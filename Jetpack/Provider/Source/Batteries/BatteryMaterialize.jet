@@ -20,12 +20,16 @@ env_battery_materialize_package: fn(store_dir: String, slug: String) -[FS, Env, 
     destination: files.join(source_root, "{found.slug}-{key}")
     if files.stat(destination) == {
         .Ok(info) -> {
-            if info.is_symlink || !info.is_dir -> return Err(ProviderReason{message: "embedded battery cache entry is not a real directory: {destination}"})
+            if info.is_symlink || !info.is_dir {
+                return Err(ProviderReason{message: "embedded battery cache entry is not a real directory: {destination}"})
+            }
             env_battery_verify_package_tree(destination, found)
             return Ok(destination)
         }
         .Err(error) -> {
-            if !store_io_is_not_found(error) -> return Err(ProviderReason{message: "could not inspect embedded battery cache {destination}: {error}"})
+            if !store_io_is_not_found(error) {
+                return Err(ProviderReason{message: "could not inspect embedded battery cache {destination}: {error}"})
+            }
         }
     }
     staging: provider_exclusive_temp_dir(source_root, "battery-source") ?? return Err(ProviderReason{message: "could not create embedded battery staging directory: {err}"})
@@ -74,16 +78,22 @@ env_battery_append_bytes: fn(target: &[U8], bytes: [U8]) Never! {
 env_battery_ensure_real_directory: fn(path: String) ProviderReason! -[FS]> {
     if files.stat(path) == {
         .Ok(info) -> {
-            if info.is_symlink || !info.is_dir -> return Err(ProviderReason{message: "embedded battery cache path is not a real directory: {path}"})
+            if info.is_symlink || !info.is_dir {
+                return Err(ProviderReason{message: "embedded battery cache path is not a real directory: {path}"})
+            }
             return
         }
         .Err(error) -> {
-            if !store_io_is_not_found(error) -> return Err(ProviderReason{message: "could not inspect embedded battery cache path {path}: {error}"})
+            if !store_io_is_not_found(error) {
+                return Err(ProviderReason{message: "could not inspect embedded battery cache path {path}: {error}"})
+            }
         }
     }
     files.create_dir_all(path) ?? return Err(ProviderReason{message: "could not create embedded battery cache directory {path}: {err}"})
     info: files.stat(path) ?? return Err(ProviderReason{message: "could not inspect embedded battery cache directory {path}: {err}"})
-    if info.is_symlink || !info.is_dir -> return Err(ProviderReason{message: "embedded battery cache path is not a real directory: {path}"})
+    if info.is_symlink || !info.is_dir {
+        return Err(ProviderReason{message: "embedded battery cache path is not a real directory: {path}"})
+    }
 }
 
 env_battery_write_package_tree: fn(root: String, package: BatteryPackage) ProviderReason! -[FS, Env]> {
@@ -91,7 +101,9 @@ env_battery_write_package_tree: fn(root: String, package: BatteryPackage) Provid
         relative: env_battery_safe_relative_path(file.path)
         destination: files.join(root, relative)
         parent: files.dirname(destination)
-        if parent == "" -> return Err(ProviderReason{message: "embedded battery file has no parent directory: {file.path}"})
+        if parent == "" {
+            return Err(ProviderReason{message: "embedded battery file has no parent directory: {file.path}"})
+        }
         env_battery_ensure_real_directory(parent)
         files.write_bytes(destination, file.bytes) ?? return Err(ProviderReason{message: "could not write embedded battery file {destination}: {err}"})
         if !sys.is_windows() {
@@ -105,20 +117,26 @@ env_battery_write_package_tree: fn(root: String, package: BatteryPackage) Provid
 env_battery_verify_package_tree: fn(root: String, package: BatteryPackage) ProviderReason! -[FS, Env]> {
     seen := [String]{}
     env_battery_verify_directory(root, "", package, seen)
-    if seen.len() != package.files.len() -> return Err(ProviderReason{message: "embedded battery cache is missing files for `{package.slug}`"})
+    if seen.len() != package.files.len() {
+        return Err(ProviderReason{message: "embedded battery cache is missing files for `{package.slug}`"})
+    }
 }
 
 env_battery_verify_directory: fn(directory: String, relative: String, package: BatteryPackage, seen: &[String]) ProviderReason! -[FS, Env]> {
     entries: files.list_dir(directory) ?? return Err(ProviderReason{message: "could not read embedded battery cache {directory}: {err}"})
     loop entry in entries {
         info: files.stat(entry.path) ?? return Err(ProviderReason{message: "could not inspect embedded battery cache entry {entry.path}: {err}"})
-        if info.is_symlink -> return Err(ProviderReason{message: "embedded battery cache contains a symlink: {entry.path}"})
+        if info.is_symlink {
+            return Err(ProviderReason{message: "embedded battery cache contains a symlink: {entry.path}"})
+        }
         next_relative: if relative == "" -> entry.name else -> "{relative}/{entry.name}"
         if info.is_dir {
             env_battery_verify_directory(entry.path, next_relative, package, seen)
             next
         }
-        if !info.is_file -> return Err(ProviderReason{message: "embedded battery cache contains a non-file: {entry.path}"})
+        if !info.is_file {
+            return Err(ProviderReason{message: "embedded battery cache contains a non-file: {entry.path}"})
+        }
         relative_name: next_relative.replace("\\", "/")
         expected := BatteryFile?{None}
         loop file in package.files {
@@ -126,18 +144,26 @@ env_battery_verify_directory: fn(directory: String, relative: String, package: B
         }
         file: expected ?? return Err(ProviderReason{message: "embedded battery cache contains an unexpected file: {entry.path}"})
         bytes: files.read_bytes(entry.path) ?? return Err(ProviderReason{message: "could not read embedded battery cache file {entry.path}: {err}"})
-        if bytes != file.bytes -> return Err(ProviderReason{message: "embedded battery cache bytes do not match bundled `{file.path}`"})
+        if bytes != file.bytes {
+            return Err(ProviderReason{message: "embedded battery cache bytes do not match bundled `{file.path}`"})
+        }
         mode: if sys.is_windows() -> BATTERIES_FILE_MODE else -> (info.mode).bit_and(0o7777)
-        if mode != file.mode -> return Err(ProviderReason{message: "embedded battery cache mode does not match bundled `{file.path}`"})
+        if mode != file.mode {
+            return Err(ProviderReason{message: "embedded battery cache mode does not match bundled `{file.path}`"})
+        }
         if !seen.contains(relative_name) -> seen.push(relative_name)
     }
 }
 
 // A bundled path of plain relative components.
 env_battery_safe_relative_path: fn(path: String) -> String ProviderReason! {
-    if path == "" || files.is_abs(path) -> return Err(ProviderReason{message: "embedded battery path is not relative: \"{path}\""})
+    if path == "" || files.is_abs(path) {
+        return Err(ProviderReason{message: "embedded battery path is not relative: \"{path}\""})
+    }
     loop part in path.split("/") {
-        if part == "" || part == "." || part == ".." -> return Err(ProviderReason{message: "embedded battery path is unsafe: \"{path}\""})
+        if part == "" || part == "." || part == ".." {
+            return Err(ProviderReason{message: "embedded battery path is unsafe: \"{path}\""})
+        }
     }
     Ok(path)
 }

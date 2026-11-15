@@ -3,8 +3,11 @@
 use {
     jet_pkg_model.[ForeignLanguage, LockFile, LockSource, LockedPackage, pkg_json_render_pretty, pkg_lock_write, pkg_sha256_hex]
     jetpack_publication.[
-        publication_emit_cyclonedx, publication_emit_spdx, publication_lock_digest,
-        publication_registry_spdx, publication_spdx_checksum,
+        publication_emit_cyclonedx,
+        publication_emit_spdx,
+        publication_lock_digest,
+        publication_registry_spdx,
+        publication_spdx_checksum,
     ]
     files: core.files
     process: core.process
@@ -15,40 +18,50 @@ use {
 publication_sbom_test_package: fn(name: String, version: String, fingerprint: String) -> LockedPackage Never! {
     LockedPackage{name: name, version: version, source: LockSource.Path("../{name}"), fingerprint: fingerprint}
 }
+
 publication_sbom_test_lock: fn(packages: [LockedPackage]) -> LockFile Never! {
     lock := LockFile.empty()
     lock.packages = packages
     lock
 }
+
 publication_sbom_test_spdx_root: fn(digest: String, name: String, version: String, checksum: String) -> String Never! {
     "SPDXVersion: SPDX-2.3\nDataLicense: CC0-1.0\nSPDXID: SPDXRef-DOCUMENT\nDocumentNamespace: https://jet-lang.dev/spdx/{name}-{version}-{digest}\nDocumentName: {name}-{version}\nCreator: Tool: jet\nCreated: 1970-01-01T00:00:00Z\n\n##### Root package\n\nPackageName: {name}\nSPDXID: SPDXRef-root\nPackageVersion: {version}\nFilesAnalyzed: false\nPackageChecksum: {checksum}\nPackageDownloadLocation: NOASSERTION\n\n"
 }
+
 // The empty-lock CycloneDX document, byte for byte.
 PUBLICATION_SBOM_TEST_EMPTY_CDX: "{{\n  \"bomFormat\": \"CycloneDX\",\n  \"specVersion\": \"1.5\",\n  \"serialNumber\": \"urn:uuid:jet-sha256-5818e1a4ff61c5588768e1a8635440de1bb62905969dabe6786d37baf1dcf4f5\",\n  \"version\": 1,\n  \"metadata\": {{\n    \"timestamp\": \"1970-01-01T00:00:00Z\",\n    \"tools\": [\n      {{\n        \"name\": \"jet\"\n      }}\n    ],\n    \"component\": {{\n      \"type\": \"library\",\n      \"name\": \"myapp\",\n      \"version\": \"0.1.0\"\n    }}\n  }},\n  \"components\": []\n}}\n"
 
 publication_sbom_test_component: fn(index: Int, name: String, version: String, content: String) -> Dyn Never! {
-    Dyn.Object([
-        "type": Dyn.Text("library"),
-        "bom-ref": Dyn.Text("pkg-{index}"),
-        "name": Dyn.Text(name.copy()),
-        "version": Dyn.Text(version.copy()),
-        "hashes": Dyn.Array([Dyn]{Dyn.Object(["alg": Dyn.Text("SHA-256"), "content": Dyn.Text(content.copy())])}),
-    ])
+    Dyn.Object(
+        [
+            "type": Dyn.Text("library"),
+            "bom-ref": Dyn.Text("pkg-{index}"),
+            "name": Dyn.Text(name.copy()),
+            "version": Dyn.Text(version.copy()),
+            "hashes": Dyn.Array([Dyn]{Dyn.Object(["alg": Dyn.Text("SHA-256"), "content": Dyn.Text(content.copy())])}),
+        ],
+    )
 }
+
 // The expected CycloneDX bytes in the empty-lock golden's layout.
 publication_sbom_test_cdx: fn(digest: String, root_name: String, root_version: String, components: [Dyn]) -> String Never! {
-    document: Dyn.Object([
-        "bomFormat": Dyn.Text("CycloneDX"),
-        "specVersion": Dyn.Text("1.5"),
-        "serialNumber": Dyn.Text("urn:uuid:jet-{digest}"),
-        "version": Dyn.Int(1),
-        "metadata": Dyn.Object([
-            "timestamp": Dyn.Text("1970-01-01T00:00:00Z"),
-            "tools": Dyn.Array([Dyn]{Dyn.Object(["name": Dyn.Text("jet")])}),
-            "component": Dyn.Object(["type": Dyn.Text("library"), "name": Dyn.Text(root_name.copy()), "version": Dyn.Text(root_version.copy())]),
-        ]),
-        "components": Dyn.Array(components.copy()),
-    ])
+    document: Dyn.Object(
+        [
+            "bomFormat": Dyn.Text("CycloneDX"),
+            "specVersion": Dyn.Text("1.5"),
+            "serialNumber": Dyn.Text("urn:uuid:jet-{digest}"),
+            "version": Dyn.Int(1),
+            "metadata": Dyn.Object(
+                [
+                    "timestamp": Dyn.Text("1970-01-01T00:00:00Z"),
+                    "tools": Dyn.Array([Dyn]{Dyn.Object(["name": Dyn.Text("jet")])}),
+                    "component": Dyn.Object(["type": Dyn.Text("library"), "name": Dyn.Text(root_name.copy()), "version": Dyn.Text(root_version.copy())]),
+                ],
+            ),
+            "components": Dyn.Array(components.copy()),
+        ],
+    )
     "{pkg_json_render_pretty(document)}\n"
 }
 

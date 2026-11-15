@@ -1,34 +1,29 @@
-
 #Error
 CellResultError: enum {
     Failed
 }
 
 Box: struct<T> {
-    value: T,
+    value: T
 
-    new: fn(value: &&T) -> Box<T> {
-        return Box<T>{ value: value }
-    }
+    new: fn(value: &&T) -> Box<T> { return Box<T>{value: value} }
 }
 
 Number: struct {
-    value: Int,
+    value: Int
 }
 
 Reverse: struct<Value, Alpha> {
-    first: Value,
-    second: Alpha,
+    first: Value
+    second: Alpha
 }
 
-keep_result: fn(value: &&(Int CellResultError!)) {
+keep_result: fn(value: &&Int CellResultError!) {
     cell: Cell.new(value)
     print(cell.read(fn(result) { result ?? 0 }))
 }
 
-ok_result: fn() -> Int CellResultError! {
-    return Ok(7)
-}
+ok_result: fn() -> Int CellResultError! { return Ok(7) }
 
 run: fn() {
     counts := [String:Int]{}
@@ -46,11 +41,12 @@ run: fn() {
     projected: nested.guard_read().map(fn(value) { value.value.value })
     print(projected.get())
 
-    reverse: Cell.new(Reverse<Float, Number>{
-        first: 1.5,
-        second: Number{ value: 13 },
-    })
+    reverse: Cell.new(
+        Reverse<Float, Number>{
+            first: 1.5,
+            second: Number{value: 13},
+        },
+    )
     print(reverse.get().first)
     print(reverse.get().second.value)
-
 }

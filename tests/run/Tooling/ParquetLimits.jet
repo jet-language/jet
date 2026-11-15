@@ -16,6 +16,7 @@ use {
 }
 
 INT32_PAGES: #run embed_bytes("int32_with_null_pages.parquet")
+
 INT96_SPARK: #run embed_bytes("int96_from_spark.parquet")
 
 kind_name: fn(kind: data.DataErrorKind) -> String { "{kind:Debug}" }
@@ -30,7 +31,7 @@ read: fn(bytes: [U8], limits: data.DataLimits) -> [Dyn] data.DataError! {
 
 report: fn(label: String, result: [Dyn] data.DataError!) {
     if result == {
-        .Ok(rows) -> print("{label}: {rows.len()} rows")
+        .Ok(rows) -> { print("{label}: {rows.len()} rows") }
         .Err(err) -> print("{label}: {kind_name(err.kind)} from {err.operation}")
     }
 }
@@ -67,11 +68,15 @@ run: fn() {
 
     // The branch a program writes: on the kind, never on the reason text.
     if read(with_page_type(INT96_SPARK, U8{6}), safe) == {
-        .Ok(_) -> print("handled: read")
-        .Err(err) -> if err.kind == {
-            .Unsupported -> print("handled: unsupported input, ask for a plain v1 file")
-            .Limit -> print("handled: over the limits")
-            .Decode | .IO | .Empty | .InvalidArgument | .NonFinite | .Overflow | .State | .Bridge | .DuplicateKey | .MissingKey | .WrongOwner | .StaleRevision | .InvalidValue -> print("handled: unreadable file")
+        .Ok(_) -> { print("handled: read") }
+        .Err(err) -> {
+            if err.kind == {
+                .Unsupported -> { print("handled: unsupported input, ask for a plain v1 file") }
+                .Limit -> print("handled: over the limits")
+                .Decode | .IO | .Empty | .InvalidArgument | .NonFinite | .Overflow | .State | .Bridge | .DuplicateKey | .MissingKey | .WrongOwner | .StaleRevision | .InvalidValue -> {
+                    print("handled: unreadable file")
+                }
+            }
         }
     }
 }

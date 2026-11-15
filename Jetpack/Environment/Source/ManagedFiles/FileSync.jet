@@ -5,7 +5,6 @@
 // and returns a complete plan; `FilePlan.apply` then writes content-addressed
 // objects and destinations with a rollback path. The state file records
 // ownership metadata only and never stores file contents.
-
 use {
     jetpack_foundation.[SOURCE_ROOT_DIR]
     jet_pkg_model.[pkg_sha256_hex]
@@ -15,9 +14,13 @@ use {
 }
 
 ENV_FILES_DIR: "files"
+
 ENV_FILES_OBJECTS_DIR: "objects"
+
 ENV_FILES_STATE_FILE: "state"
+
 ENV_FILES_STATE_HEADER: "jet-env-files-v1"
+
 ENV_FILES_READ_CHUNK: 65536
 
 FileActionKind: enum {
@@ -54,10 +57,10 @@ ManagedStateEntry: struct {
 }
 
 ManagedFileState: struct {
-    entries: [String: ManagedStateEntry]
+    entries: [String:ManagedStateEntry]
 
     empty: fn() -> ManagedFileState Never! {
-        ManagedFileState{entries: [String: ManagedStateEntry]{}}
+        ManagedFileState{entries: [String:ManagedStateEntry]{}}
     }
 }
 
@@ -113,14 +116,10 @@ FilePlan: struct {
         pkg_sha256_hex(canonical)
     }
 
-    apply: fn(self) -[FS, Env]> FileSyncReport EnvironmentError! {
-        env_files_apply_plan(self)
-    }
+    apply: fn(self) -[FS, Env]> FileSyncReport EnvironmentError! { env_files_apply_plan(self) }
 }
 
-env_files_error: fn(text: String) -> EnvironmentError Never! {
-    EnvironmentError.ManagedFile(text)
-}
+env_files_error: fn(text: String) -> EnvironmentError Never! { EnvironmentError.ManagedFile(text) }
 
 // Resolve every managed file, including source bytes and all destination
 // conflicts, without changing the project.
@@ -151,12 +150,10 @@ env_files_plan: fn(project_dir: String, declarations: [ManagedFile]) -[FS, Env]>
         seed: declaration.mode == FileMode.Seed
         if kind != FileActionKind.Preserve && !seed {
             state_after.entries[declaration.destination] = ManagedStateEntry{digest: digest, mode: declaration.mode, permissions: declaration.permissions, sensitive: declaration.sensitive, generation: declaration.generation}
-        } else {
-            _ := state_after.entries.remove(declaration.destination)
-        }
+        } else { _ := state_after.entries.remove(declaration.destination) }
         planned.push(PlannedFile{declaration: declaration, bytes: bytes, digest: digest, destination: destination, action: kind})
     }
-    Ok(FilePlan{actions, planned, state_before, state_after, state_path, objects_dir})
+    Ok(FilePlan{actions: actions, planned: planned, state_before: state_before, state_after: state_after, state_path: state_path, objects_dir: objects_dir})
 }
 
 env_files_resolve_bytes: fn(project_root: String, declaration: ManagedFile) -[FS, Env]> [U8] EnvironmentError! {
@@ -171,16 +168,14 @@ env_files_resolve_bytes: fn(project_root: String, declaration: ManagedFile) -[FS
 env_files_lstat: fn(path: String, what: String) -[FS]> Stat? EnvironmentError! {
     if files.stat(path) == {
         .Ok(info) -> Ok(Val(info))
-        .Err(error) -> {
-            if error == {
-                .NotFound(_) -> Ok(None)
-                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> Err(env_files_error("couldn't inspect {what}: {error}"))
-            }
+        .Err(error) -> if error == {
+            .NotFound(_) -> Ok(None)
+            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> Err(env_files_error("couldn't inspect {what}: {error}"))
         }
     }
 }
 
-env_files_classify_action: fn(destination: String, declaration: ManagedFile, digest: String, state: [String: ManagedStateEntry], objects_dir: String) -[FS, Env]> FileActionKind EnvironmentError! {
+env_files_classify_action: fn(destination: String, declaration: ManagedFile, digest: String, state: [String:ManagedStateEntry], objects_dir: String) -[FS, Env]> FileActionKind EnvironmentError! {
     existing: env_files_lstat(destination, "`{destination}`") ?? return Ok(FileActionKind.Create)
     if existing.is_dir {
         return Err(env_files_error("managed file destination `{declaration.destination}` is a directory"))
@@ -298,7 +293,7 @@ env_files_apply_plan: fn(plan: FilePlan) -[FS, Env]> FileSyncReport EnvironmentE
     if !has_mutations && plan.state_before == plan.state_after {
         loop file in plan.planned {
             if file.action == {
-                .Preserve -> report.preserved += 1
+                .Preserve -> { report.preserved += 1 }
                 .Unchanged -> report.unchanged += 1
                 .Create | .ReplaceOwned -> {}
             }
@@ -320,13 +315,17 @@ env_files_apply_plan: fn(plan: FilePlan) -[FS, Env]> FileSyncReport EnvironmentE
                 backup: journal.backups[journal.backups.len() - 1 - index]
                 files.rename(backup.backup, backup.destination).drop("rollback restores what it can")
             }
-            loop object in journal.new_objects -> files.remove(object).drop("rollback removes what it can")
+            loop object in journal.new_objects {
+                files.remove(object).drop("rollback removes what it can")
+            }
             files.remove_dir(backup_dir).drop("rollback removes what it can")
             return Err(env_files_error("environment file sync rolled back: {error.message()}"))
         }
         .Ok(_) -> {}
     }
-    loop backup in journal.backups -> env_files_remove_destination(backup.backup).drop("a leftover backup is harmless")
+    loop backup in journal.backups {
+        env_files_remove_destination(backup.backup).drop("a leftover backup is harmless")
+    }
     files.remove_dir(backup_dir).drop("an empty rollback area is harmless")
     Ok(report)
 }
@@ -348,7 +347,7 @@ env_files_apply_steps: fn(plan: FilePlan, backup_dir: String, report: &FileSyncR
     loop index in 0..<plan.planned.len() {
         file: plan.planned[index]
         if file.action == {
-            .Preserve -> report.preserved += 1
+            .Preserve -> { report.preserved += 1 }
             .Unchanged -> report.unchanged += 1
             .Create | .ReplaceOwned -> {
                 object: env_files_ensure_object(plan, file, journal.new_objects)
@@ -421,11 +420,9 @@ env_files_open_existing_object: fn(path: String) -[FS]> FileReader? EnvironmentE
     if !info.is_file -> return Err(env_files_error("managed object `{path}` is not a regular file"))
     if files.open(path, links: .Refuse) == {
         .Ok(reader) -> Ok(Val(reader))
-        .Err(error) -> {
-            if error == {
-                .NotFound(_) -> Ok(None)
-                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> Err(env_files_error("couldn't open managed object `{path}`: {error}"))
-            }
+        .Err(error) -> if error == {
+            .NotFound(_) -> Ok(None)
+            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> Err(env_files_error("couldn't open managed object `{path}`: {error}"))
         }
     }
 }
@@ -527,7 +524,9 @@ env_files_load_state: fn(path: String) -[FS]> ManagedFileState EnvironmentError!
             "symlink" -> FileMode.Symlink
             "seed" -> FileMode.Seed
             "copy" -> FileMode.Copy
-            else -> { return Err(env_files_error("managed file state has unknown mode `{mode_name}`")) }
+            else -> {
+                return Err(env_files_error("managed file state has unknown mode `{mode_name}`"))
+            }
         }
         permissions := Int?{None}
         if fields[4] != "" {
@@ -537,7 +536,9 @@ env_files_load_state: fn(path: String) -[FS]> ManagedFileState EnvironmentError!
         sensitive: if fields[5] == {
             "0" -> false
             "1" -> true
-            else -> { return Err(env_files_error("managed file state has invalid sensitivity")) }
+            else -> {
+                return Err(env_files_error("managed file state has invalid sensitivity"))
+            }
         }
         generation := String?{None}
         if fields[6] != "" -> generation = Val(env_files_unescape(fields[6]))
@@ -605,10 +606,14 @@ env_files_unescape: fn(value: String) -> String EnvironmentError! {
     index := 0
     loop index < bytes.len() {
         if (Int{bytes[index]}) == 37 {
-            if index + 2 >= bytes.len() -> return Err(env_files_error("managed file state has an invalid escape"))
+            if index + 2 >= bytes.len() {
+                return Err(env_files_error("managed file state has an invalid escape"))
+            }
             high: env_files_hex_value(Int{bytes[index + 1]})
             low: env_files_hex_value(Int{bytes[index + 2]})
-            if high < 0 || low < 0 -> return Err(env_files_error("managed file state has an invalid escape"))
+            if high < 0 || low < 0 {
+                return Err(env_files_error("managed file state has an invalid escape"))
+            }
             output.push(U8{high * 16 + low})
             index += 3
         } else {

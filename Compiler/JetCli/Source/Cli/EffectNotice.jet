@@ -28,7 +28,9 @@ JET_CLI_EFFECT_RECORD: "jet.effects/v1"
 // output is the stop when the answer is not yes.
 jet_cli_effect_notice: fn(file: String, source: String, authority: JetCLIAuthority, invocation: JetCLIInvocationAuthority?, color: Bool, json: Bool) -> JetDriverVerbOutput? {
     if invocation == .Val(rows) {
-        if rows.remote == .Val(origin) -> return jet_cli_remote_run_consent(origin, file, source, jet_cli_remote_run_unacknowledged(authority, rows), color, json)
+        if rows.remote == .Val(origin) {
+            return jet_cli_remote_run_consent(origin, file, source, jet_cli_remote_run_unacknowledged(authority, rows), color, json)
+        }
     }
     rights: jet_cli_unacknowledged(authority)
     if json {
@@ -54,11 +56,15 @@ jet_cli_effect_notice_line: fn(file: String, rights: [String]) -> String Never! 
 
 // The `run.effects` status: `effects` are the rights the notice names.
 jet_cli_run_effects_json: fn(authority: JetCLIAuthority, rights: [String]) -> String Never! {
-    jet_cli_status_render("run.effects", true, [
-        jet_cli_status_field("effects", jet_cli_status_texts(rights)),
-        jet_cli_status_field("required_effects", jet_cli_status_texts(authority.required)),
-        jet_cli_status_field("authority", jet_cli_status_text(authority.authority)),
-    ])
+    jet_cli_status_render(
+        "run.effects",
+        true,
+        [
+            jet_cli_status_field("effects", jet_cli_status_texts(rights)),
+            jet_cli_status_field("required_effects", jet_cli_status_texts(authority.required)),
+            jet_cli_status_field("authority", jet_cli_status_text(authority.authority)),
+        ],
+    )
 }
 
 // `<state>/jet/<name>`: a directory of Jet's per-user records under

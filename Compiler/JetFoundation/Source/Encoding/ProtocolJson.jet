@@ -14,10 +14,16 @@ FoundationJSONError: struct {
 // JSON with the provider-facing error text over the protocol domain: the
 // 1 MiB ceiling, 64 containers and i64 integers.
 foundation_json_parse: fn(text: String) -> Dyn FoundationJSONError! {
-    if text.bytes().len() > FOUNDATION_PROTOCOL_JSON_MAX_BYTES -> return Err(FoundationJSONError{message: "JSON input exceeds the 1 MiB limit"})
+    if text.bytes().len() > FOUNDATION_PROTOCOL_JSON_MAX_BYTES {
+        return Err(FoundationJSONError{message: "JSON input exceeds the 1 MiB limit"})
+    }
     value: protocol_json.parse(text) ?? return Err(FoundationJSONError{message: err.reason})
-    if foundation_protocol_json_integer_error(value) == .Val(message) -> return Err(FoundationJSONError{message: message})
-    if !foundation_protocol_json_valid(value, 0) -> return Err(FoundationJSONError{message: "JSON exceeds maximum nesting depth"})
+    if foundation_protocol_json_integer_error(value) == .Val(message) {
+        return Err(FoundationJSONError{message: message})
+    }
+    if !foundation_protocol_json_valid(value, 0) {
+        return Err(FoundationJSONError{message: "JSON exceeds maximum nesting depth"})
+    }
     Ok(value)
 }
 
@@ -51,7 +57,9 @@ foundation_protocol_json_integer_error: fn(value: Dyn) -> String? Never! {
         }
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> {
             number: foundation_json_integer(value) ?? return None
-            if number < -9223372036854775808 || number > 9223372036854775807 -> return Val("invalid number `{number}`")
+            if number < -9223372036854775808 || number > 9223372036854775807 {
+                return Val("invalid number `{number}`")
+            }
         }
     }
     None

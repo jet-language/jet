@@ -34,7 +34,9 @@ use {
 }
 
 ENTRIES: [String]{"sieve", "wordfreq", "datasummary", "csvtransform", "concurrency-service"}
+
 LEVELS: 3
+
 RUN_TIMEOUT_MS: 300000
 
 // The service entry listens on PORT_BASE + level, a port of its own for every
@@ -82,9 +84,7 @@ fail: fn(message: String) -> Never {
     process.exit(2)
 }
 
-member: fn(d: Dyn, name: String) -> Dyn {
-    d.field(name) ?? fail("entry.json: no `{name}`")
-}
+member: fn(d: Dyn, name: String) -> Dyn { d.field(name) ?? fail("entry.json: no `{name}`") }
 
 text_of: fn(d: Dyn, name: String) -> String {
     member(d, name).text() ?? fail("entry.json: `{name}` is not text")
@@ -97,16 +97,16 @@ items: fn(d: Dyn) -> [Dyn] {
     }
 }
 
-probe_of: fn(d: Dyn) -> Probe {
-    Probe{send: text_of(d, "send"), expect: text_of(d, "expect")}
-}
+probe_of: fn(d: Dyn) -> Probe { Probe{send: text_of(d, "send"), expect: text_of(d, "expect")} }
 
 load: fn(root: String, name: String) -> Entry {
     dir: "{root}/Tools/gauntlet/entries/{name}"
     tree: json.parse(fs.read("{dir}/entry.json") ?? fail("can't read {dir}/entry.json")) ?? fail("{dir}/entry.json is not JSON")
     spec: member(tree, "spec")
     args := [String]{}
-    loop a in items(member(spec, "args")) -> args.push(a.text() ?? fail("{name}: an argument is not text"))
+    loop a in items(member(spec, "args")) {
+        args.push(a.text() ?? fail("{name}: an argument is not text"))
+    }
     gen := ""
     input := ""
     if member(spec, "fixtureGen") == {
@@ -158,8 +158,12 @@ run_batch: fn(opts: Options, e: Entry, work: String, level: Int) -> Ran {
     spec: process.cmd(jet_argv(opts, level, e.args)).cwd(work.copy()).env("XDG_CACHE_HOME", "{opts.out}/cache").timeout(time.duration_ms(RUN_TIMEOUT_MS)).output_limit(67108864)
     receipt: spec.run() ?? return Ran{output: "", ns: 0, error: "{opts.jet} could not start: {err}"}
     ns: started.elapsed().ns
-    if receipt.timed_out -> return Ran{output: receipt.output.copy(), ns: ns, error: "timed out after {RUN_TIMEOUT_MS / 1000} s"}
-    if !receipt.success -> return Ran{output: receipt.output.copy(), ns: ns, error: "exit {receipt.code}: {receipt.errors.trim().last_lines(6).join(" | ")}"}
+    if receipt.timed_out {
+        return Ran{output: receipt.output.copy(), ns: ns, error: "timed out after {RUN_TIMEOUT_MS / 1000} s"}
+    }
+    if !receipt.success {
+        return Ran{output: receipt.output.copy(), ns: ns, error: "exit {receipt.code}: {receipt.errors.trim().last_lines(6).join(" | ")}"}
+    }
     Ran{output: receipt.output.copy(), ns: ns, error: ""}
 }
 
@@ -206,7 +210,9 @@ run_service: fn(opts: Options, e: Entry, work: String, level: Int, port: Int) ->
     }
     receipt: child.wait() ?? return Ran{output: answers, ns: started.elapsed().ns, error: "the service could not be waited for: {err}"}
     ns: started.elapsed().ns
-    if !receipt.success -> return Ran{output: answers, ns: ns, error: "the service exited {receipt.code}: {receipt.errors.trim().last_lines(6).join(" | ")}"}
+    if !receipt.success {
+        return Ran{output: answers, ns: ns, error: "the service exited {receipt.code}: {receipt.errors.trim().last_lines(6).join(" | ")}"}
+    }
     Ran{output: answers, ns: ns, error: ""}
 }
 
@@ -264,12 +270,18 @@ options: fn() -> Options {
             "--out" -> opts.out = value
             "--jet" -> opts.jet = value
             "--plant" -> opts.plant = value
-            else -> fail("unknown argument `{argv[i]}`; usage: TierParity.jet --out DIR [--jet PATH] [--plant ENTRY]")
+            else -> {
+                fail("unknown argument `{argv[i]}`; usage: TierParity.jet --out DIR [--jet PATH] [--plant ENTRY]")
+            }
         }
         i += 2
     }
-    if opts.out == "" || opts.jet == "" -> fail("--out and a jet compiler (--jet or PATH) are required")
-    if opts.plant != "" && !ENTRIES.contains(opts.plant) -> fail("--plant names one of {ENTRIES.join(", ")}")
+    if opts.out == "" || opts.jet == "" {
+        fail("--out and a jet compiler (--jet or PATH) are required")
+    }
+    if opts.plant != "" && !ENTRIES.contains(opts.plant) {
+        fail("--plant names one of {ENTRIES.join(", ")}")
+    }
     opts
 }
 

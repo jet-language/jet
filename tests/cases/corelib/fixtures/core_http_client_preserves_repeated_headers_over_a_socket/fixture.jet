@@ -7,14 +7,17 @@ use {
 }
 
 http_crlf: fn() -> String { "\r\n" }
+
 http_read: fn(stream: &net.TCPStream) -> String {
     String.from_bytes(stream.read_bytes(4096, deadline: 5s) ?? panic("read request")) ?? panic("request UTF-8")
 }
+
 http_reply: fn(stream: &net.TCPStream, file: String) {
     bytes: files.read_bytes(file) ?? panic("response bytes")
     net.tcp_write_all_bytes(stream, bytes) ?? panic("write response")
     net.tcp_close(stream) ?? panic("drop peer stream")
 }
+
 check_repeated_headers: fn() {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
@@ -49,4 +52,7 @@ check_repeated_headers: fn() {
     assert(selected == ["x-a", "one", "x-b", "middle", "x-a", "two", "set-cookie", "a=1", "set-cookie", "b=2"], "original exact interleaved response headers")
     peer.join() ?? panic("peer")
 }
-#Test("core_http_client_preserves_repeated_headers_over_a_socket") { check_repeated_headers() }
+
+#Test("core_http_client_preserves_repeated_headers_over_a_socket") {
+    check_repeated_headers()
+}

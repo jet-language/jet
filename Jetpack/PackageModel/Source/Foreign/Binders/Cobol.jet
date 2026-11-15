@@ -12,6 +12,7 @@ use {
 }
 
 COBOL_BIND_SCHEMA: "jet-cobol-bind-v1"
+
 COBOL_TOOL_ACTION: "rejected the COBOL binding"
 
 CobolBindResult: struct {
@@ -63,13 +64,11 @@ CobolFieldKind: enum {
     width: fn(self) -> Int ForeignBindError! {
         if self == {
             .FixedText(characters) -> Ok(characters)
-            .NativeInt(digits, _) -> {
-                if {
-                    digits <= 4 -> Ok(2)
-                    digits <= 9 -> Ok(4)
-                    digits <= 18 -> Ok(8)
-                    else -> Err(ForeignBindError.Source("COMP-5 fields may contain at most 18 digits"))
-                }
+            .NativeInt(digits, _) -> if {
+                digits <= 4 -> Ok(2)
+                digits <= 9 -> Ok(4)
+                digits <= 18 -> Ok(8)
+                else -> Err(ForeignBindError.Source("COMP-5 fields may contain at most 18 digits"))
             }
             .PackedDecimal(digits, _, _) -> Ok((digits + 2) /% 2)
         }
@@ -93,14 +92,18 @@ CobolFieldKind: enum {
 // Compile the program with cobc, prove the C bridge links against libcob,
 // archive both objects, and render the Jet binding with provenance.
 pkg_cobol_bind: fn(source_path: String, source: String, copybook_path: String, copybook: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> CobolBindResult ForeignBindError! {
-    if !pkg_binder_is_ident(lib) -> return Err(ForeignBindError.Source("`{lib}` is not a valid Jet library name"))
+    if !pkg_binder_is_ident(lib) {
+        return Err(ForeignBindError.Source("`{lib}` is not a valid Jet library name"))
+    }
     program: pkg_cobol_parse_program_id(source)
     layout: pkg_cobol_parse_copybook(copybook)
     packed := [CobolFieldLayout]{}
     loop field in layout.fields {
         if field.kind.is_packed() -> packed.push(field)
     }
-    if packed.len() != 1 -> return Err(ForeignBindError.Source("the callable v1 bridge requires exactly one COMP-3 field"))
+    if packed.len() != 1 {
+        return Err(ForeignBindError.Source("the callable v1 bridge requires exactly one COMP-3 field"))
+    }
     input := CobolFieldLayout?{None}
     loop field in layout.fields {
         if field.kind.is_native_int() {
@@ -163,34 +166,52 @@ pkg_cobol_parse_copybook: fn(source: String) -> CobolRecordLayout ForeignBindErr
     loop raw in pkg_binder_lines(source) {
         line: pkg_cobol_copybook_line(raw) ?? next
         words: pkg_binder_words(line)
-        if words.len() < 2 -> return Err(ForeignBindError.Source("unsupported copybook declaration `{line}`; use level 01 with level 05 PIC fields"))
+        if words.len() < 2 {
+            return Err(ForeignBindError.Source("unsupported copybook declaration `{line}`; use level 01 with level 05 PIC fields"))
+        }
         if words[0] == "01" {
-            if record != None -> return Err(ForeignBindError.Source("copybook must contain exactly one level 01 record"))
-            if words.len() != 2 -> return Err(ForeignBindError.Source("unsupported level 01 declaration `{line}`; use one record name only"))
+            if record != None {
+                return Err(ForeignBindError.Source("copybook must contain exactly one level 01 record"))
+            }
+            if words.len() != 2 {
+                return Err(ForeignBindError.Source("unsupported level 01 declaration `{line}`; use one record name only"))
+            }
             name: pkg_cobol_jet_name(words[1])
-            if !pkg_binder_is_ident(name) || name == "_" || name.starts_with("__") -> return Err(ForeignBindError.Source("copybook record name `{words[1]}` is not a valid Jet identifier"))
+            if !pkg_binder_is_ident(name) || name == "_" || name.starts_with("__") {
+                return Err(ForeignBindError.Source("copybook record name `{words[1]}` is not a valid Jet identifier"))
+            }
             record = Val(name)
             next
         }
-        if words[0] != "05" || record == None -> return Err(ForeignBindError.Source("unsupported copybook declaration `{line}`; use level 01 with level 05 PIC fields"))
+        if words[0] != "05" || record == None {
+            return Err(ForeignBindError.Source("unsupported copybook declaration `{line}`; use level 01 with level 05 PIC fields"))
+        }
         name: pkg_cobol_jet_name(words[1])
         if !pkg_binder_is_ident(name) || name == "_" || name.starts_with("__") || foundation_is_reserved_generated_name(name) || names.contains(name) {
             return Err(ForeignBindError.Source("copybook field name `{words[1]}` is not a unique, usable Jet identifier"))
         }
         names.push(name.copy())
-        if words.len() < 3 || pkg_binder_ascii_upper(words[2]) != "PIC" -> return Err(ForeignBindError.Source("copybook field `{words[1]}` must use a PIC clause"))
-        if words.len() < 4 -> return Err(ForeignBindError.Source("copybook field `{words[1]}` has no PIC shape"))
+        if words.len() < 3 || pkg_binder_ascii_upper(words[2]) != "PIC" {
+            return Err(ForeignBindError.Source("copybook field `{words[1]}` must use a PIC clause"))
+        }
+        if words.len() < 4 {
+            return Err(ForeignBindError.Source("copybook field `{words[1]}` has no PIC shape"))
+        }
         pic: pkg_binder_ascii_upper(words[3])
         clauses := [String]{}
         loop index in 4..<words.len() -> clauses.push(pkg_binder_ascii_upper(words[index]))
         kind: pkg_cobol_parse_pic(pic, clauses)
         width: kind.width()
         fields.push(CobolFieldLayout{name: name, offset: offset, width: width, kind: kind})
-        offset = offset + width
+        offset += width
     }
     name: record ?? return Err(ForeignBindError.Source("copybook has no level 01 record"))
-    if fields.len() == 0 -> return Err(ForeignBindError.Source("copybook record has no level 05 fields"))
-    if foundation_is_reserved_generated_name(pkg_cobol_upper_camel(name)) -> return Err(ForeignBindError.Source("copybook record name `{name}` projects to a reserved Jet type"))
+    if fields.len() == 0 {
+        return Err(ForeignBindError.Source("copybook record has no level 05 fields"))
+    }
+    if foundation_is_reserved_generated_name(pkg_cobol_upper_camel(name)) {
+        return Err(ForeignBindError.Source("copybook record name `{name}` projects to a reserved Jet type"))
+    }
     Ok(CobolRecordLayout{name: name, width: offset, fields: fields})
 }
 
@@ -198,7 +219,9 @@ pkg_cobol_parse_pic: fn(pic: String, clauses: [String]) -> CobolFieldKind Foreig
     if pic.starts_with("X(") && pic.ends_with(")") {
         if pkg_cobol_parse_count(pic.removeprefix("X(").removesuffix(")")) == {
             .Val(count) -> {
-                if clauses.len() == 0 && count > 0 -> return Ok(CobolFieldKind.FixedText{characters: count})
+                if clauses.len() == 0 && count > 0 {
+                    return Ok(CobolFieldKind.FixedText{characters: count})
+                }
             }
             .None -> {}
         }
@@ -211,14 +234,20 @@ pkg_cobol_parse_pic: fn(pic: String, clauses: [String]) -> CobolFieldKind Foreig
     whole_digits: pkg_cobol_pic_digits(whole)
     fraction_digits: pkg_cobol_pic_digits(fraction ?? "")
     scale: pkg_cobol_pic_digits(fraction ?? "") ?? 0
-    if whole_digits == None || fraction_digits == None -> return Err(ForeignBindError.Source("unsupported PIC shape `{pic}`"))
+    if whole_digits == None || fraction_digits == None {
+        return Err(ForeignBindError.Source("unsupported PIC shape `{pic}`"))
+    }
     digits: (whole_digits ?? 0) + (fraction_digits ?? 0)
     if clauses.len() == 1 && clauses[0] == "COMP-3" {
-        if digits == 0 || digits > 18 -> return Err(ForeignBindError.Source("COMP-3 fields may contain 1 to 18 digits for the Int minor-unit bridge"))
+        if digits == 0 || digits > 18 {
+            return Err(ForeignBindError.Source("COMP-3 fields may contain 1 to 18 digits for the Int minor-unit bridge"))
+        }
         return Ok(CobolFieldKind.PackedDecimal{digits: digits, scale: scale, signed: signed})
     }
     if clauses.len() == 1 && clauses[0] == "COMP-5" && scale == 0 {
-        if digits == 0 || digits > 18 -> return Err(ForeignBindError.Source("COMP-5 fields may contain 1 to 18 digits for the Int bridge"))
+        if digits == 0 || digits > 18 {
+            return Err(ForeignBindError.Source("COMP-5 fields may contain 1 to 18 digits for the Int bridge"))
+        }
         return Ok(CobolFieldKind.NativeInt{digits: digits, signed: signed})
     }
     Err(ForeignBindError.Source("unsupported PIC/usage `{pic} {clauses.join(" ")}`; use X(n), COMP-5, or COMP-3"))
@@ -260,7 +289,9 @@ pkg_cobol_copybook_line: fn(raw: String) -> String? Never! {
         if indicator == 42 || indicator == 47 -> return None
         fixed: pkg_bytes_text(bytes, 6, bytes.len()).trim()
         first: pkg_binder_words(fixed)
-        if first.len() > 0 && (first[0] == "01" || first[0] == "05") -> return Val(pkg_cobol_code_text(fixed))
+        if first.len() > 0 && (first[0] == "01" || first[0] == "05") {
+            return Val(pkg_cobol_code_text(fixed))
+        }
     }
     Val(pkg_cobol_code_text(trimmed))
 }
@@ -305,7 +336,9 @@ pkg_cobol_render_provenance: fn(source_path: String, foreign_source: String, gen
     descriptor: pkg_cobol_descriptor_stamp()
     program_symbol: pkg_cobol_c_symbol(program)
     facts := [String]{}
-    loop field in layout.fields -> facts.push("{field.name}:{field.offset}:{field.width}:{field.kind.debug()}")
+    loop field in layout.fields {
+        facts.push("{field.name}:{field.offset}:{field.width}:{field.kind.debug()}")
+    }
     layout_facts: facts.join(",")
     identity := ForeignIdentityBuilder.new(COBOL_BIND_SCHEMA)
     identity.field("descriptor", descriptor.bytes())
@@ -397,7 +430,7 @@ pkg_cobol_render_jet: fn(lib: String, layout: CobolRecordLayout, packed: CobolFi
 // `10^digits - 1`, the largest magnitude a field of `digits` digits holds.
 pkg_cobol_max_digits: fn(digits: Int) -> Int Never! {
     value := 1
-    loop index in 0..<digits -> value = value * 10
+    loop index in 0..<digits -> value *= 10
     value - 1
 }
 
@@ -438,7 +471,7 @@ pkg_cobol_render_bridge: fn(program: String, layout: CobolRecordLayout, packed: 
         "  if(pthread_once(&jet_cobol_once, jet_cobol_init)!=0) return INT64_MIN;",
         "  if({program_symbol}(record)!=0) return INT64_MIN;",
         "  return unpack(record + {packed.offset}, {packed.width});",
-        "}}"
+        "}}",
     }
     "{lines.join("\n")}\n"
 }
@@ -449,7 +482,9 @@ pkg_cobol_run: fn(argv: [String], tool: String) ForeignBindError! -[Exec, Time.W
 
 pkg_cobol_checked_output: fn(argv: [String], tool: String) -[Exec, Time.Wait]> BinderToolOutput ForeignBindError! {
     output: pkg_binder_capture(argv, None, tool, COBOL_TOOL_ACTION)
-    if !output.success -> return Err(ForeignBindError.ToolFailed{tool: tool, action: COBOL_TOOL_ACTION, detail: pkg_cobol_launder(output.stderr)})
+    if !output.success {
+        return Err(ForeignBindError.ToolFailed{tool: tool, action: COBOL_TOOL_ACTION, detail: pkg_cobol_launder(output.stderr)})
+    }
     Ok(output)
 }
 
@@ -460,20 +495,22 @@ pkg_cobol_launder: fn(stderr: [U8]) -> String Never! {
         if line.split_once("error:") == {
             .Val(parts) -> {
                 detail: parts.after.trim()
-                if detail != "" -> return "the foreign tool reported: {pkg_binder_take_chars(detail, 160)}"
+                if detail != "" {
+                    return "the foreign tool reported: {pkg_binder_take_chars(detail, 160)}"
+                }
             }
             .None -> {}
         }
         at: pkg_binder_find(line, "undefined reference to", 0)
-        if at >= 0 -> return "the linker reported: {pkg_binder_take_chars(pkg_binder_tail(line, at), 160)}"
+        if at >= 0 {
+            return "the linker reported: {pkg_binder_take_chars(pkg_binder_tail(line, at), 160)}"
+        }
     }
     BINDER_TOOL_FAILURE_DETAIL
 }
 
 // GnuCOBOL's C entry symbol: `-` becomes `__`.
-pkg_cobol_c_symbol: fn(program: String) -> String Never! {
-    program.replace("-", "__")
-}
+pkg_cobol_c_symbol: fn(program: String) -> String Never! { program.replace("-", "__") }
 
 pkg_cobol_jet_name: fn(word: String) -> String Never! {
     pkg_ascii_lower(pkg_binder_trim_end_matches(word, ".")).replace("-", "_")

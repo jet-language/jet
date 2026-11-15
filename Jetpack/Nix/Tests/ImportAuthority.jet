@@ -16,9 +16,7 @@ nix_test_import_refused: fn(relative: String) -> Bool {
     assert_eq(nix_import_path_components("a/.") ?? panic("trailing dot"), [String]{"a"})
     assert_eq(nix_import_path_components("...") ?? panic("dots name"), [String]{"..."})
     refusals: [String]{"", "/etc/passwd", "./shell.nix", ".", "a/../b", "..", "sub\\shell.nix"}
-    loop refused in refusals {
-        assert(nix_test_import_refused(refused))
-    }
+    loop refused in refusals { assert(nix_test_import_refused(refused)) }
 }
 
 #Test("nix import admission enforces regular files within the byte limit") {
@@ -26,13 +24,15 @@ nix_test_import_refused: fn(relative: String) -> Bool {
     at_limit.admit() ?? panic("a file at the limit is admitted")
     directory: NixImportMetadata{regular_file: false, length: 1}
     if directory.admit() == {
-        .Ok(_) -> panic("a directory import must be refused")
+        .Ok(_) -> { panic("a directory import must be refused") }
         .Err(error) -> assert_eq(error.message(), "project import is not a regular file")
     }
     oversized: NixImportMetadata{regular_file: true, length: 1048577}
     if oversized.admit() == {
-        .Ok(_) -> panic("an oversized import must be refused")
-        .Err(error) -> assert_eq(error.message(), "project import exceeds the 1 MiB evaluator limit")
+        .Ok(_) -> { panic("an oversized import must be refused") }
+        .Err(error) -> {
+            assert_eq(error.message(), "project import exceeds the 1 MiB evaluator limit")
+        }
     }
     assert_eq(nix_import_admit_source(`{ }`) ?? panic("small source is admitted"), `{ }`)
 }

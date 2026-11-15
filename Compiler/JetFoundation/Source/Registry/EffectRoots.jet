@@ -7,7 +7,21 @@
 // naming each missing and extra root.
 EFFECT_ROOT_COUNT: #run effect_root_count(embed_file("EffectRoots.jet"), EFFECT_VOCABULARY_MACHINE_ROOTS)
 
-Effect: enum { Net FS IO Time Rand Env Exec GPU FFI Browser Panic Mem Unsafe }
+Effect: enum {
+    Net
+    FS
+    IO
+    Time
+    Rand
+    Env
+    Exec
+    GPU
+    FFI
+    Browser
+    Panic
+    Mem
+    Unsafe
+}
 
 // The number of roots, once Effect's cases (in `text`, this file) are
 // `roots` in their order; else the build stops naming the difference.
@@ -32,9 +46,7 @@ EFFECT_ROOTS_REMOVED: [String]{"Context"}
 
 // Whether `name`, an effect row or authority list entry with any `!`
 // prohibition taken off, is a root a language change removed.
-effect_root_removed: fn(name: String) -> Bool Never! {
-    EFFECT_ROOTS_REMOVED.contains(name)
-}
+effect_root_removed: fn(name: String) -> Bool Never! { EFFECT_ROOTS_REMOVED.contains(name) }
 
 // The source an effect row entry was written as: its name and the `!` or
 // `..` before it, which the row parser leaves out of the entry's span.
@@ -49,7 +61,9 @@ effect_row_entry_source: fn(entry: EffectRowEntry) -> Span Never! {
 // for the last entry the comma before it. A lone entry leaves the empty list
 // as written (`-[]>`, `deny: []`).
 effect_list_entry_removal: fn(spans: [Span], index: Int) -> Span Never! {
-    if index + 1 < spans.len() -> return Span{start: spans[index].start, end: spans[index + 1].start}
+    if index + 1 < spans.len() {
+        return Span{start: spans[index].start, end: spans[index + 1].start}
+    }
     if index > 0 -> return Span{start: spans[index - 1].end, end: spans[index].end}
     spans[index]
 }

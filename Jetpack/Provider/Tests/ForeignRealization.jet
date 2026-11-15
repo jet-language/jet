@@ -29,7 +29,9 @@ provider_foreign_test_projection_error: fn(verification: &StoreVerification, roo
 
 #Test("foreign realization rejects recursive symlink as foreign projection error") {
     verification := StoreVerification.new()
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     root: provider_foreign_test_root("symlink")
     source: provider_foreign_test_write_binding(root, "hostile")
     files.create_dir_all(files.join(source, "visible")) ?? panic("visible")
@@ -42,7 +44,9 @@ provider_foreign_test_projection_error: fn(verification: &StoreVerification, roo
             assert(reason.contains("symlink"))
             assert(reason.contains("visible/loop"))
         }
-        .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> panic("expected a foreign projection error")
+        .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> {
+            panic("expected a foreign projection error")
+        }
     }
     files.remove_all(root) ?? panic("cleanup")
 }
@@ -62,7 +66,9 @@ provider_foreign_test_projection_error: fn(verification: &StoreVerification, roo
             assert(reason.contains("could not be hashed"))
             assert(reason.contains("tree hashing bound"))
         }
-        .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> panic("expected a foreign projection error")
+        .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> {
+            panic("expected a foreign projection error")
+        }
     }
     files.remove_all(root) ?? panic("cleanup")
 }

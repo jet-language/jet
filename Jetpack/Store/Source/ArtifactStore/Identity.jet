@@ -75,15 +75,11 @@ ArtifactDigest: struct {
     as_bytes: fn(self) -> [U8] Never! { self.bytes }
 
     // Lowercase hex, the Display form.
-    to_hex: fn(self) -> String Never! {
-        sha256_hex_bytes(self.bytes)
-    }
+    to_hex: fn(self) -> String Never! { sha256_hex_bytes(self.bytes) }
 }
 
 // SHA-256 of `bytes` through Core's public canonical SHA-256 implementation.
-store_artifact_sha256: fn(bytes: [U8]) -> [U8] Never! {
-    crypto.sha256(bytes).as_bytes()
-}
+store_artifact_sha256: fn(bytes: [U8]) -> [U8] Never! { crypto.sha256(bytes).as_bytes() }
 
 store_artifact_hex_value: fn(byte: U8) -> Int? Never! {
     code: Int{byte}
@@ -159,7 +155,7 @@ LeaseTarget: enum {
     action: fn(action: ActionHandle) -> LeaseTarget Never! { LeaseTarget.Action(action) }
 
     lto: fn(namespace: String, object: ObjectHandle) -> LeaseTarget ArtifactStoreError! {
-        Ok(LeaseTarget.LTO{namespace: LTONamespace.new(namespace), object})
+        Ok(LeaseTarget.LTO{namespace: LTONamespace.new(namespace), object: object})
     }
 
     entry_key: fn(self) -> ArtifactEntryKey Never! {
@@ -277,7 +273,7 @@ store_artifact_sort_keys: fn(keys: [ArtifactEntryKey]) -> [ArtifactEntryKey] Nev
 // Keys in their derived order without duplicates (a Rust `BTreeSet`).
 store_artifact_unique_keys: fn(keys: [ArtifactEntryKey]) -> [ArtifactEntryKey] Never! {
     out := [ArtifactEntryKey]{}
-    seen := [String: Bool]{}
+    seen := [String:Bool]{}
     loop key in store_artifact_sort_keys(keys) {
         identity: key.identity()
         if seen.has_key(identity) -> next

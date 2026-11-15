@@ -13,20 +13,45 @@ package: {
     authority: { allow: [FS, FS.Read, IO, Mem.Alloc, Net, Time, Time.Wait, Exec.Args] }
 }
 
-use net: core.net
-use process: core.process
-use files: core.files
-use time: core.time
+use {
+    net: core.net
+    process: core.process
+    files: core.files
+    time: core.time
+}
 
 STOP: "stop.server"
 
 NAMES: [String]{
-    "localhost", "127.0.0.1", "myhost",
-    "a.test", "aaaa.test", "both.test", "both.test.", "cname.test", "big.test", "flaky.test",
-    "nx.test", "nodata.test", "fail.test", "refused.test", "slow.test",
-    "half.test", "halfslow.test", "halfv6.test",
-    "host", "svc", "late", "empty", "gone", "x.y", "hidden.onion",
-    "v4order.test", "prefix.test", "scope.test", "policy.test"
+    "localhost",
+    "127.0.0.1",
+    "myhost",
+    "a.test",
+    "aaaa.test",
+    "both.test",
+    "both.test.",
+    "cname.test",
+    "big.test",
+    "flaky.test",
+    "nx.test",
+    "nodata.test",
+    "fail.test",
+    "refused.test",
+    "slow.test",
+    "half.test",
+    "halfslow.test",
+    "halfv6.test",
+    "host",
+    "svc",
+    "late",
+    "empty",
+    "gone",
+    "x.y",
+    "hidden.onion",
+    "v4order.test",
+    "prefix.test",
+    "scope.test",
+    "policy.test",
 }
 
 // One name per fault. Forged UDP packets (each the honest reply with one
@@ -34,9 +59,24 @@ NAMES: [String]{
 // then faulty TCP answers to a truncated UDP one. Every AAAA question gets
 // an empty answer, so no NXDOMAIN outranks the fault.
 HOSTILE: [String]{
-    "wrongid.evil.", "notreply.evil.", "short.evil.", "wrongname.evil.", "wrongtype.evil.", "twoquestions.evil.", "MixedCase.evil.", "onlyforged.evil.",
-    "overrun.evil.", "badsize.evil.", "pastend.evil.", "ptrloop.evil.", "label.evil.", "reservedlabel.evil.", "type257.evil.",
-    "tcpwrongid.evil.", "tcpwrongname.evil.", "tcpshort.evil."
+    "wrongid.evil.",
+    "notreply.evil.",
+    "short.evil.",
+    "wrongname.evil.",
+    "wrongtype.evil.",
+    "twoquestions.evil.",
+    "MixedCase.evil.",
+    "onlyforged.evil.",
+    "overrun.evil.",
+    "badsize.evil.",
+    "pastend.evil.",
+    "ptrloop.evil.",
+    "label.evil.",
+    "reservedlabel.evil.",
+    "type257.evil.",
+    "tcpwrongid.evil.",
+    "tcpwrongname.evil.",
+    "tcpshort.evil.",
 }
 
 // Names whose server answers only the resend: p<N>.park. is 10.4.0.N.
@@ -90,7 +130,9 @@ wire_name: fn(name: String) -> [U8] {
 cname: fn(target: String) -> Record { Record{kind: 5, data: wire_name(target)} }
 
 answer: fn(records: [Record]) -> Reply { Reply{rcode: 0, truncated: false, records: records} }
+
 failure: fn(rcode: Int) -> Reply { Reply{rcode: rcode, truncated: false, records: [Record]{}} }
+
 SILENT: Reply{rcode: -1, truncated: false, records: [Record]{}}
 
 // The zone: `asked` counts this name and type's queries so far, this one
@@ -98,8 +140,12 @@ SILENT: Reply{rcode: -1, truncated: false, records: [Record]{}}
 zone: fn(name: String, kind: Int, tcp: Bool, asked: Int) -> Reply {
     if name == "a.test" -> return answer([Record]{v4(10, 0, 0, 1), v4(10, 0, 0, 2)})
     if name == "aaaa.test" -> return answer([Record]{v6([Int]{0x2001, 0xdb8, 0, 0, 0, 0, 0, 1})})
-    if name == "both.test" -> return answer([Record]{v4(10, 0, 0, 3), v6([Int]{0x2001, 0xdb8, 0, 0, 0, 0, 0, 3})})
-    if name == "cname.test" -> return answer([Record]{cname("a.test"), v4(10, 0, 0, 1), v4(10, 0, 0, 2)})
+    if name == "both.test" {
+        return answer([Record]{v4(10, 0, 0, 3), v6([Int]{0x2001, 0xdb8, 0, 0, 0, 0, 0, 3})})
+    }
+    if name == "cname.test" {
+        return answer([Record]{cname("a.test"), v4(10, 0, 0, 1), v4(10, 0, 0, 2)})
+    }
     if name == "big.test" && !tcp -> return Reply{rcode: 0, truncated: true, records: [Record]{}}
     if name == "big.test" {
         records := [Record]{}
@@ -129,13 +175,21 @@ zone: fn(name: String, kind: Int, tcp: Bool, asked: Int) -> Reply {
     if name == "x.y.corp.test" -> return answer([Record]{v4(10, 1, 1, 7)})
     if name == "hidden.onion" -> return answer([Record]{v4(10, 6, 6, 6)})
     if name == "v4order.test" -> return answer([Record]{v4(10, 0, 0, 10), v4(127, 0, 0, 6)})
-    if name == "prefix.test" -> return answer([Record]{v4(127, 255, 0, 1), v4(127, 0, 0, 2), v6([Int]{0x2001, 0xdb8, 0, 0, 0, 0, 0, 7})})
-    if name == "scope.test" -> return answer([Record]{v4(192, 0, 2, 7), v4(127, 0, 0, 7), v6([Int]{0x2001, 0xdb8, 0, 0, 0, 0, 0, 8})})
-    if name == "policy.test" -> return answer([Record]{v6([Int]{0xfec0, 0, 0, 0, 0, 0, 0, 1}), v6([Int]{0x2001, 0xdb8, 0, 0, 0, 0, 0, 5})})
+    if name == "prefix.test" {
+        return answer([Record]{v4(127, 255, 0, 1), v4(127, 0, 0, 2), v6([Int]{0x2001, 0xdb8, 0, 0, 0, 0, 0, 7})})
+    }
+    if name == "scope.test" {
+        return answer([Record]{v4(192, 0, 2, 7), v4(127, 0, 0, 7), v6([Int]{0x2001, 0xdb8, 0, 0, 0, 0, 0, 8})})
+    }
+    if name == "policy.test" {
+        return answer([Record]{v6([Int]{0xfec0, 0, 0, 0, 0, 0, 0, 1}), v6([Int]{0x2001, 0xdb8, 0, 0, 0, 0, 0, 5})})
+    }
     if name.ends_with(".evil") {
         if kind != 1 -> return answer([Record]{})
         if name == "onlyforged.evil" -> return SILENT
-        if name.starts_with("tcp") && !tcp -> return Reply{rcode: 0, truncated: true, records: [Record]{}}
+        if name.starts_with("tcp") && !tcp {
+            return Reply{rcode: 0, truncated: true, records: [Record]{}}
+        }
         return answer([Record]{v4(10, 3, 0, honest(name))})
     }
     if name.ends_with(".park") {
@@ -189,6 +243,7 @@ lowered: fn(bytes: [U8], end: Int) -> [U8] {
 rest: fn(kind: Int, data: [U8]) -> [U8] {
     join([[U8]]{[U8]{byte(kind /% 256), byte(kind % 256), 0, 1, 0, 0, 0, 60, byte(data.len() /% 256), byte(data.len() % 256)}, data.copy()})
 }
+
 rr: fn(kind: Int, data: [U8]) -> [U8] { join([[U8]]{[U8]{0xc0, 0x0c}, rest(kind, data)}) }
 
 // A NOERROR reply claiming `count` answer records, followed by `body`.
@@ -208,11 +263,21 @@ forgeries: fn(query: [U8], asked: Question) -> [[U8]] {
     if asked.kind != 1 -> return out
     name: asked.name
     all: name == "onlyforged.evil"
-    if all || name == "wrongid.evil" -> out.push(bumped(encode(query, asked, answer([Record]{v4(6, 6, 6, 1)})), 1))
-    if all || name == "notreply.evil" -> out.push(with_byte(encode(query, asked, answer([Record]{v4(6, 6, 6, 2)})), 2, Int{query[2]} % 2))
-    if all || name == "short.evil" -> out.push(slice(encode(query, asked, answer([Record]{v4(6, 6, 6, 3)})), 0, 11))
-    if all || name == "wrongname.evil" -> out.push(renamed(query, asked, answer([Record]{v4(6, 6, 6, 4)})))
-    if all || name == "wrongtype.evil" -> out.push(encode(with_byte(query, asked.end - 3, 28), asked, answer([Record]{v4(6, 6, 6, 5)})))
+    if all || name == "wrongid.evil" {
+        out.push(bumped(encode(query, asked, answer([Record]{v4(6, 6, 6, 1)})), 1))
+    }
+    if all || name == "notreply.evil" {
+        out.push(with_byte(encode(query, asked, answer([Record]{v4(6, 6, 6, 2)})), 2, Int{query[2]} % 2))
+    }
+    if all || name == "short.evil" {
+        out.push(slice(encode(query, asked, answer([Record]{v4(6, 6, 6, 3)})), 0, 11))
+    }
+    if all || name == "wrongname.evil" {
+        out.push(renamed(query, asked, answer([Record]{v4(6, 6, 6, 4)})))
+    }
+    if all || name == "wrongtype.evil" {
+        out.push(encode(with_byte(query, asked.end - 3, 28), asked, answer([Record]{v4(6, 6, 6, 5)})))
+    }
     if all || name == "twoquestions.evil" {
         packet: encode(query, asked, answer([Record]{v4(6, 6, 6, 6)}))
         out.push(join([[U8]]{with_byte(slice(packet, 0, asked.end), 5, 2), slice(query, 12, asked.end), slice(packet, asked.end, packet.len())}))
@@ -224,17 +289,39 @@ forgeries: fn(query: [U8], asked: Question) -> [[U8]] {
 broken: fn(query: [U8], asked: Question, tcp: Bool) -> [U8]? {
     if asked.kind != 1 -> return None
     name: asked.name
-    if name == "mixedcase.evil" -> return Val(lowered(encode(query, asked, answer([Record]{v4(10, 3, 0, 7)})), asked.end))
-    if name == "overrun.evil" -> return Val(raw_answer(query, asked, 2, join([[U8]]{rr(1, [U8]{10, 3, 0, 9}), [U8]{0xc0, 0x0c, 0, 1}})))
-    if name == "badsize.evil" -> return Val(raw_answer(query, asked, 1, rr(1, [U8]{10, 3, 0, 10, 0})))
-    if name == "pastend.evil" -> return Val(raw_answer(query, asked, 1, [U8]{0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 200, 6, 6, 6, 11}))
-    if name == "ptrloop.evil" -> return Val(raw_answer(query, asked, 1, join([[U8]]{[U8]{0xc0, byte(asked.end)}, rest(1, [U8]{6, 6, 6, 12})})))
-    if name == "label.evil" -> return Val(raw_answer(query, asked, 1, join([[U8]]{[U8]{4, 99, 97, 102, 0xe9, 0xc0, 0x0c}, rest(1, [U8]{10, 3, 0, 13})})))
-    if name == "reservedlabel.evil" -> return Val(raw_answer(query, asked, 1, join([[U8]]{[U8]{0x41, 0xc0, 0x0c}, rest(1, [U8]{6, 6, 6, 14})})))
-    if name == "type257.evil" -> return Val(raw_answer(query, asked, 2, join([[U8]]{rr(257, [U8]{6, 6, 6, 15}), rr(1, [U8]{10, 3, 0, 15})})))
-    if tcp && name == "tcpwrongid.evil" -> return Val(bumped(encode(query, asked, answer([Record]{v4(6, 6, 6, 16)})), 1))
-    if tcp && name == "tcpwrongname.evil" -> return Val(renamed(query, asked, answer([Record]{v4(6, 6, 6, 17)})))
-    if tcp && name == "tcpshort.evil" -> return Val(slice(encode(query, asked, answer([Record]{v4(10, 3, 0, 18)})), 0, 5))
+    if name == "mixedcase.evil" {
+        return Val(lowered(encode(query, asked, answer([Record]{v4(10, 3, 0, 7)})), asked.end))
+    }
+    if name == "overrun.evil" {
+        return Val(raw_answer(query, asked, 2, join([[U8]]{rr(1, [U8]{10, 3, 0, 9}), [U8]{0xc0, 0x0c, 0, 1}})))
+    }
+    if name == "badsize.evil" {
+        return Val(raw_answer(query, asked, 1, rr(1, [U8]{10, 3, 0, 10, 0})))
+    }
+    if name == "pastend.evil" {
+        return Val(raw_answer(query, asked, 1, [U8]{0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 200, 6, 6, 6, 11}))
+    }
+    if name == "ptrloop.evil" {
+        return Val(raw_answer(query, asked, 1, join([[U8]]{[U8]{0xc0, byte(asked.end)}, rest(1, [U8]{6, 6, 6, 12})})))
+    }
+    if name == "label.evil" {
+        return Val(raw_answer(query, asked, 1, join([[U8]]{[U8]{4, 99, 97, 102, 0xe9, 0xc0, 0x0c}, rest(1, [U8]{10, 3, 0, 13})})))
+    }
+    if name == "reservedlabel.evil" {
+        return Val(raw_answer(query, asked, 1, join([[U8]]{[U8]{0x41, 0xc0, 0x0c}, rest(1, [U8]{6, 6, 6, 14})})))
+    }
+    if name == "type257.evil" {
+        return Val(raw_answer(query, asked, 2, join([[U8]]{rr(257, [U8]{6, 6, 6, 15}), rr(1, [U8]{10, 3, 0, 15})})))
+    }
+    if tcp && name == "tcpwrongid.evil" {
+        return Val(bumped(encode(query, asked, answer([Record]{v4(6, 6, 6, 16)})), 1))
+    }
+    if tcp && name == "tcpwrongname.evil" {
+        return Val(renamed(query, asked, answer([Record]{v4(6, 6, 6, 17)})))
+    }
+    if tcp && name == "tcpshort.evil" {
+        return Val(slice(encode(query, asked, answer([Record]{v4(10, 3, 0, 18)})), 0, 5))
+    }
     None
 }
 
@@ -279,12 +366,14 @@ encode: fn(query: [U8], asked: Question, reply: Reply) -> [U8] {
 }
 
 udp_serve: fn(server: UDPSocket) {
-    seen := [String: Int]{}
+    seen := [String:Int]{}
     loop {
         request: net.udp_receive(server, 512) ?? return
         query: net.udp_packet_bytes(request)
         asked: question(query) ?? next
-        if asked.name == STOP -> return
+        if asked.name == STOP {
+            return
+        }
         key: "{asked.name}/{asked.kind}"
         count: (seen.get(key) ?? 0) + 1
         seen[key] = count
@@ -324,7 +413,9 @@ tcp_serve: fn(listener: TCPListener) {
         stream := net.tcp_accept(listener) ?? return
         serving: tcp_answer(stream)
         stream.close() ?? return
-        if !serving -> return
+        if !serving {
+            return
+        }
     }
 }
 
@@ -374,7 +465,9 @@ timed_lookup: fn(name: String, origin: Instant) -> Lookup {
 threads: fn() -[FS]> Int {
     text: files.read("/proc/self/status") ?? panic("read status")
     loop line in text.lines() {
-        if line.starts_with("Threads:") -> return Int.parse(line.remove_prefix("Threads:").trim()) ?? -1
+        if line.starts_with("Threads:") {
+            return Int.parse(line.remove_prefix("Threads:").trim()) ?? -1
+        }
     }
     -1
 }
@@ -468,7 +561,9 @@ run: fn() {
             loop name in NAMES -> show(name)
             #Deadline(300ms) {
                 if net.dns_a("slow.test") == {
-                    .Ok(addresses) -> print("slow.test A within 300 ms: {addresses.len()} addresses")
+                    .Ok(addresses) -> {
+                        print("slow.test A within 300 ms: {addresses.len()} addresses")
+                    }
                     .Err(error) -> print("slow.test A within 300 ms: {net.error_message(error)}")
                 }
             }

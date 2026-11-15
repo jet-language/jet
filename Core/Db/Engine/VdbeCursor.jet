@@ -5,7 +5,6 @@
 //
 // OP_Column reads the record where it lies (the cursor's page image, the
 // pseudo cursor's register) and copies only what overflows the page.
-
 use {
     math: core.math
     base: __core_db_base
@@ -183,10 +182,10 @@ op_column: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
                 v.csr[ci].row_kind = conn.ROW_COPY
                 v.csr[ci].row = [U8]{}
                 v.csr[ci].sz_row = 0
-                if hv.value > 98307 || hv.value > v.csr[ci].payload_size -> return column_corrupt(v, r)
-            } else {
-                direct = true
-            }
+                if hv.value > 98307 || hv.value > v.csr[ci].payload_size {
+                    return column_corrupt(v, r)
+                }
+            } else { direct = true }
         } else if v.csr[ci].cur_type == conn.CURTYPE_BTREE && btree.btree_cursor_has_moved(db.btrees[v.csr[ci].bt], v.csr[ci].btc) {
             rc: aux.handle_moved_cursor(db, v, ci)
             if rc != base.OK -> return fail(r, rc)
@@ -209,9 +208,7 @@ op_column: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
                 ze: at + v.csr[ci].offsets[0]
                 loop {
                     t := record.key_byte(rec, zh)
-                    if t < 128 {
-                        zh += 1
-                    } else {
+                    if t < 128 -> zh += 1 else {
                         tv: record.key_varint(rec, zh)
                         t = if tv.value > os.U32_MASK -> os.U32_MASK else -> tv.value
                         zh += tv.len
@@ -233,9 +230,7 @@ op_column: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
             }
             if v.csr[ci].n_hdr_parsed <= p2 {
                 run.release_dyn(v, dest)
-                if v.ops[r.pc].p4 == .Mem(m) {
-                    v.mem[dest] = m.copy()
-                } else {
+                if v.ops[r.pc].p4 == .Mem(m) -> v.mem[dest] = m.copy() else {
                     mem.set_null(v.mem[dest])
                 }
                 return GO_NEXT
@@ -290,16 +285,10 @@ op_type_check: fn(db: conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
         if f.bit_and(MEM_NULL) == 0 {
             ct: db.tables[tab].cols[k].ctype
             bad := false
-            if ct == conn.COLTYPE_BLOB {
-                bad = f.bit_and(MEM_BLOB) == 0
-            } else if ct == conn.COLTYPE_INTEGER || ct == conn.COLTYPE_INT {
+            if ct == conn.COLTYPE_BLOB -> bad = f.bit_and(MEM_BLOB) == 0 else if ct == conn.COLTYPE_INTEGER || ct == conn.COLTYPE_INT {
                 bad = f.bit_and(MEM_INT) == 0
-            } else if ct == conn.COLTYPE_TEXT {
-                bad = f.bit_and(MEM_STR) == 0
-            } else if ct == conn.COLTYPE_REAL {
-                if f.bit_and(MEM_INT) != 0 {
-                    real_of_int(v.mem[i], false)
-                } else {
+            } else if ct == conn.COLTYPE_TEXT { bad = f.bit_and(MEM_STR) == 0 } else if ct == conn.COLTYPE_REAL {
+                if f.bit_and(MEM_INT) != 0 -> real_of_int(v.mem[i], false) else {
                     bad = f.bit_and(MEM_REAL.bit_or(MEM_INT_REAL)) == 0
                 }
             }
@@ -375,16 +364,12 @@ op_make_record: fn(db: conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
                 n_zero += v.mem[i].i
                 n_data += v.mem[i].z.len()
             }
-        } else {
-            n_data += record.serial_len(t)
-        }
+        } else { n_data += record.serial_len(t) }
         n_hdr += util.varint_len(t)
         types[k] = t
         k -= 1
     }
-    if n_hdr <= 126 {
-        n_hdr += 1
-    } else {
+    if n_hdr <= 126 -> n_hdr += 1 else {
         n_varint: util.varint_len(n_hdr)
         n_hdr += n_varint
         if n_varint < util.varint_len(n_hdr) -> n_hdr += 1
@@ -397,13 +382,9 @@ op_make_record: fn(db: conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
     loop k3 in 0..<n_field {
         t: types[k3]
         i: first + k3
-        if t >= 12 {
-            aux.append_bytes(out, v.mem[i].z)
-        } else if t == 7 {
+        if t >= 12 -> aux.append_bytes(out, v.mem[i].z) else if t == 7 {
             record.put_signed(out, math.to_bits(v.mem[i].r), 8)
-        } else if t >= 1 && t <= 6 {
-            record.put_signed(out, v.mem[i].i, record.serial_len(t))
-        }
+        } else if t >= 1 && t <= 6 { record.put_signed(out, v.mem[i].i, record.serial_len(t)) }
     }
     o: v.mem_base + r.p3
     run.release_dyn(v, o)
@@ -422,9 +403,7 @@ op_count: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
     ci: v.csr_base + r.p1
     bt: v.csr[ci].bt
     n := 0
-    if r.p3 != 0 {
-        n = btree.btree_row_count_est(db.btrees[bt], v.csr[ci].btc)
-    } else {
+    if r.p3 != 0 -> n = btree.btree_row_count_est(db.btrees[bt], v.csr[ci].btc) else {
         rc: btree.btree_count(db.btrees[bt], v.csr[ci].btc, n)
         if rc != base.OK -> return fail(r, rc)
     }
@@ -453,9 +432,7 @@ op_savepoint: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> 
             if db.auto_commit {
                 db.auto_commit = false
                 db.is_transaction_savepoint = 1
-            } else {
-                db.n_savepoint += 1
-            }
+            } else { db.n_savepoint += 1 }
             db.savepoints.push(conn.Savepoint{name: name, n_deferred_cons: db.n_deferred_cons, n_deferred_imm_cons: db.n_deferred_imm_cons})
             conn.sync_btrees(db)
         }
@@ -492,11 +469,7 @@ op_savepoint: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> 
                     return GO_RETURN
                 }
                 rc = v.rc
-                if rc != base.OK {
-                    db.auto_commit = false
-                } else {
-                    db.is_transaction_savepoint = 0
-                }
+                if rc != base.OK -> db.auto_commit = false else -> db.is_transaction_savepoint = 0
             } else {
                 i_sp = db.n_savepoint - i_savepoint - 1
                 is_schema_change := false
@@ -654,9 +627,7 @@ op_set_cookie: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
         db.schemas[s].schema_cookie = (r.p3 - r.p5).bit_and(os.U32_MASK)
         db.m_db_flags = db.m_db_flags.bit_or(conn.DBFLAG_SCHEMA_CHANGE)
         conn.fk_clear_trigger_cache(db, r.p1)
-    } else if r.p2 == btree.BTREE_FILE_FORMAT {
-        db.schemas[s].file_format = r.p3
-    }
+    } else if r.p2 == btree.BTREE_FILE_FORMAT { db.schemas[s].file_format = r.p3 }
     if r.p1 == 1 {
         // A change to the TEMP schema expires every statement but this one.
         conn.expire_prepared_statements(db, 0)
@@ -858,7 +829,9 @@ op_seek: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
     if v.csr[ci].is_table {
         i3: v.mem_base + r.p3
         flags3: v.mem[i3].flags
-        if flags3.bit_and(MEM_INT.bit_or(MEM_REAL).bit_or(MEM_INT_REAL).bit_or(MEM_STR)) == MEM_STR -> mem.apply_numeric_affinity(v.mem[i3], false)
+        if flags3.bit_and(MEM_INT.bit_or(MEM_REAL).bit_or(MEM_INT_REAL).bit_or(MEM_STR)) == MEM_STR {
+            mem.apply_numeric_affinity(v.mem[i3], false)
+        }
         i_key: mem.int_value(v.mem[i3])
         new_type: v.mem[i3].flags
         v.mem[i3].flags = flags3
@@ -900,9 +873,7 @@ op_seek: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
                     if rc != base.DONE -> return fail(r, rc)
                     res = 1
                 }
-            } else {
-                res = 0
-            }
+            } else { res = 0 }
         } else {
             if res > 0 || (res == 0 && oc == opc.OP_SEEK_LT) {
                 res = 0
@@ -911,9 +882,7 @@ op_seek: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
                     if rc != base.DONE -> return fail(r, rc)
                     res = 1
                 }
-            } else {
-                res = if btree.btree_eof(db.btrees[bt], btc) -> 1 else -> 0
-            }
+            } else { res = if btree.btree_eof(db.btrees[bt], btc) -> 1 else -> 0 }
         }
     }
     if res != 0 -> return GO_JUMP
@@ -958,9 +927,7 @@ op_seek_scan: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 // OP_SeekHit: cursor P1's seek_hit clamped into P2..P3.
 op_seek_hit: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     ci: v.csr_base + r.p1
-    if v.csr[ci].seek_hit < r.p2 {
-        v.csr[ci].seek_hit = r.p2
-    } else if v.csr[ci].seek_hit > r.p3 {
+    if v.csr[ci].seek_hit < r.p2 -> v.csr[ci].seek_hit = r.p2 else if v.csr[ci].seek_hit > r.p3 {
         v.csr[ci].seek_hit = r.p3
     }
     GO_NEXT
@@ -1073,15 +1040,9 @@ op_new_rowid: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
     if !v.csr[ci].use_random_rowid {
         rc: btree.btree_last(db.btrees[bt], btc, res)
         if rc != base.OK -> return fail(r, rc)
-        if res != 0 {
-            val = 1
-        } else {
+        if res != 0 -> val = 1 else {
             val = btree.btree_integer_key(db.btrees[bt], btc)
-            if val >= max_rowid {
-                v.csr[ci].use_random_rowid = true
-            } else {
-                val += 1
-            }
+            if val >= max_rowid -> v.csr[ci].use_random_rowid = true else -> val += 1
         }
     }
     if r.p3 != 0 {
@@ -1154,7 +1115,9 @@ op_row_cell: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
     sbt: v.csr[src].bt
     out := [U8]{}
     rc := btree.btree_transfer_source(db.btrees[sbt], v.csr[src].btc, out)
-    if rc == base.OK -> rc = btree.btree_transfer_row(db.btrees[v.csr[dest].bt], v.csr[dest].btc, out, i_key)
+    if rc == base.OK {
+        rc = btree.btree_transfer_row(db.btrees[v.csr[dest].bt], v.csr[dest].btc, out, i_key)
+    }
     if rc != base.OK -> return fail(r, rc)
     GO_NEXT
 }
@@ -1245,9 +1208,7 @@ op_rowid: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int 
     if v.csr[ci].null_row {
         v.mem[o].flags = MEM_NULL
         return GO_NEXT
-    } else if v.csr[ci].deferred_moveto {
-        val = v.csr[ci].moveto_target
-    } else if v.csr[ci].cur_type == conn.CURTYPE_VTAB {
+    } else if v.csr[ci].deferred_moveto { val = v.csr[ci].moveto_target } else if v.csr[ci].cur_type == conn.CURTYPE_VTAB {
         rc: h.vtab_rowid(db, v.csr[ci].vtab_cursor, val)
         aux.vtab_import_errmsg<H>(h, db, v, v.csr[ci].vtab)
         if rc != base.OK -> return fail(r, rc)
@@ -1276,7 +1237,9 @@ op_null_row: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> I
     }
     v.csr[ci].null_row = true
     v.csr[ci].cache_status = conn.CACHE_STALE
-    if v.csr[ci].cur_type == conn.CURTYPE_BTREE -> btree.btree_clear_cursor(db.btrees[v.csr[ci].bt], v.csr[ci].btc)
+    if v.csr[ci].cur_type == conn.CURTYPE_BTREE {
+        btree.btree_clear_cursor(db.btrees[v.csr[ci].bt], v.csr[ci].btc)
+    }
     GO_NEXT
 }
 
@@ -1323,7 +1286,9 @@ op_if_smaller: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 // OP_SorterSort, OP_Sort, OP_Rewind: move cursor P1 to its first entry,
 // jumping to P2 when there is none.
 op_rewind: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
-    if r.op != opc.OP_REWIND -> v.counters[conn.STMTSTATUS_SORT] = v.counters[conn.STMTSTATUS_SORT] + 1
+    if r.op != opc.OP_REWIND {
+        v.counters[conn.STMTSTATUS_SORT] = v.counters[conn.STMTSTATUS_SORT] + 1
+    }
     ci: v.csr_base + r.p1
     res := 1
     rc := base.OK
@@ -1353,9 +1318,7 @@ op_next: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
         sorter_put(v, ci, s)
     } else if r.op == opc.OP_PREV {
         rc = btree.btree_previous(db.btrees[v.csr[ci].bt], v.csr[ci].btc, r.p3)
-    } else {
-        rc = btree.btree_next(db.btrees[v.csr[ci].bt], v.csr[ci].btc, r.p3)
-    }
+    } else { rc = btree.btree_next(db.btrees[v.csr[ci].bt], v.csr[ci].btc, r.p3) }
     v.csr[ci].cache_status = conn.CACHE_STALE
     if rc == base.OK {
         v.csr[ci].null_row = false
@@ -1468,11 +1431,7 @@ op_idx_compare: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
     res := 0
     rc: aux.idx_key_compare(db, v.csr[ci].bt, v.csr[ci].btc, key, res)
     if rc != base.OK -> return fail(r, rc)
-    if r.op.bit_and(1) == opc.OP_IDX_LT.bit_and(1) {
-        res = -res
-    } else {
-        res += 1
-    }
+    if r.op.bit_and(1) == opc.OP_IDX_LT.bit_and(1) -> res = -res else -> res += 1
     if res > 0 -> return GO_JUMP
     GO_NEXT
 }

@@ -1,42 +1,41 @@
+#Error
+DomainError: struct {
+    reason: String
+}
 
 #Error
-DomainError: struct { reason: String }
-
-#Error
-SourceError: struct { reason: String }
+SourceError: struct {
+    reason: String
+}
 
 matching_failure: fn(fail: Bool) -> DomainError DomainError! {
-    if fail {
-        return Err(DomainError{reason: "matching nested"})
-    }
+    if fail -> return Err(DomainError{reason: "matching nested"})
     return DomainError{reason: "matching value"}
 }
 
-nested_matching: fn(fail: Bool) -> DomainError DomainError! {
-    return Err(matching_failure(fail))
-}
+nested_matching: fn(fail: Bool) -> DomainError DomainError! { return Err(matching_failure(fail)) }
 
 never_value: fn() -> DomainError Never! { DomainError{reason: "never"} }
+
 never_int: fn() -> Int Never! { 40 }
+
 early_return_then_never: fn(fail: Bool) -> Int Never! {
     if fail -> return 1
     value: never_int()
     value + 1
 }
+
 optional_never: fn() -> Int? {
     value: never_int()
     Val(value)
 }
-optional_never_value: fn() -> Int {
-    optional_never() ?? 0
-}
+
+optional_never_value: fn() -> Int { optional_never() ?? 0 }
 
 nested_never: fn() -> DomainError DomainError! { Err(never_value()) }
 
 implicit_failure: fn(fail: Bool) -> DomainError {
-    if fail {
-        return Err("default failure")
-    }
+    if fail -> return Err("default failure")
     return DomainError{reason: "implicit value"}
 }
 
@@ -50,24 +49,17 @@ impl DomainError.From(SourceError) {
 }
 
 declared_failure: fn(fail: Bool) -> DomainError SourceError! {
-    if fail {
-        return Err(SourceError{reason: "source"})
-    }
+    if fail -> return Err(SourceError{reason: "source"})
     return DomainError{reason: "conversion value"}
 }
 
-nested_conversion: fn(fail: Bool) -> DomainError DomainError! {
-    return Err(declared_failure(fail))
-}
+nested_conversion: fn(fail: Bool) -> DomainError DomainError! { return Err(declared_failure(fail)) }
 
-
-implicit_collection: fn() -> [Int] {
-    [1, 2, 3]
-}
+implicit_collection: fn() -> [Int] { [1, 2, 3] }
 
 sum_implicit_collection: fn() -> Int {
     total := 0
-    loop value in implicit_collection() -> total = total + value
+    loop value in implicit_collection() -> total += value
     total
 }
 
@@ -81,6 +73,7 @@ check_result_index: fn() {
         .Err(error) -> print(error.reason)
     }
 }
+
 run: fn() {
     if sum_implicit_collection() != 6 -> print("unexpected collection result")
     if early_return_then_never(true) != 1 -> print("unexpected early return")
@@ -88,33 +81,32 @@ run: fn() {
     if optional_never_value() != 40 -> print("unexpected optional !Never")
     check_result_index()
 
-
     if nested_matching(false) == {
-        .Ok(_) -> print("unexpected success")
+        .Ok(_) -> { print("unexpected success") }
         .Err(error) -> print(error.reason)
     }
     if nested_matching(true) == {
-        .Ok(_) -> print("unexpected success")
+        .Ok(_) -> { print("unexpected success") }
         .Err(error) -> print(error.reason)
     }
     if nested_never() == {
-        .Ok(_) -> print("unexpected success")
+        .Ok(_) -> { print("unexpected success") }
         .Err(error) -> print(error.reason)
     }
     if nested_locally_handled(false) == {
-        .Ok(_) -> print("unexpected success")
+        .Ok(_) -> { print("unexpected success") }
         .Err(error) -> print(error.reason)
     }
     if nested_locally_handled(true) == {
-        .Ok(_) -> print("unexpected success")
+        .Ok(_) -> { print("unexpected success") }
         .Err(error) -> print(error.reason)
     }
     if nested_conversion(false) == {
-        .Ok(_) -> print("unexpected success")
+        .Ok(_) -> { print("unexpected success") }
         .Err(error) -> print(error.reason)
     }
     if nested_conversion(true) == {
-        .Ok(_) -> print("unexpected success")
+        .Ok(_) -> { print("unexpected success") }
         .Err(error) -> print(error.reason)
     }
 }

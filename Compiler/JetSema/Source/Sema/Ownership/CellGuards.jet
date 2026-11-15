@@ -39,7 +39,9 @@ sema_cell_guard_report: fn(what: String, span: Span, diagnostics: &[Diagnostic])
     loop diagnostic in diagnostics {
         if diagnostic.code == "E0217" && diagnostic.what == what {
             if diagnostic.span == .Val(existing) {
-                if existing.start == span.start && existing.end == span.end -> return
+                if existing.start == span.start && existing.end == span.end {
+                    return
+                }
             }
         }
     }
@@ -55,11 +57,15 @@ sema_cell_guard_constructs_value: fn(expr: Expr) -> Bool Never! {
 
 // Rust `infer`: an expression that builds a value whose type stores a guard.
 sema_cell_guard_check_construct: fn(expr: Expr, ty: Type, diagnostics: &[Diagnostic]) {
-    if !sema_cell_guard_constructs_value(expr) || !sema_cell_guard_storage_unsupported(ty) -> return
+    if !sema_cell_guard_constructs_value(expr) || !sema_cell_guard_storage_unsupported(ty) {
+        return
+    }
     sema_cell_guard_report("a Cell guard cannot be stored inside `{type_name(ty)}`", expr_span(expr), diagnostics)
 }
 
 // Rust `check_lambda` captures: a lambda would carry the loan with it.
 sema_cell_guard_check_capture: fn(name: String, ty: Type, span: Span, diagnostics: &[Diagnostic]) {
-    if sema_cell_guard_contained(ty) -> sema_cell_guard_report("Cell guard `{name}` cannot be captured by a lambda", span, diagnostics)
+    if sema_cell_guard_contained(ty) {
+        sema_cell_guard_report("Cell guard `{name}` cannot be captured by a lambda", span, diagnostics)
+    }
 }

@@ -22,7 +22,6 @@
 // X64EmitRow) holds every branch, memory operand, division, string
 // operation, register call and template the selector wrote, by IR
 // instruction; ir_timing_x64_check refuses each one a fixed value decides.
-
 use {
     jet_foundation.[Type]
     jet_backend.[X64EmitRow, X64_RBP, X64_RSP, x64_emit_row_text]
@@ -121,9 +120,13 @@ ir_timing_x64_check: fn(m: IRModule, f: IRFunction, log: [X64EmitRow], errors: &
     loop at in 0..<f.op.len() {
         ir_x64_reads_into(f, at, reads)
         if !ir_timing_any(fixed, reads) -> next
-        if ir_timing_x64_row(m, f, at) == "" -> errors.push(ir_timing_finding(f, at, "a fixed operand meets an instruction the x86-64 table has no row for"))
+        if ir_timing_x64_row(m, f, at) == "" {
+            errors.push(ir_timing_finding(f, at, "a fixed operand meets an instruction the x86-64 table has no row for"))
+        }
         callee: f.a[at]
-        if f.op[at] == .Call && callee >= 0 && callee < m.functions.len() && m.functions[callee].asm != None -> errors.push(ir_timing_finding(f, at, "a fixed operand reaches an inline-asm template, whose bytes are not checked"))
+        if f.op[at] == .Call && callee >= 0 && callee < m.functions.len() && m.functions[callee].asm != None {
+            errors.push(ir_timing_finding(f, at, "a fixed operand reaches an inline-asm template, whose bytes are not checked"))
+        }
     }
     loop row in log {
         at: row.at
@@ -145,7 +148,9 @@ ir_timing_x64_check: fn(m: IRModule, f: IRFunction, log: [X64EmitRow], errors: &
             .Asm -> if operand -> "an inline-asm template given a fixed value, whose bytes are not checked" else -> ""
             .Jmp | .Call -> ""
         }
-        if what != "" -> errors.push(ir_timing_finding(f, at, "{what} (`{x64_emit_row_text(row)}`)"))
+        if what != "" {
+            errors.push(ir_timing_finding(f, at, "{what} (`{x64_emit_row_text(row)}`)"))
+        }
     }
 }
 
@@ -161,7 +166,9 @@ ir_timing_x64_memory: fn(f: IRFunction, fixed: [Bool], row: X64EmitRow, operand:
         return ""
     }
     if op == .CopyBytes {
-        if ir_timing_at(fixed, f.a[at]) || ir_timing_at(fixed, f.b[at]) -> return "a memory copy at a fixed address"
+        if ir_timing_at(fixed, f.a[at]) || ir_timing_at(fixed, f.b[at]) {
+            return "a memory copy at a fixed address"
+        }
         return ""
     }
     if operand -> return "a memory operand of an instruction with a fixed operand"
@@ -169,9 +176,7 @@ ir_timing_x64_memory: fn(f: IRFunction, fixed: [Bool], row: X64EmitRow, operand:
 }
 
 // Whether register `reg` addresses the frame: rbp, rsp or none.
-ir_timing_frame: fn(reg: Int) -> Bool Never! {
-    reg < 0 || reg == X64_RBP || reg == X64_RSP
-}
+ir_timing_frame: fn(reg: Int) -> Bool Never! { reg < 0 || reg == X64_RBP || reg == X64_RSP }
 
 // A finding at instruction `at` of `f`, with its source line.
 ir_timing_finding: fn(f: IRFunction, at: Int, message: String) -> String Never! {

@@ -1,8 +1,16 @@
 // Production collection contracts: no manufactured Sema method result.
 use jet_foundation.[
-    AccessConvention, SemaCollectionOperation, Span, TBuiltinOp, TClosureOp, Type, TypeTupleField,
-    sema_collection_method_argument_type, sema_collection_method_contract,
-    sema_collection_method_effect_row, sema_collection_method_operation,
+    AccessConvention,
+    SemaCollectionOperation,
+    Span,
+    TBuiltinOp,
+    TClosureOp,
+    Type,
+    TypeTupleField,
+    sema_collection_method_argument_type,
+    sema_collection_method_contract,
+    sema_collection_method_effect_row,
+    sema_collection_method_operation,
     sema_collection_method_result_type,
 ]
 
@@ -22,12 +30,20 @@ use jet_foundation.[
             assert_eq(effects.len(), 1)
             assert_eq(effects[0].name, "Mem")
             result: sema_collection_method_result_type(contract, None, None) ?? panic("result {method}")
-            success: if method == { "split_write" -> pair "get_disjoint_write" -> Type.List{element: view} else -> Type.Tuple{fields: [TypeTupleField]{}} }
+            success: if method == {
+                "split_write" -> pair
+                "get_disjoint_write" -> Type.List{element: view}
+                else -> Type.Tuple{fields: [TypeTupleField]{}}
+            }
             assert_eq(result, Type.Result{ok: success, err: Type.String})
             operation: sema_collection_method_operation(contract, contract.minimum_arity, None, 0, None, false, false)
             if method == {
-                "split_write" -> assert_eq(operation, SemaCollectionOperation.Builtin{operation: TBuiltinOp.SplitWrite})
-                "get_disjoint_write" -> assert_eq(operation, SemaCollectionOperation.Builtin{operation: TBuiltinOp.GetDisjointWrite})
+                "split_write" -> {
+                    assert_eq(operation, SemaCollectionOperation.Builtin{operation: TBuiltinOp.SplitWrite})
+                }
+                "get_disjoint_write" -> {
+                    assert_eq(operation, SemaCollectionOperation.Builtin{operation: TBuiltinOp.GetDisjointWrite})
+                }
                 else -> {
                     assert_eq(operation, SemaCollectionOperation.Closure{operation: TClosureOp.EditDisjoint})
                     callback: sema_collection_method_argument_type(contract, 1, None, false) ?? panic("callback")
@@ -36,7 +52,9 @@ use jet_foundation.[
                             assert_eq(params, [Type]{view, view})
                             assert_eq(ret, None)
                         }
-                        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> { panic("function callback") }
+                        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
+                            panic("function callback")
+                        }
                     }
                     assert_eq(contract.callback_indices, [Int]{1})
                 }

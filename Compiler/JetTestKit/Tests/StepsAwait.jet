@@ -9,7 +9,8 @@ use {
     outcome: cases_test_advanced(root, "ready", source)
     assert_eq(outcome.verdict.status, "PASS")
     assert_eq(outcome.run.stdout, "")
-    loop wait in ["await: file missing timeout 2ms every 1ms", "await: dir missing timeout 2ms every 1ms", "write: value = \"wrong\"\nawait: file value = \"right\" timeout 2ms every 1ms"] {
+    loop wait in
+        ["await: file missing timeout 2ms every 1ms", "await: dir missing timeout 2ms every 1ms", "write: value = \"wrong\"\nawait: file value = \"right\" timeout 2ms every 1ms"] {
         result: cases_test_advanced(root, "deadline", "{wait}\n")
         assert_eq(result.verdict.status, "FAIL")
         assert_eq(result.verdict.detail, "await deadline exceeded")
@@ -38,7 +39,8 @@ use {
     assert_eq(cases_test_advanced(root, "entry", source).verdict.status, "PASS")
     failed: "mkdir: entries/other\nawait: entry entries with-file \"marker\" timeout 2ms every 1ms capture selected\n"
     assert_eq(cases_test_advanced(root, "no-match", failed).verdict.status, "FAIL")
-    loop invalid in ["await: file ../escape timeout 1s", "await: file value timeout 1s timeout 2s", "await: entry entries capture invalid-name", "await: entry entries", "await: process 1 timeout 1s", "await: dir entries capture selected"] {
+    loop invalid in
+        ["await: file ../escape timeout 1s", "await: file value timeout 1s timeout 2s", "await: entry entries capture invalid-name", "await: entry entries", "await: process 1 timeout 1s", "await: dir entries capture selected"] {
         assert_eq(cases_test_advanced(root, "invalid", "{invalid}\n").verdict.status, "REFUSED")
     }
     files.remove_all(root) ?? panic("remove await entry scratch")
@@ -65,7 +67,8 @@ use {
     assert(failed.verdict.detail.contains("poll deadline exceeded"))
     eventual: "poll ready: jet -c 'if test -f eventual-seen; then printf ready; else : > eventual-seen; printf waiting; fi' until stdout: = \"ready\" timeout 1s every 1ms\n"
     assert_eq(cases_test_advanced(root, "eventual", eventual).verdict.status, "PASS")
-    loop invalid in ["poll ready: printf yes until stdout: = \"yes\"", "poll ready: printf yes until stdout: = \"yes\" timeout 1s every 0ms", "poll ready: printf yes until stdout: = \"yes\" && timeout 1s every 1ms"] {
+    loop invalid in
+        ["poll ready: printf yes until stdout: = \"yes\"", "poll ready: printf yes until stdout: = \"yes\" timeout 1s every 0ms", "poll ready: printf yes until stdout: = \"yes\" && timeout 1s every 1ms"] {
         assert_eq(cases_test_advanced(root, "invalid", "{invalid}\n").verdict.status, "REFUSED")
     }
     files.remove_all(root) ?? panic("remove poll scratch")
@@ -77,7 +80,8 @@ use {
     assert_eq(cases_test_advanced(root, "ready", ready).verdict.status, "PASS")
     nonzero: "poll ready: jet -c 'printf ready; exit 7' until exit: 7 && stdout: = \"ready\" timeout 1s every 1ms\n"
     assert_eq(cases_test_advanced(root, "nonzero", nonzero).verdict.status, "PASS")
-    loop source in ["poll ready: jet -c 'printf ready; exit 7' until exit: 0 && stdout: = \"ready\" timeout 20ms every 1ms", "poll ready: printf ready until exit: 0 && exit: 7 && stdout: = \"ready\" timeout 20ms every 1ms", "poll ready: jet -c 'if test -f seen; then exit 7; else : > seen; exit 0; fi' until exit: 0 && exit: 7 timeout 20ms every 1ms"] {
+    loop source in
+        ["poll ready: jet -c 'printf ready; exit 7' until exit: 0 && stdout: = \"ready\" timeout 20ms every 1ms", "poll ready: printf ready until exit: 0 && exit: 7 && stdout: = \"ready\" timeout 20ms every 1ms", "poll ready: jet -c 'if test -f seen; then exit 7; else : > seen; exit 0; fi' until exit: 0 && exit: 7 timeout 20ms every 1ms"] {
         result: cases_test_advanced(root, "mismatch", "{source}\n")
         assert_eq(result.verdict.status, "FAIL")
         assert(result.verdict.detail.contains("poll deadline exceeded"))
@@ -109,7 +113,8 @@ use {
         assert_eq(kit_steps_parse_case("step: true\nprocess -1: {mode}\n").error, "")
         assert_eq(kit_steps_parse_case("await: process -1 {mode} timeout 1s every 1ms\n").error, "")
     }
-    loop mode in ["nonzombie", "non-zombie", "alive-non-zombie", "proc-nonzombie", "proc-readable", "proc-readable-non-zombie"] {
+    loop mode in
+        ["nonzombie", "non-zombie", "alive-non-zombie", "proc-nonzombie", "proc-readable", "proc-readable-non-zombie"] {
         assert_eq(kit_steps_process_form(mode), None)
         assert(kit_steps_parse_case("step: true\nprocess -1: {mode}\n").error != "")
         assert(kit_steps_parse_case("await: process -1 {mode} timeout 1s every 1ms\n").error != "")
@@ -117,7 +122,9 @@ use {
 }
 
 #Test("both non-zombie forms share real live-child assertions awaits and absent-PID deadlines") {
-    if sys.name() != "linux" -> return
+    if sys.name() != "linux" {
+        return
+    }
     root: cases_test_root("await-nonzombie")
     loop mode in ["alive-nonzombie", "proc-readable-nonzombie"] {
         ready: "requires: os-name:linux\nspawn peer: jet -c 'exec sleep 20'\nawait: process {{pid:peer}} {mode} timeout 1s every 1ms\nstep: true\nprocess {{pid:peer}}: {mode}\nsignal peer: KILL\nwait peer timeout 1s\nexit: any # explicit signal is an expected stop\n"

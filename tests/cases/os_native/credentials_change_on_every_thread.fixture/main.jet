@@ -10,9 +10,11 @@ package: {
     authority: { allow: [IO, Mem.Alloc, Env, FS, Time] }
 }
 
-use sys: core.sys
-use files: core.files
-use tasks: core.tasks
+use {
+    sys: core.sys
+    files: core.files
+    tasks: core.tasks
+}
 
 SOCKET: "/var/run/nscd/socket"
 
@@ -51,7 +53,9 @@ credentials: fn(threads: [String]) -> [String] {
     loop thread in threads {
         status: files.read("/proc/self/task/{thread}/status") ?? next
         loop line in status.split("\n") {
-            if !(line.starts_with("Uid:") || line.starts_with("Gid:") || line.starts_with("Groups:")) -> next
+            if !(line.starts_with("Uid:") || line.starts_with("Gid:") || line.starts_with("Groups:")) {
+                next
+            }
             text: fields(line)
             if !has(seen, text) -> seen.push(text)
         }

@@ -51,16 +51,16 @@ trust_merge_semantic_locks: fn(base: SemanticLockFile, left: SemanticLockFile, r
         if left_by_key.get(key) == {
             .None -> {
                 if right_by_key.get(key) == {
-                    .Val(right_value) -> merged.push(right_value)
+                    .Val(right_value) -> { merged.push(right_value) }
                     .None -> {}
                 }
             }
             .Val(left_value) -> {
                 if right_by_key.get(key) == {
-                    .None -> merged.push(left_value)
+                    .None -> { merged.push(left_value) }
                     .Val(right_value) -> {
                         if trust_merge_record_pair(base_by_key.get(key), left_value, right_value) == {
-                            .Keep(record) -> merged.push(record)
+                            .Keep(record) -> { merged.push(record) }
                             .Conflict(conflict) -> conflicts.push(conflict)
                         }
                     }
@@ -70,7 +70,7 @@ trust_merge_semantic_locks: fn(base: SemanticLockFile, left: SemanticLockFile, r
     }
     MergeOutcome{
         merged: SemanticLockFile{records: merged, inputs: trust_merge_lock_inputs(base, left, right), source_maps: trust_merge_source_maps(base, left, right)},
-        conflicts
+        conflicts: conflicts,
     }
 }
 
@@ -79,7 +79,9 @@ trust_merge_semantic_locks: fn(base: SemanticLockFile, left: SemanticLockFile, r
 trust_merge_record_pair: fn(base: SemanticRecord?, left: SemanticRecord, right: SemanticRecord) -> LockMergeStep Never! {
     left_identity: left.identity.machine_identity()
     right_identity: right.identity.machine_identity()
-    if left_identity == right_identity -> return LockMergeStep.Keep(trust_merge_rationales(left, right.rationales))
+    if left_identity == right_identity {
+        return LockMergeStep.Keep(trust_merge_rationales(left, right.rationales))
+    }
     if base == {
         .Val(base_record) -> {
             base_identity: base_record.identity.machine_identity()
@@ -95,15 +97,15 @@ trust_merge_record_pair: fn(base: SemanticRecord?, left: SemanticRecord, right: 
 }
 
 // Records by semantic key; a later duplicate replaces an earlier one.
-trust_lock_records_by_key: fn(lock: SemanticLockFile) -> [String: SemanticRecord] Never! {
-    by_key := [String: SemanticRecord]{}
+trust_lock_records_by_key: fn(lock: SemanticLockFile) -> [String:SemanticRecord] Never! {
+    by_key := [String:SemanticRecord]{}
     loop record in lock.records -> by_key[record.identity.semantic_key()] = record.copy()
     by_key
 }
 
 // Right over left over base for one input name, in name order.
 trust_merge_lock_inputs: fn(base: SemanticLockFile, left: SemanticLockFile, right: SemanticLockFile) -> [LockInput] Never! {
-    by_name := [String: LockInput]{}
+    by_name := [String:LockInput]{}
     loop input in base.inputs -> by_name[input.name] = input.copy()
     loop input in left.inputs -> by_name[input.name] = input.copy()
     loop input in right.inputs -> by_name[input.name] = input.copy()
@@ -116,7 +118,7 @@ trust_merge_lock_inputs: fn(base: SemanticLockFile, left: SemanticLockFile, righ
 
 // Right over left over base for one pattern, in pattern order.
 trust_merge_source_maps: fn(base: SemanticLockFile, left: SemanticLockFile, right: SemanticLockFile) -> [SourceMapEntry] Never! {
-    by_pattern := [String: SourceMapEntry]{}
+    by_pattern := [String:SourceMapEntry]{}
     loop map in base.source_maps -> by_pattern[map.pattern] = map.copy()
     loop map in left.source_maps -> by_pattern[map.pattern] = map.copy()
     loop map in right.source_maps -> by_pattern[map.pattern] = map.copy()
@@ -154,7 +156,7 @@ trust_lock_conflict: fn(left: SemanticRecord, right: SemanticRecord) -> LockConf
                     left_identity: left.identity.machine_identity(),
                     right_identity: right.identity.machine_identity(),
                     left_reason: left_rationale.reason,
-                    right_reason: right_rationale.reason
+                    right_reason: right_rationale.reason,
                 })
             }
         }
@@ -180,7 +182,7 @@ trust_explain_semantic_lock: fn(lock: SemanticLockFile, key: String) -> ExplainF
             exact_artifact: record.identity.exact,
             policy_fingerprint: first.policy_fingerprint,
             update_command: first.update_command,
-            offline_satisfied: record.identity.hash != ""
+            offline_satisfied: record.identity.hash != "",
         })
     }
     None

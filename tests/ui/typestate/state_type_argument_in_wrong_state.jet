@@ -7,11 +7,15 @@ Order: struct {
         Cancelled
         Open: Draft | Confirmed
     }
+
     id: Int
 
     start: fn(id: Int) -> Order.Draft { Order{id: id} }
+
     confirm: fn(self: &&Order.Draft) -> Order.Confirmed { self }
+
     ship: fn(self: &&Order.Confirmed) -> Order.Shipped { self }
+
     cancel: fn(self: &&Order.Open) -> Order.Cancelled { self }
 }
 

@@ -12,27 +12,26 @@ package: {
 use files: core.files
 
 STEPS: 300000
+
 GROWTH_BOUND_KB: 8192
 
 // A /proc status field's number ("VmRSS:\t 123 kB").
 census: fn(prefix: String) -[FS]> Int {
     text: files.read("/proc/self/status") ?? panic("read status")
     loop line in text.lines() {
-        if line.starts_with(prefix) -> return Int.parse(line.remove_prefix(prefix).remove_suffix("kB").trim()) ?? -1
+        if line.starts_with(prefix) {
+            return Int.parse(line.remove_prefix(prefix).remove_suffix("kB").trim()) ?? -1
+        }
     }
     -1
 }
 
-words: fn(form: String) -> [String] {
-    form.split(" ").to_list().filter(fn(word) { word != "" })
-}
+words: fn(form: String) -> [String] { form.split(" ").to_list().filter(fn(word) { word != "" }) }
 
-lengths: fn(form: String) -> [Int] {
-    form.split(" ").to_list().map(fn(word) { word.len() })
-}
+lengths: fn(form: String) -> [Int] { form.split(" ").to_list().map(fn(word) { word.len() }) }
 
-scores: fn(seed: Int) -> [String: Int] {
-    [String: Int]{"one": seed, "two": seed + 1, "three": seed + 2}
+scores: fn(seed: Int) -> [String:Int] {
+    [String:Int]{"one": seed, "two": seed + 1, "three": seed + 2}
 }
 
 run: fn() {

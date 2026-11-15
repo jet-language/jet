@@ -11,6 +11,7 @@ Res: struct {
         close: fn(&&self) { print("close {self.name}") }
     }
 }
+
 Holder: struct {
     first: Res?
     second: Res?
@@ -63,18 +64,14 @@ assign_or: fn(h: Holder) -> Int {
     0
 }
 
-return_or: fn(h: Holder) -> Res? {
-    Val(h.first ?? return None)
-}
+return_or: fn(h: Holder) -> Res? { Val(h.first ?? return None) }
 
 keep: fn(r: &&Res) -> Int { r.name.len() }
 
 loop_push: fn() -> Int {
     list: [Res{name: "push"}]
     out := [Res]{}
-    loop item in list {
-        out.push(item)
-    }
+    loop item in list { out.push(item) }
     out.len()
 }
 
@@ -87,21 +84,15 @@ loop_collect: fn() -> Int {
 loop_take: fn() -> Int {
     list: [Res{name: "take"}]
     total := 0
-    loop item in list {
-        total = total + keep(item)
-    }
+    loop item in list -> total += keep(item)
     total
 }
 
 loop_drive_moves: fn() -> Int {
     list: [Res{name: "drive"}]
     out := [Res]{}
-    loop item in list.move() {
-        out.push(item)
-    }
+    loop item in list.move() { out.push(item) }
     out.len()
 }
 
-run: fn() {
-    print("unreached")
-}
+run: fn() { print("unreached") }

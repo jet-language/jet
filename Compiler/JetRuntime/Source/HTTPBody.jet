@@ -42,7 +42,9 @@ http_body_store: fn(address: I64, value: I64) { rt_text_store(address, value) }
 
 // An atomic refcount, take/close flag or transition lock in a live body
 // allocation; Sync.jet's compare-exchange performs it.
-http_body_cas: fn(address: I64, expected: I64, desired: I64) -> I64 { sync_cas(address, expected, desired) }
+http_body_cas: fn(address: I64, expected: I64, desired: I64) -> I64 {
+    sync_cas(address, expected, desired)
+}
 
 http_body_zero: fn(size: I64) -> I64 {
     pointer: jet_rt_alloc(size, I64{8})

@@ -15,12 +15,12 @@ strays: fn(found: [String], known: [String]) -> [String] {
 
 subset_count: fn(cases: [String], roots: [String]) -> Int {
     found: strays(cases, roots)
-    if found.len() > 0 -> panic("BuildEffect.jet: BuildEffect names effects the effect sources (Compiler/Prelude/Effects.jet, Core/Effects/Effects.jet, Core/Compiler/Meta.jet) do not declare: [{found.join(", ")}]")
+    if found.len() > 0 {
+        panic("BuildEffect.jet: BuildEffect names effects the effect sources (Compiler/Prelude/Effects.jet, Core/Effects/Effects.jet, Core/Compiler/Meta.jet) do not declare: [{found.join(", ")}]")
+    }
     cases.len()
 }
 
 VIEW_COUNT: #run subset_count(VIEW_CASES, ROOTS)
 
-run: fn() {
-    print(VIEW_COUNT)
-}
+run: fn() { print(VIEW_COUNT) }

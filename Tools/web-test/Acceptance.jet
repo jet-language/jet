@@ -24,7 +24,9 @@ use {
 }
 
 C_WAIT_MS: 20000
+
 C_POLL_MS: 80
+
 C_BODY_LIMIT: 268435456
 
 // Collects console.log lines, and console errors and uncaught page errors
@@ -69,9 +71,7 @@ run: fn() {
     }
     origin: "http://127.0.0.1:{port}"
     prefixes: [String]{"/click", "/reactive", "/compute", "/callback", "/lifecycle"}
-    loop prefix in prefixes {
-        check_bundle(origin, prefix) ?? fail(err.message)
-    }
+    loop prefix in prefixes { check_bundle(origin, prefix) ?? fail(err.message) }
     driver: open(engine) ?? fail(err.message)
     matrix(driver, origin) ?? {
         driver.session.close().drop("the engine also stops with the session's last owner")
@@ -100,10 +100,12 @@ check_bundle: fn(origin: String, prefix: String) Failure! {
 }
 
 matrix: fn(d: Driver, origin: String) Failure! {
-    preload: Dyn.Object([(key: String, value: Dyn)]{
-        (key: "functionDeclaration", value: Dyn.Text(C_CONSOLE_HOOK)),
-        (key: "contexts", value: Dyn.Array([Dyn]{Dyn.Text(d.context.copy())})),
-    })
+    preload: Dyn.Object(
+        [(key: String, value: Dyn)]{
+            (key: "functionDeclaration", value: Dyn.Text(C_CONSOLE_HOOK)),
+            (key: "contexts", value: Dyn.Array([Dyn]{Dyn.Text(d.context.copy())})),
+        },
+    )
     command(d.bidi, "script.addPreloadScript", preload)
 
     navigate(d, "{origin}/click/index.html")
@@ -185,7 +187,7 @@ wait_for: fn(d: Driver, expression: String, label: String) Failure! {
 // Run a page action once; a thrown page error fails the matrix.
 perform: fn(d: Driver, expression: String) Failure! {
     if evaluate(d, expression) == {
-        .Val(_) -> Ok()
+        .Val(_) -> { Ok() }
         None -> {
             page: evaluate(d, "document.body.innerHTML.slice(0, 600)") ?? "unreadable"
             Err(Failure{message: "page action threw: {expression}; the page is {page}"})
@@ -197,23 +199,31 @@ perform: fn(d: Driver, expression: String) Failure! {
 // The page value of `expression` as `String(value)` after awaiting it, or
 // None when the page threw.
 evaluate: fn(d: Driver, expression: String) -> String? Failure! {
-    params: Dyn.Object([(key: String, value: Dyn)]{
-        (key: "expression", value: Dyn.Text("(async () => String(await ({expression})))()")),
-        (key: "target", value: Dyn.Object([(key: String, value: Dyn)]{(key: "context", value: Dyn.Text(d.context.copy()))})),
-        (key: "awaitPromise", value: Dyn.Bool(true)),
-        (key: "resultOwnership", value: Dyn.Text("none")),
-    })
+    params: Dyn.Object(
+        [(key: String, value: Dyn)]{
+            (key: "expression", value: Dyn.Text("(async () => String(await ({expression})))()")),
+            (key: "target", value: Dyn.Object([(key: String, value: Dyn)]{(key: "context", value: Dyn.Text(d.context.copy()))})),
+            (key: "awaitPromise", value: Dyn.Bool(true)),
+            (key: "resultOwnership", value: Dyn.Text("none")),
+        },
+    )
     reply: command(d.bidi, "script.evaluate", params)
     if text(field(reply, "type")) != "success" -> return Ok(None)
     Ok(Val(text(field(field(reply, "result"), "value"))))
 }
 
 navigate: fn(d: Driver, address: String) Failure! {
-    command(d.bidi, "browsingContext.navigate", Dyn.Object([(key: String, value: Dyn)]{
-        (key: "context", value: Dyn.Text(d.context.copy())),
-        (key: "url", value: Dyn.Text(address.copy())),
-        (key: "wait", value: Dyn.Text("complete")),
-    }))
+    command(
+        d.bidi,
+        "browsingContext.navigate",
+        Dyn.Object(
+            [(key: String, value: Dyn)]{
+                (key: "context", value: Dyn.Text(d.context.copy())),
+                (key: "url", value: Dyn.Text(address.copy())),
+                (key: "wait", value: Dyn.Text("complete")),
+            },
+        ),
+    )
     Ok()
 }
 
@@ -236,7 +246,9 @@ command: fn(bidi: BrowserProtocol, method: String, params: Dyn) -> Dyn Failure! 
 
 fetch_response: fn(origin: String, path: String) -> HTTPResponse Failure! {
     response: client.get("{origin}{path}") ?? return Err(Failure{message: "{path} request failed: {err}"})
-    if response.status() < 200 || response.status() > 299 -> return Err(Failure{message: "{path} returned {response.status()}"})
+    if response.status() < 200 || response.status() > 299 {
+        return Err(Failure{message: "{path} returned {response.status()}"})
+    }
     Ok(response)
 }
 
@@ -277,9 +289,7 @@ text: fn(tree: Dyn) -> String {
 }
 
 // A count the page sent as decimal text; -1 when it is not one.
-number: fn(tree: Dyn) -> Int {
-    Int.parse(text(tree)) ?? (0 - 1)
-}
+number: fn(tree: Dyn) -> Int { Int.parse(text(tree)) ?? (0 - 1) }
 
 option: fn(args: [String], name: String) -> String? {
     loop index in 0..<args.len() {

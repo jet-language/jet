@@ -24,7 +24,9 @@ provider_realize_foreign_dependencies: fn(verification: &StoreVerification, root
     names.sort()
     loop name in names {
         if manifest.dependencies[name] == {
-            .Foreign(language, reference) -> realized.push(provider_realize_foreign_one(verification, roots, project_root, name, language, reference, ctx))
+            .Foreign(language, reference) -> {
+                realized.push(provider_realize_foreign_one(verification, roots, project_root, name, language, reference, ctx))
+            }
             .Path(_) | .Git(_, _) | .Registry(_) -> {}
         }
     }
@@ -44,18 +46,18 @@ provider_realize_foreign_one: fn(verification: &StoreVerification, roots: Hangar
     version: provider_foreign_exact_version(spec) ?? return Err(ProviderError.ForeignProjection("foreign dependency {name} must pin its provider package with `#version=...`"))
     source_fingerprint: foundation_try_tree_hash(source) ?? return Err(ProviderError.ForeignProjection("foreign dependency {name} source tree `{source}` could not be hashed: {err.message()}"))
     identity: CacheIdentity{
-        source_fingerprint,
+        source_fingerprint: source_fingerprint,
         recipe_fingerprint: pkg_sha256_hex("foreign-binding-projection-v1".bytes()),
         policy_fingerprint: env_cache_policy_fingerprint(ctx.offline),
         platform: pkg_host_platform(),
     }
     request: IngestRequest{
-        name,
-        version,
+        name: name,
+        version: version,
         reference: foreign_reference,
         cache_identity: identity,
         references: [String]{},
-        outputs: [String: String]{"out": source},
+        outputs: [String:String]{"out": source},
         signature: "",
         provenance: "foreign-provider-v1 language={language.root()} provider={spec.provider.label()} reference={reference}",
         platform_artifact_kind: "",
@@ -71,7 +73,7 @@ provider_realize_foreign_one: fn(verification: &StoreVerification, roots: Hangar
     provenance: provider_foreign_provenance_path(project_root, language, name)
     provenance_text: "schema = foreign-binding-v1\nlanguage = {language.root()}\nname = {name}\nreference = {foreign_reference}\ndescriptor = {descriptor.stamp()}\nstore-id = {entry.id}\noutput-hash = {entry.envelope.output_hash}\n"
     provider_write_verified_file(provenance, provenance_text.bytes())
-    Ok(ForeignRealization{name, language, reference, provider_reference: foreign_reference, entry, binding, provenance})
+    Ok(ForeignRealization{name: name, language: language, reference: reference, provider_reference: foreign_reference, entry: entry, binding: binding, provenance: provenance})
 }
 
 // `<root>/.jet/bindings/<lang>/<name>.jet`.
@@ -135,12 +137,16 @@ provider_validate_library_name: fn(name: String) ProviderError! {
 
 provider_require_directory: fn(path: String, label: String) ProviderError! -[FS]> {
     info: files.stat(path) ?? return Err(ProviderError.ForeignProjection("{label} {path} is unavailable: {err}"))
-    if info.is_symlink || !info.is_dir -> return Err(ProviderError.ForeignProjection("{label} {path} is not a real directory"))
+    if info.is_symlink || !info.is_dir {
+        return Err(ProviderError.ForeignProjection("{label} {path} is not a real directory"))
+    }
 }
 
 provider_require_regular_file: fn(path: String, label: String) ProviderError! -[FS]> {
     info: files.stat(path) ?? return Err(ProviderError.ForeignProjection("{label} {path} is unavailable: {err}"))
-    if info.is_symlink || !info.is_file -> return Err(ProviderError.ForeignProjection("{label} {path} is not a regular file"))
+    if info.is_symlink || !info.is_file {
+        return Err(ProviderError.ForeignProjection("{label} {path} is not a regular file"))
+    }
 }
 
 // The binding's `// jet-ffi-descriptor=` line must equal the current
@@ -149,14 +155,20 @@ provider_require_descriptor_stamp: fn(path: String, expected: String) ProviderEr
     source: files.read(path) ?? return Err(ProviderError.ForeignProjection("could not read generated foreign binding {path}: {err}"))
     actual := String?{None}
     loop line in source.split("\n") {
-        if actual == None && line.starts_with("// jet-ffi-descriptor=") -> actual = Val(line.removeprefix("// jet-ffi-descriptor="))
+        if actual == None && line.starts_with("// jet-ffi-descriptor=") {
+            actual = Val(line.removeprefix("// jet-ffi-descriptor="))
+        }
     }
-    if actual != Val(expected) -> return Err(ProviderError.ForeignProjection("foreign binding {path} has a missing or stale descriptor stamp"))
+    if actual != Val(expected) {
+        return Err(ProviderError.ForeignProjection("foreign binding {path} has a missing or stale descriptor stamp"))
+    }
 }
 
 provider_copy_verified_file: fn(source: String, destination: String) ProviderError! -[FS, Env]> {
     bytes: files.read_bytes(source) ?? return Err(ProviderError.ForeignProjection("could not read verified binding {source}: {err}"))
-    if bytes.len() == 0 -> return Err(ProviderError.ForeignProjection("verified binding {source} is empty"))
+    if bytes.len() == 0 {
+        return Err(ProviderError.ForeignProjection("verified binding {source} is empty"))
+    }
     provider_write_verified_file(destination, bytes)
 }
 
@@ -164,15 +176,21 @@ provider_copy_verified_file: fn(source: String, destination: String) ProviderErr
 // and renamed over a destination that is absent or a regular file.
 provider_write_verified_file: fn(destination: String, bytes: [U8]) ProviderError! -[FS, Env]> {
     parent: files.dirname(destination)
-    if parent != "" -> files.create_dir_all(parent) ?? return Err(ProviderError.ForeignProjection("could not create binding directory {parent}: {err}"))
+    if parent != "" {
+        files.create_dir_all(parent) ?? return Err(ProviderError.ForeignProjection("could not create binding directory {parent}: {err}"))
+    }
     if files.stat(destination) == {
         .Ok(info) -> {
-            if info.is_symlink || !info.is_file -> return Err(ProviderError.ForeignProjection("binding destination {destination} is not a regular file"))
+            if info.is_symlink || !info.is_file {
+                return Err(ProviderError.ForeignProjection("binding destination {destination} is not a regular file"))
+            }
         }
         .Err(_) -> {}
     }
     file_name: files.basename(destination)
-    if file_name == "" -> return Err(ProviderError.ForeignProjection("binding destination {destination} has no valid file name"))
+    if file_name == "" {
+        return Err(ProviderError.ForeignProjection("binding destination {destination} has no valid file name"))
+    }
     digest: pkg_sha256_hex(bytes)
     temporary: files.join(parent, ".{file_name}.{sys.pid()}-{provider_prefix(digest, 12)}.tmp")
     writer: files.create(temporary, if_exists: .Refuse) ?? return Err(ProviderError.ForeignProjection("could not stage binding {temporary}: {err}"))

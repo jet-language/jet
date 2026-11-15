@@ -1,15 +1,18 @@
 // Pure explicit-slot ownership; the dynamic TLS slot accessor is the separately
 // gated post-E2 adapter.
 journey_hop_drop: fn(hop: I64) {
-    if (hop == I64{0}) -> return
+    if (hop == I64{0}) {
+        return
+    }
     jet_rt_string_drop(rt_text_word(wrapping(hop + HOP_FUNCTION)))
     jet_rt_string_drop(rt_text_word(wrapping(hop + HOP_FILE)))
     jet_rt_string_drop(rt_text_word(wrapping(hop + HOP_NOTE)))
     jet_rt_string_drop(rt_text_word(wrapping(hop + HOP_SOURCE)))
     jet_rt_free(hop, HOP_BYTES, I64{8})
 }
+
 journey_hop_clone: fn(hop: I64) -> I64 {
-    if (hop == I64{0}) -> return I64{0}
+    if (hop == I64{0}) { return I64{0} }
     result: jet_rt_alloc(HOP_BYTES, I64{8})
     rt_text_store(wrapping(result + HOP_FUNCTION), jet_rt_string_clone(rt_text_word(wrapping(hop + HOP_FUNCTION))))
     rt_text_store(wrapping(result + HOP_FILE), jet_rt_string_clone(rt_text_word(wrapping(hop + HOP_FILE))))
@@ -20,6 +23,7 @@ journey_hop_clone: fn(hop: I64) -> I64 {
     rt_text_store(wrapping(result + HOP_SOURCE), jet_rt_string_clone(rt_text_word(wrapping(hop + HOP_SOURCE))))
     result
 }
+
 journey_hop_new: fn(file: I64, line: I64, column: I64, function: I64, source: I64, note: I64) -> I64 {
     hop: jet_rt_alloc(HOP_BYTES, I64{8})
     rt_text_store(wrapping(hop + HOP_FUNCTION), jet_rt_string_clone(function))
@@ -31,11 +35,13 @@ journey_hop_new: fn(file: I64, line: I64, column: I64, function: I64, source: I6
     rt_text_store(wrapping(hop + HOP_SOURCE), if (source == I64{0}) -> jet_rt_string_builder_new() else -> jet_rt_string_clone(source))
     hop
 }
+
 #Export(c) jet_rt_native_journey_new: fn() -> I64 {
     value: jet_rt_alloc(JOURNEY_BYTES, I64{8})
     err_zero(value, JOURNEY_BYTES)
     value
 }
+
 journey_hops_clear: fn(value: I64) {
     count: rt_text_word(wrapping(value + JOURNEY_HOPS))
     data: rt_text_word(wrapping(wrapping(value + JOURNEY_HOPS) + I64{16}))
@@ -46,23 +52,31 @@ journey_hops_clear: fn(value: I64) {
     }
     rt_text_store(wrapping(value + JOURNEY_HOPS), I64{0})
 }
+
 #Export(c) jet_rt_native_journey_reset: fn(value: I64) {
     journey_hop_drop(rt_text_word(wrapping(value + JOURNEY_ORIGIN)))
     rt_text_store(wrapping(value + JOURNEY_ORIGIN), I64{0})
     journey_hops_clear(value)
 }
+
 #Export(c) jet_rt_native_journey_drop: fn(value: I64) {
-    if (value == I64{0}) -> return
+    if (value == I64{0}) {
+        return
+    }
     jet_rt_native_journey_reset(value)
     data: rt_text_word(wrapping(wrapping(value + JOURNEY_HOPS) + I64{16}))
-    if (data != I64{0}) -> jet_rt_free(data, rt_text_word(wrapping(wrapping(value + JOURNEY_HOPS) + I64{8})) * I64{8}, I64{8})
+    if (data != I64{0}) {
+        jet_rt_free(data, rt_text_word(wrapping(wrapping(value + JOURNEY_HOPS) + I64{8})) * I64{8}, I64{8})
+    }
     jet_rt_free(value, JOURNEY_BYTES, I64{8})
 }
+
 // Real Closure24 callback, checked by E2 named FunctionAddress before TLS use.
 #Export(c) jet_rt_journey_destructor: fn(_header: I64, value: I64) -> I64 {
     jet_rt_native_journey_drop(value)
     I64{0}
 }
+
 #Export(c) jet_rt_native_journey_clone: fn(value: I64) -> I64 {
     result: jet_rt_native_journey_new()
     rt_text_store(wrapping(result + JOURNEY_ORIGIN), journey_hop_clone(rt_text_word(wrapping(value + JOURNEY_ORIGIN))))
@@ -79,13 +93,16 @@ journey_hops_clear: fn(value: I64) {
     }
     result
 }
+
 journey_same_site: fn(hop: I64, file: I64, line: I64, function: I64) -> Bool {
     rt_text_word(wrapping(hop + HOP_LINE)) == (line.bit_and(I64{4294967295})) && err_text_eq(rt_text_word(wrapping(hop + HOP_FILE)), file) && err_text_eq(rt_text_word(wrapping(hop + HOP_FUNCTION)), function)
 }
+
 #Export(c) jet_rt_native_journey_origin: fn(value: I64, file: I64, line: I64, column: I64, function: I64, source: I64) {
     jet_rt_native_journey_reset(value)
     rt_text_store(wrapping(value + JOURNEY_ORIGIN), journey_hop_new(file, line, column, function, source, I64{0}))
 }
+
 #Export(c) jet_rt_native_journey_frame: fn(value: I64, file: I64, line: I64, column: I64, function: I64, source: I64, note: I64) {
     count: rt_text_word(wrapping(value + JOURNEY_HOPS))
     if (rt_text_word(wrapping(value + JOURNEY_ORIGIN)) == I64{0} && count == I64{0}) {
@@ -96,22 +113,26 @@ journey_same_site: fn(hop: I64, file: I64, line: I64, function: I64) -> Bool {
         last: rt_text_word(wrapping(rt_text_word(wrapping(wrapping(value + JOURNEY_HOPS) + I64{16})) + (count - I64{1}) * I64{8}))
         if journey_same_site(last, file, line, function) {
             rt_text_store(wrapping(last + HOP_COUNT), wrapping(rt_text_word(wrapping(last + HOP_COUNT)) + I64{1}).bit_and(I64{4294967295}))
-            return // Repeated site's note and column remain the first ones.
+            return  // Repeated site's note and column remain the first ones.
         }
     }
     row: err_rows_append(wrapping(value + JOURNEY_HOPS), I64{8})
     rt_text_store(row, journey_hop_new(file, line, column, function, source, note))
 }
+
 // TAKE the caller's explicit slot once; a second take yields null.
 #Export(c) jet_rt_native_journey_take: fn(slot: I64) -> I64 {
     value: rt_text_word(slot)
     rt_text_store(slot, I64{0})
     value
 }
+
 // TAKES carried; a carried origin replaces this slot's previously handled
 // journey, and later hops collapse only consecutive equal sites.
 #Export(c) jet_rt_native_journey_adopt: fn(value: I64, carried: I64) {
-    if (carried == I64{0}) -> return
+    if (carried == I64{0}) {
+        return
+    }
     origin: rt_text_word(wrapping(carried + JOURNEY_ORIGIN))
     if (origin != I64{0}) {
         jet_rt_native_journey_reset(value)
@@ -144,6 +165,7 @@ journey_same_site: fn(hop: I64, file: I64, line: I64, function: I64) -> Bool {
     rt_text_store(wrapping(carried + JOURNEY_HOPS), I64{0})
     jet_rt_native_journey_drop(carried)
 }
+
 // The generated route borrows the original error; context is retained in the
 // cloned Err88 independently of the execution journey.
 #Export(c) jet_rt_native_err_context_frame: fn(value: I64, journey: I64, file: I64, line: I64, column: I64, function: I64, source: I64, note: I64) -> I64 {

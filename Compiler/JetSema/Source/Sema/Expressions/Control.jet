@@ -159,8 +159,12 @@ sema_expression_panic_locals: fn(scopes: SemaScopeTable, span: Span) -> [TPanicL
         name: binding.symbol.name
         if name == "_" || name.starts_with("__") || seen.get(name) != None -> next
         seen[name] = true
-        if binding.symbol.kind != SymbolKind.Local && binding.symbol.kind != SymbolKind.Parameter -> next
-        ty: binding.symbol.ty ?? { next }
+        if binding.symbol.kind != SymbolKind.Local && binding.symbol.kind != SymbolKind.Parameter {
+            next
+        }
+        ty: binding.symbol.ty ?? {
+            next
+        }
         if ty != Type.Int && ty != Type.Float && ty != Type.Bool -> next
         names.push(name.copy())
         rows[name] = row
@@ -168,9 +172,13 @@ sema_expression_panic_locals: fn(scopes: SemaScopeTable, span: Span) -> [TPanicL
     names.sort()
     locals := [TPanicLocal]{}
     loop name in names {
-        row: rows.get(name) ?? { next }
+        row: rows.get(name) ?? {
+            next
+        }
         symbol: scopes.bindings[row].symbol
-        local_ty: symbol.ty ?? { next }
+        local_ty: symbol.ty ?? {
+            next
+        }
         locals.push(TPanicLocal{display_name: name, local: checked_symbol_local(name, symbol.span, symbol.id, local_ty)})
     }
     locals
@@ -274,9 +282,7 @@ sema_expression_contextual_result_call: fn(call: Call, expected: Type?, scopes: 
     }
     result_expected: sema_expr_unwrap_tag(expected ?? Type.Named{name: "Never"})
     if call.name == "Ok" && call.args.len() == 0 {
-        if result_expected == .Result(ok, _) && ok == (Type.Named{name: "Unit"}) {
-            return Val(true)
-        }
+        if result_expected == .Result(ok, _) && ok == (Type.Named{name: "Unit"}) -> return Val(true)
         return None
     }
     if call.args.len() != 1 || call.args[0].label != None -> return None
@@ -339,7 +345,9 @@ sema_expression_default_err_call: fn(value: Expr, span: Span, expected: Type, en
 // materializing a copy (the Rust reference's contextual Ok/Err normalization).
 // A field of a borrowed parameter has no storage to give up and keeps its copy.
 sema_expression_result_call_takes_field: fn(call: Call, state: &SemaOwnershipState, scopes: SemaScopeTable) -> Bool {
-    if call.args.len() != 1 || call.args[0].convention != AccessConvention.Move || !(call.args[0].expr == .Field(_, _, _, _)) -> return false
+    if call.args.len() != 1 || call.args[0].convention != AccessConvention.Move || !(call.args[0].expr == .Field(_, _, _, _)) {
+        return false
+    }
     root: sema_ownership_binding_for_expr(state, call.args[0].expr, scopes) ?? return true
     !sema_ownership_binding_is_borrowed_param(root)
 }
@@ -354,7 +362,9 @@ sema_expression_result_call_payload: fn(call: Call, state: &SemaOwnershipState, 
     argument: call.args[0]
     if argument.convention == AccessConvention.Move && argument.expr == .Ident(_, _, _) {
         if sema_ownership_binding_for_expr(state, argument.expr, scopes) == .Val(root) {
-            if !sema_ownership_binding_is_borrowed_param(root) -> return Expr.Place{value: argument.expr.copy(), access: PlaceAccess.Take, span: argument.span, id: AST_NODE_GENERATED}
+            if !sema_ownership_binding_is_borrowed_param(root) {
+                return Expr.Place{value: argument.expr.copy(), access: PlaceAccess.Take, span: argument.span, id: AST_NODE_GENERATED}
+            }
         }
     }
     argument.expr.copy()
@@ -363,7 +373,9 @@ sema_expression_result_call_payload: fn(call: Call, state: &SemaOwnershipState, 
 // `Ok(...)` / `Err(...)` where no fallible result is expected.
 sema_result_payload_misplaced: fn(success: Bool, span: Span) -> Diagnostic Never! {
     fix: "use it in a `T E!` return type, a `T E!` binding annotation, or a call that expects one"
-    if success -> return sema_error("E0404", span, "`Ok(...)` only fits where a fallible result is expected", "`Ok` builds the success side of a `T E!` result", fix)
+    if success {
+        return sema_error("E0404", span, "`Ok(...)` only fits where a fallible result is expected", "`Ok` builds the success side of a `T E!` result", fix)
+    }
     sema_error("E0404", span, "`Err(...)` only fits where a fallible result is expected", "`Err` builds the failure side of a `T E!` result", fix)
 }
 
@@ -447,7 +459,9 @@ sema_expression_try_union_conversion: fn(target: Type, source: Type, environment
             }
             resolved: sema_expr_expected_type(source, environment, program)
             found: loop member in members {
-                if type_identity_equal(member, source) || type_identity_equal(sema_expr_expected_type(member, environment, program), resolved) -> break member.copy()
+                if type_identity_equal(member, source) || type_identity_equal(sema_expr_expected_type(member, environment, program), resolved) {
+                    break member.copy()
+                }
             } ?? return None
             Val(TTryConvert.WidenUnion{enum_name: enum_name, tag: type_name(found)})
         }
@@ -528,7 +542,9 @@ sema_pattern_consumes_result_carrier: fn(pattern: Pattern) -> Bool Never! {
     if pattern == {
         .Ok(_, _, _, _) | .Err(_, _, _, _) -> true
         .Or(alternatives, _) -> loop alternative in alternatives {
-            if sema_pattern_consumes_result_carrier(alternative) -> break true
+            if sema_pattern_consumes_result_carrier(alternative) {
+                break true
+            }
         } ?? false
         .Variant(variant, bindings, _, _) -> bindings.len() == 1 && (variant == "Ok" || variant == "Err")
         .Present(_, _, _, _) | .Absent(_) | .Range(_, _, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> false
@@ -539,7 +555,9 @@ sema_pattern_consumes_result_carrier: fn(pattern: Pattern) -> Bool Never! {
 // or names an `Ok`/`Err` case that the carrier's success enum `success`
 // declares itself (`Reply: enum { Ok(Int), Err(String) }`).
 sema_pattern_tests_carrier: fn(pattern: Pattern, success: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
-    if success == .Val(enum_ty) -> return sema_pattern_names_success_case(pattern, enum_ty, environment, program)
+    if success == .Val(enum_ty) {
+        return sema_pattern_names_success_case(pattern, enum_ty, environment, program)
+    }
     sema_pattern_consumes_result_carrier(pattern)
 }
 
@@ -547,7 +565,9 @@ sema_pattern_names_success_case: fn(pattern: Pattern, success: Type, environment
     if pattern == {
         .Variant(variant, bindings, _, _) -> bindings.len() == 1 && (variant == "Ok" || variant == "Err") && sema_coverage_payload_type(success, variant, 0, environment, program) != None
         .Or(alternatives, _) -> loop alternative in alternatives {
-            if sema_pattern_names_success_case(alternative, success, environment, program) -> break true
+            if sema_pattern_names_success_case(alternative, success, environment, program) {
+                break true
+            }
         } ?? false
         .Ok(_, _, _, _) | .Err(_, _, _, _) | .Present(_, _, _, _) | .Absent(_) | .Range(_, _, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> false
     }
@@ -561,13 +581,19 @@ sema_pattern_names_success_case: fn(pattern: Pattern, success: Type, environment
 // and access marks pass the carrier root through to the call, as
 // sema_check_expression does, so a table's parenthesized header is that call.
 sema_expression_carrier_success_enum: fn(subject: Expr, carrier: TExpr?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Type? {
-    if subject == .Paren(inner, _, _) -> return sema_expression_carrier_success_enum(inner, carrier, environment, program, scopes)
-    if subject == .Place(inner, _, _, _) -> return sema_expression_carrier_success_enum(inner, carrier, environment, program, scopes)
+    if subject == .Paren(inner, _, _) {
+        return sema_expression_carrier_success_enum(inner, carrier, environment, program, scopes)
+    }
+    if subject == .Place(inner, _, _, _) {
+        return sema_expression_carrier_success_enum(inner, carrier, environment, program, scopes)
+    }
     if !sema_expression_propagating_call(subject, scopes) -> return None
     if carrier == .Val(checked) {
         if sema_expr_unwrap_tag(checked.ty) == .Result(ok, error) {
             if sema_failure_callee(Val(subject), environment, program, scopes) == .Val(callee) {
-                if !callee.inferable && sema_expr_unwrap_tag(error) != (Type.Named{name: "Never"}) -> return None
+                if !callee.inferable && sema_expr_unwrap_tag(error) != (Type.Named{name: "Never"}) {
+                    return None
+                }
             }
             success: sema_expr_unwrap_tag(ok)
             if success == .Named(_) || success == .Apply(_, _) -> return Val(success)
@@ -588,10 +614,14 @@ sema_expression_carrier_case_subject: fn(subject: Expr, carrier: &&TExpr?, envir
 // Result carrier, so its call root must not propagate, unless the pattern
 // names a case of the call's success enum.
 sema_check_pattern_subject: fn(subject: Expr, pattern: Pattern, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if !sema_pattern_consumes_result_carrier(pattern) -> return sema_check_expression(subject, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if !sema_pattern_consumes_result_carrier(pattern) {
+        return sema_check_expression(subject, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
     carrier: sema_check_expression_carrier(subject, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     success: sema_expression_carrier_success_enum(subject, carrier, environment, program, scopes)
-    if success == None || !sema_pattern_tests_carrier(pattern, success, environment, program) -> return carrier
+    if success == None || !sema_pattern_tests_carrier(pattern, success, environment, program) {
+        return carrier
+    }
     sema_expression_carrier_case_subject(subject, carrier, environment, program, scopes, context, diagnostics)
 }
 
@@ -609,13 +639,17 @@ sema_expression_call_expected: fn(value: TExpr, expected: Type?, environment: Se
     if context.failure_success_view && expected != None && !sema_expression_failure_carrier_position(expected, value.ty) {
         if sema_expr_unwrap_tag(value.ty) == .Result(success, _) {
             required := sema_expr_expected_type(expected, environment, program)
-            if sema_expr_unwrap_tag(required) == .Result(required_success, _) -> required = required_success
+            if sema_expr_unwrap_tag(required) == .Result(required_success, _) {
+                required = required_success
+            }
             offered: sema_expr_expected_type(success, environment, program)
             compatible: sema_expr_expected_assignable(required, offered, environment, program) ?? return None
             if !compatible {
                 // A `T` success fills a `T?` slot; the
                 // propagated payload is lifted by `sema_expression_auto_propagate`.
-                if sema_expr_optional_lift_type(required, offered, environment, program) == .Val(_) -> return Val(value)
+                if sema_expr_optional_lift_type(required, offered, environment, program) == .Val(_) {
+                    return Val(value)
+                }
                 diagnostics.push(sema_type_mismatch(required, offered, value.span))
                 return None
             }
@@ -630,7 +664,9 @@ sema_failure_conversion_name_part: fn(name: String) -> String Never! {
     plain := true
     loop byte in bytes {
         code: Int{byte}
-        if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)) -> plain = false
+        if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)) {
+            plain = false
+        }
     }
     if plain -> return name.copy()
     digits: "0123456789abcdef".bytes()
@@ -672,23 +708,31 @@ sema_failure_conversion_leaf: fn(ty: Type) -> String Never! {
 // parameters), which only the file declaring that type builds.
 sema_failure_declared_conversion: fn(source: Type, target: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> String? {
     head := String?{None}
-    if sema_expr_unwrap_tag(source) == .Apply(applied, _) -> head = Val(sema_error_conversion_leaf(applied))
+    if sema_expr_unwrap_tag(source) == .Apply(applied, _) {
+        head = Val(sema_error_conversion_leaf(applied))
+    }
     instance: head != None
     name: sema_failure_declared_conversion_name(head ?? sema_failure_conversion_leaf(source), sema_failure_conversion_leaf(target))
     index: sema_scope_resolve_index(scopes, name) ?? {
         if instance -> return None
-        if sema_failure_namespace_conversion(name, environment, program) == .Val(key) -> return Val(key)
+        if sema_failure_namespace_conversion(name, environment, program) == .Val(key) {
+            return Val(key)
+        }
         return sema_failure_dependency_conversion(name, source, target, environment, program)
     }
     if scopes.bindings[index].symbol.kind != SymbolKind.Function -> return None
-    if instance && !sema_failure_conversion_takes_instance(sema_scope_binding_symbol(environment, scopes, index).ty) -> return None
+    if instance && !sema_failure_conversion_takes_instance(sema_scope_binding_symbol(environment, scopes, index).ty) {
+        return None
+    }
     Val(scopes.bindings[index].key.copy())
 }
 
 // Whether a conversion routine's `self` is a generic instance (`Unsent<T>`).
 sema_failure_conversion_takes_instance: fn(routine: Type?) -> Bool Never! {
     if routine == .Val(function_type) {
-        if function_type == .Fn(params, _, _, _, _, _) -> return params.len() == 1 && params[0] == .Apply(_, _)
+        if function_type == .Fn(params, _, _, _, _, _) {
+            return params.len() == 1 && params[0] == .Apply(_, _)
+        }
     }
     false
 }
@@ -697,12 +741,16 @@ sema_failure_conversion_takes_instance: fn(routine: Type?) -> Bool Never! {
 // generated name no source spells, so the namespace never binds it into this file's
 // scope; the package is still one namespace, so its routine applies here.
 sema_failure_namespace_conversion: fn(name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
-    if !sema_registration_package_is_namespace(environment.package_identity) || module_is_core(environment.module_identity) -> return None
+    if !sema_registration_package_is_namespace(environment.package_identity) || module_is_core(environment.module_identity) {
+        return None
+    }
     if program.registration_graph == .Val(graph) {
         loop module_row in graph.modules {
             if module_row.package_identity != environment.package_identity -> next
             loop function in module_row.functions {
-                if function.symbol.name == name -> return Val(symbol_table_key(graph.symbols, function.symbol.id))
+                if function.symbol.name == name {
+                    return Val(symbol_table_key(graph.symbols, function.symbol.id))
+                }
             }
         }
     }
@@ -723,7 +771,9 @@ sema_failure_dependency_conversion: fn(name: String, source: Type, target: Type,
             loop module_row in graph.modules {
                 if module_row.package_identity != package -> next
                 loop function in module_row.functions {
-                    if function.symbol.name == name -> return Val(symbol_table_key(graph.symbols, function.symbol.id))
+                    if function.symbol.name == name {
+                        return Val(symbol_table_key(graph.symbols, function.symbol.id))
+                    }
                 }
             }
         }
@@ -739,19 +789,21 @@ SemaFailureProvenance: struct {
 
 sema_failure_definition_location: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, symbol: Symbol) -> String? {
     if program.registration_graph == .Val(graph) {
-    symbol_text: module_text(graph.module_table, symbol.module_identity)
-    loop module_row_index in 0..<graph.modules.len() {
-        if graph.modules[module_row_index].module_identity != symbol.module_identity && graph.modules[module_row_index].module_name != symbol_text -> next
-        if graph.modules[module_row_index].module_path == "" -> return None
-        line: sema_source_line_at(graph.modules[module_row_index].source_segments, symbol.span) ?? return None
-        loop segment_index in 0..<graph.modules[module_row_index].source_segments.len() {
-            if symbol.span.start >= graph.modules[module_row_index].source_segments[segment_index].generated.start && symbol.span.start < graph.modules[module_row_index].source_segments[segment_index].generated.end && line <= graph.modules[module_row_index].source_segments[segment_index].line_starts.len() {
-                column: symbol.span.start - graph.modules[module_row_index].source_segments[segment_index].generated.start - graph.modules[module_row_index].source_segments[segment_index].line_starts[line - 1] + 1
-                return Val("{sema_failure_definition_path(graph.modules[module_row_index].module_path, graph.modules[module_row_index].source_file)}:{line}:{column}")
+        symbol_text: module_text(graph.module_table, symbol.module_identity)
+        loop module_row_index in 0..<graph.modules.len() {
+            if graph.modules[module_row_index].module_identity != symbol.module_identity && graph.modules[module_row_index].module_name != symbol_text {
+                next
             }
+            if graph.modules[module_row_index].module_path == "" -> return None
+            line: sema_source_line_at(graph.modules[module_row_index].source_segments, symbol.span) ?? return None
+            loop segment_index in 0..<graph.modules[module_row_index].source_segments.len() {
+                if symbol.span.start >= graph.modules[module_row_index].source_segments[segment_index].generated.start && symbol.span.start < graph.modules[module_row_index].source_segments[segment_index].generated.end && line <= graph.modules[module_row_index].source_segments[segment_index].line_starts.len() {
+                    column: symbol.span.start - graph.modules[module_row_index].source_segments[segment_index].generated.start - graph.modules[module_row_index].source_segments[segment_index].line_starts[line - 1] + 1
+                    return Val("{sema_failure_definition_path(graph.modules[module_row_index].module_path, graph.modules[module_row_index].source_file)}:{line}:{column}")
+                }
+            }
+            return None
         }
-        return None
-    }
     }
     None
 }
@@ -777,7 +829,9 @@ sema_failure_call_provenance: fn(expr: Expr?, environment: SemaScopeEnvironment,
                 symbol: scopes.bindings[index].symbol
                 definition = sema_failure_definition_location(environment, program, symbol) ?? fallback
                 if sema_scope_resolve_declaration(environment, program, symbol.id) == .Val(item) {
-                    if item == .Func(func) -> contract = sema_failure_contract_source(func.return_type)
+                    if item == .Func(func) {
+                        contract = sema_failure_contract_source(func.return_type)
+                    }
                 }
             }
             return SemaFailureProvenance{callee: call.name, definition: definition, contract: contract}
@@ -813,7 +867,9 @@ sema_failure_callee: fn(expr: Expr?, environment: SemaScopeEnvironment, program:
         .MethodCall(receiver, method, _, _, _, _, _) -> {
             alias: if receiver == {
                 .Ident(name, _, _) -> name
-                .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> { return None }
+                .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {
+                    return None
+                }
             }
             imported: sema_call_core_import_target(environment, program, alias) ?? sema_call_source_import_target(environment, program, alias) ?? return None
             if imported.item != None -> return None
@@ -867,13 +923,17 @@ sema_failure_method_key: fn(graph: SemaRegistrationGraph, key: String) -> String
         if !key.starts_with("function:{module_identity}:") -> next
         loop owner in 0..<graph.modules[module_index].nominals.len() {
             loop row in 0..<graph.modules[module_index].nominals[owner].methods.len() {
-                if symbol_key_text(SymbolKind.Function, module_identity, graph.modules[module_index].nominals[owner].symbol.name, graph.modules[module_index].nominals[owner].methods[row].declaration.name) == key -> return Val(symbol_table_key(graph.symbols, graph.modules[module_index].nominals[owner].methods[row].symbol.id))
+                if symbol_key_text(SymbolKind.Function, module_identity, graph.modules[module_index].nominals[owner].symbol.name, graph.modules[module_index].nominals[owner].methods[row].declaration.name) == key {
+                    return Val(symbol_table_key(graph.symbols, graph.modules[module_index].nominals[owner].methods[row].symbol.id))
+                }
             }
         }
         loop owner in 0..<graph.modules[module_index].impls.len() {
             if graph.modules[module_index].impls[owner].trait_name != None -> next
             loop row in 0..<graph.modules[module_index].impls[owner].methods.len() {
-                if symbol_key_text(SymbolKind.Function, module_identity, graph.modules[module_index].impls[owner].declaration.type_name, graph.modules[module_index].impls[owner].methods[row].declaration.name) == key -> return Val(symbol_table_key(graph.symbols, graph.modules[module_index].impls[owner].methods[row].symbol.id))
+                if symbol_key_text(SymbolKind.Function, module_identity, graph.modules[module_index].impls[owner].declaration.type_name, graph.modules[module_index].impls[owner].methods[row].declaration.name) == key {
+                    return Val(symbol_table_key(graph.symbols, graph.modules[module_index].impls[owner].methods[row].symbol.id))
+                }
             }
         }
     }
@@ -887,7 +947,9 @@ sema_failure_method_key: fn(graph: SemaRegistrationGraph, key: String) -> String
 sema_failure_callee_inferable: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> Bool? {
     site: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Function(module_index, row) {
-        if program.registration_graph == .Val(graph) -> return Val(sema_failure_function_inferable(graph.modules[module_index].functions[row].declaration))
+        if program.registration_graph == .Val(graph) {
+            return Val(sema_failure_function_inferable(graph.modules[module_index].functions[row].declaration))
+        }
         return None
     }
     item: sema_scope_resolve_declaration(environment, program, id) ?? return None
@@ -914,7 +976,9 @@ sema_failure_source_declares_failure: fn(expr: Expr?, environment: SemaScopeEnvi
             if symbol.kind != SymbolKind.Function -> return true
             site: sema_scope_declaration_site(environment, program, symbol.id) ?? return true
             if site == .Function(module_index, row) {
-                if program.registration_graph == .Val(graph) -> return sema_failure_written_return_fails(graph.modules[module_index].functions[row].declaration.return_type)
+                if program.registration_graph == .Val(graph) {
+                    return sema_failure_written_return_fails(graph.modules[module_index].functions[row].declaration.return_type)
+                }
                 return true
             }
             item: sema_scope_resolve_declaration(environment, program, symbol.id) ?? return true
@@ -927,7 +991,9 @@ sema_failure_source_declares_failure: fn(expr: Expr?, environment: SemaScopeEnvi
 
 sema_failure_written_return_fails: fn(return_type: Type?) -> Bool Never! {
     written: return_type ?? return true
-    if sema_expr_unwrap_tag(written) == .Result(_, error) -> return sema_expr_unwrap_tag(error) != (Type.Named{name: "Never"})
+    if sema_expr_unwrap_tag(written) == .Result(_, error) {
+        return sema_expr_unwrap_tag(error) != (Type.Named{name: "Never"})
+    }
     false
 }
 
@@ -950,7 +1016,9 @@ sema_failure_union_record_propagation: fn(callee: SemaFailureCallee?, error: Typ
     if callee == .Val(found) {
         if found.inferable {
             loop edge in context.failure_union_edges {
-                if edge == found.key -> return
+                if edge == found.key {
+                    return
+                }
             }
             context.failure_union_edges.push(found.key)
             return
@@ -961,9 +1029,7 @@ sema_failure_union_record_propagation: fn(callee: SemaFailureCallee?, error: Typ
 
 // The detail prefix of a failure-domain diagnostic that the bundle failure
 // solve emits or discharges once every body is checked (#3708).
-sema_failure_obligation_mark: fn() -> String Never! {
-    "inferred-failure-obligation:"
-}
+sema_failure_obligation_mark: fn() -> String Never! { "inferred-failure-obligation:" }
 
 // The first detail line of a report the union solve replaces: a typed failure
 // that meets the default `Err` route of a body that solve projects onto a
@@ -971,9 +1037,7 @@ sema_failure_obligation_mark: fn() -> String Never! {
 // pass may land before that solve (sema_local_values_blocked), as it may
 // before the obligations are settled; the solve's half takes the line off a
 // report it leaves (sema_failure_union_settle_reports).
-sema_failure_union_pending_mark: fn() -> String Never! {
-    "inferred-failure-union:pending"
-}
+sema_failure_union_pending_mark: fn() -> String Never! { "inferred-failure-union:pending" }
 
 // #3708: the diagnostic just reported against an unannotated callee becomes
 // an obligation of the bundle failure solve. The call checks as the `T Never!`
@@ -1023,7 +1087,9 @@ sema_failure_callee_is_generator: fn(callee: SemaFailureCallee?, program: SemaPr
     if program.registration_graph == .Val(graph) {
         row: sema_registration_callable_row(graph, found.key) ?? return false
         if row == .Function(module_index, index) {
-            if graph.modules[module_index].functions[index].declaration.return_type == .Val(.Apply(name, args)) -> return name == "Stream" && args.len() == 1
+            if graph.modules[module_index].functions[index].declaration.return_type == .Val(.Apply(name, args)) {
+                return name == "Stream" && args.len() == 1
+            }
         }
     }
     false
@@ -1071,7 +1137,9 @@ sema_failure_unnamed_domain: fn(domain: Type) -> Bool Never! {
 }
 
 sema_failure_no_carrier: fn(error: Type, span: Span, implicit: Bool) -> Diagnostic {
-    if implicit -> return sema_error("E0403", span, "this fallible call only works inside a function that returns a fallible result", "ordinary fallible calls propagate their failure automatically to the caller", "declare `{type_name(error)}!` in the return type, or handle the result with `??`")
+    if implicit {
+        return sema_error("E0403", span, "this fallible call only works inside a function that returns a fallible result", "ordinary fallible calls propagate their failure automatically to the caller", "declare `{type_name(error)}!` in the return type, or handle the result with `??`")
+    }
     sema_error("E0403", span, "`?` only works inside a function that returns a fallible result", "propagation early-returns the failure to the caller", "declare the failure in the return type — `{type_name(error)}!` — or handle the result with `??`")
 }
 
@@ -1086,7 +1154,9 @@ sema_failure_no_default_conversion: fn(error: Type, span: Span, implicit: Bool) 
     listed: sema_failure_unnamed_domain(error)
     route: if listed -> "a conversion source is one named type, so `{name}` has no `impl Err.From(…)`" else -> "`{name}` can reach `Err` only through `impl Err.From({written})`"
     conversion: if listed -> "" else -> ", add `impl Err.From({written}) {{ … }}`"
-    if implicit -> return sema_error("E2402", span, "this implicit fallible call can't convert `{name}` into `Err` — no declared conversion exists", "ordinary fallible calls propagate automatically; {route}", "handle this call locally with `??`{conversion}, or change the return type")
+    if implicit {
+        return sema_error("E2402", span, "this implicit fallible call can't convert `{name}` into `Err` — no declared conversion exists", "ordinary fallible calls propagate automatically; {route}", "handle this call locally with `??`{conversion}, or change the return type")
+    }
     fix: if listed -> "handle the result locally with `??`, or change the return type" else -> "add `impl Err.From({written}) {{ … }}` before this function, or change the return type"
     sema_error("E2402", span, "`?` can't convert `{name}` into `Err` — no declared conversion exists", "`?` uses the declared conversion rail; {route}", fix)
 }
@@ -1098,7 +1168,9 @@ sema_failure_no_default_conversion: fn(error: Type, span: Span, implicit: Bool) 
 sema_failure_parent_error: fn(operand_error: Type, scopes: SemaScopeTable, context: &SemaCheckContext) -> Type? {
     carrier := scopes.failure_carrier
     if carrier == None && context.failure_inference {
-        if context.inferred_failure_carrier == None -> context.inferred_failure_carrier = Val(TFailureCarrier.Result{success: Type.Named{name: "Unit"}, error: operand_error})
+        if context.inferred_failure_carrier == None {
+            context.inferred_failure_carrier = Val(TFailureCarrier.Result{success: Type.Named{name: "Unit"}, error: operand_error})
+        }
         carrier = context.inferred_failure_carrier
     }
     parent: carrier ?? return None
@@ -1123,7 +1195,9 @@ sema_expression_propagation_conversion: fn(operand_ty: Type, source_expr: Expr?,
             // precedes that projection; a spawned task body records it so a
             // recheck keeps the task element it was first checked with.
             if sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) {
-                if context.taskgroups.in_spawn && sema_failure_callee_inferred_never(sema_failure_callee_of(source_expr, checked_callee, environment, program, scopes), program) -> context.task_body_propagates = true
+                if context.taskgroups.in_spawn && sema_failure_callee_inferred_never(sema_failure_callee_of(source_expr, checked_callee, environment, program, scopes), program) {
+                    context.task_body_propagates = true
+                }
                 return Val(TTryConvert.Never)
             }
             callee: sema_failure_callee_of(source_expr, checked_callee, environment, program, scopes)
@@ -1131,11 +1205,15 @@ sema_expression_propagation_conversion: fn(operand_ty: Type, source_expr: Expr?,
             // A failure that can leave a deep check or `defer` body is
             // reported there; an unannotated callee's report waits for the
             // bundle failure solve, which drops it when the callee can't fail.
-            if sema_body_propagates(context, scopes, span, diagnostics) -> return sema_failure_defer_obligation(callee, diagnostics)
+            if sema_body_propagates(context, scopes, span, diagnostics) {
+                return sema_failure_defer_obligation(callee, diagnostics)
+            }
             sema_failure_record_edge(callee, context)
             // A call E2702 already reports can only fail: its implicit
             // propagation is not a second error (sema_crypto_misused_call).
-            if implicit && sema_crypto_misused_call(source_expr, diagnostics) -> return Val(TTryConvert.NoConversion)
+            if implicit && sema_crypto_misused_call(source_expr, diagnostics) {
+                return Val(TTryConvert.NoConversion)
+            }
             // A callback whose expected return row is a plain value has no
             // failure route of its own: an unannotated callee's failure is an
             // obligation the bundle failure solve settles, as in a named
@@ -1150,7 +1228,9 @@ sema_expression_propagation_conversion: fn(operand_ty: Type, source_expr: Expr?,
             if context.failure_inference && context.inferred_failure_carrier == None && scopes.failure_carrier == None && callee == .Val(found) && found.inferable {
                 deferred_open: !context.callback_return_closed && !sema_failure_solved(program)
                 if context.callback_return_closed || deferred_open {
-                    if deferred_open -> sema_failure_union_record_propagation(callee, error, context)
+                    if deferred_open {
+                        sema_failure_union_record_propagation(callee, error, context)
+                    }
                     diagnostics.push(sema_failure_no_carrier(error, span, implicit))
                     return sema_failure_defer_obligation(callee, diagnostics)
                 }
@@ -1161,9 +1241,13 @@ sema_expression_propagation_conversion: fn(operand_ty: Type, source_expr: Expr?,
             }
             // A callback with no return row takes the carrier of its first
             // propagated call whose callee declares a failure route.
-            if context.callback_return_open && context.callback_return_row == None && scopes.failure_carrier == None && sema_failure_source_declares_failure(source_expr, environment, program, scopes) -> context.callback_return_row = Val(sema_expr_unwrap_tag(operand_ty))
+            if context.callback_return_open && context.callback_return_row == None && scopes.failure_carrier == None && sema_failure_source_declares_failure(source_expr, environment, program, scopes) {
+                context.callback_return_row = Val(sema_expr_unwrap_tag(operand_ty))
+            }
             normalized_target: sema_expr_unwrap_tag(target)
-            if normalized_target == (Type.Named{name: "Err"}) -> sema_failure_union_record_propagation(callee, error, context)
+            if normalized_target == (Type.Named{name: "Err"}) {
+                sema_failure_union_record_propagation(callee, error, context)
+            }
             // `Never!` proves no failure route remains, even when a
             // conversion happens to be declared.
             if normalized_target == (Type.Named{name: "Never"}) {
@@ -1174,14 +1258,26 @@ sema_expression_propagation_conversion: fn(operand_ty: Type, source_expr: Expr?,
             // callee may publish its failure by the declared spelling
             // (`NetError`) while the caller's contract carries the canonical
             // identity; both name one nominal type in this module.
-            if type_identity_equal(error, target) || type_identity_equal(sema_expr_expected_type(error, environment, program), sema_expr_expected_type(target, environment, program)) -> return sema_expression_propagation_taken(context, TTryConvert.NoConversion)
-            if normalized_target == (Type.Named{name: "Err"}) && sema_expr_unwrap_tag(error) == Type.String -> return sema_expression_propagation_taken(context, TTryConvert.DefaultErr)
+            if type_identity_equal(error, target) || type_identity_equal(sema_expr_expected_type(error, environment, program), sema_expr_expected_type(target, environment, program)) {
+                return sema_expression_propagation_taken(context, TTryConvert.NoConversion)
+            }
+            if normalized_target == (Type.Named{name: "Err"}) && sema_expr_unwrap_tag(error) == Type.String {
+                return sema_expression_propagation_taken(context, TTryConvert.DefaultErr)
+            }
             widened: sema_expression_try_union_conversion(normalized_target, error, environment, program)
-            if widened == .Val(widening) -> return sema_expression_propagation_taken(context, widening)
-            if sema_failure_declared_conversion(error, target, environment, program, scopes) == .Val(key) -> return sema_expression_propagation_taken(context, TTryConvert.Typed{fn_name: key, source: error, target: target})
-            if sema_prelude_error_conversion_key(error, target, environment, program) == .Val(key) -> return sema_expression_propagation_taken(context, TTryConvert.Typed{fn_name: key, source: error, target: target})
+            if widened == .Val(widening) {
+                return sema_expression_propagation_taken(context, widening)
+            }
+            if sema_failure_declared_conversion(error, target, environment, program, scopes) == .Val(key) {
+                return sema_expression_propagation_taken(context, TTryConvert.Typed{fn_name: key, source: error, target: target})
+            }
+            if sema_prelude_error_conversion_key(error, target, environment, program) == .Val(key) {
+                return sema_expression_propagation_taken(context, TTryConvert.Typed{fn_name: key, source: error, target: target})
+            }
             opened: sema_failure_open_union_conversion(normalized_target, error, environment, program, scopes)
-            if opened == .Val(conversion) -> return sema_expression_propagation_taken(context, conversion)
+            if opened == .Val(conversion) {
+                return sema_expression_propagation_taken(context, conversion)
+            }
             if normalized_target == (Type.Named{name: "Err"}) {
                 diagnostics.push(sema_failure_no_default_conversion(error, span, implicit))
                 // #6281 c176: the union solve projects an inferable body that
@@ -1201,7 +1297,9 @@ sema_expression_propagation_conversion: fn(operand_ty: Type, source_expr: Expr?,
             }
             // D9: a `_` hole domain already has its one E0119 at the
             // signature; keep the success value typed and report nothing more.
-            if normalized_target == (Type.Named{name: "_"}) -> return sema_expression_propagation_taken(context, TTryConvert.NoConversion)
+            if normalized_target == (Type.Named{name: "_"}) {
+                return sema_expression_propagation_taken(context, TTryConvert.NoConversion)
+            }
             diagnostics.push(sema_failure_domain_mismatch(source_expr, span, error, target, environment, program, scopes, context))
             return sema_failure_defer_obligation(callee, diagnostics)
         }
@@ -1209,7 +1307,9 @@ sema_expression_propagation_conversion: fn(operand_ty: Type, source_expr: Expr?,
             if sema_body_propagates(context, scopes, span, diagnostics) -> return None
             if scopes.failure_carrier == .Val(parent) {
                 if parent == .Optional(target_value) {
-                    if type_identity_equal(value, target_value) -> return sema_expression_propagation_taken(context, TTryConvert.NoConversion)
+                    if type_identity_equal(value, target_value) {
+                        return sema_expression_propagation_taken(context, TTryConvert.NoConversion)
+                    }
                 }
             }
             diagnostics.push(sema_error("E0403", span, "`?` on `{type_name(operand_ty)}` needs a function that returns the same optional type", "propagation passes `None` back to the caller", "declare `{type_name(operand_ty)}` as the optional return type, or handle it with `??`"))
@@ -1292,7 +1392,9 @@ sema_expression_try_declared_conversion: fn(inner: TExpr, conversion: TryConvert
                 }
             }
             found: loop member in members {
-                if type_identity_equal(member, source) -> break true
+                if type_identity_equal(member, source) {
+                    break true
+                }
             } ?? false
             if !found {
                 diagnostics.push(sema_error("E2402", span, "the operand error is not a member of the enclosing error union", "union widening is valid only for a declared source member", "add the source error type to the return union"))
@@ -1320,7 +1422,9 @@ sema_expression_auto_propagate: fn(expr: Expr, value: &&TExpr, expected: Type?, 
     span: expr_span(expr)
     method_callee: sema_failure_method_callee(value, program, context)
     conversion: sema_expression_propagation_conversion(value.ty, Val(expr), method_callee, span, true, environment, program, scopes, context, diagnostics) ?? return None
-    if scopes.failures_explicit -> sema_failure_marks_require(expr, conversion, sema_failure_callee_of(Val(expr), method_callee, environment, program, scopes), environment, program, context, diagnostics)
+    if scopes.failures_explicit {
+        sema_failure_marks_require(expr, conversion, sema_failure_callee_of(Val(expr), method_callee, environment, program, scopes), environment, program, context, diagnostics)
+    }
     payload: sema_expression_carrier_payload(value.ty) ?? return None
     location: sema_expression_panic_location(environment, program, scopes, span)
     propagated: sema_tree_node(payload, TExprKind.TryWithContext{inner: value.move(), note: None, convert: conversion, file: location.file, line: location.line, function: location.function}, span)
@@ -1350,14 +1454,18 @@ sema_expression_auto_propagates: fn(ty: Type, expected: Type?, context: SemaChec
 // error since `root_mark` as its cause, so fixing that error is seen to
 // clear it too.
 sema_expression_rejected_call_propagation: fn(result_type: Type, source: Expr?, root_mark: Int, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
-    if !context.failure_success_view || !sema_expression_auto_propagates(result_type, expected, context) -> return
+    if !context.failure_success_view || !sema_expression_auto_propagates(result_type, expected, context) {
+        return
+    }
     mark: diagnostics.len()
     _ := sema_expression_propagation_conversion(result_type, source, None, span, true, environment, program, scopes, context, diagnostics)
     sema_link_reports_to_first_error(diagnostics, root_mark, mark)
 }
 
 sema_expression_try: fn(value: Expr, span: Span, conversion: TryConvert, context_expr: Expr?, try_id: Int, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, check_context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if sema_failure_marks_written(value, conversion, context_expr, try_id) -> return sema_failure_marks_check_written(value, span, expected, environment, program, scopes, state, tail_store, check_context, diagnostics)
+    if sema_failure_marks_written(value, conversion, context_expr, try_id) {
+        return sema_failure_marks_check_written(value, span, expected, environment, program, scopes, state, tail_store, check_context, diagnostics)
+    }
     // Explicit `?` owns its operand's carrier: the call root must not
     // propagate a second time before this check sees it.
     inner: sema_check_expression_carrier(value, None, environment, program, scopes, state, tail_store, check_context, diagnostics) ?? return None
@@ -1505,7 +1613,9 @@ sema_control_value_loop_attach_fallback: fn(value: Expr, fallback: OrFallback, s
             if callee == {
                 .Lambda(lambda, _) -> {
                     updated_lambda := lambda
-                    if !updated_lambda.meta.result_loop || !updated_lambda.meta.requires_exhaustion_route -> return None
+                    if !updated_lambda.meta.result_loop || !updated_lambda.meta.requires_exhaustion_route {
+                        return None
+                    }
                     route: sema_control_value_loop_fallback_stmt(fallback, sema_control_value_loop_root_label(updated_lambda), scopes, diagnostics) ?? return None
                     if updated_lambda.body == {
                         .Block(statements) -> {
@@ -1586,7 +1696,9 @@ sema_expression_or_fallback: fn(value: Expr, fallback: OrFallback, span: Span, e
         // error stops the build before lowering. One that failed without an
         // error leaves no tree and records why.
         if !sema_has_error_since(diagnostics, route_diagnostics) {
-            if context.incomplete_reasons.len() == route_reasons -> sema_check_unsupported(context, "the `??` fallback at offset {span.start} checked to nothing without a report")
+            if context.incomplete_reasons.len() == route_reasons {
+                sema_check_unsupported(context, "the `??` fallback at offset {span.start} checked to nothing without a report")
+            }
             return None
         }
         if payload == (Type.Named{name: "Never"}) -> return None
@@ -1691,7 +1803,9 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
     fallback_reaches_merge := false
     context.fallback_err_denial = sema_fallback_err_denial_for(subject_ty)
     // Ok(None) shares the mixed carrier's fallback but carries no report.
-    if subject_ty == .Result(ok, _) && ok == .Option(_) -> context.fallback_err_denial = Val("E0408")
+    if subject_ty == .Result(ok, _) && ok == .Option(_) {
+        context.fallback_err_denial = Val("E0408")
+    }
     if fallback == {
         .Value(other) -> {
             fallback_expected: if payload == (Type.Named{name: "Never"}) -> None else -> Val(payload)
@@ -1701,12 +1815,16 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
             checked: sema_check_expression(other, fallback_expected, environment, program, scopes, fallback_state, tail_store, context, diagnostics) ?? {
                 if fallback_expected != None && sema_value_mismatch_index(diagnostics, fallback_start, expr_span(other)) == .Val(mismatch_index) {
                     probe_diagnostics := [Diagnostic]{}
-                    if sema_probe_expression(other, None, environment, program, scopes, fallback_state, tail_store, context, probe_diagnostics) == .Val(offered) -> diagnostics[mismatch_index] = sema_or_fallback_mismatch(payload, offered.ty, expr_span(other))
+                    if sema_probe_expression(other, None, environment, program, scopes, fallback_state, tail_store, context, probe_diagnostics) == .Val(offered) {
+                        diagnostics[mismatch_index] = sema_or_fallback_mismatch(payload, offered.ty, expr_span(other))
+                    }
                 }
                 return None
             }
             fallback_fits := true
-            if payload != (Type.Named{name: "Never"}) && checked.ty != (Type.Named{name: "Never"}) -> fallback_fits = sema_expr_expected_assignable(payload, checked.ty, environment, program) ?? return None
+            if payload != (Type.Named{name: "Never"}) && checked.ty != (Type.Named{name: "Never"}) {
+                fallback_fits = sema_expr_expected_assignable(payload, checked.ty, environment, program) ?? return None
+            }
             if {
                 payload == (Type.Named{name: "Never"}) -> fallback_payload = checked.ty
                 checked.ty != (Type.Named{name: "Never"}) && !fallback_fits -> {
@@ -1732,7 +1850,11 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
                     last_span = sema_compiler_index_stmt_span(statement)
                 }
                 if !last_exits {
-                    if body.len() == 0 -> diagnostics.push(sema_error("E0003", last_span, "a `??` fallback block needs a final value or exit", "a fallback block runs its statements and then produces one value or leaves control", "add a final value or exit, such as `{{ log(err); default_value }}` or `{{ log(err); return }}`")) else -> diagnostics.push(sema_error("E0114", last_span, "this fallback ends with a statement instead of a value", "a value-expected fallback block must end with one unadorned expression; statements yield unit", "put one unadorned expression last, or use `return ...` for an early exit"))
+                    if body.len() == 0 {
+                        diagnostics.push(sema_error("E0003", last_span, "a `??` fallback block needs a final value or exit", "a fallback block runs its statements and then produces one value or leaves control", "add a final value or exit, such as `{{ log(err); default_value }}` or `{{ log(err); return }}`"))
+                    } else {
+                        diagnostics.push(sema_error("E0114", last_span, "this fallback ends with a statement instead of a value", "a value-expected fallback block must end with one unadorned expression; statements yield unit", "put one unadorned expression last, or use `return ...` for an early exit"))
+                    }
                     return None
                 }
             }
@@ -1758,7 +1880,9 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
                     sema_scope_leave(scopes, fallback_state)
                     return None
                 }
-                if payload == (Type.Named{name: "Never"}) -> fallback_payload = if tail_value == .Val(value) -> value.ty else -> Type.Named{name: "Never"}
+                if payload == (Type.Named{name: "Never"}) {
+                    fallback_payload = if tail_value == .Val(value) -> value.ty else -> Type.Named{name: "Never"}
+                }
             }
             sema_single_use_leave_scope(scopes, fallback_state, diagnostics)
             sema_scope_rollback(scopes, block_mark)
@@ -1768,7 +1892,9 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
                 }
                 else -> {
                     block_values := checked_block.value
-                    if tail_value != None -> block_values.push(TStmt.ExprStmt{value: tail_value ?? sema_node(context, fallback_payload, NodeKind.Unit, block_span), span: expr_span(tail ?? Expr.Unit{span: block_span, id: AST_NODE_GENERATED})})
+                    if tail_value != None {
+                        block_values.push(TStmt.ExprStmt{value: tail_value ?? sema_node(context, fallback_payload, NodeKind.Unit, block_span), span: expr_span(tail ?? Expr.Unit{span: block_span, id: AST_NODE_GENERATED})})
+                    }
                     fallback_expr: sema_tree_node(fallback_payload, TExprKind.InlineBlock{body: block_values}, block_span)
                     fallback_tree = Val(TOrFallback.Value{value: fallback_expr})
                 }
@@ -1796,8 +1922,12 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
                         return None
                     }
                     checked_return: sema_stmt_check_return_value(returned_expr, return_type, environment, program, scopes, fallback_state, tail_store, context, diagnostics) ?? return None
-                    if !sema_stmt_record_return_views(returned_expr, checked_return.ty, scopes, fallback_state, context, diagnostics) -> return None
-                    if !sema_stmt_move_direct(returned_expr, fallback_state, scopes, "`or return`", diagnostics) -> return None
+                    if !sema_stmt_record_return_views(returned_expr, checked_return.ty, scopes, fallback_state, context, diagnostics) {
+                        return None
+                    }
+                    if !sema_stmt_move_direct(returned_expr, fallback_state, scopes, "`or return`", diagnostics) {
+                        return None
+                    }
                     fallback_tree = Val(TOrFallback.Return{value: Val(checked_return)})
                 }
             }
@@ -1825,7 +1955,9 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
                 diagnostics.push(sema_error("E0115", route_span, "`next` only works inside a loop", "`break` and `next` steer the nearest `loop` loop", "move this inside a loop, or remove it"))
                 return None
             }
-            if sema_loop_value_resolve_frame(context, None) == .Val(frame_index) -> sema_ownership_check_loop_move_backedge(fallback_state, context.loop_value_frames[frame_index], diagnostics)
+            if sema_loop_value_resolve_frame(context, None) == .Val(frame_index) {
+                sema_ownership_check_loop_move_backedge(fallback_state, context.loop_value_frames[frame_index], diagnostics)
+            }
             fallback_tree = Val(TOrFallback.Continue)
         }
         .BreakLabel(label, route_span) -> {
@@ -1840,7 +1972,9 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
                 diagnostics.push(sema_error("E0405", route_span, "the `?? next` label is not an enclosing loop", "the fallback route must name an active loop label", "use an enclosing loop label"))
                 return None
             }
-            if sema_loop_value_resolve_frame(context, Val(label)) == .Val(frame_index) -> sema_ownership_check_loop_move_backedge(fallback_state, context.loop_value_frames[frame_index], diagnostics)
+            if sema_loop_value_resolve_frame(context, Val(label)) == .Val(frame_index) {
+                sema_ownership_check_loop_move_backedge(fallback_state, context.loop_value_frames[frame_index], diagnostics)
+            }
             fallback_tree = Val(TOrFallback.ContinueLabel{label: label})
         }
     }
@@ -1991,9 +2125,7 @@ sema_expression_if_bind_subject: fn(subject: Expr, condition: Expr, else_value: 
     // local has a unique name and declares normally.
     if sema_expression_if_subject_is_table_it(subject) {
         sema_scope_push_binding(scopes, SemaScopeBinding{frame: scopes.current, symbol: symbol, key: key.copy(), mutable: window, access: access, integer_bounds: bounds, string_view: false, compiler_builtin: false})
-    } else {
-        _ := sema_scope_declare_local(scopes, symbol, key, window, access, bounds, false)
-    }
+    } else { _ := sema_scope_declare_local(scopes, symbol, key, window, access, bounds, false) }
     if in_place -> sema_scope_mark_place_alias(scopes, name)
     sema_ownership_declare_binding(state, symbol, key, false)
     // The arms' payload sources are rooted at this local; the subject it
@@ -2075,7 +2207,9 @@ sema_expression_window_source: fn(subject: Expr, scopes: SemaScopeTable) -> Expr
         // copy: `value` is a payload of read parameter `subject`, which keeps the original; the Val carrier owns this one
         .Place(value, access, _, _) -> if access == PlaceAccess.Write -> Val(value.copy()) else -> None
         .Ident(name, _, node) -> {
-            if !name.starts_with("__jet_switch_subject_") && !(name == "it" && node == AST_NODE_GENERATED) -> return None
+            if !name.starts_with("__jet_switch_subject_") && !(name == "it" && node == AST_NODE_GENERATED) {
+                return None
+            }
             index: sema_scope_resolve_index(scopes, name) ?? return None
             if scopes.bindings[index].access == AccessConvention.Write -> Val(subject) else -> None
         }
@@ -2101,9 +2235,7 @@ sema_expression_subject_moved: fn(subject: Expr) -> Bool Never! {
 sema_expression_window_names: fn(pattern: Pattern, names: &[String]) {
     if pattern == {
         .Present(binding, _, inner, _) | .Ok(binding, _, inner, _) | .Err(binding, _, inner, _) -> {
-            if inner == .Val(nested) {
-                sema_expression_window_names(nested, names)
-            } else {
+            if inner == .Val(nested) -> sema_expression_window_names(nested, names) else {
                 names.push(binding.copy())
             }
         }
@@ -2122,8 +2254,8 @@ sema_expression_window_names: fn(pattern: Pattern, names: &[String]) {
 
 sema_expression_window_slot_names: fn(slot: PatSlot, names: &[String]) {
     if slot == {
-        .Bind(name, _) -> names.push(name.copy())
-        .Nested(nested) -> sema_expression_window_names(nested, names)
+        .Bind(name, _) -> { names.push(name.copy()) }
+        .Nested(nested) -> { sema_expression_window_names(nested, names) }
         .Named(_, _, inner) -> sema_expression_window_slot_names(inner, names)
         .Wildcard | .Range(_, _) | .Rest(_) | .Value(_) -> {}
     }
@@ -2139,7 +2271,9 @@ sema_expression_pattern_binding_sources: fn(shape: TPatternShape, subject_ty: Ty
             loop (index, slot) in slots {
                 field := "{index}"
                 if payload.payload == .Val(named_payload) {
-                    if named_payload == .Named(fields) && index < fields.len() -> field = fields[index].name
+                    if named_payload == .Named(fields) && index < fields.len() {
+                        field = fields[index].name
+                    }
                 }
                 projected: Expr.Field{base: variant_source, member: field, span: span, id: AST_NODE_GENERATED}
                 ty: if index < payload.types.len() -> payload.types[index] else -> subject_ty
@@ -2154,12 +2288,16 @@ sema_expression_pattern_binding_sources: fn(shape: TPatternShape, subject_ty: Ty
                     .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> subject_ty
                 }
                 sema_expression_pattern_binding_sources(nested.shape, ty, source, name, environment, program, sources, diagnostics)
-            } else if binding == name -> sources.push(source.copy())
+            } else if binding == name { sources.push(source.copy()) }
         }
         .Struct(fields, _) -> {
             loop field in fields {
                 if field == {
-                    .Bind(member, local, span) -> if local == name -> sources.push(Expr.Field{base: source, member: member, span: span, id: AST_NODE_GENERATED})
+                    .Bind(member, local, span) -> {
+                        if local == name {
+                            sources.push(Expr.Field{base: source, member: member, span: span, id: AST_NODE_GENERATED})
+                        }
+                    }
                     .Nested(member, nested, span) -> {
                         projected: Expr.Field{base: source, member: member, span: span, id: AST_NODE_GENERATED}
                         if program.registration_graph == .Val(graph) {
@@ -2169,7 +2307,9 @@ sema_expression_pattern_binding_sources: fn(shape: TPatternShape, subject_ty: Ty
                             actuals: sema_pattern_subject_args(subject_ty)
                             ty := subject_ty
                             loop registered in nominal.fields {
-                                if registered.symbol.name == member -> ty = sema_inference_substitute_type(registered.ty, names, actuals)
+                                if registered.symbol.name == member {
+                                    ty = sema_inference_substitute_type(registered.ty, names, actuals)
+                                }
                             }
                             sema_expression_pattern_binding_sources(nested.shape, ty, projected, name, environment, program, sources, diagnostics)
                         } else {
@@ -2180,7 +2320,11 @@ sema_expression_pattern_binding_sources: fn(shape: TPatternShape, subject_ty: Ty
                 }
             }
         }
-        .Or(alternatives, _) -> loop alternative in alternatives -> sema_expression_pattern_binding_sources(alternative, subject_ty, source, name, environment, program, sources, diagnostics)
+        .Or(alternatives, _) -> {
+            loop alternative in alternatives {
+                sema_expression_pattern_binding_sources(alternative, subject_ty, source, name, environment, program, sources, diagnostics)
+            }
+        }
         // List/map payload relations conservatively view the entire subject,
         // matching their existing return-provenance convention.
         .List(_, _, _) | .Map(_, _, _) -> sources.push(source.copy())
@@ -2190,8 +2334,12 @@ sema_expression_pattern_binding_sources: fn(shape: TPatternShape, subject_ty: Ty
 
 sema_expression_pattern_slot_sources: fn(slot: TPatternBinding, ty: Type, source: Expr, name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, sources: &[Expr], diagnostics: &[Diagnostic]) {
     if slot == {
-        .Bind(binding, _) -> if binding == name -> sources.push(source.copy())
-        .Nested(nested) -> sema_expression_pattern_binding_sources(nested.shape, ty, source, name, environment, program, sources, diagnostics)
+        .Bind(binding, _) -> {
+            if binding == name -> sources.push(source.copy())
+        }
+        .Nested(nested) -> {
+            sema_expression_pattern_binding_sources(nested.shape, ty, source, name, environment, program, sources, diagnostics)
+        }
         .Wildcard | .Range(_, _) | .Value(_) -> {}
     }
 }
@@ -2202,15 +2350,21 @@ sema_expression_pattern_slot_sources: fn(slot: TPatternBinding, ty: Type, source
 // subject, however many arms bind such a payload.
 sema_expression_reject_read_write_view_payload: fn(state: &SemaOwnershipState, subject: Expr, subject_ty: Type, payload_ty: Type, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
     if sema_pattern_unwrap_tags(payload_ty) == .Apply(view_name, _) {
-        if view_name != "ViewMut" -> return
+        if view_name != "ViewMut" {
+            return
+        }
     } else {
         return
     }
     root: sema_ownership_binding_for_expr(state, subject, scopes) ?? return
-    if root.symbol.kind != SymbolKind.Parameter || root.access != AccessConvention.Read -> return
+    if root.symbol.kind != SymbolKind.Parameter || root.access != AccessConvention.Read {
+        return
+    }
     span: expr_span(subject)
     loop diagnostic in diagnostics {
-        if diagnostic.code == "E0120" && diagnostic.span == .Val(reported) && sema_ownership_span_same(reported, span) -> return
+        if diagnostic.code == "E0120" && diagnostic.span == .Val(reported) && sema_ownership_span_same(reported, span) {
+            return
+        }
     }
     name: root.symbol.name
     shown: type_name(subject_ty)
@@ -2251,7 +2405,9 @@ sema_expression_check_pattern_condition: fn(subject: Expr, pattern: Pattern, spa
             symbol: Symbol{id: id, kind: SymbolKind.Local, name: fact.name, module_identity: environment.module_identity, owner: Val(owner), span: fact.span, ty: Val(fact.ty), visibility: 0}
             sources := [Expr]{}
             sema_expression_pattern_binding_sources(checked.pattern.shape, checked_subject.ty, source ?? subject, fact.name, environment, program, sources, diagnostics)
-            if !window && !sema_expression_subject_moved(subject) -> sema_expression_reject_read_write_view_payload(state, subject, checked_subject.ty, fact.ty, scopes, diagnostics)
+            if !window && !sema_expression_subject_moved(subject) {
+                sema_expression_reject_read_write_view_payload(state, subject, checked_subject.ty, fact.ty, scopes, diagnostics)
+            }
             // An explicit `name.move()` takes this payload out of its subject
             // (sema_ownership_move_pattern_payload) when the subject stays
             // live. A `subject.move()` moves into the match, so its bindings own
@@ -2264,7 +2420,9 @@ sema_expression_check_pattern_condition: fn(subject: Expr, pattern: Pattern, spa
             // copy: the ownership state keeps the payload's subject places
             // for a later `name.move()`, while the condition binding keeps them for
             // its view provenance (sema_ownership_record_pattern_views).
-            if !window && !collection && !sema_expression_subject_moved(subject) -> sema_ownership_note_pattern_sources(state, symbol, sources.copy())
+            if !window && !collection && !sema_expression_subject_moved(subject) {
+                sema_ownership_note_pattern_sources(state, symbol, sources.copy())
+            }
             bindings.push(SemaConditionBinding{symbol: symbol, key: key, window: window, sources: sources})
         }
         facts.push(updated)
@@ -2410,7 +2568,9 @@ sema_expression_absent_optional_test: fn(condition: Expr) -> (name: BindName, sp
 sema_expression_flow_optional_payload: fn(scopes: SemaScopeTable, name: String) -> Type? {
     index: sema_scope_resolve_index(scopes, name) ?? return None
     binding: scopes.bindings[index]
-    if binding.mutable || (binding.symbol.kind != SymbolKind.Local && binding.symbol.kind != SymbolKind.Parameter) -> return None
+    if binding.mutable || (binding.symbol.kind != SymbolKind.Local && binding.symbol.kind != SymbolKind.Parameter) {
+        return None
+    }
     declared: binding.symbol.ty ?? return None
     if declared == {
         .Option(inner) -> Val(inner)
@@ -2457,8 +2617,12 @@ sema_expression_rewrite_optional_ne_none: fn(condition: Expr, scopes: SemaScopeT
 // symbol identities for the branch.
 sema_expression_check_condition: fn(condition: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaConditionCheck {
     rewritten: sema_expression_rewrite_optional_ne_none(condition, scopes)
-    if rewritten == .Val(presence) -> return sema_expression_check_condition(presence, environment, program, scopes, state, tail_store, context, diagnostics)
-    if !sema_expression_condition_binds(condition) -> return sema_expression_check_condition_inner(condition, environment, program, scopes, state, tail_store, context, diagnostics)
+    if rewritten == .Val(presence) {
+        return sema_expression_check_condition(presence, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
+    if !sema_expression_condition_binds(condition) {
+        return sema_expression_check_condition_inner(condition, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
     _ := sema_scope_enter(scopes, state, "pattern@{expr_span(condition).start}")
     checked := sema_expression_check_condition_inner(condition, environment, program, scopes, state, tail_store, context, diagnostics)
     sema_scope_leave(scopes, state)
@@ -2480,7 +2644,9 @@ sema_expression_declare_condition_bindings: fn(bindings: [SemaConditionBinding],
         in_place: !binding.window && sema_expression_sources_read_in_place(binding.sources, scopes)
         if !sema_scope_declare_local(scopes, binding.symbol, binding.key, binding.window, access, None, false) {
             if binding.window || !sema_expression_refines_optional(scopes, binding.symbol) {
-                if track -> diagnostics.push(sema_already_defined(binding.symbol.name, binding.symbol.span))
+                if track {
+                    diagnostics.push(sema_already_defined(binding.symbol.name, binding.symbol.span))
+                }
                 next
             }
             // `x == .Val(x)` over a stable Optional refines
@@ -2488,7 +2654,9 @@ sema_expression_declare_condition_bindings: fn(bindings: [SemaConditionBinding],
             sema_scope_refine_local(scopes, binding.symbol, binding.key)
         }
         if in_place -> sema_scope_mark_place_alias(scopes, binding.symbol.name)
-        if track && binding.symbol.ty != None -> sema_ownership_declare_binding(state, binding.symbol, binding.key, false)
+        if track && binding.symbol.ty != None {
+            sema_ownership_declare_binding(state, binding.symbol, binding.key, false)
+        }
         // Also track the temporary `&&` bindings: later tests must resolve
         // their payload origin and reborrow ancestry, not a new local owner.
         _ := sema_ownership_record_pattern_views(state, binding.symbol.name, binding.symbol.span, binding.sources, access, scopes)
@@ -2601,8 +2769,8 @@ sema_expression_if_next_word: fn(value: Expr, scopes: SemaScopeTable, condition:
 // top-level test and every test along a `&&` chain.
 sema_expression_condition_binding_names: fn(condition: Expr, names: &[BindName]) Never! {
     if condition == {
-        .PatternTest(_, pattern, _, _) -> sema_pattern_test_binding_names(pattern, names)
-        .Paren(inner, _, _) -> sema_expression_condition_binding_names(inner, names)
+        .PatternTest(_, pattern, _, _) -> { sema_pattern_test_binding_names(pattern, names) }
+        .Paren(inner, _, _) -> { sema_expression_condition_binding_names(inner, names) }
         .Binary(op, left, right, _, _) -> {
             if op == BinOp.And {
                 sema_expression_condition_binding_names(left, names)
@@ -2615,28 +2783,40 @@ sema_expression_condition_binding_names: fn(condition: Expr, names: &[BindName])
 
 sema_expression_if_next_body: fn(body: [Stmt], value: Expr, scopes: SemaScopeTable, condition: Expr, then_arm: Bool) -> [Stmt] {
     out := body.copy()
-    if sema_expression_if_next_word(value, scopes, condition, then_arm) -> out.push(Stmt.Continue{span: expr_span(value)})
+    if sema_expression_if_next_word(value, scopes, condition, then_arm) {
+        out.push(Stmt.Continue{span: expr_span(value)})
+    }
     out
 }
 
 sema_expression_if_next_value: fn(value: Expr, scopes: SemaScopeTable, condition: Expr, then_arm: Bool) -> Expr {
-    if sema_expression_if_next_word(value, scopes, condition, then_arm) -> return Expr.NoElse{span: expr_span(value), id: AST_NODE_GENERATED}
+    if sema_expression_if_next_word(value, scopes, condition, then_arm) {
+        return Expr.NoElse{span: expr_span(value), id: AST_NODE_GENERATED}
+    }
     value.copy()
 }
 
 sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if sema_expression_if_next_word(then_value, scopes, condition, true) || sema_expression_if_next_word(else_value, scopes, condition, false) -> return sema_expression_if(condition, sema_expression_if_next_body(then_body, then_value, scopes, condition, true), sema_expression_if_next_value(then_value, scopes, condition, true), sema_expression_if_next_body(else_body, else_value, scopes, condition, false), sema_expression_if_next_value(else_value, scopes, condition, false), span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if sema_expression_if_next_word(then_value, scopes, condition, true) || sema_expression_if_next_word(else_value, scopes, condition, false) {
+        return sema_expression_if(condition, sema_expression_if_next_body(then_body, then_value, scopes, condition, true), sema_expression_if_next_value(then_value, scopes, condition, true), sema_expression_if_next_body(else_body, else_value, scopes, condition, false), sema_expression_if_next_value(else_value, scopes, condition, false), span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
     type_param: sema_expression_type_table_param(condition, environment, scopes)
-    if type_param == .Val(param) -> return sema_expression_type_table(param, condition, then_body, then_value, else_body, else_value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if type_param == .Val(param) {
+        return sema_expression_type_table(param, condition, then_body, then_value, else_body, else_value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
     dispatch_subject: sema_expression_if_dispatch_subject(condition, else_value)
-    if dispatch_subject == .Val(subject) -> return sema_expression_if_hoisted(subject, condition, then_body, then_value, else_body, else_value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if dispatch_subject == .Val(subject) {
+        return sema_expression_if_hoisted(subject, condition, then_body, then_value, else_body, else_value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
     // An arm for a failure the subject can no longer fail with is left out
     // (sema_gone_failure_arm): the table goes on from the arm after it.
     if else_body.len() == 0 && else_value == .If(next_condition, _, _, _, _, next_span, _) {
         if next_span == span {
             if sema_gone_failure_arm(condition, scopes, environment, program) == .Val(gone) {
                 diagnostics.push(sema_gone_failure_lint(gone, None, sema_gone_failure_value_end(then_body, then_value), environment, program))
-                if else_value == .If(_, next_then_body, next_then_value, next_else_body, next_else_value, _, _) -> return sema_expression_if(next_condition, next_then_body, next_then_value, next_else_body, next_else_value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+                if else_value == .If(_, next_then_body, next_then_value, next_else_body, next_else_value, _, _) {
+                    return sema_expression_if(next_condition, next_then_body, next_then_value, next_else_body, next_else_value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+                }
             }
             if sema_gone_failure_arm(next_condition, scopes, environment, program) == .Val(gone) {
                 if else_value == .If(_, next_then_body, next_then_value, next_else_body, next_else_value, _, _) {
@@ -2650,7 +2830,9 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
     // with the branches swapped, so the other branch holds the payload (Rust
     // value `if`). Source order of evaluation is unchanged.
     if sema_expression_absent_optional_test(condition) == .Val(test) {
-        if sema_expression_flow_optional_payload(scopes, test.name.name) != None && sema_expression_if_absent_test_swaps(else_value, test.name.name) -> return sema_expression_if(sema_expression_presence_test(test.name, test.span), else_body, else_value, then_body, then_value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        if sema_expression_flow_optional_payload(scopes, test.name.name) != None && sema_expression_if_absent_test_swaps(else_value, test.name.name) {
+            return sema_expression_if(sema_expression_presence_test(test.name, test.span), else_body, else_value, then_body, then_value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        }
     }
     // Card #1440 / E0307: the outermost level of an else-less dispatch chain
     // proves coverage once, after every nested level has been checked.
@@ -2664,7 +2846,9 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
     caught: sema_catch_all_err_arm(condition, scopes, environment, program)
     condition_mark: diagnostics.len()
     condition_check: if caught == .Val(found) -> sema_expression_check_condition(found.cond, environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_expression_check_condition(condition, environment, program, scopes, state, tail_store, context, diagnostics)
-    if condition_check.checked == None && !sema_has_error_since(diagnostics, condition_mark) -> return None
+    if condition_check.checked == None && !sema_has_error_since(diagnostics, condition_mark) {
+        return None
+    }
     // Each arm runs in its own frame on the live scope table and on the live
     // ownership state, both rolled back (sema_ownership_fork). Only a deferred
     // bare `None` then-value, checked after the else arm, keeps a copy of the
@@ -2684,7 +2868,9 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
         sema_scope_rollback(scopes, then_mark)
         found_sites: state.share_found.copy()
         sema_ownership_fork_drop(state, fork, found_sites, [SemaOwnershipShareSite]{})
-        if quiet_then -> loop diagnostics.len() > then_diagnostic_start -> _ := diagnostics.pop()
+        if quiet_then {
+            loop diagnostics.len() > then_diagnostic_start -> _ := diagnostics.pop()
+        }
         return None
     }
     // Owner rule (bare `None`): without an optional expected type, a bare
@@ -2715,7 +2901,9 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
             sema_scope_rollback(scopes, then_mark)
             found_sites: state.share_found.copy()
             sema_ownership_fork_drop(state, fork, found_sites, [SemaOwnershipShareSite]{})
-            if quiet_then -> loop diagnostics.len() > then_diagnostic_start -> _ := diagnostics.pop()
+            if quiet_then {
+                loop diagnostics.len() > then_diagnostic_start -> _ := diagnostics.pop()
+            }
             return None
         }
         then_first = Val(first)
@@ -2723,7 +2911,9 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
         sema_ownership_leave_scope(state)
         then_path = sema_ownership_fork_path(state, fork)
     }
-    if quiet_then -> loop diagnostics.len() > then_diagnostic_start -> _ := diagnostics.pop()
+    if quiet_then {
+        loop diagnostics.len() > then_diagnostic_start -> _ := diagnostics.pop()
+    }
     sema_scope_rollback(scopes, then_mark)
     sema_ownership_fork_rollback(state, fork)
     then_found: if defer_then -> deferred_then_state.share_found else -> then_path.share_found
@@ -2779,11 +2969,15 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
             sema_scope_leave(deferred_then_scopes, deferred_then_state)
             sema_ownership_keep_mutations(state, deferred_then_state)
             sema_ownership_fork_drop(state, fork, deferred_then_state.share_found, else_path.share_found)
-            if quiet_then -> loop diagnostics.len() > deferred_diagnostic_start -> _ := diagnostics.pop()
+            if quiet_then {
+                loop diagnostics.len() > deferred_diagnostic_start -> _ := diagnostics.pop()
+            }
             return None
         }
     }
-    if quiet_then -> loop diagnostics.len() > deferred_diagnostic_start -> _ := diagnostics.pop()
+    if quiet_then {
+        loop diagnostics.len() > deferred_diagnostic_start -> _ := diagnostics.pop()
+    }
     sema_ownership_keep_mutations(state, deferred_then_state)
     then_reaches_merge: !sema_stmt_block_has_no_fallthrough(then_body) && then_checked.ty != Type.Named{name: "Never"}
     if defer_then {
@@ -2791,7 +2985,9 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
         sema_ownership_leave_scope(deferred_then_state)
         then_path = sema_ownership_fork_path(deferred_then_state, fork)
     } else {
-        if !quiet_then -> loop diagnostic in then_end_diagnostics -> diagnostics.push(diagnostic)
+        if !quiet_then {
+            loop diagnostic in then_end_diagnostics -> diagnostics.push(diagnostic)
+        }
     }
     // The single-use check reads the state before the `if`, which the
     // rollback left live; the join and share notes report nothing.
@@ -2818,32 +3014,30 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
     result_ty: if {
         then_reaches_merge && else_reaches_merge -> if {
             sema_expression_nominal_identity(then_checked.ty, else_checked.ty, environment, program) -> then_checked.ty
-            else -> {
+            else -> if sema_expression_if_carrier(expected, then_checked.ty, else_checked.ty) == {
                 // A decision table in a fallible context mixes `Ok`/`Err`
                 // arms with plain success values; the plain side lifts into
                 // the expected carrier through the one `Ok` constructor.
-                if sema_expression_if_carrier(expected, then_checked.ty, else_checked.ty) == {
-                    .Val(carrier) -> {
-                        joined_then = sema_expression_lift_into_carrier(then_checked, carrier)
-                        joined_else = sema_expression_lift_into_carrier(else_checked, carrier)
-                        carrier
-                    }
-                    .None -> {
-                        // Two numeric producers follow the one widening law, as
-                        // an operator's operands do.
-                        numeric: sema_expr_numeric_join(then_checked.ty, else_checked.ty) ?? {
-                            if context.collect_item_if == (Val(span)) {
-                                diagnostics.push(sema_error("E0074", span, "this collecting loop produces incompatible item types", "one collecting loop builds one List, but these paths produce {sema_type_show(then_checked.ty)} and {sema_type_show(else_checked.ty)}", "convert every item to one type, or split the loops"))
-                            } else {
-                                diagnostics.push(sema_error("E0124", span, "this `if`'s branches produce different types: {sema_type_show(then_checked.ty)} and {sema_type_show(else_checked.ty)}", "an `if` used as a value must give the same type on every path (S68)", "make both branches produce {sema_type_show(then_checked.ty)} (or the same type)"))
-                            }
-                            return None
+                .Val(carrier) -> {
+                    joined_then = sema_expression_lift_into_carrier(then_checked, carrier)
+                    joined_else = sema_expression_lift_into_carrier(else_checked, carrier)
+                    carrier
+                }
+                .None -> {
+                    // Two numeric producers follow the one widening law, as
+                    // an operator's operands do.
+                    numeric: sema_expr_numeric_join(then_checked.ty, else_checked.ty) ?? {
+                        if context.collect_item_if == (Val(span)) {
+                            diagnostics.push(sema_error("E0074", span, "this collecting loop produces incompatible item types", "one collecting loop builds one List, but these paths produce {sema_type_show(then_checked.ty)} and {sema_type_show(else_checked.ty)}", "convert every item to one type, or split the loops"))
+                        } else {
+                            diagnostics.push(sema_error("E0124", span, "this `if`'s branches produce different types: {sema_type_show(then_checked.ty)} and {sema_type_show(else_checked.ty)}", "an `if` used as a value must give the same type on every path (S68)", "make both branches produce {sema_type_show(then_checked.ty)} (or the same type)"))
                         }
-                        line: sema_source_line_at(environment.source_segments, span) ?? 0
-                        joined_then = sema_expr_numeric_literal_conversion(then_checked, numeric, then_checked.span, line, diagnostics) ?? return None
-                        joined_else = sema_expr_numeric_literal_conversion(else_checked, numeric, else_checked.span, line, diagnostics) ?? return None
-                        numeric
+                        return None
                     }
+                    line: sema_source_line_at(environment.source_segments, span) ?? 0
+                    joined_then = sema_expr_numeric_literal_conversion(then_checked, numeric, then_checked.span, line, diagnostics) ?? return None
+                    joined_else = sema_expr_numeric_literal_conversion(else_checked, numeric, else_checked.span, line, diagnostics) ?? return None
+                    numeric
                 }
             }
         }
@@ -2863,7 +3057,9 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
             sema_coverage_check_table(table, false, span, environment, program, diagnostics)
         }
     }
-    if else_table_head -> sema_coverage_check_closed_else(sema_coverage_else_chain_heads(checked_condition, else_checked, span), span, environment, program, diagnostics)
+    if else_table_head {
+        sema_coverage_check_closed_else(sema_coverage_else_chain_heads(checked_condition, else_checked, span), span, environment, program, diagnostics)
+    }
     value: sema_tree_node(result_ty, TExprKind.IfExpr{cond: checked.condition, then_body: then_result.value, then_value: joined_then, else_body: else_result.value, else_value: joined_else}, span)
     sema_expr_expected(value, expected, environment, program, diagnostics)
 }
@@ -2940,8 +3136,12 @@ sema_expression_type_table: fn(param: String, condition: Expr, then_body: [Stmt]
         arm_return := mark.saved.return_type.copy()
         if target == .Val(arm_type) {
             actuals: [Type]{arm_type.copy()}
-            if expected == .Val(declared) -> arm_expected = Val(sema_inference_substitute_type(declared, names, actuals))
-            if mark.saved.return_type == .Val(declared) -> arm_return = Val(sema_inference_substitute_type(declared, names, actuals))
+            if expected == .Val(declared) {
+                arm_expected = Val(sema_inference_substitute_type(declared, names, actuals))
+            }
+            if mark.saved.return_type == .Val(declared) {
+                arm_return = Val(sema_inference_substitute_type(declared, names, actuals))
+            }
             // After the mark, so the rollback below puts the rebound rows back.
             sema_stmt_type_switch_rebind(scopes, param, arm_type)
             targets.push(arm_type.copy())
@@ -2954,7 +3154,9 @@ sema_expression_type_table: fn(param: String, condition: Expr, then_body: [Stmt]
         arm_value: if is_else -> rest_value else -> values[index]
         body := sema_check_statements(arm_body, arm_return, environment, program, scopes, state, tail_store, context, diagnostics, mark.saved.loop_depth)
         value := TExpr?{None}
-        if body.complete -> value = sema_check_expression(arm_value, arm_expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        if body.complete {
+            value = sema_check_expression(arm_value, arm_expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        }
         sema_single_use_leave_scope(scopes, state, diagnostics)
         path: sema_ownership_fork_path(state, fork)
         sema_ownership_fork_rollback(state, branch_fork)
@@ -2966,7 +3168,9 @@ sema_expression_type_table: fn(param: String, condition: Expr, then_body: [Stmt]
             next
         }
         never: Type.Named{name: "Never"}
-        if !sema_stmt_block_has_no_fallthrough(arm_body) && checked.ty != never -> reaching.push(path)
+        if !sema_stmt_block_has_no_fallthrough(arm_body) && checked.ty != never {
+            reaching.push(path)
+        }
         body_value := body.value.move()
         body.value = [TStmt]{}
         arm_bodies.push(body_value)

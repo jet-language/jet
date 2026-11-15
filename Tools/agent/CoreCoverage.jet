@@ -30,50 +30,85 @@ use {
 }
 
 TOOL: "/Tools/agent/CoreCoverage.jet"
+
 RATCHET: "Tools/agent/core-coverage-ratchet.json"
+
 PARTS: "Compiler/Prelude/CoreSourceParts.tsv"
+
 BARE_SPELLINGS: "Compiler/JetFoundation/Source/Registry/CoreModules.jet"
+
 USAGE: "usage: jet Tools/agent/CoreCoverage.jet [--check|--write] [--json]\n--check: reject an untested public function the ratchet does not list\n--write: initialize the ratchet, then only remove names\n--json: include each declaration and its source evidence"
+
 SKIPPED_NAMES: [String]{"expected", "node_modules", "target"}
+
 // The typed-literal kinds (`Regex{"…"}`, `Sh{"…"}`, `SQL{"…"}`, `HTML{"…"}`): a
 // user names each unqualified, though each lives in its own module.
 LITERAL_KINDS: [String]{"core.regex.Regex", "core.process.Sh", "core.db.SQL", "core.text.html.HTML"}
+
 // The built-in scalar types. A user names each unqualified, and a Core module's
 // `impl Float.Roundable` gives it methods in that module (core.math.Float).
 BUILTIN_SCALARS: [String]{"Int", "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64", "Float", "F32", "Bool", "String", "Char"}
+
 HOST_EXTENSIONS: [String]{".rs", ".mjs", ".js"}
+
 // A host literal holds a Jet program when it declares a function or imports
 // from core or app.
 EMBEDDED_PROGRAM: Regex{"\b\w+:\s*fn\b|\buse\s+(?:\x7B\s*)?(?:\w+\s*:\s*)?(?:core|app)\b"}
+
 PRIVATE_MODULE: "priv module"
+
 // The token the lexer ends each interpolation expression with: no source token
 // holds a space, and the value an interpolation ends with is displayed.
 INTERPOLATION_END: "interpolation end"
+
 DOCTESTS: 0
+
 EXAMPLES: 1
+
 TESTS: 2
 
 TAB: 9
+
 NEWLINE: 10
+
 CARRIAGE_RETURN: 13
+
 SPACE: 32
+
 QUOTE: 34
+
 HASH: 35
+
 APOSTROPHE: 39
+
 OPEN_PAREN: 40
+
 CLOSE_PAREN: 41
+
 STAR: 42
+
 COMMA: 44
+
 MINUS: 45
+
 SLASH: 47
+
 COLON: 58
+
 LESS: 60
+
 EQUALS: 61
+
 GREATER: 62
+
 BACKSLASH: 92
+
 BACKTICK: 96
+
 LOWER_R: 114
+
 OPEN_BRACE: 123
+
 CLOSE_BRACE: 125
 
 #Error
@@ -130,12 +165,12 @@ Report: struct {
 // result type, the owner types that have methods and the prelude aliases.
 Table: struct {
     ids: [String]
-    by_id: [String: Int]
+    by_id: [String:Int]
     returns: [String]
-    types: [String: Bool]
+    types: [String:Bool]
     // Each owner type's last name and the one owner type of that name, or ""
     // when two modules declare one.
-    tails: [String: String]
+    tails: [String:String]
     units: [String]
     names: [String]
 }
@@ -250,11 +285,15 @@ snake_case: fn(part: String) -> String Never! {
     String.from_bytes_lossy(out)
 }
 
-is_lower_or_digit: fn(byte: Int) -> Bool Never! { (byte >= 97 && byte <= 122) || (byte >= 48 && byte <= 57) }
+is_lower_or_digit: fn(byte: Int) -> Bool Never! {
+    (byte >= 97 && byte <= 122) || (byte >= 48 && byte <= 57)
+}
 
 is_space: fn(byte: Int) -> Bool Never! { byte == SPACE || (byte >= TAB && byte <= CARRIAGE_RETURN) }
 
-is_word_start: fn(byte: Int) -> Bool Never! { (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95 }
+is_word_start: fn(byte: Int) -> Bool Never! {
+    (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95
+}
 
 is_word: fn(byte: Int) -> Bool Never! { is_word_start(byte) || (byte >= 48 && byte <= 57) }
 
@@ -297,7 +336,9 @@ find_at: fn(source: [U8], from: Int, end: Int, word: String) -> Int Never! {
 lex: fn(source: [U8]) -> [Token] Never! { lex_range(source, 0, source.len()) }
 
 // The text of bytes `start..<end` of `source`.
-span: fn(source: [U8], start: Int, end: Int) -> String Never! { String.from_bytes_lossy(source[start..<end]) }
+span: fn(source: [U8], start: Int, end: Int) -> String Never! {
+    String.from_bytes_lossy(source[start..<end])
+}
 
 // One past the `*/` closing the nested block comment whose body starts at `at`.
 block_comment_end: fn(source: [U8], start: Int, end: Int) -> Int Never! {
@@ -349,9 +390,13 @@ token_width: fn(source: [U8], at: Int, end: Int, c: Int) -> Int Never! {
         is_word_start(c) -> {
             loop is_word(byte_at(source, at + width, end)) -> width += 1
         }
-        (c == COLON && (follow == COLON || follow == EQUALS)) || (c == MINUS && follow == GREATER) -> width = 2
+        (c == COLON && (follow == COLON || follow == EQUALS)) || (c == MINUS && follow == GREATER) -> {
+            width = 2
+        }
         c >= 192 -> {
-            loop byte_at(source, at + width, end) >= 128 && byte_at(source, at + width, end) < 192 -> width += 1
+            loop byte_at(source, at + width, end) >= 128 && byte_at(source, at + width, end) < 192 {
+                width += 1
+            }
         }
     }
     width
@@ -432,7 +477,9 @@ line_of: fn(lines: [Int], offset: Int) -> Int Never! {
 }
 
 chain: fn(tokens: [Token], start: Int) -> Chain Never! {
-    if !is_identifier(token(tokens, start)) -> return Chain{found: false, parts: [String]{}, end: start}
+    if !is_identifier(token(tokens, start)) {
+        return Chain{found: false, parts: [String]{}, end: start}
+    }
     parts := [String]{token(tokens, start)}
     end := start + 1
     loop token(tokens, end) == "." && is_identifier(token(tokens, end + 1)) {
@@ -547,7 +594,7 @@ signature_text: fn(raw: [U8]) -> String Never! {
 }
 
 // The spelling of the result type starting at token `start`, or "".
-result_type: fn(source: [U8], tokens: [Token], start: Int, unit: String, local_types: [String: Bool]) -> String Never! {
+result_type: fn(source: [U8], tokens: [Token], start: Int, unit: String, local_types: [String:Bool]) -> String Never! {
     if start >= tokens.len() -> return ""
     at := start
     loop token(tokens, at) == "&" -> at += 1
@@ -601,7 +648,9 @@ inside_private: fn(scopes: [Owner]) -> Bool Never! {
     false
 }
 
-is_owner_kind: fn(value: String) -> Bool Never! { value == "struct" || value == "enum" || value == "trait" }
+is_owner_kind: fn(value: String) -> Bool Never! {
+    value == "struct" || value == "enum" || value == "trait"
+}
 
 // How a token moves the paren depth.
 paren_step: fn(value: String) -> Int Never! {
@@ -623,19 +672,23 @@ public_functions: fn(path: String, source_text: String) -> [Function] Never! {
     source: source_text.bytes()
     tokens: lex(source)
     lines: newlines(source)
-    local_types := [String: Bool]{}
+    local_types := [String:Bool]{}
     loop index in 0..<tokens.len() {
-        if is_owner_kind(tokens[index].value) && token(tokens, index - 1) == ":" -> local_types[token(tokens, index - 2)] = true
+        if is_owner_kind(tokens[index].value) && token(tokens, index - 1) == ":" {
+            local_types[token(tokens, index - 2)] = true
+        }
     }
     rows := [Function]{}
-    seen := [String: Bool]{}
+    seen := [String:Bool]{}
     scopes := [Owner]{}
     pending := Owner{name: "", kind: ""}
     parens := 0
     loop i in 0..<tokens.len() {
         value: tokens[i].value
         parens += paren_step(value)
-        if is_owner_kind(value) && token(tokens, i - 1) == ":" -> pending = Owner{name: token(tokens, i - 2), kind: value.copy()}
+        if is_owner_kind(value) && token(tokens, i - 1) == ":" {
+            pending = Owner{name: token(tokens, i - 2), kind: value.copy()}
+        }
         if value == {
             // `impl Type.Trait(Arg) {` names its type; a bare `impl Trait {` inside a
             // type's body belongs to that type. An impl of a reserved `__` trait, bare
@@ -649,13 +702,17 @@ public_functions: fn(path: String, source_text: String) -> [Function] Never! {
                         owner = if owner.starts_with("__") -> "{enclosing.name}.{owner}" else -> enclosing.name.copy()
                     }
                 }
-                if token(tokens, i + 2) == "." && token(tokens, i + 3).starts_with("__") -> owner = "{owner}.{token(tokens, i + 3)}"
+                if token(tokens, i + 2) == "." && token(tokens, i + 3).starts_with("__") {
+                    owner = "{owner}.{token(tokens, i + 3)}"
+                }
                 pending = Owner{name: owner.copy(), kind: "impl"}
             }
             // `priv name: module {` or `priv(scope) name: module {`; the name may be dotted.
             "module" -> {
                 start := if token(tokens, i - 1) == ":" -> i - 2 else -> i
-                loop token(tokens, start - 1) == "." && is_identifier(token(tokens, start - 2)) -> start -= 2
+                loop token(tokens, start - 1) == "." && is_identifier(token(tokens, start - 2)) {
+                    start -= 2
+                }
                 qualified: token(tokens, start - 1) == ")" && token(tokens, start - 4) == "priv"
                 pending = if token(tokens, start - 1) == "priv" || qualified -> Owner{name: "", kind: PRIVATE_MODULE} else -> Owner{name: "", kind: "module"}
             }
@@ -670,12 +727,16 @@ public_functions: fn(path: String, source_text: String) -> [Function] Never! {
         }
         // `name: fn(…) {`: a dotted `Owner.name: fn` head, a parameter typed
         // `fn(…)` and a field or binding typed `fn(…)` (no body) are not declarations here.
-        if value != "fn" || token(tokens, i - 1) != ":" || !is_identifier(token(tokens, i - 2)) || token(tokens, i - 3) == "." || parens != 0 -> next
+        if value != "fn" || token(tokens, i - 1) != ":" || !is_identifier(token(tokens, i - 2)) || token(tokens, i - 3) == "." || parens != 0 {
+            next
+        }
         opener: token(tokens, i + 1)
         if opener != "(" && opener != "<" -> next
         if inside_private(scopes) -> next
         // A `priv` or `priv(scope)` declaration is no user-callable surface.
-        if token(tokens, i - 3) == "priv" || (token(tokens, i - 3) == ")" && token(tokens, i - 6) == "priv") -> next
+        if token(tokens, i - 3) == "priv" || (token(tokens, i - 3) == ")" && token(tokens, i - 6) == "priv") {
+            next
+        }
         owner := ""
         if scopes.len() > 0 {
             scope: scopes[scopes.len() - 1]
@@ -704,27 +765,29 @@ public_functions: fn(path: String, source_text: String) -> [Function] Never! {
         // callable name, and a call site cannot tell them apart: one row each.
         if seen.has_key(id) -> next
         seen[id.copy()] = true
-        rows.push(Function{
-            unit: unit.copy(),
-            name: qualified_name.copy(),
-            id: id.copy(),
-            signature: if result != "" -> "{parameters} -> {result}" else -> parameters.copy(),
-            file: path.copy(),
-            line: line_of(lines, tokens[i].offset),
-            return_type: result.copy(),
-            doctests: [String]{},
-            examples: [String]{},
-            tests: [String]{},
-            foreign: body == "extern",
-            part: false,
-        })
+        rows.push(
+            Function{
+                unit: unit.copy(),
+                name: qualified_name.copy(),
+                id: id.copy(),
+                signature: if result != "" -> "{parameters} -> {result}" else -> parameters.copy(),
+                file: path.copy(),
+                line: line_of(lines, tokens[i].offset),
+                return_type: result.copy(),
+                doctests: [String]{},
+                examples: [String]{},
+                tests: [String]{},
+                foreign: body == "extern",
+                part: false,
+            },
+        )
     }
     rows
 }
 
 // Call resolution's view of the inventory.
 table_of: fn(functions: [Function]) -> Table Never! {
-    table := Table{ids: [String]{}, by_id: [String: Int]{}, returns: [String]{}, types: [String: Bool]{}, tails: [String: String]{}, units: [String]{}, names: [String]{}}
+    table := Table{ids: [String]{}, by_id: [String:Int]{}, returns: [String]{}, types: [String:Bool]{}, tails: [String:String]{}, units: [String]{}, names: [String]{}}
     loop index in 0..<functions.len() {
         row: functions[index]
         table.ids.push(row.id.copy())
@@ -736,7 +799,9 @@ table_of: fn(functions: [Function]) -> Table Never! {
     }
     loop (owner, _) in table.types {
         tail: owner.rpartition(".").tail
-        if table.tails.has_key(tail) && table.tails[tail] != owner -> table.tails[tail.copy()] = "" else -> table.tails[tail.copy()] = owner.copy()
+        if table.tails.has_key(tail) && table.tails[tail] != owner -> table.tails[tail.copy()] = "" else {
+            table.tails[tail.copy()] = owner.copy()
+        }
     }
     table
 }
@@ -747,23 +812,27 @@ first_part: fn(name: String) -> String Never! { name.partition(".").head.copy() 
 // type, every typed-literal kind and every built-in scalar a Core module gives
 // methods (a user names them unqualified) and, for a doctest, the names of its
 // own module.
-initial_aliases: fn(table: Table, context: String) -> [String: String] Never! {
-    aliases := [String: String]{"core": "core", "app": "app"}
+initial_aliases: fn(table: Table, context: String) -> [String:String] Never! {
+    aliases := [String:String]{"core": "core", "app": "app"}
     loop kind in LITERAL_KINDS {
         if table.types.has_key(kind) -> aliases[kind.rpartition(".").tail.copy()] = kind.copy()
     }
     loop index in 0..<table.ids.len() {
         head: first_part(table.names[index])
         if table.units[index] == "core.prelude" -> aliases[head.copy()] = "core.prelude.{head}"
-        if context != "" && table.units[index] == context -> aliases[head.copy()] = "{context}.{head}"
-        if head != table.names[index] && BUILTIN_SCALARS.contains(head) && !aliases.has_key(head) -> aliases[head.copy()] = "{table.units[index]}.{head}"
+        if context != "" && table.units[index] == context {
+            aliases[head.copy()] = "{context}.{head}"
+        }
+        if head != table.names[index] && BUILTIN_SCALARS.contains(head) && !aliases.has_key(head) {
+            aliases[head.copy()] = "{table.units[index]}.{head}"
+        }
     }
     aliases
 }
 
 // `parts` with its head alias expanded. A binding restored to "" was absent
 // before its block.
-expand: fn(parts: [String], aliases: [String: String]) -> String Never! {
+expand: fn(parts: [String], aliases: [String:String]) -> String Never! {
     bound: aliases.get(parts[0]) ?? ""
     with_head(if bound != "" -> bound else -> parts[0], parts)
 }
@@ -815,13 +884,13 @@ chained_type: fn(tokens: [Token], table: Table, typed: String, open: Int) -> Str
     }
 }
 
-bind: fn(map: &[String: String], undo: &[Undo], binding: Binding, key: String, value: String) {
+bind: fn(map: &[String:String], undo: &[Undo], binding: Binding, key: String, value: String) {
     undo.push(Undo{binding: binding, key: key.copy(), previous: map.get(key) ?? ""})
     map[key.copy()] = value.copy()
 }
 
 // Undo every binding made since `mark`.
-restore: fn(aliases: &[String: String], receivers: &[String: String], undo: &[Undo], mark: Int) {
+restore: fn(aliases: &[String:String], receivers: &[String:String], undo: &[Undo], mark: Int) {
     loop undo.len() > mark {
         entry: undo.pop() ?? break
         if entry.binding == .Receiver {
@@ -835,7 +904,7 @@ restore: fn(aliases: &[String: String], receivers: &[String: String], undo: &[Un
 // Bind the rows of the `use` whose first row starts at token `start`; the
 // index after the `use`. A row is `path`, `path.[a, b]` or `alias: path`;
 // `use { row row … }` holds several.
-read_use: fn(tokens: [Token], start: Int, aliases: &[String: String], undo: &[Undo]) -> Int Never! {
+read_use: fn(tokens: [Token], start: Int, aliases: &[String:String], undo: &[Undo]) -> Int Never! {
     at := start
     block: token(tokens, at) == "{{"
     if block -> at += 1
@@ -854,7 +923,9 @@ read_use: fn(tokens: [Token], start: Int, aliases: &[String: String], undo: &[Un
                 loop at < tokens.len() && tokens[at].value != "]" {
                     member: token(tokens, at)
                     at += 1
-                    if is_identifier(member) -> bind(aliases, undo, .Alias, member, "{path}.{member}")
+                    if is_identifier(member) {
+                        bind(aliases, undo, .Alias, member, "{path}.{member}")
+                    }
                 }
                 at += 1
             }
@@ -871,22 +942,24 @@ read_use: fn(tokens: [Token], start: Int, aliases: &[String: String], undo: &[Un
     at
 }
 
-call_sites: fn(source_text: String, table: Table, initial: [String: String]) -> [Call] Never! {
+call_sites: fn(source_text: String, table: Table, initial: [String:String]) -> [Call] Never! {
     tokens: lex(source_text.bytes())
     aliases := initial.copy()
-    receivers := [String: String]{}
+    receivers := [String:String]{}
     undo := [Undo]{}
     marks := [Int]{}
     calls := [Call]{}
     // Each call's closing paren and the type it returns, in first-seen order.
-    return_at := [Int: Int]{}
+    return_at := [Int:Int]{}
     return_closes := [Int]{}
     return_types := [String]{}
     // The result type each function the program declares spells (`next_of:
     // fn(…) -> browser.BrowserEvent`), so a binding to its call is typed too.
-    results := [String: [String]]{}
+    results := [String:[String]]{}
     loop at in 0..<tokens.len() {
-        if !is_identifier(tokens[at].value) || token(tokens, at + 1) != ":" || token(tokens, at + 2) != "fn" -> next
+        if !is_identifier(tokens[at].value) || token(tokens, at + 1) != ":" || token(tokens, at + 2) != "fn" {
+            next
+        }
         open: after_generics(tokens, at + 3)
         if token(tokens, open) != "(" -> next
         close := open + 1
@@ -896,7 +969,7 @@ call_sites: fn(source_text: String, table: Table, initial: [String: String]) -> 
             close += 1
         }
         spelled: chain(tokens, result_start(tokens, close))
-        if spelled.found -> results[tokens[at].value.copy()] = spelled.parts.copy() // copy: the map keeps its own parts
+        if spelled.found -> results[tokens[at].value.copy()] = spelled.parts.copy()  // copy: the map keeps its own parts
     }
     i := 0
     loop i < tokens.len() {
@@ -936,7 +1009,9 @@ call_sites: fn(source_text: String, table: Table, initial: [String: String]) -> 
         listed: token(tokens, i - 1) == "(" || token(tokens, i - 1) == ","
         if is_identifier(value) && (follow == ":" || follow == ":=") {
             at := i + 2
-            loop token(tokens, at) == "&" || token(tokens, at) == "~" || token(tokens, at) == "comptime" -> at += 1
+            loop token(tokens, at) == "&" || token(tokens, at) == "~" || token(tokens, at) == "comptime" {
+                at += 1
+            }
             rhs: chain(tokens, at)
             if rhs.found {
                 // A method of a typed receiver (`first := region.claim(…)`) is
@@ -951,11 +1026,17 @@ call_sites: fn(source_text: String, table: Table, initial: [String: String]) -> 
                 declared: if rhs.parts.len() == 1 && results.has_key(rhs.parts[0]) -> expand(results[rhs.parts[0]], aliases) else -> ""
                 if {
                     !listed && declared != "" -> {
-                        if called && table.types.has_key(declared) -> typed = chained_type(tokens, table, declared, open)
+                        if called && table.types.has_key(declared) {
+                            typed = chained_type(tokens, table, declared, open)
+                        }
                     }
                     table.types.has_key(target) -> typed = target.copy()
-                    !listed && table.by_id.get(target) == .Val(row) && called -> typed = chained_type(tokens, table, bound_type(table, row), open)
-                    !listed && table.by_id.get(target) == .Val(row) -> typed = bound_type(table, row)
+                    !listed && table.by_id.get(target) == .Val(row) && called -> {
+                        typed = chained_type(tokens, table, bound_type(table, row), open)
+                    }
+                    !listed && table.by_id.get(target) == .Val(row) -> {
+                        typed = bound_type(table, row)
+                    }
                 }
                 if typed != "" -> bind(receivers, undo, .Receiver, value, typed)
             }
@@ -1033,7 +1114,9 @@ call_sites: fn(source_text: String, table: Table, initial: [String: String]) -> 
         member: token(tokens, close + 2)
         at: after_generics(tokens, close + 3)
         row: table.by_id.get("{return_types[slot]}.{member}") ?? -1
-        if row >= 0 && token(tokens, at) == "(" -> calls.push(Call{index: row, offset: tokens[close + 2].offset})
+        if row >= 0 && token(tokens, at) == "(" {
+            calls.push(Call{index: row, offset: tokens[close + 2].offset})
+        }
     }
     calls
 }
@@ -1049,7 +1132,9 @@ fenced_programs: fn(block: String, programs: &[String]) {
         }
         body := at + 3
         if starts_at(raw, body, raw.len(), "jet") -> body += 3
-        loop byte_at(raw, body, raw.len()) == SPACE || byte_at(raw, body, raw.len()) == TAB -> body += 1
+        loop byte_at(raw, body, raw.len()) == SPACE || byte_at(raw, body, raw.len()) == TAB {
+            body += 1
+        }
         if byte_at(raw, body, raw.len()) != NEWLINE {
             at += 1
             next
@@ -1205,7 +1290,7 @@ candidate: fn(program: String, programs: &[String]) {
 files_under: fn(root: String, path: String, found: &[String]) CoverageError! -[FS]> {
     listed: files.list_dir("{root}/{path}") ?? return Err(fail("`{path}` cannot be listed: {err}"))
     names := [String]{}
-    directories := [String: Bool]{}
+    directories := [String:Bool]{}
     loop entry in listed {
         if entry.name.starts_with(".") || SKIPPED_NAMES.contains(entry.name) -> next
         names.push(entry.name.copy())
@@ -1217,7 +1302,9 @@ files_under: fn(root: String, path: String, found: &[String]) CoverageError! -[F
         meta: files.stat("{root}/{child}") ?? next
         if meta.is_symlink -> next
         if {
-            meta.is_dir || (directories.get(name) ?? false) -> files_under(root, child, found) ?? return Err(err)
+            meta.is_dir || (directories.get(name) ?? false) -> {
+                files_under(root, child, found) ?? return Err(err)
+            }
             meta.is_file -> found.push(child.copy())
         }
     }
@@ -1238,20 +1325,22 @@ read_source: fn(root: String, path: String) -[FS]> String CoverageError! {
 
 // The paths of the compiler-private Core source parts: the third column of
 // each PARTS row.
-part_paths: fn(root: String) -[FS]> [String: Bool] CoverageError! {
+part_paths: fn(root: String) -[FS]> [String:Bool] CoverageError! {
     source: read_source(root, PARTS) ?? return Err(err)
-    paths := [String: Bool]{}
+    paths := [String:Bool]{}
     loop line in source.split("\n") {
         if line == "" || line.starts_with("#") -> next
         columns := [String]{}
         loop column in line.split("\t") -> columns.push(column.copy())
-        if columns.len() < 3 || columns[2] == "" -> return Err(fail("`{PARTS}`: a part row names no path: {line}"))
+        if columns.len() < 3 || columns[2] == "" {
+            return Err(fail("`{PARTS}`: a part row names no path: {line}"))
+        }
         paths[columns[2].copy()] = true
     }
     Ok(paths)
 }
 
-record: fn(functions: &[Function], seen: &[String: Bool], table: Table, program: String, file: String, kind: Int, initial: [String: String]) {
+record: fn(functions: &[Function], seen: &[String:Bool], table: Table, program: String, file: String, kind: Int, initial: [String:String]) {
     lines: newlines(program.bytes())
     loop call in call_sites(program, table, initial) {
         evidence: "{file}:{line_of(lines, call.offset)}"
@@ -1291,7 +1380,7 @@ bare_spellings: fn(root: String) -[FS]> [Alias] Never! {
 }
 
 // `aliases` with every bare spelling it does not already bind.
-with_bare: fn(aliases: [String: String], bare: [Alias]) -> [String: String] Never! {
+with_bare: fn(aliases: [String:String], bare: [Alias]) -> [String:String] Never! {
     out := aliases.copy()
     loop alias in bare {
         if !out.has_key(alias.name) -> out[alias.name.copy()] = alias.target.copy()
@@ -1322,14 +1411,18 @@ census: fn(root: String) -[FS]> Report CoverageError! {
     table: table_of(functions)
     unique := 0
     loop _ in table.by_id -> unique += 1
-    if functions.len() == 0 || unique != functions.len() -> return Err(fail("Core census is empty or contains duplicate public function identities"))
+    if functions.len() == 0 || unique != functions.len() {
+        return Err(fail("Core census is empty or contains duplicate public function identities"))
+    }
     bare: bare_spellings(root)
-    seen := [String: Bool]{}
+    seen := [String:Bool]{}
     loop index in 0..<paths.len() {
         programs: doctest_programs(sources[index])
         if programs.len() == 0 -> next
         initial: with_bare(initial_aliases(table, module_name(paths[index])), bare)
-        loop at in 0..<programs.len() -> record(functions, seen, table, programs[at], "{paths[index]}#doctest-{at + 1}", DOCTESTS, initial)
+        loop at in 0..<programs.len() {
+            record(functions, seen, table, programs[at], "{paths[index]}#doctest-{at + 1}", DOCTESTS, initial)
+        }
     }
     plain: with_bare(initial_aliases(table, ""), bare)
     kinds: [Int]{EXAMPLES, TESTS}
@@ -1345,18 +1438,20 @@ census: fn(root: String) -[FS]> Report CoverageError! {
                 next
             }
             programs: embedded_programs(source)
-            loop at in 0..<programs.len() -> record(functions, seen, table, programs[at], "{path}#program-{at + 1}", kind, plain)
+            loop at in 0..<programs.len() {
+                record(functions, seen, table, programs[at], "{path}#program-{at + 1}", kind, plain)
+            }
         }
     }
     units := [String]{}
-    known := [String: Bool]{}
+    known := [String:Bool]{}
     loop row in functions {
         if known.has_key(row.unit) -> next
         known[row.unit.copy()] = true
         units.push(row.unit.copy())
     }
     units.sort()
-    at_unit := [String: Int]{}
+    at_unit := [String:Int]{}
     modules := [ModuleRow]{}
     loop unit in units {
         at_unit[unit.copy()] = modules.len()
@@ -1377,13 +1472,17 @@ census: fn(root: String) -[FS]> Report CoverageError! {
     Ok(Report{modules: modules.copy(), total_public: functions.len(), total_uncovered: uncovered, functions: functions.copy(), excluded: excluded.copy()})
 }
 
-is_untested: fn(row: Function) -> Bool Never! { row.doctests.len() == 0 && row.examples.len() == 0 && row.tests.len() == 0 }
+is_untested: fn(row: Function) -> Bool Never! {
+    row.doctests.len() == 0 && row.examples.len() == 0 && row.tests.len() == 0
+}
 
 // Each untested public function: its module, name and signature.
 untested: fn(report: Report) -> [Untested] Never! {
     rows := [Untested]{}
     loop row in report.functions {
-        if is_untested(row) -> rows.push(Untested{unit: row.unit.copy(), name: row.name.copy(), signature: row.signature.copy(), file: row.file.copy(), line: row.line})
+        if is_untested(row) {
+            rows.push(Untested{unit: row.unit.copy(), name: row.name.copy(), signature: row.signature.copy(), file: row.file.copy(), line: row.line})
+        }
     }
     rows
 }
@@ -1409,12 +1508,16 @@ ratchet_entries: fn(tree: Dyn) -> [Entry] CoverageError! {
     entries := [Entry]{}
     listed: if field(tree, "modules") == {
         .Object(object) -> object.copy()
-        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return Err(invalid)
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> {
+            return Err(invalid)
+        }
     }
     loop module_entry in listed {
         items: if module_entry.value == {
             .Array(values) -> values.copy()
-            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return Err(invalid)
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {
+                return Err(invalid)
+            }
         }
         loop item in items {
             if {
@@ -1456,7 +1559,7 @@ ratchet_decision: fn(rows: [Untested], previous: Previous) -> Decision Never! {
     owns := [String]{}
     keys := [String]{}
     alive := [Bool]{}
-    position := [String: Int]{}
+    position := [String:Int]{}
     loop entry in previous.entries {
         own: "{entry.unit}\t{entry_key(entry.name, entry.signature)}"
         if position.has_key(own) -> next
@@ -1466,7 +1569,7 @@ ratchet_decision: fn(rows: [Untested], previous: Previous) -> Decision Never! {
         alive.push(true)
     }
     removable := owns.len()
-    kept_at := [String: Int]{}
+    kept_at := [String:Int]{}
     kept := [Untested]{}
     pending := [Untested]{}
     loop row in rows {
@@ -1503,12 +1606,14 @@ ratchet_decision: fn(rows: [Untested], previous: Previous) -> Decision Never! {
     listed: if previous.present -> kept.copy() else -> rows.copy()
     keyed := [Keyed]{}
     loop row in listed {
-        keyed.push(Keyed{
-            entry: Entry{unit: row.unit.copy(), name: row.name.copy(), signature: row.signature.copy()},
-            unit_key: text.collation_key(row.unit),
-            name_key: text.collation_key(row.name),
-            signature_key: text.collation_key(row.signature),
-        })
+        keyed.push(
+            Keyed{
+                entry: Entry{unit: row.unit.copy(), name: row.name.copy(), signature: row.signature.copy()},
+                unit_key: text.collation_key(row.unit),
+                name_key: text.collation_key(row.name),
+                signature_key: text.collation_key(row.signature),
+            },
+        )
     }
     keyed.sort_by(fn(left: Keyed, right: Keyed) {
         by_unit: compare_bytes(left.unit_key, right.unit_key)
@@ -1522,7 +1627,7 @@ ratchet_decision: fn(rows: [Untested], previous: Previous) -> Decision Never! {
     Decision{passes: previous.present && unlisted.len() == 0, unlisted: unlisted.copy(), removable: removable, next: next_entries.copy()}
 }
 
-keep_row: fn(kept_at: &[String: Int], kept: &[Untested], own: String, row: Untested) {
+keep_row: fn(kept_at: &[String:Int], kept: &[Untested], own: String, row: Untested) {
     slot: kept_at.get(own) ?? -1
     if {
         slot >= 0 -> kept[slot] = row.copy()
@@ -1575,53 +1680,69 @@ ratchet_text: fn(entries: [Entry]) -> String Never! {
     "{{\n  \"version\": 2,\n  \"modules\": {{\n{blocks.join(",\n")}{tail}  }}\n}}\n"
 }
 
-texts: fn(items: [String]) -> Dyn Never! { Dyn.Array(items.map(fn(item) { Dyn.Text(item.copy()) })) }
+texts: fn(items: [String]) -> Dyn Never! {
+    Dyn.Array(items.map(fn(item) { Dyn.Text(item.copy()) }))
+}
 
 report_json: fn(report: Report) -> Dyn Never! {
     modules := [Dyn]{}
     loop row in report.modules {
-        modules.push(Dyn.Object([String: Dyn]{
-            "module": Dyn.Text(row.unit.copy()),
-            "public": Dyn.Int(row.public),
-            "doctests": Dyn.Int(row.doctests),
-            "examples": Dyn.Int(row.examples),
-            "tests": Dyn.Int(row.tests),
-            "uncovered": Dyn.Int(row.uncovered),
-        }))
+        modules.push(
+            Dyn.Object(
+                [String:Dyn]{
+                    "module": Dyn.Text(row.unit.copy()),
+                    "public": Dyn.Int(row.public),
+                    "doctests": Dyn.Int(row.doctests),
+                    "examples": Dyn.Int(row.examples),
+                    "tests": Dyn.Int(row.tests),
+                    "uncovered": Dyn.Int(row.uncovered),
+                },
+            ),
+        )
     }
     functions := [Dyn]{}
     loop row in report.functions {
-        functions.push(Dyn.Object([String: Dyn]{
-            "module": Dyn.Text(row.unit.copy()),
-            "name": Dyn.Text(row.name.copy()),
-            "id": Dyn.Text(row.id.copy()),
-            "signature": Dyn.Text(row.signature.copy()),
-            "file": Dyn.Text(row.file.copy()),
-            "line": Dyn.Int(row.line),
-            "returnType": if row.return_type != "" -> Dyn.Text(row.return_type.copy()) else -> Dyn.Null,
-            "doctests": texts(row.doctests),
-            "examples": texts(row.examples),
-            "tests": texts(row.tests),
-        }))
+        functions.push(
+            Dyn.Object(
+                [String:Dyn]{
+                    "module": Dyn.Text(row.unit.copy()),
+                    "name": Dyn.Text(row.name.copy()),
+                    "id": Dyn.Text(row.id.copy()),
+                    "signature": Dyn.Text(row.signature.copy()),
+                    "file": Dyn.Text(row.file.copy()),
+                    "line": Dyn.Int(row.line),
+                    "returnType": if row.return_type != "" -> Dyn.Text(row.return_type.copy()) else -> Dyn.Null,
+                    "doctests": texts(row.doctests),
+                    "examples": texts(row.examples),
+                    "tests": texts(row.tests),
+                },
+            ),
+        )
     }
     excluded := [Dyn]{}
     loop row in report.excluded {
-        excluded.push(Dyn.Object([String: Dyn]{
-            "module": Dyn.Text(row.unit.copy()),
-            "name": Dyn.Text(row.name.copy()),
-            "signature": Dyn.Text(row.signature.copy()),
-            "file": Dyn.Text(row.file.copy()),
-            "line": Dyn.Int(row.line),
-            "extern": Dyn.Bool(row.foreign),
-            "part": Dyn.Bool(row.part),
-        }))
+        excluded.push(
+            Dyn.Object(
+                [String:Dyn]{
+                    "module": Dyn.Text(row.unit.copy()),
+                    "name": Dyn.Text(row.name.copy()),
+                    "signature": Dyn.Text(row.signature.copy()),
+                    "file": Dyn.Text(row.file.copy()),
+                    "line": Dyn.Int(row.line),
+                    "extern": Dyn.Bool(row.foreign),
+                    "part": Dyn.Bool(row.part),
+                },
+            ),
+        )
     }
-    Dyn.Object([String: Dyn]{
-        "modules": Dyn.Array(modules.copy()),
-        "total": Dyn.Object([String: Dyn]{"public": Dyn.Int(report.total_public), "uncovered": Dyn.Int(report.total_uncovered), "excluded": Dyn.Int(report.excluded.len())}),
-        "functions": Dyn.Array(functions.copy()),
-        "excluded": Dyn.Array(excluded.copy()),
-    })
+    Dyn.Object(
+        [String:Dyn]{
+            "modules": Dyn.Array(modules.copy()),
+            "total": Dyn.Object([String:Dyn]{"public": Dyn.Int(report.total_public), "uncovered": Dyn.Int(report.total_uncovered), "excluded": Dyn.Int(report.excluded.len())}),
+            "functions": Dyn.Array(functions.copy()),
+            "excluded": Dyn.Array(excluded.copy()),
+        },
+    )
 }
 
 // The excluded count line: how many declarations the census leaves out, by
@@ -1655,15 +1776,21 @@ coverage_main: fn(args: [String], root: String) -[FS, IO]> Int CoverageError! {
     check: args.contains("--check")
     write: args.contains("--write")
     loop arg in args {
-        if arg != "--check" && arg != "--write" && arg != "--json" -> return Err(fail("choose --check or --write, optionally --json"))
+        if arg != "--check" && arg != "--write" && arg != "--json" {
+            return Err(fail("choose --check or --write, optionally --json"))
+        }
     }
     if check && write -> return Err(fail("choose --check or --write, optionally --json"))
     report: census(root) ?? return Err(err)
     if {
-        args.contains("--json") -> print(json.to_string_pretty(report_json(report)) ?? return Err(fail("the report cannot be encoded: {err}")))
+        args.contains("--json") -> {
+            print(json.to_string_pretty(report_json(report)) ?? return Err(fail("the report cannot be encoded: {err}")))
+        }
         else -> {
             print("module\tpublic\tdoctests\texamples\ttests\tuncovered")
-            loop row in report.modules -> print("{row.unit}\t{row.public}\t{row.doctests}\t{row.examples}\t{row.tests}\t{row.uncovered}")
+            loop row in report.modules {
+                print("{row.unit}\t{row.public}\t{row.doctests}\t{row.examples}\t{row.tests}\t{row.uncovered}")
+            }
             print("total: {report.total_public} public functions; {report.total_uncovered} uncovered")
             print(excluded_line(report))
         }
@@ -1714,7 +1841,9 @@ fixture_rows: fn() -> [Function] Never! {
 ids: fn(source: String, context: String) -> [String] Never! {
     table: table_of(fixture_rows())
     found := [String]{}
-    loop call in call_sites(source, table, initial_aliases(table, context)) -> found.push(table.ids[call.index].copy())
+    loop call in call_sites(source, table, initial_aliases(table, context)) {
+        found.push(table.ids[call.index].copy())
+    }
     found
 }
 
@@ -1917,7 +2046,9 @@ untested_row: fn(unit: String, name: String, signature: String) -> Untested Neve
 
 listed: fn(entries: [Entry]) -> Previous Never! { Previous{present: true, entries: entries.copy()} }
 
-entry: fn(unit: String, name: String, signature: String) -> Entry Never! { Entry{unit: unit.copy(), name: name.copy(), signature: signature.copy()} }
+entry: fn(unit: String, name: String, signature: String) -> Entry Never! {
+    Entry{unit: unit.copy(), name: name.copy(), signature: signature.copy()}
+}
 
 #Test("ratchet lists names by module and signature, re-files moves, and only removes") {
     none: Previous{present: false, entries: [Entry]{}}

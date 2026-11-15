@@ -3,7 +3,6 @@
 // fixed signing seed and a fake `gh` that writes to the fixture, so nothing
 // is ever published. Every blocked case also checks that its audit entry is
 // kept.
-
 use {
     crypto: core.crypto
     files: core.files
@@ -13,9 +12,13 @@ use {
 }
 
 COMMIT: "1111111111111111111111111111111111111111"
+
 TREE: "2222222222222222222222222222222222222222"
+
 OTHER_COMMIT: "4444444444444444444444444444444444444444"
+
 SEED_IDENTITY: "jet@a0.0.25#3333333333333333333333333333333333333333333333333333333333333333"
+
 TARGET: "linux-x64"
 
 // The fake publisher: it logs each call, and `release create` records the
@@ -91,7 +94,7 @@ read_tree: fn(path: String) -[FS]> Dyn Never! {
     json.parse(files.read(path) ?? panic("read {path}: {err}")) ?? panic("{path} is not JSON: {err}")
 }
 
-object: fn(entries: [String: Dyn]) -> Dyn Never! { Dyn.Object(entries.copy()) }
+object: fn(entries: [String:Dyn]) -> Dyn Never! { Dyn.Object(entries.copy()) }
 
 seed_bytes: fn(byte: Int) -> [U8] Never! {
     seed := [U8]{}
@@ -107,11 +110,11 @@ public_of: fn(seed: [U8]) -> String Never! {
 }
 
 scope_row: fn(scope: String, status: String) -> Dyn Never! {
-    object([String: Dyn]{"scope": Dyn.Text(scope.copy()), "status": Dyn.Text(status.copy())})
+    object([String:Dyn]{"scope": Dyn.Text(scope.copy()), "status": Dyn.Text(status.copy())})
 }
 
 counted: fn(scope: String, total: Int, passed: Int) -> Dyn Never! {
-    object([String: Dyn]{"scope": Dyn.Text(scope.copy()), "status": Dyn.Text("PASS"), "total": Dyn.Int(total), "passed": Dyn.Int(passed)})
+    object([String:Dyn]{"scope": Dyn.Text(scope.copy()), "status": Dyn.Text("PASS"), "total": Dyn.Int(total), "passed": Dyn.Int(passed)})
 }
 
 passing_rows: fn() -> [Dyn] Never! {
@@ -125,14 +128,19 @@ jet_sha: fn(dir: String) -[FS]> String Never! {
 // One runner's verify-full.json in `scratch/<name>/`.
 runner: fn(scratch: String, name: String, dir: String, shard: Int, count: Int, status: String, rows: [Dyn]) -[FS]> String Never! {
     evidence: files.join(scratch, name)
-    put_json(files.join(evidence, "verify-full.json"), object([String: Dyn]{
-        "head": Dyn.Text(COMMIT),
-        "jet_sha256": Dyn.Text(jet_sha(dir)),
-        "rows": Dyn.Array(rows.copy()),
-        "shard": object([String: Dyn]{"count": Dyn.Int(count), "index": Dyn.Int(shard)}),
-        "status": Dyn.Text(status.copy()),
-        "target": Dyn.Text(TARGET),
-    }))
+    put_json(
+        files.join(evidence, "verify-full.json"),
+        object(
+            [String:Dyn]{
+                "head": Dyn.Text(COMMIT),
+                "jet_sha256": Dyn.Text(jet_sha(dir)),
+                "rows": Dyn.Array(rows.copy()),
+                "shard": object([String:Dyn]{"count": Dyn.Int(count), "index": Dyn.Int(shard)}),
+                "status": Dyn.Text(status.copy()),
+                "target": Dyn.Text(TARGET),
+            },
+        ),
+    )
     evidence
 }
 
@@ -141,10 +149,15 @@ write_sums: fn(dir: String) Never! -[FS]> {
 }
 
 write_build: fn(dir: String, s2: String, s3: String) Never! -[FS]> {
-    put_json(files.join(dir, "BUILD.json"), object([String: Dyn]{
-        "chain": object([String: Dyn]{"s1": Dyn.Text(SEED_IDENTITY), "s2": Dyn.Text(s2.copy()), "s3": Dyn.Text(s3.copy())}),
-        "target": Dyn.Text(TARGET),
-    }))
+    put_json(
+        files.join(dir, "BUILD.json"),
+        object(
+            [String:Dyn]{
+                "chain": object([String:Dyn]{"s1": Dyn.Text(SEED_IDENTITY), "s2": Dyn.Text(s2.copy()), "s3": Dyn.Text(s3.copy())}),
+                "target": Dyn.Text(TARGET),
+            },
+        ),
+    )
 }
 
 // A `build` release directory of `jet`, as the build step leaves it.
@@ -154,7 +167,7 @@ make_build: fn(dir: String, jet: String) Never! -[FS]> {
     sha: jet_sha(dir)
     identity: "jet@a0.0.26#{sha}"
     put(files.join(dir, "jet-runtime/native.key"), "runtime-key-1\n")
-    put_json(files.join(dir, "jet-runtime/provenance.json"), object([String: Dyn]{"compilerSha256": Dyn.Text(sha)}))
+    put_json(files.join(dir, "jet-runtime/provenance.json"), object([String:Dyn]{"compilerSha256": Dyn.Text(sha)}))
     put(files.join(dir, "IDENTITY"), "{identity}\n")
     put(files.join(dir, "VERSION"), "a0.0.26 {COMMIT} 2026-01-02\n")
     write_sums(dir)
@@ -212,16 +225,22 @@ has_problem: fn(problems: [Problem], class: String, part: String) -> Bool Never!
 // `outcome` has `verdict`, names a `class` problem containing `part`, and
 // its audit entry is on disk with the same verdict and problem.
 expect: fn(outcome: Outcome, verdict: String, class: String, part: String) Never! -[FS]> {
-    if outcome.verdict != verdict || !has_problem(outcome.problems, class, part) -> panic("want {verdict} with [{class}] `{part}`, got {outcome.verdict}:\n{problem_lines(outcome.problems)}")
+    if outcome.verdict != verdict || !has_problem(outcome.problems, class, part) {
+        panic("want {verdict} with [{class}] `{part}`, got {outcome.verdict}:\n{problem_lines(outcome.problems)}")
+    }
     audit: read_tree(outcome.audit)
     assert_eq(text_field(audit, "verdict"), verdict)
     kept := [Problem]{}
-    loop item in array_field(audit, "problems") -> kept.push(problem(text_field(item, "class"), text_field(item, "text")))
+    loop item in array_field(audit, "problems") {
+        kept.push(problem(text_field(item, "class"), text_field(item, "text")))
+    }
     assert(has_problem(kept, class, part))
 }
 
 expect_clean: fn(outcome: Outcome, verdict: String) Never! -[FS]> {
-    if outcome.verdict != verdict || outcome.problems.len() > 0 -> panic("want a clean {verdict}, got {outcome.verdict}:\n{problem_lines(outcome.problems)}")
+    if outcome.verdict != verdict || outcome.problems.len() > 0 {
+        panic("want a clean {verdict}, got {outcome.verdict}:\n{problem_lines(outcome.problems)}")
+    }
     assert_eq(text_field(read_tree(outcome.audit), "verdict"), verdict)
 }
 
@@ -328,9 +347,7 @@ texts: fn(items: [Dyn]) -> [String] Never! {
     loop (index, stamp) in stamps {
         fixture: new_fixture("stamp-{index}")
         path: files.join(fixture.dir, "VERSION")
-        if stamp == "" {
-            files.remove(path) ?? panic("rm VERSION {err}")
-        } else {
+        if stamp == "" -> files.remove(path) ?? panic("rm VERSION {err}") else {
             put(path, "{stamp}\n")
         }
         write_sums(fixture.dir)
@@ -445,7 +462,7 @@ texts: fn(items: [Dyn]) -> [String] Never! {
 
 #Test("a stale artifact blocks: a runtime packed by another jet, a receipt of another commit, a jet rebuilt after signing") {
     runtime: new_fixture("stale-runtime")
-    put_json(files.join(runtime.dir, "jet-runtime/provenance.json"), object([String: Dyn]{"compilerSha256": Dyn.Text("6".repeat(64))}))
+    put_json(files.join(runtime.dir, "jet-runtime/provenance.json"), object([String:Dyn]{"compilerSha256": Dyn.Text("6".repeat(64))}))
     write_sums(runtime.dir)
     expect(candidate(runtime), "BLOCKED", STALE, "packed by jet {"6".repeat(64)}")
     receipt := new_fixture("stale-receipt")
@@ -615,17 +632,19 @@ put_le: fn(bytes: &[U8], at: Int, value: Int, count: Int) Never! {
     files.set_mode(audit, 365) ?? panic("chmod audit: {err}")
     outcome: publish(sealed)
     files.set_mode(audit, 493) ?? panic("chmod audit: {err}")
-    if outcome.verdict != "BLOCKED" || !has_problem(outcome.problems, INPUT, "cannot create") -> panic("want BLOCKED on an unwritable audit, got {outcome.verdict}:\n{problem_lines(outcome.problems)}")
+    if outcome.verdict != "BLOCKED" || !has_problem(outcome.problems, INPUT, "cannot create") {
+        panic("want BLOCKED on an unwritable audit, got {outcome.verdict}:\n{problem_lines(outcome.problems)}")
+    }
     assert_eq(gh_log(sealed), [String]{})
-    kept: write_audit(sealed.dir, 1, "candidate", "CANDIDATE", [Problem]{}, [String: Dyn]{}) ?? "refused: {err.text}"
+    kept: write_audit(sealed.dir, 1, "candidate", "CANDIDATE", [Problem]{}, [String:Dyn]{}) ?? "refused: {err.text}"
     assert(kept.contains("already exists"))
 }
 
 #Test("an admitted release needs a full passing RELEASE.json of its own identity, and its tag on origin") {
     identity: "jet@a0.0.26#{"a".repeat(64)}"
-    good: object([String: Dyn]{"schema": Dyn.Text("jet-release/v1"), "name": Dyn.Text("a0.0.26"), "commit": Dyn.Text("c".repeat(40)), "verdict": Dyn.Text("PASS"), "scope": Dyn.Text("full"), "identity": Dyn.Text(identity)})
+    good: object([String:Dyn]{"schema": Dyn.Text("jet-release/v1"), "name": Dyn.Text("a0.0.26"), "commit": Dyn.Text("c".repeat(40)), "verdict": Dyn.Text("PASS"), "scope": Dyn.Text("full"), "identity": Dyn.Text(identity)})
     assert_eq(admission_problems(good, identity).len(), 0)
-    bad: object([String: Dyn]{"schema": Dyn.Text("jet-release/v1"), "name": Dyn.Text(""), "commit": Dyn.Text("c".repeat(40)), "verdict": Dyn.Text("FAIL"), "scope": Dyn.Text("filtered: io"), "identity": Dyn.Text("jet@a0.0.26#b")})
+    bad: object([String:Dyn]{"schema": Dyn.Text("jet-release/v1"), "name": Dyn.Text(""), "commit": Dyn.Text("c".repeat(40)), "verdict": Dyn.Text("FAIL"), "scope": Dyn.Text("filtered: io"), "identity": Dyn.Text("jet@a0.0.26#b")})
     found: admission_problems(bad, identity)
     assert(has_problem(found, ADMISSION, "verdict is FAIL, not PASS"))
     assert(has_problem(found, ADMISSION, "scope is filtered: io, not full"))
@@ -656,7 +675,7 @@ put_le: fn(bytes: &[U8], at: Int, value: Int, count: Int) Never! {
 }
 
 kit_row: fn(id: String, tier: String, status: String) -> SuiteRow Never! {
-    suite_row(object([String: Dyn]{"suite": Dyn.Text("ui"), "case": Dyn.Text(id.copy()), "tier": Dyn.Text(tier.copy()), "status": Dyn.Text(status.copy()), "detail": Dyn.Text("")}))
+    suite_row(object([String:Dyn]{"suite": Dyn.Text("ui"), "case": Dyn.Text(id.copy()), "tier": Dyn.Text(tier.copy()), "status": Dyn.Text(status.copy()), "detail": Dyn.Text("")}))
 }
 
 lost_ids: fn(compared: Compared) -> [String] Never! {
@@ -777,12 +796,16 @@ flaky_ids: fn(compared: Compared) -> [String] Never! {
     dir: files.mkdtemp("jet-release-git-env-") ?? panic("scratch: {err}")
     decoy: files.join(dir, "decoy.git")
     assert_eq(git_in(dir, [String]{"init", "--quiet", "--bare", decoy}).rc, 0)
-    redirect: [String: String]{
-        "GIT_DIR": decoy, "GIT_WORK_TREE": dir, "GIT_INDEX_FILE": files.join(decoy, "index"), "GIT_COMMON_DIR": decoy,
-        "GIT_OBJECT_DIRECTORY": files.join(decoy, "objects"), "GIT_ALTERNATE_OBJECT_DIRECTORIES": files.join(decoy, "objects"),
+    redirect: [String:String]{
+        "GIT_DIR": decoy,
+        "GIT_WORK_TREE": dir,
+        "GIT_INDEX_FILE": files.join(decoy, "index"),
+        "GIT_COMMON_DIR": decoy,
+        "GIT_OBJECT_DIRECTORY": files.join(decoy, "objects"),
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES": files.join(decoy, "objects"),
     }
     assert_eq(GIT_REPOSITORY_VARS.len(), redirect.len())
-    saved := [String: String?]{}
+    saved := [String:String?]{}
     loop name in GIT_REPOSITORY_VARS {
         saved[name] = sys.get(name)
         sys.set(name, redirect[name])
@@ -890,7 +913,7 @@ put_seed: fn(dir: String, jet: String, name: String) -[FS]> String Never! {
     put(files.join(dir, "jet-runtime/README"), "pack\n")
     put(files.join(dir, "SOURCE"), "{COMMIT} (dev, {name})\n")
     put(files.join(dir, "SHA256SUMS"), "{sha}  jet\n")
-    put_json(files.join(dir, "RELEASE.json"), object([String: Dyn]{"name": Dyn.Text(name.copy()), "identity": Dyn.Text(identity), "commit": Dyn.Text(COMMIT)}))
+    put_json(files.join(dir, "RELEASE.json"), object([String:Dyn]{"name": Dyn.Text(name.copy()), "identity": Dyn.Text(identity), "commit": Dyn.Text(COMMIT)}))
     identity
 }
 
@@ -905,7 +928,9 @@ boot_seeds: fn(label: String) -[FS, Env]> String Never! {
     put(files.join(boot, "IDENTITY"), "jet@a0.0.26#{sha256_file(files.join(boot, "jet"))}\n")
     put(files.join(boot, "jet-runtime/README"), "pack\n")
     copied: [String]{"SOURCE", "SHA256SUMS", "RELEASE.json"}
-    loop name in copied -> put(files.join(boot, name), files.read(files.join(seeds, "a0.0.25/{name}")) ?? panic("read {name}: {err}"))
+    loop name in copied {
+        put(files.join(boot, name), files.read(files.join(seeds, "a0.0.25/{name}")) ?? panic("read {name}: {err}"))
+    }
     files.symlink("boot-a0.0.25", files.join(seeds, "current")) ?? panic("current: {err}")
     seeds
 }
@@ -1075,7 +1100,7 @@ CORE_READING_JET: "#!/bin/sh\nif [ ! -f \"$JET_TOOLCHAIN_ROOT/Core/Core.jet\" ];
 }
 
 suite_kit_row: fn(suite: String, id: String, status: String) -> SuiteRow Never! {
-    suite_row(object([String: Dyn]{"suite": Dyn.Text(suite.copy()), "case": Dyn.Text(id.copy()), "tier": Dyn.Text("-"), "status": Dyn.Text(status.copy()), "detail": Dyn.Text("")}))
+    suite_row(object([String:Dyn]{"suite": Dyn.Text(suite.copy()), "case": Dyn.Text(id.copy()), "tier": Dyn.Text("-"), "status": Dyn.Text(status.copy()), "detail": Dyn.Text("")}))
 }
 
 // What parse_row_file makes of `text`: the commit it names, or why it refuses.
@@ -1141,20 +1166,23 @@ row_file_verdict: fn(text: String) -> String Never! {
         kit_row("tests/ui/ledger/x.jet", "o0", "KNOWN-FAILING"),
         kit_row("tests/ui/same/x.jet", "o0", "FAIL"),
     }
-    sources: [String: String]{"tests/cases/q/help.case": "stdout: = ../../cli/help.txt\n", "tests/cases/r/core.case": "run: jet check {{root}}/Core\n"}
+    sources: [String:String]{"tests/cases/q/help.case": "stdout: = ../../cli/help.txt\n", "tests/cases/r/core.case": "run: jet check {{root}}/Core\n"}
     paths: [String]{"tests/ui/edited/x.jet", "tests/cases/p/fixtures/main.jet", "tests/cli/help.txt", KNOWN_LEDGER}
     ledger: ledger_changes("tests/ui/ledger/x\t#1\twhy\ntests/ui/kept/x.jet\t#2\twhy\n", "# id\tcard\treason\ntests/ui/kept/x.jet\t#2\twhy\ntests/ui/new/x.jet\t#3\twhy\n")
     assert_eq(ledger.len(), 2)
     assert(ledger.has_key("tests/ui/ledger/x") && ledger.has_key("tests/ui/new/x.jet"))
     stale: carried_stale(rows, paths, sources, ledger)
-    assert_eq((loop item in rows -> "{item.id} {stale.has_key(item.id)}"), [String]{
-        "tests/ui/edited/x.jet true",
-        "tests/cases/p/x.case true",
-        "tests/cases/q/help.case true",
-        "tests/cases/r/core.case true",
-        "tests/ui/ledger/x.jet true",
-        "tests/ui/same/x.jet false",
-    })
+    assert_eq(
+        (loop item in rows -> "{item.id} {stale.has_key(item.id)}"),
+        [String]{
+            "tests/ui/edited/x.jet true",
+            "tests/cases/p/x.case true",
+            "tests/cases/q/help.case true",
+            "tests/cases/r/core.case true",
+            "tests/ui/ledger/x.jet true",
+            "tests/ui/same/x.jet false",
+        },
+    )
     assert_eq(carried_stale(rows, [String]{}, sources, ledger).len(), 0)
 }
 
@@ -1187,20 +1215,23 @@ row_file_verdict: fn(text: String) -> String Never! {
         kit_row("tests/cases/opt/run.case", "-", "OPT-IN"),
     }
     paths: [String]{"tests/ui/edited/x.jet", "tests/cases/p/fixtures/main.jet", "tests/cli/help.txt", "tests/cases/opt/fixture.jet", "Compiler/JetCli/Source/Cli/Main.jet"}
-    sources: [String: String]{"tests/cases/q/help.case": "stdout: = ../../cli/help.txt\n", "tests/cases/r/core.case": "run: jet check {{root}}/Core\n", "tests/ui/same/x.jet": "run: fn() {{}}\n"}
+    sources: [String:String]{"tests/cases/q/help.case": "stdout: = ../../cli/help.txt\n", "tests/cases/r/core.case": "run: jet check {{root}}/Core\n", "tests/ui/same/x.jet": "run: fn() {{}}\n"}
     picks: release_picks(rows, ReleaseRule{every: false, paths: paths, known: ledger_ids("tests/ui/ledger/x\t#1\twhy\n"), sources: sources})
-    assert_eq((loop pick in picks -> "{pick.id} {pick.reason}"), [String]{
-        "tests/ui/fail/x.jet failing on s2",
-        "tests/ui/known/x.jet failing on s2",
-        "tests/ui/fixed/x.jet known-failing",
-        "tests/ui/ledger/x.jet known-failing",
-        "tests/ui/edited/x.jet changed",
-        "tests/cases/p/x.case changed",
-        "tests/cases/q/help.case naming a changed file",
-        "tests/cases/r/core.case reading the checkout",
-        "tests/ui/tiers/x.jet failing on s2",
-    })
-    every: release_picks(rows, ReleaseRule{every: true, paths: [String]{}, known: [String: Bool]{}, sources: [String: String]{}})
+    assert_eq(
+        (loop pick in picks -> "{pick.id} {pick.reason}"),
+        [String]{
+            "tests/ui/fail/x.jet failing on s2",
+            "tests/ui/known/x.jet failing on s2",
+            "tests/ui/fixed/x.jet known-failing",
+            "tests/ui/ledger/x.jet known-failing",
+            "tests/ui/edited/x.jet changed",
+            "tests/cases/p/x.case changed",
+            "tests/cases/q/help.case naming a changed file",
+            "tests/cases/r/core.case reading the checkout",
+            "tests/ui/tiers/x.jet failing on s2",
+        },
+    )
+    every: release_picks(rows, ReleaseRule{every: true, paths: [String]{}, known: [String:Bool]{}, sources: [String:String]{}})
     assert_eq(every.len(), 11)
     assert(!(loop pick in every -> pick.id.copy()).contains("tests/cases/opt/run.case"))
 }

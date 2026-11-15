@@ -186,7 +186,9 @@ sema_shared_cycle_unread: fn(state: SemaOwnershipState, key: String, allowed: [S
 // comment. `ty` is the type the value is stored as, when known; `allowed`
 // holds the spans a fresh name's references may lie in (sema_shared_cycle_unread).
 sema_shared_cycle_fresh: fn(value: Expr, ty: Type?, owner: String, allowed: [Span], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: SemaOwnershipState) -> Bool {
-    if ty == .Val(known) && !sema_shared_cycle_reaches(owner, known, environment, program) -> return true
+    if ty == .Val(known) && !sema_shared_cycle_reaches(owner, known, environment, program) {
+        return true
+    }
     if value == {
         .Paren(inner, _, _) -> return sema_shared_cycle_fresh(inner, ty, owner, allowed, environment, program, scopes, state)
         // A copy (`x.copy()`, or a generated copy) shares every `Shared`
@@ -197,22 +199,32 @@ sema_shared_cycle_fresh: fn(value: Expr, ty: Type?, owner: String, allowed: [Spa
         .Lambda(lambda, _) -> return sema_shared_cycle_lambda_fresh(value, lambda, owner, allowed, environment, program, scopes, state)
         .Present(inner, _, _) -> return sema_shared_cycle_fresh(inner, sema_shared_cycle_option_inner(ty), owner, allowed, environment, program, scopes, state)
         .Call(call, _) -> {
-            if call.name == "Val" && call.args.len() == 1 -> return sema_shared_cycle_fresh(call.args[0].expr, sema_shared_cycle_option_inner(ty), owner, allowed, environment, program, scopes, state)
+            if call.name == "Val" && call.args.len() == 1 {
+                return sema_shared_cycle_fresh(call.args[0].expr, sema_shared_cycle_option_inner(ty), owner, allowed, environment, program, scopes, state)
+            }
         }
         .EnumLit(_, variant, _, args, _, _, _) -> {
             if args.len() == 0 -> return true
-            if variant == "Val" && args.len() == 1 -> return sema_shared_cycle_fresh(sema_shared_cycle_enum_arg(args[0]), sema_shared_cycle_option_inner(ty), owner, allowed, environment, program, scopes, state)
+            if variant == "Val" && args.len() == 1 {
+                return sema_shared_cycle_fresh(sema_shared_cycle_enum_arg(args[0]), sema_shared_cycle_option_inner(ty), owner, allowed, environment, program, scopes, state)
+            }
         }
         .MethodCall(receiver, method, _, _, _, args, _) -> {
-            if method == "copy" && args.len() == 0 -> return sema_shared_cycle_fresh(receiver, ty, owner, allowed, environment, program, scopes, state)
+            if method == "copy" && args.len() == 0 {
+                return sema_shared_cycle_fresh(receiver, ty, owner, allowed, environment, program, scopes, state)
+            }
             if method == "new" && args.len() == 1 && args[0].flags.shared_operand {
-                if receiver == .Ident(name, _, _) && name == "Shared" -> return sema_shared_cycle_fresh(args[0].expr, sema_shared_cycle_shared_inner(ty), owner, allowed, environment, program, scopes, state)
+                if receiver == .Ident(name, _, _) && name == "Shared" {
+                    return sema_shared_cycle_fresh(args[0].expr, sema_shared_cycle_shared_inner(ty), owner, allowed, environment, program, scopes, state)
+                }
             }
         }
         .StructLit(type_name, type_args, _, _, fields, _, _, _) -> {
             struct_ty: if type_args.len() == 0 -> Type.Named{name: type_name} else -> Type.Apply{name: type_name, args: type_args}
             loop field in fields {
-                if !sema_shared_cycle_fresh(field.value, sema_shared_access_field_type(struct_ty, field.name, environment, program, scopes), owner, allowed, environment, program, scopes, state) -> return false
+                if !sema_shared_cycle_fresh(field.value, sema_shared_access_field_type(struct_ty, field.name, environment, program, scopes), owner, allowed, environment, program, scopes, state) {
+                    return false
+                }
             }
             return true
         }
@@ -223,20 +235,26 @@ sema_shared_cycle_fresh: fn(value: Expr, ty: Type?, owner: String, allowed: [Spa
                 .Value(inner) -> return sema_shared_cycle_fresh(inner, target, owner, allowed, environment, program, scopes, state)
                 .Elements(elements) -> {
                     loop element in elements {
-                        if !sema_shared_cycle_fresh(element, sema_shared_cycle_element(target), owner, allowed, environment, program, scopes, state) -> return false
+                        if !sema_shared_cycle_fresh(element, sema_shared_cycle_element(target), owner, allowed, environment, program, scopes, state) {
+                            return false
+                        }
                     }
                     return true
                 }
                 .Entries(entries) -> {
                     loop entry in entries {
-                        if !sema_shared_cycle_fresh(entry.key, None, owner, allowed, environment, program, scopes, state) || !sema_shared_cycle_fresh(entry.value, sema_shared_cycle_element(target), owner, allowed, environment, program, scopes, state) -> return false
+                        if !sema_shared_cycle_fresh(entry.key, None, owner, allowed, environment, program, scopes, state) || !sema_shared_cycle_fresh(entry.value, sema_shared_cycle_element(target), owner, allowed, environment, program, scopes, state) {
+                            return false
+                        }
                     }
                     return true
                 }
                 .Fields(fields) -> {
                     struct_ty: target ?? return false
                     loop field in fields {
-                        if !sema_shared_cycle_fresh(field.value, sema_shared_access_field_type(struct_ty, field.name, environment, program, scopes), owner, allowed, environment, program, scopes, state) -> return false
+                        if !sema_shared_cycle_fresh(field.value, sema_shared_access_field_type(struct_ty, field.name, environment, program, scopes), owner, allowed, environment, program, scopes, state) {
+                            return false
+                        }
                     }
                     return true
                 }
@@ -244,21 +262,29 @@ sema_shared_cycle_fresh: fn(value: Expr, ty: Type?, owner: String, allowed: [Spa
         }
         .ListLit(elements, _, _) -> {
             loop element in elements {
-                if !sema_shared_cycle_fresh(element, sema_shared_cycle_element(ty), owner, allowed, environment, program, scopes, state) -> return false
+                if !sema_shared_cycle_fresh(element, sema_shared_cycle_element(ty), owner, allowed, environment, program, scopes, state) {
+                    return false
+                }
             }
             return true
         }
         .TupleLit(fields, _, _, _) -> {
             loop field in fields {
-                if !sema_shared_cycle_fresh(field.value, None, owner, allowed, environment, program, scopes, state) -> return false
+                if !sema_shared_cycle_fresh(field.value, None, owner, allowed, environment, program, scopes, state) {
+                    return false
+                }
             }
             return true
         }
         .Ident(name, _, _) -> {
             if name == "None" && sema_scope_resolve_index(scopes, name) == None -> return true
             // A named function captures nothing.
-            if sema_scope_resolve(scopes, name) == .Val(symbol) && symbol.kind == SymbolKind.Function -> return true
-            if sema_shared_cycle_fresh_name(name, owner, allowed, environment, program, scopes, state) -> return true
+            if sema_scope_resolve(scopes, name) == .Val(symbol) && symbol.kind == SymbolKind.Function {
+                return true
+            }
+            if sema_shared_cycle_fresh_name(name, owner, allowed, environment, program, scopes, state) {
+                return true
+            }
         }
         .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
@@ -296,7 +322,9 @@ sema_shared_cycle_lambda_fresh: fn(value: Expr, lambda: Lambda, owner: String, a
             if parameters.contains(name) -> next
             symbol: sema_scope_resolve(scopes, name) ?? next
             if symbol.kind != SymbolKind.Local && symbol.kind != SymbolKind.Parameter -> next
-            if !sema_shared_cycle_fresh(expression, None, owner, allowed, environment, program, scopes, state) -> return false
+            if !sema_shared_cycle_fresh(expression, None, owner, allowed, environment, program, scopes, state) {
+                return false
+            }
         }
     }
     true
@@ -312,16 +340,24 @@ sema_shared_cycle_note_ident: fn(named: &[Expr], expression: Expr) {
 sema_shared_cycle_check_write: fn(target: LValue, value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: SemaOwnershipState, diagnostics: &[Diagnostic]) {
     if target == {
         .Local(_, _) -> {}
-        .Field(base, field, field_span) -> sema_shared_cycle_check_stored(sema_shared_cycle_field_place(base, field, environment, program, scopes), Span{start: sema_shared_access_place_start(base), end: field_span.end}, value, environment, program, scopes, state, diagnostics)
-        .Index(base, _, index_span, _) -> sema_shared_cycle_check_stored(sema_shared_cycle_element_place(base, environment, program, scopes), Span{start: sema_shared_access_place_start(base), end: index_span.end}, value, environment, program, scopes, state, diagnostics)
+        .Field(base, field, field_span) -> {
+            sema_shared_cycle_check_stored(sema_shared_cycle_field_place(base, field, environment, program, scopes), Span{start: sema_shared_access_place_start(base), end: field_span.end}, value, environment, program, scopes, state, diagnostics)
+        }
+        .Index(base, _, index_span, _) -> {
+            sema_shared_cycle_check_stored(sema_shared_cycle_element_place(base, environment, program, scopes), Span{start: sema_shared_access_place_start(base), end: index_span.end}, value, environment, program, scopes, state, diagnostics)
+        }
     }
 }
 
 sema_shared_cycle_check_stored: fn(found: (owner: Type, place: Type)?, span: Span, value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: SemaOwnershipState, diagnostics: &[Diagnostic]) {
     cell: found ?? return
     owner: sema_shared_cycle_owner_key(cell.owner, environment, program) ?? return
-    if !sema_shared_cycle_reaches(owner, cell.place, environment, program) -> return
-    if sema_shared_cycle_fresh(value, Val(cell.place), owner, [Span]{expr_source_span(value)}, environment, program, scopes, state) -> return
+    if !sema_shared_cycle_reaches(owner, cell.place, environment, program) {
+        return
+    }
+    if sema_shared_cycle_fresh(value, Val(cell.place), owner, [Span]{expr_source_span(value)}, environment, program, scopes, state) {
+        return
+    }
     diagnostics.push(sema_shared_cycle_diagnostic(span, cell.owner, cell.place))
 }
 
@@ -330,10 +366,14 @@ sema_shared_cycle_check_stored: fn(found: (owner: Type, place: Type)?, span: Spa
 // a statement bound ahead of the edit (SEMA_SHARED_HOISTED_RHS) were checked
 // there.
 sema_shared_cycle_check_call: fn(place: Expr, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: SemaOwnershipState, diagnostics: &[Diagnostic]) {
-    if args.len() == 0 -> return
+    if args.len() == 0 {
+        return
+    }
     found: sema_shared_cycle_place(place, environment, program, scopes) ?? return
     owner: sema_shared_cycle_owner_key(found.owner, environment, program) ?? return
-    if !sema_shared_cycle_reaches(owner, found.place, environment, program) -> return
+    if !sema_shared_cycle_reaches(owner, found.place, environment, program) {
+        return
+    }
     stores_functions: sema_shared_cycle_holds_function(found.place)
     // A method-call argument (`kid.copy()`) is spanned at its method name, so
     // the allowed extent starts at its receiver.
@@ -342,7 +382,9 @@ sema_shared_cycle_check_call: fn(place: Expr, args: [CallArg], environment: Sema
         if argument.expr == .Ident(name, _, _) && name.starts_with(SEMA_SHARED_HOISTED_RHS) -> next
         // A place that holds no function value cannot store one: a function
         // argument (`kids.sort_by(fn(kid) { … })`) is a callback the call runs.
-        if !stores_functions && sema_shared_cycle_function_argument(argument.expr, environment, program, scopes) -> next
+        if !stores_functions && sema_shared_cycle_function_argument(argument.expr, environment, program, scopes) {
+            next
+        }
         if !sema_shared_cycle_fresh(argument.expr, None, owner, allowed, environment, program, scopes, state) {
             diagnostics.push(sema_shared_cycle_diagnostic(Span{start: sema_shared_access_place_start(place), end: expr_span(place).end}, found.owner, found.place))
             return
@@ -364,7 +406,9 @@ sema_shared_cycle_check_hoisted_call: fn(expr: Expr, environment: SemaScopeEnvir
             touching := [CallArg]{}
             loop argument in args {
                 // copy: `args` belongs to the statement, which keeps them.
-                if sema_shared_access_expr_touches_shared(argument.expr, scopes) -> touching.push(argument.copy())
+                if sema_shared_access_expr_touches_shared(argument.expr, scopes) {
+                    touching.push(argument.copy())
+                }
             }
             sema_shared_cycle_check_call(value, touching, environment, program, scopes, state, diagnostics)
         }
@@ -375,8 +419,12 @@ sema_shared_cycle_check_hoisted_call: fn(expr: Expr, environment: SemaScopeEnvir
 // after the replacement is checked.
 sema_shared_cycle_check_replace: fn(inner: Type, value: Expr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: SemaOwnershipState, diagnostics: &[Diagnostic]) {
     owner: sema_shared_cycle_owner_key(inner, environment, program) ?? return
-    if !sema_shared_cycle_reaches(owner, inner, environment, program) -> return
-    if sema_shared_cycle_fresh(value, Val(inner), owner, [Span]{expr_source_span(value)}, environment, program, scopes, state) -> return
+    if !sema_shared_cycle_reaches(owner, inner, environment, program) {
+        return
+    }
+    if sema_shared_cycle_fresh(value, Val(inner), owner, [Span]{expr_source_span(value)}, environment, program, scopes, state) {
+        return
+    }
     diagnostics.push(sema_shared_cycle_diagnostic(span, inner, inner))
 }
 
@@ -385,7 +433,9 @@ sema_shared_cycle_check_replace: fn(inner: Type, value: Expr, span: Span, enviro
 sema_shared_cycle_diagnostic: fn(span: Span, owner_ty: Type, place_ty: Type) -> Diagnostic {
     name: type_name(owner_ty)
     what: "this write can close a strong `Shared` cycle through `{name}`"
-    if sema_shared_cycle_holds_function(place_ty) -> return sema_error("E0221", span, what, "a function value keeps alive everything it captures, and the stored one may capture a strong handle that reaches this `{name}` cell; reference counting never frees a strong cycle", "capture a weak handle instead (`back: cell.downgrade()`, then `back.upgrade()` inside the function), or store a named function or a lambda that captures only new cells")
+    if sema_shared_cycle_holds_function(place_ty) {
+        return sema_error("E0221", span, what, "a function value keeps alive everything it captures, and the stored one may capture a strong handle that reaches this `{name}` cell; reference counting never frees a strong cycle", "capture a weak handle instead (`back: cell.downgrade()`, then `back.upgrade()` inside the function), or store a named function or a lambda that captures only new cells")
+    }
     sema_error("E0221", span, what, "the stored value may already reach this `{name}` cell through strong `Shared` handles, and reference counting never frees a strong cycle", "store a `Shared.Weak<{name}>` back-edge (`.downgrade()`) or an id, or build the stored value here from new cells (`Shared{{{name}{{…}}}}`)")
 }
 

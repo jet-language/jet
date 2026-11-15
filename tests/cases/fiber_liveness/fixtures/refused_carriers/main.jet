@@ -8,22 +8,26 @@ package: {
     authority: { allow: [Env, Exec, FS, FS.Read, IO] }
 }
 
-use files: core.files
-use sys: core.sys
+use {
+    files: core.files
+    sys: core.sys
+}
 
 TASKS: 64
+
 CARRIERS: 32
+
 ROOM: 8388608
 
-work: fn(i: Int) -> Int {
-    i % 5
-}
+work: fn(i: Int) -> Int { i % 5 }
 
 // A /proc status field's number ("VmSize:\t 123 kB", "Threads:\t3").
 census: fn(prefix: String) -[FS]> Int {
     text: files.read("/proc/self/status") ?? panic("read status")
     loop line in text.lines() {
-        if line.starts_with(prefix) -> return Int.parse(line.remove_prefix(prefix).remove_suffix("kB").trim()) ?? -1
+        if line.starts_with(prefix) {
+            return Int.parse(line.remove_prefix(prefix).remove_suffix("kB").trim()) ?? -1
+        }
     }
     -1
 }

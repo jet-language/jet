@@ -13,14 +13,15 @@
 // site's owner outlives any `#Context(allocator:)` block, so its candidate is
 // built in the program heap, its destination's allocator (jet_rt_move_enter
 // of 0 and jet_rt_move_leave).
-
 use jet_foundation.[DeclID, SharedLifetime, Span, TConstantDef, Type, name_rows_set, name_rows_value]
 
 IR_SHARED_SITE_BYTES: 8
 
 ir_shared_site: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, initializer: DeclID, lifetime: SharedLifetime, span: Span) -> Int Never! {
     row: ir_decl_row(p, initializer)
-    if row < 0 -> return ir_fail_slot(b, span, "Shared site initializer outside the checked program (declaration row {initializer.row.index()})")
+    if row < 0 {
+        return ir_fail_slot(b, span, "Shared site initializer outside the checked program (declaration row {initializer.row.index()})")
+    }
     shared_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     site: ir_shared_site_word(m, b, p.functions[row].key)
     word_row: ir_word_row(m)
@@ -63,7 +64,9 @@ ir_shared_site: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, initiali
 // puts a copy of the payload the build folded into a new cell and publishes
 // it; every read returns an owning clone of the published cell.
 ir_shared_holder_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TConstantDef, span: Span) -> Int Never! {
-    inner: if ir_untag(definition.ty) == .Shared(value) -> value else -> { return ir_fail_slot(b, span, "shared holder {definition.name} of {ir_type_name(definition.ty)}") }
+    inner: if ir_untag(definition.ty) == .Shared(value) -> value else -> {
+        return ir_fail_slot(b, span, "shared holder {definition.name} of {ir_type_name(definition.ty)}")
+    }
     shared_row: ir_value_type(m, p, definition.ty) ?? return ir_type_fail(b, span, definition.ty)
     site: ir_shared_site_word(m, b, "holder:{definition.key}")
     word_row: ir_word_row(m)
@@ -102,7 +105,9 @@ ir_computed_constant_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, item_ke
         return ir_call_row_values(m, p, b, item, [Int]{}, span)
     }
     row: ir_value_type(m, p, inner) ?? return ir_type_fail(b, span, inner)
-    if m.types[row].kind == .Unit || m.types[row].option_null -> return ir_call_row_values(m, p, b, item, [Int]{}, span)
+    if m.types[row].kind == .Unit || m.types[row].option_null {
+        return ir_call_row_values(m, p, b, item, [Int]{}, span)
+    }
     site: ir_shared_site_word(m, b, "computed:{item_key}")
     word_row: ir_word_row(m)
     pointer_row: ir_pointer_row(m)

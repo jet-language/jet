@@ -9,20 +9,33 @@
 // `pkg_store_list`); this facade is the checked engine boundary above it.
 
 STORE_STAGE_DIR: ".stage"
+
 STORE_OBJECTS_DIR: "objects"
+
 STORE_CAS_DIR: "cas"
+
 STORE_REFERRERS_DIR: "referrers"
+
 STORE_PARTIAL_SUFFIX: ".partial"
+
 STORE_NIX_GC_ROOT: "nix-gc-root"
+
 STORE_BUILD_SCRATCH_DIR: "build-scratch"
+
 STORE_FAILED_SCRATCH_DIR: "failed-scratch"
+
 STORE_AUTO_CLEAN_STAMP: ".last-auto-clean"
+
 STORE_STALE_AFTER_SECONDS: 2592000
+
 STORE_AUTO_CLEAN_AFTER_SECONDS: 86400
+
 STORE_MAX_GC_METADATA_BYTES: 1048576
+
 STORE_LEASE_NAME_MAX: 256
 
 STORE_OPTIMIZE_SEQUENCE: Shared{ProcessSequence{next: 0}}
+
 STORE_GC_QUARANTINE_SEQUENCE: Shared{ProcessSequence{next: 0}}
 
 // Active and stale executable leases.
@@ -47,9 +60,7 @@ store_list_unlocked: fn(roots: HangarRoots) -> [StoreEntry] StoreError! {
 // Inspect package projections without taking a lock or replaying journals.
 // Health/reporting paths use this so observation cannot create or repair
 // store state.
-store_list_read_only: fn(roots: HangarRoots) -> [StoreEntry] Never! {
-    pkg_store_list(roots)
-}
+store_list_read_only: fn(roots: HangarRoots) -> [StoreEntry] Never! { pkg_store_list(roots) }
 
 // Strictly read the committed package projection without taking the Hangar
 // lock or replaying a migration. Audit uses this boundary so observation
@@ -78,7 +89,7 @@ store_inspect_leases: fn(roots: HangarRoots) -> LeaseInventory StoreError! {
             else -> active += 1
         }
     }
-    Ok(LeaseInventory{active, stale})
+    Ok(LeaseInventory{active: active, stale: stale})
 }
 
 // Produce the audit projection without a lock, migration, journal replay, or
@@ -87,7 +98,7 @@ store_inspect_leases: fn(roots: HangarRoots) -> LeaseInventory StoreError! {
 store_audit_read_only: fn(verification: &StoreVerification, roots: HangarRoots) -> AuditSnapshot StoreError! {
     graph: store_closure_graph_read_only(verification, roots)
     entries: store_list_read_only_checked(roots)
-    known := [String: Bool]{}
+    known := [String:Bool]{}
     loop entry in entries -> known[entry.id] = true
 
     hangar: roots.hangar_dir()
@@ -101,7 +112,9 @@ store_audit_read_only: fn(verification: &StoreVerification, roots: HangarRoots) 
                 }
             }
         }
-        .Err(error) -> if !StoreError.IO(error).is_not_found() -> return Err(StoreError.IO(error))
+        .Err(error) -> {
+            if !StoreError.IO(error).is_not_found() -> return Err(StoreError.IO(error))
+        }
     }
 
     loop id in store_sorted_record_ids(graph) {
@@ -332,6 +345,8 @@ store_expected_record_id: fn(name: String, version: String, reference: String, o
         .Ok(producer) -> producer.provider == "nix" || producer.provider == "jetpackage"
         .Err(_) -> false
     }
-    if content_addressed && output_hash != "" -> return store_content_addressed_entry_id(name, version, reference, output_hash)
+    if content_addressed && output_hash != "" {
+        return store_content_addressed_entry_id(name, version, reference, output_hash)
+    }
     store_entry_id(name, version, reference, out)
 }

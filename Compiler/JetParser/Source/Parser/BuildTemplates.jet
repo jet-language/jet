@@ -25,7 +25,9 @@ parser_parse_template_items_arg: fn(state: &JetParserState, args: &[CallArg]) {
 // `#code { items }`, written with no space between `#` and `code`. Its
 // spelling is the Syntax registry's CODE_VALUE; `code` stays an identifier.
 parser_code_value_ahead: fn(state: &JetParserState) -> Bool Never! {
-    if parser_kind_at(state, 0) != TOKEN_HASH || parser_kind_at(state, 1) != TOKEN_IDENT || parser_value_at(state, 1) != "code" -> return false
+    if parser_kind_at(state, 0) != TOKEN_HASH || parser_kind_at(state, 1) != TOKEN_IDENT || parser_value_at(state, 1) != "code" {
+        return false
+    }
     parser_kind_at(state, 2) == TOKEN_LBRACE && parser_lookahead(state, 0).span.end == parser_lookahead(state, 1).span.start
 }
 

@@ -19,7 +19,7 @@ CPUS: [Int]{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
 // `log`: the PASS and FAIL counts of the testkit summary (the last line that
 // starts `{"PASS"`, a JSON object), and the exit code, 124 on the timeout and
 // 127 when the run did not start.
-row_line: fn(row: [String], ran: Result<ProcessReceipt, IOError>, log: String) -> String {
+row_line: fn(row: [String], ran: ProcessReceipt IOError!, log: String) -> String {
     head: "{row[0]}\t{row[1]}\t{row[2]}"
     receipt: ran ?? {
         files.write(log, "{err}\n")
@@ -32,7 +32,9 @@ row_line: fn(row: [String], ran: Result<ProcessReceipt, IOError>, log: String) -
 
 run: fn() {
     args: process.args()
-    if ![2, 3].contains(args.len()) -> process.fail(2, "usage: jet Tools/agent/orchestrator/VerifyRows.jet ROWS OUTDIR [JET]")
+    if ![2, 3].contains(args.len()) {
+        process.fail(2, "usage: jet Tools/agent/orchestrator/VerifyRows.jet ROWS OUTDIR [JET]")
+    }
     out: args[1]
     given: args.get(2) ?? "jet"
     // A JET given as a relative path still names it from the worktree.

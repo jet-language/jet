@@ -14,7 +14,9 @@ priv rt_text_word: fn(address: I64) -> I64 {
 }
 
 priv rt_text_store: fn(address: I64, value: I64) {
-    #Unsafe("address is an aligned word of native storage the caller owns or holds the lock for") { os_store_i64(address, value) }
+    #Unsafe("address is an aligned word of native storage the caller owns or holds the lock for") {
+        os_store_i64(address, value)
+    }
 }
 
 priv rt_text_byte: fn(address: I64) -> I64 {
@@ -65,20 +67,12 @@ RT_MOVE_STRING_FROM: I64{2048}
             }
         }
         if (left <= I64{16}) {
-            if (left >= I64{8}) {
-                os_move_8_16_i64(to, from, left)
-            } else if (left >= I64{4}) {
+            if (left >= I64{8}) { os_move_8_16_i64(to, from, left) } else if (left >= I64{4}) {
                 os_move_4_7_i64(to, from, left)
-            } else if (left > I64{0}) {
-                os_move_1_3_i64(to, from, left)
-            }
-        } else if (left <= I64{32}) {
-            os_move_16_32_i64(to, from, left)
-        } else if (left <= I64{64}) {
+            } else if (left > I64{0}) { os_move_1_3_i64(to, from, left) }
+        } else if (left <= I64{32}) { os_move_16_32_i64(to, from, left) } else if (left <= I64{64}) {
             os_move_32_64_i64(to, from, left)
-        } else {
-            os_move_64_128_i64(to, from, left)
-        }
+        } else { os_move_64_128_i64(to, from, left) }
     }
 }
 
@@ -94,7 +88,9 @@ RT_MOVE_STRING_FROM: I64{2048}
 RT_FILL_CHUNK: I64{16384}
 
 #Export(c) priv jet_rt_mem_fill: fn(target: I64, source: I64, period: I64, total: I64) {
-    if (total <= I64{0} || period <= I64{0}) -> return
+    if (total <= I64{0} || period <= I64{0}) {
+        return
+    }
     #Unsafe("native lowering owns total writable bytes at target and period readable bytes at source, outside the target bytes") {
         if (period == I64{1}) {
             jet_rt_mem_fill_bytes(target, os_load_u8(source), total)
@@ -109,7 +105,7 @@ RT_FILL_CHUNK: I64{16384}
                 lane += I64{1}
             }
             words: total >> I64{3}
-            if (words > I64{0}) -> os_fill_words_i64(target, word, words)
+            if (words > I64{0}) { os_fill_words_i64(target, word, words) }
             // Every word starts on a period, so the tail is the word's low bytes.
             at := words << I64{3}
             shift := I64{0}
@@ -149,20 +145,12 @@ RT_FILL_STRING_FROM: I64{2048}
         // The byte in all eight lanes of a word.
         word: wrapping(value.bit_and(I64{255}) * I64{72340172838076673})
         if (count <= I64{16}) {
-            if (count >= I64{8}) {
-                os_fill_8_16_i64(target, word, count)
-            } else if (count >= I64{4}) {
+            if (count >= I64{8}) { os_fill_8_16_i64(target, word, count) } else if (count >= I64{4}) {
                 os_fill_4_7_i64(target, word, count)
-            } else if (count > I64{0}) {
-                os_fill_1_3_i64(target, word, count)
-            }
-        } else if (count <= I64{32}) {
-            os_fill_16_32_i64(target, word, count)
-        } else if (count <= I64{64}) {
+            } else if (count > I64{0}) { os_fill_1_3_i64(target, word, count) }
+        } else if (count <= I64{32}) { os_fill_16_32_i64(target, word, count) } else if (count <= I64{64}) {
             os_fill_32_64_i64(target, word, count)
-        } else if (count <= I64{128}) {
-            os_fill_64_128_i64(target, word, count)
-        } else if (count >= RT_FILL_STRING_FROM) {
+        } else if (count <= I64{128}) { os_fill_64_128_i64(target, word, count) } else if (count >= RT_FILL_STRING_FROM) {
             os_fill_string_i64(target, word, count)
         } else {
             os_fill_64_i64(target, word)
@@ -207,7 +195,7 @@ RT_FILL_STRING_FROM: I64{2048}
 // last word, read overlapped.
 // Otherwise the bytes from the first differing word decide.
 #Export(c) priv memcmp: fn(left: I64, right: I64, count: I64) -> I64 {
-    if (left == right) -> return I64{0}
+    if (left == right) { return I64{0} }
     at := I64{0}
     last_block: count - I64{64}
     last_word: count - I64{8}
@@ -218,11 +206,13 @@ RT_FILL_STRING_FROM: I64{2048}
         loop at <= last_word && os_load_i64(wrapping(left + at)) == os_load_i64(wrapping(right + at)) {
             at += I64{8}
         }
-        if (at > last_word && count >= I64{8} && os_load_i64(wrapping(left + last_word)) == os_load_i64(wrapping(right + last_word))) -> return I64{0}
+        if (at > last_word && count >= I64{8} && os_load_i64(wrapping(left + last_word)) == os_load_i64(wrapping(right + last_word))) {
+            return I64{0}
+        }
         loop at < count {
             a: os_load_u8(wrapping(left + at))
             b: os_load_u8(wrapping(right + at))
-            if (a != b) -> return a - b
+            if (a != b) { return a - b }
             at += I64{1}
         }
     }
@@ -275,9 +265,7 @@ priv coll_call5: fn(code: I64, a: I64, b: I64, c: I64, d: I64, e: I64) -> I64 {
 }
 
 priv coll_call0_unit: fn(code: I64) {
-    #Unsafe("checked executable System V void(void) address") {
-        os_call0_unit(code)
-    }
+    #Unsafe("checked executable System V void(void) address") { os_call0_unit(code) }
 }
 
 priv coll_call3_unit: fn(code: I64, a: I64, b: I64, c: I64) {

@@ -122,13 +122,16 @@ run: fn() {
     print(observation)
     restart_count: tree.restarts(a) ?? panic("restarts")
     log.set_sink("jsonl", telemetry_path)
-    log.info_fields("service.observe", [
-        log.field("observation", observation),
-        log.counter("dead_letters", tree.dead_letter_count()),
-        log.counter("events", tree.event_count()),
-        log.counter("restarts", restart_count),
-        log.counter("chaos_failures", chaos)
-    ])
+    log.info_fields(
+        "service.observe",
+        [
+            log.field("observation", observation),
+            log.counter("dead_letters", tree.dead_letter_count()),
+            log.counter("events", tree.event_count()),
+            log.counter("restarts", restart_count),
+            log.counter("chaos_failures", chaos),
+        ],
+    )
     log.flush()
     telemetry: files.read(telemetry_path) ?? panic("telemetry read")
     print("telemetry:{telemetry_has_service_counters(telemetry)}")

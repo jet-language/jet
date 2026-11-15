@@ -1,10 +1,7 @@
 // TOOLS-D1 consumer tests (158/167) plus closed-schema edges. These exercise
 // the debugger's validator only; the runtime producer feed needs the unported
 // runtime observer.
-
-use {
-    jet_debug.[render_event_observations]
-}
+use jet_debug.[render_event_observations]
 
 debug_event_test_record: fn() -> String Never! {
     `{"sequence":1,"source":"AsyncEvent","event_id":2,"owner_id":3,"subscription_id":4,"dispatch_id":5,"lifecycle":"HandlerFailed","queued":1,"blocked":0,"running":1,"capacity":8,"overflow":"DropNewest","priority":17,"failure":"Handler","terminal":"None"}`
@@ -28,14 +25,18 @@ debug_event_test_with: fn(field: String, replacement: String) -> String Never! {
         "priority" -> "\"priority\":17"
         "failure" -> "\"failure\":\"Handler\""
         "terminal" -> "\"terminal\":\"None\""
-        else -> { panic("unknown test field {field}") }
+        else -> {
+            panic("unknown test field {field}")
+        }
     }
     record.replace(original, replacement)
 }
 
 debug_event_test_error: fn(snapshot: String) -> String Never! {
     if render_event_observations(snapshot) == {
-        .Ok(_) -> { panic("expected the observation to be refused") }
+        .Ok(_) -> {
+            panic("expected the observation to be refused")
+        }
         .Err(error) -> error.message
     }
 }
@@ -66,7 +67,9 @@ debug_event_test_padded: fn(total_bytes: Int) -> String Never! {
 #Test("event_observations_render_ordered_lines_up_to_the_record_bound") {
     assert_eq(debug_event_test_render(debug_event_test_snapshot("")), "")
     rows := [String]{}
-    loop index in 1..<257 -> rows.push(debug_event_test_with("sequence", "\"sequence\":{index * 3}"))
+    loop index in 1..<257 {
+        rows.push(debug_event_test_with("sequence", "\"sequence\":{index * 3}"))
+    }
     rendered: debug_event_test_render(debug_event_test_snapshot(rows.join(",")))
     lines: rendered.split("\n").to_list()
     assert_eq(lines.len(), 256)

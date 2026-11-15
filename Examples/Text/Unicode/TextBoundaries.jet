@@ -50,11 +50,14 @@ run: fn() {
 
     print("title")
     loop uncased in ["", "456", "! ?", "界", "😀"] -> print(parse.is_title(uncased))
-    loop titled in ["Title 456", "Hello World", "Élan Vital", "123 Abc", "A1B", "Abc-Def"] -> print(parse.is_title(titled))
+    loop titled in ["Title 456", "Hello World", "Élan Vital", "123 Abc", "A1B", "Abc-Def"] {
+        print(parse.is_title(titled))
+    }
     loop untitled in ["Hello world", "HeLLo", "abc", "Abc-def"] -> print(parse.is_title(untitled))
 
     print("duration")
-    loop ms in [0, 1, 999, -999, 1000, 1999, 60000, 61000, 3600000, 3601000, 86400000, 90061001, -90061001, -1000, -61000] {
+    loop ms in
+        [0, 1, 999, -999, 1000, 1999, 60000, 61000, 3600000, 3601000, 86400000, 90061001, -90061001, -1000, -61000] {
         print(fmt.duration(ms))
     }
 }

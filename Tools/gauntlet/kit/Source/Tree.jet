@@ -8,15 +8,11 @@ use {
 
 // The value at `path` ("" is the whole value), null included; None when a
 // step is missing.
-value_at: fn(tree: Dyn, path: String) -> Dyn? {
-    Val(json.at<Dyn>(tree, path) ?? return None)
-}
+value_at: fn(tree: Dyn, path: String) -> Dyn? { Val(json.at<Dyn>(tree, path) ?? return None) }
 
 // The value at `path`, null when a step is missing: what JavaScript's
 // `tree.a?.b ?? null` reads.
-dyn_at: fn(tree: Dyn, path: String) -> Dyn {
-    json.at<Dyn>(tree, path) ?? Dyn.Null
-}
+dyn_at: fn(tree: Dyn, path: String) -> Dyn { json.at<Dyn>(tree, path) ?? Dyn.Null }
 
 // The value at `path`; None when a step is missing or the value is null.
 member: fn(tree: Dyn, path: String) -> Dyn? {
@@ -32,14 +28,10 @@ text_at: fn(tree: Dyn, path: String) -> String? {
 }
 
 // The text at `path`; "" when it is absent or not a string.
-text_or_empty: fn(tree: Dyn, path: String) -> String {
-    text_at(tree, path) ?? ""
-}
+text_or_empty: fn(tree: Dyn, path: String) -> String { text_at(tree, path) ?? "" }
 
 // Whether the value at `path` is `true`.
-is_true: fn(tree: Dyn, path: String) -> Bool {
-    dyn_at(tree, path) == Dyn.Bool(true)
-}
+is_true: fn(tree: Dyn, path: String) -> Bool { dyn_at(tree, path) == Dyn.Bool(true) }
 
 // Whether the value at `path` is truthy as JavaScript sees it: present and
 // not null, false, 0 or "".
@@ -54,9 +46,7 @@ number_at: fn(tree: Dyn, path: String) -> Float? {
 }
 
 // The whole number at `path`; None when it is absent or not a whole number.
-int_at: fn(tree: Dyn, path: String) -> Int? {
-    Val(dyn_at(tree, path).decode<Int>() ?? return None)
-}
+int_at: fn(tree: Dyn, path: String) -> Int? { Val(dyn_at(tree, path).decode<Int>() ?? return None) }
 
 // The elements of the array at `path` (none for another value).
 items_at: fn(tree: Dyn, path: String) -> [Dyn] {

@@ -13,14 +13,20 @@ text_route_fits: fn(value: I64) -> Bool {
 text_route_native: fn(value: I64) -> I64 { if int_inline(value) -> value else -> int_word(value) }
 
 // The Rust kernels' `panic!` reasons cross the guard as an ordinary panic.
-text_route_panic: fn(message: I64) { jet_rt_panic_message(rt_text_data(message), rt_text_len(message)) }
+text_route_panic: fn(message: I64) {
+    jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
+}
 
 // Append count copies of one ASCII byte, reserving once.
 text_push_repeat_byte: fn(target: I64, byte: I64, count: I64) {
-    if (count <= I64{0}) -> return
+    if (count <= I64{0}) {
+        return
+    }
     used: rt_text_len(target)
     buffer: rt_text_reserve_extra(target, rt_text_data(target), used, count)
-    if (buffer == I64{0}) -> return
+    if (buffer == I64{0}) {
+        return
+    }
     at := I64{0}
     loop at < count {
         rt_text_put(wrapping(wrapping(buffer + used) + at), byte)
@@ -32,7 +38,9 @@ text_push_repeat_byte: fn(target: I64, byte: I64, count: I64) {
 // Start of the scalar that ends at byte offset end (> floor).
 text_scalar_start: fn(data: I64, floor: I64, end: I64) -> I64 {
     at := end - I64{1}
-    loop at > floor && (rt_text_byte(wrapping(data + at)).bit_and(I64{192})) == (I64{128}) -> at -= I64{1}
+    loop at > floor && (rt_text_byte(wrapping(data + at)).bit_and(I64{192})) == (I64{128}) {
+        at -= I64{1}
+    }
     at
 }
 
@@ -59,18 +67,26 @@ text_trim_side: fn(value: I64, leading: Bool, trailing: Bool) -> I64 {
 }
 
 #Export(c) jet_text_trim_start: fn(value: I64) -> I64 { text_trim_side(value, true, false) }
+
 #Export(c) jet_text_trim_end: fn(value: I64) -> I64 { text_trim_side(value, false, true) }
+
 #Export(c) jet_text_parse_lstrip: fn(value: I64) -> I64 { text_trim_side(value, true, false) }
+
 #Export(c) jet_text_parse_rstrip: fn(value: I64) -> I64 { text_trim_side(value, false, true) }
+
 #Export(c) jet_text_parse_strip: fn(value: I64) -> I64 { rt_text_trim(value) }
 
 #Export(c) jet_text_remove_prefix: fn(value: I64, prefix: I64) -> I64 {
-    if jet_string_starts_with(value, prefix) -> return rt_text_slice(value, rt_text_len(prefix), rt_text_len(value))
+    if jet_string_starts_with(value, prefix) {
+        return rt_text_slice(value, rt_text_len(prefix), rt_text_len(value))
+    }
     jet_rt_string_clone(value)
 }
 
 #Export(c) jet_text_remove_suffix: fn(value: I64, suffix: I64) -> I64 {
-    if jet_string_ends_with(value, suffix) -> return rt_text_slice(value, I64{0}, rt_text_len(value) - rt_text_len(suffix))
+    if jet_string_ends_with(value, suffix) {
+        return rt_text_slice(value, I64{0}, rt_text_len(value) - rt_text_len(suffix))
+    }
     jet_rt_string_clone(value)
 }
 
@@ -93,7 +109,7 @@ text_trim_side: fn(value: I64, leading: Bool, trailing: Bool) -> I64 {
     length: rt_text_len(value)
     at := I64{0}
     loop at < length {
-        if (rt_text_byte(wrapping(data + at)) >= I64{128}) -> return false
+        if (rt_text_byte(wrapping(data + at)) >= I64{128}) { return false }
         at += I64{1}
     }
     true
@@ -225,7 +241,7 @@ text_char_alnum: fn(cp: I64) -> Bool { compiler_text_alphabetic(cp) || compiler_
 text_route_all: fn(value: I64, kind: I64, empty: Bool) -> Bool {
     data: rt_text_data(value)
     length: rt_text_len(value)
-    if (length == I64{0}) -> return empty
+    if (length == I64{0}) { return empty }
     at := I64{0}
     loop at < length {
         cp: rt_text_decode(wrapping(data + at))
@@ -241,15 +257,19 @@ text_route_all: fn(value: I64, kind: I64, empty: Bool) -> Bool {
 }
 
 #Export(c) jet_text_isalnum: fn(value: I64) -> Bool { text_route_all(value, I64{0}, false) }
+
 #Export(c) jet_text_isdecimal: fn(value: I64) -> Bool { text_route_all(value, I64{1}, false) }
+
 #Export(c) jet_text_isdigit: fn(value: I64) -> Bool { text_route_all(value, I64{1}, false) }
+
 #Export(c) jet_text_isprintable: fn(value: I64) -> Bool { text_route_all(value, I64{2}, true) }
+
 #Export(c) jet_text_isnumeric: fn(value: I64) -> Bool { compiler_text_all(value, I64{1}) }
 
 #Export(c) jet_text_isidentifier: fn(value: I64) -> Bool {
     data: rt_text_data(value)
     length: rt_text_len(value)
-    if (length == I64{0}) -> return false
+    if (length == I64{0}) { return false }
     first: rt_text_decode(data)
     if !(first == I64{95} || compiler_text_alphabetic(first)) -> return false
     at := rt_text_width(data)
@@ -308,6 +328,7 @@ text_cased_all: fn(value: I64, lower: Bool) -> Bool {
 }
 
 #Export(c) jet_text_is_lower: fn(value: I64) -> Bool { text_cased_all(value, true) }
+
 #Export(c) jet_text_is_upper: fn(value: I64) -> Bool { text_cased_all(value, false) }
 
 // ---- case conversion -------------------------------------------------------
@@ -317,7 +338,7 @@ text_cased_all: fn(value: I64, lower: Bool) -> Bool {
     data: rt_text_data(value)
     length: rt_text_len(value)
     result: rt_text_builder_with_capacity(length)
-    if (length == I64{0}) -> return result
+    if (length == I64{0}) { return result }
     unicode_append_mapping(result, unicode_title_mapping(rt_text_decode(data)))
     unicode_lower_append(result, data, rt_text_width(data), length)
     result

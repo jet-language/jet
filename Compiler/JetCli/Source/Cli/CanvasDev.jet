@@ -60,7 +60,9 @@ jet_cli_dev_canvas_plan: fn(jet_argv: [String], args: [String], color: Bool, qui
         if argument == "--" -> break
         if !argument.starts_with("-") || argument == "-" -> next
         head: argument.partition("=").head
-        if head == "--canvas" || head == "--canvas-host" || head == "--canvas-port" || jet_cli_run_control(head, "dev") -> next
+        if head == "--canvas" || head == "--canvas-host" || head == "--canvas-port" || jet_cli_run_control(head, "dev") {
+            next
+        }
         if !jet_cli_is_known_flag(head) -> return jet_cli_unknown_flag(head, "dev", color)
         return jet_cli_not_ported("dev {head}", color)
     }
@@ -72,7 +74,9 @@ jet_cli_dev_canvas_plan: fn(jet_argv: [String], args: [String], color: Bool, qui
     target: if args.len() > 1 -> args[1] else -> "."
     if jet_cli_env_boundary_refusal(target, jet_argv, color) == .Val(refusal) -> return refusal
     entry: jet_cli_check(jet_argv, args, "dev", color, quiet, threads, false)
-    if entry == .Check(file, source, _, _, _, _, notice, _, _, _, _, _, _) -> return JetCLIPlan.DevCanvas{file: file, source: source, color: color, host: host, port: port, notice: notice}
+    if entry == .Check(file, source, _, _, _, _, notice, _, _, _, _, _, _) {
+        return JetCLIPlan.DevCanvas{file: file, source: source, color: color, host: host, port: port, notice: notice}
+    }
     entry
 }
 
@@ -142,7 +146,9 @@ jet_cli_dev_canvas_loop: fn(file: String, color: Bool, host: String, port: Int) 
                     jet_cli_canvas_debug_answer(debugs, state, file, source_id, edit)
                     next
                 }
-                if jet_cli_dev_canvas_transact(state, file, source_id, edit) -> stamp = jet_cli_dev_stamp(root, [String]{})
+                if jet_cli_dev_canvas_transact(state, file, source_id, edit) {
+                    stamp = jet_cli_dev_stamp(root, [String]{})
+                }
             }
             ticks += 1
             if ticks % JET_CLI_CANVAS_STAMP_TICKS != 0 -> next
@@ -164,7 +170,8 @@ jet_cli_dev_canvas_loop: fn(file: String, color: Bool, host: String, port: Int) 
 // runs on its own; a launch that fails answers why, and the session serves
 // on.
 jet_cli_dev_canvas_open_browser: fn(url: String) -[Env, Exec]> String? Never! {
-    if cli_process.cmd([String]{jet_cli_dev_canvas_browser(), url.copy()}).detached().spawn() == { // copy: the argv owns its words
+    if cli_process.cmd([String]{jet_cli_dev_canvas_browser(), url.copy()}).detached().spawn() == {
+        // copy: the argv owns its words
         .Ok(_) -> None
         .Err(error) -> Val("{error}")
     }
@@ -184,7 +191,7 @@ jet_cli_dev_canvas_source_id: fn(root: String, file: String) -[FS]> String Never
     full: cli_files.realpath(file) ?? file
     base: cli_files.realpath(root) ?? root
     if full.starts_with("{base}/") -> return full.slice(base.len() + 1, full.len())
-    file.copy() // copy: an entry outside the project root is named by its own path
+    file.copy()  // copy: an entry outside the project root is named by its own path
 }
 
 // Check the entry as `jet inspect semindex` does (Doc mode) and publish its
@@ -196,7 +203,9 @@ jet_cli_dev_canvas_project: fn(state: Shared<CanvasHostState>, file: String, sou
     revision: source_revision(src)
     compiled: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Doc)
     if compiled == {
-        .Refused(refusal) -> canvas_host_publish_failure(state, revision, "E2105", refusal.stderr, watch.elapsed_millis())
+        .Refused(refusal) -> {
+            canvas_host_publish_failure(state, revision, "E2105", refusal.stderr, watch.elapsed_millis())
+        }
         .Compiled(result, snapshot) -> {
             jet_cli_dev_canvas_publish_project(state, snapshot)
             jet_cli_dev_canvas_publish(state, file, source_id, src, revision, result, snapshot, watch.elapsed_millis())
@@ -229,7 +238,9 @@ jet_cli_dev_canvas_publish_project: fn(state: Shared<CanvasHostState>, snapshot:
             break
         }
     }
-    if found < 0 -> return
+    if found < 0 {
+        return
+    }
     root: snapshot.roots[found]
     files := [CanvasProjectFile]{}
     loop file in root.files {
@@ -239,11 +250,13 @@ jet_cli_dev_canvas_publish_project: fn(state: Shared<CanvasHostState>, snapshot:
             "env.jet" -> "env"
             else -> "source"
         }
-        files.push(CanvasProjectFile{path: file.relative_path.copy(), revision: source_revision(file.source), kind: kind}) // copy: the document keeps its own path
+        files.push(CanvasProjectFile{path: file.relative_path.copy(), revision: source_revision(file.source), kind: kind})  // copy: the document keeps its own path
     }
-    if cli_files.read("{root.canonical_path}/.jet/lock") == .Ok(lock) -> files.push(CanvasProjectFile{path: ".jet/lock", revision: source_revision(lock), kind: "lock"})
+    if cli_files.read("{root.canonical_path}/.jet/lock") == .Ok(lock) {
+        files.push(CanvasProjectFile{path: ".jet/lock", revision: source_revision(lock), kind: "lock"})
+    }
     prefix: "{root.canonical_path}/"
-    entry: if snapshot.entry_path.starts_with(prefix) -> snapshot.entry_path.slice(prefix.len(), snapshot.entry_path.len()) else -> snapshot.entry_path.copy() // copy: an entry outside its root is named by its own path
+    entry: if snapshot.entry_path.starts_with(prefix) -> snapshot.entry_path.slice(prefix.len(), snapshot.entry_path.len()) else -> snapshot.entry_path.copy()  // copy: an entry outside its root is named by its own path
     canvas_host_publish_project(state, root.canonical_path, entry, files)
 }
 
@@ -272,7 +285,7 @@ jet_cli_dev_canvas_apply: fn(state: Shared<CanvasHostState>, file: String, sourc
     }
     changed: candidate != edit.before
     if changed {
-        overlay: candidate.copy() // copy: the check reads the candidate in place of the entry, and the write needs it after
+        overlay: candidate.copy()  // copy: the check reads the candidate in place of the entry, and the write needs it after
         if jet_cli_compile_entry(file, false, None, JetDriverCompileMode.Doc, Val(overlay), None) == {
             .Refused(refusal) -> {
                 canvas_host_edit_refuse(state, edit, "check", refusal.stderr)

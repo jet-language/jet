@@ -1,9 +1,7 @@
 // A function whose failure set is empty
 // (`T Never!`) returns its success value directly on every tier. Its callers,
 // optional returns, early returns, and function values all see plain values.
-double: fn(x: Int) -> Int Never! {
-    x * 2
-}
+double: fn(x: Int) -> Int Never! { x * 2 }
 
 first_even: fn(xs: [Int]) -> Int? Never! {
     loop x in xs {
@@ -17,20 +15,16 @@ clamp: fn(x: Int, hi: Int) -> Int Never! {
     x
 }
 
-note: fn(total: &Int, x: Int) Never! {
-    total += x
-}
+note: fn(total: &Int, x: Int) Never! { total += x }
 
-apply: fn(f: fn(Int) -> Int Never!, x: Int) -> Int Never! {
-    f(x)
-}
+apply: fn(f: fn(Int) -> Int Never!, x: Int) -> Int Never! { f(x) }
 
 run: fn() {
     print(double(21))
     print(first_even([Int]{1, 3, 4, 5}) ?? -1)
     print(first_even([Int]{1, 3}) ?? -1)
     if first_even([Int]{7, 8}) == {
-        Val(found) -> print("found {found}")
+        Val(found) -> { print("found {found}") }
         None -> print("none")
     }
     print(clamp(12, 10))

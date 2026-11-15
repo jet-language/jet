@@ -2,8 +2,16 @@
 // organization floor. Gates run before creating directories or process locks.
 use {
     jet_foundation.[
-        Diagnostic, ENV_JET_ORG_UNSAFE_POLICY, PolicyDeclaration, PolicyKey, PolicyScope, Span,
-        diagnostic_from_registry, policy_gate_forbidding, policy_key_is_audited_gate, policy_key_name,
+        Diagnostic,
+        ENV_JET_ORG_UNSAFE_POLICY,
+        PolicyDeclaration,
+        PolicyKey,
+        PolicyScope,
+        Span,
+        diagnostic_from_registry,
+        policy_gate_forbidding,
+        policy_key_is_audited_gate,
+        policy_key_name,
     ]
     sys: core.sys
     files: core.files
@@ -24,11 +32,15 @@ PackageGateError: struct {
 // declaration forbids it (Foundation policy_gate_forbidding).
 pkg_gate_refusal: fn(key: PolicyKey, site: String, span: Span?, declarations: [PolicyDeclaration]) -> Diagnostic? Never! {
     declaration: policy_gate_forbidding(key, declarations) ?? return None
-    Val(pkg_manifest_diagnostic_from_row("E3415", [ManifestEntry]{
-        ManifestEntry{key: "gate", value: policy_key_name(key)},
-        ManifestEntry{key: "site", value: site},
-        ManifestEntry{key: "policy", value: declaration.source}
-    }, span))
+    Val(pkg_manifest_diagnostic_from_row(
+        "E3415",
+        [ManifestEntry]{
+            ManifestEntry{key: "gate", value: policy_key_name(key)},
+            ManifestEntry{key: "site", value: site},
+            ManifestEntry{key: "policy", value: declaration.source},
+        },
+        span,
+    ))
 }
 
 // The organization's policy file (`JET_ORG_UNSAFE_POLICY`), the outermost
@@ -44,22 +56,51 @@ PackageOrganizationPolicy: struct {
 
 pkg_load_organization_gate_policy: fn() -[FS, Env]> PackageOrganizationPolicy PackageGateError! {
     path: sys.get(ENV_JET_ORG_UNSAFE_POLICY) ?? return Ok(PackageOrganizationPolicy{declarations: [PolicyDeclaration]{}, deny: [String]{}, source: ""})
-    source: files.read(path) ?? return Err(PackageGateError{diagnostics: [Diagnostic]{diagnostic_from_registry("E3109", None,
-        "cannot read the configured organization gate policy",
-        "JET_ORG_UNSAFE_POLICY names `{path}`, but it could not be read: {pkg_io_cause(err)}",
-        "fix the policy path or remove the environment variable")}})
-    document := pkg_parse_organization_document(source) ?? return Err(PackageGateError{diagnostics: [Diagnostic]{diagnostic_from_registry("E3109", None,
-        "the configured organization gate policy is malformed",
-        "`{path}` must contain a manifest-shaped `policy: {{ unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }}` block, an `authority: {{ deny: [Meta] }}` block, or both: {err:Debug}",
-        "fix the organization policy; configured policy never fails open")}})
+    source: files.read(path) ?? return Err(
+        PackageGateError{
+            diagnostics: [Diagnostic]{
+                diagnostic_from_registry(
+                    "E3109",
+                    None,
+                    "cannot read the configured organization gate policy",
+                    "JET_ORG_UNSAFE_POLICY names `{path}`, but it could not be read: {pkg_io_cause(err)}",
+                    "fix the policy path or remove the environment variable",
+                ),
+            },
+        },
+    )
+    document := pkg_parse_organization_document(source) ?? return Err(
+        PackageGateError{
+            diagnostics: [Diagnostic]{
+                diagnostic_from_registry(
+                    "E3109",
+                    None,
+                    "the configured organization gate policy is malformed",
+                    "`{path}` must contain a manifest-shaped `policy: {{ unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }}` block, an `authority: {{ deny: [Meta] }}` block, or both: {err:Debug}",
+                    "fix the organization policy; configured policy never fails open",
+                ),
+            },
+        },
+    )
     wrong_shape := document.declarations.len() == 0 && document.deny.len() == 0
     loop declaration in document.declarations {
         if !policy_key_is_audited_gate(declaration.key) -> wrong_shape = true
     }
-    if wrong_shape -> return Err(PackageGateError{diagnostics: [Diagnostic]{diagnostic_from_registry("E3109", None,
-        "the organization gate policy has the wrong shape",
-        "this admin input contains only the shared audited-gate fields and the effects it denies",
-        "use `policy: {{ gate_kind: .Forbid }}` with any subset of the fifteen audited gate policy keys, `authority: {{ deny: [Effect] }}`, or both")}})
+    if wrong_shape {
+        return Err(
+            PackageGateError{
+                diagnostics: [Diagnostic]{
+                    diagnostic_from_registry(
+                        "E3109",
+                        None,
+                        "the organization gate policy has the wrong shape",
+                        "this admin input contains only the shared audited-gate fields and the effects it denies",
+                        "use `policy: {{ gate_kind: .Forbid }}` with any subset of the fifteen audited gate policy keys, `authority: {{ deny: [Effect] }}`, or both",
+                    ),
+                },
+            },
+        )
+    }
     loop index in 0..<document.declarations.len() {
         document.declarations[index].scope = PolicyScope.Organization
         document.declarations[index].source = path
@@ -72,7 +113,9 @@ pkg_project_gate_declarations: fn(cache: &WorkspaceDeclarationCache, root: Strin
     declarations := organization.declarations.move()
     loaded: if pkg_package_facts_for_root(cache, root) == {
         .Ok(found) -> found
-        .Err(error) -> return Err(PackageGateError{diagnostics: [Diagnostic]{error.diagnostic}})
+        .Err(error) -> {
+            return Err(PackageGateError{diagnostics: [Diagnostic]{error.diagnostic}})
+        }
     }
     if loaded == .Val(facts) {
         loop declaration in facts.policy.declarations {
@@ -87,13 +130,19 @@ pkg_project_gate_declarations: fn(cache: &WorkspaceDeclarationCache, root: Strin
 pkg_check_project_gate: fn(root: String, key: PolicyKey, site: String) PackageGateError! -[FS, Env]> {
     cache := WorkspaceDeclarationCache.new()
     declarations: pkg_project_gate_declarations(cache, root)
-    if pkg_gate_refusal(key, site, None, declarations) == .Val(diagnostic) -> return Err(PackageGateError{diagnostics: [Diagnostic]{diagnostic}})
+    if pkg_gate_refusal(key, site, None, declarations) == .Val(diagnostic) {
+        return Err(PackageGateError{diagnostics: [Diagnostic]{diagnostic}})
+    }
 }
 
 pkg_invocation_gate_key: fn(argument: String) -> PolicyKey? Never! {
     if argument == "--force" -> return Val(PolicyKey.ForcePin)
-    if argument == "--gate" || argument.starts_with("--gate=") || argument == "--allow" || argument.starts_with("--allow=") || argument == "--release" || argument == "--target" || argument == "--profile" || argument.starts_with("--target=") || argument.starts_with("--profile=") -> return Val(PolicyKey.BuildFlag)
-    if argument == "--deny" || argument.starts_with("--deny=") || argument == "--trust" || argument == "--online" || argument == "--try-anyway" || argument == "--interpret" || argument == "--offline" || argument == "--locked" -> return Val(PolicyKey.SessionFlag)
+    if argument == "--gate" || argument.starts_with("--gate=") || argument == "--allow" || argument.starts_with("--allow=") || argument == "--release" || argument == "--target" || argument == "--profile" || argument.starts_with("--target=") || argument.starts_with("--profile=") {
+        return Val(PolicyKey.BuildFlag)
+    }
+    if argument == "--deny" || argument.starts_with("--deny=") || argument == "--trust" || argument == "--online" || argument == "--try-anyway" || argument == "--interpret" || argument == "--offline" || argument == "--locked" {
+        return Val(PolicyKey.SessionFlag)
+    }
     None
 }
 
@@ -109,12 +158,16 @@ pkg_check_invocation_flags: fn(root: String, args: [String]) PackageGateError! -
     loop argument in args {
         key: pkg_invocation_gate_key(argument) ?? next
         site: "command line ({argument})"
-        if pkg_gate_refusal(key, site, None, declarations) == .Val(diagnostic) -> diagnostics.push(diagnostic)
+        if pkg_gate_refusal(key, site, None, declarations) == .Val(diagnostic) {
+            diagnostics.push(diagnostic)
+        }
         if argument == "--allow" || argument.starts_with("--allow=") {
-            if pkg_gate_refusal(PolicyKey.DependencyGrant, site, None, declarations) == .Val(diagnostic) -> diagnostics.push(diagnostic)
+            if pkg_gate_refusal(PolicyKey.DependencyGrant, site, None, declarations) == .Val(diagnostic) {
+                diagnostics.push(diagnostic)
+            }
         }
     }
-    if diagnostics.len() > 0 -> return Err(PackageGateError{diagnostics})
+    if diagnostics.len() > 0 -> return Err(PackageGateError{diagnostics: diagnostics})
 }
 
 pkg_is_forced_override: fn(package: PackageOverride) -> Bool Never! {
@@ -142,12 +195,16 @@ pkg_check_workspace_overlay_gates: fn(cache: &WorkspaceDeclarationCache, root: S
     loop overlay in policy.overlays {
         loop package in overlay.packages {
             if !pkg_is_forced_override(package) -> next
-            if pkg_gate_refusal(PolicyKey.ForcePin, "workspace.jet overlay {overlay.name} package {package.package} .Force", None, declarations) == .Val(diagnostic) -> diagnostics.push(diagnostic)
+            if pkg_gate_refusal(PolicyKey.ForcePin, "workspace.jet overlay {overlay.name} package {package.package} .Force", None, declarations) == .Val(diagnostic) {
+                diagnostics.push(diagnostic)
+            }
         }
     }
     loop grant in policy.build_grants {
         if grant.effects.len() == 0 -> next
-        if pkg_gate_refusal(PolicyKey.DependencyGrant, "workspace.jet build grant {grant.subject}", None, declarations) == .Val(diagnostic) -> diagnostics.push(diagnostic)
+        if pkg_gate_refusal(PolicyKey.DependencyGrant, "workspace.jet build grant {grant.subject}", None, declarations) == .Val(diagnostic) {
+            diagnostics.push(diagnostic)
+        }
     }
-    if diagnostics.len() > 0 -> return Err(PackageGateError{diagnostics})
+    if diagnostics.len() > 0 -> return Err(PackageGateError{diagnostics: diagnostics})
 }

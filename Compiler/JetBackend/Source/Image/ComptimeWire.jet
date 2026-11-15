@@ -5,23 +5,38 @@
 
 // Compiler -> child commands.
 X64_COMPTIME_CALL: 1
+
 X64_COMPTIME_READ: 2
+
 X64_COMPTIME_WRITE: 3
+
 X64_COMPTIME_ALLOC: 4
+
 X64_COMPTIME_TEXT: 5
+
 X64_COMPTIME_INT: 6
+
 X64_COMPTIME_RETURN: 7
+
 X64_COMPTIME_EXIT: 8
+
 X64_COMPTIME_FILTER: 9
+
 X64_COMPTIME_MAP: 10
+
 X64_COMPTIME_PROTECT: 11
+
 X64_COMPTIME_ADMIT: 12
 
 // Child -> compiler replies.
 X64_COMPTIME_HELLO: 0
+
 X64_COMPTIME_DONE: 1
+
 X64_COMPTIME_HOST: 2
+
 X64_COMPTIME_STOP: 3
+
 X64_COMPTIME_REFUSED: 4
 
 X64_COMPTIME_FRAME_BYTES: 64
@@ -35,11 +50,17 @@ X64_COMPTIME_FRAME_BYTES: 64
 // (IRModule.host_literals); and a `debug` trace line, whose one operand is
 // the String the compiler prints while compiling.
 X64_COMPTIME_HOST_METHOD: 1
+
 X64_COMPTIME_HOST_FIELD: 2
+
 X64_COMPTIME_HOST_INPUT: 3
+
 X64_COMPTIME_HOST_MISSING: 4
+
 X64_COMPTIME_HOST_CONSTANT: 5
+
 X64_COMPTIME_HOST_LITERAL: 6
+
 X64_COMPTIME_HOST_TRACE: 7
 
 // Stop kinds (JetRuntime Trap.jet's trap_stop calls): a message
@@ -47,13 +68,18 @@ X64_COMPTIME_HOST_TRACE: 7
 // (length, index), a require stop (kind, message, left, right), a reached
 // `#Todo` (file, line, expected type).
 X64_COMPTIME_STOP_MESSAGE: 1
+
 X64_COMPTIME_STOP_SHIFT: 2
+
 X64_COMPTIME_STOP_LIST_BOUNDS: 3
+
 X64_COMPTIME_STOP_REQUIRE: 4
+
 X64_COMPTIME_STOP_TODO: 5
 
 // The descriptors the child serves on.
 X64_COMPTIME_COMMAND_FD: 3
+
 X64_COMPTIME_REPLY_FD: 4
 
 // One frame: `kind` and up to seven operands.
@@ -115,7 +141,9 @@ X64_COMPTIME_FILE_CALLS: [Int]{0, 1, 2, 3, 4, 5, 6, 8, 17, 18, 21, 74, 75, 77, 8
 // past the five the child starts with (standard input, output and error,
 // the command and reply descriptors), so one the block opened.
 X64_COMPTIME_FILE_FD_CALLS: [Int]{0, 1, 3, 5, 8, 17, 18, 74, 75, 77, 91, 217}
+
 X64_COMPTIME_FIRST_OPENED_FD: 5
+
 X64_COMPTIME_SIGRETURN: 15
 
 // One classic BPF instruction and its symbolic jump targets (-1: next).
@@ -127,15 +155,23 @@ X64ComptimeBpf: struct {
 }
 
 X64_BPF_LD_W_ABS: 32
+
 X64_BPF_JEQ_K: 21
+
 X64_BPF_JGE_K: 53
+
 X64_BPF_RET_K: 6
+
 X64_SECCOMP_RET_ALLOW: 2147418112
+
 X64_SECCOMP_RET_TRAP: 196608
+
 // SECCOMP_RET_ERRNO with errno 4095: a reissued call the filter doesn't
 // admit returns -4095, which no admitted call returns.
 X64_SECCOMP_RET_UNADMITTED: 331775
+
 X64_SECCOMP_RET_KILL_PROCESS: 2147483648
+
 X64_AUDIT_ARCH_X86_64: 3221225534
 
 // The seccomp program of a comptime child; `stdout` admits writes to
@@ -187,7 +223,9 @@ x64_comptime_admit_block: fn(program: &[X64ComptimeBpf], cookie: Int) Never! {
     program.push(X64ComptimeBpf{code: X64_BPF_JGE_K, k: X64_COMPTIME_FIRST_OPENED_FD, jt: allow, jf: fd_refused})
     program.push(X64ComptimeBpf{code: X64_BPF_RET_K, k: X64_SECCOMP_RET_UNADMITTED, jt: -1, jf: -1})
     program.push(X64ComptimeBpf{code: X64_BPF_RET_K, k: X64_SECCOMP_RET_ALLOW, jt: -1, jf: -1})
-    if program.len() != rest -> panic("comptime seccomp layout: the cookie check ends at {rest}, the program has {program.len()} instructions")
+    if program.len() != rest {
+        panic("comptime seccomp layout: the cookie check ends at {rest}, the program has {program.len()} instructions")
+    }
 }
 
 // The refusal block: the calls a comptime run makes freely, the descriptor
@@ -222,7 +260,9 @@ x64_comptime_refusal_block: fn(program: &[X64ComptimeBpf], fds: [Int]) Never! {
     }
     program.push(X64ComptimeBpf{code: X64_BPF_RET_K, k: X64_SECCOMP_RET_TRAP, jt: -1, jf: -1})
     program.push(X64ComptimeBpf{code: X64_BPF_RET_K, k: X64_SECCOMP_RET_ALLOW, jt: -1, jf: -1})
-    if program.len() != allow + 1 -> panic("comptime seccomp layout: allow is {allow}, the program has {program.len()} instructions")
+    if program.len() != allow + 1 {
+        panic("comptime seccomp layout: allow is {allow}, the program has {program.len()} instructions")
+    }
 }
 
 // Encodes `program`: a jump target becomes its offset past the next
@@ -232,7 +272,9 @@ x64_comptime_bpf_bytes: fn(program: [X64ComptimeBpf]) -> [U8] Never! {
     loop (at, row) in program {
         jt: if row.jt < 0 -> 0 else -> row.jt - at - 1
         jf: if row.jf < 0 -> 0 else -> row.jf - at - 1
-        if jt < 0 || jt > 255 || jf < 0 || jf > 255 -> panic("comptime seccomp jump out of range at {at}")
+        if jt < 0 || jt > 255 || jf < 0 || jf > 255 {
+            panic("comptime seccomp jump out of range at {at}")
+        }
         bytes.push(U8{row.code.bit_and(255)})
         bytes.push(U8{(row.code >> 8).bit_and(255)})
         bytes.push(U8{jt})

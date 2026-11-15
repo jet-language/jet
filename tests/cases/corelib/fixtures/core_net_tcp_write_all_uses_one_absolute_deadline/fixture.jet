@@ -1,4 +1,5 @@
 package: { name: "tcp-write-all-deadline" authority: { allow: [Net, Time] } }
+
 use {
     net: core.net
     tasks: core.tasks
@@ -22,7 +23,7 @@ run: fn() {
     client := net.tcp_connect(address) ?? panic("connect")
     started := time.unix_ns() /% 1_000_000
     if client.write("x".repeat(16000000), deadline: 80ms) == {
-        .Ok(_) -> print("unexpected write")
+        .Ok(_) -> { print("unexpected write") }
         .Err(error) -> print(net.error_message(error))
     }
     elapsed := time.unix_ns() /% 1_000_000 - started

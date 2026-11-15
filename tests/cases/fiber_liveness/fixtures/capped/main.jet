@@ -9,12 +9,16 @@ package: {
     authority: { allow: [Env, FS, FS.Read, IO, Mem.Alloc, Time, Time.Wait] }
 }
 
-use files: core.files
-use sys: core.sys
-use time: core.time
+use {
+    files: core.files
+    sys: core.sys
+    time: core.time
+}
 
 TASKS: 200
+
 CAP: 4294967296
+
 PEAK_BOUND_KB: 3145728
 
 nap: fn() -> Int {
@@ -26,7 +30,9 @@ nap: fn() -> Int {
 census: fn(prefix: String) -[FS]> Int {
     text: files.read("/proc/self/status") ?? panic("read status")
     loop line in text.lines() {
-        if line.starts_with(prefix) -> return Int.parse(line.remove_prefix(prefix).remove_suffix("kB").trim()) ?? -1
+        if line.starts_with(prefix) {
+            return Int.parse(line.remove_prefix(prefix).remove_suffix("kB").trim()) ?? -1
+        }
     }
     -1
 }

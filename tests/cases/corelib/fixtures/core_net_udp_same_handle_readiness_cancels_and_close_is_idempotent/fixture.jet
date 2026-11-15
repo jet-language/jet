@@ -1,4 +1,3 @@
-
 use {
     net: core.net
     tasks: core.tasks
@@ -12,7 +11,7 @@ run: fn() {
     waiter: task {
         ready_tx.send(1)
         if socket.ready(interest, deadline: Duration.seconds(1) ?? panic("deadline")) == {
-            .Ok(_) -> panic("udp unexpectedly ready")
+            .Ok(_) -> { panic("udp unexpectedly ready") }
             .Err(error) -> print(net.error_message(error))
         }
     }
@@ -25,7 +24,7 @@ run: fn() {
     closed.close() ?? panic("close")
     closed.close() ?? panic("second close")
     if net.udp_receive(closed, 1) == {
-        .Ok(_) -> panic("closed receive succeeded")
+        .Ok(_) -> { panic("closed receive succeeded") }
         .Err(error) -> print(net.error_message(error))
     }
 }

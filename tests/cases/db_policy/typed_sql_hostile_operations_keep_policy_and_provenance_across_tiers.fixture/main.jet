@@ -1,4 +1,3 @@
-
 use {
     application: app
     db: core.db
@@ -31,46 +30,38 @@ run: fn() {
     conn := db.open_memory()
     policy: db.policy("tasks", "true") ?? panic("policy")
     scoped := conn.with_policy(policy, "attacker")
-    _created: db.migrate(scoped, "tasks-v1", [
-        SQL{"CREATE TABLE tasks (id INTEGER PRIMARY KEY, body TEXT)"}
-    ]) ?? panic("create")
+    _created: db.migrate(
+        scoped,
+        "tasks-v1",
+        [
+            SQL{"CREATE TABLE tasks (id INTEGER PRIMARY KEY, body TEXT)"},
+        ],
+    ) ?? panic("create")
 
     payload: "x'); DROP TABLE tasks; --"
     _inserted: scoped.execute(
-        SQL{"INSERT INTO tasks (id, body) VALUES (1, {payload})"}
+        SQL{"INSERT INTO tasks (id, body) VALUES (1, {payload})"},
     ) ?? panic("insert")
     row: scoped.query_one(SQL{"SELECT body FROM tasks"}) ?? panic("query")
     body: db.row_text(row, "body") ?? panic("missing body")
     print("interpolation:{body}")
 
     duplicate: scoped.query(
-        SQL{"SELECT id FROM tasks WHERE body = {payload} OR body = {payload}"}
+        SQL{"SELECT id FROM tasks WHERE body = {payload} OR body = {payload}"},
     ) ?? panic("duplicate")
     print("duplicate:{duplicate.len()}")
 
     if scoped.query(SQL{"SELECT body FROM tasks WHERE body = ?"}) == {
-        .Ok(_rows) -> {
-            print("placeholder:accepted")
-        }
-        .Err(_error) -> {
-            print("placeholder:rejected")
-        }
+        .Ok(_rows) -> { print("placeholder:accepted") }
+        .Err(_error) -> { print("placeholder:rejected") }
     }
     if scoped.query(SQL{"SELECT no_such_column FROM tasks"}) == {
-        .Ok(_rows) -> {
-            print("driver:accepted")
-        }
-        .Err(_error) -> {
-            print("driver:rejected")
-        }
+        .Ok(_rows) -> { print("driver:accepted") }
+        .Err(_error) -> { print("driver:rejected") }
     }
     if scoped.query(SQL{"SELECT body FROM other JOIN tasks"}) == {
-        .Ok(_rows) -> {
-            print("authority:accepted")
-        }
-        .Err(_error) -> {
-            print("authority:rejected")
-        }
+        .Ok(_rows) -> { print("authority:accepted") }
+        .Err(_error) -> { print("authority:rejected") }
     }
 
     live: application.live(task_bodies, scoped.copy())
@@ -83,27 +74,39 @@ run: fn() {
     print("live-after:{live_after.contains(updated)}")
 
     tx_body: "rolled back"
-    tx_count: db.transaction(scoped, "rollback", [
-        SQL{"INSERT INTO tasks (id, body) VALUES (2, {tx_body})"},
-        SQL{"INSERT INTO tasks (missing_column) VALUES (2)"}
-    ]) ?? -1
+    tx_count: db.transaction(
+        scoped,
+        "rollback",
+        [
+            SQL{"INSERT INTO tasks (id, body) VALUES (2, {tx_body})"},
+            SQL{"INSERT INTO tasks (missing_column) VALUES (2)"},
+        ],
+    ) ?? -1
     if {
         tx_count < 0 -> print("rollback:rejected")
         else -> print("rollback:accepted")
     }
     rollback_rows: scoped.query(SQL{"SELECT id FROM tasks"}) ?? panic("rollback query")
     print("rollback-rows:{rollback_rows.len()}")
-    migration_count: db.migrate(scoped, "broken", [
-        SQL{"CREATE TABLE migration_marker (id INTEGER)"},
-        SQL{"INSERT INTO tasks (missing_column) VALUES (3)"}
-    ]) ?? -1
+    migration_count: db.migrate(
+        scoped,
+        "broken",
+        [
+            SQL{"CREATE TABLE migration_marker (id INTEGER)"},
+            SQL{"INSERT INTO tasks (missing_column) VALUES (3)"},
+        ],
+    ) ?? -1
     if {
         migration_count < 0 -> print("migration:rejected")
         else -> print("migration:accepted")
     }
-    retry_count: db.migrate(scoped, "broken", [
-        SQL{"CREATE TABLE migration_marker (id INTEGER)"}
-    ]) ?? -1
+    retry_count: db.migrate(
+        scoped,
+        "broken",
+        [
+            SQL{"CREATE TABLE migration_marker (id INTEGER)"},
+        ],
+    ) ?? -1
     if {
         retry_count == 1 -> print("migration-retry:1")
         else -> print("migration-retry:rejected")

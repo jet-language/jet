@@ -45,15 +45,28 @@ ECJPAKEContext: struct {
 ecjpake_setup: fn(role: ECJPAKERole, md: hashes.Md, id: ecp.GroupID, secret: [U8]) -> ECJPAKEContext ecp.EcpError! {
     grp: ecp.group_load(id)
     s: bn.read_binary(secret) ?? return Err(.Mpi(err))
-    Ok(ECJPAKEContext{
-        md: md, grp: grp, role: role, point_format: .Uncompressed,
-        pm1: ecp.point_new(), pm2: ecp.point_new(), pp1: ecp.point_new(), pp2: ecp.point_new(), pp: ecp.point_new(),
-        xm1: bn.mpi(), xm2: bn.mpi(), s: s,
-    })
+    Ok(
+        ECJPAKEContext{
+            md: md,
+            grp: grp,
+            role: role,
+            point_format: .Uncompressed,
+            pm1: ecp.point_new(),
+            pm2: ecp.point_new(),
+            pp1: ecp.point_new(),
+            pp2: ecp.point_new(),
+            pp: ecp.point_new(),
+            xm1: bn.mpi(),
+            xm2: bn.mpi(),
+            s: s,
+        },
+    )
 }
 
 /// Encode points compressed or not (mbedtls_ecjpake_set_point_format).
-ecjpake_set_point_format: fn(ctx: &ECJPAKEContext, format: ecp.PointFormat) Never! { ctx.point_format = format }
+ecjpake_set_point_format: fn(ctx: &ECJPAKEContext, format: ecp.PointFormat) Never! {
+    ctx.point_format = format
+}
 
 /// BadInput unless ctx has a curve and a secret (mbedtls_ecjpake_check).
 ecjpake_check: fn(ctx: ECJPAKEContext) ecp.EcpError! {

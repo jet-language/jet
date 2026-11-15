@@ -10,10 +10,13 @@
 // every process still in it is killed (cgroup.kill) and the scope removed.
 // O_WRONLY|O_CLOEXEC and O_RDONLY|O_CLOEXEC.
 PROCESS_SCOPE_WRITE: I64{524289}
+
 PROCESS_SCOPE_READ: I64{524288}
+
 // How long the removal waits for killed processes to exit: 10000 tries 1 ms
 // apart. A process stuck in uninterruptible sleep past that keeps the scope.
 PROCESS_SCOPE_DRAIN_TRIES: I64{10000}
+
 PROCESS_SCOPE_DRAIN_NS: I64{1000000}
 
 // A cgroup interface file (or /proc file) as an owned text, or 0.
@@ -22,13 +25,13 @@ process_scope_read: fn(path: I64) -> I64 {
     file := I64{-4}
     loop file == (I64{-4}) -> file = host_call(I64{2}, name, PROCESS_SCOPE_READ, I64{0})
     fd_c_path_drop(name, path)
-    if (file < I64{0}) -> return I64{0}
+    if (file < I64{0}) { return I64{0} }
     scratch: jet_rt_alloc(I64{4096}, I64{1})
     text: jet_rt_string_builder_new()
     good := true
     loop {
         count: host_call(I64{0}, file, scratch, I64{4096})
-        if (count == I64{-4}) -> next
+        if (count == I64{-4}) { next }
         if (count <= I64{0}) {
             good = count == I64{0}
             break
@@ -51,9 +54,11 @@ process_scope_write: fn(dir: I64, file: I64, value: I64) -> I64 {
     loop fd == (I64{-4}) -> fd = host_call(I64{2}, name, PROCESS_SCOPE_WRITE, I64{0})
     fd_c_path_drop(name, path)
     jet_rt_string_drop(path)
-    if (fd < I64{0}) -> return fd
+    if (fd < I64{0}) { return fd }
     written := I64{-4}
-    loop written == (I64{-4}) -> written = host_call(I64{1}, fd, rt_text_data(value), rt_text_len(value))
+    loop written == (I64{-4}) {
+        written = host_call(I64{1}, fd, rt_text_data(value), rt_text_len(value))
+    }
     spawn_close(fd)
     if (written < I64{0}) -> written else -> I64{0}
 }
@@ -73,7 +78,7 @@ process_scope_mkdir: fn(dir: I64, leaf: I64) -> I64 {
 // as an owned text; 0 when the row is missing.
 process_scope_parent: fn() -> I64 {
     rows: process_scope_read(rt_static_text("/proc/self/cgroup"))
-    if (rows == I64{0}) -> return I64{0}
+    if (rows == I64{0}) { return I64{0} }
     at := I64{0}
     found := I64{-1}
     loop at < rt_text_len(rows) {
@@ -82,7 +87,7 @@ process_scope_parent: fn() -> I64 {
             break
         }
         next_row: rt_text_find(rows, rt_static_text("\n"), at, false)
-        if (next_row < I64{0}) -> break
+        if (next_row < I64{0}) { break }
         at = next_row + I64{1}
     }
     if (found < I64{0}) {
@@ -90,7 +95,7 @@ process_scope_parent: fn() -> I64 {
         return I64{0}
     }
     end := rt_text_find(rows, rt_static_text("\n"), found, false)
-    if (end < I64{0}) -> end = rt_text_len(rows)
+    if (end < I64{0}) { end = rt_text_len(rows) }
     // The parent: everything before the path's last `/`.
     slash: rt_text_find_byte(rt_text_data(rows), end, I64{47}, found, true)
     cut: if (slash < found) -> found else -> slash
@@ -138,7 +143,7 @@ process_scope_open: fn(bytes: I64, procs: I64, failed: I64) -> I64 {
     if (result == I64{0}) {
         step = rt_static_text("/memory.swap.max")
         result = process_scope_write(dir, step, rt_static_text("0"))
-        if (result == I64{-2}) -> result = I64{0}
+        if (result == I64{-2}) { result = I64{0} }
     }
     if (result == I64{0}) {
         step = rt_static_text("/memory.oom.group")
@@ -179,14 +184,14 @@ process_scope_open: fn(bytes: I64, procs: I64, failed: I64) -> I64 {
 process_scope_remove_tree: fn(parent: I64, name: I64) -> I64 {
     fd := I64{-4}
     loop fd == (I64{-4}) -> fd = host_call(I64{257}, parent, name, FILES_TREE_OPEN)
-    if (fd == I64{-2}) -> return I64{0}
-    if (fd < I64{0}) -> return fd
+    if (fd == I64{-2}) { return I64{0} }
+    if (fd < I64{0}) { return fd }
     buffer: jet_rt_alloc(FILES_DIRENT_BYTES, I64{8})
     failure := I64{0}
     loop failure == (I64{0}) {
         count: host_call(I64{217}, fd, buffer, FILES_DIRENT_BYTES)
-        if (count == I64{-4}) -> next
-        if (count == I64{0} || count == I64{-2}) -> break
+        if (count == I64{-4}) { next }
+        if (count == I64{0} || count == I64{-2}) { break }
         if (count < I64{0}) {
             failure = count
             break
@@ -197,7 +202,7 @@ process_scope_remove_tree: fn(parent: I64, name: I64) -> I64 {
             at += rt_text_byte(wrapping(record + I64{16})).bit_or((rt_text_byte(wrapping(record + I64{17})) << I64{8}))
             entry: wrapping(record + I64{19})
             if files_dot_entry(entry) -> next
-            if (rt_text_byte(wrapping(record + I64{18})) != I64{4}) -> next
+            if (rt_text_byte(wrapping(record + I64{18})) != I64{4}) { next }
             result: process_scope_remove_tree(fd, entry)
             if (result < I64{0}) {
                 failure = result
@@ -207,7 +212,7 @@ process_scope_remove_tree: fn(parent: I64, name: I64) -> I64 {
     }
     jet_rt_free(buffer, FILES_DIRENT_BYTES, I64{8})
     spawn_close(fd)
-    if (failure < I64{0}) -> return failure
+    if (failure < I64{0}) { return failure }
     removed: host_call(I64{263}, parent, name, I64{512})
     if (removed < I64{0} && removed != I64{-2}) -> removed else -> I64{0}
 }
@@ -220,7 +225,7 @@ process_scope_remove: fn(dir: I64) {
     tries := I64{0}
     loop {
         removed: process_scope_remove_tree(FILES_AT_FDCWD, name)
-        if (removed != I64{-16} || tries >= PROCESS_SCOPE_DRAIN_TRIES) -> break
+        if (removed != I64{-16} || tries >= PROCESS_SCOPE_DRAIN_TRIES) { break }
         fs_lock_sleep(PROCESS_SCOPE_DRAIN_NS)
         tries += I64{1}
     }
@@ -232,12 +237,12 @@ process_scope_peak: fn(dir: I64) -> I64 {
     path: scheduler_text_concat(dir, rt_static_text("/memory.peak"))
     text: process_scope_read(path)
     jet_rt_string_drop(path)
-    if (text == I64{0}) -> return I64{-1}
+    if (text == I64{0}) { return I64{-1} }
     value := I64{0}
     digits := I64{0}
     loop digits < rt_text_len(text) {
         byte: rt_text_byte(wrapping(rt_text_data(text) + digits))
-        if (byte < I64{48} || byte > I64{57}) -> break
+        if (byte < I64{48} || byte > I64{57}) { break }
         value = value * I64{10} + (byte - I64{48})
         digits += I64{1}
     }

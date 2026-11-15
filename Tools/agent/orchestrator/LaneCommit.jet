@@ -48,7 +48,9 @@ command: fn(l: Lander, line: Sh) -> ProcessSpec {
 // Whether `line`, its errors discarded, exits 0.
 quiet: fn(l: Lander, line: Sh) -> Bool { command(l, line).stderr(.Capture).run().code == 0 }
 
-short_head: fn(l: Lander) -> String { command(l, Sh{"git rev-parse --short HEAD"}).run().output.trim() }
+short_head: fn(l: Lander) -> String {
+    command(l, Sh{"git rev-parse --short HEAD"}).run().output.trim()
+}
 
 // Every path a patch touches, each once, in the order git lists them; a rename
 // contributes both its old and its new path. `git apply --numstat -z` gives
@@ -78,7 +80,9 @@ revert_job: fn(l: Lander, job: String) {
     _ := command(l, Sh{"git apply -R {"{job}/patch"}"}).run()
     loop path in files.read("{job}/files").lines() {
         target: "{l.worktree}/{path}"
-        if path != "" && files.exists(target) && !quiet(l, Sh{"git ls-files --error-unmatch -- {path}"}) -> files.remove(target)
+        if path != "" && files.exists(target) && !quiet(l, Sh{"git ls-files --error-unmatch -- {path}"}) {
+            files.remove(target)
+        }
     }
     done := files.best_effort()
     done.remove("{job}/applied")
@@ -95,13 +99,17 @@ jobs_in: fn(queue: String) -> [String] {
 // shared tree: revert every job still marked applied (newest first) whose
 // paths still differ from HEAD (a committed job matches HEAD).
 interrupted: fn(l: Lander) {
-    if !files.is_dir(l.worktree) -> return
+    if !files.is_dir(l.worktree) {
+        return
+    }
     queued := jobs_in(l.queue)
     queued.reverse()
     loop job in queued.filter(fn(job) { files.exists("{job}/applied") }) {
         paths: files.read("{job}/files").lines()
         _ := quiet(l, Sh{"git reset -q --"}.extend(paths.copy()))
-        if !quiet(l, Sh{"git diff --quiet HEAD --"}.extend(paths.copy())) || command(l, Sh{"git ls-files --others --exclude-standard --"}.extend(paths)).run().output != "" -> revert_job(l, job)
+        if !quiet(l, Sh{"git diff --quiet HEAD --"}.extend(paths.copy())) || command(l, Sh{"git ls-files --others --exclude-standard --"}.extend(paths)).run().output != "" {
+            revert_job(l, job)
+        }
         finish(job, 7, "lane-commit: lander interrupted; reverted, resubmit")
     }
 }
@@ -115,7 +123,9 @@ Interrupt: struct {
 
 // A drain step boundary: after a held signal, revert and end with 143.
 checkpoint: fn(l: Lander, stop: Shared<Interrupt>) {
-    if !stop.guard_read().value.signalled -> return
+    if !stop.guard_read().value.signalled {
+        return
+    }
     interrupted(l)
     process.exit(143)
 }
@@ -218,7 +228,9 @@ alive: fn(pid: String) -> Bool {
 }
 
 drain: fn(l: Lander, stop: Shared<Interrupt>) {
-    if !files.is_dir(l.worktree) -> return
+    if !files.is_dir(l.worktree) {
+        return
+    }
     batch := [String]{}
     union := [String]{}
     loop job in jobs_in(l.queue) {
@@ -239,7 +251,9 @@ drain: fn(l: Lander, stop: Shared<Interrupt>) {
             batch.push(job)
         }
     }
-    if batch.len() == 0 -> return
+    if batch.len() == 0 {
+        return
+    }
     whole: run_pre(l, stop.copy(), union)
     if whole.code == 0 {
         loop job in batch -> commit_job(l, stop.copy(), job)
@@ -286,7 +300,9 @@ drain_trapped: fn(l: Lander) {
 
 run: fn() {
     args: process.args()
-    if args.len() < 3 -> process.fail(1, "usage: jet Tools/agent/orchestrator/LaneCommit.jet LANE MESSAGE PATCH")
+    if args.len() < 3 {
+        process.fail(1, "usage: jet Tools/agent/orchestrator/LaneCommit.jet LANE MESSAGE PATCH")
+    }
     lane: args[0]
     r: roots.roots()
     run_dir: r["JET_RUN_ROOT"]

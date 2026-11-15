@@ -1,20 +1,30 @@
+#Error
+BuildLeftError: enum {
+    One
+}
 
 #Error
-BuildLeftError: enum { One }
+BuildRightError: enum {
+    One
+}
+
 #Error
-BuildRightError: enum { One }
-#Error
-BuildTargetError: enum { One }
+BuildTargetError: enum {
+    One
+}
 
 impl BuildLeftError.From(BuildError) {
     from: fn(error: BuildError) -> BuildLeftError { return BuildLeftError.One }
 }
+
 impl BuildRightError.From(BuildError) {
     from: fn(error: BuildError) -> BuildRightError { return BuildRightError.One }
 }
+
 impl BuildTargetError.From(BuildLeftError) {
     from: fn(error: BuildLeftError) -> BuildTargetError { return BuildTargetError.One }
 }
+
 impl BuildTargetError.From(BuildRightError) {
     from: fn(error: BuildRightError) -> BuildTargetError { return BuildTargetError.One }
 }

@@ -7,15 +7,51 @@
 use jet_foundation.[Symbol]
 
 PROTO_MAX_FIELD_NUMBER: 536870911
+
 PROTO_INT32_MIN: -2147483648
+
 PROTO_INT32_MAX: 2147483647
+
 PROTO_SYMBOLS: #run "{{}}[]()=;,.<>:+-"
 
 PROTO_KEYWORDS: #run { [String]{
-    "syntax", "package", "import", "option", "message", "enum", "service", "rpc", "returns", "stream",
-    "reserved", "extensions", "extend", "oneof", "group", "required", "optional", "repeated", "double",
-    "float", "int32", "sint32", "sfixed32", "int64", "sint64", "sfixed64", "uint32", "uint64", "fixed32",
-    "fixed64", "bool", "string", "bytes", "to", "max", "public", "weak"
+    "syntax",
+    "package",
+    "import",
+    "option",
+    "message",
+    "enum",
+    "service",
+    "rpc",
+    "returns",
+    "stream",
+    "reserved",
+    "extensions",
+    "extend",
+    "oneof",
+    "group",
+    "required",
+    "optional",
+    "repeated",
+    "double",
+    "float",
+    "int32",
+    "sint32",
+    "sfixed32",
+    "int64",
+    "sint64",
+    "sfixed64",
+    "uint32",
+    "uint64",
+    "fixed32",
+    "fixed64",
+    "bool",
+    "string",
+    "bytes",
+    "to",
+    "max",
+    "public",
+    "weak",
 } }
 
 pkg_data_bind_proto: fn(input: String, root_name: String?) -> SchemaBuilder DataBindError! {
@@ -29,10 +65,10 @@ pkg_data_bind_proto: fn(input: String, root_name: String?) -> SchemaBuilder Data
     enum_names.sort()
     builder := SchemaBuilder.new()
     use_root: messages.len() == 1
-    source_names := [String: String]{}
-    leaf_names := [String: String]{}
+    source_names := [String:String]{}
+    leaf_names := [String:String]{}
     ambiguous_leaves := [String]{}
-    enum_leaf_names := [String: String]{}
+    enum_leaf_names := [String:String]{}
     ambiguous_enum_leaves := [String]{}
     loop enum_name in enum_names {
         leaf: pkg_data_proto_leaf(enum_name)
@@ -53,7 +89,7 @@ pkg_data_bind_proto: fn(input: String, root_name: String?) -> SchemaBuilder Data
         loop field in messages[index].fields {
             base := BoundType.Dynamic
             if pkg_data_proto_scalar(field.type_name) == {
-                .Val(scalar) -> base = pkg_data_bound_scalar(scalar)
+                .Val(scalar) -> { base = pkg_data_bound_scalar(scalar) }
                 .None -> {
                     reference: pkg_data_proto_trim_dots(field.type_name)
                     leaf: pkg_data_proto_leaf(reference)
@@ -114,15 +150,21 @@ pkg_data_lex_proto: fn(input: String) -> [ProtoToken] DataBindError! {
         }
         if ch == "/" && pkg_data_at(chars, index + 1) == "*" {
             index += 2
-            loop index + 1 < chars.len() && !(chars[index] == "*" && chars[index + 1] == "/") -> index += 1
-            if index + 1 >= chars.len() -> return Err(DataBindError{message: "proto block comment is not closed"})
+            loop index + 1 < chars.len() && !(chars[index] == "*" && chars[index + 1] == "/") {
+                index += 1
+            }
+            if index + 1 >= chars.len() {
+                return Err(DataBindError{message: "proto block comment is not closed"})
+            }
             index += 2
             next
         }
         if pkg_data_is_ascii_alphabetic(ch) || ch == "_" {
             start: index
             index += 1
-            loop index < chars.len() && (pkg_data_is_ascii_alphanumeric(chars[index]) || chars[index] == "_") -> index += 1
+            loop index < chars.len() && (pkg_data_is_ascii_alphanumeric(chars[index]) || chars[index] == "_") {
+                index += 1
+            }
             tokens.push(ProtoToken.Word(pkg_data_slice(chars, start, index)))
             next
         }
@@ -133,7 +175,9 @@ pkg_data_lex_proto: fn(input: String) -> [ProtoToken] DataBindError! {
                 index += 1
                 digits: index
                 loop index < chars.len() && pkg_data_is_ascii_hexdigit(chars[index]) -> index += 1
-                if digits == index -> return Err(DataBindError{message: "proto hexadecimal number has no digits"})
+                if digits == index {
+                    return Err(DataBindError{message: "proto hexadecimal number has no digits"})
+                }
             } else {
                 loop index < chars.len() && pkg_data_is_ascii_digit(chars[index]) -> index += 1
                 if pkg_data_at(chars, index) == "." && pkg_data_is_ascii_digit(pkg_data_at(chars, index + 1)) {
@@ -142,10 +186,14 @@ pkg_data_lex_proto: fn(input: String) -> [ProtoToken] DataBindError! {
                 }
                 if pkg_data_at(chars, index) == "e" || pkg_data_at(chars, index) == "E" {
                     index += 1
-                    if pkg_data_at(chars, index) == "+" || pkg_data_at(chars, index) == "-" -> index += 1
+                    if pkg_data_at(chars, index) == "+" || pkg_data_at(chars, index) == "-" {
+                        index += 1
+                    }
                     digits: index
                     loop index < chars.len() && pkg_data_is_ascii_digit(chars[index]) -> index += 1
-                    if digits == index -> return Err(DataBindError{message: "proto numeric exponent has no digits"})
+                    if digits == index {
+                        return Err(DataBindError{message: "proto numeric exponent has no digits"})
+                    }
                 }
             }
             tokens.push(ProtoToken.Number(pkg_data_slice(chars, start, index)))
@@ -178,7 +226,9 @@ pkg_data_lex_proto_string: fn(chars: [String], open: Int) -> (value: String, nex
         if current == quote -> return Ok((next_index: index + 1, value: value.join("")))
         if current == "\\" {
             index += 1
-            if index >= chars.len() -> return Err(DataBindError{message: "proto string ends after an escape"})
+            if index >= chars.len() {
+                return Err(DataBindError{message: "proto string ends after an escape"})
+            }
             escaped: chars[index]
             decoded := ""
             if escaped == {
@@ -191,29 +241,41 @@ pkg_data_lex_proto_string: fn(chars: [String], open: Int) -> (value: String, nex
                 "v" -> decoded = pkg_data_scalar_of(11)
                 "\\" | "'" | "\"" | "?" -> decoded = escaped
                 "x" -> {
-                    if index + 2 >= chars.len() -> return Err(DataBindError{message: "proto hex escape needs two digits"})
+                    if index + 2 >= chars.len() {
+                        return Err(DataBindError{message: "proto hex escape needs two digits"})
+                    }
                     first: chars[index + 1]
                     second: chars[index + 2]
-                    if !pkg_data_is_ascii_hexdigit(first) || !pkg_data_is_ascii_hexdigit(second) -> return Err(DataBindError{message: "proto hex escape needs two hexadecimal digits"})
+                    if !pkg_data_is_ascii_hexdigit(first) || !pkg_data_is_ascii_hexdigit(second) {
+                        return Err(DataBindError{message: "proto hex escape needs two hexadecimal digits"})
+                    }
                     index += 2
                     decoded = pkg_data_scalar_of(pkg_data_parse_radix("{first}{second}", 16) ?? 0)
                 }
                 "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" -> {
                     start: index
                     end := index + 1
-                    loop end < chars.len() && end < start + 3 && pkg_data_proto_is_octal(chars[end]) -> end += 1
+                    loop end < chars.len() && end < start + 3 && pkg_data_proto_is_octal(chars[end]) {
+                        end += 1
+                    }
                     index = end - 1
                     decoded = pkg_data_scalar_of(pkg_data_proto_octal(pkg_data_slice(chars, start, end)))
                 }
                 else -> return Err(DataBindError{message: "proto escape \\{escaped} is unsupported"})
             }
-            if pkg_data_code(decoded) == 0 -> return Err(DataBindError{message: "proto string contains a NUL escape"})
+            if pkg_data_code(decoded) == 0 {
+                return Err(DataBindError{message: "proto string contains a NUL escape"})
+            }
             value.push(decoded)
             index += 1
             next
         }
-        if current == "\n" || pkg_data_code(current) == 13 -> return Err(DataBindError{message: "proto string contains a newline"})
-        if pkg_data_is_control(current) -> return Err(DataBindError{message: "proto string contains a control character"})
+        if current == "\n" || pkg_data_code(current) == 13 {
+            return Err(DataBindError{message: "proto string contains a newline"})
+        }
+        if pkg_data_is_control(current) {
+            return Err(DataBindError{message: "proto string contains a control character"})
+        }
         value.push(current.copy())
         index += 1
     }
@@ -274,9 +336,7 @@ pkg_data_is_proto_identifier: fn(value: String) -> Bool Never! {
     true
 }
 
-pkg_data_is_proto_keyword: fn(value: String) -> Bool Never! {
-    PROTO_KEYWORDS.contains(value)
-}
+pkg_data_is_proto_keyword: fn(value: String) -> Bool Never! { PROTO_KEYWORDS.contains(value) }
 
 // The Jet type a proto scalar or well-known wrapper type maps to.
 pkg_data_proto_scalar: fn(type_name: String) -> String? Never! {
@@ -369,10 +429,10 @@ ProtoParser: struct {
             package: None,
             syntax_seen: false,
             body_started: false,
-            lex_error: None
+            lex_error: None,
         }
         if pkg_data_lex_proto(input) == {
-            .Ok(tokens) -> parser.tokens = tokens
+            .Ok(tokens) -> { parser.tokens = tokens }
             .Err(error) -> parser.lex_error = Val(error.message)
         }
         parser
@@ -423,7 +483,9 @@ ProtoParser: struct {
     }
 
     expect_symbol: fn(&self, expected: String, what: String) DataBindError! {
-        if !self.symbol_at(0, expected) -> return Err(DataBindError{message: "proto expected {what}"})
+        if !self.symbol_at(0, expected) {
+            return Err(DataBindError{message: "proto expected {what}"})
+        }
         self.pos += 1
     }
 
@@ -453,12 +515,16 @@ ProtoParser: struct {
 
     parse_qualified_name: fn(&self, what: String) -> String DataBindError! {
         first: self.take_word(what)
-        if !pkg_data_is_proto_identifier(first) -> return Err(DataBindError{message: "proto name {first} is invalid"})
+        if !pkg_data_is_proto_identifier(first) {
+            return Err(DataBindError{message: "proto name {first} is invalid"})
+        }
         name := first
         loop self.symbol_at(0, ".") {
             self.pos += 1
             segment: self.take_word(what)
-            if !pkg_data_is_proto_identifier(segment) -> return Err(DataBindError{message: "proto name segment {segment} is invalid"})
+            if !pkg_data_is_proto_identifier(segment) {
+                return Err(DataBindError{message: "proto name segment {segment} is invalid"})
+            }
             name = "{name}.{segment}"
         }
         Ok(name)
@@ -474,7 +540,9 @@ ProtoParser: struct {
         loop self.symbol_at(0, ".") {
             self.pos += 1
             segment: self.take_word("an option name segment")
-            if !pkg_data_is_proto_identifier(segment) -> return Err(DataBindError{message: "proto option name segment {segment} is invalid"})
+            if !pkg_data_is_proto_identifier(segment) {
+                return Err(DataBindError{message: "proto option name segment {segment} is invalid"})
+            }
             name = "{name}.{segment}"
         }
         Ok(name)
@@ -484,15 +552,19 @@ ProtoParser: struct {
         if self.symbol_at(0, "{{") {
             self.pos += 1
             loop !self.symbol_at(0, "}}") {
-                if self.pos >= self.tokens.len() -> return Err(DataBindError{message: "proto option aggregate is not closed"})
+                if self.pos >= self.tokens.len() {
+                    return Err(DataBindError{message: "proto option aggregate is not closed"})
+                }
                 _: self.parse_option_name()
-                if !(self.symbol_at(0, ":") || self.symbol_at(0, "=")) -> return Err(DataBindError{message: "proto option aggregate field needs a colon"})
+                if !(self.symbol_at(0, ":") || self.symbol_at(0, "=")) {
+                    return Err(DataBindError{message: "proto option aggregate field needs a colon"})
+                }
                 self.pos += 1
                 _: self.parse_option_value()
-                if self.symbol_at(0, ",") || self.symbol_at(0, ";") {
-                    self.pos += 1
-                } else {
-                    if !self.symbol_at(0, "}}") -> return Err(DataBindError{message: "proto option aggregate needs a separator"})
+                if self.symbol_at(0, ",") || self.symbol_at(0, ";") -> self.pos += 1 else {
+                    if !self.symbol_at(0, "}}") {
+                        return Err(DataBindError{message: "proto option aggregate needs a separator"})
+                    }
                 }
             }
             self.pos += 1
@@ -502,7 +574,9 @@ ProtoParser: struct {
         if token == {
             .StringLiteral(_) -> {
                 self.pos += 1
-                loop self.token_at(0) != None && pkg_data_proto_is_string(self.token_at(0) ?? ProtoToken.Symbol("")) -> self.pos += 1
+                loop self.token_at(0) != None && pkg_data_proto_is_string(self.token_at(0) ?? ProtoToken.Symbol("")) {
+                    self.pos += 1
+                }
                 Ok(ProtoOptionValue.Text)
             }
             .Number(_) -> {
@@ -519,14 +593,18 @@ ProtoParser: struct {
                     return Ok(ProtoOptionValue.Identifier)
                 }
                 if pkg_data_eq_ignore_case(value, "true") -> return Ok(ProtoOptionValue.Flag(true))
-                if pkg_data_eq_ignore_case(value, "false") -> return Ok(ProtoOptionValue.Flag(false))
+                if pkg_data_eq_ignore_case(value, "false") {
+                    return Ok(ProtoOptionValue.Flag(false))
+                }
                 Ok(ProtoOptionValue.Identifier)
             }
             .Symbol(symbol) -> {
                 if symbol == "+" || symbol == "-" {
                     self.pos += 1
                     following: self.token_at(0) ?? return Err(DataBindError{message: "proto option sign needs a number"})
-                    if !pkg_data_proto_is_number(following) -> return Err(DataBindError{message: "proto option sign needs a number"})
+                    if !pkg_data_proto_is_number(following) {
+                        return Err(DataBindError{message: "proto option sign needs a number"})
+                    }
                     self.pos += 1
                     return Ok(ProtoOptionValue.Number)
                 }
@@ -555,12 +633,16 @@ ProtoParser: struct {
 
     parse_field_options: fn(&self) DataBindError! {
         self.expect_symbol("[", "field options")
-        if self.symbol_at(0, "]") -> return Err(DataBindError{message: "proto field options cannot be empty"})
+        if self.symbol_at(0, "]") {
+            return Err(DataBindError{message: "proto field options cannot be empty"})
+        }
         loop {
             _: self.parse_option_assignment()
             if self.symbol_at(0, ",") {
                 self.pos += 1
-                if self.symbol_at(0, "]") -> return Err(DataBindError{message: "proto field options cannot end with a comma"})
+                if self.symbol_at(0, "]") {
+                    return Err(DataBindError{message: "proto field options cannot end with a comma"})
+                }
                 next
             }
             self.expect_symbol("]", "the end of field options")
@@ -580,7 +662,9 @@ ProtoParser: struct {
             .Number(text) -> number = text
             .Word(_) | .StringLiteral(_) | .Symbol(_) -> return Err(DataBindError{message: "proto expected {what}"})
         }
-        if number.contains(".") || number.contains("e") || number.contains("E") -> return Err(DataBindError{message: "proto {what} must be an integer"})
+        if number.contains(".") || number.contains("e") || number.contains("E") {
+            return Err(DataBindError{message: "proto {what} must be an integer"})
+        }
         self.pos += 1
         value: pkg_data_parse_proto_integer_literal(number) ?? return Err(DataBindError{message: "proto {what} is out of range"})
         Ok(value * sign)
@@ -603,8 +687,12 @@ ProtoParser: struct {
             if literal == {
                 .Val(name) -> {
                     self.pos += 1
-                    if !pkg_data_proto_reserved_name_valid(name) -> return Err(DataBindError{message: "proto reserved name {pkg_cbind_debug_quote(name)} is invalid"})
-                    if reserved.names.contains(name) -> return Err(DataBindError{message: "proto reserved name {name} is repeated"})
+                    if !pkg_data_proto_reserved_name_valid(name) {
+                        return Err(DataBindError{message: "proto reserved name {pkg_cbind_debug_quote(name)} is invalid"})
+                    }
+                    if reserved.names.contains(name) {
+                        return Err(DataBindError{message: "proto reserved name {name} is repeated"})
+                    }
                     reserved.names.push(name)
                 }
                 .None -> {
@@ -615,22 +703,28 @@ ProtoParser: struct {
                         if self.is_word(0, "max") {
                             self.pos += 1
                             end = maximum
-                        } else {
-                            end = self.parse_integer("a reserved range end", signed)
-                        }
+                        } else { end = self.parse_integer("a reserved range end", signed) }
                     }
                     minimum: if signed -> PROTO_INT32_MIN else -> 1
-                    if start < minimum || end < minimum || start > end || end > maximum -> return Err(DataBindError{message: "proto reserved range is out of range"})
-                    if pkg_data_proto_range_has_prohibited_number((end: end, start: start)) -> return Err(DataBindError{message: "proto reserved range uses prohibited field numbers"})
+                    if start < minimum || end < minimum || start > end || end > maximum {
+                        return Err(DataBindError{message: "proto reserved range is out of range"})
+                    }
+                    if pkg_data_proto_range_has_prohibited_number((end: end, start: start)) {
+                        return Err(DataBindError{message: "proto reserved range uses prohibited field numbers"})
+                    }
                     loop old in reserved.ranges {
-                        if pkg_data_proto_ranges_overlap((end: end, start: start), old) -> return Err(DataBindError{message: "proto reserved ranges overlap"})
+                        if pkg_data_proto_ranges_overlap((end: end, start: start), old) {
+                            return Err(DataBindError{message: "proto reserved ranges overlap"})
+                        }
                     }
                     reserved.ranges.push((end: end, start: start))
                 }
             }
             if self.symbol_at(0, ",") {
                 self.pos += 1
-                if self.symbol_at(0, ";") -> return Err(DataBindError{message: "proto reserved list cannot end with a comma"})
+                if self.symbol_at(0, ";") {
+                    return Err(DataBindError{message: "proto reserved list cannot end with a comma"})
+                }
                 next
             }
             self.expect_symbol(";", "a reserved semicolon")
@@ -648,12 +742,14 @@ ProtoParser: struct {
                 if self.is_word(0, "max") {
                     self.pos += 1
                     end = PROTO_MAX_FIELD_NUMBER
-                } else {
-                    end = self.parse_integer("an extension range end", false)
-                }
+                } else { end = self.parse_integer("an extension range end", false) }
             }
-            if start == 0 || start > end || end > PROTO_MAX_FIELD_NUMBER -> return Err(DataBindError{message: "proto extension range is out of range"})
-            if pkg_data_proto_range_has_prohibited_number((end: end, start: start)) -> return Err(DataBindError{message: "proto extension range uses prohibited field numbers"})
+            if start == 0 || start > end || end > PROTO_MAX_FIELD_NUMBER {
+                return Err(DataBindError{message: "proto extension range is out of range"})
+            }
+            if pkg_data_proto_range_has_prohibited_number((end: end, start: start)) {
+                return Err(DataBindError{message: "proto extension range uses prohibited field numbers"})
+            }
             if self.symbol_at(0, ",") {
                 self.pos += 1
                 next
@@ -682,7 +778,9 @@ ProtoParser: struct {
         type_name: self.parse_type_name()
         if self.word_at(0) == None -> return Err(DataBindError{message: "proto field has no name"})
         wire_name: self.take_word("a field name")
-        if !pkg_data_is_proto_identifier(wire_name) || pkg_data_is_proto_keyword(wire_name) -> return Err(DataBindError{message: "proto field name {wire_name} is invalid"})
+        if !pkg_data_is_proto_identifier(wire_name) || pkg_data_is_proto_keyword(wire_name) {
+            return Err(DataBindError{message: "proto field name {wire_name} is invalid"})
+        }
         self.expect_symbol("=", "an equals sign")
         token: self.token_at(0) ?? return Err(DataBindError{message: "proto field number is missing"})
         literal := ""
@@ -691,23 +789,35 @@ ProtoParser: struct {
             .Word(_) | .StringLiteral(_) | .Symbol(_) -> return Err(DataBindError{message: "proto field number is missing"})
         }
         self.pos += 1
-        if literal.contains(".") || literal.contains("e") || literal.contains("E") -> return Err(DataBindError{message: "proto field number must be an integer"})
+        if literal.contains(".") || literal.contains("e") || literal.contains("E") {
+            return Err(DataBindError{message: "proto field number must be an integer"})
+        }
         number: pkg_data_parse_proto_integer_literal(literal) ?? return Err(DataBindError{message: "proto field number is invalid"})
-        if number > 4294967295 -> return Err(DataBindError{message: "proto field number is invalid"})
-        if number == 0 || number > PROTO_MAX_FIELD_NUMBER -> return Err(DataBindError{message: "proto field number {number} is out of range"})
-        if number >= 19000 && number <= 19999 -> return Err(DataBindError{message: "proto field number {number} is prohibited"})
+        if number > 4294967295 {
+            return Err(DataBindError{message: "proto field number is invalid"})
+        }
+        if number == 0 || number > PROTO_MAX_FIELD_NUMBER {
+            return Err(DataBindError{message: "proto field number {number} is out of range"})
+        }
+        if number >= 19000 && number <= 19999 {
+            return Err(DataBindError{message: "proto field number {number} is prohibited"})
+        }
         if self.symbol_at(0, "[") -> self.parse_field_options()
         self.expect_symbol(";", "a field semicolon")
         Ok(ProtoField{wire_name: wire_name, type_name: type_name, repeated: repeated, optional: optional, number: number})
     }
 
     declare_message: fn(&self, source_name: String) DataBindError! {
-        if self.enum_names.contains(source_name) || self.message_names.contains(source_name) -> return Err(DataBindError{message: "proto has duplicate declaration {source_name}"})
+        if self.enum_names.contains(source_name) || self.message_names.contains(source_name) {
+            return Err(DataBindError{message: "proto has duplicate declaration {source_name}"})
+        }
         self.message_names.push(source_name.copy())
     }
 
     declare_enum: fn(&self, source_name: String) DataBindError! {
-        if self.message_names.contains(source_name) || self.enum_names.contains(source_name) -> return Err(DataBindError{message: "proto has duplicate declaration {source_name}"})
+        if self.message_names.contains(source_name) || self.enum_names.contains(source_name) {
+            return Err(DataBindError{message: "proto has duplicate declaration {source_name}"})
+        }
         self.enum_names.push(source_name.copy())
     }
 
@@ -725,7 +835,9 @@ ProtoParser: struct {
     parse_message: fn(&self, parent: String?) -> String DataBindError! {
         _: self.take_word("message")
         short_name: self.take_word("a message name")
-        if !pkg_data_is_proto_identifier(short_name) || pkg_data_is_proto_keyword(short_name) -> return Err(DataBindError{message: "proto message name {short_name} is invalid"})
+        if !pkg_data_is_proto_identifier(short_name) || pkg_data_is_proto_keyword(short_name) {
+            return Err(DataBindError{message: "proto message name {short_name} is invalid"})
+        }
         source_name: self.full_name(parent, short_name)
         self.declare_message(source_name)
         self.expect_symbol("{{", "a message block")
@@ -738,10 +850,14 @@ ProtoParser: struct {
             if self.symbol_at(0, "}}") {
                 self.pos += 1
                 loop name in field_names {
-                    if nested_names.contains(name) -> return Err(DataBindError{message: "proto field collides with a nested message or enum"})
+                    if nested_names.contains(name) {
+                        return Err(DataBindError{message: "proto field collides with a nested message or enum"})
+                    }
                 }
                 loop field in fields {
-                    if reserved.covers(field.wire_name, field.number) -> return Err(DataBindError{message: "proto field uses a reserved name or number"})
+                    if reserved.covers(field.wire_name, field.number) {
+                        return Err(DataBindError{message: "proto field uses a reserved name or number"})
+                    }
                 }
                 self.messages.push(ProtoMessage{source_name: source_name, short_name: short_name, fields: fields})
                 return Ok(source_name)
@@ -759,12 +875,16 @@ ProtoParser: struct {
             if self.is_word(0, "reserved") {
                 parsed: self.parse_reserved(false, PROTO_MAX_FIELD_NUMBER)
                 loop name in parsed.names {
-                    if reserved.names.contains(name) -> return Err(DataBindError{message: "proto reserved name is repeated"})
+                    if reserved.names.contains(name) {
+                        return Err(DataBindError{message: "proto reserved name is repeated"})
+                    }
                     reserved.names.push(name)
                 }
                 loop range in parsed.ranges {
                     loop old in reserved.ranges {
-                        if pkg_data_proto_ranges_overlap(range, old) -> return Err(DataBindError{message: "proto reserved ranges overlap"})
+                        if pkg_data_proto_ranges_overlap(range, old) {
+                            return Err(DataBindError{message: "proto reserved ranges overlap"})
+                        }
                     }
                     reserved.ranges.push(range)
                 }
@@ -782,11 +902,17 @@ ProtoParser: struct {
                 self.pos += 1
                 next
             }
-            if self.is_word(0, "oneof") || self.is_word(0, "group") || self.is_word(0, "extend") -> return Err(DataBindError{message: "proto oneof, group, and extend declarations are unsupported"})
+            if self.is_word(0, "oneof") || self.is_word(0, "group") || self.is_word(0, "extend") {
+                return Err(DataBindError{message: "proto oneof, group, and extend declarations are unsupported"})
+            }
             field: self.parse_field()
-            if field_names.contains(field.wire_name) -> return Err(DataBindError{message: "proto has duplicate field {field.wire_name}"})
+            if field_names.contains(field.wire_name) {
+                return Err(DataBindError{message: "proto has duplicate field {field.wire_name}"})
+            }
             field_names.push(field.wire_name)
-            if field_numbers.contains(field.number) -> return Err(DataBindError{message: "proto has duplicate field number {field.number}"})
+            if field_numbers.contains(field.number) {
+                return Err(DataBindError{message: "proto has duplicate field number {field.number}"})
+            }
             field_numbers.push(field.number)
             fields.push(field)
         }
@@ -796,7 +922,9 @@ ProtoParser: struct {
     parse_enum: fn(&self, parent: String?) -> String DataBindError! {
         _: self.take_word("enum")
         short_name: self.take_word("an enum name")
-        if !pkg_data_is_proto_identifier(short_name) || pkg_data_is_proto_keyword(short_name) -> return Err(DataBindError{message: "proto enum name {short_name} is invalid"})
+        if !pkg_data_is_proto_identifier(short_name) || pkg_data_is_proto_keyword(short_name) {
+            return Err(DataBindError{message: "proto enum name {short_name} is invalid"})
+        }
         source_name: self.full_name(parent, short_name)
         self.declare_enum(source_name)
         self.expect_symbol("{{", "an enum block")
@@ -808,9 +936,13 @@ ProtoParser: struct {
         loop self.pos < self.tokens.len() {
             if self.symbol_at(0, "}}") {
                 self.pos += 1
-                if values.len() == 0 -> return Err(DataBindError{message: "proto enum {source_name} has no values"})
+                if values.len() == 0 {
+                    return Err(DataBindError{message: "proto enum {source_name} has no values"})
+                }
                 loop value in values {
-                    if reserved.covers(value.name, value.number) -> return Err(DataBindError{message: "proto enum value uses a reserved name or number"})
+                    if reserved.covers(value.name, value.number) {
+                        return Err(DataBindError{message: "proto enum value uses a reserved name or number"})
+                    }
                 }
                 self.enums.push(ProtoEnum{source_name: source_name})
                 return Ok(source_name)
@@ -828,12 +960,16 @@ ProtoParser: struct {
             if self.is_word(0, "reserved") {
                 parsed: self.parse_reserved(true, PROTO_INT32_MAX)
                 loop name in parsed.names {
-                    if reserved.names.contains(name) -> return Err(DataBindError{message: "proto enum reserved name is repeated"})
+                    if reserved.names.contains(name) {
+                        return Err(DataBindError{message: "proto enum reserved name is repeated"})
+                    }
                     reserved.names.push(name)
                 }
                 loop range in parsed.ranges {
                     loop old in reserved.ranges {
-                        if pkg_data_proto_ranges_overlap(range, old) -> return Err(DataBindError{message: "proto enum reserved ranges overlap"})
+                        if pkg_data_proto_ranges_overlap(range, old) {
+                            return Err(DataBindError{message: "proto enum reserved ranges overlap"})
+                        }
                     }
                     reserved.ranges.push(range)
                 }
@@ -844,15 +980,25 @@ ProtoParser: struct {
                 next
             }
             value_name: self.take_word("an enum value name")
-            if !pkg_data_is_proto_identifier(value_name) || pkg_data_is_proto_keyword(value_name) -> return Err(DataBindError{message: "proto enum value name {value_name} is invalid"})
-            if value_name == short_name || names.contains(value_name) -> return Err(DataBindError{message: "proto enum has a duplicate or colliding value {value_name}"})
+            if !pkg_data_is_proto_identifier(value_name) || pkg_data_is_proto_keyword(value_name) {
+                return Err(DataBindError{message: "proto enum value name {value_name} is invalid"})
+            }
+            if value_name == short_name || names.contains(value_name) {
+                return Err(DataBindError{message: "proto enum has a duplicate or colliding value {value_name}"})
+            }
             names.push(value_name.copy())
             self.expect_symbol("=", "an enum value equals sign")
             number: self.parse_integer("an enum value number", true)
-            if number < PROTO_INT32_MIN || number > PROTO_INT32_MAX -> return Err(DataBindError{message: "proto enum value number is out of int32 range"})
-            if number >= 19000 && number <= 19999 -> return Err(DataBindError{message: "proto enum value uses a prohibited number"})
+            if number < PROTO_INT32_MIN || number > PROTO_INT32_MAX {
+                return Err(DataBindError{message: "proto enum value number is out of int32 range"})
+            }
+            if number >= 19000 && number <= 19999 {
+                return Err(DataBindError{message: "proto enum value uses a prohibited number"})
+            }
             if !allow_alias {
-                if numbers.contains(number) -> return Err(DataBindError{message: "proto enum has duplicate value number {number}"})
+                if numbers.contains(number) {
+                    return Err(DataBindError{message: "proto enum has duplicate value number {number}"})
+                }
                 numbers.push(number)
             }
             if self.symbol_at(0, "[") -> self.parse_field_options()
@@ -864,20 +1010,28 @@ ProtoParser: struct {
 
     parse_syntax: fn(&self) DataBindError! {
         _: self.take_word("syntax")
-        if self.syntax_seen -> return Err(DataBindError{message: "proto has more than one syntax declaration"})
+        if self.syntax_seen {
+            return Err(DataBindError{message: "proto has more than one syntax declaration"})
+        }
         self.expect_symbol("=", "a syntax equals sign")
         syntax: self.take_string("a syntax string")
-        if syntax != "proto2" && syntax != "proto3" -> return Err(DataBindError{message: "proto syntax {pkg_cbind_debug_quote(syntax)} is unsupported"})
+        if syntax != "proto2" && syntax != "proto3" {
+            return Err(DataBindError{message: "proto syntax {pkg_cbind_debug_quote(syntax)} is unsupported"})
+        }
         self.expect_symbol(";", "a syntax semicolon")
         self.syntax_seen = true
     }
 
     parse_package: fn(&self) DataBindError! {
         _: self.take_word("package")
-        if self.package != None -> return Err(DataBindError{message: "proto has more than one package declaration"})
+        if self.package != None {
+            return Err(DataBindError{message: "proto has more than one package declaration"})
+        }
         package: self.parse_qualified_name("a package name")
         loop part in package.split(".") {
-            if !pkg_data_is_proto_identifier(part) -> return Err(DataBindError{message: "proto package name {package} is invalid"})
+            if !pkg_data_is_proto_identifier(part) {
+                return Err(DataBindError{message: "proto package name {package} is invalid"})
+            }
         }
         self.expect_symbol(";", "a package semicolon")
         self.package = Val(package)
@@ -887,7 +1041,9 @@ ProtoParser: struct {
         _: self.take_word("import")
         if self.is_word(0, "public") || self.is_word(0, "weak") -> self.pos += 1
         path: self.take_string("an import path")
-        if path == "" || pkg_data_proto_has_control(path) -> return Err(DataBindError{message: "proto import path is invalid"})
+        if path == "" || pkg_data_proto_has_control(path) {
+            return Err(DataBindError{message: "proto import path is invalid"})
+        }
         self.expect_symbol(";", "an import semicolon")
     }
 
@@ -901,19 +1057,27 @@ ProtoParser: struct {
         loop self.pos < self.tokens.len() {
             if {
                 self.is_word(0, "syntax") -> {
-                    if self.body_started -> return Err(DataBindError{message: "proto syntax declaration must precede messages and enums"})
+                    if self.body_started {
+                        return Err(DataBindError{message: "proto syntax declaration must precede messages and enums"})
+                    }
                     self.parse_syntax()
                 }
                 self.is_word(0, "package") -> {
-                    if self.body_started -> return Err(DataBindError{message: "proto package declaration must precede messages and enums"})
+                    if self.body_started {
+                        return Err(DataBindError{message: "proto package declaration must precede messages and enums"})
+                    }
                     self.parse_package()
                 }
                 self.is_word(0, "import") -> {
-                    if self.body_started -> return Err(DataBindError{message: "proto import declaration must precede messages and enums"})
+                    if self.body_started {
+                        return Err(DataBindError{message: "proto import declaration must precede messages and enums"})
+                    }
                     self.parse_import()
                 }
                 self.is_word(0, "option") -> {
-                    if self.body_started -> return Err(DataBindError{message: "proto file options must precede messages and enums"})
+                    if self.body_started {
+                        return Err(DataBindError{message: "proto file options must precede messages and enums"})
+                    }
                     _: self.parse_option_statement()
                 }
                 self.is_word(0, "message") -> {
@@ -928,7 +1092,9 @@ ProtoParser: struct {
                 else -> return Err(DataBindError{message: "proto has unsupported top-level declaration {self.word_at(0) ?? "unknown"}"})
             }
         }
-        if self.messages.len() == 0 -> return Err(DataBindError{message: "proto input has no message block"})
+        if self.messages.len() == 0 {
+            return Err(DataBindError{message: "proto input has no message block"})
+        }
         Ok(ProtoSchema{messages: self.messages, enums: self.enums})
     }
 }

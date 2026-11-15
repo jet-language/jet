@@ -1,8 +1,12 @@
 // The compiler-private source keys are the existing runtime spellings.
 // No reserved-name parser exemption or compatibility alias is involved.
 use jet_foundation.[
-    Type, TypeTupleField, core_call, core_host_fixed_signature,
-    core_module_export, type_identity_equal,
+    Type,
+    TypeTupleField,
+    core_call,
+    core_host_fixed_signature,
+    core_module_export,
+    type_identity_equal,
 ]
 
 raw_host_key_fixture: fn(module_name: String, key: String, retired: String, parameters: [Type], result: Type, borrowed: [Bool], effect_kind: String, effect_leaf: String?) {
@@ -12,7 +16,7 @@ raw_host_key_fixture: fn(module_name: String, key: String, retired: String, para
     assert(row.signature.borrow_mask == borrowed)
     assert(row.aot_direct)
     if row.symbol == {
-        .Prelude(symbol) -> assert(symbol == key)
+        .Prelude(symbol) -> { assert(symbol == key) }
         .SourceOwned -> panic("raw host route retains its Prelude symbol")
     }
     actual_effect: row.effect_kind ?? panic("raw host authority is registered")

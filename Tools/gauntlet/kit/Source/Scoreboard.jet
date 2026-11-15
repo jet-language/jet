@@ -10,28 +10,33 @@ use {
 
 // How far over its run reference's wall time Jet's run tier may finish.
 RUN_REFERENCE_MARGIN_SECONDS: 0.0005
+
 // The tiers a peer is shown on without a ratio (none today).
 TRACE_ONLY_TIERS: [String]{}
+
 // The phases of a card that can no longer own a loss.
 TERMINAL_PHASES: ["done", "cancelled", "frozen"]
 
 // The Tower cards a declared loss owner is checked against.
 TowerState: enum {
     Available(TowerCards)
-    // Why the cards could not be read.
     Unavailable(String)
 }
+
+// Why the cards could not be read.
 
 // A read Tower store: its revision and its cards by number.
 TowerCards: struct {
     revision: Dyn
-    cards: [Int: Dyn]
+    cards: [Int:Dyn]
 }
 
 // The cards of a read Tower store, each by its `num`.
 tower_state: fn(store: Dyn) -> TowerState {
-    if !(value_at(store, "cards") == .Val(.Array(_))) -> return TowerState.Unavailable("Tower store has no cards array")
-    cards := [Int: Dyn]{}
+    if !(value_at(store, "cards") == .Val(.Array(_))) {
+        return TowerState.Unavailable("Tower store has no cards array")
+    }
+    cards := [Int:Dyn]{}
     loop card in items_at(store, "cards") {
         if int_at(card, "num") == .Val(number) -> cards[number] = card
     }
@@ -120,8 +125,8 @@ scoreboard: fn(matrix: Dyn, results: Dyn, manifest: Dyn, tower: TowerState?, cei
     loss_owners := Dyn.object()
     loss_owners["declared"] = owners
     loss_owners["tower"] = if state == {
-        .Available(found) -> Dyn{[String: Dyn]{"status": "available", "revision": found.revision}}
-        .Unavailable(reason) -> Dyn{[String: Dyn]{"status": "unavailable", "reason": reason}}
+        .Available(found) -> Dyn{[String:Dyn]{"status": "available", "revision": found.revision}}
+        .Unavailable(reason) -> Dyn{[String:Dyn]{"status": "unavailable", "reason": reason}}
     }
     loss_owners["unresolved"] = Dyn.Array(unresolved)
     board := Dyn.object()
@@ -148,7 +153,9 @@ cell_record: fn(cell: Dyn, matrix: Dyn, canonical: [Dyn], allowed: [Dyn], requir
     records := [Dyn]{}
     loop result in canonical {
         loop declared in items_at(value_at(result, "entry") ?? Dyn.Null, "cells") {
-            if strictly_equal(Val(declared), id) -> records.push(entry_record(result, matrix, owners, tower))
+            if strictly_equal(Val(declared), id) {
+                records.push(entry_record(result, matrix, owners, tower))
+            }
         }
     }
     mode: matrix_cell_mode(cell)
@@ -158,15 +165,21 @@ cell_record: fn(cell: Dyn, matrix: Dyn, canonical: [Dyn], allowed: [Dyn], requir
     if count != 1 && !uncovered_ok {
         if {
             count == 0 -> failures = failures.concat(missing_cell_failures(matrix, cell))
-            else -> loop peer in matrix_peer_languages(matrix, Val(cell)) {
-                loop metric in structural_metrics {
-                    failures.push(Dyn{[String: Dyn]{
-                        "metric": metric,
-                        "peer": peer,
-                        "verdict": "unmeasured",
-                        "reason": "matrix cell has {count} corpus entries; exactly one is required",
-                        "tiers": Dyn.object(),
-                    }})
+            else -> {
+                loop peer in matrix_peer_languages(matrix, Val(cell)) {
+                    loop metric in structural_metrics {
+                        failures.push(
+                            Dyn{
+                                [String:Dyn]{
+                                    "metric": metric,
+                                    "peer": peer,
+                                    "verdict": "unmeasured",
+                                    "reason": "matrix cell has {count} corpus entries; exactly one is required",
+                                    "tiers": Dyn.object(),
+                                }
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -175,7 +188,9 @@ cell_record: fn(cell: Dyn, matrix: Dyn, canonical: [Dyn], allowed: [Dyn], requir
     if {
         count == 1 -> metric_verdicts = member(records[0], "metric_verdicts") ?? Dyn.Null
         uncovered_ok -> {}
-        else -> loop metric in structural_metrics -> metric_verdicts[metric] = "unmeasured"
+        else -> {
+            loop metric in structural_metrics -> metric_verdicts[metric] = "unmeasured"
+        }
     }
     peer_verdict: if count == 1 -> member(records[0], "verdict") ?? Dyn.Null else -> Dyn.Text("unmeasured")
     ceiling: ceiling_cell(cell, references, measurements, required)
@@ -200,17 +215,23 @@ cell_record: fn(cell: Dyn, matrix: Dyn, canonical: [Dyn], allowed: [Dyn], requir
 missing_cell_failures: fn(matrix: Dyn, cell: Dyn) -> [Dyn] {
     mode: matrix_cell_mode(cell)
     tiers := Dyn.object()
-    loop rule in tier_policy(mode) -> tiers[rule.tier] = Dyn{[String: Dyn]{"status": "unmeasured", "jet": Dyn.Null, "peer": Dyn.Null, "ratio": Dyn.Null, "verdict": Dyn.Null}}
+    loop rule in tier_policy(mode) {
+        tiers[rule.tier] = Dyn{[String:Dyn]{"status": "unmeasured", "jet": Dyn.Null, "peer": Dyn.Null, "ratio": Dyn.Null, "verdict": Dyn.Null}}
+    }
     failures := [Dyn]{}
     loop peer in matrix_peer_languages(matrix, Val(cell)) {
         loop metric in comparison_metrics(mode) {
-            failures.push(Dyn{[String: Dyn]{
-                "metric": metric,
-                "peer": peer,
-                "verdict": "unmeasured",
-                "reason": "matrix cell has no corpus entry; peer and metric evidence are missing",
-                "tiers": tiers,
-            }})
+            failures.push(
+                Dyn{
+                    [String:Dyn]{
+                        "metric": metric,
+                        "peer": peer,
+                        "verdict": "unmeasured",
+                        "reason": "matrix cell has no corpus entry; peer and metric evidence are missing",
+                        "tiers": tiers,
+                    }
+                },
+            )
         }
     }
     failures
@@ -236,9 +257,13 @@ entry_record: fn(result: Dyn, matrix: Dyn, owners: Dyn, tower: TowerState) -> Dy
     compared: peer_comparisons(entry, value_at(entry, "languages") ?? Dyn.Null, rows, jet_tiers)
     entry_owners: (if text_at(entry, "name") == .Val(name) -> owners.get(name) else -> None) ?? Dyn.Null
     peers := [Dyn]{}
-    loop language in declared.concat(missing_run_peers) -> peers.push(peer_record(entry, language, compared.get(language) ?? Dyn.Null, rows, metric, metrics, entry_owners, tower))
+    loop language in declared.concat(missing_run_peers) {
+        peers.push(peer_record(entry, language, compared.get(language) ?? Dyn.Null, rows, metric, metrics, entry_owners, tower))
+    }
     shown_tiers := Dyn.object()
-    loop rule in rules -> shown_tiers[rule.tier] = member(jet_tiers, "{rule.tier}/status") ?? Dyn.Text("unavailable")
+    loop rule in rules {
+        shown_tiers[rule.tier] = member(jet_tiers, "{rule.tier}/status") ?? Dyn.Text("unavailable")
+    }
     shown: shown_tiers.copy()
     tiers_ready: rules.filter(fn(rule) { rule.required }).all(fn(rule) { text_at(shown, rule.tier) == Val("ok") })
     applicable: peers.filter(fn(peer) { is_true(peer, "applicable") })
@@ -247,7 +272,9 @@ entry_record: fn(result: Dyn, matrix: Dyn, owners: Dyn, tower: TowerState) -> Dy
     loop item in metrics {
         path: "metric_verdicts/{item}"
         verdicts := applicable.map(fn(peer) { text_at(peer, path) })
-        if item == "runtime_wall_seconds" && run_reference == .Val(reference) -> verdicts.push(text_at(reference, "verdict"))
+        if item == "runtime_wall_seconds" && run_reference == .Val(reference) {
+            verdicts.push(text_at(reference, "verdict"))
+        }
         metric_verdicts[item] = Dyn.Text(cell_verdict(verdicts))
     }
     failures := [Dyn]{}
@@ -257,7 +284,9 @@ entry_record: fn(result: Dyn, matrix: Dyn, owners: Dyn, tower: TowerState) -> Dy
         peer_failures := [Dyn]{}
         loop peer in applicable {
             loop failure in items_at(peer, "metric_failures") {
-                if text_at(failure, "metric") == Val(item.copy()) -> peer_failures.push(failure.copy())
+                if text_at(failure, "metric") == Val(item.copy()) {
+                    peer_failures.push(failure.copy())
+                }
             }
         }
         if item == "runtime_wall_seconds" && run_reference == .Val(reference) && text_at(reference, "verdict") != Val("win") {
@@ -266,7 +295,7 @@ entry_record: fn(result: Dyn, matrix: Dyn, owners: Dyn, tower: TowerState) -> Dy
             failure["peer"] = member(reference, "reference") ?? Dyn.Null
             failure["verdict"] = member(reference, "verdict") ?? Dyn.Null
             failure["reason"] = member(reference, "reason") ?? Dyn.Null
-            failure["tiers"] = Dyn{[String: Dyn]{"run": member(reference, "cache_states") ?? Dyn.Null}}
+            failure["tiers"] = Dyn{[String:Dyn]{"run": member(reference, "cache_states") ?? Dyn.Null}}
             failure["owner"] = if text_at(reference, "verdict") == Val("loss") -> live_loss_owner(entry_owners, item, tower) else -> Dyn.Null
             peer_failures.push(failure)
         }
@@ -285,7 +314,9 @@ entry_record: fn(result: Dyn, matrix: Dyn, owners: Dyn, tower: TowerState) -> Dy
             owner := Dyn.object()
             put_present(owner, "entry", value_at(entry, "name"))
             owner["peer"] = value_at(peer_failure, "peer") ?? Dyn.Null
-            loop row in members(member(peer_failure, "owner") ?? Dyn.Null) -> owner[row.key] = row.value
+            loop row in members(member(peer_failure, "owner") ?? Dyn.Null) {
+                owner[row.key] = row.value
+            }
             loss_owners.push(owner)
         }
     }
@@ -320,12 +351,16 @@ peer_record: fn(entry: Dyn, language: String, comparison: Dyn, rows: Dyn, metric
     rules: peer_tier_policy(entry, language)
     tiers: rules.map(fn(rule) { rule.tier })
     comparisons := Dyn.object()
-    loop item in metrics -> comparisons[item] = scoreboard_metric_comparison(entry, language, comparison, item, tiers)
+    loop item in metrics {
+        comparisons[item] = scoreboard_metric_comparison(entry, language, comparison, item, tiers)
+    }
     verdicts := Dyn.object()
     loop item in metrics -> verdicts[item] = member(comparisons, "{item}/verdict") ?? Dyn.Null
     primary_aot: member(comparisons, "{metric}/tiers/aot") ?? Dyn.Null
     tier_verdicts := Dyn.object()
-    loop tier in tiers -> tier_verdicts[tier] = member(comparisons, "{metric}/tiers/{tier}/verdict") ?? Dyn.Null
+    loop tier in tiers {
+        tier_verdicts[tier] = member(comparisons, "{metric}/tiers/{tier}/verdict") ?? Dyn.Null
+    }
     failures := [Dyn]{}
     loop item in metrics {
         judged: member(comparisons, item) ?? Dyn.Null
@@ -375,7 +410,7 @@ scoreboard_metric_comparison: fn(entry: Dyn, language: String, comparison: Dyn, 
         "not_applicable" -> {
             cells := Dyn.object()
             loop tier in tiers -> cells[tier] = unjudged_cell("not_applicable", declared)
-            return Dyn{[String: Dyn]{"status": "not_applicable", "applicability": declared, "tiers": cells, "verdict": "not_applicable", "reason": Dyn.Null}}
+            return Dyn{[String:Dyn]{"status": "not_applicable", "applicability": declared, "tiers": cells, "verdict": "not_applicable", "reason": Dyn.Null}}
         }
         else -> {}
     }
@@ -384,7 +419,9 @@ scoreboard_metric_comparison: fn(entry: Dyn, language: String, comparison: Dyn, 
         return unmeasured_metric_comparison(tiers, invalid_applicability(reason), reason)
     }
     cells := Dyn.object()
-    loop tier in tiers -> cells[tier] = rejudged_cell(member(comparison, "tiers/{tier}/metrics/{metric}") ?? Dyn.object(), language, metric, tier)
+    loop tier in tiers {
+        cells[tier] = rejudged_cell(member(comparison, "tiers/{tier}/metrics/{metric}") ?? Dyn.object(), language, metric, tier)
+    }
     ratio_tiers: tiers.filter(fn(tier) { RATIO_TIERS.contains(tier) && comparable_at_tier(metric, tier) })
     verdicts := [String?]{}
     reasons := [String]{}
@@ -394,13 +431,15 @@ scoreboard_metric_comparison: fn(entry: Dyn, language: String, comparison: Dyn, 
         if reason != "" && !reasons.contains(reason) -> reasons.push(reason)
     }
     verdict: cell_verdict(verdicts)
-    Dyn{[String: Dyn]{
-        "status": if verdict == "unmeasured" -> "unmeasured" else -> "measured",
-        "applicability": declared,
-        "tiers": cells,
-        "verdict": verdict,
-        "reason": if reasons.len() > 0 -> Dyn.Text(reasons.join("; ")) else -> Dyn.Null,
-    }}
+    Dyn{
+        [String:Dyn]{
+            "status": if verdict == "unmeasured" -> "unmeasured" else -> "measured",
+            "applicability": declared,
+            "tiers": cells,
+            "verdict": verdict,
+            "reason": if reasons.len() > 0 -> Dyn.Text(reasons.join("; ")) else -> Dyn.Null,
+        }
+    }
 }
 
 // A comparison cell of `metric` on `tier` (empty when there is none) as the
@@ -411,9 +450,15 @@ rejudged_cell: fn(item: Dyn, language: String, metric: String, tier: String) -> 
     status: text_at(item, "status") ?? ""
     expected: expected_verdict(item)
     if {
-        status == "not_applicable" && !comparable_at_tier(metric, tier) -> cell["verdict"] = Dyn.Null
-        status == "not_applicable" -> mark_unmeasured(cell, "metric marked not_applicable without a declared structural reason")
-        status == "trace_only" || status == "not_comparable" -> mark_unmeasured(cell, "{metric} is not a ratio-measured metric on {tier}")
+        status == "not_applicable" && !comparable_at_tier(metric, tier) -> {
+            cell["verdict"] = Dyn.Null
+        }
+        status == "not_applicable" -> {
+            mark_unmeasured(cell, "metric marked not_applicable without a declared structural reason")
+        }
+        status == "trace_only" || status == "not_comparable" -> {
+            mark_unmeasured(cell, "{metric} is not a ratio-measured metric on {tier}")
+        }
         status != "measured" || expected == None || text_at(item, "verdict") != expected -> {
             unread := [String]{}
             if PEER_FLOOR_METRICS.contains(metric) {
@@ -446,7 +491,9 @@ mark_unmeasured: fn(cell: &Dyn, reason: String) {
 // The verdict a measured cell must carry: that of its ratio, when both
 // readings are positive and the ratio is Jet's over the peer's.
 expected_verdict: fn(item: Dyn) -> String? {
-    if positive(value_at(item, "jet")) && positive(value_at(item, "peer")) && number_at(item, "jet") == .Val(jet) && number_at(item, "peer") == .Val(peer) && number_at(item, "ratio") == .Val(ratio) && math.to_bits(ratio) == math.to_bits(jet / peer) -> return ratio_verdict(Val(ratio))
+    if positive(value_at(item, "jet")) && positive(value_at(item, "peer")) && number_at(item, "jet") == .Val(jet) && number_at(item, "peer") == .Val(peer) && number_at(item, "ratio") == .Val(ratio) && math.to_bits(ratio) == math.to_bits(jet / peer) {
+        return ratio_verdict(Val(ratio))
+    }
     None
 }
 
@@ -458,7 +505,7 @@ unmeasured_metric_comparison: fn(tiers: [String], applicability: Dyn, reason: St
         cell["reason"] = reason
         cells[tier] = cell
     }
-    Dyn{[String: Dyn]{"status": "unmeasured", "applicability": applicability, "tiers": cells, "verdict": "unmeasured", "reason": reason}}
+    Dyn{[String:Dyn]{"status": "unmeasured", "applicability": applicability, "tiers": cells, "verdict": "unmeasured", "reason": reason}}
 }
 
 // One verdict for several: not applicable when none is comparable, else
@@ -496,29 +543,35 @@ run_reference_verdict: fn(entry: Dyn, rows: Dyn, tiers: Dyn) -> Dyn? {
             else -> "loss"
         }
         if verdict == "unmeasured" -> unmeasured.push(state.copy())
-        if verdict == "loss" -> lost.push("{state} run tier {(jet ?? 0.0):Fixed(6)}s is more than {margin}s over {reference} {(reference_wall ?? 0.0):Fixed(6)}s")
-        states[state] = Dyn{[String: Dyn]{
-            "jet": if jet == None -> Dyn.Null else -> member(measured, "metrics/runtime_wall_seconds") ?? Dyn.Null,
-            "reference": if reference_wall == None -> Dyn.Null else -> member(row, "metrics/runtime_wall_seconds") ?? Dyn.Null,
-            "limit": if limit == .Val(bound) -> Dyn.Float(bound) else -> Dyn.Null,
-            "verdict": verdict,
-        }}
+        if verdict == "loss" {
+            lost.push("{state} run tier {(jet ?? 0.0):Fixed(6)}s is more than {margin}s over {reference} {(reference_wall ?? 0.0):Fixed(6)}s")
+        }
+        states[state] = Dyn{
+            [String:Dyn]{
+                "jet": if jet == None -> Dyn.Null else -> member(measured, "metrics/runtime_wall_seconds") ?? Dyn.Null,
+                "reference": if reference_wall == None -> Dyn.Null else -> member(row, "metrics/runtime_wall_seconds") ?? Dyn.Null,
+                "limit": if limit == .Val(bound) -> Dyn.Float(bound) else -> Dyn.Null,
+                "verdict": verdict,
+            }
+        }
     }
-    Dyn{[String: Dyn]{
-        "reference": reference,
-        "margin_seconds": RUN_REFERENCE_MARGIN_SECONDS,
-        "cache_states": states,
-        "verdict": if {
-            unmeasured.len() > 0 -> "unmeasured"
-            lost.len() > 0 -> "loss"
-            else -> "win"
-        },
-        "reason": if {
-            unmeasured.len() > 0 -> Dyn.Text("uncovered: no {unmeasured[0]} run-tier reading for jet or no {reference} reference reading")
-            lost.len() > 0 -> Dyn.Text(lost.join("; "))
-            else -> Dyn.Null
-        },
-    }}
+    Dyn{
+        [String:Dyn]{
+            "reference": reference,
+            "margin_seconds": RUN_REFERENCE_MARGIN_SECONDS,
+            "cache_states": states,
+            "verdict": if {
+                unmeasured.len() > 0 -> "unmeasured"
+                lost.len() > 0 -> "loss"
+                else -> "win"
+            },
+            "reason": if {
+                unmeasured.len() > 0 -> Dyn.Text("uncovered: no {unmeasured[0]} run-tier reading for jet or no {reference} reference reading")
+                lost.len() > 0 -> Dyn.Text(lost.join("; "))
+                else -> Dyn.Null
+            },
+        }
+    }
 }
 
 // The card that owns a loss on `metric`: the entry's declared card for the
@@ -554,7 +607,9 @@ live_loss_owner: fn(owners: Dyn, metric: String, tower: TowerState) -> Dyn {
             owner["card"] = Dyn.Int(number)
             put_present(owner, "title", value_at(card, "title"))
             put_present(owner, "phase", value_at(card, "phase"))
-            if terminal -> owner["reason"] = "declared owner card is terminal" else -> owner["assignee"] = member(card, "assignee") ?? Dyn.Null
+            if terminal -> owner["reason"] = "declared owner card is terminal" else {
+                owner["assignee"] = member(card, "assignee") ?? Dyn.Null
+            }
             owner
         }
     }
@@ -562,7 +617,7 @@ live_loss_owner: fn(owners: Dyn, metric: String, tower: TowerState) -> Dyn {
 
 // The leading members of a loss owner.
 owner_row: fn(status: String, metric: String, category: Dyn) -> Dyn {
-    Dyn{[String: Dyn]{"status": status, "metric": metric, "category": category}}
+    Dyn{[String:Dyn]{"status": status, "metric": metric, "category": category}}
 }
 
 // A matrix cell against its machine ceiling: the asm-parity references that
@@ -574,7 +629,9 @@ ceiling_cell: fn(cell: Dyn, references: Dyn, measurements: Dyn, required: [Dyn])
     id: value_at(cell, "id")
     names := [Dyn?]{}
     loop reference in items_at(references, "") {
-        if value_at(reference, "gauntlet") == .Val(.Array(bounded)) && listed(bounded, id) -> names.push(value_at(reference, "name"))
+        if value_at(reference, "gauntlet") == .Val(.Array(bounded)) && listed(bounded, id) {
+            names.push(value_at(reference, "name"))
+        }
     }
     rows: items_at(measurements, "rows")
     metrics := Dyn.object()
@@ -609,26 +666,30 @@ ceiling_cell: fn(cell: Dyn, references: Dyn, measurements: Dyn, required: [Dyn])
         }
         verdict: if names.len() == 0 -> "uncovered" else -> ceiling_reduce(judged.map(fn(row) { text_at(row, "verdict") ?? "" }))
         verdicts.push(verdict.copy())
-        metrics[metric] = Dyn{[String: Dyn]{
-            "measure": measure,
-            "verdict": verdict,
-            "rows": Dyn.Array(judged),
-            "reason": if verdict == {
-                "meet" -> Dyn.Null
-                "uncovered" -> Dyn.Text("no hand-written machine-code reference names this cell")
-                "unmeasured" -> Dyn.Text("machine-ceiling reference was not measured (asm-parity results are missing)")
-                "wrong" -> Dyn.Text("machine-ceiling output differs from the cell's expected output")
-                else -> Dyn.Text("Jet/ceiling is above 1.00")
-            },
-        }}
+        metrics[metric] = Dyn{
+            [String:Dyn]{
+                "measure": measure,
+                "verdict": verdict,
+                "rows": Dyn.Array(judged),
+                "reason": if verdict == {
+                    "meet" -> Dyn.Null
+                    "uncovered" -> Dyn.Text("no hand-written machine-code reference names this cell")
+                    "unmeasured" -> Dyn.Text("machine-ceiling reference was not measured (asm-parity results are missing)")
+                    "wrong" -> Dyn.Text("machine-ceiling output differs from the cell's expected output")
+                    else -> Dyn.Text("Jet/ceiling is above 1.00")
+                },
+            }
+        }
     }
-    Dyn{[String: Dyn]{
-        "required": Dyn.Bool(listed(required, id)),
-        "status": if names.len() > 0 -> "covered" else -> "uncovered",
-        "references": Dyn.Array(names.map(fn(name) { name ?? Dyn.Null })),
-        "metrics": metrics,
-        "verdict": Dyn.Text(ceiling_reduce(verdicts)),
-    }}
+    Dyn{
+        [String:Dyn]{
+            "required": Dyn.Bool(listed(required, id)),
+            "status": if names.len() > 0 -> "covered" else -> "uncovered",
+            "references": Dyn.Array(names.map(fn(name) { name ?? Dyn.Null })),
+            "metrics": metrics,
+            "verdict": Dyn.Text(ceiling_reduce(verdicts)),
+        }
+    }
 }
 
 // The asm-parity measure that judges `metric` at the machine ceiling:
@@ -702,7 +763,9 @@ json_number: fn(value: Float) -> String { json.stringify(Dyn.Float(value)) }
 #Test("a Tower store without a cards array is unavailable, and its cards are read by number") {
     assert(tower_state(json.parse("{{\"rev\": 3}}") ?? panic("store")) == TowerState.Unavailable("Tower store has no cards array"))
     if tower_state(json.parse("{{\"rev\": 4, \"cards\": [{{\"num\": 7}}, {{\"num\": \"x\"}}]}}") ?? panic("store")) == {
-        .Available(found) -> assert(found.cards.len() == 1 && found.cards.get(7) != None && json.stringify(found.revision) == "4")
+        .Available(found) -> {
+            assert(found.cards.len() == 1 && found.cards.get(7) != None && json.stringify(found.revision) == "4")
+        }
         .Unavailable(reason) -> panic(reason)
     }
 }

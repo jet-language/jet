@@ -24,12 +24,12 @@ Owner: struct {
     team: String
     owner: String
 }
+
 #Codable
 Summary: struct {
     team: String
     mean: Float
 }
-
 
 #Codable
 Joined: struct {
@@ -146,18 +146,14 @@ run: fn() {
     print("stage=aggregated")
     mark("aggregated")
     values := [Float]{}
-    loop row in filtered {
-        values.push(row.value)
-    }
+    loop row in filtered { values.push(row.value) }
     rolling: data.rolling_mean(values, 8) ?? panic("rolling mean")
     summary: data.describe(values) ?? panic("describe")
     print("stage=windowed")
     mark("windowed")
 
     summaries := [Summary]{}
-    loop group in groups {
-        summaries.push(Summary{team: group.key, mean: group.value})
-    }
+    loop group in groups { summaries.push(Summary{team: group.key, mean: group.value}) }
     owners: [Owner]{{team: "team0", owner: "Ada"}, {team: "team1", owner: "Grace"}, {team: "team2", owner: "Lin"}, {team: "team3", owner: "Mina"}, {team: "team4", owner: "Noor"}, {team: "team5", owner: "Omar"}, {team: "team6", owner: "Priya"}, {team: "team7", owner: "Quinn"}, {team: "team8", owner: "Rae"}, {team: "team9", owner: "Sol"}}
     joined: join_summaries(summaries, owners)
     regression: fit(rows)

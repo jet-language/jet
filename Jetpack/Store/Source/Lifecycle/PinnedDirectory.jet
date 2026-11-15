@@ -11,6 +11,7 @@
 // flags and the unsupported-platform fallback are Core's responsibility.
 
 STORE_PINNED_PRIVATE_MODE: 0o700
+
 STORE_PINNED_FILE_MODE: 0o600
 
 PinnedLifecycleDirectory: struct {
@@ -28,30 +29,28 @@ PinnedLifecycleDirectory: struct {
         directory := files.open_directory(parts.anchor)
         loop name in parts.names {
             if directory.open_directory(name) == {
-                .Ok(child) -> directory = child
+                .Ok(child) -> { directory = child }
                 .Err(error) -> {
                     if !store_io_is_not_found(error) -> return Err(StoreError.IO(error))
                     if directory.create_directory(name, mode: STORE_PINNED_PRIVATE_MODE) == {
-                        .Ok(_) -> directory.fsync()
+                        .Ok(_) -> { directory.fsync() }
                         .Err(create_error) -> {
-                            if !store_io_is_already_exists(create_error) -> return Err(StoreError.IO(create_error))
+                            if !store_io_is_already_exists(create_error) {
+                                return Err(StoreError.IO(create_error))
+                            }
                         }
                     }
                     directory = directory.open_directory(name)
                 }
             }
         }
-        Ok(PinnedLifecycleDirectory{directory, absolute_path: absolute})
+        Ok(PinnedLifecycleDirectory{directory: directory, absolute_path: absolute})
     }
 
-    path: fn(self) -> String Never! {
-        self.absolute_path
-    }
+    path: fn(self) -> String Never! { self.absolute_path }
 
     // The member path used in diagnostics (`path().join(name)`).
-    member_path: fn(self, name: String) -> String Never! {
-        files.join(self.absolute_path, name)
-    }
+    member_path: fn(self, name: String) -> String Never! { files.join(self.absolute_path, name) }
 
     // At most `maximum` member names of the held directory.
     names: fn(self, maximum: Int) -[FS]> [String] StoreError! {
@@ -100,9 +99,7 @@ PinnedLifecycleDirectory: struct {
     }
 
     // Make earlier member creations, renames and removals durable.
-    sync: fn(self) StoreError! -[FS]> {
-        self.directory.fsync()
-    }
+    sync: fn(self) StoreError! -[FS]> { self.directory.fsync() }
 
     // The member `name` is still a regular file with the identity of `opened`.
     validate_open_name: fn(self, opened: Stat, name: String) StoreError! -[FS]> {
@@ -125,7 +122,9 @@ store_pinned_absolute: fn(path: String) -[FS, Env]> String StoreError! {
     absolute: if files.is_abs(path) -> path else -> files.join(files.cwd(), path)
     segments: files.split_slash(absolute)
     loop part in segments {
-        if part == "." || part == ".." -> return Err(StoreError.InvalidInput("pinned directory path contains traversal"))
+        if part == "." || part == ".." {
+            return Err(StoreError.InvalidInput("pinned directory path contains traversal"))
+        }
     }
     Ok(absolute)
 }
@@ -139,11 +138,13 @@ store_pinned_components: fn(absolute: String) -> PinnedPathParts StoreError! {
         if part != "" -> parts.push(part)
     }
     if absolute.starts_with("/") -> return Ok(PinnedPathParts{anchor: "/", names: parts})
-    if parts.len() == 0 -> return Err(StoreError.InvalidInput("pinned directory has no normal component"))
+    if parts.len() == 0 {
+        return Err(StoreError.InvalidInput("pinned directory has no normal component"))
+    }
     anchor: "{parts[0]}/"
     names := [String]{}
     loop index in 1..<parts.len() -> names.push(parts[index])
-    Ok(PinnedPathParts{anchor, names})
+    Ok(PinnedPathParts{anchor: anchor, names: names})
 }
 
 // One plain member name.

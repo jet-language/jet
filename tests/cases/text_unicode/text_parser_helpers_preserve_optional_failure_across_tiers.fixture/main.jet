@@ -1,4 +1,3 @@
-
 use {
     parse: core.text.parse
     combinators
@@ -28,9 +27,7 @@ run: fn() {
     if signed == .Val(decimal) {
         rest: combinators.remaining(decimal.next)
         print("decimal: value={decimal.n} pos={decimal.next.pos} rest={rest}")
-    } else {
-        print("decimal: missing")
-    }
+    } else { print("decimal: missing") }
     no_digits: combinators.int_dec(combinators.input(" \t+tail")) == .None
     print("no digits={no_digits}")
 
@@ -39,9 +36,7 @@ run: fn() {
     if combinators.take_n(combinators.input("jet"), 2) == .Val(taken) {
         rest: combinators.remaining(taken.next)
         print("take valid: chunk={taken.chunk} pos={taken.next.pos} rest={rest}")
-    } else {
-        print("take valid: rejected")
-    }
+    } else { print("take valid: rejected") }
     took: combinators.take_while(combinators.input("jet!x"), fn(scalar: String) { scalar != "!" })
     print("take_while: chunk={took.chunk} pos={took.next.pos}")
 }

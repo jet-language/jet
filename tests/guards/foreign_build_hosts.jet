@@ -3,12 +3,15 @@ use s1_host_files: core.files
 // Exact maintained-file assertions of tests/foreign_build_hosts.rs:19-185.
 // Test-body helpers are definition-before-use, collision-qualified, no production policy copied.
 s1_host_read: fn(path: String) -> String { s1_host_files.read(path) ?? panic("read {path}") }
+
 s1_host_maintained_lines: fn(path: String) -> Int {
     count := 0
     loop line in s1_host_read(path).lines() {
         // Stored trim views ICE at String method calls; keep owned text.
         trimmed: line.trim().copy()
-        if !trimmed.is_empty() && !trimmed.starts_with("#") && !trimmed.starts_with("//") && !trimmed.starts_with("<!--") -> count += 1
+        if !trimmed.is_empty() && !trimmed.starts_with("#") && !trimmed.starts_with("//") && !trimmed.starts_with("<!--") {
+            count += 1
+        }
     }
     count
 }
@@ -42,7 +45,9 @@ s1_host_adapters_use_one_jet_library_runner_and_fail_closed_outputs: fn() {
     assert(powershell.contains("project parts"))
     assert(powershell.contains("TimeoutSeconds"))
     variables: [String]{"RUSTC", "RUSTC_LINKER", "CC", "NO_COLOR", "PATH"}
-    loop variable in variables -> assert(powershell.contains("EnvironmentVariables[\"{variable}\"]"))
+    loop variable in variables {
+        assert(powershell.contains("EnvironmentVariables[\"{variable}\"]"))
+    }
     adapters: [String]{"cmake/Jet.cmake", "gradle/jet-library.gradle", "bazel/jet_library.bzl", "msbuild/Jet.Library.targets"}
     loop relative in adapters {
         text: s1_host_read("{root}/{relative}")

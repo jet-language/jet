@@ -56,8 +56,11 @@ CommandRow: struct {
 
 // The page holding the root command index, and the lines around the index.
 DOC_PATH: "Docs/spec/reference/cli.md"
+
 INDEX_BEGIN: "<!-- BEGIN GENERATED CLI COMMAND INDEX: jet Tools/cli-census/Census.jet --write -->\n"
+
 INDEX_END: "<!-- END GENERATED CLI COMMAND INDEX -->\n"
+
 // The column a usage row's summary starts after, as `jet help` pads it.
 USAGE_WIDTH: 36
 
@@ -326,7 +329,9 @@ doc_with_index: fn(doc: String, lines: [String]) -> String CensusError! {
     if begin < 0 -> return Err(census_fail("census: {DOC_PATH} has no line `{INDEX_BEGIN.trim()}`"))
     body_start: begin + byte_len(INDEX_BEGIN)
     end: byte_slice(doc, body_start, byte_len(doc)).find(INDEX_END)
-    if end < 0 -> return Err(census_fail("census: {DOC_PATH} has no line `{INDEX_END.trim()}` after its index"))
+    if end < 0 {
+        return Err(census_fail("census: {DOC_PATH} has no line `{INDEX_END.trim()}` after its index"))
+    }
     fence: "```"
     Ok("{byte_slice(doc, 0, body_start)}{fence}text\n{lines.join("\n")}\n{fence}\n{byte_slice(doc, body_start + end, byte_len(doc))}")
 }
@@ -352,7 +357,9 @@ census_main: fn(args: [String]) -[FS, IO]> Int CensusError! {
         files.write(DOC_PATH, indexed) ?? return Err(census_fail("census: cannot write {DOC_PATH}: {err}"))
         print("census: wrote the root command index of {DOC_PATH}")
     }
-    if mode == "--check" && indexed != doc -> problems.push("census: the root command index of {DOC_PATH} differs from the command rows; run jet Tools/cli-census/Census.jet --write")
+    if mode == "--check" && indexed != doc {
+        problems.push("census: the root command index of {DOC_PATH} differs from the command rows; run jet Tools/cli-census/Census.jet --write")
+    }
     if problems.len() == 0 -> return Ok(0)
     loop line in problems -> term.eprint(line)
     Ok(1)
@@ -384,11 +391,14 @@ rows_of: fn(source: String) -> [CommandRow] Never! {
     forms: unbuilt_forms("    {{form: \"db\", ported: false, card: 1}},\n    {{form: \"fmt --x\", ported: false, card: 1}},\n    {{form: \"run\", ported: true, card: 1}},\n")
     assert_eq(forms, [String]{"db", "fmt --x"})
     lines: index_lines(rows, forms)
-    assert_eq(lines, [String]{
-        "jet run [<file.jet>]                 Run a \"program\"",
-        "jet fmt [args]                       Format",
-        "jet self <command>                   Manage {{it}}",
-    })
+    assert_eq(
+        lines,
+        [String]{
+            "jet run [<file.jet>]                 Run a \"program\"",
+            "jet fmt [args]                       Format",
+            "jet self <command>                   Manage {{it}}",
+        },
+    )
     doc: "intro\n{INDEX_BEGIN}```text\nold\n```\n{INDEX_END}after\n"
     written: doc_with_index(doc, lines) ?? panic(err.message)
     assert_eq(written, "intro\n{INDEX_BEGIN}```text\n{lines.join("\n")}\n```\n{INDEX_END}after\n")

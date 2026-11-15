@@ -23,35 +23,85 @@ s4_agent_adapter_has_all: fn(adapter: String, needles: [String]) {
 // Port of tests/agent_workloads.rs:2046-2093; no production path checks retired.
 #Test("structured_data_database_http_jet_adapters_use_production_paths") {
     guards_enter_root()
-    s4_agent_adapter_has_all("structured_data.jet", [String]{
-        "json: core.encoding.json", "fs.read(input)", "json.decode<Batch>", "json.to_string",
-    })
-    s4_agent_adapter_has_all("database_access.jet", [String]{
-        "db: core.db", "db.open_memory()", "db.migrate", "scoped.execute(", "scoped.query_one(", "scoped.close()",
-    })
-    s4_agent_adapter_has_all("http_api.jet", [String]{
-        "http_client: core.http.client", "http_server: core.http.server", "net.tcp_listen(",
-        "mux.serve_once(listener)", "http_client.request(", "request.send()",
-    })
+    s4_agent_adapter_has_all(
+        "structured_data.jet",
+        [String]{
+            "json: core.encoding.json",
+            "fs.read(input)",
+            "json.decode<Batch>",
+            "json.to_string",
+        },
+    )
+    s4_agent_adapter_has_all(
+        "database_access.jet",
+        [String]{
+            "db: core.db",
+            "db.open_memory()",
+            "db.migrate",
+            "scoped.execute(",
+            "scoped.query_one(",
+            "scoped.close()",
+        },
+    )
+    s4_agent_adapter_has_all(
+        "http_api.jet",
+        [String]{
+            "http_client: core.http.client",
+            "http_server: core.http.server",
+            "net.tcp_listen(",
+            "mux.serve_once(listener)",
+            "http_client.request(",
+            "request.send()",
+        },
+    )
 }
 
 // Port of tests/agent_workloads.rs:2095-2154; include hostile and cleanup paths.
 #Test("mcp_terminal_service_jet_adapters_use_production_paths") {
     guards_enter_root()
-    s4_agent_adapter_has_all("mcp_resource.jet", [String]{
-        "process.cmd([jet, \"self\", \"lsp\"])", "resources/list", "resources/read",
-        "child.stdin.write", "jet://environment", "-32002", "/agent-secret",
-    })
-    s4_agent_adapter_has_all("interactive_terminal.jet", [String]{
-        ".terminal(TerminalPolicy", ".spawn()", "terminal_session.sh", "session.resize",
-        "child.wait()", "Name: ", "Hello Ada", "Choice blue", "terminal_closed.sh",
-        "interactive-terminal-closed", ".timeout(",
-    })
-    s4_agent_adapter_has_all("service_lifecycle.jet", [String]{
-        "JETPACK_FAKE_SYSTEMD_STATE", "\"services\", \"up\"", "\"services\", \"health\"",
-        "\"services\", \"wait\"", "\"services\", \"logs\"", "\"services\", \"down\"",
-        "E1261", "supervisor.error", "phase=failed", "recovery=startup-failed",
-    })
+    s4_agent_adapter_has_all(
+        "mcp_resource.jet",
+        [String]{
+            "process.cmd([jet, \"self\", \"lsp\"])",
+            "resources/list",
+            "resources/read",
+            "child.stdin.write",
+            "jet://environment",
+            "-32002",
+            "/agent-secret",
+        },
+    )
+    s4_agent_adapter_has_all(
+        "interactive_terminal.jet",
+        [String]{
+            ".terminal(TerminalPolicy",
+            ".spawn()",
+            "terminal_session.sh",
+            "session.resize",
+            "child.wait()",
+            "Name: ",
+            "Hello Ada",
+            "Choice blue",
+            "terminal_closed.sh",
+            "interactive-terminal-closed",
+            ".timeout(",
+        },
+    )
+    s4_agent_adapter_has_all(
+        "service_lifecycle.jet",
+        [String]{
+            "JETPACK_FAKE_SYSTEMD_STATE",
+            "\"services\", \"up\"",
+            "\"services\", \"health\"",
+            "\"services\", \"wait\"",
+            "\"services\", \"logs\"",
+            "\"services\", \"down\"",
+            "E1261",
+            "supervisor.error",
+            "phase=failed",
+            "recovery=startup-failed",
+        },
+    )
 }
 
 // Original read_native_os_matrix/read_jet_baseline/read_tasks schema and

@@ -15,9 +15,10 @@ use math: core.math
 
 #Error
 ColorError: enum {
-    // The text is not `#rgb`, `#rrggbb` or `#rrggbbaa` hex.
     InvalidHex(String)
 }
+
+// The text is not `#rgb`, `#rrggbb` or `#rrggbbaa` hex.
 
 // A color as hue, saturation and lightness: `h` in degrees from 0 up to 360,
 // and `s`, `l` and `a` from 0 to 1.
@@ -47,12 +48,16 @@ Color: struct {
     from_hex: fn(text: String) -> Color ColorError! {
         raw: text.bytes()
         count: raw.len()
-        if (count != 4 && count != 7 && count != 9) || (Int{raw[0]}) != 35 -> return Err(ColorError.InvalidHex(text.copy()))
+        if (count != 4 && count != 7 && count != 9) || (Int{raw[0]}) != 35 {
+            return Err(ColorError.InvalidHex(text.copy()))
+        }
         digits := [Int]{}
         loop index in 1..<count {
             digits.push(color_hex_digit(raw[index]) ?? return Err(ColorError.InvalidHex(text.copy())))
         }
-        if count == 4 -> return Ok(Color{r: U8{digits[0] * 17}, g: U8{digits[1] * 17}, b: U8{digits[2] * 17}, a: U8{255}})
+        if count == 4 {
+            return Ok(Color{r: U8{digits[0] * 17}, g: U8{digits[1] * 17}, b: U8{digits[2] * 17}, a: U8{255}})
+        }
         alpha: if count == 9 -> digits[6] * 16 + digits[7] else -> 255
         Ok(Color{r: U8{digits[0] * 16 + digits[1]}, g: U8{digits[2] * 16 + digits[3]}, b: U8{digits[4] * 16 + digits[5]}, a: U8{alpha}})
     }
@@ -70,10 +75,10 @@ Color: struct {
         saturation: color_unit(hsl.s)
         lightness: color_unit(hsl.l)
         Color{
-            r: color_channel(color_hsl_part(0.0, hue, saturation, lightness))
-            g: color_channel(color_hsl_part(8.0, hue, saturation, lightness))
-            b: color_channel(color_hsl_part(4.0, hue, saturation, lightness))
-            a: color_channel(hsl.a)
+            r: color_channel(color_hsl_part(0.0, hue, saturation, lightness)),
+            g: color_channel(color_hsl_part(8.0, hue, saturation, lightness)),
+            b: color_channel(color_hsl_part(4.0, hue, saturation, lightness)),
+            a: color_channel(hsl.a),
         }
     }
 
@@ -105,10 +110,10 @@ Color: struct {
     // The color whose linear-light channels `linear` gives.
     from_linear: fn(linear: LinearColor) -> Color Never! {
         Color{
-            r: color_channel(color_encode(color_unit(linear.r)))
-            g: color_channel(color_encode(color_unit(linear.g)))
-            b: color_channel(color_encode(color_unit(linear.b)))
-            a: color_channel(linear.a)
+            r: color_channel(color_encode(color_unit(linear.r))),
+            g: color_channel(color_encode(color_unit(linear.g))),
+            b: color_channel(color_encode(color_unit(linear.b))),
+            a: color_channel(linear.a),
         }
     }
 

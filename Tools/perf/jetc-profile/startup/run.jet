@@ -31,12 +31,19 @@ use {
 }
 
 SCHEMA: "jet.native-host-shape-pair.v1"
+
 USAGE: "usage: startup.mjs PAIR_DIRECTORY NEW_RECEIPT_FILE"
+
 ELAPSED: Regex{"Elapsed \(wall clock\) time \(h:mm:ss or m:ss\):\s*(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)"}
+
 HEX64: Regex{"[0-9a-f]{{64}}"}
+
 TRIAL: Regex{"trial-[0-9]+"}
+
 METRICS: [String]{"wall_ns", "compile_ns", "pre_parse_ns"}
+
 ZERO: Float{0.0}
+
 BILLION: Float{1000000000.0}
 
 // The canonical receipt as startupReceipt reads it: a count is the integer
@@ -86,7 +93,9 @@ read_json: fn(file: String) -[FS]> Dyn MeasureError! {
 // fs.realpathSync: a missing path is node's lstat ENOENT.
 real_path: fn(path: String) -[Env, FS]> String MeasureError! {
     resolved: files.canonicalize(path) ?? {
-        if err == .NotFound(_) -> return Err(measure_error("ENOENT: no such file or directory, lstat '{files.collapse(files.absolute(path) ?? path)}'"))
+        if err == .NotFound(_) {
+            return Err(measure_error("ENOENT: no such file or directory, lstat '{files.collapse(files.absolute(path) ?? path)}'"))
+        }
         return Err(measure_error("{err}"))
     }
     Ok(resolved)
@@ -94,21 +103,25 @@ real_path: fn(path: String) -[Env, FS]> String MeasureError! {
 
 // startupReceipt: one key=value per non-empty line, the last of a key kept.
 startup_receipt: fn(text: String) -> Receipt MeasureError! {
-    fields := [String: String]{}
+    fields := [String:String]{}
     loop line in text.split("\n") {
         if line == "" -> next
         parts: line.partition("=")
-        if parts.sep == "" || parts.head == "" -> return Err(measure_error("invalid canonical startup receipt"))
+        if parts.sep == "" || parts.head == "" {
+            return Err(measure_error("invalid canonical startup receipt"))
+        }
         fields[parts.head.copy()] = parts.tail.copy()
     }
-    Ok(Receipt{
-        complete: fields.get("complete") == Val("true")
-        report_count: if fields.get("report_count") == .Val(count) -> safe_number(number_from_text(count)) else -> None
-        source_bytes: if fields.get("source_bytes") == .Val(bytes) -> safe_number(number_from_text(bytes)) else -> None
-        selected_factory_tier: fields.get("selected_factory_tier")
-        actual_factory_tier: fields.get("actual_factory_tier")
-        compiler_identity: fields.get("compiler_identity")
-    })
+    Ok(
+        Receipt{
+            complete: fields.get("complete") == Val("true"),
+            report_count: if fields.get("report_count") == .Val(count) -> safe_number(number_from_text(count)) else -> None,
+            source_bytes: if fields.get("source_bytes") == .Val(bytes) -> safe_number(number_from_text(bytes)) else -> None,
+            selected_factory_tier: fields.get("selected_factory_tier"),
+            actual_factory_tier: fields.get("actual_factory_tier"),
+            compiler_identity: fields.get("compiler_identity"),
+        },
+    )
 }
 
 // startupInputHash's walk: [name, sha256] of every regular file in name order.
@@ -125,7 +138,9 @@ walk_inputs: fn(root: String, relative: String, out: &[String]) MeasureError! -[
             walk_inputs(root, child, out)
             next
         }
-        if !info.is_file -> return Err(measure_error("startup inputs must be an immutable regular-file snapshot"))
+        if !info.is_file {
+            return Err(measure_error("startup inputs must be an immutable regular-file snapshot"))
+        }
         bytes: files.read_bytes(path) ?? return Err(measure_error("{err}"))
         out.push("[{json_quote(child)},{json_quote(crypto.sha256(bytes).hex())}]")
     }
@@ -156,18 +171,21 @@ startup_timing: fn(events: [Dyn], time_text: String, entry: String) -> Timing Me
     begin: begins[0]
     // begin, end, parse and parse_end, as safe integers.
     ts: ([Dyn]{begin, ends[0], parse_begins[0], parse_ends[0]}).filter_map(fn(event) { safe_integer(event.get("ts")) }).to_list()
-    if ([Dyn]{ends[0], parse_begins[0], parse_ends[0]}).any(fn(event) { !same(event.get("pid"), begin.get("pid")) || !same(event.get("tid"), begin.get("tid")) }) ||
-        ts.len() != 4 || !(ts[0] < ts[2] && ts[2] <= ts[3] && ts[3] <= ts[1]) {
+    if ([Dyn]{ends[0], parse_begins[0], parse_ends[0]}).any(fn(event) { !same(event.get("pid"), begin.get("pid")) || !same(event.get("tid"), begin.get("tid")) }) || ts.len() != 4 || !(ts[0] < ts[2] && ts[2] <= ts[3] && ts[3] <= ts[1]) {
         return Err(measure_error("invalid compile/selected-entry parse boundaries"))
     }
     clock: ELAPSED.match(time_text) ?? return Err(measure_error("missing process wall time"))
     seconds: Float.from_int((clock.group_int(1) ?? 0) * 3600 + (clock.group_int(2) ?? 0) * 60) + (clock.group_float(3) ?? math.NAN)
-    if !math.is_finite(seconds) || !(seconds > ZERO) -> return Err(measure_error("invalid process wall time"))
-    Ok(Timing{
-        wall_ns: checked(Int{js_round(seconds * BILLION)}) ?? 0
-        compile_ns: (ts[1] - ts[0]) * 1000
-        pre_parse_ns: (ts[2] - ts[0]) * 1000
-    })
+    if !math.is_finite(seconds) || !(seconds > ZERO) {
+        return Err(measure_error("invalid process wall time"))
+    }
+    Ok(
+        Timing{
+            wall_ns: checked(Int{js_round(seconds * BILLION)}) ?? 0,
+            compile_ns: (ts[1] - ts[0]) * 1000,
+            pre_parse_ns: (ts[2] - ts[0]) * 1000,
+        },
+    )
 }
 
 timing_of: fn(timing: Timing, name: String) -> Int Never! {
@@ -186,14 +204,20 @@ median_timing: fn(trials: [Trial], name: String) -> Int? Never! {
 
 check_identity: fn(rows: [Trial]) MeasureError! {
     first: rows[0].receipt.compiler_identity
-    if ([String]{"", "unavailable"}).contains(first ?? "") -> return Err(measure_error("compiler identity unavailable"))
-    if rows.any(fn(row) { row.receipt.compiler_identity != first }) -> return Err(measure_error("compiler identity changed within an arm"))
+    if ([String]{"", "unavailable"}).contains(first ?? "") {
+        return Err(measure_error("compiler identity unavailable"))
+    }
+    if rows.any(fn(row) { row.receipt.compiler_identity != first }) {
+        return Err(measure_error("compiler identity changed within an arm"))
+    }
     Ok()
 }
 
 // compareStartup: the receipt's leading fields and whether every median wins.
 compare_startup: fn(plain: [Trial], optimized: [Trial]) -> [(key: String, value: Dyn)] MeasureError! {
-    if plain.len() < 3 || plain.len() != optimized.len() -> return Err(measure_error("require at least three matched startup trials"))
+    if plain.len() < 3 || plain.len() != optimized.len() {
+        return Err(measure_error("require at least three matched startup trials"))
+    }
     oracle: plain[0]
     rows := plain.copy()  // copy: plain is read again below
     rows.extend(optimized.copy())  // copy: optimized is read again below
@@ -202,9 +226,15 @@ compare_startup: fn(plain: [Trial], optimized: [Trial]) -> [(key: String, value:
         if !receipt.complete || receipt.report_count != Val(0) || (receipt.source_bytes ?? 0) <= 0 || receipt.selected_factory_tier != Val("Aot") || receipt.actual_factory_tier != Val("Aot") {
             return Err(measure_error("startup compile did not complete through the canonical AOT factory"))
         }
-        if !HEX64.full_match(row.artifact_sha256) || row.artifact_sha256 != oracle.artifact_sha256 || receipt.source_bytes != oracle.receipt.source_bytes -> return Err(measure_error("paired emitted artifact differs"))
-        if !HEX64.full_match(row.source_sha256) || row.source_sha256 != oracle.source_sha256 -> return Err(measure_error("paired actual project inputs differ"))
-        if METRICS.any(fn(name) { timing_of(row.timing, name) <= 0 }) -> return Err(measure_error("missing or invalid startup timing"))
+        if !HEX64.full_match(row.artifact_sha256) || row.artifact_sha256 != oracle.artifact_sha256 || receipt.source_bytes != oracle.receipt.source_bytes {
+            return Err(measure_error("paired emitted artifact differs"))
+        }
+        if !HEX64.full_match(row.source_sha256) || row.source_sha256 != oracle.source_sha256 {
+            return Err(measure_error("paired actual project inputs differ"))
+        }
+        if METRICS.any(fn(name) { timing_of(row.timing, name) <= 0 }) {
+            return Err(measure_error("missing or invalid startup timing"))
+        }
     }
     check_identity(plain)
     check_identity(optimized)
@@ -249,25 +279,33 @@ read_trial: fn(dir: String, pair: Dyn, input_root: String, entry: String) -[Env,
         return Err(measure_error("startup trial did not use the actual matched input snapshot and entry"))
     }
     receipt: startup_receipt(read_text(files.join(dir, "receipt")))
-    if !receipt.complete || receipt.report_count != Val(0) -> return Err(measure_error("startup compile did not complete"))
+    if !receipt.complete || receipt.report_count != Val(0) {
+        return Err(measure_error("startup compile did not complete"))
+    }
     trace_file: files.join(dir, "trace.json")
     trace_bytes: files.read_bytes(trace_file) ?? return Err(read_failure(trace_file, err))
-    if !is_text(invocation.get("trace_sha256"), crypto.sha256(trace_bytes).hex()) -> return Err(measure_error("startup trace differs from the recorded completed process"))
+    if !is_text(invocation.get("trace_sha256"), crypto.sha256(trace_bytes).hex()) {
+        return Err(measure_error("startup trace differs from the recorded completed process"))
+    }
     completed: completed_from(Val(0), invocation.get("process_pid"), invocation.get("process_started_unix_ms"), invocation.get("process_finished_unix_ms"))
     events: read_trace(trace_file, Val(completed))
     artifact_file: files.join(dir, "out.rs")
     artifact: files.read_bytes(artifact_file) ?? return Err(read_failure(artifact_file, err))
-    Ok(Trial{
-        receipt: receipt
-        source_sha256: text_of(invocation.get("source_sha256")) ?? ""
-        artifact_sha256: crypto.sha256(artifact).hex()
-        timing: startup_timing(events, read_text(files.join(dir, "time.txt")), entry)
-    })
+    Ok(
+        Trial{
+            receipt: receipt,
+            source_sha256: text_of(invocation.get("source_sha256")) ?? "",
+            artifact_sha256: crypto.sha256(artifact).hex(),
+            timing: startup_timing(events, read_text(files.join(dir, "time.txt")), entry),
+        },
+    )
 }
 
 read_arm: fn(root: String, arm: String, trials: [String], pair: Dyn, input_root: String, entry: String) -[Env, FS]> [Trial] MeasureError! {
     out := [Trial]{}
-    loop name in trials -> out.push(read_trial(files.join(files.join(root, arm), name), pair, input_root, entry))
+    loop name in trials {
+        out.push(read_trial(files.join(files.join(root, arm), name), pair, input_root, entry))
+    }
     Ok(out)
 }
 
@@ -278,12 +316,18 @@ compare_directory: fn(root: String) -[Env, FS]> Compared MeasureError! {
         return Err(measure_error("startup pair must record shared source hash, machine, and build profile"))
     }
     input_root: real_path(files.join(root, "inputs"))
-    if !is_text(pair.get("source_sha256"), startup_input_hash(input_root)) -> return Err(measure_error("startup input snapshot differs from the paired source hash"))
+    if !is_text(pair.get("source_sha256"), startup_input_hash(input_root)) {
+        return Err(measure_error("startup input snapshot differs from the paired source hash"))
+    }
     pinned: measure_error("startup pair must pin its relative source entry")
     entry: text_of(pair.get("entry")) ?? return Err(pinned)
-    if files.is_absolute(entry) || files.relative(real_path(files.join(input_root, entry)), input_root) != entry || !files.is_file(files.join(input_root, entry)) -> return Err(pinned)
+    if files.is_absolute(entry) || files.relative(real_path(files.join(input_root, entry)), input_root) != entry || !files.is_file(files.join(input_root, entry)) {
+        return Err(pinned)
+    }
     trials: trial_names(root, "plain")
-    if trials.join("\n") != trial_names(root, "optimized").join("\n") -> return Err(measure_error("unmatched startup trial directories"))
+    if trials.join("\n") != trial_names(root, "optimized").join("\n") {
+        return Err(measure_error("unmatched startup trial directories"))
+    }
     plain: read_arm(root, "plain", trials, pair, input_root, entry)
     optimized: read_arm(root, "optimized", trials, pair, input_root, entry)
     out := compare_startup(plain, optimized)

@@ -20,7 +20,7 @@ cli_cmd_env_hook: fn(theme: Theme, parsed: CLIParsed) -[IO, Env, Time.Wait]> Int
         theme.error(
             "unknown shell for `jet env hook`",
             "the auto-activation hook is available for: {ENV_HOOK_SHELLS.join(", ")}.",
-            "try `jet env hook bash`, `jet env hook zsh`, or `jet env hook fish`."
+            "try `jet env hook bash`, `jet env hook zsh`, or `jet env hook fish`.",
         )
         return EXIT_USAGE
     }
@@ -40,7 +40,9 @@ cli_cmd_env_export: fn(verification: &StoreVerification, cache: &WorkspaceDeclar
     active: cli_nonempty_env(ENV_HOOK_ACTIVE_DIR_VAR)
     active_hash: cli_nonempty_env(ENV_HOOK_ACTIVE_HASH_VAR)
     target_hash := String?{None}
-    if target == .Val(root) -> target_hash = env_hook_definition_fingerprint_with_selections(root, parsed.flags.preset, parsed.flags.environment)
+    if target == .Val(root) {
+        target_hash = env_hook_definition_fingerprint_with_selections(root, parsed.flags.preset, parsed.flags.environment)
+    }
     // Nothing changed since the last prompt: stay silent, so the hook is a
     // no-op on most prompts and never re-realizes.
     if target == active && target_hash == active_hash -> return EXIT_OK
@@ -78,9 +80,7 @@ cli_cmd_env_export: fn(verification: &StoreVerification, cache: &WorkspaceDeclar
     script := ""
     if target == .Val(root) {
         script = cli_env_export_activate(verification, cache, theme, parsed, kind, root, target_hash, active != None, base_path, watched_reload_ready) ?? return err.code
-    } else if active != None {
-        script = env_hook_render_unload(kind, base_path)
-    }
+    } else if active != None { script = env_hook_render_unload(kind, base_path) }
     cli_print_raw(script)
     EXIT_OK
 }
@@ -120,7 +120,9 @@ cli_env_export_activate: fn(verification: &StoreVerification, cache: &WorkspaceD
     trusted: !sensitive || trust_is_environment_trusted(store, root, hash, plan.refs, plan.secrets, plan.environment)
     if !trusted {
         if term.stdin().is_tty() || parsed.flags.trust {
-            if trust_gate_with_environment(theme, store, root, plan.refs, plan.table, plan.secrets, plan.environment, parsed.flags.trust) != None -> return Err(keep)
+            if trust_gate_with_environment(theme, store, root, plan.refs, plan.table, plan.secrets, plan.environment, parsed.flags.trust) != None {
+                return Err(keep)
+            }
         } else {
             theme.detail("{ENV_FILE} here is not trusted — run `jet env` to approve it once")
             return Err(keep)
@@ -171,11 +173,15 @@ cli_env_export_activate: fn(verification: &StoreVerification, cache: &WorkspaceD
     // Reconcile the source graph after realization. If a prompt races an
     // edit, keep the prior activation and let the next prompt retry the new
     // hash instead of emitting a plan assembled from mixed revisions.
-    if env_hook_definition_fingerprint_with_selections(root, parsed.flags.preset, parsed.flags.environment) != target_hash -> return Err(keep)
+    if env_hook_definition_fingerprint_with_selections(root, parsed.flags.preset, parsed.flags.environment) != target_hash {
+        return Err(keep)
+    }
     plan_hash: target_hash ?? ""
     entry: cli_find_project_entry(root)
     cli_run_lifecycle_hooks_silent(verification, cache, theme, parsed, roots, root, entry, env, plan.environment.lifecycle.on_enter, "on_enter") ?? return Err(keep)
-    if env_hook_definition_fingerprint_with_selections(root, parsed.flags.preset, parsed.flags.environment) != target_hash -> return Err(keep)
+    if env_hook_definition_fingerprint_with_selections(root, parsed.flags.preset, parsed.flags.environment) != target_hash {
+        return Err(keep)
+    }
     script := ""
     if active -> script = env_hook_render_unload(kind, base_path)
     composed_path: env.composed_path_for_parent(base_path) ?? {

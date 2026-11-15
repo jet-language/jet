@@ -9,7 +9,6 @@ package: {
 // its length. FileReader.advise(advice) tells the system how the file will
 // be read (posix_fadvise); it plans caching and never changes what a read
 // returns.
-
 use files: core.files
 
 kind: fn(error: IOError) -> String {
@@ -31,7 +30,7 @@ run: fn() {
     out.allocate(16)
     print("after allocate 16: {out.stat().size}")
     if out.allocate(-1) == {
-        .Ok(_) -> print("negative size: accepted")
+        .Ok(_) -> { print("negative size: accepted") }
         .Err(error) -> print("negative size: {kind(error)}")
     }
 

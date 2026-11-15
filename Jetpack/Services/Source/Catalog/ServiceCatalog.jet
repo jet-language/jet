@@ -11,9 +11,7 @@
 ServicesError: struct {
     message: String
 
-    new: fn(message: String) -> ServicesError Never! {
-        ServicesError{message}
-    }
+    new: fn(message: String) -> ServicesError Never! { ServicesError{message: message} }
 }
 
 impl IOError -> ServicesError { return ServicesError{message: "{self}"} }
@@ -118,9 +116,7 @@ ServicePresetKind: enum {
         }
     }
 
-    canonical_name: fn(self) -> String Never! {
-        self.names()[0]
-    }
+    canonical_name: fn(self) -> String Never! { self.names()[0] }
 
     // The `<package>@<source>` ref realized before spawning. It is the public
     // spelling, `@jetpack`: `nixpkgs` is not a public source (E1358), and
@@ -335,11 +331,19 @@ ServicePresetKind: enum {
     // First-start state setup inside `data_dir`, run through `env`'s PATH.
     prepare: fn(self, port: Int, data_dir: String, env: &ShellEnv) ServicesError! -[FS, Env, Exec, Time.Wait]> {
         if self == {
-            .Postgres -> services_prepare_database(port, data_dir, env, "initdb", [String]{"--no-locale", "--encoding=UTF8", "--pgdata", data_dir})
-            .Mysql -> services_prepare_database(port, data_dir, env, "mysqld", [String]{"--initialize-insecure", "--datadir={data_dir}"})
-            .Mariadb -> services_prepare_database(port, data_dir, env, "mariadb-install-db", [String]{"--auth-root-authentication-method=normal", "--skip-test-db", "--datadir={data_dir}"})
-            .Nginx -> services_prepare_nginx(port, data_dir)
-            .Garage -> services_prepare_config(files.join(data_dir, "garage.toml"), "metadata_dir = \"{data_dir}/meta\"\ndata_dir = \"{data_dir}/data\"\nrpc_bind_addr = \"127.0.0.1:{services_saturating_add(port, 1)}\"\n[s3_api]\napi_bind_addr = \"127.0.0.1:{port}\"\n", "Garage")
+            .Postgres -> {
+                services_prepare_database(port, data_dir, env, "initdb", [String]{"--no-locale", "--encoding=UTF8", "--pgdata", data_dir})
+            }
+            .Mysql -> {
+                services_prepare_database(port, data_dir, env, "mysqld", [String]{"--initialize-insecure", "--datadir={data_dir}"})
+            }
+            .Mariadb -> {
+                services_prepare_database(port, data_dir, env, "mariadb-install-db", [String]{"--auth-root-authentication-method=normal", "--skip-test-db", "--datadir={data_dir}"})
+            }
+            .Nginx -> { services_prepare_nginx(port, data_dir) }
+            .Garage -> {
+                services_prepare_config(files.join(data_dir, "garage.toml"), "metadata_dir = \"{data_dir}/meta\"\ndata_dir = \"{data_dir}/data\"\nrpc_bind_addr = \"127.0.0.1:{services_saturating_add(port, 1)}\"\n[s3_api]\napi_bind_addr = \"127.0.0.1:{port}\"\n", "Garage")
+            }
             .Kafka -> {
                 controller_port: services_saturating_add(port, 1)
                 services_prepare_config(files.join(data_dir, "server.properties"), "process.roles=broker,controller\nnode.id=1\ncontroller.quorum.voters=1@127.0.0.1:{controller_port}\nlisteners=PLAINTEXT://127.0.0.1:{port},CONTROLLER://127.0.0.1:{controller_port}\nadvertised.listeners=PLAINTEXT://127.0.0.1:{port}\nlistener.security.protocol.map=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT\ncontroller.listener.names=CONTROLLER\ninter.broker.listener.name=PLAINTEXT\nlog.dirs={data_dir}/logs\n", "Kafka")
@@ -352,10 +356,18 @@ ServicePresetKind: enum {
                 }
                 services_prepare_config(files.join(data_dir, "connector.properties"), connector, "Kafka Connect")
             }
-            .Mosquitto -> services_prepare_config(files.join(data_dir, "mosquitto.conf"), "listener {port} 127.0.0.1\nallow_anonymous true\npersistence true\npersistence_location {data_dir}/\n", "Mosquitto")
-            .OpentelemetryCollector -> services_prepare_config(files.join(data_dir, "otel-collector.yaml"), "receivers: {{}}\nprocessors: {{}}\nexporters: {{}}\nservice:\n  pipelines: {{}}\n", "OpenTelemetry")
-            .Prometheus -> services_prepare_config(files.join(data_dir, "prometheus.yml"), "global:\n  scrape_interval: 15s\n", "Prometheus")
-            .Varnish -> services_prepare_config(files.join(data_dir, "default.vcl"), "vcl 4.1;\nbackend default {{\n  .host = \"127.0.0.1\";\n  .port = \"8080\";\n}}\n", "Varnish")
+            .Mosquitto -> {
+                services_prepare_config(files.join(data_dir, "mosquitto.conf"), "listener {port} 127.0.0.1\nallow_anonymous true\npersistence true\npersistence_location {data_dir}/\n", "Mosquitto")
+            }
+            .OpentelemetryCollector -> {
+                services_prepare_config(files.join(data_dir, "otel-collector.yaml"), "receivers: {{}}\nprocessors: {{}}\nexporters: {{}}\nservice:\n  pipelines: {{}}\n", "OpenTelemetry")
+            }
+            .Prometheus -> {
+                services_prepare_config(files.join(data_dir, "prometheus.yml"), "global:\n  scrape_interval: 15s\n", "Prometheus")
+            }
+            .Varnish -> {
+                services_prepare_config(files.join(data_dir, "default.vcl"), "vcl 4.1;\nbackend default {{\n  .host = \"127.0.0.1\";\n  .port = \"8080\";\n}}\n", "Varnish")
+            }
             .Redis | .Minio | .Adminer | .Blackfire | .Caddy | .Cassandra | .Clickhouse | .Cockroachdb | .Couchdb | .DynamodbLocal | .Elasticmq | .Elasticsearch | .Httpbin | .Influxdb | .Keycloak | .Meilisearch | .Memcached | .Mongodb | .Nats | .Nixseparatedebuginfod | .Opensearch | .Rabbitmq | .Rustfs | .Sqld | .Tailscale | .Temporal | .Tideways | .Typesense | .Vault | .Wiremock -> {}
         }
     }
@@ -364,12 +376,47 @@ ServicePresetKind: enum {
 // Every preset in catalog order.
 services_catalog_kinds: fn() -> [ServicePresetKind] Never! {
     [ServicePresetKind]{
-        .Redis, .Postgres, .Mysql, .Mariadb, .Nginx, .Minio, .Adminer, .Blackfire, .Caddy,
-        .Cassandra, .Clickhouse, .Cockroachdb, .Couchdb, .DynamodbLocal, .Elasticmq, .Elasticsearch,
-        .Garage, .Httpbin, .Influxdb, .KafkaConnect, .Kafka, .Keycloak, .Meilisearch,
-        .Memcached, .Mongodb, .Mosquitto, .Nats, .Nixseparatedebuginfod, .Opensearch,
-        .OpentelemetryCollector, .Prometheus, .Rabbitmq, .Rustfs, .Sqld, .Tailscale, .Temporal,
-        .Tideways, .Typesense, .Varnish, .Vault, .Wiremock
+        .Redis,
+        .Postgres,
+        .Mysql,
+        .Mariadb,
+        .Nginx,
+        .Minio,
+        .Adminer,
+        .Blackfire,
+        .Caddy,
+        .Cassandra,
+        .Clickhouse,
+        .Cockroachdb,
+        .Couchdb,
+        .DynamodbLocal,
+        .Elasticmq,
+        .Elasticsearch,
+        .Garage,
+        .Httpbin,
+        .Influxdb,
+        .KafkaConnect,
+        .Kafka,
+        .Keycloak,
+        .Meilisearch,
+        .Memcached,
+        .Mongodb,
+        .Mosquitto,
+        .Nats,
+        .Nixseparatedebuginfod,
+        .Opensearch,
+        .OpentelemetryCollector,
+        .Prometheus,
+        .Rabbitmq,
+        .Rustfs,
+        .Sqld,
+        .Tailscale,
+        .Temporal,
+        .Tideways,
+        .Typesense,
+        .Varnish,
+        .Vault,
+        .Wiremock,
     }
 }
 
@@ -404,7 +451,9 @@ services_catalog_executable: fn(name: String) -> String? Never! {
 services_catalog_presets: fn() -> [ServicePreset] Never! {
     presets := [ServicePreset]{}
     kinds: services_catalog_kinds()
-    loop kind in kinds -> presets.push(ServicePreset{name: kind.canonical_name(), package: kind.pkg_ref(), default_port: kind.port()})
+    loop kind in kinds {
+        presets.push(ServicePreset{name: kind.canonical_name(), package: kind.pkg_ref(), default_port: kind.port()})
+    }
     presets
 }
 
@@ -422,7 +471,9 @@ services_image_run_command: fn(plan: DevServicePlan) -> [String] ServicesError! 
     kind: services_catalog(plan.name) ?? return Err(ServicesError.new("service {plan.name} has no run command and is not a built-in service"))
     kind.require_runtime(plan.name)
     port: if plan.ports.len() > 0 -> plan.ports[0] else -> kind.port()
-    if port < 1 || port > 65535 -> return Err(ServicesError.new("service {plan.name} has an invalid port"))
+    if port < 1 || port > 65535 {
+        return Err(ServicesError.new("service {plan.name} has an invalid port"))
+    }
     Ok(kind.run(port, "/var/lib/jet/services/{services_canonical_service_name(plan.name)}"))
 }
 
@@ -473,7 +524,9 @@ services_prepare_nginx: fn(port: Int, data_dir: String) ServicesError! -[FS, Env
 // only gains the marker.
 services_prepare_database: fn(port: Int, data_dir: String, env: &ShellEnv, tool: String, args: [String]) ServicesError! -[FS, Env, Exec, Time.Wait]> {
     marker: services_catalog_marker(data_dir)
-    if files.is_file(marker) -> return
+    if files.is_file(marker) {
+        return
+    }
     initialized: files.is_file(files.join(data_dir, "PG_VERSION")) || files.is_dir(files.join(data_dir, "mysql"))
     if !initialized -> services_run_catalog_tool(env, tool, args, data_dir)
     if services_write_atomic(marker, "port={port}\n".bytes()) == .Err(error) {
@@ -487,8 +540,12 @@ services_run_catalog_tool: fn(env: &ShellEnv, tool: String, args: [String], data
     spec := process.cmd(argv).cwd(data_dir).stdout(.Capture).stderr(.Capture)
     spec = env.apply_to(spec) ?? return Err(ServicesError.new("couldn't initialize service preset with `{tool}`: {err.message()}"))
     receipt: spec.run() ?? return Err(ServicesError.new("couldn't initialize service preset with `{tool}`: {err}"))
-    if receipt.success -> return
+    if receipt.success {
+        return
+    }
     detail: receipt.errors.trim()
-    if detail == "" -> return Err(ServicesError.new("service preset initializer `{tool}` exited with {env_shell_exit_status_text(receipt)}"))
+    if detail == "" {
+        return Err(ServicesError.new("service preset initializer `{tool}` exited with {env_shell_exit_status_text(receipt)}"))
+    }
     Err(ServicesError.new("service preset initializer `{tool}` failed: {detail}"))
 }

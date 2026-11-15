@@ -19,9 +19,7 @@ unhex: fn(text: String) -> [U8] { encoding.hex_to_bytes(text) ?? panic("bad hex 
 hex: fn(bytes: [U8]) -> String { encoding.bytes_to_hex(bytes) }
 
 tally: fn(t: &Counts, ok: Bool, what: String) {
-    if ok {
-        t.pass += 1
-    } else {
+    if ok -> t.pass += 1 else {
         t.fail += 1
         print("FAIL {what}")
     }
@@ -74,7 +72,9 @@ run_digest: fn(algorithm: String) {
             msg = [U8]{}
             loop i in 0..<(bits /% 8) -> msg.push(all[i])
         }
-        if field(line, "MD") == .Val(v) -> tally(t, digest_hex(algorithm, msg) == v.lower(), "{name} Len = {bits}")
+        if field(line, "MD") == .Val(v) {
+            tally(t, digest_hex(algorithm, msg) == v.lower(), "{name} Len = {bits}")
+        }
     }
     print("nist {name} pass={t.pass} fail={t.fail}")
 }

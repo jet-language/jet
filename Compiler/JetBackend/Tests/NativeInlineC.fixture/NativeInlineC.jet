@@ -12,7 +12,9 @@ use {
 }
 
 FIXTURE: "tests/fixtures/native_inline_c_shared_state.jet"
+
 DEFINED: "int64_t jet_fixture_shared_counter = 0;"
+
 DECLARED: "extern int64_t jet_fixture_shared_counter;"
 
 fail: fn(message: String) -> Never { process.fail(1, message) }
@@ -44,15 +46,23 @@ run: fn() {
     if !shared.contains(DEFINED) -> fail("{FIXTURE} no longer defines the shared counter")
 
     ok: build(jet, scratch, "native_inline_c_shared_state", shared)
-    if ok.code != 0 || ok.signal != 0 -> fail("shared-state build failed: code={ok.code} signal={ok.signal}\n{ok.errors}")
+    if ok.code != 0 || ok.signal != 0 {
+        fail("shared-state build failed: code={ok.code} signal={ok.signal}\n{ok.errors}")
+    }
     ran: process.cmd([String]{"{ok.folder}/.jet/build/main"}).run() ?? fail("the built program failed to start: {err}")
-    if ran.code != 0 || (ran.signal ?? 0) != 0 -> fail("the built program failed: code={ran.code}\n{ran.errors}")
+    if ran.code != 0 || (ran.signal ?? 0) != 0 {
+        fail("the built program failed: code={ran.code}\n{ran.errors}")
+    }
     if ran.output != "bump=42 peek=42\n" -> fail("the built program printed {ran.output.debug()}")
 
     missing: build(jet, scratch, "native_inline_c_missing_definition", shared.replace(DEFINED, DECLARED))
     if missing.code == 0 -> fail("an unresolved inline C symbol built")
-    if !missing.errors.contains("inline C bodies leave undefined symbols") -> fail("the refusal does not name undefined symbols:\n{missing.errors}")
-    if !missing.errors.contains("jet_fixture_shared_counter") -> fail("the refusal does not name the missing symbol:\n{missing.errors}")
+    if !missing.errors.contains("inline C bodies leave undefined symbols") {
+        fail("the refusal does not name undefined symbols:\n{missing.errors}")
+    }
+    if !missing.errors.contains("jet_fixture_shared_counter") {
+        fail("the refusal does not name the missing symbol:\n{missing.errors}")
+    }
     if files.exists("{missing.folder}/.jet/build/main") -> fail("a refusal left an executable")
     print("native inline C shared state and whole-bridge refusal: passed")
 }

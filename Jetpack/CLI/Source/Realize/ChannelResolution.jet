@@ -18,9 +18,7 @@ ChannelSource: struct {
     priv nix_channel: String?
 
     // The channel `git ls-remote` or the local catalog resolves.
-    resolution_channel: fn(self) -> String Never! {
-        self.nix_channel ?? self.channel.as_str()
-    }
+    resolution_channel: fn(self) -> String Never! { self.nix_channel ?? self.channel.as_str() }
 }
 
 // Every declared source that tracks a channel, in source-table name order.
@@ -33,7 +31,9 @@ cli_channel_sources: fn(table: SourceTable) -> [ChannelSource] Never! {
         nix_channel := cli_nixpkgs_channel(raw)
         if nix_channel == None -> nix_channel = cli_nixpkgs_channel(split.base)
         tracked := split.channel
-        if tracked == None && (policy.moves() || nix_channel != None) -> tracked = Val(ChannelRef.Latest)
+        if tracked == None && (policy.moves() || nix_channel != None) {
+            tracked = Val(ChannelRef.Latest)
+        }
         channel: tracked ?? next
         base: if {
             policy.moves() -> split.base.split_once(REF_CHANNEL_MARKER)?.before ?? split.base
@@ -42,15 +42,17 @@ cli_channel_sources: fn(table: SourceTable) -> [ChannelSource] Never! {
         }
         pinned: policy == ChannelPolicy.Pinned
         lock_channel: if pinned -> nix_channel ?? channel.as_str() else -> channel.as_str()
-        sources.push(ChannelSource{
-            name: decl.name,
-            base: base,
-            channel: channel,
-            policy: policy,
-            raw: raw,
-            lock_channel: lock_channel,
-            nix_channel: nix_channel,
-        })
+        sources.push(
+            ChannelSource{
+                name: decl.name,
+                base: base,
+                channel: channel,
+                policy: policy,
+                raw: raw,
+                lock_channel: lock_channel,
+                nix_channel: nix_channel,
+            },
+        )
     }
     sources
 }
@@ -135,7 +137,7 @@ cli_report_unlocked_channel: fn(theme: Theme, name: String, channel: String) Nev
         "E1271",
         "source `{name}` tracks `{channel}` but is not locked",
         "channel refs resolve only during `jetpack update`; build/run/env read the exact source recorded in `{UNIFIED_LOCK_FILE}`.",
-        "run `jetpack update {name}` and commit `{UNIFIED_LOCK_FILE}`."
+        "run `jetpack update {name}` and commit `{UNIFIED_LOCK_FILE}`.",
     )
 }
 
@@ -194,7 +196,9 @@ cli_resolve_channel_from_fixture: fn(source: ChannelSource, flags: CLIFlags) -[F
     rows: cli_channel_fixture_rows(flags)
     loop columns in rows {
         if columns.len() == 0 || columns[0].starts_with("#") -> next
-        if columns.len() >= 3 && cli_fixture_row_matches(source, columns) -> return Val(cli_exact_upstream(source.base, columns[2]))
+        if columns.len() >= 3 && cli_fixture_row_matches(source, columns) {
+            return Val(cli_exact_upstream(source.base, columns[2]))
+        }
     }
     None
 }
@@ -218,9 +222,7 @@ cli_exact_upstream: fn(base: String, exact: String) -> String Never! {
     "{base}#{exact}"
 }
 
-cli_ci_mode: fn() -[Env]> Bool Never! {
-    (sys.get("CI") ?? "") != ""
-}
+cli_ci_mode: fn() -[Env]> Bool Never! { (sys.get("CI") ?? "") != "" }
 
 cli_resolve_channel_with_git: fn(source: ChannelSource) -[Env, Exec, Time.Wait]> String ProviderError! {
     if !source.base.starts_with("github:") {
@@ -229,7 +231,9 @@ cli_resolve_channel_with_git: fn(source: ChannelSource) -[Env, Exec, Time.Wait]>
     parts: source.base.removeprefix("github:").split("/").to_list()
     owner: if parts.len() > 0 -> parts[0] else -> ""
     repo: if parts.len() > 1 -> parts[1] else -> ""
-    if owner == "" || repo == "" -> return Err(ProviderError.Channel("`{source.base}` is not a GitHub repo source"))
+    if owner == "" || repo == "" {
+        return Err(ProviderError.Channel("`{source.base}` is not a GitHub repo source"))
+    }
     url: "https://github.com/{owner}/{repo}.git"
     if source.nix_channel == .Val(channel) {
         out: cli_git_ls_remote(url, "refs/heads/{channel}")
@@ -287,7 +291,9 @@ cli_newest_tag: fn(lines: [String], mask: String?) -> String? Never! {
     major := Int?{None}
     if mask == .Val(series) {
         if series.starts_with("v") && series.ends_with(".x") {
-            if Int.parse(series.removeprefix("v").removesuffix(".x")) == .Ok(wanted) -> major = Val(wanted)
+            if Int.parse(series.removeprefix("v").removesuffix(".x")) == .Ok(wanted) {
+                major = Val(wanted)
+            }
         }
     }
     best_nums := [Int]{}

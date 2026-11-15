@@ -1,4 +1,3 @@
-
 use data: core.files.data
 
 show_bridge: fn(step: String) {
@@ -12,7 +11,7 @@ show_bridge: fn(step: String) {
 
 probe_bridge: fn(name: String) {
     if data.require_bridge(name) == {
-        .Ok(_) -> print("{name}: available")
+        .Ok(_) -> { print("{name}: available") }
         .Err(error) -> print("{name}: {error}")
     }
 }
@@ -25,7 +24,7 @@ run: fn() {
     probe_bridge("r")
     probe_bridge("gpu")
     if data.require_bridge("nope") == {
-        .Ok(_) -> print("nope: unexpectedly ok")
+        .Ok(_) -> { print("nope: unexpectedly ok") }
         .Err(error) -> print("nope: {error}")
     }
 }

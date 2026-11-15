@@ -20,8 +20,14 @@ cli_jetpack_main: fn(argv: [String]) -[IO, FS, Env, Exec, Net, Time, Time.Wait, 
         return EXIT_OK
     }
     args: cli_tail(argv, 1)
-    if args.get(0) == .Val(verb) && verb == EXTENSION_HOST_SUBCOMMAND -> return cli_run_compiler_extension_host(cli_tail(args, 1))
-    if args.get(0) == .Val(verb) && verb == BUILD_PLUGIN_HOST_SUBCOMMAND -> return cli_run_build_plugin_host(cli_tail(args, 1))
-    if args.get(0) == .Val(verb) && verb == PACKAGE_DEPENDENCY_HOST_SUBCOMMAND -> return cli_run_package_dependency_host(cli_tail(args, 1))
+    if args.get(0) == .Val(verb) && verb == EXTENSION_HOST_SUBCOMMAND {
+        return cli_run_compiler_extension_host(cli_tail(args, 1))
+    }
+    if args.get(0) == .Val(verb) && verb == BUILD_PLUGIN_HOST_SUBCOMMAND {
+        return cli_run_build_plugin_host(cli_tail(args, 1))
+    }
+    if args.get(0) == .Val(verb) && verb == PACKAGE_DEPENDENCY_HOST_SUBCOMMAND {
+        return cli_run_package_dependency_host(cli_tail(args, 1))
+    }
     cli_run(args)
 }

@@ -6,10 +6,20 @@
 use {
     jet_parser.[parse_source]
     jet_sema.[
-        SemaBuildFacts, SemaComptimeFunctionResult, SemaComptimeItemValue, SemaForeignProviderInput,
-        SemaRegistrationForeignHandleFacts, SemaRegistrationHostHooks, SemaRegistrationImportEdge,
-        SemaRegistrationModuleInput, SemaRegistrationPackagePolicy, SemaSourceOrigin, SemaSourceSegment,
-        sema_collect_comptime_declarations, sema_finalize_registration_graph, sema_registration_prepare_graph,
+        SemaBuildFacts,
+        SemaComptimeFunctionResult,
+        SemaComptimeItemValue,
+        SemaForeignProviderInput,
+        SemaRegistrationForeignHandleFacts,
+        SemaRegistrationHostHooks,
+        SemaRegistrationImportEdge,
+        SemaRegistrationModuleInput,
+        SemaRegistrationPackagePolicy,
+        SemaSourceOrigin,
+        SemaSourceSegment,
+        sema_collect_comptime_declarations,
+        sema_finalize_registration_graph,
+        sema_registration_prepare_graph,
     ]
     jet_driver.[jet_driver_canonical_effect_module]
     jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, Span, compiler_threads_single, effect_vocabulary_module, jet_target_machine_hosted, module_intern, module_table]
@@ -64,7 +74,9 @@ callable_access_expect: fn(failures: &[String], name: String, source: String, wa
         found.push("{diagnostic.code} {diagnostic.what}")
     }
     codes: loop entry in found -> entry.partition(" ").head
-    if codes != wanted -> failures.push("{name}: found [{found.join("; ")}], wanted [{wanted.join(", ")}]")
+    if codes != wanted {
+        failures.push("{name}: found [{found.join("; ")}], wanted [{wanted.join(", ")}]")
+    }
 }
 
 CALLABLE_ACCESS_DECLS: "push_one: fn(buf: &[Int]) {{\n    buf.push(1)\n}}\nthrough: fn(f: fn(buf: &[Int]), buf: &[Int]) {{\n    f(buf)\n}}\nthrough_generic: fn<T>(f: fn(&[T]), buf: &[T]) {{\n    f(buf)\n}}\nWrapper: struct {{\n    edit: fn(buf: &[Int])\n}}\nread_only: fn(f: fn([Int]), buf: [Int]) {{\n    f(buf)\n}}\n"
@@ -82,6 +94,8 @@ CALLABLE_ACCESS_DECLS: "push_one: fn(buf: &[Int]) {{\n    buf.push(1)\n}}\nthrou
     callable_access_expect(failures, "marked lambda in a read slot", "{CALLABLE_ACCESS_DECLS}run: fn() {{\n    read_only(fn(buf: &[Int]) {{ buf.push(5) }}, [Int]{{}})\n}}\n", [String]{"E0113"})
     callable_access_expect(failures, "written function in a read slot", "{CALLABLE_ACCESS_DECLS}run: fn() {{\n    read_only(push_one, [Int]{{}})\n}}\n", [String]{"E0227"})
     callable_access_expect(failures, "written value in a read slot", "{CALLABLE_ACCESS_DECLS}run: fn() {{\n    wrapper: Wrapper{{edit: push_one}}\n    read_only(wrapper.edit, [Int]{{}})\n}}\n", [String]{"E0227"})
-    if failures.len() > 0 -> panic("CallableAccessContracts collected {failures.len()} failures:\n{failures.join("\n")}")
+    if failures.len() > 0 {
+        panic("CallableAccessContracts collected {failures.len()} failures:\n{failures.join("\n")}")
+    }
     print("callable access contracts: passed")
 }

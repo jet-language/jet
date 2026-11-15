@@ -24,7 +24,9 @@ ProviderFilteredJSON: struct {
 // `BadOutput` carrying the filtered noise.
 provider_json_parse_lenient: fn(input: String) -> ProviderFilteredJSON ProviderError! {
     raw: input.bytes()
-    if raw.len() > PROVIDER_JSON_MAX_BYTES -> return Err(ProviderError.BadOutput("JSON input exceeds the 1 MiB limit"))
+    if raw.len() > PROVIDER_JSON_MAX_BYTES {
+        return Err(ProviderError.BadOutput("JSON input exceeds the 1 MiB limit"))
+    }
     kept := [U8]{}
     noise := [String]{}
     start := 0
@@ -35,16 +37,14 @@ provider_json_parse_lenient: fn(input: String) -> ProviderFilteredJSON ProviderE
         content_end := newline
         if content_end > start && (Int{raw[content_end - 1]}) == 13 -> content_end -= 1
         content: pkg_bytes_text(raw, start, content_end)
-        if trust_json_is_provider_noise(content) {
-            noise.push(content)
-        } else {
+        if trust_json_is_provider_noise(content) -> noise.push(content) else {
             loop index in start..<end -> kept.push(raw[index])
         }
         start = end
     }
     filtered: pkg_bytes_text(kept, 0, kept.len())
     if json.parse(filtered) == {
-        .Ok(value) -> Ok(ProviderFilteredJSON{value, noise})
+        .Ok(value) -> Ok(ProviderFilteredJSON{value: value, noise: noise})
         .Err(error) -> Err(ProviderError.BadOutput(trust_json_with_noise(error.reason, noise)))
     }
 }
@@ -57,7 +57,7 @@ provider_json_get: fn(value: Dyn, key: String) -> Dyn ProviderReason! {
     Ok(found)
 }
 
-provider_json_object: fn(value: Dyn) -> [String: Dyn] ProviderReason! {
+provider_json_object: fn(value: Dyn) -> [String:Dyn] ProviderReason! {
     object: pkg_json_object(value) ?? return Err(ProviderReason{message: PKG_JSON_NOT_OBJECT})
     Ok(object)
 }

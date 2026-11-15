@@ -1540,9 +1540,7 @@ jet_driver_comptime_function_closure: fn(
             else -> jet_driver_comptime_prefetched(index, node, program, values) ?? sema_check_comptime_function(graph, environment, program, probe, available, memory_plan[0], values, current.module_identity, current.function_key)
         }
         if fresh && checked.waiting_dependencies.len() > 0 {
-            if waited_row >= 0 {
-                index.waiting_functions[waited_row] = checked.copy()
-            } else {
+            if waited_row >= 0 -> index.waiting_functions[waited_row] = checked.copy() else {
                 index.waiting_at[node] = index.waiting_functions.len()
                 index.waiting_functions.push(checked.copy())
             }
@@ -1674,7 +1672,9 @@ jet_driver_comptime_prefetched: fn(index: &JetDriverComptimeRunIndex, node: Int,
     if mark >= 0 {
         loop at in mark..<values.len() {
             loop source in checked.comptime_body_sources {
-                if values[at].module_identity == source.module_identity && values[at].key == source.key -> return None
+                if values[at].module_identity == source.module_identity && values[at].key == source.key {
+                    return None
+                }
             }
         }
     }
@@ -1701,7 +1701,9 @@ jet_driver_comptime_prefetch: fn(environments: &[SemaScopeEnvironment], programs
     seeds: jet_driver_comptime_prefetch_seeds(programs[0], index, prechecks, seen)
     if seeds.len() == 0 -> return 0
     workers: sema_comptime_walk_admit(threads, programs[0], seeds, grows: true)
-    if workers <= 1 || !jet_driver_comptime_memory_plan(programs[0], threads, memory_plan) -> return 0
+    if workers <= 1 || !jet_driver_comptime_memory_plan(programs[0], threads, memory_plan) {
+        return 0
+    }
     walk := sema_comptime_walk_open(environments[0], programs[0], available, values, memory_plan[0], workers)
     kept := 0
     task.group jet_driver_comptime_prefetch_threads {
@@ -1716,7 +1718,9 @@ jet_driver_comptime_prefetch: fn(environments: &[SemaScopeEnvironment], programs
 // closure took.
 jet_driver_comptime_prefetch_clear: fn(index: &JetDriverComptimeRunIndex) Never! {
     loop node in 0..<index.nodes.len() {
-        if index.prefetched[node].len() > 0 -> index.prefetched[node] = [SemaComptimeFunctionResult]{}
+        if index.prefetched[node].len() > 0 {
+            index.prefetched[node] = [SemaComptimeFunctionResult]{}
+        }
         if index.prefetched_has_refs[node] {
             index.prefetched_refs[node] = [JetDriverComptimeFunctionRef]{}
             index.prefetched_has_refs[node] = false
@@ -1779,9 +1783,13 @@ jet_driver_comptime_closure_prefetch: fn(environment: &SemaScopeEnvironment, pro
     loop at in start..<end {
         jet_driver_comptime_prefetch_node(index, seen, jobs, queue_nodes[at], queue[at].module_identity, queue[at].function_key)
     }
-    if jobs.len() < 2 -> return
+    if jobs.len() < 2 {
+        return
+    }
     workers: sema_comptime_walk_admit(threads, program, jobs, grows: false)
-    if workers <= 1 || !jet_driver_comptime_memory_plan(program, threads, memory_plan) -> return
+    if workers <= 1 || !jet_driver_comptime_memory_plan(program, threads, memory_plan) {
+        return
+    }
     walk := sema_comptime_walk_open(environment, program, available, values, memory_plan[0], workers)
     kept := 0
     task.group jet_driver_comptime_closure_prefetch_threads {
@@ -1801,7 +1809,9 @@ jet_driver_comptime_prefetch_seeds: fn(program: SemaProgramTables, index: &JetDr
     graph: graph_option ?? return jobs
     loop at in 0..<prechecks.len() {
         if prechecks[at] == .Val(check) {
-            if !check.complete || check.waiting_dependencies.len() > 0 || check.folded != None -> next
+            if !check.complete || check.waiting_dependencies.len() > 0 || check.folded != None {
+                next
+            }
             if check.request == .Val(request) {
                 loop call in request.calls {
                     jet_driver_comptime_prefetch_add(index, seen, jobs, call.module_identity, call.callee_key)
@@ -2195,7 +2205,9 @@ jet_driver_comptime_type_land: fn(program: &SemaProgramTables, available: &SemaC
 // (TConstantDef.item_function), so it joins the batch instead of waiting
 // for them to land.
 jet_driver_comptime_computed_waits: fn(batch: JetDriverComptimeBatch, checked: SemaComptimeItemCheck) -> Bool Never! {
-    if checked.waiting_dependencies.len() == 0 || checked.request == None || !checked.complete || jet_driver_has_errors(checked.diagnostics) -> return false
+    if checked.waiting_dependencies.len() == 0 || checked.request == None || !checked.complete || jet_driver_has_errors(checked.diagnostics) {
+        return false
+    }
     jet_driver_comptime_batch_computes(batch, checked.waiting_dependencies)
 }
 
@@ -2318,7 +2330,9 @@ jet_driver_comptime_local_value_runs: fn(values: &[SemaComptimeItemValue], sourc
 // produced a value: it printed, ended the program, stopped, ran out of
 // steps, failed, or could not run.
 jet_driver_comptime_local_value_eval_reason: fn(result: JetEvalIRResult) -> String? {
-    if result.stdout.len() > 0 || result.stderr.len() > 0 || result.debug_trace.len() > 0 -> return Val("it prints text")
+    if result.stdout.len() > 0 || result.stderr.len() > 0 || result.debug_trace.len() > 0 {
+        return Val("it prints text")
+    }
     if result.exit_code != None -> return Val("it ends the program")
     if result.internal_problem == .Val(problem) {
         return Val("the compile-time evaluator can't run it ({problem.message})")
@@ -2408,7 +2422,9 @@ jet_driver_comptime_pass_sites: fn(index: &JetDriverComptimeRunIndex, pending: [
 }
 
 jet_driver_comptime_pass_site_add: fn(index: &JetDriverComptimeRunIndex, source: SemaComptimeItemSource) Never! {
-    if source.kind != SemaComptimeItemKind.BodyExpression || source.local_value -> return
+    if source.kind != SemaComptimeItemKind.BodyExpression || source.local_value {
+        return
+    }
     keys := index.pass_sites.remove(source.span.start) ?? [String]{}
     jet_driver_comptime_wait_add(keys, source.key)
     index.pass_sites[source.span.start] = keys
@@ -2632,7 +2648,9 @@ jet_driver_comptime_staged_flush: fn(
         }
         staged: jet_driver_comptime_stage(programs, values, checked_functions, trace, staging, request.compiler_threads)
         if request.trace_sink == .Val(sink) -> sink.end("comptime.stage", 1)
-        if staged == .Val(stopped) -> return JetDriverComptimeFlush{stop: Val(stopped), progressed: false}
+        if staged == .Val(stopped) {
+            return JetDriverComptimeFlush{stop: Val(stopped), progressed: false}
+        }
     }
     jet_driver_comptime_flush(request, batch, values, checked_functions, trace, programs[0], staging, counters, diagnostics)
 }
@@ -3208,7 +3226,9 @@ jet_driver_comptime_run: fn(
                 // A check that waits only on constants the batch computes
                 // reads them in the batch's program, and goes on as one that
                 // waits on nothing.
-                if jet_driver_comptime_computed_waits(batch, checked_item) -> checked_item.waiting_dependencies = [String]{}
+                if jet_driver_comptime_computed_waits(batch, checked_item) {
+                    checked_item.waiting_dependencies = [String]{}
+                }
                 // A settled check that waits on a batch key waits below.
                 if batch.entries.len() > 0 && !jet_driver_comptime_settled(source.local_value, jet_driver_has_errors(checked_item.diagnostics), checked_item.complete, checked_item.waiting_dependencies) {
                     flushed := jet_driver_comptime_staged_flush(request, batch, values, checked_functions, trace, programs, staging, counters, diagnostics)
@@ -4545,11 +4565,15 @@ jet_driver_keep_going_trap_unresolved_calls: fn(kg: &JetDriverKeepGoingLog, func
     // foreign row.
     targets := (loop _ in 0..<decls.rows.len() -> false)
     loop function in functions {
-        if decl_table_find(decls, symbols, function.key) == .Val(id) -> targets[id.row.index()] = true
+        if decl_table_find(decls, symbols, function.key) == .Val(id) {
+            targets[id.row.index()] = true
+        }
     }
     loop semantic_module in modules {
         loop row in semantic_module.foreign_functions {
-            if decl_table_find(decls, symbols, row.key) == .Val(id) -> targets[id.row.index()] = true
+            if decl_table_find(decls, symbols, row.key) == .Val(id) {
+                targets[id.row.index()] = true
+            }
             if decl_table_find_symbol(decls, row.symbol_id) == .Val(id) {
                 targets[id.row.index()] = true
             }
@@ -4867,7 +4891,9 @@ jet_driver_module_meta_source: fn(unit: JetDriverSourceUnit, packages: [JetDrive
     loop package in packages {
         if package.root_index != unit.root_index -> next
         meta.package = SemaModulePackage{name: package.name.copy(), version: package.version ?? "0.0.0", edition: if package.edition == "" -> None else -> Val(package.edition.copy()), log: if package.log_filter == "" -> None else -> Val(package.log_filter.copy())}
-        if package.policy_memory_kernel == .Val(kernel) -> meta.memory_kernel = sema_unsafe_path_within(meta.file, kernel)
+        if package.policy_memory_kernel == .Val(kernel) {
+            meta.memory_kernel = sema_unsafe_path_within(meta.file, kernel)
+        }
         break
     }
     meta
@@ -5145,7 +5171,9 @@ jet_driver_finalize_program: fn(
     // A traced run whose Core is the built-in one counts how its Core
     // demand's checks split over the Core facts' sealed and excluded keys
     // (sema_core_bound_counters).
-    if request.core_bound_keys.len() > 0 || request.core_excluded_keys.len() > 0 -> sema_core_bound_counters(demand_graph, bodies.modules, functions, request.core_bound_keys, request.core_excluded_keys, request.core_excluded_reasons, request.trace_sink)
+    if request.core_bound_keys.len() > 0 || request.core_excluded_keys.len() > 0 {
+        sema_core_bound_counters(demand_graph, bodies.modules, functions, request.core_bound_keys, request.core_excluded_keys, request.core_excluded_reasons, request.trace_sink)
+    }
     sema_finalize_program(demand_graph, trail, stage, values, functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink, bodies)
 }
 
@@ -5217,7 +5245,9 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     // `use_driven`) leaves Core's casing to the Core library's check.
     if !kg.enabled && !request.every_core_body && request.core_tests == "" {
         loop index in 0..<registration_inputs.len() {
-            if module_is_core(registration_inputs[index].module_identity) -> registration_inputs[index].check_casing = false
+            if module_is_core(registration_inputs[index].module_identity) {
+                registration_inputs[index].check_casing = false
+            }
         }
     }
     // The graph counts its lookups only while a trace is open.
@@ -5737,7 +5767,9 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     // while lowering and the IR build go on.
     aside_functions := 0
     if request.release_state_aside {
-        loop graph_module in checked_graph.modules -> aside_functions += graph_module.functions.len()
+        loop graph_module in checked_graph.modules {
+            aside_functions += graph_module.functions.len()
+        }
     }
     released_facts: sema_graph_modules_take_checked_facts(checked_graph.modules)
     jet_driver_release_facts_aside(aside_functions, released_facts)
@@ -6015,18 +6047,21 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     result.command_record = command_record
     jet_driver_trace_result_built(request.trace_sink, result.diagnostics.len())
     if request.release_state_aside {
-        jet_driver_release_aside(lowering_rows.len(), JetDriverHeldState{
-            load: load.move(),
-            registration: registration_graph.move(),
-            checked: checked_graph.move(),
-            functions: unlowered_functions.move(),
-            // The lowering inputs took the checked modules.
-            modules: [SemaGraphModuleResult]{},
-            values: comptime_values.move(),
-            stage: comptime_stage.move(),
-            run: comptime_run.move(),
-            trail: trail.move(),
-        })
+        jet_driver_release_aside(
+            lowering_rows.len(),
+            JetDriverHeldState{
+                load: load.move(),
+                registration: registration_graph.move(),
+                checked: checked_graph.move(),
+                functions: unlowered_functions.move(),
+                // The lowering inputs took the checked modules.
+                modules: [SemaGraphModuleResult]{},
+                values: comptime_values.move(),
+                stage: comptime_stage.move(),
+                run: comptime_run.move(),
+                trail: trail.move(),
+            },
+        )
     }
     result
 }
@@ -6046,7 +6081,9 @@ JET_DRIVER_RELEASE_ASIDE_MIN_FUNCTIONS: 16
 // JET_DRIVER_RELEASE_ASIDE_MIN_FUNCTIONS functions (`checked`) drops here.
 jet_driver_release_aside: fn(checked: Int, state: &&JetDriverHeldState) {
     held: state.move()
-    if checked < JET_DRIVER_RELEASE_ASIDE_MIN_FUNCTIONS -> return
+    if checked < JET_DRIVER_RELEASE_ASIDE_MIN_FUNCTIONS {
+        return
+    }
     released: task &&held { held.functions.len() }
     released.detach()
 }
@@ -6057,7 +6094,9 @@ jet_driver_release_aside: fn(checked: Int, state: &&JetDriverHeldState) {
 // functions (`checked`: 0 when the build holds its state) produced them.
 jet_driver_release_facts_aside: fn(checked: Int, facts: &&[SemaCheckedFacts]) {
     held: facts.move()
-    if checked < JET_DRIVER_RELEASE_ASIDE_MIN_FUNCTIONS -> return
+    if checked < JET_DRIVER_RELEASE_ASIDE_MIN_FUNCTIONS {
+        return
+    }
     released: task &&held { held.len() }
     released.detach()
 }

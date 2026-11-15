@@ -8,6 +8,7 @@ package: {
         binary: .Library{ entry: binary }
     }
 }
+
 // core.encoding.binary — Python `struct` for integers, plus named packers.
 //
 // Format characters (after an optional `<` little / `>` `!` big prefix):
@@ -19,6 +20,7 @@ package: {
 // There is no native alignment (`@`). Repeat counts (`3I`) are supported.
 // A missing or extra value is a typed BinaryError, not a panic.
 use math: core.math
+
 #Error
 BinaryError: enum {
     Range
@@ -100,7 +102,7 @@ unpack_u32le: fn(data: [U8], offset: Int) -> Int? Never! {
     loop k < 4 {
         b: u8_int(data[offset + k])
         n = (n).bit_or((b << (k * 8)))
-        k = k + 1
+        k += 1
     }
     Val(n)
 }
@@ -112,7 +114,7 @@ unpack_u32be: fn(data: [U8], offset: Int) -> Int? Never! {
     loop k < 4 {
         b: u8_int(data[offset + k])
         n = ((n << 8)).bit_or(b)
-        k = k + 1
+        k += 1
     }
     Val(n)
 }
@@ -187,9 +189,7 @@ calcsize: fn(fmt: String) -> Int BinaryError! {
 
 pack: fn(fmt: String, values: [Int]) -> [U8] BinaryError! {
     spec: parse_fmt(fmt)
-    if values.len() != spec.count {
-        return Err(BinaryError.Values)
-    }
+    if values.len() != spec.count -> return Err(BinaryError.Values)
     out := [U8]{}
     i := 0
     loop op in spec.ops {
@@ -202,8 +202,8 @@ pack: fn(fmt: String, values: [Int]) -> [U8] BinaryError! {
             if i >= values.len() -> return Err(BinaryError.Values)
             packed: pack_one(op.code, spec.little, values[i])
             loop b in packed -> out.push(b)
-            i = i + 1
-            r = r + 1
+            i += 1
+            r += 1
         }
     }
     Ok(out)
@@ -211,14 +211,12 @@ pack: fn(fmt: String, values: [Int]) -> [U8] BinaryError! {
 
 unpack: fn(fmt: String, data: [U8]) -> [Int] BinaryError! {
     spec: parse_fmt(fmt)
-    if data.len() != spec.size {
-        return Err(BinaryError.Buffer)
-    }
+    if data.len() != spec.size -> return Err(BinaryError.Buffer)
     out := [Int]{}
     off := 0
     loop op in spec.ops {
         if op.code == 120 {
-            off = off + op.repeat
+            off += op.repeat
             next
         }
         r := 0
@@ -226,7 +224,7 @@ unpack: fn(fmt: String, data: [U8]) -> [Int] BinaryError! {
             pair: unpack_one(op.code, spec.little, data, off)
             out.push(pair.value)
             off = pair.next
-            r = r + 1
+            r += 1
         }
     }
     Ok(out)
@@ -235,9 +233,7 @@ unpack: fn(fmt: String, data: [U8]) -> [Int] BinaryError! {
 iter_unpack: fn(fmt: String, data: [U8]) -> [[Int]] BinaryError! {
     size: calcsize(fmt)
     if size <= 0 -> return Err(BinaryError.Format)
-    if data.len() %% size != 0 {
-        return Err(BinaryError.Buffer)
-    }
+    if data.len() %% size != 0 -> return Err(BinaryError.Buffer)
     rows := [[Int]]{}
     off := 0
     loop off < data.len() {
@@ -245,11 +241,11 @@ iter_unpack: fn(fmt: String, data: [U8]) -> [[Int]] BinaryError! {
         k := 0
         loop k < size {
             chunk.push(data[off + k])
-            k = k + 1
+            k += 1
         }
         row: unpack(fmt, chunk)
         rows.push(row)
-        off = off + size
+        off += size
     }
     Ok(rows)
 }
@@ -299,23 +295,23 @@ parse_fmt: fn(fmt: String) -> Spec BinaryError! {
                 d: u8_int(raw[i])
                 if d < 48 || d > 57 -> break
                 rep = rep * 10 + (d - 48)
-                i = i + 1
+                i += 1
             }
             if i >= raw.len() -> return Err(BinaryError.Format)
             code: u8_int(raw[i])
-            i = i + 1
+            i += 1
             if rep < 1 -> return Err(BinaryError.Format)
             w: width(code) ?? return Err(BinaryError.Format)
             ops.push(Op{code: code, repeat: rep})
-            size = size + w * rep
-            if code != 120 -> count = count + rep
+            size += w * rep
+            if code != 120 -> count += rep
             next
         }
         w: width(n) ?? return Err(BinaryError.Format)
         ops.push(Op{code: n, repeat: 1})
-        size = size + w
-        if n != 120 -> count = count + 1
-        i = i + 1
+        size += w
+        if n != 120 -> count += 1
+        i += 1
     }
     Ok({little: little, size: size, count: count, ops: ops})
 }
@@ -352,7 +348,9 @@ pack_one: fn(code: Int, little: Bool, value: Int) -> [U8] BinaryError! {
         return pack_u32be(value)
     }
     if code == 113 {
-        if value < -9223372036854775808 || value > 9223372036854775807 -> return Err(BinaryError.Range)
+        if value < -9223372036854775808 || value > 9223372036854775807 {
+            return Err(BinaryError.Range)
+        }
         if little -> return pack_u64le((value).bit_and(18446744073709551615))
         return pack_u64be((value).bit_and(18446744073709551615))
     }
@@ -371,18 +369,24 @@ unpack_one: fn(code: Int, little: Bool, data: [U8], offset: Int) -> (next: Int, 
     }
     if code == 104 || code == 72 {
         n := 0
-        if little -> n = unpack_u16le(data, offset) ?? return Err(BinaryError.Buffer) else -> n = unpack_u16be(data, offset) ?? return Err(BinaryError.Buffer)
+        if little -> n = unpack_u16le(data, offset) ?? return Err(BinaryError.Buffer) else {
+            n = unpack_u16be(data, offset) ?? return Err(BinaryError.Buffer)
+        }
         if code == 104 -> n = sign_extend(n, 16)
         return (value: n, next: offset + 2)
     }
     if code == 105 || code == 73 || code == 108 || code == 76 {
         n := 0
-        if little -> n = unpack_u32le(data, offset) ?? return Err(BinaryError.Buffer) else -> n = unpack_u32be(data, offset) ?? return Err(BinaryError.Buffer)
+        if little -> n = unpack_u32le(data, offset) ?? return Err(BinaryError.Buffer) else {
+            n = unpack_u32be(data, offset) ?? return Err(BinaryError.Buffer)
+        }
         if code == 105 || code == 108 -> n = sign_extend(n, 32)
         return (value: n, next: offset + 4)
     }
     n := 0
-    if little -> n = unpack_u64le(data, offset) ?? return Err(BinaryError.Buffer) else -> n = unpack_u64be(data, offset) ?? return Err(BinaryError.Buffer)
+    if little -> n = unpack_u64le(data, offset) ?? return Err(BinaryError.Buffer) else {
+        n = unpack_u64be(data, offset) ?? return Err(BinaryError.Buffer)
+    }
     if code == 113 -> n = sign_extend(n, 64)
     (value: n, next: offset + 8)
 }

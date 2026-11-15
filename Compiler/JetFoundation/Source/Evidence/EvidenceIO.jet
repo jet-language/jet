@@ -6,12 +6,19 @@ use {
 }
 
 EVIDENCE_REPORT_ENV: ENV_JET_EVIDENCE_REPORT
+
 EVIDENCE_REPORT_ID_ENV: ENV_JET_EVIDENCE_REPORT_ID
+
 EVIDENCE_TOOLCHAIN_ENV: ENV_JET_EVIDENCE_TOOLCHAIN
+
 EVIDENCE_TARGET_ENV: ENV_JET_EVIDENCE_TARGET
+
 EVIDENCE_PROFILE_ENV: ENV_JET_EVIDENCE_PROFILE
+
 EVIDENCE_SOURCE_REVISION_ENV: ENV_JET_EVIDENCE_SOURCE_REVISION
+
 EVIDENCE_BUILD_REVISION_ENV: ENV_JET_EVIDENCE_BUILD_REVISION
+
 EVIDENCE_REVISION_ENV: ENV_JET_EVIDENCE_REVISION
 
 // EvidenceBuild::from_environment: an unset variable is the empty string.
@@ -38,7 +45,9 @@ evidence_record_from_test_environment: fn(kind_code: Int, state: Int, name: Stri
 evidence_report_read: fn(path: String) -[FS.Read]> EvidenceReport EvidenceCodecError! {
     bytes: if evidence_files.read_bytes(path) == {
         .Ok(value) -> value
-        .Err(error) -> { return Err(evidence_codec_error("{error}")) }
+        .Err(error) -> {
+            return Err(evidence_codec_error("{error}"))
+        }
     }
     evidence_report_from_bytes(bytes, U64.MAX)
 }
@@ -78,7 +87,9 @@ evidence_stable_token: fn(parts: [String]) -> String Never! {
 evidence_write_record_from_codes: fn(path: String, kind: Int, state: Int, name: String, message: String, file: String, line: U32, context: EvidenceCaptureContext) EvidenceCodecError! -[FS, Env]> {
     record := evidence_record_from_test_environment(kind, state, name, message, file, line)
     if record.outcome == EvidenceOutcome.Passed || record.outcome == EvidenceOutcome.Failed {
-        if evidence_record_set_expectation(record, context.expectation) == .Err(error) -> return Err(evidence_codec_error(evidence_expectation_error_text(error)))
+        if evidence_record_set_expectation(record, context.expectation) == .Err(error) {
+            return Err(evidence_codec_error(evidence_expectation_error_text(error)))
+        }
     }
     if (record.kind == EvidenceKind.Runtime || record.kind == EvidenceKind.Contract) && context.property_case {
         record.attachments.push(EvidenceAttachment{name: "caught_by", value: "property_case"})
@@ -104,10 +115,14 @@ evidence_write_record_with_derivation: fn(path: String, record: EvidenceRecord, 
 // exclusive OS lock on the report also serializes concurrent test processes
 // sharing it.
 evidence_append_frame: fn(path: String, frame: [U8]) EvidenceCodecError! -[FS, Env]> {
-    if frame.len() > EVIDENCE_MAX_REPORT_BYTES -> return Err(evidence_codec_error("evidence record exceeds the 16 MiB limit"))
+    if frame.len() > EVIDENCE_MAX_REPORT_BYTES {
+        return Err(evidence_codec_error("evidence record exceeds the 16 MiB limit"))
+    }
     writer := if evidence_files.append(path) == {
         .Ok(opened) -> opened
-        .Err(error) -> { return Err(evidence_codec_error("{error}")) }
+        .Err(error) -> {
+            return Err(evidence_codec_error("{error}"))
+        }
     }
     guard: if evidence_files.lock(path) == {
         .Ok(held) -> held

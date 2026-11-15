@@ -15,12 +15,19 @@ use {
 }
 
 NIX_INDEX_TEST_KEY_ID: "jet-test-index-v1"
+
 NIX_INDEX_ROOT: "hangar/nix-index/v1"
+
 NIX_INDEX_LOCAL_INDEX_ROOT: "index-v1"
+
 NIX_INDEX_LOCAL_NATIVE_RECIPE_ROOT: "recipes-v1.json"
+
 NIX_INDEX_TRUST_CONFIG: "trust/nix-index-v1.ed25519.pub"
+
 NIX_INDEX_ENDPOINT_CONFIG: "config/nix-index-v1.endpoint"
+
 NIX_INDEX_TRANSPORT_TIMEOUT_MS: 120000
+
 NIX_INDEX_MAX_LOCAL_REVISIONS: 128
 
 NIX_INDEX_TEMP_SEQUENCE: Shared{ProcessSequence{next: 1}}
@@ -60,9 +67,7 @@ NixIndexClient: struct {
 
     // The endpoint this client read at construction; later config rewrites
     // do not change it.
-    configured_endpoint: fn(self) -> String Never! {
-        self.endpoint
-    }
+    configured_endpoint: fn(self) -> String Never! { self.endpoint }
 
     // The configured official index: an explicit endpoint and trust key must
     // both be installed under the Hangar root, and the test key is refused.
@@ -76,8 +81,12 @@ NixIndexClient: struct {
         }
         trust_exists: nix_index_path_exists(trust_path)
         endpoint_exists: nix_index_path_exists(endpoint_path)
-        if !trust_exists && !endpoint_exists -> return Err(NixIndexError.Invalid("signed nixpkgs index endpoint and public key must be configured explicitly"))
-        if !trust_exists || !endpoint_exists -> return Err(NixIndexError.Invalid("nix index endpoint and public-key overrides must be installed together"))
+        if !trust_exists && !endpoint_exists {
+            return Err(NixIndexError.Invalid("signed nixpkgs index endpoint and public key must be configured explicitly"))
+        }
+        if !trust_exists || !endpoint_exists {
+            return Err(NixIndexError.Invalid("nix index endpoint and public-key overrides must be installed together"))
+        }
         trust: nix_index_read_regular(trust_path, 4096)
         text: String.from_bytes(trust) ?? return Err(NixIndexError.Invalid("nix index public key is not UTF-8"))
         parts: text.trim().split_once(":") ?? return Err(NixIndexError.Invalid("nix index public key must be key-id:base64-public-key"))
@@ -86,23 +95,29 @@ NixIndexClient: struct {
             return Err(NixIndexError.Invalid("nix index trust root `{NIX_INDEX_TEST_KEY_ID}` is test-only and cannot be used for official signed indexes"))
         }
         key_bytes: base64.decode(parts.after) ?? return Err(NixIndexError.Invalid("nix index public key is not base64"))
-        if key_bytes.len() != 32 -> return Err(NixIndexError.Invalid("nix index public key must be 32 bytes"))
+        if key_bytes.len() != 32 {
+            return Err(NixIndexError.Invalid("nix index public key must be 32 bytes"))
+        }
         endpoint_bytes: nix_index_read_regular(endpoint_path, 4096)
         endpoint_text: String.from_bytes(endpoint_bytes) ?? return Err(NixIndexError.Invalid("nix index endpoint is not UTF-8"))
         endpoint: nix_index_parse_endpoint(endpoint_text.trim())
         public_key: crypto.VerifyKey.from_bytes(key_bytes) ?? return Err(NixIndexError.Invalid("nix index public key is invalid"))
         transport: nix_index_native_transport(endpoint)
-        Ok(NixIndexClient{endpoint, root: roots.root, key_id, public_key: Val(public_key), local_catalog: false, offline, clock: NixIndexClock.System, transport})
+        Ok(NixIndexClient{endpoint: endpoint, root: roots.root, key_id: key_id, public_key: Val(public_key), local_catalog: false, offline: offline, clock: NixIndexClock.System, transport: transport})
     }
 
     // An explicit local, unsigned catalog directory.
     from_local_catalog: fn(catalog: String, offline: Bool) -[FS]> NixIndexClient NixIndexError! {
-        if !nix_index_path_exists(catalog) -> return Err(NixIndexError.Invalid("local unofficial nixpkgs catalog `{catalog}` does not exist"))
+        if !nix_index_path_exists(catalog) {
+            return Err(NixIndexError.Invalid("local unofficial nixpkgs catalog `{catalog}` does not exist"))
+        }
         nix_index_ensure_real_directory(catalog)
-        transport: NixIndexTransport{get_bounded: fn(url: String, max_bytes: Int) -[Net, Time.Wait]> {
-            nix_index_unconfigured_get(url, max_bytes)
-        }}
-        Ok(NixIndexClient{endpoint: "", root: catalog, key_id: "", public_key: None, local_catalog: true, offline, clock: NixIndexClock.System, transport})
+        transport: NixIndexTransport{
+            get_bounded: fn(url: String, max_bytes: Int) -[Net, Time.Wait]> {
+                nix_index_unconfigured_get(url, max_bytes)
+            },
+        }
+        Ok(NixIndexClient{endpoint: "", root: catalog, key_id: "", public_key: None, local_catalog: true, offline: offline, clock: NixIndexClock.System, transport: transport})
     }
 
     // A signed client over an explicit transport and clock (the Rust test
@@ -110,7 +125,7 @@ NixIndexClient: struct {
     with_transport: fn(root: String, endpoint: String, key_id: String, public_key: [U8], transport: &&NixIndexTransport, clock: NixIndexClock, offline: Bool) -> NixIndexClient NixIndexError! {
         parsed: nix_index_parse_endpoint(endpoint)
         key: crypto.VerifyKey.from_bytes(public_key) ?? return Err(NixIndexError.Invalid("test index public key is invalid"))
-        Ok(NixIndexClient{endpoint: parsed, root, key_id, public_key: Val(key), local_catalog: false, offline, clock, transport: transport.move()})
+        Ok(NixIndexClient{endpoint: parsed, root: root, key_id: key_id, public_key: Val(key), local_catalog: false, offline: offline, clock: clock, transport: transport.move()})
     }
 
     resolve: fn(self, key: NixIndexKey) -[FS, Env, Net, Time, Time.Wait]> NixVerifiedIndexRecord NixIndexError! {
@@ -121,7 +136,9 @@ NixIndexClient: struct {
         if manifest.manifest.issued_unix > now + NIX_INDEX_MAX_MANIFEST_FUTURE_SKEW_SECONDS {
             return Err(NixIndexError.Invalid("signed nixpkgs channel manifest is too far in the future"))
         }
-        if manifest.manifest.expires_unix <= now -> return Err(NixIndexError.Invalid("signed nixpkgs channel manifest is expired"))
+        if manifest.manifest.expires_unix <= now {
+            return Err(NixIndexError.Invalid("signed nixpkgs channel manifest is expired"))
+        }
         target: manifest.manifest.target_for(key.revision, key.system) ?? return Err(NixIndexError.Invalid("manifest has no target for {key.channel}@{key.revision} on {key.system}"))
         cached: self.load_target(key, target)
         compressed := [U8]{}
@@ -132,7 +149,9 @@ NixIndexClient: struct {
                 signature_bytes = pair.signature
             }
             .None -> {
-                if self.offline -> return Err(NixIndexError.Offline("signed nixpkgs index target is not cached for {key.revision} on {key.system}"))
+                if self.offline {
+                    return Err(NixIndexError.Offline("signed nixpkgs index target is not cached for {key.revision} on {key.system}"))
+                }
                 compressed = self.transport.get_bounded(target.url, target.compressed_length)
                 nix_index_verify_digest_and_length(compressed, target.compressed_length, target.sha256, "nix index target")
                 signature_bytes = self.transport.get_bounded(target.signature_url, NIX_INDEX_MAX_SIGNATURE_BYTES)
@@ -142,7 +161,9 @@ NixIndexClient: struct {
             }
         }
         decoded: nix_index_zstd_decode_bounded(compressed, NIX_INDEX_MAX_DECODED_BYTES)
-        if decoded.len() != target.decoded_length -> return Err(NixIndexError.Invalid("nix index decoded length disagrees with manifest"))
+        if decoded.len() != target.decoded_length {
+            return Err(NixIndexError.Invalid("nix index decoded length disagrees with manifest"))
+        }
         signature: NixIndexSignature.parse(signature_bytes)
         public_key: self.public_key ?? return Err(NixIndexError.Invalid("signed index has no verifier"))
         nix_index_verify_index_signature(public_key, self.key_id, signature, decoded)
@@ -151,7 +172,9 @@ NixIndexClient: struct {
         if document.channel != key.channel || document.revision != key.revision || document.system != key.system {
             return Err(NixIndexError.Invalid("signed nixpkgs index target disagrees with its requested key"))
         }
-        if document.records.len() != target.record_count -> return Err(NixIndexError.Invalid("nix index record count disagrees with manifest"))
+        if document.records.len() != target.record_count {
+            return Err(NixIndexError.Invalid("nix index record count disagrees with manifest"))
+        }
         if cached == None -> self.cache_target_atomically(key, target, compressed, signature_bytes)
         self.cache_manifest_atomically(key.channel, manifest)
         record: document.record_for(key.attrpath) ?? return Err(document.not_indexed(key))
@@ -168,7 +191,7 @@ NixIndexClient: struct {
             jet_key_id: self.key_id,
             jet_signature: signature.signature,
         }
-        Ok(NixVerifiedIndexRecord{record, proof, trust: NixIndexTrustTier.OfficialSigned})
+        Ok(NixVerifiedIndexRecord{record: record, proof: proof, trust: NixIndexTrustTier.OfficialSigned})
     }
 
     // A cached manifest while it is unexpired; otherwise a fresh signed one.
@@ -179,10 +202,14 @@ NixIndexClient: struct {
                 if found == {
                     .Val(cached) -> {
                         if cached.manifest.expires_unix > now -> return Ok(cached)
-                        if self.offline -> return Err(NixIndexError.Offline("signed nixpkgs channel manifest expired; refresh required"))
+                        if self.offline {
+                            return Err(NixIndexError.Offline("signed nixpkgs channel manifest expired; refresh required"))
+                        }
                     }
                     .None -> {
-                        if self.offline -> return Err(NixIndexError.Offline("signed nixpkgs channel manifest is not cached"))
+                        if self.offline {
+                            return Err(NixIndexError.Offline("signed nixpkgs channel manifest is not cached"))
+                        }
                     }
                 }
             }
@@ -197,14 +224,18 @@ NixIndexClient: struct {
     // its single immutable index target. More than one matching revision
     // requires a manifest.
     local_channel_revision: fn(self, channel: String, system: String) -[FS]> String NixIndexError! {
-        if !self.local_catalog -> return Err(NixIndexError.Invalid("channel revision lookup requires a local nixpkgs catalog"))
+        if !self.local_catalog {
+            return Err(NixIndexError.Invalid("channel revision lookup requires a local nixpkgs catalog"))
+        }
         nix_index_validate_channel(channel)
         nix_index_validate_system(system)
         path: files.join(files.join(files.join(self.root, "v1"), channel), "manifest.json")
         if nix_index_path_exists(path) {
             bytes: nix_index_read_regular(path, NIX_INDEX_MAX_MANIFEST_BYTES)
             manifest: NixIndexChannelManifest.parse(bytes)
-            if manifest.channel != channel -> return Err(NixIndexError.Invalid("local nixpkgs channel manifest disagrees with its requested channel"))
+            if manifest.channel != channel {
+                return Err(NixIndexError.Invalid("local nixpkgs channel manifest disagrees with its requested channel"))
+            }
             loop target in manifest.targets {
                 if target.system == system -> return Ok(target.revision)
             }
@@ -215,13 +246,17 @@ NixIndexClient: struct {
         entries: files.list_dir(index_root) ?? return Err(NixIndexError.Transport("read local index: {err}"))
         revision := String?{None}
         loop index in 0..<entries.len() {
-            if index >= NIX_INDEX_MAX_LOCAL_REVISIONS -> return Err(NixIndexError.Invalid("local catalog has too many revisions"))
+            if index >= NIX_INDEX_MAX_LOCAL_REVISIONS {
+                return Err(NixIndexError.Invalid("local catalog has too many revisions"))
+            }
             candidate: entries[index].name
             nix_index_validate_revision(candidate)
             nix_index_ensure_real_directory(entries[index].path)
             if !nix_index_path_exists(files.join(entries[index].path, system)) -> next
-            _: self.load_local_index(NixIndexKey{channel, revision: candidate, system, attrpath: [String]{}})
-            if revision != None -> return Err(NixIndexError.Invalid("local catalog has multiple revisions; provide an explicit channel manifest"))
+            _: self.load_local_index(NixIndexKey{channel: channel, revision: candidate, system: system, attrpath: [String]{}})
+            if revision != None {
+                return Err(NixIndexError.Invalid("local catalog has multiple revisions; provide an explicit channel manifest"))
+            }
             revision = Val(candidate)
         }
         found: revision ?? return Err(NixIndexError.Invalid("local catalog has no index for {channel} on {system}"))
@@ -260,9 +295,13 @@ NixIndexClient: struct {
         }
         matches := [NixNativeRecipe]{}
         loop recipe in recipes {
-            if recipe.name == name && (requested ?? recipe.version) == recipe.version -> matches.push(recipe)
+            if recipe.name == name && (requested ?? recipe.version) == recipe.version {
+                matches.push(recipe)
+            }
         }
-        if matches.len() > 1 -> return Err(NixIndexError.Invalid("local unofficial native catalog has ambiguous recipes for `{package}`"))
+        if matches.len() > 1 {
+            return Err(NixIndexError.Invalid("local unofficial native catalog has ambiguous recipes for `{package}`"))
+        }
         if matches.len() == 0 -> return Ok(None)
         Ok(Val(matches[0]))
     }
@@ -271,17 +310,23 @@ NixIndexClient: struct {
     // its digest.
     load_local_index: fn(self, key: NixIndexKey) -[FS]> (digest: String, document: NixIndexDocument) NixIndexError! {
         target_dir: files.join(files.join(files.join(self.root, NIX_INDEX_LOCAL_INDEX_ROOT), key.revision), key.system)
-        if !nix_index_path_exists(target_dir) -> return Err(NixIndexError.Invalid("local unofficial nixpkgs catalog has no target for {key.revision} on {key.system}"))
+        if !nix_index_path_exists(target_dir) {
+            return Err(NixIndexError.Invalid("local unofficial nixpkgs catalog has no target for {key.revision} on {key.system}"))
+        }
         nix_index_ensure_real_directory(target_dir)
         entries: files.list_dir(target_dir) ?? return Err(NixIndexError.Transport("read local unofficial nixpkgs catalog target directory {target_dir}: {err}"))
         found_digest := String?{None}
         found_document := NixIndexDocument?{None}
         loop entry in entries {
             info: files.stat(entry.path) ?? return Err(NixIndexError.Transport("inspect local catalog entry: {err}"))
-            if info.is_symlink -> return Err(NixIndexError.Invalid("local unofficial nixpkgs catalog contains a symlink"))
+            if info.is_symlink {
+                return Err(NixIndexError.Invalid("local unofficial nixpkgs catalog contains a symlink"))
+            }
             if !entry.name.ends_with(".json.zst") -> next
             digest: entry.name.removesuffix(".json.zst")
-            if !nix_is_lower_hex(digest, 64) -> return Err(NixIndexError.Invalid("local unofficial nixpkgs catalog target digest is malformed"))
+            if !nix_is_lower_hex(digest, 64) {
+                return Err(NixIndexError.Invalid("local unofficial nixpkgs catalog target digest is malformed"))
+            }
             compressed: nix_index_read_regular(entry.path, NIX_INDEX_MAX_COMPRESSED_BYTES)
             nix_index_verify_digest_and_length(compressed, compressed.len(), digest, "local unofficial nixpkgs catalog target")
             decoded: nix_index_zstd_decode_bounded(compressed, NIX_INDEX_MAX_DECODED_BYTES)
@@ -290,7 +335,9 @@ NixIndexClient: struct {
             if document.channel != key.channel || document.revision != key.revision || document.system != key.system {
                 return Err(NixIndexError.Invalid("local unofficial nixpkgs catalog target disagrees with its requested key"))
             }
-            if found_document != None -> return Err(NixIndexError.Invalid("local unofficial nixpkgs catalog has multiple target records"))
+            if found_document != None {
+                return Err(NixIndexError.Invalid("local unofficial nixpkgs catalog has multiple target records"))
+            }
             found_digest = Val(digest)
             found_document = Val(document)
         }
@@ -315,7 +362,7 @@ NixIndexClient: struct {
             jet_key_id: "",
             jet_signature: "",
         }
-        Ok(NixVerifiedIndexRecord{record, proof, trust: NixIndexTrustTier.LocalUnofficial})
+        Ok(NixVerifiedIndexRecord{record: record, proof: proof, trust: NixIndexTrustTier.LocalUnofficial})
     }
 
     load_manifest: fn(self, channel: String) -[FS]> NixIndexCachedManifest? NixIndexError! {
@@ -325,16 +372,20 @@ NixIndexClient: struct {
         bytes_exists: nix_index_path_exists(bytes_path)
         signature_exists: nix_index_path_exists(signature_path)
         if !bytes_exists && !signature_exists -> return Ok(None)
-        if !bytes_exists || !signature_exists -> return Err(NixIndexError.Invalid("cached nix index manifest is missing its signature pair"))
+        if !bytes_exists || !signature_exists {
+            return Err(NixIndexError.Invalid("cached nix index manifest is missing its signature pair"))
+        }
         bytes: nix_index_read_regular(bytes_path, NIX_INDEX_MAX_MANIFEST_BYTES)
         signature_bytes: nix_index_read_regular(signature_path, NIX_INDEX_MAX_SIGNATURE_BYTES)
         manifest: NixIndexChannelManifest.parse(bytes)
         manifest.validate()
-        if manifest.channel != channel -> return Err(NixIndexError.Invalid("cached nixpkgs channel manifest disagrees with requested channel"))
+        if manifest.channel != channel {
+            return Err(NixIndexError.Invalid("cached nixpkgs channel manifest disagrees with requested channel"))
+        }
         public_key: self.public_key ?? return Err(NixIndexError.Invalid("signed index has no verifier"))
         nix_index_verify_manifest_signature(public_key, self.key_id, signature_bytes, bytes)
         self.check_generation(channel, manifest, bytes)
-        Ok(Val(NixIndexCachedManifest{manifest, bytes, signature_bytes}))
+        Ok(Val(NixIndexCachedManifest{manifest: manifest, bytes: bytes, signature_bytes: signature_bytes}))
     }
 
     fetch_manifest: fn(self, channel: String) -[FS, Net, Time.Wait]> NixIndexCachedManifest NixIndexError! {
@@ -343,11 +394,13 @@ NixIndexClient: struct {
         signature_bytes: self.transport.get_bounded("{base}.sig.json", NIX_INDEX_MAX_SIGNATURE_BYTES)
         manifest: NixIndexChannelManifest.parse(bytes)
         manifest.validate()
-        if manifest.channel != channel -> return Err(NixIndexError.Invalid("signed nixpkgs channel manifest disagrees with requested channel"))
+        if manifest.channel != channel {
+            return Err(NixIndexError.Invalid("signed nixpkgs channel manifest disagrees with requested channel"))
+        }
         public_key: self.public_key ?? return Err(NixIndexError.Invalid("signed index has no verifier"))
         nix_index_verify_manifest_signature(public_key, self.key_id, signature_bytes, bytes)
         self.check_generation(channel, manifest, bytes)
-        Ok(NixIndexCachedManifest{manifest, bytes, signature_bytes})
+        Ok(NixIndexCachedManifest{manifest: manifest, bytes: bytes, signature_bytes: signature_bytes})
     }
 
     // Refuse a manifest older than the recorded highest generation, or a
@@ -366,7 +419,9 @@ NixIndexClient: struct {
         bytes_exists: nix_index_path_exists(bytes_path)
         signature_exists: nix_index_path_exists(signature_path)
         if !bytes_exists && !signature_exists -> return Ok(None)
-        if !bytes_exists || !signature_exists -> return Err(NixIndexError.Invalid("cached nix index target is missing its signature pair"))
+        if !bytes_exists || !signature_exists {
+            return Err(NixIndexError.Invalid("cached nix index target is missing its signature pair"))
+        }
         bytes: nix_index_read_regular(bytes_path, NIX_INDEX_MAX_COMPRESSED_BYTES)
         nix_index_verify_digest_and_length(bytes, target.compressed_length, target.sha256, "cached nix index target")
         signature: nix_index_read_regular(signature_path, NIX_INDEX_MAX_SIGNATURE_BYTES)
@@ -410,12 +465,16 @@ NixIndexClient: struct {
         bytes: nix_index_read_regular(path, 256)
         text: String.from_bytes(bytes) ?? return Err(NixIndexError.Invalid("nix index rollback state is not UTF-8"))
         lines: nix_text_lines(text)
-        if lines.len() == 0 -> return Err(NixIndexError.Invalid("nix index rollback generation is malformed"))
+        if lines.len() == 0 {
+            return Err(NixIndexError.Invalid("nix index rollback generation is malformed"))
+        }
         generation: nix_index_parse_generation(lines[0]) ?? return Err(NixIndexError.Invalid("nix index rollback generation is malformed"))
         if lines.len() < 2 || lines[1].bytes().len() != 64 || !nix_index_is_hex(lines[1]) {
             return Err(NixIndexError.Invalid("nix index rollback digest is malformed"))
         }
-        if lines.len() > 2 -> return Err(NixIndexError.Invalid("nix index rollback state has trailing data"))
+        if lines.len() > 2 {
+            return Err(NixIndexError.Invalid("nix index rollback state has trailing data"))
+        }
         Ok(Val((generation: generation, digest: lines[1])))
     }
 
@@ -431,7 +490,9 @@ NixIndexClient: struct {
 
     target_path: fn(self, key: NixIndexKey, digest: String) -> String NixIndexError! {
         nix_index_validate_key(key)
-        if !nix_is_lower_hex(digest, 64) -> return Err(NixIndexError.Invalid("nix index target digest is malformed"))
+        if !nix_is_lower_hex(digest, 64) {
+            return Err(NixIndexError.Invalid("nix index target digest is malformed"))
+        }
         targets: files.join(files.join(self.root, NIX_INDEX_ROOT), "targets")
         Ok(files.join(files.join(files.join(targets, key.revision), key.system), "{digest}.json.zst"))
     }
@@ -450,23 +511,35 @@ NixIndexCachedManifest: struct {
 nix_index_native_transport: fn(endpoint: String) -> NixIndexTransport NixIndexError! {
     configured: nix_index_parse_network_url(endpoint)
     scheme: configured.scheme
-    Ok(NixIndexTransport{get_bounded: fn(url: String, max_bytes: Int) -[Net, Time.Wait]> {
-        nix_index_native_get(scheme, url, max_bytes)
-    }})
+    Ok(
+        NixIndexTransport{
+            get_bounded: fn(url: String, max_bytes: Int) -[Net, Time.Wait]> {
+                nix_index_native_get(scheme, url, max_bytes)
+            },
+        },
+    )
 }
 
 nix_index_native_get: fn(scheme: String, url: String, max_bytes: Int) -[Net, Time.Wait]> [U8] NixIndexError! {
     requested: nix_index_parse_network_url(url)
-    if requested.scheme != scheme -> return Err(NixIndexError.Transport("signed nix index target changes the endpoint scheme"))
+    if requested.scheme != scheme {
+        return Err(NixIndexError.Transport("signed nix index target changes the endpoint scheme"))
+    }
     request: http_client.request("GET", url).total_timeout(NIX_INDEX_TRANSPORT_TIMEOUT_MS).redirects(0)
     response: http_client.send(request) ?? return Err(NixIndexError.Transport("{err}"))
     status: response.status()
     if status != 200 -> return Err(NixIndexError.Transport("index endpoint returned HTTP {status}"))
     declared: nix_index_content_length(response)
-    if (declared ?? 0) > max_bytes -> return Err(NixIndexError.Invalid("index response exceeds its bound"))
+    if (declared ?? 0) > max_bytes {
+        return Err(NixIndexError.Invalid("index response exceeds its bound"))
+    }
     bytes: response.body().bytes(max_bytes + 1) ?? return Err(NixIndexError.Transport("read index endpoint: {err}"))
-    if bytes.len() > max_bytes -> return Err(NixIndexError.Invalid("index response exceeds its bound"))
-    if declared == .Val(length) && length != bytes.len() -> return Err(NixIndexError.Transport("index response Content-Length disagrees"))
+    if bytes.len() > max_bytes {
+        return Err(NixIndexError.Invalid("index response exceeds its bound"))
+    }
+    if declared == .Val(length) && length != bytes.len() {
+        return Err(NixIndexError.Transport("index response Content-Length disagrees"))
+    }
     Ok(bytes)
 }
 
@@ -487,13 +560,15 @@ nix_index_content_length: fn(response: HTTPResponse) -> Int? Never! {
 nix_index_parse_network_url: fn(url: String) -> (scheme: String, host: String, port: Int) NixIndexError! {
     parts: url.split_once("://") ?? return Err(NixIndexError.Invalid("nix index URL has no scheme"))
     scheme: pkg_ascii_lower(parts.before)
-    if scheme != "http" && scheme != "https" -> return Err(NixIndexError.Invalid("nix index URL must use HTTP or HTTPS"))
+    if scheme != "http" && scheme != "https" {
+        return Err(NixIndexError.Invalid("nix index URL must use HTTP or HTTPS"))
+    }
     authority := parts.after
     separators: [String]{"/", "?", "#"}
-    loop separator in separators {
-        authority = authority.split(separator).to_list()[0]
+    loop separator in separators -> authority = authority.split(separator).to_list()[0]
+    if authority == "" || authority.contains("@") {
+        return Err(NixIndexError.Invalid("nix index URL authority is malformed"))
     }
-    if authority == "" || authority.contains("@") -> return Err(NixIndexError.Invalid("nix index URL authority is malformed"))
     default_port: if scheme == "https" -> 443 else -> 80
     host := ""
     port := default_port
@@ -501,7 +576,9 @@ nix_index_parse_network_url: fn(url: String) -> (scheme: String, host: String, p
     if bracketed {
         inner: authority.removeprefix("[").split_once("]") ?? return Err(NixIndexError.Invalid("nix index IPv6 host is malformed"))
         host = inner.before
-        if inner.after.starts_with(":") -> port = nix_index_parse_index_port(inner.after.removeprefix(":"))
+        if inner.after.starts_with(":") {
+            port = nix_index_parse_index_port(inner.after.removeprefix(":"))
+        }
     } else {
         if authority.cut_last(":") == {
             .Val(pieces) -> {
@@ -511,7 +588,9 @@ nix_index_parse_network_url: fn(url: String) -> (scheme: String, host: String, p
             .None -> host = authority
         }
     }
-    if host == "" || (!bracketed && host.contains(":")) || nix_text_has_whitespace(host) -> return Err(NixIndexError.Invalid("nix index host is malformed"))
+    if host == "" || (!bracketed && host.contains(":")) || nix_text_has_whitespace(host) {
+        return Err(NixIndexError.Invalid("nix index host is malformed"))
+    }
     Ok((scheme: scheme, host: host, port: port))
 }
 
@@ -536,9 +615,7 @@ nix_index_parse_decimal: fn(text: String) -> Int? Never! {
     Val(value)
 }
 
-nix_index_parse_generation: fn(line: String) -> Int? Never! {
-    nix_index_parse_decimal(line)
-}
+nix_index_parse_generation: fn(line: String) -> Int? Never! { nix_index_parse_decimal(line) }
 
 nix_index_is_hex: fn(text: String) -> Bool Never! {
     loop byte in text.bytes() {
@@ -581,10 +658,14 @@ nix_index_ensure_real_directory: fn(path: String) NixIndexError! -[FS]> {
         current = if current == "" -> segment else -> files.join(current, segment)
         if files.stat(current) == {
             .Ok(info) -> {
-                if info.is_symlink || !info.is_dir -> return Err(NixIndexError.Invalid("nix index state path `{current}` is not a real directory"))
+                if info.is_symlink || !info.is_dir {
+                    return Err(NixIndexError.Invalid("nix index state path `{current}` is not a real directory"))
+                }
             }
             .Err(error) -> {
-                if !nix_io_is_not_found(error) -> return Err(NixIndexError.Transport("inspect {current}: {error}"))
+                if !nix_io_is_not_found(error) {
+                    return Err(NixIndexError.Transport("inspect {current}: {error}"))
+                }
                 files.create_dir_all(current) ?? return Err(NixIndexError.Transport("create {current}: {err}"))
             }
         }
@@ -595,20 +676,30 @@ nix_index_ensure_real_directory: fn(path: String) NixIndexError! -[FS]> {
 // from before the open to after the read.
 nix_index_read_regular: fn(path: String, limit: Int) -[FS]> [U8] NixIndexError! {
     expected: files.stat(path) ?? return Err(NixIndexError.Transport("read {path}: {err}"))
-    if expected.is_symlink || !expected.is_file -> return Err(NixIndexError.Invalid("read {path}: file is not a regular file"))
-    if expected.size > limit -> return Err(NixIndexError.Invalid("read {path}: file exceeds its read bound"))
+    if expected.is_symlink || !expected.is_file {
+        return Err(NixIndexError.Invalid("read {path}: file is not a regular file"))
+    }
+    if expected.size > limit {
+        return Err(NixIndexError.Invalid("read {path}: file exceeds its read bound"))
+    }
     reader := files.open(path, links: .Refuse) ?? return Err(NixIndexError.Transport("read {path}: {err}"))
     opened: reader.stat() ?? return Err(NixIndexError.Transport("read {path}: {err}"))
-    if !opened.is_file || opened.id != expected.id -> return Err(NixIndexError.Transport("read {path}: file changed before reading"))
+    if !opened.is_file || opened.id != expected.id {
+        return Err(NixIndexError.Transport("read {path}: file changed before reading"))
+    }
     bytes := [U8]{}
     loop {
         chunk: reader.read_bytes(65536) ?? return Err(NixIndexError.Transport("read {path}: {err}"))
         if chunk.len() == 0 -> break
         loop byte in chunk -> bytes.push(byte)
-        if bytes.len() > limit -> return Err(NixIndexError.Invalid("read {path}: file exceeds its read bound"))
+        if bytes.len() > limit {
+            return Err(NixIndexError.Invalid("read {path}: file exceeds its read bound"))
+        }
     }
     after: files.stat(path) ?? return Err(NixIndexError.Transport("read {path}: {err}"))
-    if bytes.len() != expected.size || after.id != expected.id -> return Err(NixIndexError.Transport("read {path}: file changed while reading"))
+    if bytes.len() != expected.size || after.id != expected.id {
+        return Err(NixIndexError.Transport("read {path}: file changed while reading"))
+    }
     Ok(bytes)
 }
 
@@ -621,10 +712,14 @@ nix_index_write_atomic: fn(path: String, bytes: [U8], replace: Bool) NixIndexErr
     nix_index_ensure_real_directory(parent)
     if files.stat(path) == {
         .Ok(info) -> {
-            if info.is_symlink || !info.is_file -> return Err(NixIndexError.Invalid("nix index state file `{path}` is not regular"))
+            if info.is_symlink || !info.is_file {
+                return Err(NixIndexError.Invalid("nix index state file `{path}` is not regular"))
+            }
             if !replace {
                 current: nix_index_read_regular(path, bytes.len())
-                if current == bytes -> return
+                if current == bytes {
+                    return
+                }
                 return Err(NixIndexError.Invalid("immutable nix index object `{path}` changed"))
             }
         }
@@ -658,11 +753,17 @@ nix_index_publish: fn(temporary: String, path: String, parent: String, bytes: [U
             files.fsync(parent) ?? return Err(NixIndexError.Transport("write {path}: {err}"))
         }
         .Err(error) -> {
-            if !nix_io_is_already_exists(error) -> return Err(NixIndexError.Transport("write {path}: {error}"))
+            if !nix_io_is_already_exists(error) {
+                return Err(NixIndexError.Transport("write {path}: {error}"))
+            }
             info: files.stat(path) ?? return Err(NixIndexError.Transport("write {path}: {err}"))
-            if info.is_symlink || !info.is_file -> return Err(NixIndexError.Transport("write {path}: immutable nix index object is not a regular file"))
+            if info.is_symlink || !info.is_file {
+                return Err(NixIndexError.Transport("write {path}: immutable nix index object is not a regular file"))
+            }
             current: nix_index_read_regular(path, bytes.len()) ?? return Err(NixIndexError.Transport("write {path}: {err.message()}"))
-            if current != bytes -> return Err(NixIndexError.Transport("write {path}: immutable nix index object changed"))
+            if current != bytes {
+                return Err(NixIndexError.Transport("write {path}: immutable nix index object changed"))
+            }
             files.remove(temporary).drop("the published object already holds these bytes")
         }
     }

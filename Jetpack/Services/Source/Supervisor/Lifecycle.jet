@@ -3,9 +3,13 @@
 // terminal cleanup of a generation and its dependents, and `down`.
 
 SERVICES_MAX_RESTART_DELAY_MS: 60000
+
 SERVICES_MAX_WATCH_DEPTH: 64
+
 SERVICES_MAX_WATCH_ENTRIES: 4096
+
 SERVICES_WATCH_DEBOUNCE_MS: 250
+
 SERVICES_STATE_LOCK_SCOPE: "services-state"
 
 // One started generation: the live child, its verified identity, and the
@@ -67,7 +71,9 @@ services_spawn_service_supervisor: fn(project_dir: String, env: &ShellEnv, plan:
     loop !services_supervisor_published(dir) {
         exited: supervisor.exited() ?? return Err(ServicesError.new("couldn't observe the supervisor of service `{plan.name}`: {err}"))
         // Its last publication may land just before it exits.
-        if exited && !services_supervisor_published(dir) -> return Err(ServicesError.new("service `{plan.name}` supervisor exited without publishing runtime state"))
+        if exited && !services_supervisor_published(dir) {
+            return Err(ServicesError.new("service `{plan.name}` supervisor exited without publishing runtime state"))
+        }
         time.sleep(time.duration_ms(20))
     }
 }
@@ -87,7 +93,7 @@ services_restart_env: fn(env: ShellEnv) -> ShellEnv Never! {
         label: env.label,
         prompt_path: env.prompt_path,
         prompt_strip: env.prompt_strip,
-        cache_leases: [CacheLease]{}
+        cache_leases: [CacheLease]{},
     }
 }
 
@@ -187,7 +193,7 @@ services_launch: fn(project_dir: String, env: &ShellEnv, plan: DevServicePlan, r
         services_remove_quiet(services_ports_path(resolved.dir))
         return Err(ServicesError.new("couldn't publish service lifecycle state: {error}{cleanup}"))
     }
-    Ok(Val(StartedService{child, state, authority: attached}))
+    Ok(Val(StartedService{child: child, state: state, authority: attached}))
 }
 
 // The spawn specification: the preset rebuilt for allocated ports, preset
@@ -199,7 +205,9 @@ services_service_spec: fn(env: &ShellEnv, plan: DevServicePlan, resolved: &Servi
         if preset == .Val(kind) {
             first_port: if resolved.ports.len() > 0 -> resolved.ports[0] else -> kind.port()
             if plan.run == None -> resolved.run = kind.run(first_port, resolved.data_dir)
-            if plan.ready == None && plan.ready_probe == None -> resolved.ready_probe = Val(kind.readiness(first_port))
+            if plan.ready == None && plan.ready_probe == None {
+                resolved.ready_probe = Val(kind.readiness(first_port))
+            }
         }
     }
     if plan.run == None && preset == .Val(kind) {
@@ -210,7 +218,9 @@ services_service_spec: fn(env: &ShellEnv, plan: DevServicePlan, resolved: &Servi
     // an unwritable log fails before spawn.
     _: files.create(services_stdout_path(resolved.dir)) ?? return Err(ServicesError.new("{err}"))
     _: files.create(services_stderr_path(resolved.dir)) ?? return Err(ServicesError.new("{err}"))
-    if resolved.run.len() == 0 -> return Err(ServicesError.new("service `{plan.name}` has an empty `run:` command"))
+    if resolved.run.len() == 0 {
+        return Err(ServicesError.new("service `{plan.name}` has an empty `run:` command"))
+    }
     // PATH and leased variables reach the child only through `apply_to`,
     // which passes the lease descriptors they name; a `systemd-run --scope`
     // wrapper executes the service in place and inherits both.
@@ -227,7 +237,9 @@ services_service_spec: fn(env: &ShellEnv, plan: DevServicePlan, resolved: &Servi
     }
     if socket_paths.len() > 0 {
         service_env[ENV_JETPACK_SERVICE_SOCKETS] = socket_paths.join("\n")
-        loop index in 0..<socket_paths.len() -> service_env["{ENV_PREFIX_JETPACK_SERVICE_SOCKET}{index}"] = socket_paths[index]
+        loop index in 0..<socket_paths.len() {
+            service_env["{ENV_PREFIX_JETPACK_SERVICE_SOCKET}{index}"] = socket_paths[index]
+        }
     }
     names: envmodel_sorted_keys_of(service_env)
     argv := [String]{}
@@ -256,7 +268,9 @@ services_service_spec: fn(env: &ShellEnv, plan: DevServicePlan, resolved: &Servi
 SERVICES_LOG_REDIRECT_SCRIPT: "exec >\"$1\" 2>\"$2\"; shift 2; exec \"$@\""
 
 services_log_redirect_argv: fn(stdout_path: String, stderr_path: String, run: [String]) -[Env]> [String] ServicesError! {
-    if sys.is_windows() -> return Err(ServicesError.new("service log capture needs a POSIX shell, which this host lacks"))
+    if sys.is_windows() {
+        return Err(ServicesError.new("service log capture needs a POSIX shell, which this host lacks"))
+    }
     argv := [String]{"/bin/sh", "-c", SERVICES_LOG_REDIRECT_SCRIPT, "jetpack-svc", stdout_path, stderr_path}
     argv.extend(run.copy())
     Ok(argv)
@@ -268,7 +282,9 @@ services_capture_process_state: fn(child: &ProcessChild, authority: ServiceAutho
     pid: child.id()
     problem: if services_process_start_identity(pid) == {
         .Ok(found) -> {
-            if found == .Val(start) -> return Ok(ServiceProcessState{pid, start_identity: start, containment: None})
+            if found == .Val(start) {
+                return Ok(ServiceProcessState{pid: pid, start_identity: start, containment: None})
+            }
             "the process is gone"
         }
         .Err(error) -> error.message
@@ -342,12 +358,10 @@ services_monitor_service: fn(host: ServiceHost, first: StartedService, project_d
                 return
             }
             restart: if plan.restart == {
-                .Val(policy) -> {
-                    if policy == {
-                        .Always(_, _, _) -> true
-                        .OnFailure(_, _, _) -> !receipt.success
-                        .Never -> false
-                    }
+                .Val(policy) -> if policy == {
+                    .Always(_, _, _) -> true
+                    .OnFailure(_, _, _) -> !receipt.success
+                    .Never -> false
                 }
                 .None -> false
             }
@@ -367,7 +381,9 @@ services_monitor_service: fn(host: ServiceHost, first: StartedService, project_d
                 .Ok(found) -> if found == .Val(facts) && facts.phase == ServicePhase.Ready -> "post-ready-crash" else -> "restart"
                 .Err(_) -> "restart"
             }
-            if !services_restart_generation(host, project_dir, env, plan, recovery, watched, started, stamps, "service restart did not produce a running process") -> return
+            if !services_restart_generation(host, project_dir, env, plan, recovery, watched, started, stamps, "service restart did not produce a running process") {
+                return
+            }
             next
         }
         if watched.len() > 0 {
@@ -399,7 +415,9 @@ services_monitor_service: fn(host: ServiceHost, first: StartedService, project_d
                 started.child.wait().drop("the replaced child is reaped")
                 restarts += 1
                 time.sleep(time.duration_ms(services_restart_delay(budget.backoff_ms, budget.exponential, restarts)))
-                if !services_restart_generation(host, project_dir, env, plan, "watch-restart", watched, started, stamps, "service watch restart did not produce a running process") -> return
+                if !services_restart_generation(host, project_dir, env, plan, "watch-restart", watched, started, stamps, "service watch restart did not produce a running process") {
+                    return
+                }
                 next
             }
         }
@@ -415,7 +433,7 @@ services_restart_generation: fn(host: ServiceHost, project_dir: String, env: &Sh
             if found == .Val(next_generation) {
                 started = next_generation
                 if services_watch_stamps(project_dir, watched) == {
-                    .Ok(fresh) -> stamps = fresh
+                    .Ok(fresh) -> { stamps = fresh }
                     .Err(error) -> {
                         services_finish_supervisor(host, project_dir, plan, started, Val(error.message))
                         return false
@@ -448,7 +466,9 @@ services_restart_budget: fn(plan: DevServicePlan) -> ServiceRestartBudget Never!
             .Never -> return ServiceRestartBudget{max: 0, backoff_ms: 0, exponential: false}
         }
     }
-    if plan.watch.len() > 0 -> return ServiceRestartBudget{max: 3, backoff_ms: 250, exponential: false}
+    if plan.watch.len() > 0 {
+        return ServiceRestartBudget{max: 3, backoff_ms: 250, exponential: false}
+    }
     ServiceRestartBudget{max: 0, backoff_ms: 0, exponential: false}
 }
 
@@ -456,7 +476,7 @@ services_bounded_budget: fn(max: Int, backoff_ms: Int, exponential: Bool) -> Ser
     ServiceRestartBudget{
         max: if max < SERVICES_MAX_RESTARTS -> max else -> SERVICES_MAX_RESTARTS,
         backoff_ms: if backoff_ms < SERVICES_MAX_BACKOFF_MS -> backoff_ms else -> SERVICES_MAX_BACKOFF_MS,
-        exponential
+        exponential: exponential,
     }
 }
 
@@ -467,9 +487,11 @@ services_restart_delay: fn(backoff_ms: Int, exponential: Bool, attempt: Int) -> 
     if shift > 20 -> shift = 20
     multiplier := 1
     if exponential {
-        loop step in 0..<shift -> multiplier = multiplier * 2
+        loop step in 0..<shift -> multiplier *= 2
     }
-    if backoff_ms > SERVICES_MAX_RESTART_DELAY_MS /% multiplier -> return SERVICES_MAX_RESTART_DELAY_MS
+    if backoff_ms > SERVICES_MAX_RESTART_DELAY_MS /% multiplier {
+        return SERVICES_MAX_RESTART_DELAY_MS
+    }
     delay: backoff_ms * multiplier
     if delay > SERVICES_MAX_RESTART_DELAY_MS -> return SERVICES_MAX_RESTART_DELAY_MS
     delay
@@ -492,10 +514,14 @@ services_mark_lifecycle_ready: fn(project_dir: String, plan: DevServicePlan) Ser
     dir: services_service_dir(project_dir, plan.name)
     found: services_read_lifecycle(dir)
     facts := found ?? return
-    if !facts.phase.is_live() -> return
+    if !facts.phase.is_live() {
+        return
+    }
     facts.phase = ServicePhase.Ready
     facts.recovery = "none"
-    if services_write_lifecycle(dir, facts) == .Err(error) -> return Err(ServicesError.new("couldn't publish ready lifecycle state: {error}"))
+    if services_write_lifecycle(dir, facts) == .Err(error) {
+        return Err(ServicesError.new("couldn't publish ready lifecycle state: {error}"))
+    }
 }
 
 // Close one supervised generation under the services-state lock: stop its
@@ -514,12 +540,16 @@ services_finish_supervisor: fn(host: ServiceHost, project_dir: String, plan: Dev
         // An old supervisor can see its child exit after a new generation
         // published state; it must not touch that generation.
         if services_authority_from_lifecycle(facts) == .Ok(current) {
-            if current != started.authority -> return
+            if current != started.authority {
+                return
+            }
         }
     }
     preserve_terminal_state: if existing == .Val(facts) -> services_is_terminal_evidence(facts) else -> false
     if services_stop_supervisor_authority(host, project_dir, plan, started) == .Err(cleanup_error) {
-        if preserve_terminal_state -> return
+        if preserve_terminal_state {
+            return
+        }
         message: if error == .Val(text) -> "{text}; supervisor cleanup failed: {cleanup_error.message}" else -> "supervisor cleanup failed: {cleanup_error.message}"
         services_write_atomic(services_supervisor_error_path(dir), message.bytes()).drop("supervisor error evidence is best-effort")
         if services_read_lifecycle(dir) == .Ok(found) {
@@ -535,9 +565,7 @@ services_finish_supervisor: fn(host: ServiceHost, project_dir: String, plan: Dev
     if !preserve_terminal_state {
         if error == .Val(text) {
             services_write_atomic(services_supervisor_error_path(dir), text.bytes()).drop("supervisor error evidence is best-effort")
-        } else {
-            services_remove_quiet(services_supervisor_error_path(dir))
-        }
+        } else { services_remove_quiet(services_supervisor_error_path(dir)) }
         if services_read_lifecycle(dir) == .Ok(found) {
             if found == .Val(facts) {
                 updated := facts
@@ -566,7 +594,9 @@ services_is_terminal_evidence: fn(facts: LifecycleFacts) -> Bool Never! {
 // Stop every live service that names `dependency` in `after`, dependents of
 // dependents first, and record the dependency failure on each.
 services_stop_dependents: fn(project_dir: String, dependency: String, visited: &[String]) -[FS, Env, Exec, Time, Time.Wait]> {
-    if visited.contains(dependency) -> return
+    if visited.contains(dependency) {
+        return
+    }
     visited.push(dependency.copy())
     root: services_service_dir(project_dir, "")
     entries: files.list_dir(root) ?? return
@@ -588,7 +618,9 @@ services_stop_dependents: fn(project_dir: String, dependency: String, visited: &
         // A Windows guardian observes the marker itself.
         stopped := true
         if authority.guardian() == None {
-            if services_stop_process_with_authority(state, Val(ShutdownPolicy.Kill), Val(authority)) == .Err(_) -> stopped = false
+            if services_stop_process_with_authority(state, Val(ShutdownPolicy.Kill), Val(authority)) == .Err(_) {
+                stopped = false
+            }
         }
         if stopped {
             services_remove_quiet(services_pid_path(dir))
@@ -613,22 +645,30 @@ services_watch_stamps: fn(project_dir: String, paths: [String]) -[FS]> [String] 
         if unique.len() == 0 || unique[unique.len() - 1] != root -> unique.push(root)
     }
     entries := [String]{}
-    loop root in unique -> services_collect_watch_stamps(project_dir, root, SERVICES_MAX_WATCH_ENTRIES, 0, entries)
+    loop root in unique {
+        services_collect_watch_stamps(project_dir, root, SERVICES_MAX_WATCH_ENTRIES, 0, entries)
+    }
     entries.sort()
     Ok(entries)
 }
 
 services_collect_watch_stamps: fn(project_dir: String, path: String, limit: Int, depth: Int, entries: &[String]) ServicesError! -[FS]> {
-    if depth > SERVICES_MAX_WATCH_DEPTH -> return Err(ServicesError.new("watched tree exceeds the bounded depth of {SERVICES_MAX_WATCH_DEPTH}"))
+    if depth > SERVICES_MAX_WATCH_DEPTH {
+        return Err(ServicesError.new("watched tree exceeds the bounded depth of {SERVICES_MAX_WATCH_DEPTH}"))
+    }
     if env_shell_strip_path_prefix(path, project_dir) == .Val(relative) {
         if services_first_real_component(relative) == .Val(first) {
-            if first == CONFIG_DEFAULT_DIR -> return
+            if first == CONFIG_DEFAULT_DIR {
+                return
+            }
         }
     }
     info: if files.stat(path) == {
         .Ok(found) -> found
         .Err(error) -> {
-            if services_is_not_found(error) -> return services_push_watch_stamp(entries, limit, "{path}\tmissing")
+            if services_is_not_found(error) {
+                return services_push_watch_stamp(entries, limit, "{path}\tmissing")
+            }
             return Err(ServicesError.new("couldn't inspect watched path `{path}`: {error}"))
         }
     }
@@ -640,19 +680,27 @@ services_collect_watch_stamps: fn(project_dir: String, path: String, limit: Int,
     }
     modified_ns: info.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")
     services_push_watch_stamp(entries, limit, "{path}\t{kind}:{info.size}:{modified_ns}")
-    if !info.is_dir -> return
+    if !info.is_dir {
+        return
+    }
     listed: files.list_dir(path) ?? return Err(ServicesError.new("couldn't read watched directory `{path}`: {err}"))
     children := [String]{}
     loop entry in listed {
-        if children.len() >= limit -> return Err(ServicesError.new("watched directory `{path}` exceeds the bounded limit of {limit} entries"))
+        if children.len() >= limit {
+            return Err(ServicesError.new("watched directory `{path}` exceeds the bounded limit of {limit} entries"))
+        }
         children.push(entry.path)
     }
     children.sort()
-    loop child in children -> services_collect_watch_stamps(project_dir, child, limit, depth + 1, entries)
+    loop child in children {
+        services_collect_watch_stamps(project_dir, child, limit, depth + 1, entries)
+    }
 }
 
 services_push_watch_stamp: fn(entries: &[String], limit: Int, stamp: String) ServicesError! {
-    if entries.len() >= limit -> return Err(ServicesError.new("watched tree exceeds the bounded limit of {limit} entries"))
+    if entries.len() >= limit {
+        return Err(ServicesError.new("watched tree exceeds the bounded limit of {limit} entries"))
+    }
     entries.push(stamp.copy())
 }
 
@@ -665,7 +713,9 @@ services_watch_changed_debounced: fn(project_dir: String, paths: [String], stamp
     }
     if pending == .Val(candidate) {
         if candidate.stamps == current {
-            if services_now_ms() - candidate.since_ms < SERVICES_WATCH_DEBOUNCE_MS -> return Ok(false)
+            if services_now_ms() - candidate.since_ms < SERVICES_WATCH_DEBOUNCE_MS {
+                return Ok(false)
+            }
             stamps = current
             pending = None
             return Ok(true)
@@ -698,7 +748,9 @@ services_down_one: fn(host: ServiceHost, project_dir: String, plan: DevServicePl
         services_remove_quiet(services_stopping_path(dir))
         services_remove_quiet(services_ports_path(dir))
         services_remove_quiet(services_supervisor_error_path(dir))
-        if removed == .Val(message) -> return Err(ServicesError.new("couldn't remove legacy service state: {message}"))
+        if removed == .Val(message) {
+            return Err(ServicesError.new("couldn't remove legacy service state: {message}"))
+        }
         return
     }
     lifecycle: services_read_lifecycle(dir)
@@ -734,13 +786,13 @@ services_down_one: fn(host: ServiceHost, project_dir: String, plan: DevServicePl
         services_stop_process_with_authority(state, plan.shutdown, Val(authority))
         deadline: services_now_ms() + 5000
         loop services_process_matches_start(state) {
-            if services_now_ms() >= deadline -> return Err(ServicesError.new("service process {state.pid} is still alive after guardian shutdown"))
+            if services_now_ms() >= deadline {
+                return Err(ServicesError.new("service process {state.pid} is still alive after guardian shutdown"))
+            }
             time.sleep(time.duration_ms(50))
         }
         guard = env_acquire_lock(pkg_managed_dir(project_dir), SERVICES_STATE_LOCK_SCOPE) ?? return Err(ServicesError.new("couldn't relock service state: {err}"))
-    } else {
-        services_stop_process_with_authority(state, plan.shutdown, Val(authority))
-    }
+    } else { services_stop_process_with_authority(state, plan.shutdown, Val(authority)) }
     removed: if services_remove_existing(services_pid_path(dir)) == {
         .Ok(_) -> String?{None}
         .Err(error) -> Val("{error}")
@@ -757,14 +809,18 @@ services_down_one: fn(host: ServiceHost, project_dir: String, plan: DevServicePl
             services_write_lifecycle_quiet(dir, updated)
         }
     }
-    if removed == .Val(message) -> return Err(ServicesError.new("couldn't remove service state: {message}"))
+    if removed == .Val(message) {
+        return Err(ServicesError.new("couldn't remove service state: {message}"))
+    }
 }
 
 // The authority `down` stops through: the lifecycle's, or the in-process
 // host's own process group when no lifecycle record exists.
 services_down_authority: fn(host: ServiceHost, lifecycle: LifecycleFacts?) -> ServiceAuthority ServicesError! {
     facts: lifecycle ?? {
-        if host != ServiceHost.InProcess -> return Err(ServicesError.new("service lifecycle state is missing its authority facts"))
+        if host != ServiceHost.InProcess {
+            return Err(ServicesError.new("service lifecycle state is missing its authority facts"))
+        }
         return Ok(ServiceAuthority.TestProcessGroup)
     }
     services_authority_from_lifecycle(facts)
@@ -780,7 +836,9 @@ services_stop_supervisor_authority: fn(host: ServiceHost, project_dir: String, p
         .Ok(matches) -> {
             if matches {
                 live_attempted = true
-                if services_stop_started_process(started, Val(ShutdownPolicy.Kill)) == .Err(error) -> live_error = Val(error)
+                if services_stop_started_process(started, Val(ShutdownPolicy.Kill)) == .Err(error) {
+                    live_error = Val(error)
+                }
             }
         }
         .Err(error) -> {
@@ -792,7 +850,9 @@ services_stop_supervisor_authority: fn(host: ServiceHost, project_dir: String, p
     found: services_read_lifecycle(dir)
     facts: found ?? {
         if live_error == .Val(error) -> return Err(error)
-        if live_attempted -> return
+        if live_attempted {
+            return
+        }
         return Err(ServicesError.new("service lifecycle state is missing its authority facts"))
     }
     if !services_lifecycle_needs_authority_cleanup(facts) {
@@ -801,7 +861,9 @@ services_stop_supervisor_authority: fn(host: ServiceHost, project_dir: String, p
     }
     services_verify_persisted_authority_identity(host, project_dir, plan, facts, started.authority)
     if services_stop_persisted_authority_after_leader_exit(started.state, started.authority) == .Err(error) {
-        if live_error == .Val(first) -> return Err(ServicesError.new("{first.message}; {error.message}"))
+        if live_error == .Val(first) {
+            return Err(ServicesError.new("{first.message}; {error.message}"))
+        }
         return Err(error)
     }
 }

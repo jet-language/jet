@@ -36,10 +36,14 @@ foundation_address_is_public: fn(address: SocketAddr) -> Bool Never! {
 // all of it is public.
 foundation_resolve_public_addresses: fn(host: String, port: Int) -[Net, Time.Wait]> [SocketAddr] FoundationFetchError! {
     name := host
-    if host.starts_with("[") && host.ends_with("]") -> name = host.removeprefix("[").removesuffix("]")
+    if host.starts_with("[") && host.ends_with("]") {
+        name = host.removeprefix("[").removesuffix("]")
+    }
     if net.socket_addrs(name, port) == {
         .Ok(addresses) -> {
-            if !foundation_addresses_are_public(addresses) -> return Err(FoundationFetchError.IO("provider destination resolves to a non-public address"))
+            if !foundation_addresses_are_public(addresses) {
+                return Err(FoundationFetchError.IO("provider destination resolves to a non-public address"))
+            }
             Ok(addresses)
         }
         .Err(error) -> Err(FoundationFetchError.IO("could not resolve provider destination: {error}"))

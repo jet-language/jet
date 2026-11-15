@@ -48,7 +48,9 @@ lsp_handle_notification: fn(server: &LSPServer, method: String, params: Dyn?, st
             lsp_publish_document_diagnostics(server, uri, stdout) ?? return Err(err)
             _ := server.diagnostic_state.dirty.remove(uri)
         }
-        "textDocument/didChange" -> { _ := lsp_update_document(server.diagnostic_state, params, is_open: false) }
+        "textDocument/didChange" -> {
+            _ := lsp_update_document(server.diagnostic_state, params, is_open: false)
+        }
         "textDocument/didClose" -> {
             uri: lsp_params_uri(params) ?? return
             lsp_close_document(server, uri, stdout) ?? return Err(err)
@@ -58,6 +60,7 @@ lsp_handle_notification: fn(server: &LSPServer, method: String, params: Dyn?, st
 }
 
 LSP_SEMANTIC_TOKEN_TYPES: [String]{"keyword", "type", "function", "variable", "parameter", "property", "enumMember", "string", "number", "comment", "operator", "namespace", "decorator"}
+
 LSP_SEMANTIC_TOKEN_MODIFIERS: [String]{"declaration", "readonly"}
 
 lsp_json_strings: fn(values: [String]) -> String Never! {

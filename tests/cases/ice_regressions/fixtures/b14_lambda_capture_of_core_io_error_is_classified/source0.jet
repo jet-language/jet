@@ -1,9 +1,7 @@
 // A lambda capturing a compiler-owned Core enum (`IOError`, whose
 // `IOContext` payload has no module export) had no copy classification, so
 // its body check stopped without a diagnostic.
-fail_with: fn(error: IOError) IOError! {
-    Err(error)
-}
+fail_with: fn(error: IOError) IOError! { Err(error) }
 
 publish: fn(validate: (fn() IOError!)?) -> Int IOError! {
     if validate == .Val(check) -> check()
@@ -21,7 +19,7 @@ cause_of: fn(error: IOError) -> String {
     primary: IOError.Other(IOContext{operation: .Write, resource: Val("root"), os_code: None, cause: Val("primary")})
     validate: fn() { fail_with(primary) }
     if publish(Val(validate)) == {
-        .Ok(_) -> panic("published")
+        .Ok(_) -> { panic("published") }
         .Err(error) -> assert_eq(cause_of(error), "primary")
     }
 }
@@ -30,7 +28,7 @@ run: fn() {
     primary: IOError.Other(IOContext{operation: .Write, resource: Val("root"), os_code: None, cause: Val("primary")})
     validate: fn() { fail_with(primary) }
     if publish(Val(validate)) == {
-        .Ok(_) -> print("published")
+        .Ok(_) -> { print("published") }
         .Err(error) -> print(cause_of(error))
     }
 }

@@ -5,7 +5,11 @@ use {
     jet_foundation.[CtEnumArg, CtValue, NamedCtValue]
     jetpack_foundation.[ENV_FIELD_FORMATTER, ENV_FIELD_GIT_HOOKS_PATH, REF_SOURCE_JETPACK]
     jet_pkg_model.[
-        Pkg, pkg_ascii_lower, pkg_bytes_is_word, pkg_bytes_space_width, pkg_text_has_control,
+        Pkg,
+        pkg_ascii_lower,
+        pkg_bytes_is_word,
+        pkg_bytes_space_width,
+        pkg_text_has_control,
     ]
 }
 
@@ -22,13 +26,16 @@ EnvironmentFactError: struct {
 // The largest value a Rust `u64` duration may carry; debounce arithmetic
 // saturates here.
 ENVMODEL_U64_MAX: 18446744073709551615
+
 ENVMODEL_DEFAULT_DEBOUNCE_MS: 250
 
 // ── Presets ──
 
 envmodel_presets_from_value: fn(value: CtValue) -> [PresetSpec] EnvironmentFactError! {
     presets := [PresetSpec]{}
-    loop entry in envmodel_preset_entries(value) -> presets.push(envmodel_preset_from_value(entry.name, entry.value))
+    loop entry in envmodel_preset_entries(value) {
+        presets.push(envmodel_preset_from_value(entry.name, entry.value))
+    }
     Ok(presets)
 }
 
@@ -49,13 +56,17 @@ envmodel_preset_entries: fn(value: CtValue) -> [EnvNamedValue] EnvironmentFactEr
                         if name.trim() == "" -> return Err(EnvironmentFactError.new(unnamed))
                         entries.push(EnvNamedValue{name: name, value: entry.value})
                     }
-                    .Int(_) | .BigInt(_) | .Bool(_) | .Char(_) | .Tuple(_) | .Struct(_, _) | .Enum(_, _) -> { return Err(EnvironmentFactError.new(unnamed)) }
+                    .Int(_) | .BigInt(_) | .Bool(_) | .Char(_) | .Tuple(_) | .Struct(_, _) | .Enum(_, _) -> {
+                        return Err(EnvironmentFactError.new(unnamed))
+                    }
                 }
             }
         }
         .Struct(_, fields) -> {
             loop field in fields {
-                if field.name.trim() == "" -> return Err(EnvironmentFactError.new("preset records need non-empty names"))
+                if field.name.trim() == "" {
+                    return Err(EnvironmentFactError.new("preset records need non-empty names"))
+                }
                 entries.push(EnvNamedValue{name: field.name, value: field.value})
             }
         }
@@ -63,11 +74,15 @@ envmodel_preset_entries: fn(value: CtValue) -> [EnvNamedValue] EnvironmentFactEr
             loop item in values {
                 fields: envmodel_checked_struct_fields_named(item, "preset")
                 name: envmodel_optional_string_field(fields, "name") ?? ""
-                if name.trim() == "" -> return Err(EnvironmentFactError.new("preset list entries need a non-empty `name`"))
+                if name.trim() == "" {
+                    return Err(EnvironmentFactError.new("preset list entries need a non-empty `name`"))
+                }
                 entries.push(EnvNamedValue{name: name, value: item})
             }
         }
-        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> { return Err(EnvironmentFactError.new("presets must be a map, record, or list of named preset records")) }
+        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {
+            return Err(EnvironmentFactError.new("presets must be a map, record, or list of named preset records"))
+        }
     }
     Ok(entries)
 }
@@ -75,22 +90,32 @@ envmodel_preset_entries: fn(value: CtValue) -> [EnvNamedValue] EnvironmentFactEr
 envmodel_preset_from_value: fn(name: String, value: CtValue) -> PresetSpec EnvironmentFactError! {
     fields: envmodel_checked_struct_fields_named(value, "preset")
     if envmodel_optional_string_field(fields, "name") == .Val(declared) {
-        if declared != name -> return Err(EnvironmentFactError.new("preset map key `{name}` conflicts with its `name: {declared}` field"))
+        if declared != name {
+            return Err(EnvironmentFactError.new("preset map key `{name}` conflicts with its `name: {declared}` field"))
+        }
     }
     spec := PresetSpec{name: name}
-    if fields.get("extends") == .Val(extends) -> spec.extends = envmodel_list_strings_named(extends, "preset.extends")
-    if fields.get("packages") == .Val(packages) -> spec.packages = envmodel_list_strings_named(packages, "preset.packages")
-    if fields.get("variables") == .Val(variables) -> spec.variables = envmodel_string_map_named(variables, "preset.variables")
+    if fields.get("extends") == .Val(extends) {
+        spec.extends = envmodel_list_strings_named(extends, "preset.extends")
+    }
+    if fields.get("packages") == .Val(packages) {
+        spec.packages = envmodel_list_strings_named(packages, "preset.packages")
+    }
+    if fields.get("variables") == .Val(variables) {
+        spec.variables = envmodel_string_map_named(variables, "preset.variables")
+    }
     spec.hostname = envmodel_optional_string_named(fields, "hostname", "preset.hostname")
     spec.user = envmodel_optional_string_named(fields, "user", "preset.user")
     Ok(spec)
 }
 
 // Preset record fields: de-duplicated and restricted to the preset vocabulary.
-envmodel_checked_struct_fields_named: fn(value: CtValue, scope: String) -> [String: CtValue] EnvironmentFactError! {
+envmodel_checked_struct_fields_named: fn(value: CtValue, scope: String) -> [String:CtValue] EnvironmentFactError! {
     fields: if value == {
         .Struct(_, record_fields) -> record_fields
-        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> { return Err(EnvironmentFactError.new("{scope} entries must be typed records")) }
+        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {
+            return Err(EnvironmentFactError.new("{scope} entries must be typed records"))
+        }
     }
     unique: envmodel_checked_unique_fields(fields, scope)
     envmodel_require_known_fields(unique, scope, [String]{"name", "extends", "packages", "variables", "hostname", "user"})
@@ -107,7 +132,9 @@ envmodel_languages_from_value: fn(value: CtValue) -> [LanguageSpec] EnvironmentF
             loop entry in entries {
                 name: if entry.key == {
                     .Str(text) -> text
-                    .Int(_) | .BigInt(_) | .Bool(_) | .Char(_) | .Tuple(_) | .Struct(_, _) | .Enum(_, _) -> { return Err(EnvironmentFactError.new("language maps need string language names")) }
+                    .Int(_) | .BigInt(_) | .Bool(_) | .Char(_) | .Tuple(_) | .Struct(_, _) | .Enum(_, _) -> {
+                        return Err(EnvironmentFactError.new("language maps need string language names"))
+                    }
                 }
                 selections.push(envmodel_language_record(Val(name), entry.value))
             }
@@ -122,22 +149,30 @@ envmodel_languages_from_value: fn(value: CtValue) -> [LanguageSpec] EnvironmentF
                         selections.push(envmodel_language_name(envmodel_last_segment(variant)))
                     }
                     .Struct(_, _) -> { selections.push(envmodel_language_record(None, item)) }
-                    .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> { return Err(EnvironmentFactError.new(unnamed)) }
+                    .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {
+                        return Err(EnvironmentFactError.new(unnamed))
+                    }
                 }
             }
         }
         .Struct(type_name, _) -> {
-            if envmodel_last_segment(type_name) != "Lang" -> return Err(EnvironmentFactError.new(unsupported))
+            if envmodel_last_segment(type_name) != "Lang" {
+                return Err(EnvironmentFactError.new(unsupported))
+            }
             selections.push(envmodel_language_record(None, value))
         }
-        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> { return Err(EnvironmentFactError.new(unsupported)) }
+        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {
+            return Err(EnvironmentFactError.new(unsupported))
+        }
     }
     unique := [LanguageSpec]{}
     loop selection in selections {
         duplicate := false
         loop existing in unique {
             if existing.key() == selection.key() {
-                if existing != selection -> return Err(EnvironmentFactError.new("language pack `{selection.name}` is declared with conflicting selection facts"))
+                if existing != selection {
+                    return Err(EnvironmentFactError.new("language pack `{selection.name}` is declared with conflicting selection facts"))
+                }
                 duplicate = true
                 break
             }
@@ -157,7 +192,9 @@ envmodel_language_name: fn(name: String) -> LanguageSpec EnvironmentFactError! {
 envmodel_language_record: fn(name_hint: String?, value: CtValue) -> LanguageSpec EnvironmentFactError! {
     type_name: if value == {
         .Struct(record_type, _) -> record_type
-        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> { return Err(EnvironmentFactError.new("language selections must use typed Lang records")) }
+        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {
+            return Err(EnvironmentFactError.new("language selections must use typed Lang records"))
+        }
     }
     if envmodel_last_segment(type_name) != "Lang" {
         return Err(EnvironmentFactError.new("language selection must be a Lang record, not `{type_name}`"))
@@ -177,14 +214,18 @@ envmodel_language_record: fn(name_hint: String?, value: CtValue) -> LanguageSpec
             }
             chosen = key
         }
-        .None -> chosen = field_name ?? return Err(EnvironmentFactError.new("a Lang record needs a language name or a map key"))
+        .None -> {
+            chosen = field_name ?? return Err(EnvironmentFactError.new("a Lang record needs a language name or a map key"))
+        }
     }
     validated: envmodel_language_name(chosen)
     name: validated.name
     enable_value: fields.get("enable") ?? return Err(EnvironmentFactError.new("a Lang record needs a Bool `enable` field"))
     enable: if enable_value == {
         .Bool(flag) -> flag
-        .Int(_) | .Float(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> { return Err(EnvironmentFactError.new("Lang.enable must be Bool")) }
+        .Int(_) | .Float(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {
+            return Err(EnvironmentFactError.new("Lang.enable must be Bool"))
+        }
     }
     version: if fields.get("version") == {
         .Val(raw) -> Val(envmodel_language_token(raw, "Lang.version"))
@@ -198,7 +239,9 @@ envmodel_language_record: fn(name_hint: String?, value: CtValue) -> LanguageSpec
     if fields.get("venv") == .Val(raw) {
         venv = if raw == {
             .Bool(flag) -> flag
-            .Int(_) | .Float(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> { return Err(EnvironmentFactError.new("Lang.venv must be Bool")) }
+            .Int(_) | .Float(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {
+                return Err(EnvironmentFactError.new("Lang.venv must be Bool"))
+            }
         }
     }
     extra_packages := [String]{}
@@ -208,11 +251,15 @@ envmodel_language_record: fn(name_hint: String?, value: CtValue) -> LanguageSpec
         raw: fields.get(alias) ?? next
         packages: envmodel_list_strings_named(raw, "Lang.{alias}")
         loop package in packages {
-            if package.trim() == "" || envmodel_has_whitespace(package) -> return Err(EnvironmentFactError.new("Lang.{alias} must contain non-empty package refs"))
+            if package.trim() == "" || envmodel_has_whitespace(package) {
+                return Err(EnvironmentFactError.new("Lang.{alias} must contain non-empty package refs"))
+            }
         }
         if {
             extra_found -> {
-                if extra_packages != packages -> return Err(EnvironmentFactError.new("Lang extra, extras, and packages fields conflict"))
+                if extra_packages != packages {
+                    return Err(EnvironmentFactError.new("Lang extra, extras, and packages fields conflict"))
+                }
             }
             else -> {
                 extra_packages = packages
@@ -231,9 +278,13 @@ envmodel_language_token: fn(value: CtValue, field: String) -> String Environment
             if args.len() != 0 -> return Err(EnvironmentFactError.new(wrong))
             envmodel_last_segment(variant)
         }
-        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> { return Err(EnvironmentFactError.new(wrong)) }
+        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {
+            return Err(EnvironmentFactError.new(wrong))
+        }
     }
-    if token.trim() == "" || envmodel_has_whitespace(token) -> return Err(EnvironmentFactError.new("{field} must be a non-empty token"))
+    if token.trim() == "" || envmodel_has_whitespace(token) {
+        return Err(EnvironmentFactError.new("{field} must be a non-empty token"))
+    }
     Ok(token)
 }
 
@@ -248,7 +299,9 @@ envmodel_lifecycle_from_field: fn(lifecycle: &EnvironmentLifecycle, name: String
         "unset" -> lifecycle.unset = envmodel_env_names_named(value, "unset")
         "on_enter" -> lifecycle.on_enter = envmodel_hooks_from_value("on_enter", value)
         "checks" -> lifecycle.checks = envmodel_hooks_from_value("check", value)
-        ENV_FIELD_GIT_HOOKS_PATH -> lifecycle.git_hooks_path = Val(envmodel_git_hooks_path_from_value(value))
+        ENV_FIELD_GIT_HOOKS_PATH -> {
+            lifecycle.git_hooks_path = Val(envmodel_git_hooks_path_from_value(value))
+        }
         "reload" -> {
             lifecycle.reload = envmodel_reload_from_value(value)
             lifecycle.reload_explicit = true
@@ -265,7 +318,9 @@ envmodel_formatter_from_value: fn(value: CtValue) -> FormatterSpec EnvironmentFa
     raw: envmodel_string_value(value) ?? return Err(EnvironmentFactError.new("formatter must be one typed package reference"))
     normalized: if raw.starts_with("pkgs.") -> "{REF_SOURCE_JETPACK}.{raw.removeprefix("pkgs.")}" else -> raw
     packages: Pkg.parse_list(normalized)
-    if packages.len() != 1 -> return Err(EnvironmentFactError.new("formatter must contain exactly one package reference"))
+    if packages.len() != 1 {
+        return Err(EnvironmentFactError.new("formatter must contain exactly one package reference"))
+    }
     package: envmodel_pkg_ref(packages[0])
     if package == "" || package.starts_with("@") || envmodel_has_whitespace(package) {
         return Err(EnvironmentFactError.new("formatter must be one non-empty package reference"))
@@ -288,7 +343,9 @@ envmodel_dotenv_from_value: fn(value: CtValue) -> [DotenvSpec] EnvironmentFactEr
     values: if value == {
         .Str(_) | .Struct(_, _) -> [CtValue]{value}
         .List(items) -> items
-        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> { return Err(EnvironmentFactError.new("dotenv must be a list of files or Dotenv records")) }
+        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {
+            return Err(EnvironmentFactError.new("dotenv must be a list of files or Dotenv records"))
+        }
     }
     specs := [DotenvSpec]{}
     loop item in values {
@@ -311,11 +368,13 @@ envmodel_dotenv_from_value: fn(value: CtValue) -> [DotenvSpec] EnvironmentFactEr
         envmodel_validate_dotenv_spec(spec)
         specs.push(spec)
     }
-    seen := [String: DotenvSpec]{}
+    seen := [String:DotenvSpec]{}
     loop spec in specs {
         if seen.get(spec.file) == {
             .Val(existing) -> {
-                if existing != spec -> return Err(EnvironmentFactError.new("dotenv file `{spec.file}` has conflicting policies"))
+                if existing != spec {
+                    return Err(EnvironmentFactError.new("dotenv file `{spec.file}` has conflicting policies"))
+                }
             }
             .None -> seen[spec.file] = spec
         }
@@ -333,24 +392,32 @@ envmodel_validate_dotenv_spec: fn(spec: DotenvSpec) EnvironmentFactError! {
     names.extend(spec.allow)
     names.extend(spec.secrets)
     loop name in names {
-        if !envmodel_valid_env_name(name) -> return Err(EnvironmentFactError.new("dotenv variable `{name}` is not a valid environment name"))
+        if !envmodel_valid_env_name(name) {
+            return Err(EnvironmentFactError.new("dotenv variable `{name}` is not a valid environment name"))
+        }
     }
     if spec.allow.len() > 0 {
         loop name in spec.secrets {
-            if !spec.allow.contains(name) -> return Err(EnvironmentFactError.new("dotenv secrets must be included in the allowlist for `{spec.file}`"))
+            if !spec.allow.contains(name) {
+                return Err(EnvironmentFactError.new("dotenv secrets must be included in the allowlist for `{spec.file}`"))
+            }
         }
     }
 }
 
 // Dotenv record fields: de-duplicated and restricted to `file`, `allow`, and
 // `secrets`.
-envmodel_checked_dotenv_fields: fn(value: CtValue) -> [String: CtValue] EnvironmentFactError! {
+envmodel_checked_dotenv_fields: fn(value: CtValue) -> [String:CtValue] EnvironmentFactError! {
     fields: if value == {
         .Struct(_, record_fields) -> record_fields
-        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> { return Err(EnvironmentFactError.new("dotenv entries must be strings or Dotenv records")) }
+        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {
+            return Err(EnvironmentFactError.new("dotenv entries must be strings or Dotenv records"))
+        }
     }
     deduped: envmodel_dedupe_fields(fields)
-    if deduped.conflict == .Val(name) -> return Err(EnvironmentFactError.new("Dotenv field `{name}` is declared with conflicting values"))
+    if deduped.conflict == .Val(name) {
+        return Err(EnvironmentFactError.new("Dotenv field `{name}` is declared with conflicting values"))
+    }
     loop name in envmodel_sorted_keys(deduped.fields) {
         if name == {
             "file" | "allow" | "secrets" -> {}
@@ -363,10 +430,14 @@ envmodel_checked_dotenv_fields: fn(value: CtValue) -> [String: CtValue] Environm
 envmodel_dotenv_names: fn(value: CtValue) -> [String] EnvironmentFactError! {
     values: if value == {
         .List(items) -> items
-        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> { return Err(EnvironmentFactError.new("Dotenv `allow` and `secrets` must be lists of strings")) }
+        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {
+            return Err(EnvironmentFactError.new("Dotenv `allow` and `secrets` must be lists of strings"))
+        }
     }
     names := [String]{}
-    loop item in values -> names.push(envmodel_string_value(item) ?? return Err(EnvironmentFactError.new("Dotenv variable names must be strings")))
+    loop item in values {
+        names.push(envmodel_string_value(item) ?? return Err(EnvironmentFactError.new("Dotenv variable names must be strings")))
+    }
     Ok(names)
 }
 
@@ -387,7 +458,9 @@ envmodel_valid_env_name: fn(name: String) -> Bool Never! {
 envmodel_hooks_from_value: fn(prefix: String, value: CtValue) -> [HookSpec] EnvironmentFactError! {
     values: if value == {
         .List(items) -> items
-        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> { return Err(EnvironmentFactError.new("{prefix} must be a list of commands or hook records")) }
+        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {
+            return Err(EnvironmentFactError.new("{prefix} must be a list of commands or hook records"))
+        }
     }
     hooks := [HookSpec]{}
     loop index in 0..<values.len() {
@@ -401,7 +474,9 @@ envmodel_hooks_from_value: fn(prefix: String, value: CtValue) -> [HookSpec] Envi
         }
         fields: envmodel_checked_unique_fields_named(item, "{prefix}[{index}]", [String]{"name", "command", "cwd", "trusted"})
         command: envmodel_optional_string_field(fields, "command") ?? ""
-        if command.trim() == "" -> return Err(EnvironmentFactError.new("{prefix}[{index}] needs a non-empty string `command`"))
+        if command.trim() == "" {
+            return Err(EnvironmentFactError.new("{prefix}[{index}] needs a non-empty string `command`"))
+        }
         name := "{prefix}.{index}"
         if fields.get("name") == .Val(raw) {
             name = envmodel_string_value(raw) ?? return Err(EnvironmentFactError.new("{prefix}[{index}].name must be a string"))
@@ -409,7 +484,9 @@ envmodel_hooks_from_value: fn(prefix: String, value: CtValue) -> [HookSpec] Envi
         cwd: if fields.get("cwd") == {
             .Val(raw) -> {
                 directory: envmodel_string_value(raw) ?? return Err(EnvironmentFactError.new("{prefix}[{index}].cwd must be a string"))
-                if !envmodel_contained_path(directory) -> return Err(EnvironmentFactError.new("{prefix}[{index}].cwd must stay inside the project"))
+                if !envmodel_contained_path(directory) {
+                    return Err(EnvironmentFactError.new("{prefix}[{index}].cwd must stay inside the project"))
+                }
                 Val(directory)
             }
             .None -> None
@@ -418,7 +495,9 @@ envmodel_hooks_from_value: fn(prefix: String, value: CtValue) -> [HookSpec] Envi
         if fields.get("trusted") == .Val(raw) {
             trusted = if raw == {
                 .Bool(flag) -> flag
-                .Int(_) | .Float(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> { return Err(EnvironmentFactError.new("{prefix}[{index}].trusted must be Bool")) }
+                .Int(_) | .Float(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {
+                    return Err(EnvironmentFactError.new("{prefix}[{index}].trusted must be Bool"))
+                }
             }
         }
         hooks.push(HookSpec{name: name, action: HookAction.Command(command), cwd: cwd, trusted: trusted})
@@ -427,19 +506,15 @@ envmodel_hooks_from_value: fn(prefix: String, value: CtValue) -> [HookSpec] Envi
 }
 
 // A `#Job` name: `[A-Za-z_][A-Za-z0-9_]*`.
-envmodel_valid_task_name: fn(name: String) -> Bool Never! {
-    envmodel_valid_env_name(name)
-}
+envmodel_valid_task_name: fn(name: String) -> Bool Never! { envmodel_valid_env_name(name) }
 
 envmodel_reload_from_value: fn(value: CtValue) -> ReloadPolicy EnvironmentFactError! {
     if value == {
-        .Enum(_, variant, args) -> {
-            if envmodel_last_segment(variant) == {
-                "Never" && args.len() == 0 -> Ok(ReloadPolicy.Never)
-                "Prompt" && args.len() == 0 -> Ok(ReloadPolicy.Prompt)
-                "Watch" -> envmodel_reload_watch_from_args(args)
-                else -> Err(EnvironmentFactError.new("unknown or malformed reload policy `{variant}`"))
-            }
+        .Enum(_, variant, args) -> if envmodel_last_segment(variant) == {
+            "Never" && args.len() == 0 -> Ok(ReloadPolicy.Never)
+            "Prompt" && args.len() == 0 -> Ok(ReloadPolicy.Prompt)
+            "Watch" -> envmodel_reload_watch_from_args(args)
+            else -> Err(EnvironmentFactError.new("unknown or malformed reload policy `{variant}`"))
         }
         .Struct(_, _) -> {
             fields: envmodel_checked_unique_fields_named(value, "reload", [String]{"watch", "debounce"})
@@ -453,13 +528,11 @@ envmodel_reload_from_value: fn(value: CtValue) -> ReloadPolicy EnvironmentFactEr
             }
             Ok(ReloadPolicy.Watch{paths: paths, debounce_ms: debounce_ms})
         }
-        .Str(text) -> {
-            if pkg_ascii_lower(text) == {
-                "never" -> Ok(ReloadPolicy.Never)
-                "prompt" -> Ok(ReloadPolicy.Prompt)
-                "watch" -> Ok(ReloadPolicy.Watch{paths: [String]{}, debounce_ms: ENVMODEL_DEFAULT_DEBOUNCE_MS})
-                else -> Err(EnvironmentFactError.new("unknown reload policy `{text}`"))
-            }
+        .Str(text) -> if pkg_ascii_lower(text) == {
+            "never" -> Ok(ReloadPolicy.Never)
+            "prompt" -> Ok(ReloadPolicy.Prompt)
+            "watch" -> Ok(ReloadPolicy.Watch{paths: [String]{}, debounce_ms: ENVMODEL_DEFAULT_DEBOUNCE_MS})
+            else -> Err(EnvironmentFactError.new("unknown reload policy `{text}`"))
         }
         .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> Err(EnvironmentFactError.new("reload must be Never, Prompt, Watch, or a Reload record"))
     }
@@ -474,12 +547,16 @@ envmodel_reload_watch_from_args: fn(args: [CtEnumArg]) -> ReloadPolicy Environme
                 if label == {
                     "watch" -> paths = envmodel_reload_paths(arg.value)
                     "debounce" -> debounce_ms = envmodel_duration_ms(arg.value)
-                    else -> { return Err(EnvironmentFactError.new("unknown Reload.Watch field `{label}`")) }
+                    else -> {
+                        return Err(EnvironmentFactError.new("unknown Reload.Watch field `{label}`"))
+                    }
                 }
             }
             .None -> {
                 if {
-                    paths.len() == 0 && envmodel_is_list(arg.value) -> paths = envmodel_reload_paths(arg.value)
+                    paths.len() == 0 && envmodel_is_list(arg.value) -> {
+                        paths = envmodel_reload_paths(arg.value)
+                    }
                     else -> debounce_ms = envmodel_duration_ms(arg.value)
                 }
             }
@@ -498,7 +575,9 @@ envmodel_is_list: fn(value: CtValue) -> Bool Never! {
 envmodel_reload_paths: fn(value: CtValue) -> [String] EnvironmentFactError! {
     paths: envmodel_list_strings_named(value, "reload.watch")
     loop path in paths {
-        if !envmodel_contained_path(path) -> return Err(EnvironmentFactError.new("reload.watch path `{path}` must stay inside the project"))
+        if !envmodel_contained_path(path) {
+            return Err(EnvironmentFactError.new("reload.watch path `{path}` must stay inside the project"))
+        }
     }
     Ok(paths)
 }
@@ -520,7 +599,9 @@ envmodel_duration_ms: fn(value: CtValue) -> Int EnvironmentFactError! {
         .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> None
     }
     milliseconds: raw ?? return Err(EnvironmentFactError.new("reload debounce must be a positive duration"))
-    if milliseconds <= 0 -> return Err(EnvironmentFactError.new("reload debounce must be a positive duration"))
+    if milliseconds <= 0 {
+        return Err(EnvironmentFactError.new("reload debounce must be a positive duration"))
+    }
     Ok(milliseconds)
 }
 
@@ -533,7 +614,9 @@ envmodel_duration_scaled: fn(unit: String, value: CtValue?) -> Int? Never! {
     raw: value ?? return None
     amount: if raw == {
         .Int(number) -> envmodel_positive_u64(number) ?? return None
-        .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> { return None }
+        .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {
+            return None
+        }
     }
     factor: if unit == {
         "Seconds" | "Second" -> 1000
@@ -551,29 +634,37 @@ envmodel_duration_scaled: fn(unit: String, value: CtValue?) -> Int? Never! {
 envmodel_list_strings_named: fn(value: CtValue, scope: String) -> [String] EnvironmentFactError! {
     values: if value == {
         .List(items) -> items
-        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> { return Err(EnvironmentFactError.new("{scope} must be a list of strings")) }
+        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {
+            return Err(EnvironmentFactError.new("{scope} must be a list of strings"))
+        }
     }
     strings := [String]{}
-    loop item in values -> strings.push(envmodel_string_value(item) ?? return Err(EnvironmentFactError.new("{scope} must contain only strings")))
+    loop item in values {
+        strings.push(envmodel_string_value(item) ?? return Err(EnvironmentFactError.new("{scope} must contain only strings")))
+    }
     Ok(strings)
 }
 
 envmodel_env_names_named: fn(value: CtValue, scope: String) -> [String] EnvironmentFactError! {
     names: envmodel_list_strings_named(value, scope)
     loop name in names {
-        if !envmodel_valid_env_name(name) -> return Err(EnvironmentFactError.new("{scope} variable '{name}' is not a valid environment name"))
+        if !envmodel_valid_env_name(name) {
+            return Err(EnvironmentFactError.new("{scope} variable '{name}' is not a valid environment name"))
+        }
     }
     Ok(names)
 }
 
-envmodel_string_map_named: fn(value: CtValue, scope: String) -> [String: String] EnvironmentFactError! {
+envmodel_string_map_named: fn(value: CtValue, scope: String) -> [String:String] EnvironmentFactError! {
     pairs := [EnvNamedValue]{}
     if value == {
         .Map(entries) -> {
             loop entry in entries {
                 key: if entry.key == {
                     .Str(text) -> text
-                    .Int(_) | .BigInt(_) | .Bool(_) | .Char(_) | .Tuple(_) | .Struct(_, _) | .Enum(_, _) -> { return Err(EnvironmentFactError.new("{scope} keys must be strings")) }
+                    .Int(_) | .BigInt(_) | .Bool(_) | .Char(_) | .Tuple(_) | .Struct(_, _) | .Enum(_, _) -> {
+                        return Err(EnvironmentFactError.new("{scope} keys must be strings"))
+                    }
                 }
                 pairs.push(EnvNamedValue{name: key, value: entry.value})
             }
@@ -581,17 +672,21 @@ envmodel_string_map_named: fn(value: CtValue, scope: String) -> [String: String]
         .Struct(_, fields) -> {
             loop field in fields -> pairs.push(EnvNamedValue{name: field.name, value: field.value})
         }
-        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> { return Err(EnvironmentFactError.new("{scope} must be a record of string values")) }
+        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {
+            return Err(EnvironmentFactError.new("{scope} must be a record of string values"))
+        }
     }
-    result := [String: String]{}
+    result := [String:String]{}
     loop pair in pairs {
-        if !envmodel_valid_env_name(pair.name) -> return Err(EnvironmentFactError.new("{scope} variable '{pair.name}' is not a valid environment name"))
+        if !envmodel_valid_env_name(pair.name) {
+            return Err(EnvironmentFactError.new("{scope} variable '{pair.name}' is not a valid environment name"))
+        }
         result[pair.name] = envmodel_string_value(pair.value) ?? return Err(EnvironmentFactError.new("{scope} values must be strings"))
     }
     Ok(result)
 }
 
-envmodel_optional_string_named: fn(fields: [String: CtValue], name: String, scope: String) -> String? EnvironmentFactError! {
+envmodel_optional_string_named: fn(fields: [String:CtValue], name: String, scope: String) -> String? EnvironmentFactError! {
     raw: fields.get(name) ?? return Ok(None)
     Ok(Val(envmodel_string_value(raw) ?? return Err(EnvironmentFactError.new("{scope} must be a string"))))
 }
@@ -603,7 +698,7 @@ envmodel_string_value: fn(value: CtValue) -> String? Never! {
     }
 }
 
-envmodel_optional_string_field: fn(fields: [String: CtValue], name: String) -> String? Never! {
+envmodel_optional_string_field: fn(fields: [String:CtValue], name: String) -> String? Never! {
     raw: fields.get(name) ?? return None
     envmodel_string_value(raw)
 }
@@ -611,16 +706,18 @@ envmodel_optional_string_field: fn(fields: [String: CtValue], name: String) -> S
 // Record fields keyed by name. A repeated name must repeat the same value;
 // `conflict` names the first one that does not.
 EnvFieldDedupe: struct {
-    fields: [String: CtValue]
+    fields: [String:CtValue]
     conflict: String?
 }
 
 envmodel_dedupe_fields: fn(fields: [NamedCtValue]) -> EnvFieldDedupe Never! {
-    result := [String: CtValue]{}
+    result := [String:CtValue]{}
     loop field in fields {
         if result.get(field.name) == {
             .Val(existing) -> {
-                if existing != field.value -> return EnvFieldDedupe{fields: result, conflict: Val(field.name)}
+                if existing != field.value {
+                    return EnvFieldDedupe{fields: result, conflict: Val(field.name)}
+                }
             }
             .None -> result[field.name] = field.value
         }
@@ -628,16 +725,20 @@ envmodel_dedupe_fields: fn(fields: [NamedCtValue]) -> EnvFieldDedupe Never! {
     EnvFieldDedupe{fields: result, conflict: None}
 }
 
-envmodel_checked_unique_fields: fn(fields: [NamedCtValue], scope: String) -> [String: CtValue] EnvironmentFactError! {
+envmodel_checked_unique_fields: fn(fields: [NamedCtValue], scope: String) -> [String:CtValue] EnvironmentFactError! {
     deduped: envmodel_dedupe_fields(fields)
-    if deduped.conflict == .Val(name) -> return Err(EnvironmentFactError.new("{scope}.{name} is declared with conflicting values"))
+    if deduped.conflict == .Val(name) {
+        return Err(EnvironmentFactError.new("{scope}.{name} is declared with conflicting values"))
+    }
     Ok(deduped.fields)
 }
 
-envmodel_checked_unique_fields_named: fn(value: CtValue, scope: String, allowed: [String]) -> [String: CtValue] EnvironmentFactError! {
+envmodel_checked_unique_fields_named: fn(value: CtValue, scope: String, allowed: [String]) -> [String:CtValue] EnvironmentFactError! {
     fields: if value == {
         .Struct(_, record_fields) -> record_fields
-        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> { return Err(EnvironmentFactError.new("{scope} must be a typed record")) }
+        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {
+            return Err(EnvironmentFactError.new("{scope} must be a typed record"))
+        }
     }
     unique: envmodel_checked_unique_fields(fields, scope)
     envmodel_require_known_fields(unique, scope, allowed)
@@ -645,15 +746,17 @@ envmodel_checked_unique_fields_named: fn(value: CtValue, scope: String, allowed:
 }
 
 // The first field outside `allowed`, in field-name order, is rejected.
-envmodel_require_known_fields: fn(fields: [String: CtValue], scope: String, allowed: [String]) EnvironmentFactError! {
+envmodel_require_known_fields: fn(fields: [String:CtValue], scope: String, allowed: [String]) EnvironmentFactError! {
     loop name in envmodel_sorted_keys(fields) {
-        if !allowed.contains(name) -> return Err(EnvironmentFactError.new("unknown {scope} field `{name}`"))
+        if !allowed.contains(name) {
+            return Err(EnvironmentFactError.new("unknown {scope} field `{name}`"))
+        }
     }
 }
 
 // ── Shared text and path helpers ──
 
-envmodel_sorted_keys: fn<V>(map: [String: V]) -> [String] Never! {
+envmodel_sorted_keys: fn<V>(map: [String:V]) -> [String] Never! {
     names := map.keys().to_list()
     names.sort()
     names
@@ -741,7 +844,9 @@ envmodel_contained_path: fn(value: String) -> Bool Never! {
 // A project path made only of normal components: relative, no `.`/`..`, no
 // `\`, `:`, or control characters.
 envmodel_normal_project_path: fn(value: String) -> Bool Never! {
-    if value == "" || value.starts_with("/") || value.contains("\\") || value.contains(":") || pkg_text_has_control(value) -> return false
+    if value == "" || value.starts_with("/") || value.contains("\\") || value.contains(":") || pkg_text_has_control(value) {
+        return false
+    }
     loop component in envmodel_path_components(value) {
         if component == {
             .Normal(_) -> {}

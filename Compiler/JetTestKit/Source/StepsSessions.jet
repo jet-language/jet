@@ -46,7 +46,9 @@ kit_steps_recv_form: fn(text: String) -> KitRecvForm? {
         loop predicate in predicates {
             tokens: kit_steps_tokens(predicate) ?? return None
             assertion: if predicate.starts_with("$") -> {
-                if tokens.len() < 3 || tokens[1].text != "=" || kit_steps_json_path(tokens[0].text) == None -> return None
+                if tokens.len() < 3 || tokens[1].text != "=" || kit_steps_json_path(tokens[0].text) == None {
+                    return None
+                }
                 kit_steps_json_assertion("stdout doc {predicate}") ?? return None
             } else if predicate.starts_with("ndjson ") -> {
                 kit_steps_json_assertion("stdout {predicate} {reason}") ?? return None
@@ -55,7 +57,7 @@ kit_steps_recv_form: fn(text: String) -> KitRecvForm? {
             }
             form.predicates.push(assertion)
         }
-    } else if form.collect -> return None
+    } else if form.collect { return None }
     deadline := ""
     loop cursor < words.len() {
         key: words[cursor].text
@@ -73,9 +75,7 @@ kit_steps_recv_form: fn(text: String) -> KitRecvForm? {
         } else if key == "every" {
             if form.every > 0 -> return None
             form.every = if duration > 0 -> duration else -> 1
-        } else {
-            return None
-        }
+        } else { return None }
         cursor += 2
     }
     if form.every > 0 && deadline == "" -> return None
@@ -88,9 +88,7 @@ kit_steps_recv_valid: fn(text: String) -> Bool {
 }
 
 // One chunk to the session's reader; a refused send means the reader is gone.
-kit_steps_send_chunk: fn(out: Sender<[U8]>, chunk: &&[U8]) Err! {
-    out.send(chunk)
-}
+kit_steps_send_chunk: fn(out: Sender<[U8]>, chunk: &&[U8]) Err! { out.send(chunk) }
 
 // Drains the child's captured stdout into `out`; an empty chunk marks its end.
 // Cancellation also ends the read empty, so only the task's own return (not a
@@ -136,7 +134,9 @@ kit_steps_recv_unit: fn(buffer: [U8], unit: String, ended: Bool) -> KitRecvUnit 
     end: (newline ?? (buffer.len() - 1)) + 1
     record: String.from_bytes(buffer.slice(0, end)) ?? return Err("recv line is not UTF-8")
     subject := if record.ends_with("\n") -> kit_steps_byte_slice(record, 0, record.count_bytes() - 1) else -> record.copy()
-    if subject.ends_with("\r") -> subject = kit_steps_byte_slice(subject, 0, subject.count_bytes() - 1)
+    if subject.ends_with("\r") {
+        subject = kit_steps_byte_slice(subject, 0, subject.count_bytes() - 1)
+    }
     Ok(KitRecvUnit{record: if record.ends_with("\n") -> record else -> "{record}\n", subject: subject, size: end})
 }
 
@@ -203,9 +203,7 @@ kit_steps_session_read: fn(step: KitStep, context: KitStepCtx, previous: KitStep
                     taken += buffer.len()
                     buffer = [U8]{}
                     matched = true
-                } else if holds.status != "FAIL" {
-                    failure = "recv predicate: {holds.detail}"
-                }
+                } else if holds.status != "FAIL" { failure = "recv predicate: {holds.detail}" }
             }
         } else {
             loop !matched && failure == "" {
@@ -224,9 +222,7 @@ kit_steps_session_read: fn(step: KitStep, context: KitStepCtx, previous: KitStep
                 if form.collect {
                     output = if unit == "frame" -> "{output}{found.record}\n" else -> "{output}{found.record}"
                     holds: kit_steps_recv_holds(form.predicates, output, check, state)
-                    if holds.status == "PASS" {
-                        matched = true
-                    } else if holds.status != "FAIL" {
+                    if holds.status == "PASS" -> matched = true else if holds.status != "FAIL" {
                         failure = "recv predicate: {holds.detail}"
                     }
                     next
@@ -236,9 +232,7 @@ kit_steps_session_read: fn(step: KitStep, context: KitStepCtx, previous: KitStep
                 if holds.status == "PASS" {
                     if unit == "frame" -> output = found.record
                     matched = true
-                } else if holds.status != "FAIL" {
-                    failure = "recv predicate: {holds.detail}"
-                }
+                } else if holds.status != "FAIL" { failure = "recv predicate: {holds.detail}" }
             }
         }
         if matched || failure != "" -> break
@@ -254,9 +248,7 @@ kit_steps_session_read: fn(step: KitStep, context: KitStepCtx, previous: KitStep
             time.sleep(time.duration_ns(interval))
             next
         }
-        if chunk.len() == 0 {
-            ended = true
-        } else {
+        if chunk.len() == 0 -> ended = true else {
             loop byte in chunk -> buffer.push(byte)
         }
     }
@@ -265,9 +257,7 @@ kit_steps_session_read: fn(step: KitStep, context: KitStepCtx, previous: KitStep
     // Bytes the reader delivered after the last unit belong to the next recv.
     loop {
         chunk: arrivals.try_receive() ?? break
-        if chunk.len() == 0 {
-            ended = true
-        } else {
+        if chunk.len() == 0 -> ended = true else {
             loop byte in chunk -> buffer.push(byte)
         }
     }
@@ -297,7 +287,9 @@ kit_steps_session_action: fn(step: KitStep, context: KitStepCtx, previous: KitSt
         policy: kit_steps_policy(step, context.env) ?? return kit_steps_action_error(state, "invalid session policy")
         overlay: kit_steps_environment(context.plan, policy, context.work, context.scratch, state.built)
         prepared: kit_steps_prepare(step, context.env, context.work, context.scratch, context.snapshots, context.plan.fixture, state.built, overlay) ?? return kit_steps_action_error(state, "{err}")
-        if kit_exec_prepare(prepared.env, prepared.cwd, context.scratch, prepared.overlay) == .Val(stopped) -> return kit_steps_action_stopped(state, stopped)
+        if kit_exec_prepare(prepared.env, prepared.cwd, context.scratch, prepared.overlay) == .Val(stopped) {
+            return kit_steps_action_stopped(state, stopped)
+        }
         started: time.instant()
         spec := kit_exec_spec(prepared.env, prepared.argv, prepared.cwd, context.scratch, prepared.overlay)
         if step.terminal == .Val(shape) {
@@ -305,8 +297,7 @@ kit_steps_session_action: fn(step: KitStep, context: KitStepCtx, previous: KitSt
         }
         child := spec.spawn() ?? return kit_steps_action_error(state, "session spawn: {err}")
         input_error := ""
-        if step.stdin == "null" -> child.stdin.close()
-        else if prepared.stdin.len() > 0 {
+        if step.stdin == "null" -> child.stdin.close() else if prepared.stdin.len() > 0 {
             child.stdin.write_bytes(prepared.stdin) ?? {
                 input_error = "session stdin: {err}"
                 ()
@@ -321,7 +312,9 @@ kit_steps_session_action: fn(step: KitStep, context: KitStepCtx, previous: KitSt
         pending := state.children[index]
         if step.action == "send" {
             payload: if step.literal_input -> step.argv[0] else -> files.read(kit_steps_snapshot_path(context.snapshots, context.plan.fixture, step.argv[0])) ?? return kit_steps_action_error(state, "send file: {err}")
-            if kit_steps_build_target_text(payload) -> return KitStepResult{state: state, verdict: kit_expect_verdict("REFUSED", "build-target")}
+            if kit_steps_build_target_text(payload) {
+                return KitStepResult{state: state, verdict: kit_expect_verdict("REFUSED", "build-target")}
+            }
             expanded: kit_steps_runtime_expand(payload, context, state) ?? return kit_steps_action_error(state, "send token unavailable")
             cr: "\r"
             framed: if step.session_mode == "raw" -> expanded else if pending.step.session_mode == "content-length" -> "Content-Length: {expanded.count_bytes()}{cr}\n{cr}\n{expanded}" else if pending.step.session_mode == "line" -> "{expanded}\n" else -> expanded
@@ -341,22 +334,24 @@ kit_steps_session_action: fn(step: KitStep, context: KitStepCtx, previous: KitSt
             if kit_steps_has_terminal(pending.step) {
                 eof: String.from_bytes([U8{4}]) ?? panic("EOF character")
                 pending.child.stdin.write(eof).drop("the child may have exited before its input ended")
-            } else {
-                pending.child.stdin.close()
-            }
+            } else { pending.child.stdin.close() }
         }
         if step.duration > 0 {
             started: time.instant()
             deadline: kit_steps_answer_deadline(context.env, step.duration)
             loop !(pending.child.exited() ?? return kit_steps_action_error(state, "wait status: {err}")) {
-                if started.elapsed().ns >= deadline -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "wait deadline exceeded")}
+                if started.elapsed().ns >= deadline {
+                    return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "wait deadline exceeded")}
+                }
                 time.sleep(1ms)
             }
         }
         receipt: pending.child.wait() ?? return kit_steps_action_error(state, "session wait: {err}")
         state.last = kit_exec_receipt(receipt, pending.started.elapsed().ns, pending.input_error)
         if pending.signalled -> state.last.signal = None
-        if pending.taken > 0 -> state.last.stdout = kit_steps_byte_slice(state.last.stdout, pending.taken, state.last.stdout.count_bytes())
+        if pending.taken > 0 {
+            state.last.stdout = kit_steps_byte_slice(state.last.stdout, pending.taken, state.last.stdout.count_bytes())
+        }
         state.children[index].joined = true
         return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
     }
@@ -393,16 +388,16 @@ kit_steps_send_result: fn(step: KitStep, context: KitStepCtx, state: KitStepStat
 
 // One report to the parallel group's collector; a refused send means the
 // collector is gone.
-kit_steps_send_message: fn(sender: Sender<String>, message: &&String) Err! {
-    sender.send(message)
-}
+kit_steps_send_message: fn(sender: Sender<String>, message: &&String) Err! { sender.send(message) }
 
 kit_steps_send_report: fn(step: KitStep, context: KitStepCtx, state: KitStepState, sender: Sender<String>) Never! {
     kit_steps_send_message(sender, kit_steps_send_result(step, context, state)).drop("nobody collects a gone group")
 }
 
 kit_steps_parallel_start: fn(group: Group, steps: [KitStep], index: Int, context: KitStepCtx, state: KitStepState, sender: Sender<String>) Never! {
-    if index >= steps.len() -> return
+    if index >= steps.len() {
+        return
+    }
     original: steps[index]
     if original.action != "send" {
         kit_steps_send_message(sender, "parallel contains a non-send action").drop("nobody collects a gone group")

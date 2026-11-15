@@ -8,6 +8,7 @@ package: {
         ui: .Library{ entry: ui }
     }
 }
+
 use {
     core: core
     tui_text: core.tui
@@ -152,12 +153,13 @@ EventResult: enum {
 }
 
 point: fn(x: Float, y: Float) -> Point Never! { Point{x: x, y: y} }
-size: fn(width: Float, height: Float) -> Size Never! {
-    Size{width: width, height: height}
-}
+
+size: fn(width: Float, height: Float) -> Size Never! { Size{width: width, height: height} }
+
 rect: fn(x: Float, y: Float, width: Float, height: Float) -> Rect Never! {
     Rect{x: x, y: y, width: width, height: height}
 }
+
 constraint: fn(min_width: Float, min_height: Float, max_width: Float, max_height: Float) -> SizeConstraint Never! {
     SizeConstraint{min_width: min_width, min_height: min_height, max_width: max_width, max_height: max_height}
 }
@@ -175,8 +177,17 @@ box: fn(children: [UINode]) -> UINode Never! {
         height += child.height
     }
     UINode{
-        label: "", width: width, height: height, accessibility: None, ime: None, shortcut: None,
-        role: Val(UIAriaRole.Container), kind: UINodeKind.Box, children: children, color: None, click: 0,
+        label: "",
+        width: width,
+        height: height,
+        accessibility: None,
+        ime: None,
+        shortcut: None,
+        role: Val(UIAriaRole.Container),
+        kind: UINodeKind.Box,
+        children: children,
+        color: None,
+        click: 0,
     }
 }
 
@@ -198,7 +209,9 @@ button: fn(display: String) -> UINode Never! {
 __button_click: fn(display: String, shortcut: UIShortcut?, label: String?, click: Int) -> UINode Never! {
     result := button(display)
     result.shortcut = shortcut
-    if label == .Val(name) -> result.accessibility = Val(UIAccessibility{name: Val(name), description: None, states: [UIAccessibilityState]{}})
+    if label == .Val(name) {
+        result.accessibility = Val(UIAccessibility{name: Val(name), description: None, states: [UIAccessibilityState]{}})
+    }
     result.click = click
     result
 }
@@ -210,22 +223,34 @@ text_input: fn(state: String, ime: UIIMEMode) -> UINode Never! {
     result
 }
 
-desktop: fn() -> UIPreviewViewport Never! { UIPreviewViewport{device: .Desktop, width: 1280, height: 800, scale: 1} }
-phone: fn() -> UIPreviewViewport Never! { UIPreviewViewport{device: .Phone, width: 390, height: 844, scale: 2} }
-tablet: fn() -> UIPreviewViewport Never! { UIPreviewViewport{device: .Tablet, width: 834, height: 1119, scale: 2} }
+desktop: fn() -> UIPreviewViewport Never! {
+    UIPreviewViewport{device: .Desktop, width: 1280, height: 800, scale: 1}
+}
+
+phone: fn() -> UIPreviewViewport Never! {
+    UIPreviewViewport{device: .Phone, width: 390, height: 844, scale: 2}
+}
+
+tablet: fn() -> UIPreviewViewport Never! {
+    UIPreviewViewport{device: .Tablet, width: 834, height: 1119, scale: 2}
+}
 
 // A preview renders in the desktop viewport unless `viewport:` names another.
-preview: fn(name: String, &&body: fn() -> UINode, *, viewport: UIPreviewViewport?{None}) -> UIPreview Never! {
+preview: fn(name: String, body: &&fn() -> UINode, *, viewport: UIPreviewViewport?{None}) -> UIPreview Never! {
     UIPreview{kind: .Preview, name: name, viewport: viewport ?? desktop(), body: body}
 }
-playground: fn(name: String, &&body: fn() -> UINode, *, viewport: UIPreviewViewport?{None}) -> UIPreview Never! {
+
+playground: fn(name: String, body: &&fn() -> UINode, *, viewport: UIPreviewViewport?{None}) -> UIPreview Never! {
     UIPreview{kind: .Playground, name: name, viewport: viewport ?? desktop(), body: body}
 }
 
 // Registers previews and playgrounds alike; each entry's `kind` tells them apart.
-previews: fn(&&entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError! { preview_registry(entries) }
+previews: fn(entries: &&[UIPreview]) -> UIPreviewRegistry UIPreviewError! {
+    preview_registry(entries)
+}
 
 key_event: fn(code: String) -> InputEvent Never! { InputEvent.Key{code: code} }
+
 resize_event: fn(width: Float, height: Float) -> InputEvent Never! {
     InputEvent.Resize{size: size(width, height)}
 }
@@ -233,13 +258,17 @@ resize_event: fn(width: Float, height: Float) -> InputEvent Never! {
 tui_backend: fn() -[Browser, Env]> TUIBackend Never! {
     TUIBackend{state: Shared{backend_state(true, tui_text.capabilities().unicode)}}
 }
+
 null_backend: fn() -[Browser]> NullBackend Never! {
     NullBackend{state: Shared{backend_state(false, false)}}
 }
 
 aria_role_button: fn() -> UIAriaRole Never! { UIAriaRole.Button }
+
 aria_role_container: fn() -> UIAriaRole Never! { UIAriaRole.Container }
+
 aria_role_label: fn() -> UIAriaRole Never! { UIAriaRole.Label }
+
 aria_role_text_input: fn() -> UIAriaRole Never! { UIAriaRole.TextInput }
 
 node_accessibility: fn(n: UINode, metadata: UIAccessibility) -> UINode Never! {
@@ -265,12 +294,14 @@ node_shortcut: fn(n: UINode, shortcut: UIShortcut) -> UINode Never! {
     result
 }
 
-preview_registry: fn(&&entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError! {
+preview_registry: fn(entries: &&[UIPreview]) -> UIPreviewRegistry UIPreviewError! {
     if entries.len() > 64 -> return Err(UIPreviewError.TooManyPreviews)
     loop (index, entry) in entries {
         if entry.name == "" -> return Err(UIPreviewError.EmptyName)
         loop earlier in 0..<index {
-            if entries[earlier].name == entry.name -> return Err(UIPreviewError.DuplicatePreview(entry.name.copy()))
+            if entries[earlier].name == entry.name {
+                return Err(UIPreviewError.DuplicatePreview(entry.name.copy()))
+            }
         }
     }
     Ok(UIPreviewRegistry{entries: entries})
@@ -307,7 +338,9 @@ NullBackend: struct {
 
     // The size `tree` takes within `constraint`: a box its widest child by
     // its children's summed heights, any other node its own size.
-    measure: fn(self, tree: UINode, constraint: SizeConstraint) -> Size { measure_tree(tree, constraint) }
+    measure: fn(self, tree: UINode, constraint: SizeConstraint) -> Size {
+        measure_tree(tree, constraint)
+    }
 
     // Places the next paints in `frame`.
     layout: fn(self, _tree: UINode, frame: Rect) {
@@ -361,7 +394,9 @@ TUIBackend: struct {
 
     // The size `tree` takes within `constraint`: a box its widest child by
     // its children's summed heights, any other node its own size.
-    measure: fn(self, tree: UINode, constraint: SizeConstraint) -> Size { measure_tree(tree, constraint) }
+    measure: fn(self, tree: UINode, constraint: SizeConstraint) -> Size {
+        measure_tree(tree, constraint)
+    }
 
     // Places the next paints in `frame` and clears a grid of its whole cells.
     layout: fn(self, _tree: UINode, frame: Rect) {
@@ -485,7 +520,9 @@ load_texture_atlas: fn(path: String) -[FS]> TextureAtlas Never! {
 measure_text: fn(text: String, size: Int) -> Int Never! { draw.measure_text(text, size) }
 
 // Collision checks: they draw nothing and need no window.
-check_collision_recs: fn(rec1: Rect, rec2: Rect) -> Bool Never! { draw.check_collision_recs(rec1, rec2) }
+check_collision_recs: fn(rec1: Rect, rec2: Rect) -> Bool Never! {
+    draw.check_collision_recs(rec1, rec2)
+}
 
 check_collision_circles: fn(center1: Point, radius1: Float, center2: Point, radius2: Float) -> Bool Never! {
     draw.check_collision_circles(center1, radius1, center2, radius2)
@@ -502,7 +539,9 @@ check_collision_circle_line: fn(center: Point, radius: Float, p1: Point, p2: Poi
 }
 
 // Inside means left or top edge included, right or bottom edge excluded.
-check_collision_point_rec: fn(point: Point, rec: Rect) -> Bool Never! { draw.check_collision_point_rec(point, rec) }
+check_collision_point_rec: fn(point: Point, rec: Rect) -> Bool Never! {
+    draw.check_collision_point_rec(point, rec)
+}
 
 check_collision_point_circle: fn(point: Point, center: Point, radius: Float) -> Bool Never! {
     draw.check_collision_point_circle(point, center, radius)
@@ -520,7 +559,9 @@ check_collision_point_line: fn(point: Point, p1: Point, p2: Point, threshold: In
 }
 
 // Even-odd crossings; fewer than three points enclose nothing.
-check_collision_point_poly: fn(point: Point, points: [Point]) -> Bool Never! { draw.check_collision_point_poly(point, points) }
+check_collision_point_poly: fn(point: Point, points: [Point]) -> Bool Never! {
+    draw.check_collision_point_poly(point, points)
+}
 
 // Where the segments start1..end1 and start2..end2 cross, or None when
 // they are parallel or cross outside either segment.
@@ -547,11 +588,17 @@ gen_image_checked: fn(width: Int, height: Int, checks_x: Int, checks_y: Int, fir
 }
 
 // The pixel at (x, y), or a zero color outside the image.
-get_image_color: fn(image: Image, x: Int, y: Int) -> Color Never! { draw.get_image_color(image.canvas, x, y) }
+get_image_color: fn(image: Image, x: Int, y: Int) -> Color Never! {
+    draw.get_image_color(image.canvas, x, y)
+}
 
-image_clear_background: fn(image: &Image, color: Color) Never! { draw.image_clear_background(image.canvas, color) }
+image_clear_background: fn(image: &Image, color: Color) Never! {
+    draw.image_clear_background(image.canvas, color)
+}
 
-image_draw_pixel: fn(image: &Image, x: Int, y: Int, color: Color) Never! { draw.image_draw_pixel(image.canvas, x, y, color) }
+image_draw_pixel: fn(image: &Image, x: Int, y: Int, color: Color) Never! {
+    draw.image_draw_pixel(image.canvas, x, y, color)
+}
 
 image_draw_rectangle: fn(image: &Image, x: Int, y: Int, width: Int, height: Int, color: Color) Never! {
     draw.image_draw_rectangle(image.canvas, x, y, width, height, color)
@@ -561,7 +608,9 @@ image_draw_rectangle: fn(image: &Image, x: Int, y: Int, width: Int, height: Int,
 // left with less than one column still sets its first pixel unless it
 // sits at the left edge, and one with columns but less than one row fills
 // its first row.
-image_draw_rectangle_rec: fn(image: &Image, rec: Rect, color: Color) Never! { draw.image_draw_rectangle_rec(image.canvas, rec, color) }
+image_draw_rectangle_rec: fn(image: &Image, rec: Rect, color: Color) Never! {
+    draw.image_draw_rectangle_rec(image.canvas, rec, color)
+}
 
 // Keeps the part of the image inside `crop`, clipped to the image and
 // truncated to whole pixels; one past the right or bottom edge leaves the
@@ -571,7 +620,9 @@ image_crop: fn(image: &Image, crop: Rect) Never! { draw.image_crop(image.canvas,
 
 // Nearest neighbor; a new size an image cannot have leaves the image as
 // it is.
-image_resize_nn: fn(image: &Image, new_width: Int, new_height: Int) Never! { draw.image_resize_nn(image.canvas, new_width, new_height) }
+image_resize_nn: fn(image: &Image, new_width: Int, new_height: Int) Never! {
+    draw.image_resize_nn(image.canvas, new_width, new_height)
+}
 
 image_flip_vertical: fn(image: &Image) Never! { draw.image_flip_vertical(image.canvas) }
 
@@ -585,18 +636,24 @@ image_rotate_ccw: fn(image: &Image) Never! { draw.image_rotate_ccw(image.canvas)
 
 // Each channel becomes channel * tint / 255, rounded down, alpha
 // included.
-image_color_tint: fn(image: &Image, color: Color) Never! { draw.image_color_tint(image.canvas, color) }
+image_color_tint: fn(image: &Image, color: Color) Never! {
+    draw.image_color_tint(image.canvas, color)
+}
 
 // Red, green and blue become 255 minus themselves.
 image_color_invert: fn(image: &Image) Never! { draw.image_color_invert(image.canvas) }
 
 // Adds `brightness`, clamped to -255..255, to red, green and blue; a sum
 // above 255 becomes 255 and one below 0 becomes 1.
-image_color_brightness: fn(image: &Image, brightness: Int) Never! { draw.image_color_brightness(image.canvas, brightness) }
+image_color_brightness: fn(image: &Image, brightness: Int) Never! {
+    draw.image_color_brightness(image.canvas, brightness)
+}
 
 // Pixels that hold `color` become `replace`. An image keeps its pixels
 // premultiplied, so a clear pixel holds every color of alpha 0.
-image_color_replace: fn(image: &Image, color: Color, replace: Color) Never! { draw.image_color_replace(image.canvas, color, replace) }
+image_color_replace: fn(image: &Image, color: Color, replace: Color) Never! {
+    draw.image_color_replace(image.canvas, color, replace)
+}
 
 // ---- windows ----------------------------------------------------------
 //
@@ -636,25 +693,28 @@ image_color_replace: fn(image: &Image, color: Color, replace: Color) Never! { dr
 // On Linux the display server comes from the environment: $WAYLAND_DISPLAY.
 
 SIDE_MAX: 16384
+
 ICON_SIDE_MAX: 1024
+
 // A headless window's frames are one 60 Hz refresh apart.
 HEADLESS_REFRESH_NS: 16666667
 
 #Error
 UIError: enum {
-    // The environment names no display server.
     NoDisplay
-    // The display server could not be reached.
     Connect(String)
-    // The display server broke or refused the protocol.
     Protocol(String)
-    // The display server lacks something a window needs.
     Unsupported(String)
-    // A window size, pixel buffer or the clipboard's text is out of range.
     Size(String)
-    // An app_id or icon name the program passed is malformed.
     Invalid(String)
 }
+
+// The environment names no display server.
+// The display server could not be reached.
+// The display server broke or refused the protocol.
+// The display server lacks something a window needs.
+// A window size, pixel buffer or the clipboard's text is out of range.
+// An app_id or icon name the program passed is malformed.
 
 UIPointerButton: enum {
     Left
@@ -999,10 +1059,28 @@ open: fn(*, width: Int, height: Int, title: String) -[Env, Net, Time]> Window UI
             if !wayland.available() -> return Err(UIError.NoDisplay)
             link: wayland.connect(width, height, title)
             state: WindowState{
-                width: link.width(), height: link.height(), scale: link.scale(), frames: 0, closed: false, failure: None,
-                link: Val(Shared{link}), script: [[UIEvent]]{}, checksums: [Int]{}, cursor: UICursor.Default,
-                canvas: draw.no_image(), typeset: draw.typeset(), drawn: false, presented: false, damage: [UIRect]{}, keys: [Key]{}, buttons: [UIPointerButton]{}, mouse_x: 0, mouse_y: 0, clipboard: "",
-                maximized: false, fullscreen: false,
+                width: link.width(),
+                height: link.height(),
+                scale: link.scale(),
+                frames: 0,
+                closed: false,
+                failure: None,
+                link: Val(Shared{link}),
+                script: [[UIEvent]]{},
+                checksums: [Int]{},
+                cursor: UICursor.Default,
+                canvas: draw.no_image(),
+                typeset: draw.typeset(),
+                drawn: false,
+                presented: false,
+                damage: [UIRect]{},
+                keys: [Key]{},
+                buttons: [UIPointerButton]{},
+                mouse_x: 0,
+                mouse_y: 0,
+                clipboard: "",
+                maximized: false,
+                fullscreen: false,
             }
             return Ok(Window{state: Shared{state}})
         }
@@ -1022,10 +1100,28 @@ headless: fn(*, width: Int, height: Int, script: [[UIEvent]]) -> Window UIError!
         return Err(UIError.Size("a window is 1 to {SIDE_MAX} pixels on each side, not {width}x{height}"))
     }
     state: WindowState{
-        width: width, height: height, scale: 1.0, frames: 0, closed: false, failure: None,
-        link: None, script: script, checksums: [Int]{}, cursor: UICursor.Default,
-        canvas: draw.no_image(), typeset: draw.typeset(), drawn: false, presented: false, damage: [UIRect]{}, keys: [Key]{}, buttons: [UIPointerButton]{}, mouse_x: 0, mouse_y: 0, clipboard: "",
-        maximized: false, fullscreen: false,
+        width: width,
+        height: height,
+        scale: 1.0,
+        frames: 0,
+        closed: false,
+        failure: None,
+        link: None,
+        script: script,
+        checksums: [Int]{},
+        cursor: UICursor.Default,
+        canvas: draw.no_image(),
+        typeset: draw.typeset(),
+        drawn: false,
+        presented: false,
+        damage: [UIRect]{},
+        keys: [Key]{},
+        buttons: [UIPointerButton]{},
+        mouse_x: 0,
+        mouse_y: 0,
+        clipboard: "",
+        maximized: false,
+        fullscreen: false,
     }
     Ok(Window{state: Shared{state}})
 }
@@ -1057,6 +1153,7 @@ Frames: struct {
 
     impl Iterable {
         Iter: FrameCursor
+
         iter: fn(&&self) -> FrameCursor { FrameCursor{state: self.state.copy()} }
     }
 }
@@ -1066,6 +1163,7 @@ FrameCursor: struct {
 
     impl Iterator {
         Item: Frame
+
         // The next frame, once it is due; none after the frame that carried
         // `.Close`. A frame that drew and presented nothing shows what it drew
         // first, copying only the pixels its draws changed (one pixel when
@@ -1081,9 +1179,7 @@ FrameCursor: struct {
                         guard.value.failure = Val(error)
                         guard.value.closed = true
                     }
-                } else {
-                    guard.value.checksums.push(checksum(guard.value.canvas.pixels))
-                }
+                } else { guard.value.checksums.push(checksum(guard.value.canvas.pixels)) }
             }
             guard.value.drawn = false
             guard.value.presented = false
@@ -1105,7 +1201,9 @@ FrameCursor: struct {
             } else {
                 time_ns = index * HEADLESS_REFRESH_NS
                 delta_ns = if index == 0 -> 0 else -> HEADLESS_REFRESH_NS
-                if index < guard.value.script.len() -> events = guard.value.script[index].copy() else -> events.push(UIEvent.Close)
+                if index < guard.value.script.len() -> events = guard.value.script[index].copy() else {
+                    events.push(UIEvent.Close)
+                }
                 loop event in events {
                     if event == .Resize(width, height) {
                         guard.value.width = width
@@ -1117,11 +1215,19 @@ FrameCursor: struct {
             was_buttons: guard.value.buttons.copy()
             loop event in events {
                 if event == {
-                    .Close -> guard.value.closed = true
-                    .KeyDown(key) -> if !guard.value.keys.contains(key) -> guard.value.keys.push(key.copy())
-                    .KeyUp(key) -> guard.value.keys = without_key(guard.value.keys, key)
-                    .PointerDown(button) -> if !guard.value.buttons.contains(button) -> guard.value.buttons.push(button.copy())
-                    .PointerUp(button) -> guard.value.buttons = without_button(guard.value.buttons, button)
+                    .Close -> { guard.value.closed = true }
+                    .KeyDown(key) -> {
+                        if !guard.value.keys.contains(key) -> guard.value.keys.push(key.copy())
+                    }
+                    .KeyUp(key) -> { guard.value.keys = without_key(guard.value.keys, key) }
+                    .PointerDown(button) -> {
+                        if !guard.value.buttons.contains(button) {
+                            guard.value.buttons.push(button.copy())
+                        }
+                    }
+                    .PointerUp(button) -> {
+                        guard.value.buttons = without_button(guard.value.buttons, button)
+                    }
                     .PointerMove(x, y) -> {
                         guard.value.mouse_x = x
                         guard.value.mouse_y = y
@@ -1136,10 +1242,20 @@ FrameCursor: struct {
                 }
             }
             frame: Frame{
-                state: self.state.copy(), index: index, width: guard.value.width, height: guard.value.height, scale: guard.value.scale,
-                time: Float{time_ns} / 1000000000.0, delta: Float{delta_ns} / 1000000000.0, pending: events,
-                was_keys: was_keys, keys: guard.value.keys.copy(), was_buttons: was_buttons, buttons: guard.value.buttons.copy(),
-                mouse_x: guard.value.mouse_x, mouse_y: guard.value.mouse_y,
+                state: self.state.copy(),
+                index: index,
+                width: guard.value.width,
+                height: guard.value.height,
+                scale: guard.value.scale,
+                time: Float{time_ns} / 1000000000.0,
+                delta: Float{delta_ns} / 1000000000.0,
+                pending: events,
+                was_keys: was_keys,
+                keys: guard.value.keys.copy(),
+                was_buttons: was_buttons,
+                buttons: guard.value.buttons.copy(),
+                mouse_x: guard.value.mouse_x,
+                mouse_y: guard.value.mouse_y,
             }
             guard.value.frames += 1
             Val(frame)
@@ -1201,11 +1317,15 @@ Frame: struct {
 
     is_key_up: fn(self, key: Key) -> Bool { !self.keys.contains(key) }
 
-    is_key_pressed: fn(self, key: Key) -> Bool { !self.was_keys.contains(key) && self.pending.contains(UIEvent.KeyDown(key)) }
+    is_key_pressed: fn(self, key: Key) -> Bool {
+        !self.was_keys.contains(key) && self.pending.contains(UIEvent.KeyDown(key))
+    }
 
     is_key_released: fn(self, key: Key) -> Bool { self.pending.contains(UIEvent.KeyUp(key)) }
 
-    is_mouse_button_down: fn(self, button: UIPointerButton) -> Bool { self.buttons.contains(button) }
+    is_mouse_button_down: fn(self, button: UIPointerButton) -> Bool {
+        self.buttons.contains(button)
+    }
 
     is_mouse_button_up: fn(self, button: UIPointerButton) -> Bool { !self.buttons.contains(button) }
 
@@ -1213,7 +1333,9 @@ Frame: struct {
         !self.was_buttons.contains(button) && self.pending.contains(UIEvent.PointerDown(button))
     }
 
-    is_mouse_button_released: fn(self, button: UIPointerButton) -> Bool { self.pending.contains(UIEvent.PointerUp(button)) }
+    is_mouse_button_released: fn(self, button: UIPointerButton) -> Bool {
+        self.pending.contains(UIEvent.PointerUp(button))
+    }
 
     // The pointer's latest place in window pixels; (0, 0) before it moved.
     get_mouse_x: fn(self) -> Int { self.mouse_x }
@@ -1427,7 +1549,7 @@ Frame: struct {
 // measure, lay out and paint: not part of the ui surface.
 priv internal: module {
     // Notes that a draw call changed the pixels in `rect` (unclipped).
-    mark: fn(&state: WindowState, rect: UIRect) {
+    mark: fn(state: &WindowState, rect: UIRect) {
         state.drawn = true
         wayland.grow_damage(state.damage, rect)
     }
@@ -1496,15 +1618,32 @@ priv internal: module {
 
     leaf: fn(label: String, width: Float, height: Float, role: UIAriaRole?, kind: UINodeKind, color: Color?) -> UINode Never! {
         UINode{
-            label: label, width: width, height: height, accessibility: None, ime: None, shortcut: None,
-            role: role, kind: kind, children: [UINode]{}, color: color, click: 0,
+            label: label,
+            width: width,
+            height: height,
+            accessibility: None,
+            ime: None,
+            shortcut: None,
+            role: role,
+            kind: kind,
+            children: [UINode]{},
+            color: color,
+            click: 0,
         }
     }
 
     backend_state: fn(tui: Bool, unicode: Bool) -> UIBackendState Never! {
         UIBackendState{
-            tui: tui, unicode: unicode, frame: None, commands: [String]{}, focus: [UINode]{}, focused: -1,
-            cols: 0, rows: 0, cells: [Int]{}, renders: 0,
+            tui: tui,
+            unicode: unicode,
+            frame: None,
+            commands: [String]{},
+            focus: [UINode]{},
+            focused: -1,
+            cols: 0,
+            rows: 0,
+            cells: [Int]{},
+            renders: 0,
         }
     }
 
@@ -1523,19 +1662,19 @@ priv internal: module {
         value
     }
 
-    layout_state: fn(&state: UIBackendState, frame: Rect) Never! {
+    layout_state: fn(state: &UIBackendState, frame: Rect) Never! {
         state.frame = Val(frame)
         if state.tui -> reset_cells(state, frame.width, frame.height)
     }
 
-    mount_state: fn(&state: UIBackendState, tree: UINode, constraint: SizeConstraint?) Never! {
+    mount_state: fn(state: &UIBackendState, tree: UINode, constraint: SizeConstraint?) Never! {
         viewport: constraint ?? SizeConstraint{min_width: 0.0, min_height: 0.0, max_width: 80.0, max_height: 24.0}
         size: measure_tree(tree, viewport)
         layout_state(state, Rect{x: 0.0, y: 0.0, width: size.width, height: size.height})
         paint_state(state, tree)
     }
 
-    paint_state: fn(&state: UIBackendState, tree: UINode) Never! {
+    paint_state: fn(state: &UIBackendState, tree: UINode) Never! {
         frame: state.frame ?? Rect{x: 0.0, y: 0.0, width: tree.width, height: tree.height}
         if state.tui {
             state.renders += 1
@@ -1558,7 +1697,7 @@ priv internal: module {
 
     // A box stacks its children down its frame, each its own height across
     // the frame's width; every other node is a leaf painted into its frame.
-    visit: fn(&state: UIBackendState, node: UINode, frame: Rect) Never! {
+    visit: fn(state: &UIBackendState, node: UINode, frame: Rect) Never! {
         if node.kind == .Box {
             at := frame.y
             loop child in node.children {
@@ -1569,7 +1708,9 @@ priv internal: module {
         }
         if state.tui {
             row: cell_index(frame.y)
-            if row < state.rows -> tui_text.__write_cells(state.cells, state.cols, row, cell_index(frame.x), node.label, state.unicode)
+            if row < state.rows {
+                tui_text.__write_cells(state.cells, state.cols, row, cell_index(frame.x), node.label, state.unicode)
+            }
             return
         }
         place: rect_text(frame)
@@ -1581,12 +1722,14 @@ priv internal: module {
     }
 
     // The interactive nodes (buttons and text inputs) of a tree, in pre-order.
-    collect_focus: fn(node: UINode, &found: [UINode]) Never! {
-        if node.role == Val(UIAriaRole.Button) || node.role == Val(UIAriaRole.TextInput) -> found.push(node.copy())
+    collect_focus: fn(node: UINode, found: &[UINode]) Never! {
+        if node.role == Val(UIAriaRole.Button) || node.role == Val(UIAriaRole.TextInput) {
+            found.push(node.copy())
+        }
         loop child in node.children -> collect_focus(child, found)
     }
 
-    dispatch: fn(&state: UIBackendState, event: InputEvent) -> EventResult Never! {
+    dispatch: fn(state: &UIBackendState, event: InputEvent) -> EventResult Never! {
         if event == {
             .Key(code) -> {
                 if code.to_ascii_lower() == "tab" && state.focus.len() > 0 {
@@ -1606,7 +1749,7 @@ priv internal: module {
         }
     }
 
-    focus_ring: fn(&state: UIBackendState, nodes: [UINode]) Never! {
+    focus_ring: fn(state: &UIBackendState, nodes: [UINode]) Never! {
         state.focus = nodes.copy()
         state.focused = if nodes.len() == 0 -> -1 else -> 0
     }
@@ -1617,7 +1760,7 @@ priv internal: module {
     }
 
     // A grid of the whole cells of a side, at least one each way, all blank.
-    reset_cells: fn(&state: UIBackendState, width: Float, height: Float) Never! {
+    reset_cells: fn(state: &UIBackendState, width: Float, height: Float) Never! {
         state.cols = cell_index(if width >= 1.0 -> width else -> 1.0)
         state.rows = cell_index(if height >= 1.0 -> height else -> 1.0)
         count: state.cols * state.rows
@@ -1634,10 +1777,8 @@ priv internal: module {
     }
 
     // The UTF-8 bytes of scalar `n`.
-    push_scalar: fn(&out: [U8], n: Int) Never! {
-        if n < 0x80 {
-            out.push(U8{n})
-        } else if n < 0x800 {
+    push_scalar: fn(out: &[U8], n: Int) Never! {
+        if n < 0x80 -> out.push(U8{n}) else if n < 0x800 {
             out.push(U8{0xC0 + (n >> 6)})
             out.push(U8{0x80 + n.bit_and(63)})
         } else if n < 0x10000 {
@@ -1674,19 +1815,13 @@ priv internal: module {
         digits := [U8]{}
         point := -1
         loop index in (if negative -> 1 else -> 0)..<exponent_at {
-            if raw[index] == (U8{46}) {
-                point = digits.len()
-            } else {
-                digits.push(raw[index])
-            }
+            if raw[index] == (U8{46}) -> point = digits.len() else -> digits.push(raw[index])
         }
         if point < 0 -> point = digits.len()
         exponent := 0
         below := false
         loop index in (exponent_at + 1)..<raw.len() {
-            if raw[index] == (U8{45}) {
-                below = true
-            } else {
+            if raw[index] == (U8{45}) -> below = true else {
                 exponent = exponent * 10 + Int{raw[index]} - 48
             }
         }
@@ -1716,7 +1851,7 @@ priv internal: module {
     // empty for none) and the label's UTF-8 byte length, then the label and a
     // newline. A web build's host (JetWeb Host.jet) turns it into the page's
     // elements.
-    scene_records: fn(node: UINode, frame: Rect, &records: [String]) Never! {
+    scene_records: fn(node: UINode, frame: Rect, records: &[String]) Never! {
         if node.kind == .Box {
             at := frame.y
             loop child in node.children {
@@ -1779,17 +1914,17 @@ priv internal: module {
     lab: playground("lab", fn() { text("lab") }, viewport: tablet())
     assert(lab.kind == UIPreviewKind.Playground && lab.viewport == tablet())
     if previews([preview("card", fn() { text("a") }), preview("card", fn() { text("b") })]) == {
-        .Ok(_) -> assert(false)
+        .Ok(_) -> { assert(false) }
         .Err(error) -> assert(error == UIPreviewError.DuplicatePreview("card"))
     }
     if previews([playground("", fn() { text("blank") })]) == {
-        .Ok(_) -> assert(false)
+        .Ok(_) -> { assert(false) }
         .Err(error) -> assert(error == UIPreviewError.EmptyName)
     }
     if previews([preview("card", fn() { text("card") })]) == {
         .Ok(registry) -> {
             if registry.render("missing") == {
-                .Ok(_) -> assert(false)
+                .Ok(_) -> { assert(false) }
                 .Err(error) -> assert(error == UIPreviewError.UnknownPreview("missing"))
             }
             if registry.render("card") == {
@@ -1827,7 +1962,7 @@ priv internal: module {
 #Test("frames track held keys, buttons and the pointer") {
     script: [[UIEvent]]{
         [UIEvent]{.KeyDown(.Left)},
-        [UIEvent]{.KeyDown(.Left), .PointerMove(x: 3, y: 4), .PointerDown(.Left)},
+        [UIEvent]{.KeyDown(.Left), .PointerMove{x: 3, y: 4}, .PointerDown(.Left)},
         [UIEvent]{.KeyUp(.Left), .PointerUp(.Left)},
         [UIEvent]{.KeyDown(.Up), .PointerDown(.Right), .Focus(false)},
     }
@@ -1839,14 +1974,17 @@ priv internal: module {
         buttons: "{frame.is_mouse_button_down(.Left)} {frame.is_mouse_button_pressed(.Left)} {frame.is_mouse_button_released(.Left)} {frame.is_mouse_button_up(.Right)}"
         seen.push("{keys} | {buttons} | {frame.get_mouse_x()},{frame.get_mouse_y()}")
     }
-    assert_eq(seen, [String]{
-        "true true false true | false false false true | 0,0",
-        // A second press of a held key is a repeat.
-        "true false false true | true true false true | 3,4",
-        "false false true true | false false true true | 3,4",
-        // Losing the keyboard lets everything go.
-        "false false false true | false false false true | 3,4",
-    })
+    assert_eq(
+        seen,
+        [String]{
+            "true true false true | false false false true | 0,0",
+            // A second press of a held key is a repeat.
+            "true false false true | true true false true | 3,4",
+            "false false true true | false false true true | 3,4",
+            // Losing the keyboard lets everything go.
+            "false false false true | false false false true | 3,4",
+        },
+    )
     assert(window.load_image_from_screen().width() == 0)
 }
 

@@ -172,7 +172,9 @@ body_codec_get_float: fn(bytes: [U8], input: &BodyCodecIn) -> Float Never! {
 }
 
 // A Char as the text of its one scalar; other text fails the read.
-body_codec_put_char: fn(out: &BodyCodecOut, value: Char) Never! { body_codec_put_string(out, "{value}") }
+body_codec_put_char: fn(out: &BodyCodecOut, value: Char) Never! {
+    body_codec_put_string(out, "{value}")
+}
 
 body_codec_get_char: fn(bytes: [U8], input: &BodyCodecIn) -> Char Never! {
     scalars: body_codec_get_string(bytes, input).chars()
@@ -181,14 +183,35 @@ body_codec_get_char: fn(bytes: [U8], input: &BodyCodecIn) -> Char Never! {
     '\u{0}'
 }
 
-body_codec_put_u8: fn(out: &BodyCodecOut, value: U8) Never! { body_codec_put_uvarint(out, Int{value}) }
-body_codec_put_u16: fn(out: &BodyCodecOut, value: U16) Never! { body_codec_put_uvarint(out, Int{value}) }
-body_codec_put_u32: fn(out: &BodyCodecOut, value: U32) Never! { body_codec_put_uvarint(out, Int{value}) }
-body_codec_put_u64: fn(out: &BodyCodecOut, value: U64) Never! { body_codec_put_uvarint(out, Int{value}) }
+body_codec_put_u8: fn(out: &BodyCodecOut, value: U8) Never! {
+    body_codec_put_uvarint(out, Int{value})
+}
+
+body_codec_put_u16: fn(out: &BodyCodecOut, value: U16) Never! {
+    body_codec_put_uvarint(out, Int{value})
+}
+
+body_codec_put_u32: fn(out: &BodyCodecOut, value: U32) Never! {
+    body_codec_put_uvarint(out, Int{value})
+}
+
+body_codec_put_u64: fn(out: &BodyCodecOut, value: U64) Never! {
+    body_codec_put_uvarint(out, Int{value})
+}
+
 body_codec_put_i8: fn(out: &BodyCodecOut, value: I8) Never! { body_codec_put_int(out, Int{value}) }
-body_codec_put_i16: fn(out: &BodyCodecOut, value: I16) Never! { body_codec_put_int(out, Int{value}) }
-body_codec_put_i32: fn(out: &BodyCodecOut, value: I32) Never! { body_codec_put_int(out, Int{value}) }
-body_codec_put_i64: fn(out: &BodyCodecOut, value: I64) Never! { body_codec_put_int(out, Int{value}) }
+
+body_codec_put_i16: fn(out: &BodyCodecOut, value: I16) Never! {
+    body_codec_put_int(out, Int{value})
+}
+
+body_codec_put_i32: fn(out: &BodyCodecOut, value: I32) Never! {
+    body_codec_put_int(out, Int{value})
+}
+
+body_codec_put_i64: fn(out: &BodyCodecOut, value: I64) Never! {
+    body_codec_put_int(out, Int{value})
+}
 
 // A value too wide for its integer type: the read fails.
 body_codec_too_wide: fn(input: &BodyCodecIn) -> Int Never! {

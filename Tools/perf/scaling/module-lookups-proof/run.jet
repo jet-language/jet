@@ -31,9 +31,13 @@ use {
 }
 
 TOOL: "/Tools/perf/scaling/module-lookups-proof/run.jet"
+
 SIZES: [Int]{128, 256, 512, 1024}
+
 METRIC: "counter.sema.check.module_lookups"
+
 MISSING: "Missing or disabled deterministic baseline counter"
+
 // JavaScript's Number.MAX_SAFE_INTEGER: a counter above it is not an exact count.
 MAX_SAFE: 9007199254740991.0
 
@@ -69,10 +73,14 @@ verdict: fn(receipt: Receipt, counts: [Count]) -> String? Never! {
     loop point in counts {
         if !point.ok -> return Val("N={point.n} did not compile successfully")
         lookups: point.lookups ?? return Val("N={point.n} has no valid growing deterministic counter")
-        if !math.is_integer(lookups) || lookups <= baseline || lookups > MAX_SAFE -> return Val("N={point.n} has no valid growing deterministic counter")
+        if !math.is_integer(lookups) || lookups <= baseline || lookups > MAX_SAFE {
+            return Val("N={point.n} has no valid growing deterministic counter")
+        }
         anchor: counts[0].lookups ?? lookups
         limit: (anchor - baseline) * Float{point.n} / Float{SIZES[0]} * 1.25
-        if lookups - baseline > limit -> return Val("N={point.n}: {js(lookups - baseline)} module lookups exceed the linear envelope")
+        if lookups - baseline > limit {
+            return Val("N={point.n}: {js(lookups - baseline)} module lookups exceed the linear envelope")
+        }
     }
     None
 }
@@ -80,11 +88,13 @@ verdict: fn(receipt: Receipt, counts: [Count]) -> String? Never! {
 run: fn() {
     args: process.args()
     // The arguments in pairs, the last of a name winning, as the original pairs them.
-    flags := [String: String]{}
+    flags := [String:String]{}
     loop at in 0..<args.len() /% 2 -> flags[args[2 * at].copy()] = args[2 * at + 1].copy()
     compiler_flag: flags.get("--compiler") ?? ""
     root_flag: flags.get("--root") ?? ""
-    if compiler_flag == "" || root_flag == "" -> process.fail(1, "Usage: module-lookups-proof.mjs --compiler BUILT_JETC0 --root FRESH_DIRECTORY")
+    if compiler_flag == "" || root_flag == "" {
+        process.fail(1, "Usage: module-lookups-proof.mjs --compiler BUILT_JETC0 --root FRESH_DIRECTORY")
+    }
     root: absolute(root_flag)
     if files.exists(root) -> process.fail(1, "Proof directory already exists: {root}")
     compiler: absolute(compiler_flag)
@@ -95,7 +105,9 @@ run: fn() {
     counts := [Count]{}
     baseline := Float?{None}
     if receipt.series.len() > 0 {
-        loop point in receipt.series[0].points -> counts.push(Count{n: point.n, ok: point.ok, lookups: point.metrics.get(METRIC)})
+        loop point in receipt.series[0].points {
+            counts.push(Count{n: point.n, ok: point.ok, lookups: point.metrics.get(METRIC)})
+        }
         if receipt.series[0].baseline == .Val(base) -> baseline = base.metrics.get(METRIC)
     }
     error: verdict(receipt, counts)

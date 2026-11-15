@@ -53,7 +53,9 @@ pm_comments_kept: fn(source: String, formatted: String) -> Bool {
     if kept.len() != wanted.len() -> return false
     loop at in 0..<wanted.len() {
         if kept[at].text != wanted[at].text -> return false
-        if kept[at].before != wanted[at].before && kept[at].after != wanted[at].after -> return false
+        if kept[at].before != wanted[at].before && kept[at].after != wanted[at].after {
+            return false
+        }
     }
     true
 }
@@ -67,7 +69,9 @@ pm_round_trip: fn(path: String, source: String) -> String? {
         return None
     }
     if !valid -> return Val("{path}: an invalid manifest is formatted")
-    if !pm_comments_kept(source, first) -> return Val("{path}: formatting loses, changes, reorders or moves a comment")
+    if !pm_comments_kept(source, first) {
+        return Val("{path}: formatting loses, changes, reorders or moves a comment")
+    }
     second: pkg_format_source(first, path) ?? return Val("{path}: the formatted manifest is refused: {err.message}")
     if second != first -> return Val("{path}: formatting the formatted manifest changes it")
     None

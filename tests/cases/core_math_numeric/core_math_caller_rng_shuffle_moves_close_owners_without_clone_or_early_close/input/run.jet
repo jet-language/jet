@@ -1,4 +1,3 @@
-
 use random: core.math.random
 
 Ticket: struct {
@@ -9,6 +8,7 @@ Ticket: struct {
         close: fn(&&self) { print("close token {self.payload.len()}") }
     }
 }
+
 shuffled: fn() {
     stream := random.rng(42)
     owners := [Ticket]{
@@ -19,6 +19,7 @@ shuffled: fn() {
     stream.shuffle(owners)
     loop owner in owners -> print("{owner.id}:{owner.payload[0]}")
 }
+
 run: fn() {
     shuffled()
     print("released")

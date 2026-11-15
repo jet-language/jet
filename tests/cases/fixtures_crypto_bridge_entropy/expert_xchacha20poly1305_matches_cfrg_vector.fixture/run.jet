@@ -5,16 +5,19 @@ use {
     expert: core.crypto.expert
     files: core.files
 }
+
 filled: fn(value: Int, count: Int) -> [U8] {
     out := [U8]{}
     loop _ in 0..<count -> out.push((U8{value}))
     out
 }
+
 cut: fn(bytes: [U8], start: Int, end: Int) -> [U8] {
     out := [U8]{}
     loop i in start..<end -> out.push(bytes[i])
     out
 }
+
 hex: fn(text: String) -> [U8] {
     raw: text.bytes()
     out := [U8]{}
@@ -27,14 +30,17 @@ hex: fn(text: String) -> [U8] {
     }
     out
 }
+
 little: fn(bytes: [U8], at: Int, width: Int) -> Int {
     out := 0
     loop i in 0..<width -> out = out.bit_or(Int{bytes[at + i]} << (8 * i))
     out
 }
+
 store_little: fn(bytes: &[U8], at: Int, width: Int, value: Int) {
     loop i in 0..<width -> bytes[at + i] = (U8{(value >> (8 * i)).bit_and(255)})
 }
+
 #Test("expert_xchacha20poly1305_matches_cfrg_vector") {
     #Unsafe("original published known-answer vector") {
         key: hex("808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f")

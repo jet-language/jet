@@ -5,32 +5,22 @@
 run: fn() {
     count: 2000000
     numbers := Set<Int>.new()
-    loop i in 0..<count {
-        numbers.add((i * 7919) % count)
-    }
+    loop i in 0..<count { numbers.add((i * 7919) % count) }
     again := 0
     loop i in 0..<1000 {
-        if numbers.add(i) {
-            again += 1
-        }
+        if numbers.add(i) -> again += 1
     }
     print("ints: {numbers.len()} re-added {again}")
     low: count - 10
     high: count + 10
     hits := 0
     loop key in low..<high {
-        if numbers.has(key) {
-            hits += 1
-        }
+        if numbers.has(key) -> hits += 1
     }
     print("hits: {hits}")
-    loop k in 0..<10 {
-        numbers.remove(k * 3)
-    }
+    loop k in 0..<10 { numbers.remove(k * 3) }
     total := 0
-    loop n in numbers.to_list() {
-        total += n
-    }
+    loop n in numbers.to_list() -> total += n
     print("after remove: {numbers.len()} sum {total}")
     copied := numbers.copy()
     print("copy equal: {copied.equal(numbers)}")
@@ -41,23 +31,17 @@ run: fn() {
     print("cleared: {copied.len()} {copied.has(5)} {copied.has(6)}")
 
     ranked := Rank<Int>.new()
-    loop i in 0..<200000 {
-        ranked.add((i * 7919) % 200000)
-    }
+    loop i in 0..<200000 { ranked.add((i * 7919) % 200000) }
     ascending := true
     previous := -1
     loop n in ranked.to_list() {
-        if n <= previous {
-            ascending = false
-        }
+        if n <= previous -> ascending = false
         previous = n
     }
     print("rank: {ranked.len()} ascending {ascending} first {ranked.first() ?? -1} last {ranked.last() ?? -1}")
 
     words := Set<String>.new()
-    loop i in 0..<count {
-        words.add("line-{(i * 7919) % count}")
-    }
+    loop i in 0..<count { words.add("line-{(i * 7919) % count}") }
     present: words.has("line-1999999")
     absent: words.has("line-2000000")
     print("words: {words.len()} {present} {absent}")

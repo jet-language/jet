@@ -45,7 +45,9 @@ parser_split_type_markers: fn(markers: [Marker]) -> (derives: [NamedSpan], serde
         family: owned_trait_family(marker.name)
         if family.len() > 0 {
             loop name in family {
-                if marker.name != MARKER_CODABLE || codable_derives(marker, name) -> derives.push(NamedSpan{name: name, span: marker.name_span})
+                if marker.name != MARKER_CODABLE || codable_derives(marker, name) {
+                    derives.push(NamedSpan{name: name, span: marker.name_span})
+                }
             }
             next
         }
@@ -103,7 +105,9 @@ parser_marker_shape_error: fn(state: &JetParserState, marker: Marker) {
 // None when there is no layout fact.
 parser_layout_marker_fact: fn(state: &JetParserState, markers: [Marker], grouped: Bool, is_enum: Bool) -> StructLayout? {
     marker: loop candidate in markers {
-        if candidate.name == "Layout" -> break candidate
+        if candidate.name == "Layout" {
+            break candidate
+        }
     } ?? return None
     if grouped -> return parser_layout_grouped_fact(state, marker, is_enum)
     values: parser_bind_marker_arguments(state, marker, [String]{"kind", "tag"}, 1) ?? {
@@ -158,7 +162,9 @@ parser_layout_marker_fact: fn(state: &JetParserState, markers: [Marker], grouped
         }
         layout := StructLayout?{None}
         if variant == {
-            "c" -> layout = Val(if alignment == .Val(bytes) -> StructLayout.CAligned{alignment: bytes, target: alignment_target} else -> StructLayout.C)
+            "c" -> {
+                layout = Val(if alignment == .Val(bytes) -> StructLayout.CAligned{alignment: bytes, target: alignment_target} else -> StructLayout.C)
+            }
             "columnar" -> {
                 if has_alignment {
                     parser_add_fatal_code(state, "E1105", alignment_span ?? marker.span, "`align` is only valid with `#Layout(c)`", "columnar layout has no C ABI alignment override", "use `#Layout(c, align(64))` or remove `align(…)`")
@@ -189,9 +195,7 @@ parser_layout_marker_fact: fn(state: &JetParserState, markers: [Marker], grouped
 }
 
 parser_layout_refusal: fn(state: &JetParserState, fatal: Bool, span: Span, what: String, why: String, fix: String) {
-    if fatal {
-        parser_add_fatal_code(state, "E1105", span, what, why, fix)
-    } else {
+    if fatal -> parser_add_fatal_code(state, "E1105", span, what, why, fix) else {
         parser_add_error_code(state, "E1105", span, what, why, fix)
     }
 }
@@ -242,9 +246,8 @@ parser_layout_grouped_fact: fn(state: &JetParserState, marker: Marker, is_enum: 
                 has_alignment = true
                 alignment_target = call.args.len() == 2
                 argument: call.args[if alignment_target -> 1 else -> 0].expr
-                if parser_layout_align_bytes(argument) == .Val(number) {
-                    alignment = Val(number)
-                } else if argument == .Unary(op, operand, _, _) && op == UnOp.Neg && operand == .Int(_, _, _, _, _) {
+                if parser_layout_align_bytes(argument) == .Val(number) -> alignment = Val(number) else if argument == .Unary(op, operand, _, _) && op == UnOp.Neg && operand == .Int(_, _, _, _, _) {
+
                 } else {
                     parser_add_error_code(state, "E1105", expr_span(argument), "`align` requires one integer byte value or `#build.cpu.cache_line` (or `align(target, N)`)", "`#Layout(c, align(N))` is compiler-owned ABI metadata", "write `align(64)`, `align(#build.cpu.cache_line)` or `align(target, 2097152)`")
                 }
@@ -257,15 +260,15 @@ parser_layout_grouped_fact: fn(state: &JetParserState, marker: Marker, is_enum: 
         if variant == {
             "c" -> return Val(if alignment == .Val(bytes) -> StructLayout.CAligned{alignment: bytes, target: alignment_target} else -> StructLayout.C)
             "columnar" -> {
-                if has_alignment -> parser_add_error_code(state, "E1105", marker.span, "`align` is only valid with `#Layout(c)`", "columnar layout has no C ABI alignment override", "write `#Layout(c, align(64))`")
+                if has_alignment {
+                    parser_add_error_code(state, "E1105", marker.span, "`align` is only valid with `#Layout(c)`", "columnar layout has no C ABI alignment override", "write `#Layout(c, align(64))`")
+                }
                 return Val(StructLayout.Columnar)
             }
             else -> {
                 if jet_layout_integer_backing_name(variant) {
                     parser_add_error_code(state, "E1105", marker.span, "`#Layout({variant})` backs only an enum", "an integer backing sets the number type of a payload-free enum's cases; a struct has fields, not case numbers", "use `#Layout(c)` on the struct, or put `#Layout({variant})` on a payload-free enum")
-                } else {
-                    parser_layout_variant_refusal(state, variant, variant_span, false)
-                }
+                } else { parser_layout_variant_refusal(state, variant, variant_span, false) }
                 return None
             }
         }
@@ -280,7 +283,9 @@ parser_layout_align_bytes: fn(argument: Expr) -> Int? {
     if argument == .Int(number, _, _, _, _) && number >= 0 -> return Val(number)
     if argument == .Field(base, member, _, _) && member == "cache_line" {
         if base == .Field(root, group, _, _) && group == "cpu" {
-            if root == .Ident(name, _, _) && name == "#build" -> return Val(COMPILER_BUILD_CPU_CACHE_LINE_GENERIC)
+            if root == .Ident(name, _, _) && name == "#build" {
+                return Val(COMPILER_BUILD_CPU_CACHE_LINE_GENERIC)
+            }
         }
     }
     None
@@ -292,7 +297,9 @@ parser_layout_align_call: fn(value: Expr) -> Call? {
         if call.args.len() == 1 -> return Val(call)
         if call.args.len() == 2 {
             // copy: `call` is a payload of read parameter `value`, which keeps the original; the Val carrier owns this one
-            if call.args[0].expr == .Ident(name, _, _) && name == "target" -> return Val(call.copy())
+            if call.args[0].expr == .Ident(name, _, _) && name == "target" {
+                return Val(call.copy())
+            }
         }
     }
     None
@@ -302,10 +309,14 @@ parser_layout_align_call: fn(value: Expr) -> Call? {
 // for the grouped spelling whenever its first argument is an identifier.
 parser_layout_marker_span: fn(markers: [Marker], grouped: Bool, layout: StructLayout?) -> Span? {
     marker: loop candidate in markers {
-        if candidate.name == "Layout" -> break candidate
+        if candidate.name == "Layout" {
+            break candidate
+        }
     } ?? return None
     if layout != None -> return Val(marker.span)
-    if grouped && parser_marker_expression(marker, 0) == .Val(first) && first == .Ident(_, _, _) -> return Val(marker.span)
+    if grouped && parser_marker_expression(marker, 0) == .Val(first) && first == .Ident(_, _, _) {
+        return Val(marker.span)
+    }
     None
 }
 
@@ -313,7 +324,9 @@ parser_layout_marker_span: fn(markers: [Marker], grouped: Bool, layout: StructLa
 // layout argument, where an unusable alignment is reported.
 parser_layout_alignment_span: fn(markers: [Marker]) -> Span? {
     marker: loop candidate in markers {
-        if candidate.name == "Layout" -> break candidate
+        if candidate.name == "Layout" {
+            break candidate
+        }
     } ?? return None
     value: parser_marker_expression(marker, 1) ?? return None
     call: parser_layout_align_call(value) ?? return None
@@ -334,7 +347,9 @@ parser_marker_binding_slots: fn(marker: Marker, names: [String], flags: [String]
     loop index in 0..<marker.args.len() {
         label := parser_marker_label(marker, index)
         // copy: the flag word is read from the marker; the label owns its text.
-        if label == "" && parser_marker_expression(marker, index) == .Val(value) && value == .Ident(word, _, _) && flags.contains(word) -> label = word.copy()
+        if label == "" && parser_marker_expression(marker, index) == .Val(value) && value == .Ident(word, _, _) && flags.contains(word) {
+            label = word.copy()
+        }
         parameter := -1
         if label != "" {
             saw_named = true
@@ -468,16 +483,14 @@ parser_meta_attr_from_marker: fn(state: &JetParserState, marker: Marker) -> Meta
             field_span = label.span
         }
         span: Span{start: field_span.start, end: value_span.end}
-        if name == "category" {
-            fields.push(MetaField.Category{value: value, span: span})
-        } else if name == "maturity" {
-            if parser_maturity_tag(value) == None -> parser_add_error_code(state, "E0352", value_span, "`#Meta` maturity needs a known maturity value", "maturity metadata is a closed documentation scale", "write `maturity: .Experimental`, `.Tested`, or `.Hardened`")
+        if name == "category" -> fields.push(MetaField.Category{value: value, span: span}) else if name == "maturity" {
+            if parser_maturity_tag(value) == None {
+                parser_add_error_code(state, "E0352", value_span, "`#Meta` maturity needs a known maturity value", "maturity metadata is a closed documentation scale", "write `maturity: .Experimental`, `.Tested`, or `.Hardened`")
+            }
             fields.push(MetaField.Maturity{value: value, span: span})
         } else if name == "tunable" && value == .Bool(flag, _, _) {
             if flag -> fields.push(MetaField.Tunable{span: span})
-        } else {
-            fields.push(MetaField.Unknown{name: name, value: Val(value), span: field_span})
-        }
+        } else { fields.push(MetaField.Unknown{name: name, value: Val(value), span: field_span}) }
     }
     Val(MetaAttr{fields: fields, span: marker.span})
 }
@@ -488,23 +501,15 @@ parser_job_metadata_error: fn(state: &JetParserState, field: String, expected: S
 
 parser_job_word: fn(value: Expr) -> String? {
     if value == {
-        .Ident(name, _, _) -> {
-            return Val(name)
-        }
+        .Ident(name, _, _) -> { return Val(name) }
         .EnumLit(_, variant, _, args, _, _, _) -> {
-            if args.len() == 0 {
-                return Val(variant)
-            }
+            if args.len() == 0 -> return Val(variant)
         }
         .Str(parts, _, _) -> {
             if parts.len() == 1 {
                 if parts[0] == {
-                    .Lit(text) -> {
-                        return Val(text)
-                    }
-                    .Interp(_, _) | .Byte(_) -> {
-                        return None
-                    }
+                    .Lit(text) -> { return Val(text) }
+                    .Interp(_, _) | .Byte(_) -> { return None }
                 }
             }
         }
@@ -740,12 +745,10 @@ parser_job_every_from_marker: fn(marker: Marker) -> EveryMarker? {
     arg := if schedule == {
         .UnitLit(_, int, float, suffix, suffix_span, _, _) -> EveryArg.Duration{int: int, float: float, suffix: suffix, suffix_span: suffix_span}
         .Str(parts, span, _) -> if {
-            parts.len() == 1 -> {
-                if parts[0] == {
-                    .Lit(text) -> EveryArg.WallClock{text: text, text_span: span}
-                    .Interp(_, _) -> EveryArg.Expression{value: schedule}
-                    .Byte(_) -> EveryArg.Expression{value: schedule}
-                }
+            parts.len() == 1 -> if parts[0] == {
+                .Lit(text) -> EveryArg.WallClock{text: text, text_span: span}
+                .Interp(_, _) -> EveryArg.Expression{value: schedule}
+                .Byte(_) -> EveryArg.Expression{value: schedule}
             }
             else -> EveryArg.Expression{value: schedule}
         }

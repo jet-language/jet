@@ -28,18 +28,29 @@
 // problem as a cache miss.
 
 RECORD_FORMAT: 1
+
 RECORD_CHECKSUM_BYTES: 32
+
 RECORD_MAX_DEPTH: 128
+
 RECORD_MAX_I64: 9223372036854775807
 
 RECORD_TAG_NULL: 0
+
 RECORD_TAG_FALSE: 1
+
 RECORD_TAG_TRUE: 2
+
 RECORD_TAG_INT: 3
+
 RECORD_TAG_STR: 4
+
 RECORD_TAG_BYTES: 5
+
 RECORD_TAG_LIST: 6
+
 RECORD_TAG_MAP: 7
+
 RECORD_TAG_DIGEST: 8
 
 // One self-describing record value. `Map` fields may be given in any order;
@@ -176,9 +187,7 @@ record_value_shape: fn(expected: String, value: RecordValue) -> String Never! {
     "record is malformed: expected {expected}, found {record_value_kind(value)}"
 }
 
-record_value_is_null: fn(value: RecordValue) -> Bool Never! {
-    value == .Null
-}
+record_value_is_null: fn(value: RecordValue) -> Bool Never! { value == .Null }
 
 record_value_as_str: fn(value: RecordValue) -> RecordStringResult Never! {
     if value == {
@@ -204,7 +213,9 @@ record_value_as_int: fn(value: RecordValue) -> RecordIntResult Never! {
 record_value_as_usize: fn(value: RecordValue) -> RecordCountResult Never! {
     decoded: record_value_as_int(value)
     number: decoded.value ?? return RecordCountResult{value: None, problem: decoded.problem}
-    if number < 0 || number > 18446744073709551615 -> return RecordCountResult{value: None, problem: Val("record is malformed: negative or oversized count")}
+    if number < 0 || number > 18446744073709551615 {
+        return RecordCountResult{value: None, problem: Val("record is malformed: negative or oversized count")}
+    }
     RecordCountResult{value: Val(number), problem: None}
 }
 
@@ -317,11 +328,15 @@ record_bytes_before: fn(left: [U8], right: [U8]) -> Bool Never! {
 record_canonical_value: fn(value: RecordValue, problems: &[String]) -> RecordValue Never! {
     if value == {
         .Int(number) -> {
-            if number < 0 - RECORD_MAX_I64 - 1 || number > RECORD_MAX_I64 -> problems.push("record integer {number} is outside i64")
+            if number < 0 - RECORD_MAX_I64 - 1 || number > RECORD_MAX_I64 {
+                problems.push("record integer {number} is outside i64")
+            }
             value
         }
         .Digest(digest) -> {
-            if digest.len() != RECORD_CHECKSUM_BYTES -> problems.push("record digest has {digest.len()} bytes, expected 32")
+            if digest.len() != RECORD_CHECKSUM_BYTES {
+                problems.push("record digest has {digest.len()} bytes, expected 32")
+            }
             value
         }
         .List(values) -> {
@@ -340,9 +355,7 @@ record_canonical_value: fn(value: RecordValue, problems: &[String]) -> RecordVal
                 names.push(field.name.bytes())
                 if seen.get(field.name) != None {
                     problems.push("record map key `{field.name}` is duplicated")
-                } else {
-                    seen[field.name] = true
-                }
+                } else { seen[field.name] = true }
             }
             sorted: loop index in record_sorted_order(names) -> canonical[index]
             RecordValue.Map{fields: sorted}
@@ -376,7 +389,7 @@ record_sorted_order: fn(names: [[U8]]) -> [Int] Never! {
             start = end
         }
         order = merged
-        width = width * 2
+        width *= 2
     }
     order
 }
@@ -395,7 +408,7 @@ record_intern: fn(table: &RecordStringTable, value: String) Never! {
 
 record_intern_value: fn(table: &RecordStringTable, value: RecordValue) Never! {
     if value == {
-        .Str(text) -> record_intern(table, text)
+        .Str(text) -> { record_intern(table, text) }
         .List(values) -> {
             loop item in values -> record_intern_value(table, item)
         }
@@ -415,7 +428,7 @@ record_put_ref: fn(out: &[U8], table: RecordStringTable, value: String) Never! {
 
 record_put_value: fn(out: &[U8], table: RecordStringTable, value: RecordValue) Never! {
     if value == {
-        .Null -> out.push(U8{RECORD_TAG_NULL})
+        .Null -> { out.push(U8{RECORD_TAG_NULL}) }
         .Bool(flag) -> {
             if flag -> out.push(U8{RECORD_TAG_TRUE}) else -> out.push(U8{RECORD_TAG_FALSE})
         }
@@ -477,7 +490,7 @@ record_section_order: fn(ids: [Int]) -> [Int] Never! {
             start = end
         }
         order = merged
-        width = width * 2
+        width *= 2
     }
     order
 }
@@ -491,7 +504,9 @@ record_encode: fn(schema: String, sections: [RecordSection]) -> RecordEncodeResu
     ids := [Int]{}
     seen := [Int:Bool]{}
     loop section in sections {
-        if section.id < 0 || section.id >> 64 != 0 -> return RecordEncodeResult{bytes: None, problem: Val("record section id {section.id} is outside u64")}
+        if section.id < 0 || section.id >> 64 != 0 {
+            return RecordEncodeResult{bytes: None, problem: Val("record section id {section.id} is outside u64")}
+        }
         elements := [RecordValue]{}
         loop element in section.elements -> elements.push(record_canonical_value(element, problems))
         canonical.push(RecordSection{id: section.id, elements: elements})
@@ -601,7 +616,9 @@ record_read_len: fn(bytes: [U8], cursor: &RecordCursor) -> Int Never! {
 
 // Advance past `len` bytes without copying them.
 record_skip: fn(cursor: &RecordCursor, len: Int) Never! {
-    if cursor.problem != None -> return
+    if cursor.problem != None {
+        return
+    }
     if len > cursor.end - cursor.at {
         record_fail(cursor, "record is truncated")
         return
@@ -633,10 +650,14 @@ record_reader_failure: fn(problem: String) -> RecordReaderResult Never! {
 // Verify the checksum and framing and index every section. Element payloads are
 // not decoded until asked for.
 record_open: fn(bytes: [U8]) -> RecordReaderResult Never! {
-    if bytes.len() < 4 + RECORD_CHECKSUM_BYTES -> return record_reader_failure("record is truncated")
+    if bytes.len() < 4 + RECORD_CHECKSUM_BYTES {
+        return record_reader_failure("record is truncated")
+    }
     if !record_has_magic(bytes) -> return record_reader_failure("record magic is not `JETR`")
     body_end: bytes.len() - RECORD_CHECKSUM_BYTES
-    if sha256_bytes(bytes[0..<body_end]) != bytes.slice(body_end, bytes.len()) -> return record_reader_failure("record checksum does not match its bytes")
+    if sha256_bytes(bytes[0..<body_end]) != bytes.slice(body_end, bytes.len()) {
+        return record_reader_failure("record checksum does not match its bytes")
+    }
     record_index(bytes)
 }
 
@@ -646,7 +667,9 @@ record_open: fn(bytes: [U8]) -> RecordReaderResult Never! {
 // but the checksum is not recomputed, so opening costs the index, not a hash
 // of every byte.
 record_open_trusted: fn(bytes: [U8]) -> RecordReaderResult Never! {
-    if bytes.len() < 4 + RECORD_CHECKSUM_BYTES -> return record_reader_failure("record is truncated")
+    if bytes.len() < 4 + RECORD_CHECKSUM_BYTES {
+        return record_reader_failure("record is truncated")
+    }
     if !record_has_magic(bytes) -> return record_reader_failure("record magic is not `JETR`")
     record_index(bytes)
 }
@@ -662,7 +685,9 @@ record_index: fn(bytes: [U8]) -> RecordReaderResult Never! {
     checksum: bytes.slice(body_end, bytes.len())
     cursor := RecordCursor{at: 4, end: body_end, problem: None}
     format: record_read_uvarint(bytes, cursor)
-    if cursor.problem == None && format != RECORD_FORMAT -> return record_reader_failure("record format {format} is not supported")
+    if cursor.problem == None && format != RECORD_FORMAT {
+        return record_reader_failure("record format {format} is not supported")
+    }
     schema: record_read_str(bytes, cursor)
     string_count: record_read_len(bytes, cursor)
     strings := [String]{}
@@ -679,7 +704,9 @@ record_index: fn(bytes: [U8]) -> RecordReaderResult Never! {
         if cursor.problem != None -> break
         id: record_read_uvarint(bytes, cursor)
         if cursor.problem != None -> break
-        if ids.len() > 0 && ids[ids.len() - 1] >= id -> return record_reader_failure("record section {id} is duplicated or out of order")
+        if ids.len() > 0 && ids[ids.len() - 1] >= id {
+            return record_reader_failure("record section {id} is duplicated or out of order")
+        }
         element_count: record_read_len(bytes, cursor)
         lengths := [Int]{}
         loop _ in 0..<element_count {
@@ -695,7 +722,9 @@ record_index: fn(bytes: [U8]) -> RecordReaderResult Never! {
             bounds.push(cursor.at)
         }
     }
-    if cursor.problem == None && cursor.at != body_end -> record_malformed(cursor, "trailing bytes before the checksum")
+    if cursor.problem == None && cursor.at != body_end {
+        record_malformed(cursor, "trailing bytes before the checksum")
+    }
     if cursor.problem != None -> return record_reader_failure(cursor.problem ?? "")
     RecordReaderResult{
         reader: Val(RecordReader{schema: schema, digest: checksum, bytes: bytes, strings: strings, ids: ids, section_positions: section_positions, firsts: firsts, bounds: bounds}),
@@ -717,7 +746,9 @@ record_open_schema_trusted: fn(bytes: [U8], schema: String) -> RecordReaderResul
 record_schema_check: fn(opened: &&RecordReaderResult, schema: String) -> RecordReaderResult Never! {
     result := opened.move()
     if result.reader == .Val(reader) {
-        if reader.schema != schema -> return record_reader_failure("record schema is `{reader.schema}`, expected `{schema}`")
+        if reader.schema != schema {
+            return record_reader_failure("record schema is `{reader.schema}`, expected `{schema}`")
+        }
     }
     result
 }
@@ -794,7 +825,9 @@ record_section_element: fn(reader: RecordReader, section: Int, index: Int) -> Re
     start: reader.bounds[reader.firsts[section] + index]
     cursor := RecordCursor{at: start, end: reader.bounds[reader.firsts[section] + index + 1], problem: None}
     value: record_read_value(reader, cursor, 0)
-    if cursor.problem == None && cursor.at != cursor.end -> record_malformed(cursor, "element has trailing bytes")
+    if cursor.problem == None && cursor.at != cursor.end {
+        record_malformed(cursor, "element has trailing bytes")
+    }
     if cursor.problem != None -> return RecordValueResult{value: None, problem: cursor.problem}
     RecordValueResult{value: Val(value), problem: None}
 }
@@ -802,7 +835,9 @@ record_section_element: fn(reader: RecordReader, section: Int, index: Int) -> Re
 // Decode one element of one section.
 record_element: fn(reader: RecordReader, id: Int, index: Int) -> RecordValueResult Never! {
     section: record_section_index(reader, id) ?? return RecordValueResult{value: None, problem: Val("record section {id} is missing")}
-    if index < 0 || index >= record_section_elements(reader, section) -> return RecordValueResult{value: None, problem: Val("record is malformed: section {id} has no element {index}")}
+    if index < 0 || index >= record_section_elements(reader, section) {
+        return RecordValueResult{value: None, problem: Val("record is malformed: section {id} has no element {index}")}
+    }
     record_section_element(reader, section, index)
 }
 
@@ -816,12 +851,18 @@ RecordSpanResult: struct {
 
 record_element_bytes_span: fn(reader: RecordReader, id: Int, index: Int) -> RecordSpanResult Never! {
     section: record_section_index(reader, id) ?? return RecordSpanResult{start: 0, end: 0, problem: Val("record section {id} is missing")}
-    if index < 0 || index >= record_section_elements(reader, section) -> return RecordSpanResult{start: 0, end: 0, problem: Val("record is malformed: section {id} has no element {index}")}
+    if index < 0 || index >= record_section_elements(reader, section) {
+        return RecordSpanResult{start: 0, end: 0, problem: Val("record is malformed: section {id} has no element {index}")}
+    }
     cursor := RecordCursor{at: reader.bounds[reader.firsts[section] + index], end: reader.bounds[reader.firsts[section] + index + 1], problem: None}
     kind: record_read_byte(reader.bytes, cursor)
-    if cursor.problem == None && kind != RECORD_TAG_BYTES -> record_malformed(cursor, "section {id} element {index} is not bytes")
+    if cursor.problem == None && kind != RECORD_TAG_BYTES {
+        record_malformed(cursor, "section {id} element {index} is not bytes")
+    }
     len: record_read_len(reader.bytes, cursor)
-    if cursor.problem == None && cursor.at + len != cursor.end -> record_malformed(cursor, "element has trailing bytes")
+    if cursor.problem == None && cursor.at + len != cursor.end {
+        record_malformed(cursor, "element has trailing bytes")
+    }
     if cursor.problem != None -> return RecordSpanResult{start: 0, end: 0, problem: cursor.problem}
     RecordSpanResult{start: cursor.at, end: cursor.end, problem: None}
 }
@@ -863,9 +904,7 @@ record_digest: fn(schema: String, sections: [RecordSection]) -> RecordDigestResu
 }
 
 // Lowercase hex of a digest.
-record_digest_hex: fn(digest: [U8]) -> String Never! {
-    sha256_hex_bytes(digest)
-}
+record_digest_hex: fn(digest: [U8]) -> String Never! { sha256_hex_bytes(digest) }
 
 // Parse a 64-character lowercase hex digest.
 record_parse_digest_hex: fn(text: String) -> [U8]? Never! {
@@ -907,11 +946,11 @@ record_json: fn(bytes: [U8]) -> RecordStringResult Never! {
 
 record_value_json: fn(out: &[U8], value: RecordValue) Never! {
     if value == {
-        .Null -> foundation_json_append(out, "null")
-        .Bool(flag) -> foundation_json_append(out, if flag -> "true" else -> "false")
-        .Int(number) -> foundation_json_append(out, "{number}")
-        .Str(text) -> foundation_json_append(out, "\"{foundation_json_escape(text)}\"")
-        .Bytes(raw) -> foundation_json_append(out, "{{\"bytes\":\"{sha256_hex_bytes(raw)}\"}}")
+        .Null -> { foundation_json_append(out, "null") }
+        .Bool(flag) -> { foundation_json_append(out, if flag -> "true" else -> "false") }
+        .Int(number) -> { foundation_json_append(out, "{number}") }
+        .Str(text) -> { foundation_json_append(out, "\"{foundation_json_escape(text)}\"") }
+        .Bytes(raw) -> { foundation_json_append(out, "{{\"bytes\":\"{sha256_hex_bytes(raw)}\"}}") }
         .List(values) -> {
             foundation_json_append(out, "[")
             loop (index, item) in values {
@@ -929,7 +968,9 @@ record_value_json: fn(out: &[U8], value: RecordValue) Never! {
             }
             foundation_json_append(out, "}}")
         }
-        .Digest(digest) -> foundation_json_append(out, "{{\"digest\":\"{sha256_hex_bytes(digest)}\"}}")
+        .Digest(digest) -> {
+            foundation_json_append(out, "{{\"digest\":\"{sha256_hex_bytes(digest)}\"}}")
+        }
     }
 }
 
@@ -946,6 +987,4 @@ record_key_digest: fn(fields: [String]) -> String Never! {
 }
 
 // The store key of a blob record: lowercase hex SHA-256 of its whole bytes.
-record_blob_key: fn(bytes: View<U8>) -> String Never! {
-    sha256_hex_bytes(sha256_bytes(bytes))
-}
+record_blob_key: fn(bytes: View<U8>) -> String Never! { sha256_hex_bytes(sha256_bytes(bytes)) }

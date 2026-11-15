@@ -28,12 +28,14 @@ CORE_RECORD_SOURCE_DEMANDS: #run core_record_source_demands(CORE_DECLARATIONS, C
 
 core_enum_rows: fn(declared: CoreDeclarations) -> [CoreModuleTypeExport] {
     rows := [CoreModuleTypeExport]{}
-    seen := [String: String]{}
+    seen := [String:String]{}
     loop entry in declared.modules {
         loop leaf in entry.types {
             if leaf.generic_arity > 0 || leaf.variants.len() == 0 -> next
             variants: leaf.variants.join("|")
-            if seen.get(leaf.name) == .Val(earlier) && earlier != variants -> panic("{CORE_DECLARATIONS_CORE_PATH}:{entry.line}: Core enum leaf {leaf.name} has different variants in {entry.name}")
+            if seen.get(leaf.name) == .Val(earlier) && earlier != variants {
+                panic("{CORE_DECLARATIONS_CORE_PATH}:{entry.line}: Core enum leaf {leaf.name} has different variants in {entry.name}")
+            }
             seen[leaf.name] = variants
             rows.push(CoreModuleTypeExport{name: leaf.name.copy(), kind: CoreLeafKind.Enum{variants: leaf.variants.copy()}})
         }
@@ -44,7 +46,9 @@ core_enum_rows: fn(declared: CoreDeclarations) -> [CoreModuleTypeExport] {
 core_source_owned_types: fn(declared: CoreDeclarations) -> [CoreSourceOwnedType] Never! {
     rows := [CoreSourceOwnedType]{}
     loop source in declared.source_rows {
-        loop owned in source.owned_types -> rows.push(CoreSourceOwnedType{path: source.path.copy(), name: owned.copy()})
+        loop owned in source.owned_types {
+            rows.push(CoreSourceOwnedType{path: source.path.copy(), name: owned.copy()})
+        }
     }
     rows
 }
@@ -52,7 +56,7 @@ core_source_owned_types: fn(declared: CoreDeclarations) -> [CoreSourceOwnedType]
 core_record_source_demands: fn(declared: CoreDeclarations, rows: [CoreRecordFieldRow]) -> [CoreRecordSourceDemand] Never! {
     // Each Core type's declaring module: the source module that owns it, else
     // the first module line that exports it. An enum maps to "".
-    modules := [String: String]{}
+    modules := [String:String]{}
     loop source in declared.source_rows {
         loop owned in source.owned_types {
             if modules.get(owned) == None -> modules[owned.copy()] = source.module_name.copy()
@@ -60,15 +64,13 @@ core_record_source_demands: fn(declared: CoreDeclarations, rows: [CoreRecordFiel
     }
     loop entry in declared.modules {
         loop leaf in entry.types {
-            if leaf.generic_arity == 0 && leaf.variants.len() > 0 {
-                modules[leaf.name.copy()] = ""
-            } else if modules.get(leaf.name) == None {
+            if leaf.generic_arity == 0 && leaf.variants.len() > 0 -> modules[leaf.name.copy()] = "" else if modules.get(leaf.name) == None {
                 modules[leaf.name.copy()] = entry.name.copy()
             }
         }
     }
     demands := [CoreRecordSourceDemand]{}
-    seen := [String: Bool]{}
+    seen := [String:Bool]{}
     loop row in rows {
         owner_module: modules.get(row.owner) ?? ""
         names := [String]{}
@@ -87,18 +89,18 @@ core_record_source_demands: fn(declared: CoreDeclarations, rows: [CoreRecordFiel
 // The nominal names a value of `ty` holds in its layout.
 core_record_layout_names: fn(ty: Type, names: &[String]) Never! {
     if ty == {
-        .Named(name) -> names.push(name.copy())
+        .Named(name) -> { names.push(name.copy()) }
         .Apply(name, args) -> {
             names.push(name.copy())
             loop arg in args -> core_record_layout_names(arg, names)
         }
-        .List(element) -> core_record_layout_names(element, names)
+        .List(element) -> { core_record_layout_names(element, names) }
         .Map(key, _, value) -> {
             core_record_layout_names(key, names)
             core_record_layout_names(value, names)
         }
-        .Shared(inner) -> core_record_layout_names(inner, names)
-        .Option(inner) -> core_record_layout_names(inner, names)
+        .Shared(inner) -> { core_record_layout_names(inner, names) }
+        .Option(inner) -> { core_record_layout_names(inner, names) }
         .Result(ok, err) -> {
             core_record_layout_names(ok, names)
             core_record_layout_names(err, names)
@@ -106,9 +108,9 @@ core_record_layout_names: fn(ty: Type, names: &[String]) Never! {
         .Tuple(fields) -> {
             loop field in fields -> core_record_layout_names(field.ty, names)
         }
-        .FixedList(elem, _) -> core_record_layout_names(elem, names)
+        .FixedList(elem, _) -> { core_record_layout_names(elem, names) }
         .InlineRange(base, _, _) -> core_record_layout_names(base, names)
-        .Tagged(_, inner) | .Case(_, inner) -> core_record_layout_names(inner, names)
+        .Tagged(_, inner) | .Case(_, inner) -> { core_record_layout_names(inner, names) }
         .Union(members) -> {
             loop member in members -> core_record_layout_names(member, names)
         }

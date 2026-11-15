@@ -100,12 +100,16 @@ jet_cli_package_engine: fn(start: String, words: [String], color: Bool, json: Bo
     }
     root: if jet_cli_require_inspect_root(start, "error: `jet {command}` needs a project — no `package.jet` found here or above", color) == {
         .Root(path) -> path
-        .Refused(plan) -> { return plan }
+        .Refused(plan) -> {
+            return plan
+        }
     }
     notices := [String]{}
     entry: if jet_cli_find_project_entry(root, command, color, notices) == {
         .Entry(found) -> found.path
-        .Refused(plan) -> { return plan }
+        .Refused(plan) -> {
+            return plan
+        }
         .Absent -> jet_cli_entry_join(root, JET_CLI_DEFAULT_ENTRY_FILE)
     }
     argv := [String]{JET_CLI_PACKAGE_ENGINE_VERB, root, entry, if color -> "1" else -> "0", if json -> "1" else -> "0"}

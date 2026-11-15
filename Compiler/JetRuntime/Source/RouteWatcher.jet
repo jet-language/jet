@@ -24,7 +24,9 @@ watch_state_new: fn(target: I64, text: I64, number: I64, snapshot: I64, ready: I
 }
 
 watch_snapshot_drop: fn(snapshot: I64) {
-    if (snapshot == I64{0}) -> return
+    if (snapshot == I64{0}) {
+        return
+    }
     length: trap_word(snapshot)
     data: trap_word(wrapping(snapshot + I64{16}))
     at := I64{0}
@@ -33,7 +35,7 @@ watch_snapshot_drop: fn(snapshot: I64) {
         at += I64{1}
     }
     capacity: trap_word(wrapping(snapshot + I64{8}))
-    if (capacity != I64{0}) -> jet_rt_free(data, capacity * I64{32}, I64{8})
+    if (capacity != I64{0}) { jet_rt_free(data, capacity * I64{32}, I64{8}) }
     jet_rt_free(snapshot, I64{24}, I64{8})
 }
 
@@ -41,9 +43,14 @@ watch_snapshot_drop: fn(snapshot: I64) {
     _ := sync_add(value, I64{1})
     value
 }
+
 #Export(c) jet_rt_handle_drop_watch_handle: fn(value: I64) {
-    if (value == I64{0}) -> return
-    if (sync_add(value, I64{-1}) != I64{1}) -> return
+    if (value == I64{0}) {
+        return
+    }
+    if (sync_add(value, I64{-1}) != I64{1}) {
+        return
+    }
     jet_rt_string_drop(sync_load(wrapping(value + I64{16})))
     watch_snapshot_drop(sync_load(wrapping(value + I64{32})))
     jet_rt_handle_drop_jet_event(sync_load(wrapping(value + I64{56})))
@@ -54,9 +61,14 @@ watch_snapshot_drop: fn(snapshot: I64) {
     _ := sync_add(value, I64{1})
     value
 }
+
 #Export(c) jet_rt_handle_drop_watch_set: fn(value: I64) {
-    if (value == I64{0}) -> return
-    if (sync_add(value, I64{-1}) != I64{1}) -> return
+    if (value == I64{0}) {
+        return
+    }
+    if (sync_add(value, I64{-1}) != I64{1}) {
+        return
+    }
     length: sync_load(wrapping(value + I64{8}))
     data: sync_load(wrapping(value + I64{24}))
     at := I64{0}
@@ -65,7 +77,7 @@ watch_snapshot_drop: fn(snapshot: I64) {
         at += I64{1}
     }
     capacity: sync_load(wrapping(value + I64{16}))
-    if (capacity != I64{0}) -> jet_rt_free(data, capacity * I64{8}, I64{8})
+    if (capacity != I64{0}) { jet_rt_free(data, capacity * I64{8}, I64{8}) }
     jet_rt_free(value, I64{32}, I64{8})
 }
 
@@ -95,7 +107,9 @@ watch_join: fn(parent: I64, name: I64) -> I64 {
     text: jet_rt_string_builder_new()
     jet_rt_string_builder_push(text, parent)
     length: rt_text_len(parent)
-    if (length > I64{0} && rt_text_byte(wrapping(wrapping(rt_text_data(parent) + length) - I64{1})) != I64{47}) -> rt_text_append(text, rt_text_data(rt_static_text("/")), I64{1})
+    if (length > I64{0} && rt_text_byte(wrapping(wrapping(rt_text_data(parent) + length) - I64{1})) != I64{47}) {
+        rt_text_append(text, rt_text_data(rt_static_text("/")), I64{1})
+    }
     rt_text_append(text, name, host_startup_byte_length(name))
     text
 }
@@ -137,7 +151,7 @@ watch_snapshot: fn(root: I64, snapshot: I64, error: I64) -> Bool {
             } else {
                 loop {
                     count: host_call(I64{217}, fd, buffer, FILES_DIRENT_BYTES)
-                    if (count == I64{0}) -> break
+                    if (count == I64{0}) { break }
                     if (count < I64{0}) {
                         _ := compiler_fs_errno(HOST_IO_OP_READ, path, -count, error)
                         failed = true
@@ -154,7 +168,7 @@ watch_snapshot: fn(root: I64, snapshot: I64, error: I64) -> Bool {
                             coll_copy(stack, grown, stack_capacity * I64{8})
                             jet_rt_free(stack, stack_capacity * I64{8}, I64{8})
                             stack = grown
-                            stack_capacity = stack_capacity * I64{2}
+                            stack_capacity *= I64{2}
                         }
                         trap_store(wrapping(stack + depth * I64{8}), watch_join(path, entry))
                         depth += I64{1}
@@ -182,7 +196,9 @@ watch_min: fn(left: I64, right: I64) -> I64 { if (left < right) -> left else -> 
 // scratch buffer; the header keeps whichever buffer holds the result.
 watch_snapshot_sort: fn(snapshot: I64) {
     length: trap_word(snapshot)
-    if (length < I64{2}) -> return
+    if (length < I64{2}) {
+        return
+    }
     original: trap_word(wrapping(snapshot + I64{16}))
     source := original
     target := jet_rt_alloc(length * I64{32}, I64{8})
@@ -211,7 +227,7 @@ watch_snapshot_sort: fn(snapshot: I64) {
         swap: source
         source = target
         target = swap
-        width = width * I64{2}
+        width *= I64{2}
     }
     if (source == original) {
         jet_rt_free(target, length * I64{32}, I64{8})
@@ -237,7 +253,7 @@ watch_snapshot_sort: fn(snapshot: I64) {
 // jet_process_alive: kill(pid, 0) succeeds or fails with EPERM; a pid that
 // is not positive or not an i32 is not alive.
 watch_process_alive: fn(pid: I64) -> Bool {
-    if (pid <= I64{0} || pid > I64{2147483647}) -> return false
+    if (pid <= I64{0} || pid > I64{2147483647}) { return false }
     result: host_call(I64{62}, pid, I64{0}, I64{0})
     result == I64{0} || result == I64{-1}
 }
@@ -245,7 +261,7 @@ watch_process_alive: fn(pid: I64) -> Bool {
 // WatchHandle::process_pid: seen_ready starts as the first liveness probe.
 #Export(c) jet_watcher_process_pid: fn(pid: I64) -> I64 {
     native: jet_int_owned_to_i64(pid)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     ready: watch_process_alive(native)
     watch_state_new(I64{1}, jet_rt_string_builder_new(), native, I64{0}, if ready -> I64{1} else -> I64{0})
 }
@@ -253,7 +269,7 @@ watch_process_alive: fn(pid: I64) -> Bool {
 // WatchHandle::port: not ready until a later poll connects.
 #Export(c) jet_watcher_port: fn(host: I64, port: I64) -> I64 {
     native: jet_int_owned_to_i64(port)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     watch_state_new(I64{2}, jet_rt_string_clone(host), native, I64{0}, I64{0})
 }
 
@@ -315,14 +331,14 @@ watch_diff: fn(previous: I64, next: I64, events: I64) {
         order := I64{1}
         loop other < old_count {
             order = jet_rt_string_compare(trap_word(wrapping(old_rows + other * I64{32})), trap_word(row))
-            if (order >= I64{0}) -> break
+            if (order >= I64{0}) { break }
             other += I64{1}
         }
         if (other < old_count && order == I64{0}) {
-            if !watch_row_same(wrapping(old_rows + other * I64{32}), row) -> watch_file_event(events, rt_static_text("Modified"), row)
-        } else {
-            watch_file_event(events, rt_static_text("Created"), row)
-        }
+            if !watch_row_same(wrapping(old_rows + other * I64{32}), row) {
+                watch_file_event(events, rt_static_text("Modified"), row)
+            }
+        } else { watch_file_event(events, rt_static_text("Created"), row) }
         at += I64{1}
     }
     at = I64{0}
@@ -332,10 +348,12 @@ watch_diff: fn(previous: I64, next: I64, events: I64) {
         order := I64{1}
         loop other < new_count {
             order = jet_rt_string_compare(trap_word(wrapping(new_rows + other * I64{32})), trap_word(row))
-            if (order >= I64{0}) -> break
+            if (order >= I64{0}) { break }
             other += I64{1}
         }
-        if (other >= new_count || order != I64{0}) -> watch_file_event(events, rt_static_text("Removed"), row)
+        if (other >= new_count || order != I64{0}) {
+            watch_file_event(events, rt_static_text("Removed"), row)
+        }
         at += I64{1}
     }
 }
@@ -382,7 +400,7 @@ watch_poll_process: fn(state: I64, events: I64) {
 // TcpStream::connect((host, port)).is_ok() for a port in 0..=65535; the
 // connected stream or the failure is dropped at once.
 watch_port_ready: fn(host: I64, port: I64) -> Bool {
-    if (port < I64{0} || port > I64{65535}) -> return false
+    if (port < I64{0} || port > I64{65535}) { return false }
     slots: jet_rt_alloc(I64{16}, I64{8})
     thread_zero(slots, I64{16})
     connected: jet_net_tcp_connect_happy(host, port, I64{9223372036854775807}, slots, wrapping(slots + I64{8})) != I64{0}
@@ -406,9 +424,7 @@ watch_poll_port: fn(state: I64, events: I64) {
         jet_rt_string_builder_push(detail, rt_static_text(":"))
         rt_text_push_number(detail, port)
         watch_event_push(events, rt_static_text("Ready"), jet_rt_string_builder_new(), jet_rt_string_builder_finish(detail))
-    } else if (!ready && seen) {
-        sync_store(wrapping(state + I64{40}), I64{0})
-    }
+    } else if (!ready && seen) { sync_store(wrapping(state + I64{40}), I64{0}) }
 }
 
 // WatchHandle::poll: an inactive watch answers no events.
@@ -417,37 +433,58 @@ watch_poll_port: fn(state: I64, events: I64) {
     thread_zero(events, I64{24})
     if (jet_scheduler_native_propagate() == I64{0} && sync_load(wrapping(state + I64{48})) != I64{0}) {
         target: sync_load(wrapping(state + I64{8}))
-        if (target == I64{0}) {
-            watch_poll_files(state, events)
-        } else if (target == I64{1}) {
+        if (target == I64{0}) { watch_poll_files(state, events) } else if (target == I64{1}) {
             watch_poll_process(state, events)
-        } else {
-            watch_poll_port(state, events)
-        }
+        } else { watch_poll_port(state, events) }
     }
     length: trap_word(events)
     data: coll_i64_output(length, out_data)
-    if (length != I64{0}) -> coll_copy(trap_word(wrapping(events + I64{16})), data, length * I64{8})
+    if (length != I64{0}) {
+        coll_copy(trap_word(wrapping(events + I64{16})), data, length * I64{8})
+    }
     capacity: trap_word(wrapping(events + I64{8}))
-    if (capacity != I64{0}) -> jet_rt_free(trap_word(wrapping(events + I64{16})), capacity * I64{8}, I64{8})
+    if (capacity != I64{0}) {
+        jet_rt_free(trap_word(wrapping(events + I64{16})), capacity * I64{8}, I64{8})
+    }
     jet_rt_free(events, I64{24}, I64{8})
     length
 }
 
 #Export(c) jet_watcher_cancel: fn(state: I64) { sync_store(wrapping(state + I64{48}), I64{0}) }
-#Export(c) jet_watcher_is_active: fn(state: I64) -> Bool { sync_load(wrapping(state + I64{48})) != I64{0} }
-#Export(c) jet_watcher_target: fn(state: I64) -> I64 { jet_int_owned_from_i64(sync_load(wrapping(state + I64{8}))) }
-#Export(c) jet_watcher_text: fn(state: I64) -> I64 { jet_rt_string_clone(sync_load(wrapping(state + I64{16}))) }
-#Export(c) jet_watcher_number: fn(state: I64) -> I64 { jet_int_owned_from_i64(sync_load(wrapping(state + I64{24}))) }
-#Export(c) jet_watcher_event: fn(state: I64) -> I64 { jet_rt_handle_clone_jet_event(sync_load(wrapping(state + I64{56}))) }
+
+#Export(c) jet_watcher_is_active: fn(state: I64) -> Bool {
+    sync_load(wrapping(state + I64{48})) != I64{0}
+}
+
+#Export(c) jet_watcher_target: fn(state: I64) -> I64 {
+    jet_int_owned_from_i64(sync_load(wrapping(state + I64{8})))
+}
+
+#Export(c) jet_watcher_text: fn(state: I64) -> I64 {
+    jet_rt_string_clone(sync_load(wrapping(state + I64{16})))
+}
+
+#Export(c) jet_watcher_number: fn(state: I64) -> I64 {
+    jet_int_owned_from_i64(sync_load(wrapping(state + I64{24})))
+}
+
+#Export(c) jet_watcher_event: fn(state: I64) -> I64 {
+    jet_rt_handle_clone_jet_event(sync_load(wrapping(state + I64{56})))
+}
 
 // WatchSet::add keeps its own count of the handle.
 #Export(c) jet_watcher_set_add: fn(set: I64, handle: I64) {
     watch_words_push(wrapping(set + I64{8}), jet_rt_handle_clone_watch_handle(handle))
 }
-#Export(c) jet_watcher_set_len: fn(set: I64) -> I64 { jet_int_owned_from_i64(trap_word(wrapping(set + I64{8}))) }
+
+#Export(c) jet_watcher_set_len: fn(set: I64) -> I64 {
+    jet_int_owned_from_i64(trap_word(wrapping(set + I64{8})))
+}
+
 #Export(c) jet_watcher_set_get: fn(set: I64, index: I64) -> I64 {
     at: jet_int_owned_to_i64(index)
-    if (at < I64{0} || at >= trap_word(wrapping(set + I64{8}))) -> jet_rt_unreachable(rt_text_data(rt_static_text("watch set index out of range")), I64{28})
+    if (at < I64{0} || at >= trap_word(wrapping(set + I64{8}))) {
+        jet_rt_unreachable(rt_text_data(rt_static_text("watch set index out of range")), I64{28})
+    }
     jet_rt_handle_clone_watch_handle(trap_word(wrapping(trap_word(wrapping(set + I64{24})) + at * I64{8})))
 }

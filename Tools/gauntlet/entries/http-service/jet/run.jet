@@ -1,5 +1,7 @@
-use web: core.web
-use core.[http.server, net]
+use {
+    web: core.web
+    core.[http.server, net]
+}
 
 ServerState: struct {
     stopped: Bool
@@ -10,7 +12,9 @@ Args: struct {
     port: String
 }
 
-reply: fn(status: Int, body: String) -> HTTPResponse HTTPError! { Ok(server.response(status, body).header("content-type", "application/json")) }
+reply: fn(status: Int, body: String) -> HTTPResponse HTTPError! {
+    Ok(server.response(status, body).header("content-type", "application/json"))
+}
 
 kv: fn(key: String, req: HTTPRequest, store: Shared<[String:String]>, put: Bool) -> HTTPResponse HTTPError! {
     if put {

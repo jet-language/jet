@@ -98,7 +98,9 @@ parser_if_table_has_statement_arm: fn(state: JetParserState) -> Bool Never! {
         kind: state.tokens[index].kind
         if braces == 1 && parens == 0 && brackets == 0 && (kind == TOKEN_UNIFIED_ARROW) {
             next_index := index + 1
-            loop next_index < state.tokens.len() && parser_is_trivia(state.tokens[next_index].kind) -> next_index += 1
+            loop next_index < state.tokens.len() && parser_is_trivia(state.tokens[next_index].kind) {
+                next_index += 1
+            }
             next_kind: if next_index < state.tokens.len() -> state.tokens[next_index].kind else -> TOKEN_EOF
             if next_kind == TOKEN_RETURN || next_kind == TOKEN_BREAK -> return true
         }
@@ -128,9 +130,13 @@ parser_hole_table_open: fn(state: JetParserState, start: Int) -> Int Never! {
     loop index < state.tokens.len() {
         kind: state.tokens[index].kind
         if kind == TOKEN_EOF -> return -1
-        if kind == TOKEN_IDENT && parser_value(state, state.tokens[index]) == PARSER_DISPATCH_HOLE -> hole = true
+        if kind == TOKEN_IDENT && parser_value(state, state.tokens[index]) == PARSER_DISPATCH_HOLE {
+            hole = true
+        }
         if parens == 0 && brackets == 0 {
-            if kind == TOKEN_SEMI || kind == TOKEN_RBRACE || kind == TOKEN_UNIFIED_ARROW -> return -1
+            if kind == TOKEN_SEMI || kind == TOKEN_RBRACE || kind == TOKEN_UNIFIED_ARROW {
+                return -1
+            }
             if kind == TOKEN_LBRACE -> return if hole -> index else -> -1
         }
         if kind == TOKEN_LPAREN -> parens += 1
@@ -163,11 +169,17 @@ parser_dispatch_table_open: fn(state: JetParserState, start: Int) -> Int Never! 
         kind: state.tokens[index].kind
         if kind == TOKEN_EOF -> return -1
         if parens == 0 && brackets == 0 {
-            if kind == TOKEN_SEMI || kind == TOKEN_RBRACE || kind == TOKEN_LBRACE || kind == TOKEN_UNIFIED_ARROW -> return -1
+            if kind == TOKEN_SEMI || kind == TOKEN_RBRACE || kind == TOKEN_LBRACE || kind == TOKEN_UNIFIED_ARROW {
+                return -1
+            }
             if kind == TOKEN_EQ_EQ || kind == TOKEN_NOT_EQ || kind == TOKEN_LT || kind == TOKEN_LE || kind == TOKEN_GT || kind == TOKEN_GE {
                 open := index + 1
-                loop open < state.tokens.len() && parser_is_trivia(state.tokens[open].kind) -> open += 1
-                if open < state.tokens.len() && state.tokens[open].kind == TOKEN_LBRACE -> return open
+                loop open < state.tokens.len() && parser_is_trivia(state.tokens[open].kind) {
+                    open += 1
+                }
+                if open < state.tokens.len() && state.tokens[open].kind == TOKEN_LBRACE {
+                    return open
+                }
             }
         }
         if kind == TOKEN_LPAREN -> parens += 1
@@ -189,20 +201,26 @@ parser_expression_form_if_ahead: fn(state: &JetParserState) -> Bool Never! {
     loop {
         kind: parser_kind_at(state, offset)
         if kind == TOKEN_EOF -> return false
-        if (kind == TOKEN_SEMI || kind == TOKEN_RBRACE) && parens == 0 && brackets == 0 && braces == 0 -> return false
+        if (kind == TOKEN_SEMI || kind == TOKEN_RBRACE) && parens == 0 && brackets == 0 && braces == 0 {
+            return false
+        }
         if kind == TOKEN_LPAREN -> parens += 1
         if kind == TOKEN_RPAREN && parens > 0 -> parens -= 1
         if kind == TOKEN_LBRACKET -> brackets += 1
         if kind == TOKEN_RBRACKET && brackets > 0 -> brackets -= 1
         if kind == TOKEN_LBRACE {
-            if parens == 0 && brackets == 0 && braces == 0 -> return parser_if_hole_table_ahead(state)
+            if parens == 0 && brackets == 0 && braces == 0 {
+                return parser_if_hole_table_ahead(state)
+            }
             braces += 1
         }
         if kind == TOKEN_RBRACE && braces > 0 -> braces -= 1
         if parens == 0 && brackets == 0 && braces == 0 {
             if kind == TOKEN_UNIFIED_ARROW -> return true
             if kind == TOKEN_EQ_EQ || kind == TOKEN_NOT_EQ || kind == TOKEN_LT || kind == TOKEN_LE || kind == TOKEN_GT || kind == TOKEN_GE {
-                if parser_kind_at(state, offset + 1) == TOKEN_LBRACE -> return !parser_if_table_has_statement_arm(state)
+                if parser_kind_at(state, offset + 1) == TOKEN_LBRACE {
+                    return !parser_if_table_has_statement_arm(state)
+                }
             }
         }
         offset += 1
@@ -211,7 +229,9 @@ parser_expression_form_if_ahead: fn(state: &JetParserState) -> Bool Never! {
 
 // `if` and `loop` reach `parser_parse_expression_form` from the prefix parser.
 parser_parse_expression_form: fn(state: &JetParserState, depth: Int) -> ParsedExpr {
-    if parser_current_kind(state) == TOKEN_KW_LOOP -> return parser_expression_form_parse_loop(state, depth + 1)
+    if parser_current_kind(state) == TOKEN_KW_LOOP {
+        return parser_expression_form_parse_loop(state, depth + 1)
+    }
     parts := [ParserBranchPart]{}
     parser_expression_form_parse_if(state, depth + 1, true, parts)
 }
@@ -254,7 +274,9 @@ parser_expression_form_pattern_condition: fn(state: &JetParserState, subject: Ex
         parser_expression_form_error(state, "E0366", pattern.span, "pattern arms need `==` — this table uses `{op_text}`", "structural patterns compare by shape under `if subject == {{ … }}` only", "write `if subject == {{ … }}` for pattern arms, or use a Bool head")
         return Expr.Bool{value: false, span: pattern.span, id: parser_node_id(state)}
     }
-    if parser_dispatch_hole_marked(subject) -> return parser_dispatch_hole_pattern(state, subject, pattern)
+    if parser_dispatch_hole_marked(subject) {
+        return parser_dispatch_hole_pattern(state, subject, pattern)
+    }
     Expr.PatternTest{subject: subject, pattern: pattern.pattern, span: pattern.span, id: parser_node_id(state)}
 }
 
@@ -339,7 +361,9 @@ parser_expression_form_arm_alternates: fn(state: &JetParserState, subject: Expr,
 // that still distributes (and needs parentheses when it has several atoms).
 // In a hole table it is an ordinary Bool operand.
 parser_expression_form_arm_bool_operand: fn(state: &JetParserState, subject: Expr, op: BinOp, depth: Int) -> Expr {
-    if parser_dispatch_hole_marked(subject) -> return parser_expression_form_dispatch_atom(state, depth + 1).expr
+    if parser_dispatch_hole_marked(subject) {
+        return parser_expression_form_dispatch_atom(state, depth + 1).expr
+    }
     if parser_current_kind(state) == TOKEN_LPAREN {
         parser_bump(state)
         inner: parser_expression_form_dispatch_condition(state, subject, op, depth + 1)
@@ -353,7 +377,9 @@ parser_expression_form_arm_bool_operand: fn(state: &JetParserState, subject: Exp
 
 parser_expression_form_arm_and: fn(state: &JetParserState, subject: Expr, op: BinOp, depth: Int) -> Expr {
     first: parser_expression_form_arm_alternates(state, subject, op, false, depth + 1)
-    if first.count > 1 && (parser_current_kind(state) == TOKEN_AND_AND || parser_current_kind(state) == TOKEN_OR_OR) -> parser_expression_form_distributed_group(state, first.span)
+    if first.count > 1 && (parser_current_kind(state) == TOKEN_AND_AND || parser_current_kind(state) == TOKEN_OR_OR) {
+        parser_expression_form_distributed_group(state, first.span)
+    }
     result := first.cond
     loop parser_current_kind(state) == TOKEN_AND_AND {
         parser_bump(state)
@@ -394,7 +420,9 @@ parser_expression_form_value_block: fn(state: &JetParserState, depth: Int) -> Pa
     statements := [Stmt]{}
     loop {
         // As in `parser_parse_body_block`: stop under an enclosing abort.
-        if parser_aborting(state) -> return ParserExpressionFormValueBranch{body: statements, value: Expr.NoElse{span: parser_current(state).span, id: parser_node_id(state)}, span: parser_cover(open.span, parser_current(state).span)}
+        if parser_aborting(state) {
+            return ParserExpressionFormValueBranch{body: statements, value: Expr.NoElse{span: parser_current(state).span, id: parser_node_id(state)}, span: parser_cover(open.span, parser_current(state).span)}
+        }
         parser_skip_semicolons(state)
         kind: parser_current_kind(state)
         if kind == TOKEN_RBRACE {
@@ -405,8 +433,11 @@ parser_expression_form_value_block: fn(state: &JetParserState, depth: Int) -> Pa
             }
             // A statement tail is E0114 at that statement; an empty branch is E0003 at
             // the `}`.
-            if statements.len() > 0 -> parser_expression_form_error(state, "E0114", jfmt_stmt_span(statements[statements.len() - 1]), "this value branch ends with a statement instead of a value", "a value-expected block must end with one unadorned expression; statements yield unit", "put one unadorned expression last, or use `return ...` for an early exit")
-            else -> parser_expression_form_error(state, "E0003", close.span, "this `if` branch is empty but is used as a value", "when `if` produces a value, each branch must end with one", "put a value as the last line, like `{{ x }}`")
+            if statements.len() > 0 {
+                parser_expression_form_error(state, "E0114", jfmt_stmt_span(statements[statements.len() - 1]), "this value branch ends with a statement instead of a value", "a value-expected block must end with one unadorned expression; statements yield unit", "put one unadorned expression last, or use `return ...` for an early exit")
+            } else {
+                parser_expression_form_error(state, "E0003", close.span, "this `if` branch is empty but is used as a value", "when `if` produces a value, each branch must end with one", "put a value as the last line, like `{{ x }}`")
+            }
             return ParserExpressionFormValueBranch{body: statements, value: Expr.NoElse{span: Span{start: close.span.start, end: close.span.start}, id: parser_node_id(state)}, span: parser_cover(open.span, close.span)}
         }
         if kind == TOKEN_EOF {
@@ -466,14 +497,18 @@ parser_expression_form_value_block: fn(state: &JetParserState, depth: Int) -> Pa
 // `next` arm parses as a name, which may be a local called `next`; sema
 // reads it as the loop-control word when no such name is in scope.
 parser_expression_form_selected_value: fn(state: &JetParserState, depth: Int) -> ParserExpressionFormValueBranch {
-    if parser_current_kind(state) == TOKEN_LBRACE -> return parser_expression_form_value_block(state, depth + 1)
+    if parser_current_kind(state) == TOKEN_LBRACE {
+        return parser_expression_form_value_block(state, depth + 1)
+    }
     if parser_current_kind(state) == TOKEN_RETURN || parser_current_kind(state) == TOKEN_BREAK {
         start: parser_current(state).span
         control: parser_parse_table_arm_statement(state)
         // The statement took the line break that ends it. Give the break back
         // so the table or the line around this branch ends there, and a `.Case`
         // on the next line starts the next arm instead of continuing a value.
-        if state.position > 0 && state.tokens[state.position - 1].kind == TOKEN_SEMI -> state.position -= 1
+        if state.position > 0 && state.tokens[state.position - 1].kind == TOKEN_SEMI {
+            state.position -= 1
+        }
         end: parser_prev_token_end(state)
         return ParserExpressionFormValueBranch{body: [Stmt]{control}, value: Expr.NoElse{span: Span{start: end, end: end}, id: parser_node_id(state)}, span: Span{start: start.start, end: end}}
     }
@@ -618,7 +653,9 @@ parser_expression_form_parse_dispatch_table: fn(state: &JetParserState, subject:
 // arms cover the subject (E0307), so it needs no `else` either.
 parser_expression_form_pattern_arm: fn(cond: Expr) -> Bool Never! {
     if cond == .PatternTest(_, _, _, _) -> return true
-    if cond == .Binary(op, left, _, _, _) -> return op == BinOp.And && parser_expression_form_pattern_arm(left)
+    if cond == .Binary(op, left, _, _, _) {
+        return op == BinOp.And && parser_expression_form_pattern_arm(left)
+    }
     false
 }
 
@@ -637,11 +674,15 @@ parser_dispatch_hole_count: fn(expr: Expr) -> Int Never! {
         .Ident(name, _, _) -> {
             if name == PARSER_DISPATCH_HOLE -> count = 1
         }
-        .Binary(_, left, right, _, _) -> count = parser_dispatch_hole_count(left) + parser_dispatch_hole_count(right)
-        .Unary(_, operand, _, _) -> count = parser_dispatch_hole_count(operand)
-        .Paren(value, _, _) -> count = parser_dispatch_hole_count(value)
-        .Field(base, _, _, _) -> count = parser_dispatch_hole_count(base)
-        .Index(base, index, _, _, _) -> count = parser_dispatch_hole_count(base) + parser_dispatch_hole_count(index)
+        .Binary(_, left, right, _, _) -> {
+            count = parser_dispatch_hole_count(left) + parser_dispatch_hole_count(right)
+        }
+        .Unary(_, operand, _, _) -> { count = parser_dispatch_hole_count(operand) }
+        .Paren(value, _, _) -> { count = parser_dispatch_hole_count(value) }
+        .Field(base, _, _, _) -> { count = parser_dispatch_hole_count(base) }
+        .Index(base, index, _, _, _) -> {
+            count = parser_dispatch_hole_count(base) + parser_dispatch_hole_count(index)
+        }
         .CompareChain(operands, _, _, _, _) -> {
             loop operand in operands -> count += parser_dispatch_hole_count(operand)
         }
@@ -669,14 +710,18 @@ parser_dispatch_hole_fill: fn(state: &JetParserState, header: &&Expr, candidate:
     if header == {
         .Ident(_, _, _) -> candidate
         .Binary(op, left, right, span, _) -> {
-            if parser_dispatch_hole_count(left) > 0 -> return Expr.Binary{op: op, left: parser_dispatch_hole_fill(state, left, candidate), right: right, span: span, id: parser_node_id(state)}
+            if parser_dispatch_hole_count(left) > 0 {
+                return Expr.Binary{op: op, left: parser_dispatch_hole_fill(state, left, candidate), right: right, span: span, id: parser_node_id(state)}
+            }
             Expr.Binary{op: op, left: left, right: parser_dispatch_hole_fill(state, right, candidate), span: span, id: parser_node_id(state)}
         }
         .Unary(op, operand, span, _) -> Expr.Unary{op: op, operand: parser_dispatch_hole_fill(state, operand, candidate), span: span, id: parser_node_id(state)}
         .Paren(value, span, _) -> Expr.Paren{value: parser_dispatch_hole_fill(state, value, candidate), span: span, id: parser_node_id(state)}
         .Field(base, member, span, _) -> Expr.Field{base: parser_dispatch_hole_fill(state, base, candidate), member: member, span: span, id: parser_node_id(state)}
         .Index(base, index, span, kind, _) -> {
-            if parser_dispatch_hole_count(base) > 0 -> return Expr.Index{base: parser_dispatch_hole_fill(state, base, candidate), index: index, span: span, kind: kind, id: parser_node_id(state)}
+            if parser_dispatch_hole_count(base) > 0 {
+                return Expr.Index{base: parser_dispatch_hole_fill(state, base, candidate), index: index, span: span, kind: kind, id: parser_node_id(state)}
+            }
             Expr.Index{base: base, index: parser_dispatch_hole_fill(state, index, candidate), span: span, kind: kind, id: parser_node_id(state)}
         }
         .CompareChain(operands, ops, hooks, span, _) -> {
@@ -692,7 +737,9 @@ parser_dispatch_hole_fill: fn(state: &JetParserState, header: &&Expr, candidate:
             Expr.Call{call: rebuilt, id: parser_node_id(state)}
         }
         .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _) -> {
-            if parser_dispatch_hole_count(receiver) > 0 -> return Expr.MethodCall{receiver: parser_dispatch_hole_fill(state, receiver, candidate), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: args, id: parser_node_id(state)}
+            if parser_dispatch_hole_count(receiver) > 0 {
+                return Expr.MethodCall{receiver: parser_dispatch_hole_fill(state, receiver, candidate), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: args, id: parser_node_id(state)}
+            }
             Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: parser_dispatch_hole_fill_args(state, args, candidate), id: parser_node_id(state)}
         }
         // `parser_dispatch_hole_count` finds no hole in these forms.
@@ -719,7 +766,9 @@ parser_dispatch_hole_marker: fn(header: Expr) -> Expr Never! {
 }
 
 parser_dispatch_hole_marked: fn(expr: Expr) -> Bool Never! {
-    if expr == .Ident(name, _, id) -> return name == PARSER_DISPATCH_HOLE && id == AST_NODE_GENERATED
+    if expr == .Ident(name, _, id) {
+        return name == PARSER_DISPATCH_HOLE && id == AST_NODE_GENERATED
+    }
     false
 }
 
@@ -746,7 +795,9 @@ parser_dispatch_hole_pattern: fn(state: &JetParserState, subject: Expr, pattern:
 // E0946: a hole table header holds exactly one hole.
 parser_dispatch_hole_check_header: fn(state: &JetParserState, header: Expr) {
     count: parser_dispatch_hole_count(header)
-    if count > 1 -> parser_add_error_code(state, "E0946", expr_span(header), "an `if` table header holds one `_` hole, and this one has {count}", "each arm's candidate takes the place of the one `_`, so a second `_` would stand for nothing", "keep one `_` and write the other value out in the header")
+    if count > 1 {
+        parser_add_error_code(state, "E0946", expr_span(header), "an `if` table header holds one `_` hole, and this one has {count}", "each arm's candidate takes the place of the one `_`, so a second `_` would stand for nothing", "keep one `_` and write the other value out in the header")
+    }
 }
 
 // E0948: a pattern or range arm in a hole table whose header uses the
@@ -765,8 +816,12 @@ ParserDispatchHoleComparison: struct {
 parser_dispatch_hole_comparison: fn(header: Expr) -> ParserDispatchHoleComparison? Never! {
     if header == .Binary(op, left, right, _, _) {
         if parser_expression_form_dispatch_op_kind(op) {
-            if parser_dispatch_hole_is(right) && parser_dispatch_hole_count(left) == 0 -> return Val(ParserDispatchHoleComparison{subject: left, op: op})
-            if parser_dispatch_hole_is(left) && parser_dispatch_hole_count(right) == 0 && (op == BinOp.Eq || op == BinOp.Ne) -> return Val(ParserDispatchHoleComparison{subject: right, op: op})
+            if parser_dispatch_hole_is(right) && parser_dispatch_hole_count(left) == 0 {
+                return Val(ParserDispatchHoleComparison{subject: left, op: op})
+            }
+            if parser_dispatch_hole_is(left) && parser_dispatch_hole_count(right) == 0 && (op == BinOp.Eq || op == BinOp.Ne) {
+                return Val(ParserDispatchHoleComparison{subject: right, op: op})
+            }
         }
     }
     None
@@ -782,7 +837,9 @@ parser_expression_form_dispatch_op_kind: fn(op: BinOp) -> Bool Never! {
 parser_expression_form_parse_hole_table: fn(state: &JetParserState, header: &&Expr, start: Span, depth: Int) -> ParsedExpr {
     parser_dispatch_hole_check_header(state, header)
     compared: parser_dispatch_hole_comparison(header)
-    if compared == .Val(table) -> return parser_expression_form_parse_dispatch_table(state, table.subject, table.op, start, depth + 1)
+    if compared == .Val(table) {
+        return parser_expression_form_parse_dispatch_table(state, table.subject, table.op, start, depth + 1)
+    }
     saved_else_arms: state.else_arms.len()
     marker: parser_dispatch_hole_marker(header)
     state.dispatch_hole_headers.push(header)
@@ -824,7 +881,9 @@ parser_expression_form_parse_if: fn(state: &JetParserState, depth: Int, lint_sty
     // As Rust's `?`: once the arrow is missing (a classic `if c {` statement
     // read as a value), the value form ends here. A speculative parse that
     // is about to be rewound then never reads the statement's body.
-    if parser_aborting(state) -> return ParsedExpr{expr: condition.expr, span: parser_cover(start.span, condition.span)}
+    if parser_aborting(state) {
+        return ParsedExpr{expr: condition.expr, span: parser_cover(start.span, condition.span)}
+    }
     then_start: parser_current(state).span.start
     then_branch: parser_expression_form_selected_value(state, depth + 1)
     parts.push(ParserBranchPart{is_else: false, cond: cond_span, body: Span{start: then_start, end: parser_prev_token_end(state)}})
@@ -855,6 +914,8 @@ parser_expression_form_parse_if: fn(state: &JetParserState, depth: Int, lint_sty
         }
     }
     span: parser_cover(start.span, end)
-    if lint_style && (chained || parser_authored_line_break(state, branch_start, state.position)) -> parser_prefer_arm_table(state, start.span, parts, saved_diagnostics)
+    if lint_style && (chained || parser_authored_line_break(state, branch_start, state.position)) {
+        parser_prefer_arm_table(state, start.span, parts, saved_diagnostics)
+    }
     ParsedExpr{expr: Expr.If{cond: condition.expr, then_body: then_branch.body, then_value: then_branch.value, else_body: else_body.move(), else_value: else_value.move(), span: span, id: parser_node_id(state)}, span: span}
 }

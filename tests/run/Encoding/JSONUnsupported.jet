@@ -6,19 +6,19 @@ use {
 
 // A comptime value runs on the build's implicit `Err` rail: an unhandled
 // failure fails the build, so this one handles the failure itself.
-COMPTIME_UNSUPPORTED: #run {
-    if json.to_string(Dyn.Float(math.NAN)) == {
-        .Ok(_) -> "accepted"
-        .Err(error) -> if error.format == .JSON && error.kind == .Unsupported -> error.reason else -> "another error"
-    }
-}
+COMPTIME_UNSUPPORTED: #run { if json.to_string(Dyn.Float(math.NAN)) == {
+    .Ok(_) -> "accepted"
+    .Err(error) -> if error.format == .JSON && error.kind == .Unsupported -> error.reason else -> "another error"
+} }
+
 COMPTIME_CHAR: #run { json.to_string('\n') ?? panic("comptime Char JSON") }
+
 C0_EXPECTED: "\"\\u0000\\u0001\\u0002\\u0003\\u0004\\u0005\\u0006\\u0007\\b\\t\\n\\u000b\\f\\r\\u000e\\u000f\\u0010\\u0011\\u0012\\u0013\\u0014\\u0015\\u0016\\u0017\\u0018\\u0019\\u001a\\u001b\\u001c\\u001d\\u001e\\u001f\""
 
 reject: fn(label: String, number: Float) {
     tree: Dyn.Array([Dyn]{Dyn.Float(number)})
     if json.to_string(tree) == {
-        .Ok(_) -> panic("non-finite JSON accepted")
+        .Ok(_) -> { panic("non-finite JSON accepted") }
         .Err(error) -> {
             assert(error.format == .JSON && error.kind == .Unsupported)
             assert_eq(error.path, "$")
@@ -52,7 +52,7 @@ run: fn() {
     print("C0 lowercase: {wire.contains("\\u001f") && !wire.contains("\\u001F")}")
     bad: Dyn.Float(math.NAN)
     if jsonl.to_string([Dyn]{Dyn.Int(12), bad}) == {
-        .Ok(_) -> panic("non-finite JSONL accepted")
+        .Ok(_) -> { panic("non-finite JSONL accepted") }
         .Err(error) -> {
             assert(error.format == .JSONL && error.kind == .Unsupported)
             print("JSONL: {error.path} offset={error.byte_offset} line={error.line ?? panic("record line")}")
@@ -60,8 +60,10 @@ run: fn() {
     }
     if jsonl.dumps([Dyn]{bad}) == .Ok(_) -> panic("non-finite JSONL dumps accepted")
     if jsonl.append_line("\n12", bad) == {
-        .Ok(_) -> panic("non-finite append accepted")
-        .Err(error) -> print("append: {error.path} offset={error.byte_offset} line={error.line ?? panic("record line")}")
+        .Ok(_) -> { panic("non-finite append accepted") }
+        .Err(error) -> {
+            print("append: {error.path} offset={error.byte_offset} line={error.line ?? panic("record line")}")
+        }
     }
     print("exact Int: {json.to_string(Dyn.Int(9007199254740993)) ?? panic("exact JSON")}")
 }

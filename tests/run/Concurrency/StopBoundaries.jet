@@ -33,9 +33,7 @@ check: fn(name: String, value: Int) -> Int ParseError! {
 
 consume: fn(name: String) -> Int ParseError! {
     total := 0
-    loop value in guarded(name) {
-        total += check(name, value)
-    }
+    loop value in guarded(name) -> total += check(name, value)
     Ok(total)
 }
 
@@ -51,9 +49,15 @@ consume_until_cancel: fn(started: Sender<Int>, gate: Receiver<Int>) -> Int {
 
 failure_label: fn(error: TaskFailure) -> String {
     if error == {
-        .Panicked(reason) -> { return "panicked: {reason}" }
-        .DeadlineBlown -> { return "deadline" }
-        .Cancelled -> { return "cancelled" }
+        .Panicked(reason) -> {
+            return "panicked: {reason}"
+        }
+        .DeadlineBlown -> {
+            return "deadline"
+        }
+        .Cancelled -> {
+            return "cancelled"
+        }
     }
 }
 
@@ -81,7 +85,7 @@ run: fn() {
     print("task: started with {started_rx.receive() ?? -1}")
     worker.cancel()
     if worker.join() == {
-        .Ok(sum) -> print("task: finished {sum}")
+        .Ok(sum) -> { print("task: finished {sum}") }
         .Err(error) -> print("task: {failure_label(error)}")
     }
     gate_tx.close()

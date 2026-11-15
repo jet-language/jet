@@ -6,6 +6,7 @@ use {
 }
 
 multipart_crlf: fn() -> String { "\r\n" }
+
 multipart_length: fn(headers: String) -> Int {
     loop line in headers.lines() {
         pair: txt.split_once(line, ":")
@@ -15,6 +16,7 @@ multipart_length: fn(headers: String) -> Int {
     }
     panic("Content-Length missing")
 }
+
 multipart_test: fn() {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
@@ -80,4 +82,7 @@ multipart_test: fn() {
     assert(body == expected, "original exact multipart body")
     assert(txt.split(body, "--{boundary}").len() - 1 == 2, "original delimiter substring count")
 }
-#Test("core_http_client_multipart_boundary_does_not_collide_with_fields") { multipart_test() }
+
+#Test("core_http_client_multipart_boundary_does_not_collide_with_fields") {
+    multipart_test()
+}

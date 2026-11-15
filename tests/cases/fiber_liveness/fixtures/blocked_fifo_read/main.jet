@@ -39,7 +39,7 @@ run: fn() {
     _ := one.join() ?? -1
     latency: time.instant() - start
     read := 0
-    loop handle in handles { read += handle.join() ?? 0 }
+    loop handle in handles -> read += handle.join() ?? 0
     _ := feed.join() ?? -1
     print("{read} bytes read from {BLOCKERS} fifos")
     print("quick task under 100 ms {latency.in(.Milliseconds) < 100}")

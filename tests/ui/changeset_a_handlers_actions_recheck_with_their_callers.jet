@@ -11,20 +11,27 @@ Traced: struct {
     }
 }
 
-#Traced
-load: fn() -> Int { 1 }
+#Traced load: fn() -> Int { 1 }
 
 install: fn(meta: Compiler) {
     meta.events(
         watch: .Functions{marked: Traced{}},
         fn(event) {
             if event == .Checked(.Function(f)) {
-                meta.add(#code { extra: fn() -> Int { 2 } }, scope: "extra")
-                meta.rewrite_body(f, #code {
-                    added: extra()
-                    print("added {added}")
-                    #{f.body}
-                })
+                meta.add(
+                    #code {
+                        extra: fn() -> Int { 2 }
+                    },
+                    scope: "extra",
+                )
+                meta.rewrite_body(
+                    f,
+                    #code {
+                        added: extra()
+                        print("added {added}")
+                        #{f.body}
+                    },
+                )
             }
         },
     )

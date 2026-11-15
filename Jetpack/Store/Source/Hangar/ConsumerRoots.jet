@@ -40,11 +40,15 @@ store_commit_profile_generation_root: fn(verification: &StoreVerification, roots
 // gate so a missing or rebound lifecycle root cannot look like a live
 // profile.
 store_validate_profile_generation_root: fn(verification: &StoreVerification, roots: HangarRoots, owner: String, profile: String, generation: Int, witness: String, targets: [String]) StoreError! {
-    if targets.len() == 0 -> return
+    if targets.len() == 0 {
+        return
+    }
     id: store_profile_generation_root_id(owner, profile, generation)
     snapshot: store_lifecycle_snapshot(verification, roots)
     root: snapshot.roots.get(id.as_str()) ?? return Err(StoreError.NotFound("profile generation lifecycle root is missing"))
-    if root.phase != RootPhase.Committed -> return Err(StoreError.Other("profile generation lifecycle root is not committed"))
+    if root.phase != RootPhase.Committed {
+        return Err(StoreError.Other("profile generation lifecycle root is not committed"))
+    }
     expected: store_sorted_unique(targets)
     if root.identity.kind != RootKind.ProfileGeneration || root.identity.producer.as_str() != "jetpack-profile-generation" || root.identity.incarnation.get() != 1 || root.identity.witness.as_str() != witness || root.targets != expected || root.protected_targets != expected {
         return Err(StoreError.Other("profile generation lifecycle root disagrees with its record"))
@@ -56,7 +60,9 @@ store_validate_profile_generation_root: fn(verification: &StoreVerification, roo
 // never be rebound to another witness or target set.
 store_reconcile_external_consumer_root: fn(verification: &StoreVerification, roots: HangarRoots, consumer: String, key: String, witness: String, requested: [String], at: Int) -> PreparedExternalConsumerRoot? StoreError! {
     targets: store_sorted_unique(requested)
-    if targets.len() == 0 -> return Err(StoreError.Other("external consumer root requires at least one Hangar object"))
+    if targets.len() == 0 {
+        return Err(StoreError.Other("external consumer root requires at least one Hangar object"))
+    }
     objects: files.join(roots.hangar_dir(), STORE_OBJECTS_DIR)
     objects_metadata: files.stat(objects)
     if objects_metadata.is_symlink || !objects_metadata.is_dir {
@@ -68,7 +74,9 @@ store_reconcile_external_consumer_root: fn(verification: &StoreVerification, roo
             .Ok(metadata) -> metadata.is_dir && !metadata.is_symlink
             .Err(_) -> false
         }
-        if !canonical_name || !real_directory -> return Err(StoreError.Other("external consumer target is not a canonical Hangar object"))
+        if !canonical_name || !real_directory {
+            return Err(StoreError.Other("external consumer target is not a canonical Hangar object"))
+        }
     }
     id: RootID.new("external-consumer:{consumer}:{store_sha256_hex(key.bytes())}")
     root_witness: RootWitness.new(witness)

@@ -8,6 +8,7 @@ package: {
         perf: .Library{ entry: perf }
     }
 }
+
 use core: core
 
 // core.perf — a process-global 0.0..=1.0 fidelity knob for adaptive work.
@@ -33,7 +34,9 @@ fidelity: fn() -[Env]> Float Never! {
 default_fidelity: fn() -> Float Never! { 1.0 }
 
 override_fidelity: fn(value: Float) PerfError! -[Env]> {
-    if core.math.is_nan(value) || value < 0.0 || value > 1.0 -> return Err(PerfError.OutOfRange(value))
+    if core.math.is_nan(value) || value < 0.0 || value > 1.0 {
+        return Err(PerfError.OutOfRange(value))
+    }
     // Preserve the existing f32 precision, including a negative zero.
     rounded: Float.from_f32(F32.from_float(value) ?? panic("validated fidelity cannot overflow F32"))
     core.perf.__write_bits(core.math.to_bits(rounded) + 1)

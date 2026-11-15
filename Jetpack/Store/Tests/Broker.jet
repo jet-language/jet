@@ -29,10 +29,10 @@ store_broker_test_request: fn(identity_name: String, reference: String, source: 
         reference: reference,
         cache_identity: CacheIdentity{source_fingerprint: "sha256:{identity_name}-source", recipe_fingerprint: "sha256:{identity_name}-action", policy_fingerprint: "sha256:{identity_name}-policy", platform: pkg_host_platform()},
         references: [String]{},
-        outputs: [String: String]{"out": source},
+        outputs: [String:String]{"out": source},
         signature: "",
         provenance: provenance,
-        platform_artifact_kind: ""
+        platform_artifact_kind: "",
     }
 }
 
@@ -76,12 +76,12 @@ store_broker_test_incoming_empty: fn(shared_root: String) -> Bool Never! {
 #Test("store broker request operations reject fields from the other operation") {
     write := BrokerWireReader.memory("{STORE_BROKER_REQUEST_MAGIC}\nop=write\nbytes=0\ncredential=00\n\n".bytes())
     if store_broker_read_request(write) == {
-        .Ok(_) -> panic("a write without provenance must fail")
+        .Ok(_) -> { panic("a write without provenance must fail") }
         .Err(error) -> assert(error.message().contains("no `reference`"))
     }
     read := BrokerWireReader.memory("{STORE_BROKER_REQUEST_MAGIC}\nop=read\nreference={store_hex_bytes("app".bytes())}\nbytes=0\n\n".bytes())
     if store_broker_read_request(read) == {
-        .Ok(_) -> panic("a read with archive bytes must fail")
+        .Ok(_) -> { panic("a read with archive bytes must fail") }
         .Err(error) -> assert(error.message().contains("cannot include archive bytes"))
     }
 }
@@ -89,15 +89,21 @@ store_broker_test_incoming_empty: fn(shared_root: String) -> Bool Never! {
 #Test("store broker archive response round trips success and missing status") {
     encoded: store_broker_encode_archive_response("archive".bytes()) ?? panic("encode")
     reader := BrokerWireReader.memory(encoded)
-    assert_eq(if store_broker_read_archive_response(reader) == {
-        .Ok(found) -> found
-        .Err(error) -> panic("parse")
-    }, Val("archive".bytes()))
+    assert_eq(
+        if store_broker_read_archive_response(reader) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("parse")
+        },
+        Val("archive".bytes()),
+    )
     missing := BrokerWireReader.memory("{STORE_BROKER_RESPONSE_MAGIC}\nstatus=missing\n\n".bytes())
-    assert_eq(if store_broker_read_archive_response(missing) == {
-        .Ok(found) -> found
-        .Err(error) -> panic("parse missing")
-    }, [U8]?{None})
+    assert_eq(
+        if store_broker_read_archive_response(missing) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("parse missing")
+        },
+        [U8]?{None},
+    )
 }
 
 #Test("store broker configured paths must stay inside the installed boundary") {
@@ -107,7 +113,7 @@ store_broker_test_incoming_empty: fn(shared_root: String) -> Bool Never! {
     config: SharedStoreConfig{socket: files.join(roots.root, "outside.sock"), shared_root: files.join(base, "root"), trust_key: files.join(base, "trust/hangar.key"), grants: files.join(base, "users")}
     layout: store_broker_user_layout(roots)
     if store_broker_validate_config_paths(layout, config) == {
-        .Ok(_) -> panic("an outside socket must be refused")
+        .Ok(_) -> { panic("an outside socket must be refused") }
         .Err(error) -> assert(error.message().contains("outside the installed private boundary"))
     }
     store_test_drop_roots(roots)
@@ -148,7 +154,9 @@ store_broker_test_incoming_empty: fn(shared_root: String) -> Bool Never! {
 }
 
 #Test("store broker admin service unit passes systemd unit validation") {
-    if sys.family() == "windows" -> return
+    if sys.family() == "windows" {
+        return
+    }
     roots: store_test_temp_roots()
     trust: files.join(roots.root, "trust")
     grants: files.join(roots.root, "users")
@@ -214,7 +222,9 @@ store_broker_test_incoming_empty: fn(shared_root: String) -> Bool Never! {
 
 #Test("store broker authenticated socket handler promotes reads and rejects failures") {
     verification := StoreVerification.new()
-    if sys.family() == "windows" -> return
+    if sys.family() == "windows" {
+        return
+    }
     roots: store_test_temp_roots()
     local: HangarRoots.at(files.join(roots.root, "l"))
     source: files.join(roots.root, "s")
@@ -279,7 +289,9 @@ store_broker_test_incoming_empty: fn(shared_root: String) -> Bool Never! {
 
 #Test("store broker realize verified round trips through broker and fails closed on auth") {
     verification := StoreVerification.new()
-    if sys.family() == "windows" -> return
+    if sys.family() == "windows" {
+        return
+    }
     roots: store_test_temp_roots()
     repo: files.join(roots.root, "repo")
     package: files.join(repo, "pkgs/hello")
@@ -341,7 +353,7 @@ store_broker_test_incoming_empty: fn(shared_root: String) -> Bool Never! {
         store_broker_test_serve_result(broker_verification, denied_listener, server_config)
     }
     if store_realize_verified(verification, denied, store_broker_test_ctx(denied), RealizeRequest.Package{spec: spec, table: table}) == {
-        .Ok(_) -> panic("unauthorized broker read must not reach provider realization")
+        .Ok(_) -> { panic("unauthorized broker read must not reach provider realization") }
         .Err(error) -> assert(error == .Store(_))
     }
     assert(store_find_by_reference(verification, denied, "hello@mine") == None)
@@ -373,13 +385,13 @@ store_broker_test_ctx: fn(roots: HangarRoots) -> ProviderCtx Never! {
 #Test("store broker writer grants require short lived source and builder authority") {
     incomplete: store_broker_parse_writer_grant("jet-shared-store-grant-v2\nread\nwrite\n") ?? panic("parse incomplete")
     if store_broker_authorize_grant(incomplete, true, store_broker_test_binding(), "abc", store_broker_now_secs()) == {
-        .Ok(_) -> panic("a grant without expiry must be refused")
+        .Ok(_) -> { panic("a grant without expiry must be refused") }
         .Err(error) -> assert(error.message().contains("expiry"))
     }
     now: store_broker_now_secs()
     expired: store_broker_parse_writer_grant("jet-shared-store-grant-v2\nread\nwrite\nexpires={now - 1}\ncredential=abc\nsource=source\nbuilder=builder\naction=action\noutput=output\nplatform=platform\nsandbox=sandbox\npolicy=policy\n") ?? panic("parse expired")
     if store_broker_authorize_grant(expired, true, store_broker_test_binding(), "abc", store_broker_now_secs()) == {
-        .Ok(_) -> panic("an expired grant must be refused")
+        .Ok(_) -> { panic("an expired grant must be refused") }
         .Err(error) -> assert(error.message().contains("expired"))
     }
 }
@@ -392,8 +404,10 @@ store_broker_test_ctx: fn(roots: HangarRoots) -> ProviderCtx Never! {
     roots: store_test_temp_roots()
     verification := StoreVerification.new()
     if store_serve_shared_store(verification, HangarRoots.at(files.join(roots.root, "local"))) == {
-        .Ok(_) -> panic("the broker service must not serve without a handed-over listener")
-        .Err(error) -> assert(error == .Unsupported(_) && error.message().contains("not supported yet"), "unexpected broker refusal: {error.message()}")
+        .Ok(_) -> { panic("the broker service must not serve without a handed-over listener") }
+        .Err(error) -> {
+            assert(error == .Unsupported(_) && error.message().contains("not supported yet"), "unexpected broker refusal: {error.message()}")
+        }
     }
     socket: files.join(roots.root, "peer.sock")
     listener: net.unix_listen(socket) ?? panic("listen")
@@ -402,8 +416,10 @@ store_broker_test_ctx: fn(roots: HangarRoots) -> ProviderCtx Never! {
     stream := accepting.join() ?? panic("accept")
     config: store_broker_test_configure(HangarRoots.at(files.join(roots.root, "served")))
     if store_broker_serve_connection(verification, stream, config) == {
-        .Ok(_) -> panic("a connection without kernel peer credentials must be refused")
-        .Err(error) -> assert(error == .Unsupported(_) && error.message().contains("peer's credentials"), "unexpected peer refusal: {error.message()}")
+        .Ok(_) -> { panic("a connection without kernel peer credentials must be refused") }
+        .Err(error) -> {
+            assert(error == .Unsupported(_) && error.message().contains("peer's credentials"), "unexpected peer refusal: {error.message()}")
+        }
     }
     net.unix_close(client).drop("client close")
     store_test_drop_roots(roots)

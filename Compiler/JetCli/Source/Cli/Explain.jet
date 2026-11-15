@@ -28,9 +28,13 @@ jet_cli_explain_diagnostic: fn(args: [String], color: Bool, json: Bool) -> JetCL
     if args.len() < 2 {
         return Val(jet_cli_done("", "usage: jet explain <CODE|FACT> [file]\n       jet explain marker <file>:<line> <policy-key>\n       {JET_CLI_EXPLAIN_EFFECTS_USAGE}\n", JET_DRIVER_EXIT_USAGE))
     }
-    if diagnostic_explanation(args[1]) == .Val(explanation) -> return Val(jet_cli_explanation_output(explanation, color, json))
+    if diagnostic_explanation(args[1]) == .Val(explanation) {
+        return Val(jet_cli_explanation_output(explanation, color, json))
+    }
     bytes: args[1].bytes()
-    if bytes.len() == 0 || bytes[0] < (U8{65}) || bytes[0] > (U8{90}) || args[1].contains(".") -> return None
+    if bytes.len() == 0 || bytes[0] < (U8{65}) || bytes[0] > (U8{90}) || args[1].contains(".") {
+        return None
+    }
     explanation: diagnostic_explanation("jet.{args[1]}") ?? return None
     Val(jet_cli_explanation_output(explanation, color, json))
 }
@@ -46,9 +50,7 @@ jet_cli_is_diagnostic_type_path: fn(value: String) -> Bool Never! {
         first: Int{bytes[0]}
         if index == parts.len() - 1 {
             if first < 65 || first > 90 -> return false
-        } else if first < 97 || first > 122 {
-            return false
-        }
+        } else if first < 97 || first > 122 { return false }
         loop byte in bytes {
             code: Int{byte}
             word: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
@@ -74,9 +76,15 @@ jet_cli_explain_loaded_diagnostic_type: fn(name: String, loaded: JetDriverSource
         if source_module.module_name != module_name -> next
         loop item in source_module.program.items {
             methods := [Func]?{None}
-            if item == .Impl(definition) && definition.type_name == type_name && definition.trait_name == .Val(trait_name) && trait_name == "Diagnostic" -> methods = Val(definition.methods)
-            if item == .Struct(definition) && definition.name == type_name -> methods = jet_cli_nested_diagnostic_methods(definition.trait_impls)
-            if item == .Enum(definition) && definition.name == type_name -> methods = jet_cli_nested_diagnostic_methods(definition.trait_impls)
+            if item == .Impl(definition) && definition.type_name == type_name && definition.trait_name == .Val(trait_name) && trait_name == "Diagnostic" {
+                methods = Val(definition.methods)
+            }
+            if item == .Struct(definition) && definition.name == type_name {
+                methods = jet_cli_nested_diagnostic_methods(definition.trait_impls)
+            }
+            if item == .Enum(definition) && definition.name == type_name {
+                methods = jet_cli_nested_diagnostic_methods(definition.trait_impls)
+            }
             if methods == .Val(found) {
                 what: jet_cli_diagnostic_type_literal(source_module.source, found, "what")
                 explanation: DiagnosticExplanation{code: name, stage: "library", meaning: what ?? "", what: what, why: jet_cli_diagnostic_type_literal(source_module.source, found, "why"), fix: jet_cli_diagnostic_type_literal(source_module.source, found, "fix"), example: None}

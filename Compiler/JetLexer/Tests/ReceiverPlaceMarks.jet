@@ -9,7 +9,9 @@ place_mark_semi_before: fn(source: String, mark: Int) -> Bool Never! {
     lexed: lex(source.bytes())
     assert(lexed.diagnostics.is_empty())
     loop index in 0..<lexed.tokens.len() {
-        if lexed.tokens[index].kind == mark -> return index > 0 && lexed.tokens[index - 1].kind == TOKEN_SEMI
+        if lexed.tokens[index].kind == mark {
+            return index > 0 && lexed.tokens[index - 1].kind == TOKEN_SEMI
+        }
     }
     panic("the source has no mark token")
 }

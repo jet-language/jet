@@ -11,12 +11,13 @@ use {
 }
 
 output: fn(size: String) {
-    if size == "small" -> print("ok")
-    else -> print("0123456789abcdef0123456789abcdef")
+    if size == "small" -> print("ok") else -> print("0123456789abcdef0123456789abcdef")
 }
 
 cpu: fn() {
-    loop {}
+    loop {
+
+    }
 }
 
 memory: fn() {
@@ -34,7 +35,7 @@ descriptors: fn() {
     path: if sys.family() == "windows" -> "NUL" else -> "/dev/null"
     loop {
         if files.open(path) == {
-            .Ok(handle) -> handles.push(handle)
+            .Ok(handle) -> { handles.push(handle) }
             .Err(_) -> time.sleep(1ms)
         }
     }
@@ -136,12 +137,11 @@ reaped: fn(pid_files: [String]) {
 run: fn() {
     args: process.args()
     mode: args.get(0) ?? ""
-    if mode == "output" -> output(args.get(1) ?? "large")
-    else if mode == "cpu" -> cpu()
-    else if mode == "memory" -> memory()
-    else if mode == "files" -> descriptors()
-    else if mode == "tree" -> tree(args.get(1) ?? panic("tree needs a pid file"))
-    else if mode == "descendant" -> descendant(args.get(1) ?? panic("descendant needs a pid file"))
-    else if mode == "reaped" -> reaped(args.slice(1, args.len()))
-    else -> process.exit(2)
+    if mode == "output" -> output(args.get(1) ?? "large") else if mode == "cpu" -> cpu() else if mode == "memory" {
+        memory()
+    } else if mode == "files" { descriptors() } else if mode == "tree" {
+        tree(args.get(1) ?? panic("tree needs a pid file"))
+    } else if mode == "descendant" {
+        descendant(args.get(1) ?? panic("descendant needs a pid file"))
+    } else if mode == "reaped" { reaped(args.slice(1, args.len())) } else { process.exit(2) }
 }

@@ -34,7 +34,9 @@ lsp_completion_prefix_start: fn(bytes: [U8], offset: Int) -> Int Never! {
     start := offset
     loop start > 0 {
         code: Int{bytes[start - 1]}
-        if !((code >= 65 && code <= 90) || (code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code == 95 || code >= 128) -> break
+        if !((code >= 65 && code <= 90) || (code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code == 95 || code >= 128) {
+            break
+        }
         start -= 1
     }
     start
@@ -57,11 +59,12 @@ lsp_type_owner: fn(ty: Type) -> String Never! {
 
 // What `receiver.` completes against.
 LSPMemberScope: enum {
-    // The members of values or of a type named this.
     Owner(name: String)
-    // The declarations of the checked module at this path.
     Module(path: String)
 }
+
+// The members of values or of a type named this.
+// The declarations of the checked module at this path.
 
 lsp_member_scope: fn(view: LSPView, receiver_end: Int) -> LSPMemberScope? Never! {
     index: view.checked.index ?? return None
@@ -99,7 +102,9 @@ lsp_scope_candidate: fn(symbol: SemSymbol, module_path: String?, offset: Int) ->
         .Source(_) -> {}
     }
     if (module_path ?? return false) != symbol.module_path -> return false
-    if symbol.lexical_scope == .Val(scope) -> return lsp_span_holds(scope.span, offset) && scope.declaration_offset <= offset
+    if symbol.lexical_scope == .Val(scope) {
+        return lsp_span_holds(scope.span, offset) && scope.declaration_offset <= offset
+    }
     true
 }
 
@@ -114,7 +119,9 @@ lsp_completion_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String 
     if start > 0 && bytes[start - 1] == (U8{46}) {
         receiver_end: start - 1
         empty: lsp_response(id, "{{\"isIncomplete\":false,\"items\":[]}}")
-        if receiver_end == 0 || lsp_completion_prefix_start(bytes, receiver_end) == receiver_end -> return empty
+        if receiver_end == 0 || lsp_completion_prefix_start(bytes, receiver_end) == receiver_end {
+            return empty
+        }
         member = Val(lsp_member_scope(view, receiver_end - 1) ?? return empty)
     }
     seen := [String:Bool]{}

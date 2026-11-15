@@ -16,7 +16,9 @@ cli_task_access_trace_path: fn(cache_key: String) -[Env]> String Never! {
 
 // Run `argv` in `env` under the file-access tracer, writing `trace_path`.
 cli_run_job_with_access_trace: fn(env: &ShellEnv, argv: [String], project_dir: String, clean: Bool, silent: Bool, trace_path: String) -[IO, FS, Env, Exec, Time, Time.Wait, Rand]> Int CLIError! {
-    if !sys.is_linux() -> return Err(CLIError.Other("strict cached job access tracing is currently supported only on Linux"))
+    if !sys.is_linux() {
+        return Err(CLIError.Other("strict cached job access tracing is currently supported only on Linux"))
+    }
     // A leased `strace` stays a bare name the run resolves through its
     // lease; a host one is found along our bin dirs and the base PATH.
     tracer: if env.leases_executable("strace") -> "strace" else -> {
@@ -32,7 +34,9 @@ cli_run_job_with_access_trace: fn(env: &ShellEnv, argv: [String], project_dir: S
         silent -> env.run_command_in_silent(traced, Val(project_dir))
         else -> env.run_command_in(traced, Val(project_dir))
     }
-    if !files.is_file(trace_path) -> return Err(CLIError.Other("file-access tracer completed without producing an access log"))
+    if !files.is_file(trace_path) {
+        return Err(CLIError.Other("file-access tracer completed without producing an access log"))
+    }
     Ok(code)
 }
 
@@ -47,9 +51,13 @@ cli_task_undeclared_accesses: fn(project_dir: String, job_cwd: String, entry: St
     project_root: files.canonicalize(project_dir) ?? return Err(CLIError.Other("couldn't resolve project root for access proof: {err}"))
     entry_path: files.canonicalize(entry) ?? return Err(CLIError.Other("couldn't resolve job entry for access proof: {err}"))
     declared := [String]{}
-    loop input in metadata.inputs -> declared.push(cli_job_path(project_dir, Val(input), "input", true))
+    loop input in metadata.inputs {
+        declared.push(cli_job_path(project_dir, Val(input), "input", true))
+    }
     outputs := [String]{}
-    loop output in metadata.outputs -> outputs.push(cli_job_path(project_dir, Val(output), "output", true))
+    loop output in metadata.outputs {
+        outputs.push(cli_job_path(project_dir, Val(output), "output", true))
+    }
     git_dir: files.join(project_root, ".git")
     target_dir: files.join(project_root, "target")
     unexpected := [String]{}
@@ -62,7 +70,9 @@ cli_task_undeclared_accesses: fn(project_dir: String, job_cwd: String, entry: St
                 next
             }
             path: if files.exists(normalized) -> files.canonicalize(normalized) ?? normalized else -> normalized
-            if !cli_path_starts_with(path, project_root) || cli_path_starts_with(path, git_dir) || cli_path_starts_with(path, target_dir) || path == entry_path -> next
+            if !cli_path_starts_with(path, project_root) || cli_path_starts_with(path, git_dir) || cli_path_starts_with(path, target_dir) || path == entry_path {
+                next
+            }
             if cli_path_covered(path, declared) || cli_path_covered(path, outputs) -> next
             shown: path.replace("\\", "/")
             if !unexpected.contains(shown) -> unexpected.push(shown)

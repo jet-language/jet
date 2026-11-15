@@ -25,11 +25,9 @@ ImageError: enum {
     // Rust `error.kind() == ErrorKind::NotFound`.
     is_not_found: fn(self) -> Bool Never! {
         if self == {
-            .IO(error) -> {
-                if error == {
-                    .NotFound(_) -> true
-                    .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> false
-                }
+            .IO(error) -> if error == {
+                .NotFound(_) -> true
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> false
             }
             .InvalidData(_) | .InvalidInput(_) | .AlreadyExists(_) | .Other(_) -> false
         }
@@ -41,6 +39,4 @@ impl IOError -> ImageError { ImageError.IO(self) }
 impl EncodingError -> ImageError { ImageError.Other(self.reason) }
 
 // Rust `invalid(message)`: an `InvalidData` refusal with final text.
-image_invalid: fn(message: String) -> ImageError Never! {
-    ImageError.InvalidData(message)
-}
+image_invalid: fn(message: String) -> ImageError Never! { ImageError.InvalidData(message) }

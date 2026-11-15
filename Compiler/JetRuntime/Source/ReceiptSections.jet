@@ -7,7 +7,9 @@
 // without the payload. The CLI receipt reader (ReceiptSections.jet in JetCli)
 // parses exactly this format.
 RECEIPT_SECTION_BYTES: I64{67108864}
+
 RECEIPT_SECTION_COUNT: I64{256}
+
 // O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC.
 RECEIPT_SECTION_STAGE_OPEN: I64{524481}
 
@@ -20,7 +22,9 @@ RECEIPT_SECTION_STAGE_OPEN: I64{524481}
 
 receipt_section_attach: fn(tree: I64, section: I64, type_name: I64, schema: I64) {
     directory: rt_env_get(env_name_jet_receipt_dir())
-    if (directory == I64{0}) -> return
+    if (directory == I64{0}) {
+        return
+    }
     claim: rt_env_get(env_name_jet_receipt_claim())
     if (claim == I64{0}) {
         jet_rt_string_drop(directory)
@@ -53,12 +57,14 @@ receipt_section_stop_with: fn(head: I64, value: I64, tail: I64) {
 
 // 64 lowercase hex digits.
 receipt_section_digest_ok: fn(value: I64) -> Bool {
-    if (rt_text_len(value) != I64{64}) -> return false
+    if (rt_text_len(value) != I64{64}) { return false }
     data: rt_text_data(value)
     at := I64{0}
     loop at < (I64{64}) {
         byte: rt_text_byte(wrapping(data + at))
-        if !((byte >= I64{48} && byte <= I64{57}) || (byte >= I64{97} && byte <= I64{102})) -> return false
+        if !((byte >= I64{48} && byte <= I64{57}) || (byte >= I64{97} && byte <= I64{102})) {
+            return false
+        }
         at += I64{1}
     }
     true
@@ -68,15 +74,17 @@ receipt_section_digest_ok: fn(value: I64) -> Bool {
 // UTF-8 C2 80..9F) and no path separator.
 receipt_section_name_ok: fn(value: I64, limit: I64) -> Bool {
     length: rt_text_len(value)
-    if (length == I64{0} || length > limit) -> return false
+    if (length == I64{0} || length > limit) { return false }
     data: rt_text_data(value)
     at := I64{0}
     loop at < length {
         byte: rt_text_byte(wrapping(data + at))
-        if (byte < I64{32} || byte == I64{127} || byte == I64{47} || byte == I64{92}) -> return false
+        if (byte < I64{32} || byte == I64{127} || byte == I64{47} || byte == I64{92}) {
+            return false
+        }
         if (byte == I64{194} && at + I64{1} < length) {
             next_byte: rt_text_byte(wrapping(data + at + I64{1}))
-            if (next_byte >= I64{128} && next_byte <= I64{159}) -> return false
+            if (next_byte >= I64{128} && next_byte <= I64{159}) { return false }
         }
         at += I64{1}
     }
@@ -126,7 +134,7 @@ receipt_section_render: fn(target: I64, tree: I64) {
         rt_text_push_word(target, I64{91}, I64{1})
         at := I64{0}
         loop at < length {
-            if (at != I64{0}) -> rt_text_push_word(target, I64{44}, I64{1})
+            if (at != I64{0}) { rt_text_push_word(target, I64{44}, I64{1}) }
             receipt_section_render(target, rt_text_word(wrapping(data + at * DYN_ELEMENT_BYTES)))
             at += I64{1}
         }
@@ -140,7 +148,9 @@ receipt_section_render: fn(target: I64, tree: I64) {
         slot := at
         loop slot > (I64{0}) {
             previous: rt_text_word(wrapping(order + (slot - I64{1}) * I64{8}))
-            if (jet_rt_string_compare(rt_text_word(wrapping(previous + DYN_ENTRY_KEY)), rt_text_word(wrapping(entry + DYN_ENTRY_KEY))) <= I64{0}) -> break
+            if (jet_rt_string_compare(rt_text_word(wrapping(previous + DYN_ENTRY_KEY)), rt_text_word(wrapping(entry + DYN_ENTRY_KEY))) <= I64{0}) {
+                break
+            }
             fd_put(order, slot * I64{8}, previous)
             slot -= I64{1}
         }
@@ -150,7 +160,7 @@ receipt_section_render: fn(target: I64, tree: I64) {
     rt_text_push_word(target, I64{123}, I64{1})
     at = I64{0}
     loop at < length {
-        if (at != I64{0}) -> rt_text_push_word(target, I64{44}, I64{1})
+        if (at != I64{0}) { rt_text_push_word(target, I64{44}, I64{1}) }
         entry: rt_text_word(wrapping(order + at * I64{8}))
         dyn_quote(target, rt_text_word(wrapping(entry + DYN_ENTRY_KEY)))
         rt_text_push_word(target, I64{58}, I64{1})
@@ -245,7 +255,7 @@ receipt_section_capacity: fn(directory: I64, payload_bytes: I64) -> Bool {
     name: fd_c_path(directory)
     fd: host_call(I64{2}, name, FILES_O_DIRECTORY_CLOEXEC, I64{0})
     fd_c_path_drop(name, directory)
-    if (fd < I64{0}) -> return true
+    if (fd < I64{0}) { return true }
     buffer: jet_rt_alloc(FILES_DIRENT_BYTES, I64{8})
     facts: jet_rt_alloc(I64{128}, I64{8})
     count := I64{0}
@@ -254,8 +264,8 @@ receipt_section_capacity: fn(directory: I64, payload_bytes: I64) -> Bool {
     stop := I64{0}
     loop stop == (I64{0}) {
         listed: host_call(I64{217}, fd, buffer, FILES_DIRENT_BYTES)
-        if (listed == I64{-4}) -> next
-        if (listed <= I64{0}) -> break
+        if (listed == I64{-4}) { next }
+        if (listed <= I64{0}) { break }
         at := I64{0}
         loop at < listed {
             record: wrapping(buffer + at)
@@ -279,7 +289,7 @@ receipt_section_capacity: fn(directory: I64, payload_bytes: I64) -> Bool {
                 stop = rt_static_text("receipt section record is not a regular file")
                 break
             }
-            if (rt_text_byte(entry) == I64{46}) -> next
+            if (rt_text_byte(entry) == I64{46}) { next }
             count += I64{1}
             total = wrapping(total + rt_text_word(wrapping(facts + I64{56})))
         }
@@ -336,7 +346,9 @@ receipt_section_directory_at: fn(name: I64, length: I64, facts: I64) -> Bool {
             loop {
                 result: receipt_section_lstat(name, facts)
                 if (result == I64{0}) {
-                    if ((rt_text_word(wrapping(facts + I64{16})).bit_and(I64{61440})) != I64{16384}) -> safe = false
+                    if ((rt_text_word(wrapping(facts + I64{16})).bit_and(I64{61440})) != I64{16384}) {
+                        safe = false
+                    }
                     break
                 }
                 if (result != I64{-2}) {
@@ -364,8 +376,8 @@ receipt_section_write_all: fn(fd: I64, data: I64, length: I64) -> Bool {
         // write: trap_syscall, not host_call, whose read recorder allocates
         // (and records no write).
         result: trap_syscall(I64{1}, fd, wrapping(data + written), length - written, I64{0}, I64{0}, I64{0})
-        if (result == I64{-4}) -> next
-        if (result <= I64{0}) -> return false
+        if (result == I64{-4}) { next }
+        if (result <= I64{0}) { return false }
         written += result
     }
     true
@@ -374,14 +386,14 @@ receipt_section_write_all: fn(fd: I64, data: I64, length: I64) -> Bool {
 // Whether the file at the terminated `name` holds exactly `bytes`.
 receipt_section_same: fn(name: I64, bytes: I64) -> Bool {
     fd: host_call(I64{2}, name, I64{524288}, I64{0})
-    if (fd < I64{0}) -> return false
+    if (fd < I64{0}) { return false }
     length: rt_text_len(bytes)
     buffer: jet_rt_alloc(length + I64{1}, I64{1})
     filled := I64{0}
     loop filled <= length {
         result: host_call(I64{0}, fd, wrapping(buffer + filled), length + I64{1} - filled)
-        if (result == I64{-4}) -> next
-        if (result <= I64{0}) -> break
+        if (result == I64{-4}) { next }
+        if (result <= I64{0}) { break }
         filled += result
     }
     _ := host_call(I64{3}, fd, I64{0}, I64{0})
@@ -411,9 +423,7 @@ receipt_section_publish: fn(directory: I64, record_id: I64, record: I64) {
     published_name: fd_c_path(published)
     failure := rt_static_text("")
     fd: host_call(I64{2}, staged_name, RECEIPT_SECTION_STAGE_OPEN, I64{438})
-    if (fd < I64{0}) {
-        failure = rt_static_text("could not stage receipt section")
-    } else {
+    if (fd < I64{0}) { failure = rt_static_text("could not stage receipt section") } else {
         flushed := receipt_section_write_all(fd, rt_text_data(record), rt_text_len(record))
         if flushed {
             synced := I64{-4}
@@ -421,12 +431,12 @@ receipt_section_publish: fn(directory: I64, record_id: I64, record: I64) {
             flushed = synced == I64{0}
         }
         _ := host_call(I64{3}, fd, I64{0}, I64{0})
-        if !flushed {
-            failure = rt_static_text("could not flush receipt section")
-        } else {
+        if !flushed -> failure = rt_static_text("could not flush receipt section") else {
             linked: host_call(I64{86}, staged_name, published_name, I64{0})
             if (linked == I64{-17}) {
-                if !receipt_section_same(published_name, record) -> failure = rt_static_text("receipt section identity collision with different content")
+                if !receipt_section_same(published_name, record) {
+                    failure = rt_static_text("receipt section identity collision with different content")
+                }
             } else if (linked != I64{0}) {
                 failure = rt_static_text("could not publish receipt section")
             }
@@ -437,5 +447,5 @@ receipt_section_publish: fn(directory: I64, record_id: I64, record: I64) {
     fd_c_path_drop(published_name, published)
     jet_rt_string_drop(staged)
     jet_rt_string_drop(published)
-    if (rt_text_len(failure) != I64{0}) -> receipt_section_stop(failure)
+    if (rt_text_len(failure) != I64{0}) { receipt_section_stop(failure) }
 }

@@ -8,21 +8,43 @@ use {
     jetpack_foundation.[JET_KEYWORD_LIST, foundation_sanitize_crate_name]
     files: core.files
     jet_pkg_model.[
-        BinderHostOS, ForeignBindError, ForeignLanguage, pkg_binder_append_artifact_boundary,
-        pkg_binder_append_field, pkg_binder_canonicalize, pkg_binder_capture,
-        pkg_binder_cc_ar_identity, pkg_binder_create_dir_all, pkg_binder_find,
-        pkg_binder_is_ascii_alpha, pkg_binder_is_ascii_digit, pkg_binder_is_ident,
-        pkg_binder_launder_first_line, pkg_binder_remove_file_quiet, pkg_binder_remove_tree_quiet,
-        pkg_binder_slice, pkg_binder_tail, pkg_binder_words, pkg_binder_write, pkg_bridge_tool_path,
-        pkg_bytes_code, pkg_bytes_starts_with, pkg_bytes_text, pkg_sha256_hex,
+        BinderHostOS,
+        ForeignBindError,
+        ForeignLanguage,
+        pkg_binder_append_artifact_boundary,
+        pkg_binder_append_field,
+        pkg_binder_canonicalize,
+        pkg_binder_capture,
+        pkg_binder_cc_ar_identity,
+        pkg_binder_create_dir_all,
+        pkg_binder_find,
+        pkg_binder_is_ascii_alpha,
+        pkg_binder_is_ascii_digit,
+        pkg_binder_is_ident,
+        pkg_binder_launder_first_line,
+        pkg_binder_remove_file_quiet,
+        pkg_binder_remove_tree_quiet,
+        pkg_binder_slice,
+        pkg_binder_tail,
+        pkg_binder_words,
+        pkg_binder_write,
+        pkg_bridge_tool_path,
+        pkg_bytes_code,
+        pkg_bytes_starts_with,
+        pkg_bytes_text,
+        pkg_sha256_hex,
     ]
 }
 
 DART_BIND_SCHEMA: "jet-dart-bind-v1"
+
 DART_COMPUTE_SCHEMA: "jet-dart-compute-v1"
+
 DART_TOOL_ACTION: "rejected the Dart binding input"
+
 // Breadth-first SDK search bounds for the `dart_api_dl` sources.
 DART_SDK_SEARCH_DEPTH: 7
+
 DART_SDK_SEARCH_ENTRIES: 4096
 
 DartBindResult: struct {
@@ -98,14 +120,18 @@ DartFunction: struct {
 // Parse the Dart contract, build the callback bridge and `dart_api_dl`
 // archive, and render the Jet, Dart host, and Rust host sources.
 pkg_dart_bind: fn(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> DartBindResult ForeignBindError! {
-    if !pkg_binder_is_ident(lib) -> return Err(ForeignBindError.Source("`{lib}` is not a valid Jet library name"))
+    if !pkg_binder_is_ident(lib) {
+        return Err(ForeignBindError.Source("`{lib}` is not a valid Jet library name"))
+    }
     functions: pkg_dart_parse(source)
     canonical: pkg_binder_canonicalize(path, "could not resolve the Dart contract path")
     pkg_binder_create_dir_all(cache, "could not create Dart binding cache")
     found: pkg_bridge_tool_path("dart") ?? return Err(ForeignBindError.ToolMissing("dart"))
     dart: files.canonicalize(found) ?? return Err(ForeignBindError.ToolMissing("dart"))
     sdk: files.dirname(files.dirname(dart))
-    if sdk == "" -> return Err(ForeignBindError.Source("the Dart SDK root could not be derived from the provisioned `dart` tool"))
+    if sdk == "" {
+        return Err(ForeignBindError.Source("the Dart SDK root could not be derived from the provisioned `dart` tool"))
+    }
     header: pkg_dart_find_named(sdk, "dart_api_dl.h") ?? return Err(ForeignBindError.Source("the provisioned Dart SDK has no `dart_api_dl.h`"))
     api_c: pkg_dart_find_named(sdk, "dart_api_dl.c") ?? return Err(ForeignBindError.Source("the provisioned Dart SDK has no `dart_api_dl.c`"))
     build: files.join(cache, ".dart-build-{lib}")
@@ -118,7 +144,9 @@ pkg_dart_bind: fn(path: String, source: String, lib: String, cache: String) -[FS
     pkg_binder_remove_file_quiet(archive)
     pkg_binder_write(bridge_c, pkg_dart_render_c(lib, functions), "could not write Dart callback bridge")
     include: files.dirname(header)
-    if include == "" -> return Err(ForeignBindError.Source("the Dart API DL header has no parent directory"))
+    if include == "" {
+        return Err(ForeignBindError.Source("the Dart API DL header has no parent directory"))
+    }
     pkg_dart_run([String]{"cc", "-std=c11", "-fPIC", "-c", bridge_c, "-I", include, "-o", bridge_o}, "cc")
     pkg_dart_run([String]{"cc", "-std=c11", "-fPIC", "-c", api_c, "-I", include, "-o", api_o}, "cc")
     if pkg_dart_run([String]{"ar", "rcs", archive, bridge_o, api_o}, "ar") == {
@@ -144,7 +172,7 @@ pkg_dart_bind: fn(path: String, source: String, lib: String, cache: String) -[FS
         host_rust: pkg_dart_render_host_rust(lib, functions),
         bound: bound,
         archive: archive,
-        provenance: provenance
+        provenance: provenance,
     }
     pkg_binder_remove_tree_quiet(build)
     Ok(result)
@@ -213,51 +241,87 @@ pkg_dart_parse: fn(source: String) -> [DartFunction] ForeignBindError! {
         at: pkg_dart_find_top_level_pragma(raw, cursor)
         if at < 0 -> break
         end: pkg_dart_find_annotation_end(raw, at)
-        if end < 0 -> return Err(ForeignBindError.Source("a Dart `@pragma` annotation is not closed"))
+        if end < 0 {
+            return Err(ForeignBindError.Source("a Dart `@pragma` annotation is not closed"))
+        }
         annotation: pkg_bytes_text(raw, at, end)
         cursor = end
-        if !annotation.contains("'vm:entry-point'") && !annotation.contains("\"vm:entry-point\"") -> next
+        if !annotation.contains("'vm:entry-point'") && !annotation.contains("\"vm:entry-point\"") {
+            next
+        }
         boundary: pkg_dart_find_decl_boundary(raw, cursor)
-        if boundary < 0 -> return Err(ForeignBindError.Source("an entry-point declaration has no function body"))
-        if (Int{raw[boundary]}) == 59 -> return Err(ForeignBindError.Source("a Dart entry point must have a function body"))
+        if boundary < 0 {
+            return Err(ForeignBindError.Source("an entry-point declaration has no function body"))
+        }
+        if (Int{raw[boundary]}) == 59 {
+            return Err(ForeignBindError.Source("a Dart entry point must have a function body"))
+        }
         header: pkg_bytes_text(raw, cursor, boundary).trim()
         open: pkg_binder_find(header, "(", 0)
-        if open < 0 -> return Err(ForeignBindError.Source("an entry-point declaration is not a top-level function"))
+        if open < 0 {
+            return Err(ForeignBindError.Source("an entry-point declaration is not a top-level function"))
+        }
         close: pkg_dart_matching_close(header.bytes(), open)
-        if close < 0 -> return Err(ForeignBindError.Source("an entry-point function parameter list is not closed"))
+        if close < 0 {
+            return Err(ForeignBindError.Source("an entry-point function parameter list is not closed"))
+        }
         prefix: pkg_binder_words(pkg_binder_slice(header, 0, open))
-        if prefix.len() != 2 -> return Err(ForeignBindError.Source("entry points must be top-level functions with an explicit scalar result type"))
+        if prefix.len() != 2 {
+            return Err(ForeignBindError.Source("entry points must be top-level functions with an explicit scalar result type"))
+        }
         result: DartScalar.parse(prefix[0]) ?? return Err(ForeignBindError.Source("Dart entry point `{prefix[1]}` uses unsupported result type `{prefix[0]}`"))
         name: prefix[1]
-        if !pkg_binder_is_ident(name) -> return Err(ForeignBindError.Source("`{name}` is not a bindable Dart entry point"))
+        if !pkg_binder_is_ident(name) {
+            return Err(ForeignBindError.Source("`{name}` is not a bindable Dart entry point"))
+        }
         suffix: pkg_binder_tail(header, close + 1).trim()
-        if suffix.contains("async") -> return Err(ForeignBindError.Source("Dart entry point `{name}` cannot be async"))
-        if suffix != "" -> return Err(ForeignBindError.Source("Dart entry point `{name}` uses unsupported function modifier `{suffix}`"))
+        if suffix.contains("async") {
+            return Err(ForeignBindError.Source("Dart entry point `{name}` cannot be async"))
+        }
+        if suffix != "" {
+            return Err(ForeignBindError.Source("Dart entry point `{name}` uses unsupported function modifier `{suffix}`"))
+        }
         jet: pkg_cpp_snake(name)
-        if pkg_dart_reserved_function(jet) -> return Err(ForeignBindError.Source("Dart entry point `{name}` projects to reserved Jet name `{jet}`"))
+        if pkg_dart_reserved_function(jet) {
+            return Err(ForeignBindError.Source("Dart entry point `{name}` projects to reserved Jet name `{jet}`"))
+        }
         params := [DartParam]{}
         loop raw_item in pkg_binder_slice(header, open + 1, close).split(",") {
             item: raw_item.trim()
             if item == "" -> next
-            if item.contains("{{") || item.contains("}}") || item.contains("[") || item.contains("]") -> return Err(ForeignBindError.Source("Dart entry point `{name}` cannot use named or optional parameters"))
+            if item.contains("{{") || item.contains("}}") || item.contains("[") || item.contains("]") {
+                return Err(ForeignBindError.Source("Dart entry point `{name}` cannot use named or optional parameters"))
+            }
             words: pkg_binder_words(item)
-            if words.len() != 2 -> return Err(ForeignBindError.Source("Dart entry point `{name}` needs explicit positional parameter types"))
+            if words.len() != 2 {
+                return Err(ForeignBindError.Source("Dart entry point `{name}` needs explicit positional parameter types"))
+            }
             kind: DartScalar.parse(words[0]) ?? return Err(ForeignBindError.Source("Dart entry point `{name}` uses unsupported parameter type `{words[0]}`"))
-            if !pkg_binder_is_ident(words[1]) -> return Err(ForeignBindError.Source("Dart entry point `{name}` has invalid parameter `{words[1]}`"))
+            if !pkg_binder_is_ident(words[1]) {
+                return Err(ForeignBindError.Source("Dart entry point `{name}` has invalid parameter `{words[1]}`"))
+            }
             param: pkg_cpp_snake(words[1])
-            if pkg_dart_reserved_parameter(param) -> return Err(ForeignBindError.Source("Dart parameter `{words[1]}` on `{name}` projects to reserved Jet name `{param}`"))
+            if pkg_dart_reserved_parameter(param) {
+                return Err(ForeignBindError.Source("Dart parameter `{words[1]}` on `{name}` projects to reserved Jet name `{param}`"))
+            }
             loop existing in params {
-                if existing.name == param -> return Err(ForeignBindError.Source("Dart parameter `{words[1]}` on `{name}` collides with another generated Jet parameter `{param}`"))
+                if existing.name == param {
+                    return Err(ForeignBindError.Source("Dart parameter `{words[1]}` on `{name}` collides with another generated Jet parameter `{param}`"))
+                }
             }
             params.push(DartParam{name: param, kind: kind})
         }
         loop existing in functions {
-            if existing.jet == jet -> return Err(ForeignBindError.Source("Dart entry point `{name}` collides with another generated Jet function `{jet}`"))
+            if existing.jet == jet {
+                return Err(ForeignBindError.Source("Dart entry point `{name}` collides with another generated Jet function `{jet}`"))
+            }
         }
         functions.push(DartFunction{name: name, jet: jet, params: params, result: result})
         cursor = boundary + 1
     }
-    if functions.len() == 0 -> return Err(ForeignBindError.Source("no `@pragma('vm:entry-point')` top-level `int` or `double` functions were found"))
+    if functions.len() == 0 {
+        return Err(ForeignBindError.Source("no `@pragma('vm:entry-point')` top-level `int` or `double` functions were found"))
+    }
     Ok(functions)
 }
 
@@ -288,9 +352,7 @@ pkg_dart_find_top_level_pragma: fn(raw: [U8], from: Int) -> Int Never! {
                     i += 3
                     quote = 0
                     triple = false
-                } else {
-                    i += 1
-                }
+                } else { i += 1 }
                 next
             }
             if {
@@ -542,7 +604,9 @@ pkg_dart_find_named: fn(root: String, name: String) -[FS]> String? ForeignBindEr
         loop entry in entries {
             seen += 1
             if entry.name == name -> return Ok(Val(entry.path))
-            if current.depth < DART_SDK_SEARCH_DEPTH && entry.is_dir -> queue.push((dir: entry.path, depth: current.depth + 1))
+            if current.depth < DART_SDK_SEARCH_DEPTH && entry.is_dir {
+                queue.push((dir: entry.path, depth: current.depth + 1))
+            }
         }
     }
     Ok(None)
@@ -634,7 +698,9 @@ pkg_dart_reserved_parameter: fn(value: String) -> Bool Never! {
 // A failing tool's detail is its stderr, or its stdout when stderr is empty.
 pkg_dart_run: fn(argv: [String], tool: String) ForeignBindError! -[Exec, Time.Wait]> {
     output: pkg_binder_capture(argv, None, tool, DART_TOOL_ACTION)
-    if output.success -> return
+    if output.success {
+        return
+    }
     detail: if output.stderr.len() == 0 -> output.stdout else -> output.stderr
     return Err(ForeignBindError.ToolFailed{tool: tool, action: DART_TOOL_ACTION, detail: pkg_binder_launder_first_line(detail)})
 }

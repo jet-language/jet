@@ -21,8 +21,15 @@ use {
     core_library_files: core.files
     core_library_sys: core.sys
     jet_driver.[
-        JetDriverCompileMode, JetDriverLoweringInputs, JetDriverVerbOutput, jet_driver_check_outcome, jet_driver_checked_declarations,
-        jet_driver_core_interface_bytes, jet_driver_core_interface_units, jet_driver_lowering_inputs, jet_driver_present_diagnostics,
+        JetDriverCompileMode,
+        JetDriverLoweringInputs,
+        JetDriverVerbOutput,
+        jet_driver_check_outcome,
+        jet_driver_checked_declarations,
+        jet_driver_core_interface_bytes,
+        jet_driver_core_interface_units,
+        jet_driver_lowering_inputs,
+        jet_driver_present_diagnostics,
         jet_driver_runtime_interface_sources,
     ]
     jet_foundation.[CompilerThreads, FnBody, compiler_take_rows, compiler_transfer_rows, symbol_table]
@@ -39,9 +46,40 @@ use {
 // this list to that rule: a package that crosses the share either way fails
 // it until it moves.
 JET_CLI_CORE_LOWERED: [String]{
-    "app", "archive", "args", "auth", "build", "collections", "color", "compiler", "compute", "data", "debug",
-    "devtools", "effects", "event", "game", "git", "image", "jobs", "log", "meta", "mod", "perf", "plugin",
-    "reactive", "reflect", "regex", "rt", "service", "sync", "target", "tasks", "tui", "units", "watcher",
+    "app",
+    "archive",
+    "args",
+    "auth",
+    "build",
+    "collections",
+    "color",
+    "compiler",
+    "compute",
+    "data",
+    "debug",
+    "devtools",
+    "effects",
+    "event",
+    "game",
+    "git",
+    "image",
+    "jobs",
+    "log",
+    "meta",
+    "mod",
+    "perf",
+    "plugin",
+    "reactive",
+    "reflect",
+    "regex",
+    "rt",
+    "service",
+    "sync",
+    "target",
+    "tasks",
+    "tui",
+    "units",
+    "watcher",
 }
 
 // The Core object's bytes, else the problem that stopped it; each build,
@@ -50,7 +88,10 @@ JET_CLI_CORE_LOWERED: [String]{
 // `{prefix}.skipped`, one per failure that left its root out. The Core
 // check's phases and the library's `ir.build`, `ir.lint`, `ir.opt`, `ir.x64`
 // and `ir.object` go to `trace_sink`, as the runtime library's do.
-JetCLICoreLibrary: struct { bytes: [U8], problem: String }
+JetCLICoreLibrary: struct {
+    bytes: [U8]
+    problem: String
+}
 
 // The Core library's IR (jet_cli_core_library_ir): built from its own Core
 // check, linted and optimized, with the build's and the lint's issue rows,
@@ -77,7 +118,9 @@ jet_cli_core_library_ir: fn(compiler_threads: CompilerThreads, trace_sink: JetCL
 jet_cli_core_library_lowered: fn(compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLICoreLibraryIR {
     checked := jet_cli_core_checked(trace_sink)
     inputs := if checked.move() == {
-        .Stopped(output) -> return JetCLICoreLibraryIR.Stopped{problem: "the Core check of the Core library stopped:\n{output.stderr}{output.stdout}"}
+        .Stopped(output) -> {
+            return JetCLICoreLibraryIR.Stopped{problem: "the Core check of the Core library stopped:\n{output.stderr}{output.stdout}"}
+        }
         .Checked(found) -> found.move()
     }
     declarations := jet_driver_checked_declarations(inputs)
@@ -85,7 +128,9 @@ jet_cli_core_library_lowered: fn(compiler_threads: CompilerThreads, trace_sink: 
     library := ir_build_core_library(inputs.functions.move(), inputs.decls, inputs.symbols.move(), declarations.type_defs.move(), declarations.impls.move(), inputs.sources.move(), declarations.constants.move(), declarations.foreign.move(), inputs.entry_module_identity, JET_CLI_CORE_LOWERED, compiler_threads)
     if trace_sink == .Val(sink) -> sink.end("ir.build", library.program.functions.len())
     issues := compiler_take_rows<String>(library.errors)
-    loop failure in library.failures -> issues.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
+    loop failure in library.failures {
+        issues.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
+    }
     // The memory term is read now: the front end before this holds most of it.
     threads: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
     // What the library build left of the Core check (its modules, its
@@ -104,7 +149,9 @@ jet_cli_core_library_lowered: fn(compiler_threads: CompilerThreads, trace_sink: 
     // A compile reads only the header of the bodies file and the records it
     // looks up, so the build reads it whole: a file a compile would misread
     // is the build's error (sema_core_bodies_problem).
-    if sema_core_bodies_problem(bodies) == .Val(problem) -> issues.push("the Core bodies file does not read back: {problem}")
+    if sema_core_bodies_problem(bodies) == .Val(problem) {
+        issues.push("the Core bodies file does not read back: {problem}")
+    }
     inputs.functions = [FnBody]{}
     inputs.symbols = symbol_table()
     inputs.sources = [String:String]{}
@@ -113,7 +160,9 @@ jet_cli_core_library_lowered: fn(compiler_threads: CompilerThreads, trace_sink: 
     released.detach()
     if issues.len() == 0 {
         if trace_sink == .Val(sink) -> sink.begin("ir.lint", "", -1, -1)
-        loop finding in ir_lint_module(library.program, "ir.build", threads) -> issues.push(jet_cli_runtime_lint_issue(finding))
+        loop finding in ir_lint_module(library.program, "ir.build", threads) {
+            issues.push(jet_cli_runtime_lint_issue(finding))
+        }
         if trace_sink == .Val(sink) -> sink.end("ir.lint", library.program.functions.len())
     }
     if issues.len() == 0 {
@@ -121,7 +170,9 @@ jet_cli_core_library_lowered: fn(compiler_threads: CompilerThreads, trace_sink: 
         _ := ir_optimize_module(library.program, ir_opt_options(2), threads)
         if trace_sink == .Val(sink) -> sink.end("ir.opt", library.program.functions.len())
         if trace_sink == .Val(sink) -> sink.begin("ir.lint", "", -1, -1)
-        loop finding in ir_lint_module(library.program, "ir.opt", threads) -> issues.push(jet_cli_runtime_lint_issue(finding))
+        loop finding in ir_lint_module(library.program, "ir.opt", threads) {
+            issues.push(jet_cli_runtime_lint_issue(finding))
+        }
         if trace_sink == .Val(sink) -> sink.end("ir.lint", library.program.functions.len())
     }
     JetCLICoreLibraryIR.Built{library: library, issues: issues, seal: seal, bodies: bodies, threads: threads}
@@ -248,8 +299,12 @@ jet_cli_core_checked: fn(trace_sink: JetCLITraceSink?) -> JetCLICoreChecked {
             if trace_sink == .Val(sink) -> sink.begin("core_check.diagnostics", "", -1, -1)
             diagnostics: jet_driver_present_diagnostics(front.compile.diagnostics, snapshot, front.compile.generated_source_files)
             if trace_sink == .Val(sink) -> sink.end("core_check.diagnostics", diagnostics.len())
-            if jet_cli_errors(diagnostics).len() > 0 -> return JetCLICoreChecked.Stopped{output: jet_driver_check_outcome("Core", source, diagnostics, false, false)}
-            if front.compile.internal_problem == .Val(problem) -> return JetCLICoreChecked.Stopped{output: jet_cli_ice(problem)}
+            if jet_cli_errors(diagnostics).len() > 0 {
+                return JetCLICoreChecked.Stopped{output: jet_driver_check_outcome("Core", source, diagnostics, false, false)}
+            }
+            if front.compile.internal_problem == .Val(problem) {
+                return JetCLICoreChecked.Stopped{output: jet_cli_ice(problem)}
+            }
             inputs: front.inputs.move() ?? return JetCLICoreChecked.Stopped{output: jet_cli_ice("the Core check stopped before lowering without a diagnostic")}
             JetCLICoreChecked.Checked{inputs: inputs}
         }

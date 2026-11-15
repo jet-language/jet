@@ -1,7 +1,10 @@
 // Fake host tools are ORIGINAL test inputs.
 use {
     jetpack_integrations.[
-        CppBindOptions, CppTemplateInstantiation, pkg_cffi_resolve_link_for_target, pkg_cpp_bind,
+        CppBindOptions,
+        CppTemplateInstantiation,
+        pkg_cffi_resolve_link_for_target,
+        pkg_cpp_bind,
         pkg_cpp_cache_identity_for_test,
     ]
     files: core.files
@@ -11,25 +14,34 @@ use {
 
 pkg_integration_cpp_clang: fn(log: String, canonical: String) -> String {
     parameter: Dyn.Object(["kind": Dyn.Text("ParmVarDecl"), "name": Dyn.Text("value"), "type": Dyn.Object(["qualType": Dyn.Text("long")])])
-    probe_decl: Dyn.Object([
-        "kind": Dyn.Text("FunctionDecl"),
-        "name": Dyn.Text("probe"),
-        "loc": Dyn.Object(["file": Dyn.Text(canonical.copy())]),
-        "type": Dyn.Object(["qualType": Dyn.Text("long (long)")]),
-        "inner": Dyn.Array([Dyn]{parameter}),
-    ])
+    probe_decl: Dyn.Object(
+        [
+            "kind": Dyn.Text("FunctionDecl"),
+            "name": Dyn.Text("probe"),
+            "loc": Dyn.Object(["file": Dyn.Text(canonical.copy())]),
+            "type": Dyn.Object(["qualType": Dyn.Text("long (long)")]),
+            "inner": Dyn.Array([Dyn]{parameter}),
+        ],
+    )
     ast: pkg_cpp_target_json.to_string(Dyn.Object(["kind": Dyn.Text("TranslationUnitDecl"), "inner": Dyn.Array([Dyn]{probe_decl})])) ?? panic("render fake clang AST")
     "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{log}'\nif [ \"$1\" = \"--version\" ]; then printf '%s\\n' 'fake clang 1'; exit 0; fi\ncase \"$*\" in\n  *-ast-dump=json*) printf '%s\\n' '{ast}'; exit 0 ;;\nesac\nprevious=''\noutput=''\nfor argument in \"$@\"; do\n  if [ \"$previous\" = \"-o\" ]; then output=\"$argument\"; fi\n  previous=\"$argument\"\ndone\n: > \"$output\"\n"
 }
+
 pkg_integration_cpp_ar: fn(log: String, version: Int) -> String {
     "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{log}'\nif [ \"$1\" = \"--version\" ]; then printf '%s\\n' 'fake ar {version}'; exit 0; fi\n: > \"$2\"\n"
 }
+
 pkg_integration_cpp_proof: fn(commands: String) -> String {
-    loop line in commands.lines() { if line.contains("-shared") -> return line }
+    loop line in commands.lines() {
+        if line.contains("-shared") -> return line
+    }
     panic("original find shared proof must succeed")
 }
+
 #Test("cpp_binder_uses_selected_target_tools_runtime_and_cache_identity") {
-    if sys.family() != "unix" -> return
+    if sys.family() != "unix" {
+        return
+    }
     scratch: files.temp_dir("jet_cpp_target_tools") ?? panic("scratch")
     root: scratch.path
     target: "aarch64-apple-darwin"
@@ -79,6 +91,7 @@ pkg_integration_cpp_proof: fn(commands: String) -> String {
     second: pkg_cpp_cache_identity_for_test(header, options, target)
     assert(first != second)
 }
+
 #Test("cpp_link_metadata_requires_exact_selected_target") {
     scratch: files.temp_dir("jet_cpp_link_target") ?? panic("scratch")
     root: scratch.path
@@ -90,7 +103,7 @@ pkg_integration_cpp_proof: fn(commands: String) -> String {
     loop text in invalid {
         files.write(metadata, text) ?? panic("metadata")
         if pkg_cffi_resolve_link_for_target("jet_cpp_probe", root, "aarch64-apple-darwin") == {
-            .Ok(_) -> panic("invalid selected target metadata accepted")
+            .Ok(_) -> { panic("invalid selected target metadata accepted") }
             .Err(_) -> {}
         }
     }

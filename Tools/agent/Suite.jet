@@ -52,9 +52,7 @@ suite: fn(label: String, tree: String, jetdir: String, profile: String, settings
     // memory). The runner's own TMPDIR lives under the state root.
     fs: "{state_root()}/scratch/Main/sgfs"
     dirs: [String]{"{sg}/tmp", "{fs}/tmp"}
-    loop dir in dirs {
-        files.create_dir_all(dir) ?? return fail("cannot create {dir}: {err}")
-    }
+    loop dir in dirs { files.create_dir_all(dir) ?? return fail("cannot create {dir}: {err}") }
     sha: first_line("{jetdir}/COMMIT") ?? first_line("{tree}/.chain-base") ?? ""
     pool: choose_jetpack(jetdir, sha, base, profile)
     if pool.warn != "" {
@@ -124,7 +122,9 @@ choose_jetpack: fn(jetdir: String, sha: String, base: String, profile: String) -
     // compare like for like with the base run instead of erroring; a wave that
     // changes Jetpack must still be proved with its own jetpack.
     standin: newest_jetpack(base)
-    if standin != "" -> return Pool{jetpack: standin.copy(), warn: "WARN: STAND-IN JETPACK for {commit}: no {base}/{shown}/jetpack, using {standin}; Jetpack source changes in this tree are NOT exercised"}
+    if standin != "" {
+        return Pool{jetpack: standin.copy(), warn: "WARN: STAND-IN JETPACK for {commit}: no {base}/{shown}/jetpack, using {standin}; Jetpack source changes in this tree are NOT exercised"}
+    }
     Pool{jetpack: "", warn: "WARN: NO JETPACK for {commit} (no {base}/{shown}/jetpack): ~156 jetpack cases rows will ERROR 'jetpack binary required'; build it with: jet Tools/agent/Chain.jet slot -- jet Tools/agent/Land.jet publish jetpack {rerun}"}
 }
 
@@ -157,12 +157,16 @@ take_snapshot: fn(jetdir: String, sg: String, fs: String, label: String) -[Env, 
     if !same_bytes("{jetdir}/jet", "{held_copy}/jet") {
         stale: [String]{held_copy, link}
         loop gone in stale {
-            if files.exists(gone) || files.is_symlink(gone) -> files.remove_all(gone) ?? return fail("cannot remove {gone}: {err}")
+            if files.exists(gone) || files.is_symlink(gone) {
+                files.remove_all(gone) ?? return fail("cannot remove {gone}: {err}")
+            }
         }
         // `cp -r` keeps the snapshot's own symlinks (its jetpack, its runtime
         // pack) as links.
         copied: process.cmd([String]{"cp", "-r", jetdir, held_copy}).run() ?? return fail("cp could not start: {err}")
-        if copied.code != 0 || copied.signal != None -> return fail("cannot copy {jetdir} to {held_copy}: {copied.errors.trim_end()}")
+        if copied.code != 0 || copied.signal != None {
+            return fail("cannot copy {jetdir} to {held_copy}: {copied.errors.trim_end()}")
+        }
     }
     if !files.exists("{link}/jet") {
         files.symlink(held_copy, link, replace: true) ?? return fail("cannot link {link}: {err}")

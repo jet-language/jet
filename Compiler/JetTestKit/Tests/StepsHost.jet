@@ -5,7 +5,8 @@ use {
 
 #Test("host names families and normalized architectures support any-of and negation from case text") {
     root: cases_test_root("host-requirements")
-    loop pair in [["os", sys.family()], ["os-name", kit_steps_host_name()], ["arch", kit_steps_host_arch()]] {
+    loop pair in
+        [["os", sys.family()], ["os-name", kit_steps_host_name()], ["arch", kit_steps_host_arch()]] {
         pass: "requires: {pair[0]}:absent|{pair[1]}\nstep: printf ok\nstdout: ~ ok # original predicate\n"
         assert_eq(cases_test_advanced(root, "matches", pass).verdict.status, "PASS")
         skip: "requires: {pair[0]}:!{pair[1]}\nstep: printf ok\n"
@@ -16,14 +17,17 @@ use {
 
 #Test("host probes check exit and JSON output and alternatives fail rather than silently skip") {
     root: cases_test_root("host-probes")
-    loop requirement in ["requires: probe printf '%s' '{{\"ready\":true}}' json $.ready = true", "tools-any: absent-testkit-tool | printf+cat", "probes-any: false | true + printf ok"] {
+    loop requirement in
+        ["requires: probe printf '%s' '{{\"ready\":true}}' json $.ready = true", "tools-any: absent-testkit-tool | printf+cat", "probes-any: false | true + printf ok"] {
         assert_eq(cases_test_advanced(root, "pass", "{requirement}\nstep: printf ok\n").verdict.status, "PASS")
     }
     assert_eq(cases_test_advanced(root, "false-json", "requires: probe printf '%s' '{{\"ready\":false}}' json $.ready = true\nstep: printf ok\n").verdict.status, "SKIP-HOST")
     // A probe's stdout assertion carries the requirement's reason, as a step's does.
     assert_eq(cases_test_advanced(root, "stdout-pass", "requires: probe printf '/nix/store/x' stdout: ^= \"/nix/\" # the probe printed a store path\nstep: printf ok\n").verdict.status, "PASS")
     assert_eq(cases_test_advanced(root, "stdout-skip", "requires: probe printf '/usr/x' stdout: ^= \"/nix/\" # the probe printed a store path\nstep: printf ok\n").verdict.status, "SKIP-HOST")
-    loop requirement in ["tools-any: absent-testkit-tool", "probes-any: false | false + true"] -> assert_eq(cases_test_advanced(root, "none", "{requirement}\nstep: printf ok\n").verdict.status, "FAIL")
+    loop requirement in ["tools-any: absent-testkit-tool", "probes-any: false | false + true"] {
+        assert_eq(cases_test_advanced(root, "none", "{requirement}\nstep: printf ok\n").verdict.status, "FAIL")
+    }
     files.remove_all(root) ?? panic("remove probe scratch")
 }
 
@@ -66,7 +70,8 @@ use {
     root: cases_test_root("host-adjacency")
     pass: "step: printf ok\nenv: VALUE=one\nunset: UNUSED\nstdout: ~ ok # original predicate\n"
     assert_eq(cases_test_advanced(root, "adjacent", pass).verdict.status, "PASS")
-    loop separator in ["stdout: ~ ok # original predicate", "capture: value = text stdout", "mkdir: child"] {
+    loop separator in
+        ["stdout: ~ ok # original predicate", "capture: value = text stdout", "mkdir: child"] {
         source: "step: printf ok\n{separator}\nenv: VALUE=two\n"
         result: cases_test_advanced(root, "nonadjacent", source)
         assert_eq(result.verdict.status, "REFUSED")
@@ -156,11 +161,13 @@ use {
     assert_eq(failed.detail, "free-port probe failed (exit 3): no ports")
     files.remove_all(root) ?? panic("remove failing free-port scratch")
 }
+
 #Test("host-port cases hold the port's host-wide lock until they end and refuse malformed ports") {
     plan: kit_steps_parse_case("host-port: 8080\nstep: printf ok\n")
     assert_eq(plan.error, "")
     assert_eq(plan.host_port, 8080)
-    loop source in ["host-port: 0\nstep: true\n", "host-port: 65536\nstep: true\n", "host-port: http\nstep: true\n", "host-port: 8080\nhost-port: 8081\nstep: true\n", "step: true\nhost-port: 8080\n"] {
+    loop source in
+        ["host-port: 0\nstep: true\n", "host-port: 65536\nstep: true\n", "host-port: http\nstep: true\n", "host-port: 8080\nhost-port: 8081\nstep: true\n", "step: true\nhost-port: 8080\n"] {
         assert(kit_steps_parse_case(source).error.contains("host-port needs one header port"))
     }
     root: cases_test_root("host-port-lock")
@@ -219,7 +226,8 @@ use {
 
 #Test("malformed free-port tokens and non-canonical control/session spellings are parse errors") {
     root: cases_test_root("host-canonical")
-    loop source in ["step: printf {{free-port:}}\n", "step: printf {{free-port:bad:name}}\n", "step: printf {{free-port:unterminated\n", "session peer raw: cat\nclose: peer\n", "session peer raw extra: cat\nclose peer\n", "spawn peer: cat\nwait peer: ignored\n", "repeat while file: missing absent timeout 1s every 1ms fail unquoted\nend repeat\n", "session peer raw: cat\nsend peer: \"x\"\nclose peer\nclose peer\n"] {
+    loop source in
+        ["step: printf {{free-port:}}\n", "step: printf {{free-port:bad:name}}\n", "step: printf {{free-port:unterminated\n", "session peer raw: cat\nclose: peer\n", "session peer raw extra: cat\nclose peer\n", "spawn peer: cat\nwait peer: ignored\n", "repeat while file: missing absent timeout 1s every 1ms fail unquoted\nend repeat\n", "session peer raw: cat\nsend peer: \"x\"\nclose peer\nclose peer\n"] {
         result: cases_test_advanced(root, "noncanonical", source)
         assert_eq(result.verdict.status, "REFUSED")
         assert(result.verdict.detail != "read_bytes")
@@ -247,7 +255,7 @@ use {
     source: "when env-set {name}: write: present = \"yes\"\nwhen env {name}: step: false\nfile: present = \"yes\"\n"
     result: cases_test_advanced(root, "empty", source)
     if previous == {
-        .Val(value) -> sys.set(name, value)
+        .Val(value) -> { sys.set(name, value) }
         .None -> { removed: sys.unset(name) ?? panic("unset test environment") }
     }
     assert_eq(result.verdict.status, "PASS")
@@ -351,7 +359,8 @@ use {
 }
 
 #Test("capture joins reject mutable guards unconditional overlap and accumulating declarations") {
-    loop source in [
+    loop source in
+        [
         "capture: chosen = text file value\ncapture: chosen = text file value\n",
         "when os unix: capture: chosen = text file value\nwhen os unix: capture: chosen = text file value\n",
         "when os unix: capture: chosen = text file value\ncapture: chosen = text file value\n",

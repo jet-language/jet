@@ -11,18 +11,14 @@ held: fn() -[FS]> Int {
     count
 }
 
-lock: fn(name: String) -[FS, Env]> FileLock {
-    files.lock(name) ?? panic("lock {name}")
-}
+lock: fn(name: String) -[FS, Env]> FileLock { files.lock(name) ?? panic("lock {name}") }
 
 Holder: struct {
     note: String
     lock: FileLock
 
     // Owns self: its lock closes when this returns.
-    finish: fn(&&self) -[FS]> Int {
-        held()
-    }
+    finish: fn(&&self) -[FS]> Int { held() }
 }
 
 Outer: struct {
@@ -31,13 +27,9 @@ Outer: struct {
     spare: FileLock
 }
 
-consume_holder: fn(&&h: Holder) -[FS]> Int {
-    held()
-}
+consume_holder: fn(h: &&Holder) -[FS]> Int { held() }
 
-consume_lock: fn(&&l: FileLock) -[FS]> Int {
-    held()
-}
+consume_lock: fn(l: &&FileLock) -[FS]> Int { held() }
 
 Count: struct {
     n: Int
@@ -55,9 +47,7 @@ Guard: struct {
         close: fn(&&self) {}
     }
 
-    finish: fn(&&self) -[FS]> Int {
-        held()
-    }
+    finish: fn(&&self) -[FS]> Int { held() }
 }
 
 Prepared: struct {
@@ -112,13 +102,11 @@ member_argument: fn() -[IO, FS, Env]> {
 
 branch: fn(moved: Bool) -[IO, FS, Env]> {
     o := outer("d")
-    if moved {
-        close(o.spare)
-    }
+    if moved -> close(o.spare)
     print("branch {moved} {held()}")
 }
 
-adopt: fn(&&h: Holder) -[IO, FS]> {
+adopt: fn(h: &&Holder) -[IO, FS]> {
     me := h.move()
     inside: consume_holder(me)
     print("adopted {inside} {held()}")
@@ -150,7 +138,8 @@ rebound_receiver: fn() -[IO, FS, Env]> {
 }
 
 run: fn() -[IO, FS, Env]> {
-    loop name in ["a", "b-owner", "b-spare", "c-owner", "c-spare", "c-again", "d-owner", "d-spare", "e", "f", "g", "g-marker", "h", "h-marker", "i", "i-marker"] {
+    loop name in
+        ["a", "b-owner", "b-spare", "c-owner", "c-spare", "c-again", "d-owner", "d-spare", "e", "f", "g", "g-marker", "h", "h-marker", "i", "i-marker"] {
         files.write("{name}.lk", "") ?? panic("write {name}")
     }
     receiver()

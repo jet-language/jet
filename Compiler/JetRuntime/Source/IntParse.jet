@@ -9,7 +9,7 @@ numeric_trim_start: fn(text: I64) -> I64 {
     at := I64{0}
     loop at < length {
         byte: rt_text_byte(wrapping(data + at))
-        if (byte > I64{32} && byte < I64{127}) -> break
+        if (byte > I64{32} && byte < I64{127}) { break }
         if !unicode_is_white_space(rt_text_decode(wrapping(data + at))) -> break
         at += rt_text_width(wrapping(data + at))
     }
@@ -22,8 +22,10 @@ numeric_trim_end: fn(text: I64, start: I64) -> I64 {
     loop end > start {
         at := end - I64{1}
         byte: rt_text_byte(wrapping(data + at))
-        if (byte > I64{32} && byte < I64{127}) -> break
-        loop at > start && (rt_text_byte(wrapping(data + at)).bit_and(I64{192})) == (I64{128}) -> at -= I64{1}
+        if (byte > I64{32} && byte < I64{127}) { break }
+        loop at > start && (rt_text_byte(wrapping(data + at)).bit_and(I64{192})) == (I64{128}) {
+            at -= I64{1}
+        }
         if !unicode_is_white_space(rt_text_decode(wrapping(data + at))) -> break
         end = at
     }
@@ -87,9 +89,9 @@ numeric_radix: fn(radix: I64, err: I64) -> I64 {
 }
 
 numeric_digit: fn(byte: I64) -> I64 {
-    if (byte >= I64{48} && byte <= I64{57}) -> return byte - I64{48}
-    if (byte >= I64{65} && byte <= I64{90}) -> return byte - I64{55}
-    if (byte >= I64{97} && byte <= I64{122}) -> return byte - I64{87}
+    if (byte >= I64{48} && byte <= I64{57}) { return byte - I64{48} }
+    if (byte >= I64{65} && byte <= I64{90}) { return byte - I64{55} }
+    if (byte >= I64{97} && byte <= I64{122}) { return byte - I64{87} }
     I64{-1}
 }
 
@@ -140,14 +142,10 @@ numeric_int_parse: fn(text: I64, radix: I64, decimal: Bool, ok: I64, err: I64) -
                 node = int_copy(small, capacity - int_len(small))
                 int_scale(node, radix, digit)
             }
-        } else {
-            int_scale(node, radix, digit)
-        }
+        } else { int_scale(node, radix, digit) }
         at += I64{1}
     }
-    if (node == I64{0}) {
-        sync_store(ok, if negative -> -small else -> small)
-    } else {
+    if (node == I64{0}) { sync_store(ok, if negative -> -small else -> small) } else {
         if negative -> int_store(wrapping(node + I64{16}), I64{1})
         sync_store(ok, int_pack(node))
     }
@@ -160,13 +158,13 @@ numeric_int_parse: fn(text: I64, radix: I64, decimal: Bool, ok: I64, err: I64) -
 
 #Export(c) jet_int_from_radix: fn(text: I64, radix: I64, ok: I64, err: I64) -> I64 {
     base: numeric_radix(radix, err)
-    if (base == I64{0}) -> return I64{0}
+    if (base == I64{0}) { return I64{0} }
     numeric_int_parse(text, base, false, ok, err)
 }
 
 #Export(c) jet_int_to_radix: fn(value: I64, radix: I64, ok: I64, err: I64) -> I64 {
     base: numeric_radix(radix, err)
-    if (base == I64{0}) -> return I64{0}
+    if (base == I64{0}) { return I64{0} }
     // One scratch allocation stores least-significant-first ASCII digits;
     // int_copy owns only a private magnitude, no clone/hazard-domain owner.
     small_carrier: int_inline(value)

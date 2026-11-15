@@ -47,7 +47,9 @@ MarkerGroupNamespace: struct {
 marker_group_code: fn(input: [Token]) -> [Token] Never! {
     code := [Token]{}
     loop token in input {
-        if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT -> code.push(token.copy())
+        if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT {
+            code.push(token.copy())
+        }
     }
     code
 }
@@ -73,11 +75,17 @@ marker_group_skip_semicolons: fn(tokens: [Token], index: Int) -> Int Never! {
 // fields whose one member is its group.
 marker_group_token_range: fn(tokens: [Token], tables: TokenTables, start: Int) -> MarkerGroupTokenRange? Never! {
     if start < 0 || start + 3 >= tokens.len() -> return None
-    if tokens[start].kind != TOKEN_IDENT || tokens[start + 1].kind != TOKEN_COLON || tokens[start + 2].kind != TOKEN_KW_STRUCT || tokens[start + 3].kind != TOKEN_LBRACE -> return None
+    if tokens[start].kind != TOKEN_IDENT || tokens[start + 1].kind != TOKEN_COLON || tokens[start + 2].kind != TOKEN_KW_STRUCT || tokens[start + 3].kind != TOKEN_LBRACE {
+        return None
+    }
     head := marker_group_skip_semicolons(tokens, start + 4)
-    if head + 2 >= tokens.len() || tokens[head].kind != TOKEN_KW_IMPL || tokens[head + 1].kind != TOKEN_IDENT || token_decoded(tables, tokens[head + 1]) != "Marker" || tokens[head + 2].kind != TOKEN_LBRACE -> return None
+    if head + 2 >= tokens.len() || tokens[head].kind != TOKEN_KW_IMPL || tokens[head + 1].kind != TOKEN_IDENT || token_decoded(tables, tokens[head + 1]) != "Marker" || tokens[head + 2].kind != TOKEN_LBRACE {
+        return None
+    }
     head = marker_group_skip_semicolons(tokens, head + 3)
-    if head + 3 >= tokens.len() || tokens[head].kind != TOKEN_IDENT || token_decoded(tables, tokens[head]) != "group" || tokens[head + 1].kind != TOKEN_COLON || tokens[head + 2].kind != TOKEN_HASH || tokens[head + 3].kind != TOKEN_LBRACKET -> return None
+    if head + 3 >= tokens.len() || tokens[head].kind != TOKEN_IDENT || token_decoded(tables, tokens[head]) != "group" || tokens[head + 1].kind != TOKEN_COLON || tokens[head + 2].kind != TOKEN_HASH || tokens[head + 3].kind != TOKEN_LBRACKET {
+        return None
+    }
     depth := 1
     end := head + 4
     loop end < tokens.len() {
@@ -119,12 +127,18 @@ named_marker_groups: fn(tokens: [Token], tables: TokenTables) -> [NamedMarkerGro
     index := 0
     scope := MarkerGroupNamespace{path: "", braces: [String?]{}}
     loop index < code.len() {
-        declarative: loop brace in scope.braces { if brace == None -> break false } ?? true
+        declarative: loop brace in scope.braces {
+            if brace == None {
+                break false
+            }
+        } ?? true
         if declarative && marker_group_token_range(code, tables, index) == .Val(range) {
             name: if scope.path == "" -> range.name else -> "{scope.path}.{range.name}"
             member_tables := token_tables()
             members := [Token]{}
-            loop cursor in range.start..<range.end -> members.push(marker_group_rebase_token(code[cursor], tables, member_tables))
+            loop cursor in range.start..<range.end {
+                members.push(marker_group_rebase_token(code[cursor], tables, member_tables))
+            }
             groups.push(NamedMarkerGroupTokens{name: name, name_span: code[index].span, members: members.move(), tables: member_tables.move()})
             index = range.stop + 1
             next
@@ -136,7 +150,9 @@ named_marker_groups: fn(tokens: [Token], tables: TokenTables) -> [NamedMarkerGro
 }
 
 marker_group_scope_allows: fn(group: NamedMarkerGroupTokens, scope: String) -> Bool Never! {
-    if group.required_scope == .Val(required) -> return scope == required || scope.starts_with("{required}.")
+    if group.required_scope == .Val(required) {
+        return scope == required || scope.starts_with("{required}.")
+    }
     true
 }
 
@@ -144,13 +160,23 @@ marker_group_find: fn(local: [NamedMarkerGroupTokens], imported: [NamedMarkerGro
     prefix := scope
     loop prefix != "" {
         qualified: "{prefix}.{name}"
-        loop group in imported { if group.name == qualified && marker_group_scope_allows(group, scope) -> return Val(group) }
-        loop group in local { if group.name == qualified -> return Val(group) }
+        loop group in imported {
+            if group.name == qualified && marker_group_scope_allows(group, scope) {
+                return Val(group)
+            }
+        }
+        loop group in local {
+            if group.name == qualified -> return Val(group)
+        }
         parts: prefix.split(".").to_list()
         prefix = parts.slice(0, parts.len() - 1).join(".")
     }
-    loop group in imported { if group.name == name && marker_group_scope_allows(group, scope) -> return Val(group) }
-    loop group in local { if group.name == name -> return Val(group) }
+    loop group in imported {
+        if group.name == name && marker_group_scope_allows(group, scope) -> return Val(group)
+    }
+    loop group in local {
+        if group.name == name -> return Val(group)
+    }
     None
 }
 
@@ -167,7 +193,9 @@ marker_group_expandable: fn(group: NamedMarkerGroupTokens, local: [NamedMarkerGr
             if kind == TOKEN_BANG -> return false
             path: marker_token_path(group.members, group.tables, index) ?? return false
             name: path.name
-            if name == "Unsafe" || name == "Impure" || name == "Nondeterministic" || name == "Allow" || name == "Scrub" || name == "FX" -> return false
+            if name == "Unsafe" || name == "Impure" || name == "Nondeterministic" || name == "Allow" || name == "Scrub" || name == "FX" {
+                return false
+            }
             if marker_group_find(local, imported, name, scope) != None -> return false
             index = path.end
             count += 1
@@ -175,7 +203,9 @@ marker_group_expandable: fn(group: NamedMarkerGroupTokens, local: [NamedMarkerGr
             next
         }
         if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> depth += 1
-        if (kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE) && depth > 0 -> depth -= 1
+        if (kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE) && depth > 0 {
+            depth -= 1
+        }
         if depth == 0 && kind == TOKEN_COMMA -> entry = true
         index += 1
     }
@@ -223,7 +253,9 @@ marker_group_push_members: fn(output: &[Token], group: NamedMarkerGroupTokens, s
 
 expand_named_marker_groups_with_uses: fn(tokens: [Token], tables: &TokenTables, imported: [NamedMarkerGroupTokens]) -> ExpandedMarkerGroups {
     local: named_marker_groups(tokens, tables)
-    if local.len() == 0 && imported.len() == 0 -> return ExpandedMarkerGroups{tokens: tokens, uses: [ExpandedMarkerGroupUse]{}}
+    if local.len() == 0 && imported.len() == 0 {
+        return ExpandedMarkerGroups{tokens: tokens, uses: [ExpandedMarkerGroupUse]{}}
+    }
     code: marker_group_code(tokens)
     output := [Token]{}
     uses := [ExpandedMarkerGroupUse]{}
@@ -272,8 +304,12 @@ expand_named_marker_groups_with_uses: fn(tokens: [Token], tables: &TokenTables, 
                         entry = false
                         next
                     }
-                    if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> depth += 1
-                    if (kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE) && depth > 0 -> depth -= 1
+                    if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE {
+                        depth += 1
+                    }
+                    if (kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE) && depth > 0 {
+                        depth -= 1
+                    }
                     entry = depth == 0 && kind == TOKEN_COMMA
                     output.push(code[index])
                     index += 1

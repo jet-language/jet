@@ -22,7 +22,8 @@ use files: core.files
     prefix: "write: doc input\n"
     good: "{prefix}json: file doc doc $.a != $.b\njson: file doc doc $.a #== $.b\njson: file doc doc $.a #== $.obj\njson: file doc doc $.obj == $.obj2\njson: file doc doc $.n == $.f\n"
     assert_eq(cases_test_advanced(root, "deep", good).verdict.status, "PASS")
-    loop predicate in ["$.a != $.same", "$.obj != $.obj2", "$.a #== $.short", "$.n #== $.f", "$.missing != $.a", "$.a #== $.missing"] {
+    loop predicate in
+        ["$.a != $.same", "$.obj != $.obj2", "$.a #== $.short", "$.n #== $.f", "$.missing != $.a", "$.a #== $.missing"] {
         assert_eq(cases_test_advanced(root, "failed", "{prefix}json: file doc doc {predicate}\n").verdict.status, "FAIL")
     }
     assert_eq(cases_test_advanced(root, "path", "{prefix}json: file doc doc $.a != $.bad[\n").verdict.status, "REFUSED")

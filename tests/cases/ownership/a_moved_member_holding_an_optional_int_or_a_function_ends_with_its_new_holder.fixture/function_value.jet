@@ -1,7 +1,9 @@
 // A struct member holding a function value moves out of its holder: the
 // holder stops owning it, so the taken value's Shared is its only owner and
 // the cell is freed where the taken value ends, before the holder's scope end.
-Node: struct { label: String }
+Node: struct {
+    label: String
+}
 
 Hooks: struct {
     pick: fn(Int) -> Int
@@ -17,9 +19,7 @@ make: fn(n: Int) -> Holder {
     Holder{hooks: Hooks{pick: fn(x: Int) -> Int { x + n }, node: Shared{Node{label: "node {n}"}}}, name: "holder {n}"}
 }
 
-consume: fn(hooks: Hooks) -> Int {
-    hooks.pick(1)
-}
+consume: fn(hooks: Hooks) -> Int { hooks.pick(1) }
 
 take_hooks: fn(n: Int) -> Int {
     h: make(n)

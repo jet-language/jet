@@ -9,7 +9,9 @@ int_hazard_root := I64{0}
 // guarded hook, whose init-array run precedes all user code/Int spills.
 // runtime-init: 4 when int_hazard_root
 #Export(c) jet_rt_int_hazard_init: fn() {
-    if (int_hazard_root != I64{0}) -> return
+    if (int_hazard_root != I64{0}) {
+        return
+    }
     root: jet_rt_alloc(I64{16}, I64{8})
     #Unsafe("runtime-init runs before any other thread exists") { int_hazard_root = root }
     thread_zero(int_hazard_root, I64{16})
@@ -18,7 +20,7 @@ int_hazard_root := I64{0}
 #Export(c) jet_rt_int_hazard_enter: fn() -> I64 {
     base: thread_base()
     record := sync_load(wrapping(base + I64{192}))
-    if (record != I64{0}) -> return record
+    if (record != I64{0}) { return record }
     record = jet_rt_alloc(I64{16}, I64{8})
     sync_store(record, I64{0})
     loop {
@@ -49,7 +51,9 @@ int_hazard_push_retired: fn(node: I64) {
     loop {
         head: sync_load(head_slot)
         int_store(wrapping(node + I64{8}), head)
-        if sync_cas(head_slot, head, node) == head -> return
+        if sync_cas(head_slot, head, node) == head {
+            return
+        }
     }
 }
 
@@ -57,8 +61,9 @@ int_hazard_push_retired: fn(node: I64) {
     cursor := sync_swap(wrapping(int_hazard_root + I64{8}), I64{0})
     loop cursor != (I64{0}) {
         next_node: int_load(wrapping(cursor + I64{8}))
-        if int_hazard_contains(cursor) -> int_hazard_push_retired(cursor)
-        else -> int_free_node(cursor)
+        if int_hazard_contains(cursor) -> int_hazard_push_retired(cursor) else {
+            int_free_node(cursor)
+        }
         cursor = next_node
     }
 }
@@ -66,28 +71,29 @@ int_hazard_push_retired: fn(node: I64) {
 #Export(c) jet_rt_int_hazard_clear: fn(record: I64) {
     sync_store(record, I64{0})
     // Seed threshold is ANY pending node, not a new batch.
-    if (sync_load(wrapping(int_hazard_root + I64{8})) != I64{0}) -> jet_rt_int_hazard_reclaim()
+    if (sync_load(wrapping(int_hazard_root + I64{8})) != I64{0}) { jet_rt_int_hazard_reclaim() }
 }
 
 #Export(c) jet_rt_int_retire_zero: fn(node: I64) {
     // refs already0 and the publication owner has been removed. A reader
     // publishing after this scan MUST revalidate before any node dereference.
-    if int_hazard_contains(node) -> int_hazard_push_retired(node)
-    else -> int_free_node(node)
-    if (sync_load(wrapping(int_hazard_root + I64{8})) != I64{0}) -> jet_rt_int_hazard_reclaim()
+    if int_hazard_contains(node) -> int_hazard_push_retired(node) else -> int_free_node(node)
+    if (sync_load(wrapping(int_hazard_root + I64{8})) != I64{0}) { jet_rt_int_hazard_reclaim() }
 }
 
 #Export(c) jet_rt_int_hazard_try_retain: fn(node: I64) -> Bool {
     loop {
         refs: int_load(node)
-        if (refs == I64{0}) -> return false
-        if (refs < I64{0} || refs == I64{9223372036854775807}) -> jet_rt_unreachable(I64{0}, I64{0})
+        if (refs == I64{0}) { return false }
+        if (refs < I64{0} || refs == I64{9223372036854775807}) {
+            jet_rt_unreachable(I64{0}, I64{0})
+        }
         if sync_cas(node, refs, refs + I64{1}) == refs -> return true
     }
 }
 
 int_hazard_reload: fn(place: I64, callback: I64, context: I64) -> I64 {
-    if (callback == I64{0}) -> return sync_load(place)
+    if (callback == I64{0}) { return sync_load(place) }
     // The native numeric forwarder lends a pure reload callback and its live
     // closure context for this synchronous call.
     coll_call_box(callback, context)
@@ -100,10 +106,10 @@ int_hazard_clone: fn(place: I64, initial: I64, callback: I64, context: I64) -> I
         current: int_hazard_reload(place, callback, context)
         if current != raw -> raw = current
         if int_inline(raw) {
-            if (record != I64{0}) -> jet_rt_int_hazard_clear(record)
+            if (record != I64{0}) { jet_rt_int_hazard_clear(record) }
             return raw
         }
-        if (record == I64{0}) -> record = jet_rt_int_hazard_enter()
+        if (record == I64{0}) { record = jet_rt_int_hazard_enter() }
         jet_rt_int_hazard_protect(record, int_node(raw))
         validated: int_hazard_reload(place, callback, context)
         if validated != raw {
@@ -124,6 +130,7 @@ int_hazard_clone: fn(place: I64, initial: I64, callback: I64, context: I64) -> I
 #Export(c) jet_rt_int_clone_atomic: fn(place: I64) -> I64 {
     int_hazard_clone(place, sync_load(place), I64{0}, I64{0})
 }
+
 #Export(c) jet_rt_int_clone_atomic_reload: fn(initial: I64, callback: I64, context: I64) -> I64 {
     int_hazard_clone(I64{0}, initial, callback, context)
 }

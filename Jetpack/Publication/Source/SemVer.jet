@@ -24,9 +24,7 @@ PublicationSemVer: struct {
     }
 
     impl Comparable {
-        compare: fn(self, rhs: PublicationSemVer) -> Ordering {
-            publication_precedence(self, rhs)
-        }
+        compare: fn(self, rhs: PublicationSemVer) -> Ordering { publication_precedence(self, rhs) }
     }
 
     impl Display {
@@ -138,11 +136,7 @@ publication_cmp_pre_ids: fn(left: String, right: String) -> Ordering Never! {
         if xn && yn {
             order = x.len() <=> y.len()
             if order == Ordering.Equal -> order = x <=> y
-        } else if xn {
-            order = Ordering.Less
-        } else if yn {
-            order = Ordering.Greater
-        } else {
+        } else if xn { order = Ordering.Less } else if yn { order = Ordering.Greater } else {
             order = x <=> y
         }
         if order != Ordering.Equal -> return order
@@ -262,7 +256,9 @@ PublicationPartial: struct {
 
 publication_parse_partial: fn(input: String) -> PublicationPartial? Never! {
     text: input.trim()
-    if text == "" -> return Val(PublicationPartial{major: None, minor: None, patch: None, pre: None, build: None})
+    if text == "" {
+        return Val(PublicationPartial{major: None, minor: None, patch: None, pre: None, build: None})
+    }
     rest := text.removeprefix("v")
     if rest == "" -> return None
     build := String?{None}
@@ -282,15 +278,13 @@ publication_parse_partial: fn(input: String) -> PublicationPartial? Never! {
     loop part in core.split(".") {
         if count >= 3 -> return None
         value := Int?{None}
-        if part == "*" || part == "x" || part == "X" || part == "" {
-            seen_wild = true
-        } else {
+        if part == "*" || part == "x" || part == "X" || part == "" -> seen_wild = true else {
             if seen_wild -> return None
             value = Val(publication_parse_numeric_id(part) ?? return None)
         }
-        if count == 0 -> parsed.major = value
-        else if count == 1 -> parsed.minor = value
-        else -> parsed.patch = value
+        if count == 0 -> parsed.major = value else if count == 1 -> parsed.minor = value else {
+            parsed.patch = value
+        }
         count += 1
     }
     Val(parsed)
@@ -308,7 +302,9 @@ publication_successor: fn(value: Int) -> Int? Never! {
 publication_parse_range: fn(input: String) -> [PublicationComparator]? Never! {
     range: input.trim()
     if range == "" -> return Val([PublicationComparator]{})
-    if range.split_once(" - ") == .Val(parts) -> return publication_expand_hyphen(parts.before.trim(), parts.after.trim())
+    if range.split_once(" - ") == .Val(parts) {
+        return publication_expand_hyphen(parts.before.trim(), parts.after.trim())
+    }
     comps := [PublicationComparator]{}
     loop simple in publication_split_simples(range) {
         expanded: publication_parse_simple(simple) ?? return None
@@ -361,9 +357,7 @@ publication_parse_simple: fn(input: String) -> [PublicationComparator]? Never! {
     } else if text.starts_with("<") {
         op = PublicationOp.Lt
         rest = text.removeprefix("<")
-    } else if text.starts_with("=") {
-        rest = text.removeprefix("=")
-    }
+    } else if text.starts_with("=") { rest = text.removeprefix("=") }
     if rest.trim() == "" -> return None
     publication_expand_op(op, publication_parse_partial(rest) ?? return None)
 }
@@ -409,9 +403,7 @@ publication_expand_caret: fn(p: PublicationPartial) -> [PublicationComparator]? 
     major: p.major ?? return Val([PublicationComparator]{})
     lower: PublicationSemVer{major: major, minor: p.minor ?? 0, patch: p.patch ?? 0, pre: p.pre, build: None}
     upper := publication_ver(0, 0, 0)
-    if major > 0 {
-        upper = publication_ver(publication_successor(major) ?? return None, 0, 0)
-    } else if p.minor == None {
+    if major > 0 -> upper = publication_ver(publication_successor(major) ?? return None, 0, 0) else if p.minor == None {
         upper = publication_ver(1, 0, 0)
     } else if (p.minor ?? 0) > 0 || p.patch == None {
         upper = publication_ver(0, publication_successor(p.minor ?? 0) ?? return None, 0)
@@ -427,9 +419,7 @@ publication_expand_tilde: fn(p: PublicationPartial) -> [PublicationComparator]? 
     upper := publication_ver(0, 0, 0)
     if p.minor == .Val(minor) {
         upper = publication_ver(major, publication_successor(minor) ?? return None, 0)
-    } else {
-        upper = publication_ver(publication_successor(major) ?? return None, 0, 0)
-    }
+    } else { upper = publication_ver(publication_successor(major) ?? return None, 0, 0) }
     Val(publication_interval(lower, upper))
 }
 
@@ -467,7 +457,9 @@ publication_set_matches: fn(set: [PublicationComparator], version: PublicationSe
     loop comparator in set {
         if !publication_comparator_matches(comparator, version) -> return false
         bound: comparator.version
-        if bound.pre != None && bound.major == version.major && bound.minor == version.minor && bound.patch == version.patch -> allowed = true
+        if bound.pre != None && bound.major == version.major && bound.minor == version.minor && bound.patch == version.patch {
+            allowed = true
+        }
     }
     allowed
 }
@@ -484,7 +476,7 @@ PublicationReleaseBounds: struct {
 publication_set_satisfiable: fn(first: [PublicationComparator], second: [PublicationComparator]) -> Bool Never! {
     bounds := PublicationReleaseBounds{
         lower: publication_ver(0, 0, 0),
-        upper: publication_ver(PUBLICATION_U64_MAX, PUBLICATION_U64_MAX, PUBLICATION_U64_MAX)
+        upper: publication_ver(PUBLICATION_U64_MAX, PUBLICATION_U64_MAX, PUBLICATION_U64_MAX),
     }
     if !publication_constrain_release_bounds(first, bounds) -> return false
     if !publication_constrain_release_bounds(second, bounds) -> return false
@@ -501,12 +493,14 @@ publication_constrain_release_bounds: fn(set: [PublicationComparator], bounds: &
                 publication_tighten_lower(bounds, v)
                 publication_tighten_upper(bounds, v)
             }
-            .Gte -> publication_tighten_lower(bounds, v)
+            .Gte -> { publication_tighten_lower(bounds, v) }
             .Gt -> {
                 lower: if pre -> v else -> (publication_release_successor(v) ?? return false)
                 publication_tighten_lower(bounds, lower)
             }
-            .Lt -> publication_tighten_upper(bounds, publication_release_predecessor(v) ?? return false)
+            .Lt -> {
+                publication_tighten_upper(bounds, publication_release_predecessor(v) ?? return false)
+            }
             .Lte -> {
                 upper: if pre -> (publication_release_predecessor(v) ?? return false) else -> v
                 publication_tighten_upper(bounds, upper)
@@ -525,15 +519,25 @@ publication_tighten_upper: fn(bounds: &PublicationReleaseBounds, version: Public
 }
 
 publication_release_successor: fn(version: PublicationSemVer) -> PublicationSemVer? Never! {
-    if version.patch < PUBLICATION_U64_MAX -> return Val(publication_ver(version.major, version.minor, version.patch + 1))
-    if version.minor < PUBLICATION_U64_MAX -> return Val(publication_ver(version.major, version.minor + 1, 0))
+    if version.patch < PUBLICATION_U64_MAX {
+        return Val(publication_ver(version.major, version.minor, version.patch + 1))
+    }
+    if version.minor < PUBLICATION_U64_MAX {
+        return Val(publication_ver(version.major, version.minor + 1, 0))
+    }
     if version.major < PUBLICATION_U64_MAX -> return Val(publication_ver(version.major + 1, 0, 0))
     None
 }
 
 publication_release_predecessor: fn(version: PublicationSemVer) -> PublicationSemVer? Never! {
-    if version.patch > 0 -> return Val(publication_ver(version.major, version.minor, version.patch - 1))
-    if version.minor > 0 -> return Val(publication_ver(version.major, version.minor - 1, PUBLICATION_U64_MAX))
-    if version.major > 0 -> return Val(publication_ver(version.major - 1, PUBLICATION_U64_MAX, PUBLICATION_U64_MAX))
+    if version.patch > 0 {
+        return Val(publication_ver(version.major, version.minor, version.patch - 1))
+    }
+    if version.minor > 0 {
+        return Val(publication_ver(version.major, version.minor - 1, PUBLICATION_U64_MAX))
+    }
+    if version.major > 0 {
+        return Val(publication_ver(version.major - 1, PUBLICATION_U64_MAX, PUBLICATION_U64_MAX))
+    }
     None
 }

@@ -1,4 +1,5 @@
 use engine_paths: core.files.path
+
 // Exact independent-root engine claims; PENDING-SEAM(package-tests), no runtime proof claimed.
 engine_independent_root_fixture: fn() -> (base: String, roots: HangarRoots, repo: String, table: SourceTable, spec: RefSpec, ctx: ProviderCtx) {
     base: files.tmpdir("jet-engine-independent-root-") ?? panic("base fixture")
@@ -21,6 +22,7 @@ engine_independent_root_fixture: fn() -> (base: String, roots: HangarRoots, repo
     ctx: ProviderCtx{fixtures: None, store_dir: roots.hangar_dir(), offline: true, project_dir: None, nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
     (base: base, roots: roots, repo: repo, table: table, spec: spec, ctx: ctx)
 }
+
 engine_independent_root_cleanup: fn(base: String) {
     store_make_tree_writable_for_removal(base).drop("fixture cleanup")
     files.remove_all(base).drop("fixture cleanup")
@@ -38,8 +40,8 @@ engine_independent_root_cleanup: fn(base: String) {
     assert(!files.exists(files.join(fixture.roots.root, "private/unreproducible")))
     staging: files.join(fixture.roots.hangar_dir(), "reproducibility-staging")
     if files.list_dir(staging) == {
-        .Ok(entries) -> assert_eq(entries.len(), 0)
-        .Err(_) -> {} // Original read_dir().unwrap_or(false) accepts an absent/unreadable staging directory.
+        .Ok(entries) -> { assert_eq(entries.len(), 0) }
+        .Err(_) -> {}  // Original read_dir().unwrap_or(false) accepts an absent/unreadable staging directory.
     }
     engine_independent_root_cleanup(fixture.base)
 }
@@ -51,12 +53,14 @@ engine_independent_root_cleanup: fn(base: String) {
     source: files.join(fixture.repo, "pkgs/hello/bin/hello")
     changed: fn() -[FS]> Bool {
         checks += 1
-        if checks == 2 -> files.write(source, "#!/bin/sh\necho divergent\n") ?? panic("divergent source")
+        if checks == 2 {
+            files.write(source, "#!/bin/sh\necho divergent\n") ?? panic("divergent source")
+        }
         false
     }
     options: IndependentRootOptions{retries: 0, cancelled: Val(changed)}
     if store_certify_independent_root_build(verification, fixture.roots, fixture.ctx, RealizeRequest.Package{spec: fixture.spec, table: fixture.table}, options) == {
-        .Ok(_) -> panic("divergent roots were promoted")
+        .Ok(_) -> { panic("divergent roots were promoted") }
         .Err(error) -> assert(error.message().contains("conflicting independent roots"))
     }
     assert_eq(store_list(verification, fixture.roots).len(), 0)
@@ -81,7 +85,7 @@ engine_independent_root_cleanup: fn(base: String) {
     cancelled: fn() -[FS]> Bool { true }
     options: IndependentRootOptions{retries: 1, cancelled: Val(cancelled)}
     if store_certify_independent_root_build(verification, fixture.roots, fixture.ctx, RealizeRequest.Package{spec: fixture.spec, table: fixture.table}, options) == {
-        .Ok(_) -> panic("cancelled certification was promoted")
+        .Ok(_) -> { panic("cancelled certification was promoted") }
         .Err(error) -> assert(error.message().contains("cancelled"))
     }
     assert_eq(store_list(verification, fixture.roots).len(), 0)

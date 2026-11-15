@@ -21,7 +21,9 @@ test_copy_bytes: fn(destination: I64, source: I64, length: I64) {
 }
 
 // A fresh unique copy: capture texts keep growing in place after a snapshot.
-test_text_clone: fn(text: I64) -> I64 { rt_text_copy(trap_word(text), trap_word(wrapping(text + I64{8}))) }
+test_text_clone: fn(text: I64) -> I64 {
+    rt_text_copy(trap_word(text), trap_word(wrapping(text + I64{8})))
+}
 
 test_text_drop: fn(text: I64) { jet_rt_string_drop(text) }
 
@@ -297,14 +299,16 @@ test_parse_record: fn(data: I64, end: I64, start: I64, record: I64) {
 // offset after it, or -1 when the field is malformed.
 test_parse_cases: fn(data: I64, end: I64, at: I64) -> I64 {
     if (at < end && trap_byte(wrapping(data + at)) == I64{45}) {
-        if (end - at >= I64{2} && trap_byte(wrapping(wrapping(data + at) + I64{1})) == I64{10}) -> return at + I64{2}
+        if (end - at >= I64{2} && trap_byte(wrapping(wrapping(data + at) + I64{1})) == I64{10}) {
+            return at + I64{2}
+        }
         return I64{-1}
     }
     cursor := at
     numbers := I64{0}
     loop numbers < (I64{3}) {
         if (numbers > I64{0}) {
-            if (cursor >= end || trap_byte(wrapping(data + cursor)) != I64{47}) -> return I64{-1}
+            if (cursor >= end || trap_byte(wrapping(data + cursor)) != I64{47}) { return I64{-1} }
             cursor += I64{1}
         }
         first: cursor
@@ -313,14 +317,16 @@ test_parse_cases: fn(data: I64, end: I64, at: I64) -> I64 {
             byte: trap_byte(wrapping(data + cursor))
             if (byte == I64{10} || byte == I64{47}) { break }
             digit: byte - I64{48}
-            if (digit < I64{0} || digit > I64{9} || value > (I64{9223372036854775807} - digit) /% I64{10}) -> return I64{-1}
+            if (digit < I64{0} || digit > I64{9} || value > (I64{9223372036854775807} - digit) /% I64{10}) {
+                return I64{-1}
+            }
             value = value * I64{10} + digit
             cursor += I64{1}
         }
-        if (cursor == first) -> return I64{-1}
+        if (cursor == first) { return I64{-1} }
         numbers += I64{1}
     }
-    if (cursor >= end || trap_byte(wrapping(data + cursor)) != I64{10}) -> return I64{-1}
+    if (cursor >= end || trap_byte(wrapping(data + cursor)) != I64{10}) { return I64{-1} }
     cursor + I64{1}
 }
 
@@ -440,7 +446,9 @@ test_report_text: fn(record: I64, capture: I64) {
             }
         }
         else -> {
-            if ((flags.bit_and(I64{1})) != I64{0}) -> test_msg_pass(I64{1}) else -> test_msg_fail(I64{1})
+            if ((flags.bit_and(I64{1})) != I64{0}) { test_msg_pass(I64{1}) } else {
+                test_msg_fail(I64{1})
+            }
         }
     }
     test_write_word(I64{1}, I64{10}, I64{1})
@@ -465,10 +473,14 @@ test_report_text: fn(record: I64, capture: I64) {
         if {
             ((flags.bit_and(I64{4})) != I64{0}) -> skipped += I64{1}
             ((flags.bit_and(I64{2})) != I64{0}) -> {
-                if ((flags.bit_and(I64{1})) != I64{0}) -> expected += I64{1} else -> unexpected += I64{1}
+                if ((flags.bit_and(I64{1})) != I64{0}) { expected += I64{1} } else {
+                    unexpected += I64{1}
+                }
             }
             else -> {
-                if ((flags.bit_and(I64{1})) != I64{0}) -> passed += I64{1} else -> failed += I64{1}
+                if ((flags.bit_and(I64{1})) != I64{0}) { passed += I64{1} } else {
+                    failed += I64{1}
+                }
             }
         }
         if ((flags.bit_and(I64{5})) == I64{0}) { ok = false }

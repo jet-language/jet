@@ -12,11 +12,17 @@ use {
     jet_backend.[x64_process_env]
     jet_pkg_model.[WorkspaceDeclarationCache]
     jetpack_foundation.[
-        JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST_ENV, JET_DEVELOPMENT_RECEIPT_DIRECTORY_ENV,
-        JET_DEVELOPMENT_RECEIPT_ENTRY_ENV, JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST_ENV,
-        JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_ENV, JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST_ENV,
-        JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST_ENV, JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST_ENV,
-        JET_DEVELOPMENT_RECEIPT_TARGET_ENV, PACKAGE_FILE, UNIFIED_LOCK_FILE,
+        JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST_ENV,
+        JET_DEVELOPMENT_RECEIPT_DIRECTORY_ENV,
+        JET_DEVELOPMENT_RECEIPT_ENTRY_ENV,
+        JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST_ENV,
+        JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_ENV,
+        JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST_ENV,
+        JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST_ENV,
+        JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST_ENV,
+        JET_DEVELOPMENT_RECEIPT_TARGET_ENV,
+        PACKAGE_FILE,
+        UNIFIED_LOCK_FILE,
     ]
 }
 
@@ -120,7 +126,9 @@ jet_cli_launch_env: fn(vars: [JetCLIEnvVar]) -> [String]? {
     rows := [String]{}
     loop row in x64_process_env() {
         overridden: loop prefix in prefixes {
-            if row.starts_with(prefix) -> break true
+            if row.starts_with(prefix) {
+                break true
+            }
         } ?? false
         if !overridden -> rows.push(row.copy())
     }

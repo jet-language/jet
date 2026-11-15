@@ -1,37 +1,93 @@
 // Original names preserved except six retired legacy reader witnesses (Main
 // current-schema-only greenfield ruling).
 use jet_foundation.[
-    CanonicalJSON, JetSymbolRef, SourceIdentity, TRACE_SCHEMA, TRACE_VERSION, TraceAllocation,
-    TraceBrowser, TraceGameDrawEvent, TraceGameFrame, TraceHardware, TraceIO, TraceLock,
-    TraceNative, TraceReceiptSection, TraceSample, TraceSkeleton, TraceSourceMap, TraceSpan,
-    TraceTask, TraceToolchain, artifact_extension, build_skeleton_bytes, canonical_json_bytes,
-    capture_policy_default_exclusions, capture_policy_to_json, jettrace_array, jettrace_artifact,
-    jettrace_get, jettrace_object_view, jettrace_wrapper_fields, trace_id,
-    trace_profile_unsupported, trace_skeleton_content_json, trace_source_map_jet_with_source,
+    CanonicalJSON,
+    JetSymbolRef,
+    SourceIdentity,
+    TRACE_SCHEMA,
+    TRACE_VERSION,
+    TraceAllocation,
+    TraceBrowser,
+    TraceGameDrawEvent,
+    TraceGameFrame,
+    TraceHardware,
+    TraceIO,
+    TraceLock,
+    TraceNative,
+    TraceReceiptSection,
+    TraceSample,
+    TraceSkeleton,
+    TraceSourceMap,
+    TraceSpan,
+    TraceTask,
+    TraceToolchain,
+    artifact_extension,
+    build_skeleton_bytes,
+    canonical_json_bytes,
+    capture_policy_default_exclusions,
+    capture_policy_to_json,
+    jettrace_array,
+    jettrace_artifact,
+    jettrace_get,
+    jettrace_object_view,
+    jettrace_wrapper_fields,
+    trace_id,
+    trace_profile_unsupported,
+    trace_skeleton_content_json,
+    trace_source_map_jet_with_source,
     verify_jettrace,
 ]
 
 jettrace_sample_skeleton: fn() -> TraceSkeleton Never! {
-    TraceSkeleton{command: "run", argv: [String]{"run", "app.jet"},
+    TraceSkeleton{
+        command: "run",
+        argv: [String]{"run", "app.jet"},
         toolchain: TraceToolchain{jet_version: "0.0.0-test", compiler_build_id: "build-test", stdlib_id: "stdlib-test", runner_id: "runner-test"},
         hardware: TraceHardware{cpu_arch: "x86_64", logical_cpus: U64{1}, os: "linux", target: "x86_64-unknown-linux-gnu"},
-        capture_policy: capture_policy_default_exclusions(), samples: [TraceSample]{}, profile: trace_profile_unsupported("test fixture has no source capture"),
-        allocations: [TraceAllocation]{}, browser: [TraceBrowser]{}, game_frames: [TraceGameFrame]{}, game_draw_events: [TraceGameDrawEvent]{},
-        tasks: [TraceTask]{}, locks: [TraceLock]{}, io: [TraceIO]{}, native: [TraceNative]{}, spans: [TraceSpan]{},
-        receipt_sections: [TraceReceiptSection]{}, source_identity: [SourceIdentity]{}, source_maps: [TraceSourceMap]{}}
+        capture_policy: capture_policy_default_exclusions(),
+        samples: [TraceSample]{},
+        profile: trace_profile_unsupported("test fixture has no source capture"),
+        allocations: [TraceAllocation]{},
+        browser: [TraceBrowser]{},
+        game_frames: [TraceGameFrame]{},
+        game_draw_events: [TraceGameDrawEvent]{},
+        tasks: [TraceTask]{},
+        locks: [TraceLock]{},
+        io: [TraceIO]{},
+        native: [TraceNative]{},
+        spans: [TraceSpan]{},
+        receipt_sections: [TraceReceiptSection]{},
+        source_identity: [SourceIdentity]{},
+        source_maps: [TraceSourceMap]{},
+    }
 }
+
 jettrace_test_symbol: fn() -> JetSymbolRef Never! { JetSymbolRef{path: "app.jet", name: "run"} }
-jettrace_test_bytes: fn(value: TraceSkeleton) -> [U8] Never! { build_skeleton_bytes(value) ?? panic(err.message) }
-jettrace_test_valid: fn(value: TraceSkeleton) -> CanonicalJSON Never! { verify_jettrace(jettrace_test_bytes(value)) ?? panic(err.message) }
+
+jettrace_test_bytes: fn(value: TraceSkeleton) -> [U8] Never! {
+    build_skeleton_bytes(value) ?? panic(err.message)
+}
+
+jettrace_test_valid: fn(value: TraceSkeleton) -> CanonicalJSON Never! {
+    verify_jettrace(jettrace_test_bytes(value)) ?? panic(err.message)
+}
+
 jettrace_test_error_bytes: fn(bytes: [U8]) -> String Never! {
     return if verify_jettrace(bytes) == {
         .Err(error) -> error.message
         .Ok(_) -> panic("expected jettrace rejection")
     }
 }
-jettrace_test_error: fn(value: TraceSkeleton) -> String Never! { jettrace_test_error_bytes(jettrace_test_bytes(value)) }
-jettrace_test_text: fn(value: TraceSkeleton) -> String Never! { String.from_bytes(jettrace_test_bytes(value)) ?? panic("UTF8") }
-jettrace_test_set: fn(value: &CanonicalJSON, key: String, &&replacement: CanonicalJSON) Never! {
+
+jettrace_test_error: fn(value: TraceSkeleton) -> String Never! {
+    jettrace_test_error_bytes(jettrace_test_bytes(value))
+}
+
+jettrace_test_text: fn(value: TraceSkeleton) -> String Never! {
+    String.from_bytes(jettrace_test_bytes(value)) ?? panic("UTF8")
+}
+
+jettrace_test_set: fn(value: &CanonicalJSON, key: String, replacement: &&CanonicalJSON) Never! {
     if value == {
         .Object(original) -> {
             fields := original.copy()
@@ -47,24 +103,32 @@ jettrace_test_set: fn(value: &CanonicalJSON, key: String, &&replacement: Canonic
         .Null | .Bool(_) | .Integer(_) | .String(_) | .Array(_) -> panic("fixture is not an object")
     }
 }
-jettrace_test_wrap: fn(&&content: CanonicalJSON) -> [U8] Never! { canonical_json_bytes(jettrace_artifact(content) ?? panic(err.message)) }
-jettrace_test_task: fn(id: U64, parent: U64, &&state: String, &&wait: String) -> TraceTask Never! {
+
+jettrace_test_wrap: fn(content: &&CanonicalJSON) -> [U8] Never! {
+    canonical_json_bytes(jettrace_artifact(content) ?? panic(err.message))
+}
+
+jettrace_test_task: fn(id: U64, parent: U64, state: &&String, wait: &&String) -> TraceTask Never! {
     TraceTask{id: id, parent: parent, state: state.move(), wait: wait.move(), cancelled: false, symbol: jettrace_test_symbol()}
 }
+
 // The view readers return views of their argument; these copy the one node a
 // test compares, so no view outlives the call.
 jettrace_test_wrapper_lookup: fn(value: CanonicalJSON, key: String) -> CanonicalJSON JetTraceError! {
     fields: jettrace_wrapper_fields(value)
     Ok(fields[jettrace_get(fields, key)].value.copy())
 }
+
 jettrace_test_object_lookup: fn(value: CanonicalJSON, key: String) -> CanonicalJSON JetTraceError! {
     fields: jettrace_object_view(value, "fixture object")
     Ok(fields[jettrace_get(fields, key)].value.copy())
 }
+
 jettrace_test_array_item: fn(value: CanonicalJSON, index: Int) -> CanonicalJSON JetTraceError! {
     items: jettrace_array(value, "fixture array")
     Ok(items[index].copy())
 }
+
 #Test("trace_version_has_one_typed_home") {
     version: TRACE_VERSION
     assert_eq(version, U32{1})
@@ -72,7 +136,8 @@ jettrace_test_array_item: fn(value: CanonicalJSON, index: Int) -> CanonicalJSON 
     wrapper: jettrace_test_valid(jettrace_sample_skeleton())
     assert_eq(jettrace_test_wrapper_lookup(wrapper, "version") ?? panic(err.message), CanonicalJSON.Integer("{version}"))
 }
-jettrace_test_window: fn(&&status: String, wall: U64?, cpu: U64?) -> Bool Never! {
+
+jettrace_test_window: fn(status: &&String, wall: U64?, cpu: U64?) -> Bool Never! {
     skeleton := jettrace_sample_skeleton()
     skeleton.profile.window_status = status.move()
     skeleton.profile.window_wall_ns = wall
@@ -82,6 +147,7 @@ jettrace_test_window: fn(&&status: String, wall: U64?, cpu: U64?) -> Bool Never!
         .Err(_) -> false
     }
 }
+
 #Test("profile_run_window_status_governs_its_measurements") {
     assert(jettrace_test_window("exit", Val(U64{5}), Val(U64{4})))
     assert(jettrace_test_window("live", Val(U64{5}), None))
@@ -91,6 +157,7 @@ jettrace_test_window: fn(&&status: String, wall: U64?, cpu: U64?) -> Bool Never!
     assert(!jettrace_test_window("unavailable", None, Val(U64{4})))
     assert(!jettrace_test_window("complete", Val(U64{5}), Val(U64{4})))
 }
+
 #Test("captured_wall_and_alloc_round_trip_with_symbol") {
     skeleton := jettrace_sample_skeleton()
     skeleton.samples.push(TraceSample{domain: "wall", duration_ns: U64{42}, symbol: jettrace_test_symbol()})
@@ -104,6 +171,7 @@ jettrace_test_window: fn(&&status: String, wall: U64?, cpu: U64?) -> Bool Never!
     assert(text.contains("\"name\":\"run\""))
     assert_eq((trace_id(verified) ?? panic(err.message)).len(), 64)
 }
+
 #Test("captured_tasks_round_trip_with_parent_causality") {
     skeleton := jettrace_sample_skeleton()
     skeleton.tasks.push(jettrace_test_task(U64{1}, U64{0}, "running", ""))
@@ -115,6 +183,7 @@ jettrace_test_window: fn(&&status: String, wall: U64?, cpu: U64?) -> Bool Never!
     assert(text.contains("\"wait\":\"time sleep\""))
     _: jettrace_test_valid(skeleton)
 }
+
 #Test("captured_locks_round_trip_with_channel_waiters") {
     skeleton := jettrace_sample_skeleton()
     skeleton.locks.push(TraceLock{kind: "channel", id: U64{3}, depth: U64{0}, capacity: Val(U64{1}), send_waiters: U64{0}, recv_waiters: U64{1}, closed: false, symbol: jettrace_test_symbol()})
@@ -125,11 +194,13 @@ jettrace_test_window: fn(&&status: String, wall: U64?, cpu: U64?) -> Bool Never!
     assert(text.contains("\"capacity\":1"))
     _: jettrace_test_valid(skeleton)
 }
+
 #Test("idle_channel_lock_row_is_rejected") {
     skeleton := jettrace_sample_skeleton()
     skeleton.locks.push(TraceLock{kind: "channel", id: U64{1}, depth: U64{0}, capacity: Val(U64{1}), send_waiters: U64{0}, recv_waiters: U64{0}, closed: false, symbol: jettrace_test_symbol()})
     assert(jettrace_test_error(skeleton).contains("no waiters"))
 }
+
 #Test("captured_io_round_trip_with_tcp_accept_wait") {
     skeleton := jettrace_sample_skeleton()
     skeleton.tasks.push(jettrace_test_task(U64{3}, U64{0}, "done", ""))
@@ -145,12 +216,14 @@ jettrace_test_window: fn(&&status: String, wall: U64?, cpu: U64?) -> Bool Never!
     skeleton.tasks[0].wait = "tcp accept"
     assert(jettrace_test_error(skeleton).contains("completed task must have an empty wait"))
 }
+
 #Test("vacuous_io_row_is_rejected") {
     skeleton := jettrace_sample_skeleton()
     skeleton.tasks.push(jettrace_test_task(U64{1}, U64{0}, "blocked", "time sleep"))
     skeleton.io.push(TraceIO{end_ns: U64{2}, kind: "tcp", start_ns: U64{1}, task_id: U64{1}, wait: "time sleep", symbol: jettrace_test_symbol()})
     assert(jettrace_test_error(skeleton).contains("not an observe I/O wait"))
 }
+
 #Test("orphan_task_and_io_causality_are_rejected") {
     skeleton := jettrace_sample_skeleton()
     skeleton.tasks.push(jettrace_test_task(U64{2}, U64{1}, "done", ""))
@@ -159,6 +232,7 @@ jettrace_test_window: fn(&&status: String, wall: U64?, cpu: U64?) -> Bool Never!
     skeleton.io.push(TraceIO{end_ns: U64{2}, kind: "tcp", start_ns: U64{1}, task_id: U64{3}, wait: "tcp accept", symbol: jettrace_test_symbol()})
     assert(jettrace_test_error(skeleton).contains("missing task 3"))
 }
+
 #Test("native_timing_round_trips_with_root_causality_and_unavailable_state") {
     skeleton := jettrace_sample_skeleton()
     skeleton.tasks.push(jettrace_test_task(U64{1}, U64{0}, "done", ""))
@@ -173,6 +247,7 @@ jettrace_test_window: fn(&&status: String, wall: U64?, cpu: U64?) -> Bool Never!
     skeleton.native[0] = TraceNative{clock: "process_cpu", duration_ns: None, observed_at_ns: U64{0}, reason: "process CPU timing is unavailable on target wasm32-unknown-unknown", status: "unavailable", symbol: jettrace_test_symbol(), target: "wasm32-unknown-unknown", task_id: None}
     _: jettrace_test_valid(skeleton)
 }
+
 #Test("task_observation_spans_round_trip_with_parent_causality_and_unavailable_state") {
     skeleton := jettrace_sample_skeleton()
     pairs: [(id: U64, parent: U64)]{(id: U64{1}, parent: U64{0}), (id: U64{2}, parent: U64{1})}
@@ -190,6 +265,7 @@ jettrace_test_window: fn(&&status: String, wall: U64?, cpu: U64?) -> Bool Never!
     skeleton.spans = [TraceSpan]{TraceSpan{clock: "monotonic", end_ns: None, kind: "task_observed", parent_task_id: None, reason: "task span requires multiple live observations", start_ns: None, status: "unavailable", symbol: jettrace_test_symbol(), task_id: None}}
     _: jettrace_test_valid(skeleton)
 }
+
 #Test("capture_policy_audits_fixed_row_caps_and_truncation") {
     skeleton := jettrace_sample_skeleton()
     skeleton.capture_policy.io_rows_truncated = true
@@ -221,6 +297,7 @@ jettrace_test_window: fn(&&status: String, wall: U64?, cpu: U64?) -> Bool Never!
         assert(jettrace_test_error_bytes(jettrace_test_wrap(oversized)).contains("exceeds capture_policy.{limit_keys[index]}_row_limit"))
     }
 }
+
 #Test("browser_rows_are_closed_bounded_and_source_attributed") {
     skeleton := jettrace_sample_skeleton()
     skeleton.browser.push(TraceBrowser{class: "event", duration_ns: U64{25}, start_ns: U64{100}, symbol: jettrace_test_symbol()})
@@ -231,24 +308,28 @@ jettrace_test_window: fn(&&status: String, wall: U64?, cpu: U64?) -> Bool Never!
     skeleton.browser[0].class = "payload"
     assert(jettrace_test_error(skeleton).contains("class must be"))
 }
+
 #Test("skeleton_round_trips_with_schema_identity") {
     verified: jettrace_test_valid(jettrace_sample_skeleton())
     assert_eq(jettrace_test_wrapper_lookup(verified, "schema") ?? panic(err.message), CanonicalJSON.String(TRACE_SCHEMA))
     assert_eq((trace_id(verified) ?? panic(err.message)).len(), 64)
     assert(artifact_extension().ends_with("jettrace"))
 }
+
 #Test("forged_trace_id_is_rejected") {
     content: trace_skeleton_content_json(jettrace_sample_skeleton()) ?? panic(err.message)
     wrapper := jettrace_artifact(content) ?? panic(err.message)
     jettrace_test_set(wrapper, "trace_id", .String("0".repeat(64)))
     assert(jettrace_test_error_bytes(canonical_json_bytes(wrapper)).contains("content hash mismatch"))
 }
+
 #Test("newer_major_version_names_required_toolchain") {
     content: trace_skeleton_content_json(jettrace_sample_skeleton()) ?? panic(err.message)
     wrapper := jettrace_artifact(content) ?? panic(err.message)
     jettrace_test_set(wrapper, "version", .Integer("2"))
     assert(jettrace_test_error_bytes(canonical_json_bytes(wrapper)).contains("newer jet toolchain"))
 }
+
 #Test("embedded_source_maps_hash_and_sort_for_offline_truth") {
     skeleton := jettrace_sample_skeleton()
     skeleton.source_maps.push(trace_source_map_jet_with_source("b.jet", "run: fn() {{}}\n") ?? panic(err.message))
@@ -267,6 +348,7 @@ jettrace_test_window: fn(&&status: String, wall: U64?, cpu: U64?) -> Bool Never!
     skeleton.source_maps[1].sha256 = "0".repeat(64)
     assert(jettrace_test_error(skeleton).contains("does not match map bytes"))
 }
+
 // Retired, not counted as ported: legacy_capture_policy_v1_keeps_unknown_limit_semantics
 // (3047-3097), capture_policy_v2_remains_readable_with_unknown_native_limit (3100-3116),
 // capture_policy_v3_remains_readable_with_unknown_span_limit (3119-3133),
@@ -285,6 +367,7 @@ jettrace_test_window: fn(&&status: String, wall: U64?, cpu: U64?) -> Bool Never!
         assert_eq(jettrace_test_error_bytes(jettrace_test_wrap(content)), "unsupported capture_policy schema")
     }
 }
+
 #Test("current capture policy rejects malformed native and span rows") {
     skeleton := jettrace_sample_skeleton()
     skeleton.tasks.push(jettrace_test_task(U64{1}, U64{0}, "done", ""))

@@ -7,12 +7,14 @@ use {
     json: core.encoding.json
     core.encoding.Dyn
 }
+
 host_triple: fn(arch: String, os: String) -> String {
     known_arch: arch == "x86_64" || arch == "aarch64"
     if os == "linux" && known_arch -> return "{arch}-unknown-linux-gnu"
     if os == "macos" && known_arch -> return "{arch}-apple-darwin"
     "{arch}-unknown-{os}"
 }
+
 run: fn() {
     clang: process.which("clang++") ?? panic("the C++ binder needs clang++")
     ar: process.which("ar") ?? panic("the C++ binder needs ar")

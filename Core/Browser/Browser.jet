@@ -22,6 +22,7 @@ use {
 // and a redacted trace. Profiles and timeout validation remain offline-checkable.
 
 host: module
+
 storage: module
 
 C_MAX_SOURCE_BYTES: 1048576
@@ -76,7 +77,9 @@ BrowserAbilities: struct {
     profile: String
 
     bidi: fn(self) -> Bool Never! { self.bidi }
+
     cdp: fn(self) -> Bool Never! { self.cdp }
+
     profile: fn(self) -> String Never! { self.profile }
 }
 
@@ -88,7 +91,9 @@ BrowserPrivacy: struct {
     shared_profiles: Bool
 
     isolated_profiles: fn(self) -> Bool Never! { self.isolated_profiles }
+
     redact_receipts: fn(self) -> Bool Never! { self.redact_receipts }
+
     shared_profiles: fn(self) -> Bool Never! { self.shared_profiles }
 }
 
@@ -113,18 +118,29 @@ BrowserEvent: struct {
     __session: String
 
     kind: fn(self) -> String Never! { self.method }
+
     request_id: fn(self) -> String Never! { self.request_id }
+
     request_method: fn(self) -> String Never! { self.request_method }
+
     url_hash: fn(self) -> String Never! { self.url_hash }
+
     is_blocked: fn(self) -> Bool Never! { self.is_blocked }
+
     status_code: fn(self) -> Int Never! { self.status_code }
+
     download_id: fn(self) -> String Never! { self.download_id }
+
     suggested_filename_hash: fn(self) -> String Never! { self.suggested_filename_hash }
+
     // The top call frame of a `Debugger.paused`: its 0-based line and column
     // and the hash of its function name. -1, -1 and "" on any other event.
     frame_line: fn(self) -> Int Never! { self.frame_line }
+
     frame_column: fn(self) -> Int Never! { self.frame_column }
+
     frame_function_hash: fn(self) -> String Never! { self.frame_function_hash }
+
     // The hash of the source-map URL a `Debugger.scriptParsed` names; "" when
     // the script names none.
     source_map_url_hash: fn(self) -> String Never! { self.source_map_url_hash }
@@ -134,7 +150,9 @@ BrowserTrace: struct {
     entries: [String]
 
     entry_count: fn(self) -> Int Never! { self.entries.len() }
+
     redacted: fn(self) -> Bool Never! { trace_redacted(self.entries) }
+
     summary: fn(self) -> String Never! { self.entries.join(",") }
 }
 
@@ -144,9 +162,13 @@ BrowserReceipt: struct {
     cleaned: Bool
 
     entry_count: fn(self) -> Int Never! { self.entries.len() }
+
     redacted: fn(self) -> Bool Never! { trace_redacted(self.entries) }
+
     summary: fn(self) -> String Never! { self.entries.join(",") }
+
     isolated: fn(self) -> Bool Never! { self.isolated }
+
     cleaned: fn(self) -> Bool Never! { self.cleaned }
 }
 
@@ -171,7 +193,9 @@ priv BrowserState: struct {
     // no end. The engine, if any, stops after this, when its field drops.
     impl Close {
         close: fn(&&self) {
-            if self.closed || !self.session_started -> return
+            if self.closed || !self.session_started {
+                return
+            }
             id: self.next_id
             core.browser.__ws_set_timeout(self.conn, self.timeout_ms) ?? return
             self.conn.send_text("{{\"id\":{id},\"method\":\"session.end\",\"params\":{{}}}}") ?? return
@@ -180,7 +204,9 @@ priv BrowserState: struct {
                 body: message.text() ?? return
                 value: json.parse(body) ?? return
                 if browser_id(value) == .Val(got) {
-                    if got == id -> return
+                    if got == id {
+                        return
+                    }
                 }
             }
         }
@@ -202,7 +228,9 @@ priv BrowserEngine: struct {
         close: fn(&&self) {
             // Close cannot fail: an engine that already exited cannot be
             // signalled, and wait still reaps it.
-            if self.session_url != "" -> http.__request("DELETE", self.session_url).send().drop("a gone driver session needs no delete")
+            if self.session_url != "" {
+                http.__request("DELETE", self.session_url).send().drop("a gone driver session needs no delete")
+            }
             self.child.kill().drop("an exited engine needs no signal")
             self.child.wait().drop("the engine receipt is not reported")
             files.remove_all(self.profile).drop("profile removal at close is best-effort")
@@ -258,10 +286,16 @@ Browser: struct {
     add_intercept_url: fn(self, phase: String, url_pattern: String) -[Net, Time]> BrowserIntercept BrowserError! {
         if !phase_ok(phase) || url_pattern.len() == 0 -> return Err(BrowserError{kind: "protocol"})
         pattern: obj([(key: "type", value: Dyn.Text("string")), (key: "pattern", value: Dyn.Text(url_pattern.copy()))])
-        result: browser_command(self, "network.addIntercept", obj([
-            (key: "phases", value: Dyn.Array([Dyn]{Dyn.Text(phase.copy())})),
-            (key: "urlPatterns", value: Dyn.Array([Dyn]{pattern.move()}))
-        ]))
+        result: browser_command(
+            self,
+            "network.addIntercept",
+            obj(
+                [
+                    (key: "phases", value: Dyn.Array([Dyn]{Dyn.Text(phase.copy())})),
+                    (key: "urlPatterns", value: Dyn.Array([Dyn]{pattern.move()})),
+                ],
+            ),
+        )
         id: browser_string(result, "intercept")
         Ok(BrowserIntercept{__browser: self, __scope: new_scope(id)})
     }
@@ -279,12 +313,20 @@ Browser: struct {
     }
 
     fulfill_request: fn(self, request_id: String, status: Int, body: String) BrowserError! -[Net, Time]> {
-        if request_id.len() == 0 || status < 100 || status > 599 -> return Err(BrowserError{kind: "protocol"})
-        browser_command(self, "network.provideResponse", obj([
-            (key: "request", value: Dyn.Text(request_id.copy())),
-            (key: "statusCode", value: Dyn.Int(status)),
-            (key: "body", value: string_value(body))
-        ]))
+        if request_id.len() == 0 || status < 100 || status > 599 {
+            return Err(BrowserError{kind: "protocol"})
+        }
+        browser_command(
+            self,
+            "network.provideResponse",
+            obj(
+                [
+                    (key: "request", value: Dyn.Text(request_id.copy())),
+                    (key: "statusCode", value: Dyn.Int(status)),
+                    (key: "body", value: string_value(body)),
+                ],
+            ),
+        )
         Ok()
     }
 
@@ -331,15 +373,20 @@ BrowserContext: struct {
     __scope: Shared<__BrowserScope>
 
     page: fn(self) -[Net, Time]> BrowserPage BrowserError! { context_create_tab(self) }
+
     tab: fn(self) -[Net, Time]> BrowserPage BrowserError! { context_create_tab(self) }
+
     // Contexts are always isolated BiDi user contexts.
     isolated: fn(self) -> Bool Never! { true }
+
     // The hashed user-context id; the raw id never leaves the session.
     user_hash: fn(self) -> String Never! { fact_hash(scope_id(self.__scope)) }
 
     close: fn(self) BrowserError! -[Net, Time]> {
         if scope_closed(self.__scope) -> return Ok()
-        if !browser_closed(self.__browser) -> browser_command(self.__browser, "browser.removeUserContext", obj([(key: "userContext", value: Dyn.Text(scope_id(self.__scope)))]))
+        if !browser_closed(self.__browser) {
+            browser_command(self.__browser, "browser.removeUserContext", obj([(key: "userContext", value: Dyn.Text(scope_id(self.__scope)))]))
+        }
         scope_close(self.__scope)
         Ok()
     }
@@ -353,17 +400,25 @@ BrowserPage: struct {
     goto: fn(self, url: String) BrowserError! -[Env, Net, Time]> {
         page_live(self)
         target: navigation_url(url)
-        browser_command(self.__browser, "browsingContext.navigate", obj([
-            (key: "context", value: Dyn.Text(scope_id(self.__scope))),
-            (key: "url", value: Dyn.Text(target)),
-            (key: "wait", value: Dyn.Text("complete"))
-        ]))
+        browser_command(
+            self.__browser,
+            "browsingContext.navigate",
+            obj(
+                [
+                    (key: "context", value: Dyn.Text(scope_id(self.__scope))),
+                    (key: "url", value: Dyn.Text(target)),
+                    (key: "wait", value: Dyn.Text("complete")),
+                ],
+            ),
+        )
         Ok()
     }
 
     close: fn(self) BrowserError! -[Net, Time]> {
         if scope_closed(self.__scope) -> return Ok()
-        if !scope_closed(self.__context) && !browser_closed(self.__browser) -> browser_command(self.__browser, "browsingContext.close", obj([(key: "context", value: Dyn.Text(scope_id(self.__scope)))]))
+        if !scope_closed(self.__context) && !browser_closed(self.__browser) {
+            browser_command(self.__browser, "browsingContext.close", obj([(key: "context", value: Dyn.Text(scope_id(self.__scope)))]))
+        }
         scope_close(self.__scope)
         Ok()
     }
@@ -374,7 +429,9 @@ BrowserPage: struct {
     protocol: fn(self, kind: String) -> BrowserProtocol BrowserError! {
         page_live(self)
         if browser_closed(self.__browser) -> return Err(BrowserError{kind: "closed"})
-        if kind != "cdp" || !browser_cdp(self.__browser) -> return Err(BrowserError{kind: "unsupported protocol"})
+        if kind != "cdp" || !browser_cdp(self.__browser) {
+            return Err(BrowserError{kind: "unsupported protocol"})
+        }
         Ok(BrowserProtocol{__browser: self.__browser, __kind: "cdp", __context: self.__context, __page: self.__scope, __session: new_scope("")})
     }
 
@@ -390,9 +447,7 @@ BrowserPage: struct {
         ids := [String]{}
         if contexts == .Array(nodes) {
             loop node in nodes -> collect_frame_ids(node, ids)
-        } else {
-            return Err(BrowserError{kind: "protocol"})
-        }
+        } else { return Err(BrowserError{kind: "protocol"}) }
         out := [BrowserFrame]{}
         loop id in ids -> out.push(page_frame(self, id))
         Ok(out)
@@ -461,17 +516,45 @@ BrowserPage: struct {
         Ok()
     }
 
-    url: fn(self) -[Net, Time]> String BrowserError! { page_evaluate_text(self, "String(location.href)") }
-    title: fn(self) -[Net, Time]> String BrowserError! { page_evaluate_text(self, "String(document.title || '')") }
-    text: fn(self) -[Net, Time]> String BrowserError! { page_evaluate_text(self, "document.body ? String(document.body.innerText || '') : ''") }
-    dom: fn(self) -[Net, Time]> String BrowserError! { page_evaluate_text(self, "document.documentElement ? document.documentElement.outerHTML : ''") }
+    url: fn(self) -[Net, Time]> String BrowserError! {
+        page_evaluate_text(self, "String(location.href)")
+    }
 
-    get_by_role: fn(self, role: String, name: String) -> BrowserLocator Never! { page_locator(self, "accessibility", role, name, "") }
-    get_by_text: fn(self, value: String) -> BrowserLocator Never! { page_locator(self, "innerText", "", "", value) }
-    get_by_label: fn(self, name: String) -> BrowserLocator Never! { page_locator(self, "accessibility", "", name, "") }
-    get_by_placeholder: fn(self, value: String) -> BrowserLocator Never! { page_locator(self, "css", "", "", css_attr_equals("placeholder", value)) }
-    get_by_test_id: fn(self, id: String) -> BrowserLocator Never! { page_locator(self, "css", "", "", css_attr_equals("data-testid", id)) }
-    get_by_css: fn(self, selector: String) -> BrowserLocator Never! { page_locator(self, "css", "", "", selector) }
+    title: fn(self) -[Net, Time]> String BrowserError! {
+        page_evaluate_text(self, "String(document.title || '')")
+    }
+
+    text: fn(self) -[Net, Time]> String BrowserError! {
+        page_evaluate_text(self, "document.body ? String(document.body.innerText || '') : ''")
+    }
+
+    dom: fn(self) -[Net, Time]> String BrowserError! {
+        page_evaluate_text(self, "document.documentElement ? document.documentElement.outerHTML : ''")
+    }
+
+    get_by_role: fn(self, role: String, name: String) -> BrowserLocator Never! {
+        page_locator(self, "accessibility", role, name, "")
+    }
+
+    get_by_text: fn(self, value: String) -> BrowserLocator Never! {
+        page_locator(self, "innerText", "", "", value)
+    }
+
+    get_by_label: fn(self, name: String) -> BrowserLocator Never! {
+        page_locator(self, "accessibility", "", name, "")
+    }
+
+    get_by_placeholder: fn(self, value: String) -> BrowserLocator Never! {
+        page_locator(self, "css", "", "", css_attr_equals("placeholder", value))
+    }
+
+    get_by_test_id: fn(self, id: String) -> BrowserLocator Never! {
+        page_locator(self, "css", "", "", css_attr_equals("data-testid", id))
+    }
+
+    get_by_css: fn(self, selector: String) -> BrowserLocator Never! {
+        page_locator(self, "css", "", "", selector)
+    }
 }
 
 // A browsing-context frame (main or child). Listing frames never closes them.
@@ -544,12 +627,18 @@ BrowserLocator: struct {
         shared_id: self.resolve()
         target: obj([(key: "context", value: Dyn.Text(scope_id(self.__page)))])
         node: obj([(key: "type", value: Dyn.Text("node")), (key: "sharedId", value: Dyn.Text(shared_id))])
-        browser_command(self.__browser, "script.callFunction", obj([
-            (key: "functionDeclaration", value: Dyn.Text(C_FILL_FUNCTION)),
-            (key: "awaitPromise", value: Dyn.Bool(false)),
-            (key: "target", value: target),
-            (key: "arguments", value: Dyn.Array([Dyn]{node.move(), string_value(value)}))
-        ]))
+        browser_command(
+            self.__browser,
+            "script.callFunction",
+            obj(
+                [
+                    (key: "functionDeclaration", value: Dyn.Text(C_FILL_FUNCTION)),
+                    (key: "awaitPromise", value: Dyn.Bool(false)),
+                    (key: "target", value: target),
+                    (key: "arguments", value: Dyn.Array([Dyn]{node.move(), string_value(value)})),
+                ],
+            ),
+        )
         Ok()
     }
 
@@ -567,11 +656,17 @@ BrowserLocator: struct {
         if path.len() == 0 -> return Err(BrowserError{kind: "protocol"})
         shared_id: self.resolve()
         element: obj([(key: "sharedId", value: Dyn.Text(shared_id))])
-        browser_command(self.__browser, "input.setFiles", obj([
-            (key: "context", value: Dyn.Text(scope_id(self.__page))),
-            (key: "element", value: element),
-            (key: "files", value: Dyn.Array([Dyn]{Dyn.Text(path.copy())}))
-        ]))
+        browser_command(
+            self.__browser,
+            "input.setFiles",
+            obj(
+                [
+                    (key: "context", value: Dyn.Text(scope_id(self.__page))),
+                    (key: "element", value: element),
+                    (key: "files", value: Dyn.Array([Dyn]{Dyn.Text(path.copy())})),
+                ],
+            ),
+        )
         Ok()
     }
 }
@@ -607,11 +702,15 @@ BrowserProtocol: struct {
         params: json.parse(params_json) ?? return Err(BrowserError{kind: "protocol"})
         if !(params == .Object(_)) -> return Err(BrowserError{kind: "protocol"})
         if self.__kind == "bidi" {
-            if method.starts_with("goog:cdp.") -> return Err(BrowserError{kind: "unsupported protocol"})
+            if method.starts_with("goog:cdp.") {
+                return Err(BrowserError{kind: "unsupported protocol"})
+            }
             result: browser_command(self.__browser, method, params)
             return Ok(json.dumps(result) ?? return Err(BrowserError{kind: "protocol"}))
         }
-        if self.__kind != "cdp" || !browser_cdp(self.__browser) -> return Err(BrowserError{kind: "unsupported protocol"})
+        if self.__kind != "cdp" || !browser_cdp(self.__browser) {
+            return Err(BrowserError{kind: "unsupported protocol"})
+        }
         if !cdp_method_ok(method) -> return Err(BrowserError{kind: "protocol"})
         page_session: protocol_session(self)
         request := [(key: String, value: Dyn)]{(key: "method", value: Dyn.Text(method.copy())), (key: "params", value: params)}
@@ -625,10 +724,14 @@ BrowserProtocol: struct {
             self.__browser.subscribe(event)
             return Ok()
         }
-        if self.__kind != "cdp" || !browser_cdp(self.__browser) -> return Err(BrowserError{kind: "unsupported protocol"})
+        if self.__kind != "cdp" || !browser_cdp(self.__browser) {
+            return Err(BrowserError{kind: "unsupported protocol"})
+        }
         if !cdp_method_ok(event) -> return Err(BrowserError{kind: "protocol"})
         request := [(key: String, value: Dyn)]{(key: "events", value: Dyn.Array([Dyn]{Dyn.Text("goog:cdp.{event}")}))}
-        if protocol_session(self) != None -> request.push((key: "contexts", value: Dyn.Array([Dyn]{Dyn.Text(scope_id(self.__page))})))
+        if protocol_session(self) != None {
+            request.push((key: "contexts", value: Dyn.Array([Dyn]{Dyn.Text(scope_id(self.__page))})))
+        }
         browser_command(self.__browser, "session.subscribe", obj(request))
         Ok()
     }
@@ -643,7 +746,9 @@ BrowserProtocol: struct {
         started: time.instant()
         loop {
             value: browser_recv_json(self.__browser, started, timeout.milliseconds)
-            if !browser_capture_event(self.__browser, value) -> return Err(BrowserError{kind: "protocol"})
+            if !browser_capture_event(self.__browser, value) {
+                return Err(BrowserError{kind: "protocol"})
+            }
             if browser_pop_session_event(self.__browser, session) == .Val(event) -> return Ok(event)
         }
     }
@@ -655,7 +760,9 @@ BrowserProtocol: struct {
 priv protocol_session: fn(protocol: BrowserProtocol) -[Net, Time]> String? BrowserError! {
     page: scope_id(protocol.__page)
     if page == "" -> return Ok(None)
-    if scope_closed(protocol.__page) || scope_closed(protocol.__context) -> return Err(BrowserError{kind: "closed"})
+    if scope_closed(protocol.__page) || scope_closed(protocol.__context) {
+        return Err(BrowserError{kind: "closed"})
+    }
     known: scope_id(protocol.__session)
     if known != "" -> return Ok(Val(known))
     result: browser_command(protocol.__browser, "goog:cdp.getSession", obj([(key: "context", value: Dyn.Text(page))]))
@@ -678,9 +785,13 @@ BrowserLocked: struct {
     driver_size: Int
 
     engine: fn(self) -> String Never! { self.engine }
+
     version: fn(self) -> String Never! { self.version }
+
     binary: fn(self) -> String Never! { self.binary }
+
     protocol: fn(self) -> String Never! { self.protocol }
+
     verify: fn(self) BrowserError! -[FS]> {
         if !files.is_file(self.binary) -> return Err(BrowserError{kind: "missing binary"})
         size: files.getsize(self.binary) ?? return Err(BrowserError{kind: "missing binary"})
@@ -709,14 +820,23 @@ BrowserTestConfig: struct {
     source_root: String
 
     engines: fn(self) -> [String] Never! { self.engines }
+
     retries: fn(self) -> Int Never! { self.retries }
+
     filter: fn(self) -> String Never! { self.filter }
+
     reporter: fn(self) -> String Never! { self.reporter }
+
     ui: fn(self) -> Bool Never! { self.ui }
+
     visual: fn(self) -> Bool Never! { self.visual }
+
     watch: fn(self) -> Bool Never! { self.watch }
+
     server_url: fn(self) -> String Never! { self.server_url }
+
     artifact_dir: fn(self) -> String Never! { self.artifact_dir }
+
     report_path: fn(self) -> String Never! { self.report_path }
 }
 
@@ -790,8 +910,11 @@ BrowserTestReport: struct {
     cases: [BrowserTestCase]
 
     json: fn(self) -> String Never! { report_json(self) }
+
     text: fn(self) -> String Never! { report_text(self) }
+
     html: fn(self) -> String Never! { report_html(self) }
+
     exit_code: fn(self) -> Int Never! { report_exit_code(self) }
 }
 
@@ -827,7 +950,9 @@ BrowserTestServer: struct {
         if guard.value.child == .Val(child) {
             // A child that already exited cannot be signalled; wait still reaps it.
             child.kill() ?? ()
-            if child.wait() == .Ok(receipt) -> guard.value.logs = bounded_text("{receipt.output}{receipt.errors}", C_MAX_SERVER_LOG_BYTES)
+            if child.wait() == .Ok(receipt) {
+                guard.value.logs = bounded_text("{receipt.output}{receipt.errors}", C_MAX_SERVER_LOG_BYTES)
+            }
         }
         guard.value.child = None
     }
@@ -841,7 +966,6 @@ config_from_env: fn() -[Env, FS]> BrowserTestConfig BrowserError! {
     config_from_snapshot(root, env)
 }
 
-
 make_profile: fn(name: String) -> BrowserProfile BrowserError! { profile(name) }
 
 // No trimming, case folding, timeout clamping, or fallback. Profile refusal uses
@@ -850,7 +974,9 @@ profile: fn(name: String) -> BrowserProfile BrowserError! {
     version: if name == {
         "bidi-2025.5" -> "2025.5"
         "bidi-2024.11" -> "2024.11"
-        else -> { return Err(BrowserError{kind: "invalid profile"}) }
+        else -> {
+            return Err(BrowserError{kind: "invalid profile"})
+        }
     }
     Ok(BrowserProfile{name: name, version: version})
 }
@@ -863,7 +989,9 @@ timeout: fn(ms: Int) -> BrowserTimeout BrowserError! {
 // The project's pin, read through FS alone (architecture.md:1287-1288): the
 // `.jet/lock` of the working directory, the project root a program runs from.
 locked: fn(engine: String) -[FS, IO]> BrowserLocked BrowserError! {
-    if engine != "chromium" && engine != "firefox" && engine != "webkit" -> return Err(BrowserError{kind: "unknown engine"})
+    if engine != "chromium" && engine != "firefox" && engine != "webkit" {
+        return Err(BrowserError{kind: "unknown engine"})
+    }
     raw: files.read(".jet/lock") ?? return Err(BrowserError{kind: "missing lock"})
     entry: parse_locked(raw, engine)
     if !files.is_file(entry.binary) -> return Err(BrowserError{kind: "missing binary"})
@@ -956,12 +1084,27 @@ priv launch_chromium: fn(pin: BrowserLocked, p: BrowserProfile) -[Exec, FS, Net,
 priv connect_session: fn(endpoint: String, p: BrowserProfile, t: BrowserTimeout) -[Net, Time]> Browser BrowserError! {
     conn: if core.net.ws.__connect(endpoint) == {
         .Ok(value) -> value
-        .Err(error) -> return Err(browser_ws_error(error))
+        .Err(error) -> {
+            return Err(browser_ws_error(error))
+        }
     }
-    Ok(Browser{__state: Shared{BrowserState{
-        conn: conn.move(), next_id: 1, closed: false, session_started: false, timeout_ms: t.milliseconds,
-        profile: p.name, cdp: true, trace: [String]{"connect"}, trace_bytes: 7, events: [BrowserEvent]{}, engine: None
-    }}})
+    Ok(
+        Browser{
+            __state: Shared{BrowserState{
+                conn: conn.move(),
+                next_id: 1,
+                closed: false,
+                session_started: false,
+                timeout_ms: t.milliseconds,
+                profile: p.name,
+                cdp: true,
+                trace: [String]{"connect"},
+                trace_bytes: 7,
+                events: [BrowserEvent]{},
+                engine: None,
+            }},
+        },
+    )
 }
 
 // The BiDi port the engine records in its profile. A read can race the
@@ -991,15 +1134,29 @@ connect: fn(endpoint: String) -[Net, Time]> Browser BrowserError! {
 connect_profile: fn(endpoint: String, p: BrowserProfile, t: BrowserTimeout) -[Net, Time]> Browser BrowserError! {
     conn: if core.net.ws.__connect(endpoint) == {
         .Ok(value) -> value
-        .Err(error) -> return Err(browser_ws_error(error))
+        .Err(error) -> {
+            return Err(browser_ws_error(error))
+        }
     }
-    browser: Browser{__state: Shared{BrowserState{
-        conn: conn.move(), next_id: 1, closed: false, session_started: false, timeout_ms: t.milliseconds,
-        profile: p.name, cdp: false, trace: [String]{"connect"}, trace_bytes: 7, events: [BrowserEvent]{}, engine: None
-    }}}
+    browser: Browser{
+        __state: Shared{BrowserState{
+            conn: conn.move(),
+            next_id: 1,
+            closed: false,
+            session_started: false,
+            timeout_ms: t.milliseconds,
+            profile: p.name,
+            cdp: false,
+            trace: [String]{"connect"},
+            trace_bytes: 7,
+            events: [BrowserEvent]{},
+            engine: None,
+        }},
+    }
     status: browser_command(browser, "session.status", empty_object())
-    if !browser_true_field(status, "ready") || !browser_text_field(status, "message") ->
+    if !browser_true_field(status, "ready") || !browser_text_field(status, "message") {
         return Err(BrowserError{kind: "protocol"})
+    }
     always: obj([(key: "alwaysMatch", value: empty_object())])
     session: browser_command(browser, "session.new", obj([(key: "capabilities", value: always)]))
     // The session counts as started before reply validation, so a failed
@@ -1099,7 +1256,9 @@ browser_set_cdp: fn(browser: Browser, cdp: Bool) Never! {
 // The trace keeps at most 8 KiB, dropping the oldest entries first.
 browser_trace_push: fn(browser: Browser, entry: String) Never! {
     size: entry.len()
-    if size > C_TRACE_LIMIT_BYTES -> return
+    if size > C_TRACE_LIMIT_BYTES {
+        return
+    }
     guard := browser.__state.guard_edit()
     drop := 0
     total := guard.value.trace_bytes
@@ -1157,8 +1316,12 @@ priv browser_pop_session_event: fn(browser: Browser, session: String) -> Browser
 browser_check_command: fn(browser: Browser, method: String) BrowserError! {
     guard: browser.__state.guard_read()
     if guard.value.closed -> return Err(BrowserError{kind: "closed"})
-    if !profile_allows(guard.value.profile, method) -> return Err(BrowserError{kind: "unsupported protocol"})
-    if (method == "goog:cdp.sendCommand" || method == "goog:cdp.getSession") && !guard.value.cdp -> return Err(BrowserError{kind: "unsupported protocol"})
+    if !profile_allows(guard.value.profile, method) {
+        return Err(BrowserError{kind: "unsupported protocol"})
+    }
+    if (method == "goog:cdp.sendCommand" || method == "goog:cdp.getSession") && !guard.value.cdp {
+        return Err(BrowserError{kind: "unsupported protocol"})
+    }
     Ok()
 }
 
@@ -1256,7 +1419,9 @@ event_facts: fn(value: Dyn, method: String) -> BrowserEvent Never! {
     if url == .Val(found) -> out.url_hash = fact_hash(found)
     out.status_code = response_status(params)
     out.download_id = browser_text(params, "download") ?? ""
-    if browser_text(params, "suggestedFilename") == .Val(name) -> out.suggested_filename_hash = fact_hash(name)
+    if browser_text(params, "suggestedFilename") == .Val(name) {
+        out.suggested_filename_hash = fact_hash(name)
+    }
     out
 }
 
@@ -1279,7 +1444,9 @@ priv cdp_event_facts: fn(value: Dyn, method: String) -> BrowserEvent Never! {
     out.status_code = response_status(params)
     if out.method == "Debugger.scriptParsed" {
         if browser_text(params, "url") == .Val(url) -> out.url_hash = fact_hash(url)
-        if browser_text(params, "sourceMapURL") == .Val(map) && map != "" -> out.source_map_url_hash = fact_hash(map)
+        if browser_text(params, "sourceMapURL") == .Val(map) && map != "" {
+            out.source_map_url_hash = fact_hash(map)
+        }
     }
     if out.method == "Debugger.paused" {
         frames: browser_get(params, "callFrames") ?? return out
@@ -1288,8 +1455,12 @@ priv cdp_event_facts: fn(value: Dyn, method: String) -> BrowserEvent Never! {
             top: items[0]
             out.frame_function_hash = fact_hash(browser_text(top, "functionName") ?? "")
             location: browser_get(top, "location") ?? return out
-            if browser_get(location, "lineNumber") == .Val(line) -> out.frame_line = dyn_int(line) ?? -1
-            if browser_get(location, "columnNumber") == .Val(column) -> out.frame_column = dyn_int(column) ?? -1
+            if browser_get(location, "lineNumber") == .Val(line) {
+                out.frame_line = dyn_int(line) ?? -1
+            }
+            if browser_get(location, "columnNumber") == .Val(column) {
+                out.frame_column = dyn_int(column) ?? -1
+            }
         }
     }
     out
@@ -1305,15 +1476,40 @@ priv response_status: fn(params: Dyn) -> Int Never! {
 }
 
 C_BIDI_2024_11: [String]{
-    "session.status", "session.new", "session.end", "session.subscribe",
-    "browser.createUserContext", "browser.removeUserContext", "browser.setDownloadBehavior",
-    "browsingContext.create", "browsingContext.close", "browsingContext.getTree", "browsingContext.navigate",
-    "browsingContext.reload", "browsingContext.locateNodes", "browsingContext.captureScreenshot", "browsingContext.print",
-    "input.performActions", "input.releaseActions", "input.setFiles",
-    "network.addIntercept", "network.continueRequest", "network.failRequest", "network.provideResponse", "network.removeIntercept",
-    "storage.getCookies", "storage.setCookie", "storage.deleteCookies",
-    "script.addPreloadScript", "script.callFunction", "script.disown", "script.evaluate", "script.getRealms", "script.removePreloadScript",
-    "goog:cdp.sendCommand", "goog:cdp.getSession"
+    "session.status",
+    "session.new",
+    "session.end",
+    "session.subscribe",
+    "browser.createUserContext",
+    "browser.removeUserContext",
+    "browser.setDownloadBehavior",
+    "browsingContext.create",
+    "browsingContext.close",
+    "browsingContext.getTree",
+    "browsingContext.navigate",
+    "browsingContext.reload",
+    "browsingContext.locateNodes",
+    "browsingContext.captureScreenshot",
+    "browsingContext.print",
+    "input.performActions",
+    "input.releaseActions",
+    "input.setFiles",
+    "network.addIntercept",
+    "network.continueRequest",
+    "network.failRequest",
+    "network.provideResponse",
+    "network.removeIntercept",
+    "storage.getCookies",
+    "storage.setCookie",
+    "storage.deleteCookies",
+    "script.addPreloadScript",
+    "script.callFunction",
+    "script.disown",
+    "script.evaluate",
+    "script.getRealms",
+    "script.removePreloadScript",
+    "goog:cdp.sendCommand",
+    "goog:cdp.getSession",
 }
 
 profile_allows: fn(name: String, method: String) -> Bool Never! {
@@ -1415,7 +1611,9 @@ trace_redacted: fn(entries: [String]) -> Bool Never! {
         if entry == "connect" -> next
         parts: parse.split(entry, ":")
         if parts.len() == 2 && parts[0] == "event" && hex_text(parts[1], 16) -> next
-        if parts.len() == 3 && (parts[0] == "send" || parts[0] == "recv" || parts[0] == "error") && digit_text(parts[1]) && hex_text(parts[2], 16) -> next
+        if parts.len() == 3 && (parts[0] == "send" || parts[0] == "recv" || parts[0] == "error") && digit_text(parts[1]) && hex_text(parts[2], 16) {
+            next
+        }
         return false
     }
     true
@@ -1449,7 +1647,9 @@ cdp_method_ok: fn(method: String) -> Bool Never! {
 
 // ---- Scopes, pages, and locators --------------------------------------------
 
-new_scope: fn(id: String) -> Shared<__BrowserScope> Never! { Shared{__BrowserScope{id: id, closed: false}} }
+new_scope: fn(id: String) -> Shared<__BrowserScope> Never! {
+    Shared{__BrowserScope{id: id, closed: false}}
+}
 
 scope_id: fn(scope: Shared<__BrowserScope>) -> String Never! {
     guard: scope.guard_read()
@@ -1479,7 +1679,9 @@ context_create_tab: fn(context: BrowserContext) -[Net, Time]> BrowserPage Browse
 }
 
 page_live: fn(page: BrowserPage) BrowserError! {
-    if scope_closed(page.__scope) || scope_closed(page.__context) -> return Err(BrowserError{kind: "closed"})
+    if scope_closed(page.__scope) || scope_closed(page.__context) {
+        return Err(BrowserError{kind: "closed"})
+    }
     Ok()
 }
 
@@ -1524,12 +1726,18 @@ storage_name: fn(kind: String) -> String? Never! {
 page_storage_call: fn(page: BrowserPage, function: String, arguments: &&[Dyn]) -[Net, Time]> Dyn BrowserError! {
     page_live(page)
     target: obj([(key: "context", value: Dyn.Text(scope_id(page.__scope)))])
-    browser_command(page.__browser, "script.callFunction", obj([
-        (key: "functionDeclaration", value: Dyn.Text(function.copy())),
-        (key: "awaitPromise", value: Dyn.Bool(false)),
-        (key: "target", value: target),
-        (key: "arguments", value: Dyn.Array(arguments))
-    ]))
+    browser_command(
+        page.__browser,
+        "script.callFunction",
+        obj(
+            [
+                (key: "functionDeclaration", value: Dyn.Text(function.copy())),
+                (key: "awaitPromise", value: Dyn.Bool(false)),
+                (key: "target", value: target),
+                (key: "arguments", value: Dyn.Array(arguments)),
+            ],
+        ),
+    )
 }
 
 remote_string: fn(result: Dyn) -> String? BrowserError! {
@@ -1545,18 +1753,26 @@ remote_string: fn(result: Dyn) -> String? BrowserError! {
 page_evaluate_text: fn(page: BrowserPage, expression: String) -[Net, Time]> String BrowserError! {
     page_live(page)
     target: obj([(key: "context", value: Dyn.Text(scope_id(page.__scope)))])
-    result: browser_command(page.__browser, "script.evaluate", obj([
-        (key: "expression", value: Dyn.Text(expression.copy())),
-        (key: "awaitPromise", value: Dyn.Bool(false)),
-        (key: "resultOwnership", value: Dyn.Text("none")),
-        (key: "target", value: target)
-    ]))
+    result: browser_command(
+        page.__browser,
+        "script.evaluate",
+        obj(
+            [
+                (key: "expression", value: Dyn.Text(expression.copy())),
+                (key: "awaitPromise", value: Dyn.Bool(false)),
+                (key: "resultOwnership", value: Dyn.Text("none")),
+                (key: "target", value: target),
+            ],
+        ),
+    )
     found: remote_string(result) ?? return Err(BrowserError{kind: "protocol"})
     Ok(found)
 }
 
 navigation_url: fn(url: String) -[Env]> String Never! {
-    if url.contains("://") || url.starts_with("about:") || url.starts_with("data:") -> return url.copy()
+    if url.contains("://") || url.starts_with("about:") || url.starts_with("data:") {
+        return url.copy()
+    }
     env: core.sys.__startup_env()
     base: env_value(env, "JET_TEST_WEB_SERVER_URL") ?? env_value(env, "JET_BROWSER_TEST_SERVER_URL") ?? ""
     if base.len() == 0 -> return url.copy()
@@ -1598,23 +1814,38 @@ page_locator: fn(page: BrowserPage, kind: String, role: String, name: String, va
 locator_wire: fn(locator: BrowserLocator) -> Dyn BrowserError! {
     if locator.__kind == "accessibility" {
         value := [(key: String, value: Dyn)]{}
-        if locator.__role.len() > 0 -> value.push((key: "role", value: Dyn.Text(locator.__role.copy())))
-        if locator.__name.len() > 0 -> value.push((key: "name", value: Dyn.Text(locator.__name.copy())))
+        if locator.__role.len() > 0 {
+            value.push((key: "role", value: Dyn.Text(locator.__role.copy())))
+        }
+        if locator.__name.len() > 0 {
+            value.push((key: "name", value: Dyn.Text(locator.__name.copy())))
+        }
         if value.len() == 0 -> return Err(BrowserError{kind: "protocol"})
         return Ok(obj([(key: "type", value: Dyn.Text("accessibility")), (key: "value", value: obj(value))]))
     }
-    if locator.__kind == "css" || locator.__kind == "innerText" -> return Ok(obj([(key: "type", value: Dyn.Text(locator.__kind.copy())), (key: "value", value: Dyn.Text(locator.__value.copy()))]))
+    if locator.__kind == "css" || locator.__kind == "innerText" {
+        return Ok(obj([(key: "type", value: Dyn.Text(locator.__kind.copy())), (key: "value", value: Dyn.Text(locator.__value.copy()))]))
+    }
     Err(BrowserError{kind: "protocol"})
 }
 
 locator_query: fn(locator: BrowserLocator, timeout_ms: Int) -[Net, Time]> String? BrowserError! {
-    if scope_closed(locator.__page) || scope_closed(locator.__context) -> return Err(BrowserError{kind: "closed"})
+    if scope_closed(locator.__page) || scope_closed(locator.__context) {
+        return Err(BrowserError{kind: "closed"})
+    }
     wire: locator_wire(locator)
-    result: browser_command_with_timeout(locator.__browser, "browsingContext.locateNodes", obj([
-        (key: "context", value: Dyn.Text(scope_id(locator.__page))),
-        (key: "locator", value: wire),
-        (key: "maxNodeCount", value: Dyn.Int(1))
-    ]), timeout_ms)
+    result: browser_command_with_timeout(
+        locator.__browser,
+        "browsingContext.locateNodes",
+        obj(
+            [
+                (key: "context", value: Dyn.Text(scope_id(locator.__page))),
+                (key: "locator", value: wire),
+                (key: "maxNodeCount", value: Dyn.Int(1)),
+            ],
+        ),
+        timeout_ms,
+    )
     nodes: browser_get(result, "nodes") ?? return Err(BrowserError{kind: "protocol"})
     if nodes == .Array(items) {
         if items.len() == 0 -> return Ok(None)
@@ -1653,9 +1884,7 @@ selected: fn(config: BrowserTestConfig, name: String) -> Bool Never! {
         if n == 44 || n == 32 || n == 9 || n == 10 || n == 12 || n == 13 {
             if pattern.len() > 0 && glob_match(pattern, value) -> return true
             pattern = [U8]{}
-        } else {
-            pattern.push(b)
-        }
+        } else { pattern.push(b) }
     }
     pattern.len() > 0 && glob_match(pattern, value)
 }
@@ -1709,7 +1938,8 @@ begin_named: fn(config: BrowserTestConfig, test: String, engine: String, attempt
         return Err(err)
     }
     // An older profile may lack an optional event; the queue keeps the rest.
-    loop event in ([String]{"log.entryAdded", "network.beforeRequestSent", "network.responseStarted", "network.fetchError", "browsingContext.consoleMessage"}) {
+    loop event in
+        ([String]{"log.entryAdded", "network.beforeRequestSent", "network.responseStarted", "network.fetchError", "browsingContext.consoleMessage"}) {
         _: b.subscribe(event)
     }
     Ok(BrowserTestFixture{__browser: b, __context: context, __page: page})
@@ -1718,7 +1948,6 @@ begin_named: fn(config: BrowserTestConfig, test: String, engine: String, attempt
 fixture_context: fn(fixture: BrowserTestFixture) -> BrowserContext Never! { fixture.__context }
 
 fixture_page: fn(fixture: BrowserTestFixture) -> BrowserPage Never! { fixture.__page }
-
 
 fixture_source: fn(name: String, body: String) -> String BrowserError! {
     generate_source(name, body, "")
@@ -1765,13 +1994,9 @@ report_summary: fn(report: BrowserTestReport) -> String Never! {
     failed := 0
     skipped := 0
     loop case in report.cases {
-        if !case.selected {
-            skipped += 1
-        } else if case.attempts.len() > 0 && case.attempts[case.attempts.len() - 1].passed {
+        if !case.selected -> skipped += 1 else if case.attempts.len() > 0 && case.attempts[case.attempts.len() - 1].passed {
             passed += 1
-        } else {
-            failed += 1
-        }
+        } else { failed += 1 }
     }
     "{passed} passed, {failed} failed, {skipped} skipped"
 }
@@ -1800,21 +2025,23 @@ report_attempt_value: fn(attempt: BrowserTestAttempt) -> Dyn Never! {
     trace := [Dyn]{}
     loop entry in attempt.trace -> trace.push(Dyn.Text(entry))
     error: if attempt.error.len() == 0 -> Dyn.Null else -> Dyn.Text(attempt.error.copy())
-    obj([
-        (key: "test", value: Dyn.Text(attempt.test.copy())),
-        (key: "engine", value: Dyn.Text(attempt.engine.copy())),
-        (key: "attempt", value: Dyn.Int(attempt.attempt)),
-        (key: "passed", value: Dyn.Bool(attempt.passed)),
-        (key: "expectedFailure", value: Dyn.Bool(attempt.expected_failure)),
-        (key: "durationMs", value: Dyn.Int(attempt.duration_ms)),
-        (key: "source", value: report_source_value(attempt.source)),
-        (key: "actions", value: Dyn.Array(actions)),
-        (key: "snapshots", value: Dyn.Array(snapshots)),
-        (key: "events", value: Dyn.Array(events)),
-        (key: "artifacts", value: Dyn.Array(artifacts)),
-        (key: "trace", value: Dyn.Array(trace)),
-        (key: "error", value: error)
-    ])
+    obj(
+        [
+            (key: "test", value: Dyn.Text(attempt.test.copy())),
+            (key: "engine", value: Dyn.Text(attempt.engine.copy())),
+            (key: "attempt", value: Dyn.Int(attempt.attempt)),
+            (key: "passed", value: Dyn.Bool(attempt.passed)),
+            (key: "expectedFailure", value: Dyn.Bool(attempt.expected_failure)),
+            (key: "durationMs", value: Dyn.Int(attempt.duration_ms)),
+            (key: "source", value: report_source_value(attempt.source)),
+            (key: "actions", value: Dyn.Array(actions)),
+            (key: "snapshots", value: Dyn.Array(snapshots)),
+            (key: "events", value: Dyn.Array(events)),
+            (key: "artifacts", value: Dyn.Array(artifacts)),
+            (key: "trace", value: Dyn.Array(trace)),
+            (key: "error", value: error),
+        ],
+    )
 }
 
 // The `jet.browser.test/v1` document, pretty-rendered with keys in schema order.
@@ -1825,16 +2052,18 @@ report_json: fn(report: BrowserTestReport) -> String Never! {
         loop attempt in case.attempts -> attempts.push(report_attempt_value(attempt))
         cases.push(obj([(key: "name", value: Dyn.Text(case.name)), (key: "selected", value: Dyn.Bool(case.selected)), (key: "attempts", value: Dyn.Array(attempts))]))
     }
-    document: obj([
-        (key: "schema", value: Dyn.Text("jet.browser.test/v1")),
-        (key: "sourceRoot", value: Dyn.Text(report.source_root.copy())),
-        (key: "reporter", value: Dyn.Text(report.reporter.copy())),
-        (key: "ui", value: Dyn.Bool(report.ui)),
-        (key: "watch", value: Dyn.Bool(report.watch)),
-        (key: "summary", value: Dyn.Text(report_summary(report))),
-        (key: "exitCode", value: Dyn.Int(report_exit_code(report))),
-        (key: "cases", value: Dyn.Array(cases))
-    ])
+    document: obj(
+        [
+            (key: "schema", value: Dyn.Text("jet.browser.test/v1")),
+            (key: "sourceRoot", value: Dyn.Text(report.source_root.copy())),
+            (key: "reporter", value: Dyn.Text(report.reporter.copy())),
+            (key: "ui", value: Dyn.Bool(report.ui)),
+            (key: "watch", value: Dyn.Bool(report.watch)),
+            (key: "summary", value: Dyn.Text(report_summary(report))),
+            (key: "exitCode", value: Dyn.Int(report_exit_code(report))),
+            (key: "cases", value: Dyn.Array(cases)),
+        ],
+    )
     // The document holds no Float, so rendering cannot fail.
     json.to_string_pretty(document) ?? ""
 }
@@ -1850,7 +2079,9 @@ report_text: fn(report: BrowserTestReport) -> String Never! {
             status: if attempt.passed -> "PASS" else -> "FAIL"
             lines.push("{status} {attempt.test} [{attempt.engine}] attempt={attempt.attempt} duration={attempt.duration_ms}ms\n")
             if attempt.error.len() > 0 -> lines.push("  error: {attempt.error}\n")
-            loop action in attempt.actions -> lines.push("  action {action.sequence}: {action.kind} {action.fact}\n")
+            loop action in attempt.actions {
+                lines.push("  action {action.sequence}: {action.kind} {action.fact}\n")
+            }
             loop snapshot in attempt.snapshots {
                 origin: if snapshot.source.path.len() == 0 -> "" else -> " source={snapshot.source.path}:{snapshot.source.line}"
                 lines.push("  snapshot {snapshot.kind}: {snapshot.path} bytes={snapshot.bytes} hash={snapshot.hash}{origin}\n")
@@ -1858,7 +2089,9 @@ report_text: fn(report: BrowserTestReport) -> String Never! {
             loop event in attempt.events {
                 lines.push("  {event.kind} request={event.request_id_hash} method={event.request_method} url={event.url_hash} status={event.status_code} blocked={event.is_blocked}\n")
             }
-            loop artifact in attempt.artifacts -> lines.push("  attachment {artifact.name}: {artifact.path}\n")
+            loop artifact in attempt.artifacts {
+                lines.push("  attachment {artifact.name}: {artifact.path}\n")
+            }
             if attempt.trace.len() > 0 -> lines.push("  trace: {attempt.trace.join(",")}\n")
         }
     }
@@ -1875,18 +2108,12 @@ report_html: fn(report: BrowserTestReport) -> String Never! {
     loop index < raw.len() {
         b: raw[index]
         line_separator: b == (U8{226}) && index + 2 < raw.len() && raw[index + 1] == (U8{128}) && (raw[index + 2] == (U8{168}) || raw[index + 2] == (U8{169}))
-        if b == (U8{38}) {
-            push_str(out, "\\u0026")
-        } else if b == (U8{60}) {
+        if b == (U8{38}) -> push_str(out, "\\u0026") else if b == (U8{60}) {
             push_str(out, "\\u003c")
-        } else if b == (U8{62}) {
-            push_str(out, "\\u003e")
-        } else if line_separator {
+        } else if b == (U8{62}) { push_str(out, "\\u003e") } else if line_separator {
             push_str(out, if raw[index + 2] == (U8{168}) -> "\\u2028" else -> "\\u2029")
             index += 2
-        } else {
-            out.push(b)
-        }
+        } else { out.push(b) }
         index += 1
     }
     push_str(out, C_REPORT_HTML_TAIL)
@@ -1902,14 +2129,18 @@ write_report: fn(report: BrowserTestReport, path: String) BrowserError! -[FS]> {
         else -> report_text(report)
     }
     write_report_text(path, rendered)
-    if report.ui || report.reporter == "html" -> write_report_text(files.with_suffix(path, ".html"), report_html(report))
+    if report.ui || report.reporter == "html" {
+        write_report_text(files.with_suffix(path, ".html"), report_html(report))
+    }
     Ok()
 }
 
 write_report_text: fn(path: String, rendered: String) BrowserError! -[FS]> {
     if rendered.bytes().len() > C_MAX_REPORT_BYTES -> return Err(BrowserError{kind: "protocol"})
     parent: files.dirname(path)
-    if parent.len() > 0 -> files.create_dir_all(parent) ?? return Err(BrowserError{kind: "transport"})
+    if parent.len() > 0 {
+        files.create_dir_all(parent) ?? return Err(BrowserError{kind: "transport"})
+    }
     files.write(path, rendered) ?? return Err(BrowserError{kind: "transport"})
     Ok()
 }
@@ -1984,10 +2215,10 @@ server_url: fn(server: BrowserTestServer) -> String Never! { server.url() }
 
 server_logs: fn(server: BrowserTestServer) -> String Never! { server.logs() }
 
-
 push_str: fn(out: &[U8], s: String) Never! {
     loop b in s.bytes() -> out.push(b)
 }
+
 source_name: fn(text: String) -> String Never! {
     raw: text.bytes()
     out := [U8]{}
@@ -1997,9 +2228,7 @@ source_name: fn(text: String) -> String Never! {
         if ok {
             if i == 0 && n >= 48 && n <= 57 -> out.push(U8{95})
             out.push(n)
-        } else {
-            out.push(U8{95})
-        }
+        } else { out.push(U8{95}) }
     }
     if out.len() == 0 -> return "generated_browser_test"
     String.from_bytes(out) ?? "generated_browser_test"
@@ -2013,9 +2242,7 @@ esc_source: fn(text: String) -> String Never! {
             out.push(U8{92})
             out.push(b)
         } else {
-            if b == (U8{10}) {
-                push_str(out, "\\n")
-            } else {
+            if b == (U8{10}) -> push_str(out, "\\n") else {
                 if b == (U8{13}) -> push_str(out, "\\r") else -> out.push(b)
             }
         }
@@ -2035,7 +2262,7 @@ C_REPORT_HTML_TAIL: "</script><script>\nconst data=JSON.parse(document.getElemen
     assert_eq(previous.version, "2024.11")
     loop invalid in ([String]{"", "default", "BIDI-2025.5", " bidi-2025.5", "bidi-2025.5 "}) {
         if profile(invalid) == {
-            .Ok(_) -> panic("invalid profile accepted")
+            .Ok(_) -> { panic("invalid profile accepted") }
             .Err(error) -> {
                 assert_eq(error.kind, "invalid profile")
                 assert_eq("{error}", "browser profile is not supported")
@@ -2051,8 +2278,10 @@ C_REPORT_HTML_TAIL: "</script><script>\nconst data=JSON.parse(document.getElemen
     assert_eq(maximum.milliseconds, 600000)
     loop invalid in ([Int]{-1, 0, 600001, 9223372036854775807}) {
         if timeout(invalid) == {
-            .Ok(_) -> panic("invalid timeout accepted")
-            .Err(error) -> assert_eq("{error}", "browser timeout must be between 1 and 600000 milliseconds")
+            .Ok(_) -> { panic("invalid timeout accepted") }
+            .Err(error) -> {
+                assert_eq("{error}", "browser timeout must be between 1 and 600000 milliseconds")
+            }
         }
     }
 }
@@ -2180,9 +2409,9 @@ parse_i64: fn(value: String) -> Int? Never! {
         d: Int{raw[i]} - 48
         if d < 0 || d > 9 -> return None
         if n < limit /% 10 -> return None
-        n = n * 10
+        n *= 10
         if n < limit + d -> return None
-        n = n - d
+        n -= d
         i += 1
     }
     Val(if negative -> n else -> -n)
@@ -2192,7 +2421,9 @@ config_value: fn(root: String, key: String) -[FS]> String? Never! {
     raw: files.read(files.join(root, "browser-tests.conf")) ?? return None
     loop line in parse.split(raw, "\n") {
         pair: parse.split_once(text.trim(line), "=")
-        if pair.found && parse.lower(text.trim(pair.head)) == parse.lower(key) -> return Val(text.trim(pair.tail))
+        if pair.found && parse.lower(text.trim(pair.head)) == parse.lower(key) {
+            return Val(text.trim(pair.tail))
+        }
     }
     None
 }
@@ -2216,8 +2447,12 @@ setting: fn(root: String, env: [(name: [U8], value: [U8])], variable: String, ke
 env_bool: fn(env: [(name: [U8], value: [U8])], variable: String, default: Bool) -> Bool Never! {
     value: env_value(env, variable) ?? return default
     normalized: parse.lower(text.trim(value))
-    if normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on" -> return true
-    if normalized == "0" || normalized == "false" || normalized == "no" || normalized == "off" -> return false
+    if normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on" {
+        return true
+    }
+    if normalized == "0" || normalized == "false" || normalized == "no" || normalized == "off" {
+        return false
+    }
     default
 }
 
@@ -2238,7 +2473,9 @@ test_engines: fn(raw: String) -> [String] BrowserError! {
         value: parse.lower(text.trim(String.from_bytes(token) ?? ""))
         token = [U8]{}
         if value == "" -> next
-        if value != "chromium" && value != "firefox" && value != "webkit" -> return Err(BrowserError{kind: "unknown engine"})
+        if value != "chromium" && value != "firefox" && value != "webkit" {
+            return Err(BrowserError{kind: "unknown engine"})
+        }
         requested.push(value)
     }
     engines := [String]{}
@@ -2260,17 +2497,13 @@ split_command: fn(raw: String) -> [String] Never! {
     quote := U8{0}
     loop b in raw.bytes() {
         if quote != (U8{0}) {
-            if b == quote -> quote = U8{0} else -> value.push(b)
-        } else if b == (U8{39}) || b == (U8{34}) {
-            quote = b
-        } else if ascii_space(b) {
+            if b == quote -> quote = U8{0} else { value.push(b) }
+        } else if b == (U8{39}) || b == (U8{34}) { quote = b } else if ascii_space(b) {
             if value.len() > 0 {
                 command.push(String.from_bytes(value) ?? "")
                 value = [U8]{}
             }
-        } else {
-            value.push(b)
-        }
+        } else { value.push(b) }
     }
     if value.len() > 0 -> command.push(String.from_bytes(value) ?? "")
     command
@@ -2284,7 +2517,9 @@ config_from_snapshot: fn(root: String, env: [(name: [U8], value: [U8])]) -[FS]> 
     timeout_ms: parse_i64(setting(root, env, "JET_TEST_TIMEOUT_MS", "timeout-ms") ?? "") ?? 30000
     validated_timeout: timeout(timeout_ms)
     reporter: parse.lower(setting(root, env, "JET_TEST_REPORTER", "reporter") ?? "text")
-    if reporter != "text" && reporter != "json" && reporter != "html" -> return Err(BrowserError{kind: "protocol"})
+    if reporter != "text" && reporter != "json" && reporter != "html" {
+        return Err(BrowserError{kind: "protocol"})
+    }
     artifacts: setting(root, env, "JET_TEST_ARTIFACTS", "artifacts") ?? files.join(root, ".jet/browser-tests/artifacts")
     report_path: setting(root, env, "JET_TEST_REPORT", "report") ?? files.join(root, ".jet/browser-tests/report.json")
     server_url: env_value(env, "JET_TEST_WEB_SERVER_URL") ?? setting(root, env, "JET_BROWSER_TEST_SERVER_URL", "server-url") ?? ""
@@ -2292,17 +2527,27 @@ config_from_snapshot: fn(root: String, env: [(name: [U8], value: [U8])]) -[FS]> 
     reuse: if env_value(env, "JET_TEST_WEB_SERVER_REUSE") != None -> env_bool(env, "JET_TEST_WEB_SERVER_REUSE", false) else -> parse.lower(config_value(root, "server") ?? "") == "reuse"
     cwd: setting(root, env, "JET_TEST_WEB_SERVER_CWD", "server-cwd") ?? root
     filter: setting(root, env, "JET_TEST_FILTER", "filter") ?? ""
-    Ok(BrowserTestConfig{
-        engines: engines, retries: retries, timeout: validated_timeout,
-        filter: filter, reporter: reporter, server_reuse: reuse,
-        ui: env_bool(env, "JET_TEST_BROWSER_UI", false),
-        visual: env_bool(env, "JET_TEST_BROWSER_VISUAL", false),
-        watch: env_bool(env, "JET_TEST_WATCH", false),
-        trace_on_retry: env_bool(env, "JET_TEST_TRACE_ON_RETRY", true),
-        trace_all: env_bool(env, "JET_TEST_TRACE", false),
-        server_url: server_url, server_command: split_command(command),
-        server_cwd: cwd, artifact_dir: artifacts, report_path: report_path, source_root: root
-    })
+    Ok(
+        BrowserTestConfig{
+            engines: engines,
+            retries: retries,
+            timeout: validated_timeout,
+            filter: filter,
+            reporter: reporter,
+            server_reuse: reuse,
+            ui: env_bool(env, "JET_TEST_BROWSER_UI", false),
+            visual: env_bool(env, "JET_TEST_BROWSER_VISUAL", false),
+            watch: env_bool(env, "JET_TEST_WATCH", false),
+            trace_on_retry: env_bool(env, "JET_TEST_TRACE_ON_RETRY", true),
+            trace_all: env_bool(env, "JET_TEST_TRACE", false),
+            server_url: server_url,
+            server_command: split_command(command),
+            server_cwd: cwd,
+            artifact_dir: artifacts,
+            report_path: report_path,
+            source_root: root,
+        },
+    )
 }
 
 parse_locked: fn(raw: String, engine: String) -> BrowserLocked BrowserError! {
@@ -2329,16 +2574,22 @@ parse_locked: fn(raw: String, engine: String) -> BrowserLocked BrowserError! {
             "version" -> current.version = value
             "binary" -> current.binary = value
             "protocol" -> current.protocol = value
-            "size" -> current.size = parse_i64(value) ?? return Err(BrowserError{kind: "invalid lock"})
+            "size" -> {
+                current.size = parse_i64(value) ?? return Err(BrowserError{kind: "invalid lock"})
+            }
             "output-hash" -> current.output_hash = value
             "driver" -> current.driver = value
-            "driver-size" -> current.driver_size = parse_i64(value) ?? return Err(BrowserError{kind: "invalid lock"})
+            "driver-size" -> {
+                current.driver_size = parse_i64(value) ?? return Err(BrowserError{kind: "invalid lock"})
+            }
             else -> {}
         }
     }
     if in_browser && current.engine == engine -> found = Val(current)
     entry: found ?? return Err(BrowserError{kind: "missing lock"})
-    if entry.engine == "" || entry.binary == "" || entry.protocol == "" || entry.output_hash == "" -> return Err(BrowserError{kind: "invalid lock"})
+    if entry.engine == "" || entry.binary == "" || entry.protocol == "" || entry.output_hash == "" {
+        return Err(BrowserError{kind: "invalid lock"})
+    }
     Ok(entry)
 }
 
@@ -2371,42 +2622,52 @@ strip_quotes: fn(raw: String) -> String Never! {
     assert_eq(entry.binary(), "last")
     assert_eq(entry.size, -1)
     if parse_locked("{raw}[[browser]]\nengine=chromium\nsize=overflow\n", "firefox") == {
-        .Ok(_) -> panic("invalid size accepted")
+        .Ok(_) -> { panic("invalid size accepted") }
         .Err(error) -> assert_eq(error.kind, "invalid lock")
     }
 }
 
 #Test("browser handshake checks preserve native first-match and protocol rules") {
-    ready: tree.object_from_entries([(key: String, value: Dyn)]{
-        (key: "ready", value: Dyn.Bool(true)),
-        (key: "message", value: Dyn.Text("ready"))
-    })
+    ready: tree.object_from_entries(
+        [(key: String, value: Dyn)]{
+            (key: "ready", value: Dyn.Bool(true)),
+            (key: "message", value: Dyn.Text("ready")),
+        },
+    )
     assert(browser_true_field(ready, "ready"))
     assert(browser_text_field(ready, "message"))
     assert(!browser_true_field(Dyn.Null, "ready"))
     assert(!browser_text_field(Dyn.Null, "message"))
-    duplicate_ready: tree.object_from_entries([(key: String, value: Dyn)]{
-        (key: "ready", value: Dyn.Bool(false)),
-        (key: "ready", value: Dyn.Bool(true))
-    })
+    duplicate_ready: tree.object_from_entries(
+        [(key: String, value: Dyn)]{
+            (key: "ready", value: Dyn.Bool(false)),
+            (key: "ready", value: Dyn.Bool(true)),
+        },
+    )
     assert(!browser_true_field(duplicate_ready, "ready"))
-    caps: tree.object_from_entries([(key: String, value: Dyn)]{
-        (key: "goog:cdp", value: Dyn.Bool(false)),
-        (key: "goog:cdp", value: Dyn.Bool(true))
-    })
-    session: tree.object_from_entries([(key: String, value: Dyn)]{
-        (key: "sessionId", value: Dyn.Text("")),
-        (key: "capabilities", value: caps)
-    })
+    caps: tree.object_from_entries(
+        [(key: String, value: Dyn)]{
+            (key: "goog:cdp", value: Dyn.Bool(false)),
+            (key: "goog:cdp", value: Dyn.Bool(true)),
+        },
+    )
+    session: tree.object_from_entries(
+        [(key: String, value: Dyn)]{
+            (key: "sessionId", value: Dyn.Text("")),
+            (key: "capabilities", value: caps),
+        },
+    )
     assert_eq(browser_session_cdp(session) ?? panic("duplicate cdp session reads"), false)
     typed_text: tree.typed_string("typed")
-    typed_session: tree.object_from_entries([(key: String, value: Dyn)]{
-        (key: "sessionId", value: typed_text),
-        (key: "capabilities", value: tree.object_from_entries([(key: String, value: Dyn)]{}))
-    })
+    typed_session: tree.object_from_entries(
+        [(key: String, value: Dyn)]{
+            (key: "sessionId", value: typed_text),
+            (key: "capabilities", value: tree.object_from_entries([(key: String, value: Dyn)]{})),
+        },
+    )
     assert_eq(browser_session_cdp(typed_session) ?? panic("typed session reads"), false)
     if browser_session_cdp(Dyn.Null) == {
-        .Ok(_) -> panic("non-object session accepted")
+        .Ok(_) -> { panic("non-object session accepted") }
         .Err(error) -> assert_eq(error.kind, "protocol")
     }
 }

@@ -29,9 +29,29 @@
 // bytes in the syntax codec (JetFoundation Facts/SyntaxCodec.jet).
 use {
     jet_foundation.[
-        AppliedRuleApplication, BodyCodecIn, CompilerThreads, DIAGNOSTIC_LINT, DebugTraceSite, DeclID, Diagnostic, ElseArmSpan, FencedStatement, Func,
-        Item, ModuleID, PolicyDeclaration, Program, Span, SymbolID, TraitImplBlock, TraitMethodSig, body_codec_get_program, body_codec_out,
-        body_codec_put_program, diagnostic_with_source_path, name_table,
+        AppliedRuleApplication,
+        BodyCodecIn,
+        CompilerThreads,
+        DIAGNOSTIC_LINT,
+        DebugTraceSite,
+        DeclID,
+        Diagnostic,
+        ElseArmSpan,
+        FencedStatement,
+        Func,
+        Item,
+        ModuleID,
+        PolicyDeclaration,
+        Program,
+        Span,
+        SymbolID,
+        TraitImplBlock,
+        TraitMethodSig,
+        body_codec_get_program,
+        body_codec_out,
+        body_codec_put_program,
+        diagnostic_with_source_path,
+        name_table,
     ]
     jet_lexer.[TOKEN_LBRACE, TOKEN_RBRACE, lex_generated_threads]
     jet_parser.[parse_lexed_with_source_threads]
@@ -39,6 +59,7 @@ use {
 
 // "JTCI" in little-endian byte order.
 JET_DRIVER_CORE_INTERFACE_MAGIC: 0x4943544A
+
 JET_DRIVER_CORE_INTERFACE_VERSION: 3
 
 // One Core unit's interface rows (see above). `path` and `module_name` are
@@ -111,21 +132,25 @@ jet_driver_core_interface_units: fn(rows: &&[JetDriverCoreSource], threads: Comp
         // the whole text gave the same words, demand and lines, but no
         // bodies.
         heads := [U8]{}
-        if parsed.from_heads && parsed.parsed.diagnostics.len() == 0 -> heads = jet_driver_core_heads_bytes(parsed.parsed.program)
+        if parsed.from_heads && parsed.parsed.diagnostics.len() == 0 {
+            heads = jet_driver_core_heads_bytes(parsed.parsed.program)
+        }
         bodies := parsed.lazy.move()
         if !parsed.from_heads -> bodies = jet_driver_core_body_spans(text, threads)
-        units.push(JetDriverCoreInterfaceUnit{
-            path: row.path.move(),
-            module_name: row.module_name.move(),
-            text_bytes: text.bytes().len(),
-            text_hash: text_hash,
-            lines: parsed.lines,
-            demand: parsed.demand.move(),
-            words: parsed.words.move() ?? jet_driver_unit_no_words(),
-            bodies: bodies.move(),
-            heads: heads.move(),
-            holds: parsed.holds,
-        })
+        units.push(
+            JetDriverCoreInterfaceUnit{
+                path: row.path.move(),
+                module_name: row.module_name.move(),
+                text_bytes: text.bytes().len(),
+                text_hash: text_hash,
+                lines: parsed.lines,
+                demand: parsed.demand.move(),
+                words: parsed.words.move() ?? jet_driver_unit_no_words(),
+                bodies: bodies.move(),
+                heads: heads.move(),
+                holds: parsed.holds,
+            },
+        )
     }
     units
 }
@@ -172,36 +197,50 @@ jet_driver_core_body_spans: fn(text: String, threads: CompilerThreads) -> [Span]
     loop item in parsed.program.items {
         if item == {
             .Func(value) -> {
-                if value.body.len() > 0 -> jet_driver_core_body_push(spans, braces, opens, value.name_span.end, value.span.end)
+                if value.body.len() > 0 {
+                    jet_driver_core_body_push(spans, braces, opens, value.name_span.end, value.span.end)
+                }
             }
             .Struct(value) -> {
                 loop method in value.methods {
-                    if method.body.len() > 0 -> jet_driver_core_body_push(spans, braces, opens, method.name_span.end, method.span.end)
+                    if method.body.len() > 0 {
+                        jet_driver_core_body_push(spans, braces, opens, method.name_span.end, method.span.end)
+                    }
                 }
                 loop block in value.trait_impls {
                     loop method in block.methods {
-                        if method.body.len() > 0 -> jet_driver_core_body_push(spans, braces, opens, method.name_span.end, method.span.end)
+                        if method.body.len() > 0 {
+                            jet_driver_core_body_push(spans, braces, opens, method.name_span.end, method.span.end)
+                        }
                     }
                 }
             }
             .Enum(value) -> {
                 loop method in value.methods {
-                    if method.body.len() > 0 -> jet_driver_core_body_push(spans, braces, opens, method.name_span.end, method.span.end)
+                    if method.body.len() > 0 {
+                        jet_driver_core_body_push(spans, braces, opens, method.name_span.end, method.span.end)
+                    }
                 }
                 loop block in value.trait_impls {
                     loop method in block.methods {
-                        if method.body.len() > 0 -> jet_driver_core_body_push(spans, braces, opens, method.name_span.end, method.span.end)
+                        if method.body.len() > 0 {
+                            jet_driver_core_body_push(spans, braces, opens, method.name_span.end, method.span.end)
+                        }
                     }
                 }
             }
             .Impl(value) -> {
                 loop method in value.methods {
-                    if method.body.len() > 0 -> jet_driver_core_body_push(spans, braces, opens, method.name_span.end, method.span.end)
+                    if method.body.len() > 0 {
+                        jet_driver_core_body_push(spans, braces, opens, method.name_span.end, method.span.end)
+                    }
                 }
             }
             .Trait(value) -> {
                 loop method in value.methods {
-                    if method.default_body == .Val(body) && body.len() > 0 -> jet_driver_core_body_push(spans, braces, opens, method.name_span.end, method.span.end)
+                    if method.default_body == .Val(body) && body.len() > 0 {
+                        jet_driver_core_body_push(spans, braces, opens, method.name_span.end, method.span.end)
+                    }
                 }
             }
             .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
@@ -228,16 +267,22 @@ jet_driver_core_body_push: fn(spans: &[Span], braces: [Int], opens: [Bool], name
         high = middle
     }
     close: low - 1
-    if close < 0 || braces[close] != end - 1 || opens[close] -> return
+    if close < 0 || braces[close] != end - 1 || opens[close] {
+        return
+    }
     depth := 0
     at := close
     loop {
-        if at < 0 -> return
+        if at < 0 {
+            return
+        }
         depth += if opens[at] -> -1 else -> 1
         if depth == 0 -> break
         at -= 1
     }
-    if braces[at] < name_end -> return
+    if braces[at] < name_end {
+        return
+    }
     spans.push(Span{start: braces[at], end: end})
 }
 
@@ -426,8 +471,12 @@ jet_driver_core_interface_ints: fn(bytes: [U8], cursor: &JetDriverCoreInterfaceC
 // at least, are `bytes`; None when it is not one this compiler reads.
 jet_driver_core_interface_entries: fn(bytes: [U8]) -> [JetDriverCoreInterfaceEntry]? Never! {
     cursor := JetDriverCoreInterfaceCursor{at: 0, end: bytes.len(), failed: false}
-    if jet_driver_core_interface_u32(bytes, cursor) != JET_DRIVER_CORE_INTERFACE_MAGIC -> return None
-    if jet_driver_core_interface_u32(bytes, cursor) != JET_DRIVER_CORE_INTERFACE_VERSION -> return None
+    if jet_driver_core_interface_u32(bytes, cursor) != JET_DRIVER_CORE_INTERFACE_MAGIC {
+        return None
+    }
+    if jet_driver_core_interface_u32(bytes, cursor) != JET_DRIVER_CORE_INTERFACE_VERSION {
+        return None
+    }
     count: jet_driver_core_interface_count(bytes, cursor, 12)
     header: jet_driver_core_interface_u32(bytes, cursor)
     if cursor.failed || header > bytes.len() -> return None
@@ -501,7 +550,9 @@ jet_driver_core_interface_matches: fn(rows: JetDriverCoreInterfaceUnit, module_n
 jet_driver_core_interface_same_held: fn(rows: [JetDriverReachDeclaration], held: [JetDriverReachDeclaration]) -> Bool Never! {
     if rows.len() != held.len() -> return false
     loop (index, row) in rows {
-        if row.position != held[index].position || row.name_start != held[index].name_start || row.span.start != held[index].span.start || row.span.end != held[index].span.end -> return false
+        if row.position != held[index].position || row.name_start != held[index].name_start || row.span.start != held[index].span.start || row.span.end != held[index].span.end {
+            return false
+        }
     }
     true
 }
@@ -548,10 +599,14 @@ jet_driver_core_interface_read_words: fn(bytes: [U8], cursor: &JetDriverCoreInte
     owners: jet_driver_core_interface_ints(bytes, cursor)
     names: jet_driver_core_interface_strings(bytes, cursor)
     cascades := [Bool]{}
-    loop _ in 0..<jet_driver_core_interface_count(bytes, cursor, 4) -> cascades.push(jet_driver_core_interface_flag(bytes, cursor))
+    loop _ in 0..<jet_driver_core_interface_count(bytes, cursor, 4) {
+        cascades.push(jet_driver_core_interface_flag(bytes, cursor))
+    }
     traits: jet_driver_core_interface_strings(bytes, cursor)
     spells := [[Int]]{}
-    loop _ in 0..<jet_driver_core_interface_count(bytes, cursor, 4) -> spells.push(jet_driver_core_interface_ints(bytes, cursor))
+    loop _ in 0..<jet_driver_core_interface_count(bytes, cursor, 4) {
+        spells.push(jet_driver_core_interface_ints(bytes, cursor))
+    }
     held := [JetDriverReachDeclaration]{}
     loop _ in 0..<jet_driver_core_interface_count(bytes, cursor, 24) {
         position: jet_driver_core_interface_int(bytes, cursor)
@@ -777,7 +832,9 @@ jet_driver_core_restore_bodies: fn(request: JetDriverCompileRequest, lazy: [JetD
         parsed := done.parsed.move()
         loaded: lazy[at].loaded
         loop diagnostic in parsed.diagnostics {
-            if diagnostic.severity != DIAGNOSTIC_LINT -> diagnostics.push(diagnostic_with_source_path(diagnostic, source_units[modules[loaded].source_unit_index].path, 0))
+            if diagnostic.severity != DIAGNOSTIC_LINT {
+                diagnostics.push(diagnostic_with_source_path(diagnostic, source_units[modules[loaded].source_unit_index].path, 0))
+            }
         }
         if jet_driver_has_errors(parsed.diagnostics) {
             failed = true
@@ -789,15 +846,23 @@ jet_driver_core_restore_bodies: fn(request: JetDriverCompileRequest, lazy: [JetD
         parsed.program.items = [Item]{}
         loop item in items.move() -> jet_driver_core_restore_index(item, funcs, sigs)
         restored += jet_driver_core_restore_items(modules[loaded].program.items, funcs, sigs)
-        if problem == None -> problem = jet_driver_core_restore_check(modules[loaded], wanted_ends[index])
+        if problem == None {
+            problem = jet_driver_core_restore_check(modules[loaded], wanted_ends[index])
+        }
         names: parsed.program.used_import_names.move()
         parsed.program.used_import_names = [String]{}
         loop name in names.move() {
-            if !modules[loaded].program.used_import_names.contains(name) -> modules[loaded].program.used_import_names.push(name)
+            if !modules[loaded].program.used_import_names.contains(name) {
+                modules[loaded].program.used_import_names.push(name)
+            }
         }
         if {
-            lazy[at].item_ends.len() > 0 -> jet_driver_core_restore_regions(modules[loaded].program, parsed.program.move(), lazy[at], lazy[at].item_ends, restored_at[index])
-            else -> jet_driver_core_restore_whole(modules[loaded].program, parsed.program.move(), lazy[at])
+            lazy[at].item_ends.len() > 0 -> {
+                jet_driver_core_restore_regions(modules[loaded].program, parsed.program.move(), lazy[at], lazy[at].item_ends, restored_at[index])
+            }
+            else -> {
+                jet_driver_core_restore_whole(modules[loaded].program, parsed.program.move(), lazy[at])
+            }
         }
     }
     JetDriverCoreRestore{bodies: if failed -> -1 else -> restored, tokens: tokens, problem: problem.move()}
@@ -812,7 +877,9 @@ jet_driver_core_restore_check: fn(module_row: JetDriverLoadedModule, ends: [Int]
     blank := [Int:Bool]{}
     loop item in module_row.program.items -> jet_driver_core_blanked_ends(item, blank)
     loop end in ends {
-        if blank.get(end) != None -> return Val("the restore of Core module `{module_row.module_name}` left its kept function `{jet_driver_core_blank_name(module_row.program.items, end)}` with no body")
+        if blank.get(end) != None {
+            return Val("the restore of Core module `{module_row.module_name}` left its kept function `{jet_driver_core_blank_name(module_row.program.items, end)}` with no body")
+        }
     }
     None
 }
@@ -866,15 +933,19 @@ JetDriverCoreRestore: struct {
 
 // A whole restoring parse's side tables (`fresh`) in place of the module's
 // own parse's in `program`, its held declarations' rows kept after them.
-jet_driver_core_restore_whole: fn(program: &Program, &&fresh: Program, row: JetDriverCoreLazyModule) {
+jet_driver_core_restore_whole: fn(program: &Program, fresh: &&Program, row: JetDriverCoreLazyModule) {
     spans := fresh.block_spans.move()
-    loop index in row.block_spans..<program.block_spans.len() -> spans.push(program.block_spans[index])
+    loop index in row.block_spans..<program.block_spans.len() {
+        spans.push(program.block_spans[index])
+    }
     program.block_spans = spans.move()
     arms := fresh.else_arms.move()
     loop index in row.else_arms..<program.else_arms.len() -> arms.push(program.else_arms[index])
     program.else_arms = arms.move()
     sites := fresh.debug_sites.move()
-    loop index in row.debug_sites..<program.debug_sites.len() -> sites.push(program.debug_sites[index])
+    loop index in row.debug_sites..<program.debug_sites.len() {
+        sites.push(program.debug_sites[index])
+    }
     program.debug_sites = sites.move()
     program.fenced_statements = fresh.fenced_statements.move()
     program.applied_rules = fresh.applied_rules.move()
@@ -887,41 +958,61 @@ jet_driver_core_restore_whole: fn(program: &Program, &&fresh: Program, row: JetD
 // parse's in `program` (jet_driver_core_side_order), its held
 // declarations' rows kept after them. A rule with no target belongs to the
 // file, so the module's own parse gives it.
-jet_driver_core_restore_regions: fn(program: &Program, &&fresh: Program, row: JetDriverCoreLazyModule, ends: [Int], restored: [Bool]) {
+jet_driver_core_restore_regions: fn(program: &Program, fresh: &&Program, row: JetDriverCoreLazyModule, ends: [Int], restored: [Bool]) {
     own_spans := [Int]{}
-    loop index in 0..<row.block_spans -> own_spans.push(jet_driver_core_region(ends, program.block_spans[index].start))
+    loop index in 0..<row.block_spans {
+        own_spans.push(jet_driver_core_region(ends, program.block_spans[index].start))
+    }
     fresh_spans: loop span in fresh.block_spans -> jet_driver_core_region(ends, span.start)
     spans := [Span]{}
-    loop pick in jet_driver_core_side_order(own_spans, restored, fresh_spans) -> spans.push(if pick >= 0 -> program.block_spans[pick] else -> fresh.block_spans[-pick - 1])
-    loop index in row.block_spans..<program.block_spans.len() -> spans.push(program.block_spans[index])
+    loop pick in jet_driver_core_side_order(own_spans, restored, fresh_spans) {
+        spans.push(if pick >= 0 -> program.block_spans[pick] else -> fresh.block_spans[-pick - 1])
+    }
+    loop index in row.block_spans..<program.block_spans.len() {
+        spans.push(program.block_spans[index])
+    }
     program.block_spans = spans.move()
 
     own_arms := [Int]{}
-    loop index in 0..<row.else_arms -> own_arms.push(jet_driver_core_region(ends, program.else_arms[index].table.start))
+    loop index in 0..<row.else_arms {
+        own_arms.push(jet_driver_core_region(ends, program.else_arms[index].table.start))
+    }
     fresh_arms: loop arm in fresh.else_arms -> jet_driver_core_region(ends, arm.table.start)
     arms := [ElseArmSpan]{}
-    loop pick in jet_driver_core_side_order(own_arms, restored, fresh_arms) -> arms.push(if pick >= 0 -> program.else_arms[pick] else -> fresh.else_arms[-pick - 1])
+    loop pick in jet_driver_core_side_order(own_arms, restored, fresh_arms) {
+        arms.push(if pick >= 0 -> program.else_arms[pick] else -> fresh.else_arms[-pick - 1])
+    }
     loop index in row.else_arms..<program.else_arms.len() -> arms.push(program.else_arms[index])
     program.else_arms = arms.move()
 
     own_sites := [Int]{}
-    loop index in 0..<row.debug_sites -> own_sites.push(jet_driver_core_region(ends, program.debug_sites[index].name_start))
+    loop index in 0..<row.debug_sites {
+        own_sites.push(jet_driver_core_region(ends, program.debug_sites[index].name_start))
+    }
     fresh_sites: loop site in fresh.debug_sites -> jet_driver_core_region(ends, site.name_start)
     sites := [DebugTraceSite]{}
-    loop pick in jet_driver_core_side_order(own_sites, restored, fresh_sites) -> sites.push(if pick >= 0 -> program.debug_sites[pick] else -> fresh.debug_sites[-pick - 1])
-    loop index in row.debug_sites..<program.debug_sites.len() -> sites.push(program.debug_sites[index])
+    loop pick in jet_driver_core_side_order(own_sites, restored, fresh_sites) {
+        sites.push(if pick >= 0 -> program.debug_sites[pick] else -> fresh.debug_sites[-pick - 1])
+    }
+    loop index in row.debug_sites..<program.debug_sites.len() {
+        sites.push(program.debug_sites[index])
+    }
     program.debug_sites = sites.move()
 
     own_fenced: loop fenced in program.fenced_statements -> jet_driver_core_region(ends, fenced.span.start)
     fresh_fenced: loop fenced in fresh.fenced_statements -> jet_driver_core_region(ends, fenced.span.start)
     fenced_rows := [FencedStatement]{}
-    loop pick in jet_driver_core_side_order(own_fenced, restored, fresh_fenced) -> fenced_rows.push(if pick >= 0 -> program.fenced_statements[pick] else -> fresh.fenced_statements[-pick - 1])
+    loop pick in jet_driver_core_side_order(own_fenced, restored, fresh_fenced) {
+        fenced_rows.push(if pick >= 0 -> program.fenced_statements[pick] else -> fresh.fenced_statements[-pick - 1])
+    }
     program.fenced_statements = fenced_rows.move()
 
     own_policies: loop policy in program.policy_declarations -> jet_driver_core_region(ends, policy.span.start)
     fresh_policies: loop policy in fresh.policy_declarations -> jet_driver_core_region(ends, policy.span.start)
     policies := [PolicyDeclaration]{}
-    loop pick in jet_driver_core_side_order(own_policies, restored, fresh_policies) -> policies.push(if pick >= 0 -> program.policy_declarations[pick] else -> fresh.policy_declarations[-pick - 1])
+    loop pick in jet_driver_core_side_order(own_policies, restored, fresh_policies) {
+        policies.push(if pick >= 0 -> program.policy_declarations[pick] else -> fresh.policy_declarations[-pick - 1])
+    }
     program.policy_declarations = policies.move()
 
     program.applied_rules = jet_driver_core_restore_rules(program.applied_rules, fresh.applied_rules.move(), ends, restored)
@@ -930,7 +1021,7 @@ jet_driver_core_restore_regions: fn(program: &Program, &&fresh: Program, row: Je
 
 // jet_driver_core_side_order over rule applications, each by its
 // target's region; the restoring parse's rules with no target leave.
-jet_driver_core_restore_rules: fn(own: [AppliedRuleApplication], &&fresh: [AppliedRuleApplication], ends: [Int], restored: [Bool]) -> [AppliedRuleApplication] {
+jet_driver_core_restore_rules: fn(own: [AppliedRuleApplication], fresh: &&[AppliedRuleApplication], ends: [Int], restored: [Bool]) -> [AppliedRuleApplication] {
     own_regions: loop rule in own -> if rule.target == .Val(target) -> jet_driver_core_region(ends, target.start) else -> -1
     fresh_rows := [AppliedRuleApplication]{}
     fresh_regions := [Int]{}
@@ -941,7 +1032,9 @@ jet_driver_core_restore_rules: fn(own: [AppliedRuleApplication], &&fresh: [Appli
         }
     }
     rules := [AppliedRuleApplication]{}
-    loop pick in jet_driver_core_side_order(own_regions, restored, fresh_regions) -> rules.push(if pick >= 0 -> own[pick] else -> fresh_rows[-pick - 1])
+    loop pick in jet_driver_core_side_order(own_regions, restored, fresh_regions) {
+        rules.push(if pick >= 0 -> own[pick] else -> fresh_rows[-pick - 1])
+    }
     rules
 }
 
@@ -976,7 +1069,7 @@ jet_driver_core_blanked_method_ends: fn(methods: [Func], blocks: [TraitImplBlock
 
 // Files each function and trait method of `item`, an item of a restoring
 // parse, that has a body, by the byte where it starts.
-jet_driver_core_restore_index: fn(&&item: Item, funcs: &[Int:Func], sigs: &[Int:TraitMethodSig]) Never! {
+jet_driver_core_restore_index: fn(item: &&Item, funcs: &[Int:Func], sigs: &[Int:TraitMethodSig]) Never! {
     if item == .Func(value) {
         if value.body.len() > 0 -> funcs[value.span.start] = value
     } else if item == .Struct(value) {
@@ -987,7 +1080,9 @@ jet_driver_core_restore_index: fn(&&item: Item, funcs: &[Int:Func], sigs: &[Int:
         jet_driver_core_restore_index_methods(value.methods, [TraitImplBlock]{}, funcs)
     } else if item == .Trait(value) {
         loop method in value.methods {
-            if method.default_body == .Val(body) && body.len() > 0 -> sigs[method.span.start] = method
+            if method.default_body == .Val(body) && body.len() > 0 {
+                sigs[method.span.start] = method
+            }
         }
     }
 }
@@ -1033,7 +1128,9 @@ jet_driver_core_restore_items: fn(items: &[Item], funcs: [Int:Func], sigs: [Int:
         } else if items[position] == .Trait(value) {
             restorable := false
             loop method in value.methods {
-                if method.default_body == .Val(body) && body.len() == 0 && sigs.get(method.span.start) != None -> restorable = true
+                if method.default_body == .Val(body) && body.len() == 0 && sigs.get(method.span.start) != None {
+                    restorable = true
+                }
             }
             if !restorable -> next
             updated := value

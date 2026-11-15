@@ -16,10 +16,15 @@ use {
 }
 
 SPEC_PATH: "Docs/spec/syntax-decisions.md"
+
 BOARD_PATH: "Tools/tower/Board.jet"
+
 OPEN: "<!-- BEGIN GENERATED RATIFIED INDEX -->"
+
 CLOSE: "<!-- END GENERATED RATIFIED INDEX -->"
+
 CELL_LIMIT: 96
+
 CELL_KEEP: 93
 
 // ECMAScript `\s`: Unicode White_Space without U+0085, plus U+FEFF. The index
@@ -94,7 +99,9 @@ ratified_decisions: fn(raw: String) -> [RatifiedDecision] IndexError! {
                     .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {}
                 }
             }
-            if !found -> return Err(index_fail("tower decision list --json returned no decision array"))
+            if !found {
+                return Err(index_fail("tower decision list --json returned no decision array"))
+            }
         }
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> return Err(index_fail("tower decision list --json returned no decision array"))
     }
@@ -136,7 +143,9 @@ index_body: fn(rows: [RatifiedDecision]) -> String Never! {
 
 // `spec` with its generated block replaced by `body`.
 replace_index: fn(spec: String, body: String) -> String IndexError! {
-    if spec.find(OPEN) < 0 || spec.find(CLOSE) < spec.find(OPEN) -> return Err(index_fail("{SPEC_PATH} has no generated ratified-index markers"))
+    if spec.find(OPEN) < 0 || spec.find(CLOSE) < spec.find(OPEN) {
+        return Err(index_fail("{SPEC_PATH} has no generated ratified-index markers"))
+    }
     before: spec.partition(OPEN)
     after: before.tail.partition(CLOSE)
     Ok("{before.head}{body}{after.tail}")
@@ -152,7 +161,9 @@ decision_index_main: fn(args: [String]) -[Exec, Env, FS, Time.Wait]> String Inde
     spec: files.read(SPEC_PATH) ?? return Err(index_fail("cannot read {SPEC_PATH}: {err}"))
     next_spec: replace_index(spec, index_body(rows)) ?? return Err(err)
     if next_spec == spec -> return Ok("decision index up to date ({rows.len()} ratified)")
-    if check -> return Err(index_fail("decision index is stale; run: jet Tools/agent/DecisionIndex.jet"))
+    if check {
+        return Err(index_fail("decision index is stale; run: jet Tools/agent/DecisionIndex.jet"))
+    }
     files.write(SPEC_PATH, next_spec) ?? return Err(index_fail("cannot write {SPEC_PATH}: {err}"))
     Ok("wrote decision index: {rows.len()} ratified decisions")
 }
@@ -182,8 +193,10 @@ repeated: fn(text: String, count: Int) -> String Never! {
     replaced: replace_index(spec, "{OPEN}\nnew\n{CLOSE}") ?? panic("markers: {err.message}")
     assert_eq(replaced, "head\n{OPEN}\nnew\n{CLOSE}\ntail\n")
     if replace_index("{CLOSE}\n{OPEN}\n", "") == {
-        .Ok(text) -> panic("reversed markers were accepted: {text}")
-        .Err(error) -> assert_eq(error.message, "{SPEC_PATH} has no generated ratified-index markers")
+        .Ok(text) -> { panic("reversed markers were accepted: {text}") }
+        .Err(error) -> {
+            assert_eq(error.message, "{SPEC_PATH} has no generated ratified-index markers")
+        }
     }
 }
 

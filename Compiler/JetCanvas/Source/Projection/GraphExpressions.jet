@@ -80,9 +80,7 @@ details_composite_expr: fn(expr: Expr) -> Bool Never! {
     }
 }
 
-data_provider_y: fn(y: Int, ordinal: Int) -> Int Never! {
-    y + 96 + (ordinal % 2) * 18
-}
+data_provider_y: fn(y: Int, ordinal: Int) -> Int Never! { y + 96 + (ordinal % 2) * 18 }
 
 // The getter or constant node that provides `expr`, or None when `expr` is
 // not a plain value.
@@ -134,7 +132,9 @@ method_is_pure: fn(index: SemIndex, span: Span) -> Bool Never! {
         if reference.span != span -> next
         target: reference.target ?? return false
         loop definition in index.definitions {
-            if definition.def.module_path != target.module_path || definition.def.def_span != target.def_span -> next
+            if definition.def.module_path != target.module_path || definition.def.def_span != target.def_span {
+                next
+            }
             if definition.def.kind == .Function(callable) {
                 if callable.effects == .Val(row) -> return row.len() == 0
             }
@@ -196,7 +196,9 @@ project_expr_node: fn(g: &GraphBuilder, index: SemIndex, src: String, expr: Expr
             variant_like: starts_uppercase(method)
             archetype: if variant_like || method_is_pure(index, method_span) -> "function_pure" else -> "function_exec"
             affordances := [String]{"insert_call", "source_jump"}
-            if ((method == "image" || method == "sound") && game_assets_receiver(receiver)) || method == "component" -> affordances.push("edit_game_selection")
+            if ((method == "image" || method == "sound") && game_assets_receiver(receiver)) || method == "component" {
+                affordances.push("edit_game_selection")
+            }
             add_node(g, node_id, if variant_like -> "variant" else -> archetype, if variant_like -> method else -> ".{method}", method_span, x, y, [String]{}, affordances)
             receiver_type: expr_type(g, index, receiver)
             recv_pin: add_pin(g, node_id, "self", "input", receiver_type, "", false)
@@ -213,7 +215,9 @@ project_expr_node: fn(g: &GraphBuilder, index: SemIndex, src: String, expr: Expr
             add_node(g, node_id, "fallible", "?", span, x, y, [String]{"fallible"}, [String]{"add_fallback_rail", "source_jump"})
             inner_type: expr_type(g, index, inner)
             input: add_pin(g, node_id, "value", "input", inner_type, "", true)
-            if project_expr_node(g, index, src, inner, ordinal, x - 180, y, ExprPlacement.Data) == .Val(out) -> add_wire(g, out, input, "fallible")
+            if project_expr_node(g, index, src, inner, ordinal, x - 180, y, ExprPlacement.Data) == .Val(out) {
+                add_wire(g, out, input, "fallible")
+            }
             Val(add_pin(g, node_id, "ok", "output", "unknown", "", false))
         }
         .OrFallback(value, _, _, _, _) -> project_expr_node(g, index, src, value, ordinal, x, y, placement)

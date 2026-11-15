@@ -11,7 +11,7 @@ float_bits: fn(raw: String, expected: Int) -> Bool {
 run: fn() {
     text: Cursor.over("id=7;enabled=TRUE;tail")
     if text.take_pattern("id={id:Int};enabled={enabled:Bool};") == {
-        .Err(error) -> print(error)
+        .Err(error) -> { print(error) }
         .Ok(_) -> panic("uppercase Bool must miss")
     }
     retry: text.take_pattern("id={id:Int};enabled={enabled:String};") ?? panic("text miss consumed input")
@@ -21,7 +21,7 @@ run: fn() {
 
     overflow: Cursor.over("9223372036854775808!")
     if overflow.take_pattern("{value:Int}!") == {
-        .Err(error) -> print(error)
+        .Err(error) -> { print(error) }
         .Ok(_) -> panic("i64 overflow must miss")
     }
     preserved: overflow.take_pattern("{raw:String}!") ?? panic("overflow miss consumed input")
@@ -32,7 +32,7 @@ run: fn() {
 
     reader: Reader.over([U8]{0xAB, 0x01, 0x02, 0x03, 0xFE})
     if reader.take_pattern([U8]{"{first:U8}wrong"}) == {
-        .Err(error) -> print(error)
+        .Err(error) -> { print(error) }
         .Ok(_) -> panic("reader literal must miss")
     }
     print("remaining={reader.remaining()}")

@@ -1,8 +1,15 @@
 // Claims ported from jet_pkg_model::ComBind tests.
 use {
     jet_pkg_model.[
-        BinderHostOS, COM_DISCOVERY_C, ComTypeLibraryInput, ForeignBindError, pkg_com_bind,
-        pkg_com_parse_schema, pkg_com_project, pkg_com_render_c, pkg_com_render_jet,
+        BinderHostOS,
+        COM_DISCOVERY_C,
+        ComTypeLibraryInput,
+        ForeignBindError,
+        pkg_com_bind,
+        pkg_com_parse_schema,
+        pkg_com_project,
+        pkg_com_render_c,
+        pkg_com_render_jet,
     ]
     jet_testkit.[kit_require_tool]
     files: core.files
@@ -46,7 +53,7 @@ COM_TEST_OFFICE_METADATA: #run "LIB\tOffice Fixture\t{{00000000-0000-0000-0000-0
         "SafeArrayGetElement",
         "VariantChangeType",
         "IDispatch_Release",
-        "GetCurrentThreadId"
+        "GetCurrentThreadId",
     }
     loop needle in needles {
         if !c.contains(needle) -> panic("missing {needle}")
@@ -69,7 +76,9 @@ COM_TEST_OFFICE_METADATA: #run "LIB\tOffice Fixture\t{{00000000-0000-0000-0000-0
 }
 
 #Test("com generated windows sources cross compile with winegcc") {
-    if BinderHostOS.current() == BinderHostOS.Windows -> return
+    if BinderHostOS.current() == BinderHostOS.Windows {
+        return
+    }
     winegcc: kit_require_tool("winegcc") ?? return
     // winegcc compiles through the host gcc: without it, winegcc itself fails.
     _: kit_require_tool("gcc") ?? return
@@ -88,7 +97,9 @@ COM_TEST_OFFICE_METADATA: #run "LIB\tOffice Fixture\t{{00000000-0000-0000-0000-0
 }
 
 #Test("com non windows host is rejected before tool or file access") {
-    if BinderHostOS.current() == BinderHostOS.Windows -> return
+    if BinderHostOS.current() == BinderHostOS.Windows {
+        return
+    }
     error: if pkg_com_bind(ComTypeLibraryInput.File("missing.tlb"), "office", "missing-cache") == {
         .Ok(_) -> panic("a non-Windows host bound a COM type library")
         .Err(error) -> error

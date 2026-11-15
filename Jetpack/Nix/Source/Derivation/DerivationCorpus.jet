@@ -9,7 +9,9 @@ impl NixDerivationStore {
     // them, its input derivations, into this store. Fixed, floating and
     // impure derivations read no inputs, as in the reference.
     load_from_filesystem: fn(&self, drv_path: String) NixError! -[FS]> {
-        if self.derivations.get(drv_path) != None -> return
+        if self.derivations.get(drv_path) != None {
+            return
+        }
         text: files.read(drv_path) ?? return Err(NixError.DrvIO("{drv_path}: {err}"))
         drv: NixDerivation.parse(text)
         self.derivations[drv_path] = drv
@@ -17,10 +19,14 @@ impl NixDerivationStore {
     }
 
     load_inputs_from_filesystem: fn(&self, drv: NixDerivation) NixError! -[FS]> {
-        if drv.is_fixed() -> return
+        if drv.is_fixed() {
+            return
+        }
         loop name in drv.output_names() {
             output: drv.outputs[name]
-            if output.is_floating() || output.is_impure() -> return
+            if output.is_floating() || output.is_impure() {
+                return
+            }
         }
         loop input in drv.input_drvs -> self.load_from_filesystem(input.path)
     }
@@ -44,13 +50,13 @@ nix_differential_corpus: fn(store_dir: String, limit: Int) -[FS]> NixCorpusRepor
         if files.suffix(entry.name) == ".drv" -> paths.push(entry.path)
     }
     paths.sort()
-    store := nix_derivation_store([String: NixDerivation]{})
+    store := nix_derivation_store([String:NixDerivation]{})
     loop index in 0..<paths.len() {
         if index >= limit -> break
         path: paths[index]
         aterm := ""
         if files.read(path) == {
-            .Ok(text) -> aterm = text
+            .Ok(text) -> { aterm = text }
             .Err(_) -> {
                 report.skipped += 1
                 next
@@ -58,11 +64,9 @@ nix_differential_corpus: fn(store_dir: String, limit: Int) -[FS]> NixCorpusRepor
         }
         drv := NixDerivation?{None}
         if NixDerivation.parse(aterm) == {
-            .Ok(parsed) -> drv = Val(parsed)
+            .Ok(parsed) -> { drv = Val(parsed) }
             .Err(error) -> {
-                if nix_is_unsupported(error) {
-                    report.skipped += 1
-                } else {
+                if nix_is_unsupported(error) -> report.skipped += 1 else {
                     report.divergences.push(error)
                 }
                 next
@@ -85,9 +89,7 @@ nix_differential_corpus: fn(store_dir: String, limit: Int) -[FS]> NixCorpusRepor
         }
         if nix_verify_corpus_outputs(store, store_dir, path, derivation) == {
             .Err(error) -> {
-                if nix_is_unsupported(error) {
-                    report.skipped += 1
-                } else {
+                if nix_is_unsupported(error) -> report.skipped += 1 else {
                     report.divergences.push(error)
                 }
                 next

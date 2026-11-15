@@ -159,10 +159,12 @@ cli_test_image_index: fn(project: String) -[FS, Env, Exec, Time.Wait]> String {
     uploads := 0
     manifest := RegistryTestRequest?{None}
     loop request in requests {
-        if request.method == "HEAD" -> heads = heads + 1
-        if request.method == "POST" -> posts = posts + 1
-        if request.method == "PUT" && request.path.starts_with("/test-upload") -> uploads = uploads + 1
-        if request.method == "PUT" && request.path.contains("/manifests/1") && manifest == None -> manifest = Val(request)
+        if request.method == "HEAD" -> heads += 1
+        if request.method == "POST" -> posts += 1
+        if request.method == "PUT" && request.path.starts_with("/test-upload") -> uploads += 1
+        if request.method == "PUT" && request.path.contains("/manifests/1") && manifest == None {
+            manifest = Val(request)
+        }
     }
     assert_eq(heads, 2)
     assert_eq(posts, 2)
@@ -202,9 +204,7 @@ EnvironmentImageClaim: struct {
         cli_test_image_jetpack(self.project, [String]{"image", "server"}).env("JETPACK_ROOT", self.root).run() ?? panic("run jetpack image")
     }
 
-    image_dir: fn(self) -> String {
-        files.join(self.project, ".jet/images/server")
-    }
+    image_dir: fn(self) -> String { files.join(self.project, ".jet/images/server") }
 
     projection: fn(self) -[FS]> String {
         files.read(files.join(self.image_dir(), "projection.json")) ?? panic("read projection.json")
@@ -234,10 +234,22 @@ EnvironmentImageClaim: struct {
     assert(cli_test_image_blob_containing(image, "\"User\":\"10001\"".bytes()).len() > 0)
     plan: files.read(files.join(image, "plan.json")) ?? panic("read plan.json")
     expected: [String]{
-        "\"source\":\"env:dev\"", "\"entrypoint\":[\"/bin/sh\"]", "\"platform\":\"linux.x64\"", "\"user\":10001",
-        "\"expose\":[]", "\"healthcheck\":false", "\"services\":[]", "\"content\":\"Hangar\"", "\"cache\":\"Hangar\"",
-        "\"archive\":\"Hangar\"", "\"signing\":\"Hangar\"", "\"provenance\":\"Hangar+.jet/lock\"", "\"inputs\":\".jet/lock\"",
-        "\"platforms\":\".jet/lock\"", "\"publish\":\"Hangar\"", "\"remote\":\"jetpack-remote\""
+        "\"source\":\"env:dev\"",
+        "\"entrypoint\":[\"/bin/sh\"]",
+        "\"platform\":\"linux.x64\"",
+        "\"user\":10001",
+        "\"expose\":[]",
+        "\"healthcheck\":false",
+        "\"services\":[]",
+        "\"content\":\"Hangar\"",
+        "\"cache\":\"Hangar\"",
+        "\"archive\":\"Hangar\"",
+        "\"signing\":\"Hangar\"",
+        "\"provenance\":\"Hangar+.jet/lock\"",
+        "\"inputs\":\".jet/lock\"",
+        "\"platforms\":\".jet/lock\"",
+        "\"publish\":\"Hangar\"",
+        "\"remote\":\"jetpack-remote\"",
     }
     loop fact in expected -> assert(plan.contains(fact), "plan: {plan}")
     dossier: files.read(files.join(image, "dossier.json")) ?? panic("read dossier.json")
@@ -372,7 +384,7 @@ cli_test_environment_image_index: fn(claim: EnvironmentImageClaim) -[FS, Env, Ex
         "integration:vault:provider:vault",
         "integration:vault:grant:vault.read",
         "integration:cloud-credentials:secret-refs=1",
-        "integration:vault:secret-refs=1"
+        "integration:vault:secret-refs=1",
     }
     loop fact in facts -> assert(report.contains(fact), "projection: {report}")
     assert(!report.contains("aws_production"), "secret name leaked: {report}")
@@ -419,7 +431,9 @@ cli_test_environment_image_index: fn(claim: EnvironmentImageClaim) -[FS, Env, Ex
 
 #Test("image environment rejects symlinked extra file") {
     verification := StoreVerification.new()
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     claim: EnvironmentImageClaim.new("environment-image-symlink-file", "env.dev: module {{ packages: [\"bash@nixpkgs\"] }}\nimage.server: module {{ from: env.dev, files: [\"payload.bin\"] }}\n")
     outside: cli_test_image_scratch("environment-image-symlink-outside")
     files.write(files.join(outside, "payload.bin"), "must not be read\n") ?? panic("write outside payload")
@@ -435,7 +449,9 @@ cli_test_environment_image_index: fn(claim: EnvironmentImageClaim) -[FS, Env, Ex
 
 #Test("image environment rejects hardlinked extra file") {
     verification := StoreVerification.new()
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     claim: EnvironmentImageClaim.new("environment-image-hardlink-file", "env.dev: module {{ packages: [\"bash@nixpkgs\"] }}\nimage.server: module {{ from: env.dev, files: [\"payload.bin\"] }}\n")
     outside: cli_test_image_scratch("environment-image-hardlink-outside")
     files.write(files.join(outside, "payload.bin"), "must not be read\n") ?? panic("write outside payload")
@@ -451,7 +467,9 @@ cli_test_environment_image_index: fn(claim: EnvironmentImageClaim) -[FS, Env, Ex
 
 #Test("image environment rejects symlinked ancestor extra file") {
     verification := StoreVerification.new()
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     claim: EnvironmentImageClaim.new("environment-image-symlink-ancestor-file", "env.dev: module {{ packages: [\"bash@nixpkgs\"] }}\nimage.server: module {{ from: env.dev, files: [\"nested/payload.bin\"] }}\n")
     outside: cli_test_image_scratch("environment-image-symlink-ancestor-outside")
     files.write(files.join(outside, "payload.bin"), "must not be read\n") ?? panic("write outside payload")

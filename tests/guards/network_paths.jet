@@ -89,9 +89,7 @@ np_line_modules: fn(line: String, in_use: Bool) -> [String] {
             next
         }
         end := at
-        loop end < bytes.len() && np_is_word(bytes[end]) {
-            end += 1
-        }
+        loop end < bytes.len() && np_is_word(bytes[end]) -> end += 1
         // `core.http.[Headers]` names its module with a trailing dot.
         stop: if bytes[end - 1] == (U8{46}) -> end - 1 else -> end
         path: s5_grammar_slice_bytes(line, at, stop)
@@ -116,7 +114,9 @@ np_modules: fn(source: String) -> [String] {
         if trimmed.starts_with("//") -> next
         if line.starts_with("use ") -> in_use = true
         loop reached in np_line_modules(line, in_use) -> found.push(reached)
-        if in_use && (trimmed == "}}" || (line.starts_with("use ") && !trimmed.ends_with("{{"))) -> in_use = false
+        if in_use && (trimmed == "}}" || (line.starts_with("use ") && !trimmed.ends_with("{{"))) {
+            in_use = false
+        }
     }
     found
 }
@@ -133,9 +133,9 @@ np_walk: fn(path: String, out: &[String]) {
 
 // The census against the closed list: one line per difference, and one per
 // diagnostics or report path that reaches a network module.
-np_findings: fn(found: [String: String]) -> [String] {
+np_findings: fn(found: [String:String]) -> [String] {
     findings := [String]{}
-    allowed := [String: Bool]{}
+    allowed := [String:Bool]{}
     loop row in NP_ALLOWED -> allowed[row.path] = true
     loop path in found.keys() {
         if np_report_path(path) {
@@ -145,7 +145,9 @@ np_findings: fn(found: [String: String]) -> [String] {
         }
     }
     loop row in NP_ALLOWED {
-        if found.get(row.path) == None -> findings.push("{row.path}: reaches no network module now; delete its NP_ALLOWED row")
+        if found.get(row.path) == None {
+            findings.push("{row.path}: reaches no network module now; delete its NP_ALLOWED row")
+        }
     }
     findings.sort()
     findings
@@ -157,7 +159,7 @@ np_findings: fn(found: [String: String]) -> [String] {
     np_walk(NP_ROOT, sources)
     assert(sources.len() > 1000, "the census found only {sources.len()} Jet sources")
     reports := 0
-    found := [String: String]{}
+    found := [String:String]{}
     loop path in sources {
         if np_report_path(path) -> reports += 1
         modules: np_modules(np_files.read(path) ?? panic("read {path}: {err}"))
@@ -170,11 +172,13 @@ np_findings: fn(found: [String: String]) -> [String] {
 #Test("the network census counts imports and calls, not mentions") {
     source: "use {{\n    a_http: core.http.client\n    a_url: core.net.url\n}}\nuse b_net: core.net\n// core.http.get(x) in a comment\nwhy: \"use `core.net.fetch(url)`\"\nrun: fn() {{ core.http.get(\"x\") }}\nlink: core.net.url.parse(\"x\")\n"
     assert_eq(np_modules(source), [String]{"core.http.client", "core.net", "core.http.get"})
-    found := [String: String]{}
+    found := [String:String]{}
     found["Compiler/JetFoundation/Source/Diagnostics/Render.jet"] = "core.http"
     found["Compiler/JetCli/Source/Cli/New.jet"] = "core.net"
     loop row in NP_ALLOWED {
-        if row.path != "Compiler/JetCanvas/Source/Host/CanvasHost.jet" -> found[row.path] = "core.http"
+        if row.path != "Compiler/JetCanvas/Source/Host/CanvasHost.jet" {
+            found[row.path] = "core.http"
+        }
     }
     findings: np_findings(found)
     assert_eq(findings.len(), 3)

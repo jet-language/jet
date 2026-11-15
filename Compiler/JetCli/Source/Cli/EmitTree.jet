@@ -48,11 +48,13 @@ jet_cli_emit_tree_json: fn(tier: String, file: String, function: String?, nodes:
 
 jet_cli_emit_node_json: fn(node: JetCLIEmitNode) -> JetCLIStatusValue Never! {
     children: loop child in node.children -> jet_cli_emit_node_json(child)
-    jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("kind", jet_cli_status_text(node.kind)),
-        jet_cli_status_field("text", jet_cli_status_text(node.text)),
-        jet_cli_status_field("children", jet_cli_status_array(children)),
-    })
+    jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("kind", jet_cli_status_text(node.kind)),
+            jet_cli_status_field("text", jet_cli_status_text(node.text)),
+            jet_cli_status_field("children", jet_cli_status_array(children)),
+        },
+    )
 }
 
 // The bytes of one tier in the requested form.

@@ -1,4 +1,3 @@
-
 #Test("cc refs are one native provider surface") {
     spec: RefSpec.classify("cc-toolchain@jetpack") ?? panic("cc-toolchain@jetpack classifies")
     assert(provider_cc_toolchain_is_reference(spec))
@@ -11,18 +10,18 @@
     target: provider_cc_toolchain_requested_target(spec) ?? panic("an explicit target selector resolves")
     assert_eq(target, "aarch64-unknown-linux-gnu")
     if provider_cc_normalize_target("../host") == {
-        .Ok(_) -> panic("a path-like target must not normalize")
+        .Ok(_) -> { panic("a path-like target must not normalize") }
         .Err(_) -> {}
     }
 }
 
 #Test("cc manifest text cannot escape publication path") {
     if provider_cc_validate_text_field("../outside", "version") == {
-        .Ok(_) -> panic("a path separator must be rejected")
+        .Ok(_) -> { panic("a path separator must be rejected") }
         .Err(_) -> {}
     }
     if provider_cc_validate_text_field("1\n2", "version") == {
-        .Ok(_) -> panic("a control character must be rejected")
+        .Ok(_) -> { panic("a control character must be rejected") }
         .Err(_) -> {}
     }
     if provider_cc_validate_text_field("clang-18", "version") == {
@@ -40,7 +39,7 @@
 
 #Test("cc uncovered target names every covered target") {
     if provider_cc_pack_covered_target("riscv64-unknown-linux-gnu") == {
-        .Ok(_) -> panic("riscv64 is not covered")
+        .Ok(_) -> { panic("riscv64 is not covered") }
         .Err(error) -> {
             assert(error == .UncoveredTarget(_))
             message: error.message()
@@ -56,12 +55,14 @@
 // A stub pack: the manifest and three tool files, zstd-compressed.
 provider_cc_pack_test_archive: fn() -> [U8] Never! {
     manifest: "{{\"schema\":1,\"host\":\"x86_64-linux\",\"llvm\":\"21.1.8\",\"musl\":\"1.2.5\",\"glibc\":\"2.42\",\"targets\":[{{\"triple\":\"x86_64-unknown-linux-gnu\"}},{{\"triple\":\"aarch64-unknown-linux-gnu\"}},{{\"triple\":\"x86_64-unknown-linux-musl\"}},{{\"triple\":\"aarch64-unknown-linux-musl\"}}]}}"
-    tar: provider_registry_test_tar([[U8]]{
-        provider_registry_test_member("./jet-cc-pack.json", 48, manifest.bytes()),
-        provider_registry_test_member("./bin/clang", 48, "stub clang".bytes()),
-        provider_registry_test_member("./bin/ld.lld", 48, "stub lld".bytes()),
-        provider_registry_test_member("./bin/llvm-ar", 48, "stub llvm-ar".bytes())
-    })
+    tar: provider_registry_test_tar(
+        [[U8]]{
+            provider_registry_test_member("./jet-cc-pack.json", 48, manifest.bytes()),
+            provider_registry_test_member("./bin/clang", 48, "stub clang".bytes()),
+            provider_registry_test_member("./bin/ld.lld", 48, "stub lld".bytes()),
+            provider_registry_test_member("./bin/llvm-ar", 48, "stub llvm-ar".bytes()),
+        },
+    )
     zstd.compress(tar) ?? panic("compress the stub pack")
 }
 
@@ -74,7 +75,9 @@ provider_cc_pack_test_asset: fn(archive: [U8]) -[Env]> CcPackAsset Never! {
 provider_cc_pack_test_beside: fn(base: String, label: String, asset: CcPackAsset, archive: [U8]?) -[FS]> String Never! {
     dir: files.join(base, label)
     files.create_dir_all(dir) ?? panic("create the beside directory")
-    if archive == .Val(bytes) -> files.write_bytes(files.join(dir, asset.file), bytes) ?? panic("write the stub pack")
+    if archive == .Val(bytes) {
+        files.write_bytes(files.join(dir, asset.file), bytes) ?? panic("write the stub pack")
+    }
     dir
 }
 
@@ -106,7 +109,7 @@ provider_cc_pack_test_beside: fn(base: String, label: String, asset: CcPackAsset
     asset.sha256 = expected
     beside: provider_cc_pack_test_beside(base, "seed", asset, Val(archive))
     if provider_cc_pack_ensure(verification, roots, asset, CcPackSources{beside: Val(beside), url: None, release_base: "https://invalid.invalid"}, false) == {
-        .Ok(_) -> panic("a wrong-hash pack must be refused")
+        .Ok(_) -> { panic("a wrong-hash pack must be refused") }
         .Err(error) -> {
             message: error.message()
             assert(message.contains(expected))
@@ -129,7 +132,7 @@ provider_cc_pack_test_beside: fn(base: String, label: String, asset: CcPackAsset
     beside: provider_cc_pack_test_beside(base, "seed", asset, None)
     files.write(files.join(beside, CC_PACK_RELEASE_FILE), "0.4.2\n") ?? panic("write RELEASE")
     if provider_cc_pack_ensure(verification, roots, asset, CcPackSources{beside: Val(beside), url: None, release_base: "https://invalid.invalid"}, true) == {
-        .Ok(_) -> panic("an offline miss must fail")
+        .Ok(_) -> { panic("an offline miss must fail") }
         .Err(error) -> {
             assert(error == .Offline(_))
             message: error.message()
@@ -166,7 +169,7 @@ provider_cc_pack_test_beside: fn(base: String, label: String, asset: CcPackAsset
     sys.set(CC_PACK_URL_ENV, "file://{files.join(double, asset.file)}")
     sources := provider_cc_pack_default_sources()
     if previous == {
-        .Val(value) -> sys.set(CC_PACK_URL_ENV, value)
+        .Val(value) -> { sys.set(CC_PACK_URL_ENV, value) }
         .None -> { sys.unset(CC_PACK_URL_ENV) ?? panic("restore {CC_PACK_URL_ENV}") }
     }
     assert_eq(sources.url, Val("file://{files.join(double, asset.file)}"))
@@ -175,7 +178,7 @@ provider_cc_pack_test_beside: fn(base: String, label: String, asset: CcPackAsset
     expected: pkg_sha256_hex("another pack".bytes())
     wrong.sha256 = expected
     if provider_cc_pack_ensure(verification, roots, wrong, sources, true) == {
-        .Ok(_) -> panic("a wrong-hash pack must be refused")
+        .Ok(_) -> { panic("a wrong-hash pack must be refused") }
         .Err(error) -> {
             message: error.message()
             assert(message.contains(expected))

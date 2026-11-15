@@ -71,16 +71,18 @@ x64_jetline_parse: fn(table: &&[U8]) -> X64Jetline Never! {
             decl: link_debug_uleb(table, cursor)
             rows: link_debug_uleb(table, cursor)
             if rows < 0 || cursor + rows > end -> break
-            functions.push(X64JetlineFunction{
-                low: low,
-                high: high,
-                name: x64_jetline_text(table, strings + name),
-                file: x64_jetline_text(table, strings + file),
-                dir: dir,
-                decl: decl,
-                rows: cursor,
-                rows_end: cursor + rows,
-            })
+            functions.push(
+                X64JetlineFunction{
+                    low: low,
+                    high: high,
+                    name: x64_jetline_text(table, strings + name),
+                    file: x64_jetline_text(table, strings + file),
+                    dir: dir,
+                    decl: decl,
+                    rows: cursor,
+                    rows_end: cursor + rows,
+                },
+            )
             cursor += rows
             address = high
         }

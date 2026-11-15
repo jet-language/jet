@@ -1,8 +1,15 @@
 // Native materializer policy fixtures; no synthetic native execution facts.
 use {
     jet_pkg_model.[
-        BundleFile, BundleFileKind, BundleSigningRun, BundleSigningStatus, BundleTarget,
-        pkg_bundle_materialize, pkg_bundle_native_relative, pkg_bundle_native_signing, pkg_sha256_hex,
+        BundleFile,
+        BundleFileKind,
+        BundleSigningRun,
+        BundleSigningStatus,
+        BundleTarget,
+        pkg_bundle_materialize,
+        pkg_bundle_native_relative,
+        pkg_bundle_native_signing,
+        pkg_sha256_hex,
     ]
     files: core.files
     sys: core.sys
@@ -21,12 +28,15 @@ use {
     outside: BundleFile.new("other.app/Contents/demo", BundleFileKind.Executable, 493, [U8]{})
     assert(pkg_bundle_native_relative(plan, outside, true) == .Err(_))
 }
+
 #Test("native bundle signing requires successful verify and canonical tool identity") {
     absent: BundleSigningRun{requested: false, verified: false, programs: [String]{}, identities: [String]{}}
-    assert((if pkg_bundle_native_signing(absent) == {
-        .Ok(found) -> found
-        .Err(error) -> panic("unrequested signing failed: {error.message()}")
-    }) == None)
+    assert(
+        (if pkg_bundle_native_signing(absent) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("unrequested signing failed: {error.message()}")
+        }) == None,
+    )
     pending: BundleSigningRun{requested: true, verified: false, programs: [String]{"sign"}, identities: [String]{"id"}}
     assert(pkg_bundle_native_signing(pending) == .Err(_))
     one: BundleSigningRun{requested: true, verified: true, programs: [String]{"verify"}, identities: [String]{"id"}}
@@ -51,6 +61,7 @@ use {
     assert_eq(many.tool, Val("multiple"))
     assert_eq(many.tool_identity, Val(pkg_sha256_hex(bytes)))
 }
+
 #Test("native macOS bundle publishes real files and refuses an occupied output") {
     root: files.tmpdir("jet-native-bundle") ?? panic("scratch")
     plan := pkg_bundle_wire_test_plan()
@@ -68,6 +79,7 @@ use {
     assert(pkg_bundle_materialize(plan, output, "compiler-fixture-version") == .Err(_))
     files.remove_all(root) ?? panic("cleanup")
 }
+
 #Test("native bundle failure cleans partially written stage") {
     root: files.tmpdir("jet-native-bundle-duplicate") ?? panic("scratch")
     plan := pkg_bundle_wire_test_plan()

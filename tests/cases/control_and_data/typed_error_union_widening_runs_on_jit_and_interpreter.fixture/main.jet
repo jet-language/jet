@@ -1,13 +1,15 @@
+#Error
+NarrowError: enum {
+    Narrow
+}
 
 #Error
-NarrowError: enum { Narrow }
-#Error
-OtherError: enum { Other }
+OtherError: enum {
+    Other
+}
 
 narrow: fn() -> Int NarrowError! { Err(NarrowError.Narrow) }
 
 widen: fn() -> Int (NarrowError | OtherError)! { narrow() }
 
-run: fn() {
-    print(widen() ?? 7)
-}
+run: fn() { print(widen() ?? 7) }

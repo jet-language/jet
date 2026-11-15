@@ -8,19 +8,19 @@
 // keeps the aligned header live, and the locked compare-exchange publishes one
 // more owner on retain, and on unref gives release ordering and the last
 // owner's acquire before its release helper runs.
-#Export(c)
-jet_rt_native_closure_retain: fn(boxed: I64) {
+#Export(c) jet_rt_native_closure_retain: fn(boxed: I64) {
     loop {
         count: sync_load(boxed)
-        if (count == I64{9223372036854775807}) -> jet_rt_panic_overflow()
-        if (sync_cas(boxed, count, count + I64{1}) == count) -> return
+        if (count == I64{9223372036854775807}) { jet_rt_panic_overflow() }
+        if (sync_cas(boxed, count, count + I64{1}) == count) {
+            return
+        }
     }
 }
 
-#Export(c)
-jet_rt_native_closure_unref: fn(boxed: I64) -> Bool {
+#Export(c) jet_rt_native_closure_unref: fn(boxed: I64) -> Bool {
     loop {
         count: sync_load(boxed)
-        if (sync_cas(boxed, count, count - I64{1}) == count) -> return count == I64{1}
+        if (sync_cas(boxed, count, count - I64{1}) == count) { return count == I64{1} }
     }
 }

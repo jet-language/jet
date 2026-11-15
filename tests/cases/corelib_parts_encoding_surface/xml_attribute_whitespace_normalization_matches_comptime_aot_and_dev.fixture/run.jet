@@ -1,4 +1,3 @@
-
 use xml: core.encoding.xml
 
 summarize: fn(source: String) -> String {
@@ -15,8 +14,11 @@ summarize: fn(source: String) -> String {
 }
 
 CR: #run { String.from_bytes([13]) ?? panic("CR") }
+
 CLOSE: #run "/>"
+
 SOURCE: #run "<r xmlns='urn:\tfoo\nbar' a='A\tB\nC{CR}\nD{CR}E' b='&#xD;&#xA;&#x9;'{CLOSE}"
+
 NORMALIZED: #run summarize(SOURCE)
 
 run: fn() {

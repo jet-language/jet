@@ -29,9 +29,7 @@ jetos_main: fn(theme: Theme, verb: String?, args: [String], flags: JetOSFlags) -
     }
 }
 
-jetos_usage: fn() -> String Never! {
-    "jet os {OS_BUILT_VERBS.join("|")} <host>|host@root"
-}
+jetos_usage: fn() -> String Never! { "jet os {OS_BUILT_VERBS.join("|")} <host>|host@root" }
 
 // `jet os check <host>`: the Package projects and its System is selected.
 jetos_cmd_check: fn(theme: Theme, raw: String) -[IO, FS, Env, Time.Wait]> Int Never! {
@@ -63,23 +61,29 @@ jetos_render_plan_json: fn(system: SystemPlan, graph_identity: String) -> String
     }
     services: loop service in system.services -> jetos_service_plan_dyn(service)
     options: loop option in system.options -> Dyn.Object(["key": Dyn.Text(option.key.copy()), "value": Dyn.Text(option.value.copy())])
-    pkg_json_render(Dyn.Object([
-        "host": Dyn.Text(system.name.copy()),
-        "target": Dyn.Text(system.target.copy()),
-        "graph_identity": Dyn.Text(graph_identity.copy()),
-        "boot": jetos_boot_profile(system).to_dyn(),
-        "packages": Dyn.Array(packages),
-        "closure": Dyn.Array([Dyn]{}),
-        "services": Dyn.Array(services),
-        "options": Dyn.Array(options),
-    ]))
+    pkg_json_render(
+        Dyn.Object(
+            [
+                "host": Dyn.Text(system.name.copy()),
+                "target": Dyn.Text(system.target.copy()),
+                "graph_identity": Dyn.Text(graph_identity.copy()),
+                "boot": jetos_boot_profile(system).to_dyn(),
+                "packages": Dyn.Array(packages),
+                "closure": Dyn.Array([Dyn]{}),
+                "services": Dyn.Array(services),
+                "options": Dyn.Array(options),
+            ],
+        ),
+    )
 }
 
 jetos_service_plan_dyn: fn(service: ServicePlan) -> Dyn Never! {
     fields: loop field in service.extra -> Dyn.Object(["key": Dyn.Text(field.key.copy()), "value": Dyn.Text(field.value.copy())])
-    Dyn.Object([
-        "name": Dyn.Text(service.name.copy()),
-        "enable": Dyn.Bool(service.enable),
-        "fields": Dyn.Array(fields),
-    ])
+    Dyn.Object(
+        [
+            "name": Dyn.Text(service.name.copy()),
+            "enable": Dyn.Bool(service.enable),
+            "fields": Dyn.Array(fields),
+        ],
+    )
 }

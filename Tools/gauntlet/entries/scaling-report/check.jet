@@ -10,6 +10,8 @@ use {
 run: fn() {
     print((files.read(process.args()[0]) ?? panic("no output file: {err}")).remove_suffix("\n"))
     loop name in ["report.md", "planned.md"] {
-        if files.exists(name) -> print("--- {name}\n{(files.read(name) ?? panic("`{name}` cannot be read: {err}")).remove_suffix("\n")}")
+        if files.exists(name) {
+            print("--- {name}\n{(files.read(name) ?? panic("`{name}` cannot be read: {err}")).remove_suffix("\n")}")
+        }
     }
 }

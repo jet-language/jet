@@ -1,10 +1,20 @@
 // Offline syntax dictionary lookup, plaintext essays, and typo classification.
 use {
     jet_cli.[
-        JET_CLI_SYNTAX_ROWS, JetCLISyntaxKind, JetCLISyntaxRow, jet_cli_edit_distance,
-        jet_cli_explain_build_fact_name, jet_cli_explain_policy, jet_cli_grammar_constants, jet_cli_grammar_tokens,
-        jet_cli_syntax_display, jet_cli_syntax_lookup, jet_cli_syntax_nearest,
-        jet_cli_syntax_plain_text, jet_cli_syntax_query, jet_cli_toolchain_root,
+        JET_CLI_SYNTAX_ROWS,
+        JetCLISyntaxKind,
+        JetCLISyntaxRow,
+        jet_cli_edit_distance,
+        jet_cli_explain_build_fact_name,
+        jet_cli_explain_policy,
+        jet_cli_grammar_constants,
+        jet_cli_grammar_tokens,
+        jet_cli_syntax_display,
+        jet_cli_syntax_lookup,
+        jet_cli_syntax_nearest,
+        jet_cli_syntax_plain_text,
+        jet_cli_syntax_query,
+        jet_cli_toolchain_root,
     ]
     cli_files: core.files
 }
@@ -12,45 +22,80 @@ use {
 #Test("syntax_explain") {
     keyword_index: jet_cli_syntax_lookup("  Fn  ") ?? panic("case-insensitive syntax lookup")
     keyword: JET_CLI_SYNTAX_ROWS[keyword_index]
-    if keyword.token != "fn" || keyword.kind != JetCLISyntaxKind.Keyword -> panic("canonical keyword")
-    if jet_cli_syntax_plain_text(keyword) != "The Jet keyword `fn`.\nExample:\n  name: fn …\n" -> panic("keyword essay")
+    if keyword.token != "fn" || keyword.kind != JetCLISyntaxKind.Keyword {
+        panic("canonical keyword")
+    }
+    if jet_cli_syntax_plain_text(keyword) != "The Jet keyword `fn`.\nExample:\n  name: fn …\n" {
+        panic("keyword essay")
+    }
     marker_index: jet_cli_syntax_lookup("#Inline") ?? panic("marker display lookup")
     marker_row: JET_CLI_SYNTAX_ROWS[marker_index]
-    if marker_row.kind != JetCLISyntaxKind.Marker || jet_cli_syntax_display(marker_row) != "#Inline" -> panic("marker identity")
+    if marker_row.kind != JetCLISyntaxKind.Marker || jet_cli_syntax_display(marker_row) != "#Inline" {
+        panic("marker identity")
+    }
     take_index: jet_cli_syntax_lookup("&&") ?? panic("take token lookup")
     essay: jet_cli_syntax_plain_text(JET_CLI_SYNTAX_ROWS[take_index])
-    if !essay.contains("Between two conditions:\n") || !essay.contains("Before a parameter's type or `self`:\n") -> panic("one token's multiple meanings")
+    if !essay.contains("Between two conditions:\n") || !essay.contains("Before a parameter's type or `self`:\n") {
+        panic("one token's multiple meanings")
+    }
     if jet_cli_syntax_lookup("^") != .None -> panic("`^` is free and has no dictionary row")
-    if !jet_cli_syntax_query("#Inlin") || !jet_cli_syntax_query(":>") || !jet_cli_syntax_query("é") -> panic("syntax typo classification")
-    if jet_cli_syntax_query("npm:tool") || jet_cli_syntax_query("pkg@registry") || jet_cli_syntax_query("package-overlay:local") -> panic("package references are not syntax typos")
+    if !jet_cli_syntax_query("#Inlin") || !jet_cli_syntax_query(":>") || !jet_cli_syntax_query("é") {
+        panic("syntax typo classification")
+    }
+    if jet_cli_syntax_query("npm:tool") || jet_cli_syntax_query("pkg@registry") || jet_cli_syntax_query("package-overlay:local") {
+        panic("package references are not syntax typos")
+    }
     if jet_cli_syntax_nearest("#Inlin") != "#Inline" -> panic("nearest registered spelling")
     if jet_cli_edit_distance("é", "f") != 1 -> panic("nearest syntax counts Unicode scalars")
-    if jet_cli_explain_policy("copies", false, true) == .None -> panic("standalone policy explanation")
-    if jet_cli_explain_policy("not_a_policy", false, true) != .None -> panic("unknown policy remains with caller")
-    if jet_cli_explain_build_fact_name("#build.target.os") != .Val("Build.OS") -> panic("build fact precedes syntax typo classification")
-    if jet_cli_explain_build_fact_name("#Build.Settings.Mode") != .Val("Build.Settings.mode") -> panic("dynamic setting normalization")
-    if jet_cli_explain_build_fact_name("#build.settings.") != .None || jet_cli_explain_build_fact_name("#build.settings.a.b") != .None -> panic("invalid setting paths are not source queries")
+    if jet_cli_explain_policy("copies", false, true) == .None {
+        panic("standalone policy explanation")
+    }
+    if jet_cli_explain_policy("not_a_policy", false, true) != .None {
+        panic("unknown policy remains with caller")
+    }
+    if jet_cli_explain_build_fact_name("#build.target.os") != .Val("Build.OS") {
+        panic("build fact precedes syntax typo classification")
+    }
+    if jet_cli_explain_build_fact_name("#Build.Settings.Mode") != .Val("Build.Settings.mode") {
+        panic("dynamic setting normalization")
+    }
+    if jet_cli_explain_build_fact_name("#build.settings.") != .None || jet_cli_explain_build_fact_name("#build.settings.a.b") != .None {
+        panic("invalid setting paths are not source queries")
+    }
     // The generated rows: every JET_HIGHLIGHT_TOKENS spelling, under the kind
     // its highlight class gives it, and each Prelude marker as a marker, under
     // its Prelude spelling, with the plain meaning of its kind.
     yield_row: JET_CLI_SYNTAX_ROWS[jet_cli_syntax_lookup("yield") ?? panic("a listed keyword has a row")]
-    if yield_row.kind != JetCLISyntaxKind.Keyword || jet_cli_syntax_plain_text(yield_row) != "The Jet keyword `yield`.\nExample:\n  yield …\n" -> panic("a generated keyword row explains itself")
+    if yield_row.kind != JetCLISyntaxKind.Keyword || jet_cli_syntax_plain_text(yield_row) != "The Jet keyword `yield`.\nExample:\n  yield …\n" {
+        panic("a generated keyword row explains itself")
+    }
     unsafe_row: JET_CLI_SYNTAX_ROWS[jet_cli_syntax_lookup("unsafe") ?? panic("a Prelude marker has a row")]
-    if unsafe_row.kind != JetCLISyntaxKind.Marker || jet_cli_syntax_display(unsafe_row) != "#Unsafe" || unsafe_row.registry_name != "MARKER_SOURCE" -> panic("a keyword spelled as a marker is a marker row")
+    if unsafe_row.kind != JetCLISyntaxKind.Marker || jet_cli_syntax_display(unsafe_row) != "#Unsafe" || unsafe_row.registry_name != "MARKER_SOURCE" {
+        panic("a keyword spelled as a marker is a marker row")
+    }
     freeze_row: JET_CLI_SYNTAX_ROWS[jet_cli_syntax_lookup("freeze") ?? panic("a highlighted built-in has a row")]
-    if freeze_row.kind != JetCLISyntaxKind.Builtin || freeze_row.registry_name != "KW_FREEZE" -> panic("a token row takes its kind from its highlight class")
-    if jet_cli_syntax_display(JET_CLI_SYNTAX_ROWS[jet_cli_syntax_lookup("#cli") ?? panic("CLI row")]) != "#CLI" -> panic("a marker row keeps its Prelude spelling")
+    if freeze_row.kind != JetCLISyntaxKind.Builtin || freeze_row.registry_name != "KW_FREEZE" {
+        panic("a token row takes its kind from its highlight class")
+    }
+    if jet_cli_syntax_display(JET_CLI_SYNTAX_ROWS[jet_cli_syntax_lookup("#cli") ?? panic("CLI row")]) != "#CLI" {
+        panic("a marker row keeps its Prelude spelling")
+    }
     if jet_cli_syntax_lookup("#Pure") != .None -> panic("an undeclared marker has no row")
     loop row in JET_CLI_SYNTAX_ROWS {
-        if jet_cli_syntax_plain_text(row) == "" || row.registry_name == "" -> panic("every syntax row explains itself")
+        if jet_cli_syntax_plain_text(row) == "" || row.registry_name == "" {
+            panic("every syntax row explains itself")
+        }
         found: jet_cli_syntax_lookup(jet_cli_syntax_display(row)) ?? panic("every dictionary display is searchable")
         if JET_CLI_SYNTAX_ROWS[found].token != row.token -> panic("dictionary lookup precedence")
     }
     // A retired marker has no dictionary row, so `jet explain` never presents
     // it as live syntax.
-    loop retired in ([String]{"#Invariant", "#InlineAlways", "#Min", "#Max", "#Ref", "#Tag", "#CodableAsBase", "#PublishedSchema", "#Encode", "#Decode", "#DenyUnknownFields", "#Discriminant", "#Untagged", "#Skip", "#Flatten"}) {
+    loop retired in
+        ([String]{"#Invariant", "#InlineAlways", "#Min", "#Max", "#Ref", "#Tag", "#CodableAsBase", "#PublishedSchema", "#Encode", "#Decode", "#DenyUnknownFields", "#Discriminant", "#Untagged", "#Skip", "#Flatten"}) {
         if jet_cli_syntax_lookup(retired) == .Val(index) {
-            if JET_CLI_SYNTAX_ROWS[index].kind == JetCLISyntaxKind.Marker -> panic("{retired} is retired, so the dictionary has no marker row for it")
+            if JET_CLI_SYNTAX_ROWS[index].kind == JetCLISyntaxKind.Marker {
+                panic("{retired} is retired, so the dictionary has no marker row for it")
+            }
         }
     }
 }
@@ -61,7 +106,9 @@ syntax_explain_names_decision: fn(text: String) -> Bool Never! {
     raw: text.bytes()
     loop index in 0..<raw.len() {
         if raw[index] != (U8{68}) || index + 2 >= raw.len() -> next
-        if raw[index + 1] != (U8{45}) || raw[index + 2] < (U8{65}) || raw[index + 2] > (U8{90}) -> next
+        if raw[index + 1] != (U8{45}) || raw[index + 2] < (U8{65}) || raw[index + 2] > (U8{90}) {
+            next
+        }
         if index == 0 -> return true
         before: raw[index - 1]
         letter: (before >= (U8{65}) && before <= (U8{90})) || (before >= (U8{97}) && before <= (U8{122}))
@@ -77,7 +124,9 @@ syntax_explain_row_problem: fn(row: JetCLISyntaxRow) -> String Never! {
         if meaning.example.trim() == "" -> return "`{row.token}` has a meaning with no example"
     }
     essay: jet_cli_syntax_plain_text(row)
-    if essay.contains("SIGIL_") || essay.contains("OP_") -> return "`{row.token}`'s explanation names a registry constant"
+    if essay.contains("SIGIL_") || essay.contains("OP_") {
+        return "`{row.token}`'s explanation names a registry constant"
+    }
     if syntax_explain_names_decision(essay) -> return "`{row.token}`'s explanation names a decision"
     ""
 }

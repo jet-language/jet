@@ -9,22 +9,29 @@
 // data/length, byte cursor, consumed-LF line, owned error.
 compiler_json_peek: fn(state: I64) -> I64 {
     at: rt_text_word(wrapping(state + I64{16}))
-    if (at == rt_text_word(wrapping(state + I64{8}))) -> return I64{-1}
+    if (at == rt_text_word(wrapping(state + I64{8}))) { return I64{-1} }
     rt_text_decode(wrapping(rt_text_word(state) + at))
 }
+
 compiler_json_bump: fn(state: I64) {
     at: rt_text_word(wrapping(state + I64{16}))
     data: rt_text_word(state)
-    if (rt_text_byte(wrapping(data + at)) == I64{10}) -> rt_text_store(wrapping(state + I64{24}), rt_text_word(wrapping(state + I64{24})) + I64{1})
+    if (rt_text_byte(wrapping(data + at)) == I64{10}) {
+        rt_text_store(wrapping(state + I64{24}), rt_text_word(wrapping(state + I64{24})) + I64{1})
+    }
     rt_text_store(wrapping(state + I64{16}), at + rt_text_width(wrapping(data + at)))
 }
+
 compiler_json_ws: fn(state: I64) {
     loop {
         ch: compiler_json_peek(state)
-        if (ch != I64{32} && ch != I64{9} && ch != I64{13} && ch != I64{10}) -> return
+        if (ch != I64{32} && ch != I64{9} && ch != I64{13} && ch != I64{10}) {
+            return
+        }
         compiler_json_bump(state)
     }
 }
+
 compiler_json_error_owned: fn(state: I64, reason: I64) -> I64 {
     error: jet_rt_alloc(ENCODING_ERROR_BYTES, I64{8})
     encoding_store(wrapping(error + ENCODING_ERROR_FORMAT), I64{0})
@@ -40,9 +47,11 @@ compiler_json_error_owned: fn(state: I64, reason: I64) -> I64 {
     rt_text_store(wrapping(state + I64{32}), error)
     I64{0}
 }
+
 compiler_json_error: fn(state: I64, reason: I64) -> I64 {
     compiler_json_error_owned(state, jet_rt_string_clone(reason))
 }
+
 compiler_json_hex4: fn(state: I64) -> I64 {
     value := I64{0}
     count := I64{0}
@@ -63,9 +72,10 @@ compiler_json_hex4: fn(state: I64) -> I64 {
     }
     value
 }
+
 compiler_json_unicode: fn(state: I64, target: I64) -> Bool {
     high: compiler_json_hex4(state)
-    if (high == I64{-1}) -> return false
+    if (high == I64{-1}) { return false }
     scalar := high
     if (high >= I64{55296} && high <= I64{56319}) {
         if (compiler_json_peek(state) != I64{92}) {
@@ -79,7 +89,7 @@ compiler_json_unicode: fn(state: I64, target: I64) -> Bool {
         }
         compiler_json_bump(state)
         low: compiler_json_hex4(state)
-        if (low == I64{-1}) -> return false
+        if (low == I64{-1}) { return false }
         if (low < I64{56320} || low > I64{57343}) {
             _ := compiler_json_error(state, rt_static_text("unpaired surrogate in string"))
             return false
@@ -92,8 +102,11 @@ compiler_json_unicode: fn(state: I64, target: I64) -> Bool {
     rt_text_push_scalar(target, scalar)
     true
 }
+
 compiler_json_string: fn(state: I64) -> I64 {
-    if (compiler_json_peek(state) != I64{34}) -> return compiler_json_error(state, rt_static_text("expected quoted text"))
+    if (compiler_json_peek(state) != I64{34}) {
+        return compiler_json_error(state, rt_static_text("expected quoted text"))
+    }
     compiler_json_bump(state)
     target: jet_rt_string_builder_new()
     loop {
@@ -103,7 +116,7 @@ compiler_json_string: fn(state: I64) -> I64 {
             break
         }
         compiler_json_bump(state)
-        if (ch == I64{34}) -> return jet_rt_string_builder_finish(target)
+        if (ch == I64{34}) { return jet_rt_string_builder_finish(target) }
         if (ch == I64{92}) {
             escape: compiler_json_peek(state)
             if (escape == I64{-1}) {
@@ -129,19 +142,23 @@ compiler_json_string: fn(state: I64) -> I64 {
     jet_rt_string_drop(target)
     I64{0}
 }
+
 compiler_json_digit: fn(state: I64) -> Bool {
     ch: compiler_json_peek(state)
     ch >= I64{48} && ch <= I64{57}
 }
+
 compiler_json_number: fn(state: I64) -> I64 {
     start: rt_text_word(wrapping(state + I64{16}))
-    if (compiler_json_peek(state) == I64{45}) -> compiler_json_bump(state)
+    if (compiler_json_peek(state) == I64{45}) { compiler_json_bump(state) }
     if (compiler_json_peek(state) == I64{48}) { compiler_json_bump(state) } else if (compiler_json_peek(state) >= I64{49} && compiler_json_peek(state) <= I64{57}) {
         loop compiler_json_digit(state) -> compiler_json_bump(state)
     } else { return compiler_json_error(state, rt_static_text("bad number")) }
     if (compiler_json_peek(state) == I64{46}) {
         compiler_json_bump(state)
-        if !compiler_json_digit(state) -> return compiler_json_error(state, rt_static_text("bad number"))
+        if !compiler_json_digit(state) {
+            return compiler_json_error(state, rt_static_text("bad number"))
+        }
         loop compiler_json_digit(state) -> compiler_json_bump(state)
     }
     exponent_start := I64{-1}
@@ -149,9 +166,13 @@ compiler_json_number: fn(state: I64) -> I64 {
     if (compiler_json_peek(state) == I64{101} || compiler_json_peek(state) == I64{69}) {
         compiler_json_bump(state)
         exponent_negative = compiler_json_peek(state) == I64{45}
-        if (compiler_json_peek(state) == I64{43} || compiler_json_peek(state) == I64{45}) -> compiler_json_bump(state)
+        if (compiler_json_peek(state) == I64{43} || compiler_json_peek(state) == I64{45}) {
+            compiler_json_bump(state)
+        }
         exponent_start = rt_text_word(wrapping(state + I64{16}))
-        if !compiler_json_digit(state) -> return compiler_json_error(state, rt_static_text("bad number"))
+        if !compiler_json_digit(state) {
+            return compiler_json_error(state, rt_static_text("bad number"))
+        }
         loop compiler_json_digit(state) -> compiler_json_bump(state)
     }
     end: rt_text_word(wrapping(state + I64{16}))
@@ -160,12 +181,14 @@ compiler_json_number: fn(state: I64) -> I64 {
     at := start
     loop at < end {
         byte: rt_text_byte(wrapping(data + at))
-        if (byte >= I64{48} && byte <= I64{57}) -> digits += I64{1}
+        if (byte >= I64{48} && byte <= I64{57}) { digits += I64{1} }
         at += I64{1}
     }
     // The Rust original validates total digits first, then i64 exponent, then
     // abs(exponent)<=1e6. Finite-f64 restrictions do not apply to Number.
-    if (digits > I64{1000000}) -> return compiler_json_error(state, rt_static_text("JSON number exceeds the 1000000-digit limit"))
+    if (digits > I64{1000000}) {
+        return compiler_json_error(state, rt_static_text("JSON number exceeds the 1000000-digit limit"))
+    }
     if (exponent_start != I64{-1}) {
         limit: if exponent_negative -> I64{-9223372036854775808} else -> I64{-9223372036854775807}
         exponent := I64{0}
@@ -174,27 +197,39 @@ compiler_json_number: fn(state: I64) -> I64 {
             digit: rt_text_byte(wrapping(data + at)) - I64{48}
             // The smallest exponent whose *10 stays >= limit: ceil(limit / 10), i.e. the
             // truncated quotient. `/%` floors, so divide the negated sign pair.
-            if (exponent < -(limit /% I64{-10})) -> return compiler_json_error(state, rt_static_text("JSON number exponent is out of range"))
+            if (exponent < -(limit /% I64{-10})) {
+                return compiler_json_error(state, rt_static_text("JSON number exponent is out of range"))
+            }
             exponent *= I64{10}
-            if exponent < limit + digit -> return compiler_json_error(state, rt_static_text("JSON number exponent is out of range"))
+            if exponent < limit + digit {
+                return compiler_json_error(state, rt_static_text("JSON number exponent is out of range"))
+            }
             exponent -= digit
             at += I64{1}
         }
-        if (exponent < I64{-1000000}) -> return compiler_json_error(state, rt_static_text("JSON number exponent exceeds the ±1000000 limit"))
+        if (exponent < I64{-1000000}) {
+            return compiler_json_error(state, rt_static_text("JSON number exponent exceeds the ±1000000 limit"))
+        }
     }
     dyn_new(DYN_NUMBER, rt_text_copy(wrapping(data + start), end - start))
 }
+
 compiler_json_word: fn(state: I64, word: I64, kind: I64, payload: I64) -> I64 {
     at := I64{0}
     loop at < rt_text_len(word) {
-        if compiler_json_peek(state) != rt_text_byte(wrapping(rt_text_data(word) + at)) -> return compiler_json_error(state, rt_static_text("expected a JSON word"))
+        if compiler_json_peek(state) != rt_text_byte(wrapping(rt_text_data(word) + at)) {
+            return compiler_json_error(state, rt_static_text("expected a JSON word"))
+        }
         compiler_json_bump(state)
         at += I64{1}
     }
     dyn_new(kind, payload)
 }
+
 compiler_json_container: fn(state: I64, depth: I64, object: Bool) -> I64 {
-    if (depth >= I64{64}) -> return compiler_json_error(state, rt_static_text("JSON value is nested too deeply"))
+    if (depth >= I64{64}) {
+        return compiler_json_error(state, rt_static_text("JSON value is nested too deeply"))
+    }
     compiler_json_bump(state)
     kind: if object -> DYN_OBJECT else -> DYN_ARRAY
     stride: if object -> DYN_ENTRY_BYTES else -> DYN_ELEMENT_BYTES
@@ -210,7 +245,7 @@ compiler_json_container: fn(state: I64, depth: I64, object: Bool) -> I64 {
         key := I64{0}
         if object {
             key = compiler_json_string(state)
-            if (key == I64{0}) -> break
+            if (key == I64{0}) { break }
             compiler_json_ws(state)
             if (compiler_json_peek(state) != I64{58}) {
                 jet_rt_string_drop(key)
@@ -267,22 +302,30 @@ compiler_json_container: fn(state: I64, depth: I64, object: Bool) -> I64 {
     data_sequence_drop(sequence, kind)
     I64{0}
 }
+
 compiler_json_value: fn(state: I64, depth: I64) -> I64 {
     compiler_json_ws(state)
     ch: compiler_json_peek(state)
-    if (ch == I64{110}) -> return compiler_json_word(state, rt_static_text("null"), DYN_NULL, I64{0})
-    if (ch == I64{116}) -> return compiler_json_word(state, rt_static_text("true"), DYN_BOOL, I64{1})
-    if (ch == I64{102}) -> return compiler_json_word(state, rt_static_text("false"), DYN_BOOL, I64{0})
+    if (ch == I64{110}) {
+        return compiler_json_word(state, rt_static_text("null"), DYN_NULL, I64{0})
+    }
+    if (ch == I64{116}) {
+        return compiler_json_word(state, rt_static_text("true"), DYN_BOOL, I64{1})
+    }
+    if (ch == I64{102}) {
+        return compiler_json_word(state, rt_static_text("false"), DYN_BOOL, I64{0})
+    }
     if (ch == I64{34}) {
         text: compiler_json_string(state)
-        if (text == I64{0}) -> return I64{0}
+        if (text == I64{0}) { return I64{0} }
         return dyn_new(DYN_TEXT, text)
     }
-    if (ch == I64{91}) -> return compiler_json_container(state, depth, false)
-    if (ch == I64{123}) -> return compiler_json_container(state, depth, true)
-    if (ch == I64{45} || (ch >= I64{48} && ch <= I64{57})) -> return compiler_json_number(state)
+    if (ch == I64{91}) { return compiler_json_container(state, depth, false) }
+    if (ch == I64{123}) { return compiler_json_container(state, depth, true) }
+    if (ch == I64{45} || (ch >= I64{48} && ch <= I64{57})) { return compiler_json_number(state) }
     compiler_json_error(state, rt_static_text("expected a JSON value"))
 }
+
 #Export(c) jet_std_json_parse: fn(a0: I64, ok: I64, err: I64) -> I64 {
     state: jet_rt_alloc(I64{40}, I64{8})
     rt_text_store(state, rt_text_data(a0))

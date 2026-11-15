@@ -5,16 +5,20 @@
 // bits of its binary64 widening. The program prints one line per function
 // with the rows it checked and how many results differ, plus the first
 // differing rows. A NaN matches any NaN.
-use {
-    math: core.math
-}
+use math: core.math
 
 FADD: #run embed_file("corpus/fadd.txt")
+
 FSUB: #run embed_file("corpus/fsub.txt")
+
 FMUL: #run embed_file("corpus/fmul.txt")
+
 FDIV: #run embed_file("corpus/fdiv.txt")
+
 FFMA: #run embed_file("corpus/ffma.txt")
+
 FSQRT: #run embed_file("corpus/fsqrt.txt")
+
 FMA32: #run embed_file("corpus/fma32.txt")
 
 hex_value: fn(b: U8) -> Int {
@@ -27,7 +31,7 @@ hex_value: fn(b: U8) -> Int {
 word_at: fn(raw: [U8], at: Int) -> Int {
     n := 0
     loop i in 0..<16 -> n = n * 16 + hex_value(raw[at + i])
-    if n > 9223372036854775807 -> n = n - 18446744073709551616
+    if n > 9223372036854775807 -> n -= 18446744073709551616
     n
 }
 
@@ -52,8 +56,8 @@ is_nan_word: fn(word: Int) -> Bool {
 // infinities and NaN.
 narrow: fn(x: Float) -> F32 {
     if math.is_nan(x) -> return F32{0.0} / F32{0.0}
-    if (x > Float{3.4028234663852886e38}) -> return F32{1.0} / F32{0.0}
-    if (x < Float{-3.4028234663852886e38}) -> return F32{-1.0} / F32{0.0}
+    if (x > Float{3.4028234663852886e38}) { return F32{1.0} / F32{0.0} }
+    if (x < Float{-3.4028234663852886e38}) { return F32{-1.0} / F32{0.0} }
     F32{x}
 }
 
@@ -76,15 +80,15 @@ check: fn(name: String, corpus: String) {
     wrong := 0
     loop at < raw.len() {
         if raw[at] == (U8{35}) {
-            loop raw[at] != (U8{10}) -> at = at + 1
-            at = at + 1
+            loop raw[at] != (U8{10}) -> at += 1
+            at += 1
             next
         }
         // The row's words: its arguments, then the result.
         words := [Int]{}
         loop {
             words.push(word_at(raw, at))
-            at = at + 17
+            at += 17
             if raw[at - 1] == (U8{10}) -> break
         }
         want: words[words.len() - 1]
@@ -95,10 +99,12 @@ check: fn(name: String, corpus: String) {
             shown.push(hex_word(words[i]))
         }
         got: math.to_bits(Float.from_f32(value(name, arguments)))
-        rows = rows + 1
+        rows += 1
         if got != want && !(is_nan_word(got) && is_nan_word(want)) {
-            wrong = wrong + 1
-            if wrong <= 3 -> print("{name}({shown.join(", ")}) = {hex_word(got)}, correctly rounded {hex_word(want)}")
+            wrong += 1
+            if wrong <= 3 {
+                print("{name}({shown.join(", ")}) = {hex_word(got)}, correctly rounded {hex_word(want)}")
+            }
         }
     }
     print("{name}: {rows} rows, {wrong} not correctly rounded")

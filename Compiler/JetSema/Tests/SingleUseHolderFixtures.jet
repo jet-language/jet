@@ -13,7 +13,7 @@ single_use_holder_errors: fn(file: String) -> [String] {
     codes := [String]{}
     checked: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program)
     if checked == {
-        .Refused(refusal) -> panic("{file}: refused before checking: {refusal.stderr}")
+        .Refused(refusal) -> { panic("{file}: refused before checking: {refusal.stderr}") }
         .Compiled(result, snapshot) -> {
             if result.internal_problem != None -> panic("{file}: internal compiler failure")
             loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
@@ -30,7 +30,9 @@ single_use_holder_errors: fn(file: String) -> [String] {
     consumed: single_use_holder_errors("tests/cases/single_use/holder_consumed_compiles.fixture/main.jet")
     if consumed.len() != 0 -> panic("consumed holders: {consumed}")
     containers: single_use_holder_errors("tests/ui/ownership/single_use_duty_covers_every_container.jet")
-    if containers != ["E0140", "E0140", "E0140", "E0140", "E0140", "E0140"] -> panic("containers: {containers}")
+    if containers != ["E0140", "E0140", "E0140", "E0140", "E0140", "E0140"] {
+        panic("containers: {containers}")
+    }
     lent: single_use_holder_errors("Examples/Memory/Allocation/UserAllocator.jet")
     if lent.len() != 0 -> panic("an allocator lent to a generic function: {lent}")
     context: single_use_holder_errors("tests/cases/context/context_allocator_reads_back_the_user_allocator.fixture/main.jet")

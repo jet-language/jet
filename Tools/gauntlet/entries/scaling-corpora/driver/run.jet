@@ -35,7 +35,9 @@ run: fn() {
     numbers: args.map(fn(arg) { Int.parse(arg) ?? 0 })
     files := [String:String]{}
     if (command.get(0) ?? "") == {
-        "shapes" -> print(shapes().map(fn(shape) { "{shape.name} {"{shape.kind:Debug}".lower()} {if shape.kind == .Stress -> "n" else -> "lines"} {shape.base}: {shape.dimension}" }).join("\n"))
+        "shapes" -> {
+            print(shapes().map(fn(shape) { "{shape.name} {"{shape.kind:Debug}".lower()} {if shape.kind == .Stress -> "n" else -> "lines"} {shape.base}: {shape.dimension}" }).join("\n"))
+        }
         "layouts" -> print(layouts().join(" "))
         "domains" -> print(all().map(fn(domain) { "{domain.name}: {domain.dimension}" }).join("\n"))
         "modulus" -> print("package {MODULUS} mixed {MODULUS}")
@@ -75,7 +77,9 @@ run: fn() {
             print("physical {counted.physical} code {counted.code}")
             // mixed.mjs and package.mjs define isCodeLine with the same body,
             // which the package keeps once, so both columns call it.
-            loop (index, line) in lines(args[0]) -> print("{index} {is_code_line(line)} {is_code_line(line)}")
+            loop (index, line) in lines(args[0]) {
+                print("{index} {is_code_line(line)} {is_code_line(line)}")
+            }
         }
         "digest" -> {
             at := 0
@@ -128,7 +132,9 @@ run: fn() {
             }
             // `size >= NaN` never holds, so a NaN PER_FILE packs every item
             // into the one file the end flushes: more lines than all items hold.
-            if args.len() > 2 -> pack(files, args[0], items, Int.parse(args[2]) ?? items.map(fn(item_lines) { item_lines.len() }).sum() + 1) else -> pack(files, args[0], items)
+            if args.len() > 2 {
+                pack(files, args[0], items, Int.parse(args[2]) ?? items.map(fn(item_lines) { item_lines.len() }).sum() + 1)
+            } else { pack(files, args[0], items) }
             print_files(files)
         }
         else -> {

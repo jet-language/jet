@@ -10,16 +10,21 @@ use {
 }
 
 PKG_JS_RUNTIME: "node"
+
 PKG_JS_TOOL_ACTION: "rejected the JavaScript binding"
 
 // Bind the scalar declarations of a `.d.ts` file to the module at `runtime_path`.
 pkg_javascript_bind: fn(declaration_path: String, declarations: String, runtime_path: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ScalarBindResult ForeignBindError! {
-    if !pkg_binder_is_ident(lib) -> return Err(ForeignBindError.Source("{lib} is not a valid Jet library name"))
+    if !pkg_binder_is_ident(lib) {
+        return Err(ForeignBindError.Source("{lib} is not a valid Jet library name"))
+    }
     functions: pkg_javascript_parse(declarations)
     descriptor: pkg_binder_descriptor_for(ForeignLanguage.JS, "JS")
     declaration: pkg_binder_canonicalize(declaration_path, "could not resolve TypeScript declarations")
     on_disk: pkg_binder_read_text(declaration, "could not read TypeScript declarations from {declaration}")
-    if on_disk != declarations -> return Err(ForeignBindError.Source("TypeScript declaration text does not match the declared source file"))
+    if on_disk != declarations {
+        return Err(ForeignBindError.Source("TypeScript declaration text does not match the declared source file"))
+    }
     runtime: pkg_binder_canonicalize(runtime_path, "could not resolve JavaScript runtime")
     pkg_javascript_check_node(runtime)
     pkg_binder_create_dir_all(cache, "could not create JavaScript binding cache")
@@ -43,7 +48,9 @@ pkg_javascript_bind: fn(declaration_path: String, declarations: String, runtime_
 pkg_javascript_check_node: fn(path: String) ForeignBindError! -[Exec, Time.Wait]> {
     if process.cmd([String]{PKG_JS_RUNTIME, "--check", path}).stdout(.Capture).stderr(.Capture).run() == {
         .Ok(receipt) -> {
-            if receipt.success -> return
+            if receipt.success {
+                return
+            }
             return Err(ForeignBindError.PlainToolFailed{tool: PKG_JS_RUNTIME, action: PKG_JS_TOOL_ACTION, detail: receipt.errors.trim()})
         }
         .Err(error) -> {
@@ -74,23 +81,35 @@ pkg_javascript_parse: fn(source: String) -> [ScalarBridgeFunction] ForeignBindEr
         }
         if !declared -> next
         open: pkg_binder_find(signature, "(", 0)
-        if open < 0 -> return Err(ForeignBindError.Source("line {number}: declaration has no parameter list"))
+        if open < 0 {
+            return Err(ForeignBindError.Source("line {number}: declaration has no parameter list"))
+        }
         name: pkg_binder_slice(signature, 0, open).trim()
-        if !pkg_binder_is_ident(name) || name == "take_error" -> return Err(ForeignBindError.Source("line {number}: {name} is not a bindable JavaScript function name"))
+        if !pkg_binder_is_ident(name) || name == "take_error" {
+            return Err(ForeignBindError.Source("line {number}: {name} is not a bindable JavaScript function name"))
+        }
         close: pkg_binder_find(signature, ")", open + 1)
-        if close < 0 -> return Err(ForeignBindError.Source("line {number}: declaration {name} has no closed parameter list"))
+        if close < 0 {
+            return Err(ForeignBindError.Source("line {number}: declaration {name} has no closed parameter list"))
+        }
         params: pkg_javascript_parse_params(pkg_binder_slice(signature, open + 1, close), number)
         tail: pkg_binder_tail(signature, close + 1).trim()
         annotated: tail.removeprefix(":")
-        if !tail.starts_with(":") || !annotated.ends_with(";") -> return Err(ForeignBindError.Source("line {number}: declaration {name} needs a scalar return type"))
+        if !tail.starts_with(":") || !annotated.ends_with(";") {
+            return Err(ForeignBindError.Source("line {number}: declaration {name} needs a scalar return type"))
+        }
         return_type: annotated.removesuffix(";").trim()
         result: pkg_javascript_scalar(return_type) ?? return Err(ForeignBindError.Source("line {number}: JavaScript type {return_type} is outside the typed scalar ABI"))
         loop existing in functions {
-            if existing.name == name -> return Err(ForeignBindError.Source("line {number}: declaration {name} is repeated"))
+            if existing.name == name {
+                return Err(ForeignBindError.Source("line {number}: declaration {name} is repeated"))
+            }
         }
         functions.push(ScalarBridgeFunction{name: name, params: params, result: result})
     }
-    if functions.len() == 0 -> return Err(ForeignBindError.Source("the TypeScript declarations have no exported typed scalar functions"))
+    if functions.len() == 0 {
+        return Err(ForeignBindError.Source("the TypeScript declarations have no exported typed scalar functions"))
+    }
     Ok(functions)
 }
 
@@ -99,12 +118,18 @@ pkg_javascript_parse_params: fn(source: String, line: Int) -> [ForeignScalar] Fo
     if source.trim() == "" -> return Ok(out)
     loop raw in source.split(",") {
         param: raw.trim()
-        if param.contains("?") || param.contains("=") || param.starts_with("...") -> return Err(ForeignBindError.Source("line {line}: optional, default, and rest JavaScript parameters are not in the typed ABI"))
+        if param.contains("?") || param.contains("=") || param.starts_with("...") {
+            return Err(ForeignBindError.Source("line {line}: optional, default, and rest JavaScript parameters are not in the typed ABI"))
+        }
         colon: pkg_binder_find(param, ":", 0)
-        if colon < 0 -> return Err(ForeignBindError.Source("line {line}: JavaScript parameter {param} needs a scalar type"))
+        if colon < 0 {
+            return Err(ForeignBindError.Source("line {line}: JavaScript parameter {param} needs a scalar type"))
+        }
         name: pkg_binder_slice(param, 0, colon).trim()
         annotation: pkg_binder_tail(param, colon + 1).trim()
-        if !pkg_binder_is_ident(name) -> return Err(ForeignBindError.Source("line {line}: {name} is not a bindable JavaScript parameter"))
+        if !pkg_binder_is_ident(name) {
+            return Err(ForeignBindError.Source("line {line}: {name} is not a bindable JavaScript parameter"))
+        }
         scalar: pkg_javascript_scalar(annotation) ?? return Err(ForeignBindError.Source("line {line}: JavaScript type {annotation} is outside the typed scalar ABI"))
         out.push(scalar)
     }
@@ -124,7 +149,9 @@ pkg_javascript_render_worker: fn(functions: [ScalarBridgeFunction]) -> String Ne
     out := [String]{"import {{ pathToFileURL }} from \"node:url\";\n\nconst KINDS = {{\n"}
     loop function in functions {
         kinds := [String]{}
-        loop scalar in function.params -> kinds.push(pkg_binder_debug_quote(pkg_binder_scalar_kind(scalar)))
+        loop scalar in function.params {
+            kinds.push(pkg_binder_debug_quote(pkg_binder_scalar_kind(scalar)))
+        }
         out.push("  {pkg_binder_debug_quote(function.name)}: [{kinds.join(", ")}],\n")
     }
     out.push("}};\nconst RESULTS = {{\n")
@@ -136,7 +163,7 @@ pkg_javascript_render_worker: fn(functions: [ScalarBridgeFunction]) -> String Ne
 }
 
 // The fixed worker body after the `RESULTS` table.
-PKG_JS_WORKER_TAIL: #run { ```};
+PKG_JS_WORKER_TAIL: #run { `};
 
 function convert(kind, value) {
   if (kind === "int") return BigInt(value);
@@ -180,4 +207,4 @@ async function main() {
 }
 
 main().catch(() => process.exitCode = 2);
-``` }
+` }

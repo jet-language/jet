@@ -6,13 +6,26 @@ use {
     manifest_core_files: core.files
     manifest_core_sys: core.sys
     jet_foundation.[
-        Diagnostic, AllocatorPolicy, RuntimeLayer, Span, diagnostic_from_registry,
+        Diagnostic,
+        AllocatorPolicy,
+        RuntimeLayer,
+        Span,
+        diagnostic_from_registry,
         diagnostic_registry_row,
     ]
     jetpack_foundation.[
-        BINARY_NAME, FILE_EXT, LANG_NAME, MANIFEST_BLOCK_AUTHORITY, MANIFEST_FIELD_EDITION,
-        PACKAGE_FILE, TARGET_EXAMPLE,
-        TARGET_EXECUTABLE, TARGET_FIELD_ENTRY, TARGET_FIELD_NAME, TARGET_LIBRARY, TARGET_SANDBOX,
+        BINARY_NAME,
+        FILE_EXT,
+        LANG_NAME,
+        MANIFEST_BLOCK_AUTHORITY,
+        MANIFEST_FIELD_EDITION,
+        PACKAGE_FILE,
+        TARGET_EXAMPLE,
+        TARGET_EXECUTABLE,
+        TARGET_FIELD_ENTRY,
+        TARGET_FIELD_NAME,
+        TARGET_LIBRARY,
+        TARGET_SANDBOX,
         TARGET_TEST,
     ]
 }
@@ -24,29 +37,38 @@ use {
 // the E1208 toolchain check all read it; tests/guards/jet_version.jet keeps
 // any other self-version spelling out.
 JET_VERSION: "a0.0.45"
+
 // The release channel the `a` of JET_VERSION names.
 JET_VERSION_CHANNEL: "alpha"
+
 // The stamps a published compiler keeps beside its executable: VERSION
 // (`a0.0.N <commit> <YYYY-MM-DD>`, written by Tools/release `admit` and
 // shipped in the release) marks a release; COMMIT (the commit, written by
 // Tools/agent/Land.jet and Tools/release `build`) marks a dev build of a
 // known commit. A build may not read git, so a fresh `jet build` has neither.
 JET_VERSION_STAMP: "VERSION"
+
 JET_COMMIT_STAMP: "COMMIT"
 
 // Supported editions, oldest to newest; the last is the newest stable. One
 // language edition, 2026, as the compiler loader accepts (7bef65ccd4).
 LATEST_EDITION: "2026"
+
 SUPPORTED_EDITIONS: [String]{"2026"}
 
 // The registry-protocol version this toolchain speaks.
 REGISTRY_COMPAT: "1"
 
 CURRENT_RELEASE_CHANNEL: "prerelease"
+
 CURRENT_RELEASE_DISPOSITION: "current"
+
 CURRENT_RELEASE_READINESS: "not-ready"
+
 RELEASE_COMPATIBILITY_POLICY: "future-1.0"
+
 RELEASE_COMPATIBILITY_POLICY_DISPOSITION: "planned"
+
 RELEASE_COMPATIBILITY_POLICY_ACTIVE: false
 
 // The current release identity, independent of the package SemVer.
@@ -89,9 +111,7 @@ pkg_effective_edition: fn(manifest: Manifest) -> String Never! {
     edition
 }
 
-pkg_latest_edition: fn() -> String Never! {
-    LATEST_EDITION
-}
+pkg_latest_edition: fn() -> String Never! { LATEST_EDITION }
 
 pkg_edition_is_supported: fn(edition: String) -> Bool Never! {
     SUPPORTED_EDITIONS.contains(edition.trim())
@@ -100,15 +120,20 @@ pkg_edition_is_supported: fn(edition: String) -> Bool Never! {
 // A manifest asking for an edition this toolchain lacks is E2001.
 pkg_check_edition_support: fn(manifest: Manifest, file: String) ManifestError! {
     edition: manifest.package.edition ?? return
-    if pkg_edition_is_supported(edition) -> return
+    if pkg_edition_is_supported(edition) {
+        return
+    }
     return Err(ManifestError{diagnostic: pkg_e2001(edition)})
 }
 
 pkg_e2001: fn(requested: String) -> Diagnostic Never! {
-    diagnostic_from_registry("E2001", None,
+    diagnostic_from_registry(
+        "E2001",
+        None,
         "this package needs a newer Jet",
         "editions opt a project into a specific era of Jet syntax. A newer edition can use syntax this compiler does not understand. This toolchain supports editions up to {pkg_latest_edition()}, but `{PACKAGE_FILE}` asks for `{requested}`.",
-        "upgrade with `{BINARY_NAME} self upgrade`, or set `{MANIFEST_FIELD_EDITION}: \"{pkg_latest_edition()}\"` in `{PACKAGE_FILE}`.")
+        "upgrade with `{BINARY_NAME} self upgrade`, or set `{MANIFEST_FIELD_EDITION}: \"{pkg_latest_edition()}\"` in `{PACKAGE_FILE}`.",
+    )
 }
 
 // The running compiler: JET_VERSION and what its stamps say. `version` is the
@@ -134,7 +159,9 @@ pkg_jet_build_from_stamps: fn(version_stamp: String?, commit_stamp: String?) -> 
     }
     if commit_stamp == .Val(text) {
         commit: text.trim().split("\n").to_list()[0].trim()
-        if pkg_is_commit_hex(commit) -> return JetBuild{version: "{JET_VERSION}-dev+{commit.slice(0..<10)}", commit: commit.copy(), date: "", released: false}
+        if pkg_is_commit_hex(commit) {
+            return JetBuild{version: "{JET_VERSION}-dev+{commit.slice(0..<10)}", commit: commit.copy(), date: "", released: false}
+        }
     }
     JetBuild{version: "{JET_VERSION}-dev", commit: "", date: "", released: false}
 }
@@ -163,9 +190,7 @@ pkg_is_iso_date: fn(text: String) -> Bool Never! {
         code: Int{byte}
         if index == 4 || index == 7 {
             if code != 45 -> return false
-        } else if code < 48 || code > 57 {
-            return false
-        }
+        } else if code < 48 || code > 57 { return false }
     }
     true
 }
@@ -174,7 +199,9 @@ pkg_is_iso_date: fn(text: String) -> Bool Never! {
 // `jet a0.0.43 (29517f5447, 2026-11-09, alpha)` for a release, `jet
 // a0.0.43-dev+29517f5447` otherwise.
 pkg_version_line: fn(build: JetBuild) -> String Never! {
-    if build.released -> return "{BINARY_NAME} {build.version} ({build.commit.slice(0..<10)}, {build.date}, {JET_VERSION_CHANNEL})"
+    if build.released {
+        return "{BINARY_NAME} {build.version} ({build.commit.slice(0..<10)}, {build.date}, {JET_VERSION_CHANNEL})"
+    }
     "{BINARY_NAME} {build.version}"
 }
 
@@ -200,21 +227,25 @@ pkg_version_json: fn(build: JetBuild) -> String Never! {
     release: pkg_current_release_status()
     commit: if build.commit == "" -> Dyn.Null else -> Dyn.Text(build.commit.copy())
     date: if build.date == "" -> Dyn.Null else -> Dyn.Text(build.date.copy())
-    report: pkg_json_render(Dyn.Object([
-        "version": Dyn.Text(build.version.copy()),
-        "release": Dyn.Text(JET_VERSION),
-        "released": Dyn.Bool(build.released),
-        "commit": commit,
-        "date": date,
-        "channel": Dyn.Text(JET_VERSION_CHANNEL),
-        "release_status": Dyn.Text(release.channel.copy()),
-        "release_disposition": Dyn.Text(release.disposition.copy()),
-        "release_readiness": Dyn.Text(release.readiness.copy()),
-        "compatibility_policy": Dyn.Text(release.policy.copy()),
-        "compatibility_policy_active": Dyn.Bool(release.policy_active),
-        "supported_editions": pkg_json_texts(SUPPORTED_EDITIONS),
-        "registry_protocol": Dyn.Text(REGISTRY_COMPAT),
-    ]))
+    report: pkg_json_render(
+        Dyn.Object(
+            [
+                "version": Dyn.Text(build.version.copy()),
+                "release": Dyn.Text(JET_VERSION),
+                "released": Dyn.Bool(build.released),
+                "commit": commit,
+                "date": date,
+                "channel": Dyn.Text(JET_VERSION_CHANNEL),
+                "release_status": Dyn.Text(release.channel.copy()),
+                "release_disposition": Dyn.Text(release.disposition.copy()),
+                "release_readiness": Dyn.Text(release.readiness.copy()),
+                "compatibility_policy": Dyn.Text(release.policy.copy()),
+                "compatibility_policy_active": Dyn.Bool(release.policy_active),
+                "supported_editions": pkg_json_texts(SUPPORTED_EDITIONS),
+                "registry_protocol": Dyn.Text(REGISTRY_COMPAT),
+            ],
+        ),
+    )
     "{report}\n"
 }
 
@@ -234,9 +265,9 @@ Manifest: struct {
     // Package-owned import boundary policy.
     boundaries: [ImportBoundary]
     // Jet package dependencies.
-    dependencies: [String: DepSpec]
+    dependencies: [String:DepSpec]
     // Never parsed from `package.jet` (each block pins its own version).
-    dependencies_rust: [String: String]
+    dependencies_rust: [String:String]
     // Raw `package.jet` text, kept for comment-preserving edits.
     raw: String
 
@@ -263,15 +294,16 @@ PackageMeta: struct {
 }
 
 DepSpec: enum {
-    // Path dependency: `helpers: ../helpers`.
     Path(path: String)
-    // Git dependency with one selector, or an `owner/repo/rev@github` ref.
     Git(url: String, selector: GitSelector)
-    // Registry version string.
     Registry(String)
-    // This rule project-tier dependency.
     Foreign(language: ForeignLanguage, reference: String)
 }
+
+// Path dependency: `helpers: ../helpers`.
+// Git dependency with one selector, or an `owner/repo/rev@github` ref.
+// Registry version string.
+// This rule project-tier dependency.
 
 GitSelector: enum {
     Tag(String)
@@ -311,7 +343,9 @@ pkg_manifest_parse: fn(path: String, raw: String) -> Manifest ManifestError! {
             return Err(ManifestError{diagnostic: pkg_manifest_parse_diagnostic(path, error)})
         }
     }
-    if facts.validate_guarantees() == .Err(error) -> return Err(ManifestError{diagnostic: pkg_manifest_parse_diagnostic(path, error)})
+    if facts.validate_guarantees() == .Err(error) {
+        return Err(ManifestError{diagnostic: pkg_manifest_parse_diagnostic(path, error)})
+    }
     if pkg_to_manifest(facts, raw) == {
         .Ok(manifest) -> Ok(manifest)
         .Err(error) -> Err(error)
@@ -328,12 +362,23 @@ pkg_manifest_path_in: fn(dir: String) -> String Never! {
 // checked here.
 pkg_check_toolchain: fn(manifest: Manifest, file: String) ManifestError! {
     constraint: manifest.package.jet_constraint ?? return
-    if !pkg_is_range_constraint(constraint) -> return
-    if pkg_satisfies_constraint(JET_VERSION, constraint) -> return
-    return Err(ManifestError{diagnostic: diagnostic_from_registry("E1208", None,
-        "this project requires Jet `{constraint}` but this is Jet {JET_VERSION}",
-        "the top-level `jet` field specifies a minimum toolchain version",
-        "update Jet to a newer version, or change the `jet` field in `{PACKAGE_FILE}`")})
+    if !pkg_is_range_constraint(constraint) {
+        return
+    }
+    if pkg_satisfies_constraint(JET_VERSION, constraint) {
+        return
+    }
+    return Err(
+        ManifestError{
+            diagnostic: diagnostic_from_registry(
+                "E1208",
+                None,
+                "this project requires Jet `{constraint}` but this is Jet {JET_VERSION}",
+                "the top-level `jet` field specifies a minimum toolchain version",
+                "update Jet to a newer version, or change the `jet` field in `{PACKAGE_FILE}`",
+            ),
+        },
+    )
 }
 
 pkg_is_range_constraint: fn(value: String) -> Bool Never! {
@@ -344,8 +389,12 @@ pkg_is_range_constraint: fn(value: String) -> Bool Never! {
 pkg_satisfies_constraint: fn(version: String, input: String) -> Bool Never! {
     constraint: input.trim()
     if constraint == "*" || constraint == "" -> return true
-    if constraint.starts_with(">=") -> return pkg_version_ge(version, constraint.removeprefix(">=").trim())
-    if constraint.starts_with("^") -> return pkg_version_ge(version, constraint.removeprefix("^").trim())
+    if constraint.starts_with(">=") {
+        return pkg_version_ge(version, constraint.removeprefix(">=").trim())
+    }
+    if constraint.starts_with("^") {
+        return pkg_version_ge(version, constraint.removeprefix("^").trim())
+    }
     version.trim() == constraint
 }
 
@@ -384,9 +433,7 @@ pkg_add_dependency: fn(raw: String, name: String, spec: DepSpec) -> String Never
     pkg_add_dep(raw, name, spec)
 }
 
-pkg_remove_dependency: fn(raw: String, name: String) -> String Never! {
-    pkg_remove_dep(raw, name)
-}
+pkg_remove_dependency: fn(raw: String, name: String) -> String Never! { pkg_remove_dep(raw, name) }
 
 // Rust `Diagnostic::from_row(code, holes, span)`: fill the registered row's
 // `{hole}` templates and project its protocol metadata.
@@ -414,105 +461,148 @@ pkg_manifest_parse_diagnostic: fn(path: String, error: PackageParseError) -> Dia
         .UnknownOutputKind(kind) -> pkg_e1215("unknown Output kind `{kind}`")
         .RetiredRecordHead -> pkg_e1215("record literals use `{{ … }}`; remove the dot before `{{`")
         .InvalidValue(field, value) -> {
-            if field == "runtime" -> return pkg_e1215("`runtime` must be `core`, `alloc`, or `hosted`, not `{value}`")
+            if field == "runtime" {
+                return pkg_e1215("`runtime` must be `core`, `alloc`, or `hosted`, not `{value}`")
+            }
             pkg_e1215("invalid value for `{field}`: `{value}`")
         }
         .ConfigMembers -> pkg_e1215("a Config file cannot declare `members`")
-        .NestedMembers(root, member) -> diagnostic_from_registry("E1323", None,
+        .NestedMembers(root, member) -> diagnostic_from_registry(
+            "E1323",
+            None,
             "member Package `{member}` declares `members`",
             "Package membership has depth cap one: `{root}` owns the member list, but `{member}` declares another one",
-            "remove `members:` from `{member}` and lift its references into `{root}`")
+            "remove `members:` from `{member}` and lift its references into `{root}`",
+        )
         .LintPolicyCode(code, name) -> pkg_manifest_diagnostic_from_row("E1206", [ManifestEntry]{ManifestEntry{key: "code", value: code}, ManifestEntry{key: "name", value: name}}, None)
         .Composition(detail) -> pkg_e1215(detail)
         .BadTarget(name, value, reserved) -> {
-            if reserved -> return pkg_e1210("package `{name}` lists target `{value}`, which has no backend yet (reserved for a future increment)")
+            if reserved {
+                return pkg_e1210("package `{name}` lists target `{value}`, which has no backend yet (reserved for a future increment)")
+            }
             pkg_e1210("package `{name}` lists target `{value}`, which is not a known target")
         }
         .BadTargetField(name, detail) -> pkg_e1216("package `{name}`: {detail}")
         .ReservedSection(section) -> pkg_e1209(path, section)
         .BadEffectsBlock(detail) -> pkg_e1221(detail)
-        .RetiredAuthorityField(field, replacement) -> diagnostic_from_registry("E1215", None,
+        .RetiredAuthorityField(field, replacement) -> diagnostic_from_registry(
+            "E1215",
+            None,
             "`{field}` is not a field",
             "`{field}` moved into `{replacement}` in the one `authority:` block.",
-            "write `{replacement}` inside `authority: {{ … }}`")
+            "write `{replacement}` inside `authority: {{ … }}`",
+        )
         .BadMemoryPolicy(detail) -> {
             if detail.contains("is not a memory floor") || detail.contains("memory floors belong in `authority.deny`") {
-                return diagnostic_from_registry("E1215", None,
+                return diagnostic_from_registry(
+                    "E1215",
+                    None,
                     "`{PACKAGE_FILE}` names an unknown memory floor",
                     "{detail}; memory floors belong in `authority.deny`.",
-                    "write the denial in `authority.deny` inside `authority: {{ deny: […] }}`")
+                    "write the denial in `authority.deny` inside `authority: {{ deny: […] }}`",
+                )
             }
             pkg_e1215("memory policy is malformed: {detail}")
         }
-        .RetiredPolicyField(field, replacement) -> diagnostic_from_registry("E1215", None,
+        .RetiredPolicyField(field, replacement) -> diagnostic_from_registry(
+            "E1215",
+            None,
             "`{field}` is not a field",
             "Package refusals use the named `policy.lints.deny` surface; `{field}` was a separate boolean and no longer has meaning.",
-            "remove `{field}` for the default, or put `auto_derive` in `policy.lints.deny` as `{replacement}` to refuse auto-derive")
+            "remove `{field}` for the default, or put `auto_derive` in `policy.lints.deny` as `{replacement}` to refuse auto-derive",
+        )
         .BadGuaranteePolicy(detail) -> pkg_e1215("package guarantee policy is malformed: {detail}")
         .BadPackagePolicy(detail) -> pkg_e1215("package metadata policy is malformed: {detail}")
-        .BadAllocatorPolicy(detail) -> diagnostic_from_registry("E1222", None,
+        .BadAllocatorPolicy(detail) -> diagnostic_from_registry(
+            "E1222",
+            None,
             "invalid hosted program allocator",
             detail,
-            "use `allocator: mem.Heap` or wrap it with `allocator: mem.Counting.over(mem.Heap, cap: 2.gb)`")
+            "use `allocator: mem.Heap` or wrap it with `allocator: mem.Counting.over(mem.Heap, cap: 2.gb)`",
+        )
     }
 }
 
 // An unknown top-level manifest field.
 pkg_e1215_unknown_field: fn(field: String) -> Diagnostic Never! {
-    diagnostic_from_registry("E1215", None,
+    diagnostic_from_registry(
+        "E1215",
+        None,
         "unknown field `{field}:` in `{PACKAGE_FILE}`",
         "`{field}:` is not part of the Package vocabulary. Identity is bare `name:` and `version:` at the top level — there is no `identity:` or `payload:` wrapper.",
-        "use `name:`, `version:`, `deps:`, `boundaries:`, `outputs:`, `settings:`, `build:`, `authority:`, `policy:`, or `members:`")
+        "use `name:`, `version:`, `deps:`, `boundaries:`, `outputs:`, `settings:`, `build:`, `authority:`, `policy:`, or `members:`",
+    )
 }
 
 // E1221: a malformed `authority:` block.
 pkg_e1221: fn(detail: String) -> Diagnostic Never! {
-    diagnostic_from_registry("E1221", None,
+    diagnostic_from_registry(
+        "E1221",
+        None,
         "`{PACKAGE_FILE}` has a malformed `{MANIFEST_BLOCK_AUTHORITY}` block",
         detail,
-        "`authority: {{ allow: […], deny: […], grants: {{ \"dep\": […] }}, trust: {{ … }}, providers: {{ … }} }}` is the one package authority block; rights use the thirteen grantable roots, `FFI` and its language leaves (`FFI.Go`, `FFI.Py`, `FFI.Octave`), plus deny-only `Panic`/`Mem`")
+        "`authority: {{ allow: […], deny: […], grants: {{ \"dep\": […] }}, trust: {{ … }}, providers: {{ … }} }}` is the one package authority block; rights use the thirteen grantable roots, `FFI` and its language leaves (`FFI.Go`, `FFI.Py`, `FFI.Octave`), plus deny-only `Panic`/`Mem`",
+    )
 }
 
 pkg_e1215: fn(detail: String) -> Diagnostic Never! {
-    diagnostic_from_registry("E1215", None,
+    diagnostic_from_registry(
+        "E1215",
+        None,
         "`{PACKAGE_FILE}` has a shape error",
         detail,
-        "check `{PACKAGE_FILE}` against Docs/spec/syntax-decisions.md (U1)")
+        "check `{PACKAGE_FILE}` against Docs/spec/syntax-decisions.md (U1)",
+    )
 }
 
 pkg_e1209: fn(file: String, section: String) -> Diagnostic Never! {
-    diagnostic_from_registry("E1209", None,
+    diagnostic_from_registry(
+        "E1209",
+        None,
         "`{section}` is reserved and not yet implemented",
         "this section name is reserved for a future Jet feature — using it now is an error",
-        "remove the `{section}` block from `{PACKAGE_FILE}`, or leave it empty")
+        "remove the `{section}` block from `{PACKAGE_FILE}`, or leave it empty",
+    )
 }
 
 pkg_e1210: fn(detail: String) -> Diagnostic Never! {
-    diagnostic_from_registry("E1210", None,
+    diagnostic_from_registry(
+        "E1210",
+        None,
         "`{PACKAGE_FILE}` lists an unknown target",
         detail,
-        "use a shipped target: `{TARGET_LIBRARY}`, `{TARGET_EXECUTABLE}`, `{TARGET_TEST}`, `{TARGET_EXAMPLE}`, or `{TARGET_SANDBOX}`")
+        "use a shipped target: `{TARGET_LIBRARY}`, `{TARGET_EXECUTABLE}`, `{TARGET_TEST}`, `{TARGET_EXAMPLE}`, or `{TARGET_SANDBOX}`",
+    )
 }
 
 pkg_e1216: fn(detail: String) -> Diagnostic Never! {
-    diagnostic_from_registry("E1216", None,
+    diagnostic_from_registry(
+        "E1216",
+        None,
         "`{PACKAGE_FILE}` has an invalid target field",
         detail,
-        "a target block accepts `{TARGET_FIELD_ENTRY}: \"…\"` and `{TARGET_FIELD_NAME}: \"…\"`")
+        "a target block accepts `{TARGET_FIELD_ENTRY}: \"…\"` and `{TARGET_FIELD_NAME}: \"…\"`",
+    )
 }
 
 pkg_e1212: fn(file: String, name: String) -> Diagnostic Never! {
-    diagnostic_from_registry("E1212", None,
+    diagnostic_from_registry(
+        "E1212",
+        None,
         "`{PACKAGE_FILE}` declares package `{name}` but no `{name}: module` was found",
         "each `packages:` name must correspond to a `module <name> {{ … }}` declaration in a `.{FILE_EXT}` file in the source tree",
-        "add a `.{FILE_EXT}` file containing `{name}: module {{ … }}`, or remove `{name}` from `packages:` in `{PACKAGE_FILE}`")
+        "add a `.{FILE_EXT}` file containing `{name}: module {{ … }}`, or remove `{name}` from `packages:` in `{PACKAGE_FILE}`",
+    )
 }
 
 pkg_e1213: fn(file: String, name: String, paths: [String]) -> Diagnostic Never! {
-    diagnostic_from_registry("E1213", None,
+    diagnostic_from_registry(
+        "E1213",
+        None,
         "`{PACKAGE_FILE}` declares package `{name}` but `{name}: module` is ambiguous",
         "`{name}: module` was found in multiple files: {paths.join(", ")}; each package name must map to exactly one module",
-        "rename one of the conflicting `{name}: module` declarations so each package has a unique name")
+        "rename one of the conflicting `{name}: module` declarations so each package has a unique name",
+    )
 }
 
 // `--profile=<name>` names no blessed or declared profile.

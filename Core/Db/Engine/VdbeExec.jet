@@ -9,7 +9,6 @@
 // abort_due_to_interrupt. Without shared cache, sqlite3VdbeEnter and
 // sqlite3VdbeLeave do nothing; without SQLITE_DEBUG and VDBE_PROFILE there is
 // no tracing or cycle counting.
-
 use {
     base: __core_db_base
     conn: __core_db_conn
@@ -48,11 +47,7 @@ exec: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
         r.p3 = v.ops[r.pc].p3
         r.p5 = v.ops[r.pc].p5
         answer: exec_op<H>(h, db, v, r)
-        if answer == GO_NEXT {
-            r.pc += 1
-        } else if answer == GO_JUMP {
-            r.pc = r.p2
-        } else if answer == GO_NEXT_CHECK || answer == GO_JUMP_CHECK {
+        if answer == GO_NEXT -> r.pc += 1 else if answer == GO_JUMP -> r.pc = r.p2 else if answer == GO_NEXT_CHECK || answer == GO_JUMP_CHECK {
             // check_for_interrupt.
             r.pc = if answer == GO_JUMP_CHECK -> r.p2 else -> r.pc + 1
             if db.is_interrupted -> return exec_return<H>(h, db, v, r, GO_INTERRUPT)
@@ -60,9 +55,7 @@ exec: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
                 r.rc = base.INTERRUPT
                 return exec_return<H>(h, db, v, r, GO_ERROR)
             }
-        } else {
-            return exec_return<H>(h, db, v, r, answer)
-        }
+        } else { return exec_return<H>(h, db, v, r, answer) }
     }
 }
 
@@ -93,9 +86,7 @@ exec_return: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run, answer: 
     } else if answer == GO_TOO_BIG {
         aux.vdbe_error(v, "string or blob too big".bytes())
         rc = base.TOOBIG
-    } else if answer == GO_INTERRUPT {
-        rc = base.INTERRUPT
-    }
+    } else if answer == GO_INTERRUPT { rc = base.INTERRUPT }
     loop {
         if abort -> rc = abort_due_to_error<H>(h, db, v, r, rc)
         // vdbe_return; a progress handler that interrupts here aborts.
@@ -113,17 +104,13 @@ exec_return: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run, answer: 
 // answers SQLITE_ERROR.
 abort_due_to_error: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: Run, code: Int) -[DB]> Int Never! {
     rc := code
-    if db.malloc_failed {
-        rc = base.NOMEM
-    } else if rc == base.IOERR_CORRUPTFS {
-        rc = base.CORRUPT
+    if db.malloc_failed -> rc = base.NOMEM else if rc == base.IOERR_CORRUPTFS -> rc = base.CORRUPT
+    if v.err_msg == None && rc != base.IOERR_NOMEM {
+        aux.vdbe_error(v, base.error_string(rc).bytes())
     }
-    if v.err_msg == None && rc != base.IOERR_NOMEM -> aux.vdbe_error(v, base.error_string(rc).bytes())
     v.rc = rc
     aux.system_error(db, rc)
-    if v.state == conn.VDBE_RUN_STATE {
-        _: aux.halt<H>(h, db, v)
-    }
+    if v.state == conn.VDBE_RUN_STATE -> _: aux.halt<H>(h, db, v)
     if rc == base.IOERR_NOMEM -> aux.oom_fault(db)
     if rc == base.CORRUPT && !db.auto_commit {
         db.flags = db.flags.bit_or(conn.SQLITE_CORRUPT_RD_ONLY)
@@ -287,9 +274,7 @@ exec_op: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int N
 // vdbe_create starts it with, over n_mem registers, running.
 exec_test_stmt: fn(db: &conn.Conn, ops: [(op: Int, p1: Int, p2: Int, p3: Int)], n_mem: Int) -> conn.Vdbe Never! {
     v := aux.vdbe_create(db)
-    loop o in ops {
-        _: aux.add_op3(db, v, o.op, o.p1, o.p2, o.p3)
-    }
+    loop o in ops -> _: aux.add_op3(db, v, o.op, o.p1, o.p2, o.p3)
     aux.make_ready(db, v, 0, n_mem, 0, 0, false)
     v.state = conn.VDBE_RUN_STATE
     v.pc = 0

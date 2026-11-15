@@ -7,7 +7,8 @@
     count: [Int]{1, 2, 3, 4}.lazy().map(fn(n) {
         pulled += 1
         n
-    }).count_where(fn(n) { n % 2 == 0 })
+    })
+        .count_where(fn(n) { n % 2 == 0 })
     assert_eq(count, 2)
     assert_eq(pulled, 4)
 }
@@ -17,7 +18,8 @@
     found: [Int]{1, 2, 3, 4}.lazy().map(fn(n) {
         pulled += 1
         n
-    }).find(fn(n) { n >= 2 })
+    })
+        .find(fn(n) { n >= 2 })
     assert_eq(found ?? 0, 2)
     assert_eq(pulled, 2)
 }
@@ -46,7 +48,8 @@
     longest: [String]{"bb", "a", "cc"}.lazy().map(fn(s) {
         pulled += 1
         s
-    }).max_by(fn(s) { s.len() })
+    })
+        .max_by(fn(s) { s.len() })
     assert_eq(longest ?? "", "cc")
     assert_eq(pulled, 3)
 }
@@ -75,7 +78,8 @@
     pairs: [String]{"x", "y", "z"}.lazy().map(fn(s) {
         pulled += 1
         s
-    }).indexed()
+    })
+        .indexed()
     first: pairs.find(fn(p) { p.idx == 1 })
     assert_eq(pulled, 2)
     assert_eq(first?.item ?? "", "y")

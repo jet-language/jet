@@ -3,6 +3,7 @@
 engine_receipt_text: fn(receipt: CacheReceipt) -> String {
     "jet-cache-receipt-v1\nrole={receipt.role}\nwitness={receipt.witness}\nversion={receipt.version}\nissued={receipt.issued_unix}\nexpires={receipt.expires_unix}\nreference={receipt.provenance.reference}\nsource={receipt.provenance.source}\nbuilder={receipt.provenance.builder}\naction={receipt.provenance.action}\noutput={receipt.provenance.output}\nplatform={receipt.provenance.platform}\nsandbox={receipt.provenance.sandbox}\npolicy={receipt.provenance.policy}\nsignature_key={receipt.signature.key_id}\nsignature_algorithm={receipt.signature.algorithm}\nsignature={receipt.signature.sig_hex}\n"
 }
+
 engine_receipt_field: fn(bytes: [U8], name: String) -> String {
     text: String.from_bytes(bytes) ?? panic("receipt UTF-8")
     prefix: "{name}="
@@ -11,11 +12,13 @@ engine_receipt_field: fn(bytes: [U8], name: String) -> String {
     }
     panic("receipt field {name}")
 }
+
 // The original clamps receipt clocks with `.max(0)`.
 engine_receipt_clock: fn(unix: Int) -> Int {
     if unix < 0 -> return 0
     unix
 }
+
 #Test("binary_cache_trust_receipt_rejects_rollback_freeze_and_mix_and_match") {
     root: files.tmpdir("engine-cache-trust-root-") ?? panic("root")
     source: files.tmpdir("engine-cache-trust-source-") ?? panic("source")
@@ -23,7 +26,7 @@ engine_receipt_clock: fn(unix: Int) -> Int {
     mirror: files.tmpdir("engine-cache-trust-mirror-") ?? panic("mirror")
     files.write(files.join(source, "payload"), "trusted bytes\n") ?? panic("payload")
     files.write(files.join(dependency_source, "payload"), "dependency bytes\n") ?? panic("dependency payload")
-    roots: HangarRoots{root, dev_mode: false}
+    roots: HangarRoots{root: root, dev_mode: false}
     verification := StoreVerification.new()
     dependency: engine_cache_ingest(verification, roots, "cache-trust-dependency", "./cache-trust-dependency", dependency_source, engine_cache_identity("cache-trust-dependency"), [String]{}, "cache trust dependency")
     identity: engine_cache_identity("cache-trust")

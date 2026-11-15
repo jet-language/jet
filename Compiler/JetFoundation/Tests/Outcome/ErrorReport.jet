@@ -3,15 +3,27 @@
 // supplied directly; private TLS journey execution/terminal rendering is not
 // Foundation's portable wire policy.
 use jet_foundation.[
-    JetErrorContextFrame, JetErrorConversion, JetErrorDetails, JetErrorField, JetErrorJourneyFrame,
-    JetErrorReport, JetErrorSpan, jet_error_context_from_json, jet_error_conversion_from_json,
-    jet_error_details_from_json, jet_error_journey_from_json, jet_error_json_encode_value,
-    jet_error_json_u32, jet_error_report_from_json,
+    JetErrorContextFrame,
+    JetErrorConversion,
+    JetErrorDetails,
+    JetErrorField,
+    JetErrorJourneyFrame,
+    JetErrorReport,
+    JetErrorSpan,
+    jet_error_context_from_json,
+    jet_error_conversion_from_json,
+    jet_error_details_from_json,
+    jet_error_journey_from_json,
+    jet_error_json_encode_value,
+    jet_error_json_u32,
+    jet_error_report_from_json,
 ]
 
 outcome_test_report: fn() -> JetErrorReport Never! {
     JetErrorReport{
-        code: Val("CFG404"), message: "loading config", typed_identity: Val("IoError"),
+        code: Val("CFG404"),
+        message: "loading config",
+        typed_identity: Val("IoError"),
         causes: [JetErrorReport]{JetErrorReport{code: Val("IO001"), message: "disk offline", typed_identity: Val("IoError")}},
         context_frames: [JetErrorContextFrame]{JetErrorContextFrame{text: "while loading app.toml", file: "config.jet", line: 42}},
         origin: Val(JetErrorJourneyFrame{fn_name: "load", file: "config.jet", line: 40, column: 12, note: "", hops: 1}),
@@ -19,12 +31,15 @@ outcome_test_report: fn() -> JetErrorReport Never! {
         conversion_history: [JetErrorConversion]{JetErrorConversion{source: "IoError", target: "ConfigError"}},
     }
 }
+
 outcome_test_wire: fn() -> String Never! {
     "{{\"schema\":\"jet.err/v1\",\"message\":\"loading config\",\"code\":\"CFG404\",\"cause\":{{\"schema\":\"jet.err/v1\",\"message\":\"disk offline\",\"code\":\"IO001\",\"cause\":null,\"typed_identity\":\"IoError\"}},\"typed_identity\":\"IoError\",\"context_frames\":[{{\"text\":\"while loading app.toml\",\"file\":\"config.jet\",\"line\":42}}],\"origin\":{{\"fn_name\":\"load\",\"file\":\"config.jet\",\"line\":40,\"column\":12,\"note\":\"\",\"hops\":1}},\"source_journey\":[{{\"fn_name\":\"run\",\"file\":\"config.jet\",\"line\":42,\"column\":5,\"note\":\"\",\"hops\":1}}],\"conversion_history\":[{{\"source\":\"IoError\",\"target\":\"ConfigError\"}}]}}"
 }
+
 outcome_test_tree: fn() -> Dyn Never! {
     Dyn.Object([String:Dyn]{"schema": Dyn.Text("jet.err/v1"), "message": Dyn.Text("plain"), "code": Dyn.Null, "cause": Dyn.Null})
 }
+
 outcome_test_decode_refusal: fn(tree: Dyn, expected: String) Never! {
     actual: if jet_error_report_from_json(tree) == {
         .Ok(_) -> panic("invalid report accepted")
@@ -32,6 +47,7 @@ outcome_test_decode_refusal: fn(tree: Dyn, expected: String) Never! {
     }
     assert(actual == expected)
 }
+
 outcome_test_wire_refusal: fn(wire: String, expected: String) Never! {
     actual: if JetErrorReport.from_json(wire) == {
         .Ok(_) -> panic("invalid report wire accepted")
@@ -48,6 +64,7 @@ outcome_test_wire_refusal: fn(wire: String, expected: String) Never! {
     assert(report.causes[0].message == "unexpected token at line 3")
     assert(report.to_json() == "{{\"schema\":\"jet.err/v1\",\"message\":\"parse failed\",\"code\":\"CFG404\",\"cause\":{{\"schema\":\"jet.err/v1\",\"message\":\"unexpected token at line 3\",\"code\":null,\"cause\":null}}}}")
 }
+
 #Test("default_report_keeps_structured_error_and_source_facts") {
     report: outcome_test_report()
     assert((report.code ?? panic("code missing")) == "CFG404")
@@ -68,6 +85,7 @@ outcome_test_wire_refusal: fn(wire: String, expected: String) Never! {
     assert(report.conversion_history[0].source == "IoError" && report.conversion_history[0].target == "ConfigError")
     assert(report.to_json() == outcome_test_wire())
 }
+
 #Test("error report causes null object array and optional omission") {
     plain: JetErrorReport{message: "plain"}
     assert(plain.to_json() == "{{\"schema\":\"jet.err/v1\",\"message\":\"plain\",\"code\":null,\"cause\":null}}")
@@ -77,6 +95,7 @@ outcome_test_wire_refusal: fn(wire: String, expected: String) Never! {
     empty_identity: JetErrorReport{message: "", code: Val(""), typed_identity: Val("")}
     assert(empty_identity.to_json() == "{{\"schema\":\"jet.err/v1\",\"message\":\"\",\"code\":\"\",\"cause\":null,\"typed_identity\":\"\"}}")
 }
+
 #Test("error report raw details preserve order typed values and usize writer") {
     details: JetErrorDetails{variant: "DuplicateTargetName", fields: [JetErrorField]{JetErrorField{name: "name", value: "\"app\""}, JetErrorField{name: "typed", value: "{{\"z\":[null,true,9223372036854775808],\"a\":1.25}}"}}, source_span: Val(JetErrorSpan{start: 18446744073709551615, end: 0})}
     assert(details.to_json() == "{{\"variant\":\"DuplicateTargetName\",\"fields\":{{\"name\":\"app\",\"typed\":{{\"z\":[null,true,9223372036854775808],\"a\":1.25}}}},\"source_span\":{{\"start\":18446744073709551615,\"end\":0}}}}")
@@ -93,12 +112,14 @@ outcome_test_wire_refusal: fn(wire: String, expected: String) Never! {
     tree: Dyn.Object([String:Dyn]{"z": Dyn.Array([Dyn]{Dyn.Null, Dyn.Bool(true), Dyn.Int(9223372036854775808)}), "a": Dyn.Float(1.25)})
     assert_eq(jet_error_json_encode_value(tree), "{{\"z\":[null,true,9223372036854775808],\"a\":1.25}}")
 }
+
 #Test("error report protocol quote matches Unicode control policy") {
     controls: String.from_bytes([U8]{U8{8}, U8{12}, U8{127}, U8{194}, U8{128}}) ?? panic("bad fixture")
     report: JetErrorReport{message: "a\"b\\c\n\t{controls}é🚀"}
     assert(report.to_json() == "{{\"schema\":\"jet.err/v1\",\"message\":\"a\\\"b\\\\c\\n\\t\\u0008\\u000c\\u007f\\u0080é🚀\",\"code\":null,\"cause\":null}}")
     assert(jet_error_json_encode_value(Dyn.Text(controls)) == "\"\\u0008\\u000c\\u007f\\u0080\"")
 }
+
 #Test("error report typed tree decode preserves all carrier facts") {
     root := [String:Dyn]{"schema": Dyn.Text("jet.err/v1"), "message": Dyn.Text("typed"), "code": Dyn.Text("E3502"), "cause": Dyn.Array([Dyn]{outcome_test_tree(), outcome_test_tree()}), "typed_identity": Dyn.Text("BuildError.DuplicateTargetName")}
     frame: Dyn.Object([String:Dyn]{"fn_name": Dyn.Text("build"), "file": Dyn.Text("package.jet"), "line": Dyn.Int(4294967295), "column": Dyn.Int(4294967295), "note": Dyn.Text("origin"), "hops": Dyn.Int(4294967295)})
@@ -119,6 +140,7 @@ outcome_test_wire_refusal: fn(wire: String, expected: String) Never! {
     span: details.source_span ?? panic("lost span")
     assert(span.start == 4294967295 && span.end == 0)
 }
+
 #Test("error report exact typed decoder refusals and precedence") {
     outcome_test_decode_refusal(Dyn.Null, "error report report is not an object")
     outcome_test_decode_refusal(Dyn.Object([String:Dyn]{}), "error report lacks schema")
@@ -156,6 +178,7 @@ outcome_test_wire_refusal: fn(wire: String, expected: String) Never! {
     report: JetErrorReport.from_json(outcome_test_wire()) ?? panic("original wire refused")
     assert(report == outcome_test_report())
 }
+
 #Test("error report protocol canonical equality and duplicate refusal") {
     wire: JetErrorReport{message: "plain"}.to_json()
     assert((JetErrorReport.from_json(wire) ?? panic("canonical wire rejected")).to_json() == wire)
@@ -165,6 +188,7 @@ outcome_test_wire_refusal: fn(wire: String, expected: String) Never! {
     outcome_test_wire_refusal("", "invalid error report: expected a JSON value")
     outcome_test_wire_refusal("{{\"schema\":\"jet.err/v1\",\"message\":\"plain\",\"code\":null,\"cause\":1}}", "error report cause is not null, an object, or an array")
 }
+
 #Test("error report protocol nested causes raw details and max u32 roundtrip") {
     report := outcome_test_report()
     report.causes = [JetErrorReport]{outcome_test_report(), JetErrorReport{message: "second"}}

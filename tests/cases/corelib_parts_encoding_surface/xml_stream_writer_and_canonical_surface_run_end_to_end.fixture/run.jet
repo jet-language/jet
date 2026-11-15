@@ -1,4 +1,3 @@
-
 use {
     xml: core.encoding.xml
     encoding: core.encoding
@@ -24,7 +23,7 @@ run: fn() {
     input16: files.open("input.xml") ?? panic("open utf16 source")
     output16: files.create("output-utf16.xml") ?? panic("create utf16")
     reader16 := xml.reader(input16) ?? panic("reader utf16")
-    render16 := xml.XMLRenderOptions{ encoding: .UTF16LE, lexical: .Deterministic }
+    render16 := xml.XMLRenderOptions{encoding: .UTF16LE, lexical: .Deterministic}
     writer16 := xml.writer(output16, encoding.EncodingLimits.safe(), render16) ?? panic("writer utf16")
     loop true {
         if reader16.next() == {
@@ -37,6 +36,6 @@ run: fn() {
     }
     writer16.finish() ?? panic("finish utf16")
     tree: xml.parse("<r xmlns:q='urn:q' q:z='2' a='1'><e/></r>") ?? panic("parse")
-    options := xml.XMLCanonical{ mode: .Exclusive10, comments: false, inclusive_prefixes: ["q"] }
+    options := xml.XMLCanonical{mode: .Exclusive10, comments: false, inclusive_prefixes: ["q"]}
     print(xml.canonical(tree, options) ?? panic("canonical"))
 }

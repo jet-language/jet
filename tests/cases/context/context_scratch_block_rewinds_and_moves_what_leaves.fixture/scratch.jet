@@ -31,9 +31,7 @@ returned: fn() -> [Int] {
 
 scratch_total: fn() -> Int {
     result := 0
-    #Context(allocator: context.scratch) {
-        result = total(squares(30))
-    }
+    #Context(allocator: context.scratch) { result = total(squares(30)) }
     result
 }
 
@@ -99,9 +97,7 @@ blocks: fn(count: Int) {
         table["squares"] = squares(30)
         line = "total {total(squares(30))}"
         holder := [Int]{}
-        #Context(allocator: context.scratch) {
-            holder = squares(30)
-        }
+        #Context(allocator: context.scratch) { holder = squares(30) }
         #Context(allocator: context.scratch) {
             junk := [Int]{}
             loop i in 0..<256 -> junk.push(-1 - i)
@@ -137,9 +133,7 @@ blocks: fn(count: Int) {
     print("arena blocks start at one mark: {first_mark == second_mark && first_mark != dropped}")
 
     fresh := 0
-    #Context(allocator: mem.Arena.new()) {
-        fresh = total(squares(30))
-    }
+    #Context(allocator: mem.Arena.new()) { fresh = total(squares(30)) }
     print("fresh arena: {fresh}")
 }
 

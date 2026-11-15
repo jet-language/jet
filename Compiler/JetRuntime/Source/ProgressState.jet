@@ -7,7 +7,7 @@ progress_bound: fn(text: I64) -> I64 {
     at := I64{0}
     count := I64{0}
     loop at < length {
-        if (count >= I64{256}) -> break
+        if (count >= I64{256}) { break }
         at += rt_text_width(wrapping(data + at))
         count += I64{1}
     }
@@ -37,7 +37,7 @@ progress_strip_ansi: fn(text: I64) -> I64 {
                 }
             }
             (state == I64{2}) -> {
-                if (character >= I64{64} && character <= I64{126}) -> state = I64{0}
+                if (character >= I64{64} && character <= I64{126}) { state = I64{0} }
             }
             (state == I64{3}) -> {
                 if {
@@ -53,14 +53,14 @@ progress_strip_ansi: fn(text: I64) -> I64 {
 }
 
 progress_unsigned_float: fn(word: I64) -> Float {
-    if (word >= I64{0}) -> return Float{word}
+    if (word >= I64{0}) { return Float{word} }
     // Round-to-odd before the signed cast preserves the low sticky bit, so
     // a U64 halfway case followed by bit0=1 cannot be double-rounded down.
     Float{((word >> I64{1}).bit_and(I64{9223372036854775807})).bit_or((word.bit_and(I64{1})))} * Float{2}
 }
 
 progress_unsigned_text: fn(word: I64) -> I64 {
-    if (word >= I64{0}) -> return jet_rt_i64_to_string(word)
+    if (word >= I64{0}) { return jet_rt_i64_to_string(word) }
     output: jet_rt_string_builder_new()
     // unsigned /10 implemented from the signed-safe half, preserving U64.MAX.
     half: (word >> I64{1}).bit_and(I64{9223372036854775807})
@@ -81,9 +81,7 @@ progress_fixed2: fn(value: Float, suffix: I64) -> I64 {
     numerator: jet_int_mul(mantissa, I64{100})
     rounded := I64{0}
     if {
-        (shift >= I64{0}) -> {
-            rounded = jet_int_shl(numerator, shift, I64{0}, I64{0}, I64{0})
-        }
+        (shift >= I64{0}) -> { rounded = jet_int_shl(numerator, shift, I64{0}, I64{0}, I64{0}) }
         // mantissa*100 < 2^60: every smaller binary value rounds to zero.
         (shift > I64{-61}) -> {
             places: -shift
@@ -108,8 +106,8 @@ progress_fixed2: fn(value: Float, suffix: I64) -> I64 {
     output: jet_rt_string_builder_new()
     if {
         (length <= I64{2}) -> {
-            rt_text_push_word(output, I64{11824}, I64{2}) // 0.
-            if (length == I64{1}) -> rt_text_push_word(output, I64{48}, I64{1})
+            rt_text_push_word(output, I64{11824}, I64{2})  // 0.
+            if (length == I64{1}) { rt_text_push_word(output, I64{48}, I64{1}) }
             rt_text_append(output, rt_text_data(digits), length)
         }
         else -> {
@@ -137,8 +135,7 @@ progress_render: fn(description: I64, format: I64, count: I64, total: I64, elaps
     percent := jet_rt_string_clone(rt_static_text("?"))
     if (total >= I64{0}) {
         jet_rt_string_drop(percent)
-        if (total == I64{0}) -> percent = jet_rt_i64_to_string(I64{100})
-        else {
+        if (total == I64{0}) { percent = jet_rt_i64_to_string(I64{100}) } else {
             count_int: jet_int_owned_from_i64(count)
             scaled: jet_int_mul(count_int, I64{100})
             total_int: jet_int_owned_from_i64(total)
@@ -173,7 +170,7 @@ progress_render: fn(description: I64, format: I64, count: I64, total: I64, elaps
 progress_enabled: fn() -> Bool {
     if !host_is_tty(I64{2}) -> return false
     value: host_environment_value(env_name_jet_machine_output())
-    if (value == I64{0}) -> return true
+    if (value == I64{0}) { return true }
     // Raw var_os equality: invalid UTF-8 never aliases the ASCII value "1".
     rt_text_byte(value) != I64{49} || rt_text_byte(wrapping(value + I64{1})) != I64{0}
 }
@@ -200,9 +197,7 @@ progress_write: fn(text: I64, newline: Bool) -> Bool {
     }
     slot: jet_rt_alloc(I64{8}, I64{8})
     if {
-        (cause != I64{0}) -> {
-            _ := host_io_other_take(operation, host_stderr_name(), cause, slot)
-        }
+        (cause != I64{0}) -> { _ := host_io_other_take(operation, host_stderr_name(), cause, slot) }
         else -> {
             frame: jet_rt_string_builder_new()
             if !newline -> rt_text_push_word(frame, I64{13}, I64{1})
@@ -235,17 +230,23 @@ progress_write: fn(text: I64, newline: Bool) -> Bool {
 }
 
 #Export(c) jet_rt_progress_state_finish: fn(state: I64) {
-    if (rt_text_word(wrapping(state + I64{56})) != I64{0}) -> return
+    if (rt_text_word(wrapping(state + I64{56})) != I64{0}) {
+        return
+    }
     rt_text_store(wrapping(state + I64{56}), I64{1})
-    if (rt_text_word(wrapping(state + I64{48})) != I64{0}) -> _ := progress_write(rt_static_text(""), true)
+    if (rt_text_word(wrapping(state + I64{48})) != I64{0}) {
+        _ := progress_write(rt_static_text(""), true)
+    }
 }
 
 #Export(c) jet_rt_progress_state_advance: fn(state: I64) {
-    if (rt_text_word(wrapping(state + I64{56})) != I64{0}) -> return
+    if (rt_text_word(wrapping(state + I64{56})) != I64{0}) {
+        return
+    }
     previous: rt_text_word(wrapping(state + I64{40}))
     count := if (previous == I64{-1}) -> previous else -> wrapping(previous + I64{1})
     total: rt_text_word(state)
-    if (total >= I64{0} && world_unsigned_before(total, count)) -> count = total
+    if (total >= I64{0} && world_unsigned_before(total, count)) { count = total }
     rt_text_store(wrapping(state + I64{40}), count)
     instant: time_clock_read(I64{1})
     seconds := sync_load(instant) - rt_text_word(wrapping(state + I64{24}))
@@ -258,9 +259,11 @@ progress_write: fn(text: I64, newline: Bool) -> Bool {
     text: progress_render(rt_text_word(wrapping(state + I64{8})), rt_text_word(wrapping(state + I64{16})), count, total, elapsed, terminal_color_enabled())
     emitted: progress_write(text, false)
     jet_rt_string_drop(text)
-    if !emitted -> return
+    if !emitted {
+        return
+    }
     rt_text_store(wrapping(state + I64{48}), I64{1})
-    if (total >= I64{0} && count == total) -> jet_rt_progress_state_finish(state)
+    if (total >= I64{0} && count == total) { jet_rt_progress_state_finish(state) }
 }
 
 #Export(c) jet_rt_progress_state_drop: fn(state: I64) {

@@ -108,7 +108,9 @@ run: fn() {
     }
     if args.len() > 0 && args[0] == "--patterns" {
         if args.len() != 1 -> usage("jet Tools/agent/LaneCheck.jet --patterns")
-        loop rule in personal_info_rules(machine_identity(files.cwd() ?? repo)) -> print("{rule.kind}\t{rule.source}")
+        loop rule in personal_info_rules(machine_identity(files.cwd() ?? repo)) {
+            print("{rule.kind}\t{rule.source}")
+        }
         return
     }
     if personal_info_guard(repo) != 0 {
@@ -117,7 +119,9 @@ run: fn() {
     }
     jet: process.env_nonempty("JET") ?? (process.which("jet") ?? "jet")
     assembly: assembly_spec(jet, repo).run() ?? return assembly_refused("{jet} could not run Jetpack/Bootstrap/Assemble.jet: {err}")
-    if assembly.code != 0 || assembly.signal != None -> return assembly_refused(process.combined_output(assembly).trim_end())
+    if assembly.code != 0 || assembly.signal != None {
+        return assembly_refused(process.combined_output(assembly).trim_end())
+    }
     unsafe_ratchet(repo)
     vocabulary_rows(repo)
     body_tree_rows(repo)
@@ -156,9 +160,7 @@ assembly_env: fn(jet: String) -> [Setting] {
 
 assembly_spec: fn(jet: String, repo: String) -[Exec]> ProcessSpec {
     spec := process.cmd([String]{jet, "Jetpack/Bootstrap/Assemble.jet", "check"}).cwd(repo)
-    loop setting in assembly_env(jet) {
-        spec = spec.env(setting.name, setting.value)
-    }
+    loop setting in assembly_env(jet) -> spec = spec.env(setting.name, setting.value)
     spec
 }
 
@@ -167,7 +169,9 @@ assembly_spec: fn(jet: String, repo: String) -[Exec]> ProcessSpec {
 unsafe_ratchet: fn(repo: String) -[Env, Exec, FS, IO]> () {
     jet: process.env_nonempty("JET") ?? (process.which("jet") ?? "jet")
     ratchet: process.cmd([String]{jet, "Tools/agent/UnsafeRatchet.jet", "--check"}).cwd(repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/UnsafeRatchet.jet: {err}")
-    if ratchet.code == 0 && ratchet.signal == None -> return
+    if ratchet.code == 0 && ratchet.signal == None {
+        return
+    }
     check_refused(process.combined_output(ratchet).trim_end(), "the unsafe-region ratchet differs from Docs/spec/safety.md (see above; record an audited row with jet Tools/agent/UnsafeRatchet.jet --update; lower a fallen memory-kernel count with jet Tools/agent/UnsafeRatchet.jet)")
 }
 
@@ -175,7 +179,9 @@ unsafe_ratchet: fn(repo: String) -[Env, Exec, FS, IO]> () {
 vocabulary_rows: fn(repo: String) -[Env, Exec, FS, IO]> () {
     jet: process.env_nonempty("JET") ?? (process.which("jet") ?? "jet")
     rows: process.cmd([String]{jet, "Tools/agent/VocabularyRows.jet", "--check"}).cwd(repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/VocabularyRows.jet: {err}")
-    if rows.code == 0 && rows.signal == None -> return
+    if rows.code == 0 && rows.signal == None {
+        return
+    }
     check_refused(process.combined_output(rows).trim_end(), "a generated Source/Vocabulary.jet differs from its Vocabulary.tsv (see above; regenerate with jet Tools/agent/VocabularyRows.jet --write)")
 }
 
@@ -183,7 +189,9 @@ vocabulary_rows: fn(repo: String) -[Env, Exec, FS, IO]> () {
 body_tree_rows: fn(repo: String) -[Env, Exec, FS, IO]> () {
     jet: process.env_nonempty("JET") ?? (process.which("jet") ?? "jet")
     rows: process.cmd([String]{jet, "Tools/agent/BodyTreeRows.jet", "--check"}).cwd(repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/BodyTreeRows.jet: {err}")
-    if rows.code == 0 && rows.signal == None -> return
+    if rows.code == 0 && rows.signal == None {
+        return
+    }
     check_refused(process.combined_output(rows).trim_end(), "a generated flat-body enum in Compiler/JetFoundation/Source/Facts differs from its declaration in Compiler/JetSema/Source/Sema/Tree.jet (see above; regenerate with jet Tools/agent/BodyTreeRows.jet --write)")
 }
 
@@ -191,7 +199,9 @@ body_tree_rows: fn(repo: String) -[Env, Exec, FS, IO]> () {
 diagnostic_census: fn(repo: String) -[Env, Exec, FS, IO]> () {
     jet: process.env_nonempty("JET") ?? (process.which("jet") ?? "jet")
     census: process.cmd([String]{jet, "Tools/agent/DiagnosticCensus.jet", "--check"}).cwd(repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/DiagnosticCensus.jet: {err}")
-    if census.code == 0 && census.signal == None -> return
+    if census.code == 0 && census.signal == None {
+        return
+    }
     check_refused(process.combined_output(census).trim_end(), "the diagnostic census refused the tree (see above; regenerate with jet Tools/agent/DiagnosticCensus.jet --write; a new dead or uncarried code needs its emitter or its ui snapshot, report fixture or case, not a baseline row)")
 }
 
@@ -199,7 +209,9 @@ diagnostic_census: fn(repo: String) -[Env, Exec, FS, IO]> () {
 compiler_data: fn(repo: String) -[Env, Exec, FS, IO]> () {
     jet: process.env_nonempty("JET") ?? (process.which("jet") ?? "jet")
     ratchet: process.cmd([String]{jet, "Tools/agent/CompilerData.jet", "--check"}).cwd(repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/CompilerData.jet: {err}")
-    if ratchet.code == 0 && ratchet.signal == None -> return
+    if ratchet.code == 0 && ratchet.signal == None {
+        return
+    }
     check_refused(process.combined_output(ratchet).trim_end(), "the compiler-data ratchet differs from tests/compiler_data.tsv (see above; a count only falls: key the data by an id, then lower its row with jet Tools/agent/CompilerData.jet --write)")
 }
 
@@ -207,7 +219,9 @@ compiler_data: fn(repo: String) -[Env, Exec, FS, IO]> () {
 script_pairing: fn(repo: String) -[Env, Exec, FS, IO]> () {
     jet: process.env_nonempty("JET") ?? (process.which("jet") ?? "jet")
     pairing: process.cmd([String]{jet, "Tools/agent/ScriptPairing.jet", "--check"}).cwd(repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/ScriptPairing.jet: {err}")
-    if pairing.code == 0 && pairing.signal == None -> return
+    if pairing.code == 0 && pairing.signal == None {
+        return
+    }
     check_refused(process.combined_output(pairing).trim_end(), "the change adds a script in another language without its gauntlet pair (see above)")
 }
 
@@ -262,10 +276,13 @@ runtime_generators: fn(repo: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never!
 // --- Compiler/Prelude -------------------------------------------------------
 
 PRELUDE_TREE: "Compiler/Prelude"
+
 // The readers' prelude: a Jet module only a generator reads, which the
 // compiler does not embed, so its generator check is its whole check.
 PRELUDE_READERS_MODULE: "core/prelude.jet"
+
 PRELUDE_UNCHECKED: "PRELUDE UNCHECKED: needs a seed with the prelude check mode"
+
 // The compiler source whose build-time tables read Core.rows and
 // CoreSourceParts.tsv (Compiler/JetFoundation/Source/CoreDeclarations).
 CORE_DECLARATION_TABLES: "Compiler/JetFoundation/Source/Registry/CoreCallRows.jet"
@@ -273,7 +290,9 @@ CORE_DECLARATION_TABLES: "Compiler/JetFoundation/Source/Registry/CoreCallRows.je
 // Whether `relative` is a Prelude source LaneCheck checks: a `.jet`, `.rows`
 // or `.tsv` file under Compiler/Prelude other than its package.jet.
 prelude_source: fn(relative: String) -> Bool Never! {
-    if !relative.starts_with("{PRELUDE_TREE}/") || relative.removeprefix("{PRELUDE_TREE}/") == "package.jet" -> return false
+    if !relative.starts_with("{PRELUDE_TREE}/") || relative.removeprefix("{PRELUDE_TREE}/") == "package.jet" {
+        return false
+    }
     relative.ends_with(".jet") || relative.ends_with(".rows") || relative.ends_with(".tsv")
 }
 
@@ -314,7 +333,9 @@ prelude_check: fn(repo: String, jet: String, relative: String, target: String, s
         text = ran.text
         generated = ran.code
     }
-    if !name.ends_with(".jet") || name == PRELUDE_READERS_MODULE -> return Val(Ran{code: generated, text: text})
+    if !name.ends_with(".jet") || name == PRELUDE_READERS_MODULE {
+        return Val(Ran{code: generated, text: text})
+    }
     // A generator failure is reported beside the prelude check, not instead of it.
     if !prelude_mode(repo, jet) {
         if generated != 0 -> return Val(Ran{code: generated, text: text})
@@ -322,9 +343,7 @@ prelude_check: fn(repo: String, jet: String, relative: String, target: String, s
     }
     checked: run_check(repo, jet, [String]{"check", "--prelude", target}, scratch)
     code := checked.code
-    if generated != 0 {
-        code = generated
-    }
+    if generated != 0 -> code = generated
     Val(Ran{code: code, text: "{text}{checked.text}"})
 }
 
@@ -335,7 +354,9 @@ generator_check: fn(repo: String, generator: [String], relative: String) -[Env, 
     folder: if generator[1].starts_with("Toolchain/") -> "{repo}/Compiler" else -> repo
     receipt: process.cmd(generator).cwd(folder).env("JET_TOOLCHAIN_ROOT", process.env_nonempty("JET_TOOLCHAIN_ROOT") ?? repo).output_limit(268435456).run() ?? return Ran{code: 127, text: "error: {relative}: `{command}` could not start: {err}\n"}
     output: process.combined_output(receipt)
-    if receipt.code != 0 || receipt.signal != None -> return Ran{code: 1, text: "{output}\nerror: {relative}: `{command}` failed: a compiler copy of it differs (see above)\n"}
+    if receipt.code != 0 || receipt.signal != None {
+        return Ran{code: 1, text: "{output}\nerror: {relative}: `{command}` failed: a compiler copy of it differs (see above)\n"}
+    }
     Ran{code: 0, text: output}
 }
 
@@ -344,7 +365,9 @@ generator_check: fn(repo: String, generator: [String], relative: String) -[Env, 
 // CoreSourceRows.jet's, as for Prelude/Effects.jet, then the file's own
 // `jet check`.
 CORE_EFFECTS_SOURCE: "Core/Effects/Effects.jet"
+
 META_EFFECTS_SOURCE: "Core/Compiler/Meta.jet"
+
 // Core/Compiler/Lang.jet is a Core module whose Effect and FFILanguage enums
 // are a block CoreSourceRows.jet writes from the effect sources, so its check
 // is CoreSourceRows.jet's, then the Core check.
@@ -417,14 +440,20 @@ compiler_check: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time
     ran := Ran{code: 0, text: ""}
     if {
         runtime_owned -> ran = runtime_check(repo, jet, scratch)
-        prelude_source(relative) -> ran = prelude_check(repo, jet, relative, target, scratch) ?? {
-            held.clear()
-            print(PRELUDE_UNCHECKED)
-            return 1
+        prelude_source(relative) -> {
+            ran = prelude_check(repo, jet, relative, target, scratch) ?? {
+                held.clear()
+                print(PRELUDE_UNCHECKED)
+                return 1
+            }
         }
-        relative == CORE_EFFECTS_SOURCE || relative == META_EFFECTS_SOURCE -> ran = core_effects_check(repo, jet, relative, target, scratch)
+        relative == CORE_EFFECTS_SOURCE || relative == META_EFFECTS_SOURCE -> {
+            ran = core_effects_check(repo, jet, relative, target, scratch)
+        }
         relative == LANG_SOURCE -> ran = core_lang_check(repo, jet, relative, target, scratch)
-        relative.starts_with("Core/") && relative.ends_with(".jet") -> ran = core_check(repo, jet, relative, target, scratch)
+        relative.starts_with("Core/") && relative.ends_with(".jet") -> {
+            ran = core_check(repo, jet, relative, target, scratch)
+        }
         else -> ran = run_check(repo, jet, [String]{"check", target}, scratch)
     }
     if runtime_shared {
@@ -458,7 +487,9 @@ Ran: struct {
 mem_available_mb: fn() -[FS]> Int Never! {
     text: files.read("/proc/meminfo") ?? return 0
     loop line in text.lines() {
-        if line.starts_with("MemAvailable:") -> return int_or(line.removeprefix("MemAvailable:").trim().partition(" ").head, 0) /% 1024
+        if line.starts_with("MemAvailable:") {
+            return int_or(line.removeprefix("MemAvailable:").trim().partition(" ").head, 0) /% 1024
+        }
     }
     0
 }
@@ -495,7 +526,9 @@ run_check: fn(repo: String, jet: String, command: [String], scratch: String) -[E
     }
     memory: process.env_nonempty("JET_CHECK_MEM") ?? "20G"
     limit: if memory == "off" -> 0 else -> memory_bytes(memory)
-    if limit < 0 -> return Ran{code: 64, text: "lane-check: JET_CHECK_MEM must be `off` or a size such as 20G, 512M or 4096K, not `{memory}`\n"}
+    if limit < 0 {
+        return Ran{code: 64, text: "lane-check: JET_CHECK_MEM must be `off` or a size such as 20G, 512M or 4096K, not `{memory}`\n"}
+    }
     argv := [String]{jet.copy()}
     argv.extend(command.copy())
     spec := process.cmd(argv).cwd(repo).env("JET_KEEP_GOING", "1").env("TMPDIR", scratch).env("TMP", scratch).env("TEMP", scratch)
@@ -504,7 +537,7 @@ run_check: fn(repo: String, jet: String, command: [String], scratch: String) -[E
     results: process.run_all([ProcessSpec]{spec}, 1) ?? return Ran{code: 127, text: "lane-check: {argv[0]} could not start: {err}\n"}
     if results[0] == {
         .Ok(receipt) -> {
-            code: if receipt.timed_out -> 124 else -> if receipt.signal == .Val(number) -> 128 + number else -> receipt.code
+            code: if receipt.timed_out -> 124 else if receipt.signal == .Val(number) -> 128 + number else -> receipt.code
             Ran{code: code, text: "{receipt.output}{receipt.errors}"}
         }
         .Err(error) -> if error == {
@@ -544,7 +577,9 @@ report: fn(text: String, code: Int) -> String Never! {
         found.push(Located{head: lines[index].copy(), location: location})
     }
     if found.len() == 0 && code == 0 -> return "CHECK OK"
-    if found.len() == 0 -> return "CHECK FAILED — jet check exited {code} without a compiler diagnostic\n{text}"
+    if found.len() == 0 {
+        return "CHECK FAILED — jet check exited {code} without a compiler diagnostic\n{text}"
+    }
     keys := [String]{}
     order := [String]{}
     loop entry in found {
@@ -597,7 +632,9 @@ core_row: fn(structure: String, relative: String) -> CoreRow? Never! {
     answer: json.parse(structure) ?? return None
     core: answer.get("core") ?? return None
     listed: core.get("sources") ?? return None
-    sources: if listed == .Array(rows) -> rows.copy() else -> return None
+    sources: if listed == .Array(rows) -> rows.copy() else -> {
+        return None
+    }
     loop source in sources {
         if json_text(source, "path") != relative -> next
         owner: json_text(source, "owner")
@@ -621,7 +658,9 @@ core_check: fn(repo: String, jet: String, relative: String, target: String, scra
     // Asked from Compiler/, a package: a jet built before `--core` stopped
     // resolving the inspect target refuses it where no package.jet is found.
     asked: process.cmd([String]{jet, "inspect", "structure", "--core", "--json"}).cwd("{repo}/Compiler").env("NO_COLOR", "1").output_limit(268435456).run() ?? return Ran{code: 1, text: "lane-check: `{jet} inspect structure --core --json` could not start: {err}\n"}
-    if asked.code != 0 || asked.signal != None -> return Ran{code: 1, text: "{process.combined_output(asked)}\nlane-check: `{jet} inspect structure --core --json` failed\n"}
+    if asked.code != 0 || asked.signal != None {
+        return Ran{code: 1, text: "{process.combined_output(asked)}\nlane-check: `{jet} inspect structure --core --json` failed\n"}
+    }
     row: core_row(asked.output, relative) ?? return Ran{code: 1, text: "lane-check: {relative} is no Core source of `{jet} inspect structure --core --json`; declare it in Compiler/Prelude/Core.rows or CoreSourceParts.tsv and rebuild the compiler\n"}
     if row.runtime -> return run_check(repo, jet, [String]{"check", target}, scratch)
     dir: "{scratch}/core-probe.{sys.pid()}"
@@ -637,7 +676,9 @@ core_check: fn(repo: String, jet: String, relative: String, target: String, scra
 // --- assembled runtime ------------------------------------------------------
 
 RUNTIME_TREE: "Compiler/JetRuntime"
+
 RUNTIME_SOURCES: "Compiler/JetRuntime/sources.list"
+
 RUNTIME_PACKAGE: "Compiler/JetRuntime/package.jet"
 
 // Where one line of the assembled runtime unit came from: a listed source and
@@ -661,7 +702,9 @@ runtime_sources: fn(repo: String) -[FS]> (paths: [String], problem: String) Neve
     loop raw in text.split("\n") {
         line: raw.trim()
         if line == "" || line.starts_with("#") -> next
-        if paths.contains(line) -> return (paths: [String]{}, problem: "{RUNTIME_SOURCES} lists {line} twice")
+        if paths.contains(line) {
+            return (paths: [String]{}, problem: "{RUNTIME_SOURCES} lists {line} twice")
+        }
         paths.push(line.copy())
     }
     if paths.len() == 0 -> return (paths: paths, problem: "{RUNTIME_SOURCES} lists no source")
@@ -670,7 +713,9 @@ runtime_sources: fn(repo: String) -[FS]> (paths: [String], problem: String) Neve
 
 runtime_unit: fn(repo: String) -[FS]> RuntimeUnit Never! {
     listed: runtime_sources(repo)
-    if listed.problem != "" -> return RuntimeUnit{text: "", lines: [UnitLine]{}, problem: listed.problem}
+    if listed.problem != "" {
+        return RuntimeUnit{text: "", lines: [UnitLine]{}, problem: listed.problem}
+    }
     texts := [String]{}
     loop path in listed.paths {
         text: files.read("{repo}/{path}") ?? return RuntimeUnit{text: "", lines: [UnitLine]{}, problem: "cannot read {path}: {err}"}
@@ -726,7 +771,9 @@ word_byte: fn(b: U8) -> Bool Never! {
     (b >= (U8{48}) && b <= (U8{57})) || (b >= (U8{65}) && b <= (U8{90})) || (b >= (U8{97}) && b <= (U8{122})) || b == (U8{95})
 }
 
-space_byte: fn(b: U8) -> Bool Never! { b == (U8{32}) || b == (U8{9}) || b == (U8{10}) || b == (U8{13}) || b == (U8{11}) || b == (U8{12}) }
+space_byte: fn(b: U8) -> Bool Never! {
+    b == (U8{32}) || b == (U8{9}) || b == (U8{10}) || b == (U8{13}) || b == (U8{11}) || b == (U8{12})
+}
 
 // A `use { … }` block rewritten as one `use` line per row, keeping every line:
 // `use {` and its `}` turn to spaces and each row's last four columns of
@@ -758,7 +805,9 @@ unblock_uses: fn(text: String) -> String Never! {
         if depth == 0 && line.starts_with(row) {
             rest: line.removeprefix(row)
             first: if rest.count_bytes() > 0 -> rest.bytes()[0] else -> U8{0}
-            if (first >= (U8{65}) && first <= (U8{90})) || (first >= (U8{97}) && first <= (U8{122})) || first == (U8{95}) || first == (U8{34}) -> lines[at] = "{indent}use {rest}"
+            if (first >= (U8{65}) && first <= (U8{90})) || (first >= (U8{97}) && first <= (U8{122})) || first == (U8{95}) || first == (U8{34}) {
+                lines[at] = "{indent}use {rest}"
+            }
         }
         loop b in line.partition("//").head.bytes() {
             if b == (U8{91}) -> depth += 1
@@ -772,7 +821,9 @@ unblock_uses: fn(text: String) -> String Never! {
 // every location in the unit moved to the source line it came from.
 runtime_check: fn(repo: String, jet: String, scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
     unit: runtime_unit(repo)
-    if unit.problem != "" -> return Ran{code: 1, text: "lane-check: the runtime unit cannot be assembled: {unit.problem}\n"}
+    if unit.problem != "" {
+        return Ran{code: 1, text: "lane-check: the runtime unit cannot be assembled: {unit.problem}\n"}
+    }
     dir: "{scratch}/runtime-unit.{sys.pid()}"
     files.create_dir_all(dir) ?? return Ran{code: 1, text: "lane-check: cannot create {dir}: {err}\n"}
     manifest: files.read("{repo}/{RUNTIME_PACKAGE}") ?? return Ran{code: 1, text: "lane-check: cannot read {RUNTIME_PACKAGE}: {err}\n"}
@@ -797,7 +848,9 @@ runtime_manifest: fn(repo: String, manifest: String, lines: [UnitLine]) -[FS]> S
         if origin.path == source -> next
         source = origin.path.copy()
         directory := source.rpartition("/").head
-        loop directory != "" && !files.exists("{repo}/{directory}/package.jet") -> directory = directory.rpartition("/").head
+        loop directory != "" && !files.exists("{repo}/{directory}/package.jet") {
+            directory = directory.rpartition("/").head
+        }
         if directory == "" || seen.contains(directory) -> next
         seen.push(directory.copy())
         text: files.read("{repo}/{directory}/package.jet") ?? next
@@ -884,7 +937,9 @@ escape_pcre: fn(text: String) -> String Never! {
     out
 }
 
-within: fn(path: String, root: String) -> Bool Never! { path == root || path.starts_with("{root}/") }
+within: fn(path: String, root: String) -> Bool Never! {
+    path == root || path.starts_with("{root}/")
+}
 
 trim_slashes: fn(text: String) -> String Never! {
     out := text
@@ -927,7 +982,9 @@ machine_mounts: fn() -[FS]> [String] Never! {
         fields: line.split(" ").to_list()
         if fields.len() < 2 -> next
         mount: unescape_mount(fields[1])
-        if (mount.starts_with("/mnt/") && mount.len() > 5) || (mount.starts_with("/media/") && mount.len() > 7) || (mount.starts_with("/run/media/") && mount.len() > 11) -> out.push(mount)
+        if (mount.starts_with("/mnt/") && mount.len() > 5) || (mount.starts_with("/media/") && mount.len() > 7) || (mount.starts_with("/run/media/") && mount.len() > 11) {
+            out.push(mount)
+        }
     }
     out
 }
@@ -957,7 +1014,9 @@ RuleSet: struct {
 
 add_path: fn(set: &RuleSet, raw: String) Never! {
     find: trim_slashes(raw)
-    if find.len() < 2 || set.seen.contains(find) -> return
+    if find.len() < 2 || set.seen.contains(find) {
+        return
+    }
     set.seen.push(find.copy())
     set.rules.push(Rule{kind: "path", find: find.copy(), source: "{escape_pcre(find)}(?![\\w-])"})
 }
@@ -965,7 +1024,9 @@ add_path: fn(set: &RuleSet, raw: String) Never! {
 add_word: fn(set: &RuleSet, raw: String) Never! {
     find: raw.trim()
     lower: find.lower()
-    if find.len() < 3 || GENERIC_NAMES.contains(lower) || set.seen.contains(lower) -> return
+    if find.len() < 3 || GENERIC_NAMES.contains(lower) || set.seen.contains(lower) {
+        return
+    }
     set.seen.push(lower)
     set.rules.push(Rule{kind: "word", find: find.copy(), source: "\\b{escape_pcre(find)}\\b"})
 }
@@ -976,7 +1037,9 @@ noreply_handle: fn(email: String) -> String Never! {
     if !email.lower().ends_with(suffix) -> return ""
     local: email[0..<email.len() - suffix.len()]
     parts: local.partition("+")
-    if parts.sep == "" || int_or(parts.head, -1) < 0 || parts.tail == "" || parts.tail.contains("@") -> return ""
+    if parts.sep == "" || int_or(parts.head, -1) < 0 || parts.tail == "" || parts.tail.contains("@") {
+        return ""
+    }
     parts.tail
 }
 
@@ -1107,11 +1170,15 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
     assert(failed.starts_with("CHECK FAILED — jet check exited 17 without a compiler diagnostic\n"))
     assert(failed.contains("beginning\nend\n"))
     text := ""
-    loop n in 1..<9 -> text = "{text}error[E0308]: independent error {n}\n  --> src/shared.jet:{n}:1\n"
+    loop n in 1..<9 {
+        text = "{text}error[E0308]: independent error {n}\n  --> src/shared.jet:{n}:1\n"
+    }
     text = "{text}Error [jet.StrayCharacter]: bad escape\n  --> other.jet:3:7\n    |\ncomplete diagnostic tail retained\n"
     grouped: report(text, 101)
     assert(grouped.starts_with("CHECK FAILED — 9 error(s) in 2 file(s)\n"))
-    loop n in 1..<9 -> assert(grouped.contains("src/shared.jet:{n}:1: error[E0308]: independent error {n}"))
+    loop n in 1..<9 {
+        assert(grouped.contains("src/shared.jet:{n}:1: error[E0308]: independent error {n}"))
+    }
     assert(grouped.contains("\nother.jet\n  other.jet:3:7: Error [jet.StrayCharacter]: bad escape\n"))
     assert(grouped.ends_with("--- complete compiler output ---\n{text}"))
 }

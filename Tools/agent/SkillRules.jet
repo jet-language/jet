@@ -18,18 +18,27 @@ use {
 }
 
 INVENTORY: ".agents/skills/_shared/skill-sources.md"
+
 REPO_SKILLS: ".agents/skills"
+
 TOWER_SKILLS: "Tools/tower/skills"
+
 SCANNED_ROOTS: [String]{".agents", "Tools/tower/skills"}
+
 STATUSES: [String]{"keep", "narrow", "disable", "retire"}
 
 LINE_BREAK: Regex{"\r?\n"}
+
 SPACES: Regex{"\s+"}
+
 SOURCE_JOIN: Regex{"\s*\+\s*"}
+
 // | Reach | Source | `name` | Status | Trigger | Rule |
 ROW: Regex{"^\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*\x60([^\x60|]+)\x60\s*\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|\s*$"}
+
 // The clause before a match: from the last sentence or clause break.
 CLAUSE_BREAK: Regex{"[.;:!?]\s"}
+
 NEGATION: Regex{"\b(?:[Nn]ever|[Nn]ot|[Nn]o|[Nn]or|[Dd]on't|[Aa]void|[Ww]ithout|[Ii]nstead of|[Rr]ather than)\b"}
 
 #Error
@@ -95,7 +104,9 @@ inventory_rows: fn(text: String) -> [SkillRow] Never! {
     rows := [SkillRow]{}
     loop (index, line) in LINE_BREAK.split(text) {
         if ROW.match(line) == {
-            .Val(row) -> rows.push(SkillRow{line: index + 1, source: row.groups[1].copy(), name: row.groups[2].copy(), status: row.groups[3].copy(), trigger: row.groups[4].copy(), rule: row.groups[5].copy()})
+            .Val(row) -> {
+                rows.push(SkillRow{line: index + 1, source: row.groups[1].copy(), name: row.groups[2].copy(), status: row.groups[3].copy(), trigger: row.groups[4].copy(), rule: row.groups[5].copy()})
+            }
             .None -> {}
         }
     }
@@ -106,7 +117,9 @@ inventory_rows: fn(text: String) -> [SkillRow] Never! {
 source_keys: fn(source: String) -> [String] Never! {
     keys := [String]{}
     loop part in SOURCE_JOIN.split(source.trim()) {
-        if part == "R" || part == "T" || part == "M" || part == "H" || part == "G" -> keys.push(part.copy())
+        if part == "R" || part == "T" || part == "M" || part == "H" || part == "G" {
+            keys.push(part.copy())
+        }
     }
     keys
 }
@@ -118,7 +131,9 @@ unmapped: fn(rows: [SkillRow], key: String, directory: String, names: [String], 
         loop row in rows {
             if row.name == name && source_keys(row.source).contains(key) -> mapped = true
         }
-        if !mapped -> errors.push("{directory}/{name}/SKILL.md has no row with source {key} in {INVENTORY}")
+        if !mapped {
+            errors.push("{directory}/{name}/SKILL.md has no row with source {key} in {INVENTORY}")
+        }
     }
 }
 
@@ -129,15 +144,25 @@ inventory_errors: fn(rows: [SkillRow], repo: [String], tower: [String]) -> [Stri
     seen := [String:Int]{}
     loop row in rows {
         if seen.get(row.name) == {
-            .Val(first) -> errors.push("{INVENTORY}:{row.line}: `{row.name}` repeats the row at line {first}")
+            .Val(first) -> {
+                errors.push("{INVENTORY}:{row.line}: `{row.name}` repeats the row at line {first}")
+            }
             .None -> seen[row.name.copy()] = row.line
         }
-        if !STATUSES.contains(row.status) -> errors.push("{INVENTORY}:{row.line}: `{row.name}` has status `{row.status}`; use keep, narrow, disable or retire")
-        if row.trigger == "" || row.rule == "" -> errors.push("{INVENTORY}:{row.line}: `{row.name}` needs its trigger and its preserved rule")
+        if !STATUSES.contains(row.status) {
+            errors.push("{INVENTORY}:{row.line}: `{row.name}` has status `{row.status}`; use keep, narrow, disable or retire")
+        }
+        if row.trigger == "" || row.rule == "" {
+            errors.push("{INVENTORY}:{row.line}: `{row.name}` needs its trigger and its preserved rule")
+        }
         if row.status == "retire" -> next
         keys: source_keys(row.source)
-        if keys.contains("R") && !repo.contains(row.name) -> errors.push("{INVENTORY}:{row.line}: `{row.name}` is {row.status} from R, but {REPO_SKILLS}/{row.name}/SKILL.md does not exist")
-        if keys.contains("T") && !tower.contains(row.name) -> errors.push("{INVENTORY}:{row.line}: `{row.name}` is {row.status} from T, but {TOWER_SKILLS}/{row.name}/SKILL.md does not exist")
+        if keys.contains("R") && !repo.contains(row.name) {
+            errors.push("{INVENTORY}:{row.line}: `{row.name}` is {row.status} from R, but {REPO_SKILLS}/{row.name}/SKILL.md does not exist")
+        }
+        if keys.contains("T") && !tower.contains(row.name) {
+            errors.push("{INVENTORY}:{row.line}: `{row.name}` is {row.status} from T, but {TOWER_SKILLS}/{row.name}/SKILL.md does not exist")
+        }
     }
     unmapped(rows, "R", REPO_SKILLS, repo, errors)
     unmapped(rows, "T", TOWER_SKILLS, tower, errors)
@@ -154,9 +179,7 @@ skills_in: fn(directory: String) -[FS]> [String] SkillRulesError! {
 
 // ---- contradictory rules ----
 
-normalized: fn(text: String) -> String Never! {
-    SPACES.replace(text, " ")
-}
+normalized: fn(text: String) -> String Never! { SPACES.replace(text, " ") }
 
 negated: fn(line: String, start: Int) -> Bool Never! {
     before: line.slice(0, start)
@@ -174,7 +197,9 @@ missing_laws: fn(agents: String, rules: [Contradiction]) -> [String] Never! {
     text: normalized(agents)
     missing := [String]{}
     loop rule in rules {
-        if !text.contains(rule.law) -> missing.push("AGENTS.md no longer says \"{rule.law}\"; update the {rule.topic} rule in Tools/agent/SkillRules.jet")
+        if !text.contains(rule.law) {
+            missing.push("AGENTS.md no longer says \"{rule.law}\"; update the {rule.topic} rule in Tools/agent/SkillRules.jet")
+        }
     }
     missing
 }
@@ -205,9 +230,7 @@ visit_markdown: fn(directory: String, found: &[String]) SkillRulesError! -[FS]> 
     loop name in sorted_names(directory) ?? return Err(err) {
         path: join_path(directory, name)
         if files.is_symlink(path) -> next
-        if files.is_dir(path) {
-            visit_markdown(path, found) ?? return Err(err)
-        } else if files.is_file(path) && path.ends_with(".md") {
+        if files.is_dir(path) -> visit_markdown(path, found) ?? return Err(err) else if files.is_file(path) && path.ends_with(".md") {
             found.push(path)
         }
     }
@@ -222,11 +245,15 @@ skill_rules_main: fn() -[FS, IO]> Int SkillRulesError! {
     tower: skills_in(TOWER_SKILLS) ?? return Err(err)
     errors := inventory_errors(rows, repo, tower)
     rules: contradictions()
-    loop missing in missing_laws(read_text("AGENTS.md") ?? return Err(err), rules) -> errors.push(missing)
+    loop missing in missing_laws(read_text("AGENTS.md") ?? return Err(err), rules) {
+        errors.push(missing)
+    }
     paths := [String]{}
     loop root in SCANNED_ROOTS -> visit_markdown(root, paths) ?? return Err(err)
     loop path in paths {
-        loop error in contradiction_errors(path, read_text(path) ?? return Err(err), rules) -> errors.push(error)
+        loop error in contradiction_errors(path, read_text(path) ?? return Err(err), rules) {
+            errors.push(error)
+        }
     }
     if errors.len() > 0 {
         term.eprint("skill-rules: {errors.len()} problem(s)")

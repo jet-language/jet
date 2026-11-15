@@ -1,18 +1,13 @@
-
 #SingleUse Lock: struct {
-    resource: String,
-}
-acquire: fn(resource: String) -> Lock {
-    return Lock{ resource: resource }
-}
-release: fn(lock: &&Lock) {
-    print(lock.resource)
+    resource: String
 }
 
+acquire: fn(resource: String) -> Lock { return Lock{resource: resource} }
 
-hold: fn(lock: &&Lock) -> Lock {
-    return lock
-}
+release: fn(lock: &&Lock) { print(lock.resource) }
+
+hold: fn(lock: &&Lock) -> Lock { return lock }
+
 run: fn() {
     db: acquire("db")
     held: hold(db)

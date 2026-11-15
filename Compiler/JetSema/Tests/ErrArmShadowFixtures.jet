@@ -10,11 +10,13 @@ use {
     file: "Compiler/JetSema/Tests/fixtures/ErrArmShadow.fixture/ErrArmShadow.jet"
     checked: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program)
     if checked == {
-        .Refused(refusal) -> panic("{file}: {refusal.stderr}")
+        .Refused(refusal) -> { panic("{file}: {refusal.stderr}") }
         .Compiled(result, snapshot) -> {
             if result.internal_problem != None -> panic("{file}: internal compiler failure")
             loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
-                if diagnostic.severity == DIAGNOSTIC_ERROR -> panic("{file}: unexpected {diagnostic.code}")
+                if diagnostic.severity == DIAGNOSTIC_ERROR {
+                    panic("{file}: unexpected {diagnostic.code}")
+                }
             }
         }
     }

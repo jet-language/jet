@@ -4,8 +4,15 @@
 // `jet env vars` lists each control with the source that won.
 use {
     jet_cli.[
-        JetCLIControlValue, JetCLIStatusValue, jet_cli_control_environment, jet_cli_control_resolve,
-        jet_cli_control_written, jet_cli_env_redact, jet_cli_env_vars_source, jet_cli_env_vars_table, jet_cli_plan,
+        JetCLIControlValue,
+        JetCLIStatusValue,
+        jet_cli_control_environment,
+        jet_cli_control_resolve,
+        jet_cli_control_written,
+        jet_cli_env_redact,
+        jet_cli_env_vars_source,
+        jet_cli_env_vars_table,
+        jet_cli_plan,
     ]
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE]
     jet_foundation.[JetCLIControlSpec, jet_cli_control_named]
@@ -21,9 +28,9 @@ controls_test_show: fn(value: JetCLIStatusValue?) -> String Never! {
     given: value ?? return "none"
     if given == {
         .Bool(on) -> if on -> "on" else -> "off"
-        .Text(text) -> text.copy() // copy: the value keeps its text.
+        .Text(text) -> text.copy()  // copy: the value keeps its text.
         .Array(items) -> {
-            shown: loop item in items -> controls_test_show(Val(item.copy())) // copy: the list keeps its item.
+            shown: loop item in items -> controls_test_show(Val(item.copy()))  // copy: the list keeps its item.
             shown.join("|")
         }
         .Null -> "null"
@@ -33,14 +40,14 @@ controls_test_show: fn(value: JetCLIStatusValue?) -> String Never! {
 
 // The value and source a resolved control shows.
 controls_test_resolved: fn(resolved: JetCLIControlValue) -> String Never! {
-    "{controls_test_show(Val(resolved.value.copy()))} from {jet_cli_env_vars_source(resolved.source)}" // copy: the caller keeps its value.
+    "{controls_test_show(Val(resolved.value.copy()))} from {jet_cli_env_vars_source(resolved.source)}"  // copy: the caller keeps its value.
 }
 
 // The report code `argv` is refused with; any other plan fails the test.
 controls_test_refused: fn(argv: [String]) -> String Never! {
     if jet_cli_plan(argv) == .Refused(report, _, code, _) {
         assert_eq(code, JET_DRIVER_EXIT_USAGE)
-        return report.code.copy() // copy: the plan is dropped here.
+        return report.code.copy()  // copy: the plan is dropped here.
     }
     panic("`jet {argv.join(" ")}` is refused")
 }
@@ -105,15 +112,11 @@ controls_test_refused: fn(argv: [String]) -> String Never! {
         assert(keep[0].contains("check.keep_going") && keep[0].contains(" on ") && keep[0].contains("flag"), "--keep-going is on from the flag: {keep[0]}")
         assert_eq(lines.filter(fn(line) { line.starts_with("--trace ") && line.contains("out.json") }).len(), 1)
         assert_eq(lines.filter(fn(line) { line.starts_with("--opt-dump") }).len(), 0)
-    } else {
-        panic("`jet env vars` lists the controls")
-    }
+    } else { panic("`jet env vars` lists the controls") }
     if jet_cli_plan([String]{"env", "vars", "--json"}) == .Done(output) {
         assert(output.stdout.starts_with("{{\"schema\":\"jet.status/v1\",\"action\":\"env.vars\",\"ok\":true"), "the env.vars status object: {output.stdout}")
         assert(output.stdout.contains("\"name\":\"memory_ledger\""), "without --command every control is listed")
-    } else {
-        panic("`jet env vars --json` writes its status")
-    }
+    } else { panic("`jet env vars --json` writes its status") }
     assert_eq(controls_test_refused([String]{"env", "vars", "--command=nope"}), "E2104")
     assert_eq(controls_test_refused([String]{"env", "vars", "--", "--keep-going"}), "E2104")
     assert_eq(controls_test_refused([String]{"env", "vars", "--command=check", "--", "--opt-dump=main"}), "E2102")
@@ -128,9 +131,7 @@ controls_test_refused: fn(argv: [String]) -> String Never! {
             dump: output.stdout.split("\n").to_list().filter(fn(line) { line.starts_with("--opt-dump ") })
             assert_eq(dump.len(), 1)
             assert(dump[0].contains(" {row[1]} "), "--command={row[0]} names {row[1]}: {dump[0]}")
-        } else {
-            panic("`jet env vars --command={row[0]}` lists the controls")
-        }
+        } else { panic("`jet env vars --command={row[0]}` lists the controls") }
     }
 }
 

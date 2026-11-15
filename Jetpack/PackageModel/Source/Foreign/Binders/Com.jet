@@ -12,8 +12,11 @@ use {
 }
 
 COM_BINDER_SCHEMA: "jet-com-bind-v3"
+
 COM_TOOL_ACTION: "could not inspect the COM type library"
+
 COM_TRANSPORT: "windows-com-automation"
+
 COM_OPERATION_FAILED: "the Windows COM operation failed"
 
 // Where the type library comes from: a file, or a registered library.
@@ -105,9 +108,7 @@ ComMethod: struct {
     result: ComKind
     params: [ComParam]
 
-    name: fn(self) -> String Never! {
-        "{self.interface}_{self.jet}"
-    }
+    name: fn(self) -> String Never! { "{self.interface}_{self.jet}" }
 }
 
 // The per-bind scratch directory, removed on every exit path.
@@ -130,15 +131,21 @@ ComSchema: struct {
 // Inspect the type library on a Windows host, build the automation bridge
 // archive, and render the Jet surface with its provenance record.
 pkg_com_bind: fn(input: ComTypeLibraryInput, lib: String, cache: String) -[FS, Env, Exec, Time, Time.Wait]> ComBindResult ForeignBindError! {
-    if BinderHostOS.current() != BinderHostOS.Windows -> return Err(ForeignBindError.UnsupportedHost("COM type libraries and IDispatch require a Windows host"))
-    if !pkg_binder_is_ident(lib) -> return Err(ForeignBindError.Source("`{lib}` is not a valid Jet library name"))
+    if BinderHostOS.current() != BinderHostOS.Windows {
+        return Err(ForeignBindError.UnsupportedHost("COM type libraries and IDispatch require a Windows host"))
+    }
+    if !pkg_binder_is_ident(lib) {
+        return Err(ForeignBindError.Source("`{lib}` is not a valid Jet library name"))
+    }
     cc_found: pkg_bridge_tool_path("cc") ?? return Err(ForeignBindError.ToolMissing("cc"))
     cc: files.canonicalize(cc_found) ?? return Err(ForeignBindError.ToolMissing("cc"))
     ar_found: pkg_bridge_tool_path("ar") ?? return Err(ForeignBindError.ToolMissing("ar"))
     ar: files.canonicalize(ar_found) ?? return Err(ForeignBindError.ToolMissing("ar"))
     file_input := String?{None}
     if input == {
-        .File(path) -> file_input = Val(pkg_binder_canonicalize(path, "could not resolve the COM type library"))
+        .File(path) -> {
+            file_input = Val(pkg_binder_canonicalize(path, "could not resolve the COM type library"))
+        }
         .Registered(guid, _, _, _) -> pkg_com_validate_guid(guid)
     }
     pkg_binder_create_dir_all(cache, "could not create COM binding cache")
@@ -199,7 +206,7 @@ pkg_com_bind: fn(input: ComTypeLibraryInput, lib: String, cache: String) -[FS, E
         (name: "archive-sha256", value: archive_digest),
         (name: "cc", value: cc_identity),
         (name: "ar", value: ar_identity),
-        (name: "input-kind", value: input.kind())
+        (name: "input-kind", value: input.kind()),
     }
     if input == {
         .File(_) -> {
@@ -226,40 +233,56 @@ pkg_com_bind: fn(input: ComTypeLibraryInput, lib: String, cache: String) -[FS, E
 // must carry enough identity to reject a stale or hand-edited bridge.
 pkg_com_validate_provenance: fn(provenance_path: String, generated_source: String, archive: String, lib: String) ForeignBindError! -[FS, Env, Exec, Time.Wait]> {
     provenance: pkg_bridge_read_provenance(provenance_path)
-    if provenance.schema != FOREIGN_BRIDGE_PROVENANCE_SCHEMA -> return Err(ForeignBindError.Source("unsupported COM binding provenance schema `{provenance.schema}`"))
+    if provenance.schema != FOREIGN_BRIDGE_PROVENANCE_SCHEMA {
+        return Err(ForeignBindError.Source("unsupported COM binding provenance schema `{provenance.schema}`"))
+    }
     descriptor: pkg_binder_descriptor(ForeignLanguage.Com) ?? return Err(ForeignBindError.Source("COM binder descriptor is not registered"))
     expected_descriptor: descriptor.stamp()
     abi: "jet_com_{lib}"
-    if pkg_com_provenance_single(provenance, "language") != "com"
-        || pkg_com_provenance_single(provenance, "abi") != abi
-        || pkg_com_provenance_single(provenance, "transport") != COM_TRANSPORT
-        || pkg_com_provenance_single(provenance, "binder-schema") != COM_BINDER_SCHEMA
-        || pkg_com_provenance_single(provenance, "descriptor") != expected_descriptor {
+    if pkg_com_provenance_single(provenance, "language") != "com" || pkg_com_provenance_single(provenance, "abi") != abi || pkg_com_provenance_single(provenance, "transport") != COM_TRANSPORT || pkg_com_provenance_single(provenance, "binder-schema") != COM_BINDER_SCHEMA || pkg_com_provenance_single(provenance, "descriptor") != expected_descriptor {
         return Err(ForeignBindError.Source("COM binding provenance does not match the active ABI descriptor"))
     }
     identity: provenance.identity
-    if !pkg_com_is_digest(identity) -> return Err(ForeignBindError.Source("COM binding provenance has an invalid identity digest"))
+    if !pkg_com_is_digest(identity) {
+        return Err(ForeignBindError.Source("COM binding provenance has an invalid identity digest"))
+    }
     metadata_digest: pkg_com_provenance_single(provenance, "metadata-sha256")
     generated_digest: pkg_com_provenance_single(provenance, "generated-sha256")
     archive_digest: pkg_com_provenance_single(provenance, "archive-sha256")
     digests: [(name: String, value: String)]{(name: "metadata-sha256", value: metadata_digest), (name: "generated-sha256", value: generated_digest), (name: "archive-sha256", value: archive_digest)}
     loop digest in digests {
-        if !pkg_com_is_digest(digest.value) -> return Err(ForeignBindError.Source("COM binding provenance has an invalid `{digest.name}` digest"))
+        if !pkg_com_is_digest(digest.value) {
+            return Err(ForeignBindError.Source("COM binding provenance has an invalid `{digest.name}` digest"))
+        }
     }
-    if pkg_bridge_sha_file(generated_source) != generated_digest -> return Err(ForeignBindError.Source("the generated COM cache differs from its provenance; regenerate the binding"))
+    if pkg_bridge_sha_file(generated_source) != generated_digest {
+        return Err(ForeignBindError.Source("the generated COM cache differs from its provenance; regenerate the binding"))
+    }
     actual_descriptor: pkg_com_generated_descriptor(generated_source) ?? return Err(ForeignBindError.Source("generated COM cache has no ABI descriptor"))
-    if actual_descriptor != expected_descriptor -> return Err(ForeignBindError.Source("generated COM cache has a stale ABI descriptor"))
-    if pkg_bridge_sha_file(archive) != archive_digest -> return Err(ForeignBindError.Source("the generated COM archive differs from its provenance; regenerate the binding"))
+    if actual_descriptor != expected_descriptor {
+        return Err(ForeignBindError.Source("generated COM cache has a stale ABI descriptor"))
+    }
+    if pkg_bridge_sha_file(archive) != archive_digest {
+        return Err(ForeignBindError.Source("the generated COM archive differs from its provenance; regenerate the binding"))
+    }
     archive_name: files.basename(archive)
-    if pkg_com_provenance_single(provenance, "artifact.{archive_name}") != archive_digest -> return Err(ForeignBindError.Source("COM archive provenance does not match the selected archive"))
+    if pkg_com_provenance_single(provenance, "artifact.{archive_name}") != archive_digest {
+        return Err(ForeignBindError.Source("COM archive provenance does not match the selected archive"))
+    }
     input_kind: pkg_com_provenance_single(provenance, "input-kind")
-    if input_kind != "file" && input_kind != "registry" -> return Err(ForeignBindError.Source("unsupported COM binding input kind `{input_kind}`"))
+    if input_kind != "file" && input_kind != "registry" {
+        return Err(ForeignBindError.Source("unsupported COM binding input kind `{input_kind}`"))
+    }
     record: if input_kind == "file" -> pkg_com_validate_file_input(provenance) else -> pkg_com_validate_registry_input(provenance)
     cc: pkg_com_provenance_single(provenance, "cc")
     ar: pkg_com_provenance_single(provenance, "ar")
-    if cc != pkg_bridge_tool_identity("cc") || ar != pkg_bridge_tool_identity("ar") -> return Err(ForeignBindError.Source("the COM binding toolchain differs from its provenance; use the pinned tools and regenerate"))
+    if cc != pkg_bridge_tool_identity("cc") || ar != pkg_bridge_tool_identity("ar") {
+        return Err(ForeignBindError.Source("the COM binding toolchain differs from its provenance; use the pinned tools and regenerate"))
+    }
     expected_identity: pkg_com_identity(lib, expected_descriptor, metadata_digest, generated_digest, record, cc, ar)
-    if identity != expected_identity -> return Err(ForeignBindError.Source("COM binding identity differs from its provenance; regenerate the binding"))
+    if identity != expected_identity {
+        return Err(ForeignBindError.Source("COM binding identity differs from its provenance; regenerate the binding"))
+    }
     guids: [(name: String, value: String)]{(name: "type-library-guid", value: pkg_com_provenance_single(provenance, "type-library-guid")), (name: "class-guid", value: pkg_com_provenance_single(provenance, "class-guid"))}
     loop guid in guids {
         if pkg_com_validate_guid(guid.value) == {
@@ -267,7 +290,9 @@ pkg_com_validate_provenance: fn(provenance_path: String, generated_source: Strin
             .Err(error) -> return Err(ForeignBindError.Source("COM provenance `{guid.name}` is invalid ({error.message()})"))
         }
     }
-    if !pkg_binder_is_ident(pkg_com_provenance_single(provenance, "root-interface")) -> return Err(ForeignBindError.Source("COM provenance has an invalid root interface"))
+    if !pkg_binder_is_ident(pkg_com_provenance_single(provenance, "root-interface")) {
+        return Err(ForeignBindError.Source("COM provenance has an invalid root interface"))
+    }
 }
 
 // A file-backed input: an absolute path whose bytes still match when the
@@ -275,15 +300,23 @@ pkg_com_validate_provenance: fn(provenance_path: String, generated_source: Strin
 // artifact, so a missing original file is accepted.
 pkg_com_validate_file_input: fn(provenance: ForeignProvenance) -[FS]> String ForeignBindError! {
     path: pkg_com_provenance_single(provenance, "type-library")
-    if !files.is_abs(path) -> return Err(ForeignBindError.Source("COM type-library provenance path is not absolute"))
+    if !files.is_abs(path) {
+        return Err(ForeignBindError.Source("COM type-library provenance path is not absolute"))
+    }
     expected: pkg_com_provenance_single(provenance, "type-library-sha256")
-    if !pkg_com_is_digest(expected) -> return Err(ForeignBindError.Source("COM type-library provenance has an invalid digest"))
+    if !pkg_com_is_digest(expected) {
+        return Err(ForeignBindError.Source("COM type-library provenance has an invalid digest"))
+    }
     if files.stat(path) == {
         .Ok(info) -> {
-            if !info.is_file || info.is_symlink -> return Err(ForeignBindError.Source("the COM type-library provenance path is not a regular file"))
+            if !info.is_file || info.is_symlink {
+                return Err(ForeignBindError.Source("the COM type-library provenance path is not a regular file"))
+            }
             if pkg_bridge_sha_file(path) == {
                 .Ok(actual) -> {
-                    if actual != expected -> return Err(ForeignBindError.Source("the COM type library differs from its provenance; regenerate the binding"))
+                    if actual != expected {
+                        return Err(ForeignBindError.Source("the COM type library differs from its provenance; regenerate the binding"))
+                    }
                 }
                 .Err(error) -> return Err(ForeignBindError.Source("the COM type library could not be read ({error.message}); regenerate the binding"))
             }
@@ -312,7 +345,9 @@ pkg_com_validate_registry_input: fn(provenance: ForeignProvenance) -> String For
 pkg_com_generated_descriptor: fn(generated_source: String) -[FS]> String? Never! {
     source: files.read(generated_source) ?? return None
     loop line in pkg_binder_lines(source) {
-        if line.starts_with("// jet-ffi-descriptor=") -> return Val(line.removeprefix("// jet-ffi-descriptor="))
+        if line.starts_with("// jet-ffi-descriptor=") {
+            return Val(line.removeprefix("// jet-ffi-descriptor="))
+        }
     }
     None
 }
@@ -321,7 +356,9 @@ pkg_com_generated_descriptor: fn(generated_source: String) -[FS]> String? Never!
 // error.
 pkg_com_provenance_single: fn(provenance: ForeignProvenance, name: String) -> String ForeignBindError! {
     values: provenance.fields.get(name) ?? return Err(ForeignBindError.Source("COM binding provenance has no `{name}` field"))
-    if values.len() != 1 -> return Err(ForeignBindError.Source("COM binding provenance has duplicate `{name}` fields"))
+    if values.len() != 1 {
+        return Err(ForeignBindError.Source("COM binding provenance has duplicate `{name}` fields"))
+    }
     Ok(values[0])
 }
 
@@ -384,16 +421,16 @@ pkg_com_identity: fn(lib: String, descriptor: String, metadata_digest: String, g
 }
 
 // Nanoseconds since the Unix epoch, used to make scratch names unique.
-pkg_com_unique_suffix: fn() -[Time]> Int {
-    time.unix_ns()
-}
+pkg_com_unique_suffix: fn() -[Time]> Int { time.unix_ns() }
 
 // Swap the staged archive into place, keeping the previous archive until the
 // new one is published.
 pkg_com_publish_archive: fn(staged: String, archive: String) ForeignBindError! -[FS, Env, Time]> {
     backup: files.with_suffix(archive, ".a.previous.{sys.pid()}-{pkg_com_unique_suffix()}")
     had_previous: files.exists(archive)
-    if had_previous && !files.is_file(archive) -> return Err(ForeignBindError.IO("COM archive path is not a regular file: {archive}"))
+    if had_previous && !files.is_file(archive) {
+        return Err(ForeignBindError.IO("COM archive path is not a regular file: {archive}"))
+    }
     if had_previous {
         pkg_binder_remove_file_quiet(backup)
         files.rename(archive, backup) ?? return Err(ForeignBindError.IO("could not stage the previous COM archive {archive}: {err}"))
@@ -410,9 +447,7 @@ pkg_com_publish_archive: fn(staged: String, archive: String) ForeignBindError! -
 }
 
 // Best-effort restore of the previous archive (`let _ = rename`).
-pkg_com_rename_quiet: fn(from: String, to: String) -[FS]> {
-    files.rename(from, to) ?? return
-}
+pkg_com_rename_quiet: fn(from: String, to: String) -[FS]> { files.rename(from, to) ?? return }
 
 // Parse the inspector's tab-separated LIB/CLASS/METHOD/SKIP records.
 pkg_com_parse_schema: fn(bytes: [U8]) -> ComSchema ForeignBindError! {
@@ -427,12 +462,16 @@ pkg_com_parse_schema: fn(bytes: [U8]) -> ComSchema ForeignBindError! {
         record_tag: fields[0]
         if {
             record_tag == "LIB" && fields.len() == 3 -> {
-                if name != None || guid != None -> return Err(ForeignBindError.Source("the COM inspector returned duplicate library metadata"))
+                if name != None || guid != None {
+                    return Err(ForeignBindError.Source("the COM inspector returned duplicate library metadata"))
+                }
                 name = Val(fields[1])
                 guid = Val(fields[2])
             }
             record_tag == "CLASS" && fields.len() == 3 -> {
-                if class != None -> return Err(ForeignBindError.Source("the COM inspector returned duplicate coclass metadata"))
+                if class != None {
+                    return Err(ForeignBindError.Source("the COM inspector returned duplicate coclass metadata"))
+                }
                 class = Val(fields[1])
                 root = Val(pkg_com_project(fields[2]))
             }
@@ -444,12 +483,16 @@ pkg_com_parse_schema: fn(bytes: [U8]) -> ComSchema ForeignBindError! {
             else -> return Err(ForeignBindError.Source("the COM inspector returned unknown `{record_tag}` metadata"))
         }
     }
-    if methods.len() == 0 -> return Err(ForeignBindError.Source("the type library has no safely bindable IDispatch members"))
+    if methods.len() == 0 {
+        return Err(ForeignBindError.Source("the type library has no safely bindable IDispatch members"))
+    }
     library_name: name ?? return Err(ForeignBindError.Source("the COM inspector omitted the library identity"))
     library_guid: guid ?? return Err(ForeignBindError.Source("the COM inspector omitted the library GUID"))
     class_guid: class ?? return Err(ForeignBindError.Source("the type library has no creatable COM class"))
     root_interface: root ?? return Err(ForeignBindError.Source("the COM class has no default automation interface"))
-    if library_name == "" -> return Err(ForeignBindError.Source("the COM inspector returned an empty library name"))
+    if library_name == "" {
+        return Err(ForeignBindError.Source("the COM inspector returned an empty library name"))
+    }
     pkg_com_validate_guid(library_guid)
     pkg_com_validate_guid(class_guid)
     Ok(ComSchema{name: library_name, guid: library_guid, class_guid: class_guid, root_interface: root_interface, methods: methods})
@@ -463,7 +506,9 @@ pkg_com_parse_method: fn(fields: [String], methods: [ComMethod]) -> ComMethod Fo
     raw: fields[2]
     dispid: pkg_com_parse_signed(fields[3], -2147483648, 2147483647) ?? return Err(ForeignBindError.Source("COM member `{raw}` has an invalid DISPID"))
     flags: pkg_com_parse_unsigned(fields[4], 65535) ?? return Err(ForeignBindError.Source("COM member `{raw}` has invalid invocation flags"))
-    if flags != 1 && flags != 2 && flags != 4 && flags != 8 -> return Err(ForeignBindError.Source("COM member `{raw}` has unsupported invocation flags `{flags}`"))
+    if flags != 1 && flags != 2 && flags != 4 && flags != 8 {
+        return Err(ForeignBindError.Source("COM member `{raw}` has unsupported invocation flags `{flags}`"))
+    }
     jet := pkg_com_project(raw)
     if pkg_com_member_taken(methods, interface, jet) {
         suffix: if {
@@ -473,7 +518,9 @@ pkg_com_parse_method: fn(fields: [String], methods: [ComMethod]) -> ComMethod Fo
         }
         jet = "{jet}{suffix}"
     }
-    if pkg_com_member_taken(methods, interface, jet) -> return Err(ForeignBindError.Source("COM member `{raw}` collides with generated Jet member `{interface}.{jet}`"))
+    if pkg_com_member_taken(methods, interface, jet) {
+        return Err(ForeignBindError.Source("COM member `{raw}` collides with generated Jet member `{interface}.{jet}`"))
+    }
     result: ComKind.parse(fields[5]) ?? return Err(ForeignBindError.Source("COM member `{raw}` has unsupported result type `{fields[5]}`"))
     params := [ComParam]{}
     names := [String]{}
@@ -481,7 +528,9 @@ pkg_com_parse_method: fn(fields: [String], methods: [ComMethod]) -> ComMethod Fo
         value: fields[index]
         pair: value.split_once(":") ?? return Err(ForeignBindError.Source("COM member `{raw}` has malformed parameter metadata"))
         param_name: pkg_com_project(pair.before)
-        if names.contains(param_name) -> return Err(ForeignBindError.Source("COM member `{raw}` has duplicate parameter name `{param_name}`"))
+        if names.contains(param_name) {
+            return Err(ForeignBindError.Source("COM member `{raw}` has duplicate parameter name `{param_name}`"))
+        }
         names.push(param_name.copy())
         kind: ComKind.parse(pair.after) ?? return Err(ForeignBindError.Source("COM member `{raw}` has unsupported parameter type `{pair.after}`"))
         params.push(ComParam{name: param_name, kind: kind})
@@ -493,7 +542,9 @@ pkg_com_parse_method: fn(fields: [String], methods: [ComMethod]) -> ComMethod Fo
 // (ASCII case-insensitively).
 pkg_com_member_taken: fn(methods: [ComMethod], interface: String, jet: String) -> Bool Never! {
     loop method in methods {
-        if pkg_ascii_lower(method.interface) == pkg_ascii_lower(interface) && pkg_ascii_lower(method.jet) == pkg_ascii_lower(jet) -> return true
+        if pkg_ascii_lower(method.interface) == pkg_ascii_lower(interface) && pkg_ascii_lower(method.jet) == pkg_ascii_lower(jet) {
+            return true
+        }
     }
     false
 }
@@ -648,7 +699,9 @@ pkg_com_is_hex: fn(code: Int) -> Bool Never! {
 // operation message.
 pkg_com_run_capture: fn(argv: [String], tool: String) -[Exec, Time.Wait]> [U8] ForeignBindError! {
     output: pkg_binder_capture(argv, None, tool, COM_TOOL_ACTION)
-    if !output.success -> return Err(ForeignBindError.ToolFailed{tool: tool, action: COM_TOOL_ACTION, detail: COM_OPERATION_FAILED})
+    if !output.success {
+        return Err(ForeignBindError.ToolFailed{tool: tool, action: COM_TOOL_ACTION, detail: COM_OPERATION_FAILED})
+    }
     Ok(output.stdout)
 }
 

@@ -66,7 +66,7 @@ run: fn() {
     tied: [Ticket]{
         {team: "same", minutes: Float{3.0}},
         {team: "same", minutes: Float{1.0}},
-        {team: "same", minutes: Float{2.0}}
+        {team: "same", minutes: Float{2.0}},
     }
     sorted: data.query(tied).sort_by(fn(t) { t.team }).collect() ?? panic("sort")
     print("tie_order: {sorted[0].minutes},{sorted[1].minutes},{sorted[2].minutes}")
@@ -113,7 +113,7 @@ run: fn() {
     // Hostile plot labels are SVG-escaped; negative counts reject.
     hostile_rows: [Ticket]{
         {team: "<script>&\"x", minutes: Float{4.0}},
-        {team: "<script>&\"x", minutes: Float{4.0}}
+        {team: "<script>&\"x", minutes: Float{4.0}},
     }
     hostile_groups: data.query(hostile_rows)
         .group_by(fn(t) { t.team })
@@ -137,7 +137,7 @@ run: fn() {
         .group_by(fn(e) { e.service })
         .mean(fn(e) { e.latency_ms })
         .collect() == {
-        .Ok(_) -> print("large_limit: ok")
+        .Ok(_) -> { print("large_limit: ok") }
         .Err(error) -> print("large_limit: {error}")
     }
 }

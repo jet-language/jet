@@ -5,15 +5,17 @@
 // the release metadata. Its content digest covers all of it, and
 // CANDIDATE.json.sig is the signer's Ed25519 signature of that digest.
 // Publish derives the record again from disk and refuses any difference.
-
 use {
     json: core.encoding.json
     jetpack_publication.[publication_sign, publication_verify]
 }
 
 CANDIDATE_SCHEMA: "jet.release.candidate.v1"
+
 CANDIDATE_FILE: "CANDIDATE.json"
+
 SIGNATURE_FILE: "CANDIDATE.json.sig"
+
 NOTES_FILE: "NOTES.md"
 
 // Everything a record is derived from.
@@ -29,16 +31,14 @@ Candidate: struct {
     signer: String
 }
 
-seed_asset_name: fn(name: String, target: String) -> String Never! {
-    "jet-{name}-{target}.tar.gz"
-}
+seed_asset_name: fn(name: String, target: String) -> String Never! { "jet-{name}-{target}.tar.gz" }
 
 text: fn(value: String) -> Dyn Never! { Dyn.Text(value.copy()) }
 
 artifacts_dyn: fn(artifacts: [Artifact]) -> Dyn Never! {
     out := [Dyn]{}
     loop artifact in artifacts {
-        out.push(Dyn.Object([String: Dyn]{"path": text(artifact.path), "sha256": text(artifact.sha256), "size": Dyn.Int(artifact.size)}))
+        out.push(Dyn.Object([String:Dyn]{"path": text(artifact.path), "sha256": text(artifact.sha256), "size": Dyn.Int(artifact.size)}))
     }
     Dyn.Array(out)
 }
@@ -46,23 +46,25 @@ artifacts_dyn: fn(artifacts: [Artifact]) -> Dyn Never! {
 receipt_dyn: fn(receipt: Receipt) -> Dyn Never! {
     rows := [Dyn]{}
     loop row in receipt.rows {
-        entry := [String: Dyn]{"scope": text(row.scope), "status": text(row.status)}
+        entry := [String:Dyn]{"scope": text(row.scope), "status": text(row.status)}
         if row.total == .Val(total) -> entry["total"] = Dyn.Int(total)
         if row.passed == .Val(passed) -> entry["passed"] = Dyn.Int(passed)
         rows.push(Dyn.Object(entry))
     }
-    Dyn.Object([String: Dyn]{
-        "file": text(receipt.file),
-        "head": text(receipt.head),
-        "jet_sha256": text(receipt.jet_sha256),
-        "kind": text(receipt.kind),
-        "rows": Dyn.Array(rows),
-        "sha256": text(receipt.sha256),
-        "shard": Dyn.Int(receipt.shard),
-        "shards": Dyn.Int(receipt.shards),
-        "status": text(receipt.status),
-        "target": text(receipt.target),
-    })
+    Dyn.Object(
+        [String:Dyn]{
+            "file": text(receipt.file),
+            "head": text(receipt.head),
+            "jet_sha256": text(receipt.jet_sha256),
+            "kind": text(receipt.kind),
+            "rows": Dyn.Array(rows),
+            "sha256": text(receipt.sha256),
+            "shard": Dyn.Int(receipt.shard),
+            "shards": Dyn.Int(receipt.shards),
+            "status": text(receipt.status),
+            "target": text(receipt.target),
+        },
+    )
 }
 
 upload_names: fn(candidate: Candidate) -> [String] Never! {
@@ -83,48 +85,58 @@ record_of: fn(candidate: Candidate) -> Dyn Never! {
         loop receipt in candidate.receipts {
             if receipt.target == row.target -> files.push(text(receipt.file))
         }
-        matrix.push(Dyn.Object([String: Dyn]{"asset": text(seed_asset_name(candidate.name, row.target)), "name": text(row.name), "receipts": Dyn.Array(files), "target": text(row.target)}))
+        matrix.push(Dyn.Object([String:Dyn]{"asset": text(seed_asset_name(candidate.name, row.target)), "name": text(row.name), "receipts": Dyn.Array(files), "target": text(row.target)}))
     }
     assets := [Dyn]{}
     loop name in upload_names(candidate) -> assets.push(text(name))
-    Dyn.Object([String: Dyn]{
-        "schema": text(CANDIDATE_SCHEMA),
-        "name": text(candidate.name),
-        "source": Dyn.Object([String: Dyn]{"commit": text(release.commit), "repository": text(candidate.remote.slug), "tree": text(candidate.remote.tree)}),
-        "toolchain": Dyn.Object([String: Dyn]{
-            "fixed_point": Dyn.Object([String: Dyn]{"s2": text(release.s2), "s3": text(release.s3)}),
-            "identity": text(release.identity),
-            "jet_sha256": text(release.jet_sha256),
-            "seed": text(release.seed),
-            "target": text(release.target),
-        }),
-        "artifacts": Dyn.Object([String: Dyn]{
-            "release": artifacts_dyn(candidate.staged),
-            "shipped": artifacts_dyn(release.shipped),
-            "shipped_sums_sha256": text(sha256_hex(release.sums.bytes())),
-        }),
-        "signatures": Dyn.Object([String: Dyn]{"file": text(SIGNATURE_FILE), "scheme": text("ed25519"), "signed": text("content_digest"), "signer": text(candidate.signer)}),
-        "tests": Dyn.Array(receipts),
-        "support_matrix": Dyn.Array(matrix),
-        "provenance": Dyn.Object([String: Dyn]{
-            "gate": text(if release.kind == "admitted" -> "release-compiler" else -> "verify-full"),
-            "kind": text(release.kind),
-            "runtime_key": text(release.runtime_key),
-            "runtime_packed_by": text(release.runtime_compiler_sha256),
-            "runtime_provenance_sha256": text(release.runtime_provenance_sha256),
-        }),
-        "metadata": Dyn.Object([String: Dyn]{
-            "assets": Dyn.Array(assets),
-            "latest": Dyn.Bool(true),
-            "notes_sha256": text(candidate.notes_sha256),
-            "tag": text(if release.kind == "admitted" -> "verify-tag" else -> "target"),
-            "title": text(candidate.name),
-        }),
-    })
+    Dyn.Object(
+        [String:Dyn]{
+            "schema": text(CANDIDATE_SCHEMA),
+            "name": text(candidate.name),
+            "source": Dyn.Object([String:Dyn]{"commit": text(release.commit), "repository": text(candidate.remote.slug), "tree": text(candidate.remote.tree)}),
+            "toolchain": Dyn.Object(
+                [String:Dyn]{
+                    "fixed_point": Dyn.Object([String:Dyn]{"s2": text(release.s2), "s3": text(release.s3)}),
+                    "identity": text(release.identity),
+                    "jet_sha256": text(release.jet_sha256),
+                    "seed": text(release.seed),
+                    "target": text(release.target),
+                },
+            ),
+            "artifacts": Dyn.Object(
+                [String:Dyn]{
+                    "release": artifacts_dyn(candidate.staged),
+                    "shipped": artifacts_dyn(release.shipped),
+                    "shipped_sums_sha256": text(sha256_hex(release.sums.bytes())),
+                },
+            ),
+            "signatures": Dyn.Object([String:Dyn]{"file": text(SIGNATURE_FILE), "scheme": text("ed25519"), "signed": text("content_digest"), "signer": text(candidate.signer)}),
+            "tests": Dyn.Array(receipts),
+            "support_matrix": Dyn.Array(matrix),
+            "provenance": Dyn.Object(
+                [String:Dyn]{
+                    "gate": text(if release.kind == "admitted" -> "release-compiler" else -> "verify-full"),
+                    "kind": text(release.kind),
+                    "runtime_key": text(release.runtime_key),
+                    "runtime_packed_by": text(release.runtime_compiler_sha256),
+                    "runtime_provenance_sha256": text(release.runtime_provenance_sha256),
+                },
+            ),
+            "metadata": Dyn.Object(
+                [String:Dyn]{
+                    "assets": Dyn.Array(assets),
+                    "latest": Dyn.Bool(true),
+                    "notes_sha256": text(candidate.notes_sha256),
+                    "tag": text(if release.kind == "admitted" -> "verify-tag" else -> "target"),
+                    "title": text(candidate.name),
+                },
+            ),
+        },
+    )
 }
 
 without_digest: fn(tree: Dyn) -> Dyn Never! {
-    kept := [String: Dyn]{}
+    kept := [String:Dyn]{}
     if tree == .Object(entries) {
         loop entry in entries {
             if entry.key != "content_digest" -> kept[entry.key.copy()] = entry.value.copy()
@@ -142,7 +154,7 @@ content_digest: fn(tree: Dyn) -> String Problem! {
 // The record with its content digest, as stored.
 sealed_record: fn(record: Dyn) -> String Problem! {
     digest: content_digest(record) ?? return Err(err)
-    kept := [String: Dyn]{}
+    kept := [String:Dyn]{}
     if record == .Object(entries) {
         loop entry in entries -> kept[entry.key.copy()] = entry.value.copy()
     }
@@ -151,9 +163,7 @@ sealed_record: fn(record: Dyn) -> String Problem! {
     Ok("{sealed}\n")
 }
 
-canonical_or_empty: fn(tree: Dyn) -> String Never! {
-    json.canonical(tree) ?? ""
-}
+canonical_or_empty: fn(tree: Dyn) -> String Never! { json.canonical(tree) ?? "" }
 
 keys_of: fn(tree: Dyn) -> [String] Never! {
     keys := [String]{}
@@ -185,7 +195,9 @@ record_mismatches: fn(stored: Dyn, fresh: Dyn) -> [Problem] Never! {
             if !contains_text(keys, key) -> keys.push(key.copy())
         }
         loop key in keys {
-            if canonical_or_empty(field(left, key)) != canonical_or_empty(field(right, key)) -> problems.push(problem(MISMATCH, "the record's `{name}.{key}` does not match the release directory"))
+            if canonical_or_empty(field(left, key)) != canonical_or_empty(field(right, key)) {
+                problems.push(problem(MISMATCH, "the record's `{name}.{key}` does not match the release directory"))
+            }
         }
     }
     problems
@@ -196,7 +208,9 @@ record_mismatches: fn(stored: Dyn, fresh: Dyn) -> [Problem] Never! {
 // leaves a signature behind.
 sign_digest: fn(seed_path: String, public_key: String, digest: String) -[FS, Env]> String Problem! {
     signature: publication_sign(seed_path, digest) ?? return Err(problem(SIGNING, "signing with {seed_path} failed: {err.diagnostic.what} {err.diagnostic.why}"))
-    if !verify_digest(public_key, digest, signature) -> return Err(problem(SIGNING, "the signature does not verify with the signer's public key {public_key}: the key pair does not match"))
+    if !verify_digest(public_key, digest, signature) {
+        return Err(problem(SIGNING, "the signature does not verify with the signer's public key {public_key}: the key pair does not match"))
+    }
     Ok(signature)
 }
 

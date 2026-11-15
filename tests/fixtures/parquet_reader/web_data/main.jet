@@ -1,3 +1,5 @@
+#[Target(Web), HTML(Path{"index.html"})]
+
 // D-DATA-WEB-TYPED-PROOF1: generated Web DataFlow proof input.
 // The bytes are declared with embed_bytes, then bound through the canonical
 // provider loader path before typed snapshot/decode. No parser lives here.
@@ -5,8 +7,6 @@ use {
     data: core.data
     ui: core.ui
 }
-
-#[Target(Web), HTML(Path{"index.html"})]
 
 #Codable
 IntCell: struct {
@@ -19,6 +19,7 @@ WrongCell: struct {
 }
 
 GOOD_PARQUET: #run embed_bytes("../int32_with_null_pages.parquet")
+
 BAD_PARQUET: #run embed_bytes("../ARROW-RS-GH-6229-DICTHEADER.parquet")
 
 typed_success: fn() -> String {

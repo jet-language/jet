@@ -1,12 +1,13 @@
-
 #UnitFamily(Length, base: meter) {
     meter
     half(scale: 1/2)
 }
+
 #UnitFamily(Temperature, base: kelvin) {
     kelvin
     celsius(scale: 1, offset: 27315/100)
 }
+
 external_scale: fn(value: Float) -> Float { calibrate(value) }
 
 calibrate: fn(value: Float) -> Float { value * 2 }
@@ -22,7 +23,5 @@ run: fn() {
     print(rounded.raw())
     point: CelsiusPoint.from_float(Float{20.0})
     print(CelsiusPoint.from_float(point.raw() * 2).raw())
-    #Overflow(.Wrapping) {
-        print(Meter.from_float(value.raw() * 2).raw())
-    }
+    #Overflow(.Wrapping) { print(Meter.from_float(value.raw() * 2).raw()) }
 }

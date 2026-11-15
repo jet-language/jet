@@ -25,9 +25,7 @@ cli_fixtures_for: fn(flags: CLIFlags) -[Env]> String? Never! {
 }
 
 // The current directory, or empty when it cannot be read.
-cli_current_dir: fn() -[FS, Env]> String Never! {
-    sys.current_dir() ?? ""
-}
+cli_current_dir: fn() -[FS, Env]> String Never! { sys.current_dir() ?? "" }
 
 // Render one authority diagnostic against `workspace.jet` and exit 2.
 cli_report_authority_error: fn(diagnostic: Diagnostic) -[IO, Exec, Time.Wait]> Never {
@@ -79,7 +77,7 @@ cli_checked_workspace_source: fn(cache: &WorkspaceDeclarationCache, dir: String)
         .Ok(found) -> {
             source: found ?? return Ok(None)
             resolver.revalidate_source(source)
-            Ok(Val(CheckedWorkspaceSource{resolver, source}))
+            Ok(Val(CheckedWorkspaceSource{resolver: resolver, source: source}))
         }
         .Err(error) -> Err(CLIError.Diagnostic(error.workspace_diagnostic()))
     }
@@ -141,7 +139,9 @@ cli_checked_env_file: fn(dir: String) -[FS, Env]> EnvFile? CLIError! {
 cli_nearest_workspace_source: fn(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> WorkspaceRootSnapshot? CLIError! {
     walk := AuthorityResolver.authority_walk_root(start)
     loop {
-        if cli_checked_workspace_source(cache, walk) == .Val(checked) -> return Ok(Val(WorkspaceRootSnapshot{root: walk, source: Val(checked)}))
+        if cli_checked_workspace_source(cache, walk) == .Val(checked) {
+            return Ok(Val(WorkspaceRootSnapshot{root: walk, source: Val(checked)}))
+        }
         walk = AuthorityResolver.authority_walk_parent(walk) ?? return Ok(None)
     }
 }
@@ -163,7 +163,7 @@ cli_workspace_index_required_diagnostic: fn() -> Diagnostic Never! {
     diagnostic_from_registry("E1239", None, "workspace build needs workspace.jet as the index", "an authority declaration is not a member index", "move members into workspace.jet and keep one workspace index")
 }
 
-cli_workspace_snapshot_from_source: fn(resolver: AuthorityResolver, &&expected: WorkspaceSource) -[FS, Env, Exec, Time.Wait]> WorkspaceSnapshot CLIError! {
+cli_workspace_snapshot_from_source: fn(resolver: AuthorityResolver, expected: &&WorkspaceSource) -[FS, Env, Exec, Time.Wait]> WorkspaceSnapshot CLIError! {
     if envmodel_workspace_load_checked_source(resolver, expected) == {
         .Ok(snapshot) -> Ok(snapshot)
         .Err(error) -> Err(CLIError.Diagnostic(error.diagnostic))
@@ -172,7 +172,7 @@ cli_workspace_snapshot_from_source: fn(resolver: AuthorityResolver, &&expected: 
 
 // Evaluate a checked workspace index, write its `.jet/lock` entries, and
 // return the plan. A diagnostic is rendered and reported as exit 2.
-cli_load_workspace_for_source: fn(cache: &WorkspaceDeclarationCache, dir: String, &&checked: CheckedWorkspaceSource) -[IO, FS, Env, Exec, Time, Time.Wait]> WorkspacePlan? CLIError! {
+cli_load_workspace_for_source: fn(cache: &WorkspaceDeclarationCache, dir: String, checked: &&CheckedWorkspaceSource) -[IO, FS, Env, Exec, Time, Time.Wait]> WorkspacePlan? CLIError! {
     if checked.resolver.revalidate_source(checked.source) == {
         .Err(error) -> return Err(cli_render_workspace_error(CLIError.Diagnostic(error.diagnostic())))
         .Ok(_) -> {}
@@ -264,7 +264,9 @@ cli_cwd_workspace_index: fn(cache: &WorkspaceDeclarationCache) -[IO, FS, Env, Ex
     if allow_lock -> plan = cli_workspace_lock_index(cache, snapshot.root)
     members := [WorkspaceMember]{}
     if plan == .Val(found) {
-        loop member in found.members -> members.push(WorkspaceMember{name: member.name, path: member.path})
+        loop member in found.members {
+            members.push(WorkspaceMember{name: member.name, path: member.path})
+        }
         return WorkspaceIndex.from_members(members)
     }
     WorkspaceIndex.empty()

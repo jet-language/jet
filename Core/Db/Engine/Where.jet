@@ -101,7 +101,9 @@ mask_bit: fn(n: Int) -> Int Never! {
 }
 
 // IsUniqueIndex.
-is_unique_index: fn(db: conn.Conn, ix: Int) -> Bool Never! { db.indexes[ix].on_error != ast.OE_NONE }
+is_unique_index: fn(db: conn.Conn, ix: Int) -> Bool Never! {
+    db.indexes[ix].on_error != ast.OE_NONE
+}
 
 // ---------------------------------------------------------------------------
 // The WhereInfo answers (where.c).
@@ -113,9 +115,7 @@ where_output_row_count: fn(wi: we.WhereInfo) -> Int Never! { wi.n_row_out }
 where_is_distinct: fn(wi: we.WhereInfo) -> Int Never! { wi.e_distinct }
 
 // sqlite3WhereIsOrdered.
-where_is_ordered: fn(wi: we.WhereInfo) -> Int Never! {
-    if wi.n_ob_sat < 0 -> 0 else -> wi.n_ob_sat
-}
+where_is_ordered: fn(wi: we.WhereInfo) -> Int Never! { if wi.n_ob_sat < 0 -> 0 else -> wi.n_ob_sat }
 
 // sqlite3WhereOrderByLimitOptLabel.
 where_order_by_limit_opt_label: fn(wi: we.WhereInfo) -> Int Never! {
@@ -126,7 +126,9 @@ where_order_by_limit_opt_label: fn(wi: we.WhereInfo) -> Int Never! {
 
 // sqlite3WhereMinMaxOptEarlyOut.
 where_min_max_opt_early_out: fn(p: &cg.Parse, wi: we.WhereInfo) Never! {
-    if !wi.b_ordered_inner_loop || wi.n_ob_sat == 0 -> return
+    if !wi.b_ordered_inner_loop || wi.n_ob_sat == 0 {
+        return
+    }
     i := wi.n_level - 1
     loop i >= 0 {
         if wi.loops[wi.levels[i].w_loop].ws_flags.bit_and(we.WHERE_COLUMN_IN) != 0 {
@@ -145,7 +147,9 @@ where_continue_label: fn(wi: we.WhereInfo) -> Int Never! { wi.i_continue }
 where_break_label: fn(wi: we.WhereInfo) -> Int Never! { wi.i_break }
 
 // sqlite3WhereOkOnePass: the ONEPASS_* answer and aiCurOnePass.
-where_ok_one_pass: fn(wi: we.WhereInfo) -> (e: Int, cur: [Int]) Never! { (e: wi.e_one_pass, cur: wi.ai_cur_one_pass.copy()) }
+where_ok_one_pass: fn(wi: we.WhereInfo) -> (e: Int, cur: [Int]) Never! {
+    (e: wi.e_one_pass, cur: wi.ai_cur_one_pass.copy())
+}
 
 // sqlite3WhereUsesDeferredSeek.
 where_uses_deferred_seek: fn(wi: we.WhereInfo) -> Bool Never! { wi.b_deferred_seek }
@@ -209,13 +213,17 @@ scan_next: fn(p: &cg.Parse, a: &ast.AST, wi: we.WhereInfo, s: &WhereScan) -> Int
                 term: wi.terms[t]
                 if term.left_cursor != i_cur || term.left_column != i_column -> next
                 x: term.expr
-                if i_column == conn.XN_EXPR && ast.expr_compare_skip(a, a.exprs[x].left, s.idx_expr, i_cur) != 0 -> next
+                if i_column == conn.XN_EXPR && ast.expr_compare_skip(a, a.exprs[x].left, s.idx_expr, i_cur) != 0 {
+                    next
+                }
                 if s.i_equiv > 1 && ast.has(a, x, ast.EP_OUTER_ON) -> next
                 if term.e_operator.bit_and(we.WO_EQUIV) != 0 && s.n_equiv < 11 {
                     px: right_subexpr_is_column(a, x)
                     if px >= 0 {
                         j := 0
-                        loop j < s.n_equiv && !(s.ai_cur[j] == a.exprs[px].itable && s.ai_column[j] == a.exprs[px].icolumn) -> j += 1
+                        loop j < s.n_equiv && !(s.ai_cur[j] == a.exprs[px].itable && s.ai_column[j] == a.exprs[px].icolumn) {
+                            j += 1
+                        }
                         if j == s.n_equiv {
                             s.ai_cur[j] = a.exprs[px].itable
                             s.ai_column[j] = a.exprs[px].icolumn
@@ -231,7 +239,9 @@ scan_next: fn(p: &cg.Parse, a: &ast.AST, wi: we.WhereInfo, s: &WhereScan) -> Int
                 }
                 if term.e_operator.bit_and(we.WO_EQ.bit_or(we.WO_IS)) != 0 {
                     r: a.exprs[x].right
-                    if r >= 0 && a.exprs[r].op == tk.TK_COLUMN && a.exprs[r].itable == s.ai_cur[0] && a.exprs[r].icolumn == s.ai_column[0] -> next
+                    if r >= 0 && a.exprs[r].op == tk.TK_COLUMN && a.exprs[r].itable == s.ai_cur[0] && a.exprs[r].icolumn == s.ai_column[0] {
+                        next
+                    }
                 }
                 s.wc = wc
                 s.k = k
@@ -267,9 +277,7 @@ scan_init: fn(p: &cg.Parse, a: &ast.AST, wi: we.WhereInfo, s: &WhereScan, wc: In
         j: i_column0
         i_column = p.db.indexes[ix].ai_column[j]
         t: p.db.indexes[ix].table
-        if i_column == p.db.tables[t].ipkey {
-            i_column = conn.XN_ROWID
-        } else if i_column >= 0 {
+        if i_column == p.db.tables[t].ipkey -> i_column = conn.XN_ROWID else if i_column >= 0 {
             s.idxaff = p.db.tables[t].cols[i_column].affinity
             s.coll_name = Val(p.db.indexes[ix].coll[j])
         } else if i_column == conn.XN_EXPR {
@@ -279,9 +287,7 @@ scan_init: fn(p: &cg.Parse, a: &ast.AST, wi: we.WhereInfo, s: &WhereScan, wc: In
             s.idxaff = ex.expr_affinity(p.db, a, s.idx_expr)
             return scan_next(p, a, wi, s)
         }
-    } else if i_column == conn.XN_EXPR {
-        return -1
-    }
+    } else if i_column == conn.XN_EXPR { return -1 }
     s.ai_column[0] = i_column
     scan_next(p, a, wi, s)
 }
@@ -362,15 +368,15 @@ is_distinct_redundant: fn(p: &cg.Parse, a: &ast.AST, wi: we.WhereInfo, src: Int,
 }
 
 // estLog.
-est_log: fn(n: Int) -> Int Never! {
-    if n <= 10 -> 0 else -> util.log_est(n) - 33
-}
+est_log: fn(n: Int) -> Int Never! { if n <= 10 -> 0 else -> util.log_est(n) - 33 }
 
 // translateColumnToCopy: from i_start on, OP_Column of cursor i_tab_cur
 // becomes OP_Copy from the registers at i_register and OP_Rowid becomes
 // OP_Sequence of i_autoidx_cur.
 translate_column_to_copy: fn(p: &cg.Parse, i_start: Int, i_tab_cur: Int, i_register: Int, i_autoidx_cur: Int) Never! {
-    if p.db.malloc_failed -> return
+    if p.db.malloc_failed {
+        return
+    }
     i_end: cg.v_current_addr(p)
     loop i in i_start..<i_end {
         if p.f.v.ops[i].p1 != i_tab_cur -> next
@@ -391,8 +397,12 @@ translate_column_to_copy: fn(p: &cg.Parse, i_start: Int, i_tab_cur: Int, i_regis
 // si, an operand of an outer join.
 constraint_compatible_with_outer_join: fn(a: ast.AST, wi: we.WhereInfo, t: Int, si: Int) -> Bool Never! {
     x: wi.terms[t].expr
-    if !ast.has(a, x, ast.EP_OUTER_ON.bit_or(ast.EP_INNER_ON)) || a.exprs[x].w != a.items[si].cursor -> return false
-    if a.items[si].jointype.bit_and(ast.JT_LEFT.bit_or(ast.JT_RIGHT)) != 0 && ast.has(a, x, ast.EP_INNER_ON) -> return false
+    if !ast.has(a, x, ast.EP_OUTER_ON.bit_or(ast.EP_INNER_ON)) || a.exprs[x].w != a.items[si].cursor {
+        return false
+    }
+    if a.items[si].jointype.bit_and(ast.JT_LEFT.bit_or(ast.JT_RIGHT)) != 0 && ast.has(a, x, ast.EP_INNER_ON) {
+        return false
+    }
     true
 }
 
@@ -402,7 +412,9 @@ term_can_drive_index: fn(db: conn.Conn, a: ast.AST, wi: we.WhereInfo, t: Int, si
     term: wi.terms[t]
     if term.left_cursor != a.items[si].cursor -> return false
     if term.e_operator.bit_and(we.WO_EQ.bit_or(we.WO_IS)) == 0 -> return false
-    if a.items[si].jointype.bit_and(ast.JT_LEFT.bit_or(ast.JT_LTORJ).bit_or(ast.JT_RIGHT)) != 0 && !constraint_compatible_with_outer_join(a, wi, t, si) -> return false
+    if a.items[si].jointype.bit_and(ast.JT_LEFT.bit_or(ast.JT_LTORJ).bit_or(ast.JT_RIGHT)) != 0 && !constraint_compatible_with_outer_join(a, wi, t, si) {
+        return false
+    }
     if term.prereq_right.bit_and(not_ready) != 0 -> return false
     if term.left_column < 0 -> return false
     aff: db.tables[a.items[si].tab].cols[term.left_column].affinity
@@ -421,9 +433,7 @@ index_affinity_str: fn(db: &conn.Conn, a: ast.AST, ix: Int) -> [U8] Never! {
     loop n in 0..<db.indexes[ix].n_column {
         x: db.indexes[ix].ai_column[n]
         aff := base.AFF_INTEGER
-        if x >= 0 {
-            aff = db.tables[t].cols[x].affinity
-        } else if x == conn.XN_EXPR {
+        if x >= 0 -> aff = db.tables[t].cols[x].affinity else if x == conn.XN_EXPR {
             aff = ex.expr_affinity(db, a, ast.list_expr(a, db.indexes[ix].col_expr, n))
         }
         if aff < base.AFF_BLOB -> aff = base.AFF_BLOB
@@ -455,7 +465,9 @@ generate_index_key: fn(p: &cg.Parse, a: &ast.AST, ix: Int, i_data_cur: Int, reg_
     }
     n_col: if prefix_only && p.db.indexes[ix].uniq_not_null -> p.db.indexes[ix].n_key_col else -> p.db.indexes[ix].n_column
     reg_base: cg.get_temp_range(p, n_col)
-    if prior >= 0 && (reg_base != reg_prior || p.db.indexes[prior].part_idx_where >= 0) -> prior = -1
+    if prior >= 0 && (reg_base != reg_prior || p.db.indexes[prior].part_idx_where >= 0) {
+        prior = -1
+    }
     loop j in 0..<n_col {
         cj: p.db.indexes[ix].ai_column[j]
         if prior >= 0 && p.db.indexes[prior].ai_column[j] == cj && cj != conn.XN_EXPR -> next
@@ -577,9 +589,7 @@ construct_automatic_index: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, wc: 
         addr_counter = cg.op2(p, opc.OP_INTEGER, 0, 0)
         _: cg.op3(p, opc.OP_INIT_COROUTINE, reg_yield, 0, a.items[si].addr_fill_sub)
         addr_top = cg.op1(p, opc.OP_YIELD, reg_yield)
-    } else {
-        addr_top = cg.op1(p, opc.OP_REWIND, i_tab_cur)
-    }
+    } else { addr_top = cg.op1(p, opc.OP_REWIND, i_tab_cur) }
     i_continue := 0
     if partial >= 0 {
         i_continue = cg.v_make_label(p)
@@ -589,7 +599,9 @@ construct_automatic_index: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, wc: 
     reg_record: cg.get_temp_reg(p)
     reg_base: generate_index_key(p, a, ix, i_tab_cur, reg_record, false, false, -1, 0).reg_base
     reg_filter: wi.levels[lv].reg_filter
-    if reg_filter != 0 -> _: cg.op4_int(p, opc.OP_FILTER_ADD, reg_filter, 0, reg_base, wi.loops[l].n_eq)
+    if reg_filter != 0 {
+        _: cg.op4_int(p, opc.OP_FILTER_ADD, reg_filter, 0, reg_base, wi.loops[l].n_eq)
+    }
     _: cg.op2(p, opc.OP_IDX_INSERT, i_idx_cur, reg_record)
     cg.v_change_p5(p, conn.OPFLAG_USESEEKRESULT)
     if partial >= 0 -> cg.v_resolve_label(p, i_continue)
@@ -629,11 +641,7 @@ construct_bloom_filter: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, i_level
         i_src: wi.levels[lv].i_from
         t: a.items[ast.src_item(a, src, i_src)].tab
         sz := util.log_est_to_int(p.db.tables[t].n_row_log_est)
-        if sz < 10000 {
-            sz = 10000
-        } else if sz > 10000000 {
-            sz = 10000000
-        }
+        if sz < 10000 -> sz = 10000 else if sz > 10000000 -> sz = 10000000
         _: cg.op2(p, opc.OP_BLOB, sz, reg_filter)
         addr_top: cg.op1(p, opc.OP_REWIND, i_cur)
         loop k in 0..<wi.wcs[0].a.len() {
@@ -667,7 +675,9 @@ construct_bloom_filter: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, i_level
             jt: a.items[ast.src_item(a, src, wi.levels[i_level].i_from)].jointype
             l2: wi.levels[i_level].w_loop
             if jt.bit_and(ast.JT_LEFT.bit_or(ast.JT_LTORJ)) == 0 && l2 >= 0 && wi.loops[l2].prereq.bit_and(not_ready) == 0 {
-                if wi.loops[l2].ws_flags.bit_and(we.WHERE_BLOOMFILTER.bit_or(we.WHERE_COLUMN_IN)) == we.WHERE_BLOOMFILTER -> break
+                if wi.loops[l2].ws_flags.bit_and(we.WHERE_BLOOMFILTER.bit_or(we.WHERE_COLUMN_IN)) == we.WHERE_BLOOMFILTER {
+                    break
+                }
             }
             i_level += 1
         }
@@ -682,9 +692,7 @@ construct_bloom_filter: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, i_level
 // Virtual tables: the IndexInfo of xBestIndex.
 
 // SMASKBIT32.
-smask_bit32: fn(n: Int) -> Int Never! {
-    if n < 32 -> 1 << n else -> 0
-}
+smask_bit32: fn(n: Int) -> Int Never! { if n < 32 -> 1 << n else -> 0 }
 
 // allocateIndexInfo: the IndexInfo for the virtual table of FROM item si
 // over the usable terms of clause wc (marked TERM_OK), and the constraints
@@ -701,7 +709,9 @@ allocate_index_info: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, wc: Int, m
         if wi.terms[x].prereq_right.bit_and(m_unusable) != 0 -> next
         if util.clear_bits(wi.terms[x].e_operator, we.WO_EQUIV) == 0 -> next
         if wi.terms[x].wt_flags.bit_and(we.TERM_VNULL) != 0 -> next
-        if jt.bit_and(ast.JT_LEFT.bit_or(ast.JT_LTORJ).bit_or(ast.JT_RIGHT)) != 0 && !constraint_compatible_with_outer_join(a, wi, x, si) -> next
+        if jt.bit_and(ast.JT_LEFT.bit_or(ast.JT_LTORJ).bit_or(ast.JT_RIGHT)) != 0 && !constraint_compatible_with_outer_join(a, wi, x, si) {
+            next
+        }
         we.add_wt_flags(wi, x, we.TERM_OK)
     }
     n_order_by := 0
@@ -736,9 +746,7 @@ allocate_index_info: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, wc: Int, m
             n_order_by = n
             if wi.wctrl_flags.bit_and(cg.WHERE_DISTINCTBY) != 0 {
                 e_distinct = if wi.wctrl_flags.bit_and(cg.WHERE_SORTBYGROUP) != 0 -> 3 else -> 2
-            } else if wi.wctrl_flags.bit_and(cg.WHERE_GROUPBY) != 0 {
-                e_distinct = 1
-            }
+            } else if wi.wctrl_flags.bit_and(cg.WHERE_GROUPBY) != 0 { e_distinct = 1 }
         }
     }
     info := conn.IndexInfo{constraints: [conn.IndexConstraint]{}, order_by: [conn.IndexOrderBy]{}, usage: [conn.IndexConstraintUsage]{}, idx_num: 0, idx_str: None, need_to_free_idx_str: false, order_by_consumed: false, estimated_cost: 0.0, estimated_rows: 0, idx_flags: 0, col_used: 0, colls: [[U8]]{}, rhs: [base.Mem]{}, has_rhs: [Bool]{}, e_distinct: e_distinct, m_in: 0, m_handle_in: 0}
@@ -750,13 +758,13 @@ allocate_index_info: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, wc: Int, m
         xe: wi.terms[x].expr
         op := wi.terms[x].e_operator.bit_and(we.WO_ALL)
         if op == we.WO_IN {
-            if wi.terms[x].wt_flags.bit_and(we.TERM_SLICE) == 0 -> info.m_in = info.m_in.bit_or(smask_bit32(j))
+            if wi.terms[x].wt_flags.bit_and(we.TERM_SLICE) == 0 {
+                info.m_in = info.m_in.bit_or(smask_bit32(j))
+            }
             op = we.WO_EQ
         }
         cop := op
-        if op == we.WO_AUX {
-            cop = wi.terms[x].e_match_op
-        } else if op.bit_and(we.WO_ISNULL.bit_or(we.WO_IS)) != 0 {
+        if op == we.WO_AUX -> cop = wi.terms[x].e_match_op else if op.bit_and(we.WO_ISNULL.bit_or(we.WO_IS)) != 0 {
             cop = if op == we.WO_ISNULL -> conn.INDEX_CONSTRAINT_ISNULL else -> conn.INDEX_CONSTRAINT_IS
         } else if op.bit_and(we.WO_LT.bit_or(we.WO_LE).bit_or(we.WO_GT).bit_or(we.WO_GE)) != 0 && ast.is_vector(a, a.exprs[xe].right) {
             if j < 16 -> no_omit = no_omit.bit_or(1 << j)
@@ -797,9 +805,7 @@ vtab_collation: fn(info: conn.IndexInfo, i_cons: Int) -> [U8]? Never! {
 vtab_in: fn(info: &conn.IndexInfo, i_cons: Int, b_handle: Int) -> Bool Never! {
     m: if i_cons >= 0 -> smask_bit32(i_cons) else -> 0
     if m.bit_and(info.m_in) == 0 -> return false
-    if b_handle == 0 {
-        info.m_handle_in = util.clear_bits(info.m_handle_in, m)
-    } else if b_handle > 0 {
+    if b_handle == 0 -> info.m_handle_in = util.clear_bits(info.m_handle_in, m) else if b_handle > 0 {
         info.m_handle_in = info.m_handle_in.bit_or(m)
     }
     true
@@ -835,13 +841,9 @@ vtab_best_index_call: fn(p: &cg.Parse, a: &ast.AST, t: Int, info: &conn.IndexInf
     p.db.n_schema_lock -= 1
     rc: r.rc
     if rc != base.OK && rc != base.CONSTRAINT {
-        if rc == base.NOMEM {
-            aux.oom_fault(p.db)
-        } else if r.err == .Val(msg) {
+        if rc == base.NOMEM -> aux.oom_fault(p.db) else if r.err == .Val(msg) {
             ast.error(a, ast.text(msg))
-        } else {
-            ast.error(a, base.error_string(rc))
-        }
+        } else { ast.error(a, base.error_string(rc)) }
     }
     vt: p.db.tables[t].vtab
     if vt >= 0 && p.db.vtables[vt].b_all_schemas -> vtab_uses_all_schemas(p, a)
@@ -865,7 +867,9 @@ range_scan_est: fn(wi: &we.WhereInfo, lower: Int, upper: Int, l: Int) Never! {
     n_out := wi.loops[l].n_out
     n_new := range_adjust(wi, lower, n_out)
     n_new = range_adjust(wi, upper, n_new)
-    if lower >= 0 && wi.terms[lower].truth_prob > 0 && upper >= 0 && wi.terms[upper].truth_prob > 0 -> n_new -= 20
+    if lower >= 0 && wi.terms[lower].truth_prob > 0 && upper >= 0 && wi.terms[upper].truth_prob > 0 {
+        n_new -= 20
+    }
     if lower >= 0 -> n_out -= 1
     if upper >= 0 -> n_out -= 1
     if n_new < 10 -> n_new = 10
@@ -886,7 +890,9 @@ loop_alloc: fn(wi: &we.WhereInfo) -> Int Never! {
 
 // whereLoopResize: at least n term slots, grown to a multiple of 8.
 loop_resize: fn(wi: &we.WhereInfo, l: Int, n: Int) Never! {
-    if wi.loops[l].lterm.len() >= n -> return
+    if wi.loops[l].lterm.len() >= n {
+        return
+    }
     m: ((n + 7) /% 8) * 8
     loop wi.loops[l].lterm.len() < m -> wi.loops[l].lterm.push(-1)
 }
@@ -955,11 +961,7 @@ link_get: fn(wi: we.WhereInfo, prev: Int) -> Int Never! {
 }
 
 link_set: fn(wi: &we.WhereInfo, prev: Int, l: Int) Never! {
-    if prev < 0 {
-        wi.p_loops = l
-    } else {
-        wi.loops[prev].next = l
-    }
+    if prev < 0 -> wi.p_loops = l else -> wi.loops[prev].next = l
 }
 
 // whereLoopCheaperProperSubset.
@@ -980,23 +982,31 @@ loop_cheaper_proper_subset: fn(wi: we.WhereInfo, x: Int, y: Int) -> Bool Never! 
         }
         i -= 1
     }
-    if lx.ws_flags.bit_and(we.WHERE_IDX_ONLY) != 0 && ly.ws_flags.bit_and(we.WHERE_IDX_ONLY) == 0 -> return false
+    if lx.ws_flags.bit_and(we.WHERE_IDX_ONLY) != 0 && ly.ws_flags.bit_and(we.WHERE_IDX_ONLY) == 0 {
+        return false
+    }
     true
 }
 
 // whereLoopAdjustCost: template t's cost moved below its proper subsets
 // and above its proper supersets on the list.
 loop_adjust_cost: fn(wi: &we.WhereInfo, t: Int) Never! {
-    if wi.loops[t].ws_flags.bit_and(we.WHERE_INDEXED) == 0 -> return
+    if wi.loops[t].ws_flags.bit_and(we.WHERE_INDEXED) == 0 {
+        return
+    }
     l := wi.p_loops
     loop l >= 0 {
         if wi.loops[l].i_tab == wi.loops[t].i_tab && wi.loops[l].ws_flags.bit_and(we.WHERE_INDEXED) != 0 {
             if loop_cheaper_proper_subset(wi, l, t) {
                 if wi.loops[l].r_run < wi.loops[t].r_run -> wi.loops[t].r_run = wi.loops[l].r_run
-                if wi.loops[l].n_out - 1 < wi.loops[t].n_out -> wi.loops[t].n_out = wi.loops[l].n_out - 1
+                if wi.loops[l].n_out - 1 < wi.loops[t].n_out {
+                    wi.loops[t].n_out = wi.loops[l].n_out - 1
+                }
             } else if loop_cheaper_proper_subset(wi, t, l) {
                 if wi.loops[l].r_run > wi.loops[t].r_run -> wi.loops[t].r_run = wi.loops[l].r_run
-                if wi.loops[l].n_out + 1 > wi.loops[t].n_out -> wi.loops[t].n_out = wi.loops[l].n_out + 1
+                if wi.loops[l].n_out + 1 > wi.loops[t].n_out {
+                    wi.loops[t].n_out = wi.loops[l].n_out + 1
+                }
             }
         }
         l = wi.loops[l].next
@@ -1013,9 +1023,15 @@ loop_find_lesser: fn(wi: we.WhereInfo, prev0: Int, t: Int) -> (keep: Bool, prev:
     loop l >= 0 {
         lp: wi.loops[l].prereq
         if wi.loops[l].i_tab == wi.loops[t].i_tab && wi.loops[l].i_sort_idx == wi.loops[t].i_sort_idx {
-            if wi.loops[l].ws_flags.bit_and(we.WHERE_AUTO_INDEX) != 0 && wi.loops[t].n_skip == 0 && wi.loops[t].ws_flags.bit_and(we.WHERE_INDEXED) != 0 && wi.loops[t].ws_flags.bit_and(we.WHERE_COLUMN_EQ) != 0 && lp.bit_and(tp) == tp -> break
-            if lp.bit_and(tp) == lp && wi.loops[l].r_setup <= wi.loops[t].r_setup && wi.loops[l].r_run <= wi.loops[t].r_run && wi.loops[l].n_out <= wi.loops[t].n_out -> return (keep: false, prev: prev)
-            if lp.bit_and(tp) == tp && wi.loops[l].r_run >= wi.loops[t].r_run && wi.loops[l].n_out >= wi.loops[t].n_out -> break
+            if wi.loops[l].ws_flags.bit_and(we.WHERE_AUTO_INDEX) != 0 && wi.loops[t].n_skip == 0 && wi.loops[t].ws_flags.bit_and(we.WHERE_INDEXED) != 0 && wi.loops[t].ws_flags.bit_and(we.WHERE_COLUMN_EQ) != 0 && lp.bit_and(tp) == tp {
+                break
+            }
+            if lp.bit_and(tp) == lp && wi.loops[l].r_setup <= wi.loops[t].r_setup && wi.loops[l].r_run <= wi.loops[t].r_run && wi.loops[l].n_out <= wi.loops[t].n_out {
+                return (keep: false, prev: prev)
+            }
+            if lp.bit_and(tp) == tp && wi.loops[l].r_run >= wi.loops[t].r_run && wi.loops[l].n_out >= wi.loops[t].n_out {
+                break
+            }
         }
         prev = l
         l = wi.loops[l].next
@@ -1033,7 +1049,9 @@ loop_insert: fn(p: &cg.Parse, wi: &we.WhereInfo, b: &WhereLoopBuilder, t: Int) -
     b.i_plan_limit -= 1
     loop_adjust_cost(wi, t)
     if b.has_or_set {
-        if wi.loops[t].n_lterm != 0 -> _: where_or_insert(b.or_set, wi.loops[t].prereq, wi.loops[t].r_run, wi.loops[t].n_out)
+        if wi.loops[t].n_lterm != 0 {
+            _: where_or_insert(b.or_set, wi.loops[t].prereq, wi.loops[t].r_run, wi.loops[t].n_out)
+        }
         return base.OK
     }
     f: loop_find_lesser(wi, -1, t)
@@ -1072,7 +1090,9 @@ loop_output_adjust: fn(a: ast.AST, wi: &we.WhereInfo, wc: Int, l: Int, n_row: In
     loop i in 0..<wi.wcs[wc].n_base {
         term: wi.wcs[wc].a[i]
         pa: wi.terms[term].prereq_all
-        if pa.bit_and(not_allowed) != 0 || pa.bit_and(mask_self) == 0 || wi.terms[term].wt_flags.bit_and(we.TERM_VIRTUAL) != 0 -> next
+        if pa.bit_and(not_allowed) != 0 || pa.bit_and(mask_self) == 0 || wi.terms[term].wt_flags.bit_and(we.TERM_VIRTUAL) != 0 {
+            next
+        }
         j := wi.loops[l].n_lterm - 1
         loop j >= 0 {
             x: wi.loops[l].lterm[j]
@@ -1091,9 +1111,7 @@ loop_output_adjust: fn(a: ast.AST, wi: &we.WhereInfo, wc: Int, l: Int, n_row: In
             }
         }
         tp: wi.terms[term].truth_prob
-        if tp <= 0 {
-            wi.loops[l].n_out += tp
-        } else {
+        if tp <= 0 -> wi.loops[l].n_out += tp else {
             wi.loops[l].n_out -= 1
             if wi.terms[term].e_operator.bit_and(we.WO_EQ.bit_or(we.WO_IS)) != 0 {
                 k := ast.expr_is_integer(a, a.exprs[wi.terms[term].expr].right) ?? 2
@@ -1121,7 +1139,9 @@ range_vector_len: fn(p: &cg.Parse, a: &ast.AST, cur: Int, ix: Int, n_eq: Int, xe
         lhs: ast.list_expr(a, a.exprs[lv].x, i)
         rv: a.exprs[xe].right
         rhs: if ast.has(a, rv, ast.EP_X_IS_SELECT) -> ast.list_expr(a, a.selects[a.exprs[rv].x].elist, i) else -> ast.list_expr(a, a.exprs[rv].x, i)
-        if a.exprs[lhs].op != tk.TK_COLUMN || a.exprs[lhs].itable != cur || a.exprs[lhs].icolumn != p.db.indexes[ix].ai_column[i + n_eq] || p.db.indexes[ix].sort_order[i + n_eq] != p.db.indexes[ix].sort_order[n_eq] -> break
+        if a.exprs[lhs].op != tk.TK_COLUMN || a.exprs[lhs].itable != cur || a.exprs[lhs].icolumn != p.db.indexes[ix].ai_column[i + n_eq] || p.db.indexes[ix].sort_order[i + n_eq] != p.db.indexes[ix].sort_order[n_eq] {
+            break
+        }
         aff: ex.compare_affinity(p.db, a, rhs, ex.expr_affinity(p.db, a, lhs))
         if aff != ex.table_column_affinity(p.db, t, a.exprs[lhs].icolumn) -> break
         c: ex.binary_compare_coll_seq(p, a, lhs, rhs)
@@ -1147,8 +1167,12 @@ add_btree_index: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopB
     nw: b.new
     if cg.n_err(a) != 0 -> return a.ctx.rc
     op_mask := if wi.loops[nw].ws_flags.bit_and(we.WHERE_BTM_LIMIT) != 0 -> we.WO_LT.bit_or(we.WO_LE) else -> we.WO_EQ.bit_or(we.WO_IN).bit_or(we.WO_GT).bit_or(we.WO_GE).bit_or(we.WO_LT).bit_or(we.WO_LE).bit_or(we.WO_ISNULL).bit_or(we.WO_IS)
-    if p.db.indexes[probe].b_unordered -> op_mask = util.clear_bits(op_mask, we.WO_GT.bit_or(we.WO_GE).bit_or(we.WO_LT).bit_or(we.WO_LE))
-    if p.db.indexes[probe].b_low_qual -> op_mask = util.clear_bits(op_mask, we.WO_EQ.bit_or(we.WO_IN).bit_or(we.WO_IS))
+    if p.db.indexes[probe].b_unordered {
+        op_mask = util.clear_bits(op_mask, we.WO_GT.bit_or(we.WO_GE).bit_or(we.WO_LT).bit_or(we.WO_LE))
+    }
+    if p.db.indexes[probe].b_low_qual {
+        op_mask = util.clear_bits(op_mask, we.WO_EQ.bit_or(we.WO_IN).bit_or(we.WO_IS))
+    }
     saved_n_eq: wi.loops[nw].n_eq
     saved_n_btm: wi.loops[nw].n_btm
     saved_n_top: wi.loops[nw].n_top
@@ -1171,15 +1195,17 @@ add_btree_index: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopB
         i_equiv: s.i_equiv
         term = scan_next(p, a, wi, s)
         e_op: wi.terms[x].e_operator
-        if (e_op == we.WO_ISNULL || wi.terms[x].wt_flags.bit_and(we.TERM_VNULL) != 0) && index_column_not_null(p.db, probe, saved_n_eq) -> next
+        if (e_op == we.WO_ISNULL || wi.terms[x].wt_flags.bit_and(we.TERM_VNULL) != 0) && index_column_not_null(p.db, probe, saved_n_eq) {
+            next
+        }
         if wi.terms[x].prereq_right.bit_and(wi.loops[nw].mask_self) != 0 -> next
         if wi.terms[x].wt_flags.bit_and(we.TERM_LIKEOPT) != 0 && e_op == we.WO_LT -> next
-        if jt.bit_and(ast.JT_LEFT.bit_or(ast.JT_LTORJ).bit_or(ast.JT_RIGHT)) != 0 && !constraint_compatible_with_outer_join(a, wi, x, si) -> next
+        if jt.bit_and(ast.JT_LEFT.bit_or(ast.JT_LTORJ).bit_or(ast.JT_RIGHT)) != 0 && !constraint_compatible_with_outer_join(a, wi, x, si) {
+            next
+        }
         if is_unique_index(p.db, probe) && saved_n_eq == p.db.indexes[probe].n_key_col - 1 {
             b.bld_flags1 = b.bld_flags1.bit_or(we.BLDF1_UNIQUE)
-        } else {
-            b.bld_flags1 = b.bld_flags1.bit_or(we.BLDF1_INDEXED)
-        }
+        } else { b.bld_flags1 = b.bld_flags1.bit_or(we.BLDF1_INDEXED) }
         wi.loops[nw].ws_flags = saved_ws_flags
         wi.loops[nw].n_eq = saved_n_eq
         wi.loops[nw].n_btm = saved_n_btm
@@ -1209,9 +1235,7 @@ add_btree_index: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopB
                 if m + log_k + 10 - (n_in + r_log_size) < 0 {
                     if n_in_mul < 2 && cg.opt_enabled(p, cg.OPT_SEEK_SCAN) {
                         wi.loops[nw].ws_flags = wi.loops[nw].ws_flags.bit_or(we.WHERE_IN_SEEKSCAN)
-                    } else {
-                        next
-                    }
+                    } else { next }
                 }
             }
             wi.loops[nw].ws_flags = wi.loops[nw].ws_flags.bit_or(we.WHERE_COLUMN_IN)
@@ -1221,11 +1245,11 @@ add_btree_index: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopB
             if i_col == conn.XN_ROWID || (i_col >= 0 && n_in_mul == 0 && saved_n_eq == p.db.indexes[probe].n_key_col - 1) {
                 if i_col == conn.XN_ROWID || p.db.indexes[probe].uniq_not_null || (p.db.indexes[probe].n_key_col == 1 && p.db.indexes[probe].on_error != ast.OE_NONE && e_op == we.WO_EQ) {
                     wi.loops[nw].ws_flags = wi.loops[nw].ws_flags.bit_or(we.WHERE_ONEROW)
-                } else {
-                    wi.loops[nw].ws_flags = wi.loops[nw].ws_flags.bit_or(we.WHERE_UNQ_WANTED)
-                }
+                } else { wi.loops[nw].ws_flags = wi.loops[nw].ws_flags.bit_or(we.WHERE_UNQ_WANTED) }
             }
-            if i_equiv > 1 -> wi.loops[nw].ws_flags = wi.loops[nw].ws_flags.bit_or(we.WHERE_TRANSCONS)
+            if i_equiv > 1 {
+                wi.loops[nw].ws_flags = wi.loops[nw].ws_flags.bit_or(we.WHERE_TRANSCONS)
+            }
         } else if e_op.bit_and(we.WO_ISNULL) != 0 {
             wi.loops[nw].ws_flags = wi.loops[nw].ws_flags.bit_or(we.WHERE_COLUMN_NULL)
         } else {
@@ -1247,7 +1271,9 @@ add_btree_index: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopB
                 wi.loops[nw].ws_flags = wi.loops[nw].ws_flags.bit_or(we.WHERE_COLUMN_RANGE).bit_or(we.WHERE_TOP_LIMIT)
                 wi.loops[nw].n_top = n_vec_len
                 p_top = x
-                if wi.loops[nw].ws_flags.bit_and(we.WHERE_BTM_LIMIT) != 0 -> p_btm = wi.loops[nw].lterm[wi.loops[nw].n_lterm - 2]
+                if wi.loops[nw].ws_flags.bit_and(we.WHERE_BTM_LIMIT) != 0 {
+                    p_btm = wi.loops[nw].lterm[wi.loops[nw].n_lterm - 2]
+                }
             }
         }
         if wi.loops[nw].ws_flags.bit_and(we.WHERE_COLUMN_RANGE) != 0 {
@@ -1266,7 +1292,9 @@ add_btree_index: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopB
         n_out: wi.loops[nw].n_out
         r_cost_idx: if p.db.indexes[probe].idx_type == ast.IDXTYPE_IPK -> n_out + 16 else -> n_out + 1 + (15 * p.db.indexes[probe].sz_idx_row) /% sz_tab_row
         r_run := util.log_est_add(r_log_size, r_cost_idx)
-        if wi.loops[nw].ws_flags.bit_and(we.WHERE_IDX_ONLY.bit_or(we.WHERE_IPK).bit_or(we.WHERE_EXPRIDX)) == 0 -> r_run = util.log_est_add(r_run, n_out + 16)
+        if wi.loops[nw].ws_flags.bit_and(we.WHERE_IDX_ONLY.bit_or(we.WHERE_IPK).bit_or(we.WHERE_EXPRIDX)) == 0 {
+            r_run = util.log_est_add(r_run, n_out + 16)
+        }
         wi.loops[nw].r_run = r_run + n_in_mul + n_in
         wi.loops[nw].n_out = n_out + n_in_mul + n_in
         loop_output_adjust(a, wi, b.wc, nw, r_size)
@@ -1327,7 +1355,9 @@ index_might_help_with_order_by: fn(db: conn.Conn, a: &ast.AST, wi: we.WhereInfo,
         } else if ce >= 0 {
             loop jj in 0..<n_key_col {
                 ce_j: ast.list_expr(a, ce, jj)
-                if db.indexes[ix].ai_column[jj] == conn.XN_EXPR && ast.expr_compare_skip(a, e, ce_j, i_cursor) == 0 -> return true
+                if db.indexes[ix].ai_column[jj] == conn.XN_EXPR && ast.expr_compare_skip(a, e, ce_j, i_cursor) == 0 {
+                    return true
+                }
             }
         }
     }
@@ -1353,9 +1383,7 @@ where_usable_partial_index: fn(p: &cg.Parse, a: &ast.AST, wi: we.WhereInfo, i_ta
         if qpsg {
             m := ex.ParseVarMatch{vars: [base.Mem]{}, used: [Int]{}}
             implies = ex.implies_expr_with(m, a, e, pw, i_tab)
-        } else {
-            implies = ex.expr_implies_expr(p, a, e, pw, i_tab)
-        }
+        } else { implies = ex.expr_implies_expr(p, a, e, pw, i_tab) }
         if implies && wi.terms[t].wt_flags.bit_and(we.TERM_VNULL) == 0 -> return true
     }
     false
@@ -1392,10 +1420,15 @@ CoveringIndexWalker: struct {
             }
             ast.WRC_CONTINUE
         }
+
         walk_has_select_cb: fn(&self) -> Bool Never! { true }
+
         walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
+
         walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+
         walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+
         walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
     }
 }
@@ -1452,9 +1485,7 @@ where_part_idx_expr: fn(p: &cg.Parse, a: &ast.AST, ix: Int, part0: Int, mask0: I
         null_row: a.items[si].jointype.bit_and(ast.JT_LEFT.bit_or(ast.JT_LTORJ)) != 0
         p.idx_exprs.push(cg.IndexedExpr{expr: d, i_data_cur: a.items[si].cursor, i_idx_cur: i_idx_cur, i_idx_col: col, b_maybe_null_row: null_row, aff: aff, next: p.f.idx_part_epr})
         p.f.idx_part_epr = p.idx_exprs.len() - 1
-    } else if col < rs.BMS - 1 {
-        mask = util.clear_bits(mask, 1 << col)
-    }
+    } else if col < rs.BMS - 1 { mask = util.clear_bits(mask, 1 << col) }
     mask
 }
 
@@ -1471,11 +1502,7 @@ add_btree: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopBuilder
     has_rowid: ex.has_rowid(p.db, t)
     probe := -1
     pk := -1
-    if is_indexed_by {
-        probe = a.items[si].u2
-    } else if !has_rowid {
-        probe = p.db.tables[t].index
-    } else {
+    if is_indexed_by -> probe = a.items[si].u2 else if !has_rowid -> probe = p.db.tables[t].index else {
         pk = conn.index_alloc(p.db)
         p.db.indexes[pk].n_key_col = 1
         p.db.indexes[pk].n_column = 1
@@ -1507,9 +1534,7 @@ add_btree: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopBuilder
             r_setup := r_log_size + r_size
             if p.db.tables[t].tab_type != conn.TABTYP_VIEW && p.db.tables[t].tab_flags.bit_and(ast.TF_EPHEMERAL) == 0 {
                 r_setup += 28
-            } else {
-                r_setup -= 25
-            }
+            } else { r_setup -= 25 }
             if r_setup < 0 -> r_setup = 0
             wi.loops[nw].r_setup = r_setup
             wi.loops[nw].n_out = 43
@@ -1577,25 +1602,29 @@ add_btree: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopBuilder
                         tt: wi.wcs[0].a[ii]
                         if !ex.expr_covered_by_index(p.db, a, wi.terms[tt].expr, cur, pr) -> break
                         tp: wi.terms[tt].truth_prob
-                        if tp <= 0 {
-                            n_lookup += tp
-                        } else {
+                        if tp <= 0 -> n_lookup += tp else {
                             n_lookup -= 1
-                            if wi.terms[tt].e_operator.bit_and(we.WO_EQ.bit_or(we.WO_IS)) != 0 -> n_lookup -= 19
+                            if wi.terms[tt].e_operator.bit_and(we.WO_EQ.bit_or(we.WO_IS)) != 0 {
+                                n_lookup -= 19
+                            }
                         }
                     }
                     r_run = util.log_est_add(r_run, n_lookup)
                 }
                 wi.loops[nw].r_run = r_run
                 loop_output_adjust(a, wi, wc, nw, r_size)
-                if jt.bit_and(ast.JT_RIGHT) == 0 || p.db.indexes[pr].col_expr < 0 -> rc = loop_insert(p, wi, b, nw)
+                if jt.bit_and(ast.JT_RIGHT) == 0 || p.db.indexes[pr].col_expr < 0 {
+                    rc = loop_insert(p, wi, b, nw)
+                }
                 wi.loops[nw].n_out = r_size
                 if rc != base.OK -> break
             }
         }
         b.bld_flags1 = 0
         rc = add_btree_index(p, a, wi, b, si, pr, 0)
-        if b.bld_flags1 == we.BLDF1_INDEXED -> p.db.tables[t].tab_flags = p.db.tables[t].tab_flags.bit_or(ast.TF_STATS_USED)
+        if b.bld_flags1 == we.BLDF1_INDEXED {
+            p.db.tables[t].tab_flags = p.db.tables[t].tab_flags.bit_or(ast.TF_STATS_USED)
+        }
     }
     if pk >= 0 {
         conn.free_index(p.db, pk)
@@ -1634,7 +1663,9 @@ add_virtual_one: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopB
         pr: wi.terms[term].prereq_right
         info.constraints[i].usable = pr.bit_and(m_usable) == pr && wi.terms[term].e_operator.bit_and(m_exclude) == 0 && (has_retry || !is_limit_term(wi, term))
     }
-    loop i in 0..<n_constraint -> info.usage[i] = conn.IndexConstraintUsage{argv_index: 0, omit: false}
+    loop i in 0..<n_constraint {
+        info.usage[i] = conn.IndexConstraintUsage{argv_index: 0, omit: false}
+    }
     info.idx_str = None
     info.idx_num = 0
     info.order_by_consumed = false
@@ -1671,8 +1702,12 @@ add_virtual_one: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopB
         wi.loops[nw].lterm[i_term] = term
         if i_term > mx_term -> mx_term = i_term
         if info.usage[i].omit {
-            if i < 16 && (1 << i).bit_and(no_omit) == 0 && i_term < 16 -> wi.loops[nw].omit_mask = wi.loops[nw].omit_mask.bit_or(1 << i_term)
-            if wi.terms[term].e_match_op == conn.INDEX_CONSTRAINT_OFFSET -> wi.loops[nw].b_omit_offset = true
+            if i < 16 && (1 << i).bit_and(no_omit) == 0 && i_term < 16 {
+                wi.loops[nw].omit_mask = wi.loops[nw].omit_mask.bit_or(1 << i_term)
+            }
+            if wi.terms[term].e_match_op == conn.INDEX_CONSTRAINT_OFFSET {
+                wi.loops[nw].b_omit_offset = true
+            }
         }
         if smask_bit32(i).bit_and(info.m_handle_in) != 0 {
             wi.loops[nw].m_handle_in = wi.loops[nw].m_handle_in.bit_or(mask_bit32(i_term))
@@ -1708,9 +1743,7 @@ add_virtual_one: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopB
     wi.loops[nw].n_out = util.log_est(if er < 0 -> er + (1 << 64) else -> er)
     if info.idx_flags.bit_and(conn.INDEX_SCAN_UNIQUE) != 0 {
         wi.loops[nw].ws_flags = wi.loops[nw].ws_flags.bit_or(we.WHERE_ONEROW)
-    } else {
-        wi.loops[nw].ws_flags = util.clear_bits(wi.loops[nw].ws_flags, we.WHERE_ONEROW)
-    }
+    } else { wi.loops[nw].ws_flags = util.clear_bits(wi.loops[nw].ws_flags, we.WHERE_ONEROW) }
     rc = loop_insert(p, wi, b, nw)
     if wi.loops[nw].need_free {
         wi.loops[nw].idx_str = None
@@ -1818,7 +1851,9 @@ add_or: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopBuilder, m
     loop k < n_wc && rc == base.OK {
         term: wi.wcs[wc].a[k]
         k += 1
-        if wi.terms[term].e_operator.bit_and(we.WO_OR) == 0 || wi.terms[term].indexable.bit_and(wi.loops[nw].mask_self) == 0 -> next
+        if wi.terms[term].e_operator.bit_and(we.WO_OR) == 0 || wi.terms[term].indexable.bit_and(wi.loops[nw].mask_self) == 0 {
+            next
+        }
         or_wc: wi.terms[term].sub_wc
         sum := we.WhereOrSet{a: [we.WhereOrCost]{}}
         once := true
@@ -1834,9 +1869,7 @@ add_or: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopBuilder, m
                 wi.wcs[temp_wc].n_base = 1
                 wi.wcs[temp_wc].a = [Int]{or_term}
                 sub.wc = temp_wc
-            } else {
-                next
-            }
+            } else { next }
             sub.or_set.a = [we.WhereOrCost]{}
             rc = if is_vtab -> add_virtual(p, a, wi, sub, m_prereq, m_unusable) else -> add_btree(p, a, wi, sub, m_prereq)
             if rc == base.OK -> rc = add_or(p, a, wi, sub, m_prereq, m_unusable)
@@ -1896,9 +1929,7 @@ add_all: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopBuilder) 
             if jt.bit_and(ast.JT_LTORJ) != 0 -> has_right_join = true
             m_prereq = m_prereq.bit_or(m_prior)
             first_past_rj = jt.bit_and(ast.JT_RIGHT) != 0
-        } else if !has_right_join {
-            m_prereq = 0
-        }
+        } else if !has_right_join { m_prereq = 0 }
         if ex.is_virtual(p.db, a.items[si].tab) {
             loop k in (i_tab + 1)..<wi.n_level {
                 sk: ast.src_item(a, src, k)
@@ -1907,9 +1938,7 @@ add_all: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopBuilder) 
                 }
             }
             rc = add_virtual(p, a, wi, b, m_prereq, m_unusable)
-        } else {
-            rc = add_btree(p, a, wi, b, m_prereq)
-        }
+        } else { rc = add_btree(p, a, wi, b, m_prereq) }
         if rc == base.OK && wi.wcs[b.wc].has_or -> rc = add_or(p, a, wi, b, m_prereq, m_unusable)
         m_prior = m_prior.bit_or(wi.loops[nw].mask_self)
         if rc != base.OK || p.db.malloc_failed {
@@ -1939,7 +1968,9 @@ path_satisfies_order_by: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, ob: In
     order_distinct_mask := 0
     ready := 0
     eq_op_mask := we.WO_EQ.bit_or(we.WO_IS).bit_or(we.WO_ISNULL)
-    if wctrl.bit_and(cg.WHERE_ORDERBY_LIMIT.bit_or(cg.WHERE_ORDERBY_MAX).bit_or(cg.WHERE_ORDERBY_MIN)) != 0 -> eq_op_mask = eq_op_mask.bit_or(we.WO_IN)
+    if wctrl.bit_and(cg.WHERE_ORDERBY_LIMIT.bit_or(cg.WHERE_ORDERBY_MAX).bit_or(cg.WHERE_ORDERBY_MIN)) != 0 {
+        eq_op_mask = eq_op_mask.bit_or(we.WO_IN)
+    }
     l := -1
     i_loop := 0
     loop is_order_distinct && ob_sat < ob_done && i_loop <= n_loop {
@@ -1949,15 +1980,13 @@ path_satisfies_order_by: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, ob: In
         if il < n_loop {
             l = path_loops[il]
             if wctrl.bit_and(cg.WHERE_ORDERBY_LIMIT) != 0 -> next
-        } else {
-            l = last
-        }
+        } else { l = last }
         if wi.loops[l].ws_flags.bit_and(we.WHERE_VIRTUALTABLE) != 0 {
-            if wi.loops[l].is_ordered != 0 && wctrl.bit_and(cg.WHERE_DISTINCTBY.bit_or(cg.WHERE_SORTBYGROUP)) != cg.WHERE_DISTINCTBY -> ob_sat = ob_done
+            if wi.loops[l].is_ordered != 0 && wctrl.bit_and(cg.WHERE_DISTINCTBY.bit_or(cg.WHERE_SORTBYGROUP)) != cg.WHERE_DISTINCTBY {
+                ob_sat = ob_done
+            }
             break
-        } else if wctrl.bit_and(cg.WHERE_DISTINCTBY) != 0 {
-            wi.loops[l].n_distinct_col = 0
-        }
+        } else if wctrl.bit_and(cg.WHERE_DISTINCTBY) != 0 { wi.loops[l].n_distinct_col = 0 }
         i_cur: a.items[ast.src_item(a, wi.tab_list, wi.loops[l].i_tab)].cursor
         loop i in 0..<n_order_by {
             if mask_bit(i).bit_and(ob_sat) != 0 -> next
@@ -2007,7 +2036,9 @@ path_satisfies_order_by: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, ob: In
                 if j < n_eq && j >= wi.loops[l].n_skip {
                     e_op: wi.terms[wi.loops[l].lterm[j]].e_operator
                     if e_op.bit_and(eq_op_mask) != 0 {
-                        if e_op.bit_and(we.WO_ISNULL.bit_or(we.WO_IS)) != 0 -> is_order_distinct = false
+                        if e_op.bit_and(we.WO_ISNULL.bit_or(we.WO_IS)) != 0 {
+                            is_order_distinct = false
+                        }
                         j += 1
                         next
                     } else if e_op.bit_and(we.WO_IN) != 0 {
@@ -2025,10 +2056,14 @@ path_satisfies_order_by: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, ob: In
                 if ix >= 0 {
                     i_column = p.db.indexes[ix].ai_column[j]
                     rev_idx = p.db.indexes[ix].sort_order[j].bit_and(base.KEYINFO_ORDER_DESC)
-                    if i_column == p.db.tables[p.db.indexes[ix].table].ipkey -> i_column = conn.XN_ROWID
+                    if i_column == p.db.tables[p.db.indexes[ix].table].ipkey {
+                        i_column = conn.XN_ROWID
+                    }
                 }
                 if is_order_distinct {
-                    if i_column >= 0 && j >= n_eq && p.db.tables[p.db.indexes[ix].table].cols[i_column].not_null == 0 -> is_order_distinct = false
+                    if i_column >= 0 && j >= n_eq && p.db.tables[p.db.indexes[ix].table].cols[i_column].not_null == 0 {
+                        is_order_distinct = false
+                    }
                     if i_column == conn.XN_EXPR -> is_order_distinct = false
                 }
                 is_match := false
@@ -2040,9 +2075,13 @@ path_satisfies_order_by: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, ob: In
                     if mask_bit(ii).bit_and(ob_sat) != 0 -> next
                     oe: ast.skip_collate_and_likely(a, ast.list_expr(a, ob, ii))
                     if oe < 0 -> next
-                    if wctrl.bit_and(cg.WHERE_GROUPBY.bit_or(cg.WHERE_DISTINCTBY)) == 0 -> b_once = false
+                    if wctrl.bit_and(cg.WHERE_GROUPBY.bit_or(cg.WHERE_DISTINCTBY)) == 0 {
+                        b_once = false
+                    }
                     if i_column >= conn.XN_ROWID {
-                        if a.exprs[oe].op != tk.TK_COLUMN && a.exprs[oe].op != tk.TK_AGG_COLUMN -> next
+                        if a.exprs[oe].op != tk.TK_COLUMN && a.exprs[oe].op != tk.TK_AGG_COLUMN {
+                            next
+                        }
                         if a.exprs[oe].itable != i_cur -> next
                         if a.exprs[oe].icolumn != i_column -> next
                     } else {
@@ -2062,7 +2101,9 @@ path_satisfies_order_by: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, ob: In
                 sf: if is_match -> a.lists[ob].items[mi].sort_flags else -> 0
                 if is_match && wctrl.bit_and(cg.WHERE_GROUPBY) == 0 {
                     if rev_set {
-                        if rev.bit_xor(rev_idx) != sf.bit_and(base.KEYINFO_ORDER_DESC) -> is_match = false
+                        if rev.bit_xor(rev_idx) != sf.bit_and(base.KEYINFO_ORDER_DESC) {
+                            is_match = false
+                        }
                     } else {
                         rev = rev_idx.bit_xor(sf.bit_and(base.KEYINFO_ORDER_DESC))
                         if rev != 0 -> rev_mask = rev_mask.bit_or(mask_bit(il))
@@ -2072,9 +2113,7 @@ path_satisfies_order_by: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, ob: In
                 if is_match && sf.bit_and(base.KEYINFO_ORDER_BIGNULL) != 0 {
                     if j == n_eq {
                         wi.loops[l].ws_flags = wi.loops[l].ws_flags.bit_or(we.WHERE_BIGNULL_SORT)
-                    } else {
-                        is_match = false
-                    }
+                    } else { is_match = false }
                 }
                 if !is_match {
                     if j == 0 || j < n_key_col -> is_order_distinct = false
@@ -2093,7 +2132,9 @@ path_satisfies_order_by: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, ob: In
                 pe: ast.list_expr(a, ob, i)
                 m_term: we.expr_usage(wi.mask_set, a, pe)
                 if m_term == 0 && !ast.expr_is_constant(a, pe) -> next
-                if m_term.bit_and(mask_not(order_distinct_mask)) == 0 -> ob_sat = ob_sat.bit_or(mask_bit(i))
+                if m_term.bit_and(mask_not(order_distinct_mask)) == 0 {
+                    ob_sat = ob_sat.bit_or(mask_bit(i))
+                }
             }
         }
     }
@@ -2133,11 +2174,7 @@ sorting_cost: fn(a: &ast.AST, wi: we.WhereInfo, n_row0: Int, n_order_by: Int, n_
 path_solver: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, n_row_est: Int) -> Int Never! {
     n_loop: wi.n_level
     mx_choice := 10
-    if n_loop <= 1 {
-        mx_choice = 1
-    } else if n_loop == 2 {
-        mx_choice = 5
-    }
+    if n_loop <= 1 -> mx_choice = 1 else if n_loop == 2 -> mx_choice = 5
     n_order_by := 0
     if wi.order_by >= 0 && n_row_est != 0 -> n_order_by = ast.list_len(a, wi.order_by)
     paths := [we.WherePath]{}
@@ -2167,7 +2204,9 @@ path_solver: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, n_row_est: Int) ->
                 f_mask: paths[fr].mask_loop
                 if wi.loops[wl].prereq.bit_and(mask_not(f_mask)) != 0 -> next
                 if wi.loops[wl].mask_self.bit_and(f_mask) != 0 -> next
-                if wi.loops[wl].ws_flags.bit_and(we.WHERE_AUTO_INDEX) != 0 && paths[fr].n_row < 3 -> next
+                if wi.loops[wl].ws_flags.bit_and(we.WHERE_AUTO_INDEX) != 0 && paths[fr].n_row < 3 {
+                    next
+                }
                 r_unsorted := util.log_est_add(wi.loops[wl].r_setup, wi.loops[wl].r_run + paths[fr].n_row)
                 r_unsorted = util.log_est_add(r_unsorted, paths[fr].r_unsorted)
                 n_out: paths[fr].n_row + wi.loops[wl].n_out
@@ -2178,12 +2217,12 @@ path_solver: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, n_row_est: Int) ->
                     r: path_satisfies_order_by(p, a, wi, wi.order_by, paths[fr].loops, wi.wctrl_flags, i_loop, wl)
                     is_ordered = r.n
                     rev_mask = r.rev
-                } else {
-                    rev_mask = paths[fr].rev_loop
-                }
+                } else { rev_mask = paths[fr].rev_loop }
                 r_cost := 0
                 if is_ordered >= 0 && is_ordered < n_order_by {
-                    if sort_cost[is_ordered] == 0 -> sort_cost[is_ordered] = sorting_cost(a, wi, n_row_est, n_order_by, is_ordered)
+                    if sort_cost[is_ordered] == 0 {
+                        sort_cost[is_ordered] = sorting_cost(a, wi, n_row_est, n_order_by, is_ordered)
+                    }
                     r_cost = util.log_est_add(r_unsorted, sort_cost[is_ordered]) + 3
                 } else {
                     r_cost = r_unsorted
@@ -2191,21 +2230,25 @@ path_solver: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, n_row_est: Int) ->
                 }
                 jj := 0
                 loop jj < n_to {
-                    if paths[to_b + jj].mask_loop == mask_new && (paths[to_b + jj].is_ordered < 0) == (is_ordered < 0) -> break
+                    if paths[to_b + jj].mask_loop == mask_new && (paths[to_b + jj].is_ordered < 0) == (is_ordered < 0) {
+                        break
+                    }
                     jj += 1
                 }
                 if jj >= n_to {
-                    if n_to >= mx_choice && (r_cost > mx_cost || (r_cost == mx_cost && r_unsorted >= mx_unsorted)) -> next
+                    if n_to >= mx_choice && (r_cost > mx_cost || (r_cost == mx_cost && r_unsorted >= mx_unsorted)) {
+                        next
+                    }
                     if n_to < mx_choice {
                         jj = n_to
                         n_to += 1
-                    } else {
-                        jj = mx_i
-                    }
+                    } else { jj = mx_i }
                 } else {
                     tc: paths[to_b + jj].r_cost
                     tn: paths[to_b + jj].n_row
-                    if tc < r_cost || (tc == r_cost && (tn < n_out || (tn == n_out && paths[to_b + jj].r_unsorted <= r_unsorted))) -> next
+                    if tc < r_cost || (tc == r_cost && (tn < n_out || (tn == n_out && paths[to_b + jj].r_unsorted <= r_unsorted))) {
+                        next
+                    }
                 }
                 t: to_b + jj
                 paths[t].mask_loop = mask_new
@@ -2326,7 +2369,9 @@ short_cut: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopBuilder
             cx: ix
             ix = p.db.indexes[cx].next
             n_key_col: p.db.indexes[cx].n_key_col
-            if !is_unique_index(p.db, cx) || p.db.indexes[cx].part_idx_where >= 0 || n_key_col > 3 -> next
+            if !is_unique_index(p.db, cx) || p.db.indexes[cx].part_idx_where >= 0 || n_key_col > 3 {
+                next
+            }
             op_mask: if p.db.indexes[cx].uniq_not_null -> we.WO_EQ.bit_or(we.WO_IS) else -> we.WO_EQ
             j := 0
             loop j < n_key_col {
@@ -2338,7 +2383,9 @@ short_cut: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopBuilder
             }
             if j != n_key_col -> next
             ws := we.WHERE_COLUMN_EQ.bit_or(we.WHERE_ONEROW).bit_or(we.WHERE_INDEXED)
-            if p.db.indexes[cx].is_covering || a.items[si].col_used.bit_and(p.db.indexes[cx].col_not_idxed) == 0 -> ws = ws.bit_or(we.WHERE_IDX_ONLY)
+            if p.db.indexes[cx].is_covering || a.items[si].col_used.bit_and(p.db.indexes[cx].col_not_idxed) == 0 {
+                ws = ws.bit_or(we.WHERE_IDX_ONLY)
+            }
             wi.loops[l].ws_flags = ws
             wi.loops[l].n_lterm = j
             wi.loops[l].n_eq = j
@@ -2354,7 +2401,9 @@ short_cut: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopBuilder
     wi.levels[0].i_tab_cur = i_cur
     wi.n_row_out = 1
     if wi.order_by >= 0 -> wi.n_ob_sat = ast.list_len(a, wi.order_by)
-    if wi.wctrl_flags.bit_and(cg.WHERE_WANT_DISTINCT) != 0 -> wi.e_distinct = cg.WHERE_DISTINCT_UNIQUE
+    if wi.wctrl_flags.bit_and(cg.WHERE_WANT_DISTINCT) != 0 {
+        wi.e_distinct = cg.WHERE_DISTINCT_UNIQUE
+    }
     if s.i_equiv > 1 -> wi.loops[l].ws_flags = wi.loops[l].ws_flags.bit_or(we.WHERE_TRANSCONS)
     true
 }
@@ -2371,13 +2420,18 @@ DeterministicWalker: struct {
             }
             ast.WRC_CONTINUE
         }
+
         walk_has_select_cb: fn(&self) -> Bool Never! { true }
+
         walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! {
             self.code = 0
             ast.WRC_ABORT
         }
+
         walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+
         walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+
         walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
     }
 }
@@ -2396,7 +2450,9 @@ expr_is_deterministic: fn(a: &ast.AST, e: Int) -> Bool Never! {
 // result; not_ready less their tables.
 omit_noop_join: fn(a: &ast.AST, wi: &we.WhereInfo, not_ready: Int) -> Int Never! {
     tab_used := we.expr_list_usage(wi.mask_set, a, wi.result_set)
-    if wi.order_by >= 0 -> tab_used = tab_used.bit_or(we.expr_list_usage(wi.mask_set, a, wi.order_by))
+    if wi.order_by >= 0 {
+        tab_used = tab_used.bit_or(we.expr_list_usage(wi.mask_set, a, wi.order_by))
+    }
     has_right_join: a.items[ast.src_item(a, wi.tab_list, 0)].jointype.bit_and(ast.JT_LTORJ) != 0
     nr := not_ready
     i := wi.n_level - 1
@@ -2407,7 +2463,9 @@ omit_noop_join: fn(a: &ast.AST, wi: &we.WhereInfo, not_ready: Int) -> Int Never!
         si: ast.src_item(a, wi.tab_list, wi.loops[l].i_tab)
         cur: a.items[si].cursor
         if a.items[si].jointype.bit_and(ast.JT_LEFT.bit_or(ast.JT_RIGHT)) != ast.JT_LEFT -> next
-        if wi.wctrl_flags.bit_and(cg.WHERE_WANT_DISTINCT) == 0 && wi.loops[l].ws_flags.bit_and(we.WHERE_ONEROW) == 0 -> next
+        if wi.wctrl_flags.bit_and(cg.WHERE_WANT_DISTINCT) == 0 && wi.loops[l].ws_flags.bit_and(we.WHERE_ONEROW) == 0 {
+            next
+        }
         mask_self: wi.loops[l].mask_self
         if tab_used.bit_and(mask_self) != 0 -> next
         n_wc: wi.wcs[0].a.len()
@@ -2428,7 +2486,9 @@ omit_noop_join: fn(a: &ast.AST, wi: &we.WhereInfo, not_ready: Int) -> Int Never!
         nr = nr.bit_and(mask_not(mask_self))
         loop k in 0..<n_wc {
             t: wi.wcs[0].a[k]
-            if wi.terms[t].prereq_all.bit_and(mask_self) != 0 -> we.add_wt_flags(wi, t, we.TERM_CODED)
+            if wi.terms[t].prereq_all.bit_and(mask_self) != 0 {
+                we.add_wt_flags(wi, t, we.TERM_CODED)
+            }
         }
         loop k in lv..<(wi.n_level - 1) -> wi.levels[k] = wi.levels[k + 1]
         wi.n_level -= 1
@@ -2468,14 +2528,12 @@ add_indexed_expr: fn(p: &cg.Parse, a: &ast.AST, ix: Int, i_idx_cur: Int, si: Int
             null_row = a.items[si].jointype.bit_and(ast.JT_LEFT.bit_or(ast.JT_LTORJ).bit_or(ast.JT_RIGHT)) != 0
         } else if j >= 0 && p.db.tables[t].cols[j].col_flags.bit_and(conn.COLFLAG_VIRTUAL) != 0 {
             e = cat.column_expr(p.db, a, t, j)
-        } else {
-            next
-        }
+        } else { next }
         if ast.expr_is_constant(a, e) -> next
         if a.exprs[e].op == tk.TK_FUNCTION {
             x: a.exprs[e].x
             n: if x >= 0 -> ast.list_len(a, x) else -> 0
-            def := cat.find_function(p.db, a.exprs[e].token ?? [U8]{}, n, p.db.enc, ) ?? next
+            def := cat.find_function(p.db, a.exprs[e].token ?? [U8]{}, n, p.db.enc) ?? next
             if def.flags.bit_and(conn.FUNC_RESULT_SUBTYPE) != 0 -> next
         }
         d: ast.expr_dup(a, e, 0)
@@ -2537,7 +2595,9 @@ where_begin: fn(p: &cg.Parse, a: &ast.AST, tab_list: Int, where_e: Int, order_by
     we.where_split(wi, a, 0, where_e, tk.TK_AND)
     if n_tab_list == 0 {
         if order_by >= 0 -> wi.n_ob_sat = ast.list_len(a, order_by)
-        if wctrl.bit_and(cg.WHERE_WANT_DISTINCT) != 0 && cg.opt_enabled(p, cg.OPT_DISTINCT_OPT) -> wi.e_distinct = cg.WHERE_DISTINCT_UNIQUE
+        if wctrl.bit_and(cg.WHERE_WANT_DISTINCT) != 0 && cg.opt_enabled(p, cg.OPT_DISTINCT_OPT) {
+            wi.e_distinct = cg.WHERE_DISTINCT_UNIQUE
+        }
         _: cg.explain(p, a, false, "SCAN CONSTANT ROW")
     } else {
         ii := 0
@@ -2558,7 +2618,9 @@ where_begin: fn(p: &cg.Parse, a: &ast.AST, tab_list: Int, where_e: Int, order_by
         x: wi.terms[t].expr
         if wi.terms[t].prereq_all != 0 -> next
         if n_tab_list != 0 && !expr_is_deterministic(a, x) -> next
-        if ast.has(a, x, ast.EP_INNER_ON) && a.items[ast.src_item(a, tab_list, 0)].jointype.bit_and(ast.JT_LTORJ) != 0 -> next
+        if ast.has(a, x, ast.EP_INNER_ON) && a.items[ast.src_item(a, tab_list, 0)].jointype.bit_and(ast.JT_LTORJ) != 0 {
+            next
+        }
         ex.expr_if_false(p, a, x, wi.i_break, cg.JUMPIFNULL)
         we.add_wt_flags(wi, t, we.TERM_CODED)
     }
@@ -2584,14 +2646,18 @@ where_begin: fn(p: &cg.Parse, a: &ast.AST, tab_list: Int, where_e: Int, order_by
         }
         if wi.wctrl_flags.bit_and(cg.WHERE_WANT_DISTINCT) != 0 -> wi.n_row_out -= 30
     }
-    if wi.order_by < 0 && p.db.flags.bit_and(conn.SQLITE_REVERSE_ORDER) != 0 -> reverse_scan_order(a, wi)
+    if wi.order_by < 0 && p.db.flags.bit_and(conn.SQLITE_REVERSE_ORDER) != 0 {
+        reverse_scan_order(a, wi)
+    }
     if cg.n_err(a) != 0 -> return where_begin_error(p, a, wi)
     not_ready := rs.ALLBITS
     if wi.n_level >= 2 && result_set >= 0 && wctrl.bit_and(cg.WHERE_AGG_DISTINCT) == 0 && cg.opt_enabled(p, cg.OPT_OMIT_NOOP_JOIN) {
         not_ready = omit_noop_join(a, wi, not_ready)
         n_tab_list = wi.n_level
     }
-    if wi.n_level >= 2 && cg.opt_enabled(p, cg.OPT_BLOOM_FILTER) -> check_bloom_filter_useful(p, a, wi)
+    if wi.n_level >= 2 && cg.opt_enabled(p, cg.OPT_BLOOM_FILTER) {
+        check_bloom_filter_useful(p, a, wi)
+    }
     p.f.n_query_loop += wi.n_row_out
     b_fordelete := 0
     if wctrl.bit_and(cg.WHERE_ONEPASS_DESIRED) != 0 {
@@ -2602,7 +2668,9 @@ where_begin: fn(p: &cg.Parse, a: &ast.AST, tab_list: Int, where_e: Int, order_by
         if b_onerow || (wctrl.bit_and(cg.WHERE_ONEPASS_MULTIROW) != 0 && !ex.is_virtual(p.db, t0) && (ws.bit_and(we.WHERE_MULTI_OR) == 0 || wctrl.bit_and(cg.WHERE_DUPLICATES_OK) != 0) && cg.opt_enabled(p, cg.OPT_ONE_PASS)) {
             wi.e_one_pass = if b_onerow -> we.ONEPASS_SINGLE else -> we.ONEPASS_MULTI
             if ex.has_rowid(p.db, t0) && ws.bit_and(we.WHERE_IDX_ONLY) != 0 {
-                if wctrl.bit_and(cg.WHERE_ONEPASS_MULTIROW) != 0 -> b_fordelete = conn.OPFLAG_FORDELETE
+                if wctrl.bit_and(cg.WHERE_ONEPASS_MULTIROW) != 0 {
+                    b_fordelete = conn.OPFLAG_FORDELETE
+                }
                 wi.loops[l0].ws_flags = util.clear_bits(ws, we.WHERE_IDX_ONLY)
             }
         }
@@ -2616,13 +2684,15 @@ where_begin: fn(p: &cg.Parse, a: &ast.AST, tab_list: Int, where_e: Int, order_by
         l: wi.levels[ii].w_loop
         ws: wi.loops[l].ws_flags
         if p.db.tables[t].tab_flags.bit_and(ast.TF_EPHEMERAL) != 0 || p.db.tables[t].tab_type == conn.TABTYP_VIEW {
-            // Nothing to open.
-        } else if ws.bit_and(we.WHERE_VIRTUALTABLE) != 0 {
+
+        } else if // Nothing to open.
+        ws.bit_and(we.WHERE_VIRTUALTABLE) != 0 {
             vt: p.db.tables[t].vtab
             _: cg.op4(p, opc.OP_VOPEN, cur, 0, 0, conn.P4.Vtab(vt))
         } else if ex.is_virtual(p.db, t) {
-            // A virtual table scanned by another level's plan.
-        } else if (ws.bit_and(we.WHERE_IDX_ONLY) == 0 && wctrl.bit_and(cg.WHERE_OR_SUBCLAUSE) == 0) || jt.bit_and(ast.JT_LTORJ.bit_or(ast.JT_RIGHT)) != 0 {
+
+        } else if // A virtual table scanned by another level's plan.
+        (ws.bit_and(we.WHERE_IDX_ONLY) == 0 && wctrl.bit_and(cg.WHERE_OR_SUBCLAUSE) == 0) || jt.bit_and(ast.JT_LTORJ.bit_or(ast.JT_RIGHT)) != 0 {
             op := opc.OP_OPEN_READ
             if wi.e_one_pass != we.ONEPASS_OFF {
                 op = opc.OP_OPEN_WRITE
@@ -2662,9 +2732,13 @@ where_begin: fn(p: &cg.Parse, a: &ast.AST, tab_list: Int, where_e: Int, order_by
             } else {
                 i_index_cur = p.f.n_tab
                 p.f.n_tab += 1
-                if p.db.indexes[ix].b_has_expr && cg.opt_enabled(p, cg.OPT_INDEXED_EXPR) -> add_indexed_expr(p, a, ix, i_index_cur, si)
+                if p.db.indexes[ix].b_has_expr && cg.opt_enabled(p, cg.OPT_INDEXED_EXPR) {
+                    add_indexed_expr(p, a, ix, i_index_cur, si)
+                }
                 pw: p.db.indexes[ix].part_idx_where
-                if pw >= 0 && jt.bit_and(ast.JT_RIGHT) == 0 -> _: where_part_idx_expr(p, a, ix, pw, 0, i_index_cur, si)
+                if pw >= 0 && jt.bit_and(ast.JT_RIGHT) == 0 {
+                    _: where_part_idx_expr(p, a, ix, pw, 0, i_index_cur, si)
+                }
             }
             wi.levels[ii].i_idx_cur = i_index_cur
             if op != 0 {
@@ -2720,9 +2794,7 @@ where_begin: fn(p: &cg.Parse, a: &ast.AST, tab_list: Int, where_e: Int, order_by
         if ws.bit_and(we.WHERE_AUTO_INDEX.bit_or(we.WHERE_BLOOMFILTER)) != 0 {
             if ws.bit_and(we.WHERE_AUTO_INDEX) != 0 {
                 construct_automatic_index(p, a, wi, 0, not_ready, ii)
-            } else {
-                construct_bloom_filter(p, a, wi, ii, not_ready)
-            }
+            } else { construct_bloom_filter(p, a, wi, ii, not_ready) }
             if p.db.malloc_failed -> return where_begin_error(p, a, wi)
         }
         _: explain_one_scan(p, a, wi, tab_list, ii, wctrl)
@@ -2772,9 +2844,7 @@ where_end: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo) Never! -[DB]> {
                 _: cg.op2(p, opc.OP_DECR_JUMP_ZERO, wi.levels[lv].reg_bignull, wi.levels[lv].p2 - 1)
             }
             if addr_seek != 0 -> cg.v_jump_here(p, addr_seek)
-        } else if wi.levels[lv].addr_cont != 0 {
-            cg.v_resolve_label(p, wi.levels[lv].addr_cont)
-        }
+        } else if wi.levels[lv].addr_cont != 0 { cg.v_resolve_label(p, wi.levels[lv].addr_cont) }
         ws: wi.loops[l].ws_flags
         n_in: wi.levels[lv].in_loops.len()
         if ws.bit_and(we.WHERE_IN_ABLE) != 0 && n_in > 0 {
@@ -2811,11 +2881,15 @@ where_end: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo) Never! -[DB]> {
             cg.v_jump_here(p, addr_skip)
             cg.v_jump_here(p, addr_skip - 2)
         }
-        if wi.levels[lv].addr_like_rep != 0 -> _: cg.op2(p, opc.OP_DECR_JUMP_ZERO, wi.levels[lv].i_like_rep_cntr >> 1, wi.levels[lv].addr_like_rep)
+        if wi.levels[lv].addr_like_rep != 0 {
+            _: cg.op2(p, opc.OP_DECR_JUMP_ZERO, wi.levels[lv].i_like_rep_cntr >> 1, wi.levels[lv].addr_like_rep)
+        }
         i_left_join: wi.levels[lv].i_left_join
         if i_left_join != 0 {
             addr: cg.op1(p, opc.OP_IF_POS, i_left_join)
-            if ws.bit_and(we.WHERE_IDX_ONLY) == 0 -> _: cg.op1(p, opc.OP_NULL_ROW, wi.levels[lv].i_tab_cur)
+            if ws.bit_and(we.WHERE_IDX_ONLY) == 0 {
+                _: cg.op1(p, opc.OP_NULL_ROW, wi.levels[lv].i_tab_cur)
+            }
             cov: wi.levels[lv].covering_idx
             if ws.bit_and(we.WHERE_INDEXED) != 0 || (ws.bit_and(we.WHERE_MULTI_OR) != 0 && cov >= 0) {
                 if ws.bit_and(we.WHERE_MULTI_OR) != 0 {
@@ -2827,9 +2901,7 @@ where_end: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo) Never! -[DB]> {
             }
             if wi.levels[lv].op == opc.OP_RETURN {
                 _: cg.op2(p, opc.OP_GOSUB, wi.levels[lv].p1, wi.levels[lv].addr_first)
-            } else {
-                _: cg.goto(p, wi.levels[lv].addr_first)
-            }
+            } else { _: cg.goto(p, wi.levels[lv].addr_first) }
             cg.v_jump_here(p, addr)
         }
     }
@@ -2847,9 +2919,7 @@ where_end: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo) Never! -[DB]> {
         }
         ws: wi.loops[l].ws_flags
         ix := -1
-        if ws.bit_and(we.WHERE_INDEXED.bit_or(we.WHERE_IDX_ONLY)) != 0 {
-            ix = wi.loops[l].index
-        } else if ws.bit_and(we.WHERE_MULTI_OR) != 0 {
+        if ws.bit_and(we.WHERE_INDEXED.bit_or(we.WHERE_IDX_ONLY)) != 0 -> ix = wi.loops[l].index else if ws.bit_and(we.WHERE_MULTI_OR) != 0 {
             ix = wi.levels[lv].covering_idx
         }
         if ix < 0 || p.db.malloc_failed -> next
@@ -2874,9 +2944,7 @@ where_end: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo) Never! -[DB]> {
                 opcode: p.f.v.ops[k].opcode
                 if opcode == opc.OP_COLUMN {
                     x := p.f.v.ops[k].p2
-                    if !has_rowid {
-                        x = p.db.indexes[pk].ai_column[x]
-                    } else {
+                    if !has_rowid -> x = p.db.indexes[pk].ai_column[x] else {
                         x = cat.storage_column_to_table(p.db, t, x)
                     }
                     x = cat.table_column_to_index(p.db, ix, x)
@@ -2887,9 +2955,7 @@ where_end: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo) Never! -[DB]> {
                 } else if opcode == opc.OP_ROWID {
                     p.f.v.ops[k].p1 = i_idx_cur
                     p.f.v.ops[k].opcode = opc.OP_IDX_ROWID
-                } else if opcode == opc.OP_IF_NULL_ROW {
-                    p.f.v.ops[k].p1 = i_idx_cur
-                }
+                } else if opcode == opc.OP_IF_NULL_ROW { p.f.v.ops[k].p1 = i_idx_cur }
             }
             k += 1
             if k >= last -> break
@@ -2914,7 +2980,9 @@ src_item_text: fn(a: ast.AST, si: Int) -> String Never! {
         return ast.text(n)
     }
     s: fi.select
-    if a.selects[s].sel_flags.bit_and(ast.SF_NESTED_FROM) != 0 -> return "(join-{a.selects[s].sel_id})"
+    if a.selects[s].sel_flags.bit_and(ast.SF_NESTED_FROM) != 0 {
+        return "(join-{a.selects[s].sel_id})"
+    }
     "(subquery-{a.selects[s].sel_id})"
 }
 
@@ -2950,7 +3018,9 @@ explain_append_term: fn(db: conn.Conn, s0: String, ix: Int, n_term: Int, i_term:
 explain_index_range: fn(db: conn.Conn, wl: we.WhereLoop) -> String Never! {
     ix: wl.index
     n_eq: wl.n_eq
-    if n_eq == 0 && wl.ws_flags.bit_and(we.WHERE_BTM_LIMIT.bit_or(we.WHERE_TOP_LIMIT)) == 0 -> return ""
+    if n_eq == 0 && wl.ws_flags.bit_and(we.WHERE_BTM_LIMIT.bit_or(we.WHERE_TOP_LIMIT)) == 0 {
+        return ""
+    }
     s := " ("
     loop i in 0..<n_eq {
         z: explain_index_column_name(db, ix, i)
@@ -2962,7 +3032,9 @@ explain_index_range: fn(db: conn.Conn, wl: we.WhereLoop) -> String Never! {
         s = explain_append_term(db, s, ix, wl.n_btm, n_eq, b_and, ">")
         b_and = true
     }
-    if wl.ws_flags.bit_and(we.WHERE_TOP_LIMIT) != 0 -> s = explain_append_term(db, s, ix, wl.n_top, n_eq, b_and, "<")
+    if wl.ws_flags.bit_and(we.WHERE_TOP_LIMIT) != 0 {
+        s = explain_append_term(db, s, ix, wl.n_top, n_eq, b_and, "<")
+    }
     "{s})"
 }
 
@@ -2973,7 +3045,9 @@ explain_one_scan: fn(p: &cg.Parse, a: &ast.AST, wi: we.WhereInfo, tab_list: Int,
     si: ast.src_item(a, tab_list, wi.levels[lv].i_from)
     wl: wi.loops[wi.levels[lv].w_loop]
     flags: wl.ws_flags
-    if flags.bit_and(we.WHERE_MULTI_OR) != 0 || wctrl.bit_and(cg.WHERE_OR_SUBCLAUSE) != 0 -> return 0
+    if flags.bit_and(we.WHERE_MULTI_OR) != 0 || wctrl.bit_and(cg.WHERE_OR_SUBCLAUSE) != 0 {
+        return 0
+    }
     is_search: flags.bit_and(we.WHERE_BTM_LIMIT.bit_or(we.WHERE_TOP_LIMIT)) != 0 || (flags.bit_and(we.WHERE_VIRTUALTABLE) == 0 && wl.n_eq > 0) || wctrl.bit_and(cg.WHERE_ORDERBY_MIN.bit_or(cg.WHERE_ORDERBY_MAX)) != 0
     verb: if is_search -> "SEARCH" else -> "SCAN"
     msg := "{verb} {src_item_text(a, si)}"
@@ -2983,31 +3057,19 @@ explain_one_scan: fn(p: &cg.Parse, a: &ast.AST, wi: we.WhereInfo, tab_list: Int,
         fmt := ""
         has_fmt := true
         if !ex.has_rowid(p.db, a.items[si].tab) && p.db.indexes[ix].idx_type == ast.IDXTYPE_PRIMARYKEY {
-            if is_search {
-                fmt = "PRIMARY KEY"
-            } else {
-                has_fmt = false
-            }
+            if is_search -> fmt = "PRIMARY KEY" else -> has_fmt = false
         } else if flags.bit_and(we.WHERE_PARTIALIDX) != 0 {
             fmt = "AUTOMATIC PARTIAL COVERING INDEX"
-        } else if flags.bit_and(we.WHERE_AUTO_INDEX) != 0 {
-            fmt = "AUTOMATIC COVERING INDEX"
-        } else if flags.bit_and(we.WHERE_IDX_ONLY) != 0 {
+        } else if flags.bit_and(we.WHERE_AUTO_INDEX) != 0 { fmt = "AUTOMATIC COVERING INDEX" } else if flags.bit_and(we.WHERE_IDX_ONLY) != 0 {
             fmt = "COVERING INDEX {name}"
-        } else {
-            fmt = "INDEX {name}"
-        }
+        } else { fmt = "INDEX {name}" }
         if has_fmt -> msg = "{msg} USING {fmt}{explain_index_range(p.db, wl)}"
     } else if flags.bit_and(we.WHERE_IPK) != 0 && flags.bit_and(we.WHERE_CONSTRAINT) != 0 {
         msg = "{msg} USING INTEGER PRIMARY KEY (rowid"
         range_op := "<"
-        if flags.bit_and(we.WHERE_COLUMN_EQ.bit_or(we.WHERE_COLUMN_IN)) != 0 {
-            range_op = "="
-        } else if flags.bit_and(we.WHERE_BOTH_LIMIT) == we.WHERE_BOTH_LIMIT {
+        if flags.bit_and(we.WHERE_COLUMN_EQ.bit_or(we.WHERE_COLUMN_IN)) != 0 -> range_op = "=" else if flags.bit_and(we.WHERE_BOTH_LIMIT) == we.WHERE_BOTH_LIMIT {
             msg = "{msg}>? AND rowid"
-        } else if flags.bit_and(we.WHERE_BTM_LIMIT) != 0 {
-            range_op = ">"
-        }
+        } else if flags.bit_and(we.WHERE_BTM_LIMIT) != 0 { range_op = ">" }
         msg = "{msg}{range_op}?)"
     } else if flags.bit_and(we.WHERE_VIRTUALTABLE) != 0 {
         idx_str: if wl.idx_str == .Val(z) -> ast.text(z) else -> ""
@@ -3055,9 +3117,7 @@ disable_term: fn(a: ast.AST, wi: &we.WhereInfo, lv: Int, t0: Int) Never! {
     loop wi.terms[t].wt_flags.bit_and(we.TERM_CODED) == 0 && (wi.levels[lv].i_left_join == 0 || ast.has(a, wi.terms[t].expr, ast.EP_OUTER_ON)) && wi.levels[lv].not_ready.bit_and(wi.terms[t].prereq_all) == 0 {
         if n_loop != 0 && wi.terms[t].wt_flags.bit_and(we.TERM_LIKE) != 0 {
             we.add_wt_flags(wi, t, we.TERM_LIKECOND)
-        } else {
-            we.add_wt_flags(wi, t, we.TERM_CODED)
-        }
+        } else { we.add_wt_flags(wi, t, we.TERM_CODED) }
         par: wi.terms[t].i_parent
         if par < 0 -> break
         t = wi.wcs[wi.terms[t].wc].a[par]
@@ -3068,9 +3128,7 @@ disable_term: fn(a: ast.AST, wi: &we.WhereInfo, lv: Int, t0: Int) Never! {
 }
 
 // Byte i of affinity string aff, 0 past its end (C's terminating NUL).
-aff_at: fn(aff: [U8], i: Int) -> Int Never! {
-    if i < aff.len() -> (Int{aff[i]}) else -> 0
-}
+aff_at: fn(aff: [U8], i: Int) -> Int Never! { if i < aff.len() -> (Int{aff[i]}) else -> 0 }
 
 // codeApplyAffinity: OP_Affinity of aff from byte off over the n registers
 // from base0, leading and trailing BLOB and NONE entries dropped.
@@ -3099,7 +3157,9 @@ update_range_affinity_str: fn(db: conn.Conn, a: ast.AST, right: Int, n: Int, aff
         k: off + i
         if k >= aff.len() -> next
         x: Int{aff[k]}
-        if ex.compare_affinity(db, a, e, x) == base.AFF_BLOB || ex.expr_needs_no_affinity_change(a, e, x) -> aff[k] = U8{base.AFF_BLOB}
+        if ex.compare_affinity(db, a, e, x) == base.AFF_BLOB || ex.expr_needs_no_affinity_change(a, e, x) {
+            aff[k] = U8{base.AFF_BLOB}
+        }
     }
 }
 
@@ -3159,12 +3219,12 @@ code_equality_term: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, t: Int, lv:
     i_reg := i_target
     if xop == tk.TK_EQ || xop == tk.TK_IS {
         i_reg = ex.expr_code_target(p, a, a.exprs[x].right, i_target)
-    } else if xop == tk.TK_ISNULL {
-        _: cg.op2(p, opc.OP_NULL, 0, i_reg)
-    } else {
+    } else if xop == tk.TK_ISNULL { _: cg.op2(p, opc.OP_NULL, 0, i_reg) } else {
         b_rev := b_rev0
         ix: wi.loops[l].index
-        if wi.loops[l].ws_flags.bit_and(we.WHERE_VIRTUALTABLE) == 0 && ix >= 0 && p.db.indexes[ix].sort_order[i_eq] != 0 -> b_rev = !b_rev
+        if wi.loops[l].ws_flags.bit_and(we.WHERE_VIRTUALTABLE) == 0 && ix >= 0 && p.db.indexes[ix].sort_order[i_eq] != 0 {
+            b_rev = !b_rev
+        }
         loop i in 0..<i_eq {
             lt: wi.loops[l].lterm[i]
             if lt >= 0 && wi.terms[lt].expr == x {
@@ -3208,15 +3268,15 @@ code_equality_term: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, t: Int, lv:
         _: cg.op2(p, if b_rev -> opc.OP_LAST else -> opc.OP_REWIND, i_tab, 0)
         wi.loops[l].ws_flags = wi.loops[l].ws_flags.bit_or(we.WHERE_IN_ABLE)
         if wi.levels[lv].in_loops.len() == 0 -> wi.levels[lv].addr_nxt = cg.v_make_label(p)
-        if i_eq > 0 && wi.loops[l].ws_flags.bit_and(we.WHERE_IN_SEEKSCAN) == 0 -> wi.loops[l].ws_flags = wi.loops[l].ws_flags.bit_or(we.WHERE_IN_EARLYOUT)
+        if i_eq > 0 && wi.loops[l].ws_flags.bit_and(we.WHERE_IN_SEEKSCAN) == 0 {
+            wi.loops[l].ws_flags = wi.loops[l].ws_flags.bit_or(we.WHERE_IN_EARLYOUT)
+        }
         i_map := 0
         loop i in i_eq..<n_lterm {
             if wi.terms[wi.loops[l].lterm[i]].expr != x -> next
             i_out: i_reg + i - i_eq
             top := 0
-            if e_type == ex.IN_INDEX_ROWID {
-                top = cg.op2(p, opc.OP_ROWID, i_tab, i_out)
-            } else {
+            if e_type == ex.IN_INDEX_ROWID -> top = cg.op2(p, opc.OP_ROWID, i_tab, i_out) else {
                 i_col := 0
                 if has_map {
                     if i_map < ai_map.len() -> i_col = ai_map[i_map]
@@ -3240,7 +3300,9 @@ code_equality_term: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, t: Int, lv:
             _: cg.op3(p, opc.OP_SEEK_HIT, wi.levels[lv].i_idx_cur, 0, i_eq)
         }
     }
-    if wi.loops[l].ws_flags.bit_and(we.WHERE_TRANSCONS) == 0 || wi.terms[t].e_operator.bit_and(we.WO_EQUIV) == 0 -> disable_term(a, wi, lv, t)
+    if wi.loops[l].ws_flags.bit_and(we.WHERE_TRANSCONS) == 0 || wi.terms[t].e_operator.bit_and(we.WO_EQUIV) == 0 {
+        disable_term(a, wi, lv, t)
+    }
     i_reg
 }
 
@@ -3272,9 +3334,7 @@ code_all_equality_terms: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: In
             if n_reg == 1 {
                 cg.release_temp_reg(p, reg_base)
                 reg_base = r1
-            } else {
-                _: cg.op2(p, opc.OP_COPY, r1, reg_base + j)
-            }
+            } else { _: cg.op2(p, opc.OP_COPY, r1, reg_base + j) }
         }
         eop: wi.terms[t].e_operator
         x: wi.terms[t].expr
@@ -3282,10 +3342,16 @@ code_all_equality_terms: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: In
             if ast.has(a, x, ast.EP_X_IS_SELECT) && j < aff.len() -> aff[j] = U8{base.AFF_BLOB}
         } else if eop.bit_and(we.WO_ISNULL) == 0 {
             right: a.exprs[x].right
-            if wi.terms[t].wt_flags.bit_and(we.TERM_IS) == 0 && rs.expr_can_be_null(p.db, a, right) -> _: cg.op2(p, opc.OP_IS_NULL, reg_base + j, wi.levels[lv].addr_brk)
+            if wi.terms[t].wt_flags.bit_and(we.TERM_IS) == 0 && rs.expr_can_be_null(p.db, a, right) {
+                _: cg.op2(p, opc.OP_IS_NULL, reg_base + j, wi.levels[lv].addr_brk)
+            }
             if cg.n_err(a) == 0 && j < aff.len() {
-                if ex.compare_affinity(p.db, a, right, Int{aff[j]}) == base.AFF_BLOB -> aff[j] = (U8{base.AFF_BLOB})
-                if ex.expr_needs_no_affinity_change(a, right, Int{aff[j]}) -> aff[j] = (U8{base.AFF_BLOB})
+                if ex.compare_affinity(p.db, a, right, Int{aff[j]}) == base.AFF_BLOB {
+                    aff[j] = (U8{base.AFF_BLOB})
+                }
+                if ex.expr_needs_no_affinity_change(a, right, Int{aff[j]}) {
+                    aff[j] = (U8{base.AFF_BLOB})
+                }
             }
         }
     }
@@ -3295,9 +3361,13 @@ code_all_equality_terms: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: In
 // whereLikeOptimizationStringFixup: the OP_String8 of a LIKE range bound
 // just coded becomes a BLOB on the loop's second pass.
 like_string_fixup: fn(p: &cg.Parse, wi: we.WhereInfo, lv: Int, t: Int) Never! {
-    if wi.terms[t].wt_flags.bit_and(we.TERM_LIKEOPT) == 0 -> return
+    if wi.terms[t].wt_flags.bit_and(we.TERM_LIKEOPT) == 0 {
+        return
+    }
     last: cg.v_last_addr(p)
-    if last < 0 -> return
+    if last < 0 {
+        return
+    }
     cntr: wi.levels[lv].i_like_rep_cntr
     p.f.v.ops[last].p3 = cntr >> 1
     p.f.v.ops[last].p5 = cntr.bit_and(1)
@@ -3337,9 +3407,7 @@ code_expr_or_vector: fn(p: &cg.Parse, a: &ast.AST, e: Int, i_reg: Int, n_reg: In
                 ex.expr_code(p, a, li, i_reg + i)
             }
         }
-    } else {
-        ex.expr_code(p, a, e, i_reg)
-    }
+    } else { ex.expr_code(p, a, e, i_reg) }
 }
 
 // whereApplyPartialIndexConstraints: the terms of clause wc that the
@@ -3352,7 +3420,9 @@ where_apply_partial_index_constraints: fn(a: &ast.AST, wi: &we.WhereInfo, truth0
     }
     loop t in wi.wcs[wc].a {
         if wi.terms[t].wt_flags.bit_and(we.TERM_CODED) != 0 -> next
-        if ast.expr_compare(a, wi.terms[t].expr, truth, i_tab_cur) == 0 -> we.add_wt_flags(wi, t, we.TERM_CODED)
+        if ast.expr_compare(a, wi.terms[t].expr, truth, i_tab_cur) == 0 {
+            we.add_wt_flags(wi, t, we.TERM_CODED)
+        }
     }
 }
 
@@ -3432,7 +3502,9 @@ code_vtab_loop: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, cur: I
             disable_term(a, wi, lv, t)
             next
         }
-        if wi.terms[t].e_operator.bit_and(we.WO_IN) == 0 || smask_bit32(j).bit_and(wi.loops[l].m_handle_in) != 0 || p.db.malloc_failed -> next
+        if wi.terms[t].e_operator.bit_and(we.WO_IN) == 0 || smask_bit32(j).bit_and(wi.loops[l].m_handle_in) != 0 || p.db.malloc_failed {
+            next
+        }
         reg: i_reg + j + 2
         loop inl in wi.levels[lv].in_loops {
             op: p.f.v.ops[inl.addr_in_top]
@@ -3524,9 +3596,7 @@ code_rowid_range_loop: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int,
         }
         _: cg.op3(p, op, cur, addr_brk, r1)
         cg.release_temp_reg(p, r_temp)
-    } else {
-        _: cg.op2(p, if b_rev -> opc.OP_LAST else -> opc.OP_REWIND, cur, addr_halt)
-    }
+    } else { _: cg.op2(p, if b_rev -> opc.OP_LAST else -> opc.OP_REWIND, cur, addr_halt) }
     if end_t >= 0 {
         x: wi.terms[end_t].expr
         right: a.exprs[x].right
@@ -3537,9 +3607,7 @@ code_rowid_range_loop: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int,
         is_vec: ast.is_vector(a, right)
         if !is_vec && (xop == tk.TK_LT || xop == tk.TK_GT) {
             test_op = if b_rev -> opc.OP_LE else -> opc.OP_GE
-        } else {
-            test_op = if b_rev -> opc.OP_LT else -> opc.OP_GT
-        }
+        } else { test_op = if b_rev -> opc.OP_LT else -> opc.OP_GT }
         if !is_vec -> disable_term(a, wi, lv, end_t)
     }
     start: cg.v_current_addr(p)
@@ -3574,9 +3642,7 @@ end_op: fn(k: Int) -> Int Never! {
     opc.OP_IDX_LT
 }
 
-b2i: fn(b: Bool) -> Int Never! {
-    if b -> 1 else -> 0
-}
+b2i: fn(b: Bool) -> Int Never! { if b -> 1 else -> 0 }
 
 // Case 4: an index scan between the bounds of its == and range terms;
 // the index the constraint loop may test terms on (-1 when the scan is
@@ -3617,7 +3683,9 @@ code_index_loop: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, cur: 
         }
         if range_start < 0 {
             c: p.db.indexes[ix].ai_column[n_eq]
-            if (c >= 0 && p.db.tables[p.db.indexes[ix].table].cols[c].not_null == 0) || c == conn.XN_EXPR -> b_seek_past_null = true
+            if (c >= 0 && p.db.tables[p.db.indexes[ix].table].cols[c].not_null == 0) || c == conn.XN_EXPR {
+                b_seek_past_null = true
+            }
         }
     }
     if ws.bit_and(we.WHERE_TOP_LIMIT.bit_or(we.WHERE_BTM_LIMIT)) == 0 && ws.bit_and(we.WHERE_BIGNULL_SORT) != 0 {
@@ -3657,14 +3725,12 @@ code_index_loop: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, cur: 
         right: a.exprs[wi.terms[range_start].expr].right
         code_expr_or_vector(p, a, right, reg_base + n_eq, n_btm)
         like_string_fixup(p, wi, lv, range_start)
-        if wi.terms[range_start].wt_flags.bit_and(we.TERM_VNULL) == 0 && rs.expr_can_be_null(p.db, a, right) -> _: cg.op2(p, opc.OP_IS_NULL, reg_base + n_eq, addr_nxt)
+        if wi.terms[range_start].wt_flags.bit_and(we.TERM_VNULL) == 0 && rs.expr_can_be_null(p.db, a, right) {
+            _: cg.op2(p, opc.OP_IS_NULL, reg_base + n_eq, addr_nxt)
+        }
         update_range_affinity_str(p.db, a, right, n_btm, start_aff, n_eq)
         n_constraint += n_btm
-        if !ast.is_vector(a, right) {
-            disable_term(a, wi, lv, range_start)
-        } else {
-            start_eq = true
-        }
+        if !ast.is_vector(a, right) -> disable_term(a, wi, lv, range_start) else -> start_eq = true
         b_seek_past_null = false
     } else if b_seek_past_null {
         start_eq = false
@@ -3709,15 +3775,13 @@ code_index_loop: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, cur: 
         right: a.exprs[wi.terms[range_end].expr].right
         code_expr_or_vector(p, a, right, reg_base + n_eq, n_top)
         like_string_fixup(p, wi, lv, range_end)
-        if wi.terms[range_end].wt_flags.bit_and(we.TERM_VNULL) == 0 && rs.expr_can_be_null(p.db, a, right) -> _: cg.op2(p, opc.OP_IS_NULL, reg_base + n_eq, addr_nxt)
+        if wi.terms[range_end].wt_flags.bit_and(we.TERM_VNULL) == 0 && rs.expr_can_be_null(p.db, a, right) {
+            _: cg.op2(p, opc.OP_IS_NULL, reg_base + n_eq, addr_nxt)
+        }
         update_range_affinity_str(p.db, a, right, n_top, end_aff, 0)
         code_apply_affinity(p, reg_base + n_eq, n_top, end_aff, 0)
         n_constraint += n_top
-        if !ast.is_vector(a, right) {
-            disable_term(a, wi, lv, range_end)
-        } else {
-            end_eq = true
-        }
+        if !ast.is_vector(a, right) -> disable_term(a, wi, lv, range_end) else -> end_eq = true
     } else if b_stop_at_null {
         if reg_bignull == 0 {
             _: cg.op2(p, opc.OP_NULL, 0, reg_base + n_eq)
@@ -3739,14 +3803,15 @@ code_index_loop: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, cur: 
         _: cg.op2(p, opc.OP_IF, reg_bignull, here + 2)
         _: cg.op4_int(p, end_op(br * 2 + spn), i_idx_cur, addr_nxt, reg_base, n_constraint + spn)
     }
-    if wi.loops[l].ws_flags.bit_and(we.WHERE_IN_EARLYOUT) != 0 -> _: cg.op3(p, opc.OP_SEEK_HIT, i_idx_cur, n_eq, n_eq)
+    if wi.loops[l].ws_flags.bit_and(we.WHERE_IN_EARLYOUT) != 0 {
+        _: cg.op3(p, opc.OP_SEEK_HIT, i_idx_cur, n_eq, n_eq)
+    }
     omit_table: wi.loops[l].ws_flags.bit_and(we.WHERE_IDX_ONLY) != 0 && wi.wctrl_flags.bit_and(cg.WHERE_OR_SUBCLAUSE.bit_or(cg.WHERE_RIGHT_JOIN)) == 0
     t: p.db.indexes[ix].table
     if omit_table {
-        // A covering index: the table is not read.
-    } else if ex.has_rowid(p.db, t) {
-        code_deferred_seek(p, wi, ix, cur, i_idx_cur)
-    } else if cur != i_idx_cur {
+
+    } else if // A covering index: the table is not read.
+    ex.has_rowid(p.db, t) { code_deferred_seek(p, wi, ix, cur, i_idx_cur) } else if cur != i_idx_cur {
         pk: cat.primary_key_index(p.db, t)
         n_pk: p.db.indexes[pk].n_key_col
         i_rowid_reg: cg.get_temp_range(p, n_pk)
@@ -3761,7 +3826,7 @@ code_index_loop: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, cur: 
         if pw >= 0 -> where_apply_partial_index_constraints(a, wi, pw, cur, 0)
     }
     ws2: wi.loops[l].ws_flags
-    wi.levels[lv].op = if ws2.bit_and(we.WHERE_ONEROW) != 0 -> opc.OP_NOOP else -> if b_rev -> opc.OP_PREV else -> opc.OP_NEXT
+    wi.levels[lv].op = if ws2.bit_and(we.WHERE_ONEROW) != 0 -> opc.OP_NOOP else if b_rev -> opc.OP_PREV else -> opc.OP_NEXT
     wi.levels[lv].p1 = i_idx_cur
     wi.levels[lv].p3 = if ws2.bit_and(we.WHERE_UNQ_WANTED) != 0 -> 1 else -> 0
     if ws2.bit_and(we.WHERE_CONSTRAINT) == 0 -> wi.levels[lv].p5 = conn.STMTSTATUS_FULLSCAN_STEP
@@ -3793,7 +3858,9 @@ code_multi_or_loop: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, cu
     if wi.n_level > 1 {
         n_not_ready: wi.n_level - lv - 1
         items := [Int]{si}
-        loop k in 1..<(n_not_ready + 1) -> items.push(ast.src_item(a, wi.tab_list, wi.levels[lv + k].i_from))
+        loop k in 1..<(n_not_ready + 1) {
+            items.push(ast.src_item(a, wi.tab_list, wi.levels[lv + k].i_from))
+        }
         a.srclists.push(ast.SQLSrcList{items: items, nalloc: n_not_ready + 1})
         or_tab = a.srclists.len() - 1
     }
@@ -3818,7 +3885,9 @@ code_multi_or_loop: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, cu
         loop i_term in 0..<n_wc {
             tt: wi.wcs[0].a[i_term]
             if tt == term -> next
-            if wi.terms[tt].wt_flags.bit_and(we.TERM_VIRTUAL.bit_or(we.TERM_CODED).bit_or(we.TERM_SLICE)) != 0 -> next
+            if wi.terms[tt].wt_flags.bit_and(we.TERM_VIRTUAL.bit_or(we.TERM_CODED).bit_or(we.TERM_SLICE)) != 0 {
+                next
+            }
             if wi.terms[tt].e_operator.bit_and(we.WO_ALL) == 0 -> next
             e: wi.terms[tt].expr
             if ast.has(a, e, ast.EP_SUBQUERY) -> next
@@ -3831,7 +3900,9 @@ code_multi_or_loop: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, cu
     n_or: wi.wcs[or_wc].a.len()
     loop ii in 0..<n_or {
         or_term: wi.wcs[or_wc].a[ii]
-        if wi.terms[or_term].left_cursor != cur && wi.terms[or_term].e_operator.bit_and(we.WO_AND) == 0 -> next
+        if wi.terms[or_term].left_cursor != cur && wi.terms[or_term].e_operator.bit_and(we.WO_AND) == 0 {
+            next
+        }
         del: ast.expr_dup(a, wi.terms[or_term].expr, 0)
         if p.db.malloc_failed {
             ast.expr_delete(a, del)
@@ -3857,7 +3928,9 @@ code_multi_or_loop: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, cu
                     pk: cat.primary_key_index(p.db, t_tab)
                     n_pk: p.db.indexes[pk].n_key_col
                     r: cg.get_temp_range(p, n_pk)
-                    loop i_pk in 0..<n_pk -> ex.expr_code_get_column_of_table(p, a, t_tab, cur, p.db.indexes[pk].ai_column[i_pk], r + i_pk)
+                    loop i_pk in 0..<n_pk {
+                        ex.expr_code_get_column_of_table(p, a, t_tab, cur, p.db.indexes[pk].ai_column[i_pk], r + i_pk)
+                    }
                     if i_set != 0 -> jmp1 = cg.op4_int(p, opc.OP_FOUND, reg_rowset, 0, r, n_pk)
                     if i_set >= 0 {
                         _: cg.op3(p, opc.OP_MAKE_RECORD, r, n_pk, reg_rowid)
@@ -3874,9 +3947,7 @@ code_multi_or_loop: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, cu
             sub_ix: sw.loops[sub_l].index
             if sw.loops[sub_l].ws_flags.bit_and(we.WHERE_INDEXED) != 0 && (ii == 0 || sub_ix == cov) && (ex.has_rowid(p.db, t_tab) || p.db.indexes[sub_ix].idx_type != ast.IDXTYPE_PRIMARYKEY) {
                 cov = sub_ix
-            } else {
-                cov = -1
-            }
+            } else { cov = -1 }
             if sw.b_deferred_seek -> wi.b_deferred_seek = true
             where_end(p, a, sw)
             cg.explain_pop(p)
@@ -3931,17 +4002,13 @@ code_one_loop_start: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, n
         _: cg.op3(p, opc.OP_INIT_COROUTINE, reg_yield, 0, a.items[si].addr_fill_sub)
         wi.levels[lv].p2 = cg.op2(p, opc.OP_YIELD, reg_yield, addr_brk)
         wi.levels[lv].op = opc.OP_GOTO
-    } else if ws.bit_and(we.WHERE_VIRTUALTABLE) != 0 {
-        code_vtab_loop(p, a, wi, lv, cur, b_rev)
-    } else if ws.bit_and(we.WHERE_IPK) != 0 && ws.bit_and(we.WHERE_COLUMN_IN.bit_or(we.WHERE_COLUMN_EQ)) != 0 {
+    } else if ws.bit_and(we.WHERE_VIRTUALTABLE) != 0 { code_vtab_loop(p, a, wi, lv, cur, b_rev) } else if ws.bit_and(we.WHERE_IPK) != 0 && ws.bit_and(we.WHERE_COLUMN_IN.bit_or(we.WHERE_COLUMN_EQ)) != 0 {
         code_rowid_eq_loop(p, a, wi, lv, cur, b_rev, not_ready)
     } else if ws.bit_and(we.WHERE_IPK) != 0 && ws.bit_and(we.WHERE_COLUMN_RANGE) != 0 {
         code_rowid_range_loop(p, a, wi, lv, cur, b_rev, addr_halt)
     } else if ws.bit_and(we.WHERE_INDEXED) != 0 {
         ix = code_index_loop(p, a, wi, lv, cur, b_rev, not_ready)
-    } else if ws.bit_and(we.WHERE_MULTI_OR) != 0 {
-        code_multi_or_loop(p, a, wi, lv, cur, si)
-    } else if a.items[si].is_recursive {
+    } else if ws.bit_and(we.WHERE_MULTI_OR) != 0 { code_multi_or_loop(p, a, wi, lv, cur, si) } else if a.items[si].is_recursive {
         wi.levels[lv].op = opc.OP_NOOP
     } else {
         wi.levels[lv].op = if b_rev -> opc.OP_PREV else -> opc.OP_NEXT
@@ -3966,7 +4033,9 @@ code_one_loop_start: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, n
             if outer_join {
                 if !ast.has(a, e, ast.EP_OUTER_ON.bit_or(ast.EP_INNER_ON)) -> next
                 if jt.bit_and(ast.JT_LEFT) != 0 && !ast.has(a, e, ast.EP_OUTER_ON) -> next
-                if we.get_mask(wi.mask_set, a.exprs[e].w).bit_and(wi.levels[lv].not_ready) != 0 -> next
+                if we.get_mask(wi.mask_set, a.exprs[e].w).bit_and(wi.levels[lv].not_ready) != 0 {
+                    next
+                }
             }
             if i_loop == 1 && !ex.expr_covered_by_index(p.db, a, e, wi.levels[lv].i_tab_cur, ix) {
                 i_next = 2
@@ -3979,7 +4048,9 @@ code_one_loop_start: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, n
             skip_like_addr := 0
             if f.bit_and(we.TERM_LIKECOND) != 0 {
                 x: wi.levels[lv].i_like_rep_cntr
-                if x > 0 -> skip_like_addr = cg.op1(p, if x.bit_and(1) != 0 -> opc.OP_IF_NOT else -> opc.OP_IF, x >> 1)
+                if x > 0 {
+                    skip_like_addr = cg.op1(p, if x.bit_and(1) != 0 -> opc.OP_IF_NOT else -> opc.OP_IF, x >> 1)
+                }
             }
             ex.expr_if_false(p, a, e, addr_cont, cg.JUMPIFNULL)
             if skip_like_addr != 0 -> cg.v_jump_here(p, skip_like_addr)
@@ -3999,7 +4070,9 @@ code_one_loop_start: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, n
         alt: where_find_term(p, a, wi, 0, cur, wi.terms[t].left_column, not_ready, we.WO_EQ.bit_or(we.WO_IN).bit_or(we.WO_IS), -1)
         if alt < 0 || wi.terms[alt].wt_flags.bit_and(we.TERM_CODED) != 0 -> next
         ax: wi.terms[alt].expr
-        if wi.terms[alt].e_operator.bit_and(we.WO_IN) != 0 && ast.has(a, ax, ast.EP_X_IS_SELECT) && ast.list_len(a, a.selects[a.exprs[ax].x].elist) > 1 -> next
+        if wi.terms[alt].e_operator.bit_and(we.WO_IN) != 0 && ast.has(a, ax, ast.EP_X_IS_SELECT) && ast.list_len(a, a.selects[a.exprs[ax].x].elist) > 1 {
+            next
+        }
         alt_e := a.exprs[ax].copy()
         alt_e.left = a.exprs[e].left
         ae: ast.push_expr(a, alt_e)
@@ -4017,7 +4090,9 @@ code_one_loop_start: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, n
             pk: cat.primary_key_index(p.db, t_tab)
             n_pk = p.db.indexes[pk].n_key_col
             r = cg.get_temp_range(p, n_pk + 1)
-            loop i_pk in 0..<n_pk -> ex.expr_code_get_column_of_table(p, a, t_tab, cur, p.db.indexes[pk].ai_column[i_pk], r + 1 + i_pk)
+            loop i_pk in 0..<n_pk {
+                ex.expr_code_get_column_of_table(p, a, t_tab, cur, p.db.indexes[pk].ai_column[i_pk], r + 1 + i_pk)
+            }
         }
         rj: wi.levels[lv].rj
         jmp1: cg.op4_int(p, opc.OP_FOUND, rj.i_match, 0, r + 1, n_pk)
@@ -4074,7 +4149,9 @@ right_join_loop: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int) Never
     if a.items[si].jointype.bit_and(ast.JT_LTORJ) == 0 {
         m_all = m_all.bit_or(wi.loops[l].mask_self)
         loop t in wi.wcs[0].a {
-            if wi.terms[t].wt_flags.bit_and(we.TERM_VIRTUAL.bit_or(we.TERM_SLICE)) != 0 && wi.terms[t].e_operator != we.WO_ROWVAL -> break
+            if wi.terms[t].wt_flags.bit_and(we.TERM_VIRTUAL.bit_or(we.TERM_SLICE)) != 0 && wi.terms[t].e_operator != we.WO_ROWVAL {
+                break
+            }
             if wi.terms[t].prereq_all.bit_and(mask_not(m_all)) != 0 -> next
             e: wi.terms[t].expr
             if ast.has(a, e, ast.EP_OUTER_ON.bit_or(ast.EP_INNER_ON)) -> next
@@ -4096,13 +4173,13 @@ right_join_loop: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int) Never
         r: p.f.n_mem
         n_pk := 1
         addr_cont: sw.i_continue
-        if ex.has_rowid(p.db, t_tab) {
-            ex.expr_code_get_column_of_table(p, a, t_tab, i_cur, -1, r)
-        } else {
+        if ex.has_rowid(p.db, t_tab) -> ex.expr_code_get_column_of_table(p, a, t_tab, i_cur, -1, r) else {
             pk: cat.primary_key_index(p.db, t_tab)
             n_pk = p.db.indexes[pk].n_key_col
             p.f.n_mem += n_pk - 1
-            loop i_pk in 0..<n_pk -> ex.expr_code_get_column_of_table(p, a, t_tab, i_cur, p.db.indexes[pk].ai_column[i_pk], r + i_pk)
+            loop i_pk in 0..<n_pk {
+                ex.expr_code_get_column_of_table(p, a, t_tab, i_cur, p.db.indexes[pk].ai_column[i_pk], r + i_pk)
+            }
         }
         jmp: cg.op4_int(p, opc.OP_FILTER, rj.reg_bloom, 0, r, n_pk)
         _: cg.op4_int(p, opc.OP_FOUND, rj.i_match, addr_cont, r, n_pk)
@@ -4148,9 +4225,7 @@ where_test_has_op: fn(p: cg.Parse, opcode: Int, p1: Int) -> Bool Never! {
         assert(wi.levels[0].op == opc.OP_NEXT && wi.levels[0].p1 == 0)
         where_end(p, a, wi)
         assert(where_test_has_op(p, opc.OP_REWIND, 0) && where_test_has_op(p, opc.OP_NEXT, 0))
-    } else {
-        assert(false)
-    }
+    } else { assert(false) }
 }
 
 #Test("rowid == constant takes the short cut to one OP_SeekRowid") {
@@ -4172,9 +4247,7 @@ where_test_has_op: fn(p: cg.Parse, opcode: Int, p1: Int) -> Bool Never! {
         assert(wi.levels[0].op == opc.OP_NOOP)
         where_end(p, a, wi)
         assert(where_test_has_op(p, opc.OP_SEEK_ROWID, 0) && !where_test_has_op(p, opc.OP_REWIND, 0))
-    } else {
-        assert(false)
-    }
+    } else { assert(false) }
 }
 
 #Test("explain text names the item and the index range") {

@@ -25,7 +25,7 @@ csv_fixture_same: fn(value: I64, template: I64) -> Bool {
 
 csv_fixture_fields: fn(records: I64, index: I64, first: I64, second: I64) -> Bool {
     record: csv_words_get(records, index)
-    if (trap_word(record) != (if (second == I64{0}) -> I64{1} else -> I64{2})) -> return false
+    if (trap_word(record) != (if (second == I64{0}) -> I64{1} else -> I64{2})) { return false }
     if !csv_fixture_same(csv_words_get(record, I64{0}), first) -> return false
     second == I64{0} || csv_fixture_same(csv_words_get(record, I64{1}), second)
 }
@@ -53,22 +53,40 @@ csv_fixture_rejects: fn(template: I64, reason: I64) -> Bool {
 
 #Export(c) jet_rt_codec_csv_fixture: fn() -> I64 {
     out: jet_rt_alloc(I64{8}, I64{8})
-    if (csv_fixture_parse(rt_static_text("a,\"b\"\"c|\nd\"|\n\"\",e"), out) != I64{1}) -> return I64{1}
+    if (csv_fixture_parse(rt_static_text("a,\"b\"\"c|\nd\"|\n\"\",e"), out) != I64{1}) {
+        return I64{1}
+    }
     records: trap_word(out)
-    if (trap_word(records) != I64{2}) -> return I64{2}
-    if !csv_fixture_fields(records, I64{0}, rt_static_text("a"), rt_static_text("b\"c|\nd")) -> return I64{3}
-    if !csv_fixture_fields(records, I64{1}, rt_static_text(""), rt_static_text("e")) -> return I64{4}
+    if (trap_word(records) != I64{2}) { return I64{2} }
+    if !csv_fixture_fields(records, I64{0}, rt_static_text("a"), rt_static_text("b\"c|\nd")) {
+        return I64{3}
+    }
+    if !csv_fixture_fields(records, I64{1}, rt_static_text(""), rt_static_text("e")) {
+        return I64{4}
+    }
     csv_records_free(records)
-    if (csv_fixture_parse(rt_static_text(""), out) != I64{1} || trap_word(trap_word(out)) != I64{0}) -> return I64{5}
+    if (csv_fixture_parse(rt_static_text(""), out) != I64{1} || trap_word(trap_word(out)) != I64{0}) {
+        return I64{5}
+    }
     csv_records_free(trap_word(out))
-    if (csv_fixture_parse(rt_static_text("x\n\n"), out) != I64{1}) -> return I64{6}
+    if (csv_fixture_parse(rt_static_text("x\n\n"), out) != I64{1}) { return I64{6} }
     blank: trap_word(out)
-    if (trap_word(blank) != I64{2} || !csv_fixture_fields(blank, I64{1}, rt_static_text(""), I64{0})) -> return I64{7}
+    if (trap_word(blank) != I64{2} || !csv_fixture_fields(blank, I64{1}, rt_static_text(""), I64{0})) {
+        return I64{7}
+    }
     csv_records_free(blank)
     jet_rt_free(out, I64{8}, I64{8})
-    if !csv_fixture_rejects(rt_static_text("a|b"), rt_static_text("E2701: CSV row 1, line 1, column 2 — bare CR is not a record ending")) -> return I64{8}
-    if !csv_fixture_rejects(rt_static_text("a,\"x"), rt_static_text("E2701: CSV row 1, line 1, column 5 — quoted field ended before its closing quote")) -> return I64{9}
-    if !csv_fixture_rejects(rt_static_text("\"ok\"junk"), rt_static_text("E2701: CSV row 1, line 1, column 5 — only quote, comma, CRLF, LF, or EOF may follow a closing quote")) -> return I64{10}
-    if !csv_fixture_rejects(rt_static_text("h|\n\"bad|\nvalue"), rt_static_text("E2701: CSV row 2, line 3, column 6 — quoted field ended before its closing quote")) -> return I64{11}
+    if !csv_fixture_rejects(rt_static_text("a|b"), rt_static_text("E2701: CSV row 1, line 1, column 2 — bare CR is not a record ending")) {
+        return I64{8}
+    }
+    if !csv_fixture_rejects(rt_static_text("a,\"x"), rt_static_text("E2701: CSV row 1, line 1, column 5 — quoted field ended before its closing quote")) {
+        return I64{9}
+    }
+    if !csv_fixture_rejects(rt_static_text("\"ok\"junk"), rt_static_text("E2701: CSV row 1, line 1, column 5 — only quote, comma, CRLF, LF, or EOF may follow a closing quote")) {
+        return I64{10}
+    }
+    if !csv_fixture_rejects(rt_static_text("h|\n\"bad|\nvalue"), rt_static_text("E2701: CSV row 2, line 3, column 6 — quoted field ended before its closing quote")) {
+        return I64{11}
+    }
     I64{0}
 }

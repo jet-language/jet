@@ -6,11 +6,23 @@ use {
 
 // Phantom parameters have neither Display nor Equatable; stored fields govern.
 #!Equatable
-FromSpace: struct { id: Int }
+FromSpace: struct {
+    id: Int
+}
+
 #!Equatable
-ToSpace: struct { id: Int }
-Phantom: enum<T> { Marker }
-qualified: fn(value: &&Label<FromSpace, ToSpace>) -> labels.Label<FromSpace, ToSpace> { value.move() }
+ToSpace: struct {
+    id: Int
+}
+
+Phantom: enum<T> {
+    Marker
+}
+
+qualified: fn(value: &&Label<FromSpace, ToSpace>) -> labels.Label<FromSpace, ToSpace> {
+    value.move()
+}
+
 run: fn() {
     a: Label<FromSpace, ToSpace>{text: "source identity"}
     b: qualified(a.copy())

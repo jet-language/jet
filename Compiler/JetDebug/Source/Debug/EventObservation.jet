@@ -10,11 +10,15 @@ use {
 
 // Rust MAX_SNAPSHOT_BYTES / MAX_EVENTS.
 DEBUG_EVENT_MAX_SNAPSHOT_BYTES: 1048576
+
 DEBUG_EVENT_MAX_EVENTS: 256
+
 DEBUG_EVENT_FIELD_COUNT: 15
 
 #Error
-DebugEventObservationError: struct { message: String }
+DebugEventObservationError: struct {
+    message: String
+}
 
 debug_event_error: fn(message: String) -> DebugEventObservationError Never! {
     DebugEventObservationError{message: message}
@@ -28,18 +32,20 @@ render_event_observations: fn(snapshot: String) -> String DebugEventObservationE
     root: foundation_parse_protocol_json(snapshot) ?? return Err(debug_event_error("runtime observation is not valid JSON"))
     no_sequence: "runtime observation has no event sequence"
     if debug_event_field(root, "event_observations") == {
-        .Val(sequence) -> {
-            if sequence == {
-                .Array(rows) -> {
-                    if rows.len() > DEBUG_EVENT_MAX_EVENTS {
-                        return Err(debug_event_error("runtime event observation exceeds the 256-record limit"))
-                    }
-                    return debug_render_event_rows(rows)
+        .Val(sequence) -> if sequence == {
+            .Array(rows) -> {
+                if rows.len() > DEBUG_EVENT_MAX_EVENTS {
+                    return Err(debug_event_error("runtime event observation exceeds the 256-record limit"))
                 }
-                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return Err(debug_event_error(no_sequence)) }
+                return debug_render_event_rows(rows)
+            }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {
+                return Err(debug_event_error(no_sequence))
             }
         }
-        .None -> { return Err(debug_event_error(no_sequence)) }
+        .None -> {
+            return Err(debug_event_error(no_sequence))
+        }
     }
 }
 
@@ -80,7 +86,9 @@ debug_render_event_rows: fn(events: [Dyn]) -> String DebugEventObservationError!
                 terminal: debug_event_closed(fields, "terminal") ?? return Err(err)
                 lines.push("sequence={sequence} source={source} event={event_id} owner={owner_id} subscription={subscription_id} dispatch={dispatch_id} lifecycle={lifecycle} queued={queued} blocked={blocked} running={running} capacity={capacity} overflow={overflow} priority={priority} failure={failure} terminal={terminal}")
             }
-            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> { return Err(debug_event_error("runtime event observation is not an object")) }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> {
+                return Err(debug_event_error("runtime event observation is not an object"))
+            }
         }
     }
     Ok(lines.join("\n"))
@@ -159,7 +167,9 @@ debug_event_count: fn(object: Dyn, key: String) -> Int DebugEventObservationErro
 debug_event_closed: fn(object: Dyn, key: String) -> String DebugEventObservationError! {
     value: debug_event_field(object, key) ?? return Err(debug_event_error("runtime event observation has invalid `{key}`"))
     if value == .Text(text) {
-        if !debug_event_allowed(key, text) -> return Err(debug_event_error("runtime event observation has unknown `{key}` value"))
+        if !debug_event_allowed(key, text) {
+            return Err(debug_event_error("runtime event observation has unknown `{key}` value"))
+        }
         return Ok(text)
     }
     Err(debug_event_error("runtime event observation has invalid `{key}`"))

@@ -5,9 +5,13 @@
 use gh_files: core.files
 
 GH_SYNTAX_DIR: "Compiler/JetFoundation/Data/Syntax"
+
 GH_VSCODE: "Tools/editors/vscode/syntaxes/jet.tmLanguage.json"
+
 GH_TREE_SITTER: "Tools/editors/tree-sitter/grammar.js"
+
 GH_ZED: "Tools/editors/zed/languages/jet/highlights.scm"
+
 GH_NODE_TYPES: "Tools/editors/tree-sitter/src/node-types.json"
 
 GhToken: struct {
@@ -58,7 +62,9 @@ gh_unescape: fn(body: String) -> String {
 
 gh_strip_comma: fn(text: String) -> String {
     trimmed: text.trim().copy()
-    if trimmed.ends_with(",") -> return gh_slice(trimmed, 0, trimmed.count_bytes() - 1).trim().copy()
+    if trimmed.ends_with(",") {
+        return gh_slice(trimmed, 0, trimmed.count_bytes() - 1).trim().copy()
+    }
     trimmed
 }
 
@@ -76,11 +82,7 @@ gh_constants: fn() -> [(name: String, value: String)] {
             close := -1
             escaped := false
             loop (index, byte) in rest.bytes() {
-                if escaped {
-                    escaped = false
-                } else if byte == (U8{92}) {
-                    escaped = true
-                } else if byte == (U8{34}) {
+                if escaped -> escaped = false else if byte == (U8{92}) -> escaped = true else if byte == (U8{34}) {
                     close = index
                     break
                 }
@@ -96,7 +98,9 @@ gh_constants: fn() -> [(name: String, value: String)] {
 }
 
 gh_resolve: fn(constants: [(name: String, value: String)], written: String) -> String {
-    if written.starts_with("\"") -> return gh_unescape(gh_slice(written, 1, written.count_bytes() - 1))
+    if written.starts_with("\"") {
+        return gh_unescape(gh_slice(written, 1, written.count_bytes() - 1))
+    }
     loop constant in constants {
         if constant.name == written -> return constant.value
     }
@@ -113,9 +117,7 @@ gh_active_markers: fn() -> [String] {
             _: gh_index(line, "{{") ?? panic("marker struct without a body: {line}")
             colon: gh_index(line, ": struct") ?? panic("marker struct without a name: {line}")
             current = Val(gh_slice(line, 0, colon).trim().copy())
-        } else if line.starts_with("}}") {
-            current = None
-        } else if current == .Val(name) && line.trim().starts_with("impl Marker") {
+        } else if line.starts_with("}}") { current = None } else if current == .Val(name) && line.trim().starts_with("impl Marker") {
             names.push(name.copy())
             current = None
         }
@@ -287,7 +289,9 @@ gh_grammar_keyword_words: fn() -> [String] {
     loop token in gh_tokens() {
         if gh_bracket(token.text) -> next
         loop entry in sections {
-            if !gh_section_has_token(entry.section, token.text) -> missing.push("{entry.path} generated section missing `{token.text}` ({token.class})")
+            if !gh_section_has_token(entry.section, token.text) {
+                missing.push("{entry.path} generated section missing `{token.text}` ({token.class})")
+            }
         }
     }
     assert_eq(missing.join("\n"), "")
@@ -334,7 +338,9 @@ gh_grammar_keyword_words: fn() -> [String] {
     }
     expected := [String]{}
     loop token in gh_tokens() {
-        if token.class != "MarkerRule" && gh_is_ident(token.text) && gh_has(anonymous, token.text) && !gh_has(expected, token.text) -> expected.push(token.text)
+        if token.class != "MarkerRule" && gh_is_ident(token.text) && gh_has(anonymous, token.text) && !gh_has(expected, token.text) {
+            expected.push(token.text)
+        }
     }
     actual.sort()
     expected.sort()
@@ -372,7 +378,9 @@ gh_grammar_keyword_words: fn() -> [String] {
     intruders := [String]{}
     loop constant in gh_constants() {
         if !constant.name.starts_with("FOREIGN_") || !gh_is_ident(constant.value) -> next
-        if gh_has(words, constant.value) && !gh_has(keywords, constant.value) && !gh_has(intruders, constant.value) -> intruders.push(constant.value)
+        if gh_has(words, constant.value) && !gh_has(keywords, constant.value) && !gh_has(intruders, constant.value) {
+            intruders.push(constant.value)
+        }
     }
     assert_eq(intruders.join(" "), "")
 }

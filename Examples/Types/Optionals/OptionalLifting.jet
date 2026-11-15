@@ -3,9 +3,7 @@ Config: struct {
     limit: Int?
 }
 
-describe: fn(value: String?) -> String {
-    value ?? "none"
-}
+describe: fn(value: String?) -> String { value ?? "none" }
 
 find: fn(n: Int) -> Int? {
     if n > 0 -> return n
@@ -17,13 +15,9 @@ Box: struct {
 }
 
 // A call result fills an optional argument or place the same way a name does.
-make_box: fn(v: Int) -> Box {
-    Box{v: v}
-}
+make_box: fn(v: Int) -> Box { Box{v: v} }
 
-box_value: fn(box: Box?) -> Int {
-    (box ?? Box{v: 0}).v
-}
+box_value: fn(box: Box?) -> Int { (box ?? Box{v: 0}).v }
 
 // An enum payload, a map value and an `Ok(...)` success payload are slots
 // too, and `?? return` hands back a plain value that the `Int?` result lifts.
@@ -44,7 +38,7 @@ doubled: fn(n: Int) -> Int? {
 }
 
 run: fn() {
-    limit := Val(10)          // no expected type: Val still infers Int?
+    limit := Val(10)  // no expected type: Val still infers Int?
     cfg: Config{limit: 5}
     ids: [Int?]{1, None}
     limit = 20
@@ -66,7 +60,7 @@ run: fn() {
     print(Config{limit: box_value(make_box(9))}.limit ?? 0)
     slot: Slot.Held(4)
     if slot == .Held(inner) -> print("held {inner ?? 0}")
-    table: [String: Int?]{"a": 1, "b": None}
+    table: [String:Int?]{"a": 1, "b": None}
     print(table["a"] ?? 0)
     if first_byte([U8]{7, 8}) == .Ok(b) -> print("byte {b ?? 0}")
     print(doubled(6) ?? 0)

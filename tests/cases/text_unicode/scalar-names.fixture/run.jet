@@ -8,9 +8,7 @@ use {
 s3_unicode_scalar: fn(cp: Int) -> String Never! {
     if cp < 0 || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff) -> return ""
     bytes := [U8]{}
-    if cp < 128 {
-        bytes.push(U8{cp})
-    } else if cp < 2048 {
+    if cp < 128 -> bytes.push(U8{cp}) else if cp < 2048 {
         bytes.push(U8{(cp >> 6).bit_or(192)})
         bytes.push(U8{cp.bit_and(63).bit_or(128)})
     } else if cp < 65536 {
@@ -36,9 +34,7 @@ s3_unicode_split_ws: fn(text: String) -> [String] Never! {
                 out.push(current)
                 current = ""
             }
-        } else {
-            current = "{current}{scalar}"
-        }
+        } else { current = "{current}{scalar}" }
     }
     if current.bytes().len() > 0 -> out.push(current)
     out
@@ -56,8 +52,8 @@ s3_unicode_cps: fn(field: String) -> String Never! {
 }
 
 S3UnicodeBreak: struct {
-    full: String,
-    segments: [String],
+    full: String
+    segments: [String]
 }
 
 // Original parse_break(): malformed hex/scalar => None; empty => None.
@@ -119,6 +115,4 @@ s3_unicode_scalar_names: fn() {
     print(checked)
 }
 
-run: fn() {
-    s3_unicode_scalar_names()
-}
+run: fn() { s3_unicode_scalar_names() }

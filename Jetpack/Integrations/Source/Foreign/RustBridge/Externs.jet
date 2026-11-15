@@ -8,16 +8,40 @@
 // `CRecordDefinitions`.
 use {
     jet_foundation.[
-        AccessConvention, CModule, Diagnostic, ExternFn, ExternRustBlock, Func, InlineAsmContract,
-        InlineAsmOutput, InternalTag, Item, Measure, NamedSpan, Param, StructDef, StructLayout,
-        TagMarker, Type, TypeTupleField, diagnostic_from_registry, dimension_identity,
-        inline_assembly_contract, inline_assembly_register_known, inline_assembly_target_supported,
+        AccessConvention,
+        CModule,
+        Diagnostic,
+        ExternFn,
+        ExternRustBlock,
+        Func,
+        InlineAsmContract,
+        InlineAsmOutput,
+        InternalTag,
+        Item,
+        Measure,
+        NamedSpan,
+        Param,
+        StructDef,
+        StructLayout,
+        TagMarker,
+        Type,
+        TypeTupleField,
+        diagnostic_from_registry,
+        dimension_identity,
+        inline_assembly_contract,
+        inline_assembly_register_known,
+        inline_assembly_target_supported,
         measure_expression,
     ]
     jetpack_foundation.[GENERATED_NAME_PREFIX]
     jet_parser.[parser_guest_import_symbol]
     jet_pkg_model.[
-        CFFI, FFIHandleFact, FFILinkClosure, ForeignBridgeError, ForeignLanguage, pkg_ascii_lower,
+        CFFI,
+        FFIHandleFact,
+        FFILinkClosure,
+        ForeignBridgeError,
+        ForeignLanguage,
+        pkg_ascii_lower,
         pkg_binder_descriptor,
     ]
 }
@@ -144,9 +168,7 @@ pkg_ffi_is_list: fn(ty: Type) -> Bool Never! {
     }
 }
 
-pkg_ffi_is_string: fn(ty: Type) -> Bool Never! {
-    ty == Type.String
-}
+pkg_ffi_is_string: fn(ty: Type) -> Bool Never! { ty == Type.String }
 
 // The handle name a nominal type spells, if it is a checked handle.
 pkg_ffi_is_handle: fn(ty: Type, handle_names: [String]) -> Bool Never! {
@@ -167,13 +189,13 @@ CRecordDecl: struct {
 // trampoline.
 CRecordDefinitions: struct {
     priv source: String
-    priv names: [String: String]
-    priv aliases: [String: Type]
+    priv names: [String:String]
+    priv aliases: [String:Type]
     priv records: [CRecordDecl]
     priv handle_names: [String]
 
     empty: fn() -> CRecordDefinitions Never! {
-        CRecordDefinitions{source: "", names: [String: String]{}, aliases: [String: Type]{}, records: [CRecordDecl]{}, handle_names: [String]{}}
+        CRecordDefinitions{source: "", names: [String:String]{}, aliases: [String:Type]{}, records: [CRecordDecl]{}, handle_names: [String]{}}
     }
 
     is_record_type: fn(self, ty: Type) -> Bool Never! {
@@ -298,13 +320,27 @@ pkg_ffi_mangle_path: fn(name: String) -> String Never! {
 pkg_ffi_path_escape: fn(code: Int) -> String Never! {
     digits: "0123456789abcdef".bytes()
     if code == {
-        95 -> { return "u" }
-        46 -> { return "d" }
-        58 -> { return "c" }
-        47 -> { return "s" }
-        92 -> { return "b" }
-        45 -> { return "h" }
-        else -> { return "x{String.from_bytes([U8]{digits[code >> 4], digits[code.bit_and(15)]}) ?? ""}" }
+        95 -> {
+            return "u"
+        }
+        46 -> {
+            return "d"
+        }
+        58 -> {
+            return "c"
+        }
+        47 -> {
+            return "s"
+        }
+        92 -> {
+            return "b"
+        }
+        45 -> {
+            return "h"
+        }
+        else -> {
+            return "x{String.from_bytes([U8]{digits[code >> 4], digits[code.bit_and(15)]}) ?? ""}"
+        }
     }
 }
 
@@ -337,7 +373,9 @@ pkg_ffi_collect_externs: fn(program: RustBridgeProgram, target: String) -> [Exte
                     functions: block.functions
                     loop function in functions -> out.push(pkg_ffi_extern_entry(function, block))
                 }
-                .Func(function) -> pkg_ffi_collect_function(function, program_module.alias, target, out)
+                .Func(function) -> {
+                    pkg_ffi_collect_function(function, program_module.alias, target, out)
+                }
                 .CModule(c_module) -> pkg_ffi_collect_c_module(c_module, out)
                 .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .Module(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
@@ -355,39 +393,43 @@ pkg_ffi_collect_function: fn(function: Func, owner: String, target: String, out:
         names := [String]{}
         loop index in 0..<function.params.len() -> names.push("arg{index}")
         wrapper_owner: if owner == "" -> "root" else -> owner
-        out.push(ExternEntry{
-            jet_name: function.name,
-            rust_path: symbol,
-            wrapper_name: pkg_ffi_mangle_path("jet_ffi_guest.{wrapper_owner}.{function.name}"),
-            params: pkg_ffi_param_shapes(function.params),
-            param_names: names,
-            return_type: function.return_type,
-            crate_spec: "std",
-            line_hint: "`#Import(c) {function.name}: fn`",
-            inline: None,
-            c_abi: true,
-            generated: false,
-            c_module: false,
-            close: None
-        })
+        out.push(
+            ExternEntry{
+                jet_name: function.name,
+                rust_path: symbol,
+                wrapper_name: pkg_ffi_mangle_path("jet_ffi_guest.{wrapper_owner}.{function.name}"),
+                params: pkg_ffi_param_shapes(function.params),
+                param_names: names,
+                return_type: function.return_type,
+                crate_spec: "std",
+                line_hint: "`#Import(c) {function.name}: fn`",
+                inline: None,
+                c_abi: true,
+                generated: false,
+                c_module: false,
+                close: None,
+            },
+        )
         return
     }
     inline: function.inline_foreign ?? return
-    out.push(ExternEntry{
-        jet_name: function.name,
-        rust_path: "",
-        wrapper_name: "jet_ffi_{function.name}",
-        params: pkg_ffi_param_shapes(function.params),
-        param_names: pkg_ffi_param_names(function.params),
-        return_type: function.return_type,
-        crate_spec: "std",
-        line_hint: "`#FFI({inline.lang}) {function.name}: fn`",
-        inline: Val(InlineEntry{lang: inline.lang, source: inline.source, param_names: pkg_ffi_param_names(function.params), asm_contract: pkg_ffi_inline_asm_contract(function, target)}),
-        c_abi: false,
-        generated: false,
-        c_module: false,
-        close: None
-    })
+    out.push(
+        ExternEntry{
+            jet_name: function.name,
+            rust_path: "",
+            wrapper_name: "jet_ffi_{function.name}",
+            params: pkg_ffi_param_shapes(function.params),
+            param_names: pkg_ffi_param_names(function.params),
+            return_type: function.return_type,
+            crate_spec: "std",
+            line_hint: "`#FFI({inline.lang}) {function.name}: fn`",
+            inline: Val(InlineEntry{lang: inline.lang, source: inline.source, param_names: pkg_ffi_param_names(function.params), asm_contract: pkg_ffi_inline_asm_contract(function, target)}),
+            c_abi: false,
+            generated: false,
+            c_module: false,
+            close: None,
+        },
+    )
 }
 
 // The Foundation-checked operand contract (one implementation with sema); an
@@ -404,21 +446,23 @@ pkg_ffi_inline_asm_contract: fn(function: Func, target: String) -> InlineAsmCont
 pkg_ffi_collect_c_module: fn(c_module: CModule, out: &[ExternEntry]) Never! {
     functions: c_module.functions
     loop function in functions {
-        out.push(ExternEntry{
-            jet_name: function.name,
-            rust_path: function.rust_path,
-            wrapper_name: "jet_ffi_{function.name}",
-            params: pkg_ffi_param_shapes(function.params),
-            param_names: pkg_ffi_param_names(function.params),
-            return_type: function.return_type,
-            crate_spec: "std",
-            line_hint: "`{function.name}` in C module `{c_module.lib}`",
-            inline: None,
-            c_abi: true,
-            generated: function.generated,
-            c_module: true,
-            close: pkg_ffi_close_name(function.close)
-        })
+        out.push(
+            ExternEntry{
+                jet_name: function.name,
+                rust_path: function.rust_path,
+                wrapper_name: "jet_ffi_{function.name}",
+                params: pkg_ffi_param_shapes(function.params),
+                param_names: pkg_ffi_param_names(function.params),
+                return_type: function.return_type,
+                crate_spec: "std",
+                line_hint: "`{function.name}` in C module `{c_module.lib}`",
+                inline: None,
+                c_abi: true,
+                generated: function.generated,
+                c_module: true,
+                close: pkg_ffi_close_name(function.close),
+            },
+        )
     }
 }
 
@@ -436,7 +480,7 @@ pkg_ffi_extern_entry: fn(function: ExternFn, block: ExternRustBlock) -> ExternEn
         c_abi: false,
         generated: function.generated,
         c_module: false,
-        close: pkg_ffi_close_name(function.close)
+        close: pkg_ffi_close_name(function.close),
     }
 }
 
@@ -463,12 +507,16 @@ pkg_ffi_owner_key: fn(owner: String, name: String) -> String Never! {
     if owner == "" -> name else -> "{owner}::{name}"
 }
 
-pkg_ffi_collect_record_items: fn(items: [Item], owner: String, records: &[CRecordDecl], names: &[String: String], aliases: &[String: Type]) Never! {
+pkg_ffi_collect_record_items: fn(items: [Item], owner: String, records: &[CRecordDecl], names: &[String:String], aliases: &[String:Type]) Never! {
     loop item in items {
         if item == {
-            .Struct(definition) -> pkg_ffi_collect_record(definition, owner, records, names)
-            .Distinct(definition) -> pkg_ffi_record_alias(owner, definition.name, definition.base, aliases)
-            .TypeAlias(definition) -> pkg_ffi_record_alias(owner, definition.name, definition.target, aliases)
+            .Struct(definition) -> { pkg_ffi_collect_record(definition, owner, records, names) }
+            .Distinct(definition) -> {
+                pkg_ffi_record_alias(owner, definition.name, definition.base, aliases)
+            }
+            .TypeAlias(definition) -> {
+                pkg_ffi_record_alias(owner, definition.name, definition.target, aliases)
+            }
             .CodeModule(code_module) -> {
                 body: code_module.body ?? next
                 pkg_ffi_collect_record_items(body, pkg_ffi_owner_key(owner, code_module.name), records, names, aliases)
@@ -478,9 +526,11 @@ pkg_ffi_collect_record_items: fn(items: [Item], owner: String, records: &[CRecor
     }
 }
 
-pkg_ffi_collect_record: fn(definition: StructDef, owner: String, records: &[CRecordDecl], names: &[String: String]) Never! {
+pkg_ffi_collect_record: fn(definition: StructDef, owner: String, records: &[CRecordDecl], names: &[String:String]) Never! {
     layout: definition.layout ?? return
-    if !pkg_ffi_struct_layout_is_c(layout) -> return
+    if !pkg_ffi_struct_layout_is_c(layout) {
+        return
+    }
     key: pkg_ffi_owner_key(owner, definition.name)
     rust_name: pkg_ffi_c_record_rust_name(key)
     names[key] = rust_name
@@ -492,7 +542,7 @@ pkg_ffi_collect_record: fn(definition: StructDef, owner: String, records: &[CRec
 }
 
 // A qualified alias key plus a bare-name entry that the first owner claims.
-pkg_ffi_record_alias: fn(owner: String, name: String, base: Type, aliases: &[String: Type]) Never! {
+pkg_ffi_record_alias: fn(owner: String, name: String, base: Type, aliases: &[String:Type]) Never! {
     aliases[pkg_ffi_owner_key(owner, name)] = base
     if !aliases.has_key(name) -> aliases[name] = base
 }
@@ -501,9 +551,11 @@ pkg_ffi_record_alias: fn(owner: String, name: String, base: Type, aliases: &[Str
 // declarations the trampoline refers to.
 pkg_ffi_collect_c_record_definitions: fn(program: RustBridgeProgram) -> CRecordDefinitions Never! {
     records := [CRecordDecl]{}
-    names := [String: String]{}
-    aliases := [String: Type]{}
-    loop program_module in program.modules -> pkg_ffi_collect_record_items(program_module.items, program_module.alias, records, names, aliases)
+    names := [String:String]{}
+    aliases := [String:Type]{}
+    loop program_module in program.modules {
+        pkg_ffi_collect_record_items(program_module.items, program_module.alias, records, names, aliases)
+    }
     handle_names := [String]{}
     facts: program.cffi.handle_facts
     loop fact in facts {
@@ -559,13 +611,23 @@ pkg_ffi_inline_asm_target_diagnostic: fn(entries: [ExternEntry], target: String)
 
 pkg_ffi_inline_asm_entry_diagnostic: fn(asm: ExternEntry, inline: InlineEntry, target: String) -> Diagnostic? Never! {
     contract: inline.asm_contract ?? return Val(pkg_ffi_asm_error("{asm.line_hint} has no checked assembly contract", "assembly output and clobbers must be normalized by sema before native bridge generation", "fix the inline assembly operand contract and re-run sema"))
-    if inline.param_names != asm.param_names || inline.param_names.len() != asm.params.len() -> return Val(pkg_ffi_asm_error("{asm.line_hint} has a stale assembly parameter map", "the native bridge must consume the sema-checked parameter order and names", "re-run sema so the inline assembly contract is normalized for this declaration"))
-    if contract.target != target -> return Val(pkg_ffi_asm_error("{asm.line_hint} was checked for `{contract.target}`, not selected target `{target}`", "inline assembly is validated and compiled for the driver's selected target, not the host architecture", "select the checked target or provide an assembly body for the selected target"))
-    if !inline_assembly_target_supported(target) -> return Val(pkg_ffi_asm_error("{asm.line_hint} has no audited inline-assembly register set for target `{target}`", "inline assembly needs a target-specific register namespace before native bridge generation", "select a supported native target or provide a target-specific assembly body"))
+    if inline.param_names != asm.param_names || inline.param_names.len() != asm.params.len() {
+        return Val(pkg_ffi_asm_error("{asm.line_hint} has a stale assembly parameter map", "the native bridge must consume the sema-checked parameter order and names", "re-run sema so the inline assembly contract is normalized for this declaration"))
+    }
+    if contract.target != target {
+        return Val(pkg_ffi_asm_error("{asm.line_hint} was checked for `{contract.target}`, not selected target `{target}`", "inline assembly is validated and compiled for the driver's selected target, not the host architecture", "select the checked target or provide an assembly body for the selected target"))
+    }
+    if !inline_assembly_target_supported(target) {
+        return Val(pkg_ffi_asm_error("{asm.line_hint} has no audited inline-assembly register set for target `{target}`", "inline assembly needs a target-specific register namespace before native bridge generation", "select a supported native target or provide a target-specific assembly body"))
+    }
     returns_value := false
     if asm.return_type == .Val(ty) -> returns_value = pkg_ffi_inline_rust_type(ty) != "()"
-    if contract.output == None && returns_value -> return Val(pkg_ffi_asm_error("{asm.line_hint} has no checked output destination", "a value-returning assembly body must identify its result with the sema-checked output operand", "mark one named output or explicit target register with `; -> return`"))
-    if contract.output != None && !returns_value -> return Val(pkg_ffi_asm_error("{asm.line_hint} declares an output for a unit return", "a void assembly body must not expose a result destination", "remove the `; -> return` anchor from the body"))
+    if contract.output == None && returns_value {
+        return Val(pkg_ffi_asm_error("{asm.line_hint} has no checked output destination", "a value-returning assembly body must identify its result with the sema-checked output operand", "mark one named output or explicit target register with `; -> return`"))
+    }
+    if contract.output != None && !returns_value {
+        return Val(pkg_ffi_asm_error("{asm.line_hint} declares an output for a unit return", "a void assembly body must not expose a result destination", "remove the `; -> return` anchor from the body"))
+    }
     if contract.output == .Val(output) {
         problem: pkg_ffi_asm_output_problem(asm, output, target)
         if problem != None -> return problem
@@ -575,11 +637,17 @@ pkg_ffi_inline_asm_entry_diagnostic: fn(asm: ExternEntry, inline: InlineEntry, t
     clobbers: contract.clobbers
     loop clobber in clobbers {
         normalized: pkg_ffi_normalize_register(clobber)
-        if !inline_assembly_register_known(target, normalized) -> return Val(pkg_ffi_asm_error("{asm.line_hint} names clobber register `{clobber}`, which is not valid for target `{target}`", "fixed assembly clobbers are checked against the selected target namespace", "use a register valid for the selected target"))
-        if seen_clobbers.contains(normalized) -> return Val(pkg_ffi_asm_error("{asm.line_hint} repeats clobber register `{clobber}`", "the checked assembly contract must contain each discarded output exactly once", "remove duplicate names from `; clobbers …`"))
+        if !inline_assembly_register_known(target, normalized) {
+            return Val(pkg_ffi_asm_error("{asm.line_hint} names clobber register `{clobber}`, which is not valid for target `{target}`", "fixed assembly clobbers are checked against the selected target namespace", "use a register valid for the selected target"))
+        }
+        if seen_clobbers.contains(normalized) {
+            return Val(pkg_ffi_asm_error("{asm.line_hint} repeats clobber register `{clobber}`", "the checked assembly contract must contain each discarded output exactly once", "remove duplicate names from `; clobbers …`"))
+        }
         seen_clobbers.push(normalized.copy())
         if output_register == .Val(result_register) {
-            if result_register == normalized -> return Val(pkg_ffi_asm_error("{asm.line_hint} uses `{clobber}` as both result and an early-written clobber", "an early-written clobber cannot overwrite the fixed result destination", "choose a distinct result register or clobber register"))
+            if result_register == normalized {
+                return Val(pkg_ffi_asm_error("{asm.line_hint} uses `{clobber}` as both result and an early-written clobber", "an early-written clobber cannot overwrite the fixed result destination", "choose a distinct result register or clobber register"))
+            }
         }
     }
     None
@@ -599,7 +667,9 @@ pkg_ffi_foreign_language_for_entry: fn(entry: ExternEntry) -> ForeignLanguage? N
     if entry.c_abi {
         // COM type-library binders use the reserved bridge prefix on every
         // generated symbol; the descriptor survives the shared C bridge.
-        if entry.rust_path.starts_with((ForeignLanguage.Com).bridge_prefix()) -> return Val(ForeignLanguage.Com)
+        if entry.rust_path.starts_with((ForeignLanguage.Com).bridge_prefix()) {
+            return Val(ForeignLanguage.Com)
+        }
         return Val(ForeignLanguage.C)
     }
     lang: entry.inline_lang() ?? return Val(ForeignLanguage.Rust)
@@ -727,8 +797,8 @@ pkg_ffi_convention_debug: fn(convention: AccessConvention) -> String Never! {
 }
 
 // Every non-`std` `name@version` crate the entries name.
-pkg_ffi_collect_crate_deps: fn(entries: [ExternEntry]) -> [String: String] Never! {
-    deps := [String: String]{}
+pkg_ffi_collect_crate_deps: fn(entries: [ExternEntry]) -> [String:String] Never! {
+    deps := [String:String]{}
     loop entry in entries {
         if entry.crate_spec == "std" -> next
         spec: pkg_ffi_parse_crate_spec(entry.crate_spec) ?? next
@@ -746,7 +816,7 @@ pkg_ffi_parse_crate_spec: fn(spec: String) -> (name: String, version: String)? N
 }
 
 // A map's keys in sorted order (the Rust `BTreeMap` iteration order).
-pkg_ffi_sorted_keys: fn(map: [String: String]) -> [String] Never! {
+pkg_ffi_sorted_keys: fn(map: [String:String]) -> [String] Never! {
     keys := map.keys().to_list()
     keys.sort()
     keys

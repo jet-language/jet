@@ -1,11 +1,17 @@
 // Runtime policy claims: per-verb policy, the process lock
 // (Foundation/ProjectLock.jet) and native sandbox reporting. Lock-holder races
 // that need a second thread or a re-spawned test binary are not claimed here.
-
 use {
     jetpack_foundation.[
-        JETPACK_VERBS, RUNTIME_LOCK_DIR, RUNTIME_LOCK_OWNER_FILE, SOURCE_ROOT_DIR, env_acquire_lock, env_acquire_lock_waiting,
-        env_lock_path_for_scope, env_lock_state, env_try_acquire_lock,
+        JETPACK_VERBS,
+        RUNTIME_LOCK_DIR,
+        RUNTIME_LOCK_OWNER_FILE,
+        SOURCE_ROOT_DIR,
+        env_acquire_lock,
+        env_acquire_lock_waiting,
+        env_lock_path_for_scope,
+        env_lock_state,
+        env_try_acquire_lock,
     ]
     files: core.files
     sys: core.sys
@@ -83,14 +89,18 @@ env_rt_test_is_timeout: fn(error: IOError) -> Bool {
     assert(before.is_file)
     assert(!before.is_symlink)
     if !sys.is_windows() -> assert_eq(before.mode.bit_and(0o777), 0o600)
-    assert((if env_try_acquire_lock(root, "hangar") == {
-        .Ok(found) -> found
-        .Err(error) -> panic("same-scope try")
-    }) == None)
-    assert((if env_try_acquire_lock(root, "other") == {
-        .Ok(found) -> found
-        .Err(error) -> panic("other-scope try")
-    }) == None)
+    assert(
+        (if env_try_acquire_lock(root, "hangar") == {
+            .Ok(found) -> found
+            .Err(error) -> panic("same-scope try")
+        }) == None,
+    )
+    assert(
+        (if env_try_acquire_lock(root, "other") == {
+            .Ok(found) -> found
+            .Err(error) -> panic("other-scope try")
+        }) == None,
+    )
     assert((env_lock_state(env_lock_path_for_scope(root, "other")) ?? panic("probe other")) == RuntimeLockState.Held)
     close(first)
     assert_eq((files.stat(owner_path) ?? panic("persistent owner")).id, before.id)
@@ -116,13 +126,15 @@ env_rt_test_is_timeout: fn(error: IOError) -> Bool {
 }
 
 #Test("a dedicated lock owner symlink is refused without touching its target") {
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     root: env_rt_test_scratch("owner-symlink")
     target: files.join(root, "attacker-target")
     files.write(target, "not a lock") ?? panic("target")
     files.symlink(target, files.join(root, RUNTIME_LOCK_OWNER_FILE)) ?? panic("plant owner symlink")
     if env_acquire_lock_waiting(root, "hangar", time.duration_ms(50)) == {
-        .Ok(_) -> panic("a symlinked owner must be rejected")
+        .Ok(_) -> { panic("a symlinked owner must be rejected") }
         .Err(error) -> assert(!env_rt_test_is_timeout(error))
     }
     assert(env_try_acquire_lock(root, "hangar") == .Err(_))
@@ -135,7 +147,7 @@ env_rt_test_is_timeout: fn(error: IOError) -> Bool {
     guard: env_acquire_lock(root, "hangar") ?? panic("first claim")
     watch: time.start()
     if env_acquire_lock_waiting(root, "other", time.duration_ms(80)) == {
-        .Ok(_) -> panic("contended advisory lock must time out")
+        .Ok(_) -> { panic("contended advisory lock must time out") }
         .Err(error) -> {
             assert(env_rt_test_is_timeout(error))
             if error == .TimedOut(context) {
@@ -167,7 +179,9 @@ env_rt_test_is_timeout: fn(error: IOError) -> Bool {
     // Rust swap_before_open_is_rejected_atomically and the symlink half of
     // lock_open_and_platform_failures_fail_closed: a final link is refused
     // outright, never waited on.
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     root: env_rt_test_scratch("symlink-fail-closed")
     lock_dir: files.join(root, RUNTIME_LOCK_DIR)
     files.create_dir_all(lock_dir) ?? panic("lock dir")
@@ -175,7 +189,7 @@ env_rt_test_is_timeout: fn(error: IOError) -> Bool {
     files.write(target, "not a lock") ?? panic("target")
     files.symlink(target, files.join(lock_dir, "hangar.lock")) ?? panic("plant symlink")
     if env_acquire_lock_waiting(root, "hangar", time.duration_ms(50)) == {
-        .Ok(_) -> panic("a symlinked marker must be rejected")
+        .Ok(_) -> { panic("a symlinked marker must be rejected") }
         .Err(error) -> assert(!env_rt_test_is_timeout(error))
     }
     assert_eq(files.read(target) ?? panic("read target"), "not a lock")
@@ -183,7 +197,9 @@ env_rt_test_is_timeout: fn(error: IOError) -> Bool {
 }
 
 #Test("dual marker name replacement cannot split the shared owner file lock") {
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     root: env_rt_test_scratch("dual-replace-fail-closed")
     first: env_acquire_lock(root, "hangar") ?? panic("first claim")
     lock_dir: files.join(root, RUNTIME_LOCK_DIR)

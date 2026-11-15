@@ -72,17 +72,15 @@ run: fn() {
     loop n in [-1, 5, 12] -> print(classify(n))
     loop n in [-1, 7] {
         if pick(n) == {
-            .Err(.Low) -> print("statement low")
-            .Err(.High) -> print("statement high")
+            .Err(.Low) -> { print("statement low") }
+            .Err(.High) -> { print("statement high") }
             .Ok(v) -> print("statement ok {v}")
         }
     }
     print(pick(12) == .Err(.High))
     print(pick(-3) == .Err(.High))
     loop n in [-2, 0, 3] -> print(shape_name(n))
-    if make(4) == .Ok(.Rect(w, h)) && w < h {
-        print("guarded rect {w} {h}")
-    }
+    if make(4) == .Ok(.Rect(w, h)) && w < h -> print("guarded rect {w} {h}")
     print(area(Val(Shape.Circle{r: 2})))
     print(area(Val(Shape.Rect{w: 3, h: 4})))
     print(area(None))

@@ -27,7 +27,9 @@ gnu_time: fn() -[Env, FS]> String {
 }
 
 SAMPLE_MS: 20
+
 MAX_SAFE_INTEGER: 9007199254740991
+
 // The measured command's streams: stdin from /dev/null, stdout and stderr
 // into the files named by $1 and $2, then GNU time in this same process.
 REDIRECT: "exec </dev/null >\"$1\" 2>\"$2\"; shift 2; exec \"$@\""
@@ -39,7 +41,9 @@ MeasureError: struct {
     syntax: Bool
 }
 
-measure_error: fn(message: String) -> MeasureError Never! { MeasureError{message: message, syntax: false} }
+measure_error: fn(message: String) -> MeasureError Never! {
+    MeasureError{message: message, syntax: false}
+}
 
 // The host's clock tick and page size: `getconf CLK_TCK` and `PAGESIZE`,
 // else 100 and 4096.
@@ -197,7 +201,9 @@ read_rusage: fn(time_file: String) -[FS]> Rusage? Never! {
     text: files.read(time_file) ?? return None
     lines: js_trim(text).split("\n").to_list()
     fields: lines[lines.len() - 1].split(" ").to_list()
-    if fields.len() != 4 || !decimal_text(fields[0]) || !decimal_text(fields[1]) || !decimal_text(fields[2]) || !digits_text(fields[3]) -> return None
+    if fields.len() != 4 || !decimal_text(fields[0]) || !decimal_text(fields[1]) || !decimal_text(fields[2]) || !digits_text(fields[3]) {
+        return None
+    }
     Val(Rusage{user_ns: rusage_ns(fields[1]), sys_ns: rusage_ns(fields[2]), max_rss_bytes: (Int.parse(fields[3]) ?? 0) * 1024})
 }
 
@@ -270,7 +276,9 @@ run_measured: fn(argv: [String], options: MeasureOptions) -[Env, Exec, FS, Time,
 cpu_at: fn(samples: [Sample], t_ns: Float) -> Float Never! {
     if samples.len() == 0 -> return KIT_ZERO
     first: samples[0]
-    if t_ns <= first.t_ns -> return first.cpu_ns * js_max(KIT_ZERO, t_ns) / js_max(Float{1.0}, first.t_ns)
+    if t_ns <= first.t_ns {
+        return first.cpu_ns * js_max(KIT_ZERO, t_ns) / js_max(Float{1.0}, first.t_ns)
+    }
     loop i in 1..<samples.len() {
         if t_ns <= samples[i].t_ns {
             a: samples[i - 1]
@@ -302,7 +310,9 @@ safe_integer: fn(value: Dyn?) -> Int? Never! { safe_number(as_number(value) ?? r
 
 // Number.isSafeInteger(number): the integer it holds.
 safe_number: fn(number: Float) -> Int? Never! {
-    if !math.is_finite(number) || math.abs(number - math.floor(number)) > KIT_ZERO || math.abs(number) > Float.from_int(MAX_SAFE_INTEGER) -> return None
+    if !math.is_finite(number) || math.abs(number - math.floor(number)) > KIT_ZERO || math.abs(number) > Float.from_int(MAX_SAFE_INTEGER) {
+        return None
+    }
     Val(checked(Int{number}) ?? return None)
 }
 
@@ -311,15 +321,17 @@ safe_number: fn(number: Float) -> Int? Never! {
 completed_from: fn(exit_code: Int?, pid: Dyn?, started: Dyn?, finished: Dyn?) -> Completed Never! {
     unsafe: MAX_SAFE_INTEGER + 1
     Completed{
-        exit_code: exit_code
-        pid: safe_integer(pid) ?? 0
-        started_unix_ms: safe_integer(started) ?? unsafe
-        finished_unix_ms: safe_integer(finished) ?? unsafe
+        exit_code: exit_code,
+        pid: safe_integer(pid) ?? 0,
+        started_unix_ms: safe_integer(started) ?? unsafe,
+        finished_unix_ms: safe_integer(finished) ?? unsafe,
     }
 }
 
 read_failure: fn(file: String, error: IOError) -> MeasureError Never! {
-    if error == .NotFound(_) -> return measure_error("ENOENT: no such file or directory, open '{file}'")
+    if error == .NotFound(_) {
+        return measure_error("ENOENT: no such file or directory, open '{file}'")
+    }
     measure_error("{error}")
 }
 
@@ -333,19 +345,23 @@ read_trace: fn(file: String, completed: Completed?) -[FS]> [Dyn] MeasureError! {
         if run.exit_code != Val(0) || run.pid <= 0 || !safe(run.pid) || !safe(run.started_unix_ms) || !safe(run.finished_unix_ms) || run.started_unix_ms > run.finished_unix_ms {
             return Err(measure_error("completed trace requires successful recorded process identity"))
         }
-        if !text.starts_with("[\n") || !text.ends_with("\n") -> return Err(measure_error("invalid or truncated completed trace stream"))
+        if !text.starts_with("[\n") || !text.ends_with("\n") {
+            return Err(measure_error("invalid or truncated completed trace stream"))
+        }
     }
     events := [Dyn]{}
     lines: text.split("\n").to_list()
     loop index in 0..<lines.len() {
         raw: lines[index]
         if strict && (index == 0 || index == lines.len() - 1) -> next
-        if strict && (!raw.starts_with("{{") || !raw.ends_with("}},")) -> return Err(measure_error("invalid or truncated completed trace event"))
+        if strict && (!raw.starts_with("{{") || !raw.ends_with("}},")) {
+            return Err(measure_error("invalid or truncated completed trace event"))
+        }
         trimmed: js_trim(raw)
         line: if trimmed.ends_with(",") -> trimmed.removesuffix(",") else -> trimmed
         if !line.starts_with("{{") -> next
         if json.parse(line) == {
-            .Ok(event) -> events.push(event)
+            .Ok(event) -> { events.push(event) }
             .Err(_) -> {
                 if strict -> return Err(measure_error("malformed completed trace event"))
             }
@@ -377,14 +393,16 @@ check_completed: fn(events: [Dyn], run: Completed) MeasureError! {
         if !same(field(Val(event), "pid"), Val(Dyn.Int(run.pid))) -> return Err(identity)
     }
     stacks := [Open]{}
-    last_time := [String: Int]{}
+    last_time := [String:Int]{}
     phases: [String]{"M", "i", "C", "B", "E"}
     loop event in events {
         value: Val(event)
         tid: safe_integer(field(value, "tid"))
         name: text_of(field(value, "name")) ?? ""
         ph: text_of(field(value, "ph")) ?? ""
-        if tid == None || (tid ?? 0) < 0 || name == "" || !phases.contains(ph) -> return Err(measure_error("invalid completed trace event schema"))
+        if tid == None || (tid ?? 0) < 0 || name == "" || !phases.contains(ph) {
+            return Err(measure_error("invalid completed trace event schema"))
+        }
         // Producer metadata has no timestamp. Its unix_ms anchor and the
         // independently recorded process window have millisecond precision.
         if ph == "M" && field(value, "ts") == None -> next
@@ -395,10 +413,14 @@ check_completed: fn(events: [Dyn], run: Completed) MeasureError! {
         pid_text: js_string(field(value, "pid"))
         tid_text: js_string(field(value, "tid"))
         thread: "{pid_text}:{tid_text}"
-        if ts < (last_time.get(thread) ?? 0) -> return Err(measure_error("invalid completed trace time order"))
+        if ts < (last_time.get(thread) ?? 0) {
+            return Err(measure_error("invalid completed trace time order"))
+        }
         last_time[thread] = ts
         if ph != "B" && ph != "E" -> next
-        if (text_of(field(value, "cat")) ?? "") == "" -> return Err(measure_error("invalid completed trace span category"))
+        if (text_of(field(value, "cat")) ?? "") == "" {
+            return Err(measure_error("invalid completed trace span category"))
+        }
         at := -1
         loop i in 0..<stacks.len() {
             if stacks[i].thread == thread -> at = i
@@ -412,7 +434,9 @@ check_completed: fn(events: [Dyn], run: Completed) MeasureError! {
             next
         }
         begin: stacks[at].stack.pop() ?? return Err(measure_error("unbalanced completed trace spans"))
-        if !same(field(Val(begin), "name"), field(value, "name")) || !same(field(Val(begin), "cat"), field(value, "cat")) -> return Err(measure_error("unbalanced completed trace spans"))
+        if !same(field(Val(begin), "name"), field(value, "name")) || !same(field(Val(begin), "cat"), field(value, "cat")) {
+            return Err(measure_error("unbalanced completed trace spans"))
+        }
     }
     loop open in stacks {
         if open.stack.len() > 0 -> return Err(measure_error("unbalanced completed trace spans"))
@@ -493,8 +517,10 @@ phase_table: fn(events: [Dyn], samples: [Sample], offset_ns: Float) -> PhaseTabl
         }
         if is_text(ph, "B") {
             if first_begin == {
-                .None -> first_begin = Val(t_ns)
-                .Val(first) -> if t_ns < first -> first_begin = Val(t_ns)
+                .None -> { first_begin = Val(t_ns) }
+                .Val(first) -> {
+                    if t_ns < first -> first_begin = Val(t_ns)
+                }
             }
             if at < 0 {
                 open.push(OpenSpans{tid: tid, cat: cat_text, starts: [Float]{}})
@@ -590,7 +616,9 @@ walk_counters: fn(value: Dyn, key: String, counters: &[Counter]) MeasureError! {
     if value == {
         .Int(_) | .Float(_) | .Number(_) -> {
             number: as_number(Val(value)) ?? math.NAN
-            if !math.is_finite(number) || number < KIT_ZERO -> return Err(measure_error("Invalid counter: {key}"))
+            if !math.is_finite(number) || number < KIT_ZERO {
+                return Err(measure_error("Invalid counter: {key}"))
+            }
             loop i in 0..<counters.len() {
                 if counters[i].key == key {
                     counters[i].value = counters[i].value + number
@@ -632,7 +660,9 @@ counter_body: fn(line: String) -> String? Never! {
     loop i in 0..<inner.len() {
         byte: Int{inner[i]}
         if byte == 13 -> return None
-        if byte == 226 && i + 2 < inner.len() && (Int{inner[i + 1]}) == 128 && (Int{inner[i + 2]} == 168 || Int{inner[i + 2]} == 169) -> return None
+        if byte == 226 && i + 2 < inner.len() && (Int{inner[i + 1]}) == 128 && (Int{inner[i + 2]} == 168 || Int{inner[i + 2]} == 169) {
+            return None
+        }
     }
     Val(body)
 }
@@ -645,7 +675,9 @@ parse_counters: fn(output: String) -> [Counter] MeasureError! {
     loop raw in output.split("\n") {
         line: raw.removesuffix("\r")
         body: counter_body(line) ?? {
-            if line.starts_with("JET_PHASE_COUNTERS") -> return Err(measure_error("Malformed counter line: {line}"))
+            if line.starts_with("JET_PHASE_COUNTERS") {
+                return Err(measure_error("Malformed counter line: {line}"))
+            }
             next
         }
         parsed: json.parse(body) ?? return Err(MeasureError{message: "{err}", syntax: true})
@@ -682,6 +714,8 @@ parse_counters: fn(output: String) -> [Counter] MeasureError! {
 // parseCounters' object, as JSON.stringify writes it.
 counters_json: fn(counters: [Counter]) -> Dyn Never! {
     entries := [(key: String, value: Dyn)]{}
-    loop counter in counters -> entries.push((key: counter.key.copy(), value: Dyn.Float(counter.value)))  // copy: the list keeps its keys
+    loop counter in counters {
+        entries.push((key: counter.key.copy(), value: Dyn.Float(counter.value)))  // copy: the list keeps its keys
+    }
     Dyn.Object(entries)
 }

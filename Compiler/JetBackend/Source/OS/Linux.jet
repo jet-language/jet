@@ -19,62 +19,104 @@
 use core.mem
 
 OS_SYS_READ: 0
+
 OS_SYS_WRITE: 1
+
 OS_SYS_CLOSE: 3
+
 OS_SYS_MPROTECT: 10
+
 OS_SYS_MUNMAP: 11
+
 OS_SYS_BRK: 12
+
 OS_SYS_RT_SIGACTION: 13
+
 OS_SYS_RT_SIGPROCMASK: 14
+
 OS_SYS_PREAD64: 17
+
 OS_SYS_MADVISE: 28
+
 OS_SYS_DUP2: 33
+
 OS_SYS_NANOSLEEP: 35
+
 OS_SYS_GETPID: 39
+
 OS_SYS_EXECVE: 59
+
 OS_SYS_FORK: 57
+
 OS_SYS_WAIT4: 61
+
 OS_SYS_KILL: 62
+
 OS_SYS_FCNTL: 72
+
 OS_SYS_SIGALTSTACK: 131
+
 OS_SYS_PRCTL: 157
+
 OS_SYS_ARCH_PRCTL: 158
+
 OS_SYS_EXIT_GROUP: 231
+
 OS_SYS_OPENAT: 257
+
 OS_SYS_PRLIMIT64: 302
+
 OS_SYS_GETRANDOM: 318
+
 OS_SYS_MEMFD_CREATE: 319
+
 OS_SYS_CLOSE_RANGE: 436
+
 OS_SYS_LANDLOCK_CREATE_RULESET: 444
+
 OS_SYS_LANDLOCK_ADD_RULE: 445
+
 OS_SYS_LANDLOCK_RESTRICT_SELF: 446
 
 OS_PROT_READ: 1
+
 OS_PROT_WRITE: 2
+
 OS_PROT_EXEC: 4
 
 OS_PAGE_SIZE: 4096
 
 OS_MAP_PRIVATE: 0x02
+
 OS_MAP_PRIVATE_ANONYMOUS: 0x22
+
 OS_MAP_NORESERVE: 0x4000
+
 // Map exactly at the address, replacing what the caller had mapped there.
 OS_MAP_FIXED: 0x10
+
 // Map exactly at the hint or fail with EEXIST; never replace a mapping.
 OS_MAP_FIXED_NOREPLACE: 0x100000
+
 // madvise: a mapping a fork leaves out of the child, and one it copies again.
 OS_MADV_DONTFORK: 10
+
 OS_MADV_DOFORK: 11
 
 OS_AT_FDCWD: -100
+
 OS_O_RDONLY_CLOEXEC: 0x80000
+
 OS_O_PATH_CLOEXEC: 0x280000
+
 OS_O_DIRECTORY: 0x10000
 
 OS_PR_SET_NO_NEW_PRIVS: 38
 
 OS_EEXIST: 17
+
 OS_EINTR: 4
+
 OS_ENOTDIR: 20
 
 // One raw system call with up to six arguments. The operands arrive in rdi,
@@ -100,9 +142,7 @@ os_syscall: fn(number: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int
 }
 
 // Whether a system call result is `-errno` rather than a value.
-os_failed: fn(result: Int) -> Bool Never! {
-    result < 0 && result > -4096
-}
+os_failed: fn(result: Int) -> Bool Never! { result < 0 && result > -4096 }
 
 os_page_round: fn(size: Int) -> Int Never! {
     size + (OS_PAGE_SIZE - size % OS_PAGE_SIZE) % OS_PAGE_SIZE
@@ -222,14 +262,14 @@ os_store_byte: fn(address: Int, value: Int) {
 // Copy `bytes` to `address`, then zero bytes up to the next multiple of 8,
 // so the destination must hold `bytes.len()` rounded up to 8 bytes (a
 // page-rounded mapping always does).
-#Unsafe("the caller owns `bytes.len()` rounded up to 8 bytes at `address`") os_copy_in: fn(address: Int, bytes: [U8]) {
-    os_copy_in_range(address, bytes, 0, bytes.len())
-}
+#Unsafe("the caller owns `bytes.len()` rounded up to 8 bytes at `address`")
+os_copy_in: fn(address: Int, bytes: [U8]) { os_copy_in_range(address, bytes, 0, bytes.len()) }
 
 // Like os_copy_in, but borrowing one range avoids allocating image chunks.
 // The range moves in one copy and its padding to the next word is zeroed in
 // one fill.
-#Unsafe("the caller owns `count` rounded up to 8 bytes at `address`") os_copy_in_range: fn(address: Int, bytes: [U8], start: Int, count: Int) {
+#Unsafe("the caller owns `count` rounded up to 8 bytes at `address`")
+os_copy_in_range: fn(address: Int, bytes: [U8], start: Int, count: Int) {
     mem.list_copy<U8>(mem.Ptr<U8>.from_addr(address), bytes, start, count)
     mem.fill<U8>(mem.Ptr<U8>.from_addr(address + count), U8{0}, (count + 7) /% 8 * 8 - count)
 }

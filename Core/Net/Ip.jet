@@ -8,6 +8,7 @@ package: {
         ip: .Library{ entry: ip }
     }
 }
+
 // core.net.ip — IPv4/IPv6 addresses and CIDR networks.
 //
 // Python `ipaddress` is the bar: parse, classify, and ask whether a host
@@ -79,22 +80,24 @@ is_unspecified: fn(addr: IPv4) -> Bool Never! {
 }
 
 is_global: fn(addr: IPv4) -> Bool Never! {
-    if is_private(addr) || is_loopback(addr) || is_link_local(addr) || is_multicast(addr) || is_reserved(addr) || is_unspecified(addr) -> return false
-    if addr.a == 0 -> return false // "This network" /8 is a separate class, never global.
+    if is_private(addr) || is_loopback(addr) || is_link_local(addr) || is_multicast(addr) || is_reserved(addr) || is_unspecified(addr) {
+        return false
+    }
+    if addr.a == 0 -> return false  // "This network" /8 is a separate class, never global.
     // IANA IPv4 Special-Purpose Address Space, updated 2025-10-09:
     // reject Globally Reachable=False rows, with more-specific True exceptions.
-    if addr.a == 100 && addr.b >= 64 && addr.b <= 127 -> return false // Shared address space /10.
+    if addr.a == 100 && addr.b >= 64 && addr.b <= 127 -> return false  // Shared address space /10.
     if addr.a == 192 {
         if addr.b == 0 && addr.c == 0 -> return addr.d == 9 || addr.d == 10
-        if addr.b == 0 && addr.c == 2 -> return false // TEST-NET-1 /24.
+        if addr.b == 0 && addr.c == 2 -> return false  // TEST-NET-1 /24.
         // The deprecated /24 parent has a blank global field; only this /32 is False.
         if addr.b == 88 && addr.c == 99 && addr.d == 2 -> return false
     }
     if addr.a == 198 {
-        if addr.b == 18 || addr.b == 19 -> return false // Benchmarking /15.
-        if addr.b == 51 && addr.c == 100 -> return false // TEST-NET-2 /24.
+        if addr.b == 18 || addr.b == 19 -> return false  // Benchmarking /15.
+        if addr.b == 51 && addr.c == 100 -> return false  // TEST-NET-2 /24.
     }
-    if addr.a == 203 && addr.b == 0 && addr.c == 113 -> return false // TEST-NET-3 /24.
+    if addr.a == 203 && addr.b == 0 && addr.c == 113 -> return false  // TEST-NET-3 /24.
     true
 }
 
@@ -156,7 +159,9 @@ parse_ipv6: fn(text: String) -> IPv6 IOError! {
     dbl := find_dcolon(text)
     if dbl >= 0 {
         tail: slice_u(raw, dbl + 2, raw.len())
-        if find_dcolon(String.from_bytes(tail) ?? "") >= 0 -> return Err(net_err("IPv6 may contain only one: "))
+        if find_dcolon(String.from_bytes(tail) ?? "") >= 0 {
+            return Err(net_err("IPv6 may contain only one: "))
+        }
     }
     left := String.from_bytes(raw) ?? ""
     right := ""
@@ -170,9 +175,7 @@ parse_ipv6: fn(text: String) -> IPv6 IOError! {
     total: lw.len() + rw.len()
     if compressed {
         if total >= 8 -> return Err(net_err("IPv6: must replace at least one group"))
-    } else if total != 8 {
-        return Err(net_err("IPv6 needs 8 groups or a: "))
-    }
+    } else if total != 8 { return Err(net_err("IPv6 needs 8 groups or a: ")) }
     words := [Int]{}
     loop w in lw {
         n: parse_hex4(w) ?? return Err(net_err("bad IPv6 group"))
@@ -182,7 +185,7 @@ parse_ipv6: fn(text: String) -> IPv6 IOError! {
     if compressed -> pad = 8 - total
     loop pad > 0 {
         words.push(0)
-        pad = pad - 1
+        pad -= 1
     }
     loop w in rw {
         n: parse_hex4(w) ?? return Err(net_err("bad IPv6 group"))
@@ -198,16 +201,17 @@ ipv6_to_string: fn(addr: IPv6) -> String Never! {
     loop i < addr.words.len() {
         piece: hex4(addr.words[i])
         if i == 0 -> s = piece else -> s = "{s}:{piece}"
-        i = i + 1
+        i += 1
     }
     s
 }
+
 ipv6_is_loopback: fn(addr: IPv6) -> Bool Never! {
     if addr.words.len() != 8 -> return false
     i := 0
     loop i < 7 {
         if addr.words[i] != 0 -> return false
-        i = i + 1
+        i += 1
     }
     addr.words[7] == 1
 }
@@ -234,8 +238,8 @@ int_pow2: fn(n: Int) -> Int Never! {
     acc := 1
     i := 0
     loop i < n {
-        acc = acc * 2
-        i = i + 1
+        acc *= 2
+        i += 1
     }
     acc
 }
@@ -247,6 +251,7 @@ split_colon: fn(text: String) -> [String] Never! {
     if raw.len() == 0 -> return [String]{}
     split_byte(String.from_bytes(raw) ?? "", 58)
 }
+
 split_byte: fn(text: String, code: Int) -> [String] Never! {
     raw: text.bytes()
     out := [String]{}
@@ -259,7 +264,7 @@ split_byte: fn(text: String, code: Int) -> [String] Never! {
             out.push(String.from_bytes(slice_u(raw, start, i)) ?? "")
             start = i + 1
         }
-        i = i + 1
+        i += 1
     }
     out
 }
@@ -320,7 +325,7 @@ hex4: fn(n: Int) -> String {
     loop shift >= 0 {
         d: (v /% int_pow2(shift)) %% 16
         if d < 10 -> out.push(U8{48 + d}) else -> out.push(U8{97 + (d - 10)})
-        shift = shift - 4
+        shift -= 4
     }
     String.from_bytes(out) ?? "0000"
 }
@@ -331,7 +336,7 @@ find_dcolon: fn(text: String) -> Int Never! {
     i := 0
     loop i + 1 < raw.len() {
         if raw[i] == (U8{58}) && raw[i + 1] == (U8{58}) -> return i
-        i = i + 1
+        i += 1
     }
     -1
 }
@@ -349,12 +354,14 @@ slice_str: fn(text: String, start: Int, end: Int) -> String Never! {
 }
 
 net_err: fn(message: String) -> IOError Never! {
-    IOError.InvalidInput(IOContext{
-        operation: .Resolve,
-        resource: None,
-        os_code: None,
-        cause: Val(message),
-    })
+    IOError.InvalidInput(
+        IOContext{
+            operation: .Resolve,
+            resource: None,
+            os_code: None,
+            cause: Val(message),
+        },
+    )
 }
 
 IPv4Interface: struct {
@@ -371,9 +378,13 @@ from_packed_ipv4: fn(bytes: [U8]) -> IPv4 IOError! {
     ipv4(Int{bytes[0]}, Int{bytes[1]}, Int{bytes[2]}, Int{bytes[3]})
 }
 
-reverse_pointer: fn(addr: IPv4) -> String Never! { "{addr.d}.{addr.c}.{addr.b}.{addr.a}.in-addr.arpa" }
+reverse_pointer: fn(addr: IPv4) -> String Never! {
+    "{addr.d}.{addr.c}.{addr.b}.{addr.a}.in-addr.arpa"
+}
 
-with_prefixlen: fn(net: Network) -> String Never! { return "{ipv4_to_string(net.addr)}/{net.prefix}" }
+with_prefixlen: fn(net: Network) -> String Never! {
+    return "{ipv4_to_string(net.addr)}/{net.prefix}"
+}
 
 with_netmask: fn(net: Network) -> String Never! {
     mask: ipv4_from_int(prefix_mask(net.prefix)) ?? net.addr
@@ -389,6 +400,7 @@ num_addresses: fn(net: Network) -> Int Never! {
     if net.prefix < 0 || net.prefix > 32 -> return 0
     int_pow2(32 - net.prefix)
 }
+
 network_first: fn(net: Network) -> IPv4 Never! { net.addr }
 
 network_last: fn(net: Network) -> IPv4 Never! { network_broadcast(net) }
@@ -413,7 +425,9 @@ supernet: fn(net: Network) -> Network Never! {
 
 subnets: fn(net: Network, new_prefix: Int) -> [Network] Never! {
     out := [Network]{}
-    if net.prefix < 0 || net.prefix > 32 || new_prefix <= net.prefix || new_prefix > 32 -> return out
+    if net.prefix < 0 || net.prefix > 32 || new_prefix <= net.prefix || new_prefix > 32 {
+        return out
+    }
     step: int_pow2(32 - new_prefix)
     start: ipv4_int(net.addr)
     end: start + int_pow2(32 - net.prefix)
@@ -421,7 +435,7 @@ subnets: fn(net: Network, new_prefix: Int) -> [Network] Never! {
     loop n < end {
         addr: ipv4_from_int(n) ?? net.addr
         out.push(Network{addr: addr, prefix: new_prefix})
-        n = n + step
+        n += step
     }
     out
 }
@@ -439,7 +453,7 @@ hosts: fn(net: Network) -> [IPv4] Never! {
     n := start
     loop n < stop {
         out.push(ipv4_from_int(n) ?? net.addr)
-        n = n + 1
+        n += 1
     }
     out
 }
@@ -460,7 +474,9 @@ interface: fn(text: String) -> IPv4Interface IOError! {
     Ok(IPv4Interface{addr: addr, network: network_value})
 }
 
-is_carrier_grade_nat: fn(addr: IPv4) -> Bool Never! { addr.a == 100 && addr.b >= 64 && addr.b <= 127 }
+is_carrier_grade_nat: fn(addr: IPv4) -> Bool Never! {
+    addr.a == 100 && addr.b >= 64 && addr.b <= 127
+}
 
 is_benchmarking: fn(addr: IPv4) -> Bool Never! { addr.a == 198 && (addr.b == 18 || addr.b == 19) }
 
@@ -489,23 +505,29 @@ ipv6_is_private: fn(addr: IPv6) -> Bool Never! {
 // global.
 ipv6_is_global: fn(addr: IPv6) -> Bool Never! {
     if addr.words.len() != 8 -> return false
-    if ipv6_is_loopback(addr) || ipv6_is_unspecified(addr) || ipv6_is_link_local(addr) || ipv6_is_multicast(addr) || ipv6_is_private(addr) -> return false
+    if ipv6_is_loopback(addr) || ipv6_is_unspecified(addr) || ipv6_is_link_local(addr) || ipv6_is_multicast(addr) || ipv6_is_private(addr) {
+        return false
+    }
     w: addr.words
-    if w[0] == 0 && w[1] == 0 && w[2] == 0 && w[3] == 0 && w[4] == 0 && w[5] == 65535 -> return false // IPv4-mapped ::ffff:0:0/96.
-    if w[0] == 100 && w[1] == 65435 && w[2] == 1 -> return false // Local-use translation 64:ff9b:1::/48.
-    if w[0] == 256 && w[1] == 0 && w[2] == 0 && (w[3] == 0 || w[3] == 1) -> return false // Discard 100::/64 and dummy 100:0:0:1::/64.
+    if w[0] == 0 && w[1] == 0 && w[2] == 0 && w[3] == 0 && w[4] == 0 && w[5] == 65535 {
+        return false  // IPv4-mapped ::ffff:0:0/96.
+    }
+    if w[0] == 100 && w[1] == 65435 && w[2] == 1 -> return false  // Local-use translation 64:ff9b:1::/48.
+    if w[0] == 256 && w[1] == 0 && w[2] == 0 && (w[3] == 0 || w[3] == 1) -> return false  // Discard 100::/64 and dummy 100:0:0:1::/64.
     if w[0] == 8193 {
-        if w[1] == 3512 -> return false // Documentation 2001:db8::/32.
+        if w[1] == 3512 -> return false  // Documentation 2001:db8::/32.
         if w[1] < 512 {
             // IETF protocol assignments 2001::/23 and their reachable rows.
-            if w[1] == 1 && w[2] == 0 && w[3] == 0 && w[4] == 0 && w[5] == 0 && w[6] == 0 -> return w[7] >= 1 && w[7] <= 3
-            if w[1] == 3 -> return true // AMT 2001:3::/32.
-            if w[1] == 4 && w[2] == 274 -> return true // AS112-v6 2001:4:112::/48.
-            return w[1] >= 32 && w[1] <= 63 // ORCHIDv2 2001:20::/28 and DETs 2001:30::/28.
+            if w[1] == 1 && w[2] == 0 && w[3] == 0 && w[4] == 0 && w[5] == 0 && w[6] == 0 {
+                return w[7] >= 1 && w[7] <= 3
+            }
+            if w[1] == 3 -> return true  // AMT 2001:3::/32.
+            if w[1] == 4 && w[2] == 274 -> return true  // AS112-v6 2001:4:112::/48.
+            return w[1] >= 32 && w[1] <= 63  // ORCHIDv2 2001:20::/28 and DETs 2001:30::/28.
         }
     }
-    if w[0] == 16383 && w[1] < 4096 -> return false // Documentation 3fff::/20.
-    if w[0] == 24320 -> return false // SRv6 SIDs 5f00::/16.
+    if w[0] == 16383 && w[1] < 4096 -> return false  // Documentation 3fff::/20.
+    if w[0] == 24320 -> return false  // SRv6 SIDs 5f00::/16.
     true
 }
 
@@ -542,16 +564,14 @@ ipv6_compressed: fn(addr: IPv6) -> String Never! {
     loop i < 8 {
         if addr.words[i] == 0 {
             j := i
-            loop j < 8 && addr.words[j] == 0 -> j = j + 1
+            loop j < 8 && addr.words[j] == 0 -> j += 1
             n: j - i
             if n > best_n {
                 best_i = i
                 best_n = n
             }
             i = j
-        } else {
-            i = i + 1
-        }
+        } else { i += 1 }
     }
     if best_n < 2 -> best_i = -1
     s := ""
@@ -559,12 +579,12 @@ ipv6_compressed: fn(addr: IPv6) -> String Never! {
     loop i < 8 {
         if i == best_i {
             if s.bytes().len() == 0 -> s = "::" else -> s = "{s}::"
-            i = i + best_n
+            i += best_n
             next
         }
         if s.bytes().len() > 0 && !ends_colon_str(s) -> s = "{s}:"
         s = "{s}{hex_trim(addr.words[i])}"
-        i = i + 1
+        i += 1
     }
     s
 }
@@ -592,15 +612,14 @@ hex_trim: fn(n: Int) -> String {
             started = true
             if d < 10 -> out.push(U8{48 + d}) else -> out.push(U8{97 + (d - 10)})
         }
-        shift = shift - 4
+        shift -= 4
     }
     result: String.from_bytes(out) ?? "0"
     return result
 }
+
 ends_colon_str: fn(text: String) -> Bool {
     found := false
-    loop b in text.bytes() {
-        found = Int{b} == 58
-    }
+    loop b in text.bytes() -> found = Int{b} == 58
     return found
 }

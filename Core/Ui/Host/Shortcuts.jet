@@ -19,7 +19,9 @@ SHORTCUTS: Shared{ShortcutRegistry{bindings: [UIShortcutBinding]{}}}
 COMMAND: 16
 
 binding: fn(shortcut: UIShortcut, action: String) -> UIShortcutBinding UIHostError! {
-    if action.len() == 0 -> return Err(UIHostError.InvalidRequest("shortcut action must not be empty"))
+    if action.len() == 0 {
+        return Err(UIHostError.InvalidRequest("shortcut action must not be empty"))
+    }
     Ok(UIShortcutBinding{shortcut: shortcut, action: action, node: None})
 }
 
@@ -28,22 +30,30 @@ binding: fn(shortcut: UIShortcut, action: String) -> UIShortcutBinding UIHostErr
 // claims its key from the provider first, so a browser page
 // cancels the default action of bound keys only.
 register: fn(binding: UIShortcutBinding) -[IO]> UIShortcutBinding UIHostError! {
-    if !core.ui.host.__capability(4) -> return Err(UIHostError.CapabilityUnavailable{capability: "Shortcuts"})
-    if binding.action.len() == 0 -> return Err(UIHostError.InvalidRequest("shortcut action must not be empty"))
+    if !core.ui.host.__capability(4) {
+        return Err(UIHostError.CapabilityUnavailable{capability: "Shortcuts"})
+    }
+    if binding.action.len() == 0 {
+        return Err(UIHostError.InvalidRequest("shortcut action must not be empty"))
+    }
     loop existing in SHORTCUTS.bindings {
         if existing.shortcut != binding.shortcut -> next
         if existing.action == binding.action -> return Ok(existing.copy())
         return Err(UIHostError.ShortcutConflict{shortcut: binding.shortcut.copy(), existing_action: existing.action.copy()})
     }
     loop claim in key_claims(binding.shortcut) {
-        if !core.ui.host.__key_claim(claim) -> return Err(shortcut_failure("the provider could not claim key `{claim}`"))
+        if !core.ui.host.__key_claim(claim) {
+            return Err(shortcut_failure("the provider could not claim key `{claim}`"))
+        }
     }
     SHORTCUTS.bindings.push(binding.copy())
     Ok(binding)
 }
 
 dispatch: fn(shortcut: UIShortcut) -[IO]> UIShortcutDispatch UIHostError! {
-    if !core.ui.host.__capability(4) -> return Err(UIHostError.CapabilityUnavailable{capability: "Shortcuts"})
+    if !core.ui.host.__capability(4) {
+        return Err(UIHostError.CapabilityUnavailable{capability: "Shortcuts"})
+    }
     Ok(dispatched(lookup(shortcut)))
 }
 
@@ -53,13 +63,19 @@ dispatch: fn(shortcut: UIShortcut) -[IO]> UIShortcutDispatch UIHostError! {
 // exactly one of Control and Meta also matches a command binding. An empty
 // record is the provider's mark that its queue overflowed and dropped events.
 poll: fn() -[IO]> UIShortcutDispatch? UIHostError! {
-    if !core.ui.host.__capability(4) -> return Err(UIHostError.CapabilityUnavailable{capability: "Shortcuts"})
+    if !core.ui.host.__capability(4) {
+        return Err(UIHostError.CapabilityUnavailable{capability: "Shortcuts"})
+    }
     raw: core.ui.host.__event_pop(2) ?? return Ok(None)
     if raw.len() == 0 -> return Err(UIHostError.QueueFull{service: "Shortcuts"})
     fields: core.ui.host.provider_record_fields(raw) ?? return Err(shortcut_failure("a key event is not a provider record"))
-    if fields.len() != 3 -> return Err(shortcut_failure("a key event has 3 fields, not {fields.len()}"))
+    if fields.len() != 3 {
+        return Err(shortcut_failure("a key event has 3 fields, not {fields.len()}"))
+    }
     mask: Int.parse(fields[2]) ?? return Err(shortcut_failure("key modifiers `{fields[2]}` are not a number"))
-    if mask < 0 || mask > 15 -> return Err(shortcut_failure("key modifiers `{fields[2]}` are outside the Control, Alt, Shift and Meta bits"))
+    if mask < 0 || mask > 15 {
+        return Err(shortcut_failure("key modifiers `{fields[2]}` are outside the Control, Alt, Shift and Meta bits"))
+    }
     pressed: core.ui.host.shortcut(fields[1], UIShortcutModifiers{bits: mask})
     if lookup(pressed) == .Val(exact) -> return Ok(Val(UIShortcutDispatch.Dispatched(exact)))
     control: mask.bit_and(1) != 0
@@ -105,8 +121,9 @@ priv internal: module {
     bound: binding(key, " ") ?? panic("space action rejected")
     assert(bound.action == " " && bound.node == None && bound.shortcut == key)
     if binding(key, "") == .Err(error) {
-        if error == .InvalidRequest(message) -> assert(message == "shortcut action must not be empty")
-        else -> panic("wrong shortcut binding error")
+        if error == .InvalidRequest(message) {
+            assert(message == "shortcut action must not be empty")
+        } else { panic("wrong shortcut binding error") }
     } else { panic("empty action accepted") }
 }
 

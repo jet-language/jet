@@ -6,7 +6,9 @@
     base: files.join(sys.temp_dir(), "tc-fixture-{sys.pid()}-{token}")
     files.create_dir_all(files.join(base, "ring")) ?? panic("ring dir")
     files.write(files.join(base, "cargo"), "#!/bin/sh\nexit 0\n") ?? panic("cargo")
-    if !sys.is_windows() -> files.set_mode(files.join(base, "cargo"), 0o755) ?? panic("make cargo executable")
+    if !sys.is_windows() {
+        files.set_mode(files.join(base, "cargo"), 0o755) ?? panic("make cargo executable")
+    }
     files.write(files.join(base, "version"), "0.4.2\n") ?? panic("version")
     files.write(files.join(base, "ring/http"), "artifact") ?? panic("ring artifact")
     toolchain: recipe_toolchain_from_object(base) ?? panic("the fixture object resolves")

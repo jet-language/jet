@@ -30,7 +30,9 @@ hot: fn(s: Dyn, f: Dyn) -> String [FieldError]! {
     profile: s.get("profile") ?? return Ok("(not profiled)")
     phase: profile.field("phases").get(f.field("phase").text()) ?? return Ok("(not profiled)")
     rows := [String]{}
-    loop row in phase.field("inclusive").decode<[Dyn]>().take(3) -> rows.push("{(row.get("source") ?? Dyn.Null).decode<String?>()?("source") ?? row.field("symbol").text()?("symbol")} {fmt.decimal(row.field("share").float() * 100.0, 0)}%")
+    loop row in phase.field("inclusive").decode<[Dyn]>().take(3) {
+        rows.push("{(row.get("source") ?? Dyn.Null).decode<String?>()?("source") ?? row.field("symbol").text()?("symbol")} {fmt.decimal(row.field("share").float() * 100.0, 0)}%")
+    }
     Ok(rows.join("; "))
 }
 
@@ -64,15 +66,23 @@ report: fn(receipts: [(file: String, receipt: Dyn)]) -> String [FieldError]! {
         out.push("{cell} {mode} | {if rungs.len() == 0 -> "none" else -> rungs.join(", ")} | {if timed -> fixed(top.field("metrics").field("wall_seconds").float()?("wall_seconds"), 1) else -> "-"} | {if timed -> fixed(Float{top.field("metrics").field("peak_rss_kb").int()} / 1048576.0) else -> "-"} | {(s.get("truncated") ?? Dyn.Null).decode<String?>()?("truncated") ?? ""} |")
         loop f in (s.get("failures") ?? []).decode<[Dyn]>() {
             kind: f.field("kind").text()
-            if kind == "growth" -> growth.push("{cell} {mode} | {f.field("metric").text()} | {fixed((f.get("ratio") ?? Dyn.Null).decode<Float?>()?("ratio"))} | {fixed((f.get("exponent") ?? Dyn.Null).decode<Float?>()?("exponent"))} | {(f.get("counter") ?? Dyn.Null).decode<String?>()?("counter") ?? "-"} | {hot(s, f)} |")
+            if kind == "growth" {
+                growth.push("{cell} {mode} | {f.field("metric").text()} | {fixed((f.get("ratio") ?? Dyn.Null).decode<Float?>()?("ratio"))} | {fixed((f.get("exponent") ?? Dyn.Null).decode<Float?>()?("exponent"))} | {(f.get("counter") ?? Dyn.Null).decode<String?>()?("counter") ?? "-"} | {hot(s, f)} |")
+            }
             if kind == "floor" -> floors.push("{cell} {f.field("text").text()} |")
-            if ["compile", "timeout", "truncated"].contains(kind) -> broken.push("{cell} {mode} | {(f.get("phase") ?? Dyn.Null).decode<String?>()?("phase") ?? "-"} | {f.field("text").text()} |")
+            if ["compile", "timeout", "truncated"].contains(kind) {
+                broken.push("{cell} {mode} | {(f.get("phase") ?? Dyn.Null).decode<String?>()?("phase") ?? "-"} | {f.field("text").text()} |")
+            }
         }
-        if !(s.get("done") ?? s.has("failures")).bool() -> broken.push("{cell} {mode} | - | incomplete checkpoint |")
+        if !(s.get("done") ?? s.has("failures")).bool() {
+            broken.push("{cell} {mode} | - | incomplete checkpoint |")
+        }
         if mode == "counters" {
             reason := "not in the timing sample"
             loop t in series {
-                if (t.get("mode") ?? "timing").text() == "counters" || "| {t.field("shape").text()} | {t.field("layout").text()} | {t.field("compiler").text()} |" != cell -> next
+                if (t.get("mode") ?? "timing").text() == "counters" || "| {t.field("shape").text()} | {t.field("layout").text()} | {t.field("compiler").text()} |" != cell {
+                    next
+                }
                 oks := [Bool]{}
                 loop p in t.field("points").decode<[Dyn]>() -> oks.push(p.field("ok").bool()?("ok"))
                 reason = if oks.contains(true) -> "" else -> "timing compilation failed"
@@ -88,7 +98,9 @@ report: fn(receipts: [(file: String, receipt: Dyn)]) -> String [FieldError]! {
         }
         // The keys keep their JSON order, so the stable sort keeps equal phases in it.
         rows.sort_by(fn(a, b) { b.projected <=> a.projected })
-        loop row in rows -> projected.push("{cell} {row.p.field("at_lines").int()} | {if row.key == "wall_seconds" -> "**total**" else -> row.key.slice(6..<row.key.len())} | {fixed(row.p.field("measured_s").float()?("measured_s"))} | {fixed(row.p.field("exponent").float()?("exponent"))} | {fixed(row.projected, 1)} |")
+        loop row in rows {
+            projected.push("{cell} {row.p.field("at_lines").int()} | {if row.key == "wall_seconds" -> "**total**" else -> row.key.slice(6..<row.key.len())} | {fixed(row.p.field("measured_s").float()?("measured_s"))} | {fixed(row.p.field("exponent").float()?("exponent"))} | {fixed(row.projected, 1)} |")
+        }
     }
     Ok("{out.join("\n")}\n{growth.join("\n")}\n{floors.join("\n")}\n{broken.join("\n")}\n{projected.join("\n")}\n{uncovered.join("\n")}\n")
 }

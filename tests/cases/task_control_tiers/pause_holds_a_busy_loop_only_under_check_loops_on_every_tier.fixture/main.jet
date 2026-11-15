@@ -4,9 +4,7 @@ use time: core.time
 // starts with can hold or stop it.
 spin: fn(limit: Int) -> Int {
     n := 0
-    loop n < limit {
-        n += 1
-    }
+    loop n < limit -> n += 1
     n
 }
 
@@ -46,7 +44,7 @@ run: fn() {
         spinner.resume()
         spinner.cancel()
         if spinner.join() == {
-            .Ok(_) -> print("it finished")
+            .Ok(_) -> { print("it finished") }
             .Err(_) -> print("cancel stopped it")
         }
     }

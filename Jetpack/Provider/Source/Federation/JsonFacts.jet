@@ -12,7 +12,7 @@ impl MetadataFacts {
 
     // Keep every native top-level field in the typed projection under
     // `namespace`, beside the byte-for-byte native document.
-    add_json_projection: fn(&self, namespace: String, object: [String: Dyn]) Never! {
+    add_json_projection: fn(&self, namespace: String, object: [String:Dyn]) Never! {
         loop key in object.keys().to_list() -> self.add_typed_json("{namespace}.{key}", object[key])
     }
 
@@ -34,7 +34,7 @@ impl MetadataFacts {
 }
 
 // Rust `json_string`: the non-blank string at `key`.
-provider_graph_json_string: fn(object: [String: Dyn], key: String) -> String? Never! {
+provider_graph_json_string: fn(object: [String:Dyn], key: String) -> String? Never! {
     value: object.get(key) ?? return None
     text: pkg_json_text(value) ?? return None
     if text.trim() == "" -> return None
@@ -43,12 +43,10 @@ provider_graph_json_string: fn(object: [String: Dyn], key: String) -> String? Ne
 
 // Rust `as_i64`: a JSON whole number (no fraction or exponent). Strict
 // `json.parse` keeps every number as its exact lexeme (#4602).
-provider_graph_json_int: fn(value: Dyn) -> Int? Never! {
-    foundation_json_integer(value)
-}
+provider_graph_json_int: fn(value: Dyn) -> Int? Never! { foundation_json_integer(value) }
 
 // The first non-blank string among `keys`.
-provider_graph_json_first_string: fn(object: [String: Dyn], keys: [String]) -> String? Never! {
+provider_graph_json_first_string: fn(object: [String:Dyn], keys: [String]) -> String? Never! {
     loop key in keys {
         value: provider_graph_json_string(object, key) ?? next
         return Val(value)
@@ -65,14 +63,14 @@ provider_graph_either: fn<T>(first: T?, second: T?) -> T? Never! {
 }
 
 // The keys of the object at `key`, in document order.
-provider_graph_json_keys: fn(object: [String: Dyn], key: String) -> [String] Never! {
+provider_graph_json_keys: fn(object: [String:Dyn], key: String) -> [String] Never! {
     value: object.get(key) ?? return [String]{}
     fields: pkg_json_object(value) ?? return [String]{}
     fields.keys().to_list()
 }
 
 // Strings of the array at `key`; an object item contributes its `name`.
-provider_graph_json_array_strings: fn(object: [String: Dyn], key: String) -> [String] Never! {
+provider_graph_json_array_strings: fn(object: [String:Dyn], key: String) -> [String] Never! {
     value: object.get(key) ?? return [String]{}
     items: pkg_json_array(value) ?? return [String]{}
     out := [String]{}
@@ -100,18 +98,14 @@ provider_graph_json_value_text: fn(value: Dyn) -> String Never! {
     }
 }
 
-provider_graph_is_text: fn(value: Dyn) -> Bool Never! {
-    pkg_json_text(value) != None
-}
+provider_graph_is_text: fn(value: Dyn) -> Bool Never! { pkg_json_text(value) != None }
 
 provider_graph_is_non_blank_text: fn(value: Dyn) -> Bool Never! {
     text: pkg_json_text(value) ?? return false
     text.trim() != ""
 }
 
-provider_graph_is_bool: fn(value: Dyn) -> Bool Never! {
-    pkg_json_bool(value) != None
-}
+provider_graph_is_bool: fn(value: Dyn) -> Bool Never! { pkg_json_bool(value) != None }
 
 // Rust `json_string_list`: one string, or an array of only strings.
 provider_graph_json_string_list: fn(value: Dyn) -> [String]? Never! {
@@ -129,7 +123,7 @@ provider_graph_json_string_list: fn(value: Dyn) -> [String]? Never! {
 }
 
 // The document's root object, or None when it is not a JSON object.
-provider_graph_json_root: fn(document: String) -> [String: Dyn]? Never! {
+provider_graph_json_root: fn(document: String) -> [String:Dyn]? Never! {
     if pkg_json_parse_protocol(document) == {
         .Parsed(tree) -> pkg_json_object(tree)
         .Failed(_) -> None
@@ -163,7 +157,9 @@ impl ProviderFactReport {
         conflicts := [String]{}
         if facts.name == "" -> losses.push("npm metadata has no package name")
         facts.version = provider_graph_json_string(object, "version") ?? ""
-        if object.has_key("version") && facts.version == "" -> losses.push("npm metadata `version` must be a non-empty string")
+        if object.has_key("version") && facts.version == "" {
+            losses.push("npm metadata `version` must be a non-empty string")
+        }
         if facts.version == "" {
             if object.get("versions") == {
                 .Val(raw_versions) -> {
@@ -181,7 +177,9 @@ impl ProviderFactReport {
                                     .None -> {}
                                 }
                             }
-                            if versions.len() > 1 -> losses.push("npm packument contains multiple versions; select one exact version before realization")
+                            if versions.len() > 1 {
+                                losses.push("npm packument contains multiple versions; select one exact version before realization")
+                            }
                         }
                         .None -> losses.push("npm `versions` must be an object")
                     }
@@ -206,9 +204,7 @@ impl ProviderFactReport {
                         facts.bins = values.keys().to_list()
                     }
                     .None -> {
-                        if provider_graph_is_text(bin) {
-                            facts.bins = [String]{facts.name}
-                        } else {
+                        if provider_graph_is_text(bin) -> facts.bins = [String]{facts.name} else {
                             losses.push("npm `bin` must be a string or object")
                         }
                     }
@@ -228,7 +224,9 @@ impl ProviderFactReport {
                 .Val(raw_version) -> {
                     if pkg_json_text(raw_version) == {
                         .Val(version) -> {
-                            if version != facts.version -> conflicts.push("npm packument version `{facts.version}` conflicts with package version `{version}`")
+                            if version != facts.version {
+                                conflicts.push("npm packument version `{facts.version}` conflicts with package version `{version}`")
+                            }
                         }
                         .None -> losses.push("npm package `version` must be a string")
                     }
@@ -240,9 +238,11 @@ impl ProviderFactReport {
         facts.add_json_projection("provider.npm.native", object)
         if separate_package -> facts.add_json_projection("provider.npm.package", metadata)
         dependency_sets: [(field: String, kind: String)]{
-            (field: "dependencies", kind: "runtime"), (field: "devDependencies", kind: "dev"),
-            (field: "optionalDependencies", kind: "optional"), (field: "peerDependencies", kind: "peer"),
-            (field: "bundledDependencies", kind: "bundled")
+            (field: "dependencies", kind: "runtime"),
+            (field: "devDependencies", kind: "dev"),
+            (field: "optionalDependencies", kind: "optional"),
+            (field: "peerDependencies", kind: "peer"),
+            (field: "bundledDependencies", kind: "bundled"),
         }
         loop set in dependency_sets {
             value: metadata.get(set.field) ?? next
@@ -252,7 +252,9 @@ impl ProviderFactReport {
                     .Val(values) -> {
                         loop name in values.keys().to_list() {
                             facts.add_typed_json("provider.npm.dependency.{set.kind}.{name}", values[name])
-                            if !provider_graph_is_text(values[name]) -> losses.push("npm `{set.field}.{name}` must retain a string requirement")
+                            if !provider_graph_is_text(values[name]) {
+                                losses.push("npm `{set.field}.{name}` must retain a string requirement")
+                            }
                         }
                         next
                     }
@@ -264,7 +266,9 @@ impl ProviderFactReport {
                     .Val(items) -> {
                         loop index in 0..<items.len() {
                             facts.add_typed_json("provider.npm.dependency.bundled.{index}", items[index])
-                            if !provider_graph_is_text(items[index]) -> losses.push("npm `bundledDependencies[{index}]` must be a package name")
+                            if !provider_graph_is_text(items[index]) {
+                                losses.push("npm `bundledDependencies[{index}]` must be a package name")
+                            }
                         }
                         next
                     }
@@ -281,7 +285,9 @@ impl ProviderFactReport {
                     .Val(optional) -> {
                         loop name in runtime.keys().to_list() {
                             requirement: optional.get(name) ?? next
-                            if runtime[name] != requirement -> losses.push("npm dependency `{name}` has different runtime and optional requirements")
+                            if runtime[name] != requirement {
+                                losses.push("npm dependency `{name}` has different runtime and optional requirements")
+                            }
                         }
                     }
                     .None -> {}
@@ -295,7 +301,9 @@ impl ProviderFactReport {
                     .Val(scripts) -> {
                         loop name in scripts.keys().to_list() {
                             facts.add_typed_json("provider.npm.hook.{name}", scripts[name])
-                            if !provider_graph_is_text(scripts[name]) -> losses.push("npm script `{name}` must be a string command")
+                            if !provider_graph_is_text(scripts[name]) {
+                                losses.push("npm script `{name}` must be a string command")
+                            }
                         }
                     }
                     .None -> losses.push("npm `scripts` must be an object")
@@ -320,7 +328,9 @@ impl ProviderFactReport {
                     .Val(engines) -> {
                         loop engine in engines.keys().to_list() {
                             facts.add_typed_json("provider.npm.variant.engine.{engine}", engines[engine])
-                            if !provider_graph_is_text(engines[engine]) -> losses.push("npm engine `{engine}` must be a string requirement")
+                            if !provider_graph_is_text(engines[engine]) {
+                                losses.push("npm engine `{engine}` must be a string requirement")
+                            }
                         }
                     }
                     .None -> losses.push("npm `engines` must be an object")
@@ -334,7 +344,7 @@ impl ProviderFactReport {
             (field: "publishConfig", target: "provider.npm.source.publish_config"),
             (field: "author", target: "provider.npm.source.author"),
             (field: "maintainers", target: "provider.npm.source.maintainers"),
-            (field: "dist-tags", target: "provider.npm.channel.dist_tags")
+            (field: "dist-tags", target: "provider.npm.channel.dist_tags"),
         }
         loop projection in projections {
             value: metadata.get(projection.field) ?? next
@@ -344,9 +354,7 @@ impl ProviderFactReport {
             .Val(yanked) -> {
                 if provider_graph_is_bool(yanked) {
                     facts.add_typed_json("provider.npm.yanked", yanked)
-                } else {
-                    losses.push("npm `yanked` must be a boolean")
-                }
+                } else { losses.push("npm `yanked` must be a boolean") }
             }
             .None -> {}
         }
@@ -358,7 +366,9 @@ impl ProviderFactReport {
                         loop key in dist_keys {
                             value: dist.get(key) ?? next
                             facts.add_typed_json("provider.npm.dist.{key}", value)
-                            if !provider_graph_is_non_blank_text(value) -> losses.push("npm dist field `{key}` must be a non-empty string")
+                            if !provider_graph_is_non_blank_text(value) {
+                                losses.push("npm dist field `{key}` must be a non-empty string")
+                            }
                         }
                         facts.integrity_hash = provider_graph_json_first_string(dist, [String]{"integrity", "shasum"}) ?? ""
                     }
@@ -371,7 +381,7 @@ impl ProviderFactReport {
     }
 
     // A PyPI JSON API record (`info` plus artifact `urls`).
-    pypi_json_document: fn(object: [String: Dyn]) -> ProviderFactReport Never! {
+    pypi_json_document: fn(object: [String:Dyn]) -> ProviderFactReport Never! {
         info_object: pkg_json_object(object.get("info") ?? Dyn.Null)
         has_info: info_object == .Val(_)
         info: info_object ?? object
@@ -388,7 +398,9 @@ impl ProviderFactReport {
             root_fields: [String]{"name", "version"}
             loop field in root_fields {
                 value: object.get(field) ?? next
-                if !provider_graph_is_text(value) -> losses.push("PyPI top-level `{field}` must be a string")
+                if !provider_graph_is_text(value) {
+                    losses.push("PyPI top-level `{field}` must be a string")
+                }
             }
         }
         info_fields: [String]{"name", "version", "license", "summary", "home_page", "download_url", "author", "author_email", "maintainer", "maintainer_email", "requires_python", "description_content_type"}
@@ -401,7 +413,9 @@ impl ProviderFactReport {
             loop field in identity_fields {
                 info_value: provider_graph_json_string(info, field) ?? next
                 root_value: provider_graph_json_string(object, field) ?? next
-                if info_value != root_value -> conflicts.push("PyPI metadata declares conflicting {field} values: {info_value}, {root_value}")
+                if info_value != root_value {
+                    conflicts.push("PyPI metadata declares conflicting {field} values: {info_value}, {root_value}")
+                }
             }
         }
         text_fields: [String]{"summary", "home_page", "download_url", "author", "author_email", "maintainer", "maintainer_email", "requires_python", "description_content_type"}
@@ -415,8 +429,10 @@ impl ProviderFactReport {
             facts.add_typed_text("{namespace}.{key}", value)
         }
         list_fields: [(field: String, kind: String)]{
-            (field: "requires_dist", kind: "runtime"), (field: "provides_extra", kind: "extra"),
-            (field: "classifiers", kind: "classifier"), (field: "project_urls", kind: "project_url")
+            (field: "requires_dist", kind: "runtime"),
+            (field: "provides_extra", kind: "extra"),
+            (field: "classifiers", kind: "classifier"),
+            (field: "project_urls", kind: "project_url"),
         }
         loop list_field in list_fields {
             value: info.get(list_field.field) ?? next
@@ -434,10 +450,16 @@ impl ProviderFactReport {
                             }
                             "classifiers" -> {
                                 facts.add_typed_text("provider.pypi.variant.{list_field.kind}.{index}", text)
-                                if text.starts_with("Operating System: ") || text.starts_with("Platform: ") -> facts.platforms.push(text.copy())
-                                if facts.license == "" && text.starts_with("License: ") -> facts.license = text
+                                if text.starts_with("Operating System: ") || text.starts_with("Platform: ") {
+                                    facts.platforms.push(text.copy())
+                                }
+                                if facts.license == "" && text.starts_with("License: ") {
+                                    facts.license = text
+                                }
                             }
-                            else -> facts.add_typed_text("provider.pypi.variant.{list_field.kind}.{index}", text)
+                            else -> {
+                                facts.add_typed_text("provider.pypi.variant.{list_field.kind}.{index}", text)
+                            }
                         }
                     }
                     next
@@ -449,7 +471,9 @@ impl ProviderFactReport {
                     .Val(urls) -> {
                         loop name in urls.keys().to_list() {
                             if pkg_json_text(urls[name]) == {
-                                .Val(url) -> facts.add_typed_text("provider.pypi.source.project_url.{name}", url)
+                                .Val(url) -> {
+                                    facts.add_typed_text("provider.pypi.source.project_url.{name}", url)
+                                }
                                 .None -> losses.push("PyPI project URL `{name}` must be a string")
                             }
                         }
@@ -466,9 +490,13 @@ impl ProviderFactReport {
                     .Val(dynamic) -> {
                         loop index in 0..<dynamic.len() {
                             facts.add_typed_json("provider.pypi.dynamic.{index}", dynamic[index])
-                            if !provider_graph_is_text(dynamic[index]) -> losses.push("PyPI `dynamic[{index}]` must be a field name")
+                            if !provider_graph_is_text(dynamic[index]) {
+                                losses.push("PyPI `dynamic[{index}]` must be a field name")
+                            }
                         }
-                        if dynamic.len() > 0 -> losses.push("dynamic Python metadata must be resolved to an exact lock")
+                        if dynamic.len() > 0 {
+                            losses.push("dynamic Python metadata must be resolved to an exact lock")
+                        }
                     }
                     .None -> losses.push("PyPI `dynamic` must be an array of fields")
                 }
@@ -480,7 +508,7 @@ impl ProviderFactReport {
             (field: "provides_dist", target: "provider.pypi.metadata.provides"),
             (field: "license_files", target: "provider.pypi.metadata.license_files"),
             (field: "import_name", target: "provider.pypi.metadata.import_name"),
-            (field: "import_namespaces", target: "provider.pypi.metadata.import_namespaces")
+            (field: "import_namespaces", target: "provider.pypi.metadata.import_namespaces"),
         }
         loop projection in json_projections {
             value: info.get(projection.field) ?? next
@@ -530,16 +558,18 @@ impl ProviderFactReport {
                 .Val(yanked) -> {
                     if provider_graph_is_bool(yanked) {
                         facts.add_typed_json("provider.pypi.advisory.yanked.{index}", yanked)
-                    } else {
-                        losses.push("PyPI artifact `{filename}` yanked must be boolean")
-                    }
+                    } else { losses.push("PyPI artifact `{filename}` yanked must be boolean") }
                 }
                 .None -> {}
             }
             if provider_graph_json_string(url, "yanked_reason") == {
-                .Val(reason) -> facts.add_typed_text("provider.pypi.advisory.yanked_reason.{index}", reason)
+                .Val(reason) -> {
+                    facts.add_typed_text("provider.pypi.advisory.yanked_reason.{index}", reason)
+                }
                 .None -> {
-                    if url.has_key("yanked_reason") -> losses.push("PyPI artifact `{filename}` yanked_reason must be a string")
+                    if url.has_key("yanked_reason") {
+                        losses.push("PyPI artifact `{filename}` yanked_reason must be a string")
+                    }
                 }
             }
         }
@@ -548,16 +578,24 @@ impl ProviderFactReport {
         loop index in 1..<artifact_hashes.len() {
             left: artifact_hashes[index - 1]
             right: artifact_hashes[index]
-            if left.filename == right.filename && left.digest != right.digest -> conflicts.push("PyPI artifact `{left.filename}` has conflicting sha256 digests")
+            if left.filename == right.filename && left.digest != right.digest {
+                conflicts.push("PyPI artifact `{left.filename}` has conflicting sha256 digests")
+            }
         }
         if artifact_hashes.len() == 1 -> facts.integrity_hash = artifact_hashes[0].digest
         vulnerabilities: pkg_json_array(object.get("vulnerabilities") ?? Dyn.Null) ?? [Dyn]{}
         loop index in 0..<vulnerabilities.len() {
             facts.add_typed_json("provider.pypi.advisory.vulnerability.{index}", vulnerabilities[index])
-            if pkg_json_object(vulnerabilities[index]) == None -> losses.push("PyPI vulnerability {index} must be an object")
+            if pkg_json_object(vulnerabilities[index]) == None {
+                losses.push("PyPI vulnerability {index} must be an object")
+            }
         }
-        if object.has_key("urls") && pkg_json_array(object["urls"]) == None -> losses.push("PyPI `urls` must be an array of artifacts")
-        if object.has_key("vulnerabilities") && pkg_json_array(object["vulnerabilities"]) == None -> losses.push("PyPI `vulnerabilities` must be an array")
+        if object.has_key("urls") && pkg_json_array(object["urls"]) == None {
+            losses.push("PyPI `urls` must be an array of artifacts")
+        }
+        if object.has_key("vulnerabilities") && pkg_json_array(object["vulnerabilities"]) == None {
+            losses.push("PyPI `vulnerabilities` must be an array")
+        }
         facts.source_identity = "pypi:{facts.name}@{facts.version}"
         facts.dependencies = provider_sorted_unique(facts.dependencies)
         facts.platforms = provider_sorted_unique(facts.platforms)
@@ -568,7 +606,7 @@ impl ProviderFactReport {
     swiftpm_document: fn(document: String) -> ProviderFactReport Never! {
         root: provider_graph_json_root(document) ?? return ProviderFactReport.unreadable(ProviderFamily.SwiftPM, "swiftpm", "Package.resolved is not valid JSON")
         root_pins: root.get("pins")
-        nested: pkg_json_object(root.get("object") ?? Dyn.Null) ?? [String: Dyn]{}
+        nested: pkg_json_object(root.get("object") ?? Dyn.Null) ?? [String:Dyn]{}
         object_pins: nested.get("pins")
         if root_pins != None && object_pins != None && root_pins != object_pins {
             return ProviderFactReport.unreadable(ProviderFamily.SwiftPM, "swiftpm", "SwiftPM lock has conflicting top-level and object `pins` arrays")
@@ -605,10 +643,12 @@ impl ProviderFactReport {
             pin_fields: [String]{"identity", "package", "location", "repositoryURL", "kind"}
             loop field in pin_fields {
                 value: pin.get(field) ?? next
-                if !provider_graph_is_text(value) -> losses.push("SwiftPM pin `{field}` must be a string")
+                if !provider_graph_is_text(value) {
+                    losses.push("SwiftPM pin `{field}` must be a string")
+                }
             }
             facts.name = provider_graph_either(identity, package) ?? ""
-            state := [String: Dyn]{}
+            state := [String:Dyn]{}
             has_state := false
             if pin.get("state") == {
                 .Val(raw_state) -> {
@@ -626,7 +666,9 @@ impl ProviderFactReport {
                 state_fields: [String]{"version", "revision", "branch"}
                 loop field in state_fields {
                     value: state.get(field) ?? next
-                    if !provider_graph_is_text(value) && value != Dyn.Null -> losses.push("SwiftPM pin `{facts.name}` state field `{field}` must be a string or null")
+                    if !provider_graph_is_text(value) && value != Dyn.Null {
+                        losses.push("SwiftPM pin `{facts.name}` state field `{field}` must be a string or null")
+                    }
                 }
             }
             version: provider_graph_either(provider_graph_json_string(state, "version"), provider_graph_json_string(pin, "version"))
@@ -643,19 +685,25 @@ impl ProviderFactReport {
             if branch == {
                 .Val(name) -> {
                     facts.add_typed_text("provider.swiftpm.variant.branch", name)
-                    if facts.integrity_hash == "" -> losses.push("SwiftPM pin `{facts.name}` has branch `{name}` but no exact revision")
+                    if facts.integrity_hash == "" {
+                        losses.push("SwiftPM pin `{facts.name}` has branch `{name}` but no exact revision")
+                    }
                 }
                 .None -> {}
             }
             if provider_graph_json_string(pin, "kind") == {
-                .Val(kind) -> facts.add_typed_text("provider.swiftpm.variant.kind", kind)
+                .Val(kind) -> { facts.add_typed_text("provider.swiftpm.variant.kind", kind) }
                 .None -> {}
             }
             if provider_graph_json_first_string(pin, [String]{"location", "repositoryURL"}) == {
-                .Val(location) -> facts.add_typed_text("provider.swiftpm.source.location", location)
+                .Val(location) -> {
+                    facts.add_typed_text("provider.swiftpm.source.location", location)
+                }
                 .None -> {}
             }
-            if !has_state && !pin.has_key("state") -> losses.push("SwiftPM pin `{facts.name}` has no state object")
+            if !has_state && !pin.has_key("state") {
+                losses.push("SwiftPM pin `{facts.name}` has no state object")
+            }
             pinned: facts.first_typed("provider.revision") ?? ""
             source: if pinned != "" -> pinned else -> facts.version
             facts.source_identity = "swiftpm:{facts.name}@{source}"
@@ -683,7 +731,9 @@ impl ProviderFactReport {
                     loop right_index in (left_index + 1)..<pins.len() {
                         right: pkg_json_object(pins[right_index]) ?? next
                         right_identity: provider_graph_json_first_string(right, [String]{"identity", "package"}) ?? next
-                        if left_identity == right_identity && pins[left_index] != pins[right_index] -> conflicts.push("SwiftPM pin `{left_identity}` has conflicting native states")
+                        if left_identity == right_identity && pins[left_index] != pins[right_index] {
+                            conflicts.push("SwiftPM pin `{left_identity}` has conflicting native states")
+                        }
                     }
                 }
             }

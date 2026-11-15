@@ -8,6 +8,7 @@ package: {
         query: .Library{ entry: query }
     }
 }
+
 use {
     core: core
     core.data.[DataLimits, Query]
@@ -33,7 +34,9 @@ __query_sql: fn<T: Encode>(rows: [T], sql: SQL) -> Query<T> [FieldError]! {
     loop item in spec.projection {
         if item == .Aggregate(_, _, _) -> reshapes = true
     }
-    if reshapes -> return Err(query_field_error("SQL projection/grouping changes the row shape; use the Dyn query result"))
+    if reshapes {
+        return Err(query_field_error("SQL projection/grouping changes the row shape; use the Dyn query result"))
+    }
     selected := [T]{}
     loop index in query_sql_select(trees, spec) -> selected.push(rows[index].copy())
     Ok(core.data.query_make<T>([String]{"scan", "sql"}, false, DataLimits.safe(), fn() { Ok(selected.copy()) }))
@@ -61,7 +64,9 @@ priv query_sql_spec: fn(sql: SQL) -> sql_kernel.JetSQLQuery Err! {
         if placeholder -> return Err("analytics query WHERE binding is missing")
         return Ok(spec)
     }
-    if !placeholder || sql.values.len() != 1 -> return Err("analytics query bindings do not match its WHERE value")
+    if !placeholder || sql.values.len() != 1 {
+        return Err("analytics query bindings do not match its WHERE value")
+    }
     if sql.values[0] == .Blob(_) -> return Err("analytics query WHERE requires a scalar binding")
     literal: if sql.values[0] == {
         .Null -> "null"
@@ -71,7 +76,9 @@ priv query_sql_spec: fn(sql: SQL) -> sql_kernel.JetSQLQuery Err! {
         .Text(value) -> "'{value.replace("'", "''")}'"
         .Blob(_) -> ""
     }
-    if spec.filter == .Val(filter) -> spec.filter = Val((field: filter.field.copy(), operator: filter.operator.copy(), value: literal))
+    if spec.filter == .Val(filter) {
+        spec.filter = Val((field: filter.field.copy(), operator: filter.operator.copy(), value: literal))
+    }
     Ok(spec)
 }
 
@@ -82,9 +89,7 @@ priv query_sql_fields: fn(trees: [Dyn]) -> [String] Never! {
     loop tree in trees {
         if tree == .Object(_) {
             loop entry in encoding_stream.object_entries(tree) -> names.push(entry.key.copy())
-        } else {
-            names.push("$")
-        }
+        } else { names.push("$") }
     }
     names
 }
@@ -122,7 +127,9 @@ priv query_sql_select: fn(trees: [Dyn], spec: sql_kernel.JetSQLQuery) -> [Int] N
         keys := [String]{}
         loop index in selected -> keys.push(query_sql_cell(trees[index], order.field) ?? "")
         ordered := [Int]{}
-        loop position in core.data.query_merge_order(keys, true, order.descending) -> ordered.push(selected[position])
+        loop position in core.data.query_merge_order(keys, true, order.descending) {
+            ordered.push(selected[position])
+        }
         selected = ordered
     }
     if spec.limit == .Val(limit) {
@@ -154,9 +161,13 @@ query_read_error: fn(path: String, reason: String) -> [FieldError] Never! {
 query_text: fn(path: String) -[FS]> String [FieldError]! {
     max: 536870912
     info: files.stat(path, links: .Follow) ?? return Err(query_read_error(path, "{err}"))
-    if info.size > max -> return Err(query_read_error(path, "input exceeds the {max}-byte query bound"))
+    if info.size > max {
+        return Err(query_read_error(path, "input exceeds the {max}-byte query bound"))
+    }
     bytes: files.read_at(path, 0, max + 1) ?? return Err(query_read_error(path, "{err}"))
-    if bytes.len() > max -> return Err(query_read_error(path, "input grew beyond the {max}-byte query bound"))
+    if bytes.len() > max {
+        return Err(query_read_error(path, "input grew beyond the {max}-byte query bound"))
+    }
     rt.utf8_validate(bytes) ?? return Err(query_read_error(path, err.message))
     #Unsafe("the exact owned query bytes passed the shared strict UTF-8 validator") {
         return Ok(rt.bytes_into_text(bytes))
@@ -191,13 +202,14 @@ __query_test_sales: fn() -> [__QueryTestSale] Never! {
     expected: [String]{"analytics query references unknown field `missing`", "SQL projection/grouping changes the row shape; use the Dyn query result", "analytics query WHERE binding is missing"}
     loop index in 0..<refusals.len() {
         if __query_sql<__QueryTestSale>(rows, SQL{text: refusals[index], values: [DBValue]{}}) == {
-            .Ok(_) -> panic("SQL query should be refused")
+            .Ok(_) -> { panic("SQL query should be refused") }
             .Err(errors) -> assert_eq(errors[0].reason, expected[index])
         }
     }
     if query_validate_fields([String]{"item"}, SQL{text: "SELECT * FROM sales ORDER BY cents", values: [DBValue]{}}) == {
-        .Ok(_) -> panic("an unknown header field should be refused")
-        .Err(errors) -> assert_eq(errors[0].reason, "analytics query references unknown field `cents`")
+        .Ok(_) -> { panic("an unknown header field should be refused") }
+        .Err(errors) -> {
+            assert_eq(errors[0].reason, "analytics query references unknown field `cents`")
+        }
     }
 }
-

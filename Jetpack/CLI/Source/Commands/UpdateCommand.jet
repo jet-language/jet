@@ -13,9 +13,7 @@ cli_render_channel_update_row: fn(theme: Theme, scope: String, name: String, nam
 UpdateConfirmation: struct {
     decision: Bool?
 
-    new: fn() -> UpdateConfirmation Never! {
-        UpdateConfirmation{decision: None}
-    }
+    new: fn() -> UpdateConfirmation Never! { UpdateConfirmation{decision: None} }
 
     confirm: fn(&self, theme: Theme, assume_yes: Bool) -[IO, Time.Wait]> Bool Never! {
         if self.decision == .Val(decided) -> return decided
@@ -68,7 +66,9 @@ UpdateScopes: struct {
 }
 
 cli_update_scopes: fn(parsed: CLIParsed) -> UpdateScopes Never! {
-    if parsed.flags.update_deps || parsed.flags.update_tools -> return UpdateScopes{deps: parsed.flags.update_deps, tools: parsed.flags.update_tools}
+    if parsed.flags.update_deps || parsed.flags.update_tools {
+        return UpdateScopes{deps: parsed.flags.update_deps, tools: parsed.flags.update_tools}
+    }
     if parsed.positional.get(0) == {
         .Val(word) -> if word == TOOL_PROFILE_NAME -> UpdateScopes{deps: false, tools: true} else -> UpdateScopes{deps: true, tools: false}
         .None -> UpdateScopes{deps: true, tools: true}
@@ -102,10 +102,12 @@ cli_cmd_update: fn(verification: &StoreVerification, theme: Theme, parsed: CLIPa
             cli_render_project_update_plan(theme, plan)
         }
         has_project_plan: project_plan != None
-        return cli_update_user_tools_with_plan(verification, theme, parsed, confirmation, has_project_plan, fn() { if project_plan == {
-            .Val(plan) -> cli_apply_project_update(theme, plan)
-            .None -> EXIT_OK
-        } })
+        return cli_update_user_tools_with_plan(verification, theme, parsed, confirmation, has_project_plan, fn() {
+            if project_plan == {
+                .Val(plan) -> cli_apply_project_update(theme, plan)
+                .None -> EXIT_OK
+            }
+        })
     }
     if scopes.tools -> return cli_update_user_tools(verification, theme, parsed, confirmation)
     cli_cmd_update_project(cache, theme, parsed, confirmation)
@@ -124,8 +126,12 @@ cli_update_exit_code: fn(error: CLIError) -> Int Never! {
 cli_cmd_update_project: fn(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, confirmation: &UpdateConfirmation) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     plan: if cli_plan_project_update(cache, theme, parsed) == {
         .Val(found) -> found
-        .None -> { return EXIT_OK }
-        .Err(error) -> { return cli_update_exit_code(error) }
+        .None -> {
+            return EXIT_OK
+        }
+        .Err(error) -> {
+            return cli_update_exit_code(error)
+        }
     }
     theme.status("Plan channel update")
     cli_render_project_update_plan(theme, plan)
@@ -135,7 +141,9 @@ cli_cmd_update_project: fn(cache: &WorkspaceDeclarationCache, theme: Theme, pars
 }
 
 cli_plan_project_update: fn(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ProjectUpdatePlan? CLIError! {
-    if parsed.flags.offline && parsed.flags.local_nix_catalog == None -> return Err(CLIError.Reported(cli_offline_refusal(theme, "update")))
+    if parsed.flags.offline && parsed.flags.local_nix_catalog == None {
+        return Err(CLIError.Reported(cli_offline_refusal(theme, "update")))
+    }
     plan: cli_load_project_plan(cache, theme)
     project_dir: plan.project_root
     only: parsed.positional.get(0)
@@ -154,7 +162,9 @@ cli_plan_project_update: fn(cache: &WorkspaceDeclarationCache, theme: Theme, par
     selected := [ChannelSource]{}
     loop source in sources {
         if only == {
-            .Val(name) -> if source.name == name -> selected.push(source)
+            .Val(name) -> {
+                if source.name == name -> selected.push(source)
+            }
             .None -> selected.push(source)
         }
     }
@@ -188,7 +198,7 @@ cli_plan_project_update: fn(cache: &WorkspaceDeclarationCache, theme: Theme, par
                 loop spec in plan.refs {
                     if spec.source.label() == source.name -> package_count += 1
                 }
-                updates.push(ProjectSourceUpdate{source, before, after: exact, package_count, download_bytes: cli_channel_download_size_from_fixture(source, flags_eff)})
+                updates.push(ProjectSourceUpdate{source: source, before: before, after: exact, package_count: package_count, download_bytes: cli_channel_download_size_from_fixture(source, flags_eff)})
             }
             .Err(error) -> {
                 error.report(theme)
@@ -197,7 +207,7 @@ cli_plan_project_update: fn(cache: &WorkspaceDeclarationCache, theme: Theme, par
         }
     }
     if !ok -> return Err(CLIError.Reported(EXIT_USAGE))
-    Ok(Val(ProjectUpdatePlan{project_dir, updates}))
+    Ok(Val(ProjectUpdatePlan{project_dir: project_dir, updates: updates}))
 }
 
 cli_render_project_update_plan: fn(theme: Theme, plan: ProjectUpdatePlan) Never! -[IO, Time.Wait]> {
@@ -205,7 +215,9 @@ cli_render_project_update_plan: fn(theme: Theme, plan: ProjectUpdatePlan) Never!
     loop update in plan.updates {
         if update.source.name.len() > name_w -> name_w = update.source.name.len()
     }
-    loop update in plan.updates -> cli_render_channel_update_row(theme, "deps", update.source.name, name_w, update.before, update.after, update.package_count, update.download_bytes)
+    loop update in plan.updates {
+        cli_render_channel_update_row(theme, "deps", update.source.name, name_w, update.before, update.after, update.package_count, update.download_bytes)
+    }
     if cli_update_download_bytes(plan.updates) == .Val(bytes) -> theme.download_line(bytes)
 }
 

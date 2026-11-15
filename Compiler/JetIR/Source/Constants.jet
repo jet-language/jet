@@ -36,7 +36,9 @@ ir_float_constant_bits: fn(value: Float, f32: Bool) -> Int Never! {
     fraction: bits.bit_and(4503599627370495)
     if exponent == 2047 {
         if fraction == 0 -> return sign.bit_or(2139095040)
-        if fraction.bit_and(536870911) == 0 -> return sign.bit_or(2139095040).bit_or((fraction >> 29))
+        if fraction.bit_and(536870911) == 0 {
+            return sign.bit_or(2139095040).bit_or((fraction >> 29))
+        }
         return sign.bit_or(2139095040).bit_or((fraction >> 29)).bit_or(4194304)
     }
     if exponent == 0 -> return sign

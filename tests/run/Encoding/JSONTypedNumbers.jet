@@ -37,35 +37,35 @@ Outer: struct {
 
 whole: fn(label: String, raw: String) {
     if json.decode<WholeBox>(raw) == {
-        .Ok(value) -> print("{label}: Int {value.n}")
+        .Ok(value) -> { print("{label}: Int {value.n}") }
         .Err(errors) -> print("{label}: Int rejected {errors}")
     }
 }
 
 byte: fn(label: String, raw: String) {
     if json.decode<ByteBox>(raw) == {
-        .Ok(value) -> print("{label}: U8 {value.n}")
+        .Ok(value) -> { print("{label}: U8 {value.n}") }
         .Err(errors) -> print("{label}: U8 rejected {errors}")
     }
 }
 
 int32: fn(label: String, raw: String) {
     if json.decode<Int32Box>(raw) == {
-        .Ok(value) -> print("{label}: I32 {value.n}")
+        .Ok(value) -> { print("{label}: I32 {value.n}") }
         .Err(errors) -> print("{label}: I32 rejected {errors}")
     }
 }
 
 float: fn(label: String, raw: String) {
     if json.decode<FloatBox>(raw) == {
-        .Ok(value) -> print("{label}: Float {value.n}")
+        .Ok(value) -> { print("{label}: Float {value.n}") }
         .Err(errors) -> print("{label}: Float rejected {errors}")
     }
 }
 
 decimal: fn(label: String, raw: String) {
     if json.decode<DecimalBox>(raw) == {
-        .Ok(value) -> print("{label}: Decimal {value.n.to_string()}")
+        .Ok(value) -> { print("{label}: Decimal {value.n.to_string()}") }
         .Err(errors) -> print("{label}: Decimal rejected {errors}")
     }
 }
@@ -96,12 +96,14 @@ run: fn() {
     decimal("exponent", "{{\"n\":1E-5}}")
     nested: "{{\"inner\":{{\"count\":7,\"ratio\":2.5,\"price\":19.990,\"tally\":[1,2,99999999999999999999]}}}}"
     if json.decode<Outer>(nested) == {
-        .Ok(value) -> print("nested: count {value.inner.count}, ratio {value.inner.ratio}, price {value.inner.price.to_string()}, tally {value.inner.tally}")
+        .Ok(value) -> {
+            print("nested: count {value.inner.count}, ratio {value.inner.ratio}, price {value.inner.price.to_string()}, tally {value.inner.tally}")
+        }
         .Err(errors) -> print("nested: rejected {errors}")
     }
     bad_nested: "{{\"inner\":{{\"count\":7.5,\"ratio\":2.5,\"price\":1,\"tally\":[1]}}}}"
     if json.decode<Outer>(bad_nested) == {
-        .Ok(value) -> print("nested fractional count: accepted {value.inner.count}")
+        .Ok(value) -> { print("nested fractional count: accepted {value.inner.count}") }
         .Err(errors) -> print("nested fractional count: rejected {errors}")
     }
 }

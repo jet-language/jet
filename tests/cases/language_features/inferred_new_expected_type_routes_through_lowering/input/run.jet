@@ -1,10 +1,7 @@
-
 Counter: struct {
     value: Int
 
-    new: fn(value: Int) -> Counter {
-        return Counter{ value: value }
-    }
+    new: fn(value: Int) -> Counter { return Counter{value: value} }
 }
 
 Holder: struct {
@@ -16,29 +13,21 @@ GenericHolder: struct<T> {
     step: fn(Int) -> Int
 
     new: fn(value: &&T) -> GenericHolder<T> {
-        return GenericHolder<T>{ value: value, step: fn(n: Int) { n + 9 } }
+        return GenericHolder<T>{value: value, step: fn(n: Int) { n + 9 }}
     }
 
-    marker: fn(self) -> Int {
-        return self.step(0)
-    }
+    marker: fn(self) -> Int { return self.step(0) }
 }
 
-fresh: fn(value: Int) -> Counter {
-    return .new(value)
-}
+fresh: fn(value: Int) -> Counter { return .new(value) }
 
-read: fn(counter: Counter) -> Int {
-    return counter.value
-}
+read: fn(counter: Counter) -> Int { return counter.value }
 
-increment: fn(value: Int) -> Int {
-    return value + 1
-}
+increment: fn(value: Int) -> Int { return value + 1 }
 
 run: fn() {
     bound: Counter.new(1)
-    holder: Holder{ counter: .new(2) }
+    holder: Holder{counter: .new(2)}
     pool: Pool<Holder>.new()
     nested_pool: Pool<Pool<Holder>>.new()
     nested: GenericHolder<GenericHolder<Int>>.new(.new(7))

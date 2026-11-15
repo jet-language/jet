@@ -62,15 +62,14 @@ parse_count: fn(text: String) -> Int Err! {
 
 // Effect denials keep their prefix `!`.
 tick: fn() -[!Mem.Alloc]> {
+
 }
 
 run: fn() {
     // `[Int?]` is a list whose items may be missing.
     ids: [Int?]{Val(1), None, Val(3)}
     total := 0
-    loop id in ids {
-        total += id ?? 0
-    }
+    loop id in ids -> total += id ?? 0
     print("total {total}")
 
     list: recent(2) ?? [Int]{}
@@ -84,7 +83,7 @@ run: fn() {
     print("inner {held}")
     maybe: Holder<Int>?{Val(Holder<Int>{value: 5})}
     if maybe == {
-        .Val(holder) -> print("outer {holder.value}")
+        .Val(holder) -> { print("outer {holder.value}") }
         .None -> print("outer none")
     }
 
@@ -100,7 +99,7 @@ run: fn() {
     save(entry) ?? return
     big: Entry{id: 500}
     if save(big) == {
-        .Err(_) -> print("save full")
+        .Err(_) -> { print("save full") }
         .Ok(_) -> {}
     }
     fallback: fetch(-1) ?? Entry{id: 0}

@@ -1,4 +1,3 @@
-
 Resource: struct {
     name: String
     payload: String
@@ -7,14 +6,19 @@ Resource: struct {
         close: fn(&&self) { print("close {self.name} {self.payload}") }
     }
 }
+
 make: fn() -> Resource { Resource{name: "call", payload: "intact"} }
+
 ordered: fn(early: Bool) {
     Resource{name: call_name, ..}: make()
     Resource{name: literal_name, ..}: Resource{name: "literal", payload: "intact"}
     print("names {call_name} {literal_name}")
-    if early -> return
+    if early {
+        return
+    }
     print("normal")
 }
+
 run: fn() {
     ordered(false)
     ordered(true)

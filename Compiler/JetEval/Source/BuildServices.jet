@@ -17,15 +17,20 @@ jet_eval_build_field: fn(data: TComptimeValue, name: String) -> TComptimeValue? 
 }
 
 jet_eval_build_context_value: fn(session: Int, program: TComptimeValue) -> TComptimeValue Never! {
-    TComptimeValue.Struct{type_name: "Build", fields: [TComptimeField]{
-        {name: "__session", value: TComptimeValue.Int{value: session}},
-        {name: "program", value: program},
-    }}
+    TComptimeValue.Struct{
+        type_name: "Build",
+        fields: [TComptimeField]{
+            {name: "__session", value: TComptimeValue.Int{value: session}},
+            {name: "program", value: program},
+        },
+    }
 }
 
 jet_eval_build_context_id: fn(data: TComptimeValue) -> Int? Never! {
     if data == .Struct(name, _) {
-        if name == "Build" && jet_eval_build_field(data, "__session") == .Val(.Int(id)) -> return Val(id)
+        if name == "Build" && jet_eval_build_field(data, "__session") == .Val(.Int(id)) {
+            return Val(id)
+        }
     }
     None
 }
@@ -59,12 +64,16 @@ jet_eval_build_session_input: fn(data: TComptimeValue) -> BuildSessionValue? Nev
                 start: jet_eval_build_field(data, "start") ?? return None
                 end: jet_eval_build_field(data, "end") ?? return None
                 file: jet_eval_build_field(data, "file") ?? return None
-                if start == .Int(first) && end == .Int(last) && file == .String(written) -> return Val(BuildSessionValue.Span{start: first, end: last, file: written.copy()})
+                if start == .Int(first) && end == .Int(last) && file == .String(written) {
+                    return Val(BuildSessionValue.Span{start: first, end: last, file: written.copy()})
+                }
                 return None
             }
             session: jet_eval_build_field(data, "session") ?? return None
             id: jet_eval_build_field(data, "id") ?? return None
-            if session == .Int(owner) && id == .Int(index) -> return Val(BuildSessionValue.Handle{type_name: name, session: owner, id: index})
+            if session == .Int(owner) && id == .Int(index) {
+                return Val(BuildSessionValue.Handle{type_name: name, session: owner, id: index})
+            }
         }
         .Float(_, _) | .BigInt(_) | .Map(_) | .Failed(_) -> {}
     }
@@ -80,15 +89,21 @@ jet_eval_build_session_output: fn(value: BuildSessionValue) -> TComptimeValue Ne
         .Char(character) -> jet_eval_char_value(character)
         .Enum(variant) -> TComptimeValue.Enum{type_name: "", variant: variant, args: [TComptimeEnumArg]{}}
         .List(values) -> TComptimeValue.List{values: loop item in values -> jet_eval_build_session_output(item)}
-        .Handle(name, owner, index) -> TComptimeValue.Struct{type_name: name, fields: [TComptimeField]{
-            {name: "session", value: TComptimeValue.Int{value: owner}},
-            {name: "id", value: TComptimeValue.Int{value: index}},
-        }}
-        .Span(start, end, file) -> TComptimeValue.Struct{type_name: "SourceSpan", fields: [TComptimeField]{
-            {name: "file", value: TComptimeValue.String{value: file}},
-            {name: "start", value: TComptimeValue.Int{value: start}},
-            {name: "end", value: TComptimeValue.Int{value: end}},
-        }}
+        .Handle(name, owner, index) -> TComptimeValue.Struct{
+            type_name: name,
+            fields: [TComptimeField]{
+                {name: "session", value: TComptimeValue.Int{value: owner}},
+                {name: "id", value: TComptimeValue.Int{value: index}},
+            },
+        }
+        .Span(start, end, file) -> TComptimeValue.Struct{
+            type_name: "SourceSpan",
+            fields: [TComptimeField]{
+                {name: "file", value: TComptimeValue.String{value: file}},
+                {name: "start", value: TComptimeValue.Int{value: start}},
+                {name: "end", value: TComptimeValue.Int{value: end}},
+            },
+        }
     }
 }
 
@@ -109,10 +124,14 @@ jet_eval_build_session_diagnostic: fn(error: BuildSessionDiagnostic) -> Diagnost
     diagnostic := diagnostic_from_registry(error.code, span, error.what, error.why, error.fix)
     if error.error == .Val(typed) {
         projection: build_session_error_projection(typed)
-        diagnostic.structured = Val(DiagnosticStructured.BuildError{report: DiagnosticBuildError{
-            code: Val("E3502"), message: projection.text, typed_identity: Val("BuildError.{projection.variant}"),
-            details: Val(DiagnosticErrorDetails{variant: projection.variant, fields: loop field in projection.fields -> DiagnosticErrorField{name: field.name, value: field.value}, source_span: Val(DiagnosticErrorSpan{start: error.start, end: error.end})}),
-        }})
+        diagnostic.structured = Val(DiagnosticStructured.BuildError{
+            report: DiagnosticBuildError{
+                code: Val("E3502"),
+                message: projection.text,
+                typed_identity: Val("BuildError.{projection.variant}"),
+                details: Val(DiagnosticErrorDetails{variant: projection.variant, fields: loop field in projection.fields -> DiagnosticErrorField{name: field.name, value: field.value}, source_span: Val(DiagnosticErrorSpan{start: error.start, end: error.end})}),
+            },
+        })
     }
     diagnostic
 }
@@ -122,31 +141,46 @@ jet_eval_build_session_diagnostic: fn(error: BuildSessionDiagnostic) -> Diagnost
 jet_eval_build_failed_value: fn(error: BuildSessionDiagnostic) -> TComptimeValue? Never! {
     typed: error.error ?? return None
     projection: build_session_error_projection(typed)
-    fields: loop field in projection.fields -> TComptimeValue.Struct{type_name: "__jet_ErrorField", fields: [TComptimeField]{
-        {name: "name", value: jet_eval_build_graph_text(field.name)},
-        {name: "value", value: jet_eval_build_graph_text(field.value)},
-    }}
-    span: TComptimeValue.Struct{type_name: "__jet_ErrorSpan", fields: [TComptimeField]{
-        {name: "start", value: jet_eval_build_graph_int(error.start)},
-        {name: "end", value: jet_eval_build_graph_int(error.end)},
-    }}
-    details: TComptimeValue.Struct{type_name: "__jet_ErrorDetails", fields: [TComptimeField]{
-        {name: "variant", value: jet_eval_build_graph_text(projection.variant)},
-        {name: "fields", value: TComptimeValue.List{values: fields}},
-        {name: "source_span", value: TComptimeValue.Present{value: span}},
-    }}
-    metadata: TComptimeValue.Struct{type_name: "__jet_ErrorMetadata", fields: [TComptimeField]{
-        {name: "typed_identity", value: TComptimeValue.Present{value: jet_eval_build_graph_text("BuildError.{projection.variant}")}},
-        {name: "context_frames", value: TComptimeValue.List{values: []}},
-        {name: "conversion_history", value: TComptimeValue.List{values: []}},
-        {name: "details", value: TComptimeValue.Present{value: details}},
-    }}
-    value: TComptimeValue.Struct{type_name: "Err", fields: [TComptimeField]{
-        {name: "message", value: jet_eval_build_graph_text(projection.text)},
-        {name: "code", value: TComptimeValue.Present{value: jet_eval_build_graph_text("E3502")}},
-        {name: "cause", value: TComptimeValue.Failed{report: .Clean{ty: Type.Named{name: "Err"}}}},
-        {name: "__jet___memo_error_metadata", value: metadata},
-    }}
+    fields: loop field in projection.fields -> TComptimeValue.Struct{
+        type_name: "__jet_ErrorField",
+        fields: [TComptimeField]{
+            {name: "name", value: jet_eval_build_graph_text(field.name)},
+            {name: "value", value: jet_eval_build_graph_text(field.value)},
+        },
+    }
+    span: TComptimeValue.Struct{
+        type_name: "__jet_ErrorSpan",
+        fields: [TComptimeField]{
+            {name: "start", value: jet_eval_build_graph_int(error.start)},
+            {name: "end", value: jet_eval_build_graph_int(error.end)},
+        },
+    }
+    details: TComptimeValue.Struct{
+        type_name: "__jet_ErrorDetails",
+        fields: [TComptimeField]{
+            {name: "variant", value: jet_eval_build_graph_text(projection.variant)},
+            {name: "fields", value: TComptimeValue.List{values: fields}},
+            {name: "source_span", value: TComptimeValue.Present{value: span}},
+        },
+    }
+    metadata: TComptimeValue.Struct{
+        type_name: "__jet_ErrorMetadata",
+        fields: [TComptimeField]{
+            {name: "typed_identity", value: TComptimeValue.Present{value: jet_eval_build_graph_text("BuildError.{projection.variant}")}},
+            {name: "context_frames", value: TComptimeValue.List{values: []}},
+            {name: "conversion_history", value: TComptimeValue.List{values: []}},
+            {name: "details", value: TComptimeValue.Present{value: details}},
+        },
+    }
+    value: TComptimeValue.Struct{
+        type_name: "Err",
+        fields: [TComptimeField]{
+            {name: "message", value: jet_eval_build_graph_text(projection.text)},
+            {name: "code", value: TComptimeValue.Present{value: jet_eval_build_graph_text("E3502")}},
+            {name: "cause", value: TComptimeValue.Failed{report: .Clean{ty: Type.Named{name: "Err"}}}},
+            {name: "__jet___memo_error_metadata", value: metadata},
+        },
+    }
     Val(TComptimeValue.Failed{report: TComptimeReport.Told{value: value}})
 }
 
@@ -180,7 +214,9 @@ jet_eval_build_failed_diagnostic: fn(value: TComptimeValue, fallback: Span) -> D
         identity_value: jet_eval_build_field_present(metadata, "typed_identity") ?? return None
         identity: if identity_value == {
             .String(text) -> text
-            .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> { return None }
+            .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> {
+                return None
+            }
         }
         details: jet_eval_build_field_present(metadata, "details") ?? return None
         variant: jet_eval_build_field_text(details, "variant") ?? return None
@@ -189,7 +225,9 @@ jet_eval_build_failed_diagnostic: fn(value: TComptimeValue, fallback: Span) -> D
         rows_value: jet_eval_build_field(details, "fields") ?? return None
         rows: if rows_value == {
             .List(values) -> values
-            .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> { return None }
+            .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> {
+                return None
+            }
         }
         fields := [DiagnosticErrorField]{}
         loop field in rows {
@@ -211,25 +249,42 @@ jet_eval_build_failed_diagnostic: fn(value: TComptimeValue, fallback: Span) -> D
             if carried == .String(text) -> code = text
         }
         diagnostic := diagnostic_from_registry(report.code, Val(span), report.what, report.why, report.fix)
-        diagnostic.structured = Val(DiagnosticStructured.BuildError{report: DiagnosticBuildError{
-            code: Val(code), message: message, typed_identity: Val("BuildError.{variant}"),
-            details: Val(DiagnosticErrorDetails{variant: variant, fields: fields, source_span: Val(DiagnosticErrorSpan{start: span.start, end: span.end})}),
-        }})
+        diagnostic.structured = Val(DiagnosticStructured.BuildError{
+            report: DiagnosticBuildError{
+                code: Val(code),
+                message: message,
+                typed_identity: Val("BuildError.{variant}"),
+                details: Val(DiagnosticErrorDetails{variant: variant, fields: fields, source_span: Val(DiagnosticErrorSpan{start: span.start, end: span.end})}),
+            },
+        })
         return Val(diagnostic)
     }
     None
 }
 
-jet_eval_build_graph_int: fn(value: Int) -> TComptimeValue Never! { TComptimeValue.Int{value: value} }
-jet_eval_build_graph_text: fn(value: String) -> TComptimeValue Never! { TComptimeValue.String{value: value} }
-jet_eval_build_graph_ints: fn(values: [Int]) -> TComptimeValue Never! { TComptimeValue.List{values: loop value in values -> jet_eval_build_graph_int(value)} }
-jet_eval_build_graph_texts: fn(values: [String]) -> TComptimeValue Never! { TComptimeValue.List{values: loop value in values -> jet_eval_build_graph_text(value)} }
+jet_eval_build_graph_int: fn(value: Int) -> TComptimeValue Never! {
+    TComptimeValue.Int{value: value}
+}
+
+jet_eval_build_graph_text: fn(value: String) -> TComptimeValue Never! {
+    TComptimeValue.String{value: value}
+}
+
+jet_eval_build_graph_ints: fn(values: [Int]) -> TComptimeValue Never! {
+    TComptimeValue.List{values: loop value in values -> jet_eval_build_graph_int(value)}
+}
+
+jet_eval_build_graph_texts: fn(values: [String]) -> TComptimeValue Never! {
+    TComptimeValue.List{values: loop value in values -> jet_eval_build_graph_text(value)}
+}
+
 jet_eval_build_graph_optional_int: fn(value: Int?) -> TComptimeValue Never! {
     if value == {
         .Val(number) -> TComptimeValue.Present{value: jet_eval_build_graph_int(number)}
         .None -> TComptimeValue.Failed{report: .Clean{ty: Type.Int}}
     }
 }
+
 jet_eval_build_graph_optional_bool: fn(value: Bool?) -> TComptimeValue Never! {
     if value == {
         .Val(flag) -> TComptimeValue.Present{value: TComptimeValue.Bool{value: flag}}
@@ -238,69 +293,104 @@ jet_eval_build_graph_optional_bool: fn(value: Bool?) -> TComptimeValue Never! {
 }
 
 jet_eval_build_graph_action: fn(value: BuildGraphAction) -> TComptimeValue Never! {
-    TComptimeValue.Struct{type_name: "BuildGraphAction", fields: [TComptimeField]{
-        {name: "id", value: jet_eval_build_graph_int(value.id)},
-        {name: "name", value: jet_eval_build_graph_text(value.name)},
-        {name: "kind", value: jet_eval_build_graph_text(value.kind)},
-        {name: "inputs", value: jet_eval_build_graph_texts(value.inputs)},
-        {name: "outputs", value: jet_eval_build_graph_texts(value.outputs)},
-        {name: "target", value: jet_eval_build_graph_optional_int(value.target)},
-        {name: "caps", value: jet_eval_build_graph_texts(value.caps)},
-        {name: "pools", value: jet_eval_build_graph_texts(value.pools)},
-        {name: "plugin", value: jet_eval_build_graph_optional_int(value.plugin)},
-        {name: "compiler_owned", value: TComptimeValue.Bool{value: value.compiler_owned}},
-        {name: "key", value: jet_eval_build_graph_text(value.key)},
-        {name: "cache_hit", value: jet_eval_build_graph_optional_bool(value.cache_hit)},
-    }}
+    TComptimeValue.Struct{
+        type_name: "BuildGraphAction",
+        fields: [TComptimeField]{
+            {name: "id", value: jet_eval_build_graph_int(value.id)},
+            {name: "name", value: jet_eval_build_graph_text(value.name)},
+            {name: "kind", value: jet_eval_build_graph_text(value.kind)},
+            {name: "inputs", value: jet_eval_build_graph_texts(value.inputs)},
+            {name: "outputs", value: jet_eval_build_graph_texts(value.outputs)},
+            {name: "target", value: jet_eval_build_graph_optional_int(value.target)},
+            {name: "caps", value: jet_eval_build_graph_texts(value.caps)},
+            {name: "pools", value: jet_eval_build_graph_texts(value.pools)},
+            {name: "plugin", value: jet_eval_build_graph_optional_int(value.plugin)},
+            {name: "compiler_owned", value: TComptimeValue.Bool{value: value.compiler_owned}},
+            {name: "key", value: jet_eval_build_graph_text(value.key)},
+            {name: "cache_hit", value: jet_eval_build_graph_optional_bool(value.cache_hit)},
+        },
+    }
 }
 
 jet_eval_build_graph_file: fn(value: BuildGraphFile) -> TComptimeValue Never! {
-    TComptimeValue.Struct{type_name: "BuildGraphFile", fields: [TComptimeField]{
-        {name: "path", value: jet_eval_build_graph_text(value.path)},
-        {name: "owner", value: jet_eval_build_graph_optional_int(value.owner)},
-        {name: "consumers", value: jet_eval_build_graph_ints(value.consumers)},
-        {name: "targets", value: jet_eval_build_graph_ints(value.targets)},
-    }}
+    TComptimeValue.Struct{
+        type_name: "BuildGraphFile",
+        fields: [TComptimeField]{
+            {name: "path", value: jet_eval_build_graph_text(value.path)},
+            {name: "owner", value: jet_eval_build_graph_optional_int(value.owner)},
+            {name: "consumers", value: jet_eval_build_graph_ints(value.consumers)},
+            {name: "targets", value: jet_eval_build_graph_ints(value.targets)},
+        },
+    }
 }
 
 jet_eval_build_graph_value: fn(graph: BuildGraph) -> TComptimeValue Never! {
     targets := [TComptimeValue]{}
-    loop row in graph.targets -> targets.push(TComptimeValue.Struct{type_name: "BuildGraphTarget", fields: [TComptimeField]{
-        {name: "id", value: jet_eval_build_graph_int(row.id)},
-        {name: "name", value: jet_eval_build_graph_text(row.name)},
-        {name: "kind", value: jet_eval_build_graph_text(row.kind)},
-        {name: "deps", value: jet_eval_build_graph_ints(row.deps)},
-        {name: "actions", value: jet_eval_build_graph_ints(row.actions)},
-        {name: "files", value: jet_eval_build_graph_texts(row.files)},
-        {name: "plugin", value: jet_eval_build_graph_optional_int(row.plugin)},
-    }})
+    loop row in graph.targets {
+        targets.push(
+            TComptimeValue.Struct{
+                type_name: "BuildGraphTarget",
+                fields: [TComptimeField]{
+                    {name: "id", value: jet_eval_build_graph_int(row.id)},
+                    {name: "name", value: jet_eval_build_graph_text(row.name)},
+                    {name: "kind", value: jet_eval_build_graph_text(row.kind)},
+                    {name: "deps", value: jet_eval_build_graph_ints(row.deps)},
+                    {name: "actions", value: jet_eval_build_graph_ints(row.actions)},
+                    {name: "files", value: jet_eval_build_graph_texts(row.files)},
+                    {name: "plugin", value: jet_eval_build_graph_optional_int(row.plugin)},
+                },
+            },
+        )
+    }
     keys := [TComptimeValue]{}
-    loop row in graph.action_keys -> keys.push(TComptimeValue.Struct{type_name: "BuildGraphActionKey", fields: [TComptimeField]{
-        {name: "action", value: jet_eval_build_graph_text(row.action)},
-        {name: "key", value: jet_eval_build_graph_text(row.key)},
-    }})
+    loop row in graph.action_keys {
+        keys.push(
+            TComptimeValue.Struct{
+                type_name: "BuildGraphActionKey",
+                fields: [TComptimeField]{
+                    {name: "action", value: jet_eval_build_graph_text(row.action)},
+                    {name: "key", value: jet_eval_build_graph_text(row.key)},
+                },
+            },
+        )
+    }
     nodes := [TComptimeValue]{}
     loop row in graph.nodes {
         digests := [TComptimeValue]{}
-        loop digest in row.input_digests -> digests.push(TComptimeValue.Struct{type_name: "BuildGraphInputDigest", fields: [TComptimeField]{
-            {name: "name", value: jet_eval_build_graph_text(digest.name)},
-            {name: "digest", value: jet_eval_build_graph_text(digest.digest)},
-        }})
-        nodes.push(TComptimeValue.Struct{type_name: "BuildGraphNode", fields: [TComptimeField]{
-            {name: "kind", value: jet_eval_build_graph_text(row.kind)},
-            {name: "key", value: jet_eval_build_graph_text(row.key)},
-            {name: "subject", value: jet_eval_build_graph_text(row.subject)},
-            {name: "inputs", value: jet_eval_build_graph_texts(row.inputs)},
-            {name: "input_digests", value: TComptimeValue.List{values: digests}},
-        }})
+        loop digest in row.input_digests {
+            digests.push(
+                TComptimeValue.Struct{
+                    type_name: "BuildGraphInputDigest",
+                    fields: [TComptimeField]{
+                        {name: "name", value: jet_eval_build_graph_text(digest.name)},
+                        {name: "digest", value: jet_eval_build_graph_text(digest.digest)},
+                    },
+                },
+            )
+        }
+        nodes.push(
+            TComptimeValue.Struct{
+                type_name: "BuildGraphNode",
+                fields: [TComptimeField]{
+                    {name: "kind", value: jet_eval_build_graph_text(row.kind)},
+                    {name: "key", value: jet_eval_build_graph_text(row.key)},
+                    {name: "subject", value: jet_eval_build_graph_text(row.subject)},
+                    {name: "inputs", value: jet_eval_build_graph_texts(row.inputs)},
+                    {name: "input_digests", value: TComptimeValue.List{values: digests}},
+                },
+            },
+        )
     }
-    TComptimeValue.Struct{type_name: "BuildGraph", fields: [TComptimeField]{
-        {name: "targets", value: TComptimeValue.List{values: targets}},
-        {name: "actions", value: TComptimeValue.List{values: loop row in graph.actions -> jet_eval_build_graph_action(row)}},
-        {name: "action_keys", value: TComptimeValue.List{values: keys}},
-        {name: "cache_hits", value: TComptimeValue.List{values: loop row in graph.cache_hits -> jet_eval_build_graph_action(row)}},
-        {name: "files", value: TComptimeValue.List{values: loop row in graph.files -> jet_eval_build_graph_file(row)}},
-        {name: "affected_files", value: TComptimeValue.List{values: loop row in graph.affected_files -> jet_eval_build_graph_file(row)}},
-        {name: "nodes", value: TComptimeValue.List{values: nodes}},
-    }}
+    TComptimeValue.Struct{
+        type_name: "BuildGraph",
+        fields: [TComptimeField]{
+            {name: "targets", value: TComptimeValue.List{values: targets}},
+            {name: "actions", value: TComptimeValue.List{values: loop row in graph.actions -> jet_eval_build_graph_action(row)}},
+            {name: "action_keys", value: TComptimeValue.List{values: keys}},
+            {name: "cache_hits", value: TComptimeValue.List{values: loop row in graph.cache_hits -> jet_eval_build_graph_action(row)}},
+            {name: "files", value: TComptimeValue.List{values: loop row in graph.files -> jet_eval_build_graph_file(row)}},
+            {name: "affected_files", value: TComptimeValue.List{values: loop row in graph.affected_files -> jet_eval_build_graph_file(row)}},
+            {name: "nodes", value: TComptimeValue.List{values: nodes}},
+        },
+    }
 }

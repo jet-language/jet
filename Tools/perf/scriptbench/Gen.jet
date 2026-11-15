@@ -52,7 +52,9 @@ emit: fn(path: String, parts: [String]) {
 tree: fn(dir: String) {
     root: "{dir}/w02"
     done: "{dir}/w02.done"
-    if fs.exists(done) -> return
+    if fs.exists(done) {
+        return
+    }
     n := 0
     loop a in 0..<10 {
         loop b in 0..<10 {
@@ -72,7 +74,9 @@ tree: fn(dir: String) {
 
 log: fn(dir: String) {
     path: "{dir}/data/log100m.txt"
-    if fs.exists(path) -> return
+    if fs.exists(path) {
+        return
+    }
     rng := RNG{state: 2}
     levels: ["INFO", "INFO", "INFO", "DEBUG", "WARN", "ERROR"]
     svcs: ["api", "auth", "billing", "search", "web"]
@@ -103,7 +107,9 @@ capital: fn(word: String) -> String {
 
 words: fn(dir: String) {
     path: "{dir}/data/words.txt"
-    if fs.exists(path) -> return
+    if fs.exists(path) {
+        return
+    }
     rng := RNG{state: 3}
     syl: ["ka", "lo", "mi", "ne", "ru", "sa", "ti", "vo", "ze", "qua", "ber", "don", "fel", "gri", "hap", "jun"]
     vocab := [String]{}
@@ -153,15 +159,21 @@ words: fn(dir: String) {
 
 sales: fn(dir: String) {
     path: "{dir}/w05.csv"
-    if fs.exists(path) -> return
+    if fs.exists(path) {
+        return
+    }
     parts := ["id,name,dept,qty,price_cents\n"]
-    loop i in 1..<1000001 -> parts.push("{i},name{i %% 1000},dept{i %% 17},{i %% 100},{(i * 31) %% 10000}\n")
+    loop i in 1..<1000001 {
+        parts.push("{i},name{i %% 1000},dept{i %% 17},{i %% 100},{(i * 31) %% 10000}\n")
+    }
     emit(path, parts)
 }
 
 people: fn(dir: String) {
     path: "{dir}/w06.json"
-    if fs.exists(path) -> return
+    if fs.exists(path) {
+        return
+    }
     parts := ["["]
     loop i in 0..<400000 {
         comma: if i == 0 -> "" else -> ","
@@ -174,7 +186,9 @@ people: fn(dir: String) {
 
 lines: fn(dir: String) {
     path: "{dir}/w13.txt"
-    if fs.exists(path) -> return
+    if fs.exists(path) {
+        return
+    }
     parts := [String]{}
     loop i in 0..<2000000 -> parts.push("k{(i * 7919) %% 1000003}\n")
     emit(path, parts)

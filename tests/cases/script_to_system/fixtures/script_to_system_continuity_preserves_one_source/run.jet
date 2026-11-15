@@ -8,22 +8,18 @@ TimerArgs: struct {
 
 seconds: fn(minutes: Int) -> Int { minutes * 60 }
 
-run: fn(args: TimerArgs) {
-    print(seconds(args.minutes))
-}
+run: fn(args: TimerArgs) { print(seconds(args.minutes)) }
 
-serve: fn() {
-    print(seconds(1))
-}
+serve: fn() { print(seconds(1)) }
 
-dev: fn() {
-    serve()
-}
+dev: fn() { serve() }
 
 #Test("one minute is sixty seconds") {
     assert_eq(seconds(1), 60)
 }
 
-APP: Output.Executable{ name: "pulse", entry: run }
-API: Output.Service{ name: "pulse-api", entry: serve }
-defaults: { run: APP }
+APP: Output.Executable{name: "pulse", entry: run}
+
+API: Output.Service{name: "pulse-api", entry: serve}
+
+defaults: {run: APP}

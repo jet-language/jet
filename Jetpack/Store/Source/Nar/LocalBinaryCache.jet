@@ -43,11 +43,17 @@ store_nar_write_or_match: fn(path: String, bytes: [U8]) StoreError! {
     parent: files.dirname(path)
     if parent == "" -> return Err(store_nar_invalid("binary-cache destination has no parent"))
     store_nar_validate_destination_parent(parent)
-    if files.is_symlink(path) -> return Err(store_nar_invalid("binary-cache destination cannot be a symlink"))
+    if files.is_symlink(path) {
+        return Err(store_nar_invalid("binary-cache destination cannot be a symlink"))
+    }
     if files.is_file(path) {
-        if store_nar_read_bounded(path, bytes.len()) == bytes -> return
+        if store_nar_read_bounded(path, bytes.len()) == bytes {
+            return
+        }
         return Err(store_nar_invalid("binary-cache destination already has conflicting bytes"))
     }
-    if files.exists(path) -> return Err(store_nar_invalid("binary-cache destination is not a regular file"))
+    if files.exists(path) {
+        return Err(store_nar_invalid("binary-cache destination is not a regular file"))
+    }
     store_nar_write_atomic(path, bytes)
 }

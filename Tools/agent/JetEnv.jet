@@ -29,7 +29,6 @@
 // /tmp is RAM-backed tmpfs on this machine: a scratch variable (SCRATCH_VARS)
 // there is refused, because build output on it fills swap and triggers OOM
 // kills. The command's exit status is this launcher's (128 + N for signal N).
-
 use {
     crypto: core.crypto
     files: core.files
@@ -40,13 +39,19 @@ use {
 }
 
 TOOL: "/Tools/agent/JetEnv.jet"
+
 USAGE: "usage: jet Tools/agent/JetEnv.jet [full] [--norust] <command> [args...]"
+
 SCRATCH_VARS: [String]{"JET_SCRATCH_ROOT", "JET_TEST_SCRATCH_DIR", "CARGO_TARGET_DIR"}
+
 // The variables `nix develop` never takes from the shell (its ignoreVars).
 NIX_IGNORED: [String]{"BASHOPTS", "HOME", "NIX_BUILD_TOP", "NIX_ENFORCE_PURITY", "NIX_LOG_FD", "NIX_REMOTE", "PPID", "SHELLOPTS", "SSL_CERT_FILE", "TEMP", "TEMPDIR", "TERM", "TMP", "TMPDIR", "TZ", "UID"}
+
 // The variables `nix develop` puts in front of the caller's value.
 NIX_PREPENDED: [String]{"PATH", "XDG_DATA_DIRS"}
+
 RUST_TOOLS: [String]{"cargo", "rustc", "rustup"}
+
 // What the dev shells read: they never read `self`.
 FLAKE_FILES: [String]{"flake.nix", "flake.lock"}
 
@@ -78,7 +83,7 @@ parse: fn(args: [String]) -> Request Err! {
 }
 
 launch: fn(request: Request) -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
-    if scratch_on_tmp(scratch_values([String: String]{})) == .Val(why) {
+    if scratch_on_tmp(scratch_values([String:String]{})) == .Val(why) {
         term.eprint(why)
         return 64
     }
@@ -142,8 +147,8 @@ compiler: fn(repo: String) -[Env, FS]> String Never! {
 }
 
 // The scratch variables the command sees: `vars` over the caller's.
-scratch_values: fn(vars: [String: String]) -[Env]> [String: String] Never! {
-    out := [String: String]{}
+scratch_values: fn(vars: [String:String]) -[Env]> [String:String] Never! {
+    out := [String:String]{}
     loop name in SCRATCH_VARS {
         value: vars.get(name) ?? sys.get(name) ?? ""
         if value != "" -> out[name.copy()] = value.copy()
@@ -152,7 +157,7 @@ scratch_values: fn(vars: [String: String]) -[Env]> [String: String] Never! {
 }
 
 // The first scratch variable that resolves onto /tmp, as the refusal text.
-scratch_on_tmp: fn(values: [String: String]) -[FS]> String? Never! {
+scratch_on_tmp: fn(values: [String:String]) -[FS]> String? Never! {
     loop name in SCRATCH_VARS {
         value: values.get(name) ?? next
         resolved: files.realpath(value) ?? value.copy()
@@ -165,7 +170,7 @@ scratch_on_tmp: fn(values: [String: String]) -[FS]> String? Never! {
 
 // The exported variables of the flake's `shell` dev shell, from its cached
 // profile; a missing profile is built first, once, under a lock.
-dev_shell: fn(repo: String, shell: String) -[Env, Exec, FS, IO, Time.Wait]> [String: String] Err! {
+dev_shell: fn(repo: String, shell: String) -[Env, Exec, FS, IO, Time.Wait]> [String:String] Err! {
     nix_bytes := [U8]{}
     loop name in FLAKE_FILES {
         bytes: files.read_bytes(files.join(repo, name)) ?? return Err("cannot read {repo}/{name}: {err}")
@@ -175,7 +180,9 @@ dev_shell: fn(repo: String, shell: String) -[Env, Exec, FS, IO, Time.Wait]> [Str
     key: crypto.sha256(nix_bytes).hex()
     cache: files.join(sys.get("XDG_CACHE_HOME") ?? files.join(sys.home_dir() ?? "", ".cache"), "jet/dev-shells")
     profile: files.join(cache, "{key}-{shell}")
-    if !files.exists(profile) && build_profile(repo, cache, key, shell, profile) == .Err(why) -> return Err(why)
+    if !files.exists(profile) && build_profile(repo, cache, key, shell, profile) == .Err(why) {
+        return Err(why)
+    }
     text: files.read(profile) ?? return Err("cannot read the dev-shell profile {profile}: {err}")
     shell_vars: exported(text) ?? return Err("the dev-shell profile {profile} is not a Nix shell environment: {err.message}")
     Ok(shell_vars)
@@ -197,15 +204,17 @@ build_profile: fn(repo: String, cache: String, key: String, shell: String, profi
         files.rename(staging, snapshot) ?? return Err("cannot move {staging} to {snapshot}: {err}")
     }
     built: process.cmd([String]{"nix", "print-dev-env", "--profile", profile, "path:{snapshot}#{shell}"}).cwd(repo).stdout(.Capture).stderr(.Inherit).run() ?? return Err("nix could not start: {err}")
-    if !built.success -> return Err("`nix print-dev-env --profile {profile} path:{snapshot}#{shell}` failed (exit {built.code})")
+    if !built.success {
+        return Err("`nix print-dev-env --profile {profile} path:{snapshot}#{shell}` failed (exit {built.code})")
+    }
     Ok()
 }
 
 // The `exported` variables of a Nix shell environment
 // (`{"variables": {NAME: {"type": T, "value": V}}}`).
-exported: fn(text: String) -> [String: String] Err! {
+exported: fn(text: String) -> [String:String] Err! {
     tree: json.parse(text) ?? return Err("not JSON: {err}")
-    out := [String: String]{}
+    out := [String:String]{}
     if field(tree, "variables") == .Object(variables) {
         loop entry in variables {
             if field(entry.value, "type") == .Text(kind) && kind == "exported" && field(entry.value, "value") == .Text(value) {
@@ -227,8 +236,8 @@ field: fn(tree: Dyn, name: String) -> Dyn Never! {
 }
 
 // The variables the command gets on top of the caller's environment.
-environment: fn(shell: [String: String], repo: String, jet: String) -[Env]> [String: String] Never! {
-    out := [String: String]{}
+environment: fn(shell: [String:String], repo: String, jet: String) -[Env]> [String:String] Never! {
+    out := [String:String]{}
     loop (name, value) in shell {
         if NIX_IGNORED.contains(name) -> next
         if NIX_PREPENDED.contains(name) {
@@ -286,8 +295,8 @@ on_path: fn(path: String, tool: String) -[FS]> Bool Never! {
 }
 
 #Test("a scratch variable on /tmp is refused") {
-    assert(scratch_on_tmp([String: String]{"JET_SCRATCH_ROOT": "/tmp/jet-env-test-x"}) != None)
-    assert(scratch_on_tmp([String: String]{"CARGO_TARGET_DIR": "/tmp"}) != None)
-    assert(scratch_on_tmp([String: String]{"JET_SCRATCH_ROOT": "/mnt/scratch"}) == None)
-    assert(scratch_on_tmp([String: String]{}) == None)
+    assert(scratch_on_tmp([String:String]{"JET_SCRATCH_ROOT": "/tmp/jet-env-test-x"}) != None)
+    assert(scratch_on_tmp([String:String]{"CARGO_TARGET_DIR": "/tmp"}) != None)
+    assert(scratch_on_tmp([String:String]{"JET_SCRATCH_ROOT": "/mnt/scratch"}) == None)
+    assert(scratch_on_tmp([String:String]{}) == None)
 }

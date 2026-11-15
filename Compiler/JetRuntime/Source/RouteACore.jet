@@ -17,7 +17,7 @@ packed_bytes_out: fn(bytes: I64, length: I64, output: I64) -> I64 {
 // std::env::var_os(name) as its encoded bytes, None when unset.
 #Export(c) jet_tui_cap_env_bytes: fn(name: I64, some: I64, some_len: I64) -> I64 {
     value: host_environment_value(name)
-    if (value == I64{0}) -> return I64{0}
+    if (value == I64{0}) { return I64{0} }
     rt_text_store(some_len, packed_bytes_out(value, host_startup_byte_length(value), some))
     I64{1}
 }
@@ -34,7 +34,9 @@ packed_bytes_out: fn(bytes: I64, length: I64, output: I64) -> I64 {
 // advance.
 #Export(c) jet_job_queue_sleep_ms: fn(millis: I64) {
     native: jet_int_owned_to_i64(millis)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        return
+    }
     request: jet_rt_alloc(I64{32}, I64{8})
     // u64 millis: floor(millis / 1000) = floor(floor(millis / 2) / 500).
     seconds: ((native >> I64{1}).bit_and(I64{9223372036854775807})) /% I64{500}
@@ -42,9 +44,11 @@ packed_bytes_out: fn(bytes: I64, length: I64, output: I64) -> I64 {
     rt_text_store(request, seconds)
     rt_text_store(wrapping(request + I64{8}), remainder * I64{1000000})
     loop {
-        if (rt_text_word(request) == I64{0} && rt_text_word(wrapping(request + I64{8})) == I64{0}) -> break
+        if (rt_text_word(request) == I64{0} && rt_text_word(wrapping(request + I64{8})) == I64{0}) {
+            break
+        }
         result: host_call(I64{35}, request, request + I64{16}, I64{0})
-        if (result != I64{-4}) -> break
+        if (result != I64{-4}) { break }
         rt_text_store(request, rt_text_word(wrapping(request + I64{16})))
         rt_text_store(wrapping(request + I64{8}), rt_text_word(wrapping(request + I64{24})))
     }
@@ -54,7 +58,7 @@ packed_bytes_out: fn(bytes: I64, length: I64, output: I64) -> I64 {
 // Whether the current host task is cancelled; no task is None.
 #Export(c) jet_scheduler_task_cancelled_state: fn(some: I64) -> I64 {
     control: scheduler_control_current()
-    if (control == I64{0}) -> return I64{0}
+    if (control == I64{0}) { return I64{0} }
     rt_text_store(some, if (sync_load(wrapping(control + I64{16})) != I64{0}) -> I64{1} else -> I64{0})
     I64{1}
 }
@@ -65,5 +69,10 @@ packed_bytes_out: fn(bytes: I64, length: I64, output: I64) -> I64 {
 #Export(c) jet_tasks_quiesce: fn() -> Bool { jet_rt_scheduler_shutdown() >= I64{0} }
 
 // The shared Condition48 protocol.
-#Export(c) jet_condition_notify_one: fn(condition: I64) { jet_rt_native_condition_notify_one(condition) }
-#Export(c) jet_condition_notify_all: fn(condition: I64) { jet_rt_native_condition_notify_all(condition) }
+#Export(c) jet_condition_notify_one: fn(condition: I64) {
+    jet_rt_native_condition_notify_one(condition)
+}
+
+#Export(c) jet_condition_notify_all: fn(condition: I64) {
+    jet_rt_native_condition_notify_all(condition)
+}

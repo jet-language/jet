@@ -30,16 +30,12 @@ fmt_preview_root: fn(name: String) -[FS, Env]> String {
         argv.push(file.copy())
         if jet_cli_plan(argv) == .Fmt(request) {
             assert_eq(jet_cli_format_run(request, false).exit_code, JET_DRIVER_EXIT_USER_ERROR)
-        } else {
-            panic("`jet fmt` plans a format run")
-        }
+        } else { panic("`jet fmt` plans a format run") }
         assert_eq(cli_files.read(file) ?? panic("source after a preview"), FMT_PREVIEW_MESSY)
     }
     if jet_cli_plan([String]{"fmt", file.copy()}) == .Fmt(request) {
         assert_eq(jet_cli_format_run(request, false).exit_code, JET_DRIVER_EXIT_OK)
-    } else {
-        panic("`jet fmt` plans a format run")
-    }
+    } else { panic("`jet fmt` plans a format run") }
     assert_eq(cli_files.read(file) ?? panic("formatted source"), "run: fn() {{ print(1) }}\n")
     cli_files.remove_all(root) ?? panic("fmt preview cleanup")
 }
@@ -51,9 +47,7 @@ fmt_preview_root: fn(name: String) -[FS, Env]> String {
         if jet_cli_plan([String]{"fmt", flag.copy(), file.copy()}) == .Refused(report, _, code, _) {
             assert_eq(report.code, "E2102")
             assert_eq(code, JET_DRIVER_EXIT_USAGE)
-        } else {
-            panic("`jet fmt {flag}` is refused")
-        }
+        } else { panic("`jet fmt {flag}` is refused") }
         assert_eq(cli_files.read(file) ?? panic("source after a refusal"), FMT_PREVIEW_MESSY)
     }
     cli_files.remove_all(root) ?? panic("flag value cleanup")
@@ -68,9 +62,7 @@ fmt_preview_root: fn(name: String) -[FS, Env]> String {
         output: jet_cli_format_run(request, false)
         assert_eq(output.exit_code, JET_DRIVER_EXIT_USAGE)
         assert(output.stderr.contains("--check"), "the report names the missing path")
-    } else {
-        panic("`jet fmt <file> -- --check` plans a format run")
-    }
+    } else { panic("`jet fmt <file> -- --check` plans a format run") }
     assert_eq(cli_files.read(file) ?? panic("source after a failed run"), FMT_PREVIEW_MESSY)
     cli_files.remove_all(root) ?? panic("separator cleanup")
 }

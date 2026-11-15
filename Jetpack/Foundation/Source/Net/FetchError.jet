@@ -79,25 +79,13 @@ foundation_fetch_scheme_error: fn(url: String) -> FoundationFetchError Never! {
 foundation_fetch_classify_http_error: fn(url: String, detail: String) -> FoundationFetchErrorKind Never! {
     if !url.starts_with("https://") -> return FoundationFetchErrorKind.General
     lower: detail.to_ascii_lower()
-    if lower.contains("no valid certificates loaded")
-        || lower.contains("no root cert")
-        || lower.contains("no roots")
-        || lower.contains("empty root")
-        || lower.contains("trust store") {
+    if lower.contains("no valid certificates loaded") || lower.contains("no root cert") || lower.contains("no roots") || lower.contains("empty root") || lower.contains("trust store") {
         return FoundationFetchErrorKind.TLSTrustRoots
     }
-    if lower.contains("certificate")
-        || lower.contains("unknownissuer")
-        || lower.contains("notvalid")
-        || lower.contains("expired")
-        || lower.contains("hostname")
-        || lower.contains("cert") {
+    if lower.contains("certificate") || lower.contains("unknownissuer") || lower.contains("notvalid") || lower.contains("expired") || lower.contains("hostname") || lower.contains("cert") {
         return FoundationFetchErrorKind.TLSCertificate
     }
-    if lower.contains("tls")
-        || lower.contains("rustls")
-        || lower.contains("handshake")
-        || lower.contains("alert") {
+    if lower.contains("tls") || lower.contains("rustls") || lower.contains("handshake") || lower.contains("alert") {
         return FoundationFetchErrorKind.TLSHandshake
     }
     FoundationFetchErrorKind.General
@@ -107,8 +95,9 @@ foundation_fetch_classify_http_error: fn(url: String, detail: String) -> Foundat
 // missing/empty hosts are NOT rejected. Core's validated URL parser differs.
 foundation_fetch_host_from_url: fn(url: String) -> String Never! {
     rest := url
-    if url.starts_with("https://") -> rest = url.removeprefix("https://")
-    else if url.starts_with("http://") -> rest = url.removeprefix("http://")
+    if url.starts_with("https://") -> rest = url.removeprefix("https://") else if url.starts_with("http://") {
+        rest = url.removeprefix("http://")
+    }
     loop part in rest.split("/") -> return part
     rest
 }
@@ -120,7 +109,9 @@ foundation_fetch_resolve_redirect: fn(current: String, location: String) -> Stri
     if location.starts_with("https://") || location.starts_with("http://") -> return Ok(location)
     if location.starts_with("/") {
         parts: current.split_once("://") ?? return Err(foundation_fetch_http_error(current, "redirect URL has no authority"))
-        loop authority in parts.after.split("/") -> return Ok("{parts.before}://{authority}{location}")
+        loop authority in parts.after.split("/") {
+            return Ok("{parts.before}://{authority}{location}")
+        }
     }
     return Err(foundation_fetch_http_error(current, "redirect Location must be an absolute or root-relative URL"))
 }

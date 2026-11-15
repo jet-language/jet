@@ -16,7 +16,9 @@ test_contract_root := I64{0}
 // it arms `jet prove`'s authority journal then too (ProveJournal.jet).
 #Export(c) jet_rt_test_contracts_open: fn(path: I64) {
     rt_prove_journal_open()
-    if (test_contract_root != I64{0}) -> return
+    if (test_contract_root != I64{0}) {
+        return
+    }
     root: jet_rt_alloc(I64{40}, I64{8})
     thread_zero(root, I64{40})
     trap_store(wrapping(root + I64{8}), test_text_clone(path))
@@ -34,7 +36,9 @@ test_contract_root := I64{0}
 // when its condition was true. A run with no records file records nothing.
 #Export(c) jet_rt_test_contract: fn(data: I64, length: I64, held: Bool) {
     root: test_contract_root
-    if (root == I64{0}) -> return
+    if (root == I64{0}) {
+        return
+    }
     sync_mutex_lock(root)
     if held {
         entry: test_contract_entry(root, data)
@@ -51,14 +55,16 @@ test_contract_root := I64{0}
 // The site's [key, seen] pair, inserted unseen when absent; the table doubles
 // before it is half full. The caller holds the lock.
 test_contract_entry: fn(root: I64, key: I64) -> I64 {
-    if ((trap_word(wrapping(root + I64{32})) + I64{1}) * I64{2} > trap_word(wrapping(root + I64{24}))) -> test_contract_grow(root)
+    if ((trap_word(wrapping(root + I64{32})) + I64{1}) * I64{2} > trap_word(wrapping(root + I64{24}))) {
+        test_contract_grow(root)
+    }
     sites: trap_word(wrapping(root + I64{16}))
     mask: trap_word(wrapping(root + I64{24})) - I64{1}
     index := test_contract_hash(key).bit_and(mask)
     loop {
         entry: wrapping(sites + index * I64{16})
         found: trap_word(entry)
-        if (found == key) -> return entry
+        if (found == key) { return entry }
         if (found == I64{0}) {
             trap_store(entry, key)
             trap_store(wrapping(entry + I64{8}), I64{0})
@@ -90,7 +96,7 @@ test_contract_grow: fn(root: I64) {
         if (key != I64{0}) {
             index := test_contract_hash(key).bit_and(mask)
             loop {
-                if (trap_word(wrapping(sites + index * I64{16})) == I64{0}) -> break
+                if (trap_word(wrapping(sites + index * I64{16})) == I64{0}) { break }
                 index = (index + I64{1}).bit_and(mask)
             }
             entry: wrapping(sites + index * I64{16})

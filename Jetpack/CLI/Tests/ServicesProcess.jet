@@ -66,7 +66,9 @@
 }
 
 #Test("services up readiness timeout preserves startup failure receipt") {
-    if !sys.is_linux() -> return
+    if !sys.is_linux() {
+        return
+    }
     claim: ServicesClaim.new("up-timeout-receipt")
     claim.write_project("timeout: {{ run: [\"sh\", \"-c\", \"sleep 30\"], ready: \"false\" }}", "run: fn() {{}}\n")
     out: claim.run([String]{"services", "up", "timeout", "--no-color"}, cli_test_health_timeout("500"))
@@ -128,7 +130,9 @@
 }
 
 #Test("services production path persists linux authority and dependency lifecycle") {
-    if !sys.is_linux() -> return
+    if !sys.is_linux() {
+        return
+    }
     claim: ServicesClaim.new("authority-lifecycle")
     claim.write_project("database: {{ run: [\"sleep\", \"30\"] }}, api: {{ run: [\"sleep\", \"30\"], after: [\"database\"] }}", "run: fn() {{}}\n")
     up: claim.run([String]{"services", "up", "--no-color"}, cli_test_no_env())
@@ -152,7 +156,9 @@
 // The fake systemd authority checks the production flags and exercises the
 // process-group cleanup path: a descendant dies with the scope.
 #Test("services production path kills descendants in the supervisor process group") {
-    if !sys.is_linux() -> return
+    if !sys.is_linux() {
+        return
+    }
     claim: ServicesClaim.new("authority-descendants")
     claim.write_project("fixture: {{ run: [\"sh\", \"-c\", \"sleep 30 & child=$!; echo $child > child.pid; wait\"] }}", "run: fn() {{}}\n")
     up: claim.run([String]{"services", "up", "--no-color"}, cli_test_no_env())
@@ -163,7 +169,9 @@
     pid_text: files.read(files.join(claim.service_dir("fixture"), "pid")) ?? panic("read service pid")
     service_pid := -1
     loop line in pid_text.lines() {
-        if line.starts_with("pid=") && service_pid < 0 -> service_pid = Int.parse(line.removeprefix("pid=")) ?? -1
+        if line.starts_with("pid=") && service_pid < 0 {
+            service_pid = Int.parse(line.removeprefix("pid=")) ?? -1
+        }
     }
     assert(service_pid >= 0)
     assert(child_pid != service_pid, "fixture must have a real descendant")
@@ -179,7 +187,9 @@
 }
 
 #Test("services production supervisor stops descendants after leader exit") {
-    if !sys.is_linux() -> return
+    if !sys.is_linux() {
+        return
+    }
     claim: ServicesClaim.new("authority-leader-exit")
     claim.write_project("fixture: {{ run: [\"sh\", \"-c\", \"sleep 30 & child=$!; echo $child > child.pid; while [ ! -f exit.flag ]; do sleep 0.01; done; exit 0\"] }}", "run: fn() {{}}\n")
     up: claim.run([String]{"services", "up", "--no-color"}, cli_test_no_env())
@@ -205,7 +215,9 @@
 }
 
 #Test("services production path rejects retired depends on field") {
-    if !sys.is_linux() -> return
+    if !sys.is_linux() {
+        return
+    }
     claim: ServicesClaim.new("depends-on-rejected")
     claim.write_project("database: {{ run: [\"sleep\", \"30\"] }}, api: {{ run: [\"sleep\", \"30\"], depends_on: [\"database\"] }}", "run: fn() {{}}\n")
     out: claim.run([String]{"services", "up", "--no-color"}, cli_test_no_env())
@@ -216,7 +228,9 @@
 }
 
 #Test("services production path bounds readiness probe runtime") {
-    if !sys.is_linux() -> return
+    if !sys.is_linux() {
+        return
+    }
     claim: ServicesClaim.new("bounded-readiness-production")
     claim.write_project("fixture: {{ run: [\"sleep\", \"30\"], ready: \"sleep 30\" }}", "run: fn() {{}}\n")
     watch: time.start()
@@ -230,7 +244,9 @@
 }
 
 #Test("services production path stops dependents after dependency failure") {
-    if !sys.is_linux() -> return
+    if !sys.is_linux() {
+        return
+    }
     claim: ServicesClaim.new("dependency-failure")
     claim.write_project("database: {{ run: [\"sh\", \"-c\", \"sleep 1\"] }}, api: {{ run: [\"sleep\", \"30\"], after: [\"database\"] }}", "run: fn() {{}}\n")
     up: claim.run([String]{"services", "up", "--no-color"}, cli_test_health_timeout("1500"))

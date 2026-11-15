@@ -1,4 +1,5 @@
 #Target(Web)
+
 Packet: enum {
     Data(Int)
     Empty
@@ -12,7 +13,7 @@ make_opt: fn(n: Int) -> Int? { .Val(n) }
 
 #Target(JS)
 bind_opt: fn(n: Int) -[]> Int {
-    if make_opt(n) == .Val(value) { return value }
+    if make_opt(n) == .Val(value) -> return value
     return 0
 }
 
@@ -38,7 +39,5 @@ wasm_classify: fn(n: Int) -[]> Int {
 }
 
 run: fn() {
-    loop n in 0..<5 {
-        print("{n}: {bind_opt(n)} {classify_range(n)} {wasm_classify(n)}")
-    }
+    loop n in 0..<5 { print("{n}: {bind_opt(n)} {classify_range(n)} {wasm_classify(n)}") }
 }

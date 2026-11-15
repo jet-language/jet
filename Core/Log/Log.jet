@@ -8,6 +8,7 @@ package: {
         log: .Library{ entry: log }
     }
 }
+
 use {
     core: core
     rt: jet.runtime.log
@@ -49,6 +50,7 @@ LogSpan: struct {
     name: String
 
     id: fn(self) -> Int Never! { self.id }
+
     name: fn(self) -> String Never! { self.name }
 }
 
@@ -62,28 +64,50 @@ LogLevel: enum {
     Fatal
 }
 
-debug: fn(message: String, at: SourceLocation{#caller}) Never! -[Log]> { emit(.Debug, message, [LogField]{}, at.module) }
+debug: fn(message: String, at: SourceLocation{#caller}) Never! -[Log]> {
+    emit(.Debug, message, [LogField]{}, at.module)
+}
 
-info: fn(message: String, at: SourceLocation{#caller}) Never! -[Log]> { emit(.Info, message, [LogField]{}, at.module) }
+info: fn(message: String, at: SourceLocation{#caller}) Never! -[Log]> {
+    emit(.Info, message, [LogField]{}, at.module)
+}
 
-warn: fn(message: String, at: SourceLocation{#caller}) Never! -[Log]> { emit(.Warn, message, [LogField]{}, at.module) }
+warn: fn(message: String, at: SourceLocation{#caller}) Never! -[Log]> {
+    emit(.Warn, message, [LogField]{}, at.module)
+}
 
-error: fn(message: String, at: SourceLocation{#caller}) Never! -[Log]> { emit(.Error, message, [LogField]{}, at.module) }
+error: fn(message: String, at: SourceLocation{#caller}) Never! -[Log]> {
+    emit(.Error, message, [LogField]{}, at.module)
+}
 
 /// Emit a message at a caller-selected level.
-log: fn(level: LogLevel, message: String, at: SourceLocation{#caller}) Never! -[Log]> { emit(level, message, [LogField]{}, at.module) }
+log: fn(level: LogLevel, message: String, at: SourceLocation{#caller}) Never! -[Log]> {
+    emit(level, message, [LogField]{}, at.module)
+}
 
-critical: fn(message: String, at: SourceLocation{#caller}) Never! -[Log]> { emit(.Critical, message, [LogField]{}, at.module) }
+critical: fn(message: String, at: SourceLocation{#caller}) Never! -[Log]> {
+    emit(.Critical, message, [LogField]{}, at.module)
+}
 
-fatal: fn(message: String, at: SourceLocation{#caller}) Never! -[Log]> { emit(.Fatal, message, [LogField]{}, at.module) }
+fatal: fn(message: String, at: SourceLocation{#caller}) Never! -[Log]> {
+    emit(.Fatal, message, [LogField]{}, at.module)
+}
 
-debug_fields: fn(message: String, fields: [LogField], at: SourceLocation{#caller}) Never! -[Log]> { emit(.Debug, message, fields, at.module) }
+debug_fields: fn(message: String, fields: [LogField], at: SourceLocation{#caller}) Never! -[Log]> {
+    emit(.Debug, message, fields, at.module)
+}
 
-info_fields: fn(message: String, fields: [LogField], at: SourceLocation{#caller}) Never! -[Log]> { emit(.Info, message, fields, at.module) }
+info_fields: fn(message: String, fields: [LogField], at: SourceLocation{#caller}) Never! -[Log]> {
+    emit(.Info, message, fields, at.module)
+}
 
-warn_fields: fn(message: String, fields: [LogField], at: SourceLocation{#caller}) Never! -[Log]> { emit(.Warn, message, fields, at.module) }
+warn_fields: fn(message: String, fields: [LogField], at: SourceLocation{#caller}) Never! -[Log]> {
+    emit(.Warn, message, fields, at.module)
+}
 
-error_fields: fn(message: String, fields: [LogField], at: SourceLocation{#caller}) Never! -[Log]> { emit(.Error, message, fields, at.module) }
+error_fields: fn(message: String, fields: [LogField], at: SourceLocation{#caller}) Never! -[Log]> {
+    emit(.Error, message, fields, at.module)
+}
 
 field: fn(key: String, value: String) -> LogField Never! {
     LogField{key: key, value: value, kind: "string", redacted: false}
@@ -179,22 +203,26 @@ setup: fn(spec: String) Never! -[Log]> {
         value: trim(pair.right)
         if {
             value.len() == 0 && is_format(key) -> rt.format_store(format_code(key))
-            key == "format" && is_format(ascii_lower(value)) -> rt.format_store(format_code(ascii_lower(value)))
+            key == "format" && is_format(ascii_lower(value)) -> {
+                rt.format_store(format_code(ascii_lower(value)))
+            }
             key == "sink" -> {
                 sink: ascii_lower(value)
-                if sink == "stderr" || sink == "stdout" -> set_sink(sink, "") else -> set_sink("jsonl", value)
+                if sink == "stderr" || sink == "stdout" -> set_sink(sink, "") else {
+                    set_sink("jsonl", value)
+                }
             }
             (key == "file" || key == "path") && value.len() > 0 -> set_sink("jsonl", value)
-            (key == "sample" || key == "sample_every") && (parse_int(value) ?? 0) > 0 -> sample_every(parse_int(value) ?? 0)
+            (key == "sample" || key == "sample_every") && (parse_int(value) ?? 0) > 0 -> {
+                sample_every(parse_int(value) ?? 0)
+            }
             key == "trace_id" && value.len() > 0 -> set_trace_id(value)
             else -> reject_setting("log.setup: unsupported setting `{trim(raw)}`; it was ignored")
         }
     }
 }
 
-is_format: fn(name: String) -> Bool {
-    name == "auto" || name == "json" || name == "text"
-}
+is_format: fn(name: String) -> Bool { name == "auto" || name == "json" || name == "text" }
 
 format_code: fn(name: String) -> Int Never! {
     if name == "json" -> return 1
@@ -202,9 +230,7 @@ format_code: fn(name: String) -> Int Never! {
     0
 }
 
-reject_setting: fn(message: String) -[Log]> {
-    rt.record_emit("error", message, [LogField]{})
-}
+reject_setting: fn(message: String) -[Log]> { rt.record_emit("error", message, [LogField]{}) }
 
 disable: fn() Never! -[Log]> { rt.disabled_store(true) }
 
@@ -230,9 +256,7 @@ normalize_fields: fn(fields: [LogField]) -> [LogField] {
             out.push(LogField{key: field.key, value: "[redacted]", kind: "redacted", redacted: true})
         } else if field.kind != "string" && field.kind != "int" && field.kind != "float" && field.kind != "bool" && field.kind != "counter" {
             out.push(LogField{key: field.key, value: field.value, kind: "string", redacted: false})
-        } else {
-            out.push(field.copy())
-        }
+        } else { out.push(field.copy()) }
     }
     out
 }
@@ -249,7 +273,9 @@ FILTER_PER_MODULE: 7
 
 // The sources below the code's levels and above them (`rt.config_load`).
 CONFIG_PACKAGE: 0
+
 CONFIG_ENV: 1
+
 CONFIG_FLAG: 2
 
 // Level resolution, the filter text and the record leaf: not part of the
@@ -264,7 +290,9 @@ priv internal: module {
         // `fatal` always ends the process with exit 1 (ledger #1474); the host
         // applies the level filter to the record and still exits, so a disabled
         // or filtered logger must not skip the call.
-        if level != .Fatal && !enabled_for(level_rank(level), path) -> return
+        if level != .Fatal && !enabled_for(level_rank(level), path) {
+            return
+        }
         tagged := [LogField]{LogField{key: "module", value: path, kind: "string", redacted: false}}
         loop item in normalize_fields(fields) -> tagged.push(item)
         // The runtime keeps sink selection, sampling, timestamps and
@@ -445,7 +473,9 @@ priv internal: module {
                 operator: if source == CONFIG_FLAG -> "--log" else -> "JET_LOG"
                 target: if path == "" -> "every module" else -> "`{path}`"
                 note: "log.set_level({rank_name(rank)}) at {at} for {target} is kept below {operator}, which sets {rank_name(kept)}"
-                if !rt.disabled_load() -> rt.record_emit("warn", note, [LogField]{LogField{key: "module", value: at.module, kind: "string", redacted: false}})
+                if !rt.disabled_load() {
+                    rt.record_emit("warn", note, [LogField]{LogField{key: "module", value: at.module, kind: "string", redacted: false}})
+                }
                 return
             }
         }
@@ -503,6 +533,7 @@ hex_digit: fn(value: Int) -> U8 {
     if n < 10 -> return U8{48 + n}
     U8{87 + n}
 }
+
 trim: fn(text: String) -> String {
     raw: text.bytes()
     a := 0
@@ -570,13 +601,9 @@ record: fn(level: LogLevel, message: String, fields: [LogField]) -> LogRecord Ne
     LogRecord{level: level, message: message, fields: fields}
 }
 
-formatter: fn(mode: String) -> Formatter Never! {
-    Formatter{mode: canon_mode(mode)}
-}
+formatter: fn(mode: String) -> Formatter Never! { Formatter{mode: canon_mode(mode)} }
 
-handler: fn(level: LogLevel) -> Handler Never! {
-    Handler{minimum: level, mode: "json"}
-}
+handler: fn(level: LogLevel) -> Handler Never! { Handler{minimum: level, mode: "json"} }
 
 handler_format: fn(target: Handler, mode: String) -> Handler Never! {
     Handler{minimum: target.minimum, mode: canon_mode(mode)}
@@ -596,15 +623,14 @@ format: fn(target: Formatter, event: LogRecord) -> String Never! {
 }
 
 handle: fn(target: Handler, event: LogRecord, at: SourceLocation{#caller}) Never! -[Log]> {
-    if level_rank(event.level) < level_rank(target.minimum) -> return
+    if level_rank(event.level) < level_rank(target.minimum) {
+        return
+    }
     formatter: Formatter{mode: canon_mode(target.mode)}
     if formatter.mode == "text" {
         emit(event.level, format(formatter, event), [LogField]{}, at.module)
-    } else {
-        emit(event.level, event.message, event.fields, at.module)
-    }
+    } else { emit(event.level, event.message, event.fields, at.module) }
 }
-
 
 render_text: fn(event: LogRecord) -> String {
     line := "{level_name(event.level)}: {event.message}"
@@ -619,13 +645,9 @@ render_text: fn(event: LogRecord) -> String {
 render_json: fn(event: LogRecord) -> String {
     line := "{{\"level\":\"{level_name(event.level)}\",\"msg\":\"{escape(event.message)}\""
     loop field in event.fields {
-        if field.redacted {
-            line = "{line},\"{escape(field.key)}\":\"[redacted]\""
-        } else if field.kind == "int" || field.kind == "float" || field.kind == "bool" || field.kind == "counter" {
+        if field.redacted -> line = "{line},\"{escape(field.key)}\":\"[redacted]\"" else if field.kind == "int" || field.kind == "float" || field.kind == "bool" || field.kind == "counter" {
             line = "{line},\"{escape(field.key)}\":{field.value}"
-        } else {
-            line = "{line},\"{escape(field.key)}\":\"{escape(field.value)}\""
-        }
+        } else { line = "{line},\"{escape(field.key)}\":\"{escape(field.value)}\"" }
     }
     line = "{line}}}"
     line
@@ -687,6 +709,7 @@ parse_int: fn(text: String) -> Int? {
     if !any -> return None
     Val(n)
 }
+
 add: fn(event: LogRecord, field: LogField) -> LogRecord Never! {
     fields := event.fields
     fields.push(field.copy())
@@ -695,11 +718,15 @@ add: fn(event: LogRecord, field: LogField) -> LogRecord Never! {
 
 group: fn(event: LogRecord, prefix: String) -> LogRecord Never! {
     fields := [LogField]{}
-    loop field in event.fields -> fields.push(LogField{key: "{prefix}.{field.key}", value: field.value, kind: field.kind, redacted: field.redacted})
+    loop field in event.fields {
+        fields.push(LogField{key: "{prefix}.{field.key}", value: field.value, kind: field.kind, redacted: field.redacted})
+    }
     LogRecord{level: event.level, message: event.message, fields: fields}
 }
 
-time: fn(event: LogRecord, timestamp: Int) -> LogRecord Never! { add(event, int("time", timestamp)) }
+time: fn(event: LogRecord, timestamp: Int) -> LogRecord Never! {
+    add(event, int("time", timestamp))
+}
 
 clear: fn(event: LogRecord) -> LogRecord Never! { record(event.level, event.message, [LogField]{}) }
 
@@ -837,11 +864,13 @@ otlp_attribute_json: fn(attribute: LogField) -> String Never! {
 }
 
 #Test("typed log fields retain order and normalize only redacted or unknown kinds") {
-    fields: normalize_fields([LogField]{
-        {key: "same", value: "secret", kind: "int", redacted: true},
-        {key: "same", value: "7", kind: "counter", redacted: false},
-        {key: "\"", value: "\n", kind: "unknown", redacted: false}
-    })
+    fields: normalize_fields(
+        [LogField]{
+            {key: "same", value: "secret", kind: "int", redacted: true},
+            {key: "same", value: "7", kind: "counter", redacted: false},
+            {key: "\"", value: "\n", kind: "unknown", redacted: false},
+        },
+    )
     assert_eq(fields.len(), 3)
     assert_eq(fields[0].key, "same")
     assert_eq(fields[0].value, "[redacted]")
@@ -863,7 +892,7 @@ otlp_attribute_json: fn(attribute: LogField) -> String Never! {
         start_ns: 1700000000000000000,
         end_ns: 1700000000250000000,
         attributes: [LogField]{field("jet.request_id", "req-1"), int("http.response.status_code", 200), bool("jet.limited", false), redact("jet.token")},
-        status: .Ok
+        status: .Ok,
     }
     statement: TraceSpan{
         trace_id: "4bf92f3577b34da6a3ce929d0e0e4736",
@@ -874,14 +903,14 @@ otlp_attribute_json: fn(attribute: LogField) -> String Never! {
         start_ns: 1700000000100000000,
         end_ns: 1700000000200000000,
         attributes: [LogField]{},
-        status: .Error("no such table")
+        status: .Error("no such table"),
     }
     expected: [String]{
         "{{\"resourceSpans\":[{{\"resource\":{{\"attributes\":[{{\"key\":\"service.name\",\"value\":{{\"stringValue\":\"crew\"}}}}]}},\"scopeSpans\":[{{\"scope\":{{\"name\":\"core.log\"}},\"spans\":[",
         "{{\"traceId\":\"4bf92f3577b34da6a3ce929d0e0e4736\",\"spanId\":\"00f067aa0ba902b7\",\"name\":\"POST /api/lookup\",\"kind\":2,\"startTimeUnixNano\":\"1700000000000000000\",\"endTimeUnixNano\":\"1700000000250000000\",\"attributes\":[",
         "{{\"key\":\"jet.request_id\",\"value\":{{\"stringValue\":\"req-1\"}}}},{{\"key\":\"http.response.status_code\",\"value\":{{\"intValue\":\"200\"}}}},{{\"key\":\"jet.limited\",\"value\":{{\"boolValue\":false}}}},{{\"key\":\"jet.token\",\"value\":{{\"stringValue\":\"[redacted]\"}}}}],\"status\":{{\"code\":1}}}},",
         "{{\"traceId\":\"4bf92f3577b34da6a3ce929d0e0e4736\",\"spanId\":\"b7ad6b7169203331\",\"parentSpanId\":\"00f067aa0ba902b7\",\"name\":\"db \\\"select\\\"\",\"kind\":1,\"startTimeUnixNano\":\"1700000000100000000\",\"endTimeUnixNano\":\"1700000000200000000\",\"attributes\":[],\"status\":{{\"code\":2,\"message\":\"no such table\"}}}}",
-        "]}}]}}]}}"
+        "]}}]}}]}}",
     }.join("")
     assert_eq(otlp_traces_json("crew", [TraceSpan]{server, statement}), expected)
     assert_eq(otlp_traces_json("crew", [TraceSpan]{}), "{{\"resourceSpans\":[{{\"resource\":{{\"attributes\":[{{\"key\":\"service.name\",\"value\":{{\"stringValue\":\"crew\"}}}}]}},\"scopeSpans\":[{{\"scope\":{{\"name\":\"core.log\"}},\"spans\":[]}}]}}]}}")

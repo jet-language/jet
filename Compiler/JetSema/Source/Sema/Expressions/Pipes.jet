@@ -56,14 +56,22 @@ sema_expr_pipe_step_without_value: fn(step: PipeStep, environment: SemaScopeEnvi
         loop placement in placements {
             if placement.method != method -> next
             // copy: the placement list is dropped once the fitting ones are kept.
-            if sema_expr_pipe_fits(placement.value, environment, program, scopes, state, tail_store, context) -> fits.push(placement.copy())
+            if sema_expr_pipe_fits(placement.value, environment, program, scopes, state, tail_store, context) {
+                fits.push(placement.copy())
+            }
         }
     }
-    if fits.len() == 0 -> return sema_error("E0438", step.span, what, why, "Write `<>` where the value goes, such as `|> f(<>)`, or end the pipe before this step")
-    if fits.len() == 1 -> return diagnostic_with_edit(sema_error("E0438", step.span, what, why, "Write `<>` where the value goes: `{fits[0].shown}`"), fits[0].edit)
+    if fits.len() == 0 {
+        return sema_error("E0438", step.span, what, why, "Write `<>` where the value goes, such as `|> f(<>)`, or end the pipe before this step")
+    }
+    if fits.len() == 1 {
+        return diagnostic_with_edit(sema_error("E0438", step.span, what, why, "Write `<>` where the value goes: `{fits[0].shown}`"), fits[0].edit)
+    }
     shown: (loop fit in fits -> "`{fit.shown}`").join(", ")
     diagnostic := diagnostic_with_edit_grade(sema_error("E0438", step.span, what, why, "`<>` fits in more than one place: {shown}; write it where the value goes"), fits[0].edit, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview)
-    loop index in 1..<fits.len() -> diagnostic = diagnostic_with_alternative_edit(diagnostic, fits[index].edit)
+    loop index in 1..<fits.len() {
+        diagnostic = diagnostic_with_alternative_edit(diagnostic, fits[index].edit)
+    }
     diagnostic
 }
 
@@ -92,7 +100,9 @@ sema_expr_pipe_placements: fn(step: PipeStep, environment: SemaScopeEnvironment,
         return placements
     }
     if step.value == .Call(call, id) {
-        if sema_expr_pipe_fits(step.value, environment, program, scopes, state, tail_store, context) -> return placements
+        if sema_expr_pipe_fits(step.value, environment, program, scopes, state, tail_store, context) {
+            return placements
+        }
         written: loop arg in call.args -> sema_expr_pipe_argument_text(arg)
         // The step ends at the call's `)`.
         close: step.span.end - 1
@@ -130,7 +140,9 @@ sema_expr_pipe_placements: fn(step: PipeStep, environment: SemaScopeEnvironment,
 // The edit that writes `<>` as argument `slot` of a call whose `)` is at
 // `close`: before the argument now in that slot, or after the last one.
 sema_expr_pipe_slot_edit: fn(args: [CallArg], slot: Int, close: Int) -> TextEdit Never! {
-    if slot < args.len() -> return TextEdit{span: Span{start: args[slot].span.start, end: args[slot].span.start}, new_text: "<>, "}
+    if slot < args.len() {
+        return TextEdit{span: Span{start: args[slot].span.start, end: args[slot].span.start}, new_text: "<>, "}
+    }
     if args.len() > 0 -> return TextEdit{span: Span{start: close, end: close}, new_text: ", <>"}
     TextEdit{span: Span{start: close, end: close}, new_text: "<>"}
 }

@@ -8,6 +8,7 @@ engine_cache_nar_string: fn(out: &[U8], value: String) {
     padding: (8 - length % 8) % 8
     loop _ in 0..<padding -> out.push(U8{0})
 }
+
 engine_cache_nar_regular_entry: fn(out: &[U8], name: String) {
     fields: [String]{"entry", "(", "name", name, "node", "(", "type", "regular", "contents", "", ")", ")"}
     loop field in fields -> engine_cache_nar_string(out, field)

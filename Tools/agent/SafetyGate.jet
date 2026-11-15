@@ -42,8 +42,11 @@ use {
 }
 
 TOOL: "/Tools/agent/SafetyGate.jet"
+
 USAGE: "usage: jet Tools/agent/SafetyGate.jet OUT ARTIFACTS_JSON [SEED COUNT [--prepare]]\n       jet Tools/agent/SafetyGate.jet --source OUT JET [SEED COUNT]"
+
 TIERS: [String]{"O0", "O1", "O2"}
+
 ADDITIONAL_COVERAGE: [String]{
     "native stack redzones/use-after-return",
     "uninitialized-memory/undefined-behavior instrumentation",
@@ -52,26 +55,43 @@ ADDITIONAL_COVERAGE: [String]{
     "IR Lint alias.exclusive/view.valid/send.boundary mutation controls",
     "inline moved-payload/Option-unwrap and backedge aliases",
 }
+
 GOLDEN_AREAS: [String]{"Memory/", "Collections/", "Text/", "LowLevel/", "Concurrency/"}
+
 WRAPPER_FIXTURES: [String]{"lowlevel_mem_direct_import_without_unsafe", "sys_posix_wrapper_without_unsafe"}
+
 WRAPPER_DIAGNOSTICS: [Int]{3, 2}
+
 UNSAFE_DIAGNOSTIC: "Error [jet.UnsafeCallOutsideUnsafe]"
+
 DEFAULT_SEED: 4
+
 DEFAULT_COUNT: 50
+
 CHECK_TIMEOUT_MS: 3600000
 
 I64_MAX: 9223372036854775807
+
 I64_MIN: -9223372036854775808
+
 STEP_LIMIT: 20000
+
 OUTPUT_LIMIT: 300
+
 // `s += s` in a loop doubles a String; the model discards such programs long
 // before the evaluator's own string limit.
 STRING_LIMIT: 4096
+
 ATTEMPTS: 200
+
 WORD: 4294967296
+
 MASK: 4294967295
+
 LETTERS: [String]{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", " ", "k", "l", "m", "-", ":", ".", ","}
+
 COMPARE: [String]{"==", "!=", "<", ">", "<=", ">="}
+
 ATOM: 11
 
 #Error
@@ -219,7 +239,9 @@ real: fn(g: &Gen) -> Float Never! { Float{draw(g)} / 4294967296.0 }
 
 chance: fn(g: &Gen, p: Float) -> Bool Never! { real(g) < p }
 
-choice: fn(name: String, weight: Float) -> Choice Never! { Choice{name: name.copy(), weight: weight} }
+choice: fn(name: String, weight: Float) -> Choice Never! {
+    Choice{name: name.copy(), weight: weight}
+}
 
 // `weight` when there are `count` candidates, else no weight.
 live: fn(count: Int, weight: Float) -> Float Never! { if count > 0 -> weight else -> 0.0 }
@@ -278,7 +300,9 @@ vars_of: fn(g: Gen, ty: String) -> [Int] Never! {
     out
 }
 
-mutable_of: fn(g: Gen, ty: String) -> [Int] Never! { vars_of(g, ty).filter(fn(at) { g.vars[at].mutable }) }
+mutable_of: fn(g: Gen, ty: String) -> [Int] Never! {
+    vars_of(g, ty).filter(fn(at) { g.vars[at].mutable })
+}
 
 // A mutable local binding nothing has assigned yet.
 local_var: fn(name: String, ty: String, loops: Int) -> Var Never! {
@@ -300,9 +324,7 @@ declare: fn(g: &Gen, at: Int) -> Int Never! {
     at
 }
 
-drop_scope: fn(g: &Gen) -> () {
-    g.scopes = g.scopes[0..<g.scopes.len() - 1]
-}
+drop_scope: fn(g: &Gen) -> () { g.scopes = g.scopes[0..<g.scopes.len() - 1] }
 
 blank_expr: fn(k: String) -> Expr Never! {
     Expr{k: k.copy(), v: 0, b: false, s: "", op: "", l: -1, r: -1, args: [Int]{}, conds: [Int]{}, vals: [Int]{}}
@@ -381,10 +403,17 @@ leaf: fn(g: &Gen, index_weight: Float) -> Int Never! {
     lists: vars_of(g, "List")
     structs: vars_of(g, "Struct")
     strs: vars_of(g, "Str")
-    kind: weighted(g, [Choice]{
-        choice("lit", 4.0), choice("var", live(ints.len(), 6.0)), choice("len", live(lists.len(), 1.0)),
-        choice("index", live(lists.len(), index_weight)), choice("field", live(structs.len(), 2.0)), choice("slen", live(strs.len(), 1.0)),
-    })
+    kind: weighted(
+        g,
+        [Choice]{
+            choice("lit", 4.0),
+            choice("var", live(ints.len(), 6.0)),
+            choice("len", live(lists.len(), 1.0)),
+            choice("index", live(lists.len(), index_weight)),
+            choice("field", live(structs.len(), 2.0)),
+            choice("slen", live(strs.len(), 1.0)),
+        },
+    )
     if kind == {
         "var" -> return var_ref(g, "var", ints)
         "len" -> return var_ref(g, "len", lists)
@@ -429,7 +458,9 @@ divisor: fn(g: &Gen, depth: Int) -> Int Never! {
 callable: fn(g: Gen) -> [Int] Never! {
     out := [Int]{}
     loop at in 0..<g.fns.len() {
-        if g.fns[at].params.all(fn(p) { g.vars[p].ty == "Int" || vars_of(g, g.vars[p].ty).len() > 0 }) -> out.push(at)
+        if g.fns[at].params.all(fn(p) { g.vars[p].ty == "Int" || vars_of(g, g.vars[p].ty).len() > 0 }) {
+            out.push(at)
+        }
     }
     out
 }
@@ -608,8 +639,25 @@ str_expr: fn(g: &Gen) -> Int Never! {
 
 blank_stmt: fn(k: String) -> Stmt Never! {
     Stmt{
-        k: k.copy(), name: "", op: "", e: -1, idx: -1, f: "", binding: -1, conds: [Int]{}, bodies: [[Int]]{}, otherwise: [Int]{},
-        has_otherwise: false, body: [Int]{}, lo: -1, hi: -1, inclusive: false, limit: 0, index: "", item: "", parts: [Int]{},
+        k: k.copy(),
+        name: "",
+        op: "",
+        e: -1,
+        idx: -1,
+        f: "",
+        binding: -1,
+        conds: [Int]{},
+        bodies: [[Int]]{},
+        otherwise: [Int]{},
+        has_otherwise: false,
+        body: [Int]{},
+        lo: -1,
+        hi: -1,
+        inclusive: false,
+        limit: 0,
+        index: "",
+        item: "",
+        parts: [Int]{},
     }
 }
 
@@ -649,9 +697,13 @@ block: fn(g: &Gen, count: Int, ctx: Ctx) -> [Int] Never! {
     out
 }
 
-inner_ctx: fn(ctx: Ctx) -> Ctx Never! { Ctx{loops: ctx.loops, in_loop: ctx.in_loop, in_fn: ctx.in_fn, prints: ctx.prints, nest: ctx.nest + 1} }
+inner_ctx: fn(ctx: Ctx) -> Ctx Never! {
+    Ctx{loops: ctx.loops, in_loop: ctx.in_loop, in_fn: ctx.in_fn, prints: ctx.prints, nest: ctx.nest + 1}
+}
 
-loop_ctx: fn(ctx: Ctx) -> Ctx Never! { Ctx{loops: ctx.loops + 1, in_loop: true, in_fn: ctx.in_fn, prints: ctx.prints, nest: ctx.nest + 1} }
+loop_ctx: fn(ctx: Ctx) -> Ctx Never! {
+    Ctx{loops: ctx.loops + 1, in_loop: true, in_fn: ctx.in_fn, prints: ctx.prints, nest: ctx.nest + 1}
+}
 
 stmt: fn(g: &Gen, ctx: Ctx) -> [Int] Never! {
     ints: mutable_of(g, "Int")
@@ -672,16 +724,31 @@ stmt: fn(g: &Gen, ctx: Ctx) -> [Int] Never! {
     structured: if has_struct -> Float{1.0} else -> Float{0.0}
     jumping: if ctx.in_loop -> Float{1.0} else -> Float{0.0}
     returning: if ctx.in_fn -> Float{1.0} else -> Float{0.0}
-    kind: weighted(g, [Choice]{
-        choice("int", 5.0), choice("bool", 1.0), choice("assign", live(ints.len(), 4.0)), choice("assignBool", live(bools.len(), 0.5)),
-        choice("print", 4.0 * printing), choice("if", 3.0 * nesting),
-        choice("range", 2.0 * looped), choice("while", 1.5 * looped),
-        choice("list", 1.5), choice("push", live(open.len(), 1.5)), choice("setidx", live(open.len(), 1.0)),
-        choice("foreach", live(lists.len(), 1.5 * looped)),
-        choice("struct", 1.0 * structured), choice("setfield", live(structs.len(), 1.5)),
-        choice("str", 2.0), choice("append", live(strs.len(), 2.0)), choice("assignStr", live(strs.len(), 0.5)), choice("move", live(movable.len(), 0.7)),
-        choice("jump", 1.0 * jumping), choice("return", 0.7 * returning),
-    })
+    kind: weighted(
+        g,
+        [Choice]{
+            choice("int", 5.0),
+            choice("bool", 1.0),
+            choice("assign", live(ints.len(), 4.0)),
+            choice("assignBool", live(bools.len(), 0.5)),
+            choice("print", 4.0 * printing),
+            choice("if", 3.0 * nesting),
+            choice("range", 2.0 * looped),
+            choice("while", 1.5 * looped),
+            choice("list", 1.5),
+            choice("push", live(open.len(), 1.5)),
+            choice("setidx", live(open.len(), 1.0)),
+            choice("foreach", live(lists.len(), 1.5 * looped)),
+            choice("struct", 1.0 * structured),
+            choice("setfield", live(structs.len(), 1.5)),
+            choice("str", 2.0),
+            choice("append", live(strs.len(), 2.0)),
+            choice("assignStr", live(strs.len(), 0.5)),
+            choice("move", live(movable.len(), 0.7)),
+            choice("jump", 1.0 * jumping),
+            choice("return", 0.7 * returning),
+        },
+    )
     inner: inner_ctx(ctx)
     if kind == {
         "int" -> {
@@ -911,7 +978,9 @@ interp_stmt: fn(g: &Gen, ints: [Int], bools: [Int], strs: [Int], structs: [Int])
     loop at in bools -> holes.push(Hole{k: "var", name: g.vars[at].name.copy(), f: ""})
     loop at in strs -> holes.push(Hole{k: "var", name: g.vars[at].name.copy(), f: ""})
     loop at in structs {
-        loop f in g.fields -> holes.push(Hole{k: "field", name: g.vars[at].name.copy(), f: f.copy()})
+        loop f in g.fields {
+            holes.push(Hole{k: "field", name: g.vars[at].name.copy(), f: f.copy()})
+        }
     }
     s := blank_stmt("interp")
     title: fresh(g, "t")
@@ -1171,9 +1240,13 @@ decl_lines: fn(g: Gen, s: Stmt, pad: String) -> [String] Never! {
             return [String]{"{bind}{init.s}{{{fields.join(", ")}}}"}
         }
         "ifx" -> {
-            if init.conds.len() == 1 -> return [String]{"{bind}if {expr(g, init.conds[0])} -> {expr(g, init.vals[0])} else -> {expr(g, init.r)}"}
+            if init.conds.len() == 1 {
+                return [String]{"{bind}if {expr(g, init.conds[0])} -> {expr(g, init.vals[0])} else -> {expr(g, init.r)}"}
+            }
             out := [String]{"{bind}if {{"}
-            loop i in 0..<init.conds.len() -> out.push("{pad}    {expr(g, init.conds[i])} -> {expr(g, init.vals[i])}")
+            loop i in 0..<init.conds.len() {
+                out.push("{pad}    {expr(g, init.conds[i])} -> {expr(g, init.vals[i])}")
+            }
             out.push("{pad}    else -> {expr(g, init.r)}")
             out.push("{pad}}}")
             return out
@@ -1185,7 +1258,9 @@ decl_lines: fn(g: Gen, s: Stmt, pad: String) -> [String] Never! {
 
 if_lines: fn(g: Gen, s: Stmt, pad: String, depth: Int) -> [String] Never! {
     if s.conds.len() == 1 && !s.has_otherwise {
-        if single(g, s.bodies[0]) == .Val(one) -> return [String]{"{pad}if {expr(g, s.conds[0])} -> {one}"}
+        if single(g, s.bodies[0]) == .Val(one) {
+            return [String]{"{pad}if {expr(g, s.conds[0])} -> {one}"}
+        }
     }
     out := [String]{"{pad}if {{"}
     loop i in 0..<s.conds.len() {
@@ -1278,9 +1353,13 @@ compared: fn(op: String, order: Ordering) -> Value Never! {
     Value{k: "bool", i: 0, b: holds, s: "", items: [Int]{}}
 }
 
-str_value: fn(s: String) -> Value Never! { Value{k: "str", i: 0, b: false, s: s.copy(), items: [Int]{}} }
+str_value: fn(s: String) -> Value Never! {
+    Value{k: "str", i: 0, b: false, s: s.copy(), items: [Int]{}}
+}
 
-items_value: fn(k: String, items: [Int]) -> Value Never! { Value{k: k.copy(), i: 0, b: false, s: "", items: items} }
+items_value: fn(k: String, items: [Int]) -> Value Never! {
+    Value{k: k.copy(), i: 0, b: false, s: "", items: items}
+}
 
 no_signal: fn() -> Signal Never! { Signal{k: "", v: int_value(0)} }
 
@@ -1647,7 +1726,7 @@ generate_core_case: fn(seed: Int, index: Int) -> Case Never! {
     rng := new_gen(seed_state("jet-core-safety-fuzz:{seed}:{index}"))
     statements := [String]{"m := [String:Int]{{}}", "xs := [Int]{{}}"}
     output := [String]{}
-    map := [String: Int]{}
+    map := [String:Int]{}
     list := [Int]{}
     loop step in 0..<64 {
         key: "k{(draw(rng) * 8) /% WORD}"
@@ -1794,7 +1873,9 @@ visit: fn(root: String, dir: String, entries: &[Entry]) -[FS]> () {
                 entries.push(Entry{path: "{path}/run.jet", stem: relative(root, path)})
                 next
             }
-            if !files.exists("{path}/package.jet") && !files.exists("{path}/workspace.jet") -> visit(root, path, entries)
+            if !files.exists("{path}/package.jet") && !files.exists("{path}/workspace.jet") {
+                visit(root, path, entries)
+            }
             next
         }
         if child.name.ends_with(".jet") && child.name != "package.jet" && child.name != "workspace.jet" {
@@ -1806,8 +1887,8 @@ visit: fn(root: String, dir: String, entries: &[Entry]) -[FS]> () {
 relative: fn(root: String, path: String) -> String Never! { path.removeprefix("{root}/") }
 
 // The first two tab-separated columns of each nonempty line.
-columns: fn(text: String) -> [String: String] Never! {
-    out := [String: String]{}
+columns: fn(text: String) -> [String:String] Never! {
+    out := [String:String]{}
     loop line in text.trim().split("\n").to_list() {
         if line == "" -> next
         cells: line.split("\t").to_list()
@@ -1896,8 +1977,7 @@ coverage_receipt: fn(input: Dyn, head: String, coverage: String) -[FS]> Bool Nev
     receipt: json.parse(String.from_bytes(bytes) ?? return false) ?? return false
     checked_cases: int_field(receipt, "checked_cases") ?? return false
     failures_empty: if field(receipt, "failures") == .Array(items) -> items.len() == 0 else -> false
-    hash(bytes) == text_field(input, "sha256") && text_field(receipt, "head") == head && text_field(receipt, "coverage") == coverage
-        && text_field(receipt, "verdict") == "PASS" && checked_cases > 0 && checked_cases <= 9007199254740991 && failures_empty
+    hash(bytes) == text_field(input, "sha256") && text_field(receipt, "head") == head && text_field(receipt, "coverage") == coverage && text_field(receipt, "verdict") == "PASS" && checked_cases > 0 && checked_cases <= 9007199254740991 && failures_empty
 }
 
 Gate: struct {
@@ -1931,7 +2011,9 @@ command: fn(gate: Gate, name: String, argv: [String]) -[Env, Exec, FS, IO, Time,
     Ran{code: code, detail: detail, output: output}
 }
 
-occurrences: fn(haystack: String, needle: String) -> Int Never! { haystack.split(needle).to_list().len() - 1 }
+occurrences: fn(haystack: String, needle: String) -> Int Never! {
+    haystack.split(needle).to_list().len() - 1
+}
 
 // The two unsafe-wrapper fixtures must each report exactly their
 // jet.UnsafeCallOutsideUnsafe diagnostics and exit 1.
@@ -2008,7 +2090,9 @@ golden_digest: fn(cases: [Case]) -> String Never! {
 run_gate: fn(out: String, artifacts: String, seed: Int, count: Int, mode: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Int GateError! {
     files.create_dir_all(out) ?? return Err(gate_fail("`{out}` cannot be created: {err}"))
     // Delete neither caller-owned artifacts nor historical receipts; every run has a unique out.
-    if files.exists("{out}/safety-summary.json") -> return Err(gate_fail("receipt already exists: {out}"))
+    if files.exists("{out}/safety-summary.json") {
+        return Err(gate_fail("receipt already exists: {out}"))
+    }
     repo: repo_root()
     bytes: files.read_bytes(artifacts) ?? return Err(gate_fail("`{artifacts}` cannot be read: {err}"))
     manifest: json.parse(String.from_bytes(bytes) ?? return Err(gate_fail("`{artifacts}` is not UTF-8"))) ?? return Err(gate_fail("`{artifacts}` is not JSON"))
@@ -2018,9 +2102,11 @@ run_gate: fn(out: String, artifacts: String, seed: Int, count: Int, mode: String
     pin: command(gate, "source-pin", [String]{"git", "rev-parse", "HEAD"})
     if pin.code != 0 -> return Err(gate_fail("cannot identify safety source tree"))
     source_head: pin.output.trim()
-    if !source_head.starts_with(head) -> gate.gaps.push("artifact head {head} differs from audited source {source_head}")
+    if !source_head.starts_with(head) {
+        gate.gaps.push("artifact head {head} differs from audited source {source_head}")
+    }
     corpus: prepare_corpus(out, seed, count) ?? return Err(err)
-    summary := [String: Dyn]{
+    summary := [String:Dyn]{
         "schema": Dyn.Text("jet-native-safety-v1"),
         "head": Dyn.Text(head.copy()),
         "artifacts_sha256": Dyn.Text(hash(bytes)),
@@ -2068,14 +2154,16 @@ run_gate: fn(out: String, artifacts: String, seed: Int, count: Int, mode: String
     }
     // No native producer provides these today; never call ASan full I1 proof.
     loop gap in ADDITIONAL_COVERAGE {
-        if !coverage_receipt(field(field(native, "additional_coverage"), gap), head, gap) -> gate.gaps.push(gap.copy())
+        if !coverage_receipt(field(field(native, "additional_coverage"), gap), head, gap) {
+            gate.gaps.push(gap.copy())
+        }
     }
     loop c in gate.checks {
         if c.verdict == "gap" -> gate.gaps.push("{c.name}: {c.detail}")
     }
     failures: gate.checks.filter(fn(c) { c.verdict == "fail" })
-    verdict: if failures.len() > 0 -> "FAIL" else -> if gate.gaps.len() > 0 -> "GAP" else -> "PASS"
-    code: if failures.len() > 0 -> 1 else -> if gate.gaps.len() > 0 -> 3 else -> 0
+    verdict: if failures.len() > 0 -> "FAIL" else if gate.gaps.len() > 0 -> "GAP" else -> "PASS"
+    code: if failures.len() > 0 -> 1 else if gate.gaps.len() > 0 -> 3 else -> 0
     summary["checks"] = Dyn.Array(gate.checks.map(fn(c) { check_tree(c) }))
     summary["gaps"] = Dyn.Array(gate.gaps.map(fn(gap) { Dyn.Text(gap.copy()) }))
     summary["failures"] = Dyn.Array(failures.map(fn(c) { check_tree(c) }))
@@ -2101,11 +2189,11 @@ checker_of: fn(manifest: Dyn, native: Dyn, head: String) -> Dyn Never! {
     if bound == .Object(_) -> return bound
     debug: text_field(manifest, "debug_jet")
     path: if debug != "" -> debug else -> text_field(manifest, "release_jet")
-    Dyn.Object([String: Dyn]{"path": Dyn.Text(path), "head": Dyn.Text(head.copy())})
+    Dyn.Object([String:Dyn]{"path": Dyn.Text(path), "head": Dyn.Text(head.copy())})
 }
 
 check_tree: fn(c: Check) -> Dyn Never! {
-    Dyn.Object([String: Dyn]{"name": Dyn.Text(c.name.copy()), "verdict": Dyn.Text(c.verdict.copy()), "detail": Dyn.Text(c.detail.copy())})
+    Dyn.Object([String:Dyn]{"name": Dyn.Text(c.name.copy()), "verdict": Dyn.Text(c.verdict.copy()), "detail": Dyn.Text(c.detail.copy())})
 }
 
 // One admitted native tier output for one case family.
@@ -2114,10 +2202,11 @@ native_tier: fn(gate: &Gate, head: String, seed: Int, count: Int, tier: String, 
     directory: text_field(input, "directory")
     if directory == "" -> return add(gate, name, "gap", "no admitted native producer output")
     receipt: json.parse(files.read("{directory}/native-safety-input.json") ?? return add(gate, name, "gap", "native-safety-input.json cannot be read")) ?? return add(gate, name, "gap", "native-safety-input.json is not JSON")
-    bound: text_field(receipt, "head") == head && text_field(receipt, "backend") == "jet-native" && text_field(receipt, "tier") == tier
-        && text_field(receipt, "corpus_sha256") == digest && (int_field(receipt, "seed") ?? -1) == seed && (int_field(receipt, "count") ?? -1) == count
+    bound: text_field(receipt, "head") == head && text_field(receipt, "backend") == "jet-native" && text_field(receipt, "tier") == tier && text_field(receipt, "corpus_sha256") == digest && (int_field(receipt, "seed") ?? -1) == seed && (int_field(receipt, "count") ?? -1) == count
     if !bound -> return add(gate, name, "gap", "native provenance/corpus/seed mismatch")
-    loop row in compare_native(directory, cases) -> add(gate, "{name}/{row.stem}", row.verdict, row.detail)
+    loop row in compare_native(directory, cases) {
+        add(gate, "{name}/{row.stem}", row.verdict, row.detail)
+    }
     lint: columns(files.read("{directory}/lint.tsv") ?? "")
     loop c in cases {
         if !lint.has_key(c.stem) {
@@ -2133,12 +2222,17 @@ native_tier: fn(gate: &Gate, head: String, seed: Int, count: Int, tier: String, 
     library: text_field(runtime, "library")
     library_hash: if library != "" && files.exists(library) -> hash(files.read_bytes(library) ?? [U8]{}) else -> ""
     negative: field(runtime, "negative_control")
-    admitted: library_hash != "" && library_hash == text_field(runtime, "sha256") && text_field(runtime, "head") == head
-        && text_field(runtime, "instrumentation") == "address" && text_field(negative, "receipt") != ""
-    if !admitted -> return add(gate, "{name}-runtime", "gap", "missing exact-head instrumented runtime archive/negative control")
-    if !negative_control(negative, head, library_hash) -> return add(gate, "{name}-negative-control", "gap", "ASan/LSan negative-control receipt incomplete or stale")
+    admitted: library_hash != "" && library_hash == text_field(runtime, "sha256") && text_field(runtime, "head") == head && text_field(runtime, "instrumentation") == "address" && text_field(negative, "receipt") != ""
+    if !admitted {
+        return add(gate, "{name}-runtime", "gap", "missing exact-head instrumented runtime archive/negative control")
+    }
+    if !negative_control(negative, head, library_hash) {
+        return add(gate, "{name}-negative-control", "gap", "ASan/LSan negative-control receipt incomplete or stale")
+    }
     language: text_field(runtime, "language")
-    if language != "Jet" -> add(gate, "{name}-rust-free-runtime", "gap", "runtime language {if language == "" -> "unspecified" else -> language}")
+    if language != "Jet" {
+        add(gate, "{name}-rust-free-runtime", "gap", "runtime language {if language == "" -> "unspecified" else -> language}")
+    }
     if text_field(receipt, "frontend_language") != "Jet" || text_field(receipt, "compiler_language") != "Jet" {
         add(gate, "{name}-rust-free-compiler", "gap", "compiler/front-end still depends on Rust")
     }
@@ -2149,15 +2243,16 @@ negative_control: fn(negative: Dyn, head: String, runtime_sha256: String) -[FS]>
     bytes: files.read_bytes(text_field(negative, "receipt")) ?? return false
     receipt: json.parse(String.from_bytes(bytes) ?? return false) ?? return false
     detected: if field(receipt, "detected") == .Array(items) -> items.map(fn(item) { if item == .Text(word) -> word.copy() else -> "" }) else -> [String]{}
-    hash(bytes) == text_field(negative, "sha256") && text_field(receipt, "head") == head && text_field(receipt, "runtime_sha256") == runtime_sha256
-        && ([String]{"heap-buffer-overflow", "heap-use-after-free", "leak"}).all(fn(kind) { detected.contains(kind) })
+    hash(bytes) == text_field(negative, "sha256") && text_field(receipt, "head") == head && text_field(receipt, "runtime_sha256") == runtime_sha256 && ([String]{"heap-buffer-overflow", "heap-use-after-free", "leak"}).all(fn(kind) { detected.contains(kind) })
 }
 
 // The VerifyFull leg: the wrapper fixtures under `jet` and the generated
 // corpus, which the model must define in full.
 run_source: fn(out: String, jet: String, seed: Int, count: Int) -[Env, Exec, FS, IO, Time, Time.Wait]> Int GateError! {
     files.create_dir_all(out) ?? return Err(gate_fail("`{out}` cannot be created: {err}"))
-    if files.exists("{out}/safety-summary.txt") -> return Err(gate_fail("receipt already exists: {out}"))
+    if files.exists("{out}/safety-summary.txt") {
+        return Err(gate_fail("receipt already exists: {out}"))
+    }
     gate := Gate{out: out.copy(), repo: repo_root(), checks: [Check]{}, gaps: [String]{}}
     wrapper_fixtures(gate, jet, "", "")
     corpus: prepare_corpus(out, seed, count) ?? return Err(err)
@@ -2196,7 +2291,9 @@ safety_main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int GateE
         count: number(if args.len() > 4 -> args[4] else -> "", DEFAULT_COUNT) ?? return Err(err)
         return run_source(absolute(args[1]), args[2], seed, count)
     }
-    if args.len() < 2 || args.len() > 5 || (args.len() == 5 && args[4] != "--prepare") -> return Err(gate_fail(USAGE))
+    if args.len() < 2 || args.len() > 5 || (args.len() == 5 && args[4] != "--prepare") {
+        return Err(gate_fail(USAGE))
+    }
     seed: number(if args.len() > 2 -> args[2] else -> "", DEFAULT_SEED) ?? return Err(err)
     count: number(if args.len() > 3 -> args[3] else -> "", DEFAULT_COUNT) ?? return Err(err)
     mode: if args.len() == 5 -> "prepare" else -> "gate"
@@ -2239,7 +2336,8 @@ native_result: fn(dir: String, stem: String, verdict: String, stdout: String, st
     assert_eq(compare_native(dir, cases)[0].verdict, "fail")
     native_result(dir, "core/case", "pass", "ok\n", "", "0")
     assert_eq(compare_native(dir, cases)[0].verdict, "pass")
-    loop bad in ([[String]]{[String]{"bad\n", "", "0"}, [String]{"ok\n", "bad\n", "0"}, [String]{"ok\n", "", "70"}, [String]{"ok\n", "", "null"}}) {
+    loop bad in
+        ([[String]]{[String]{"bad\n", "", "0"}, [String]{"ok\n", "bad\n", "0"}, [String]{"ok\n", "", "70"}, [String]{"ok\n", "", "null"}}) {
         native_result(dir, "core/case", "pass", bad[0], bad[1], bad[2])
         assert_eq(compare_native(dir, cases)[0].verdict, "fail")
     }
@@ -2288,7 +2386,9 @@ native_result: fn(dir: String, stem: String, verdict: String, stdout: String, st
     assert_eq(listed.trim().split("\n").to_list().len(), 6)
     assert(prepare_corpus(scratch("zero"), 4, 0) == .Err(_))
     assert(number("1.5", 0) == .Err(_))
-    loop corpus in ([Corpus]{a, b, c}) -> files.remove_all(files.dirname(files.dirname(files.dirname(corpus.features)))) ?? ()
+    loop corpus in ([Corpus]{a, b, c}) {
+        files.remove_all(files.dirname(files.dirname(files.dirname(corpus.features)))) ?? ()
+    }
 }
 
 #Test("additional coverage requires exact-head hashed nonempty passing evidence") {
@@ -2299,14 +2399,14 @@ native_result: fn(dir: String, stem: String, verdict: String, stdout: String, st
     assert(coverage_receipt(input, "abcdef123", "stack"))
     assert(!coverage_receipt(input, "old", "stack"))
     assert(!coverage_receipt(input, "abcdef123", "races"))
-    assert(!coverage_receipt(Dyn.Object([String: Dyn]{"receipt": Dyn.Text(path.copy()), "sha256": Dyn.Text("wrong")}), "abcdef123", "stack"))
+    assert(!coverage_receipt(Dyn.Object([String:Dyn]{"receipt": Dyn.Text(path.copy()), "sha256": Dyn.Text("wrong")}), "abcdef123", "stack"))
     files.write(path, "{{\"head\":\"abcdef123\",\"coverage\":\"stack\",\"verdict\":\"PASS\",\"checked_cases\":0,\"failures\":[]}}") ?? panic("write")
     assert(!coverage_receipt(receipt_input(path), "abcdef123", "stack"))
     files.remove_all(dir) ?? ()
 }
 
 receipt_input: fn(path: String) -[FS]> Dyn Never! {
-    Dyn.Object([String: Dyn]{"receipt": Dyn.Text(path.copy()), "sha256": Dyn.Text(hash(files.read_bytes(path) ?? panic("read")))})
+    Dyn.Object([String:Dyn]{"receipt": Dyn.Text(path.copy()), "sha256": Dyn.Text(hash(files.read_bytes(path) ?? panic("read")))})
 }
 
 #Test("#4754 whole inline moved-payload/Option-unwrap/backedge class stays a required gate") {

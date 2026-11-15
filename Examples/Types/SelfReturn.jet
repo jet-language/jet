@@ -2,7 +2,8 @@
 // method returns that type, so methods chain on its result. A trait method
 // written `-> Self` is implemented with either `-> Self` or the type's name.
 UsageOf: enum {
-    Program Children
+    Program
+    Children
 
     label: fn(self) -> String {
         if self == {
@@ -10,7 +11,9 @@ UsageOf: enum {
             .Children -> "children"
         }
     }
+
     mine: fn() -> Self { UsageOf.Program }
+
     same: fn(self) -> Self { self.copy() }
 }
 
@@ -18,9 +21,12 @@ Point: struct {
     x: Int
 
     origin: fn() -> Self { Point{x: 0} }
+
     moved: fn(self, by: Int) -> Self { Point{x: self.x + by} }
+
     shown: fn(self) -> String { "p{self.x}" }
 }
+
 Grow: trait {
     grown: fn(self) -> Self
     fresh: fn() -> Self
@@ -31,17 +37,21 @@ Counter: struct {
 
     impl Grow {
         grown: fn(self) -> Self { Counter{n: self.n + 1} }
+
         fresh: fn() -> Self { Counter{n: 0} }
     }
 }
+
 Doubler: struct {
     n: Int
 
     impl Grow {
         grown: fn(self) -> Doubler { Doubler{n: self.n * 2} }
+
         fresh: fn() -> Doubler { Doubler{n: 1} }
     }
 }
+
 run: fn() {
     m: UsageOf.mine()
     print(m.label())

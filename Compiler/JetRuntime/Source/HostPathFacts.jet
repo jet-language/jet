@@ -5,7 +5,7 @@
 fs_text_has_nul: fn(path: I64) -> Bool {
     at := I64{0}
     loop at < rt_text_len(path) {
-        if (rt_text_byte(wrapping(rt_text_data(path) + at)) == I64{0}) -> return true
+        if (rt_text_byte(wrapping(rt_text_data(path) + at)) == I64{0}) { return true }
         at += I64{1}
     }
     false
@@ -44,9 +44,11 @@ fs_text_has_nul: fn(path: I64) -> Bool {
     // A fresh unique copy: the join appends to it in place. 0 only after a
     // propagated allocation stop.
     result: rt_text_copy(rt_text_data(base), rt_text_len(base))
-    if (result == I64{0}) -> return I64{0}
+    if (result == I64{0}) { return I64{0} }
     length: rt_text_len(base)
-    if (length != I64{0} && rt_text_byte(wrapping(wrapping(rt_text_data(base) + length) - I64{1})) != I64{47}) -> rt_text_push_word(result, I64{47}, I64{1})
+    if (length != I64{0} && rt_text_byte(wrapping(wrapping(rt_text_data(base) + length) - I64{1})) != I64{47}) {
+        rt_text_push_word(result, I64{47}, I64{1})
+    }
     jet_rt_string_builder_push(result, path)
     result
 }
@@ -55,7 +57,7 @@ fs_text_has_nul: fn(path: I64) -> Bool {
 // (present, even empty, wins), else /tmp. Never the logical overlay.
 #Export(c) jet_fs_temp_directory_raw: fn() -> I64 {
     value: rt_env_get_lossy(rt_static_text("TMPDIR"))
-    if (value != I64{0}) -> return value
+    if (value != I64{0}) { return value }
     jet_rt_string_clone(rt_static_text("/tmp"))
 }
 
@@ -67,9 +69,7 @@ fs_text_has_nul: fn(path: I64) -> Bool {
     nanos: sync_load(wrapping(sample + I64{8}))
     text: jet_rt_string_builder_new()
     if (seconds >= I64{0}) {
-        if (seconds == I64{0}) {
-            rt_text_push_number(text, nanos)
-        } else {
+        if (seconds == I64{0}) { rt_text_push_number(text, nanos) } else {
             rt_text_push_number(text, seconds)
             divisor := I64{100000000}
             loop divisor > (I64{0}) {
@@ -86,18 +86,18 @@ fs_text_has_nul: fn(path: I64) -> Bool {
 // result is truncated to what that read returned. No EINTR retry on read.
 #Export(c) jet_files_read_at_os: fn(path: I64, offset: I64, count: I64, output: I64, len: I64, error: I64) -> I64 {
     start: host_native_int(offset)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     limit: host_native_int(count)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     if !compiler_fs_path(path, HOST_IO_OP_READ, error) -> return I64{0}
     name: fd_c_path(path)
     fd := I64{0}
     loop {
         fd = host_call(I64{2}, name, I64{524288}, I64{0})
-        if (fd != I64{-4}) -> break
+        if (fd != I64{-4}) { break }
     }
     fd_c_path_drop(name, path)
-    if (fd < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_READ, path, -fd, error)
+    if (fd < I64{0}) { return compiler_fs_errno(HOST_IO_OP_READ, path, -fd, error) }
     sought: host_call(I64{8}, fd, start, I64{0})
     if (sought < I64{0}) {
         _ := host_call(I64{3}, fd, I64{0}, I64{0})

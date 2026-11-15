@@ -48,6 +48,7 @@ LinkPack: struct {
     r_sym: [Int]
     r_add: [Int]
 }
+
 link_pack_rust_symbol: fn(name: String) -> Bool Never! {
     if name.starts_with("__rust_") || name.starts_with("__rdl_") -> return true
     bytes: name.bytes()
@@ -113,7 +114,9 @@ link_pack_symbol: fn(c: &LinkContext, p: &LinkPack, obj: Int, k: Int) -> Int Nev
         if kind != LINK_G_FILE || p.exports.get(f) != None -> return link_pack_global(p, f)
         s: c.g_section[f].copy()
         name: c.g_name[f].copy()
-        if s == LINK_ABS -> return link_pack_local(p, -1 - f, name, 0, LINK_ABS, c.g_value[f], c.g_size[f])
+        if s == LINK_ABS {
+            return link_pack_local(p, -1 - f, name, 0, LINK_ABS, c.g_value[f], c.g_size[f])
+        }
         out: link_pack_out(c, p, s)
         if out < 0 {
             site: link_section_label(c, s)
@@ -131,7 +134,9 @@ link_pack_symbol: fn(c: &LinkContext, p: &LinkPack, obj: Int, k: Int) -> Int Nev
     value: link_u64(c.bufs, b, at + 8)
     size: link_u64(c.bufs, b, at + 16)
     file_symbol: c.obj_first_symbol[obj] + k
-    if s == LINK_ABS -> return link_pack_local(p, file_symbol, link_cstr(c.bufs, b, c.obj_strtab[obj] + link_u32(c.bufs, b, at)), info.bit_and(15), LINK_ABS, value, size)
+    if s == LINK_ABS {
+        return link_pack_local(p, file_symbol, link_cstr(c.bufs, b, c.obj_strtab[obj] + link_u32(c.bufs, b, at)), info.bit_and(15), LINK_ABS, value, size)
+    }
     if s < 0 {
         object: c.obj_name[obj].copy()
         link_error(c, "runtime pack: {object} refers to local symbol {k}, whose section was discarded")
@@ -295,15 +300,25 @@ link_pack_write: fn(c: &LinkContext, exports: [Int]) -> [U8] Never! {
         if link_rel_count(c, obj, s) > 0 {
             rela_out.push(next_index)
             next_index += 1
-        } else {
-            rela_out.push(-1)
-        }
+        } else { rela_out.push(-1) }
     }
     p := LinkPack{
-        ord_row: ord_row, row_ord: row_ord, sec_out: sec_out,
-        local_index: [Int:Int]{}, l_name: [String]{}, l_info: [Int]{}, l_shndx: [Int]{}, l_value: [Int]{}, l_size: [Int]{},
-        global_index: [Int:Int]{}, gl_id: [Int]{}, exports: [Int:Bool]{},
-        r_off: [Int]{}, r_type: [Int]{}, r_sym: [Int]{}, r_add: [Int]{},
+        ord_row: ord_row,
+        row_ord: row_ord,
+        sec_out: sec_out,
+        local_index: [Int:Int]{},
+        l_name: [String]{},
+        l_info: [Int]{},
+        l_shndx: [Int]{},
+        l_value: [Int]{},
+        l_size: [Int]{},
+        global_index: [Int:Int]{},
+        gl_id: [Int]{},
+        exports: [Int:Bool]{},
+        r_off: [Int]{},
+        r_type: [Int]{},
+        r_sym: [Int]{},
+        r_add: [Int]{},
     }
     loop f in exports {
         p.exports.add(f, true).drop("exports are unique")
@@ -325,7 +340,9 @@ link_pack_write: fn(c: &LinkContext, exports: [Int]) -> [U8] Never! {
     // precedes its FDEs).
     cie_used := [Int:Bool]{}
     loop piece in 0..<c.ep_sec.len() {
-        if c.ep_cie[piece] >= 0 && c.ep_keep[piece] -> cie_used.add(c.ep_cie[piece], true).drop("a set")
+        if c.ep_cie[piece] >= 0 && c.ep_keep[piece] {
+            cie_used.add(c.ep_cie[piece], true).drop("a set")
+        }
     }
     eh := [U8]{}
     eh_out := [Int:Int]{}
@@ -368,7 +385,9 @@ link_pack_write: fn(c: &LinkContext, exports: [Int]) -> [U8] Never! {
     strtab := [U8]{U8{0}}
     link_pack_sym(symtab, xindex, 0, 0, 0, 0, 0)
     loop out in p.sec_out -> link_pack_sym(symtab, xindex, 0, 3, out, 0, 0)
-    loop (j, name) in p.l_name -> link_pack_sym(symtab, xindex, elf64_string(strtab, name), p.l_info[j], p.l_shndx[j], p.l_value[j], p.l_size[j])
+    loop (j, name) in p.l_name {
+        link_pack_sym(symtab, xindex, elf64_string(strtab, name), p.l_info[j], p.l_shndx[j], p.l_value[j], p.l_size[j])
+    }
     first_global: 1 + p.sec_out.len() + p.l_name.len()
     loop f in p.gl_id {
         name_at: elf64_string(strtab, c.g_name[f])
@@ -489,7 +508,9 @@ x64_link_runtime_pack: fn(names: [String], bufs: &&[[U8]], extra_roots: [String]
     c.fault_report = LinkFaultReport.Import
     link_load_inputs(c, names)
     if c.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
-    if c.obj_name.len() == 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"runtime pack: no Jet runtime object among the inputs"}}
+    if c.obj_name.len() == 0 {
+        return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"runtime pack: no Jet runtime object among the inputs"}}
+    }
     root_names := [String]{}
     seen := name_table_sized(256)
     loop obj in 0..<c.obj_name.len() {
@@ -539,7 +560,9 @@ x64_link_runtime_pack: fn(names: [String], bufs: &&[[U8]], extra_roots: [String]
         if g < 0 -> next
         f: link_final(c, g)
         if c.g_kind[f] != LINK_G_FILE {
-            if !optional.contains(name) -> link_error(c, "runtime pack: the input objects do not define the root `{name}`")
+            if !optional.contains(name) {
+                link_error(c, "runtime pack: the input objects do not define the root `{name}`")
+            }
             next
         }
         if c.g_section[f] >= 0 -> sections.push(c.g_section[f])
@@ -552,7 +575,9 @@ x64_link_runtime_pack: fn(names: [String], bufs: &&[[U8]], extra_roots: [String]
     imports.push(LINK_FAULT_REPORT)
     link_collect(c, sections, imports)
     loop name in c.g_name {
-        if link_pack_rust_symbol(name) -> link_error(c, "runtime pack: Rust symbol `{name}` is not an admissible runtime dependency")
+        if link_pack_rust_symbol(name) {
+            link_error(c, "runtime pack: Rust symbol `{name}` is not an admissible runtime dependency")
+        }
     }
     if c.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
     bytes: link_pack_write(c, exports)
@@ -580,9 +605,12 @@ x64_link_runtime_pack: fn(names: [String], bufs: &&[[U8]], extra_roots: [String]
 // so binding looks up only a program's imports.
 
 LINK_IMAGE_BIND_SECTION: ".jet.bind"
+
 // "JETBIND1", little-endian.
 LINK_IMAGE_BIND_MAGIC: 0x31444e494254454a
+
 LINK_IMAGE_EXPORTS_SECTION: ".jet.exports"
+
 // "JETEXPT1", little-endian.
 LINK_IMAGE_EXPORTS_MAGIC: 0x3154505845544548
 
@@ -607,7 +635,9 @@ x64_link_runtime_image: fn(name: String, pack: &&[U8]) -> X64ExecutableResult Ne
     // Every other definition the pack exports stays: any program may use it.
     sections := [Int]{entry_section}
     loop g in 0..<c.g_name.len() {
-        if c.g_kind[g] == LINK_G_FILE && c.g_alias[g] < 0 && c.g_section[g] >= 0 && !CHECKED_ALLOC_RUNTIME_EXPORTS.contains(c.g_name[g]) -> sections.push(c.g_section[g])
+        if c.g_kind[g] == LINK_G_FILE && c.g_alias[g] < 0 && c.g_section[g] >= 0 && !CHECKED_ALLOC_RUNTIME_EXPORTS.contains(c.g_name[g]) {
+            sections.push(c.g_section[g])
+        }
     }
     imports := link_linker_names()
     imports.push("main")
@@ -696,7 +726,7 @@ link_image_add_section_at: fn(elf: &[U8], tail: &[U8], origin: Int, name: String
     headers.extend(tail[shoff..<shoff + 64 * shnum])
     name_at: elf64_string(names, name)
     if shoff + 64 * shnum == tail.len() && names_at + names_size <= shoff {
-        loop tail.len() > names_at { _: tail.pop() }
+        loop tail.len() > names_at -> _: tail.pop()
     }
     elf64_pad(tail, 8)
     payload_at: origin + tail.len()
@@ -760,7 +790,7 @@ link_image_export_index: fn(image: [U8]) -> [U8] Never! {
         if link_image_u16(image, symtab_at + 24 * k + 6) != 0 -> defined.push(k)
     }
     slots := 1
-    loop slots < 2 * defined.len() -> slots = slots * 2
+    loop slots < 2 * defined.len() -> slots *= 2
     table := [Int]{}
     loop _ in 0..<slots -> table.push(0)
     mask: slots - 1

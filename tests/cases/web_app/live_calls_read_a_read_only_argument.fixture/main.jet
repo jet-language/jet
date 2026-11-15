@@ -25,13 +25,9 @@ shown: fn(state: Loadable<Int, CountError>) -> String {
 
 // `project` is a read-only parameter in each function: binding, pushing and
 // invalidating for it leave it with its caller.
-bind: fn(project: String) -> app.Live<Int, CountError> {
-    app.live(count, project)
-}
+bind: fn(project: String) -> app.Live<Int, CountError> { app.live(count, project) }
 
-bind_polled: fn(project: String) -> app.Live<Int, CountError> {
-    app.subscribe(count, project)
-}
+bind_polled: fn(project: String) -> app.Live<Int, CountError> { app.subscribe(count, project) }
 
 pin: fn(project: String, value: Int) {
     app.push(count, project, value: value)

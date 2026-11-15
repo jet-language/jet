@@ -74,7 +74,9 @@ sema_single_use_holder: fn(ty: Type, environment: SemaScopeEnvironment, program:
     if program.registration_graph == .Val(graph) {
         caller: sema_type_module_row(graph, environment.module_identity)
         row: sema_copy_fork_row_at(ty, graph, caller) ?? return false
-        if sema_copy_table_facts(program.copy_facts, row) == .Val(facts) && !facts.holds_resource -> return false
+        if sema_copy_table_facts(program.copy_facts, row) == .Val(facts) && !facts.holds_resource {
+            return false
+        }
         seen := [String]{}
         return sema_copy_holds_single_use(ty, graph, caller, seen)
     }
@@ -93,9 +95,13 @@ sema_single_use_is_task: fn(ty: Type) -> Bool Never! {
 // its fields is also consumed once each of those fields is moved out.
 sema_single_use_note_binding: fn(state: &SemaOwnershipState, symbol: Symbol, key: String, environment: SemaScopeEnvironment, program: SemaProgramTables) {
     ty: symbol.ty ?? return
-    if !sema_single_use_type(ty, environment, program) -> return
+    if !sema_single_use_type(ty, environment, program) {
+        return
+    }
     row: sema_ownership_last_row(state, key)
-    if row < 0 -> return
+    if row < 0 {
+        return
+    }
     sema_ownership_set_single_use(state, row)
     if sema_single_use_is_task(ty) -> state.declarations[row].owes_join = true
     state.declarations[row].duty_fields = sema_single_use_duty_fields(ty, environment, program)
@@ -123,7 +129,9 @@ sema_single_use_duty_fields: fn(ty: Type, environment: SemaScopeEnvironment, pro
                 loop field in nominal.fields {
                     if field.computed -> next
                     seen := [String]{}
-                    if sema_copy_holds_single_use(sema_inference_substitute_type_bindings(sema_type_resolve_member_type(graph, nominal, field.ty), bindings), graph, caller, seen) -> fields.push(field.symbol.name)
+                    if sema_copy_holds_single_use(sema_inference_substitute_type_bindings(sema_type_resolve_member_type(graph, nominal, field.ty), bindings), graph, caller, seen) {
+                        fields.push(field.symbol.name)
+                    }
                 }
             }
         }
@@ -140,7 +148,9 @@ sema_single_use_check_discard: fn(ty: Type, span: Span, in_taskgroup_spawn: Bool
         diagnostics.push(sema_single_use_diag_unjoined("this task", "discarding it into `_` skips the join before the task finishes", span))
         return
     }
-    if sema_single_use_type(ty, environment, program) -> diagnostics.push(sema_single_use_diag_discarded(span))
+    if sema_single_use_type(ty, environment, program) {
+        diagnostics.push(sema_single_use_diag_discarded(span))
+    }
 }
 
 sema_single_use_key: fn(state: SemaOwnershipState, key: String) -> Bool Never! {
@@ -225,9 +235,7 @@ sema_single_use_check_scope_end: fn(state: SemaOwnershipState, diagnostics: &[Di
         if fact.active && fact.scope_depth >= state.scope_depth && !sema_single_use_moved(state, fact) {
             if fact.owes_join {
                 diagnostics.push(sema_single_use_diag_unjoined(fact.name, "the program may end before this task finishes", fact.span))
-            } else {
-                diagnostics.push(sema_single_use_diag_unconsumed(fact.name, fact.span))
-            }
+            } else { diagnostics.push(sema_single_use_diag_unconsumed(fact.name, fact.span)) }
         }
     }
 }
@@ -240,7 +248,9 @@ sema_single_use_check_scope_end: fn(state: SemaOwnershipState, diagnostics: &[Di
 // scope end doesn't report it again.
 sema_single_use_check_return: fn(state: &SemaOwnershipState, frame_depth: Int, span: Span, diagnostics: &[Diagnostic]) {
     loop row in sema_ownership_single_use_rows(state) {
-        if !state.declarations[row].active || state.declarations[row].owes_join || state.declarations[row].scope_depth < frame_depth -> next
+        if !state.declarations[row].active || state.declarations[row].owes_join || state.declarations[row].scope_depth < frame_depth {
+            next
+        }
         if sema_single_use_moved(state, state.declarations[row]) -> next
         diagnostics.push(sema_single_use_diag_returned(state.declarations[row].name, span))
         sema_ownership_note_undo(state, row)
@@ -263,13 +273,21 @@ sema_single_use_leave_scope: fn(scopes: &SemaScopeTable, state: &SemaOwnershipSt
 sema_single_use_note_drain: fn(state: &SemaOwnershipState, condition: Expr, body: [Stmt], scopes: SemaScopeTable) {
     receiver: sema_single_use_drained_receiver(condition) ?? return
     if receiver == .Ident(name, span, _) {
-        if sema_stmt_refutable_loop_body_can_break(body) -> return
+        if sema_stmt_refutable_loop_body_can_break(body) {
+            return
+        }
         drain := SemaSingleUseDrain{name: name, mentions: 0, reads: 0, pops: 0}
-        loop statement in body -> ast_visit_statement(statement, fn(expression: Expr) { drain.visit(expression) }, true)
-        if drain.pops == 0 || drain.mentions != drain.reads -> return
+        loop statement in body {
+            ast_visit_statement(statement, fn(expression: Expr) { drain.visit(expression) }, true)
+        }
+        if drain.pops == 0 || drain.mentions != drain.reads {
+            return
+        }
         index: sema_scope_resolve_index_at(scopes, name, span) ?? return
         row: sema_ownership_last_row(state, scopes.bindings[index].key)
-        if row < 0 || !state.declarations[row].single_use -> return
+        if row < 0 || !state.declarations[row].single_use {
+            return
+        }
         sema_ownership_note_undo(state, row)
         state.declarations[row].single_use = false
     }
@@ -280,8 +298,12 @@ sema_single_use_note_drain: fn(state: &SemaOwnershipState, condition: Expr, body
 sema_single_use_drained_receiver: fn(condition: Expr) -> Expr? Never! {
     if condition == {
         .Binary(op, left, right, _, _) -> {
-            if (op == BinOp.Gt || op == BinOp.Ne) && right == .Int(value, _, _, _, _) && value == 0 -> return sema_single_use_query_receiver(left, "len")
-            if op == BinOp.Lt && left == .Int(value, _, _, _, _) && value == 0 -> return sema_single_use_query_receiver(right, "len")
+            if (op == BinOp.Gt || op == BinOp.Ne) && right == .Int(value, _, _, _, _) && value == 0 {
+                return sema_single_use_query_receiver(left, "len")
+            }
+            if op == BinOp.Lt && left == .Int(value, _, _, _, _) && value == 0 {
+                return sema_single_use_query_receiver(right, "len")
+            }
             None
         }
         .Unary(op, operand, _, _) -> if op == UnOp.Not -> sema_single_use_query_receiver(operand, "is_empty") else -> None
@@ -290,7 +312,9 @@ sema_single_use_drained_receiver: fn(condition: Expr) -> Expr? Never! {
 }
 
 sema_single_use_query_receiver: fn(expression: Expr, query: String) -> Expr? Never! {
-    if expression == .MethodCall(receiver, method, _, _, _, args, _) && method == query && args.len() == 0 -> return Val(receiver)
+    if expression == .MethodCall(receiver, method, _, _, _, args, _) && method == query && args.len() == 0 {
+        return Val(receiver)
+    }
     None
 }
 
@@ -314,15 +338,15 @@ SemaSingleUseDrain: struct {
 
     visit: fn(&self, expression: Expr) Never! {
         if expression == {
-            .Ident(mentioned, _, _) -> if mentioned == self.name -> self.mentions += 1
+            .Ident(mentioned, _, _) -> {
+                if mentioned == self.name -> self.mentions += 1
+            }
             .MethodCall(receiver, method, _, _, _, args, _) -> {
                 if sema_single_use_receiver_name(receiver) == .Val(owner) && owner == self.name && args.len() == 0 {
                     if method == "pop" {
                         self.reads += 1
                         self.pops += 1
-                    } else if method == "len" || method == "is_empty" {
-                        self.reads += 1
-                    }
+                    } else if method == "len" || method == "is_empty" { self.reads += 1 }
                 }
             }
             .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
@@ -335,7 +359,9 @@ SemaSingleUseDrain: struct {
 // never copies a path to list it.
 sema_single_use_path_moves: fn(before: SemaOwnershipState, path: SemaOwnershipPath) -> [Bool] Never! {
     moves := [Bool]{}
-    loop row in sema_ownership_single_use_rows(before) -> moves.push(sema_single_use_moved_in(path.moved, before.declarations[row]))
+    loop row in sema_ownership_single_use_rows(before) {
+        moves.push(sema_single_use_moved_in(path.moved, before.declarations[row]))
+    }
     moves
 }
 
@@ -369,7 +395,9 @@ sema_single_use_check_paths: fn(before: SemaOwnershipState, paths: [[Bool]], dia
 sema_single_use_check_consume: fn(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if call.args.len() != 1 {
         diagnostics.push(sema_error("E0103", call.name_span, "`consume` discards exactly one value", "`drop` throws a single value away, running its cleanup", "e.g. consume(x)"))
-        loop argument_index in 0..<call.args.len() -> _ := sema_check_expression(call.args[argument_index].expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
+        loop argument_index in 0..<call.args.len() {
+            _ := sema_check_expression(call.args[argument_index].expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
+        }
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     argument: call.args[0]
@@ -378,7 +406,9 @@ sema_single_use_check_consume: fn(call: Call, environment: SemaScopeEnvironment,
         if context.unsafe_depth == 0 && sema_single_use_argument(state, argument.expr, scopes) != None {
             diagnostics.push(sema_single_use_diag_unaudited(name, span))
         }
-        if !sema_ownership_mark_move(state, argument.expr, scopes, "`consume`", diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+        if !sema_ownership_mark_move(state, argument.expr, scopes, "`consume`", diagnostics) {
+            return SemaDirectSpecialCheck{handled: true, value: None}
+        }
     }
     SemaDirectSpecialCheck{handled: true, value: Val(sema_tree_node(Type.Named{name: "Unit"}, TExprKind.Drop{value: value}, call.name_span))}
 }

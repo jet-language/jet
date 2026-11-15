@@ -2,12 +2,25 @@
 // loader/checker/lowerer; no disk source mutation or synthesized `run`.
 use {
     jet_driver.[
-        JET_DRIVER_CORE_SOURCE_ROOT, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot,
-        JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileRequest,
-        JetDriverCoreSource, JetDriverLoweringInputsResult, jet_driver_checked_projection, jet_driver_core_text,
-        jet_driver_compile, jet_driver_has_errors, jet_driver_invocation_run, jet_driver_load, jet_driver_lowering_inputs,
-        jet_driver_module_display, jet_driver_registration_module_inputs,
-        jet_driver_schema_pending_breaks, jet_driver_source_query,
+        JET_DRIVER_CORE_SOURCE_ROOT,
+        JetDriverAuthorizedSourceFile,
+        JetDriverAuthorizedSourceRoot,
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode,
+        JetDriverCompileRequest,
+        JetDriverCoreSource,
+        JetDriverLoweringInputsResult,
+        jet_driver_checked_projection,
+        jet_driver_core_text,
+        jet_driver_compile,
+        jet_driver_has_errors,
+        jet_driver_invocation_run,
+        jet_driver_load,
+        jet_driver_lowering_inputs,
+        jet_driver_module_display,
+        jet_driver_registration_module_inputs,
+        jet_driver_schema_pending_breaks,
+        jet_driver_source_query,
     ]
     jet_cli.[jet_cli_checked_semindex, jet_cli_driver_request]
     jet_sema.[SchemaSnapshot, SemaForeignProviderInput, SnapshotField]
@@ -19,15 +32,18 @@ use {
 seams_require: fn(ok: Bool, detail: String) Never! {
     if !ok -> panic("CLISeams: {detail}")
 }
+
 seams_request: fn(source: String, mode: JetDriverCompileMode) -> JetDriverCompileRequest {
     snapshot: JetDriverAuthorizedSourceSnapshot{
-        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{
-            canonical_path: "/seams-fixture",
-            identity: "seams-root",
-            allow_hardlinks: false,
-            files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/seams-fixture/main.jet", relative_path: "main.jet", identity: "seams-file", source: source}},
-            foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
-        }},
+        roots: [JetDriverAuthorizedSourceRoot]{
+            JetDriverAuthorizedSourceRoot{
+                canonical_path: "/seams-fixture",
+                identity: "seams-root",
+                allow_hardlinks: false,
+                files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/seams-fixture/main.jet", relative_path: "main.jet", identity: "seams-file", source: source}},
+                foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+            },
+        },
         entry_root_identity: "seams-root",
         entry_path: "/seams-fixture/main.jet",
     }
@@ -35,6 +51,7 @@ seams_request: fn(source: String, mode: JetDriverCompileMode) -> JetDriverCompil
     request.schema_snapshots = Val([String:SchemaSnapshot]{})
     request
 }
+
 seams_package_request: fn(version: String?) -> JetDriverCompileRequest {
     request := seams_request("serve: fn() {{ undefined_call() }}", JetDriverCompileMode.Doc)
     manifest := "name: \"seams_package\"\n"
@@ -77,11 +94,14 @@ seams_registration_inputs: fn(request: JetDriverCompileRequest, expected_source_
             seams_require(actual.generated.start == expected.generated.start && actual.generated.end == expected.generated.end && actual.source_file == expected.source_file && actual.source_start == expected.source_start && actual.line_starts == expected.line_starts && actual.origin == expected.origin, "canonical source segments survive unchanged")
         }
         loop file in load.source_files {
-            if file.path == unit.path -> seams_require(row.source == file.source, "real source bytes survive including empty Core and private files")
+            if file.path == unit.path {
+                seams_require(row.source == file.source, "real source bytes survive including empty Core and private files")
+            }
         }
         // The metadata ABI fallback is the one Core unit with no catalog file.
-        if unit.root_index >= 0 || unit.file_index >= 0 -> source_rows += 1
-        else -> seams_require(row.source == "" && unit.root_identity == JET_DRIVER_CORE_SOURCE_ROOT, "only explicit metadata ABI fallback lacks a catalog source file")
+        if unit.root_index >= 0 || unit.file_index >= 0 -> source_rows += 1 else {
+            seams_require(row.source == "" && unit.root_identity == JET_DRIVER_CORE_SOURCE_ROOT, "only explicit metadata ABI fallback lacks a catalog source file")
+        }
     }
     seams_require(source_rows == expected_source_rows, "source and metadata-only rows remain distinct: {source_rows} source rows of {inputs.len()}, expected {expected_source_rows}")
 }
@@ -129,6 +149,7 @@ seams_checked_projection: fn() {
     legacy: jet_driver_compile(seams_request(source, JetDriverCompileMode.Doc))
     seams_require(legacy.complete && legacy.doc_modules.filter(fn(row) { !row.module_name.starts_with("core.") }).len() == 1, "legacy Doc projects the one user module beside the Core modules every program loads: {legacy.doc_modules.map(fn(row) { row.module_name })}")
 }
+
 #Test("cli_seams") {
     seams_checked_projection()
     // A valid parse with an intentionally undefined body succeeds in the
@@ -210,7 +231,9 @@ seams_checked_projection: fn() {
     schema.schema_snapshots = Val([String:SchemaSnapshot]{"Account": baseline})
     breaking: jet_driver_compile(schema)
     schema_error := false
-    loop diagnostic in breaking.diagnostics { if diagnostic.code == "E0910" -> schema_error = true }
+    loop diagnostic in breaking.diagnostics {
+        if diagnostic.code == "E0910" -> schema_error = true
+    }
     seams_require(schema_error && !breaking.complete, "schema fails in the checker")
     schema_check := seams_request("#Codable(published) Account: struct {{\n    name: String\n    verified: Bool\n}}\nserve: fn() {{ }}", JetDriverCompileMode.Program)
     schema_check.schema_snapshots = Val([String:SchemaSnapshot]{"Account": baseline})
@@ -218,7 +241,9 @@ seams_checked_projection: fn() {
     seams_require(!schema_retained.compile.complete && schema_retained.source_modules.len() == 0, "retained schema failure is still a checker failure")
     ingress: schema_retained.schema_ingress ?? panic("supplied schema input was discarded")
     if ingress == {
-        .Supplied(snapshots) -> seams_require(snapshots.get("Account") == Val((baseline)), "supplied schema map remains a distinct actual input")
+        .Supplied(snapshots) -> {
+            seams_require(snapshots.get("Account") == Val((baseline)), "supplied schema map remains a distinct actual input")
+        }
         .Cache(_, _) -> panic("supplied schema map was confused with a disk cache read")
     }
     parsed: parse_source("#Codable(published) Account: struct {{\n    name: String\n    verified: Bool\n}}".bytes())
@@ -235,6 +260,7 @@ seams_deep_request: fn(deep_checks: DeepChecks) -> JetDriverCompileRequest {
     request.deep_checks = deep_checks
     request
 }
+
 seams_deep_kept: fn(deep_checks: DeepChecks) -> [String] {
     front: jet_driver_lowering_inputs(seams_deep_request(deep_checks), None)
     seams_require(front.compile.complete && !jet_driver_has_errors(front.compile.diagnostics) && front.inputs != None, "deep-check compile: {front.compile.diagnostics.map(fn(diagnostic) { "{diagnostic.code} {diagnostic.what}" })}")
@@ -242,6 +268,7 @@ seams_deep_kept: fn(deep_checks: DeepChecks) -> [String] {
     if front.inputs == .Val(checked) -> kept = checked.deep_checks.copy()
     kept
 }
+
 seams_deep_refused: fn(scope: String) -> [String] {
     front: jet_driver_lowering_inputs(seams_deep_request(DeepChecks{scopes: [String]{scope}}), None)
     seams_require(!front.compile.complete, "`{scope}` keeps no deep check, so the compile stops")
@@ -249,6 +276,7 @@ seams_deep_refused: fn(scope: String) -> [String] {
     loop diagnostic in front.compile.diagnostics -> codes.push(diagnostic.code.copy())
     codes
 }
+
 #Test("embedded_deep_checks") {
     stock: seams_request("run: fn() {{ }}", JetDriverCompileMode.Program)
     seams_require(!stock.deep_checks.all && stock.deep_checks.scopes.len() == 0, "a request no options reach keeps no deep check")

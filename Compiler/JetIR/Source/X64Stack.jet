@@ -9,10 +9,7 @@
 // through a function value, has no bound. The runtime's own frames (the
 // Runtime targets) are not counted; each bound names the runtime symbols it
 // reaches.
-
-use {
-    jet_backend.[X64RelocTarget]
-}
+use jet_backend.[X64RelocTarget]
 
 IRX64StackBound: struct {
     // The entry's function row.
@@ -119,9 +116,7 @@ ir_x64_stack_visit: fn(walk: &IRX64StackWalk, compiled: IRX64Result, row: Int) N
     walk.visited += 1
     walk.state[row] = 1
     walk.pending.push(row)
-    if compiled.debug[row].dynamic {
-        walk.open[row] = "dynamic"
-    } else {
+    if compiled.debug[row].dynamic -> walk.open[row] = "dynamic" else {
         loop reloc in compiled.functions[row].relocs {
             callee: ir_x64_stack_callee(walk, reloc.target)
             if callee < 0 -> next
@@ -141,7 +136,9 @@ ir_x64_stack_visit: fn(walk: &IRX64StackWalk, compiled: IRX64Result, row: Int) N
 ir_x64_stack_settle: fn(walk: &IRX64StackWalk, compiled: IRX64Result, root: Int) Never! {
     members := [Int]{}
     loop {
-        member := walk.pending.pop() ?? { break }
+        member := walk.pending.pop() ?? {
+            break
+        }
         walk.part[member] = root
         walk.state[member] = 2
         members.push(member)
@@ -185,7 +182,9 @@ ir_x64_stack_settle: fn(walk: &IRX64StackWalk, compiled: IRX64Result, root: Int)
                 cyclic = true
                 next
             }
-            if walk.next[member] < 0 || walk.deep[callee] > walk.deep[walk.next[member]] -> walk.next[member] = callee
+            if walk.next[member] < 0 || walk.deep[callee] > walk.deep[walk.next[member]] {
+                walk.next[member] = callee
+            }
             if walk.deep[callee] > outside -> outside = walk.deep[callee]
         }
     }
@@ -272,7 +271,9 @@ ir_x64_stack_runtime: fn(compiled: IRX64Result, entry: Int) -> [String] Never! {
     names := [String]{}
     reached[entry] = true
     loop pending.len() > 0 {
-        row := pending.pop() ?? { break }
+        row := pending.pop() ?? {
+            break
+        }
         loop reloc in compiled.functions[row].relocs {
             if reloc.target == {
                 .Function(id) -> {

@@ -20,7 +20,9 @@ run: fn() {
         at: place.head.split(":").to_list()
         number: Int.parse(at[1]) ?? stop("not a line number: {source}")
         lines: (files.read("{repo}/{at[0]}") ?? stop("{err}")).split("\n").to_list()
-        if number < 1 || number > lines.len() || !lines[number - 1].contains("{place.tail}: fn") -> stop("{source} does not declare {place.tail}")
+        if number < 1 || number > lines.len() || !lines[number - 1].contains("{place.tail}: fn") {
+            stop("{source} does not declare {place.tail}")
+        }
         print("resolved {place.tail}")
     }
 }

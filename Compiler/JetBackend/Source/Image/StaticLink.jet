@@ -55,93 +55,152 @@
 // into tables (a runtime codegen unit has ~63k sections): they are read from
 // the input bytes when needed, and only live sections and global symbols get
 // rows. See "In-process linking" in Docs/research/jet-backend-design-2026-10-01.md.
-
-use jet_foundation.[CompilerThreads, NameTable, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, name_count, name_find, name_index, name_intern, name_table, name_table_sized, sha256_bytes]
-use link_hex: core.encoding.hex
+use {
+    jet_foundation.[CompilerThreads, NameTable, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, name_count, name_find, name_index, name_intern, name_table, name_table_sized, sha256_bytes]
+    link_hex: core.encoding.hex
+}
 
 LINK_BASE: 0x400000
+
 LINK_RUN_BASE: 0x200000000000
+
 // 1 GiB: below 2 GiB, so a sign-extended 32-bit address reaches an image of
 // up to 1 GiB, and clear of a running jet: its image sits at LINK_BASE, and
 // its heap is mapped top-down from the stack, so only its brk heap (musl's)
 // lies below. The loader maps without replacing, so a range that is taken
 // falls back to a file.
 LINK_RUN_LOW_BASE: 0x40000000
+
 LINK_PAGE: 0x1000
+
 LINK_EHDR_SIZE: 64
+
 LINK_PHDR_SIZE: 56
+
 // The GNU build-id note: name size, descriptor size, type
 // (NT_GNU_BUILD_ID), "GNU\0", then the 20-byte id.
 LINK_BUILD_ID_SIZE: 20
+
 LINK_BUILD_ID_NOTE_SIZE: 36
 
 // Output classes, in image order. LINK_DROP sections never reach the image;
 // LINK_DISCARD sections belong to a COMDAT group loaded earlier.
 LINK_DISCARD: -2
+
 LINK_DROP: -1
+
 LINK_RODATA: 0
+
 LINK_EH: 1
+
 LINK_TEXT: 2
+
 LINK_TDATA: 3
+
 LINK_TBSS: 4
+
 LINK_PREINIT: 5
+
 LINK_INIT: 6
+
 LINK_FINI: 7
+
 LINK_RELRO: 8
+
 LINK_DATA: 9
+
 LINK_BSS: 10
+
 LINK_CLASSES: 11
 
 // Where a symbol is defined, when not in a section.
 LINK_UNDEF: -1
+
 LINK_ABS: -2
+
 LINK_COMMON: -3
 
 // How a global symbol is defined.
 LINK_G_NONE: 0
+
 LINK_G_FILE: 1
+
 LINK_G_COMMON: 2
+
 LINK_G_LINKER: 3
 
 // ELF section types.
 LINK_SHT_PROGBITS: 1
+
 LINK_SHT_SYMTAB: 2
+
 LINK_SHT_RELA: 4
+
 LINK_SHT_NOTE: 7
+
 LINK_SHT_NOBITS: 8
+
 LINK_SHT_INIT_ARRAY: 14
+
 LINK_SHT_FINI_ARRAY: 15
+
 LINK_SHT_PREINIT_ARRAY: 16
+
 LINK_SHT_GROUP: 17
+
 LINK_SHT_SYMTAB_SHNDX: 18
+
 LINK_SHT_X86_64_UNWIND: 0x70000001
+
 // SHF_INFO_LINK: the section's sh_info names a section. On an init/fini
 // array it names the guard section the hook is conditional on (cond_roots).
 LINK_SHF_INFO_LINK: 0x40
 
 // x86-64 relocation types (psABI).
 LINK_R_NONE: 0
+
 LINK_R_64: 1
+
 LINK_R_PC32: 2
+
 LINK_R_PLT32: 4
+
 LINK_R_GOTPCREL: 9
+
 LINK_R_32: 10
+
 LINK_R_32S: 11
+
 LINK_R_DTPOFF64: 17
+
 LINK_R_TPOFF64: 18
+
 LINK_R_TLSGD: 19
+
 LINK_R_TLSLD: 20
+
 LINK_R_DTPOFF32: 21
+
 LINK_R_GOTTPOFF: 22
+
 LINK_R_TPOFF32: 23
+
 LINK_R_PC64: 24
+
 LINK_R_GOTOFF64: 25
+
 LINK_R_GOTPC32: 26
+
 LINK_R_SIZE32: 32
+
 LINK_R_SIZE64: 33
+
 LINK_R_GOTPC32_TLSDESC: 34
+
 LINK_R_TLSDESC_CALL: 35
+
 LINK_R_GOTPCRELX: 41
+
 LINK_R_REX_GOTPCRELX: 42
 
 LINK_MEMBER_SCALE: 16777216
@@ -149,20 +208,22 @@ LINK_MEMBER_SCALE: 16777216
 // The runtime's fault report (JetIR BuildLibrary.jet ir_fault_report_call),
 // which each image link writes (link_fault_report) as the object below.
 LINK_FAULT_REPORT: "jet_rt_fault_report"
+
 LINK_FAULT_REPORT_OBJECT: "<linker fault report>"
 
 // Which fault report a link writes.
 LinkFaultReport: enum {
-    // The report naming Jet frames from the image's own .debug_jetline
-    // (JetRuntime Assets/FaultReport/report.S).
     Full
-    // A release image's (`debug_info: split`): its frames as addresses
-    // under its build id, which `jet crash` names from the side debug file
-    // (Assets/FaultReport/addresses.S).
     Addresses
-    // None: a runtime pack imports the name, and the program's link writes it.
     Import
 }
+
+// The report naming Jet frames from the image's own .debug_jetline
+// (JetRuntime Assets/FaultReport/report.S).
+// A release image's (`debug_info: split`): its frames as addresses
+// under its build id, which `jet crash` names from the side debug file
+// (Assets/FaultReport/addresses.S).
+// None: a runtime pack imports the name, and the program's link writes it.
 
 LinkContext: struct {
     bufs: [[U8]]
@@ -296,20 +357,82 @@ LinkContext: struct {
 
 link_context: fn(bufs: &&[[U8]], base: Int) -> LinkContext Never! {
     LinkContext{
-        bufs: bufs.move(), archives: [LinkArchive]{}, archive_buffer: [Int]{}, pulled: [Int:Bool]{},
-        names: name_table(), name_member: [Int]{-1}, name_global: [Int]{-1}, name_comdat: [Bool]{false},
-        obj_name: [String]{}, obj_buffer: [Int]{}, obj_base: [Int]{}, obj_shoff: [Int]{}, obj_names: [Int]{},
-        obj_symtab: [Int]{}, obj_strtab: [Int]{}, obj_shndx: [Int]{}, obj_count: [Int]{}, obj_first_global: [Int]{},
-        obj_first_section: [Int]{}, obj_first_symbol: [Int]{}, obj_sym_count: [Int]{}, rela: [Int:Int]{}, discarded: [Int:Bool]{}, sym_global: [Int]{}, roots: [Int]{},
-        cond_roots: [Int]{}, cond_guards: [Int]{}, init_code: [Int:Int]{},
-        g_name: [String]{}, g_name_id: [Int]{}, g_kind: [Int]{}, g_section: [Int]{}, g_value: [Int]{}, g_size: [Int]{},
-        g_obj: [Int]{}, g_weak_def: [Bool]{}, g_strong_ref: [Bool]{}, g_alias: [Int]{}, g_addr: [Int]{},
-        g_common_size: [Int]{}, g_common_align: [Int]{}, pending: [Int]{}, pending_head: 0,
-        live: [Int]{}, live_secs: [Int]{}, live_class: [Int]{}, live_addr: [Int]{},
-        ep_sec: [Int]{}, ep_obj: [Int]{}, ep_start: [Int]{}, ep_len: [Int]{}, ep_cie: [Int]{}, ep_target: [Int]{},
-        ep_first_reloc: [Int]{}, ep_reloc_count: [Int]{}, ep_next: [Int]{}, ep_keep: [Bool]{}, ep_out: [Int]{}, sec_fde: [Int]{},
-        got: [Int:Int]{}, got_keys: [Int]{}, rel_base: [Int]{}, rel_slot: [Int]{}, got_start: 0, tls_start: 0, tls_end: 0, tls_align: 1,
-        eh_start: 0, eh_size: 0, eh_debug: false, base: base, fault_report: LinkFaultReport.Full, fault_report_section: -1, fault_report_caller: -1, errors: [String]{}, undefined: [String]{},
+        bufs: bufs.move(),
+        archives: [LinkArchive]{},
+        archive_buffer: [Int]{},
+        pulled: [Int:Bool]{},
+        names: name_table(),
+        name_member: [Int]{-1},
+        name_global: [Int]{-1},
+        name_comdat: [Bool]{false},
+        obj_name: [String]{},
+        obj_buffer: [Int]{},
+        obj_base: [Int]{},
+        obj_shoff: [Int]{},
+        obj_names: [Int]{},
+        obj_symtab: [Int]{},
+        obj_strtab: [Int]{},
+        obj_shndx: [Int]{},
+        obj_count: [Int]{},
+        obj_first_global: [Int]{},
+        obj_first_section: [Int]{},
+        obj_first_symbol: [Int]{},
+        obj_sym_count: [Int]{},
+        rela: [Int:Int]{},
+        discarded: [Int:Bool]{},
+        sym_global: [Int]{},
+        roots: [Int]{},
+        cond_roots: [Int]{},
+        cond_guards: [Int]{},
+        init_code: [Int:Int]{},
+        g_name: [String]{},
+        g_name_id: [Int]{},
+        g_kind: [Int]{},
+        g_section: [Int]{},
+        g_value: [Int]{},
+        g_size: [Int]{},
+        g_obj: [Int]{},
+        g_weak_def: [Bool]{},
+        g_strong_ref: [Bool]{},
+        g_alias: [Int]{},
+        g_addr: [Int]{},
+        g_common_size: [Int]{},
+        g_common_align: [Int]{},
+        pending: [Int]{},
+        pending_head: 0,
+        live: [Int]{},
+        live_secs: [Int]{},
+        live_class: [Int]{},
+        live_addr: [Int]{},
+        ep_sec: [Int]{},
+        ep_obj: [Int]{},
+        ep_start: [Int]{},
+        ep_len: [Int]{},
+        ep_cie: [Int]{},
+        ep_target: [Int]{},
+        ep_first_reloc: [Int]{},
+        ep_reloc_count: [Int]{},
+        ep_next: [Int]{},
+        ep_keep: [Bool]{},
+        ep_out: [Int]{},
+        sec_fde: [Int]{},
+        got: [Int:Int]{},
+        got_keys: [Int]{},
+        rel_base: [Int]{},
+        rel_slot: [Int]{},
+        got_start: 0,
+        tls_start: 0,
+        tls_end: 0,
+        tls_align: 1,
+        eh_start: 0,
+        eh_size: 0,
+        eh_debug: false,
+        base: base,
+        fault_report: LinkFaultReport.Full,
+        fault_report_section: -1,
+        fault_report_caller: -1,
+        errors: [String]{},
+        undefined: [String]{},
     }
 }
 
@@ -317,9 +440,7 @@ link_context: fn(bufs: &&[[U8]], base: Int) -> LinkContext Never! {
 // Little-endian reads from input buffers. 64-bit fields are read as two
 // halves so ordinary values stay small integers.
 
-link_u8: fn(bufs: [[U8]], b: Int, at: Int) -> Int Never! {
-    Int{bufs[b][at]}
-}
+link_u8: fn(bufs: [[U8]], b: Int, at: Int) -> Int Never! { Int{bufs[b][at]} }
 
 link_u16: fn(bufs: [[U8]], b: Int, at: Int) -> Int Never! {
     row: bufs[b]
@@ -337,7 +458,7 @@ link_u64: fn(bufs: [[U8]], b: Int, at: Int) -> Int Never! {
 
 link_s64: fn(bufs: [[U8]], b: Int, at: Int) -> Int Never! {
     high := link_u32(bufs, b, at + 4)
-    if high >= 0x80000000 -> high = high - 0x100000000
+    if high >= 0x80000000 -> high -= 0x100000000
     link_u32(bufs, b, at) + high * 0x100000000
 }
 
@@ -381,9 +502,7 @@ link_align: fn(value: Int, align: Int) -> Int Never! {
     (value + align - 1).div_euclid(align) * align
 }
 
-link_error: fn(c: &LinkContext, message: String) Never! {
-    c.errors.push(message.copy())
-}
+link_error: fn(c: &LinkContext, message: String) Never! { c.errors.push(message.copy()) }
 
 // ---------------------------------------------------------------------------
 // Sections, read from their headers.
@@ -394,11 +513,7 @@ link_obj_of: fn(c: LinkContext, s: Int) -> Int Never! {
     high := c.obj_first_section.len() - 1
     loop low < high {
         mid: (low + high + 1).div_euclid(2)
-        if c.obj_first_section[mid] <= s {
-            low = mid
-        } else {
-            high = mid - 1
-        }
+        if c.obj_first_section[mid] <= s -> low = mid else -> high = mid - 1
     }
     low
 }
@@ -448,11 +563,21 @@ link_class: fn(c: LinkContext, obj: Int, s: Int) -> Int Never! {
     flags: link_u64(c.bufs, b, h + 8)
     name: c.obj_names[obj] + link_u32(c.bufs, b, h)
     if (flags.bit_and(2)) == 0 || kind == LINK_SHT_NOTE || kind == LINK_SHT_RELA -> return LINK_DROP
-    if kind == LINK_SHT_X86_64_UNWIND || link_name_has(c.bufs, b, name, ".eh_frame", true) -> return LINK_EH
-    if (flags.bit_and(0x400)) != 0 -> return if kind == LINK_SHT_NOBITS -> LINK_TBSS else -> LINK_TDATA
-    if kind == LINK_SHT_PREINIT_ARRAY || link_name_has(c.bufs, b, name, ".preinit_array", false) -> return LINK_PREINIT
-    if kind == LINK_SHT_INIT_ARRAY || link_name_has(c.bufs, b, name, ".init_array", false) -> return LINK_INIT
-    if kind == LINK_SHT_FINI_ARRAY || link_name_has(c.bufs, b, name, ".fini_array", false) -> return LINK_FINI
+    if kind == LINK_SHT_X86_64_UNWIND || link_name_has(c.bufs, b, name, ".eh_frame", true) {
+        return LINK_EH
+    }
+    if (flags.bit_and(0x400)) != 0 {
+        return if kind == LINK_SHT_NOBITS -> LINK_TBSS else -> LINK_TDATA
+    }
+    if kind == LINK_SHT_PREINIT_ARRAY || link_name_has(c.bufs, b, name, ".preinit_array", false) {
+        return LINK_PREINIT
+    }
+    if kind == LINK_SHT_INIT_ARRAY || link_name_has(c.bufs, b, name, ".init_array", false) {
+        return LINK_INIT
+    }
+    if kind == LINK_SHT_FINI_ARRAY || link_name_has(c.bufs, b, name, ".fini_array", false) {
+        return LINK_FINI
+    }
     if (flags.bit_and(4)) != 0 -> return LINK_TEXT
     if (flags.bit_and(1)) != 0 {
         if kind == LINK_SHT_NOBITS -> return LINK_BSS
@@ -468,7 +593,9 @@ link_rela_of: fn(c: LinkContext, obj: Int, s: Int) -> Int Never! {
     if next_s - c.obj_first_section[obj] < c.obj_count[obj] {
         h: link_hdr(c, obj, next_s)
         b: c.obj_buffer[obj]
-        if link_u32(c.bufs, b, h + 4) == LINK_SHT_RELA && c.obj_first_section[obj] + link_u32(c.bufs, b, h + 44) == s -> return next_s
+        if link_u32(c.bufs, b, h + 4) == LINK_SHT_RELA && c.obj_first_section[obj] + link_u32(c.bufs, b, h + 44) == s {
+            return next_s
+        }
     }
     if c.rela.len() == 0 -> return -1
     c.rela.get(s) ?? -1
@@ -548,16 +675,16 @@ link_defined: fn(c: LinkContext, g: Int) -> Bool Never! {
 // Note a reference to global `g`; a strong reference to an undefined symbol
 // queues it for archive resolution.
 link_reference: fn(c: &LinkContext, g: Int, weak: Bool) Never! {
-    if weak -> return
+    if weak {
+        return
+    }
     if !c.g_strong_ref[g] {
         c.g_strong_ref[g] = true
         c.pending.push(g)
     }
 }
 
-link_sym_at: fn(c: LinkContext, obj: Int, k: Int) -> Int Never! {
-    c.obj_symtab[obj] + 24 * k
-}
+link_sym_at: fn(c: LinkContext, obj: Int, k: Int) -> Int Never! { c.obj_symtab[obj] + 24 * k }
 
 // Where symbol `k` of `obj` is defined: a section id, LINK_ABS, LINK_COMMON
 // or LINK_UNDEF (also for a section of a discarded COMDAT group).
@@ -613,7 +740,9 @@ link_target_addr: fn(c: LinkContext, obj: Int, k: Int) -> Int Never! {
     if g >= 0 -> return link_global_addr(c, g)
     s: link_sym_shndx(c, obj, k)
     // A defined local's value is an offset in its section: 32 bits.
-    if s >= 0 -> return link_sec_addr(c, s) + link_u32(c.bufs, c.obj_buffer[obj], link_sym_at(c, obj, k) + 8)
+    if s >= 0 {
+        return link_sec_addr(c, s) + link_u32(c.bufs, c.obj_buffer[obj], link_sym_at(c, obj, k) + 8)
+    }
     if s == LINK_ABS -> return link_u64(c.bufs, c.obj_buffer[obj], link_sym_at(c, obj, k) + 8)
     0
 }
@@ -676,16 +805,14 @@ link_load_object: fn(c: &LinkContext, b: Int, base: Int, size: Int, name: String
     loop k in 1..<count {
         h: shoff + 64 * k
         kind: link_u32(c.bufs, b, h + 4)
-        if kind == LINK_SHT_SYMTAB {
-            symtab = k
-        } else if kind == LINK_SHT_SYMTAB_SHNDX {
+        if kind == LINK_SHT_SYMTAB -> symtab = k else if kind == LINK_SHT_SYMTAB_SHNDX {
             shndx = base + link_u64(c.bufs, b, h + 24)
         } else if kind == LINK_SHT_RELA {
             target: link_u32(c.bufs, b, h + 44)
-            if target + 1 != k && target > 0 && target < count -> c.rela.add(first + target, first + k).drop("one RELA section per section")
-        } else if kind == LINK_SHT_GROUP {
-            groups.push(k)
-        } else if kind == LINK_SHT_X86_64_UNWIND || (kind == LINK_SHT_PROGBITS && link_u8(c.bufs, b, names_at + link_u32(c.bufs, b, h) + 1) == 0x65) {
+            if target + 1 != k && target > 0 && target < count {
+                c.rela.add(first + target, first + k).drop("one RELA section per section")
+            }
+        } else if kind == LINK_SHT_GROUP { groups.push(k) } else if kind == LINK_SHT_X86_64_UNWIND || (kind == LINK_SHT_PROGBITS && link_u8(c.bufs, b, names_at + link_u32(c.bufs, b, h) + 1) == 0x65) {
             // `.e...`: an `.eh_frame` an assembler typed PROGBITS.
             eh.push(k)
         }
@@ -699,9 +826,7 @@ link_load_object: fn(c: &LinkContext, b: Int, base: Int, size: Int, name: String
             if kind != LINK_SHT_PREINIT_ARRAY && link_u32(c.bufs, b, h + 8).bit_and(LINK_SHF_INFO_LINK) != 0 && guard > 0 && guard < count {
                 c.cond_roots.push(first + k)
                 c.cond_guards.push(first + guard)
-            } else {
-                c.roots.push(first + k)
-            }
+            } else { c.roots.push(first + k) }
         }
     }
     symtab_header: shoff + 64 * symtab
@@ -739,7 +864,9 @@ link_load_object: fn(c: &LinkContext, b: Int, base: Int, size: Int, name: String
         members: link_u64(c.bufs, b, h + 32).div_euclid(4)
         loop m in 1..<members {
             member: link_u32(c.bufs, b, at + 4 * m)
-            if member > 0 && member < count -> c.discarded.add(first + member, true).drop("a section is in one group")
+            if member > 0 && member < count {
+                c.discarded.add(first + member, true).drop("a section is in one group")
+            }
         }
     }
     loop k in first_global..<sym_count {
@@ -755,9 +882,7 @@ link_load_object: fn(c: &LinkContext, b: Int, base: Int, size: Int, name: String
         value: link_u64(c.bufs, b, at + 8)
         symbol_size: link_u64(c.bufs, b, at + 16)
         kind: c.g_kind[g].copy()
-        if section == LINK_UNDEF {
-            link_reference(c, g, weak)
-        } else if section == LINK_COMMON {
+        if section == LINK_UNDEF -> link_reference(c, g, weak) else if section == LINK_COMMON {
             if kind == LINK_G_NONE || kind == LINK_G_COMMON {
                 c.g_kind[g] = LINK_G_COMMON
                 if symbol_size > c.g_common_size[g] -> c.g_common_size[g] = symbol_size
@@ -870,7 +995,9 @@ link_parse_eh: fn(c: &LinkContext, obj: Int, s: Int) Never! {
 // Resolution against the archives.
 
 link_pull: fn(c: &LinkContext, key: Int) Never! {
-    if c.pulled.get(key) != None -> return
+    if c.pulled.get(key) != None {
+        return
+    }
     c.pulled.add(key, true).drop("checked absent above")
     index: key.div_euclid(LINK_MEMBER_SCALE)
     member: key % LINK_MEMBER_SCALE
@@ -911,13 +1038,54 @@ link_archived: fn(c: LinkContext, name: String) -> Bool Never! {
 // which musl no longer exports.
 link_lfs64_base: fn(name: String) -> String? Never! {
     names: [String]{
-        "open64", "openat64", "creat64", "lseek64", "pread64", "pwrite64", "preadv64", "pwritev64",
-        "truncate64", "ftruncate64", "stat64", "fstat64", "lstat64", "fstatat64", "statfs64", "fstatfs64",
-        "statvfs64", "fstatvfs64", "mmap64", "readdir64", "posix_fadvise64", "posix_fallocate64",
-        "fallocate64", "lockf64", "sendfile64", "getrlimit64", "setrlimit64", "prlimit64", "glob64",
-        "globfree64", "alphasort64", "scandir64", "versionsort64", "ftw64", "nftw64", "mkstemp64",
-        "mkostemp64", "mkstemps64", "mkostemps64", "tmpfile64", "fopen64", "freopen64", "fseeko64",
-        "ftello64", "fgetpos64", "fsetpos64", "fcntl64", "getdents64",
+        "open64",
+        "openat64",
+        "creat64",
+        "lseek64",
+        "pread64",
+        "pwrite64",
+        "preadv64",
+        "pwritev64",
+        "truncate64",
+        "ftruncate64",
+        "stat64",
+        "fstat64",
+        "lstat64",
+        "fstatat64",
+        "statfs64",
+        "fstatfs64",
+        "statvfs64",
+        "fstatvfs64",
+        "mmap64",
+        "readdir64",
+        "posix_fadvise64",
+        "posix_fallocate64",
+        "fallocate64",
+        "lockf64",
+        "sendfile64",
+        "getrlimit64",
+        "setrlimit64",
+        "prlimit64",
+        "glob64",
+        "globfree64",
+        "alphasort64",
+        "scandir64",
+        "versionsort64",
+        "ftw64",
+        "nftw64",
+        "mkstemp64",
+        "mkostemp64",
+        "mkstemps64",
+        "mkostemps64",
+        "tmpfile64",
+        "fopen64",
+        "freopen64",
+        "fseeko64",
+        "ftello64",
+        "fgetpos64",
+        "fsetpos64",
+        "fcntl64",
+        "getdents64",
     }
     if name == "readdir64_r" -> return Val("readdir_r")
     loop candidate in names {
@@ -1227,7 +1395,9 @@ LINK_OWNED_START: "__jet_start"
 // the runtime object asks libc for none and a program that links no C
 // pulls none in.
 LINK_THREAD_LIBC: "jet_rt_thread_libc"
+
 LINK_THREAD_LIBC_NAMES: [String]{"pthread_create", "pthread_join", "pthread_detach", "pthread_attr_init", "pthread_attr_setstacksize", "pthread_attr_destroy"}
+
 LINK_THREAD_CREATE: "__jet_thread_create"
 
 // `__jet_thread_create(word, entry, start, bytes)`: the runtime's create
@@ -1295,9 +1465,7 @@ link_shims: fn(c: &LinkContext) -> Bool Never! {
         }
         if link_alloc_shim_target(name) == .Val(target) {
             link_synth_function(s, name)
-            if target == "" {
-                link_synth_code(s, [Int]{0xc3})
-            } else {
+            if target == "" -> link_synth_code(s, [Int]{0xc3}) else {
                 link_synth_code(s, [Int]{0xe9})
                 link_synth_rel32(s, target, LINK_R_PLT32)
             }
@@ -1345,9 +1513,7 @@ link_shims: fn(c: &LinkContext) -> Bool Never! {
 // share one run of code as they would in one function.
 link_fault_report: fn(s: &LinkSynth, report: LinkFaultReport) Never! {
     link_synth_function(s, LINK_FAULT_REPORT)
-    if report == .Addresses {
-        s.text.extend(X64_FAULT_REPORT_ADDRESSES)
-    } else {
+    if report == .Addresses -> s.text.extend(X64_FAULT_REPORT_ADDRESSES) else {
         s.text.extend(X64_FAULT_REPORT)
     }
 }
@@ -1385,7 +1551,9 @@ link_eh_shims: fn(c: LinkContext, s: &LinkSynth) Never! {
             link_synth_rel32(s, "__register_frame_info", LINK_R_PLT32)
         }
     }
-    if !find -> return
+    if !find {
+        return
+    }
     link_synth_function(s, "_dl_find_object")
     if !lazy {
         // mov eax, -1; ret: no object is found, so libgcc's unwinder uses the
@@ -1445,10 +1613,26 @@ link_defined_name: fn(c: LinkContext, name: String) -> Bool Never! {
 // Symbols the linker defines from the layout when inputs reference them.
 link_linker_names: fn() -> [String] Never! {
     [String]{
-        "__jet_init_array_start", "__jet_init_array_end", "__init_array_start", "__init_array_end",
-        "__fini_array_start", "__fini_array_end", "__preinit_array_start", "__preinit_array_end",
-        "__EH_FRAME_BEGIN__", "_GLOBAL_OFFSET_TABLE_", "_TLS_MODULE_BASE_", "__ehdr_start", "__executable_start",
-        "_etext", "etext", "_edata", "edata", "__bss_start", "_end", "end",
+        "__jet_init_array_start",
+        "__jet_init_array_end",
+        "__init_array_start",
+        "__init_array_end",
+        "__fini_array_start",
+        "__fini_array_end",
+        "__preinit_array_start",
+        "__preinit_array_end",
+        "__EH_FRAME_BEGIN__",
+        "_GLOBAL_OFFSET_TABLE_",
+        "_TLS_MODULE_BASE_",
+        "__ehdr_start",
+        "__executable_start",
+        "_etext",
+        "etext",
+        "_edata",
+        "edata",
+        "__bss_start",
+        "_end",
+        "end",
     }
 }
 
@@ -1458,7 +1642,9 @@ link_linker_names: fn() -> [String] Never! {
 // Mark section `s` live (queueing it on `work`) unless it already is or
 // never reaches the image (then remembered as -2).
 link_mark: fn(c: &LinkContext, work: &[Int], s: Int) Never! {
-    if s < 0 || c.live[s] != -1 -> return
+    if s < 0 || c.live[s] != -1 {
+        return
+    }
     obj: link_obj_of(c, s)
     class: link_class(c, obj, s)
     if class < 0 || class == LINK_EH {
@@ -1548,7 +1734,9 @@ link_collect: fn(c: &LinkContext, entries: [Int], linker_names: [String]) Never!
                     symbol: link_u32(c.bufs, b, at + 12)
                     t: link_target_section(c, obj, symbol)
                     link_mark(c, work, t)
-                    if t >= 0 && t == c.fault_report_section && c.fault_report_caller < 0 -> c.fault_report_caller = s
+                    if t >= 0 && t == c.fault_report_section && c.fault_report_caller < 0 {
+                        c.fault_report_caller = s
+                    }
                     slot: link_scan_reloc(c, reported, linker, obj, s, at, symbol)
                     c.rel_slot.push(slot)
                 }
@@ -1651,14 +1839,14 @@ link_got_form: fn(c: LinkContext, kind: Int, obj: Int, s: Int, off: Int, symbol:
             // A sign-extended imm32 holds addresses below 2 GiB only; above
             // (LINK_RUN_BASE) the load stays rip-relative as `lea`.
             form = if kind == LINK_R_REX_GOTPCRELX && c.base < 0x80000000 -> 4 else -> 1
-        } else if kind == LINK_R_GOTPCRELX && (rex.bit_and(0xf0)) != 0x40 {
-            form = 1
-        }
+        } else if kind == LINK_R_GOTPCRELX && (rex.bit_and(0xf0)) != 0x40 { form = 1 }
     } else if kind == LINK_R_GOTPCRELX && opcode == 0xff && (modrm == 0x15 || modrm == 0x25) {
         form = if modrm == 0x15 -> 2 else -> 3
     }
     // Only code is rewritten, and never for an absolute symbol.
-    if form == 0 || (link_sec_flags(c, obj, s).bit_and(4)) == 0 || link_target_absolute(c, obj, symbol) -> return 0
+    if form == 0 || (link_sec_flags(c, obj, s).bit_and(4)) == 0 || link_target_absolute(c, obj, symbol) {
+        return 0
+    }
     form
 }
 
@@ -1683,7 +1871,9 @@ link_scan_reloc: fn(c: &LinkContext, reported: &[Int:Bool], linker: [Bool], obj:
     }
     kind: link_u32(c.bufs, b, at + 8)
     if !link_is_got_reloc(kind) -> return -1
-    if link_got_form(c, kind, obj, s, link_u32(c.bufs, b, at), symbol, link_s64(c.bufs, b, at + 16)) != 0 -> return -1
+    if link_got_form(c, kind, obj, s, link_u32(c.bufs, b, at), symbol, link_s64(c.bufs, b, at + 16)) != 0 {
+        return -1
+    }
     key: link_got_key(c, obj, symbol)
     if c.got.get(key) == .Val(found) -> return found
     slot: c.got_keys.len()
@@ -1700,7 +1890,9 @@ link_priority: fn(c: LinkContext, s: Int) -> Int Never! {
     name: link_cstr(c.bufs, c.obj_buffer[obj], link_sec_name(c, obj, s))
     bytes: name.bytes()
     dot := -1
-    loop (k, byte) in bytes { if (Int{byte}) == 46 -> dot = k }
+    loop (k, byte) in bytes {
+        if (Int{byte}) == 46 -> dot = k
+    }
     if dot <= 0 -> return 65536
     Int.parse(String.from_bytes(bytes[dot + 1..<bytes.len()]) ?? "") ?? 65536
 }
@@ -1769,7 +1961,7 @@ link_sort_by: fn(items: [Int], keys: [Int]) -> [Int] Never! {
             start = end
         }
         order = merged
-        width = width * 2
+        width *= 2
     }
     result := [Int]{}
     loop k in order -> result.push(items[k])
@@ -1829,9 +2021,13 @@ link_layout: fn(c: &LinkContext, note: Bool, packed: Bool) -> LinkLayout Never! 
     order: link_order(c)
     has_tls: order[LINK_TDATA].len() + order[LINK_TBSS].len() > 0
     commons := false
-    loop g in 0..<c.g_name.len() { if c.g_kind[g] == LINK_G_COMMON -> commons = true }
+    loop g in 0..<c.g_name.len() {
+        if c.g_kind[g] == LINK_G_COMMON -> commons = true
+    }
     has_rw := c.got_keys.len() > 0 || commons
-    loop class in LINK_TDATA..<LINK_CLASSES { if order[class].len() > 0 -> has_rw = true }
+    loop class in LINK_TDATA..<LINK_CLASSES {
+        if order[class].len() > 0 -> has_rw = true
+    }
     phnum: 3 + (if has_rw -> 1 else -> 0) + (if has_tls -> 1 else -> 0) + (if note -> 1 else -> 0)
     addr := c.base + LINK_EHDR_SIZE + LINK_PHDR_SIZE * phnum
     note_at: if note -> addr else -> 0
@@ -1881,11 +2077,28 @@ link_layout: fn(c: &LinkContext, note: Bool, packed: Bool) -> LinkLayout Never! 
         addr += c.g_common_size[g]
     }
     LinkLayout{
-        order: order, phnum: phnum, r_end: r_end, text_start: text_start, text_end: text_end, rw_start: rw_start,
-        file_end: if has_rw -> file_end else -> rw_start, mem_end: if has_rw -> addr else -> rw_start,
-        has_rw: has_rw, has_tls: has_tls, tdata_end: tdata_end, init_start: init_start, init_end: init_end,
-        fini_start: fini_start, fini_end: fini_end, preinit_start: preinit_start, preinit_end: preinit_end,
-        bss_start: file_end, note_at: note_at, notes: [Int:Int]{}, packed: packed, rw_shift: if packed -> rw_start - r_end else -> 0,
+        order: order,
+        phnum: phnum,
+        r_end: r_end,
+        text_start: text_start,
+        text_end: text_end,
+        rw_start: rw_start,
+        file_end: if has_rw -> file_end else -> rw_start,
+        mem_end: if has_rw -> addr else -> rw_start,
+        has_rw: has_rw,
+        has_tls: has_tls,
+        tdata_end: tdata_end,
+        init_start: init_start,
+        init_end: init_end,
+        fini_start: fini_start,
+        fini_end: fini_end,
+        preinit_start: preinit_start,
+        preinit_end: preinit_end,
+        bss_start: file_end,
+        note_at: note_at,
+        notes: [Int:Int]{},
+        packed: packed,
+        rw_shift: if packed -> rw_start - r_end else -> 0,
     }
 }
 
@@ -1980,7 +2193,9 @@ link_apply_got: fn(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: I
     // form takes a GOT slot, so the scan's decision stands.
     form: if decided == 1 && kind == LINK_R_REX_GOTPCRELX && (Int{out[pos - 3]}.bit_and(0xf8)) == 0x48 && !link_fits32(target + addend - place) && link_fits32(target) -> 4 else -> decided
     value: if form == 4 -> target else -> target + addend - place
-    if !link_fits32(value) -> errors.push(link_reloc_text(c, s, off, "relaxed GOT relocation out of range"))
+    if !link_fits32(value) {
+        errors.push(link_reloc_text(c, s, off, "relaxed GOT relocation out of range"))
+    }
     if form == 1 {
         out[pos - 2] = U8{0x8d}
         link_put32(out, pos, value)
@@ -2021,7 +2236,9 @@ link_apply: fn(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: Int, 
     }
     if kind == LINK_R_NONE -> return false
     symbol: link_u32(c.bufs, b, at + 12)
-    if link_is_got_reloc(kind) -> return link_apply_got(c, errors, out, obj, s, kind, off, symbol, addend, pos, place)
+    if link_is_got_reloc(kind) {
+        return link_apply_got(c, errors, out, obj, s, kind, off, symbol, addend, pos, place)
+    }
     target: link_target_addr(c, obj, symbol)
     if kind == LINK_R_64 {
         link_put64(out, pos, target + addend)
@@ -2029,13 +2246,17 @@ link_apply: fn(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: Int, 
     }
     if kind == LINK_R_PC32 || kind == LINK_R_PLT32 {
         value: target + addend - place
-        if !link_fits32(value) -> errors.push(link_reloc_text(c, s, off, "PC-relative relocation out of range"))
+        if !link_fits32(value) {
+            errors.push(link_reloc_text(c, s, off, "PC-relative relocation out of range"))
+        }
         link_put32(out, pos, value)
         return false
     }
     if kind == LINK_R_32 || kind == LINK_R_32S {
         value: target + addend
-        if (kind == LINK_R_32 && (value < 0 || value > 0xffffffff)) || (kind == LINK_R_32S && !link_fits32(value)) -> errors.push(link_reloc_text(c, s, off, "32-bit absolute relocation out of range"))
+        if (kind == LINK_R_32 && (value < 0 || value > 0xffffffff)) || (kind == LINK_R_32S && !link_fits32(value)) {
+            errors.push(link_reloc_text(c, s, off, "32-bit absolute relocation out of range"))
+        }
         link_put32(out, pos, value)
         return false
     }
@@ -2161,7 +2382,9 @@ link_emit_section: fn(c: LinkContext, errors: &[String], out: &[U8], row: Int) N
     size: link_sec_size(c, obj, s)
     out.extend(c.bufs[b][start..<start + size])
     r: link_rela_of(c, obj, s)
-    if r < 0 -> return
+    if r < 0 {
+        return
+    }
     count: link_sec_size(c, obj, r).div_euclid(24)
     table: link_sec_offset(c, obj, r)
     address: c.live_addr[row].copy()
@@ -2390,7 +2613,9 @@ link_debug_frame: fn(c: &LinkContext) -> [U8] Never! {
 // pointers, so only debuggers and profilers read the tables, and they read
 // `.debug_frame` from the side debug file.
 link_eh_unloaded: fn(c: LinkContext) -> Bool Never! {
-    if link_defined_name(c, "_Unwind_Find_FDE") || link_defined_name(c, "__register_frame_info") -> return false
+    if link_defined_name(c, "_Unwind_Find_FDE") || link_defined_name(c, "__register_frame_info") {
+        return false
+    }
     loop piece in 0..<c.ep_sec.len() {
         if c.ep_cie[piece] >= 0 || !c.ep_keep[piece] -> next
         obj: c.ep_obj[piece].copy()
@@ -2446,10 +2671,16 @@ link_write: fn(c: &LinkContext, l: LinkLayout, entry: Int, pieces: &LinkPieces) 
     link_phdr(out, 0, 1, 4, c.base, l.r_end - c.base, l.r_end - c.base, LINK_PAGE)
     // Packed, the code's offset is link_write_code's, once the file before it is.
     link_phdr(out, if l.packed -> 0 else -> l.text_start - c.base, 1, 5, l.text_start, l.text_end - l.text_start, l.text_end - l.text_start, LINK_PAGE)
-    if l.has_rw -> link_phdr(out, link_file_offset(c, l, LINK_DATA, l.rw_start), 1, 6, l.rw_start, l.file_end - l.rw_start, l.mem_end - l.rw_start, LINK_PAGE)
-    if l.has_tls -> link_phdr(out, link_file_offset(c, l, LINK_TDATA, c.tls_start), 7, 4, c.tls_start, l.tdata_end - c.tls_start, c.tls_end - c.tls_start, c.tls_align)
+    if l.has_rw {
+        link_phdr(out, link_file_offset(c, l, LINK_DATA, l.rw_start), 1, 6, l.rw_start, l.file_end - l.rw_start, l.mem_end - l.rw_start, LINK_PAGE)
+    }
+    if l.has_tls {
+        link_phdr(out, link_file_offset(c, l, LINK_TDATA, c.tls_start), 7, 4, c.tls_start, l.tdata_end - c.tls_start, c.tls_end - c.tls_start, c.tls_align)
+    }
     // PT_NOTE: the build-id note, its id zero until link_build_id.
-    if l.note_at != 0 -> link_phdr(out, l.note_at - c.base, 4, 4, l.note_at, LINK_BUILD_ID_NOTE_SIZE, LINK_BUILD_ID_NOTE_SIZE, 4)
+    if l.note_at != 0 {
+        link_phdr(out, l.note_at - c.base, 4, 4, l.note_at, LINK_BUILD_ID_NOTE_SIZE, LINK_BUILD_ID_NOTE_SIZE, 4)
+    }
     // PT_GNU_STACK: the stack is not executable.
     elf64_u32(out, 0x6474e551)
     elf64_u32(out, 6)
@@ -2507,7 +2738,9 @@ link_write_contents: fn(c: &LinkContext, out: &[U8], l: LinkLayout, origin: Int,
 // `image` from the next page, its program and section headers pointed at
 // it; its padding is int3, and nothing follows it.
 link_write_code: fn(c: &LinkContext, image: &[U8], l: LinkLayout, pieces: &LinkPieces) Never! {
-    if !l.packed -> return
+    if !l.packed {
+        return
+    }
     at: link_align(image.len(), LINK_PAGE)
     link_pad_to(image, at, 0)
     loop row in l.order[LINK_TEXT] {
@@ -2519,7 +2752,9 @@ link_write_code: fn(c: &LinkContext, image: &[U8], l: LinkLayout, pieces: &LinkP
     shoff: link_debug_le(image, 40, 8)
     loop k in 1..<link_debug_le(image, 60, 2) {
         header: shoff + 64 * k
-        if link_debug_le(image, header + 4, 4) == LINK_SHT_PROGBITS && link_debug_le(image, header + 16, 8) == l.text_start -> link_put64(image, header + 24, at)
+        if link_debug_le(image, header + 4, 4) == LINK_SHT_PROGBITS && link_debug_le(image, header + 16, 8) == l.text_start {
+            link_put64(image, header + 24, at)
+        }
     }
 }
 
@@ -2531,9 +2766,7 @@ LinkPieces: struct {
     errors: [[String]]
 }
 
-link_no_pieces: fn() -> LinkPieces Never! {
-    LinkPieces{bytes: [[U8]]{}, errors: [[String]]{}}
-}
+link_no_pieces: fn() -> LinkPieces Never! { LinkPieces{bytes: [[U8]]{}, errors: [[String]]{}} }
 
 // Append live row `row` to `out`, which is at the row's file offset: its
 // piece, which leaves `pieces` once placed, else the row emitted in place.
@@ -2616,7 +2849,9 @@ link_emit_pieces: fn(c: &&LinkContext, rows: [Int], threads: CompilerThreads) ->
     live: c.live_secs.len()
     inputs: Shared{LinkEmitInputs{contexts: [LinkContext]{c.move()}, rows: rows}}
     parts := [Shared<LinkEmitPart>]{}
-    loop part in 0..<(bounds.len() - 1) -> parts.push(Shared{LinkEmitPart{start: bounds[part], end: bounds[part + 1], bytes: [[U8]]{}, errors: [[String]]{}}})
+    loop part in 0..<(bounds.len() - 1) {
+        parts.push(Shared{LinkEmitPart{start: bounds[part], end: bounds[part + 1], bytes: [[U8]]{}, errors: [[String]]{}}})
+    }
     _ := link_emit_parts(inputs, parts, 0) ?? panic("the link emitting threads failed")
     pieces := LinkPieces{bytes: [[U8]]{}, errors: [[String]]{}}
     loop _ in 0..<live {
@@ -2726,7 +2961,9 @@ link_debug_sections: fn(c: &LinkContext, debug_info: Bool) -> LinkDebug Never! {
         first: c.obj_first_section[obj].copy()
         loop k in 1..<c.obj_count[obj] {
             s: first + k
-            if link_sec_type(c, obj, s) != LINK_SHT_PROGBITS || (link_sec_flags(c, obj, s).bit_and(0x802)) != 0 || link_sec_size(c, obj, s) == 0 -> next
+            if link_sec_type(c, obj, s) != LINK_SHT_PROGBITS || (link_sec_flags(c, obj, s).bit_and(0x802)) != 0 || link_sec_size(c, obj, s) == 0 {
+                next
+            }
             name_at: link_sec_name(c, obj, s)
             if !link_name_has(c.bufs, b, name_at, ".debug_", false) -> next
             name: link_cstr(c.bufs, b, name_at)
@@ -2792,7 +3029,9 @@ link_write_sections: fn(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkD
     headers := [LinkSectionHeader]{}
     class_headers := [Int]{}
     loop _ in 0..<LINK_CLASSES -> class_headers.push(-1)
-    if side -> headers.push(LinkSectionHeader{name: ".note.gnu.build-id", kind: LINK_SHT_NOTE, flags: 2, addr: l.note_at, offset: LINK_EHDR_SIZE, size: LINK_BUILD_ID_NOTE_SIZE, link: 0, info: 0, align: 4, entry_size: 0})
+    if side {
+        headers.push(LinkSectionHeader{name: ".note.gnu.build-id", kind: LINK_SHT_NOTE, flags: 2, addr: l.note_at, offset: LINK_EHDR_SIZE, size: LINK_BUILD_ID_NOTE_SIZE, link: 0, info: 0, align: 4, entry_size: 0})
+    }
     names: [String]{".rodata", ".eh_frame", ".text", ".tdata", ".tbss", ".preinit_array", ".init_array", ".fini_array", ".data.rel.ro", ".data", ".bss"}
     kinds: [Int]{LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_NOBITS, LINK_SHT_PREINIT_ARRAY, LINK_SHT_INIT_ARRAY, LINK_SHT_FINI_ARRAY, LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_NOBITS}
     // ALLOC, plus EXECINSTR for code, WRITE for data, TLS for thread data.
@@ -2926,7 +3165,9 @@ link_trace_lines: fn(c: &LinkContext, debug: LinkDebug, pieces: LinkPieces, l: L
     global: link_global_named(c, "jet_rt_context_trace")
     if global < 0 -> return [U8]{}
     final: link_final(c, global)
-    if c.g_kind[final] != LINK_G_FILE || c.g_section[final] < 0 || link_live_row(c, c.g_section[final]) < 0 -> return [U8]{}
+    if c.g_kind[final] != LINK_G_FILE || c.g_section[final] < 0 || link_live_row(c, c.g_section[final]) < 0 {
+        return [U8]{}
+    }
     loop (group, name) in debug.names {
         if name != ".debug_jetline" -> next
         bytes := [U8]{}
@@ -2936,9 +3177,7 @@ link_trace_lines: fn(c: &LinkContext, debug: LinkDebug, pieces: LinkPieces, l: L
                 errors := [String]{}
                 link_emit_section(c, errors, bytes, row)
                 c.errors.extend(errors)
-            } else {
-                bytes.extend(pieces.bytes[row].copy())
-            }
+            } else { bytes.extend(pieces.bytes[row].copy()) }
         }
         link_pad_to(bytes, debug.sizes[group], 0)
         if !link_jetline_link(bytes, l.text_start, l.text_end) -> return [U8]{}
@@ -3038,7 +3277,9 @@ link_load_inputs: fn(c: &LinkContext, names: [String]) Never! {
         index: c.archives.len()
         loop (k, symbol) in archive.symbol_names {
             id: link_name(c, symbol)
-            if c.name_member[id] < 0 -> c.name_member[id] = index * LINK_MEMBER_SCALE + archive.symbol_members[k]
+            if c.name_member[id] < 0 {
+                c.name_member[id] = index * LINK_MEMBER_SCALE + archive.symbol_members[k]
+            }
         }
         c.archives.push(archive)
         c.archive_buffer.push(b)
@@ -3063,7 +3304,9 @@ link_resolve_program: fn(c: &LinkContext) -> Int Never! {
         }
         else -> {
             entry = LINK_OWNED_START
-            if !link_defined_name(c, LINK_OWNED_START) -> link_load_synth(c, link_owned_startup(), "<linker owned startup>")
+            if !link_defined_name(c, LINK_OWNED_START) {
+                link_load_synth(c, link_owned_startup(), "<linker owned startup>")
+            }
         }
     }
     entry_g: link_intern(c, entry)
@@ -3099,6 +3342,7 @@ X64ResidentLinkRequest: struct {
     runtime_input: Int
     callable_exports: [String]
 }
+
 X64ResidentSymbol: struct {
     symbol: String
     defining_symbol: String
@@ -3109,6 +3353,7 @@ X64ResidentSymbol: struct {
     size: Int
     section_end: Int
 }
+
 X64ResidentSegment: struct {
     address: Int
     file_size: Int
@@ -3116,6 +3361,7 @@ X64ResidentSegment: struct {
     align: Int
     flags: Int
 }
+
 X64ResidentLinkFacts: struct {
     base: Int
     entry: Int
@@ -3129,6 +3375,7 @@ X64ResidentLinkFacts: struct {
     fini_end: Int
     symbols: [X64ResidentSymbol]
 }
+
 // The linked image, else (`image.errors` not empty) why it failed; with a
 // split link, its side debug file and build id (else both empty).
 X64ResidentLinkResult: struct {
@@ -3137,6 +3384,7 @@ X64ResidentLinkResult: struct {
     debug_file: [U8]
     build_id: [U8]
 }
+
 link_resident_failure: fn(errors: &&[String]) -> X64ResidentLinkResult Never! {
     X64ResidentLinkResult{image: X64ExecutableResult{bytes: [U8]{}, errors: errors.move()}, facts: None, debug_file: [U8]{}, build_id: [U8]{}}
 }
@@ -3175,12 +3423,10 @@ x64_link_live_undefined: fn(names: [String], bufs: &&[[U8]]) -> X64LiveUndefined
     if c.errors.len() == 0 {
         entry_g: link_resolve_program(c)
         entry_section: link_entry_section(c, entry_g)
-        if entry_section >= 0 {
-            link_collect(c, [Int]{entry_section}, link_linker_names())
-        }
+        if entry_section >= 0 -> link_collect(c, [Int]{entry_section}, link_linker_names())
     }
     inputs := c.bufs.move()
-    loop inputs.len() > names.len() { _: inputs.pop() }
+    loop inputs.len() > names.len() -> _: inputs.pop()
     X64LiveUndefined{symbols: c.undefined.move(), bufs: inputs}
 }
 
@@ -3221,14 +3467,18 @@ link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &
     c := link_context(bufs, base)
     if split -> c.fault_report = LinkFaultReport.Addresses
     if request == .Val(wanted) {
-        if names.len() != c.bufs.len() || wanted.runtime_input < 0 || wanted.runtime_input >= names.len() -> return link_resident_failure([String]{"resident runtime input is outside the actual link inputs"})
+        if names.len() != c.bufs.len() || wanted.runtime_input < 0 || wanted.runtime_input >= names.len() {
+            return link_resident_failure([String]{"resident runtime input is outside the actual link inputs"})
+        }
     }
     link_load_inputs(c, names)
     if c.errors.len() > 0 -> return link_resident_failure(c.errors.move())
     if request == .Val(wanted) {
         seen := name_table_sized(64)
         loop symbol in wanted.callable_exports {
-            if symbol == "" || name_find(seen, symbol) != None -> return link_resident_failure([String]{"empty or duplicate resident runtime export `{symbol}`"})
+            if symbol == "" || name_find(seen, symbol) != None {
+                return link_resident_failure([String]{"empty or duplicate resident runtime export `{symbol}`"})
+            }
             _ := name_intern(seen, symbol)
             global: link_intern(c, symbol)
             link_reference(c, global, false)
@@ -3236,22 +3486,34 @@ link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &
     }
     entry_g := link_resolve_program(c)
     entry_section := link_entry_section(c, entry_g)
-    if entry_section < 0 || (request != .None && c.errors.len() > 0) -> return link_resident_failure(c.errors.move())
+    if entry_section < 0 || (request != .None && c.errors.len() > 0) {
+        return link_resident_failure(c.errors.move())
+    }
     entries := [Int]{entry_section}
     if request == .Val(wanted) {
         loop symbol in wanted.callable_exports {
             global: link_global_named(c, symbol)
-            if global < 0 -> return link_resident_failure([String]{"unresolved resident runtime export `{symbol}`"})
+            if global < 0 {
+                return link_resident_failure([String]{"unresolved resident runtime export `{symbol}`"})
+            }
             final: link_final(c, global)
-            if c.g_kind[final] != LINK_G_FILE || c.g_section[final] < 0 -> return link_resident_failure([String]{"resident export `{symbol}` is not a concrete file definition"})
+            if c.g_kind[final] != LINK_G_FILE || c.g_section[final] < 0 {
+                return link_resident_failure([String]{"resident export `{symbol}` is not a concrete file definition"})
+            }
             object: c.g_obj[final]
             section: c.g_section[final]
-            if c.obj_buffer[object] != wanted.runtime_input -> return link_resident_failure([String]{"resident export `{symbol}` is not defined by the designated runtime input"})
-            if (link_sec_flags(c, object, section).bit_and(4)) == 0 -> return link_resident_failure([String]{"resident export `{symbol}` is not executable code"})
+            if c.obj_buffer[object] != wanted.runtime_input {
+                return link_resident_failure([String]{"resident export `{symbol}` is not defined by the designated runtime input"})
+            }
+            if (link_sec_flags(c, object, section).bit_and(4)) == 0 {
+                return link_resident_failure([String]{"resident export `{symbol}` is not executable code"})
+            }
             section_size: link_sec_size(c, object, section)
             offset: c.g_value[final]
             size: c.g_size[final]
-            if offset < 0 || offset >= section_size || size < 0 || size > section_size - offset -> return link_resident_failure([String]{"resident export `{symbol}` has an out-of-section extent"})
+            if offset < 0 || offset >= section_size || size < 0 || size > section_size - offset {
+                return link_resident_failure([String]{"resident export `{symbol}` has an out-of-section extent"})
+            }
             entries.push(section)
         }
     }
@@ -3270,7 +3532,9 @@ link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &
     // segments keep their file offsets at their addresses.
     layout: link_layout(c, split, request == .None)
     if request != .None {
-        if layout.text_start <= 0 || layout.text_end < layout.text_start || layout.mem_end > 9223372036854775807 -> return link_resident_failure([String]{"resident executable layout is outside the native address range"})
+        if layout.text_start <= 0 || layout.text_end < layout.text_start || layout.mem_end > 9223372036854775807 {
+            return link_resident_failure([String]{"resident executable layout is outside the native address range"})
+        }
     }
     startup: link_has_startup(c)
     link_define_names(c, layout, startup)
@@ -3303,16 +3567,22 @@ link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &
         symbols := [X64ResidentSymbol]{}
         loop symbol in wanted.callable_exports {
             global: link_global_named(c, symbol)
-            if global < 0 -> return link_resident_failure([String]{"resident runtime export disappeared after resolution"})
+            if global < 0 {
+                return link_resident_failure([String]{"resident runtime export disappeared after resolution"})
+            }
             final: link_final(c, global)
             section: c.g_section[final]
             row: link_live_row(c, section)
-            if row < 0 || c.live_class[row] != LINK_TEXT -> return link_resident_failure([String]{"resident export `{symbol}` is not in the final executable mapping"})
+            if row < 0 || c.live_class[row] != LINK_TEXT {
+                return link_resident_failure([String]{"resident export `{symbol}` is not in the final executable mapping"})
+            }
             object: c.g_obj[final]
             address: link_global_addr(c, global)
             section_address: c.live_addr[row]
             section_size: link_sec_size(c, object, section)
-            if address <= 0 || address < section_address || address < layout.text_start || address >= layout.text_end || section_address < layout.text_start || section_size <= 0 || section_size > layout.text_end - section_address -> return link_resident_failure([String]{"resident export `{symbol}` has an invalid linked code address"})
+            if address <= 0 || address < section_address || address < layout.text_start || address >= layout.text_end || section_address < layout.text_start || section_size <= 0 || section_size > layout.text_end - section_address {
+                return link_resident_failure([String]{"resident export `{symbol}` has an invalid linked code address"})
+            }
             section_end: section_address + section_size
             symbols.push(X64ResidentSymbol{symbol: symbol, defining_symbol: c.g_name[final], input: c.obj_buffer[object], object_offset: c.obj_base[object], address: address, size: c.g_size[final], section_end: section_end})
         }
@@ -3320,9 +3590,13 @@ link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &
             {address: c.base, file_size: layout.r_end - c.base, memory_size: layout.r_end - c.base, align: LINK_PAGE, flags: 4},
             {address: layout.text_start, file_size: layout.text_end - layout.text_start, memory_size: layout.text_end - layout.text_start, align: LINK_PAGE, flags: 5},
         }
-        if layout.has_rw -> segments.push(X64ResidentSegment{address: layout.rw_start, file_size: layout.file_end - layout.rw_start, memory_size: layout.mem_end - layout.rw_start, align: LINK_PAGE, flags: 6})
+        if layout.has_rw {
+            segments.push(X64ResidentSegment{address: layout.rw_start, file_size: layout.file_end - layout.rw_start, memory_size: layout.mem_end - layout.rw_start, align: LINK_PAGE, flags: 6})
+        }
         tls := X64ResidentSegment?{None}
-        if layout.has_tls -> tls = Val(X64ResidentSegment{address: c.tls_start, file_size: layout.tdata_end - c.tls_start, memory_size: c.tls_end - c.tls_start, align: c.tls_align, flags: 4})
+        if layout.has_tls {
+            tls = Val(X64ResidentSegment{address: c.tls_start, file_size: layout.tdata_end - c.tls_start, memory_size: c.tls_end - c.tls_start, align: c.tls_align, flags: 4})
+        }
         facts = Val(X64ResidentLinkFacts{base: c.base, entry: entry, segments: segments.move(), tls: tls, preinit_start: layout.preinit_start, preinit_end: layout.preinit_end, init_start: layout.init_start, init_end: layout.init_end, fini_start: layout.fini_start, fini_end: layout.fini_end, symbols: symbols.move()})
     }
     X64ResidentLinkResult{image: X64ExecutableResult{bytes: image.move(), errors: [String]{}}, facts: facts.move(), debug_file: debug_file.move(), build_id: build_id.move()}

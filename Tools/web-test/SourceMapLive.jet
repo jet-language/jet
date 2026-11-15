@@ -27,7 +27,9 @@ C_PAUSE_MS: 20000
 C_BODY_LIMIT: 268435456
 
 SOURCE_MAPPING_URL: Regex{"//# sourceMappingURL=app\.js\.map\s*$"}
+
 JET_STATEMENT: Regex{"^\s*[A-Za-z_]\w*: "}
+
 DRIVE_PATH: Regex{"^[A-Za-z]:[\\/]"}
 
 #Error
@@ -77,10 +79,16 @@ PauseReport: struct {
 }
 
 #[Codable(only: .Encode), Rename(.Camel)]
-BreakpointAt: struct { url: String, line_number: Int, column_number: Int }
+BreakpointAt: struct {
+    url: String
+    line_number: Int
+    column_number: Int
+}
 
 #Codable(only: .Encode)
-Navigation: struct { url: String }
+Navigation: struct {
+    url: String
+}
 
 run: fn(args: LiveArgs) Failure! {
     check(args.port > 0, "usage: SourceMapLive.jet --port <port> [--prefix /click]")
@@ -126,11 +134,20 @@ run: fn(args: LiveArgs) Failure! {
     }
     session.close().drop("the engine stops at its last owner's drop as well")
     print("PASS web source-map CDP Jet breakpoint")
-    print(json.stringify(PauseReport{
-        source_mapping_url: "app.js.map", script_parsed_map_url: paused.named, generated_line: hit.generated_line + 1,
-        paused_generated_line: paused.line + 1, paused_generated_column: paused.column,
-        jet_file: jet_file, jet_line: hit.original_line + 1, jet_text: jet_text
-    }))
+    print(
+        json.stringify(
+            PauseReport{
+                source_mapping_url: "app.js.map",
+                script_parsed_map_url: paused.named,
+                generated_line: hit.generated_line + 1,
+                paused_generated_line: paused.line + 1,
+                paused_generated_column: paused.column,
+                jet_file: jet_file,
+                jet_line: hit.original_line + 1,
+                jet_text: jet_text,
+            },
+        ),
+    )
     Ok()
 }
 
@@ -152,7 +169,9 @@ pause_in: fn(session: Browser, origin: String, prefix: String, mappings: [Mappin
     named := false
     loop {
         event: cdp.next_event(timeout) ?? return Err(Failure{message: "the page did not pause at app.js:{hit.generated_line + 1}:{hit.generated_column} within {C_PAUSE_MS} ms: {err}"})
-        if event.kind() == "Debugger.scriptParsed" && event.source_map_url_hash() == map_hash -> named = true
+        if event.kind() == "Debugger.scriptParsed" && event.source_map_url_hash() == map_hash {
+            named = true
+        }
         if event.kind() != "Debugger.paused" -> next
         line: event.frame_line()
         column: event.frame_column()
@@ -161,7 +180,9 @@ pause_in: fn(session: Browser, origin: String, prefix: String, mappings: [Mappin
         // line that starts at or before its column.
         at := Mapping?{None}
         loop mapping in mappings {
-            if mapping.generated_line == line && mapping.generated_column <= column -> at = Val(mapping.copy())
+            if mapping.generated_line == line && mapping.generated_column <= column {
+                at = Val(mapping.copy())
+            }
         }
         found: at ?? return Err(Failure{message: "the page paused at app.js:{line + 1}:{column}, where app.js.map maps nothing"})
         check(found.source == hit.source && found.original_line == hit.original_line, "the page paused at app.js:{line + 1}:{column}, which app.js.map maps to Jet line {found.original_line + 1}, not {hit.original_line + 1}")
@@ -213,7 +234,9 @@ decode_vlq: fn(segment: String) -> [Int] Failure! {
             code >= 48 && code <= 57 -> code + 4
             code == 43 -> 62
             code == 47 -> 63
-            else -> return Err(Failure{message: "bad VLQ at {index + 1} in `{segment}`"})
+            else -> {
+                return Err(Failure{message: "bad VLQ at {index + 1} in `{segment}`"})
+            }
         }
         result += digit.bit_and(31) << shift
         if digit >= 32 {
@@ -232,7 +255,9 @@ decode_vlq: fn(segment: String) -> [Int] Failure! {
 // The text of a 2xx response to GET `path` on the static server.
 served: fn(origin: String, path: String) -> String Failure! {
     response: client.get("{origin}{path}") ?? return Err(Failure{message: "{path} request failed: {err}"})
-    if response.status() < 200 || response.status() > 299 -> return Err(Failure{message: "{path} returned {response.status()}"})
+    if response.status() < 200 || response.status() > 299 {
+        return Err(Failure{message: "{path} returned {response.status()}"})
+    }
     body: response.text(C_BODY_LIMIT) ?? return Err(Failure{message: "{path} body is not text: {err}"})
     Ok(body)
 }

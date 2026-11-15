@@ -18,29 +18,21 @@ use {
 // Source owns constructor composition and rejects invalid async capacities
 // before allocating provider state. Private leaves reuse existing host calls.
 
-scope: fn() -> EventScope Never! {
-    core.event.__scope_new()
-}
+scope: fn() -> EventScope Never! { core.event.__scope_new() }
 
-new: fn<T>() -> Event<T> Never! {
-    with_policy<T>(policy_sync())
-}
+new: fn<T>() -> Event<T> Never! { with_policy<T>(policy_sync()) }
 
 with_policy: fn<T>(policy: EventPolicy) -> Event<T> Never! {
     core.event.__event_with_policy<T>(policy)
 }
 
-hook: fn<T, R>(fallback: R) -> Hook<T, R> Never! {
-    core.event.__hook_new<T, R>(fallback)
-}
+hook: fn<T, R>(fallback: R) -> Hook<T, R> Never! { core.event.__hook_new<T, R>(fallback) }
 
 decision_hook: fn<T, E>(policy: HookPolicy) -> DecisionHook<T, E> Never! {
     core.event.__decision_hook_new<T, E>(policy)
 }
 
-policy_sync: fn() -> EventPolicy Never! {
-    core.event.__policy_sync()
-}
+policy_sync: fn() -> EventPolicy Never! { core.event.__policy_sync() }
 
 async_result: fn<T, E>(policy: AsyncPolicy, failures: FailurePolicy) -> AsyncEvent<T, E> EventConfigError! {
     if policy.capacity <= 0 -> return Err(EventConfigError.InvalidCapacity)

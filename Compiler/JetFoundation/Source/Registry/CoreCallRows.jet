@@ -14,14 +14,23 @@ CORE_MODULE_EXPORTS: #run core_module_export_rows(CORE_DECLARATIONS)
 // type export leaf with the modules exporting it in table order, and the
 // bare spellings by name. Each key keeps its first row, as a scan would.
 CORE_CALL_KEY_ROWS: #run ir_key_index(core_call_lookup_keys(CORE_CALLS))
+
 CORE_CALL_KEYS: #run ir_key_index_keys(core_call_lookup_keys(CORE_CALLS), CORE_CALL_KEY_ROWS)
+
 CORE_MODULE_EXPORT_KEY_ROWS: #run ir_key_index(core_module_export_names(CORE_MODULE_EXPORTS))
+
 CORE_MODULE_EXPORT_KEYS: #run ir_key_index_keys(core_module_export_names(CORE_MODULE_EXPORTS), CORE_MODULE_EXPORT_KEY_ROWS)
+
 CORE_TYPE_EXPORT_LEAVES: #run core_type_export_leaves(CORE_MODULE_EXPORTS)
+
 CORE_TYPE_EXPORT_MODULES: #run core_type_export_modules(CORE_MODULE_EXPORTS, CORE_TYPE_EXPORT_LEAVES)
+
 CORE_TYPE_EXPORT_KEY_ROWS: #run ir_key_index(CORE_TYPE_EXPORT_LEAVES)
+
 CORE_TYPE_EXPORT_KEYS: #run ir_key_index_keys(CORE_TYPE_EXPORT_LEAVES, CORE_TYPE_EXPORT_KEY_ROWS)
+
 CORE_BARE_SOURCE_KEY_ROWS: #run ir_key_index(core_bare_source_names(CORE_BARE_SOURCE_MODULES))
+
 CORE_BARE_SOURCE_KEYS: #run ir_key_index_keys(core_bare_source_names(CORE_BARE_SOURCE_MODULES), CORE_BARE_SOURCE_KEY_ROWS)
 
 // A non-receiver Core call's lookup key.
@@ -100,14 +109,16 @@ core_module_export_rows: fn(declared: CoreDeclarations) -> [CoreModuleExportName
 
 core_call_rows: fn(declared: CoreDeclarations, extensions: [CoreCallRecord]) -> [CoreCallRecord] {
     rows := [CoreCallRecord]{}
-    owners := [String: String]{}
+    owners := [String:String]{}
     loop row in declared.dispatchers {
         owners[core_call_key(row.record)] = "Core.rows"
         rows.push(row.record.copy())
     }
     loop row in extensions {
         key: core_call_key(row)
-        if owners.get(key) == .Val(owner) -> panic("{CORE_CALL_EXTENSIONS_PATH}: row `{key}` repeats a {owner} row; drop the extension row")
+        if owners.get(key) == .Val(owner) {
+            panic("{CORE_CALL_EXTENSIONS_PATH}: row `{key}` repeats a {owner} row; drop the extension row")
+        }
         owners[key] = CORE_CALL_EXTENSIONS_PATH
         rows.push(row.copy())
     }

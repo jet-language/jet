@@ -10,7 +10,7 @@ recipe_test_scratch: fn(label: String) -[FS, Env, Rand]> String {
 }
 
 recipe_test_ctx: fn(src: String, out: String, cache: String, offline: Bool) -> RecipeBuildContext {
-    RecipeBuildContext{source_dir: src, output_root: out, tools: [String: String]{}, fetch_cache: cache, offline}
+    RecipeBuildContext{source_dir: src, output_root: out, tools: [String:String]{}, fetch_cache: cache, offline: offline}
 }
 
 recipe_test_run_error: fn(recipe: BuildRecipe, ctx: RecipeBuildContext) -[FS, Env, Exec, Net, Rand, Time.Wait]> RecipeDiagnostic {
@@ -21,7 +21,7 @@ recipe_test_run_error: fn(recipe: BuildRecipe, ctx: RecipeBuildContext) -[FS, En
 }
 
 recipe_test_lower_error: fn(recipe: BuildRecipe, package: String) -[FS, Env, Rand]> RecipeDiagnostic {
-    if recipe_lower_to_plan(recipe, package, [String: String]{}) == {
+    if recipe_lower_to_plan(recipe, package, [String:String]{}) == {
         .Ok(_) -> panic("the recipe must not lower")
         .Err(error) -> error
     }
@@ -108,7 +108,7 @@ recipe_test_has_stage_leftover: fn(base: String) -[FS]> Bool {
     files.create_dir_all(src) ?? panic("src")
     recipe: BuildRecipe{steps: [BuildStep]{BuildStep.Exec{tool: "gcc", args: [String]{}}}}
     if recipe_validate(recipe, recipe_test_ctx(src, files.join(base, "out"), files.join(base, "cache"), false)) == {
-        .Ok(_) -> panic("gcc without a realized dependency must not validate")
+        .Ok(_) -> { panic("gcc without a realized dependency must not validate") }
         .Err(error) -> assert_eq(error.code, "E1238")
     }
     assert_eq(recipe_test_run_error(recipe, recipe_test_ctx(src, files.join(base, "out"), files.join(base, "cache"), false)).code, "E1238")
@@ -120,17 +120,19 @@ recipe_test_has_stage_leftover: fn(base: String) -[FS]> Bool {
     base: recipe_test_scratch("relative-tool")
     src: files.join(base, "src")
     files.create_dir_all(src) ?? panic("src")
-    ctx: RecipeBuildContext{source_dir: src, output_root: files.join(base, "out"), tools: [String: String]{"cc": "cc"}, fetch_cache: files.join(base, "cache"), offline: false}
+    ctx: RecipeBuildContext{source_dir: src, output_root: files.join(base, "out"), tools: [String:String]{"cc": "cc"}, fetch_cache: files.join(base, "cache"), offline: false}
     recipe: BuildRecipe{steps: [BuildStep]{BuildStep.Exec{tool: "cc", args: [String]{}}}}
     if recipe_validate(recipe, ctx) == {
-        .Ok(_) -> panic("a relative tool path must not validate")
+        .Ok(_) -> { panic("a relative tool path must not validate") }
         .Err(error) -> assert_eq(error.code, "E1238")
     }
     files.remove_all(base).drop("test cleanup")
 }
 
 #Test("recipe native path succeeds or refuses before launch") {
-    if !sys.is_linux() && !sys.is_macos() -> return
+    if !sys.is_linux() && !sys.is_macos() {
+        return
+    }
     base: recipe_test_scratch("native-sandbox")
     src: files.join(base, "src")
     out: files.join(base, "out")
@@ -140,7 +142,7 @@ recipe_test_has_stage_leftover: fn(base: String) -[FS]> Bool {
     // target the way a realized dependency is named.
     shell: files.canonicalize(process.which("sh") ?? panic("a shell is required for the native recipe path")) ?? panic("resolve the shell")
     quoted_marker: marker.replace("'", "'\\''")
-    ctx: RecipeBuildContext{source_dir: src, output_root: out, tools: [String: String]{"sh": shell}, fetch_cache: files.join(base, "cache"), offline: false}
+    ctx: RecipeBuildContext{source_dir: src, output_root: out, tools: [String:String]{"sh": shell}, fetch_cache: files.join(base, "cache"), offline: false}
     recipe: BuildRecipe{steps: [BuildStep]{BuildStep.Exec{tool: "sh", args: [String]{"-c", "printf ok > \"$JET_BUILD_OUTPUT/ok\"; printf escaped > '{quoted_marker}' || :"}}}}
     status: foundation_native_sandbox_status()
     if recipe_run(recipe, ctx, None) == {
@@ -213,7 +215,7 @@ recipe_test_has_stage_leftover: fn(base: String) -[FS]> Bool {
     files.create_dir_all(src) ?? panic("src")
     recipe: BuildRecipe{steps: [BuildStep]{BuildStep.Exec{tool: "definitely-not-a-real-tool", args: [String]{"--boom"}}}}
     if recipe_validate(recipe, recipe_test_ctx(src, files.join(base, "out"), files.join(base, "cache"), false)) == {
-        .Ok(_) -> panic("an unrealized tool must not validate")
+        .Ok(_) -> { panic("an unrealized tool must not validate") }
         .Err(error) -> assert_eq(error.code, "E1238")
     }
     files.remove_all(base).drop("test cleanup")
@@ -226,7 +228,7 @@ recipe_test_has_stage_leftover: fn(base: String) -[FS]> Bool {
     recipe: BuildRecipe{steps: [BuildStep]{}}
     ctx: recipe_test_ctx(files.join(base, "missing"), files.join(base, "out"), files.join(base, "cache"), false)
     if recipe_validate(recipe, ctx) == {
-        .Ok(_) -> panic("an empty recipe graph must not validate")
+        .Ok(_) -> { panic("an empty recipe graph must not validate") }
         .Err(error) -> {
             assert_eq(error.code, "E1238")
             assert(error.why.contains("at least one finite staged action"))
@@ -235,7 +237,7 @@ recipe_test_has_stage_leftover: fn(base: String) -[FS]> Bool {
     assert_eq(recipe_test_run_error(recipe, ctx).code, "E1238")
     attempt := BuildAttempt.new("pkg", "path:missing", "adapter", "", "")
     if recipe_run_logged(recipe, ctx, None, attempt) == {
-        .Ok(_) -> panic("an unadmitted logged run must refuse")
+        .Ok(_) -> { panic("an unadmitted logged run must refuse") }
         .Err(error) -> assert_eq(error.code, "E1238")
     }
     assert_eq(attempt.steps.len(), 0)
@@ -246,12 +248,14 @@ recipe_test_has_stage_leftover: fn(base: String) -[FS]> Bool {
 }
 
 #Test("recipe lowers to one build plan with a complete fingerprint") {
-    tools: [String: String]{"cc": sys.executable()}
-    recipe: BuildRecipe{steps: [BuildStep]{
-        BuildStep.Fetch{url: "file:///src.tgz", sha256: "abc123"},
-        BuildStep.Exec{tool: "cc", args: [String]{"-c", "main.c"}},
-        BuildStep.Install{src: "main.o", dest: "lib/main.o"}
-    }}
+    tools: [String:String]{"cc": sys.executable()}
+    recipe: BuildRecipe{
+        steps: [BuildStep]{
+            BuildStep.Fetch{url: "file:///src.tgz", sha256: "abc123"},
+            BuildStep.Exec{tool: "cc", args: [String]{"-c", "main.c"}},
+            BuildStep.Install{src: "main.o", dest: "lib/main.o"},
+        },
+    }
     plan: recipe_lower_to_plan(recipe, "demo", tools) ?? panic("lower")
     assert_eq(plan.actions.len(), 3)
     assert_eq(plan.targets.len(), 1)
@@ -268,7 +272,7 @@ recipe_test_has_stage_leftover: fn(base: String) -[FS]> Bool {
 
 #Test("recipe plan binds outputs authority and finite stage facts") {
     recipe: BuildRecipe{steps: [BuildStep]{BuildStep.Install{src: "bin/tool", dest: "bin/tool"}}}
-    plan: recipe_lower_to_plan(recipe, "demo", [String: String]{}) ?? panic("lower")
+    plan: recipe_lower_to_plan(recipe, "demo", [String:String]{}) ?? panic("lower")
     action: plan.actions[0]
     assert_eq(action.outputs, [String]{".jet/recipe/demo/step-0.stamp", ".jet/recipe/demo/outputs/bin/tool"})
     assert(action.caps.contains(BuildEffect.FS))
@@ -282,10 +286,12 @@ recipe_test_has_stage_leftover: fn(base: String) -[FS]> Bool {
 #Test("recipe finite plan rejects empty and overlapping outputs") {
     empty: recipe_test_lower_error(BuildRecipe{steps: [BuildStep]{}}, "demo")
     assert_eq(empty.code, "E1238")
-    overlapping: BuildRecipe{steps: [BuildStep]{
-        BuildStep.InstallTree{src: "share", dest: "share"},
-        BuildStep.Install{src: "tool", dest: "share/tool"}
-    }}
+    overlapping: BuildRecipe{
+        steps: [BuildStep]{
+            BuildStep.InstallTree{src: "share", dest: "share"},
+            BuildStep.Install{src: "tool", dest: "share/tool"},
+        },
+    }
     error: recipe_test_lower_error(overlapping, "demo")
     assert_eq(error.code, "E1238")
     assert(error.why.contains("overlaps output"))
@@ -308,15 +314,17 @@ recipe_test_staged_fragment: fn() -> BuildPlanFragment {
     BuildPlanFragment{actions: [PlanFragmentAction]{emitted}}
 }
 
-recipe_test_staged_tools: fn() -> [String: String] {
-    [String: String]{"planner": sys.executable(), "planner-alt": sys.executable()}
+recipe_test_staged_tools: fn() -> [String:String] {
+    [String:String]{"planner": sys.executable(), "planner-alt": sys.executable()}
 }
 
 // Reads its one declared input, then emits the fixed fragment.
 recipe_test_reading_emit: fn(sandbox: PlanSandbox) -[FS, Env]> BuildPlanFragment StagedPlanActionError! {
     view := sandbox
     bytes: view.read_input("manifest")
-    if bytes != "planner manifest".bytes() -> return Err(StagedPlanActionError.Failed("unexpected manifest bytes"))
+    if bytes != "planner manifest".bytes() {
+        return Err(StagedPlanActionError.Failed("unexpected manifest bytes"))
+    }
     Ok(recipe_test_staged_fragment())
 }
 
@@ -347,7 +355,7 @@ recipe_test_undeclared_emit: fn(sandbox: PlanSandbox) -[FS, Env]> BuildPlanFragm
     manifest: "planner manifest".bytes()
     files.write_bytes(files.join(src, "manifest"), manifest) ?? panic("manifest")
     action: recipe_test_staged_action("sha256-{pkg_sha256_hex(manifest)}")
-    ctx: StagedPlanContext{source_dir: src, artifact_root}
+    ctx: StagedPlanContext{source_dir: src, artifact_root: artifact_root}
     report: recipe_run_staged_plan_action(action, ctx, recipe_test_staged_tools(), StagedPlanEmitter{emit: recipe_test_reading_emit}) ?? panic("staged plan publishes")
     assert(report.plan_fingerprint.starts_with("plan-sha256:"))
     assert_eq(report.lock.action_identity, report.action_identity)
@@ -367,10 +375,10 @@ recipe_test_undeclared_emit: fn(sandbox: PlanSandbox) -[FS, Env]> BuildPlanFragm
     files.create_dir_all(src) ?? panic("src")
     files.write(files.join(src, "manifest"), "planner manifest") ?? panic("manifest")
     files.write(files.join(src, "secret"), "hidden") ?? panic("secret")
-    ctx: StagedPlanContext{source_dir: src, artifact_root}
+    ctx: StagedPlanContext{source_dir: src, artifact_root: artifact_root}
     declared: recipe_test_staged_action("sha256-{pkg_sha256_hex("planner manifest".bytes())}")
     if recipe_run_staged_plan_action(declared, ctx, recipe_test_staged_tools(), StagedPlanEmitter{emit: recipe_test_undeclared_emit}) == {
-        .Ok(_) -> panic("an undeclared staged-plan read must refuse")
+        .Ok(_) -> { panic("an undeclared staged-plan read must refuse") }
         .Err(error) -> {
             assert_eq(error.code, "E1238")
             assert(error.why.contains("staged plan action denied input `secret`"))
@@ -378,7 +386,7 @@ recipe_test_undeclared_emit: fn(sandbox: PlanSandbox) -[FS, Env]> BuildPlanFragm
     }
     drifted: recipe_test_staged_action("sha256-{"0".repeat(64)}")
     if recipe_run_staged_plan_action(drifted, ctx, recipe_test_staged_tools(), StagedPlanEmitter{emit: recipe_test_reading_emit}) == {
-        .Ok(_) -> panic("a drifted staged-plan input digest must refuse")
+        .Ok(_) -> { panic("a drifted staged-plan input digest must refuse") }
         .Err(error) -> assert_eq(error.code, "E1238")
     }
     assert(!files.exists(artifact_root))
@@ -393,10 +401,12 @@ recipe_test_undeclared_emit: fn(sandbox: PlanSandbox) -[FS, Env]> BuildPlanFragm
     files.write(files.join(src, "tool"), "new") ?? panic("new tool")
     files.create_dir_all(files.join(out, "bin")) ?? panic("out bin")
     files.write(files.join(out, "bin/tool"), "old") ?? panic("old tool")
-    recipe: BuildRecipe{steps: [BuildStep]{
-        BuildStep.Install{src: "tool", dest: "bin/tool"},
-        BuildStep.Fetch{url: "https://example.invalid/source.tar", sha256: "0".repeat(64)}
-    }}
+    recipe: BuildRecipe{
+        steps: [BuildStep]{
+            BuildStep.Install{src: "tool", dest: "bin/tool"},
+            BuildStep.Fetch{url: "https://example.invalid/source.tar", sha256: "0".repeat(64)},
+        },
+    }
     assert_eq(recipe_test_run_error(recipe, recipe_test_ctx(src, out, files.join(base, "cache"), false)).code, "E1236")
     assert_eq(files.read(files.join(out, "bin/tool")) ?? panic("previous output"), "old")
     assert(!recipe_test_has_stage_leftover(base))
@@ -404,7 +414,9 @@ recipe_test_undeclared_emit: fn(sandbox: PlanSandbox) -[FS, Env]> BuildPlanFragm
 }
 
 #Test("recipe publication rejects an output root swap") {
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     base: recipe_test_scratch("output-swap")
     outside: files.join(base, "outside")
     output: files.join(base, "out")
@@ -415,7 +427,7 @@ recipe_test_undeclared_emit: fn(sandbox: PlanSandbox) -[FS, Env]> BuildPlanFragm
     stage: parent.exclusive_child("jet-recipe-stage") ?? panic("stage")
     files.write(files.join(stage.path, "new"), "new") ?? panic("staged file")
     if recipe_commit_staged_output(parent, stage.name, output) == {
-        .Ok(_) -> panic("a swapped output root must fail closed")
+        .Ok(_) -> { panic("a swapped output root must fail closed") }
         .Err(error) -> assert_eq(error.code, "E1238")
     }
     assert_eq(files.read(files.join(outside, "sentinel")) ?? panic("sentinel"), "keep")
@@ -425,7 +437,9 @@ recipe_test_undeclared_emit: fn(sandbox: PlanSandbox) -[FS, Env]> BuildPlanFragm
 }
 
 #Test("recipe publication stays on the held parent after a path swap") {
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     base: recipe_test_scratch("parent-swap")
     parent_path: files.join(base, "parent")
     replacement: files.join(base, "replacement")

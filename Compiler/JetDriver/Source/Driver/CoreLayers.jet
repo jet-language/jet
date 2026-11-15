@@ -24,14 +24,18 @@ JetDriverCoreLayerName: struct {
 // Each loaded Core unit's names of a higher layer's modules (E1012), under
 // `request.core_layers`; an empty table checks nothing.
 jet_driver_check_core_layers: fn(request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], diagnostics: &[Diagnostic]) {
-    if request.core_layers.len() == 0 -> return
+    if request.core_layers.len() == 0 {
+        return
+    }
     // A private part's layer is its owner's.
     owners := [String:String]{}
     loop row in request.core_sources {
         if row.owner != "" -> owners[row.module_name] = row.owner
     }
     loop unit in source_units {
-        if !jet_driver_unit_is_core(unit) || unit.file_index < 0 || unit.file_index >= request.core_sources.len() -> next
+        if !jet_driver_unit_is_core(unit) || unit.file_index < 0 || unit.file_index >= request.core_sources.len() {
+            next
+        }
         row: request.core_sources[unit.file_index]
         from: if row.owner == "" -> row.module_name else -> row.owner
         from_layer: jet_driver_core_layer_of(request.core_layers, from).layer
@@ -96,11 +100,15 @@ jet_driver_core_layer_names: fn(tokens: [Token], tables: TokenTables, owners: [S
                     next
                 }
             }
-            if owners.get(word) == .Val(owner) -> names.push(JetDriverCoreLayerName{module_name: owner.copy(), span: token.span})
+            if owners.get(word) == .Val(owner) {
+                names.push(JetDriverCoreLayerName{module_name: owner.copy(), span: token.span})
+            }
         }
         if token.literal >= 0 {
             loop part in token_string_parts(tables, token) {
-                if part.kind == STRING_PART_INTERPOLATION -> jet_driver_core_layer_names(part.tokens, tables, owners, names)
+                if part.kind == STRING_PART_INTERPOLATION {
+                    jet_driver_core_layer_names(part.tokens, tables, owners, names)
+                }
             }
         }
         index += 1

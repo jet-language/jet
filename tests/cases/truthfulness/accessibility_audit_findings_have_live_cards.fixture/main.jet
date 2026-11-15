@@ -14,6 +14,7 @@ policy_slice_bytes: fn(text: String, start: Int, end: Int) -> String {
     if start == end -> return ""
     String.from_bytes(raw[start..(end - 1)]) ?? panic("corpus byte span must end on UTF-8 boundaries")
 }
+
 policy_space_width: fn(bytes: [U8], index: Int) -> Int {
     first: Int{bytes[index]}
     if first == 32 || (first >= 9 && first <= 13) -> return 1
@@ -23,11 +24,14 @@ policy_space_width: fn(bytes: [U8], index: Int) -> Int {
     if index + 2 >= bytes.len() -> return 0
     third: Int{bytes[index + 2]}
     if first == 225 && second == 154 && third == 128 -> return 3
-    if first == 226 && second == 128 && ((third >= 128 && third <= 138) || third == 168 || third == 169 || third == 175) -> return 3
+    if first == 226 && second == 128 && ((third >= 128 && third <= 138) || third == 168 || third == 169 || third == 175) {
+        return 3
+    }
     if first == 226 && second == 129 && third == 159 -> return 3
     if first == 227 && second == 128 && third == 128 -> return 3
     0
 }
+
 policy_split_whitespace: fn(text: String) -> [String] {
     bytes: text.bytes()
     words := [String]{}
@@ -57,6 +61,7 @@ audit_table_cells: fn(raw: String) -> [String] {
     loop cell in audit_parse.split(line, "|") -> result.push(cell.trim())
     result
 }
+
 audit_card_refs: fn(cell: String) -> [String] {
     result := [String]{}
     loop token in policy_split_whitespace(cell) {
@@ -70,6 +75,7 @@ audit_card_refs: fn(cell: String) -> [String] {
     }
     result
 }
+
 audit_card_number: fn(card: String) -> Int {
     // Rust parse::<i64>() rejects overflow; do not wrap an oversized card reference.
     number := 0
@@ -98,7 +104,9 @@ run: fn() {
     assert(header + 1 < lines.len(), "accessibility findings table needs a separator row")
     separator: audit_table_cells(lines[header + 1])
     assert(separator.len() == expected.len(), "accessibility findings table separator must match its five columns")
-    loop cell in separator -> assert(cell == "---", "accessibility findings table needs a Markdown separator for every column")
+    loop cell in separator {
+        assert(cell == "---", "accessibility findings table needs a Markdown separator for every column")
+    }
     rows := [[String]]{}
     finding_ids := [String]{}
     loop i in (header + 2)..<lines.len() {
@@ -106,7 +114,9 @@ run: fn() {
         if !line.trim_start().starts_with("|") -> break
         cells: audit_table_cells(line)
         assert(cells.len() == expected.len(), "accessibility findings row must have id, surface, screen_reader, state, and card: {line}")
-        loop j in 0..<expected.len() -> assert(!cells[j].is_empty(), "accessibility finding {expected[j]} must not be empty: {line}")
+        loop j in 0..<expected.len() {
+            assert(!cells[j].is_empty(), "accessibility finding {expected[j]} must not be empty: {line}")
+        }
         assert(!finding_ids.contains(cells[0]), "accessibility finding IDs must be unique: {cells[0]}")
         finding_ids.push(cells[0])
         assert(cells[3] == "pass" || cells[3] == "gap" || cells[3] == "not-proven", "accessibility finding {cells[0]} has an unknown state: {cells[3]}")

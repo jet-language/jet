@@ -8,45 +8,78 @@
 // bits are not the function's to choose (an arithmetic NaN), any NaN matches
 // any NaN; the sign-bit, payload and signaling operations and the frexp and
 // modf splits must match bit for bit.
-use {
-    math: core.math
-}
+use math: core.math
 
 CANONICALIZE: #run embed_file("corpus/canonicalize.txt")
+
 CEIL: #run embed_file("corpus/ceil.txt")
+
 COPYSIGN: #run embed_file("corpus/copysign.txt")
+
 FABS: #run embed_file("corpus/fabs.txt")
+
 FDIM: #run embed_file("corpus/fdim.txt")
+
 FLOOR: #run embed_file("corpus/floor.txt")
+
 FREXP: #run embed_file("corpus/frexp.txt")
+
 FMOD: #run embed_file("corpus/fmod.txt")
+
 GET_PAYLOAD: #run embed_file("corpus/get_payload.txt")
+
 IS_NORMAL: #run embed_file("corpus/is_normal.txt")
+
 IS_SIGNALING: #run embed_file("corpus/is_signaling.txt")
+
 IS_SUBNORMAL: #run embed_file("corpus/is_subnormal.txt")
+
 LDEXP: #run embed_file("corpus/ldexp.txt")
+
 LOGB: #run embed_file("corpus/logb.txt")
+
 MODF: #run embed_file("corpus/modf.txt")
+
 MAX_FLOAT: #run embed_file("corpus/max_float.txt")
+
 MAXIMUM: #run embed_file("corpus/maximum.txt")
+
 MAXIMUM_MAG: #run embed_file("corpus/maximum_mag.txt")
+
 MAXIMUM_MAG_NUM: #run embed_file("corpus/maximum_mag_num.txt")
+
 MAXIMUM_NUM: #run embed_file("corpus/maximum_num.txt")
+
 MIN_FLOAT: #run embed_file("corpus/min_float.txt")
+
 MINIMUM: #run embed_file("corpus/minimum.txt")
+
 MINIMUM_MAG: #run embed_file("corpus/minimum_mag.txt")
+
 MINIMUM_MAG_NUM: #run embed_file("corpus/minimum_mag_num.txt")
+
 MINIMUM_NUM: #run embed_file("corpus/minimum_num.txt")
+
 NEXT_AFTER: #run embed_file("corpus/next_after.txt")
+
 NEXT_DOWN: #run embed_file("corpus/next_down.txt")
+
 NEXT_UP: #run embed_file("corpus/next_up.txt")
+
 REM_QUO: #run embed_file("corpus/rem_quo.txt")
+
 REMAINDER: #run embed_file("corpus/remainder.txt")
+
 ROUND_EVEN: #run embed_file("corpus/round_even.txt")
+
 SET_PAYLOAD: #run embed_file("corpus/set_payload.txt")
+
 SET_PAYLOAD_SIGNALING: #run embed_file("corpus/set_payload_signaling.txt")
+
 TOTAL_ORDER: #run embed_file("corpus/total_order.txt")
+
 TOTAL_ORDER_MAG: #run embed_file("corpus/total_order_mag.txt")
+
 TRUNC: #run embed_file("corpus/trunc.txt")
 
 hex_value: fn(b: U8) -> Int {
@@ -102,11 +135,14 @@ f32_magnitude: fn(magnitude: Int) -> F32 {
 }
 
 bits: fn(x: F32) -> Int { math.to_bits(x) }
+
 flag: fn(b: Bool) -> Int { if b -> 1 else -> 0 }
+
 maybe: fn(x: F32?) -> Int {
     value: x ?? return -1
     math.to_bits(value)
 }
+
 // The exponent word as a whole number.
 exponent_of: fn(word: Int) -> Int { if word >= 0x8000_0000 -> word - 0x1_0000_0000 else -> word }
 
@@ -171,6 +207,7 @@ results: fn(name: String, w: [Int]) -> [Int] {
     }
     [Int]{value(name, w)}
 }
+
 // Whether `name` chooses its NaN result's bits: a sign-bit, payload or
 // signaling operation, or a split that returns its NaN argument.
 exact_nan: fn(name: String) -> Bool {
@@ -187,13 +224,13 @@ same: fn(name: String, corpus: String) {
     loop at < raw.len() {
         comment: raw[at] == (U8{35})
         x: f32_of(if comment -> 0 else -> word_at(raw, at))
-        loop raw[at] != (U8{10}) -> at = at + 1
-        at = at + 1
+        loop raw[at] != (U8{10}) -> at += 1
+        at += 1
         if comment -> next
         got: if name == "expm1" -> bits(math.expm1(x)) else -> bits(math.log1p(x))
         want: if name == "expm1" -> bits(math.exp_m1(x)) else -> bits(math.ln_1p(x))
-        rows = rows + 1
-        if got != want && !(is_nan_word(got) && is_nan_word(want)) -> wrong = wrong + 1
+        rows += 1
+        if got != want && !(is_nan_word(got) && is_nan_word(want)) -> wrong += 1
     }
     print("{name}: {rows} rows, {wrong} differ from its member")
 }
@@ -205,15 +242,15 @@ check: fn(name: String, corpus: String) {
     wrong := 0
     loop at < raw.len() {
         if raw[at] == (U8{35}) {
-            loop raw[at] != (U8{10}) -> at = at + 1
-            at = at + 1
+            loop raw[at] != (U8{10}) -> at += 1
+            at += 1
             next
         }
         // The row's words: its arguments, then the results.
         words := [Int]{}
         loop {
             words.push(word_at(raw, at))
-            at = at + 9
+            at += 9
             if raw[at - 1] == (U8{10}) -> break
         }
         got: results(name, words)
@@ -221,11 +258,13 @@ check: fn(name: String, corpus: String) {
         differs := false
         loop i in 0..<got.len() {
             want: words[arguments + i]
-            if got[i] != want && (exact_nan(name) || i != 0 || !(is_nan_word(got[i]) && is_nan_word(want))) -> differs = true
+            if got[i] != want && (exact_nan(name) || i != 0 || !(is_nan_word(got[i]) && is_nan_word(want))) {
+                differs = true
+            }
         }
-        rows = rows + 1
+        rows += 1
         if differs {
-            wrong = wrong + 1
+            wrong += 1
             if wrong <= 3 {
                 shown := [String]{}
                 loop i in 0..<arguments -> shown.push(hex_word(words[i]))

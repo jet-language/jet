@@ -228,39 +228,50 @@ jet_eval_compiler_services_string: fn(value: String) -> TComptimeValue Never! {
 // value (`compiler.lex`, `compiler.parse`) and a query's own call site name
 // no file: their `file` is empty.
 jet_eval_compiler_services_span: fn(span: Span, file: String) -> TComptimeValue Never! {
-    TComptimeValue.Struct{type_name: "SourceSpan", fields: [TComptimeField]{
-        TComptimeField{name: "file", value: jet_eval_compiler_services_string(file)},
-        TComptimeField{name: "start", value: jet_eval_compiler_services_int(span.start)},
-        TComptimeField{name: "end", value: jet_eval_compiler_services_int(span.end)},
-
-    }}
+    TComptimeValue.Struct{
+        type_name: "SourceSpan",
+        fields: [TComptimeField]{
+            TComptimeField{name: "file", value: jet_eval_compiler_services_string(file)},
+            TComptimeField{name: "start", value: jet_eval_compiler_services_int(span.start)},
+            TComptimeField{name: "end", value: jet_eval_compiler_services_int(span.end)},
+        },
+    }
 }
 
 jet_eval_compiler_services_option_string: fn(value: String?) -> TComptimeValue Never! {
-    if value == .Val(item) -> return TComptimeValue.Present{value: jet_eval_compiler_services_string(item)}
+    if value == .Val(item) {
+        return TComptimeValue.Present{value: jet_eval_compiler_services_string(item)}
+    }
     TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.String}}
 }
 
 jet_eval_compiler_services_option_span: fn(value: Span?, file: String) -> TComptimeValue Never! {
-    if value == .Val(item) -> return TComptimeValue.Present{value: jet_eval_compiler_services_span(item, file)}
+    if value == .Val(item) {
+        return TComptimeValue.Present{value: jet_eval_compiler_services_span(item, file)}
+    }
     TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "SourceSpan"}}}
 }
 
 jet_eval_compiler_services_diagnostic_value: fn(diagnostic: Diagnostic) -> TComptimeValue Never! {
     severity := if diagnostic.severity == DIAGNOSTIC_LINT -> "lint" else -> "error"
-    TComptimeValue.Struct{type_name: "CompilerDiagnostic", fields: [TComptimeField]{
-        TComptimeField{name: "code", value: jet_eval_compiler_services_string(diagnostic.code)},
-        TComptimeField{name: "severity", value: jet_eval_compiler_services_string(severity)},
-        TComptimeField{name: "message", value: jet_eval_compiler_services_string(diagnostic.what)},
-        TComptimeField{name: "why", value: jet_eval_compiler_services_string(diagnostic.why)},
-        TComptimeField{name: "fix", value: jet_eval_compiler_services_string(diagnostic.fix)},
-        TComptimeField{name: "span", value: jet_eval_compiler_services_option_span(diagnostic.span, diagnostic.source_path ?? "")},
-    }}
+    TComptimeValue.Struct{
+        type_name: "CompilerDiagnostic",
+        fields: [TComptimeField]{
+            TComptimeField{name: "code", value: jet_eval_compiler_services_string(diagnostic.code)},
+            TComptimeField{name: "severity", value: jet_eval_compiler_services_string(severity)},
+            TComptimeField{name: "message", value: jet_eval_compiler_services_string(diagnostic.what)},
+            TComptimeField{name: "why", value: jet_eval_compiler_services_string(diagnostic.why)},
+            TComptimeField{name: "fix", value: jet_eval_compiler_services_string(diagnostic.fix)},
+            TComptimeField{name: "span", value: jet_eval_compiler_services_option_span(diagnostic.span, diagnostic.source_path ?? "")},
+        },
+    }
 }
 
 jet_eval_compiler_services_diagnostic_values: fn(diagnostics: [Diagnostic]) -> TComptimeValue Never! {
     values := [TComptimeValue]{}
-    loop diagnostic in diagnostics -> values.push(jet_eval_compiler_services_diagnostic_value(diagnostic))
+    loop diagnostic in diagnostics {
+        values.push(jet_eval_compiler_services_diagnostic_value(diagnostic))
+    }
     TComptimeValue.List{values: values}
 }
 
@@ -383,11 +394,14 @@ jet_eval_compiler_services_string_values: fn(values: [String]) -> TComptimeValue
 
 jet_eval_compiler_services_token_value: fn(tables: TokenTables, token: Token) -> TComptimeValue? {
     kind: jet_eval_compiler_services_token_kind(token.kind) ?? return None
-    TComptimeValue.Struct{type_name: "CompilerToken", fields: [TComptimeField]{
-        TComptimeField{name: "kind", value: jet_eval_compiler_services_string(kind)},
-        TComptimeField{name: "text", value: jet_eval_compiler_services_string(token_text(tables, token))},
-        TComptimeField{name: "span", value: jet_eval_compiler_services_span(token.span, "")},
-    }}
+    TComptimeValue.Struct{
+        type_name: "CompilerToken",
+        fields: [TComptimeField]{
+            TComptimeField{name: "kind", value: jet_eval_compiler_services_string(kind)},
+            TComptimeField{name: "text", value: jet_eval_compiler_services_string(token_text(tables, token))},
+            TComptimeField{name: "span", value: jet_eval_compiler_services_span(token.span, "")},
+        },
+    }
 }
 
 jet_eval_compiler_services_lex_value: fn(source: String, lexed: Lexed) -> TComptimeValue? {
@@ -396,12 +410,15 @@ jet_eval_compiler_services_lex_value: fn(source: String, lexed: Lexed) -> TCompt
         value: jet_eval_compiler_services_token_value(lexed.tables, token) ?? return None
         tokens.push(value)
     }
-    TComptimeValue.Struct{type_name: "CompilerLexed", fields: [TComptimeField]{
-        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
-        TComptimeField{name: "source", value: jet_eval_compiler_services_string(source)},
-        TComptimeField{name: "tokens", value: TComptimeValue.List{values: tokens}},
-        TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(lexed.diagnostics)},
-    }}
+    TComptimeValue.Struct{
+        type_name: "CompilerLexed",
+        fields: [TComptimeField]{
+            TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
+            TComptimeField{name: "source", value: jet_eval_compiler_services_string(source)},
+            TComptimeField{name: "tokens", value: TComptimeValue.List{values: tokens}},
+            TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(lexed.diagnostics)},
+        },
+    }
 }
 
 jet_eval_compiler_services_lex: fn(input: JetCompilerServicesSourceInput) -> JetCompilerServicesLexFacts? {
@@ -545,11 +562,14 @@ jet_eval_compiler_services_syntax_node: fn(item: Item) -> TComptimeValue Never! 
             span = value.name_span
         }
     }
-    TComptimeValue.Struct{type_name: "CompilerNode", fields: [TComptimeField]{
-        TComptimeField{name: "kind", value: jet_eval_compiler_services_string(kind)},
-        TComptimeField{name: "name", value: jet_eval_compiler_services_option_string(name)},
-        TComptimeField{name: "span", value: jet_eval_compiler_services_span(span, "")},
-    }}
+    TComptimeValue.Struct{
+        type_name: "CompilerNode",
+        fields: [TComptimeField]{
+            TComptimeField{name: "kind", value: jet_eval_compiler_services_string(kind)},
+            TComptimeField{name: "name", value: jet_eval_compiler_services_option_string(name)},
+            TComptimeField{name: "span", value: jet_eval_compiler_services_span(span, "")},
+        },
+    }
 }
 
 jet_eval_compiler_services_syntax_value: fn(source: String, parsed: ParseResult) -> TComptimeValue Never! {
@@ -559,22 +579,25 @@ jet_eval_compiler_services_syntax_value: fn(source: String, parsed: ParseResult)
         if diagnostic.severity == DIAGNOSTIC_ERROR -> has_error = true
     }
     if !has_error {
-        loop item in parsed.program.items -> items.push(jet_eval_compiler_services_syntax_node(item))
+        loop item in parsed.program.items {
+            items.push(jet_eval_compiler_services_syntax_node(item))
+        }
     }
-    TComptimeValue.Struct{type_name: "CompilerSyntaxTree", fields: [TComptimeField]{
-        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
-        TComptimeField{name: "source", value: jet_eval_compiler_services_string(source)},
-        TComptimeField{name: "items", value: TComptimeValue.List{values: items}},
-        TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(parsed.diagnostics)},
-    }}
+    TComptimeValue.Struct{
+        type_name: "CompilerSyntaxTree",
+        fields: [TComptimeField]{
+            TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
+            TComptimeField{name: "source", value: jet_eval_compiler_services_string(source)},
+            TComptimeField{name: "items", value: TComptimeValue.List{values: items}},
+            TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(parsed.diagnostics)},
+        },
+    }
 }
 
 jet_eval_compiler_services_parse: fn(input: JetCompilerServicesSourceInput) -> JetCompilerServicesParseFacts? {
     lex_facts: jet_eval_compiler_services_lex(input) ?? return None
     parsed := if {
-        lex_facts.lexed.diagnostics.len() > 0 -> {
-            ParseResult{program: ast_program(), diagnostics: lex_facts.lexed.diagnostics}
-        }
+        lex_facts.lexed.diagnostics.len() > 0 -> ParseResult{program: ast_program(), diagnostics: lex_facts.lexed.diagnostics}
         else -> parse_lexed(lex_facts.lexed.copy())
     }
     value := jet_eval_compiler_services_syntax_value(input.source, parsed)
@@ -606,20 +629,23 @@ jet_eval_compiler_services_function_info: fn(registration: SemaRegistrationGraph
     arithmetic := sema_comptime_reflection_arithmetic_facts(function, registration_module.source_file)
     identity := "{registration_module.module_name}.{function.name}"
     facts := sema_comptime_reflection_declared_function_facts(function, identity)
-    TComptimeValue.Struct{type_name: "FunctionInfo", fields: [TComptimeField]{
-        TComptimeField{name: "name", value: jet_eval_compiler_services_string(function.name)},
-        TComptimeField{name: "module", value: jet_eval_compiler_services_string(registration_module.module_name)},
-        TComptimeField{name: "identity", value: jet_eval_compiler_services_string(identity)},
-        TComptimeField{name: "package", value: jet_eval_compiler_services_string(registration_module.package_identity)},
-        TComptimeField{name: "signature", value: sema_comptime_reflection_callable_signature(registration, module_index, function, solved_effects, registration_module.source_file)},
-        TComptimeField{name: "span", value: jet_eval_compiler_services_span(function.name_span, registration_module.source_file)},
-        TComptimeField{name: "reaches_panic", value: TComptimeValue.Bool{value: reaches_panic}},
-        TComptimeField{name: "arithmetic", value: TComptimeValue.List{values: arithmetic}},
-        TComptimeField{name: "facts", value: TComptimeValue.List{values: facts}},
-        TComptimeField{name: "markers", value: TComptimeValue.List{values: markers}},
-        TComptimeField{name: "location", value: sema_comptime_reflection_location(registration_module.source_segments, sema_comptime_reflection_module_of(registration_module), Val(function.name_span))},
-        TComptimeField{name: "documentation", value: TComptimeValue.List{values: sema_comptime_reflection_documentation(source, Val(function.name_span))}},
-    }}
+    TComptimeValue.Struct{
+        type_name: "FunctionInfo",
+        fields: [TComptimeField]{
+            TComptimeField{name: "name", value: jet_eval_compiler_services_string(function.name)},
+            TComptimeField{name: "module", value: jet_eval_compiler_services_string(registration_module.module_name)},
+            TComptimeField{name: "identity", value: jet_eval_compiler_services_string(identity)},
+            TComptimeField{name: "package", value: jet_eval_compiler_services_string(registration_module.package_identity)},
+            TComptimeField{name: "signature", value: sema_comptime_reflection_callable_signature(registration, module_index, function, solved_effects, registration_module.source_file)},
+            TComptimeField{name: "span", value: jet_eval_compiler_services_span(function.name_span, registration_module.source_file)},
+            TComptimeField{name: "reaches_panic", value: TComptimeValue.Bool{value: reaches_panic}},
+            TComptimeField{name: "arithmetic", value: TComptimeValue.List{values: arithmetic}},
+            TComptimeField{name: "facts", value: TComptimeValue.List{values: facts}},
+            TComptimeField{name: "markers", value: TComptimeValue.List{values: markers}},
+            TComptimeField{name: "location", value: sema_comptime_reflection_location(registration_module.source_segments, sema_comptime_reflection_module_of(registration_module), Val(function.name_span))},
+            TComptimeField{name: "documentation", value: TComptimeValue.List{values: sema_comptime_reflection_documentation(source, Val(function.name_span))}},
+        },
+    }
 }
 
 // The ForeignInfo of one checked foreign declaration: its Jet name, the
@@ -637,7 +663,9 @@ jet_eval_compiler_services_function_info: fn(registration: SemaRegistrationGraph
 // in (jet_eval_compiler_services_segment_span).
 jet_eval_compiler_services_foreign_info: fn(function: SemaCheckedForeignFunction, providers: [SemaCheckedForeignProvider], segments: [SemaSourceSegment], file: String) -> TComptimeValue {
     params := [TComptimeValue]{}
-    loop parameter in function.params -> params.push(jet_eval_compiler_services_string(type_name(parameter.ty)))
+    loop parameter in function.params {
+        params.push(jet_eval_compiler_services_string(type_name(parameter.ty)))
+    }
     returns := String?{None}
     if function.return_type == .Val(ty) -> returns = Val(type_name(ty))
     library := ""
@@ -649,43 +677,51 @@ jet_eval_compiler_services_foreign_info: fn(function: SemaCheckedForeignFunction
     if function.owner == SemaCheckedForeignOwner.CModule {
         loop provider in providers {
             if provider.module_identity != function.module_identity -> next
-            library = provider.library.copy() // copy: the checked graph keeps its providers
+            library = provider.library.copy()  // copy: the checked graph keeps its providers
             if provider.boundary == .Val(boundary) {
-                target = boundary.target.copy() // copy: the checked graph keeps its providers
-                artifact = boundary.loaded_artifact.copy() // copy: the checked graph keeps its providers
-                coverage = boundary.artifact_coverage_digest.copy() // copy: the checked graph keeps its providers
+                target = boundary.target.copy()  // copy: the checked graph keeps its providers
+                artifact = boundary.loaded_artifact.copy()  // copy: the checked graph keeps its providers
+                coverage = boundary.artifact_coverage_digest.copy()  // copy: the checked graph keeps its providers
                 verified = boundary.obligations.len() > 0
                 loop obligation in boundary.obligations {
                     checked: sema_checked_foreign_basis_verified(obligation.basis)
                     if !checked -> verified = false
-                    evidence.push(TComptimeValue.Struct{type_name: "ForeignEvidence", fields: [TComptimeField]{
-                        {name: "name", value: jet_eval_compiler_services_string(obligation.name)},
-                        {name: "basis", value: jet_eval_compiler_services_string(obligation.basis)},
-                        {name: "checker", value: jet_eval_compiler_services_string(obligation.checker)},
-                        {name: "assumptions", value: jet_eval_compiler_services_string_values(obligation.assumptions)},
-                        {name: "verified", value: TComptimeValue.Bool{value: checked}},
-                    }})
+                    evidence.push(
+                        TComptimeValue.Struct{
+                            type_name: "ForeignEvidence",
+                            fields: [TComptimeField]{
+                                {name: "name", value: jet_eval_compiler_services_string(obligation.name)},
+                                {name: "basis", value: jet_eval_compiler_services_string(obligation.basis)},
+                                {name: "checker", value: jet_eval_compiler_services_string(obligation.checker)},
+                                {name: "assumptions", value: jet_eval_compiler_services_string_values(obligation.assumptions)},
+                                {name: "verified", value: TComptimeValue.Bool{value: checked}},
+                            },
+                        },
+                    )
                 }
             }
             break
         }
     }
-    TComptimeValue.Struct{type_name: "ForeignInfo", fields: [TComptimeField]{
-        {name: "name", value: jet_eval_compiler_services_string(function.name)},
-        {name: "symbol", value: jet_eval_compiler_services_string(function.symbol)},
-        {name: "module", value: jet_eval_compiler_services_string(function.module_name)},
-        {name: "language", value: jet_eval_compiler_services_string(function.language)},
-        {name: "library", value: jet_eval_compiler_services_string(library)},
-        {name: "abi", value: jet_eval_compiler_services_string(function.abi)},
-        {name: "params", value: TComptimeValue.List{values: params}},
-        {name: "returns", value: jet_eval_compiler_services_option_string(returns)},
-        {name: "target", value: jet_eval_compiler_services_string(target)},
-        {name: "artifact", value: jet_eval_compiler_services_string(artifact)},
-        {name: "coverage", value: jet_eval_compiler_services_string(coverage)},
-        {name: "evidence", value: TComptimeValue.List{values: evidence}},
-        {name: "verified", value: TComptimeValue.Bool{value: verified}},
-        {name: "span", value: jet_eval_compiler_services_segment_span(function.span, segments, file)},
-    }}
+    TComptimeValue.Struct{
+        type_name: "ForeignInfo",
+        fields: [TComptimeField]{
+            {name: "name", value: jet_eval_compiler_services_string(function.name)},
+            {name: "symbol", value: jet_eval_compiler_services_string(function.symbol)},
+            {name: "module", value: jet_eval_compiler_services_string(function.module_name)},
+            {name: "language", value: jet_eval_compiler_services_string(function.language)},
+            {name: "library", value: jet_eval_compiler_services_string(library)},
+            {name: "abi", value: jet_eval_compiler_services_string(function.abi)},
+            {name: "params", value: TComptimeValue.List{values: params}},
+            {name: "returns", value: jet_eval_compiler_services_option_string(returns)},
+            {name: "target", value: jet_eval_compiler_services_string(target)},
+            {name: "artifact", value: jet_eval_compiler_services_string(artifact)},
+            {name: "coverage", value: jet_eval_compiler_services_string(coverage)},
+            {name: "evidence", value: TComptimeValue.List{values: evidence}},
+            {name: "verified", value: TComptimeValue.Bool{value: verified}},
+            {name: "span", value: jet_eval_compiler_services_segment_span(function.span, segments, file)},
+        },
+    }
 }
 
 // `span` of a module's text as a SourceSpan of the file it was written in. A
@@ -732,7 +768,9 @@ jet_eval_compiler_services_checked: fn(input: JetCompilerServicesCheckedInput) -
         module_text: sema_comptime_reflection_doc_source(registration_module.source, registration_module.source_file)
         checked_module := SemaGraphModuleResult?{None}
         loop candidate in input.graph.modules {
-            if candidate.module_identity == registration_module.module_identity -> checked_module = Val(candidate)
+            if candidate.module_identity == registration_module.module_identity {
+                checked_module = Val(candidate)
+            }
         }
         registry := SemaScopeMembersMarkerRegistry?{None}
         loop item in registration_module.program.items {
@@ -752,7 +790,9 @@ jet_eval_compiler_services_checked: fn(input: JetCompilerServicesCheckedInput) -
                 function_id := symbol_find(input.registration.symbols, function.key)
                 if function_id == .Val(id) {
                     loop registered in registration_module.functions {
-                        if registered.symbol.id == id -> declared = sema_comptime_reflection_declared_effect_names(registered.declaration)
+                        if registered.symbol.id == id {
+                            declared = sema_comptime_reflection_declared_effect_names(registered.declaration)
+                        }
                     }
                 }
                 effects.push(sema_comptime_reflection_effect_info(declared, Val(function.effects.solved)))
@@ -766,15 +806,18 @@ jet_eval_compiler_services_checked: fn(input: JetCompilerServicesCheckedInput) -
     }
     semantic_index := TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "CompilerSemanticIndex"}}}
     if !has_errors && index.complete -> semantic_index = TComptimeValue.Present{value: index.value}
-    value := TComptimeValue.Struct{type_name: "CompilerChecked", fields: [TComptimeField]{
-        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
-        TComptimeField{name: "source", value: jet_eval_compiler_services_string(input.parsed.source)},
-        TComptimeField{name: "syntax", value: input.parsed.value},
-        TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(diagnostics)},
-        TComptimeField{name: "functions", value: TComptimeValue.List{values: functions}},
-        TComptimeField{name: "effects", value: TComptimeValue.List{values: effects}},
-        TComptimeField{name: "semantic_index", value: semantic_index},
-    }}
+    value := TComptimeValue.Struct{
+        type_name: "CompilerChecked",
+        fields: [TComptimeField]{
+            TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
+            TComptimeField{name: "source", value: jet_eval_compiler_services_string(input.parsed.source)},
+            TComptimeField{name: "syntax", value: input.parsed.value},
+            TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(diagnostics)},
+            TComptimeField{name: "functions", value: TComptimeValue.List{values: functions}},
+            TComptimeField{name: "effects", value: TComptimeValue.List{values: effects}},
+            TComptimeField{name: "semantic_index", value: semantic_index},
+        },
+    }
     JetCompilerServicesCheckedFacts{value: value, semantic_index_complete: !has_errors && index.complete}
 }
 
@@ -812,10 +855,10 @@ JetCompilerServicesProgramInfo: enum {
 // body checked, false when a build that keeps going checked a failed one
 // as a trap of its declared signature.
 jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph, graph: SemaGraphResult, source: String, module_sources: [SemaCompilerModuleSource], *, checked_complete: Bool) -> JetCompilerServicesProgramInfo {
-    if !registration.complete -> return .Missing(fact: "the registration graph is incomplete")
-    if !graph.complete -> return .Missing(fact: "the checked graph is incomplete")
+    if !registration.complete -> return .Missing{fact: "the registration graph is incomplete"}
+    if !graph.complete -> return .Missing{fact: "the checked graph is incomplete"}
     index: sema_compiler_semantic_index_from_checked(registration, graph, source, module_sources)
-    if !index.complete -> return .Missing(fact: "semantic index: {index.missing}")
+    if !index.complete -> return .Missing{fact: "semantic index: {index.missing}"}
     catalog: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
     types := [TComptimeValue]{}
     functions := [TComptimeValue]{}
@@ -830,24 +873,30 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
         // FunctionInfo its documentation.
         doc_text: sema_comptime_reflection_source(module_row.source, module_row.source_file)
         checked := SemaGraphModuleResult?{None}
-        loop candidate in graph.modules { if candidate.module_identity == module_row.module_identity -> checked = Val(candidate) }
-        if checked == None -> return .Missing(fact: "module `{module_text(registration.module_table, module_row.module_identity)}` has no checked result")
+        loop candidate in graph.modules {
+            if candidate.module_identity == module_row.module_identity -> checked = Val(candidate)
+        }
+        if checked == None {
+            return .Missing{fact: "module `{module_text(registration.module_table, module_row.module_identity)}` has no checked result"}
+        }
         module_types := [TComptimeValue]{}
         module_functions := [TComptimeValue]{}
         registry := SemaScopeMembersMarkerRegistry?{None}
         loop item in module_row.program.items {
             name := String?{None}
             if item == {
-                .Struct(definition) -> name = Val(definition.name)
-                .Enum(definition) -> name = Val(definition.name)
-                .Distinct(definition) -> name = Val(definition.name)
+                .Struct(definition) -> { name = Val(definition.name) }
+                .Enum(definition) -> { name = Val(definition.name) }
+                .Distinct(definition) -> { name = Val(definition.name) }
                 .Func(function) -> {
                     if function.name == "build" {
-                        if jet_eval_compiler_services_function_key(registration, function, module_row) == .Val(key) -> build_keys.push(key)
+                        if jet_eval_compiler_services_function_key(registration, function, module_row) == .Val(key) {
+                            build_keys.push(key)
+                        }
                         next
                     }
-                    key: jet_eval_compiler_services_function_key(registration, function, module_row) ?? return .Missing(fact: "function `{module_row.module_name}.{function.name}` is not registered")
-                    markers: sema_comptime_reflection_written_markers(registration, module_row.module_identity, module_row.program, catalog, function.markers, registry) ?? return .Missing(fact: "module `{module_row.module_name}` has no marker registry")
+                    key: jet_eval_compiler_services_function_key(registration, function, module_row) ?? return .Missing{fact: "function `{module_row.module_name}.{function.name}` is not registered"}
+                    markers: sema_comptime_reflection_written_markers(registration, module_row.module_identity, module_row.program, catalog, function.markers, registry) ?? return .Missing{fact: "module `{module_row.module_name}` has no marker registry"}
                     value: jet_eval_compiler_services_function_info(registration, module_index, function, doc_text, checked, Val(key), markers)
                     functions.push(value.copy())
                     module_functions.push(value)
@@ -855,16 +904,18 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
                 .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
             if name == .Val(type_name) {
-                value: sema_comptime_reflection_type_info(registration, module_row.module_identity, type_name, catalog, [Type]{}) ?? return .Missing(fact: "type `{module_row.module_name}.{type_name}` has no TypeInfo")
+                value: sema_comptime_reflection_type_info(registration, module_row.module_identity, type_name, catalog, [Type]{}) ?? return .Missing{fact: "type `{module_row.module_name}.{type_name}` has no TypeInfo"}
                 types.push(value.copy())
                 module_types.push(value)
             }
         }
         if checked == .Val(module_result) {
-            loop function in module_result.foreign_functions -> foreign.push(jet_eval_compiler_services_foreign_info(function, module_result.foreign_providers, module_row.source_segments, module_row.source_file))
+            loop function in module_result.foreign_functions {
+                foreign.push(jet_eval_compiler_services_foreign_info(function, module_result.foreign_providers, module_row.source_segments, module_row.source_file))
+            }
             constants.extend(sema_comptime_reflection_declared_constants(registration, module_index, module_result.declarations.constants))
         }
-        traits.extend(sema_comptime_reflection_declared_traits(registration, module_index, catalog) ?? return .Missing(fact: "module `{module_row.module_name}` has no marker registry"))
+        traits.extend(sema_comptime_reflection_declared_traits(registration, module_index, catalog) ?? return .Missing{fact: "module `{module_row.module_name}` has no marker registry"})
         at := -1
         loop (row, package) in packages {
             if package.identity == module_row.package_identity -> at = row
@@ -877,14 +928,19 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
         packages[at].functions.extend(module_functions.copy())
         // A file module carries no written markers; a code module's
         // ModuleInfo (in a marker body) lists its own.
-        packages[at].modules.push(TComptimeValue.Struct{type_name: "ModuleInfo", fields: [TComptimeField]{
-            {name: "name", value: jet_eval_compiler_services_string(module_row.module_name)},
-            {name: "identity", value: jet_eval_compiler_services_string(module_row.module_name)},
-            {name: "types", value: TComptimeValue.List{values: module_types}},
-            {name: "functions", value: TComptimeValue.List{values: module_functions}},
-            {name: "markers", value: TComptimeValue.List{values: [TComptimeValue]{}}},
-            {name: "comments", value: TComptimeValue.List{values: sema_comptime_reflection_written_comments(doc_text, module_row.source_segments)}},
-        }})
+        packages[at].modules.push(
+            TComptimeValue.Struct{
+                type_name: "ModuleInfo",
+                fields: [TComptimeField]{
+                    {name: "name", value: jet_eval_compiler_services_string(module_row.module_name)},
+                    {name: "identity", value: jet_eval_compiler_services_string(module_row.module_name)},
+                    {name: "types", value: TComptimeValue.List{values: module_types}},
+                    {name: "functions", value: TComptimeValue.List{values: module_functions}},
+                    {name: "markers", value: TComptimeValue.List{values: [TComptimeValue]{}}},
+                    {name: "comments", value: TComptimeValue.List{values: sema_comptime_reflection_written_comments(doc_text, module_row.source_segments)}},
+                },
+            },
+        )
     }
     package_values := [TComptimeValue]{}
     // Settings belong to the build, which takes them from the built package
@@ -894,15 +950,20 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
         package_settings := [TComptimeValue]{}
         // copy: a loop body can't move a list every pass reads.
         if package.identity == registration.package_identity -> package_settings = settings.copy()
-        package_values.push(TComptimeValue.Struct{type_name: "PackageInfo", fields: [TComptimeField]{
-            {name: "name", value: jet_eval_compiler_services_string(package.name)},
-            {name: "identity", value: jet_eval_compiler_services_string(package.identity)},
-            {name: "version", value: jet_eval_compiler_services_string(package.version)},
-            {name: "modules", value: TComptimeValue.List{values: package.modules}},
-            {name: "types", value: TComptimeValue.List{values: package.types}},
-            {name: "functions", value: TComptimeValue.List{values: package.functions}},
-            {name: "settings", value: TComptimeValue.List{values: package_settings}},
-        }})
+        package_values.push(
+            TComptimeValue.Struct{
+                type_name: "PackageInfo",
+                fields: [TComptimeField]{
+                    {name: "name", value: jet_eval_compiler_services_string(package.name)},
+                    {name: "identity", value: jet_eval_compiler_services_string(package.identity)},
+                    {name: "version", value: jet_eval_compiler_services_string(package.version)},
+                    {name: "modules", value: TComptimeValue.List{values: package.modules}},
+                    {name: "types", value: TComptimeValue.List{values: package.types}},
+                    {name: "functions", value: TComptimeValue.List{values: package.functions}},
+                    {name: "settings", value: TComptimeValue.List{values: package_settings}},
+                },
+            },
+        )
     }
     // The revision is the content hash of the checked sources: each module's
     // identity and text, in load order.
@@ -928,10 +989,12 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
     if index.value == .Struct(_, index_fields) {
         loop name in ([String]{"definitions", "references", "calls", "structural_nodes"}) {
             value := TComptimeValue?{None}
-            loop field in index_fields { if field.name == name -> value = Val(field.value) }
-            fields.push(TComptimeField{name: if name == "calls" -> "call_edges" else -> name, value: value ?? return .Missing(fact: "the semantic index has no `{name}`")})
+            loop field in index_fields {
+                if field.name == name -> value = Val(field.value)
+            }
+            fields.push(TComptimeField{name: if name == "calls" -> "call_edges" else -> name, value: value ?? return .Missing{fact: "the semantic index has no `{name}`"}})
         }
-    } else { return .Missing(fact: "the semantic index is not a struct") }
+    } else { return .Missing{fact: "the semantic index is not a struct"} }
     .Ready(value: TComptimeValue.Struct{type_name: "ProgramInfo", fields: fields})
 }
 
@@ -943,17 +1006,24 @@ jet_eval_compiler_services_root_calls: fn(registration: SemaRegistrationGraph, g
             if checked.module_identity != module_row.module_identity -> next
             loop call in checked.call_facts {
                 if build_keys.contains(call.caller_key) -> next
-                callee := call.intrinsic_api.copy() // copy: the checked graph keeps its call facts
+                callee := call.intrinsic_api.copy()  // copy: the checked graph keeps its call facts
                 if call.callee == .Val(id) {
-                    if !symbol_is_local(id) -> callee = Val(symbol_table_key(registration.symbols, id))
+                    if !symbol_is_local(id) {
+                        callee = Val(symbol_table_key(registration.symbols, id))
+                    }
                 }
                 name: callee ?? next
-                calls.push(TComptimeValue.Struct{type_name: "CompilerCall", fields: [TComptimeField]{
-                    {name: "caller", value: jet_eval_compiler_services_string(sema_compiler_identity(registration, call.caller_key))},
-                    {name: "callee", value: jet_eval_compiler_services_string(sema_compiler_identity(registration, name))},
-                    {name: "module", value: jet_eval_compiler_services_string(checked.module_path)},
-                    {name: "span", value: jet_eval_compiler_services_span(call.span, module_row.source_file)},
-                }})
+                calls.push(
+                    TComptimeValue.Struct{
+                        type_name: "CompilerCall",
+                        fields: [TComptimeField]{
+                            {name: "caller", value: jet_eval_compiler_services_string(sema_compiler_identity(registration, call.caller_key))},
+                            {name: "callee", value: jet_eval_compiler_services_string(sema_compiler_identity(registration, name))},
+                            {name: "module", value: jet_eval_compiler_services_string(checked.module_path)},
+                            {name: "span", value: jet_eval_compiler_services_span(call.span, module_row.source_file)},
+                        },
+                    },
+                )
             }
         }
     }
@@ -974,7 +1044,9 @@ jet_eval_compiler_services_type_names: fn(registration: SemaRegistrationGraph) -
     namespace: registration.modules[root].namespace
     aliases := [String]{}
     loop import in registration.modules[root].program.imports {
-        if import.alias != "" && !aliases.contains(import.alias) -> aliases.push(import.alias.copy())
+        if import.alias != "" && !aliases.contains(import.alias) {
+            aliases.push(import.alias.copy())
+        }
     }
     loop (module_index, module_row) in registration.modules {
         loop (row, nominal) in module_row.nominals {
@@ -984,7 +1056,9 @@ jet_eval_compiler_services_type_names: fn(registration: SemaRegistrationGraph) -
             loop alias in aliases -> spellings.push("{alias}.{name}")
             loop spelling in spellings {
                 found: sema_type_resolve_nominal_row_at(registration, Type.Named{name: spelling}, root) ?? next
-                if found.module_index == module_index && found.row == row -> names.root.push(sema_comptime_reflection_type_id_record(identity.copy(), spelling.copy()))
+                if found.module_index == module_index && found.row == row {
+                    names.root.push(sema_comptime_reflection_type_id_record(identity.copy(), spelling.copy()))
+                }
             }
             if module_index == root || (namespace != "" && module_row.namespace == namespace) {
                 names.scope.push(sema_comptime_reflection_type_id_record(identity, name.copy()))
@@ -993,7 +1067,9 @@ jet_eval_compiler_services_type_names: fn(registration: SemaRegistrationGraph) -
             // The prelude's bare names, read from no module's scope.
             bare: sema_type_graph_lookup_symbol_at(registration, -1, name) ?? next
             found: sema_type_lookup_nominal_row(registration, Val(bare), name, -1) ?? next
-            if found.module_index == module_index && found.row == row -> names.scope.push(sema_comptime_reflection_type_id_record(identity, name.copy()))
+            if found.module_index == module_index && found.row == row {
+                names.scope.push(sema_comptime_reflection_type_id_record(identity, name.copy()))
+            }
         }
     }
     names
@@ -1004,7 +1080,8 @@ jet_eval_compiler_services_type_names: fn(registration: SemaRegistrationGraph) -
 // empty, and not complete, so the build skips the snapshot.
 jet_eval_compiler_services_program_unread: fn() -> TComptimeValue Never! {
     fields := [TComptimeField]{}
-    loop name in ([String]{"types", "functions", "traits", "constants", "packages", "foreign", "root_calls", "root_types", "scope_types", "definitions", "references", "call_edges", "structural_nodes"}) {
+    loop name in
+        ([String]{"types", "functions", "traits", "constants", "packages", "foreign", "root_calls", "root_types", "scope_types", "definitions", "references", "call_edges", "structural_nodes"}) {
         fields.push(TComptimeField{name: name, value: TComptimeValue.List{values: [TComptimeValue]{}}})
     }
     fields.push(TComptimeField{name: "complete", value: TComptimeValue.Bool{value: false}})
@@ -1035,6 +1112,7 @@ jet_eval_compiler_services_package_rows: fn(registration: SemaRegistrationGraph,
     version: if entry -> registration.build_facts.package_version.copy() else -> module_row.package.version.copy()
     JetCompilerServicesPackageRows{identity: module_row.package_identity.copy(), name: name, version: version, modules: [TComptimeValue]{}, types: [TComptimeValue]{}, functions: [TComptimeValue]{}}
 }
+
 // Package and build call sites must consume Jetpack's typed host query result;
 // this helper deliberately defines no package view, lock/profile, or graph facts.
 // A package query carrier must preserve the pinned-root authority, checked-read
@@ -1119,15 +1197,23 @@ jet_eval_compiler_services_source_map: fn(rust_source: String) -> JetCompilerSer
 jet_eval_compiler_services_source_map_value: fn(map: JetCompilerServicesSourceMap) -> TComptimeValue Never! {
     lines := [TComptimeValue]{}
     loop line in map.generated_lines {
-        lines.push(TComptimeValue.Struct{type_name: "CompilerGeneratedLine", fields: [TComptimeField]{
-            TComptimeField{name: "generated_line", value: jet_eval_compiler_services_int(line.generated_line)},
-            TComptimeField{name: "source", value: jet_eval_compiler_services_option_string(line.source)},
-            TComptimeField{name: "source_line", value: jet_eval_compiler_services_int(line.source_line)},
-        }})
+        lines.push(
+            TComptimeValue.Struct{
+                type_name: "CompilerGeneratedLine",
+                fields: [TComptimeField]{
+                    TComptimeField{name: "generated_line", value: jet_eval_compiler_services_int(line.generated_line)},
+                    TComptimeField{name: "source", value: jet_eval_compiler_services_option_string(line.source)},
+                    TComptimeField{name: "source_line", value: jet_eval_compiler_services_int(line.source_line)},
+                },
+            },
+        )
     }
-    TComptimeValue.Struct{type_name: "CompilerSourceMap", fields: [TComptimeField]{
-        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
-        TComptimeField{name: "sources", value: jet_eval_compiler_services_string_values(map.sources)},
-        TComptimeField{name: "generated_lines", value: TComptimeValue.List{values: lines}},
-    }}
+    TComptimeValue.Struct{
+        type_name: "CompilerSourceMap",
+        fields: [TComptimeField]{
+            TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
+            TComptimeField{name: "sources", value: jet_eval_compiler_services_string_values(map.sources)},
+            TComptimeField{name: "generated_lines", value: TComptimeValue.List{values: lines}},
+        },
+    }
 }

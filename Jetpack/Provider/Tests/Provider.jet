@@ -12,11 +12,11 @@ provider_core_test_write: fn(path: String, text: String) -[FS]> {
 }
 
 provider_core_test_ctx: fn(store: String, offline: Bool, fixtures: String?, project: String?) -> ProviderCtx {
-    ProviderCtx{fixtures, store_dir: store, offline, project_dir: project, nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
+    ProviderCtx{fixtures: fixtures, store_dir: store, offline: offline, project_dir: project, nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
 }
 
 provider_core_test_table: fn(name: String, upstream: String, via: ProviderKind) -> SourceTable {
-    SourceTable.from_decls([NamedSourceDecl]{NamedSourceDecl{name, upstream, via}})
+    SourceTable.from_decls([NamedSourceDecl]{NamedSourceDecl{name: name, upstream: upstream, via: via}})
 }
 
 provider_core_test_spec: fn(raw: String) -> RefSpec {
@@ -48,7 +48,9 @@ provider_core_test_git: fn(dir: String, args: [String]) -[Exec, Time.Wait]> Proc
 // `git` is not installed.
 provider_core_test_git_repo: fn(dir: String, files_to_write: [(path: String, text: String)]) -[FS, Exec, Time.Wait]> Bool {
     if !provider_core_test_git_available() -> return false
-    loop entry in files_to_write -> provider_core_test_write(files.join(dir, entry.path), entry.text)
+    loop entry in files_to_write {
+        provider_core_test_write(files.join(dir, entry.path), entry.text)
+    }
     provider_core_test_git(dir, [String]{"init", "--quiet"})
     provider_core_test_git(dir, [String]{"config", "user.email", "jetpack@example.invalid"})
     provider_core_test_git(dir, [String]{"config", "user.name", "Jet Test"})
@@ -121,7 +123,7 @@ provider_core_test_is_bad_output: fn(error: ProviderError) -> Bool {
     files.write(files.join(candidate, "sentinel"), "keep") ?? panic("sentinel")
     before: files.stat(candidate) ?? panic("candidate identity")
     if provider_create_temp_candidate(parent, name) == {
-        .Ok(_) -> panic("an existing temporary directory must not be reused")
+        .Ok(_) -> { panic("an existing temporary directory must not be reused") }
         .Err(error) -> assert(error == .AlreadyExists(_))
     }
     assert_eq((files.stat(candidate) ?? panic("same candidate")).id, before.id)
@@ -170,7 +172,7 @@ provider_core_test_is_bad_output: fn(error: ProviderError) -> Bool {
 }
 
 provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest: String, references: [String], proof: String, nar_hash: String, size: Int) -> AdmittedNixObject {
-    AdmittedNixObject{store_path, hangar_path, hangar_digest: digest, direct_reference_digests: references, upstream_proof_sha256: proof, nar_hash, size, compression: "zstd"}
+    AdmittedNixObject{store_path: store_path, hangar_path: hangar_path, hangar_digest: digest, direct_reference_digests: references, upstream_proof_sha256: proof, nar_hash: nar_hash, size: size, compression: "zstd"}
 }
 
 #Test("provider indexed realization records union and both provenance families") {
@@ -185,7 +187,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     bin_leaf: "sha256-{provider_core_test_repeat("d", 64)}"
     out_digest: "sha256-{provider_core_test_repeat("a", 64)}"
     bin_digest: "sha256-{provider_core_test_repeat("b", 64)}"
-    record: NixIndexRecord{attrpath: [String]{"ripgrep"}, version: "15.2.0", drv_path: "/nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-ripgrep.drv", outputs: [String: String]{"bin": bin_store, "out": out_store}}
+    record: NixIndexRecord{attrpath: [String]{"ripgrep"}, version: "15.2.0", drv_path: "/nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-ripgrep.drv", outputs: [String:String]{"bin": bin_store, "out": out_store}}
     proof: NixIndexProof{
         schema: 1,
         channel: "nixpkgs-unstable",
@@ -202,12 +204,12 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     out_object: provider_core_test_admitted(out_store, out_path, out_digest, [String]{leaf}, provider_core_test_repeat("4", 64), "sha256-nar-out", 42)
     bin_object: provider_core_test_admitted(bin_store, bin_path, bin_digest, [String]{bin_leaf, leaf}, provider_core_test_repeat("5", 64), "sha256-nar-bin", 43)
     admitted: AdmittedNixClosure{
-        outputs: [String: AdmittedNixObject]{"bin": bin_object, "out": out_object},
-        objects: [String: AdmittedNixObject]{out_store: out_object, bin_store: bin_object},
+        outputs: [String:AdmittedNixObject]{"bin": bin_object, "out": out_object},
+        objects: [String:AdmittedNixObject]{out_store: out_object, bin_store: bin_object},
         closure_receipt_sha256: provider_core_test_repeat("6", 64),
     }
     key: NixIndexKey{channel: "nixpkgs-unstable", revision: "c8f90650c15282fa8656a041bfbbd2403997a9a7", system: "x86_64-linux", attrpath: [String]{"ripgrep"}}
-    verified: NixVerifiedIndexRecord{record, proof, trust: NixIndexTrustTier.OfficialSigned}
+    verified: NixVerifiedIndexRecord{record: record, proof: proof, trust: NixIndexTrustTier.OfficialSigned}
     realized: provider_realization_from_index(provider_core_test_spec("ripgrep@jetpack"), key, verified, admitted) ?? panic("indexed realization")
     assert_eq(realized.source_state, SourceState.Substituted)
     assert_eq(realized.references, [String]{leaf, bin_leaf})
@@ -253,14 +255,16 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
         assert_eq(provider_resolve_kind(spec, SourceTable.empty(), true, "."), case.kind)
         assert_eq(provider_flake_ref(spec, SourceTable.empty()), case.flake)
         if provider_for(case.kind).realize(verification, spec, SourceTable.empty(), ctx) == {
-            .Ok(_) -> panic("direct ecosystem root unexpectedly used a provider")
+            .Ok(_) -> { panic("direct ecosystem root unexpectedly used a provider") }
             .Err(error) -> {
                 if error == {
                     .Unsupported(message) -> {
                         assert(message.contains(case.kind.label()))
                         assert(message.contains("import and lock"))
                     }
-                    .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .FixtureMissing(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> panic("unexpected provider error: {error.message()}")
+                    .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .FixtureMissing(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> {
+                        panic("unexpected provider error: {error.message()}")
+                    }
                 }
             }
         }
@@ -289,24 +293,30 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     offline: provider_core_test_ctx(store, true, None, None)
     if provider_core_test_realize_error(verification, registry_spec, SourceTable.empty(), offline) == {
         .Offline(reason) -> assert(reason.contains("--offline"))
-        .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .NixIndex(_) | .NixCache(_) -> panic("an offline registry realization must be refused as offline")
+        .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .NixIndex(_) | .NixCache(_) -> {
+            panic("an offline registry realization must be refused as offline")
+        }
     }
     nix_spec: provider_core_test_spec("fastfetch@jetpack")
     if provider_plan_downloads(verification, [RefSpec]{nix_spec}, SourceTable.empty(), offline) == {
-        .Ok(_) -> panic("Nix planning needs a signed index")
+        .Ok(_) -> { panic("Nix planning needs a signed index") }
         .Err(error) -> {
             if error == {
                 .Unsupported(reason) -> assert(reason.contains("signed index"))
-                .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .FixtureMissing(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> panic("unexpected planning error: {error.message()}")
+                .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .FixtureMissing(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> {
+                    panic("unexpected planning error: {error.message()}")
+                }
             }
         }
     }
     if provider_for(ProviderKind.Nix).realize(verification, nix_spec, SourceTable.empty(), offline) == {
-        .Ok(_) -> panic("offline Nix realization without an index must fail")
+        .Ok(_) -> { panic("offline Nix realization without an index must fail") }
         .Err(error) -> {
             if error == {
                 .Offline(reason) -> assert(reason.contains("--offline"))
-                .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .NixIndex(_) | .NixCache(_) -> panic("unexpected realization error: {error.message()}")
+                .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .NixIndex(_) | .NixCache(_) -> {
+                    panic("unexpected realization error: {error.message()}")
+                }
             }
         }
     }
@@ -385,7 +395,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     assert_eq(facts.get("nix.build.home"), Val("/homeless-shelter"))
     assert_eq(facts.get("nix.build.uid"), Val("unprivileged"))
     assert_eq(facts.get("nix.build.time"), Val("deterministic"))
-    plan: ProviderPlanFacts.from_facts([String: String]{}) ?? panic("empty plan")
+    plan: ProviderPlanFacts.from_facts([String:String]{}) ?? panic("empty plan")
     producer: ProducerRecord.new("nix", "/nix/store/fake.drv", "sha256-fake", plan, "nix-compat", "policy=test\nplatform=test", provider_nix_build_facts_record()) ?? panic("producer")
     runtime: provider_nix_runtime_environment(producer)
     assert_eq(runtime.get("HOME"), Val("/homeless-shelter"))
@@ -395,21 +405,23 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     tampered := producer
     tampered.facts["nix.build.env.HOME"] = "/tmp"
     if provider_validate_nix_build_facts(tampered) == {
-        .Ok(_) -> panic("a changed build fact must be rejected")
+        .Ok(_) -> { panic("a changed build fact must be rejected") }
         .Err(_) -> {}
     }
     assert_eq(provider_nix_runtime_environment(tampered).len(), 0)
 }
 
 #Test("provider shared carrier rejects unpinned external reference") {
-    plan: ProviderPlanFacts.from_facts([String: String]{"action.kind": "test"}) ?? panic("plan")
-    producer := ProducerRecord.new("npm", "cas:source", "source", plan, "test-toolchain", "policy=test\nplatform=any", [String: String]{}) ?? panic("producer")
+    plan: ProviderPlanFacts.from_facts([String:String]{"action.kind": "test"}) ?? panic("plan")
+    producer := ProducerRecord.new("npm", "cas:source", "source", plan, "test-toolchain", "policy=test\nplatform=any", [String:String]{}) ?? panic("producer")
     if provider_refresh_provider_facts(producer, "left-pad@npm") == {
-        .Ok(_) -> panic("an unpinned external reference must be rejected")
+        .Ok(_) -> { panic("an unpinned external reference must be rejected") }
         .Err(error) -> {
             if error == {
                 .BadOutput(reason) -> assert(reason.contains("exact"))
-                .BuildFailed(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> panic("unexpected error: {error.message()}")
+                .BuildFailed(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> {
+                    panic("unexpected error: {error.message()}")
+                }
             }
         }
     }
@@ -445,7 +457,9 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
 ]`
     if provider_core_test_parse_error(provider_core_test_spec("fastfetch@jetpack"), stdout) == {
         .BadOutput(reason) -> assert(reason.contains("expected exactly one"))
-        .BuildFailed(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> panic("multiple Nix results must be rejected as bad output")
+        .BuildFailed(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> {
+            panic("multiple Nix results must be rejected as bad output")
+        }
     }
 }
 
@@ -456,7 +470,9 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
             assert(reason.contains("missing key `outputs`"))
             assert(reason.contains(noise))
         }
-        .BuildFailed(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> panic("expected BadOutput")
+        .BuildFailed(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> {
+            panic("expected BadOutput")
+        }
     }
 }
 
@@ -481,7 +497,9 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     ctx: provider_core_test_ctx(dir, false, Val(files.join(dir, "definitely-not-here-xyz")), None)
     if provider_core_test_realize_error(verification, provider_core_test_spec("nope@jetpack"), SourceTable.empty(), ctx) == {
         .FixtureMissing(_) -> {}
-        .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> panic("expected FixtureMissing")
+        .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> {
+            panic("expected FixtureMissing")
+        }
     }
 }
 
@@ -721,7 +739,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     assert_eq(package.root, files.join(repo, "packages/hello"))
     assert_eq(package.facts.name, "hello")
     if provider_find_canonical_package(repo, "stray") == {
-        .Ok(_) -> panic("a non-member Package must not be found")
+        .Ok(_) -> { panic("a non-member Package must not be found") }
         .Err(_) -> {}
     }
     table: provider_core_test_table("mine", "path:{repo}", ProviderKind.Core)
@@ -778,24 +796,28 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
 // A pinned-looking cargo outside the immutable closure never
 // runs, and build scratch is swept after the refusal.
 #Test("provider bridge build rejects untrusted toolchain outside native closure") {
-    if sys.name() != "linux" -> return
+    if sys.name() != "linux" {
+        return
+    }
     base: provider_core_test_dir("jpk-bridge")
     cargo: files.join(base, "toolchain/cargo")
     provider_core_test_write(cargo, "#!/bin/sh\nmkdir -p \"$CARGO_TARGET_DIR/release\"\nprintf 'PINNED-RLIB-BYTES' > \"$CARGO_TARGET_DIR/release/libmath.rlib\"\nexit 0\n")
     files.set_mode(cargo, 0o755) ?? panic("executable cargo")
-    toolchain: CargoToolchain{cargo, id: "toolchain-test", version: "9.9.9", pinned: true, ring_artifacts: [String: String]{}}
+    toolchain: CargoToolchain{cargo: cargo, id: "toolchain-test", version: "9.9.9", pinned: true, ring_artifacts: [String:String]{}}
     hangar: files.join(base, "hangar")
     files.create_dir_all(hangar) ?? panic("hangar")
     pkg: files.join(base, "pkg")
     provider_core_test_write(files.join(pkg, "Cargo.toml"), "[package]\nname=\"math\"\n")
     if provider_build_rlib_from_cargo(pkg, hangar, toolchain, false) == {
-        .Ok(_) -> panic("a tool outside the immutable closure must not run")
-        .Err(error) -> assert(error.message().contains("outside the immutable tool closure") || error.message().contains("native sandbox"))
+        .Ok(_) -> { panic("a tool outside the immutable closure must not run") }
+        .Err(error) -> {
+            assert(error.message().contains("outside the immutable tool closure") || error.message().contains("native sandbox"))
+        }
     }
     assert(!files.exists(files.join(pkg, "libmath.rlib")))
     scratch: files.join(hangar, STORE_BUILD_SCRATCH_DIR)
     if files.list_dir(scratch) == {
-        .Ok(entries) -> assert_eq(entries.len(), 0)
+        .Ok(entries) -> { assert_eq(entries.len(), 0) }
         .Err(_) -> {}
     }
     files.remove_all(base) ?? panic("cleanup")

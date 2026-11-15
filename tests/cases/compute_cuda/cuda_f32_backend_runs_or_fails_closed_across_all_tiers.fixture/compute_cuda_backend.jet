@@ -1,4 +1,3 @@
-
 use compute: core.compute
 
 cuda_loss: fn(value: Tensor) -> Tensor {
@@ -19,14 +18,16 @@ run: fn() {
         .Err(_) -> {
             print("cuda:unavailable")
             if compute.stream_new_on(compute.device_cuda()) == {
-                .Ok(_) -> panic("cuda stream unexpectedly accepted")
+                .Ok(_) -> { panic("cuda stream unexpectedly accepted") }
                 .Err(_) -> { print("cuda:stream:rejected") }
             }
         }
         .Ok(cuda_row) -> {
             cuda_column: compute.on_device(f32_column, compute.device_cuda()) ?? panic("cuda_column")
             if !compute.placement(cuda_row).contains("backend=cuda") -> panic("cuda backend")
-            if !compute.placement(cuda_row).contains("profile=F32Strict+Reproducible") -> panic("cuda profile")
+            if !compute.placement(cuda_row).contains("profile=F32Strict+Reproducible") {
+                panic("cuda profile")
+            }
             product: compute.matmul(cuda_column, cuda_row) ?? panic("matmul")
             doubled: compute.add(product, product) ?? panic("add")
             negated: compute.negate(doubled) ?? panic("negate")
@@ -46,7 +47,9 @@ run: fn() {
             gradient_result: compute.gradient(cuda_loss, cuda_row.copy())
             gradient: gradient_result.value
             gradient_tail: compute.get(gradient, [0, 256]) ?? panic("gradient_tail")
-            if gradient_tail < cpu_gradient_tail - 0.001 || gradient_tail > cpu_gradient_tail + 0.001 -> panic("cuda gradient parity")
+            if gradient_tail < cpu_gradient_tail - 0.001 || gradient_tail > cpu_gradient_tail + 0.001 {
+                panic("cuda gradient parity")
+            }
             print("cuda:sqrt_gradient:{gradient_tail}")
 
             stream: compute.stream_new_on(compute.device_cuda()) ?? panic("stream")
@@ -58,7 +61,7 @@ run: fn() {
             if !compute.transfer_show(cpu).contains("to=CPU") -> panic("transfer destination")
             print("cuda:transfer:{compute.transfer_show(cpu)}")
             if compute.det(product) == {
-                .Ok(_) -> panic("cuda det unexpectedly accepted")
+                .Ok(_) -> { panic("cuda det unexpectedly accepted") }
                 .Err(_) -> { print("cuda:det:rejected") }
             }
         }

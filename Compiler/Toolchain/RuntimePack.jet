@@ -70,23 +70,34 @@ use {
 }
 
 USAGE: "usage: jet Toolchain/RuntimePack.jet pack --jet=JET --tree=DIR... --out=DIR --identity=FILE\n       jet Toolchain/RuntimePack.jet [--root DIR] unit OUT [--test NAME]...|--check"
+
 // The checkout folder of the Compiler package, which every recorded path names.
 PACKAGE: "Compiler"
+
 RUNTIME_SOURCES: "Compiler/JetRuntime/sources.list"
+
 RUNTIME_PACKAGE: "Compiler/JetRuntime/package.jet"
+
 RUNTIME_LIFECYCLE: "Compiler/JetRuntime/lifecycle.list"
+
 // The embedded jet.runtime interface (JetDriver RuntimeInterface.jet): the
 // runtime production renders it from the runtime source, and the pack fails
 // when this copy disagrees.
 RUNTIME_INTERFACE: "Compiler/JetFoundation/Source/Registry/RuntimeInterface.jet"
+
 RUNTIME_FRAGMENTS: "Compiler/JetRuntime/Tests/Fragments.fixture"
+
 DRIVER_LOADER: "Compiler/JetDriver/Source/Driver/Loader.jet"
+
 // The runtime's folder; every other `--tree` folder is its producer's.
 RUNTIME_TREE: "JetRuntime"
+
 // JetSema's unit map (UnsafeObligations.jet) reads this mark too.
 UNIT_SOURCE_MARK: "// [unit source: "
+
 // A package.jet's `policy: { memory: .Kernel([...]) }` list, and each path in it.
 MEMORY_KERNEL_FIELD: Regex{"\bmemory\s*:\s*\.\s*Kernel\s*\(\s*\[([^\]]*)\]"}
+
 QUOTED_PATH: Regex{"\"([^\"]*)\""}
 
 InventoryFile: struct {
@@ -170,15 +181,21 @@ c_string: fn(b: [U8], at: Int, end: Int) -> String {
 // with it, else "".
 elf_symbol_names: fn(b: [U8], base: Int, end: Int, what: String, names: &[String]) -> String {
     size: end - base
-    if size < 64 || le(b, base, 4) != 1179403647 || le(b, base + 4, 2) != 258 -> return "{what} is not a 64-bit little-endian ELF object"
+    if size < 64 || le(b, base, 4) != 1179403647 || le(b, base + 4, 2) != 258 {
+        return "{what} is not a 64-bit little-endian ELF object"
+    }
     shoff: le(b, base + 40, 8)
     shentsize: le(b, base + 58, 2)
     shnum := le(b, base + 60, 2)
     if shoff == 0 -> return ""
-    if shentsize < 64 || shoff < 0 || shoff + shentsize > size -> return "{what} has a malformed section header table"
+    if shentsize < 64 || shoff < 0 || shoff + shentsize > size {
+        return "{what} has a malformed section header table"
+    }
     // More than 0xff00 sections: section 0's sh_size holds the count.
     if shnum == 0 -> shnum = le(b, base + shoff + 32, 8)
-    if shnum < 0 || shoff + shnum * shentsize > size -> return "{what} has a malformed section header table"
+    if shnum < 0 || shoff + shnum * shentsize > size {
+        return "{what} has a malformed section header table"
+    }
     loop i in 0..<shnum {
         header: base + shoff + i * shentsize
         kind: le(b, header + 4, 4)
@@ -187,10 +204,14 @@ elf_symbol_names: fn(b: [U8], base: Int, end: Int, what: String, names: &[String
         table_size: le(b, header + 32, 8)
         link: le(b, header + 40, 4)
         entry: le(b, header + 56, 8)
-        if entry < 24 || link >= shnum || table < 0 || table_size < 0 || table + table_size > size -> return "{what} has a malformed symbol table"
+        if entry < 24 || link >= shnum || table < 0 || table_size < 0 || table + table_size > size {
+            return "{what} has a malformed symbol table"
+        }
         strings: le(b, base + shoff + link * shentsize + 24, 8)
         strings_size: le(b, base + shoff + link * shentsize + 32, 8)
-        if strings < 0 || strings_size < 0 || strings + strings_size > size -> return "{what} has a malformed string table"
+        if strings < 0 || strings_size < 0 || strings + strings_size > size {
+            return "{what} has a malformed string table"
+        }
         at := base + table
         loop at + entry <= base + table + table_size {
             name: le(b, at, 4)
@@ -205,7 +226,9 @@ elf_symbol_names: fn(b: [U8], base: Int, end: Int, what: String, names: &[String
 
 // Appends every symbol name of the ELF object `b` (the file `what`) to
 // `names`; the problem, else "".
-symbol_names: fn(b: [U8], what: String, names: &[String]) -> String { elf_symbol_names(b, 0, b.len(), what, names) }
+symbol_names: fn(b: [U8], what: String, names: &[String]) -> String {
+    elf_symbol_names(b, 0, b.len(), what, names)
+}
 
 // The Rust symbols among the symbol names of `bytes` (the file `what`), or
 // why they can't be read, else "".
@@ -229,8 +252,8 @@ built_object_sha256: fn(path: String) -> String {
 }
 
 inventory_value: fn(found: Inventory) -> Dyn {
-    rows: loop row in found.files -> Dyn.Object([String: Dyn]{"path": Dyn.Text(row.path.copy()), "sha256": Dyn.Text(row.sha256.copy())})
-    Dyn.Object([String: Dyn]{"sha256": Dyn.Text(found.sha256.copy()), "files": Dyn.Array(rows)})
+    rows: loop row in found.files -> Dyn.Object([String:Dyn]{"path": Dyn.Text(row.path.copy()), "sha256": Dyn.Text(row.sha256.copy())})
+    Dyn.Object([String:Dyn]{"sha256": Dyn.Text(found.sha256.copy()), "files": Dyn.Array(rows)})
 }
 
 compact: fn(value: Dyn) -> String { json.dumps(value) ?? fail("cannot render JSON: {err}") }
@@ -239,13 +262,17 @@ sha256_json: fn(value: Dyn) -> String { crypto.sha256(compact(value).bytes()).he
 
 // The recipe the pack is a function of (format jet-native-runtime-recipe/v3).
 pack_recipe: fn(source: String, backend: String, lifecycle: String, compiler: String) -> String {
-    sha256_json(Dyn.Object([String: Dyn]{
-        "format": Dyn.Text("jet-native-runtime-recipe/v3"),
-        "source": Dyn.Text(source.copy()),
-        "backend": Dyn.Text(backend.copy()),
-        "lifecycle": Dyn.Text(lifecycle.copy()),
-        "compiler": Dyn.Text(compiler.copy()),
-    }))
+    sha256_json(
+        Dyn.Object(
+            [String:Dyn]{
+                "format": Dyn.Text("jet-native-runtime-recipe/v3"),
+                "source": Dyn.Text(source.copy()),
+                "backend": Dyn.Text(backend.copy()),
+                "lifecycle": Dyn.Text(lifecycle.copy()),
+                "compiler": Dyn.Text(compiler.copy()),
+            },
+        ),
+    )
 }
 
 // The pack's content identity, native.key (format jet-native-runtime/v5):
@@ -253,15 +280,19 @@ pack_recipe: fn(source: String, backend: String, lifecycle: String, compiler: St
 // `core`, the digests of the Core library's object, export list and thread
 // receipt, which the image links beside the runtime.
 pack_identity: fn(source: String, abi: String, threads: String, backend: String, lifecycle: String, core: String) -> String {
-    sha256_json(Dyn.Object([String: Dyn]{
-        "format": Dyn.Text("jet-native-runtime/v5"),
-        "source": Dyn.Text(source.copy()),
-        "abi": Dyn.Text(abi.copy()),
-        "threads": Dyn.Text(threads.copy()),
-        "backend": Dyn.Text(backend.copy()),
-        "lifecycle": Dyn.Text(lifecycle.copy()),
-        "core": Dyn.Text(core.copy()),
-    }))
+    sha256_json(
+        Dyn.Object(
+            [String:Dyn]{
+                "format": Dyn.Text("jet-native-runtime/v5"),
+                "source": Dyn.Text(source.copy()),
+                "abi": Dyn.Text(abi.copy()),
+                "threads": Dyn.Text(threads.copy()),
+                "backend": Dyn.Text(backend.copy()),
+                "lifecycle": Dyn.Text(lifecycle.copy()),
+                "core": Dyn.Text(core.copy()),
+            },
+        ),
+    )
 }
 
 field: fn(value: Dyn, key: String) -> Dyn {
@@ -313,18 +344,20 @@ copy_into: fn(from: String, to: String) {
 // unless the rename can't move it (`to` on another file system), then copied.
 // Either way `to` keeps the file's bytes and mode.
 move_into: fn(from: String, to: String) {
-    if files.rename(from, to) == .Ok(_) -> return
+    if files.rename(from, to) == .Ok(_) {
+        return
+    }
     copy_into(from, to)
 }
 
 // `--name=value` flags; `--tree` may repeat.
 Flags: struct {
-    values: [String: String]
+    values: [String:String]
     trees: [String]
 }
 
 parse_flags: fn(args: [String]) -> Flags {
-    values := [String: String]{}
+    values := [String:String]{}
     trees := [String]{}
     loop arg in args {
         if !arg.starts_with("--") || !arg.contains("=") -> fail(USAGE)
@@ -355,7 +388,9 @@ pack: fn(args: [String]) {
     loop entry in flags.values {
         if !known.contains(entry.key) -> fail("unknown flag --{entry.key}\n{USAGE}")
     }
-    if !flags.trees.contains(RUNTIME_TREE) -> fail("the --tree folders must include the runtime's, {RUNTIME_TREE}")
+    if !flags.trees.contains(RUNTIME_TREE) {
+        fail("the --tree folders must include the runtime's, {RUNTIME_TREE}")
+    }
     root: absolute(".")
     identity: flag(flags, "identity")
     jet: absolute(flag(flags, "jet"))
@@ -375,7 +410,9 @@ pack: fn(args: [String]) {
     loop tree in flags.trees {
         if tree == RUNTIME_TREE -> next
         directory: "{PACKAGE}/{tree}"
-        loop path in tree_files(at(root, directory), fn(name: String) { name.ends_with(".jet") }) -> backend_paths.push("{directory}/{path}")
+        loop path in tree_files(at(root, directory), fn(name: String) { name.ends_with(".jet") }) {
+            backend_paths.push("{directory}/{path}")
+        }
     }
     backend: inventory(backend_paths, in_package)
     lifecycle: inventory([String]{RUNTIME_LIFECYCLE}, in_package)
@@ -397,14 +434,18 @@ built_version: fn(jet: String) -> String {
     text: output_of(process.cmd([String]{jet.copy(), "--version", "--json"}).env_remove("JET_TOOLCHAIN_ROOT"), "{jet} --version --json")
     facts: json.parse(text.trim()) ?? fail("`{jet} --version --json` is not JSON: {err}")
     version: text_of(field(facts, "release"))
-    if version == "" || version.contains(" ") || version.contains("#") || version.contains("@") -> fail("`{jet} --version --json` names no release version")
+    if version == "" || version.contains(" ") || version.contains("#") || version.contains("@") {
+        fail("`{jet} --version --json` names no release version")
+    }
     version
 }
 
 // A command that must exit 0; its stdout.
 output_of: fn(spec: ProcessSpec, what: String) -> String {
     receipt: spec.output_limit(268435456).run() ?? fail("{what} could not start: {err}")
-    if receipt.code != 0 || receipt.signal != None -> fail("{what} failed ({receipt.code}):\n{receipt.errors}")
+    if receipt.code != 0 || receipt.signal != None {
+        fail("{what} failed ({receipt.code}):\n{receipt.errors}")
+    }
     receipt.output
 }
 
@@ -496,7 +537,9 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
     threads: files.read("{prefix}.threads") ?? fail("cannot read the runtime thread receipt: {err}")
     thread_rows: threads.split("\n").to_list()
     thread_names: loop name in thread_rows if name != "" -> name.copy()
-    if !(thread_names.len() == 1 && thread_names[0] == "*") && thread_names.any(fn(name) { !exports.contains(name) }) -> fail("runtime thread receipt names a symbol the checked exports lack")
+    if !(thread_names.len() == 1 && thread_names[0] == "*") && thread_names.any(fn(name) { !exports.contains(name) }) {
+        fail("runtime thread receipt names a symbol the checked exports lack")
+    }
     check_core_library(core, tool.out)
     // The jet.runtime interface the runtime source renders (Request.jet
     // jet_cli_runtime_library) must be the copy jet embeds; a stale copy fails
@@ -537,7 +580,7 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
     move_into(image, files.join(out, "jet_runtime.image"))
     move_into("{web}.wasm", files.join(out, "jet_runtime.wasm"))
     move_into("{web}.wasm.tsv", files.join(out, "jet_runtime.wasm.tsv"))
-    fields: [String: Dyn]{
+    fields: [String:Dyn]{
         "backend": Dyn.Text("jet-native"),
         "runtimeKey": Dyn.Text(key.copy()),
         "objectSha256": Dyn.Text(object_sha256),
@@ -576,7 +619,9 @@ check_core_library: fn(core: String, out: String) {
     if !core_rows.any(fn(row) { row != "" }) -> fail("the Core export list is empty")
     core_threads: files.read("{core}.threads") ?? fail("cannot read the Core thread receipt: {err}")
     core_thread_rows: core_threads.split("\n").to_list()
-    if core_threads.trim() != "*" && core_thread_rows.any(fn(name) { name != "" && !core_rows.any(fn(row) { row.starts_with("{name}\t") }) }) -> fail("Core thread receipt names a symbol the Core exports lack")
+    if core_threads.trim() != "*" && core_thread_rows.any(fn(name) { name != "" && !core_rows.any(fn(row) { row.starts_with("{name}\t") }) }) {
+        fail("Core thread receipt names a symbol the Core exports lack")
+    }
     // A Core root the library left out (JetCli CoreLibrary.jet writes one
     // `{prefix}.skipped` row per failure) fails the pack, the rows kept in OUT
     // as core.skipped: a skipped root would make its callers fall back
@@ -649,7 +694,9 @@ unit_body: fn(text: String, uses: &[String]) -> String {
                 block = true
                 next
             }
-            if core_import(line.removeprefix("use ")) && !uses.contains(line) -> uses.push(line.copy())
+            if core_import(line.removeprefix("use ")) && !uses.contains(line) {
+                uses.push(line.copy())
+            }
             if line.contains("[") && !line.contains("]") -> depth = 1
             next
         }
@@ -666,8 +713,12 @@ unit_packages: fn(root: String, paths: [String]) -> [String] {
     packages := [String]{}
     loop path in paths {
         directory := path.rpartition("/").head
-        loop directory != "" && directory != PACKAGE && !files.exists(at(root, "{directory}/package.jet")) -> directory = directory.rpartition("/").head
-        if directory == "" || directory == PACKAGE -> fail("`{path}` has no package.jet above it inside {PACKAGE}, so its memory kernel cannot be read")
+        loop directory != "" && directory != PACKAGE && !files.exists(at(root, "{directory}/package.jet")) {
+            directory = directory.rpartition("/").head
+        }
+        if directory == "" || directory == PACKAGE {
+            fail("`{path}` has no package.jet above it inside {PACKAGE}, so its memory kernel cannot be read")
+        }
         if !packages.contains(directory) -> packages.push(directory.move())
     }
     packages
@@ -755,7 +806,9 @@ unit_tests: fn(args: [String]) -> [String]? {
     tests := [String]{}
     at := 1
     loop at < args.len() {
-        if args[at] != "--test" || !is_type_name(args[at + 1]) || tests.contains(args[at + 1]) -> return None
+        if args[at] != "--test" || !is_type_name(args[at + 1]) || tests.contains(args[at + 1]) {
+            return None
+        }
         tests.push(args[at + 1].copy())
         at += 2
     }
@@ -770,7 +823,9 @@ unit_check: fn(root: String, out: String) -> Int {
     listed: files.list_dir(dir) ?? fail("`{RUNTIME_FRAGMENTS}` cannot be listed: {err}")
     fragments := [String]{}
     loop entry in listed {
-        if entry.name.ends_with(".jet") && entry.name != "package.jet" -> fragments.push("{RUNTIME_FRAGMENTS}/{entry.name}")
+        if entry.name.ends_with(".jet") && entry.name != "package.jet" {
+            fragments.push("{RUNTIME_FRAGMENTS}/{entry.name}")
+        }
     }
     fragments.sort()
     if fragments.len() == 0 -> fail("`{RUNTIME_FRAGMENTS}` holds no fragment")
@@ -788,7 +843,7 @@ unit_check: fn(root: String, out: String) -> Int {
         }
         owners.push(current.copy())
     }
-    counts := [String: Int]{}
+    counts := [String:Int]{}
     total := 0
     error := false
     loop line in "{receipt.output}{receipt.errors}".split("\n") {
@@ -838,7 +893,7 @@ run: fn() {
 }
 
 #Test("recipe and identity JSON keep their field order") {
-    assert_eq(compact(Dyn.Object([String: Dyn]{"format": Dyn.Text("f"), "source": Dyn.Text("s"), "n": Dyn.Int(0)})), "{{\"format\":\"f\",\"source\":\"s\",\"n\":0}}")
+    assert_eq(compact(Dyn.Object([String:Dyn]{"format": Dyn.Text("f"), "source": Dyn.Text("s"), "n": Dyn.Int(0)})), "{{\"format\":\"f\",\"source\":\"s\",\"n\":0}}")
 }
 
 #Test("ABI symbols and export names compare sorted") {

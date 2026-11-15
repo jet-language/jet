@@ -1,20 +1,24 @@
-
 Counter: struct {
     value: Int
 
     impl Rollback {
         Snapshot: CounterSnap
-        snapshot: fn(self) -> CounterSnap {
-            return CounterSnap{ value: self.value }
-        }
-        restore: fn(&self, snap: &&CounterSnap) {
-            self.value = snap.value
-        }
+
+        snapshot: fn(self) -> CounterSnap { return CounterSnap{value: self.value} }
+
+        restore: fn(&self, snap: &&CounterSnap) { self.value = snap.value }
     }
 }
-CounterSnap: struct { value: Int }
+
+CounterSnap: struct {
+    value: Int
+}
+
 #Error
-Fail: enum { Bad }
+Fail: enum {
+    Bad
+}
+
 bump: fn(c: &Counter) -> Int Fail! {
     #Transact {
         c.value += 1
@@ -22,8 +26,9 @@ bump: fn(c: &Counter) -> Int Fail! {
     }
     return Ok(c.value)
 }
+
 run: fn() {
-    c := Counter{ value: 0 }
+    c := Counter{value: 0}
     _: bump(c) ?? 0
     print(c.value)
 }

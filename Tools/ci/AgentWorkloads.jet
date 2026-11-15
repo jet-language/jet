@@ -23,13 +23,19 @@ run: fn() {
 // every problem.
 
 MANIFEST_PATH: "tests/agent_workloads/manifest.tsv"
+
 POLICY_PATH: "tests/agent_workloads/policy.tsv"
+
 BASELINE_PATH: "tests/agent_workloads/jet_baseline.tsv"
+
 DEFAULT_REPORT_PATH: "Docs/audits/agent-workload-corpus-report.tsv"
 
 BASELINE_HEADER: "version\ttask_id\tjet_status\tloss_owner"
+
 MATRIX_HEADER: "version\tos\tarch_policy\trequirement\tadapters\treason"
+
 MANIFEST_HEADER: "version\ttask_id\tdomain\tcase\tdeclared_outcome\tinput\texpected\tauthority\tadapters\tplatforms\tevidence\ttower_card\tloss_cards"
+
 REPORT_HEADER: "version\tos\tarch\ttask\tdomain\tcase\tjet\tbash\tpython\tnode\tjet_vs_baselines\tloss_owner\trun_exit\tjet_source_tokens\tbash_source_tokens\tpython_source_tokens\tnode_source_tokens\tjet_cold_ns\tbash_cold_ns\tpython_cold_ns\tnode_cold_ns\tjet_warm_ns\tbash_warm_ns\tpython_warm_ns\tnode_warm_ns\tpolicy_digest"
 
 // The frozen inputs one report is checked against; a None text is unreadable.
@@ -93,12 +99,16 @@ owner_ok: fn(value: String) -> Bool Never! {
 
 adapters_ok: fn(value: String) -> Bool Never! {
     loop adapter in pieces(value, ",") {
-        if adapter != "jet" && adapter != "bash" && adapter != "python" && adapter != "node" -> return false
+        if adapter != "jet" && adapter != "bash" && adapter != "python" && adapter != "node" {
+            return false
+        }
     }
     true
 }
 
-adapter_status: fn(value: String) -> Bool Never! { value == "pass" || value == "loss" || value == "missing" }
+adapter_status: fn(value: String) -> Bool Never! {
+    value == "pass" || value == "loss" || value == "missing"
+}
 
 // Every problem of `report` against `inputs`, in the order they are found.
 report_problems: fn(report: String, inputs: GateInputs) -> [String] Never! {
@@ -108,7 +118,9 @@ report_problems: fn(report: String, inputs: GateInputs) -> [String] Never! {
     baseline_owner := [String:String]{}
     baseline_seen := [String:Bool]{}
     baseline_lines: records(inputs.baseline ?? "")
-    if inputs.baseline == None || baseline_lines.len() == 0 || baseline_lines[0] != BASELINE_HEADER -> problems.push("baseline schema drifted")
+    if inputs.baseline == None || baseline_lines.len() == 0 || baseline_lines[0] != BASELINE_HEADER {
+        problems.push("baseline schema drifted")
+    }
     loop (index, line) in baseline_lines {
         if index == 0 || line == "" -> next
         fields: pieces(line, "\t")
@@ -119,7 +131,9 @@ report_problems: fn(report: String, inputs: GateInputs) -> [String] Never! {
         id: fields[1].copy()
         if baseline_seen.get(id) != None -> problems.push("duplicate Jet baseline task: {id}")
         baseline_seen[id.copy()] = true
-        if !owner_ok(fields[3]) -> problems.push("Jet baseline loss has no card or ratified non-goal: {id}")
+        if !owner_ok(fields[3]) {
+            problems.push("Jet baseline loss has no card or ratified non-goal: {id}")
+        }
         baseline_tasks.push(id.copy())
         baseline_status[id.copy()] = fields[2].copy()
         baseline_owner[id] = fields[3].copy()
@@ -128,7 +142,9 @@ report_problems: fn(report: String, inputs: GateInputs) -> [String] Never! {
     matrix_arch := [String:String]{}
     matrix_count := 0
     matrix_lines: records(inputs.matrix ?? "")
-    if inputs.matrix == None || matrix_lines.len() == 0 || matrix_lines[0] != MATRIX_HEADER -> problems.push("native OS matrix schema drifted")
+    if inputs.matrix == None || matrix_lines.len() == 0 || matrix_lines[0] != MATRIX_HEADER {
+        problems.push("native OS matrix schema drifted")
+    }
     loop (index, line) in matrix_lines {
         if index == 0 || line == "" -> next
         fields: pieces(line, "\t")
@@ -136,9 +152,13 @@ report_problems: fn(report: String, inputs: GateInputs) -> [String] Never! {
             problems.push("bad native OS matrix row: {line}")
             next
         }
-        if fields[1] == "" || fields[2] == "" || (fields[3] != "required" && fields[3] != "excluded") || !adapters_ok(fields[4]) || fields[5] == "" -> problems.push("bad native OS matrix metadata: {line}")
+        if fields[1] == "" || fields[2] == "" || (fields[3] != "required" && fields[3] != "excluded") || !adapters_ok(fields[4]) || fields[5] == "" {
+            problems.push("bad native OS matrix metadata: {line}")
+        }
         os: fields[1].copy()
-        if matrix_requirement.get(os) != None -> problems.push("duplicate native OS matrix row: {os}")
+        if matrix_requirement.get(os) != None {
+            problems.push("duplicate native OS matrix row: {os}")
+        }
         matrix_requirement[os.copy()] = fields[3].copy()
         matrix_arch[os] = fields[2].copy()
         matrix_count += 1
@@ -148,7 +168,9 @@ report_problems: fn(report: String, inputs: GateInputs) -> [String] Never! {
     manifest_owner := [String:String]{}
     manifest_count := 0
     manifest_lines: records(inputs.manifest ?? "")
-    if inputs.manifest == None || manifest_lines.len() == 0 || manifest_lines[0] != MANIFEST_HEADER -> problems.push("corpus manifest schema drifted")
+    if inputs.manifest == None || manifest_lines.len() == 0 || manifest_lines[0] != MANIFEST_HEADER {
+        problems.push("corpus manifest schema drifted")
+    }
     loop (index, line) in manifest_lines {
         if index == 0 || line == "" -> next
         fields: pieces(line, "\t")
@@ -198,12 +220,18 @@ report_problems: fn(report: String, inputs: GateInputs) -> [String] Never! {
         seen[id.copy()] = true
         if manifest_domain.get(id) == {
             .Val(domain) -> {
-                if f[4] != domain || f[5] != (manifest_case.get(id) ?? "") -> problems.push("task metadata drifted: {id}")
-                if f[11] != (manifest_owner.get(id) ?? "") -> problems.push("loss owner drifted from manifest: {id}")
+                if f[4] != domain || f[5] != (manifest_case.get(id) ?? "") {
+                    problems.push("task metadata drifted: {id}")
+                }
+                if f[11] != (manifest_owner.get(id) ?? "") {
+                    problems.push("loss owner drifted from manifest: {id}")
+                }
             }
             .None -> problems.push("report has unknown task: {id}")
         }
-        if !adapter_status(f[6]) || !adapter_status(f[7]) || !adapter_status(f[8]) || !adapter_status(f[9]) -> problems.push("bad adapter status: {id}")
+        if !adapter_status(f[6]) || !adapter_status(f[7]) || !adapter_status(f[8]) || !adapter_status(f[9]) {
+            problems.push("bad adapter status: {id}")
+        }
         if f[10] != "pass" && f[10] != "loss" -> problems.push("bad corpus score: {id}")
         if current.get(id) == None -> current_tasks.push(id.copy())
         current[id.copy()] = f[6].copy()
@@ -211,26 +239,24 @@ report_problems: fn(report: String, inputs: GateInputs) -> [String] Never! {
         if f[12] != "0" -> problems.push("corpus command exited {f[12]}: {id}")
         expected_score: if f[12] == "0" && f[6] == "pass" && f[7] == "pass" && f[8] == "pass" && f[9] == "pass" -> "pass" else -> "loss"
         if f[10] != expected_score -> problems.push("corpus score drifted: {id}")
-        if f[6] == "loss" && !owner_ok(f[11]) -> problems.push("Jet loss has no card or ratified non-goal: {id}")
+        if f[6] == "loss" && !owner_ok(f[11]) {
+            problems.push("Jet loss has no card or ratified non-goal: {id}")
+        }
         if !nonnegative_integer(f[12]) -> problems.push("bad corpus exit code: {id}")
         loop metric in 14..<26 {
-            if !nonnegative_integer(f[metric - 1]) -> problems.push("bad report metric in {id}: column={metric}")
+            if !nonnegative_integer(f[metric - 1]) {
+                problems.push("bad report metric in {id}: column={metric}")
+            }
         }
-        if !lower_hex64(f[25]) {
-            problems.push("bad policy digest: {id}")
-        } else if f[25] != inputs.policy_digest {
+        if !lower_hex64(f[25]) -> problems.push("bad policy digest: {id}") else if f[25] != inputs.policy_digest {
             problems.push("policy digest is not the frozen policy: {id}")
         }
-        if report_digest == "" {
-            report_digest = f[25].copy()
-        } else if f[25] != report_digest {
+        if report_digest == "" -> report_digest = f[25].copy() else if f[25] != report_digest {
             problems.push("policy digest drifted: {id}")
         }
     }
 
-    if !header_seen {
-        problems.push("report has no header")
-    } else if host_os == "" {
+    if !header_seen -> problems.push("report has no header") else if host_os == "" {
         problems.push("report has no task rows")
     } else {
         requirement: matrix_requirement.get(host_os) ?? ""
@@ -240,20 +266,26 @@ report_problems: fn(report: String, inputs: GateInputs) -> [String] Never! {
             problems.push("OS is excluded by frozen matrix: {host_os}")
         } else {
             arch: matrix_arch.get(host_os) ?? ""
-            if arch != "any" && arch != host_arch -> problems.push("architecture {host_arch} is not allowed for {host_os}")
+            if arch != "any" && arch != host_arch {
+                problems.push("architecture {host_arch} is not allowed for {host_os}")
+            }
         }
     }
     loop id in baseline_tasks {
         owner: baseline_owner.get(id) ?? ""
         if manifest_owner.get(id) == {
             .Val(manifest) -> {
-                if owner != manifest -> problems.push("Jet baseline loss owner drifted from manifest: {id}")
+                if owner != manifest {
+                    problems.push("Jet baseline loss owner drifted from manifest: {id}")
+                }
             }
             .None -> problems.push("Jet baseline names unknown task: {id}")
         }
         if current.get(id) == {
             .Val(status) -> {
-                if (baseline_status.get(id) ?? "") == "pass" && status != "pass" -> problems.push("Jet regression: task={id} baseline=pass current={status} owner={owner}")
+                if (baseline_status.get(id) ?? "") == "pass" && status != "pass" {
+                    problems.push("Jet regression: task={id} baseline=pass current={status} owner={owner}")
+                }
             }
             .None -> problems.push("report is missing baseline task: {id}")
         }
@@ -285,7 +317,9 @@ repository_root: fn() -[FS, Env]> String Never! {
 // the final newline.
 frozen_inputs: fn(root: String, policy_text: String) -[FS, Env]> GateInputs Never! {
     policy := policy_text
-    if policy.ends_with("\n") -> policy = String.from_bytes_lossy(policy.bytes()[0..<policy.bytes().len() - 1])
+    if policy.ends_with("\n") {
+        policy = String.from_bytes_lossy(policy.bytes()[0..<policy.bytes().len() - 1])
+    }
     GateInputs{
         baseline: read_text(process.env_nonempty("JET_AGENT_WORKLOAD_BASELINE") ?? "{root}/{BASELINE_PATH}"),
         matrix: read_text("{root}/{MATRIX_PATH}"),
@@ -388,7 +422,9 @@ gate_corpus: fn(root: String, run_dir: String, report: String) -[FS, Env, Exec, 
         .stdout(.Inherit)
         .stderr(.Inherit)
         .run() ?? return uncovered("jet test Compiler --profile cases agent_workloads could not start")
-    if receipt.code != 0 -> return uncovered("jet test Compiler --profile cases agent_workloads exited {receipt.code}")
+    if receipt.code != 0 {
+        return uncovered("jet test Compiler --profile cases agent_workloads exited {receipt.code}")
+    }
     uncovered("testkit results have no mapping to the per-task agent workload report; {report} preserved")
 }
 
@@ -545,9 +581,7 @@ absolute_dir: fn(path: String) -[FS, Env]> String Never! {
 }
 
 // The gate's own verdict for one report, with its pass line.
-gate_passes: fn(report: String) -[FS, Env, IO, Time.Wait]> Bool Never! {
-    gate_check(report) == 0
-}
+gate_passes: fn(report: String) -[FS, Env, IO, Time.Wait]> Bool Never! { gate_check(report) == 0 }
 
 matrix_main: fn(args: [String]) -[FS, Env, Exec, IO, Time.Wait]> Int Never! {
     if args.len() != 1 {
@@ -557,7 +591,7 @@ matrix_main: fn(args: [String]) -[FS, Env, Exec, IO, Time.Wait]> Int Never! {
     report_dir: absolute_dir(args[0])
     matrix := ""
     if files.read(MATRIX_PATH) == {
-        .Ok(text) -> matrix = text
+        .Ok(text) -> { matrix = text }
         .Err(error) -> {
             term.eprint("agent workload matrix: cannot read {MATRIX_PATH}: {error}")
             return 1
@@ -576,7 +610,7 @@ matrix_main: fn(args: [String]) -[FS, Env, Exec, IO, Time.Wait]> Int Never! {
         }
         report_text := ""
         if files.read(report) == {
-            .Ok(text) -> report_text = text
+            .Ok(text) -> { report_text = text }
             .Err(_) -> {}
         }
         declared: report_os(report_text)

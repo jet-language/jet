@@ -18,11 +18,10 @@ use jet_foundation.[
 ]
 
 SEMA_MATH_REDUCE_OP_TYPE: "ReduceOp"
+
 SEMA_MATH_REDUCE_OP_VALUES: [String]{"Add", "Mul", "Min", "Max", "Avg"}
 
-sema_call_math_is_lane: fn(name: String) -> Bool Never! {
-    type_simd_lane_arity(name) != None
-}
+sema_call_math_is_lane: fn(name: String) -> Bool Never! { type_simd_lane_arity(name) != None }
 
 // The SIMD lane type `ty` names (`F32x4`), bare or as the Core declaration's
 // canonical identity (`core.math::F32x4`).
@@ -36,11 +35,15 @@ sema_call_math_lane_name: fn(ty: Type) -> String? {
 sema_call_math_builtin_name: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
     name: if ty == {
         .Named(found) -> found
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> { return None }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
+            return None
+        }
     }
     if !sema_core_is_math_type(name) -> return None
     if program.registration_graph == .Val(graph) {
-        if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) != None -> return None
+        if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) != None {
+            return None
+        }
     }
     Val(name)
 }
@@ -58,21 +61,29 @@ sema_call_math_method_return: fn(name: String, method: String, argument_count: I
         if method == "cross" && argument_count == 1 && name == "Vec3" -> return Val(self_type)
         if method == "length" && argument_count == 0 -> return Val(Type.Float)
         if method == "normalize" && argument_count == 0 -> return Val(self_type)
-        if method == "to_array" && argument_count == 0 -> return Val(sema_call_math_array_bridge(name))
+        if method == "to_array" && argument_count == 0 {
+            return Val(sema_call_math_array_bridge(name))
+        }
         return None
     }
     if name == "Mat3" || name == "Mat4" {
         if method == "matmul" && argument_count == 1 -> return Val(self_type)
         if method == "transpose" && argument_count == 0 -> return Val(self_type)
-        if method == "transform" && argument_count == 1 -> return Val(Type.Named{name: if name == "Mat3" -> "Vec3" else -> "Vec4"})
-        if method == "to_array" && argument_count == 0 -> return Val(sema_call_math_array_bridge(name))
+        if method == "transform" && argument_count == 1 {
+            return Val(Type.Named{name: if name == "Mat3" -> "Vec3" else -> "Vec4"})
+        }
+        if method == "to_array" && argument_count == 0 {
+            return Val(sema_call_math_array_bridge(name))
+        }
     }
     None
 }
 
 // Rust `math_method_arg_ty`.
 sema_call_math_method_argument: fn(name: String, method: String) -> Type? {
-    if method == "dot" || method == "cross" || method == "matmul" -> return Val(Type.Named{name: name})
+    if method == "dot" || method == "cross" || method == "matmul" {
+        return Val(Type.Named{name: name})
+    }
     if name == "Mat3" && method == "transform" -> return Val(Type.Named{name: "Vec3"})
     if name == "Mat4" && method == "transform" -> return Val(Type.Named{name: "Vec4"})
     None
@@ -86,10 +97,14 @@ sema_call_math_reduce_error: fn(span: Span, what: String, why: String, fix: Stri
 // value. A written value that names no `ReduceOp` variant is E2510 before the
 // Core `reduce` method checks the call; true when it was.
 sema_call_math_lane_reduce_rejected: fn(receiver: Type, method: String, args: [CallArg], diagnostics: &[Diagnostic]) -> Bool Never! {
-    if method != "reduce" || args.len() != 1 || sema_call_math_lane_name(receiver) == None -> return false
+    if method != "reduce" || args.len() != 1 || sema_call_math_lane_name(receiver) == None {
+        return false
+    }
     if args[0].expr == {
         .EnumLit(enum_type, variant, _, payload, _, value_span, _) -> {
-            if (enum_type == "" || enum_type == SEMA_MATH_REDUCE_OP_TYPE) && payload.len() == 0 && SEMA_MATH_REDUCE_OP_VALUES.contains(variant) -> return false
+            if (enum_type == "" || enum_type == SEMA_MATH_REDUCE_OP_TYPE) && payload.len() == 0 && SEMA_MATH_REDUCE_OP_VALUES.contains(variant) {
+                return false
+            }
             diagnostics.push(sema_call_math_reduce_error(value_span, "this value is not a `ReduceOp`", "`reduce` accepts `.Add`, `.Mul`, `.Min`, `.Max`, or `.Avg`", "use a Core `ReduceOp` value"))
             return true
         }
@@ -120,9 +135,13 @@ sema_call_try_math_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
         values.push(checked)
     }
     if !complete -> return failed
-    if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) -> return failed
+    if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
+        return failed
+    }
     value: sema_tree_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.MathMethod{type_name: name, method: method}, args: values}, span)
-    if !sema_effect_record_intrinsic_fact(environment, program, scopes, context, "{name}.{method}", span, sema_call_geometry_call_facts(result), diagnostics) -> return failed
+    if !sema_effect_record_intrinsic_fact(environment, program, scopes, context, "{name}.{method}", span, sema_call_geometry_call_facts(result), diagnostics) {
+        return failed
+    }
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 
@@ -142,6 +161,8 @@ sema_call_try_math_static: fn(owner: String, method: String, args: [CallArg], sp
         return failed
     }
     value: sema_tree_node(self_type, TExprKind.MathBuiltin{type_name: name, function: method, args: [TExpr]{checked}}, span)
-    if !sema_effect_record_intrinsic_fact(environment, program, scopes, context, "{name}.{method}", span, sema_call_geometry_call_facts(self_type), diagnostics) -> return failed
+    if !sema_effect_record_intrinsic_fact(environment, program, scopes, context, "{name}.{method}", span, sema_call_geometry_call_facts(self_type), diagnostics) {
+        return failed
+    }
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }

@@ -47,9 +47,7 @@ ImportCatalog: struct {
     }
 
     // Catalog evidence is authoritative only when it names something.
-    is_authoritative: fn(self) -> Bool Never! {
-        self.names.len() > 0
-    }
+    is_authoritative: fn(self) -> Bool Never! { self.names.len() > 0 }
 
     // The catalog name closest (edit distance, then name) to the item's last
     // `/`, `:` or `.` segment, among catalog names and the fallback names.
@@ -90,7 +88,7 @@ provider_last_segment: fn(item: String) -> String Never! {
 provider_add_catalog_json: fn(path: String, names: &[String]) Never! -[FS]> {
     text: files.read(path) ?? return
     if json.parse(text) == {
-        .Ok(value) -> provider_add_catalog_value(value, names)
+        .Ok(value) -> { provider_add_catalog_value(value, names) }
         .Err(_) -> {}
     }
 }
@@ -106,7 +104,7 @@ provider_add_catalog_value: fn(value: Dyn, names: &[String]) Never! {
             loop item in values -> provider_add_catalog_value(item, names)
         }
         .Object(pairs) -> {
-            fields := [String: Dyn]{}
+            fields := [String:Dyn]{}
             loop pair in pairs -> fields[pair.key] = pair.value
             if fields.get("name") == {
                 .Val(found) -> {
@@ -122,7 +120,7 @@ provider_add_catalog_value: fn(value: Dyn, names: &[String]) Never! {
             nested_fields: [String]{"packages", "records", "catalog", "recipes"}
             loop field in nested_fields {
                 if fields.get(field) == {
-                    .Val(nested) -> provider_add_catalog_value(nested, names)
+                    .Val(nested) -> { provider_add_catalog_value(nested, names) }
                     .None -> {}
                 }
             }
@@ -186,9 +184,7 @@ provider_import_source_path: fn(dir: String, requested: String?) -[FS]> String P
     if requested == {
         .Val(raw) -> {
             path: if files.is_abs(raw) -> raw else -> files.join(dir, raw)
-            if files.is_dir(path) {
-                found = provider_first_file(path, supported)
-            } else if files.is_file(path) {
+            if files.is_dir(path) -> found = provider_first_file(path, supported) else if files.is_file(path) {
                 found = Val(path)
             }
         }
@@ -253,7 +249,9 @@ provider_import_projection: fn(facts: DevShellFacts, catalog: ImportCatalog) -> 
         }
         if !packages.contains(name) -> packages.push(name)
     }
-    loop item in facts.unmapped -> gaps.push(ImportGap{item, candidate: catalog.nearest(item, packages)})
+    loop item in facts.unmapped {
+        gaps.push(ImportGap{item: item, candidate: catalog.nearest(item, packages)})
+    }
     packages.sort()
     (packages: packages, gaps: provider_sorted_unique_gaps(gaps))
 }
@@ -289,11 +287,7 @@ provider_one_line: fn(value: String) -> String Never! {
     out := [U8]{}
     loop byte in value.bytes() {
         code: Int{byte}
-        if code == 10 || code == 13 {
-            out.push(U8{32})
-        } else {
-            out.push(byte)
-        }
+        if code == 10 || code == 13 -> out.push(U8{32}) else -> out.push(byte)
     }
     pkg_bytes_text(out, 0, out.len())
 }
@@ -311,7 +305,7 @@ provider_import_rationale: fn(file: String, provider: String, exact: String, rea
 provider_add_import_source_record: fn(lock: &SemanticLockFile, file: String, fingerprint: String) Never! {
     key: "nix-import-source:{file}"
     provider_retain_records_without_key(lock, key)
-    identity: LockIdentity{kind: LockRecordKind.SourceRef, key, exact: fingerprint, hash: fingerprint, platform: ""}
+    identity: LockIdentity{kind: LockRecordKind.SourceRef, key: key, exact: fingerprint, hash: fingerprint, platform: ""}
     lock.records.push(SemanticRecord.new(identity, provider_import_rationale(file, "nix-import", fingerprint, "bounded Nix devShell source fingerprint")))
 }
 
@@ -334,7 +328,9 @@ provider_clear_import_records: fn(lock: &SemanticLockFile) Never! {
         imported_package := false
         if record.identity.kind == LockRecordKind.Package {
             loop rationale in record.rationales {
-                if rationale.reason.starts_with("imported from bounded Nix devShell") -> imported_package = true
+                if rationale.reason.starts_with("imported from bounded Nix devShell") {
+                    imported_package = true
+                }
             }
         }
         if !graph_record && !import_record && !imported_package -> kept.push(record.copy())
@@ -348,7 +344,7 @@ provider_add_import_gap_record: fn(lock: &SemanticLockFile, file: String, gap: I
     key: "nix-import-unmapped:{item}"
     exact: "source={file};item={item};nearest={candidate}"
     provider_retain_records_without_key(lock, key)
-    identity: LockIdentity{kind: LockRecordKind.FlakeUnsupported, key, exact, hash: pkg_sha256_hex(exact.bytes()), platform: ""}
+    identity: LockIdentity{kind: LockRecordKind.FlakeUnsupported, key: key, exact: exact, hash: pkg_sha256_hex(exact.bytes()), platform: ""}
     lock.records.push(SemanticRecord.new(identity, provider_import_rationale(file, "nix-import", exact, "no catalog package mapping; nearest candidate is `{candidate}`")))
 }
 
@@ -358,7 +354,7 @@ provider_add_import_evaluator_record: fn(lock: &SemanticLockFile, file: String, 
     loop gap in gaps -> items.push(gap.item)
     exact: "packages={packages.join(",")};unmapped={items.join(",")}"
     provider_retain_records_without_key(lock, key)
-    identity: LockIdentity{kind: LockRecordKind.FlakeEvaluator, key, exact, hash: pkg_sha256_hex(exact.bytes()), platform: system}
+    identity: LockIdentity{kind: LockRecordKind.FlakeEvaluator, key: key, exact: exact, hash: pkg_sha256_hex(exact.bytes()), platform: system}
     lock.records.push(SemanticRecord.new(identity, provider_import_rationale(file, "native-nix-evaluator", exact, "bounded direct Nix environment import projection")))
 }
 
@@ -370,7 +366,7 @@ provider_import_nixpkgs_channel: fn(graph: FlakeGraph) -> LockedSourceChannel? N
         base: input.url.split_once("?")?.before ?? input.url
         declared: if base.starts_with("github:NixOS/nixpkgs/") -> base.removeprefix("github:NixOS/nixpkgs/") else -> ""
         channel: if declared == "" -> "nixos-unstable" else -> declared
-        return Val(LockedSourceChannel{name: REF_SOURCE_JETPACK, channel, exact: "github:NixOS/nixpkgs#{input.revision}"})
+        return Val(LockedSourceChannel{name: REF_SOURCE_JETPACK, channel: channel, exact: "github:NixOS/nixpkgs#{input.revision}"})
     }
     None
 }
@@ -447,7 +443,9 @@ provider_cmd_import: fn(theme: Theme, dir: String, requested: String?, fixtures:
                 loop record in graph_lock.records -> lock.records.push(record)
                 source_channel = provider_import_nixpkgs_channel(graph)
             }
-            .Err(error) -> gaps.push(ImportGap{item: "flake metadata: {error.message()}", candidate: catalog.nearest("flake", packages)})
+            .Err(error) -> {
+                gaps.push(ImportGap{item: "flake metadata: {error.message()}", candidate: catalog.nearest("flake", packages)})
+            }
         }
     }
     provider_add_import_source_record(lock, file, fingerprint)

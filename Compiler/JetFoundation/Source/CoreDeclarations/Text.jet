@@ -5,7 +5,9 @@
 
 core_decl_len: fn(text: String) -> Int Never! { text.bytes().len() }
 
-core_decl_tail: fn(text: String, start: Int) -> String Never! { foundation_byte_text(text.bytes(), start, core_decl_len(text)) }
+core_decl_tail: fn(text: String, start: Int) -> String Never! {
+    foundation_byte_text(text.bytes(), start, core_decl_len(text))
+}
 
 core_decl_space: fn(code: Int) -> Bool Never! {
     code == 32 || code == 9 || code == 10 || code == 11 || code == 12 || code == 13
@@ -119,7 +121,9 @@ core_decl_line: fn(raw: String) -> String Never! {
             quoted = true
             next
         }
-        if code == 47 && (Int{bytes[index + 1]}) == 47 -> return foundation_byte_text(bytes, 0, index).trim()
+        if code == 47 && (Int{bytes[index + 1]}) == 47 {
+            return foundation_byte_text(bytes, 0, index).trim()
+        }
     }
     raw.trim()
 }

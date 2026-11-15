@@ -15,13 +15,21 @@ use {
 }
 
 BUILD_ROUTES_PATH: "Compiler/JetIR/Source/BuildRoutes.jet"
+
 BUILD_TYPES_PATH: "Compiler/JetIR/Source/BuildTypes.jet"
+
 ROUTE_HANDLE_PATH: "Compiler/JetIR/Source/RouteHandle.jet"
+
 RUNTIME_ROUTES_PATH: "Compiler/JetIR/Source/RuntimeRoutes.jet"
+
 RUNTIME_HANDLES_PATH: "Compiler/JetFoundation/Source/Registry/RuntimeHandles.jet"
+
 RUNTIME_RECORDS_PATH: "Compiler/JetIR/Source/RuntimeRecords.jet"
+
 COMPILER_OWNED_PATH: "Compiler/JetIR/Source/CompilerOwned.jet"
+
 EVAL_VALUES_PATH: "Compiler/JetEval/Source/CompilerValueMethods.jet"
+
 SPECIAL_ROUTES_PATH: "Tools/hardening/special-routes.tsv"
 
 // One file the manifest reads, by repository-relative path.
@@ -39,19 +47,19 @@ Declared: struct {
 // The declarations of every Core source file, keyed for route lookups.
 ParsedCore: struct {
     // "<module>.<fn>" for top-level functions.
-    fns: [String: Declared]
+    fns: [String:Declared]
     // "<module>.<fn>" -> the declared return type; absent means Unit.
-    returns: [String: Type]
+    returns: [String:Type]
     // "<type>" for every struct, enum, distinct, alias and trait.
-    types: [String: Declared]
+    types: [String:Declared]
     // "<type>.<method>" for struct and impl methods.
-    methods: [String: Declared]
-    method_returns: [String: Type]
+    methods: [String:Declared]
+    method_returns: [String:Type]
     // "<type>.<field>" for struct fields.
-    fields: [String: Declared]
-    enums: [String: Bool]
+    fields: [String:Declared]
+    enums: [String:Bool]
     // Structs that declare at least one field.
-    records: [String: Bool]
+    records: [String:Bool]
     errors: [String]
 }
 
@@ -107,10 +115,12 @@ line_of: fn(text: String, needle: String) -> Int Never! {
 }
 
 parse_core: fn(sources: [SourceFile]) -> ParsedCore Never! {
-    out := ParsedCore{fns: [String: Declared]{}, returns: [String: Type]{}, types: [String: Declared]{}, methods: [String: Declared]{}, method_returns: [String: Type]{}, fields: [String: Declared]{}, enums: [String: Bool]{}, records: [String: Bool]{}, errors: [String]{}}
+    out := ParsedCore{fns: [String:Declared]{}, returns: [String:Type]{}, types: [String:Declared]{}, methods: [String:Declared]{}, method_returns: [String:Type]{}, fields: [String:Declared]{}, enums: [String:Bool]{}, records: [String:Bool]{}, errors: [String]{}}
     loop row in CORE_SOURCE_OWNED_ROWS {
         source := SourceFile?{None}
-        loop file in sources { if file.path == row.path -> source = Val(file.copy()) }
+        loop file in sources {
+            if file.path == row.path -> source = Val(file.copy())
+        }
         file: source ?? {
             out.errors.push("Core source `{row.path}` for `{row.module_name}` is missing")
             next
@@ -135,7 +145,9 @@ parse_into: fn(out: &ParsedCore, module_name: String, file: SourceFile) Never! {
             .Struct(s) -> {
                 out.types[s.name.copy()] = Declared{path: file.path.copy(), line: line_at(starts, s.span.start)}
                 if s.fields.len() > 0 -> out.records[s.name.copy()] = true
-                loop field in s.fields -> out.fields["{s.name}.{field.name}"] = Declared{path: file.path.copy(), line: line_at(starts, s.span.start)}
+                loop field in s.fields {
+                    out.fields["{s.name}.{field.name}"] = Declared{path: file.path.copy(), line: line_at(starts, s.span.start)}
+                }
                 loop m in s.methods {
                     key: "{s.name}.{m.name}"
                     out.methods[key.copy()] = Declared{path: file.path.copy(), line: line_at(starts, m.span.start)}
@@ -146,9 +158,15 @@ parse_into: fn(out: &ParsedCore, module_name: String, file: SourceFile) Never! {
                 out.types[e.name.copy()] = Declared{path: file.path.copy(), line: line_at(starts, e.span.start)}
                 out.enums[e.name.copy()] = true
             }
-            .Distinct(d) -> out.types[d.name.copy()] = Declared{path: file.path.copy(), line: line_at(starts, d.span.start)}
-            .TypeAlias(a) -> out.types[a.name.copy()] = Declared{path: file.path.copy(), line: line_at(starts, a.span.start)}
-            .Trait(t) -> out.types[t.name.copy()] = Declared{path: file.path.copy(), line: line_at(starts, t.span.start)}
+            .Distinct(d) -> {
+                out.types[d.name.copy()] = Declared{path: file.path.copy(), line: line_at(starts, d.span.start)}
+            }
+            .TypeAlias(a) -> {
+                out.types[a.name.copy()] = Declared{path: file.path.copy(), line: line_at(starts, a.span.start)}
+            }
+            .Trait(t) -> {
+                out.types[t.name.copy()] = Declared{path: file.path.copy(), line: line_at(starts, t.span.start)}
+            }
             .Impl(i) -> {
                 loop m in i.methods {
                     key: "{i.type_name}.{m.name}"
@@ -183,7 +201,9 @@ type_text: fn(ty: Type) -> String Never! {
         }
         .Tuple(fields) -> {
             parts := [String]{}
-            loop field in fields -> parts.push(if field.name == "" -> type_text(field.ty) else -> "{field.name}: {type_text(field.ty)}")
+            loop field in fields {
+                parts.push(if field.name == "" -> type_text(field.ty) else -> "{field.name}: {type_text(field.ty)}")
+            }
             "({parts.join(", ")})"
         }
         .Shared(inner) -> "Shared<{type_text(inner)}>"
@@ -229,17 +249,27 @@ compiler_record_fields: fn(name: String) -> [String] Never! {
 
 ir_route: fn(symbol: String, route_files: [SourceFile]) -> Route? Never! {
     routed: ir_route_symbol(symbol)
-    if ir_route_builder_lowered(routed) -> return Val(Route{kind: "ir-builder", path: BUILD_ROUTES_PATH, line: file_line(route_files, BUILD_ROUTES_PATH, "\"{routed}\""), symbol: routed.copy()})
-    if ir_environment_route(routed) != None -> return Val(Route{kind: "ir-environment", path: RUNTIME_ROUTES_PATH, line: file_line(route_files, RUNTIME_ROUTES_PATH, "\"{routed}\""), symbol: routed.copy()})
-    if ir_runtime_route(routed) != None -> return Val(Route{kind: "ir-runtime", path: RUNTIME_ROUTES_PATH, line: file_line(route_files, RUNTIME_ROUTES_PATH, "\"{routed}\""), symbol: routed.copy()})
+    if ir_route_builder_lowered(routed) {
+        return Val(Route{kind: "ir-builder", path: BUILD_ROUTES_PATH, line: file_line(route_files, BUILD_ROUTES_PATH, "\"{routed}\""), symbol: routed.copy()})
+    }
+    if ir_environment_route(routed) != None {
+        return Val(Route{kind: "ir-environment", path: RUNTIME_ROUTES_PATH, line: file_line(route_files, RUNTIME_ROUTES_PATH, "\"{routed}\""), symbol: routed.copy()})
+    }
+    if ir_runtime_route(routed) != None {
+        return Val(Route{kind: "ir-runtime", path: RUNTIME_ROUTES_PATH, line: file_line(route_files, RUNTIME_ROUTES_PATH, "\"{routed}\""), symbol: routed.copy()})
+    }
     // ir_core_call's named arms: `if symbol == "<name>" -> return ir_<lowering>(…)`.
     arm: file_line(route_files, BUILD_ROUTES_PATH, "== \"{routed}\" -> return ir_")
-    if arm > 0 -> return Val(Route{kind: "ir-core-call", path: BUILD_ROUTES_PATH, line: arm, symbol: routed.copy()})
+    if arm > 0 {
+        return Val(Route{kind: "ir-core-call", path: BUILD_ROUTES_PATH, line: arm, symbol: routed.copy()})
+    }
     None
 }
 
 file_line: fn(files: [SourceFile], path: String, needle: String) -> Int Never! {
-    loop file in files { if file.path == path -> return line_of(file.text, needle) }
+    loop file in files {
+        if file.path == path -> return line_of(file.text, needle)
+    }
     0
 }
 
@@ -268,8 +298,8 @@ parse_special_routes: fn(text: String) -> [SpecialRoute] Err! {
 surface: fn(core: ParsedCore, specials: [SpecialRoute], special_files: [SourceFile], route_files: [SourceFile]) -> Surface Never! {
     rows := [SurfaceRow]{}
     errors := core.errors.copy()
-    seen := [String: Bool]{}
-    modules := [String: Bool]{}
+    seen := [String:Bool]{}
+    modules := [String:Bool]{}
     loop export in CORE_MODULE_EXPORTS -> modules[export.module_name.copy()] = true
     loop export in CORE_MODULE_EXPORTS {
         loop member in export.members {
@@ -331,7 +361,9 @@ module_call_row: fn(id: String, module_name: String, member: String, core: Parse
     record: core_call(module_name, member)
     owned_path := String?{None}
     loop row in CORE_SOURCE_OWNED_ROWS {
-        if row.module_name == module_name && row.owned_members.contains(member) -> owned_path = Val(row.path.copy())
+        if row.module_name == module_name && row.owned_members.contains(member) {
+            owned_path = Val(row.path.copy())
+        }
     }
     declared_aot := false
     target := member.copy()
@@ -357,7 +389,9 @@ module_call_row: fn(id: String, module_name: String, member: String, core: Parse
     // result type does not depend on how many optional arguments are passed.
     fixed: core_sig_fixed(CoreCallSignatureRequest{module_name: module_name.copy(), member: member.copy(), actual_arity: -1, actual_accesses: [AccessConvention]{}, type_args: [Type]{}})
     signature := fixed
-    if fixed == .Val(found) && (found.module_name != module_name || found.member != member) -> signature = None
+    if fixed == .Val(found) && (found.module_name != module_name || found.member != member) {
+        signature = None
+    }
     ty := Type?{None}
     if signature == .Val(found) -> ty = found.return_type.copy()
     shown: if {
@@ -407,7 +441,7 @@ receiver_row: fn(id: String, owner: String, member: String, symbol: String, targ
     unrouted(id, "receiver_method", owner, member, "no Core source declares {declared}, no IR handle route answers it and {shown} has no IR dispatcher arm", declared_aot: declared_aot)
 }
 
-field_row: fn(id: String, owner: String, field: String, compiler_fields: [String: [TypeTupleField]], core: ParsedCore, route_files: [SourceFile]) -> SurfaceRow Never! {
+field_row: fn(id: String, owner: String, field: String, compiler_fields: [String:[TypeTupleField]], core: ParsedCore, route_files: [SourceFile]) -> SurfaceRow Never! {
     if ir_compiler_owned_record_fields(owner, compiler_fields) == .Val(fields) {
         loop known in fields {
             if known.name == field {
@@ -433,8 +467,12 @@ field_dispatch: fn(owner: String, field: String, route_files: [SourceFile]) -> R
             return Val(Route{kind: "ir-handle-field", path: RUNTIME_ROUTES_PATH, line: file_line(route_files, RUNTIME_ROUTES_PATH, "\"{handle.runtime}\""), symbol: "{handle.runtime}.{field}"})
         }
     }
-    if schema_route(IR_RECORD_SCHEMAS, RUNTIME_RECORDS_PATH, owner, field, route_files) == .Val(route) -> return Val(route.copy())
-    if schema_route(IR_GENERATED_RECORDS, RUNTIME_ROUTES_PATH, owner, field, route_files) == .Val(route) -> return Val(route.copy())
+    if schema_route(IR_RECORD_SCHEMAS, RUNTIME_RECORDS_PATH, owner, field, route_files) == .Val(route) {
+        return Val(route.copy())
+    }
+    if schema_route(IR_GENERATED_RECORDS, RUNTIME_ROUTES_PATH, owner, field, route_files) == .Val(route) {
+        return Val(route.copy())
+    }
     if ir_host_value_name(owner) && jet_eval_compiler_value_method_record(owner, field) {
         return Val(Route{kind: "eval-host-field", path: EVAL_VALUES_PATH, line: file_line(route_files, EVAL_VALUES_PATH, "owner == \"{owner}\""), symbol: "{owner}.{field}"})
     }
@@ -475,7 +513,7 @@ nominal_row: fn(id: String, module_name: String, name: String, core: ParsedCore,
 // names must exist, must lack every other route, and its needle must be in the
 // named file; otherwise the table is wrong and generation fails.
 apply_specials: fn(rows: &[SurfaceRow], errors: &[String], specials: [SpecialRoute], special_files: [SourceFile]) Never! {
-    keys := [String: Bool]{}
+    keys := [String:Bool]{}
     loop special in specials {
         where: "{SPECIAL_ROUTES_PATH}:{special.row}"
         if keys.get(special.key) != None {
@@ -484,7 +522,9 @@ apply_specials: fn(rows: &[SurfaceRow], errors: &[String], specials: [SpecialRou
         }
         keys[special.key.copy()] = true
         text := String?{None}
-        loop file in special_files { if file.path == special.path -> text = Val(file.text.copy()) }
+        loop file in special_files {
+            if file.path == special.path -> text = Val(file.text.copy())
+        }
         body: text ?? {
             errors.push("{where}: `{special.path}` does not exist")
             next
@@ -495,7 +535,9 @@ apply_specials: fn(rows: &[SurfaceRow], errors: &[String], specials: [SpecialRou
             next
         }
         index := -1
-        loop (at, row) in rows { if row.id == special.key -> index = at }
+        loop (at, row) in rows {
+            if row.id == special.key -> index = at
+        }
         if index < 0 {
             errors.push("{where}: `{special.key}` is not a surface row")
             next

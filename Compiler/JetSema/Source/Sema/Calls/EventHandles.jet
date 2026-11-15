@@ -12,9 +12,7 @@ use jet_foundation.[
     Type,
 ]
 
-sema_event_unit: fn() -> Type Never! {
-    Type.Named{name: "Unit"}
-}
+sema_event_unit: fn() -> Type Never! { Type.Named{name: "Unit"} }
 
 // The handle family a receiver type is named for: `Event<T>`, `Hook<T, R>`,
 // `DecisionHook<T, E>`, `AsyncEvent<T, E>`, `DispatchReport<E>`,
@@ -22,12 +20,10 @@ sema_event_unit: fn() -> Type Never! {
 // non-generic `Event` included).
 sema_event_handle_family: fn(ty: Type) -> String? {
     if ty == {
-        .Apply(name, args) -> {
-            if name == {
-                "Event" | "DispatchReport" -> if args.len() == 1 -> Val(name) else -> None
-                "Hook" | "DecisionHook" | "AsyncEvent" -> if args.len() == 2 -> Val(name) else -> None
-                else -> None
-            }
+        .Apply(name, args) -> if name == {
+            "Event" | "DispatchReport" -> if args.len() == 1 -> Val(name) else -> None
+            "Hook" | "DecisionHook" | "AsyncEvent" -> if args.len() == 2 -> Val(name) else -> None
+            else -> None
         }
         .Named(name) -> if name == "EventScope" || name == "Subscription" || name == "EventTrace" -> Val(name) else -> None
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
@@ -42,7 +38,9 @@ sema_event_handle_family: fn(ty: Type) -> String? {
 sema_event_handle_owner: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
     owner: sema_event_handle_family(ty) ?? return None
     if program.registration_graph == .Val(graph) {
-        if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) != None -> return None
+        if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) != None {
+            return None
+        }
     }
     Val(owner)
 }
@@ -67,21 +65,29 @@ sema_event_method_shape: fn(owner: String, method: String, args: [Type]) -> (ari
         return None
     }
     if owner == "DecisionHook" {
-        if method == "run" -> return Val((arity: 1, result: Type.Apply{name: "HookOutcome", args: args.copy()}))
+        if method == "run" {
+            return Val((arity: 1, result: Type.Apply{name: "HookOutcome", args: args.copy()}))
+        }
         return None
     }
     if owner == "AsyncEvent" {
         report: Type.Apply{name: "DispatchReport", args: [Type]{args[1].copy()}}
-        if method == "emit_async" -> return Val((arity: 1, result: Type.Apply{name: "Task", args: [Type]{report}}))
+        if method == "emit_async" {
+            return Val((arity: 1, result: Type.Apply{name: "Task", args: [Type]{report}}))
+        }
         if method == "close" -> return Val((arity: 0, result: sema_event_unit()))
-        if method == "queued_count" || method == "running_count" || method == "blocked_count" -> return Val((arity: 0, result: Type.Int))
+        if method == "queued_count" || method == "running_count" || method == "blocked_count" {
+            return Val((arity: 0, result: Type.Int))
+        }
         return None
     }
     if owner == "DispatchReport" {
         if method == "state" -> return Val((arity: 0, result: Type.Named{name: "DispatchState"}))
         if method == "accepted" -> return Val((arity: 0, result: Type.Bool))
         if method == "delivered_handlers" -> return Val((arity: 0, result: Type.Int))
-        if method == "failures" -> return Val((arity: 0, result: Type.List{element: Type.Apply{name: "DispatchFailure", args: args.copy()}}))
+        if method == "failures" {
+            return Val((arity: 0, result: Type.List{element: Type.Apply{name: "DispatchFailure", args: args.copy()}}))
+        }
         if method == "trace" -> return Val((arity: 0, result: Type.Named{name: "EventTrace"}))
         return None
     }
@@ -97,7 +103,9 @@ sema_event_method_shape: fn(owner: String, method: String, args: [Type]) -> (ari
     }
     if owner == "EventTrace" {
         if method == "summary" -> return Val((arity: 0, result: Type.String))
-        if method == "delivered" || method == "queued" || method == "dropped" -> return Val((arity: 0, result: Type.Int))
+        if method == "delivered" || method == "queued" || method == "dropped" {
+            return Val((arity: 0, result: Type.Int))
+        }
         return None
     }
     None
@@ -111,10 +119,18 @@ sema_event_parameter: fn(name: String, ty: Type, convention: AccessConvention) -
 // moved payload of an emit or a run, and a Hook run's moved fallback.
 sema_event_value_parameters: fn(owner: String, method: String, args: [Type]) -> [SemaCallParam] Never! {
     params := [SemaCallParam]{}
-    if method == "on" || method == "once" || method == "on_priority" -> params.push(sema_event_parameter("scope", Type.Named{name: "EventScope"}, AccessConvention.Read))
-    if method == "on_priority" -> params.push(sema_event_parameter("priority", Type.Int, AccessConvention.Read))
-    if method == "emit" || method == "emit_async" || method == "run" -> params.push(sema_event_parameter("payload", args[0].copy(), AccessConvention.Move))
-    if owner == "Hook" && method == "run" -> params.push(sema_event_parameter("fallback", args[1].copy(), AccessConvention.Move))
+    if method == "on" || method == "once" || method == "on_priority" {
+        params.push(sema_event_parameter("scope", Type.Named{name: "EventScope"}, AccessConvention.Read))
+    }
+    if method == "on_priority" {
+        params.push(sema_event_parameter("priority", Type.Int, AccessConvention.Read))
+    }
+    if method == "emit" || method == "emit_async" || method == "run" {
+        params.push(sema_event_parameter("payload", args[0].copy(), AccessConvention.Move))
+    }
+    if owner == "Hook" && method == "run" {
+        params.push(sema_event_parameter("fallback", args[1].copy(), AccessConvention.Move))
+    }
     params
 }
 
@@ -138,7 +154,9 @@ sema_call_try_event_handle_method: fn(receiver: Expr, receiver_value: TExpr, met
     owner: sema_event_handle_owner(receiver_type, environment, program) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     type_args := [Type]{}
     if receiver_type == .Apply(_, receiver_args) {
-        loop arg in receiver_args -> type_args.push(sema_call_resolved_type(arg, environment, program))
+        loop arg in receiver_args {
+            type_args.push(sema_call_resolved_type(arg, environment, program))
+        }
     }
     shape: sema_event_method_shape(owner, method, type_args) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     callee: "{owner}.{method}"
@@ -157,7 +175,9 @@ sema_call_try_event_handle_method: fn(receiver: Expr, receiver_value: TExpr, met
     }
     typed: sema_call_typecheck_bound_arguments(callee, params, None, false, binding, checked_args, environment, program, scopes, state, tail_store, context, span, diagnostics, true) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     ownership := sema_ownership_check_method_call(state, callee, receiver, AccessConvention.Read, params, checked_args, scopes, span, diagnostics)
-    if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !ownership.accepted || !ownership.complete {
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
     values := typed.values
     if registers {
         handler: sema_expression_lambda_host_callback_stored(args[args.len() - 1].expr, Val(sema_event_handler_type(owner, type_args)), false, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}

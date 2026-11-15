@@ -1,6 +1,7 @@
-
 #Error
-PatternError: enum { Rejected }
+PatternError: enum {
+    Rejected
+}
 
 Pattern: distinct String
 
@@ -8,13 +9,11 @@ impl Pattern.CheckedText {
     Error: PatternError
 
     check: fn(text: String) PatternError! -[]> {
-        if text == "bad" { return Err(PatternError.Rejected) }
+        if text == "bad" -> return Err(PatternError.Rejected)
         return Ok()
     }
 
-    encode_hole: fn<T: Printable>(value: T) -[]> String {
-        return ""
-    }
+    encode_hole: fn<T: Printable>(value: T) -[]> String { return "" }
 }
 
 impl Err.From(PatternError) {
@@ -33,6 +32,4 @@ load: fn(text: String) -[]> Pattern {
     return Ok(pattern)
 }
 
-run: fn() {
-    _: load("bad")
-}
+run: fn() { _: load("bad") }

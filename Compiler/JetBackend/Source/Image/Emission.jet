@@ -4,9 +4,13 @@
 // its read-only data objects, its debug files and types, and each function's
 // source facts.
 
-X64FunctionID: struct { value: Int }
+X64FunctionID: struct {
+    value: Int
+}
 
-X64DataID: struct { value: Int }
+X64DataID: struct {
+    value: Int
+}
 
 // A relocation's target: a compiled function, a runtime function (a call),
 // a data object of the module, or a runtime data object (its address, read
@@ -21,7 +25,10 @@ X64RelocTarget: enum {
 
 // A rel32 field at `at` (offset in the function's code) that must hold the
 // distance from the end of the field to the target.
-X64Reloc: struct { at: Int, target: X64RelocTarget }
+X64Reloc: struct {
+    at: Int
+    target: X64RelocTarget
+}
 
 // `align`: the function's start alignment in `.text`, a power of two of at
 // least X64_FUNCTION_ALIGN; code inside it aligned to `align` stays aligned.
@@ -37,7 +44,10 @@ X64CompiledFunction: struct {
 // where each run of code from one source line starts, the end of the
 // prologue, the call frame instructions of its FDE, and where each debug
 // variable lives over which code range.
-X64LineRow: struct { at: Int, line: Int }
+X64LineRow: struct {
+    at: Int
+    line: Int
+}
 
 // A register (hardware number; xmm n as 16 + n), a frame slot at `offset`
 // from rbp, or the frame address rbp + `offset` itself (a StackSlot's
@@ -50,11 +60,20 @@ X64DebugLocation: enum {
 
 // X64FunctionSource.variables[variable] is at `location` for code offsets
 // start..<end.
-X64VariableRange: struct { variable: Int, start: Int, end: Int, location: X64DebugLocation }
+X64VariableRange: struct {
+    variable: Int
+    start: Int
+    end: Int
+    location: X64DebugLocation
+}
 
 // The code offsets start..<end hold code of inline site `site` (a row of
 // X64FunctionSource.inlines, from 1) or of a site nested in it.
-X64InlineRange: struct { site: Int, start: Int, end: Int }
+X64InlineRange: struct {
+    site: Int
+    start: Int
+    end: Int
+}
 
 X64FunctionDebug: struct {
     lines: [X64LineRow]
@@ -75,11 +94,24 @@ X64FunctionDebug: struct {
 
 // The source types of the debug variables, described by their machine
 // layout.
-X64DebugEncoding: enum { Signed Unsigned Float Bool Char }
+X64DebugEncoding: enum {
+    Signed
+    Unsigned
+    Float
+    Bool
+    Char
+}
 
-X64DebugMember: struct { name: String, offset: Int, ty: Int }
+X64DebugMember: struct {
+    name: String
+    offset: Int
+    ty: Int
+}
 
-X64DebugEnumerator: struct { name: String, value: Int }
+X64DebugEnumerator: struct {
+    name: String
+    value: Int
+}
 
 // Type references are rows of X64ModuleDebug.types; -1 is no type (an
 // untyped pointer). `Opaque` has a name and size but no known contents.
@@ -93,7 +125,11 @@ X64DebugTypeKind: enum {
     Opaque
 }
 
-X64DebugType: struct { name: String, size: Int, kind: X64DebugTypeKind }
+X64DebugType: struct {
+    name: String
+    size: Int
+    kind: X64DebugTypeKind
+}
 
 // A source variable: a parameter or a named local. `indirect` when the
 // carried value is the address of the variable's bytes (an inline aggregate)

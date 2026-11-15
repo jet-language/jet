@@ -49,7 +49,9 @@ sema_default_owner_scope: fn(environment: SemaScopeEnvironment, program: SemaPro
         owner_environment.function_name = environment.function_name
         table := sema_scope_init(owner_module)
         registration_diagnostics := [Diagnostic]{}
-        if !sema_registration_apply_graph_module(graph, owner_module, table, registration_diagnostics) -> return None
+        if !sema_registration_apply_graph_module(graph, owner_module, table, registration_diagnostics) {
+            return None
+        }
         state := sema_ownership_state_init()
         _ := sema_scope_enter(table, state, sema_scope_function_owner_key(scopes))
         return Val(SemaDefaultOwnerScope{environment: owner_environment.move(), scopes: table.move(), state: state.move()})

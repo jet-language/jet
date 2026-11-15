@@ -111,7 +111,9 @@ ArtifactLease: struct {
         close: fn(&&self) -[FS]> {
             expected: self.owner_value.owner_line("lease").bytes()
             bytes: files.read_bytes(self.path_value) ?? return
-            if !pkg_bytes_starts_with(bytes, 0, expected) -> return
+            if !pkg_bytes_starts_with(bytes, 0, expected) {
+                return
+            }
             files.remove(self.path_value).drop("lease release is best-effort; a lease of a dead owner is reclaimed")
         }
     }
@@ -126,7 +128,9 @@ ArtifactStoreLock: struct {
     impl Close {
         close: fn(&&self) -[FS]> {
             bytes: files.read_bytes(self.path) ?? return
-            if bytes != self.owner_line -> return
+            if bytes != self.owner_line {
+                return
+            }
             files.remove(self.path).drop("lock release is best-effort; a lock of a dead owner is reclaimed")
         }
     }
@@ -145,7 +149,9 @@ store_artifact_parse_lease: fn(bytes: [U8]) -> ArtifactLeaseRecord? Never! {
     lines: store_artifact_lines(text)
     if lines.len() == 0 -> return None
     header: lines[0].split("|").to_list()
-    if header.len() != 4 || header[0] != STORE_ARTIFACT_VERSION || header[1] != "lease" -> return None
+    if header.len() != 4 || header[0] != STORE_ARTIFACT_VERSION || header[1] != "lease" {
+        return None
+    }
     pid: store_artifact_parse_pid(header[2]) ?? return None
     if header[3] == "" -> return None
     owner: ArtifactProcessIdentity.new(pid, header[3])
@@ -155,7 +161,7 @@ store_artifact_parse_lease: fn(bytes: [U8]) -> ArtifactLeaseRecord? Never! {
         if fields.len() != 2 -> return None
         targets.push(ArtifactEntryKey.parse_wire(fields[0], fields[1]) ?? return None)
     }
-    Val(ArtifactLeaseRecord{owner, targets: store_artifact_unique_keys(targets)})
+    Val(ArtifactLeaseRecord{owner: owner, targets: store_artifact_unique_keys(targets)})
 }
 
 // The owner of a lock file (`jet.store.v1|lock|<pid>|<start>`).
@@ -166,7 +172,9 @@ store_artifact_parse_owner_line: fn(bytes: [U8]) -> ArtifactProcessIdentity? Nev
         text = pkg_bytes_text(raw, 0, raw.len() - 1)
     }
     fields: text.split("|").to_list()
-    if fields.len() != 4 || fields[0] != STORE_ARTIFACT_VERSION || fields[1] != "lock" || fields[3] == "" -> return None
+    if fields.len() != 4 || fields[0] != STORE_ARTIFACT_VERSION || fields[1] != "lock" || fields[3] == "" {
+        return None
+    }
     pid: store_artifact_parse_pid(fields[2]) ?? return None
     Val(ArtifactProcessIdentity.new(pid, fields[3]))
 }
@@ -201,7 +209,7 @@ store_artifact_lines: fn(text: String) -> [String] Never! {
 // (by `ArtifactEntryKey.identity`), the highest sequence, the file size, and
 // whether every record was valid. Replay stops at the first invalid record.
 ArtifactJournalState: struct {
-    last_use: [String: Int]
+    last_use: [String:Int]
     last_sequence: Int
     bytes: Int
     valid: Bool
@@ -222,11 +230,13 @@ store_artifact_read_journal: fn(path: String) -[FS]> ArtifactJournalState Artifa
     bytes: if files.read_bytes(path) == {
         .Ok(read) -> read
         .Err(error) -> {
-            if store_artifact_io_missing(error) -> return Ok(ArtifactJournalState{last_use: [String: Int]{}, last_sequence: 0, bytes: 0, valid: true})
+            if store_artifact_io_missing(error) {
+                return Ok(ArtifactJournalState{last_use: [String:Int]{}, last_sequence: 0, bytes: 0, valid: true})
+            }
             return Err(ArtifactStoreError.IO(error))
         }
     }
-    state := ArtifactJournalState{last_use: [String: Int]{}, last_sequence: 0, bytes: bytes.len(), valid: true}
+    state := ArtifactJournalState{last_use: [String:Int]{}, last_sequence: 0, bytes: bytes.len(), valid: true}
     start := 0
     loop index in 0..<(bytes.len() + 1) {
         if index < bytes.len() && (Int{bytes[index]}) != 10 -> next
@@ -238,9 +248,7 @@ store_artifact_read_journal: fn(path: String) -[FS]> ArtifactJournalState Artifa
                 if record.sequence > state.last_sequence -> state.last_sequence = record.sequence
                 if record.operation == "remove" {
                     state.last_use.remove(record.key.identity()).drop("a remove of an unknown key is a no-op")
-                } else {
-                    state.last_use[record.key.identity()] = record.sequence
-                }
+                } else { state.last_use[record.key.identity()] = record.sequence }
             }
             .None -> {
                 state.valid = false
@@ -269,12 +277,14 @@ store_artifact_parse_journal_line: fn(line: [U8]) -> ArtifactJournalRecord? Neve
     fields: text.split("|").to_list()
     if fields.len() != 7 || fields[0] != STORE_ARTIFACT_VERSION -> return None
     // The checksum covers everything before it, trailing separator included.
-    if pkg_sha256_hex(store_artifact_slice(line, 0, end - fields[6].bytes().len())) != fields[6] -> return None
+    if pkg_sha256_hex(store_artifact_slice(line, 0, end - fields[6].bytes().len())) != fields[6] {
+        return None
+    }
     length: store_artifact_parse_count(fields[4]) ?? return None
     sequence: store_artifact_parse_count(fields[5]) ?? return None
     key: ArtifactEntryKey.parse_wire(fields[2], fields[3]) ?? return None
     if fields[1] != "put" && fields[1] != "touch" && fields[1] != "remove" -> return None
-    Val(ArtifactJournalRecord{operation: fields[1], key, length, sequence})
+    Val(ArtifactJournalRecord{operation: fields[1], key: key, length: length, sequence: sequence})
 }
 
 // Bytes read from the journal's end to find its final line. A line is one

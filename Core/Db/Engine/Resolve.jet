@@ -33,6 +33,7 @@ EXCLUDED_TABLE_NUMBER: 2
 
 // Bitmask (sqliteInt.h): BMS bits, ALLBITS all of them set.
 BMS: 64
+
 ALLBITS: 18446744073709551615
 
 // ---------------------------------------------------------------------------
@@ -56,9 +57,13 @@ nc_release: fn(p: &cg.Parse, mark: Int) Never! {
 
 nc_has: fn(p: cg.Parse, nc: Int, f: Int) -> Bool Never! { p.ncs[nc].nc_flags.bit_and(f) != 0 }
 
-nc_set: fn(p: &cg.Parse, nc: Int, f: Int) Never! { p.ncs[nc].nc_flags = p.ncs[nc].nc_flags.bit_or(f) }
+nc_set: fn(p: &cg.Parse, nc: Int, f: Int) Never! {
+    p.ncs[nc].nc_flags = p.ncs[nc].nc_flags.bit_or(f)
+}
 
-nc_clear: fn(p: &cg.Parse, nc: Int, f: Int) Never! { p.ncs[nc].nc_flags = util.clear_bits(p.ncs[nc].nc_flags, f) }
+nc_clear: fn(p: &cg.Parse, nc: Int, f: Int) Never! {
+    p.ncs[nc].nc_flags = util.clear_bits(p.ncs[nc].nc_flags, f)
+}
 
 // ---------------------------------------------------------------------------
 // Helpers from expr.c, select.c and window.c.
@@ -69,7 +74,9 @@ expr_can_be_null: fn(db: conn.Conn, a: ast.AST, e0: Int) -> Bool Never! {
     loop a.exprs[e].op == tk.TK_UPLUS || a.exprs[e].op == tk.TK_UMINUS -> e = a.exprs[e].left
     op := a.exprs[e].op
     if op == tk.TK_REGISTER -> op = a.exprs[e].op2
-    if op == tk.TK_INTEGER || op == tk.TK_STRING || op == tk.TK_FLOAT || op == tk.TK_BLOB -> return false
+    if op == tk.TK_INTEGER || op == tk.TK_STRING || op == tk.TK_FLOAT || op == tk.TK_BLOB {
+        return false
+    }
     if op == tk.TK_COLUMN {
         t: a.exprs[e].y
         if ast.has(a, e, ast.EP_CAN_BE_NULL) || t < 0 -> return true
@@ -87,7 +94,9 @@ is_rowid: fn(z: [U8]) -> Bool Never! {
 // sqlite3ExprFunctionUsable: a function with SQLITE_FUNC_DIRECT, or any
 // function outside a trusted schema, may not be called from the schema.
 expr_function_usable: fn(p: cg.Parse, a: &ast.AST, e: Int, d: conn.FuncDef) Never! {
-    if !ast.has(a, e, ast.EP_FROM_DDL) -> return
+    if !ast.has(a, e, ast.EP_FROM_DDL) {
+        return
+    }
     if d.flags.bit_and(conn.FUNC_DIRECT) != 0 || p.db.flags.bit_and(conn.SQLITE_TRUSTED_SCHEMA) == 0 {
         t: ast.expr_text(a, e)
         off: ast.expr_offset(a, e)
@@ -97,7 +106,9 @@ expr_function_usable: fn(p: cg.Parse, a: &ast.AST, e: Int, d: conn.FuncDef) Neve
 
 // sqlite3SrcItemColumnUsed: mark column `col` of a nested-FROM item used.
 src_item_column_used: fn(a: &ast.AST, si: Int, col: Int) Never! {
-    if !a.items[si].is_nested_from -> return
+    if !a.items[si].is_nested_from {
+        return
+    }
     el: a.selects[a.items[si].select].elist
     a.lists[el].items[col].used = true
 }
@@ -138,14 +149,20 @@ RefSrcWalker: struct {
             self.code = self.code.bit_or(2)
             ast.WRC_CONTINUE
         }
+
         walk_has_select_cb: fn(&self) -> Bool Never! { true }
+
         // selectRefEnter.
         walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! {
             src: a.selects[s].src
-            loop i in 0..<ast.src_len(a, src) -> self.exclude.push(a.items[ast.src_item(a, src, i)].cursor)
+            loop i in 0..<ast.src_len(a, src) {
+                self.exclude.push(a.items[ast.src_item(a, src, i)].cursor)
+            }
             ast.WRC_CONTINUE
         }
+
         walk_has_select_cb2: fn(&self) -> Bool Never! { true }
+
         // selectRefLeave.
         walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {
             n := ast.src_len(a, a.selects[s].src)
@@ -154,6 +171,7 @@ RefSrcWalker: struct {
                 n -= 1
             }
         }
+
         walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
     }
 }
@@ -168,7 +186,9 @@ references_src_list: fn(a: &ast.AST, e: Int, src: Int) -> Int Never! {
     _: ast.walk_expr_list<RefSrcWalker>(w, a, a.exprs[e].x)
     left: a.exprs[e].left
     if left >= 0 -> _: ast.walk_expr_list<RefSrcWalker>(w, a, a.exprs[left].x)
-    if ast.has(a, e, ast.EP_WIN_FUNC) -> _: ast.walk_expr<RefSrcWalker>(w, a, a.windows[a.exprs[e].y].filter)
+    if ast.has(a, e, ast.EP_WIN_FUNC) {
+        _: ast.walk_expr<RefSrcWalker>(w, a, a.windows[a.exprs[e].y].filter)
+    }
     if w.code.bit_and(1) != 0 -> return 1
     if w.code != 0 -> 0 else -> -1
 }
@@ -181,7 +201,9 @@ window_update: fn(p: &cg.Parse, a: &ast.AST, list: Int, win: Int, d: conn.FuncDe
     if a.windows[win].name != None && a.windows[win].frm_type == 0 {
         nm: a.windows[win].name ?? [U8]{}
         w2: ast.window_find(a, list, nm)
-        if w2 < 0 -> return
+        if w2 < 0 {
+            return
+        }
         a.windows[win].partition = ast.expr_list_dup(a, a.windows[w2].partition, 0)
         a.windows[win].order_by = ast.expr_list_dup(a, a.windows[w2].order_by, 0)
         a.windows[win].start_expr = ast.expr_dup(a, a.windows[w2].start_expr, 0)
@@ -190,9 +212,7 @@ window_update: fn(p: &cg.Parse, a: &ast.AST, list: Int, win: Int, d: conn.FuncDe
         a.windows[win].end_type = a.windows[w2].end_type
         a.windows[win].frm_type = a.windows[w2].frm_type
         a.windows[win].exclude = a.windows[w2].exclude
-    } else {
-        ast.window_chain(a, win, list)
-    }
+    } else { ast.window_chain(a, win, list) }
     w: a.windows[win].copy()
     if w.frm_type == tk.TK_RANGE && (w.start_expr >= 0 || w.end_expr >= 0) && ast.list_len(a, w.order_by) != 1 {
         ast.error(a, "RANGE with offset PRECEDING/FOLLOWING requires one ORDER BY expression")
@@ -243,7 +263,9 @@ window_update: fn(p: &cg.Parse, a: &ast.AST, list: Int, win: Int, d: conn.FuncDe
                 a.windows[win].start_type = st
                 a.windows[win].end_type = et
                 a.windows[win].exclude = 0
-                if st == tk.TK_FOLLOWING -> a.windows[win].start_expr = ast.expr(a, tk.TK_INTEGER, "1".bytes())
+                if st == tk.TK_FOLLOWING {
+                    a.windows[win].start_expr = ast.expr(a, tk.TK_INTEGER, "1".bytes())
+                }
             }
         }
     }
@@ -263,17 +285,24 @@ IncrAggDepthWalker: struct {
             if a.exprs[e].op == tk.TK_AGG_FUNCTION -> a.exprs[e].op2 = a.exprs[e].op2 + self.n
             ast.WRC_CONTINUE
         }
+
         walk_has_select_cb: fn(&self) -> Bool Never! { false }
+
         walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
+
         walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+
         walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+
         walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
     }
 }
 
 // incrAggFunctionDepth.
 incr_agg_function_depth: fn(a: &ast.AST, e: Int, n: Int) Never! {
-    if n <= 0 -> return
+    if n <= 0 {
+        return
+    }
     w := IncrAggDepthWalker{n: n}
     _: ast.walk_expr<IncrAggDepthWalker>(w, a, e)
 }
@@ -299,7 +328,9 @@ resolve_alias: fn(a: &ast.AST, elist: Int, i_col: Int, e: Int, n_subquery: Int) 
 // folding case (sqlite3StrNICmp(zSpan, z, n)==0 && z[n]==0).
 span_matches: fn(span: [U8], at: Int, n: Int, z: [U8]) -> Bool Never! {
     loop i in 0..<n {
-        if util.lower_byte(util.sql_byte(span, at + i)) != util.lower_byte(util.sql_byte(z, i)) -> return false
+        if util.lower_byte(util.sql_byte(span, at + i)) != util.lower_byte(util.sql_byte(z, i)) {
+            return false
+        }
     }
     util.sql_byte(z, n) == 0
 }
@@ -419,9 +450,7 @@ lookup_name: fn(p: &cg.Parse, a: &ast.AST, db_name0: [U8]?, z_tab: [U8]?, z_col:
     a.exprs[e].itable = -1
 
     if z_db == .Val(zdb) {
-        if nc_has(p, nc, ast.NC_PART_IDX.bit_or(ast.NC_IS_CHECK)) {
-            z_db = None
-        } else {
+        if nc_has(p, nc, ast.NC_PART_IDX.bit_or(ast.NC_IS_CHECK)) -> z_db = None else {
             found := false
             loop i in 0..<p.db.dbs.len() {
                 if util.str_icmp(p.db.dbs[i].name, zdb) == 0 {
@@ -454,21 +483,15 @@ lookup_name: fn(p: &cg.Parse, a: &ast.AST, db_name0: [U8]?, z_tab: [U8]?, z_col:
                                 if !a.items[si].is_using || ast.id_list_index(a, a.items[si].u3, z_col) < 0 {
                                     ast.expr_list_delete(a, fj)
                                     fj = -1
-                                } else if a.items[si].jointype.bit_and(ast.JT_RIGHT) == 0 {
-                                    next
-                                } else if a.items[si].jointype.bit_and(ast.JT_LEFT) == 0 {
+                                } else if a.items[si].jointype.bit_and(ast.JT_RIGHT) == 0 { next } else if a.items[si].jointype.bit_and(ast.JT_LEFT) == 0 {
                                     cnt = 0
                                     ast.expr_list_delete(a, fj)
                                     fj = -1
-                                } else {
-                                    fj = extend_fj_match(a, fj, match_si, a.exprs[e].icolumn)
-                                }
+                                } else { fj = extend_fj_match(a, fj, match_si, a.exprs[e].icolumn) }
                             }
                             cnt += 1
                             hit = true
-                        } else if cnt > 0 {
-                            next
-                        }
+                        } else if cnt > 0 { next }
                         cnt_tab += 1
                         match_si = si
                         a.exprs[e].icolumn = j
@@ -488,7 +511,9 @@ lookup_name: fn(p: &cg.Parse, a: &ast.AST, db_name0: [U8]?, z_tab: [U8]?, z_col:
                         if p.db.tables[t].tnum != 1 -> next
                         if !is_valid_schema_table_name(ztab, p.db.tables[t], schema) -> next
                     }
-                    if ast.in_rename(a) && a.items[si].alias != None -> cg.rename_token_remap(p, cg.RENAME_EXPR_TAB, -1, cg.RENAME_EXPR_TAB, e)
+                    if ast.in_rename(a) && a.items[si].alias != None {
+                        cg.rename_token_remap(p, cg.RENAME_EXPR_TAB, -1, cg.RENAME_EXPR_TAB, e)
+                    }
                 }
                 h_col: util.str_ihash(z_col)
                 loop j in 0..<p.db.tables[t].cols.len() {
@@ -497,15 +522,11 @@ lookup_name: fn(p: &cg.Parse, a: &ast.AST, db_name0: [U8]?, z_tab: [U8]?, z_col:
                             if !a.items[si].is_using || ast.id_list_index(a, a.items[si].u3, z_col) < 0 {
                                 ast.expr_list_delete(a, fj)
                                 fj = -1
-                            } else if a.items[si].jointype.bit_and(ast.JT_RIGHT) == 0 {
-                                next
-                            } else if a.items[si].jointype.bit_and(ast.JT_LEFT) == 0 {
+                            } else if a.items[si].jointype.bit_and(ast.JT_RIGHT) == 0 { next } else if a.items[si].jointype.bit_and(ast.JT_LEFT) == 0 {
                                 cnt = 0
                                 ast.expr_list_delete(a, fj)
                                 fj = -1
-                            } else {
-                                fj = extend_fj_match(a, fj, match_si, a.exprs[e].icolumn)
-                            }
+                            } else { fj = extend_fj_match(a, fj, match_si, a.exprs[e].icolumn) }
                         }
                         cnt += 1
                         match_si = si
@@ -522,7 +543,9 @@ lookup_name: fn(p: &cg.Parse, a: &ast.AST, db_name0: [U8]?, z_tab: [U8]?, z_col:
             if match_si >= 0 {
                 a.exprs[e].itable = a.items[match_si].cursor
                 a.exprs[e].y = a.items[match_si].tab
-                if a.items[match_si].jointype.bit_and(ast.JT_LEFT.bit_or(ast.JT_LTORJ)) != 0 -> ast.set_flags(a, e, ast.EP_CAN_BE_NULL)
+                if a.items[match_si].jointype.bit_and(ast.JT_LEFT.bit_or(ast.JT_LTORJ)) != 0 {
+                    ast.set_flags(a, e, ast.EP_CAN_BE_NULL)
+                }
                 schema = p.db.tables[a.exprs[e].y].schema
             }
         }
@@ -593,13 +616,9 @@ lookup_name: fn(p: &cg.Parse, a: &ast.AST, db_name0: [U8]?, z_tab: [U8]?, z_col:
                         } else {
                             a.exprs[e].icolumn = i_col
                             new_op = tk.TK_TRIGGER
-                            if i_col < 0 {
-                                a.exprs[e].aff = base.AFF_INTEGER
-                            } else if a.exprs[e].itable == 0 {
+                            if i_col < 0 -> a.exprs[e].aff = base.AFF_INTEGER else if a.exprs[e].itable == 0 {
                                 p.f.oldmask = p.f.oldmask.bit_or(mask32(i_col))
-                            } else {
-                                p.f.newmask = p.f.newmask.bit_or(mask32(i_col))
-                            }
+                            } else { p.f.newmask = p.f.newmask.bit_or(mask32(i_col)) }
                         }
                     }
                 }
@@ -633,7 +652,9 @@ lookup_name: fn(p: &cg.Parse, a: &ast.AST, db_name0: [U8]?, z_tab: [U8]?, z_col:
                         return ast.WRC_ABORT
                     }
                     resolve_alias(a, el, j, e, n_subquery)
-                    if ast.in_rename(a) -> cg.rename_token_remap(p, cg.RENAME_EXPR, -1, cg.RENAME_EXPR, e)
+                    if ast.in_rename(a) {
+                        cg.rename_token_remap(p, cg.RENAME_EXPR, -1, cg.RENAME_EXPR, e)
+                    }
                     return lookup_name_end(p, a, e, schema, nc, top_nc)
                 }
             }
@@ -660,9 +681,7 @@ lookup_name: fn(p: &cg.Parse, a: &ast.AST, db_name0: [U8]?, z_tab: [U8]?, z_col:
     if cnt != 1 {
         if fj >= 0 {
             if ast.list_len(a, fj) == cnt - 1 {
-                if ast.has(a, e, ast.EP_LEAF) {
-                    ast.clear_flags(a, e, ast.EP_LEAF)
-                } else {
+                if ast.has(a, e, ast.EP_LEAF) -> ast.clear_flags(a, e, ast.EP_LEAF) else {
                     ast.expr_delete(a, a.exprs[e].left)
                     a.exprs[e].left = -1
                     ast.expr_delete(a, a.exprs[e].right)
@@ -729,9 +748,7 @@ create_column_expr: fn(db: conn.Conn, a: &ast.AST, src: Int, i_src: Int, i_col: 
     t: a.items[si].tab
     a.exprs[e].y = t
     a.exprs[e].itable = a.items[si].cursor
-    if db.tables[t].ipkey == i_col {
-        a.exprs[e].icolumn = -1
-    } else {
+    if db.tables[t].ipkey == i_col -> a.exprs[e].icolumn = -1 else {
         a.exprs[e].icolumn = i_col
         if db.tables[t].tab_flags.bit_and(ast.TF_HAS_GENERATED) != 0 && db.tables[t].cols[i_col].col_flags.bit_and(conn.COLFLAG_GENERATED) != 0 {
             ncol: db.tables[t].cols.len()
@@ -749,13 +766,9 @@ create_column_expr: fn(db: conn.Conn, a: &ast.AST, src: Int, i_src: Int, i_col: 
 not_valid_impl: fn(p: cg.Parse, a: &ast.AST, nc: Int, msg: String, e: Int, at: Int) Never! {
     f: p.ncs[nc].nc_flags
     z_in := "partial index WHERE clauses"
-    if f.bit_and(ast.NC_IDX_EXPR) != 0 {
-        z_in = "index expressions"
-    } else if f.bit_and(ast.NC_IS_CHECK) != 0 {
+    if f.bit_and(ast.NC_IDX_EXPR) != 0 -> z_in = "index expressions" else if f.bit_and(ast.NC_IS_CHECK) != 0 {
         z_in = "CHECK constraints"
-    } else if f.bit_and(ast.NC_GEN_COL) != 0 {
-        z_in = "generated columns"
-    }
+    } else if f.bit_and(ast.NC_GEN_COL) != 0 { z_in = "generated columns" }
     off: ast.expr_offset(a, at)
     ast.error_at(a, "{msg} prohibited in {z_in}", off)
     if e >= 0 -> a.exprs[e].op = tk.TK_NULL
@@ -782,9 +795,7 @@ check_row_value: fn(a: &ast.AST, e: Int) Never! {
         x: a.exprs[e].x
         n_right = ast.vector_size(a, ast.list_expr(a, x, 0))
         if n_right == n_left -> n_right = ast.vector_size(a, ast.list_expr(a, x, 1))
-    } else {
-        n_right = ast.vector_size(a, a.exprs[e].right)
-    }
+    } else { n_right = ast.vector_size(a, a.exprs[e].right) }
     if n_left != n_right {
         off: ast.expr_offset(a, e)
         ast.error_at(a, "row value misused", off)
@@ -846,14 +857,10 @@ resolve_expr_step: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
         z_tab: a.exprs[left].token.copy()
         z_col: a.exprs[right].token ?? [U8]{}
         return lookup_name(p, a, z_db, z_tab, z_col, nc, e)
-    } else if op == tk.TK_FUNCTION {
-        return resolve_function(p, a, nc, e)
-    } else if op == tk.TK_SELECT || op == tk.TK_EXISTS || op == tk.TK_IN {
+    } else if op == tk.TK_FUNCTION { return resolve_function(p, a, nc, e) } else if op == tk.TK_SELECT || op == tk.TK_EXISTS || op == tk.TK_IN {
         if ast.has(a, e, ast.EP_X_IS_SELECT) {
             n_ref: p.ncs[nc].n_ref
-            if nc_has(p, nc, ast.NC_SELF_REF) {
-                not_valid_impl(p, a, nc, "subqueries", e, e)
-            } else {
+            if nc_has(p, nc, ast.NC_SELF_REF) -> not_valid_impl(p, a, nc, "subqueries", e, e) else {
                 _: cg.pwalk_select(p, a, a.exprs[e].x)
             }
             if n_ref != p.ncs[nc].n_ref -> ast.set_flags(a, e, ast.EP_VAR_SELECT)
@@ -895,11 +902,7 @@ resolve_function: fn(p: &cg.Parse, a: &ast.AST, nc: Int, e: Int) -[DB]> Int Neve
     def := cat.find_function(p.db, z_id, n, enc)
     if def == None {
         def = cat.find_function(p.db, z_id, -2, enc)
-        if def == None {
-            no_such_func = true
-        } else {
-            wrong_num_args = true
-        }
+        if def == None -> no_such_func = true else -> wrong_num_args = true
     } else if def == .Val(d) {
         is_agg = d.has_finalize
         if d.flags.bit_and(conn.FUNC_UNLIKELY) != 0 {
@@ -929,7 +932,9 @@ resolve_function: fn(p: &cg.Parse, a: &ast.AST, nc: Int, e: Int) -[DB]> Int Neve
             a.exprs[e].op = tk.TK_NULL
             return ast.WRC_PRUNE
         }
-        if d.flags.bit_and(conn.FUNC_CONSTANT.bit_or(conn.FUNC_SLOCHNG)) != 0 -> ast.set_flags(a, e, ast.EP_CONST_FUNC)
+        if d.flags.bit_and(conn.FUNC_CONSTANT.bit_or(conn.FUNC_SLOCHNG)) != 0 {
+            ast.set_flags(a, e, ast.EP_CONST_FUNC)
+        }
         if d.flags.bit_and(conn.FUNC_CONSTANT) == 0 {
             resolve_not_valid(p, a, nc, "non-deterministic functions", ast.NC_IDX_EXPR.bit_or(ast.NC_PART_IDX).bit_or(ast.NC_GEN_COL), -1, e)
         } else {
@@ -973,10 +978,10 @@ resolve_function: fn(p: &cg.Parse, a: &ast.AST, nc: Int, e: Int) -[DB]> Int Neve
         }
         // Window functions may not be arguments of aggregate or window
         // functions; aggregates may be arguments of window functions.
-        if is_agg -> nc_clear(p, nc, ast.NC_ALLOW_WIN.bit_or(if win < 0 -> ast.NC_ALLOW_AGG else -> 0))
-    } else if ast.has(a, e, ast.EP_WIN_FUNC) {
-        is_agg = true
-    }
+        if is_agg {
+            nc_clear(p, nc, ast.NC_ALLOW_WIN.bit_or(if win < 0 -> ast.NC_ALLOW_AGG else -> 0))
+        }
+    } else if ast.has(a, e, ast.EP_WIN_FUNC) { is_agg = true }
     _: cg.pwalk_expr_list(p, a, list)
     if is_agg {
         left: a.exprs[e].left
@@ -995,7 +1000,9 @@ resolve_function: fn(p: &cg.Parse, a: &ast.AST, nc: Int, e: Int) -[DB]> Int Neve
         } else {
             a.exprs[e].op = tk.TK_AGG_FUNCTION
             a.exprs[e].op2 = 0
-            if ast.has(a, e, ast.EP_WIN_FUNC) -> _: cg.pwalk_expr(p, a, a.windows[a.exprs[e].y].filter)
+            if ast.has(a, e, ast.EP_WIN_FUNC) {
+                _: cg.pwalk_expr(p, a, a.windows[a.exprs[e].y].filter)
+            }
             nc2 := nc
             loop nc2 >= 0 && references_src_list(a, e, p.ncs[nc2].src) == 0 {
                 a.exprs[e].op2 = a.exprs[e].op2 + 1 + p.ncs[nc2].n_nested_select
@@ -1018,7 +1025,9 @@ resolve_as_name: fn(a: ast.AST, elist: Int, e: Int) -> Int Never! {
     if a.exprs[e].op != tk.TK_ID -> return 0
     z_col: a.exprs[e].token
     loop i in 0..<ast.list_len(a, elist) {
-        if a.lists[elist].items[i].eename == ast.ENAME_NAME && util.str_icmp_opt(a.lists[elist].items[i].ename, z_col) == 0 -> return i + 1
+        if a.lists[elist].items[i].eename == ast.ENAME_NAME && util.str_icmp_opt(a.lists[elist].items[i].ename, z_col) == 0 {
+            return i + 1
+        }
     }
     0
 }
@@ -1104,7 +1113,9 @@ resolve_compound_order_by: fn(p: &cg.Parse, a: &ast.AST, s0: Int) -[DB]> Int Nev
                     // renaming, resolve the term itself too.
                     dup: ast.expr_dup(a, pe, 0)
                     i_col = resolve_order_by_term_to_expr_list(p, a, s, dup)
-                    if ast.in_rename(a) && i_col > 0 -> _: resolve_order_by_term_to_expr_list(p, a, s, pe)
+                    if ast.in_rename(a) && i_col > 0 {
+                        _: resolve_order_by_term_to_expr_list(p, a, s, pe)
+                    }
                     ast.expr_delete(a, dup)
                 }
             }
@@ -1114,20 +1125,18 @@ resolve_compound_order_by: fn(p: &cg.Parse, a: &ast.AST, s0: Int) -[DB]> Int Nev
                     nw: ast.expr(a, tk.TK_INTEGER, [U8]{})
                     ast.set_flags(a, nw, ast.EP_INT_VALUE)
                     a.exprs[nw].ivalue = i_col
-                    if item_e == pe {
-                        a.lists[ob].items[i].expr = nw
-                    } else {
+                    if item_e == pe -> a.lists[ob].items[i].expr = nw else {
                         parent := item_e
-                        loop a.exprs[a.exprs[parent].left].op == tk.TK_COLLATE -> parent = a.exprs[parent].left
+                        loop a.exprs[a.exprs[parent].left].op == tk.TK_COLLATE {
+                            parent = a.exprs[parent].left
+                        }
                         a.exprs[parent].left = nw
                     }
                     ast.expr_delete(a, pe)
                     a.lists[ob].items[i].order_by_col = i_col
                 }
                 a.lists[ob].items[i].done = true
-            } else {
-                more_to_do = true
-            }
+            } else { more_to_do = true }
         }
         s = a.selects[s].next_sel
     }
@@ -1174,17 +1183,24 @@ RemoveWindowsWalker: struct {
             if ast.has(a, e, ast.EP_WIN_FUNC) -> ast.window_unlink_from_select(a, a.exprs[e].y)
             ast.WRC_CONTINUE
         }
+
         walk_has_select_cb: fn(&self) -> Bool Never! { false }
+
         walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
+
         walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+
         walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+
         walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
     }
 }
 
 // windowRemoveExprFromSelect: the windows of `e` leave SELECT `sel`'s list.
 window_remove_expr_from_select: fn(a: &ast.AST, sel: Int, e: Int) Never! {
-    if a.selects[sel].win < 0 -> return
+    if a.selects[sel].win < 0 {
+        return
+    }
     w := RemoveWindowsWalker{sel: sel}
     _: ast.walk_expr<RemoveWindowsWalker>(w, a, e)
 }
@@ -1299,9 +1315,7 @@ resolve_select_body: fn(p: &cg.Parse, a: &ast.AST, s0: Int, outer: Int, nc: Int)
         if group_by >= 0 || nc_has(p, nc, ast.NC_HAS_AGG) {
             bits: ast.SF_AGGREGATE.bit_or(p.ncs[nc].nc_flags.bit_and(ast.NC_MIN_MAX_AGG.bit_or(ast.NC_ORDER_AGG)))
             a.selects[s].sel_flags = a.selects[s].sel_flags.bit_or(bits)
-        } else {
-            nc_clear(p, nc, ast.NC_ALLOW_AGG)
-        }
+        } else { nc_clear(p, nc, ast.NC_ALLOW_AGG) }
 
         // The other clauses may refer to result-set aliases.
         p.ncs[nc].u = a.selects[s].elist
@@ -1318,13 +1332,17 @@ resolve_select_body: fn(p: &cg.Parse, a: &ast.AST, s0: Int, outer: Int, nc: Int)
         // Table-valued function arguments.
         loop i in 0..<ast.src_len(a, src) {
             si: ast.src_item(a, src, i)
-            if a.items[si].is_tab_func && resolve_expr_list_names(p, a, nc, a.items[si].func_arg) != 0 -> return ast.WRC_ABORT
+            if a.items[si].is_tab_func && resolve_expr_list_names(p, a, nc, a.items[si].func_arg) != 0 {
+                return ast.WRC_ABORT
+            }
         }
 
         if ast.in_rename(a) {
             w := a.selects[s].win_defn
             loop w >= 0 {
-                if resolve_expr_list_names(p, a, nc, a.windows[w].order_by) != 0 || resolve_expr_list_names(p, a, nc, a.windows[w].partition) != 0 -> return ast.WRC_ABORT
+                if resolve_expr_list_names(p, a, nc, a.windows[w].order_by) != 0 || resolve_expr_list_names(p, a, nc, a.windows[w].partition) != 0 {
+                    return ast.WRC_ABORT
+                }
                 w = a.windows[w].next_win
             }
         }
@@ -1341,12 +1359,16 @@ resolve_select_body: fn(p: &cg.Parse, a: &ast.AST, s0: Int, outer: Int, nc: Int)
 
         // A compound's rightmost ORDER BY waits for every term.
         ob: a.selects[s].order_by
-        if ob >= 0 && is_compound <= n_compound && resolve_order_group_by_nc(p, a, nc, s, ob, "ORDER") != 0 -> return ast.WRC_ABORT
+        if ob >= 0 && is_compound <= n_compound && resolve_order_group_by_nc(p, a, nc, s, ob, "ORDER") != 0 {
+            return ast.WRC_ABORT
+        }
         if p.db.malloc_failed -> return ast.WRC_ABORT
         nc_clear(p, nc, ast.NC_ALLOW_WIN)
 
         if group_by >= 0 {
-            if resolve_order_group_by_nc(p, a, nc, s, group_by, "GROUP") != 0 || p.db.malloc_failed -> return ast.WRC_ABORT
+            if resolve_order_group_by_nc(p, a, nc, s, group_by, "GROUP") != 0 || p.db.malloc_failed {
+                return ast.WRC_ABORT
+            }
             loop i in 0..<ast.list_len(a, group_by) {
                 if ast.has(a, ast.list_expr(a, group_by, i), ast.EP_AGG) {
                     ast.error(a, "aggregate functions are not allowed in the GROUP BY clause")
@@ -1373,11 +1395,20 @@ ResolveWalker: struct {
     select: Bool
 
     impl WalkCb {
-        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! { resolve_expr_step(p, a, e) }
+        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
+            resolve_expr_step(p, a, e)
+        }
+
         has_select: fn(self) -[]> Bool Never! { self.select }
-        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { resolve_select_step(p, a, s) }
+
+        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+            resolve_select_step(p, a, s)
+        }
+
         has_select2: fn(self) -[]> Bool Never! { false }
+
         on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+
         win_defn: fn(self) -[]> Bool Never! { false }
     }
 }
@@ -1456,7 +1487,9 @@ resolve_self_reference: fn(p: &cg.Parse, a: &ast.AST, t: Int, typ: Int, e: Int, 
         item.cursor = -1
         a.items.push(item)
         a.srclists[src].items.push(a.items.len() - 1)
-        if p.db.tables[t].schema != p.db.dbs[conn.DB_TEMP].schema -> flags = flags.bit_or(ast.NC_FROM_DDL)
+        if p.db.tables[t].schema != p.db.dbs[conn.DB_TEMP].schema {
+            flags = flags.bit_or(ast.NC_FROM_DDL)
+        }
     }
     mark: p.ncs.len()
     nc: nc_push(p, nc_new(src, flags.bit_or(ast.NC_IS_DDL)))
@@ -1475,17 +1508,40 @@ ResolveTestGen: struct {
 
     impl Gen {
         read_schema: fn(self, p: &cg.Parse, a: &ast.AST) -[DB]> Int Never! { base.OK }
-        authorize: fn(self, p: &cg.Parse, code: Int, arg1: [U8]?, arg2: [U8]?, arg3: [U8]?) -[DB]> Int Never! { base.OK }
+
+        authorize: fn(self, p: &cg.Parse, code: Int, arg1: [U8]?, arg2: [U8]?, arg3: [U8]?) -[DB]> Int Never! {
+            base.OK
+        }
+
         nested_parse: fn(self, p: &cg.Parse, a: &ast.AST, sql: [U8]) Never! -[DB]> {}
-        select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> Int Never! { 0 }
+
+        select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> Int Never! {
+            0
+        }
+
         select_prep: fn(self, p: &cg.Parse, a: &ast.AST, s: Int, outer_nc: Int) Never! -[DB]> {}
+
         select_expand: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
-        result_set_of_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int, aff: Int) -[DB]> Int Never! { -1 }
+
+        result_set_of_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int, aff: Int) -[DB]> Int Never! {
+            -1
+        }
+
         view_get_column_names: fn(self, p: &cg.Parse, a: &ast.AST, t: Int) -[DB]> Int Never! { 0 }
+
         eponymous_table: fn(self, p: &cg.Parse, a: &ast.AST, name: [U8]) -[DB]> Int Never! { -1 }
-        vtab_overload_function: fn(self, p: &cg.Parse, a: &ast.AST, def: conn.FuncDef, n_arg: Int, e: Int) -[DB]> conn.FuncDef Never! { def.copy() }
-        vtab_best_index: fn(self, p: &cg.Parse, a: &ast.AST, t: Int, info: &conn.IndexInfo) -[DB]> (rc: Int, err: [U8]?) Never! { (rc: base.ERROR, err: None) }
-        vtab_find_function: fn(self, p: &cg.Parse, a: &ast.AST, t: Int, n_arg: Int, name: [U8]) -[DB]> Int Never! { 0 }
+
+        vtab_overload_function: fn(self, p: &cg.Parse, a: &ast.AST, def: conn.FuncDef, n_arg: Int, e: Int) -[DB]> conn.FuncDef Never! {
+            def.copy()
+        }
+
+        vtab_best_index: fn(self, p: &cg.Parse, a: &ast.AST, t: Int, info: &conn.IndexInfo) -[DB]> (rc: Int, err: [U8]?) Never! {
+            (rc: base.ERROR, err: None)
+        }
+
+        vtab_find_function: fn(self, p: &cg.Parse, a: &ast.AST, t: Int, n_arg: Int, name: [U8]) -[DB]> Int Never! {
+            0
+        }
     }
 }
 

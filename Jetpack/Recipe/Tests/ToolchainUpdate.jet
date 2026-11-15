@@ -4,7 +4,9 @@
 // update state. Test signing keys are rebuilt from fixed seeds
 
 RECIPE_UPDATE_TEST_TARGET: "x86_64-unknown-linux-gnu"
+
 RECIPE_UPDATE_TEST_KEY_ID: "local-channel-v1"
+
 RECIPE_UPDATE_TEST_ARTIFACT: "v1/stable/1.2.3/jet-1.2.3-x86_64-unknown-linux-gnu"
 
 recipe_update_test_tree: fn(label: String) -[FS, Env, Rand]> String {
@@ -50,13 +52,15 @@ recipe_update_test_publication: fn(root: String, artifact_bytes: [U8], key: cryp
         published_at: now - 1,
         expires_at: now + 86400,
         min_version: "1.0.0",
-        artifacts: [ToolchainArtifact]{ToolchainArtifact{
-            target: RECIPE_UPDATE_TEST_TARGET,
-            path: RECIPE_UPDATE_TEST_ARTIFACT,
-            sha256: pkg_sha256_hex(artifact_bytes),
-            size: artifact_bytes.len(),
-            signature: "{RECIPE_UPDATE_TEST_ARTIFACT}.sig.json"
-        }}
+        artifacts: [ToolchainArtifact]{
+            ToolchainArtifact{
+                target: RECIPE_UPDATE_TEST_TARGET,
+                path: RECIPE_UPDATE_TEST_ARTIFACT,
+                sha256: pkg_sha256_hex(artifact_bytes),
+                size: artifact_bytes.len(),
+                signature: "{RECIPE_UPDATE_TEST_ARTIFACT}.sig.json",
+            },
+        },
     }
     manifest_path: files.join(root, "v1/stable/manifest.json")
     manifest_bytes: manifest.canonical().bytes()
@@ -76,12 +80,12 @@ recipe_update_test_options: fn(root: String, trust_key: String, allow_unofficial
         endpoint: "file://{root}",
         channel: "stable",
         platform: RECIPE_UPDATE_TEST_TARGET,
-        trust_key,
+        trust_key: trust_key,
         dry_run: !apply,
-        apply,
-        allow_unofficial,
+        apply: apply,
+        allow_unofficial: allow_unofficial,
         running_version: "1.0.0",
-        state_path: files.join(root, "state/toolchain.state")
+        state_path: files.join(root, "state/toolchain.state"),
     }
 }
 
@@ -102,7 +106,7 @@ recipe_update_test_plan: fn() -[Time]> ToolchainUpdatePlan {
         sequence: 1,
         published_at: now - 1,
         expires_at: now + 86400,
-        min_version: "1.0.0"
+        min_version: "1.0.0",
     }
 }
 
@@ -150,7 +154,7 @@ recipe_update_test_policy_error: fn(manifest: ToolchainChannelManifest, options:
         apply: false,
         allow_unofficial: true,
         running_version: "1.0.0",
-        state_path: files.join(tree, "state/toolchain.state")
+        state_path: files.join(tree, "state/toolchain.state"),
     }
     assert(recipe_update_test_error(options, None).contains("file://"))
     options.endpoint = "http://localhost:3210"
@@ -165,11 +169,11 @@ recipe_update_test_policy_error: fn(manifest: ToolchainChannelManifest, options:
         "https://localhost:443@evil.example",
         "http://[::1]@evil.example",
         "http://localhost%40evil.example",
-        "https://localhost%40evil.example"
+        "https://localhost%40evil.example",
     }
     loop endpoint in rejected {
         if recipe_update_parse_endpoint(endpoint) == {
-            .Ok(_) -> panic("userinfo or encoded authority must not be accepted: {endpoint}")
+            .Ok(_) -> { panic("userinfo or encoded authority must not be accepted: {endpoint}") }
             .Err(_) -> {}
         }
     }
@@ -182,7 +186,7 @@ recipe_update_test_policy_error: fn(manifest: ToolchainChannelManifest, options:
         }
     }
     if recipe_update_parse_endpoint("http://2001:db8::1:3210") == {
-        .Ok(_) -> panic("an unbracketed IPv6 authority must be refused")
+        .Ok(_) -> { panic("an unbracketed IPv6 authority must be refused") }
         .Err(_) -> {}
     }
     _: recipe_update_parse_endpoint("https://[2001:db8::1]:443") ?? panic("a bracketed IPv6 HTTPS endpoint is accepted")
@@ -201,16 +205,16 @@ recipe_update_test_policy_error: fn(manifest: ToolchainChannelManifest, options:
         "http://dl.jet-lang.dev/v1/stable/artifact",
         "https://evil.example/v1/stable/artifact",
         "//evil.example/v1/stable/artifact",
-        "https://dl.jet-lang.dev:444/v1/stable/artifact"
+        "https://dl.jet-lang.dev:444/v1/stable/artifact",
     }
     loop location in unsafe_locations {
         if recipe_update_resolve_redirect(endpoint.origin, second, location) == {
-            .Ok(_) -> panic("unsafe redirect must be rejected: {location}")
+            .Ok(_) -> { panic("unsafe redirect must be rejected: {location}") }
             .Err(_) -> {}
         }
     }
     if recipe_update_resolve_redirect(endpoint.origin, "https://evil.example/start", "/safe") == {
-        .Ok(_) -> panic("a redirect from another origin must be rejected")
+        .Ok(_) -> { panic("a redirect from another origin must be rejected") }
         .Err(_) -> {}
     }
 }
@@ -232,7 +236,9 @@ recipe_update_test_policy_error: fn(manifest: ToolchainChannelManifest, options:
 }
 
 #Test("toolchain install replaces the current path without backup or partial file") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     tree: recipe_update_test_tree("install")
     current: files.join(tree, "jet")
     replacement: "#!/bin/sh\nexit 0\n".bytes()
@@ -254,7 +260,7 @@ recipe_update_test_policy_error: fn(manifest: ToolchainChannelManifest, options:
     files.write(current, "current toolchain") ?? panic("write current executable")
     files.write(staged, "unrelated staged bytes") ?? panic("write collision file")
     if recipe_update_install_verified(current, "#!/bin/sh\nexit 0\n".bytes(), recipe_update_test_plan(), files.join(tree, "state/toolchain.state"), "1.0.0") == {
-        .Ok(_) -> panic("an existing staging path must stop the update")
+        .Ok(_) -> { panic("an existing staging path must stop the update") }
         .Err(error) -> assert(error.message().contains("staging file"))
     }
     assert_eq(files.read(current) ?? panic("read current executable"), "current toolchain")
@@ -267,7 +273,7 @@ recipe_update_test_policy_error: fn(manifest: ToolchainChannelManifest, options:
     options := recipe_update_test_options(tree, files.join(tree, "unused.pub"), true, true)
     options.platform = if recipe_toolchain_default_target() == RECIPE_UPDATE_TEST_TARGET -> "aarch64-unknown-linux-gnu" else -> RECIPE_UPDATE_TEST_TARGET
     if recipe_toolchain_update_run_at(options, None, recipe_update_test_now()) == {
-        .Ok(_) -> panic("cross-platform apply must be rejected")
+        .Ok(_) -> { panic("cross-platform apply must be rejected") }
         .Err(error) -> assert(error.message().contains("exact host platform"))
     }
     files.remove_all(tree).drop("test cleanup")

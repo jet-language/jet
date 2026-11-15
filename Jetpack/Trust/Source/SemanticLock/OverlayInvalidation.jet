@@ -21,7 +21,7 @@ OverlayInvalidation: struct {
 
 // Every `(overlay, package)` whose fingerprint changed, in (overlay, package)
 // order. A package without declared actions invalidates `action:<package>`.
-trust_overlay_invalidations: fn(before: [OverlayFingerprint], after: [OverlayFingerprint], actions_by_package: [String: [String]]) -> [OverlayInvalidation] Never! {
+trust_overlay_invalidations: fn(before: [OverlayFingerprint], after: [OverlayFingerprint], actions_by_package: [String:[String]]) -> [OverlayInvalidation] Never! {
     keys := [OverlayFingerprint]{}
     loop entry in before -> keys.push(entry.copy())
     loop entry in after -> keys.push(entry.copy())
@@ -44,7 +44,7 @@ trust_overlay_invalidations: fn(before: [OverlayFingerprint], after: [OverlayFin
             fingerprint_after == "" -> "overlay `{overlay}` removed package `{package}`"
             else -> "overlay `{overlay}` changed package `{package}` policy ({fingerprint_before} → {fingerprint_after})"
         }
-        out.push(OverlayInvalidation{overlay, package, policy_fingerprint_before: fingerprint_before, policy_fingerprint_after: fingerprint_after, affected_action_keys: affected, reason})
+        out.push(OverlayInvalidation{overlay: overlay, package: package, policy_fingerprint_before: fingerprint_before, policy_fingerprint_after: fingerprint_after, affected_action_keys: affected, reason: reason})
     }
     out
 }

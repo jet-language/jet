@@ -18,7 +18,9 @@ use {
 }
 
 MEASURED: ["wall_ns", "process_wall_median_ns"]
+
 ORIGINAL_ONLY: [".metadata.toolchain.python", ".metadata.toolchain.runner"]
+
 NOT_STARTED: "could not start canonical codec command"
 
 #CLI
@@ -37,20 +39,24 @@ run: fn(check: Check) {
 // Each value under `value`, the value of field `key` in an object whose
 // status is `status`, as `path: value`.
 show: fn(path: String, value: Dyn, key: String, places: [String], status: String) {
-    if ORIGINAL_ONLY.contains(path) -> return
+    if ORIGINAL_ONLY.contains(path) {
+        return
+    }
     if value == {
         .Object(fields) -> {
             inner := ""
             loop field in fields {
                 if field.key == "status" && field.value == .Text(text) -> inner = text.copy()
             }
-            loop field in fields -> show("{path}.{field.key}", field.value, field.key, places, inner)
+            loop field in fields {
+                show("{path}.{field.key}", field.value, field.key, places, inner)
+            }
         }
         .Array(items) -> {
             if items.len() == 0 -> print("{path}: []")
             loop index in 0..<items.len() -> show("{path}[{index}]", items[index], key, places, "")
         }
-        .Int(_) | .Float(_) | .Number(_) -> print("{path}: {number(value, key, status)}")
+        .Int(_) | .Float(_) | .Number(_) -> { print("{path}: {number(value, key, status)}") }
         .Text(text) -> print("{path}: {json.stringify(Dyn.Text(fixed(text, key, places)))}")
         .Null | .Bool(_) | .Bytes(_) | .DateTime(_) -> print("{path}: {json.stringify(value)}")
     }

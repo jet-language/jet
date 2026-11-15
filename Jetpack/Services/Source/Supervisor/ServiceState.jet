@@ -4,8 +4,11 @@
 // Every state file is replaced whole, so a reader never sees half a record.
 
 SERVICES_MAX_SERVICE_NAME_BYTES: 256
+
 SERVICES_MAX_STATE_BYTES: 4096
+
 SERVICES_MAX_LIFECYCLE_BYTES: 16384
+
 SERVICES_SUPERVISOR_ENV: ENV_JETPACK_SERVICE_SUPERVISOR
 
 // A service process's saved identity: the PID plus the platform-tagged start
@@ -26,10 +29,11 @@ ServiceProcessState: struct {
 // The `pid` record as found on disk.
 PersistedProcessState: enum {
     Verified(ServiceProcessState)
-    // Written by Jetpack versions that persisted only a PID. It may be
-    // removed but never authorizes a liveness claim or a signal.
     LegacyPID(Int)
 }
+
+// Written by Jetpack versions that persisted only a PID. It may be
+// removed but never authorizes a liveness claim or a signal.
 
 // The verified identity of a record; a legacy PID authorizes nothing.
 services_verified_state: fn(record: PersistedProcessState) -> ServiceProcessState? Never! {
@@ -94,13 +98,14 @@ LifecycleFacts: struct {
 
 // Which platform authority contains a service generation.
 ServiceAuthority: enum {
-    // The service's own process group (the in-process host).
     TestProcessGroup
-    // A delegated `systemd-run --user --scope` unit on Linux.
     LinuxSystemdUser(unit: String)
-    // A named Windows Job Object held by the Core process identity.
     WindowsGuardianJobObject(guardian: String)
     Unsupported
+
+    // The service's own process group (the in-process host).
+    // A delegated `systemd-run --user --scope` unit on Linux.
+    // A named Windows Job Object held by the Core process identity.
 
     backend: fn(self) -> String Never! {
         if self == {
@@ -154,7 +159,9 @@ services_pid_path: fn(dir: String) -> String Never! { files.join(dir, "pid") }
 
 services_stopping_path: fn(dir: String) -> String Never! { files.join(dir, ".stopping") }
 
-services_supervisor_error_path: fn(dir: String) -> String Never! { files.join(dir, "supervisor.error") }
+services_supervisor_error_path: fn(dir: String) -> String Never! {
+    files.join(dir, "supervisor.error")
+}
 
 services_ports_path: fn(dir: String) -> String Never! { files.join(dir, "ports") }
 
@@ -231,7 +238,9 @@ services_read_text_bounded: fn(path: String, limit: Int) -[FS]> String IOError! 
         return Err(services_state_error(path, "service state is not a bounded regular file"))
     }
     bytes: files.read_bytes(path)
-    if bytes.len() > limit -> return Err(services_state_error(path, "service state exceeded its bound while being read"))
+    if bytes.len() > limit {
+        return Err(services_state_error(path, "service state exceeded its bound while being read"))
+    }
     String.from_bytes(bytes) ?? return Err(services_state_error(path, "service state is not UTF-8"))
 }
 
@@ -300,7 +309,7 @@ services_read_process_state: fn(dir: String) -[FS]> PersistedProcessState? Servi
     if !version -> return Err(invalid)
     found_pid: pid ?? return Err(invalid)
     found_start: start ?? return Err(invalid)
-    Ok(Val(PersistedProcessState.Verified(ServiceProcessState{pid: found_pid, start_identity: found_start, containment})))
+    Ok(Val(PersistedProcessState.Verified(ServiceProcessState{pid: found_pid, start_identity: found_start, containment: containment})))
 }
 
 // The authority a lifecycle record names.
@@ -323,14 +332,14 @@ services_authority_from_lifecycle: fn(facts: LifecycleFacts) -> ServiceAuthority
 services_lifecycle_for: fn(authority: ServiceAuthority, generation: Int, phase: ServicePhase, recovery: String, pid: Int?, dependencies: [String]) -> LifecycleFacts Never! {
     LifecycleFacts{
         backend: authority.backend(),
-        generation,
-        phase,
+        generation: generation,
+        phase: phase,
         containment: authority.containment(),
-        recovery,
-        pid,
+        recovery: recovery,
+        pid: pid,
         unit: authority.unit(),
         guardian: authority.guardian(),
-        dependencies
+        dependencies: dependencies,
     }
 }
 
@@ -411,10 +420,10 @@ services_read_lifecycle: fn(dir: String) -[FS]> LifecycleFacts? ServicesError! {
         phase: phase ?? return Err(invalid),
         containment: containment ?? return Err(invalid),
         recovery: recovery ?? return Err(invalid),
-        pid,
-        unit,
-        guardian,
-        dependencies
+        pid: pid,
+        unit: unit,
+        guardian: guardian,
+        dependencies: dependencies,
     }
     services_validate_lifecycle_authority(facts, path)
     Ok(Val(facts))

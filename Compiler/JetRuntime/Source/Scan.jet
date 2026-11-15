@@ -21,9 +21,8 @@
 // Match calls return 1/0; take calls return 1/0 and on miss write an owned E4
 // String pointer to error_out. Success leaves error_out untouched. Caller builds
 // the canonical IR Option/Result/tuple, including Unit for a hole-free take.
-scan_byte: fn(data: I64, stride: I64, at: I64) -> I64 {
-    rt_text_byte(wrapping(data + at * stride))
-}
+scan_byte: fn(data: I64, stride: I64, at: I64) -> I64 { rt_text_byte(wrapping(data + at * stride)) }
+
 scan_ascii: fn(data: I64, len: I64, stride: I64, word: I64, count: I64) -> Bool {
     if (len != count) { return false }
     at := I64{0}
@@ -35,14 +34,16 @@ scan_ascii: fn(data: I64, len: I64, stride: I64, word: I64, count: I64) -> Bool 
     }
     true
 }
+
 scan_equal: fn(data: I64, stride: I64, literal: I64, len: I64) -> Bool {
     at := I64{0}
     loop at < len {
-        if scan_byte(data, stride, at) != rt_text_byte(wrapping(literal + at)) { return false }
+        if scan_byte(data, stride, at) != rt_text_byte(wrapping(literal + at)) -> return false
         at += I64{1}
     }
     true
 }
+
 scan_find: fn(data: I64, len: I64, stride: I64, literal: I64, n: I64, start: I64) -> I64 {
     if (stride == I64{1}) { return rt_text_find_bytes(data, len, literal, n, start, false) }
     // The ordinary String path reuses the linear two-way search. Padded-byte
@@ -50,11 +51,12 @@ scan_find: fn(data: I64, len: I64, stride: I64, literal: I64, n: I64, start: I64
     if (n > len - start) { return I64{-1} }
     at := start
     loop at <= len - n {
-        if scan_equal(wrapping(data + at * stride), stride, literal, n) { return at }
+        if scan_equal(wrapping(data + at * stride), stride, literal, n) -> return at
         at += I64{1}
     }
     I64{-1}
 }
+
 scan_utf8: fn(data: I64, len: I64, stride: I64) -> Bool {
     at := I64{0}
     loop at < len {
@@ -64,7 +66,12 @@ scan_utf8: fn(data: I64, len: I64, stride: I64) -> Bool {
     }
     true
 }
-ScanInteger: struct { valid: Bool, word: I64 }
+
+ScanInteger: struct {
+    valid: Bool
+    word: I64
+}
+
 scan_integer: fn(data: I64, len: I64, stride: I64) -> ScanInteger {
     result := ScanInteger{valid: false, word: I64{0}}
     if (len == I64{0}) { return result }
@@ -90,6 +97,7 @@ scan_integer: fn(data: I64, len: I64, stride: I64) -> ScanInteger {
     result.word = if negative -> value else -> -value
     result
 }
+
 scan_bool: fn(data: I64, len: I64, stride: I64) -> I64 {
     // Bool spelling is intentionally not ASCII-case-folded (unlike f64).
     if (len == I64{1}) {
@@ -108,10 +116,11 @@ scan_bool: fn(data: I64, len: I64, stride: I64) -> I64 {
     if (word == I64{435728179558} || word == I64{435728179526}) { return I64{0} }
     I64{-1}
 }
+
 scan_text_validate: fn(data: I64, len: I64, stride: I64, parts: I64, count: I64, prefix: Bool) -> I64 {
     // Text match subjects are &str on the reference tier. Padded byte callers
     // prove the same precondition here, using the one shared UTF-8 validator.
-    if !scan_utf8(data, len, stride) { return I64{-1} }
+    if !scan_utf8(data, len, stride) -> return I64{-1}
     cursor := I64{0}
     index := I64{0}
     loop index < count {
@@ -119,7 +128,9 @@ scan_text_validate: fn(data: I64, len: I64, stride: I64, parts: I64, count: I64,
         row_tag: rt_text_word(row)
         if (row_tag == I64{0}) {
             n: rt_text_word(wrapping(row + I64{16}))
-            if (n > len - cursor || !scan_equal(wrapping(data + cursor * stride), stride, rt_text_word(wrapping(row + I64{8})), n)) { return I64{-1} }
+            if (n > len - cursor || !scan_equal(wrapping(data + cursor * stride), stride, rt_text_word(wrapping(row + I64{8})), n)) {
+                return I64{-1}
+            }
             cursor += n
         } else {
             end := len
@@ -132,12 +143,14 @@ scan_text_validate: fn(data: I64, len: I64, stride: I64, parts: I64, count: I64,
             length: end - cursor
             if (row_tag == I64{2} || row_tag == I64{5}) {
                 parsed: scan_integer(raw, length, stride)
-                if !parsed.valid { return I64{-1} }
-                if (row_tag == I64{5} && (parsed.word < rt_text_word(wrapping(row + I64{8})) || parsed.word > rt_text_word(wrapping(row + I64{16})))) { return I64{-1} }
+                if !parsed.valid -> return I64{-1}
+                if (row_tag == I64{5} && (parsed.word < rt_text_word(wrapping(row + I64{8})) || parsed.word > rt_text_word(wrapping(row + I64{16})))) {
+                    return I64{-1}
+                }
                 rt_text_store(wrapping(row + I64{48}), parsed.word)
             } else if (row_tag == I64{3}) {
                 decimal: scan_decimal(raw, length, stride)
-                if !decimal.valid { return I64{-1} }
+                if !decimal.valid -> return I64{-1}
                 rt_text_store(wrapping(row + I64{48}), cursor)
                 rt_text_store(wrapping(row + I64{56}), length)
             } else if (row_tag == I64{4}) {
@@ -155,6 +168,7 @@ scan_text_validate: fn(data: I64, len: I64, stride: I64, parts: I64, count: I64,
     if (!prefix && cursor != len) { return I64{-1} }
     cursor
 }
+
 scan_binary_validate: fn(data: I64, len: I64, stride: I64, parts: I64, count: I64, prefix: Bool) -> I64 {
     total: len * I64{8}
     position := I64{0}
@@ -165,7 +179,9 @@ scan_binary_validate: fn(data: I64, len: I64, stride: I64, parts: I64, count: I6
         if (row_tag == I64{16}) {
             n: rt_text_word(wrapping(row + I64{16}))
             byte_position: position /% I64{8}
-            if ((position.bit_and(I64{7})) != I64{0} || n > len - byte_position || !scan_equal(wrapping(data + byte_position * stride), stride, rt_text_word(wrapping(row + I64{8})), n)) { return I64{-1} }
+            if ((position.bit_and(I64{7})) != I64{0} || n > len - byte_position || !scan_equal(wrapping(data + byte_position * stride), stride, rt_text_word(wrapping(row + I64{8})), n)) {
+                return I64{-1}
+            }
             position += n * I64{8}
         } else if (row_tag == I64{17}) {
             width: rt_text_word(wrapping(row + I64{8}))
@@ -177,7 +193,9 @@ scan_binary_validate: fn(data: I64, len: I64, stride: I64, parts: I64, count: I6
                 at := I64{0}
                 loop at < bytes {
                     byte: scan_byte(data, stride, position /% I64{8} + at)
-                    if little { value = value.bit_or(byte << (at * I64{8})) } else { value = (value << I64{8}).bit_or(byte) }
+                    if little -> value = value.bit_or(byte << (at * I64{8})) else {
+                        value = (value << I64{8}).bit_or(byte)
+                    }
                     at += I64{1}
                 }
             } else {
@@ -209,13 +227,16 @@ scan_binary_validate: fn(data: I64, len: I64, stride: I64, parts: I64, count: I6
         }
         index += I64{1}
     }
-    if ((!prefix && position != total) || (prefix && (position.bit_and(I64{7})) != I64{0})) { return I64{-1} }
+    if ((!prefix && position != total) || (prefix && (position.bit_and(I64{7})) != I64{0})) {
+        return I64{-1}
+    }
     position /% I64{8}
 }
+
 scan_text_copy: fn(data: I64, len: I64, stride: I64) -> I64 {
     if (stride == I64{1}) { return rt_text_copy(data, len) }
     header: rt_text_with_length(len, len)
-    if (header == I64{0}) -> return I64{0}
+    if (header == I64{0}) { return I64{0} }
     target: rt_text_data(header)
     at := I64{0}
     loop at < len {
@@ -224,15 +245,16 @@ scan_text_copy: fn(data: I64, len: I64, stride: I64) -> I64 {
     }
     header
 }
+
 scan_bytes_copy: fn(data: I64, len: I64, stride: I64, target_stride: I64) -> I64 {
     header: coll_list_new()
     if (len == I64{0}) { return header }
     target: jet_rt_alloc(len * target_stride, I64{8})
     at := I64{0}
     loop at < len {
-        if (target_stride == I64{1}) { rt_text_put(wrapping(target + at), scan_byte(data, stride, at)) } else {
-            rt_text_store(wrapping(target + at * target_stride), scan_byte(data, stride, at))
-        }
+        if (target_stride == I64{1}) {
+            rt_text_put(wrapping(target + at), scan_byte(data, stride, at))
+        } else { rt_text_store(wrapping(target + at * target_stride), scan_byte(data, stride, at)) }
         at += I64{1}
     }
     rt_text_store(header, len)
@@ -240,6 +262,7 @@ scan_bytes_copy: fn(data: I64, len: I64, stride: I64, target_stride: I64) -> I64
     rt_text_store(wrapping(header + I64{16}), target)
     header
 }
+
 scan_materialize: fn(data: I64, stride: I64, parts: I64, count: I64) {
     index := I64{0}
     loop index < count {
@@ -274,27 +297,31 @@ scan_materialize: fn(data: I64, stride: I64, parts: I64, count: I64) {
         index += I64{1}
     }
 }
+
 #Export(c) jet_rt_text_pattern_match: fn(data: I64, len: I64, stride: I64, parts: I64, count: I64) -> I64 {
     if (scan_text_validate(data, len, stride, parts, count, false) < I64{0}) { return I64{0} }
     scan_materialize(data, stride, parts, count)
     I64{1}
 }
+
 #Export(c) jet_rt_binary_pattern_match: fn(data: I64, len: I64, stride: I64, parts: I64, count: I64) -> I64 {
     if (scan_binary_validate(data, len, stride, parts, count, false) < I64{0}) { return I64{0} }
     scan_materialize(data, stride, parts, count)
     I64{1}
 }
+
 scan_miss: fn(position: I64, binary: Bool) -> I64 {
     message: rt_text_builder_with_capacity(I64{64})
-    rt_text_push_word(message, I64{2336931036722913648}, I64{8}) // pattern
-    rt_text_push_word(message, I64{2338616625292667236}, I64{8}) // did not
-    rt_text_push_word(message, I64{8386019613857833325}, I64{8}) // match at
+    rt_text_push_word(message, I64{2336931036722913648}, I64{8})  // pattern
+    rt_text_push_word(message, I64{2338616625292667236}, I64{8})  // did not
+    rt_text_push_word(message, I64{8386019613857833325}, I64{8})  // match at
     rt_text_push_word(message, if binary -> I64{2338042638363882016} else -> I64{2338053698190926624}, I64{8})
-    rt_text_push_word(message, I64{7957695015293251440}, I64{8}) // position
+    rt_text_push_word(message, I64{7957695015293251440}, I64{8})  // position
     rt_text_push_word(message, I64{32}, I64{1})
     rt_text_push_number(message, position)
     message
 }
+
 scan_take: fn(position_slot: I64, data: I64, len: I64, stride: I64, parts: I64, count: I64, error_out: I64, binary: Bool) -> I64 {
     position: rt_text_word(position_slot)
     tail: wrapping(data + position * stride)
@@ -308,9 +335,11 @@ scan_take: fn(position_slot: I64, data: I64, len: I64, stride: I64, parts: I64, 
     rt_text_store(position_slot, position + consumed)
     I64{1}
 }
+
 #Export(c) jet_rt_cursor_take_pattern: fn(handle: I64, parts: I64, count: I64, error_out: I64) -> I64 {
     scan_take(wrapping(handle + I64{24}), rt_text_data(handle), rt_text_len(handle), I64{1}, parts, count, error_out, false)
 }
+
 #Export(c) jet_rt_reader_take_pattern: fn(handle: I64, parts: I64, count: I64, error_out: I64) -> I64 {
     scan_take(wrapping(handle + I64{24}), rt_text_data(handle), rt_text_len(handle), I64{1}, parts, count, error_out, true)
 }

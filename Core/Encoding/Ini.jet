@@ -20,11 +20,8 @@ INIError: struct {
     line: Int
     reason: String
 
-    new: fn(line: Int, reason: String) -> INIError Never! {
-        INIError{line: line, reason: reason}
-    }
+    new: fn(line: Int, reason: String) -> INIError Never! { INIError{line: line, reason: reason} }
 }
-
 
 Pair: struct {
     key: String
@@ -52,9 +49,13 @@ parse: fn(text: String) -> Ini INIError! {
         if trimmed.bytes().len() == 0 -> next
         raw: trimmed.bytes()
         if raw[0] == (U8{91}) {
-            if raw[raw.len() - 1] != (U8{93}) -> return Err(INIError{line: line, reason: "ini section is missing a closing bracket"})
+            if raw[raw.len() - 1] != (U8{93}) {
+                return Err(INIError{line: line, reason: "ini section is missing a closing bracket"})
+            }
             current = trim(String.from_bytes(slice_b(raw, 1, raw.len() - 1)) ?? "")
-            if current.bytes().len() == 0 -> return Err(INIError{line: line, reason: "ini section name is empty"})
+            if current.bytes().len() == 0 {
+                return Err(INIError{line: line, reason: "ini section name is empty"})
+            }
             doc = ensure_section(doc, current)
             next
         }
@@ -102,7 +103,9 @@ has_section: fn(doc: Ini, name: String) -> Bool Never! {
     false
 }
 
-has_option: fn(doc: Ini, section: String, key: String) -> Bool Never! { get(doc, section, key) != None }
+has_option: fn(doc: Ini, section: String, key: String) -> Bool Never! {
+    get(doc, section, key) != None
+}
 
 get: fn(doc: Ini, section: String, key: String) -> String? Never! {
     loop s in doc.sections {
@@ -115,7 +118,9 @@ get: fn(doc: Ini, section: String, key: String) -> String? Never! {
     None
 }
 
-get_or: fn(doc: Ini, section: String, key: String, fallback: String) -> String Never! { get(doc, section, key) ?? fallback }
+get_or: fn(doc: Ini, section: String, key: String, fallback: String) -> String Never! {
+    get(doc, section, key) ?? fallback
+}
 
 get_int: fn(doc: Ini, section: String, key: String) -> Int? Never! {
     text: get(doc, section, key) ?? return None
@@ -162,15 +167,11 @@ set: fn(doc: Ini, section: String, key: String, value: String) -> Ini Never! {
                 if p.key == key {
                     pairs.push(Pair{key: key, value: value})
                     found_key = true
-                } else {
-                    pairs.push(p.copy())
-                }
+                } else { pairs.push(p.copy()) }
             }
             if !found_key -> pairs.push(Pair{key: key, value: value})
             sections.push(Section{name: s.name, pairs: pairs})
-        } else {
-            sections.push(s.copy())
-        }
+        } else { sections.push(s.copy()) }
     }
     if !found_section {
         sections.push(Section{name: section, pairs: [Pair]{Pair{key: key, value: value}}})
@@ -187,9 +188,7 @@ remove_option: fn(doc: Ini, section: String, key: String) -> Ini Never! {
                 if p.key != key -> pairs.push(p.copy())
             }
             sections.push(Section{name: s.name, pairs: pairs})
-        } else {
-            sections.push(s.copy())
-        }
+        } else { sections.push(s.copy()) }
     }
     Ini{sections: sections}
 }
@@ -224,10 +223,8 @@ strip_comment: fn(line: String) -> String Never! {
         } else if n == 34 || n == 39 {
             in_quote = true
             q = n
-        } else if n == 35 || n == 59 {
-            return String.from_bytes(slice_b(raw, 0, i)) ?? ""
-        }
-        i = i + 1
+        } else if n == 35 || n == 59 { return String.from_bytes(slice_b(raw, 0, i)) ?? "" }
+        i += 1
     }
     line.copy()
 }
@@ -243,13 +240,10 @@ unquote: fn(text: String) -> String Never! {
             loop i < raw.len() - 1 {
                 if raw[i] == (U8{92}) && i + 1 < raw.len() - 1 {
                     i += 1
-                    if raw[i] == (U8{110}) -> body.push(U8{10})
-                    else if raw[i] == (U8{114}) -> body.push(U8{13})
-                    else if raw[i] == (U8{116}) -> body.push(U8{9})
-                    else -> body.push(raw[i])
-                } else {
-                    body.push(raw[i])
-                }
+                    if raw[i] == (U8{110}) -> body.push(U8{10}) else if raw[i] == (U8{114}) {
+                        body.push(U8{13})
+                    } else if raw[i] == (U8{116}) { body.push(U8{9}) } else { body.push(raw[i]) }
+                } else { body.push(raw[i]) }
                 i += 1
             }
             return String.from_bytes(body) ?? text.copy()
@@ -264,18 +258,19 @@ ini_value: fn(text: String) -> String {
     i := 0
     loop i < raw.len() {
         n: raw[i]
-        if n == 32 || n == 9 || n == 35 || n == 59 || n == 34 || n == 39 || n == 10 || n == 13 || n == 92 -> quote = true
+        if n == 32 || n == 9 || n == 35 || n == 59 || n == 34 || n == 39 || n == 10 || n == 13 || n == 92 {
+            quote = true
+        }
         i += 1
     }
     if !quote -> return text.copy()
     out := "\""
     loop b in raw {
-        if b == (U8{92}) -> out = "{out}\\\\"
-        else if b == (U8{10}) -> out = "{out}\\n"
-        else if b == (U8{13}) -> out = "{out}\\r"
-        else if b == (U8{9}) -> out = "{out}\\t"
-        else if b == (U8{34}) -> out = "{out}\\\""
-        else -> out = "{out}{String.from_bytes([U8]{b}) ?? ""}"
+        if b == (U8{92}) -> out = "{out}\\\\" else if b == (U8{10}) -> out = "{out}\\n" else if b == (U8{13}) {
+            out = "{out}\\r"
+        } else if b == (U8{9}) { out = "{out}\\t" } else if b == (U8{34}) { out = "{out}\\\"" } else {
+            out = "{out}{String.from_bytes([U8]{b}) ?? ""}"
+        }
     }
     "{out}\""
 }
@@ -288,11 +283,11 @@ split_lines: fn(text: String) -> [String] Never! {
     loop i < raw.len() {
         if raw[i] == (U8{10}) {
             end := i
-            if end > start && raw[end - 1] == (U8{13}) -> end = end - 1
+            if end > start && raw[end - 1] == (U8{13}) -> end -= 1
             out.push(String.from_bytes(slice_b(raw, start, end)) ?? "")
             start = i + 1
         }
-        i = i + 1
+        i += 1
     }
     if start <= raw.len() -> out.push(String.from_bytes(slice_b(raw, start, raw.len())) ?? "")
     out
@@ -304,13 +299,11 @@ trim: fn(text: String) -> String Never! {
     b := raw.len()
     loop a < b {
         n: raw[a]
-        if n == 32 || n == 9 -> a = a + 1
-        else -> break
+        if n == 32 || n == 9 -> a += 1 else -> break
     }
     loop b > a {
         n: raw[b - 1]
-        if n == 32 || n == 9 -> b = b - 1
-        else -> break
+        if n == 32 || n == 9 -> b -= 1 else -> break
     }
     String.from_bytes(slice_b(raw, a, b)) ?? ""
 }
@@ -328,7 +321,7 @@ slice_b: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     i := start
     loop i < end && i >= 0 && i < raw.len() {
         out.push(raw[i])
-        i = i + 1
+        i += 1
     }
     out
 }
@@ -337,11 +330,7 @@ ascii_lower: fn(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
         n: b
-        if n >= 65 && n <= 90 {
-            out.push(U8{n + 32})
-        } else {
-            out.push(b)
-        }
+        if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
     }
     String.from_bytes(out) ?? text.copy()
 }
@@ -361,7 +350,7 @@ parse_int: fn(text: String) -> Int? {
         d: raw[i]
         if d < 48 || d > 57 -> return None
         n = n * 10 + (d - 48)
-        i = i + 1
+        i += 1
     }
     Val(n * sign)
 }
@@ -384,19 +373,19 @@ parse_float: fn(text: String) -> Float? {
         if d < 48 || d > 57 -> return None
         whole = whole * Float{10} + Float{d - 48}
         seen = true
-        i = i + 1
+        i += 1
     }
     frac := Float{0}
     place := Float{1} / Float{10}
     if i < raw.len() && raw[i] == (U8{46}) {
-        i = i + 1
+        i += 1
         loop i < raw.len() {
             d: raw[i]
             if d < 48 || d > 57 -> return None
-            frac = frac + Float{d - 48} * place
-            place = place * (Float{1} / Float{10})
+            frac += Float{d - 48} * place
+            place *= (Float{1} / Float{10})
             seen = true
-            i = i + 1
+            i += 1
         }
     }
     if !seen || i != raw.len() -> return None

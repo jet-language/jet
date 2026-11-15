@@ -1,4 +1,5 @@
 use tasks: core.tasks
+
 select_cancel_worker: fn(ready_sender: Sender<Int>) {
     task.group worker {
         { sender: _sender, receiver: ch }: channel<Int>()
@@ -12,7 +13,7 @@ select_cancel_worker: fn(ready_sender: Sender<Int>) {
 
 run: fn() {
     task.group g {
-    { sender: ready_sender, receiver: ready }: channel<Int>()
+        { sender: ready_sender, receiver: ready }: channel<Int>()
         slow: task select_cancel_worker(ready_sender)
         ready.receive() ?? panic("closed")
         slow.cancel()

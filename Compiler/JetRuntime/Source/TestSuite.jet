@@ -6,6 +6,7 @@
 // first and inline pair output second. TLS uses the one dynamic-key mechanism,
 // with detach owning its state free.
 test_suite_key := I64{0}
+
 // 1 once `test: fn` called `t.run()`: a later `t.<setting>(…)` plan line is
 // marked, and `jet test` refuses it (Registry/TestSettings.jet).
 test_suite_ran := I64{0}
@@ -16,7 +17,9 @@ rt_test_suite_state_drop_address: fn() -> I64 {
 
 // runtime-init: 3 when test_suite_key
 #Export(c) jet_rt_test_suite_init: fn() {
-    if (test_suite_key != I64{0}) -> return
+    if (test_suite_key != I64{0}) {
+        return
+    }
     closure: jet_rt_alloc(I64{24}, I64{8})
     trap_store(closure, I64{1})
     trap_store(wrapping(closure + I64{8}), rt_test_suite_state_drop_address())
@@ -55,9 +58,7 @@ test_suite_state_ensure: fn() -> I64 {
 #Export(c) jet_test_suite_new: fn() -> I64 {
     suite: jet_rt_alloc(I64{24}, I64{8})
     state: test_suite_state()
-    if (state == I64{0}) {
-        thread_zero(suite, I64{24})
-    } else {
+    if (state == I64{0}) { thread_zero(suite, I64{24}) } else {
         trap_store(suite, jet_int_owned_from_i64(trap_word(state)))
         trap_store(wrapping(suite + I64{8}), jet_int_owned_from_i64(trap_word(wrapping(state + I64{8}))))
         trap_store(wrapping(suite + I64{16}), trap_word(wrapping(state + I64{16})))
@@ -108,7 +109,9 @@ test_suite_state_ensure: fn() -> I64 {
 // harness's own records (TestContracts.jet).
 #Export(c) jet_test_setting: fn(_suite: I64, key: I64, line: I64) {
     path: rt_env_get(key)
-    if (path == I64{0}) -> return
+    if (path == I64{0}) {
+        return
+    }
     error: jet_rt_alloc(I64{8}, I64{8})
     trap_store(error, I64{0})
     appended := I64{1}
@@ -118,7 +121,9 @@ test_suite_state_ensure: fn() -> I64 {
         appended = jet_files_append_bytes_os(path, mark, I64{1}, error)
         jet_rt_free(mark, I64{8}, I64{8})
     }
-    if (appended != I64{0}) -> appended = jet_files_append_bytes_os(path, rt_text_data(line), rt_text_len(line), error)
+    if (appended != I64{0}) {
+        appended = jet_files_append_bytes_os(path, rt_text_data(line), rt_text_len(line), error)
+    }
     if (appended == I64{0}) {
         message: jet_rt_handle_show_io_error(trap_word(error))
         jet_rt_test_eprint(message)

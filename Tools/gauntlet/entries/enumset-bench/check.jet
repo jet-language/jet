@@ -47,7 +47,9 @@ run: fn(check: Check) {
         dir: files.join(scratch, size)
         names := [String]{}
         loop item in files.list_dir(dir) ?? process.fail(1, "{dir}: {err}") {
-            if !item.is_dir && (item.name.ends_with(".jet") || item.name.ends_with(".rs")) -> names.push(item.name.copy())  // copy: the listing goes away
+            if !item.is_dir && (item.name.ends_with(".jet") || item.name.ends_with(".rs")) {
+                names.push(item.name.copy())  // copy: the listing goes away
+            }
         }
         names.sort()
         loop name in names {
@@ -66,7 +68,7 @@ masked: fn(key: String, value: Dyn) -> Dyn {
         .Text(text) -> if key == "error_tail" -> Dyn.Text(without_runner_note(text)) else -> value.copy()  // copy: the report keeps its own
         .Array(items) -> Dyn.Array(items.map(fn(item) { masked("", item) }))
         .Object(entries) -> {
-            out := [String: Dyn]{}
+            out := [String:Dyn]{}
             loop entry in entries -> out[entry.key.copy()] = masked(entry.key, entry.value)  // copy: the masked report keeps its own
             Dyn.Object(out)
         }

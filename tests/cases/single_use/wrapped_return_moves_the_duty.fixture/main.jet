@@ -1,20 +1,17 @@
 // A `#SingleUse` name an owning position wraps in `Ok`, `Err` or `Val`
 // moves into the wrapper, so its duty goes to whoever takes the result.
 #SingleUse Lock: struct {
-    resource: String,
+    resource: String
 }
 
-#Error LockError: struct {
-    reason: String,
+#Error
+LockError: struct {
+    reason: String
 }
 
-acquire: fn(resource: String) -> Lock {
-    Lock{resource: resource}
-}
+acquire: fn(resource: String) -> Lock { Lock{resource: resource} }
 
-release: fn(lock: &&Lock) {
-    print("released {lock.resource}")
-}
+release: fn(lock: &&Lock) { print("released {lock.resource}") }
 
 open: fn(resource: String) -> Lock LockError! {
     lock: acquire(resource)

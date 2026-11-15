@@ -24,13 +24,19 @@ KEYWORD_TABLE_OPENERS: [String]{"defer", "assert", "task", "next", "group", "rac
 keyword_table_agrees: fn(word: String) {
     in_table: LEXER_KEYWORD_SPELLINGS.contains(word) || LEXER_RETIRED_SPELLINGS.contains(word)
     refused: keyword_table_refused(word)
-    if refused && !in_table -> panic("the parser refuses `{word}` as a local's name, but the keyword table does not hold it")
+    if refused && !in_table {
+        panic("the parser refuses `{word}` as a local's name, but the keyword table does not hold it")
+    }
     if !refused && in_table -> panic("the keyword `{word}` parsed as a local's name")
 }
 
 #Test("every keyword table word is refused as an identifier") {
-    loop word in LEXER_KEYWORD_SPELLINGS -> assert(keyword_table_refused(word), "the keyword `{word}` parsed as a local's name")
-    loop word in LEXER_RETIRED_SPELLINGS -> assert(keyword_table_refused(word), "the retired keyword `{word}` parsed as a local's name")
+    loop word in LEXER_KEYWORD_SPELLINGS {
+        assert(keyword_table_refused(word), "the keyword `{word}` parsed as a local's name")
+    }
+    loop word in LEXER_RETIRED_SPELLINGS {
+        assert(keyword_table_refused(word), "the retired keyword `{word}` parsed as a local's name")
+    }
 }
 
 #Test("every word the parser refuses as an identifier is in the keyword table") {

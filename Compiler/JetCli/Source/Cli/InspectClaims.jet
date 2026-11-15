@@ -64,13 +64,15 @@ jet_cli_inspect_claims_floor: fn(root: String) -[FS, Env]> ClaimsGrade? Manifest
 jet_cli_claims_grade_json: fn(view: JetCLIClaimsGradeView) -> JetCLIStatusValue Never! {
     floor_text := String?{None}
     if view.floor == .Val(required) -> floor_text = Val(required.render())
-    jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("grade", jet_cli_status_text(view.grade.render())),
-        jet_cli_status_field("failed", jet_cli_status_bool(view.failed)),
-        jet_cli_status_field("floor", jet_cli_status_optional_text(floor_text)),
-        jet_cli_status_field("floorMet", jet_cli_status_bool(view.floor_met())),
-        jet_cli_status_field("evidence", jet_cli_status_optional_text(view.report.copy())),
-    })
+    jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("grade", jet_cli_status_text(view.grade.render())),
+            jet_cli_status_field("failed", jet_cli_status_bool(view.failed)),
+            jet_cli_status_field("floor", jet_cli_status_optional_text(floor_text)),
+            jet_cli_status_field("floorMet", jet_cli_status_bool(view.floor_met())),
+            jet_cli_status_field("evidence", jet_cli_status_optional_text(view.report.copy())),
+        },
+    )
 }
 
 jet_cli_claims_grade_text: fn(view: JetCLIClaimsGradeView, file: String) -> String Never! {
@@ -241,9 +243,7 @@ jet_cli_claim_validate_relation: fn(manifest: JetCLIStatusValue, relation: JetCL
             errors.push("row#{index} row_id is missing")
             next
         }
-        if id.trim() == "" || row_ids.contains(id) {
-            errors.push("duplicate or empty row_id: {id}")
-        }
+        if id.trim() == "" || row_ids.contains(id) -> errors.push("duplicate or empty row_id: {id}")
         if !row_ids.contains(id) -> row_ids.push(id.copy())
         capability: jet_cli_status_string(jet_cli_status_get(row, "capability_id"))
         mode: jet_cli_status_string(jet_cli_status_get(row, "mode"))
@@ -305,7 +305,7 @@ jet_cli_claim_validate_relation: fn(manifest: JetCLIStatusValue, relation: JetCL
             }
         } else { errors.push("row disposition is missing: {id}") }
         loop field in
-            ([String]{"contract", "route", "observable", "oracle", "evidence", "identity", "owner", "source_identity", "candidate_identity"}), {
+            ([String]{"contract", "route", "observable", "oracle", "evidence", "identity", "owner", "source_identity", "candidate_identity"}) {
             if !jet_cli_status_is_object(jet_cli_status_get(row, field)) {
                 errors.push("row {field} is missing: {id}")
             }
@@ -399,14 +399,14 @@ jet_cli_claim_validate_relation: fn(manifest: JetCLIStatusValue, relation: JetCL
 
 jet_cli_claim_unavailable: fn(path: String, reason: String) -> JetCLIStatusValue Never! {
     jet_cli_status_object(
-    [JetCLIStatusField]{
-        jet_cli_status_field("schema", jet_cli_status_text(JET_CLI_CAPABILITY_RELATION_SCHEMA)),
-        jet_cli_status_field("status", jet_cli_status_text("unavailable")),
-        jet_cli_status_field("relation", jet_cli_status_text(JET_CLI_RELEASE_CLAIM_SOURCE)),
-        jet_cli_status_field("path", jet_cli_status_text(path)),
-        jet_cli_status_field("reason", jet_cli_status_text(reason)),
-        jet_cli_status_field("rows", jet_cli_status_array([JetCLIStatusValue]{})),
-    },
+        [JetCLIStatusField]{
+            jet_cli_status_field("schema", jet_cli_status_text(JET_CLI_CAPABILITY_RELATION_SCHEMA)),
+            jet_cli_status_field("status", jet_cli_status_text("unavailable")),
+            jet_cli_status_field("relation", jet_cli_status_text(JET_CLI_RELEASE_CLAIM_SOURCE)),
+            jet_cli_status_field("path", jet_cli_status_text(path)),
+            jet_cli_status_field("reason", jet_cli_status_text(reason)),
+            jet_cli_status_field("rows", jet_cli_status_array([JetCLIStatusValue]{})),
+        },
     )
 }
 
@@ -450,18 +450,18 @@ jet_cli_claim_rows: fn(relation: JetCLIStatusValue) -> [JetCLIStatusValue] Never
         mode: jet_cli_status_string(jet_cli_status_get(row, "mode")) ?? next
         disposition: jet_cli_status_string(jet_cli_status_get(row, "disposition")) ?? next
         claims.push(
-        jet_cli_status_object(
-        [JetCLIStatusField]{
-            jet_cli_status_field("claim", jet_cli_status_text(id)),
-            jet_cli_status_field("capability", jet_cli_status_text(capability)),
-            jet_cli_status_field("mode", jet_cli_status_text(mode)),
-            jet_cli_status_field("disposition", jet_cli_status_text(disposition)),
-            jet_cli_status_field("status", jet_cli_status_text(jet_cli_status_string(jet_cli_status_get(row, "status")) ?? disposition)),
-            jet_cli_status_field("counted", jet_cli_status_bool(jet_cli_status_boolean(jet_cli_status_get(row, "counted")) ?? false)),
-            jet_cli_status_field("owner_link", jet_cli_status_get(row, "owner_link") ?? JetCLIStatusValue.Null),
-            jet_cli_status_field("candidate_identity", jet_cli_status_get(row, "candidate_identity") ?? JetCLIStatusValue.Null),
-        },
-        ),
+            jet_cli_status_object(
+                [JetCLIStatusField]{
+                    jet_cli_status_field("claim", jet_cli_status_text(id)),
+                    jet_cli_status_field("capability", jet_cli_status_text(capability)),
+                    jet_cli_status_field("mode", jet_cli_status_text(mode)),
+                    jet_cli_status_field("disposition", jet_cli_status_text(disposition)),
+                    jet_cli_status_field("status", jet_cli_status_text(jet_cli_status_string(jet_cli_status_get(row, "status")) ?? disposition)),
+                    jet_cli_status_field("counted", jet_cli_status_bool(jet_cli_status_boolean(jet_cli_status_get(row, "counted")) ?? false)),
+                    jet_cli_status_field("owner_link", jet_cli_status_get(row, "owner_link") ?? JetCLIStatusValue.Null),
+                    jet_cli_status_field("candidate_identity", jet_cli_status_get(row, "candidate_identity") ?? JetCLIStatusValue.Null),
+                },
+            ),
         )
     }
     claims
@@ -499,15 +499,15 @@ jet_cli_inspect_claims_manifest: fn(file: String, json: Bool, color: Bool) -[FS,
     grade: jet_cli_inspect_claims_grade(file, floor)
     if json {
         release: jet_cli_status_object(
-        [JetCLIStatusField]{
-            jet_cli_status_field("version", jet_cli_status_text(JET_VERSION)),
-            jet_cli_status_field("status", jet_cli_status_text(JET_CLI_RELEASE_CHANNEL)),
-            jet_cli_status_field("disposition", jet_cli_status_text(JET_CLI_RELEASE_DISPOSITION)),
-            jet_cli_status_field("readiness", jet_cli_status_text(JET_CLI_RELEASE_READINESS)),
-            jet_cli_status_field("compatibility_policy", jet_cli_status_text(JET_CLI_RELEASE_POLICY)),
-            jet_cli_status_field("compatibility_policy_disposition", jet_cli_status_text(JET_CLI_RELEASE_POLICY_DISPOSITION)),
-            jet_cli_status_field("compatibility_policy_active", jet_cli_status_bool(JET_CLI_RELEASE_POLICY_ACTIVE)),
-        },
+            [JetCLIStatusField]{
+                jet_cli_status_field("version", jet_cli_status_text(JET_VERSION)),
+                jet_cli_status_field("status", jet_cli_status_text(JET_CLI_RELEASE_CHANNEL)),
+                jet_cli_status_field("disposition", jet_cli_status_text(JET_CLI_RELEASE_DISPOSITION)),
+                jet_cli_status_field("readiness", jet_cli_status_text(JET_CLI_RELEASE_READINESS)),
+                jet_cli_status_field("compatibility_policy", jet_cli_status_text(JET_CLI_RELEASE_POLICY)),
+                jet_cli_status_field("compatibility_policy_disposition", jet_cli_status_text(JET_CLI_RELEASE_POLICY_DISPOSITION)),
+                jet_cli_status_field("compatibility_policy_active", jet_cli_status_bool(JET_CLI_RELEASE_POLICY_ACTIVE)),
+            },
         )
         fields: [JetCLIStatusField]{
             jet_cli_status_field("file", jet_cli_status_text(file)),

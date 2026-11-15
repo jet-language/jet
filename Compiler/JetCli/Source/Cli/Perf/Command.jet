@@ -6,9 +6,21 @@ use {
     cli_files: core.files
     jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, JetDriverRunReceiptSection, jet_driver_run_receipt_section_new]
     jet_foundation.[
-        CanonicalJSON, CanonicalJSONField, JET_CLI_COMMANDS, JetTraceError, TRACE_SCHEMA, TRACE_VERSION,
-        artifact_extension, canonical_json_bytes, diagnostic_theme_paint, jettrace_array, jettrace_error,
-        jettrace_object_view, trace_id, trace_receipt_section_from_json, verify_jettrace,
+        CanonicalJSON,
+        CanonicalJSONField,
+        JET_CLI_COMMANDS,
+        JetTraceError,
+        TRACE_SCHEMA,
+        TRACE_VERSION,
+        artifact_extension,
+        canonical_json_bytes,
+        diagnostic_theme_paint,
+        jettrace_array,
+        jettrace_error,
+        jettrace_object_view,
+        trace_id,
+        trace_receipt_section_from_json,
+        verify_jettrace,
     ]
 }
 
@@ -30,7 +42,9 @@ jet_cli_perf: fn(argv: [String], color: Bool) -[FS, Env, Exec, Time]> JetDriverV
             if word == "--" -> passthrough = true
             if jet_cli_is_help_flag(word) -> help = true
             if word == "--quiet" -> quiet = true
-            if word == "--quiet" || word == "--color" || word == "--no-color" || word.starts_with("--color=") -> next
+            if word == "--quiet" || word == "--color" || word == "--no-color" || word.starts_with("--color=") {
+                next
+            }
         }
         rest.push(word)
     }
@@ -65,7 +79,9 @@ jet_cli_perf_json: fn(action: String, value: CanonicalJSON) -> String Never! {
 // `read_verified`: a `.jettrace` path, read and verified.
 jet_cli_perf_read: fn(path: String) -[FS]> CanonicalJSON JetTraceError! {
     extension: artifact_extension()
-    if !path.ends_with(extension) -> return Err(jettrace_error("trace path must end with {extension}"))
+    if !path.ends_with(extension) {
+        return Err(jettrace_error("trace path must end with {extension}"))
+    }
     bytes: cli_files.read_bytes(path) ?? return Err(jettrace_error("cannot read {path}: {jet_cli_io_error_text(err)}"))
     // The report names the file: a verification failure alone does not say
     // which trace it rejected.
@@ -95,19 +111,29 @@ jet_cli_perf_view: fn(args: [String], color: Bool) -[FS]> JetDriverVerbOutput Ne
         }
         if arg.starts_with("--frames=") {
             value: arg.slice(9..<arg.len())
-            if value != "jet" && value != "all" -> return jet_cli_perf_error("`--frames` accepts only `jet` or `all`", JET_CLI_PERF_FIX, color)
+            if value != "jet" && value != "all" {
+                return jet_cli_perf_error("`--frames` accepts only `jet` or `all`", JET_CLI_PERF_FIX, color)
+            }
             frames = value
             next
         }
         if arg == "--frames" {
-            if index + 1 >= args.len() -> return jet_cli_perf_error("`--frames` needs `jet` or `all`", JET_CLI_PERF_FIX, color)
-            if args[index + 1] != "jet" && args[index + 1] != "all" -> return jet_cli_perf_error("`--frames` accepts only `jet` or `all`", JET_CLI_PERF_FIX, color)
+            if index + 1 >= args.len() {
+                return jet_cli_perf_error("`--frames` needs `jet` or `all`", JET_CLI_PERF_FIX, color)
+            }
+            if args[index + 1] != "jet" && args[index + 1] != "all" {
+                return jet_cli_perf_error("`--frames` accepts only `jet` or `all`", JET_CLI_PERF_FIX, color)
+            }
             frames = if args[index + 1] == "all" -> "all" else -> "jet"
             skip = true
             next
         }
-        if arg.starts_with("-") -> return jet_cli_perf_error("unknown `jet perf view` flag `{arg}`", "run `jet perf view <path{extension}> [--json|--html] [--frames=jet|all]`", color)
-        if path != None -> return jet_cli_perf_error("`jet perf view` takes one trace path", JET_CLI_PERF_FIX, color)
+        if arg.starts_with("-") {
+            return jet_cli_perf_error("unknown `jet perf view` flag `{arg}`", "run `jet perf view <path{extension}> [--json|--html] [--frames=jet|all]`", color)
+        }
+        if path != None {
+            return jet_cli_perf_error("`jet perf view` takes one trace path", JET_CLI_PERF_FIX, color)
+        }
         // copy: the argument list keeps its word; the trace path owns its own.
         path = Val(arg.copy())
     }
@@ -115,17 +141,23 @@ jet_cli_perf_view: fn(args: [String], color: Bool) -[FS]> JetDriverVerbOutput Ne
     trace: jet_cli_perf_read(shown) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
     flame: jet_cli_perf_flame(trace)
     timeline: jet_cli_perf_timeline(trace)
-    if mode == "html" -> return JetDriverVerbOutput{stdout: jet_cli_perf_view_html(trace_id(trace) ?? "unknown", frames, flame, timeline), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    if mode == "text" -> return JetDriverVerbOutput{stdout: jet_cli_perf_view_text(trace, frames, flame, timeline, color), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    view: CanonicalJSON.Object([CanonicalJSONField]{
-        {key: "flamegraph", value: jet_cli_perf_strings(flame)},
-        {key: "frames", value: CanonicalJSON.String(frames)},
-        {key: "kind", value: CanonicalJSON.String("jet.trace.view")},
-        {key: "schema", value: CanonicalJSON.String(TRACE_SCHEMA)},
-        {key: "timeline", value: jet_cli_perf_strings(timeline)},
-        {key: "trace", value: trace},
-        {key: "version", value: CanonicalJSON.Integer("{TRACE_VERSION}")},
-    })
+    if mode == "html" {
+        return JetDriverVerbOutput{stdout: jet_cli_perf_view_html(trace_id(trace) ?? "unknown", frames, flame, timeline), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
+    if mode == "text" {
+        return JetDriverVerbOutput{stdout: jet_cli_perf_view_text(trace, frames, flame, timeline, color), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
+    view: CanonicalJSON.Object(
+        [CanonicalJSONField]{
+            {key: "flamegraph", value: jet_cli_perf_strings(flame)},
+            {key: "frames", value: CanonicalJSON.String(frames)},
+            {key: "kind", value: CanonicalJSON.String("jet.trace.view")},
+            {key: "schema", value: CanonicalJSON.String(TRACE_SCHEMA)},
+            {key: "timeline", value: jet_cli_perf_strings(timeline)},
+            {key: "trace", value: trace},
+            {key: "version", value: CanonicalJSON.Integer("{TRACE_VERSION}")},
+        },
+    )
     JetDriverVerbOutput{stdout: jet_cli_perf_json("perf.view", view), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
@@ -140,7 +172,9 @@ jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String]
     out = "{out}{diagnostic_theme_paint(color, "1", "trace")} {trace_id(trace) ?? "unknown"}\n"
     out = "{out}{diagnostic_theme_paint(color, "1", "command")} {jet_cli_perf_content_text(trace, "command") ?? "unknown"}\n"
     out = "{out}{diagnostic_theme_paint(color, "1", "frames")} {frames}\n"
-    if jet_cli_perf_first_sample(trace) == .Val(sample) -> out = "{out}sample {sample.domain} {sample.ns}ns · {sample.symbol}\n"
+    if jet_cli_perf_first_sample(trace) == .Val(sample) {
+        out = "{out}sample {sample.domain} {sample.ns}ns · {sample.symbol}\n"
+    }
     summaries: [String?]{
         jet_cli_perf_profile_summary(trace),
         jet_cli_perf_allocation_summary(trace),
@@ -154,7 +188,9 @@ jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String]
     loop summary in summaries {
         if summary == .Val(line) -> out = "{out}{line}\n"
     }
-    if frames == "all" -> out = "{out}generated-frames: none retained in .jettrace (hidden unless captured under --frames=all)\n"
+    if frames == "all" {
+        out = "{out}generated-frames: none retained in .jettrace (hidden unless captured under --frames=all)\n"
+    }
     if flame.len() > 0 {
         out = "{out}{diagnostic_theme_paint(color, "1", "flamegraph")}\n"
         loop line in flame -> out = "{out}{line}\n"
@@ -225,17 +261,23 @@ jet_cli_perf_compare: fn(args: [String], color: Bool) -[FS, Env]> JetDriverVerbO
             next
         }
         if arg == "--baseline" {
-            if index + 1 >= args.len() -> return jet_cli_perf_error("`--baseline` needs a pinned baseline name", JET_CLI_PERF_FIX, color)
+            if index + 1 >= args.len() {
+                return jet_cli_perf_error("`--baseline` needs a pinned baseline name", JET_CLI_PERF_FIX, color)
+            }
             // copy: the argument list keeps its word; the baseline name owns its own.
             baseline = Val(args[index + 1].copy())
             skip = true
             next
         }
-        if arg.starts_with("-") -> return jet_cli_perf_error("unknown `jet perf compare` flag `{arg}`", usage, color)
+        if arg.starts_with("-") {
+            return jet_cli_perf_error("unknown `jet perf compare` flag `{arg}`", usage, color)
+        }
         // copy: the argument list keeps its word; the path list owns its own.
         paths.push(arg.copy())
     }
-    if paths.len() != 2 -> return jet_cli_perf_error("`jet perf compare` needs two {extension} paths", usage, color)
+    if paths.len() != 2 {
+        return jet_cli_perf_error("`jet perf compare` needs two {extension} paths", usage, color)
+    }
     base: jet_cli_perf_read(paths[0]) ?? return jet_cli_perf_error("base trace: {err.message}", JET_CLI_PERF_FIX, color)
     head: jet_cli_perf_read(paths[1]) ?? return jet_cli_perf_error("head trace: {err.message}", JET_CLI_PERF_FIX, color)
     same_tool: jet_cli_perf_same(jet_cli_perf_identity(base, "toolchain", "digest"), jet_cli_perf_identity(head, "toolchain", "digest"))
@@ -254,9 +296,15 @@ jet_cli_perf_compare: fn(args: [String], color: Bool) -[FS, Env]> JetDriverVerbO
     base_wall: jet_cli_perf_sample_duration(base, "wall")
     head_wall: jet_cli_perf_sample_duration(head, "wall")
     deltas := [String]{}
-    if base_wall == .Val(before) && head_wall == .Val(after) -> deltas.push("wall {before}->{after} ns")
-    if jet_cli_perf_sample_duration(base, "cpu") == .Val(before) && jet_cli_perf_sample_duration(head, "cpu") == .Val(after) -> deltas.push("cpu {before}->{after} ns")
-    if jet_cli_perf_allocation_bytes(base) == .Val(before) && jet_cli_perf_allocation_bytes(head) == .Val(after) -> deltas.push("alloc {before}->{after} B")
+    if base_wall == .Val(before) && head_wall == .Val(after) {
+        deltas.push("wall {before}->{after} ns")
+    }
+    if jet_cli_perf_sample_duration(base, "cpu") == .Val(before) && jet_cli_perf_sample_duration(head, "cpu") == .Val(after) {
+        deltas.push("cpu {before}->{after} ns")
+    }
+    if jet_cli_perf_allocation_bytes(base) == .Val(before) && jet_cli_perf_allocation_bytes(head) == .Val(after) {
+        deltas.push("alloc {before}->{after} B")
+    }
     receipt_deltas: jet_cli_perf_receipt_deltas(base, head) ?? return jet_cli_perf_error("receipt sections: {err.message}", JET_CLI_PERF_FIX, color)
     // #241 budgets: wall AbsoluteFrom/RelativeTo against the pinned base trace.
     budget := "budgets: no comparable wall samples for #241 RelativeTo evaluation"
@@ -289,7 +337,9 @@ jet_cli_perf_baseline_refusal: fn(name: String) -[FS, Env]> String? Never! {
     }
     loop byte in name.bytes() {
         code: Int{byte}
-        if !((code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code == 45 || code == 47) -> pinned = false
+        if !((code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code == 45 || code == 47) {
+            pinned = false
+        }
     }
     if !pinned -> return Val("baseline name `{name}` is not a pinned BaselineName")
     path: "{jet_cli_selected_root_or_cwd()}/.jet/perf/baselines/names/{name}.json"
@@ -527,8 +577,12 @@ jet_cli_perf_lock_summary: fn(trace: CanonicalJSON) -> String? Never! {
     waiters := 0
     symbol := String?{None}
     loop item in items {
-        if jet_cli_perf_member_integer(item, "send_waiters") != None -> waiters += jet_cli_perf_member_number(item, "send_waiters") ?? 0
-        if jet_cli_perf_member_integer(item, "recv_waiters") != None -> waiters += jet_cli_perf_member_number(item, "recv_waiters") ?? 0
+        if jet_cli_perf_member_integer(item, "send_waiters") != None {
+            waiters += jet_cli_perf_member_number(item, "send_waiters") ?? 0
+        }
+        if jet_cli_perf_member_integer(item, "recv_waiters") != None {
+            waiters += jet_cli_perf_member_number(item, "recv_waiters") ?? 0
+        }
         if symbol == None -> symbol = jet_cli_perf_member_symbol(item)
     }
     Val("locks count={items.len()} waiters={waiters} · {symbol ?? "?"}")
@@ -614,13 +668,20 @@ jet_cli_perf_flame: fn(trace: CanonicalJSON) -> [String] Never! {
     if jet_cli_perf_profile_rows(trace) == .Ok(items) {
         loop line in jet_cli_perf_flame_profile(items) -> rows.push(line)
     }
-    if jet_cli_perf_browser_summary(trace) == .Val(browser) -> rows.push("{browser.symbol} browser {jet_cli_perf_bar(browser.count)}")
+    if jet_cli_perf_browser_summary(trace) == .Val(browser) {
+        rows.push("{browser.symbol} browser {jet_cli_perf_bar(browser.count)}")
+    }
     rows
 }
 
 // One function's profile rows on one clock: their samples, and those of
 // each row that is one source line.
-JetCLIPerfFlameFunction: struct { symbol: String, clock: String, weight: Int, lines: [(line: Int, weight: Int)] }
+JetCLIPerfFlameFunction: struct {
+    symbol: String
+    clock: String
+    weight: Int
+    lines: [(line: Int, weight: Int)]
+}
 
 // The profile rows by function and clock, hottest first: each function's
 // samples and its share of its clock's, then its hottest lines. At most 8
@@ -643,7 +704,9 @@ jet_cli_perf_flame_profile: fn(items: View<CanonicalJSON>) -> [String] Never! {
             functions.push(JetCLIPerfFlameFunction{symbol: symbol, clock: clock, weight: 0, lines: [(line: Int, weight: Int)]{}})
         }
         functions[found].weight += weight
-        if jet_cli_perf_row_line(item) == .Val(line) -> functions[found].lines.push((line: line, weight: weight))
+        if jet_cli_perf_row_line(item) == .Val(line) {
+            functions[found].lines.push((line: line, weight: weight))
+        }
     }
     functions.sort_by(fn(left: JetCLIPerfFlameFunction, right: JetCLIPerfFlameFunction) { right.weight <=> left.weight })
     out := [String]{}
@@ -658,7 +721,9 @@ jet_cli_perf_flame_profile: fn(items: View<CanonicalJSON>) -> [String] Never! {
         out.push("{functions[index].symbol} profile:{functions[index].clock} samples={weight} share={share}%")
         functions[index].lines.sort_by(fn(left: (line: Int, weight: Int), right: (line: Int, weight: Int)) { (right.weight <=> left.weight).then(left.line <=> right.line) })
         shown: if functions[index].lines.len() > 3 -> 3 else -> functions[index].lines.len()
-        loop at in 0..<shown -> out.push("  line {functions[index].lines[at].line} samples={functions[index].lines[at].weight}")
+        loop at in 0..<shown {
+            out.push("  line {functions[index].lines[at].line} samples={functions[index].lines[at].weight}")
+        }
     }
     out
 }

@@ -8,7 +8,9 @@ lsp_uri_to_path: fn(uri: String) -> String Never! {
     rest: uri.slice(7, uri.len())
     decoded: lsp_url.percent_decode(rest) ?? return ""
     bytes: decoded.bytes()
-    if bytes.len() >= 3 && bytes[0] == (U8{47}) && bytes[2] == (U8{58}) && lsp_is_ascii_letter(bytes[1]) -> return decoded.slice(1, decoded.len())
+    if bytes.len() >= 3 && bytes[0] == (U8{47}) && bytes[2] == (U8{58}) && lsp_is_ascii_letter(bytes[1]) {
+        return decoded.slice(1, decoded.len())
+    }
     decoded
 }
 

@@ -25,7 +25,9 @@ provider_cc_toolchain_plan_downloads: fn(verification: &StoreVerification, specs
                 next
             }
             .Err(error) -> {
-                if !error.is_missing_descriptor(target) -> return Err(ProviderError.BadOutput(error.message()))
+                if !error.is_missing_descriptor(target) {
+                    return Err(ProviderError.BadOutput(error.message()))
+                }
             }
         }
         if ctx.fixtures == {
@@ -59,7 +61,9 @@ provider_cc_toolchain_realize: fn(verification: &StoreVerification, spec: RefSpe
     if provider_cc_toolchain_resolve_for_target(verification, ctx.store_dir, target, ctx.fixtures != None) == {
         .Ok(descriptor) -> return Ok(provider_cc_realized_from_descriptor(spec, ctx, descriptor, SourceState.Cached))
         .Err(error) -> {
-            if !error.is_missing_descriptor(target) -> return Err(ProviderError.BadOutput(error.message()))
+            if !error.is_missing_descriptor(target) {
+                return Err(ProviderError.BadOutput(error.message()))
+            }
         }
     }
     if ctx.fixtures == {
@@ -90,9 +94,9 @@ provider_cc_realized_from_descriptor: fn(spec: RefSpec, ctx: ProviderCtx, descri
         envelope: descriptor.envelope,
         cache_identity: descriptor.cache_identity(ctx),
         source_state: source_state,
-        named_outputs: [String: String]{"out": descriptor.root},
+        named_outputs: [String:String]{"out": descriptor.root},
         references: descriptor.references,
-        producer: descriptor.producer
+        producer: descriptor.producer,
     }
 }
 
@@ -145,20 +149,22 @@ provider_cc_publish_fixture: fn(spec: RefSpec, ctx: ProviderCtx, manifest: CcBun
     identity: descriptor.cache_identity(ctx)
     producer := descriptor.producer
     producer.facts["cache.output"] = descriptor.bundle_sha256
-    Ok(Realized{
-        name: CC_TOOLCHAIN_PACKAGE,
-        version: descriptor.version,
-        reference: spec.raw,
-        out: output,
-        bin: files.join(output, "bin"),
-        rlib: "",
-        envelope: descriptor.envelope,
-        cache_identity: identity,
-        source_state: SourceState.Downloaded,
-        named_outputs: [String: String]{"out": output},
-        references: [String]{},
-        producer: producer
-    })
+    Ok(
+        Realized{
+            name: CC_TOOLCHAIN_PACKAGE,
+            version: descriptor.version,
+            reference: spec.raw,
+            out: output,
+            bin: files.join(output, "bin"),
+            rlib: "",
+            envelope: descriptor.envelope,
+            cache_identity: identity,
+            source_state: SourceState.Downloaded,
+            named_outputs: [String:String]{"out": output},
+            references: [String]{},
+            producer: producer,
+        },
+    )
 }
 
 // The fixture manifest for a target: `jet-cc-toolchain-<target>.json`, or the
@@ -201,7 +207,9 @@ provider_cc_manifest_bundle_root: fn(fixtures: String?, manifest: CcBundleManife
     metadata: files.stat(root) ?? {
         return Err(CcToolchainError.Invalid("C toolchain bundle is unavailable: {err}"))
     }
-    if metadata.is_symlink || !metadata.is_dir -> return Err(CcToolchainError.Invalid("C toolchain bundle is not a real directory"))
+    if metadata.is_symlink || !metadata.is_dir {
+        return Err(CcToolchainError.Invalid("C toolchain bundle is not a real directory"))
+    }
     Ok(root)
 }
 
@@ -227,11 +235,15 @@ provider_cc_copy_tree: fn(source: String, destination: String) CcToolchainError!
 provider_cc_copy_tree_node: fn(source: String, destination: String, spent: CcCopyBudget) -[FS]> CcCopyBudget CcToolchainError! {
     budget := spent
     budget.nodes += 1
-    if budget.nodes > CC_TOOLCHAIN_MAX_BUNDLE_NODES -> return Err(CcToolchainError.Invalid("C toolchain bundle has too many filesystem nodes"))
+    if budget.nodes > CC_TOOLCHAIN_MAX_BUNDLE_NODES {
+        return Err(CcToolchainError.Invalid("C toolchain bundle has too many filesystem nodes"))
+    }
     metadata: files.stat(source) ?? {
         return Err(CcToolchainError.Invalid("read C toolchain bundle: {err}"))
     }
-    if metadata.is_symlink -> return Err(CcToolchainError.Invalid("C toolchain bundle contains symlink `{source}`"))
+    if metadata.is_symlink {
+        return Err(CcToolchainError.Invalid("C toolchain bundle contains symlink `{source}`"))
+    }
     if metadata.is_dir {
         files.create_dir_all(destination) ?? {
             return Err(CcToolchainError.Invalid("create C toolchain bundle directory: {err}"))
@@ -252,7 +264,9 @@ provider_cc_copy_tree_node: fn(source: String, destination: String, spent: CcCop
     }
     if metadata.is_file {
         budget.bytes += metadata.size
-        if budget.bytes > CC_TOOLCHAIN_MAX_BUNDLE_BYTES -> return Err(CcToolchainError.Invalid("C toolchain bundle exceeds its size limit"))
+        if budget.bytes > CC_TOOLCHAIN_MAX_BUNDLE_BYTES {
+            return Err(CcToolchainError.Invalid("C toolchain bundle exceeds its size limit"))
+        }
         parent: files.dirname(destination)
         if parent != "" {
             files.create_dir_all(parent) ?? {
@@ -278,7 +292,9 @@ provider_cc_ensure_real_directory: fn(path: String) CcToolchainError! -[FS]> {
     metadata: files.stat(path) ?? {
         return Err(CcToolchainError.Invalid("inspect Hangar directory: {err}"))
     }
-    if metadata.is_symlink || !metadata.is_dir -> return Err(CcToolchainError.Invalid("Hangar path `{path}` is not a real directory"))
+    if metadata.is_symlink || !metadata.is_dir {
+        return Err(CcToolchainError.Invalid("Hangar path `{path}` is not a real directory"))
+    }
 }
 
 // Best-effort removal of a failed staging tree; a symlink is removed itself,

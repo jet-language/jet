@@ -5,12 +5,14 @@ engine_import_todo: fn(plan: ImportPlan, path: String, word: String) -> Bool {
     }
     false
 }
+
 engine_import_loss: fn(facts: ProviderFacts, word: String) -> Bool {
     loop loss in facts.losses {
         if loss.reason.contains(word) -> return true
     }
     false
 }
+
 engine_import_report_conflict: fn(report: ProviderFactReport, word: String) -> Bool {
     loop conflict in report.conflicts {
         if conflict.contains(word) -> return true
@@ -56,7 +58,9 @@ engine_import_report_conflict: fn(report: ProviderFactReport, word: String) -> B
     plan: cli_import_cargo("[package]\nname = \"app\"\nversion = \"0.1.0\"\n[target.'cfg(unix)'.dependencies]\ncc = \"1\"\n", "")
     assert_eq(plan.deps[0].provider_ref, "cc@cargo#platform=cfg(unix)")
     facts: plan.provider_facts.get("cc@cargo#platform=cfg(unix)") ?? panic("unlocked target facts")
-    loop loss in facts.losses -> assert(!loss.reason.contains("duplicate selector fact `platform=cfg(unix)`"))
+    loop loss in facts.losses {
+        assert(!loss.reason.contains("duplicate selector fact `platform=cfg(unix)`"))
+    }
     assert(engine_import_todo(plan, "Cargo.lock", "unresolved"))
     assert(!plan.emit_pkg_jet().contains("cc:"))
 }
@@ -101,7 +105,9 @@ engine_import_report_conflict: fn(report: ProviderFactReport, word: String) -> B
     facts: plan.provider_facts.get("serde@cargo") ?? panic("ambiguous Cargo facts")
     matched := false
     loop conflict in facts.conflicts {
-        if conflict.key == "provider.selector.version" && conflict.source == "Cargo.lock" -> matched = true
+        if conflict.key == "provider.selector.version" && conflict.source == "Cargo.lock" {
+            matched = true
+        }
     }
     assert(matched)
     assert(engine_import_todo(plan, "Cargo.lock", "conflicts"))
@@ -158,7 +164,7 @@ engine_import_report_conflict: fn(report: ProviderFactReport, word: String) -> B
     assert(!registry.is_lossless())
     assert(engine_import_report_conflict(registry, "conflicting native facts"))
     if registry.lock_record("app", "web@jet-registry#version=1.0.0", "any") == {
-        .Ok(_) -> panic("conflicting registry facts entered lock")
+        .Ok(_) -> { panic("conflicting registry facts entered lock") }
         .Err(error) -> assert(error.message.contains("conflict"))
     }
 }

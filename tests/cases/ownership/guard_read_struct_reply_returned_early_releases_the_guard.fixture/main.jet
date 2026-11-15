@@ -8,18 +8,14 @@ Reply: struct {
     body: String
 }
 
-reply: fn(status: Int) -> Reply {
-    Reply{status: status, body: "status {status}"}
-}
+reply: fn(status: Int) -> Reply { Reply{status: status, body: "status {status}"} }
 
 handle: fn(store: Shared<[String:String]>, key: String) -> Reply {
     stored: store.guard_read().value.get(key) ?? return reply(404)
     Reply{status: 200, body: stored}
 }
 
-show: fn(answer: Reply) {
-    print("{answer.status} {answer.body}")
-}
+show: fn(answer: Reply) { print("{answer.status} {answer.body}") }
 
 run: fn() {
     store: Shared{[String:String]{}}

@@ -12,6 +12,7 @@ OperatorVector: struct {
         }
     }
 }
+
 OperatorPrice: struct {
     value: Int
 
@@ -19,14 +20,19 @@ OperatorPrice: struct {
         mul: fn(self, rhs: Decimal) -> Decimal { return rhs.copy() }
     }
 }
+
 impl Int.Mul(OperatorPrice) {
     mul: fn(self, rhs: OperatorPrice) -> OperatorPrice {
         return OperatorPrice{value: self * rhs.value}
     }
 }
+
 operator_scalar: fn(value: Float) { print(value) }
+
 operator_vector: fn(value: OperatorVector) { print(value.value) }
+
 operator_price: fn(value: OperatorPrice) { print(value.value) }
+
 #Test("operator_rhs_fixtures") {
     vector: OperatorVector{value: 3}
     scale: Float{2.0}

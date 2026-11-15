@@ -3,9 +3,7 @@
 // at its row.
 use db: core.db
 
-mark_seen: fn(tasks: DBScope) {
-    _rows: tasks.execute(SQL{"UPDATE task SET seen = 1"}) ?? 0
-}
+mark_seen: fn(tasks: DBScope) { _rows: tasks.execute(SQL{"UPDATE task SET seen = 1"}) ?? 0 }
 
 open_count: fn(tasks: DBScope) -[DB.Read]> Int {
     mark_seen(tasks)

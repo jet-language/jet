@@ -8,8 +8,11 @@ use {
 }
 
 NIX_DEFAULT_STORE_DIR: "/nix/store"
+
 NIX_NIX32_ALPHABET: "0123456789abcdfghijklmnpqrsvwxyz"
+
 NIX_STORE_PATH_DIGEST_CHARS: 32
+
 NIX_COMPRESSED_HASH_BYTES: 20
 
 nix_sha256_digest: fn(bytes: [U8]) -> [U8] Never! {
@@ -50,7 +53,9 @@ nix_nix32_decode: fn(text: String) -> [U8] NixError! {
     loop group in 0..<count {
         scalar: scalars[count - 1 - group]
         digit: nix_nix32_digit(scalar)
-        if digit < 0 -> return Err(NixError.DrvParse("invalid Nix32 character: {nix_debug_scalar(scalar)}"))
+        if digit < 0 {
+            return Err(NixError.DrvParse("invalid Nix32 character: {nix_debug_scalar(scalar)}"))
+        }
         bit: group * 5
         index: bit /% 8
         shift: bit % 8
@@ -119,7 +124,9 @@ nix_make_output_path: fn(store_dir: String, output_id: String, modulo_hash: [U8]
 // Fixed-output path (`makeFixedOutputPath`); `method_algo` is the ATerm form
 // (`sha256`, `r:sha256`, `sha512`, `r:sha512`, ...).
 nix_make_fixed_output_path: fn(store_dir: String, name: String, method_algo: String, hash_hex: String) -> String Never! {
-    if method_algo == "r:sha256" -> return nix_make_store_path(store_dir, "source", "sha256:{hash_hex}", name)
+    if method_algo == "r:sha256" {
+        return nix_make_store_path(store_dir, "source", "sha256:{hash_hex}", name)
+    }
     // flat, non-SHA-256 NAR and git: sha256("fixed:out:" + methodAlgo + ":" + hex + ":")
     digest: nix_sha256_digest("fixed:out:{method_algo}:{hash_hex}:".bytes())
     nix_make_store_path(store_dir, "output:out", "sha256:{nix_hex(digest)}", name)

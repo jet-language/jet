@@ -39,12 +39,16 @@ impl NixEvaluator {
             }
             .Head -> {
                 values: nixeval_list(argument, "list")
-                if values.len() == 0 -> return Err(NixEvalError.Invalid("head called on an empty list"))
+                if values.len() == 0 {
+                    return Err(NixEvalError.Invalid("head called on an empty list"))
+                }
                 self.force(values[0])
             }
             .Tail -> {
                 values: nixeval_list(argument, "list")
-                if values.len() == 0 -> return Err(NixEvalError.Invalid("tail called on an empty list"))
+                if values.len() == 0 {
+                    return Err(NixEvalError.Invalid("tail called on an empty list"))
+                }
                 NixEvalValue.List(values[1..<values.len()])
             }
             .ConcatLists -> {
@@ -86,7 +90,9 @@ impl NixEvaluator {
             }
             .StorePath -> {
                 path: argument.plain_string()
-                if !nixeval_is_store_path(path) -> return Err(NixEvalError.Unsupported("builtins.storePath requires a canonical /nix/store path"))
+                if !nixeval_is_store_path(path) {
+                    return Err(NixEvalError.Unsupported("builtins.storePath requires a canonical /nix/store path"))
+                }
                 NixEvalValue.Contextual{value: path.copy(), contexts: [String]{"path:{path}"}}
             }
             .Throw -> nixeval_throw(argument)
@@ -94,9 +100,11 @@ impl NixEvaluator {
     }
 
     // `builtins.attrNames`: the attribute names in key order, as strings.
-    attribute_names: fn(&self, fields: [String: Int]) -> NixEvalValue Never! {
+    attribute_names: fn(&self, fields: [String:Int]) -> NixEvalValue Never! {
         names := [Int]{}
-        loop name in nixeval_sorted(fields.keys().to_list()) -> names.push(self.value_thunk(NixEvalValue.Str(name)))
+        loop name in nixeval_sorted(fields.keys().to_list()) {
+            names.push(self.value_thunk(NixEvalValue.Str(name)))
+        }
         NixEvalValue.List(names)
     }
 
@@ -107,19 +115,25 @@ impl NixEvaluator {
             .Ok(document) -> return self.json_to_value(document, document.root, 0)
             .Err(error) -> {
                 reason: error.message()
-                if reason == "JSON value is too deeply nested" -> return Err(NixEvalError.ResourceLimit(reason))
+                if reason == "JSON value is too deeply nested" {
+                    return Err(NixEvalError.ResourceLimit(reason))
+                }
                 return Err(NixEvalError.Invalid(reason))
             }
         }
     }
 
     partial: fn(&self, operation: NixEvalOperation, argument: NixEvalValue) -> NixEvalValue Never! {
-        NixEvalValue.Native(NixEvalNative.Partial{operation, arguments: [Int]{self.value_thunk(argument)}})
+        NixEvalValue.Native(NixEvalNative.Partial{operation: operation, arguments: [Int]{self.value_thunk(argument)}})
     }
 
     apply_partial: fn(&self, operation: NixEvalOperation, arguments: [Int]) -> NixEvalValue NixEvalError! {
-        if arguments.len() < operation.arity() -> return Ok(NixEvalValue.Native(NixEvalNative.Partial{operation, arguments}))
-        if arguments.len() > operation.arity() -> return Err(NixEvalError.Invalid("builtin received too many arguments"))
+        if arguments.len() < operation.arity() {
+            return Ok(NixEvalValue.Native(NixEvalNative.Partial{operation: operation, arguments: arguments}))
+        }
+        if arguments.len() > operation.arity() {
+            return Err(NixEvalError.Invalid("builtin received too many arguments"))
+        }
         first: self.force(arguments[0])
         second: self.force(arguments[1])
         if operation == {
@@ -164,12 +178,14 @@ impl NixEvaluator {
                         if !nixeval_contains_text(contexts, context) -> contexts.push(context)
                     }
                 }
-                NixEvalText{value: String.from_bytes(output) ?? "", contexts}.into_value()
+                NixEvalText{value: String.from_bytes(output) ?? "", contexts: contexts}.into_value()
             }
             .ReplaceStrings -> {
                 from: self.string_list(first)
                 to: self.string_list(second)
-                if from.len() != to.len() -> return Err(NixEvalError.Invalid("replaceStrings requires equal search and replacement lists"))
+                if from.len() != to.len() {
+                    return Err(NixEvalError.Invalid("replaceStrings requires equal search and replacement lists"))
+                }
                 subject_value: self.force(arguments[2])
                 subject: subject_value.stringify()
                 bytes: subject.value.bytes()
@@ -193,7 +209,9 @@ impl NixEvaluator {
                 length: nixeval_integer(second, "integer substring length")
                 subject_value: self.force(arguments[2])
                 subject: subject_value.stringify()
-                if start < 0 -> return Err(NixEvalError.Invalid("negative start position in substring"))
+                if start < 0 {
+                    return Err(NixEvalError.Invalid("negative start position in substring"))
+                }
                 bytes: subject.value.bytes()
                 output := [U8]{}
                 position := 0
@@ -223,7 +241,9 @@ impl NixEvaluator {
 
     apply_fetch: fn(&self, fetcher: NixEvalFetcher, argument: NixEvalValue) -> NixEvalValue NixEvalError! {
         fields: nixeval_attribute_set(argument, "fixed-output fetcher attribute set")
-        if self.authority == None -> return Err(NixEvalError.Unsupported("fixed-output fetchers require explicit fetch authority and verified bytes"))
+        if self.authority == None {
+            return Err(NixEvalError.Unsupported("fixed-output fetchers require explicit fetch authority and verified bytes"))
+        }
         url_field: self.first_string_field(fields, [String]{"url", "uri"})
         url: url_field ?? return Err(NixEvalError.Missing("url"))
         hash_field: self.first_string_field(fields, [String]{"hash", "sha256", "narHash"})
@@ -235,13 +255,15 @@ impl NixEvaluator {
         if !nixeval_is_request_text(url) || !nixeval_is_request_text(hash) || !nixeval_is_request_text(name) || !nixeval_is_request_text(revision) {
             return Err(NixEvalError.ResourceLimit("fixed-output fetcher authority request is too large"))
         }
-        path: self.ask(NixEvalRequest.Fetch{kind: fetcher.name(), url, hash, name, revision})
-        if !nixeval_is_store_path(path) -> return Err(NixEvalError.Invalid("fixed-output fetch authority returned a non-store path"))
+        path: self.ask(NixEvalRequest.Fetch{kind: fetcher.name(), url: url, hash: hash, name: name, revision: revision})
+        if !nixeval_is_store_path(path) {
+            return Err(NixEvalError.Invalid("fixed-output fetch authority returned a non-store path"))
+        }
         Ok(NixEvalValue.Contextual{value: path.copy(), contexts: [String]{"path:{path}"}})
     }
 
     // The plain string of the first present field among `names`.
-    first_string_field: fn(&self, fields: [String: Int], names: [String]) -> String? NixEvalError! {
+    first_string_field: fn(&self, fields: [String:Int], names: [String]) -> String? NixEvalError! {
         loop name in names {
             found: self.field_value(fields, name)
             value: found ?? next
@@ -304,7 +326,7 @@ nixeval_builtin_native: fn(field: String) -> NixEvalNative? Never! {
 nixeval_integer: fn(value: NixEvalValue, expected: String) -> Int NixEvalError! {
     if value == {
         .Integer(number) -> Ok(number)
-        .Null | .Bool(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> Err(NixEvalError.TypeMismatch{expected, actual: value.type_name()})
+        .Null | .Bool(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> Err(NixEvalError.TypeMismatch{expected: expected, actual: value.type_name()})
     }
 }
 
@@ -337,42 +359,30 @@ impl NixEvalBuiltin {
     // The type predicate of an `is*` builtin; other builtins admit nothing.
     admits: fn(self, value: NixEvalValue) -> Bool Never! {
         if self == {
-            .IsAttrs -> {
-                if value == {
-                    .AttrSet(_) | .Packages(_) | .CrossPackages(_) -> true
-                    .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> false
-                }
+            .IsAttrs -> if value == {
+                .AttrSet(_) | .Packages(_) | .CrossPackages(_) -> true
+                .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> false
             }
-            .IsBool -> {
-                if value == {
-                    .Bool(_) -> true
-                    .Null | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> false
-                }
+            .IsBool -> if value == {
+                .Bool(_) -> true
+                .Null | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> false
             }
-            .IsFunction -> {
-                if value == {
-                    .Function(_, _) | .Native(_) -> true
-                    .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) -> false
-                }
+            .IsFunction -> if value == {
+                .Function(_, _) | .Native(_) -> true
+                .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) -> false
             }
-            .IsInt -> {
-                if value == {
-                    .Integer(_) -> true
-                    .Null | .Bool(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> false
-                }
+            .IsInt -> if value == {
+                .Integer(_) -> true
+                .Null | .Bool(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> false
             }
-            .IsList -> {
-                if value == {
-                    .List(_) -> true
-                    .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> false
-                }
+            .IsList -> if value == {
+                .List(_) -> true
+                .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> false
             }
             .IsNull -> value == NixEvalValue.Null
-            .IsPath -> {
-                if value == {
-                    .Path(_) -> true
-                    .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> false
-                }
+            .IsPath -> if value == {
+                .Path(_) -> true
+                .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> false
             }
             .IsString -> value.text() != None
             .AttrNames | .AttrValues | .GetAttr | .HasAttr | .Length | .Head | .Tail | .ConcatLists | .ConcatStringsSep | .Map | .Filter | .ReplaceStrings | .Substring | .BaseNameOf | .DirOf | .StringLength | .ToJSON | .FromJSON | .StorePath | .Throw -> false
@@ -381,10 +391,10 @@ impl NixEvalBuiltin {
 }
 
 // The fields of an attribute set argument, or a type mismatch naming `expected`.
-nixeval_attribute_set: fn(value: NixEvalValue, expected: String) -> [String: Int] NixEvalError! {
+nixeval_attribute_set: fn(value: NixEvalValue, expected: String) -> [String:Int] NixEvalError! {
     if value == {
         .AttrSet(fields) -> Ok(fields)
-        .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> Err(NixEvalError.TypeMismatch{expected, actual: value.type_name()})
+        .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> Err(NixEvalError.TypeMismatch{expected: expected, actual: value.type_name()})
     }
 }
 
@@ -392,7 +402,7 @@ nixeval_attribute_set: fn(value: NixEvalValue, expected: String) -> [String: Int
 nixeval_list: fn(value: NixEvalValue, expected: String) -> [Int] NixEvalError! {
     if value == {
         .List(items) -> Ok(items)
-        .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> Err(NixEvalError.TypeMismatch{expected, actual: value.type_name()})
+        .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> Err(NixEvalError.TypeMismatch{expected: expected, actual: value.type_name()})
     }
 }
 

@@ -179,7 +179,9 @@ trust_nix_input_record_assignments: fn(text: String) -> [FlakeAssignment] Never!
             if pkg_bytes_code(raw, open) == TRUST_OPEN_BRACE {
                 close: trust_nix_matching(raw, open, TRUST_OPEN_BRACE, TRUST_CLOSE_BRACE)
                 if close >= 0 {
-                    loop assignment in trust_nix_block_assignments(pkg_bytes_text(raw, open + 1, close), "") -> found.push(assignment)
+                    loop assignment in trust_nix_block_assignments(pkg_bytes_text(raw, open + 1, close), "") {
+                        found.push(assignment)
+                    }
                     cursor = close + 1
                     next
                 }
@@ -216,14 +218,16 @@ trust_nix_block_assignments: fn(text: String, parent: String) -> [FlakeAssignmen
         if pkg_bytes_code(raw, after) == TRUST_OPEN_BRACE {
             close: trust_nix_matching(raw, after, TRUST_OPEN_BRACE, TRUST_CLOSE_BRACE)
             if close >= 0 {
-                loop assignment in trust_nix_block_assignments(pkg_bytes_text(raw, after + 1, close), path) -> found.push(assignment)
+                loop assignment in trust_nix_block_assignments(pkg_bytes_text(raw, after + 1, close), path) {
+                    found.push(assignment)
+                }
                 cursor = close + 1
                 next
             }
         }
         value: trust_nix_quoted_rhs(pkg_bytes_text(raw, after, raw.len())) ?? next
         parts: trust_text_split_last(path, TRUST_DOT) ?? next
-        found.push(FlakeAssignment{path: parts.before, field: parts.after, value})
+        found.push(FlakeAssignment{path: parts.before, field: parts.after, value: value})
     }
     found
 }
@@ -245,7 +249,7 @@ trust_nix_assignments_after: fn(text: String, prefix: String) -> [FlakeAssignmen
         equals: trust_text_find_byte(raw, TRUST_EQUALS, end)
         if equals < 0 -> next
         value: trust_nix_quoted_rhs(pkg_bytes_text(raw, equals + 1, raw.len())) ?? next
-        found.push(FlakeAssignment{path: parts.before, field: parts.after, value})
+        found.push(FlakeAssignment{path: parts.before, field: parts.after, value: value})
     }
     found
 }
@@ -263,7 +267,9 @@ trust_nix_output_assignments: fn(text: String) -> [FlakeOutputAssignment] Never!
                     loop index in 1..<parts.len() -> attribute.push(parts[index])
                     found.push(FlakeOutputAssignment{prefix: kind.copy(), system: parts[0], attribute: attribute.join(".")})
                 }
-                else -> found.push(FlakeOutputAssignment{prefix: kind.copy(), system: "", attribute: parts[0]})
+                else -> {
+                    found.push(FlakeOutputAssignment{prefix: kind.copy(), system: "", attribute: parts[0]})
+                }
             }
         }
     }
@@ -357,7 +363,9 @@ trust_nix_quoted_values: fn(text: String) -> [String] Never! {
         start: trust_text_find_byte(raw, TRUST_QUOTE, cursor)
         if start < 0 -> break
         end: trust_nix_skip_quoted(raw, start)
-        if end <= raw.len() && end > start + 1 -> values.push(pkg_bytes_text(raw, start + 1, end - 1))
+        if end <= raw.len() && end > start + 1 {
+            values.push(pkg_bytes_text(raw, start + 1, end - 1))
+        }
         cursor = if end > start + 1 -> end else -> start + 1
     }
     values
@@ -371,6 +379,6 @@ trust_nix_flake_parts_composition: fn(text: String) -> FlakeComposition? Never! 
         modules: pkg_overlay_sorted_unique(trust_nix_list_assignment_values(text, "imports")),
         module_sources: [String]{},
         systems: pkg_overlay_sorted_unique(trust_nix_list_assignment_values(text, "systems")),
-        per_system: text.contains("perSystem") || text.contains("per_system")
+        per_system: text.contains("perSystem") || text.contains("per_system"),
     })
 }

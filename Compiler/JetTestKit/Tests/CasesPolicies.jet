@@ -16,7 +16,8 @@ use {
     assert_eq(policy.memory_limit, 1048576)
     assert_eq(env.timeout.ns, 5000000000)
     assert_eq(env.memory_limit, 0)
-    loop bound in ["", "time=0", "time=-1", "memory=no", "cpu=2", "time=1 time=2", "memory=1 memory=2"] {
+    loop bound in
+        ["", "time=0", "time=-1", "memory=no", "cpu=2", "time=1 time=2", "memory=1 memory=2"] {
         assert(kit_steps_parse_case("step: printf x\nlimit: {bound}\n").error != "")
     }
 }
@@ -77,7 +78,8 @@ use {
     tight: kit_steps_parse_case("step first: printf x\nstep second: printf x\nelapsed: second <= 1 * first\n").steps[1].assertions[0]
     assert_eq(kit_steps_elapsed(tight, history).status, "FAIL")
     assert_eq(kit_steps_elapsed(assertion, []).status, "ERROR")
-    loop relation in ["second <= 0 * first", "second <= -1 * first", "second <= nope * first", "missing <= 2 * first", "second <= 2 * missing", "second < 2 * first"] {
+    loop relation in
+        ["second <= 0 * first", "second <= -1 * first", "second <= nope * first", "missing <= 2 * first", "second <= 2 * missing", "second < 2 * first"] {
         assert(kit_steps_parse_case("step first: printf x\nstep second: printf x\nelapsed: {relation}\n").error != "")
     }
 }
@@ -109,7 +111,8 @@ use {
     assert_eq(plan.steps[0].assertions[0].value, "{{\"quoted\":\"don't # change\",\"items\":[1,2]}}")
     assert_eq(plan.steps[0].assertions[1].value, "number")
     assert_eq(plan.steps[0].assertions[2].path, "some file.json")
-    loop assertion in ["stdout doc $ = invalid", "stdout doc $ : number", "stdout doc $ : number #", "stdout doc $ : unknown", "stdout doc $ #= -1", "stdout doc $ has {{}}", "stdout doc $ has []", "stdout doc $[01] = null", "stdout wrong $ = null", "file ../outside doc $ = null"] {
+    loop assertion in
+        ["stdout doc $ = invalid", "stdout doc $ : number", "stdout doc $ : number #", "stdout doc $ : unknown", "stdout doc $ #= -1", "stdout doc $ has {{}}", "stdout doc $ has []", "stdout doc $[01] = null", "stdout wrong $ = null", "file ../outside doc $ = null"] {
         assert(kit_steps_parse_case("step: printf x\njson: {assertion}\n").error != "")
     }
 }
@@ -176,7 +179,7 @@ use {
     child.stdin.close()
     failure := ""
     if child.wait() == {
-        .Err(error) -> failure = "{error}"
+        .Err(error) -> { failure = "{error}" }
         .Ok(_) -> panic("output limit did not stop the process")
     }
     elapsed: started.elapsed().ns

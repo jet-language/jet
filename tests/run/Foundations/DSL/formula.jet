@@ -90,10 +90,10 @@ valid_book: fn(book: Book) -> Bool {
 }
 
 depends_on_operand: fn(
-operand: String,
-target: String,
-book: Book,
-seen: &[String],
+    operand: String,
+    target: String,
+    book: Book,
+    seen: &[String],
 ) -> Bool {
     if Int.parse(operand) == .Ok(_) -> return false
     if operand == target -> return true
@@ -101,10 +101,10 @@ seen: &[String],
 }
 
 depends_on_formula: fn(
-formula: Formula,
-target: String,
-book: Book,
-seen: &[String],
+    formula: Formula,
+    target: String,
+    book: Book,
+    seen: &[String],
 ) -> Bool {
     if formula.kind == 0 -> return false
     if formula.kind == 3 -> return depends_on_operand(formula.left, target, book.copy(), seen)
@@ -112,10 +112,10 @@ seen: &[String],
 }
 
 depends_on_cell: fn(
-name: String,
-target: String,
-book: Book,
-seen: &[String],
+    name: String,
+    target: String,
+    book: Book,
+    seen: &[String],
 ) -> Bool {
     if seen.contains(name.copy()) -> return false
     formula: book.cells.get(name.copy()) ?? return false
@@ -126,20 +126,20 @@ seen: &[String],
 }
 
 resolve_operand: fn(
-operand: String,
-book: Book,
-values: &[String:Int],
-visiting: &[String],
+    operand: String,
+    book: Book,
+    values: &[String:Int],
+    visiting: &[String],
 ) -> Int? {
     if Int.parse(operand) == .Ok(value) -> return Val(value)
     return eval_cell(operand, book.copy(), values, visiting)
 }
 
 eval_cell: fn(
-name: String,
-book: Book,
-values: &[String:Int],
-visiting: &[String],
+    name: String,
+    book: Book,
+    values: &[String:Int],
+    visiting: &[String],
 ) -> Int? {
     if values.get(name.copy()) == .Val(cached) -> return Val(cached)
     if visiting.contains(name.copy()) -> return None
@@ -170,10 +170,10 @@ visiting: &[String],
 }
 
 recalculate: fn(
-book: Book,
-previous: [String:Int],
-changed: String,
-new_value: Int,
+    book: Book,
+    previous: [String:Int],
+    changed: String,
+    new_value: Int,
 ) -> Recalc? {
     if book.cells.get(changed.copy()) == .None -> return None
     if !valid_book(book.copy()) -> return None

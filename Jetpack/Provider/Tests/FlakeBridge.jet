@@ -18,9 +18,7 @@ provider_bridge_test_facts: fn(text: String) -> DevShellFacts {
     provider_parse_facts_json(text) ?? panic("facts parse")
 }
 
-provider_bridge_test_theme: fn() -> Theme {
-    Theme.resolve(true)
-}
+provider_bridge_test_theme: fn() -> Theme { Theme.resolve(true) }
 
 provider_bridge_test_lock_text: fn(dir: String) -[FS]> String {
     files.read(trust_semantic_lock_live_path(dir)) ?? panic("semantic lock")
@@ -67,11 +65,13 @@ provider_bridge_test_read_error: fn(dir: String, fixtures: String?) -[FS, Env]> 
     }
     loop input in inputs {
         if provider_parse_facts_json(input) == {
-            .Ok(_) -> panic("schema-wrong provider output passed: {input}")
+            .Ok(_) -> { panic("schema-wrong provider output passed: {input}") }
             .Err(error) -> {
                 if error == {
                     .BadOutput(_) -> {}
-                    .BuildFailed(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> panic("schema-wrong provider output must be BadOutput: {input}")
+                    .BuildFailed(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> {
+                        panic("schema-wrong provider output must be BadOutput: {input}")
+                    }
                 }
             }
         }
@@ -81,14 +81,16 @@ provider_bridge_test_read_error: fn(dir: String, fixtures: String?) -[FS, Env]> 
 #Test("bridge fact schema error retains filtered provider noise") {
     noise: "warning: ignoring untrusted substituter"
     if provider_parse_facts_json("{noise}\n{{\"shellHook\":\"\"}}\n") == {
-        .Ok(_) -> panic("facts without a package field must fail")
+        .Ok(_) -> { panic("facts without a package field must fail") }
         .Err(error) -> {
             if error == {
                 .BadOutput(reason) -> {
                     assert(reason.contains("missing one of `packages`, `buildInputs`, or `nativeBuildInputs`"))
                     assert(reason.contains(noise))
                 }
-                .BuildFailed(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> panic("expected BadOutput")
+                .BuildFailed(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> {
+                    panic("expected BadOutput")
+                }
             }
         }
     }
@@ -132,13 +134,16 @@ provider_bridge_test_read_error: fn(dir: String, fixtures: String?) -[FS, Env]> 
 
 #Test("bridge flake commits locked transitive nodes and indirect registry") {
     dir: provider_bridge_test_dir("locked_graph")
-    files.write(files.join(dir, "flake.nix"), `{
+    files.write(
+        files.join(dir, "flake.nix"),
+        `{
   inputs = {
     nixpkgs.url = "nixpkgs";
     flake-utils.url = "github:numtide/flake-utils";
   };
   outputs = { ... }: { devShells.x86_64-linux.default = {}; };
-}`) ?? panic("flake")
+}`,
+    ) ?? panic("flake")
     files.write(files.join(dir, "flake.lock"), PROVIDER_BRIDGE_TEST_STAGE_A_LOCK) ?? panic("flake lock")
     fixtures: provider_bridge_test_fixture("locked_graph_fx", `{"buildInputs": [], "shellHook": ""}`)
     assert_eq(provider_cmd_flake(provider_bridge_test_theme(), dir, Val(fixtures)), 0)
@@ -180,7 +185,9 @@ provider_bridge_test_read_error: fn(dir: String, fixtures: String?) -[FS, Env]> 
     assert(graph.unsupported.contains("packages:{other}:default"))
     facts := DevShellFacts{packages: [String]{}, unmapped: [String]{}}
     loop output in graph.outputs {
-        if output.kind == FlakeOutputKind.Package -> provider_record_package_output_fact(facts, output, host)
+        if output.kind == FlakeOutputKind.Package {
+            provider_record_package_output_fact(facts, output, host)
+        }
     }
     shim: provider_render_shim(facts)
     assert(shim.contains("packages: []"))
@@ -234,7 +241,7 @@ provider_bridge_test_read_error: fn(dir: String, fixtures: String?) -[FS, Env]> 
     files.write(files.join(dir, "flake.nix"), "let overlay = final: prev: {{}}; in {{ devShells.{system}.default = {{ packages = []; }}; devShells.{system}.debug = (import pkgs {{ overlays = [ {overlays.join(" ")} ]; }}).mkShell {{ packages = []; }}; }}") ?? panic("flake")
     fixtures: provider_bridge_test_fixture("named_devshell_budget_fx", `{"buildInputs": [], "shellHook": ""}`)
     if provider_read_devshell_output_facts(dir, None, "debug") == {
-        .Ok(_) -> panic("an over-budget named devShell must fail")
+        .Ok(_) -> { panic("an over-budget named devShell must fail") }
         .Err(error) -> {
             assert_eq(error.code(), Val("E1256"))
             assert(error.message().contains("overlay list exceeds 64"))
@@ -251,7 +258,9 @@ provider_bridge_test_read_error: fn(dir: String, fixtures: String?) -[FS, Env]> 
     fixtures: provider_bridge_test_dir("nofx_fx")
     if provider_bridge_test_read_error(dir, Val(fixtures)) == {
         .FixtureMissing(_) -> {}
-        .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> panic("expected FixtureMissing")
+        .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> {
+            panic("expected FixtureMissing")
+        }
     }
     files.remove_all(dir) ?? panic("cleanup")
     files.remove_all(fixtures) ?? panic("cleanup fixtures")
@@ -269,7 +278,9 @@ provider_bridge_test_read_error: fn(dir: String, fixtures: String?) -[FS, Env]> 
     files.write(files.join(dir, "sub/shell.nix"), `{ pkgs }: { packages = import ../../outside.nix pkgs; }`) ?? panic("escaping shell")
     if provider_bridge_test_read_error(dir, None) == {
         .Unsupported(reason) -> assert(reason.contains("escapes the flake project-root authority"))
-        .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .FixtureMissing(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> panic("a project-root escape must be refused as unsupported")
+        .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .FixtureMissing(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> {
+            panic("a project-root escape must be refused as unsupported")
+        }
     }
     if !sys.is_windows() {
         outside: provider_bridge_test_dir("native_import_outside")
@@ -278,7 +289,9 @@ provider_bridge_test_read_error: fn(dir: String, fixtures: String?) -[FS, Env]> 
         files.symlink(files.join(outside, "escape.nix"), files.join(dir, "sub/escape.nix")) ?? panic("symlink")
         if provider_bridge_test_read_error(dir, None) == {
             .Unsupported(reason) -> assert(reason.contains("symlinks are not allowed"))
-            .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .FixtureMissing(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> panic("a symlinked import must be refused as unsupported")
+            .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .FixtureMissing(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> {
+                panic("a symlinked import must be refused as unsupported")
+            }
         }
         files.remove_all(outside) ?? panic("cleanup outside")
     }
@@ -305,7 +318,9 @@ provider_bridge_test_read_error: fn(dir: String, fixtures: String?) -[FS, Env]> 
     assert_eq(error.code(), Val("E1256"))
     if error == {
         .ForeignProjection(reason) -> assert(reason.contains("evaluator limit"))
-        .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> panic("an oversized input must be a foreign projection error")
+        .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) | .Offline(_) | .NixIndex(_) | .NixCache(_) -> {
+            panic("an oversized input must be a foreign projection error")
+        }
     }
     files.remove_all(dir) ?? panic("cleanup")
 }

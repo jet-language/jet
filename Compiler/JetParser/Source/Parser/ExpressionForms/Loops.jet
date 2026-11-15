@@ -101,7 +101,9 @@ parser_expression_form_loop_header_separator: fn(state: &JetParserState, message
 parser_expression_form_loop_step: fn(state: &JetParserState, depth: Int) -> Stmt? {
     if !parser_expression_form_loop_stride_here(state) -> return None
     parser_bump(state)
-    if parser_expression_form_loop_body_start(state) || parser_expression_form_loop_guard_comma(state) -> return None
+    if parser_expression_form_loop_body_start(state) || parser_expression_form_loop_guard_comma(state) {
+        return None
+    }
     step_expr: parser_parse_expression_no_struct_lit(state, depth + 1)
     if parser_is_assignment_operator(parser_current_kind(state)) {
         operator: parser_bump(state)
@@ -192,32 +194,76 @@ parser_expression_form_loop_rewrite_exits: fn(statements: &[Stmt], target: Strin
         statement := statements[index]
         if statement == {
             .Break(span) -> {
-                if nested_loop_depth == 0 -> statements[index] = Stmt.BreakLabel{name: target, span: span}
+                if nested_loop_depth == 0 {
+                    statements[index] = Stmt.BreakLabel{name: target, span: span}
+                }
             }
             .BreakValue(value, span) -> {
-                if nested_loop_depth == 0 -> statements[index] = Stmt.BreakLabelValue{name: target, name_span: span, value: value, span: span}
+                if nested_loop_depth == 0 {
+                    statements[index] = Stmt.BreakLabelValue{name: target, name_span: span, value: value, span: span}
+                }
             }
-            .Switch(subject, arms, else_body, span) -> statements[index] = Stmt.Switch{subject: subject, arms: parser_expression_form_loop_rewritten_arms(arms, target, nested_loop_depth), else_body: parser_expression_form_loop_rewritten_else(else_body, target, nested_loop_depth), span: span}
-            .ComptimeSwitch(subject, arms, else_body, span) -> statements[index] = Stmt.ComptimeSwitch{subject: subject, arms: parser_expression_form_loop_rewritten_arms(arms, target, nested_loop_depth), else_body: parser_expression_form_loop_rewritten_else(else_body, target, nested_loop_depth), span: span}
+            .Switch(subject, arms, else_body, span) -> {
+                statements[index] = Stmt.Switch{subject: subject, arms: parser_expression_form_loop_rewritten_arms(arms, target, nested_loop_depth), else_body: parser_expression_form_loop_rewritten_else(else_body, target, nested_loop_depth), span: span}
+            }
+            .ComptimeSwitch(subject, arms, else_body, span) -> {
+                statements[index] = Stmt.ComptimeSwitch{subject: subject, arms: parser_expression_form_loop_rewritten_arms(arms, target, nested_loop_depth), else_body: parser_expression_form_loop_rewritten_else(else_body, target, nested_loop_depth), span: span}
+            }
             .Loop(_, _, _, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) -> {}
-            .Unsafe(a, b, body, d) -> statements[index] = Stmt.Unsafe{audit: a, audit_expr: b, body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: d}
-            .Impure(a, b, body, d) -> statements[index] = Stmt.Impure{reason: a, reason_expr: b, body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: d}
-            .Reactive(body, b) -> statements[index] = Stmt.Reactive{body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: b}
-            .Shield(body, b) -> statements[index] = Stmt.Shield{body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: b}
-            .Defer(body, b) -> statements[index] = Stmt.Defer{body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: b}
-            .Switched(a, body, c) -> statements[index] = Stmt.Switched{marker: a, body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: c}
-            .Region(a, b, body, d) -> statements[index] = Stmt.Region{name: a, name_span: b, body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: d}
-            .Policy(a, body, c) -> statements[index] = Stmt.Policy{declarations: a, body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: c}
-            .TaskGroup(a, b, c, body, e) -> statements[index] = Stmt.TaskGroup{name: a, name_span: b, args: c, body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: e}
-            .Layout(a, b, body, d) -> statements[index] = Stmt.Layout{name: a, name_span: b, body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: d}
-            .AuthorityScope(a, b, c, body, e) -> statements[index] = Stmt.AuthorityScope{caps: a, caps_span: b, binding: c, body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: e}
-            .ComptimeBlock(body, b, c) -> statements[index] = Stmt.ComptimeBlock{body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), is_template_loop: b, span: c}
-            .ContextBlock(a, body, c) -> statements[index] = Stmt.ContextBlock{fields: a, body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: c}
-            .Live(body, b) -> statements[index] = Stmt.Live{body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: b}
-            .AssumeDet(a, b, body, d) -> statements[index] = Stmt.AssumeDet{reason: a, reason_expr: b, body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: d}
-            .Transact(a, b, body, d, e) -> statements[index] = Stmt.Transact{name: a, name_span: b, body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), implicit: d, span: e}
-            .ScopeMember(a, b, c, d, body, f, g, h) -> statements[index] = Stmt.ScopeMember{name: a, name_span: b, args: c, args_span: d, body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), dsl: f, dot_span: g, span: h}
-            .ComptimeIf(a, b, then_body, else_body, e, f) -> statements[index] = Stmt.ComptimeIf{cond: a, cond_span: b, then_body: parser_expression_form_loop_rewritten(then_body, target, nested_loop_depth), else_body: parser_expression_form_loop_rewritten_else(else_body, target, nested_loop_depth), span: e, selected_then: f}
+            .Unsafe(a, b, body, d) -> {
+                statements[index] = Stmt.Unsafe{audit: a, audit_expr: b, body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: d}
+            }
+            .Impure(a, b, body, d) -> {
+                statements[index] = Stmt.Impure{reason: a, reason_expr: b, body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: d}
+            }
+            .Reactive(body, b) -> {
+                statements[index] = Stmt.Reactive{body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: b}
+            }
+            .Shield(body, b) -> {
+                statements[index] = Stmt.Shield{body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: b}
+            }
+            .Defer(body, b) -> {
+                statements[index] = Stmt.Defer{body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: b}
+            }
+            .Switched(a, body, c) -> {
+                statements[index] = Stmt.Switched{marker: a, body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: c}
+            }
+            .Region(a, b, body, d) -> {
+                statements[index] = Stmt.Region{name: a, name_span: b, body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: d}
+            }
+            .Policy(a, body, c) -> {
+                statements[index] = Stmt.Policy{declarations: a, body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: c}
+            }
+            .TaskGroup(a, b, c, body, e) -> {
+                statements[index] = Stmt.TaskGroup{name: a, name_span: b, args: c, body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: e}
+            }
+            .Layout(a, b, body, d) -> {
+                statements[index] = Stmt.Layout{name: a, name_span: b, body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: d}
+            }
+            .AuthorityScope(a, b, c, body, e) -> {
+                statements[index] = Stmt.AuthorityScope{caps: a, caps_span: b, binding: c, body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: e}
+            }
+            .ComptimeBlock(body, b, c) -> {
+                statements[index] = Stmt.ComptimeBlock{body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), is_template_loop: b, span: c}
+            }
+            .ContextBlock(a, body, c) -> {
+                statements[index] = Stmt.ContextBlock{fields: a, body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: c}
+            }
+            .Live(body, b) -> {
+                statements[index] = Stmt.Live{body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: b}
+            }
+            .AssumeDet(a, b, body, d) -> {
+                statements[index] = Stmt.AssumeDet{reason: a, reason_expr: b, body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), span: d}
+            }
+            .Transact(a, b, body, d, e) -> {
+                statements[index] = Stmt.Transact{name: a, name_span: b, body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), implicit: d, span: e}
+            }
+            .ScopeMember(a, b, c, d, body, f, g, h) -> {
+                statements[index] = Stmt.ScopeMember{name: a, name_span: b, args: c, args_span: d, body: parser_expression_form_loop_rewritten(body, target, nested_loop_depth), dsl: f, dot_span: g, span: h}
+            }
+            .ComptimeIf(a, b, then_body, else_body, e, f) -> {
+                statements[index] = Stmt.ComptimeIf{cond: a, cond_span: b, then_body: parser_expression_form_loop_rewritten(then_body, target, nested_loop_depth), else_body: parser_expression_form_loop_rewritten_else(else_body, target, nested_loop_depth), span: e, selected_then: f}
+            }
             .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Yield(_, _) | .DeferClose(_, _) -> {}
         }
     }
@@ -290,7 +336,9 @@ parser_expression_form_parse_loop: fn(state: &JetParserState, depth: Int) -> Par
     counted := ParserExpressionFormCountedLoop?{None}
     clauses := [ParserExpressionFormLoopClause]{}
     if {
-        parser_current_kind(state) == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON_EQ -> counted = Val(parser_expression_form_parse_counted_loop(state, start.span, depth + 1))
+        parser_current_kind(state) == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON_EQ -> {
+            counted = Val(parser_expression_form_parse_counted_loop(state, start.span, depth + 1))
+        }
         bindingless -> {
             collection: parser_parse_expression_no_struct_lit(state, depth + 1)
             clauses.push(ParserExpressionFormLoopClause{var: "it", var_span: collection.span, var2: None, kind: ForKind.In{collection: collection.expr, step: None}})

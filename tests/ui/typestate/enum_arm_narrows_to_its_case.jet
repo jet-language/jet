@@ -5,6 +5,7 @@ Door: enum {
     Shut
     Open
     Locked(code: Int)
+
     state {
         Shut -> Open, Locked
         Open -> Shut
@@ -24,8 +25,8 @@ press: fn(door: Door) -> Door {
 
 run: fn() {
     if press(.Shut) == {
-        .Open -> print("open")
-        .Shut -> print("shut")
+        .Open -> { print("open") }
+        .Shut -> { print("shut") }
         .Locked(_) -> print("locked")
     }
 }

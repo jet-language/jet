@@ -2,7 +2,6 @@
 // predicate)` and `condition.notify_one()` / `notify_all()` over the
 // runtime Condition handle; and projecting a guard onto stored fields:
 // `guard.map(...)` / `guard.split(...)`.
-
 use jet_foundation.[Type]
 
 // `guard.wait(condition, value -> ready)`: jet_rt_native_shared_guard_wait
@@ -96,7 +95,9 @@ ir_shared_guard_path_offset: fn(m: &IRModule, p: IRProgram, b: IRBuilder, guard:
 ir_shared_guard_map: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, guard: Int, path: [TFieldRef], span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     offset: ir_shared_guard_path_offset(m, p, b, guard, path)
-    if offset < 0 -> return ir_fail_slot(b, span, "SharedGuard.map onto a field that is not stored inline")
+    if offset < 0 {
+        return ir_fail_slot(b, span, "SharedGuard.map onto a field that is not stored inline")
+    }
     taken: ir_expr(m, p, b, guard)
     if ir_failed(b) || taken < 0 -> return -1
     source: ir_own(m, p, b, taken)
@@ -115,7 +116,9 @@ ir_shared_guard_split: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, g
     second_member: ir_member_of_row(m, p, row, "second") ?? return ir_type_fail(b, span, ty)
     first_offset: ir_shared_guard_path_offset(m, p, b, guard, first)
     second_offset: ir_shared_guard_path_offset(m, p, b, guard, second)
-    if first_offset < 0 || second_offset < 0 -> return ir_fail_slot(b, span, "SharedGuard.split onto a field that is not stored inline")
+    if first_offset < 0 || second_offset < 0 {
+        return ir_fail_slot(b, span, "SharedGuard.split onto a field that is not stored inline")
+    }
     taken: ir_expr(m, p, b, guard)
     if ir_failed(b) || taken < 0 -> return -1
     source: ir_own(m, p, b, taken)

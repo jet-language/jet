@@ -77,12 +77,16 @@ lsp_test_symbol_rows: fn(rows: [Dyn]) -> [String] Never! {
 #Test("a file import links to the imported document") {
     server := lsp_test_server()
     uri: "file:///w/app.jet"
-    lsp_test_open(server, uri, `use helper: "./helper"
+    lsp_test_open(
+        server,
+        uri,
+        `use helper: "./helper"
 
 run: fn() -> Int {
     2
 }
-`)
+`,
+    )
     lsp_test_open(server, "file:///w/helper.jet", "double: fn(x: Int) -> Int {{ x * 2 }}\n")
     rows: lsp_test_rows(lsp_test_result(server, "textDocument/documentLink", "{{{lsp_test_text_document(uri)}}}"))
     assert_eq(rows.len(), 1)
@@ -92,7 +96,9 @@ run: fn() -> Int {
 
 lsp_test_token_data: fn(result: Dyn) -> [Int] Never! {
     data := [Int]{}
-    loop value in lsp_test_rows(lsp_test_field(result, "data")) -> data.push(foundation_json_integer(value) ?? -1)
+    loop value in lsp_test_rows(lsp_test_field(result, "data")) {
+        data.push(foundation_json_integer(value) ?? -1)
+    }
     data
 }
 
@@ -112,7 +118,9 @@ lsp_test_token_data: fn(result: Dyn) -> [Int] Never! {
 
 lsp_test_labels: fn(result: Dyn) -> [String] Never! {
     labels := [String]{}
-    loop item in lsp_test_rows(lsp_test_field(result, "items")) -> labels.push("{lsp_test_text(item, "label")}={lsp_test_int(item, "kind")}")
+    loop item in lsp_test_rows(lsp_test_field(result, "items")) {
+        labels.push("{lsp_test_text(item, "label")}={lsp_test_int(item, "kind")}")
+    }
     labels
 }
 
@@ -134,10 +142,14 @@ lsp_test_labels: fn(result: Dyn) -> [String] Never! {
 #Test("completion after a dot with no receiver is empty") {
     server := lsp_test_server()
     uri: "file:///w/dot.jet"
-    lsp_test_open(server, uri, `f: fn() {
+    lsp_test_open(
+        server,
+        uri,
+        `f: fn() {
     .
 }
-`)
+`,
+    )
     result: lsp_test_result(server, "textDocument/completion", lsp_test_at(uri, 1, 5))
     assert_eq(lsp_test_rows(lsp_test_field(result, "items")).len(), 0)
 }
@@ -172,13 +184,19 @@ lsp_test_action_rows: fn(server: &LSPServer, uri: String, line: Int) -> [Dyn] {
     assert(kinds.contains("quickfix"), "the diagnostic's fix is offered")
     // A declaration whose markers are all above offers to move them inside.
     clean: "file:///w/clean.jet"
-    lsp_test_open(server, clean, `#Codable
+    lsp_test_open(
+        server,
+        clean,
+        `#Codable
 Pixel: struct {
     r: Int
 }
-`)
+`,
+    )
     titles := [String]{}
-    loop action in lsp_test_action_rows(server, clean, 1) -> titles.push(lsp_test_text(action, "title"))
+    loop action in lsp_test_action_rows(server, clean, 1) {
+        titles.push(lsp_test_text(action, "title"))
+    }
     assert_eq(titles, [String]{"Write the markers inside the declaration's body"})
     // A line outside the document is refused.
     outside: "{{{lsp_test_text_document(clean)},\"range\":{{\"start\":{{\"line\":40,\"character\":0}},\"end\":{{\"line\":40,\"character\":0}}}}}}"

@@ -106,9 +106,7 @@ FactKey: struct {
     merge: FactMerge{FactMerge.Override}
     default: FactDefault?{None}
 
-    new: fn(name: String) -> FactKey Never! {
-        FactKey{name: name}
-    }
+    new: fn(name: String) -> FactKey Never! { FactKey{name: name} }
 
     tighten_only: fn(name: String) -> FactKey Never! {
         FactKey{name: name, merge: FactMerge.TightenOnly}
@@ -144,11 +142,9 @@ FactValue: enum {
             .Char(value) -> "'{value}'"
             .Text(value) -> "\"{value}\""
             .Enum(variant) -> ".{variant}"
-            .OptionalText(value) -> {
-                if value == {
-                    .Val(text) -> "Some(\"{text}\")"
-                    .None -> "None"
-                }
+            .OptionalText(value) -> if value == {
+                .Val(text) -> "Some(\"{text}\")"
+                .None -> "None"
             }
             .Policy(value) -> pkg_policy_value_display(value)
         }
@@ -163,17 +159,13 @@ FactValue: enum {
             .Char(value) -> "Char({value:Debug})"
             .Text(value) -> "Text({value:Debug})"
             .Enum(variant) -> "Enum({variant:Debug})"
-            .OptionalText(value) -> {
-                if value == {
-                    .Val(text) -> "OptionalText(Some({text:Debug}))"
-                    .None -> "OptionalText(None)"
-                }
+            .OptionalText(value) -> if value == {
+                .Val(text) -> "OptionalText(Some({text:Debug}))"
+                .None -> "OptionalText(None)"
             }
-            .Policy(value) -> {
-                if value == {
-                    .Limit(limit) -> "Policy(Limit({limit:Debug}))"
-                    .Enabled | .Forbid | .Default | .GateOnly | .Obligations | .Relaxed | .PerSite | .Track | .Skip | .Allow | .On | .Off | .Explicit | .Arithmetic(_) -> "Policy({value:Debug})"
-                }
+            .Policy(value) -> if value == {
+                .Limit(limit) -> "Policy(Limit({limit:Debug}))"
+                .Enabled | .Forbid | .Default | .GateOnly | .Obligations | .Relaxed | .PerSite | .Track | .Skip | .Allow | .On | .Off | .Explicit | .Arithmetic(_) -> "Policy({value:Debug})"
             }
         }
     }
@@ -183,19 +175,25 @@ FactValue: enum {
         if self == {
             .Bool(outer) -> {
                 if next == {
-                    .Bool(inner) -> { return if outer && !inner -> SafetyRelation.Tighten else -> SafetyRelation.Widen }
+                    .Bool(inner) -> {
+                        return if outer && !inner -> SafetyRelation.Tighten else -> SafetyRelation.Widen
+                    }
                     .Int(_) | .Char(_) | .Text(_) | .Enum(_) | .OptionalText(_) | .Policy(_) -> {}
                 }
             }
             .Int(outer) -> {
                 if next == {
-                    .Int(inner) -> { return if inner < outer -> SafetyRelation.Tighten else -> SafetyRelation.Widen }
+                    .Int(inner) -> {
+                        return if inner < outer -> SafetyRelation.Tighten else -> SafetyRelation.Widen
+                    }
                     .Bool(_) | .Char(_) | .Text(_) | .Enum(_) | .OptionalText(_) | .Policy(_) -> {}
                 }
             }
             .Policy(outer) -> {
                 if next == {
-                    .Policy(inner) -> { return if pkg_policy_gate_widens(outer, inner) -> SafetyRelation.Widen else -> SafetyRelation.Tighten }
+                    .Policy(inner) -> {
+                        return if pkg_policy_gate_widens(outer, inner) -> SafetyRelation.Widen else -> SafetyRelation.Tighten
+                    }
                     .Bool(_) | .Int(_) | .Char(_) | .Text(_) | .Enum(_) | .OptionalText(_) -> {}
                 }
             }
@@ -240,11 +238,9 @@ pkg_policy_gate_widens: fn(outer: PolicyValue, inner: PolicyValue) -> Bool Never
         .Forbid -> inner != PolicyValue.Forbid
         .Obligations -> inner != PolicyValue.Obligations && inner != PolicyValue.Track
         .PerSite -> inner != PolicyValue.Track && inner != PolicyValue.Skip && inner != PolicyValue.PerSite
-        .Default | .GateOnly | .Relaxed -> {
-            if inner == {
-                .Track | .Obligations | .Default | .GateOnly | .Relaxed | .Skip -> false
-                .Enabled | .Limit(_) | .Forbid | .PerSite | .Allow | .On | .Off | .Explicit | .Arithmetic(_) -> true
-            }
+        .Default | .GateOnly | .Relaxed -> if inner == {
+            .Track | .Obligations | .Default | .GateOnly | .Relaxed | .Skip -> false
+            .Enabled | .Limit(_) | .Forbid | .PerSite | .Allow | .On | .Off | .Explicit | .Arithmetic(_) -> true
         }
         .Track -> inner != PolicyValue.Track
         .Skip -> inner != PolicyValue.Skip
@@ -295,9 +291,7 @@ FactContribution: struct {
         updated
     }
 
-    forced: fn(&&self) -> FactContribution Never! {
-        self.force_with_reason(".Force")
-    }
+    forced: fn(&&self) -> FactContribution Never! { self.force_with_reason(".Force") }
 
     with_reason: fn(&&self, reason: String) -> FactContribution Never! {
         updated := self
@@ -384,7 +378,7 @@ pkg_fact_precedes: fn(left: FactContribution, right: FactContribution) -> Bool N
 pkg_fact_resolve: fn(key: FactKey, declarations: [FactContribution]) -> EffectiveFact? FactError! {
     chain := [FactContribution]{}
     loop declaration in declarations {
-        if declaration.key == key.name { chain.push(declaration.copy()) }
+        if declaration.key == key.name -> chain.push(declaration.copy())
     }
     if key.default == {
         .Val(written) -> {
@@ -424,23 +418,31 @@ pkg_fact_resolve: fn(key: FactKey, declarations: [FactContribution]) -> Effectiv
     }
     force_layer := -1
     loop declaration in chain {
-        if declaration.force && declaration.layer.rank() > force_layer -> force_layer = declaration.layer.rank()
+        if declaration.force && declaration.layer.rank() > force_layer {
+            force_layer = declaration.layer.rank()
+        }
     }
     eligible := [Int]{}
     loop index in 0..<chain.len() {
-        if force_layer < 0 || chain[index].layer.rank() <= force_layer { eligible.push(index) }
+        if force_layer < 0 || chain[index].layer.rank() <= force_layer -> eligible.push(index)
     }
     effective_layer := -1
     loop index in eligible {
-        if chain[index].layer.rank() > effective_layer -> effective_layer = chain[index].layer.rank()
+        if chain[index].layer.rank() > effective_layer {
+            effective_layer = chain[index].layer.rank()
+        }
     }
     effective_scope := -1
     loop index in eligible {
-        if chain[index].layer.rank() == effective_layer && chain[index].scope.rank() > effective_scope -> effective_scope = chain[index].scope.rank()
+        if chain[index].layer.rank() == effective_layer && chain[index].scope.rank() > effective_scope {
+            effective_scope = chain[index].scope.rank()
+        }
     }
     candidates := [Int]{}
     loop index in eligible {
-        if chain[index].layer.rank() == effective_layer && chain[index].scope.rank() == effective_scope { candidates.push(index) }
+        if chain[index].layer.rank() == effective_layer && chain[index].scope.rank() == effective_scope {
+            candidates.push(index)
+        }
     }
     first: chain[candidates[0]]
     loop position in 1..<candidates.len() {
@@ -455,8 +457,12 @@ pkg_fact_resolve: fn(key: FactKey, declarations: [FactContribution]) -> Effectiv
             next_writer: chain[eligible[position]]
             if previous.value.safety_relation(next_writer.value) == {
                 .Same | .Tighten -> {}
-                .Widen -> { return Err(FactError.SafetyWidening{key: key.name, previous: previous, next: next_writer}) }
-                .Incomparable -> { return Err(FactError.SafetyIncomparable{key: key.name, previous: previous, next: next_writer}) }
+                .Widen -> {
+                    return Err(FactError.SafetyWidening{key: key.name, previous: previous, next: next_writer})
+                }
+                .Incomparable -> {
+                    return Err(FactError.SafetyIncomparable{key: key.name, previous: previous, next: next_writer})
+                }
             }
         }
     }

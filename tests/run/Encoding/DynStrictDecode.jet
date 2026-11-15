@@ -6,42 +6,46 @@ use {
     csv: core.encoding.csv
 }
 
-Scalars: struct { count: Int, ratio: Float, active: Bool }
+Scalars: struct {
+    count: Int
+    ratio: Float
+    active: Bool
+}
 
 run: fn() {
     if json.decode<Int>("\"42\"") == {
-        .Ok(_value) -> print("bad")
+        .Ok(_value) -> { print("bad") }
         .Err(_error) -> print("json Int rejected")
     }
     if json.decode<Float>("\"1.5\"") == {
-        .Ok(_value) -> print("bad")
+        .Ok(_value) -> { print("bad") }
         .Err(_error) -> print("json Float rejected")
     }
     if json.decode<Bool>("\"true\"") == {
-        .Ok(_value) -> print("bad")
+        .Ok(_value) -> { print("bad") }
         .Err(_error) -> print("json Bool rejected")
     }
     if toml.decode<Scalars>("count = \"42\"\nratio = 1.5\nactive = true") == {
-        .Ok(_value) -> print("bad")
+        .Ok(_value) -> { print("bad") }
         .Err(_error) -> print("toml rejected")
     }
     if yaml.decode<Scalars>("count: 42\nratio: \"1.5\"\nactive: true") == {
-        .Ok(_value) -> print("bad")
+        .Ok(_value) -> { print("bad") }
         .Err(_error) -> print("yaml rejected")
     }
     rows: csv.decode<Scalars>("count,ratio,active\n42,1.5,true") ?? panic("CSV cells")
     print("{rows[0].count}|{rows[0].ratio}|{rows[0].active}")
     // A CSV decode must not leak its cell mode into the next JSON decode.
     if json.decode<Int>("\"42\"") == {
-        .Ok(_value) -> print("bad")
+        .Ok(_value) -> { print("bad") }
         .Err(_error) -> print("scope restored")
     }
     if json.decode<I64>("9223372036854775808") == {
-        .Ok(_value) -> print("bad")
+        .Ok(_value) -> { print("bad") }
         .Err(_error) -> print("I64 range rejected")
     }
     if json.decode<Float>("1e400") == {
-        .Ok(_value) -> print("bad")
+        .Ok(_value) -> { print("bad") }
         .Err(_error) -> print("Float range rejected")
     }
     tree: json.parse("1e400") ?? panic("unread number")

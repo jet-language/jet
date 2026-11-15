@@ -16,10 +16,25 @@ Secret: struct {
     }
 }
 
-Wrapper: struct<T> { value: T }
-Pair: struct<T> { first: T, second: T }
-ConcretePair: struct { first: Secret, second: Secret }
-PlainPair: struct { first: String, second: String }
+Wrapper: struct<T> {
+    value: T
+}
+
+Pair: struct<T> {
+    first: T
+    second: T
+}
+
+ConcretePair: struct {
+    first: Secret
+    second: Secret
+}
+
+PlainPair: struct {
+    first: String
+    second: String
+}
+
 DrainPair: struct {
     first: Secret
     second: Secret
@@ -88,7 +103,9 @@ early_remainder: fn(leave: Bool, first_id: Int) {
     held: Pair<Secret>{first: Secret{id: first_id, token: "owned"}, second: Secret{id: first_id + 1, token: "owned"}}
     taken: held.first.move()
     print("early {taken.id} {held.second.id}")
-    if leave -> return
+    if leave {
+        return
+    }
     print("fallthrough")
 }
 

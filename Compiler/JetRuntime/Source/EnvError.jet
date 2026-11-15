@@ -1,6 +1,11 @@
 #Export(c) jet_rt_handle_clone_env_error: fn(value: I64) -> I64 { encoding_enum_clone(value) }
+
 #Export(c) jet_rt_handle_drop_env_error: fn(value: I64) { encoding_enum_drop(value) }
-#Export(c) jet_rt_handle_eq_env_error: fn(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
+
+#Export(c) jet_rt_handle_eq_env_error: fn(left: I64, right: I64) -> Bool {
+    encoding_enum_eq(left, right)
+}
+
 #Export(c) jet_rt_handle_show_env_error: fn(value: I64) -> I64 {
     kind: encoding_word(wrapping(value + ENCODING_ENUM_TAG))
     result: jet_rt_string_builder_new()
@@ -18,5 +23,11 @@
     }
     result
 }
-#Export(c) jet_rt_handle_debug_env_error: fn(value: I64) -> I64 { jet_rt_handle_show_env_error(value) }
-#Export(c) jet_rt_handle_display_env_error: fn(value: I64) -> I64 { jet_rt_handle_show_env_error(value) }
+
+#Export(c) jet_rt_handle_debug_env_error: fn(value: I64) -> I64 {
+    jet_rt_handle_show_env_error(value)
+}
+
+#Export(c) jet_rt_handle_display_env_error: fn(value: I64) -> I64 {
+    jet_rt_handle_show_env_error(value)
+}

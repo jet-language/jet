@@ -87,7 +87,9 @@ jet_cli_sem_ops_for_file: fn(raw: String, source_hash: String) -> [JetCLISemOp] 
         root: directory ?? break
         receipts: "{root}/.jet/codemods"
         names := [String]{}
-        loop entry in (cli_files.list_dir(receipts) ?? [cli_files.DirEntry]{}) -> names.push(entry.name)
+        loop entry in (cli_files.list_dir(receipts) ?? [cli_files.DirEntry]{}) {
+            names.push(entry.name)
+        }
         names.sort()
         loop name in names {
             receipt: "{receipts}/{name}"
@@ -131,15 +133,15 @@ jet_cli_sem_op_transition: fn(operation: JetCLISemOp, paths: [String], before: S
 
 jet_cli_sem_op_value: fn(operation: JetCLISemOp) -> JetCLIStatusValue Never! {
     jet_cli_status_object(
-    [JetCLIStatusField]{
-        jet_cli_status_field("kind", jet_cli_status_text(operation.kind)),
-        jet_cli_status_field("rule_id", jet_cli_status_optional_text(operation.rule_id)),
-        jet_cli_status_field("from", jet_cli_status_optional_text(operation.from)),
-        jet_cli_status_field("to", jet_cli_status_optional_text(operation.to)),
-        jet_cli_status_field("node", jet_cli_status_optional_text(operation.node)),
-        jet_cli_status_field("match", jet_cli_status_optional_text(operation.match_template)),
-        jet_cli_status_field("replace", jet_cli_status_optional_text(operation.replace_template)),
-    },
+        [JetCLIStatusField]{
+            jet_cli_status_field("kind", jet_cli_status_text(operation.kind)),
+            jet_cli_status_field("rule_id", jet_cli_status_optional_text(operation.rule_id)),
+            jet_cli_status_field("from", jet_cli_status_optional_text(operation.from)),
+            jet_cli_status_field("to", jet_cli_status_optional_text(operation.to)),
+            jet_cli_status_field("node", jet_cli_status_optional_text(operation.node)),
+            jet_cli_status_field("match", jet_cli_status_optional_text(operation.match_template)),
+            jet_cli_status_field("replace", jet_cli_status_optional_text(operation.replace_template)),
+        },
     )
 }
 
@@ -160,7 +162,9 @@ jet_cli_semantic_rename_ops: fn(before: [SemDefinitionFact], after: [SemDefiniti
         candidate: after[index]
         reverse := 0
         loop (other_index, other) in before {
-            if other_index == old_index || (other.kind == candidate.kind && other.module_path == candidate.module_path && other.signature_id == candidate.signature_id && other.name != candidate.name) -> reverse += 1
+            if other_index == old_index || (other.kind == candidate.kind && other.module_path == candidate.module_path && other.signature_id == candidate.signature_id && other.name != candidate.name) {
+                reverse += 1
+            }
         }
         if reverse != 1 -> next
         used.push(index)
@@ -177,7 +181,9 @@ jet_cli_fix_definition_facts: fn(file: String, source: String) -> [SemDefinition
     if compiled == {
         .Refused(_) -> return None
         .Compiled(result, _) -> {
-            if !result.complete || result.internal_problem != None || jet_cli_errors(result.diagnostics).len() > 0 -> return None
+            if !result.complete || result.internal_problem != None || jet_cli_errors(result.diagnostics).len() > 0 {
+                return None
+            }
             index: jet_cli_checked_semindex(result) ?? return None
             return Val(index.definition_facts)
         }

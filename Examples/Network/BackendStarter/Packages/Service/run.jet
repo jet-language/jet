@@ -26,6 +26,7 @@ use {
 }
 
 SESSION_TTL_MS: 600000
+
 // The exit status for missing configuration (sysexits EX_CONFIG).
 CONFIG_ERROR: 78
 
@@ -39,7 +40,9 @@ Config: struct {
 config_from_env: fn() -> Config {
     state_dir: process.env_get("BACKEND_STATE_DIR") ?? process.fail(CONFIG_ERROR, "BACKEND_STATE_DIR must name the directory that keeps the service's database")
     password: process.env_get("BACKEND_OPERATOR_PASSWORD") ?? process.fail(CONFIG_ERROR, "BACKEND_OPERATOR_PASSWORD must carry the operator credential from the deployment's secret store; the starter ships none")
-    if password.len() < 16 -> process.fail(CONFIG_ERROR, "BACKEND_OPERATOR_PASSWORD must be at least 16 characters")
+    if password.len() < 16 {
+        process.fail(CONFIG_ERROR, "BACKEND_OPERATOR_PASSWORD must be at least 16 characters")
+    }
     Config{
         address: process.env_get("BACKEND_ADDR") ?? "127.0.0.1:8080",
         state_dir: state_dir,
@@ -58,14 +61,18 @@ migrate: fn(orders: db.DBScope) {
 login: fn(req: HTTPRequest, operator: String, stored: crypto.PasswordHash) -> HTTPResponse HTTPError! {
     body: req.json<contract.LoginRequest>() ?? return backend.error_response(req, 400, "malformed-json", "request body is not LoginRequest")
     session: if body.user == operator -> backend.issue_session(body.user, crypto.Secret.from_text(body.password), stored, time.now().to_unix_ms(), SESSION_TTL_MS) else -> ""
-    if session == "" -> return backend.error_response(req, 401, "unauthorized", "invalid user name or password")
+    if session == "" {
+        return backend.error_response(req, 401, "unauthorized", "invalid user name or password")
+    }
     Ok(http_server.json(200, contract.LoginResponse{session: session}) ?? return Err(err))
 }
 
 create_order: fn(req: HTTPRequest, orders: db.DBScope) -> HTTPResponse HTTPError! {
     session: auth.session_validate(req.header("x-session") ?? "", time.now().to_unix_ms()) ?? return backend.error_response(req, 401, "unauthorized", "a valid session is required")
     body: req.json<contract.OrderRequest>() ?? return backend.error_response(req, 400, "malformed-json", "request body is not OrderRequest")
-    if body.item == "" || body.quantity <= 0 -> return backend.error_response(req, 422, "invalid-order", "item and positive quantity are required")
+    if body.item == "" || body.quantity <= 0 {
+        return backend.error_response(req, 422, "invalid-order", "item and positive quantity are required")
+    }
     owner: auth.session_user(session)
     _inserted: orders.execute(SQL{"INSERT INTO orders (item, quantity, owner) VALUES ({body.item}, {body.quantity}, {owner})"}) ?? return backend.error_response(req, 503, "store-unavailable", "the order was not stored")
     row: orders.query_one(SQL{"SELECT max(id) AS id FROM orders"}) ?? return backend.error_response(req, 503, "store-unavailable", "the order was not stored")

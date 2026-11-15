@@ -8,6 +8,7 @@ package: {
         data: .Library{ entry: data }
     }
 }
+
 use {
     core: core
     files: core.files
@@ -23,7 +24,7 @@ use {
 
 /// Read a local file loader's file as its payload; `core.data.snapshot` then
 /// parses and commits it. A failed read is recorded in the loader status.
-read: fn<T>(loader: &DataLoader<T>) -[FS]> DataError! {
+read: fn<T>(loader: &DataLoader<T>) DataError! -[FS]> {
     core.data.__read_file<T>(loader, fn(path) { Ok(files.read_bytes(path) ?? return Err("{err}")) })
 }
 
@@ -73,7 +74,7 @@ csv_reader_next: fn<T: Decode>(state: Shared<__CSVRowSource>) -> T? DataError! {
     if cell.value.records.next() == {
         .Ok(next) -> {
             record: next ?? return Ok(None)
-            cell.value.row = cell.value.row + 1
+            cell.value.row += 1
             if csv_reader_row<T>(cell.value.header, record.fields, cell.value.row) == {
                 .Ok(row) -> return Ok(Val(row))
                 .Err(failure) -> return Err(failure)
@@ -93,7 +94,9 @@ csv_reader_row: fn<T: Decode>(header: [String], fields: [String], row: Int) -> T
         return Err(error)
     }
     entries := [(key: String, value: Dyn)]{}
-    loop column in 0..<header.len() -> entries.push((key: header[column].copy(), value: Dyn.Text(fields[column].copy())))
+    loop column in 0..<header.len() {
+        entries.push((key: header[column].copy(), value: Dyn.Text(fields[column].copy())))
+    }
     tree: encoding_stream.object_from_entries(entries)
     previous: rt.text_cells_enter()
     if tree.decode<T>() == {
@@ -175,7 +178,7 @@ json_reader_next: fn<T: Decode>(state: Shared<__JSONRowSource>) -> T? DataError!
         }
     }
     cell.value.parser.allocation.release(heap.tracked)
-    cell.value.row = cell.value.row + 1
+    cell.value.row += 1
     if tree.decode<T>() == {
         .Ok(value) -> Ok(Val(value))
         .Err(failures) -> {
@@ -207,12 +210,18 @@ require_bridge: fn(provider: String) DataError! -[FS, Env]> {
 
 bridge_provider: fn(provider: String) -> String? Never! {
     name := core.data.trim(provider)
-    loop name.ends_with(".") -> name = String.from_bytes(name.bytes()[0..<name.bytes().len() - 1]) ?? ""
-    if name.ends_with(".*") -> name = String.from_bytes(name.bytes()[0..<name.bytes().len() - 2]) ?? ""
+    loop name.ends_with(".") {
+        name = String.from_bytes(name.bytes()[0..<name.bytes().len() - 1]) ?? ""
+    }
+    if name.ends_with(".*") {
+        name = String.from_bytes(name.bytes()[0..<name.bytes().len() - 2]) ?? ""
+    }
     name = core.data.upper(name)
     if name == "PY" || name == "PYTHON" -> return Val("py.*")
     if name == "R" -> return Val("r.*")
-    if name == "GPU" || name == "CUDA" || name == "METAL" || name == "VULKAN" || name == "WEBGPU" -> return Val("gpu.*")
+    if name == "GPU" || name == "CUDA" || name == "METAL" || name == "VULKAN" || name == "WEBGPU" {
+        return Val("gpu.*")
+    }
     None
 }
 
@@ -223,8 +232,12 @@ bridge_status: fn(step: String) -[FS, Env]> DataStatus Never! {
             if enabled == "1" -> path = "available"
         }
     }
-    if step == "py.*" -> return DataStatus{step: step, path: path, clone_value: "owned-copy", ownership: "python-sidecar", trust: "untrusted-foreign", fallback: "none", replacement: "core.data native lists/query/stats"}
-    if step == "r.*" -> return DataStatus{step: step, path: path, clone_value: "owned-copy", ownership: "r-sidecar", trust: "untrusted-foreign", fallback: "none", replacement: "core.data Query<T> typed round-trip"}
+    if step == "py.*" {
+        return DataStatus{step: step, path: path, clone_value: "owned-copy", ownership: "python-sidecar", trust: "untrusted-foreign", fallback: "none", replacement: "core.data native lists/query/stats"}
+    }
+    if step == "r.*" {
+        return DataStatus{step: step, path: path, clone_value: "owned-copy", ownership: "r-sidecar", trust: "untrusted-foreign", fallback: "none", replacement: "core.data Query<T> typed round-trip"}
+    }
     DataStatus{step: step, path: path, clone_value: "device-transfer", ownership: "device-buffer", trust: "untrusted-accelerator", fallback: "none", replacement: "core.data / Tensor native CPU path"}
 }
 

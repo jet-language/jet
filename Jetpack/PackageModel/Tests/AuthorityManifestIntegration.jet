@@ -3,8 +3,14 @@
 use {
     jet_foundation.[Diagnostic, Span, policy_key_name]
     jet_pkg_model.[
-        ClaimsGrade, EffectBudgetWitness, Manifest, PackageEffects, PackageFacts, PackagePolicy,
-        ProvenanceRequirement, pkg_effect_enforce,
+        ClaimsGrade,
+        EffectBudgetWitness,
+        Manifest,
+        PackageEffects,
+        PackageFacts,
+        PackagePolicy,
+        ProvenanceRequirement,
+        pkg_effect_enforce,
     ]
 }
 
@@ -79,7 +85,7 @@ s1_authority_manifest_error: fn(text: String) -> Diagnostic {
 
 #Test("e1220_keeps_dependency_and_effect_provenance_after_key_move") {
     manifest: PackageFacts.parse("name: \"demo\"\nversion: \"0.1.0\"\nauthority: {{ allow: [FS] }}\n", "package.jet") ?? panic("authority holds")
-    entries: [PackageEffects]{PackageEffects{name: "netdep", effects: [String]{"Net"}, effect_chains: [String: [String]]{}, effect_witnesses: [String: EffectBudgetWitness]{}, panic_sites: [String]{}, boundary_span: Val(Span{start: 4, end: 12})}}
+    entries: [PackageEffects]{PackageEffects{name: "netdep", effects: [String]{"Net"}, effect_chains: [String:[String]]{}, effect_witnesses: [String:EffectBudgetWitness]{}, panic_sites: [String]{}, boundary_span: Val(Span{start: 4, end: 12})}}
     diagnostics: pkg_effect_enforce(entries, manifest)
     assert_eq(diagnostics.len(), 1)
     diagnostic: diagnostics[0]
@@ -98,7 +104,7 @@ s1_authority_manifest_error: fn(text: String) -> Diagnostic {
     assert_eq(facts.authority.grants.len(), 1)
     requirement := ProvenanceRequirement?{None}
     if facts.authority.trust == {
-        .Val(trust) -> requirement = trust.require
+        .Val(trust) -> { requirement = trust.require }
         .None -> {}
     }
     // Actual PackageModel enum migration: Rust None is Jet Unrequired (Authority.jet43).
@@ -141,7 +147,9 @@ s1_authority_manifest_error: fn(text: String) -> Diagnostic {
     }
     assert_eq(tightened, Val(ClaimsGrade.Proved))
     if root.member_claims_floor(lowered) == {
-        .Err(error) -> assert(error.message.contains("cannot weaken from `examples(2)` to `examples(1)`"))
+        .Err(error) -> {
+            assert(error.message.contains("cannot weaken from `examples(2)` to `examples(1)`"))
+        }
         .Ok(_) -> panic("a member must not lower its root's floor")
     }
     // A root with no floor leaves each member its own.

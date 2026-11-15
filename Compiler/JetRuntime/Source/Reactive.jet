@@ -20,17 +20,24 @@
 // Thread48: stack{len0 cap8 data16} roots{len24 cap32 data40}
 
 REACTIVE_CELL_BYTES: I64{64}
+
 REACTIVE_OBSERVER_BYTES: I64{104}
+
 REACTIVE_THREAD_BYTES: I64{48}
+
 reactive_thread_key := I64{0}
+
 reactive_next_observer := I64{1}
 
 reactive_word: fn(address: I64) -> I64 { trap_word(address) }
+
 reactive_store: fn(address: I64, value: I64) { trap_store(address, value) }
 
 // runtime-init: 3 when reactive_thread_key
 #Export(c) jet_rt_reactive_init: fn() {
-    if (reactive_thread_key != I64{0}) -> return
+    if (reactive_thread_key != I64{0}) {
+        return
+    }
     #Unsafe("runtime-init runs before any other thread exists") {
         reactive_thread_key = jet_rt_tls_key_new(I64{0})
     }
@@ -38,7 +45,7 @@ reactive_store: fn(address: I64, value: I64) { trap_store(address, value) }
 
 reactive_thread: fn() -> I64 {
     state: jet_rt_tls_get(reactive_thread_key)
-    if (state != I64{0}) -> return state
+    if (state != I64{0}) { return state }
     fresh: jet_rt_alloc(REACTIVE_THREAD_BYTES, I64{8})
     coll_zero(fresh, REACTIVE_THREAD_BYTES)
     jet_rt_tls_set(reactive_thread_key, fresh)
@@ -48,9 +55,9 @@ reactive_thread: fn() -> I64 {
 // The observer recomputing on this thread, 0 outside every observer.
 reactive_active_observer: fn() -> I64 {
     state: jet_rt_tls_get(reactive_thread_key)
-    if (state == I64{0}) -> return I64{0}
+    if (state == I64{0}) { return I64{0} }
     length: reactive_word(state)
-    if (length == I64{0}) -> return I64{0}
+    if (length == I64{0}) { return I64{0} }
     event_words_get(state, length - I64{1})
 }
 
@@ -72,7 +79,7 @@ reactive_observer_new: fn(env: I64, invoke: I64, release: I64) -> I64 {
     reactive_store(wrapping(observer + I64{8}), I64{1})
     reactive_store(wrapping(observer + I64{16}), reactive_next_observer)
     #Unsafe("the observer id is a label nothing reads back; a racing creator can only repeat a label") {
-        reactive_next_observer = reactive_next_observer + I64{1}
+        reactive_next_observer += I64{1}
     }
     reactive_store(wrapping(observer + I64{24}), I64{1})
     reactive_store(wrapping(observer + I64{40}), env)
@@ -88,7 +95,9 @@ reactive_observer_retain: fn(observer: I64) {
 reactive_observer_release: fn(observer: I64) {
     refs: reactive_word(observer) - I64{1}
     reactive_store(observer, refs)
-    if (refs != I64{0}) -> return
+    if (refs != I64{0}) {
+        return
+    }
     reactive_clear_dependencies(observer)
     reactive_release_closure(observer)
     event_words_free(reactive_word(wrapping(observer + I64{80})), reactive_word(wrapping(observer + I64{72})))
@@ -129,10 +138,14 @@ reactive_cell_unsubscribe: fn(cell: I64, observer: I64) {
 // Rust dispose: the first owner to end the observer detaches it; a running
 // body keeps its closure until the run returns.
 reactive_observer_dispose: fn(observer: I64) {
-    if (reactive_word(wrapping(observer + I64{24})) == I64{0}) -> return
+    if (reactive_word(wrapping(observer + I64{24})) == I64{0}) {
+        return
+    }
     reactive_store(wrapping(observer + I64{24}), I64{0})
     reactive_clear_dependencies(observer)
-    if (reactive_word(wrapping(observer + I64{32})) == I64{0}) -> reactive_release_closure(observer)
+    if (reactive_word(wrapping(observer + I64{32})) == I64{0}) {
+        reactive_release_closure(observer)
+    }
 }
 
 // Rust ReactiveObserver::run: an inactive or already running observer is
@@ -140,9 +153,13 @@ reactive_observer_dispose: fn(observer: I64) {
 // each source it reads subscribes it again. A derived's result replaces its
 // cell's value and notifies the cell's own subscribers.
 reactive_observer_run: fn(observer: I64) {
-    if (reactive_word(wrapping(observer + I64{24})) == I64{0} || reactive_word(wrapping(observer + I64{32})) != I64{0}) -> return
+    if (reactive_word(wrapping(observer + I64{24})) == I64{0} || reactive_word(wrapping(observer + I64{32})) != I64{0}) {
+        return
+    }
     invoke: reactive_word(wrapping(observer + I64{48}))
-    if (invoke == I64{0}) -> return
+    if (invoke == I64{0}) {
+        return
+    }
     reactive_store(wrapping(observer + I64{32}), I64{1})
     reactive_observer_retain(observer)
     reactive_clear_dependencies(observer)
@@ -150,7 +167,7 @@ reactive_observer_run: fn(observer: I64) {
     event_words_push(state, observer)
     target: reactive_word(wrapping(observer + I64{88}))
     out := I64{0}
-    if (target != I64{0}) -> out = coll_slot_new(reactive_word(wrapping(target + I64{8})))
+    if (target != I64{0}) { out = coll_slot_new(reactive_word(wrapping(target + I64{8}))) }
     _ := coll_call2(invoke, reactive_word(wrapping(observer + I64{40})), out)
     event_words_remove(state, reactive_word(state) - I64{1})
     stopped: reactive_stopped()
@@ -158,9 +175,7 @@ reactive_observer_run: fn(observer: I64) {
     if (target != I64{0}) {
         if (stopped || reactive_word(wrapping(observer + I64{24})) == I64{0}) {
             meta: reactive_word(wrapping(target + I64{8}))
-            if stopped {
-                jet_rt_free(out, coll_size(meta), I64{8})
-            } else {
+            if stopped -> jet_rt_free(out, coll_size(meta), I64{8}) else {
                 coll_slot_free(out, meta)
             }
         } else {
@@ -168,7 +183,9 @@ reactive_observer_run: fn(observer: I64) {
             reactive_cell_notify(target)
         }
     }
-    if (reactive_word(wrapping(observer + I64{24})) == I64{0}) -> reactive_release_closure(observer)
+    if (reactive_word(wrapping(observer + I64{24})) == I64{0}) {
+        reactive_release_closure(observer)
+    }
     reactive_observer_release(observer)
 }
 
@@ -181,14 +198,14 @@ reactive_cell_new: fn(meta: I64, version: I64) -> I64 {
     cell
 }
 
-reactive_cell_retain: fn(cell: I64) {
-    reactive_store(cell, reactive_word(cell) + I64{1})
-}
+reactive_cell_retain: fn(cell: I64) { reactive_store(cell, reactive_word(cell) + I64{1}) }
 
 reactive_cell_release: fn(cell: I64) {
     refs: reactive_word(cell) - I64{1}
     reactive_store(cell, refs)
-    if (refs != I64{0}) -> return
+    if (refs != I64{0}) {
+        return
+    }
     observer: reactive_word(wrapping(cell + I64{56}))
     if (observer != I64{0}) {
         reactive_store(wrapping(observer + I64{88}), I64{0})
@@ -225,7 +242,9 @@ reactive_cell_replace: fn(cell: I64, slot: I64) {
 reactive_cell_notify: fn(cell: I64) {
     base: wrapping(cell + I64{32})
     length: reactive_word(base)
-    if (length == I64{0}) -> return
+    if (length == I64{0}) {
+        return
+    }
     snapshot: jet_rt_alloc(length * I64{8}, I64{8})
     at := I64{0}
     loop at < length {
@@ -248,12 +267,16 @@ reactive_cell_notify: fn(cell: I64) {
 // and tracks the source for its next clear.
 reactive_cell_track: fn(cell: I64) {
     observer: reactive_active_observer()
-    if (observer == I64{0}) -> return
+    if (observer == I64{0}) {
+        return
+    }
     base: wrapping(cell + I64{32})
     length: reactive_word(base)
     at := I64{0}
     loop at < length {
-        if (event_words_get(base, at) == observer) -> return
+        if (event_words_get(base, at) == observer) {
+            return
+        }
         at += I64{1}
     }
     reactive_observer_retain(observer)
@@ -266,7 +289,9 @@ reactive_cell_track: fn(cell: I64) {
 reactive_cell_read: fn(cell: I64, out: I64) {
     meta: reactive_word(wrapping(cell + I64{8}))
     payload: reactive_word(wrapping(cell + I64{16}))
-    if (payload == I64{0}) -> return
+    if (payload == I64{0}) {
+        return
+    }
     if (reactive_word(wrapping(meta + I64{8})) == I64{0}) {
         coll_copy(payload, out, coll_payload(meta))
         return
@@ -295,7 +320,9 @@ reactive_cell_read: fn(cell: I64, out: I64) {
 #Export(c) jet_reactive_cell_peek: fn(cell: I64, out: I64) { reactive_cell_read(cell, out) }
 
 // `.version`: an owned exact Int.
-#Export(c) jet_reactive_cell_version: fn(cell: I64) -> I64 { jet_int_owned_from_i64(reactive_word(wrapping(cell + I64{24}))) }
+#Export(c) jet_reactive_cell_version: fn(cell: I64) -> I64 {
+    jet_int_owned_from_i64(reactive_word(wrapping(cell + I64{24})))
+}
 
 // `signal.set(value)`: the cell takes over the value's bytes at `slot`, its
 // version advances, and its subscribers re-run.
@@ -315,7 +342,7 @@ reactive_cell_read: fn(cell: I64, out: I64) {
 }
 
 #Export(c) jet_rt_handle_drop_jet_reactive_cell: fn(cell: I64) {
-    if (cell != I64{0}) -> reactive_cell_release(cell)
+    if (cell != I64{0}) { reactive_cell_release(cell) }
 }
 
 // `reactive.derived(body)` / `reactive.computed(body)` (Rust JetDerived::new):
@@ -364,11 +391,17 @@ reactive_cell_read: fn(cell: I64, out: I64) {
     observer
 }
 
-#Export(c) jet_reactive_effect_last: fn(observer: I64) -> I64 { jet_int_owned_from_i64(reactive_word(wrapping(observer + I64{96}))) }
+#Export(c) jet_reactive_effect_last: fn(observer: I64) -> I64 {
+    jet_int_owned_from_i64(reactive_word(wrapping(observer + I64{96})))
+}
 
-#Export(c) jet_reactive_effect_active: fn(observer: I64) -> Bool { reactive_word(wrapping(observer + I64{24})) != I64{0} }
+#Export(c) jet_reactive_effect_active: fn(observer: I64) -> Bool {
+    reactive_word(wrapping(observer + I64{24})) != I64{0}
+}
 
-#Export(c) jet_reactive_effect_unsubscribe: fn(observer: I64) { reactive_observer_dispose(observer) }
+#Export(c) jet_reactive_effect_unsubscribe: fn(observer: I64) {
+    reactive_observer_dispose(observer)
+}
 
 #Export(c) jet_rt_handle_clone_jet_reactive_effect: fn(observer: I64) -> I64 {
     reactive_store(wrapping(observer + I64{8}), reactive_word(wrapping(observer + I64{8})) + I64{1})
@@ -377,9 +410,11 @@ reactive_cell_read: fn(cell: I64, out: I64) {
 }
 
 #Export(c) jet_rt_handle_drop_jet_reactive_effect: fn(observer: I64) {
-    if (observer == I64{0}) -> return
+    if (observer == I64{0}) {
+        return
+    }
     owners: reactive_word(wrapping(observer + I64{8})) - I64{1}
     reactive_store(wrapping(observer + I64{8}), owners)
-    if (owners == I64{0}) -> reactive_observer_dispose(observer)
+    if (owners == I64{0}) { reactive_observer_dispose(observer) }
     reactive_observer_release(observer)
 }

@@ -5,7 +5,11 @@
 // iterators, equality, ordering, comptime values and write windows, on
 // every tier.
 
-Light: enum { Red Amber Green }
+Light: enum {
+    Red
+    Amber
+    Green
+}
 
 byte: fn(i: Int) -> U8? {
     if i < 0 || i > 255 -> return None
@@ -52,14 +56,17 @@ Sample: struct {
 }
 
 K_BYTE: #run byte(255)
+
 K_NONE: #run byte(256)
+
 K_FLAG: #run flag(2)
+
 K_LIGHT: #run light(2)
 
 // Write windows into an inline Option: a write parameter, a field, a variable.
 bump: fn(o: &U8?, by: U8) {
     if &o == {
-        .Val(n) -> n = n + by
+        .Val(n) -> { n += by }
         None -> {}
     }
 }
@@ -67,7 +74,7 @@ bump: fn(o: &U8?, by: U8) {
 windows: fn() {
     local := byte(250)
     if &local == {
-        .Val(n) -> n = n + U8{4}
+        .Val(n) -> { n += U8{4} }
         None -> {}
     }
     print("window local {local}")
@@ -75,11 +82,11 @@ windows: fn() {
     print("window param {local}")
     s := Sample{name: "w", code: byte(7), on: flag(1), mark: Val('x'), light: light(0)}
     if &s.code == {
-        .Val(n) -> n = n * U8{3}
+        .Val(n) -> { n *= U8{3} }
         None -> {}
     }
     if &s.on == {
-        .Val(v) -> v = !v
+        .Val(v) -> { v = !v }
         None -> {}
     }
     print("window field {s.code} {s.on}")
@@ -109,10 +116,10 @@ run: fn() {
     print("{chars.first()} {chars.get(1)} {chars.get(7)}")
     popped := [Bool]{true, false}
     print("{popped.pop()} {popped.pop()} {popped.pop()}")
-    m := [String: U8]{}
+    m := [String:U8]{}
     m["a"] = U8{200}
     print("{m.get("a")} {m.get("b")} {m.remove("a")} {m.remove("a")}")
-    flags := [Int: Bool]{1: true, 2: false}
+    flags := [Int:Bool]{1: true, 2: false}
     print("{flags.get(1)} {flags.get(2)} {flags.get(3)}")
     // Lazy iteration.
     bytes: "jet".bytes()

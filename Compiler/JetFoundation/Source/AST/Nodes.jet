@@ -13,48 +13,32 @@
 // equality does not look through an alias.
 
 ExprNode: Expr
+
 StmtNode: Stmt
+
 PatternNode: Pattern
 
 ASTTables: struct {}
 
-ast_tables: fn() -> ASTTables Never! {
-    ASTTables{}
-}
+ast_tables: fn() -> ASTTables Never! { ASTTables{} }
 
-ast_expr: fn(_tables: ASTTables, node: ExprNode) -> Expr Never! {
-    node.copy()
-}
+ast_expr: fn(_tables: ASTTables, node: ExprNode) -> Expr Never! { node.copy() }
 
-ast_stmt: fn(_tables: ASTTables, node: StmtNode) -> Stmt Never! {
-    node.copy()
-}
+ast_stmt: fn(_tables: ASTTables, node: StmtNode) -> Stmt Never! { node.copy() }
 
-ast_pattern: fn(_tables: ASTTables, node: PatternNode) -> Pattern Never! {
-    node.copy()
-}
+ast_pattern: fn(_tables: ASTTables, node: PatternNode) -> Pattern Never! { node.copy() }
 
 // The span a diagnostic about the expression points at (`expr_span`).
-ast_expr_span: fn(_tables: ASTTables, node: ExprNode) -> Span Never! {
-    expr_span(node)
-}
+ast_expr_span: fn(_tables: ASTTables, node: ExprNode) -> Span Never! { expr_span(node) }
 
 // The expression's NodeId (`expr_node_id`).
-ast_expr_id: fn(_tables: ASTTables, node: ExprNode) -> Int Never! {
-    expr_node_id(node)
-}
+ast_expr_id: fn(_tables: ASTTables, node: ExprNode) -> Int Never! { expr_node_id(node) }
 
-ast_add_expr: fn(_tables: &ASTTables, view: &&Expr) -> ExprNode Never! {
-    view
-}
+ast_add_expr: fn(_tables: &ASTTables, view: &&Expr) -> ExprNode Never! { view }
 
-ast_add_stmt: fn(_tables: &ASTTables, view: &&Stmt) -> StmtNode Never! {
-    view
-}
+ast_add_stmt: fn(_tables: &ASTTables, view: &&Stmt) -> StmtNode Never! { view }
 
-ast_add_pattern: fn(_tables: &ASTTables, view: &&Pattern) -> PatternNode Never! {
-    view
-}
+ast_add_pattern: fn(_tables: &ASTTables, view: &&Pattern) -> PatternNode Never! { view }
 
 ASTExprKind: enum {
     Str

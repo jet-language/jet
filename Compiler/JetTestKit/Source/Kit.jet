@@ -93,6 +93,7 @@ KitRun: struct {
     stdout_bytes: [U8]?{None}
     stderr_bytes: [U8]?{None}
 }
+
 KitOptions: struct {
     suite: String
     jet: String
@@ -134,7 +135,7 @@ KitCtx: struct {
     scratch: String
     bless: KitBless
     // The known-failing ledger (kit_known_load), read once per run.
-    known: [String: String]
+    known: [String:String]
 }
 
 KitSelection: struct {
@@ -497,9 +498,13 @@ kit_steps_execute: fn(original_context: KitStepCtx, hooks: KitStepHooks) -> KitO
     context := original_context
     state := KitStepState{last: kit_exec_failed("no steps"), built: "", built_once: false}
     plan: context.plan
-    if plan.error != "" -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", plan.error), run: state.last}
+    if plan.error != "" {
+        return KitOutcome{verdict: kit_expect_verdict("REFUSED", plan.error), run: state.last}
+    }
     loop requirement in plan.requires {
-        if kit_steps_build_target_text(requirement) -> return kit_steps_finish(state, kit_expect_verdict("REFUSED", "build-target"))
+        if kit_steps_build_target_text(requirement) {
+            return kit_steps_finish(state, kit_expect_verdict("REFUSED", "build-target"))
+        }
         if !requirement.starts_with("first-existing ") -> next
         words: kit_steps_words(requirement) ?? return kit_steps_finish(state, kit_expect_verdict("REFUSED", "invalid first-existing requirement"))
         found := false
@@ -520,10 +525,18 @@ kit_steps_execute: fn(original_context: KitStepCtx, hooks: KitStepHooks) -> KitO
         .Val(value) -> return KitOutcome{verdict: value, run: state.last}
         .None -> {}
     }
-    if kit_expect_named(plan.normalize, "version") && (context.env.version == "" || context.env.version_error != "") -> return KitOutcome{verdict: kit_expect_verdict("ERROR", "jet version: {context.env.version_error}"), run: state.last}
-    if plan.compile_only && context.golden == None -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", "run: none is golden-only"), run: state.last}
-    if plan.refused != "" -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", plan.refused), run: state.last}
-    if plan.steps.len() == 0 -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", "case has no steps"), run: state.last}
+    if kit_expect_named(plan.normalize, "version") && (context.env.version == "" || context.env.version_error != "") {
+        return KitOutcome{verdict: kit_expect_verdict("ERROR", "jet version: {context.env.version_error}"), run: state.last}
+    }
+    if plan.compile_only && context.golden == None {
+        return KitOutcome{verdict: kit_expect_verdict("REFUSED", "run: none is golden-only"), run: state.last}
+    }
+    if plan.refused != "" {
+        return KitOutcome{verdict: kit_expect_verdict("REFUSED", plan.refused), run: state.last}
+    }
+    if plan.steps.len() == 0 {
+        return KitOutcome{verdict: kit_expect_verdict("REFUSED", "case has no steps"), run: state.last}
+    }
     blessing: kit_steps_bless_plan(plan, context.id, context.bless)
     if blessing == {
         .Val(value) -> return KitOutcome{verdict: value, run: state.last}
@@ -533,14 +546,20 @@ kit_steps_execute: fn(original_context: KitStepCtx, hooks: KitStepHooks) -> KitO
     if plan.fixture != "" {
         fixture: files.join(context.snapshots, plan.fixture)
         // A missing fixture would stop the copy, and with it the pool task, without a verdict.
-        if !files.is_dir(fixture) -> return kit_steps_finish(state, kit_expect_verdict("ERROR", "fixture directory is missing: {plan.fixture}"))
+        if !files.is_dir(fixture) {
+            return kit_steps_finish(state, kit_expect_verdict("ERROR", "fixture directory is missing: {plan.fixture}"))
+        }
         kit_exec_copy_tree(fixture, context.work, true, true)
     }
     port_names: kit_steps_case_port_names(context)
     if port_names.len() > 0 {
         ports := [Int]{}
-        if kit_steps_free_ports(context, port_names.len(), ports) == .Val(failure) -> return kit_steps_finish(state, failure)
-        loop index in 0..<port_names.len() -> state.free_ports.push(KitFreePort{name: port_names[index], port: ports[index]})
+        if kit_steps_free_ports(context, port_names.len(), ports) == .Val(failure) {
+            return kit_steps_finish(state, failure)
+        }
+        loop index in 0..<port_names.len() {
+            state.free_ports.push(KitFreePort{name: port_names[index], port: ports[index]})
+        }
     }
     // A case that binds a fixed host port holds its lock until the case ends,
     // waiting at most the wall-clock guard, so concurrent kit and
@@ -557,22 +576,30 @@ kit_steps_execute: fn(original_context: KitStepCtx, hooks: KitStepHooks) -> KitO
             if loops[slot].kind == "repeat" && cursor == loops[slot].start + 1 {
                 opening: plan.steps[loops[slot].start]
                 activity: kit_steps_repeat_check(opening, context, state)
-                if activity.status != "PASS" && activity.status != "FAIL" -> return kit_steps_finish(state, activity)
+                if activity.status != "PASS" && activity.status != "FAIL" {
+                    return kit_steps_finish(state, activity)
+                }
                 if activity.status == "FAIL" {
                     state = kit_steps_loop_restore(loops[slot], state)
                     cursor = loops[slot].end + 1
                     loops = loops.slice(0, slot)
                     next
                 }
-                if kit_steps_repeat_exceeded(opening, loops[slot], context, state) == .Val(failed) -> return kit_steps_finish(state, failed)
+                if kit_steps_repeat_exceeded(opening, loops[slot], context, state) == .Val(failed) {
+                    return kit_steps_finish(state, failed)
+                }
             }
         }
         index: cursor
         original: plan.steps[index]
         cursor += 1
-        if kit_steps_build_target_conditions(original.conditions) -> return kit_steps_finish(state, kit_expect_verdict("REFUSED", "build-target"))
+        if kit_steps_build_target_conditions(original.conditions) {
+            return kit_steps_finish(state, kit_expect_verdict("REFUSED", "build-target"))
+        }
         if !kit_steps_conditions(original.conditions, context, state) -> next
-        if kit_steps_build_target_used(original, plan) -> return kit_steps_finish(state, kit_expect_verdict("REFUSED", "build-target"))
+        if kit_steps_build_target_used(original, plan) {
+            return kit_steps_finish(state, kit_expect_verdict("REFUSED", "build-target"))
+        }
         if original.action == "when" {
             if !kit_steps_condition(original.argv[0], context, state) {
                 depth := 1
@@ -587,8 +614,12 @@ kit_steps_execute: fn(original_context: KitStepCtx, hooks: KitStepHooks) -> KitO
         if original.action == "end when" -> next
         // Selected nonZ loops/awaits refuse before loop state or PID expansion.
         // Attached assertions select their own conditions after the command.
-        if ((original.action == "repeat" && kit_steps_process_nonzombie_mode(original.argv[4])) || (original.action == "await" && original.argv[0] == "process" && kit_steps_process_nonzombie_mode(original.argv[2]))) && sys.name() != "linux" -> return kit_steps_finish(state, kit_expect_verdict("REFUSED", "process-state"))
-        if original.action == "for" || original.action == "repeat" -> state = kit_steps_loop_initialize(original, state)
+        if ((original.action == "repeat" && kit_steps_process_nonzombie_mode(original.argv[4])) || (original.action == "await" && original.argv[0] == "process" && kit_steps_process_nonzombie_mode(original.argv[2]))) && sys.name() != "linux" {
+            return kit_steps_finish(state, kit_expect_verdict("REFUSED", "process-state"))
+        }
+        if original.action == "for" || original.action == "repeat" {
+            state = kit_steps_loop_initialize(original, state)
+        }
         if original.action == "for" {
             values: kit_steps_loop_values(kit_steps_resolve_step(original, context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "loop token unavailable")), context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "{err}"))
             end: kit_steps_block_end(plan.steps, index)
@@ -603,7 +634,9 @@ kit_steps_execute: fn(original_context: KitStepCtx, hooks: KitStepHooks) -> KitO
         }
         if original.action == "repeat" {
             activity: kit_steps_repeat_check(original, context, state)
-            if activity.status != "PASS" && activity.status != "FAIL" -> return kit_steps_finish(state, activity)
+            if activity.status != "PASS" && activity.status != "FAIL" {
+                return kit_steps_finish(state, activity)
+            }
             end: kit_steps_block_end(plan.steps, index)
             if activity.status == "FAIL" {
                 cursor = end + 1
@@ -619,9 +652,13 @@ kit_steps_execute: fn(original_context: KitStepCtx, hooks: KitStepHooks) -> KitO
             if frame.kind == "repeat" {
                 opening: plan.steps[frame.start]
                 activity: kit_steps_repeat_check(opening, context, state)
-                if activity.status != "PASS" && activity.status != "FAIL" -> return kit_steps_finish(state, activity)
+                if activity.status != "PASS" && activity.status != "FAIL" {
+                    return kit_steps_finish(state, activity)
+                }
                 if activity.status == "PASS" {
-                    if kit_steps_repeat_exceeded(opening, frame, context, state) == .Val(failed) -> return kit_steps_finish(state, failed)
+                    if kit_steps_repeat_exceeded(opening, frame, context, state) == .Val(failed) {
+                        return kit_steps_finish(state, failed)
+                    }
                     remaining: kit_steps_repeat_wall(opening, context.env) - frame.started.elapsed().ns
                     interval: kit_steps_duration_ns(opening.argv[8]) ?? 0
                     time.sleep(time.duration_ns(if interval < remaining -> interval else -> remaining))
@@ -649,16 +686,23 @@ kit_steps_execute: fn(original_context: KitStepCtx, hooks: KitStepHooks) -> KitO
             next
         }
         step := kit_steps_resolve_step(original, context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "undefined capture or unavailable tool token"))
-        if step.refused_capability != "" -> return kit_steps_finish(state, kit_expect_verdict("REFUSED", step.refused_capability))
+        if step.refused_capability != "" {
+            return kit_steps_finish(state, kit_expect_verdict("REFUSED", step.refused_capability))
+        }
         if step.argv.len() > 0 && step.argv[0] == "fail" {
-            if step.argv.len() != 2 -> return kit_steps_finish(state, kit_expect_verdict("REFUSED", "fail needs one message"))
+            if step.argv.len() != 2 {
+                return kit_steps_finish(state, kit_expect_verdict("REFUSED", "fail needs one message"))
+            }
             return kit_steps_finish(state, kit_expect_verdict("FAIL", step.argv[1]))
         }
-        invoked: if step.action == "poll" -> kit_steps_poll(step, index, context, state, hooks) else if kit_steps_setup_kind(step.action) || kit_expect_named(["assert", "apply-edits", "await", "session", "send", "recv", "signal", "close", "spawn", "wait", "capture", "write", "inventory"], step.action) ->
-            kit_steps_action(step, context, state) else -> kit_steps_hook_invoke(hooks, step, index, context, state)
+        invoked: if step.action == "poll" -> kit_steps_poll(step, index, context, state, hooks) else if kit_steps_setup_kind(step.action) || kit_expect_named(["assert", "apply-edits", "await", "session", "send", "recv", "signal", "close", "spawn", "wait", "capture", "write", "inventory"], step.action) -> kit_steps_action(step, context, state) else -> kit_steps_hook_invoke(hooks, step, index, context, state)
         state = invoked.state
-        if invoked.verdict.status != "PASS" || state.settled -> return kit_steps_finish(state, invoked.verdict)
-        if step.action == "capture" || step.action == "await" -> step.assertions = kit_steps_resolve_assertions(step.assertions, context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "undefined capture or unavailable tool token"))
+        if invoked.verdict.status != "PASS" || state.settled {
+            return kit_steps_finish(state, invoked.verdict)
+        }
+        if step.action == "capture" || step.action == "await" {
+            step.assertions = kit_steps_resolve_assertions(step.assertions, context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "undefined capture or unavailable tool token"))
+        }
         if kit_expect_named(["spawn", "session", "send", "signal"], step.action) -> next
         if kit_expect_named(["", "wait", "close", "poll"], step.action) {
             wired: kit_steps_wiring_finish(step, context, state)
@@ -681,8 +725,12 @@ kit_steps_execute: fn(original_context: KitStepCtx, hooks: KitStepHooks) -> KitO
             loop rule in step.json_normalize -> rules.push(rule)
             output: kit_steps_json_normalize(state.last.stdout, "stdout", rules)
             errors: kit_steps_json_normalize(state.last.stderr, "stderr", rules)
-            if output.error != "" -> return kit_steps_finish(state, kit_expect_verdict("FAIL", output.error))
-            if errors.error != "" -> return kit_steps_finish(state, kit_expect_verdict("FAIL", errors.error))
+            if output.error != "" {
+                return kit_steps_finish(state, kit_expect_verdict("FAIL", output.error))
+            }
+            if errors.error != "" {
+                return kit_steps_finish(state, kit_expect_verdict("FAIL", errors.error))
+            }
             state.json_stdout = Val(output.text)
             state.json_stderr = Val(errors.text)
         }
@@ -691,13 +739,17 @@ kit_steps_execute: fn(original_context: KitStepCtx, hooks: KitStepHooks) -> KitO
                 .Val(golden) -> kit_golden_source_name(golden.entry)
                 .None -> ""
             }
-            state.history.push(KitCapturedStep{label: step.label,
-                stdout: kit_steps_replace(kit_steps_normalize(state.json_stdout ?? state.last.stdout, context.env, context.work, context.scratch, plan.normalize, state.built, source_name), step.replacements, context, state, true, source_name),
-                stderr: kit_steps_replace(kit_steps_normalize(state.json_stderr ?? state.last.stderr, context.env, context.work, context.scratch, plan.normalize, state.built, source_name), step.replacements, context, state, true, source_name),
-                elapsed_ns: state.last.elapsed_ns,
-                code: if state.last.signal == None -> Val(state.last.code) else -> None,
-                raw_stdout: kit_steps_replace(state.last.stdout, step.replacements, context, state, false, source_name),
-                raw_stderr: kit_steps_replace(state.last.stderr, step.replacements, context, state, false, source_name)})
+            state.history.push(
+                KitCapturedStep{
+                    label: step.label,
+                    stdout: kit_steps_replace(kit_steps_normalize(state.json_stdout ?? state.last.stdout, context.env, context.work, context.scratch, plan.normalize, state.built, source_name), step.replacements, context, state, true, source_name),
+                    stderr: kit_steps_replace(kit_steps_normalize(state.json_stderr ?? state.last.stderr, context.env, context.work, context.scratch, plan.normalize, state.built, source_name), step.replacements, context, state, true, source_name),
+                    elapsed_ns: state.last.elapsed_ns,
+                    code: if state.last.signal == None -> Val(state.last.code) else -> None,
+                    raw_stdout: kit_steps_replace(state.last.stdout, step.replacements, context, state, false, source_name),
+                    raw_stderr: kit_steps_replace(state.last.stderr, step.replacements, context, state, false, source_name),
+                },
+            )
         }
         verdict: kit_steps_hook_check(hooks, step, index, context, state)
         if verdict.status != "PASS" -> return kit_steps_finish(state, verdict)
@@ -825,7 +877,9 @@ kit_scratch_root: fn() -> String? {
     uid: sys.getuid()
     if files.is_dir("/dev/shm") -> return Val("/dev/shm/jet-testkit-{uid}")
     if sys.get("XDG_RUNTIME_DIR") == .Val(runtime) {
-        if runtime.starts_with("/") && files.is_dir(runtime) -> return Val(files.join(runtime, "jet-testkit"))
+        if runtime.starts_with("/") && files.is_dir(runtime) {
+            return Val(files.join(runtime, "jet-testkit"))
+        }
     }
     kit_disk_root()
 }
@@ -857,8 +911,10 @@ kit_case_blocks: fn(status: String) -> Bool {
 // Runs `selected_suites` in one pool. `reports` None writes one report of every row to
 // options.results; Val(paths) finishes each suite on its own, its rows and summary to
 // paths[suite] ("" prints the summary only), as each gate test reports its suite.
-kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [String], reports: [String: String]?) -> KitExecution {
-    if selected_suites.len() == 0 || selected_suites.any(fn(suite) { !kit_expect_named(kit_suites(), suite) }) -> return kit_execution_refused("REFUSED\tselection\t\tsuite not installed: {options.suite}")
+kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [String], reports: [String:String]?) -> KitExecution {
+    if selected_suites.len() == 0 || selected_suites.any(fn(suite) { !kit_expect_named(kit_suites(), suite) }) {
+        return kit_execution_refused("REFUSED\tselection\t\tsuite not installed: {options.suite}")
+    }
     // A representable `--timeout` is at most about 9e9 seconds, so the two
     // products below cannot overflow.
     _: Duration.seconds(options.timeout) ?? return kit_execution_refused("REFUSED\tselection\t\ttimeout: {err}")
@@ -868,22 +924,30 @@ kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [Stri
     limit: Duration.seconds(options.timeout * sys.cpu_count()) ?? return kit_execution_refused("REFUSED\tselection\t\ttimeout: {err}")
     timeout: Duration.seconds(options.timeout * KIT_WALL_GUARD) ?? return kit_execution_refused("REFUSED\tselection\t\ttimeout: {err}")
     discovery_env: KitEnv{root: root, scratch: "", jet: options.jet, jetpack: options.jetpack, timeout: timeout, cpu_limit: Val(limit), memory_limit: 0}
-    discovery_ctx: KitCtx{options: options, env: discovery_env, root: root, scratch: "", bless: options.bless, known: [String: String]{}}
+    discovery_ctx: KitCtx{options: options, env: discovery_env, root: root, scratch: "", bless: options.bless, known: [String:String]{}}
     corpus := [KitSelected]{}
     loop suite in selected_suites {
-        loop entry in kit_suite_discover(suite, discovery_ctx) -> corpus.push(KitSelected{entry: entry, suite: suite})
+        loop entry in kit_suite_discover(suite, discovery_ctx) {
+            corpus.push(KitSelected{entry: entry, suite: suite})
+        }
     }
     kit_execute_corpus_order(corpus)
     selection: kit_exec_select_ids(corpus.map(fn(item) { item.entry.path }), options)
-    if selection.error != "" -> return kit_execution_refused("REFUSED\tselection\t\t{selection.error}")
+    if selection.error != "" {
+        return kit_execution_refused("REFUSED\tselection\t\t{selection.error}")
+    }
     entries: corpus.filter(fn(item) { kit_expect_named(selection.ids, item.entry.path) })
     if entries.len() == 0 && options.others_selected -> return KitExecution{code: 0, failures: []}
-    if entries.len() == 0 -> return kit_execution_refused("ERROR\tselection\t\tno matching corpus entries")
+    if entries.len() == 0 {
+        return kit_execution_refused("ERROR\tselection\t\tno matching corpus entries")
+    }
     if options.list {
         loop item in entries -> print("{item.entry.suite}\t{item.entry.path}")
         return KitExecution{code: 0, failures: []}
     }
-    if options.jet == "" -> return kit_execution_refused("ERROR\tselection\t\tJET must name the compiler under test")
+    if options.jet == "" {
+        return kit_execution_refused("ERROR\tselection\t\tJET must name the compiler under test")
+    }
     jet: files.canonicalize(options.jet) ?? return kit_execution_refused("ERROR\tselection\t\tcompiler: {err}")
     jetpack: if options.jetpack == "" -> "" else -> files.canonicalize(options.jetpack) ?? return kit_execution_refused("ERROR\tselection\t\tjetpack: {err}")
     base: if options.scratch != "" -> options.scratch else -> kit_scratch_root() ?? return kit_execution_refused("ERROR\tselection\t\tscratch: set HOME or pass --scratch")
@@ -892,7 +956,9 @@ kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [Stri
     // the rows stage on disk.
     state: kit_state_dir(root) ?? return kit_execution_refused("ERROR\tselection\t\tstate: {err}")
     run_scratch: files.join(canonical, "testkit-{process.current_pid()}-{selected_suites.join("-")}")
-    if files.exists(run_scratch) -> return kit_execution_refused("ERROR\tselection\t\tscratch already exists: {run_scratch}")
+    if files.exists(run_scratch) {
+        return kit_execution_refused("ERROR\tselection\t\tscratch already exists: {run_scratch}")
+    }
     files.create_dir_all(run_scratch) ?? return kit_execution_refused("ERROR\tselection\t\tscratch: {err}")
     // A run staged in memory keeps its FFI cache there too, for that run only:
     // a cold Rust helper realizes in about a second in memory, but takes over
@@ -904,16 +970,18 @@ kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [Stri
     env := KitEnv{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: timeout, cpu_limit: Val(limit), memory_limit: 0, resident_limit: kit_resident_guard(), ffi_cache: ffi_cache, scratch_memory: scratch_memory}
     // Golden C rows build on every tier, each with a fresh Hangar: the run
     // takes the pack once, so no tier unpacks a copy of its own.
-    if jetpack != "" && kit_expect_named(selected_suites, "golden") -> env.cc_pack = kit_cc_pack_root(jetpack, state)
-    if entries.any(fn(item) { item.suite == "ui" && item.entry.mode != "coverage" }) -> kit_ui_stage(root, run_scratch, entries.any(fn(item) { item.suite == "ui" && item.entry.mode.ends_with("project") }), options.ui_corpora)
+    if jetpack != "" && kit_expect_named(selected_suites, "golden") {
+        env.cc_pack = kit_cc_pack_root(jetpack, state)
+    }
+    if entries.any(fn(item) { item.suite == "ui" && item.entry.mode != "coverage" }) {
+        kit_ui_stage(root, run_scratch, entries.any(fn(item) { item.suite == "ui" && item.entry.mode.ends_with("project") }), options.ui_corpora)
+    }
     version_run: kit_exec_invoke(env, [jet, "--version"], root, run_scratch, "")
     if version_run.code == 0 && kit_exec_process_failure(version_run) == None {
         env.version = kit_steps_version(version_run.stdout) ?? ""
         env.version_display = kit_steps_version_display(version_run.stdout) ?? ""
         if env.version == "" -> env.version_error = "unparseable jet --version banner"
-    } else {
-        env.version_error = "jet --version failed: {version_run.error} {version_run.stderr}"
-    }
+    } else { env.version_error = "jet --version failed: {version_run.error} {version_run.stderr}" }
     available: kit_exec_available_memory()
     jobs: kit_execute_jobs(options.jobs, entries.len(), kit_execute_workers())
     history_dir: files.join(state, "history")
@@ -926,7 +994,9 @@ kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [Stri
         loop result in run.results -> results.push(result)
     }
     kit_history_save(history_dir, ran_suites, history, results)
-    if options.bless.ids.len() > 0 || options.bless.all -> print("bless: ids={options.bless.ids} all={options.bless.all} reason={options.bless.reason}")
+    if options.bless.ids.len() > 0 || options.bless.all {
+        print("bless: ids={options.bless.ids} all={options.bless.all} reason={options.bless.reason}")
+    }
     kit_exec_remove_tree(run_scratch) ?? {
         results.push(KitCaseResult{suite: "kit", case: "cleanup", tier: "-", status: "ERROR", detail: "{err}", exit: -1})
         kit_report_row(results[results.len() - 1])
@@ -953,10 +1023,12 @@ kit_cc_pack_root: fn(jetpack: String, state: String) -> String {
 // The run's failures and exit code once every row is in: one report of every row to
 // `results_path` (reports None), or each suite's rows and summary to reports[suite].
 // The rows keep corpus order (kit_execute_corpus_order).
-kit_execute_finish: fn(jet: String, results: [KitCaseResult], ran_suites: [String], suites: [String], reports: [String: String]?, results_path: String) -> KitExecution {
+kit_execute_finish: fn(jet: String, results: [KitCaseResult], ran_suites: [String], suites: [String], reports: [String:String]?, results_path: String) -> KitExecution {
     failures := [KitFailure]{}
     loop result in results {
-        if kit_case_blocks(result.status) -> failures.push(KitFailure{suite: result.suite, row: "{result.status}\t{result.case}\t{result.tier}\t{result.detail}"})
+        if kit_case_blocks(result.status) {
+            failures.push(KitFailure{suite: result.suite, row: "{result.status}\t{result.case}\t{result.tier}\t{result.detail}"})
+        }
     }
     if reports == .Val(paths) {
         code := if failures.any(fn(failure) { !kit_expect_named(suites, failure.suite) }) -> 2 else -> 0
@@ -970,13 +1042,17 @@ kit_execute_finish: fn(jet: String, results: [KitCaseResult], ran_suites: [Strin
             loop failure in failures {
                 if failure.suite == suite -> reported = true
             }
-            if suite_code != 0 && !reported -> failures.push(KitFailure{suite: suite, row: "ERROR\tresults\t\tthe {suite} report could not be written to {path}"})
+            if suite_code != 0 && !reported {
+                failures.push(KitFailure{suite: suite, row: "ERROR\tresults\t\tthe {suite} report could not be written to {path}"})
+            }
             if suite_code > code -> code = suite_code
         }
         return KitExecution{code: code, failures: failures, results: results}
     }
     code: kit_report_finish(jet, results, results_path, ran_suites)
-    if code != 0 && failures.len() == 0 -> failures.push(KitFailure{suite: "", row: "ERROR\tresults\t\tthe {suites.join(",")} report could not be written to {results_path}"})
+    if code != 0 && failures.len() == 0 {
+        failures.push(KitFailure{suite: "", row: "ERROR\tresults\t\tthe {suites.join(",")} report could not be written to {results_path}"})
+    }
     KitExecution{code: code, failures: failures, results: results}
 }
 
@@ -984,7 +1060,9 @@ kit_execute_finish: fn(jet: String, results: [KitCaseResult], ran_suites: [Strin
 // RAM-backed /tmp and the checkout: what outlives a run stays on disk.
 kit_execute_disk_dir: fn(path: String, root: String) -> String Err! {
     canonical: kit_execute_scratch_dir(path, root) ?? return Err(err)
-    if canonical == "/tmp" || canonical.starts_with("/tmp/") -> return Err("{canonical} must be disk-backed and outside the checkout")
+    if canonical == "/tmp" || canonical.starts_with("/tmp/") {
+        return Err("{canonical} must be disk-backed and outside the checkout")
+    }
     Ok(canonical)
 }
 
@@ -993,7 +1071,9 @@ kit_execute_disk_dir: fn(path: String, root: String) -> String Err! {
 kit_execute_scratch_dir: fn(path: String, root: String) -> String Err! {
     files.create_dir_all(path) ?? return Err("{err}")
     canonical: files.canonicalize(path) ?? return Err("{err}")
-    if canonical == root || canonical.starts_with("{root}/") -> return Err("{canonical} must be outside the checkout")
+    if canonical == root || canonical.starts_with("{root}/") {
+        return Err("{canonical} must be outside the checkout")
+    }
     Ok(canonical)
 }
 
@@ -1067,7 +1147,7 @@ KitHistory: struct {
 
 // The corpus pool's schedule (kit_schedule_claims): each entry's history row is its
 // suite and path, and an entry never measured claims kit_job_memory().
-kit_execute_schedule: fn(entries: [KitSelected], history: [String: KitHistory], jobs: Int, budget: Int, available: Int) -> KitSchedule {
+kit_execute_schedule: fn(entries: [KitSelected], history: [String:KitHistory], jobs: Int, budget: Int, available: Int) -> KitSchedule {
     keys := [String]{}
     loop item in entries -> keys.push(kit_history_key(item.suite, item.entry.path))
     kit_schedule_claims(keys, history, kit_job_memory(), jobs, budget, available)
@@ -1081,7 +1161,7 @@ kit_execute_schedule: fn(entries: [KitSelected], history: [String: KitHistory], 
 // raised to the entry's need but never above the whole room. The guard only stops a
 // runaway child: the claims, not the guard, keep the pool inside the room, so a lower
 // guard would turn a heavy entry into a kill.
-kit_schedule_claims: fn(keys: [String], history: [String: KitHistory], unmeasured: Int, jobs: Int, budget: Int, available: Int) -> KitSchedule {
+kit_schedule_claims: fn(keys: [String], history: [String:KitHistory], unmeasured: Int, jobs: Int, budget: Int, available: Int) -> KitSchedule {
     schedule := KitSchedule{order: [Int]{}, weights: [Int]{}, guards: [Int]{}, budget: budget, jobs: jobs}
     ranks := [Int]{}
     loop (index, key) in keys {
@@ -1108,8 +1188,8 @@ kit_history_file: fn(dir: String, suite: String) -> String { files.join(dir, "{s
 // The last measurement of every entry of the selected suites, keyed by suite and path.
 // Each suite's file has one `path<TAB>wall_ms<TAB>peak_kib` row per entry; a missing or
 // malformed file or row only loses its scheduling hints.
-kit_history_load: fn(dir: String, suites: [String]) -> [String: KitHistory] {
-    history := [String: KitHistory]{}
+kit_history_load: fn(dir: String, suites: [String]) -> [String:KitHistory] {
+    history := [String:KitHistory]{}
     loop suite in suites {
         text: kit_exec_optional(kit_history_file(dir, suite)) ?? next
         loop line in text.split("\n") {
@@ -1126,17 +1206,21 @@ kit_history_load: fn(dir: String, suites: [String]) -> [String: KitHistory] {
 // Folds this run's measurements into the history and rewrites each suite's file. The
 // file is replaced by a rename, without fsync: a history lost in a crash only loses
 // its scheduling hints, and a durable write cost every run a journal flush.
-kit_history_save: fn(dir: String, suites: [String], history: [String: KitHistory], results: [KitCaseResult]) {
+kit_history_save: fn(dir: String, suites: [String], history: [String:KitHistory], results: [KitCaseResult]) {
     merged := history
     loop result in results {
-        if result.wall_ms > 0 -> merged[kit_history_key(result.suite, result.case)] = KitHistory{wall_ms: result.wall_ms, peak_kib: result.peak_kib}
+        if result.wall_ms > 0 {
+            merged[kit_history_key(result.suite, result.case)] = KitHistory{wall_ms: result.wall_ms, peak_kib: result.peak_kib}
+        }
     }
     files.create_dir_all(dir) ?? return
     loop suite in suites {
         prefix: "{suite}\t"
         rows := [String]{}
         loop (key, last) in merged {
-            if key.starts_with(prefix) -> rows.push("{kit_steps_byte_slice(key, prefix.count_bytes(), key.count_bytes())}\t{last.wall_ms}\t{last.peak_kib}")
+            if key.starts_with(prefix) {
+                rows.push("{kit_steps_byte_slice(key, prefix.count_bytes(), key.count_bytes())}\t{last.wall_ms}\t{last.peak_kib}")
+            }
         }
         rows.sort_by(fn(row) { row })
         path: kit_history_file(dir, suite)
@@ -1166,9 +1250,11 @@ kit_execute_admits: fn(schedule: KitSchedule, running: Int, claimed: Int, weight
 // memory claim fits beside the running ones' (the first always starts). As each entry
 // finishes, its verdict diffs and rows print at once. Returns one run per entry in corpus
 // order for the report file; a serial (`--jobs 1`) run prints in schedule order.
-kit_execute_entries: fn(entries: [KitSelected], schedule: KitSchedule, options: KitOptions, env: KitEnv, known: [String: String], root: String, run_scratch: String) -> [KitEntryRun] {
+kit_execute_entries: fn(entries: [KitSelected], schedule: KitSchedule, options: KitOptions, env: KitEnv, known: [String:String], root: String, run_scratch: String) -> [KitEntryRun] {
     runs := [KitEntryRun]{}
-    loop (index, item) in entries -> runs.push(KitEntryRun{index: index, suite: item.suite, ran: false, done: false, results: [KitCaseResult]{}})
+    loop (index, item) in entries {
+        runs.push(KitEntryRun{index: index, suite: item.suite, ran: false, done: false, results: [KitCaseResult]{}})
+    }
     { sender: done, receiver: finished }: channel<KitEntryRun>()
     task.group pool(limit: schedule.jobs) {
         started := 0
@@ -1206,16 +1292,14 @@ kit_execute_entries: fn(entries: [KitSelected], schedule: KitSchedule, options: 
 }
 
 // Runs one entry in its own task, so a panic in it still reports the entry, as not done.
-kit_execute_report: fn(index: Int, item: KitSelected, options: KitOptions, env: KitEnv, known: [String: String], root: String, run_scratch: String, guard: Int, done: Sender<KitEntryRun>) {
+kit_execute_report: fn(index: Int, item: KitSelected, options: KitOptions, env: KitEnv, known: [String:String], root: String, run_scratch: String, guard: Int, done: Sender<KitEntryRun>) {
     entry_task: task kit_execute_entry(index, item.copy(), options.copy(), env.copy(), known.copy(), root.copy(), run_scratch.copy(), guard)
     run := entry_task.join() ?? KitEntryRun{index: index, suite: item.suite.copy(), ran: true, done: false, results: [KitCaseResult]{}}
     kit_execute_send(done, run).drop("nobody collects a stopped run")
 }
 
 // One entry's report to the collector; a refused send means it is gone.
-kit_execute_send: fn(done: Sender<KitEntryRun>, run: &&KitEntryRun) Err! {
-    done.send(run)
-}
+kit_execute_send: fn(done: Sender<KitEntryRun>, run: &&KitEntryRun) Err! { done.send(run) }
 
 // One child of a process pool (kit_pool_run): entry `index`, its receipt or why it
 // couldn't run, and its wall time.
@@ -1232,7 +1316,9 @@ KitPoolRun: struct {
 // workspace's package and Core runs through it.
 kit_pool_run: fn(specs: [ProcessSpec], schedule: KitSchedule) -> [KitPoolRun] {
     runs := [KitPoolRun]{}
-    loop index in 0..<specs.len() -> runs.push(KitPoolRun{index: index, receipt: None, error: "the pool stopped before this run", wall_ms: 0})
+    loop index in 0..<specs.len() {
+        runs.push(KitPoolRun{index: index, receipt: None, error: "the pool stopped before this run", wall_ms: 0})
+    }
     { sender: done, receiver: finished }: channel<KitPoolRun>()
     task.group pool(limit: schedule.jobs) {
         started := 0
@@ -1280,14 +1366,12 @@ kit_pool_child: fn(index: Int, spec: ProcessSpec, done: Sender<KitPoolRun>) {
 }
 
 // One child's report to the pool; a refused send means it is gone.
-kit_pool_send: fn(done: Sender<KitPoolRun>, run: &&KitPoolRun) Err! {
-    done.send(run)
-}
+kit_pool_send: fn(done: Sender<KitPoolRun>, run: &&KitPoolRun) Err! { done.send(run) }
 
 // Folds a pool's runs into `history` and rewrites `suite`'s file (kit_history_save):
 // run i is the entry paths[i], measured by its wall time and its receipt's peak. A
 // run with no receipt or no peak keeps its last measurement.
-kit_pool_save: fn(dir: String, suite: String, paths: [String], history: [String: KitHistory], runs: [KitPoolRun]) {
+kit_pool_save: fn(dir: String, suite: String, paths: [String], history: [String:KitHistory], runs: [KitPoolRun]) {
     measured := [KitCaseResult]{}
     loop run in runs {
         receipt: run.receipt ?? next
@@ -1300,7 +1384,7 @@ kit_pool_save: fn(dir: String, suite: String, paths: [String], history: [String:
 // One entry in its private scratch `<run>/<index>`, removed afterwards unless tracing.
 // Every row carries the entry's wall time and its memory claim: its children's largest
 // resident peak plus the files a row held on a memory-backed scratch.
-kit_execute_entry: fn(index: Int, item: KitSelected, options: KitOptions, env: KitEnv, known: [String: String], root: String, run_scratch: String, guard: Int) -> KitEntryRun {
+kit_execute_entry: fn(index: Int, item: KitSelected, options: KitOptions, env: KitEnv, known: [String:String], root: String, run_scratch: String, guard: Int) -> KitEntryRun {
     entry: item.entry
     started: time.instant()
     run := KitEntryRun{index: index, suite: item.suite, ran: false, done: true, results: [KitCaseResult]{}}

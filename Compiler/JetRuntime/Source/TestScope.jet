@@ -5,11 +5,17 @@
 
 // Five-byte stop codes as little-endian words, compared and written raw.
 TEST_SCOPE_E3001: I64{211261862725}
+
 TEST_SCOPE_E3005: I64{228441731909}
+
 TEST_SCOPE_E3010: I64{206983672645}
+
 TEST_SCOPE_E3011: I64{211278639941}
+
 TEST_SCOPE_R0801: I64{211262386258}
+
 TEST_SCOPE_R0802: I64{215557353554}
+
 TEST_SCOPE_R0803: I64{219852320850}
 
 test_scope_clone: fn(text: I64) -> I64 {
@@ -47,7 +53,9 @@ test_scope_frame_drop: fn(row: I64) {
 
 test_scope_list_free: fn(list: I64) {
     capacity: trap_word(wrapping(list + I64{8}))
-    if (capacity != I64{0}) -> jet_rt_free(trap_word(wrapping(list + I64{16})), capacity * I64{8}, I64{8})
+    if (capacity != I64{0}) {
+        jet_rt_free(trap_word(wrapping(list + I64{16})), capacity * I64{8}, I64{8})
+    }
 }
 
 test_scope_expect_clear: fn(state: I64) {
@@ -98,9 +106,9 @@ test_scope_state_drop: fn(state: I64) {
 
 #Export(c) jet_rt_testing_take_failure: fn(output: I64) -> Bool {
     state: test_capture_state()
-    if (state == I64{0}) -> return false
+    if (state == I64{0}) { return false }
     message: trap_word(wrapping(state + I64{120}))
-    if (message == I64{0}) -> return false
+    if (message == I64{0}) { return false }
     trap_store(output, message)
     trap_store(wrapping(output + I64{8}), trap_word(wrapping(state + I64{128})))
     trap_store(wrapping(state + I64{120}), I64{0})
@@ -110,15 +118,15 @@ test_scope_state_drop: fn(state: I64) {
 
 #Export(c) jet_rt_testing_clear_failure: fn() {
     state: test_capture_state()
-    if (state != I64{0}) -> test_scope_failure_clear(state)
+    if (state != I64{0}) { test_scope_failure_clear(state) }
 }
 
 // The thread's test state while a testing failure is pending, else 0. The
 // pair stays at state+120/+128 until the next record, clear, or state drop.
 test_scope_pending_failure: fn() -> I64 {
     state: test_capture_state()
-    if (state == I64{0}) -> return I64{0}
-    if (trap_word(wrapping(state + I64{120})) == I64{0}) -> return I64{0}
+    if (state == I64{0}) { return I64{0} }
+    if (trap_word(wrapping(state + I64{120})) == I64{0}) { return I64{0} }
     state
 }
 
@@ -133,7 +141,7 @@ test_scope_pending_failure: fn() -> I64 {
 // Null denotes None; a live but unstopped frame stays.
 #Export(c) jet_rt_test_expect_fail_leave_scope: fn(scope: I64) -> I64 {
     state: test_capture_state()
-    if (state == I64{0}) -> return I64{0}
+    if (state == I64{0}) { return I64{0} }
     completed: wrapping(state + I64{56})
     at := trap_word(completed)
     loop at > (I64{0}) {
@@ -152,7 +160,7 @@ test_scope_pending_failure: fn() -> I64 {
         row: trap_word(wrapping(frames + I64{16})) + at * I64{8}
         if (trap_word(row) == scope) {
             code: trap_word(wrapping(row + I64{24}))
-            if (code == I64{0}) -> return I64{0}
+            if (code == I64{0}) { return I64{0} }
             trap_store(wrapping(row + I64{24}), I64{0})
             test_scope_frame_drop(row)
             test_scope_remove(frames, at, I64{5})
@@ -165,7 +173,9 @@ test_scope_pending_failure: fn() -> I64 {
 // First stop wins on EVERY active expectation frame.
 #Export(c) jet_rt_test_record_stop: fn(code: I64, message: I64) {
     state: test_capture_state()
-    if (state == I64{0}) -> return
+    if (state == I64{0}) {
+        return
+    }
     frames: wrapping(state + I64{32})
     at := I64{0}
     loop at < trap_word(frames) {
@@ -190,7 +200,9 @@ rt_test_scope_record_stop_address: fn() -> I64 {
 
 test_scope_record_raw_stop: fn(code_word: I64, code_length: I64, message: I64, length: I64) {
     code: test_scope_stop_code
-    if (code == I64{0}) -> return
+    if (code == I64{0}) {
+        return
+    }
     _ := coll_call4(code, code_word, code_length, message, length)
 }
 
@@ -198,7 +210,7 @@ test_scope_record_raw_stop: fn(code_word: I64, code_length: I64, message: I64, l
 // unstopped frame rather than constructing temporary text just to clone it.
 #Export(c) jet_rt_test_scope_record_stop: fn(code_word: I64, code_length: I64, message: I64, length: I64) -> I64 {
     state: test_capture_state()
-    if (state == I64{0}) -> return I64{0}
+    if (state == I64{0}) { return I64{0} }
     frames: wrapping(state + I64{32})
     at := I64{0}
     loop at < trap_word(frames) {
@@ -230,7 +242,9 @@ test_scope_stopped_index: fn(state: I64) -> I64 {
     loop at > (I64{0}) {
         at -= I64{5}
         row: wrapping(trap_word(wrapping(frames + I64{16})) + at * I64{8})
-        if (trap_word(wrapping(row + I64{24})) != I64{0} && !test_scope_ordinary(trap_word(wrapping(row + I64{8})))) -> return at
+        if (trap_word(wrapping(row + I64{24})) != I64{0} && !test_scope_ordinary(trap_word(wrapping(row + I64{8})))) {
+            return at
+        }
     }
     I64{-1}
 }
@@ -238,17 +252,17 @@ test_scope_stopped_index: fn(state: I64) -> I64 {
 // Scope zero is valid; Bool distinguishes it from None.
 #Export(c) jet_rt_test_expect_fail_stopped_scope: fn(output: I64) -> Bool {
     state: test_capture_state()
-    if (state == I64{0}) -> return false
-    if (trap_word(wrapping(state + I64{80})) != I64{0}) -> return false
+    if (state == I64{0}) { return false }
+    if (trap_word(wrapping(state + I64{80})) != I64{0}) { return false }
     at: test_scope_stopped_index(state)
-    if (at < I64{0}) -> return false
+    if (at < I64{0}) { return false }
     trap_store(output, trap_word(wrapping(trap_word(wrapping(state + I64{48})) + at * I64{8})))
     true
 }
 
 // The five code bytes of a recorded stop as one little-endian word.
 test_scope_code_word: fn(code: I64) -> I64 {
-    if (trap_word(wrapping(code + I64{8})) != I64{5}) -> return I64{0}
+    if (trap_word(wrapping(code + I64{8})) != I64{5}) { return I64{0} }
     bytes: trap_word(code)
     word := I64{0}
     at := I64{0}
@@ -267,16 +281,17 @@ test_scope_code_word: fn(code: I64) -> I64 {
 // untouched.
 #Export(c) jet_rt_test_catch_for_scope: fn(scope: I64) -> Bool {
     control: scheduler_control_current()
-    if (control == I64{0} || scheduler_control_status(control) != I64{5}) -> return false
+    if (control == I64{0} || scheduler_control_status(control) != I64{5}) { return false }
     state: test_capture_state()
-    if (state == I64{0} || trap_word(wrapping(state + I64{80})) != I64{0}) -> return false
+    if (state == I64{0} || trap_word(wrapping(state + I64{80})) != I64{0}) { return false }
     index: test_scope_stopped_index(state)
-    if (index < I64{0}) -> return false
+    if (index < I64{0}) { return false }
     row: wrapping(trap_word(wrapping(state + I64{48})) + index * I64{8})
-    if (trap_word(row) != scope) -> return false
+    if (trap_word(row) != scope) { return false }
     word: test_scope_code_word(trap_word(wrapping(row + I64{24})))
-    if (word != TEST_SCOPE_E3001 && word != TEST_SCOPE_E3005 && word != TEST_SCOPE_E3010 && word != TEST_SCOPE_E3011 &&
-        word != TEST_SCOPE_R0801 && word != TEST_SCOPE_R0802 && word != TEST_SCOPE_R0803) -> return false
+    if (word != TEST_SCOPE_E3001 && word != TEST_SCOPE_E3005 && word != TEST_SCOPE_E3010 && word != TEST_SCOPE_E3011 && word != TEST_SCOPE_R0801 && word != TEST_SCOPE_R0802 && word != TEST_SCOPE_R0803) {
+        return false
+    }
     // The original stop stays pending while deeper frames unwind; only a
     // mismatch replaces it (test_scope_catch native) with E3001 at once.
     saved: jet_rt_poll_call_enter()
@@ -290,9 +305,13 @@ test_scope_code_word: fn(code: I64) -> I64 {
 // cleared here, before that frame's own cleanup.
 #Export(c) jet_rt_test_catch_boundary: fn(scope: I64) {
     control: scheduler_control_current()
-    if (control == I64{0} || scheduler_control_status(control) != I64{5}) -> return
+    if (control == I64{0} || scheduler_control_status(control) != I64{5}) {
+        return
+    }
     state: test_capture_state()
-    if (state == I64{0}) -> return
+    if (state == I64{0}) {
+        return
+    }
     completed: wrapping(state + I64{56})
     at := trap_word(completed)
     loop at > (I64{0}) {
@@ -314,7 +333,7 @@ test_scope_quoted: fn(builder: I64, text: I64) {
 // A stop meets the expectation when its code and raw message (never rendered
 // text) match; a region that never stopped fails.
 test_scope_expectation_met: fn(expected: I64, expected_message: I64, code: I64, message: I64) -> Bool {
-    if (code == I64{0}) -> return false
+    if (code == I64{0}) { return false }
     code_matches: expected == I64{0} || jet_rt_string_eq(expected, code)
     code_matches && (expected_message == I64{0} || jet_string_contains(message, expected_message))
 }
@@ -328,20 +347,19 @@ test_scope_expectation_met: fn(expected: I64, expected_message: I64, code: I64, 
     if (expected != I64{0}) {
         if stopped -> test_scope_msg_stop_code(result) else -> test_scope_msg_region_stop(result)
         jet_rt_string_builder_push(result, expected)
-        if (expected_message != I64{0}) -> test_scope_msg_code_message(result)
+        if (expected_message != I64{0}) { test_scope_msg_code_message(result) }
     } else {
-        if (expected_message != I64{0}) -> test_scope_msg_stop_message(result)
-        else -> test_scope_msg_region_fail(result)
+        if (expected_message != I64{0}) { test_scope_msg_stop_message(result) } else {
+            test_scope_msg_region_fail(result)
+        }
     }
-    if (expected_message != I64{0}) -> test_scope_quoted(result, expected_message)
+    if (expected_message != I64{0}) { test_scope_quoted(result, expected_message) }
     if stopped {
         test_scope_msg_got(result)
         jet_rt_string_builder_push(result, code)
         test_scope_msg_colon(result)
         jet_rt_string_builder_push(result, message)
-    } else {
-        test_scope_msg_passed(result)
-    }
+    } else { test_scope_msg_passed(result) }
     result
 }
 
@@ -358,9 +376,9 @@ test_scope_fail: fn(message: I64) {
 
 test_scope_catch: fn(output: I64, native: Bool) -> Bool {
     state: test_capture_state()
-    if (state == I64{0}) -> return false
+    if (state == I64{0}) { return false }
     index: test_scope_stopped_index(state)
-    if (index < I64{0}) -> return false
+    if (index < I64{0}) { return false }
     frames: wrapping(state + I64{32})
     data: trap_word(wrapping(frames + I64{16}))
     row: wrapping(data + index * I64{8})
@@ -373,7 +391,7 @@ test_scope_catch: fn(output: I64, native: Bool) -> Bool {
     // A mismatch replaces the original stop, not first-stop-wins rejection.
     // Natively that stop is still pending here, and a pending stop cuts every
     // text push short, so it is discarded before the replacement is built.
-    if (!met && native) -> scheduler_control_discard_stop(scheduler_control_current())
+    if (!met && native) { scheduler_control_discard_stop(scheduler_control_current()) }
     error: if met -> I64{0} else -> jet_rt_test_expect_fail_error(expected, expected_message, code, message)
     trap_store(wrapping(row + I64{24}), I64{0})
     at := index
@@ -401,19 +419,20 @@ test_scope_catch: fn(output: I64, native: Bool) -> Bool {
     at = I64{0}
     loop at < trap_word(timeouts) {
         timer: wrapping(trap_word(wrapping(timeouts + I64{16})) + at * I64{8})
-        if (trap_word(wrapping(timer + I64{32})) > index /% I64{5}) -> test_scope_remove(timeouts, at, I64{5})
-        else -> at += I64{5}
+        if (trap_word(wrapping(timer + I64{32})) > index /% I64{5}) {
+            test_scope_remove(timeouts, at, I64{5})
+        } else { at += I64{5} }
     }
     completed: test_scope_push(wrapping(state + I64{56}), I64{2})
     trap_store(completed, scope)
     trap_store(wrapping(completed + I64{8}), code)
-    if (output != I64{0}) -> trap_store(output, scope)
+    if (output != I64{0}) { trap_store(output, scope) }
     true
 }
 
 #Export(c) jet_rt_test_expect_fail_abort: fn() {
     state: test_capture_state()
-    if (state != I64{0}) -> test_scope_expect_clear(state)
+    if (state != I64{0}) { test_scope_expect_clear(state) }
 }
 
 #Export(c) jet_rt_test_expect_fail_unmet: fn(expected: I64, expected_message: I64) {
@@ -439,7 +458,7 @@ test_scope_catch: fn(output: I64, native: Bool) -> Bool {
 
 #Export(c) jet_rt_test_timeout_leave: fn(scope: I64, output: I64) -> Bool {
     state: test_capture_state()
-    if (state == I64{0}) -> return false
+    if (state == I64{0}) { return false }
     list: wrapping(state + I64{88})
     at := trap_word(list)
     loop at > (I64{0}) {
@@ -455,8 +474,9 @@ test_scope_catch: fn(output: I64, native: Bool) -> Bool {
             }
             elapsed := I64{0}
             if (seconds >= I64{0}) {
-                if (seconds > I64{9223372036} || (seconds == I64{9223372036} && nanos > I64{854775807})) -> elapsed = I64{9223372036854775807}
-                else -> elapsed = seconds * I64{1000000000} + nanos
+                if (seconds > I64{9223372036} || (seconds == I64{9223372036} && nanos > I64{854775807})) {
+                    elapsed = I64{9223372036854775807}
+                } else { elapsed = seconds * I64{1000000000} + nanos }
             }
             trap_store(output, elapsed)
             trap_store(wrapping(output + I64{8}), trap_word(wrapping(row + I64{24})))
@@ -469,7 +489,7 @@ test_scope_catch: fn(output: I64, native: Bool) -> Bool {
 
 #Export(c) jet_rt_test_timeout_abort: fn() {
     state: test_capture_state()
-    if (state != I64{0}) -> trap_store(wrapping(state + I64{88}), I64{0})
+    if (state != I64{0}) { trap_store(wrapping(state + I64{88}), I64{0}) }
 }
 
 #Export(c) jet_rt_test_timeout_message: fn(elapsed_ns: I64, limit_ns: I64) -> I64 {
@@ -495,7 +515,7 @@ test_scope_catch: fn(output: I64, native: Bool) -> Bool {
 
 #Export(c) jet_rt_test_take_whole_skip: fn() -> Bool {
     state: test_capture_state()
-    if (state == I64{0}) -> return false
+    if (state == I64{0}) { return false }
     result: trap_word(wrapping(state + I64{112})) != I64{0}
     trap_store(wrapping(state + I64{112}), I64{0})
     result
@@ -503,5 +523,5 @@ test_scope_catch: fn(output: I64, native: Bool) -> Bool {
 
 #Export(c) jet_rt_test_skip_abort: fn() {
     state: test_capture_state()
-    if (state != I64{0}) -> trap_store(wrapping(state + I64{112}), I64{0})
+    if (state != I64{0}) { trap_store(wrapping(state + I64{112}), I64{0}) }
 }

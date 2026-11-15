@@ -15,13 +15,15 @@ enum_case_test_names: fn(program: Program) -> String {
 }
 
 #Test("enum cases, payload cases and grouped cases are declared bare") {
-    program: parser_test_program(`Signal: enum {
+    program: parser_test_program(
+        `Signal: enum {
     Stop
     Go(speed: Int)
     Warn { Soft Loud(level: Int) }
 }
 Shape: enum { Circle(Float), Empty }
-`)
+`,
+    )
     assert_eq(enum_case_test_names(program), "Stop Go Warn.Soft Warn.Loud Circle Empty")
 }
 
@@ -45,8 +47,10 @@ Shape: enum { Circle(Float), Empty }
 }
 
 #Test("the formatter writes declared cases bare") {
-    formatted: parser_test_stable(`Shape: enum { Circle(Float), Empty }
-`)
+    formatted: parser_test_stable(
+        `Shape: enum { Circle(Float), Empty }
+`,
+    )
     assert(formatted.contains("Circle(Float)"), formatted)
     assert(!formatted.contains(".Circle") && !formatted.contains(".Empty"), formatted)
 }

@@ -54,9 +54,7 @@ status_from: fn(response: HTTPResponse) -> Int HTTPError! {
         response.status() == 200 -> {
             _: response.json<StatusResponse>() ?? panic("invalid status response")
         }
-        else -> {
-            _: response.json<ErrorResponse>() ?? panic("invalid error response")
-        }
+        else -> { _: response.json<ErrorResponse>() ?? panic("invalid error response") }
     }
     return response.status()
 }
@@ -115,9 +113,7 @@ run_concurrent: fn(url: String, body: String, count: Int, workers: Int) {
                 first: values[0] ?? panic("concurrent request failed")
                 second: values[1] ?? panic("concurrent request failed")
                 third: values[2] ?? panic("concurrent request failed")
-                if first != 12 || second != 12 || third != 12 {
-                    panic("concurrent sum mismatch")
-                }
+                if first != 12 || second != 12 || third != 12 -> panic("concurrent sum mismatch")
                 print("concurrent=3")
             }
             else -> { panic("workload only defines concurrent counts 2 and 3") }
@@ -199,7 +195,9 @@ run: fn(args: WorkloadArgs) {
                         }
                         op == "POST" && fields[1] == "/sum" -> {
                             if {
-                                fields[2].contains("numbers") -> { print("sum={post_sum(url, fields[2])}") }
+                                fields[2].contains("numbers") -> {
+                                    print("sum={post_sum(url, fields[2])}")
+                                }
                                 else -> { print("error={post_error_status(url, fields[2])}") }
                             }
                         }

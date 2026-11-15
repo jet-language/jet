@@ -26,7 +26,9 @@ kit_exec_select_ids: fn(all_ids: [String], options: KitOptions) -> KitSelection 
         loop raw in text.split("\n") {
             id: raw.trim().copy()
             if id == "" || id.starts_with("#") -> next
-            if kit_expect_named(requested, id) -> return KitSelection{ids: [], error: "duplicate case ID: {id}"}
+            if kit_expect_named(requested, id) {
+                return KitSelection{ids: [], error: "duplicate case ID: {id}"}
+            }
             if !kit_expect_named(all_ids, id) {
                 if options.others_selected -> next
                 return KitSelection{ids: [], error: "unknown case ID: {id}"}
@@ -36,8 +38,12 @@ kit_exec_select_ids: fn(all_ids: [String], options: KitOptions) -> KitSelection 
     }
     seen := [String]{}
     loop id in options.bless.ids {
-        if kit_expect_named(seen, id) -> return KitSelection{ids: [], error: "duplicate bless ID: {id}"}
-        if !kit_expect_named(all_ids, id) -> return KitSelection{ids: [], error: "unknown bless ID: {id}"}
+        if kit_expect_named(seen, id) {
+            return KitSelection{ids: [], error: "duplicate bless ID: {id}"}
+        }
+        if !kit_expect_named(all_ids, id) {
+            return KitSelection{ids: [], error: "unknown bless ID: {id}"}
+        }
         seen.push(id.copy())
     }
     selected := [String]{}
@@ -58,7 +64,9 @@ kit_exec_select_ids: fn(all_ids: [String], options: KitOptions) -> KitSelection 
 kit_exec_select_runs: fn(ids: [String], tests: [[String]], filter: String) -> [Int] {
     selected := [Int]{}
     loop (index, id) in ids {
-        if filter == "" || id.contains(filter) || tests[index].any(fn(test) { "{id}: {test}".contains(filter) }) -> selected.push(index)
+        if filter == "" || id.contains(filter) || tests[index].any(fn(test) { "{id}: {test}".contains(filter) }) {
+            selected.push(index)
+        }
     }
     selected
 }
@@ -136,7 +144,9 @@ kit_exec_toolchain_root: fn(root: String) -> String? {
         if start == "" -> next
         current := files.canonicalize(start) ?? next
         loop {
-            if files.is_dir(files.join(current, "Core")) && files.is_dir(files.join(current, "Compiler/Prelude")) -> return Val(current)
+            if files.is_dir(files.join(current, "Core")) && files.is_dir(files.join(current, "Compiler/Prelude")) {
+                return Val(current)
+            }
             if current == "/" -> break
             current = files.dirname(current)
         }
@@ -213,8 +223,7 @@ kit_exec_base_value: fn(name: String, env: KitEnv, scratch: String) -> String? {
 // them as bytes and its receipt text is lossy instead of a failed wait.
 kit_exec_spec: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, overlay: [KitEnvVar]) -> ProcessSpec {
     spec := process.cmd(argv).cwd(cwd).stdout(.Stream).stderr(.Stream).stdin(.Stream).timeout(env.timeout)
-    if env.env_clear -> spec = spec.env_clear()
-    else {
+    if env.env_clear -> spec = spec.env_clear() else {
         spec = spec.env_remove(ENV_JET_COMPILER_EXTENSION).env_remove(ENV_JET_COMPILER_IDENTITY)
         loop variable in KIT_CONTROL_VARIABLES -> spec = spec.env_remove(variable)
         spec = spec
@@ -245,19 +254,19 @@ kit_exec_spec: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, ove
         // kit it runs resolves it the same way.
         spec = spec.env_remove(ENV_JET_TEST_TOOLCHAIN_ROOT)
         if kit_exec_base_value(ENV_JET_TOOLCHAIN_ROOT, env, scratch) == {
-            .Val(toolchain) -> spec = spec.env(ENV_JET_TOOLCHAIN_ROOT, toolchain)
+            .Val(toolchain) -> { spec = spec.env(ENV_JET_TOOLCHAIN_ROOT, toolchain) }
             .None -> spec = spec.env_remove(ENV_JET_TOOLCHAIN_ROOT)
         }
         if kit_exec_base_value("PATH", env, scratch) == .Val(path) -> spec = spec.env("PATH", path)
         if kit_exec_base_value("JET", env, scratch) == {
-            .Val(jet) -> spec = spec.env("JET", jet)
+            .Val(jet) -> { spec = spec.env("JET", jet) }
             .None -> spec = spec.env_remove("JET")
         }
     }
     if env.memory_limit > 0 -> spec = spec.memory_limit(env.memory_limit)
     loop variable in overlay {
         if variable.value == {
-            .Val(value) -> spec = spec.env(variable.name, value)
+            .Val(value) -> { spec = spec.env(variable.name, value) }
             .None -> spec = spec.env_remove(variable.name)
         }
     }
@@ -267,7 +276,9 @@ kit_exec_spec: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, ove
 // Refuses a child that would run in the invoking user's home and creates the
 // case's temporary and home directories: the run that stops the spawn, or None.
 kit_exec_prepare: fn(env: KitEnv, cwd: String, scratch: String, overlay: [KitEnvVar]) -> KitRun? {
-    if kit_exec_home_refusal(env, cwd, scratch, overlay) == .Val(reason) -> return Val(kit_exec_refused(reason))
+    if kit_exec_home_refusal(env, cwd, scratch, overlay) == .Val(reason) {
+        return Val(kit_exec_refused(reason))
+    }
     files.create_dir_all(files.join(scratch, "tmp")) ?? return Val(kit_exec_failed("create child temp directory: {err}"))
     files.create_dir_all(kit_exec_home(scratch)) ?? return Val(kit_exec_failed("create child home directory: {err}"))
     None
@@ -284,9 +295,16 @@ kit_exec_receipt: fn(receipt: ProcessReceipt, elapsed_ns: Int, input_error: Stri
         }
         .None -> ""
     }
-    KitRun{stdout: receipt.output, stderr: receipt.errors, code: receipt.code,
-        signal: receipt.signal, timed_out: receipt.timed_out, error: input_error,
-        elapsed_ns: elapsed_ns, limit_hit: limit_hit}
+    KitRun{
+        stdout: receipt.output,
+        stderr: receipt.errors,
+        code: receipt.code,
+        signal: receipt.signal,
+        timed_out: receipt.timed_out,
+        error: input_error,
+        elapsed_ns: elapsed_ns,
+        limit_hit: limit_hit,
+    }
 }
 
 // A child that exits before reading its input breaks the pipe; name its exit
@@ -484,9 +502,13 @@ kit_exec_wait: fn(child: ProcessChild, watched: &KitResident, spent: &KitCPU, st
     pause := 1
     loop {
         at: started.elapsed().ns
-        if until >= 0 && at >= until -> return
+        if until >= 0 && at >= until {
+            return
+        }
         exited: child.exited() ?? return
-        if exited -> return
+        if exited {
+            return
+        }
         kit_exec_watch_resident(watched, at)
         kit_exec_watch_cpu(spent, at)
         time.sleep(if until >= 0 && until - at < pause * 1000000 -> time.duration_ns(until - at) else -> time.duration_ms(pause))
@@ -511,14 +533,20 @@ KitCPU: struct {
 // time is what the step's own work costs: a host busy with other work slows
 // the step's wall time, not this.
 kit_exec_watch_cpu: fn(spent: &KitCPU, at: Int) Never! {
-    if spent.pid <= 0 || spent.killed || at < spent.due -> return
+    if spent.pid <= 0 || spent.killed || at < spent.due {
+        return
+    }
     spent.due = at + 100000000
     used: sys.tree_cpu_time(spent.pid) ?? return
     spent.used = used.ns
-    if spent.used <= spent.limit -> return
+    if spent.used <= spent.limit {
+        return
+    }
     pids := [Int]{}
     _: kit_exec_tree_resident(spent.pid, true, pids)
-    if !kit_exec_stop_tree(spent.pid, pids) -> return
+    if !kit_exec_stop_tree(spent.pid, pids) {
+        return
+    }
     spent.killed = true
 }
 
@@ -528,7 +556,9 @@ kit_exec_stop_tree: fn(pid: Int, pids: [Int]) -> Bool Never! {
     #Unsafe("the testkit stops its own step child at a resource guard") {
         sys.kill(pid, 9) ?? return false
         loop descendant in pids {
-            if descendant != pid -> sys.kill(descendant, 9).drop("a descendant may exit before its signal")
+            if descendant != pid {
+                sys.kill(descendant, 9).drop("a descendant may exit before its signal")
+            }
         }
     }
     true
@@ -561,7 +591,9 @@ KitResident: struct {
 // case's `limit: resident=`) it sums the child and its live descendants and
 // kills them all. A case's `limit: memory=` keeps Core memory_limit.
 kit_exec_watch_resident: fn(watched: &KitResident, at: Int) Never! {
-    if watched.pid <= 0 || watched.killed || at < watched.due -> return
+    if watched.pid <= 0 || watched.killed || at < watched.due {
+        return
+    }
     watched.due = at + 100000000
     if watched.scratch != "" && at >= watched.scratch_due {
         watched.scratch_due = at + 1000000000
@@ -569,10 +601,16 @@ kit_exec_watch_resident: fn(watched: &KitResident, at: Int) Never! {
     }
     pids := [Int]{}
     used: kit_exec_tree_resident(watched.pid, watched.tree, pids)
-    if pids.len() == 0 -> return
+    if pids.len() == 0 {
+        return
+    }
     if used > watched.peak -> watched.peak = used
-    if used + watched.scratch_bytes <= watched.limit -> return
-    if !kit_exec_stop_tree(watched.pid, pids) -> return
+    if used + watched.scratch_bytes <= watched.limit {
+        return
+    }
+    if !kit_exec_stop_tree(watched.pid, pids) {
+        return
+    }
     watched.killed = true
 }
 
@@ -732,6 +770,7 @@ kit_exec_seconds: fn(ns: Int) -> String {
     tenths: if ns < 0 -> 0 else -> ns /% 100000000
     "{tenths /% 10}.{tenths % 10}"
 }
+
 kit_exec_write: fn(path: String, contents: String) {
     files.create_dir_all(files.dirname(path)) ?? panic("mkdir {path}: {err}")
     files.write(path, contents) ?? panic("write {path}: {err}")
@@ -759,7 +798,9 @@ kit_exec_remove_tree: fn(path: String) -> Bool Err! {
 // step that started them. Before its scratch goes, stop every process still
 // running an executable from that scratch or working inside it.
 kit_exec_stop_strays: fn(scratch: String) {
-    if sys.name() != "linux" -> return
+    if sys.name() != "linux" {
+        return
+    }
     root: files.canonicalize(scratch) ?? return
     inside: "{root}/"
     own: process.current_pid()
@@ -769,7 +810,9 @@ kit_exec_stop_strays: fn(scratch: String) {
         if pid == own -> next
         executable: files.read_link("/proc/{pid}/exe") ?? ""
         directory: files.read_link("/proc/{pid}/cwd") ?? ""
-        if !executable.starts_with(inside) && !directory.starts_with(inside) && directory != root -> next
+        if !executable.starts_with(inside) && !directory.starts_with(inside) && directory != root {
+            next
+        }
         #Unsafe("the testkit stops a process its own case left running in the case scratch") {
             sys.kill(pid, 9).drop("a stray may exit before its signal")
         }
@@ -778,12 +821,13 @@ kit_exec_stop_strays: fn(scratch: String) {
 
 kit_exec_make_writable: fn(path: String) {
     info: files.stat(path) ?? return
-    if info.is_symlink || !info.is_dir -> return
+    if info.is_symlink || !info.is_dir {
+        return
+    }
     files.chmod(path, info.mode % 64 + 448) ?? return
     entries: files.list_dir(path) ?? return
     loop entry in entries -> kit_exec_make_writable(entry.path)
 }
-
 
 kit_exec_optional: fn(path: String) -> String? {
     if !files.exists(path) -> return None
@@ -806,41 +850,60 @@ KIT_EXEC_CHECKED_IN_STATE: [String]{"bindings"}
 
 // Copies one listed `entry` of a tree into `destination` (kit_exec_copy_tree).
 kit_exec_copy_entry: fn(entry: files.DirEntry, destination: String, fixture_state: Bool, authored_jet: Bool) {
-    if entry.name == ".git" -> return
+    if entry.name == ".git" {
+        return
+    }
     if entry.name == ".jet" && !authored_jet {
-        if !entry.is_dir -> return
+        if !entry.is_dir {
+            return
+        }
         loop part in KIT_EXEC_CHECKED_IN_STATE {
             kept: files.join(entry.path, part)
-            if files.is_dir(kept) -> kit_exec_copy_tree(kept, files.join(files.join(destination, ".jet"), part), false, true)
+            if files.is_dir(kept) {
+                kit_exec_copy_tree(kept, files.join(files.join(destination, ".jet"), part), false, true)
+            }
         }
         return
     }
     name: if fixture_state && (entry.name == "state" || entry.name == "fixture-state") -> ".jet" else -> entry.name
     target: files.join(destination, name)
-    if entry.is_dir -> kit_exec_copy_tree(entry.path, target, fixture_state, authored_jet)
-    else -> kit_exec_copy_file(entry.path, target)
+    if entry.is_dir -> kit_exec_copy_tree(entry.path, target, fixture_state, authored_jet) else {
+        kit_exec_copy_file(entry.path, target)
+    }
 }
 
 kit_exec_requires: fn(requirement: String, env: KitEnv, work: String, scratch: String) -> KitVerdict? {
     if requirement.starts_with("first-existing ") -> return None
     if requirement.starts_with("path-exists:") {
         path: kit_steps_expand(requirement.slice(12, requirement.len()), env, work, scratch, "")
-        if !files.exists(files.join(work, path)) -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
+        if !files.exists(files.join(work, path)) {
+            return Val(kit_expect_verdict("SKIP-HOST", requirement))
+        }
         return None
     }
     if requirement.starts_with("env:") {
         assignment: requirement.slice(4, requirement.len())
         equals: assignment.index("=") ?? -1
-        if equals <= 0 -> return Val(kit_expect_verdict("REFUSED", "invalid requires: {requirement}"))
+        if equals <= 0 {
+            return Val(kit_expect_verdict("REFUSED", "invalid requires: {requirement}"))
+        }
         name: assignment.slice(0, equals)
         value: assignment.slice(equals + 1, assignment.len())
-        if (sys.get(name) ?? "") != value -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
+        if (sys.get(name) ?? "") != value {
+            return Val(kit_expect_verdict("SKIP-HOST", requirement))
+        }
     } else if requirement.starts_with("os:") {
-        if !kit_steps_host_matches(sys.family(), requirement.slice(3, requirement.len())) -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
+        if !kit_steps_host_matches(sys.family(), requirement.slice(3, requirement.len())) {
+            return Val(kit_expect_verdict("SKIP-HOST", requirement))
+        }
     } else if requirement.starts_with("os-name:") {
-        if !kit_steps_host_matches(kit_steps_host_name(), requirement.slice(8, requirement.len())) -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
+        if !kit_steps_host_matches(kit_steps_host_name(), requirement.slice(8, requirement.len())) {
+            return Val(kit_expect_verdict("SKIP-HOST", requirement))
+        }
     } else if requirement.starts_with("arch:") {
-        if !kit_steps_host_matches(kit_steps_host_arch(), requirement.slice(5, requirement.len())) -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
+        if !kit_steps_host_matches(kit_steps_host_arch(), requirement.slice(5, requirement.len())) {
+            return Val(kit_expect_verdict("SKIP-HOST", requirement))
+        }
     } else if requirement.starts_with("probe ") {
         matched: kit_steps_probe(requirement.slice(6, requirement.len()), env, work, scratch)
         if !matched -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
@@ -850,9 +913,9 @@ kit_exec_requires: fn(requirement: String, env: KitEnv, work: String, scratch: S
         matched: kit_steps_capability_any(body, probes, env, work, scratch)
         if !matched -> return Val(kit_expect_verdict("FAIL", requirement))
     } else if requirement.starts_with("tool:") {
-        if kit_steps_tool(requirement.slice(5, requirement.len())) == None -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
-    } else {
-        return Val(kit_expect_verdict("REFUSED", "unknown host requirement: {requirement}"))
-    }
+        if kit_steps_tool(requirement.slice(5, requirement.len())) == None {
+            return Val(kit_expect_verdict("SKIP-HOST", requirement))
+        }
+    } else { return Val(kit_expect_verdict("REFUSED", "unknown host requirement: {requirement}")) }
     None
 }

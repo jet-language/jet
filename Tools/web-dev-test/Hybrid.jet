@@ -25,13 +25,18 @@ use {
 }
 
 C_WAIT_MS: 15000
+
 C_POLL_MS: 80
+
 C_BODY_LIMIT: 268435456
+
 // WebDriver's Escape key, U+E00C.
 C_ESCAPE_UTF8: [U8]{238, 128, 140}
 
 C_FETCH_APP_JS: "fetch('/app.js', {{cache:'no-store'}}).then((r) => r.text())"
+
 C_PILL: "(document.querySelector('#jet-dev-pill .label')?.textContent || '')"
+
 C_OVERLAY: "JSON.stringify({{ title: document.querySelector('#jet-dev-overlay h3')?.textContent || '', body: document.querySelector('#jet-dev-overlay pre')?.textContent || '', footer: document.querySelector('#jet-dev-overlay footer')?.textContent || '', pill: document.querySelector('#jet-dev-pill .label')?.textContent || '' }})"
 
 #Error
@@ -157,10 +162,16 @@ status: fn(o: Options) -> Dyn Failure! {
 
 set_offline: fn(d: Driver, offline: Bool) Failure! {
     conditions: if offline -> Dyn.Object([(key: String, value: Dyn)]{(key: "type", value: Dyn.Text("offline"))}) else -> Dyn.Null
-    command(d.bidi, "emulation.setNetworkConditions", Dyn.Object([(key: String, value: Dyn)]{
-        (key: "networkConditions", value: conditions),
-        (key: "contexts", value: Dyn.Array([Dyn]{Dyn.Text(d.context.copy())})),
-    }))
+    command(
+        d.bidi,
+        "emulation.setNetworkConditions",
+        Dyn.Object(
+            [(key: String, value: Dyn)]{
+                (key: "networkConditions", value: conditions),
+                (key: "contexts", value: Dyn.Array([Dyn]{Dyn.Text(d.context.copy())})),
+            },
+        ),
+    )
     Ok()
 }
 
@@ -168,10 +179,16 @@ press: fn(d: Driver, key: String) Failure! {
     down: Dyn.Object([(key: String, value: Dyn)]{(key: "type", value: Dyn.Text("keyDown")), (key: "value", value: Dyn.Text(key.copy()))})
     up: Dyn.Object([(key: String, value: Dyn)]{(key: "type", value: Dyn.Text("keyUp")), (key: "value", value: Dyn.Text(key.copy()))})
     source: Dyn.Object([(key: String, value: Dyn)]{(key: "type", value: Dyn.Text("key")), (key: "id", value: Dyn.Text("keyboard")), (key: "actions", value: Dyn.Array([Dyn]{down, up}))})
-    command(d.bidi, "input.performActions", Dyn.Object([(key: String, value: Dyn)]{
-        (key: "context", value: Dyn.Text(d.context.copy())),
-        (key: "actions", value: Dyn.Array([Dyn]{source})),
-    }))
+    command(
+        d.bidi,
+        "input.performActions",
+        Dyn.Object(
+            [(key: String, value: Dyn)]{
+                (key: "context", value: Dyn.Text(d.context.copy())),
+                (key: "actions", value: Dyn.Array([Dyn]{source})),
+            },
+        ),
+    )
     Ok()
 }
 
@@ -215,23 +232,31 @@ perform: fn(d: Driver, expression: String) Failure! {
 // The page value of `expression` as `String(value)` after awaiting it, or
 // None when the page threw.
 evaluate: fn(d: Driver, expression: String) -> String? Failure! {
-    params: Dyn.Object([(key: String, value: Dyn)]{
-        (key: "expression", value: Dyn.Text("(async () => String(await ({expression})))()")),
-        (key: "target", value: Dyn.Object([(key: String, value: Dyn)]{(key: "context", value: Dyn.Text(d.context.copy()))})),
-        (key: "awaitPromise", value: Dyn.Bool(true)),
-        (key: "resultOwnership", value: Dyn.Text("none")),
-    })
+    params: Dyn.Object(
+        [(key: String, value: Dyn)]{
+            (key: "expression", value: Dyn.Text("(async () => String(await ({expression})))()")),
+            (key: "target", value: Dyn.Object([(key: String, value: Dyn)]{(key: "context", value: Dyn.Text(d.context.copy()))})),
+            (key: "awaitPromise", value: Dyn.Bool(true)),
+            (key: "resultOwnership", value: Dyn.Text("none")),
+        },
+    )
     reply: command(d.bidi, "script.evaluate", params)
     if text(field(reply, "type")) != "success" -> return Ok(None)
     Ok(Val(text(field(field(reply, "result"), "value"))))
 }
 
 navigate: fn(d: Driver, address: String) Failure! {
-    command(d.bidi, "browsingContext.navigate", Dyn.Object([(key: String, value: Dyn)]{
-        (key: "context", value: Dyn.Text(d.context.copy())),
-        (key: "url", value: Dyn.Text(address.copy())),
-        (key: "wait", value: Dyn.Text("complete")),
-    }))
+    command(
+        d.bidi,
+        "browsingContext.navigate",
+        Dyn.Object(
+            [(key: String, value: Dyn)]{
+                (key: "context", value: Dyn.Text(d.context.copy())),
+                (key: "url", value: Dyn.Text(address.copy())),
+                (key: "wait", value: Dyn.Text("complete")),
+            },
+        ),
+    )
     Ok()
 }
 
@@ -271,9 +296,7 @@ text: fn(tree: Dyn) -> String {
     ""
 }
 
-number: fn(tree: Dyn) -> Int {
-    tree.int() ?? (0 - 1)
-}
+number: fn(tree: Dyn) -> Int { tree.int() ?? (0 - 1) }
 
 option: fn(args: [String], name: String) -> String? {
     loop index in 0..<args.len() {

@@ -202,8 +202,12 @@ run: fn() {
     devanagari_font: discover_font("hi") ?? ""
     arabic_shape: if arabic_font == "" -> "unavailable:font" else -> shape_with_harfbuzz(arabic_font, "سلام")
     devanagari_shape: if devanagari_font == "" -> "unavailable:font" else -> shape_with_harfbuzz(devanagari_font, "नमस्ते")
-    if !arabic_shape.starts_with("unavailable:") && !arabic_shape.starts_with("[") -> panic("Arabic shaping returned no glyph JSON")
-    if !devanagari_shape.starts_with("unavailable:") && !devanagari_shape.starts_with("[") -> panic("Devanagari shaping returned no glyph JSON")
+    if !arabic_shape.starts_with("unavailable:") && !arabic_shape.starts_with("[") {
+        panic("Arabic shaping returned no glyph JSON")
+    }
+    if !devanagari_shape.starts_with("unavailable:") && !devanagari_shape.starts_with("[") {
+        panic("Devanagari shaping returned no glyph JSON")
+    }
     print("shape_arabic=checked")
     print("shape_devanagari=checked")
     print("text_probe_complete")

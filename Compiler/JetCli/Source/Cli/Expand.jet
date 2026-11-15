@@ -74,13 +74,13 @@ jet_cli_expand_inline_function: fn(function: Func, owner: String?, unit: JetDriv
     line: diagnostic_line_at(unit.source, span.start)
     column: diagnostic_column_at(unit.source, span.start)
     value: jet_cli_status_object(
-    [JetCLIStatusField]{
-        jet_cli_status_field("name", jet_cli_status_text(name)),
-        jet_cli_status_field("source", jet_cli_status_text(unit.path)),
-        jet_cli_status_field("span", jet_cli_expand_span(span, Val(unit.source))),
-        jet_cli_status_field("contract", jet_cli_status_text(contract)),
-        jet_cli_status_field("rust_attribute", jet_cli_status_text(attribute)),
-    },
+        [JetCLIStatusField]{
+            jet_cli_status_field("name", jet_cli_status_text(name)),
+            jet_cli_status_field("source", jet_cli_status_text(unit.path)),
+            jet_cli_status_field("span", jet_cli_expand_span(span, Val(unit.source))),
+            jet_cli_status_field("contract", jet_cli_status_text(contract)),
+            jet_cli_status_field("rust_attribute", jet_cli_status_text(attribute)),
+        },
     )
     facts.push(JetCLIExpandFact{source: unit.path, offset: span.start, name: name, text: "{unit.path}:{line}:{column}   {name}   {contract}   -> {attribute}", value: value})
 }
@@ -140,24 +140,24 @@ jet_cli_expand_effects: fn(index: SemIndex) -> [JetCLIExpandFact] Never! {
         provenance: loop proof in row.provenance -> {
             spans: loop span in proof.spans -> jet_cli_expand_span(span, None)
             jet_cli_status_object(
-            [JetCLIStatusField]{
-                jet_cli_status_field("effect", jet_cli_status_text(proof.effect_name)),
-                jet_cli_status_field("call_path", jet_cli_status_texts(proof.call_path)),
-                jet_cli_status_field("spans", jet_cli_status_array(spans)),
-            },
+                [JetCLIStatusField]{
+                    jet_cli_status_field("effect", jet_cli_status_text(proof.effect_name)),
+                    jet_cli_status_field("call_path", jet_cli_status_texts(proof.call_path)),
+                    jet_cli_status_field("spans", jet_cli_status_array(spans)),
+                },
             )
         }
         value: jet_cli_status_object(
-        [JetCLIStatusField]{
-            jet_cli_status_field("function", jet_cli_status_text(row.function)),
-            jet_cli_status_field("direct", jet_cli_status_texts(row.direct)),
-            jet_cli_status_field("callees", jet_cli_status_texts(row.callees)),
-            jet_cli_status_field("inferred", jet_cli_status_texts(row.inferred)),
-            jet_cli_status_field("maximal", jet_cli_status_bool(row.maximal)),
-            jet_cli_status_field("evidence", jet_cli_status_text("checked_static")),
-            jet_cli_status_field("runtime_observation", jet_cli_status_text("not_run")),
-            jet_cli_status_field("provenance", jet_cli_status_array(provenance)),
-        },
+            [JetCLIStatusField]{
+                jet_cli_status_field("function", jet_cli_status_text(row.function)),
+                jet_cli_status_field("direct", jet_cli_status_texts(row.direct)),
+                jet_cli_status_field("callees", jet_cli_status_texts(row.callees)),
+                jet_cli_status_field("inferred", jet_cli_status_texts(row.inferred)),
+                jet_cli_status_field("maximal", jet_cli_status_bool(row.maximal)),
+                jet_cli_status_field("evidence", jet_cli_status_text("checked_static")),
+                jet_cli_status_field("runtime_observation", jet_cli_status_text("not_run")),
+                jet_cli_status_field("provenance", jet_cli_status_array(provenance)),
+            },
         )
         maximal: if row.maximal -> " (maximal)" else -> ""
         output.push(JetCLIExpandFact{source: "", offset: 0, name: row.function, text: "{row.function}: resolved=[{row.inferred.join(", ")}]{maximal}", value: value})
@@ -177,14 +177,14 @@ jet_cli_expand_derive: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [Je
         row: definition.def
         forwarded := jet_cli_expand_distinct_forward(modules, row.module_path, row.name, definition.derives, forwards)
         value: jet_cli_status_object(
-        [JetCLIStatusField]{
-            jet_cli_status_field("name", jet_cli_status_text(row.name)),
-            jet_cli_status_field("identity", jet_cli_status_text(row.identity)),
-            jet_cli_status_field("source", jet_cli_status_text(row.module_path)),
-            jet_cli_status_field("span", jet_cli_expand_span(row.def_span, jet_cli_expand_source(modules, row.module_path))),
-            jet_cli_status_field("derives", jet_cli_status_texts(definition.derives)),
-            jet_cli_status_field("forwarded_source", jet_cli_status_text(forwarded)),
-        },
+            [JetCLIStatusField]{
+                jet_cli_status_field("name", jet_cli_status_text(row.name)),
+                jet_cli_status_field("identity", jet_cli_status_text(row.identity)),
+                jet_cli_status_field("source", jet_cli_status_text(row.module_path)),
+                jet_cli_status_field("span", jet_cli_expand_span(row.def_span, jet_cli_expand_source(modules, row.module_path))),
+                jet_cli_status_field("derives", jet_cli_status_texts(definition.derives)),
+                jet_cli_status_field("forwarded_source", jet_cli_status_text(forwarded)),
+            },
         )
         text := "{row.name}: {definition.derives.join(", ")} [{row.identity}]"
         loop line in forwarded.lines() -> text = "{text}\n    {line}".trim_end()
@@ -203,14 +203,20 @@ jet_cli_expand_distinct_forward: fn(modules: [JetDriverDocModule], path: String,
         loop item in unit.items {
             if item == .Distinct(declaration) {
                 if declaration.name != name -> next
-                if forwards.get(unit.path) == None -> forwards[unit.path] = sema_derive_distinct_forward_source(unit.items)
+                if forwards.get(unit.path) == None {
+                    forwards[unit.path] = sema_derive_distinct_forward_source(unit.items)
+                }
                 generated: forwards.get(unit.path) ?? [String:String]{}
                 source := generated.get(name) ?? ""
                 native := [String]{}
                 loop derived in derives {
-                    if derived != "Equatable" && derived != "Comparable" -> native.push(derived.copy())
+                    if derived != "Equatable" && derived != "Comparable" {
+                        native.push(derived.copy())
+                    }
                 }
-                if native.len() > 0 -> source = "{source}// {native.join(", ")}: forwarded natively to `{type_name(declaration.base)}`; no generated members\n"
+                if native.len() > 0 {
+                    source = "{source}// {native.join(", ")}: forwarded natively to `{type_name(declaration.base)}`; no generated members\n"
+                }
                 return source
             }
         }
@@ -220,15 +226,15 @@ jet_cli_expand_distinct_forward: fn(modules: [JetDriverDocModule], path: String,
 
 jet_cli_expand_template: fn(unit: JetDriverDocModule, span: Span, kind: String, name: String, methods: [String], text: String) -> JetCLIExpandFact Never! {
     value: jet_cli_status_object(
-    [JetCLIStatusField]{
-        jet_cli_status_field("kind", jet_cli_status_text(kind)),
-        jet_cli_status_field("name", jet_cli_status_text(name)),
-        jet_cli_status_field("methods", jet_cli_status_texts(methods)),
-        jet_cli_status_field("text", jet_cli_status_text(text)),
-        jet_cli_status_field("source", jet_cli_status_text(unit.path)),
-        jet_cli_status_field("span", jet_cli_expand_span(span, Val(unit.source))),
-        jet_cli_status_field("origin", jet_cli_status_text("#loop (closed comptime source)")),
-    },
+        [JetCLIStatusField]{
+            jet_cli_status_field("kind", jet_cli_status_text(kind)),
+            jet_cli_status_field("name", jet_cli_status_text(name)),
+            jet_cli_status_field("methods", jet_cli_status_texts(methods)),
+            jet_cli_status_field("text", jet_cli_status_text(text)),
+            jet_cli_status_field("source", jet_cli_status_text(unit.path)),
+            jet_cli_status_field("span", jet_cli_expand_span(span, Val(unit.source))),
+            jet_cli_status_field("origin", jet_cli_status_text("#loop (closed comptime source)")),
+        },
     )
     line: diagnostic_line_at(unit.source, span.start)
     column: diagnostic_column_at(unit.source, span.start)
@@ -339,17 +345,17 @@ jet_cli_expand_view_text: fn(entry: ViewProvenanceEntry) -> String Never! {
 
 jet_cli_expand_view_value: fn(entry: ViewProvenanceEntry) -> JetCLIStatusValue Never! {
     sources: loop path in entry.value.sources -> jet_cli_status_object(
-    [JetCLIStatusField]{
-        jet_cli_status_field("source", jet_cli_status_text(jet_cli_expand_view_source(path))),
-        jet_cli_status_field("projections", jet_cli_status_texts(jet_cli_expand_view_projections(path))),
-    },
+        [JetCLIStatusField]{
+            jet_cli_status_field("source", jet_cli_status_text(jet_cli_expand_view_source(path))),
+            jet_cli_status_field("projections", jet_cli_status_texts(jet_cli_expand_view_projections(path))),
+        },
     )
     jet_cli_status_object(
-    [JetCLIStatusField]{
-        jet_cli_status_field("output_path", jet_cli_status_texts(entry.slot)),
-        jet_cli_status_field("sources", jet_cli_status_array(sources)),
-        jet_cli_status_field("mutable", jet_cli_status_bool(entry.value.mutable)),
-    },
+        [JetCLIStatusField]{
+            jet_cli_status_field("output_path", jet_cli_status_texts(entry.slot)),
+            jet_cli_status_field("sources", jet_cli_status_array(sources)),
+            jet_cli_status_field("mutable", jet_cli_status_bool(entry.value.mutable)),
+        },
     )
 }
 

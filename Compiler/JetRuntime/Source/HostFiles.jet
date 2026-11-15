@@ -70,9 +70,9 @@ fd_new: fn(number: I64, path: I64, writer: Bool) -> I64 {
 
 #Export(c) jet_fd_open_raw: fn(path: I64, flags: I64, mode: I64, errno: I64) -> I64 {
     native_flags: host_native_int(flags)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     native_mode: host_native_int(mode)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     name: fd_c_path(path)
     bits: fd_open_flags(native_flags)
     result: host_call(I64{2}, name, bits.bit_or(I64{524288}), native_mode.bit_and(I64{4294967295}))
@@ -84,7 +84,7 @@ fd_new: fn(number: I64, path: I64, writer: Bool) -> I64 {
 // Takes ownership of a native descriptor supplied by another runtime leaf.
 #Export(c) jet_fd_adopt_raw: fn(number: I64, path: I64, writer: Bool) -> I64 {
     native: host_i32(number)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     fd_new(native, path, writer)
 }
 
@@ -134,6 +134,7 @@ fd_flush_locked: fn(state: I64) -> I64 {
     fd_put(state, I64{48}, remaining)
     failure
 }
+
 // Read/dup have no separate WriteZero output. Preserve that flush failure as
 // the existing custom ErrorOut32 domain, never as invented POSIX errno 4096.
 fd_read_error: fn(result: I64, error: I64) -> I64 {
@@ -149,7 +150,7 @@ fd_read_error: fn(result: I64, error: I64) -> I64 {
 // No refill or EINTR retry here; the line provider owns both on this same FD72.
 #Export(c) jet_fd_read_raw: fn(state: I64, bytes: I64, length: I64, error: I64) -> I64 {
     requested: host_native_int(length)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     fd_lock(state)
     result := fd_flush_locked(state)
     if (result == I64{0}) {
@@ -159,9 +160,7 @@ fd_read_error: fn(result: I64, error: I64) -> I64 {
             result = if (requested < unread) -> requested else -> unread
             rt_text_bytes_copy(bytes, wrapping(fd_word(state, I64{32}) + fd_word(state, I64{56})), result)
             fd_put(state, I64{56}, fd_word(state, I64{56}) + result)
-        } else {
-            result = host_call(I64{0}, fd_word(state, I64{8}), bytes, requested)
-        }
+        } else { result = host_call(I64{0}, fd_word(state, I64{8}), bytes, requested) }
     }
     fd_unlock(state)
     fd_read_error(result, error)
@@ -169,7 +168,7 @@ fd_read_error: fn(result: I64, error: I64) -> I64 {
 
 #Export(c) jet_fd_write_raw: fn(state: I64, bytes: I64, length: I64, errno: I64, zero: I64) -> I64 {
     requested: host_native_int(length)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     fd_lock(state)
     result := I64{-9}
     if (fd_word(state, I64{16}) == I64{0}) {
@@ -224,9 +223,9 @@ fd_read_error: fn(result: I64, error: I64) -> I64 {
 
 #Export(c) jet_fd_seek_raw: fn(state: I64, offset: I64, whence: I64, errno: I64, zero: I64) -> I64 {
     delta: host_native_int(offset)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     origin: host_i32(whence)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     fd_lock(state)
     result := fd_flush_locked(state)
     if (result == I64{0}) {
@@ -241,11 +240,11 @@ fd_read_error: fn(result: I64, error: I64) -> I64 {
                     fd_put(state, I64{48}, I64{0})
                     fd_put(state, I64{56}, I64{0})
                 }
-            } else {
-                adjusted -= unread
-            }
+            } else { adjusted -= unread }
         }
-        if (result >= I64{0}) -> result = host_call(I64{8}, fd_word(state, I64{8}), adjusted, origin)
+        if (result >= I64{0}) {
+            result = host_call(I64{8}, fd_word(state, I64{8}), adjusted, origin)
+        }
         if (result >= I64{0}) {
             fd_put(state, I64{48}, I64{0})
             fd_put(state, I64{56}, I64{0})
@@ -285,13 +284,17 @@ fd_operation: fn(state: I64, syscall: I64, a2: I64, a3: I64, errno: I64) {
 
 #Export(c) jet_fd_chmod_raw: fn(state: I64, mode: I64, errno: I64) {
     native: host_native_int(mode)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        return
+    }
     fd_operation(state, I64{91}, native.bit_and(I64{4294967295}), I64{0}, errno)
 }
 
 #Export(c) jet_fd_lock_raw: fn(state: I64, operation: I64, errno: I64) {
     native: host_i32(operation)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        return
+    }
     fd_operation(state, I64{73}, native, I64{0}, errno)
 }
 
@@ -355,9 +358,7 @@ fd_operation: fn(state: I64, syscall: I64, a2: I64, a3: I64, errno: I64) {
 #Export(c) jet_fd_dup_raw: fn(state: I64, errno: I64) -> I64 {
     fd_lock(state)
     result := fd_flush_locked(state)
-    if (result == I64{0}) {
-        result = host_call(I64{72}, fd_word(state, I64{8}), I64{1030}, I64{3})
-    }
+    if (result == I64{0}) { result = host_call(I64{72}, fd_word(state, I64{8}), I64{1030}, I64{3}) }
     duplicate: if (result < I64{0}) -> I64{0} else -> fd_new(result, fd_word(state, I64{24}), fd_word(state, I64{40}) < I64{0})
     fd_unlock(state)
     _ := fd_read_error(result, errno)
@@ -378,7 +379,9 @@ fd_operation: fn(state: I64, syscall: I64, a2: I64, a3: I64, errno: I64) {
 
 #Export(c) jet_fs_mkdir_raw: fn(path: I64, mode: I64, errno: I64) {
     native: host_native_int(mode)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        return
+    }
     name: fd_c_path(path)
     result: host_call(I64{83}, name, native.bit_and(I64{4294967295}), I64{0})
     fd_c_path_drop(name, path)
@@ -412,7 +415,7 @@ fd_operation: fn(state: I64, syscall: I64, a2: I64, a3: I64, errno: I64) {
 
 #Export(c) jet_fd_directory_raw: fn(state: I64, bytes: I64, length: I64, errno: I64) -> I64 {
     requested: host_native_int(length)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     fd_lock(state)
     result: if (fd_word(state, I64{16}) != I64{0}) -> I64{-9} else -> host_call(I64{217}, fd_word(state, I64{8}), bytes, requested)
     fd_unlock(state)
@@ -426,9 +429,9 @@ fd_zero: fn(result: I64, zero: I64) {
 
 #Export(c) jet_fd_open_at_raw: fn(directory: I64, path: I64, flags: I64, mode: I64, errno: I64) -> I64 {
     native_flags: host_native_int(flags)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     native_mode: host_native_int(mode)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     name: fd_c_path(path)
     bits: fd_open_flags(native_flags)
     fd_lock(directory)
@@ -516,7 +519,7 @@ fd_created_finish: fn(result: I64, output: I64, errno: I64) {
 
 #Export(c) jet_fd_adopt_unbuffered_raw: fn(number: I64, path: I64) -> I64 {
     native: host_i32(number)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     state: fd_new(native, path, false)
     fd_put(state, I64{40}, I64{0})
     state
@@ -524,7 +527,7 @@ fd_created_finish: fn(result: I64, output: I64, errno: I64) {
 
 #Export(c) jet_fd_write_unbuffered_raw: fn(state: I64, bytes: I64, length: I64, error: I64) -> I64 {
     requested: host_native_int(length)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     fd_lock(state)
     result := I64{-9}
     if (fd_word(state, I64{16}) == I64{0}) {
@@ -539,13 +542,15 @@ fd_created_finish: fn(result: I64, output: I64, errno: I64) {
 
 #Export(c) jet_fd_truncate_raw: fn(state: I64, length: I64, errno: I64) {
     native: host_native_int(length)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        return
+    }
     fd_operation(state, I64{77}, native, I64{0}, errno)
 }
 
 #Export(c) jet_fs_readlink_raw: fn(path: I64, bytes: I64, length: I64, errno: I64) -> I64 {
     requested: host_native_int(length)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     name: fd_c_path(path)
     result: host_call(I64{89}, name, bytes, requested)
     fd_c_path_drop(name, path)
@@ -557,7 +562,7 @@ fd_created_finish: fn(result: I64, output: I64, errno: I64) {
 // reports exactly one syscall's count or POSIX error.
 #Export(c) jet_fs_xattr_get_raw: fn(path: I64, attribute: I64, bytes: I64, length: I64, error: I64) -> I64 {
     requested: host_native_int(length)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     name: fd_c_path(path)
     key: fd_c_path(attribute)
     result := I64{0}
@@ -571,7 +576,9 @@ fd_created_finish: fn(result: I64, output: I64, errno: I64) {
 
 #Export(c) jet_fd_mkdir_at_raw: fn(directory: I64, path: I64, mode: I64, errno: I64) {
     native: host_native_int(mode)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        return
+    }
     name: fd_c_path(path)
     fd_operation(directory, I64{258}, name, native.bit_and(I64{4294967295}), errno)
     fd_c_path_drop(name, path)
@@ -585,7 +592,7 @@ fd_created_finish: fn(result: I64, output: I64, errno: I64) {
 
 #Export(c) jet_fd_readlink_at_raw: fn(directory: I64, path: I64, bytes: I64, length: I64, errno: I64) -> I64 {
     requested: host_native_int(length)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     name: fd_c_path(path)
     fd_lock(directory)
     result := I64{-9}
@@ -602,7 +609,9 @@ fd_created_finish: fn(result: I64, output: I64, errno: I64) {
 
 #Export(c) jet_fd_rename_at_raw: fn(source: I64, old: I64, destination: I64, new: I64, flags: I64, errno: I64) {
     native_flags: host_native_int(flags)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        return
+    }
     a: fd_dup_number(source)
     if (a < I64{0}) {
         _ := fd_error(a, errno)
@@ -630,9 +639,13 @@ fd_created_finish: fn(result: I64, output: I64, errno: I64) {
 // Independent terminal-control FD72 can outlive the ProcessChild carrier.
 #Export(c) jet_fd_resize_raw: fn(state: I64, cols: I64, rows: I64, error: I64) {
     native_rows: host_native_int(rows)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        return
+    }
     native_cols: host_native_int(cols)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        return
+    }
     size: (native_rows.bit_and(I64{65535})).bit_or(((native_cols.bit_and(I64{65535})) << I64{16}))
     fd_lock(state)
     result := I64{-9}

@@ -21,6 +21,7 @@ use {
 }
 
 C_WAIT_MS: 20000
+
 C_POLL_MS: 80
 
 #Error
@@ -165,8 +166,8 @@ wait_for: fn(d: Driver, expression: String, label: String) Failure! {
 // Run a page action once; a thrown page error fails the journey.
 perform: fn(d: Driver, expression: String) Failure! {
     if evaluate(d, expression) == {
-        .Val(_) -> Ok()
-        None -> Err(Failure{message: "page action threw: {expression}"})
+        .Val(_) -> { Ok() }
+        None -> { Err(Failure{message: "page action threw: {expression}"}) }
         .Err(error) -> Err(error)
     }
 }
@@ -174,12 +175,14 @@ perform: fn(d: Driver, expression: String) Failure! {
 // The page value of `expression` as `String(value)` after awaiting it, or
 // None when the page threw.
 evaluate: fn(d: Driver, expression: String) -> String? Failure! {
-    params: Dyn.Object([(key: String, value: Dyn)]{
-        (key: "expression", value: Dyn.Text("(async () => String(await ({expression})))()")),
-        (key: "target", value: Dyn.Object([(key: String, value: Dyn)]{(key: "context", value: Dyn.Text(d.context.copy()))})),
-        (key: "awaitPromise", value: Dyn.Bool(true)),
-        (key: "resultOwnership", value: Dyn.Text("none")),
-    })
+    params: Dyn.Object(
+        [(key: String, value: Dyn)]{
+            (key: "expression", value: Dyn.Text("(async () => String(await ({expression})))()")),
+            (key: "target", value: Dyn.Object([(key: String, value: Dyn)]{(key: "context", value: Dyn.Text(d.context.copy()))})),
+            (key: "awaitPromise", value: Dyn.Bool(true)),
+            (key: "resultOwnership", value: Dyn.Text("none")),
+        },
+    )
     wire: json.to_string(params) ?? return Err(Failure{message: "script.evaluate parameters cannot be encoded: {err}"})
     reply: d.bidi.send("script.evaluate", wire) ?? return Err(Failure{message: "script.evaluate failed: {err}"})
     tree: json.parse(reply) ?? return Err(Failure{message: "script.evaluate reply is not JSON: {err}"})
@@ -198,7 +201,9 @@ open: fn(engine: String, address: String, origin: String) -> Driver Failure! {
     reply: bidi.send("browsingContext.getTree", "{{}}") ?? return Err(Failure{message: "browsingContext.getTree failed: {err}"})
     tree: json.parse(reply) ?? return Err(Failure{message: "browsingContext.getTree reply is not JSON: {err}"})
     loop entry in items(field(tree, "contexts")) {
-        if text(field(entry, "url")).starts_with(origin) -> return Ok(Driver{session: session, bidi: bidi, context: text(field(entry, "context"))})
+        if text(field(entry, "url")).starts_with(origin) {
+            return Ok(Driver{session: session, bidi: bidi, context: text(field(entry, "context"))})
+        }
     }
     Err(Failure{message: "no browsing context shows {origin}"})
 }

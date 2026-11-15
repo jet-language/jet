@@ -12,9 +12,38 @@
 // instead (ir_lint_route_gaps): every R4 gap against that runtime's exports.
 use {
     jet_ir.[
-        IRClass, IRDataReloc, IRFunction, IRLintFinding, IRModule, IROp, IRSlotKind, IRType, IRTypeKind, IR_CODE_TYPE, IR_LINT_OPS, IR_OVERFLOW_TRAP, IR_OVERFLOW_WRAP,
-        ir_args, ir_emit, ir_end, ir_function_new, ir_intern_name, ir_intern_text, ir_intern_type, ir_lint_context, ir_lint_core_routes, ir_lint_module, ir_lint_route_gaps,
-        ir_lint_text, ir_module_new, ir_op_code, ir_open, ir_open_if, ir_opt_lint, ir_opt_report, ir_slot,
+        IRClass,
+        IRDataReloc,
+        IRFunction,
+        IRLintFinding,
+        IRModule,
+        IROp,
+        IRSlotKind,
+        IRType,
+        IRTypeKind,
+        IR_CODE_TYPE,
+        IR_LINT_OPS,
+        IR_OVERFLOW_TRAP,
+        IR_OVERFLOW_WRAP,
+        ir_args,
+        ir_emit,
+        ir_end,
+        ir_function_new,
+        ir_intern_name,
+        ir_intern_text,
+        ir_intern_type,
+        ir_lint_context,
+        ir_lint_core_routes,
+        ir_lint_module,
+        ir_lint_route_gaps,
+        ir_lint_text,
+        ir_module_new,
+        ir_op_code,
+        ir_open,
+        ir_open_if,
+        ir_opt_lint,
+        ir_opt_report,
+        ir_slot,
     ]
     jet_foundation.[Type, compiler_threads_single, name_rows_set]
     process: core.process
@@ -67,9 +96,7 @@ lp_fn: fn(name: String) -> IRFunction {
     ir_function_new(name, "test:lint.jet::{name}", "", "lint.jet", 1)
 }
 
-lp_temp: fn(f: &IRFunction, ty: Int) -> Int {
-    ir_slot(f, ty, IRSlotKind.Temp, -1, 0)
-}
+lp_temp: fn(f: &IRFunction, ty: Int) -> Int { ir_slot(f, ty, IRSlotKind.Temp, -1, 0) }
 
 lp_const: fn(f: &IRFunction, ty: Int, value: Int) -> Int {
     slot: lp_temp(f, ty)
@@ -77,9 +104,7 @@ lp_const: fn(f: &IRFunction, ty: Int, value: Int) -> Int {
     slot
 }
 
-lp_return: fn(f: &IRFunction, slot: Int) {
-    _ := ir_emit(f, IROp.Return, -1, slot, -1, -1, 0)
-}
+lp_return: fn(f: &IRFunction, slot: Int) { _ := ir_emit(f, IROp.Return, -1, slot, -1, -1, 0) }
 
 // A module with `twice(n: Int) -> Int` (function 0), `release(g: Guard)`
 // (function 1, Guard's drop) and a `run` that is valid but for the bug
@@ -470,11 +495,43 @@ lp_fixed_trap: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
 // The plants: each one's name is the rule it breaks, then any `#variant`
 // of another bug for the same rule; one module each.
 LP_RULES: [String]{
-    "arena", "operand.slot", "operand.dst", "operand.ref", "operand.kind", "operand.imm", "operand.imm#int_big", "typing.layout", "typing.convert",
-    "typing.clone", "typing.data", "typing.data#text", "typing.data#object", "typing.access", "typing.access#store", "typing.access#copy",
-    "typing.access#frame", "typing.access#view", "typing.access#word", "typing.drop", "typing.drop#close", "call.arity", "call.arg",
-    "call.result", "call.indirect", "call.indirect#arg", "call.indirect#result", "route.call", "control.nesting", "control.depth", "return",
-    "type.kind", "type.layout", "timing.fixed", "timing.fixed#divide", "timing.fixed#shift", "timing.fixed#trap",
+    "arena",
+    "operand.slot",
+    "operand.dst",
+    "operand.ref",
+    "operand.kind",
+    "operand.imm",
+    "operand.imm#int_big",
+    "typing.layout",
+    "typing.convert",
+    "typing.clone",
+    "typing.data",
+    "typing.data#text",
+    "typing.data#object",
+    "typing.access",
+    "typing.access#store",
+    "typing.access#copy",
+    "typing.access#frame",
+    "typing.access#view",
+    "typing.access#word",
+    "typing.drop",
+    "typing.drop#close",
+    "call.arity",
+    "call.arg",
+    "call.result",
+    "call.indirect",
+    "call.indirect#arg",
+    "call.indirect#result",
+    "route.call",
+    "control.nesting",
+    "control.depth",
+    "return",
+    "type.kind",
+    "type.layout",
+    "timing.fixed",
+    "timing.fixed#divide",
+    "timing.fixed#shift",
+    "timing.fixed#trap",
 }
 
 lp_plant: fn(plant: String, m: &IRModule, t: LPTypes, f: &IRFunction) {
@@ -552,9 +609,7 @@ lp_core_failures: fn(core: [IRLintFinding]) -> Int {
     failures := 0
     seen := [String]{}
     loop finding in core {
-        if LP_CORE_ARITY.contains(finding.function) {
-            seen.push(finding.function)
-        } else {
+        if LP_CORE_ARITY.contains(finding.function) -> seen.push(finding.function) else {
             print("core row not listed: {finding.function}: {finding.message}")
             failures += 1
         }
@@ -580,14 +635,10 @@ lp_status: fn() -> Int {
     if valid.len() > 0 {
         print("FAIL valid module:\n{ir_lint_text(valid)}")
         failures += 1
-    } else {
-        print("ok valid")
-    }
+    } else { print("ok valid") }
     loop plant in LP_RULES {
         found: lp_lint(plant)
-        if lp_only(found, lp_rule(plant)) {
-            print("ok {plant}")
-        } else {
+        if lp_only(found, lp_rule(plant)) -> print("ok {plant}") else {
             print("FAIL {plant}:\n{ir_lint_text(found)}")
             failures += 1
         }
@@ -612,9 +663,7 @@ lp_status: fn() -> Int {
     if core_failures > 0 {
         print("FAIL core routes ({core_failures} rows above)")
         failures += 1
-    } else {
-        print("ok core routes ({core.len()} listed)")
-    }
+    } else { print("ok core routes ({core.len()} listed)") }
     print(if failures == 0 -> "LINT PLANTED PASS" else -> "LINT PLANTED FAIL ({failures})")
     if failures == 0 -> 0 else -> 1
 }

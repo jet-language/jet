@@ -8,7 +8,9 @@ kit_steps_json_projection_valid: fn(part: String) -> Bool {
     names := [String]{}
     loop raw in kit_steps_byte_slice(part, 1, part.count_bytes() - 1).split(",") {
         name: raw.trim().copy()
-        if name == "" || name.contains(".") || name.contains("[") || name.contains(" ") || kit_expect_named(names, name) -> return false
+        if name == "" || name.contains(".") || name.contains("[") || name.contains(" ") || kit_expect_named(names, name) {
+            return false
+        }
         names.push(name)
     }
     names.len() > 0
@@ -23,9 +25,9 @@ kit_steps_json_filter: fn(part: String) -> KitJSONFilter? {
         if index == 0 -> next
         code: Int{byte}
         if quoted {
-            if escaped -> escaped = false
-            else if code == 92 -> escaped = true
-            else if code == 34 -> quoted = false
+            if escaped -> escaped = false else if code == 92 -> escaped = true else if code == 34 {
+                quoted = false
+            }
             next
         }
         if code == 34 {
@@ -52,7 +54,9 @@ kit_steps_json_filter: fn(part: String) -> KitJSONFilter? {
         key: kit_steps_byte_slice(part, 1, index).trim().copy()
         if kit_steps_json_path("$.{key}") == None -> return None
         literal: kit_steps_byte_slice(rest, width, rest.count_bytes()).trim().copy()
-        if literal.starts_with("@.") -> return Val(KitJSONFilter{key: key, op: operator, expected: Dyn.Null, reference: kit_steps_byte_slice(literal, 1, literal.count_bytes())})
+        if literal.starts_with("@.") {
+            return Val(KitJSONFilter{key: key, op: operator, expected: Dyn.Null, reference: kit_steps_byte_slice(literal, 1, literal.count_bytes())})
+        }
         expected: json.parse(literal) ?? return None
         if operator == "in" && kit_steps_json_type(expected) != "array" -> return None
         return Val(KitJSONFilter{key: key, op: operator, expected: expected})
@@ -89,7 +93,9 @@ kit_steps_json_select: fn(value: Dyn, parts: [String], depth: Int) -> [Dyn]? {
             decoded: json.parse(part) ?? return None
             key = if decoded == {
                 .Text(text) -> text
-                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> { return None }
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {
+                    return None
+                }
             }
         }
         if value == {
@@ -103,7 +109,7 @@ kit_steps_json_select: fn(value: Dyn, parts: [String], depth: Int) -> [Dyn]? {
     if part.starts_with("{{") {
         if value == {
             .Object(_) -> {
-                projected := [String: Dyn]{}
+                projected := [String:Dyn]{}
                 loop raw in kit_steps_byte_slice(part, 1, part.count_bytes() - 1).split(",") {
                     name: raw.trim().copy()
                     child: value.get(name) ?? return None
@@ -146,9 +152,9 @@ kit_steps_json_select: fn(value: Dyn, parts: [String], depth: Int) -> [Dyn]? {
 kit_steps_json_values: fn(text: String, mode: String, path: String) -> [Dyn]? {
     parts: kit_steps_json_path(path) ?? return None
     tree := Dyn.Null
-    if mode == "doc" || mode.starts_with("doc[zero ") -> tree = json.parse(text) ?? return None
-    else if mode == "toml" -> tree = toml.parse(text) ?? return None
-    else if mode == "ndjson" {
+    if mode == "doc" || mode.starts_with("doc[zero ") -> tree = json.parse(text) ?? return None else if mode == "toml" {
+        tree = toml.parse(text) ?? return None
+    } else if mode == "ndjson" {
         records := [Dyn]{}
         loop raw in text.split("\n") {
             line: raw.trim().copy()
@@ -158,7 +164,7 @@ kit_steps_json_values: fn(text: String, mode: String, path: String) -> [Dyn]? {
             records.push(record)
         }
         tree = Dyn.Array(records)
-    } else -> return None
+    } else { return None }
     if mode.starts_with("doc[zero ") {
         if !mode.ends_with("]") -> return None
         tree = kit_steps_json_zero(tree, kit_steps_byte_slice(mode, 9, mode.count_bytes() - 1))
@@ -207,8 +213,12 @@ kit_steps_json_relation: fn(actual: String, assertion: KitAssertion, history: [K
         if assertion.json_op == "#==" || assertion.json_op == "#>=" {
             a: kit_steps_json_size(left[i]) ?? return Val("JSON count relation needs an array or object")
             b: kit_steps_json_size(right[i]) ?? return Val("JSON count relation needs an array or object")
-            if (assertion.json_op == "#==" && a != factor * b) || (assertion.json_op == "#>=" && a < factor * b) -> return Val("JSON count relation differs")
-        } else if !kit_steps_json_equal(left[i], right[i]) -> return Val("JSON relation values differ")
+            if (assertion.json_op == "#==" && a != factor * b) || (assertion.json_op == "#>=" && a < factor * b) {
+                return Val("JSON count relation differs")
+            }
+        } else if !kit_steps_json_equal(left[i], right[i]) {
+            return Val("JSON relation values differ")
+        }
     }
     None
 }

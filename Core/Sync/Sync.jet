@@ -8,6 +8,7 @@ package: {
         sync: .Library{ entry: sync }
     }
 }
+
 // core.sync — replica-aware CRDT value types. Every write names the
 // replica that made it, so replicas that edit apart merge to one value in
 // either order and neither loses its work. A carrier that breaks a bound or
@@ -18,9 +19,13 @@ package: {
 // list.
 
 MAX_TEXT: 1048576
+
 MAX_ATOMS: 4194304
+
 MAX_REPLICAS: 4096
+
 MAX_ENTRIES: 100000
+
 MAX_INT: 9223372036854775807
 
 // One character of a SyncText. `(replica, counter)` is its identity; `after`
@@ -94,7 +99,9 @@ text_new: fn(replica: String, value: String) -> SyncText Never! {
 text_set: fn(doc: SyncText, replica: String, value: String) -> SyncText Never! {
     if !doc.valid || !valid_token(replica) || value.len() > MAX_TEXT -> return doc.copy()
     inserted: scalars(value)
-    if doc.atoms.len() + inserted.len() > MAX_ATOMS || clock_exhausted(doc, inserted.len()) -> return doc.copy()
+    if doc.atoms.len() + inserted.len() > MAX_ATOMS || clock_exhausted(doc, inserted.len()) {
+        return doc.copy()
+    }
     deleted: mark_deleted(doc, text_visible(doc))
     insert_after(deleted, replica, "", inserted)
 }
@@ -104,9 +111,13 @@ text_set: fn(doc: SyncText, replica: String, value: String) -> SyncText Never! {
 // anchors to the character before the edited range, so it survives a
 // concurrent edit of that range.
 text_edit: fn(doc: SyncText, replica: String, index: Int, delete_count: Int, value: String) -> SyncText Never! {
-    if !doc.valid || !valid_token(replica) || index < 0 || delete_count < 0 || value.len() > MAX_TEXT -> return doc.copy()
+    if !doc.valid || !valid_token(replica) || index < 0 || delete_count < 0 || value.len() > MAX_TEXT {
+        return doc.copy()
+    }
     inserted: scalars(value)
-    if doc.atoms.len() + inserted.len() > MAX_ATOMS || clock_exhausted(doc, inserted.len()) -> return doc.copy()
+    if doc.atoms.len() + inserted.len() > MAX_ATOMS || clock_exhausted(doc, inserted.len()) {
+        return doc.copy()
+    }
     visible: text_visible(doc)
     if index > visible.len() || delete_count > visible.len() - index -> return doc.copy()
     anchor := ""
@@ -129,14 +140,16 @@ text_merge: fn(left: SyncText, right: SyncText) -> SyncText Never! {
     sides: [[SyncTextAtom]]{left.atoms, right.atoms}
     loop side in sides {
         loop atom in side {
-            if !valid_token(atom.replica) || atom.counter <= 0 || scalars(atom.scalar).len() != 1 -> return invalid_text()
+            if !valid_token(atom.replica) || atom.counter <= 0 || scalars(atom.scalar).len() != 1 {
+                return invalid_text()
+            }
             id: atom_id(atom.replica, atom.counter)
             previous: merged.get(id)
-            if previous == .None {
-                _: merged.add(id, atom)
-            } else {
+            if previous == .None -> _: merged.add(id, atom) else {
                 existing: previous
-                if existing.scalar != atom.scalar || existing.after != atom.after -> return invalid_text()
+                if existing.scalar != atom.scalar || existing.after != atom.after {
+                    return invalid_text()
+                }
                 if atom.deleted && !existing.deleted -> _: merged.add(id, atom)
             }
         }
@@ -190,14 +203,16 @@ counter_new: fn(replica: String, value: Int) -> SyncCounter Never! {
 counter_inc: fn(counter: SyncCounter, replica: String, delta: Int) -> SyncCounter Never! {
     if !counter.valid || !valid_token(replica) -> return counter.copy()
     count := counter.counts.get(replica) ?? CounterCount{positive: 0, negative: 0}
-    if counter.counts.get(replica) == .None && counter.counts.len() >= MAX_REPLICAS -> return invalid_counter()
+    if counter.counts.get(replica) == .None && counter.counts.len() >= MAX_REPLICAS {
+        return invalid_counter()
+    }
     if delta >= 0 {
         if count.positive > MAX_INT - delta -> return invalid_counter()
-        count.positive = count.positive + delta
+        count.positive += delta
     } else {
         // `delta` is negative, so `MAX_INT + delta` cannot overflow.
         if count.negative > MAX_INT + delta -> return invalid_counter()
-        count.negative = count.negative - delta
+        count.negative -= delta
     }
     counts := counter.counts
     _: counts.add(replica.copy(), count)
@@ -213,7 +228,9 @@ counter_merge: fn(left: SyncCounter, right: SyncCounter) -> SyncCounter Never! {
     loop side in sides {
         loop replica in side.keys() {
             incoming: side.get(replica) ?? return invalid_counter()
-            if !valid_token(replica) || incoming.positive < 0 || incoming.negative < 0 -> return invalid_counter()
+            if !valid_token(replica) || incoming.positive < 0 || incoming.negative < 0 {
+                return invalid_counter()
+            }
             count := counts.get(replica) ?? CounterCount{positive: 0, negative: 0}
             if incoming.positive > count.positive -> count.positive = incoming.positive
             if incoming.negative > count.negative -> count.negative = incoming.negative
@@ -265,7 +282,9 @@ map_merge: fn(left: SyncMap, right: SyncMap) -> SyncMap Never! {
     loop side in sides {
         loop key in side.keys() {
             incoming: side.get(key) ?? return invalid_map()
-            if !valid_token(key) || !valid_token(incoming.writer) || incoming.clock <= 0 || incoming.value.len() > MAX_TEXT -> return invalid_map()
+            if !valid_token(key) || !valid_token(incoming.writer) || incoming.clock <= 0 || incoming.value.len() > MAX_TEXT {
+                return invalid_map()
+            }
             previous: entries.get(key)
             replace := true
             if previous != .None {
@@ -431,7 +450,9 @@ atom_id: fn(replica: String, counter: Int) -> String Never! {
 
 invalid_text: fn() -> SyncText Never! { SyncText{atoms: [SyncTextAtom]{}, valid: false} }
 
-invalid_counter: fn() -> SyncCounter Never! { SyncCounter{counts: [String:CounterCount]{}, valid: false} }
+invalid_counter: fn() -> SyncCounter Never! {
+    SyncCounter{counts: [String:CounterCount]{}, valid: false}
+}
 
 invalid_map: fn() -> SyncMap Never! { SyncMap{entries: [String:LWW]{}, valid: false} }
 
@@ -469,7 +490,9 @@ text_order: fn(doc: SyncText) -> [Int] Never! {
         index: stack.pop() ?? break
         order.push(index)
         atom: doc.atoms[index]
-        loop child in reversed_children(doc, children, atom_id(atom.replica, atom.counter)) -> stack.push(child)
+        loop child in reversed_children(doc, children, atom_id(atom.replica, atom.counter)) {
+            stack.push(child)
+        }
     }
     order
 }
@@ -533,9 +556,7 @@ mark_deleted: fn(doc: SyncText, indices: [Int]) -> SyncText Never! {
     atoms := [SyncTextAtom]{}
     loop index in 0..<doc.atoms.len() {
         atom: doc.atoms[index]
-        if marked.get(index) == .None {
-            atoms.push(atom.copy())
-        } else {
+        if marked.get(index) == .None -> atoms.push(atom.copy()) else {
             atoms.push(SyncTextAtom{replica: atom.replica, counter: atom.counter, after: atom.after, scalar: atom.scalar, deleted: true})
         }
     }
@@ -564,9 +585,9 @@ counter_total: fn(counter: SyncCounter) -> Int? Never! {
         count: counter.counts.get(replica) ?? next
         if count.positive < 0 || count.negative < 0 -> return None
         if total > 0 && count.positive > MAX_INT - total -> return None
-        total = total + count.positive
+        total += count.positive
         if total < 0 && count.negative > MAX_INT + total + 1 -> return None
-        total = total - count.negative
+        total -= count.negative
     }
     Val(total)
 }
@@ -593,7 +614,9 @@ insert_item: fn(items: [RGAItem], item: RGAItem) -> [RGAItem] Never! {
 escape_display: fn(value: String) -> String Never! {
     out := ""
     loop scalar in scalars(value) {
-        if scalar == "\\" || scalar == "," || scalar == "=" || scalar == "|" || scalar == ":" || scalar == "/" -> out = "{out}\\"
+        if scalar == "\\" || scalar == "," || scalar == "=" || scalar == "|" || scalar == ":" || scalar == "/" {
+            out = "{out}\\"
+        }
         out = "{out}{scalar}"
     }
     out

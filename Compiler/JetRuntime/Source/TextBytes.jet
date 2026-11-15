@@ -7,10 +7,14 @@
 // Append count native [U8] elements starting at start. Reserve once,
 // then initialize every byte before publishing the new length.
 text_bytes_push: fn(target: I64, data: I64, start: I64, count: I64) {
-    if (count <= I64{0}) -> return
+    if (count <= I64{0}) {
+        return
+    }
     used: rt_text_len(target)
     buffer: rt_text_reserve_extra(target, rt_text_data(target), used, count)
-    if (buffer == I64{0}) -> return
+    if (buffer == I64{0}) {
+        return
+    }
     if (RT_HOST_U8_STRIDE == I64{1}) {
         rt_text_bytes_copy(wrapping(buffer + used), wrapping(data + start), count)
     } else {
@@ -44,7 +48,7 @@ text_bytes_valid_end: fn(data: I64, start: I64, length: I64) -> I64 {
             } else if (wrapping(data + at).bit_and(I64{4095}) <= I64{4088}) {
                 // rest is 1..7 here, so its low bits are rest.
                 tail: rt_text_word(wrapping(data + at)).bit_and(wrapping((I64{1} << (rest.bit_and(I64{7}) * I64{8})) - I64{1}))
-                if (tail.bit_and(I64{-9187201950435737472}) == I64{0}) -> return length
+                if (tail.bit_and(I64{-9187201950435737472}) == I64{0}) { return length }
             }
         }
         if (host_u8_get(data, at) < I64{128}) {
@@ -52,7 +56,7 @@ text_bytes_valid_end: fn(data: I64, start: I64, length: I64) -> I64 {
             next
         }
         width: rt_text_valid_width(wrapping(data + at * RT_HOST_U8_STRIDE), length - at, RT_HOST_U8_STRIDE)
-        if (width < I64{0}) -> return at
+        if (width < I64{0}) { return at }
         at += width
     }
     length
@@ -63,7 +67,7 @@ text_bytes_valid_end: fn(data: I64, start: I64, length: I64) -> I64 {
 // "incomplete" form; otherwise the invalid subpart length is reported.
 text_bytes_utf8_error: fn(data: I64, length: I64) -> I64 {
     at: text_bytes_valid_end(data, I64{0}, length)
-    if (at == length) -> return I64{0}
+    if (at == length) { return I64{0} }
     width: rt_text_valid_width(wrapping(data + at * RT_HOST_U8_STRIDE), length - at, RT_HOST_U8_STRIDE)
     message: jet_rt_string_builder_new()
     lead: host_u8_get(data, at)
@@ -83,7 +87,7 @@ text_bytes_utf8_error: fn(data: I64, length: I64) -> I64 {
 // Exact copy of length native [U8] elements into a fresh owned text:
 // packed elements are the text's bytes, copied whole (rt_text_copy).
 text_bytes_owned: fn(data: I64, length: I64) -> I64 {
-    if (RT_HOST_U8_STRIDE == I64{1}) -> return rt_text_copy(data, length)
+    if (RT_HOST_U8_STRIDE == I64{1}) { return rt_text_copy(data, length) }
     result: rt_text_builder_with_capacity(length)
     text_bytes_push(result, data, I64{0}, length)
     result
@@ -92,7 +96,7 @@ text_bytes_owned: fn(data: I64, length: I64) -> I64 {
 // jet_string_validate_utf8: Ok() or the Utf8Error text.
 #Export(c) jet_string_validate_utf8: fn(data: I64, length: I64, err: I64) -> I64 {
     message: text_bytes_utf8_error(data, length)
-    if (message == I64{0}) -> return I64{1}
+    if (message == I64{0}) { return I64{1} }
     rt_text_store(err, message)
     I64{0}
 }
@@ -131,16 +135,16 @@ text_bytes_owned: fn(data: I64, length: I64) -> I64 {
         if (end < length) {
             rt_text_push_scalar(result, I64{65533})
             at = end - rt_text_valid_width(wrapping(data + end * RT_HOST_U8_STRIDE), length - end, RT_HOST_U8_STRIDE)
-        } else {
-            at = end
-        }
+        } else { at = end }
     }
     result
 }
 
 // jet_raw_bytes_into_text: Jet validated these bytes first; the borrowed list
 // is copied, never adopted.
-#Export(c) jet_raw_bytes_into_text: fn(data: I64, length: I64) -> I64 { text_bytes_owned(data, length) }
+#Export(c) jet_raw_bytes_into_text: fn(data: I64, length: I64) -> I64 {
+    text_bytes_owned(data, length)
+}
 
 // jet_string_bytes: the UTF-8 bytes as a fresh [U8], one block move into
 // the packed buffer (not a store per byte).
@@ -156,9 +160,7 @@ text_bytes_owned: fn(data: I64, length: I64) -> I64 {
     }
     bytes: jet_rt_alloc_8(length * RT_HOST_U8_STRIDE)
     data: rt_text_data(value)
-    if (RT_HOST_U8_STRIDE == I64{1}) {
-        jet_rt_mem_move(bytes, data, length)
-    } else {
+    if (RT_HOST_U8_STRIDE == I64{1}) { jet_rt_mem_move(bytes, data, length) } else {
         at := I64{0}
         loop at < length {
             host_u8_put(bytes, at, rt_text_byte(wrapping(data + at)))
@@ -174,7 +176,7 @@ text_bytes_owned: fn(data: I64, length: I64) -> I64 {
 // reads past the storage.
 #Export(c) jet_raw_string_byte: fn(value: I64, index: I64) -> I64 {
     at: jet_int_owned_to_i64(index)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     if (at < I64{0} || at >= rt_text_len(value)) {
         trap_native_index_range_stop()
         return I64{0}

@@ -31,13 +31,13 @@ trust_pin_identity_preparse: fn(text: String) -> JetPinIdentity Never! {
         return JetPinIdentity{
             payload_name: trust_pin_simple_field(body, "name") ?? "",
             payload_version: trust_pin_simple_field(body, "version") ?? "",
-            jet: trust_pin_simple_field(body, "jet")
+            jet: trust_pin_simple_field(body, "jet"),
         }
     }
     JetPinIdentity{
         payload_name: trust_pin_top_level_simple_field(stripped, "name") ?? "",
         payload_version: trust_pin_top_level_simple_field(stripped, "version") ?? "",
-        jet: trust_pin_top_level_simple_field(stripped, "jet")
+        jet: trust_pin_top_level_simple_field(stripped, "jet"),
     }
 }
 
@@ -115,7 +115,9 @@ trust_pin_top_block_body: fn(text: String, key: String) -> String? Never! {
         start: index.copy()
         index = trust_pin_ident_end(raw, start)
         colon: trust_text_skip_ascii_space(raw, index)
-        if pkg_bytes_text(raw, start, index) != key || pkg_bytes_code(raw, colon) != TRUST_COLON -> next
+        if pkg_bytes_text(raw, start, index) != key || pkg_bytes_code(raw, colon) != TRUST_COLON {
+            next
+        }
         open: trust_text_skip_ascii_space(raw, colon + 1)
         if pkg_bytes_code(raw, open) != TRUST_OPEN_BRACE -> next
         close: trust_pin_matching_brace(raw, open)
@@ -183,7 +185,9 @@ trust_pin_simple_field: fn(body: String, key: String) -> String? Never! {
         start: index.copy()
         index = trust_pin_ident_end(raw, start)
         colon: trust_text_skip_ascii_space(raw, index)
-        if pkg_bytes_text(raw, start, index) != key || pkg_bytes_code(raw, colon) != TRUST_COLON -> next
+        if pkg_bytes_text(raw, start, index) != key || pkg_bytes_code(raw, colon) != TRUST_COLON {
+            next
+        }
         value_start: colon + 1
         end := value_start
         quoted := false
@@ -215,7 +219,9 @@ trust_pin_top_level_simple_field: fn(text: String, key: String) -> String? Never
     loop index < raw.len() {
         code: Int{raw[index]}
         if in_string {
-            if code == TRUST_QUOTE && (index == 0 || Int{raw[index - 1]} != TRUST_BACKSLASH) -> in_string = false
+            if code == TRUST_QUOTE && (index == 0 || Int{raw[index - 1]} != TRUST_BACKSLASH) {
+                in_string = false
+            }
             index += 1
             next
         }
@@ -323,4 +329,3 @@ trust_pin_report: fn(root: String) -[FS, Env]> String {
     }
     out.join("")
 }
-

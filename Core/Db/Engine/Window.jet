@@ -45,10 +45,15 @@ use {
 
 // The i64 fields of struct CallCount and struct NtileCtx in AggState.ints.
 WIN_CC_VALUE: 0
+
 WIN_CC_STEP: 1
+
 WIN_CC_TOTAL: 2
+
 WIN_NT_TOTAL: 0
+
 WIN_NT_PARAM: 1
+
 WIN_NT_ROW: 2
 
 // sqlite3_aggregate_context for a context of three i64 fields, zeroed
@@ -60,7 +65,9 @@ window_ctx_ints: fn(v: &conn.Vdbe, n_byte: Int) -> Int Never! {
 }
 
 // One more in i64 field f of context k.
-window_ctx_bump: fn(v: &conn.Vdbe, k: Int, f: Int) Never! { v.aggs[k].ints[f] = v.aggs[k].ints[f] + 1 }
+window_ctx_bump: fn(v: &conn.Vdbe, k: Int, f: Int) Never! {
+    v.aggs[k].ints[f] = v.aggs[k].ints[f] + 1
+}
 
 // row_numberStepFunc.
 row_number_step: fn(v: &conn.Vdbe) Never! {
@@ -84,7 +91,9 @@ dense_rank_step: fn(v: &conn.Vdbe) Never! {
 // dense_rankValueFunc.
 dense_rank_value: fn(v: &conn.Vdbe) Never! {
     k: window_ctx_ints(v, 24)
-    if k < 0 -> return
+    if k < 0 {
+        return
+    }
     if v.aggs[k].ints[WIN_CC_STEP] != 0 {
         window_ctx_bump(v, k, WIN_CC_VALUE)
         v.aggs[k].ints[WIN_CC_STEP] = 0
@@ -97,7 +106,9 @@ dense_rank_value: fn(v: &conn.Vdbe) Never! {
 // the second argument, a positive integer.
 nth_value_step: fn(db: conn.Conn, v: &conn.Vdbe) Never! {
     k: api.aggregate_context(v, 24)
-    if k < 0 -> return
+    if k < 0 {
+        return
+    }
     r1: v.fctx.arg + 1
     t: mem.value_numeric_type(v.mem[r1])
     ival := 0
@@ -124,7 +135,9 @@ nth_value_step: fn(db: conn.Conn, v: &conn.Vdbe) Never! {
 // nth_valueFinalizeFunc and first_valueFinalizeFunc.
 nth_value_finalize: fn(db: conn.Conn, v: &conn.Vdbe, n_byte: Int) Never! {
     k: api.aggregate_context(v, n_byte)
-    if k < 0 || v.aggs[k].vals.len() == 0 -> return
+    if k < 0 || v.aggs[k].vals.len() == 0 {
+        return
+    }
     x: v.aggs[k].vals[0]
     api.result_value(db, v, x)
     v.aggs[k].vals = [base.Mem]{}
@@ -133,7 +146,9 @@ nth_value_finalize: fn(db: conn.Conn, v: &conn.Vdbe, n_byte: Int) Never! {
 // first_valueStepFunc.
 first_value_step: fn(v: &conn.Vdbe) Never! {
     k: api.aggregate_context(v, 24)
-    if k < 0 || v.aggs[k].vals.len() > 0 -> return
+    if k < 0 || v.aggs[k].vals.len() > 0 {
+        return
+    }
     x: mem.mem_copy(v.mem[v.fctx.arg])
     v.aggs[k].vals = [base.Mem]{x}
 }
@@ -141,15 +156,21 @@ first_value_step: fn(v: &conn.Vdbe) Never! {
 // rankStepFunc.
 rank_step: fn(v: &conn.Vdbe) Never! {
     k: window_ctx_ints(v, 24)
-    if k < 0 -> return
+    if k < 0 {
+        return
+    }
     window_ctx_bump(v, k, WIN_CC_STEP)
-    if v.aggs[k].ints[WIN_CC_VALUE] == 0 -> v.aggs[k].ints[WIN_CC_VALUE] = v.aggs[k].ints[WIN_CC_STEP]
+    if v.aggs[k].ints[WIN_CC_VALUE] == 0 {
+        v.aggs[k].ints[WIN_CC_VALUE] = v.aggs[k].ints[WIN_CC_STEP]
+    }
 }
 
 // rankValueFunc.
 rank_value: fn(v: &conn.Vdbe) Never! {
     k: window_ctx_ints(v, 24)
-    if k < 0 -> return
+    if k < 0 {
+        return
+    }
     x: v.aggs[k].ints[WIN_CC_VALUE]
     api.result_int64(v, x)
     v.aggs[k].ints[WIN_CC_VALUE] = 0
@@ -170,7 +191,9 @@ call_count_step_inverse: fn(v: &conn.Vdbe) Never! {
 // percent_rankValueFunc.
 percent_rank_value: fn(v: &conn.Vdbe) Never! {
     k: window_ctx_ints(v, 24)
-    if k < 0 -> return
+    if k < 0 {
+        return
+    }
     v.aggs[k].ints[WIN_CC_VALUE] = v.aggs[k].ints[WIN_CC_STEP]
     total: v.aggs[k].ints[WIN_CC_TOTAL]
     r: if total > 1 -> util.int_to_double(v.aggs[k].ints[WIN_CC_VALUE]) / util.int_to_double(total - 1) else -> Float{0.0}
@@ -180,7 +203,9 @@ percent_rank_value: fn(v: &conn.Vdbe) Never! {
 // cume_distValueFunc.
 cume_dist_value: fn(v: &conn.Vdbe) Never! {
     k: window_ctx_ints(v, 0)
-    if k < 0 -> return
+    if k < 0 {
+        return
+    }
     r: util.int_to_double(v.aggs[k].ints[WIN_CC_STEP]) / util.int_to_double(v.aggs[k].ints[WIN_CC_TOTAL])
     api.result_double(v, r)
 }
@@ -188,11 +213,15 @@ cume_dist_value: fn(v: &conn.Vdbe) Never! {
 // ntileStepFunc.
 ntile_step: fn(db: conn.Conn, v: &conn.Vdbe) Never! {
     k: window_ctx_ints(v, 24)
-    if k < 0 -> return
+    if k < 0 {
+        return
+    }
     if v.aggs[k].ints[WIN_NT_TOTAL] == 0 {
         n: mem.int_value(v.mem[v.fctx.arg])
         v.aggs[k].ints[WIN_NT_PARAM] = n
-        if n <= 0 -> api.result_error(db, v, "argument of ntile must be a positive integer".bytes(), -1)
+        if n <= 0 {
+            api.result_error(db, v, "argument of ntile must be a positive integer".bytes(), -1)
+        }
     }
     window_ctx_bump(v, k, WIN_NT_TOTAL)
 }
@@ -206,7 +235,9 @@ ntile_inverse: fn(v: &conn.Vdbe) Never! {
 // ntileValueFunc.
 ntile_value: fn(v: &conn.Vdbe) Never! {
     k: window_ctx_ints(v, 24)
-    if k < 0 || v.aggs[k].ints[WIN_NT_PARAM] <= 0 -> return
+    if k < 0 || v.aggs[k].ints[WIN_NT_PARAM] <= 0 {
+        return
+    }
     total: v.aggs[k].ints[WIN_NT_TOTAL]
     param: v.aggs[k].ints[WIN_NT_PARAM]
     row: v.aggs[k].ints[WIN_NT_ROW]
@@ -217,9 +248,7 @@ ntile_value: fn(v: &conn.Vdbe) Never! {
     }
     n_large: total - param * n_size
     i_small: n_large * (n_size + 1)
-    if row < i_small {
-        api.result_int64(v, 1 + row /% (n_size + 1))
-    } else {
+    if row < i_small -> api.result_int64(v, 1 + row /% (n_size + 1)) else {
         api.result_int64(v, 1 + n_large + (row - i_small) /% n_size)
     }
 }
@@ -227,7 +256,9 @@ ntile_value: fn(v: &conn.Vdbe) Never! {
 // last_valueStepFunc.
 last_value_step: fn(v: &conn.Vdbe) Never! {
     k: api.aggregate_context(v, 16)
-    if k < 0 -> return
+    if k < 0 {
+        return
+    }
     x: mem.mem_copy(v.mem[v.fctx.arg])
     v.aggs[k].vals = [base.Mem]{x}
     v.aggs[k].n += 1
@@ -236,7 +267,9 @@ last_value_step: fn(v: &conn.Vdbe) Never! {
 // last_valueInvFunc.
 last_value_inverse: fn(v: &conn.Vdbe) Never! {
     k: api.aggregate_context(v, 16)
-    if k < 0 -> return
+    if k < 0 {
+        return
+    }
     v.aggs[k].n -= 1
     if v.aggs[k].n == 0 -> v.aggs[k].vals = [base.Mem]{}
 }
@@ -244,7 +277,9 @@ last_value_inverse: fn(v: &conn.Vdbe) Never! {
 // last_valueValueFunc.
 last_value_value: fn(db: conn.Conn, v: &conn.Vdbe) Never! {
     k: api.aggregate_context(v, 0)
-    if k < 0 || v.aggs[k].vals.len() == 0 -> return
+    if k < 0 || v.aggs[k].vals.len() == 0 {
+        return
+    }
     x: v.aggs[k].vals[0]
     api.result_value(db, v, x)
 }
@@ -252,7 +287,9 @@ last_value_value: fn(db: conn.Conn, v: &conn.Vdbe) Never! {
 // last_valueFinalizeFunc.
 last_value_finalize: fn(db: conn.Conn, v: &conn.Vdbe) Never! {
     k: api.aggregate_context(v, 16)
-    if k < 0 || v.aggs[k].vals.len() == 0 -> return
+    if k < 0 || v.aggs[k].vals.len() == 0 {
+        return
+    }
     x: v.aggs[k].vals[0]
     api.result_value(db, v, x)
     v.aggs[k].vals = [base.Mem]{}
@@ -269,69 +306,29 @@ window_func_call: fn(db: conn.Conn, v: &conn.Vdbe, method: Int) Never! {
     inverse: method == aux.FN_INVERSE
     fin: method == aux.FN_FINAL
     if id == cat.FI_ROW_NUMBER {
-        if step {
-            row_number_step(v)
-        } else if !inverse {
-            row_number_value(v)
-        }
+        if step -> row_number_step(v) else if !inverse -> row_number_value(v)
     } else if id == cat.FI_DENSE_RANK {
-        if step {
-            dense_rank_step(v)
-        } else if !inverse {
-            dense_rank_value(v)
-        }
+        if step -> dense_rank_step(v) else if !inverse -> dense_rank_value(v)
     } else if id == cat.FI_RANK {
-        if step {
-            rank_step(v)
-        } else if !inverse {
-            rank_value(v)
-        }
+        if step -> rank_step(v) else if !inverse -> rank_value(v)
     } else if id == cat.FI_PERCENT_RANK {
-        if step {
-            call_count_total_step(v)
-        } else if inverse {
-            call_count_step_inverse(v)
-        } else {
+        if step -> call_count_total_step(v) else if inverse -> call_count_step_inverse(v) else {
             percent_rank_value(v)
         }
     } else if id == cat.FI_CUME_DIST {
-        if step {
-            call_count_total_step(v)
-        } else if inverse {
-            call_count_step_inverse(v)
-        } else {
+        if step -> call_count_total_step(v) else if inverse -> call_count_step_inverse(v) else {
             cume_dist_value(v)
         }
     } else if id == cat.FI_NTILE {
-        if step {
-            ntile_step(db, v)
-        } else if inverse {
-            ntile_inverse(v)
-        } else {
-            ntile_value(v)
-        }
+        if step -> ntile_step(db, v) else if inverse -> ntile_inverse(v) else -> ntile_value(v)
     } else if id == cat.FI_LAST_VALUE {
-        if step {
-            last_value_step(v)
-        } else if inverse {
-            last_value_inverse(v)
-        } else if fin {
+        if step -> last_value_step(v) else if inverse -> last_value_inverse(v) else if fin {
             last_value_finalize(db, v)
-        } else {
-            last_value_value(db, v)
-        }
+        } else { last_value_value(db, v) }
     } else if id == cat.FI_NTH_VALUE {
-        if step {
-            nth_value_step(db, v)
-        } else if fin {
-            nth_value_finalize(db, v, 0)
-        }
+        if step -> nth_value_step(db, v) else if fin -> nth_value_finalize(db, v, 0)
     } else if id == cat.FI_FIRST_VALUE {
-        if step {
-            first_value_step(v)
-        } else if fin {
-            nth_value_finalize(db, v, 24)
-        }
+        if step -> first_value_step(v) else if fin -> nth_value_finalize(db, v, 24)
     }
 }
 
@@ -422,7 +419,9 @@ WindowRewriteWalker: struct {
             if p.db.malloc_failed -> return ast.WRC_ABORT
             ast.WRC_CONTINUE
         }
+
         has_select: fn(self) -[]> Bool Never! { true }
+
         on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
             t: cg.walk_top(p)
             save: p.walks[t].u2
@@ -432,8 +431,11 @@ WindowRewriteWalker: struct {
             p.walks[t].u2 = save
             ast.WRC_PRUNE
         }
+
         has_select2: fn(self) -[]> Bool Never! { false }
+
         on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+
         win_defn: fn(self) -[]> Bool Never! { false }
     }
 }
@@ -483,13 +485,24 @@ WindowAggDepthWalker: struct {
     impl WalkCb {
         on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
             t: cg.walk_top(p)
-            if a.exprs[e].op == tk.TK_AGG_FUNCTION && a.exprs[e].op2 >= p.walks[t].depth -> a.exprs[e].op2 += 1
+            if a.exprs[e].op == tk.TK_AGG_FUNCTION && a.exprs[e].op2 >= p.walks[t].depth {
+                a.exprs[e].op2 += 1
+            }
             ast.WRC_CONTINUE
         }
+
         has_select: fn(self) -[]> Bool Never! { true }
-        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { cg.walker_depth_increase(p) }
+
+        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+            cg.walker_depth_increase(p)
+        }
+
         has_select2: fn(self) -[]> Bool Never! { true }
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> { cg.walker_depth_decrease(p) }
+
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {
+            cg.walker_depth_decrease(p)
+        }
+
         win_defn: fn(self) -[]> Bool Never! { false }
     }
 }
@@ -507,10 +520,17 @@ DisallowAggOrderByWalker: struct {
             }
             ast.WRC_CONTINUE
         }
+
         has_select: fn(self) -[]> Bool Never! { false }
-        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
+
+        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+            ast.WRC_CONTINUE
+        }
+
         has_select2: fn(self) -[]> Bool Never! { false }
+
         on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+
         win_defn: fn(self) -[]> Bool Never! { false }
     }
 }
@@ -534,7 +554,9 @@ expr_list_prefix_same: fn(a: &ast.AST, sort: Int, ob: Int) -> Bool Never! {
 // on failure.
 window_rewrite: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
     rc := base.OK
-    if a.selects[s].win < 0 || a.selects[s].prior >= 0 || a.selects[s].sel_flags.bit_and(ast.SF_WIN_REWRITE) != 0 || ast.in_rename(a) -> return rc
+    if a.selects[s].win < 0 || a.selects[s].prior >= 0 || a.selects[s].sel_flags.bit_and(ast.SF_WIN_REWRITE) != 0 || ast.in_rename(a) {
+        return rc
+    }
     cg.get_vdbe(p)
     src: a.selects[s].src
     where_e: a.selects[s].where_expr
@@ -735,9 +757,13 @@ window_code_init: fn(p: &cg.Parse, a: &ast.AST, s: Int) Never! {
 // windowCheckValue's eCond: a PRECEDING or FOLLOWING value, or
 // nth_value()'s second argument.
 WINDOW_STARTING_INT: 0
+
 WINDOW_ENDING_INT: 1
+
 WINDOW_NTH_VALUE_INT: 2
+
 WINDOW_STARTING_NUM: 3
+
 WINDOW_ENDING_NUM: 4
 
 // windowCheckValue: code that halts with an error unless register reg,
@@ -796,14 +822,18 @@ WindowCodeArg: struct {
 
 // windowCodeOp's op, and WindowCodeArg.e_delete.
 WINDOW_RETURN_ROW: 1
+
 WINDOW_AGGINVERSE: 2
+
 WINDOW_AGGSTEP: 3
 
 // windowReadPeerValues: code that reads the window's ORDER BY (peer)
 // values of the row of cursor csr into the registers from reg.
 window_read_peer_values: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg, csr: Int, reg: Int) Never! {
     ob: a.windows[s.mwin].order_by
-    if ob < 0 -> return
+    if ob < 0 {
+        return
+    }
     part: a.windows[s.mwin].partition
     i_col_off: a.windows[s.mwin].nbuffer_col + ast.list_len(a, part)
     loop i in 0..<ast.list_len(a, ob) -> _: cg.op3(p, opc.OP_COLUMN, csr, i_col_off + i, reg + i)
@@ -842,9 +872,7 @@ window_agg_step: fn(p: &cg.Parse, a: &ast.AST, mwin: Int, csr: Int, inverse: Boo
                 cg.v_jump_here(p, here - 2)
             }
             cg.v_jump_here(p, addr_is_null)
-        } else if w.reg_app != 0 {
-            _: cg.op2(p, opc.OP_ADD_IMM, w.reg_app + 1 - b_inverse, 1)
-        } else if !is_noop {
+        } else if w.reg_app != 0 { _: cg.op2(p, opc.OP_ADD_IMM, w.reg_app + 1 - b_inverse, 1) } else if !is_noop {
             addr_if := 0
             if w.filter >= 0 {
                 reg_tmp: cg.get_temp_reg(p)
@@ -943,9 +971,7 @@ window_full_scan: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg) Never! -[DB]> 
     addr_next: cg.v_current_addr(p)
     _: cg.op2(p, opc.OP_ROWID, csr, reg_rowid)
     _: cg.op3(p, opc.OP_GT, mw.reg_end_rowid, lbl_brk, reg_rowid)
-    if mw.exclude == tk.TK_CURRENT {
-        _: cg.op3(p, opc.OP_EQ, reg_c_rowid, lbl_next, reg_rowid)
-    } else if mw.exclude != tk.TK_NO {
+    if mw.exclude == tk.TK_CURRENT -> _: cg.op3(p, opc.OP_EQ, reg_c_rowid, lbl_next, reg_rowid) else if mw.exclude != tk.TK_NO {
         addr_eq := 0
         if mw.exclude == tk.TK_TIES -> addr_eq = cg.op3(p, opc.OP_EQ, reg_c_rowid, 0, reg_rowid)
         if mw.order_by >= 0 {
@@ -955,9 +981,7 @@ window_full_scan: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg) Never! -[DB]> 
             cg.v_append_p4(p, conn.P4.KeyInfo(key))
             addr: cg.v_current_addr(p) + 1
             _: cg.op3(p, opc.OP_JUMP, addr, lbl_next, addr)
-        } else {
-            _: cg.op2(p, opc.OP_GOTO, 0, lbl_next)
-        }
+        } else { _: cg.op2(p, opc.OP_GOTO, 0, lbl_next) }
         if addr_eq != 0 -> cg.v_jump_here(p, addr_eq)
     }
     window_agg_step(p, a, mwin, csr, false, s.reg_arg)
@@ -980,9 +1004,7 @@ window_full_scan: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg) Never! -[DB]> 
 // first_value(), lead(), lag()).
 window_return_one_row: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg) Never! -[DB]> {
     mwin: s.mwin
-    if a.windows[mwin].reg_start_rowid != 0 {
-        window_full_scan(p, a, s)
-    } else {
+    if a.windows[mwin].reg_start_rowid != 0 -> window_full_scan(p, a, s) else {
         eph: a.windows[mwin].eph_csr
         win := mwin
         loop win >= 0 {
@@ -997,9 +1019,7 @@ window_return_one_row: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg) Never! -[
                 if is_nth {
                     _: cg.op3(p, opc.OP_COLUMN, eph, w.iarg_col + 1, tmp_reg)
                     window_check_value(p, tmp_reg, WINDOW_NTH_VALUE_INT)
-                } else {
-                    _: cg.op2(p, opc.OP_INTEGER, 1, tmp_reg)
-                }
+                } else { _: cg.op2(p, opc.OP_INTEGER, 1, tmp_reg) }
                 _: cg.op3(p, opc.OP_ADD, tmp_reg, w.reg_app, tmp_reg)
                 _: cg.op3(p, opc.OP_GT, w.reg_app + 1, lbl, tmp_reg)
                 _: cg.op3(p, opc.OP_SEEK_ROWID, csr, 0, tmp_reg)
@@ -1011,9 +1031,7 @@ window_return_one_row: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg) Never! -[
                 csr: w.csr_app
                 lbl: cg.v_make_label(p)
                 tmp_reg: cg.get_temp_reg(p)
-                if n_arg < 3 {
-                    _: cg.op2(p, opc.OP_NULL, 0, w.reg_result)
-                } else {
+                if n_arg < 3 -> _: cg.op2(p, opc.OP_NULL, 0, w.reg_result) else {
                     _: cg.op3(p, opc.OP_COLUMN, eph, w.iarg_col + 2, w.reg_result)
                 }
                 _: cg.op2(p, opc.OP_ROWID, eph, tmp_reg)
@@ -1074,7 +1092,9 @@ window_cache_frame: fn(p: cg.Parse, a: ast.AST, mwin: Int) -> Bool Never! {
     if a.windows[mwin].reg_start_rowid != 0 -> return true
     win := mwin
     loop win >= 0 {
-        if wfunc_is(p, a, win, cat.FI_NTH_VALUE) || wfunc_is(p, a, win, cat.FI_FIRST_VALUE) || wfunc_is(p, a, win, cat.FI_LEAD) || wfunc_is(p, a, win, cat.FI_LAG) -> return true
+        if wfunc_is(p, a, win, cat.FI_NTH_VALUE) || wfunc_is(p, a, win, cat.FI_FIRST_VALUE) || wfunc_is(p, a, win, cat.FI_LEAD) || wfunc_is(p, a, win, cat.FI_LAG) {
+            return true
+        }
         win = a.windows[win].next_win
     }
     false
@@ -1093,9 +1113,7 @@ window_if_new_peer: fn(p: &cg.Parse, a: &ast.AST, ob: Int, reg_new: Int, reg_old
         here: cg.v_current_addr(p) + 1
         _: cg.op3(p, opc.OP_JUMP, here, addr, here)
         _: cg.op3(p, opc.OP_COPY, reg_new, reg_old, n_val - 1)
-    } else {
-        _: cg.op2(p, opc.OP_GOTO, 0, addr)
-    }
+    } else { _: cg.op2(p, opc.OP_GOTO, 0, addr) }
 }
 
 // windowCodeRangeTest: for a RANGE offset frame, code that jumps to lbl
@@ -1116,11 +1134,7 @@ window_code_range_test: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg, op0: Int
     op := op0
     sf: a.lists[ob].items[0].sort_flags
     if sf.bit_and(base.KEYINFO_ORDER_DESC) != 0 {
-        if op == opc.OP_GE {
-            op = opc.OP_LE
-        } else if op == opc.OP_GT {
-            op = opc.OP_LT
-        } else {
+        if op == opc.OP_GE -> op = opc.OP_LE else if op == opc.OP_GT -> op = opc.OP_LT else {
             op = opc.OP_GE
         }
         arith = opc.OP_SUBTRACT
@@ -1128,13 +1142,9 @@ window_code_range_test: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg, op0: Int
     if sf.bit_and(base.KEYINFO_ORDER_BIGNULL) != 0 {
         // reg1 is NULL.
         addr: cg.op1(p, opc.OP_NOT_NULL, reg1)
-        if op == opc.OP_GE {
-            _: cg.op2(p, opc.OP_GOTO, 0, lbl)
-        } else if op == opc.OP_GT {
+        if op == opc.OP_GE -> _: cg.op2(p, opc.OP_GOTO, 0, lbl) else if op == opc.OP_GT {
             _: cg.op2(p, opc.OP_NOT_NULL, reg2, lbl)
-        } else if op == opc.OP_LE {
-            _: cg.op2(p, opc.OP_IS_NULL, reg2, lbl)
-        }
+        } else if op == opc.OP_LE { _: cg.op2(p, opc.OP_IS_NULL, reg2, lbl) }
         _: cg.op2(p, opc.OP_GOTO, 0, addr_done)
         // reg1 is not NULL, but reg2 is.
         cg.v_jump_here(p, addr)
@@ -1145,7 +1155,9 @@ window_code_range_test: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg, op0: Int
     // at least ''.
     _: cg.op4_text(p, opc.OP_STRING8, 0, reg_string, 0, [U8]{})
     addr_ge: cg.op3(p, opc.OP_GE, reg_string, 0, reg1)
-    if (op == opc.OP_GE && arith == opc.OP_ADD) || (op == opc.OP_LE && arith == opc.OP_SUBTRACT) -> _: cg.op3(p, op, reg2, lbl, reg1)
+    if (op == opc.OP_GE && arith == opc.OP_ADD) || (op == opc.OP_LE && arith == opc.OP_SUBTRACT) {
+        _: cg.op3(p, op, reg2, lbl, reg1)
+    }
     _: cg.op3(p, arith, reg_val, reg1, reg1)
     cg.v_jump_here(p, addr_ge)
     _: cg.op3(p, op, reg2, lbl, reg1)
@@ -1184,9 +1196,7 @@ window_code_op: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg, op: Int, reg_cou
             } else {
                 window_code_range_test(p, a, s, opc.OP_GT, s.end_csr, reg_countdown, s.current_csr, lbl_done)
             }
-        } else {
-            _: cg.op3(p, opc.OP_IF_POS, reg_countdown, lbl_done, 1)
-        }
+        } else { _: cg.op3(p, opc.OP_IF_POS, reg_countdown, lbl_done, 1) }
     }
 
     if op == WINDOW_RETURN_ROW && mw.reg_start_rowid == 0 -> window_agg_final(p, a, s, false)
@@ -1219,17 +1229,13 @@ window_code_op: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg, op: Int, reg_cou
     } else if op == WINDOW_AGGINVERSE {
         csr = s.start_csr
         reg = s.start_reg
-        if mw.reg_start_rowid != 0 {
-            _: cg.op2(p, opc.OP_ADD_IMM, mw.reg_start_rowid, 1)
-        } else {
+        if mw.reg_start_rowid != 0 -> _: cg.op2(p, opc.OP_ADD_IMM, mw.reg_start_rowid, 1) else {
             window_agg_step(p, a, s.mwin, csr, true, s.reg_arg)
         }
     } else {
         csr = s.end_csr
         reg = s.end_reg
-        if mw.reg_start_rowid != 0 {
-            _: cg.op2(p, opc.OP_ADD_IMM, mw.reg_end_rowid, 1)
-        } else {
+        if mw.reg_start_rowid != 0 -> _: cg.op2(p, opc.OP_ADD_IMM, mw.reg_end_rowid, 1) else {
             window_agg_step(p, a, s.mwin, csr, false, s.reg_arg)
         }
     }
@@ -1294,18 +1300,18 @@ window_code_step: fn(p: &cg.Parse, a: &ast.AST, sel: Int, wi: &we.WhereInfo, reg
     // When a buffered row may go: never (0), once out of the frame
     // (AGGINVERSE), once returned (RETURN_ROW), or once in it (AGGSTEP).
     if mw.start_type == tk.TK_FOLLOWING {
-        if mw.frm_type != tk.TK_RANGE && window_expr_gt_zero(p, a, mw.start_expr) -> s.e_delete = WINDOW_RETURN_ROW
+        if mw.frm_type != tk.TK_RANGE && window_expr_gt_zero(p, a, mw.start_expr) {
+            s.e_delete = WINDOW_RETURN_ROW
+        }
     } else if mw.start_type == tk.TK_UNBOUNDED {
         if !window_cache_frame(p, a, mwin) {
             if mw.end_type == tk.TK_PRECEDING {
-                if mw.frm_type != tk.TK_RANGE && window_expr_gt_zero(p, a, mw.end_expr) -> s.e_delete = WINDOW_AGGSTEP
-            } else {
-                s.e_delete = WINDOW_RETURN_ROW
-            }
+                if mw.frm_type != tk.TK_RANGE && window_expr_gt_zero(p, a, mw.end_expr) {
+                    s.e_delete = WINDOW_AGGSTEP
+                }
+            } else { s.e_delete = WINDOW_RETURN_ROW }
         }
-    } else {
-        s.e_delete = WINDOW_AGGINVERSE
-    }
+    } else { s.e_delete = WINDOW_AGGINVERSE }
 
     // The subquery row's values, as a record, and the rowid it goes in at.
     reg_new: p.f.n_mem + 1
@@ -1344,7 +1350,9 @@ window_code_step: fn(p: &cg.Parse, a: &ast.AST, sel: Int, wi: &we.WhereInfo, reg
         p.f.n_mem += n_peer
     }
 
-    loop i_input in 0..<n_input -> _: cg.op3(p, opc.OP_COLUMN, csr_input, i_input, reg_new + i_input)
+    loop i_input in 0..<n_input {
+        _: cg.op3(p, opc.OP_COLUMN, csr_input, i_input, reg_new + i_input)
+    }
     _: cg.op3(p, opc.OP_MAKE_RECORD, reg_new, n_input, reg_record)
 
     // A new partition flushes the one before, through a Gosub whose
@@ -1390,7 +1398,9 @@ window_code_step: fn(p: &cg.Parse, a: &ast.AST, sel: Int, wi: &we.WhereInfo, reg
         _: cg.op2(p, opc.OP_GOTO, 0, lbl_where_end)
         cg.v_jump_here(p, addr_ge)
     }
-    if mw.start_type == tk.TK_FOLLOWING && mw.frm_type != tk.TK_RANGE && reg_end != 0 -> _: cg.op3(p, opc.OP_SUBTRACT, reg_start, reg_end, reg_start)
+    if mw.start_type == tk.TK_FOLLOWING && mw.frm_type != tk.TK_RANGE && reg_end != 0 {
+        _: cg.op3(p, opc.OP_SUBTRACT, reg_start, reg_end, reg_start)
+    }
 
     if mw.start_type != tk.TK_UNBOUNDED -> _: cg.op1(p, opc.OP_REWIND, s.start_csr)
     _: cg.op1(p, opc.OP_REWIND, s.current_csr)

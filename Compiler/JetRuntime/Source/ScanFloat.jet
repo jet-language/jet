@@ -2,9 +2,16 @@
 // exact rational; only the final quotient is rounded, ties to even. No Float
 // arithmetic, libc parser, or lossy decimal accumulator.
 ScanDecimal: struct {
-    valid: Bool, negative: Bool, first: I64, last: I64,
-    digits: I64, fraction: I64, exponent: I64, special: I64
+    valid: Bool
+    negative: Bool
+    first: I64
+    last: I64
+    digits: I64
+    fraction: I64
+    exponent: I64
+    special: I64
 }
+
 scan_decimal: fn(data: I64, len: I64, stride: I64) -> ScanDecimal {
     result := ScanDecimal{valid: false, negative: false, first: I64{0}, last: I64{0}, digits: I64{0}, fraction: I64{0}, exponent: I64{0}, special: I64{0}}
     if (len == I64{0}) { return result }
@@ -38,17 +45,17 @@ scan_decimal: fn(data: I64, len: I64, stride: I64) -> ScanDecimal {
         }
         if (byte < I64{48} || byte > I64{57}) { return result }
         seen = true
-        if point { result.fraction += I64{1} }
+        if point -> result.fraction += I64{1}
         if (byte != I64{48}) {
-            if leading { result.first = at }
+            if leading -> result.first = at
             leading = false
             result.last = at + I64{1}
             trailing = I64{0}
         } else if !leading { trailing += I64{1} }
-        if !leading { result.digits += I64{1} }
+        if !leading -> result.digits += I64{1}
         at += I64{1}
     }
-    if !seen { return result }
+    if !seen -> return result
     if (at < len) {
         at += I64{1}
         minus := false
@@ -67,7 +74,9 @@ scan_decimal: fn(data: I64, len: I64, stride: I64) -> ScanDecimal {
         loop at < len {
             digit: scan_byte(data, stride, at) - I64{48}
             if (digit < I64{0} || digit > I64{9}) { return result }
-            if (exp <= (bound - digit) /% I64{10}) { exp = exp * I64{10} + digit } else { exp = bound }
+            if (exp <= (bound - digit) /% I64{10}) { exp = exp * I64{10} + digit } else {
+                exp = bound
+            }
             at += I64{1}
         }
         result.exponent = if minus -> -exp else -> exp
@@ -77,6 +86,7 @@ scan_decimal: fn(data: I64, len: I64, stride: I64) -> ScanDecimal {
     result.valid = true
     result
 }
+
 scan_pow10: fn(node: I64, count: I64) {
     remaining := count
     loop remaining >= (I64{9}) {
@@ -90,6 +100,7 @@ scan_pow10: fn(node: I64, count: I64) {
     }
     int_scale(node, factor, I64{0})
 }
+
 scan_float_bits: fn(data: I64, len: I64, stride: I64) -> I64 {
     decimal: scan_decimal(data, len, stride)
     sign: if decimal.negative -> I64{-9223372036854775808} else -> I64{0}
@@ -150,7 +161,9 @@ scan_float_bits: fn(data: I64, len: I64, stride: I64) -> I64 {
     twice: jet_int_add(remainder, remainder)
     comparison: int_compare_abs(twice, int_tag(denominator))
     mantissa := int_word(quotient)
-    if (comparison > I64{0} || (comparison == I64{0} && (sticky || (mantissa.bit_and(I64{1})) != I64{0}))) { mantissa += I64{1} }
+    if (comparison > I64{0} || (comparison == I64{0} && (sticky || (mantissa.bit_and(I64{1})) != I64{0}))) {
+        mantissa += I64{1}
+    }
     int_discard(quotient)
     int_discard(remainder)
     int_discard(twice)

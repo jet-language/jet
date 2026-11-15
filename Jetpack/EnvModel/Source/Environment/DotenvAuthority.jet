@@ -12,18 +12,28 @@ envmodel_checked_dotenv_snapshot: fn(root: String, relative: String) -[FS, Env]>
     }
     resolver: if AuthorityResolver.open(root) == {
         .Ok(opened) -> opened
-        .Err(error) -> { return Err(EnvironmentFactError.new(error.message())) }
+        .Err(error) -> {
+            return Err(EnvironmentFactError.new(error.message()))
+        }
     }
     file: if resolver.checked_file(relative) == {
         .Ok(checked) -> checked
-        .Err(error) -> { return Err(EnvironmentFactError.new(error.message())) }
+        .Err(error) -> {
+            return Err(EnvironmentFactError.new(error.message()))
+        }
     }
     // The opened descriptor's link count.
     info: if file.handle.stat() == {
         .Ok(stat) -> stat
-        .Err(error) -> { return Err(EnvironmentFactError.new("couldn't inspect dotenv file authority: {error}")) }
+        .Err(error) -> {
+            return Err(EnvironmentFactError.new("couldn't inspect dotenv file authority: {error}"))
+        }
     }
-    if info.links > 1 -> return Err(EnvironmentFactError.new("dotenv file must not be a hard link to another path"))
-    if resolver.revalidate_file(file) == .Err(error) -> return Err(EnvironmentFactError.new(error.message()))
+    if info.links > 1 {
+        return Err(EnvironmentFactError.new("dotenv file must not be a hard link to another path"))
+    }
+    if resolver.revalidate_file(file) == .Err(error) {
+        return Err(EnvironmentFactError.new(error.message()))
+    }
     Ok(file.bytes)
 }

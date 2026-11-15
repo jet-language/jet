@@ -6,8 +6,11 @@
 // reference's reason text, which the journal wraps with the member path.
 
 STORE_LIFECYCLE_JOURNAL_VERSION: "jet-lifecycle-journal-v1"
+
 STORE_LIFECYCLE_SNAPSHOT_VERSION: "jet-lifecycle-snapshot-v1"
+
 STORE_LIFECYCLE_STATE_VERSION: "jet-lifecycle-state-v1"
+
 STORE_LIFECYCLE_CHECKSUM_FIELD: "checksum\t"
 
 // Rust `render_entry`.
@@ -50,7 +53,9 @@ store_lifecycle_seal_body: fn(body: String) -> String Never! {
 store_lifecycle_parse_entry: fn(raw: String) -> LifecycleJournalEntry StoreError! {
     body: store_lifecycle_checked_body(raw)
     lines: store_lifecycle_lines(body)
-    if lines.len() == 0 || lines[0] != STORE_LIFECYCLE_JOURNAL_VERSION -> return Err(StoreError.InvalidData("unsupported journal version"))
+    if lines.len() == 0 || lines[0] != STORE_LIFECYCLE_JOURNAL_VERSION {
+        return Err(StoreError.InvalidData("unsupported journal version"))
+    }
     if lines.len() < 2 -> return Err(StoreError.InvalidData("missing lifecycle operation"))
     fields: lines[1].split("\t").to_list()
     targets := [String]{}
@@ -61,13 +66,21 @@ store_lifecycle_parse_entry: fn(raw: String) -> LifecycleJournalEntry StoreError
         role: if parts.len() == 2 -> parts[0] else -> ""
         if role == {
             "target" -> {
-                if targets.len() >= STORE_LIFECYCLE_MAX_TARGETS_PER_ROOT -> return Err(StoreError.InvalidData("lifecycle transaction exceeds target-count bound"))
-                if targets.contains(parts[1]) -> return Err(StoreError.InvalidData("duplicate lifecycle target `{parts[1]}`"))
+                if targets.len() >= STORE_LIFECYCLE_MAX_TARGETS_PER_ROOT {
+                    return Err(StoreError.InvalidData("lifecycle transaction exceeds target-count bound"))
+                }
+                if targets.contains(parts[1]) {
+                    return Err(StoreError.InvalidData("duplicate lifecycle target `{parts[1]}`"))
+                }
                 targets.push(parts[1])
             }
             "protect" -> {
-                if protected.len() >= STORE_LIFECYCLE_MAX_TARGETS_PER_ROOT * 2 -> return Err(StoreError.InvalidData("lifecycle transaction exceeds protected-target bound"))
-                if protected.contains(parts[1]) -> return Err(StoreError.InvalidData("duplicate protected target `{parts[1]}`"))
+                if protected.len() >= STORE_LIFECYCLE_MAX_TARGETS_PER_ROOT * 2 {
+                    return Err(StoreError.InvalidData("lifecycle transaction exceeds protected-target bound"))
+                }
+                if protected.contains(parts[1]) {
+                    return Err(StoreError.InvalidData("duplicate protected target `{parts[1]}`"))
+                }
                 protected.push(parts[1])
             }
             else -> return Err(StoreError.InvalidData("invalid lifecycle journal line `{line}`"))
@@ -82,33 +95,33 @@ store_lifecycle_parse_entry: fn(raw: String) -> LifecycleJournalEntry StoreError
             identity: store_lifecycle_parse_identity(fields[1], fields[2], fields[3], fields[4], fields[5])
             revision: store_lifecycle_parse_legacy_revision(fields[4])
             at: store_lifecycle_parse_timestamp(fields[6])
-            Ok(LifecycleJournalEntry.Prepare{identity, proposed, protected: protect, metadata: RootMetadata.empty(), revision, at})
+            Ok(LifecycleJournalEntry.Prepare{identity: identity, proposed: proposed, protected: protect, metadata: RootMetadata.empty(), revision: revision, at: at})
         }
         operation == "prepare" && fields.len() == 11 -> {
             identity: store_lifecycle_parse_identity(fields[1], fields[2], fields[3], fields[4], fields[5])
             metadata: store_lifecycle_parse_metadata(fields[8], fields[9], fields[10])
             revision: store_lifecycle_parse_revision(fields[6])
             at: store_lifecycle_parse_timestamp(fields[7])
-            Ok(LifecycleJournalEntry.Prepare{identity, proposed, protected: protect, metadata, revision, at})
+            Ok(LifecycleJournalEntry.Prepare{identity: identity, proposed: proposed, protected: protect, metadata: metadata, revision: revision, at: at})
         }
         operation == "commit" && fields.len() == 5 && no_sets -> {
             id: store_lifecycle_parse_id(fields[1])
             incarnation: store_lifecycle_parse_incarnation(fields[2])
             witness: store_lifecycle_parse_witness(fields[3])
             at: store_lifecycle_parse_timestamp(fields[4])
-            Ok(LifecycleJournalEntry.Commit{id, incarnation, witness, at})
+            Ok(LifecycleJournalEntry.Commit{id: id, incarnation: incarnation, witness: witness, at: at})
         }
         operation == "tombstone" && fields.len() == 5 && no_sets -> {
             id: store_lifecycle_parse_id(fields[1])
             incarnation: store_lifecycle_parse_incarnation(fields[2])
             witness: store_lifecycle_parse_witness(fields[3])
             at: store_lifecycle_parse_timestamp(fields[4])
-            Ok(LifecycleJournalEntry.Tombstone{id, incarnation, witness, at})
+            Ok(LifecycleJournalEntry.Tombstone{id: id, incarnation: incarnation, witness: witness, at: at})
         }
         operation == "legacy" && fields.len() == 7 && protect.len() == 0 -> {
             identity: store_lifecycle_parse_identity(fields[1], fields[2], fields[3], fields[4], fields[5])
             at: store_lifecycle_parse_timestamp(fields[6])
-            Ok(LifecycleJournalEntry.Legacy{identity, targets: proposed, at})
+            Ok(LifecycleJournalEntry.Legacy{identity: identity, targets: proposed, at: at})
         }
         else -> Err(StoreError.InvalidData("invalid lifecycle journal operation"))
     }
@@ -120,14 +133,18 @@ store_lifecycle_checked_body: fn(raw: String) -> String StoreError! {
     split: raw.cut_last(STORE_LIFECYCLE_CHECKSUM_FIELD) ?? return Err(StoreError.InvalidData("missing checksum"))
     if !split.after.ends_with("\n") -> return Err(StoreError.InvalidData("truncated checksum"))
     checksum: split.after.removesuffix("\n")
-    if checksum.bytes().len() != 64 || checksum.contains("\n") -> return Err(StoreError.InvalidData("invalid checksum"))
-    if pkg_sha256_hex(split.before.bytes()) != checksum -> return Err(StoreError.InvalidData("checksum mismatch"))
+    if checksum.bytes().len() != 64 || checksum.contains("\n") {
+        return Err(StoreError.InvalidData("invalid checksum"))
+    }
+    if pkg_sha256_hex(split.before.bytes()) != checksum {
+        return Err(StoreError.InvalidData("checksum mismatch"))
+    }
     Ok(split.before)
 }
 
 // Rust `render_snapshot`, with the sequence already rendered so admission can
 // size the longest possible spelling.
-store_lifecycle_render_snapshot_text: fn(through: String, roots: [String: LifecycleRoot]) -> String Never! {
+store_lifecycle_render_snapshot_text: fn(through: String, roots: [String:LifecycleRoot]) -> String Never! {
     out := [String]{"{STORE_LIFECYCLE_SNAPSHOT_VERSION}\nthrough\t{through}\n{STORE_LIFECYCLE_STATE_VERSION}\n"}
     ids: store_lifecycle_sorted_ids(roots)
     loop id in ids {
@@ -145,59 +162,79 @@ store_lifecycle_render_snapshot_text: fn(through: String, roots: [String: Lifecy
     out.join("")
 }
 
-store_lifecycle_render_snapshot: fn(through: Int, roots: [String: LifecycleRoot]) -> String Never! {
+store_lifecycle_render_snapshot: fn(through: Int, roots: [String:LifecycleRoot]) -> String Never! {
     store_lifecycle_render_snapshot_text("{through}", roots)
 }
 
 // A parsed snapshot: the journal sequence it covers and the root state.
 LifecycleSnapshotRecord: struct {
     through: Int
-    roots: [String: LifecycleRoot]
+    roots: [String:LifecycleRoot]
 }
 
 // Rust `parse_snapshot`.
 store_lifecycle_parse_snapshot: fn(raw: String) -> LifecycleSnapshotRecord StoreError! {
     body: store_lifecycle_checked_body(raw)
     lines: store_lifecycle_lines(body)
-    if lines.len() == 0 || lines[0] != STORE_LIFECYCLE_SNAPSHOT_VERSION -> return Err(StoreError.InvalidData("unsupported lifecycle snapshot version"))
-    if lines.len() < 2 || !lines[1].starts_with("through\t") -> return Err(StoreError.InvalidData("missing lifecycle snapshot sequence"))
+    if lines.len() == 0 || lines[0] != STORE_LIFECYCLE_SNAPSHOT_VERSION {
+        return Err(StoreError.InvalidData("unsupported lifecycle snapshot version"))
+    }
+    if lines.len() < 2 || !lines[1].starts_with("through\t") {
+        return Err(StoreError.InvalidData("missing lifecycle snapshot sequence"))
+    }
     through: store_lifecycle_parse_u64(lines[1].removeprefix("through\t")) ?? return Err(StoreError.InvalidData("invalid lifecycle snapshot sequence"))
-    if through == 0 -> return Err(StoreError.InvalidData("lifecycle snapshot sequence must be nonzero"))
-    if lines.len() < 3 || lines[2] != STORE_LIFECYCLE_STATE_VERSION -> return Err(StoreError.InvalidData("missing lifecycle snapshot state header"))
-    roots := [String: LifecycleRoot]{}
+    if through == 0 {
+        return Err(StoreError.InvalidData("lifecycle snapshot sequence must be nonzero"))
+    }
+    if lines.len() < 3 || lines[2] != STORE_LIFECYCLE_STATE_VERSION {
+        return Err(StoreError.InvalidData("missing lifecycle snapshot state header"))
+    }
+    roots := [String:LifecycleRoot]{}
     current := ""
     work := 0
     loop index in 3..<lines.len() {
         line: lines[index]
         work += 1
-        if work > STORE_LIFECYCLE_MAX_RECOVERY_WORK -> return Err(StoreError.InvalidData("lifecycle snapshot exceeds work bound"))
+        if work > STORE_LIFECYCLE_MAX_RECOVERY_WORK {
+            return Err(StoreError.InvalidData("lifecycle snapshot exceeds work bound"))
+        }
         fields: line.split("\t").to_list()
         record: fields[0]
         count: fields.len()
         if {
             record == "root" && (count == 15 || count == 11) && (fields[10] == "0" || fields[10] == "1") -> {
-                if roots.len() >= STORE_LIFECYCLE_MAX_ROOTS -> return Err(StoreError.InvalidData("lifecycle snapshot exceeds root-count bound"))
+                if roots.len() >= STORE_LIFECYCLE_MAX_ROOTS {
+                    return Err(StoreError.InvalidData("lifecycle snapshot exceeds root-count bound"))
+                }
                 identity: store_lifecycle_parse_identity(fields[1], fields[2], fields[3], fields[4], fields[5])
                 id: identity.id.as_str()
-                if roots.has_key(id) -> return Err(StoreError.InvalidData("duplicate lifecycle snapshot root `{id}`"))
+                if roots.has_key(id) {
+                    return Err(StoreError.InvalidData("duplicate lifecycle snapshot root `{id}`"))
+                }
                 phase: RootPhase.parse(fields[6])
                 prepared_at: store_lifecycle_parse_timestamp(fields[7])
                 committed_at: store_lifecycle_parse_optional_timestamp(fields[8])
                 tombstoned_at: store_lifecycle_parse_optional_timestamp(fields[9])
                 metadata: if count == 15 -> store_lifecycle_parse_metadata(fields[12], fields[13], fields[14]) else -> RootMetadata.empty()
                 revision: if count == 15 -> store_lifecycle_parse_revision(fields[11]) else -> store_lifecycle_parse_legacy_revision(fields[4])
-                roots[id] = LifecycleRoot{identity, targets: [String]{}, protected_targets: [String]{}, phase, prepared_at, committed_at, tombstoned_at, metadata, revision, legacy: fields[10] == "1"}
+                roots[id] = LifecycleRoot{identity: identity, targets: [String]{}, protected_targets: [String]{}, phase: phase, prepared_at: prepared_at, committed_at: committed_at, tombstoned_at: tombstoned_at, metadata: metadata, revision: revision, legacy: fields[10] == "1"}
                 current = id
             }
             (record == "target" || record == "protect") && count == 2 -> {
-                if current == "" -> return Err(StoreError.InvalidData("snapshot target precedes root"))
-                if !roots.has_key(current) -> return Err(StoreError.InvalidData("snapshot target has no current root"))
+                if current == "" {
+                    return Err(StoreError.InvalidData("snapshot target precedes root"))
+                }
+                if !roots.has_key(current) {
+                    return Err(StoreError.InvalidData("snapshot target has no current root"))
+                }
                 set: if record == "target" -> roots[current].targets else -> roots[current].protected_targets
-                if set.len() >= STORE_LIFECYCLE_MAX_TARGETS_PER_ROOT * 2 -> return Err(StoreError.InvalidData("lifecycle snapshot root exceeds target bound"))
-                if set.contains(fields[1]) -> return Err(StoreError.InvalidData("duplicate lifecycle snapshot target `{fields[1]}`"))
-                if record == "target" {
-                    roots[current].targets.push(fields[1])
-                } else {
+                if set.len() >= STORE_LIFECYCLE_MAX_TARGETS_PER_ROOT * 2 {
+                    return Err(StoreError.InvalidData("lifecycle snapshot root exceeds target bound"))
+                }
+                if set.contains(fields[1]) {
+                    return Err(StoreError.InvalidData("duplicate lifecycle snapshot target `{fields[1]}`"))
+                }
+                if record == "target" -> roots[current].targets.push(fields[1]) else {
                     roots[current].protected_targets.push(fields[1])
                 }
             }
@@ -214,25 +251,33 @@ store_lifecycle_parse_snapshot: fn(raw: String) -> LifecycleSnapshotRecord Store
         .Err(error) -> return Err(StoreError.InvalidData(error.message()))
         .Ok(_) -> {}
     }
-    Ok(LifecycleSnapshotRecord{through, roots})
+    Ok(LifecycleSnapshotRecord{through: through, roots: roots})
 }
 
 // Rust `validate_snapshot_state`: every root's phase agrees with its
 // timestamps and target sets.
-store_lifecycle_validate_snapshot_state: fn(roots: [String: LifecycleRoot]) StoreError! {
+store_lifecycle_validate_snapshot_state: fn(roots: [String:LifecycleRoot]) StoreError! {
     ids: store_lifecycle_sorted_ids(roots)
     loop id in ids {
         root: roots[id]
-        if id != root.identity.id.as_str() || root.targets.len() == 0 -> return Err(StoreError.InvalidData("invalid lifecycle snapshot root identity or targets"))
+        if id != root.identity.id.as_str() || root.targets.len() == 0 {
+            return Err(StoreError.InvalidData("invalid lifecycle snapshot root identity or targets"))
+        }
         root.metadata.validate()
-        if root.revision == 0 -> return Err(StoreError.InvalidData("lifecycle snapshot root `{id}` has zero revision"))
+        if root.revision == 0 {
+            return Err(StoreError.InvalidData("lifecycle snapshot root `{id}` has zero revision"))
+        }
         consistent: if root.phase == {
             .Prepared -> root.committed_at == None && root.tombstoned_at == None && root.protected_targets.len() > 0 && store_lifecycle_is_subset(root.targets, root.protected_targets)
             .Committed -> root.committed_at != None && root.tombstoned_at == None && root.protected_targets == root.targets
             .Tombstoned -> root.committed_at != None && root.tombstoned_at != None && root.protected_targets.len() == 0
         }
-        if !consistent -> return Err(StoreError.InvalidData("invalid lifecycle snapshot root `{id}`"))
-        if root.legacy && root.phase == RootPhase.Prepared -> return Err(StoreError.InvalidData("legacy lifecycle snapshot root `{id}` is prepared"))
+        if !consistent {
+            return Err(StoreError.InvalidData("invalid lifecycle snapshot root `{id}`"))
+        }
+        if root.legacy && root.phase == RootPhase.Prepared {
+            return Err(StoreError.InvalidData("legacy lifecycle snapshot root `{id}` is prepared"))
+        }
         committed_backwards: if root.committed_at == {
             .Val(committed) -> committed.get() < root.prepared_at.get()
             .None -> false
@@ -242,12 +287,14 @@ store_lifecycle_validate_snapshot_state: fn(roots: [String: LifecycleRoot]) Stor
             .Val(tombstoned) -> tombstoned.get() < floor.get()
             .None -> false
         }
-        if committed_backwards || tombstoned_backwards -> return Err(StoreError.InvalidData("lifecycle snapshot root `{id}` has backwards timestamps"))
+        if committed_backwards || tombstoned_backwards {
+            return Err(StoreError.InvalidData("lifecycle snapshot root `{id}` has backwards timestamps"))
+        }
     }
 }
 
 // Rust `canonical_state`: the state text the lifecycle revision digests.
-store_lifecycle_canonical_state: fn(roots: [String: LifecycleRoot]) -> String Never! {
+store_lifecycle_canonical_state: fn(roots: [String:LifecycleRoot]) -> String Never! {
     out := [String]{"{STORE_LIFECYCLE_STATE_VERSION}\n"}
     ids: store_lifecycle_sorted_ids(roots)
     loop id in ids {
@@ -299,7 +346,9 @@ store_lifecycle_parse_optional_timestamp: fn(value: String) -> LifecycleTimestam
 
 store_lifecycle_parse_revision: fn(value: String) -> Int StoreError! {
     revision: store_lifecycle_parse_u64(value) ?? return Err(StoreError.InvalidData("invalid lifecycle root revision"))
-    if revision == 0 -> return Err(StoreError.InvalidData("lifecycle root revision must be nonzero"))
+    if revision == 0 {
+        return Err(StoreError.InvalidData("lifecycle root revision must be nonzero"))
+    }
     Ok(revision)
 }
 

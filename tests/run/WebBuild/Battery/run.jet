@@ -44,12 +44,12 @@ app_graph: fn() -> App {
         .hydration_dev()
 }
 
-
 #Codable
 Login: struct {
     user: String
     password: String
 }
+
 #Codable
 OrderSearch: struct {
     limit: Int
@@ -58,10 +58,9 @@ OrderSearch: struct {
 app_order_detail: fn(id: Int, search: OrderSearch) -> WebPage {
     return core_web.page(
         "Order",
-        "<main><h1>Order {id}</h1><p>limit={search.limit}</p></main>"
+        "<main><h1>Order {id}</h1><p>limit={search.limit}</p></main>",
     )
 }
-
 
 RouteState: struct {
     cache_version: Int
@@ -72,27 +71,23 @@ Orders: struct {
     path: String
     state: Shared<RouteState>
 
-    #Server.Get("/old")
-    redirect: fn(self) -> HTTPResponse HTTPError! {
+    #Server.Get("/old") redirect: fn(self) -> HTTPResponse HTTPError! {
         Ok(battery.redirect_response("/orders"))
     }
 
-    #Server.Get("/orders")
-    list: fn(self, req: HTTPRequest) -> HTTPResponse HTTPError! {
+    #Server.Get("/orders") list: fn(self, req: HTTPRequest) -> HTTPResponse HTTPError! {
         count: battery.count_orders(self.path) ?? return Ok(battery.status_response(500, "database read failed"))
         version: self.state.guard_read().value.cache_version
         body: "<h1>Orders</h1><p>request-path={req.path()}</p><p>orders={count}</p><p>cache={version}</p>"
         Ok(battery.ok_response(body))
     }
 
-    #Server.Get("/orders/:id")
-    detail: fn(self, id: Int) -> HTTPResponse HTTPError! {
+    #Server.Get("/orders/:id") detail: fn(self, id: Int) -> HTTPResponse HTTPError! {
         if id < 1 -> return Ok(battery.not_found_response("bad order id"))
         Ok(battery.ok_response("<h1>Order {id}</h1><p>{battery.order_detail_path(id)}</p>"))
     }
 
-    #Server.Post("/orders")
-    create: fn(self, req: HTTPRequest) -> HTTPResponse HTTPError! {
+    #Server.Post("/orders") create: fn(self, req: HTTPRequest) -> HTTPResponse HTTPError! {
         fields: http.form_decode(req.text() ?? return Ok(battery.invalid_response("unreadable form")))
         item: http.query_get(fields, "item") ?? return Ok(battery.invalid_response("missing item"))
         quantity_text: http.query_get(fields, "quantity") ?? return Ok(battery.invalid_response("missing quantity"))
@@ -104,8 +99,7 @@ Orders: struct {
         Ok(battery.created_response("created order rows={inserted}"))
     }
 
-    #Server.Post("/login")
-    login: fn(self, req: HTTPRequest) -> HTTPResponse HTTPError! {
+    #Server.Post("/login") login: fn(self, req: HTTPRequest) -> HTTPResponse HTTPError! {
         input: req.json<Login>() ?? return Ok(battery.invalid_response("invalid login"))
         state: battery.login_state(input.user, input.password) ?? return Ok(battery.status_response(401, "login failed"))
         self.state.guard_edit().value.session_id = state.session_id
@@ -113,8 +107,7 @@ Orders: struct {
         Ok(response.header("set-cookie", state.cookie))
     }
 
-    #Server.Get("/protected")
-    protected: fn(self, req: HTTPRequest) -> HTTPResponse HTTPError! {
+    #Server.Get("/protected") protected: fn(self, req: HTTPRequest) -> HTTPResponse HTTPError! {
         cookie: req.header("cookie") ?? return Ok(battery.status_response(401, "login required"))
         session_id: self.state.guard_read().value.session_id
         status: battery.protected_status(session_id, cookie)

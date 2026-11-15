@@ -1,6 +1,7 @@
-
 #Error
-TextError: enum { Bad }
+TextError: enum {
+    Bad
+}
 
 Pattern: distinct String
 
@@ -8,13 +9,11 @@ impl Pattern.CheckedText {
     Error: TextError
 
     check: fn(text: String) TextError! -[]> {
-        if text == "hello [1]" || text == "ok" { return Ok() }
+        if text == "hello [1]" || text == "ok" -> return Ok()
         return Err(TextError.Bad)
     }
 
-    encode_hole: fn<T: Printable>(value: T) -[]> String {
-        return "[1]"
-    }
+    encode_hole: fn<T: Printable>(value: T) -[]> String { return "[1]" }
 }
 
 accepts: fn(text: String) -[]> Bool {
@@ -25,6 +24,7 @@ accepts: fn(text: String) -[]> Bool {
 }
 
 COMPTIME_GOOD: #run accepts("ok")
+
 COMPTIME_BAD: #run accepts("")
 
 run: fn() {
@@ -32,12 +32,12 @@ run: fn() {
     print(literal.raw())
 
     if Pattern.from("ok") == {
-        .Ok(value) -> print(value.raw())
+        .Ok(value) -> { print(value.raw()) }
         .Err(_error) -> print("good rejected")
     }
 
     if Pattern.from("") == {
-        .Ok(_value) -> print("bad accepted")
+        .Ok(_value) -> { print("bad accepted") }
         .Err(_error) -> print("bad rejected")
     }
 

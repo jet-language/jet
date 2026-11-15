@@ -15,10 +15,15 @@
 // so `jetpack add/remove/build` can resolve and edit the declared environment.
 // The env file stays the declarative front door: add and remove edit this
 // file, never a hidden install database.
-
 use {
     jetpack_foundation.[
-        ENV_FILE, JETPACK_PROMPT_LABEL, PACK_DIRECTIVE_PACKAGES, PACK_DIRECTIVE_PROMPT, PACK_DIRECTIVE_SOURCE, REF_PROVIDER_AT, REF_SOURCE_JETPACK,
+        ENV_FILE,
+        JETPACK_PROMPT_LABEL,
+        PACK_DIRECTIVE_PACKAGES,
+        PACK_DIRECTIVE_PROMPT,
+        PACK_DIRECTIVE_SOURCE,
+        REF_PROVIDER_AT,
+        REF_SOURCE_JETPACK,
         REF_SOURCE_NIXPKGS,
     ]
     jet_env_model.[env_file_all_call_args, env_file_list_arg, env_file_quoted_strings, env_file_string_arg]
@@ -54,9 +59,7 @@ EnvFile: struct {
     }
 
     // The prompt label, defaulting to `jetpack`.
-    prompt_label: fn(self) -> String Never! {
-        self.prompt ?? JETPACK_PROMPT_LABEL
-    }
+    prompt_label: fn(self) -> String Never! { self.prompt ?? JETPACK_PROMPT_LABEL }
 
     // The default source label, defaulting to canonical `jetpack`.
     source_label: fn(self) -> String Never! {
@@ -124,9 +127,7 @@ EnvFile: struct {
     }
 
     // Path to the env file in a project dir.
-    path_in: fn(dir: String) -> String Never! {
-        files.join(dir, ENV_FILE)
-    }
+    path_in: fn(dir: String) -> String Never! { files.join(dir, ENV_FILE) }
 
     // Load and parse the env file in `dir`, if present.
     load: fn(dir: String) -[FS]> EnvFile? Never! {
@@ -145,10 +146,14 @@ EnvFile: struct {
                 0 -> {}
                 1 -> file.default_source = Val(env_file_published_source(args[0]))
                 2 -> file.named.push(EnvNamedSource{name: args[0], upstream: args[1], via: None})
-                else -> file.named.push(EnvNamedSource{name: args[0], upstream: args[1], via: Val(args[2])})
+                else -> {
+                    file.named.push(EnvNamedSource{name: args[0], upstream: args[1], via: Val(args[2])})
+                }
             }
         }
-        loop package in env_file_list_arg(text, PACK_DIRECTIVE_PACKAGES) -> file.packages.push(package.trim())
+        loop package in env_file_list_arg(text, PACK_DIRECTIVE_PACKAGES) {
+            file.packages.push(package.trim())
+        }
         file.prompt = env_file_string_arg(text, PACK_DIRECTIVE_PROMPT)
         file
     }

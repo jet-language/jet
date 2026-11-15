@@ -1,25 +1,49 @@
 // These facts intentionally exceed JCS's exact binary64 integer boundary.
 use {
     jet_pkg_model.[
-        BundleFile, BundleFileFact, BundleFileKind, BundleInputFact, BundleKind, BundleMetadata,
-        BundlePlan, BundleReceipt, BundleTarget, LaunchDescriptor, SigningHook, UpdaterManifest,
-        pkg_bundle_canonical_bytes, pkg_bundle_canonical_text, pkg_bundle_integer, pkg_bundle_object,
+        BundleFile,
+        BundleFileFact,
+        BundleFileKind,
+        BundleInputFact,
+        BundleKind,
+        BundleMetadata,
+        BundlePlan,
+        BundleReceipt,
+        BundleTarget,
+        LaunchDescriptor,
+        SigningHook,
+        UpdaterManifest,
+        pkg_bundle_canonical_bytes,
+        pkg_bundle_canonical_text,
+        pkg_bundle_integer,
+        pkg_bundle_object,
     ]
     jet_foundation.[
-        CanonicalJSON, canonical_json_integer, canonical_json_sha256, sha256_bytes,
+        CanonicalJSON,
+        canonical_json_integer,
+        canonical_json_sha256,
+        sha256_bytes,
         sha256_hex_bytes,
     ]
 }
 
 pkg_bundle_wire_test_plan: fn() -> BundlePlan Never! {
     BundlePlan{
-        schema_version: 1, kind: BundleKind.Desktop, target: BundleTarget.LinuxAppImage,
-        package: "demo", version: "1.2.3", executable_source: "/checkout/demo",
+        schema_version: 1,
+        kind: BundleKind.Desktop,
+        target: BundleTarget.LinuxAppImage,
+        package: "demo",
+        version: "1.2.3",
+        executable_source: "/checkout/demo",
         artifact_name: "demo.AppImage",
         metadata: BundleMetadata{identifier: "demo", display_name: "Demo", publisher: "Example", description: "", categories: [String]{}},
-        files: [BundleFile]{}, launch: LaunchDescriptor.new("AppRun", "usr/bin/demo"),
+        files: [BundleFile]{},
+        launch: LaunchDescriptor.new("AppRun", "usr/bin/demo"),
         inputs: [BundleInputFact]{BundleInputFact{role: "executable", path: "/checkout/demo", digest: "input-hash", bytes: 9007199254740993}},
-        signing_hooks: [SigningHook]{}, updater: None, game: None, identity: "plan-id"
+        signing_hooks: [SigningHook]{},
+        updater: None,
+        game: None,
+        identity: "plan-id",
     }
 }
 
@@ -32,17 +56,19 @@ pkg_bundle_wire_test_plan: fn() -> BundlePlan Never! {
     invalids: [String]{"-0", "01"}
     loop invalid in invalids {
         if canonical_json_integer(invalid) == {
-            .Ok(_) -> panic("noncanonical integer accepted")
+            .Ok(_) -> { panic("noncanonical integer accepted") }
             .Err(error) -> assert_eq(error.message, "non-canonical integer `{invalid}`")
         }
     }
 }
 
 #Test("bundle canonical wire preserves mixed nested carriers") {
-    value: pkg_bundle_object([
-        "z": CanonicalJSON.Array([CanonicalJSON]{CanonicalJSON.Null, CanonicalJSON.Bool(false), pkg_bundle_integer(-7), CanonicalJSON.String("x")}),
-        "a": pkg_bundle_object(["b": CanonicalJSON.Bool(true)])
-    ])
+    value: pkg_bundle_object(
+        [
+            "z": CanonicalJSON.Array([CanonicalJSON]{CanonicalJSON.Null, CanonicalJSON.Bool(false), pkg_bundle_integer(-7), CanonicalJSON.String("x")}),
+            "a": pkg_bundle_object(["b": CanonicalJSON.Bool(true)]),
+        ],
+    )
     assert_eq(pkg_bundle_canonical_text(value), "{{\"a\":{{\"b\":true}},\"z\":[null,false,-7,\"x\"]}}\n")
     assert_eq(pkg_bundle_canonical_text(value).bytes(), pkg_bundle_canonical_bytes(value))
 }
@@ -50,7 +76,7 @@ pkg_bundle_wire_test_plan: fn() -> BundlePlan Never! {
 #Test("bundle canonical wire uses Rust UTF8 not UTF16 key ordering") {
     bmp: String.from_bytes([U8]{U8{238}, U8{128}, U8{128}}) ?? panic("U+E000")
     astral: String.from_bytes([U8]{U8{240}, U8{144}, U8{128}, U8{128}}) ?? panic("U+10000")
-    fields := [String: CanonicalJSON]{}
+    fields := [String:CanonicalJSON]{}
     fields[astral] = pkg_bundle_integer(2)
     fields[bmp] = pkg_bundle_integer(1)
     fields["é"] = pkg_bundle_integer(0)

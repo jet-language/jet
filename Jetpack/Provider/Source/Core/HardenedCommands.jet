@@ -62,5 +62,7 @@ provider_network_denied: fn() -[Env]> Bool Never! {
 }
 
 provider_ensure_network_allowed: fn(need: String) ProviderError! -[Env]> {
-    if provider_network_denied() -> return Err(ProviderError.Offline("network disabled by {PROVIDER_DENY_NETWORK_ENV} while trying to {need}"))
+    if provider_network_denied() {
+        return Err(ProviderError.Offline("network disabled by {PROVIDER_DENY_NETWORK_ENV} while trying to {need}"))
+    }
 }

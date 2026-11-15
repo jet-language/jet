@@ -83,18 +83,25 @@ use {
 }
 
 JET_EVAL_IR_INLINE_MIN: -4611686018427387904
+
 JET_EVAL_IR_INLINE_MAX: 4611686018427387903
+
 // The page the compiler reads child memory by.
 JET_EVAL_NATIVE_PAGE: 4096
+
 // The end of the user address space: no word at or above it is an address.
 JET_EVAL_NATIVE_USER_END: 140737488355328
+
 // The most bytes one value read may span.
 JET_EVAL_NATIVE_READ_MAX: 4294967296
+
 // Units of fuel per millisecond of a comptime call: the default fuel is a
 // five-second budget.
 JET_EVAL_NATIVE_FUEL_PER_MS: 2000
+
 // A native call passes its cell and at most four parameter words.
 JET_EVAL_NATIVE_MAX_PARAMS: 4
+
 JET_EVAL_NATIVE_PREFIX: "__jet_comptime_"
 
 // A compile's native children over the runtime image `image`: `sealed`
@@ -225,7 +232,9 @@ jet_eval_native_session: fn(file: String, reader: &&JetEvalNativeImageReader) ->
 
 // Reads the runtime image file on the first call.
 jet_eval_native_image_read: fn(image: &JetEvalNativeImage) Never! {
-    if image.read -> return
+    if image.read {
+        return
+    }
     image.read = true
     found: image.reader.read(image.file) ?? return
     image.at = found.at
@@ -420,7 +429,9 @@ jet_eval_native_load: fn(built: &&JetEvalIRComptime, config: JetEvalConfig, thre
             next
         }
         rows := [Int]{}
-        loop slot in 0..<code.functions[id].param_count -> rows.push(code.functions[id].slot_type[slot])
+        loop slot in 0..<code.functions[id].param_count {
+            rows.push(code.functions[id].slot_type[slot])
+        }
         result: code.functions[id].result
         size: if result >= 0 && code.types[result].size > 8 -> code.types[result].size else -> 8
         name: "{JET_EVAL_NATIVE_PREFIX}item_{index}"
@@ -553,9 +564,7 @@ jet_eval_native_wrapper: fn(code: &IRModule, name: String, id: Int, params: [Int
         _ := ir_emit(w, IROp.Call, value, id, start, args.len(), 0)
         if code.types[result].kind == .Aggregate {
             _ := ir_emit(w, IROp.CopyBytes, -1, cell, value, code.types[result].size, 0)
-        } else {
-            _ := ir_emit(w, IROp.Store, -1, cell, 0, value, 0)
-        }
+        } else { _ := ir_emit(w, IROp.Store, -1, cell, 0, value, 0) }
     }
     _ := ir_emit(w, IROp.Return, -1, -1, -1, -1, 0)
     w
@@ -590,7 +599,9 @@ jet_eval_native_missing: fn(code: &IRModule, session: JetEvalNativeSession) {
             calls.push(at)
         }
     }
-    if calls.len() == 0 -> return
+    if calls.len() == 0 {
+        return
+    }
     permit := session.image.guard_edit()
     jet_eval_native_image_read(permit.value)
     defined: x64_runtime_image_defines(permit.value.bytes, permit.value.gap_at, permit.value.gap, code.names, asked)
@@ -609,7 +620,9 @@ jet_eval_native_missing: fn(code: &IRModule, session: JetEvalNativeSession) {
         symbol: code.names[code.functions[id].a[at]].copy()
         start: code.functions[id].b[at]
         rows := [Int]{}
-        loop arg in start..<(start + code.functions[id].c[at]) -> rows.push(code.functions[id].slot_type[code.functions[id].args[arg]])
+        loop arg in start..<(start + code.functions[id].c[at]) {
+            rows.push(code.functions[id].slot_type[code.functions[id].args[arg]])
+        }
         dst: code.functions[id].dst[at]
         result: if dst >= 0 -> code.functions[id].slot_type[dst] else -> -1
         stub := jet_eval_native_missing_stub(code, "{JET_EVAL_NATIVE_PREFIX}missing_{index /% 2}", symbol, rows, result)
@@ -650,13 +663,26 @@ jet_eval_native_missing_stub: fn(code: &IRModule, name: String, symbol: String, 
 // context; none for a constant).
 jet_eval_native_run: fn(program: &JetEvalNativeProgram, item: Int, args: [TComptimeValue], config: JetEvalConfig, span: Span) -> JetEvalIRResult {
     s := JetEvalIRState{
-        child: X64ComptimeChild{}, pages: [[U8]]{}, page_rows: [Int:Int]{},
+        child: X64ComptimeChild{},
+        pages: [[U8]]{},
+        page_rows: [Int:Int]{},
         budget: if config.fuel < 0 -> -1 else -> config.fuel /% JET_EVAL_NATIVE_FUEL_PER_MS,
-        stdout: "", stderr: "", max_depth: config.max_call_depth, runtime_execution: program.runtime_execution, eval_entry: config.eval_entry, impure: config.impure, impure_gate: config.impure_gate, effect_call: config.effect_call, span: span,
-        failure: None, internal_problem: None, exit_code: None,
+        stdout: "",
+        stderr: "",
+        max_depth: config.max_call_depth,
+        runtime_execution: program.runtime_execution,
+        eval_entry: config.eval_entry,
+        impure: config.impure,
+        impure_gate: config.impure_gate,
+        effect_call: config.effect_call,
+        span: span,
+        failure: None,
+        internal_problem: None,
+        exit_code: None,
         inputs: if config.comptime_input_adapter == .Val(adapter) -> Val(adapter.clone_input_adapter()) else -> None,
         compiler: if config.compiler_query_host == .Val(host) -> Val(host.clone_compiler_host()) else -> None,
-        host_types: Val(program.types.copy()), host_layouts: Val(program.layouts.copy()),
+        host_types: Val(program.types.copy()),
+        host_layouts: Val(program.layouts.copy()),
         host_adapter: if config.build_host_adapter == .Val(installed) -> Val(installed.clone_adapter()) else -> None,
     }
     if program.failure != "" {
@@ -704,7 +730,9 @@ jet_eval_native_run: fn(program: &JetEvalNativeProgram, item: Int, args: [TCompt
     permit.value.child = s.child.copy()
     // Standard error no runtime stop read back is the evaluated code's own
     // output, an effect a comptime evaluation refuses.
-    if !s.runtime_execution && s.stderr != "" && !jet_eval_ir_failed(s) -> jet_eval_ir_effect_refused(s, "standard error", false)
+    if !s.runtime_execution && s.stderr != "" && !jet_eval_ir_failed(s) {
+        jet_eval_ir_effect_refused(s, "standard error", false)
+    }
     jet_eval_ir_result(s, value)
 }
 
@@ -768,12 +796,16 @@ jet_eval_native_serve: fn(s: &JetEvalIRState) -> Bool {
             }
             // The code can't go on without its answer: the child ends with it.
             x64_comptime_reap(s.child, true)
-            if !jet_eval_ir_failed(s) -> jet_eval_ir_problem(s, "a host route of compile-time code has no answer")
+            if !jet_eval_ir_failed(s) {
+                jet_eval_ir_problem(s, "a host route of compile-time code has no answer")
+            }
             return false
         }
         if kind == X64_COMPTIME_STOP {
             jet_eval_native_stop(s, x64_comptime_word(reply, 8), x64_comptime_word(reply, 16), x64_comptime_word(reply, 24), x64_comptime_word(reply, 32), x64_comptime_word(reply, 40))
-            if !jet_eval_ir_failed(s) -> jet_eval_ir_problem(s, "a runtime stop of compile-time code has no report")
+            if !jet_eval_ir_failed(s) {
+                jet_eval_ir_problem(s, "a runtime stop of compile-time code has no report")
+            }
             return false
         }
         if kind == X64_COMPTIME_REFUSED {
@@ -790,7 +822,9 @@ jet_eval_native_serve: fn(s: &JetEvalIRState) -> Bool {
 // The call's child ended before its DONE: out of fuel, out of stack, a
 // runtime exit (a stop's report on standard error, or a program's exit).
 jet_eval_native_ended: fn(s: &JetEvalIRState) {
-    if jet_eval_ir_failed(s) -> return
+    if jet_eval_ir_failed(s) {
+        return
+    }
     if s.child.exhausted {
         _ := jet_eval_ir_out_of_fuel(s)
         return
@@ -817,7 +851,9 @@ jet_eval_native_ended: fn(s: &JetEvalIRState) {
     }
     report: String.from_bytes_lossy(s.child.stderr).trim()
     s.child.stderr = [U8]{}
-    if jet_eval_native_overflow(s, report) -> return
+    if jet_eval_native_overflow(s, report) {
+        return
+    }
     jet_eval_ir_source_fail(s, if report == "" -> "the runtime exited with status {code}" else -> report)
 }
 
@@ -841,13 +877,9 @@ jet_eval_native_overflow: fn(s: &JetEvalIRState, report: String) -> Bool Never! 
         address := 0
         loop index in at + JET_EVAL_NATIVE_UNNAMED_AT.bytes().len()..<digits.len() {
             digit: Int{digits[index]}
-            if digit >= 48 && digit <= 57 {
-                address = address * 16 + digit - 48
-            } else if digit >= 97 && digit <= 102 {
+            if digit >= 48 && digit <= 57 -> address = address * 16 + digit - 48 else if digit >= 97 && digit <= 102 {
                 address = address * 16 + digit - 87
-            } else {
-                break
-            }
+            } else { break }
         }
         s.overflow_at = address
     }
@@ -868,7 +900,9 @@ jet_eval_native_overflow_error: fn(span: Span, what: String) -> JetEvalError Nev
 // batch function whose code holds its address.
 jet_eval_native_overflow_name: fn(s: &JetEvalIRState, program: JetEvalNativeProgram) Never! {
     id: x64_comptime_function_at(program.functions, s.overflow_at) ?? return
-    if id >= program.function_names.len() || program.function_names[id] == "" -> return
+    if id >= program.function_names.len() || program.function_names[id] == "" {
+        return
+    }
     s.failure = Val(jet_eval_native_overflow_error(s.span, "Stack overflow in `{program.function_names[id]}`"))
 }
 
@@ -902,14 +936,14 @@ jet_eval_native_stop: fn(s: &JetEvalIRState, kind: Int, a: Int, b: Int, c: Int, 
             right: jet_eval_ir_text(s, d) ?? return
             left: jet_eval_ir_text(s, c) ?? return
             message = "expected: {right}, got: {left}"
-        } else if b != 0 {
-            message = jet_eval_ir_text(s, b) ?? return
-        }
+        } else if b != 0 { message = jet_eval_ir_text(s, b) ?? return }
         if s.runtime_execution {
             jet_eval_ir_source_fail(s, message)
             return
         }
-        if s.failure == None -> s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: diagnostic_from_registry("E3010", Val(s.span), "`{message}`", "compile-time code stopped the build: a `panic`, a failed check or an unhandled failure in a `#run` value is a compile error", "handle the failure inside the `#run` block (`??` or an `.Ok`/`.Err` match), or fix the value the check rejects")})
+        if s.failure == None {
+            s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: diagnostic_from_registry("E3010", Val(s.span), "`{message}`", "compile-time code stopped the build: a `panic`, a failed check or an unhandled failure in a `#run` value is a compile error", "handle the failure inside the `#run` block (`??` or an `.Ok`/`.Err` match), or fix the value the check rejects")})
+        }
         return
     }
     // A reached `#Todo` (Trap.jet jet_todo_stop): the E3011 stop at its file
@@ -921,7 +955,9 @@ jet_eval_native_stop: fn(s: &JetEvalIRState, kind: Int, a: Int, b: Int, c: Int, 
         what: "`#Todo at {file}:{b} — expected {expected}`"
         why: if s.runtime_execution -> "this code is deliberately incomplete and reached a running program." else -> "compile-time code reached a `#Todo`, so the `#run` value has no result: the code it stands for is deliberately incomplete."
         fix: if s.runtime_execution -> "implement the missing code before running the program." else -> "implement the missing code, or keep the `#Todo` out of the code a `#run` value runs."
-        if s.failure == None -> s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: diagnostic_from_registry("E3011", Val(s.span), what, why, fix)})
+        if s.failure == None {
+            s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: diagnostic_from_registry("E3011", Val(s.span), what, why, fix)})
+        }
         return
     }
     jet_eval_ir_problem(s, "the comptime child stopped with kind {kind} ({a}, {b}, {c}, {d})")
@@ -968,7 +1004,9 @@ jet_eval_native_refused: fn(s: &JetEvalIRState, number: Int, first: Int) {
 // ambient time or randomness); `jet eval` refuses every one as its evaluator
 // mode does.
 jet_eval_ir_effect_refused: fn(s: &JetEvalIRState, what: String, nondeterministic: Bool) Never! {
-    if s.failure != None -> return
+    if s.failure != None {
+        return
+    }
     if s.eval_entry {
         s.failure = Val(jet_eval_diagnostic(JetEvalErrorKind.Effect, s.span, what, "this effect is not permitted in the current evaluator mode", "run the effect in an authorized runtime ambient context"))
         return
@@ -1077,24 +1115,28 @@ jet_eval_ir_debug_trace_route: fn(s: &JetEvalIRState, args: [Int]) -> Int? {
 // reads through the same host. A running program has no input host: there
 // the route is E0956, as check-time refuses a runtime path to the input.
 jet_eval_ir_comptime_input_route: fn(s: &JetEvalIRState, args: [Int], dst_row: Int) -> Int? {
-    if args.len() != 2 && args.len() != 3 -> return jet_eval_ir_primitive_shape(s, "jet_comptime_input")
+    if args.len() != 2 && args.len() != 3 {
+        return jet_eval_ir_primitive_shape(s, "jet_comptime_input")
+    }
     builtin: jet_eval_ir_text(s, args[0]) ?? return None
     path: jet_eval_ir_text(s, args[1]) ?? return None
     pin := String?{None}
-    if args.len() == 3 {
-        pin = Val(jet_eval_ir_text(s, args[2]) ?? return None)
-    }
+    if args.len() == 3 -> pin = Val(jet_eval_ir_text(s, args[2]) ?? return None)
     adapter: if s.inputs == {
         .Val(installed) -> installed.clone_input_adapter()
         .None -> {
-            if s.failure == None -> s.failure = Val(jet_eval_ir_comptime_input_without_host(s.runtime_execution, s.span, builtin, path))
+            if s.failure == None {
+                s.failure = Val(jet_eval_ir_comptime_input_without_host(s.runtime_execution, s.span, builtin, path))
+            }
             return None
         }
     }
     value: if jet_eval_ir_comptime_input_read(adapter, builtin, path, pin, s.span) == {
         .Ok(read) -> read
         .Err(error) -> {
-            if s.failure == None -> s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: error.diagnostic})
+            if s.failure == None {
+                s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: error.diagnostic})
+            }
             return None
         }
     }
@@ -1106,7 +1148,9 @@ jet_eval_ir_comptime_input_route: fn(s: &JetEvalIRState, args: [Int], dst_row: I
 // net under a program that skipped it), E3401 in a compile that has no host.
 jet_eval_ir_comptime_input_without_host: fn(runtime_execution: Bool, span: Span, builtin: String, path: String) -> JetEvalError {
     shown: if builtin == "fetch" -> "net.fetch" else -> builtin
-    if runtime_execution -> return jet_eval_diagnostic(JetEvalErrorKind.Source, span, "a running program can't call `{shown}`", "`{shown}` reads a compile-time input, which only comptime code and `build: fn` read", "call `{shown}` in a `#run` item and use its value in the program")
+    if runtime_execution {
+        return jet_eval_diagnostic(JetEvalErrorKind.Source, span, "a running program can't call `{shown}`", "`{shown}` reads a compile-time input, which only comptime code and `build: fn` read", "call `{shown}` in a `#run` item and use its value in the program")
+    }
     jet_eval_diagnostic(JetEvalErrorKind.Effect, span, "`{shown}` can't read files here", "this compile has no comptime input host, so it can't read `{path}`", "build the program with `jet build` or `jet run`, which read comptime inputs")
 }
 
@@ -1206,7 +1250,9 @@ jet_eval_native_admit: fn(s: &JetEvalIRState) -> Bool {
 }
 
 jet_eval_native_forget: fn(s: &JetEvalIRState) {
-    if s.pages.len() == 0 -> return
+    if s.pages.len() == 0 {
+        return
+    }
     s.pages = [[U8]]{}
     s.page_rows = [Int:Int]{}
 }
@@ -1248,7 +1294,9 @@ jet_eval_native_alloc: fn(s: &JetEvalIRState, size: Int, align: Int) -> Int? {
 
 // Whether `count` bytes from `pointer` may be child memory.
 jet_eval_native_address: fn(s: &JetEvalIRState, pointer: Int, count: Int) -> Bool Never! {
-    if pointer > 0 && count <= JET_EVAL_NATIVE_READ_MAX && pointer + count <= JET_EVAL_NATIVE_USER_END -> return true
+    if pointer > 0 && count <= JET_EVAL_NATIVE_READ_MAX && pointer + count <= JET_EVAL_NATIVE_USER_END {
+        return true
+    }
     jet_eval_ir_problem(s, if pointer == 0 -> "the compiler read the child's memory through a null pointer" else -> "the compiler read the child's memory through a word that is not an address")
     false
 }
@@ -1340,7 +1388,9 @@ jet_eval_ir_bytes_value: fn(bytes: [U8], at: Int, width: Int, signed: Bool) -> I
 jet_eval_native_put: fn(s: &JetEvalIRState, pointer: Int, bytes: [U8]) -> Bool {
     if bytes.len() == 0 -> return true
     if !jet_eval_native_address(s, pointer, bytes.len()) -> return false
-    if jet_eval_native_command(s, X64_COMPTIME_WRITE, [Int]{pointer, bytes.len()}, bytes) -> return true
+    if jet_eval_native_command(s, X64_COMPTIME_WRITE, [Int]{pointer, bytes.len()}, bytes) {
+        return true
+    }
     jet_eval_native_lost(s, "a write of its memory")
     false
 }
@@ -1366,26 +1416,36 @@ jet_eval_ir_text: fn(s: &JetEvalIRState, header: Int) -> String? {
 // ---------------------------------------------------------------------------
 // Failures.
 
-jet_eval_ir_failed: fn(s: JetEvalIRState) -> Bool Never! { s.failure != None || s.internal_problem != None || s.exit_code != None }
+jet_eval_ir_failed: fn(s: JetEvalIRState) -> Bool Never! {
+    s.failure != None || s.internal_problem != None || s.exit_code != None
+}
 
 // A compiler defect met while running compile-time code natively: there is
 // no interpreter, and the IR in these names is the JetIR program the child
 // runs. Each caller names the native run around the message (#6725), so it
 // carries no prefix of its own.
 jet_eval_ir_problem: fn(s: &JetEvalIRState, message: String) Never! {
-    if s.internal_problem == None -> s.internal_problem = Val(JetEvalInternalProblem{span: Val(s.span), message: message})
+    if s.internal_problem == None {
+        s.internal_problem = Val(JetEvalInternalProblem{span: Val(s.span), message: message})
+    }
 }
 
 jet_eval_ir_source_fail: fn(s: &JetEvalIRState, what: String) Never! {
-    if s.failure == None -> s.failure = Val(jet_eval_source_error(s.runtime_execution, s.span, what))
+    if s.failure == None {
+        s.failure = Val(jet_eval_source_error(s.runtime_execution, s.span, what))
+    }
 }
 
 jet_eval_ir_unsupported: fn(s: &JetEvalIRState, operation: String) Never! {
-    if s.failure == None -> s.failure = Val(jet_eval_diagnostic(JetEvalErrorKind.Unsupported, s.span, "compile-time evaluation does not implement `{operation}`", "this operation has no compiler-time evaluator yet", "do not treat the incomplete evaluation as successful"))
+    if s.failure == None {
+        s.failure = Val(jet_eval_diagnostic(JetEvalErrorKind.Unsupported, s.span, "compile-time evaluation does not implement `{operation}`", "this operation has no compiler-time evaluator yet", "do not treat the incomplete evaluation as successful"))
+    }
 }
 
 jet_eval_ir_out_of_fuel: fn(s: &JetEvalIRState) -> Int? Never! {
-    if s.failure == None -> s.failure = Val(jet_eval_diagnostic(JetEvalErrorKind.Fuel, s.span, "compile-time evaluation exhausted its fuel", "compile-time evaluation is bounded to keep compilation finite", "increase the evaluator fuel or simplify the evaluated program"))
+    if s.failure == None {
+        s.failure = Val(jet_eval_diagnostic(JetEvalErrorKind.Fuel, s.span, "compile-time evaluation exhausted its fuel", "compile-time evaluation is bounded to keep compilation finite", "increase the evaluator fuel or simplify the evaluated program"))
+    }
     None
 }
 
@@ -1411,7 +1471,9 @@ jet_eval_ir_in_range: fn(value: Int, bits: Int, signed: Bool) -> Bool Never! {
     value >= 0 && value < jet_eval_ir_pow2(bits)
 }
 
-jet_eval_ir_inline: fn(word: Int) -> Bool Never! { word >= JET_EVAL_IR_INLINE_MIN && word <= JET_EVAL_IR_INLINE_MAX }
+jet_eval_ir_inline: fn(word: Int) -> Bool Never! {
+    word >= JET_EVAL_IR_INLINE_MIN && word <= JET_EVAL_IR_INLINE_MAX
+}
 
 // The exact integer an Int word holds: inline, or its runtime node's u32
 // base-1e9 limbs (Int.jet: negative@16, limbs@24, len@32).

@@ -24,9 +24,12 @@ KeyRef: struct<T> {
     impl Display {
         display: fn(self) -> String { "repo:{self.name}@v{self.version}" }
     }
+
     // Debug shows the public fields only; the identity stays private.
     impl Debug {
-        debug: fn(&&self) -> String { "KeyRef {{ name: {self.name.debug()}, version: {self.version} }}" }
+        debug: fn(&&self) -> String {
+            "KeyRef {{ name: {self.name.debug()}, version: {self.version} }}"
+        }
     }
 }
 
@@ -59,9 +62,7 @@ ExpiringSecret: struct<T> {
     }
 
     impl Close {
-        close: fn(&&self) {
-            close_secret_storage<T>(self.value.move())
-        }
+        close: fn(&&self) { close_secret_storage<T>(self.value.move()) }
     }
 }
 
@@ -90,7 +91,10 @@ priv loan_secret: fn<T, R>(value: T?, callback: fn(T) -> R Never!) -> R Expired!
     }
 }
 
-ExpiryCloseCount: struct { count: Int }
+ExpiryCloseCount: struct {
+    count: Int
+}
+
 ExpiryCloseProbe: struct {
     count: Shared<ExpiryCloseCount>
 
@@ -101,17 +105,17 @@ ExpiryCloseProbe: struct {
         }
     }
 }
+
 // Structural twin of ExpiringSecret's Shared<T?> + Close, specialized to a
 // counted probe because the public wrapper's closed crypto family rejects it.
 ExpiryCloseOwner: struct {
     value: Shared<ExpiryCloseProbe?>
 
     impl Close {
-        close: fn(&&self) {
-            close_secret_storage<ExpiryCloseProbe>(self.value.move())
-        }
+        close: fn(&&self) { close_secret_storage<ExpiryCloseProbe>(self.value.move()) }
     }
 }
+
 #Test("Expired storage takes its credential and closes it exactly once") {
     count: Shared{ExpiryCloseCount{count: 0}}
     storage: Shared{(ExpiryCloseProbe?{Val(ExpiryCloseProbe{count: count.copy()})})}
@@ -188,6 +192,7 @@ WrappedVaultKey: struct {
     header_len: Int
 
     from_bytes: fn(bytes: &&[U8]) -> WrappedVaultKey KeyWrapError! { __wrapped_from_bytes(bytes) }
+
     bytes: fn(self) -> [U8] Never! { __wrapped_bytes(self) }
 
     impl Display {
@@ -198,24 +203,40 @@ WrappedVaultKey: struct {
         }
     }
 
-    impl Debug { debug: fn(&&self) -> String { self.display() } }
+    impl Debug {
+        debug: fn(&&self) -> String { self.display() }
+    }
 }
 
 __wrapped_from_bytes: fn(bytes: &&[U8]) -> WrappedVaultKey KeyWrapError! {
     meta: wrapped_metadata(bytes) ?? return Err(err)
-    Ok(WrappedVaultKey{encoded: bytes.move(), mode: meta.mode, key_type: meta.key_type,
-        origin_name: meta.name.move(), origin_generation: meta.generation, header_len: meta.header_len})
+    Ok(
+        WrappedVaultKey{
+            encoded: bytes.move(),
+            mode: meta.mode,
+            key_type: meta.key_type,
+            origin_name: meta.name.move(),
+            origin_generation: meta.generation,
+            header_len: meta.header_len,
+        },
+    )
 }
+
 __wrapped_bytes: fn(wrapped: WrappedVaultKey) -> [U8] Never! { wrapped.encoded.copy() }
+
 KeyUnlock: struct {
     kind: Int
     secret: View<U8>
 }
+
 // These retain a read borrow of the real owner's bytes, never a copied secret.
-#Unsafe("vault key import: the caller's unlock request borrows the private key's bytes for the unlock only") __key_unlock_recipient: fn(identity: X25519SecretKey) -> KeyUnlock Never! {
+#Unsafe("vault key import: the caller's unlock request borrows the private key's bytes for the unlock only")
+__key_unlock_recipient: fn(identity: X25519SecretKey) -> KeyUnlock Never! {
     KeyUnlock{kind: 1, secret: identity.bytes[0..<identity.bytes.len()]}
 }
-#Unsafe("vault key import: the caller's unlock request borrows the passphrase's bytes for the unlock only") __key_unlock_passphrase: fn(passphrase: Secret) -> KeyUnlock Never! {
+
+#Unsafe("vault key import: the caller's unlock request borrows the passphrase's bytes for the unlock only")
+__key_unlock_passphrase: fn(passphrase: Secret) -> KeyUnlock Never! {
     KeyUnlock{kind: 2, secret: passphrase.bytes[0..<passphrase.bytes.len()]}
 }
 
@@ -229,43 +250,31 @@ KeyWrapError: struct {
 get: fn(name: String) -[Secret]> String? Never! { vault.get(name) }
 
 load: fn<T>(key: KeyRef<T>) -[Secret]> T VaultError! {
-    #Unsafe("vault typed load provider boundary") {
-        return vault.load<T>(key)
-    }
+    #Unsafe("vault typed load provider boundary") { return vault.load<T>(key) }
 }
 
 current: fn<T>(name: String) -[Secret]> KeyRef<T>? VaultError! {
     validate_name(name) ?? return Err(VaultError.InvalidName)
-    #Unsafe("vault typed current provider boundary") {
-        return vault.current<T>(name)
-    }
+    #Unsafe("vault typed current provider boundary") { return vault.current<T>(name) }
 }
 
 status: fn<T>(key: KeyRef<T>) -[Secret]> KeyStatus VaultError! {
-    #Unsafe("vault typed status provider boundary") {
-        return vault.status<T>(key)
-    }
+    #Unsafe("vault typed status provider boundary") { return vault.status<T>(key) }
 }
 
 versions: fn<T>(name: String) -[Secret]> [KeyRef<T>] VaultError! {
     validate_name(name) ?? return Err(VaultError.InvalidName)
-    #Unsafe("vault typed versions provider boundary") {
-        return vault.versions<T>(name)
-    }
+    #Unsafe("vault typed versions provider boundary") { return vault.versions<T>(name) }
 }
 
 prepare_generate: fn<T>(name: String) -[Secret]> MutationPlan<T> VaultError! {
     validate_name(name) ?? return Err(VaultError.InvalidName)
-    #Unsafe("vault typed generation provider boundary") {
-        return vault.prepare_generate<T>(name)
-    }
+    #Unsafe("vault typed generation provider boundary") { return vault.prepare_generate<T>(name) }
 }
 
 prepare_store: fn<T>(name: String, key: &&T) -[Secret]> MutationPlan<T> VaultError! {
     validate_name(name) ?? return Err(VaultError.InvalidName)
-    #Unsafe("vault typed store provider boundary") {
-        return vault.prepare_store<T>(name, key)
-    }
+    #Unsafe("vault typed store provider boundary") { return vault.prepare_store<T>(name, key) }
 }
 
 prepare_import_signing: fn(name: String, bytes: &&[U8]) -[Secret]> MutationPlan<SigningKey> VaultError! {
@@ -286,7 +295,9 @@ prepare_import_x25519: fn(name: String, bytes: &&[U8]) -[Secret]> MutationPlan<X
 
 prepare_import_wrapped: fn<T>(name: String, wrapped: WrappedVaultKey, unlock: KeyUnlock) -[Secret]> WrappedImportPlan<T> KeyWrapError! {
     validate_name(name) ?? return Err(KeyWrapError{reason: "invalid vault key name"})
-    if wrapped.encoded.len() < 16 || wrapped.encoded.len() > 8192 -> return Err(KeyWrapError{reason: "invalid wrapped key length"})
+    if wrapped.encoded.len() < 16 || wrapped.encoded.len() > 8192 {
+        return Err(KeyWrapError{reason: "invalid wrapped key length"})
+    }
     #Unsafe("vault wrapped import provider boundary") {
         return vault.prepare_import_wrapped<T>(name, wrapped, unlock)
     }
@@ -294,9 +305,7 @@ prepare_import_wrapped: fn<T>(name: String, wrapped: WrappedVaultKey, unlock: Ke
 
 prepare_rotate: fn<T>(name: String) -[Secret]> MutationPlan<T> VaultError! {
     validate_name(name) ?? return Err(VaultError.InvalidName)
-    #Unsafe("vault typed rotation provider boundary") {
-        return vault.prepare_rotate<T>(name)
-    }
+    #Unsafe("vault typed rotation provider boundary") { return vault.prepare_rotate<T>(name) }
 }
 
 prepare_retire: fn<T>(key: KeyRef<T>, reason: String) -[Secret]> MutationPlan<T> VaultError! {
@@ -382,7 +391,9 @@ export_to_passphrase: fn<T>(key: KeyRef<T>, passphrase: Secret) -[Secret]> Wrapp
 }
 
 export_to_recipients: fn<T>(key: KeyRef<T>, recipients: [X25519PublicKey]) -[Secret]> WrappedVaultKey KeyWrapError! {
-    if recipients.len() == 0 || recipients.len() > 16 -> return Err(KeyWrapError{reason: "recipient count must be 1..=16"})
+    if recipients.len() == 0 || recipients.len() > 16 {
+        return Err(KeyWrapError{reason: "recipient count must be 1..=16"})
+    }
     #Unsafe("vault recipient export provider boundary") {
         return vault.export_to_recipients<T>(key, recipients)
     }
@@ -432,6 +443,7 @@ validate_name: fn(name: String) -> Bool? {
     }
     Val(true)
 }
+
 validate_reason: fn(reason: String) -> Bool? {
     raw: reason.bytes()
     if raw.len() == 0 || raw.len() > 256 -> return None
@@ -453,7 +465,6 @@ validate_reason: fn(reason: String) -> Bool? {
     }
     Val(true)
 }
-
 
 // JVKW/v1 parser policy salvaged from 5933a61b2 vault_02:jvkw_parse.
 // Integer cursors avoid allocating the non-secret header arrays just to validate them.
@@ -497,7 +508,9 @@ wrapped_nonzero: fn(bytes: [U8], at: &Int, count: Int) -> Bool KeyWrapError! {
 }
 
 wrapped_metadata: fn(bytes: [U8]) -> WrappedMetadata KeyWrapError! {
-    if bytes.len() < 16 || bytes.len() > 8192 -> return Err(wrap_error("invalid wrapped vault key length"))
+    if bytes.len() < 16 || bytes.len() > 8192 {
+        return Err(wrap_error("invalid wrapped vault key length"))
+    }
     if bytes[0] != (U8{74}) || bytes[1] != (U8{86}) || bytes[2] != (U8{75}) || bytes[3] != (U8{87}) {
         return Err(wrap_error("invalid wrapped vault key encoding"))
     }
@@ -505,13 +518,17 @@ wrapped_metadata: fn(bytes: [U8]) -> WrappedMetadata KeyWrapError! {
     mode: Int{bytes[5]}
     if mode != 1 && mode != 2 -> return Err(wrap_error("unsupported wrapped vault key mode"))
     key_type: Int{bytes[6]}
-    if key_type != 1 && key_type != 2 -> return Err(wrap_error("unsupported wrapped vault key type"))
+    if key_type != 1 && key_type != 2 {
+        return Err(wrap_error("unsupported wrapped vault key type"))
+    }
     if bytes[7] != (U8{0}) -> return Err(wrap_error("invalid wrapped vault key encoding"))
     fixed := 8
     header_len: wrapped_uint(bytes, fixed, 4) ?? return Err(err)
     ciphertext_len: wrapped_uint(bytes, fixed, 4) ?? return Err(err)
     header_end: 16 + header_len
-    if ciphertext_len != 64 || header_end + 80 != bytes.len() -> return Err(wrap_error("invalid wrapped vault key length"))
+    if ciphertext_len != 64 || header_end + 80 != bytes.len() {
+        return Err(wrap_error("invalid wrapped vault key length"))
+    }
     at := 16
     repo_nonzero: wrapped_nonzero(bytes, at, 16) ?? return Err(err)
     name_len: wrapped_uint(bytes, at, 2) ?? return Err(err)

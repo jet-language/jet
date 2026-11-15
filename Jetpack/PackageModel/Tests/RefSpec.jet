@@ -1,7 +1,17 @@
 use {
     jet_pkg_model.[
-        ChannelPolicy, ChannelRef, NamedSourceDecl, ProviderKind, ProviderRef, RefError,
-        RefSource, RefSpec, SourceTable, WorkspaceIndex, WorkspaceMember, pkg_canonical_locked_ref,
+        ChannelPolicy,
+        ChannelRef,
+        NamedSourceDecl,
+        ProviderKind,
+        ProviderRef,
+        RefError,
+        RefSource,
+        RefSpec,
+        SourceTable,
+        WorkspaceIndex,
+        WorkspaceMember,
+        pkg_canonical_locked_ref,
         pkg_with_default_source,
     ]
     jetpack_foundation.[REF_PROVIDER_AT]
@@ -45,10 +55,12 @@ pkg_test_provider_ref: fn(raw: String) -> ProviderRef {
 }
 
 pkg_test_ws_index: fn() -> WorkspaceIndex {
-    WorkspaceIndex.from_members([WorkspaceMember]{
-        {name: "logging", path: "./infra/logging"},
-        {name: "ranker", path: "packages/ranker"}
-    })
+    WorkspaceIndex.from_members(
+        [WorkspaceMember]{
+            {name: "logging", path: "./infra/logging"},
+            {name: "ranker", path: "packages/ranker"},
+        },
+    )
 }
 
 #Test("nixpkgs is not a public source") {
@@ -101,7 +113,7 @@ pkg_test_ws_index: fn() -> WorkspaceIndex {
     cases: [(raw: String, source: RefSource, provider: ProviderKind)]{
         (raw: "rack@ruby#version=3.2.0", source: RefSource.RubyGems, provider: ProviderKind.RubyGems),
         (raw: "JSON-MaybeXS@perl#version=1.004008", source: RefSource.Cpan, provider: ProviderKind.Cpan),
-        (raw: "monolog/monolog@php#version=3.9.0", source: RefSource.Packagist, provider: ProviderKind.Packagist)
+        (raw: "monolog/monolog@php#version=3.9.0", source: RefSource.Packagist, provider: ProviderKind.Packagist),
     }
     loop case in cases {
         spec: pkg_test_classify(case.raw)
@@ -114,7 +126,7 @@ pkg_test_ws_index: fn() -> WorkspaceIndex {
     cases: [(raw: String, source: RefSource, provider: ProviderKind)]{
         (raw: "hello@jet-registry#version=1.0.0", source: RefSource.JetRegistry, provider: ProviderKind.JetRegistry),
         (raw: "left-pad@npm#version=1.3.0", source: RefSource.Npm, provider: ProviderKind.Npm),
-        (raw: "serde@cargo#version=1.0.200", source: RefSource.Cargo, provider: ProviderKind.Cargo)
+        (raw: "serde@cargo#version=1.0.200", source: RefSource.Cargo, provider: ProviderKind.Cargo),
     }
     loop case in cases {
         spec: pkg_test_classify(case.raw)
@@ -154,15 +166,15 @@ pkg_test_ws_index: fn() -> WorkspaceIndex {
 #Test("rejects unknown source") {
     if pkg_test_ref_error("wget@brew") == {
         .UnknownSource(source, _, _) -> assert_eq(source, "brew")
-        .MissingSeparator(_) | .EmptyHalf(_) | .Malformed(_) | .AmbiguousBare(_) | .AmbiguousMember(_, _) | .UnknownMember(_, _) -> panic("expected UnknownSource")
+        .MissingSeparator(_) | .EmptyHalf(_) | .Malformed(_) | .AmbiguousBare(_) | .AmbiguousMember(_, _) | .UnknownMember(_, _) -> {
+            panic("expected UnknownSource")
+        }
     }
 }
 
 #Test("provider first and path word refs are malformed") {
     refs: [String]{"github@owner/repo", "path@../helpers", "../helpers@path"}
-    loop raw in refs {
-        assert_eq(pkg_test_ref_error(raw), RefError.Malformed(raw))
-    }
+    loop raw in refs { assert_eq(pkg_test_ref_error(raw), RefError.Malformed(raw)) }
 }
 
 #Test("package ref keeps version after source") {
@@ -188,16 +200,22 @@ pkg_test_ws_index: fn() -> WorkspaceIndex {
 }
 
 #Test("named source unknown lists declared") {
-    table: SourceTable.from_decls([NamedSourceDecl]{
-        {name: "stable", upstream: "u1", via: ProviderKind.Nix},
-        {name: "unstable", upstream: "u2", via: ProviderKind.Core}
-    })
+    table: SourceTable.from_decls(
+        [NamedSourceDecl]{
+            {name: "stable", upstream: "u1", via: ProviderKind.Nix},
+            {name: "unstable", upstream: "u2", via: ProviderKind.Core},
+        },
+    )
     if RefSpec.classify_in("neovim@beta", table) == {
-        .Ok(_) -> panic("expected UnknownSource")
+        .Ok(_) -> { panic("expected UnknownSource") }
         .Err(error) -> {
             if error == {
-                .UnknownSource(_, _, declared) -> assert_eq(declared, [String]{"stable", "unstable"})
-                .MissingSeparator(_) | .EmptyHalf(_) | .Malformed(_) | .AmbiguousBare(_) | .AmbiguousMember(_, _) | .UnknownMember(_, _) -> panic("expected UnknownSource")
+                .UnknownSource(_, _, declared) -> {
+                    assert_eq(declared, [String]{"stable", "unstable"})
+                }
+                .MissingSeparator(_) | .EmptyHalf(_) | .Malformed(_) | .AmbiguousBare(_) | .AmbiguousMember(_, _) | .UnknownMember(_, _) -> {
+                    panic("expected UnknownSource")
+                }
             }
         }
     }
@@ -229,22 +247,28 @@ pkg_test_ws_index: fn() -> WorkspaceIndex {
     assert_eq(error.code(), Val("E1231"))
     if error == {
         .UnknownMember(_, suggestions) -> assert_eq(suggestions, [String]{"logging"})
-        .MissingSeparator(_) | .EmptyHalf(_) | .Malformed(_) | .UnknownSource(_, _, _) | .AmbiguousBare(_) | .AmbiguousMember(_, _) -> panic("expected UnknownMember")
+        .MissingSeparator(_) | .EmptyHalf(_) | .Malformed(_) | .UnknownSource(_, _, _) | .AmbiguousBare(_) | .AmbiguousMember(_, _) -> {
+            panic("expected UnknownMember")
+        }
     }
 }
 
 #Test("unknown path member suggests paths only") {
     if pkg_test_workspace_error("infra/loggin", pkg_test_ws_index()) == {
         .UnknownMember(_, suggestions) -> assert_eq(suggestions, [String]{"infra/logging"})
-        .MissingSeparator(_) | .EmptyHalf(_) | .Malformed(_) | .UnknownSource(_, _, _) | .AmbiguousBare(_) | .AmbiguousMember(_, _) -> panic("expected UnknownMember")
+        .MissingSeparator(_) | .EmptyHalf(_) | .Malformed(_) | .UnknownSource(_, _, _) | .AmbiguousBare(_) | .AmbiguousMember(_, _) -> {
+            panic("expected UnknownMember")
+        }
     }
 }
 
 #Test("ambiguous bare member is E1230 and lists candidates") {
-    index: WorkspaceIndex.from_members([WorkspaceMember]{
-        {name: "logging", path: "infra/logging"},
-        {name: "logging", path: "apps/logging"}
-    })
+    index: WorkspaceIndex.from_members(
+        [WorkspaceMember]{
+            {name: "logging", path: "infra/logging"},
+            {name: "logging", path: "apps/logging"},
+        },
+    )
     error: pkg_test_workspace_error("logging", index)
     assert_eq(error.code(), Val("E1230"))
     if error == {
@@ -253,7 +277,9 @@ pkg_test_ws_index: fn() -> WorkspaceIndex {
             assert(candidates.contains("infra/logging"))
             assert(candidates.contains("apps/logging"))
         }
-        .MissingSeparator(_) | .EmptyHalf(_) | .Malformed(_) | .UnknownSource(_, _, _) | .AmbiguousBare(_) | .UnknownMember(_, _) -> panic("expected AmbiguousMember")
+        .MissingSeparator(_) | .EmptyHalf(_) | .Malformed(_) | .UnknownSource(_, _, _) | .AmbiguousBare(_) | .UnknownMember(_, _) -> {
+            panic("expected AmbiguousMember")
+        }
     }
 }
 
@@ -332,7 +358,9 @@ pkg_test_ws_index: fn() -> WorkspaceIndex {
 #Test("provider ref rejects unknown provider") {
     if pkg_test_provider_ref_error("owner/repo@gitlab") == {
         .UnknownSource(source, _, _) -> assert_eq(source, "gitlab")
-        .MissingSeparator(_) | .EmptyHalf(_) | .Malformed(_) | .AmbiguousBare(_) | .AmbiguousMember(_, _) | .UnknownMember(_, _) -> panic("expected UnknownSource")
+        .MissingSeparator(_) | .EmptyHalf(_) | .Malformed(_) | .AmbiguousBare(_) | .AmbiguousMember(_, _) | .UnknownMember(_, _) -> {
+            panic("expected UnknownSource")
+        }
     }
 }
 

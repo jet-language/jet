@@ -1,25 +1,49 @@
 // Record value views, the schema-checked reader, the digest helpers and the
 // debugging JSON rendering of the canonical record codec.
 use jet_foundation.[
-    RecordField, RecordSection, RecordValue, record_digest, record_digest_hex, record_element,
-    record_elements, record_encode, record_json, record_open_schema, record_open_schema_trusted, record_parse_digest_hex,
-    record_value_as_bool, record_value_as_digest, record_value_as_int, record_value_as_list,
-    record_value_as_optional_str, record_value_as_str, record_value_as_usize, record_value_field,
-    record_value_is_null, record_value_list_of_str, record_value_optional_str, record_value_str_list,
+    RecordField,
+    RecordSection,
+    RecordValue,
+    record_digest,
+    record_digest_hex,
+    record_element,
+    record_elements,
+    record_encode,
+    record_json,
+    record_open_schema,
+    record_open_schema_trusted,
+    record_parse_digest_hex,
+    record_value_as_bool,
+    record_value_as_digest,
+    record_value_as_int,
+    record_value_as_list,
+    record_value_as_optional_str,
+    record_value_as_str,
+    record_value_as_usize,
+    record_value_field,
+    record_value_is_null,
+    record_value_list_of_str,
+    record_value_optional_str,
+    record_value_str_list,
 ]
 
 record_views_test_sample: fn() -> [RecordSection] Never! {
     digest := [U8]{}
     loop _ in 0..<32 -> digest.push(U8{7})
     [RecordSection]{
-        RecordSection{id: 7, elements: [RecordValue]{
-            RecordValue.Map{fields: [RecordField]{
-                RecordField{name: "name", value: RecordValue.Str{value: "core.text"}},
-                RecordField{name: "count", value: RecordValue.Int{value: -3}},
-                RecordField{name: "digest", value: RecordValue.Digest{value: digest}},
-            }},
-            RecordValue.List{values: [RecordValue]{RecordValue.Null, RecordValue.Bool{value: true}, RecordValue.Str{value: "é"}}},
-        }},
+        RecordSection{
+            id: 7,
+            elements: [RecordValue]{
+                RecordValue.Map{
+                    fields: [RecordField]{
+                        RecordField{name: "name", value: RecordValue.Str{value: "core.text"}},
+                        RecordField{name: "count", value: RecordValue.Int{value: -3}},
+                        RecordField{name: "digest", value: RecordValue.Digest{value: digest}},
+                    },
+                },
+                RecordValue.List{values: [RecordValue]{RecordValue.Null, RecordValue.Bool{value: true}, RecordValue.Str{value: "é"}}},
+            },
+        },
         RecordSection{id: 1, elements: [RecordValue]{RecordValue.Str{value: "core.text"}}},
     }
 }
@@ -79,11 +103,23 @@ record_views_test_sample: fn() -> [RecordSection] Never! {
 }
 
 #Test("record JSON renders the decoded tree") {
-    encoded: record_encode("jet.test/v1", [RecordSection]{RecordSection{id: 1, elements: [RecordValue]{RecordValue.Map{fields: [RecordField]{
-        RecordField{name: "b", value: RecordValue.Bytes{value: [U8]{U8{1}, U8{2}}}},
-        RecordField{name: "n", value: RecordValue.Null},
-        RecordField{name: "s", value: RecordValue.Str{value: "q\""}},
-    }}}}})
+    encoded: record_encode(
+        "jet.test/v1",
+        [RecordSection]{
+            RecordSection{
+                id: 1,
+                elements: [RecordValue]{
+                    RecordValue.Map{
+                        fields: [RecordField]{
+                            RecordField{name: "b", value: RecordValue.Bytes{value: [U8]{U8{1}, U8{2}}}},
+                            RecordField{name: "n", value: RecordValue.Null},
+                            RecordField{name: "s", value: RecordValue.Str{value: "q\""}},
+                        },
+                    },
+                },
+            },
+        },
+    )
     bytes: encoded.bytes ?? panic("encodes")
     json: record_json(bytes).value ?? panic("renders")
     expected: "\"sections\":{{\"1\":[{{\"b\":{{\"bytes\":\"0102\"}},\"n\":null,\"s\":\"q\\\"\"}}]}}}}"

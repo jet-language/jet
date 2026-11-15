@@ -2,29 +2,39 @@
 // by Budget.jet. Fixed-schema field lists are bounded. Large sample lists are
 // traversed once. Rust stable_id / verify_stable_id.
 perf_stable_id: fn(content: CanonicalJSON) -> String Never! { canonical_json_sha256(content) }
+
 perf_verify_stable_id: fn(content: CanonicalJSON, claimed: String) PerfBudgetError! {
     actual: perf_stable_id(content)
-    if actual != claimed -> return Err(perf_error("content hash mismatch: claimed {claimed}, recomputed {actual}"))
+    if actual != claimed {
+        return Err(perf_error("content hash mismatch: claimed {claimed}, recomputed {actual}"))
+    }
 }
+
 // Rust budget_report.
 perf_budget_report: fn(content: CanonicalJSON) -> CanonicalJSON Never! {
     id: perf_stable_id(content)
-    perf_report_object_new([CanonicalJSONField]{
-        CanonicalJSONField{key: "content", value: content},
-        CanonicalJSONField{key: "report_id", value: CanonicalJSON.String(id)},
-        CanonicalJSONField{key: "schema", value: CanonicalJSON.String("jet.budget-report")},
-        CanonicalJSONField{key: "version", value: CanonicalJSON.Integer("1")},
-    })
+    perf_report_object_new(
+        [CanonicalJSONField]{
+            CanonicalJSONField{key: "content", value: content},
+            CanonicalJSONField{key: "report_id", value: CanonicalJSON.String(id)},
+            CanonicalJSONField{key: "schema", value: CanonicalJSON.String("jet.budget-report")},
+            CanonicalJSONField{key: "version", value: CanonicalJSON.Integer("1")},
+        },
+    )
 }
+
 perf_report_object_new: fn(fields: [CanonicalJSONField]) -> CanonicalJSON Never! {
     canonical_json_object(fields) ?? panic(err.message)
 }
+
 // Rust object; return indices, not copies of the object's large values.
 perf_report_object: fn(value: CanonicalJSON, name: String, keys: [String]) PerfBudgetError! {
     if value == .Object(fields) {
         if fields.len() == keys.len() {
             loop key in keys {
-                if perf_report_find(fields, key) == None -> return Err(perf_error("{name} has missing or unknown fields"))
+                if perf_report_find(fields, key) == None {
+                    return Err(perf_error("{name} has missing or unknown fields"))
+                }
             }
             return
         }
@@ -32,13 +42,18 @@ perf_report_object: fn(value: CanonicalJSON, name: String, keys: [String]) PerfB
     }
     return Err(perf_error("{name} is not an object"))
 }
+
 perf_report_find: fn(fields: [CanonicalJSONField], key: String) -> Int? Never! {
-    loop (index, field) in fields { if field.key == key -> return Val(index) }
+    loop (index, field) in fields {
+        if field.key == key -> return Val(index)
+    }
     None
 }
+
 perf_report_index: fn(fields: [CanonicalJSONField], key: String) -> Int Never! {
     perf_report_find(fields, key) ?? panic("validated object key is absent")
 }
+
 // Rust text / integer / unsigned / boolean / array / hex64 / one_of.
 perf_report_text: fn(value: CanonicalJSON, name: String) -> String PerfBudgetError! {
     if value == {
@@ -46,43 +61,57 @@ perf_report_text: fn(value: CanonicalJSON, name: String) -> String PerfBudgetErr
         .Null | .Bool(_) | .Integer(_) | .Array(_) | .Object(_) -> Err(perf_error("{name} is not text"))
     }
 }
+
 perf_report_integer: fn(value: CanonicalJSON, name: String) -> Int PerfBudgetError! {
-    if value == .Integer(v) -> return Ok(perf_integer_parse(v) ?? return Err(perf_error("{name} is not a canonical integer")))
+    if value == .Integer(v) {
+        return Ok(perf_integer_parse(v) ?? return Err(perf_error("{name} is not a canonical integer")))
+    }
     Err(perf_error("{name} is not an integer"))
 }
+
 perf_report_unsigned: fn(value: CanonicalJSON, name: String) -> Int PerfBudgetError! {
     v: perf_report_integer(value, name)
     if v < 0 -> return Err(perf_error("{name} is negative"))
     Ok(v)
 }
+
 perf_report_boolean: fn(value: CanonicalJSON, name: String) -> Bool PerfBudgetError! {
     if value == {
         .Bool(v) -> Ok(v)
         .Null | .Integer(_) | .String(_) | .Array(_) | .Object(_) -> Err(perf_error("{name} is not boolean"))
     }
 }
+
 perf_report_array: fn(value: CanonicalJSON, name: String) PerfBudgetError! {
     if !(value == .Array(_)) -> return Err(perf_error("{name} is not an array"))
 }
+
 perf_report_hex64: fn(value: CanonicalJSON, name: String) -> String PerfBudgetError! {
     v: perf_report_text(value, name)
     bytes: v.bytes()
     if bytes.len() != 64 -> return Err(perf_error("{name} is not lowercase Hex64"))
     loop byte in bytes {
         n: Int{byte}
-        if !((n >= 48 && n <= 57) || (n >= 97 && n <= 102)) -> return Err(perf_error("{name} is not lowercase Hex64"))
+        if !((n >= 48 && n <= 57) || (n >= 97 && n <= 102)) {
+            return Err(perf_error("{name} is not lowercase Hex64"))
+        }
     }
     Ok(v)
 }
+
 perf_report_one_of: fn(value: CanonicalJSON, name: String, allowed: [String]) PerfBudgetError! {
     v: perf_report_text(value, name)
-    loop item in allowed { if item == v -> return Ok() }
+    loop item in allowed {
+        if item == v -> return Ok()
+    }
     return Err(perf_error("{name} has unknown value `{v}`"))
 }
+
 // Rust nullable: dispatch through one validator, without copying its value.
 perf_report_nullable: fn(value: CanonicalJSON, validate: fn(CanonicalJSON) PerfBudgetError!) PerfBudgetError! {
     if value != .Null -> validate(value)
 }
+
 // Rust validate_rational.
 perf_validate_rational: fn(value: CanonicalJSON, quantity: Bool, name: String) -> PerfRational PerfBudgetError! {
     perf_report_object(value, name, [String]{"num", "den"})
@@ -92,18 +121,22 @@ perf_validate_rational: fn(value: CanonicalJSON, quantity: Bool, name: String) -
         if d <= 0 -> return Err(perf_error("{name}.den must be positive"))
         if quantity && n < 0 -> return Err(perf_error("{name} quantity is negative"))
         reduced: perf_rational_new(n, d)
-        if reduced.num != n || reduced.den != d -> return Err(perf_error("{name} is not gcd-reduced"))
+        if reduced.num != n || reduced.den != d {
+            return Err(perf_error("{name} is not gcd-reduced"))
+        }
         return Ok(reduced)
     }
     panic("validated rational object")
 }
+
 // Rust validate_policy.
 perf_validate_policy: fn(value: CanonicalJSON) PerfBudgetError! {
     perf_report_object(value, "measurement policy", [String]{"min_candidate_samples", "min_baseline_samples", "baseline_generations", "bootstrap_resamples", "lower_rank", "upper_rank", "stale_after_seconds", "trend_generations"})
     if value == .Object(f) {
-        loop field in f { _: perf_report_unsigned(field.value, "measurement policy.{field.key}") }
+        loop field in f -> _: perf_report_unsigned(field.value, "measurement policy.{field.key}")
     }
 }
+
 // Rust validate_statistics.
 perf_validate_statistics: fn(value: CanonicalJSON) PerfBudgetError! {
     perf_report_object(value, "statistics", [String]{"count", "sorted_samples", "p50", "p90", "p95", "p99", "p999", "mean", "mad"})
@@ -111,17 +144,24 @@ perf_validate_statistics: fn(value: CanonicalJSON) PerfBudgetError! {
         count: perf_report_unsigned(f[perf_report_index(f, "count")].value, "statistics.count")
         samples: perf_report_quantities(f[perf_report_index(f, "sorted_samples")].value, "statistics.sorted_samples", "statistics sample")
         loop index in 1..<samples.len() {
-            if perf_rational_cmp(samples[index - 1], samples[index]) == Ordering.Greater -> return Err(perf_error("statistics.sorted_samples is not sorted"))
+            if perf_rational_cmp(samples[index - 1], samples[index]) == Ordering.Greater {
+                return Err(perf_error("statistics.sorted_samples is not sorted"))
+            }
         }
-        if count != samples.len() -> return Err(perf_error("statistics.count does not match sorted_samples"))
+        if count != samples.len() {
+            return Err(perf_error("statistics.count does not match sorted_samples"))
+        }
         actual: perf_statistics(samples)
         keys: [String]{"p50", "p90", "p95", "p99", "p999", "mean", "mad"}
         wants: [PerfRational]{actual.p50, actual.p90, actual.p95, actual.p99, actual.p999, actual.mean, actual.mad}
         loop (index, key) in keys {
-            if perf_validate_rational(f[perf_report_index(f, key)].value, true, "statistics.{key}") != wants[index] -> return Err(perf_error("statistics.{key} does not match independent recomputation"))
+            if perf_validate_rational(f[perf_report_index(f, key)].value, true, "statistics.{key}") != wants[index] {
+                return Err(perf_error("statistics.{key} does not match independent recomputation"))
+            }
         }
     }
 }
+
 // Rust validate_history.
 perf_validate_history: fn(value: CanonicalJSON) PerfBudgetError! {
     perf_report_object(value, "history selection", [String]{"state_id", "report_ids"})
@@ -129,9 +169,12 @@ perf_validate_history: fn(value: CanonicalJSON) PerfBudgetError! {
         _: perf_report_hex64(f[perf_report_index(f, "state_id")].value, "history.state_id")
         ids: perf_report_index(f, "report_ids")
         perf_report_array(f[ids].value, "history.report_ids")
-        if f[ids].value == .Array(values) { loop id in values { _: perf_report_hex64(id, "history report id") } }
+        if f[ids].value == .Array(values) {
+            loop id in values -> _: perf_report_hex64(id, "history report id")
+        }
     }
 }
+
 // Rust validate_baseline.
 perf_validate_baseline: fn(value: CanonicalJSON) PerfBudgetError! {
     perf_report_object(value, "statistical baseline", [String]{"history", "pooled_samples", "statistics", "policy"})
@@ -139,11 +182,14 @@ perf_validate_baseline: fn(value: CanonicalJSON) PerfBudgetError! {
         perf_validate_history(f[perf_report_index(f, "history")].value)
         samples: perf_report_index(f, "pooled_samples")
         perf_report_array(f[samples].value, "baseline.pooled_samples")
-        if f[samples].value == .Array(values) { loop q in values { _: perf_validate_rational(q, true, "baseline sample") } }
+        if f[samples].value == .Array(values) {
+            loop q in values -> _: perf_validate_rational(q, true, "baseline sample")
+        }
         perf_validate_statistics(f[perf_report_index(f, "statistics")].value)
         perf_validate_policy(f[perf_report_index(f, "policy")].value)
     }
 }
+
 // Rust validate_trend.
 perf_validate_trend: fn(value: CanonicalJSON) PerfBudgetError! {
     perf_report_object(value, "trend", [String]{"label", "report_ids", "estimators", "score"})
@@ -155,62 +201,84 @@ perf_validate_trend: fn(value: CanonicalJSON) PerfBudgetError! {
         id_count := 0
         if f[ids].value == .Array(values) {
             id_count = values.len()
-            loop id in values { _: perf_report_hex64(id, "trend report id") }
+            loop id in values -> _: perf_report_hex64(id, "trend report id")
         }
         perf_report_array(f[estimators].value, "trend.estimators")
         if f[estimators].value == .Array(values) {
-            if id_count != values.len() -> return Err(perf_error("trend inputs are not index-aligned"))
-            loop q in values { _: perf_validate_rational(q, true, "trend estimator") }
+            if id_count != values.len() {
+                return Err(perf_error("trend inputs are not index-aligned"))
+            }
+            loop q in values -> _: perf_validate_rational(q, true, "trend estimator")
         }
         _: perf_report_rational_or_none(f[perf_report_index(f, "score")].value, "trend.score")
     }
 }
+
 // Rust validate_decision.
 perf_validate_decision: fn(value: CanonicalJSON) PerfBudgetError! {
     perf_report_object(value, "decision", [String]{"evidence", "reason", "point", "lower95", "upper95", "trend", "policy_outcome"})
     if value == .Object(f) {
         perf_report_one_of(f[perf_report_index(f, "evidence")].value, "decision.evidence", [String]{"pass", "regression", "inconclusive", "unavailable"})
         reason: perf_report_index(f, "reason")
-        if f[reason].value != .Null { _: perf_report_text(f[reason].value, "decision.reason") }
+        if f[reason].value != .Null -> _: perf_report_text(f[reason].value, "decision.reason")
         keys: [String]{"point", "lower95", "upper95"}
-        loop key in keys { _: perf_report_rational_or_none(f[perf_report_index(f, key)].value, "decision.{key}") }
+        loop key in keys {
+            _: perf_report_rational_or_none(f[perf_report_index(f, key)].value, "decision.{key}")
+        }
         perf_validate_trend(f[perf_report_index(f, "trend")].value)
         perf_report_one_of(f[perf_report_index(f, "policy_outcome")].value, "decision.policy_outcome", [String]{"pass", "warn", "fail"})
     }
 }
+
 // Rust validate_metric.
 perf_validate_metric: fn(value: CanonicalJSON) PerfBudgetError! {
     perf_report_object(value, "metric", [String]{"name", "percentile"})
     if value == .Object(f) {
         _: perf_report_text(f[perf_report_index(f, "name")].value, "metric.name")
         p: perf_report_index(f, "percentile")
-        if f[p].value != .Null -> perf_report_one_of(f[p].value, "metric.percentile", [String]{"p50", "p90", "p95", "p99", "p999"})
+        if f[p].value != .Null {
+            perf_report_one_of(f[p].value, "metric.percentile", [String]{"p50", "p90", "p95", "p99", "p999"})
+        }
     }
 }
+
 // Rust validate_provider.
 perf_validate_provider: fn(value: CanonicalJSON) PerfBudgetError! {
     perf_report_object(value, "provider", [String]{"kind", "identity", "version", "isolation", "cpu_arch", "cpu_model", "logical_cpus", "memory_bytes", "os", "kernel", "power_governor", "hardware_fingerprint"})
     if value == .Object(f) {
         keys: [String]{"kind", "identity", "version", "isolation", "cpu_arch", "cpu_model", "os", "kernel", "power_governor"}
-        loop key in keys { _: perf_report_text(f[perf_report_index(f, key)].value, "provider.{key}") }
+        loop key in keys {
+            _: perf_report_text(f[perf_report_index(f, key)].value, "provider.{key}")
+        }
         _: perf_report_unsigned(f[perf_report_index(f, "logical_cpus")].value, "provider.logical_cpus")
         _: perf_report_unsigned(f[perf_report_index(f, "memory_bytes")].value, "provider.memory_bytes")
         hash: perf_report_hex64(f[perf_report_index(f, "hardware_fingerprint")].value, "provider.hardware_fingerprint")
         unhashed := [CanonicalJSONField]{}
-        loop field in f { if field.key != "hardware_fingerprint" -> unhashed.push(field.copy()) }
+        loop field in f {
+            if field.key != "hardware_fingerprint" -> unhashed.push(field.copy())
+        }
         perf_verify_stable_id(perf_report_object_new(unhashed), hash) ?? return Err(perf_error("provider hardware_fingerprint mismatch"))
     }
 }
+
 // Rust validate_comparison.
 perf_validate_comparison: fn(value: CanonicalJSON) PerfBudgetError! {
     if value == .Object(f) {
         k: perf_report_find(f, "kind") ?? return Err(perf_error("comparison missing kind"))
         kind: perf_report_text(f[k].value, "comparison.kind")
         if kind == "absolute" || kind == "absolute_from" {
-            keys: if { kind == "absolute" -> [String]{"kind", "limit", "direction"} else -> [String]{"kind", "baseline", "limit", "direction"} }
-            name: if { kind == "absolute" -> "absolute comparison" else -> "absolute_from comparison" }
+            keys: if {
+                kind == "absolute" -> [String]{"kind", "limit", "direction"}
+                else -> [String]{"kind", "baseline", "limit", "direction"}
+            }
+            name: if {
+                kind == "absolute" -> "absolute comparison"
+                else -> "absolute_from comparison"
+            }
             perf_report_object(value, name, keys)
-            if kind == "absolute_from" { _: perf_report_text(f[perf_report_index(f, "baseline")].value, "comparison.baseline") }
+            if kind == "absolute_from" {
+                _: perf_report_text(f[perf_report_index(f, "baseline")].value, "comparison.baseline")
+            }
             _: perf_validate_rational(f[perf_report_index(f, "limit")].value, true, "comparison.limit")
             perf_report_one_of(f[perf_report_index(f, "direction")].value, "comparison.direction", [String]{"at_most", "at_least"})
             return
@@ -227,6 +295,7 @@ perf_validate_comparison: fn(value: CanonicalJSON) PerfBudgetError! {
     }
     return Err(perf_error("comparison is not an object"))
 }
+
 // Rust validate_measurement.
 perf_validate_measurement: fn(value: CanonicalJSON) PerfBudgetError! {
     if value == .Object(f) {
@@ -236,7 +305,9 @@ perf_validate_measurement: fn(value: CanonicalJSON) PerfBudgetError! {
         perf_report_object(value, "measurement", required)
         _: perf_report_text(f[perf_report_index(f, "budget_id")].value, "measurement.budget_id")
         spec: perf_report_index(f, "budget_spec")
-        if !(f[spec].value == .Object(_)) -> return Err(perf_error("measurement.budget_spec is not an object"))
+        if !(f[spec].value == .Object(_)) {
+            return Err(perf_error("measurement.budget_spec is not an object"))
+        }
         hash: perf_report_hex64(f[perf_report_index(f, "budget_spec_sha256")].value, "measurement.budget_spec_sha256")
         perf_verify_stable_id(f[spec].value, hash) ?? return Err(perf_error("measurement budget_spec_sha256 mismatch"))
         _: perf_report_text(f[perf_report_index(f, "source")].value, "measurement.source")
@@ -254,7 +325,9 @@ perf_validate_measurement: fn(value: CanonicalJSON) PerfBudgetError! {
         perf_report_nullable(f[perf_report_index(f, "policy")].value, fn(v: CanonicalJSON) { perf_validate_policy(v) })
         samples: perf_report_index(f, "samples")
         perf_report_array(f[samples].value, "measurement.samples")
-        if f[samples].value == .Array(values) { loop q in values { _: perf_validate_rational(q, true, "measurement sample") } }
+        if f[samples].value == .Array(values) {
+            loop q in values -> _: perf_validate_rational(q, true, "measurement sample")
+        }
         perf_report_nullable(f[perf_report_index(f, "statistics")].value, fn(v: CanonicalJSON) { perf_validate_statistics(v) })
         perf_report_nullable(f[perf_report_index(f, "history")].value, fn(v: CanonicalJSON) { perf_validate_history(v) })
         perf_report_nullable(f[perf_report_index(f, "baseline")].value, fn(v: CanonicalJSON) { perf_validate_baseline(v) })
@@ -263,17 +336,22 @@ perf_validate_measurement: fn(value: CanonicalJSON) PerfBudgetError! {
             kind: perf_report_text(p[perf_report_index(p, "kind")].value, "provider.kind")
             if compile == Val(c) {
                 if f[metric].value == .Object(m) {
-                    if perf_report_text(m[perf_report_index(m, "name")].value, "metric.name") != "CompileTime" || kind != "CompilerProbe" || f[unit].value != CanonicalJSON.String("Duration") || m[perf_report_index(m, "percentile")].value == .Null -> return Err(perf_error("compile metadata requires the CompilerProbe provider, CompileTime percentile, and Duration unit"))
+                    if perf_report_text(m[perf_report_index(m, "name")].value, "metric.name") != "CompileTime" || kind != "CompilerProbe" || f[unit].value != CanonicalJSON.String("Duration") || m[perf_report_index(m, "percentile")].value == .Null {
+                        return Err(perf_error("compile metadata requires the CompilerProbe provider, CompileTime percentile, and Duration unit"))
+                    }
                 }
                 perf_validate_compile_metadata(f[c].value, f[samples].value)
             } else {
-                if kind == "CompilerProbe" -> return Err(perf_error("CompilerProbe measurement has no compile metadata"))
+                if kind == "CompilerProbe" {
+                    return Err(perf_error("CompilerProbe measurement has no compile metadata"))
+                }
             }
         }
         return
     }
     return Err(perf_error("measurement is not an object"))
 }
+
 // Rust validate_phase_totals.
 perf_validate_phase_totals: fn(value: CanonicalJSON, name: String) -> [String:Int] PerfBudgetError! {
     perf_report_array(value, name)
@@ -284,10 +362,14 @@ perf_validate_phase_totals: fn(value: CanonicalJSON, name: String) -> [String:In
             perf_report_object(entry, "{name} entry", [String]{"name", "ns"})
             if entry == .Object(f) {
                 phase: perf_report_text(f[perf_report_index(f, "name")].value, "{name}.name")
-                if phase == "" || (prior != "" && prior >= phase) -> return Err(perf_error("{name} is not sorted by phase name"))
+                if phase == "" || (prior != "" && prior >= phase) {
+                    return Err(perf_error("{name} is not sorted by phase name"))
+                }
                 prior = phase
                 ns: perf_report_unsigned(f[perf_report_index(f, "ns")].value, "{name}.ns")
-                if totals.has_key(phase) -> return Err(perf_error("{name} contains a duplicate phase"))
+                if totals.has_key(phase) {
+                    return Err(perf_error("{name} contains a duplicate phase"))
+                }
                 totals[phase] = ns
             }
         }
@@ -295,7 +377,13 @@ perf_validate_phase_totals: fn(value: CanonicalJSON, name: String) -> [String:In
     if totals.len() == 0 -> return Err(perf_error("{name} is empty"))
     Ok(totals)
 }
-PerfCompileAggregate: struct { phases: [String:Int], elapsed: [PerfRational], peak_rss_bytes: Int }
+
+PerfCompileAggregate: struct {
+    phases: [String:Int]
+    elapsed: [PerfRational]
+    peak_rss_bytes: Int
+}
+
 // Rust validate_compile_record.
 perf_validate_compile_record: fn(value: CanonicalJSON, root: [CanonicalJSONField], aggregate: &PerfCompileAggregate) PerfBudgetError! {
     _: perf_report_unsigned(root[perf_report_index(root, "workload_bytes")].value, "compile.workload_bytes")
@@ -303,18 +391,25 @@ perf_validate_compile_record: fn(value: CanonicalJSON, root: [CanonicalJSONField
     if value == .Object(f) {
         keys: [String]{"backend", "cache_state", "clock", "compiler_digest", "core_digest", "edit_bytes", "host", "linker", "profile", "source_tree_sha256", "target", "workload_bytes"}
         loop key in keys {
-            if f[perf_report_index(f, key)].value != root[perf_report_index(root, key)].value -> return Err(perf_error("compile sample record `{key}` does not match its row identity"))
+            if f[perf_report_index(f, key)].value != root[perf_report_index(root, key)].value {
+                return Err(perf_error("compile sample record `{key}` does not match its row identity"))
+            }
         }
         hashes: [String]{"compiler_digest", "core_digest", "source_tree_sha256"}
-        loop key in hashes { _: perf_report_hex64(f[perf_report_index(f, key)].value, "compile sample {key}") }
+        loop key in hashes {
+            _: perf_report_hex64(f[perf_report_index(f, key)].value, "compile sample {key}")
+        }
         ns: perf_report_unsigned(f[perf_report_index(f, "elapsed_ns")].value, "compile sample elapsed_ns")
         aggregate.elapsed.push(perf_rational_integer(ns))
         rss: perf_report_unsigned(f[perf_report_index(f, "peak_rss_bytes")].value, "compile sample peak_rss_bytes")
         if rss > aggregate.peak_rss_bytes -> aggregate.peak_rss_bytes = rss
         phases: perf_validate_phase_totals(f[perf_report_index(f, "phase_totals")].value, "compile sample phase_totals")
-        loop (name, phase_ns) in phases { aggregate.phases[name] = (aggregate.phases.get(name) ?? 0) + phase_ns }
+        loop (name, phase_ns) in phases {
+            aggregate.phases[name] = (aggregate.phases.get(name) ?? 0) + phase_ns
+        }
     }
 }
+
 // Rust validate_compile_metadata.
 perf_validate_compile_metadata: fn(value: CanonicalJSON, measurement_samples: CanonicalJSON) PerfBudgetError! {
     perf_report_object(value, "compile metadata", [String]{"backend", "cache_state", "clock", "compiler_digest", "core_digest", "edit_bytes", "edit_sha256", "host", "linker", "peak_rss_bytes", "phase_totals", "profile", "sample_records", "samples", "source_tree_sha256", "target", "variance", "warmups", "workload_bytes"})
@@ -334,28 +429,42 @@ perf_validate_compile_metadata: fn(value: CanonicalJSON, measurement_samples: Ca
         _: perf_report_text(f[perf_report_index(f, "target")].value, "compile.target")
         keys: [String]{"backend", "host", "linker", "profile", "target"}
         loop key in keys {
-            if perf_report_text(f[perf_report_index(f, key)].value, "compile.{key}") == "" -> return Err(perf_error("compile.{key} is empty"))
+            if perf_report_text(f[perf_report_index(f, key)].value, "compile.{key}") == "" {
+                return Err(perf_error("compile.{key} is empty"))
+            }
         }
         samples: perf_report_usize_wire(f[perf_report_index(f, "samples")].value, "compile.samples")
         warmups: perf_report_usize_wire(f[perf_report_index(f, "warmups")].value, "compile.warmups")
-        if samples != 20 || warmups != 1 -> return Err(perf_error("compile metadata does not use the pinned warmup/sample policy"))
+        if samples != 20 || warmups != 1 {
+            return Err(perf_error("compile metadata does not use the pinned warmup/sample policy"))
+        }
         records: perf_report_index(f, "sample_records")
         perf_report_array(f[records].value, "compile.sample_records")
         aggregate := PerfCompileAggregate{phases: [String:Int]{}, elapsed: [PerfRational]{}, peak_rss_bytes: 0}
         if f[records].value == .Array(entries) {
-            if entries.len() != samples -> return Err(perf_error("compile.sample_records count does not match compile.samples"))
+            if entries.len() != samples {
+                return Err(perf_error("compile.sample_records count does not match compile.samples"))
+            }
             loop record in entries -> perf_validate_compile_record(record, f, aggregate)
         }
-        if aggregate.peak_rss_bytes != peak -> return Err(perf_error("compile.peak_rss_bytes does not equal the maximum per-sample peak RSS"))
+        if aggregate.peak_rss_bytes != peak {
+            return Err(perf_error("compile.peak_rss_bytes does not equal the maximum per-sample peak RSS"))
+        }
         perf_report_array(measurement_samples, "measurement.samples")
         if measurement_samples == .Array(measured) {
-            if measured.len() != aggregate.elapsed.len() -> return Err(perf_error("measurement.samples count does not match compile.sample_records"))
+            if measured.len() != aggregate.elapsed.len() {
+                return Err(perf_error("measurement.samples count does not match compile.sample_records"))
+            }
             loop (index, sample) in measured {
-                if perf_validate_rational(sample, true, "measurement.samples[{index}]") != aggregate.elapsed[index] -> return Err(perf_error("measurement.samples does not match compile.sample_records"))
+                if perf_validate_rational(sample, true, "measurement.samples[{index}]") != aggregate.elapsed[index] {
+                    return Err(perf_error("measurement.samples does not match compile.sample_records"))
+                }
             }
         }
         phases: perf_validate_phase_totals(f[perf_report_index(f, "phase_totals")].value, "compile.phase_totals")
-        if phases != aggregate.phases -> return Err(perf_error("compile.phase_totals does not equal the per-sample phase totals"))
+        if phases != aggregate.phases {
+            return Err(perf_error("compile.phase_totals does not equal the per-sample phase totals"))
+        }
         sum := perf_rational_zero()
         loop v in aggregate.elapsed -> sum = perf_rational_add(sum, v)
         mean: perf_rational_div(sum, perf_rational_integer(aggregate.elapsed.len()))
@@ -365,15 +474,20 @@ perf_validate_compile_metadata: fn(value: CanonicalJSON, measurement_samples: Ca
             squares = perf_rational_add(squares, perf_rational_mul(delta, delta))
         }
         variance: perf_rational_div(squares, perf_rational_integer(aggregate.elapsed.len()))
-        if perf_validate_rational(f[perf_report_index(f, "variance")].value, true, "compile.variance") != variance -> return Err(perf_error("compile.variance does not match elapsed samples"))
+        if perf_validate_rational(f[perf_report_index(f, "variance")].value, true, "compile.variance") != variance {
+            return Err(perf_error("compile.variance does not match elapsed samples"))
+        }
     }
 }
+
 // Rust sanitize_measurement.
 perf_sanitize_measurement: fn(value: CanonicalJSON) -> CanonicalJSON PerfBudgetError! {
     if value == .Object(f) {
         out := [CanonicalJSONField]{}
         loop field in f {
-            if field.key != "history" && field.key != "baseline" && field.key != "decision" -> out.push(field.copy())
+            if field.key != "history" && field.key != "baseline" && field.key != "decision" {
+                out.push(field.copy())
+            }
         }
         keys: [String]{"history", "baseline", "decision"}
         loop key in keys -> out.push(CanonicalJSONField{key: key, value: CanonicalJSON.Null})
@@ -381,12 +495,14 @@ perf_sanitize_measurement: fn(value: CanonicalJSON) -> CanonicalJSON PerfBudgetE
     }
     Err(perf_error("measurement is not object"))
 }
+
 // Rust frame / wire_text.
 perf_report_frame: fn(input: &[U8], value: String) Never! {
     bytes: value.bytes()
     perf_push_u64(input, bytes.len())
     loop byte in bytes -> input.push(byte)
 }
+
 perf_report_wire_text: fn(value: CanonicalJSON) -> String Never! {
     if value == {
         .String(v) -> v.copy()
@@ -398,6 +514,7 @@ perf_report_wire_text: fn(value: CanonicalJSON) -> String Never! {
         }
     }
 }
+
 // Rust validate_context_key; context builder is also available to producers.
 perf_budget_context_key: fn(subject: [CanonicalJSONField], tool: [CanonicalJSONField], measurement: [CanonicalJSONField]) -> String PerfBudgetError! {
     metric: perf_report_index(measurement, "metric")
@@ -411,48 +528,71 @@ perf_budget_context_key: fn(subject: [CanonicalJSONField], tool: [CanonicalJSONF
             perf_report_frame(input, perf_report_wire_text(m[perf_report_index(m, "percentile")].value))
             perf_report_frame(input, perf_report_wire_text(measurement[perf_report_index(measurement, "target_class")].value))
             keys: [String]{"target_triple", "profile"}
-            loop key in keys -> perf_report_frame(input, perf_report_wire_text(subject[perf_report_index(subject, key)].value))
+            loop key in keys {
+                perf_report_frame(input, perf_report_wire_text(subject[perf_report_index(subject, key)].value))
+            }
             tool_keys: [String]{"jet_version", "compiler_build_id", "stdlib_id", "runner_id", "digest"}
-            loop key in tool_keys -> perf_report_frame(input, perf_report_wire_text(tool[perf_report_index(tool, key)].value))
+            loop key in tool_keys {
+                perf_report_frame(input, perf_report_wire_text(tool[perf_report_index(tool, key)].value))
+            }
             provider_keys: [String]{"kind", "identity", "version", "isolation", "cpu_arch", "cpu_model", "logical_cpus", "memory_bytes", "os", "kernel", "power_governor", "hardware_fingerprint"}
-            loop key in provider_keys -> perf_report_frame(input, perf_report_wire_text(p[perf_report_index(p, key)].value))
+            loop key in provider_keys {
+                perf_report_frame(input, perf_report_wire_text(p[perf_report_index(p, key)].value))
+            }
             return Ok(sha256_hex_bytes(sha256_bytes(input[0..<input.len()])))
         }
         return Err(perf_error("provider is not object"))
     }
     Err(perf_error("metric is not object"))
 }
+
 perf_validate_context_key: fn(subject: [CanonicalJSONField], tool: [CanonicalJSONField], measurement: [CanonicalJSONField]) PerfBudgetError! {
     actual: perf_budget_context_key(subject, tool, measurement)
-    if perf_report_text(measurement[perf_report_index(measurement, "context_key")].value, "context_key") != actual -> return Err(perf_error("measurement context_key mismatch"))
+    if perf_report_text(measurement[perf_report_index(measurement, "context_key")].value, "context_key") != actual {
+        return Err(perf_error("measurement context_key mismatch"))
+    }
 }
+
 // Rust usize_wire / rational_or_none / quantities / history_ids.
 perf_report_usize_wire: fn(value: CanonicalJSON, name: String) -> Int PerfBudgetError! {
     v: perf_report_unsigned(value, name)
-    if v > 18446744073709551615 -> return Err(perf_error("{name} exceeds implementation resource limit"))
+    if v > 18446744073709551615 {
+        return Err(perf_error("{name} exceeds implementation resource limit"))
+    }
     Ok(v)
 }
+
 perf_report_rational_or_none: fn(value: CanonicalJSON, name: String) -> PerfRational? PerfBudgetError! {
     if value == .Null -> return Ok(None)
     Ok(Val(perf_validate_rational(value, false, name)))
 }
+
 perf_report_quantities: fn(value: CanonicalJSON, name: String, item_name: String) -> [PerfRational] PerfBudgetError! {
     perf_report_array(value, name)
     out := [PerfRational]{}
-    if value == .Array(v) { loop q in v -> out.push(perf_validate_rational(q, true, item_name)) }
+    if value == .Array(v) {
+        loop q in v -> out.push(perf_validate_rational(q, true, item_name))
+    }
     Ok(out)
 }
+
 perf_report_ids: fn(value: CanonicalJSON, name: String, item_name: String) -> [String] PerfBudgetError! {
     perf_report_array(value, name)
     out := [String]{}
-    if value == .Array(v) { loop id in v -> out.push(perf_report_text(id, item_name)) }
+    if value == .Array(v) {
+        loop id in v -> out.push(perf_report_text(id, item_name))
+    }
     Ok(out)
 }
+
 perf_report_history_ids: fn(value: CanonicalJSON) -> [String] PerfBudgetError! {
     if value == .Null -> return Ok([String]{})
-    if value == .Object(f) -> return perf_report_ids(f[perf_report_index(f, "report_ids")].value, "history.report_ids", "history report id")
+    if value == .Object(f) {
+        return perf_report_ids(f[perf_report_index(f, "report_ids")].value, "history.report_ids", "history report id")
+    }
     Err(perf_error("history is not object"))
 }
+
 // Rust parse_percentile / parse_direction / parse_enforcement.
 perf_report_parse_percentile: fn(value: CanonicalJSON) -> PerfPercentile? PerfBudgetError! {
     if value == .Null -> return Ok(None)
@@ -468,6 +608,7 @@ perf_report_parse_percentile: fn(value: CanonicalJSON) -> PerfPercentile? PerfBu
     }
     Err(perf_error("percentile is not text or null"))
 }
+
 perf_report_parse_direction: fn(value: CanonicalJSON) -> PerfDirection PerfBudgetError! {
     v: perf_report_text(value, "direction")
     if v == {
@@ -476,6 +617,7 @@ perf_report_parse_direction: fn(value: CanonicalJSON) -> PerfDirection PerfBudge
         else -> Err(perf_error("unknown direction"))
     }
 }
+
 perf_report_parse_enforcement: fn(value: CanonicalJSON) -> PerfEnforcement PerfBudgetError! {
     v: perf_report_text(value, "enforcement")
     if v == {
@@ -484,6 +626,7 @@ perf_report_parse_enforcement: fn(value: CanonicalJSON) -> PerfEnforcement PerfB
         else -> Err(perf_error("unknown enforcement"))
     }
 }
+
 // Rust parse_comparison.
 perf_report_parse_comparison: fn(value: CanonicalJSON) -> PerfComparison PerfBudgetError! {
     if value == .Object(f) {
@@ -494,9 +637,16 @@ perf_report_parse_comparison: fn(value: CanonicalJSON) -> PerfComparison PerfBud
             direction: if d == {
                 "at_most" -> PerfLimitDirection.AtMost
                 "at_least" -> PerfLimitDirection.AtLeast
-                else -> { return Err(perf_error("unknown limit direction")) }
+                else -> {
+                    return Err(perf_error("unknown limit direction"))
+                }
             }
-            return Ok(if { kind == "absolute" -> PerfComparison.Absolute{limit: limit, direction: direction} else -> PerfComparison.AbsoluteFrom{limit: limit, direction: direction} })
+            return Ok(
+                if {
+                    kind == "absolute" -> PerfComparison.Absolute{limit: limit, direction: direction}
+                    else -> PerfComparison.AbsoluteFrom{limit: limit, direction: direction}
+                },
+            )
         }
         if kind == "relative_to" {
             limit: perf_report_unsigned(f[perf_report_index(f, "limit_basis_points")].value, "comparison.limit_basis_points")
@@ -504,7 +654,9 @@ perf_report_parse_comparison: fn(value: CanonicalJSON) -> PerfComparison PerfBud
             goal: if g == {
                 "regression_at_most" -> PerfRelativeGoal.RegressionAtMost
                 "improvement_at_least" -> PerfRelativeGoal.ImprovementAtLeast
-                else -> { return Err(perf_error("unknown relative goal")) }
+                else -> {
+                    return Err(perf_error("unknown relative goal"))
+                }
             }
             return Ok(PerfComparison.RelativeTo{limit_basis_points: limit, goal: goal})
         }
@@ -512,16 +664,22 @@ perf_report_parse_comparison: fn(value: CanonicalJSON) -> PerfComparison PerfBud
     }
     Err(perf_error("comparison is not object"))
 }
+
 // Rust parse_policy.
 perf_report_parse_policy: fn(value: CanonicalJSON) -> PerfMeasurementPolicy? PerfBudgetError! {
     if value == .Null -> return Ok(None)
-    if value == .Object(f) -> return Ok(Val(PerfMeasurementPolicy{
-        bootstrap_resamples: perf_report_usize_wire(f[perf_report_index(f, "bootstrap_resamples")].value, "policy.bootstrap_resamples"),
-        lower_rank: perf_report_usize_wire(f[perf_report_index(f, "lower_rank")].value, "policy.lower_rank"),
-        upper_rank: perf_report_usize_wire(f[perf_report_index(f, "upper_rank")].value, "policy.upper_rank"),
-    }))
+    if value == .Object(f) {
+        return Ok(
+            Val(PerfMeasurementPolicy{
+                bootstrap_resamples: perf_report_usize_wire(f[perf_report_index(f, "bootstrap_resamples")].value, "policy.bootstrap_resamples"),
+                lower_rank: perf_report_usize_wire(f[perf_report_index(f, "lower_rank")].value, "policy.lower_rank"),
+                upper_rank: perf_report_usize_wire(f[perf_report_index(f, "upper_rank")].value, "policy.upper_rank"),
+            }),
+        )
+    }
     Err(perf_error("policy is not object"))
 }
+
 // Rust evidence_enum / outcome_enum / trend_label_enum.
 perf_report_evidence_enum: fn(value: CanonicalJSON) -> PerfEvidence PerfBudgetError! {
     v: perf_report_text(value, "decision.evidence")
@@ -533,6 +691,7 @@ perf_report_evidence_enum: fn(value: CanonicalJSON) -> PerfEvidence PerfBudgetEr
         else -> Err(perf_error("unknown evidence"))
     }
 }
+
 perf_report_outcome_enum: fn(value: CanonicalJSON) -> PerfPolicyOutcome PerfBudgetError! {
     v: perf_report_text(value, "decision.policy_outcome")
     if v == {
@@ -542,6 +701,7 @@ perf_report_outcome_enum: fn(value: CanonicalJSON) -> PerfPolicyOutcome PerfBudg
         else -> Err(perf_error("unknown policy outcome"))
     }
 }
+
 perf_report_trend_label_enum: fn(value: CanonicalJSON) -> PerfTrendLabel PerfBudgetError! {
     v: perf_report_text(value, "trend.label")
     if v == {
@@ -552,10 +712,13 @@ perf_report_trend_label_enum: fn(value: CanonicalJSON) -> PerfTrendLabel PerfBud
         else -> Err(perf_error("unknown trend label"))
     }
 }
+
 // Rust verify_wire_evaluation.
 perf_verify_wire_evaluation: fn(evidence_id: String, m: [CanonicalJSONField]) PerfBudgetError! {
     decision: perf_report_index(m, "decision")
-    if m[decision].value == .Null -> return
+    if m[decision].value == .Null {
+        return
+    }
     if m[decision].value == .Object(d) {
         direction: perf_report_parse_direction(m[perf_report_index(m, "direction")].value)
         enforcement: perf_report_parse_enforcement(m[perf_report_index(m, "enforcement")].value)
@@ -573,34 +736,54 @@ perf_verify_wire_evaluation: fn(evidence_id: String, m: [CanonicalJSONField]) Pe
         outcome: perf_report_outcome_enum(d[perf_report_index(d, "policy_outcome")].value)
         statistical: !(comparison == .Absolute(_, _))
         if baseline.len() == 0 && statistical && evidence == PerfEvidence.Unavailable {
-            expected: if { enforcement == PerfEnforcement.Warn -> PerfPolicyOutcome.Warn else -> PerfPolicyOutcome.Fail }
-            if outcome != expected -> return Err(perf_error("unavailable decision policy outcome mismatch"))
+            expected: if {
+                enforcement == PerfEnforcement.Warn -> PerfPolicyOutcome.Warn
+                else -> PerfPolicyOutcome.Fail
+            }
+            if outcome != expected {
+                return Err(perf_error("unavailable decision policy outcome mismatch"))
+            }
         } else {
             metric: perf_report_index(m, "metric")
             if m[metric].value == .Object(f) {
                 actual: perf_evaluate(evidence_id, perf_report_text(m[perf_report_index(m, "context_key")].value, "context_key"), ids, candidate, baseline, perf_report_parse_percentile(f[perf_report_index(f, "percentile")].value), comparison, direction, enforcement, policy)
-                if perf_report_rational_or_none(d[perf_report_index(d, "point")].value, "decision.point") != Val(actual.point) || perf_report_rational_or_none(d[perf_report_index(d, "lower95")].value, "decision.lower95") != actual.lower95 || perf_report_rational_or_none(d[perf_report_index(d, "upper95")].value, "decision.upper95") != actual.upper95 || evidence != actual.evidence || outcome != actual.outcome -> return Err(perf_error("persisted decision does not match independent evaluator recomputation"))
+                if perf_report_rational_or_none(d[perf_report_index(d, "point")].value, "decision.point") != Val(actual.point) || perf_report_rational_or_none(d[perf_report_index(d, "lower95")].value, "decision.lower95") != actual.lower95 || perf_report_rational_or_none(d[perf_report_index(d, "upper95")].value, "decision.upper95") != actual.upper95 || evidence != actual.evidence || outcome != actual.outcome {
+                    return Err(perf_error("persisted decision does not match independent evaluator recomputation"))
+                }
             }
         }
         if d[perf_report_index(d, "trend")].value == .Object(t) {
             tids: perf_report_ids(t[perf_report_index(t, "report_ids")].value, "history.report_ids", "history report id")
             estimators: perf_report_quantities(t[perf_report_index(t, "estimators")].value, "trend.estimators", "trend.estimators")
             actual: perf_trend(tids, estimators, direction)
-            if perf_report_trend_label_enum(t[perf_report_index(t, "label")].value) != actual.label || perf_report_rational_or_none(t[perf_report_index(t, "score")].value, "trend.score") != actual.score -> return Err(perf_error("persisted trend does not match independent recomputation"))
+            if perf_report_trend_label_enum(t[perf_report_index(t, "label")].value) != actual.label || perf_report_rational_or_none(t[perf_report_index(t, "score")].value, "trend.score") != actual.score {
+                return Err(perf_error("persisted trend does not match independent recomputation"))
+            }
         }
     }
 }
+
 // Rust EvaluationInputs / verify_evaluation.
 PerfEvaluationInputs: struct {
-    evidence_id: String, context_key: String, baseline_report_ids: [String],
-    candidate: [PerfRational], baseline: [PerfRational], percentile: PerfPercentile?,
-    comparison: PerfComparison, direction: PerfDirection, enforcement: PerfEnforcement,
+    evidence_id: String
+    context_key: String
+    baseline_report_ids: [String]
+    candidate: [PerfRational]
+    baseline: [PerfRational]
+    percentile: PerfPercentile?
+    comparison: PerfComparison
+    direction: PerfDirection
+    enforcement: PerfEnforcement
     policy: PerfMeasurementPolicy?
 }
+
 perf_verify_evaluation: fn(expected: PerfEvaluation, inputs: PerfEvaluationInputs) PerfBudgetError! {
     actual: perf_evaluate(inputs.evidence_id, inputs.context_key, inputs.baseline_report_ids, inputs.candidate, inputs.baseline, inputs.percentile, inputs.comparison, inputs.direction, inputs.enforcement, inputs.policy)
-    if actual != expected -> return Err(perf_error("persisted budget evaluation does not match independent recomputation"))
+    if actual != expected {
+        return Err(perf_error("persisted budget evaluation does not match independent recomputation"))
+    }
 }
+
 // Rust validate_report_content.
 perf_validate_report_content: fn(value: CanonicalJSON) PerfBudgetError! {
     perf_report_object(value, "report content", [String]{"subject", "toolchain", "evidence_id", "measurements", "summary", "privacy"})
@@ -609,7 +792,9 @@ perf_validate_report_content: fn(value: CanonicalJSON) PerfBudgetError! {
         perf_report_object(f[s].value, "subject", [String]{"target_id", "member_sources", "target_triple", "target_class", "profile", "artifact", "measured_start", "measured_end"})
         if f[s].value == .Object(subject) {
             keys: [String]{"target_id", "target_triple", "target_class", "profile", "measured_start", "measured_end"}
-            loop key in keys { _: perf_report_text(subject[perf_report_index(subject, key)].value, "subject.{key}") }
+            loop key in keys {
+                _: perf_report_text(subject[perf_report_index(subject, key)].value, "subject.{key}")
+            }
             sources: perf_report_index(subject, "member_sources")
             perf_report_array(subject[sources].value, "subject.member_sources")
             prior_path := ""
@@ -621,7 +806,9 @@ perf_validate_report_content: fn(value: CanonicalJSON) PerfBudgetError! {
                     if source == .Object(sf) {
                         path: perf_report_text(sf[perf_report_index(sf, "path")].value, "member source.path")
                         hash: perf_report_hex64(sf[perf_report_index(sf, "sha256")].value, "member source.sha256")
-                        if seen && (prior_path > path || (prior_path == path && prior_hash > hash)) -> return Err(perf_error("member_sources is not sorted"))
+                        if seen && (prior_path > path || (prior_path == path && prior_hash > hash)) {
+                            return Err(perf_error("member_sources is not sorted"))
+                        }
                         prior_path = path
                         prior_hash = hash
                         seen = true
@@ -661,7 +848,9 @@ perf_validate_report_content: fn(value: CanonicalJSON) PerfBudgetError! {
                         if measurement == .Object(mf) {
                             budget: perf_report_text(mf[perf_report_index(mf, "budget_id")].value, "budget_id")
                             source: perf_report_text(mf[perf_report_index(mf, "source")].value, "source")
-                            if has_prior && (prior_budget > budget || (prior_budget == budget && prior_source > source)) -> return Err(perf_error("measurements is not sorted by budget_id then source"))
+                            if has_prior && (prior_budget > budget || (prior_budget == budget && prior_source > source)) {
+                                return Err(perf_error("measurements is not sorted by budget_id then source"))
+                            }
                             prior_budget = budget
                             prior_source = source
                             has_prior = true
@@ -671,11 +860,13 @@ perf_validate_report_content: fn(value: CanonicalJSON) PerfBudgetError! {
                         sanitized.push(perf_sanitize_measurement(measurement))
                     }
                 }
-                hash_content: perf_report_object_new([CanonicalJSONField]{
-                    CanonicalJSONField{key: "measurements", value: CanonicalJSON.Array(sanitized)},
-                    CanonicalJSONField{key: "subject", value: f[s].value.copy()},
-                    CanonicalJSONField{key: "toolchain", value: f[tool_index].value.copy()},
-                })
+                hash_content: perf_report_object_new(
+                    [CanonicalJSONField]{
+                        CanonicalJSONField{key: "measurements", value: CanonicalJSON.Array(sanitized)},
+                        CanonicalJSONField{key: "subject", value: f[s].value.copy()},
+                        CanonicalJSONField{key: "toolchain", value: f[tool_index].value.copy()},
+                    },
+                )
                 perf_verify_stable_id(hash_content, evidence) ?? return Err(perf_error("evidence_id mismatch"))
             }
         }
@@ -684,12 +875,16 @@ perf_validate_report_content: fn(value: CanonicalJSON) PerfBudgetError! {
         if f[summary].value == .Object(fields) {
             perf_report_one_of(fields[perf_report_index(fields, "outcome")].value, "summary.outcome", [String]{"pass", "warn", "fail"})
             keys: [String]{"pass", "warn", "fail"}
-            loop key in keys { _: perf_report_unsigned(fields[perf_report_index(fields, key)].value, "summary.{key}") }
+            loop key in keys {
+                _: perf_report_unsigned(fields[perf_report_index(fields, key)].value, "summary.{key}")
+            }
         }
         privacy: perf_report_index(f, "privacy")
         perf_report_object(f[privacy].value, "privacy", [String]{"schema", "workspace_paths_only", "retained", "excluded"})
         if f[privacy].value == .Object(fields) {
-            if fields[perf_report_index(fields, "schema")].value != CanonicalJSON.Integer("1") || !perf_report_boolean(fields[perf_report_index(fields, "workspace_paths_only")].value, "privacy.workspace_paths_only") -> return Err(perf_error("unsupported privacy schema/policy"))
+            if fields[perf_report_index(fields, "schema")].value != CanonicalJSON.Integer("1") || !perf_report_boolean(fields[perf_report_index(fields, "workspace_paths_only")].value, "privacy.workspace_paths_only") {
+                return Err(perf_error("unsupported privacy schema/policy"))
+            }
             keys: [String]{"retained", "excluded"}
             loop key in keys {
                 i: perf_report_index(fields, key)
@@ -699,7 +894,9 @@ perf_validate_report_content: fn(value: CanonicalJSON) PerfBudgetError! {
                 if fields[i].value == .Array(values) {
                     loop v in values {
                         text: perf_report_text(v, "privacy.{key} item")
-                        if has_prior && prior > text -> return Err(perf_error("privacy.{key} is not sorted"))
+                        if has_prior && prior > text {
+                            return Err(perf_error("privacy.{key} is not sorted"))
+                        }
                         prior = text
                         has_prior = true
                     }
@@ -708,12 +905,15 @@ perf_validate_report_content: fn(value: CanonicalJSON) PerfBudgetError! {
         }
     }
 }
+
 // Rust verify_budget_report. Validate content before the wrapper's claimed ID.
 perf_verify_budget_report: fn(bytes: [U8]) -> CanonicalJSON PerfBudgetError! {
     report: canonical_json_parse(bytes) ?? return Err(perf_error(err.message))
     if report == .Object(fields) {
         perf_report_object(report, "budget report wrapper", [String]{"content", "report_id", "schema", "version"}) ?? return Err(perf_error("budget report wrapper has missing or unknown keys"))
-        if fields[perf_report_index(fields, "schema")].value != CanonicalJSON.String("jet.budget-report") || fields[perf_report_index(fields, "version")].value != CanonicalJSON.Integer("1") -> return Err(perf_error("unsupported budget report schema/version"))
+        if fields[perf_report_index(fields, "schema")].value != CanonicalJSON.String("jet.budget-report") || fields[perf_report_index(fields, "version")].value != CanonicalJSON.Integer("1") {
+            return Err(perf_error("unsupported budget report schema/version"))
+        }
         content: perf_report_index(fields, "content")
         perf_validate_report_content(fields[content].value)
         claimed: perf_report_text(fields[perf_report_index(fields, "report_id")].value, "budget report_id")

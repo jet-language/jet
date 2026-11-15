@@ -35,13 +35,14 @@ comptime_serving: fn() -> Bool { comptime_serve_root != I64{0} }
 // allows for a file call (JetBackend ComptimeWire.jet
 // x64_comptime_admit_block).
 comptime_serve_cookie := I64{0}
+
 comptime_serve_admitted := I64{0}
 
 comptime_serve_move: fn(fd: I64, number: I64, address: I64, count: I64) {
     at := I64{0}
     loop at < count {
         moved: trap_syscall(number, fd, address + at, count - at, I64{0}, I64{0}, I64{0})
-        if (moved == I64{-4}) -> next
+        if (moved == I64{-4}) { next }
         // The compiler went away or sent a bad address: nothing is left to serve.
         if (moved <= I64{0}) {
             trap_defect_exit(I64{125})
@@ -51,9 +52,13 @@ comptime_serve_move: fn(fd: I64, number: I64, address: I64, count: I64) {
     }
 }
 
-comptime_serve_receive: fn(address: I64, count: I64) { comptime_serve_move(I64{3}, I64{0}, address, count) }
+comptime_serve_receive: fn(address: I64, count: I64) {
+    comptime_serve_move(I64{3}, I64{0}, address, count)
+}
 
-comptime_serve_send: fn(address: I64, count: I64) { comptime_serve_move(I64{4}, I64{1}, address, count) }
+comptime_serve_send: fn(address: I64, count: I64) {
+    comptime_serve_move(I64{4}, I64{1}, address, count)
+}
 
 // Fills `frame` with `kind` and four words (the rest zero).
 comptime_serve_fill: fn(frame: I64, kind: I64, a: I64, b: I64, c: I64, d: I64) {
@@ -156,7 +161,7 @@ comptime_serve_loop: fn(frame: I64) -> I64 {
             comptime_serve_reply(frame, I64{1}, comptime_serve_value(kind, a), I64{0}, I64{0}, I64{0})
             next
         }
-        if (kind == I64{7}) -> return a
+        if (kind == I64{7}) { return a }
         if (kind == I64{9}) {
             comptime_serve_filter(frame, a, b, c)
             next
@@ -263,6 +268,6 @@ comptime_serve_stop_code := I64{0}
         }
     }
     frame: alloc_map_try(I64{4096})
-    if (frame > I64{0}) -> comptime_serve_reply(frame, I64{4}, number, first, I64{0}, I64{0})
+    if (frame > I64{0}) { comptime_serve_reply(frame, I64{4}, number, first, I64{0}, I64{0}) }
     trap_defect_exit(I64{0})
 }

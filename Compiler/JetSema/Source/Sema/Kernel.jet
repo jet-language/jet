@@ -9,9 +9,35 @@
 use jet_foundation.[AccessConvention, CallArg, Diagnostic, Expr, Func, KernelMarker, ModuleTable, PlaceAccess, Span, Stmt, Type, expr_span]
 
 SEMA_KERNEL_SAFE_COMPUTE_CALLS: [String]{
-    "abs", "add", "broadcast_to", "det", "div", "exp", "fft", "full", "from_list", "inv", "matmul",
-    "maximum", "minimum", "mul", "negate", "numel", "ones", "rank", "reshape", "shape", "solve",
-    "sqrt", "sub", "sum", "sum_axis", "to_list", "to_sparse", "transpose", "zeros",
+    "abs",
+    "add",
+    "broadcast_to",
+    "det",
+    "div",
+    "exp",
+    "fft",
+    "full",
+    "from_list",
+    "inv",
+    "matmul",
+    "maximum",
+    "minimum",
+    "mul",
+    "negate",
+    "numel",
+    "ones",
+    "rank",
+    "reshape",
+    "shape",
+    "solve",
+    "sqrt",
+    "sub",
+    "sum",
+    "sum_axis",
+    "to_list",
+    "to_sparse",
+    "transpose",
+    "zeros",
 }
 
 // One unproved obligation and where it fails.
@@ -37,13 +63,23 @@ sema_kernel_failure: fn(obligation: String, span: Span) -> Diagnostic Never! {
 // top-level declaration, a safe boundary, an effect-free kind of body, and
 // read-only monomorphic parameters.
 sema_kernel_declaration_failure: fn(func: Func, kernel: KernelMarker, method: Bool) -> SemaKernelFailure? Never! {
-    if method -> return Val(SemaKernelFailure{obligation: "top-level declaration", span: kernel.span})
-    if func.is_unsafe -> return Val(SemaKernelFailure{obligation: "safe memory boundary", span: func.unsafe_span ?? kernel.span})
-    if func.is_reactive || func.is_job || func.inline_foreign != None -> return Val(SemaKernelFailure{obligation: "effect-free function body", span: kernel.span})
+    if method {
+        return Val(SemaKernelFailure{obligation: "top-level declaration", span: kernel.span})
+    }
+    if func.is_unsafe {
+        return Val(SemaKernelFailure{obligation: "safe memory boundary", span: func.unsafe_span ?? kernel.span})
+    }
+    if func.is_reactive || func.is_job || func.inline_foreign != None {
+        return Val(SemaKernelFailure{obligation: "effect-free function body", span: kernel.span})
+    }
     read_only: loop param in func.params {
-        if param.variadic || param.convention != AccessConvention.Read -> break false
+        if param.variadic || param.convention != AccessConvention.Read {
+            break false
+        }
     } ?? true
-    if func.type_params.len() > 0 || !read_only -> return Val(SemaKernelFailure{obligation: "read-only, monomorphic parameters", span: kernel.span})
+    if func.type_params.len() > 0 || !read_only {
+        return Val(SemaKernelFailure{obligation: "read-only, monomorphic parameters", span: kernel.span})
+    }
     None
 }
 
@@ -90,7 +126,9 @@ sema_kernel_prove_statement: fn(statement: Stmt, names: &[String], compute_alias
         .Expr(value) -> return sema_kernel_prove_expr(value, names, compute_aliases)
         .Return(value, _) -> return if value == .Val(returned) -> sema_kernel_prove_expr(returned, names, compute_aliases) else -> None
         .Val(binding) -> {
-            if binding.mutable || binding.pattern != None -> return Val(SemaKernelFailure{obligation: "immutable scalar locals", span: binding.name_span})
+            if binding.mutable || binding.pattern != None {
+                return Val(SemaKernelFailure{obligation: "immutable scalar locals", span: binding.name_span})
+            }
             failure: sema_kernel_prove_expr(binding.init, names, compute_aliases)
             if failure != None -> return failure
             names.push(binding.name)
@@ -143,7 +181,9 @@ sema_kernel_prove_expr: fn(expression: Expr, names: [String], compute_aliases: [
                 .Elements(_) | .Entries(_) | .ByteText(_) -> true
                 .Fields(_) | .Value(_) | .Empty -> false
             }
-            if collection && !fixed -> return Val(SemaKernelFailure{obligation: "an allocation-free body: this literal allocates new collection storage", span: span})
+            if collection && !fixed {
+                return Val(SemaKernelFailure{obligation: "an allocation-free body: this literal allocates new collection storage", span: span})
+            }
             return Val(SemaKernelFailure{obligation: "race-free straight-line body", span: span})
         }
         .MapLit(_, span, _) -> return Val(SemaKernelFailure{obligation: "an allocation-free body: this literal allocates new collection storage", span: span})
@@ -166,7 +206,9 @@ sema_kernel_check_effects: fn(pending: SemaKernelPending, direct: [String], call
     }
     // The deny-only Unsafe fact an `#Unsafe` gate records is no effect.
     direct_effects: loop name in direct {
-        if name != "Unsafe" -> break true
+        if name != "Unsafe" {
+            break true
+        }
     } ?? false
     if pending.declared_effects || direct_effects || effect_edges > 0 || maximal {
         diagnostics.push(sema_kernel_failure("no reachable effects or opaque calls", pending.span))

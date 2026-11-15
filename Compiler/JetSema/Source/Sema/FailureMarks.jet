@@ -117,9 +117,13 @@ sema_failure_marks_check_written: fn(value: Expr, span: Span, expected: Type?, e
 // failure set is still inferred: a callee the solve finds infallible owes no
 // mark.
 sema_failure_marks_require: fn(expr: Expr, conversion: TTryConvert, callee: SemaFailureCallee?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
-    if conversion == .Never -> return
+    if conversion == .Never {
+        return
+    }
     id: expr_node_id(expr)
-    if id == AST_NODE_GENERATED || id == context.failure_mark_written || context.compiler_generated -> return
+    if id == AST_NODE_GENERATED || id == context.failure_mark_written || context.compiler_generated {
+        return
+    }
     name := "this call"
     if expr == .Call(written, _) -> name = "`{written.name}`"
     if expr == .MethodCall(_, method, _, _, _, _, _) -> name = "`.{method}`"
@@ -131,7 +135,9 @@ sema_failure_marks_require: fn(expr: Expr, conversion: TTryConvert, callee: Sema
         start: expr_source_start(expr)
         first: if receiver -> TextEdit{span: Span{start: start, end: start}, new_text: "("} else -> TextEdit{span: Span{start: end, end: end}, new_text: "?"}
         diagnostic := diagnostic_with_edit_grade(reported, first, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving)
-        if receiver -> diagnostic.fix_edits.push(TextEdit{span: Span{start: end, end: end}, new_text: "?)"})
+        if receiver {
+            diagnostic.fix_edits.push(TextEdit{span: Span{start: end, end: end}, new_text: "?)"})
+        }
         diagnostics.push(diagnostic)
     }
     if close == None -> diagnostics.push(reported)

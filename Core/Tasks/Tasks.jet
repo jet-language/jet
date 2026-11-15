@@ -8,6 +8,7 @@ package: {
         tasks: .Library{ entry: tasks }
     }
 }
+
 use {
     core: core
     time: core.time
@@ -62,13 +63,12 @@ scheduler: module {
     }
 
     // A test's send; the test holds the receiver, so a refusal is its bug.
-    priv test_send: fn(sender: Sender<Int>, value: Int) Err! {
-        sender.send(value)
-    }
+    priv test_send: fn(sender: Sender<Int>, value: Int) Err! { sender.send(value) }
 }
 
 impl Condition {
     notify_one: fn(self) Never! { core.tasks.__condition_notify_one(self) }
+
     notify_all: fn(self) Never! { core.tasks.__condition_notify_all(self) }
 }
 
@@ -239,11 +239,9 @@ waitany: fn<T>(receivers: [Receiver<T>]) -[Time.Wait]> (index: Int, value: T?) N
     (index: 0, value: recv(receivers[0]))
 }
 
-
 host_sleep_ms: fn(ms: Int) -[Time.Wait]> {
     _: recv(core.tasks.after(Duration.milliseconds(ms) ?? panic("sleep duration is outside Duration's range"), 0))
 }
-
 
 host_yield: fn() -[Time.Wait]> { core.tasks.__yield_now() }
 
@@ -252,6 +250,7 @@ host_yield: fn() -[Time.Wait]> { core.tasks.__yield_now() }
 /// stopped, while a task or a timer is still pending. The threads start again
 /// on the next task or timer.
 quiesce: fn() -[Exec]> Bool Never! { core.tasks.__quiesce() }
+
 /// Receiver metadata is owned by the scheduler's typed handle.
 is_timer: fn<T>(rx: Receiver<T>) -> Bool Never! { rx.is_timer() }
 
@@ -263,9 +262,7 @@ is_ready: fn<T>(rx: Receiver<T>) -> Bool Never! { rx.is_ready() }
 
 delay_ms: fn<T>(rx: Receiver<T>) -> Int Never! { rx.delay_ms() }
 
-timeout: fn(delay: time.Duration) Never! -[Time.Wait]> {
-    _: recv(core.tasks.after(delay, 0))
-}
+timeout: fn(delay: time.Duration) Never! -[Time.Wait]> { _: recv(core.tasks.after(delay, 0)) }
 
 sleep: fn(ms: Int) Never! -[Time.Wait]> {
     delay := ms
@@ -348,16 +345,16 @@ start: fn<T>(rx: Receiver<T>) -> Receiver<T> Never! { rx.copy() }
 run: fn() Never! -[Time.Wait]> { yield_now() }
 
 is_closed: fn(state: TaskState) -> Bool Never! { state.closed }
+
 is_locked: fn(state: TaskState) -> Bool Never! { state.locked }
+
 size: fn(state: TaskState) -> Int Never! { state.values.len() }
+
 capacity: fn(state: TaskState) -> Int Never! { state.capacity }
+
 generation: fn(state: TaskState) -> Int Never! { state.generation }
 
-spawn_name: fn(name: String) -> String Never! {
-    name.copy()
-}
-
-
+spawn_name: fn(name: String) -> String Never! { name.copy() }
 
 #Test("a Once runs its work once, however many tasks call it") {
     once: Once.new()
@@ -365,10 +362,12 @@ spawn_name: fn(name: String) -> String Never! {
     // copy: the work's handle to the same cell, which the test reads after
     counter: hits.copy()
     assert(!once.is_done())
-    assert(once.call(fn() {
-        guard := counter.guard_edit()
-        guard.value += 1
-    }))
+    assert(
+        once.call(fn() {
+            guard := counter.guard_edit()
+            guard.value += 1
+        }),
+    )
     assert(!once.call(fn() { panic("a done Once ran its work again") }))
     assert(once.is_done())
     counted: hits.guard_read()
@@ -422,7 +421,7 @@ spawn_name: fn(name: String) -> String Never! {
     assert(mine != theirs)
     seven: TaskID{value: 7}
     assert_eq(seven.display(), "task 7")
-    seen := [TaskID: Bool]{}
+    seen := [TaskID:Bool]{}
     seen[mine] = true
     assert(seen.get(current_task()) != None && seen.get(theirs) == None)
 }

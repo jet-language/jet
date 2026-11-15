@@ -72,11 +72,11 @@ run: fn() (EncodingError | IOError)! {
     loop row in lines -> print("row {json.to_string(row) ?? return}")
     broken := json.reader(Reset{peer: "socket"}) ?? return
     if broken.next() == {
-        .Ok(_) -> print("read past a failed source")
+        .Ok(_) -> { print("read past a failed source") }
         .Err(error) -> {
             print("io {error.kind == .IO}")
             if error.cause() == {
-                .Val(cause) -> print("cause {cause.kind} {cause.os_code ?? 0} {cause.message}")
+                .Val(cause) -> { print("cause {cause.kind} {cause.os_code ?? 0} {cause.message}") }
                 None -> print("no cause")
             }
         }

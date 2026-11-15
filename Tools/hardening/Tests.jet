@@ -2,7 +2,6 @@
 // seeds. Run from the repository root: `jet test Tools/hardening`, with $JET
 // naming the compiler the seeds run on (else `jet` on PATH). Each test pairs
 // the accepted case with the forged or broken case that must fail.
-
 use {
     files: core.files
     json: core.encoding.json
@@ -277,12 +276,12 @@ repro_input: fn() -> ReproInput Never! {
         normalization: [String]{"trim-final-newline"},
         oracle: Oracle{name: "unicode-lower", version: "17.0.0", input_digest: digest("oracle input"), independence_class: "external"},
         classification: "mismatch",
-        tower_action: Dyn.Object([String: Dyn]{"kind": Dyn.Text("card")}),
+        tower_action: Dyn.Object([String:Dyn]{"kind": Dyn.Text("card")}),
     }
 }
 
 with_field: fn(tree: Dyn, name: String, value: Dyn) -> Dyn Never! {
-    kept := [String: Dyn]{}
+    kept := [String:Dyn]{}
     if tree == .Object(entries) {
         loop entry in entries -> kept[entry.key.copy()] = entry.value.copy()
     }
@@ -290,9 +289,7 @@ with_field: fn(tree: Dyn, name: String, value: Dyn) -> Dyn Never! {
     Dyn.Object(kept)
 }
 
-errors_of: fn(tree: Dyn) -> String Never! {
-    validate_repro(tree, "").errors.join("\n")
-}
+errors_of: fn(tree: Dyn) -> String Never! { validate_repro(tree, "").errors.join("\n") }
 
 #Test("a sealed repro reconstructs source, stdin, oracle, commands, raw channels, exit, seed, mutation, commit and binary") {
     input: repro_input()
@@ -337,7 +334,7 @@ errors_of: fn(tree: Dyn) -> String Never! {
         with_field(bundle, "stable_surface_id", Dyn.Text("module:core.text.upper")),
         with_field(bundle, "registry_snapshot_hash", Dyn.Text(digest("other"))),
         with_field(bundle, "tier_commands", commands_dyn([TierCommand]{TierCommand{tier: "aot", command: "jet check {SOURCE_SLOT}"}})),
-        with_field(bundle, "oracle", Dyn.Object([String: Dyn]{"independence_class": Dyn.Text("external"), "input_digest": Dyn.Text(digest("forged")), "name": Dyn.Text("unicode-lower"), "version": Dyn.Text("17.0.0")})),
+        with_field(bundle, "oracle", Dyn.Object([String:Dyn]{"independence_class": Dyn.Text("external"), "input_digest": Dyn.Text(digest("forged")), "name": Dyn.Text("unicode-lower"), "version": Dyn.Text("17.0.0")})),
     }
     loop forged in tampered {
         assert(errors_of(forged).contains("repro content digest does not match bundle"))
@@ -436,7 +433,9 @@ stored_finding: fn(findings: [Dyn], surface: String) -> Dyn Never! {
         runs: run_seed(seed, jet, scratch) ?? panic("{seed.surface}: {err}")
         assert_eq(runs.len(), regression_tiers().len())
         loop run in runs {
-            if !clean_run(seed, run) -> panic("{seed.surface} on {run.tier} printed `{run.stdout}` (stderr `{run.stderr}`)")
+            if !clean_run(seed, run) {
+                panic("{seed.surface} on {run.tier} printed `{run.stdout}` (stderr `{run.stderr}`)")
+            }
         }
         findings: seed_finding(seed, runs, regression_identity(), "none") ?? panic("{seed.surface}: {err}")
         assert_eq(findings.len(), 0)
@@ -524,7 +523,9 @@ run_problem: fn(program: Generated, run: CaseRun) -> String Never! {
         }
         sizes[program.instances.len() - 1] = sizes[program.instances.len() - 1] + 1
     }
-    loop (index, family) in CONSTRUCT_FAMILIES -> assert_eq(primary_instance(programs[index]).family, family)
+    loop (index, family) in CONSTRUCT_FAMILIES {
+        assert_eq(primary_instance(programs[index]).family, family)
+    }
     assert_eq(leading.len(), CONSTRUCT_FAMILIES.len())
     assert_eq(reached.len(), productions().len())
     // Programs of one, two and three instances all occur.
@@ -603,7 +604,9 @@ forged: fn(decls: String, body: String) -> Generated Never! {
 
 fingerprint: fn(programs: [Generated]) -> [String] Never! {
     out := [String]{}
-    loop program in programs -> out.push("{program.case_id} {program.seed} {primary_instance(program).construct_id} {digest(program.source)}")
+    loop program in programs {
+        out.push("{program.case_id} {program.seed} {primary_instance(program).construct_id} {digest(program.source)}")
+    }
     out
 }
 
@@ -611,7 +614,9 @@ fingerprint: fn(programs: [Generated]) -> [String] Never! {
     first: fingerprint(generated(GENERATOR_SEED, 32))
     assert_eq(first, fingerprint(generated(GENERATOR_SEED, 32)))
     assert(first != fingerprint(generated("2343", 32)))
-    loop (index, line) in first -> assert(line.starts_with("{case_name(index)} {GENERATOR_SEED}:{index} "))
+    loop (index, line) in first {
+        assert(line.starts_with("{case_name(index)} {GENERATOR_SEED}:{index} "))
+    }
     // A longer run starts with the shorter one: case n never depends on the count.
     assert_eq(fingerprint(generated(GENERATOR_SEED, 64)).slice(0, 32), first)
 }

@@ -1,14 +1,18 @@
-Holder: struct { owner: Shared<Int> }
+Holder: struct {
+    owner: Shared<Int>
+}
 
-SharedPair: struct { first: Shared<Int>, rest: Shared<Int> }
+SharedPair: struct {
+    first: Shared<Int>
+    rest: Shared<Int>
+}
+
 Bucket: struct {
-    values: [Int],
-    by_name: [String:Int],
+    values: [Int]
+    by_name: [String:Int]
 }
 
-extract_owner: fn(holder: &&Holder) -> Shared<Int> {
-    return holder.owner
-}
+extract_owner: fn(holder: &&Holder) -> Shared<Int> { return holder.owner }
 
 append_then_fail: fn(values: &[Int], value: Int) -> Int? Err! {
     values.push(value)
@@ -101,7 +105,7 @@ run: fn() {
     once_weak: once_owner.downgrade()
     once_escaped: take_once(once_owner)
     print(once_escaped.strong_count())
-    if once_weak.upgrade() == .None { panic("FnOnce transfer released its owner") }
+    if once_weak.upgrade() == .None -> panic("FnOnce transfer released its owner")
     replaced_owner := Shared{37}
     replaced_weak: replaced_owner.downgrade()
     replaced_result: replace_then_take(replaced_owner)

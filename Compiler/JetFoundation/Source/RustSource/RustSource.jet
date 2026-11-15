@@ -178,7 +178,9 @@ rust_source_char_literal_end: fn(bytes: [U8], at: Int, escaped_ends: [Int]) -> I
             second >= 0xC0 && second <= 0xDF -> 2
             second >= 0xE0 && second <= 0xEF -> 3
             second >= 0xF0 && second <= 0xF7 -> 4
-            else -> { return None }
+            else -> {
+                return None
+            }
         }
         end: 1 + width
         if at + end > bytes.len() -> return None
@@ -193,6 +195,7 @@ rust_source_char_literal_end: fn(bytes: [U8], at: Int, escaped_ends: [Int]) -> I
 }
 
 BODY_ITEMS: [String]{"fn ", "mod ", "impl ", "impl<", "trait ", "struct ", "enum ", "union ", "macro_rules!", "thread_local!", "unsafe fn ", "unsafe impl", "unsafe trait ", "async fn ", "const fn ", "const unsafe fn ", "extern "}
+
 SEMICOLON_ITEMS: [String]{"const ", "static ", "use ", "type "}
 
 // Remove only delimitable test-only items, including their leading docs and
@@ -214,7 +217,9 @@ strip_test_items: fn(source: String) -> String Never! {
         loop line_end < code.len() && rust_source_byte(code, line_end) != 10 -> line_end += 1
         if line_end < code.len() -> line_end += 1
         at := line_start
-        loop at < line_end && (rust_source_byte(code, at) == 32 || rust_source_byte(code, at) == 9) -> at += 1
+        loop at < line_end && (rust_source_byte(code, at) == 32 || rust_source_byte(code, at) == 9) {
+            at += 1
+        }
         if rust_source_starts_with(code, at, "#[cfg(test)]".bytes()) || rust_source_starts_with(code, at, "#[test]".bytes()) {
             end: rust_source_test_item_end(code, at, brackets, item_ends, ends)
             if end == {
@@ -274,7 +279,9 @@ rust_source_ascii_space: fn(byte: Int) -> Bool Never! {
 
 rust_source_past_line_end: fn(code: [U8], end: Int) -> Int Never! {
     index := end
-    loop index < code.len() && (rust_source_byte(code, index) == 32 || rust_source_byte(code, index) == 9 || rust_source_byte(code, index) == 13) -> index += 1
+    loop index < code.len() && (rust_source_byte(code, index) == 32 || rust_source_byte(code, index) == 9 || rust_source_byte(code, index) == 13) {
+        index += 1
+    }
     if rust_source_byte(code, index) == 10 -> return index + 1
     if index == code.len() -> return index
     end
@@ -395,16 +402,14 @@ rust_source_item_ends: fn(code: [U8], closes: [Int]) -> RustSourceItemEnds Never
                     angle[index] = angle[close + 1]
                     body[index] = body[close + 1]
                 }
-            } else if byte == 62 && rust_source_byte(code, index - 1) != 45 {
-                angle[index] = index
-            } else {
+            } else if byte == 62 && rust_source_byte(code, index - 1) != 45 { angle[index] = index } else {
                 angle[index] = angle[index + 1]
                 body[index] = if byte == 59 -> rust_source_past_line_end(code, index + 1) else -> body[index + 1]
             }
         }
         index -= 1
     }
-    RustSourceItemEnds{body, semicolon}
+    RustSourceItemEnds{body: body, semicolon: semicolon}
 }
 
 RustSourceLeading: struct {
@@ -432,9 +437,13 @@ rust_source_leading_lines: fn(source: [U8], code: [U8]) -> [RustSourceLeading] N
             if rust_source_byte(source, end - 1) == 10 -> break
         }
         source_indent := start
-        loop source_indent < end && (rust_source_byte(source, source_indent) == 32 || rust_source_byte(source, source_indent) == 9) -> source_indent += 1
+        loop source_indent < end && (rust_source_byte(source, source_indent) == 32 || rust_source_byte(source, source_indent) == 9) {
+            source_indent += 1
+        }
         code_indent := start
-        loop code_indent < end && (rust_source_byte(code, code_indent) == 32 || rust_source_byte(code, code_indent) == 9) -> code_indent += 1
+        loop code_indent < end && (rust_source_byte(code, code_indent) == 32 || rust_source_byte(code, code_indent) == 9) {
+            code_indent += 1
+        }
         if !rust_source_starts_with(source, source_indent, "///".bytes()) && !rust_source_starts_with(code, code_indent, "#[".bytes()) {
             chain_start = end
             chain_above = if rust_source_byte(code, last_nonspace) == 93 -> last_nonspace else -> -1

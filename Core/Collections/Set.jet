@@ -5,6 +5,7 @@
 StringSet: struct {
     items: [String]
 }
+
 copy_strings: fn(xs: [String]) -> [String] {
     out := [String]{}
     loop x in xs -> out.push(x.copy())
@@ -48,9 +49,7 @@ remove: fn(s: StringSet, item: String) -> StringSet? Never! {
     Val(discard(s, item))
 }
 
-contains: fn(s: StringSet, item: String) -> Bool Never! {
-    has_string(s.items, item)
-}
+contains: fn(s: StringSet, item: String) -> Bool Never! { has_string(s.items, item) }
 
 len: fn(s: StringSet) -> Int Never! { s.items.len() }
 
@@ -104,6 +103,4 @@ isdisjoint: fn(a: StringSet, b: StringSet) -> Bool Never! {
     true
 }
 
-clone_set: fn(s: StringSet) -> StringSet Never! {
-    StringSet{items: copy_strings(s.items)}
-}
+clone_set: fn(s: StringSet) -> StringSet Never! { StringSet{items: copy_strings(s.items)} }

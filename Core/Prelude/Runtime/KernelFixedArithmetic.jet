@@ -60,71 +60,120 @@ JetFixedArithmeticResult: enum {
 }
 
 #Equatable
-JetFixedWide: struct { high: I64, low: U64 }
-FixedMagnitude: struct { negative: Bool, high: U64, low: U64 }
-FixedBounds: struct { lower: FixedMagnitude, upper: FixedMagnitude }
+JetFixedWide: struct {
+    high: I64
+    low: U64
+}
+
+FixedMagnitude: struct {
+    negative: Bool
+    high: U64
+    low: U64
+}
+
+FixedBounds: struct {
+    lower: FixedMagnitude
+    upper: FixedMagnitude
+}
 
 // Rust operation/mode constants (:65–85), unchanged resident numbers.
 JET_FIXED_OP_ADD: 0
+
 JET_FIXED_OP_SUB: 1
+
 JET_FIXED_OP_MUL: 2
+
 JET_FIXED_OP_DIV: 3
+
 JET_FIXED_OP_REM: 4
+
 JET_FIXED_OP_BIT_AND: 5
+
 JET_FIXED_OP_BIT_OR: 6
+
 JET_FIXED_OP_BIT_XOR: 7
+
 JET_FIXED_OP_SHL: 8
+
 JET_FIXED_OP_SHR: 9
+
 JET_FIXED_OP_POW: 10
+
 JET_FIXED_OP_FLOOR_DIV: 11
+
 JET_FIXED_OP_MOD: 12
+
 JET_FIXED_OP_ROTATE_LEFT: 13
+
 JET_FIXED_OP_ROTATE_RIGHT: 14
+
 JET_FIXED_OP_NEG: 15
+
 JET_FIXED_MODE_TRAP: 0
+
 JET_FIXED_MODE_WRAPPING: 1
+
 JET_FIXED_MODE_SATURATING: 2
+
 JET_FIXED_MODE_CHECKED: 3
 
-fixed_zero: fn() -> FixedMagnitude Never! { FixedMagnitude{negative: false, high: U64{0}, low: U64{0}} }
+fixed_zero: fn() -> FixedMagnitude Never! {
+    FixedMagnitude{negative: false, high: U64{0}, low: U64{0}}
+}
+
 fixed_small: fn(value: U64, negative: Bool) -> FixedMagnitude Never! {
     FixedMagnitude{negative: negative && value != U64{0}, high: U64{0}, low: value}
 }
+
 fixed_word_bits: fn(value: I64) -> U64 Never! {
-    if (value >= I64{0}) -> return checked(U64{value}) ?? panic("nonnegative I64 conversion failed")
+    if (value >= I64{0}) {
+        return checked(U64{value}) ?? panic("nonnegative I64 conversion failed")
+    }
     magnitude: wrapping((checked(U64{-(value + I64{1})}) ?? panic("I64 magnitude conversion failed")) + U64{1})
     wrapping(U64{0} - magnitude)
 }
+
 fixed_word_signed: fn(value: U64) -> I64 Never! {
-    if (value < U64{9223372036854775808}) -> return checked(I64{value}) ?? panic("low I64 conversion failed")
+    if (value < U64{9223372036854775808}) {
+        return checked(I64{value}) ?? panic("low I64 conversion failed")
+    }
     low: checked(I64{value - U64{9223372036854775808}}) ?? panic("high I64 conversion failed")
     // #4391: equivalent MIN construction avoids the bootstrap constructor's
     // erroneous checked conversion of positive 2^63 before unary negation.
     (I64{-9223372036854775807} - I64{1}) + low
 }
+
 fixed_magnitude: fn(value: JetFixedWide) -> FixedMagnitude Never! {
     high: fixed_word_bits(value.high)
-    if (value.high >= I64{0}) -> return FixedMagnitude{negative: false, high: high, low: value.low}
+    if (value.high >= I64{0}) { return FixedMagnitude{negative: false, high: high, low: value.low} }
     low: wrapping(U64{0} - value.low)
     carry: if (value.low == U64{0}) -> U64{1} else -> U64{0}
     FixedMagnitude{negative: true, high: wrapping((high.bit_xor(U64{18446744073709551615})) + carry), low: low}
 }
+
 fixed_wide_display: fn(value: JetFixedWide) -> Int Never! {
     // Formatting alone uses the canonical exact-number owner; never the value path.
     (Int{value.high} << 64) + Int{value.low}
 }
-fixed_is_zero: fn(value: FixedMagnitude) -> Bool Never! { value.high == U64{0} && value.low == U64{0} }
+
+fixed_is_zero: fn(value: FixedMagnitude) -> Bool Never! {
+    value.high == U64{0} && value.low == U64{0}
+}
+
 fixed_less_magnitude: fn(a: FixedMagnitude, b: FixedMagnitude) -> Bool Never! {
     a.high < b.high || (a.high == b.high && a.low < b.low)
 }
+
 fixed_less: fn(a: FixedMagnitude, b: FixedMagnitude) -> Bool Never! {
     if a.negative != b.negative -> return a.negative
     if a.negative -> return fixed_less_magnitude(b, a)
     fixed_less_magnitude(a, b)
 }
+
 fixed_negate: fn(value: FixedMagnitude) -> FixedMagnitude Never! {
     FixedMagnitude{negative: !value.negative && !fixed_is_zero(value), high: value.high, low: value.low}
 }
+
 fixed_add: fn(a: FixedMagnitude, b: FixedMagnitude) -> FixedMagnitude Never! {
     if a.negative == b.negative {
         low: wrapping(a.low + b.low)
@@ -137,10 +186,12 @@ fixed_add: fn(a: FixedMagnitude, b: FixedMagnitude) -> FixedMagnitude Never! {
     high: wrapping(wrapping(a.high - b.high) - borrow)
     FixedMagnitude{negative: a.negative && (high != U64{0} || low != U64{0}), high: high, low: low}
 }
+
 fixed_low_bits: fn(value: FixedMagnitude) -> U64 Never! {
     if value.negative -> return wrapping(U64{0} - value.low)
     value.low
 }
+
 fixed_mask: fn(bits: Int) -> U64 Never! {
     if bits == 64 -> return U64{18446744073709551615}
     (U64{1} << bits) - U64{1}
@@ -161,38 +212,50 @@ jet_fixed_integer_widen: fn(value: JetFixedWide, signed: Bool) -> JetFixedWide N
     if signed -> return value.copy()
     JetFixedWide{high: I64{0}, low: value.low}
 }
+
 // Rust jet_fixed_integer_narrow (:107): full64 never passes through exact Int.
 jet_fixed_integer_narrow: fn(value: JetFixedWide, signed: Bool, bits: Int) -> I64 Never! {
     low := value.low.bit_and(fixed_mask(bits))
-    if (signed && bits < 64 && (low.bit_and((U64{1} << (bits - 1)))) != U64{0}) -> low = low.bit_or(U64{18446744073709551615}.bit_xor(fixed_mask(bits)))
+    if (signed && bits < 64 && (low.bit_and((U64{1} << (bits - 1)))) != U64{0}) {
+        low = low.bit_or(U64{18446744073709551615}.bit_xor(fixed_mask(bits)))
+    }
     fixed_word_signed(low)
 }
+
 fixed_narrow: fn(value: FixedMagnitude, signed: Bool, bits: Int) -> I64 Never! {
     jet_fixed_integer_narrow(JetFixedWide{high: I64{0}, low: fixed_low_bits(value)}, signed, bits)
 }
+
 // Rust failure (:119).
 failure: fn(mode: Int, error: JetFixedArithmeticError) -> JetFixedArithmeticResult Never! {
     if mode == JET_FIXED_MODE_CHECKED -> return JetFixedArithmeticResult.Absent
     JetFixedArithmeticResult.Trap(error)
 }
+
 // Rust checked_value (:127).
 checked_value: fn(mode: Int, value: FixedMagnitude, range: FixedBounds, error: JetFixedArithmeticError, signed: Bool, bits: Int) -> JetFixedArithmeticResult Never! {
-    if fixed_less(value, range.lower) || fixed_less(range.upper, value) -> return failure(mode, error)
+    if fixed_less(value, range.lower) || fixed_less(range.upper, value) {
+        return failure(mode, error)
+    }
     JetFixedArithmeticResult.Value(fixed_narrow(value, signed, bits))
 }
+
 // Rust wrapping_value (:142).
 wrapping_value: fn(value: FixedMagnitude, signed: Bool, bits: Int) -> JetFixedArithmeticResult Never! {
     JetFixedArithmeticResult.Value(fixed_narrow(value, signed, bits))
 }
+
 fixed_clamp: fn(value: FixedMagnitude, range: FixedBounds) -> FixedMagnitude Never! {
     if fixed_less(value, range.lower) -> return range.lower
     if fixed_less(range.upper, value) -> return range.upper
     value.copy()
 }
+
 // Rust saturating_value (:146).
 saturating_value: fn(value: FixedMagnitude, range: FixedBounds, signed: Bool, bits: Int) -> JetFixedArithmeticResult Never! {
     wrapping_value(fixed_clamp(value, range), signed, bits)
 }
+
 fixed_mode_value: fn(value: FixedMagnitude, mode: Int, range: FixedBounds, error: JetFixedArithmeticError, signed: Bool, bits: Int) -> JetFixedArithmeticResult Never! {
     if mode == {
         1 -> wrapping_value(value, signed, bits)
@@ -201,79 +264,107 @@ fixed_mode_value: fn(value: FixedMagnitude, mode: Int, range: FixedBounds, error
         else -> JetFixedArithmeticResult.Trap(JetFixedArithmeticError.UnknownOperation)
     }
 }
+
 // Multiplication needs only low64 plus a range-overflow witness: every output
 // interval is <=64 bits. Nonzero high proves overflow; wrapping ignores it.
 fixed_product: fn(a: FixedMagnitude, b: FixedMagnitude) -> FixedMagnitude Never! {
     if fixed_is_zero(a) || fixed_is_zero(b) -> return fixed_zero()
     if (a.high == U64{0} && b.high == U64{0}) {
-        if checked(a.low * b.low) == .Val(product) -> return FixedMagnitude{negative: a.negative != b.negative, high: (U64{0}), low: product}
+        if checked(a.low * b.low) == .Val(product) {
+            return FixedMagnitude{negative: a.negative != b.negative, high: (U64{0}), low: product}
+        }
     }
     FixedMagnitude{negative: a.negative != b.negative, high: U64{1}, low: wrapping(a.low * b.low)}
 }
+
 fixed_quotient: fn(left: FixedMagnitude, right: FixedMagnitude) -> FixedMagnitude Never! {
-    if (right.high != U64{0}) -> return fixed_zero()
+    if (right.high != U64{0}) { return fixed_zero() }
     fixed_small(left.low /% right.low, left.negative != right.negative)
 }
+
 fixed_remainder: fn(left: FixedMagnitude, right: FixedMagnitude) -> FixedMagnitude Never! {
-    if (right.high != U64{0}) -> return left.copy()
+    if (right.high != U64{0}) { return left.copy() }
     fixed_small(left.low %% right.low, left.negative)
 }
+
 // Rust floor_div (:150).
 floor_div: fn(left: FixedMagnitude, right: FixedMagnitude) -> FixedMagnitude Never! {
     quotient: fixed_quotient(left, right)
     remainder: fixed_remainder(left, right)
-    if !fixed_is_zero(remainder) && left.negative != right.negative -> return fixed_add(quotient, fixed_small(U64{1}, true))
+    if !fixed_is_zero(remainder) && left.negative != right.negative {
+        return fixed_add(quotient, fixed_small(U64{1}, true))
+    }
     quotient
 }
+
 // Rust floored_mod (:160).
 floored_mod: fn(left: FixedMagnitude, right: FixedMagnitude) -> FixedMagnitude Never! {
     remainder: fixed_remainder(left, right)
-    if !fixed_is_zero(remainder) && left.negative != right.negative -> return fixed_add(remainder, right)
+    if !fixed_is_zero(remainder) && left.negative != right.negative {
+        return fixed_add(remainder, right)
+    }
     remainder
 }
+
 // Rust wrapping_pow (:172).
 wrapping_pow: fn(left: FixedMagnitude, exponent: U64, bits: Int, signed: Bool) -> I64 Never! {
     base := fixed_low_bits(left).bit_and(fixed_mask(bits))
     result := U64{1}.bit_and(fixed_mask(bits))
     remaining := exponent
     loop remaining != (U64{0}) {
-        if ((remaining.bit_and(U64{1})) != U64{0}) -> result = wrapping(result * base).bit_and(fixed_mask(bits))
+        if ((remaining.bit_and(U64{1})) != U64{0}) {
+            result = wrapping(result * base).bit_and(fixed_mask(bits))
+        }
         remaining >>= 1
-        if (remaining != U64{0}) -> base = wrapping(base * base).bit_and(fixed_mask(bits))
+        if (remaining != U64{0}) { base = wrapping(base * base).bit_and(fixed_mask(bits)) }
     }
     jet_fixed_integer_narrow(JetFixedWide{high: I64{0}, low: result}, signed, bits)
 }
+
 // Rust saturating_pow (:192).
 saturating_pow: fn(left: FixedMagnitude, exponent: U64, range: FixedBounds, signed: Bool, bits: Int) -> I64 Never! {
     base := fixed_clamp(left, range)
     result := fixed_clamp(fixed_small(U64{1}, false), range)
     remaining := exponent
     loop remaining != (U64{0}) {
-        if ((remaining.bit_and(U64{1})) != U64{0}) -> result = fixed_clamp(fixed_product(result, base), range)
+        if ((remaining.bit_and(U64{1})) != U64{0}) {
+            result = fixed_clamp(fixed_product(result, base), range)
+        }
         remaining >>= 1
-        if (remaining != U64{0}) -> base = fixed_clamp(fixed_product(base, base), range)
+        if (remaining != U64{0}) { base = fixed_clamp(fixed_product(base, base), range) }
     }
     fixed_narrow(result, signed, bits)
 }
+
 // Rust power (:219): huge exponents fail BEFORE selecting any mode.
 power: fn(left: FixedMagnitude, right: FixedMagnitude, mode: Int, range: FixedBounds, signed: Bool, bits: Int) -> JetFixedArithmeticResult Never! {
     if right.negative -> return failure(mode, JetFixedArithmeticError.PowerNegative)
-    if (right.high != U64{0} || right.low > U64{4294967295}) -> return failure(mode, JetFixedArithmeticError.PowerOverflow)
-    if mode == 1 -> return JetFixedArithmeticResult.Value(wrapping_pow(left, right.low, bits, signed))
-    if mode == 2 -> return JetFixedArithmeticResult.Value(saturating_pow(left, right.low, range, signed, bits))
-    if mode != 0 && mode != 3 -> return JetFixedArithmeticResult.Trap(JetFixedArithmeticError.UnknownOperation)
+    if (right.high != U64{0} || right.low > U64{4294967295}) {
+        return failure(mode, JetFixedArithmeticError.PowerOverflow)
+    }
+    if mode == 1 {
+        return JetFixedArithmeticResult.Value(wrapping_pow(left, right.low, bits, signed))
+    }
+    if mode == 2 {
+        return JetFixedArithmeticResult.Value(saturating_pow(left, right.low, range, signed, bits))
+    }
+    if mode != 0 && mode != 3 {
+        return JetFixedArithmeticResult.Trap(JetFixedArithmeticError.UnknownOperation)
+    }
     base := left
     result := fixed_small(U64{1}, false)
     remaining := right.low
     loop remaining != (U64{0}) {
         if ((remaining.bit_and(U64{1})) != U64{0}) {
             result = fixed_product(result, base)
-            if (result.high != U64{0}) -> return failure(mode, JetFixedArithmeticError.PowerOverflow)
+            if (result.high != U64{0}) {
+                return failure(mode, JetFixedArithmeticError.PowerOverflow)
+            }
         }
         remaining >>= 1
         if (remaining != U64{0}) {
             base = fixed_product(base, base)
-            if (base.high != U64{0}) -> return failure(mode, JetFixedArithmeticError.PowerOverflow)
+            if (base.high != U64{0}) { return failure(mode, JetFixedArithmeticError.PowerOverflow) }
         }
     }
     checked_value(mode, result, range, JetFixedArithmeticError.PowerOverflow, signed, bits)
@@ -292,16 +383,24 @@ jet_fixed_arithmetic: fn(left: I64, right: JetFixedWide, op: Int, mode: Int, sig
         1 -> return fixed_mode_value(fixed_add(a, fixed_negate(b)), mode, range, JetFixedArithmeticError.SubOverflow, signed, bits)
         2 -> return fixed_mode_value(fixed_product(a, b), mode, range, JetFixedArithmeticError.MulOverflow, signed, bits)
         15 -> {
-            if !signed -> return JetFixedArithmeticResult.Trap(JetFixedArithmeticError.UnknownOperation)
+            if !signed {
+                return JetFixedArithmeticResult.Trap(JetFixedArithmeticError.UnknownOperation)
+            }
             return fixed_mode_value(fixed_negate(a), mode, range, JetFixedArithmeticError.SubOverflow, signed, bits)
         }
         10 -> return power(a, b, mode, range, signed, bits)
         3 | 4 | 11 | 12 -> {
             if fixed_is_zero(b) -> return failure(mode, JetFixedArithmeticError.DivideZero)
-            if op == 3 -> return fixed_mode_value(fixed_quotient(a, b), mode, range, JetFixedArithmeticError.DivisionOverflow, signed, bits)
-            if mode != 0 && mode != 3 -> return JetFixedArithmeticResult.Trap(JetFixedArithmeticError.UnknownOperation)
+            if op == 3 {
+                return fixed_mode_value(fixed_quotient(a, b), mode, range, JetFixedArithmeticError.DivisionOverflow, signed, bits)
+            }
+            if mode != 0 && mode != 3 {
+                return JetFixedArithmeticResult.Trap(JetFixedArithmeticError.UnknownOperation)
+            }
             if op == 4 -> return wrapping_value(fixed_remainder(a, b), signed, bits)
-            if op == 11 -> return checked_value(mode, floor_div(a, b), range, JetFixedArithmeticError.DivisionOverflow, signed, bits)
+            if op == 11 {
+                return checked_value(mode, floor_div(a, b), range, JetFixedArithmeticError.DivisionOverflow, signed, bits)
+            }
             return checked_value(mode, floored_mod(a, b), range, JetFixedArithmeticError.DivisionOverflow, signed, bits)
         }
         5 -> return wrapping_value(fixed_small(left_word.low.bit_and(widened.low), false), signed, bits)
@@ -313,7 +412,9 @@ jet_fixed_arithmetic: fn(left: I64, right: JetFixedWide, op: Int, mode: Int, sig
                 return JetFixedArithmeticResult.Trap(JetFixedArithmeticError.ShiftOutOfRange{direction: direction, count: widened, bits: bits})
             }
             count: Int{b.low}
-            if op == 8 -> return wrapping_value(fixed_small(left_word.low << count, false), signed, bits)
+            if op == 8 {
+                return wrapping_value(fixed_small(left_word.low << count, false), signed, bits)
+            }
             if signed {
                 value: left >> count
                 return JetFixedArithmeticResult.Value(jet_fixed_integer_narrow(JetFixedWide{high: I64{0}, low: fixed_word_bits(value)}, signed, bits))
@@ -321,7 +422,9 @@ jet_fixed_arithmetic: fn(left: I64, right: JetFixedWide, op: Int, mode: Int, sig
             return wrapping_value(fixed_small(left_word.low >> count, false), signed, bits)
         }
         13 | 14 -> {
-            if b.negative -> return JetFixedArithmeticResult.Trap(JetFixedArithmeticError.RotateNegative)
+            if b.negative {
+                return JetFixedArithmeticResult.Trap(JetFixedArithmeticError.RotateNegative)
+            }
             // 2^64 modulo width computed without a full64 exact Int conversion.
             width: U64{bits}
             two64_mod: ((U64{18446744073709551615} %% width) + U64{1}) %% width

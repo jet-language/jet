@@ -7,37 +7,62 @@
 // bits are not the function's to choose (an arithmetic NaN), any NaN matches
 // any NaN; the sign-bit, payload and signaling operations must match bit for
 // bit.
-use {
-    math: core.math
-}
+use math: core.math
 
 CANONICALIZE: #run embed_file("corpus/canonicalize.txt")
+
 COPYSIGN: #run embed_file("corpus/copysign.txt")
+
 FABS: #run embed_file("corpus/fabs.txt")
+
 GET_PAYLOAD: #run embed_file("corpus/get_payload.txt")
+
 IS_CANONICAL: #run embed_file("corpus/is_canonical.txt")
+
 IS_FINITE: #run embed_file("corpus/is_finite.txt")
+
 IS_INF: #run embed_file("corpus/is_inf.txt")
+
 IS_NAN: #run embed_file("corpus/is_nan.txt")
+
 IS_NORMAL: #run embed_file("corpus/is_normal.txt")
+
 IS_SIGNALING: #run embed_file("corpus/is_signaling.txt")
+
 IS_SUBNORMAL: #run embed_file("corpus/is_subnormal.txt")
+
 IS_ZERO: #run embed_file("corpus/is_zero.txt")
+
 LDEXP: #run embed_file("corpus/ldexp.txt")
+
 MAXIMUM: #run embed_file("corpus/maximum.txt")
+
 MAXIMUM_MAG: #run embed_file("corpus/maximum_mag.txt")
+
 MAXIMUM_MAG_NUM: #run embed_file("corpus/maximum_mag_num.txt")
+
 MAXIMUM_NUM: #run embed_file("corpus/maximum_num.txt")
+
 MINIMUM: #run embed_file("corpus/minimum.txt")
+
 MINIMUM_MAG: #run embed_file("corpus/minimum_mag.txt")
+
 MINIMUM_MAG_NUM: #run embed_file("corpus/minimum_mag_num.txt")
+
 MINIMUM_NUM: #run embed_file("corpus/minimum_num.txt")
+
 NEXT_DOWN: #run embed_file("corpus/next_down.txt")
+
 NEXT_UP: #run embed_file("corpus/next_up.txt")
+
 SET_PAYLOAD: #run embed_file("corpus/set_payload.txt")
+
 SET_PAYLOAD_SIGNALING: #run embed_file("corpus/set_payload_signaling.txt")
+
 SIGN_BIT: #run embed_file("corpus/sign_bit.txt")
+
 TOTAL_ORDER: #run embed_file("corpus/total_order.txt")
+
 TOTAL_ORDER_MAG: #run embed_file("corpus/total_order_mag.txt")
 
 hex_value: fn(b: U8) -> Int {
@@ -52,7 +77,7 @@ word_at: fn(raw: [U8], at: Int) -> Int? {
     if raw[at] == (U8{45}) -> return None
     n := 0
     loop i in 0..<16 -> n = n * 16 + hex_value(raw[at + i])
-    if n > 9223372036854775807 -> n = n - 18446744073709551616
+    if n > 9223372036854775807 -> n -= 18446744073709551616
     Val(n)
 }
 
@@ -76,7 +101,9 @@ is_nan_word: fn(word: Int?) -> Bool {
 }
 
 bits: fn(x: Float) -> Int? { Val(math.to_bits(x)) }
+
 flag: fn(b: Bool) -> Int? { Val(if b -> 1 else -> 0) }
+
 maybe: fn(x: Float?) -> Int? {
     value: x ?? return None
     Val(math.to_bits(value))
@@ -130,24 +157,24 @@ check: fn(name: String, corpus: String) {
     wrong := 0
     loop at < raw.len() {
         if raw[at] == (U8{35}) {
-            loop raw[at] != (U8{10}) -> at = at + 1
-            at = at + 1
+            loop raw[at] != (U8{10}) -> at += 1
+            at += 1
             next
         }
         // The row's words: its arguments, then the result.
         row := [Int?]{}
         loop {
             row.push(word_at(raw, at))
-            at = at + 17
+            at += 17
             if raw[at - 1] == (U8{10}) -> break
         }
         want: row[row.len() - 1]
         words := [Int]{}
         loop i in 0..<(row.len() - 1) -> words.push(row[i] ?? panic("an argument word is none"))
         got: value(name, words)
-        rows = rows + 1
+        rows += 1
         if got != want && (exact_nan(name) || !(is_nan_word(got) && is_nan_word(want))) {
-            wrong = wrong + 1
+            wrong += 1
             if wrong <= 3 {
                 shown := [String]{}
                 loop word in words -> shown.push(hex_word(Val(word)))

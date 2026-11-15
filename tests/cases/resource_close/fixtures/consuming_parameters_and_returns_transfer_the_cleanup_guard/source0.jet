@@ -1,4 +1,3 @@
-
 Resource: struct {
     name: String
 
@@ -8,10 +7,13 @@ Resource: struct {
 
     handoff: fn(&&self) -> Resource { return self }
 }
-relay: fn(&&resource: Resource) -> Resource { return resource }
-consume: fn(&&resource: Resource) { print("consume {resource.name}") }
+
+relay: fn(resource: &&Resource) -> Resource { return resource }
+
+consume: fn(resource: &&Resource) { print("consume {resource.name}") }
+
 run: fn() {
-    first := Resource{ name: "transfer" }
+    first := Resource{name: "transfer"}
     second := relay(first)
     third := second.handoff()
     consume(third)

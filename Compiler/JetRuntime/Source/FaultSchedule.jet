@@ -11,7 +11,9 @@
 fault_check_code := I64{0}
 
 // Checked FunctionAddress intrinsic in the canonical RuntimeLibrary table.
-rt_fault_check_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+rt_fault_check_address: fn() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
 
 fault_schedule_release_selectors: fn(state: I64) {
     count: trap_word(wrapping(state + I64{32}))
@@ -21,7 +23,7 @@ fault_schedule_release_selectors: fn(state: I64) {
         jet_rt_string_drop(trap_word(wrapping(rows + at * I64{16})))
         at += I64{1}
     }
-    if (count != I64{0}) -> jet_rt_free(rows, count * I64{16}, I64{8})
+    if (count != I64{0}) { jet_rt_free(rows, count * I64{16}, I64{8}) }
     trap_store(wrapping(state + I64{32}), I64{0})
     trap_store(wrapping(state + I64{40}), I64{0})
     trap_store(wrapping(state + I64{48}), I64{-1})
@@ -46,7 +48,9 @@ fault_schedule_ensure: fn() -> I64 {
 // Borrow the checked selector slots; retain independent text owners. This is
 // the same arming edge used by the allocator-only fixture, not a second cell.
 fault_schedule_arm: fn(selectors: I64, count: I64, active: I64, fail_nth: I64) {
-    if (active < I64{-1} || active > count || count < I64{0}) -> panic("fault schedule selected an invalid target")
+    if (active < I64{-1} || active > count || count < I64{0}) {
+        panic("fault schedule selected an invalid target")
+    }
     state: fault_schedule_ensure()
     fault_schedule_release_selectors(state)
     rows: if (count == I64{0}) -> I64{0} else -> jet_rt_alloc(count * I64{16}, I64{8})
@@ -68,7 +72,7 @@ fault_schedule_arm: fn(selectors: I64, count: I64, active: I64, fail_nth: I64) {
 fault_schedule_covers: fn(bound: I64, observed: I64) -> Bool {
     length: rt_text_len(bound)
     observed_length: rt_text_len(observed)
-    if (observed_length < length) -> return false
+    if (observed_length < length) { return false }
     if !rt_text_equal_bytes(rt_text_data(bound), rt_text_data(observed), length) -> return false
     observed_length == length || rt_text_byte(wrapping(rt_text_data(observed) + length)) == I64{46}
 }
@@ -76,7 +80,7 @@ fault_schedule_covers: fn(bound: I64, observed: I64) -> Bool {
 // Whether the armed schedule fails this `operation` (a selector text) now.
 #Export(c) jet_fault_should_fail: fn(operation: I64) -> Bool {
     code: fault_check_code
-    if (code == I64{0}) -> return false
+    if (code == I64{0}) { return false }
     coll_call1(code, operation) != I64{0}
 }
 
@@ -89,7 +93,7 @@ fault_schedule_covers: fn(bound: I64, observed: I64) -> Bool {
         return I64{0}
     }
     state: fault_allocation_state()
-    if (state == I64{0}) -> return I64{0}
+    if (state == I64{0}) { return I64{0} }
     rows: trap_word(wrapping(state + I64{40}))
     count: trap_word(wrapping(state + I64{32}))
     fail_nth: trap_word(state)

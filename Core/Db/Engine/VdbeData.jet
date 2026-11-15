@@ -2,7 +2,6 @@
 // opcodes of the Jet SQLite engine: the cases of SQLite 3.45.0
 // sqlite3VdbeExec (vdbe.c) from OP_Goto to OP_ZeroOrNull. Each handler runs
 // the op at Run.pc and answers a vdberun.GO_* code.
-
 use {
     math: core.math
     base: __core_db_base
@@ -99,9 +98,7 @@ op_halt: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int N
     if rc == base.BUSY {
         v.rc = base.BUSY
         r.rc = base.BUSY
-    } else {
-        r.rc = if v.rc != base.OK -> base.ERROR else -> base.DONE
-    }
+    } else { r.rc = if v.rc != base.OK -> base.ERROR else -> base.DONE }
     GO_RETURN
 }
 
@@ -147,7 +144,9 @@ op_string8: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
     z := run.p4_text(v, r.pc) ?? [U8]{}
     n := mem.c_text_len(z, base.UTF8, db.limits[ast.LIMIT_LENGTH])
     if r.enc != base.UTF8 {
-        if mem.set_str(v.mem[i], z, -1, base.UTF8, db.limits[ast.LIMIT_LENGTH]) != base.OK -> return GO_TOO_BIG
+        if mem.set_str(v.mem[i], z, -1, base.UTF8, db.limits[ast.LIMIT_LENGTH]) != base.OK {
+            return GO_TOO_BIG
+        }
         mem.change_encoding(v.mem[i], r.enc)
         z = v.mem[i].z.copy()
         n = z.len()
@@ -168,9 +167,7 @@ op_string: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     v.mem[i].flags = MEM_STR
     if v.ops[r.pc].p4 == .Text(z) {
         v.mem[i].z = if r.p1 < z.len() -> z[0..<r.p1].copy() else -> z.copy()
-    } else {
-        v.mem[i].z = [U8]{}
-    }
+    } else { v.mem[i].z = [U8]{} }
     v.mem[i].enc = r.enc
     if r.p3 > 0 && v.mem[v.mem_base + r.p3].i == r.p5 -> v.mem[i].flags = MEM_BLOB
     GO_NEXT
@@ -202,9 +199,7 @@ op_soft_null: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 op_blob: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     i: v.mem_base + r.p2
     run.out2(v, i)
-    if run.p4_text(v, r.pc) == .Val(z) {
-        _: mem.set_str(v.mem[i], z, r.p1, 0, base.I64_MAX)
-    } else {
+    if run.p4_text(v, r.pc) == .Val(z) -> _: mem.set_str(v.mem[i], z, r.p1, 0, base.I64_MAX) else {
         mem.set_zero_blob(v.mem[i], r.p1)
         mem.expand_blob(v.mem[i])
     }
@@ -244,7 +239,9 @@ op_copy: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     to: v.mem_base + r.p2
     loop k in 0..<r.p3 + 1 {
         run.reg_copy(v, to + k, from + k)
-        if v.mem[to + k].flags.bit_and(MEM_SUBTYPE) != 0 && r.p5.bit_and(2) != 0 -> v.mem[to + k].flags = clear_bits(v.mem[to + k].flags, MEM_SUBTYPE)
+        if v.mem[to + k].flags.bit_and(MEM_SUBTYPE) != 0 && r.p5.bit_and(2) != 0 {
+            v.mem[to + k].flags = clear_bits(v.mem[to + k].flags, MEM_SUBTYPE)
+        }
     }
     GO_NEXT
 }
@@ -332,9 +329,7 @@ op_arith: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     type1 := v.mem[i1].flags
     type2 := v.mem[i2].flags
     int_math := false
-    if type1.bit_and(type2).bit_and(MEM_INT) != 0 {
-        int_math = true
-    } else if type1.bit_or(type2).bit_and(MEM_NULL) != 0 {
+    if type1.bit_and(type2).bit_and(MEM_INT) != 0 -> int_math = true else if type1.bit_or(type2).bit_and(MEM_NULL) != 0 {
         run.reg_null(v, out)
         return GO_NEXT
     } else {
@@ -346,13 +341,9 @@ op_arith: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
         a := v.mem[i1].i
         b: v.mem[i2].i
         res := Int?{None}
-        if r.op == opc.OP_ADD {
-            res = util.add_int64(b, a)
-        } else if r.op == opc.OP_SUBTRACT {
+        if r.op == opc.OP_ADD -> res = util.add_int64(b, a) else if r.op == opc.OP_SUBTRACT {
             res = util.sub_int64(b, a)
-        } else if r.op == opc.OP_MULTIPLY {
-            res = util.mul_int64(b, a)
-        } else {
+        } else if r.op == opc.OP_MULTIPLY { res = util.mul_int64(b, a) } else {
             if a == 0 {
                 run.reg_null(v, out)
                 return GO_NEXT
@@ -373,11 +364,7 @@ op_arith: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     }
     ra: mem.real_value(v.mem[i1])
     rb := mem.real_value(v.mem[i2])
-    if r.op == opc.OP_ADD {
-        rb += ra
-    } else if r.op == opc.OP_SUBTRACT {
-        rb -= ra
-    } else if r.op == opc.OP_MULTIPLY {
+    if r.op == opc.OP_ADD -> rb += ra else if r.op == opc.OP_SUBTRACT -> rb -= ra else if r.op == opc.OP_MULTIPLY {
         rb *= ra
     } else if r.op == opc.OP_DIVIDE {
         if ra == 0.0 {
@@ -428,22 +415,14 @@ op_bits: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     a := mem.int_value(v.mem[i2])
     b := mem.int_value(v.mem[i1])
     op := r.op
-    if op == opc.OP_BIT_AND {
-        a = a.bit_and(b)
-    } else if op == opc.OP_BIT_OR {
-        a = a.bit_or(b)
-    } else if b != 0 {
+    if op == opc.OP_BIT_AND -> a = a.bit_and(b) else if op == opc.OP_BIT_OR -> a = a.bit_or(b) else if b != 0 {
         if b < 0 {
             op = 2 * opc.OP_SHIFT_LEFT + 1 - op
             b = if b > -64 -> -b else -> 64
         }
-        if b >= 64 {
-            a = if a >= 0 || op == opc.OP_SHIFT_LEFT -> 0 else -> -1
-        } else {
+        if b >= 64 -> a = if a >= 0 || op == opc.OP_SHIFT_LEFT -> 0 else -> -1 else {
             ua := util.as_u64(a)
-            if op == opc.OP_SHIFT_LEFT {
-                ua = (ua << b).bit_and(U64_MASK)
-            } else {
+            if op == opc.OP_SHIFT_LEFT -> ua = (ua << b).bit_and(U64_MASK) else {
                 ua >>= b
                 if a < 0 -> ua = ua.bit_or((U64_MASK << (64 - b)).bit_and(U64_MASK))
             }
@@ -505,7 +484,9 @@ op_cast: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 // OP_Ne + k jumps on less, equal and greater (OP_Ne, OP_Eq, OP_Gt, OP_Le,
 // OP_Lt, OP_Ge).
 CMP_LT_JUMPS: 25
+
 CMP_EQ_JUMPS: 42
+
 CMP_GT_JUMPS: 37
 
 cmp_jumps: fn(op: Int, res: Int) -> Bool Never! {
@@ -536,9 +517,7 @@ op_compare_jump: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
         if r.p5.bit_and(conn.CMP_NULLEQ) != 0 {
             if flags1.bit_and(flags3).bit_and(MEM_NULL) != 0 && flags3.bit_and(MEM_CLEARED) == 0 {
                 res = 0
-            } else {
-                res = if flags3.bit_and(MEM_NULL) != 0 -> -1 else -> 1
-            }
+            } else { res = if flags3.bit_and(MEM_NULL) != 0 -> -1 else -> 1 }
         } else {
             if r.p5.bit_and(conn.CMP_JUMPIFNULL) != 0 -> return GO_JUMP
             r.i_compare = 1
@@ -553,7 +532,9 @@ op_compare_jump: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
                     mem.apply_numeric_affinity(v.mem[i1], false)
                     flags3 = v.mem[i3].flags
                 }
-                if flags3.bit_and(nums.bit_or(MEM_STR)) == MEM_STR -> mem.apply_numeric_affinity(v.mem[i3], false)
+                if flags3.bit_and(nums.bit_or(MEM_STR)) == MEM_STR {
+                    mem.apply_numeric_affinity(v.mem[i3], false)
+                }
             }
         } else if affinity == base.AFF_TEXT && flags1.bit_or(flags3).bit_and(MEM_STR) != 0 {
             if flags1.bit_and(MEM_STR) == 0 && flags1.bit_and(nums) != 0 {
@@ -603,7 +584,9 @@ op_compare: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
             r.i_compare = c
             if c != 0 {
                 sf: record.sort_flags_of(info, i)
-                if sf.bit_and(base.KEYINFO_ORDER_BIGNULL) != 0 && (v.mem[p1 + idx].flags.bit_and(MEM_NULL) != 0 || v.mem[p2 + idx].flags.bit_and(MEM_NULL) != 0) -> c = -c
+                if sf.bit_and(base.KEYINFO_ORDER_BIGNULL) != 0 && (v.mem[p1 + idx].flags.bit_and(MEM_NULL) != 0 || v.mem[p2 + idx].flags.bit_and(MEM_NULL) != 0) {
+                    c = -c
+                }
                 if sf.bit_and(base.KEYINFO_ORDER_DESC) != 0 -> c = -c
                 r.i_compare = c
                 break
@@ -616,11 +599,7 @@ op_compare: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 // OP_Jump: to P1, P2 or P3 as iCompare is less than, equal to or greater
 // than zero.
 op_jump: fn(r: &Run) -> Int Never! {
-    if r.i_compare < 0 {
-        r.pc = r.p1 - 1
-    } else if r.i_compare == 0 {
-        r.pc = r.p2 - 1
-    } else {
+    if r.i_compare < 0 -> r.pc = r.p1 - 1 else if r.i_compare == 0 -> r.pc = r.p2 - 1 else {
         r.pc = r.p3 - 1
     }
     GO_NEXT
@@ -629,11 +608,14 @@ op_jump: fn(r: &Run) -> Int Never! {
 // The three-valued AND and OR, indexed by v1 * 3 + v2 with 0 false, 1
 // true and 2 NULL.
 AND_LOGIC: [0, 0, 0, 0, 1, 2, 0, 2, 2]
+
 OR_LOGIC: [0, 1, 2, 1, 1, 1, 2, 1, 2]
 
 // The truth value of register i: 0, 1, or 2 for NULL.
 truth: fn(v: conn.Vdbe, i: Int) -> Int Never! {
-    if v.mem[i].flags.bit_and(MEM_NULL) != 0 && v.mem[i].flags.bit_and(MEM_INT.bit_or(MEM_INT_REAL)) == 0 -> return 2
+    if v.mem[i].flags.bit_and(MEM_NULL) != 0 && v.mem[i].flags.bit_and(MEM_INT.bit_or(MEM_INT_REAL)) == 0 {
+        return 2
+    }
     if mem.boolean_value(v.mem[i], false) -> 1 else -> 0
 }
 
@@ -644,9 +626,7 @@ op_and_or: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     x: if r.op == opc.OP_AND -> AND_LOGIC[v1 * 3 + v2] else -> OR_LOGIC[v1 * 3 + v2]
     out: v.mem_base + r.p3
     run.release_dyn(v, out)
-    if x == 2 {
-        mem.set_type_flag(v.mem[out], MEM_NULL)
-    } else {
+    if x == 2 -> mem.set_type_flag(v.mem[out], MEM_NULL) else {
         v.mem[out].i = x
         mem.set_type_flag(v.mem[out], MEM_INT)
     }
@@ -669,9 +649,7 @@ op_not: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     if v.mem[i1].flags.bit_and(MEM_NULL) == 0 {
         x: if mem.boolean_value(v.mem[i1], false) -> 0 else -> 1
         run.reg_int(v, out, x)
-    } else {
-        run.reg_null(v, out)
-    }
+    } else { run.reg_null(v, out) }
     GO_NEXT
 }
 
@@ -734,17 +712,9 @@ op_is_type: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
         ci: v.csr_base + r.p1
         if r.p3 < v.csr[ci].n_hdr_parsed {
             t: v.csr[ci].types[r.p3]
-            if t >= 12 {
-                mask = if t.bit_and(1) == 1 -> 4 else -> 8
-            } else {
-                mask = IS_TYPE_MASKS[t]
-            }
-        } else {
-            mask = 1 << (run.p4_int(v, r.pc) - 1)
-        }
-    } else {
-        mask = 1 << (base.value_type(v.mem[v.mem_base + r.p3]) - 1)
-    }
+            if t >= 12 -> mask = if t.bit_and(1) == 1 -> 4 else -> 8 else -> mask = IS_TYPE_MASKS[t]
+        } else { mask = 1 << (run.p4_int(v, r.pc) - 1) }
+    } else { mask = 1 << (base.value_type(v.mem[v.mem_base + r.p3]) - 1) }
     if mask.bit_and(r.p5) != 0 -> return GO_JUMP
     GO_NEXT
 }
@@ -760,9 +730,7 @@ op_zero_or_null: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     out: v.mem_base + r.p2
     if v.mem[v.mem_base + r.p1].flags.bit_and(MEM_NULL) != 0 || v.mem[v.mem_base + r.p3].flags.bit_and(MEM_NULL) != 0 {
         run.reg_null(v, out)
-    } else {
-        run.reg_int(v, out, 0)
-    }
+    } else { run.reg_int(v, out, 0) }
     GO_NEXT
 }
 

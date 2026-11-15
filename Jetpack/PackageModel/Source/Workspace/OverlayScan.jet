@@ -7,24 +7,28 @@
 use jetpack_foundation.[KW_MODULE, NS_WORKSPACE]
 
 OVERLAY_QUOTE: 34
+
 OVERLAY_BACKSLASH: 92
+
 OVERLAY_SLASH: 47
+
 OVERLAY_STAR: 42
+
 OVERLAY_NEWLINE: 10
+
 OVERLAY_COMMA: 44
+
 OVERLAY_COLON: 58
+
 OVERLAY_OPEN_BRACE: 123
+
 OVERLAY_CLOSE_BRACE: 125
 
 // `(`, `[`, `{`
-pkg_overlay_is_open: fn(code: Int) -> Bool Never! {
-    code == 40 || code == 91 || code == 123
-}
+pkg_overlay_is_open: fn(code: Int) -> Bool Never! { code == 40 || code == 91 || code == 123 }
 
 // `)`, `]`, `}`
-pkg_overlay_is_close: fn(code: Int) -> Bool Never! {
-    code == 41 || code == 93 || code == 125
-}
+pkg_overlay_is_close: fn(code: Int) -> Bool Never! { code == 41 || code == 93 || code == 125 }
 
 // The offset just past the string literal whose opening quote precedes `at`.
 pkg_overlay_skip_quoted: fn(raw: [U8], at: Int) -> Int Never! {
@@ -416,18 +420,14 @@ pkg_overlay_read_ident: fn(raw: [U8], at: Int) -> (ident: String, end: Int)? Nev
     starts: (first >= 65 && first <= 90) || (first >= 97 && first <= 122) || first == 95
     if !starts -> return None
     end := at + 1
-    loop end < raw.len() && (pkg_bytes_is_word(Int{raw[end]}) || Int{raw[end]} == 45) {
-        end += 1
-    }
+    loop end < raw.len() && (pkg_bytes_is_word(Int{raw[end]}) || Int{raw[end]} == 45) -> end += 1
     Val((end: end, ident: pkg_bytes_text(raw, at, end)))
 }
 
 // Trim, drop trailing commas, and strip one pair of surrounding quotes.
 pkg_overlay_unquote: fn(text: String) -> String Never! {
     value := text.trim()
-    loop value.ends_with(",") {
-        value = value.removesuffix(",")
-    }
+    loop value.ends_with(",") -> value = value.removesuffix(",")
     if value.bytes().len() >= 2 && value.starts_with("\"") && value.ends_with("\"") {
         return value.removeprefix("\"").removesuffix("\"")
     }
@@ -437,9 +437,7 @@ pkg_overlay_unquote: fn(text: String) -> String Never! {
 // Remove every trailing `suffix` repetition.
 pkg_overlay_trim_end_all: fn(text: String, suffix: String) -> String Never! {
     value := text
-    loop value.ends_with(suffix) {
-        value = value.removesuffix(suffix)
-    }
+    loop value.ends_with(suffix) -> value = value.removesuffix(suffix)
     value
 }
 
@@ -461,7 +459,9 @@ pkg_overlay_find_workspace_body_start: fn(src: String) -> Int? Never! {
     loop {
         at: pkg_overlay_find_word(raw, NS_WORKSPACE, search) ?? return None
         head: pkg_bytes_colon_keyword_end(raw, at + namespace.len(), keyword)
-        if head >= 0 && pkg_bytes_code(raw, at - 1) != 46 -> return pkg_overlay_find_char(raw, head, OVERLAY_OPEN_BRACE)
+        if head >= 0 && pkg_bytes_code(raw, at - 1) != 46 {
+            return pkg_overlay_find_char(raw, head, OVERLAY_OPEN_BRACE)
+        }
         search = at + namespace.len()
     }
 }

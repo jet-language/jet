@@ -4,6 +4,7 @@ use {
     http: core.http
     core.http.[HTTPRequest]
 }
+
 #Error
 WsError: enum {
     InvalidURL
@@ -60,7 +61,7 @@ header_has_token: fn(value: String, wanted: String) -> Bool Never! {
             if piece == target -> return true
             start = i + 1
         }
-        i = i + 1
+        i += 1
     }
     false
 }
@@ -71,11 +72,11 @@ trim_ascii: fn(text: String) -> String Never! {
     end := raw.len()
     loop start < end {
         n: Int{raw[start]}
-        if n == 32 || n == 9 || n == 10 || n == 13 -> start = start + 1 else -> break
+        if n == 32 || n == 9 || n == 10 || n == 13 -> start += 1 else -> break
     }
     loop end > start {
         n: Int{raw[end - 1]}
-        if n == 32 || n == 9 || n == 10 || n == 13 -> end = end - 1 else -> break
+        if n == 32 || n == 9 || n == 10 || n == 13 -> end -= 1 else -> break
     }
     if end <= start -> return ""
     slice(raw, start, end)
@@ -96,7 +97,6 @@ slice: fn(raw: [U8], start: Int, end: Int) -> String Never! {
     loop {
         if i >= end -> return String.from_bytes(out) ?? ""
         out.push(raw[i])
-        i = i + 1
+        i += 1
     }
 }
-

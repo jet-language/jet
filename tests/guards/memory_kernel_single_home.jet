@@ -8,7 +8,9 @@
 use mksh_files: core.files
 
 MKSH_KERNEL: "Core/Mem/Mem.jet"
+
 MKSH_ROOTS: [String]{"Compiler", "Core", "Jetpack"}
+
 MKSH_SKIPPED: [String]{"Tests", ".jet", "target", "node_modules"}
 
 MkshPrimitive: struct {
@@ -69,7 +71,9 @@ mksh_kernel_entries: fn(manifest: String) -> [String] Never! {
     list: parts[1].split("])").to_list()[0].to_string()
     loop item in list.split(",") {
         entry := item.trim()
-        if entry.starts_with("\"") && entry.ends_with("\"") && entry.len() >= 2 -> entry = entry.slice(1, entry.len() - 1)
+        if entry.starts_with("\"") && entry.ends_with("\"") && entry.len() >= 2 {
+            entry = entry.slice(1, entry.len() - 1)
+        }
         if entry.len() > 0 -> entries.push(entry)
     }
     entries
@@ -106,8 +110,12 @@ mksh_home_findings: fn(source: String) -> [String] Never! {
             count += 1
             if mksh_gate(lines, index).contains("Unsafe(\"") -> gated = true
         }
-        if count != 1 -> findings.push("{MKSH_KERNEL}: `{primitive.name}` ({primitive.action}) is declared {count} times; the kernel declares each primitive once")
-        if count == 1 && !gated -> findings.push("{MKSH_KERNEL}: `{primitive.name}` ({primitive.action}) states no precondition; declare it behind `#Unsafe(\"…\")`")
+        if count != 1 {
+            findings.push("{MKSH_KERNEL}: `{primitive.name}` ({primitive.action}) is declared {count} times; the kernel declares each primitive once")
+        }
+        if count == 1 && !gated {
+            findings.push("{MKSH_KERNEL}: `{primitive.name}` ({primitive.action}) states no precondition; declare it behind `#Unsafe(\"…\")`")
+        }
     }
     findings
 }
@@ -131,7 +139,9 @@ mksh_home_findings: fn(source: String) -> [String] Never! {
         source: mksh_files.read(path) ?? panic("read {path}: {err}")
         loop line in source.lines() {
             loop primitive in MKSH_PRIMITIVES {
-                if primitive.unique && mksh_declares(line, primitive.name) -> findings.push("{path}: declares `{primitive.name}`, a primitive whose one home is {MKSH_KERNEL}")
+                if primitive.unique && mksh_declares(line, primitive.name) {
+                    findings.push("{path}: declares `{primitive.name}`, a primitive whose one home is {MKSH_KERNEL}")
+                }
             }
         }
     }
@@ -150,7 +160,9 @@ mksh_home_findings: fn(source: String) -> [String] Never! {
         folder: path.slice(0, path.len() - "package.jet".len())
         loop entry in mksh_kernel_entries(manifest) {
             manifests += 1
-            if !mksh_files.exists("{folder}{entry}") -> findings.push("{path}: policy.memory names `{entry}`, which does not exist")
+            if !mksh_files.exists("{folder}{entry}") {
+                findings.push("{path}: policy.memory names `{entry}`, which does not exist")
+            }
         }
     }
     assert(manifests >= 3, "found only {manifests} kernel entries in shipped manifests")

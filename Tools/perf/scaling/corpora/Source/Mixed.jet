@@ -14,26 +14,38 @@
 // expected output is derived from the same template parameters that wrote
 // the source; the harness pins it as the golden. Every combine is reduced
 // modulo MODULUS, so the model and the program agree exactly.
-use {
-    rx: core.regex
-}
+use rx: core.regex
 
 // Sections of about 820 lines, the mean size of an L5 source file.
 UNITS_PER_SECTION: 6
+
 MAX_SEED: 4294967295
+
 MIXED_WORDS: ["alpha", "bravo", "cedar", "delta", "ember", "fjord", "grove", "harbor", "island", "juniper", "kestrel", "lantern", "meadow", "nectar", "orchid", "prairie"]
+
 PACKAGE_MANIFEST: "name: \"mixed_bench\"\nversion: \"0.1.0\"\nedition: \"2026\"\noutputs: {{ app: .Executable{{ entry: run }} }}\n"
 
 // Templates are written with short local names; the emitted source spells
 // them the way the compiler's code does, which brings lines to L5's length.
-RENAMES: [String: String]{
-    "seed": "seed_value", "accumulator": "running_total", "index": "position", "records": "built_records",
-    "shapes": "built_shapes", "counts": "word_counts", "table": "lookup_table", "probes": "probe_keys",
-    "steps": "step_count", "step": "step_value", "marker": "marker_value", "found": "found_value",
+RENAMES: [String:String]{
+    "seed": "seed_value",
+    "accumulator": "running_total",
+    "index": "position",
+    "records": "built_records",
+    "shapes": "built_shapes",
+    "counts": "word_counts",
+    "table": "lookup_table",
+    "probes": "probe_keys",
+    "steps": "step_count",
+    "step": "step_value",
+    "marker": "marker_value",
+    "found": "found_value",
 }
 
 // The whole words RENAMES names.
-renamed: fn() -> rx.Regex { rx.compile("\\b({RENAMES.keys().join("|")})\\b") ?? panic("the rename pattern compiles: {err}") }
+renamed: fn() -> rx.Regex {
+    rx.compile("\\b({RENAMES.keys().join("|")})\\b") ?? panic("the rename pattern compiles: {err}")
+}
 
 md: fn(value: Int) -> Int { value % M }
 
@@ -128,7 +140,9 @@ MixedPackage: struct {
     source_sha256: String
 }
 
-scored: fn(p: RecordsModel, identifier: Int, weight: Int, label: Int) -> Int { md(identifier * p.score_a + weight * p.score_b + label) }
+scored: fn(p: RecordsModel, identifier: Int, weight: Int, label: Int) -> Int {
+    md(identifier * p.score_a + weight * p.score_b + label)
+}
 
 records_value: fn(p: RecordsModel, seed: Int) -> Int {
     identifiers := [Int]{}
@@ -426,19 +440,23 @@ mixed_unit: fn(m: Int, u: Int, r: &Seeded, stats: &Stats) -> Generated {
         label_limit: r.int(34, 42)
         tail: worker.text[worker.text.len() - 2].trim()
         text := worker.text.slice(0, worker.text.len() - 2)
-        text.extend([
-            "    worker_result: {tail}",
-            "    checkpoint: blend_m{m}(worker_result, seed % 1000, {first})",
-            "    trace_label: \"{worker.name}:{{worker_result % 1000}}:{{checkpoint % 1000}}\"",
-            "    trace_weight: if trace_label.len() > {label_limit} -> blend_m{m}(checkpoint, trace_label.len(), {third}) else -> blend_m{m}(checkpoint, 1, {third})",
-            "    blended_parts: [Int]{{worker_result % 997, checkpoint % 991, trace_weight % 983}}",
-            "    combined := 0",
-            "    loop part in blended_parts -> combined = blend_m{m}(combined, part, {fourth})",
-            "    blend_m{m}(combined, worker_result % 997, {second})",
-            "}}",
-        ])
+        text.extend(
+            [
+                "    worker_result: {tail}",
+                "    checkpoint: blend_m{m}(worker_result, seed % 1000, {first})",
+                "    trace_label: \"{worker.name}:{{worker_result % 1000}}:{{checkpoint % 1000}}\"",
+                "    trace_weight: if trace_label.len() > {label_limit} -> blend_m{m}(checkpoint, trace_label.len(), {third}) else -> blend_m{m}(checkpoint, 1, {third})",
+                "    blended_parts: [Int]{{worker_result % 997, checkpoint % 991, trace_weight % 983}}",
+                "    combined := 0",
+                "    loop part in blended_parts -> combined = blend_m{m}(combined, part, {fourth})",
+                "    blend_m{m}(combined, worker_result % 997, {second})",
+                "}}",
+            ],
+        )
         if index % 2 == 0 -> lines.push("// Worker {index} of {unit_name}.")
-        loop line in text -> lines.push(words.replace_all_with(line, fn(found) { RENAMES.get(found.text) ?? found.text }))
+        loop line in text {
+            lines.push(words.replace_all_with(line, fn(found) { RENAMES.get(found.text) ?? found.text }))
+        }
         lines.push("")
         total.push("    accumulator = (accumulator * 7 + {worker.name}(accumulator + {index + 1})) % {M}")
         seed: accumulator + index + 1
@@ -447,7 +465,9 @@ mixed_unit: fn(m: Int, u: Int, r: &Seeded, stats: &Stats) -> Generated {
         label_length: "{worker.name}:{result % 1000}:{checkpoint % 1000}".len()
         trace_weight: blend(checkpoint, if label_length > label_limit -> label_length else -> 1, third)
         combined := 0
-        loop part in [result % 997, checkpoint % 991, trace_weight % 983] -> combined = blend(combined, part, fourth)
+        loop part in [result % 997, checkpoint % 991, trace_weight % 983] {
+            combined = blend(combined, part, fourth)
+        }
         accumulator = md(accumulator * 7 + blend(combined, result % 997, second))
         stats.functions += 1
     }
@@ -462,18 +482,25 @@ section_header: fn(m: Int) -> [String] {
     trait_name: "ScoredM{m}"
     [String]{
         "// Section {m} of the mixed compile-throughput benchmark.",
-        "{trait_name}: trait {{", "    score: fn(self) -> Int", "}}", "",
+        "{trait_name}: trait {{",
+        "    score: fn(self) -> Int",
+        "}}",
+        "",
         "pick_m{m}: fn<T>(items: [T], index: Int, fallback: T) -> T {{",
         "    if index < items.len() -> return items[index]",
         "    fallback",
-        "}}", "",
+        "}}",
+        "",
         "total_score_m{m}: fn(items: [{trait_name}]) -> Int {{",
         "    sum := 0",
         "    loop item in items -> sum = (sum + item.score()) % {M}",
         "    sum",
-        "}}", "",
-        "score_one_m{m}: fn(item: {trait_name}) -> Int {{ item.score() * 2 }}", "",
-        "blend_m{m}: fn(left: Int, right: Int, weight: Int) -> Int {{ (left * weight + right) % {M} }}", "",
+        "}}",
+        "",
+        "score_one_m{m}: fn(item: {trait_name}) -> Int {{ item.score() * 2 }}",
+        "",
+        "blend_m{m}: fn(left: Int, right: Int, weight: Int) -> Int {{ (left * weight + right) % {M} }}",
+        "",
     }
 }
 

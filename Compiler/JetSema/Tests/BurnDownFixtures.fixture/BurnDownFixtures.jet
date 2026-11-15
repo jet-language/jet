@@ -1,7 +1,9 @@
 // Production Source contracts for the recovered policy and guest boundaries.
-use jet_foundation.[DIAGNOSTIC_ERROR, FnBody, Type, body_node]
-use jet_parser.[parse_source]
-use jet_sema.[SemaSourceSegment, check_program, sema_guest_export_value_type]
+use {
+    jet_foundation.[DIAGNOSTIC_ERROR, FnBody, Type, body_node]
+    jet_parser.[parse_source]
+    jet_sema.[SemaSourceSegment, check_program, sema_guest_export_value_type]
+}
 
 bd_require: fn(ok: Bool, message: String) Never! {
     if !ok -> panic("recovered Source contract: {message}")
@@ -9,7 +11,9 @@ bd_require: fn(ok: Bool, message: String) Never! {
 
 bd_returned: fn(function: FnBody) -> Int Never! {
     loop statement in function.body {
-        if function.tree.stmts[statement] == .Return(value, _) -> return value ?? panic("missing returned policy value")
+        if function.tree.stmts[statement] == .Return(value, _) {
+            return value ?? panic("missing returned policy value")
+        }
     }
     panic("missing policy return")
 }
@@ -20,7 +24,9 @@ bd_policy: fn() Never! {
     bd_require(parsed.diagnostics.len() == 0, "policy parses")
     checked: check_program(parsed.program, "policy_fixture", "policy.jet", [SemaSourceSegment]{})
     loop diagnostic in checked.diagnostics {
-        if diagnostic.severity == DIAGNOSTIC_ERROR -> panic("policy checker: {diagnostic.code}: {diagnostic.what}")
+        if diagnostic.severity == DIAGNOSTIC_ERROR {
+            panic("policy checker: {diagnostic.code}: {diagnostic.what}")
+        }
     }
     bd_require(checked.complete, "policy uses the complete Source path")
     saw_direct := false

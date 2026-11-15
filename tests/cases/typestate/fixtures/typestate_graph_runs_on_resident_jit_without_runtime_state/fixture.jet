@@ -1,4 +1,3 @@
-
 Settlement: struct {
     state {
         Queued -> Approved
@@ -7,8 +6,11 @@ Settlement: struct {
     }
 
     begin: fn() -[]> Settlement.Queued { Settlement{} }
+
     approve: fn(self: &&Settlement.Queued) -[]> Settlement.Approved { self }
+
     settle: fn(self: &&Settlement.Approved) -[]> Settlement.Settled { self }
+
     report: fn(self: Settlement.Settled) -[]> String { "settled" }
 }
 

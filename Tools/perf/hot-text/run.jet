@@ -26,22 +26,30 @@
 // Tools/perf/fntrace.c, which puts a breakpoint at every function of <jet>
 // and records each one's first entry. A failure ends the run with its report
 // on stderr and exit 1.
-use core.[collections, crypto, files, process, sys]
-use core.encoding.binary
-use core.text.fmt
+use {
+    core.[collections, crypto, files, process, sys]
+    core.encoding.binary
+    core.text.fmt
+}
 
 USAGE: "usage: jet Tools/perf/hot-text/run.jet -- --jet <jet> [--out <file>] | --check"
+
 LIST: "Compiler/JetCli/hot-text.list"
+
 // The private Core parts: Core sources that are no public module, each
 // built under its own module name.
 PARTS: "Compiler/Prelude/CoreSourceParts.tsv"
+
 // The source trees the compiler is built from.
 SOURCE_DIRS: [String]{"Compiler", "Core", "Jetpack"}
+
 // A copy of one function: an owned clone, a lambda in it, a generic
 // instance, a foreign asm body, or the program entry's wrapper.
 COPY_SUFFIX: Regex{"(?:\.own\d+|__lambda_[0-9a-f]{{16}}|__[0-9a-f]{{16}}|__asm|__entry)$"}
+
 // A function's declaration, after any attributes (`#Unsafe("why") name: fn`).
 FN_DECL: Regex{"^\s*(?:#\w+(?:\((?:\"[^\"]*\"|[^()\"])*\))?\s+)*(\w+)\s*:\s*fn\b"}
+
 TYPE_DECL: Regex{"^(\w+)(?:<[^>]*>)?\s*:\s*(?:struct|enum)\b"}
 
 HELLO: "run: fn() {{\n    print(\"hello\")\n}}\n"
@@ -111,7 +119,7 @@ run: fn() -> Never Err! {
         print(check(root))
         process.exit(0)
     }
-    args := [String: String]{"jet": "", "out": files.join(root, LIST)}
+    args := [String:String]{"jet": "", "out": files.join(root, LIST)}
     i := 0
     loop i < argv.len() {
         key: argv[i].remove_prefix("--")
@@ -128,7 +136,7 @@ run: fn() -> Never Err! {
     boundary: symbols.filter(fn(symbol) { pack.has(symbol.name) }).map(fn(symbol) { symbol.value }).min() ?? return Err("{jet} defines none of the runtime pack's functions")
     // `main` is the object's first function whatever the list says.
     addresses := [Int]{}
-    by_address := [Int: String]{}
+    by_address := [Int:String]{}
     loop symbol in symbols.filter(fn(symbol) { symbol.value < boundary && symbol.name != "main" }) {
         if by_address.has_key(symbol.value) -> next
         addresses.push(symbol.value)
@@ -176,7 +184,9 @@ check: fn(root: String) -> String Err! {
     declared: hot_text_declared(root)
     rows: files.read(files.join(root, LIST)).lines().filter(fn(line) { line != "" && !line.starts_with("#") })
     stale: rows.filter(fn(row) { !hot_text_row_declared(declared, row) })
-    if stale.len() > 0 -> return Err("{LIST}: {stale.len()} of {rows.len()} rows name no function the sources declare; regenerate the list (jet Tools/perf/hot-text/run.jet -- --jet <jet>):\n{stale.join("\n")}")
+    if stale.len() > 0 {
+        return Err("{LIST}: {stale.len()} of {rows.len()} rows name no function the sources declare; regenerate the list (jet Tools/perf/hot-text/run.jet -- --jet <jet>):\n{stale.join("\n")}")
+    }
     Ok("{LIST}: all {rows.len()} rows name a function the sources declare")
 }
 
@@ -215,8 +225,8 @@ hot_text_declared: fn(root: String) -> HotTextDeclared Err! {
 
 // The private Core parts of `table` (PARTS' rows: module, owner, path, ...)
 // by their source path.
-hot_text_parts: fn(table: String) -> [String: String] Never! {
-    parts := [String: String]{}
+hot_text_parts: fn(table: String) -> [String:String] Never! {
+    parts := [String:String]{}
     loop line in table.lines() {
         if line == "" || line.starts_with("#") -> next
         fields: line.split("\t").to_list()
@@ -227,7 +237,7 @@ hot_text_parts: fn(table: String) -> [String: String] Never! {
 
 // The module names the build may give the file at `relative` under `dir`;
 // `parts` maps a private Core part's path to its module.
-hot_text_modules: fn(dir: String, relative: String, parts: [String: String]) -> [String] Never! {
+hot_text_modules: fn(dir: String, relative: String, parts: [String:String]) -> [String] Never! {
     stem: files.stem(relative)
     if dir != "Core" -> return [String]{stem}
     if parts.get("Core/{relative}") == .Val(part) -> return [String]{part}
@@ -249,7 +259,9 @@ hot_text_snake: fn(segment: String) -> String Never! {
             previous: Int{bytes[index - 1]}
             following: if index + 1 < bytes.len() -> (Int{bytes[index + 1]}) else -> 0
             acronym_end: previous >= 65 && previous <= 90 && following >= 97 && following <= 122
-            if acronym_end || (previous >= 97 && previous <= 122) || (previous >= 48 && previous <= 57) -> out.push(U8{95})
+            if acronym_end || (previous >= 97 && previous <= 122) || (previous >= 48 && previous <= 57) {
+                out.push(U8{95})
+            }
         }
         out.push(if upper -> U8{code + 32} else -> bytes[index])
     }
@@ -279,8 +291,12 @@ hot_text_row_declared: fn(declared: HotTextDeclared, row: String) -> Bool Never!
     name := row.copy()
     loop COPY_SUFFIX.is_match(name) -> name = COPY_SUFFIX.replace_first(name, "")
     if name.starts_with("jet_ir_") || declared.functions.has(name) -> return true
-    if declared.modules.has(name.split("_errconv_").to_list()[0]) && name.contains("_errconv_") -> return true
-    if declared.typed.has(name.split("___computed_").to_list()[0]) && name.contains("___computed_") -> return true
+    if declared.modules.has(name.split("_errconv_").to_list()[0]) && name.contains("_errconv_") {
+        return true
+    }
+    if declared.typed.has(name.split("___computed_").to_list()[0]) && name.contains("___computed_") {
+        return true
+    }
     name.ends_with("_compare") && declared.typed.has(name.remove_suffix("_compare"))
 }
 

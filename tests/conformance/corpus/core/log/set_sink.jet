@@ -8,9 +8,11 @@ use {
 run: fn() {
     root: testing.temp_dir("log-set-sink")
     path: Path.from(root).join("events.jsonl").to_string()
-    print((fn() {
-        log.set_sink("jsonl", path)
-        true
-    })())
+    print(
+        (fn() {
+            log.set_sink("jsonl", path)
+            true
+        })(),
+    )
     files.remove_all(root) ?? panic("cleanup")
 }

@@ -3,6 +3,7 @@
 // stay acyclic and sharing is explicit.
 
 NIXEVAL_MAX_PATH_BYTES: 4096
+
 NIXEVAL_MAX_PACKAGE_NAME_BYTES: 128
 
 // A package namespace. `overlay` names a shared, mutable override table once
@@ -104,8 +105,8 @@ NixEvalValue: enum {
     BuiltinsNamespace
     LibraryNamespace
     List([Int])
-    AttrSet([String: Int])
-    Derivation(fields: [String: Int], request: NixEvalDerivation?)
+    AttrSet([String:Int])
+    Derivation(fields: [String:Int], request: NixEvalDerivation?)
     Function(lambda: Int, frame: Int)
     Native(NixEvalNative)
 
@@ -142,7 +143,7 @@ NixEvalValue: enum {
         }
     }
 
-    attr_fields: fn(self) -> [String: Int]? Never! {
+    attr_fields: fn(self) -> [String:Int]? Never! {
         if self == {
             .AttrSet(fields) -> Val(fields)
             .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> None
@@ -163,7 +164,9 @@ NixEvalValue: enum {
             .Package(name) -> return Ok(name)
             .Contextual(_, contexts) -> {
                 loop context in contexts {
-                    if nixeval_has_prefix(context, "path:") -> return Err(NixEvalError.Unsupported("path string contexts are not devShell packages"))
+                    if nixeval_has_prefix(context, "path:") {
+                        return Err(NixEvalError.Unsupported("path string contexts are not devShell packages"))
+                    }
                 }
             }
             .Null | .Bool(_) | .Integer(_) | .Str(_) | .Path(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> {}
@@ -175,8 +178,8 @@ NixEvalValue: enum {
     // String coercion with its string contexts.
     stringify: fn(self) -> NixEvalText NixEvalError! {
         if self == {
-            .Str(value) -> return Ok(NixEvalText{value, contexts: [String]{}})
-            .Contextual(value, contexts) -> return Ok(NixEvalText{value, contexts})
+            .Str(value) -> return Ok(NixEvalText{value: value, contexts: [String]{}})
+            .Contextual(value, contexts) -> return Ok(NixEvalText{value: value, contexts: contexts})
             .Integer(value) -> return Ok(NixEvalText{value: "{value}", contexts: [String]{}})
             .Package(name) -> return Ok(NixEvalText{value: name.copy(), contexts: [String]{"package:{name}"}})
             .Path(path) -> return Ok(NixEvalText{value: path.copy(), contexts: [String]{"path:{path}"}})
@@ -197,17 +200,13 @@ NixEvalValue: enum {
             .Null -> other == NixEvalValue.Null
             .Bool(value) -> other == NixEvalValue.Bool(value)
             .Integer(value) -> other == NixEvalValue.Integer(value)
-            .Package(package) -> {
-                if other == {
-                    .Package(right) -> package == right
-                    .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> nixeval_package_named(package, other.text())
-                }
+            .Package(package) -> if other == {
+                .Package(right) -> package == right
+                .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> nixeval_package_named(package, other.text())
             }
-            .Str(left) | .Contextual(left, _) -> {
-                if other == {
-                    .Package(package) -> nixeval_package_named(package, Val(left))
-                    .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> nixeval_same_text(other.text(), left)
-                }
+            .Str(left) | .Contextual(left, _) -> if other == {
+                .Package(package) -> nixeval_package_named(package, Val(left))
+                .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> nixeval_same_text(other.text(), left)
             }
             .Path(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> false
         }
@@ -246,7 +245,7 @@ NixEvalThunk: enum {
 // One lexical scope. Child frames share their root's expression fuel.
 NixEvalFrame: struct {
     parent: Int?
-    bindings: [String: Int]
+    bindings: [String:Int]
     scopes: [Int]
     fuel: Int
     base_path: String
@@ -282,7 +281,9 @@ nixeval_is_store_path: fn(path: String) -> Bool Never! {
     label_marks: "+._?=-".bytes()
     loop index in 33..<bytes.len() {
         byte: Int{bytes[index]}
-        if !nixeval_is_ascii_alphanumeric(byte) && nixeval_first_byte(label_marks, byte) < 0 -> return false
+        if !nixeval_is_ascii_alphanumeric(byte) && nixeval_first_byte(label_marks, byte) < 0 {
+            return false
+        }
     }
     true
 }

@@ -1,4 +1,3 @@
-
 #Error
 TypedFailure: enum {
     Bad
@@ -10,16 +9,12 @@ StoreFailure: enum {
 }
 
 implicit: fn(value: Int) -> Int {
-    if value == 0 {
-        return Err("implicit")
-    }
+    if value == 0 -> return Err("implicit")
     return value
 }
 
 explicit: fn(value: Int) -> Int TypedFailure! {
-    if value == 0 {
-        return Err(TypedFailure.Bad)
-    }
+    if value == 0 -> return Err(TypedFailure.Bad)
     return value
 }
 
@@ -28,9 +23,7 @@ impl Err.From(StoreFailure) {
 }
 
 converted: fn(value: Int) -> Int StoreFailure! {
-    if value == 0 {
-        return Err(StoreFailure.Missing)
-    }
+    if value == 0 -> return Err(StoreFailure.Missing)
     return value
 }
 
@@ -39,16 +32,12 @@ contextual_source: fn() -> Int { Err("context", code: "E_CONTEXT", cause: Err("r
 contextual: fn() -> Int { contextual_source()?("loading") }
 
 optional_success: fn(value: Int) -> Int? {
-    if value == 0 {
-        return None
-    }
+    if value == 0 -> return None
     return Val(value)
 }
 
 unit_success: fn(fail: Bool) {
-    if fail {
-        return Err("unit")
-    }
+    if fail -> return Err("unit")
 }
 
 unit_caller: fn(fail: Bool) -> Int {

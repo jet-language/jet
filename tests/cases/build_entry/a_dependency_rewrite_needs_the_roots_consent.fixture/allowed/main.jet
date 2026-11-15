@@ -4,12 +4,13 @@ build: fn(b: Build) -[Meta.Rewrite]> {
     app: b.add_executable("app", ["main.jet"], [])
     meta: b.compiler(app)
     meta.allow_rewrite(package: "greet")
-    meta.rewrite_body(greet.hello, #code {
-        "rewritten by the root"
-    })
+    meta.rewrite_body(
+        greet.hello,
+        #code {
+            "rewritten by the root"
+        },
+    )
     b.default(app)
 }
 
-run: fn() {
-    print(greet.hello())
-}
+run: fn() { print(greet.hello()) }

@@ -17,7 +17,7 @@ step env-keeps: jet run .
 env: JET_LOG=warn,shop.web=error
 exit: 0
 stdout: = "shop=warn shop.db=warn shop.web=error\nshop=warn shop.db=warn shop.web=error\n"
-stderr: ~ "\"body\":\"log.set_level(debug) at run.jet:31:9 for `shop.web` is kept below JET_LOG, which sets error\"" # the timestamp varies; the note names the call, the path and JET_LOG
+stderr: ~ "\"body\":\"log.set_level(debug) at run.jet:35:9 for `shop.web` is kept below JET_LOG, which sets error\"" # the timestamp varies; the note names the call, the path and JET_LOG
 step flag: jet run --log=error .
 exit: 0
 stdout: = "shop=error shop.db=error shop.web=error\nshop=error shop.db=error shop.web=debug\n"
@@ -25,7 +25,7 @@ step flag-over-env: jet run --log=shop.web=critical .
 env: JET_LOG=info,shop.web=debug
 exit: 0
 stdout: = "shop=info shop.db=info shop.web=critical\nshop=info shop.db=info shop.web=critical\n"
-stderr: ~ "\"body\":\"log.set_level(debug) at run.jet:31:9 for `shop.web` is kept below --log, which sets critical\"" # the timestamp varies; the note names --log
+stderr: ~ "\"body\":\"log.set_level(debug) at run.jet:35:9 for `shop.web` is kept below --log, which sets critical\"" # the timestamp varies; the note names --log
 step bad-env: jet run .
 env: JET_LOG=warn,shop=loud
 exit: 1
@@ -46,7 +46,7 @@ stdout: = "shop=info shop.db=debug shop.web=info\nshop=info shop.db=debug shop.w
 step explain: jet explain log .
 env: JET_LOG=error
 exit: 0
-stdout: = "core.log level filter, lowest first; the longest module path wins:\n  stock: info (core.log)\n  package: warn,shop.db=debug (./package.jet:4)\n  code: log.set_level(.Debug, path: \"shop.web\") (./run.jet:31)\n  JET_LOG: error (environment)\n  --log: given to `jet run` or `jet dev`, above every other source\nstart filter: error,shop.db=debug\na code call for a path JET_LOG or --log sets keeps their level and logs one note\n"
+stdout: = "core.log level filter, lowest first; the longest module path wins:\n  stock: info (core.log)\n  package: warn,shop.db=debug (./package.jet:4)\n  code: log.set_level(.Debug, path: \"shop.web\") (./run.jet:35)\n  JET_LOG: error (environment)\n  --log: given to `jet run` or `jet dev`, above every other source\nstart filter: error,shop.db=debug\na code call for a path JET_LOG or --log sets keeps their level and logs one note\n"
 copy: package_bad_log.template package.jet
 step bad-package: jet run .
 exit: 1

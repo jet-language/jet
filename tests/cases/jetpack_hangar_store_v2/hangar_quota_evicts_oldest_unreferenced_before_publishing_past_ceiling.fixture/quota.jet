@@ -3,8 +3,10 @@
 // `ceiling` writes footprint - 2 MiB to root/config/hangar-max-bytes and to
 // `limit` (rs:1764-1772); `check` stops when the Hangar is above it (rs:1775-1778).
 // The footprint is the Rust logical_bytes: the lstat size of every non-directory.
-use files: core.files
-use process: core.process
+use {
+    files: core.files
+    process: core.process
+}
 
 quota_payload: fn(path: String, byte: U8, count: Int) {
     payload := [U8]{}
@@ -39,7 +41,5 @@ run: fn() {
         limit: Int.parse(text.trim()) ?? panic("limit {text}")
         after: quota_logical_bytes("root/hangar")
         if after > limit -> panic("quota admitted {after} logical bytes above ceiling {limit}")
-    } else {
-        panic("unknown mode {mode}")
-    }
+    } else { panic("unknown mode {mode}") }
 }

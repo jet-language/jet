@@ -86,7 +86,7 @@ host_stdio_facts: fn(failure: I64, errno: I64, write_zero: I64) {
 // Core term's Option<String> route carrier: 1 and an owned cause in `some`
 // on failure, 0 and `some` untouched on success.
 host_stdio_option_cause: fn(failure: I64, some: I64) -> I64 {
-    if (failure == I64{0}) -> return I64{0}
+    if (failure == I64{0}) { return I64{0} }
     // `some` lends the route's zeroed Text out slot.
     rt_text_store(some, host_stdio_cause(failure))
     I64{1}
@@ -117,6 +117,7 @@ host_stdio_option_cause: fn(failure: I64, some: I64) -> I64 {
 }
 
 #Export(c) jet_stdio_stdout_tty_raw: fn() -> Bool { host_is_tty(I64{1}) }
+
 #Export(c) jet_stdio_stderr_tty_raw: fn() -> Bool { host_is_tty(I64{2}) }
 
 // jet.runtime.term stdio_flush (Core/Term/Term.jet stdio_flush).
@@ -137,11 +138,13 @@ host_stdio_option_cause: fn(failure: I64, some: I64) -> I64 {
 
 // jet.runtime.term stdout_terminal/stderr_terminal and terminal8_*_tty.
 #Export(c) jet_term_stdin_is_terminal: fn() -> Bool { host_is_tty(I64{0}) }
+
 #Export(c) jet_term_stdout_is_terminal: fn() -> Bool { host_is_tty(I64{1}) }
+
 #Export(c) jet_term_stderr_is_terminal: fn() -> Bool { host_is_tty(I64{2}) }
 
 #Export(c) jet_sys_errno_text_raw: fn(errno: I64) -> I64 {
     native: host_i32(errno)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     host_errno_cause(native)
 }

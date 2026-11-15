@@ -7,7 +7,9 @@ use {
 }
 
 PUBLICATION_NAME_POLICY_WARN_DISTANCE: 2
+
 PUBLICATION_NAME_POLICY_BLOCK_DISTANCE: 1
+
 PUBLICATION_RESERVED_SUFFIXES: [String]{"-fixed", "-patched", "-bin"}
 
 PublicationNamePolicyThresholds: struct {
@@ -59,16 +61,22 @@ publication_name_finding: fn(decision: PublicationNamePolicyDecision) -> Publica
 
 publication_name_diagnostic: fn(decision: PublicationNamePolicyDecision, name: String) -> Diagnostic? Never! {
     code: if decision == {
-        .Allow -> { return None }
+        .Allow -> {
+            return None
+        }
         .Warn(_) -> "L2608"
         .Block(_) -> "E2608"
     }
     finding: publication_name_finding(decision) ?? return None
-    Val(pkg_diagnostic_from_row(code, [(name: String, value: String)]{
-        (name: "name", value: name),
-        (name: "reason", value: publication_name_finding_reason(finding)),
-        (name: "reference", value: publication_name_finding_reference(finding))
-    }, None))
+    Val(pkg_diagnostic_from_row(
+        code,
+        [(name: String, value: String)]{
+            (name: "name", value: name),
+            (name: "reason", value: publication_name_finding_reason(finding)),
+            (name: "reference", value: publication_name_finding_reference(finding)),
+        },
+        None,
+    ))
 }
 
 publication_assess_name: fn(name: String, existing_names: [String]) -> PublicationNamePolicyDecision Never! {
@@ -82,7 +90,9 @@ publication_assess_name_with_thresholds: fn(name: String, existing_names: [Strin
     block_distance: min(thresholds.block_distance, warn_distance)
     skeleton: publication_confusable_skeleton(name)
     loop suffix in PUBLICATION_RESERVED_SUFFIXES {
-        if skeleton.ends_with(suffix) -> return PublicationNamePolicyDecision.Block(PublicationNamePolicyFinding.ReservedSuffix(suffix))
+        if skeleton.ends_with(suffix) {
+            return PublicationNamePolicyDecision.Block(PublicationNamePolicyFinding.ReservedSuffix(suffix))
+        }
     }
     nearest_block := PublicationNamePolicyFinding?{None}
     nearest_warning := PublicationNamePolicyFinding?{None}
@@ -91,7 +101,9 @@ publication_assess_name_with_thresholds: fn(name: String, existing_names: [Strin
     loop existing in existing_names {
         if existing == name -> next
         existing_skeleton: publication_confusable_skeleton(existing)
-        if existing_skeleton == skeleton -> return PublicationNamePolicyDecision.Block(PublicationNamePolicyFinding.Confusable{existing: existing})
+        if existing_skeleton == skeleton {
+            return PublicationNamePolicyDecision.Block(PublicationNamePolicyFinding.Confusable{existing: existing})
+        }
         distance: publication_edit_distance_at_most(skeleton, existing_skeleton, warn_distance) ?? next
         finding: PublicationNamePolicyFinding.EditDistance{existing: existing, distance: distance}
         if distance <= block_distance {
@@ -162,36 +174,38 @@ publication_confusable_skeleton: fn(name: String) -> String Never! {
     loop original in name.chars() {
         loop scalar in "{original}".lower().chars() {
             if scalar >= '̀' && scalar <= 'ͯ' -> next
-            parts.push(if scalar == {
-                '0' | 'ο' | 'о' | 'ö' | 'ø' | 'ò' | 'ó' | 'ô' | 'õ' | 'ō' -> "o"
-                '1' | 'і' | 'ı' | 'ι' -> "i"
-                'a' | 'а' | 'α' | 'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'ā' | 'ă' | 'ą' -> "a"
-                'b' | 'в' | 'β' -> "b"
-                'c' | 'с' | 'ç' | 'ć' | 'ĉ' | 'ċ' | 'č' -> "c"
-                'd' | 'ԁ' | 'ď' | 'đ' -> "d"
-                'e' | 'е' | 'ε' | 'è' | 'é' | 'ê' | 'ë' | 'ē' | 'ĕ' | 'ė' | 'ę' | 'ě' -> "e"
-                'f' | 'ғ' -> "f"
-                'g' | 'ɡ' | 'ğ' | 'ĝ' | 'ġ' | 'ģ' -> "g"
-                'h' | 'н' | 'һ' | 'ĥ' -> "h"
-                'i' | 'ì' | 'í' | 'î' | 'ï' | 'ī' | 'ĭ' | 'į' | 'ǐ' -> "i"
-                'j' | 'ј' | 'ĵ' -> "j"
-                'k' | 'к' | 'ĸ' | 'ķ' -> "k"
-                'l' | 'ӏ' | 'ł' | 'ĺ' | 'ļ' | 'ľ' | 'ŀ' -> "l"
-                'm' | 'м' | 'ṁ' | 'ṃ' -> "m"
-                'n' | 'ո' | 'ñ' | 'ń' | 'ņ' | 'ň' | 'ŋ' -> "n"
-                'p' | 'р' | 'ρ' | 'ƿ' | 'ṕ' -> "p"
-                'q' | 'զ' -> "q"
-                'r' | 'г' | 'ŕ' | 'ŗ' | 'ř' -> "r"
-                's' | 'ѕ' | 'š' | 'ś' | 'ŝ' | 'ş' | 'ș' -> "s"
-                't' | 'т' | 'τ' | 'ţ' | 'ť' | 'ŧ' -> "t"
-                'u' | 'υ' | 'ù' | 'ú' | 'û' | 'ü' | 'ū' | 'ŭ' | 'ů' | 'ű' | 'ų' -> "u"
-                'v' | 'ν' | 'ѵ' -> "v"
-                'w' | 'ŵ' -> "w"
-                'x' | 'х' | 'χ' -> "x"
-                'y' | 'у' | 'ү' | 'ý' | 'ÿ' | 'ŷ' -> "y"
-                'z' | 'з' | 'ž' | 'ź' | 'ż' -> "z"
-                else -> "{scalar}"
-            })
+            parts.push(
+                if scalar == {
+                    '0' | 'ο' | 'о' | 'ö' | 'ø' | 'ò' | 'ó' | 'ô' | 'õ' | 'ō' -> "o"
+                    '1' | 'і' | 'ı' | 'ι' -> "i"
+                    'a' | 'а' | 'α' | 'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'ā' | 'ă' | 'ą' -> "a"
+                    'b' | 'в' | 'β' -> "b"
+                    'c' | 'с' | 'ç' | 'ć' | 'ĉ' | 'ċ' | 'č' -> "c"
+                    'd' | 'ԁ' | 'ď' | 'đ' -> "d"
+                    'e' | 'е' | 'ε' | 'è' | 'é' | 'ê' | 'ë' | 'ē' | 'ĕ' | 'ė' | 'ę' | 'ě' -> "e"
+                    'f' | 'ғ' -> "f"
+                    'g' | 'ɡ' | 'ğ' | 'ĝ' | 'ġ' | 'ģ' -> "g"
+                    'h' | 'н' | 'һ' | 'ĥ' -> "h"
+                    'i' | 'ì' | 'í' | 'î' | 'ï' | 'ī' | 'ĭ' | 'į' | 'ǐ' -> "i"
+                    'j' | 'ј' | 'ĵ' -> "j"
+                    'k' | 'к' | 'ĸ' | 'ķ' -> "k"
+                    'l' | 'ӏ' | 'ł' | 'ĺ' | 'ļ' | 'ľ' | 'ŀ' -> "l"
+                    'm' | 'м' | 'ṁ' | 'ṃ' -> "m"
+                    'n' | 'ո' | 'ñ' | 'ń' | 'ņ' | 'ň' | 'ŋ' -> "n"
+                    'p' | 'р' | 'ρ' | 'ƿ' | 'ṕ' -> "p"
+                    'q' | 'զ' -> "q"
+                    'r' | 'г' | 'ŕ' | 'ŗ' | 'ř' -> "r"
+                    's' | 'ѕ' | 'š' | 'ś' | 'ŝ' | 'ş' | 'ș' -> "s"
+                    't' | 'т' | 'τ' | 'ţ' | 'ť' | 'ŧ' -> "t"
+                    'u' | 'υ' | 'ù' | 'ú' | 'û' | 'ü' | 'ū' | 'ŭ' | 'ů' | 'ű' | 'ų' -> "u"
+                    'v' | 'ν' | 'ѵ' -> "v"
+                    'w' | 'ŵ' -> "w"
+                    'x' | 'х' | 'χ' -> "x"
+                    'y' | 'у' | 'ү' | 'ý' | 'ÿ' | 'ŷ' -> "y"
+                    'z' | 'з' | 'ž' | 'ź' | 'ż' -> "z"
+                    else -> "{scalar}"
+                },
+            )
         }
     }
     parts.join("")

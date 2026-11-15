@@ -2,11 +2,13 @@ ReorderedPatternProbe: enum {
     Policy(ignored: Int, args: [Int], callee: String)
     Call(callee: String, args: [Int])
 }
+
 NestedLayoutProbe: enum {
     C
     CAligned(value: Int, ignored: Int)
     Other
 }
+
 reordered_bindings: fn(value: ReorderedPatternProbe) {
     if value == {
         .Policy(_, args, callee) | .Call(callee, args) -> {
@@ -15,12 +17,14 @@ reordered_bindings: fn(value: ReorderedPatternProbe) {
         }
     }
 }
+
 nested_layout: fn(value: NestedLayoutProbe?) -> Bool Never! {
     if value == {
         .Val(.C) | .Val(.CAligned(_, _)) -> true
         .Val(_) | .None -> false
     }
 }
+
 run: fn() {
     reordered_bindings(ReorderedPatternProbe.Policy{ignored: 1, args: [1, 2], callee: "policy"})
     reordered_bindings(ReorderedPatternProbe.Call{callee: "call", args: [3]})

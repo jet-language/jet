@@ -27,9 +27,11 @@ ParquetFailureKind: enum {
 ParquetFailure: struct {
     kind: ParquetFailureKind
     reason: String
+
     impl Display {
         display: fn(self) -> String { self.display_text() }
     }
+
     impl Debug {
         debug: fn(&&self) -> String { self.display_text() }
     }
@@ -43,24 +45,38 @@ ParquetFailure: struct {
         "{kind}: {self.reason}"
     }
 }
+
 // The Thrift kinds (compact protocol type nibbles) the footer uses.
 THRIFT_BYTE: 3
+
 THRIFT_I32: 5
+
 THRIFT_I64: 6
+
 THRIFT_BINARY: 8
+
 THRIFT_LIST: 9
+
 THRIFT_STRUCT: 12
+
 // Thrift nesting deeper than this is refused rather than recursed into.
 THRIFT_MAX_DEPTH: 64
 
 // Parquet physical types.
 PARQUET_BOOLEAN: 0
+
 PARQUET_INT32: 1
+
 PARQUET_INT64: 2
+
 PARQUET_INT96: 3
+
 PARQUET_FLOAT: 4
+
 PARQUET_DOUBLE: 5
+
 PARQUET_BYTE_ARRAY: 6
+
 PARQUET_FIXED_LEN_BYTE_ARRAY: 7
 
 // Julian day number of 1970-01-01.
@@ -105,7 +121,9 @@ Cursor: struct {
     end: Int
 
     byte: fn(&self, input: [U8]) -> Int ParquetFailure! {
-        if self.pos >= self.end -> return Err(decode_failure("Parquet metadata ends early at byte {self.pos}"))
+        if self.pos >= self.end {
+            return Err(decode_failure("Parquet metadata ends early at byte {self.pos}"))
+        }
         value: Int{input[self.pos]}
         self.pos += 1
         Ok(value)
@@ -117,7 +135,9 @@ Cursor: struct {
         shift := 0
         loop shift < 64 {
             b: self.byte(input) ?? return Err(err)
-            if shift == 63 && b.bit_and(127) > 1 -> return Err(decode_failure("varint at byte {self.pos - 1} exceeds 64 bits"))
+            if shift == 63 && b.bit_and(127) > 1 {
+                return Err(decode_failure("varint at byte {self.pos - 1} exceeds 64 bits"))
+            }
             value = value.bit_or((b.bit_and(127) << shift))
             if b < 128 -> return Ok(value)
             shift += 7
@@ -133,9 +153,13 @@ Cursor: struct {
     }
 
     little: fn(&self, input: [U8], width: Int) -> Int ParquetFailure! {
-        if width > self.end - self.pos -> return Err(decode_failure("value at byte {self.pos} needs {width} bytes past the end of its page"))
+        if width > self.end - self.pos {
+            return Err(decode_failure("value at byte {self.pos} needs {width} bytes past the end of its page"))
+        }
         value := 0
-        loop index in 0..<width -> value = value.bit_or((Int{input[self.pos + index]} << (8 * index)))
+        loop index in 0..<width {
+            value = value.bit_or((Int{input[self.pos + index]} << (8 * index)))
+        }
         self.pos += width
         Ok(value)
     }
@@ -148,7 +172,9 @@ Cursor: struct {
     }
 
     bytes: fn(&self, input: [U8], length: Int) -> [U8] ParquetFailure! {
-        if length < 0 || length > self.end - self.pos -> return Err(decode_failure("{length} bytes at byte {self.pos} run past the end of their region"))
+        if length < 0 || length > self.end - self.pos {
+            return Err(decode_failure("{length} bytes at byte {self.pos} run past the end of their region"))
+        }
         out := [U8]{}
         loop index in 0..<length -> out.push(input[self.pos + index])
         self.pos += length
@@ -171,12 +197,16 @@ Cursor: struct {
             value: self.byte(input) ?? return Err(err)
             return Ok(if value >= 128 -> value - 256 else -> value)
         }
-        if kind < 4 || kind > THRIFT_I64 -> return Err(decode_failure("Thrift field of type {kind} where an integer belongs"))
+        if kind < 4 || kind > THRIFT_I64 {
+            return Err(decode_failure("Thrift field of type {kind} where an integer belongs"))
+        }
         self.zigzag(input)
     }
 
     binary: fn(&self, input: [U8], kind: Int) -> [U8] ParquetFailure! {
-        if kind != THRIFT_BINARY -> return Err(decode_failure("Thrift field of type {kind} where a binary belongs"))
+        if kind != THRIFT_BINARY {
+            return Err(decode_failure("Thrift field of type {kind} where a binary belongs"))
+        }
         length: self.varint(input) ?? return Err(err)
         self.bytes(input, length)
     }
@@ -190,23 +220,25 @@ Cursor: struct {
     // A list header as (size, element kind); every element takes at least
     // one byte, so a size past the region is refused before any loop.
     list: fn(&self, input: [U8], kind: Int) -> (size: Int, kind: Int) ParquetFailure! {
-        if kind != THRIFT_LIST && kind != 10 -> return Err(decode_failure("Thrift field of type {kind} where a list belongs"))
+        if kind != THRIFT_LIST && kind != 10 {
+            return Err(decode_failure("Thrift field of type {kind} where a list belongs"))
+        }
         head: self.byte(input) ?? return Err(err)
         size := head >> 4
-        if size == 15 {
-            size = self.varint(input) ?? return Err(err)
+        if size == 15 -> size = self.varint(input) ?? return Err(err)
+        if size < 0 || size > self.end - self.pos {
+            return Err(decode_failure("Thrift list of {size} elements runs past its region"))
         }
-        if size < 0 || size > self.end - self.pos -> return Err(decode_failure("Thrift list of {size} elements runs past its region"))
         Ok((size: size, kind: head.bit_and(15)))
     }
 
     // Skips one value of `kind`; a Bool element of a list or map is one byte.
     skip: fn(&self, input: [U8], kind: Int, depth: Int, element: Bool) ParquetFailure! {
-        if depth > THRIFT_MAX_DEPTH -> return Err(decode_failure("Thrift metadata nests deeper than {THRIFT_MAX_DEPTH}"))
+        if depth > THRIFT_MAX_DEPTH {
+            return Err(decode_failure("Thrift metadata nests deeper than {THRIFT_MAX_DEPTH}"))
+        }
         if kind == 1 || kind == 2 {
-            if element {
-                _flag: self.byte(input) ?? return Err(err)
-            }
+            if element -> _flag: self.byte(input) ?? return Err(err)
             return
         }
         if kind == THRIFT_BYTE {
@@ -234,8 +266,12 @@ Cursor: struct {
         }
         if kind == 11 {
             size: self.varint(input) ?? return Err(err)
-            if size == 0 -> return
-            if size < 0 || size > self.end - self.pos -> return Err(decode_failure("Thrift map of {size} entries runs past its region"))
+            if size == 0 {
+                return
+            }
+            if size < 0 || size > self.end - self.pos {
+                return Err(decode_failure("Thrift map of {size} entries runs past its region"))
+            }
             kinds: self.byte(input) ?? return Err(err)
             loop _ in 0..<size {
                 self.skip(input, kinds >> 4, depth + 1, true) ?? return Err(err)
@@ -247,7 +283,9 @@ Cursor: struct {
             last := 0
             loop {
                 field: self.field(input, last) ?? return Err(err)
-                if field.kind == 0 -> return
+                if field.kind == 0 {
+                    return
+                }
                 self.skip(input, field.kind, depth + 1, false) ?? return Err(err)
                 last = field.id
             }
@@ -257,7 +295,9 @@ Cursor: struct {
 }
 
 expect_struct: fn(kind: Int, what: String) ParquetFailure! {
-    if kind != THRIFT_STRUCT -> return Err(decode_failure("{what} is a Thrift field of type {kind}, not a struct"))
+    if kind != THRIFT_STRUCT {
+        return Err(decode_failure("{what} is a Thrift field of type {kind}, not a struct"))
+    }
 }
 
 SchemaElement: struct {
@@ -319,7 +359,9 @@ parse_logical: fn(cursor: &Cursor, input: [U8], element: &SchemaElement) Parquet
     last := 0
     loop {
         field: cursor.field(input, last) ?? return Err(err)
-        if field.kind == 0 -> return
+        if field.kind == 0 {
+            return
+        }
         last = field.id
         element.logical = field.id
         if field.id == 10 && field.kind == THRIFT_STRUCT {
@@ -332,13 +374,9 @@ parse_logical: fn(cursor: &Cursor, input: [U8], element: &SchemaElement) Parquet
                     element.logical_width = cursor.int(input, inner.kind) ?? return Err(err)
                 } else if inner.id == 2 && (inner.kind == 1 || inner.kind == 2) {
                     element.logical_signed = inner.kind == 1
-                } else {
-                    cursor.skip(input, inner.kind, 3, false) ?? return Err(err)
-                }
+                } else { cursor.skip(input, inner.kind, 3, false) ?? return Err(err) }
             }
-        } else {
-            cursor.skip(input, field.kind, 2, false) ?? return Err(err)
-        }
+        } else { cursor.skip(input, field.kind, 2, false) ?? return Err(err) }
     }
 }
 
@@ -350,9 +388,7 @@ parse_schema_element: fn(cursor: &Cursor, input: [U8]) -> SchemaElement ParquetF
         field: cursor.field(input, last) ?? return Err(err)
         if field.kind == 0 -> break
         last = field.id
-        if field.id == 1 {
-            element.physical = cursor.int(input, field.kind) ?? return Err(err)
-        } else if field.id == 2 {
+        if field.id == 1 -> element.physical = cursor.int(input, field.kind) ?? return Err(err) else if field.id == 2 {
             element.type_length = cursor.int(input, field.kind) ?? return Err(err)
         } else if field.id == 3 {
             element.repetition = cursor.int(input, field.kind) ?? return Err(err)
@@ -366,9 +402,7 @@ parse_schema_element: fn(cursor: &Cursor, input: [U8]) -> SchemaElement ParquetF
         } else if field.id == 10 {
             expect_struct(field.kind, "SchemaElement.logicalType") ?? return Err(err)
             parse_logical(cursor, input, element) ?? return Err(err)
-        } else {
-            cursor.skip(input, field.kind, 1, false) ?? return Err(err)
-        }
+        } else { cursor.skip(input, field.kind, 1, false) ?? return Err(err) }
     }
     if !has_name -> return Err(decode_failure("schema element has no name"))
     Ok(element)
@@ -405,9 +439,7 @@ parse_column_meta: fn(cursor: &Cursor, input: [U8], column: &ColumnMeta) Parquet
             seen[5] = true
         } else if field.id == 11 {
             column.dictionary_offset = cursor.int(input, field.kind) ?? return Err(err)
-        } else {
-            cursor.skip(input, field.kind, 2, false) ?? return Err(err)
-        }
+        } else { cursor.skip(input, field.kind, 2, false) ?? return Err(err) }
     }
     loop flag in seen {
         if !flag -> return Err(decode_failure("column metadata lacks a required field"))
@@ -429,9 +461,7 @@ parse_column_chunk: fn(cursor: &Cursor, input: [U8]) -> ColumnMeta ParquetFailur
             expect_struct(field.kind, "ColumnChunk.meta_data") ?? return Err(err)
             parse_column_meta(cursor, input, column) ?? return Err(err)
             has_meta = true
-        } else {
-            cursor.skip(input, field.kind, 1, false) ?? return Err(err)
-        }
+        } else { cursor.skip(input, field.kind, 1, false) ?? return Err(err) }
     }
     if column.external -> return Err(unsupported("column chunks stored in another file"))
     if !has_meta -> return Err(decode_failure("column chunk has no metadata"))
@@ -447,14 +477,14 @@ parse_row_group: fn(cursor: &Cursor, input: [U8]) -> RowGroup ParquetFailure! {
         last = field.id
         if field.id == 1 {
             header: cursor.list(input, field.kind) ?? return Err(err)
-            if header.kind != THRIFT_STRUCT -> return Err(decode_failure("row group columns are not structs"))
+            if header.kind != THRIFT_STRUCT {
+                return Err(decode_failure("row group columns are not structs"))
+            }
             loop _ in 0..<header.size {
                 column: parse_column_chunk(cursor, input) ?? return Err(err)
                 group.columns.push(column)
             }
-        } else if field.id == 3 {
-            group.rows = cursor.int(input, field.kind) ?? return Err(err)
-        } else {
+        } else if field.id == 3 { group.rows = cursor.int(input, field.kind) ?? return Err(err) } else {
             cursor.skip(input, field.kind, 1, false) ?? return Err(err)
         }
     }
@@ -472,24 +502,24 @@ parse_file_meta: fn(cursor: &Cursor, input: [U8]) -> FileMeta ParquetFailure! {
         last = field.id
         if field.id == 2 {
             header: cursor.list(input, field.kind) ?? return Err(err)
-            if header.kind != THRIFT_STRUCT -> return Err(decode_failure("schema elements are not structs"))
+            if header.kind != THRIFT_STRUCT {
+                return Err(decode_failure("schema elements are not structs"))
+            }
             loop _ in 0..<header.size {
                 element: parse_schema_element(cursor, input) ?? return Err(err)
                 meta.schema.push(element)
             }
-        } else if field.id == 3 {
-            meta.rows = cursor.int(input, field.kind) ?? return Err(err)
-        } else if field.id == 4 {
+        } else if field.id == 3 { meta.rows = cursor.int(input, field.kind) ?? return Err(err) } else if field.id == 4 {
             header: cursor.list(input, field.kind) ?? return Err(err)
-            if header.kind != THRIFT_STRUCT -> return Err(decode_failure("row groups are not structs"))
+            if header.kind != THRIFT_STRUCT {
+                return Err(decode_failure("row groups are not structs"))
+            }
             loop _ in 0..<header.size {
                 group: parse_row_group(cursor, input) ?? return Err(err)
                 meta.groups.push(group)
             }
             has_groups = true
-        } else {
-            cursor.skip(input, field.kind, 1, false) ?? return Err(err)
-        }
+        } else { cursor.skip(input, field.kind, 1, false) ?? return Err(err) }
     }
     if meta.schema.len() == 0 -> return Err(decode_failure("file metadata has no schema"))
     if meta.rows < 0 -> return Err(decode_failure("file metadata has no row count"))
@@ -504,9 +534,7 @@ parse_page_header: fn(cursor: &Cursor, input: [U8]) -> PageHeader ParquetFailure
         field: cursor.field(input, last) ?? return Err(err)
         if field.kind == 0 -> break
         last = field.id
-        if field.id == 1 {
-            header.kind = cursor.int(input, field.kind) ?? return Err(err)
-        } else if field.id == 2 {
+        if field.id == 1 -> header.kind = cursor.int(input, field.kind) ?? return Err(err) else if field.id == 2 {
             header.uncompressed = cursor.int(input, field.kind) ?? return Err(err)
         } else if field.id == 3 {
             header.compressed = cursor.int(input, field.kind) ?? return Err(err)
@@ -517,26 +545,18 @@ parse_page_header: fn(cursor: &Cursor, input: [U8]) -> PageHeader ParquetFailure
                 inner: cursor.field(input, inner_last) ?? return Err(err)
                 if inner.kind == 0 -> break
                 inner_last = inner.id
-                if inner.id == 1 {
-                    header.values = cursor.int(input, inner.kind) ?? return Err(err)
-                } else if inner.id == 2 {
+                if inner.id == 1 -> header.values = cursor.int(input, inner.kind) ?? return Err(err) else if inner.id == 2 {
                     header.encoding = cursor.int(input, inner.kind) ?? return Err(err)
                 } else if inner.id == 3 && field.id == 5 {
                     header.level_encoding = cursor.int(input, inner.kind) ?? return Err(err)
-                } else {
-                    cursor.skip(input, inner.kind, 2, false) ?? return Err(err)
-                }
+                } else { cursor.skip(input, inner.kind, 2, false) ?? return Err(err) }
             }
-            if field.id == 5 {
-                header.has_data = true
-            } else {
-                header.has_dictionary = true
-            }
-        } else {
-            cursor.skip(input, field.kind, 1, false) ?? return Err(err)
-        }
+            if field.id == 5 -> header.has_data = true else -> header.has_dictionary = true
+        } else { cursor.skip(input, field.kind, 1, false) ?? return Err(err) }
     }
-    if header.kind < 0 || header.uncompressed < 0 || header.compressed < 0 -> return Err(decode_failure("page header lacks its type or sizes"))
+    if header.kind < 0 || header.uncompressed < 0 || header.compressed < 0 {
+        return Err(decode_failure("page header lacks its type or sizes"))
+    }
     Ok(header)
 }
 
@@ -544,38 +564,46 @@ parse_page_header: fn(cursor: &Cursor, input: [U8]) -> PageHeader ParquetFailure
 // annotations whose physical value would be misread as a plain number.
 flat_leaves: fn(schema: [SchemaElement]) -> [Leaf] ParquetFailure! {
     root: schema[0]
-    if root.children != schema.len() - 1 -> return Err(unsupported("nested schema (root holds {root.children} children of {schema.len() - 1} elements)"))
+    if root.children != schema.len() - 1 {
+        return Err(unsupported("nested schema (root holds {root.children} children of {schema.len() - 1} elements)"))
+    }
     leaves := [Leaf]{}
     loop index in 1..<schema.len() {
         element: schema[index]
         name: element.name.copy()
         if element.children > 0 -> return Err(unsupported("nested schema (group `{name}`)"))
         if element.repetition == 2 -> return Err(unsupported("repeated column `{name}`"))
-        if element.repetition != 0 && element.repetition != 1 -> return Err(decode_failure("column `{name}` has repetition {element.repetition}"))
-        if element.physical < PARQUET_BOOLEAN || element.physical > PARQUET_FIXED_LEN_BYTE_ARRAY -> return Err(decode_failure("column `{name}` has physical type {element.physical}"))
-        if element.physical == PARQUET_FIXED_LEN_BYTE_ARRAY && element.type_length <= 0 -> return Err(decode_failure("column `{name}` has fixed length {element.type_length}"))
+        if element.repetition != 0 && element.repetition != 1 {
+            return Err(decode_failure("column `{name}` has repetition {element.repetition}"))
+        }
+        if element.physical < PARQUET_BOOLEAN || element.physical > PARQUET_FIXED_LEN_BYTE_ARRAY {
+            return Err(decode_failure("column `{name}` has physical type {element.physical}"))
+        }
+        if element.physical == PARQUET_FIXED_LEN_BYTE_ARRAY && element.type_length <= 0 {
+            return Err(decode_failure("column `{name}` has fixed length {element.type_length}"))
+        }
         text := false
         unsigned := false
         // Converted types: UTF8 0, ENUM 4, UINT_8..UINT_32 11-13, INT_8..INT_64 15-18.
         converted: element.converted
-        if converted == 0 || converted == 4 {
-            text = true
-        } else if converted >= 11 && converted <= 13 {
+        if converted == 0 || converted == 4 -> text = true else if converted >= 11 && converted <= 13 {
             unsigned = converted == 13
         } else if converted != -1 && (converted < 15 || converted > 18) {
             return Err(unsupported("{converted_name(converted)} column `{name}`"))
         }
         // Logical types: STRING 1, ENUM 4, INTEGER 10.
         logical: element.logical
-        if logical == 1 || logical == 4 {
-            text = true
-        } else if logical == 10 {
-            if !element.logical_signed && element.logical_width == 64 -> return Err(unsupported("unsigned 64-bit integer column `{name}`"))
+        if logical == 1 || logical == 4 -> text = true else if logical == 10 {
+            if !element.logical_signed && element.logical_width == 64 {
+                return Err(unsupported("unsigned 64-bit integer column `{name}`"))
+            }
             if !element.logical_signed && element.logical_width == 32 -> unsigned = true
         } else if logical != -1 {
             return Err(unsupported("{logical_name(logical)} column `{name}`"))
         }
-        if text && element.physical != PARQUET_BYTE_ARRAY && element.physical != PARQUET_FIXED_LEN_BYTE_ARRAY -> return Err(decode_failure("text column `{name}` is not stored as bytes"))
+        if text && element.physical != PARQUET_BYTE_ARRAY && element.physical != PARQUET_FIXED_LEN_BYTE_ARRAY {
+            return Err(decode_failure("text column `{name}` is not stored as bytes"))
+        }
         leaves.push(Leaf{name: name, physical: element.physical, width: element.type_length, optional: element.repetition == 1, text: text, unsigned: unsigned})
     }
     Ok(leaves)
@@ -605,7 +633,9 @@ plain_values: fn(page: [U8], cursor: &Cursor, leaf: Leaf, count: Int) -> [Dyn] P
     values := [Dyn]{}
     if leaf.physical == PARQUET_BOOLEAN {
         bytes: (count + 7) >> 3
-        if bytes > cursor.end - cursor.pos -> return Err(decode_failure("column `{leaf.name}` holds fewer than {count} booleans"))
+        if bytes > cursor.end - cursor.pos {
+            return Err(decode_failure("column `{leaf.name}` holds fewer than {count} booleans"))
+        }
         loop index in 0..<count {
             bit: (Int{page[cursor.pos + (index >> 3)]} >> index.bit_and(7)).bit_and(1)
             values.push(Dyn.Bool(bit == 1))
@@ -613,7 +643,9 @@ plain_values: fn(page: [U8], cursor: &Cursor, leaf: Leaf, count: Int) -> [Dyn] P
         cursor.pos += bytes
         return Ok(values)
     }
-    if count > cursor.end - cursor.pos -> return Err(decode_failure("column `{leaf.name}` holds fewer than {count} values"))
+    if count > cursor.end - cursor.pos {
+        return Err(decode_failure("column `{leaf.name}` holds fewer than {count} values"))
+    }
     loop _ in 0..<count {
         if leaf.physical == PARQUET_INT32 {
             raw: cursor.little(page, 4) ?? return Err(err)
@@ -642,9 +674,7 @@ plain_values: fn(page: [U8], cursor: &Cursor, leaf: Leaf, count: Int) -> [Dyn] P
             if leaf.text {
                 text: String.from_bytes(bytes) ?? return Err(decode_failure("column `{leaf.name}` holds a value that is not UTF-8"))
                 values.push(Dyn.Text(text))
-            } else {
-                values.push(Dyn.Bytes(bytes))
-            }
+            } else { values.push(Dyn.Bytes(bytes)) }
         }
     }
     Ok(values)
@@ -668,7 +698,9 @@ hybrid: fn(data: [U8], cursor: &Cursor, width: Int, count: Int) -> [Int] Parquet
             remaining: cursor.end - cursor.pos
             wanted := count - out.len()
             if run < (wanted + 7) >> 3 -> wanted = run * 8
-            if (wanted * width + 7) >> 3 > remaining -> return Err(decode_failure("bit-packed run of {run} groups runs past its page"))
+            if (wanted * width + 7) >> 3 > remaining {
+                return Err(decode_failure("bit-packed run of {run} groups runs past its page"))
+            }
             bit := 0
             loop _ in 0..<wanted {
                 value := 0
@@ -693,7 +725,9 @@ hybrid: fn(data: [U8], cursor: &Cursor, width: Int, count: Int) -> [Int] Parquet
 snappy: fn(input: [U8], start: Int, end: Int, expected: Int) -> [U8] ParquetFailure! {
     cursor := Cursor{pos: start, end: end}
     length: cursor.varint(input) ?? return Err(err)
-    if length != expected -> return Err(decode_failure("Snappy block holds {length} bytes; its page header declares {expected}"))
+    if length != expected {
+        return Err(decode_failure("Snappy block holds {length} bytes; its page header declares {expected}"))
+    }
     out := [U8]{}
     loop cursor.pos < cursor.end {
         lead: cursor.byte(input) ?? return Err(err)
@@ -704,7 +738,9 @@ snappy: fn(input: [U8], start: Int, end: Int, expected: Int) -> [U8] ParquetFail
                 extended: cursor.little(input, size - 60) ?? return Err(err)
                 size = extended + 1
             }
-            if size > expected - out.len() -> return Err(decode_failure("Snappy literal overruns the declared {expected} bytes"))
+            if size > expected - out.len() {
+                return Err(decode_failure("Snappy literal overruns the declared {expected} bytes"))
+            }
             literal: cursor.bytes(input, size) ?? return Err(err)
             loop byte in literal -> out.push(byte)
             next
@@ -722,15 +758,21 @@ snappy: fn(input: [U8], start: Int, end: Int, expected: Int) -> [U8] ParquetFail
             size = (lead >> 2) + 1
             offset = cursor.little(input, 4) ?? return Err(err)
         }
-        if offset == 0 || offset > out.len() -> return Err(decode_failure("Snappy copy offset {offset} reaches before its output"))
-        if size > expected - out.len() -> return Err(decode_failure("Snappy copy overruns the declared {expected} bytes"))
+        if offset == 0 || offset > out.len() {
+            return Err(decode_failure("Snappy copy offset {offset} reaches before its output"))
+        }
+        if size > expected - out.len() {
+            return Err(decode_failure("Snappy copy overruns the declared {expected} bytes"))
+        }
         from: out.len() - offset
         loop index in 0..<size {
             byte: out[from + index]
             out.push(byte)
         }
     }
-    if out.len() != expected -> return Err(decode_failure("Snappy block yields {out.len()} bytes; its page header declares {expected}"))
+    if out.len() != expected {
+        return Err(decode_failure("Snappy block yields {out.len()} bytes; its page header declares {expected}"))
+    }
     Ok(out)
 }
 
@@ -741,15 +783,21 @@ data_page: fn(page: [U8], header: PageHeader, leaf: Leaf, dictionary: &[Dyn], ha
     present := [Bool]{}
     stored := count
     if leaf.optional {
-        if header.level_encoding != 3 -> return Err(unsupported("{encoding_name(header.level_encoding)} definition levels"))
+        if header.level_encoding != 3 {
+            return Err(unsupported("{encoding_name(header.level_encoding)} definition levels"))
+        }
         length: cursor.little(page, 4) ?? return Err(err)
-        if length < 0 || length > cursor.end - cursor.pos -> return Err(decode_failure("definition levels of column `{leaf.name}` run past their page"))
+        if length < 0 || length > cursor.end - cursor.pos {
+            return Err(decode_failure("definition levels of column `{leaf.name}` run past their page"))
+        }
         levels := Cursor{pos: cursor.pos, end: cursor.pos + length}
         decoded: hybrid(page, levels, 1, count) ?? return Err(err)
         cursor.pos += length
         stored = 0
         loop level in decoded {
-            if level > 1 -> return Err(decode_failure("column `{leaf.name}` has definition level {level}"))
+            if level > 1 {
+                return Err(decode_failure("column `{leaf.name}` has definition level {level}"))
+            }
             present.push(level == 1)
             if level == 1 -> stored += 1
         }
@@ -758,24 +806,26 @@ data_page: fn(page: [U8], header: PageHeader, leaf: Leaf, dictionary: &[Dyn], ha
     if header.encoding == 0 {
         stored_values = plain_values(page, cursor, leaf, stored) ?? return Err(err)
     } else if header.encoding == 2 || header.encoding == 8 {
-        if !has_dictionary -> return Err(decode_failure("dictionary-encoded page of column `{leaf.name}` has no dictionary page"))
+        if !has_dictionary {
+            return Err(decode_failure("dictionary-encoded page of column `{leaf.name}` has no dictionary page"))
+        }
         if stored > 0 {
             width: cursor.byte(page) ?? return Err(err)
-            if width > 32 -> return Err(decode_failure("dictionary index width {width} exceeds 32 bits"))
+            if width > 32 {
+                return Err(decode_failure("dictionary index width {width} exceeds 32 bits"))
+            }
             indices: hybrid(page, cursor, width, stored) ?? return Err(err)
             loop index in indices {
-                if index >= dictionary.len() -> return Err(decode_failure("dictionary index {index} of column `{leaf.name}` exceeds its {dictionary.len()} entries"))
+                if index >= dictionary.len() {
+                    return Err(decode_failure("dictionary index {index} of column `{leaf.name}` exceeds its {dictionary.len()} entries"))
+                }
                 stored_values.push(dictionary[index].copy())
             }
         }
-    } else {
-        return Err(unsupported("{encoding_name(header.encoding)} encoding"))
-    }
+    } else { return Err(unsupported("{encoding_name(header.encoding)} encoding")) }
     next_value := 0
     loop index in 0..<count {
-        if leaf.optional && !present[index] {
-            values.push(Dyn.Null)
-        } else {
+        if leaf.optional && !present[index] -> values.push(Dyn.Null) else {
             values.push(stored_values[next_value].copy())
             next_value += 1
         }
@@ -785,47 +835,77 @@ data_page: fn(page: [U8], header: PageHeader, leaf: Leaf, dictionary: &[Dyn], ha
 // The page payload, decompressed by `codec`.
 page_payload: fn(input: [U8], start: Int, header: PageHeader, codec: Int) -> [U8] ParquetFailure! {
     if codec == 1 -> return snappy(input, start, start + header.compressed, header.uncompressed)
-    if header.compressed != header.uncompressed -> return Err(decode_failure("uncompressed page declares {header.compressed} stored and {header.uncompressed} page bytes"))
+    if header.compressed != header.uncompressed {
+        return Err(decode_failure("uncompressed page declares {header.compressed} stored and {header.uncompressed} page bytes"))
+    }
     cursor := Cursor{pos: start, end: start + header.compressed}
     cursor.bytes(input, header.compressed)
 }
 
 // Every value of one column chunk, `rows` of them.
 column_values: fn(input: [U8], data_end: Int, column: ColumnMeta, leaf: Leaf, rows: Int, max_page_bytes: Int) -> [Dyn] ParquetFailure! {
-    if column.codec != 0 && column.codec != 1 -> return Err(unsupported("{codec_name(column.codec)} compression"))
-    if column.values != rows -> return Err(decode_failure("column `{leaf.name}` holds {column.values} values for {rows} rows"))
+    if column.codec != 0 && column.codec != 1 {
+        return Err(unsupported("{codec_name(column.codec)} compression"))
+    }
+    if column.values != rows {
+        return Err(decode_failure("column `{leaf.name}` holds {column.values} values for {rows} rows"))
+    }
     start := column.data_offset
-    if column.dictionary_offset >= 4 && column.dictionary_offset < start -> start = column.dictionary_offset
-    if start < 4 || column.compressed_size < 0 || column.compressed_size > data_end - start -> return Err(decode_failure("column `{leaf.name}` lies outside the file"))
+    if column.dictionary_offset >= 4 && column.dictionary_offset < start {
+        start = column.dictionary_offset
+    }
+    if start < 4 || column.compressed_size < 0 || column.compressed_size > data_end - start {
+        return Err(decode_failure("column `{leaf.name}` lies outside the file"))
+    }
     end: start + column.compressed_size
     dictionary := [Dyn]{}
     has_dictionary := false
     values := [Dyn]{}
     pos := start
     loop values.len() < rows {
-        if pos >= end -> return Err(decode_failure("column `{leaf.name}` ends after {values.len()} of {rows} values"))
+        if pos >= end {
+            return Err(decode_failure("column `{leaf.name}` ends after {values.len()} of {rows} values"))
+        }
         cursor := Cursor{pos: pos, end: end}
         header: parse_page_header(cursor, input) ?? return Err(err)
-        if header.compressed > end - cursor.pos -> return Err(decode_failure("page of column `{leaf.name}` runs past its chunk"))
-        if header.uncompressed > max_page_bytes -> return Err(ParquetFailure{kind: .Limit, reason: "page of {header.uncompressed} bytes exceeds max_item_bytes {max_page_bytes}"})
+        if header.compressed > end - cursor.pos {
+            return Err(decode_failure("page of column `{leaf.name}` runs past its chunk"))
+        }
+        if header.uncompressed > max_page_bytes {
+            return Err(ParquetFailure{kind: .Limit, reason: "page of {header.uncompressed} bytes exceeds max_item_bytes {max_page_bytes}"})
+        }
         body: cursor.pos
         pos = body + header.compressed
         if header.kind == 1 -> next
         if header.kind == 3 -> return Err(unsupported("DATA_PAGE_V2 pages"))
-        if header.kind != 0 && header.kind != 2 -> return Err(decode_failure("page type {header.kind}"))
+        if header.kind != 0 && header.kind != 2 {
+            return Err(decode_failure("page type {header.kind}"))
+        }
         page: page_payload(input, body, header, column.codec) ?? return Err(err)
         if header.kind == 2 {
-            if !header.has_dictionary -> return Err(decode_failure("dictionary page of column `{leaf.name}` has no dictionary header"))
-            if has_dictionary || values.len() > 0 -> return Err(decode_failure("column `{leaf.name}` has a dictionary page after its first"))
-            if header.values < 0 -> return Err(decode_failure("dictionary page of column `{leaf.name}` declares {header.values} values"))
-            if header.encoding != 0 && header.encoding != 2 -> return Err(unsupported("{encoding_name(header.encoding)} dictionary pages"))
+            if !header.has_dictionary {
+                return Err(decode_failure("dictionary page of column `{leaf.name}` has no dictionary header"))
+            }
+            if has_dictionary || values.len() > 0 {
+                return Err(decode_failure("column `{leaf.name}` has a dictionary page after its first"))
+            }
+            if header.values < 0 {
+                return Err(decode_failure("dictionary page of column `{leaf.name}` declares {header.values} values"))
+            }
+            if header.encoding != 0 && header.encoding != 2 {
+                return Err(unsupported("{encoding_name(header.encoding)} dictionary pages"))
+            }
             entries := Cursor{pos: 0, end: page.len()}
             dictionary = plain_values(page, entries, leaf, header.values) ?? return Err(err)
             has_dictionary = true
             next
         }
-        if !header.has_data -> return Err(decode_failure("data page of column `{leaf.name}` has no data header"))
-        if header.values < 0 || header.values > rows - values.len() -> return Err(decode_failure("data page of column `{leaf.name}` declares {header.values} values; {rows - values.len()} remain"))
+        if !header.has_data {
+            return Err(decode_failure("data page of column `{leaf.name}` has no data header"))
+        }
+        if header.values < 0 || header.values > rows - values.len() {
+            return Err(decode_failure("data page of column `{leaf.name}` declares {header.values} values; {rows - values.len()} remain"))
+        }
         data_page(page, header, leaf, dictionary, has_dictionary, values) ?? return Err(err)
     }
     Ok(values)
@@ -835,10 +915,14 @@ column_values: fn(input: [U8], data_end: Int, column: ColumnMeta, leaf: Leaf, ro
 // `max_page_bytes`.
 read_rows: fn(input: [U8], max_rows: Int, max_page_bytes: Int) -> Dyn ParquetFailure! {
     size: input.len()
-    if size < 12 -> return Err(decode_failure("payload of {size} bytes is shorter than a Parquet file"))
+    if size < 12 {
+        return Err(decode_failure("payload of {size} bytes is shorter than a Parquet file"))
+    }
     magic: [U8]{80, 65, 82, 49}
     loop index in 0..<4 {
-        if input[index] != magic[index] || input[size - 4 + index] != magic[index] -> return Err(decode_failure("payload does not begin and end with PAR1"))
+        if input[index] != magic[index] || input[size - 4 + index] != magic[index] {
+            return Err(decode_failure("payload does not begin and end with PAR1"))
+        }
     }
     footer := Cursor{pos: size - 8, end: size - 4}
     length: footer.little(input, 4) ?? return Err(err)
@@ -847,25 +931,37 @@ read_rows: fn(input: [U8], max_rows: Int, max_page_bytes: Int) -> Dyn ParquetFai
     cursor := Cursor{pos: data_end, end: size - 8}
     meta: parse_file_meta(cursor, input) ?? return Err(err)
     leaves: flat_leaves(meta.schema) ?? return Err(err)
-    if meta.rows > max_rows -> return Err(ParquetFailure{kind: .Limit, reason: "max_output_rows {max_rows} exceeded"})
+    if meta.rows > max_rows {
+        return Err(ParquetFailure{kind: .Limit, reason: "max_output_rows {max_rows} exceeded"})
+    }
     rows := [Dyn]{}
     loop group in meta.groups {
-        if group.columns.len() != leaves.len() -> return Err(decode_failure("row group has {group.columns.len()} columns; the schema has {leaves.len()}"))
-        if group.rows > meta.rows - rows.len() -> return Err(decode_failure("row groups hold more rows than the file's {meta.rows}"))
+        if group.columns.len() != leaves.len() {
+            return Err(decode_failure("row group has {group.columns.len()} columns; the schema has {leaves.len()}"))
+        }
+        if group.rows > meta.rows - rows.len() {
+            return Err(decode_failure("row groups hold more rows than the file's {meta.rows}"))
+        }
         columns := [[Dyn]]{}
         loop (index, column) in group.columns {
             leaf: leaves[index]
-            if column.path.len() != 1 || column.path[0] != leaf.name || column.physical != leaf.physical -> return Err(decode_failure("column chunk {index} does not match schema column `{leaf.name}`"))
+            if column.path.len() != 1 || column.path[0] != leaf.name || column.physical != leaf.physical {
+                return Err(decode_failure("column chunk {index} does not match schema column `{leaf.name}`"))
+            }
             values: column_values(input, data_end, column, leaf, group.rows, max_page_bytes) ?? return Err(err)
             columns.push(values)
         }
         loop row in 0..<group.rows {
             entries := [(key: String, value: Dyn)]{}
-            loop (index, leaf) in leaves -> entries.push((key: leaf.name.copy(), value: columns[index][row].copy()))
+            loop (index, leaf) in leaves {
+                entries.push((key: leaf.name.copy(), value: columns[index][row].copy()))
+            }
             rows.push(stream.object_from_entries(entries))
         }
     }
-    if rows.len() != meta.rows -> return Err(decode_failure("row groups hold {rows.len()} rows; the file declares {meta.rows}"))
+    if rows.len() != meta.rows {
+        return Err(decode_failure("row groups hold {rows.len()} rows; the file declares {meta.rows}"))
+    }
     Ok(Dyn.Array(rows))
 }
 
@@ -1007,9 +1103,7 @@ test_rows: fn(values: [Dyn]) -> Dyn Never! {
     Dyn.Array(rows)
 }
 
-test_same: fn(actual: Dyn, expected: Dyn) {
-    assert(actual.equal_unordered(expected))
-}
+test_same: fn(actual: Dyn, expected: Dyn) { assert(actual.equal_unordered(expected)) }
 
 test_outcome: fn(file: [U8]) -> String Never! {
     if read_rows(file, 1000, 1048576) == {
@@ -1115,11 +1209,15 @@ test_int32_page: fn() -> [U8] Never! {
     loop byte in data -> pages.push(byte)
     assert_eq(test_outcome(test_file(test_column(PARQUET_INT32, pages, 1))), "Decode: dictionary index 1 of column `v` exceeds its 1 entries")
     if read_rows(file, 1, 1048576) == {
-        .Ok(_) -> panic("two rows under max_output_rows 1")
-        .Err(failure) -> assert_eq("{failure.kind}: {failure.reason}", "Limit: max_output_rows 1 exceeded")
+        .Ok(_) -> { panic("two rows under max_output_rows 1") }
+        .Err(failure) -> {
+            assert_eq("{failure.kind}: {failure.reason}", "Limit: max_output_rows 1 exceeded")
+        }
     }
     if read_rows(file, 10, 4) == {
-        .Ok(_) -> panic("an 8-byte page under max_item_bytes 4")
-        .Err(failure) -> assert_eq("{failure.kind}: {failure.reason}", "Limit: page of 8 bytes exceeds max_item_bytes 4")
+        .Ok(_) -> { panic("an 8-byte page under max_item_bytes 4") }
+        .Err(failure) -> {
+            assert_eq("{failure.kind}: {failure.reason}", "Limit: page of 8 bytes exceeds max_item_bytes 4")
+        }
     }
 }

@@ -7,7 +7,6 @@ package: {
 // statvfs does: total, free and available bytes. `available` leaves out the
 // blocks the system keeps for its superuser, so it is what a program may
 // still write. `used_percent()` is the figure `df` prints.
-
 use files: core.files
 
 // Whether `need` bytes fit on the file system holding `path`.
@@ -30,7 +29,7 @@ run: fn() {
     print("sample used percent: {sample.used_percent()}")
 
     if files.space(files.join(scratch.path, "missing/deeper")) == {
-        .Ok(_) -> print("missing path: measured")
+        .Ok(_) -> { print("missing path: measured") }
         .Err(error) -> print("missing path: {error == .NotFound(_)}")
     }
 }

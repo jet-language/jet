@@ -2,11 +2,15 @@
 // parents, so these tests do not alter the user's default source store.
 use {
     jet_pkg_model.[
-        pkg_source_snapshot_into, pkg_source_store_component, pkg_source_store_path,
-        pkg_source_store_verify, pkg_source_store_view_into_project,
+        pkg_source_snapshot_into,
+        pkg_source_store_component,
+        pkg_source_store_path,
+        pkg_source_store_verify,
+        pkg_source_store_view_into_project,
     ]
     jetpack_foundation.[
-        foundation_open_directory_authority, foundation_read_file_nofollow_at_root,
+        foundation_open_directory_authority,
+        foundation_read_file_nofollow_at_root,
         foundation_tree_hash,
     ]
     files: core.files
@@ -23,7 +27,8 @@ pkg_source_store_test_root: fn(label: String) -[FS, Env]> String Never! {
 
 #Test("source-store components reject path syntax and all C0/C1 controls") {
     next_line: String.from_bytes([U8]{194, 133}) ?? panic("valid C1 scalar")
-    loop value in ([String]{"", ".", "..", "../pkg", "pkg/name", "pkg\\name", "pkg:version", "pkg\nname", "pkg{next_line}name"}) {
+    loop value in
+        ([String]{"", ".", "..", "../pkg", "pkg/name", "pkg\\name", "pkg:version", "pkg\nname", "pkg{next_line}name"}) {
         assert(pkg_source_store_component(value) == .Err(_))
     }
     loop value in ([String]{"jet", "1.2.3-dev+build", "abcdef0123456789", "工具"}) {
@@ -146,7 +151,7 @@ pkg_source_store_test_root: fn(label: String) -[FS, Env]> String Never! {
     pkg_source_store_verify("mylib", entry, original) ?? panic("a fresh entry verifies: {err.diagnostic.what}")
     files.write(files.join(entry, "lib.jet"), "evil: fn() {{}}\n") ?? panic("tamper")
     if pkg_source_store_verify("mylib", entry, original) == {
-        .Err(error) -> assert_eq(error.diagnostic.code, "E1204")
+        .Err(error) -> { assert_eq(error.diagnostic.code, "E1204") }
         .Ok(_) -> panic("a tampered entry must fail verification")
     }
     files.remove_all(root) ?? panic("fixture cleanup")

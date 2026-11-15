@@ -36,54 +36,86 @@
 // than ELF's 16-bit indices reach (the Core library's) uses extended
 // section numbering: the header's count and each symbol's section index at
 // SHN_LORESERVE or above move to section 0 and `.symtab_shndx`.
-
 use jet_foundation.[CompilerThreads, NameTable, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, name_find, name_index, name_intern, name_table_sized]
 
 ELF64_SECTION_HEADER_SIZE: 64
+
 ELF64_SYMBOL_SIZE: 24
+
 ELF64_RELA_SIZE: 24
+
 ELF64_R_X86_64_64: 1
+
 ELF64_R_X86_64_PC32: 2
+
 ELF64_R_X86_64_PLT32: 4
 
 // Section indices of the object, in header order.
 ELF64_OBJECT_TEXT: 1
+
 ELF64_OBJECT_DATA: 2
+
 ELF64_OBJECT_SYMTAB: 4
+
 ELF64_OBJECT_STRTAB: 5
+
 ELF64_OBJECT_SHSTRTAB: 6
+
 ELF64_OBJECT_EH_FRAME: 9
+
 ELF64_OBJECT_DEBUG_ABBREV: 11
+
 ELF64_OBJECT_DEBUG_INFO: 12
+
 ELF64_OBJECT_DEBUG_LINE: 14
+
 ELF64_OBJECT_DEBUG_LOCLISTS: 16
+
 // The fault handler's location table (Dwarf.jet dwarf_jet_line).
 ELF64_OBJECT_DEBUG_JETLINE: 17
+
 ELF64_OBJECT_RODATA: 19
+
 // With a section per function and data object: the location lists'
 // relocations, then from ELF64_OBJECT_FIRST_OWN per function its section and
 // that section's relocations, then the same per data object.
 ELF64_OBJECT_DEBUG_LOCLISTS_RELA: 20
+
 ELF64_OBJECT_FIRST_OWN: 21
+
 // The first index ELF reserves (SHN_LORESERVE): a header count or a
 // symbol's section index from it on is written through extended section
 // numbering (x64_object_file).
 ELF64_OBJECT_SECTION_LIMIT: 0xff00
+
 // A symbol's section index in `.symtab_shndx` (SHN_XINDEX).
 ELF64_OBJECT_SECTION_XINDEX: 0xffff
+
 // SHT_SYMTAB_SHNDX: the symbols' extended section indices.
 ELF64_SHT_SYMTAB_SHNDX: 18
+
 // Local symbols before the functions: null, then the section symbols
 // relocations name (with own sections, theirs follow).
 ELF64_OBJECT_SYMBOL_TEXT: 1
+
 ELF64_OBJECT_SYMBOL_DATA: 2
+
 ELF64_OBJECT_SYMBOL_ABBREV: 3
+
 ELF64_OBJECT_SYMBOL_LINE: 4
+
 ELF64_OBJECT_SYMBOL_LOCLISTS: 5
+
 ELF64_OBJECT_SYMBOL_RODATA: 6
+
 ELF64_OBJECT_SYMBOL_FIRST_OWN: 7
 
-X64ObjectRela: struct { at: Int, symbol: Int, kind: Int, addend: Int }
+X64ObjectRela: struct {
+    at: Int
+    symbol: Int
+    kind: Int
+    addend: Int
+}
 
 X64ObjectSymbol: struct {
     name: String
@@ -312,13 +344,21 @@ x64_object_text_part: fn(inputs: Shared<X64ObjectTextShared>, part: Shared<X64Ob
                 .Function(id) -> {
                     row: if id.value >= -1 && id.value + 1 < function_rows.len() -> function_rows[id.value + 1] else -> -1
                     if {
-                        row < 0 -> errors.push("{function.name}: call to function {id.value}, which is not in the object")
-                        own -> x64_object_rela_put(relas, at, function_symbols[row], ELF64_R_X86_64_PC32, -4)
+                        row < 0 -> {
+                            errors.push("{function.name}: call to function {id.value}, which is not in the object")
+                        }
+                        own -> {
+                            x64_object_rela_put(relas, at, function_symbols[row], ELF64_R_X86_64_PC32, -4)
+                        }
                         else -> x64_patch_rel32(text, at - base, reads.value.offsets[row] - base)
                     }
                 }
-                .Runtime(symbol) -> x64_object_import(imports, import_names, import_of, runtime_at, runtime_local, relas, at, symbol, ELF64_R_X86_64_PLT32)
-                .RuntimeData(symbol) -> x64_object_import(imports, import_names, import_of, runtime_at, runtime_local, relas, at, symbol, ELF64_R_X86_64_PC32)
+                .Runtime(symbol) -> {
+                    x64_object_import(imports, import_names, import_of, runtime_at, runtime_local, relas, at, symbol, ELF64_R_X86_64_PLT32)
+                }
+                .RuntimeData(symbol) -> {
+                    x64_object_import(imports, import_names, import_of, runtime_at, runtime_local, relas, at, symbol, ELF64_R_X86_64_PC32)
+                }
                 .Data(id) -> {
                     if id.value < 0 || id.value >= data_offsets.len() {
                         errors.push("{function.name}: data {id.value} is not in the module")
@@ -407,7 +447,9 @@ x64_object_data_place: fn(data: [X64Data], row: Int, placed: &[Bool], order: &[I
         placed[at] = true
         order.push(at)
         relocs: data[at].relocs
-        loop index in 0..<relocs.len() -> pending.push(relocs[relocs.len() - 1 - index].target.value)
+        loop index in 0..<relocs.len() {
+            pending.push(relocs[relocs.len() - 1 - index].target.value)
+        }
     }
 }
 
@@ -417,7 +459,9 @@ x64_object_data_place: fn(data: [X64Data], row: Int, placed: &[Bool], order: &[I
     data := [X64Data]{}
     loop row in 0..<targets.len() {
         relocs := [X64DataReloc]{}
-        loop target in targets[row] -> relocs.push(X64DataReloc{offset: 0, target: X64DataID{value: target}, addend: 0})
+        loop target in targets[row] {
+            relocs.push(X64DataReloc{offset: 0, target: X64DataID{value: target}, addend: 0})
+        }
         data.push(X64Data{id: X64DataID{value: row}, bytes: [U8]{0}, align: 8, relocs: relocs})
     }
     placed := [Bool]{false, false, false, false, false}
@@ -513,7 +557,9 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
     // `main` is id -1.
     max_id := -1
     loop function in functions {
-        if function.id.value < -1 -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"{function.name}: function id {function.id.value} is not a function row"}}
+        if function.id.value < -1 {
+            return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"{function.name}: function id {function.id.value} is not a function row"}}
+        }
         if function.id.value > max_id -> max_id = function.id.value
     }
     function_rows := [Int]{}
@@ -528,8 +574,12 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
     export_names := name_table_sized(64)
     loop entry_row in exports {
         id: entry_row.function.value
-        if id < -1 || id > max_id || function_rows[id + 1] < 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"export {entry_row.symbol}: function {id} is not in the object"}}
-        if entry_row.symbol == "" || name_find(export_names, entry_row.symbol) != None -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"empty or duplicate export symbol `{entry_row.symbol}`"}}
+        if id < -1 || id > max_id || function_rows[id + 1] < 0 {
+            return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"export {entry_row.symbol}: function {id} is not in the object"}}
+        }
+        if entry_row.symbol == "" || name_find(export_names, entry_row.symbol) != None {
+            return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"empty or duplicate export symbol `{entry_row.symbol}`"}}
+        }
         _ := name_intern(export_names, entry_row.symbol)
         exported[id + 1] = true
     }
@@ -546,7 +596,9 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
             loop (index, object) in program.data {
                 if object.id.value == guard -> at = index
             }
-            if at < 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"export {entry_row.symbol}: hook guard data {guard} is not in the object"}}
+            if at < 0 {
+                return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"export {entry_row.symbol}: hook guard data {guard} is not in the object"}}
+            }
             sections.push(ELF64_OBJECT_FIRST_OWN + 2 * (functions.len() + at))
         }
         guard_sections.push(sections)
@@ -558,8 +610,12 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
         loop (index, object) in program.data {
             if object.id.value == entry_row.data -> at = index
         }
-        if at < 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"data export {entry_row.symbol}: data {entry_row.data} is not in the object"}}
-        if entry_row.symbol == "" || name_find(export_names, entry_row.symbol) != None -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"empty or duplicate export symbol `{entry_row.symbol}`"}}
+        if at < 0 {
+            return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"data export {entry_row.symbol}: data {entry_row.data} is not in the object"}}
+        }
+        if entry_row.symbol == "" || name_find(export_names, entry_row.symbol) != None {
+            return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"empty or duplicate export symbol `{entry_row.symbol}`"}}
+        }
         _ := name_intern(export_names, entry_row.symbol)
         data_rows.push(at)
     }
@@ -582,11 +638,15 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
     }
     // Calls between functions are patched below as rel32 without per-site
     // checks: every distance inside `.text` is below its length.
-    if !x64_fits_i32(text_size) -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{".text is {text_size} bytes; calls between its functions are rel32, which reaches at most 2147483647 bytes"}}
+    if !x64_fits_i32(text_size) {
+        return X64ExecutableResult{bytes: [U8]{}, errors: [String]{".text is {text_size} bytes; calls between its functions are rel32, which reaches at most 2147483647 bytes"}}
+    }
     // Per function with own sections, its section's symbol.
     function_symbols := [Int]{}
     if own_sections {
-        loop index in 0..<functions.len() -> function_symbols.push(ELF64_OBJECT_SYMBOL_FIRST_OWN + index)
+        loop index in 0..<functions.len() {
+            function_symbols.push(ELF64_OBJECT_SYMBOL_FIRST_OWN + index)
+        }
     }
     // `.eh_frame` and the DWARF sections read only the functions, their
     // debug rows and places, so an object that admits `.text` threads builds
@@ -595,7 +655,11 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
     // (x64_object_lay). A smaller object builds both on this thread and
     // starts none.
     dwarf_symbols: X64DwarfSymbols{
-        text: ELF64_OBJECT_SYMBOL_TEXT, abbrev: ELF64_OBJECT_SYMBOL_ABBREV, line: ELF64_OBJECT_SYMBOL_LINE, loclists: ELF64_OBJECT_SYMBOL_LOCLISTS, functions: function_symbols,
+        text: ELF64_OBJECT_SYMBOL_TEXT,
+        abbrev: ELF64_OBJECT_SYMBOL_ABBREV,
+        line: ELF64_OBJECT_SYMBOL_LINE,
+        loclists: ELF64_OBJECT_SYMBOL_LOCLISTS,
+        functions: function_symbols,
     }
     laid_rows := [X64ObjectLaid]{}
     dwarf_rows := [X64DwarfSections]{}
@@ -613,13 +677,17 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
         }
     }
     laid: laid_rows.pop() ?? panic("the object writer lost its layout")
-    if laid.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: laid.errors.move()}
+    if laid.errors.len() > 0 {
+        return X64ExecutableResult{bytes: [U8]{}, errors: laid.errors.move()}
+    }
     dwarf: dwarf_rows.pop() ?? panic("the object writer lost its debug sections")
     // The functions, their debug rows and the module are read no more. When
     // the `.text` step admitted threads (`laid.workers`) they drop on a
     // thread of their own while the file is assembled; a smaller object
     // assembles its file first and they drop as this returns.
-    if laid.workers <= 1 -> return X64ExecutableResult{bytes: x64_object_file(dwarf, laid.text, text_align, laid.data, laid.data_align, laid.rodata, laid.rodata_align, laid.rela_text, laid.symtab, laid.xindex, laid.strtab, laid.first_global, laid.data_relas, exports, guard_sections, laid.own), errors: [String]{}}
+    if laid.workers <= 1 {
+        return X64ExecutableResult{bytes: x64_object_file(dwarf, laid.text, text_align, laid.data, laid.data_align, laid.rodata, laid.rodata_align, laid.rela_text, laid.symtab, laid.xindex, laid.strtab, laid.first_global, laid.data_relas, exports, guard_sections, laid.own), errors: [String]{}}
+    }
     released: Shared{X64ObjectReleased{functions: [X64CompiledFunction]{}, debug: [X64FunctionDebug]{}, programs: [X64ObjectModule]{}}}
     x64_object_release_fill(released, program, functions, debug)
     files := [[U8]]{}
@@ -686,7 +754,9 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], e
         order := [Int]{}
         loop function in functions {
             loop reloc in function.relocs {
-                if reloc.target == .Data(id) -> x64_object_data_place(program.data, id.value, placed, order)
+                if reloc.target == .Data(id) {
+                    x64_object_data_place(program.data, id.value, placed, order)
+                }
             }
         }
         loop index in data_rows -> x64_object_data_place(program.data, index, placed, order)
@@ -709,10 +779,14 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], e
     data_symbols := [Int]{}
     if {
         own_sections -> {
-            loop index in 0..<program.data.len() -> data_symbols.push(ELF64_OBJECT_SYMBOL_FIRST_OWN + functions.len() + index)
+            loop index in 0..<program.data.len() {
+                data_symbols.push(ELF64_OBJECT_SYMBOL_FIRST_OWN + functions.len() + index)
+            }
         }
         else -> {
-            loop object in program.data -> data_symbols.push(if x64_object_read_only(object) -> ELF64_OBJECT_SYMBOL_RODATA else -> ELF64_OBJECT_SYMBOL_DATA)
+            loop object in program.data {
+                data_symbols.push(if x64_object_read_only(object) -> ELF64_OBJECT_SYMBOL_RODATA else -> ELF64_OBJECT_SYMBOL_DATA)
+            }
         }
     }
     // The data relocations in data order; with own sections each object's
@@ -750,11 +824,17 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], e
         {name: "", info: 3, section: ELF64_OBJECT_RODATA, value: 0, size: 0},
     }
     if own_sections {
-        loop index in 0..<functions.len() -> symbols.push(X64ObjectSymbol{name: "", info: 3, section: ELF64_OBJECT_FIRST_OWN + 2 * index, value: 0, size: 0})
-        loop index in 0..<program.data.len() -> symbols.push(X64ObjectSymbol{name: "", info: 3, section: ELF64_OBJECT_FIRST_OWN + 2 * (functions.len() + index), value: 0, size: 0})
+        loop index in 0..<functions.len() {
+            symbols.push(X64ObjectSymbol{name: "", info: 3, section: ELF64_OBJECT_FIRST_OWN + 2 * index, value: 0, size: 0})
+        }
+        loop index in 0..<program.data.len() {
+            symbols.push(X64ObjectSymbol{name: "", info: 3, section: ELF64_OBJECT_FIRST_OWN + 2 * (functions.len() + index), value: 0, size: 0})
+        }
     }
     loop (index, function) in functions {
-        if !exported[function.id.value + 1] -> symbols.push(X64ObjectSymbol{name: function.name, info: 2, section: x64_object_function_section(own_sections, index), value: offsets[index], size: function.code.len()})
+        if !exported[function.id.value + 1] {
+            symbols.push(X64ObjectSymbol{name: function.name, info: 2, section: x64_object_function_section(own_sections, index), value: offsets[index], size: function.code.len()})
+        }
     }
     first_global: symbols.len()
     loop entry_row in exports {
@@ -784,7 +864,9 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], e
     bounds: if workers <= 1 -> [Int]{0, functions.len()} else -> compiler_threads_partition(weights, workers)
     inputs: Shared{X64ObjectTextShared{functions: functions, offsets: offsets, function_rows: function_rows, data_offsets: data_offsets, function_symbols: function_symbols, data_symbols: data_symbols}}
     parts := [Shared<X64ObjectTextPart>]{}
-    loop part in 0..<(bounds.len() - 1) -> parts.push(Shared{X64ObjectTextPart{start: bounds[part], end: bounds[part + 1], outputs: [X64ObjectTextRows]{}}})
+    loop part in 0..<(bounds.len() - 1) {
+        parts.push(Shared{X64ObjectTextPart{start: bounds[part], end: bounds[part + 1], outputs: [X64ObjectTextRows]{}}})
+    }
     _ := x64_object_text_parts(inputs, parts, 0) ?? panic("the .text threads failed")
     text := [U8]{}
     rela_text := [U8]{}
@@ -871,7 +953,9 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], e
         }
         data_relas = [X64ObjectRela]{}
     }
-    loop name in imports -> symbols.push(X64ObjectSymbol{name: name, info: 0x10, section: 0, value: 0, size: 0})
+    loop name in imports {
+        symbols.push(X64ObjectSymbol{name: name, info: 0x10, section: 0, value: 0, size: 0})
+    }
 
     strtab := [U8]{U8{0}}
     symtab := [U8]{}
@@ -892,8 +976,19 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], e
     // The `.text` threads joined: their share of the functions drops.
     x64_object_text_release(inputs)
     X64ObjectLaid{
-        text: text.move(), data: data.move(), data_align: data_align, rodata: rodata.move(), rodata_align: rodata_align, rela_text: rela_text.move(),
-        symtab: symtab.move(), xindex: xindex.move(), strtab: strtab.move(), first_global: first_global, data_relas: data_relas.move(), own: own.move(), workers: workers,
+        text: text.move(),
+        data: data.move(),
+        data_align: data_align,
+        rodata: rodata.move(),
+        rodata_align: rodata_align,
+        rela_text: rela_text.move(),
+        symtab: symtab.move(),
+        xindex: xindex.move(),
+        strtab: strtab.move(),
+        first_global: first_global,
+        data_relas: data_relas.move(),
+        own: own.move(),
+        workers: workers,
     }
 }
 
@@ -995,7 +1090,7 @@ x64_object_file: fn(dwarf: X64DwarfSections, text: [U8], text_align: Int, data: 
     loop (index, entry_row) in exports {
         if entry_row.init_priority < 0 && entry_row.fini_priority < 0 -> next
         at := lifecycle_order.len()
-        loop at > 0 && exports[lifecycle_order[at - 1]].symbol > entry_row.symbol -> at = at - 1
+        loop at > 0 && exports[lifecycle_order[at - 1]].symbol > entry_row.symbol -> at -= 1
         lifecycle_order.insert(at, index)
     }
     loop index in lifecycle_order {
@@ -1016,7 +1111,9 @@ x64_object_file: fn(dwarf: X64DwarfSections, text: [U8], text_align: Int, data: 
             }
         }
     }
-    if xindex.len() > 0 -> sections.push(X64ObjectSection{name: ".symtab_shndx", kind: ELF64_SHT_SYMTAB_SHNDX, flags: 0, bytes: xindex, link: ELF64_OBJECT_SYMTAB, info: 0, align: 4, entry_size: 4})
+    if xindex.len() > 0 {
+        sections.push(X64ObjectSection{name: ".symtab_shndx", kind: ELF64_SHT_SYMTAB_SHNDX, flags: 0, bytes: xindex, link: ELF64_OBJECT_SYMTAB, info: 0, align: 4, entry_size: 4})
+    }
     count: sections.len() + 1
     // Section names, each written once (own sections share theirs).
     shstrtab := [U8]{U8{0}}

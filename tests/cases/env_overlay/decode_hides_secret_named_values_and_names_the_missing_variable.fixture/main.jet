@@ -26,7 +26,9 @@ Settings: struct {
 run: fn() {
     names: ["APP_PORT", "APP_DB_URL", "APP_DB_PASSWORD", "APP_API_KEY", "APP_STRIPE_SECRET", "APP_REPLICA__HOST"]
     if env.decode<Settings>(prefix: "APP_", file: "", allow: names) == {
-        .Ok(_) -> print("accepted")
-        .Err(errors) -> { loop error in errors -> print(error.reason) }
+        .Ok(_) -> { print("accepted") }
+        .Err(errors) -> {
+            loop error in errors -> print(error.reason)
+        }
     }
 }

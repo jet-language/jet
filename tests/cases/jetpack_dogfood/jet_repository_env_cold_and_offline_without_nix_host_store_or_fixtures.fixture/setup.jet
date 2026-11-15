@@ -1,4 +1,5 @@
 package: { name: "setup", authority: { allow: [Env, FS] } }
+
 use {
     dogfood_files: core.files
     dogfood_sys: core.sys
@@ -27,7 +28,9 @@ run: fn() {
     entries: dogfood_files.list_dir(repo) ?? panic("read live repository")
     loop entry in entries {
         name: entry.name
-        if name == ".git" || name == ".jet" || name == "target" || name.starts_with("target-") -> next
+        if name == ".git" || name == ".jet" || name == "target" || name.starts_with("target-") {
+            next
+        }
         destination: dogfood_files.join(project, name)
         if name == "env.jet" {
             dogfood_files.copy(entry.path, destination) ?? panic("copy live environment")

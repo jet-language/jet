@@ -1,12 +1,15 @@
-use web: core.web
-use server: core.http.server
+use {
+    web: core.web
+    server: core.http.server
+}
 
 #!Codable
-JokeID: struct { value: Int }
+JokeID: struct {
+    value: Int
+}
 
 Jokes: struct {
-    #Server.Get("/jokes/:id")
-    joke: fn(self, id: JokeID) -> HTTPResponse HTTPError! {
+    #Server.Get("/jokes/:id") joke: fn(self, id: JokeID) -> HTTPResponse HTTPError! {
         Ok(server.response(200, "joke={id.value}"))
     }
 }

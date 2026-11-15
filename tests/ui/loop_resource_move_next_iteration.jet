@@ -8,13 +8,12 @@ Res: struct {
         close: fn(&&self) { print("close {self.name}") }
     }
 }
+
 keep: fn(r: &&Res) { print("keep {r.name}") }
 
 run: fn() {
     r := Res{name: "r1"}
-    loop round in 0..<3 {
-        keep(r)
-    }
+    loop round in 0..<3 { keep(r) }
     s := Res{name: "s1"}
     loop round in 0..<3 {
         if round == 1 {

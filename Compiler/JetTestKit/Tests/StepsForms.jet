@@ -36,7 +36,7 @@ use {
         ["replace_first(\"a\", \"b\")", "aaa", "baa"],
         ["visible_cols", "{esc}[31mé{esc}[0m\nx\n", "1\n1"],
         ["cursor_up_counts", "a{esc}[3Ab{esc}[12A", "3\n12"],
-        ["final_frame", "old{esc}[Jnew{cr}\n{esc}[2A{esc}[Jcleanup", "new\n"]
+        ["final_frame", "old{esc}[Jnew{cr}\n{esc}[2A{esc}[Jcleanup", "new\n"],
     ]
     loop (index, row) in rows {
         kit_exec_write(files.join(directory, "input.txt"), row[1])
@@ -47,7 +47,8 @@ use {
         wrong: "step: cat\nstdin: input.txt\nstdout.{row[0]}: = wrong.txt # original predicate\n"
         assert_eq(cases_test_advanced(root, "fail-{index}", wrong).verdict.status, "FAIL")
     }
-    loop selector in ["split(\"|\", 9)", "find_block(\"|\", ~ \"missing\")", "slice(0, 99)", "line(9)", "strip_prefix(\"missing\")", "after_first(\"missing\")", "final_frame"] {
+    loop selector in
+        ["split(\"|\", 9)", "find_block(\"|\", ~ \"missing\")", "slice(0, 99)", "line(9)", "strip_prefix(\"missing\")", "after_first(\"missing\")", "final_frame"] {
         assert_eq(cases_test_advanced(root, "absent", "step: printf a\nstdout.{selector}: empty # original predicate\n").verdict.status, "FAIL")
     }
     assert_eq(cases_test_advanced(root, "unknown", "step: printf a\nstdout.unknown: empty # original predicate\n").verdict.status, "REFUSED")
@@ -76,7 +77,7 @@ use {
         ["a\nb\n", "has-line \"b\"", "has-line \"c\""],
         [" a b c\nx\n", "any-line words-prefix [\"a\",\"b\"]", "any-line words-prefix [\"a\",\"c\"]"],
         ["1.5\n 2 \n", "numeric-lines = [1.5,2]", "numeric-lines = [1.5,3]"],
-        ["1\n2\n", "each <= 2", "each < 2"]
+        ["1\n2\n", "each <= 2", "each < 2"],
     ]
     loop (index, row) in rows {
         kit_exec_write(files.join(directory, "input.txt"), row[0])
@@ -108,10 +109,12 @@ use {
     prefix: "write: data = \"abcdef\"\nwrite: pad = \"XX\"\nwrite: tail = \"XXhello\"\ncapture: n = size file data\ncapture: start = size file pad\ncapture: end = size file tail\n"
     good: "{prefix}file: data size = {{cap:n}}+0\nfile: data size <= 2*{{cap:n}}\nfile: data size < {{cap:n}}+1\nfile.slice({{cap:start}},{{cap:end}}): tail ~ \"hello\" # captured byte span\nstep: printf '{{\"double\":12,\"more\":7}}'\njson: stdout doc $.double = 2*{{cap:n}}\njson: stdout doc $.more >= {{cap:n}}+1\njson: stdout doc $.more != {{cap:n}}+2\n"
     assert_eq(cases_test_advanced(root, "good", good).verdict.status, "PASS")
-    loop (index, wrong) in ["file: data size = 2*{{cap:n}}", "file.slice({{cap:end}},{{cap:end}}): tail ~ \"h\" # captured byte span", "step: printf '{{\"double\":12}}'\njson: stdout doc $.double = {{cap:n}}+1"] {
+    loop (index, wrong) in
+        ["file: data size = 2*{{cap:n}}", "file.slice({{cap:end}},{{cap:end}}): tail ~ \"h\" # captured byte span", "step: printf '{{\"double\":12}}'\njson: stdout doc $.double = {{cap:n}}+1"] {
         assert_eq(cases_test_advanced(root, "wrong-{index}", "{prefix}{wrong}\n").verdict.status, "FAIL")
     }
-    loop (index, invalid) in ["file: data size = {{cap:n}}-1", "step: printf '[]'\njson: stdout doc $ has 2*{{cap:n}}", "step: printf x\nstdout.slice({{cap:start}},x): ~ \"x\" # captured byte span"] {
+    loop (index, invalid) in
+        ["file: data size = {{cap:n}}-1", "step: printf '[]'\njson: stdout doc $ has 2*{{cap:n}}", "step: printf x\nstdout.slice({{cap:start}},x): ~ \"x\" # captured byte span"] {
         assert_eq(cases_test_advanced(root, "invalid-{index}", "{prefix}{invalid}\n").verdict.status, "REFUSED")
     }
     files.remove_all(root) ?? panic("remove arithmetic scratch")

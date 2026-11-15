@@ -35,7 +35,6 @@
 //
 // Addresses and section offsets in the other sections are relocations
 // against section symbols, so any ELF linker can place the sections.
-
 use jet_foundation.[CompilerThreads, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single]
 
 ELF64_R_X86_64_32: 10
@@ -51,7 +50,13 @@ x64_dwarf_register: fn(reg: Int) -> Int Never! {
 // Object symbols the debug and unwind relocations name. With `functions`
 // empty every function is in `.text`, whose symbol is `text`; otherwise
 // function i is alone in the section whose symbol is functions[i].
-X64DwarfSymbols: struct { text: Int, abbrev: Int, line: Int, loclists: Int, functions: [Int] }
+X64DwarfSymbols: struct {
+    text: Int
+    abbrev: Int
+    line: Int
+    loclists: Int
+    functions: [Int]
+}
 
 X64DwarfSections: struct {
     eh_frame: [U8]
@@ -76,9 +81,7 @@ DwarfSectionRows: struct {
 // ---------------------------------------------------------------------------
 // Encoding.
 
-dwarf_u8: fn(bytes: &[U8], value: Int) Never! {
-    bytes.push(U8{value.bit_and(255)})
-}
+dwarf_u8: fn(bytes: &[U8], value: Int) Never! { bytes.push(U8{value.bit_and(255)}) }
 
 dwarf_uleb: fn(bytes: &[U8], value: Int) Never! {
     rest := value
@@ -129,7 +132,9 @@ dwarf_patch_length: fn(bytes: &[U8], at: Int) Never! {
 
 dwarf_cfa_advance: fn(cfi: &[U8], from: Int, to: Int) Never! {
     delta: to - from
-    if delta <= 0 -> return
+    if delta <= 0 {
+        return
+    }
     if {
         delta < 64 -> dwarf_u8(cfi, (0x40).bit_or(delta))
         delta < 256 -> {
@@ -230,61 +235,114 @@ dwarf_function_symbol: fn(symbols: X64DwarfSymbols, index: Int) -> Int Never! {
 // Abbreviations.
 
 DWARF_ABBREV_UNIT: 1
+
 DWARF_ABBREV_BASE: 2
+
 DWARF_ABBREV_POINTER: 3
+
 DWARF_ABBREV_VOID_POINTER: 4
+
 DWARF_ABBREV_STRUCT: 5
+
 DWARF_ABBREV_MEMBER: 6
+
 DWARF_ABBREV_UNION: 7
+
 DWARF_ABBREV_ENUM: 8
+
 DWARF_ABBREV_ENUMERATOR: 9
+
 DWARF_ABBREV_TYPEDEF: 10
+
 DWARF_ABBREV_OPAQUE: 11
+
 DWARF_ABBREV_SUBPROGRAM: 12
+
 DWARF_ABBREV_GENERATED: 13
+
 DWARF_ABBREV_PARAMETER: 14
+
 DWARF_ABBREV_VARIABLE: 15
+
 DWARF_ABBREV_PARAMETER_UNLOCATED: 16
+
 DWARF_ABBREV_VARIABLE_UNLOCATED: 17
+
 DWARF_ABBREV_ANONYMOUS_UNION: 18
+
 DWARF_ABBREV_ABSTRACT: 19
+
 DWARF_ABBREV_ABSTRACT_GENERATED: 20
+
 DWARF_ABBREV_INLINED: 21
 
 // Attribute names and forms.
 DW_AT_LOCATION: 0x02
+
 DW_AT_NAME: 0x03
+
 DW_AT_BYTE_SIZE: 0x0b
+
 DW_AT_STMT_LIST: 0x10
+
 DW_AT_LOW_PC: 0x11
+
 DW_AT_HIGH_PC: 0x12
+
 DW_AT_LANGUAGE: 0x13
+
 DW_AT_COMP_DIR: 0x1b
+
 DW_AT_CONST_VALUE: 0x1c
+
 DW_AT_INLINE: 0x20
+
 DW_AT_PRODUCER: 0x25
+
 DW_AT_ABSTRACT_ORIGIN: 0x31
+
 DW_AT_ARTIFICIAL: 0x34
+
 DW_AT_DATA_MEMBER_LOCATION: 0x38
+
 DW_AT_DECL_FILE: 0x3a
+
 DW_AT_DECL_LINE: 0x3b
+
 DW_AT_DECLARATION: 0x3c
+
 DW_AT_ENCODING: 0x3e
+
 DW_AT_EXTERNAL: 0x3f
+
 DW_AT_FRAME_BASE: 0x40
+
 DW_AT_TYPE: 0x49
+
 DW_AT_CALL_FILE: 0x58
+
 DW_AT_CALL_LINE: 0x59
+
 DW_FORM_ADDR: 0x01
+
 DW_FORM_DATA2: 0x05
+
 DW_FORM_DATA8: 0x07
+
 DW_FORM_STRING: 0x08
+
 DW_FORM_DATA1: 0x0b
+
 DW_FORM_SDATA: 0x0d
+
 DW_FORM_UDATA: 0x0f
+
 DW_FORM_REF4: 0x13
+
 DW_FORM_SEC_OFFSET: 0x17
+
 DW_FORM_EXPRLOC: 0x18
+
 DW_FORM_FLAG_PRESENT: 0x19
 
 // One abbreviation: code, DIE tag, whether it has children, then
@@ -319,13 +377,46 @@ dwarf_abbrevs: fn(sections: Bool) -> [U8] Never! {
     dwarf_abbrev(a, DWARF_ABBREV_ENUMERATOR, 0x28, false, [Int]{DW_AT_NAME, DW_FORM_STRING, DW_AT_CONST_VALUE, DW_FORM_SDATA})
     dwarf_abbrev(a, DWARF_ABBREV_TYPEDEF, 0x16, false, [Int]{DW_AT_NAME, DW_FORM_STRING, DW_AT_TYPE, DW_FORM_REF4})
     dwarf_abbrev(a, DWARF_ABBREV_OPAQUE, 0x13, false, [Int]{DW_AT_NAME, DW_FORM_STRING, DW_AT_BYTE_SIZE, DW_FORM_UDATA, DW_AT_DECLARATION, DW_FORM_FLAG_PRESENT})
-    dwarf_abbrev(a, DWARF_ABBREV_SUBPROGRAM, 0x2e, true, [Int]{
-        DW_AT_NAME, DW_FORM_STRING, DW_AT_DECL_FILE, DW_FORM_UDATA, DW_AT_DECL_LINE, DW_FORM_UDATA,
-        DW_AT_LOW_PC, DW_FORM_ADDR, DW_AT_HIGH_PC, DW_FORM_DATA8, DW_AT_FRAME_BASE, DW_FORM_EXPRLOC, DW_AT_EXTERNAL, DW_FORM_FLAG_PRESENT,
-    })
-    dwarf_abbrev(a, DWARF_ABBREV_GENERATED, 0x2e, false, [Int]{
-        DW_AT_NAME, DW_FORM_STRING, DW_AT_LOW_PC, DW_FORM_ADDR, DW_AT_HIGH_PC, DW_FORM_DATA8, DW_AT_FRAME_BASE, DW_FORM_EXPRLOC, DW_AT_ARTIFICIAL, DW_FORM_FLAG_PRESENT,
-    })
+    dwarf_abbrev(
+        a,
+        DWARF_ABBREV_SUBPROGRAM,
+        0x2e,
+        true,
+        [Int]{
+            DW_AT_NAME,
+            DW_FORM_STRING,
+            DW_AT_DECL_FILE,
+            DW_FORM_UDATA,
+            DW_AT_DECL_LINE,
+            DW_FORM_UDATA,
+            DW_AT_LOW_PC,
+            DW_FORM_ADDR,
+            DW_AT_HIGH_PC,
+            DW_FORM_DATA8,
+            DW_AT_FRAME_BASE,
+            DW_FORM_EXPRLOC,
+            DW_AT_EXTERNAL,
+            DW_FORM_FLAG_PRESENT,
+        },
+    )
+    dwarf_abbrev(
+        a,
+        DWARF_ABBREV_GENERATED,
+        0x2e,
+        false,
+        [Int]{
+            DW_AT_NAME,
+            DW_FORM_STRING,
+            DW_AT_LOW_PC,
+            DW_FORM_ADDR,
+            DW_AT_HIGH_PC,
+            DW_FORM_DATA8,
+            DW_AT_FRAME_BASE,
+            DW_FORM_EXPRLOC,
+            DW_AT_ARTIFICIAL,
+            DW_FORM_FLAG_PRESENT,
+        },
+    )
     dwarf_abbrev(a, DWARF_ABBREV_PARAMETER, 0x05, false, located)
     dwarf_abbrev(a, DWARF_ABBREV_VARIABLE, 0x34, false, located)
     dwarf_abbrev(a, DWARF_ABBREV_PARAMETER_UNLOCATED, 0x05, false, named_variable)
@@ -335,9 +426,24 @@ dwarf_abbrevs: fn(sections: Bool) -> [U8] Never! {
     // and one concrete inlined copy.
     dwarf_abbrev(a, DWARF_ABBREV_ABSTRACT, 0x2e, false, [Int]{DW_AT_NAME, DW_FORM_STRING, DW_AT_DECL_FILE, DW_FORM_UDATA, DW_AT_DECL_LINE, DW_FORM_UDATA, DW_AT_INLINE, DW_FORM_DATA1})
     dwarf_abbrev(a, DWARF_ABBREV_ABSTRACT_GENERATED, 0x2e, false, [Int]{DW_AT_NAME, DW_FORM_STRING, DW_AT_ARTIFICIAL, DW_FORM_FLAG_PRESENT, DW_AT_INLINE, DW_FORM_DATA1})
-    dwarf_abbrev(a, DWARF_ABBREV_INLINED, 0x1d, true, [Int]{
-        DW_AT_ABSTRACT_ORIGIN, DW_FORM_REF4, DW_AT_LOW_PC, DW_FORM_ADDR, DW_AT_HIGH_PC, DW_FORM_DATA8, DW_AT_CALL_FILE, DW_FORM_UDATA, DW_AT_CALL_LINE, DW_FORM_UDATA,
-    })
+    dwarf_abbrev(
+        a,
+        DWARF_ABBREV_INLINED,
+        0x1d,
+        true,
+        [Int]{
+            DW_AT_ABSTRACT_ORIGIN,
+            DW_FORM_REF4,
+            DW_AT_LOW_PC,
+            DW_FORM_ADDR,
+            DW_AT_HIGH_PC,
+            DW_FORM_DATA8,
+            DW_AT_CALL_FILE,
+            DW_FORM_UDATA,
+            DW_AT_CALL_LINE,
+            DW_FORM_UDATA,
+        },
+    )
     dwarf_uleb(a, 0)
     a
 }
@@ -504,7 +610,9 @@ dwarf_variable_buckets: fn(ranges: [X64VariableRange], count: Int) -> [[X64Varia
     buckets := [[X64VariableRange]]{}
     loop _ in 0..<count -> buckets.push([X64VariableRange]{})
     loop range in ranges {
-        if range.variable >= 0 && range.variable < count -> buckets[range.variable].push(range.copy())
+        if range.variable >= 0 && range.variable < count {
+            buckets[range.variable].push(range.copy())
+        }
     }
     buckets
 }
@@ -520,8 +628,12 @@ dwarf_variable_ranges: fn(ranges: [X64VariableRange]) -> [X64VariableRange] Neve
     trimmed := [X64VariableRange]{}
     loop (index, range) in sorted {
         end := range.end
-        if index + 1 < sorted.len() && sorted[index + 1].start < end -> end = sorted[index + 1].start
-        if end > range.start -> trimmed.push(X64VariableRange{variable: range.variable, start: range.start, end: end, location: range.location})
+        if index + 1 < sorted.len() && sorted[index + 1].start < end {
+            end = sorted[index + 1].start
+        }
+        if end > range.start {
+            trimmed.push(X64VariableRange{variable: range.variable, start: range.start, end: end, location: range.location})
+        }
     }
     trimmed
 }
@@ -570,7 +682,7 @@ dwarf_range_order: fn(ranges: [X64VariableRange]) -> [Int] Never! {
             start = end
         }
         loop index in 0..<count -> order[index] = scratch[index]
-        width = width + width
+        width += width
     }
     order
 }
@@ -650,12 +762,16 @@ dwarf_info: fn(sections: &X64DwarfSections, program: X64ObjectModule, functions:
     if workers <= 1 {
         // The unit starts `info`: the subprograms' own references need no shift.
         refs := [Int]{}
-        loop (index, function) in functions -> dwarf_info_function(info, relas, refs, lists, list_relas, program, function, debug[index], offsets[index], dwarf_function_symbol(symbols, index), type_offsets, symbols)
+        loop (index, function) in functions {
+            dwarf_info_function(info, relas, refs, lists, list_relas, program, function, debug[index], offsets[index], dwarf_function_symbol(symbols, index), type_offsets, symbols)
+        }
     } else {
         bounds: compiler_threads_partition(weights, workers)
         inputs: Shared{DwarfInfoShared{program: program, functions: functions, debug: debug, offsets: offsets, type_offsets: type_offsets, symbols: symbols}}
         parts := [Shared<DwarfInfoPart>]{}
-        loop part in 0..<(bounds.len() - 1) -> parts.push(Shared{DwarfInfoPart{start: bounds[part], end: bounds[part + 1], outputs: [DwarfInfoRows]{}}})
+        loop part in 0..<(bounds.len() - 1) {
+            parts.push(Shared{DwarfInfoPart{start: bounds[part], end: bounds[part + 1], outputs: [DwarfInfoRows]{}}})
+        }
         _ := dwarf_info_parts(inputs, parts, 0) ?? panic("the DWARF info threads failed")
         loop part in parts {
             rows: dwarf_info_part_take(part)
@@ -665,12 +781,16 @@ dwarf_info: fn(sections: &X64DwarfSections, program: X64ObjectModule, functions:
                 addend: if rela.symbol == symbols.loclists -> rela.addend + lists_base else -> rela.addend
                 relas.push(X64ObjectRela{at: rela.at + info_base, symbol: rela.symbol, kind: rela.kind, addend: addend})
             }
-            loop rela in rows.list_relas -> list_relas.push(X64ObjectRela{at: rela.at + lists_base, symbol: rela.symbol, kind: rela.kind, addend: rela.addend})
+            loop rela in rows.list_relas {
+                list_relas.push(X64ObjectRela{at: rela.at + lists_base, symbol: rela.symbol, kind: rela.kind, addend: rela.addend})
+            }
             // Bytes append as one block copy; popping them out one by one
             // (compiler_take_rows) grew the target per byte.
             info.extend(rows.info)
             lists.extend(rows.lists)
-            loop pair in 0..<(rows.refs.len() >> 1) -> dwarf_patch_u32(info, info_base + rows.refs[2 * pair], info_base + rows.refs[2 * pair + 1])
+            loop pair in 0..<(rows.refs.len() >> 1) {
+                dwarf_patch_u32(info, info_base + rows.refs[2 * pair], info_base + rows.refs[2 * pair + 1])
+            }
         }
     }
     dwarf_uleb(info, 0)
@@ -845,7 +965,9 @@ dwarf_info_function: fn(info: &[U8], relas: &[X64ObjectRela], refs: &[Int], list
         home: if row.site > 0 && row.site <= count -> homes[row.site] else -> 0
         held[home].push(variable)
     }
-    loop variable in held[0] -> dwarf_info_variable(info, relas, facts.variables[variable], facts.file, places[variable], type_offsets, symbols)
+    loop variable in held[0] {
+        dwarf_info_variable(info, relas, facts.variables[variable], facts.file, places[variable], type_offsets, symbols)
+    }
     // The runs, each inside the open run that contains it.
     ends := [Int]{}
     loop run in debug.inlines {
@@ -865,7 +987,9 @@ dwarf_info_function: fn(info: &[U8], relas: &[X64ObjectRela], refs: &[Int], list
         dwarf_uleb(info, if caller_file >= 0 -> caller_file + 1 else -> 0)
         dwarf_uleb(info, if site.call_line > 0 -> site.call_line else -> 0)
         file: if site.file >= 0 -> site.file else -> facts.file
-        loop variable in held[run.site] -> dwarf_info_variable(info, relas, facts.variables[variable], file, places[variable], type_offsets, symbols)
+        loop variable in held[run.site] {
+            dwarf_info_variable(info, relas, facts.variables[variable], file, places[variable], type_offsets, symbols)
+        }
         ends.push(run.end)
     }
     loop _ in ends -> dwarf_uleb(info, 0)
@@ -1075,9 +1199,17 @@ dwarf_jet_line: fn(program: X64ObjectModule, functions: [X64CompiledFunction], d
 // thread builds `.debug_info`: the bytes are the same for any thread count.
 x64_dwarf_sections: fn(program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], text_size: Int, symbols: X64DwarfSymbols, threads: CompilerThreads, debug_info: Bool) -> X64DwarfSections Never! {
     sections := X64DwarfSections{
-        eh_frame: [U8]{}, eh_relas: [X64ObjectRela]{}, abbrev: [U8]{}, info: [U8]{}, info_relas: [X64ObjectRela]{},
-        line: [U8]{}, line_relas: [X64ObjectRela]{}, jet_line: [U8]{}, jet_line_relas: [X64ObjectRela]{},
-        loclists: [U8]{}, loclists_relas: [X64ObjectRela]{},
+        eh_frame: [U8]{},
+        eh_relas: [X64ObjectRela]{},
+        abbrev: [U8]{},
+        info: [U8]{},
+        info_relas: [X64ObjectRela]{},
+        line: [U8]{},
+        line_relas: [X64ObjectRela]{},
+        jet_line: [U8]{},
+        jet_line_relas: [X64ObjectRela]{},
+        loclists: [U8]{},
+        loclists_relas: [X64ObjectRela]{},
     }
     rows := 0
     loop row in debug -> rows += 1 + row.lines.len()
@@ -1093,14 +1225,16 @@ x64_dwarf_sections: fn(program: X64ObjectModule, functions: [X64CompiledFunction
             line = dwarf_line(program, functions, debug, offsets, symbols)
             jet_line = dwarf_jet_line(program, functions, debug, offsets, symbols)
         }
-        else -> task.group dwarf_section_threads {
-            framing: task dwarf_eh_frame(functions, debug, offsets, symbols)
-            lining: task dwarf_line(program, functions, debug, offsets, symbols)
-            jet_lining: task dwarf_jet_line(program, functions, debug, offsets, symbols)
-            dwarf_info(sections, program, functions, debug, offsets, text_size, symbols, threads)
-            frame = framing.join() ?? panic(compiler_threads_failure_text(err))
-            line = lining.join() ?? panic(compiler_threads_failure_text(err))
-            jet_line = jet_lining.join() ?? panic(compiler_threads_failure_text(err))
+        else -> {
+            task.group dwarf_section_threads {
+                framing: task dwarf_eh_frame(functions, debug, offsets, symbols)
+                lining: task dwarf_line(program, functions, debug, offsets, symbols)
+                jet_lining: task dwarf_jet_line(program, functions, debug, offsets, symbols)
+                dwarf_info(sections, program, functions, debug, offsets, text_size, symbols, threads)
+                frame = framing.join() ?? panic(compiler_threads_failure_text(err))
+                line = lining.join() ?? panic(compiler_threads_failure_text(err))
+                jet_line = jet_lining.join() ?? panic(compiler_threads_failure_text(err))
+            }
         }
     }
     sections.eh_frame = frame.bytes.move()

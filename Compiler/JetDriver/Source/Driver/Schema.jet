@@ -14,16 +14,19 @@ JetDriverSchemaReadOutcome: enum {
     Invalid(raw: String, error: SchemaSnapshotError)
     Parsed(raw: String, snapshot: SchemaSnapshot)
 }
+
 JetDriverSchemaRead: struct {
     name: String
     cache_dir: String
     path: String
     outcome: JetDriverSchemaReadOutcome
 }
+
 JetDriverSchemaIngress: enum {
     Supplied(snapshots: [String:SchemaSnapshot])
     Cache(root: String, reads: [JetDriverSchemaRead])
 }
+
 JetDriverSchemaCheckResult: struct {
     registration: SemaRegistrationGraph
     diagnostics: [Diagnostic]
@@ -119,7 +122,9 @@ jet_driver_schema_pending_breaks: fn(modules: [[Item]], snapshots: [String:Schem
                 // Rust status attributes the legacy single marker flag only.
                 if !definition.is_published_schema -> next
                 matched := false
-                loop diagnostic in diagnostics { if diagnostic.what.contains("`{definition.name}`") -> matched = true }
+                loop diagnostic in diagnostics {
+                    if diagnostic.what.contains("`{definition.name}`") -> matched = true
+                }
                 if matched && !names.contains(definition.name) -> names.push(definition.name)
             }
         }

@@ -15,38 +15,68 @@ use {
 
 // Word_Break tags, generator WORD_TAGS order.
 WB_CR: 1
+
 WB_LF: 2
+
 WB_NEWLINE: 3
+
 WB_EXTEND: 4
+
 WB_ZWJ: 5
+
 WB_RI: 6
+
 WB_FORMAT: 7
+
 WB_KATAKANA: 8
+
 WB_HEBREW: 9
+
 WB_ALETTER: 10
+
 WB_SINGLEQUOTE: 11
+
 WB_DOUBLEQUOTE: 12
+
 WB_MIDNUMLET: 13
+
 WB_MIDLETTER: 14
+
 WB_MIDNUM: 15
+
 WB_NUMERIC: 16
+
 WB_EXTENDNUMLET: 17
+
 WB_WSEGSPACE: 18
 
 // Sentence_Break tags, generator SENTENCE_TAGS order.
 SB_CR: 1
+
 SB_LF: 2
+
 SB_EXTEND: 3
+
 SB_SEP: 4
+
 SB_FORMAT: 5
+
 SB_SP: 6
+
 SB_LOWER: 7
+
 SB_UPPER: 8
+
 SB_OLETTER: 9
+
 SB_NUMERIC: 10
+
 SB_ATERM: 11
+
 SB_SCONTINUE: 12
+
 SB_STERM: 13
+
 SB_CLOSE: 14
 
 // Rust jet_text_word_reduce:583-603 (WB4) unit: base Word_Break class, first
@@ -68,7 +98,7 @@ word_reduce: fn(raw: [U8]) -> [WordUnit] Never! {
     loop at < raw.len() {
         cp: text_string.scalar_at(raw, at)
         class: text_asset.asset_tag(word_asset, cp, 0)
-        at = at + text_string.utf8_width_at(raw, at)
+        at += text_string.utf8_width_at(raw, at)
         count: units.len()
         if count > 0 && (class == WB_EXTEND || class == WB_FORMAT || class == WB_ZWJ) {
             base: units[count - 1].class
@@ -100,26 +130,44 @@ word_break_at: fn(units: [WordUnit], i: Int, pictographic: [U8]) -> Bool Never! 
     pc: units[i].class
     cc: units[i + 1].class
     n: units.len()
-    if pc == WB_CR && cc == WB_LF -> return false // WB3
-    if is_word_newline(pc) -> return true // WB3a
-    if is_word_newline(cc) -> return true // WB3b
-    if units[i].last == WB_ZWJ && text_asset.asset_contains(pictographic, units[i + 1].first) -> return false // WB3c
-    if pc == WB_WSEGSPACE && cc == WB_WSEGSPACE && units[i].last == WB_WSEGSPACE -> return false // WB3d
-    if is_ahletter(pc) && is_ahletter(cc) -> return false // WB5
-    if is_ahletter(pc) && is_midletter_q(cc) && i + 2 < n && is_ahletter(units[i + 2].class) -> return false // WB6
-    if is_ahletter(cc) && is_midletter_q(pc) && i >= 1 && is_ahletter(units[i - 1].class) -> return false // WB7
-    if pc == WB_HEBREW && cc == WB_SINGLEQUOTE -> return false // WB7a
-    if pc == WB_HEBREW && cc == WB_DOUBLEQUOTE && i + 2 < n && units[i + 2].class == WB_HEBREW -> return false // WB7b
-    if pc == WB_DOUBLEQUOTE && cc == WB_HEBREW && i >= 1 && units[i - 1].class == WB_HEBREW -> return false // WB7c
-    if pc == WB_NUMERIC && cc == WB_NUMERIC -> return false // WB8
-    if is_ahletter(pc) && cc == WB_NUMERIC -> return false // WB9
-    if pc == WB_NUMERIC && is_ahletter(cc) -> return false // WB10
-    if cc == WB_NUMERIC && is_midnum_q(pc) && i >= 1 && units[i - 1].class == WB_NUMERIC -> return false // WB11
-    if pc == WB_NUMERIC && is_midnum_q(cc) && i + 2 < n && units[i + 2].class == WB_NUMERIC -> return false // WB12
-    if pc == WB_KATAKANA && cc == WB_KATAKANA -> return false // WB13
-    if (is_ahletter(pc) || pc == WB_NUMERIC || pc == WB_KATAKANA || pc == WB_EXTENDNUMLET) && cc == WB_EXTENDNUMLET -> return false // WB13a
-    if pc == WB_EXTENDNUMLET && (is_ahletter(cc) || cc == WB_NUMERIC || cc == WB_KATAKANA) -> return false // WB13b
-    true // WB999
+    if pc == WB_CR && cc == WB_LF -> return false  // WB3
+    if is_word_newline(pc) -> return true  // WB3a
+    if is_word_newline(cc) -> return true  // WB3b
+    if units[i].last == WB_ZWJ && text_asset.asset_contains(pictographic, units[i + 1].first) {
+        return false  // WB3c
+    }
+    if pc == WB_WSEGSPACE && cc == WB_WSEGSPACE && units[i].last == WB_WSEGSPACE -> return false  // WB3d
+    if is_ahletter(pc) && is_ahletter(cc) -> return false  // WB5
+    if is_ahletter(pc) && is_midletter_q(cc) && i + 2 < n && is_ahletter(units[i + 2].class) {
+        return false  // WB6
+    }
+    if is_ahletter(cc) && is_midletter_q(pc) && i >= 1 && is_ahletter(units[i - 1].class) {
+        return false  // WB7
+    }
+    if pc == WB_HEBREW && cc == WB_SINGLEQUOTE -> return false  // WB7a
+    if pc == WB_HEBREW && cc == WB_DOUBLEQUOTE && i + 2 < n && units[i + 2].class == WB_HEBREW {
+        return false  // WB7b
+    }
+    if pc == WB_DOUBLEQUOTE && cc == WB_HEBREW && i >= 1 && units[i - 1].class == WB_HEBREW {
+        return false  // WB7c
+    }
+    if pc == WB_NUMERIC && cc == WB_NUMERIC -> return false  // WB8
+    if is_ahletter(pc) && cc == WB_NUMERIC -> return false  // WB9
+    if pc == WB_NUMERIC && is_ahletter(cc) -> return false  // WB10
+    if cc == WB_NUMERIC && is_midnum_q(pc) && i >= 1 && units[i - 1].class == WB_NUMERIC {
+        return false  // WB11
+    }
+    if pc == WB_NUMERIC && is_midnum_q(cc) && i + 2 < n && units[i + 2].class == WB_NUMERIC {
+        return false  // WB12
+    }
+    if pc == WB_KATAKANA && cc == WB_KATAKANA -> return false  // WB13
+    if (is_ahletter(pc) || pc == WB_NUMERIC || pc == WB_KATAKANA || pc == WB_EXTENDNUMLET) && cc == WB_EXTENDNUMLET {
+        return false  // WB13a
+    }
+    if pc == WB_EXTENDNUMLET && (is_ahletter(cc) || cc == WB_NUMERIC || cc == WB_KATAKANA) {
+        return false  // WB13b
+    }
+    true  // WB999
 }
 
 // Rust jet_text_word_segments:654-687 boundary pass: WB15/WB16 regional
@@ -178,7 +226,7 @@ words: fn(text: String) -> [String] Never! {
                 out.push(owned_segment(raw, start, end))
                 break
             }
-            at = at + text_string.utf8_width_at(raw, at)
+            at += text_string.utf8_width_at(raw, at)
         }
         start = end
     }
@@ -204,37 +252,39 @@ sentence_breaks: fn(units: [SentenceUnit]) -> [Bool] Never! {
     loop i + 1 < n {
         current: units[i].class
         if current == SB_CR && units[i + 1].class == SB_LF {
-            i = i + 1 // SB3
+            i += 1  // SB3
             next
         }
         if is_sentence_para(current) {
-            breaks[i] = true // SB4
-            i = i + 1
+            breaks[i] = true  // SB4
+            i += 1
             next
         }
         if current == SB_ATERM || current == SB_STERM {
             if current == SB_ATERM && units[i + 1].class == SB_NUMERIC {
-                i = i + 1 // SB6
+                i += 1  // SB6
                 next
             }
             if current == SB_ATERM && i > 0 && (units[i - 1].class == SB_UPPER || units[i - 1].class == SB_LOWER) && units[i + 1].class == SB_UPPER {
-                i = i + 1 // SB7
+                i += 1  // SB7
                 next
             }
             j := i + 1
-            loop j < n && units[j].class == SB_CLOSE -> j = j + 1
+            loop j < n && units[j].class == SB_CLOSE -> j += 1
             close_end: j
-            loop j < n && units[j].class == SB_SP -> j = j + 1
+            loop j < n && units[j].class == SB_SP -> j += 1
             sp_end: j
             sb9: close_end < n && is_sentence_para(units[close_end].class)
             sb10: sp_end < n && (units[sp_end].class == SB_SP || is_sentence_para(units[sp_end].class))
             sb8a: sp_end < n && (units[sp_end].class == SB_SCONTINUE || units[sp_end].class == SB_STERM || units[sp_end].class == SB_ATERM)
             sb8: current == SB_ATERM && sentence_lower_follows(units, sp_end)
-            if !(sb9 || sb10 || sb8a || sb8) && sp_end > 0 && sp_end - 1 < breaks.len() -> breaks[sp_end - 1] = true // SB11
+            if !(sb9 || sb10 || sb8a || sb8) && sp_end > 0 && sp_end - 1 < breaks.len() {
+                breaks[sp_end - 1] = true  // SB11
+            }
             i = if sp_end > i -> sp_end else -> i + 1
             next
         }
-        i = i + 1
+        i += 1
     }
     breaks
 }
@@ -246,8 +296,10 @@ sentence_lower_follows: fn(units: [SentenceUnit], from: Int) -> Bool Never! {
     loop k < units.len() {
         class: units[k].class
         if class == SB_LOWER -> return true
-        if class == SB_OLETTER || class == SB_UPPER || is_sentence_para(class) || class == SB_STERM || class == SB_ATERM -> return false
-        k = k + 1
+        if class == SB_OLETTER || class == SB_UPPER || is_sentence_para(class) || class == SB_STERM || class == SB_ATERM {
+            return false
+        }
+        k += 1
     }
     false
 }
@@ -262,7 +314,7 @@ sentence_boundaries: fn(raw: [U8]) -> [Int] Never! {
     at := 0
     loop at < raw.len() {
         class: text_asset.asset_tag(sentence_asset, text_string.scalar_at(raw, at), 0)
-        at = at + text_string.utf8_width_at(raw, at)
+        at += text_string.utf8_width_at(raw, at)
         count: units.len()
         if count > 0 && (class == SB_EXTEND || class == SB_FORMAT) {
             base: units[count - 1].class
@@ -301,7 +353,7 @@ sentences: fn(text: String) -> [String] Never! {
     start := 0
     loop end in sentence_boundaries(raw) {
         segment := owned_segment(raw, start, end)
-        trimmed := text_string.trim(segment) // #4303: slice view flows into String list
+        trimmed := text_string.trim(segment)  // #4303: slice view flows into String list
         if trimmed != "" -> out.push(trimmed)
         start = end
     }

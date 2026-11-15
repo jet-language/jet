@@ -98,7 +98,9 @@ cli_adapter_source: fn(cache: &WorkspaceDeclarationCache, theme: Theme, raw: Str
         .Named(name) -> {
             upstream: table.upstream(name) ?? ""
             if upstream.starts_with("path:") -> return Val(upstream.removeprefix("path:"))
-            if upstream.starts_with("github:") -> return Val("{upstream.removeprefix("github:")}@github")
+            if upstream.starts_with("github:") {
+                return Val("{upstream.removeprefix("github:")}@github")
+            }
             why = "that named source does not point at a path or GitHub source tree."
             fix = "write `Pkg.adapt(...)` by hand with a quoted local `source: \"./...\"` value."
         }
@@ -145,9 +147,7 @@ cli_add_adapt: fn(cache: &WorkspaceDeclarationCache, theme: Theme, raw: String) 
         if text == "/" || text == ":" || text == "@" || text == "#" {
             if current != "" -> last = current
             current = ""
-        } else {
-            current = "{current}{text}"
-        }
+        } else { current = "{current}{text}" }
     }
     if current != "" -> last = current
     name: cli_trim_end_matches(if last == "" -> "tool" else -> last, ".git")
@@ -168,8 +168,12 @@ cli_add_component: fn(theme: Theme, component: StarterComponent) -[IO, FS, Env, 
         }
         .Err(error) -> {
             if error == {
-                .AlreadyExists(path) -> theme.error("{path} already exists", "it may already be customized — `jetpack add` never overwrites a component you own.", "edit it directly, or remove it first if you want a fresh copy.")
-                .IO(_) -> theme.error("could not add that component", error.message(), "check write permissions here.")
+                .AlreadyExists(path) -> {
+                    theme.error("{path} already exists", "it may already be customized — `jetpack add` never overwrites a component you own.", "edit it directly, or remove it first if you want a fresh copy.")
+                }
+                .IO(_) -> {
+                    theme.error("could not add that component", error.message(), "check write permissions here.")
+                }
             }
             EXIT_USER_ERROR
         }
@@ -199,9 +203,7 @@ cli_cmd_remove: fn(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Ti
     if !theme.confirm_apply(parsed.flags.assume_yes) -> return EXIT_OK
     if EnvFile.remove(dir, spec) == {
         .Ok(result) -> {
-            if result.removed {
-                theme.ok("removed {theme.bold(spec.package)} from {ENV_FILE}")
-            } else {
+            if result.removed -> theme.ok("removed {theme.bold(spec.package)} from {ENV_FILE}") else {
                 theme.status("{spec.package} was not in {ENV_FILE}.")
             }
             EXIT_OK

@@ -23,14 +23,22 @@ use {
 
 // ELF program header types and the dynamic tags the loader reads.
 JET_CLI_ELF_PT_LOAD: 1
+
 JET_CLI_ELF_PT_DYNAMIC: 2
+
 JET_CLI_ELF_PT_INTERP: 3
+
 JET_CLI_ELF_DT_NULL: 0
+
 JET_CLI_ELF_DT_NEEDED: 1
+
 JET_CLI_ELF_DT_STRTAB: 5
 
 #Error
-JetCLIElfError: struct { message: String }
+JetCLIElfError: struct {
+    message: String
+}
+
 jet_cli_elf_error: fn(message: String) -> JetCLIElfError Never! { JetCLIElfError{message: message} }
 
 // What the operating system must load before an image runs: the PT_INTERP
@@ -90,12 +98,18 @@ jet_cli_elf_offset: fn(bytes: [U8], phoff: Int, phentsize: Int, phnum: Int, addr
 // The loader needs of the little-endian ELF64 image `bytes`, or why this
 // audit can't read them.
 jet_cli_elf_loader: fn(bytes: [U8]) -> JetCLIElfLoader JetCLIElfError! {
-    if bytes.len() < 64 || bytes[0] != (U8{127}) || bytes[1] != (U8{69}) || bytes[2] != (U8{76}) || bytes[3] != (U8{70}) -> return Err(jet_cli_elf_error("the image is not an ELF file"))
-    if bytes[4] != (U8{2}) || bytes[5] != (U8{1}) -> return Err(jet_cli_elf_error("the image is not a little-endian ELF64 file"))
+    if bytes.len() < 64 || bytes[0] != (U8{127}) || bytes[1] != (U8{69}) || bytes[2] != (U8{76}) || bytes[3] != (U8{70}) {
+        return Err(jet_cli_elf_error("the image is not an ELF file"))
+    }
+    if bytes[4] != (U8{2}) || bytes[5] != (U8{1}) {
+        return Err(jet_cli_elf_error("the image is not a little-endian ELF64 file"))
+    }
     phoff: jet_cli_elf_field(bytes, 32, 8) ?? return Err(jet_cli_elf_error("the ELF header is truncated"))
     phentsize: jet_cli_elf_field(bytes, 54, 2) ?? return Err(jet_cli_elf_error("the ELF header is truncated"))
     phnum: jet_cli_elf_field(bytes, 56, 2) ?? return Err(jet_cli_elf_error("the ELF header is truncated"))
-    if phentsize < 56 || phoff + phnum * phentsize > bytes.len() -> return Err(jet_cli_elf_error("the ELF program headers lie outside the image"))
+    if phentsize < 56 || phoff + phnum * phentsize > bytes.len() {
+        return Err(jet_cli_elf_error("the ELF program headers lie outside the image"))
+    }
     loader := JetCLIElfLoader{interpreter: None, dynamic: false, needed: [String]{}}
     loop index in 0..<phnum {
         header: phoff + index * phentsize
@@ -103,7 +117,9 @@ jet_cli_elf_loader: fn(bytes: [U8]) -> JetCLIElfLoader JetCLIElfError! {
         offset: jet_cli_elf_field(bytes, header + 8, 8) ?? return Err(jet_cli_elf_error("the ELF program headers are truncated"))
         filesz: jet_cli_elf_field(bytes, header + 32, 8) ?? return Err(jet_cli_elf_error("the ELF program headers are truncated"))
         if kind != JET_CLI_ELF_PT_INTERP && kind != JET_CLI_ELF_PT_DYNAMIC -> next
-        if offset + filesz > bytes.len() -> return Err(jet_cli_elf_error("ELF segment {index} lies outside the image"))
+        if offset + filesz > bytes.len() {
+            return Err(jet_cli_elf_error("ELF segment {index} lies outside the image"))
+        }
         if kind == JET_CLI_ELF_PT_INTERP {
             loader.interpreter = Val(jet_cli_elf_string(bytes, offset) ?? return Err(jet_cli_elf_error("the PT_INTERP interpreter path is not UTF-8")))
             next
@@ -174,7 +190,9 @@ jet_cli_foreign_audit_list: fn(words: [String]) -> String Never! {
 jet_cli_foreign_audit_text: fn(audit: JetCLIForeignAudit) -> String Never! {
     count: if audit.declarations.len() == 0 -> "none" else -> "{audit.declarations.len()}"
     out := "foreign declarations: {count}\n"
-    loop row in audit.declarations -> out = "{out}  {row.path}:{row.line}  {row.language}  {row.name} -> {row.symbol}\n"
+    loop row in audit.declarations {
+        out = "{out}  {row.path}:{row.line}  {row.language}  {row.name} -> {row.symbol}\n"
+    }
     out = "{out}FFI effects reached: {jet_cli_foreign_audit_list(audit.ffi_effects)}\n"
     out = "{out}C libraries linked: {jet_cli_foreign_audit_list(audit.c_libraries)}\n"
     loader: if {
@@ -183,7 +201,9 @@ jet_cli_foreign_audit_text: fn(audit: JetCLIForeignAudit) -> String Never! {
         else -> "none (static ELF, no needed libraries)"
     }
     out = "{out}dynamic loader: {loader}\n"
-    if audit.loader.needed.len() > 0 -> out = "{out}needed libraries: {audit.loader.needed.join(", ")}\n"
+    if audit.loader.needed.len() > 0 {
+        out = "{out}needed libraries: {audit.loader.needed.join(", ")}\n"
+    }
     out = "{out}host effects: {jet_cli_foreign_audit_list(audit.host_effects)}\n"
     verdict: if jet_cli_foreign_audit_clean(audit) -> "none" else -> "present"
     "{out}foreign code: {verdict}\n"
@@ -196,19 +216,23 @@ jet_cli_foreign_audit_texts: fn(words: [String]) -> JetCLIStatusValue Never! {
 
 // The `jet.status/v1` report of `audit`.
 jet_cli_foreign_audit_json: fn(audit: JetCLIForeignAudit) -> String Never! {
-    rows: loop row in audit.declarations -> jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("path", jet_cli_status_text(row.path)),
-        jet_cli_status_field("line", jet_cli_status_int(row.line)),
-        jet_cli_status_field("language", jet_cli_status_text(row.language)),
-        jet_cli_status_field("name", jet_cli_status_text(row.name)),
-        jet_cli_status_field("symbol", jet_cli_status_text(row.symbol)),
-    })
+    rows: loop row in audit.declarations -> jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("path", jet_cli_status_text(row.path)),
+            jet_cli_status_field("line", jet_cli_status_int(row.line)),
+            jet_cli_status_field("language", jet_cli_status_text(row.language)),
+            jet_cli_status_field("name", jet_cli_status_text(row.name)),
+            jet_cli_status_field("symbol", jet_cli_status_text(row.symbol)),
+        },
+    )
     interpreter: if audit.loader.interpreter == .Val(path) -> jet_cli_status_text(path) else -> JetCLIStatusValue.Null
-    loader: jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("interpreter", interpreter),
-        jet_cli_status_field("dynamic", jet_cli_status_bool(audit.loader.dynamic)),
-        jet_cli_status_field("needed", jet_cli_foreign_audit_texts(audit.loader.needed)),
-    })
+    loader: jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("interpreter", interpreter),
+            jet_cli_status_field("dynamic", jet_cli_status_bool(audit.loader.dynamic)),
+            jet_cli_status_field("needed", jet_cli_foreign_audit_texts(audit.loader.needed)),
+        },
+    )
     fields: [JetCLIStatusField]{
         jet_cli_status_field("declarations", jet_cli_status_array(rows)),
         jet_cli_status_field("ffi_effects", jet_cli_foreign_audit_texts(audit.ffi_effects)),
@@ -242,7 +266,9 @@ jet_cli_audit_foreign: fn(file: String, source: String, color: Bool, json: Bool)
                 .Image(executable, _) -> {
                     whole := executable.move()
                     complete: x64_executable_complete(whole)
-                    if complete != "" -> return jet_cli_ice("the foreign audit couldn't read the linked image of `{file}`: {complete}")
+                    if complete != "" {
+                        return jet_cli_ice("the foreign audit couldn't read the linked image of `{file}`: {complete}")
+                    }
                     loader: jet_cli_elf_loader(x64_executable_bytes(whole)) ?? return jet_cli_ice("the foreign audit couldn't read the linked image of `{file}`: {err.message}")
                     audit: jet_cli_foreign_audit(facts, effects, loader)
                     stdout: if json -> jet_cli_foreign_audit_json(audit) else -> jet_cli_foreign_audit_text(audit)
@@ -296,13 +322,17 @@ jet_cli_elf_test_refusal: fn(bytes: [U8]) -> String Never! {
     // PT_LOAD maps file bytes 0..1024 at 0x400000. PT_INTERP is at 512 and
     // PT_DYNAMIC at 640: DT_STRTAB 0x400300, DT_NEEDED 1 and 11, DT_NULL.
     // The string table at file offset 768 holds "\0libc.so.6\0libm.so.6\0".
-    image := jet_cli_elf_test_image([[Int]]{
-        [Int]{JET_CLI_ELF_PT_LOAD, 0, 4194304, 1024},
-        [Int]{JET_CLI_ELF_PT_INTERP, 512, 4194816, 28},
-        [Int]{JET_CLI_ELF_PT_DYNAMIC, 640, 4194944, 64},
-    }, 1024)
+    image := jet_cli_elf_test_image(
+        [[Int]]{
+            [Int]{JET_CLI_ELF_PT_LOAD, 0, 4194304, 1024},
+            [Int]{JET_CLI_ELF_PT_INTERP, 512, 4194816, 28},
+            [Int]{JET_CLI_ELF_PT_DYNAMIC, 640, 4194944, 64},
+        },
+        1024,
+    )
     loop (k, byte) in "/lib64/ld-linux-x86-64.so.2".bytes() -> image[512 + k] = byte
-    loop (k, value) in ([Int]{JET_CLI_ELF_DT_STRTAB, 4195072, JET_CLI_ELF_DT_NEEDED, 1, JET_CLI_ELF_DT_NEEDED, 11, JET_CLI_ELF_DT_NULL, 0}) {
+    loop (k, value) in
+        ([Int]{JET_CLI_ELF_DT_STRTAB, 4195072, JET_CLI_ELF_DT_NEEDED, 1, JET_CLI_ELF_DT_NEEDED, 11, JET_CLI_ELF_DT_NULL, 0}) {
         jet_cli_elf_test_put(image, 640 + k * 8, 8, value)
     }
     loop (k, byte) in "libc.so.6".bytes() -> image[769 + k] = byte

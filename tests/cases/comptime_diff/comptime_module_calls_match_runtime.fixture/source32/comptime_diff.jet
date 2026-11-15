@@ -4,12 +4,12 @@ use {
     cbor: core.encoding.cbor
     hex: core.encoding.hex
 }
+
 COMPTIME_VALUE: #run hex.encode(cbor.to_bytes(json.parse("{{\"a\":1,\"b\":[1,2,3],\"c\":-7}}") ?? panic("bad")) ?? panic("bad"))
 
 run: fn() {
     r: hex.encode(cbor.to_bytes(json.parse("{{\"a\":1,\"b\":[1,2,3],\"c\":-7}}") ?? panic("bad")) ?? panic("bad"))
     comptime_diff_frame("{COMPTIME_VALUE}", "{r}")
-
 }
 
 comptime_diff_frame: fn(expected_text: String, actual_text: String) {

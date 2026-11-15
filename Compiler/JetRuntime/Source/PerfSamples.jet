@@ -12,20 +12,27 @@
 
 // O_WRONLY|O_CREAT|O_APPEND|O_CLOEXEC.
 PERF_SAMPLES_OPEN: I64{525377}
+
 PERF_SAMPLES_SIGNAL: I64{27}
+
 // One sample per millisecond of CPU time.
 PERF_SAMPLES_INTERVAL_US: I64{1000}
 
 // The samples file, -1 until the start opens it, and the bias its addresses
 // are taken less.
 perf_samples_fd := I64{-1}
+
 perf_samples_bias := I64{0}
 
 // Start sampling when JET_PERF_SAMPLES names a file; once per process.
 perf_samples_start: fn() {
-    if (perf_samples_fd >= I64{0}) -> return
+    if (perf_samples_fd >= I64{0}) {
+        return
+    }
     path: rt_env_get(env_name_jet_perf_samples())
-    if (path == I64{0}) -> return
+    if (path == I64{0}) {
+        return
+    }
     fd := I64{-1}
     if (rt_text_len(path) != I64{0}) {
         name: fd_c_path(path)
@@ -33,7 +40,9 @@ perf_samples_start: fn() {
         fd_c_path_drop(name, path)
     }
     jet_rt_string_drop(path)
-    if (fd < I64{0}) -> return
+    if (fd < I64{0}) {
+        return
+    }
     bias: alloc_check_bias(alloc_check_image())
     #Unsafe("the observation start runs before the timer whose handler reads these is armed") {
         perf_samples_bias = bias
@@ -62,14 +71,16 @@ perf_samples_start: fn() {
 }
 
 // Checked FunctionAddress intrinsic in the canonical RuntimeLibrary table.
-rt_perf_samples_signal_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+rt_perf_samples_signal_address: fn() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
 
 // The SIGPROF handler (SA_SIGINFO): the interrupted rip is ucontext_t's
 // mcontext gregs[16], at 168. A write the kernel refuses loses that one
 // sample; O_APPEND puts each word after the last.
 #Export(c) jet_rt_perf_samples_signal: fn(_signal: I64, _info: I64, context: I64) -> I64 {
     fd: perf_samples_fd
-    if (fd < I64{0} || context == I64{0}) -> return I64{0}
+    if (fd < I64{0} || context == I64{0}) { return I64{0} }
     pc: rt_text_word(wrapping(context + I64{168}))
     #Unsafe("one write of a stack-local word, which the kernel copies before the call returns") {
         _ := os_write_word_i64(fd, wrapping(pc - perf_samples_bias), I64{8})

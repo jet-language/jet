@@ -3,7 +3,6 @@
 // glance, and help-app prefill widgets. The prompt label never enters shell
 // source: every generated prompt reads `$JETPACK_PROMPT_LABEL` through a fixed
 // quoted print, so label contents stay data.
-
 use {
     jet_foundation.[ENV_JETPACK_PROMPT_LABEL]
     jetpack_foundation.[ACCENT_SGR, BORDER_SGR, ERROR_SGR, SUCCESS_SGR, WARN_SGR]
@@ -17,9 +16,7 @@ ENV_SHELL_PROMPT_LABEL_ENV: ENV_JETPACK_PROMPT_LABEL
 
 // One ASCII control byte as text. Plain Jet strings have no byte escapes, so
 // the readline invisible markers (0x01/0x02) and ESC are built here.
-env_shell_control: fn(code: Int) -> String Never! {
-    String.from_bytes([U8]{U8{code}}) ?? ""
-}
+env_shell_control: fn(code: Int) -> String Never! { String.from_bytes([U8]{U8{code}}) ?? "" }
 
 // The shells Jetpack can decorate. Anything else falls back to `bash`.
 ShellKind: enum {
@@ -69,7 +66,7 @@ ShellKind: enum {
                 "  __jet_help_prefill() {{ local picked; picked=$(JET_HELP_SHELL_PREFILL=1 command jet </dev/tty) || return; [ -n \"$picked\" ] || return; READLINE_LINE=$picked; READLINE_POINT=$(printf %s \"$READLINE_LINE\" | wc -c); }}",
                 "  bind -x '\"\\e?\":__jet_help_prefill' 2>/dev/null || true",
                 "  jet() {{ if [ \"$#\" -eq 0 ]; then local picked code line; picked=$(JET_HELP_SHELL_PREFILL=1 command jet </dev/tty); code=$?; [ -n \"$picked\" ] || return $code; if IFS= read -r -e -i \"$picked\" -p \"${{PS1@P}}\" line; then [ -n \"$line\" ] || return 0; history -s -- \"$line\"; eval -- \"$line\"; return $?; fi; return 0; fi; command jet \"$@\"; }}",
-                "fi"
+                "fi",
             }
             .Zsh -> [String]{
                 "if ! typeset -f __jet_help_prefill >/dev/null 2>&1; then",
@@ -77,7 +74,7 @@ ShellKind: enum {
                 "  zle -N __jet_help_prefill 2>/dev/null || true",
                 "  bindkey '^[?' __jet_help_prefill 2>/dev/null || true",
                 "  jet() {{ if [[ $# -eq 0 ]]; then local picked; picked=$(JET_HELP_SHELL_PREFILL=1 command jet </dev/tty) || return; [[ -n $picked ]] || return 0; print -z -- \"$picked\"; return 0; fi; command jet \"$@\"; }}",
-                "fi"
+                "fi",
             }
             .Fish -> [String]{
                 "if not functions -q __jet_help_prefill",
@@ -85,7 +82,7 @@ ShellKind: enum {
                 "  bind \\e\\? __jet_help_prefill",
                 "  function jet; if test (count $argv) -eq 0; set -e __jet_help_pending; set -l picked (begin; set -lx JET_HELP_SHELL_PREFILL 1; command jet </dev/tty; end); set -l code $status; if test -n \"$picked\"; set -g __jet_help_pending \"$picked\"; end; return $code; end; command jet $argv; end",
                 "  function __jet_help_postexec --on-event fish_postexec; set -q __jet_help_pending; or return; commandline -r -- \"$__jet_help_pending\"; commandline -C (string length -- \"$__jet_help_pending\"); set -e __jet_help_pending; end",
-                "end"
+                "end",
             }
         }
         "{lines.join("\n")}\n"
@@ -104,11 +101,11 @@ BrandedShell: struct {
 
     cleanup: fn(self) -[FS]> {
         if self.cleanup_file == {
-            .Val(path) -> env_shell_remove_file(path)
+            .Val(path) -> { env_shell_remove_file(path) }
             .None -> {}
         }
         if self.cleanup_dir == {
-            .Val(path) -> env_shell_remove_tree(path)
+            .Val(path) -> { env_shell_remove_tree(path) }
             .None -> {}
         }
     }
@@ -124,7 +121,7 @@ BrandedShell: struct {
                     command_tail: [String]{"bash", "--rcfile", rc, "-i"},
                     env_vars: [(name: String, value: String)]{(name: ENV_SHELL_PROMPT_LABEL_ENV, value: label)},
                     cleanup_file: Val(rc),
-                    cleanup_dir: None
+                    cleanup_dir: None,
                 }
             }
             .Zsh -> {
@@ -134,17 +131,17 @@ BrandedShell: struct {
                     command_tail: [String]{"zsh", "-i"},
                     env_vars: [(name: String, value: String)]{
                         (name: "ZDOTDIR", value: dir),
-                        (name: ENV_SHELL_PROMPT_LABEL_ENV, value: label)
+                        (name: ENV_SHELL_PROMPT_LABEL_ENV, value: label),
                     },
                     cleanup_file: None,
-                    cleanup_dir: Val(dir)
+                    cleanup_dir: Val(dir),
                 }
             }
             .Fish -> BrandedShell{
                 command_tail: [String]{"fish", "-C", env_shell_fish_init(label, path, strip), "-i"},
                 env_vars: [(name: String, value: String)]{(name: ENV_SHELL_PROMPT_LABEL_ENV, value: label)},
                 cleanup_file: None,
-                cleanup_dir: None
+                cleanup_dir: None,
             }
         }
     }
@@ -218,7 +215,7 @@ env_shell_bash_rc: fn(label: String, path: PromptPathMode, strip: PromptStripMod
         "PS1='{status_prefix}$(printf \"%s\" \"$JETPACK_PROMPT_LABEL\") {path_escape} > '",
         "else",
         "PS1='{status_prefix}{soh}{esc}[{accent}m{stx}$(printf \"%s\" \"$JETPACK_PROMPT_LABEL\"){soh}{esc}[0m{stx} {soh}{esc}[{border}m{stx}{path_escape}{soh}{esc}[0m{stx} {soh}{esc}[{success}m{stx}❯{soh}{esc}[0m{stx} '",
-        "fi"
+        "fi",
     }
     rc: lines.join("\n")
     "{rc}\n{(ShellKind.Bash).help_prefill_widgets()}"
@@ -254,7 +251,7 @@ env_shell_zsh_rc: fn(label: String, path: PromptPathMode, strip: PromptStripMode
         "PROMPT=$'{status_prefix}$(print -r -- \"$JETPACK_PROMPT_LABEL\") {path_escape} > '",
         "else",
         "PROMPT=$'{status_prefix}%{{\\033[{accent}m%}}$(print -r -- \"$JETPACK_PROMPT_LABEL\")%{{\\033[0m%}} %{{\\033[{border}m%}}{path_escape}%{{\\033[0m%}} %{{\\033[{success}m%}}❯%{{\\033[0m%}} '",
-        "fi"
+        "fi",
     }
     rc: lines.join("\n")
     "{rc}\n{(ShellKind.Zsh).help_prefill_widgets()}"
@@ -284,7 +281,7 @@ env_shell_fish_init: fn(label: String, path: PromptPathMode, strip: PromptStripM
         "if set -q NO_COLOR; printf '%s ' \"$JETPACK_PROMPT_LABEL\"; echo -n ({path_expr}); echo -n ' > '; ",
         "else; printf '\\033[{accent}m%s\\033[0m ' \"$JETPACK_PROMPT_LABEL\"; ",
         "printf '\\033[{border}m%s\\033[0m' ({path_expr}); ",
-        "printf ' \\033[{success}m❯\\033[0m '; end; end\n"
+        "printf ' \\033[{success}m❯\\033[0m '; end; end\n",
     }
     init: parts.join("")
     "{init}{(ShellKind.Fish).help_prefill_widgets()}"
@@ -312,13 +309,9 @@ ShellScratch: struct {
 
 // Best-effort scratch cleanup: a scratch path that is already gone or cannot
 // be removed never turns a finished shell session into a failure.
-env_shell_remove_file: fn(path: String) -[FS]> {
-    files.remove(path) ?? return
-}
+env_shell_remove_file: fn(path: String) -[FS]> { files.remove(path) ?? return }
 
-env_shell_remove_tree: fn(path: String) -[FS]> {
-    files.remove_all(path) ?? return
-}
+env_shell_remove_tree: fn(path: String) -[FS]> { files.remove_all(path) ?? return }
 
 // Best-effort generated-init write; a failed write surfaces when the shell
 // starts without its rc, exactly as the Rust helpers ignored it.

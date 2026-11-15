@@ -17,7 +17,6 @@
 // builder; they belong to the `build: fn` driver path, and the action key
 // encodes each one in its empty form exactly as Rust does for a plan that has
 // none.
-
 use {
     jet_foundation.[foundation_debug_quoted]
     jetpack_foundation.[BuildEffect]
@@ -103,13 +102,19 @@ TargetSpec: struct {
     probes: [ProbeHandle]
     toolchain: ToolchainHandle?
     signing_identity: SigningIdentityHandle?
-    metadata: [String: String]
+    metadata: [String:String]
 
     new: fn() -> TargetSpec Never! {
         TargetSpec{
-            sources: [String]{}, inputs: [String]{}, outputs: [String]{}, deps: [TargetRef]{},
-            actions: [HermeticActionHandle]{}, probes: [ProbeHandle]{}, toolchain: None,
-            signing_identity: None, metadata: [String: String]{},
+            sources: [String]{},
+            inputs: [String]{},
+            outputs: [String]{},
+            deps: [TargetRef]{},
+            actions: [HermeticActionHandle]{},
+            probes: [ProbeHandle]{},
+            toolchain: None,
+            signing_identity: None,
+            metadata: [String:String]{},
         }
     }
 
@@ -180,7 +185,7 @@ HermeticBuildTarget: struct {
     probes: [ProbeHandle]
     toolchain: ToolchainHandle
     signing_identity: SigningIdentityHandle?
-    metadata: [String: String]
+    metadata: [String:String]
 }
 
 BuildResourcePool: enum {
@@ -240,9 +245,7 @@ ActionKind: enum {
 
     // Exact source bytes remain identity inputs when these surfaces can
     // observe them.
-    observes_exact_source: fn(self) -> Bool Never! {
-        self != ActionKind.Generic
-    }
+    observes_exact_source: fn(self) -> Bool Never! { self != ActionKind.Generic }
 }
 
 // An output kept in git (`.output(path, kept: true)`): publishing rewrites it
@@ -284,7 +287,7 @@ ActionSpec: struct {
     // The found programs it is passed.
     programs: [ActionProgram]
     argv: [String]
-    env: [String: String]
+    env: [String:String]
     // Only allowlisted env keys enter the action identity. Empty means the
     // declared `env` map itself is the allowlist. Kept sorted and unique
     // (Rust `BTreeSet`).
@@ -297,8 +300,8 @@ ActionSpec: struct {
     toolchain: ToolchainHandle?
     probes: [ProbeHandle]
     signing_identity: SigningIdentityHandle?
-    labels: [String: String]
-    helper_versions: [String: String]
+    labels: [String:String]
+    helper_versions: [String:String]
     // Sorted by rank, then custom name, and unique (Rust `BTreeSet`).
     resource_pools: [BuildResourcePool]
     variant_identity: String?
@@ -308,11 +311,24 @@ ActionSpec: struct {
 
     new: fn(argv: [String]) -> ActionSpec Never! {
         ActionSpec{
-            inputs: [String]{}, outputs: [String]{}, kept: [KeptOutput]{}, folders: [ActionFolder]{}, programs: [ActionProgram]{}, argv: argv, env: [String: String]{},
-            env_allowlist: [String]{}, caps: [BuildEffect]{},
-            kind: ActionKind.Generic, toolchain: None, probes: [ProbeHandle]{}, signing_identity: None,
-            labels: [String: String]{}, helper_versions: [String: String]{},
-            resource_pools: [BuildResourcePool]{}, variant_identity: None, timeout_ms: None,
+            inputs: [String]{},
+            outputs: [String]{},
+            kept: [KeptOutput]{},
+            folders: [ActionFolder]{},
+            programs: [ActionProgram]{},
+            argv: argv,
+            env: [String:String]{},
+            env_allowlist: [String]{},
+            caps: [BuildEffect]{},
+            kind: ActionKind.Generic,
+            toolchain: None,
+            probes: [ProbeHandle]{},
+            signing_identity: None,
+            labels: [String:String]{},
+            helper_versions: [String:String]{},
+            resource_pools: [BuildResourcePool]{},
+            variant_identity: None,
+            timeout_ms: None,
         }
     }
 
@@ -357,7 +373,7 @@ ActionSpec: struct {
     // use the probe (with_probe).
     with_found_program: fn(self, at: Int, flag: String, probe: ProbeHandle) -> ActionSpec Never! {
         updated := self
-        updated.programs.push(ActionProgram{at, flag: flag.copy(), probe})
+        updated.programs.push(ActionProgram{at: at, flag: flag.copy(), probe: probe})
         updated
     }
 
@@ -443,15 +459,15 @@ HermeticBuildAction: struct {
     folders: [ActionFolder]
     programs: [ActionProgram]
     argv: [String]
-    env: [String: String]
+    env: [String:String]
     env_allowlist: [String]
     caps: [BuildEffect]
     kind: ActionKind
     toolchain: ToolchainHandle
     probes: [ProbeHandle]
     signing_identity: SigningIdentityHandle?
-    labels: [String: String]
-    helper_versions: [String: String]
+    labels: [String:String]
+    helper_versions: [String:String]
     resource_pools: [BuildResourcePool]
     variant_identity: String?
     timeout_ms: Int?
@@ -472,14 +488,18 @@ build_effects_reusable: fn(caps: [BuildEffect]) -> Bool Never! {
 
 // Rust `BTreeSet<String>::insert`.
 build_insert_sorted_text: fn(values: &[String], value: String) Never! {
-    if values.contains(value) -> return
+    if values.contains(value) {
+        return
+    }
     values.push(value.copy())
     values.sort()
 }
 
 // Rust `BTreeSet<BuildCapability>::insert`.
 build_insert_effect: fn(values: &[BuildEffect], ability: BuildEffect) Never! {
-    if values.contains(ability) -> return
+    if values.contains(ability) {
+        return
+    }
     values.push(ability.copy())
     values.sort_by(fn(written) { written.rank() })
 }
@@ -487,7 +507,9 @@ build_insert_effect: fn(values: &[BuildEffect], ability: BuildEffect) Never! {
 // Rust `BTreeSet<BuildResourcePool>::insert`.
 build_insert_pool: fn(values: &[BuildResourcePool], pool: BuildResourcePool) Never! {
     loop existing in values {
-        if existing == pool -> return
+        if existing == pool {
+            return
+        }
     }
     values.push(pool.copy())
     values.sort_by(fn(left: BuildResourcePool, right: BuildResourcePool) { if left.rank() == right.rank() -> left.as_str() <=> right.as_str() else -> left.rank() <=> right.rank() })
@@ -498,7 +520,7 @@ LockRecord: struct {
     digest: String
 
     new: fn(key: String, digest: String) -> LockRecord Never! {
-        LockRecord{key, digest}
+        LockRecord{key: key, digest: digest}
     }
 }
 
@@ -526,7 +548,7 @@ BuildProvenance: struct {
     }
 
     user_declared: fn(source: String, lock: LockRecord?) -> BuildProvenance Never! {
-        BuildProvenance{source: ProvenanceSource.UserDeclared(source), lock}
+        BuildProvenance{source: ProvenanceSource.UserDeclared(source), lock: lock}
     }
 }
 
@@ -536,7 +558,7 @@ SDKIdentity: struct {
     provenance: BuildProvenance
 
     new: fn(name: String, version: String, provenance: BuildProvenance) -> SDKIdentity Never! {
-        SDKIdentity{name, version, provenance}
+        SDKIdentity{name: name, version: version, provenance: provenance}
     }
 }
 
@@ -545,7 +567,7 @@ LinkerIdentity: struct {
     provenance: BuildProvenance
 
     new: fn(name: String, provenance: BuildProvenance) -> LinkerIdentity Never! {
-        LinkerIdentity{name, provenance}
+        LinkerIdentity{name: name, provenance: provenance}
     }
 }
 
@@ -556,7 +578,7 @@ SysrootIdentity: struct {
     provenance: BuildProvenance
 
     new: fn(name: String, path_digest: String, provenance: BuildProvenance) -> SysrootIdentity Never! {
-        SysrootIdentity{name, path_digest, provenance}
+        SysrootIdentity{name: name, path_digest: path_digest, provenance: provenance}
     }
 }
 
@@ -565,7 +587,7 @@ SigningIdentitySpec: struct {
     provenance: BuildProvenance
 
     new: fn(label: String, provenance: BuildProvenance) -> SigningIdentitySpec Never! {
-        SigningIdentitySpec{label, provenance}
+        SigningIdentitySpec{label: label, provenance: provenance}
     }
 }
 
@@ -604,24 +626,38 @@ ToolchainSpec: struct {
     sdk: SDKIdentity?
     linker: LinkerIdentity?
     sysroot: SysrootIdentity?
-    tools: [String: String]
+    tools: [String:String]
     resolution: ToolchainResolution
     mounts: [BuildMount]
     provenance: BuildProvenance
 
     target: fn(target_triple: String, provenance: BuildProvenance) -> ToolchainSpec Never! {
         ToolchainSpec{
-            role: ToolchainRole.Target, host_triple: "host", target_triple: target_triple,
-            sdk: None, linker: None, sysroot: None, tools: [String: String]{},
-            resolution: ToolchainResolution.Ambient, mounts: [BuildMount]{}, provenance: provenance,
+            role: ToolchainRole.Target,
+            host_triple: "host",
+            target_triple: target_triple,
+            sdk: None,
+            linker: None,
+            sysroot: None,
+            tools: [String:String]{},
+            resolution: ToolchainResolution.Ambient,
+            mounts: [BuildMount]{},
+            provenance: provenance,
         }
     }
 
     host: fn(host_triple: String, provenance: BuildProvenance) -> ToolchainSpec Never! {
         ToolchainSpec{
-            role: ToolchainRole.Host, host_triple: host_triple, target_triple: host_triple,
-            sdk: None, linker: None, sysroot: None, tools: [String: String]{},
-            resolution: ToolchainResolution.Ambient, mounts: [BuildMount]{}, provenance: provenance,
+            role: ToolchainRole.Host,
+            host_triple: host_triple,
+            target_triple: host_triple,
+            sdk: None,
+            linker: None,
+            sysroot: None,
+            tools: [String:String]{},
+            resolution: ToolchainResolution.Ambient,
+            mounts: [BuildMount]{},
+            provenance: provenance,
         }
     }
 
@@ -664,7 +700,7 @@ ToolchainSpec: struct {
 
     with_read_only_mount_identity: fn(self, source: String, destination: String, identity: String) -> ToolchainSpec Never! {
         updated := self
-        updated.mounts.push(BuildMount{source, destination, identity})
+        updated.mounts.push(BuildMount{source: source, destination: destination, identity: identity})
         updated
     }
 }
@@ -678,7 +714,7 @@ HermeticBuildToolchain: struct {
     sdk: SDKIdentity?
     linker: LinkerIdentity?
     sysroot: SysrootIdentity?
-    tools: [String: String]
+    tools: [String:String]
     resolution: ToolchainResolution
     mounts: [BuildMount]
     provenance: BuildProvenance
@@ -699,13 +735,14 @@ ReproducibilityClass: enum {
 
 ProbeKind: enum {
     FindProgram(program: String)
-    // A folder on the machine holding `file` (jetpack_foundation
-    // foundation_find_folder).
     FindFolder(file: String)
     PkgConfig(package: String, min_version: String?)
     HeaderCheck(header: String)
     CompileCheck(name: String, includes: [String], code: String)
 }
+
+// A folder on the machine holding `file` (jetpack_foundation
+// foundation_find_folder).
 
 ProbeSpec: struct {
     kind: ProbeKind
@@ -714,29 +751,31 @@ ProbeSpec: struct {
     toolchain: ToolchainHandle?
 
     find_program: fn(program: String) -> ProbeSpec Never! {
-        ProbeSpec{kind: ProbeKind.FindProgram{program}, reproducibility: ReproducibilityClass.Ambient, provenance: BuildProvenance.ambient_record("find_program"), toolchain: None}
+        ProbeSpec{kind: ProbeKind.FindProgram{program: program}, reproducibility: ReproducibilityClass.Ambient, provenance: BuildProvenance.ambient_record("find_program"), toolchain: None}
     }
 
     find_folder: fn(file: String) -> ProbeSpec Never! {
-        ProbeSpec{kind: ProbeKind.FindFolder{file}, reproducibility: ReproducibilityClass.Ambient, provenance: BuildProvenance.ambient_record("find_folder"), toolchain: None}
+        ProbeSpec{kind: ProbeKind.FindFolder{file: file}, reproducibility: ReproducibilityClass.Ambient, provenance: BuildProvenance.ambient_record("find_folder"), toolchain: None}
     }
 
     pkg_config: fn(package: String) -> ProbeSpec Never! {
-        ProbeSpec{kind: ProbeKind.PkgConfig{package, min_version: None}, reproducibility: ReproducibilityClass.Ambient, provenance: BuildProvenance.ambient_record("pkg_config"), toolchain: None}
+        ProbeSpec{kind: ProbeKind.PkgConfig{package: package, min_version: None}, reproducibility: ReproducibilityClass.Ambient, provenance: BuildProvenance.ambient_record("pkg_config"), toolchain: None}
     }
 
     header_check: fn(header: String) -> ProbeSpec Never! {
-        ProbeSpec{kind: ProbeKind.HeaderCheck{header}, reproducibility: ReproducibilityClass.Ambient, provenance: BuildProvenance.ambient_record("header_check"), toolchain: None}
+        ProbeSpec{kind: ProbeKind.HeaderCheck{header: header}, reproducibility: ReproducibilityClass.Ambient, provenance: BuildProvenance.ambient_record("header_check"), toolchain: None}
     }
 
     compile_check: fn(name: String, includes: [String], code: String) -> ProbeSpec Never! {
-        ProbeSpec{kind: ProbeKind.CompileCheck{name, includes, code}, reproducibility: ReproducibilityClass.Ambient, provenance: BuildProvenance.ambient_record("compile_check"), toolchain: None}
+        ProbeSpec{kind: ProbeKind.CompileCheck{name: name, includes: includes, code: code}, reproducibility: ReproducibilityClass.Ambient, provenance: BuildProvenance.ambient_record("compile_check"), toolchain: None}
     }
 
     with_min_version: fn(self, version: String) -> ProbeSpec Never! {
         updated := self
         if self.kind == {
-            .PkgConfig(package, _) -> updated.kind = ProbeKind.PkgConfig{package, min_version: Val(version)}
+            .PkgConfig(package, _) -> {
+                updated.kind = ProbeKind.PkgConfig{package: package, min_version: Val(version)}
+            }
             .FindProgram(_) | .FindFolder(_) | .HeaderCheck(_) | .CompileCheck(_, _, _) -> {}
         }
         updated
@@ -812,13 +851,9 @@ HermeticBuildError: enum {
     EmptyActionArgv(String)
     EmptyEnvName(String)
     UndeclaredEnvName(action: String, key: String)
-    // An action with no ambient effect, whose record would restore nothing.
     ReusableActionWithoutOutputs(String)
     DuplicateActionOutput(action: String, output: String)
-    // A kept output the action doesn't declare as one of its outputs.
     UndeclaredKeptOutput(action: String, output: String)
-    // An output inside a folder the action reads whole, whose read-only
-    // mount would hide it.
     OutputInFolder(action: String, output: String, folder: String)
     DuplicateBuildOutput(output: String, first_action: String, second_action: String)
     UnknownTarget(Int)
@@ -829,6 +864,11 @@ HermeticBuildError: enum {
     PackagedPlugin(String)
     TargetDependencyCycle(DependencyCycle)
     ActionDependencyCycle(DependencyCycle)
+
+    // An action with no ambient effect, whose record would restore nothing.
+    // A kept output the action doesn't declare as one of its outputs.
+    // An output inside a folder the action reads whole, whose read-only
+    // mount would hide it.
 
     // Rust derived `Debug` (`{error:?}`), the text graph reports print.
     debug_text: fn(self) -> String Never! {
@@ -870,9 +910,7 @@ HermeticBuildError: enum {
 }
 
 // Rust `{:?}` of a `String`.
-build_debug_quote: fn(text: String) -> String Never! {
-    foundation_debug_quoted(text, 34)
-}
+build_debug_quote: fn(text: String) -> String Never! { foundation_debug_quoted(text, 34) }
 
 // Rust `dependency_cycle_text`: the whole loop, why it cannot build, the fix.
 build_dependency_cycle_text: fn(kind: String, cycle: DependencyCycle) -> String Never! {

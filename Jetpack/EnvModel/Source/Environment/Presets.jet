@@ -5,7 +5,7 @@ PresetSpec: struct {
     name: String{""}
     extends: [String]{[String]{}}
     packages: [String]{[String]{}}
-    variables: [String: String]{[String: String]{}}
+    variables: [String:String]{[String:String]{}}
     hostname: String?{None}
     user: String?{None}
 }
@@ -17,7 +17,7 @@ ResolvedPreset: struct {
     selected_presets: [String]{[String]{}}
     applied: [String]{[String]{}}
     packages: [String]{[String]{}}
-    variables: [String: String]{[String: String]{}}
+    variables: [String:String]{[String:String]{}}
 }
 
 #Error
@@ -36,11 +36,9 @@ PresetError: enum {
 }
 
 PresetSet: struct {
-    presets: [String: PresetSpec]{[String: PresetSpec]{}}
+    presets: [String:PresetSpec]{[String:PresetSpec]{}}
 
-    insert: fn(&self, preset: PresetSpec) PresetError! {
-        self.insert_checked(preset)
-    }
+    insert: fn(&self, preset: PresetSpec) PresetError! { self.insert_checked(preset) }
 
     // An equal re-declaration is accepted; a different one under the same
     // name is a conflict.
@@ -82,7 +80,9 @@ PresetSet: struct {
             if envmodel_optional_is(self.presets[name].hostname, hostname) -> selected.push(name)
         }
         loop name in names {
-            if envmodel_optional_is(self.presets[name].user, user) && !selected.contains(name) -> selected.push(name)
+            if envmodel_optional_is(self.presets[name].user, user) && !selected.contains(name) {
+                selected.push(name)
+            }
         }
         if selected.len() > 0 -> return selected
         if self.presets.get("default") != None -> return [String]{"default"}

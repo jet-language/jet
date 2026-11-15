@@ -2,6 +2,7 @@ package: {
     name: "crypto_random_boundaries"
     authority: { allow: [IO, Mem.Alloc, Rand] }
 }
+
 use {
     crypto: core.crypto
     random: core.crypto.random
@@ -17,11 +18,11 @@ run: fn() {
         .Ok(_) | .Err(_) -> print("url:wrong-error")
     }
     if random.token_hex(0) == {
-        .Ok(value) -> print(value == "")
+        .Ok(value) -> { print(value == "") }
         .Err(_) -> print(false)
     }
     if random.token_urlsafe(0) == {
-        .Ok(value) -> print(value == "")
+        .Ok(value) -> { print(value == "") }
         .Err(_) -> print(false)
     }
     if random.int_range(4, 4) == {

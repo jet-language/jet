@@ -25,7 +25,9 @@ kit_steps_json_path: fn(path: String) -> [String]? {
             key_start: i
             loop i < bytes.len() {
                 if bytes[i] == (U8{46}) || bytes[i] == (U8{91}) -> break
-                if bytes[i] <= (U8{32}) || bytes[i] == (U8{93}) || bytes[i] == (U8{123}) || bytes[i] == (U8{125}) -> return None
+                if bytes[i] <= (U8{32}) || bytes[i] == (U8{93}) || bytes[i] == (U8{123}) || bytes[i] == (U8{125}) {
+                    return None
+                }
                 i += 1
             }
             if i == key_start -> return None
@@ -39,12 +41,10 @@ kit_steps_json_path: fn(path: String) -> [String]? {
             loop i < bytes.len() {
                 byte: Int{bytes[i]}
                 if quoted {
-                    if escape -> escape = false
-                    else if byte == 92 -> escape = true
-                    else if byte == 34 -> quoted = false
-                } else if byte == 34 -> quoted = true
-                else if byte == 91 -> depth += 1
-                else if byte == 93 {
+                    if escape -> escape = false else if byte == 92 -> escape = true else if byte == 34 {
+                        quoted = false
+                    }
+                } else if byte == 34 { quoted = true } else if byte == 91 { depth += 1 } else if byte == 93 {
                     depth -= 1
                     if depth == 0 -> break
                 }
@@ -65,15 +65,15 @@ kit_steps_json_path: fn(path: String) -> [String]? {
             }
             parts.push(token)
             i += 1
-        } else {
-            return None
-        }
+        } else { return None }
     }
     Val(parts)
 }
 
 kit_steps_json_integer: fn(text: String) -> Int? {
-    value: Int.parse(text) ?? { return None }
+    value: Int.parse(text) ?? {
+        return None
+    }
     Val(value)
 }
 
@@ -134,7 +134,9 @@ kit_steps_json_equal: fn(left: Dyn, right: Dyn) -> Bool Never! {
                     }
                     // Distinct integer tokens must not collapse above binary64's
                     // exact range, including tokens outside the Int range.
-                    if !a.contains(".") && !a.contains("e") && !a.contains("E") && !b.contains(".") && !b.contains("e") && !b.contains("E") -> return false
+                    if !a.contains(".") && !a.contains("e") && !a.contains("E") && !b.contains(".") && !b.contains("e") && !b.contains("E") {
+                        return false
+                    }
                     return (Float.parse(a) ?? return false) == (Float.parse(b) ?? return false)
                 }
                 .Int(b) -> {
@@ -197,7 +199,9 @@ kit_steps_json_has: fn(value: Dyn, expected: Dyn) -> String? {
     if expected == {
         .Text(key) -> {
             if value == {
-                .Object(_) -> { if value.get(key) == None -> return Val("JSON object key missing: {key}") }
+                .Object(_) -> {
+                    if value.get(key) == None -> return Val("JSON object key missing: {key}")
+                }
                 .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return Val("JSON key presence needs an object")
             }
             return None
@@ -214,7 +218,9 @@ kit_steps_json_has: fn(value: Dyn, expected: Dyn) -> String? {
                                     actual: item.get(pair.key)
                                     if actual == {
                                         .Val(child) -> {
-                                            if !kit_steps_json_equal(child, pair.value) -> matches = false
+                                            if !kit_steps_json_equal(child, pair.value) {
+                                                matches = false
+                                            }
                                         }
                                         .None -> matches = false
                                     }
@@ -225,7 +231,9 @@ kit_steps_json_has: fn(value: Dyn, expected: Dyn) -> String? {
                             .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> {}
                         }
                     }
-                    shown: json.to_string(expected) ?? { return Val("JSON expected value could not be encoded: {err}") }
+                    shown: json.to_string(expected) ?? {
+                        return Val("JSON expected value could not be encoded: {err}")
+                    }
                     return Val("JSON array has no object matching {shown}")
                 }
                 .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return Val("JSON has needs an array")
@@ -255,10 +263,14 @@ kit_steps_json_leaf: fn(value: Dyn, op: String, expected: Dyn, expected_type: St
             .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {}
         }
         if kit_steps_json_type(value) != "array" -> return Val("JSON !has needs an array")
-        if kit_steps_json_has(value, expected) == None -> return Val("JSON array contains the forbidden object")
+        if kit_steps_json_has(value, expected) == None {
+            return Val("JSON array contains the forbidden object")
+        }
         return None
     }
-    if op == "!=" -> return if !kit_steps_json_equal(value, expected) -> None else -> Val("JSON value equals forbidden value")
+    if op == "!=" {
+        return if !kit_steps_json_equal(value, expected) -> None else -> Val("JSON value equals forbidden value")
+    }
     if op == "in" {
         if expected == {
             .Array(choices) -> {
@@ -278,13 +290,17 @@ kit_steps_json_leaf: fn(value: Dyn, op: String, expected: Dyn, expected_type: St
                 keys.sort()
                 wanted: if expected == {
                     .Array(items) -> items
-                    .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return Val("JSON keys needs an array") }
+                    .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {
+                        return Val("JSON keys needs an array")
+                    }
                 }
                 names := [String]{}
                 loop item in wanted {
                     name: if item == {
                         .Text(text) -> text
-                        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> { return Val("JSON keys needs strings") }
+                        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {
+                            return Val("JSON keys needs strings")
+                        }
                     }
                     names.push(name)
                 }
@@ -302,8 +318,12 @@ kit_steps_json_leaf: fn(value: Dyn, op: String, expected: Dyn, expected_type: St
     }
     if op == "=" {
         if kit_steps_json_equal(value, expected) -> return None
-        wanted: json.to_string(expected) ?? { return Val("JSON expected value could not be encoded: {err}") }
-        actual: json.to_string(value) ?? { return Val("JSON actual value could not be encoded: {err}") }
+        wanted: json.to_string(expected) ?? {
+            return Val("JSON expected value could not be encoded: {err}")
+        }
+        actual: json.to_string(value) ?? {
+            return Val("JSON actual value could not be encoded: {err}")
+        }
         return Val("JSON value differs: expected {wanted}, got {actual}")
     }
     if op == ":" {
@@ -322,7 +342,9 @@ kit_steps_json_leaf: fn(value: Dyn, op: String, expected: Dyn, expected_type: St
         }
     }
     size: kit_steps_json_size(value) ?? return Val("JSON count needs an array or object")
-    if (op == "#=" && size != count) || (op == "#>=" && size < count) -> return Val("JSON count differs: expected {op} {count}, got {size}")
+    if (op == "#=" && size != count) || (op == "#>=" && size < count) {
+        return Val("JSON count differs: expected {op} {count}, got {size}")
+    }
     None
 }
 
@@ -333,9 +355,13 @@ kit_steps_json_numeric_op: fn(op: String) -> Bool {
 
 kit_steps_json_test: fn(text: String, mode: String, path: String, op: String, literal: String) -> String? {
     if op == "canonical" -> return kit_steps_json_canonical(text)
-    if kit_expect_named(["==", "!=", "#=="], op) && literal.starts_with("$") -> return kit_steps_json_same_document(text, mode, path, op, literal)
+    if kit_expect_named(["==", "!=", "#=="], op) && literal.starts_with("$") {
+        return kit_steps_json_same_document(text, mode, path, op, literal)
+    }
     selected: kit_steps_json_values(text, mode, path) ?? {
-        if op == "!=" -> return kit_steps_json_leaf(Dyn.Null, op, json.parse(kit_steps_arithmetic(literal) ?? literal) ?? return Val("invalid expected JSON"), "", 0)
+        if op == "!=" {
+            return kit_steps_json_leaf(Dyn.Null, op, json.parse(kit_steps_arithmetic(literal) ?? literal) ?? return Val("invalid expected JSON"), "", 0)
+        }
         return Val("JSON parse or path failed: {path}")
     }
     if selected.len() == 0 {
@@ -349,24 +375,28 @@ kit_steps_json_test: fn(text: String, mode: String, path: String, op: String, li
     if kit_expect_named(["=", "!=", "has", "!has", "in", "keys", ">", ">=", "<", "<="], op) {
         evaluated: if kit_steps_json_numeric_op(op) -> kit_steps_arithmetic(literal) ?? literal else -> literal
         expected = json.parse(evaluated) ?? return Val("expected JSON literal: {err}")
-        if op == "=" && path.contains("[*]") && kit_steps_json_type(expected) == "array" -> return if kit_steps_json_equal(Dyn.Array(selected), expected) -> None else -> Val("JSON ordered projection differs")
+        if op == "=" && path.contains("[*]") && kit_steps_json_type(expected) == "array" {
+            return if kit_steps_json_equal(Dyn.Array(selected), expected) -> None else -> Val("JSON ordered projection differs")
+        }
     } else if op == ":" {
         expected_type = literal
-        if literal != "string" && literal != "number" && literal != "int" && literal != "bool" && literal != "null" && literal != "array" && literal != "object" -> return Val("unknown JSON type: {literal}")
-    } else if kit_expect_named(["~", "!~", "^=", "$=", "any~"], op) {
-        expected_type = literal
-    } else if op.starts_with("#") {
+        if literal != "string" && literal != "number" && literal != "int" && literal != "bool" && literal != "null" && literal != "array" && literal != "object" {
+            return Val("unknown JSON type: {literal}")
+        }
+    } else if kit_expect_named(["~", "!~", "^=", "$=", "any~"], op) { expected_type = literal } else if op.starts_with("#") {
         count = Int.parse(literal) ?? return Val("JSON count must be a nonnegative integer")
         if count < 0 -> return Val("JSON count must be a nonnegative integer")
-    } else {
-        return Val("unknown JSON operator: {op}")
-    }
+    } else { return Val("unknown JSON operator: {op}") }
     if op == "#distinct=" {
         values := [Dyn]{}
         loop value in selected {
             if value == {
-                .Array(items) -> { loop item in items -> values.push(item) }
-                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> values.push(value)
+                .Array(items) -> {
+                    loop item in items -> values.push(item)
+                }
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {
+                    values.push(value)
+                }
             }
         }
         return if kit_steps_json_distinct(values) == count -> None else -> Val("JSON distinct count differs")
@@ -375,7 +405,9 @@ kit_steps_json_test: fn(text: String, mode: String, path: String, op: String, li
         failure: kit_steps_json_leaf(value, op, expected, expected_type, count)
         if op.starts_with("#") && op != "#==" && op != "#distinct=" {
             size: kit_steps_json_size(value) ?? return Val("JSON count needs an array or object")
-            if !kit_steps_compare(size, kit_steps_byte_slice(op, 1, op.count_bytes()), count) -> return Val("JSON count comparison failed")
+            if !kit_steps_compare(size, kit_steps_byte_slice(op, 1, op.count_bytes()), count) {
+                return Val("JSON count comparison failed")
+            }
             next
         }
         if failure != None -> return failure
@@ -402,7 +434,9 @@ kit_steps_json_assertion: fn(value: String) -> KitAssertion? {
     if tokens.len() >= 2 && tokens[tokens.len() - 1].text == "canonical" {
         subject: kit_steps_subject(tokens[0].text)
         offset: if subject == "file" || subject == "files" -> 1 else -> 0
-        if tokens.len() != 2 + offset || (!kit_steps_subject_valid(tokens[0].text) && subject != "files") -> return None
+        if tokens.len() != 2 + offset || (!kit_steps_subject_valid(tokens[0].text) && subject != "files") {
+            return None
+        }
         return Val(KitAssertion{stream: subject, path: if offset == 1 -> tokens[1].text else -> "", mode: "json", value: "", json_mode: "doc", json_path: "$", json_op: "canonical"})
     }
     if tokens.len() < 4 -> return None
@@ -417,12 +451,16 @@ kit_steps_json_assertion: fn(value: String) -> KitAssertion? {
     mode: tokens[1 + offset].text
     path: tokens[2 + offset].text
     op: tokens[3 + offset].text
-    if mode != "doc" && mode != "ndjson" && mode != "toml" && !(mode.starts_with("doc[zero ") && mode.ends_with("]")) -> return None
+    if mode != "doc" && mode != "ndjson" && mode != "toml" && !(mode.starts_with("doc[zero ") && mode.ends_with("]")) {
+        return None
+    }
     if path == "each" {
         if tokens.len() < 9 + offset || tokens[4 + offset].text != "as" -> return None
         rows: tokens[3 + offset].text
         bound: tokens[5 + offset].text
-        if !bound.ends_with(":") || kit_steps_json_path(kit_steps_json_preview(rows)) == None -> return None
+        if !bound.ends_with(":") || kit_steps_json_path(kit_steps_json_preview(rows)) == None {
+            return None
+        }
         name: kit_steps_byte_slice(bound, 0, bound.count_bytes() - 1)
         if !kit_steps_env_name(name) -> return None
         inner: kit_steps_byte_slice(value, tokens[6 + offset].start, value.count_bytes()).trim().copy()
@@ -434,13 +472,17 @@ kit_steps_json_assertion: fn(value: String) -> KitAssertion? {
     source: if offset == 1 -> tokens[1].text else -> ""
     if stream == "file" && !kit_steps_relative_path(source) -> return None
     if op == "valid" {
-        if mode != "doc" || path != "$" || tokens.len() != needed || !kit_steps_reason(value) -> return None
+        if mode != "doc" || path != "$" || tokens.len() != needed || !kit_steps_reason(value) {
+            return None
+        }
         return Val(KitAssertion{stream: stream, path: source, mode: "json", value: "", json_mode: mode, json_path: path, json_op: op, optional_file: subject == "file?", transform: transform})
     }
     if tokens.len() == needed -> return None
     literal := kit_steps_byte_slice(body, tokens[needed].start, body.count_bytes()).trim().copy()
     if op == "any" {
-        if tokens.len() != needed + 2 || tokens[needed].text != "~" || !kit_steps_reason(value) -> return None
+        if tokens.len() != needed + 2 || tokens[needed].text != "~" || !kit_steps_reason(value) {
+            return None
+        }
         return Val(KitAssertion{stream: stream, path: source, mode: "json", value: tokens[needed + 1].text, json_mode: mode, json_path: path, json_op: "any~", optional_file: subject == "file?", transform: transform})
     }
     if kit_expect_named(["==", "!=", "#=="], op) && literal.starts_with("$") {
@@ -462,7 +504,9 @@ kit_steps_json_assertion: fn(value: String) -> KitAssertion? {
             if op == "has" {
                 if parsed == {
                     .Array(_) -> return None
-                    .Object(fields) -> { if fields.len() == 0 -> return None }
+                    .Object(fields) -> {
+                        if fields.len() == 0 -> return None
+                    }
                     .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> {}
                 }
             }
@@ -475,7 +519,9 @@ kit_steps_json_assertion: fn(value: String) -> KitAssertion? {
         if tokens.len() != needed + 1 -> return None
         literal = tokens[needed].text
         if op == ":" {
-            if !kit_steps_reason(value) || !kit_expect_named(["string", "number", "int", "bool", "null", "array", "object"], literal) -> return None
+            if !kit_steps_reason(value) || !kit_expect_named(["string", "number", "int", "bool", "null", "array", "object"], literal) {
+                return None
+            }
         } else if kit_expect_named(["~", "!~", "^=", "$="], op) {
             if !kit_steps_reason(value) -> return None
         } else if kit_expect_named(["#=", "#>=", "#<=", "#>", "#<", "#distinct="], op) {
@@ -483,9 +529,18 @@ kit_steps_json_assertion: fn(value: String) -> KitAssertion? {
             if op == "#=" && kit_steps_count_label(literal) != "" -> return None
         } else if op == "#==" {
             if literal.contains("*") && !kit_steps_count_target_valid(literal) -> return None
-        } else if op != "==" -> return None
+        } else if op != "==" { return None }
     }
     // #4814: jet fmt adds a trailing comma inside Val(...) here; keep this layout
-    Val(KitAssertion{stream: stream, path: source, mode: "json", value: literal,
-        json_mode: mode, json_path: path, json_op: op, optional_file: subject == "file?", transform: transform})
+    Val(KitAssertion{
+        stream: stream,
+        path: source,
+        mode: "json",
+        value: literal,
+        json_mode: mode,
+        json_path: path,
+        json_op: op,
+        optional_file: subject == "file?",
+        transform: transform,
+    })
 }

@@ -10,7 +10,9 @@ use {
     if parsed.diagnostics.len() != 0 -> panic("public Dyn.Bytes fixture did not parse")
     checked: check_program(parsed.program, "user/fixture", "user/fixture/dyn_bytes.jet", [SemaSourceSegment]{})
     loop diagnostic in checked.diagnostics {
-        if diagnostic.code.starts_with("E") -> panic("public Dyn.Bytes pattern: {diagnostic.code}: {diagnostic.what}")
+        if diagnostic.code.starts_with("E") {
+            panic("public Dyn.Bytes pattern: {diagnostic.code}: {diagnostic.what}")
+        }
     }
     print("Public Dyn.Bytes patterns: passed")
 }

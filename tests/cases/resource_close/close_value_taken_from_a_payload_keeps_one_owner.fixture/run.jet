@@ -10,6 +10,7 @@ Res: struct {
         close: fn(&&self) { print("close {self.name}") }
     }
 }
+
 Held: struct {
     tracer: Res
     directory: Directory?
@@ -118,9 +119,7 @@ check_arm: fn() {
 check_loop: fn() {
     list: [Res{name: "loop a"}, Res{name: "loop b"}]
     out := [Res]{}
-    loop item in list.move() {
-        out.push(item)
-    }
+    loop item in list.move() { out.push(item) }
     print("loop moved {out.len()}")
 }
 

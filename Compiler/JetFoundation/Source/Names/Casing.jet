@@ -2,6 +2,7 @@
 // JetSema so parser recovery and semantic fixes use one canonical algorithm.
 // Existing compiler spellings are retained; there is no compatibility copy.
 use unicode: core.text
+
 SemaNameCase: enum {
     Pascal
     Snake
@@ -34,7 +35,9 @@ sema_casing_is_alphabetic: fn(scalar: String) -> Bool {
 
 sema_casing_is_alphanumeric: fn(scalar: String) -> Bool {
     code: sema_casing_ascii_code(scalar)
-    if code >= 0 -> return (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+    if code >= 0 {
+        return (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+    }
     unicode.is_alphabetic(scalar) || unicode.is_numeric(scalar)
 }
 
@@ -66,7 +69,9 @@ sema_casing_ascii_has_case: fn(name: String, case: SemaNameCase) -> Bool? Never!
     if name == "_" -> return Val(true)
     start := 0
     if count > 0 && (Int{bytes[0]}) == 95 -> start = 1
-    if start >= count || (Int{bytes[start]}) == 95 || (Int{bytes[count - 1]}) == 95 -> return Val(false)
+    if start >= count || (Int{bytes[start]}) == 95 || (Int{bytes[count - 1]}) == 95 {
+        return Val(false)
+    }
     rest: start + 1
     loop index in rest..<count {
         if (Int{bytes[index]}) == 95 && (Int{bytes[index - 1]}) == 95 -> return Val(false)
@@ -79,21 +84,27 @@ sema_casing_ascii_has_case: fn(name: String, case: SemaNameCase) -> Bool? Never!
             if !upper -> return Val(false)
             loop index in rest..<count {
                 code: Int{bytes[index]}
-                if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)) -> return Val(false)
+                if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)) {
+                    return Val(false)
+                }
             }
         }
         .Snake -> {
             if !lower -> return Val(false)
             loop index in rest..<count {
                 code: Int{bytes[index]}
-                if !(code == 95 || (code >= 48 && code <= 57) || (code >= 97 && code <= 122)) -> return Val(false)
+                if !(code == 95 || (code >= 48 && code <= 57) || (code >= 97 && code <= 122)) {
+                    return Val(false)
+                }
             }
         }
         .Screaming -> {
             if !upper -> return Val(false)
             loop index in rest..<count {
                 code: Int{bytes[index]}
-                if !(code == 95 || (code >= 48 && code <= 57) || (code >= 65 && code <= 90)) -> return Val(false)
+                if !(code == 95 || (code >= 48 && code <= 57) || (code >= 65 && code <= 90)) {
+                    return Val(false)
+                }
             }
         }
     }
@@ -103,33 +114,47 @@ sema_casing_ascii_has_case: fn(name: String, case: SemaNameCase) -> Bool? Never!
 // A template paste `#{method}` names a declaration from a binding; the case
 // policy reads the binding's name inside it.
 sema_casing_has_case: fn(name: String, case: SemaNameCase) -> Bool {
-    if name.starts_with("#{{") && name.ends_with("}}") -> return sema_casing_has_case(name.slice(2, name.len() - 1), case)
+    if name.starts_with("#{{") && name.ends_with("}}") {
+        return sema_casing_has_case(name.slice(2, name.len() - 1), case)
+    }
     if sema_casing_ascii_has_case(name, case) == .Val(ascii) -> return ascii
     if name == "_" -> return true
     body := name
     if body.starts_with("_") -> body = sema_casing_drop_first_byte(body)
-    if body == "" || body.starts_with("_") || body.ends_with("_") || body.contains("__") -> return false
+    if body == "" || body.starts_with("_") || body.ends_with("_") || body.contains("__") {
+        return false
+    }
     scalars: unicode.scalars(body)
     first: scalars[0]
     if case == {
         .Pascal -> {
-            if !(sema_casing_is_upper(first) || (sema_casing_is_alphabetic(first) && !sema_casing_is_lower(first))) -> return false
+            if !(sema_casing_is_upper(first) || (sema_casing_is_alphabetic(first) && !sema_casing_is_lower(first))) {
+                return false
+            }
             loop index in 1..<scalars.len() {
                 if !sema_casing_is_alphanumeric(scalars[index]) -> return false
             }
         }
         .Snake -> {
-            if !(sema_casing_is_lower(first) || (sema_casing_is_alphabetic(first) && !sema_casing_is_upper(first))) -> return false
+            if !(sema_casing_is_lower(first) || (sema_casing_is_alphabetic(first) && !sema_casing_is_upper(first))) {
+                return false
+            }
             loop index in 1..<scalars.len() {
                 scalar: scalars[index]
-                if scalar != "_" && !(sema_casing_is_alphanumeric(scalar) && !sema_casing_is_upper(scalar)) -> return false
+                if scalar != "_" && !(sema_casing_is_alphanumeric(scalar) && !sema_casing_is_upper(scalar)) {
+                    return false
+                }
             }
         }
         .Screaming -> {
-            if !(sema_casing_is_upper(first) || (sema_casing_is_alphabetic(first) && !sema_casing_is_lower(first))) -> return false
+            if !(sema_casing_is_upper(first) || (sema_casing_is_alphabetic(first) && !sema_casing_is_lower(first))) {
+                return false
+            }
             loop index in 1..<scalars.len() {
                 scalar: scalars[index]
-                if scalar != "_" && !(sema_casing_is_alphanumeric(scalar) && !sema_casing_is_lower(scalar)) -> return false
+                if scalar != "_" && !(sema_casing_is_alphanumeric(scalar) && !sema_casing_is_lower(scalar)) {
+                    return false
+                }
             }
         }
     }
@@ -154,23 +179,33 @@ sema_casing_split_words: fn(name: String) -> [String] {
                     if {
                         index < scalars.len() && sema_casing_is_lower(scalars[index]) && index - run_start > 1 -> {
                             last_capital: index - 1
-                            if last_capital > start -> words.push(sema_casing_join(scalars, start, last_capital))
+                            if last_capital > start {
+                                words.push(sema_casing_join(scalars, start, last_capital))
+                            }
                             start = last_capital
-                            loop index < scalars.len() && !sema_casing_is_upper(scalars[index]) -> index += 1
+                            loop index < scalars.len() && !sema_casing_is_upper(scalars[index]) {
+                                index += 1
+                            }
                             words.push(sema_casing_join(scalars, start, index))
                             start = index
                         }
                         index < scalars.len() && sema_casing_is_lower(scalars[index]) -> {
-                            if run_start > start -> words.push(sema_casing_join(scalars, start, run_start))
+                            if run_start > start {
+                                words.push(sema_casing_join(scalars, start, run_start))
+                            }
                             start = run_start
-                            loop index < scalars.len() && !sema_casing_is_upper(scalars[index]) -> index += 1
+                            loop index < scalars.len() && !sema_casing_is_upper(scalars[index]) {
+                                index += 1
+                            }
                             words.push(sema_casing_join(scalars, start, index))
                             start = index
                         }
                     }
                 }
                 else -> {
-                    loop index < scalars.len() && !sema_casing_is_upper(scalars[index]) -> index += 1
+                    loop index < scalars.len() && !sema_casing_is_upper(scalars[index]) {
+                        index += 1
+                    }
                     if index > start {
                         words.push(sema_casing_join(scalars, start, index))
                         start = index
@@ -222,14 +257,101 @@ sema_casing_canonical: fn(name: String, case: SemaNameCase) -> String {
 // Compiler/JetFoundation/Data/Syntax/Acronyms.jet, its one home: edit the
 // home, then copy it here (tests/guards/closed_lists/mirrors.tsv fails on drift).
 SEMA_CASING_ACRONYMS: #run { [String]{
-    "AABB", "ABI", "AES", "ALPN", "ANSI", "AOT", "API", "ASCII", "AST", "BPE", "CAS", "CBOR",
-    "CDP", "CFG", "CI", "CLI", "CMS", "CPU", "CSR", "CSS", "CSV", "DB", "DMA", "DNS",
-    "DSL", "DTD", "EOF", "FFI", "FS", "GC", "GPIO", "GPU", "HLL", "HMAC", "HSM", "HTML", "HTTP",
-    "ID", "IME", "IO", "IP", "IR", "JIT", "JS", "JSON", "JSONL", "JVM", "KDF", "KMS", "LRU",
-    "LSP", "LTO", "LWW", "MCP", "MIME", "MMIO", "OCI", "OS", "PEM", "PID", "PM", "PNG",
-    "RGA", "RGB", "RNG", "RPC", "RSA", "SDK", "SHA", "SPSC", "SQL", "SRI", "SRV", "SSG",
-    "SSH", "SSR", "SVD", "SVG", "TCP", "TLS", "TOML", "TTY", "TUF", "TUI", "UART", "UDP",
-    "UI", "URI", "URL", "UTF", "UUID", "VJP", "VM", "XML", "YAML",
+    "AABB",
+    "ABI",
+    "AES",
+    "ALPN",
+    "ANSI",
+    "AOT",
+    "API",
+    "ASCII",
+    "AST",
+    "BPE",
+    "CAS",
+    "CBOR",
+    "CDP",
+    "CFG",
+    "CI",
+    "CLI",
+    "CMS",
+    "CPU",
+    "CSR",
+    "CSS",
+    "CSV",
+    "DB",
+    "DMA",
+    "DNS",
+    "DSL",
+    "DTD",
+    "EOF",
+    "FFI",
+    "FS",
+    "GC",
+    "GPIO",
+    "GPU",
+    "HLL",
+    "HMAC",
+    "HSM",
+    "HTML",
+    "HTTP",
+    "ID",
+    "IME",
+    "IO",
+    "IP",
+    "IR",
+    "JIT",
+    "JS",
+    "JSON",
+    "JSONL",
+    "JVM",
+    "KDF",
+    "KMS",
+    "LRU",
+    "LSP",
+    "LTO",
+    "LWW",
+    "MCP",
+    "MIME",
+    "MMIO",
+    "OCI",
+    "OS",
+    "PEM",
+    "PID",
+    "PM",
+    "PNG",
+    "RGA",
+    "RGB",
+    "RNG",
+    "RPC",
+    "RSA",
+    "SDK",
+    "SHA",
+    "SPSC",
+    "SQL",
+    "SRI",
+    "SRV",
+    "SSG",
+    "SSH",
+    "SSR",
+    "SVD",
+    "SVG",
+    "TCP",
+    "TLS",
+    "TOML",
+    "TTY",
+    "TUF",
+    "TUI",
+    "UART",
+    "UDP",
+    "UI",
+    "URI",
+    "URL",
+    "UTF",
+    "UUID",
+    "VJP",
+    "VM",
+    "XML",
+    "YAML",
 } }
 
 sema_casing_is_digit: fn(scalar: String) -> Bool {
@@ -278,7 +400,9 @@ sema_casing_acronym_name: fn(name: String) -> String {
         if code >= 97 && code <= 122 -> has_lower = true
     }
     if ascii {
-        if bytes.len() == 0 || (Int{bytes[0]}) < 65 || (Int{bytes[0]}) > 90 || !has_lower -> return name.copy()
+        if bytes.len() == 0 || (Int{bytes[0]}) < 65 || (Int{bytes[0]}) > 90 || !has_lower {
+            return name.copy()
+        }
     } else {
         scalars: unicode.scalars(name)
         if scalars.len() == 0 || !sema_casing_is_upper(scalars[0]) -> return name.copy()
@@ -290,7 +414,9 @@ sema_casing_acronym_name: fn(name: String) -> String {
     segments := [String]{}
     loop segment in name.split("_") {
         out := ""
-        loop word in sema_casing_split_words(segment) -> out = "{out}{sema_casing_acronym_word(word)}"
+        loop word in sema_casing_split_words(segment) {
+            out = "{out}{sema_casing_acronym_word(word)}"
+        }
         segments.push(out)
     }
     segments.join("_")
@@ -301,6 +427,8 @@ sema_casing_acronym_name: fn(name: String) -> String {
 // acronyms in caps (`server` -> `Server`, `http_client` -> `HTTPClient`).
 sema_casing_marker_qualifier: fn(path: String) -> String {
     segments := [String]{}
-    loop segment in path.split(".") -> segments.push(sema_casing_acronym_name(sema_casing_canonical(segment, SemaNameCase.Pascal)))
+    loop segment in path.split(".") {
+        segments.push(sema_casing_acronym_name(sema_casing_canonical(segment, SemaNameCase.Pascal)))
+    }
     segments.join(".")
 }

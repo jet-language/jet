@@ -1,7 +1,6 @@
 // The memory kernel's mapping (`mem.Region.reserve` and the region's
 // close): each pass maps a fresh 64 KiB region of private pages and unmaps
 // it. `n` passes; the sum adds every region's size.
-
 use mem: core.mem
 
 #CLI
@@ -15,9 +14,9 @@ run: fn(args: Args) {
     passes: if args.n > 0 -> args.n else -> 1
     total := 0
     loop _ in 0..<passes {
-        region := mem.Region.reserve(BYTES) ?? panic("no region") // the mapping
+        region := mem.Region.reserve(BYTES) ?? panic("no region")  // the mapping
         total += region.size()
-        close(region) // the mapping
+        close(region)  // the mapping
     }
     print("sum {total}")
 }

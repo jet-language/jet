@@ -16,17 +16,22 @@ db: module {
     // `at`, and pwrite of `count` bytes of `data` from index `at`; the bytes
     // moved.
     #Import(c) priv vfs_read: fn(fd: Int, offset: Int, buffer: &[U8], at: Int, count: Int) -[DB]> Int = "jet_db_vfs_read"
+
     #Import(c) priv vfs_write: fn(fd: Int, offset: Int, data: [U8], at: Int, count: Int) -[DB]> Int = "jet_db_vfs_write"
 
     // fsync(2), ftruncate(2) to `size` and fstat(2)'s size of `fd`.
     #Import(c) priv vfs_sync: fn(fd: Int) -[DB]> Int = "jet_db_vfs_sync"
+
     #Import(c) priv vfs_truncate: fn(fd: Int, size: Int) -[DB]> Int = "jet_db_vfs_truncate"
+
     #Import(c) priv vfs_size: fn(fd: Int) -[DB]> Int = "jet_db_vfs_size"
 
     // stat(2)'s permission bits, lstat(2)'s type and permission bits, and
     // stat(2)'s inode of `path`.
     #Import(c) priv vfs_mode: fn(path: String) -[DB]> Int = "jet_db_vfs_mode"
+
     #Import(c) priv vfs_lstat_mode: fn(path: String) -[DB]> Int = "jet_db_vfs_lstat_mode"
+
     #Import(c) priv vfs_inode: fn(path: String) -[DB]> Int = "jet_db_vfs_inode"
 
     // A root process gives `fd` the owner of `path` (robustFchown).
@@ -41,6 +46,7 @@ db: module {
 
     // unlink(2) and access(2) with `mode` of `path`.
     #Import(c) priv vfs_unlink: fn(path: String) -[DB]> Int = "jet_db_vfs_unlink"
+
     #Import(c) priv vfs_access: fn(path: String, mode: Int) -[DB]> Int = "jet_db_vfs_access"
 
     // Whether stat(2) of `path` succeeds and it is not an empty regular file;
@@ -50,6 +56,7 @@ db: module {
     // The target of the link `path`, and the working directory; each is ""
     // when the call fails.
     #Import(c) priv vfs_readlink: fn(path: String) -[DB]> String = "jet_db_vfs_readlink"
+
     #Import(c) priv vfs_cwd: fn() -[DB]> String = "jet_db_vfs_cwd"
 
     // Sleeps `micros` microseconds; the microseconds asked for.

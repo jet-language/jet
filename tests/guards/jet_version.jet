@@ -7,14 +7,24 @@
 use jv_files: core.files
 
 JV_MANIFEST: "Jetpack/PackageModel/Source/Manifest/Manifest.jet"
+
 JV_ROOTS: [String]{"Compiler", "Core", "Jetpack", "Tools", "tests"}
+
 JV_SELF: "tests/guards/jet_version.jet"
 
 // Spellings of an old self-version: a line holding one fails the census.
 JV_REFUSED: [String]{
-    "jet: \">=0.", "jet: \"0.", "jet: \\\">=0.", "jet: \\\"0.",
-    "toolchain: \"0.", "toolchain = \"0.", "toolchain = \\\"0.",
-    "Jet 0.1.0", "Jet 0.0.1", "Jet `0.1.0`", "Jet `0.0.1`",
+    "jet: \">=0.",
+    "jet: \"0.",
+    "jet: \\\">=0.",
+    "jet: \\\"0.",
+    "toolchain: \"0.",
+    "toolchain = \"0.",
+    "toolchain = \\\"0.",
+    "Jet 0.1.0",
+    "Jet 0.0.1",
+    "Jet `0.1.0`",
+    "Jet `0.0.1`",
 }
 
 // The files that still name a release `a0_NNN`, and how many lines do: the
@@ -52,7 +62,9 @@ JV_COPIES: [JVCopy]{
 jv_declared: fn() -> String {
     source: jv_files.read(JV_MANIFEST) ?? panic("read {JV_MANIFEST}: {err}")
     loop line in source.lines() {
-        if line.starts_with("JET_VERSION: \"") -> return line.removeprefix("JET_VERSION: \"").removesuffix("\"").copy()
+        if line.starts_with("JET_VERSION: \"") {
+            return line.removeprefix("JET_VERSION: \"").removesuffix("\"").copy()
+        }
     }
     panic("{JV_MANIFEST} declares no JET_VERSION")
 }
@@ -109,20 +121,30 @@ jv_names_retired_constant: fn(line: String) -> Bool Never! {
 // The old self-version spellings on one line, as findings.
 jv_line_findings: fn(path: String, number: Int, line: String, out: &[String]) {
     where: "{path}:{number}"
-    if jv_names_retired_constant(line) -> out.push("{where}: COMPILER_VERSION is retired; read JET_VERSION")
-    if jv_names_digit_after(line, "jet@") -> out.push("{where}: a compiler identity is `jet@<JET_VERSION>#<sha256>`")
+    if jv_names_retired_constant(line) {
+        out.push("{where}: COMPILER_VERSION is retired; read JET_VERSION")
+    }
+    if jv_names_digit_after(line, "jet@") {
+        out.push("{where}: a compiler identity is `jet@<JET_VERSION>#<sha256>`")
+    }
     loop refused in JV_REFUSED {
-        if line.contains(refused) -> out.push("{where}: `{refused}` spells an old Jet version; Jet is `a0.0.N`")
+        if line.contains(refused) {
+            out.push("{where}: `{refused}` spells an old Jet version; Jet is `a0.0.N`")
+        }
     }
 }
 
 // Every file a census reads: no build output, history or installed packages.
 jv_walk: fn(path: String, out: &[String]) {
     kind: jv_files.stat(path) ?? return
-    if kind.is_symlink -> return
+    if kind.is_symlink {
+        return
+    }
     if kind.is_dir {
         loop child in (jv_files.list_dir(path) ?? panic("list {path}: {err}")) {
-            if child.name == ".jet" || child.name == ".tower" || child.name == "target" || child.name == "node_modules" -> next
+            if child.name == ".jet" || child.name == ".tower" || child.name == "target" || child.name == "node_modules" {
+                next
+            }
             jv_walk("{path}/{child.name}", out)
         }
         return
@@ -158,7 +180,9 @@ jv_census_close: fn(legacy: [String:Int], findings: &[String]) {
         }
     }
     loop row in JV_LEGACY {
-        if legacy.get(row.path) == None -> findings.push("{row.path}: no `a0_NNN` name left; delete its JV_LEGACY row")
+        if legacy.get(row.path) == None {
+            findings.push("{row.path}: no `a0_NNN` name left; delete its JV_LEGACY row")
+        }
     }
     findings.sort()
 }

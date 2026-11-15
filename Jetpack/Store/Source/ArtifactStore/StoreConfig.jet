@@ -10,14 +10,22 @@ use {
 }
 
 STORE_ARTIFACT_VERSION: "jet.store.v1"
+
 STORE_ARTIFACT_ENV: ENV_JET_STORE_DIR
+
 STORE_ARTIFACT_DEFAULT_CAP_BYTES: 21474836480
+
 STORE_ARTIFACT_DEFAULT_RESERVE_BYTES: 2147483648
+
 // Maximum time a store operation waits for a live lock owner by default.
 STORE_ARTIFACT_DEFAULT_LOCK_WAIT_MS: 120000
+
 STORE_ARTIFACT_LOCK_RETRY_MS: 10
+
 STORE_ARTIFACT_LOCK_RETRY_MAX_MS: 250
+
 STORE_ARTIFACT_MAX_JOURNAL_BYTES: 67108864
+
 STORE_ARTIFACT_U64_MAX: 18446744073709551615
 
 // The machine-wide store configuration. The optional cap is an explicit host
@@ -43,7 +51,9 @@ ArtifactStoreConfig: struct {
     from_env: fn() -[Env]> ArtifactStoreConfig ArtifactStoreError! {
         root: if sys.get(STORE_ARTIFACT_ENV) == {
             .Val(value) -> {
-                if value == "" -> return Err(ArtifactStoreError.Config("{STORE_ARTIFACT_ENV} cannot be empty"))
+                if value == "" {
+                    return Err(ArtifactStoreError.Config("{STORE_ARTIFACT_ENV} cannot be empty"))
+                }
                 value
             }
             .None -> store_artifact_default_root()
@@ -51,12 +61,14 @@ ArtifactStoreConfig: struct {
         cap_bytes: store_artifact_optional_size(ENV_JET_STORE_CAP_BYTES)
         reserve: store_artifact_optional_size(ENV_JET_STORE_RESERVE_BYTES)
         reserve_bytes: reserve ?? STORE_ARTIFACT_DEFAULT_RESERVE_BYTES
-        Ok(ArtifactStoreConfig{
-            root_value: root,
-            cap_bytes_value: cap_bytes,
-            reserve_bytes_value: reserve_bytes,
-            lock_wait_value: time.duration_ms(STORE_ARTIFACT_DEFAULT_LOCK_WAIT_MS),
-        })
+        Ok(
+            ArtifactStoreConfig{
+                root_value: root,
+                cap_bytes_value: cap_bytes,
+                reserve_bytes_value: reserve_bytes,
+                lock_wait_value: time.duration_ms(STORE_ARTIFACT_DEFAULT_LOCK_WAIT_MS),
+            },
+        )
     }
 
     // Rust `Default`: the environment configuration, else `.cache/jet/store`.
@@ -98,11 +110,9 @@ store_artifact_optional_size: fn(name: String) -[Env]> Int? ArtifactStoreError! 
     value: sys.get(name) ?? return Ok(None)
     if store_artifact_parse_size(value) == {
         .Ok(size) -> Ok(Val(size))
-        .Err(error) -> {
-            if error == {
-                .Config(message) -> Err(ArtifactStoreError.Config("{name}: {message}"))
-                .IO(_) | .InvalidDigest(_) | .InvalidKey(_) | .Corrupt(_, _) | .Conflict(_) | .Locked(_, _, _) | .Capacity(_, _, _, _) -> Err(error)
-            }
+        .Err(error) -> if error == {
+            .Config(message) -> Err(ArtifactStoreError.Config("{name}: {message}"))
+            .IO(_) | .InvalidDigest(_) | .InvalidKey(_) | .Corrupt(_, _) | .Conflict(_) | .Locked(_, _, _) | .Capacity(_, _, _, _) -> Err(error)
         }
     }
 }
@@ -158,10 +168,16 @@ store_artifact_parse_size: fn(value: String) -> Int ArtifactStoreError! {
     }
     // #4303: Main-approved host-emitter binding workaround; restore :: with the emitter fix.
     digits := number.trim()
-    if digits == "" || !store_artifact_all_digits(digits) -> return Err(ArtifactStoreError.Config("invalid byte size `{trimmed}`"))
+    if digits == "" || !store_artifact_all_digits(digits) {
+        return Err(ArtifactStoreError.Config("invalid byte size `{trimmed}`"))
+    }
     count: Int.parse(digits) ?? return Err(ArtifactStoreError.Config("invalid byte size `{trimmed}`"))
-    if count > STORE_ARTIFACT_U64_MAX -> return Err(ArtifactStoreError.Config("invalid byte size `{trimmed}`"))
-    if count > STORE_ARTIFACT_U64_MAX /% multiplier -> return Err(ArtifactStoreError.Config("byte size `{trimmed}` is too large"))
+    if count > STORE_ARTIFACT_U64_MAX {
+        return Err(ArtifactStoreError.Config("invalid byte size `{trimmed}`"))
+    }
+    if count > STORE_ARTIFACT_U64_MAX /% multiplier {
+        return Err(ArtifactStoreError.Config("byte size `{trimmed}` is too large"))
+    }
     Ok(count * multiplier)
 }
 

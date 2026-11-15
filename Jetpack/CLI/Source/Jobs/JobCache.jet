@@ -30,9 +30,7 @@ cli_debug_job_cache: fn(policy: JobCachePolicy) -> String Never! {
     }
 }
 
-cli_sha256_hex: fn(bytes: [U8]) -> String Never! {
-    crypto.sha256(bytes).hex()
-}
+cli_sha256_hex: fn(bytes: [U8]) -> String Never! { crypto.sha256(bytes).hex() }
 
 // The strict job cache key (`jet-job-cache-v2`). `compiler_build` is the
 // hex SHA-256 of the compiler the job runs (`cli_resolve_job_compiler`).
@@ -51,9 +49,13 @@ cli_task_cache_key: fn(project_dir: String, entry: String, job: String, compiler
     identity = "{identity}skip={cli_debug_job_skip(metadata.skip)}\n"
     identity = "{identity}cwd={pkg_debug_opt_str(metadata.cwd)}\n"
     identity = "{identity}cache={cli_debug_job_cache(metadata.cache)}\n"
-    loop limit in cli_sorted_limits(metadata.limits) -> identity = "{identity}limit={limit.key}:{limit.value}\n"
+    loop limit in cli_sorted_limits(metadata.limits) {
+        identity = "{identity}limit={limit.key}:{limit.value}\n"
+    }
     loop reference in refs -> identity = "{identity}ref={reference.raw}\n"
-    loop decl in table.declarations() -> identity = "{identity}source={decl.name}:{decl.upstream}:{decl.via.label()}\n"
+    loop decl in table.declarations() {
+        identity = "{identity}source={decl.name}:{decl.upstream}:{decl.via.label()}\n"
+    }
     project_inputs: [String]{ENV_FILE, UNIFIED_LOCK_FILE}
     loop relative in project_inputs {
         path: files.join(project_dir, relative)
@@ -67,11 +69,11 @@ cli_task_cache_key: fn(project_dir: String, entry: String, job: String, compiler
         path: cli_job_path(project_dir, Val(input), "input", false)
         info: files.stat(path) ?? return Err(CLIError.Other("couldn't inspect job input `{input}`: {err}"))
         if info.is_symlink -> return Err(CLIError.Other("job input `{input}` may not be a symlink"))
-        if !info.is_dir && !info.is_file -> return Err(CLIError.Other("job input `{input}` is not a regular file or directory"))
+        if !info.is_dir && !info.is_file {
+            return Err(CLIError.Other("job input `{input}` is not a regular file or directory"))
+        }
         digest := ""
-        if info.is_dir {
-            digest = foundation_tree_hash(path)
-        } else {
+        if info.is_dir -> digest = foundation_tree_hash(path) else {
             digest = foundation_sha256_file_hex(path) ?? return Err(CLIError.Other("couldn't hash job input `{input}`: {err}"))
         }
         identity = "{identity}input={input}:{digest}\n"
@@ -100,16 +102,20 @@ cli_task_environment_hash_with_env: fn(refs: [RefSpec], table: SourceTable, secr
 // The job's environment identity: the trust definition hash plus the active
 // environment, its provenance and source files, and a digest of every
 // composed variable value in name order.
-cli_task_environment_hash_with_vars: fn(refs: [RefSpec], table: SourceTable, secrets: [SecretSpec], facts: EnvironmentFacts, vars: [String: String]) -> String Never! {
+cli_task_environment_hash_with_vars: fn(refs: [RefSpec], table: SourceTable, secrets: [SecretSpec], facts: EnvironmentFacts, vars: [String:String]) -> String Never! {
     identity := trust_environment_definition_hash(refs, table, secrets, facts)
     identity = "{identity}\njob-active-environment\n{facts.active_environment ?? "<none>"}\n"
-    loop contributor in facts.active_environment_provenance -> identity = "{identity}provenance={contributor}\n"
+    loop contributor in facts.active_environment_provenance {
+        identity = "{identity}provenance={contributor}\n"
+    }
     identity = "{identity}job-source-files\n"
     loop source in facts.source_files -> identity = "{identity}{source}\n"
     identity = "{identity}job-environment-values\n"
     names := vars.keys().to_list()
     names.sort()
-    loop name in names -> identity = "{identity}{name}={cli_sha256_hex((vars.get(name) ?? "").bytes())}\n"
+    loop name in names {
+        identity = "{identity}{name}={cli_sha256_hex((vars.get(name) ?? "").bytes())}\n"
+    }
     cli_sha256_hex(identity.bytes())
 }
 
@@ -117,7 +123,9 @@ cli_task_environment_hash_with_vars: fn(refs: [RefSpec], table: SourceTable, sec
 // out of secret-bearing or Jet state, and never overlaps an input with an
 // output.
 cli_validate_cached_job_metadata: fn(project_dir: String, metadata: JobMetadata) CLIError! -[FS, Env]> {
-    if metadata.cache == JobCachePolicy.Uncached -> return
+    if metadata.cache == JobCachePolicy.Uncached {
+        return
+    }
     if metadata.inputs.len() == 0 {
         return Err(CLIError.Other("strict cached jobs must declare at least one project input; undeclared reads cannot be proven safe"))
     }
@@ -144,7 +152,9 @@ cli_validate_cached_job_metadata: fn(project_dir: String, metadata: JobMetadata)
         }
     }
     loop input in inputs {
-        if !files.exists(input.path) -> return Err(CLIError.Other("job input `{input.name}` does not exist"))
+        if !files.exists(input.path) {
+            return Err(CLIError.Other("job input `{input.name}` does not exist"))
+        }
     }
 }
 
@@ -154,22 +164,30 @@ cli_validate_cached_job_environment: fn(plan: RunPlan, env: ShellEnv) CLIError! 
         return Err(CLIError.Other("strict cached jobs cannot use declared secrets; secret values are never cache inputs"))
     }
     loop dotenv in plan.environment.lifecycle.dotenv {
-        if dotenv.secrets.len() > 0 -> return Err(CLIError.Other("strict cached jobs cannot use secret dotenv variables from `{dotenv.file}`"))
+        if dotenv.secrets.len() > 0 {
+            return Err(CLIError.Other("strict cached jobs cannot use secret dotenv variables from `{dotenv.file}`"))
+        }
     }
     names := env.vars.keys().to_list()
     names.sort()
     loop name in names {
-        if cli_is_sensitive_environment_name(name) -> return Err(CLIError.Other("strict cached jobs cannot use secret-bearing environment variable `{name}`"))
+        if cli_is_sensitive_environment_name(name) {
+            return Err(CLIError.Other("strict cached jobs cannot use secret-bearing environment variable `{name}`"))
+        }
     }
 }
 
 cli_reject_cache_sensitive_path: fn(relative: String, field: String) CLIError! {
-    if cli_is_cache_sensitive_path(relative) -> return Err(CLIError.Other("cached job {field} `{relative}` is secret-bearing or Jet state"))
+    if cli_is_cache_sensitive_path(relative) {
+        return Err(CLIError.Other("cached job {field} `{relative}` is secret-bearing or Jet state"))
+    }
 }
 
 cli_reject_cache_sensitive_resolved_path: fn(project_dir: String, path: String, declared: String, field: String) CLIError! -[FS, Env]> {
     root: files.canonicalize(project_dir) ?? return Err(CLIError.Other("couldn't resolve cached job project root: {err}"))
-    if !cli_path_starts_with(path, root) -> return Err(CLIError.Other("cached job {field} `{declared}` escapes the project"))
+    if !cli_path_starts_with(path, root) {
+        return Err(CLIError.Other("cached job {field} `{declared}` escapes the project"))
+    }
     relative: path.removeprefix(root).removeprefix("/")
     if cli_is_cache_sensitive_path(relative) {
         return Err(CLIError.Other("cached job {field} `{declared}` resolves into secret-bearing or Jet state `{relative}`"))
@@ -177,7 +195,9 @@ cli_reject_cache_sensitive_resolved_path: fn(project_dir: String, path: String, 
 }
 
 cli_reject_cache_sensitive_descendants: fn(root: String, relative: String, field: String) CLIError! -[FS]> {
-    if !files.is_dir(root) -> return
+    if !files.is_dir(root) {
+        return
+    }
     entries: files.list_dir(root) ?? return Err(CLIError.Other("couldn't inspect cached job {field} `{relative}`: {err}"))
     loop item in entries {
         child: files.join(relative, item.name)
@@ -185,7 +205,9 @@ cli_reject_cache_sensitive_descendants: fn(root: String, relative: String, field
             return Err(CLIError.Other("cached job {field} `{relative}` contains secret-bearing or Jet state `{child}`"))
         }
         info: files.stat(item.path) ?? return Err(CLIError.Other("{err}"))
-        if info.is_symlink -> return Err(CLIError.Other("strict cached job {field} `{relative}` contains unsupported symlink `{child}`"))
+        if info.is_symlink {
+            return Err(CLIError.Other("strict cached job {field} `{relative}` contains unsupported symlink `{child}`"))
+        }
         if info.is_dir -> cli_reject_cache_sensitive_descendants(item.path, child, field)
     }
 }
@@ -279,7 +301,9 @@ cli_job_outputs_exist: fn(project_dir: String, metadata: JobMetadata) -[FS, Env]
 }
 
 cli_task_cache_hit: fn(project_dir: String, roots: HangarRoots, metadata: JobMetadata, key: String) -[FS, Env]> Bool Never! {
-    if metadata.cache == JobCachePolicy.Uncached || !cli_job_outputs_exist(project_dir, metadata) -> return false
+    if metadata.cache == JobCachePolicy.Uncached || !cli_job_outputs_exist(project_dir, metadata) {
+        return false
+    }
     recorded: files.read(cli_job_cache_path(project_dir, roots, metadata, key)) ?? return false
     recorded.trim() == key
 }

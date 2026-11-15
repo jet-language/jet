@@ -47,15 +47,11 @@ cli_why_test_text: fn(tree: Dyn) -> String {
     report: cli_why_test_sample()
     text: report.text()
     facts_1: [String]{"env file", "/work/env.jet:12", "packages: [ripgrep]", "lock line", "/work/.jet/lock:8", "name = \"ripgrep\"", "catalog", "endpoint", "signature chain", "signed", "disk", "dependents", "receipt"}
-    loop fact in facts_1 {
-        assert(text.contains(fact), "human report misses {fact}")
-    }
+    loop fact in facts_1 { assert(text.contains(fact), "human report misses {fact}") }
     rendered: report.to_json() ?? panic("valid typed why report JSON")
     tree: json.parse(rendered) ?? panic("the why report is JSON")
     facts_2: [String]{"\"env_file\"", "\"lock_file\"", "\"catalog\"", "\"endpoint\"", "\"signature_chain\"", "\"source_digest\"", "\"grade\"", "\"bytes\"", "\"dependents\"", "\"receipt\""}
-    loop fact in facts_2 {
-        assert(rendered.contains(fact), "JSON report misses {fact}")
-    }
+    loop fact in facts_2 { assert(rendered.contains(fact), "JSON report misses {fact}") }
     assert_eq(cli_why_test_text(cli_why_test_field(tree, "action")), "why")
     // `PackageWhy.to_json` (Store Explain/PackageWhy.jet) nests the report under
     // the status envelope's `why` field.

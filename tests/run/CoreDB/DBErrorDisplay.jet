@@ -17,14 +17,14 @@ run: fn() {
     policy: db.policy("item", "true") ?? panic("policy")
     scope: conn.with_policy(policy, "owner")
     if db.migrate(scope, "v1", [SQL{"ALTER TABLE missing_table ADD COLUMN x INTEGER"}]) == {
-        .Ok(steps) -> print("applied {steps}")
+        .Ok(steps) -> { print("applied {steps}") }
         .Err(e) -> {
             print("display: {e}")
             print("debug: {e:Debug}")
         }
     }
     if failing_step(scope) == {
-        .Ok(steps) -> print("applied {steps}")
+        .Ok(steps) -> { print("applied {steps}") }
         .Err(e) -> print("as Err: {e.message}")
     }
 }

@@ -1,10 +1,15 @@
 // JetOS owns these carriers; system/service/option plans remain the canonical
 // EnvModel carriers.
 JETOS_CACHYOS_KERNEL_PACKAGE: "cachyos-kernel"
+
 JETOS_SYSTEMD_INIT_PACKAGE: "systemd"
+
 JETOS_GNOME_DESKTOP_PACKAGES: [String]{"gdm", "gnome-session", "gnome-shell"}
+
 JETOS_VM_TOOLS: [String]{"qemu-system-x86_64", "qemu-img", "xorriso", "limine", "sfdisk", "blockdev", "mkfs.ext4", "mkfs.vfat", "mmd", "mcopy", "zstd"}
+
 JETOS_VM_GUEST_PROOF_MARKER: "JETOS_GUEST_PROOF:"
+
 JETOS_VM_PROOF_TIMEOUT_MS: 300000
 
 JetOSFlags: struct {
@@ -59,6 +64,7 @@ JetOSRealizedPackage: struct {
     // Provenance names durable provider output, never a process-scoped
     // consumption projection.
     original_output: fn(self) -> String Never! { self.original_out }
+
     original_reference: fn(self) -> String Never! { self.original_reference_text }
 }
 
@@ -69,12 +75,14 @@ JetOSBootProfile: struct {
     initrd_modules: [String]
 
     to_dyn: fn(self) -> Dyn Never! {
-        Dyn.Object([
-            "loader": Dyn.Text(self.loader.copy()),
-            "kernel": Dyn.Text(self.kernel.copy()),
-            "init": Dyn.Text(self.init.copy()),
-            "initrd_modules": pkg_json_texts(self.initrd_modules),
-        ])
+        Dyn.Object(
+            [
+                "loader": Dyn.Text(self.loader.copy()),
+                "kernel": Dyn.Text(self.kernel.copy()),
+                "init": Dyn.Text(self.init.copy()),
+                "initrd_modules": pkg_json_texts(self.initrd_modules),
+            ],
+        )
     }
 
     to_json: fn(self) -> String Never! { pkg_json_render(self.to_dyn()) }
@@ -99,20 +107,28 @@ JetOSResolvedOption: struct {
     to_json: fn(self) -> String Never! {
         rows := [Dyn]{}
         loop contender in self.contenders {
-            rows.push(Dyn.Object([
-                "value": Dyn.Text(contender.value.copy()),
-                "tier": Dyn.Text(contender.tier.copy()),
-                "priority": Dyn.Int(contender.priority),
-                "source_order": Dyn.Int(contender.source_order),
-                "winner": Dyn.Bool(contender.winner),
-            ]))
+            rows.push(
+                Dyn.Object(
+                    [
+                        "value": Dyn.Text(contender.value.copy()),
+                        "tier": Dyn.Text(contender.tier.copy()),
+                        "priority": Dyn.Int(contender.priority),
+                        "source_order": Dyn.Int(contender.source_order),
+                        "winner": Dyn.Bool(contender.winner),
+                    ],
+                ),
+            )
         }
-        pkg_json_render(Dyn.Object([
-            "key": Dyn.Text(self.key.copy()),
-            "value": Dyn.Text(self.value.copy()),
-            "tier": Dyn.Text(self.tier.copy()),
-            "priority": Dyn.Int(self.priority),
-            "contenders": Dyn.Array(rows),
-        ]))
+        pkg_json_render(
+            Dyn.Object(
+                [
+                    "key": Dyn.Text(self.key.copy()),
+                    "value": Dyn.Text(self.value.copy()),
+                    "tier": Dyn.Text(self.tier.copy()),
+                    "priority": Dyn.Int(self.priority),
+                    "contenders": Dyn.Array(rows),
+                ],
+            ),
+        )
     }
 }

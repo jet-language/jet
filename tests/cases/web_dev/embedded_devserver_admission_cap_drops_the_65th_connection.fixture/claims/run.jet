@@ -6,14 +6,19 @@ s5_reset: fn(error: NetError) -> Bool {
         .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> false
     }
 }
-S5ReadEnd: struct { bytes: Int, closed: Bool }
+
+S5ReadEnd: struct {
+    bytes: Int
+    closed: Bool
+}
+
 s5_read_end: fn(stream: net.TCPStream) -> S5ReadEnd {
     count := 0
     loop {
         if stream.read_bytes(8192, deadline: 200ms) == {
             .Ok(part) -> {
                 if part.is_empty() -> return S5ReadEnd{bytes: count, closed: true}
-                count = count + part.len()
+                count += part.len()
             }
             .Err(error) -> return S5ReadEnd{bytes: count, closed: s5_reset(error)}
         }
@@ -38,8 +43,10 @@ s5_probe_write: fn(probe: net.TCPStream) -> Bool {
     started: time.start()
     dropped := false
     loop time.elapsed(started).ns < 5000000000 {
-        probe: net.tcp_connect("127.0.0.1:{port}") ?? { dropped = true
-            break }
+        probe: net.tcp_connect("127.0.0.1:{port}") ?? {
+            dropped = true
+            break
+        }
         if !s5_probe_write(probe) {
             dropped = true
             net.tcp_close(probe).drop("original probe drop ignores close failure")
@@ -48,11 +55,15 @@ s5_probe_write: fn(probe: net.TCPStream) -> Bool {
         net.tcp_shutdown(probe, .Write).drop("original ignores probe half-close failure")
         read: s5_read_end(probe)
         net.tcp_close(probe).drop("original probe drop ignores close failure")
-        if read.bytes == 0 && read.closed { dropped = true
-            break }
+        if read.bytes == 0 && read.closed {
+            dropped = true
+            break
+        }
         tasks.yield_now()
     }
-    loop holder in holders -> net.tcp_close(holder).drop("original holder drop ignores close failure")
+    loop holder in holders {
+        net.tcp_close(holder).drop("original holder drop ignores close failure")
+    }
     assert(dropped, "the connection after64 occupied admission slots was not dropped or refused")
     s5_web_wait_up(port, 3000)
 }

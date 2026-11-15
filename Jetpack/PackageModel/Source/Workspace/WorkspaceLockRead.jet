@@ -42,7 +42,9 @@ pkg_workspace_lock_load_checked_file: fn(cache: &WorkspaceDeclarationCache, reso
     recorded_digest: lock.workspace_source_digest ?? return None
     source: if resolver.resolve_workspace_source(cache) == {
         .Ok(found) -> found
-        .Err(_) -> { return None }
+        .Err(_) -> {
+            return None
+        }
     }
     if source == {
         .Val(present) -> {
@@ -68,7 +70,9 @@ pkg_workspace_lock_load_checked_file: fn(cache: &WorkspaceDeclarationCache, reso
         names := [String]{}
         checked_members := [CheckedMember]{}
         loop member in lock.workspace_members {
-            if member.name == "" || member.path == "" || files.is_abs(member.path) || pkg_workspace_path_has_parent(member.path) -> return None
+            if member.name == "" || member.path == "" || files.is_abs(member.path) || pkg_workspace_path_has_parent(member.path) {
+                return None
+            }
             if member.source_digest != source_digest -> return None
             resolver.revalidate_source(present) ?? return None
             checked: resolver.checked_package(member.path) ?? return None
@@ -78,7 +82,9 @@ pkg_workspace_lock_load_checked_file: fn(cache: &WorkspaceDeclarationCache, reso
             if canonical_relative != member.canonical_path -> return None
             package: checked.facts
             if package.name != member.name || package.members.len() > 0 -> return None
-            if member.package_digest == "" || package.semantic_digest() != member.package_digest -> return None
+            if member.package_digest == "" || package.semantic_digest() != member.package_digest {
+                return None
+            }
             if physical_paths.contains(physical_path) || names.contains(member.name) -> return None
             physical_paths.push(physical_path.copy())
             names.push(member.name)
@@ -93,7 +99,9 @@ pkg_workspace_lock_load_checked_file: fn(cache: &WorkspaceDeclarationCache, reso
     plan_source_digest: if lock.workspace_members.len() > 0 -> lock.workspace_members[0].source_digest else -> source_digest
     members := [WorkspacePlanMember]{}
     if is_index {
-        loop member in lock.workspace_members -> members.push(WorkspacePlanMember{name: member.name, path: member.path, canonical_path: member.canonical_path})
+        loop member in lock.workspace_members {
+            members.push(WorkspacePlanMember{name: member.name, path: member.path, canonical_path: member.canonical_path})
+        }
     }
     resolver.revalidate_file(lock_file) ?? return None
     Val(WorkspacePlan{members: members, comptime_inputs: lock.comptime_inputs, overlay_policy: lock.workspace_overlay_policy, source_digest: plan_source_digest})

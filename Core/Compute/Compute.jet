@@ -21,7 +21,6 @@ package: {
 // failure as a ComputeError. `Auto` selects the CPU oracle; a tensor on any
 // other device has no provider here and is rejected with
 // ComputeError.Device rather than computed on the CPU.
-
 use {
     core: core
     core.compute.[ComputeError, VJPRun]
@@ -30,8 +29,11 @@ use {
 }
 
 MAX_ELEMENTS: 16777216
+
 INT_MAX: 9223372036854775807
+
 PROFILE_F64: "F64Strict+Reproducible"
+
 PROFILE_F32: "F32Strict+Reproducible"
 
 zeros: fn(shape: [Int]) -> Tensor ComputeError! { filled(shape, 0.0, "Auto") }
@@ -70,7 +72,7 @@ numel: fn(tensor: Tensor) -> Int Never! {
     loop dim in tensor.shape {
         if dim < 0 -> return 0
         if dim != 0 && n > INT_MAX /% dim -> return 0
-        n = n * dim
+        n *= dim
     }
     n
 }
@@ -109,7 +111,7 @@ __window_copy: fn(tensor: Tensor, range: Range, values: [Float]) -> Tensor Never
 // The element count of one first-axis slab: the product of the inner axes.
 window_slab: fn(shape: [Int]) -> Int Never! {
     slab := 1
-    loop index in 1..<shape.len() -> slab = slab * shape[index]
+    loop index in 1..<shape.len() -> slab *= shape[index]
     slab
 }
 
@@ -145,7 +147,9 @@ get: fn(tensor: Tensor, index: [Int]) -> Float ComputeError! {
 
 set: fn(tensor: &Tensor, index: [Int], value: Float) ComputeError! {
     if !math.is_finite(value) -> return Err(ComputeError.Arithmetic)
-    if tensor.numeric_profile == PROFILE_F32 && !f32_exact(value) -> return Err(ComputeError.Arithmetic)
+    if tensor.numeric_profile == PROFILE_F32 && !f32_exact(value) {
+        return Err(ComputeError.Arithmetic)
+    }
     _ := checked(tensor)
     at: offset(tensor, index)
     tensor.data[at] = value
@@ -195,7 +199,7 @@ sum_axis: fn(tensor: Tensor, axis: Int) -> Tensor ComputeError! {
     loop (index, dim) in tensor.shape {
         if index == axis -> next
         out_shape.push(dim)
-        if index < axis -> outer = outer * dim else -> inner = inner * dim
+        if index < axis -> outer *= dim else -> inner *= dim
     }
     if out_shape.len() == 0 -> out_shape.push(1)
     extent: tensor.shape[axis]
@@ -213,7 +217,7 @@ sum_axis: fn(tensor: Tensor, axis: Int) -> Tensor ComputeError! {
             loop at in start..<(start + inner) {
                 sum: tensor.data[next] + data[at]
                 data[at] = if f32 -> narrow(sum, true) else -> sum
-                next = next + 1
+                next += 1
             }
         }
     }
@@ -334,7 +338,9 @@ matmul_f32_tile: fn(a: Tensor, b: Tensor) -> Tensor ComputeError! {
         row_tile += TILE
     }
     out := Tensor{shape: out_shape.copy(), data: data, device: "CPU", numeric_profile: PROFILE_F32, requested: "CPU", reason: "", transfer: "", node: -1}
-    if a.node >= 0 || b.node >= 0 -> out.node = ad_record("matmul_f32_tile", [Tensor]{a.copy(), b.copy()}, 0)
+    if a.node >= 0 || b.node >= 0 {
+        out.node = ad_record("matmul_f32_tile", [Tensor]{a.copy(), b.copy()}, 0)
+    }
     Ok(out)
 }
 
@@ -402,7 +408,9 @@ kernel_bounds_ok: fn(shape: [Int], index: [Int]) -> Bool ComputeError! {
 // display name. `Auto` and `CPU` select the CPU oracle; an explicit
 // accelerator has no provider here and is refused with ComputeError.Device
 // (core-library.md:4280-4281), never served on the CPU.
-impl ComputeDevice.Display { display: fn(self) -> String { self.name.copy() } }
+impl ComputeDevice.Display {
+    display: fn(self) -> String { self.name.copy() }
+}
 
 device_cpu: fn() -> ComputeDevice Never! { ComputeDevice{name: "CPU"} }
 
@@ -496,7 +504,9 @@ deserialize: fn(payload: String) -> Tensor ComputeError! {
     if values_text != "" {
         loop value_text in values_text.split(",") {
             value: Float.parse(value_text) ?? return Err(ComputeError.Serialization)
-            if !math.is_finite(value) || "{value}" != value_text -> return Err(ComputeError.Serialization)
+            if !math.is_finite(value) || "{value}" != value_text {
+                return Err(ComputeError.Serialization)
+            }
             data.push(value)
         }
     }
@@ -507,7 +517,9 @@ deserialize: fn(payload: String) -> Tensor ComputeError! {
             if !f32_exact(value) -> return Err(ComputeError.Serialization)
         }
     }
-    if fields[3].removeprefix("checksum=") != wire_checksum("{fields[0]};{fields[1]};{fields[2]}") -> return Err(ComputeError.Serialization)
+    if fields[3].removeprefix("checksum=") != wire_checksum("{fields[0]};{fields[1]};{fields[2]}") {
+        return Err(ComputeError.Serialization)
+    }
     if storage_len(shape) != data.len() -> return Err(ComputeError.Serialization)
     Ok(Tensor{shape: shape, data: data, device: "CPU", numeric_profile: profile.copy(), requested: "CPU", reason: "deserialized canonical Tensor", transfer: "", node: -1})
 }
@@ -566,17 +578,21 @@ to_sparse: fn(tensor: Tensor) -> SparseTensor ComputeError! {
 
 sparse_nnz: fn(sparse: SparseTensor) -> Int Never! { sparse.values.len() }
 
-sparse_show: fn(sparse: SparseTensor) -> String Never! { "SparseCsr({sparse.rows}x{sparse.cols}, nnz={sparse.values.len()})" }
+sparse_show: fn(sparse: SparseTensor) -> String Never! {
+    "SparseCsr({sparse.rows}x{sparse.cols}, nnz={sparse.values.len()})"
+}
 
 // `sparse` times a length-`cols` vector: a fresh F64 CPU tensor of `rows`.
 sparse_mv: fn(sparse: SparseTensor, vector: Tensor) -> Tensor ComputeError! {
     _ := checked(vector)
-    if vector.shape.len() != 1 || vector.shape[0] != sparse.cols -> return Err(ComputeError.RankMismatch)
+    if vector.shape.len() != 1 || vector.shape[0] != sparse.cols {
+        return Err(ComputeError.RankMismatch)
+    }
     out := [Float]{}
     loop r in 0..<sparse.rows {
         acc := Float{0.0}
         loop k in sparse.row_ptr[r]..<sparse.row_ptr[r + 1] {
-            acc = acc + sparse.values[k] * vector.data[sparse.col_idx[k]]
+            acc += sparse.values[k] * vector.data[sparse.col_idx[k]]
             if !math.is_finite(acc) -> return Err(ComputeError.Arithmetic)
         }
         out.push(acc)
@@ -609,7 +625,9 @@ eye: fn(n: Int) -> Tensor ComputeError! {
 // Gaussian elimination with partial pivoting; each row swap flips the sign.
 det: fn(tensor: Tensor) -> Float ComputeError! {
     _ := checked(tensor)
-    if tensor.shape.len() != 2 || tensor.shape[0] != tensor.shape[1] -> return Err(ComputeError.RankMismatch)
+    if tensor.shape.len() != 2 || tensor.shape[0] != tensor.shape[1] {
+        return Err(ComputeError.RankMismatch)
+    }
     n: tensor.shape[0]
     a := tensor.data.copy()
     product := Float{1.0}
@@ -628,7 +646,7 @@ det: fn(tensor: Tensor) -> Float ComputeError! {
             product = -product
         }
         piv: a[i * n + i]
-        product = product * piv
+        product *= piv
         if !math.is_finite(product) -> return Err(ComputeError.Arithmetic)
         loop r in (i + 1)..<n {
             factor: a[r * n + i] / piv
@@ -645,7 +663,9 @@ det: fn(tensor: Tensor) -> Float ComputeError! {
 
 // Gauss-Jordan elimination of [tensor | I] with partial pivoting.
 inv: fn(tensor: Tensor) -> Tensor ComputeError! {
-    if tensor.shape.len() != 2 || tensor.shape[0] != tensor.shape[1] -> return Err(ComputeError.RankMismatch)
+    if tensor.shape.len() != 2 || tensor.shape[0] != tensor.shape[1] {
+        return Err(ComputeError.RankMismatch)
+    }
     _ := checked(tensor)
     n: tensor.shape[0]
     width: n * 2
@@ -705,13 +725,9 @@ solve: fn(a: Tensor, b: Tensor) -> Tensor ComputeError! {
     _ := checked(b)
     n: a.shape[0]
     rhs := 0
-    if b.shape.len() == 1 && b.shape[0] == n {
-        rhs = 1
-    } else if b.shape.len() == 2 && b.shape[0] == n && b.shape[1] >= 0 {
+    if b.shape.len() == 1 && b.shape[0] == n -> rhs = 1 else if b.shape.len() == 2 && b.shape[0] == n && b.shape[1] >= 0 {
         rhs = b.shape[1]
-    } else {
-        return Err(ComputeError.RankMismatch)
-    }
+    } else { return Err(ComputeError.RankMismatch) }
     width: n + rhs
     if width > MAX_ELEMENTS || n * width > MAX_ELEMENTS -> return Err(ComputeError.Shape)
     m := [Float]{}
@@ -775,9 +791,7 @@ fft: fn(tensor: Tensor) -> Tensor ComputeError! {
             imaginary := [Float]{}
             loop _ in 0..<n -> imaginary.push(Float{0.0})
             spectrum = radix2(tensor.data.copy(), imaginary, false, f32)
-        } else {
-            spectrum = bluestein(tensor.data, f32)
-        }
+        } else { spectrum = bluestein(tensor.data, f32) }
         loop index in 0..<n {
             data.push(spectrum.real[index])
             data.push(spectrum.imaginary[index])
@@ -795,7 +809,7 @@ Spectrum: struct {
 
 power_of_two: fn(n: Int) -> Bool Never! {
     p := 1
-    loop p < n -> p = p * 2
+    loop p < n -> p *= 2
     p == n
 }
 
@@ -811,12 +825,14 @@ Butterfly: struct {
 butterfly_f32: fn(cosine: Float, sine: Float, even_real: Float, even_imaginary: Float, odd_real: Float, odd_imaginary: Float) -> Butterfly ComputeError! {
     product_real: narrow(narrow(cosine * odd_real, true) - narrow(sine * odd_imaginary, true), true)
     product_imaginary: narrow(narrow(cosine * odd_imaginary, true) + narrow(sine * odd_real, true), true)
-    Ok(Butterfly{
-        even_real: narrow(even_real + product_real, true),
-        even_imaginary: narrow(even_imaginary + product_imaginary, true),
-        odd_real: narrow(even_real - product_real, true),
-        odd_imaginary: narrow(even_imaginary - product_imaginary, true),
-    })
+    Ok(
+        Butterfly{
+            even_real: narrow(even_real + product_real, true),
+            even_imaginary: narrow(even_imaginary + product_imaginary, true),
+            odd_real: narrow(even_real - product_real, true),
+            odd_imaginary: narrow(even_imaginary - product_imaginary, true),
+        },
+    )
 }
 
 // In-order iterative radix-2 transform of a power-of-two length; `inverse`
@@ -841,10 +857,10 @@ radix2: fn(real_in: &&[Float], imaginary_in: &&[Float], inverse: Bool, f32: Bool
     loop index in 1..<n {
         bit := n /% 2
         loop bit > 0 && (reversed /% bit) % 2 == 1 {
-            reversed = reversed - bit
+            reversed -= bit
             bit = bit /% 2
         }
-        reversed = reversed + bit
+        reversed += bit
         if index < reversed {
             held_real: real[index]
             real[index] = real[reversed]
@@ -887,10 +903,10 @@ radix2: fn(real_in: &&[Float], imaginary_in: &&[Float], inverse: Bool, f32: Bool
                 real[odd] = next_odd_real
                 imaginary[odd] = next_odd_imaginary
             }
-            block = block + stage
+            block += stage
         }
         if stage == n -> break
-        stage = stage * 2
+        stage *= 2
     }
     // Under F64 the butterflies skip the per-step finiteness check (narrow):
     // a non-finite value is absorbed by every later add, subtract and
@@ -913,7 +929,7 @@ radix2: fn(real_in: &&[Float], imaginary_in: &&[Float], inverse: Bool, f32: Bool
 bluestein: fn(values: [Float], f32: Bool) -> Spectrum ComputeError! {
     n: values.len()
     padded := 1
-    loop padded < 2 * n - 1 -> padded = padded * 2
+    loop padded < 2 * n - 1 -> padded *= 2
     real := [Float]{}
     imaginary := [Float]{}
     kernel_real := [Float]{}
@@ -994,7 +1010,7 @@ storage_len: fn(shape: [Int]) -> Int ComputeError! {
     loop k in 1..<shape.len() {
         dim: shape[shape.len() - k]
         if dim != 0 && stride > INT_MAX /% dim -> return Err(ComputeError.Shape)
-        stride = stride * dim
+        stride *= dim
     }
     first: shape[0]
     if first != 0 && stride > MAX_ELEMENTS /% first -> return Err(ComputeError.Shape)
@@ -1006,7 +1022,9 @@ storage_len: fn(shape: [Int]) -> Int ComputeError! {
 // the profile holds. Only the CPU oracle owns storage here, so any other
 // device or request is rejected.
 checked: fn(tensor: Tensor) -> Int ComputeError! {
-    if tensor.numeric_profile != PROFILE_F64 && tensor.numeric_profile != PROFILE_F32 -> return Err(ComputeError.Device)
+    if tensor.numeric_profile != PROFILE_F64 && tensor.numeric_profile != PROFILE_F32 {
+        return Err(ComputeError.Device)
+    }
     if tensor.device != "CPU" -> return Err(ComputeError.Device)
     if tensor.requested != "Auto" && tensor.requested != "CPU" -> return Err(ComputeError.Device)
     n: storage_len(tensor.shape)
@@ -1025,7 +1043,7 @@ checked: fn(tensor: Tensor) -> Int ComputeError! {
 // so one test after the loop does.
 all_finite: fn(values: [Float]) -> Bool Never! {
     poison := Float{0.0}
-    loop value in values -> poison = poison + value * Float{0.0}
+    loop value in values -> poison += value * Float{0.0}
     math.is_finite(poison)
 }
 
@@ -1062,11 +1080,7 @@ broadcast_shape: fn(a: [Int], b: [Int]) -> [Int] ComputeError! {
     loop axis in 0..<rank {
         da: if axis < rank - a.len() -> 1 else -> a[axis - (rank - a.len())]
         db: if axis < rank - b.len() -> 1 else -> b[axis - (rank - b.len())]
-        if da == db || db == 1 {
-            out.push(da)
-        } else if da == 1 {
-            out.push(db)
-        } else {
+        if da == db || db == 1 -> out.push(da) else if da == 1 -> out.push(db) else {
             return Err(ComputeError.RankMismatch)
         }
     }
@@ -1094,7 +1108,7 @@ expand: fn(tensor: Tensor, target: [Int]) -> [Float] ComputeError! {
         source_axis: source_rank - 1 - k
         dim: tensor.shape[source_axis]
         if dim != 1 || target[lead + source_axis] == 1 -> strides[lead + source_axis] = stride
-        stride = stride * dim
+        stride *= dim
     }
     out := [Float]{}
     position := [Int]{}
@@ -1105,11 +1119,11 @@ expand: fn(tensor: Tensor, target: [Int]) -> [Float] ComputeError! {
         axis := rank - 1
         loop axis >= 0 {
             position[axis] = position[axis] + 1
-            at = at + strides[axis]
+            at += strides[axis]
             if position[axis] < target[axis] -> break
-            at = at - strides[axis] * target[axis]
+            at -= strides[axis] * target[axis]
             position[axis] = 0
-            axis = axis - 1
+            axis -= 1
         }
     }
     Ok(out)
@@ -1124,7 +1138,9 @@ binary: fn(code: Int, a: Tensor, b: Tensor) -> Tensor ComputeError! {
     shape: broadcast_shape(a.shape, b.shape)
     // Operands that already have the result shape are read in place; others
     // are expanded to it first.
-    if a.shape != shape || b.shape != shape -> return binary(code, like(a, shape.copy(), expand(a, shape)), like(b, shape.copy(), expand(b, shape)))
+    if a.shape != shape || b.shape != shape {
+        return binary(code, like(a, shape.copy(), expand(a, shape)), like(b, shape.copy(), expand(b, shape)))
+    }
     f32: a.numeric_profile == PROFILE_F32
     data := [Float]{}
     loop (index, x) in a.data {
@@ -1191,9 +1207,15 @@ device_key: fn(device: String) -> String Never! {
 
 // The registered abilities of the backend serving `profile`.
 abilities: fn(accelerator: Bool, profile: String) -> [String] Never! {
-    if accelerator -> return [String]{"ranked-storage", "strided-view", "checked-bounds", "f32-arithmetic", "reproducible-reduction", "elementwise", "matmul", "device-buffer", "stream", "differential-oracle"}
-    if profile == PROFILE_F32 -> return [String]{"ranked-storage", "strided-view", "checked-bounds", "f32-arithmetic", "cpu-simd-dispatch", "simd-tail", "blocked-matmul", "differential-oracle"}
-    if profile == PROFILE_F64 -> return [String]{"ranked-storage", "strided-view", "checked-bounds", "reproducible-reduction", "differential-oracle"}
+    if accelerator {
+        return [String]{"ranked-storage", "strided-view", "checked-bounds", "f32-arithmetic", "reproducible-reduction", "elementwise", "matmul", "device-buffer", "stream", "differential-oracle"}
+    }
+    if profile == PROFILE_F32 {
+        return [String]{"ranked-storage", "strided-view", "checked-bounds", "f32-arithmetic", "cpu-simd-dispatch", "simd-tail", "blocked-matmul", "differential-oracle"}
+    }
+    if profile == PROFILE_F64 {
+        return [String]{"ranked-storage", "strided-view", "checked-bounds", "reproducible-reduction", "differential-oracle"}
+    }
     [String]{}
 }
 
@@ -1228,12 +1250,12 @@ priv ADTape: struct {
 
 __ad_enter: fn() Never! {
     tape := ad_tape().guard_edit()
-    tape.value.depth = tape.value.depth + 1
+    tape.value.depth += 1
 }
 
 __ad_exit: fn() Never! {
     tape := ad_tape().guard_edit()
-    tape.value.depth = tape.value.depth - 1
+    tape.value.depth -= 1
     if tape.value.depth <= 0 {
         tape.value.depth = 0
         tape.value.nodes.clear()
@@ -1248,9 +1270,7 @@ __ad_leaf: fn(tensor: Tensor) -> Tensor Never! {
     tape := ad_tape().guard_edit()
     if tensor.node >= 0 {
         tape.value.nodes.push(ADNode{op: "identity", inputs: [Tensor]{tensor.copy()}, axis: 0})
-    } else {
-        tape.value.nodes.push(ADNode{op: "leaf", inputs: [Tensor]{}, axis: 0})
-    }
+    } else { tape.value.nodes.push(ADNode{op: "leaf", inputs: [Tensor]{}, axis: 0}) }
     leaf.node = tape.value.nodes.len() - 1
     leaf
 }
@@ -1274,7 +1294,9 @@ __ad_gradient: fn(out: Tensor, leaf: Tensor) -> Tensor Never! {
 // The pullback of `out` to `leaf` under `seed`, the adjoint `out` receives:
 // the `pull` of a `compute.vjp` run. `seed` has `out`'s shape.
 __ad_pull: fn(out: Tensor, leaf: Tensor, seed: Tensor) -> Tensor Never! {
-    if seed.shape != out.shape -> panic("compute.vjp: the seed has shape {seed.shape} but the value has shape {out.shape}")
+    if seed.shape != out.shape {
+        panic("compute.vjp: the seed has shape {seed.shape} but the value has shape {out.shape}")
+    }
     gradient := ad_backward_seeded(out, leaf, seed) ?? panic("compute.vjp: a derivative rule failed")
     if ad_depth() <= 1 -> gradient.node = -1
     gradient
@@ -1289,7 +1311,9 @@ __ad_tangent: fn(out: Tensor, leaves: [Tensor], tangents: [Tensor]) -> Tensor Ne
     tangent := like(out, out.shape.copy(), ad_fill(out.data.len(), 0.0))
     loop (index, leaf) in leaves {
         direction: tangents[index]
-        if direction.shape != leaf.shape -> panic("compute.jvp: tangent {index} has shape {direction.shape} but its primal has shape {leaf.shape}")
+        if direction.shape != leaf.shape {
+            panic("compute.jvp: tangent {index} has shape {direction.shape} but its primal has shape {leaf.shape}")
+        }
         pullback: ad_backward_seeded(out, leaf, seed) ?? panic("compute.jvp: a derivative rule failed")
         along: mul(pullback, direction) ?? panic("compute.jvp: a derivative rule failed")
         share: ad_backward(along, seed) ?? panic("compute.jvp: a derivative rule failed")
@@ -1303,16 +1327,12 @@ __ad_tangent: fn(out: Tensor, leaves: [Tensor], tangents: [Tensor]) -> Tensor Ne
 // `autodiff` because the compiler resolves the initializer named in
 // core.mem.__process_shared at module scope and cannot name a function inside
 // a private module there.
-priv init_ad_tape: fn() -> Shared<ADTape> Never! {
-    Shared{ADTape{depth: 0, nodes: [ADNode]{}}}
-}
+priv init_ad_tape: fn() -> Shared<ADTape> Never! { Shared{ADTape{depth: 0, nodes: [ADNode]{}}} }
 
 // The tape and the backward pass behind the __ad_* entry points: not part of
 // the compute surface.
 priv autodiff: module {
-    ad_tape: fn() -> Shared<ADTape> Never! {
-        core.mem.__process_shared(init_ad_tape)
-    }
+    ad_tape: fn() -> Shared<ADTape> Never! { core.mem.__process_shared(init_ad_tape) }
 
     ad_depth: fn() -> Int Never! {
         tape: ad_tape().guard_read()
@@ -1331,7 +1351,9 @@ priv autodiff: module {
     // record onto the tape while they run.
     ad_nodes: fn(last: Int) -> [ADNode] Never! {
         tape: ad_tape().guard_read()
-        if last >= tape.value.nodes.len() -> panic("compute.gradient: a tracked Tensor outlived its transform")
+        if last >= tape.value.nodes.len() {
+            panic("compute.gradient: a tracked Tensor outlived its transform")
+        }
         nodes := [ADNode]{}
         loop index in 0..<(last + 1) -> nodes.push(tape.value.nodes[index].copy())
         nodes
@@ -1360,7 +1382,9 @@ priv autodiff: module {
         adjoints[out.node] = Val(seed.copy())
         loop step in 0..<(out.node - leaf.node) {
             id: out.node - step
-            adjoint: adjoints[id] ?? { next }
+            adjoint: adjoints[id] ?? {
+                next
+            }
             node: nodes[id]
             rule: ad_has_rule(node.op)
             loop (index, input) in node.inputs {
@@ -1403,7 +1427,9 @@ priv autodiff: module {
             return Ok(broadcast_to(reshape(g, kept), a.shape))
         }
         b: node.inputs[1]
-        if op == "matmul" -> return Ok(if index == 0 -> matmul(g, transpose(b)) else -> matmul(transpose(a), g))
+        if op == "matmul" {
+            return Ok(if index == 0 -> matmul(g, transpose(b)) else -> matmul(transpose(a), g))
+        }
         // The f32 tile kernel differentiates on the CPU oracle, in its inputs'
         // contract: its f32 adjoint is read as `a`'s profile. A tracked
         // adjoint stays tracked through that read, so the backward pass

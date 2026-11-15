@@ -35,7 +35,9 @@ tree_expr_known_bounds: fn(expression: TExpr) -> TIntegerBounds? Never! {
             if op != TUnaryOp.Neg -> return None
             literal := tree_expr_literal_integer(operand)
             if operand.kind == .NumericMethod(receiver, operation) {
-                if operation == .CheckedIntToFixed(_, _) -> literal = tree_expr_literal_integer(receiver)
+                if operation == .CheckedIntToFixed(_, _) {
+                    literal = tree_expr_literal_integer(receiver)
+                }
             }
             number: literal ?? return None
             return Val(integer_bounds_exact(-number))
@@ -56,9 +58,11 @@ checked_cost_integer_bounds: fn(expression: TExpr) -> TIntegerBounds? Never! {
         }
         .NumericMethod(receiver, operation) -> {
             if operation == {
-                .InlineRange(lo, hi, _) -> bounds = Val(TIntegerBounds{lo: lo, hi: hi})
+                .InlineRange(lo, hi, _) -> { bounds = Val(TIntegerBounds{lo: lo, hi: hi}) }
                 .CastAs(destination) -> {
-                    if destination == "i64" && checked_cost_integer_bounds(receiver) == .Val(original) && original.lo >= -9223372036854775808 && original.hi <= 9223372036854775807 -> bounds = Val(original)
+                    if destination == "i64" && checked_cost_integer_bounds(receiver) == .Val(original) && original.lo >= -9223372036854775808 && original.hi <= 9223372036854775807 {
+                        bounds = Val(original)
+                    }
                 }
                 .Predicate(_) | .BitCount(_, _) | .CheckedIntToFloat(_, _, _) | .CheckedIntToFixed(_, _) | .FixedNarrow(_, _) | .TryFrom(_) | .FloatExact(_, _) | .FloatNarrow | .ToShow | .EuclideanDiv | .EuclideanRem | .CharFromScalar -> {}
             }
@@ -69,17 +73,21 @@ checked_cost_integer_bounds: fn(expression: TExpr) -> TIntegerBounds? Never! {
             }
         }
         .Binary(op, _, _, left, right) -> {
-            if checked_cost_integer_bounds(left) == .Val(lhs) && checked_cost_integer_bounds(right) == .Val(rhs) -> bounds = checked_cost_combine_bounds(op, lhs, rhs)
+            if checked_cost_integer_bounds(left) == .Val(lhs) && checked_cost_integer_bounds(right) == .Val(rhs) {
+                bounds = checked_cost_combine_bounds(op, lhs, rhs)
+            }
         }
         .OrFallback(value, fallback, _) -> {
             success := TIntegerBounds?{None}
             if value.ty == {
-                .Option(inner) -> success = checked_cost_type_bounds(inner)
+                .Option(inner) -> { success = checked_cost_type_bounds(inner) }
                 .Result(ok, _) -> success = checked_cost_type_bounds(ok)
                 .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
             }
             if fallback == .Value(alternative) {
-                if success == .Val(normal) && checked_cost_integer_bounds(alternative) == .Val(other) -> bounds = Val(TIntegerBounds{lo: checked_cost_min(normal.lo, other.lo), hi: checked_cost_max(normal.hi, other.hi)})
+                if success == .Val(normal) && checked_cost_integer_bounds(alternative) == .Val(other) {
+                    bounds = Val(TIntegerBounds{lo: checked_cost_min(normal.lo, other.lo), hi: checked_cost_max(normal.hi, other.hi)})
+                }
             } else { bounds = success }
         }
         .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .CompareChain(_, _, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> {}
@@ -88,7 +96,9 @@ checked_cost_integer_bounds: fn(expression: TExpr) -> TIntegerBounds? Never! {
 }
 
 TREE_FOLD_INT_MIN: -9223372036854775808
+
 TREE_FOLD_INT_MAX: 9223372036854775807
+
 // Each factor of a folded product stays within 2^31, so the product fits.
 TREE_FOLD_FACTOR_LIMIT: 2147483648
 
@@ -110,15 +120,21 @@ tree_expr_fold_int: fn(expression: TExpr) -> Int? Never! {
             right: tree_expr_fold_int(rhs) ?? return None
             if op == {
                 .Add -> {
-                    if (right > 0 && left > TREE_FOLD_INT_MAX - right) || (right < 0 && left < TREE_FOLD_INT_MIN - right) -> return None
+                    if (right > 0 && left > TREE_FOLD_INT_MAX - right) || (right < 0 && left < TREE_FOLD_INT_MIN - right) {
+                        return None
+                    }
                     return Val(left + right)
                 }
                 .Sub -> {
-                    if (right < 0 && left > TREE_FOLD_INT_MAX + right) || (right > 0 && left < TREE_FOLD_INT_MIN + right) -> return None
+                    if (right < 0 && left > TREE_FOLD_INT_MAX + right) || (right > 0 && left < TREE_FOLD_INT_MIN + right) {
+                        return None
+                    }
                     return Val(left - right)
                 }
                 .Mul -> {
-                    if left > TREE_FOLD_FACTOR_LIMIT || left < -TREE_FOLD_FACTOR_LIMIT || right > TREE_FOLD_FACTOR_LIMIT || right < -TREE_FOLD_FACTOR_LIMIT -> return None
+                    if left > TREE_FOLD_FACTOR_LIMIT || left < -TREE_FOLD_FACTOR_LIMIT || right > TREE_FOLD_FACTOR_LIMIT || right < -TREE_FOLD_FACTOR_LIMIT {
+                        return None
+                    }
                     return Val(left * right)
                 }
                 .Div | .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare | .And | .Or -> return None
@@ -127,6 +143,8 @@ tree_expr_fold_int: fn(expression: TExpr) -> Int? Never! {
         .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .CompareChain(_, _, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> {}
     }
     bounds: tree_expr_known_bounds(expression) ?? return None
-    if bounds.lo != bounds.hi || bounds.lo < TREE_FOLD_INT_MIN || bounds.lo > TREE_FOLD_INT_MAX -> return None
+    if bounds.lo != bounds.hi || bounds.lo < TREE_FOLD_INT_MIN || bounds.lo > TREE_FOLD_INT_MAX {
+        return None
+    }
     Val(bounds.lo)
 }

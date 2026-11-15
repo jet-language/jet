@@ -15,9 +15,7 @@ impl StoreError.Display {
     }
 }
 
-open_store: fn(name: String) -> Int StoreError! {
-    Err(StoreError.Locked(name))
-}
+open_store: fn(name: String) -> Int StoreError! { Err(StoreError.Locked(name)) }
 
 // `find` writes no contract, so its cases mint `FindError`.
 find: fn(key: String) -> Int {
@@ -37,7 +35,7 @@ lookup: fn(store: String, key: String) -> Int Err! {
 
 report: fn(store: String, key: String) {
     if lookup(store, key) == {
-        .Ok(value) -> print("found {value}")
+        .Ok(value) -> { print("found {value}") }
         .Err(error) -> print("lookup failed: {error.message}")
     }
 }

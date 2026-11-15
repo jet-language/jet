@@ -1,4 +1,5 @@
 package: { name: "async-event-cancel-close" authority: { allow: [Time] } }
+
 use {
     event: core.event
     tasks: core.tasks
@@ -10,7 +11,7 @@ run: fn() {
     // Pending when the scope cancel decides them.
     hold_cancel_scope: event.scope()
     cancel_scope: event.scope()
-    cancel_event: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    cancel_event: event.async_result<Int, String>(AsyncPolicy{capacity: 1, overflow: .Block}, .Collect) ?? panic("policy")
     { sender: cancel_hold_started_tx, receiver: cancel_hold_started_rx }: channel<Int>()
     { sender: cancel_hold_release_tx, receiver: cancel_hold_release_rx }: channel<Int>()
     cancel_event.on(hold_cancel_scope, fn(n: Int) {
@@ -35,7 +36,7 @@ run: fn() {
 
     hold_close_scope: event.scope()
     close_scope: event.scope()
-    close_event: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    close_event: event.async_result<Int, String>(AsyncPolicy{capacity: 1, overflow: .Block}, .Collect) ?? panic("policy")
     { sender: close_hold_started_tx, receiver: close_hold_started_rx }: channel<Int>()
     { sender: close_hold_release_tx, receiver: close_hold_release_rx }: channel<Int>()
     close_event.on(hold_close_scope, fn(n: Int) {

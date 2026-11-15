@@ -157,9 +157,10 @@ RuleSite: enum {
     Test
     Operation
     Text
-    // A match arm: `#Through` is written after the arm's body.
     Arm
 }
+
+// A match arm: `#Through` is written after the arm's body.
 
 ImportDecl: struct {
     kind: ImportKind
@@ -737,10 +738,11 @@ DeriveBodyItem: enum {
     Item(value: Item)
     Stmt(value: Stmt)
     Loop(var: String, var_span: Span, source: Expr, body: [DeriveBodyItem], span: Span)
-    // `#if cond { … } else { … }`: the template expands only the
-    // chosen branch's items.
     If(cond: Expr, cond_span: Span, then_body: [DeriveBodyItem], else_body: [DeriveBodyItem]?, span: Span)
 }
+
+// `#if cond { … } else { … }`: the template expands only the
+// chosen branch's items.
 
 ItemTemplateLoop: struct {
     var: String
@@ -1068,7 +1070,9 @@ app_entry_run_fn: fn(items: [Item]) -> Func? Never! {
     loop item in items {
         if item == {
             .Func(function) -> {
-                if function.name == "run" && function.return_type == .Val(ty) && type_is_app(ty) -> return Val(function)
+                if function.name == "run" && function.return_type == .Val(ty) && type_is_app(ty) {
+                    return Val(function)
+                }
             }
             .CodeModule(module_value) -> {
                 if module_value.body == .Val(body) {
@@ -1256,7 +1260,9 @@ UnitScaleProvenance: enum {
 unit_family_type_name: fn(member: String) -> String Never! {
     out := ""
     loop segment in member.split("_") {
-        if segment.len() > 0 -> out = "{out}{segment.slice(0, 1).to_upper()}{segment.slice(1, segment.len())}"
+        if segment.len() > 0 {
+            out = "{out}{segment.slice(0, 1).to_upper()}{segment.slice(1, segment.len())}"
+        }
     }
     if out == "" -> return member.copy()
     out
@@ -1284,7 +1290,9 @@ unit_family_distinct_defs: fn(family: UnitFamilyDef) -> [DistinctDef] Never! {
             derives := [NamedSpan]{NamedSpan{name: if point -> "Comparable" else -> "Numeric", span: member.name_span}}
             quantity := QuantityInfo?{None}
             if family.resolved_dimension == .Val(dimension) {
-                loop codec in owned_trait_codec_names() -> derives.push(NamedSpan{name: codec.copy(), span: member.name_span})
+                loop codec in owned_trait_codec_names() {
+                    derives.push(NamedSpan{name: codec.copy(), span: member.name_span})
+                }
                 kind: if {
                     !affine -> QuantityKind.Linear
                     point -> QuantityKind.Point

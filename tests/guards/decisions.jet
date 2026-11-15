@@ -76,9 +76,7 @@ s3_guard_tombstone_provenance: fn() {
         at = close + 2
     }
     required: [String]{"D-CTMARKER1", "D-MARKERMOVE1", "D-MARKERMOVE2", "D-MARKERMOVE3", "D-MARKER-FAMILY1"}
-    loop id in required {
-        assert(ids.contains(id), "tombstone extraction regressed: missing {id}")
-    }
+    loop id in required { assert(ids.contains(id), "tombstone extraction regressed: missing {id}") }
 }
 
 #Test("tombstoned_decision_ids_carry_provenance_document_subclaims") {
@@ -94,6 +92,7 @@ DECISION_ID_FREE_ROOTS: [String]{"Compiler", "Core", "Jetpack"}
 // The roots whose citations are still the backlog. Their count is printed on
 // every run and may only shrink: lower DECISION_ID_BACKLOG as citations go.
 DECISION_ID_BACKLOG_ROOTS: [String]{"Examples", "tests", "Tools/agent"}
+
 DECISION_ID_BACKLOG: 1997
 
 decision_id_upper: fn(byte: U8) -> Bool { Int{byte} >= 65 && Int{byte} <= 90 }
@@ -116,12 +115,12 @@ decision_id_at: fn(bytes: [U8], start: Int) -> Bool {
         if end >= bytes.len() -> break
         byte: bytes[end]
         if !decision_id_upper(byte) && !s3_decision_is_digit(byte) && (Int{byte}) != 45 -> break
-        end = end + 1
+        end += 1
     }
     last := end - 1
     loop {
         if (Int{bytes[last]}) != 45 -> break
-        last = last - 1
+        last -= 1
     }
     if !s3_decision_is_digit(bytes[last]) -> return false
     last + 1 < end || end >= bytes.len() || !decision_id_word(bytes[end])
@@ -140,16 +139,22 @@ decision_id_in_line: fn(line: String) -> Bool {
 // links (fixtures hold link cycles), hidden entries, installed node modules
 // and build output are not source.
 decision_id_lines: fn(path: String, out: &[String]) {
-    if decision_files.is_symlink(path) -> return
+    if decision_files.is_symlink(path) {
+        return
+    }
     if decision_files.is_dir(path) {
         loop child in (decision_files.list_dir(path) ?? panic("list {path}: {err}")) {
-            if child.name.starts_with(".") || child.name == "node_modules" || child.name == "target" -> next
+            if child.name.starts_with(".") || child.name == "node_modules" || child.name == "target" {
+                next
+            }
             decision_id_lines(child.path, out)
         }
         return
     }
     text: decision_files.read(path) ?? return
-    if !text.contains("D-") -> return
+    if !text.contains("D-") {
+        return
+    }
     loop (index, line) in text.lines() {
         if decision_id_in_line(line) -> out.push("{path}:{index + 1}")
     }

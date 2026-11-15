@@ -4,11 +4,13 @@ use {
 }
 
 #Codable
-NewTask: struct { title: String, done: Bool }
+NewTask: struct {
+    title: String
+    done: Bool
+}
 
 Tasks: struct {
-    #Server.Post("/tasks")
-    add: fn(self, request: HTTPRequest) -> HTTPResponse HTTPError! {
+    #Server.Post("/tasks") add: fn(self, request: HTTPRequest) -> HTTPResponse HTTPError! {
         input: request.json<NewTask>()
         Ok(server.response(201, input.title))
     }

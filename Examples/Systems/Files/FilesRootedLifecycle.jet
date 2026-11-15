@@ -133,13 +133,13 @@ run: fn() {
     }
     print("descriptors left after 5 early exits: {fd_count() - before}")
     if first_line("{root}/missing.txt") == {
-        .Ok(_) -> print("missing file: read")
+        .Ok(_) -> { print("missing file: read") }
         .Err(error) -> print("missing file: {kind(error)}")
     }
     // The error message names the path. The temp root differs per run, so the
     // message is shown relative to it.
     if first_line("{root}/missing.txt") == {
-        .Ok(_) -> print("missing message: read")
+        .Ok(_) -> { print("missing message: read") }
         .Err(error) -> {
             message: "{error}".replace("{base}/", "")
             print("missing message: {message}")

@@ -226,7 +226,7 @@ semindex_language_symbols: fn() -> [SemSymbol] Never! {
 // `SemanticSymbolIndex::new` (`push` keeps the last row of one identity).
 semindex_symbol_index: fn(symbols: [SemSymbol]) -> [SemSymbol] Never! {
     unique := [SemSymbol]{}
-    positions := [String: Int]{}
+    positions := [String:Int]{}
     loop symbol in symbols {
         existing: positions.get(symbol.identity)
         if existing == .Val(position) -> unique[position] = symbol
@@ -309,11 +309,15 @@ semindex_symbol_checked_text_error: fn(items: [Item], owner: String) -> String? 
             }
             .CodeModule(code_module) -> {
                 if code_module.body == .Val(body) {
-                    if semindex_symbol_checked_text_error(body, owner) == .Val(error) -> return Val(error)
+                    if semindex_symbol_checked_text_error(body, owner) == .Val(error) {
+                        return Val(error)
+                    }
                 }
             }
             .GenericModule(generic) -> {
-                if semindex_symbol_checked_text_error(generic.body, owner) == .Val(error) -> return Val(error)
+                if semindex_symbol_checked_text_error(generic.body, owner) == .Val(error) {
+                    return Val(error)
+                }
             }
             .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
@@ -338,7 +342,9 @@ semindex_symbol_distinct_conversions: fn(owner: String, base: Type, ranged: Bool
             conversions.push(SemSymbolConversion{method: row.method, source: row.source})
         }
     }
-    if !semindex_symbol_is_numeric(base) -> conversions.push(SemSymbolConversion{method: semindex_symbol_conversion_method(base_name), source: base_name})
+    if !semindex_symbol_is_numeric(base) {
+        conversions.push(SemSymbolConversion{method: semindex_symbol_conversion_method(base_name), source: base_name})
+    }
     loop conversion in conversions {
         fallible: checked_text_error != None || ranged || semindex_symbol_is_result(semindex_symbol_distinct_conversion_return(base_name, conversion.method))
         qualified_name: "{owner}.{conversion.method}"
@@ -349,20 +355,22 @@ semindex_symbol_distinct_conversions: fn(owner: String, base: Type, ranged: Bool
             signature = "{owner}.{conversion.method}(value: {conversion.source}) -> {owner}\nfailure: {error} (CheckedText)"
             summary = "Validates {conversion.source} through {owner}.CheckedText."
         }
-        symbols.push(SemSymbol{
-            identity: semindex_identity("conversion", scope_identity, qualified_name),
-            name: conversion.method,
-            qualified_name: qualified_name,
-            owner: Val(owner),
-            module_path: module_path,
-            kind: SemSymbolKind.Member,
-            signature: signature,
-            summary: summary,
-            examples: [String]{},
-            provenance: SemSymbolProvenance.Source{module_path: module_path},
-            span: Val(span),
-            lexical_scope: lexical_scope,
-        })
+        symbols.push(
+            SemSymbol{
+                identity: semindex_identity("conversion", scope_identity, qualified_name),
+                name: conversion.method,
+                qualified_name: qualified_name,
+                owner: Val(owner),
+                module_path: module_path,
+                kind: SemSymbolKind.Member,
+                signature: signature,
+                summary: summary,
+                examples: [String]{},
+                provenance: SemSymbolProvenance.Source{module_path: module_path},
+                span: Val(span),
+                lexical_scope: lexical_scope,
+            },
+        )
     }
 }
 
@@ -370,7 +378,9 @@ semindex_symbol_distinct_conversions: fn(owner: String, base: Type, ranged: Bool
 semindex_symbol_module_def: fn(index: SemIndex, module_path: String, name_span: Span) -> String? Never! {
     loop definition in index.definitions {
         def: definition.def
-        if def.module_path == module_path && def.def_span.start == name_span.start && def.def_span.end == name_span.end && def.kind == .Module -> return Val(def.identity)
+        if def.module_path == module_path && def.def_span.start == name_span.start && def.def_span.end == name_span.end && def.kind == .Module {
+            return Val(def.identity)
+        }
     }
     None
 }
@@ -392,7 +402,9 @@ semindex_symbol_module_scope: fn(index: SemIndex, module_path: String, name: Str
 semindex_symbol_collect_conversions: fn(index: SemIndex, items: [Item], module_path: String, scope_identity: String, lexical_scope: SemSymbolScope?, symbols: &[SemSymbol]) Never! {
     loop item in items {
         if item == {
-            .Distinct(definition) -> semindex_symbol_distinct_conversions(definition.name, definition.base, definition.range != None, semindex_symbol_checked_text_error(items, definition.name), module_path, scope_identity, definition.name_span, lexical_scope, symbols)
+            .Distinct(definition) -> {
+                semindex_symbol_distinct_conversions(definition.name, definition.base, definition.range != None, semindex_symbol_checked_text_error(items, definition.name), module_path, scope_identity, definition.name_span, lexical_scope, symbols)
+            }
             .UnitFamily(family) -> {
                 // Canonical Time is the one fixed-carrier family that mints no
                 // distinct (`UnitFamilyDef::distinct_defs`).
@@ -440,11 +452,11 @@ semindex_symbol_smallest: fn(nodes: [SemNode], start: Int, end: Int, items_only:
 // from the module's structural nodes in start order (a node that ends before
 // one definition can never enclose a later one).
 SemSymbolScopes: struct {
-    enclosing: [String: Int]
-    enclosing_item: [String: Int]
-    first_lexical_child: [String: Int]
-    boundaries: [String: Span]
-    nodes_by_id: [String: SemNode]
+    enclosing: [String:Int]
+    enclosing_item: [String:Int]
+    first_lexical_child: [String:Int]
+    boundaries: [String:Span]
+    nodes_by_id: [String:SemNode]
 }
 
 semindex_symbol_scope_key: fn(module_path: String, start: Int, end: Int) -> String Never! {
@@ -452,9 +464,9 @@ semindex_symbol_scope_key: fn(module_path: String, start: Int, end: Int) -> Stri
 }
 
 semindex_symbol_scopes: fn(index: SemIndex) -> SemSymbolScopes Never! {
-    scopes := SemSymbolScopes{enclosing: [String: Int]{}, enclosing_item: [String: Int]{}, first_lexical_child: [String: Int]{}, boundaries: [String: Span]{}, nodes_by_id: [String: SemNode]{}}
+    scopes := SemSymbolScopes{enclosing: [String:Int]{}, enclosing_item: [String:Int]{}, first_lexical_child: [String:Int]{}, boundaries: [String:Span]{}, nodes_by_id: [String:SemNode]{}}
     module_paths := [String]{}
-    queries := [String: [Span]]{}
+    queries := [String:[Span]]{}
     loop definition in index.definitions {
         def: definition.def
         if def.kind == {
@@ -470,7 +482,7 @@ semindex_symbol_scopes: fn(index: SemIndex) -> SemSymbolScopes Never! {
             .Module | .Function(_) | .Struct(_, _) | .Enum(_, _) | .Trait | .Tag | .Type(_) | .Const | .EnumVariant(_) | .Field(_, _) -> {}
         }
     }
-    module_nodes := [String: [SemNode]]{}
+    module_nodes := [String:[SemNode]]{}
     loop node in index.nodes {
         scopes.nodes_by_id["{node.module_path}\n{node.id}"] = node
         if queries.get(node.module_path) == None -> next
@@ -479,7 +491,9 @@ semindex_symbol_scopes: fn(index: SemIndex) -> SemSymbolScopes Never! {
         module_nodes[node.module_path] = list
         if node.parent == .Val(parent) {
             child_key: "{node.module_path}\n{parent}"
-            if semindex_symbol_is_lexical_slot(node.slot) && scopes.first_lexical_child.get(child_key) == None -> scopes.first_lexical_child[child_key] = node.id
+            if semindex_symbol_is_lexical_slot(node.slot) && scopes.first_lexical_child.get(child_key) == None {
+                scopes.first_lexical_child[child_key] = node.id
+            }
         }
     }
     loop boundary in index.slot_boundaries {
@@ -521,8 +535,12 @@ semindex_symbol_scopes: fn(index: SemIndex) -> SemSymbolScopes Never! {
             active = kept
             candidates: if span.end < span.start -> nodes else -> active
             key: semindex_symbol_scope_key(module_path, span.start, span.end)
-            if semindex_symbol_smallest(candidates, span.start, span.end, false) == .Val(found) -> scopes.enclosing[key] = found
-            if semindex_symbol_smallest(candidates, span.start, span.end, true) == .Val(found) -> scopes.enclosing_item[key] = found
+            if semindex_symbol_smallest(candidates, span.start, span.end, false) == .Val(found) {
+                scopes.enclosing[key] = found
+            }
+            if semindex_symbol_smallest(candidates, span.start, span.end, true) == .Val(found) {
+                scopes.enclosing_item[key] = found
+            }
         }
     }
     scopes
@@ -575,7 +593,9 @@ SemSymbolShape: struct {
 semindex_symbol_shape: fn(name: String, kind: SemKind, owner: String?) -> SemSymbolShape Never! {
     shape := SemSymbolShape{kind: SemSymbolKind.Type, signature: ""}
     if kind == {
-        .Module -> shape = SemSymbolShape{kind: SemSymbolKind.Module, signature: "{name}: module"}
+        .Module -> {
+            shape = SemSymbolShape{kind: SemSymbolKind.Module, signature: "{name}: module"}
+        }
         .Function(callable) -> {
             params: semindex_parameter_parts(callable.params).join(", ")
             prefix: if owner == .Val(owner_name) -> "{owner_name}.{name}" else -> "{name}: fn"
@@ -591,19 +611,13 @@ semindex_symbol_shape: fn(name: String, kind: SemKind, owner: String?) -> SemSym
             result := ""
             if callable.failure_contract == .Val(contract) {
                 result = if failure_contract_shown_return(contract) == .Val(displayed) -> type_name(displayed) else -> ""
-            } else if callable.return_type == .Val(ret) {
-                result = type_name(ret)
-            }
+            } else if callable.return_type == .Val(ret) { result = type_name(ret) }
             ceiling := ""
-            if callable.effect_via == .Val(via) {
-                ceiling = " -[via {via.name}]>"
-            } else if shown.len() > 0 {
+            if callable.effect_via == .Val(via) -> ceiling = " -[via {via.name}]>" else if shown.len() > 0 {
                 ceiling = " -[{shown.join(", ")}]>"
             }
             suffix := ""
-            if ceiling != "" {
-                suffix = if result == "" -> ceiling else -> "{ceiling} {result}"
-            } else if result != "" {
+            if ceiling != "" -> suffix = if result == "" -> ceiling else -> "{ceiling} {result}" else if result != "" {
                 suffix = " -> {result}"
             }
             failure := ""
@@ -619,18 +633,26 @@ semindex_symbol_shape: fn(name: String, kind: SemKind, owner: String?) -> SemSym
             shown: loop field in fields -> "{field.name}: {type_name(field.ty)}"
             shape.signature = "{name}: struct {{ {shown.join(", ")} }}"
         }
-        .Enum(variants, _) -> shape.signature = "{name}: enum {{ {variants.join(", ")} }}"
-        .Trait -> shape.signature = "{name}: trait"
-        .Tag -> shape.signature = "{name}: tag"
-        .Type(_) -> shape.signature = "type {name}"
-        .Const -> shape = SemSymbolShape{kind: SemSymbolKind.Constant, signature: "const {name}"}
-        .EnumVariant(parent) -> shape = SemSymbolShape{kind: SemSymbolKind.Member, signature: "{parent}.{name}"}
-        .Field(ty, parent) -> shape = SemSymbolShape{kind: SemSymbolKind.Member, signature: "{parent}.{name}: {type_name(ty)}"}
+        .Enum(variants, _) -> { shape.signature = "{name}: enum {{ {variants.join(", ")} }}" }
+        .Trait -> { shape.signature = "{name}: trait" }
+        .Tag -> { shape.signature = "{name}: tag" }
+        .Type(_) -> { shape.signature = "type {name}" }
+        .Const -> {
+            shape = SemSymbolShape{kind: SemSymbolKind.Constant, signature: "const {name}"}
+        }
+        .EnumVariant(parent) -> {
+            shape = SemSymbolShape{kind: SemSymbolKind.Member, signature: "{parent}.{name}"}
+        }
+        .Field(ty, parent) -> {
+            shape = SemSymbolShape{kind: SemSymbolKind.Member, signature: "{parent}.{name}: {type_name(ty)}"}
+        }
         .Local(_, ty) -> {
             shown: if ty == .Val(value) -> type_name(value) else -> "value"
             shape = SemSymbolShape{kind: SemSymbolKind.Local, signature: "{name}: {shown}"}
         }
-        .Param(ty) -> shape = SemSymbolShape{kind: SemSymbolKind.Parameter, signature: "{name}: {type_name(ty)}"}
+        .Param(ty) -> {
+            shape = SemSymbolShape{kind: SemSymbolKind.Parameter, signature: "{name}: {type_name(ty)}"}
+        }
     }
     shape
 }
@@ -642,7 +664,9 @@ semindex_symbol_marker_signature: fn(modules: [JetDriverDocModule], def: SemDef)
         if doc_module.path != def.module_path && doc_module.alias != def.module_path -> next
         loop item in doc_module.items {
             if item == .MarkerDecl(declaration) {
-                if declaration.name != def.name || declaration.name_span.start != def.def_span.start || declaration.name_span.end != def.def_span.end -> next
+                if declaration.name != def.name || declaration.name_span.start != def.def_span.start || declaration.name_span.end != def.def_span.end {
+                    next
+                }
                 return Val(marker_decl_signature(declaration, doc_module.source))
             }
         }
@@ -657,9 +681,7 @@ semindex_symbol_trait_contracts: fn(contracts: [SemTraitContract], declaration: 
     loop contract in contracts {
         lines := [String]{"{prefix} {contract.trait_name}"}
         loop entry in contract.associated_types {
-            if entry.ty == .Val(ty) {
-                lines.push("  type {entry.name} = {ty}")
-            } else {
+            if entry.ty == .Val(ty) -> lines.push("  type {entry.name} = {ty}") else {
                 lines.push("  type {entry.name}")
             }
         }
@@ -693,9 +715,7 @@ semindex_symbol_source_docs: fn(source: String, def_start: Int) -> SemDocComment
         line: collected[position]
         if semindex_doc_strip_prefix(line, "Example:") == .Val(example) {
             comment.examples.push(example.trim())
-        } else if comment.summary == "" && line != "" {
-            comment.summary = line
-        }
+        } else if comment.summary == "" && line != "" { comment.summary = line }
         position -= 1
     }
     comment
@@ -726,9 +746,7 @@ semindex_symbol_imported_module: fn(modules: [JetDriverDocModule], doc_module: J
                 parent: if directory == "" -> "." else -> directory
                 // `"./helper"`, `"helper"` and `"helper.jet"` name one file.
                 name := path
-                loop name.starts_with("./") {
-                    name = name.slice(2, name.len())
-                }
+                loop name.starts_with("./") -> name = name.slice(2, name.len())
                 if !name.ends_with(".jet") -> name = "{name}.jet"
                 relative: "{parent}/{name}"
                 name_parts: name.split("/").to_list()
@@ -795,20 +813,22 @@ semindex_symbol_collect_imports: fn(symbols: &[SemSymbol], modules: [JetDriverDo
             }
             .File(_, _) | .Module(_, _) -> {
                 alias_name: import.alias
-                symbols.push(SemSymbol{
-                    identity: semindex_symbol_alias_identity(doc_module.path, import.alias_span) ?? semindex_symbol_import_identity(doc_module.path, scope, alias_name),
-                    name: alias_name,
-                    qualified_name: alias_name,
-                    owner: None,
-                    module_path: doc_module.path,
-                    kind: SemSymbolKind.Module,
-                    signature: "use {alias_name}",
-                    summary: "Imported module.",
-                    examples: [String]{},
-                    provenance: SemSymbolProvenance.Source{module_path: doc_module.path},
-                    span: Val(import.alias_span),
-                    lexical_scope: scope,
-                })
+                symbols.push(
+                    SemSymbol{
+                        identity: semindex_symbol_alias_identity(doc_module.path, import.alias_span) ?? semindex_symbol_import_identity(doc_module.path, scope, alias_name),
+                        name: alias_name,
+                        qualified_name: alias_name,
+                        owner: None,
+                        module_path: doc_module.path,
+                        kind: SemSymbolKind.Module,
+                        signature: "use {alias_name}",
+                        summary: "Imported module.",
+                        examples: [String]{},
+                        provenance: SemSymbolProvenance.Source{module_path: doc_module.path},
+                        span: Val(import.alias_span),
+                        lexical_scope: scope,
+                    },
+                )
             }
         }
     }
@@ -820,7 +840,9 @@ semindex_symbol_collect_inline_imports: fn(index: SemIndex, symbols: &[SemSymbol
             parent_identity: if parent_scope == .Val(parent) -> parent.identity else -> "module:{doc_module.path}"
             scope: semindex_symbol_module_scope(index, doc_module.path, code_module.name, code_module.name_span, code_module.span, parent_identity, parent_scope)
             semindex_symbol_collect_imports(symbols, modules, doc_module, code_module.imports, Val(scope))
-            if code_module.body == .Val(body) -> semindex_symbol_collect_inline_imports(index, symbols, modules, doc_module, body, Val(scope))
+            if code_module.body == .Val(body) {
+                semindex_symbol_collect_inline_imports(index, symbols, modules, doc_module, body, Val(scope))
+            }
         }
     }
 }
@@ -844,7 +866,9 @@ semindex_symbol_canonical_name: fn(modules: [JetDriverDocModule], module_path: S
         storage: doc_module.name_ledger ?? return fallback
         permit: storage.guard_read()
         module_index: doc_module.name_module_index
-        if name_ledger_display_path_at(permit.value, module_index, span, name, owner, Val(module_index)) == .Val(path) -> return path
+        if name_ledger_display_path_at(permit.value, module_index, span, name, owner, Val(module_index)) == .Val(path) {
+            return path
+        }
         if owner == .Val(value) {
             path: name_ledger_display_path(permit.value, module_index, value, Val(module_index)) ?? (name_ledger_canonical_path(permit.value, module_index, value) ?? value)
             return "{path}.{name}"
@@ -861,15 +885,17 @@ semindex_build_symbols: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [S
     loop doc_module in modules {
         semindex_symbol_collect_conversions(index, doc_module.items, doc_module.path, "module:{doc_module.path}", None, symbols)
     }
-    owners := [String: String]{}
-    origin_traits := [String: String]{}
+    owners := [String:String]{}
+    origin_traits := [String:String]{}
     loop member in index.members {
         if owners.get(member.identity) == None {
             owners[member.identity] = member.owner
-            if member.origin == "trait_impl" || member.origin == "trait_requirement" -> origin_traits[member.identity] = member.origin_trait
+            if member.origin == "trait_impl" || member.origin == "trait_requirement" {
+                origin_traits[member.identity] = member.origin_trait
+            }
         }
     }
-    sources := [String: String]{}
+    sources := [String:String]{}
     loop doc_module in modules -> sources[doc_module.path] = doc_module.source
     scopes: semindex_symbol_scopes(index)
     loop definition in index.definitions {
@@ -878,50 +904,64 @@ semindex_build_symbols: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [S
         owner := owners.get(def.identity)
         if owner == None {
             if def.kind == {
-                .Field(_, parent) -> owner = Val(parent)
+                .Field(_, parent) -> { owner = Val(parent) }
                 .EnumVariant(parent) -> owner = Val(parent)
                 .Module | .Function(_) | .Struct(_, _) | .Enum(_, _) | .Trait | .Tag | .Type(_) | .Const | .Local(_, _) | .Param(_) -> {}
             }
         }
         display_name: semindex_symbol_display(modules, def.module_path, def.name)
         display_owner := owner
-        if owner == .Val(value) -> display_owner = Val(semindex_symbol_display(modules, def.module_path, value))
+        if owner == .Val(value) {
+            display_owner = Val(semindex_symbol_display(modules, def.module_path, value))
+        }
         qualified_name: semindex_symbol_canonical_name(modules, def.module_path, def.name, owner, def.def_span)
         shape: semindex_symbol_shape(display_name, def.kind, display_owner)
         signature := shape.signature
         if semindex_symbol_marker_signature(modules, def) == .Val(marker) -> signature = marker
-        if definition.nominal_base == .Val(base) -> signature = "type {display_name}: distinct {semindex_symbol_display(modules, def.module_path, base)}"
+        if definition.nominal_base == .Val(base) {
+            signature = "type {display_name}: distinct {semindex_symbol_display(modules, def.module_path, base)}"
+        }
         if definition.trait_contracts.len() > 0 {
             signature = "{signature}\n{semindex_symbol_trait_contracts(definition.trait_contracts, def.kind == .Trait)}"
         }
-        if origin_traits.get(def.identity) == .Val(trait_name) -> signature = "{signature}\ntrait: {trait_name}"
+        if origin_traits.get(def.identity) == .Val(trait_name) {
+            signature = "{signature}\ntrait: {trait_name}"
+        }
         docs := SemDocComment{summary: "", examples: [String]{}}
-        if sources.get(def.module_path) == .Val(source) -> docs = semindex_symbol_source_docs(source, def.def_span.start)
+        if sources.get(def.module_path) == .Val(source) {
+            docs = semindex_symbol_source_docs(source, def.def_span.start)
+        }
         scope := SemSymbolScope?{None}
         if def.kind == {
             .Local(mutable, _) -> {
-                if docs.summary == "" -> docs.summary = if mutable -> "mutable binding" else -> "immutable binding"
-                if def.local_stage == .Val(stage) -> docs.summary = "{docs.summary}\n\n{semindex_local_stage_text(stage)}"
+                if docs.summary == "" {
+                    docs.summary = if mutable -> "mutable binding" else -> "immutable binding"
+                }
+                if def.local_stage == .Val(stage) {
+                    docs.summary = "{docs.summary}\n\n{semindex_local_stage_text(stage)}"
+                }
                 scope = semindex_symbol_scope(scopes, def.module_path, def.def_span, false)
             }
             .Param(_) -> scope = semindex_symbol_scope(scopes, def.module_path, def.def_span, true)
             .Module | .Function(_) | .Struct(_, _) | .Enum(_, _) | .Trait | .Tag | .Type(_) | .Const | .EnumVariant(_) | .Field(_, _) -> {}
         }
         identity: if scope != None -> "{def.identity}@{def.def_span.start}" else -> def.identity
-        symbols.push(SemSymbol{
-            identity: identity,
-            name: def.name,
-            qualified_name: qualified_name,
-            owner: display_owner,
-            module_path: def.module_path,
-            kind: shape.kind,
-            signature: signature,
-            summary: docs.summary,
-            examples: docs.examples,
-            provenance: SemSymbolProvenance.Source{module_path: def.module_path},
-            span: Val(def.def_span),
-            lexical_scope: scope,
-        })
+        symbols.push(
+            SemSymbol{
+                identity: identity,
+                name: def.name,
+                qualified_name: qualified_name,
+                owner: display_owner,
+                module_path: def.module_path,
+                kind: shape.kind,
+                signature: signature,
+                summary: docs.summary,
+                examples: docs.examples,
+                provenance: SemSymbolProvenance.Source{module_path: def.module_path},
+                span: Val(def.def_span),
+                lexical_scope: scope,
+            },
+        )
     }
     loop doc_module in modules {
         semindex_symbol_collect_imports(symbols, modules, doc_module, doc_module.imports, None)

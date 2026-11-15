@@ -145,9 +145,13 @@ tai_to_utc: fn(value: AstroTime) -> DateTime {
     return time.from_unix_nanoseconds(total)
 }
 
-tai_to_tt: fn(value: AstroTime) -> AstroTime { normalize(value.seconds + 32, value.nanoseconds + 184_000_000, "TT") }
+tai_to_tt: fn(value: AstroTime) -> AstroTime {
+    normalize(value.seconds + 32, value.nanoseconds + 184_000_000, "TT")
+}
 
-tt_to_tai: fn(value: AstroTime) -> AstroTime { normalize(value.seconds - 32, value.nanoseconds - 184_000_000, "TAI") }
+tt_to_tai: fn(value: AstroTime) -> AstroTime {
+    normalize(value.seconds - 32, value.nanoseconds - 184_000_000, "TAI")
+}
 
 utc_to_ut1: fn(dt: DateTime, dut1_nanoseconds: Int) -> AstroTime {
     return normalize(dt.to_unix_s(), dt.nanosecond() + dut1_nanoseconds, "UT1")

@@ -77,7 +77,9 @@ kit_steps_poll: fn(step: KitStep, index: Int, context: KitStepCtx, previous: Kit
     attempt_context.bless.ids = []
     loop {
         remaining_before: deadline - started.elapsed().ns
-        if remaining_before <= 0 -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "poll deadline exceeded")}
+        if remaining_before <= 0 {
+            return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "poll deadline exceeded")}
+        }
         policy: kit_steps_policy(step, context.env) ?? return kit_steps_action_error(state, "poll policy unavailable")
         attempt.duration = if remaining_before < policy.timeout.ns -> remaining_before else -> policy.timeout.ns
         state.json_stdout = None
@@ -85,7 +87,9 @@ kit_steps_poll: fn(step: KitStep, index: Int, context: KitStepCtx, previous: Kit
         invoked: kit_steps_hook_invoke(hooks, attempt, index, context, state)
         state = invoked.state
         if invoked.verdict.status != "PASS" -> return invoked
-        if state.last.timed_out && state.last.limit_hit != "cpu" -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "poll deadline exceeded")}
+        if state.last.timed_out && state.last.limit_hit != "cpu" {
+            return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "poll deadline exceeded")}
+        }
         failure: kit_steps_failure(attempt, state.last)
         if failure == {
             .Val(verdict) -> {
@@ -96,8 +100,12 @@ kit_steps_poll: fn(step: KitStep, index: Int, context: KitStepCtx, previous: Kit
         if rules.len() > 0 && failure == None {
             output: kit_steps_json_normalize(state.last.stdout, "stdout", rules)
             errors: kit_steps_json_normalize(state.last.stderr, "stderr", rules)
-            if output.error != "" -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", output.error)}
-            if errors.error != "" -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", errors.error)}
+            if output.error != "" {
+                return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", output.error)}
+            }
+            if errors.error != "" {
+                return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", errors.error)}
+            }
             state.json_stdout = Val(output.text)
             state.json_stderr = Val(errors.text)
         }
@@ -107,7 +115,9 @@ kit_steps_poll: fn(step: KitStep, index: Int, context: KitStepCtx, previous: Kit
             return KitStepResult{state: state, verdict: verdict}
         }
         remaining: deadline - started.elapsed().ns
-        if remaining <= 0 -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "poll deadline exceeded: {verdict.detail}")}
+        if remaining <= 0 {
+            return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "poll deadline exceeded: {verdict.detail}")}
+        }
         time.sleep(time.duration_ns(if interval < remaining -> interval else -> remaining))
     }
 }

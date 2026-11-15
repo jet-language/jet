@@ -4,7 +4,7 @@ use {
     core.reactive.loadable.[Loadable]
 }
 
-titles: fn(state: Loadable<[[String: db.DBValue]], db.DBError>) -> String {
+titles: fn(state: Loadable<[[String:db.DBValue]], db.DBError>) -> String {
     if state == {
         .Loaded(rows) -> {
             out := [String]{}
@@ -43,11 +43,11 @@ run: fn() {
     again: alice.live(SQL{"SELECT title FROM tasks ORDER BY title"}) ?? panic("again")
     print("same binding {again.id == mine.id}, per user {theirs.id != mine.id}")
     if alice.live(SQL{"DELETE FROM tasks"}) == {
-        .Ok(_ok) -> print("write live: accepted")
+        .Ok(_ok) -> { print("write live: accepted") }
         .Err(failure) -> print("write live: {failure.message()}")
     }
     if alice.live(SQL{"SELECT title FROM tasks JOIN other"}) == {
-        .Ok(_ok) -> print("join live: accepted")
+        .Ok(_ok) -> { print("join live: accepted") }
         .Err(failure) -> print("join live: rejected")
     }
     print(app.live_stats())

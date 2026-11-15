@@ -294,7 +294,7 @@ thread_test_registry_check: fn(slots: I64, count: I64) {
         thread_test_require(sync_load(wrapping(tcb + THREAD_TCB_ROW)) == at)
         slot := I64{0}
         loop slot < count {
-            if (sync_load(wrapping(slots + slot * I64{8})) == tcb) -> fakes += I64{1}
+            if (sync_load(wrapping(slots + slot * I64{8})) == tcb) { fakes += I64{1} }
             slot += I64{1}
         }
         at += I64{2}
@@ -303,7 +303,7 @@ thread_test_registry_check: fn(slots: I64, count: I64) {
     expected := I64{0}
     at = I64{0}
     loop at < count {
-        if (sync_load(wrapping(slots + at * I64{8})) != I64{0}) -> expected += I64{1}
+        if (sync_load(wrapping(slots + at * I64{8})) != I64{0}) { expected += I64{1} }
         at += I64{1}
     }
     thread_test_require(fakes == expected)
@@ -347,7 +347,7 @@ thread_test_registry_rows: fn() {
             sync_mutex_unlock(thread_tls_registry)
             sync_store(wrapping(slots + pick * I64{8}), fresh)
         }
-        if (steps.bit_and(I64{63}) == I64{0}) -> thread_test_registry_check(slots, count)
+        if (steps.bit_and(I64{63}) == I64{0}) { thread_test_registry_check(slots, count) }
         steps += I64{1}
     }
     at = I64{0}

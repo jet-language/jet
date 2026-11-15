@@ -94,6 +94,7 @@ spawn_dirs_clone: fn(list: I64) -> I64 {
 // Consumes only the owned child pointers in the source-built mechanical row;
 // the caller retains its SPAWN_SPEC_BYTES packing storage. This is not __spec_fields.
 SPAWN_SPEC_BYTES: I64{256}
+
 #Export(c) jet_process_spec_take_raw: fn(words: I64) -> I64 {
     spec: jet_rt_alloc(SPAWN_SPEC_BYTES, I64{8})
     rt_text_bytes_copy(spec, words, SPAWN_SPEC_BYTES)
@@ -205,7 +206,9 @@ spawn_child_new: fn() -> I64 {
 }
 
 // One struct timeval (seconds, microseconds) of a struct rusage, in ns.
-spawn_timeval_ns: fn(at: I64) -> I64 { fd_word(at, I64{0}) * I64{1000000000} + fd_word(at, I64{8}) * I64{1000} }
+spawn_timeval_ns: fn(at: I64) -> I64 {
+    fd_word(at, I64{0}) * I64{1000000000} + fd_word(at, I64{8}) * I64{1000}
+}
 
 spawn_plan_close: fn(plan: I64, count: I64) {
     at := I64{0}
@@ -274,6 +277,7 @@ spawn_cpu_seconds: fn(milliseconds: I64) -> I64 {
     rounded: if (milliseconds > I64{9223372036854774808}) -> I64{9223372036854775807} else -> wrapping(milliseconds + I64{999})
     rounded /% I64{1000}
 }
+
 // glibc posix/execvpe.c on the pinned Linux floor: 0 stops, 1 continues,
 // 2 records EACCES and continues. Pure syscall errno facts, no source policy.
 spawn_exec_errno_class: fn(result: I64) -> I64 {
@@ -414,7 +418,9 @@ spawn_exec_child: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: 
 SPAWN_CHILD_STACK: I64{131072}
 
 // Checked FunctionAddress intrinsic in the canonical RuntimeLibrary table.
-rt_process_spawn_child_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+rt_process_spawn_child_address: fn() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
 
 // The child entry of spawn_vfork, on its own stack. Block: the all-signals
 // mask 0, the parent's saved mask 8, one kernel sigaction 16..48, then the
@@ -423,7 +429,9 @@ rt_process_spawn_child_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, 
 // before the parent's mask returns, so no parent handler runs on the shared
 // memory.
 SPAWN_BLOCK_ARGS: I64{48}
+
 SPAWN_BLOCK_BYTES: I64{216}
+
 #Export(c) jet_rt_process_spawn_child: fn(block: I64) -> I64 {
     action: wrapping(block + I64{16})
     signal := I64{1}
@@ -460,7 +468,7 @@ spawn_flag_word: fn(flag: Bool) -> I64 { if flag -> I64{1} else -> I64{0} }
 // cgroup.procs it joins. The pid, or a negative errno.
 spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, err_write: I64, candidates: I64, argv: I64, envp: I64, fallback_argv: I64, cwd: I64, dirs: I64, session: Bool, terminal: Bool, cpu: Bool, memory: Bool, files: Bool, parent_death: Bool, affinity: I64, ioprio: I64, scope: I64) -> I64 {
     stack: trap_map(I64{0}, SPAWN_CHILD_STACK, I64{34})
-    if (stack < I64{0}) -> return stack
+    if (stack < I64{0}) { return stack }
     block: jet_rt_alloc(SPAWN_BLOCK_BYTES, I64{8})
     fd_put(block, I64{0}, I64{-1})
     fd_put(block, I64{8}, I64{0})
@@ -785,7 +793,7 @@ spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, 
             scope_peak: process_scope_peak(scope)
             if (scope_peak >= I64{0}) {
                 peak_kib = scope_peak /% I64{1024}
-                if (scope_peak.bit_and(I64{1023}) != I64{0}) -> peak_kib += I64{1}
+                if (scope_peak.bit_and(I64{1023}) != I64{0}) { peak_kib += I64{1} }
             }
             process_scope_remove(scope)
             jet_rt_string_drop(scope)
@@ -808,7 +816,9 @@ spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, 
 
 #Export(c) jet_process_kill_raw: fn(child: I64, signal: I64, group: Bool, error: I64) {
     native_signal: host_i32(signal)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        return
+    }
     sync_mutex_lock(child)
     pid: fd_word(child, I64{8})
     // std::process::Child::kill succeeds after its cached reap. Explicit
@@ -835,9 +845,9 @@ spawn_stream_dup: fn(child: I64, stream: I64) -> I64 {
 
 spawn_stream_io: fn(child: I64, stream: I64, bytes: I64, length: I64, number: I64, error: I64) -> I64 {
     index: host_native_int(stream)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     requested: host_native_int(length)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     packed: spawn_stream_dup(child, index)
     if (packed < I64{0}) { return fd_error(packed, error) }
     native: packed.bit_and(I64{4294967295})
@@ -865,7 +875,9 @@ spawn_stream_io: fn(child: I64, stream: I64, bytes: I64, length: I64, number: I6
 
 #Export(c) jet_process_close_stream_raw: fn(child: I64, stream: I64, error: I64) {
     index: host_native_int(stream)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        return
+    }
     sync_mutex_lock(child)
     offset: spawn_stream_offset(child, index)
     native: fd_word(child, offset)
@@ -877,9 +889,13 @@ spawn_stream_io: fn(child: I64, stream: I64, bytes: I64, length: I64, number: I6
 
 #Export(c) jet_process_resize_raw: fn(child: I64, cols: I64, rows: I64, error: I64) {
     native_rows: host_native_int(rows)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        return
+    }
     native_cols: host_native_int(cols)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        return
+    }
     size: (native_rows.bit_and(I64{65535})).bit_or(((native_cols.bit_and(I64{65535})) << I64{16}))
     sync_mutex_lock(child)
     master: fd_word(child, I64{56})
@@ -901,9 +917,11 @@ spawn_stream_io: fn(child: I64, stream: I64, bytes: I64, length: I64, number: I6
 // they replace, they bypass `jet test`'s read recorder.
 process_realpath: fn(path: I64, output: I64) -> I64 {
     length := I64{0}
-    loop length < (I64{4097}) && rt_text_byte(wrapping(path + length)) != (I64{0}) -> length += I64{1}
-    if (length == I64{0}) -> return I64{2}
-    if (length >= I64{4096}) -> return I64{36}
+    loop length < (I64{4097}) && rt_text_byte(wrapping(path + length)) != (I64{0}) {
+        length += I64{1}
+    }
+    if (length == I64{0}) { return I64{2} }
+    if (length >= I64{4096}) { return I64{36} }
     // stack: 4097 bytes, then one dummy byte for a zero-capacity readlink.
     stack: jet_rt_alloc(I64{4098}, I64{1})
     result: process_realpath_resolve(path, length, stack, output)
@@ -935,9 +953,11 @@ process_realpath_resolve: fn(path: I64, length: I64, stack: I64, output: I64) ->
             p = process_realpath_slashes(stack, p)
         } else {
             l := I64{0}
-            loop process_byte(stack, p + l) != (I64{0}) && process_byte(stack, p + l) != (I64{47}) -> l += I64{1}
+            loop process_byte(stack, p + l) != (I64{0}) && process_byte(stack, p + l) != (I64{47}) {
+                l += I64{1}
+            }
             l0: l
-            if (l == I64{0} && check_dir == I64{0}) -> break
+            if (l == I64{0} && check_dir == I64{0}) { break }
             if (l == I64{1} && process_byte(stack, p) == I64{46}) {
                 // A `.` component is skipped, keeping check_dir.
                 p = process_realpath_slashes(stack, p + l)
@@ -945,12 +965,12 @@ process_realpath_resolve: fn(path: I64, length: I64, stack: I64, output: I64) ->
                 // The component goes onto the output, at least for readlink;
                 // the output advances once it is known not to be a link.
                 if (q != I64{0} && process_byte(output, q - I64{1}) != I64{47}) {
-                    if (p == I64{0}) -> return I64{36}
+                    if (p == I64{0}) { return I64{36} }
                     p -= I64{1}
                     process_byte_put(stack, p, I64{47})
                     l += I64{1}
                 }
-                if (q + l >= I64{4096}) -> return I64{36}
+                if (q + l >= I64{4096}) { return I64{36} }
                 rt_text_bytes_copy(wrapping(output + q), wrapping(stack + p), l)
                 process_byte_put(output, q + l, I64{0})
                 p += l
@@ -967,25 +987,29 @@ process_realpath_resolve: fn(path: I64, length: I64, stack: I64, output: I64) ->
                     #Unsafe("readlink borrows the NUL-terminated output path and writes at most p (or the one dummy) bytes of the owned stack") {
                         linked = os_syscall_i64(I64{89}, output, target, if (p == I64{0}) -> I64{1} else -> p, I64{0}, I64{0}, I64{0})
                     }
-                    if (p == I64{0} && linked > I64{0}) -> linked = I64{0}
-                    if (linked == p) -> return I64{36}
-                    if (linked == I64{0}) -> return I64{2}
-                    if (linked < I64{0} && linked != I64{-22}) -> return -linked
+                    if (p == I64{0} && linked > I64{0}) { linked = I64{0} }
+                    if (linked == p) { return I64{36} }
+                    if (linked == I64{0}) { return I64{2} }
+                    if (linked < I64{0} && linked != I64{-22}) { return -linked }
                 }
                 if (linked == I64{-22}) {
                     // Not a link (or a `..` after known directories).
                     check_dir = I64{0}
                     if up {
-                        loop q != (I64{0}) && process_byte(output, q - I64{1}) != (I64{47}) -> q -= I64{1}
-                        if (q > I64{1} && (q > I64{2} || process_byte(output, I64{0}) != I64{47})) -> q -= I64{1}
+                        loop q != (I64{0}) && process_byte(output, q - I64{1}) != (I64{47}) {
+                            q -= I64{1}
+                        }
+                        if (q > I64{1} && (q > I64{2} || process_byte(output, I64{0}) != I64{47})) {
+                            q -= I64{1}
+                        }
                     } else {
-                        if (l0 != I64{0}) -> q += l
+                        if (l0 != I64{0}) { q += l }
                         check_dir = process_byte(stack, p)
                     }
                     p = process_realpath_slashes(stack, p)
                 } else if (linked > I64{0}) {
                     links += I64{1}
-                    if (links == I64{40}) -> return I64{40}
+                    if (links == I64{40}) { return I64{40} }
                     // Contents ending in / drop the stack's slashes, so no
                     // // or spurious overflow appears.
                     if (process_byte(stack, linked - I64{1}) == I64{47}) {
@@ -993,36 +1017,34 @@ process_realpath_resolve: fn(path: I64, length: I64, stack: I64, output: I64) ->
                     }
                     p -= linked
                     process_move_up(wrapping(stack + p), stack, linked)
-                } else {
-                    p = process_realpath_slashes(stack, p)
-                }
+                } else { p = process_realpath_slashes(stack, p) }
             }
         }
     }
     process_byte_put(output, q, I64{0})
-    if (process_byte(output, I64{0}) == I64{47}) -> return I64{0}
+    if (process_byte(output, I64{0}) == I64{47}) { return I64{0} }
     // A relative result joins the working directory, less its leading `..`s.
     cwd := I64{0}
     #Unsafe("getcwd writes at most 4097 bytes of the owned stack") {
         cwd = os_syscall_i64(I64{79}, stack, I64{4097}, I64{0}, I64{0}, I64{0}, I64{0})
     }
-    if (cwd < I64{0}) -> return -cwd
-    if (cwd == I64{0} || process_byte(stack, I64{0}) != I64{47}) -> return I64{2}
+    if (cwd < I64{0}) { return -cwd }
+    if (cwd == I64{0} || process_byte(stack, I64{0}) != I64{47}) { return I64{2} }
     l := I64{0}
     loop process_byte(stack, l) != (I64{0}) -> l += I64{1}
     p = I64{0}
     loop up_count > (I64{0}) {
         up_count -= I64{1}
         loop l > (I64{1}) && process_byte(stack, l - I64{1}) != (I64{47}) -> l -= I64{1}
-        if (l > I64{1}) -> l -= I64{1}
+        if (l > I64{1}) { l -= I64{1} }
         p += I64{2}
-        if (p < q) -> p += I64{1}
+        if (p < q) { p += I64{1} }
     }
     if (q - p != I64{0} && process_byte(stack, l - I64{1}) != I64{47}) {
         process_byte_put(stack, l, I64{47})
         l += I64{1}
     }
-    if (l + (q - p) + I64{1} >= I64{4096}) -> return I64{36}
+    if (l + (q - p) + I64{1} >= I64{4096}) { return I64{36} }
     process_move_up(wrapping(output + l), wrapping(output + p), q - p + I64{1})
     rt_text_bytes_copy(output, stack, l)
     I64{0}
@@ -1037,7 +1059,9 @@ process_realpath_slashes: fn(stack: I64, p: I64) -> I64 {
 
 process_byte: fn(base: I64, at: I64) -> I64 { rt_text_byte(wrapping(base + at)) }
 
-process_byte_put: fn(base: I64, at: I64, value: I64) { net_store_uint(wrapping(base + at), I64{1}, value) }
+process_byte_put: fn(base: I64, at: I64, value: I64) {
+    net_store_uint(wrapping(base + at), I64{1}, value)
+}
 
 // memmove of `count` bytes: from the last byte down when the target is above
 // the source, else from the first up.
@@ -1098,7 +1122,7 @@ process_move_up: fn(target: I64, source: I64, count: I64) {
 // terminal view; it is never passed to a syscall.
 #Export(c) jet_process_take_stream_raw: fn(child: I64, stream: I64, error: I64) -> I64 {
     index: host_native_int(stream)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     sync_mutex_lock(child)
     offset: wrapping(I64{32} + index * I64{8})
     master: fd_word(child, I64{56})

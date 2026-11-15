@@ -34,6 +34,7 @@ use {
 
 // The test durations a FAIL row drops before two runs' rows are compared.
 DURATION: Regex{"[0-9]+(\.[0-9]+)? ?(ms|s|µs)"}
+
 // The touched files whose lines goldens cite.
 CORE_SOURCE: Regex{"^(Core|Compiler/Prelude)/.*\.jet$"}
 
@@ -108,7 +109,9 @@ test_entry: fn(out: &[String], tests: String, k: Int, code: String, line: String
 
 run: fn() {
     args: process.args()
-    if args.len() == 0 || args[0] == "" -> process.fail(1, "usage: jet Tools/agent/orchestrator/Integrate10.jet BATCH SUB...")
+    if args.len() == 0 || args[0] == "" {
+        process.fail(1, "usage: jet Tools/agent/orchestrator/Integrate10.jet BATCH SUB...")
+    }
     batch: args[0]
     subs: args.slice(1, args.len())
     r: roots.roots()
@@ -133,7 +136,9 @@ run: fn() {
         parts: ps.partition(":")
         pb: parts.head
         pd: if parts.sep == "" -> ps else -> parts.tail
-        if !(Sh{"git -C {t} apply -p1 {files.join(files.cwd(), "{pd}/patch")}"}.ok()) -> stop("integrate: pre {pd} does not apply", 2)
+        if !(Sh{"git -C {t} apply -p1 {files.join(files.cwd(), "{pd}/patch")}"}.ok()) {
+            stop("integrate: pre {pd} does not apply", 2)
+        }
         stacked.push(pb.copy())
         files.write("{i}/PRE", "{stacked.join("\n")}\n")
         print("PRE {files.basename(pd)} from {pb}")
@@ -141,14 +146,18 @@ run: fn() {
     // Apply (three-way, generated files excluded and regenerated): IntegApply6.jet prints the applied SUBs last.
     apply: Sh{"jet -A {"{o}/IntegApply6.jet"} {t} {i}"}.extend(subs).spec().stderr(.Stdout).run()
     files.write("{i}/apply.out", apply.output)
-    if apply.code != 0 -> stop("integrate: the apply step failed: {apply.output.lines().filter(fn(line) { line.starts_with("integ-apply:") }).last() ?? ""}", 2)
+    if apply.code != 0 {
+        stop("integrate: the apply step failed: {apply.output.lines().filter(fn(line) { line.starts_with("integ-apply:") }).last() ?? ""}", 2)
+    }
     listing: apply.output.partition("--applied--\n")
     if listing.head != "" -> print(listing.head.trim_end())
     applied: listing.tail.words()
     // A generator that fails on the composed sources leaves every generated table stale: report the regeneration.
     if listing.head.lines().any(fn(line) { line.starts_with("REGEN ") && !line.ends_with(" rc=0") }) {
         report.push("REGEN FAILED: the census did not run.")
-        loop name in named(i, "regen.*.out") -> report.extend(["", "{name}:", "```"].concat(files.read_or("{i}/{name}", "").last_lines(20)).concat(["```"]))
+        loop name in named(i, "regen.*.out") {
+            report.extend(["", "{name}:", "```"].concat(files.read_or("{i}/{name}", "").last_lines(20)).concat(["```"]))
+        }
         files.write(report_path, "{report.join("\n")}\n")
         files.write("{i}/REGENFAIL", "REGENFAIL\n")
         stop(report_path, 3)
@@ -189,7 +198,9 @@ run: fn() {
     built: files.can_execute(self_jet)
     if built -> files.symlink(self_jet, "{i}/bin/jet", replace: true)
     // The engine `jet` talks to must be the seed's jetpack, whose identity JET_COMPILER_IDENTITY names.
-    if files.can_execute("{seed}/jetpack") -> files.symlink("{seed}/jetpack", "{i}/bin/jetpack", replace: true)
+    if files.can_execute("{seed}/jetpack") {
+        files.symlink("{seed}/jetpack", "{i}/bin/jetpack", replace: true)
+    }
     // The engine beside the batch compiler must be the jetpack this tree builds: the census's hosted bootstrap
     // names it as hosted-binary.
     hb: (lines_of("{i}/census/jetpack.log").filter(fn(line) { line.starts_with("hosted-binary: ") }).last() ?? "").words().get(1) ?? ""
@@ -199,7 +210,9 @@ run: fn() {
             files.copy(hb, packed)
             files.set_mode(packed, files.stat(hb).mode % 512)
             files.symlink(packed, "{i}/bin/jetpack", replace: true)
-            if built -> files.symlink(packed, "{files.dirname(files.canonicalize(self_jet))}/jetpack", replace: true)
+            if built {
+                files.symlink(packed, "{files.dirname(files.canonicalize(self_jet))}/jetpack", replace: true)
+            }
             print("tests use the built jetpack {hb}")
         }
         else -> print("no built jetpack (census jetpack row failed); tests use the seed's")
@@ -211,7 +224,9 @@ run: fn() {
         _ := process.run_all(loop s in applied.filter(fn(s) { files.read_or("{s}/tests", "") != "" }) -> runsub("new", s), 4)
         // A failing line reruns on a clean origin/dev export with the seed, so rows that already fail on dev are
         // told apart from the ones this batch introduces (a FAIL row present in both counts as pre-existing).
-        failing: loop name in named("{i}/tests", "*.rc").filter(fn(name) { lines_of("{i}/tests/{name}").any(fn(line) { !line.starts_with("0\t") }) }) -> name.removesuffix(".rc")
+        failing: loop name in named("{i}/tests", "*.rc").filter(fn(name) { lines_of("{i}/tests/{name}").any(fn(line) { !line.starts_with("0\t") }) }) {
+            name.removesuffix(".rc")
+        }
         if failing.len() > 0 {
             loop dir in ["{i}/basetree", "{i}/basebin"] -> files.create_dir_all(dir)
             _ := unpack(w, base, "{i}/basetree")
@@ -223,7 +238,9 @@ run: fn() {
         // Goldens that cite a line of a Core or Prelude file this batch touches (`<corelib>/Core/X.jet:N`) drift
         // when that file moves; run each one so the batch, not the release gate, catches it.
         cited := [String]{}
-        loop f in touched.filter(fn(f) { regex.is_match(CORE_SOURCE, f) }) -> cited.extend(Sh{"git grep -l --no-index -F {"<corelib>/{f}:"} -- *.out"}.spec().cwd(t).run().output.lines())
+        loop f in touched.filter(fn(f) { regex.is_match(CORE_SOURCE, f) }) {
+            cited.extend(Sh{"git grep -l --no-index -F {"<corelib>/{f}:"} -- *.out"}.spec().cwd(t).run().output.lines())
+        }
         cited = unique(cited)
         files.write("{i}/goldens.list", cited.map(fn(path) { "{path}\n" }).join(""))
         loop golden in cited {
@@ -239,7 +256,9 @@ run: fn() {
     }
     // The report: the summary, then one section per SUB.
     rows := [String]{}
-    loop name in named("{i}/census", "*keep-going.tsv") -> rows.extend(lines_of("{i}/census/{name}"))
+    loop name in named("{i}/census", "*keep-going.tsv") {
+        rows.extend(lines_of("{i}/census/{name}"))
+    }
     report.extend(["Census rc={crc} (built compiler: {if built -> "yes" else -> "no"}). Summary:", "```"].concat(summary).concat(["```"]).concat(failures).concat([""]))
     loop sub in subs {
         n: files.basename(sub.removesuffix("/"))
@@ -251,7 +270,9 @@ run: fn() {
         mine: lines_of("{i}/{n}.files").filter(fn(path) { path != "" })
         hits: unique(rows.filter(fn(row) { mine.any(fn(path) { row.contains(path) }) }))
         bad := hits.len() > 0
-        if bad -> report.extend(["Census rows in files this patch touches:", "```"].concat(hits).concat(["```"]))
+        if bad {
+            report.extend(["Census rows in files this patch touches:", "```"].concat(hits).concat(["```"]))
+        }
         tests: "{i}/tests/{n}"
         if {
             files.is_file("{tests}.rc") -> {
@@ -273,7 +294,9 @@ run: fn() {
     }
     if crc != 0 {
         named_paths := [String]{}
-        loop s in applied -> named_paths.extend(lines_of("{i}/{files.basename(s)}.files").filter(fn(path) { path.trim() != "" }))
+        loop s in applied {
+            named_paths.extend(lines_of("{i}/{files.basename(s)}.files").filter(fn(path) { path.trim() != "" }))
+        }
         report.extend(["## Census rows not in any submitted file", "```"].concat(rows.filter(fn(row) { !named_paths.any(fn(path) { row.contains(path) }) }).slice(0, 40)).concat(["```"]))
     }
     files.write(report_path, "{report.join("\n")}\n")

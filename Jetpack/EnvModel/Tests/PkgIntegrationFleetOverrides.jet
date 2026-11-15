@@ -22,10 +22,12 @@ use {
     source: "\nsystem.web: module {{ target: linux.x64 }}\nfleet.prod: module {{\n    hosts: {{\n        web1: system.web{{ region: base + 2, base: 40 }}\n    }}\n}}\n"
     override_plan: envmodel_test_host_groups(source, false)[0].hosts[0].overrides ?? panic("host has an override")
     first: override_plan.fields[0].value
-    assert(if first == {
-        .Value(value) -> value == CtValue.Int{value: 42}
-        .Platform(_) | .Packages(_) | .Services(_) | .Options(_) -> false
-    })
+    assert(
+        if first == {
+            .Value(value) -> value == CtValue.Int{value: 42}
+            .Platform(_) | .Packages(_) | .Services(_) | .Options(_) -> false
+        },
+    )
     found := false
     loop region in override_plan.provenance {
         if region.field == "region" {
@@ -71,4 +73,3 @@ use {
     error: envmodel_test_env_error(envmodel_evaluate_env(source, envmodel_test_base_dir()))
     assert_eq(error.code, "E0338")
 }
-

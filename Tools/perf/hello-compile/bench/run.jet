@@ -12,16 +12,25 @@
 // JET the Jet compiler, and ONLY a comma list: only the toolchains whose label
 // contains one of its items run. A failure ends the run with its report on
 // stderr and exit 1.
-use core.[collections, files, math, process, regex, sys, time]
-use core.encoding.json
+use {
+    core.[collections, files, math, process, regex, sys, time]
+    core.encoding.json
+}
 
 GCC: "/nix/store/l5qkpzsr4gxvksh45b3nhxbkyr5cviar-gcc-wrapper-15.3.0/bin/gcc"
+
 CLANG: "/nix/store/mw4gasdvwgscgpxpzihjgchfhs3hhqhn-clang-wrapper-21.1.8/bin/clang"
+
 ZIG: "/nix/store/kbb1kfzlvqiwbcpw4sd2j3v63vqab3vg-zig-0.16.0/bin/zig"
+
 GO: "/nix/store/i77g9dmcd399rmxk8688qfr4g2wzgk37-go-1.26.7/bin/go"
+
 RUSTC: "/nix/store/cqlx62f919g8xf2f39bmykslpjdh9z0j-rustc-1.97.1/bin/rustc"
+
 ODIN: "/nix/store/73b33yxdvy3fpv2x0l1l17sqa58amsxx-odin-dev-2026-05/bin/odin"
+
 STRIP_FALLBACK: "/nix/store/l5qkpzsr4gxvksh45b3nhxbkyr5cviar-gcc-wrapper-15.3.0/bin/strip"
+
 ELF_MAGIC: [U8]{U8{127}, U8{69}, U8{76}, U8{70}}
 
 // One toolchain: its label, the source it builds, its build command given the
@@ -57,15 +66,18 @@ Row: struct {
 }
 
 run: fn() -> Never Err! {
-    vars: sys.env_text("""
+    vars: sys.env_text(
+        """
         STATE=${{JET_STATE_ROOT:-${{XDG_CACHE_HOME:-$HOME/.cache}}/jet-dev}}
         BENCH=${{BENCH_DIR-${{JET_SCRATCH_ROOT:-$STATE}}/bench-hello}}
         JET=${{JET-$STATE/scratch/jet-release-night12/jet}}
         ONLY=${{ONLY-}}
-        """, sys.environment())
+        """,
+        sys.environment(),
+    )
     bench: vars["BENCH"]
     strip: process.which("strip") ?? STRIP_FALLBACK
-    sources: [String: (file: String, text: String)]{
+    sources: [String:(file: String, text: String)]{
         "c": (file: "main.c", text: "#include <stdio.h>\nint main(void){{puts(\"hello\");return 0;}}\n"),
         "zig": (file: "main.zig", text: "const std = @import(\"std\");\npub fn main() void {{ std.debug.print(\"hello\\n\", .{{}}); }}\n"),
         "rs": (file: "main.rs", text: "fn main(){{println!(\"hello\");}}\n"),
@@ -77,14 +89,18 @@ run: fn() -> Never Err! {
     results := [Row]{}
     loop toolchain in toolchains(vars["JET"]) {
         label: toolchain.label.copy()  // copy: the ONLY filter captures the label
-        if vars["ONLY"] != "" && !vars["ONLY"].split(",").any(fn(item) { label.contains(item) }) -> next
+        if vars["ONLY"] != "" && !vars["ONLY"].split(",").any(fn(item) { label.contains(item) }) {
+            next
+        }
         dir: files.join(bench, regex.replace(Regex{"[(),]"}, toolchain.label.replace(" ", "_").replace("/", "_"), ""))
         files.remove_all(dir).drop("a first run has no directory to remove")
         files.create_dir_all(dir)
         source: sources[toolchain.source]
         files.write(files.join(dir, source.file), source.text)
         cold: timed(toolchain.build(dir), dir)
-        if toolchain.out == .Val(name) && files.exists(files.join(dir, name)) -> files.remove(files.join(dir, name))
+        if toolchain.out == .Val(name) && files.exists(files.join(dir, name)) {
+            files.remove(files.join(dir, name))
+        }
         warm: timed(toolchain.build(dir), dir)
         binary: if toolchain.out == .Val(name) -> Val(files.join(dir, name)) else -> jet_binary(dir)
         sizes: size(binary, strip)
@@ -196,7 +212,9 @@ jet_binary: fn(dir: String) -> String? Err! {
     newest := -1
     loop entry in files.walk_files(dir).list() ?? return Ok(None) {
         path: entry.path
-        if !files.can_execute(path) || regex.is_match(Regex{"\.(?:so|d|rlib|stripped)$|/deps/|build-script"}, path) -> next
+        if !files.can_execute(path) || regex.is_match(Regex{"\.(?:so|d|rlib|stripped)$|/deps/|build-script"}, path) {
+            next
+        }
         stat: files.stat(path) ?? next
         if !stat.is_file || files.read_at(path, 0, 4) != ELF_MAGIC -> next
         modified: stat.modified.to_unix_ns() ?? 0

@@ -85,7 +85,9 @@ run: fn() {
     loop words in commands {
         command: words.decode<[String]>()
         step: run_child(launch, report, command.copy()) ?? return Err("{err}")
-        if first_ns == None -> first_ns = step.times.time_to_first_stdout_ns.map(fn(gap) { wall_ns + gap })
+        if first_ns == None {
+            first_ns = step.times.time_to_first_stdout_ns.map(fn(gap) { wall_ns + gap })
+        }
         wall_ns += step.times.wall_time_ns
         if step.peak_kb > peak_kb -> peak_kb = step.peak_kb
         cycles = if cycles == {
@@ -107,7 +109,7 @@ run: fn() {
         peak_rss_kb: peak_kb,
         cycles_u: if error == None -> cycles else -> None,
         steps: sequence.map(fn(_) { steps }),
-        error: error
+        error: error,
     }
     print(json.to_string(sample))
 }
@@ -125,7 +127,9 @@ single_of: fn(args: [String]) -> [String] {
 sequence_of: fn(encoded: String) -> [Dyn] {
     tree: json.parse_allow_duplicates(encoded) ?? refuse("invalid sequence JSON: {err}")
     commands: tree.decode<[[Dyn]]>() ?? [[Dyn]]{}
-    if commands.len() == 0 || commands.contains([Dyn]{}) -> refuse("sequence must be a non-empty list of commands")
+    if commands.len() == 0 || commands.contains([Dyn]{}) {
+        refuse("sequence must be a non-empty list of commands")
+    }
     loop words in commands -> Dyn.Array(words.copy())
 }
 
@@ -136,7 +140,9 @@ launcher: fn(scratch: String) -> String {
     path: files.join(scratch, "launch")
     source: files.join(files.dirname(sys.executable()), "launch.c")
     receipt: process.cmd([String]{"cc", "-O2", "-o", path, source}).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? refuse("cannot build the launcher from {source}: {err}")
-    if receipt.code != 0 -> refuse("cannot build the launcher from {source}: cc exited {receipt.code}")
+    if receipt.code != 0 {
+        refuse("cannot build the launcher from {source}: cc exited {receipt.code}")
+    }
     path
 }
 
@@ -146,7 +152,9 @@ run_child: fn(launch: String, report: String, command: [String]) -> Launched IOE
     argv := [String]{launch, report}
     loop word in command { argv.push(word.copy()) }
     child: process.cmd(argv).stdin(.Inherit).stdout(.Stream).stderr(.Inherit).spawn()
-    loop _ in child.stdout.chunks(65536) {}
+    loop _ in child.stdout.chunks(65536) {
+
+    }
     receipt: child.wait()
     text: files.read(report) ?? refuse("the launcher exited {receipt.code} without its report: {err}")
     launched_of(text) ?? refuse("the launcher exited {receipt.code} without its report")

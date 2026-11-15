@@ -36,7 +36,9 @@ use {
 }
 
 CONTRACT: "compiled-workload-peer-isolation-v1"
+
 EXIT_UNSUPPORTED: 78
+
 LAUNCHER_NAME: "compiled-workload-peer-launcher"
 
 NetworkPolicy: enum {
@@ -94,7 +96,9 @@ fail: fn(reason: String) -[IO, Exec, Time.Wait]> Never {
 // ---- Invocation ----
 
 parse_invocation: fn(args: [String]) -[FS]> Invocation LaunchError! {
-    if args.len() == 0 -> return Err(launch_error("missing execution arguments; use --contract for the capability probe"))
+    if args.len() == 0 {
+        return Err(launch_error("missing execution arguments; use --contract for the capability probe"))
+    }
     task_id := String?{None}
     root := String?{None}
     cwd := String?{None}
@@ -117,13 +121,17 @@ parse_invocation: fn(args: [String]) -[FS]> Invocation LaunchError! {
             index += 1
             next
         }
-        if !arg.starts_with("--") -> return Err(launch_error("expected launcher option, found `{arg}`"))
+        if !arg.starts_with("--") {
+            return Err(launch_error("expected launcher option, found `{arg}`"))
+        }
         option: text_from(arg, 2)
         equals: byte_position(option, 61)
         name: if equals < 0 -> option.copy() else -> text_range(option, 0, equals)
         known: name == "contract" || name == "task-id" || name == "root" || name == "cwd" || name == "network" || name == "external-write" || name == "host"
         if !known {
-            if name.starts_with("--") -> return Err(launch_error("unsupported launcher option `{name}`"))
+            if name.starts_with("--") {
+                return Err(launch_error("unsupported launcher option `{name}`"))
+            }
             return Err(launch_error("expected `--` before command, found `{name}`"))
         }
         value := ""
@@ -145,11 +153,15 @@ parse_invocation: fn(args: [String]) -[FS]> Invocation LaunchError! {
             name == "cwd" -> cwd = Val(value.copy())
             name == "network" -> network = Val(network_policy(value))
             name == "external-write" -> {
-                if value != "disabled" -> return Err(launch_error("unsupported external-write authority `{value}`"))
+                if value != "disabled" {
+                    return Err(launch_error("unsupported external-write authority `{value}`"))
+                }
                 external_write = true
             }
             else -> {
-                if value != "ambient" -> return Err(launch_error("unsupported host authority `{value}`"))
+                if value != "ambient" {
+                    return Err(launch_error("unsupported host authority `{value}`"))
+                }
                 host = true
             }
         }
@@ -161,13 +173,19 @@ parse_invocation: fn(args: [String]) -[FS]> Invocation LaunchError! {
     root_path: canonical_directory("root", root_text)
     cwd_text: cwd ?? return Err(launch_error("missing --cwd"))
     cwd_path: canonical_directory("cwd", cwd_text)
-    if root_path == "/" || root_path == "" -> return Err(launch_error("root must not be a filesystem root"))
-    if !contained(root_path, cwd_path) -> return Err(launch_error("cwd `{cwd_path}` escapes root `{root_path}` after canonicalization"))
+    if root_path == "/" || root_path == "" {
+        return Err(launch_error("root must not be a filesystem root"))
+    }
+    if !contained(root_path, cwd_path) {
+        return Err(launch_error("cwd `{cwd_path}` escapes root `{root_path}` after canonicalization"))
+    }
     if !external_write -> return Err(launch_error("missing --external-write=disabled"))
     if !host -> return Err(launch_error("missing --host=ambient"))
     policy: network ?? return Err(launch_error("missing --network authority"))
     program: command ?? return Err(launch_error("missing command after `--`"))
-    if program == "" || has_nul(program) -> return Err(launch_error("command is empty or contains NUL"))
+    if program == "" || has_nul(program) {
+        return Err(launch_error("command is empty or contains NUL"))
+    }
     loop item in command_args {
         if has_nul(item) -> return Err(launch_error("command argument contains NUL"))
     }
@@ -297,7 +315,9 @@ resolve_program: fn(program: String) -[FS, Env]> String LaunchError! {
 
 launcher_path: fn() -[FS, Env]> String LaunchError! {
     executable: sys.executable()
-    if executable == "" -> return Err(launch_error("Linux peer isolation unavailable: launcher path cannot be resolved: the host reports no executable path"))
+    if executable == "" {
+        return Err(launch_error("Linux peer isolation unavailable: launcher path cannot be resolved: the host reports no executable path"))
+    }
     files.canonicalize(executable) ?? return Err(launch_error("Linux peer isolation unavailable: launcher path cannot be resolved: {err}"))
 }
 
@@ -359,7 +379,7 @@ probe_policies: fn(bwrap: String, ip: String, launcher: String, filter: [U8], ro
 probe_root: fn() -[FS, Env, Time]> String LaunchError! {
     base := ""
     if process.env_get("JET_COMPILED_WORKLOAD_PEER_PROBE_ROOT") == {
-        .Val(configured) -> base = configured
+        .Val(configured) -> { base = configured }
         .None -> {
             home: process.env_get("HOME") ?? return Err(launch_error("cannot locate a disk-backed capability probe directory"))
             cache: process.env_get("XDG_CACHE_HOME") ?? "{home}/.cache"
@@ -369,7 +389,9 @@ probe_root: fn() -[FS, Env, Time]> String LaunchError! {
     }
     files.create_dir_all(base) ?? return Err(launch_error("capability probe root `{base}` cannot be created: {err}"))
     root: "{base}/compiled-workload-peer-probe-{sys.pid()}-{time.unix_ns()}"
-    if files.exists(root) -> return Err(launch_error("capability probe root `{root}` cannot be created: it already exists"))
+    if files.exists(root) {
+        return Err(launch_error("capability probe root `{root}` cannot be created: it already exists"))
+    }
     files.create_dir_all(root) ?? return Err(launch_error("capability probe root `{root}` cannot be created: {err}"))
     Ok(root)
 }
@@ -380,12 +402,42 @@ probe_root: fn() -[FS, Env, Time]> String LaunchError! {
 socket_filter: fn() -[Env]> [U8] LaunchError! {
     arch: sys.arch()
     number: socket_syscall(arch) ?? return Err(launch_error("Linux peer isolation unavailable: seccomp socket policy has no syscall table for `{arch}`"))
-    Ok([U8]{
-        32, 0, 0, 0, 0, 0, 0, 0,
-        21, 0, 0, 1, U8{number}, 0, 0, 0,
-        6, 0, 0, 0, 1, 0, 5, 0,
-        6, 0, 0, 0, 0, 0, 255, 127,
-    })
+    Ok(
+        [U8]{
+            32,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            21,
+            0,
+            0,
+            1,
+            U8{number},
+            0,
+            0,
+            0,
+            6,
+            0,
+            0,
+            0,
+            1,
+            0,
+            5,
+            0,
+            6,
+            0,
+            0,
+            0,
+            0,
+            0,
+            255,
+            127,
+        },
+    )
 }
 
 socket_syscall: fn(arch: String) -> Int? Never! {
@@ -400,19 +452,30 @@ linux_base_args: fn(root: String, cwd: String, network: NetworkPolicy) -> [Strin
     args := [String]{
         "--die-with-parent",
         "--unshare-all",
-        "--ro-bind", "/", "/",
-        "--remount-ro", "/",
-        "--bind", root.copy(), root.copy(),
-        "--proc", "/proc",
-        "--dev", "/dev",
-        "--tmpfs", "/tmp",
-        "--chdir", cwd.copy(),
+        "--ro-bind",
+        "/",
+        "/",
+        "--remount-ro",
+        "/",
+        "--bind",
+        root.copy(),
+        root.copy(),
+        "--proc",
+        "/proc",
+        "--dev",
+        "/dev",
+        "--tmpfs",
+        "/tmp",
+        "--chdir",
+        cwd.copy(),
     }
     if network == .LoopbackOnly {
         // CAP_NET_ADMIN exists only inside bwrap's fresh user and network
         // namespaces and is used solely to bring up the private loopback
         // interface. Disabled networking receives no extra capability.
-        loop extra in ([String]{"--uid", "0", "--gid", "0", "--cap-add", "CAP_NET_ADMIN"}) -> args.push(extra)
+        loop extra in ([String]{"--uid", "0", "--gid", "0", "--cap-add", "CAP_NET_ADMIN"}) {
+            args.push(extra)
+        }
     }
     args
 }
@@ -471,7 +534,7 @@ run_linux: fn(invocation: Invocation) -[FS, Env, Exec, IO, Time, Time.Wait]> Chi
     if sandbox_spec(bwrap, filter_path, invocation.root, invocation.cwd, invocation.network, inner) == {
         .Ok(spec) -> {
             if run_child(spec) == {
-                .Ok(end) -> result = end
+                .Ok(end) -> { result = end }
                 .Err(error) -> failure = error.message
             }
         }
@@ -482,8 +545,10 @@ run_linux: fn(invocation: Invocation) -[FS, Env, Exec, IO, Time, Time.Wait]> Chi
     }
     reported := 0
     if read_linux_signal(status_file) == {
-        .Ok(number) -> reported = number
-        .Err(error) -> if failure == "" -> failure = error.message
+        .Ok(number) -> { reported = number }
+        .Err(error) -> {
+            if failure == "" -> failure = error.message
+        }
     }
     files.remove(status_file) ?? return Err(launch_error("Linux peer isolation signal status cannot be removed from `{status_file}`: {err}"))
     if failure != "" -> return Err(launch_error(failure))
@@ -557,7 +622,9 @@ loopback_command: fn(args: [String]) -[Exec, IO, Time.Wait]> [String] Never! {
     ip: args[0].copy()
     if args.len() < 2 -> fail("loopback-only internal runner received no command")
     receipt: process.cmd([String]{ip.copy(), "link", "set", "lo", "up"}).stdin(.Capture).stdout(.Capture).stderr(.Capture).run() ?? fail("loopback-only internal runner could not start `{ip}`: {err}")
-    if !receipt.success -> fail("loopback-only internal runner `{ip}` exited {status_text(child_end(receipt))}")
+    if !receipt.success {
+        fail("loopback-only internal runner `{ip}` exited {status_text(child_end(receipt))}")
+    }
     args[1..<args.len()]
 }
 
@@ -568,9 +635,13 @@ require_socket_filter: fn() LaunchError! -[FS]> {
     no_new_privs := false
     loop line in status.split("\n") {
         if line.starts_with("Seccomp:") && text_from(line, 8).trim() == "2" -> filtered = true
-        if line.starts_with("NoNewPrivs:") && text_from(line, 11).trim() == "1" -> no_new_privs = true
+        if line.starts_with("NoNewPrivs:") && text_from(line, 11).trim() == "1" {
+            no_new_privs = true
+        }
     }
-    if !filtered || !no_new_privs -> return Err(launch_error("disabled-network internal runner requires the bubblewrap seccomp socket filter"))
+    if !filtered || !no_new_privs {
+        return Err(launch_error("disabled-network internal runner requires the bubblewrap seccomp socket filter"))
+    }
     Ok()
 }
 
@@ -585,7 +656,9 @@ sweep_namespace: fn(signal: Int) LaunchError! -[FS, Env]> {
             if sys.kill(pid, signal) == .Err(_) -> signalled = false
         }
         // A process that exited since the listing is already closed.
-        if !signalled && files.exists("/proc/{pid}") -> return Err(launch_error("Linux peer process tree signal failed for pid {pid}"))
+        if !signalled && files.exists("/proc/{pid}") {
+            return Err(launch_error("Linux peer process tree signal failed for pid {pid}"))
+        }
     }
     Ok()
 }

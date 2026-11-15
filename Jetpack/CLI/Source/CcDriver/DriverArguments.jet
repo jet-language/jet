@@ -6,10 +6,15 @@
 // invocation can rewrite it to a project-relative, symlink-free path.
 
 CC_MAX_INPUT_FILES: 100000
+
 CC_MAX_INPUT_BYTES: 536870912
+
 CC_MAX_RESPONSE_FILES: 64
+
 CC_MAX_RESPONSE_DEPTH: 16
+
 CC_MAX_RESPONSE_BYTES: 8388608
+
 CC_MAX_RESPONSE_ARGS: 100000
 
 // A standalone compiler metadata probe; it takes no flags or sources.
@@ -81,7 +86,7 @@ DriverOptions: struct {
             depfile_index: None,
             dep_target_index: None,
             dep_target_option: None,
-            separator_index: None
+            separator_index: None,
         }
     }
 
@@ -93,9 +98,7 @@ DriverOptions: struct {
     }
 
     // The index of the most recently pushed argv entry.
-    last_index: fn(self) -> Int Never! {
-        self.argv.len() - 1
-    }
+    last_index: fn(self) -> Int Never! { self.argv.len() - 1 }
 }
 
 // Parse the driver arguments of `verb`, expanding response files inside the
@@ -120,27 +123,27 @@ cli_cc_parse_expanded_args: fn(verb: String, args: [String]) -> DriverOptions CL
         if after_separator {
             cli_cc_validate_operand(argument, "source")
             options.add_source(argument)
-            index = index + 1
+            index += 1
             next
         }
         if argument == "--" {
             options.separator_index = Val(options.argv.len())
             after_separator = true
-            index = index + 1
+            index += 1
             next
         }
         if argument == {
             "-h" | "--help" -> {
                 options.help = true
-                index = index + 1
+                index += 1
             }
             "--version" -> {
                 options.version = true
-                index = index + 1
+                index += 1
             }
             "--offline" -> {
                 options.offline = true
-                index = index + 1
+                index += 1
             }
             "--project-root" -> {
                 value: cli_cc_next_value(args, index, "--project-root")
@@ -160,42 +163,44 @@ cli_cc_parse_expanded_args: fn(verb: String, args: [String]) -> DriverOptions CL
             }
             "-dumpmachine" -> {
                 options.probe = cli_cc_set_probe(options.probe, DriverProbe.DumpMachine)
-                index = index + 1
+                index += 1
             }
             "-print-sysroot" -> {
                 options.probe = cli_cc_set_probe(options.probe, DriverProbe.PrintSysroot)
-                index = index + 1
+                index += 1
             }
             "-dumpversion" -> {
                 options.probe = cli_cc_set_probe(options.probe, DriverProbe.DumpVersion)
-                index = index + 1
+                index += 1
             }
             "--sysroot" | "-isysroot" -> return Err(CLIToolError.new("`{argument}` is controlled by the pinned Hangar toolchain; remove the host sysroot override"))
             "--gcc-toolchain" | "-B" | "-fuse-ld" | "-resource-dir" | "-Xlinker" -> return Err(CLIToolError.new("`{argument}` would override the pinned Hangar compiler or linker"))
             "-c" -> {
                 options.compile_only = true
                 options.argv.push(argument.copy())
-                index = index + 1
+                index += 1
             }
             "-MMD" | "-MD" -> {
                 options.dep_mode = true
                 options.argv.push(argument.copy())
-                index = index + 1
+                index += 1
             }
             "-M" | "-MM" | "-MG" -> return Err(CLIToolError.new("`{argument}` does not declare a reproducible output; use `-MD` or `-MMD`"))
             "-MP" -> {
                 options.dep_phony = true
                 options.argv.push(argument.copy())
-                index = index + 1
+                index += 1
             }
             "-v" -> {
                 options.verbose = true
                 options.argv.push(argument.copy())
-                index = index + 1
+                index += 1
             }
             "-x" | "-D" | "-U" | "-l" | "-std" | "--std" | "--param" -> {
                 value: cli_cc_next_value(args, index, argument)
-                if value == "" || cli_cc_has_nul(value) -> return Err(CLIToolError.new("option {argument} needs a non-empty value"))
+                if value == "" || cli_cc_has_nul(value) {
+                    return Err(CLIToolError.new("option {argument} needs a non-empty value"))
+                }
                 options.argv.push(argument.copy())
                 options.argv.push(value)
             }
@@ -240,11 +245,13 @@ cli_cc_parse_expanded_args: fn(verb: String, args: [String]) -> DriverOptions CL
             "-E" | "-S" | "-P" | "-fsyntax-only" | "-save-temps" | "-###" -> return Err(CLIToolError.new("`{argument}` does not produce a declared build artifact"))
             else -> {
                 cli_cc_parse_prefixed_argument(argument, options)
-                index = index + 1
+                index += 1
             }
         }
     }
-    if options.probe != None && options.argv.len() > 0 -> return Err(CLIToolError.new("compiler metadata probes must be used without compiler flags or sources"))
+    if options.probe != None && options.argv.len() > 0 {
+        return Err(CLIToolError.new("compiler metadata probes must be used without compiler flags or sources"))
+    }
     standalone_verbose := options.verbose
     loop argument in options.argv {
         if argument != "-v" -> standalone_verbose = false
@@ -252,9 +259,15 @@ cli_cc_parse_expanded_args: fn(verb: String, args: [String]) -> DriverOptions CL
     if options.sources.len() == 0 && !options.help && !options.version && options.probe == None && !standalone_verbose {
         return Err(CLIToolError.new("{verb} needs at least one source or object"))
     }
-    if options.depfile != None && !options.dep_mode -> return Err(CLIToolError.new("`-MF` needs `-MD` or `-MMD`"))
-    if options.dep_target != None && !options.dep_mode -> return Err(CLIToolError.new("dep target needs -MD or -MMD"))
-    if options.dep_phony && !options.dep_mode -> return Err(CLIToolError.new("dep phony mode needs -MD or -MMD"))
+    if options.depfile != None && !options.dep_mode {
+        return Err(CLIToolError.new("`-MF` needs `-MD` or `-MMD`"))
+    }
+    if options.dep_target != None && !options.dep_mode {
+        return Err(CLIToolError.new("dep target needs -MD or -MMD"))
+    }
+    if options.dep_phony && !options.dep_mode {
+        return Err(CLIToolError.new("dep phony mode needs -MD or -MMD"))
+    }
     Ok(options)
 }
 
@@ -264,14 +277,20 @@ cli_cc_parse_prefixed_argument: fn(value: String, options: &DriverOptions) CLITo
     length: value.bytes().len()
     attached: cli_cc_attached_path_prefix(value)
     if {
-        value.starts_with("--project-root=") -> options.project_root = cli_cc_set_once_path(options.project_root, value.removeprefix("--project-root="), "--project-root")
-        value.starts_with("--build-root=") -> options.build_root = cli_cc_set_once_path(options.build_root, value.removeprefix("--build-root="), "--build-root")
+        value.starts_with("--project-root=") -> {
+            options.project_root = cli_cc_set_once_path(options.project_root, value.removeprefix("--project-root="), "--project-root")
+        }
+        value.starts_with("--build-root=") -> {
+            options.build_root = cli_cc_set_once_path(options.build_root, value.removeprefix("--build-root="), "--build-root")
+        }
         value.starts_with("--fixtures=") -> {
             fixtures: value.removeprefix("--fixtures=")
             if fixtures == "" -> return Err(CLIToolError.new("`--fixtures` needs a directory"))
             options.fixtures = Val(fixtures)
         }
-        value.starts_with("--target=") -> options.target = cli_cc_set_once(options.target, value.removeprefix("--target="), "--target")
+        value.starts_with("--target=") -> {
+            options.target = cli_cc_set_once(options.target, value.removeprefix("--target="), "--target")
+        }
         value.starts_with("--sysroot=") || value.starts_with("-isysroot") || value.starts_with("--gcc-toolchain=") || value.starts_with("-fuse-ld=") || value.starts_with("-resource-dir=") || value.starts_with("-B") -> {
             return Err(CLIToolError.new("`{value}` would override the pinned Hangar compiler or linker"))
         }
@@ -331,7 +350,7 @@ cli_cc_parse_prefixed_argument: fn(value: String, options: &DriverOptions) CLITo
 cli_cc_next_value: fn(args: [String], index: &Int, option: String) -> String CLIToolError! {
     value: args.get(index + 1) ?? return Err(CLIToolError.new("`{option}` needs a value"))
     if value.starts_with("-") -> return Err(CLIToolError.new("`{option}` needs a value"))
-    index = index + 2
+    index += 2
     Ok(value)
 }
 
@@ -350,19 +369,25 @@ cli_cc_set_once: fn(slot: String?, value: String, option: String) -> String? CLI
 }
 
 cli_cc_set_probe: fn(slot: DriverProbe?, probe: DriverProbe) -> DriverProbe? CLIToolError! {
-    if slot != None -> return Err(CLIToolError.new("only one standalone compiler metadata probe is allowed"))
+    if slot != None {
+        return Err(CLIToolError.new("only one standalone compiler metadata probe is allowed"))
+    }
     Ok(Val(probe))
 }
 
 cli_cc_validate_operand: fn(value: String, label: String) CLIToolError! {
-    if value == "" || cli_cc_has_nul(value) -> return Err(CLIToolError.new("{label} needs a non-empty value"))
+    if value == "" || cli_cc_has_nul(value) {
+        return Err(CLIToolError.new("{label} needs a non-empty value"))
+    }
 }
 
 // The path option attached to `argument` (`-Iinclude`), longest first.
 cli_cc_attached_path_prefix: fn(argument: String) -> String? Never! {
     prefixes: [String]{"-iwithprefixbefore", "-iwithprefix", "-idirafter", "-isystem", "-iquote", "-imacros", "-iprefix", "-include", "-I", "-L"}
     loop prefix in prefixes {
-        if argument.starts_with(prefix) && argument.bytes().len() > prefix.bytes().len() -> return Val(prefix)
+        if argument.starts_with(prefix) && argument.bytes().len() > prefix.bytes().len() {
+            return Val(prefix)
+        }
     }
     None
 }
@@ -371,26 +396,71 @@ cli_cc_attached_path_prefix: fn(argument: String) -> String? Never! {
 // and linker-passthrough flags are refused.
 cli_cc_validate_supported_flag: fn(argument: String) CLIToolError! {
     exact: [String]{
-        "-ansi", "-pedantic", "-pipe", "-pthread", "-v", "-g", "-g0", "-g1", "-g2", "-g3",
-        "-fPIC", "-fpic", "-fPIE", "-fpie",
-        "-fno-PIC", "-fno-pic", "-fno-PIE", "-fno-pie", "-fcommon", "-fno-common",
-        "-fexceptions", "-fno-exceptions", "-frtti", "-fno-rtti", "-ffunction-sections",
-        "-fdata-sections", "-fstack-protector", "-fstack-protector-strong",
-        "-fno-stack-protector", "-fstack-clash-protection", "-fno-omit-frame-pointer",
-        "-fomit-frame-pointer", "-fno-plt", "-fno-semantic-interposition", "-ffast-math",
-        "-fno-fast-math", "-fwrapv", "-fno-wrapv", "-fstrict-aliasing",
-        "-fno-strict-aliasing", "-fstrict-overflow", "-fno-strict-overflow", "-fno-ident",
-        "-fno-asynchronous-unwind-tables", "-Winvalid-pch", "-Winvalid-offsetof", "-rdynamic",
-        "-s", "-pie", "-no-pie"
+        "-ansi",
+        "-pedantic",
+        "-pipe",
+        "-pthread",
+        "-v",
+        "-g",
+        "-g0",
+        "-g1",
+        "-g2",
+        "-g3",
+        "-fPIC",
+        "-fpic",
+        "-fPIE",
+        "-fpie",
+        "-fno-PIC",
+        "-fno-pic",
+        "-fno-PIE",
+        "-fno-pie",
+        "-fcommon",
+        "-fno-common",
+        "-fexceptions",
+        "-fno-exceptions",
+        "-frtti",
+        "-fno-rtti",
+        "-ffunction-sections",
+        "-fdata-sections",
+        "-fstack-protector",
+        "-fstack-protector-strong",
+        "-fno-stack-protector",
+        "-fstack-clash-protection",
+        "-fno-omit-frame-pointer",
+        "-fomit-frame-pointer",
+        "-fno-plt",
+        "-fno-semantic-interposition",
+        "-ffast-math",
+        "-fno-fast-math",
+        "-fwrapv",
+        "-fno-wrapv",
+        "-fstrict-aliasing",
+        "-fno-strict-aliasing",
+        "-fstrict-overflow",
+        "-fno-strict-overflow",
+        "-fno-ident",
+        "-fno-asynchronous-unwind-tables",
+        "-Winvalid-pch",
+        "-Winvalid-offsetof",
+        "-rdynamic",
+        "-s",
+        "-pie",
+        "-no-pie",
     }
     refused: argument == "-Wl" || argument.starts_with("-Wl,") || argument.starts_with("-X") || argument.starts_with("-specs=") || argument.starts_with("-wrapper") || argument.starts_with("-fplugin") || argument.starts_with("-fprofile") || argument.starts_with("-gsplit-dwarf")
     if refused -> return Err(CLIToolError.new("unsupported compiler flag {argument}"))
     supported_prefixes: [String]{"-O", "-W", "-Winvalid-", "-fdiagnostics-", "-fmessage-length=", "-fvisibility=", "-std=", "--std=", "-D", "-U", "-l"}
-    if exact.contains(argument) -> return
-    loop prefix in supported_prefixes {
-        if argument.starts_with(prefix) -> return
+    if exact.contains(argument) {
+        return
     }
-    if argument.starts_with("-m") || argument.starts_with("-f") -> return Err(CLIToolError.new("unsupported or target-changing compiler flag {argument}"))
+    loop prefix in supported_prefixes {
+        if argument.starts_with(prefix) {
+            return
+        }
+    }
+    if argument.starts_with("-m") || argument.starts_with("-f") {
+        return Err(CLIToolError.new("unsupported or target-changing compiler flag {argument}"))
+    }
     Err(CLIToolError.new("unsupported compiler flag {argument}"))
 }
 
@@ -417,20 +487,24 @@ cli_cc_response_scope_roots: fn(args: [String], current_dir: String) -[FS, Env]>
         value := ""
         if {
             argument == "--project-root" || argument == "--build-root" -> {
-                index = index + 1
+                index += 1
                 value = args.get(index) ?? return Err(CLIToolError.new("{argument} needs a directory"))
             }
-            argument.starts_with("--project-root=") -> value = argument.removeprefix("--project-root=")
+            argument.starts_with("--project-root=") -> {
+                value = argument.removeprefix("--project-root=")
+            }
             argument.starts_with("--build-root=") -> value = argument.removeprefix("--build-root=")
             else -> {
-                index = index + 1
+                index += 1
                 next
             }
         }
-        if value == "" || cli_cc_has_nul(value) -> return Err(CLIToolError.new("an explicit project/build root must be a non-empty path"))
+        if value == "" || cli_cc_has_nul(value) {
+            return Err(CLIToolError.new("an explicit project/build root must be a non-empty path"))
+        }
         path: cli_cc_absolutize_lexically(current_dir, value, "project/build root")
         roots.push(cli_cc_canonical_real_directory(path, "explicit root {value}"))
-        index = index + 1
+        index += 1
     }
     roots.sort()
     unique := [String]{}
@@ -453,28 +527,40 @@ CcResponseExpansion: struct {
     }
 
     expand: fn(&self, args: [String], base_dir: String, scope_roots: [String], depth: Int) CLIToolError! -[FS]> {
-        if depth > CC_MAX_RESPONSE_DEPTH -> return Err(CLIToolError.new("response-file nesting exceeds {CC_MAX_RESPONSE_DEPTH} levels"))
+        if depth > CC_MAX_RESPONSE_DEPTH {
+            return Err(CLIToolError.new("response-file nesting exceeds {CC_MAX_RESPONSE_DEPTH} levels"))
+        }
         loop argument in args {
             if !argument.starts_with("@") {
                 self.expanded.push(argument.copy())
-                if self.expanded.len() > CC_MAX_RESPONSE_ARGS -> return Err(CLIToolError.new("response-file expansion exceeds {CC_MAX_RESPONSE_ARGS} arguments"))
+                if self.expanded.len() > CC_MAX_RESPONSE_ARGS {
+                    return Err(CLIToolError.new("response-file expansion exceeds {CC_MAX_RESPONSE_ARGS} arguments"))
+                }
                 next
             }
             raw_path: argument.removeprefix("@")
             if raw_path == "" -> return Err(CLIToolError.new("response-file reference has no path"))
-            if self.file_count >= CC_MAX_RESPONSE_FILES -> return Err(CLIToolError.new("response-file expansion exceeds {CC_MAX_RESPONSE_FILES} files"))
+            if self.file_count >= CC_MAX_RESPONSE_FILES {
+                return Err(CLIToolError.new("response-file expansion exceeds {CC_MAX_RESPONSE_FILES} files"))
+            }
             path: cli_cc_absolutize_lexically(base_dir, raw_path, "response file")
             canonical: files.canonicalize(path) ?? return Err(CLIToolError.new("response file {raw_path} is unavailable: {err}"))
             inside := false
             loop root in scope_roots {
                 if cli_cc_path_starts_with(canonical, root) -> inside = true
             }
-            if !inside -> return Err(CLIToolError.new("response file {raw_path} is outside the explicit project/build roots"))
+            if !inside {
+                return Err(CLIToolError.new("response file {raw_path} is outside the explicit project/build roots"))
+            }
             metadata: files.stat(path) ?? return Err(CLIToolError.new("inspect response file {raw_path}: {err}"))
-            if metadata.is_symlink || !metadata.is_file -> return Err(CLIToolError.new("response file {raw_path} is not a regular file"))
-            if self.stack.contains(canonical) -> return Err(CLIToolError.new("response-file expansion contains a cycle at {raw_path}"))
+            if metadata.is_symlink || !metadata.is_file {
+                return Err(CLIToolError.new("response file {raw_path} is not a regular file"))
+            }
+            if self.stack.contains(canonical) {
+                return Err(CLIToolError.new("response-file expansion contains a cycle at {raw_path}"))
+            }
             self.stack.push(canonical.copy())
-            self.file_count = self.file_count + 1
+            self.file_count += 1
             bytes: cli_cc_read_bounded_response_file(canonical)
             words: cli_cc_parse_response_words(bytes, raw_path)
             nested_base: cli_cc_path_parent(canonical) ?? base_dir
@@ -487,10 +573,16 @@ CcResponseExpansion: struct {
 
 cli_cc_read_bounded_response_file: fn(path: String) -[FS]> [U8] CLIToolError! {
     metadata: files.stat(path) ?? return Err(CLIToolError.new("read response file {path}: {err}"))
-    if metadata.is_symlink || !metadata.is_file -> return Err(CLIToolError.new("response file {path} is not a regular file"))
-    if metadata.size > CC_MAX_RESPONSE_BYTES -> return Err(CLIToolError.new("response file {path} exceeds {CC_MAX_RESPONSE_BYTES} bytes"))
+    if metadata.is_symlink || !metadata.is_file {
+        return Err(CLIToolError.new("response file {path} is not a regular file"))
+    }
+    if metadata.size > CC_MAX_RESPONSE_BYTES {
+        return Err(CLIToolError.new("response file {path} exceeds {CC_MAX_RESPONSE_BYTES} bytes"))
+    }
     bytes: files.read_at(path, 0, CC_MAX_RESPONSE_BYTES + 1) ?? return Err(CLIToolError.new("read response file {path}: {err}"))
-    if bytes.len() > CC_MAX_RESPONSE_BYTES -> return Err(CLIToolError.new("response file {path} exceeds {CC_MAX_RESPONSE_BYTES} bytes"))
+    if bytes.len() > CC_MAX_RESPONSE_BYTES {
+        return Err(CLIToolError.new("response file {path} exceeds {CC_MAX_RESPONSE_BYTES} bytes"))
+    }
     Ok(bytes)
 }
 
@@ -564,16 +656,24 @@ cli_cc_parse_response_words: fn(bytes: [U8], source: String) -> [String] CLITool
             }
         }
     }
-    if escaped -> return Err(CLIToolError.new("response file {source} ends with an incomplete escape"))
-    if quote != CcResponseQuote.Unquoted -> return Err(CLIToolError.new("response file {source} has an unterminated quote"))
+    if escaped {
+        return Err(CLIToolError.new("response file {source} ends with an incomplete escape"))
+    }
+    if quote != CcResponseQuote.Unquoted {
+        return Err(CLIToolError.new("response file {source} has an unterminated quote"))
+    }
     if started -> cli_cc_push_response_word(words, word)
     Ok(words)
 }
 
 cli_cc_push_response_word: fn(words: &[String], word: [U8]) CLIToolError! {
-    if word.len() > CC_MAX_RESPONSE_BYTES -> return Err(CLIToolError.new("one response-file argument exceeds the response-file bound"))
+    if word.len() > CC_MAX_RESPONSE_BYTES {
+        return Err(CLIToolError.new("one response-file argument exceeds the response-file bound"))
+    }
     words.push(String.from_bytes(word) ?? "")
-    if words.len() > CC_MAX_RESPONSE_ARGS -> return Err(CLIToolError.new("response-file expansion exceeds {CC_MAX_RESPONSE_ARGS} arguments"))
+    if words.len() > CC_MAX_RESPONSE_ARGS {
+        return Err(CLIToolError.new("response-file expansion exceeds {CC_MAX_RESPONSE_ARGS} arguments"))
+    }
 }
 
 // Space, tab, newline, form feed, or carriage return.
@@ -640,9 +740,13 @@ cli_cc_absolutize_lexically: fn(base: String, raw: String, label: String) -> Str
     loop part in raw.split("/") {
         if part == "" || part == "." -> next
         if part == ".." {
-            if output.len() == 0 -> return Err(CLIToolError.new("{label} path {raw} escapes its scope"))
+            if output.len() == 0 {
+                return Err(CLIToolError.new("{label} path {raw} escapes its scope"))
+            }
             _: output.pop()
-            if !absolute && output.len() < base_components.len() -> return Err(CLIToolError.new("{label} path {raw} escapes its scope"))
+            if !absolute && output.len() < base_components.len() {
+                return Err(CLIToolError.new("{label} path {raw} escapes its scope"))
+            }
             next
         }
         output.push(part)
@@ -661,7 +765,9 @@ cli_cc_reject_existing_symlinks: fn(scope_root: String, path: String, label: Str
         current = files.join(current, part)
         if files.stat(current) == {
             .Ok(metadata) -> {
-                if metadata.is_symlink -> return Err(CLIToolError.new("{label} path {path} traverses a symlink"))
+                if metadata.is_symlink {
+                    return Err(CLIToolError.new("{label} path {path} traverses a symlink"))
+                }
             }
             .Err(error) -> {
                 if store_io_is_not_found(error) -> break
@@ -675,7 +781,9 @@ cli_cc_reject_existing_symlinks: fn(scope_root: String, path: String, label: Str
 cli_cc_canonical_real_directory: fn(path: String, label: String) -[FS, Env]> String CLIToolError! {
     cli_cc_reject_symlinks_in_path(path, label)
     metadata: files.stat(path) ?? return Err(CLIToolError.new("inspect {label} {path}: {err}"))
-    if metadata.is_symlink || !metadata.is_dir -> return Err(CLIToolError.new("{label} {path} is not a real directory"))
+    if metadata.is_symlink || !metadata.is_dir {
+        return Err(CLIToolError.new("{label} {path} is not a real directory"))
+    }
     files.canonicalize(path) ?? return Err(CLIToolError.new("{label} {path} is unavailable: {err}"))
 }
 
@@ -690,10 +798,14 @@ cli_cc_reject_symlinks_in_path: fn(path: String, label: String) CLIToolError! -[
         current.push(part)
         if files.stat(cli_cc_path_render(rooted, current)) == {
             .Ok(metadata) -> {
-                if metadata.is_symlink -> return Err(CLIToolError.new("{label} {path} traverses a symlink"))
+                if metadata.is_symlink {
+                    return Err(CLIToolError.new("{label} {path} traverses a symlink"))
+                }
             }
             .Err(error) -> {
-                if store_io_is_not_found(error) -> return
+                if store_io_is_not_found(error) {
+                    return
+                }
                 return Err(CLIToolError.new("inspect {label} path {path}: {error}"))
             }
         }
@@ -704,7 +816,9 @@ cli_cc_reject_symlinks_in_path: fn(path: String, label: String) CLIToolError! -[
 cli_cc_validate_relative_path: fn(path: String, label: String) CLIToolError! {
     components: path.split("/").to_list()
     invalid: path == "" || cli_cc_has_nul(path) || path.starts_with("/") || path == "." || path.starts_with("./") || components.contains("..")
-    if invalid -> return Err(CLIToolError.new("{label} path `{path}` must be project-relative and must not contain `..`"))
+    if invalid {
+        return Err(CLIToolError.new("{label} path `{path}` must be project-relative and must not contain `..`"))
+    }
 }
 
 // Whether `value` contains a NUL byte.

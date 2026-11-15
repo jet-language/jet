@@ -17,8 +17,10 @@
 //
 // --samples takes a whole decimal number. A failure ends the run with its
 // report on stderr and exit 1.
-use core.[collections, crypto, files, process, regex, sys, term, time]
-use core.encoding.json
+use {
+    core.[collections, crypto, files, process, regex, sys, term, time]
+    core.encoding.json
+}
 
 PACKAGE: "name: \"core_activation\"\nversion: \"0.1.0\"\nauthority: {{\n    \n        allow: [IO, Mem.Alloc, Time, Net, FS, Env]\n\n}}\n"
 
@@ -143,8 +145,8 @@ Report: struct {
 }
 
 // Every battery by name, in the order the report runs them by default.
-batteries: fn() -> [String: Battery] Never! {
-    [String: Battery]{
+batteries: fn() -> [String:Battery] Never! {
+    [String:Battery]{
         "json": {use_line: "use m: core.encoding.json", call: "m.to_string(Dyn.Int(42)) ?? panic(err.reason)"},
         "regex": {use_line: "use m: core.regex", call: "m.escape(\"4.2\")"},
         "time": {use_line: "use m: core.time", call: "m.datetime(2024, 3, 1, 12, 34, 56)"},
@@ -158,11 +160,14 @@ run: fn() -> Never Err! {
     root: files.normalize("{sys.executable()}/../../../..")
     argv: process.args()
     // The roots Tools/agent/roots.mjs reads: the state root and the scratch root under it.
-    roots: sys.env_text("""
+    roots: sys.env_text(
+        """
         STATE=${{JET_STATE_ROOT:-${{XDG_CACHE_HOME:-$HOME/.cache}}/jet-dev}}
         SCRATCH=${{JET_SCRATCH_ROOT:-$STATE}}
-        """, sys.environment())
-    args := [String: String]{
+        """,
+        sys.environment(),
+    )
+    args := [String:String]{
         "jet": files.join(roots["STATE"], "safe-jet.sh"),
         "out": files.join(roots["SCRATCH"], "core-activation.json"),
         "work": files.join(roots["STATE"], "core-activation"),
@@ -172,7 +177,9 @@ run: fn() -> Never Err! {
     i := 0
     loop i < argv.len() {
         key: argv[i].remove_prefix("--")
-        if !args.has_key(key) || i + 1 >= argv.len() -> return Err("unknown or incomplete option {argv[i]}")
+        if !args.has_key(key) || i + 1 >= argv.len() {
+            return Err("unknown or incomplete option {argv[i]}")
+        }
         args[key] = argv[i + 1].copy()  // copy: the argv keeps its items
         i += 2
     }
@@ -200,21 +207,23 @@ run: fn() -> Never Err! {
         loop k in 1..<ARMS.len() {
             a: arms[k]
             control: arms[0]
-            deltas.push(Delta{
-                battery: name.copy(),  // copy: the battery names both deltas
-                arm: "{ARMS[k]}-control",
-                check_wall_ns: delta(a, control, "/check/wall_ns"),
-                build_wall_ns: delta(a, control, "/build/wall_ns"),
-                binary_bytes: delta(a, control, "/binary/bytes"),
-                text_bytes: delta(a, control, "/binary/sections/.text"),
-                rodata_bytes: delta(a, control, "/binary/sections/.rodata"),
-                defined_symbols: delta(a, control, "/binary/defined_symbols"),
-                generated_rust_bytes: delta(a, control, "/reach/generated_rust_bytes"),
-                startup_median_ns: delta(a, control, "/startup/median_ns"),
-                allocations: delta(a, control, "/alloc/allocations"),
-                peak_live_bytes: delta(a, control, "/alloc/peak_live_bytes"),
-                jit_wall_ns: delta(a, control, "/jit/wall_ns"),
-            })
+            deltas.push(
+                Delta{
+                    battery: name.copy(),  // copy: the battery names both deltas
+                    arm: "{ARMS[k]}-control",
+                    check_wall_ns: delta(a, control, "/check/wall_ns"),
+                    build_wall_ns: delta(a, control, "/build/wall_ns"),
+                    binary_bytes: delta(a, control, "/binary/bytes"),
+                    text_bytes: delta(a, control, "/binary/sections/.text"),
+                    rodata_bytes: delta(a, control, "/binary/sections/.rodata"),
+                    defined_symbols: delta(a, control, "/binary/defined_symbols"),
+                    generated_rust_bytes: delta(a, control, "/reach/generated_rust_bytes"),
+                    startup_median_ns: delta(a, control, "/startup/median_ns"),
+                    allocations: delta(a, control, "/alloc/allocations"),
+                    peak_live_bytes: delta(a, control, "/alloc/peak_live_bytes"),
+                    jit_wall_ns: delta(a, control, "/jit/wall_ns"),
+                },
+            )
         }
     }
     named: version.stdout.trim()
@@ -302,7 +311,9 @@ build_alloc_counter: fn(work: String, root: String) -> String {
     if ran.status == Val(0) -> lib else -> ""
 }
 
-unavailable: fn(reason: String) -> Dyn Never! { Unavailable{status: "unavailable", reason: reason}.encode() }
+unavailable: fn(reason: String) -> Dyn Never! {
+    Unavailable{status: "unavailable", reason: reason}.encode()
+}
 
 // Number(text) as JSON.stringify writes it: null for no number.
 number: fn(text: String?) -> Dyn Never! {
@@ -312,17 +323,23 @@ number: fn(text: String?) -> Dyn Never! {
 }
 
 allocations: fn(binary: String, lib: String, dir: String) -> Dyn Err! {
-    if lib == "" || !files.exists(lib) -> return Ok(unavailable("allocation counter library could not be built"))
+    if lib == "" || !files.exists(lib) {
+        return Ok(unavailable("allocation counter library could not be built"))
+    }
     out_file: files.join(dir, "alloc.count")
     files.remove(out_file).drop("rm -f: a first run has no count")
     ran: timed(process.cmd([binary]).env("LD_PRELOAD", lib).env("ALLOCCOUNT_OUT", out_file))
-    if ran.status != Val(0) || !files.exists(out_file) -> return Ok(unavailable("exit {shown(ran.status)}"))
+    if ran.status != Val(0) || !files.exists(out_file) {
+        return Ok(unavailable("exit {shown(ran.status)}"))
+    }
     fields := [(key: String, value: Dyn)]{(key: "status", value: "measured".encode())}
     loop pair in files.read(out_file).trim().split(" ") {
         parts: pair.split("=").to_list()
         fields.push((key: parts[0].copy(), value: number(parts.get(1))))  // copy: the split keeps its parts
     }
-    if fields.any(fn(field) { field.key == "allocations" && field.value == 0.encode() }) -> return Ok(unavailable("binary does not use the preloadable libc allocator"))
+    if fields.any(fn(field) { field.key == "allocations" && field.value == 0.encode() }) {
+        return Ok(unavailable("binary does not use the preloadable libc allocator"))
+    }
     Ok(Dyn.Object(fields))
 }
 
@@ -370,7 +387,9 @@ measure_arm: fn(jet: String, work: String, samples: Int, name: String, battery: 
         if walls.len() == 0 -> stdout = ran.stdout
         walls.push(ran.wall_ns)
     }
-    if walls.len() == samples -> row.startup = Val(Startup{status: "measured", reason: None, stderr: None, samples: Val(walls.copy()), median_ns: Val(median(walls)), stdout: Val(stdout)})  // copy: the median sorts its own
+    if walls.len() == samples {
+        row.startup = Val(Startup{status: "measured", reason: None, stderr: None, samples: Val(walls.copy()), median_ns: Val(median(walls)), stdout: Val(stdout)})  // copy: the median sorts its own
+    }
     row.alloc = Val(allocations(binary, lib, dir))
     jit: timed(process.cmd([jet, "run", "{stem}.jet"]).cwd(dir))
     scalars: jit.stdout.chars()

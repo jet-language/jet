@@ -13,16 +13,10 @@ Tracked: struct {
 arms: fn() {
     arena := mem.Arena.new()
     if arena.try_alloc(Tracked{label: "t1"}) == {
-        .Ok(value) -> {
-            print("got {value.label}")
-        }
-        .Err(error) -> {
-            print("refused {error.requested_bytes}")
-        }
+        .Ok(value) -> { print("got {value.label}") }
+        .Err(error) -> { print("refused {error.requested_bytes}") }
     }
-    if arena.try_alloc(Tracked{label: "t2"}) == .Ok(value) {
-        print("got {value.label}")
-    }
+    if arena.try_alloc(Tracked{label: "t2"}) == .Ok(value) -> print("got {value.label}")
     third: arena.try_alloc(Tracked{label: "t3"}) ?? panic("refused")
     print("got {third.label}")
     print("reset arena")
@@ -46,12 +40,8 @@ tried: fn() AllocError! {
 fixed_case: fn() {
     fixed: mem.Fixed.new(size: 64)
     if fixed.try_alloc(Tracked{label: "f1"}) == {
-        .Ok(value) -> {
-            print("got {value.label}")
-        }
-        .Err(error) -> {
-            print("refused {error.requested_bytes}")
-        }
+        .Ok(value) -> { print("got {value.label}") }
+        .Err(error) -> { print("refused {error.requested_bytes}") }
     }
     print("close fixed")
     close(fixed)

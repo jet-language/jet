@@ -50,7 +50,9 @@ store_publish_nix_cas_bundle: fn(verification: &StoreVerification, project: Stri
                 .AlreadyExists(_) -> {}
                 .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> return Err(StoreError.IO(error))
             }
-            if files.read_bytes(path) != bytes -> return Err(StoreError.InvalidData("project Nix CAS bundle digest collides"))
+            if files.read_bytes(path) != bytes {
+                return Err(StoreError.InvalidData("project Nix CAS bundle digest collides"))
+            }
         }
         .Ok(_) -> {}
     }
@@ -86,8 +88,12 @@ store_nix_cas_import_with_expectation: fn(verification: &StoreVerification, proj
     store_archive_validate_digest(digest)
     path: files.join(files.join(pkg_managed_dir(project), STORE_PROJECT_NIX_CAS_DIR), digest)
     bytes: files.read_bytes(path)
-    if "sha256-{pkg_sha256_hex(bytes)}" != digest -> return Err(StoreError.InvalidData("project Nix CAS bundle digest mismatch"))
-    if bytes.len() > STORE_MAX_ARCHIVE_BYTES -> return Err(StoreError.InvalidData("archive exceeds the 1 GiB limit"))
+    if "sha256-{pkg_sha256_hex(bytes)}" != digest {
+        return Err(StoreError.InvalidData("project Nix CAS bundle digest mismatch"))
+    }
+    if bytes.len() > STORE_MAX_ARCHIVE_BYTES {
+        return Err(StoreError.InvalidData("archive exceeds the 1 GiB limit"))
+    }
     archive: HangarArchive.decode(bytes)
     archive.verify_signature(roots, None, true)
     store_nix_cas_validate_bundle(archive, expectation)
@@ -117,19 +123,27 @@ store_nix_cas_validate_bundle: fn(archive: HangarArchive, expectation: NixReplay
     store_nix_cas_validate_platform(manifest.platform)
     store_nix_cas_validate_hex(manifest.revision, 40, "manifest revision")
     store_nix_cas_validate_hex(manifest.cache_key, 64, "manifest cache key")
-    if archive.root_id != manifest.output -> return Err(StoreError.InvalidData("Nix closure manifest output disagrees with archive root"))
+    if archive.root_id != manifest.output {
+        return Err(StoreError.InvalidData("Nix closure manifest output disagrees with archive root"))
+    }
     if manifest.members.len() == 0 || manifest.members.len() > STORE_ARCHIVE_MAX_OBJECTS {
         return Err(StoreError.InvalidData("Nix closure manifest has an invalid member count"))
     }
 
     object_keys := [String]{}
-    objects := [String: HangarArchiveObject]{}
+    objects := [String:HangarArchiveObject]{}
     loop object in archive.objects {
-        if object.meta != "" -> return Err(StoreError.InvalidData("project Nix CAS bundle contains package metadata"))
-        if object.id != object.digest -> return Err(StoreError.InvalidData("Nix CAS bundle object id disagrees with its digest"))
+        if object.meta != "" {
+            return Err(StoreError.InvalidData("project Nix CAS bundle contains package metadata"))
+        }
+        if object.id != object.digest {
+            return Err(StoreError.InvalidData("Nix CAS bundle object id disagrees with its digest"))
+        }
         store_nix_cas_validate_cas(object.digest, "Nix CAS member")
         object_keys.push(object.digest)
-        if objects.get(object.digest) != None -> return Err(StoreError.InvalidData("Nix CAS bundle contains duplicate members"))
+        if objects.get(object.digest) != None {
+            return Err(StoreError.InvalidData("Nix CAS bundle contains duplicate members"))
+        }
         objects[object.digest] = object
     }
     member_keys := [String]{}
@@ -137,13 +151,17 @@ store_nix_cas_validate_bundle: fn(archive: HangarArchive, expectation: NixReplay
     if !store_nix_cas_is_sorted_unique(object_keys) || !store_nix_cas_is_sorted_unique(member_keys) {
         return Err(StoreError.InvalidData("Nix closure manifest members must be sorted and unique"))
     }
-    if object_keys != member_keys -> return Err(StoreError.InvalidData("Nix closure manifest member set disagrees with archive objects"))
+    if object_keys != member_keys {
+        return Err(StoreError.InvalidData("Nix closure manifest member set disagrees with archive objects"))
+    }
 
-    edges := [String: [String]]{}
+    edges := [String:[String]]{}
     loop member in manifest.members {
         store_nix_cas_validate_cas(member.key, "Nix closure member key")
         store_nix_cas_validate_cas(member.hash, "Nix closure member hash")
-        if member.size == 0 -> return Err(StoreError.InvalidData("Nix closure manifest member has zero size"))
+        if member.size == 0 {
+            return Err(StoreError.InvalidData("Nix closure manifest member has zero size"))
+        }
         object: objects.get(member.key) ?? return Err(StoreError.InvalidData("Nix closure manifest names a missing member"))
         canonical: store_nix_cas_canonical_object_bytes(object)
         if member.hash != "sha256-{pkg_sha256_hex(canonical)}" || member.size != canonical.len() {
@@ -154,8 +172,12 @@ store_nix_cas_validate_bundle: fn(archive: HangarArchive, expectation: NixReplay
         }
         loop reference in member.references {
             store_nix_cas_validate_cas(reference, "Nix closure reference")
-            if reference == member.key -> return Err(StoreError.InvalidData("Nix closure manifest contains a self-reference"))
-            if objects.get(reference) == None -> return Err(StoreError.InvalidData("Nix closure manifest reference is outside the member set"))
+            if reference == member.key {
+                return Err(StoreError.InvalidData("Nix closure manifest contains a self-reference"))
+            }
+            if objects.get(reference) == None {
+                return Err(StoreError.InvalidData("Nix closure manifest reference is outside the member set"))
+            }
         }
         edges[member.key] = member.references
     }
@@ -173,20 +195,26 @@ store_nix_cas_validate_bundle: fn(archive: HangarArchive, expectation: NixReplay
         .None -> {}
     }
 
-    visiting := [String: Bool]{}
-    reachable := [String: Bool]{}
+    visiting := [String:Bool]{}
+    reachable := [String:Bool]{}
     store_nix_cas_visit(manifest.output, edges, visiting, reachable)
     unreachable := reachable.len() != member_keys.len()
     loop key in member_keys {
         if reachable.get(key) == None -> unreachable = true
     }
-    if unreachable -> return Err(StoreError.InvalidData("Nix closure manifest contains unreachable extra members"))
+    if unreachable {
+        return Err(StoreError.InvalidData("Nix closure manifest contains unreachable extra members"))
+    }
 }
 
 // Depth-first reachability from `key`, refusing reference cycles.
-store_nix_cas_visit: fn(key: String, edges: [String: [String]], visiting: &[String: Bool], reachable: &[String: Bool]) StoreError! {
-    if reachable.get(key) != None -> return
-    if visiting.get(key) != None -> return Err(StoreError.InvalidData("Nix closure manifest contains a reference cycle"))
+store_nix_cas_visit: fn(key: String, edges: [String:[String]], visiting: &[String:Bool], reachable: &[String:Bool]) StoreError! {
+    if reachable.get(key) != None {
+        return
+    }
+    if visiting.get(key) != None {
+        return Err(StoreError.InvalidData("Nix closure manifest contains a reference cycle"))
+    }
     visiting[key] = true
     references: edges.get(key) ?? return Err(StoreError.InvalidData("Nix closure manifest has a missing graph node"))
     loop reference in references -> store_nix_cas_visit(reference, edges, visiting, reachable)
@@ -250,7 +278,9 @@ store_nix_cas_build_unlocked: fn(verification: &StoreVerification, roots: Hangar
     cache_key: producer.facts.get("nix.cache.key") ?? return Err(StoreError.InvalidData("Nix CAS export has no cache identity key"))
     if producer.facts.get("nix.index.system") == {
         .Val(system) -> {
-            if system != platform -> return Err(StoreError.InvalidData("Nix CAS export producer system disagrees with its target platform"))
+            if system != platform {
+                return Err(StoreError.InvalidData("Nix CAS export producer system disagrees with its target platform"))
+            }
         }
         .None -> {}
     }
@@ -264,9 +294,11 @@ store_nix_cas_build_unlocked: fn(verification: &StoreVerification, roots: Hangar
         if object.digest == root_digest -> has_output = true
         objects.push(object)
     }
-    if !has_output -> return Err(StoreError.InvalidData("Nix CAS bundle is missing its output object"))
+    if !has_output {
+        return Err(StoreError.InvalidData("Nix CAS bundle is missing its output object"))
+    }
     manifest: store_nix_cas_build_manifest(objects, graph, root_digest, platform, revision, cache_key)
-    archive: HangarArchive{root_id: root_digest, objects, nix_manifest: Val(manifest), signature: None}
+    archive: HangarArchive{root_id: root_digest, objects: objects, nix_manifest: Val(manifest), signature: None}
     store_nix_cas_validate_bundle(archive, None)
     Ok(archive)
 }
@@ -283,15 +315,17 @@ store_nix_cas_build_manifest: fn(objects: [HangarArchiveObject], graph: ClosureG
                 return Err(StoreError.InvalidData("Nix closure graph references an object outside the exported member set"))
             }
         }
-        members.push(NixClosureMember{
-            key: object.digest,
-            hash: "sha256-{pkg_sha256_hex(bytes)}",
-            size: bytes.len(),
-            references: store_archive_sorted_unique(references),
-        })
+        members.push(
+            NixClosureMember{
+                key: object.digest,
+                hash: "sha256-{pkg_sha256_hex(bytes)}",
+                size: bytes.len(),
+                references: store_archive_sorted_unique(references),
+            },
+        )
     }
     members.sort_by(fn(member) { member.key })
-    Ok(NixClosureManifest{output, platform, revision, cache_key, members})
+    Ok(NixClosureManifest{output: output, platform: platform, revision: revision, cache_key: cache_key, members: members})
 }
 
 // The canonical bytes a manifest member hashes: the root mode and every

@@ -20,22 +20,12 @@ EXTERNAL: "198.51.100.1:9"
 run: fn() {
     args: process.args()
     mode: if args.len() > 0 -> args[0].copy() else -> ""
-    if mode == "write" {
-        write_mode()
-    } else if mode == "network" {
-        network_mode()
-    } else if mode == "descendant" {
+    if mode == "write" -> write_mode() else if mode == "network" -> network_mode() else if mode == "descendant" {
         descendant_mode()
-    } else if mode == "delayed" {
-        delayed_mode()
-    } else if mode == "signal" {
-        signal_mode()
-    } else if mode == "result" {
+    } else if mode == "delayed" { delayed_mode() } else if mode == "signal" { signal_mode() } else if mode == "result" {
         term.print("stdout-exact")
         process.fail(23, "stderr-exact")
-    } else {
-        process.exit(91)
-    }
+    } else { process.exit(91) }
 }
 
 // The working directory is writable; the file outside the root is not.
@@ -43,7 +33,7 @@ write_mode: fn() -[Env, Exec, FS, IO]> {
     files.write("inside", "inside\n") ?? process.fail(1, "inside write failed: {err}")
     outside: process.env_get("PEER_OUTSIDE") ?? ""
     if files.write(outside, "outside\n") == {
-        .Ok(_) -> term.print("outside=allowed")
+        .Ok(_) -> { term.print("outside=allowed") }
         .Err(_) -> term.print("outside=blocked")
     }
 }
@@ -54,8 +44,7 @@ network_mode: fn() -[IO, Net, Time.Wait]> {
 }
 
 // A listener on an ephemeral loopback port accepts a connection.
-#Deadline(350ms)
-loopback_reachable: fn() -[Net, Time.Wait]> Bool Never! {
+#Deadline(350ms) loopback_reachable: fn() -[Net, Time.Wait]> Bool Never! {
     listener: net.tcp_listen("127.0.0.1:0") ?? return false
     addr: net.listener_local_socket_addr(listener) ?? return false
     if net.tcp_connect_addr(addr) == {
@@ -64,8 +53,7 @@ loopback_reachable: fn() -[Net, Time.Wait]> Bool Never! {
     }
 }
 
-#Deadline(350ms)
-external_reachable: fn() -[Net, Time.Wait]> Bool Never! {
+#Deadline(350ms) external_reachable: fn() -[Net, Time.Wait]> Bool Never! {
     addr: net.socket_addr_parse(EXTERNAL) ?? return false
     if net.tcp_connect_addr(addr) == {
         .Ok(_) -> true

@@ -24,9 +24,15 @@ seven: fn() -> Int { 7 }
 
 failure_label: fn(error: TaskFailure) -> String {
     if error == {
-        .Cancelled -> { return "cancelled" }
-        .DeadlineBlown -> { return "deadline" }
-        .Panicked(_) -> { return "panicked" }
+        .Cancelled -> {
+            return "cancelled"
+        }
+        .DeadlineBlown -> {
+            return "deadline"
+        }
+        .Panicked(_) -> {
+            return "panicked"
+        }
     }
 }
 
@@ -54,7 +60,7 @@ run: fn() {
         // No pause: a plain cancel stops the busy loop, and its cleanup runs.
         spinner.cancel()
         if spinner.join() == {
-            .Ok(_) -> print("the spinner finished")
+            .Ok(_) -> { print("the spinner finished") }
             .Err(error) -> print("the spinner: {failure_label(error)}")
         }
 
@@ -65,7 +71,7 @@ run: fn() {
             spin(timed_counter)
         }
         if timed.join() == {
-            .Ok(_) -> print("the timed spinner finished")
+            .Ok(_) -> { print("the timed spinner finished") }
             .Err(error) -> print("the timed spinner: {failure_label(error)}")
         }
     }

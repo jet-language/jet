@@ -13,7 +13,9 @@ kit_steps_relative_path: fn(path: String) -> Bool {
             relative = "{kit_steps_byte_slice(relative, 0, start)}token{kit_steps_byte_slice(relative, after + end + 1, relative.count_bytes())}"
         }
     }
-    if relative.starts_with("/") || relative.contains("\\") || relative.contains(":") -> return false
+    if relative.starts_with("/") || relative.contains("\\") || relative.contains(":") {
+        return false
+    }
     collapsed: files.collapse(relative)
     collapsed != ".." && !collapsed.starts_with("../")
 }
@@ -22,7 +24,9 @@ kit_steps_work_path: fn(path: String, env: KitEnv, work: String, scratch: String
     expanded: kit_steps_expand(path, env, work, scratch, built)
     absolute: files.collapse(files.join(work, expanded))
     temporary: files.join(scratch, "tmp")
-    if absolute != work && !absolute.starts_with("{work}/") && absolute != temporary && !absolute.starts_with("{temporary}/") -> return None
+    if absolute != work && !absolute.starts_with("{work}/") && absolute != temporary && !absolute.starts_with("{temporary}/") {
+        return None
+    }
     Val(absolute)
 }
 
@@ -40,8 +44,7 @@ kit_steps_file_action: fn(step: KitStep, env: KitEnv, work: String, scratch: Str
         return kit_steps_action_run()
     }
     expanded: kit_steps_expand(step.argv[1], env, work, scratch, built)
-    source: if step.action == "copy" && files.is_absolute(expanded) -> expanded else ->
-        kit_steps_work_path(expanded, env, work, scratch, built) ?? return kit_exec_failed("file action escapes work directory")
+    source: if step.action == "copy" && files.is_absolute(expanded) -> expanded else -> kit_steps_work_path(expanded, env, work, scratch, built) ?? return kit_exec_failed("file action escapes work directory")
     if !files.exists(source) -> return kit_exec_failed("file action source is missing: {source}")
     if step.action == "remove" {
         files.remove_all(source) ?? return kit_exec_failed("remove {source}: {err}")

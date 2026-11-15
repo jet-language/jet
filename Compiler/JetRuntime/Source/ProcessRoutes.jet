@@ -11,12 +11,17 @@ process_route_text_list: fn(data: I64, length: I64) -> I64 {
     }
     result
 }
+
 process_route_optional_word: fn(present: Bool, value: I64) -> I64 {
     if present -> process_raw_box(value) else -> I64{0}
 }
+
 process_route_stream_mode: fn(mode: I64) {
-    if mode < PROCESS_STREAM_STREAM || mode > PROCESS_STREAM_STDOUT -> trap_native_index_range_stop()
+    if mode < PROCESS_STREAM_STREAM || mode > PROCESS_STREAM_STDOUT {
+        trap_native_index_range_stop()
+    }
 }
+
 #Export(c) jet_process_spec_fields_raw: fn(cmd: I64, cmd_length: I64, has_cwd: Bool, cwd: I64, env_clear: Bool, names: I64, names_length: I64, values: I64, values_length: I64, removals: I64, removals_length: I64, has_stdin: Bool, stdin: I64, stdout: I64, stderr: I64, has_timeout: Bool, timeout: I64, has_output: Bool, output: I64, has_cpu: Bool, cpu: I64, has_memory: Bool, memory: I64, has_files: Bool, files: I64, detached: Bool, has_terminal: Bool, terminal: I64, has_policy: Bool, policy: I64) -> I64 {
     process_route_stream_mode(stdin)
     process_route_stream_mode(stdout)
@@ -56,6 +61,7 @@ process_route_stream_mode: fn(mode: I64) {
     // The zeroed private directory tail is the original empty inherited Vec.
     result
 }
+
 #Export(c) jet_std_process_spec_under: fn(value: I64, authority: I64) -> I64 {
     result: value
     jet_rt_string_drop(encoding_word(wrapping(result + PROCESS_SPEC_POLICY_WIRE)))
@@ -63,21 +69,26 @@ process_route_stream_mode: fn(mode: I64) {
     encoding_store(wrapping(result + PROCESS_SPEC_ENV_CLEAR), I64{1})
     result
 }
+
 process_route_i32: fn(value: I64) -> I64 {
     bits: value.bit_and(I64{4294967295})
     if bits >= (I64{2147483648}) -> bits - I64{4294967296} else -> bits
 }
+
 // Whether `spec` already passes a held directory at child slot `target`.
 process_spec_directory_slot_taken: fn(spec: I64, target: I64) -> Bool {
     directories: encoding_word(wrapping(spec + PROCESS_SPEC_DIRECTORIES))
     if directories == (I64{0}) -> return false
     index := I64{0}
     loop index < encoding_word(directories) {
-        if encoding_word(wrapping(encoding_word(wrapping(directories + I64{16})) + index * I64{24} + I64{8})) == target -> return true
+        if encoding_word(wrapping(encoding_word(wrapping(directories + I64{16})) + index * I64{24} + I64{8})) == target {
+            return true
+        }
         index += I64{1}
     }
     false
 }
+
 #Export(c) jet_process_spec_keep_open_raw: fn(value: I64, source_fd: I64, child_fd: I64, as_cwd: Bool, spec_out: I64, supported_out: I64, assigned_out: I64, errno_out: I64) {
     // Duplicate its lent fd, never reopen a pathname. The spec is consumed:
     // its earlier rows move into the returned one, so each passed descriptor
@@ -119,7 +130,9 @@ process_spec_directory_slot_taken: fn(spec: I64, target: I64) -> Bool {
             encoding_store(wrapping(directories + DATA_SEQUENCE_LENGTH), encoding_word(wrapping(directories + DATA_SEQUENCE_LENGTH)) + I64{1})
         }
     }
-    if (refusal != I64{0} && encoding_word(wrapping(result + PROCESS_SPEC_KEEP_REFUSAL)) == I64{0}) -> encoding_store(wrapping(result + PROCESS_SPEC_KEEP_REFUSAL), refusal)
+    if (refusal != I64{0} && encoding_word(wrapping(result + PROCESS_SPEC_KEEP_REFUSAL)) == I64{0}) {
+        encoding_store(wrapping(result + PROCESS_SPEC_KEEP_REFUSAL), refusal)
+    }
     encoding_store(spec_out, result)
     // bool is exactly one C byte; do not overwrite adjacent caller storage.
     // Linux implements F_DUPFD_CLOEXEC.

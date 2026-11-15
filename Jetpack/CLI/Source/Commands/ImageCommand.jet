@@ -17,15 +17,21 @@ cli_record_omitted_secret_integration_projection: fn(projection: &ProjectionRepo
     prefix: "integration:{integration.kind.as_str()}"
     projection.omitted.push("{prefix}:activation")
     loop task_name in integration.tasks -> projection.omitted.push("{prefix}:task:{task_name}")
-    loop provider in integration.providers -> projection.omitted.push("{prefix}:provider:{provider}")
+    loop provider in integration.providers {
+        projection.omitted.push("{prefix}:provider:{provider}")
+    }
     loop grant in integration.grants -> projection.omitted.push("{prefix}:grant:{grant}")
-    loop host_check in integration.host_checks -> projection.omitted.push("{prefix}:host-check:{host_check}")
+    loop host_check in integration.host_checks {
+        projection.omitted.push("{prefix}:host-check:{host_check}")
+    }
     if integration.options.len() > 0 {
         keys := integration.options.keys().to_list()
         keys.sort()
         projection.omitted.push("{prefix}:option-keys={keys.join(",")}")
     }
-    if integration.secrets.len() > 0 -> projection.omitted.push("{prefix}:secret-refs={integration.secrets.len()}")
+    if integration.secrets.len() > 0 {
+        projection.omitted.push("{prefix}:secret-refs={integration.secrets.len()}")
+    }
 }
 
 // The declared images, for a refusal's Why text.
@@ -99,7 +105,9 @@ cli_cmd_image: fn(verification: &StoreVerification, theme: Theme, parsed: CLIPar
     if image.from_environment && image.services.len() == 0 && plan.dev_services.len() > 0 {
         projection.rejected.push("services")
         if cli_write_rejected_projection(out_dir, projection) == {
-            .Err(error) -> theme.error("couldn't write image {name} rejection projection", error.message(), "check that the image output directory is writable.")
+            .Err(error) -> {
+                theme.error("couldn't write image {name} rejection projection", error.message(), "check that the image output directory is writable.")
+            }
             .Ok(_) -> {}
         }
         quoted := [String]{}
@@ -147,9 +155,7 @@ cli_cmd_image: fn(verification: &StoreVerification, theme: Theme, parsed: CLIPar
         }
         layer_files.push(LayerFile{path: "usr/local/bin/{image.from}", data: bin_data, mode: 493})
     }
-    if image.from_environment {
-        cli_record_environment_projection(projection, plan)
-    } else {
+    if image.from_environment -> cli_record_environment_projection(projection, plan) else {
         projection.included.push("package:{image.from}")
     }
     loop env_var in image.env_vars -> projection.changed.push("env:{env_var.key}")
@@ -162,7 +168,9 @@ cli_cmd_image: fn(verification: &StoreVerification, theme: Theme, parsed: CLIPar
     if layer_files.len() == 0 {
         projection.rejected.push("environment.package-output")
         if cli_write_rejected_projection(out_dir, projection) == {
-            .Err(error) -> theme.error("couldn't write image {name} rejection projection", error.message(), "check that the image output directory is writable.")
+            .Err(error) -> {
+                theme.error("couldn't write image {name} rejection projection", error.message(), "check that the image output directory is writable.")
+            }
             .Ok(_) -> {}
         }
         return EXIT_USAGE
@@ -208,12 +216,12 @@ cli_cmd_image: fn(verification: &StoreVerification, theme: Theme, parsed: CLIPar
                 next
             }
             projection.included.push("service:{service.name}")
-            if service.after.len() > 0 -> projection.changed.push("service:{service.name}:after={services_dependency_names(service).join(",")}")
+            if service.after.len() > 0 {
+                projection.changed.push("service:{service.name}:after={services_dependency_names(service).join(",")}")
+            }
             if service.ports.len() == 0 {
                 projection.omitted.push("service:{service.name}:ports-default")
-            } else {
-                projection.changed.push("service:{service.name}:ports")
-            }
+            } else { projection.changed.push("service:{service.name}:ports") }
         }
     }
     entrypoint: image.entrypoint ?? cli_image_default_entrypoint(image, services.commands.len() > 0)
@@ -278,7 +286,9 @@ cli_cmd_image: fn(verification: &StoreVerification, theme: Theme, parsed: CLIPar
 // An environment image writes its projection artifacts; any other image
 // writes only the projection report.
 cli_write_image_projection: fn(from_environment: Bool, out_dir: String, manifest_digest: String, plan: ProjectionPlan, report: ProjectionReport) ImageError! -[FS, Env]> {
-    if from_environment -> return image_write_projection_artifacts(out_dir, manifest_digest, plan, report)
+    if from_environment {
+        return image_write_projection_artifacts(out_dir, manifest_digest, plan, report)
+    }
     image_write_projection_report(out_dir, manifest_digest, report)
 }
 
@@ -290,7 +300,9 @@ ImagePushChoice: struct {
 
 cli_image_push_destination: fn(theme: Theme, name: String, push: String?) -[IO, Time.Wait]> ImagePushChoice? Never! {
     reference: push ?? return Val(ImagePushChoice{destination: None})
-    if reference.starts_with("https://") || reference.starts_with("http://") -> return Val(ImagePushChoice{destination: Val(ImagePushDestination.Registry(reference))})
+    if reference.starts_with("https://") || reference.starts_with("http://") {
+        return Val(ImagePushChoice{destination: Val(ImagePushDestination.Registry(reference))})
+    }
     if reference.starts_with("oci://") {
         theme.error_coded("E1268", "OCI reference {reference} needs an HTTP registry URL", "the native registry transport accepts an explicit http:// or https:// registry reference.", "use --push https://registry.example/repository:tag, or use file:///... for a local layout.")
         return None
@@ -316,9 +328,7 @@ cli_image_base_directory: fn(theme: Theme, dir: String, base: String?) -[IO, FS,
         return None
     }
     path := ""
-    if reference.starts_with("file://") {
-        path = reference.removeprefix("file://")
-    } else {
+    if reference.starts_with("file://") -> path = reference.removeprefix("file://") else {
         escapes := files.is_absolute(reference)
         loop part in reference.split("/") {
             if part == ".." -> escapes = true
@@ -403,9 +413,7 @@ cli_reject_image_file: fn(theme: Theme, name: String, from_environment: Bool, re
     cli_write_rejected_projection(out_dir, projection).drop("the rejection projection is best-effort")
     if from_environment {
         theme.error_coded("E1336", "environment image {name} cannot project extra file `{relative}`", error, environment_fix)
-    } else {
-        theme.error("image file {relative} cannot be projected", error, package_fix)
-    }
+    } else { theme.error("image file {relative} cannot be projected", error, package_fix) }
 }
 
 cli_image_default_entrypoint: fn(image: ImagePlan, supervised: Bool) -> String Never! {
@@ -423,22 +431,30 @@ cli_looks_like_registry_reference: fn(reference: String) -> Bool Never! {
 // A safe project-relative image path, normalized to `a/b/c`.
 cli_normalize_project_relative_image_path: fn(relative: String) -> String CLIError! {
     unsafe_path: CLIError.InvalidData("image files must be safe project-relative paths")
-    if relative == "" || relative.contains("\\") || pkg_text_has_control(relative) || files.is_absolute(relative) -> return Err(unsafe_path)
+    if relative == "" || relative.contains("\\") || pkg_text_has_control(relative) || files.is_absolute(relative) {
+        return Err(unsafe_path)
+    }
     components := [String]{}
     loop part in relative.split("/") {
         if part == "" || part == "." -> next
         if part == ".." -> return Err(unsafe_path)
         components.push(part)
     }
-    if components.len() == 0 -> return Err(CLIError.InvalidData("image files must name a regular project file"))
+    if components.len() == 0 {
+        return Err(CLIError.InvalidData("image files must name a regular project file"))
+    }
     normalized: components.join("/")
-    if normalized.len() > 100 -> return Err(CLIError.InvalidData("image file path exceeds the OCI tar path limit"))
+    if normalized.len() > 100 {
+        return Err(CLIError.InvalidData("image file path exceeds the OCI tar path limit"))
+    }
     Ok(normalized)
 }
 
 cli_image_layer_path_conflicts: fn(layer_files: [LayerFile], candidate: String) -> Bool Never! {
     loop file in layer_files {
-        if cli_path_starts_with(candidate, file.path) || cli_path_starts_with(file.path, candidate) -> return true
+        if cli_path_starts_with(candidate, file.path) || cli_path_starts_with(file.path, candidate) {
+            return true
+        }
     }
     false
 }
@@ -450,8 +466,12 @@ cli_read_project_image_file: fn(root: String, relative: String) -[FS, Env]> [U8]
         .Ok(bytes) -> Ok(bytes)
         .Err(error) -> {
             detail: "{error}"
-            if detail.contains("hard link") -> return Err(CLIError.InvalidData("image file must not be a hard link to another project path"))
-            if detail.contains("symlink") || detail.contains("regular file") || detail.contains("not a directory") -> return Err(CLIError.InvalidData("image file must be a regular file, not a symlink or directory"))
+            if detail.contains("hard link") {
+                return Err(CLIError.InvalidData("image file must not be a hard link to another project path"))
+            }
+            if detail.contains("symlink") || detail.contains("regular file") || detail.contains("not a directory") {
+                return Err(CLIError.InvalidData("image file must be a regular file, not a symlink or directory"))
+            }
             Err(CLIError.InvalidData(detail))
         }
     }
@@ -468,7 +488,9 @@ cli_image_service_commands: fn(plan: EnvPlan, image: ImagePlan, layer_files: [La
     selected := [DevServicePlan]{}
     names := [String]{}
     visiting := [String]{}
-    loop service_name in image.services -> cli_collect_image_service(service_name, plan.dev_services, selected, names, visiting)
+    loop service_name in image.services {
+        cli_collect_image_service(service_name, plan.dev_services, selected, names, visiting)
+    }
     order: services_dependency_order(selected) ?? return Err(CLIError.InvalidData(err.message))
     commands := [[String]]{}
     loop index in order {
@@ -478,7 +500,9 @@ cli_image_service_commands: fn(plan: EnvPlan, image: ImagePlan, layer_files: [La
         }
         command := services_image_run_command(service) ?? return Err(CLIError.InvalidData(err.message))
         loop argument in command {
-            if pkg_text_has_control(argument) -> return Err(CLIError.InvalidData("service {service.name} has a command argument with a control character"))
+            if pkg_text_has_control(argument) {
+                return Err(CLIError.InvalidData("service {service.name} has a command argument with a control character"))
+            }
         }
         executable: command.get(0) ?? return Err(CLIError.InvalidData("service {service.name} has an empty run command"))
         path: cli_image_service_executable(service.name, executable)
@@ -487,7 +511,9 @@ cli_image_service_commands: fn(plan: EnvPlan, image: ImagePlan, layer_files: [La
         loop file in layer_files {
             if file.path == layer_path -> present = true
         }
-        if !present -> return Err(CLIError.InvalidData("service {service.name} executable {executable} is not a projected package"))
+        if !present {
+            return Err(CLIError.InvalidData("service {service.name} executable {executable} is not a projected package"))
+        }
         command[0] = path
         commands.push(command)
     }
@@ -496,9 +522,11 @@ cli_image_service_commands: fn(plan: EnvPlan, image: ImagePlan, layer_files: [La
         loop file in layer_files {
             if file.path == "usr/local/bin/sleep" -> has_sleep = true
         }
-        if !has_sleep -> return Err(CLIError.InvalidData("the OCI supervisor requires a projected `sleep` executable to monitor services"))
+        if !has_sleep {
+            return Err(CLIError.InvalidData("the OCI supervisor requires a projected `sleep` executable to monitor services"))
+        }
     }
-    Ok(ImageServiceProjection{commands, names})
+    Ok(ImageServiceProjection{commands: commands, names: names})
 }
 
 // The in-image path of a service executable: `sh` is `/bin/sh`, an absolute
@@ -507,18 +535,28 @@ cli_image_service_executable: fn(service: String, executable: String) -> String 
     if executable == "sh" || executable == "/bin/sh" -> return Ok("/bin/sh")
     if executable.starts_with("/") {
         loop part in executable.split("/") {
-            if part == ".." -> return Err(CLIError.InvalidData("service {service} has an unsafe executable path"))
+            if part == ".." {
+                return Err(CLIError.InvalidData("service {service} has an unsafe executable path"))
+            }
         }
-        if !cli_path_starts_with(executable, "/usr/local/bin") -> return Err(CLIError.InvalidData("service {service} has an unsafe executable path"))
+        if !cli_path_starts_with(executable, "/usr/local/bin") {
+            return Err(CLIError.InvalidData("service {service} has an unsafe executable path"))
+        }
         return Ok(executable)
     }
-    if executable == "" || executable.contains("/") || executable.contains("\\") -> return Err(CLIError.InvalidData("service {service} has an unsafe executable name"))
+    if executable == "" || executable.contains("/") || executable.contains("\\") {
+        return Err(CLIError.InvalidData("service {service} has an unsafe executable name"))
+    }
     Ok("/usr/local/bin/{executable}")
 }
 
 cli_collect_image_service: fn(name: String, plans: [DevServicePlan], selected: &[DevServicePlan], names: &[String], visiting: &[String]) CLIError! {
-    if names.contains(name) -> return
-    if visiting.contains(name) -> return Err(CLIError.InvalidData("service dependency cycle includes `{name}`"))
+    if names.contains(name) {
+        return
+    }
+    if visiting.contains(name) {
+        return Err(CLIError.InvalidData("service dependency cycle includes `{name}`"))
+    }
     visiting.push(name.copy())
     found := DevServicePlan?{None}
     loop candidate in plans {
@@ -526,7 +564,9 @@ cli_collect_image_service: fn(name: String, plans: [DevServicePlan], selected: &
     }
     service: found ?? return Err(CLIError.InvalidData("service {name} is not declared by the environment"))
     if !service.enable -> return Err(CLIError.InvalidData("service {name} is disabled"))
-    loop dependency in services_dependency_names(service) -> cli_collect_image_service(dependency, plans, selected, names, visiting)
+    loop dependency in services_dependency_names(service) {
+        cli_collect_image_service(dependency, plans, selected, names, visiting)
+    }
     // Depth-first: every dependency finished, so `name` is the newest visit.
     _ := visiting.pop()
     selected.push(service)
@@ -550,7 +590,7 @@ cli_supervisor_script: fn(commands: [[String]]) -> String Never! {
         "start() {{",
         "  \"$@\" &",
         "  pids=\"$pids $!\"",
-        "}}"
+        "}}",
     }
     loop command in commands {
         quoted := [String]{"start"}
@@ -566,9 +606,7 @@ cli_supervisor_script: fn(commands: [[String]]) -> String Never! {
     "{lines.join("\n")}\n"
 }
 
-cli_shell_quote: fn(value: String) -> String Never! {
-    "'{value.replace("'", "'\"'\"'")}'"
-}
+cli_shell_quote: fn(value: String) -> String Never! { "'{value.replace("'", "'\"'\"'")}'" }
 
 // Environment image layers: each package's verified Hangar binaries plus
 // the one shell they provide as `/bin/sh`. An empty result means a refusal
@@ -591,7 +629,9 @@ cli_environment_image_files: fn(verification: &StoreVerification, theme: Theme, 
             return [LayerFile]{}
         }
         projection.included.push("hangar:content:{entry.envelope.output_hash}")
-        if entry.envelope.platform != "" -> projection.included.push("hangar:platform:{entry.envelope.platform}")
+        if entry.envelope.platform != "" {
+            projection.included.push("hangar:platform:{entry.envelope.platform}")
+        }
         if !cli_hangar_platform_matches(target, entry.envelope.platform) {
             projection.rejected.push("package:{reference}:platform")
             realized_platform: if entry.envelope.platform == "" -> "no declared platform" else -> entry.envelope.platform
@@ -606,7 +646,9 @@ cli_environment_image_files: fn(verification: &StoreVerification, theme: Theme, 
             return [LayerFile]{}
         }
         loop binary in binaries {
-            if shell_source == None && (binary.name == "bash" || binary.name == "busybox" || binary.name == "dash" || binary.name == "sh") -> shell_source = Val(binary.data)
+            if shell_source == None && (binary.name == "bash" || binary.name == "busybox" || binary.name == "dash" || binary.name == "sh") {
+                shell_source = Val(binary.data)
+            }
             layer_path: "usr/local/bin/{binary.name}"
             existing := LayerFile?{None}
             loop file in layer_files {
@@ -650,10 +692,14 @@ cli_environment_image_file_rejection: fn(plan: EnvPlan, relative: String) -> Str
     loop component in normalized.split("/") {
         lowered: component.to_lower()
         secret_word: lowered.contains("secret") || lowered.contains("credential") || lowered.contains("token") || lowered.contains("password")
-        if lowered == ".jet" || lowered == ".env" || lowered.starts_with(".env.") || secret_word -> return Val("the selected path is secret-bearing or Jet state")
+        if lowered == ".jet" || lowered == ".env" || lowered.starts_with(".env.") || secret_word {
+            return Val("the selected path is secret-bearing or Jet state")
+        }
     }
     loop dotenv in plan.lifecycle.dotenv {
-        if cli_normalized_project_path_matches(dotenv.file, normalized) -> return Val("dotenv files are environment inputs and never image-layer inputs")
+        if cli_normalized_project_path_matches(dotenv.file, normalized) {
+            return Val("dotenv files are environment inputs and never image-layer inputs")
+        }
     }
     managed: "managed environment files are environment inputs and never image-layer inputs"
     loop file in plan.files {
@@ -682,23 +728,31 @@ cli_normalized_project_path_matches: fn(candidate: String, normalized: String) -
 
 cli_write_rejected_projection: fn(out_dir: String, projection: ProjectionReport) CLIError! -[FS, Env, Rand]> {
     files.create_dir_all(out_dir) ?? return Err(CLIError.IO(err))
-    if image_write_projection_report(out_dir, "", projection) == .Err(error) -> return Err(CLIError.Other(error.message()))
+    if image_write_projection_report(out_dir, "", projection) == .Err(error) {
+        return Err(CLIError.Other(error.message()))
+    }
 }
 
 // The Hangar entry's output must be its verified content-addressed object,
 // with a real bin projection inside it.
 cli_verify_realized_hangar_package: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) CLIError! -[FS, Env, Time]> {
     store_verify_hangar_object(verification, roots, entry) ?? return Err(CLIError.Other("{err}"))
-    if entry.envelope.output_hash == "" -> return Err(CLIError.Other("the Hangar entry has no canonical output digest"))
+    if entry.envelope.output_hash == "" {
+        return Err(CLIError.Other("the Hangar entry has no canonical output digest"))
+    }
     expected: files.canonicalize(files.join(files.join(roots.hangar_dir(), "objects"), entry.envelope.output_hash)) ?? return Err(CLIError.Other("the Hangar object cannot be opened: {err}"))
     output_info: files.stat(entry.out) ?? return Err(CLIError.Other("the Hangar output cannot be opened: {err}"))
     if output_info.is_symlink -> return Err(CLIError.Other("the Hangar output is a symlink"))
     output: files.canonicalize(entry.out) ?? return Err(CLIError.Other("the Hangar output cannot be resolved: {err}"))
-    if output != expected -> return Err(CLIError.Other("the Hangar entry output is not its verified content-addressed object"))
+    if output != expected {
+        return Err(CLIError.Other("the Hangar entry output is not its verified content-addressed object"))
+    }
     bin_info: files.stat(entry.bin) ?? return Err(CLIError.Other("the Hangar bin projection cannot be opened: {err}"))
     if bin_info.is_symlink -> return Err(CLIError.Other("the Hangar bin projection is a symlink"))
     bin: files.canonicalize(entry.bin) ?? return Err(CLIError.Other("the Hangar bin projection cannot be resolved: {err}"))
-    if !cli_path_starts_with(bin, output) -> return Err(CLIError.Other("the Hangar bin projection escapes its verified output"))
+    if !cli_path_starts_with(bin, output) {
+        return Err(CLIError.Other("the Hangar bin projection escapes its verified output"))
+    }
 }
 
 // One realized executable: its name and bytes.
@@ -709,9 +763,13 @@ RealizedBinary: struct {
 
 // The regular files of the entry's real bin directory, by name.
 cli_read_realized_package_binaries: fn(entry: StoreEntry) -[FS, Env]> [RealizedBinary] CLIError! {
-    if entry.bin == "" -> return Err(CLIError.Other("the Hangar entry has no executable bin directory"))
+    if entry.bin == "" {
+        return Err(CLIError.Other("the Hangar entry has no executable bin directory"))
+    }
     info: files.stat(entry.bin) ?? return Err(CLIError.Other("{err}"))
-    if info.is_symlink || !info.is_dir -> return Err(CLIError.Other("the Hangar bin projection is not a real directory"))
+    if info.is_symlink || !info.is_dir {
+        return Err(CLIError.Other("the Hangar bin projection is not a real directory"))
+    }
     root: files.canonicalize(entry.bin) ?? return Err(CLIError.Other("{err}"))
     names := [String]{}
     listed: files.list_dir(root) ?? return Err(CLIError.Other("{err}"))
@@ -721,11 +779,19 @@ cli_read_realized_package_binaries: fn(entry: StoreEntry) -[FS, Env]> [RealizedB
     loop item_name in names {
         item_path: files.join(root, item_name)
         metadata: files.stat(item_path) ?? return Err(CLIError.Other("{err}"))
-        if metadata.is_symlink || !metadata.is_file -> return Err(CLIError.Other("the Hangar bin projection contains a non-regular entry"))
+        if metadata.is_symlink || !metadata.is_file {
+            return Err(CLIError.Other("the Hangar bin projection contains a non-regular entry"))
+        }
         resolved: files.canonicalize(item_path) ?? return Err(CLIError.Other("{err}"))
-        if resolved == root || !cli_path_starts_with(resolved, root) -> return Err(CLIError.Other("the Hangar bin projection escapes its package output"))
-        if metadata.size > 536870912 -> return Err(CLIError.Other("a realized package binary exceeds the 512 MiB layer limit"))
-        if item_name == "" || pkg_text_has_control(item_name) -> return Err(CLIError.Other("a realized package binary has an unsafe name"))
+        if resolved == root || !cli_path_starts_with(resolved, root) {
+            return Err(CLIError.Other("the Hangar bin projection escapes its package output"))
+        }
+        if metadata.size > 536870912 {
+            return Err(CLIError.Other("a realized package binary exceeds the 512 MiB layer limit"))
+        }
+        if item_name == "" || pkg_text_has_control(item_name) {
+            return Err(CLIError.Other("a realized package binary has an unsafe name"))
+        }
         data: files.read_bytes(resolved) ?? return Err(CLIError.Other("{err}"))
         binaries.push(RealizedBinary{name: item_name, data: data})
     }

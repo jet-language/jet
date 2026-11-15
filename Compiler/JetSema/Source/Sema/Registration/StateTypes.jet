@@ -85,7 +85,9 @@ sema_state_types_rewrite_inputs: fn(inputs: &[SemaRegistrationModuleInput]) Neve
             global.owners[global_id] = Val(owner)
         }
     }
-    if repeated.len() == 0 -> return
+    if repeated.len() == 0 {
+        return
+    }
     loop id in 0..<repeated.len() {
         if repeated[id] -> global.owners[id] = None
     }
@@ -104,10 +106,14 @@ sema_state_types_rewrite_inputs: fn(inputs: &[SemaRegistrationModuleInput]) Neve
 sema_state_types_collect: fn(items: [Item], owners: &SemaStateTypeOwners) Never! {
     loop item in items {
         if item == .Struct(definition) {
-            if definition.state == .Val(state) -> owners.owners[sema_state_types_owner_id(owners, definition.name)] = Val(sema_state_types_owner(state))
+            if definition.state == .Val(state) {
+                owners.owners[sema_state_types_owner_id(owners, definition.name)] = Val(sema_state_types_owner(state))
+            }
         }
         if item == .Enum(definition) {
-            if definition.state == .Val(state) -> owners.owners[sema_state_types_owner_id(owners, definition.name)] = Val(sema_state_types_owner(state))
+            if definition.state == .Val(state) {
+                owners.owners[sema_state_types_owner_id(owners, definition.name)] = Val(sema_state_types_owner(state))
+            }
         }
     }
 }
@@ -167,7 +173,9 @@ sema_state_types_fn_names_owner: fn(function: Func, owners: SemaStateTypeOwners)
     loop param in function.params {
         if sema_state_types_split(param.ty, owners) != None -> return true
     }
-    if function.return_type == .Val(ty) -> return sema_state_types_split(sema_state_types_success(ty), owners) != None
+    if function.return_type == .Val(ty) {
+        return sema_state_types_split(sema_state_types_success(ty), owners) != None
+    }
     false
 }
 
@@ -175,7 +183,9 @@ sema_state_types_rewrite_items: fn(items: [Item], owners: SemaStateTypeOwners) -
     out := [Item]{}
     loop item in items {
         if item == {
-            .Func(function) -> out.push(Item.Func{value: sema_state_types_rewrite_fn(function, owners)})
+            .Func(function) -> {
+                out.push(Item.Func{value: sema_state_types_rewrite_fn(function, owners)})
+            }
             .Struct(definition) -> {
                 updated := definition
                 updated.methods = loop method in definition.methods -> sema_state_types_rewrite_fn(method, owners)
@@ -191,7 +201,9 @@ sema_state_types_rewrite_items: fn(items: [Item], owners: SemaStateTypeOwners) -
                 updated.methods = loop method in implementation.methods -> sema_state_types_rewrite_fn(method, owners)
                 out.push(Item.Impl{value: updated})
             }
-            .Test(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> out.push(item.copy())
+            .Test(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {
+                out.push(item.copy())
+            }
         }
     }
     out

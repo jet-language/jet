@@ -23,10 +23,7 @@
 // dependencies (the bootstrap runner authorizes one source root), no bounded
 // trait method calls through a type parameter and no mutation inside `#run`
 // (both unsupported by the generated compiler today).
-
-use {
-    combinatorics: core.math.combinatorics
-}
+use combinatorics: core.math.combinatorics
 
 // ---------------------------------------------------------------- stress
 
@@ -37,19 +34,19 @@ modules: fn(n: Int, r: &Seeded) -> [String:String] {
         a: r.int(3, 97)
         b: r.int(2, 31)
         files["modules/part_{i}.jet"] = """
-            Record{i}: struct {{
-                id: Int
-                weight: Int
-            }}
+        Record{i}: struct {{
+            id: Int
+            weight: Int
+        }}
 
-            record_{i}_make: fn(seed: Int) -> Record{i} {{ Record{i}{{id: seed % 97, weight: (seed * {a}) % 89}} }}
+        record_{i}_make: fn(seed: Int) -> Record{i} {{ Record{i}{{id: seed % 97, weight: (seed * {a}) % 89}} }}
 
-            record_{i}_score: fn(seed: Int) -> Int {{
-                record: record_{i}_make(seed)
-                (record.id * {b} + record.weight) % {M}
-            }}
+        record_{i}_score: fn(seed: Int) -> Int {{
+            record: record_{i}_make(seed)
+            (record.id * {b} + record.weight) % {M}
+        }}
 
-            """
+        """
         entries.push("record_{i}_score")
     }
     roots: consumer_tree(files, entries, "modules")
@@ -61,24 +58,24 @@ small_body: fn(i: Int, a: Int, b: Int) -> String {
     bodies: [String]{
         "helper_{i}: fn(x: Int) -> Int {{ (x * {a} + {b}) % {M} }}",
         """
-            helper_{i}: fn(x: Int) -> Int {{
-                if x % {a} == 0 -> return x /% {a}
-                x + {b}
-            }}
-            """,
+        helper_{i}: fn(x: Int) -> Int {{
+            if x % {a} == 0 -> return x /% {a}
+            x + {b}
+        }}
+        """,
         """
-            helper_{i}: fn(x: Int) -> Int {{
-                label: "h{i}-{{x % {a}}}"
-                label.len() + {b}
-            }}
-            """,
+        helper_{i}: fn(x: Int) -> Int {{
+            label: "h{i}-{{x % {a}}}"
+            label.len() + {b}
+        }}
+        """,
         """
-            helper_{i}: fn(x: Int) -> Int {{
-                total := 0
-                loop k in 0..<{a % 4 + 1} -> total += x + k * {b}
-                total % {M}
-            }}
-            """,
+        helper_{i}: fn(x: Int) -> Int {{
+            total := 0
+            loop k in 0..<{a % 4 + 1} -> total += x + k * {b}
+            total % {M}
+        }}
+        """,
     }
     bodies[i % 4]
 }
@@ -93,7 +90,9 @@ small_fns: fn(n: Int, r: &Seeded) -> [String:String] {
         items.push(small_body(i, a, r.int(1, 63)))
         entries.push("helper_{i}")
     }
-    loop k in 0..<16 -> files["fns/fns_{k}.jet"] = items.slice(min(n, k * per_file), min(n, (k + 1) * per_file)).join("\n\n")
+    loop k in 0..<16 {
+        files["fns/fns_{k}.jet"] = items.slice(min(n, k * per_file), min(n, (k + 1) * per_file)).join("\n\n")
+    }
     roots: consumer_tree(files, entries, "small")
     finish("small_fns", files, roots)
     files
@@ -109,19 +108,21 @@ huge_fns: fn(n: Int, r: &Seeded) -> [String:String] {
         locals := [String]{}
         loop s in 0..<(n + 3) /% 4 {
             c: r.int(1, 997)
-            body.push(if s % 5 == {
-                0 -> "    acc = (acc * 31 + {c}) % {M}"
-                1 -> "    if acc % {r.int(2, 13)} == 0 -> acc = (acc + {c}) % {M}"
-                2 -> {
-                    locals.push("t{s}")
-                    "    t{s}: (acc + {c}) % 1009"
-                }
-                3 -> {
-                    held: if locals.len() > 0 -> r.pick(locals) else -> "{c}"
-                    "    acc = (acc + {held} * {r.int(2, 9)}) % {M}"
-                }
-                else -> "    acc = if acc > {c * 1000} -> acc - {c} else -> acc + {c}"
-            })
+            body.push(
+                if s % 5 == {
+                    0 -> "    acc = (acc * 31 + {c}) % {M}"
+                    1 -> "    if acc % {r.int(2, 13)} == 0 -> acc = (acc + {c}) % {M}"
+                    2 -> {
+                        locals.push("t{s}")
+                        "    t{s}: (acc + {c}) % 1009"
+                    }
+                    3 -> {
+                        held: if locals.len() > 0 -> r.pick(locals) else -> "{c}"
+                        "    acc = (acc + {held} * {r.int(2, 9)}) % {M}"
+                    }
+                    else -> "    acc = if acc > {c * 1000} -> acc - {c} else -> acc + {c}"
+                },
+            )
         }
         body.extend(["    acc", "}}", ""])
         files["huge/huge_{f}.jet"] = body.join("\n")
@@ -141,11 +142,13 @@ deep_nesting: fn(n: Int, r: &Seeded) -> [String:String] {
         indent := "    "
         loop d in 0..<n {
             kind: (d + f) % 3
-            body.push(if kind == {
-                0 -> "{indent}if acc % {r.int(2, 7)} != {r.int(7, 9)} {{"
-                1 -> "{indent}loop k{d} in 0..<1 {{"
-                else -> "{indent}if acc >= 0 {{"
-            })
+            body.push(
+                if kind == {
+                    0 -> "{indent}if acc % {r.int(2, 7)} != {r.int(7, 9)} {{"
+                    1 -> "{indent}loop k{d} in 0..<1 {{"
+                    else -> "{indent}if acc >= 0 {{"
+                },
+            )
             indent = "{indent}    "
             counter: if kind == 1 -> "k{d} + " else -> ""
             body.push("{indent}acc = (acc * 3 + {counter}{r.int(1, 99)}) % {M}")
@@ -199,16 +202,16 @@ wide_enums: fn(n: Int, r: &Seeded) -> [String:String] {
     from.extend(["        else -> Opcode.Plain0", "    }}", "}}", ""])
     keyword.extend(["        else -> 0", "    }}", "}}", ""])
     consumer: """
-        opcode_total: fn(seed: Int) -> Int {{
-            acc := seed % {M}
-            loop code in 0..<{n} {{
-                op: opcode_from_code(code)
-                acc = (acc * 7 + opcode_cost(op) + keyword_code(opcode_name(op))) % {M}
-            }}
-            acc
+    opcode_total: fn(seed: Int) -> Int {{
+        acc := seed % {M}
+        loop code in 0..<{n} {{
+            op: opcode_from_code(code)
+            acc = (acc * 7 + opcode_cost(op) + keyword_code(opcode_name(op))) % {M}
         }}
+        acc
+    }}
 
-        """
+    """
     files["opcodes.jet"] = "{decl.join("\n")}\n{cost.join("\n")}\n{name.join("\n")}\n{from.join("\n")}\n{keyword.join("\n")}\n{consumer}"
     finish("wide_enums", files, ["opcode_total"])
     files
@@ -227,18 +230,22 @@ impls_traits: fn(n: Int, r: &Seeded) -> [String:String] {
     named: trait_word()
     traits := [[String]]{}
     loop k in 0..<trait_count {
-        traits.push(lines("""
-            {named}{k}: trait {{
-                measure_{k}: fn(self) -> Int
-                label_{k}: fn(self) -> String
-            }}
+        traits.push(
+            lines(
+                """
+                {named}{k}: trait {{
+                    measure_{k}: fn(self) -> Int
+                    label_{k}: fn(self) -> String
+                }}
 
-            capability_{k}_total: fn(items: [{named}{k}]) -> Int {{
-                total := 0
-                loop item in items -> total = (total + item.measure_{k}() + item.label_{k}().len()) % {M}
-                total
-            }}
-            """))
+                capability_{k}_total: fn(items: [{named}{k}]) -> Int {{
+                    total := 0
+                    loop item in items -> total = (total + item.measure_{k}() + item.label_{k}().len()) % {M}
+                    total
+                }}
+                """,
+            ),
+        )
     }
     pack(files, "traits/traits", traits)
     types := [[String]]{}
@@ -251,21 +258,31 @@ impls_traits: fn(n: Int, r: &Seeded) -> [String:String] {
             if chosen.contains(k) -> next
             chosen.push(k)
             measure: "    measure_{k}: fn(self) -> Int {{ (self.id * {r.int(2, 97)} + {r.int(1, 99)}) % {M} }}"
-            body.extend([
-                "impl Entity{i}.{named}{k} {{", measure, "    label_{k}: fn(self) -> String {{ \"e{i}-c{k}-{{self.name}}\" }}", "}}", "",
-            ])
+            body.extend(
+                [
+                    "impl Entity{i}.{named}{k} {{",
+                    measure,
+                    "    label_{k}: fn(self) -> String {{ \"e{i}-c{k}-{{self.name}}\" }}",
+                    "}}",
+                    "",
+                ],
+            )
         }
-        body.extend(lines("""
-            impl Entity{i} {{
-                bump: fn(&self) {{ self.id += {r.int(1, 9)} }}
-                weight: fn(self) -> Int {{ self.id + self.name.len() }}
-            }}
+        body.extend(
+            lines(
+                """
+                impl Entity{i} {{
+                    bump: fn(&self) {{ self.id += {r.int(1, 9)} }}
+                    weight: fn(self) -> Int {{ self.id + self.name.len() }}
+                }}
 
-            entity_{i}_use: fn(seed: Int) -> Int {{
-                entity := Entity{i}{{id: seed % 101, name: "n{{seed % 13}}"}}
-                &entity.bump()
-                total := entity.weight()
-            """))
+                entity_{i}_use: fn(seed: Int) -> Int {{
+                    entity := Entity{i}{{id: seed % 101, name: "n{{seed % 13}}"}}
+                    &entity.bump()
+                    total := entity.weight()
+                """,
+            ),
+        )
         body.extend(chosen.map(fn(k) { "    total = (total + capability_{k}_total([{named}{k}]{{entity}})) % {M}" }))
         body.extend(["    total", "}}"])
         types.push(body)
@@ -284,51 +301,51 @@ generics: fn(n: Int, r: &Seeded) -> [String:String] {
     files := [String:String]{}
     entries := [String]{}
     text := """
-        Slot: struct<T> {{
-            value: T
-            mark: Int
+    Slot: struct<T> {{
+        value: T
+        mark: Int
+    }}
+
+    wrap: fn<T>(value: T, mark: Int) -> Slot<T> {{ Slot<T>{{value: value, mark: mark}} }}
+
+    first_or: fn<T>(items: [T], fallback: T) -> T {{
+        if items.len() > 0 -> return items[0]
+        fallback
+    }}
+
+    count_where: fn<T>(items: [T], keep: fn(T) -> Bool) -> Int {{
+        total := 0
+        loop item in items {{
+            if keep(item) -> total += 1
         }}
+        total
+    }}
 
-        wrap: fn<T>(value: T, mark: Int) -> Slot<T> {{ Slot<T>{{value: value, mark: mark}} }}
+    marks_of: fn<T>(slots: [Slot<T>]) -> Int {{
+        total := 0
+        loop slot in slots -> total += slot.mark
+        total
+    }}
 
-        first_or: fn<T>(items: [T], fallback: T) -> T {{
-            if items.len() > 0 -> return items[0]
-            fallback
-        }}
-
-        count_where: fn<T>(items: [T], keep: fn(T) -> Bool) -> Int {{
-            total := 0
-            loop item in items {{
-                if keep(item) -> total += 1
-            }}
-            total
-        }}
-
-        marks_of: fn<T>(slots: [Slot<T>]) -> Int {{
-            total := 0
-            loop slot in slots -> total += slot.mark
-            total
-        }}
-
-        """
+    """
     loop i in 0..<n {
         a: r.int(2, 97)
         text = """
-            {text}
-            Thing{i}: struct {{
-                id: Int
-                weight: Int
-            }}
+        {text}
+        Thing{i}: struct {{
+            id: Int
+            weight: Int
+        }}
 
-            thing_{i}_use: fn(seed: Int) -> Int {{
-                things: [Thing{i}]{{Thing{i}{{id: seed % 31, weight: {a}}}, Thing{i}{{id: seed % 17, weight: {a + 1}}}}}
-                chosen: first_or(things, Thing{i}{{id: 0, weight: 0}})
-                heavy: count_where(things, fn(thing) {{ thing.weight > {a} }})
-                slots: [Slot<Thing{i}>]{{wrap(chosen, {i % 64}), wrap(things[1], heavy)}}
-                (chosen.id + heavy + marks_of(slots)) % {M}
-            }}
+        thing_{i}_use: fn(seed: Int) -> Int {{
+            things: [Thing{i}]{{Thing{i}{{id: seed % 31, weight: {a}}}, Thing{i}{{id: seed % 17, weight: {a + 1}}}}}
+            chosen: first_or(things, Thing{i}{{id: 0, weight: 0}})
+            heavy: count_where(things, fn(thing) {{ thing.weight > {a} }})
+            slots: [Slot<Thing{i}>]{{wrap(chosen, {i % 64}), wrap(things[1], heavy)}}
+            (chosen.id + heavy + marks_of(slots)) % {M}
+        }}
 
-            """
+        """
         entries.push("thing_{i}_use")
     }
     files["main.jet"] = text
@@ -349,16 +366,16 @@ comptime_items: fn(n: Int, r: &Seeded) -> [String:String] {
         limit: if i % 3 == 2 -> "LIMIT_{i}: #run {{ LIMIT_{i - 1} * 2 + {b} }}" else -> "LIMIT_{i}: #run {{ {a} * 7 + {b} }}"
         user: if i % 2 == {
             0 -> """
-                Gauge{i}: struct {{
-                    level: Int
-                }}
+            Gauge{i}: struct {{
+                level: Int
+            }}
 
-                impl Gauge{i} {{
-                    clamp: fn(self) -> Int {{ if self.level > LIMIT_{i} -> LIMIT_{i} else -> self.level }}
-                }}
+            impl Gauge{i} {{
+                clamp: fn(self) -> Int {{ if self.level > LIMIT_{i} -> LIMIT_{i} else -> self.level }}
+            }}
 
-                gauge_{i}_use: fn(seed: Int) -> Int {{ Gauge{i}{{level: seed % 300}}.clamp() + LIMIT_{i} }}
-                """
+            gauge_{i}_use: fn(seed: Int) -> Int {{ Gauge{i}{{level: seed % 300}}.clamp() + LIMIT_{i} }}
+            """
             else -> "limit_{i}_use: fn(seed: Int) -> Int {{ (seed + LIMIT_{i}) % {M} }}"
         }
         items.push(lines("{limit}\n\n{user}"))
@@ -386,42 +403,52 @@ data_tables: fn(n: Int, r: &Seeded) -> [String:String] {
         body.extend(["    }}", "}}", ""])
     }
     rows: max(8, n /% 8)
-    body.extend(lines("""
-        Row: struct {{
-            id: Int
-            weight: Int
-            name: String
-        }}
+    body.extend(
+        lines(
+            """
+            Row: struct {{
+                id: Int
+                weight: Int
+                name: String
+            }}
 
-        row_table: fn() -> [Row] {{
-            [Row]{{
-        """))
-    loop i in 0..<rows -> body.push("        Row{{id: {i}, weight: {r.int(0, 999)}, name: \"row-{i}\"}},")
+            row_table: fn() -> [Row] {{
+                [Row]{{
+            """,
+        ),
+    )
+    loop i in 0..<rows {
+        body.push("        Row{{id: {i}, weight: {r.int(0, 999)}, name: \"row-{i}\"}},")
+    }
     body.extend(["    }}", "}}", "", "name_table: fn() -> [String:Int] {{", "    [String:Int]{{"])
     loop i in 0..<rows -> body.push("        \"key-{i}\": {r.int(0, 999)},")
-    body.extend(lines("""
-            }}
-        }}
-
-        banner: fn() -> String {{ "{"abcdefgh".repeat(n)}" }}
-
-        tables_total: fn(seed: Int) -> Int {{
-            acc := seed % {M}
-            loop k in 0..<4 {{
-                table: if k == {{
-                    0 -> table_0()
-                    1 -> table_1()
-                    2 -> table_2()
-                    else -> table_3()
+    body.extend(
+        lines(
+            """
                 }}
-                loop value in table -> acc = (acc * 3 + value) % {M}
             }}
-            loop row in row_table() -> acc = (acc + row.weight + row.name.len()) % {M}
-            loop (key, value) in name_table() -> acc = (acc + key.len() * value) % {M}
-            (acc + banner().len()) % {M}
-        }}
 
-        """))
+            banner: fn() -> String {{ "{"abcdefgh".repeat(n)}" }}
+
+            tables_total: fn(seed: Int) -> Int {{
+                acc := seed % {M}
+                loop k in 0..<4 {{
+                    table: if k == {{
+                        0 -> table_0()
+                        1 -> table_1()
+                        2 -> table_2()
+                        else -> table_3()
+                    }}
+                    loop value in table -> acc = (acc * 3 + value) % {M}
+                }}
+                loop row in row_table() -> acc = (acc + row.weight + row.name.len()) % {M}
+                loop (key, value) in name_table() -> acc = (acc + key.len() * value) % {M}
+                (acc + banner().len()) % {M}
+            }}
+
+            """,
+        ),
+    )
     files["tables.jet"] = body.join("\n")
     finish("data_tables", files, ["tables_total"])
     files
@@ -435,14 +462,14 @@ imports: fn(n: Int, r: &Seeded) -> [String:String] {
     entries := [String]{}
     loop i in 0..<n {
         files["services/service_{i}.jet"] = """
-            use math: core.math
-            use text: core.text
-            use collections: core.collections
-            use term: core.term
+        use math: core.math
+        use text: core.text
+        use collections: core.collections
+        use term: core.term
 
-            service_{i}_value: fn(seed: Int) -> Int {{ max(seed % 13, {r.int(1, 12)}) + math.abs_diff(seed, {r.int(1, 99)}) }}
+        service_{i}_value: fn(seed: Int) -> Int {{ max(seed % 13, {r.int(1, 12)}) + math.abs_diff(seed, {r.int(1, 99)}) }}
 
-            """
+        """
         entries.push("service_{i}_value")
     }
     roots: consumer_tree(files, entries, "imports")
@@ -475,52 +502,56 @@ errors: fn(n: Int, r: &Seeded) -> [String:String] {
     loop i in 0..<n {
         k: i /% 16
         family: if i % 16 == 0 -> """
-            #Error
-            Fault{k}: enum {{
-                Missing
-                Invalid(Int)
-                Overflow(limit: Int, seen: Int)
+        #Error
+        Fault{k}: enum {{
+            Missing
+            Invalid(Int)
+            Overflow(limit: Int, seen: Int)
+        }}
+
+        fault_{k}_code: fn(fault: Fault{k}) -> Int {{
+            if fault == {{
+                .Missing -> 1
+                .Invalid(value) -> value % 97
+                .Overflow(limit, seen) -> limit + seen
             }}
-
-            fault_{k}_code: fn(fault: Fault{k}) -> Int {{
-                if fault == {{
-                    .Missing -> 1
-                    .Invalid(value) -> value % 97
-                    .Overflow(limit, seen) -> limit + seen
-                }}
-            }}
+        }}
 
 
-            """ else -> ""
+        """ else -> ""
         limit: r.int(50, 500)
-        items.push(lines("""
-            {family}parse_{i}: fn(x: Int) -> Int Fault{k}! {{
-                if x == 0 -> return Err(Fault{k}.Missing)
-                if x % {r.int(5, 17)} == 0 -> return Err(Fault{k}.Invalid(x))
-                if x > {limit * 100} -> return Err(Fault{k}.Overflow{{limit: {limit}, seen: x}})
-                Ok(x * 2)
-            }}
-
-            step_{i}: fn(x: Int) -> Int Fault{k}! {{
-                first: parse_{i}(x)
-                second: parse_{i}(first + 1)
-                Ok(first + second)
-            }}
-
-            checked_{i}: fn(x: Int) -> Int {{
-                if x < 0 -> return Err("negative input {i}")
-                x % {M}
-            }}
-
-            recover_{i}: fn(seed: Int) -> Int {{
-                quick: step_{i}(seed % 1000) ?? 0
-                detailed: if step_{i}(seed % 77) == {{
-                    .Ok(value) -> value
-                    .Err(fault) -> fault_{k}_code(fault)
+        items.push(
+            lines(
+                """
+                {family}parse_{i}: fn(x: Int) -> Int Fault{k}! {{
+                    if x == 0 -> return Err(Fault{k}.Missing)
+                    if x % {r.int(5, 17)} == 0 -> return Err(Fault{k}.Invalid(x))
+                    if x > {limit * 100} -> return Err(Fault{k}.Overflow{{limit: {limit}, seen: x}})
+                    Ok(x * 2)
                 }}
-                (quick + detailed + (checked_{i}(seed) ?? 0)) % {M}
-            }}
-            """))
+
+                step_{i}: fn(x: Int) -> Int Fault{k}! {{
+                    first: parse_{i}(x)
+                    second: parse_{i}(first + 1)
+                    Ok(first + second)
+                }}
+
+                checked_{i}: fn(x: Int) -> Int {{
+                    if x < 0 -> return Err("negative input {i}")
+                    x % {M}
+                }}
+
+                recover_{i}: fn(seed: Int) -> Int {{
+                    quick: step_{i}(seed % 1000) ?? 0
+                    detailed: if step_{i}(seed % 77) == {{
+                        .Ok(value) -> value
+                        .Err(fault) -> fault_{k}_code(fault)
+                    }}
+                    (quick + detailed + (checked_{i}(seed) ?? 0)) % {M}
+                }}
+                """,
+            ),
+        )
         entries.push("recover_{i}")
     }
     pack(files, "errors/errors", items)
@@ -553,13 +584,17 @@ strings: fn(n: Int, r: &Seeded) -> [String:String] {
     loop h in 0..<16 -> holes = "{holes}part{h}={{x + {h}}} "
     literal: "lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do ".repeat(16)
     loop i in 0..<max(1, n /% 16) {
-        items.push(lines("""
-            text_{i}: fn(x: Int) -> Int {{
-                line: "{holes}"
-                literal: "{literal}"
-                (line.len() + literal.len() + {r.int(1, 9)}) % {M}
-            }}
-            """))
+        items.push(
+            lines(
+                """
+                text_{i}: fn(x: Int) -> Int {{
+                    line: "{holes}"
+                    literal: "{literal}"
+                    (line.len() + literal.len() + {r.int(1, 9)}) % {M}
+                }}
+                """,
+            ),
+        )
         entries.push("text_{i}")
     }
     pack(files, "texts/texts", items)
@@ -572,11 +607,11 @@ strings: fn(n: Int, r: &Seeded) -> [String:String] {
 fan_in: fn(n: Int, r: &Seeded) -> [String:String] {
     files := [String:String]{}
     files["shared.jet"] = """
-        shared_scale: fn(x: Int) -> Int {{ (x * 3 + 1) % 1000003 }}
+    shared_scale: fn(x: Int) -> Int {{ (x * 3 + 1) % 1000003 }}
 
-        shared_label: fn(x: Int) -> Int {{ "v{{x % 100}}".len() }}
+    shared_label: fn(x: Int) -> Int {{ "v{{x % 100}}".len() }}
 
-        """
+    """
     items := [[String]]{}
     entries := [String]{}
     loop g in 0..<(n + 31) /% 32 {
@@ -596,7 +631,10 @@ fan_in: fn(n: Int, r: &Seeded) -> [String:String] {
 
 // ---------------------------------------------------------------- registry
 
-ShapeKind: enum { Stress Domain }
+ShapeKind: enum {
+    Stress
+    Domain
+}
 
 // A registered shape; `make(n, seed)` writes its files at size `n`.
 Shape: struct {
@@ -607,7 +645,9 @@ Shape: struct {
     make: fn(Int, Int) -> [String:String] Err!
 }
 
-stress: fn(name: String, dimension: String, base: Int, make: &&fn(Int, Int) -> [String:String] Err!) -> Shape { Shape{name: name, kind: .Stress, dimension: dimension, base: base, make: make} }
+stress: fn(name: String, dimension: String, base: Int, make: &&fn(Int, Int) -> [String:String] Err!) -> Shape {
+    Shape{name: name, kind: .Stress, dimension: dimension, base: base, make: make}
+}
 
 shapes: fn() -> [Shape] {
     found := [Shape]{

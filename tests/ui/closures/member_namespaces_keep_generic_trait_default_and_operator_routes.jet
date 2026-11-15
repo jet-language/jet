@@ -2,16 +2,24 @@
 Generic: struct<T> {
     value: T
     step: fn(Int) -> Int
+
     step: fn<U>(self, amount: U) -> Int Never! { 20 }
 }
+
 Step: trait {
-    step: fn(self, amount: Int) -> Int Never! { amount + 5 }
+    step: fn(self, amount: Int) -> Int Never! {
+        amount + 5
+    }
 }
+
 DefaultWorker: struct {
     step: fn(Int) -> Int
 
-    impl Step {}
+    impl Step {
+
+    }
 }
+
 Hook: struct {
     mul: fn(Int) -> Int
 
@@ -19,20 +27,26 @@ Hook: struct {
         mul: fn(self, rhs: Int) -> Int Never! { rhs + 10 }
     }
 }
+
 MutableWorker: struct {
     value: Int
     step: fn(Int) -> Int
+
     step: fn(&self, amount: Int) -> Int Never! {
         self.value += amount
         self.value
     }
 }
+
 Computed: struct {
     base: Int
     value: Int -> base * 2
+
     value: fn(self) -> Int Never! { self.base + 1 }
 }
+
 via_bound: fn<T: Step>(value: T) -> Int Never! { value.step(1) }
+
 #Test("member_namespace_fixtures") {
     generic: Generic<Int>{value: 1, step: fn(n) { n }}
     print(generic.step<Int>(1))

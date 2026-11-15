@@ -6,20 +6,35 @@ use {
     jetpack_foundation.[JET_KEYWORD_LIST]
     files: core.files
     jet_pkg_model.[
-        ForeignBindError, ForeignBindResult, ForeignLanguage, pkg_ascii_lower,
-        pkg_binder_append_artifact_boundary, pkg_binder_canonicalize, pkg_binder_cc_ar_identity,
-        pkg_binder_fill_template, pkg_binder_host_is_unix, pkg_binder_identity_digest,
-        pkg_binder_is_ident, pkg_binder_lines, pkg_binder_remove_tree_quiet,
-        pkg_binder_require_lib_name, pkg_binder_resolved_tool_path, pkg_binder_write,
-        pkg_worker_build_archive, pkg_worker_invoke_wrapper, pkg_worker_prepare_build,
-        pkg_worker_render_supervisor_c, pkg_worker_require_supported_host, pkg_worker_run_tool,
+        ForeignBindError,
+        ForeignBindResult,
+        ForeignLanguage,
+        pkg_ascii_lower,
+        pkg_binder_append_artifact_boundary,
+        pkg_binder_canonicalize,
+        pkg_binder_cc_ar_identity,
+        pkg_binder_fill_template,
+        pkg_binder_host_is_unix,
+        pkg_binder_identity_digest,
+        pkg_binder_is_ident,
+        pkg_binder_lines,
+        pkg_binder_remove_tree_quiet,
+        pkg_binder_require_lib_name,
+        pkg_binder_resolved_tool_path,
+        pkg_binder_write,
+        pkg_worker_build_archive,
+        pkg_worker_invoke_wrapper,
+        pkg_worker_prepare_build,
+        pkg_worker_render_supervisor_c,
+        pkg_worker_require_supported_host,
+        pkg_worker_run_tool,
     ]
 }
 
 // Static token discovery run with `php -r`: prints `N\t<name>` per top-level
 // one-argument function or `E\tARG\t<name>` for an unsupported signature.
 // Source bytes are tokenized, never executed.
-PKG_PHP_TOKEN_ANALYZER: #run { ```
+PKG_PHP_TOKEN_ANALYZER: #run { `
 $source = @file_get_contents($argv[1]);
 if ($source === false) exit(2);
 $tokens = token_get_all($source, TOKEN_PARSE);
@@ -67,10 +82,10 @@ for ($i = 0, $count = count($tokens); $i < $count; $i++) {
     }
     echo "N\t", $name, "\n";
 }
-``` }
+` }
 
 // The pool worker. Hole: `allowed`, one `'name' => true` row per function.
-PKG_PHP_WORKER: #run { ```<?php
+PKG_PHP_WORKER: #run { `<?php
 ini_set('display_errors', '0');
 error_reporting(0);
 $autoload = getenv('COMPOSER_AUTOLOAD');
@@ -121,11 +136,11 @@ while (true) {
     fwrite(STDOUT, pack('V', strlen($encoded)) . pack('V2', $id & 0xffffffff, intdiv($id, 4294967296)) . $encoded);
     fflush(STDOUT);
 }
-``` }
+` }
 
 // The pool layer over the supervisor. Holes: `abi` (the public pool ABI),
 // `inner` (the supervisor ABI), and `wrappers`.
-PKG_PHP_POOL_C: #run { ```
+PKG_PHP_POOL_C: #run { `
 #define PHP_POOL_WORKERS 4
 #define PHP_POOLS 8
 typedef struct {int64_t workers[PHP_POOL_WORKERS];uint32_t generation;uint32_t next;int opening;int open;int closing;int active;pthread_mutex_t mutex;pthread_cond_t idle;} PhpPool;
@@ -142,7 +157,7 @@ static const char* pool_invoke(int64_t h,const char*command,const char*json,int6
 void @@abi@@_cancel(int64_t h){php_failed=0;int idx;int64_t worker;if(!php_acquire(h,&idx,&worker)){php_failed=1;return;}PhpPool*p=&php_pools[idx];pthread_mutex_lock(&p->mutex);int64_t copy[PHP_POOL_WORKERS];for(int i=0;i<PHP_POOL_WORKERS;i++)copy[i]=p->workers[i];for(int i=0;i<PHP_POOL_WORKERS;i++)@@inner@@_cancel(copy[i]);for(int i=0;i<PHP_POOL_WORKERS;i++){@@inner@@_close(copy[i]);p->workers[i]=@@inner@@_open();}pthread_mutex_unlock(&p->mutex);php_release(idx);}
 void @@abi@@_close(int64_t h){php_failed=0;int n=(int)(h&255)-1;uint32_t gen=(uint32_t)((uint64_t)h>>8);if(n<0||n>=PHP_POOLS){php_failed=1;return;}pthread_mutex_lock(&php_lock);PhpPool*p=&php_pools[n];pthread_mutex_lock(&p->mutex);if(!p->open||p->generation!=gen){pthread_mutex_unlock(&p->mutex);pthread_mutex_unlock(&php_lock);php_failed=1;return;}p->closing=1;p->open=0;pthread_mutex_unlock(&php_lock);while(p->active>0)pthread_cond_wait(&p->idle,&p->mutex);int64_t copy[PHP_POOL_WORKERS];for(int i=0;i<PHP_POOL_WORKERS;i++){copy[i]=p->workers[i];p->workers[i]=0;}p->closing=0;pthread_mutex_unlock(&p->mutex);for(int i=0;i<PHP_POOL_WORKERS;i++)@@inner@@_close(copy[i]);}
 @@wrappers@@
-``` }
+` }
 
 PKG_PHP_RESERVED: [String]{"open", "take_error", "cancel", "close", "decode_response", "abi", "json", "PhpPool", "PhpError"}
 
@@ -197,30 +212,44 @@ pkg_php_parse_discovery: fn(output: [U8]) -> [String] ForeignBindError! {
     text: String.from_bytes(output) ?? return Err(ForeignBindError.Source("PHP tokenizer returned non-UTF-8 metadata"))
     out := [String]{}
     loop line in pkg_binder_lines(text) {
-        if line.starts_with("E\tARG\t") -> return Err(ForeignBindError.Source("PHP function `{line.removeprefix("E\tARG\t")}` must take one required positional argument by value"))
-        if !line.starts_with("N\t") -> return Err(ForeignBindError.Source("PHP tokenizer returned malformed metadata"))
+        if line.starts_with("E\tARG\t") {
+            return Err(ForeignBindError.Source("PHP function `{line.removeprefix("E\tARG\t")}` must take one required positional argument by value"))
+        }
+        if !line.starts_with("N\t") {
+            return Err(ForeignBindError.Source("PHP tokenizer returned malformed metadata"))
+        }
         name: line.removeprefix("N\t")
-        if !pkg_binder_is_ident(name) -> return Err(ForeignBindError.Source("PHP function `{name}` cannot be projected as a Jet identifier"))
-        if pkg_php_reserved(name) -> return Err(ForeignBindError.Source("PHP function `{name}` uses a reserved generated binding name"))
+        if !pkg_binder_is_ident(name) {
+            return Err(ForeignBindError.Source("PHP function `{name}` cannot be projected as a Jet identifier"))
+        }
+        if pkg_php_reserved(name) {
+            return Err(ForeignBindError.Source("PHP function `{name}` uses a reserved generated binding name"))
+        }
         loop existing in out {
-            if pkg_ascii_lower(existing) == pkg_ascii_lower(name) -> return Err(ForeignBindError.Source("PHP function `{name}` is declared more than once"))
+            if pkg_ascii_lower(existing) == pkg_ascii_lower(name) {
+                return Err(ForeignBindError.Source("PHP function `{name}` is declared more than once"))
+            }
         }
         out.push(name)
     }
-    if out.len() == 0 -> return Err(ForeignBindError.Source("no top-level named PHP functions were found"))
+    if out.len() == 0 {
+        return Err(ForeignBindError.Source("no top-level named PHP functions were found"))
+    }
     Ok(out)
 }
 
 pkg_php_render_worker: fn(functions: [String]) -> String Never! {
     allowed := [String]{}
     loop name in functions -> allowed.push("    '{name}' => true")
-    pkg_binder_fill_template(PKG_PHP_WORKER, [String: String]{"allowed": allowed.join(",\n")})
+    pkg_binder_fill_template(PKG_PHP_WORKER, [String:String]{"allowed": allowed.join(",\n")})
 }
 
 pkg_php_render_pool_c: fn(abi: String, inner: String, functions: [String]) -> String Never! {
     wrappers := [String]{}
-    loop name in functions -> wrappers.push(pkg_worker_invoke_wrapper(abi, name, "pool_invoke", name))
-    pkg_binder_fill_template(PKG_PHP_POOL_C, [String: String]{"abi": abi, "inner": inner, "wrappers": wrappers.join("")})
+    loop name in functions {
+        wrappers.push(pkg_worker_invoke_wrapper(abi, name, "pool_invoke", name))
+    }
+    pkg_binder_fill_template(PKG_PHP_POOL_C, [String:String]{"abi": abi, "inner": inner, "wrappers": wrappers.join("")})
 }
 
 pkg_php_render_jet: fn(lib: String, functions: [String]) -> String Never! {

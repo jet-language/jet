@@ -44,11 +44,15 @@ lexer_test_raw: fn(source: String) -> Lexed { lex_payload(source.bytes(), false)
 lexer_test_cr: fn() -> String Never! { "\r" }
 
 // The spelling of a name of `lexed`'s table (token text, decoded value, part text).
-lexer_test_name: fn(lexed: Lexed, name: Name) -> String Never! { name_text(lexed.tables.names, name) }
+lexer_test_name: fn(lexed: Lexed, name: Name) -> String Never! {
+    name_text(lexed.tables.names, name)
+}
 
 // The literal facts of `token`; a token without a literal row has none.
 lexer_test_literal: fn(lexed: Lexed, token: Token) -> TokenLiteral Never! {
-    if token.literal < 0 -> return TokenLiteral{integer: None, decimal: None, suffix: name_empty(), interpolations: 0, string_parts: [StringPart]{}, head: -1, head_decoded: name_empty(), deferred: [Diagnostic]{}, escapes: [TextEscape]{}}
+    if token.literal < 0 {
+        return TokenLiteral{integer: None, decimal: None, suffix: name_empty(), interpolations: 0, string_parts: [StringPart]{}, head: -1, head_decoded: name_empty(), deferred: [Diagnostic]{}, escapes: [TextEscape]{}}
+    }
     lexed.tables.literals[token.literal].copy()
 }
 
@@ -80,7 +84,9 @@ lexer_test_reported: fn(lexed: Lexed) -> [Diagnostic] Never! {
     loop token in lexed.tokens {
         if token.kind == TOKEN_STRING {
             literal: lexer_test_literal(lexed, token)
-            loop diagnostic in text_reading_diagnostics(literal.deferred, literal.escapes) -> reported.push(diagnostic.move())
+            loop diagnostic in text_reading_diagnostics(literal.deferred, literal.escapes) {
+                reported.push(diagnostic.move())
+            }
         }
     }
     reported
@@ -260,7 +266,9 @@ lexer_test_escape_error_at: fn(lexed: Lexed, start: Int, end: Int) -> Bool Never
         literal: lexer_test_literal(lexed, token)
         if literal.head < 0 -> next
         head: lexed.tables.literals[literal.head]
-        loop diagnostic in text_reading_diagnostics(head.deferred, head.escapes) -> reported.push(diagnostic.move())
+        loop diagnostic in text_reading_diagnostics(head.deferred, head.escapes) {
+            reported.push(diagnostic.move())
+        }
     }
     loop diagnostic in reported {
         span: diagnostic.span ?? Span{start: -1, end: -1}
@@ -279,7 +287,9 @@ lexer_test_escape_error_at: fn(lexed: Lexed, start: Int, end: Int) -> Bool Never
     assert(lexed.diagnostics.is_empty())
     found := false
     loop token in lexed.tokens {
-        if token.kind == TOKEN_CHAR && lexer_test_name(lexed, token.decoded) == (String.from_bytes([U8]{240, 159, 152, 128}) ?? "") -> found = true
+        if token.kind == TOKEN_CHAR && lexer_test_name(lexed, token.decoded) == (String.from_bytes([U8]{240, 159, 152, 128}) ?? "") {
+            found = true
+        }
     }
     assert(found)
 }
@@ -303,7 +313,10 @@ lexer_test_escape_error_at: fn(lexed: Lexed, start: Int, end: Int) -> Bool Never
 }
 
 // Reuses origin/port/compiler Payload01.jet and Strings.jet Scan controls.
-LexerTestDelimiterCase: struct { source: String, runs: [Span] }
+LexerTestDelimiterCase: struct {
+    source: String
+    runs: [Span]
+}
 
 lexer_test_delimiter_cases: fn() -> [LexerTestDelimiterCase] Never! {
     [LexerTestDelimiterCase]{
@@ -381,7 +394,9 @@ add: fn(a: Int, b: Int) -> Int {
     assert(lexed.diagnostics.is_empty())
     found := false
     loop parts in lexer_test_strings(lexed) {
-        if parts.len() == 1 && parts[0].kind == STRING_PART_TEXT && lexer_test_name(lexed, parts[0].text).contains("-> return") -> found = true
+        if parts.len() == 1 && parts[0].kind == STRING_PART_TEXT && lexer_test_name(lexed, parts[0].text).contains("-> return") {
+            found = true
+        }
     }
     assert(found)
 }
@@ -490,7 +505,9 @@ byte_fixed: [ /* block */ U8 /* block */ # /* block */ 8 /* block */ ] /* block 
 
 #Test("payload_golden_whitespace_exponents_and_shifted_spans") {
     raw := [U8]{9, 11, 12, 13, 10, 32, 32}
-    loop byte in `1_2.5e-1 1.25e+1 3.5E-1 3.25E+1 "prefix {1.25e-2} suffix"`.bytes() -> raw.push(byte)
+    loop byte in `1_2.5e-1 1.25e+1 3.5E-1 3.25E+1 "prefix {1.25e-2} suffix"`.bytes() {
+        raw.push(byte)
+    }
     result: lex_payload(raw, false)
     assert(result.diagnostics.is_empty())
     assert_eq(result.tokens.len(), 6)

@@ -17,7 +17,9 @@ FIELDS: ["metric", "sizes", "compiler", "compilerSha256", "counts", "baseline", 
 
 run: fn() {
     here: files.collapse(files.absolute(".") ?? process.fail(1, "{err}"))
-    if !files.is_file("proof/module-lookups-proof.json") -> return
+    if !files.is_file("proof/module-lookups-proof.json") {
+        return
+    }
     written: json.parse(files.read("proof/module-lookups-proof.json") ?? process.fail(1, "{err}")) ?? process.fail(1, err.display_text())
     loop key in FIELDS -> print("{key}: {show(written.get(key) ?? Dyn.Null, here)}")
     result := [String]{}

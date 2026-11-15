@@ -11,6 +11,7 @@ use environment_files: core.files
 // starting with the text before the `*`. Code spells a registered variable
 // through its generated name, never as text, outside ENVIRONMENT_SPELLED.
 ENVIRONMENT_REGISTRY: "Compiler/JetFoundation/Source/Registry/EnvironmentVariables.jet"
+
 ENVIRONMENT_ROOTS: [String]{"Compiler", "Jetpack", "Tools"}
 
 // The literals in the scanned code that name no environment variable.
@@ -73,7 +74,9 @@ environment_literals: fn(path: String, text: String, out: &[String]) {
     bytes: text.bytes()
     at := 0
     loop {
-        if at >= bytes.len() -> return
+        if at >= bytes.len() {
+            return
+        }
         if (Int{bytes[at]}) != 34 {
             at += 1
             next
@@ -87,11 +90,11 @@ environment_literals: fn(path: String, text: String, out: &[String]) {
         }
         if end < bytes.len() && (Int{bytes[end]}) == 34 {
             spelled: String.from_bytes(name) ?? ""
-            if spelled.starts_with("JET_") || spelled.starts_with("JETPACK_") -> out.push("{path} {spelled}")
+            if spelled.starts_with("JET_") || spelled.starts_with("JETPACK_") {
+                out.push("{path} {spelled}")
+            }
             at = end + 1
-        } else {
-            at = end
-        }
+        } else { at = end }
     }
 }
 
@@ -105,7 +108,9 @@ environment_scan: fn(path: String, out: &[String]) {
         }
         return
     }
-    if !path.ends_with(".jet") -> return
+    if !path.ends_with(".jet") {
+        return
+    }
     text: environment_files.read(path) ?? panic("read {path}: {err}")
     if text.contains("\"JET") -> environment_literals(path, text, out)
 }
@@ -173,7 +178,9 @@ environment_constant: fn(name: String) -> String {
         if seen.contains(row.name) -> problems.push("{row.name}: two rows")
         seen.push(row.name.copy())
         text: environment_files.read(row.reader) ?? ""
-        if !text.contains(row.name.removesuffix("*")) && !text.contains(environment_accessor(row.name)) && !text.contains(environment_constant(row.name)) -> problems.push("{row.name}: its reader {row.reader} does not name it")
+        if !text.contains(row.name.removesuffix("*")) && !text.contains(environment_accessor(row.name)) && !text.contains(environment_constant(row.name)) {
+            problems.push("{row.name}: its reader {row.reader} does not name it")
+        }
     }
     found := [String]{}
     loop root in ENVIRONMENT_ROOTS {
@@ -183,7 +190,9 @@ environment_constant: fn(name: String) -> String {
     assert(found.len() > 100, "the scan found only {found.len()} variable literals")
     loop entry in found {
         name: entry.partition(" ").tail
-        if !environment_covered(name, rows, variables) -> problems.push("{entry}: no row in {ENVIRONMENT_REGISTRY}")
+        if !environment_covered(name, rows, variables) {
+            problems.push("{entry}: no row in {ENVIRONMENT_REGISTRY}")
+        }
     }
     problems.sort()
     assert_eq(problems.join("\n"), "")
@@ -225,7 +234,9 @@ environment_constant: fn(name: String) -> String {
     }
     loop row in ENVIRONMENT_SPELLED {
         assert(row.why != "", "{row.path} needs a reason")
-        if !used.contains(row.path) -> problems.push("{row.path} spells no registered variable; drop it from ENVIRONMENT_SPELLED")
+        if !used.contains(row.path) {
+            problems.push("{row.path} spells no registered variable; drop it from ENVIRONMENT_SPELLED")
+        }
     }
     problems.sort()
     assert_eq(problems.join("\n"), "")

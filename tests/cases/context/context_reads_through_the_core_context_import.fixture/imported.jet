@@ -5,18 +5,12 @@ Probe: struct {
 }
 
 // The parameter hides the import by the ordinary scoping rule.
-shadowed: fn(context: Probe) -> Int {
-    context.deadline
-}
+shadowed: fn(context: Probe) -> Int { context.deadline }
 
-report: fn() -> String {
-    "deadline {(context.deadline ?? -1) >= 0} thread {context.thread}"
-}
+report: fn() -> String { "deadline {(context.deadline ?? -1) >= 0} thread {context.thread}" }
 
 run: fn() {
     print(report())
-    #Deadline(3600s) {
-        print(report())
-    }
+    #Deadline(3600s) { print(report()) }
     print("shadowed {shadowed(Probe{deadline: 7})}")
 }

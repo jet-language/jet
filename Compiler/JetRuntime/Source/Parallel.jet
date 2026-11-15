@@ -10,7 +10,9 @@
 // into the 32-byte control scope at 104) stack136 (the walking task's stack
 // size, which the worker's fiber takes: Fiber.jet fiber_stack_class).
 PARALLEL_JOB: I64{-1}
+
 PARALLEL_WORKER_BYTES: I64{144}
+
 // BuildParallel's PARA_EVERY_WORKER: a para_map without `limit`, more
 // workers than any host has, so it gets the available ones.
 PARALLEL_EVERY_WORKER: U64{1073741824}
@@ -72,7 +74,7 @@ parallel_worker_run: fn(worker: I64) {
 parallel_job_run: fn(worker: I64) {
     parallel_worker_run(worker)
     join: sync_load(wrapping(worker + I64{72}))
-    if (sync_add(join, I64{-1}) == I64{1}) -> sync_wake(join, I64{1})
+    if (sync_add(join, I64{-1}) == I64{1}) { sync_wake(join, I64{1}) }
 }
 
 parallel_raise: fn(record: I64) {
@@ -116,7 +118,9 @@ parallel_raise: fn(record: I64) {
     }
     serving: comptime_serving()
     cap: if serving -> I64{1} else -> scheduler_available_parallelism(I64{1})
-    if (jet_rt_session_propagate() != I64{0}) -> return
+    if (jet_rt_session_propagate() != I64{0}) {
+        return
+    }
     // Parked items hold no carrier, so an explicit `limit` is not cut to the
     // available parallelism: it alone bounds the items in flight.
     every: int_negative(limit) || !int_fits(limit, PARALLEL_EVERY_WORKER - U64{1})
@@ -128,7 +132,9 @@ parallel_raise: fn(record: I64) {
     // counts itself out of the join word at the block's head.
     bytes: I64{8} + count * PARALLEL_WORKER_BYTES
     block: jet_rt_alloc(bytes, I64{8})
-    if (block == I64{0} && jet_rt_session_propagate() != I64{0}) -> return
+    if (block == I64{0} && jet_rt_session_propagate() != I64{0}) {
+        return
+    }
     thread_zero(block, bytes)
     workers: wrapping(block + I64{8})
     sync_store(block, count)
@@ -159,7 +165,7 @@ parallel_raise: fn(record: I64) {
         // one, whatever stop it is asked to deliver meanwhile.
         loop {
             left: sync_load(block)
-            if (left == I64{0}) -> break
+            if (left == I64{0}) { break }
             _ := sync_wait(block, left, I64{-1})
         }
     }

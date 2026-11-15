@@ -33,9 +33,7 @@ SecretSpec: struct {
     // not a second author spelling; an explicit map entry replaces it.
     implicit: Bool{false}
 
-    stored: fn(name: String) -> SecretSpec Never! {
-        SecretSpec{name: name}
-    }
+    stored: fn(name: String) -> SecretSpec Never! { SecretSpec{name: name} }
 
     implicit_source: fn(name: String) -> SecretSpec Never! {
         SecretSpec{name: name, implicit: true}
@@ -122,7 +120,7 @@ SecretRotationPolicy: enum {
 // Rust `SecretDefault::None` is `Unset` here.
 SecretDefault: enum {
     Unset
-    PerProfile(values: [String: String])
+    PerProfile(values: [String:String])
 
     impl Debug {
         debug: fn(self) -> String {
@@ -260,14 +258,15 @@ AdapterPlan: struct {
 }
 
 AdapterRecipe: enum {
-    // `Recipe.copy(...)`: copy the staged source tree as-is.
     Copy
-    // `Recipe.prebuilt(bin: "...", as: "...")`: install one executable under
-    // `bin/<as>`.
     Prebuilt(bin: String, as_name: String)
-    // `Recipe.build(steps: […])`: a finite, digestable executable action graph.
     Build(recipe: BuildRecipe)
 }
+
+// `Recipe.copy(...)`: copy the staged source tree as-is.
+// `Recipe.prebuilt(bin: "...", as: "...")`: install one executable under
+// `bin/<as>`.
+// `Recipe.build(steps: […])`: a finite, digestable executable action graph.
 
 // The checked system contribution.
 // Realization belongs to JetOS; these carriers preserve the evaluator's
@@ -364,11 +363,12 @@ RestartPolicy: enum {
 }
 
 ShutdownPolicy: enum {
-    // Send TERM, wait up to `grace_ms`, then use the bounded KILL fallback.
     Term(grace_ms: Int)
-    // Skip the graceful signal and terminate the verified process group.
     Kill
 }
+
+// Send TERM, wait up to `grace_ms`, then use the bounded KILL fallback.
+// Skip the graceful signal and terminate the verified process group.
 
 // The referent selects the realization tier. ISO disk images
 // inherit system facts; OCI images project a package or environment.
@@ -520,7 +520,7 @@ EnvironmentFacts: struct {
 }
 
 // The keys of a string map in byte order (Rust `BTreeMap` key order).
-envmodel_sorted_keys_of: fn(values: [String: String]) -> [String] Never! {
+envmodel_sorted_keys_of: fn(values: [String:String]) -> [String] Never! {
     keys := values.keys().to_list()
     keys.sort()
     keys

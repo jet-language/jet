@@ -1,4 +1,5 @@
 use rr_files: core.files
+
 // Three counts over the diagnostic registry, each pinned to its ceiling. A
 // count may only fall: one above its ceiling fails, and one below it fails
 // until the ceiling drops to the new count, so a fixed row stays fixed.
@@ -10,10 +11,15 @@ use rr_files: core.files
 // - decision ID: a row that names a decision (`D-SHAPE3a`) in a column a
 //   user reads (meaning, what, why, fix, next, no-fix reason).
 RR_CENSUS: "tests/diagnostics_census.tsv"
+
 RR_REGISTRY: "Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet"
+
 RR_USER_COLUMNS: [String]{"meaning", "what", "why", "fix", "next", "no_fix_reason"}
+
 RR_CEILING_NO_UI: 25
+
 RR_CEILING_GENERIC_WHY: 0
+
 RR_CEILING_DECISION_ID: 0
 
 // Does the Why text `value` (as dt_row_value reads it, closing quote kept)
@@ -32,7 +38,9 @@ rr_no_ui_codes: fn() -> [String] {
         if line.starts_with("#") -> next
         columns: line.split("\t").to_list()
         if columns.len() < 5 -> next
-        if columns[2] == "active" && columns[3] == "compiler" && columns[4] != "ui" -> codes.push(columns[0])
+        if columns[2] == "active" && columns[3] == "compiler" && columns[4] != "ui" {
+            codes.push(columns[0])
+        }
     }
     codes
 }
@@ -72,7 +80,9 @@ rr_registry_counts: fn(text: String) -> RrRegistryRows {
         }
         value: dt_row_value(line, RR_USER_COLUMNS)
         if value == "" -> next
-        if active && trimmed.starts_with("why: ") && rr_generic_why(value) && !generic.contains(code) -> generic.push(code.copy())
+        if active && trimmed.starts_with("why: ") && rr_generic_why(value) && !generic.contains(code) {
+            generic.push(code.copy())
+        }
         loop id in dt_ids(value) {
             if id.starts_with("D-") && !decisions.contains(code) -> decisions.push(code.copy())
         }
@@ -83,8 +93,12 @@ rr_registry_counts: fn(text: String) -> RrRegistryRows {
 // The failure for `name` counting `codes` against `ceiling`, else "".
 rr_check: fn(name: String, codes: [String], ceiling: Int, constant: String) -> String {
     count: codes.len()
-    if count > ceiling -> return "{name}: {count} rows, above the ceiling {ceiling}; fix the new rows ({codes.join(", ")})"
-    if count < ceiling -> return "{name}: {count} rows, below the ceiling {ceiling}; lower {constant} to {count}"
+    if count > ceiling {
+        return "{name}: {count} rows, above the ceiling {ceiling}; fix the new rows ({codes.join(", ")})"
+    }
+    if count < ceiling {
+        return "{name}: {count} rows, below the ceiling {ceiling}; lower {constant} to {count}"
+    }
     ""
 }
 

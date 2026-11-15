@@ -8,6 +8,7 @@ package: {
         units: .Library{ entry: units }
     }
 }
+
 use {
     core: core
     math: core.math
@@ -75,6 +76,7 @@ __measurement_result: fn<E>(value: Float E!, relative: Float) -> Measurement<Flo
         .Err(error) -> Err(error)
     }
 }
+
 from: fn(magnitude: Float, unit: Float) -> Measurement<Float> Never! {
     // Measurements carry an SI value and uncertainty; the unit scale is
     // applied at construction because the carrier has no unit field.
@@ -101,9 +103,13 @@ scale: fn(m: Measurement<Float>, factor: Float) -> Measurement<Float> Never! {
     __measurement_new(m.value * factor, m.uncertainty * math.abs_float(factor))
 }
 
-add: fn(a: Measurement<Float>, b: Measurement<Float>) -> Measurement<Float> Never! { __measurement_add(a, b) }
+add: fn(a: Measurement<Float>, b: Measurement<Float>) -> Measurement<Float> Never! {
+    __measurement_add(a, b)
+}
 
-sub: fn(a: Measurement<Float>, b: Measurement<Float>) -> Measurement<Float> Never! { __measurement_sub(a, b) }
+sub: fn(a: Measurement<Float>, b: Measurement<Float>) -> Measurement<Float> Never! {
+    __measurement_sub(a, b)
+}
 
 mul: fn(a: Measurement<Float>, n: Float) -> Measurement<Float> Never! {
     __measurement_mul(a, __measurement_new(n, 0.0))
@@ -135,6 +141,7 @@ abs: fn(m: Measurement<Float>) -> Measurement<Float> Never! {
 show: fn(m: Measurement<Float>) -> String Never! { "{m.value} ± {m.uncertainty}" }
 
 METER: 1.0
+
 // British spellings remain source-compatible with the original Core surface.
 METRE: 1.0
 
@@ -153,6 +160,7 @@ GIBIBYTE: 1073741824.0
 meters: fn(n: Float) -> Measurement<Float> Never! { from(n, 1.0) }
 
 kilometers: fn(n: Float) -> Measurement<Float> Never! { from(n, 1000.0) }
+
 metres: fn(n: Float) -> Measurement<Float> Never! { meters(n) }
 
 kilometres: fn(n: Float) -> Measurement<Float> Never! { kilometers(n) }
@@ -250,11 +258,11 @@ is_zero: fn(m: Measurement<Float>) -> Bool Never! {
     assert_eq(optional.value(), -12.0)
     assert_eq(math.to_bits(optional.uncertainty()), 4599075939470750516)
     if __measurement_result<Err>(Err(Err("unit conversion is not exactly representable")), 0.025) == {
-        .Ok(_) -> panic("lost scalar conversion error")
+        .Ok(_) -> { panic("lost scalar conversion error") }
         .Err(error) -> assert_eq(error.message, "unit conversion is not exactly representable")
     }
     if __measurement_result<Err>(Ok(-12.0), -0.025) == {
-        .Ok(value) -> assert_eq(math.to_bits(value.uncertainty()), 4599075939470750516)
+        .Ok(value) -> { assert_eq(math.to_bits(value.uncertainty()), 4599075939470750516) }
         .Err(_) -> panic("successful conversion failed")
     }
 }

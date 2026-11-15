@@ -39,9 +39,7 @@ pkg_add_authority_hold: fn(raw: String, input: String) -> String Never! {
     authority: pkg_edit_block_line_range(lines, "authority") ?? return raw
     authority_inline: pkg_edit_inline_block_bounds(lines[authority_line], "authority")
     allow_line := -1
-    if authority_inline != None {
-        allow_line = authority_line
-    } else {
+    if authority_inline != None -> allow_line = authority_line else {
         loop index in authority.start..<authority.end {
             if lines[index].trim_start().starts_with("allow:") {
                 allow_line = index
@@ -203,9 +201,7 @@ pkg_edit_insert_or_replace_in_block: fn(raw: String, key: String, name: String, 
                 }
             }
         }
-        if existing >= 0 {
-            out[existing] = new_line
-        } else {
+        if existing >= 0 -> out[existing] = new_line else {
             out = pkg_edit_insert_line(out, block.end, new_line)
         }
     } else {

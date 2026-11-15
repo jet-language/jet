@@ -18,6 +18,7 @@ use {
 }
 
 ISOLATED: "/sys/devices/system/cpu/isolated"
+
 DEFAULT_FILTER: "ui_backend/wayland_windows_hold_a_one_millisecond_frame"
 
 // `2-5,8` as the CPUs it names.
@@ -45,16 +46,12 @@ frame_time: fn() -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
     at := 0
     loop at < args.len() {
         if at + 1 >= args.len() -> return usage()
-        if args[at] == "--jet" {
-            jet = args[at + 1].copy()
-        } else if args[at] == "--filter" {
+        if args[at] == "--jet" -> jet = args[at + 1].copy() else if args[at] == "--filter" {
             filter = args[at + 1].copy()
         } else if args[at] == "--cpu" {
             chosen = parse_cpus(args[at + 1])
             if chosen.len() == 0 -> return usage()
-        } else {
-            return usage()
-        }
+        } else { return usage() }
         at += 2
     }
     isolated: files.read(ISOLATED) ?? ""

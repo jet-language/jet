@@ -1,7 +1,9 @@
 // A program with one entity, one direct print, and one type error, which
 // the checkers below read but can't hide.
 
-Entity: struct { id: Int }
+Entity: struct {
+    id: Int
+}
 
 shout: fn(n: Int) { print(n) }
 
@@ -13,7 +15,9 @@ build: fn(b: Build) {
     app: b.add_executable("app", ["main.jet"], [])
     meta: b.compiler(app)
     loop info in b.program.types() {
-        if info.name == "Entity" -> b.error(info.span, "ORG01", "entity must define archive", "company policy requires archival", "add an archive method")
+        if info.name == "Entity" {
+            b.error(info.span, "ORG01", "entity must define archive", "company policy requires archival", "add an archive method")
+        }
     }
     meta.events(
         watch: .Calls{to: print},

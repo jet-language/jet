@@ -4,7 +4,7 @@ run: fn() {
     policy: Authority.from_rights(["FS.Read(\".\")"])
     guest: plugin.load("guest.wat", policy)
     if guest.normal() == {
-        .Ok(value) -> print("normal:Ok {value}")
+        .Ok(value) -> { print("normal:Ok {value}") }
         .Err(.Guest(fault)) -> {
             print("normal:Guest export={fault.export} frames={fault.frames.len()}")
             print(fault.message)

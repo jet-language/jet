@@ -56,7 +56,7 @@
     count := I64{0}
     at := I64{0}
     loop at <= length {
-        if (at == length || trap_byte(wrapping(data + at)) == I64{10}) -> count += I64{1}
+        if (at == length || trap_byte(wrapping(data + at)) == I64{10}) { count += I64{1} }
         at += I64{1}
     }
     rows: jet_rt_alloc(count * I64{8}, I64{8})
@@ -178,7 +178,7 @@ test_fault_report: fn(outcome: I64, selector: I64, nth: I64) {
     length: rt_text_word(wrapping(cells + I64{8}))
     jet_rt_free(cells, I64{16}, I64{8})
     rt_text_store(ok, rt_text_copy(data, length))
-    if (length != I64{0}) -> jet_rt_free(data, length, I64{8})
+    if (length != I64{0}) { jet_rt_free(data, length, I64{8}) }
     I64{1}
 }
 

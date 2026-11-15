@@ -33,83 +33,145 @@ use {
 
 // WhereTerm.eOperator (whereInt.h WO_*).
 WO_IN: 1
+
 WO_EQ: 2
+
 WO_LT: 16
+
 WO_LE: 8
+
 WO_GT: 4
+
 WO_GE: 32
+
 WO_AUX: 64
+
 WO_IS: 128
+
 WO_ISNULL: 256
+
 WO_OR: 512
+
 WO_AND: 1024
+
 WO_EQUIV: 2048
+
 WO_NOOP: 4096
+
 WO_ROWVAL: 8192
+
 WO_ALL: 16383
+
 WO_SINGLE: 511
 
 // WhereTerm.wtFlags (whereInt.h TERM_*).
 TERM_DYNAMIC: 1
+
 TERM_VIRTUAL: 2
+
 TERM_CODED: 4
+
 TERM_COPIED: 8
+
 TERM_ORINFO: 16
+
 TERM_ANDINFO: 32
+
 TERM_OK: 64
+
 TERM_VNULL: 128
+
 TERM_LIKEOPT: 256
+
 TERM_LIKECOND: 512
+
 TERM_LIKE: 1024
+
 TERM_IS: 2048
+
 TERM_VARSELECT: 4096
+
 TERM_HEURTRUTH: 8192
+
 TERM_HIGHTRUTH: 0
+
 TERM_SLICE: 32768
 
 // WhereLoop.wsFlags (whereInt.h WHERE_*).
 WHERE_COLUMN_EQ: 1
+
 WHERE_COLUMN_RANGE: 2
+
 WHERE_COLUMN_IN: 4
+
 WHERE_COLUMN_NULL: 8
+
 WHERE_CONSTRAINT: 15
+
 WHERE_TOP_LIMIT: 16
+
 WHERE_BTM_LIMIT: 32
+
 WHERE_BOTH_LIMIT: 48
+
 WHERE_IDX_ONLY: 64
+
 WHERE_IPK: 256
+
 WHERE_INDEXED: 512
+
 WHERE_VIRTUALTABLE: 1024
+
 WHERE_IN_ABLE: 2048
+
 WHERE_ONEROW: 4096
+
 WHERE_MULTI_OR: 8192
+
 WHERE_AUTO_INDEX: 16384
+
 WHERE_SKIPSCAN: 32768
+
 WHERE_UNQ_WANTED: 65536
+
 WHERE_PARTIALIDX: 131072
+
 WHERE_IN_EARLYOUT: 262144
+
 WHERE_BIGNULL_SORT: 524288
+
 WHERE_IN_SEEKSCAN: 1048576
+
 WHERE_TRANSCONS: 2097152
+
 WHERE_BLOOMFILTER: 4194304
+
 WHERE_SELFCULL: 8388608
+
 WHERE_OMIT_OFFSET: 16777216
+
 WHERE_EXPRIDX: 67108864
 
 // WhereLoopBuilder.bldFlags1 and bldFlags2 (whereInt.h SQLITE_BLDF*).
 BLDF1_INDEXED: 1
+
 BLDF1_UNIQUE: 2
+
 BLDF2_2NDPASS: 4
 
 // WhereOrSet capacity, the planner's budget (whereInt.h N_OR_COST,
 // SQLITE_QUERY_PLANNER_LIMIT, SQLITE_QUERY_PLANNER_LIMIT_INCR).
 N_OR_COST: 3
+
 QUERY_PLANNER_LIMIT: 20000
+
 QUERY_PLANNER_LIMIT_INCR: 1000
 
 // WhereInfo.eOnePass (sqliteInt.h ONEPASS_*).
 ONEPASS_OFF: 0
+
 ONEPASS_SINGLE: 1
+
 ONEPASS_MULTI: 2
 
 // struct WhereTerm.
@@ -289,35 +351,35 @@ WhereInfo: struct {
 // A WhereInfo with its sWC (clause 0) initialized and no levels.
 where_info_new: fn() -> WhereInfo Never! {
     wi := WhereInfo{
-        tab_list: -1
-        order_by: -1
-        result_set: -1
-        select: -1
-        ai_cur_one_pass: [Int]{-1, -1}
-        i_continue: 0
-        i_break: 0
-        saved_n_query_loop: 0
-        wctrl_flags: 0
-        i_limit: 0
-        n_level: 0
-        n_ob_sat: 0
-        e_one_pass: ONEPASS_OFF
-        e_distinct: 0
-        b_deferred_seek: false
-        untested_terms: false
-        b_ordered_inner_loop: false
-        sorted: false
-        n_row_out: 0
-        i_top: 0
-        i_end_where: 0
-        p_loops: -1
-        loops: [WhereLoop]{}
-        loop_free: [Int]{}
-        rev_mask: 0
-        wcs: [WhereClause]{}
-        terms: [WhereTerm]{}
-        mask_set: WhereMaskSet{b_var_select: false, ix: [Int]{}}
-        levels: [WhereLevel]{}
+        tab_list: -1,
+        order_by: -1,
+        result_set: -1,
+        select: -1,
+        ai_cur_one_pass: [Int]{-1, -1},
+        i_continue: 0,
+        i_break: 0,
+        saved_n_query_loop: 0,
+        wctrl_flags: 0,
+        i_limit: 0,
+        n_level: 0,
+        n_ob_sat: 0,
+        e_one_pass: ONEPASS_OFF,
+        e_distinct: 0,
+        b_deferred_seek: false,
+        untested_terms: false,
+        b_ordered_inner_loop: false,
+        sorted: false,
+        n_row_out: 0,
+        i_top: 0,
+        i_end_where: 0,
+        p_loops: -1,
+        loops: [WhereLoop]{},
+        loop_free: [Int]{},
+        rev_mask: 0,
+        wcs: [WhereClause]{},
+        terms: [WhereTerm]{},
+        mask_set: WhereMaskSet{b_var_select: false, ix: [Int]{}},
+        levels: [WhereLevel]{},
     }
     _: clause_init(wi)
     wi
@@ -355,14 +417,10 @@ expr_usage_full: fn(ms: &WhereMaskSet, a: ast.AST, e: Int) -> Int Never! {
     x: a.exprs[e]
     mask := if x.op == tk.TK_IF_NULL_ROW -> get_mask(ms, x.itable) else -> 0
     if x.left >= 0 -> mask = mask.bit_or(expr_usage_nn(ms, a, x.left))
-    if x.right >= 0 {
-        mask = mask.bit_or(expr_usage_nn(ms, a, x.right))
-    } else if x.flags.bit_and(ast.EP_X_IS_SELECT) != 0 {
+    if x.right >= 0 -> mask = mask.bit_or(expr_usage_nn(ms, a, x.right)) else if x.flags.bit_and(ast.EP_X_IS_SELECT) != 0 {
         if x.flags.bit_and(ast.EP_VAR_SELECT) != 0 -> ms.b_var_select = true
         mask = mask.bit_or(expr_select_usage(ms, a, x.x))
-    } else if x.x >= 0 {
-        mask = mask.bit_or(expr_list_usage(ms, a, x.x))
-    }
+    } else if x.x >= 0 { mask = mask.bit_or(expr_list_usage(ms, a, x.x)) }
     if (x.op == tk.TK_FUNCTION || x.op == tk.TK_AGG_FUNCTION) && x.flags.bit_and(ast.EP_WIN_FUNC) != 0 {
         w: a.windows[x.y]
         mask = mask.bit_or(expr_list_usage(ms, a, w.partition))
@@ -374,7 +432,9 @@ expr_usage_full: fn(ms: &WhereMaskSet, a: ast.AST, e: Int) -> Int Never! {
 
 // sqlite3WhereExprUsageNN: the tables expression `e` (not NULL) uses.
 expr_usage_nn: fn(ms: &WhereMaskSet, a: ast.AST, e: Int) -> Int Never! {
-    if a.exprs[e].op == tk.TK_COLUMN && !ast.has(a, e, ast.EP_FIXED_COL) -> return get_mask(ms, a.exprs[e].itable)
+    if a.exprs[e].op == tk.TK_COLUMN && !ast.has(a, e, ast.EP_FIXED_COL) {
+        return get_mask(ms, a.exprs[e].itable)
+    }
     if ast.has(a, e, ast.EP_TOKEN_ONLY.bit_or(ast.EP_LEAF)) -> return 0
     expr_usage_full(ms, a, e)
 }
@@ -388,7 +448,9 @@ expr_usage: fn(ms: &WhereMaskSet, a: ast.AST, e: Int) -> Int Never! {
 // sqlite3WhereExprListUsage.
 expr_list_usage: fn(ms: &WhereMaskSet, a: ast.AST, list: Int) -> Int Never! {
     mask := 0
-    loop i in 0..<ast.list_len(a, list) -> mask = mask.bit_or(expr_usage(ms, a, ast.list_expr(a, list, i)))
+    loop i in 0..<ast.list_len(a, list) {
+        mask = mask.bit_or(expr_usage(ms, a, ast.list_expr(a, list, i)))
+    }
     mask
 }
 
@@ -430,7 +492,9 @@ n_term: fn(wi: WhereInfo, wc: Int) -> Int Never! { wi.wcs[wc].a.len() }
 term_at: fn(wi: WhereInfo, wc: Int, i: Int) -> Int Never! { wi.wcs[wc].a[i] }
 
 // pTerm->wtFlags |= f.
-add_wt_flags: fn(wi: &WhereInfo, t: Int, f: Int) Never! { wi.terms[t].wt_flags = wi.terms[t].wt_flags.bit_or(f) }
+add_wt_flags: fn(wi: &WhereInfo, t: Int, f: Int) Never! {
+    wi.terms[t].wt_flags = wi.terms[t].wt_flags.bit_or(f)
+}
 
 // whereClauseInsert: a new term of clause wc for expression `e`; its index
 // in the clause.
@@ -550,9 +614,7 @@ is_like_or_glob: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> (ok: Bool, prefix:
     if a.exprs[left].op != tk.TK_COLUMN || ex.expr_affinity(p.db, a, left) != base.AFF_TEXT || (lt >= 0 && ex.is_virtual(p.db, lt)) {
         is_num := util.atof(znew, base.UTF8).kind
         if is_num <= 0 {
-            if i_to == 1 && (Int{znew[0]}) == 45 {
-                is_num = 1
-            } else {
+            if i_to == 1 && (Int{znew[0]}) == 45 -> is_num = 1 else {
                 bumped := znew.copy()
                 bumped[i_to - 1] = U8{(Int{znew[i_to - 1]} + 1).bit_and(255)}
                 is_num = util.atof(bumped, base.UTF8).kind
@@ -597,14 +659,18 @@ is_auxiliary_vtab_operator: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> (n: Int
             names: [String]{"match", "glob", "like", "regexp"}
             ops: [Int]{conn.INDEX_CONSTRAINT_MATCH, conn.INDEX_CONSTRAINT_GLOB, conn.INDEX_CONSTRAINT_LIKE, conn.INDEX_CONSTRAINT_REGEXP}
             loop i in 0..<4 {
-                if util.str_icmp(tok, names[i].bytes()) == 0 -> return (n: 1, op2: ops[i], left: col, right: ast.list_expr(a, list, 0))
+                if util.str_icmp(tok, names[i].bytes()) == 0 {
+                    return (n: 1, op2: ops[i], left: col, right: ast.list_expr(a, list, 0))
+                }
             }
         }
         col0: ast.list_expr(a, list, 0)
         if expr_is_vtab(p.db, a, col0) {
             g := p.up
             i: g.vtab_find_function(p, a, a.exprs[col0].y, 2, tok)
-            if i >= conn.INDEX_CONSTRAINT_FUNCTION -> return (n: 1, op2: i.bit_and(255), left: col0, right: ast.list_expr(a, list, 1))
+            if i >= conn.INDEX_CONSTRAINT_FUNCTION {
+                return (n: 1, op2: i.bit_and(255), left: col0, right: ast.list_expr(a, list, 1))
+            }
         }
     } else if op == tk.TK_NE || op == tk.TK_ISNOT || op == tk.TK_NOTNULL {
         res := 0
@@ -661,17 +727,29 @@ where_nth_subterm: fn(wi: WhereInfo, t: Int, n: Int) -> Int Never! {
 // adds the virtual term "A op B" combining them to clause wc.
 where_combine_disjuncts: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, src: Int, wc: Int, one: Int, two: Int) Never! -[DB]> {
     e_op := wi.terms[one].e_operator.bit_or(wi.terms[two].e_operator)
-    if wi.terms[one].wt_flags.bit_or(wi.terms[two].wt_flags).bit_and(TERM_VNULL) != 0 -> return
+    if wi.terms[one].wt_flags.bit_or(wi.terms[two].wt_flags).bit_and(TERM_VNULL) != 0 {
+        return
+    }
     cmp: WO_EQ.bit_or(WO_LT).bit_or(WO_LE).bit_or(WO_GT).bit_or(WO_GE)
-    if wi.terms[one].e_operator.bit_and(cmp) == 0 -> return
-    if wi.terms[two].e_operator.bit_and(cmp) == 0 -> return
+    if wi.terms[one].e_operator.bit_and(cmp) == 0 {
+        return
+    }
+    if wi.terms[two].e_operator.bit_and(cmp) == 0 {
+        return
+    }
     lo: WO_EQ.bit_or(WO_LT).bit_or(WO_LE)
     hi: WO_EQ.bit_or(WO_GT).bit_or(WO_GE)
-    if e_op.bit_and(lo) != e_op && e_op.bit_and(hi) != e_op -> return
+    if e_op.bit_and(lo) != e_op && e_op.bit_and(hi) != e_op {
+        return
+    }
     e1: wi.terms[one].expr
     e2: wi.terms[two].expr
-    if ast.expr_compare(a, a.exprs[e1].left, a.exprs[e2].left, -1) != 0 -> return
-    if ast.expr_compare(a, a.exprs[e1].right, a.exprs[e2].right, -1) != 0 -> return
+    if ast.expr_compare(a, a.exprs[e1].left, a.exprs[e2].left, -1) != 0 {
+        return
+    }
+    if ast.expr_compare(a, a.exprs[e1].right, a.exprs[e2].right, -1) != 0 {
+        return
+    }
     if e_op.bit_and(e_op - 1) != 0 {
         e_op = if e_op.bit_and(WO_LT.bit_or(WO_LE)) != 0 -> WO_LE else -> WO_GE
     }
@@ -704,7 +782,9 @@ expr_analyze_or_term: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, src: Int, wc
     add_wt_flags(wi, t, TERM_ORINFO)
     where_split(wi, a, or_wc, e, tk.TK_OR)
     where_expr_analyze(p, a, wi, src, or_wc)
-    if p.db.malloc_failed -> return
+    if p.db.malloc_failed {
+        return
+    }
     // The tables that might satisfy cases 1 and 3.
     indexable := rs.ALLBITS
     chng_to_in := rs.ALLBITS
@@ -733,17 +813,16 @@ expr_analyze_or_term: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, src: Int, wc
             }
             indexable = indexable.bit_and(b)
         } else if wi.terms[ot].wt_flags.bit_and(TERM_COPIED) != 0 {
-            // Revisited with the TERM_VIRTUAL term it was copied to.
+
         } else {
+            // Revisited with the TERM_VIRTUAL term it was copied to.
             b := get_mask(wi.mask_set, wi.terms[ot].left_cursor)
             if wi.terms[ot].wt_flags.bit_and(TERM_VIRTUAL) != 0 {
                 other: wi.wcs[or_wc].a[wi.terms[ot].i_parent]
                 b = b.bit_or(get_mask(wi.mask_set, wi.terms[other].left_cursor))
             }
             indexable = indexable.bit_and(b)
-            if wi.terms[ot].e_operator.bit_and(WO_EQ) == 0 {
-                chng_to_in = 0
-            } else {
+            if wi.terms[ot].e_operator.bit_and(WO_EQ) == 0 -> chng_to_in = 0 else {
                 chng_to_in = chng_to_in.bit_and(b)
             }
         }
@@ -772,7 +851,9 @@ expr_analyze_or_term: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, src: Int, wc
     }
     // Case 1: chng_to_in holds the (0, 1 or 2) tables that might give
     // every subterm the form "table.column = expr" for one column.
-    if chng_to_in == 0 -> return
+    if chng_to_in == 0 {
+        return
+    }
     ok_to_chng := false
     i_column := -1
     i_cursor := -1
@@ -812,9 +893,7 @@ expr_analyze_or_term: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, src: Int, wc
                 // A column on the right too must need no conversion.
                 aff_right: ex.expr_affinity(p.db, a, a.exprs[ote].right)
                 aff_left: ex.expr_affinity(p.db, a, a.exprs[ote].left)
-                if aff_right != 0 && aff_right != aff_left {
-                    ok_to_chng = false
-                } else {
+                if aff_right != 0 && aff_right != aff_left -> ok_to_chng = false else {
                     add_wt_flags(wi, ot, TERM_OK)
                 }
             }
@@ -823,7 +902,9 @@ expr_analyze_or_term: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, src: Int, wc
         }
         j += 1
     }
-    if !ok_to_chng -> return
+    if !ok_to_chng {
+        return
+    }
     // The virtual term of the OR as an IN operator.
     list := -1
     lhs := -1
@@ -873,7 +954,9 @@ might_be_indexed2: fn(db: conn.Conn, a: &ast.AST, src: Int, e: Int, j0: Int) -> 
                 loop i in 0..<db.indexes[ix].n_key_col {
                     if db.indexes[ix].ai_column[i] != conn.XN_EXPR -> next
                     ce: ast.list_expr(a, ce_list, i)
-                    if ast.expr_compare_skip(a, e, ce, i_cur) == 0 && a.exprs[e].op != tk.TK_STRING -> return (ok: true, cur: i_cur, col: conn.XN_EXPR)
+                    if ast.expr_compare_skip(a, e, ce, i_cur) == 0 && a.exprs[e].op != tk.TK_STRING {
+                        return (ok: true, cur: i_cur, col: conn.XN_EXPR)
+                    }
                 }
             }
             ix = db.indexes[ix].next
@@ -889,8 +972,12 @@ might_be_indexed2: fn(db: conn.Conn, a: &ast.AST, src: Int, e: Int, j0: Int) -> 
 // column (XN_EXPR for an indexed expression).
 might_be_indexed: fn(db: conn.Conn, a: &ast.AST, src: Int, e0: Int, op: Int) -> (ok: Bool, cur: Int, col: Int) Never! {
     e := e0
-    if a.exprs[e].op == tk.TK_VECTOR && op >= tk.TK_GT && op <= tk.TK_GE -> e = ast.list_expr(a, a.exprs[e].x, 0)
-    if a.exprs[e].op == tk.TK_COLUMN -> return (ok: true, cur: a.exprs[e].itable, col: a.exprs[e].icolumn)
+    if a.exprs[e].op == tk.TK_VECTOR && op >= tk.TK_GT && op <= tk.TK_GE {
+        e = ast.list_expr(a, a.exprs[e].x, 0)
+    }
+    if a.exprs[e].op == tk.TK_COLUMN {
+        return (ok: true, cur: a.exprs[e].itable, col: a.exprs[e].icolumn)
+    }
     loop i in 0..<ast.src_len(a, src) {
         ix := db.tables[a.items[ast.src_item(a, src, i)].tab].index
         loop ix >= 0 {
@@ -906,7 +993,9 @@ might_be_indexed: fn(db: conn.Conn, a: &ast.AST, src: Int, e0: Int, op: Int) -> 
 // that BETWEEN, OR, IS NOT NULL, LIKE, vector comparisons and virtual table
 // operators imply.
 expr_analyze: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, src: Int, wc: Int, idx_term: Int) Never! -[DB]> {
-    if p.db.malloc_failed -> return
+    if p.db.malloc_failed {
+        return
+    }
     t: wi.wcs[wc].a[idx_term]
     e: wi.terms[t].expr
     wi.mask_set.b_var_select = false
@@ -914,7 +1003,9 @@ expr_analyze: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, src: Int, wc: Int, i
     op: a.exprs[e].op
     prereq_all := 0
     if op == tk.TK_IN {
-        if ex.expr_check_in(p, a, e) -> return
+        if ex.expr_check_in(p, a, e) {
+            return
+        }
         x: a.exprs[e].x
         wi.terms[t].prereq_right = if ast.has(a, e, ast.EP_X_IS_SELECT) -> expr_select_usage(wi.mask_set, a, x) else -> expr_list_usage(wi.mask_set, a, x)
         prereq_all = prereq_left.bit_or(wi.terms[t].prereq_right)
@@ -922,9 +1013,7 @@ expr_analyze: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, src: Int, wc: Int, i
         wi.terms[t].prereq_right = expr_usage(wi.mask_set, a, a.exprs[e].right)
         if a.exprs[e].left < 0 || ast.has(a, e, ast.EP_X_IS_SELECT.bit_or(ast.EP_IF_NULL_ROW)) || a.exprs[e].x >= 0 {
             prereq_all = expr_usage_nn(wi.mask_set, a, e)
-        } else {
-            prereq_all = prereq_left.bit_or(wi.terms[t].prereq_right)
-        }
+        } else { prereq_all = prereq_left.bit_or(wi.terms[t].prereq_right) }
     }
     if wi.mask_set.b_var_select -> add_wt_flags(wi, t, TERM_VARSELECT)
     extra_right := 0
@@ -957,7 +1046,9 @@ expr_analyze: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, src: Int, wc: Int, i
         left := ast.skip_collate(a, a.exprs[e].left)
         right: ast.skip_collate(a, a.exprs[e].right)
         op_mask: if wi.terms[t].prereq_right.bit_and(prereq_left) == 0 -> WO_ALL else -> WO_EQUIV
-        if wi.terms[t].i_field > 0 -> left = ast.list_expr(a, a.exprs[left].x, wi.terms[t].i_field - 1)
+        if wi.terms[t].i_field > 0 {
+            left = ast.list_expr(a, a.exprs[left].x, wi.terms[t].i_field - 1)
+        }
         ml: might_be_indexed(p.db, a, src, left, op)
         if ml.ok {
             wi.terms[t].left_cursor = ml.cur
@@ -973,7 +1064,9 @@ expr_analyze: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, src: Int, wc: Int, i
             nt := t
             if wi.terms[t].left_cursor >= 0 {
                 dup = ast.expr_dup(a, e, 0)
-                if p.db.malloc_failed -> return
+                if p.db.malloc_failed {
+                    return
+                }
                 idx_new: clause_insert(wi, a, wc, dup, TERM_VIRTUAL.bit_or(TERM_DYNAMIC))
                 nt = wi.wcs[wc].a[idx_new]
                 mark_term_as_child(wi, wc, idx_new, idx_term)
@@ -1013,9 +1106,7 @@ expr_analyze: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, src: Int, wc: Int, i
             expr_analyze(p, a, wi, src, wc, idx_new)
             mark_term_as_child(wi, wc, idx_new, idx_term)
         }
-    } else if op == tk.TK_OR {
-        expr_analyze_or_term(p, a, wi, src, wc, idx_term)
-    } else if op == tk.TK_NOTNULL {
+    } else if op == tk.TK_OR { expr_analyze_or_term(p, a, wi, src, wc, idx_term) } else if op == tk.TK_NOTNULL {
         // "x IS NOT NULL" of a column that is no INTEGER PRIMARY KEY adds
         // the virtual term "x > NULL".
         l: a.exprs[e].left
@@ -1165,10 +1256,10 @@ expr_analyze: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, src: Int, wc: Int, i
 where_split: fn(wi: &WhereInfo, a: ast.AST, wc: Int, e: Int, op: Int) Never! {
     e2: ast.skip_collate_and_likely(a, e)
     wi.wcs[wc].op = op
-    if e2 < 0 -> return
-    if a.exprs[e2].op != op {
-        _: clause_insert(wi, a, wc, e, 0)
-    } else {
+    if e2 < 0 {
+        return
+    }
+    if a.exprs[e2].op != op -> _: clause_insert(wi, a, wc, e, 0) else {
         where_split(wi, a, wc, a.exprs[e2].left, op)
         where_split(wi, a, wc, a.exprs[e2].right, op)
     }
@@ -1203,10 +1294,16 @@ where_add_limit_expr: fn(wi: &WhereInfo, a: &ast.AST, wc: Int, i_reg: Int, e: In
 // does the ORDER BY.
 where_add_limit: fn(db: conn.Conn, wi: &WhereInfo, a: &ast.AST, wc: Int, s: Int) Never! {
     sel: a.selects[s]
-    if sel.group_by >= 0 || sel.sel_flags.bit_and(ast.SF_DISTINCT.bit_or(ast.SF_AGGREGATE)) != 0 -> return
-    if ast.src_len(a, sel.src) != 1 -> return
+    if sel.group_by >= 0 || sel.sel_flags.bit_and(ast.SF_DISTINCT.bit_or(ast.SF_AGGREGATE)) != 0 {
+        return
+    }
+    if ast.src_len(a, sel.src) != 1 {
+        return
+    }
     item0: ast.src_item(a, sel.src, 0)
-    if !ex.is_virtual(db, a.items[item0].tab) -> return
+    if !ex.is_virtual(db, a.items[item0].tab) {
+        return
+    }
     i_csr: a.items[item0].cursor
     loop ii in 0..<wi.wcs[wc].a.len() {
         t: wi.wcs[wc].a[ii]
@@ -1214,16 +1311,26 @@ where_add_limit: fn(db: conn.Conn, wi: &WhereInfo, a: &ast.AST, wc: Int, s: Int)
         // children stand for it.
         if wi.terms[t].wt_flags.bit_and(TERM_CODED) != 0 -> next
         if wi.terms[t].n_child != 0 -> next
-        if wi.terms[t].left_cursor != i_csr -> return
+        if wi.terms[t].left_cursor != i_csr {
+            return
+        }
     }
     loop ii in 0..<ast.list_len(a, sel.order_by) {
         oe: ast.list_expr(a, sel.order_by, ii)
-        if a.exprs[oe].op != tk.TK_COLUMN -> return
-        if a.exprs[oe].itable != i_csr -> return
-        if a.lists[sel.order_by].items[ii].sort_flags.bit_and(base.KEYINFO_ORDER_BIGNULL) != 0 -> return
+        if a.exprs[oe].op != tk.TK_COLUMN {
+            return
+        }
+        if a.exprs[oe].itable != i_csr {
+            return
+        }
+        if a.lists[sel.order_by].items[ii].sort_flags.bit_and(base.KEYINFO_ORDER_BIGNULL) != 0 {
+            return
+        }
     }
     where_add_limit_expr(wi, a, wc, sel.ilimit, a.exprs[sel.limit].left, i_csr, conn.INDEX_CONSTRAINT_LIMIT)
-    if sel.ioffset > 0 -> where_add_limit_expr(wi, a, wc, sel.ioffset, a.exprs[sel.limit].right, i_csr, conn.INDEX_CONSTRAINT_OFFSET)
+    if sel.ioffset > 0 {
+        where_add_limit_expr(wi, a, wc, sel.ioffset, a.exprs[sel.limit].right, i_csr, conn.INDEX_CONSTRAINT_OFFSET)
+    }
 }
 
 // sqlite3WhereClauseClear: the side effects of freeing clause wc, its
@@ -1232,7 +1339,9 @@ where_clause_clear: fn(wi: WhereInfo, a: &ast.AST, wc: Int) Never! {
     loop t in wi.wcs[wc].a {
         f: wi.terms[t].wt_flags
         if f.bit_and(TERM_DYNAMIC) != 0 -> ast.expr_delete(a, wi.terms[t].expr)
-        if f.bit_and(TERM_ORINFO.bit_or(TERM_ANDINFO)) != 0 -> where_clause_clear(wi, a, wi.terms[t].sub_wc)
+        if f.bit_and(TERM_ORINFO.bit_or(TERM_ANDINFO)) != 0 {
+            where_clause_clear(wi, a, wi.terms[t].sub_wc)
+        }
     }
 }
 
@@ -1249,14 +1358,20 @@ where_expr_analyze: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, src: Int, wc: 
 // sqlite3WhereTabFuncArgs: the arguments of table-valued function item si
 // become equality terms on its HIDDEN columns.
 where_tab_func_args: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, si: Int, wc: Int) Never! {
-    if !a.items[si].is_tab_func -> return
+    if !a.items[si].is_tab_func {
+        return
+    }
     t: a.items[si].tab
     args: a.items[si].func_arg
-    if args < 0 -> return
+    if args < 0 {
+        return
+    }
     ncol: p.db.tables[t].cols.len()
     k := 0
     loop j in 0..<ast.list_len(a, args) {
-        loop k < ncol && p.db.tables[t].cols[k].col_flags.bit_and(conn.COLFLAG_HIDDEN) == 0 -> k += 1
+        loop k < ncol && p.db.tables[t].cols[k].col_flags.bit_and(conn.COLFLAG_HIDDEN) == 0 {
+            k += 1
+        }
         if k >= ncol {
             name: ast.text(p.db.tables[t].name)
             ast.error(a, "too many arguments on {name}() - max {j}")

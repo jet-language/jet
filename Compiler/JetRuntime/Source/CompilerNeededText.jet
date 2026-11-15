@@ -4,7 +4,7 @@
 // temporary suffix, locale-sensitive libc or per-scalar copy.
 compiler_text_all: fn(value: I64, property: I64) -> Bool {
     length: rt_text_len(value)
-    if (length == I64{0}) -> return false
+    if (length == I64{0}) { return false }
     data: rt_text_data(value)
     at := I64{0}
     loop at < length {
@@ -16,6 +16,9 @@ compiler_text_all: fn(value: I64, property: I64) -> Bool {
     }
     true
 }
+
 #Export(c) jet_text_is_alphabetic: fn(value: I64) -> Bool { compiler_text_all(value, I64{0}) }
+
 #Export(c) jet_text_is_numeric: fn(value: I64) -> Bool { compiler_text_all(value, I64{1}) }
+
 #Export(c) jet_text_is_whitespace: fn(value: I64) -> Bool { compiler_text_all(value, I64{2}) }

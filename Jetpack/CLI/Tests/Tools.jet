@@ -1,8 +1,6 @@
 // Claims for `jetpack tool` and the user-tools profile.
 
-cli_tools_test_digest: fn(fill: String) -> String {
-    "sha256-{fill.repeat(64)}"
-}
+cli_tools_test_digest: fn(fill: String) -> String { "sha256-{fill.repeat(64)}" }
 
 cli_tools_test_tool: fn(name: String, reference: String, bin: String, member: String) -> InstalledUserTool {
     InstalledUserTool{
@@ -14,24 +12,26 @@ cli_tools_test_tool: fn(name: String, reference: String, bin: String, member: St
         members: [String]{member},
         member_digests: [String]{cli_tools_test_digest("e")},
         output_hash: cli_tools_test_digest("d"),
-        store_root: "/store"
+        store_root: "/store",
     }
 }
 
 cli_tools_test_generation_rows: fn(tools: [InstalledUserTool]) -> [ToolGenerationTool] {
     rows := [ToolGenerationTool]{}
     loop entry in tools {
-        rows.push(ToolGenerationTool{
-            name: entry.name,
-            version: entry.version,
-            source: entry.source,
-            reference: entry.reference,
-            output_hash: entry.output_hash,
-            store_root: entry.store_root,
-            bins: entry.bins,
-            members: entry.members,
-            projection_hashes: entry.member_digests
-        })
+        rows.push(
+            ToolGenerationTool{
+                name: entry.name,
+                version: entry.version,
+                source: entry.source,
+                reference: entry.reference,
+                output_hash: entry.output_hash,
+                store_root: entry.store_root,
+                bins: entry.bins,
+                members: entry.members,
+                projection_hashes: entry.member_digests,
+            },
+        )
     }
     rows
 }

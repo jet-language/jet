@@ -1,5 +1,4 @@
 // Browser lock claims.
-
 use {
     jetpack_foundation.[BROWSER_DEFAULT_PROTOCOL, SOURCE_ROOT_DIR]
     files: core.files
@@ -21,12 +20,10 @@ env_browser_test_fake: fn(root: String, body: String) -[FS]> String {
 env_browser_test_drifted: fn(result: LockedBrowser BrowserLockError!) -> Bool {
     if result == {
         .Ok(_) -> false
-        .Err(error) -> {
-            if error == {
-                .HashMismatch(engine, expected, actual) -> true
-                .SizeMismatch(engine, expected, actual) -> true
-                .UnknownEngine(_) | .MissingBinary(_) | .MissingLock(_) | .IO(_) | .InvalidProtocol(_) -> false
-            }
+        .Err(error) -> if error == {
+            .HashMismatch(engine, expected, actual) -> true
+            .SizeMismatch(engine, expected, actual) -> true
+            .UnknownEngine(_) | .MissingBinary(_) | .MissingLock(_) | .IO(_) | .InvalidProtocol(_) -> false
         }
     }
 }
@@ -66,7 +63,9 @@ env_browser_test_drifted: fn(result: LockedBrowser BrowserLockError!) -> Bool {
         .Err(error) -> {
             if error == {
                 .UnknownEngine(name) -> assert_eq(name, "edge")
-                .MissingBinary(_) | .MissingLock(_) | .HashMismatch(_, _, _) | .SizeMismatch(_, _, _) | .IO(_) | .InvalidProtocol(_) -> panic("expected UnknownEngine")
+                .MissingBinary(_) | .MissingLock(_) | .HashMismatch(_, _, _) | .SizeMismatch(_, _, _) | .IO(_) | .InvalidProtocol(_) -> {
+                    panic("expected UnknownEngine")
+                }
             }
         }
         .Ok(_) -> panic("edge is not a supported engine")
@@ -76,7 +75,9 @@ env_browser_test_drifted: fn(result: LockedBrowser BrowserLockError!) -> Bool {
         .Err(error) -> {
             if error == {
                 .MissingLock(engine) -> assert_eq(engine, "firefox")
-                .UnknownEngine(_) | .MissingBinary(_) | .HashMismatch(_, _, _) | .SizeMismatch(_, _, _) | .IO(_) | .InvalidProtocol(_) -> panic("expected MissingLock")
+                .UnknownEngine(_) | .MissingBinary(_) | .HashMismatch(_, _, _) | .SizeMismatch(_, _, _) | .IO(_) | .InvalidProtocol(_) -> {
+                    panic("expected MissingLock")
+                }
             }
         }
         .Ok(_) -> panic("no browser is locked")
@@ -94,7 +95,9 @@ env_browser_test_drifted: fn(result: LockedBrowser BrowserLockError!) -> Bool {
     assert_eq(found, chromium)
     assert_eq(env_browser_driver_package("chromium") ?? panic("chromium driver"), "chromedriver")
     assert_eq(env_browser_driver_package("firefox") ?? panic("firefox driver"), "")
-    if env_browser_find_driver(files.join(root, "out"), "chromedriver") == .Ok(_) -> panic("no driver is realized yet")
+    if env_browser_find_driver(files.join(root, "out"), "chromedriver") == .Ok(_) {
+        panic("no driver is realized yet")
+    }
     chromedriver: files.join(bin_dir, "chromedriver")
     files.write(chromedriver, "x") ?? panic("chromedriver")
     assert_eq(env_browser_find_driver(files.join(root, "out"), "chromedriver") ?? panic("find chromedriver"), chromedriver)

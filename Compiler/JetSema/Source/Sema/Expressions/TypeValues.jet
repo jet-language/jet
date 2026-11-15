@@ -10,7 +10,6 @@
 // module and a generic's arguments included (`shop.Box<Int>`), so two values
 // are equal, hash alike and key one map entry exactly when they name one type.
 // Only the compiler writes that literal; no text becomes a `Type`.
-
 use jet_foundation.[
     Call,
     Diagnostic,
@@ -35,7 +34,9 @@ sema_type_value_resolved: fn(wanted: Type, environment: SemaScopeEnvironment, pr
     if wanted == .Named(written) && written.ends_with("Type") {
         resolved: sema_expr_expected_type(wanted, environment, program)
         if resolved == .Named(name) {
-            if name.ends_with("::Type") && core_identity_in_module(name, "core.prelude") -> return Val(resolved)
+            if name.ends_with("::Type") && core_identity_in_module(name, "core.prelude") {
+                return Val(resolved)
+            }
         }
     }
     None
@@ -88,7 +89,9 @@ sema_type_value_written: fn(ty: Type, span: Span, expected: Type?, environment: 
 // type is checked where a `Type` is expected. Any other body
 // (`Type{path: "Rock"}`) is an ordinary literal of a private field.
 sema_type_value_literal: fn(head: Type?, body: TypedLitBody, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
-    if sema_type_value_type(head, environment, program) == None -> return SemaDirectSpecialCheck{handled: false, value: None}
+    if sema_type_value_type(head, environment, program) == None {
+        return SemaDirectSpecialCheck{handled: false, value: None}
+    }
     if body == .Value(named) {
         checked: sema_check_expression(named, head, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         return SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(checked, expected, environment, program, diagnostics)}
@@ -104,7 +107,9 @@ sema_type_value_literal: fn(head: Type?, body: TypedLitBody, expected: Type?, en
 // The path is only typed: the probe reads, moves and borrows nothing, and no
 // effect runs.
 sema_call_check_type_of: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
-    if sema_module_no_prelude(environment, program) -> return SemaDirectSpecialCheck{handled: false, value: None}
+    if sema_module_no_prelude(environment, program) {
+        return SemaDirectSpecialCheck{handled: false, value: None}
+    }
     if call.args.len() != 1 || call.type_args.len() > 0 || call.args[0].spread || call.args[0].label != None || !sema_type_of_path(call.args[0].expr) {
         diagnostics.push(sema_error("E0104", call.name_span, "`type_of` takes one name or field path", "`type_of(x)` reads the static type of a place without evaluating it, so it takes no computed value", "pass a name or a field path, as in `type_of(p)` or `type_of(order.customer)`"))
         return SemaDirectSpecialCheck{handled: true, value: None}

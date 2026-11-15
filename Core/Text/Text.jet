@@ -20,13 +20,6 @@ package: {
 //
 // Predicates on the empty string are false (`is_alphabetic("")` is false).
 // `splitn` / `rsplitn` take a maximum part count, matching Rust `splitn`.
-
-
-fmt: module
-parse: module
-wrap: module
-html: module
-
 use {
     segment_tables: __core_text_segmentation_tables
     text_unicode_string: core.text.runtime.kernel_unicode_string
@@ -40,6 +33,14 @@ use {
     text_category: core.text.runtime.assets.unicode_general_category
     unicode_category.[general_category, is_graphic_cp, punctuation_scalars]
 }
+
+fmt: module
+
+parse: module
+
+wrap: module
+
+html: module
 
 /// The consuming text scanner `Cursor.over(text)`: the runtime's cursor
 /// handle (core-library.md, "Cursor — consuming text scanner"). Only the
@@ -84,13 +85,19 @@ casefold: fn(text: String) -> String Never! { text.casefold() }
 caseless_eq: fn(left: String, right: String) -> Bool Never! { casefold(left) == casefold(right) }
 
 nfc: fn(text: String) -> String Never! { compose(decompose(text, false)) }
+
 nfd: fn(text: String) -> String Never! { encode_cps(decompose(text, false)) }
+
 nfkc: fn(text: String) -> String Never! { compose(decompose(text, true)) }
+
 nfkd: fn(text: String) -> String Never! { encode_cps(decompose(text, true)) }
 
 graphemes: fn(text: String) -> [String] Never! { split_graphemes(text) }
+
 words: fn(text: String) -> [String] Never! { split_words(text) }
+
 sentences: fn(text: String) -> [String] Never! { split_sentences(text) }
+
 /// Unicode 17.0.0 scalar labels: `U+XXXX NAME`, with legacy control names.
 /// Scalars absent from the pinned name index are labeled `UNASSIGNED`.
 inspect: fn(text: String) -> [String] Never! {
@@ -110,7 +117,9 @@ display_width: fn(text: String) -> Int Never! {
     bytes: text.bytes()
     if __printable_ascii(bytes) -> return bytes.len()
     total := 0
-    loop cluster in split_graphemes(text) -> total = total + text_width.cluster_width(decode_scalars(cluster))
+    loop cluster in split_graphemes(text) {
+        total += text_width.cluster_width(decode_scalars(cluster))
+    }
     total
 }
 
@@ -124,8 +133,11 @@ __printable_ascii: fn(bytes: [U8]) -> Bool Never! {
 }
 
 grapheme_views: fn(text: String) -> [String] Never! { graphemes(text) }
+
 word_views: fn(text: String) -> [String] Never! { words(text) }
+
 line_views: fn(text: String) -> [String] Never! { split_lines(text) }
+
 byte_views: fn(text: String) -> [String] Never! {
     out := [String]{}
     loop b in text_unicode_string.utf8_bytes(text) -> out.push("{b}")
@@ -176,7 +188,9 @@ is_blank: fn(text: String) -> Bool Never! {
     cps: decode_scalars(text)
     if cps.len() == 0 -> return false
     loop cp in cps {
-        if cp != 9 && general_category(cp, text_category.UNICODE_GENERAL_CATEGORY) != GC_ZS -> return false
+        if cp != 9 && general_category(cp, text_category.UNICODE_GENERAL_CATEGORY) != GC_ZS {
+            return false
+        }
     }
     true
 }
@@ -189,7 +203,9 @@ is_graphic: fn(text: String) -> Bool Never! {
     cps: decode_scalars(text)
     if cps.len() == 0 -> return false
     loop cp in cps {
-        if !is_graphic_cp(cp, general_category(cp, text_category.UNICODE_GENERAL_CATEGORY)) -> return false
+        if !is_graphic_cp(cp, general_category(cp, text_category.UNICODE_GENERAL_CATEGORY)) {
+            return false
+        }
     }
     true
 }
@@ -222,7 +238,7 @@ trim_start: fn(text: String) -> String Never! {
     i := 0
     loop i < pairs.len() {
         if !is_space_cp(pairs[i].cp) -> break
-        i = i + 1
+        i += 1
     }
     if i >= pairs.len() -> return ""
     slice_bytes(text.bytes(), pairs[i].index, text.bytes().len())
@@ -237,7 +253,7 @@ trim_end: fn(text: String) -> String Never! {
             end = pairs[i].index + text_unicode_string.utf8_width_at(text.bytes(), pairs[i].index)
             break
         }
-        i = i - 1
+        i -= 1
     }
     slice_bytes(text.bytes(), 0, end)
 }
@@ -248,7 +264,9 @@ trim_end: fn(text: String) -> String Never! {
 decode_latin1: fn(bytes: [U8]) -> String Never! {
     out := [U8]{}
     loop byte in bytes {
-        if byte < (U8{128}) -> out.push(byte) else -> out.extend([U8]{U8{192 + Int{byte} /% 64}, U8{128 + Int{byte} %% 64}})
+        if byte < (U8{128}) -> out.push(byte) else {
+            out.extend([U8]{U8{192 + Int{byte} /% 64}, U8{128 + Int{byte} %% 64}})
+        }
     }
     String.from_bytes(out) ?? ""
 }
@@ -269,9 +287,13 @@ leading_int: fn(text: String) -> Int? Never! {
 }
 
 /// Pad on the left until `width` UTF-8 scalars. Empty `fill` returns text unchanged.
-pad_start: fn(text: String, width: Int, fill: String) -> String Never! { pad_side(text, width, fill, true) }
+pad_start: fn(text: String, width: Int, fill: String) -> String Never! {
+    pad_side(text, width, fill, true)
+}
 
-pad_end: fn(text: String, width: Int, fill: String) -> String Never! { pad_side(text, width, fill, false) }
+pad_end: fn(text: String, width: Int, fill: String) -> String Never! {
+    pad_side(text, width, fill, false)
+}
 
 center: fn(text: String, width: Int, fill: String) -> String Never! {
     extra: width - scalar_count(text)
@@ -295,10 +317,13 @@ ends_any: fn(text: String, suffixes: [String]) -> Bool Never! {
 }
 
 /// At most `n` parts. `n <= 0` yields an empty list.
-splitn: fn(text: String, sep: String, n: Int) -> [String] Never! { split_limit(text, sep, n, false) }
+splitn: fn(text: String, sep: String, n: Int) -> [String] Never! {
+    split_limit(text, sep, n, false)
+}
 
-rsplitn: fn(text: String, sep: String, n: Int) -> [String] Never! { split_limit(text, sep, n, true) }
-
+rsplitn: fn(text: String, sep: String, n: Int) -> [String] Never! {
+    split_limit(text, sep, n, true)
+}
 
 ascii_alpha: fn(b: U8) -> Bool {
     n: b
@@ -321,7 +346,7 @@ slice_bytes: fn(raw: [U8], start: Int, end: Int) -> String {
     loop {
         if i >= hi -> return String.from_bytes(out) ?? ""
         out.push(raw[i])
-        i = i + 1
+        i += 1
     }
 }
 
@@ -399,7 +424,7 @@ find_sep: fn(text: String, sep: String, from_right: Bool) -> Int {
         loop {
             if i < 0 -> return -1
             if match_at(hay, needle, i) -> return i
-            i = i - 1
+            i -= 1
         }
     }
     loop i in 0..<(last + 1) {
@@ -432,12 +457,10 @@ decode_indexed: fn(text: String) -> [IndexedCp] Never! {
         first: Int{raw[i]}
         width: text_unicode_string.utf8_width_at(raw, i)
         if width == 1 {
-            if first < 128 {
-                out.push(IndexedCp{index: start, cp: first})
-            } else {
+            if first < 128 -> out.push(IndexedCp{index: start, cp: first}) else {
                 out.push(IndexedCp{index: start, cp: 65533})
             }
-            i = i + 1
+            i += 1
             next
         }
         cp := 0
@@ -453,15 +476,15 @@ decode_indexed: fn(text: String) -> [IndexedCp] Never! {
                 break
             }
             cp = ((cp << 6)).bit_or(((byte).bit_and(63)))
-            k = k + 1
+            k += 1
         }
         if !valid {
             out.push(IndexedCp{index: start, cp: 65533})
-            i = i + 1
+            i += 1
             next
         }
         out.push(IndexedCp{index: start, cp: cp})
-        i = i + width
+        i += width
     }
 }
 
@@ -525,9 +548,7 @@ unicode_scalar_at: fn(raw: View<U8>, at: Int) -> (cp: Int, end: Int) Never! {
         width = 3
         cp = first.bit_and(15)
     }
-    loop offset in 1..<width {
-        cp = (cp << 6).bit_or((Int{raw[at + offset]}.bit_and(63)))
-    }
+    loop offset in 1..<width -> cp = (cp << 6).bit_or((Int{raw[at + offset]}.bit_and(63)))
     (cp: cp, end: at + width)
 }
 
@@ -543,17 +564,25 @@ is_space_cp: fn(cp: Int) -> Bool {
 // General_Category tags of UNICODE_GENERAL_CATEGORY, in the order of GC_TAGS in
 // Tools/agent/UnicodeTables.jet; every other category reads as GC_OTHER.
 GC_CC: 0
+
 GC_CF: 1
+
 GC_MC: 4
+
 GC_ZS: 5
+
 GC_ZL: 6
+
 GC_ZP: 7
+
 GC_OTHER: 8
 
 // General_Category reads behind the character classes: not part of the text
 // surface.
 priv unicode_category: module {
-    general_category: fn(cp: Int, table: [U8]) -> Int Never! { text_asset.asset_tag(table, cp, GC_OTHER) }
+    general_category: fn(cp: Int, table: [U8]) -> Int Never! {
+        text_asset.asset_tag(table, cp, GC_OTHER)
+    }
 
     is_graphic_cp: fn(cp: Int, category: Int) -> Bool Never! {
         !is_space_cp(cp) && category != GC_CC && category != GC_ZS && category != GC_ZL && category != GC_ZP
@@ -581,16 +610,26 @@ combining_class: fn(cp: Int) -> Int {
     0
 }
 
-is_extend: fn(cp: Int) -> Bool { combining_class(cp) != 0 || (cp >= 0xFE00 && cp <= 0xFE0F) || (cp >= 0x1F3FB && cp <= 0x1F3FF) || cp == 0x200C || cp == 0x200D || cp == 0xFF9E || cp == 0xFF9F }
+is_extend: fn(cp: Int) -> Bool {
+    combining_class(cp) != 0 || (cp >= 0xFE00 && cp <= 0xFE0F) || (cp >= 0x1F3FB && cp <= 0x1F3FF) || cp == 0x200C || cp == 0x200D || cp == 0xFF9E || cp == 0xFF9F
+}
 
 C_SBASE: 44032
+
 C_LBASE: 4352
+
 C_VBASE: 4449
+
 C_TBASE: 4519
+
 C_LCOUNT: 19
+
 C_VCOUNT: 21
+
 C_TCOUNT: 28
+
 C_NCOUNT: 588
+
 C_SCOUNT: 11172
 
 hangul_decompose: fn(cp: Int) -> [Int] {
@@ -607,7 +646,9 @@ hangul_compose: fn(a: Int, b: Int) -> Int? {
     lindex: a - C_LBASE
     if lindex >= 0 && lindex < C_LCOUNT {
         vindex: b - C_VBASE
-        if vindex >= 0 && vindex < C_VCOUNT -> return Val(C_SBASE + (lindex * C_VCOUNT + vindex) * C_TCOUNT)
+        if vindex >= 0 && vindex < C_VCOUNT {
+            return Val(C_SBASE + (lindex * C_VCOUNT + vindex) * C_TCOUNT)
+        }
     }
     sindex: a - C_SBASE
     if sindex >= 0 && sindex < C_SCOUNT && sindex % C_TCOUNT == 0 {
@@ -711,11 +752,11 @@ canon_order: fn(cps: [Int]) -> [Int] {
             out[i] = out[i - 1]
             out[i - 1] = tmp
             if i > 1 {
-                i = i - 1
+                i -= 1
                 next
             }
         }
-        i = i + 1
+        i += 1
     }
 }
 
@@ -737,9 +778,7 @@ compose: fn(cps: [Int]) -> String {
         if cc == 0 {
             starter = out.len() - 1
             last_class = -1
-        } else {
-            last_class = cc
-        }
+        } else { last_class = cc }
     }
     encode_cps(out)
 }
@@ -842,9 +881,9 @@ split_graphemes: fn(text: String) -> [String] {
             ri_run = if is_ri(cur) -> 1 else -> 0
         } else {
             cluster.push(cur)
-            if is_ri(cur) -> ri_run = ri_run + 1 else -> ri_run = 0
+            if is_ri(cur) -> ri_run += 1 else -> ri_run = 0
         }
-        i = i + 1
+        i += 1
     }
 }
 
@@ -866,66 +905,106 @@ grapheme_break: fn(prev: Int, cur: Int) -> Bool {
     if is_ri(prev) && is_ri(cur) -> return false
     true
 }
+
 has_emoji_zwj_prefix: fn(cluster: [Int]) -> Bool {
     i := cluster.len() - 2
     loop i >= 0 {
         cp: cluster[i]
         if cp == 0x200D -> return false
         if !is_extend(cp) -> return is_emoji(cp)
-        i = i - 1
+        i -= 1
     }
     false
 }
 
+is_grapheme_control: fn(cp: Int) -> Bool {
+    (cp < 32 && cp != 9 && cp != 10 && cp != 13) || (cp >= 127 && cp <= 159)
+}
 
-is_grapheme_control: fn(cp: Int) -> Bool { (cp < 32 && cp != 9 && cp != 10 && cp != 13) || (cp >= 127 && cp <= 159) }
 is_l: fn(cp: Int) -> Bool { cp >= C_LBASE && cp < C_LBASE + C_LCOUNT }
+
 is_v: fn(cp: Int) -> Bool { cp >= C_VBASE && cp < C_VBASE + C_VCOUNT }
+
 is_t: fn(cp: Int) -> Bool { cp >= C_TBASE + 1 && cp < C_TBASE + C_TCOUNT }
+
 is_lv: fn(cp: Int) -> Bool {
     s: cp - C_SBASE
     s >= 0 && s < C_SCOUNT && s % C_TCOUNT == 0
 }
+
 is_lvt: fn(cp: Int) -> Bool {
     s: cp - C_SBASE
     s >= 0 && s < C_SCOUNT && s % C_TCOUNT != 0
 }
+
 is_ri: fn(cp: Int) -> Bool { cp >= 127462 && cp <= 127487 }
+
 is_emoji: fn(cp: Int) -> Bool { (cp >= 0x1F300 && cp <= 0x1FAFF) || (cp >= 0x2600 && cp <= 0x27BF) }
 
 // UAX #29 WB/SB algorithm adapted from 7c42badbb's text segmentation port. Tags
 // are the generator's WORD_TAGS / SENTENCE_TAGS.
 WB_CR: 1
+
 WB_LF: 2
+
 WB_NEWLINE: 3
+
 WB_EXTEND: 4
+
 WB_ZWJ: 5
+
 WB_RI: 6
+
 WB_FORMAT: 7
+
 WB_KATAKANA: 8
+
 WB_HEBREW: 9
+
 WB_ALETTER: 10
+
 WB_SINGLEQUOTE: 11
+
 WB_DOUBLEQUOTE: 12
+
 WB_MIDNUMLET: 13
+
 WB_MIDLETTER: 14
+
 WB_MIDNUM: 15
+
 WB_NUMERIC: 16
+
 WB_EXTENDNUMLET: 17
+
 WB_WSEGSPACE: 18
+
 SB_CR: 1
+
 SB_LF: 2
+
 SB_EXTEND: 3
+
 SB_SEP: 4
+
 SB_FORMAT: 5
+
 SB_SP: 6
+
 SB_LOWER: 7
+
 SB_UPPER: 8
+
 SB_OLETTER: 9
+
 SB_NUMERIC: 10
+
 SB_ATERM: 11
+
 SB_SCONTINUE: 12
+
 SB_STERM: 13
+
 SB_CLOSE: 14
 
 // JUCD schema 1, explicit little-endian 3-byte scalar range endpoints.
@@ -934,30 +1013,48 @@ SB_CLOSE: 14
 segment_uint: fn(table: View<U8>, at: Int) -> Int Never! {
     Int{table[at]}.bit_or((Int{table[at + 1]} << 8)).bit_or((Int{table[at + 2]} << 16))
 }
+
 segment_row: fn(table: View<U8>, cp: Int, stride: Int) -> Int Never! {
     low := 0
     high := (table.len() - 40) /% stride
     loop low < high {
         mid: (low + high) /% 2
         row: 40 + mid * stride
-        if cp < segment_uint(table, row) -> high = mid
-        else if cp > segment_uint(table, row + 3) -> low = mid + 1
-        else -> return row
+        if cp < segment_uint(table, row) -> high = mid else if cp > segment_uint(table, row + 3) {
+            low = mid + 1
+        } else { return row }
     }
     -1
 }
+
 segment_tag: fn(table: View<U8>, cp: Int) -> Int Never! {
     row: segment_row(table, cp, 7)
     if row < 0 -> return 0
     Int{table[row + 6]}
 }
+
 segment_contains: fn(table: View<U8>, cp: Int) -> Bool Never! { segment_row(table, cp, 6) >= 0 }
 
-WordUnit: struct { class: Int, first: Int, last: Int, end: Int }
-is_word_newline: fn(class: Int) -> Bool Never! { class == WB_NEWLINE || class == WB_CR || class == WB_LF }
+WordUnit: struct {
+    class: Int
+    first: Int
+    last: Int
+    end: Int
+}
+
+is_word_newline: fn(class: Int) -> Bool Never! {
+    class == WB_NEWLINE || class == WB_CR || class == WB_LF
+}
+
 is_ahletter: fn(class: Int) -> Bool Never! { class == WB_ALETTER || class == WB_HEBREW }
-is_midletter_q: fn(class: Int) -> Bool Never! { class == WB_MIDLETTER || class == WB_MIDNUMLET || class == WB_SINGLEQUOTE }
-is_midnum_q: fn(class: Int) -> Bool Never! { class == WB_MIDNUM || class == WB_MIDNUMLET || class == WB_SINGLEQUOTE }
+
+is_midletter_q: fn(class: Int) -> Bool Never! {
+    class == WB_MIDLETTER || class == WB_MIDNUMLET || class == WB_SINGLEQUOTE
+}
+
+is_midnum_q: fn(class: Int) -> Bool Never! {
+    class == WB_MIDNUM || class == WB_MIDNUMLET || class == WB_SINGLEQUOTE
+}
 
 // WB4: ignore Extend/Format/ZWJ after any non-newline unit, retaining its
 // actual last scalar class for WB3c and WB3d. Ends are exclusive byte offsets.
@@ -982,30 +1079,48 @@ word_reduce: fn(pairs: [IndexedCp], byte_len: Int) -> [WordUnit] Never! {
     }
     units
 }
+
 word_break_at: fn(units: [WordUnit], i: Int, pictographic: View<U8>) -> Bool Never! {
     pc: units[i].class
     cc: units[i + 1].class
     n: units.len()
-    if pc == WB_CR && cc == WB_LF -> return false // WB3
-    if is_word_newline(pc) || is_word_newline(cc) -> return true // WB3a/b
-    if units[i].last == WB_ZWJ && segment_contains(pictographic, units[i + 1].first) -> return false // WB3c
-    if pc == WB_WSEGSPACE && cc == WB_WSEGSPACE && units[i].last == WB_WSEGSPACE -> return false // WB3d
-    if is_ahletter(pc) && is_ahletter(cc) -> return false // WB5
-    if is_ahletter(pc) && is_midletter_q(cc) && i + 2 < n && is_ahletter(units[i + 2].class) -> return false // WB6
-    if is_ahletter(cc) && is_midletter_q(pc) && i >= 1 && is_ahletter(units[i - 1].class) -> return false // WB7
-    if pc == WB_HEBREW && cc == WB_SINGLEQUOTE -> return false // WB7a
-    if pc == WB_HEBREW && cc == WB_DOUBLEQUOTE && i + 2 < n && units[i + 2].class == WB_HEBREW -> return false // WB7b
-    if pc == WB_DOUBLEQUOTE && cc == WB_HEBREW && i >= 1 && units[i - 1].class == WB_HEBREW -> return false // WB7c
-    if pc == WB_NUMERIC && cc == WB_NUMERIC -> return false // WB8
-    if is_ahletter(pc) && cc == WB_NUMERIC -> return false // WB9
-    if pc == WB_NUMERIC && is_ahletter(cc) -> return false // WB10
-    if cc == WB_NUMERIC && is_midnum_q(pc) && i >= 1 && units[i - 1].class == WB_NUMERIC -> return false // WB11
-    if pc == WB_NUMERIC && is_midnum_q(cc) && i + 2 < n && units[i + 2].class == WB_NUMERIC -> return false // WB12
-    if pc == WB_KATAKANA && cc == WB_KATAKANA -> return false // WB13
-    if (is_ahletter(pc) || pc == WB_NUMERIC || pc == WB_KATAKANA || pc == WB_EXTENDNUMLET) && cc == WB_EXTENDNUMLET -> return false // WB13a
-    if pc == WB_EXTENDNUMLET && (is_ahletter(cc) || cc == WB_NUMERIC || cc == WB_KATAKANA) -> return false // WB13b
-    true // WB999
+    if pc == WB_CR && cc == WB_LF -> return false  // WB3
+    if is_word_newline(pc) || is_word_newline(cc) -> return true  // WB3a/b
+    if units[i].last == WB_ZWJ && segment_contains(pictographic, units[i + 1].first) -> return false  // WB3c
+    if pc == WB_WSEGSPACE && cc == WB_WSEGSPACE && units[i].last == WB_WSEGSPACE -> return false  // WB3d
+    if is_ahletter(pc) && is_ahletter(cc) -> return false  // WB5
+    if is_ahletter(pc) && is_midletter_q(cc) && i + 2 < n && is_ahletter(units[i + 2].class) {
+        return false  // WB6
+    }
+    if is_ahletter(cc) && is_midletter_q(pc) && i >= 1 && is_ahletter(units[i - 1].class) {
+        return false  // WB7
+    }
+    if pc == WB_HEBREW && cc == WB_SINGLEQUOTE -> return false  // WB7a
+    if pc == WB_HEBREW && cc == WB_DOUBLEQUOTE && i + 2 < n && units[i + 2].class == WB_HEBREW {
+        return false  // WB7b
+    }
+    if pc == WB_DOUBLEQUOTE && cc == WB_HEBREW && i >= 1 && units[i - 1].class == WB_HEBREW {
+        return false  // WB7c
+    }
+    if pc == WB_NUMERIC && cc == WB_NUMERIC -> return false  // WB8
+    if is_ahletter(pc) && cc == WB_NUMERIC -> return false  // WB9
+    if pc == WB_NUMERIC && is_ahletter(cc) -> return false  // WB10
+    if cc == WB_NUMERIC && is_midnum_q(pc) && i >= 1 && units[i - 1].class == WB_NUMERIC {
+        return false  // WB11
+    }
+    if pc == WB_NUMERIC && is_midnum_q(cc) && i + 2 < n && units[i + 2].class == WB_NUMERIC {
+        return false  // WB12
+    }
+    if pc == WB_KATAKANA && cc == WB_KATAKANA -> return false  // WB13
+    if (is_ahletter(pc) || pc == WB_NUMERIC || pc == WB_KATAKANA || pc == WB_EXTENDNUMLET) && cc == WB_EXTENDNUMLET {
+        return false  // WB13a
+    }
+    if pc == WB_EXTENDNUMLET && (is_ahletter(cc) || cc == WB_NUMERIC || cc == WB_KATAKANA) {
+        return false  // WB13b
+    }
+    true  // WB999
 }
+
 word_boundaries: fn(pairs: [IndexedCp], byte_len: Int) -> [Int] Never! {
     out := [Int]{}
     if pairs.len() == 0 -> return out
@@ -1024,6 +1139,7 @@ word_boundaries: fn(pairs: [IndexedCp], byte_len: Int) -> [Int] Never! {
     out.push(byte_len)
     out
 }
+
 split_words: fn(text: String) -> [String] Never! {
     raw: text.bytes()
     pairs: decode_indexed(text)
@@ -1037,8 +1153,10 @@ split_words: fn(text: String) -> [String] Never! {
     loop end in word_boundaries(pairs, raw.len()) {
         keep := false
         loop at < pairs.len() && pairs[at].index < end {
-            if !keep -> keep = segment_contains(alphabetic_window, pairs[at].cp) || segment_contains(numeric_window, pairs[at].cp)
-            at = at + 1
+            if !keep {
+                keep = segment_contains(alphabetic_window, pairs[at].cp) || segment_contains(numeric_window, pairs[at].cp)
+            }
+            at += 1
         }
         if keep -> out.push(slice_bytes(raw, start, end))
         start = end
@@ -1046,18 +1164,28 @@ split_words: fn(text: String) -> [String] Never! {
     out
 }
 
-SentenceUnit: struct { class: Int, end: Int }
-is_sentence_para: fn(class: Int) -> Bool Never! { class == SB_SEP || class == SB_CR || class == SB_LF }
+SentenceUnit: struct {
+    class: Int
+    end: Int
+}
+
+is_sentence_para: fn(class: Int) -> Bool Never! {
+    class == SB_SEP || class == SB_CR || class == SB_LF
+}
+
 sentence_lower_follows: fn(units: [SentenceUnit], from: Int) -> Bool Never! {
     k := from
     loop k < units.len() {
         class: units[k].class
         if class == SB_LOWER -> return true
-        if class == SB_OLETTER || class == SB_UPPER || is_sentence_para(class) || class == SB_STERM || class == SB_ATERM -> return false
-        k = k + 1
+        if class == SB_OLETTER || class == SB_UPPER || is_sentence_para(class) || class == SB_STERM || class == SB_ATERM {
+            return false
+        }
+        k += 1
     }
     false
 }
+
 // SB998/SB999 do NOT break. SB11 places the boundary after SATerm Close* Sp*
 // unless the SB8/SB8a/SB9/SB10 context suppresses it.
 sentence_breaks: fn(units: [SentenceUnit]) -> [Bool] Never! {
@@ -1068,40 +1196,43 @@ sentence_breaks: fn(units: [SentenceUnit]) -> [Bool] Never! {
     loop i + 1 < n {
         current: units[i].class
         if current == SB_CR && units[i + 1].class == SB_LF {
-            i = i + 1 // SB3
+            i += 1  // SB3
             next
         }
         if is_sentence_para(current) {
-            breaks[i] = true // SB4
-            i = i + 1
+            breaks[i] = true  // SB4
+            i += 1
             next
         }
         if current == SB_ATERM || current == SB_STERM {
             if current == SB_ATERM && units[i + 1].class == SB_NUMERIC {
-                i = i + 1 // SB6
+                i += 1  // SB6
                 next
             }
             if current == SB_ATERM && i > 0 && (units[i - 1].class == SB_UPPER || units[i - 1].class == SB_LOWER) && units[i + 1].class == SB_UPPER {
-                i = i + 1 // SB7
+                i += 1  // SB7
                 next
             }
             j := i + 1
-            loop j < n && units[j].class == SB_CLOSE -> j = j + 1
+            loop j < n && units[j].class == SB_CLOSE -> j += 1
             close_end: j
-            loop j < n && units[j].class == SB_SP -> j = j + 1
+            loop j < n && units[j].class == SB_SP -> j += 1
             sp_end: j
             sb9: close_end < n && is_sentence_para(units[close_end].class)
             sb10: sp_end < n && (units[sp_end].class == SB_SP || is_sentence_para(units[sp_end].class))
             sb8a: sp_end < n && (units[sp_end].class == SB_SCONTINUE || units[sp_end].class == SB_STERM || units[sp_end].class == SB_ATERM)
             sb8: current == SB_ATERM && sentence_lower_follows(units, sp_end)
-            if !(sb9 || sb10 || sb8a || sb8) && sp_end > 0 && sp_end - 1 < breaks.len() -> breaks[sp_end - 1] = true // SB11
+            if !(sb9 || sb10 || sb8a || sb8) && sp_end > 0 && sp_end - 1 < breaks.len() {
+                breaks[sp_end - 1] = true  // SB11
+            }
             i = if sp_end > i -> sp_end else -> i + 1
             next
         }
-        i = i + 1
+        i += 1
     }
     breaks
 }
+
 sentence_boundaries: fn(pairs: [IndexedCp], byte_len: Int) -> [Int] Never! {
     out := [Int]{}
     if pairs.len() == 0 -> return out
@@ -1128,6 +1259,7 @@ sentence_boundaries: fn(pairs: [IndexedCp], byte_len: Int) -> [Int] Never! {
     out.push(byte_len)
     out
 }
+
 split_sentences: fn(text: String) -> [String] Never! {
     raw: text.bytes()
     out := [String]{}
@@ -1149,17 +1281,16 @@ split_lines: fn(text: String) -> [String] {
     loop i < raw.len() {
         if raw[i] == (U8{10}) || raw[i] == (U8{13}) {
             out.push(slice_bytes(raw, start, i))
-            if raw[i] == (U8{13}) && i + 1 < raw.len() && raw[i + 1] == (U8{10}) -> i = i + 1
-            i = i + 1
+            if raw[i] == (U8{13}) && i + 1 < raw.len() && raw[i + 1] == (U8{10}) -> i += 1
+            i += 1
             start = i
             next
         }
-        i = i + 1
+        i += 1
     }
     if start < raw.len() -> out.push(slice_bytes(raw, start, raw.len()))
     out
 }
-
 
 hex_cp: fn(cp: Int) -> String {
     hex: "0123456789ABCDEF"
@@ -1177,12 +1308,12 @@ hex_cp: fn(cp: Int) -> String {
         if digits.len() >= 4 -> break
         digits.push(U8{48})
     }
-    out := [U8]{85, 43} // U+
+    out := [U8]{85, 43}  // U+
     i := digits.len() - 1
     loop {
         if i < 0 -> return String.from_bytes(out) ?? ""
         out.push(digits[i])
-        i = i - 1
+        i -= 1
     }
 }
 
@@ -1240,7 +1371,9 @@ collation_key: fn(value: String) -> [U8] Never! {
 compare_collation_keys: fn(left: [U8], right: [U8]) -> Ordering Never! {
     at := 0
     loop at < left.len() && at < right.len() {
-        if left[at] != right[at] -> return if left[at] < right[at] -> Ordering.Less else -> Ordering.Greater
+        if left[at] != right[at] {
+            return if left[at] < right[at] -> Ordering.Less else -> Ordering.Greater
+        }
         at += 1
     }
     left.len() <=> right.len()
@@ -1306,9 +1439,7 @@ collation_elements: fn(scalars: [Int]) -> [Int] Never! {
                     key.push(scalars[probe])
                     taken[probe] = true
                     row = found
-                } else {
-                    skipped_class = class
-                }
+                } else { skipped_class = class }
             }
             probe += 1
         }
@@ -1316,9 +1447,7 @@ collation_elements: fn(scalars: [Int]) -> [Int] Never! {
             first: text_asset.uint(contractions, row + 9, 3)
             count: text_asset.uint(contractions, row + 12, 1)
             collation_push_elements(out, pool, first, count)
-        } else {
-            collation_single_elements(out, singles, pool, ideographs, scalars[at])
-        }
+        } else { collation_single_elements(out, singles, pool, ideographs, scalars[at]) }
         at = next_at
     }
     out
@@ -1404,12 +1533,22 @@ collation_single_elements: fn(out: &[Int], singles: View<U8>, pool: View<U8>, id
 
 // UTS #10 (UCA 17.0.0) section 10.1.3: [.AAAA.0020.0002][.BBBB.0000.0000].
 collation_implicit: fn(ideographs: View<U8>, scalar: Int) -> (base: Int, trail: Int) Never! {
-    if (scalar >= 94208 && scalar <= 100351) || (scalar >= 101632 && scalar <= 101759) -> return (base: 64256, trail: (scalar - 94208).bit_or(32768))
-    if (scalar >= 100352 && scalar <= 101119) || (scalar >= 101760 && scalar <= 101887) -> return (base: 64257, trail: (scalar - 100352).bit_or(32768))
-    if scalar >= 110960 && scalar <= 111359 -> return (base: 64258, trail: (scalar - 110960).bit_or(32768))
-    if scalar >= 101120 && scalar <= 101631 -> return (base: 64259, trail: (scalar - 101120).bit_or(32768))
+    if (scalar >= 94208 && scalar <= 100351) || (scalar >= 101632 && scalar <= 101759) {
+        return (base: 64256, trail: (scalar - 94208).bit_or(32768))
+    }
+    if (scalar >= 100352 && scalar <= 101119) || (scalar >= 101760 && scalar <= 101887) {
+        return (base: 64257, trail: (scalar - 100352).bit_or(32768))
+    }
+    if scalar >= 110960 && scalar <= 111359 {
+        return (base: 64258, trail: (scalar - 110960).bit_or(32768))
+    }
+    if scalar >= 101120 && scalar <= 101631 {
+        return (base: 64259, trail: (scalar - 101120).bit_or(32768))
+    }
     trail: scalar.bit_and(32767).bit_or(32768)
-    if !text_asset.contains(ideographs, scalar) -> return (base: 64448 + (scalar >> 15), trail: trail)
+    if !text_asset.contains(ideographs, scalar) {
+        return (base: 64448 + (scalar >> 15), trail: trail)
+    }
     // Core Han: the CJK Unified Ideographs and CJK Compatibility Ideographs blocks.
     core_han: (scalar >= 19968 && scalar <= 40959) || (scalar >= 63744 && scalar <= 64255)
     (base: (if core_han -> 64320 else -> 64384) + (scalar >> 15), trail: trail)

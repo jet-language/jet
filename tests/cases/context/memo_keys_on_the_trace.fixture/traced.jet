@@ -4,20 +4,15 @@
 // second hits; the call from another line misses and sees its own frames.
 frames: fn() -> [SourceLocation] { context.trace }
 
-#Memo
-site: fn(n: Int) -> Int {
+#Memo site: fn(n: Int) -> Int {
     total := n
-    loop at in frames() {
-        total += at.line
-    }
+    loop at in frames() -> total += at.line
     total
 }
 
 run: fn() {
     same := [Int]{}
-    loop _ in 0..<2 {
-        same.push(site(0))
-    }
+    loop _ in 0..<2 { same.push(site(0)) }
     other: site(0)
     stats: site.cache()
     print("traced same={same[0] == same[1]} differ={same[0] != other} hits={stats.hits} misses={stats.misses}")

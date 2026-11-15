@@ -9,9 +9,7 @@ jet_cli_ascii_lower: fn(value: String) -> String Never! {
     bytes := [U8]{}
     loop byte in value.bytes() {
         code: Int{byte}
-        if code >= 65 && code <= 90 {
-            bytes.push(checked(U8{code + 32}) ?? byte)
-        } else {
+        if code >= 65 && code <= 90 -> bytes.push(checked(U8{code + 32}) ?? byte) else {
             bytes.push(byte)
         }
     }
@@ -82,7 +80,9 @@ jet_cli_syntax_meanings_text: fn(meanings: [JetCLISyntaxMeaning]) -> String Neve
         text = "{text}{indent}{meaning.text}\n{indent}Example:\n"
         loop line in meaning.example.lines() -> text = "{text}{indent}  {line}\n"
         if meaning.afterwards != "" -> text = "{text}{indent}Afterwards: {meaning.afterwards}\n"
-        if meaning.related_codes.len() > 0 -> text = "{text}{indent}Related: {meaning.related_codes.join(", ")}\n"
+        if meaning.related_codes.len() > 0 {
+            text = "{text}{indent}Related: {meaning.related_codes.join(", ")}\n"
+        }
     }
     text
 }
@@ -127,7 +127,9 @@ jet_cli_syntax_query: fn(query: String) -> Bool Never! {
         prefix := true
         loop index in 0..<colon {
             code: Int{raw[index]}
-            if !jet_cli_syntax_ascii_alphanumeric(code) && code != 95 && code != 45 && code != 46 && code != 47 -> prefix = false
+            if !jet_cli_syntax_ascii_alphanumeric(code) && code != 95 && code != 45 && code != 46 && code != 47 {
+                prefix = false
+            }
         }
         if prefix {
             loop index in (colon + 1)..<raw.len() {
@@ -138,7 +140,9 @@ jet_cli_syntax_query: fn(query: String) -> Bool Never! {
     if text.starts_with("@") || text.starts_with("#") || text.starts_with(":") -> return true
     loop byte in raw {
         code: Int{byte}
-        if !jet_cli_syntax_ascii_alphanumeric(code) && code != 95 && code != 46 && code != 45 && code != 47 && code != 64 -> return true
+        if !jet_cli_syntax_ascii_alphanumeric(code) && code != 95 && code != 46 && code != 45 && code != 47 && code != 64 {
+            return true
+        }
     }
     false
 }

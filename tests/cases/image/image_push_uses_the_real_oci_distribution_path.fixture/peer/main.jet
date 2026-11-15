@@ -2,6 +2,7 @@ package: {
     name: "registry_peer"
     authority: { allow: [IO, Mem.Alloc, FS, Net, Time.Wait] }
 }
+
 // Real TCP peer port of tests/image.rs:138-209. Returns observations, never simulated snapshots.
 // One shared 20s deadline, immediate queued accepts and 5ms polling match the original.
 use {
@@ -41,9 +42,7 @@ registry_words: fn(value: String) -> [String] {
                 words.push(word)
                 word = ""
             }
-        } else {
-            word = "{word}{scalar}"
-        }
+        } else { word = "{word}{scalar}" }
     }
     if word != "" -> words.push(word)
     words
@@ -108,12 +107,12 @@ run: fn() {
         requests.push("{{\"method\":{method_json},\"path\":{path_json},\"body_has_schema_version\":{has_schema}}}")
         status := 404
         extra := ""
-        if method == "HEAD" -> status = 404
-        else if method == "POST" {
+        if method == "HEAD" -> status = 404 else if method == "POST" {
             status = 202
             extra = "Location: /test-upload\r\n"
-        } else if method == "PUT" && (path.contains("/blobs/uploads/") || path.starts_with("/test-upload")) -> status = 201
-        else if method == "PUT" && path.contains("/manifests/") -> status = 201
+        } else if method == "PUT" && (path.contains("/blobs/uploads/") || path.starts_with("/test-upload")) {
+            status = 201
+        } else if method == "PUT" && path.contains("/manifests/") { status = 201 }
         crlf: "\r\n"
         response: "HTTP/1.1 {status} Test{crlf}{extra}Content-Length: 0{crlf}Connection: close{crlf}{crlf}"
         net.tcp_write_text(stream, response) ?? panic("write registry response")

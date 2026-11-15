@@ -38,7 +38,6 @@
 // reachable together. The heap's payload is not zeroed either, so a Load
 // before any Store reads unknown bytes in both forms. Scalar replacement
 // (OptScalar.jet) then puts the storage's fields in registers.
-
 use jet_foundation.[Type, compiler_threads_single, name_rows_set, name_rows_value]
 
 // Turns each local box of `f` into frame storage; returns how many.
@@ -56,7 +55,9 @@ ir_opt_local_boxes: fn(m: IRModule, f: &IRFunction) -> Int Never! {
     size := [Int]{}
     loop _ in 0..<count -> size.push(-1)
     loop at in 0..<f.op.len() {
-        if f.op[at] != .CallRuntime || (f.a[at] != alloc && f.a[at] != value) || f.c[at] != 2 || f.dst[at] < f.param_count -> next
+        if f.op[at] != .CallRuntime || (f.a[at] != alloc && f.a[at] != value) || f.c[at] != 2 || f.dst[at] < f.param_count {
+            next
+        }
         boxed: f.dst[at]
         if facts.defs[boxed] != 1 -> next
         bytes: ir_opt_const_at(f, facts, f.args[f.b[at]], at) ?? -1
@@ -89,7 +90,9 @@ ir_opt_local_boxes: fn(m: IRModule, f: &IRFunction) -> Int Never! {
     }
     loop slot in 0..<count {
         target: if into[slot] >= 0 && join[into[slot]] == 1 -> into[slot] else -> -1
-        if target >= 0 && (size[target] < 0 || size[slot] < size[target]) -> size[target] = size[slot]
+        if target >= 0 && (size[target] < 0 || size[slot] < size[target]) {
+            size[target] = size[slot]
+        }
     }
     // Until no candidate drops out: an Else arm is dead only while its box
     // stays a candidate, and the reads in it then count again.
@@ -103,7 +106,9 @@ ir_opt_local_boxes: fn(m: IRModule, f: &IRFunction) -> Int Never! {
         loop at in 0..<f.op.len() {
             if f.op[at] != .If || f.b[at] < 0 || f.a[at] < 0 || facts.defs[f.a[at]] != 1 -> next
             test: facts.def_at[f.a[at]]
-            if test < 0 || f.op[test] != .CallRuntime || f.a[test] != unique || f.c[test] != 1 || size[f.args[f.b[test]]] < 0 -> next
+            if test < 0 || f.op[test] != .CallRuntime || f.a[test] != unique || f.c[test] != 1 || size[f.args[f.b[test]]] < 0 {
+                next
+            }
             loop k in (f.b[at] + 1)..<f.c[at] -> dead[k] = true
         }
         // Each Offset inside a candidate: its slot is that field's address
@@ -115,7 +120,9 @@ ir_opt_local_boxes: fn(m: IRModule, f: &IRFunction) -> Int Never! {
             shift.push(0)
         }
         loop at in 0..<f.op.len() {
-            if dead[at] || f.op[at] != .Offset || f.dst[at] < f.param_count || f.a[at] < 0 || size[f.a[at]] < 0 || facts.defs[f.dst[at]] != 1 -> next
+            if dead[at] || f.op[at] != .Offset || f.dst[at] < f.param_count || f.a[at] < 0 || size[f.a[at]] < 0 || facts.defs[f.dst[at]] != 1 {
+                next
+            }
             if f.b[at] >= 0 && f.b[at] < size[f.a[at]] {
                 base[f.dst[at]] = f.a[at]
                 shift[f.dst[at]] = f.b[at]
@@ -132,8 +139,12 @@ ir_opt_local_boxes: fn(m: IRModule, f: &IRFunction) -> Int Never! {
         loop at in 0..<f.op.len() {
             op: f.op[at]
             if dead[at] -> next
-            if op == .Store && f.a[at] >= 0 && f.c[at] >= 0 && m.types[f.slot_type[f.c[at]]].drop != "" -> stored_drop[ir_opt_local_box_of(base, f.a[at])] = true
-            if op == .CopyBytes && f.a[at] >= 0 -> stored_drop[ir_opt_local_box_of(base, f.a[at])] = true
+            if op == .Store && f.a[at] >= 0 && f.c[at] >= 0 && m.types[f.slot_type[f.c[at]]].drop != "" {
+                stored_drop[ir_opt_local_box_of(base, f.a[at])] = true
+            }
+            if op == .CopyBytes && f.a[at] >= 0 {
+                stored_drop[ir_opt_local_box_of(base, f.a[at])] = true
+            }
             ir_x64_reads_into(f, at, reads)
             loop slot in reads {
                 if slot < 0 || slot >= count -> next
@@ -141,9 +152,7 @@ ir_opt_local_boxes: fn(m: IRModule, f: &IRFunction) -> Int Never! {
                 if size[boxed] < 0 -> next
                 // A box moving into its join: the join's reads are its own.
                 joining: op == .Move && boxed == slot && into[slot] == f.dst[at] && join[f.dst[at]] == 1 && size[f.dst[at]] >= 0
-                if op == .Drop && boxed == slot {
-                    dropped[slot] = true
-                } else if !joining && !ir_opt_local_box_read(m, f, facts, at, slot, boxed, shift[slot], size[boxed], base, unique, release, free) {
+                if op == .Drop && boxed == slot -> dropped[slot] = true else if !joining && !ir_opt_local_box_read(m, f, facts, at, slot, boxed, shift[slot], size[boxed], base, unique, release, free) {
                     size[boxed] = -1
                     changed = true
                 }
@@ -159,7 +168,9 @@ ir_opt_local_boxes: fn(m: IRModule, f: &IRFunction) -> Int Never! {
         // frees whichever box it holds.
         loop slot in 0..<count {
             target: if into[slot] >= 0 && join[into[slot]] == 1 -> into[slot] else -> -1
-            if target < 0 || (size[slot] >= 0 && size[target] >= 0 && !(dropped[target] && stored_drop[slot])) -> next
+            if target < 0 || (size[slot] >= 0 && size[target] >= 0 && !(dropped[target] && stored_drop[slot])) {
+                next
+            }
             if size[slot] >= 0 || size[target] >= 0 -> changed = true
             size[slot] = -1
             size[target] = -1
@@ -178,18 +189,14 @@ ir_opt_local_boxes: fn(m: IRModule, f: &IRFunction) -> Int Never! {
             f.b[at] = 8
             f.c[at] = -1
         } else if op == .CallRuntime && f.c[at] >= 1 && size[f.args[f.b[at]]] >= 0 {
-            if f.a[at] == free || f.dst[at] < 0 {
-                ir_opt_kill(f, at)
-            } else {
+            if f.a[at] == free || f.dst[at] < 0 -> ir_opt_kill(f, at) else {
                 // The unique test or the release: the only owner.
                 f.op[at] = .Const
                 f.a[at] = 1
                 f.b[at] = -1
                 f.c[at] = -1
             }
-        } else if op == .Drop && f.a[at] >= 0 && size[f.a[at]] >= 0 {
-            ir_opt_kill(f, at)
-        } else if (op == .Eq || op == .Ne) && ((f.a[at] >= 0 && size[f.a[at]] >= 0) || (f.b[at] >= 0 && size[f.b[at]] >= 0)) {
+        } else if op == .Drop && f.a[at] >= 0 && size[f.a[at]] >= 0 { ir_opt_kill(f, at) } else if (op == .Eq || op == .Ne) && ((f.a[at] >= 0 && size[f.a[at]] >= 0) || (f.b[at] >= 0 && size[f.b[at]] >= 0)) {
             f.op[at] = .Const
             f.a[at] = if op == .Ne -> 1 else -> 0
             f.b[at] = -1
@@ -213,7 +220,9 @@ ir_opt_local_box_straight: fn(f: IRFunction, from: Int, to: Int) -> Bool Never! 
     if from < 0 || from >= to -> return false
     loop at in (from + 1)..<to {
         op: f.op[at]
-        if op == .Block || op == .Loop || op == .If || op == .Else || op == .End || op == .Br || op == .BrIf || op == .Return || op == .Unreachable -> return false
+        if op == .Block || op == .Loop || op == .If || op == .Else || op == .End || op == .Br || op == .BrIf || op == .Return || op == .Unreachable {
+            return false
+        }
     }
     true
 }
@@ -238,8 +247,10 @@ ir_opt_local_box_read: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: Int, 
     if read != boxed -> return false
     if op == .CallRuntime {
         first: f.args[f.b[at]]
-        if (f.a[at] == unique || f.a[at] == release) -> return f.c[at] == 1
-        if f.a[at] == free -> return f.c[at] == 3 && first == boxed && f.args[f.b[at] + 1] != boxed && f.args[f.b[at] + 2] != boxed
+        if (f.a[at] == unique || f.a[at] == release) { return f.c[at] == 1 }
+        if f.a[at] == free {
+            return f.c[at] == 3 && first == boxed && f.args[f.b[at] + 1] != boxed && f.args[f.b[at] + 2] != boxed
+        }
         return false
     }
     if op == .Eq || op == .Ne {
@@ -300,9 +311,7 @@ ir_opt_local_box_test_module: fn(escape: Bool, moved: Bool) -> IRModule Never! {
         _ := ir_emit(run, IROp.CopyBytes, -1, frame, field, 8, 5)
         if escape -> _ := ir_emit(run, IROp.Store, -1, frame, 8, field, 5)
         _ := ir_emit(run, IROp.Load, second, frame, 0, -1, 5)
-    } else {
-        _ := ir_emit(run, IROp.Load, second, box, 8, -1, 5)
-    }
+    } else { _ := ir_emit(run, IROp.Load, second, box, 8, -1, 5) }
     alone: ir_slot(run, flag, IRSlotKind.Temp, -1, 0)
     tested: ir_args(run, [Int]{box})
     _ := ir_emit(run, IROp.CallRuntime, alone, unique, tested, 1, 6)

@@ -21,6 +21,7 @@ use {
 }
 
 JET_CLI_MEASURE_OPEN: "\tjet-measure\t"
+
 JET_CLI_MEASURE_CLOSE: "\tjet-measure-end\t\n"
 
 // One declared budget and the file whose source its spans index.
@@ -203,7 +204,9 @@ jet_cli_measure_settle: fn(wire: String, name: String, plan: JetCLIMeasurePlan, 
             parts.flags = parts.flags.bit_and(6)
             record.ok = false
         }
-        if diagnostics.len() > 0 -> parts.stderr = "{parts.stderr}{diagnostic_render_all(budget.shown, budget.source, diagnostics, color)}"
+        if diagnostics.len() > 0 {
+            parts.stderr = "{parts.stderr}{diagnostic_render_all(budget.shown, budget.source, diagnostics, color)}"
+        }
         record.budgets.push(verdict)
     }
     records.push(record)

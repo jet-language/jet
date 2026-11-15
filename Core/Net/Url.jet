@@ -12,6 +12,7 @@ use {
     core.net.mime.[MIME]
     unicode: core.text
 }
+
 #Error
 URLError: enum {
     Syntax
@@ -36,24 +37,25 @@ URL: struct {
     raw: String
     host_recipe: [URLPart]
     path_recipe: [URLPart]
+
     impl Display {
         display: fn(self) -> String { unparse(self) }
     }
+
     impl Debug {
         debug: fn(&&self) -> String { unparse(self) }
     }
+
     impl Equatable {
         equal: fn(self, rhs: URL) -> Bool {
-            self.scheme_text == rhs.scheme_text && self.user_text == rhs.user_text &&
-            self.password_text == rhs.password_text && self.host_text == rhs.host_text &&
-            self.port_value == rhs.port_value && self.port_explicit == rhs.port_explicit &&
-            self.path_text == rhs.path_text && self.query_text == rhs.query_text &&
-            self.fragment_text == rhs.fragment_text && self.raw == rhs.raw
+            self.scheme_text == rhs.scheme_text && self.user_text == rhs.user_text && self.password_text == rhs.password_text && self.host_text == rhs.host_text && self.port_value == rhs.port_value && self.port_explicit == rhs.port_explicit && self.path_text == rhs.path_text && self.query_text == rhs.query_text && self.fragment_text == rhs.fragment_text && self.raw == rhs.raw
         }
     }
 
     scheme: fn(self) -> String Never! { self.scheme_text.copy() }
+
     path: fn(self) -> String Never! { self.path_text.copy() }
+
     query: fn(self) -> String Never! { self.query_text.copy() }
 
     host: fn(self) -> String? Never! {
@@ -124,7 +126,9 @@ URL: struct {
     normalize: fn(self) -> URL Never! {
         scheme: ascii_lower(self.scheme_text)
         path := self.path_text
-        if scheme != "data" && self.path_recipe.len() == 0 -> path = normalize_path(self.path_text, self.host_text.bytes().len() > 0 || starts(self.path_text, "/"))
+        if scheme != "data" && self.path_recipe.len() == 0 {
+            path = normalize_path(self.path_text, self.host_text.bytes().len() > 0 || starts(self.path_text, "/"))
+        }
         URL{
             scheme_text: scheme,
             user_text: self.user_text,
@@ -169,7 +173,9 @@ URL: struct {
         Hole: String
 
         check: fn(text: String) URLLiteralError! -[]> {
-            if url_literal_reason(text) == .Val(reason) -> return Err(URLLiteralError{reason: reason})
+            if url_literal_reason(text) == .Val(reason) {
+                return Err(URLLiteralError{reason: reason})
+            }
             return Ok()
         }
 
@@ -201,10 +207,11 @@ userinfo_text: fn(url: URL) -> String Never! {
     "{url.user_text}:{url.password_text}"
 }
 
-
 // Why a checked URL literal was rejected.
 #Error
-URLLiteralError: struct { reason: String }
+URLLiteralError: struct {
+    reason: String
+}
 
 // A marker that occurs in none of `literals`, standing for each hole while the
 // skeleton parses.
@@ -243,7 +250,9 @@ priv url_literal_reason: fn(text: String) -> String? {
     colon: index_of(bytes, 58)
     if colon >= 0 {
         scheme: slice(bytes, 0, colon)
-        if find_text(scheme, marker, 0) >= 0 -> return Val("URL scheme cannot contain interpolation")
+        if find_text(scheme, marker, 0) >= 0 {
+            return Val("URL scheme cannot contain interpolation")
+        }
         rest: slice(bytes, colon + 1, bytes.len())
         if ascii_lower(scheme) == "data" {
             data_body := rest
@@ -253,8 +262,12 @@ priv url_literal_reason: fn(text: String) -> String? {
                 if end >= 0 -> data_body = slice(data_body.bytes(), 0, end)
             }
             comma: index_of(data_body.bytes(), 44)
-            if comma >= 0 && find_text(slice(data_body.bytes(), 0, comma), marker, 0) >= 0 -> return Val("data URL MIME metadata cannot contain interpolation")
-            if comma < 0 && find_text(data_body, marker, 0) >= 0 -> return Val("data URL payload needs a MIME separator")
+            if comma >= 0 && find_text(slice(data_body.bytes(), 0, comma), marker, 0) >= 0 {
+                return Val("data URL MIME metadata cannot contain interpolation")
+            }
+            if comma < 0 && find_text(data_body, marker, 0) >= 0 {
+                return Val("data URL payload needs a MIME separator")
+            }
         }
         if starts(rest, "//") {
             authority := slice(rest.bytes(), 2, rest.bytes().len())
@@ -275,7 +288,9 @@ priv url_literal_reason: fn(text: String) -> String? {
                 port_colon: last_index(host_port.bytes(), 58)
                 if port_colon >= 0 -> port = slice(host_port.bytes(), port_colon + 1, host_end)
             }
-            if find_text(port, marker, 0) >= 0 -> return Val("URL port cannot contain interpolation")
+            if find_text(port, marker, 0) >= 0 {
+                return Val("URL port cannot contain interpolation")
+            }
         }
     }
     _: parse_recipe(skeleton, false) ?? return Val("the text is not a valid URL ({err})")
@@ -313,7 +328,9 @@ literal: fn(literals: [String], holes: [String]) -> URL Never! {
     url
 }
 
-URLHoleCursor: struct { index: Int }
+URLHoleCursor: struct {
+    index: Int
+}
 
 // `raw` keeps the constructor's canonical rendering, including explicitly
 // empty user/password/fragment components which accessor storage omits.
@@ -382,13 +399,17 @@ apply_holes: fn(text: String, marker: String, holes: [String], cursor: &URLHoleC
     loop {
         next_marker: find_text(text, marker, start)
         if next_marker < 0 -> break
-        if next_marker > start || out.len() == 0 -> out.push(URLPart{text: slice(text.bytes(), start, next_marker), hole: false})
+        if next_marker > start || out.len() == 0 {
+            out.push(URLPart{text: slice(text.bytes(), start, next_marker), hole: false})
+        }
         if cursor.index >= holes.len() -> panic("typed URL holes do not match its literal skeleton")
         out.push(URLPart{text: holes[cursor.index], hole: true})
         cursor.index += 1
         start = next_marker + marker.bytes().len()
     }
-    if start < text.bytes().len() || out.len() == 0 -> out.push(URLPart{text: slice(text.bytes(), start, text.bytes().len()), hole: false})
+    if start < text.bytes().len() || out.len() == 0 {
+        out.push(URLPart{text: slice(text.bytes(), start, text.bytes().len()), hole: false})
+    }
     out
 }
 
@@ -411,9 +432,7 @@ normalize_recipe: fn(parts: [URLPart]) -> [URLPart] Never! {
     segments := [[URLPart]]{}
     segment := [URLPart]{}
     loop part in parts {
-        if part.hole {
-            segment.push(part.copy())
-        } else {
+        if part.hole -> segment.push(part.copy()) else {
             raw: part.text.bytes()
             start := 0
             loop i in 0..<(raw.len() + 1) {
@@ -436,15 +455,11 @@ normalize_recipe: fn(parts: [URLPart]) -> [URLPart] Never! {
         if !recipe_has_hole(row) && text == "." -> next
         if !recipe_has_hole(row) && text == ".." {
             if normalized.len() > 0 {
-                if !recipe_has_hole(normalized[normalized.len() - 1]) {
-                    _: normalized.pop()
-                } else {
+                if !recipe_has_hole(normalized[normalized.len() - 1]) -> _: normalized.pop() else {
                     normalized.push(row)
                 }
             }
-        } else {
-            normalized.push(row)
-        }
+        } else { normalized.push(row) }
     }
     out := [URLPart]{}
     if absolute -> out.push(URLPart{text: "/", hole: false})
@@ -452,7 +467,9 @@ normalize_recipe: fn(parts: [URLPart]) -> [URLPart] Never! {
         if i > 0 -> out.push(URLPart{text: "/", hole: false})
         loop part in normalized[i] -> out.push(part.copy())
     }
-    if trailing && (out.len() == 0 || !ends_slash(out[out.len() - 1].text)) -> out.push(URLPart{text: "/", hole: false})
+    if trailing && (out.len() == 0 || !ends_slash(out[out.len() - 1].text)) {
+        out.push(URLPart{text: "/", hole: false})
+    }
     out
 }
 
@@ -465,8 +482,7 @@ recipe_segments: fn(parts: [URLPart]) -> [String] Never! {
     out := [String]{}
     current := ""
     loop part in parts {
-        if part.hole -> current = "{current}{part.text}"
-        else {
+        if part.hole -> current = "{current}{part.text}" else {
             raw: part.text.bytes()
             start := 0
             loop i in 0..<(raw.len() + 1) {
@@ -490,22 +506,20 @@ render_recipe: fn(parts: [URLPart], path: Bool, data: Bool) -> String Never! {
     payload := false
     loop part in parts {
         if data {
-            if part.hole -> out = "{out}{percent_encode(part.text)}"
-            else if payload -> out = "{out}{part.text}"
-            else {
+            if part.hole -> out = "{out}{percent_encode(part.text)}" else if payload {
+                out = "{out}{part.text}"
+            } else {
                 comma: index_of(part.text.bytes(), 44)
                 if comma >= 0 {
                     out = "{out}{render_data_mime(slice(part.text.bytes(), 0, comma))},{slice(part.text.bytes(), comma + 1, part.text.bytes().len())}"
                     payload = true
-                } else {
-                    out = "{out}{render_data_mime(part.text)}"
-                }
+                } else { out = "{out}{render_data_mime(part.text)}" }
             }
         } else if part.hole && path && (part.text == "." || part.text == "..") {
             loop _ in part.text.bytes() -> out = "{out}%2E"
-        } else if part.hole -> out = "{out}{percent_encode(part.text)}"
-        else if path -> out = "{out}{encode_component(part.text, true, false)}"
-        else -> out = "{out}{render_authority_literal(part.text)}"
+        } else if part.hole { out = "{out}{percent_encode(part.text)}" } else if path {
+            out = "{out}{encode_component(part.text, true, false)}"
+        } else { out = "{out}{render_authority_literal(part.text)}" }
     }
     out
 }
@@ -514,8 +528,9 @@ render_authority_literal: fn(text: String) -> String Never! {
     out := ""
     loop b in text.bytes() {
         n: Int{b}
-        if unreserved(b) || n == 91 || n == 93 || n == 58 -> out = "{out}{slice([U8]{b}, 0, 1)}"
-        else -> out = "{out}%{slice([U8]{hex_nibble(n /% 16), hex_nibble(n %% 16)}, 0, 2)}"
+        if unreserved(b) || n == 91 || n == 93 || n == 58 -> out = "{out}{slice([U8]{b}, 0, 1)}" else {
+            out = "{out}%{slice([U8]{hex_nibble(n /% 16), hex_nibble(n %% 16)}, 0, 2)}"
+        }
     }
     out
 }
@@ -524,8 +539,9 @@ render_data_mime: fn(text: String) -> String Never! {
     out := ""
     loop b in text.bytes() {
         n: Int{b}
-        if (unreserved(b) && n != 126) || n == 33 || n == 35 || n == 36 || n == 38 || n == 43 || n == 47 || n == 59 || n == 61 || n == 94 -> out = "{out}{slice([U8]{b}, 0, 1)}"
-        else -> out = "{out}%{slice([U8]{hex_nibble(n /% 16), hex_nibble(n %% 16)}, 0, 2)}"
+        if (unreserved(b) && n != 126) || n == 33 || n == 35 || n == 36 || n == 38 || n == 43 || n == 47 || n == 59 || n == 61 || n == 94 {
+            out = "{out}{slice([U8]{b}, 0, 1)}"
+        } else { out = "{out}%{slice([U8]{hex_nibble(n /% 16), hex_nibble(n %% 16)}, 0, 2)}" }
     }
     out
 }
@@ -549,12 +565,12 @@ parse_recipe: fn(text: String, normalize: Bool) -> URL URLError! {
     port_explicit := false
 
     if rest_i + 1 < raw.len() && raw[rest_i] == (U8{47}) && raw[rest_i + 1] == (U8{47}) {
-        rest_i = rest_i + 2
+        rest_i += 2
         auth_end := rest_i
         loop auth_end < raw.len() {
             n: Int{raw[auth_end]}
             if n == 47 || n == 63 || n == 35 -> break
-            auth_end = auth_end + 1
+            auth_end += 1
         }
         authority: slice(raw, rest_i, auth_end)
         if authority.bytes().len() == 0 -> return Err(URLError.Syntax)
@@ -566,9 +582,7 @@ parse_recipe: fn(text: String, normalize: Bool) -> URL URLError! {
             if sep >= 0 {
                 user = percent_decode(slice(info.bytes(), 0, sep)) ?? return Err(URLError.Percent)
                 password = percent_decode(slice(info.bytes(), sep + 1, info.bytes().len())) ?? return Err(URLError.Percent)
-            } else {
-                user = percent_decode(info) ?? return Err(URLError.Percent)
-            }
+            } else { user = percent_decode(info) ?? return Err(URLError.Percent) }
             hostport = slice(authority.bytes(), at + 1, authority.bytes().len())
         }
         if hostport.bytes().len() == 0 -> return Err(URLError.Syntax)
@@ -581,9 +595,7 @@ parse_recipe: fn(text: String, normalize: Bool) -> URL URLError! {
                 if hp[rb + 1] == (U8{58}) {
                     port = parse_port(slice(hp, rb + 2, hp.len())) ?? return Err(URLError.Syntax)
                     port_explicit = true
-                } else if !normalize {
-                    host = ascii_lower(hostport)
-                } else {
+                } else if !normalize { host = ascii_lower(hostport) } else {
                     return Err(URLError.Syntax)
                 }
             }
@@ -594,9 +606,7 @@ parse_recipe: fn(text: String, normalize: Bool) -> URL URLError! {
                 host = host_to_ascii(ascii_lower(slice(hp, 0, col)))
                 port = parse_port(slice(hp, col + 1, hp.len())) ?? return Err(URLError.Syntax)
                 port_explicit = true
-            } else {
-                host = host_to_ascii(ascii_lower(hostport))
-            }
+            } else { host = host_to_ascii(ascii_lower(hostport)) }
         }
         if normalize && !valid_url_host(host) -> return Err(URLError.Syntax)
         rest_i = auth_end
@@ -626,7 +636,9 @@ parse_recipe: fn(text: String, normalize: Bool) -> URL URLError! {
     query := ""
     if qpos < hash -> query = escape_query(slice(raw, qpos + 1, hash))
     fragment := ""
-    if hash < raw.len() -> fragment = percent_decode(slice(raw, hash + 1, raw.len())) ?? return Err(URLError.Percent)
+    if hash < raw.len() {
+        fragment = percent_decode(slice(raw, hash + 1, raw.len())) ?? return Err(URLError.Percent)
+    }
     Ok(URL{scheme_text: scheme, user_text: user, password_text: password, host_text: host, port_value: port, port_explicit: port_explicit, path_text: path, query_text: query, fragment_text: fragment, raw: input, host_recipe: [URLPart]{}, path_recipe: [URLPart]{}})
 }
 
@@ -692,16 +704,12 @@ encode_query: fn(pairs: [[String]]) -> String Never! {
         if first {
             out = piece
             first = false
-        } else {
-            out = "{out}&{piece}"
-        }
+        } else { out = "{out}&{piece}" }
     }
     out
 }
 
-percent_encode: fn(text: String) -> String Never! {
-    encode_component(text, false, false)
-}
+percent_encode: fn(text: String) -> String Never! { encode_component(text, false, false) }
 
 percent_decode: fn(text: String) -> String URLError! {
     raw: text.bytes()
@@ -714,10 +722,10 @@ percent_decode: fn(text: String) -> String URLError! {
             hi: hex_value(raw[i + 1]) ?? return Err(URLError.Percent)
             lo: hex_value(raw[i + 2]) ?? return Err(URLError.Percent)
             out.push(U8{hi * 16 + lo})
-            i = i + 3
+            i += 3
         } else {
             out.push(raw[i])
-            i = i + 1
+            i += 1
         }
     }
     String.from_bytes(out) ?? return Err(URLError.Percent)
@@ -733,10 +741,14 @@ unparse: fn(url: URL) -> String Never! {
         authority = host.copy()
         if url.user_text.bytes().len() > 0 {
             authority = percent_encode(url.user_text)
-            if url.password_text.bytes().len() > 0 -> authority = "{authority}:{percent_encode(url.password_text)}"
+            if url.password_text.bytes().len() > 0 {
+                authority = "{authority}:{percent_encode(url.password_text)}"
+            }
             authority = "{authority}@{host}"
         }
-        if url.port_value >= 0 && (url.port_explicit || url.port_value != scheme_default_port(scheme)) -> authority = "{authority}:{url.port_value}"
+        if url.port_value >= 0 && (url.port_explicit || url.port_value != scheme_default_port(scheme)) {
+            authority = "{authority}:{url.port_value}"
+        }
     }
     path := url.path_text
     if authority.bytes().len() > 0 && path.bytes().len() == 0 -> path = "/"
@@ -745,7 +757,9 @@ unparse: fn(url: URL) -> String Never! {
     if url.query_text.bytes().len() > 0 -> query_text = "?{url.query_text}"
     fragment_text := ""
     if url.fragment_text.bytes().len() > 0 -> fragment_text = "#{percent_encode(url.fragment_text)}"
-    if authority.bytes().len() > 0 -> return "{scheme}://{authority}{path_text}{query_text}{fragment_text}"
+    if authority.bytes().len() > 0 {
+        return "{scheme}://{authority}{path_text}{query_text}{fragment_text}"
+    }
     if scheme == "file" -> return "file://{path_text}{query_text}{fragment_text}"
     return "{scheme}:{path_text}{query_text}{fragment_text}"
 }
@@ -757,7 +771,9 @@ urljoin: fn(base: String, rel: String) -> String URLError! {
 }
 
 join_url: fn(parsed: URL, rel: String) -> URL URLError! {
-    if rel.bytes().len() == 0 -> return with_parts(parsed, parsed.path_text, parsed.query_text, parsed.fragment_text)
+    if rel.bytes().len() == 0 {
+        return with_parts(parsed, parsed.path_text, parsed.query_text, parsed.fragment_text)
+    }
     if has_scheme(rel) -> return parse(rel)
     if starts(rel, "//") -> return parse("{parsed.scheme_text}:{rel}")
     if rel.bytes()[0] == (U8{35}) {
@@ -905,9 +921,7 @@ utf8_points: fn(raw: [U8]) -> [Int]? {
         } else if b >= 192 {
             width = 2
             cp = (b).bit_and(31)
-        } else if b >= 128 {
-            return None
-        }
+        } else if b >= 128 { return None }
         if i + width > raw.len() -> return None
         loop k in 1..<width {
             next: Int{raw[i + k]}
@@ -915,7 +929,7 @@ utf8_points: fn(raw: [U8]) -> [Int]? {
             cp = cp * 64 + ((next).bit_and(63))
         }
         out.push(cp)
-        i = i + width
+        i += width
     }
     Val(out)
 }
@@ -936,10 +950,10 @@ punycode: fn(points: [Int]) -> String Never! {
         loop cp in points {
             if cp >= n && (m < 0 || cp < m) -> m = cp
         }
-        delta = delta + (m - n) * (handled + 1)
+        delta += (m - n) * (handled + 1)
         n = m
         loop cp in points {
-            if cp < n -> delta = delta + 1
+            if cp < n -> delta += 1
             if cp == n {
                 q := delta
                 k := 36
@@ -950,16 +964,16 @@ punycode: fn(points: [Int]) -> String Never! {
                     if q < t -> break
                     out.push(punycode_digit(t + (q - t) %% (36 - t)))
                     q = (q - t) /% (36 - t)
-                    k = k + 36
+                    k += 36
                 }
                 out.push(punycode_digit(q))
                 bias = punycode_adapt(delta, handled + 1, handled == basic)
                 delta = 0
-                handled = handled + 1
+                handled += 1
             }
         }
-        delta = delta + 1
-        n = n + 1
+        delta += 1
+        n += 1
     }
     String.from_bytes(out) ?? ""
 }
@@ -971,11 +985,11 @@ punycode_digit: fn(d: Int) -> U8 Never! {
 
 punycode_adapt: fn(delta_in: Int, points: Int, first: Bool) -> Int Never! {
     delta := if first -> delta_in /% 700 else -> delta_in /% 2
-    delta = delta + delta /% points
+    delta += delta /% points
     k := 0
     loop delta > 455 {
         delta = delta /% 35
-        k = k + 36
+        k += 36
     }
     k + (36 * delta) /% (delta + 38)
 }
@@ -996,13 +1010,11 @@ parse_qsl: fn(query: String) -> [[String]] URLError! {
                     k: form_percent_decode(slice(piece.bytes(), 0, eq))
                     v: form_percent_decode(slice(piece.bytes(), eq + 1, piece.bytes().len()))
                     rows.push([String]{k, v})
-                } else {
-                    rows.push([String]{form_percent_decode(piece), ""})
-                }
+                } else { rows.push([String]{form_percent_decode(piece), ""}) }
             }
             start = i + 1
         }
-        i = i + 1
+        i += 1
     }
     rows
 }
@@ -1017,8 +1029,13 @@ split_fragment: fn(url: String) -> (fragment: String, url: String) Never! {
 }
 
 quote: fn(text: String) -> String Never! { encode_component(text, true, false) }
-quote_from_bytes: fn(data: [U8]) -> String Never! { encode_component(String.from_bytes(data) ?? "", true, false) }
+
+quote_from_bytes: fn(data: [U8]) -> String Never! {
+    encode_component(String.from_bytes(data) ?? "", true, false)
+}
+
 quote_plus: fn(text: String) -> String Never! { encode_component(text, false, true) }
+
 unquote: fn(text: String) -> String URLError! { percent_decode(text) }
 
 unquote_to_bytes: fn(text: String) -> [U8] URLError! {
@@ -1026,13 +1043,14 @@ unquote_to_bytes: fn(text: String) -> [U8] URLError! {
     decoded.bytes()
 }
 
-unquote_plus: fn(text: String) -> String URLError! {
-    percent_decode(form_to_percent(text))
-}
+unquote_plus: fn(text: String) -> String URLError! { percent_decode(form_to_percent(text)) }
 
 urlparse: fn(text: String) -> URL URLError! { parse(text) }
+
 urlsplit: fn(text: String) -> URL URLError! { parse(text) }
+
 urlunparse: fn(url: URL) -> String Never! { unparse(url) }
+
 urlunsplit: fn(url: URL) -> String Never! { unparse(url) }
 
 urldefrag: fn(text: String) -> (url: String, fragment: String) Never! {
@@ -1048,9 +1066,9 @@ encode_component: fn(text: String, allow_slash: Bool, plus_space: Bool) -> Strin
     out := [U8]{}
     loop b in text.bytes() {
         n: Int{b}
-        if plus_space && n == 32 -> out.push(U8{43})
-        else if unreserved(b) || (allow_slash && n == 47) -> out.push(b)
-        else {
+        if plus_space && n == 32 -> out.push(U8{43}) else if unreserved(b) || (allow_slash && n == 47) {
+            out.push(b)
+        } else {
             out.push(U8{37})
             out.push(hex_nibble(n /% 16))
             out.push(hex_nibble(n %% 16))
@@ -1066,16 +1084,12 @@ form_to_percent: fn(text: String) -> String Never! {
             out.push(U8{37})
             out.push(U8{50})
             out.push(U8{48})
-        } else {
-            out.push(b)
-        }
+        } else { out.push(b) }
     }
     String.from_bytes(out) ?? ""
 }
 
-form_percent_decode: fn(text: String) -> String URLError! {
-    percent_decode(form_to_percent(text))
-}
+form_percent_decode: fn(text: String) -> String URLError! { percent_decode(form_to_percent(text)) }
 
 unreserved: fn(b: U8) -> Bool Never! {
     n: Int{b}
@@ -1115,8 +1129,10 @@ valid_scheme: fn(text: String) -> Bool Never! {
     i := 1
     loop i < raw.len() {
         n: Int{raw[i]}
-        if !((n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 43 || n == 45 || n == 46) -> return false
-        i = i + 1
+        if !((n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 43 || n == 45 || n == 46) {
+            return false
+        }
+        i += 1
     }
     true
 }
@@ -1127,7 +1143,7 @@ scheme_colon: fn(raw: [U8]) -> Int Never! {
         n: Int{raw[i]}
         if n == 58 -> return i
         if n == 47 || n == 63 || n == 35 -> return -1
-        i = i + 1
+        i += 1
     }
     -1
 }
@@ -1153,11 +1169,11 @@ trim_ascii: fn(text: String) -> String Never! {
     end := raw.len()
     loop start < end {
         n: Int{raw[start]}
-        if n == 32 || n == 9 || n == 10 || n == 13 -> start = start + 1 else -> break
+        if n == 32 || n == 9 || n == 10 || n == 13 -> start += 1 else -> break
     }
     loop end > start {
         n: Int{raw[end - 1]}
-        if n == 32 || n == 9 || n == 10 || n == 13 -> end = end - 1 else -> break
+        if n == 32 || n == 9 || n == 10 || n == 13 -> end -= 1 else -> break
     }
     if end <= start -> return ""
     slice(raw, start, end)
@@ -1168,11 +1184,11 @@ valid_percent: fn(text: String) -> Bool Never! {
     i := 0
     loop i < raw.len() {
         if raw[i] == (U8{37}) {
-            if i + 2 >= raw.len() || !is_hex_byte(raw[i + 1]) || !is_hex_byte(raw[i + 2]) -> return false
-            i = i + 3
-        } else {
-            i = i + 1
-        }
+            if i + 2 >= raw.len() || !is_hex_byte(raw[i + 1]) || !is_hex_byte(raw[i + 2]) {
+                return false
+            }
+            i += 3
+        } else { i += 1 }
     }
     true
 }
@@ -1189,12 +1205,14 @@ valid_url_host: fn(host: String) -> Bool Never! {
             if label == 0 && i < raw.len() - 1 -> return false
             label = 0
         } else {
-            if n <= 32 || n == 127 || n == 47 || n == 63 || n == 35 || n == 64 || n == 91 || n == 93 -> return false
-            label = label + 1
+            if n <= 32 || n == 127 || n == 47 || n == 63 || n == 35 || n == 64 || n == 91 || n == 93 {
+                return false
+            }
+            label += 1
             if label > 63 -> return false
             non_dot = true
         }
-        i = i + 1
+        i += 1
     }
     if !non_dot -> return false
     if label == 0 && raw[raw.len() - 1] != (U8{46}) -> return false
@@ -1215,17 +1233,13 @@ normalize_path: fn(path: String, absolute: Bool) -> String Never! {
         if i == raw.len() || raw[i] == (U8{47}) {
             segment: slice(raw, start, i)
             if segment == ".." {
-                if segments.len() > 0 && segments[segments.len() - 1] != ".." {
-                    _: segments.pop()
-                } else if !absolute {
+                if segments.len() > 0 && segments[segments.len() - 1] != ".." -> _: segments.pop() else if !absolute {
                     segments.push("..")
                 }
-            } else if segment != "" && segment != "." {
-                segments.push(segment)
-            }
+            } else if segment != "" && segment != "." { segments.push(segment) }
             start = i + 1
         }
-        i = i + 1
+        i += 1
     }
     out := ""
     if absolute -> out = "/"
@@ -1233,7 +1247,9 @@ normalize_path: fn(path: String, absolute: Bool) -> String Never! {
         if out.bytes().len() > 0 && out.bytes()[out.bytes().len() - 1] != (U8{47}) -> out = "{out}/"
         out = "{out}{segment}"
     }
-    if path.bytes().len() > 0 && path.bytes()[path.bytes().len() - 1] == (U8{47}) && out.bytes().len() > 0 && out.bytes()[out.bytes().len() - 1] != (U8{47}) -> out = "{out}/"
+    if path.bytes().len() > 0 && path.bytes()[path.bytes().len() - 1] == (U8{47}) && out.bytes().len() > 0 && out.bytes()[out.bytes().len() - 1] != (U8{47}) {
+        out = "{out}/"
+    }
     if out.bytes().len() == 0 && absolute -> return "/"
     out
 }
@@ -1243,7 +1259,7 @@ dirname_url: fn(path: String) -> String Never! {
     if raw.len() == 0 -> return "/"
     i := raw.len()
     loop i > 0 {
-        i = i - 1
+        i -= 1
         if raw[i] == (U8{47}) -> return slice(raw, 0, i + 1)
     }
     "/"
@@ -1277,7 +1293,7 @@ last_index: fn(raw: [U8], b: Int) -> Int Never! {
     i := raw.len() - 1
     loop i >= 0 {
         if (Int{raw[i]}) == b -> return i
-        i = i - 1
+        i -= 1
     }
     -1
 }

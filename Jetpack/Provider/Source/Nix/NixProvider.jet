@@ -6,7 +6,9 @@ NixProvider: struct {
     // A readable project lock is the Nix cache authority.
     validate_cache_authority: fn(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) ProviderError! -[FS]> {
         project: ctx.project_dir ?? return
-        if !files.is_dir(project) -> return
+        if !files.is_dir(project) {
+            return
+        }
         if pkg_lock_load_strict(project) == {
             .Err(error) -> { return Err(ProviderError.BadOutput(error.message())) }
             .Val(_) | .None -> {}
@@ -68,7 +70,9 @@ NixProvider: struct {
         loop spec in specs {
             native: if index.resolve_native_recipe(spec.package) == {
                 .Ok(found) -> found
-                .Err(error) -> { return Err(ProviderError.NixIndex(error)) }
+                .Err(error) -> {
+                    return Err(ProviderError.NixIndex(error))
+                }
             }
             if native == {
                 .Val(recipe) -> {
@@ -83,12 +87,16 @@ NixProvider: struct {
             verified: if index.resolve(key) == {
                 .Ok(record) -> record
                 .Err(error) -> {
-                    if !provider_nix_index_not_indexed(error) -> return Err(ProviderError.NixIndex(error))
+                    if !provider_nix_index_not_indexed(error) {
+                        return Err(ProviderError.NixIndex(error))
+                    }
                     plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
                     next
                 }
             }
-            loop name in provider_sorted_keys(verified.record.outputs) -> nix_paths.push(verified.record.outputs[name])
+            loop name in provider_sorted_keys(verified.record.outputs) {
+                nix_paths.push(verified.record.outputs[name])
+            }
         }
         if nix_paths.len() > 0 {
             roots: ctx.nix_roots ?? return Err(ProviderError.BadOutput("download planning has no Hangar roots for closure admission"))
@@ -108,9 +116,7 @@ NixProvider: struct {
         }
     }
 
-    requires_acquisition: fn(self, spec: RefSpec, table: SourceTable) -> Bool Never! {
-        true
-    }
+    requires_acquisition: fn(self, spec: RefSpec, table: SourceTable) -> Bool Never! { true }
 
     approval_facts: fn(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -> String? ProviderReason! {
         Ok(None)
@@ -130,7 +136,9 @@ NixProvider: struct {
             .Val(catalog) -> {
                 native: if catalog.resolve_native_recipe(spec.package) == {
                     .Ok(found) -> found
-                    .Err(error) -> { return Err(ProviderError.NixIndex(error)) }
+                    .Err(error) -> {
+                        return Err(ProviderError.NixIndex(error))
+                    }
                 }
                 if native == {
                     .Val(recipe) -> return provider_native_realize_catalog_recipe(spec, recipe, ctx)
@@ -165,7 +173,9 @@ NixProvider: struct {
         store_require_catalog_permission(Val(verified.trust.label()), ctx.allow_local_nix_catalog) ?? return Err(ProviderError.BadOutput(err.message()))
         roots: ctx.nix_roots ?? return Err(ProviderError.BadOutput("index-backed Nix realization has no Hangar roots for closure admission"))
         requests := [NixOutputRequest]{}
-        loop name in provider_sorted_keys(verified.record.outputs) -> requests.push(NixOutputRequest{name, store_path: verified.record.outputs[name]})
+        loop name in provider_sorted_keys(verified.record.outputs) {
+            requests.push(NixOutputRequest{name: name, store_path: verified.record.outputs[name]})
+        }
         admitted: store_admit_nix_closure_with_progress(verification, roots, requests, ctx.offline, None, ctx.progress) ?? return Err(provider_nix_cache_error(verification, roots, err))
         realized: provider_realization_from_index(spec, key, verified, admitted)
         provider_finalize_nix_realization(verification, spec, table, ctx, realized)
@@ -176,14 +186,16 @@ NixProvider: struct {
 // cache key, on the locked platform (the closure system when unrecorded).
 provider_nix_locked_expectation: fn(closure: NixClosureRecord, envelope: LockEnvelope, ctx: ProviderCtx) -> CacheExpectation? Never! {
     platform: if envelope.platform == "" -> closure.system else -> envelope.platform
-    if envelope.output_hash == "" || closure.output != envelope.output_hash || platform != closure.system -> return None
+    if envelope.output_hash == "" || closure.output != envelope.output_hash || platform != closure.system {
+        return None
+    }
     roots: ctx.nix_roots ?? return None
     Val(CacheExpectation{
         identity: CacheIdentity{
             source_fingerprint: envelope.output_hash,
             recipe_fingerprint: pkg_sha256_hex(PROVIDER_NIX_RECIPE_ID.bytes()),
             policy_fingerprint: closure.cache_key,
-            platform,
+            platform: platform,
         },
         owned_output: Val(files.join(files.join(roots.hangar_dir(), STORE_OBJECTS_DIR), closure.output)),
         allow_unsigned_local: true,
@@ -201,6 +213,8 @@ provider_nix_index_not_indexed: fn(error: NixIndexError) -> Bool Never! {
 // No signed index: offline forbids fetching, online ambient nixpkgs is never
 // accepted.
 provider_nix_missing_index_error: fn(spec: RefSpec, offline: Bool) -> ProviderError Never! {
-    if offline -> return ProviderError.Offline("`{spec.raw}` is not in the hangar and --offline forbids fetching provider output")
+    if offline {
+        return ProviderError.Offline("`{spec.raw}` is not in the hangar and --offline forbids fetching provider output")
+    }
     ProviderError.Unsupported("Nix package realization needs an exact signed-index record or an exact-lock local fallback policy for `{spec.raw}`; ambient nixpkgs is never accepted")
 }

@@ -21,8 +21,10 @@ metadata_contract_card: fn(owner: String) -> Bool Never! {
     loop row in METADATA_CONTRACT_ROWS {
         if row.spelling.is_empty() -> violations.push("a row has no spelling")
         if seen.contains(row.spelling) -> violations.push("`{row.spelling}` is registered twice")
-        seen.push(row.spelling.copy()) // copy: the duplicate check keeps every spelling.
-        if !metadata_contract_card(row.owner) -> violations.push("`{row.spelling}` names the owner `{row.owner}`, which is not a card")
+        seen.push(row.spelling.copy())  // copy: the duplicate check keeps every spelling.
+        if !metadata_contract_card(row.owner) {
+            violations.push("`{row.spelling}` names the owner `{row.owner}`, which is not a card")
+        }
         if row.witness.is_empty() -> violations.push("`{row.spelling}` names no witness")
         if row.delivery == MetadataDelivery.Built && !metadata_contract_files.exists(row.witness) {
             violations.push("`{row.spelling}` is Built, but its witness `{row.witness}` is not a file")

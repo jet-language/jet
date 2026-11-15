@@ -9,16 +9,23 @@
     dyn_store(wrapping(wrapping(value + RESERVOIR_SEQUENCE) + DATA_SEQUENCE_DATA), I64{8})
     value
 }
+
 #Export(c) jet_rt_handle_clone_jet_reservoir_sampler: fn(value: I64) -> I64 {
     _ := sync_add(wrapping(value + RESERVOIR_REFS), I64{1})
     value
 }
+
 #Export(c) jet_rt_handle_drop_jet_reservoir_sampler: fn(value: I64) {
-    if (value == I64{0}) -> return
-    if (sync_add(wrapping(value + RESERVOIR_REFS), I64{-1}) != I64{1}) -> return
+    if (value == I64{0}) {
+        return
+    }
+    if (sync_add(wrapping(value + RESERVOIR_REFS), I64{-1}) != I64{1}) {
+        return
+    }
     coll_text_list_drop(wrapping(value + RESERVOIR_SEQUENCE), true)
     jet_rt_free(value, RESERVOIR_BYTES, I64{8})
 }
+
 #Export(c) jet_rt_native_reservoir_add: fn(value: I64, text: I64) {
     sync_mutex_lock(wrapping(value + RESERVOIR_MUTEX))
     old_count: iter_unsigned(dyn_word(wrapping(value + RESERVOIR_COUNT)))
@@ -52,6 +59,7 @@
     }
     sync_mutex_unlock(wrapping(value + RESERVOIR_MUTEX))
 }
+
 #Export(c) jet_rt_native_reservoir_sample: fn(value: I64) -> I64 {
     sync_mutex_lock(wrapping(value + RESERVOIR_MUTEX))
     // Lists.jet:1-7: canonical inline len/cap/data, owned E4 elements (stride8).
@@ -59,20 +67,21 @@
     sync_mutex_unlock(wrapping(value + RESERVOIR_MUTEX))
     result
 }
+
 #Export(c) jet_rt_handle_show_jet_reservoir_sampler: fn(value: I64) -> I64 {
     sync_mutex_lock(wrapping(value + RESERVOIR_MUTEX))
     count: iter_unsigned(dyn_word(wrapping(value + RESERVOIR_COUNT)))
     sync_mutex_unlock(wrapping(value + RESERVOIR_MUTEX))
     text: jet_rt_string_builder_new()
-    rt_text_push_word(text, I64{7597421330097726802}, I64{8}) // Reservoi
-    rt_text_push_word(text, I64{8243113923098792818}, I64{8}) // rSampler
-    rt_text_push_word(text, I64{4025896}, I64{3}) // (n=
+    rt_text_push_word(text, I64{7597421330097726802}, I64{8})  // Reservoi
+    rt_text_push_word(text, I64{8243113923098792818}, I64{8})  // rSampler
+    rt_text_push_word(text, I64{4025896}, I64{3})  // (n=
     divisor := U64{1}
-    loop count /% divisor >= (U64{10}) { divisor *= U64{10} }
+    loop count /% divisor >= (U64{10}) -> divisor *= U64{10}
     loop {
         digit: (count /% divisor) % U64{10}
         rt_text_push_word(text, wrapping(I64{digit}) + I64{48}, I64{1})
-        if (divisor == U64{1}) -> break
+        if (divisor == U64{1}) { break }
         divisor = divisor /% U64{10}
     }
     rt_text_push_word(text, I64{41}, I64{1})

@@ -21,6 +21,7 @@ kit_steps_loop_words: fn(text: String) -> [String]? {
     if label == "" -> return Val(["for", "line", selector, "as", tokens[binding + 1].text])
     Val(["for", "line", selector, "of", label, "as", tokens[binding + 1].text])
 }
+
 kit_steps_block_end: fn(steps: [KitStep], start: Int) -> Int {
     kind: steps[start].action
     depth := 1
@@ -41,7 +42,9 @@ kit_steps_loop_valid: fn(words: [String]) -> Bool {
         end: if words[words.len() - 3] == "sorted" -> words.len() - 3 else -> words.len() - 2
         return end >= 3 && kit_steps_entries_valid(words.slice(2, end))
     }
-    if words[1] != "line" || !kit_steps_loop_subject_valid(words[2], words.len() == 7) -> return false
+    if words[1] != "line" || !kit_steps_loop_subject_valid(words[2], words.len() == 7) {
+        return false
+    }
     words.len() == 5 || (words.len() == 7 && words[3] == "of" && words[4] != "" && !words[4].contains(" ") && !words[4].contains("\t"))
 }
 
@@ -56,10 +59,14 @@ kit_steps_loop_subject_valid: fn(text: String, named: Bool) -> Bool {
 kit_steps_repeat_valid: fn(words: [String], text: String) -> Bool {
     if words.len() != 11 || words[0] != "repeat" || words[1] != "while" -> return false
     if words[5] != "timeout" || words[7] != "every" || words[9] != "fail" -> return false
-    if kit_steps_duration_ns(words[6]) == None || kit_steps_duration_ns(words[8]) == None -> return false
+    if kit_steps_duration_ns(words[6]) == None || kit_steps_duration_ns(words[8]) == None {
+        return false
+    }
     tokens: kit_steps_tokens(kit_steps_body(text)) ?? return false
     if tokens.len() != 11 || text.bytes()[tokens[10].start] != (U8{34}) -> return false
-    if words[2] == "file:" -> return kit_steps_relative_path(words[3]) && kit_expect_named(["exists", "absent"], words[4])
+    if words[2] == "file:" {
+        return kit_steps_relative_path(words[3]) && kit_expect_named(["exists", "absent"], words[4])
+    }
     words[2] == "process" && (words[4] == "alive" || kit_steps_process_nonzombie_mode(words[4]))
 }
 
@@ -81,9 +88,11 @@ kit_steps_loop_values: fn(step: KitStep, context: KitStepCtx, state: KitStepStat
         path: kit_steps_runtime_expand(selector_words[1], context, state) ?? return Err("loop file token unavailable")
         location: kit_steps_work_path(path, context.env, context.work, context.scratch, state.built) ?? return Err("loop file escapes work")
         source = files.read(location) ?? return Err("loop file read: {err}")
-    } else if subject.starts_with("cap:") -> source = kit_steps_captured_subject(kit_steps_byte_slice(subject, 4, subject.count_bytes()), state.captures) ?? return Err("loop capture unavailable")
-    else if words.len() == 7 -> source = kit_steps_history_stream(words[4], subject, state.history, true) ?? return Err("loop step label unavailable")
-    else -> source = kit_steps_select_stream(state.last.stdout, state.last.stderr, subject)
+    } else if subject.starts_with("cap:") {
+        source = kit_steps_captured_subject(kit_steps_byte_slice(subject, 4, subject.count_bytes()), state.captures) ?? return Err("loop capture unavailable")
+    } else if words.len() == 7 {
+        source = kit_steps_history_stream(words[4], subject, state.history, true) ?? return Err("loop step label unavailable")
+    } else { source = kit_steps_select_stream(state.last.stdout, state.last.stderr, subject) }
     transformed: kit_steps_transform(source, kit_steps_subject_transform(selector)) ?? return Err("loop subject transform failed")
     Ok(kit_steps_rust_lines(transformed))
 }
@@ -164,13 +173,19 @@ kit_steps_repeat_wall: fn(step: KitStep, env: KitEnv) -> Int {
 kit_steps_repeat_exceeded: fn(step: KitStep, frame: KitLoopFrame, context: KitStepCtx, state: KitStepState) -> KitVerdict? {
     waited: frame.started.elapsed().ns
     wall: kit_steps_repeat_wall(step, context.env)
-    if step.argv[2] != "process" -> return if waited >= wall -> Val(kit_expect_verdict("FAIL", step.argv[10])) else -> None
+    if step.argv[2] != "process" {
+        return if waited >= wall -> Val(kit_expect_verdict("FAIL", step.argv[10])) else -> None
+    }
     limit: kit_steps_answer_deadline(context.env, kit_steps_duration_ns(step.argv[6]) ?? 0)
     spent: kit_steps_repeat_cpu(step, context, state) - frame.cpu_ns
     used: if spent < 0 -> 0 else -> spent
     detail: "used {used /% 1000000} ms CPU in {waited /% 1000000} ms wall"
-    if used >= limit -> return Val(kit_expect_verdict("FAIL", "{step.argv[10]}: cpu limit {limit /% 1000000} ms: {detail}"))
-    if waited >= wall -> return Val(kit_expect_verdict("FAIL", "{step.argv[10]}: wall-clock guard {wall /% 1000000} ms: {detail}"))
+    if used >= limit {
+        return Val(kit_expect_verdict("FAIL", "{step.argv[10]}: cpu limit {limit /% 1000000} ms: {detail}"))
+    }
+    if waited >= wall {
+        return Val(kit_expect_verdict("FAIL", "{step.argv[10]}: wall-clock guard {wall /% 1000000} ms: {detail}"))
+    }
     None
 }
 
@@ -196,7 +211,9 @@ kit_steps_process_nonzombie_probe: fn(stat: String?, mode: String) -> Bool? {
     bytes: text.bytes()
     end := -1
     loop (index, byte) in bytes {
-        if byte == (U8{41}) && (!readable || (index + 1 < bytes.len() && bytes[index + 1] == (U8{32}))) -> end = index
+        if byte == (U8{41}) && (!readable || (index + 1 < bytes.len() && bytes[index + 1] == (U8{32}))) {
+            end = index
+        }
     }
     if end < 0 -> return if readable -> Val(true) else -> None
     cursor := end + 1
@@ -208,21 +225,27 @@ kit_steps_process_nonzombie_probe: fn(stat: String?, mode: String) -> Bool? {
     }
     if cursor < bytes.len() {
         scalar: kit_steps_scalar(bytes, cursor)
-        if scalar.value == 90 && (scalar.next == bytes.len() || kit_steps_unicode_space(kit_steps_scalar(bytes, scalar.next).value)) -> return Val(false)
+        if scalar.value == 90 && (scalar.next == bytes.len() || kit_steps_unicode_space(kit_steps_scalar(bytes, scalar.next).value)) {
+            return Val(false)
+        }
     }
     if readable -> Val(true) else -> None
 }
 
 // Callers guard nonZ modes on Linux before expanding the PID or observing it.
 kit_steps_process_nonzombie: fn(pid: Int, mode: String) -> Bool {
-    stat: files.read("/proc/{pid}/stat") ?? { return kit_steps_process_nonzombie_probe(None, mode) ?? kit_steps_process_alive(pid) }
+    stat: files.read("/proc/{pid}/stat") ?? {
+        return kit_steps_process_nonzombie_probe(None, mode) ?? kit_steps_process_alive(pid)
+    }
     kit_steps_process_nonzombie_probe(Val(stat), mode) ?? kit_steps_process_alive(pid)
 }
 
 kit_steps_loop_initialize: fn(step: KitStep, previous: KitStepState) -> KitStepState {
     state := previous
     loop name in step.aggregate_names {
-        if kit_steps_capture_named(name, state.captures) == None -> state.captures.push(KitCapture{name: name, value: KitCapturedValue.Text(""), aggregate: true})
+        if kit_steps_capture_named(name, state.captures) == None {
+            state.captures.push(KitCapture{name: name, value: KitCapturedValue.Text(""), aggregate: true})
+        }
     }
     state
 }

@@ -1,7 +1,11 @@
 // A tail `panic(...)` after an exhaustive `if` whose arms all return or panic
 // is dead code, but it stays a diverging statement: it is not a valueless
 // call used as the function's value (no E0116).
-Op: enum { A B(n: Int) C }
+Op: enum {
+    A
+    B(n: Int)
+    C
+}
 
 pick: fn(op: Op) -> Int {
     x: 1
@@ -13,6 +17,4 @@ pick: fn(op: Op) -> Int {
     panic("checked op is unsupported")
 }
 
-run: fn() {
-    print(pick(Op.A))
-}
+run: fn() { print(pick(Op.A)) }

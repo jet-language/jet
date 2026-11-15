@@ -44,9 +44,7 @@ run: fn() {
         roots: ca.copy()
         clients.push(task { exchange(at, roots, index) })
     }
-    loop client in clients {
-        print(client.join() ?? panic("client task"))
-    }
+    loop client in clients { print(client.join() ?? panic("client task")) }
     _: listener.shutdown(100ms) ?? panic("shutdown TLS server")
     _: serving.join() ?? panic("join TLS server")
 }

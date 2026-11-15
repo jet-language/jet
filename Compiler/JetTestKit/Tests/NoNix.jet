@@ -14,7 +14,8 @@ use {
     assert_eq(plan.steps[1].isolate_network, "enabled")
     assert_eq(plan.steps[2].isolate_network, "disabled")
     assert_eq(plan.steps[3].isolate, "")
-    loop (i, source) in ["isolate: no-nix\n", "step: jetpack env\nisolate: other\n", "step: jetpack env\nisolate: no-nix enabled\n", "step: jetpack env\nisolate: no-nix network=other\n", "step: jetpack env\nisolate: no-nix network=enabled extra\n", "step: jetpack env\nisolate: no-nix\nisolate: no-nix\n", "copy: a b\nisolate: no-nix\n", "remove: a\nisolate: no-nix\n"] {
+    loop (i, source) in
+        ["isolate: no-nix\n", "step: jetpack env\nisolate: other\n", "step: jetpack env\nisolate: no-nix enabled\n", "step: jetpack env\nisolate: no-nix network=other\n", "step: jetpack env\nisolate: no-nix network=enabled extra\n", "step: jetpack env\nisolate: no-nix\nisolate: no-nix\n", "copy: a b\nisolate: no-nix\n", "remove: a\nisolate: no-nix\n"] {
         cases_test_source(root, "bad-{i}", source)
         invalid: kit_steps_parse_case(files.read(files.join(root, cases_test_entry("bad-{i}").path)) ?? panic("read invalid case"))
         assert(invalid.error != "")
@@ -31,7 +32,9 @@ no_nix_test_assets: fn(root: String) {
 }
 
 #Test("no-nix launcher reexec preserves argv stdin environment cwd and both network modes") {
-    if kit_no_nix_required() != None -> return
+    if kit_no_nix_required() != None {
+        return
+    }
     root: cases_test_root("no-nix-reexec")
     no_nix_test_assets(root)
     kit_exec_write(files.join(root, "tests/cases/group/input.stdin"), "two words\n")
@@ -53,7 +56,9 @@ no_nix_test_assets: fn(root: String) {
 }
 
 #Test("no-nix preparation derives wrapper flags and preserves ELF image size and mode") {
-    if kit_no_nix_required() != None -> return
+    if kit_no_nix_required() != None {
+        return
+    }
     root: cases_test_root("no-nix-elf")
     cases_test_source(root, "image", "step: jetpack env\nisolate: no-nix network=disabled\n")
     plan: kit_steps_parse_case(files.read(files.join(root, cases_test_entry("image").path)) ?? panic("read image case"))
@@ -129,7 +134,8 @@ no_nix_test_put: fn(bytes: &[U8], offset: Int, width: Int, value: Int) {
     kit_exec_write(files.join(root, "tests/cases/group/inherited.out"), "1")
     context: cases_test_context(root, files.join(root, "scratch"))
     assert_eq(kit_cases_run(cases_test_entry("cleared"), context)[0].verdict.status, "PASS")
-    loop (i, source) in ["env-clear: true\n", "step: jet -c true\nenv-clear: false\n", "step: jet -c true\nenv-clear: true\nenv-clear: true\n", "copy: a b\nenv-clear: true\n"] {
+    loop (i, source) in
+        ["env-clear: true\n", "step: jet -c true\nenv-clear: false\n", "step: jet -c true\nenv-clear: true\nenv-clear: true\n", "copy: a b\nenv-clear: true\n"] {
         cases_test_source(root, "clear-bad-{i}", source)
         assert(kit_steps_parse_case(files.read(files.join(root, cases_test_entry("clear-bad-{i}").path)) ?? panic("read invalid clear case")).error != "")
     }
@@ -142,7 +148,8 @@ no_nix_test_put: fn(bytes: &[U8], offset: Int, width: Int, value: Int) {
     cases_test_source(root, "child", "env: CASE_VALUE=case\nspawn child: jet -c 'set -eu; test -z \"${{HOME+x}}\"; test -z \"${{NO_COLOR+x}}\"; printf \"%s|%s\" \"$CASE_VALUE\" \"$1\"' scenario {{env:HOME|fallback}}\nenv-clear: true\nenv: CASE_VALUE=step\nwait: child\nstdout: = cleared.out\nstderr: empty\n")
     context: cases_test_context(root, files.join(root, "scratch"))
     assert_eq(kit_cases_run(cases_test_entry("child"), context)[0].verdict.status, "PASS")
-    loop action in ["copy: a b", "remove: a", "concat: a b", "write: a b", "inventory before: .", "step: printf x\ncapture: x stdout doc $", "spawn child: printf x\nwait: child"] {
+    loop action in
+        ["copy: a b", "remove: a", "concat: a b", "write: a b", "inventory before: .", "step: printf x\ncapture: x stdout doc $", "spawn child: printf x\nwait: child"] {
         loop modifier in ["env-clear: true", "isolate: no-nix"] {
             cases_test_source(root, "invalid-action", "{action}\n{modifier}\n")
             plan: kit_steps_parse_case(files.read(files.join(root, cases_test_entry("invalid-action").path)) ?? panic("read modifier case"))

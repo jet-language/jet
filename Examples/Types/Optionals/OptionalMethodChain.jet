@@ -41,16 +41,16 @@ Account: struct {
 }
 
 find: fn(name: String) -> Account? {
-    if name == "user" -> return Val(Account{name: "user", address: Val(Address{city: "Oslo"}), port_text: "8080"})
+    if name == "user" {
+        return Val(Account{name: "user", address: Val(Address{city: "Oslo"}), port_text: "8080"})
+    }
     if name == "ada" -> return Val(Account{name: "ada", address: None, port_text: "oops"})
     None
 }
 
 // `find(name)?.parse()` is `Int?`; a parse failure leaves through this
 // function's `PortError` carrier.
-port_of: fn(name: String) -> Int? PortError! {
-    return Ok(find(name)?.parse())
-}
+port_of: fn(name: String) -> Int? PortError! { return Ok(find(name)?.parse()) }
 
 show_port: fn(name: String) {
     if port_of(name) == {

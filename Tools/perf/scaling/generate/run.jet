@@ -34,7 +34,9 @@ usage: fn() -> String {
     lines.join("\n")
 }
 
-count_of: fn(text: String) -> Int Err! { Int.parse(text) ?? return Err("{text} is too large\n{usage()}") }
+count_of: fn(text: String) -> Int Err! {
+    Int.parse(text) ?? return Err("{text} is too large\n{usage()}")
+}
 
 // The value after each flag of `names` (the last one wins) and the other
 // arguments, in order.
@@ -52,7 +54,9 @@ numeric_flags: fn(args: [String], names: [String]) -> Flags Err! {
         if {
             names.contains(arg) -> {
                 value: args.get(i + 1) ?? ""
-                if !parse.is_digit(value) -> return Err("{arg} needs a nonnegative integer\n{usage()}")
+                if !parse.is_digit(value) {
+                    return Err("{arg} needs a nonnegative integer\n{usage()}")
+                }
                 values[arg] = count_of(value)
                 i += 2
             }
@@ -71,7 +75,8 @@ listing: fn() -> String {
         kind: if shape.kind == .Stress -> "stress" else -> "domain"
         unit: if shape.kind == .Stress -> "n" else -> "lines"
         "{shape.name.pad_end(14, " ")} {kind.pad_end(7, " ")} base {"{shape.base}".pad_start(7, " ")} {unit}: {shape.dimension}"
-    }).join("\n")
+    })
+        .join("\n")
 }
 
 // The printed line of a corpus, field for field as generate.mjs prints it.
@@ -99,17 +104,21 @@ generate: fn(args: [String], name: String) -> String Err! {
     n: count_of(flags.rest[0])
     seed: flags.values.get("--seed") ?? 1
     built: corpus(shape_of(name, n), n, seed, "files")
-    Ok(json.to_string(Generated{
-        entry: write_files(built.files, flags.rest[1]),
-        shape: name,
-        n: n,
-        seed: seed,
-        kind: if built.kind == .Stress -> "stress" else -> "domain",
-        code_lines: built.code_lines,
-        files: built.files.len(),
-        expect: Expect{diagnostics: built.diagnostics},
-        source_sha256: built.source_sha256,
-    }))
+    Ok(
+        json.to_string(
+            Generated{
+                entry: write_files(built.files, flags.rest[1]),
+                shape: name,
+                n: n,
+                seed: seed,
+                kind: if built.kind == .Stress -> "stress" else -> "domain",
+                code_lines: built.code_lines,
+                files: built.files.len(),
+                expect: Expect{diagnostics: built.diagnostics},
+                source_sha256: built.source_sha256,
+            },
+        ),
+    )
 }
 
 // The printed line of the `mixed` profile.
@@ -140,12 +149,16 @@ generate_mixed: fn(args: [String]) -> String Err! {
     check_inputs(code_lines, seed)
     built: mixed_sources(code_lines, seed)
     stats: built.stats
-    Ok(json.to_string(MixedGenerated{
-        entry: write_files(built.files, flags.rest[0]),
-        source_sha256: built.source_sha256,
-        expected: built.expected,
-        stats: MixedStats{physical_lines: built.physical_lines, code_lines: built.code_lines, bytes: built.bytes, functions: stats.functions, types: stats.types, comptime_items: stats.comptime_items, sections: stats.sections},
-    }))
+    Ok(
+        json.to_string(
+            MixedGenerated{
+                entry: write_files(built.files, flags.rest[0]),
+                source_sha256: built.source_sha256,
+                expected: built.expected,
+                stats: MixedStats{physical_lines: built.physical_lines, code_lines: built.code_lines, bytes: built.bytes, functions: stats.functions, types: stats.types, comptime_items: stats.comptime_items, sections: stats.sections},
+            },
+        ),
+    )
 }
 
 // The text a command line prints. With no arguments the shape is missing,
@@ -160,6 +173,4 @@ command: fn(argv: [String]) -> String Err! {
     }
 }
 
-run: fn() {
-    print(command(process.args()) ?? process.fail(2, err.message))
-}
+run: fn() { print(command(process.args()) ?? process.fail(2, err.message)) }

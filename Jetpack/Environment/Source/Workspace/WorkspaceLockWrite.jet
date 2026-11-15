@@ -2,14 +2,26 @@
 // path is PackageModel's `pkg_workspace_lock_load`. Writing holds the project's
 // `workspace-lock` process lock and revalidates every authority input it read,
 // so a stale or partial workspace lock never masquerades as a valid index.
-
 use {
     jetpack_foundation.[env_runtime_project_lock]
     jet_pkg_model.[
-        AuthorityResolver, CheckedFile, LockFile, LockedWorkspaceMember, PKG_LOCK_VERSION, PKG_NO_WORKSPACE_SOURCE,
-        PKG_WORKSPACE_LOCK, WorkspaceDeclarationCache, WorkspacePlan, WorkspacePlanMember, WorkspaceSourceRole,
-        pkg_check_workspace_overlay_gates, pkg_lock_ensure_build_stamp, pkg_lock_parse, pkg_lock_write,
-        pkg_lock_write_atomically, pkg_sha256_hex,
+        AuthorityResolver,
+        CheckedFile,
+        LockFile,
+        LockedWorkspaceMember,
+        PKG_LOCK_VERSION,
+        PKG_NO_WORKSPACE_SOURCE,
+        PKG_WORKSPACE_LOCK,
+        WorkspaceDeclarationCache,
+        WorkspacePlan,
+        WorkspacePlanMember,
+        WorkspaceSourceRole,
+        pkg_check_workspace_overlay_gates,
+        pkg_lock_ensure_build_stamp,
+        pkg_lock_parse,
+        pkg_lock_write,
+        pkg_lock_write_atomically,
+        pkg_sha256_hex,
     ]
     files: core.files
 }
@@ -36,9 +48,11 @@ env_workspace_lock_write_locked: fn(cache: &WorkspaceDeclarationCache, workspace
     resolver: AuthorityResolver.open(workspace_root) ?? return Err(env_workspace_lock_invalid("workspace authority cannot be opened: {err.message()}"))
     existing_lock := CheckedFile?{None}
     if resolver.checked_file(PKG_WORKSPACE_LOCK) == {
-        .Ok(file) -> existing_lock = Val(file.move())
+        .Ok(file) -> { existing_lock = Val(file.move()) }
         .Err(error) -> {
-            if !error.is_missing() -> return Err(env_workspace_lock_invalid("workspace lock cannot be opened: {error.message()}"))
+            if !error.is_missing() {
+                return Err(env_workspace_lock_invalid("workspace lock cannot be opened: {error.message()}"))
+            }
         }
     }
     lock := LockFile.empty()
@@ -50,7 +64,9 @@ env_workspace_lock_write_locked: fn(cache: &WorkspaceDeclarationCache, workspace
     lock.version = PKG_LOCK_VERSION
     source: if resolver.resolve_workspace_source(cache) == {
         .Ok(found) -> found
-        .Err(error) -> { return Err(env_workspace_lock_invalid("workspace authority cannot be resolved: {error.message()}")) }
+        .Err(error) -> {
+            return Err(env_workspace_lock_invalid("workspace authority cannot be resolved: {error.message()}"))
+        }
     }
     if source == {
         .Val(checked) -> {
@@ -64,7 +80,9 @@ env_workspace_lock_write_locked: fn(cache: &WorkspaceDeclarationCache, workspace
             resolver.revalidate_source(checked) ?? return Err(env_workspace_lock_invalid("workspace authority changed before lock write: {err.message()}"))
         }
         .None -> {
-            if plan.members.len() > 0 -> return Err(env_workspace_lock_invalid("workspace lock members require a checked Package index"))
+            if plan.members.len() > 0 {
+                return Err(env_workspace_lock_invalid("workspace lock members require a checked Package index"))
+            }
         }
     }
     source_digest: if {
@@ -93,12 +111,16 @@ env_workspace_lock_write_locked: fn(cache: &WorkspaceDeclarationCache, workspace
         if !recorded -> lock.comptime_inputs.push(input.copy())
     }
     if existing_lock == {
-        .Val(file) -> resolver.revalidate_file(file) ?? return Err(env_workspace_lock_invalid("existing lock changed before write: {err.message()}"))
+        .Val(file) -> {
+            resolver.revalidate_file(file) ?? return Err(env_workspace_lock_invalid("existing lock changed before write: {err.message()}"))
+        }
         .None -> {
             if resolver.checked_file(PKG_WORKSPACE_LOCK) == {
                 .Ok(file) -> return Err(env_workspace_lock_invalid("workspace lock appeared during write: {file.path}"))
                 .Err(error) -> {
-                    if !error.is_missing() -> return Err(env_workspace_lock_invalid("workspace lock changed during write: {error.message()}"))
+                    if !error.is_missing() {
+                        return Err(env_workspace_lock_invalid("workspace lock changed during write: {error.message()}"))
+                    }
                 }
             }
         }
@@ -121,5 +143,5 @@ env_workspace_lock_member: fn(resolver: AuthorityResolver, member: WorkspacePlan
     if checked.facts.members.len() > 0 {
         return Err(env_workspace_lock_invalid("Package member `{manifest_path}` declares nested members"))
     }
-    Ok(LockedWorkspaceMember{name: member.name, path: member.path, source_digest, canonical_path: canonical_relative, package_digest: checked.facts.semantic_digest()})
+    Ok(LockedWorkspaceMember{name: member.name, path: member.path, source_digest: source_digest, canonical_path: canonical_relative, package_digest: checked.facts.semantic_digest()})
 }

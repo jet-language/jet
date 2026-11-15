@@ -31,9 +31,7 @@ WasmValidator: struct {
         WasmError.new("func {self.function}: {message}", self.at)
     }
 
-    push: fn(&self, ty: Int) Never! {
-        self.vals.push(ty)
-    }
+    push: fn(&self, ty: Int) Never! { self.vals.push(ty) }
 
     pop: fn(&self) -> Int WasmError! {
         top: self.frame_heights.len() - 1
@@ -80,7 +78,9 @@ WasmValidator: struct {
         top: self.frame_ops.len() - 1
         results: self.frame_results[top]
         self.pop_all(results)
-        if self.vals.len() != self.frame_heights[top] -> return Err(self.fail("type mismatch: values remaining on stack at end of block"))
+        if self.vals.len() != self.frame_heights[top] {
+            return Err(self.fail("type mismatch: values remaining on stack at end of block"))
+        }
         _: self.frame_ops.pop()
         _: self.frame_params.pop()
         _: self.frame_results.pop()
@@ -90,7 +90,9 @@ WasmValidator: struct {
     }
 
     label_types: fn(self, depth: Int) -> [Int] WasmError! {
-        if depth < 0 || depth >= self.frame_ops.len() -> return Err(self.fail("unknown label {depth}"))
+        if depth < 0 || depth >= self.frame_ops.len() {
+            return Err(self.fail("unknown label {depth}"))
+        }
         index: self.frame_ops.len() - 1 - depth
         if self.frame_ops[index] == WASM_OP_LOOP -> return Ok(self.frame_params[index])
         Ok(self.frame_results[index])
@@ -98,9 +100,7 @@ WasmValidator: struct {
 
     unreachable: fn(&self) Never! {
         top: self.frame_heights.len() - 1
-        loop self.vals.len() > self.frame_heights[top] {
-            _: self.vals.pop()
-        }
+        loop self.vals.len() > self.frame_heights[top] -> _: self.vals.pop()
         self.frame_unreachable[top] = true
     }
 
@@ -110,7 +110,9 @@ WasmValidator: struct {
     }
 
     func_type: fn(self, index: Int) -> WasmFuncType WasmError! {
-        if index < 0 || index >= self.func_types.len() -> return Err(self.fail("unknown function {index}"))
+        if index < 0 || index >= self.func_types.len() {
+            return Err(self.fail("unknown function {index}"))
+        }
         Ok(self.wm.types[self.func_types[index]])
     }
 
@@ -129,16 +131,32 @@ WasmValidator: struct {
     }
 
     elem: fn(self, index: Int) -> Int WasmError! {
-        if index < 0 || index >= self.wm.elems.len() -> return Err(self.fail("unknown elem segment {index}"))
+        if index < 0 || index >= self.wm.elems.len() {
+            return Err(self.fail("unknown elem segment {index}"))
+        }
         Ok(self.wm.elems[index].elem_type)
     }
 }
 
 wasm_validate_module: fn(wm: WasmModule) WasmError! {
     v := WasmValidator{
-        wm: wm, ops: WasmOpTable.new(), func_types: [Int]{}, globals: [WasmGlobalType]{}, tables: [Int]{}, refs: [Int:Bool]{},
-        memories: 0, locals: [Int]{}, results: [Int]{}, vals: [Int]{}, frame_ops: [Int]{}, frame_params: [[Int]]{},
-        frame_results: [[Int]]{}, frame_heights: [Int]{}, frame_unreachable: [Bool]{}, at: -1, function: -1,
+        wm: wm,
+        ops: WasmOpTable.new(),
+        func_types: [Int]{},
+        globals: [WasmGlobalType]{},
+        tables: [Int]{},
+        refs: [Int:Bool]{},
+        memories: 0,
+        locals: [Int]{},
+        results: [Int]{},
+        vals: [Int]{},
+        frame_ops: [Int]{},
+        frame_params: [[Int]]{},
+        frame_results: [[Int]]{},
+        frame_heights: [Int]{},
+        frame_unreachable: [Bool]{},
+        at: -1,
+        function: -1,
     }
     wasm_validate_imports(v)
     loop index in wm.funcs {
@@ -153,7 +171,9 @@ wasm_validate_module: fn(wm: WasmModule) WasmError! {
         wasm_validate_limits(memory, WASM_MAX_PAGES, "memory")
         v.memories += 1
     }
-    if v.memories > 1 -> return Err(WasmError.new("multiple memories are not supported by the plugin engine", -1))
+    if v.memories > 1 {
+        return Err(WasmError.new("multiple memories are not supported by the plugin engine", -1))
+    }
     // Function references the module declares outside function bodies.
     loop entry in wm.exports {
         if entry.kind == WASM_EXTERN_FUNC -> v.refs[entry.index] = true
@@ -173,35 +193,53 @@ wasm_validate_module: fn(wm: WasmModule) WasmError! {
     }
     names := [String:Bool]{}
     loop entry in wm.exports {
-        if names.get(entry.name) != None -> return Err(WasmError.new("duplicate export name `{entry.name}`", -1))
+        if names.get(entry.name) != None {
+            return Err(WasmError.new("duplicate export name `{entry.name}`", -1))
+        }
         names[entry.name] = true
         count: if entry.kind == WASM_EXTERN_FUNC -> v.func_types.len() else if entry.kind == WASM_EXTERN_TABLE -> v.tables.len() else if entry.kind == WASM_EXTERN_MEMORY -> v.memories else -> v.globals.len()
-        if entry.index >= count -> return Err(WasmError.new("export `{entry.name}` names an unknown index {entry.index}", -1))
+        if entry.index >= count {
+            return Err(WasmError.new("export `{entry.name}` names an unknown index {entry.index}", -1))
+        }
     }
     if wm.start == .Val(start) {
         ty: wasm_validate_function_type(v, start)
-        if ty.params.len() != 0 || ty.results.len() != 0 -> return Err(WasmError.new("start function must have type [] -> []", -1))
+        if ty.params.len() != 0 || ty.results.len() != 0 {
+            return Err(WasmError.new("start function must have type [] -> []", -1))
+        }
     }
     loop segment in wm.elems {
         loop item in segment.items {
-            if item >= v.func_types.len() -> return Err(WasmError.new("unknown function {item} in element segment", -1))
-            if item < 0 && segment.elem_type != WASM_FUNCREF && segment.elem_type != WASM_EXTERNREF -> return Err(WasmError.new("type mismatch in element segment", -1))
+            if item >= v.func_types.len() {
+                return Err(WasmError.new("unknown function {item} in element segment", -1))
+            }
+            if item < 0 && segment.elem_type != WASM_FUNCREF && segment.elem_type != WASM_EXTERNREF {
+                return Err(WasmError.new("type mismatch in element segment", -1))
+            }
         }
         if segment.items.len() > 0 && segment.elem_type == WASM_EXTERNREF {
             loop item in segment.items {
-                if item >= 0 -> return Err(WasmError.new("type mismatch: ref.func in an externref element segment", -1))
+                if item >= 0 {
+                    return Err(WasmError.new("type mismatch: ref.func in an externref element segment", -1))
+                }
             }
         }
         if segment.mode == WASM_SEGMENT_ACTIVE {
-            if segment.table >= v.tables.len() -> return Err(WasmError.new("unknown table {segment.table}", -1))
-            if v.tables[segment.table] != segment.elem_type -> return Err(WasmError.new("type mismatch: element segment does not match its table", -1))
+            if segment.table >= v.tables.len() {
+                return Err(WasmError.new("unknown table {segment.table}", -1))
+            }
+            if v.tables[segment.table] != segment.elem_type {
+                return Err(WasmError.new("type mismatch: element segment does not match its table", -1))
+            }
             visible: v.globals.len()
             wasm_validate_const(v, segment.offset, WASM_I32, visible)
         }
     }
     loop segment in wm.datas {
         if segment.mode == WASM_SEGMENT_ACTIVE {
-            if segment.memory != 0 || v.memories == 0 -> return Err(WasmError.new("unknown memory {segment.memory}", -1))
+            if segment.memory != 0 || v.memories == 0 {
+                return Err(WasmError.new("unknown memory {segment.memory}", -1))
+            }
             visible: v.globals.len()
             wasm_validate_const(v, segment.offset, WASM_I32, visible)
         }
@@ -214,22 +252,30 @@ wasm_validate_module: fn(wm: WasmModule) WasmError! {
 }
 
 wasm_validate_function_type: fn(v: WasmValidator, index: Int) -> WasmFuncType WasmError! {
-    if index < 0 || index >= v.func_types.len() -> return Err(WasmError.new("unknown function {index}", -1))
+    if index < 0 || index >= v.func_types.len() {
+        return Err(WasmError.new("unknown function {index}", -1))
+    }
     Ok(v.wm.types[v.func_types[index]])
 }
 
 wasm_validate_limits: fn(limits: WasmLimits, ceiling: Int, what: String) WasmError! {
-    if limits.min > ceiling -> return Err(WasmError.new("{what} size must be at most {ceiling}", -1))
+    if limits.min > ceiling {
+        return Err(WasmError.new("{what} size must be at most {ceiling}", -1))
+    }
     if limits.max == .Val(max) {
         if max > ceiling -> return Err(WasmError.new("{what} size must be at most {ceiling}", -1))
-        if max < limits.min -> return Err(WasmError.new("size minimum must not be greater than maximum", -1))
+        if max < limits.min {
+            return Err(WasmError.new("size minimum must not be greater than maximum", -1))
+        }
     }
 }
 
 wasm_validate_imports: fn(v: &WasmValidator) WasmError! {
     loop entry in v.wm.imports {
         if entry.kind == WASM_EXTERN_FUNC {
-            if entry.type_index >= v.wm.types.len() -> return Err(WasmError.new("unknown type {entry.type_index} for import `{entry.module_name}.{entry.name}`", -1))
+            if entry.type_index >= v.wm.types.len() {
+                return Err(WasmError.new("unknown type {entry.type_index} for import `{entry.module_name}.{entry.name}`", -1))
+            }
             v.func_types.push(entry.type_index)
         } else if entry.kind == WASM_EXTERN_TABLE {
             table: entry.table ?? return Err(WasmError.new("malformed table import", -1))
@@ -251,26 +297,28 @@ wasm_validate_imports: fn(v: &WasmValidator) WasmError! {
 wasm_validate_const: fn(v: &WasmValidator, expr: WasmConstExpr, expected: Int, visible: Int) WasmError! {
     op: expr.op
     ty := WASM_UNKNOWN
-    if op == WASM_OP_I32_CONST {
-        ty = WASM_I32
-    } else if op == WASM_OP_I64_CONST {
-        ty = WASM_I64
-    } else if op == WASM_OP_F32_CONST {
+    if op == WASM_OP_I32_CONST -> ty = WASM_I32 else if op == WASM_OP_I64_CONST -> ty = WASM_I64 else if op == WASM_OP_F32_CONST {
         ty = WASM_F32
-    } else if op == WASM_OP_F64_CONST {
-        ty = WASM_F64
-    } else if op == WASM_OP_REF_NULL {
+    } else if op == WASM_OP_F64_CONST { ty = WASM_F64 } else if op == WASM_OP_REF_NULL {
         ty = expr.value
     } else if op == WASM_OP_REF_FUNC {
-        if expr.value >= v.func_types.len() -> return Err(WasmError.new("unknown function {expr.value}", -1))
+        if expr.value >= v.func_types.len() {
+            return Err(WasmError.new("unknown function {expr.value}", -1))
+        }
         ty = WASM_FUNCREF
     } else {
-        if expr.value >= visible -> return Err(WasmError.new("unknown global {expr.value} in a constant expression", -1))
+        if expr.value >= visible {
+            return Err(WasmError.new("unknown global {expr.value} in a constant expression", -1))
+        }
         global: v.globals[expr.value]
-        if global.mutable -> return Err(WasmError.new("constant expression required: global {expr.value} is mutable", -1))
+        if global.mutable {
+            return Err(WasmError.new("constant expression required: global {expr.value} is mutable", -1))
+        }
         ty = global.value
     }
-    if ty != expected -> return Err(WasmError.new("type mismatch: constant expression has type {wasm_type_name(ty)}, expected {wasm_type_name(expected)}", -1))
+    if ty != expected {
+        return Err(WasmError.new("type mismatch: constant expression has type {wasm_type_name(ty)}, expected {wasm_type_name(expected)}", -1))
+    }
 }
 
 wasm_validate_body: fn(v: &WasmValidator, code: WasmCode, ty: WasmFuncType) WasmError! {
@@ -314,22 +362,24 @@ wasm_validate_instruction: fn(v: &WasmValidator, code: WasmCode, k: Int) WasmErr
         if op == WASM_OP_TABLE_INIT {
             elem_type: v.elem(a)
             table_type: v.table(b)
-            if elem_type != table_type -> return Err(v.fail("type mismatch: table.init element type differs from the table's"))
+            if elem_type != table_type {
+                return Err(v.fail("type mismatch: table.init element type differs from the table's"))
+            }
         }
         if op == WASM_OP_ELEM_DROP -> v.elem(a)
         if op == WASM_OP_TABLE_COPY {
             dst: v.table(a)
             src: v.table(b)
-            if dst != src -> return Err(v.fail("type mismatch: table.copy between tables of different element types"))
+            if dst != src {
+                return Err(v.fail("type mismatch: table.copy between tables of different element types"))
+            }
         }
         if op == WASM_OP_TABLE_SIZE -> v.table(a)
         v.pop_all(wasm_sig_side(info.sig, false))
         v.push_all(wasm_sig_side(info.sig, true))
         return
     }
-    if op == WASM_OP_UNREACHABLE {
-        v.unreachable()
-    } else if op == WASM_OP_BLOCK || op == WASM_OP_LOOP || op == WASM_OP_IF {
+    if op == WASM_OP_UNREACHABLE -> v.unreachable() else if op == WASM_OP_BLOCK || op == WASM_OP_LOOP || op == WASM_OP_IF {
         sig: v.block_type(a)
         if op == WASM_OP_IF -> v.pop_expect(WASM_I32)
         v.pop_all(sig.params)
@@ -345,7 +395,9 @@ wasm_validate_instruction: fn(v: &WasmValidator, code: WasmCode, k: Int) WasmErr
         kind: v.frame_ops[top]
         params: v.frame_params[top]
         results: v.pop_frame()
-        if kind == WASM_OP_IF && params != results -> return Err(v.fail("type mismatch: if without else must leave its parameters as its results"))
+        if kind == WASM_OP_IF && params != results {
+            return Err(v.fail("type mismatch: if without else must leave its parameters as its results"))
+        }
         v.push_all(results)
     } else if op == WASM_OP_BR {
         types: v.label_types(a)
@@ -362,7 +414,9 @@ wasm_validate_instruction: fn(v: &WasmValidator, code: WasmCode, k: Int) WasmErr
         arity: default_types.len()
         loop depth in code.tables[a] {
             types: v.label_types(depth)
-            if types.len() != arity -> return Err(v.fail("type mismatch: br_table targets have different arities"))
+            if types.len() != arity {
+                return Err(v.fail("type mismatch: br_table targets have different arities"))
+            }
             // Check each target against the stack without consuming it.
             popped := [Int]{}
             j := types.len()
@@ -385,20 +439,24 @@ wasm_validate_instruction: fn(v: &WasmValidator, code: WasmCode, k: Int) WasmErr
         v.push_all(sig.results)
     } else if op == WASM_OP_CALL_INDIRECT {
         table: v.table(b)
-        if table != WASM_FUNCREF -> return Err(v.fail("type mismatch: call_indirect through a non-funcref table"))
+        if table != WASM_FUNCREF {
+            return Err(v.fail("type mismatch: call_indirect through a non-funcref table"))
+        }
         if a >= v.wm.types.len() -> return Err(v.fail("unknown type {a}"))
         sig: v.wm.types[a]
         v.pop_expect(WASM_I32)
         v.pop_all(sig.params)
         v.push_all(sig.results)
-    } else if op == WASM_OP_DROP {
-        v.pop()
-    } else if op == WASM_OP_SELECT {
+    } else if op == WASM_OP_DROP { v.pop() } else if op == WASM_OP_SELECT {
         v.pop_expect(WASM_I32)
         first: v.pop()
         second: v.pop()
-        if wasm_is_ref(first) || wasm_is_ref(second) -> return Err(v.fail("type mismatch: select without a type needs numeric operands"))
-        if first != second && first != WASM_UNKNOWN && second != WASM_UNKNOWN -> return Err(v.fail("type mismatch: select operands differ"))
+        if wasm_is_ref(first) || wasm_is_ref(second) {
+            return Err(v.fail("type mismatch: select without a type needs numeric operands"))
+        }
+        if first != second && first != WASM_UNKNOWN && second != WASM_UNKNOWN {
+            return Err(v.fail("type mismatch: select operands differ"))
+        }
         v.push(if first == WASM_UNKNOWN -> second else -> first)
     } else if op == WASM_OP_SELECT_T {
         v.pop_expect(WASM_I32)
@@ -408,18 +466,14 @@ wasm_validate_instruction: fn(v: &WasmValidator, code: WasmCode, k: Int) WasmErr
     } else if op == WASM_OP_LOCAL_GET || op == WASM_OP_LOCAL_SET || op == WASM_OP_LOCAL_TEE {
         if a >= v.locals.len() -> return Err(v.fail("unknown local {a}"))
         ty: v.locals[a]
-        if op == WASM_OP_LOCAL_GET {
-            v.push(ty)
-        } else {
+        if op == WASM_OP_LOCAL_GET -> v.push(ty) else {
             v.pop_expect(ty)
             if op == WASM_OP_LOCAL_TEE -> v.push(ty)
         }
     } else if op == WASM_OP_GLOBAL_GET || op == WASM_OP_GLOBAL_SET {
         if a >= v.globals.len() -> return Err(v.fail("unknown global {a}"))
         global: v.globals[a]
-        if op == WASM_OP_GLOBAL_GET {
-            v.push(global.value)
-        } else {
+        if op == WASM_OP_GLOBAL_GET -> v.push(global.value) else {
             if !global.mutable -> return Err(v.fail("global {a} is immutable"))
             v.pop_expect(global.value)
         }
@@ -441,19 +495,17 @@ wasm_validate_instruction: fn(v: &WasmValidator, code: WasmCode, k: Int) WasmErr
         v.pop_expect(WASM_I32)
         v.pop_expect(ty)
         v.pop_expect(WASM_I32)
-    } else if op == WASM_OP_REF_NULL {
-        v.push(a)
-    } else if op == WASM_OP_REF_IS_NULL {
+    } else if op == WASM_OP_REF_NULL { v.push(a) } else if op == WASM_OP_REF_IS_NULL {
         ty: v.pop()
-        if ty != WASM_UNKNOWN && !wasm_is_ref(ty) -> return Err(v.fail("type mismatch: ref.is_null needs a reference"))
+        if ty != WASM_UNKNOWN && !wasm_is_ref(ty) {
+            return Err(v.fail("type mismatch: ref.is_null needs a reference"))
+        }
         v.push(WASM_I32)
     } else if op == WASM_OP_REF_FUNC {
         if a >= v.func_types.len() -> return Err(v.fail("unknown function {a}"))
         if v.refs.get(a) == None -> return Err(v.fail("undeclared function reference {a}"))
         v.push(WASM_FUNCREF)
-    } else {
-        return Err(v.fail("illegal opcode 0x{wasm_hex(op)}"))
-    }
+    } else { return Err(v.fail("illegal opcode 0x{wasm_hex(op)}")) }
 }
 
 wasm_log2: fn(width: Int) -> Int Never! {

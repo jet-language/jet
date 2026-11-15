@@ -29,6 +29,7 @@ use jet_foundation.[
 ]
 
 SEMA_SHARED_PAYLOAD_PARAM: "__jet_shared_value"
+
 SEMA_SHARED_HOISTED_RHS: "__jet_shared_rhs"
 
 sema_shared_access_inner: fn(ty: Type) -> Type? {
@@ -45,7 +46,6 @@ sema_shared_access_is_shared_type: fn(ty: Type) -> Bool Never! {
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
-
 
 sema_shared_access_is_cell_guard_type: fn(ty: Type) -> Bool Never! {
     if ty == {
@@ -117,7 +117,9 @@ sema_shared_access_effect_row: fn(ty: Type, method: String, span: Span) -> [Effe
     inner: sema_shared_access_inner(ty) ?? return [EffectRowEntry]{}
     scalar_atomic: (method == "read" || method == "get" || method == "set" || method == "replace") && sema_ownership_type_is_scalar(inner)
     protocol: method == "get" || method == "set" || method == "replace" || method == "read" || method == "edit" || method == "guard_read" || method == "guard_edit" || method == "guard_read_within" || method == "guard_edit_within" || method == "read_txn" || method == "edit_txn"
-    if protocol && !scalar_atomic -> return [EffectRowEntry]{EffectRowEntry{name: "Time.Wait", span: span}}
+    if protocol && !scalar_atomic {
+        return [EffectRowEntry]{EffectRowEntry{name: "Time.Wait", span: span}}
+    }
     [EffectRowEntry]{}
 }
 
@@ -164,20 +166,26 @@ sema_shared_access_expr_touches_shared: fn(value: Expr, scopes: SemaScopeTable) 
         .Ident(_, _, _) -> return false
         .Str(parts, _, _) -> {
             loop part in parts {
-                if part == .Interp(inner, _) && sema_shared_access_expr_touches_shared(inner, scopes) -> return true
+                if part == .Interp(inner, _) && sema_shared_access_expr_touches_shared(inner, scopes) {
+                    return true
+                }
             }
         }
         .ListLit(values, _, _) -> return sema_shared_access_expr_list_touches_shared(values, scopes)
         .MapLit(entries, _, _) -> {
             loop entry in entries {
-                if sema_shared_access_expr_touches_shared(entry.key, scopes) || sema_shared_access_expr_touches_shared(entry.value, scopes) -> return true
+                if sema_shared_access_expr_touches_shared(entry.key, scopes) || sema_shared_access_expr_touches_shared(entry.value, scopes) {
+                    return true
+                }
             }
         }
         .MemberSpread(base, _, _, _) -> return sema_shared_access_expr_touches_shared(base, scopes)
         .Spread(inner, _, _) | .Deref(inner, _, _) | .RawOf(inner, _, _) | .Copy(inner, _, _) | .Place(inner, _, _, _) | .Tainted(inner, _, _, _) | .Present(inner, _, _) -> return sema_shared_access_expr_touches_shared(inner, scopes)
         .Index(base, index, _, _, _) -> return sema_shared_access_expr_touches_shared(base, scopes) || sema_shared_access_expr_touches_shared(index, scopes)
         .Slice(base, start, end, range, _, _) -> {
-            if sema_shared_access_expr_touches_shared(base, scopes) || sema_shared_access_expr_touches_shared(start, scopes) || sema_shared_access_expr_touches_shared(end, scopes) -> return true
+            if sema_shared_access_expr_touches_shared(base, scopes) || sema_shared_access_expr_touches_shared(start, scopes) || sema_shared_access_expr_touches_shared(end, scopes) {
+                return true
+            }
             if range == {
                 .Val(inner) -> return sema_shared_access_expr_touches_shared(inner, scopes)
                 .None -> {}
@@ -196,12 +204,20 @@ sema_shared_access_expr_touches_shared: fn(value: Expr, scopes: SemaScopeTable) 
         }
         .TypedLit(_, body, _, _) -> {
             if body == {
-                .Fields(fields) -> loop field in fields {
-                    if sema_shared_access_expr_touches_shared(field.value, scopes) -> return true
+                .Fields(fields) -> {
+                    loop field in fields {
+                        if sema_shared_access_expr_touches_shared(field.value, scopes) {
+                            return true
+                        }
+                    }
                 }
                 .Elements(elements) -> return sema_shared_access_expr_list_touches_shared(elements, scopes)
-                .Entries(entries) -> loop entry in entries {
-                    if sema_shared_access_expr_touches_shared(entry.key, scopes) || sema_shared_access_expr_touches_shared(entry.value, scopes) -> return true
+                .Entries(entries) -> {
+                    loop entry in entries {
+                        if sema_shared_access_expr_touches_shared(entry.key, scopes) || sema_shared_access_expr_touches_shared(entry.value, scopes) {
+                            return true
+                        }
+                    }
                 }
                 .Value(inner) -> return sema_shared_access_expr_touches_shared(inner, scopes)
                 .ByteText(_) | .Empty -> {}
@@ -211,8 +227,12 @@ sema_shared_access_expr_touches_shared: fn(value: Expr, scopes: SemaScopeTable) 
         .EnumLit(_, _, _, args, _, _, _) -> {
             loop argument in args {
                 if argument == {
-                    .Positional(inner) -> if sema_shared_access_expr_touches_shared(inner, scopes) -> return true
-                    .Named(_, inner) -> if sema_shared_access_expr_touches_shared(inner, scopes) -> return true
+                    .Positional(inner) -> {
+                        if sema_shared_access_expr_touches_shared(inner, scopes) -> return true
+                    }
+                    .Named(_, inner) -> {
+                        if sema_shared_access_expr_touches_shared(inner, scopes) -> return true
+                    }
                 }
             }
         }
@@ -267,9 +287,13 @@ sema_shared_access_expr_touches_shared: fn(value: Expr, scopes: SemaScopeTable) 
 // lambda inside one cell's callback (`cell.items.push(fn() { other.name })`)
 // reads another cell through a callback of its own.
 sema_shared_access_payload_name: fn(scopes: SemaScopeTable) -> String {
-    if sema_scope_resolve_index(scopes, SEMA_SHARED_PAYLOAD_PARAM) == None -> return SEMA_SHARED_PAYLOAD_PARAM
+    if sema_scope_resolve_index(scopes, SEMA_SHARED_PAYLOAD_PARAM) == None {
+        return SEMA_SHARED_PAYLOAD_PARAM
+    }
     depth := 1
-    loop sema_scope_resolve_index(scopes, "{SEMA_SHARED_PAYLOAD_PARAM}_{depth}") != None -> depth += 1
+    loop sema_scope_resolve_index(scopes, "{SEMA_SHARED_PAYLOAD_PARAM}_{depth}") != None {
+        depth += 1
+    }
     "{SEMA_SHARED_PAYLOAD_PARAM}_{depth}"
 }
 
@@ -311,7 +335,9 @@ sema_shared_access_desugar_field_read: fn(handle: Expr, field: String, span: Spa
 // Probe stored place types without checking (and therefore copying) the place.
 sema_shared_access_place_type: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Type? {
     if value == {
-        .Paren(inner, _, _) -> { return sema_shared_access_place_type(inner, environment, program, scopes) }
+        .Paren(inner, _, _) -> {
+            return sema_shared_access_place_type(inner, environment, program, scopes)
+        }
         .Ident(name, _, _) -> {
             index: sema_scope_resolve_index(scopes, name) ?? return None
             return sema_scope_binding_type(environment, scopes, index)
@@ -327,11 +353,15 @@ sema_shared_access_place_type: fn(value: Expr, environment: SemaScopeEnvironment
                 .List(element) | .FixedList(element, _) -> return Val(element)
                 .Map(_, _, element) -> return Val(element)
                 // A pool slot `pool[id]` holds the pool's element type.
-                .Apply(name, args) -> if name == "Pool" && args.len() == 1 -> return Val(args[0])
+                .Apply(name, args) -> {
+                    if name == "Pool" && args.len() == 1 -> return Val(args[0])
+                }
                 .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
             }
         }
-        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> { return sema_stmt_return_known_type(value, environment, scopes) }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {
+            return sema_stmt_return_known_type(value, environment, scopes)
+        }
     }
     None
 }
@@ -341,19 +371,25 @@ sema_shared_access_place_type: fn(value: Expr, environment: SemaScopeEnvironment
 sema_shared_access_field_type: fn(owner_ty: Type, member: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Type? {
     owner_name: if owner_ty == {
         .Named(name) | .Apply(name, _) -> name
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> { return None }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
+            return None
+        }
     }
     owner_args: if owner_ty == {
         .Apply(_, args) -> args
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> [Type]{}
     }
     owner := sema_expression_type_symbol(scopes, environment, program, owner_name)
-    if owner == None -> owner = sema_expression_carrier_type_symbol(environment, program, owner_name)
+    if owner == None {
+        owner = sema_expression_carrier_type_symbol(environment, program, owner_name)
+    }
     owner_symbol: owner ?? return None
     definition: sema_scope_declaration_struct(environment, program, owner_symbol.id) ?? return None
     names: loop parameter in definition.type_params -> parameter.name
     loop field in definition.fields {
-        if field.name == member -> return Val(sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner_symbol.module_identity, field.ty, names), names, owner_args))
+        if field.name == member {
+            return Val(sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner_symbol.module_identity, field.ty, names), names, owner_args))
+        }
     }
     None
 }
@@ -375,8 +411,12 @@ sema_shared_access_project_place: fn(value: Expr, environment: SemaScopeEnvironm
             projected: sema_shared_access_project_place(base, environment, program, scopes) ?? return None
             return Val((handle: projected.handle, place: Expr.Index{base: projected.place, index: index, span: span, kind: kind, id: node}, name: projected.name))
         }
-        .Paren(inner, _, _) -> { return sema_shared_access_project_place(inner, environment, program, scopes) }
-        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> { return None }
+        .Paren(inner, _, _) -> {
+            return sema_shared_access_project_place(inner, environment, program, scopes)
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {
+            return None
+        }
     }
 }
 
@@ -400,7 +440,9 @@ sema_shared_access_write_place: fn(target: LValue, environment: SemaScopeEnviron
             projected: sema_shared_access_project_place(base, environment, program, scopes) ?? return None
             return Val((handle: projected.handle, span: Span{start: sema_shared_access_place_start(base), end: span.end}, target: LValue.Index{base: projected.place, index: index, span: span, kind: kind}, name: projected.name))
         }
-        .Local(_, _) -> { return None }
+        .Local(_, _) -> {
+            return None
+        }
     }
 }
 
@@ -444,7 +486,9 @@ sema_shared_access_call_place: fn(receiver: Expr, method_span: Span, environment
 // as a shared place assignment's right side does.
 sema_shared_access_place_call_transaction: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Stmt? {
     if expr == .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, node) {
-        if !sema_stmt_binding_is_write_place(receiver) || !sema_shared_access_expr_call_args_touches_shared(args, scopes) -> return None
+        if !sema_stmt_binding_is_write_place(receiver) || !sema_shared_access_expr_call_args_touches_shared(args, scopes) {
+            return None
+        }
         found: sema_shared_access_call_place(receiver, method_span, environment, program, scopes) ?? return None
         body := [Stmt]{}
         hoisted := [CallArg]{}
@@ -480,17 +524,23 @@ sema_shared_access_lint_busy_wait: fn(condition: Expr, body: [Stmt], scopes: Sem
             break
         }
     }
-    if poll < 0 -> return
+    if poll < 0 {
+        return
+    }
     blocking := false
     ast_visit_body(body, fn(expression: Expr) { sema_shared_access_note_blocking_call(blocking, expression) }, true)
-    if blocking || sema_shared_access_statements_write_field(body, handles[poll], members[poll]) -> return
+    if blocking || sema_shared_access_statements_write_field(body, handles[poll], members[poll]) {
+        return
+    }
     diagnostics.push(sema_lint("L0207", sema_shared_access_condition_span(condition), "this unbounded loop polls `Shared` state without waiting", "an empty or non-blocking body reads a lock-backed value repeatedly and can consume a core while another task makes progress", "wait on a `Condition` through an edit guard, or receive from a channel; an empty plain-field predicate can use that wait directly"))
 }
 
 // The condition is reported from its leftmost operand's own span: a field
 // operand (`flag.ready == false`) starts at its member name.
 sema_shared_access_condition_span: fn(condition: Expr) -> Span Never! {
-    if condition == .Binary(_, left, _, span, _) -> return Span{start: sema_shared_access_condition_span(left).start, end: span.end}
+    if condition == .Binary(_, left, _, span, _) {
+        return Span{start: sema_shared_access_condition_span(left).start, end: span.end}
+    }
     expr_span(condition)
 }
 
@@ -559,19 +609,25 @@ sema_shared_access_statement_writes_field: fn(statement: Stmt, handle: String, f
         }
         .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> return sema_shared_access_statements_write_field(body, handle, field)
         .CountedLoop(_, _, step, body, _, _, _) -> {
-            if step == .Val(inner) && sema_shared_access_statement_writes_field(inner, handle, field) -> return true
+            if step == .Val(inner) && sema_shared_access_statement_writes_field(inner, handle, field) {
+                return true
+            }
             return sema_shared_access_statements_write_field(body, handle, field)
         }
         .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
             loop arm in arms {
                 if sema_shared_access_statements_write_field(arm.body, handle, field) -> return true
             }
-            if else_body == .Val(rest) -> return sema_shared_access_statements_write_field(rest, handle, field)
+            if else_body == .Val(rest) {
+                return sema_shared_access_statements_write_field(rest, handle, field)
+            }
             return false
         }
         .ComptimeIf(_, _, then_body, else_body, _, _) -> {
             if sema_shared_access_statements_write_field(then_body, handle, field) -> return true
-            if else_body == .Val(rest) -> return sema_shared_access_statements_write_field(rest, handle, field)
+            if else_body == .Val(rest) {
+                return sema_shared_access_statements_write_field(rest, handle, field)
+            }
             return false
         }
         .Expr(_) | .Val(_) | .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Yield(_, _) | .DeferClose(_, _) -> return false

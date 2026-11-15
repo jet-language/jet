@@ -3,40 +3,71 @@
 // providers with this run entry. Input .bytes() calls construct owned test
 // facts; they are not proof of a zero-copy String/native/host invocation.
 use jet_cli.[
-    JetCLIAdaptiveTable, JetCLIColorRequest, JetCLIOutputFacts, JetCLIOutputKind,
-    JetCLIOutputProfile, JetCLITableAlignment, JetCLITableCell, JetCLITableColumn, JetCLITableRow,
-    jet_cli_color_request, jet_cli_output_channel, jet_cli_output_profile, jet_cli_table,
-    jet_cli_table_append_pad, jet_cli_table_bound_text, jet_cli_table_cell_kind,
-    jet_cli_table_cell_lines, jet_cli_table_cell_text, jet_cli_table_cell_width, jet_cli_table_clip,
-    jet_cli_table_column, jet_cli_table_extend, jet_cli_table_fit_widths, jet_cli_table_layout,
-    jet_cli_table_render, jet_cli_table_row, jet_cli_table_structured, jet_cli_table_text_width,
-    jet_cli_table_wide, jet_cli_table_wrap,
+    JetCLIAdaptiveTable,
+    JetCLIColorRequest,
+    JetCLIOutputFacts,
+    JetCLIOutputKind,
+    JetCLIOutputProfile,
+    JetCLITableAlignment,
+    JetCLITableCell,
+    JetCLITableColumn,
+    JetCLITableRow,
+    jet_cli_color_request,
+    jet_cli_output_channel,
+    jet_cli_output_profile,
+    jet_cli_table,
+    jet_cli_table_append_pad,
+    jet_cli_table_bound_text,
+    jet_cli_table_cell_kind,
+    jet_cli_table_cell_lines,
+    jet_cli_table_cell_text,
+    jet_cli_table_cell_width,
+    jet_cli_table_clip,
+    jet_cli_table_column,
+    jet_cli_table_extend,
+    jet_cli_table_fit_widths,
+    jet_cli_table_layout,
+    jet_cli_table_render,
+    jet_cli_table_row,
+    jet_cli_table_structured,
+    jet_cli_table_text_width,
+    jet_cli_table_wide,
+    jet_cli_table_wrap,
 ]
 
 shared_output_require: fn(ok: Bool, name: String) Never! {
     if !ok -> panic("shared output: {name}")
 }
+
 shared_output_bytes: fn(actual: [U8], expected: String, name: String) Never! {
     shared_output_require(actual == expected.bytes(), name)
 }
+
 shared_output_facts: fn() -> JetCLIOutputFacts Never! {
     JetCLIOutputFacts{tty: true, term: Val("xterm-256color".bytes()), no_color: false, force_color: false, requested_color: .Auto, json: false, width: Val(U64{100}), unicode: true}
 }
+
 shared_output_profile: fn(facts: JetCLIOutputFacts) -> JetCLIOutputProfile Never! {
     jet_cli_output_profile(facts) ?? panic("valid explicit output facts refused")
 }
+
 shared_output_render: fn(table: JetCLIAdaptiveTable, profile: JetCLIOutputProfile) -> [U8] Never! {
     jet_cli_table_render(table, jet_cli_table_layout(table, profile)) ?? panic("human output hidden")
 }
+
 shared_output_pair: fn() -> JetCLIAdaptiveTable Never! {
-    jet_cli_table([JetCLITableColumn]{
-        jet_cli_table_column("N".bytes(), .Text),
-        jet_cli_table_column("v".bytes(), .Integer)
-    }, [JetCLITableRow]{
-        jet_cli_table_row([JetCLITableCell]{jet_cli_table_cell_text("a".bytes()), .Integer{value: 7}}),
-        jet_cli_table_row([JetCLITableCell]{jet_cli_table_cell_text("bbb".bytes()), .Integer{value: -2}})
-    })
+    jet_cli_table(
+        [JetCLITableColumn]{
+            jet_cli_table_column("N".bytes(), .Text),
+            jet_cli_table_column("v".bytes(), .Integer),
+        },
+        [JetCLITableRow]{
+            jet_cli_table_row([JetCLITableCell]{jet_cli_table_cell_text("a".bytes()), .Integer{value: 7}}),
+            jet_cli_table_row([JetCLITableCell]{jet_cli_table_cell_text("bbb".bytes()), .Integer{value: -2}}),
+        },
+    )
 }
+
 shared_output_term_error: fn(term: [U8]) Never! {
     facts := shared_output_facts()
     // copy: `term` stays with the caller (`term` is a read parameter: no move out of it, E0201) and
@@ -46,19 +77,20 @@ shared_output_term_error: fn(term: [U8]) Never! {
         .Err(error) -> {
             if error == .InvalidTerm(value) {
                 shared_output_require(value == term, "typed TERM error preserves bytes")
-            } else {
-                panic("wrong typed TERM error")
-            }
+            } else { panic("wrong typed TERM error") }
         }
         .Ok(_) -> panic("invalid TERM accepted")
     }
 }
+
 shared_output_profiles: fn() Never! {
     facts := shared_output_facts()
     profile: shared_output_profile(facts)
     shared_output_require(profile.width == U64{100} && profile.ansi_enabled && profile.unicode_enabled && profile.progress_enabled && profile.human_enabled && !profile.machine_enabled, "Rust human terminal capabilities")
     shared_output_require(jet_cli_output_channel(profile, .Renderable) == .HumanStdout && jet_cli_output_channel(profile, .Machine) == .Hidden, "human primary channels")
-    loop kind in ([JetCLIOutputKind]{.Status, .Log, .Progress}) -> shared_output_require(jet_cli_output_channel(profile, kind) == .HumanStderr, "human secondary channels")
+    loop kind in ([JetCLIOutputKind]{.Status, .Log, .Progress}) {
+        shared_output_require(jet_cli_output_channel(profile, kind) == .HumanStderr, "human secondary channels")
+    }
 
     facts.tty = false
     redirected: shared_output_profile(facts)
@@ -85,7 +117,9 @@ shared_output_profiles: fn() Never! {
     facts.json = true
     machine: shared_output_profile(facts)
     shared_output_require(!machine.ansi_enabled && !machine.unicode_enabled && !machine.progress_enabled && !machine.human_enabled && machine.machine_enabled, "Rust JSON capabilities")
-    loop kind in ([JetCLIOutputKind]{.Renderable, .Status, .Log, .Progress}) -> shared_output_require(jet_cli_output_channel(machine, kind) == .Hidden, "JSON human channels hidden")
+    loop kind in ([JetCLIOutputKind]{.Renderable, .Status, .Log, .Progress}) {
+        shared_output_require(jet_cli_output_channel(machine, kind) == .Hidden, "JSON human channels hidden")
+    }
     shared_output_require(jet_cli_output_channel(machine, .Machine) == .MachineStdout, "JSON machine stdout")
     table: shared_output_pair()
     shared_output_require(jet_cli_table_render(table, jet_cli_table_layout(table, machine)) == None, "table emits no JSON/ANSI fragment")
@@ -96,9 +130,7 @@ shared_output_profiles: fn() Never! {
         .Err(error) -> {
             if error == .InvalidWidth(value) {
                 shared_output_require(value == U64{0}, "typed width error")
-            } else {
-                panic("wrong width error")
-            }
+            } else { panic("wrong width error") }
         }
         .Ok(_) -> panic("zero width accepted")
     }
@@ -125,13 +157,12 @@ shared_output_profiles: fn() Never! {
         .Err(error) -> {
             if error == .InvalidColorRequest(value) {
                 shared_output_require(value == bad, "typed color error")
-            } else {
-                panic("wrong color error")
-            }
+            } else { panic("wrong color error") }
         }
         .Ok(_) -> panic("invalid color accepted")
     }
 }
+
 shared_output_grids: fn() Never! {
     table: shared_output_pair()
     facts := shared_output_facts()
@@ -178,6 +209,7 @@ shared_output_grids: fn() Never! {
     shared_output_bytes(shared_output_render(mismatch, shared_output_profile(facts)), "+-------+\n| Value |\n+-------+\n|     z |\n+-------+", "schema alignment does not coerce value kind")
     shared_output_require(jet_cli_table_cell_kind(mismatch.rows[0].cells[0]) == .Text, "typed value kind retained")
 }
+
 shared_output_text: fn() Never! {
     ansi: [U8]{27, 91, 51, 49, 109, 114, 101, 100, 27, 91, 48, 109, 32, 27, 93, 116, 105, 116, 108, 101, 7, 120, 32, 27, 93, 111, 116, 104, 101, 114, 27, 92, 121}
     clean: jet_cli_table_bound_text(ansi)
@@ -216,6 +248,7 @@ shared_output_text: fn() Never! {
     shared_output_require(jet_cli_table_extend(0x1dc00) && jet_cli_table_extend(0x1dfff) && !jet_cli_table_extend(0x1dbff) && !jet_cli_table_extend(0x1e000), "reference supplementary Extend boundaries")
     shared_output_require(jet_cli_table_wide(0x3000) && jet_cli_table_wide(0x303e) && !jet_cli_table_wide(0x303f) && !jet_cli_table_wide(0x3040) && jet_cli_table_wide(0x3041), "reference wide gap boundaries")
 }
+
 shared_output_bounds: fn() Never! {
     columns := [JetCLITableColumn]{}
     loop _ in 0..<65 -> columns.push(jet_cli_table_column("c".bytes(), .Text))
@@ -241,9 +274,7 @@ shared_output_bounds: fn() Never! {
     shared_output_require(text_bound.columns[0].name.len() == 4096 && !text_bound.truncated, "text/name bound is not structural truncation")
     if text_bound.rows[0].cells[0] == .Text(value) {
         shared_output_require(value.len() == 4096, "raw Text normalized by table")
-    } else {
-        panic("Text changed kind")
-    }
+    } else { panic("Text changed kind") }
     projection: jet_cli_table_structured(extra)
     shared_output_require(projection.columns.len() == extra.columns.len() && projection.rows.len() == extra.rows.len() && projection.truncated == extra.truncated && jet_cli_table_cell_kind(projection.rows[0].cells[0]) == .Empty, "structured typed projection")
 
@@ -256,6 +287,7 @@ shared_output_bounds: fn() Never! {
     shared_output_bytes(jet_cli_table_cell_lines(.Boolean{value: false}, 256)[0], "false", "boolean false")
     shared_output_require(jet_cli_table_cell_lines(.Empty, 256) == [[U8]]{[U8]{}}, "empty value")
 }
+
 #Test("shared_output") {
     shared_output_profiles()
     shared_output_grids()

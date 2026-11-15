@@ -1,7 +1,6 @@
 // (#1187): locked browser provisioning through Jetpack.
 // Exact browser binaries are recorded in `.jet/lock` `[[browser]]` blocks so
 // automation resolves a project-pinned install, never a host PATH scrape.
-
 use {
     jetpack_foundation.[BROWSER_ENGINES, UNIFIED_LOCK_FILE]
     jet_pkg_model.[LockEnvelope, LockedBrowser, pkg_host_key, pkg_lock_load, pkg_lock_record_browser, pkg_sha256_hex]
@@ -43,7 +42,9 @@ env_browser_normalize_engine: fn(raw: String) -> String BrowserLockError! {
 }
 
 env_browser_validate_protocol: fn(protocol: String) BrowserLockError! {
-    if !BROWSER_PROTOCOLS.contains(protocol) -> return Err(BrowserLockError.InvalidProtocol(protocol))
+    if !BROWSER_PROTOCOLS.contains(protocol) {
+        return Err(BrowserLockError.InvalidProtocol(protocol))
+    }
 }
 
 // `sha256-<hex>` and the byte size of the file at `path`.
@@ -61,12 +62,12 @@ env_browser_lock_binary: fn(project_root: String, engine_input: String, binary: 
     absolute: files.canonicalize(binary) ?? return Err(BrowserLockError.IO("could not resolve {binary}: {err}"))
     hashed: env_browser_hash_file(absolute)
     locked := LockedBrowser{
-        engine,
-        version,
+        engine: engine,
+        version: version,
         binary: absolute,
-        protocol,
+        protocol: protocol,
         size: hashed.size,
-        envelope: LockEnvelope{output_hash: hashed.digest, platform: pkg_host_key(), signature: "", provenance, catalog_tier: "", catalog_trust: ""}
+        envelope: LockEnvelope{output_hash: hashed.digest, platform: pkg_host_key(), signature: "", provenance: provenance, catalog_tier: "", catalog_trust: ""},
     }
     if driver != "" {
         if !files.is_file(driver) -> return Err(BrowserLockError.MissingBinary(driver))
@@ -109,7 +110,9 @@ env_browser_verify: fn(locked: LockedBrowser) BrowserLockError! -[FS]> {
         return Err(BrowserLockError.HashMismatch{engine: locked.engine, expected: locked.envelope.output_hash, actual: hashed.digest})
     }
     if locked.driver != "" {
-        if !files.is_file(locked.driver) -> return Err(BrowserLockError.MissingBinary(locked.driver))
+        if !files.is_file(locked.driver) {
+            return Err(BrowserLockError.MissingBinary(locked.driver))
+        }
         driver: files.stat(locked.driver) ?? return Err(BrowserLockError.IO("could not stat {locked.driver}: {err}"))
         if driver.size != locked.driver_size {
             return Err(BrowserLockError.SizeMismatch{engine: locked.engine, expected: locked.driver_size, actual: driver.size})

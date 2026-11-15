@@ -27,7 +27,9 @@ provider_rubygems_parse_info: fn(repository: String, name: String, raw: String) 
             .Val(at) -> Val(provider_registry_tail(left, at + 1))
             .None -> None
         }
-        if !provider_script_safe_piece(version, "+_-.") -> return Err(RegistryError.Reason("unsafe gem version `{version}`"))
+        if !provider_script_safe_piece(version, "+_-.") {
+            return Err(RegistryError.Reason("unsafe gem version `{version}`"))
+        }
         checksum := ""
         attributes: halves.after.split(",").to_list()
         loop attribute in attributes {
@@ -37,7 +39,9 @@ provider_rubygems_parse_info: fn(repository: String, name: String, raw: String) 
                 break
             }
         }
-        if !provider_registry_valid_hex(checksum, 64) -> return Err(RegistryError.Reason("gem `{name}` {version} has no SHA-256 compact-index checksum"))
+        if !provider_registry_valid_hex(checksum, 64) {
+            return Err(RegistryError.Reason("gem `{name}` {version} has no SHA-256 compact-index checksum"))
+        }
         dependencies := [RegistryDependency]{}
         if raw_dependencies == {
             .Val(listed) -> {
@@ -55,22 +59,28 @@ provider_rubygems_parse_info: fn(repository: String, name: String, raw: String) 
                         .None -> ">= 0"
                     }
                     if dependency_name == "ruby" || dependency_name == "rubygems" -> next
-                    if !provider_script_registry(ProviderFamily.RubyGems).valid_name(dependency_name) -> return Err(RegistryError.Reason("gem `{name}` has unsafe dependency `{dependency_name}`"))
+                    if !provider_script_registry(ProviderFamily.RubyGems).valid_name(dependency_name) {
+                        return Err(RegistryError.Reason("gem `{name}` has unsafe dependency `{dependency_name}`"))
+                    }
                     dependencies.push(RegistryDependency{name: dependency_name, requirement: requirement.replace("&", ",")})
                 }
             }
             .None -> {}
         }
-        out.push(RegistryPackage{
-            name,
-            version,
-            url: "{repository}/gems/{name}-{version}.gem",
-            integrity: RegistryIntegrity.SHA256(pkg_ascii_lower(checksum)),
-            dependencies,
-            psr4: [String: [String]]{},
-        })
+        out.push(
+            RegistryPackage{
+                name: name,
+                version: version,
+                url: "{repository}/gems/{name}-{version}.gem",
+                integrity: RegistryIntegrity.SHA256(pkg_ascii_lower(checksum)),
+                dependencies: dependencies,
+                psr4: [String:[String]]{},
+            },
+        )
     }
-    if out.len() == 0 -> return Err(RegistryError.Reason("compact index has no versions for gem `{name}`"))
+    if out.len() == 0 {
+        return Err(RegistryError.Reason("compact index has no versions for gem `{name}`"))
+    }
     Ok(out)
 }
 

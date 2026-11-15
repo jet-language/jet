@@ -2089,7 +2089,9 @@ sema_author_facing_diagnostics: fn(anchor: Span, generated: [Diagnostic], diagno
 // that tool.
 sema_derive_builtin_providers: fn() -> [MarkerDecl] {
     parsed: parse_source(SEMA_PRELUDE_DERIVE_SOURCE.bytes())
-    if parsed.diagnostics.len() != 0 -> panic("Prelude/Derives.jet does not parse: {parsed.diagnostics[0].what}")
+    if parsed.diagnostics.len() != 0 {
+        panic("Prelude/Derives.jet does not parse: {parsed.diagnostics[0].what}")
+    }
     providers := [MarkerDecl]{}
     loop item in parsed.program.items {
         if item == .MarkerDecl(provider) && provider.body != None -> providers.push(provider)

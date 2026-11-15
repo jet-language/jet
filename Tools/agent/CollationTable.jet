@@ -17,12 +17,18 @@ use {
 }
 
 ALLKEYS_PATH: "tests/data/unicode/uca/allkeys_CLDR.txt"
+
 PROPLIST_PATH: "tests/data/unicode/ucd/PropList.txt"
+
 SUMS_PATH: "tests/data/unicode/SHA256SUMS"
+
 TARGET_PATH: "Core/Text/CollationTable.jet"
+
 // The binary tables' directory, relative to TARGET_PATH's directory.
 TABLE_DIR: "CollationTable"
+
 ABSENT: 16777215
+
 #Error
 TableError: struct {
     message: String
@@ -43,9 +49,7 @@ KeyRow: struct {
     rank: Int
 }
 
-fail: fn(message: String) -> TableError {
-    TableError{message: message}
-}
+fail: fn(message: String) -> TableError { TableError{message: message} }
 
 hex_value: fn(text: String) -> Int TableError! {
     if text.len() == 0 -> return Err(fail("empty hex field"))
@@ -66,12 +70,16 @@ parse_elements: fn(text: String) -> [Int] TableError! {
     loop {
         if rest == "" -> return Ok(out)
         opened: rest.partition("[")
-        if opened.sep == "" || opened.head.trim() != "" -> return Err(fail("bad element list '{text}'"))
+        if opened.sep == "" || opened.head.trim() != "" {
+            return Err(fail("bad element list '{text}'"))
+        }
         closed: opened.tail.partition("]")
         if closed.sep == "" -> return Err(fail("unclosed element in '{text}'"))
         body: closed.head
         weights: body.replace("*", ".").split(".").to_list()
-        if weights.len() != 4 || weights[0] != "" -> return Err(fail("element '{body}' is not three weights"))
+        if weights.len() != 4 || weights[0] != "" {
+            return Err(fail("element '{body}' is not three weights"))
+        }
         loop at in 1..<4 -> out.push(hex_value(weights[at]))
         rest = closed.tail.trim()
     }
@@ -84,7 +92,9 @@ parse_allkeys: fn(source: String) -> [KeyRow] TableError! {
         line: raw.partition("#").head.trim()
         if line == "" -> next
         if line.starts_with("@version") {
-            if line != "@version 17.0.0" -> return Err(fail("{ALLKEYS_PATH} is {line}, expected @version 17.0.0"))
+            if line != "@version 17.0.0" {
+                return Err(fail("{ALLKEYS_PATH} is {line}, expected @version 17.0.0"))
+            }
             version_seen = true
             next
         }
@@ -95,7 +105,9 @@ parse_allkeys: fn(source: String) -> [KeyRow] TableError! {
         loop word in fields.head.trim().split(" ") {
             if word != "" -> scalars.push(hex_value(word))
         }
-        if scalars.len() < 1 || scalars.len() > 3 -> return Err(fail("row key '{fields.head}' has {scalars.len()} scalars"))
+        if scalars.len() < 1 || scalars.len() > 3 {
+            return Err(fail("row key '{fields.head}' has {scalars.len()} scalars"))
+        }
         elements: parse_elements(fields.tail)
         if elements.len() == 0 -> return Err(fail("row '{line}' has no elements"))
         slot := 0
@@ -186,7 +198,9 @@ build_tables: fn(rows: [KeyRow]) -> Tables TableError! {
                 single_count += 1
             }
             else -> {
-                loop at in 0..<3 -> push_le(contractions, if at < row.scalars.len() -> row.scalars[at] else -> ABSENT, 3)
+                loop at in 0..<3 {
+                    push_le(contractions, if at < row.scalars.len() -> row.scalars[at] else -> ABSENT, 3)
+                }
                 push_le(contractions, element_count, 3)
                 push_le(contractions, count, 1)
                 contraction_count += 1
@@ -199,7 +213,9 @@ build_tables: fn(rows: [KeyRow]) -> Tables TableError! {
         }
         element_count += count
     }
-    if element_count >= ABSENT -> return Err(fail("{element_count} elements overflow a 3-byte index"))
+    if element_count >= ABSENT {
+        return Err(fail("{element_count} elements overflow a 3-byte index"))
+    }
     Ok(Tables{singles: singles, single_count: single_count, contractions: contractions, contraction_count: contraction_count, elements: elements, element_count: element_count})
 }
 
@@ -301,9 +317,13 @@ generated: fn() -[FS]> [Output] TableError! {
 
 table_main: fn(args: [String]) -[FS]> String TableError! {
     check: args.len() == 1 && args[0] == "--check"
-    if args.len() > 1 || (args.len() == 1 && !check) -> return Err(fail("usage: CollationTable.jet [--check]"))
+    if args.len() > 1 || (args.len() == 1 && !check) {
+        return Err(fail("usage: CollationTable.jet [--check]"))
+    }
     outputs: generated()
-    if !check -> files.create_dir_all("Core/Text/{TABLE_DIR}") ?? return Err(fail("cannot create Core/Text/{TABLE_DIR}: {err}"))
+    if !check {
+        files.create_dir_all("Core/Text/{TABLE_DIR}") ?? return Err(fail("cannot create Core/Text/{TABLE_DIR}: {err}"))
+    }
     stale := [String]{}
     loop output in outputs {
         current: files.read_bytes(output.path) ?? [U8]{}
@@ -312,7 +332,9 @@ table_main: fn(args: [String]) -[FS]> String TableError! {
         if check -> next
         files.write_bytes(output.path, output.bytes) ?? return Err(fail("cannot write {output.path}: {err}"))
     }
-    if check && stale.len() > 0 -> return Err(fail("collation-table: stale (run jet Tools/agent/CollationTable.jet): {stale.join(", ")}"))
+    if check && stale.len() > 0 {
+        return Err(fail("collation-table: stale (run jet Tools/agent/CollationTable.jet): {stale.join(", ")}"))
+    }
     if check -> return Ok("collation-table: {outputs.len()} outputs are current")
     Ok("collation-table: wrote {stale.len()} of {outputs.len()} outputs")
 }

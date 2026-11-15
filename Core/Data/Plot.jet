@@ -1,8 +1,17 @@
-use core.data.[
-    JetDataPlotMark, JetDataPlotValue, JetDataPlotField, JetDataPlotSchema,
-    JetDataPlotEncoding, JetDataPlotLayout, JetDataPlotPlan, JetDataPlotRender
-]
-use math: core.math
+use {
+    core.data.[
+        JetDataPlotMark,
+        JetDataPlotValue,
+        JetDataPlotField,
+        JetDataPlotSchema,
+        JetDataPlotEncoding,
+        JetDataPlotLayout,
+        JetDataPlotPlan,
+        JetDataPlotRender,
+    ]
+    math: core.math
+}
+
 // core.data.plot — text and SVG charts from labelled series.
 //
 // A plan is a mark plus aligned `labels` / `values`. Rendering never talks to
@@ -80,8 +89,12 @@ svg: fn(plan: JetDataPlotPlan) -> String Never! { render(plan).body }
 
 text: fn(plan: JetDataPlotPlan) -> String Never! {
     normalized: normalize_plan(plan)
-    if normalized.mark == JetDataPlotMark.Line -> return render_line_text(normalized.labels, normalized.values)
-    if normalized.mark == JetDataPlotMark.Point -> return render_point_text(normalized.labels, normalized.values)
+    if normalized.mark == JetDataPlotMark.Line {
+        return render_line_text(normalized.labels, normalized.values)
+    }
+    if normalized.mark == JetDataPlotMark.Point {
+        return render_point_text(normalized.labels, normalized.values)
+    }
     render_bar_text(normalized.labels, normalized.values)
 }
 
@@ -104,6 +117,7 @@ normalize_plan: fn(plan: JetDataPlotPlan) -> JetDataPlotPlan {
         schema: plan.schema,
     }
 }
+
 align_values: fn(labels: [String], values: [Float]) -> [Float] {
     out := [Float]{}
     loop i in 0..<labels.len() {
@@ -111,6 +125,7 @@ align_values: fn(labels: [String], values: [Float]) -> [Float] {
     }
     out
 }
+
 render_bar_text: fn(labels: [String], values: [Float]) -> String {
     bounds: value_bounds(values)
     minimum: bounds.min
@@ -122,7 +137,9 @@ render_bar_text: fn(labels: [String], values: [Float]) -> String {
         bar := ""
         if v >= (Float{0.0}) {
             width := 0
-            if maximum > (Float{0.0}) -> width = scale_between(v, Float{0.0}, maximum, 20 - baseline)
+            if maximum > (Float{0.0}) {
+                width = scale_between(v, Float{0.0}, maximum, 20 - baseline)
+            }
             loop _ in 0..<baseline -> bar = "{bar} "
             loop _ in 0..<width -> bar = "{bar}#"
         } else {
@@ -153,7 +170,7 @@ render_bar_svg: fn(labels: [String], values: [Float]) -> String {
             if maximum > (Float{0.0}) -> bw = scale_between(v, Float{0.0}, maximum, 200 - baseline)
         } else {
             if minimum < (Float{0.0}) -> bw = scale_between(v, minimum, Float{0.0}, baseline)
-            x = x - bw
+            x -= bw
         }
         out = "{out}<text x=\"4\" y=\"{y + 12}\" font-size=\"12\">{xml_escape(labels[i])}</text>"
         out = "{out}<rect x=\"{x}\" y=\"{y}\" width=\"{bw}\" height=\"16\" fill=\"#4a90d9\"/>"
@@ -163,17 +180,13 @@ render_bar_svg: fn(labels: [String], values: [Float]) -> String {
 
 render_line_text: fn(labels: [String], values: [Float]) -> String {
     out := ""
-    loop i in 0..<labels.len() {
-        out = "{out}{labels[i]}={values[i]}\n"
-    }
+    loop i in 0..<labels.len() -> out = "{out}{labels[i]}={values[i]}\n"
     out
 }
 
 render_point_text: fn(labels: [String], values: [Float]) -> String {
     out := ""
-    loop i in 0..<labels.len() {
-        out = "{out}{labels[i]}: {values[i]}\n"
-    }
+    loop i in 0..<labels.len() -> out = "{out}{labels[i]}: {values[i]}\n"
     out
 }
 
@@ -217,8 +230,8 @@ value_bounds: fn(values: [Float]) -> (min: Float, max: Float) {
         if value > maximum -> maximum = value
     }
     if minimum == maximum {
-        minimum = minimum - (Float{1.0})
-        maximum = maximum + (Float{1.0})
+        minimum -= (Float{1.0})
+        maximum += (Float{1.0})
     }
     (min: minimum, max: maximum)
 }
@@ -236,18 +249,14 @@ xml_escape: fn(text: String) -> String {
     chunk := [U8]{}
     loop b in text.bytes() {
         entity := ""
-        if b == (U8{38}) -> entity = "&amp;"
-        else if b == (U8{60}) -> entity = "&lt;"
-        else if b == (U8{62}) -> entity = "&gt;"
-        else if b == (U8{34}) -> entity = "&quot;"
-        else if b == (U8{39}) -> entity = "&apos;"
+        if b == (U8{38}) -> entity = "&amp;" else if b == (U8{60}) -> entity = "&lt;" else if b == (U8{62}) {
+            entity = "&gt;"
+        } else if b == (U8{34}) { entity = "&quot;" } else if b == (U8{39}) { entity = "&apos;" }
         if entity.len() > 0 {
             chunk_text: String.from_bytes(chunk) ?? panic("plot XML label encoding failed")
             out = "{out}{chunk_text}{entity}"
             chunk = [U8]{}
-        } else {
-            chunk.push(b)
-        }
+        } else { chunk.push(b) }
     }
     tail: String.from_bytes(chunk) ?? panic("plot XML label encoding failed")
     out = "{out}{tail}"

@@ -16,12 +16,19 @@ use {
 // ── Palette roles (jet_foundation::Terminal::Theme) ──
 
 ACCENT_SGR: "1;96"
+
 DIM_SGR: "2;37"
+
 SUCCESS_SGR: "32"
+
 WARN_SGR: "33"
+
 ERROR_SGR: "31"
+
 INVERT_SGR: "48;5;24;97;1"
+
 BORDER_SGR: "90"
+
 BOLD_SGR: "1"
 
 // Rust `Severity::Lint` in the Compiler `Diagnostic.severity` encoding.
@@ -40,9 +47,7 @@ TERMINAL_SPINNER_FRAMES: [String]{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦
 
 // ESC, which opens every ANSI control sequence. Jet string literals have no
 // hex escape, so the byte is built here once.
-terminal_esc: fn() -> String Never! {
-    String.from_bytes([U8]{U8{27}}) ?? ""
-}
+terminal_esc: fn() -> String Never! { String.from_bytes([U8]{U8{27}}) ?? "" }
 
 // The explicit colour choice a user made on the command line.
 ColorChoice: enum {
@@ -82,9 +87,7 @@ terminal_auto_color: fn(is_tty: Bool) -[Env]> Bool Never! {
 TerminalPalette: struct {
     color: Bool
 
-    new: fn(color: Bool) -> TerminalPalette Never! {
-        TerminalPalette{color: color}
-    }
+    new: fn(color: Bool) -> TerminalPalette Never! { TerminalPalette{color: color} }
 
     resolve: fn(choice: ColorChoice, is_tty: Bool) -[Env]> TerminalPalette Never! {
         TerminalPalette.new(choice.resolve(is_tty))
@@ -96,37 +99,21 @@ TerminalPalette: struct {
         "{esc}[{sgr}m{text}{esc}[0m"
     }
 
-    accent: fn(self, text: String) -> String Never! {
-        self.paint(ACCENT_SGR, text)
-    }
+    accent: fn(self, text: String) -> String Never! { self.paint(ACCENT_SGR, text) }
 
-    dim: fn(self, text: String) -> String Never! {
-        self.paint(DIM_SGR, text)
-    }
+    dim: fn(self, text: String) -> String Never! { self.paint(DIM_SGR, text) }
 
-    success: fn(self, text: String) -> String Never! {
-        self.paint(SUCCESS_SGR, text)
-    }
+    success: fn(self, text: String) -> String Never! { self.paint(SUCCESS_SGR, text) }
 
-    warn: fn(self, text: String) -> String Never! {
-        self.paint(WARN_SGR, text)
-    }
+    warn: fn(self, text: String) -> String Never! { self.paint(WARN_SGR, text) }
 
-    error: fn(self, text: String) -> String Never! {
-        self.paint(ERROR_SGR, text)
-    }
+    error: fn(self, text: String) -> String Never! { self.paint(ERROR_SGR, text) }
 
-    invert: fn(self, text: String) -> String Never! {
-        self.paint(INVERT_SGR, text)
-    }
+    invert: fn(self, text: String) -> String Never! { self.paint(INVERT_SGR, text) }
 
-    border: fn(self, text: String) -> String Never! {
-        self.paint(BORDER_SGR, text)
-    }
+    border: fn(self, text: String) -> String Never! { self.paint(BORDER_SGR, text) }
 
-    bold: fn(self, text: String) -> String Never! {
-        self.paint(BOLD_SGR, text)
-    }
+    bold: fn(self, text: String) -> String Never! { self.paint(BOLD_SGR, text) }
 }
 
 // A mutation plan row's mark. Plain output keeps the symbol, so logs and
@@ -160,9 +147,7 @@ DiagnosticGroup: struct {
 DiagnosticCollector: struct {
     groups: [DiagnosticGroup]
 
-    new: fn() -> DiagnosticCollector Never! {
-        DiagnosticCollector{groups: [DiagnosticGroup]{}}
-    }
+    new: fn() -> DiagnosticCollector Never! { DiagnosticCollector{groups: [DiagnosticGroup]{}} }
 
     // A repeat (same code and either the same root-cause key or the same
     // three texts) only raises the first card's count.
@@ -175,7 +160,7 @@ DiagnosticCollector: struct {
                 return
             }
         }
-        self.groups.push(DiagnosticGroup{code, root_cause_key, what, why, fix, count: 1, color})
+        self.groups.push(DiagnosticGroup{code: code, root_cause_key: root_cause_key, what: what, why: why, fix: fix, count: 1, color: color})
     }
 
     render: fn(self) -> String Never! {
@@ -186,7 +171,9 @@ DiagnosticCollector: struct {
             theme: Theme{color: group.color}
             rendered = "{rendered}{theme.render_diagnostic_group(group.code, group.what, group.why, group.fix, group.count)}"
         }
-        if repeated_root_causes > 0 -> rendered = "{rendered}{terminal_next_step_line(self.groups.len() > 1)}"
+        if repeated_root_causes > 0 {
+            rendered = "{rendered}{terminal_next_step_line(self.groups.len() > 1)}"
+        }
         rendered
     }
 }
@@ -239,9 +226,7 @@ terminal_write_output: fn(text: String) Never! -[IO, Time.Wait]> {
 }
 
 // The indent under the gutter that detail and ledger rows share.
-terminal_pad: fn() -> String Never! {
-    " ".repeat(JETPACK_PROMPT_LABEL.len() + 4)
-}
+terminal_pad: fn() -> String Never! { " ".repeat(JETPACK_PROMPT_LABEL.len() + 4) }
 
 // Rust `{text:<width$}`: pad with spaces to `width` scalars.
 terminal_pad_end: fn(text: String, width: Int) -> String Never! {
@@ -284,7 +269,9 @@ terminal_ansi_sequence_end: fn(raw: [U8], start: Int) -> Int Never! {
             loop index < raw.len() {
                 code: Int{raw[index]}
                 if code == 0x07 -> return index + 1
-                if code == 0x1B && index + 1 < raw.len() && (Int{raw[index + 1]}) == 0x5C -> return index + 2
+                if code == 0x1B && index + 1 < raw.len() && (Int{raw[index + 1]}) == 0x5C {
+                    return index + 2
+                }
                 index += 1
             }
             raw.len()
@@ -368,7 +355,9 @@ terminal_human_size: fn(bytes: Int) -> String Never! {
         unit += 1
     }
     name: TERMINAL_SIZE_UNITS[unit]
-    if unit == 0 || bytes >= divisor * 100 -> return "{terminal_round_half_even(bytes, divisor)} {name}"
+    if unit == 0 || bytes >= divisor * 100 {
+        return "{terminal_round_half_even(bytes, divisor)} {name}"
+    }
     tenths: terminal_round_half_even(bytes * 10, divisor)
     "{tenths /% 10}.{tenths % 10} {name}"
 }
@@ -392,9 +381,7 @@ Theme: struct {
     invocation: Shared<DiagnosticCollector>?{None}
 
     // The deterministic no-colour floor.
-    plain: fn() -> Theme Never! {
-        Theme{color: false}
-    }
+    plain: fn() -> Theme Never! { Theme{color: false} }
 
     // Compatibility entry point: `true` is the historical no-color flag.
     resolve: fn(no_color: Bool) -[IO, Env]> Theme Never! {
@@ -419,46 +406,28 @@ Theme: struct {
         theme
     }
 
-    palette: fn(self) -> TerminalPalette Never! {
-        TerminalPalette.new(self.color)
-    }
+    palette: fn(self) -> TerminalPalette Never! { TerminalPalette.new(self.color) }
 
-    bold: fn(self, text: String) -> String Never! {
-        self.palette().bold(text)
-    }
+    bold: fn(self, text: String) -> String Never! { self.palette().bold(text) }
 
-    green: fn(self, text: String) -> String Never! {
-        self.palette().success(text)
-    }
+    green: fn(self, text: String) -> String Never! { self.palette().success(text) }
 
-    yellow: fn(self, text: String) -> String Never! {
-        self.palette().warn(text)
-    }
+    yellow: fn(self, text: String) -> String Never! { self.palette().warn(text) }
 
-    red: fn(self, text: String) -> String Never! {
-        self.palette().error(text)
-    }
+    red: fn(self, text: String) -> String Never! { self.palette().error(text) }
 
-    cyan: fn(self, text: String) -> String Never! {
-        self.palette().accent(text)
-    }
+    cyan: fn(self, text: String) -> String Never! { self.palette().accent(text) }
 
-    gray: fn(self, text: String) -> String Never! {
-        self.palette().dim(text)
-    }
+    gray: fn(self, text: String) -> String Never! { self.palette().dim(text) }
 
-    border: fn(self, text: String) -> String Never! {
-        self.palette().border(text)
-    }
+    border: fn(self, text: String) -> String Never! { self.palette().border(text) }
 
     live_enabled: fn(self) -[IO, Env]> Bool Never! {
         terminal_live_output_enabled(self.color, term.stderr().is_tty(), sys.get("CI") != None)
     }
 
     // The aligned `jetpack` gutter every status line shares.
-    gutter: fn(self) -> String Never! {
-        self.cyan(JETPACK_PROMPT_LABEL)
-    }
+    gutter: fn(self) -> String Never! { self.cyan(JETPACK_PROMPT_LABEL) }
 
     // A primary status line: `  jetpack  <msg>`.
     status: fn(self, msg: String) Never! -[IO, Time.Wait]> {
@@ -662,14 +631,16 @@ Theme: struct {
     // The label is bold cyan; the rest is quiet. It reads the same without
     // colour, so the threshold survives NO_COLOR.
     rule: fn(self, segments: [String]) Never! -[IO, Env, Time.Wait]> {
-        if segments.len() == 0 -> return
+        if segments.len() == 0 {
+            return
+        }
         width := 64
         if sys.get("COLUMNS") == .Val(columns) {
             if Int.parse(columns) == {
                 .Ok(value) -> {
                     if value >= 0 {
                         narrowed: if value > 4 -> value - 4 else -> 0
-                        width = if narrowed < 40 -> 40 else -> if narrowed > 96 -> 96 else -> narrowed
+                        width = if narrowed < 40 -> 40 else if narrowed > 96 -> 96 else -> narrowed
                     }
                 }
                 .Err(_) -> {}
@@ -767,7 +738,7 @@ SpinnerState: struct {
 // A running spinner; closing it stops and clears it.
 Spinner: struct {
     priv stop: Shared<SpinnerState>?
-    priv running: Task<Unit>?
+    priv running: Task<()>?
 
     impl Close {
         close: fn(&&self) {
@@ -775,7 +746,9 @@ Spinner: struct {
                 permit: flag.guard_edit()
                 permit.value.stop = true
             }
-            if self.running == .Val(running) -> running.join().drop("the spinner stops with its owner")
+            if self.running == .Val(running) {
+                running.join().drop("the spinner stops with its owner")
+            }
         }
     }
 }
@@ -851,9 +824,7 @@ terminal_erase_lines: fn(lines: Int) -> String Never! {
 ByteProgress: struct {
     state: Shared<ByteProgressState>
 
-    new: fn() -> ByteProgress Never! {
-        ByteProgress{state: Shared{ByteProgressState.new()}}
-    }
+    new: fn() -> ByteProgress Never! { ByteProgress{state: Shared{ByteProgressState.new()}} }
 
     // Read the byte facts under one guard; `.snapshot()` is reserved for expect.
     facts: fn(self) -> ByteProgressSnapshot Never! {
@@ -894,9 +865,7 @@ ByteProgress: struct {
                 if total > TERMINAL_INT_MAX - bytes {
                     permit.value.total_overflowed = true
                     permit.value.total = None
-                } else {
-                    permit.value.total = Val(total + bytes)
-                }
+                } else { permit.value.total = Val(total + bytes) }
             }
             .None -> permit.value.total = Val(bytes)
         }
@@ -955,7 +924,9 @@ ByteProgress: struct {
     activate_renderer: fn(self, theme: Theme, tty: Bool) Never! {
         state: self.state
         permit: state.guard_edit()
-        if permit.value.renderer == None -> permit.value.renderer = Val(AggregateProgressRenderer{theme, tty, drawn: 0})
+        if permit.value.renderer == None {
+            permit.value.renderer = Val(AggregateProgressRenderer{theme: theme, tty: tty, drawn: 0})
+        }
     }
 
     // Drop the aggregate renderer; the erase control for what it drew.
@@ -974,13 +945,7 @@ ByteProgress: struct {
         state: self.state
         permit: state.guard_edit()
         current: permit.value
-        structural: force
-            || current.phase != current.last_rendered_phase
-            || current.package_done != current.last_rendered_package_done
-            || current.package_total != current.last_rendered_package_total
-            || current.object_done != current.last_rendered_object_done
-            || current.object_total != current.last_rendered_object_total
-            || current.total != current.last_rendered_total
+        structural: force || current.phase != current.last_rendered_phase || current.package_done != current.last_rendered_package_done || current.package_total != current.last_rendered_package_total || current.object_done != current.last_rendered_object_done || current.object_total != current.last_rendered_object_total || current.total != current.last_rendered_total
         byte_delta: if current.transferred == {
             .Val(now) -> if current.last_rendered_transferred == {
                 .Val(previous) -> if now > previous -> now - previous else -> 0
@@ -989,7 +954,9 @@ ByteProgress: struct {
             .None -> if current.last_rendered_transferred == None -> 0 else -> TERMINAL_BYTE_REDRAW_THRESHOLD
         }
         byte_redraw: byte_delta >= TERMINAL_BYTE_REDRAW_THRESHOLD || (current.total == current.transferred && current.transferred != Val(0))
-        if !(structural || byte_redraw) -> return
+        if !(structural || byte_redraw) {
+            return
+        }
         permit.value.last_rendered_phase = current.phase
         permit.value.last_rendered_package_done = current.package_done
         permit.value.last_rendered_package_total = current.package_total
@@ -998,7 +965,9 @@ ByteProgress: struct {
         permit.value.last_rendered_transferred = current.transferred
         permit.value.last_rendered_total = current.total
         renderer: current.renderer ?? return
-        if !renderer.tty && !structural -> return
+        if !renderer.tty && !structural {
+            return
+        }
         line: renderer.theme.render_aggregate_progress(current.phase, current.package_done, current.package_total, current.object_done, current.object_total, current.transferred, current.total)
         erase: if renderer.tty && renderer.drawn > 0 -> terminal_erase_lines(renderer.drawn) else -> ""
         terminal_write_output("{erase}{terminal_pad()}{terminal_fit_live_line(line, terminal_columns())}\n")
@@ -1040,10 +1009,14 @@ LiveRegion: struct {
 
     // Redraw the status lines in place; inert on non-TTY.
     set_status: fn(&self, lines: [String]) Never! -[IO, Env, Time.Wait]> {
-        if !self.tty -> return
+        if !self.tty {
+            return
+        }
         output := self.clear_control()
         columns: terminal_columns()
-        loop line in lines -> output = "{output}{terminal_pad()}{terminal_fit_live_line(line, columns)}\n"
+        loop line in lines {
+            output = "{output}{terminal_pad()}{terminal_fit_live_line(line, columns)}\n"
+        }
         terminal_write_output(output)
         self.drawn = lines.len()
     }

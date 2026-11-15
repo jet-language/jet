@@ -5,7 +5,6 @@
 // para_fold, whose ranges are exactly its 64-item chunks; the
 // helper reads its inputs through a frame env the caller lends until every
 // worker has joined, and writes disjoint output slots.
-
 use jet_foundation.[Span, Type, TClosureOp, TypeTupleField, name_rows_set, name_rows_value, type_carrier_identity]
 
 // A callback's parameter types and the value its call hands over: a
@@ -36,9 +35,7 @@ ir_para_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, ty: 
     m.functions.push(ir_hashed_function("para.{role}", key, "jet_ir_para_{role}_", "", 0))
     name_rows_set(m.function_rows, key, id)
     a := ir_builder_new(m.functions[id].copy())
-    if role == "map" {
-        ir_para_map_body(m, p, a, ty, span)
-    } else {
+    if role == "map" -> ir_para_map_body(m, p, a, ty, span) else {
         ir_para_fold_body(m, p, a, ty, span)
     }
     failed: ir_failed(a)
@@ -74,10 +71,14 @@ ir_para_range_open: fn(m: &IRModule, a: &IRBuilder, begin: Int, end: Int) -> Int
 // closure and its result moves into the item's own output slot.
 ir_para_map_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: Span) Never! {
     signature: ir_para_signature(ty) ?? return ir_fail(a, span, "parallel callback through {ir_type_name(ty)}")
-    if signature.params.len() != 1 -> return ir_fail(a, span, "parallel callback through {ir_type_name(ty)}")
+    if signature.params.len() != 1 {
+        return ir_fail(a, span, "parallel callback through {ir_type_name(ty)}")
+    }
     in_row: ir_value_type(m, p, signature.params[0]) ?? return ir_fail(a, span, "type {ir_type_name(signature.params[0])}")
     out_row: ir_value_type(m, p, signature.result) ?? return ir_fail(a, span, "type {ir_type_name(signature.result)}")
-    if m.types[in_row].kind == .Unit || m.types[out_row].kind == .Unit -> return ir_fail(a, span, "parallel callback over Unit")
+    if m.types[in_row].kind == .Unit || m.types[out_row].kind == .Unit {
+        return ir_fail(a, span, "parallel callback over Unit")
+    }
     pointer_row: ir_pointer_row(m)
     word_row: ir_word_row(m)
     env: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "env"))
@@ -108,15 +109,21 @@ ir_para_map_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: 
 // range is one 64-item chunk: its accumulator starts from a fresh seed and
 // steps over the chunk's items in source order into slot begin / 64.
 ir_para_fold_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: Span) Never! {
-    fields: if ir_untag(ty) == .Tuple(rows) -> rows else -> { return ir_fail(a, span, "parallel fold through {ir_type_name(ty)}") }
+    fields: if ir_untag(ty) == .Tuple(rows) -> rows else -> {
+        return ir_fail(a, span, "parallel fold through {ir_type_name(ty)}")
+    }
     if fields.len() == 3 -> return ir_para_fold_try_body(m, p, a, fields, span)
     if fields.len() != 2 -> return ir_fail(a, span, "parallel fold through {ir_type_name(ty)}")
     seed_signature: ir_para_signature(fields[0].ty) ?? return ir_fail(a, span, "parallel fold seed {ir_type_name(fields[0].ty)}")
     step_signature: ir_para_signature(fields[1].ty) ?? return ir_fail(a, span, "parallel fold step {ir_type_name(fields[1].ty)}")
-    if step_signature.params.len() != 2 -> return ir_fail(a, span, "parallel fold step {ir_type_name(fields[1].ty)}")
+    if step_signature.params.len() != 2 {
+        return ir_fail(a, span, "parallel fold step {ir_type_name(fields[1].ty)}")
+    }
     acc_row: ir_value_type(m, p, seed_signature.result) ?? return ir_fail(a, span, "type {ir_type_name(seed_signature.result)}")
     elem_row: ir_value_type(m, p, step_signature.params[1]) ?? return ir_fail(a, span, "type {ir_type_name(step_signature.params[1])}")
-    if m.types[acc_row].kind == .Unit || m.types[elem_row].kind == .Unit -> return ir_fail(a, span, "parallel fold over Unit")
+    if m.types[acc_row].kind == .Unit || m.types[elem_row].kind == .Unit {
+        return ir_fail(a, span, "parallel fold over Unit")
+    }
     pointer_row: ir_pointer_row(m)
     word_row: ir_word_row(m)
     env: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "env"))
@@ -163,13 +170,19 @@ ir_para_fold_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, callback: Int, 
 // box stays in the slot.
 ir_para_fold_try_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, fields: [TypeTupleField], span: Span) Never! {
     ty: fields[2].ty
-    acc_ty: if ir_untag(ty) == .Result(ok, _) -> ok else -> { return ir_fail(a, span, "parallel fold to {ir_type_name(ty)}") }
+    acc_ty: if ir_untag(ty) == .Result(ok, _) -> ok else -> {
+        return ir_fail(a, span, "parallel fold to {ir_type_name(ty)}")
+    }
     step_signature: ir_para_signature(fields[1].ty) ?? return ir_fail(a, span, "parallel fold step {ir_type_name(fields[1].ty)}")
-    if step_signature.params.len() != 2 -> return ir_fail(a, span, "parallel fold step {ir_type_name(fields[1].ty)}")
+    if step_signature.params.len() != 2 {
+        return ir_fail(a, span, "parallel fold step {ir_type_name(fields[1].ty)}")
+    }
     box_row: ir_value_type(m, p, ty) ?? return ir_fail(a, span, "type {ir_type_name(ty)}")
     acc_row: ir_value_type(m, p, acc_ty) ?? return ir_fail(a, span, "type {ir_type_name(acc_ty)}")
     elem_row: ir_value_type(m, p, step_signature.params[1]) ?? return ir_fail(a, span, "type {ir_type_name(step_signature.params[1])}")
-    if m.types[acc_row].kind == .Unit || m.types[elem_row].kind == .Unit -> return ir_fail(a, span, "parallel fold over Unit")
+    if m.types[acc_row].kind == .Unit || m.types[elem_row].kind == .Unit {
+        return ir_fail(a, span, "parallel fold over Unit")
+    }
     pointer_row: ir_pointer_row(m)
     word_row: ir_word_row(m)
     env: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "env"))
@@ -226,7 +239,9 @@ ir_para_list_clear: fn(m: &IRModule, b: &IRBuilder, list: Int) Never! {
 // the built arguments in order; `args` the checked ones, whose callback type
 // (I3, as the sequential methods read it) gives the helper's signature.
 ir_closure_parallel: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int, element: Int, operation: TClosureOp, operands: [Int], args: [Int], span: Span) -> Int Never! {
-    if m.types[element].kind == .Unit -> return ir_fail_slot(b, span, "closure method {ir_closure_op_name(operation)} over Unit items")
+    if m.types[element].kind == .Unit {
+        return ir_fail_slot(b, span, "closure method {ir_closure_op_name(operation)} over Unit items")
+    }
     length: ir_load_word(m, b, list, 0)
     data: ir_load_word(m, b, list, 16)
     if operation == .ParaFold -> return ir_para_fold(m, p, b, ty, length, data, operands, span)
@@ -267,9 +282,13 @@ ir_closure_parallel: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lis
     _: ir_runtime(m, b, "jet_rt_native_para_walk", [Int]{length, limit, env, invoke}, -1)
     if limited -> ir_release(m, b, limit)
     if operation == .ParaMap {
-        if ir_untag(ty) == .Result(list_ty, _) -> return ir_para_map_settle(m, p, b, ty, list_ty, signature.result, output, length, bytes, span)
+        if ir_untag(ty) == .Result(list_ty, _) {
+            return ir_para_map_settle(m, p, b, ty, list_ty, signature.result, output, length, bytes, span)
+        }
         mapped_row: ir_list_element_of(m, p, result_row) ?? return ir_type_fail(b, span, ty)
-        if mapped_row != out_row -> return ir_fail_slot(b, span, "para_map to {ir_type_name(ty)} through {ir_type_name(callback_ty)}")
+        if mapped_row != out_row {
+            return ir_fail_slot(b, span, "para_map to {ir_type_name(ty)} through {ir_type_name(callback_ty)}")
+        }
         result: ir_list_empty(m, b, result_row)
         ir_emit(b.f, IROp.Store, -1, result, 0, length, b.line)
         ir_emit(b.f, IROp.Store, -1, result, 8, length, b.line)
@@ -280,14 +299,18 @@ ir_closure_parallel: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lis
     fallible: ir_untag(ty) == .Result(_, _)
     selection_ty := ty.copy()
     if ir_untag(ty) == .Result(ok, _) -> selection_ty = ok.copy()
-    if !fallible && out_row != bool_row -> return ir_fail_slot(b, span, "closure method {ir_closure_op_name(operation)} through {ir_type_name(callback_ty)}")
+    if !fallible && out_row != bool_row {
+        return ir_fail_slot(b, span, "closure method {ir_closure_op_name(operation)} through {ir_type_name(callback_ty)}")
+    }
     selection_row: ir_value_type(m, p, selection_ty) ?? return ir_type_fail(b, span, selection_ty)
     partition: operation == .ParaPartition
     result := -1
     true_list := -1
     false_list := -1
     if partition {
-        fields: if ir_untag(selection_ty) == .Tuple(tuple_fields) -> tuple_fields else -> { return ir_type_fail(b, span, selection_ty) }
+        fields: if ir_untag(selection_ty) == .Tuple(tuple_fields) -> tuple_fields else -> {
+            return ir_type_fail(b, span, selection_ty)
+        }
         members: ir_tuple_members(m, p, fields) ?? return ir_type_fail(b, span, selection_ty)
         false_offset := -1
         true_offset := -1
@@ -306,7 +329,9 @@ ir_closure_parallel: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lis
         result = ir_list_empty(m, b, selection_row)
         true_list = result
     }
-    if fallible -> return ir_para_select_settle(m, p, b, ty, signature.result, IRParaSelection{value: result, kept: true_list, dropped: false_list}, list, element, output, length, bytes, span)
+    if fallible {
+        return ir_para_select_settle(m, p, b, ty, signature.result, IRParaSelection{value: result, kept: true_list, dropped: false_list}, list, element, output, length, bytes, span)
+    }
     // Each item goes, in source order, to the List its Bool picked.
     walk: ir_walk_open(m, b, list, element)
     flag_at: ir_element_address(m, b, output, walk.index, out_stride)
@@ -344,7 +369,9 @@ IRParaSelection: struct {
 ir_para_select_settle: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, item_ty: Type, selection: IRParaSelection, list: Int, element: Int, output: Int, length: Int, bytes: Int, span: Span) -> Int Never! {
     err_ty := Type.Int
     if ir_untag(item_ty) == .Result(ok, err) {
-        if ir_untag(ok) != Type.Bool -> return ir_fail_slot(b, span, "parallel selection to {ir_type_name(ty)} through a callback making {ir_type_name(item_ty)}")
+        if ir_untag(ok) != Type.Bool {
+            return ir_fail_slot(b, span, "parallel selection to {ir_type_name(ty)} through a callback making {ir_type_name(item_ty)}")
+        }
         err_ty = err
     } else {
         return ir_fail_slot(b, span, "parallel selection to {ir_type_name(ty)} through a callback making {ir_type_name(item_ty)}")
@@ -397,7 +424,9 @@ ir_para_select_settle: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, i
     success: ir_result_box(m, p, b, ty, true, selection.value)
     ir_emit(b.f, IROp.Copy, result, success, -1, -1, b.line)
     ir_else(b.f, b.line)
-    if ir_has_drop(m, b, selection.value) -> ir_emit(b.f, IROp.Drop, -1, selection.value, -1, -1, b.line)
+    if ir_has_drop(m, b, selection.value) {
+        ir_emit(b.f, IROp.Drop, -1, selection.value, -1, -1, b.line)
+    }
     ir_end(b.f, b.line)
     result
 }
@@ -422,10 +451,14 @@ ir_para_map_settle: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list
     item_row: ir_value_type(m, p, item_ty) ?? return ir_type_fail(b, span, item_ty)
     ok_row: ir_value_type(m, p, ok_ty) ?? return ir_type_fail(b, span, ok_ty)
     err_row: ir_value_type(m, p, err_ty) ?? return ir_type_fail(b, span, err_ty)
-    if m.types[ok_row].kind == .Unit -> return ir_fail_slot(b, span, "para_map to {ir_type_name(ty)} over Unit results")
+    if m.types[ok_row].kind == .Unit {
+        return ir_fail_slot(b, span, "para_map to {ir_type_name(ty)} over Unit results")
+    }
     mapped: ir_list_empty(m, b, list_row)
     produced: ir_list_element(m, p, b, mapped) ?? return ir_type_fail(b, span, list_ty)
-    if produced != ok_row -> return ir_fail_slot(b, span, "para_map to {ir_type_name(ty)} through a callback making {ir_type_name(item_ty)}")
+    if produced != ok_row {
+        return ir_fail_slot(b, span, "para_map to {ir_type_name(ty)} through a callback making {ir_type_name(item_ty)}")
+    }
     result: ir_fresh_temp(m, b, result_row)
     ir_emit(b.f, IROp.Const, result, 0, -1, -1, b.line)
     shell_bytes: ir_result_box_bytes(m, p, item_ty)
@@ -579,8 +612,12 @@ ir_para_fold_try: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, acc_ty
 // fixed tree, [[c0|c1]|[c2|c3]]; the grouping is part of the contract. An
 // empty List folds to one seed.
 ir_para_fold: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, length: Int, data: Int, operands: [Int], span: Span) -> Int Never! {
-    if operands.len() != 3 -> return ir_fail_slot(b, span, "para_fold without seed, step and merge callbacks")
-    if ir_untag(ty) == .Result(acc_ty, _) -> return ir_para_fold_try(m, p, b, ty, acc_ty, length, data, operands, span)
+    if operands.len() != 3 {
+        return ir_fail_slot(b, span, "para_fold without seed, step and merge callbacks")
+    }
+    if ir_untag(ty) == .Result(acc_ty, _) {
+        return ir_para_fold_try(m, p, b, ty, acc_ty, length, data, operands, span)
+    }
     word_row: ir_word_row(m)
     pointer_row: ir_pointer_row(m)
     int_row: ir_type_row(m, Type.Int) ?? 0
@@ -595,7 +632,9 @@ ir_para_fold: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, length: In
     chunk_fold: ir_lazy_address(m, b, id)
     stride: ir_list_stride(m, result_row)
     result: ir_fresh_temp(m, b, result_row)
-    if m.types[result_row].kind == .Aggregate -> ir_emit(b.f, IROp.StackAddress, result, m.types[result_row].size, m.types[result_row].align, -1, b.line)
+    if m.types[result_row].kind == .Aggregate {
+        ir_emit(b.f, IROp.StackAddress, result, m.types[result_row].size, m.types[result_row].align, -1, b.line)
+    }
     zero: ir_word_const(m, b, 0)
     empty: ir_bool_op(m, b, IROp.Eq, length, zero)
     ir_open_if(b.f, empty, b.line)

@@ -6,6 +6,7 @@ SemaUnitDimensionLookup: enum {
     Missing
     Ambiguous(name: String)
 }
+
 SemaUnitDimensionDeclaration: struct {
     module_index: Int
     item: Int
@@ -14,20 +15,25 @@ SemaUnitDimensionDeclaration: struct {
     claim: UnitDimensionDecl
     preset: Dimension?
 }
+
 SemaUnitDimensionVisibility: struct {
     local: [String:Int]
     imported: [String:[Int]]
     qualified: [String:Int]
     aliases: [String:Int]
 }
+
 sema_units_dimension_target: fn(visible: SemaUnitDimensionVisibility, qualifier: String?, name: String) -> (target: Int?, ambiguous: Bool) Never! {
-    if qualifier == .Val(alias) -> return (ambiguous: false, target: visible.qualified.get("{alias}|{name}"))
+    if qualifier == .Val(alias) {
+        return (ambiguous: false, target: visible.qualified.get("{alias}|{name}"))
+    }
     if visible.local.get(name) == .Val(index) -> return (ambiguous: false, target: Val(index))
     candidates: visible.imported.get(name) ?? [Int]{}
     if candidates.len() > 1 -> return (ambiguous: true, target: None)
     if candidates.len() == 1 -> return (ambiguous: false, target: Val(candidates[0]))
     (ambiguous: false, target: Int?{None})
 }
+
 sema_units_dimension_lookup: fn(visible: SemaUnitDimensionVisibility, known: [Int:Dimension], qualifier: String?, name: String, ambiguity_only: Bool) -> SemaUnitDimensionLookup Never! {
     target: sema_units_dimension_target(visible, qualifier, name)
     if target.ambiguous -> return SemaUnitDimensionLookup.Ambiguous{name: name}
@@ -36,6 +42,7 @@ sema_units_dimension_lookup: fn(visible: SemaUnitDimensionVisibility, known: [In
     if known.get(index) == .Val(value) -> return SemaUnitDimensionLookup.Found{value: value}
     SemaUnitDimensionLookup.Missing
 }
+
 sema_units_dimension_expression: fn(expression: Expr, visible: SemaUnitDimensionVisibility, known: [Int:Dimension], ambiguity_only: Bool) -> SemaUnitDimensionLookup Never! {
     if expression == {
         .Ident(name, _, _) -> sema_units_dimension_lookup(visible, known, None, name, ambiguity_only)
@@ -47,12 +54,18 @@ sema_units_dimension_expression: fn(expression: Expr, visible: SemaUnitDimension
             if op != BinOp.Mul && op != BinOp.Div -> return SemaUnitDimensionLookup.Missing
             left_value: sema_units_dimension_expression(left, visible, known, ambiguity_only)
             right_value: sema_units_dimension_expression(right, visible, known, ambiguity_only)
-            if left_value == .Ambiguous(name) -> return SemaUnitDimensionLookup.Ambiguous{name: name}
-            if right_value == .Ambiguous(name) -> return SemaUnitDimensionLookup.Ambiguous{name: name}
+            if left_value == .Ambiguous(name) {
+                return SemaUnitDimensionLookup.Ambiguous{name: name}
+            }
+            if right_value == .Ambiguous(name) {
+                return SemaUnitDimensionLookup.Ambiguous{name: name}
+            }
             if left_value == .Found(l) {
                 if right_value == .Found(r) {
                     value: if op == BinOp.Mul -> dimension_multiply(l, r) else -> dimension_divide(l, r)
-                    if value == .Val(dimension) -> return SemaUnitDimensionLookup.Found{value: dimension}
+                    if value == .Val(dimension) {
+                        return SemaUnitDimensionLookup.Found{value: dimension}
+                    }
                 }
             }
             SemaUnitDimensionLookup.Missing
@@ -60,11 +73,12 @@ sema_units_dimension_expression: fn(expression: Expr, visible: SemaUnitDimension
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> SemaUnitDimensionLookup.Missing
     }
 }
+
 // Rust dimension_dependencies includes identifiers on either side of any
 // binary operator; the resolver itself admits only multiplication/division.
 sema_units_dimension_dependencies: fn(expression: Expr, names: &[String]) Never! {
     if expression == {
-        .Ident(name, _, _) -> names.push(name.copy())
+        .Ident(name, _, _) -> { names.push(name.copy()) }
         .Binary(_, left, right, _, _) -> {
             sema_units_dimension_dependencies(left, names)
             sema_units_dimension_dependencies(right, names)
@@ -72,6 +86,7 @@ sema_units_dimension_dependencies: fn(expression: Expr, names: &[String]) Never!
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
 }
+
 // Rust dimension_aliases/dimension_unqualified_names, plus indexed reverse
 // dependencies. Repeated references to one declaration count only once.
 // Rust dimension_aliases visits field bases even when the outer expression
@@ -101,7 +116,9 @@ sema_units_dimension_reads: fn(expression: Expr, visible: SemaUnitDimensionVisib
                     loop candidate in candidates {
                         // Declaration indices belong to their import module;
                         // qualified entries encode the exact family visibility.
-                        if visible.qualified.get("{alias}|{name}") == (Val(candidate)) -> aliases[alias] = true
+                        if visible.qualified.get("{alias}|{name}") == (Val(candidate)) {
+                            aliases[alias] = true
+                        }
                     }
                 }
             }
@@ -109,7 +126,9 @@ sema_units_dimension_reads: fn(expression: Expr, visible: SemaUnitDimensionVisib
         .Field(base, name, _, _) -> {
             if base == .Ident(alias, _, _) {
                 aliases[alias] = true
-                if visible.qualified.get("{alias}|{name}") == .Val(index) -> dependencies[index] = true
+                if visible.qualified.get("{alias}|{name}") == .Val(index) {
+                    dependencies[index] = true
+                }
             }
             // A field base is not an unqualified dimension read.
         }
@@ -120,12 +139,14 @@ sema_units_dimension_reads: fn(expression: Expr, visible: SemaUnitDimensionVisib
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
 }
+
 // Rust stable_unit_owner: the owning package identity, and that package's
 // identity joined with the package-root-relative module path. Never derive
 // package identity from cwd, display labels or root text.
 sema_units_owner: fn(input: SemaRegistrationModuleInput) -> (package: String, module_identity: String) Never! {
     (module_identity: "{input.package_identity}::{input.module_path}", package: input.package_identity)
 }
+
 sema_units_resolve_standard: fn(prelude: &[UnitFamilyDef]) Never! {
     local := [String:Int]{}
     known := [Int:Dimension]{}
@@ -156,6 +177,7 @@ sema_units_resolve_standard: fn(prelude: &[UnitFamilyDef]) Never! {
         prelude[index].resolved_owner = Val("core.units")
     }
 }
+
 // Rust resolve_unit_dimensions. Visibility is built from exact resolved
 // import edges (the name-ledger import target), not guessed source paths.
 // Reverse edges wake only affected claims; forward references and cycles do
@@ -167,7 +189,9 @@ sema_units_resolve: fn(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegis
     exports := [[String:Int]]{}
     sema_units_dimension_declarations(inputs, declarations, module_rows, locals, exports)
     visibility := [SemaUnitDimensionVisibility]{}
-    loop local in locals -> visibility.push(SemaUnitDimensionVisibility{local: local, imported: [String:[Int]]{}, qualified: [String:Int]{}, aliases: [String:Int]{}})
+    loop local in locals {
+        visibility.push(SemaUnitDimensionVisibility{local: local, imported: [String:[Int]]{}, qualified: [String:Int]{}, aliases: [String:Int]{}})
+    }
     loop edge in edges {
         source: module_rows.get(edge.source_module_identity.id) ?? next
         target: module_rows.get(edge.target_module_identity.id) ?? next
@@ -177,7 +201,9 @@ sema_units_resolve: fn(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegis
             visibility[source].qualified["{alias}|{name}"] = index
             candidates := visibility[source].imported.get(name) ?? [Int]{}
             seen := false
-            loop candidate in candidates { if candidate == index -> seen = true }
+            loop candidate in candidates {
+                if candidate == index -> seen = true
+            }
             if !seen -> candidates.push(index)
             visibility[source].imported[name] = candidates
         }
@@ -191,9 +217,7 @@ sema_units_resolve: fn(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegis
         waits.push(0)
     }
     loop (index, declaration) in declarations {
-        if declaration.preset == .Val(value) {
-            known[index] = value
-        } else if declaration.claim == .Base(_) {
+        if declaration.preset == .Val(value) -> known[index] = value else if declaration.claim == .Base(_) {
             known[index] = dimension_base("{sema_units_owner(inputs[declaration.module_index]).module_identity}::{declaration.family}")
         }
     }
@@ -207,8 +231,12 @@ sema_units_resolve: fn(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegis
                 if visibility[declaration.module_index].aliases.get(alias) != None {
                     // The same source ledger used by L0103 and NameFacts.
                     used := false
-                    loop name in inputs[declaration.module_index].program.used_import_names { if name == alias -> used = true }
-                    if !used -> inputs[declaration.module_index].program.used_import_names.push(alias)
+                    loop name in inputs[declaration.module_index].program.used_import_names {
+                        if name == alias -> used = true
+                    }
+                    if !used {
+                        inputs[declaration.module_index].program.used_import_names.push(alias)
+                    }
                 }
             }
             loop (dependency, _) in dependencies {
@@ -240,7 +268,9 @@ sema_units_resolve: fn(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegis
         if resolved == None {
             diagnostic := sema_error("E0905", declaration.span, "dimension `{declaration.family}` cannot be resolved", "derived dimensions can use visible declared dimensions and cannot form a cycle", "import or declare every base dimension and remove any dimension cycle")
             if declaration.claim == .Derived(expression) {
-                if sema_units_dimension_expression(expression, visibility[declaration.module_index], known, true) == .Ambiguous(name) -> diagnostic = sema_error("E0905", declaration.span, "dimension name `{name}` is ambiguous", "more than one imported module exports that dimension", "qualify it with the intended module alias, such as `dep.{name}`")
+                if sema_units_dimension_expression(expression, visibility[declaration.module_index], known, true) == .Ambiguous(name) {
+                    diagnostic = sema_error("E0905", declaration.span, "dimension name `{name}` is ambiguous", "more than one imported module exports that dimension", "qualify it with the intended module alias, such as `dep.{name}`")
+                }
             }
             start: diagnostics.len()
             diagnostics.push(diagnostic)

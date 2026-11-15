@@ -19,51 +19,97 @@ use {
 }
 
 TOOL: "/Tools/agent-eval/RunColdContext.jet"
+
 CAPSULE_LIMIT: 32768
+
 OUTPUT_LIMIT: 2097152
+
 TIMEOUT_MS: 600000
+
 FAMILIES: ["openai", "anthropic"]
+
 SUBJECTS: ["## 1. Program shape", "## 2. Dot rule and common calls", "## 3. Memory and ownership verbs", "## 4. Effects and outcomes", "## 5. Forty common library verbs", "## 6. Ten runnable canonical programs", "## 7. Cold-agent rules", "&T", "&&T", "value.copy()", "-[", "Ok(value)", "Err(error)", "None", "??"]
+
 VERBS: [
-    "term.print", "term.eprint", "term.confirm", "term.readline",
-    "term.read_all_input", "files.read", "files.write", "files.read_bytes",
-    "files.write_bytes", "files.exists", "files.list_dir", "files.walk",
-    "process.argv", "process.run", "process.cmd", "sys.get", "sys.set",
-    "json.parse", "json.decode", "json.to_string", "csv.parse", "csv.to_string",
-    "text.trim", "text.lower", "text.upper", "text.splitn", "regex.compile",
-    "regex.replace", "math.abs", "math.floor", "math.ceil", "math.round",
-    "math.sqrt", "time.now", "time.sleep", "net.tcp_listen", "net.tcp_connect",
-    "http.get", "http.post", "http.serve",
+    "term.print",
+    "term.eprint",
+    "term.confirm",
+    "term.readline",
+    "term.read_all_input",
+    "files.read",
+    "files.write",
+    "files.read_bytes",
+    "files.write_bytes",
+    "files.exists",
+    "files.list_dir",
+    "files.walk",
+    "process.argv",
+    "process.run",
+    "process.cmd",
+    "sys.get",
+    "sys.set",
+    "json.parse",
+    "json.decode",
+    "json.to_string",
+    "csv.parse",
+    "csv.to_string",
+    "text.trim",
+    "text.lower",
+    "text.upper",
+    "text.splitn",
+    "regex.compile",
+    "regex.replace",
+    "math.abs",
+    "math.floor",
+    "math.ceil",
+    "math.round",
+    "math.sqrt",
+    "time.now",
+    "time.sleep",
+    "net.tcp_listen",
+    "net.tcp_connect",
+    "http.get",
+    "http.post",
+    "http.serve",
 ]
+
 PROGRAMS: [
-    "Hello", "Arithmetic", "Function call", "Branching", "Loop and mutation",
-    "List ordering", "Optional fallback", "Command-line argument", "File input",
+    "Hello",
+    "Arithmetic",
+    "Function call",
+    "Branching",
+    "Loop and mutation",
+    "List ordering",
+    "Optional fallback",
+    "Command-line argument",
+    "File input",
     "HTTP health endpoint",
 ]
+
 USAGE: """
-    Usage: node Tools/agent-eval/run-cold-context.mjs [options]
+Usage: node Tools/agent-eval/run-cold-context.mjs [options]
 
-    Required external adapter configuration is read from Tools/agent-eval/adapters.json.
-    The two stock families are represented by the openai and anthropic entries. Select
-    one transport per entry with its transport_env: api requires its declared
-    environment variables; command uses command_env or the adapter's default_argv.
-    Command adapters declare whether the request is JSON on stdin or a prompt argv
-    item. No credentials are stored in this repository.
+Required external adapter configuration is read from Tools/agent-eval/adapters.json.
+The two stock families are represented by the openai and anthropic entries. Select
+one transport per entry with its transport_env: api requires its declared
+environment variables; command uses command_env or the adapter's default_argv.
+Command adapters declare whether the request is JSON on stdin or a prompt argv
+item. No credentials are stored in this repository.
 
-    Options:
-      --config PATH          Adapter configuration JSON
-      --capsule PATH         Capsule artifact (default: Tools/agent-eval/jet-context-capsule.md)
-      --llms PATH            Explicit digest fixture; default reads jet inspect digest
-      --tasks PATH           Four-task fixture JSON
-      --baseline PATH        Recorded capsule baseline JSON
-      --output PATH          Deterministic scoreboard JSON
-      --jet-bin PATH         Direct Jet binary; default uses Tools/agent/JetEnv.jet
-      --mode capsule|control|both
-      --record-baseline      Write a capsule-only baseline after a complete run
-      --check-baseline       Fail if the capsule result regresses below baseline
-      --help                 Show this help
+Options:
+  --config PATH          Adapter configuration JSON
+  --capsule PATH         Capsule artifact (default: Tools/agent-eval/jet-context-capsule.md)
+  --llms PATH            Explicit digest fixture; default reads jet inspect digest
+  --tasks PATH           Four-task fixture JSON
+  --baseline PATH        Recorded capsule baseline JSON
+  --output PATH          Deterministic scoreboard JSON
+  --jet-bin PATH         Direct Jet binary; default uses Tools/agent/JetEnv.jet
+  --mode capsule|control|both
+  --record-baseline      Write a capsule-only baseline after a complete run
+  --check-baseline       Fail if the capsule result regresses below baseline
+  --help                 Show this help
 
-    """
+"""
 
 Kind: enum {
     Usage
@@ -78,15 +124,20 @@ Failure: struct {
 }
 
 usage_error: fn(message: String) -> Failure { Failure{kind: .Usage, message: message} }
+
 blocked: fn(message: String) -> Failure { Failure{kind: .Blocked, message: message} }
 
 // Fail with a usage, blocked or regression `message`.
 usage: fn(message: String) Failure! { Err(usage_error(message)) }
+
 block: fn(message: String) Failure! { Err(blocked(message)) }
+
 regress: fn(message: String) Failure! { Err(Failure{kind: .Regression, message: message}) }
 
 // `value`, or a usage failure with `message` when there is none.
-need: fn<T>(value: T?, message: String) -> T Failure! { Ok(value ?? return Err(usage_error(message))) }
+need: fn<T>(value: T?, message: String) -> T Failure! {
+    Ok(value ?? return Err(usage_error(message)))
+}
 
 Options: struct {
     config: String
@@ -151,7 +202,9 @@ Outcome: struct {
     errors: String
 
     // Whether it failed to start or finish with status 0.
-    bad: fn(self) -> Bool { self.spawn || self.timed_out || self.limit || self.signal || self.code != 0 }
+    bad: fn(self) -> Bool {
+        self.spawn || self.timed_out || self.limit || self.signal || self.code != 0
+    }
 }
 
 Inputs: struct {
@@ -172,7 +225,9 @@ Inputs: struct {
 // this run builds holds the same two.
 
 // The value at `path` ("a/b" steps into objects; "" is `value`), or None.
-member: fn(value: Dyn?, path: String) -> Dyn? { Val(json.pointer(value ?? return None, if path == "" -> "" else -> "/{path}") ?? return None) }
+member: fn(value: Dyn?, path: String) -> Dyn? {
+    Val(json.pointer(value ?? return None, if path == "" -> "" else -> "/{path}") ?? return None)
+}
 
 str: fn(value: Dyn?, path: String) -> String? {
     if member(value, path) == .Val(.Text(found)) -> return Val(found)
@@ -230,12 +285,16 @@ shown: fn(value: Dyn?) -> String {
     found := value ?? return "undefined"
     if found == .Text(written) -> return written
     if found == .Object(_) -> return "[object Object]"
-    if found == .Array(list) -> return list.map(fn(item) { if item == .Null -> "" else -> shown(Val(item)) }).join(",")
+    if found == .Array(list) {
+        return list.map(fn(item) { if item == .Null -> "" else -> shown(Val(item)) }).join(",")
+    }
     identity(value)
 }
 
 // What `[value].join()` shows for a value: undefined and null as nothing.
-joined: fn(value: Dyn?) -> String { if value == None || value == .Val(.Null) -> "" else -> shown(value) }
+joined: fn(value: Dyn?) -> String {
+    if value == None || value == .Val(.Null) -> "" else -> shown(value)
+}
 
 // Whether `value?.includes(needle)` holds: `value` an array holding `needle` or a string containing it.
 mentions: fn(value: Dyn?, needle: String) -> Bool {
@@ -253,7 +312,9 @@ set_key: fn(value: Dyn?, at: Int) -> String {
 // JSON.stringify of the value in canonical key order: `undefined` for none.
 // Two values a JSON input and this run's report hold are `===` when theirs
 // match: the report's are numbers and strings, never an object or array.
-identity: fn(value: Dyn?) -> String { if value == .Val(found) -> json.canonical(found) ?? "" else -> "undefined" }
+identity: fn(value: Dyn?) -> String {
+    if value == .Val(found) -> json.canonical(found) ?? "" else -> "undefined"
+}
 
 // The sha256 of `value`'s canonical JSON (hashJson).
 hash: fn(value: Dyn) -> Dyn { Dyn.Text(crypto.sha256(identity(Val(value)).bytes()).hex()) }
@@ -287,10 +348,14 @@ repo_root: fn() -> String {
 
 parse_args: fn(args: [String], repo: String) -> Options Failure! {
     // Each path option's value: its default until the arguments name one.
-    paths := [String: String]{
-        "--config": "{repo}/Tools/agent-eval/adapters.json", "--capsule": "{repo}/Tools/agent-eval/jet-context-capsule.md", "--llms": "",
-        "--tasks": "{repo}/Tools/agent-eval/tasks/tasks.json", "--baseline": "{repo}/Docs/audits/cold-agent-jet-baseline.json",
-        "--output": "{repo}/Docs/audits/cold-agent-jet-scoreboard.json", "--jet-bin": "",
+    paths := [String:String]{
+        "--config": "{repo}/Tools/agent-eval/adapters.json",
+        "--capsule": "{repo}/Tools/agent-eval/jet-context-capsule.md",
+        "--llms": "",
+        "--tasks": "{repo}/Tools/agent-eval/tasks/tasks.json",
+        "--baseline": "{repo}/Docs/audits/cold-agent-jet-baseline.json",
+        "--output": "{repo}/Docs/audits/cold-agent-jet-scoreboard.json",
+        "--jet-bin": "",
     }
     mode := "both"
     record := false
@@ -308,8 +373,12 @@ parse_args: fn(args: [String], repo: String) -> Options Failure! {
             else -> {
                 value: args.get(i) ?? ""
                 i += 1
-                if value == "" -> usage(if token == "--mode" -> "--mode needs capsule, control, or both" else -> "{token} needs a path")
-                if token == "--mode" -> mode = value.copy() else -> paths[token] = files.absolute(value) ?? value
+                if value == "" {
+                    usage(if token == "--mode" -> "--mode needs capsule, control, or both" else -> "{token} needs a path")
+                }
+                if token == "--mode" -> mode = value.copy() else {
+                    paths[token] = files.absolute(value) ?? value
+                }
             }
         }
     }
@@ -320,7 +389,9 @@ parse_args: fn(args: [String], repo: String) -> Options Failure! {
 }
 
 // The text of `file` as node reads it as utf8: each invalid byte sequence one U+FFFD.
-read_text: fn(file: String) -> String IOError! { Ok(String.from_bytes_lossy(files.read_bytes(file))) }
+read_text: fn(file: String) -> String IOError! {
+    Ok(String.from_bytes_lossy(files.read_bytes(file)))
+}
 
 read_json: fn(file: String) -> Dyn Failure! {
     content: read_text(file) ?? return Err(usage_error("cannot read {file}: {err}"))
@@ -352,7 +423,9 @@ build_control: fn(source: String, budget: Int) -> String Failure! {
     bytes: source.bytes()
     end := if bytes.len() < budget -> bytes.len() else -> budget
     loop end > 0 && end < bytes.len() && bytes[end] >= 0x80 && bytes[end] < 0xC0 -> end -= 1
-    if end != budget && end != bytes.len() -> usage("control digest could not preserve its byte budget")
+    if end != budget && end != bytes.len() {
+        usage("control digest could not preserve its byte budget")
+    }
     Ok(String.from_bytes_lossy(bytes.slice(0, end)))
 }
 
@@ -360,7 +433,9 @@ build_control: fn(source: String, budget: Int) -> String Failure! {
 numbered: fn(found: [Match], names: [String]) -> Bool {
     if found.len() != names.len() -> return false
     loop i in 0..<found.len() {
-        if (Int.parse(found[i].group(1) ?? "") ?? 0) != i + 1 || (found[i].group(2) ?? "") != names[i] -> return false
+        if (Int.parse(found[i].group(1) ?? "") ?? 0) != i + 1 || (found[i].group(2) ?? "") != names[i] {
+            return false
+        }
     }
     true
 }
@@ -368,15 +443,23 @@ numbered: fn(found: [Match], names: [String]) -> Bool {
 validate_capsule: fn(capsule: String) Failure! {
     size: capsule.bytes().len()
     if size > CAPSULE_LIMIT -> usage("capsule is {size} bytes; limit is {CAPSULE_LIMIT}")
-    if SUBJECTS.find(fn(needle) { !capsule.contains(needle) }) == .Val(missing) -> usage("capsule is missing required subject: {missing}")
-    if !numbered(Regex{"(?:\A|\s)(\d+)\.\s+`([^`]+)`"}.matches(capsule), VERBS) -> usage("capsule must contain the canonical numbered verb list")
+    if SUBJECTS.find(fn(needle) { !capsule.contains(needle) }) == .Val(missing) {
+        usage("capsule is missing required subject: {missing}")
+    }
+    if !numbered(Regex{"(?:\A|\s)(\d+)\.\s+`([^`]+)`"}.matches(capsule), VERBS) {
+        usage("capsule must contain the canonical numbered verb list")
+    }
     headings: Regex{"(?:\A|\n)### (\d+)\. ([^\r\n]+)"}.matches(capsule)
-    if !numbered(headings, PROGRAMS) -> usage("capsule must contain the canonical numbered program list")
+    if !numbered(headings, PROGRAMS) {
+        usage("capsule must contain the canonical numbered program list")
+    }
     entry: Regex{"\brun:\s*fn\b"}
     loop i in 0..<headings.len() {
         end: if i + 1 < headings.len() -> headings[i + 1].start else -> capsule.len()
         sources: Regex{"```jet\s*\r?\n([\s\S]*?)\r?\n```"}.matches(capsule.slice(headings[i].start, end))
-        if sources.len() != 1 || !entry.is_match(sources[0].group(1) ?? "") -> usage("capsule program {i + 1} is missing a complete fn run source block")
+        if sources.len() != 1 || !entry.is_match(sources[0].group(1) ?? "") {
+            usage("capsule program {i + 1} is missing a complete fn run source block")
+        }
     }
     Ok()
 }
@@ -393,19 +476,21 @@ validate_task: fn(task: Dyn) -> Task Failure! {
     if member(task, "files") == .Val(given) {
         if given == .Object(entries) {
             loop entry in entries {
-                if !(entry.value == .Text(_)) || entry.key == "" || entry.key.starts_with("/") || entry.key.replace("\\", "/").split("/").to_list().contains("..") -> usage("{id}: unsafe or non-text fixture {entry.key}")
+                if !(entry.value == .Text(_)) || entry.key == "" || entry.key.starts_with("/") || entry.key.replace("\\", "/").split("/").to_list().contains("..") {
+                    usage("{id}: unsafe or non-text fixture {entry.key}")
+                }
                 out.files.push((name: entry.key.copy(), text: shown(entry.value)))
             }
-        } else {
-            usage("{id}: files must be an object")
-        }
+        } else { usage("{id}: files must be an object") }
     }
     if mode == "http" {
         service: member(task, "service")
         unserved: "{id}: HTTP task needs port_arg, ready_path, and probes"
         out.ready_path = need(str(service, "ready_path"), unserved)
         probes: items(service, "probes") ?? []
-        if !(member(service, "port_arg") == .Val(.Bool(true))) || probes.len() == 0 -> usage(unserved)
+        if !(member(service, "port_arg") == .Val(.Bool(true))) || probes.len() == 0 {
+            usage(unserved)
+        }
         loop i in 0..<probes.len() {
             probe: probes[i]
             invalid: "{id}: invalid HTTP probe {i}"
@@ -416,65 +501,91 @@ validate_task: fn(task: Dyn) -> Task Failure! {
 }
 
 load_tasks: fn(config: Dyn) -> [Task] Failure! {
-    if str(config, "schema") != Val("jet.cold-agent.tasks.v1") -> usage("task fixture has the wrong schema")
+    if str(config, "schema") != Val("jet.cold-agent.tasks.v1") {
+        usage("task fixture has the wrong schema")
+    }
     out := [Task]{}
     loop item in need(items(config, "tasks"), "task fixture has the wrong schema") {
         task: validate_task(item)
-        if out.map(fn(seen: Task) { seen.id }).contains(task.id) -> usage("duplicate task {task.id}")
+        if out.map(fn(seen: Task) { seen.id }).contains(task.id) {
+            usage("duplicate task {task.id}")
+        }
         out.push(task)
     }
     out.sort_by(fn(task: Task) { task.id })
-    if out.map(fn(task: Task) { task.id }) != ["cli", "data-transform", "hello", "http"] -> usage("task fixture must contain hello, cli, data-transform, and http")
+    if out.map(fn(task: Task) { task.id }) != ["cli", "data-transform", "hello", "http"] {
+        usage("task fixture must contain hello, cli, data-transform, and http")
+    }
     Ok(out)
 }
 
 load_adapters: fn(config: Dyn) -> [Adapter] Failure! {
-    if str(config, "schema") != Val("jet.cold-agent.adapters.v1") -> usage("adapter config has the wrong schema")
+    if str(config, "schema") != Val("jet.cold-agent.adapters.v1") {
+        usage("adapter config has the wrong schema")
+    }
     specs: need(items(config, "adapters"), "adapter config has the wrong schema")
     unique: combinatorics.unique(need(strings(config, "required_families"), "adapter config needs a string required_families array"))
-    if !unique.contains("openai") || !unique.contains("anthropic") -> usage("adapter config must require the openai and anthropic families")
+    if !unique.contains("openai") || !unique.contains("anthropic") {
+        usage("adapter config must require the openai and anthropic families")
+    }
     out := [Adapter]{}
     loop spec in specs {
         id: need(str(spec, "id"), "each adapter needs id and family")
         family: need(str(spec, "family"), "each adapter needs id and family")
-        if out.map(fn(seen: Adapter) { seen.id }).contains(id) || out.map(fn(seen: Adapter) { seen.family }).contains(family) -> usage("adapter ids and families must be unique")
+        if out.map(fn(seen: Adapter) { seen.id }).contains(id) || out.map(fn(seen: Adapter) { seen.family }).contains(family) {
+            usage("adapter ids and families must be unique")
+        }
         command: member(spec, "command")
         transport_env: need(str(spec, "transport_env"), "{id}: api or command and transport_env are required")
-        if !truthy(member(spec, "api")) && !truthy(command) -> usage("{id}: api or command and transport_env are required")
+        if !truthy(member(spec, "api")) && !truthy(command) {
+            usage("{id}: api or command and transport_env are required")
+        }
         if truthy(command) {
             // An absent or null input is json-stdin.
-            if ![Dyn.Text("json-stdin"), Dyn.Text("prompt-argument"), Dyn.Null].contains(member(command, "input") ?? Dyn.Null) -> usage("{id}: command input must be json-stdin or prompt-argument")
-            if member(command, "command_env") != None && str(command, "command_env") == None -> usage("{id}: command_env must be a string")
-            if member(command, "default_argv") != None && argv_of(command, "default_argv") == None -> usage("{id}: default_argv must be a non-empty JSON argv array")
+            if ![Dyn.Text("json-stdin"), Dyn.Text("prompt-argument"), Dyn.Null].contains(member(command, "input") ?? Dyn.Null) {
+                usage("{id}: command input must be json-stdin or prompt-argument")
+            }
+            if member(command, "command_env") != None && str(command, "command_env") == None {
+                usage("{id}: command_env must be a string")
+            }
+            if member(command, "default_argv") != None && argv_of(command, "default_argv") == None {
+                usage("{id}: default_argv must be a non-empty JSON argv array")
+            }
         }
         out.push(Adapter{id: id, family: family, transport_env: transport_env, spec: spec.copy()})
     }
     families: out.map(fn(adapter: Adapter) { adapter.family })
-    if unique.find(fn(family) { !families.contains(family) }) == .Val(missing) -> usage("missing required family {missing}")
+    if unique.find(fn(family) { !families.contains(family) }) == .Val(missing) {
+        usage("missing required family {missing}")
+    }
     out.sort_by(fn(adapter: Adapter) { adapter.id })
     Ok(out)
 }
 
 // ---- adapters ----
 
-environment: fn() -> [String: String] {
-    out := [String: String]{}
+environment: fn() -> [String:String] {
+    out := [String:String]{}
     loop name in sys.vars() ?? [] -> out[name] = sys.get(name) ?? ""
     out
 }
 
 // The trimmed value of the variable the adapter's api `key` names (the name
 // as String() shows it).
-setting: fn(adapter: Adapter, env: [String: String], key: String) -> String { (env.get(shown(member(adapter.spec, "api/{key}"))) ?? "").trim() }
+setting: fn(adapter: Adapter, env: [String:String], key: String) -> String {
+    (env.get(shown(member(adapter.spec, "api/{key}"))) ?? "").trim()
+}
 
-selected_transport: fn(adapter: Adapter, env: [String: String]) -> String Failure! {
+selected_transport: fn(adapter: Adapter, env: [String:String]) -> String Failure! {
     configured: joined(member(adapter.spec, "default_transport"))
     value: (env.get(adapter.transport_env) ?? configured).trim().lower()
-    if value != "api" && value != "command" -> usage("{adapter.id}: transport must be api or command")
+    if value != "api" && value != "command" {
+        usage("{adapter.id}: transport must be api or command")
+    }
     Ok(value)
 }
 
-command_from_env: fn(adapter: Adapter, env: [String: String]) -> [String] Failure! {
+command_from_env: fn(adapter: Adapter, env: [String:String]) -> [String] Failure! {
     command: member(adapter.spec, "command")
     name: str(command, "command_env") ?? ""
     value: (env.get(name) ?? "").trim()
@@ -486,12 +597,14 @@ command_from_env: fn(adapter: Adapter, env: [String: String]) -> [String] Failur
     argv_of(parsed, "") ?? return Err(blocked("{adapter.id}: {name} must contain a non-empty JSON argv array"))
 }
 
-preflight: fn(adapters: [Adapter], env: [String: String]) -> Preflight Failure! {
+preflight: fn(adapters: [Adapter], env: [String:String]) -> Preflight Failure! {
     out := Preflight{resolved: [], blocked: []}
     loop adapter in adapters {
         transport: selected_transport(adapter, env)
         if transport == "command" {
-            if !truthy(member(adapter.spec, "command")) -> usage("{adapter.id}: command transport is not configured")
+            if !truthy(member(adapter.spec, "command")) {
+                usage("{adapter.id}: command transport is not configured")
+            }
             command_from_env(adapter, env) ?? {
                 out.blocked.push(err.message)
                 next
@@ -510,7 +623,9 @@ preflight: fn(adapters: [Adapter], env: [String: String]) -> Preflight Failure! 
                 out.blocked.push("{adapter.id}: missing {missing.join(", ")}")
                 next
             }
-            if str(api, "protocol") != Val("openai-chat") -> usage("{adapter.id}: unsupported API protocol {shown(member(api, "protocol"))}")
+            if str(api, "protocol") != Val("openai-chat") {
+                usage("{adapter.id}: unsupported API protocol {shown(member(api, "protocol"))}")
+            }
         }
         out.resolved.push(Resolved{adapter: adapter.copy(), transport: transport})
     }
@@ -597,7 +712,9 @@ compile_case: fn(task: Task, source: String, dir: String, prefix: [String], row:
 judge: fn(row: &Dyn, ran: Outcome, expected: String?) {
     row["stdout_sha256"] = Dyn.Text(crypto.sha256(ran.output.bytes()).hex())
     row["stderr_sha256"] = Dyn.Text(crypto.sha256(ran.errors.bytes()).hex())
-    if expected == .Val(want) -> row["expected_stdout_sha256"] = Dyn.Text(crypto.sha256(want.bytes()).hex())
+    if expected == .Val(want) {
+        row["expected_stdout_sha256"] = Dyn.Text(crypto.sha256(want.bytes()).hex())
+    }
     if {
         ran.bad() -> row["error"] = Dyn.Text(failure("run", ran))
         ran.output != (expected ?? "") -> row["error"] = "run:stdout-mismatch"
@@ -690,7 +807,9 @@ run_case: fn(task: Task, adapter: Adapter, context: String, source: String, root
         return Err(err)
     }
     if compiled {
-        if task.mode == "http" -> run_http(task, dir, prefix, row) else -> run_batch(task, dir, prefix, row)
+        if task.mode == "http" -> run_http(task, dir, prefix, row) else {
+            run_batch(task, dir, prefix, row)
+        }
     }
     files.remove_all(dir) ?? ()
     Ok(row)
@@ -708,14 +827,18 @@ scratch_dir: fn(root: String, prefix: String) -> String Failure! {
 // when it has no entry point or keeps a fence open.
 extract_source: fn(answer: String) -> String? {
     value := answer.trim()
-    if value.starts_with("{{") && str(json.parse(value) ?? Dyn.Null, "source") == .Val(source) -> value = source.trim()
+    if value.starts_with("{{") && str(json.parse(value) ?? Dyn.Null, "source") == .Val(source) {
+        value = source.trim()
+    }
     fence: Regex{"\A```(?:[jJ][eE][tT])?\s*\r?\n([\s\S]*?)\r?\n```\z"}
     if fence.match(value) == .Val(fenced) -> value = (fenced.group(1) ?? "").trim()
-    if !value.contains("run: fn") || value.starts_with("```") || value.contains("\n```") -> return None
+    if !value.contains("run: fn") || value.starts_with("```") || value.contains("\n```") {
+        return None
+    }
     Val("{value}\n")
 }
 
-call_command: fn(adapter: Adapter, prompt: String, task: String, context: String, env: [String: String], cwd: String) -> String Failure! {
+call_command: fn(adapter: Adapter, prompt: String, task: String, context: String, env: [String:String], cwd: String) -> String Failure! {
     command: command_from_env(adapter, env)
     request := Dyn.object()
     request["schema"] = "jet.cold-agent.request.v1"
@@ -731,7 +854,7 @@ call_command: fn(adapter: Adapter, prompt: String, task: String, context: String
     Ok(ran.output)
 }
 
-call_api: fn(adapter: Adapter, prompt: String, env: [String: String]) -> String Failure! {
+call_api: fn(adapter: Adapter, prompt: String, env: [String:String]) -> String Failure! {
     message := Dyn.object()
     message["role"] = "user"
     message["content"] = prompt
@@ -743,15 +866,19 @@ call_api: fn(adapter: Adapter, prompt: String, env: [String: String]) -> String 
     body["max_tokens"] = 4096
     req: http.request("POST", setting(adapter, env, "endpoint_env")).header("content-type", "application/json").header("authorization", "Bearer {setting(adapter, env, "api_key_env")}").body(json.to_string(body) ?? "").timeout(TIMEOUT_MS)
     answer: req.send() ?? return Err(blocked("{adapter.id}: API request failed: {if err == .Timeout(_) -> "timeout" else -> "network"}"))
-    if (Int.parse(answer.header("content-length") ?? "0") ?? 0) > OUTPUT_LIMIT -> block("{adapter.id}: API response exceeded limit")
+    if (Int.parse(answer.header("content-length") ?? "0") ?? 0) > OUTPUT_LIMIT {
+        block("{adapter.id}: API response exceeded limit")
+    }
     content: answer.text(OUTPUT_LIMIT) ?? return Err(blocked(if err == .BodyTooLarge(_) -> "{adapter.id}: API response exceeded limit" else -> "{adapter.id}: API response could not be read"))
-    if answer.status() < 200 || answer.status() > 299 -> block("{adapter.id}: API returned HTTP {answer.status()}")
+    if answer.status() < 200 || answer.status() > 299 {
+        block("{adapter.id}: API returned HTTP {answer.status()}")
+    }
     parsed: json.parse(content) ?? return Err(blocked("{adapter.id}: API response was not JSON"))
     str((items(parsed, "choices") ?? []).first(), "message/content") ?? return Err(blocked("{adapter.id}: API response has no message content"))
 }
 
 // The model's answer; a command adapter runs in a fresh scratch directory.
-call_adapter: fn(r: Resolved, prompt: String, task: String, context: String, env: [String: String], root: String) -> String Failure! {
+call_adapter: fn(r: Resolved, prompt: String, task: String, context: String, env: [String:String], root: String) -> String Failure! {
     if r.transport != "command" -> return call_api(r.adapter, prompt, env)
     cwd: scratch_dir(root, "request-")
     answer: call_command(r.adapter, prompt, task, context, env, cwd) ?? {
@@ -810,7 +937,9 @@ summarize: fn(rows: [Dyn]) -> Dyn {
     out
 }
 
-row_key: fn(row: Dyn) -> String { "{shown(member(row, "adapter"))}{NUL}{shown(member(row, "context"))}{NUL}{shown(member(row, "task"))}" }
+row_key: fn(row: Dyn) -> String {
+    "{shown(member(row, "adapter"))}{NUL}{shown(member(row, "context"))}{NUL}{shown(member(row, "task"))}"
+}
 
 task_descriptor: fn(task: Task) -> Dyn {
     out := Dyn.object()
@@ -822,7 +951,7 @@ task_descriptor: fn(task: Task) -> Dyn {
     out
 }
 
-adapter_descriptor: fn(r: Resolved, env: [String: String]) -> Dyn {
+adapter_descriptor: fn(r: Resolved, env: [String:String]) -> Dyn {
     out := Dyn.object()
     out["id"] = r.adapter.id
     out["family"] = r.adapter.family
@@ -831,14 +960,14 @@ adapter_descriptor: fn(r: Resolved, env: [String: String]) -> Dyn {
         out["protocol"] = member(r.adapter.spec, "api/protocol") ?? Dyn.Null
         out["model"] = Dyn.Text(setting(r.adapter, env, "model_env"))
         out["endpoint_sha256"] = Dyn.Text(crypto.sha256(setting(r.adapter, env, "endpoint_env").bytes()).hex())
-        if truthy(member(r.adapter.spec, "api/version_env")) -> out["version"] = Dyn.Text(setting(r.adapter, env, "version_env"))
-    } else {
-        out["command_sha256"] = hash(command_from_env(r.adapter, env) ?? [])
-    }
+        if truthy(member(r.adapter.spec, "api/version_env")) {
+            out["version"] = Dyn.Text(setting(r.adapter, env, "version_env"))
+        }
+    } else { out["command_sha256"] = hash(command_from_env(r.adapter, env) ?? []) }
     out
 }
 
-make_report: fn(inputs: Inputs, resolved: [Resolved], rows: [Dyn], modes: [String], blocked_reasons: [String], env: [String: String]) -> Dyn {
+make_report: fn(inputs: Inputs, resolved: [Resolved], rows: [Dyn], modes: [String], blocked_reasons: [String], env: [String:String]) -> Dyn {
     expected: resolved.flat_map(fn(r) { modes.flat_map(fn(context) { inputs.tasks.map(fn(task) { "{r.adapter.id}{NUL}{context}{NUL}{task.id}" }) }) })
     keys: combinatorics.unique(rows.map(fn(row) { row_key(row) }))
     complete: rows.len() == inputs.tasks.len() * resolved.len() * modes.len() && keys.len() == rows.len() && keys.all(fn(key: String) { expected.contains(key) })
@@ -864,24 +993,39 @@ make_report: fn(inputs: Inputs, resolved: [Resolved], rows: [Dyn], modes: [Strin
     out
 }
 
-capsule_rows: fn(report: Dyn) -> [Dyn] { (items(report, "rows") ?? []).filter(fn(row) { str(row, "context") == Val("capsule") }) }
+capsule_rows: fn(report: Dyn) -> [Dyn] {
+    (items(report, "rows") ?? []).filter(fn(row) { str(row, "context") == Val("capsule") })
+}
 
 baseline_from_report: fn(report: Dyn) -> Dyn Failure! {
-    if str(report, "status") != Val("recorded") || !truthy(member(report, "summary")) -> usage("cannot record a baseline from an incomplete or blocked run")
-    if !mentions(member(report, "contexts"), "capsule") -> usage("cannot record a baseline without capsule results")
-    if !truthy(member(report, "control")) || !truthy(member(report, "fixtures")) || !truthy(member(report, "harness")) -> usage("cannot record a baseline without reproducibility metadata")
+    if str(report, "status") != Val("recorded") || !truthy(member(report, "summary")) {
+        usage("cannot record a baseline from an incomplete or blocked run")
+    }
+    if !mentions(member(report, "contexts"), "capsule") {
+        usage("cannot record a baseline without capsule results")
+    }
+    if !truthy(member(report, "control")) || !truthy(member(report, "fixtures")) || !truthy(member(report, "harness")) {
+        usage("cannot record a baseline without reproducibility metadata")
+    }
     loop key in ["adapters", "tasks", "required_families", "rows"] {
-        if items(report, key) == None -> usage("cannot record a baseline without reproducibility metadata")
+        if items(report, key) == None {
+            usage("cannot record a baseline without reproducibility metadata")
+        }
     }
     rows: capsule_rows(report)
-    if rows.len() == 0 || (integer(report, "summary/capsule/cases") ?? -1) != rows.len() -> usage("cannot record a baseline without a complete capsule matrix")
+    if rows.len() == 0 || (integer(report, "summary/capsule/cases") ?? -1) != rows.len() {
+        usage("cannot record a baseline without a complete capsule matrix")
+    }
     out := Dyn.object()
     out["schema"] = "jet.cold-agent.baseline.v1"
     out["status"] = "recorded"
     out["contexts"] = ["capsule"]
     // A field the scoreboard lacks is left out, as JSON.stringify leaves undefined.
-    loop key in ["required_families", "capsule", "control", "context_budget_bytes", "fixtures", "harness", "adapters", "tasks"] {
-        if member(report, if key == "context_budget_bytes" -> "control/{key}" else -> key) == .Val(found) -> out[key] = found
+    loop key in
+        ["required_families", "capsule", "control", "context_budget_bytes", "fixtures", "harness", "adapters", "tasks"] {
+        if member(report, if key == "context_budget_bytes" -> "control/{key}" else -> key) == .Val(found) {
+            out[key] = found
+        }
     }
     out["rows"] = rows
     summary := Dyn.object()
@@ -891,20 +1035,34 @@ baseline_from_report: fn(report: Dyn) -> Dyn Failure! {
 }
 
 // Whether `path` in `value` is a file descriptor: string path and sha256, integer bytes.
-complete: fn(value: Dyn, path: String) -> Bool { str(value, "{path}/sha256") != None && integer(value, "{path}/bytes") != None && str(value, "{path}/path") != None }
+complete: fn(value: Dyn, path: String) -> Bool {
+    str(value, "{path}/sha256") != None && integer(value, "{path}/bytes") != None && str(value, "{path}/path") != None
+}
 
 validate_baseline: fn(b: Dyn) Failure! {
-    if str(b, "schema") != Val("jet.cold-agent.baseline.v1") || str(b, "status") != Val("recorded") -> block("baseline is not recorded; run --record-baseline with real adapter results first")
+    if str(b, "schema") != Val("jet.cold-agent.baseline.v1") || str(b, "status") != Val("recorded") {
+        block("baseline is not recorded; run --record-baseline with real adapter results first")
+    }
     families_named: items(b, "required_families") ?? []
-    if !(items(b, "contexts") ?? []).contains(Dyn.Text("capsule")) -> block("baseline has no capsule context")
-    if !families_named.contains(Dyn.Text("openai")) || !families_named.contains(Dyn.Text("anthropic")) -> block("baseline does not declare both required model families")
+    if !(items(b, "contexts") ?? []).contains(Dyn.Text("capsule")) {
+        block("baseline has no capsule context")
+    }
+    if !families_named.contains(Dyn.Text("openai")) || !families_named.contains(Dyn.Text("anthropic")) {
+        block("baseline does not declare both required model families")
+    }
     if !complete(b, "capsule") -> block("baseline capsule descriptor is incomplete")
-    if str(b, "control/path") == None || integer(b, "control/source_bytes") == None || str(b, "control/source_sha256") == None || integer(b, "control/context_budget_bytes") == None || str(b, "control/context_sha256") == None -> block("baseline control descriptor is incomplete")
+    if str(b, "control/path") == None || integer(b, "control/source_bytes") == None || str(b, "control/source_sha256") == None || integer(b, "control/context_budget_bytes") == None || str(b, "control/context_sha256") == None {
+        block("baseline control descriptor is incomplete")
+    }
     if !complete(b, "fixtures/task_file") -> block("baseline task fixture descriptor is incomplete")
-    if !complete(b, "fixtures/adapter_file") -> block("baseline adapter fixture descriptor is incomplete")
+    if !complete(b, "fixtures/adapter_file") {
+        block("baseline adapter fixture descriptor is incomplete")
+    }
     if !complete(b, "harness") -> block("baseline harness descriptor is incomplete")
     // Its control budget is an integer, so identities match as `===` does.
-    if identity(member(b, "context_budget_bytes")) != identity(member(b, "control/context_budget_bytes")) -> block("baseline context budget is inconsistent")
+    if identity(member(b, "context_budget_bytes")) != identity(member(b, "control/context_budget_bytes")) {
+        block("baseline context budget is inconsistent")
+    }
     cases: integer(b, "summary/capsule/cases") ?? return Err(blocked("baseline summary is incomplete"))
     adapters: items(b, "adapters") ?? []
     if adapters.len() < 2 -> block("baseline has no complete adapter identity")
@@ -913,8 +1071,12 @@ validate_baseline: fn(b: Dyn) Failure! {
     // The families as a JavaScript Set holds them.
     families := [String]{}
     loop (at, adapter) in adapters -> families.push(set_key(member(adapter, "family"), at))
-    if !families.contains(set_key(Val(Dyn.Text("openai")), 0)) || !families.contains(set_key(Val(Dyn.Text("anthropic")), 0)) -> block("baseline does not cover both required model families")
-    if combinatorics.unique(families).len() != adapters.len() -> block("baseline adapter families are duplicated")
+    if !families.contains(set_key(Val(Dyn.Text("openai")), 0)) || !families.contains(set_key(Val(Dyn.Text("anthropic")), 0)) {
+        block("baseline does not cover both required model families")
+    }
+    if combinatorics.unique(families).len() != adapters.len() {
+        block("baseline adapter families are duplicated")
+    }
     adapter_ids: unique_ids(adapters) ?? return Err(blocked("baseline adapter identities are invalid"))
     task_ids: unique_ids(tasks) ?? return Err(blocked("baseline task identities are invalid"))
     rows: items(b, "rows") ?? []
@@ -924,13 +1086,17 @@ validate_baseline: fn(b: Dyn) Failure! {
         adapter: str(row, "adapter")
         task: str(row, "task")
         key: "{shown(member(row, "adapter"))}{NUL}{shown(member(row, "task"))}"
-        if str(row, "context") != Val("capsule") || adapter == None || !adapter_ids.contains(adapter ?? "") || task == None || !task_ids.contains(task ?? "") || seen.contains(key) || !binary_scores(row) -> block("baseline capsule rows are invalid")
+        if str(row, "context") != Val("capsule") || adapter == None || !adapter_ids.contains(adapter ?? "") || task == None || !task_ids.contains(task ?? "") || seen.contains(key) || !binary_scores(row) {
+            block("baseline capsule rows are invalid")
+        }
         seen.push(key)
     }
     passes: integer(b, "summary/capsule/passes") ?? -1
     compile: integer(b, "summary/capsule/compile_passes") ?? -1
     run_passes: integer(b, "summary/capsule/run_passes") ?? -1
-    if cases != rows.len() || passes < 0 || passes > cases || compile < 0 || compile > cases || run_passes < 0 || run_passes > cases || (number(member(b, "summary/capsule/pass_rate")) ?? -1.0) != Float.from_int(passes) / Float.from_int(cases) -> block("baseline summary does not cover its capsule matrix")
+    if cases != rows.len() || passes < 0 || passes > cases || compile < 0 || compile > cases || run_passes < 0 || run_passes > cases || (number(member(b, "summary/capsule/pass_rate")) ?? -1.0) != Float.from_int(passes) / Float.from_int(cases) {
+        block("baseline summary does not cover its capsule matrix")
+    }
     Ok()
 }
 
@@ -944,29 +1110,50 @@ unique_ids: fn(list: [Dyn]) -> [String]? {
     Val(ids)
 }
 
-binary_scores: fn(row: Dyn) -> Bool { ["compile_score", "run_score", "score"].all(fn(key: String) { score(row, key) == 0 || score(row, key) == 1 }) }
+binary_scores: fn(row: Dyn) -> Bool {
+    ["compile_score", "run_score", "score"].all(fn(key: String) { score(row, key) == 0 || score(row, key) == 1 })
+}
 
 compare_baseline: fn(r: Dyn, b: Dyn) Failure! {
     validate_baseline(b)
     if str(r, "status") != Val("recorded") -> regress("current scoreboard is incomplete")
-    if !(items(r, "contexts") ?? []).contains(Dyn.Text("capsule")) || !truthy(member(r, "summary/capsule")) -> regress("current scoreboard has no complete capsule context")
+    if !(items(r, "contexts") ?? []).contains(Dyn.Text("capsule")) || !truthy(member(r, "summary/capsule")) {
+        regress("current scoreboard has no complete capsule context")
+    }
     if items(r, "rows") == None -> regress("current scoreboard has no result rows")
-    if str(r, "control/source_sha256") == None || integer(r, "control/source_bytes") == None || str(r, "control/context_sha256") == None -> regress("current scoreboard lacks control provenance")
+    if str(r, "control/source_sha256") == None || integer(r, "control/source_bytes") == None || str(r, "control/context_sha256") == None {
+        regress("current scoreboard lacks control provenance")
+    }
     // The report holds only strings and integers here, and the baseline's
     // were checked, so identities match as `===` does.
-    if identity(member(r, "capsule/sha256")) != identity(member(b, "capsule/sha256")) -> regress("capsule artifact changed; record a new baseline")
-    if identity(member(r, "control/context_budget_bytes")) != identity(member(b, "context_budget_bytes")) -> regress("context budget changed; record a new baseline")
-    if ["source_sha256", "source_bytes", "context_sha256"].any(fn(key) { identity(member(r, "control/{key}")) != identity(member(b, "control/{key}")) }) -> regress("control context changed; record a new baseline")
-    if identity(member(r, "harness/sha256")) != identity(member(b, "harness/sha256")) -> regress("harness changed; record a new baseline")
-    loop field in [(key: "required_families", what: "required model families"), (key: "fixtures", what: "evaluation fixtures"), (key: "adapters", what: "model adapter identity"), (key: "tasks", what: "evaluation task identity")] {
-        if identity(member(r, field.key)) != identity(member(b, field.key)) -> regress("{field.what} changed; record a new baseline")
+    if identity(member(r, "capsule/sha256")) != identity(member(b, "capsule/sha256")) {
+        regress("capsule artifact changed; record a new baseline")
+    }
+    if identity(member(r, "control/context_budget_bytes")) != identity(member(b, "context_budget_bytes")) {
+        regress("context budget changed; record a new baseline")
+    }
+    if ["source_sha256", "source_bytes", "context_sha256"].any(fn(key) { identity(member(r, "control/{key}")) != identity(member(b, "control/{key}")) }) {
+        regress("control context changed; record a new baseline")
+    }
+    if identity(member(r, "harness/sha256")) != identity(member(b, "harness/sha256")) {
+        regress("harness changed; record a new baseline")
+    }
+    loop field in
+        [(key: "required_families", what: "required model families"), (key: "fixtures", what: "evaluation fixtures"), (key: "adapters", what: "model adapter identity"), (key: "tasks", what: "evaluation task identity")] {
+        if identity(member(r, field.key)) != identity(member(b, field.key)) {
+            regress("{field.what} changed; record a new baseline")
+        }
     }
     current: capsule_rows(r)
-    if (integer(r, "summary/capsule/cases") ?? -1) != current.len() || !current.all(fn(row: Dyn) { binary_scores(row) }) -> regress("current capsule summary or rows are invalid")
+    if (integer(r, "summary/capsule/cases") ?? -1) != current.len() || !current.all(fn(row: Dyn) { binary_scores(row) }) {
+        regress("current capsule summary or rows are invalid")
+    }
     // The current rows by adapter and task, as a Map keeps them: a later row
     // replaces an earlier one of the same key.
-    by_key := [String: Dyn]{}
-    loop row in current -> by_key["{shown(member(row, "adapter"))}{NUL}{shown(member(row, "task"))}"] = row.copy()
+    by_key := [String:Dyn]{}
+    loop row in current {
+        by_key["{shown(member(row, "adapter"))}{NUL}{shown(member(row, "task"))}"] = row.copy()
+    }
     expected: items(b, "rows") ?? []
     if by_key.len() != expected.len() -> regress("current capsule matrix is incomplete")
     failures := [String]{}
@@ -979,12 +1166,16 @@ compare_baseline: fn(r: Dyn, b: Dyn) Failure! {
             next
         }
         loop key in ["compile_score", "run_score", "score"] {
-            if score(found, key) < score(want, key) -> failures.push("{name}:{key.removesuffix("_score")}")
+            if score(found, key) < score(want, key) {
+                failures.push("{name}:{key.removesuffix("_score")}")
+            }
         }
     }
     // Both rates are numbers: the baseline's was checked, and the current
     // one covers at least the baseline's two rows.
-    if (number(member(r, "summary/capsule/pass_rate")) ?? 0.0) < (number(member(b, "summary/capsule/pass_rate")) ?? 0.0) -> failures.push("capsule:pass-rate")
+    if (number(member(r, "summary/capsule/pass_rate")) ?? 0.0) < (number(member(b, "summary/capsule/pass_rate")) ?? 0.0) {
+        failures.push("capsule:pass-rate")
+    }
     failures.sort()
     if failures.len() > 0 -> regress("capsule baseline regression: {failures.join(", ")}")
     Ok()
@@ -1002,15 +1193,15 @@ prepare: fn(o: Options, repo: String) -> Inputs Failure! {
     capsule_text: read_text(o.capsule) ?? return Err(usage_error("{err}"))
     validate_capsule(capsule_text)
     llms_text := ""
-    if o.llms != "" {
-        llms_text = read_text(o.llms) ?? return Err(usage_error("{err}"))
-    } else {
+    if o.llms != "" -> llms_text = read_text(o.llms) ?? return Err(usage_error("{err}")) else {
         digest: run_command(jet_spec(jet_prefix(o.jet_bin, repo).concat(["inspect", "digest"]), repo), "")
         if digest.bad() -> usage("cannot generate control digest: {failure("digest", digest)}")
         llms_text = digest.output
     }
     budget: capsule_text.bytes().len()
-    if llms_text.bytes().len() < budget -> usage("control digest is shorter than the capsule budget")
+    if llms_text.bytes().len() < budget {
+        usage("control digest is shorter than the capsule budget")
+    }
     control_text: build_control(llms_text, budget)
     tasks: load_tasks(read_json(o.tasks))
     adapters: load_adapters(read_json(o.config))
@@ -1121,7 +1312,7 @@ cold_report: fn(score: Int) -> Dyn {
         adapters[i].spec["command"] = command
         adapters[i].spec["default_transport"] = "command"
     }
-    result: preflight(adapters, [String: String]{}) ?? Preflight{resolved: [Resolved]{}, blocked: [String]{}}
+    result: preflight(adapters, [String:String]{}) ?? Preflight{resolved: [Resolved]{}, blocked: [String]{}}
     assert_eq(result.resolved.len(), 0)
     assert_eq(result.blocked.join("|"), "anthropic: set JET_COLD_AGENT_ANTHROPIC_COMMAND for command transport|openai: set JET_COLD_AGENT_OPENAI_COMMAND for command transport")
 }
@@ -1129,7 +1320,7 @@ cold_report: fn(score: Int) -> Dyn {
 #Test("preflight accepts both built-in OMP command transports") {
     config: read_json("{repo_root()}/Tools/agent-eval/adapters.json") ?? Dyn.Null
     adapters: load_adapters(config) ?? [Adapter]{}
-    result: preflight(adapters, [String: String]{}) ?? Preflight{resolved: [Resolved]{}, blocked: [String]{}}
+    result: preflight(adapters, [String:String]{}) ?? Preflight{resolved: [Resolved]{}, blocked: [String]{}}
     families := [String]{}
     loop r in result.resolved -> families.push(r.adapter.family.copy())
     assert_eq(families.join(","), "anthropic,openai")
@@ -1254,7 +1445,8 @@ cold_report: fn(score: Int) -> Dyn {
     end: capsule.find("\n## 7. Cold-agent rules")
     start: capsule.find("\n### 10. HTTP health endpoint")
     assert(start > 0 && end > start)
-    loop broken in [capsule.replace("`term.print`", "`term.removed`"), capsule.replace("run: fn() {{\n    print(\"Hello, Jet\")\n}}", "print(\"Hello, Jet\")"), "{capsule.slice(0, start)}{capsule.slice(end, capsule.len())}"] {
+    loop broken in
+        [capsule.replace("`term.print`", "`term.removed`"), capsule.replace("run: fn() {{\n    print(\"Hello, Jet\")\n}}", "print(\"Hello, Jet\")"), "{capsule.slice(0, start)}{capsule.slice(end, capsule.len())}"] {
         rejected: if validate_capsule(broken) == {
             .Ok(_) -> false
             .Err(failure) -> failure.kind == .Usage

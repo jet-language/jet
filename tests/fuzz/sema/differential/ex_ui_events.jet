@@ -3,6 +3,7 @@ package: {
     version: "0.1.0"
     authority: { allow: [Exec, IO, Mem.Alloc, Time.Wait] }
 }
+
 // One typed Event/Hook family.
 use event: core.event
 
@@ -20,8 +21,8 @@ PublishedEvent: struct {
 
 show_publish: fn(outcome: HookOutcome<Int, String>) {
     if outcome == {
-        .Continue(value) -> print("publish {value}")
-        .Cancel -> print("publish cancelled")
+        .Continue(value) -> { print("publish {value}") }
+        .Cancel -> { print("publish cancelled") }
         .Fail(error) -> print("publish failed {error}")
     }
 }

@@ -1,4 +1,3 @@
-
 use {
     net: core.net
     tasks: core.tasks
@@ -16,7 +15,7 @@ run: fn() {
     }
     stream := net.tcp_accept(listener) ?? panic("accept")
     if stream.read_bytes(1, deadline: 20ms) == {
-        .Ok(_) -> print("unexpected read")
+        .Ok(_) -> { print("unexpected read") }
         .Err(error) -> print(net.error_message(error))
     }
     client.join() ?? panic("client task failed")

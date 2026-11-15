@@ -49,7 +49,7 @@ ir_key_index: fn(keys: [String]) -> [Int] Never! {
             start = end
         }
         order = merged
-        width = width * 2
+        width *= 2
     }
     rows := [Int]{}
     loop row in order {
@@ -61,7 +61,7 @@ ir_key_index: fn(keys: [String]) -> [Int] Never! {
 
 // The keys of an ir_key_index, in its order.
 ir_key_index_keys: fn(keys: [String], rows: [Int]) -> [String] Never! {
-    loop row in rows -> keys[row].copy() // copy: the index owns its keys; `keys` stays the caller's
+    loop row in rows -> keys[row].copy()  // copy: the index owns its keys; `keys` stays the caller's
 }
 
 // The runtime handle type a Jet type generated Rust holds natively crosses the
@@ -73,7 +73,15 @@ ir_key_index_keys: fn(keys: [String], rows: [Int]) -> [String] Never! {
 // `jet_rt_handle_display_<runtime>` / `jet_rt_handle_show_<runtime>` /
 // `jet_rt_handle_debug_<runtime>` when `display` / `show` / `debug`; compared
 // by `jet_rt_handle_eq_<runtime>` when `eq`.
-IRRuntimeHandle: struct { jet_name: String, runtime: String, clone: Bool, display: Bool, show: Bool, debug: Bool, eq: Bool }
+IRRuntimeHandle: struct {
+    jet_name: String
+    runtime: String
+    clone: Bool
+    display: Bool
+    show: Bool
+    debug: Bool
+    eq: Bool
+}
 
 IR_RUNTIME_HANDLES: #run { [IRRuntimeHandle]{
     IRRuntimeHandle{jet_name: "__EvidenceRead", runtime: "JetTestingEvidenceRead", clone: true, display: false, show: false, debug: false, eq: true},
@@ -525,10 +533,11 @@ IR_RUNTIME_HANDLES: #run { [IRRuntimeHandle]{
 } }
 
 ir_runtime_handle_keys: fn(handles: [IRRuntimeHandle]) -> [String] Never! {
-    loop handle in handles -> handle.jet_name.copy() // copy: the global handle tables can't be moved from
+    loop handle in handles -> handle.jet_name.copy()  // copy: the global handle tables can't be moved from
 }
 
 IR_RUNTIME_HANDLE_KEY_ROWS: #run ir_key_index(ir_runtime_handle_keys(IR_RUNTIME_HANDLES))
+
 IR_RUNTIME_HANDLE_KEYS: #run ir_key_index_keys(ir_runtime_handle_keys(IR_RUNTIME_HANDLES), IR_RUNTIME_HANDLE_KEY_ROWS)
 
 // The row of IR_RUNTIME_HANDLES that `name` keys, if any.

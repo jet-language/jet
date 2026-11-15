@@ -20,6 +20,7 @@ Real: struct {
 
     impl Cloner {
         go2: fn(self) -> Int { self.n }
+
         // A declared trait result takes the concrete value.
         again: fn(self) -> Cloner { Real{n: self.n + 1} }
     }
@@ -34,9 +35,7 @@ Config: struct {
     cloner: Cloner?
 }
 
-direct: fn(plain: Plain) -> Int {
-    plain.adapter.go()
-}
+direct: fn(plain: Plain) -> Int { plain.adapter.go() }
 
 via_match: fn(config: Config) -> Int {
     if config.adapter == {
@@ -56,9 +55,7 @@ optional_param: fn(adapter: Adapter?) -> Int {
     found.go()
 }
 
-make: fn(n: Int) -> Adapter {
-    Real{n: n}
-}
+make: fn(n: Int) -> Adapter { Real{n: n} }
 
 maybe: fn(n: Int) -> Adapter? {
     if n < 0 -> return None

@@ -1,7 +1,6 @@
 // Interpolation selectors beyond Display, Debug and the Float Fixed/Grouped
 // kernels: the selector's Core/Text/Fmt.jet helper renders the value, called
 // with the selector's constants or its computed number.
-
 use jet_foundation.[Span, TStrFormat, Type, module_is_core]
 
 // The text `{value:format}` adds to the string: a fresh String. Pretty hands
@@ -21,22 +20,24 @@ ir_string_format: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, form
             break
         }
     }
-    if row < 0 -> return ir_fail_slot(b, span, "interpolation format {format}: Core/Text/Fmt.jet {member} is outside the checked program")
+    if row < 0 {
+        return ir_fail_slot(b, span, "interpolation format {format}: Core/Text/Fmt.jet {member} is outside the checked program")
+    }
     params: p.functions[row].params
     expected: if format == {
         .Fixed(_) | .Grouped(_) | .Hex(_) | .Sci(_) | .Percent(_) -> 2
         .Pad(_, _) | .PadLeft(_, _) -> 3
         .Display | .Debug | .Pretty | .Bin | .Oct | .Unit(_) | .Number -> 1
     }
-    if params.len() != expected -> return ir_fail_slot(b, span, "interpolation helper {member} takes {params.len()} parameters")
+    if params.len() != expected {
+        return ir_fail_slot(b, span, "interpolation helper {member} takes {params.len()} parameters")
+    }
     target: params[0].ty
     callee: ir_function_id(m, p, p.functions[row].key, [Type]{}) ?? return ir_fail_slot(b, span, "call of {member}")
     slot: ir_expr(m, p, b, value)
     if ir_failed(b) || slot < 0 -> return -1
     argument := slot
-    if format == .Pretty {
-        argument = ir_render(m, p, b, value_ty, slot, IRRender.Debug, span)
-    } else if target == Type.String && ir_untag(concrete) != Type.String {
+    if format == .Pretty -> argument = ir_render(m, p, b, value_ty, slot, IRRender.Debug, span) else if target == Type.String && ir_untag(concrete) != Type.String {
         argument = ir_render(m, p, b, value_ty, slot, IRRender.Display, span)
     } else if target != Type.String && target != concrete {
         target_row: ir_value_type(m, p, target) ?? return ir_type_fail(b, span, target)
@@ -51,16 +52,22 @@ ir_string_format: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, form
     // The selector's constant (a count or width) has the helper's second
     // parameter's type.
     count_row := -1
-    if expected > 1 -> count_row = ir_value_type(m, p, params[1].ty) ?? return ir_type_fail(b, span, params[1].ty)
+    if expected > 1 {
+        count_row = ir_value_type(m, p, params[1].ty) ?? return ir_type_fail(b, span, params[1].ty)
+    }
     number := -1
     if count >= 0 {
         number = ir_expr(m, p, b, count)
         if ir_failed(b) || number < 0 -> return -1
-        if count_row >= 0 && b.f.slot_type[number] != count_row -> number = ir_numeric_cast(m, p, b, number, count_row, span)
+        if count_row >= 0 && b.f.slot_type[number] != count_row {
+            number = ir_numeric_cast(m, p, b, number, count_row, span)
+        }
         if ir_failed(b) || number < 0 -> return -1
     }
     if format == {
-        .Fixed(digits) | .Grouped(digits) | .Hex(digits) | .Sci(digits) | .Percent(digits) -> operands.push(if number >= 0 -> number else -> ir_int_constant(m, b, count_row, digits))
+        .Fixed(digits) | .Grouped(digits) | .Hex(digits) | .Sci(digits) | .Percent(digits) -> {
+            operands.push(if number >= 0 -> number else -> ir_int_constant(m, b, count_row, digits))
+        }
         .Pad(width, fill) | .PadLeft(width, fill) -> {
             operands.push(if number >= 0 -> number else -> ir_int_constant(m, b, count_row, width))
             text: ir_temp(m, b, string_row)

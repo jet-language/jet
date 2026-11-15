@@ -37,13 +37,21 @@ use {
 }
 
 COMMAND: "jet Tools/agent/UnsafeRatchet.jet"
+
 BEGIN: "<!-- unsafe-ratchet:begin -->"
+
 END: "<!-- unsafe-ratchet:end -->"
+
 DATA_BEGIN: "<!-- unsafe-ratchet:data"
+
 DATA_END: "-->"
+
 ABSTRACTIONS_BEGIN: "<!-- unsafe-abstractions:begin -->"
+
 ABSTRACTIONS_END: "<!-- unsafe-abstractions:end -->"
+
 CORELIB_DIRECTORY: "Core"
+
 SKIP_DIRECTORIES: [".agent-worktrees", ".cache", ".claude", ".git", ".jet", ".tmp", "build", "node_modules", "result", "target"]
 
 // Raw operations, spelled as the CoreLib reaches them: postfix dereference
@@ -52,12 +60,19 @@ SKIP_DIRECTORIES: [".agent-worktrees", ".cache", ".claude", ".git", ".jet", ".tm
 // (Compiler/JetSema/Source/Sema/Calls/Core.jet `sema_call_core_posix_control`,
 // E3101).
 RAW_OPERATIONS: ["pointer dereference", "pointer from address", "volatile access", "POSIX control"]
+
 POINTER_DEREFERENCE: Regex{"\.\*"}
+
 POINTER_FROM_ADDRESS: Regex{"\bPtr\s*<[^>]*>\s*\.\s*from_addr\s*\("}
+
 VOLATILE_ACCESS: Regex{"\bcore\s*\.\s*mem\s*\.\s*volatile_(?:read|write)\b"}
+
 POSIX_CONTROL: Regex{"\bcore\s*\.\s*sys\s*\.\s*(?:fork|setuid|setgid|set_user_ids|set_group_ids|setpgid|setpgrp|setsid|initgroups|kill|reset_signal|wait|waitpid|pipe|close_fd|mkfifo|mknod|umask|getpriority|setpriority|set_scheduling|set_wall_clock|utime|atexit|stop)\s*\("}
+
 MANIFEST_NAME: "^name\\s*:\\s*\"([^\"]+)\""
+
 LETTER: Regex{"\p{{L}}"}
+
 LETTER_OR_NUMBER: Regex{"[\p{{L}}\p{{N}}]"}
 
 // The vetted runtime boundary for signal handlers: an `#Unsafe` region outside
@@ -67,6 +82,7 @@ LETTER_OR_NUMBER: Regex{"[\p{{L}}\p{{N}}]"}
 // reach signals through core.process.signals, core.process.on_signal and
 // core.sys.on_interrupt, which that hub serves.
 SIGNAL_BOUNDARY: ["Compiler/JetRuntime/", "Compiler/JetBackend/Source/Image/Loader.jet"]
+
 // rt_sigaction (by name, by its x86-64 number 13 as the first syscall argument,
 // or by its OS_SYS constant), the C signal family, and the Core calls that
 // register a handler. core.sys.reset_signal only restores the default action;
@@ -75,13 +91,17 @@ SIGNAL_REGISTRATION: Regex{"\b(?:rt_sigaction|sigaction|bsd_signal|sysv_signal|s
 
 // The baseline line for the outside-kernel count, closed by ` -->`.
 MEMORY_BASELINE: "<!-- memory-kernel:outside "
+
 // The memory inventory covers the regions under these prefixes; a file's area
 // is its first matching prefix, and the counts table follows this order.
 MEMORY_AREA_PREFIXES: ["Compiler/JetRuntime/", "Compiler/JetBackend/Source/OS/", "Compiler/", "Core/", "Jetpack/"]
+
 MEMORY_AREA_NAMES: ["runtime", "OS layer", "compiler", "Core", "Jetpack"]
+
 // The raw memory actions, each spotted by its pattern over a region's code
 // with comments and quoted text blanked. A region none of them match is `other`.
 MEMORY_ACTIONS: ["allocate", "free", "resize", "raw read/write", "pointer offset", "byte copy/move", "atomic", "OS mapping", "foreign crossing"]
+
 MEMORY_PATTERNS: [Regex]{
     Regex{"\balloc_raw\b|\b__context_take\b|\bjet_rt_alloc\w*\s*\(|\balloc_try\w*\s*\(|\brt_alloc\w*\s*\(|\bmalloc\s*\(|\bcalloc\s*\(|\bRegion\s*\.\s*adopt\b|\.\s*allocate\s*\(|\balloc_(?:take|slab|block|large|user_take)\w*\s*\(|\bjet_alloc\w*\s*\(|\badopt\s*:\s*fn\b"},
     Regex{"\bfree_raw\b|\b__context_give\b|\bjet_rt_free\w*\s*\(|\balloc_free\w*\s*\(|\bfree\s*\(|\balloc_give\w*\s*\(|\brt_free\w*\s*\(|\bjet_rt_block_release\b|\balloc_(?:user_)?drop\w*\s*\("},
@@ -93,42 +113,71 @@ MEMORY_PATTERNS: [Regex]{
     Regex{"\bos_syscall\w*\s*\(\s*(?:I64\s*\{{\s*)?(?:9|10|11|25|28|319)\b|\bOS_SYS_(?:MMAP|MPROTECT|MUNMAP|MREMAP|MADVISE|MEMFD_CREATE|BRK)\b|\bm(?:un)?map\b|\bmprotect\b|\bmremap\b|\bmadvise\b|\bVirtual(?:Alloc|Free|Protect)\b|\b__region_(?:reserve|release)\b|\bmem\s*\.\s*(?:mapped|unmapping)\b|\balloc_(?:un)?map\w*\s*\(|\bmemfd|\bos_(?:mmap|munmap|mprotect|map|unmap|protect)\w*\s*\("},
     Regex{"\bFFI\s*\(\s*(?:c|cpp|rust|zig)\s*\)|#\s*Import\b|\bextern\b|\bffi\s*\.|\bLibrary\s*\.\s*open\b|\.\s*symbol\s*<|\bos_call\w*\s*\(|\bdl(?:open|sym)\b|\bjet_rt_c_\w+\s*\(|\bc\s*\.\s*[a-z_]+\s*\.|\blibc\s*\."},
 }
+
 // An `#FFI(asm)` template is read as written: a memory operand reads or
 // writes raw memory, a string instruction copies or fills bytes, a locked or
 // exchanging instruction is atomic, and a call through a register or operand
 // crosses into foreign code.
 ASM_ADDRESSING: Regex{"\bptr\s*\[|\[\s*(?:\{{\w+\}}|r[a-z0-9]+\b|e[a-z]{{2}}\b)"}
+
 ASM_BYTE_COPY: Regex{"\brep\w*\s+(?:movs|stos)"}
+
 ASM_ATOMIC: Regex{"\block\b|\bxchg|\bxadd|\bcmpxchg|\bmfence\b"}
+
 ASM_CALL: Regex{"\bcall\s+(?:r[a-z0-9]+\b|\{{)"}
+
 RAW_READ_WRITE: 3
+
 BYTE_COPY_MOVE: 5
+
 ATOMIC: 6
+
 FOREIGN_CROSSING: 8
+
 // A package's kernel files: `policy: { memory: .Kernel(["src/kernel", ...]) }`
 // in its package.jet, each path relative to the package, a file or a directory.
 MEMORY_KERNEL_FIELD: Regex{"\bmemory\s*:\s*\.\s*Kernel\s*\(\s*\[([^\]]*)\]"}
+
 QUOTED_PATH: Regex{"\"([^\"]*)\""}
 
 NEWLINE: 10
+
 BANG: 33
+
 QUOTE: 34
+
 HASH: 35
+
 APOSTROPHE: 39
+
 OPEN_PAREN: 40
+
 CLOSE_PAREN: 41
+
 STAR: 42
+
 COMMA: 44
+
 DOT: 46
+
 SLASH: 47
+
 COLON: 58
+
 SEMICOLON: 59
+
 OPEN_BRACKET: 91
+
 BACKSLASH: 92
+
 CLOSE_BRACKET: 93
+
 UNDERSCORE: 95
+
 BACKTICK: 96
+
 OPEN_BRACE: 123
+
 CLOSE_BRACE: 125
 
 #Error
@@ -304,11 +353,15 @@ byte_at: fn(source: [U8], index: Int) -> Int {
 byte_len: fn(text: String) -> Int { text.bytes().len() }
 
 // The text of bytes `start..<end` of `text`.
-byte_slice: fn(text: String, start: Int, end: Int) -> String { String.from_bytes_lossy(text.bytes()[start..<end]) }
+byte_slice: fn(text: String, start: Int, end: Int) -> String {
+    String.from_bytes_lossy(text.bytes()[start..<end])
+}
 
 byte_tail: fn(text: String, start: Int) -> String { byte_slice(text, start, byte_len(text)) }
 
-span_text: fn(source: [U8], start: Int, end: Int) -> String { String.from_bytes_lossy(source[start..<end]) }
+span_text: fn(source: [U8], start: Int, end: Int) -> String {
+    String.from_bytes_lossy(source[start..<end])
+}
 
 // `word` sits at `index`.
 bytes_at: fn(source: [U8], index: Int, word: String) -> Bool {
@@ -422,9 +475,7 @@ skip_comment: fn(source: [U8], start: Int) -> Int {
             depth -= 1
             if depth == 0 -> return index + 2
             index += 2
-        } else {
-            index += 1
-        }
+        } else { index += 1 }
     }
     source.len()
 }
@@ -433,13 +484,9 @@ skip_layout: fn(source: [U8], start: Int) -> Int {
     index := start
     loop {
         spaced: skip_space(source, index)
-        if spaced != index {
-            index = spaced
-        } else if comment_at(source, index) {
+        if spaced != index -> index = spaced else if comment_at(source, index) {
             index = skip_comment(source, index)
-        } else {
-            return index
-        }
+        } else { return index }
     }
     index
 }
@@ -452,15 +499,11 @@ skip_quoted: fn(source: [U8], start: Int, triple: Bool, quote: Int) -> Int {
     index := start + width
     loop index < source.len() {
         byte: Int{source[index]}
-        if byte == BACKSLASH {
-            index += 2
-        } else if byte == quote && (!triple || triple_quote_at(source, index)) {
+        if byte == BACKSLASH -> index += 2 else if byte == quote && (!triple || triple_quote_at(source, index)) {
             return index + width
         } else if quote == QUOTE && byte == OPEN_BRACE {
             index = if byte_at(source, index + 1) == OPEN_BRACE -> index + 2 else -> skip_balanced(source, index, OPEN_BRACE, CLOSE_BRACE)
-        } else {
-            index += 1
-        }
+        } else { index += 1 }
     }
     source.len()
 }
@@ -470,7 +513,9 @@ skip_literal: fn(source: [U8], index: Int) -> Int {
     byte: byte_at(source, index)
     if comment_at(source, index) -> return skip_comment(source, index)
     if triple_quote_at(source, index) -> return skip_quoted(source, index, true, QUOTE)
-    if byte == QUOTE || byte == BACKTICK || byte == APOSTROPHE -> return skip_quoted(source, index, false, byte)
+    if byte == QUOTE || byte == BACKTICK || byte == APOSTROPHE {
+        return skip_quoted(source, index, false, byte)
+    }
     return -1
 }
 
@@ -484,9 +529,7 @@ skip_balanced: fn(source: [U8], start: Int, open: Int, close: Int) -> Int {
             next
         }
         byte: Int{source[index]}
-        if byte == open {
-            depth += 1
-        } else if byte == close {
+        if byte == open -> depth += 1 else if byte == close {
             depth -= 1
             if depth == 0 -> return index + 1
         }
@@ -510,22 +553,14 @@ decode_jet_string: fn(source: [U8], start: Int, end: Int) -> String? {
         byte: Int{source[index]}
         next_byte: if index + 1 < end -> (Int{source[index + 1]}) else -> -1
         if byte == BACKSLASH {
-            if next_byte == 110 {
-                out.push(U8{10})
-            } else if next_byte == 116 {
-                out.push(U8{9})
-            } else if next_byte == QUOTE || next_byte == BACKSLASH {
+            if next_byte == 110 -> out.push(U8{10}) else if next_byte == 116 -> out.push(U8{9}) else if next_byte == QUOTE || next_byte == BACKSLASH {
                 out.push(source[index + 1])
-            } else {
-                return None
-            }
+            } else { return None }
             index += 2
         } else if (byte == OPEN_BRACE || byte == CLOSE_BRACE) && next_byte == byte {
             out.push(source[index])
             index += 2
-        } else if byte == OPEN_BRACE || byte == CLOSE_BRACE {
-            return None
-        } else {
+        } else if byte == OPEN_BRACE || byte == CLOSE_BRACE { return None } else {
             out.push(source[index])
             index += 1
         }
@@ -625,7 +660,9 @@ marker_group_at: fn(source: [U8], start: Int) -> MarkerGroup? {
     index := bracket + 1
     loop index < source.len() {
         index = skip_layout(source, index)
-        if byte_at(source, index) == CLOSE_BRACKET -> return Val(MarkerGroup{end: index + 1, reasoned_unsafe: reasoned_unsafe, reason: first_reason})
+        if byte_at(source, index) == CLOSE_BRACKET {
+            return Val(MarkerGroup{end: index + 1, reasoned_unsafe: reasoned_unsafe, reason: first_reason})
+        }
         negated := false
         if byte_at(source, index) == BANG {
             negated = true
@@ -641,9 +678,7 @@ marker_group_at: fn(source: [U8], start: Int) -> MarkerGroup? {
                 arguments: unsafe_arguments_at(source, index) ?? UnsafeArguments{end: skip_balanced(source, index, OPEN_PAREN, CLOSE_PAREN), reason: None}
                 reason = arguments.reason
                 index = arguments.end
-            } else {
-                index = skip_balanced(source, index, OPEN_PAREN, CLOSE_PAREN)
-            }
+            } else { index = skip_balanced(source, index, OPEN_PAREN, CLOSE_PAREN) }
         }
         if is_unsafe && !negated && reason != None {
             if reasoned_unsafe == 0 -> first_reason = reason ?? ""
@@ -654,7 +689,9 @@ marker_group_at: fn(source: [U8], start: Int) -> MarkerGroup? {
             index += 1
             next
         }
-        if byte_at(source, index) == CLOSE_BRACKET -> return Val(MarkerGroup{end: index + 1, reasoned_unsafe: reasoned_unsafe, reason: first_reason})
+        if byte_at(source, index) == CLOSE_BRACKET {
+            return Val(MarkerGroup{end: index + 1, reasoned_unsafe: reasoned_unsafe, reason: first_reason})
+        }
         return None
     }
     None
@@ -680,10 +717,14 @@ fn_keyword_at: fn(source: [U8], index: Int) -> Bool {
 // the offset of its `fn` keyword, or -1.
 colon_fn_at: fn(source: [U8], index: Int) -> Int {
     start := index
-    if bytes_at(source, start, "pub") && !identifier_char_at(source, start + 3) -> start = skip_layout(source, start + 3)
+    if bytes_at(source, start, "pub") && !identifier_char_at(source, start + 3) {
+        start = skip_layout(source, start + 3)
+    }
     if !identifier_start_at(source, start) -> return -1
     end := identifier_end(source, start)
-    loop byte_at(source, end) == DOT && identifier_start_at(source, end + 1) -> end = identifier_end(source, end + 1)
+    loop byte_at(source, end) == DOT && identifier_start_at(source, end + 1) {
+        end = identifier_end(source, end + 1)
+    }
     if byte_at(source, end) != COLON -> return -1
     keyword: skip_layout(source, end + 1)
     if fn_keyword_at(source, keyword) -> keyword else -> -1
@@ -692,18 +733,14 @@ colon_fn_at: fn(source: [U8], index: Int) -> Int {
 leads_to_function: fn(source: [U8], start: Int) -> Bool {
     index := skip_layout(source, start)
     loop {
-        if byte_at(source, index) == SEMICOLON {
-            index = skip_layout(source, index + 1)
-        } else if marker_group_start(source, index) >= 0 {
+        if byte_at(source, index) == SEMICOLON -> index = skip_layout(source, index + 1) else if marker_group_start(source, index) >= 0 {
             group: marker_group_at(source, index) ?? return false
             index = skip_layout(source, group.end)
         } else if byte_at(source, index) == HASH {
             end: skip_bare_marker(source, index)
             if end < 0 -> return false
             index = skip_layout(source, end)
-        } else {
-            break
-        }
+        } else { break }
     }
     fn_keyword_at(source, index) || colon_fn_at(source, index) >= 0
 }
@@ -798,15 +835,11 @@ region_end: fn(code: [U8], start: Int) -> Int {
     index := start
     loop index < code.len() {
         byte: Int{code[index]}
-        if byte == OPEN_PAREN || byte == OPEN_BRACKET {
-            parens += 1
-        } else if byte == CLOSE_PAREN || byte == CLOSE_BRACKET {
+        if byte == OPEN_PAREN || byte == OPEN_BRACKET -> parens += 1 else if byte == CLOSE_PAREN || byte == CLOSE_BRACKET {
             parens -= 1
         } else if byte == OPEN_BRACE && parens == 0 {
             return skip_balanced(code, index, OPEN_BRACE, CLOSE_BRACE)
-        } else if byte == NEWLINE && parens == 0 && header {
-            return index
-        } else if fn_keyword_at(code, index) && !identifier_char_before(code, index) {
+        } else if byte == NEWLINE && parens == 0 && header { return index } else if fn_keyword_at(code, index) && !identifier_char_before(code, index) {
             header = true
         }
         index += 1
@@ -818,8 +851,12 @@ region_end: fn(code: [U8], start: Int) -> Int {
 // registers a signal handler, pushed onto `out`.
 signal_registrations: fn(source: [U8], file: String, owner: String, out: &[Region]) {
     text: String.from_bytes_lossy(source)
-    if !text.contains("Unsafe") -> return
-    if !text.contains("sig") && !text.contains("SIG") && !text.contains("syscall") && !text.contains("interrupt") -> return
+    if !text.contains("Unsafe") {
+        return
+    }
+    if !text.contains("sig") && !text.contains("SIG") && !text.contains("syscall") && !text.contains("interrupt") {
+        return
+    }
     code: blank_literals(source)
     cursor := LineCursor{offset: 0, line: 1, line_start: 0}
     loop marker in unsafe_markers(source) {
@@ -870,7 +907,9 @@ memory_actions: fn(source: [U8], code: [U8], start: Int, end: Int) -> [Bool] {
 // One inventory row per region of `source`, pushed onto `out`.
 memory_regions: fn(source: [U8], file: String, area: Int, out: &[MemoryRow]) {
     markers: unsafe_markers(source)
-    if markers.len() == 0 -> return
+    if markers.len() == 0 {
+        return
+    }
     code: blank_literals(source)
     cursor := LineCursor{offset: 0, line: 1, line_start: 0}
     loop marker in markers {
@@ -1063,7 +1102,7 @@ memory_inventory_json: fn(rows: [MemoryRow], packages: [KernelPackage]) -> Dyn {
     loop package in packages {
         paths := [Dyn]{}
         loop path in package.paths -> paths.push(Dyn.Text(path.copy()))
-        kernels.push(Dyn.Object([String: Dyn]{"package": Dyn.Text(package.directory.copy()), "kernel": Dyn.Array(paths), "test_only": Dyn.Bool(package.test_only)}))
+        kernels.push(Dyn.Object([String:Dyn]{"package": Dyn.Text(package.directory.copy()), "kernel": Dyn.Array(paths), "test_only": Dyn.Bool(package.test_only)}))
     }
     regions := [Dyn]{}
     loop row in rows {
@@ -1071,9 +1110,9 @@ memory_inventory_json: fn(rows: [MemoryRow], packages: [KernelPackage]) -> Dyn {
         loop index in 0..<row.actions.len() {
             if row.actions[index] -> actions.push(Dyn.Text(MEMORY_ACTIONS[index].copy()))
         }
-        regions.push(Dyn.Object([String: Dyn]{"file": Dyn.Text(row.file.copy()), "line": Dyn.Int(row.line), "area": Dyn.Text(MEMORY_AREA_NAMES[row.area].copy()), "actions": Dyn.Array(actions), "kernel": Dyn.Bool(row.kernel)}))
+        regions.push(Dyn.Object([String:Dyn]{"file": Dyn.Text(row.file.copy()), "line": Dyn.Int(row.line), "area": Dyn.Text(MEMORY_AREA_NAMES[row.area].copy()), "actions": Dyn.Array(actions), "kernel": Dyn.Bool(row.kernel)}))
     }
-    Dyn.Object([String: Dyn]{"outside_kernel": Dyn.Int(memory_outside_count(rows)), "packages": Dyn.Array(kernels), "regions": Dyn.Array(regions)})
+    Dyn.Object([String:Dyn]{"outside_kernel": Dyn.Int(memory_outside_count(rows)), "packages": Dyn.Array(kernels), "regions": Dyn.Array(regions)})
 }
 
 // The outside-kernel count recorded in the baseline `text`, or None when it
@@ -1136,16 +1175,14 @@ memory_ratchet: fn(options: Options, rows: &[MemoryRow]) -[FS, IO]> Bool Ratchet
 }
 
 // Print the classified inventory, as JSON when `json`.
-print_memory_inventory: fn(options: Options) -[FS, IO]> () RatchetError! {
+print_memory_inventory: fn(options: Options) RatchetError! -[FS, IO]> {
     signals := [Region]{}
     rows := [MemoryRow]{}
     _ := scan(options.root, signals, rows) ?? return Err(err)
     packages: mark_kernels(options.root, rows) ?? return Err(err)
     if options.json {
         print(json.to_string_pretty(memory_inventory_json(rows, packages)) ?? return Err(ratchet_fail("cannot encode the inventory: {err}")))
-    } else {
-        print(render_memory_inventory(rows, packages))
-    }
+    } else { print(render_memory_inventory(rows, packages)) }
     Ok()
 }
 
@@ -1166,9 +1203,7 @@ jet_files: fn(base: String, relative: String, out: &[String]) RatchetError! -[FS
         if files.is_dir(path) {
             if SKIP_DIRECTORIES.contains(name) -> next
             jet_files(base, child, out) ?? return Err(err)
-        } else if files.is_file(path) && name.ends_with(".jet") {
-            out.push(child)
-        }
+        } else if files.is_file(path) && name.ends_with(".jet") { out.push(child) }
     }
     Ok()
 }
@@ -1238,9 +1273,7 @@ scan: fn(root: String, signals: &[Region], memory: &[MemoryRow]) -[FS]> Census R
     counts := [PackageCount]{}
     loop region in regions {
         last: counts.len() - 1
-        if last >= 0 && counts[last].name == region.package {
-            counts[last].count += 1
-        } else {
+        if last >= 0 && counts[last].name == region.package -> counts[last].count += 1 else {
             counts.push(PackageCount{name: region.package.copy(), count: 1})
         }
     }
@@ -1282,16 +1315,24 @@ raw_hits: fn(code: [U8]) -> [RawHit] {
     text: String.from_bytes_lossy(ascii)
     hits := [RawHit]{}
     if text.contains(".*") {
-        loop found in POINTER_DEREFERENCE.matches(text) -> hits.push(RawHit{index: found.start, operation: 0})
+        loop found in POINTER_DEREFERENCE.matches(text) {
+            hits.push(RawHit{index: found.start, operation: 0})
+        }
     }
     if text.contains("Ptr") {
-        loop found in POINTER_FROM_ADDRESS.matches(text) -> hits.push(RawHit{index: found.start, operation: 1})
+        loop found in POINTER_FROM_ADDRESS.matches(text) {
+            hits.push(RawHit{index: found.start, operation: 1})
+        }
     }
     if text.contains("volatile_") {
-        loop found in VOLATILE_ACCESS.matches(text) -> hits.push(RawHit{index: found.start, operation: 2})
+        loop found in VOLATILE_ACCESS.matches(text) {
+            hits.push(RawHit{index: found.start, operation: 2})
+        }
     }
     if text.contains("sys") {
-        loop found in POSIX_CONTROL.matches(text) -> hits.push(RawHit{index: found.start, operation: 3})
+        loop found in POSIX_CONTROL.matches(text) {
+            hits.push(RawHit{index: found.start, operation: 3})
+        }
     }
     hits.sort_by(fn(left: RawHit, right: RawHit) { if left.index != right.index -> left.index <=> right.index else -> left.operation <=> right.operation })
     hits
@@ -1321,7 +1362,9 @@ scan_corelib_source: fn(source: [U8], file: String, result: &CoreLibScan) {
             group: if marker_group_start(source, index) >= 0 -> marker_group_at(source, index) else -> None
             if group == {
                 .Val(found) -> {
-                    if found.reasoned_unsafe > 0 && leads_to_function(source, found.end) -> next_function_unsafe = true
+                    if found.reasoned_unsafe > 0 && leads_to_function(source, found.end) {
+                        next_function_unsafe = true
+                    }
                     index = found.end
                     next
                 }
@@ -1329,9 +1372,7 @@ scan_corelib_source: fn(source: [U8], file: String, result: &CoreLibScan) {
             }
             if unsafe_marker_at(source, index) == {
                 .Val(marker) -> {
-                    if leads_to_function(source, marker.end) {
-                        next_function_unsafe = true
-                    } else {
+                    if leads_to_function(source, marker.end) -> next_function_unsafe = true else {
                         pending_gate = true
                     }
                     index = marker.end
@@ -1368,16 +1409,16 @@ scan_corelib_source: fn(source: [U8], file: String, result: &CoreLibScan) {
                 next
             }
         }
-        if byte == OPEN_PAREN || byte == OPEN_BRACKET {
-            parens += 1
-        } else if byte == CLOSE_PAREN || byte == CLOSE_BRACKET {
+        if byte == OPEN_PAREN || byte == OPEN_BRACKET -> parens += 1 else if byte == CLOSE_PAREN || byte == CLOSE_BRACKET {
             parens -= 1
         } else if byte == OPEN_BRACE {
             depth += 1
             if pending_gate {
                 gates.push(depth)
                 pending_gate = false
-                if frames.len() > 0 -> frames[frames.len() - 1].gates.push(locate(source, cursor, index).line)
+                if frames.len() > 0 {
+                    frames[frames.len() - 1].gates.push(locate(source, cursor, index).line)
+                }
             } else if has_pending && parens == pending_parens {
                 frames.push(Frame{name: pending_name.copy(), is_unsafe: pending_unsafe, line: pending_line, depth: depth, gates: [Int]{}})
                 if pending_unsafe -> unsafe_frames += 1
@@ -1483,7 +1524,9 @@ read_abstractions: fn(text: String) -> [AbstractionRow] RatchetError! {
     begin: text.find(ABSTRACTIONS_BEGIN)
     end: text.find(ABSTRACTIONS_END)
     if begin < 0 && end < 0 -> return Ok([AbstractionRow]{})
-    if begin < 0 || end < begin -> return Err(ratchet_fail("safe-abstraction registry markers are unbalanced"))
+    if begin < 0 || end < begin {
+        return Err(ratchet_fail("safe-abstraction registry markers are unbalanced"))
+    }
     registry: byte_slice(text, begin + byte_len(ABSTRACTIONS_BEGIN), end)
     fence: registry.find("```json\n")
     if fence < 0 -> return Err(ratchet_fail("safe-abstraction registry has no ```json block"))
@@ -1514,13 +1557,13 @@ read_abstractions: fn(text: String) -> [AbstractionRow] RatchetError! {
 check_corelib: fn(root: String, baseline_text: String) -[FS]> String RatchetError! {
     current: scan_corelib(root) ?? return Err(err)
     rows: read_abstractions(baseline_text) ?? return Err(err)
-    recorded := [String: Bool]{}
+    recorded := [String:Bool]{}
     loop row in rows -> recorded["{row.file}\t{row.function}"] = true
     problems := [String]{}
     loop violation in current.violations {
         problems.push("  - {violation.file}:{violation.line}:{violation.column} {violation.operation} outside an audited #Unsafe gate")
     }
-    found := [String: Bool]{}
+    found := [String:Bool]{}
     loop abstraction in current.abstractions {
         key: "{abstraction.file}\t{abstraction.function}"
         found[key.copy()] = true
@@ -1571,7 +1614,9 @@ census_from_json: fn(parsed: Dyn) -> Census RatchetError! {
         .Array(values) -> items = values.copy()
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return Err(ratchet_fail(invalid))
     }
-    if total != items.len() -> return Err(ratchet_fail("unsafe baseline total does not match its region rows"))
+    if total != items.len() {
+        return Err(ratchet_fail("unsafe baseline total does not match its region rows"))
+    }
     regions := [Region]{}
     loop item in items {
         row: object_fields(item) ?? return Err(ratchet_fail("unsafe baseline has an invalid region row"))
@@ -1608,13 +1653,13 @@ census_from_json: fn(parsed: Dyn) -> Census RatchetError! {
 }
 
 census_json: fn(census: Census) -> Dyn {
-    counts := [String: Dyn]{}
+    counts := [String:Dyn]{}
     loop entry in census.counts -> counts[entry.name.copy()] = Dyn.Int(entry.count)
     regions := [Dyn]{}
     loop region in census.regions {
-        regions.push(Dyn.Object([String: Dyn]{"package": Dyn.Text(region.package.copy()), "file": Dyn.Text(region.file.copy()), "line": Dyn.Int(region.line), "column": Dyn.Int(region.column), "reason": Dyn.Text(region.reason.copy())}))
+        regions.push(Dyn.Object([String:Dyn]{"package": Dyn.Text(region.package.copy()), "file": Dyn.Text(region.file.copy()), "line": Dyn.Int(region.line), "column": Dyn.Int(region.column), "reason": Dyn.Text(region.reason.copy())}))
     }
-    Dyn.Object([String: Dyn]{"schema": Dyn.Int(1), "total": Dyn.Int(census.total), "counts": Dyn.Object(counts), "regions": Dyn.Array(regions)})
+    Dyn.Object([String:Dyn]{"schema": Dyn.Int(1), "total": Dyn.Int(census.total), "counts": Dyn.Object(counts), "regions": Dyn.Array(regions)})
 }
 
 markdown_cell: fn(value: String) -> String {
@@ -1660,14 +1705,18 @@ parse_baseline: fn(path: String, text: String) -> Baseline RatchetError! {
     if body.starts_with("\n") -> body = byte_tail(body, 1)
     if body.ends_with("\n") -> body = byte_slice(body, 0, byte_len(body) - 1)
     header: "{DATA_BEGIN}\n"
-    if !body.starts_with(header) -> return Err(ratchet_fail("baseline {path} has no unsafe-ratchet data"))
+    if !body.starts_with(header) {
+        return Err(ratchet_fail("baseline {path} has no unsafe-ratchet data"))
+    }
     rest: byte_tail(body, byte_len(header))
     close: rest.find("\n{DATA_END}")
     if close < 0 -> return Err(ratchet_fail("baseline {path} has no unsafe-ratchet data"))
     parsed: json.parse(byte_slice(rest, 0, close)) ?? return Err(ratchet_fail("baseline {path} has invalid JSON: {err}"))
     census: census_from_json(parsed) ?? return Err(err)
     rendered: render_section(census) ?? return Err(err)
-    if body != rendered -> return Err(ratchet_fail("baseline {path} has stale generated rows; run the ratchet with --update"))
+    if body != rendered {
+        return Err(ratchet_fail("baseline {path} has stale generated rows; run the ratchet with --update"))
+    }
     Ok(Baseline{text: text.copy(), census: census})
 }
 
@@ -1688,8 +1737,8 @@ exact_key: fn(region: Region) -> String {
     "{byte_len(region.package)}:{region.package}{byte_len(region.file)}:{region.file}{region.line}:{region.column}:{region.reason}"
 }
 
-tally: fn(regions: [Region], exact: Bool) -> [String: Int] {
-    remaining := [String: Int]{}
+tally: fn(regions: [Region], exact: Bool) -> [String:Int] {
+    remaining := [String:Int]{}
     loop region in regions {
         key: if exact -> exact_key(region) else -> semantic_key(region)
         remaining[key.copy()] = (remaining.get(key) ?? 0) + 1
@@ -1698,16 +1747,12 @@ tally: fn(regions: [Region], exact: Bool) -> [String: Int] {
 }
 
 // Current rows with no counterpart left in `remaining`, which they consume.
-unmatched: fn(current: [Region], remaining: &[String: Int], exact: Bool) -> [Region] {
+unmatched: fn(current: [Region], remaining: &[String:Int], exact: Bool) -> [Region] {
     added := [Region]{}
     loop region in current {
         key: if exact -> exact_key(region) else -> semantic_key(region)
         count: remaining.get(key) ?? 0
-        if count > 0 {
-            remaining[key.copy()] = count - 1
-        } else {
-            added.push(region.copy())
-        }
+        if count > 0 -> remaining[key.copy()] = count - 1 else -> added.push(region.copy())
     }
     added
 }
@@ -1755,7 +1800,9 @@ increases: fn(current: Census, baseline: Census) -> [CountChange] {
     loop name in names {
         before: count_of(baseline.counts, name)
         after: count_of(current.counts, name)
-        if after > before -> changes.push(CountChange{name: name.copy(), before: before, after: after})
+        if after > before {
+            changes.push(CountChange{name: name.copy(), before: before, after: after})
+        }
     }
     changes
 }
@@ -1769,7 +1816,9 @@ format_growth: fn(changes: [CountChange], added: [Region]) -> String RatchetErro
     lines := [String]{"unsafe-region baseline grew:"}
     loop change in changes -> lines.push("  {change.name}: {change.before} -> {change.after}")
     lines.push("new regions:")
-    if added.len() == 0 -> lines.push("  (baseline rows changed without enough named rows to identify the additions)")
+    if added.len() == 0 {
+        lines.push("  (baseline rows changed without enough named rows to identify the additions)")
+    }
     loop region in added -> lines.push(region_line(region) ?? return Err(err))
     lines.push("update the committed baseline in the same change:")
     lines.push("  {COMMAND} --update")
@@ -1848,35 +1897,31 @@ parse_args: fn(args: [String]) -[FS, Env]> Options RatchetError! {
     index := 0
     loop index < args.len() {
         arg: args[index]
-        if arg == "--update" {
-            options.update = true
-        } else if arg == "--check" {
+        if arg == "--update" -> options.update = true else if arg == "--check" {
             options.check = true
-        } else if arg == "--inventory" {
-            options.inventory = true
-        } else if arg == "--json" {
+        } else if arg == "--inventory" { options.inventory = true } else if arg == "--json" {
             options.json = true
         } else if arg == "--root" || arg == "--baseline" {
             index += 1
             value: if index < args.len() -> args[index].copy() else -> ""
             if value == "" -> return Err(ratchet_fail("{arg} needs a path"))
             path: resolved(value) ?? return Err(err)
-            if arg == "--root" {
-                options.root = path
-            } else {
-                options.baseline = path
-            }
+            if arg == "--root" -> options.root = path else -> options.baseline = path
         } else if arg == "--help" {
             options.help = true
             return Ok(options)
-        } else {
-            return Err(ratchet_fail("unknown option {arg}\n\n{usage()}"))
-        }
+        } else { return Err(ratchet_fail("unknown option {arg}\n\n{usage()}")) }
         index += 1
     }
-    if options.update && options.check -> return Err(ratchet_fail("--update and --check exclude each other\n\n{usage()}"))
-    if options.inventory && (options.update || options.check) -> return Err(ratchet_fail("--inventory only prints; it excludes --update and --check\n\n{usage()}"))
-    if options.json && !options.inventory -> return Err(ratchet_fail("--json prints the inventory; add --inventory\n\n{usage()}"))
+    if options.update && options.check {
+        return Err(ratchet_fail("--update and --check exclude each other\n\n{usage()}"))
+    }
+    if options.inventory && (options.update || options.check) {
+        return Err(ratchet_fail("--inventory only prints; it excludes --update and --check\n\n{usage()}"))
+    }
+    if options.json && !options.inventory {
+        return Err(ratchet_fail("--json prints the inventory; add --inventory\n\n{usage()}"))
+    }
     Ok(options)
 }
 
@@ -2002,8 +2047,10 @@ signals_in: fn(text: String) -> [Region] {
     baseline: parse_baseline("safety.md", document) ?? panic("parse: {err.message}")
     assert_eq(baseline.census.regions[0].reason, "a|b <c>")
     if parse_baseline("safety.md", document.replace("| 3:5 |", "| 3:6 |")) == {
-        .Ok(_) -> panic("a stale table row was accepted")
-        .Err(error) -> assert_eq(error.message, "baseline safety.md has stale generated rows; run the ratchet with --update")
+        .Ok(_) -> { panic("a stale table row was accepted") }
+        .Err(error) -> {
+            assert_eq(error.message, "baseline safety.md has stale generated rows; run the ratchet with --update")
+        }
     }
     empty: render_section(Census{total: 0, counts: [PackageCount]{}, regions: [Region]{}}) ?? panic("empty: {err.message}")
     assert(empty.contains("| (none) | 0 |\n| **total** | **0** |"))
@@ -2032,8 +2079,10 @@ signals_in: fn(text: String) -> [Region] {
     assert_eq(rows.len(), 1)
     assert_eq(rows[0].function, "f")
     if read_abstractions(good.replace("the caller contract is discharged here", "short")) == {
-        .Ok(_) -> panic("a short proof was accepted")
-        .Err(error) -> assert(error.message.starts_with("safe-abstraction registry row needs file, function and a proof of at least 20 characters: "))
+        .Ok(_) -> { panic("a short proof was accepted") }
+        .Err(error) -> {
+            assert(error.message.starts_with("safe-abstraction registry row needs file, function and a proof of at least 20 characters: "))
+        }
     }
     missing: read_abstractions("no registry") ?? panic("none: {err.message}")
     assert_eq(missing.len(), 0)
@@ -2085,7 +2134,7 @@ inventoried: fn(text: String, file: String) -> [MemoryRow] {
     assert_eq(lowered, "# Safety\n\n{MEMORY_BASELINE}7 -->\n{BEGIN}\n{END}\n")
     assert(memory_baseline("# Safety\n") == None)
     if parse_args([String]{"--json"}) == {
-        .Ok(_) -> panic("--json without --inventory was accepted")
+        .Ok(_) -> { panic("--json without --inventory was accepted") }
         .Err(error) -> assert(error.message.starts_with("--json prints the inventory"))
     }
 }
@@ -2108,7 +2157,7 @@ inventoried: fn(text: String, file: String) -> [MemoryRow] {
     checked: parse_args([String]{"--check"}) ?? panic("--check: {err.message}")
     assert(checked.check && !checked.update)
     if parse_args([String]{"--check", "--update"}) == {
-        .Ok(_) -> panic("--check with --update was accepted")
+        .Ok(_) -> { panic("--check with --update was accepted") }
         .Err(error) -> assert(error.message.starts_with("--update and --check exclude each other"))
     }
 }

@@ -1,13 +1,38 @@
 // Runtime UNRUN. Exact constants, typed error variants, records, and boundaries.
 use {
     jetpack_trust_root.[
-        BoundIdentity, CacheProvenance, CacheReceipt, IdentityKind, MetadataRole, PublicTrustKey,
-        PublisherIdentity, RootBootstrap, SignedMetadata, SnapshotMetaEntry, SnapshotMetadata,
-        TUFRootMetadata, TargetMeta, TargetsMetadata, TimestampMetadata, TrustEngine, TrustFixtureRoot,
-        TrustKey, TrustRootPolicy, TrustSignature, TrustedClock, trust_allow_cache_witness,
-        trust_canonical_root, trust_canonical_snapshot, trust_canonical_targets,
-        trust_fixture_threshold_root, trust_is_cache_witness_allowed, trust_public_trust_manifest,
-        trust_sign_root, trust_sign_snapshot, trust_sign_targets, trust_sign_timestamp,
+        BoundIdentity,
+        CacheProvenance,
+        CacheReceipt,
+        IdentityKind,
+        MetadataRole,
+        PublicTrustKey,
+        PublisherIdentity,
+        RootBootstrap,
+        SignedMetadata,
+        SnapshotMetaEntry,
+        SnapshotMetadata,
+        TUFRootMetadata,
+        TargetMeta,
+        TargetsMetadata,
+        TimestampMetadata,
+        TrustEngine,
+        TrustFixtureRoot,
+        TrustKey,
+        TrustRootPolicy,
+        TrustSignature,
+        TrustedClock,
+        trust_allow_cache_witness,
+        trust_canonical_root,
+        trust_canonical_snapshot,
+        trust_canonical_targets,
+        trust_fixture_threshold_root,
+        trust_is_cache_witness_allowed,
+        trust_public_trust_manifest,
+        trust_sign_root,
+        trust_sign_snapshot,
+        trust_sign_targets,
+        trust_sign_timestamp,
     ]
     crypto: core.crypto
     files: core.files
@@ -47,13 +72,15 @@ use {
     assert(loaded.consistent_snapshot)
     stripped := signed_root
     stripped.signatures = [TrustSignature]{}
-    assert(if TrustEngine.bootstrap(stripped, eng.keyring, TrustRootPolicy.default(), Val(pin), TrustedClock.Fixed(now), None) == {
-        .Ok(_) -> false
-        .Err(error) -> if error == {
-            .SignatureStripped(_) -> true
-            .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
-        }
-    })
+    assert(
+        if TrustEngine.bootstrap(stripped, eng.keyring, TrustRootPolicy.default(), Val(pin), TrustedClock.Fixed(now), None) == {
+            .Ok(_) -> false
+            .Err(error) -> if error == {
+                .SignatureStripped(_) -> true
+                .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
+            }
+        },
+    )
     rotated := root
     rotated.version = 2
     eng.recovery_drill_threshold_minus_one(rotated, [TrustKey]{keys[0]}, TrustedClock.Fixed(now)) ?? panic("recovery drill")
@@ -62,30 +89,32 @@ use {
     rotated.delegations = eng.root.delegations
     signed_rot: trust_sign_root(rotated, [TrustKey]{keys[1], keys[2]}) ?? panic("sign rotation")
     eng.update_root(signed_rot, TrustedClock.Fixed(now)) ?? panic("rotate root")
-    hashes := [String: String]{}
+    hashes := [String:String]{}
     hashes["sha256"] = crypto.sha256("pkg".bytes()).hex()
-    target_map := [String: TargetMeta]{}
-    target_map["jetsrc/pkg"] = TargetMeta{length: 3, hashes, custom: [String: String]{}}
+    target_map := [String:TargetMeta]{}
+    target_map["jetsrc/pkg"] = TargetMeta{length: 3, hashes: hashes, custom: [String:String]{}}
     targets: TargetsMetadata{version: 3, expires_unix: now + 3600, targets: target_map}
     signed_t: trust_sign_targets(targets, [TrustKey]{keys[3]}) ?? panic("sign targets")
     eng.verify_targets(signed_t, Val("jetsrc/pkg"), TrustedClock.Fixed(now)) ?? panic("verify targets")
-    assert(if eng.verify_targets(signed_t, Val("other/pkg"), TrustedClock.Fixed(now)) == {
-        .Ok(_) -> false
-        .Err(error) -> if error == {
-            .DelegationDenied(_, _) -> true
-            .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
-        }
-    })
+    assert(
+        if eng.verify_targets(signed_t, Val("other/pkg"), TrustedClock.Fixed(now)) == {
+            .Ok(_) -> false
+            .Err(error) -> if error == {
+                .DelegationDenied(_, _) -> true
+                .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
+            }
+        },
+    )
     t_canon: trust_canonical_targets(targets)
-    t_hashes := [String: String]{}
+    t_hashes := [String:String]{}
     t_hashes["sha256"] = crypto.sha256(t_canon.bytes()).hex()
-    meta := [String: SnapshotMetaEntry]{}
+    meta := [String:SnapshotMetaEntry]{}
     meta["targets"] = SnapshotMetaEntry{version: 3, length: t_canon.bytes().len(), hashes: t_hashes}
-    snap: SnapshotMetadata{version: 4, expires_unix: now + 3600, meta}
+    snap: SnapshotMetadata{version: 4, expires_unix: now + 3600, meta: meta}
     signed_s: trust_sign_snapshot(snap, [TrustKey]{keys[4]}) ?? panic("sign snapshot")
     eng.verify_snapshot(signed_s, t_canon, 3, TrustedClock.Fixed(now)) ?? panic("verify snapshot")
     s_canon: trust_canonical_snapshot(snap)
-    s_hashes := [String: String]{}
+    s_hashes := [String:String]{}
     s_hashes["sha256"] = crypto.sha256(s_canon.bytes()).hex()
     ts: TimestampMetadata{version: 5, expires_unix: now + 3600, snapshot: SnapshotMetaEntry{version: 4, length: s_canon.bytes().len(), hashes: s_hashes}}
     eng.verify_timestamp(trust_sign_timestamp(ts, [TrustKey]{keys[5]}) ?? panic("sign timestamp"), s_canon, 4, TrustedClock.Fixed(now)) ?? panic("verify timestamp")
@@ -94,13 +123,15 @@ use {
     eng.bind_identity(BoundIdentity.remote_executor("exec.1")) ?? panic("bind executor")
     eng.bind_identity(BoundIdentity.publisher("pub.alice", PublisherIdentity.OfflineEd25519{public_key_hex: "ab".repeat(32), key_id: "alice-ed25519"})) ?? panic("bind publisher")
     assert_eq((eng.identities.get(IdentityKind.Publisher.label()) ?? panic("publisher identity")).name, "pub.alice")
-    assert(if eng.bind_identity(BoundIdentity.registry("other.registry")) == {
-        .Ok(_) -> false
-        .Err(error) -> if error == {
-            .IdentityKindMismatch(_, _) -> true
-            .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
-        }
-    })
+    assert(
+        if eng.bind_identity(BoundIdentity.registry("other.registry")) == {
+            .Ok(_) -> false
+            .Err(error) -> if error == {
+                .IdentityKindMismatch(_, _) -> true
+                .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
+            }
+        },
+    )
 }
 
 pkg_integration_trust_boot: fn(fixture: TrustFixtureRoot, signed_root: SignedMetadata<TUFRootMetadata>, pin: String, now: Int) -> TrustEngine {
@@ -118,27 +149,31 @@ pkg_integration_trust_boot: fn(fixture: TrustFixtureRoot, signed_root: SignedMet
     pin: crypto.sha256(trust_canonical_root(root).bytes()).hex()
     compromised: TrustKey.generate("compromised-root")
     forged_root: trust_sign_root(root, [TrustKey]{keys[0], compromised}) ?? panic("sign forged root")
-    assert(if TrustEngine.bootstrap(forged_root, fixture.keyring, TrustRootPolicy.default(), Val(pin), TrustedClock.Fixed(now), None) == {
-        .Ok(_) -> false
-        .Err(error) -> if error == {
-            .ThresholdUnmet(role, have, need) -> role == MetadataRole.Root && have == 1 && need == 2
-            .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
-        }
-    })
+    assert(
+        if TrustEngine.bootstrap(forged_root, fixture.keyring, TrustRootPolicy.default(), Val(pin), TrustedClock.Fixed(now), None) == {
+            .Ok(_) -> false
+            .Err(error) -> if error == {
+                .ThresholdUnmet(role, have, need) -> role == MetadataRole.Root && have == 1 && need == 2
+                .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
+            }
+        },
+    )
     replacement := root
     replacement.version = 2
     replacement_root: trust_sign_root(replacement, [TrustKey]{keys[0], keys[1]}) ?? panic("sign replacement root")
-    assert(if TrustEngine.bootstrap(replacement_root, fixture.keyring, TrustRootPolicy.default(), Val(pin), TrustedClock.Fixed(now), None) == {
-        .Ok(_) -> false
-        .Err(error) -> if error == {
-            .BootstrapPinMismatch(_, _) -> true
-            .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
-        }
-    })
-    hashes := [String: String]{}
+    assert(
+        if TrustEngine.bootstrap(replacement_root, fixture.keyring, TrustRootPolicy.default(), Val(pin), TrustedClock.Fixed(now), None) == {
+            .Ok(_) -> false
+            .Err(error) -> if error == {
+                .BootstrapPinMismatch(_, _) -> true
+                .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
+            }
+        },
+    )
+    hashes := [String:String]{}
     hashes["sha256"] = crypto.sha256("pkg".bytes()).hex()
-    target_map := [String: TargetMeta]{}
-    target_map["jetsrc/pkg"] = TargetMeta{length: 3, hashes, custom: [String: String]{}}
+    target_map := [String:TargetMeta]{}
+    target_map["jetsrc/pkg"] = TargetMeta{length: 3, hashes: hashes, custom: [String:String]{}}
     targets := TargetsMetadata{version: 1, expires_unix: now + 3600, targets: target_map}
     signed_targets: trust_sign_targets(targets, [TrustKey]{keys[3]}) ?? panic("sign targets")
     engine := pkg_integration_trust_boot(fixture, signed_root, pin, now)
@@ -149,24 +184,28 @@ pkg_integration_trust_boot: fn(fixture: TrustFixtureRoot, signed_root: SignedMet
     old := targets
     old.version = 1
     signed_old: trust_sign_targets(old, [TrustKey]{keys[3]}) ?? panic("sign older targets")
-    assert(if engine.verify_targets(signed_old, Val("jetsrc/pkg"), TrustedClock.Fixed(now)) == {
-        .Ok(_) -> false
-        .Err(error) -> if error == {
-            .Rollback(role, _, _) -> role == MetadataRole.Targets
-            .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
-        }
-    })
+    assert(
+        if engine.verify_targets(signed_old, Val("jetsrc/pkg"), TrustedClock.Fixed(now)) == {
+            .Ok(_) -> false
+            .Err(error) -> if error == {
+                .Rollback(role, _, _) -> role == MetadataRole.Targets
+                .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
+            }
+        },
+    )
     frozen := targets
     frozen.version = 3
     frozen.expires_unix = now
     frozen_engine := pkg_integration_trust_boot(fixture, signed_root, pin, now)
-    assert(if frozen_engine.verify_targets(trust_sign_targets(frozen, [TrustKey]{keys[3]}) ?? panic("sign frozen targets"), Val("jetsrc/pkg"), TrustedClock.Fixed(now)) == {
-        .Ok(_) -> false
-        .Err(error) -> if error == {
-            .Expired(role, _, _) -> role == MetadataRole.Targets
-            .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
-        }
-    })
+    assert(
+        if frozen_engine.verify_targets(trust_sign_targets(frozen, [TrustKey]{keys[3]}) ?? panic("sign frozen targets"), Val("jetsrc/pkg"), TrustedClock.Fixed(now)) == {
+            .Ok(_) -> false
+            .Err(error) -> if error == {
+                .Expired(role, _, _) -> role == MetadataRole.Targets
+                .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
+            }
+        },
+    )
     changed_custom := signed_targets
     custom_target := changed_custom.signed.targets.get("jetsrc/pkg") ?? panic("target")
     custom_target.custom["provenance"] = "attacker"
@@ -174,34 +213,38 @@ pkg_integration_trust_boot: fn(fixture: TrustFixtureRoot, signed_root: SignedMet
     changed_custom.signatures = (trust_sign_targets(changed_custom.signed, [TrustKey]{keys[3]}) ?? panic("resign custom metadata")).signatures
     custom_engine := pkg_integration_trust_boot(fixture, signed_root, pin, now)
     custom_engine.verify_targets(signed_targets, Val("jetsrc/pkg"), TrustedClock.Fixed(now)) ?? panic("verify before custom mutation")
-    assert(if custom_engine.verify_targets(changed_custom, Val("jetsrc/pkg"), TrustedClock.Fixed(now)) == {
-        .Ok(_) -> false
-        .Err(error) -> if error == {
-            .ConsistentSnapshotMismatch(_, _) -> true
-            .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
-        }
-    })
+    assert(
+        if custom_engine.verify_targets(changed_custom, Val("jetsrc/pkg"), TrustedClock.Fixed(now)) == {
+            .Ok(_) -> false
+            .Err(error) -> if error == {
+                .ConsistentSnapshotMismatch(_, _) -> true
+                .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
+            }
+        },
+    )
     chain := pkg_integration_trust_boot(fixture, signed_root, pin, now)
     chain.verify_targets(signed_targets, Val("jetsrc/pkg"), TrustedClock.Fixed(now)) ?? panic("verify chain targets")
     targets_canonical: trust_canonical_targets(signed_targets.signed)
-    t_hashes := [String: String]{}
+    t_hashes := [String:String]{}
     t_hashes["sha256"] = crypto.sha256(targets_canonical.bytes()).hex()
-    meta := [String: SnapshotMetaEntry]{}
+    meta := [String:SnapshotMetaEntry]{}
     meta["targets"] = SnapshotMetaEntry{version: 1, length: targets_canonical.bytes().len(), hashes: t_hashes}
-    snapshot: SnapshotMetadata{version: 1, expires_unix: now + 3600, meta}
+    snapshot: SnapshotMetadata{version: 1, expires_unix: now + 3600, meta: meta}
     signed_snapshot: trust_sign_snapshot(snapshot, [TrustKey]{keys[4]}) ?? panic("sign snapshot")
     chain.verify_snapshot(signed_snapshot, targets_canonical, 1, TrustedClock.Fixed(now)) ?? panic("verify snapshot")
     snapshot_canonical: trust_canonical_snapshot(snapshot)
-    s_hashes := [String: String]{}
+    s_hashes := [String:String]{}
     s_hashes["sha256"] = crypto.sha256(snapshot_canonical.bytes()).hex()
     timestamp: TimestampMetadata{version: 1, expires_unix: now + 3600, snapshot: SnapshotMetaEntry{version: 1, length: snapshot_canonical.bytes().len() + 1, hashes: s_hashes}}
-    assert(if chain.verify_timestamp(trust_sign_timestamp(timestamp, [TrustKey]{keys[5]}) ?? panic("sign bad-length timestamp"), snapshot_canonical, 1, TrustedClock.Fixed(now)) == {
-        .Ok(_) -> false
-        .Err(error) -> if error == {
-            .ConsistentSnapshotMismatch(_, _) -> true
-            .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
-        }
-    })
+    assert(
+        if chain.verify_timestamp(trust_sign_timestamp(timestamp, [TrustKey]{keys[5]}) ?? panic("sign bad-length timestamp"), snapshot_canonical, 1, TrustedClock.Fixed(now)) == {
+            .Ok(_) -> false
+            .Err(error) -> if error == {
+                .ConsistentSnapshotMismatch(_, _) -> true
+                .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
+            }
+        },
+    )
     cache_key: TrustKey.generate("cache-receipt")
     provenance: CacheProvenance{reference: "jetsrc/pkg", source: "git:source", builder: "cache-builder:trusted", action: "sha256:action", output: "sha256:output", platform: "linux.x86_64", sandbox: "sandbox:policy-bound", policy: "sha256:policy"}
     receipt: CacheReceipt.issue("public", provenance, 1, now, now + 60, cache_key) ?? panic("issue receipt")
@@ -213,27 +256,33 @@ pkg_integration_trust_boot: fn(fixture: TrustFixtureRoot, signed_root: SignedMet
     assert(!(trust_is_cache_witness_allowed(dir, "public", untrusted_witness) ?? panic("check untrusted witness")))
     tampered_witness := receipt
     tampered_witness.witness = untrusted_witness
-    assert(if tampered_witness.verify(cache_key, TrustedClock.Fixed(now)) == {
-        .Ok(_) -> false
-        .Err(error) -> if error == {
-            .CacheReceiptInvalid(_) -> true
-            .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
-        }
-    })
+    assert(
+        if tampered_witness.verify(cache_key, TrustedClock.Fixed(now)) == {
+            .Ok(_) -> false
+            .Err(error) -> if error == {
+                .CacheReceiptInvalid(_) -> true
+                .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
+            }
+        },
+    )
     tampered_receipt := receipt
     tampered_receipt.provenance.output = "sha256:attacker"
-    assert(if tampered_receipt.verify(cache_key, TrustedClock.Fixed(now)) == {
-        .Ok(_) -> false
-        .Err(error) -> if error == {
-            .CacheReceiptInvalid(_) -> true
-            .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
-        }
-    })
-    assert(if receipt.verify(cache_key, TrustedClock.Fixed(now + 60)) == {
-        .Ok(_) -> false
-        .Err(error) -> if error == {
-            .CacheReceiptExpired(_, _) -> true
-            .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
-        }
-    })
+    assert(
+        if tampered_receipt.verify(cache_key, TrustedClock.Fixed(now)) == {
+            .Ok(_) -> false
+            .Err(error) -> if error == {
+                .CacheReceiptInvalid(_) -> true
+                .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
+            }
+        },
+    )
+    assert(
+        if receipt.verify(cache_key, TrustedClock.Fixed(now + 60)) == {
+            .Ok(_) -> false
+            .Err(error) -> if error == {
+                .CacheReceiptExpired(_, _) -> true
+                .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
+            }
+        },
+    )
 }

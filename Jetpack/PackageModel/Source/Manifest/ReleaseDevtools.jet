@@ -2,10 +2,17 @@ use {
     release_core_ip: core.net.ip
     release_core_sys: core.sys
     jet_foundation.[
-        ENV_JET_INSPECT, ENV_JET_INSPECT_ALLOWLIST, ENV_JET_INSPECT_TOKEN,
-        JetReleaseDevtoolsAuthentication, JetReleaseDevtoolsAuthority, JetReleaseDevtoolsDeployment,
-        JetReleaseDevtoolsEndpoint, JetReleaseDevtoolsNetwork, JetReleaseDevtoolsPolicy,
-        JetReleaseDevtoolsPublication, JetReleaseInspect,
+        ENV_JET_INSPECT,
+        ENV_JET_INSPECT_ALLOWLIST,
+        ENV_JET_INSPECT_TOKEN,
+        JetReleaseDevtoolsAuthentication,
+        JetReleaseDevtoolsAuthority,
+        JetReleaseDevtoolsDeployment,
+        JetReleaseDevtoolsEndpoint,
+        JetReleaseDevtoolsNetwork,
+        JetReleaseDevtoolsPolicy,
+        JetReleaseDevtoolsPublication,
+        JetReleaseInspect,
     ]
 }
 
@@ -17,11 +24,15 @@ use {
 
 // The canonical `package.jet` field name and the refusal text.
 RELEASE_INSPECT_FIELD: "inspect"
+
 RELEASE_INSPECT_EXPECTED: "expected .Local, .ReadOnly, or .None"
 
 INSPECT_ENABLE_ENV: ENV_JET_INSPECT
+
 INSPECT_TOKEN_ENV: ENV_JET_INSPECT_TOKEN
+
 INSPECT_ALLOWLIST_ENV: ENV_JET_INSPECT_ALLOWLIST
+
 INSPECT_MAX_ALLOWLIST_ENTRIES: 64
 
 // Parse one of the three ratified dotted values (`.None` is `Disabled`).
@@ -124,9 +135,7 @@ pkg_release_ip_display: fn(address: ReleaseIPAddress) -> String Never! {
                 best_len = length
                 best_start = run_start
             }
-        } else {
-            run_start = -1
-        }
+        } else { run_start = -1 }
     }
     if best_start < 0 {
         parts := [String]{}
@@ -176,19 +185,25 @@ pkg_release_pow2: fn(exponent: Int) -> Int Never! {
 // Parse one exact IP address or CIDR network.
 pkg_release_network_parse: fn(input: String) -> JetReleaseDevtoolsNetwork ReleaseDevtoolsError! {
     value: input.trim()
-    if value == "" -> return Err(ReleaseDevtoolsError{message: "inspect allowlist entries cannot be empty"})
+    if value == "" {
+        return Err(ReleaseDevtoolsError{message: "inspect allowlist entries cannot be empty"})
+    }
     address_text := value
     prefix := -1
     if value.split_once("/") == .Val(parts) {
         address_text = parts.before.trim()
         parsed_prefix: pkg_parse_u64(parts.after.trim()) ?? return Err(ReleaseDevtoolsError{message: "invalid inspect allowlist prefix `{parts.after}`"})
-        if parsed_prefix > 255 -> return Err(ReleaseDevtoolsError{message: "invalid inspect allowlist prefix `{parts.after}`"})
+        if parsed_prefix > 255 {
+            return Err(ReleaseDevtoolsError{message: "invalid inspect allowlist prefix `{parts.after}`"})
+        }
         prefix = parsed_prefix
     }
     address: pkg_release_parse_ip(address_text) ?? return Err(ReleaseDevtoolsError{message: "invalid inspect allowlist address `{address_text}`"})
     max_prefix: if address.v4 -> 32 else -> 128
     if prefix < 0 -> prefix = max_prefix
-    if prefix > max_prefix -> return Err(ReleaseDevtoolsError{message: "inspect allowlist prefix `/{prefix}` exceeds `/{max_prefix}`"})
+    if prefix > max_prefix {
+        return Err(ReleaseDevtoolsError{message: "inspect allowlist prefix `/{prefix}` exceeds `/{max_prefix}`"})
+    }
     Ok(JetReleaseDevtoolsNetwork{address: pkg_release_ip_display(address), prefix: prefix})
 }
 
@@ -211,7 +226,9 @@ pkg_release_allowlist_parse: fn(value: String) -> [JetReleaseDevtoolsNetwork] Re
     loop piece in value.split(",") {
         item: piece.trim()
         if item == "" -> next
-        if entries.len() == INSPECT_MAX_ALLOWLIST_ENTRIES -> return Err(ReleaseDevtoolsError{message: "inspect allowlist cannot contain more than {INSPECT_MAX_ALLOWLIST_ENTRIES} entries"})
+        if entries.len() == INSPECT_MAX_ALLOWLIST_ENTRIES {
+            return Err(ReleaseDevtoolsError{message: "inspect allowlist cannot contain more than {INSPECT_MAX_ALLOWLIST_ENTRIES} entries"})
+        }
         entries.push(pkg_release_network_parse(item))
     }
     Ok(entries)
@@ -258,7 +275,9 @@ pkg_release_deployment_debug: fn(deployment: JetReleaseDevtoolsDeployment) -> St
         .None -> "None"
     }
     networks := [String]{}
-    loop network in deployment.allowlist -> networks.push("ReleaseDevtoolsNetwork {{ address: {network.address}, prefix: {network.prefix} }}")
+    loop network in deployment.allowlist {
+        networks.push("ReleaseDevtoolsNetwork {{ address: {network.address}, prefix: {network.prefix} }}")
+    }
     "ReleaseDevtoolsDeployment {{ enabled: {pkg_debug_bool(deployment.enabled)}, token: {token}, allowlist: ReleaseDevtoolsAllowlist([{networks.join(", ")}]) }}"
 }
 

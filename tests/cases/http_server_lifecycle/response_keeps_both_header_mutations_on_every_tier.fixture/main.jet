@@ -11,9 +11,7 @@ use server: core.http.server
 run: fn() {
     response: server.response(201, "made").header("x-first", "one").header("x-second", "two")
     print("status {response.status()}")
-    loop field in response.headers.fields {
-        print("{field.name}: {field.value}")
-    }
+    loop field in response.headers.fields { print("{field.name}: {field.value}") }
     first: response.header("x-first") ?? "missing"
     second: response.header("x-second") ?? "missing"
     print("x-first={first} x-second={second}")

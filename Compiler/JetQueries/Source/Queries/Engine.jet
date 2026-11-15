@@ -13,41 +13,64 @@ use query_text: core.text
 // key-eligible structs. Keep canonical structural keys; fix the compiler seam.
 FileKey: struct {
     path: String
+
     new: fn(path: String) -> FileKey Never! { FileKey{path: path} }
 }
-QuerySubject: struct { is_file: Bool, name: String }
+
+QuerySubject: struct {
+    is_file: Bool
+    name: String
+}
+
 InputKey: struct {
     subject: QuerySubject
+
     new: fn(name: String) -> InputKey Never! {
         InputKey{subject: QuerySubject{is_file: false, name: name}}
     }
+
     file: fn(file: FileKey) -> InputKey Never! {
         InputKey{subject: QuerySubject{is_file: true, name: file.path}}
     }
 }
+
 QueryKey: struct {
     kind: String
     subject: QuerySubject
+
     new: fn(kind: String, name: String) -> QueryKey Never! {
         QueryKey{kind: kind, subject: QuerySubject{is_file: false, name: name}}
     }
+
     for_file: fn(kind: String, file: FileKey) -> QueryKey Never! {
         QueryKey{kind: kind, subject: QuerySubject{is_file: true, name: file.path}}
     }
 }
 
 // Rust InputCell/DepKey/Dep/MemoEntry and the dependency stack helper family.
-QueryInputCell: struct { revision: Int, text: String, byte_count: Int }
-QueryDepKey: struct { is_input: Bool, kind: String, subject: QuerySubject }
+QueryInputCell: struct {
+    revision: Int
+    text: String
+    byte_count: Int
+}
+
+QueryDepKey: struct {
+    is_input: Bool
+    kind: String
+    subject: QuerySubject
+}
+
 QueryDep: enum {
     Input(key: InputKey, revision: Int?)
     Query(key: QueryKey, generation: Int)
 }
+
 QueryMemoEntry: struct {
     deps: [QueryDep]
     result_kind: String
     generation: Int
 }
+
 QueryComputeFrame: struct {
     key: QueryKey
     result_kind: String
@@ -79,9 +102,16 @@ QueryEngine: struct<T> {
 
     // Rust QueryEngine::new/default.
     new: fn() -> QueryEngine<T> Never! {
-        QueryEngine<T>{revision: 0, inputs: [InputKey:QueryInputCell]{},
-            memo: [QueryKey:QueryMemoEntry]{}, values: [QueryKey:T]{}, recompute_by_key: [QueryKey:Int]{},
-            dep_stack: [QueryComputeFrame]{}, hits: 0, recomputes: 0}
+        QueryEngine<T>{
+            revision: 0,
+            inputs: [InputKey:QueryInputCell]{},
+            memo: [QueryKey:QueryMemoEntry]{},
+            values: [QueryKey:T]{},
+            recompute_by_key: [QueryKey:Int]{},
+            dep_stack: [QueryComputeFrame]{},
+            hits: 0,
+            recomputes: 0,
+        }
     }
 
     // Rust set_input: identical text neither advances revision nor prunes.
@@ -169,15 +199,19 @@ QueryEngine: struct<T> {
     }
 
     // Rust recompute_count/stats.
-    recompute_count: fn(self, key: QueryKey) -> Int Never! {
-        self.recompute_by_key.get(key) ?? 0
-    }
+    recompute_count: fn(self, key: QueryKey) -> Int Never! { self.recompute_by_key.get(key) ?? 0 }
+
     stats: fn(self) -> QueryStats Never! {
         bytes := 0
         loop (_, cell) in self.inputs -> bytes += cell.byte_count
-        QueryStats{hits: self.hits, recomputes: self.recomputes,
-            live_inputs: self.inputs.len(), live_input_bytes: bytes,
-            live_memos: self.memo.len(), live_query_counters: self.recompute_by_key.len()}
+        QueryStats{
+            hits: self.hits,
+            recomputes: self.recomputes,
+            live_inputs: self.inputs.len(),
+            live_input_bytes: bytes,
+            live_memos: self.memo.len(),
+            live_query_counters: self.recompute_by_key.len(),
+        }
     }
 
     // Rust invalidate_kind does NOT eagerly prune dependent memos/counters.
@@ -188,9 +222,12 @@ QueryEngine: struct<T> {
         }
         loop key in dead -> self.remove_memo(key)
     }
+
     // Rust invalidate: prune dependents only when the memo existed.
     invalidate: fn(&self, key: QueryKey) Never! {
-        if !self.memo.has_key(key) -> return
+        if !self.memo.has_key(key) {
+            return
+        }
         self.remove_memo(key)
         self.prune_invalid_memos(false)
     }
@@ -201,9 +238,12 @@ QueryEngine: struct<T> {
     }
 
     record_dep: fn(&self, key: QueryDepKey) Never! {
-        if self.dep_stack.len() == 0 -> return
+        if self.dep_stack.len() == 0 {
+            return
+        }
         self.dep_stack[self.dep_stack.len() - 1].deps.push(key.copy())
     }
+
     // Rust memo_entry_valid/memo_key_valid: generations are per-key recompute
     // counts, and revisiting a key returns true (not a new cycle error).
     memo_entry_valid: fn(self, entry: QueryMemoEntry, visiting: &[QueryKey:Bool]) -> Bool Never! {
@@ -216,12 +256,15 @@ QueryEngine: struct<T> {
                 }
                 .Query(key, generation) -> {
                     child: self.memo.get(key) ?? return false
-                    if child.generation != generation || !self.memo_key_valid(key, visiting) -> return false
+                    if child.generation != generation || !self.memo_key_valid(key, visiting) {
+                        return false
+                    }
                 }
             }
         }
         true
     }
+
     memo_key_valid: fn(self, key: QueryKey, visiting: &[QueryKey:Bool]) -> Bool Never! {
         if visiting.has_key(key) -> return true
         visiting[key] = true
@@ -230,6 +273,7 @@ QueryEngine: struct<T> {
         _: visiting.remove(key)
         valid
     }
+
     // Rust prune_invalid_memos: discover all dead keys against the same graph
     // before removing any entries; normal edits keep cumulative key counters.
     prune_invalid_memos: fn(&self, purge_counters: Bool) Never! {

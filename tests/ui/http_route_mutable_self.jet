@@ -1,10 +1,12 @@
-use web: core.web
-use server: core.http.server
+use {
+    web: core.web
+    server: core.http.server
+}
 
 Jokes: struct {
     count: Int
-    #Server.Get("/jokes")
-    joke: fn(&self) -> HTTPResponse HTTPError! {
+
+    #Server.Get("/jokes") joke: fn(&self) -> HTTPResponse HTTPError! {
         self.count += 1
         Ok(server.response(200, "joke"))
     }

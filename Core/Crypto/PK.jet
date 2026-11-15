@@ -38,68 +38,70 @@ PK_SIGNATURE_MAX_SIZE: 1024
 /// on unchanged.
 #Error
 PKError: enum {
-    /// The key cannot do this operation (TYPE_MISMATCH, -0x3F00).
     TypeMismatch
-    /// Bad input parameters, or a context that is not set up
-    /// (BAD_INPUT_DATA, -0x3E80).
     BadInput
-    /// The key's version is not supported (KEY_INVALID_VERSION, -0x3D80).
     KeyInvalidVersion
-    /// The key is malformed (KEY_INVALID_FORMAT, -0x3D00), with the ASN.1
-    /// error mbedtls adds to the code.
     KeyInvalidFormat(asn1.ASN1Error?)
-    /// The private value is not a key on its curve (KEY_INVALID_FORMAT plus
-    /// the MBEDTLS_ERR_ECP_* code).
     KeyInvalidFormatEcp(ecp.EcpError)
-    /// The key's algorithm is not RSA, EC or EC_DH, or has no context here
-    /// (UNKNOWN_PK_ALG, -0x3C80).
     UnknownPKAlg
-    /// The key is encrypted and no password was given
-    /// (PASSWORD_REQUIRED, -0x3C00).
     PasswordRequired
-    /// The password does not decrypt the key (PASSWORD_MISMATCH, -0x3B80).
     PasswordMismatch
-    /// The public key is malformed (INVALID_PUBKEY, -0x3B00), with the
-    /// ASN.1 error mbedtls adds to the code.
     InvalidPubkey(asn1.ASN1Error?)
-    /// The AlgorithmIdentifier is malformed (INVALID_ALG, -0x3A80), with the
-    /// ASN.1 error mbedtls adds to the code.
     InvalidAlg(asn1.ASN1Error?)
-    /// The namedCurve is not a curve of the library
-    /// (UNKNOWN_NAMED_CURVE, -0x3A00).
     UnknownNamedCurve
-    /// The key type, field type or encryption scheme is not supported
-    /// (FEATURE_UNAVAILABLE, -0x3980).
     FeatureUnavailable
-    /// The signature verifies but is followed by more bytes
-    /// (SIG_LEN_MISMATCH, -0x3900).
     SigLenMismatch
-    /// The signature does not fit the given size (BUFFER_TOO_SMALL, -0x3880).
     BufferTooSmall
-    /// An RSA failure (MBEDTLS_ERR_RSA_*, or an ASN.1 code of a PKCS#1 key).
     RSA(rsa.RSAError)
-    /// An elliptic-curve failure (MBEDTLS_ERR_ECP_*).
     Ecp(ecp.EcpError)
-    /// An ECDSA signature failure (MBEDTLS_ERR_ECP_*, plus the ASN.1 code of
-    /// a malformed signature).
     ECDSA(ecdsa.ECDSAError)
-    /// A bare ASN.1 failure (MBEDTLS_ERR_ASN1_*): a malformed specified
-    /// curve, or an output buffer too small.
     Asn1(asn1.ASN1Error)
-    /// A curve or algorithm with no OID (MBEDTLS_ERR_OID_NOT_FOUND).
     Oid(oids.OIDError)
-    /// A malformed PEM block (MBEDTLS_ERR_PEM_*).
     PEM(pem.PEMError)
-    /// PBES2 failed on an encrypted PKCS#8 key (MBEDTLS_ERR_PKCS5_*).
     PKCS5(pkcs5.PBEError)
-    /// PKCS #12 PBE failed on an encrypted PKCS#8 key
-    /// (MBEDTLS_ERR_PKCS12_*).
     PKCS12(pkcs5.PBEError)
 }
+
+/// The key cannot do this operation (TYPE_MISMATCH, -0x3F00).
+/// Bad input parameters, or a context that is not set up
+/// (BAD_INPUT_DATA, -0x3E80).
+/// The key's version is not supported (KEY_INVALID_VERSION, -0x3D80).
+/// The key is malformed (KEY_INVALID_FORMAT, -0x3D00), with the ASN.1
+/// error mbedtls adds to the code.
+/// The private value is not a key on its curve (KEY_INVALID_FORMAT plus
+/// the MBEDTLS_ERR_ECP_* code).
+/// The key's algorithm is not RSA, EC or EC_DH, or has no context here
+/// (UNKNOWN_PK_ALG, -0x3C80).
+/// The key is encrypted and no password was given
+/// (PASSWORD_REQUIRED, -0x3C00).
+/// The password does not decrypt the key (PASSWORD_MISMATCH, -0x3B80).
+/// The public key is malformed (INVALID_PUBKEY, -0x3B00), with the
+/// ASN.1 error mbedtls adds to the code.
+/// The AlgorithmIdentifier is malformed (INVALID_ALG, -0x3A80), with the
+/// ASN.1 error mbedtls adds to the code.
+/// The namedCurve is not a curve of the library
+/// (UNKNOWN_NAMED_CURVE, -0x3A00).
+/// The key type, field type or encryption scheme is not supported
+/// (FEATURE_UNAVAILABLE, -0x3980).
+/// The signature verifies but is followed by more bytes
+/// (SIG_LEN_MISMATCH, -0x3900).
+/// The signature does not fit the given size (BUFFER_TOO_SMALL, -0x3880).
+/// An RSA failure (MBEDTLS_ERR_RSA_*, or an ASN.1 code of a PKCS#1 key).
+/// An elliptic-curve failure (MBEDTLS_ERR_ECP_*).
+/// An ECDSA signature failure (MBEDTLS_ERR_ECP_*, plus the ASN.1 code of
+/// a malformed signature).
+/// A bare ASN.1 failure (MBEDTLS_ERR_ASN1_*): a malformed specified
+/// curve, or an output buffer too small.
+/// A curve or algorithm with no OID (MBEDTLS_ERR_OID_NOT_FOUND).
+/// A malformed PEM block (MBEDTLS_ERR_PEM_*).
+/// PBES2 failed on an encrypted PKCS#8 key (MBEDTLS_ERR_PKCS5_*).
+/// PKCS #12 PBE failed on an encrypted PKCS#8 key
+/// (MBEDTLS_ERR_PKCS12_*).
 
 // The ASN.1 and OID failures lift; RSA, EC and ECDSA ones are wrapped where
 // they occur, as each of those also lifts the big-number failure ASN.1 does.
 impl asn1.ASN1Error -> PKError { PKError.Asn1(self) }
+
 impl oids.OIDError -> PKError { PKError.Oid(self) }
 
 /// An RSA key held outside the library (mbedtls_pk_rsa_alt_*_func):
@@ -431,7 +433,9 @@ pk_check_pair: fn<R: RNG>(public: &PKContext, prv: &PKContext, rng: &R) PKError!
 // rsa_alt_check_pair: the sizes agree and the alt key's signature of 32
 // bytes of 0x2a verifies under the public key.
 rsa_alt_check_pair: fn(public: &PKContext, prv: PKContext) PKError! {
-    if pk_get_bitlen(prv) != rsa.rsa_get_bitlen(public.rsa) -> return Err(.RSA(.KeyCheckFailed(None)))
+    if pk_get_bitlen(prv) != rsa.rsa_get_bitlen(public.rsa) {
+        return Err(.RSA(.KeyCheckFailed(None)))
+    }
     hash := [U8]{}
     loop _ in 0..<32 -> hash.push(U8{0x2a})
     sig: rsa_alt_sign_wrap(prv, None, hash, rsa.MPI_MAX_SIZE)
@@ -447,10 +451,12 @@ pk_debug: fn(ctx: PKContext) -> [PKDebugItem] PKError! {
     own: ctx.kind ?? return Err(.BadInput)
     if own == .RSAAlt -> return Err(.TypeMismatch)
     if own == .RSA {
-        return Ok([PKDebugItem]{
-            PKDebugItem{name: "rsa.N", value: .Mpi(bn.copy_mpi(ctx.rsa.n))},
-            PKDebugItem{name: "rsa.E", value: .Mpi(bn.copy_mpi(ctx.rsa.e))}
-        })
+        return Ok(
+            [PKDebugItem]{
+                PKDebugItem{name: "rsa.N", value: .Mpi(bn.copy_mpi(ctx.rsa.n))},
+                PKDebugItem{name: "rsa.E", value: .Mpi(bn.copy_mpi(ctx.rsa.e))},
+            },
+        )
     }
     Ok([PKDebugItem]{PKDebugItem{name: "eckey.Q", value: .Point(ecp.point_copy(ctx.ec.q))}})
 }
@@ -499,7 +505,7 @@ pk_ecc_set_pubkey_from_prv: fn<R: RNG>(ctx: &PKContext, rng: &R) PKError! {
     assert(pk_verify(ctx, .SHA256, [U8]{1}, [U8]{2}) == .Err(.TypeMismatch))
     assert(pk_verify(ctx, .SHA256, [U8]{}, [U8]{2}) == .Err(.BadInput))
     if pk_debug(pk_new()) == {
-        .Ok(_) -> panic("debug")
+        .Ok(_) -> { panic("debug") }
         .Err(e) -> assert(e == .BadInput)
     }
 }

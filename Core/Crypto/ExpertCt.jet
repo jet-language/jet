@@ -14,43 +14,52 @@ arena: fn(words: Int) -> [I64] Never! {
     loop _ in 0..<words -> w.push(I64{0})
     w
 }
+
 word: fn(w: [I64], at: Int) -> I64 Never! { w[at /% 8] }
+
 store: fn(w: &[I64], at: Int, value: I64) Never! { w[at /% 8] = value }
-byte: fn(w: [I64], at: Int) -> I64 Never! {
-    (w[at /% 8] >> ((at %% 8) * 8)).bit_and(I64{255})
-}
-#Overflow(.Wrapping)
-put: fn(w: &[I64], at: Int, value: I64) Never! {
+
+byte: fn(w: [I64], at: Int) -> I64 Never! { (w[at /% 8] >> ((at %% 8) * 8)).bit_and(I64{255}) }
+
+#Overflow(.Wrapping) put: fn(w: &[I64], at: Int, value: I64) Never! {
     shift: (at %% 8) * 8
     mask: I64{255} << shift
     w[at /% 8] = (w[at /% 8].bit_and((mask.bit_xor(I64{-1})))).bit_or(((value.bit_and(I64{255})) << shift))
 }
-wipe: fn(w: &[I64]) Never! { loop i in 0..<w.len() -> w[i] = I64{0} }
+
+wipe: fn(w: &[I64]) Never! {
+    loop i in 0..<w.len() -> w[i] = I64{0}
+}
+
 clear: fn(w: &[I64], at: Int, count: Int) Never! {
     loop i in 0..<count -> put(w, at + i, I64{0})
 }
+
 load: fn(w: &[I64], at: Int, data: [U8]) Never! {
     loop i in 0..<data.len() -> put(w, at + i, I64{data[i]})
 }
+
 extract: fn(w: [I64], at: Int, count: Int) -> [U8] Never! {
     out := [U8]{}
     if !mem.__list_reserve_exact<U8>(out, count) -> panic("crypto output allocation failed")
     loop i in 0..<count -> out.push(wrapping(U8{byte(w, at + i)}))
     out
 }
+
 equal: fn(w: [I64], a: Int, b: Int, count: Int) -> Bool Never! {
     diff := I64{0}
     loop i in 0..<count -> diff = diff.bit_or((byte(w, a + i).bit_xor(byte(w, b + i))))
     diff == I64{0}
 }
+
 copy_field: fn(w: &[I64], out: Int, input: Int) Never! {
     loop i in 0..<16 {
         value: word(w, input + i * 8)
         store(w, out + i * 8, value)
     }
 }
-#Overflow(.Wrapping)
-carry: fn(w: &[I64], a: Int) Never! {
+
+#Overflow(.Wrapping) carry: fn(w: &[I64], a: Int) Never! {
     loop i in 0..<16 {
         v: word(w, a + i * 8) + I64{65536}
         c: v >> 16
@@ -64,8 +73,8 @@ carry: fn(w: &[I64], a: Int) Never! {
         }
     }
 }
-#Overflow(.Wrapping)
-swap: fn(w: &[I64], a: Int, b: Int, bit: I64) Never! {
+
+#Overflow(.Wrapping) swap: fn(w: &[I64], a: Int, b: Int, bit: I64) Never! {
     mask: I64{0} - bit
     loop i in 0..<16 {
         x: word(w, a + i * 8)
@@ -75,22 +84,22 @@ swap: fn(w: &[I64], a: Int, b: Int, bit: I64) Never! {
         store(w, b + i * 8, y.bit_xor(delta))
     }
 }
-#Overflow(.Wrapping)
-add: fn(w: &[I64], out: Int, a: Int, b: Int) Never! {
+
+#Overflow(.Wrapping) add: fn(w: &[I64], out: Int, a: Int, b: Int) Never! {
     loop i in 0..<16 {
         value: word(w, a + i * 8) + word(w, b + i * 8)
         store(w, out + i * 8, value)
     }
 }
-#Overflow(.Wrapping)
-sub: fn(w: &[I64], out: Int, a: Int, b: Int) Never! {
+
+#Overflow(.Wrapping) sub: fn(w: &[I64], out: Int, a: Int, b: Int) Never! {
     loop i in 0..<16 {
         value: word(w, a + i * 8) - word(w, b + i * 8)
         store(w, out + i * 8, value)
     }
 }
-#Overflow(.Wrapping)
-mul: fn(w: &[I64], out: Int, a: Int, b: Int, work: Int) Never! {
+
+#Overflow(.Wrapping) mul: fn(w: &[I64], out: Int, a: Int, b: Int, work: Int) Never! {
     loop i in 0..<31 -> store(w, work + i * 8, I64{0})
     loop i in 0..<16 {
         loop j in 0..<16 {
@@ -107,8 +116,8 @@ mul: fn(w: &[I64], out: Int, a: Int, b: Int, work: Int) Never! {
     carry(w, out)
     carry(w, out)
 }
-#Overflow(.Wrapping)
-pack: fn(w: &[I64], out: Int, value: Int, reduced: Int) Never! {
+
+#Overflow(.Wrapping) pack: fn(w: &[I64], out: Int, value: Int, reduced: Int) Never! {
     carry(w, value)
     carry(w, value)
     carry(w, value)
@@ -133,6 +142,7 @@ pack: fn(w: &[I64], out: Int, value: Int, reduced: Int) Never! {
         put(w, out + i * 2 + 1, (v >> 8).bit_and(I64{255}))
     }
 }
+
 inverse: fn(w: &[I64], out: Int, input: Int, work: Int) Never! {
     copy_field(w, out, input)
     i := 253
@@ -144,6 +154,7 @@ inverse: fn(w: &[I64], out: Int, input: Int, work: Int) Never! {
         i -= 1
     }
 }
+
 x25519: fn(sk: [U8], point: [U8]) -> [U8] Never! {
     if sk.len() != 32 || point.len() != 32 -> panic("invalid X25519 input")
     w := arena(204)
@@ -200,11 +211,16 @@ x25519: fn(sk: [U8], point: [U8]) -> [U8] Never! {
     out
 }
 
-C_X: [I64]{0xd51a,0x8f25,0x2d60,0xc956,0xa7b2,0x9525,0xc760,0x692c,0xdc5c,0xfdd6,0xe231,0xc0a4,0x53fe,0xcd6e,0x36d3,0x2169}
-C_D2: [I64]{0xf159,0x26b2,0x9b94,0xebd6,0xb156,0x8283,0x149a,0x00e0,0xd130,0xeef3,0x80f2,0x198e,0xfce7,0x56df,0xd9dc,0x2406}
-C_D: [I64]{0x78a3,0x1359,0x4dca,0x75eb,0xd8ab,0x4141,0x0a4d,0x0070,0xe898,0x7779,0x4079,0x8cc7,0xfe73,0x2b6f,0x6cee,0x5203}
-C_I: [I64]{0xa0b0,0x4a0e,0x1b27,0xc4ee,0xe478,0xad2f,0x1806,0x2f43,0xd7a7,0x3dfb,0x0099,0x2b4d,0xdf0b,0x4fc1,0x2480,0x2b83}
-C_L: [I64]{0xed,0xd3,0xf5,0x5c,0x1a,0x63,0x12,0x58,0xd6,0x9c,0xf7,0xa2,0xde,0xf9,0xde,0x14,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0x10}
+C_X: [I64]{0xd51a, 0x8f25, 0x2d60, 0xc956, 0xa7b2, 0x9525, 0xc760, 0x692c, 0xdc5c, 0xfdd6, 0xe231, 0xc0a4, 0x53fe, 0xcd6e, 0x36d3, 0x2169}
+
+C_D2: [I64]{0xf159, 0x26b2, 0x9b94, 0xebd6, 0xb156, 0x8283, 0x149a, 0x00e0, 0xd130, 0xeef3, 0x80f2, 0x198e, 0xfce7, 0x56df, 0xd9dc, 0x2406}
+
+C_D: [I64]{0x78a3, 0x1359, 0x4dca, 0x75eb, 0xd8ab, 0x4141, 0x0a4d, 0x0070, 0xe898, 0x7779, 0x4079, 0x8cc7, 0xfe73, 0x2b6f, 0x6cee, 0x5203}
+
+C_I: [I64]{0xa0b0, 0x4a0e, 0x1b27, 0xc4ee, 0xe478, 0xad2f, 0x1806, 0x2f43, 0xd7a7, 0x3dfb, 0x0099, 0x2b4d, 0xdf0b, 0x4fc1, 0x2480, 0x2b83}
+
+C_L: [I64]{0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10}
+
 constants: fn(w: &[I64]) Never! {
     loop i in 0..<16 {
         store(w, 3072 + i * 8, C_D2[i])
@@ -212,6 +228,7 @@ constants: fn(w: &[I64]) Never! {
         store(w, 4736 + i * 8, C_I[i])
     }
 }
+
 base: fn(w: &[I64], q: Int) Never! {
     clear(w, q, 512)
     loop i in 0..<16 {
@@ -222,6 +239,7 @@ base: fn(w: &[I64], q: Int) Never! {
     store(w, q + 256, I64{1})
     mul(w, q + 384, q, q + 128, 2816)
 }
+
 point_add: fn(w: &[I64], p: Int, q: Int) Never! {
     sub(w, 1792, p + 128, p)
     sub(w, 1920, q + 128, q)
@@ -242,9 +260,11 @@ point_add: fn(w: &[I64], p: Int, q: Int) Never! {
     mul(w, p + 256, 2560, 2432, 2816)
     mul(w, p + 384, 2304, 2688, 2816)
 }
+
 point_swap: fn(w: &[I64], p: Int, q: Int, bit: I64) Never! {
     loop i in 0..<4 -> swap(w, p + i * 128, q + i * 128, bit)
 }
+
 point_mul: fn(w: &[I64], p: Int, q: Int, scalar: Int) Never! {
     clear(w, p, 512)
     store(w, p + 128, I64{1})
@@ -260,6 +280,7 @@ point_mul: fn(w: &[I64], p: Int, q: Int, scalar: Int) Never! {
         i -= 1
     }
 }
+
 point_pack: fn(w: &[I64], out: Int, p: Int) Never! {
     inverse(w, 1792, p + 256, 2816)
     mul(w, p, p, 1792, 2816)
@@ -269,8 +290,8 @@ point_pack: fn(w: &[I64], out: Int, p: Int) Never! {
     value: byte(w, out + 31).bit_or(((byte(w, 3328).bit_and(I64{1})) << 7))
     put(w, out + 31, value)
 }
-#Overflow(.Wrapping)
-mod_l: fn(w: &[I64], out: Int, x: Int) Never! {
+
+#Overflow(.Wrapping) mod_l: fn(w: &[I64], out: Int, x: Int) Never! {
     i := 63
     loop {
         if i < 32 -> break
@@ -308,6 +329,7 @@ mod_l: fn(w: &[I64], out: Int, x: Int) Never! {
         put(w, out + j, v.bit_and(I64{255}))
     }
 }
+
 reduce: fn(w: &[I64], hash: Int) Never! {
     loop i in 0..<64 {
         value: byte(w, hash + i)
@@ -316,9 +338,12 @@ reduce: fn(w: &[I64], hash: Int) Never! {
     clear(w, hash, 64)
     mod_l(w, hash, 4960)
 }
+
 hash_parts: fn(w: &[I64], out: Int, a: Int, an: Int, b: Int, bn: Int, msg: [U8]) Never! {
     data := [U8]{}
-    if !mem.__list_reserve_exact<U8>(data, an + bn + msg.len()) -> panic("crypto hash input allocation failed")
+    if !mem.__list_reserve_exact<U8>(data, an + bn + msg.len()) {
+        panic("crypto hash input allocation failed")
+    }
     loop i in 0..<an -> data.push(wrapping(U8{byte(w, a + i)}))
     loop i in 0..<bn -> data.push(wrapping(U8{byte(w, b + i)}))
     loop v in msg -> data.push(v)
@@ -327,6 +352,7 @@ hash_parts: fn(w: &[I64], out: Int, a: Int, an: Int, b: Int, bn: Int, msg: [U8])
     crypto.wipe(data)
     crypto.wipe(digest)
 }
+
 expand: fn(w: &[I64], seed: [U8]) Never! {
     digest := crypto.sha512(seed).bytes
     load(w, 4096, digest)
@@ -337,6 +363,7 @@ expand: fn(w: &[I64], seed: [U8]) Never! {
     put(w, 4127, high)
     constants(w)
 }
+
 ed_public: fn(seed: [U8]) -> [U8] Never! {
     w := arena(684)
     expand(w, seed)
@@ -347,8 +374,8 @@ ed_public: fn(seed: [U8]) -> [U8] Never! {
     wipe(w)
     out
 }
-#Overflow(.Wrapping)
-ed_sign: fn(seed: [U8], msg: [U8]) -> [U8] Never! {
+
+#Overflow(.Wrapping) ed_sign: fn(seed: [U8], msg: [U8]) -> [U8] Never! {
     w := arena(696)
     expand(w, seed)
     base(w, 1280)
@@ -387,12 +414,13 @@ canonical_y: fn(w: [I64], bytes: Int) -> Bool Never! {
     loop {
         if i < 0 -> return false
         v: if i == 31 -> byte(w, bytes + i).bit_and(I64{127}) else -> byte(w, bytes + i)
-        limit: if i == 31 -> I64{127} else -> if i == 0 -> I64{237} else -> I64{255}
+        limit: if i == 31 -> I64{127} else if i == 0 -> I64{237} else -> I64{255}
         if v < limit -> return true
         if v > limit -> return false
         i -= 1
     }
 }
+
 scalar_canonical: fn(w: [I64], scalar: Int) -> Bool Never! {
     i := 31
     loop {
@@ -403,13 +431,14 @@ scalar_canonical: fn(w: [I64], scalar: Int) -> Bool Never! {
         i -= 1
     }
 }
+
 field_equal: fn(w: &[I64], a: Int, b: Int) -> Bool Never! {
     pack(w, 4960, a, 3200)
     pack(w, 4992, b, 3200)
     equal(w, 4960, 4992, 32)
 }
-#Overflow(.Wrapping)
-decode: fn(w: &[I64], p: Int, bytes: Int) -> Bool Never! {
+
+#Overflow(.Wrapping) decode: fn(w: &[I64], p: Int, bytes: Int) -> Bool Never! {
     if !canonical_y(w, bytes) -> return false
     clear(w, p, 512)
     store(w, p + 256, I64{1})
@@ -458,6 +487,7 @@ decode: fn(w: &[I64], p: Int, bytes: Int) -> Bool Never! {
     mul(w, p + 384, p, p + 128, 2816)
     true
 }
+
 small_order: fn(w: &[I64], p: Int) -> Bool Never! {
     loop i in 0..<64 {
         value: word(w, p + i * 8)
@@ -469,6 +499,7 @@ small_order: fn(w: &[I64], p: Int) -> Bool Never! {
     loop i in 1..<32 -> diff = diff.bit_or(byte(w, 4928 + i))
     diff == I64{0}
 }
+
 canonical_point: fn(w: &[I64], p: Int, encoded: Int) -> Bool Never! {
     // decode returns -P; invert the sign bit of its encoding unless x=0.
     point_pack(w, 4928, p)
@@ -479,6 +510,7 @@ canonical_point: fn(w: &[I64], p: Int, encoded: Int) -> Bool Never! {
     put(w, 4959, value)
     equal(w, 4928, encoded, 32)
 }
+
 verify_equation: fn(w: &[I64], msg: [U8]) -> Bool Never! {
     hash_parts(w, 4864, 5472, 32, 5536, 32, msg)
     reduce(w, 4864)
@@ -504,6 +536,7 @@ verify_equation: fn(w: &[I64], msg: [U8]) -> Bool Never! {
     y_ok: field_equal(w, 1792, 1920)
     x_ok && y_ok
 }
+
 ed_verify: fn(pk: [U8], msg: [U8], sig: [U8]) -> Bool Never! {
     if pk.len() != 32 || sig.len() != 64 -> return false
     w := arena(696)
@@ -516,6 +549,7 @@ ed_verify: fn(pk: [U8], msg: [U8], sig: [U8]) -> Bool Never! {
     wipe(w)
     ok
 }
+
 // Result codes preserve expert's existing errors: -1 rejected public key,
 // 0 invalid signature, 1 valid signature. All branching here is on public data.
 ed_verify_strict: fn(pk: [U8], msg: [U8], sig: [U8]) -> Int Never! {
@@ -524,10 +558,8 @@ ed_verify_strict: fn(pk: [U8], msg: [U8], sig: [U8]) -> Int Never! {
     load(w, 5472, sig)
     load(w, 5536, pk)
     result := 0
-    if !decode(w, 1280, 5536) -> result = -1
-    else {
-        if !canonical_point(w, 1280, 5536) -> result = -1
-        else {
+    if !decode(w, 1280, 5536) -> result = -1 else {
+        if !canonical_point(w, 1280, 5536) -> result = -1 else {
             if !small_order(w, 1280) && decode(w, 768, 5472) {
                 if canonical_point(w, 768, 5472) && !small_order(w, 768) && scalar_canonical(w, 5504) {
                     if verify_equation(w, msg) -> result = 1
@@ -542,8 +574,8 @@ ed_verify_strict: fn(pk: [U8], msg: [U8], sig: [U8]) -> Int Never! {
 le32: fn(w: [I64], at: Int) -> I64 Never! {
     byte(w, at).bit_or((byte(w, at + 1) << 8)).bit_or((byte(w, at + 2) << 16)).bit_or((byte(w, at + 3) << 24))
 }
-#Overflow(.Wrapping)
-poly_block: fn(w: &[I64], length: Int) Never! {
+
+#Overflow(.Wrapping) poly_block: fn(w: &[I64], length: Int) Never! {
     put(w, 96 + length, I64{1})
     t0: le32(w, 96)
     t1: le32(w, 100)
@@ -580,8 +612,8 @@ poly_block: fn(w: &[I64], length: Int) Never! {
     next: word(w, 48) + (first >> 26)
     store(w, 48, next)
 }
-#Overflow(.Wrapping)
-poly_finish: fn(w: &[I64]) Never! {
+
+#Overflow(.Wrapping) poly_finish: fn(w: &[I64]) Never! {
     c := I64{0}
     loop i in 1..<5 {
         v: word(w, 40 + i * 8) + c
@@ -619,6 +651,7 @@ poly_finish: fn(w: &[I64]) Never! {
         put(w, 172 + i, (v3 >> (i * 8)).bit_and(I64{255}))
     }
 }
+
 poly1305: fn(key: [U8], data: [U8]) -> [U8] Never! {
     w := arena(26)
     loop i in 0..<32 -> put(w, 176 + i, I64{key[i]})
@@ -651,30 +684,32 @@ poly1305: fn(key: [U8], data: [U8]) -> [U8] Never! {
 
 // Inputs and expected tags are frozen in corpus/core/crypto/ct/fixtures.json.
 #Test("RFC8439 Poly1305 and frozen boundary/random differential") {
-    assert(poly1305([U8]{133,214,190,120,87,85,109,51,127,68,82,254,66,213,6,168,1,3,128,138,251,13,178,253,74,191,246,175,65,73,245,27}, [U8]{67,114,121,112,116,111,103,114,97,112,104,105,99,32,70,111,114,117,109,32,82,101,115,101,97,114,99,104,32,71,114,111,117,112}) == [U8]{168,6,29,193,48,81,54,198,194,43,139,175,12,1,39,169})
-    sizes: [Int]{0,1,2,7,15,16,17,31,32,33,63,64,65,111,112,113,127,128,129,255,256,257}
-    tags: [[U8]]{[U8]{103,44,241,182,123,64,5,202,143,84,25,222,163,104,45,242},
-        [U8]{8,72,58,135,154,249,238,202,62,174,156,14,227,98,81,227},
-        [U8]{29,113,104,132,36,121,236,154,107,238,108,142,177,99,244,53},
-        [U8]{86,34,162,238,223,21,25,85,142,227,179,201,72,221,252,94},
-        [U8]{129,139,255,184,8,158,112,120,70,21,58,162,46,51,214,226},
-        [U8]{174,148,71,233,106,227,128,194,164,111,16,6,201,201,0,136},
-        [U8]{89,122,101,53,114,118,61,28,151,96,168,184,1,247,65,206},
-        [U8]{83,233,154,220,86,230,15,36,235,232,198,128,190,119,91,240},
-        [U8]{235,2,85,171,111,135,157,91,75,38,38,33,166,60,218,68},
-        [U8]{166,78,245,83,200,225,141,146,2,216,42,179,54,175,70,162},
-        [U8]{114,221,52,233,98,3,135,65,37,248,48,154,131,73,241,101},
-        [U8]{224,23,211,244,232,91,15,84,137,251,161,179,5,107,24,25},
-        [U8]{231,115,105,117,229,189,141,249,117,78,230,164,86,84,202,236},
-        [U8]{101,34,241,142,30,240,149,243,44,102,128,153,5,45,245,78},
-        [U8]{50,225,47,126,250,199,249,219,225,87,7,123,211,55,173,19},
-        [U8]{15,167,59,117,174,99,114,131,197,97,110,197,185,168,161,123},
-        [U8]{83,59,131,241,28,138,61,224,218,82,72,75,3,202,207,149},
-        [U8]{134,10,52,127,175,189,30,182,145,39,88,105,30,3,220,9},
-        [U8]{99,137,90,211,36,26,163,210,154,223,182,74,20,251,201,43},
-        [U8]{134,247,214,88,137,180,151,153,59,55,180,31,218,226,171,214},
-        [U8]{72,240,172,234,52,158,42,246,151,174,1,71,39,75,130,204},
-        [U8]{31,120,88,67,252,201,126,243,60,63,185,145,185,19,183,119}}
+    assert(poly1305([U8]{133, 214, 190, 120, 87, 85, 109, 51, 127, 68, 82, 254, 66, 213, 6, 168, 1, 3, 128, 138, 251, 13, 178, 253, 74, 191, 246, 175, 65, 73, 245, 27}, [U8]{67, 114, 121, 112, 116, 111, 103, 114, 97, 112, 104, 105, 99, 32, 70, 111, 114, 117, 109, 32, 82, 101, 115, 101, 97, 114, 99, 104, 32, 71, 114, 111, 117, 112}) == [U8]{168, 6, 29, 193, 48, 81, 54, 198, 194, 43, 139, 175, 12, 1, 39, 169})
+    sizes: [Int]{0, 1, 2, 7, 15, 16, 17, 31, 32, 33, 63, 64, 65, 111, 112, 113, 127, 128, 129, 255, 256, 257}
+    tags: [[U8]]{
+        [U8]{103, 44, 241, 182, 123, 64, 5, 202, 143, 84, 25, 222, 163, 104, 45, 242},
+        [U8]{8, 72, 58, 135, 154, 249, 238, 202, 62, 174, 156, 14, 227, 98, 81, 227},
+        [U8]{29, 113, 104, 132, 36, 121, 236, 154, 107, 238, 108, 142, 177, 99, 244, 53},
+        [U8]{86, 34, 162, 238, 223, 21, 25, 85, 142, 227, 179, 201, 72, 221, 252, 94},
+        [U8]{129, 139, 255, 184, 8, 158, 112, 120, 70, 21, 58, 162, 46, 51, 214, 226},
+        [U8]{174, 148, 71, 233, 106, 227, 128, 194, 164, 111, 16, 6, 201, 201, 0, 136},
+        [U8]{89, 122, 101, 53, 114, 118, 61, 28, 151, 96, 168, 184, 1, 247, 65, 206},
+        [U8]{83, 233, 154, 220, 86, 230, 15, 36, 235, 232, 198, 128, 190, 119, 91, 240},
+        [U8]{235, 2, 85, 171, 111, 135, 157, 91, 75, 38, 38, 33, 166, 60, 218, 68},
+        [U8]{166, 78, 245, 83, 200, 225, 141, 146, 2, 216, 42, 179, 54, 175, 70, 162},
+        [U8]{114, 221, 52, 233, 98, 3, 135, 65, 37, 248, 48, 154, 131, 73, 241, 101},
+        [U8]{224, 23, 211, 244, 232, 91, 15, 84, 137, 251, 161, 179, 5, 107, 24, 25},
+        [U8]{231, 115, 105, 117, 229, 189, 141, 249, 117, 78, 230, 164, 86, 84, 202, 236},
+        [U8]{101, 34, 241, 142, 30, 240, 149, 243, 44, 102, 128, 153, 5, 45, 245, 78},
+        [U8]{50, 225, 47, 126, 250, 199, 249, 219, 225, 87, 7, 123, 211, 55, 173, 19},
+        [U8]{15, 167, 59, 117, 174, 99, 114, 131, 197, 97, 110, 197, 185, 168, 161, 123},
+        [U8]{83, 59, 131, 241, 28, 138, 61, 224, 218, 82, 72, 75, 3, 202, 207, 149},
+        [U8]{134, 10, 52, 127, 175, 189, 30, 182, 145, 39, 88, 105, 30, 3, 220, 9},
+        [U8]{99, 137, 90, 211, 36, 26, 163, 210, 154, 223, 182, 74, 20, 251, 201, 43},
+        [U8]{134, 247, 214, 88, 137, 180, 151, 153, 59, 55, 180, 31, 218, 226, 171, 214},
+        [U8]{72, 240, 172, 234, 52, 158, 42, 246, 151, 174, 1, 71, 39, 75, 130, 204},
+        [U8]{31, 120, 88, 67, 252, 201, 126, 243, 60, 63, 185, 145, 185, 19, 183, 119},
+    }
     key := [U8]{}
     loop i in 0..<32 -> key.push(U8{(i * 197 + 23).bit_and(255)})
     loop i in 0..<sizes.len() {
@@ -682,38 +717,40 @@ poly1305: fn(key: [U8], data: [U8]) -> [U8] Never! {
         loop j in 0..<sizes[i] -> data.push(U8{(j * 29 + 7).bit_and(255)})
         assert(poly1305(key, data) == tags[i])
     }
-    random_tags: [[U8]]{[U8]{32,215,147,223,246,5,227,120,174,157,69,41,194,206,246,66},
-        [U8]{152,207,119,104,118,36,1,64,74,3,187,199,60,197,90,230},
-        [U8]{15,228,35,243,86,57,130,203,180,56,223,58,57,186,228,12},
-        [U8]{16,172,88,130,108,137,57,111,55,48,124,44,225,247,49,48},
-        [U8]{5,63,237,135,4,215,232,255,4,222,74,203,34,35,65,143},
-        [U8]{75,218,106,8,78,15,15,54,99,157,177,131,93,45,186,225},
-        [U8]{131,243,98,215,100,175,214,187,26,133,110,10,5,79,185,200},
-        [U8]{83,105,116,247,29,219,136,109,108,137,37,168,15,241,118,254},
-        [U8]{208,169,173,146,75,137,96,198,229,92,160,153,96,2,207,221},
-        [U8]{76,207,250,148,170,200,79,125,150,163,56,188,245,64,198,189},
-        [U8]{98,96,96,18,202,169,165,147,243,181,131,51,120,8,207,39},
-        [U8]{30,67,22,216,132,112,96,243,72,81,108,30,206,162,85,114},
-        [U8]{38,136,63,132,130,102,80,7,220,129,126,76,75,144,4,213},
-        [U8]{226,32,80,61,163,242,46,251,39,190,215,108,60,30,134,140},
-        [U8]{97,86,219,99,6,10,40,138,253,95,154,21,15,250,254,120},
-        [U8]{99,82,124,169,219,183,228,68,25,11,166,202,19,33,108,230},
-        [U8]{85,112,45,54,179,9,99,43,15,59,8,158,216,214,157,134},
-        [U8]{53,5,217,176,112,145,130,86,47,203,237,200,106,213,2,155},
-        [U8]{69,232,119,109,141,78,100,149,101,113,233,33,244,176,233,205},
-        [U8]{7,3,169,110,105,3,135,42,158,82,124,134,186,55,140,105},
-        [U8]{201,30,123,98,216,51,117,102,169,142,53,3,139,153,192,204},
-        [U8]{66,207,151,225,113,191,192,124,83,4,34,30,40,239,193,104},
-        [U8]{116,21,186,98,94,160,88,109,27,225,48,10,229,203,64,91},
-        [U8]{129,22,149,132,79,79,115,52,130,40,179,214,167,178,122,48},
-        [U8]{59,84,148,167,110,11,117,65,92,250,74,153,230,26,133,39},
-        [U8]{1,226,143,154,220,127,245,223,185,194,147,80,54,151,204,185},
-        [U8]{232,128,99,208,227,218,81,225,132,151,132,100,248,73,147,69},
-        [U8]{61,112,67,177,35,201,27,184,37,245,217,173,188,120,184,173},
-        [U8]{38,41,157,52,216,182,148,122,115,46,227,0,132,202,120,33},
-        [U8]{204,156,203,197,243,131,95,73,83,206,174,28,89,23,127,93},
-        [U8]{226,45,97,157,65,47,111,207,76,191,114,39,185,136,212,73},
-        [U8]{163,71,102,215,132,159,194,18,19,182,77,110,156,151,216,135}}
+    random_tags: [[U8]]{
+        [U8]{32, 215, 147, 223, 246, 5, 227, 120, 174, 157, 69, 41, 194, 206, 246, 66},
+        [U8]{152, 207, 119, 104, 118, 36, 1, 64, 74, 3, 187, 199, 60, 197, 90, 230},
+        [U8]{15, 228, 35, 243, 86, 57, 130, 203, 180, 56, 223, 58, 57, 186, 228, 12},
+        [U8]{16, 172, 88, 130, 108, 137, 57, 111, 55, 48, 124, 44, 225, 247, 49, 48},
+        [U8]{5, 63, 237, 135, 4, 215, 232, 255, 4, 222, 74, 203, 34, 35, 65, 143},
+        [U8]{75, 218, 106, 8, 78, 15, 15, 54, 99, 157, 177, 131, 93, 45, 186, 225},
+        [U8]{131, 243, 98, 215, 100, 175, 214, 187, 26, 133, 110, 10, 5, 79, 185, 200},
+        [U8]{83, 105, 116, 247, 29, 219, 136, 109, 108, 137, 37, 168, 15, 241, 118, 254},
+        [U8]{208, 169, 173, 146, 75, 137, 96, 198, 229, 92, 160, 153, 96, 2, 207, 221},
+        [U8]{76, 207, 250, 148, 170, 200, 79, 125, 150, 163, 56, 188, 245, 64, 198, 189},
+        [U8]{98, 96, 96, 18, 202, 169, 165, 147, 243, 181, 131, 51, 120, 8, 207, 39},
+        [U8]{30, 67, 22, 216, 132, 112, 96, 243, 72, 81, 108, 30, 206, 162, 85, 114},
+        [U8]{38, 136, 63, 132, 130, 102, 80, 7, 220, 129, 126, 76, 75, 144, 4, 213},
+        [U8]{226, 32, 80, 61, 163, 242, 46, 251, 39, 190, 215, 108, 60, 30, 134, 140},
+        [U8]{97, 86, 219, 99, 6, 10, 40, 138, 253, 95, 154, 21, 15, 250, 254, 120},
+        [U8]{99, 82, 124, 169, 219, 183, 228, 68, 25, 11, 166, 202, 19, 33, 108, 230},
+        [U8]{85, 112, 45, 54, 179, 9, 99, 43, 15, 59, 8, 158, 216, 214, 157, 134},
+        [U8]{53, 5, 217, 176, 112, 145, 130, 86, 47, 203, 237, 200, 106, 213, 2, 155},
+        [U8]{69, 232, 119, 109, 141, 78, 100, 149, 101, 113, 233, 33, 244, 176, 233, 205},
+        [U8]{7, 3, 169, 110, 105, 3, 135, 42, 158, 82, 124, 134, 186, 55, 140, 105},
+        [U8]{201, 30, 123, 98, 216, 51, 117, 102, 169, 142, 53, 3, 139, 153, 192, 204},
+        [U8]{66, 207, 151, 225, 113, 191, 192, 124, 83, 4, 34, 30, 40, 239, 193, 104},
+        [U8]{116, 21, 186, 98, 94, 160, 88, 109, 27, 225, 48, 10, 229, 203, 64, 91},
+        [U8]{129, 22, 149, 132, 79, 79, 115, 52, 130, 40, 179, 214, 167, 178, 122, 48},
+        [U8]{59, 84, 148, 167, 110, 11, 117, 65, 92, 250, 74, 153, 230, 26, 133, 39},
+        [U8]{1, 226, 143, 154, 220, 127, 245, 223, 185, 194, 147, 80, 54, 151, 204, 185},
+        [U8]{232, 128, 99, 208, 227, 218, 81, 225, 132, 151, 132, 100, 248, 73, 147, 69},
+        [U8]{61, 112, 67, 177, 35, 201, 27, 184, 37, 245, 217, 173, 188, 120, 184, 173},
+        [U8]{38, 41, 157, 52, 216, 182, 148, 122, 115, 46, 227, 0, 132, 202, 120, 33},
+        [U8]{204, 156, 203, 197, 243, 131, 95, 73, 83, 206, 174, 28, 89, 23, 127, 93},
+        [U8]{226, 45, 97, 157, 65, 47, 111, 207, 76, 191, 114, 39, 185, 136, 212, 73},
+        [U8]{163, 71, 102, 215, 132, 159, 194, 18, 19, 182, 77, 110, 156, 151, 216, 135},
+    }
     state := U32{2499746518}
     loop i in 0..<32 {
         random_key := [U8]{}
@@ -722,8 +759,9 @@ poly1305: fn(key: [U8], data: [U8]) -> [U8] Never! {
             state = state.bit_xor((state << 13))
             state = state.bit_xor((state >> 17))
             state = state.bit_xor((state << 5))
-            if j < 32 -> random_key.push(U8{state.bit_and(U32{255})})
-            else -> data.push(U8{state.bit_and(U32{255})})
+            if j < 32 -> random_key.push(U8{state.bit_and(U32{255})}) else {
+                data.push(U8{state.bit_and(U32{255})})
+            }
         }
         assert(poly1305(random_key, data) == random_tags[i])
     }

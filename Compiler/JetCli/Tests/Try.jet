@@ -3,19 +3,42 @@
 // CLISeams' ABI/empty-source ownership cases.
 use {
     jet_driver.[
-        JET_DRIVER_EXIT_OK, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot,
-        JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileRequest,
-        JetDriverCoreSource, jet_driver_compiler_queries_check_disk,
-        jet_driver_core_text, jet_driver_compiler_queries_documents,
-        jet_driver_compiler_queries_new, jet_driver_compiler_queries_set_document,
+        JET_DRIVER_EXIT_OK,
+        JetDriverAuthorizedSourceFile,
+        JetDriverAuthorizedSourceRoot,
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode,
+        JetDriverCompileRequest,
+        JetDriverCoreSource,
+        jet_driver_compiler_queries_check_disk,
+        jet_driver_core_text,
+        jet_driver_compiler_queries_documents,
+        jet_driver_compiler_queries_new,
+        jet_driver_compiler_queries_set_document,
     ]
     jet_cli.[
-        JetCLISourceChange, JetCLITryAction, JetCLITryChecked, JetCLITryEdit, JetCLITryPlan,
-        JetCLITryVerdict, jet_cli_checked_semindex, jet_cli_driver_request, jet_cli_errors,
-        jet_cli_sem_ops_for_file, jet_cli_source_hash, jet_cli_try_canonical, jet_cli_try_check,
-        jet_cli_try_fail, jet_cli_try_output, jet_cli_try_parse,
-        jet_cli_try_read_plan, jet_cli_try_receipt, jet_cli_try_run, jet_cli_try_semantic_ops,
-        jet_cli_try_stage, jet_cli_try_verdict,
+        JetCLISourceChange,
+        JetCLITryAction,
+        JetCLITryChecked,
+        JetCLITryEdit,
+        JetCLITryPlan,
+        JetCLITryVerdict,
+        jet_cli_checked_semindex,
+        jet_cli_driver_request,
+        jet_cli_errors,
+        jet_cli_sem_ops_for_file,
+        jet_cli_source_hash,
+        jet_cli_try_canonical,
+        jet_cli_try_check,
+        jet_cli_try_fail,
+        jet_cli_try_output,
+        jet_cli_try_parse,
+        jet_cli_try_read_plan,
+        jet_cli_try_receipt,
+        jet_cli_try_run,
+        jet_cli_try_semantic_ops,
+        jet_cli_try_stage,
+        jet_cli_try_verdict,
     ]
     jet_sema.[SchemaSnapshot]
     jet_foundation.[Diagnostic, Span, TextEdit]
@@ -27,13 +50,15 @@ use {
 try_service_request: fn(core_sources: [JetDriverCoreSource]) -> JetDriverCompileRequest {
     source: "use tools: core.devtools\nserve: fn() -> Int {{ 7 }}"
     snapshot: JetDriverAuthorizedSourceSnapshot{
-        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{
-            canonical_path: "/try-service-fixture",
-            identity: "try-service-root",
-            allow_hardlinks: false,
-            files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/try-service-fixture/main.jet", relative_path: "main.jet", identity: "try-service-file", source: source}},
-            foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
-        }},
+        roots: [JetDriverAuthorizedSourceRoot]{
+            JetDriverAuthorizedSourceRoot{
+                canonical_path: "/try-service-fixture",
+                identity: "try-service-root",
+                allow_hardlinks: false,
+                files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/try-service-fixture/main.jet", relative_path: "main.jet", identity: "try-service-file", source: source}},
+                foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+            },
+        },
         entry_root_identity: "try-service-root",
         entry_path: "/try-service-fixture/main.jet",
     }
@@ -41,6 +66,7 @@ try_service_request: fn(core_sources: [JetDriverCoreSource]) -> JetDriverCompile
     request.schema_snapshots = Val([String:SchemaSnapshot]{})
     request
 }
+
 try_service_ownership: fn(request: &&JetDriverCompileRequest, expected_source_rows: Int) {
     session := jet_driver_compiler_queries_new()
     source: request.authorized_sources.roots[0].files[0].source
@@ -48,8 +74,10 @@ try_service_ownership: fn(request: &&JetDriverCompileRequest, expected_source_ro
     checked: jet_driver_compiler_queries_check_disk(session, parsed, request)
     assert(checked.complete && checked.internal_problem == None && jet_cli_errors(checked.diagnostics).len() == 0)
     if checked.product == {
-        .CheckedCompilerValue(_) -> panic("retained mode must not construct the opaque compiler value")
-        .Failed -> panic("actual catalog ownership must survive registration")
+        .CheckedCompilerValue(_) -> {
+            panic("retained mode must not construct the opaque compiler value")
+        }
+        .Failed -> { panic("actual catalog ownership must survive registration") }
         .RetainedCheckedProjection(projection) -> {
             assert(projection.source_modules.len() == expected_source_rows)
             assert(projection.compile.doc_modules.len() >= expected_source_rows)
@@ -66,12 +94,18 @@ try_service_ownership: fn(request: &&JetDriverCompileRequest, expected_source_ro
         }
     }
 }
+
 #Test("try") {
     try_service_ownership(try_service_request([JetDriverCoreSource]{}), 1)
-    try_service_ownership(try_service_request([JetDriverCoreSource]{
-        {module_name: "core.devtools", alias: "core_devtools_fixture", path: "Core/devtools-fixture.jet", owner: "", owned_members: [String]{}, runtime: false, text: jet_driver_core_text("")},
-        {module_name: "core.devtools.fixture_private", alias: "core_devtools_fixture_private", path: "Core/devtools-fixture-private.jet", owner: "core.devtools", owned_members: [String]{}, runtime: false, text: jet_driver_core_text("")},
-    }), 3)
+    try_service_ownership(
+        try_service_request(
+            [JetDriverCoreSource]{
+                {module_name: "core.devtools", alias: "core_devtools_fixture", path: "Core/devtools-fixture.jet", owner: "", owned_members: [String]{}, runtime: false, text: jet_driver_core_text("")},
+                {module_name: "core.devtools.fixture_private", alias: "core_devtools_fixture_private", path: "Core/devtools-fixture-private.jet", owner: "core.devtools", owned_members: [String]{}, runtime: false, text: jet_driver_core_text("")},
+            },
+        ),
+        3,
+    )
     path: "/project/main.jet"
     changes: [JetCLISourceChange]{JetCLISourceChange{path: path, before: "run: fn() {{ 1 }}\n".bytes(), after: "run: fn() {{ 2 }}\n".bytes()}}
     plan: JetCLITryPlan{name: "Sample", entry: path, action: JetCLITryAction.Edits{edits: [JetCLITryEdit]{JetCLITryEdit{path: path, edit: TextEdit{span: Span{start: 11, end: 12}, new_text: "2"}}}}}
@@ -136,10 +170,14 @@ try_service_ownership: fn(request: &&JetDriverCompileRequest, expected_source_ro
     broken := baseline
     broken.sources = [String:String]{}
     if jet_cli_try_stage(rename, broken) == {
-        .Ok(_) -> panic("missing checked ownership must not reread the changed disk")
-        .Err(problem) -> if problem == {
-            .Read(_) -> panic("missing checked ownership is an internal invariant")
-            .Output(output) -> assert(output.stderr.contains("the retained rename index lost its original source ownership"))
+        .Ok(_) -> { panic("missing checked ownership must not reread the changed disk") }
+        .Err(problem) -> {
+            if problem == {
+                .Read(_) -> { panic("missing checked ownership is an internal invariant") }
+                .Output(output) -> {
+                    assert(output.stderr.contains("the retained rename index lost its original source ownership"))
+                }
+            }
         }
     }
     cli_files.write(entry, original) ?? panic("restore original ownership witness")
@@ -165,7 +203,7 @@ try_service_ownership: fn(request: &&JetDriverCompileRequest, expected_source_ro
     cli_files.write_bytes(plan_file, [U8]{255}) ?? panic("actual malformed UTF-8 plan")
     invalid_message: "could not read try plan `{plan_file}`: stream did not contain valid UTF-8"
     if jet_cli_try_read_plan(plan_file) == {
-        .Ok(_) -> panic("malformed plan bytes must not become a source or JSON value")
+        .Ok(_) -> { panic("malformed plan bytes must not become a source or JSON value") }
         .Err(problem) -> assert(problem.message == invalid_message)
     }
     invalid_utf8: jet_cli_try_run(plan_file, false, true)
@@ -173,19 +211,19 @@ try_service_ownership: fn(request: &&JetDriverCompileRequest, expected_source_ro
     assert(invalid_utf8.stdout == invalid_expected.stdout && invalid_utf8.stderr == invalid_expected.stderr && invalid_utf8.exit_code == invalid_expected.exit_code)
     cli_files.write_bytes(plan_file, [U8]{}) ?? panic("actual empty UTF-8 plan")
     if jet_cli_try_read_plan(plan_file) == {
-        .Ok(_) -> panic("empty UTF-8 is valid text, not a valid JSON plan")
+        .Ok(_) -> { panic("empty UTF-8 is valid text, not a valid JSON plan") }
         .Err(problem) -> assert(problem.message.starts_with("invalid try plan JSON: "))
     }
     bom := [U8]{239, 187, 191}
     bom.extend("{{\"entry\":\"run.jet\",\"edits\":[]}}".bytes())
     cli_files.write_bytes(plan_file, bom) ?? panic("actual BOM plan")
     if jet_cli_try_read_plan(plan_file) == {
-        .Ok(_) -> panic("the canonical JSON reader rejects the BOM, not the UTF-8 decoder")
+        .Ok(_) -> { panic("the canonical JSON reader rejects the BOM, not the UTF-8 decoder") }
         .Err(problem) -> assert(problem.message.starts_with("invalid try plan JSON: "))
     }
     missing_plan: "{root}/missing-plan.json"
     if jet_cli_try_read_plan(missing_plan) == {
-        .Ok(_) -> panic("missing plan must fail before decoding")
+        .Ok(_) -> { panic("missing plan must fail before decoding") }
         .Err(problem) -> {
             assert(problem.message.starts_with("could not read try plan `{missing_plan}`: "))
             assert(!problem.message.contains("stream did not contain valid UTF-8"))

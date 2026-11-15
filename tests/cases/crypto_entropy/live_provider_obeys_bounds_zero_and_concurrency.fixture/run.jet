@@ -3,17 +3,23 @@ use {
     random: core.crypto.random
     core.crypto.[CryptoError]
 }
-EntropyBarrier: struct { arrived: Int }
+
+EntropyBarrier: struct {
+    arrived: Int
+}
+
 s1_entropy_barrier_wait: fn(state: Shared<EntropyBarrier>, changed: Condition) {
     guard: state.guard_edit()
     guard.value.arrived += 1
     changed.notify_all()
     guard.wait(changed, fn(value) { value.arrived == 8 }) ?? panic("barrier wait")
 }
+
 s1_entropy_worker: fn(state: Shared<EntropyBarrier>, changed: Condition) -> [U8] {
     s1_entropy_barrier_wait(state, changed)
     random.bytes(64) ?? panic("entropy")
 }
+
 #Test("live_provider_obeys_bounds_zero_and_concurrency") {
     assert_eq(random.bytes(0) ?? panic("empty"), [U8]{})
     filled: random.bytes(32) ?? panic("fill")
@@ -21,11 +27,11 @@ s1_entropy_worker: fn(state: Shared<EntropyBarrier>, changed: Condition) -> [U8]
     loop _ in 0..<32 -> zeros.push(U8{0})
     assert(filled != zeros)
     if random.bytes(-1) == {
-        .Err(error) -> assert_eq(error, CryptoError.Length)
+        .Err(error) -> { assert_eq(error, CryptoError.Length) }
         .Ok(_) -> panic("negative accepted")
     }
     if random.bytes(1048577) == {
-        .Err(error) -> assert_eq(error, CryptoError.Length)
+        .Err(error) -> { assert_eq(error, CryptoError.Length) }
         .Ok(_) -> panic("oversize accepted")
     }
     state: Shared{EntropyBarrier{arrived: 0}}

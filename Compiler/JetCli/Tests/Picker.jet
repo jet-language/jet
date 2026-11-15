@@ -2,10 +2,23 @@
 // frames and keys, without a terminal.
 use {
     jet_cli.[
-        JetCLIPickerAction, JetCLIPickerKey, JetCLIPickerState, jet_cli_palette_category, jet_cli_picker_apply,
-        jet_cli_picker_categorized, jet_cli_picker_cols, jet_cli_picker_detail, jet_cli_picker_esc,
-        jet_cli_picker_fuzzy, jet_cli_picker_keys, jet_cli_picker_members, jet_cli_picker_pick,
-        jet_cli_picker_render, jet_cli_picker_search, jet_cli_picker_state, jet_cli_picker_text_view,
+        JetCLIPickerAction,
+        JetCLIPickerKey,
+        JetCLIPickerState,
+        jet_cli_palette_category,
+        jet_cli_picker_apply,
+        jet_cli_picker_categorized,
+        jet_cli_picker_cols,
+        jet_cli_picker_detail,
+        jet_cli_picker_esc,
+        jet_cli_picker_fuzzy,
+        jet_cli_picker_keys,
+        jet_cli_picker_members,
+        jet_cli_picker_pick,
+        jet_cli_picker_render,
+        jet_cli_picker_search,
+        jet_cli_picker_state,
+        jet_cli_picker_text_view,
         jet_cli_picker_wrap,
     ]
     jet_foundation.[diagnostic_explanation, diagnostic_explanation_render]
@@ -50,9 +63,7 @@ picker_test_selected: fn(frame: String) -> String Never! {
 
 picker_test_same_keys: fn(got: [JetCLIPickerKey], want: [JetCLIPickerKey]) Never! {
     assert(got.len() == want.len(), "decoded {got.len()} keys, want {want.len()}")
-    loop (at, key) in want {
-        assert(got[at] == key, "key {at} decoded wrong")
-    }
+    loop (at, key) in want { assert(got[at] == key, "key {at} decoded wrong") }
 }
 
 #Test("picker index lists every palette command once under its palette category") {
@@ -167,9 +178,7 @@ picker_test_same_keys: fn(got: [JetCLIPickerKey], want: [JetCLIPickerKey]) Never
     frame: jet_cli_picker_detail(run, 80, false)
     picker_test_boxed(frame, 80)
     assert(frame.contains("Usage   "), frame)
-    loop flag in run.flags {
-        assert(frame.contains(flag.long), "detail lacks `{flag.long}`")
-    }
+    loop flag in run.flags { assert(frame.contains(flag.long), "detail lacks `{flag.long}`") }
     assert(frame.contains("See Also  build · test · dev"), frame)
 }
 
@@ -202,10 +211,19 @@ picker_test_same_keys: fn(got: [JetCLIPickerKey], want: [JetCLIPickerKey]) Never
 #Test("key bytes decode arrows, F1, alt-enter and cut-off sequences") {
     rest := [U8]{}
     keys: jet_cli_picker_keys([U8]{27, 79, 80, 27, 91, 66, 27, 91, 49, 49, 126, 27, 13, 114, 27, 27, 3}, rest)
-    picker_test_same_keys(keys, [JetCLIPickerKey]{
-        JetCLIPickerKey.F1, JetCLIPickerKey.Down, JetCLIPickerKey.F1, JetCLIPickerKey.AltEnter,
-        JetCLIPickerKey.Text{text: "r"}, JetCLIPickerKey.Escape, JetCLIPickerKey.Escape, JetCLIPickerKey.Quit,
-    })
+    picker_test_same_keys(
+        keys,
+        [JetCLIPickerKey]{
+            JetCLIPickerKey.F1,
+            JetCLIPickerKey.Down,
+            JetCLIPickerKey.F1,
+            JetCLIPickerKey.AltEnter,
+            JetCLIPickerKey.Text{text: "r"},
+            JetCLIPickerKey.Escape,
+            JetCLIPickerKey.Escape,
+            JetCLIPickerKey.Quit,
+        },
+    )
     assert_eq(rest.len(), 0)
     cut: jet_cli_picker_keys([U8]{113, 27, 91}, rest)
     picker_test_same_keys(cut, [JetCLIPickerKey]{JetCLIPickerKey.Text{text: "q"}})

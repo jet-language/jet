@@ -12,12 +12,13 @@ package: {
     authority: { allow: [Browser, Mem.Alloc] }
 }
 
+#[Target(Web), HTML(Path{"ui_web_click.html"})]
+
 use {
     ui: core.ui
     reactive: core.reactive
     core.color.[Color]
 }
-#[Target(Web), HTML(Path{"ui_web_click.html"})]
 
 render: fn(n: Int) {
     backend: ui.null_backend()
@@ -38,12 +39,14 @@ run: fn() {
         color := Color{r: 232, g: 121, b: 12, a: 255}
         if n % 2 == 0 -> color = Color{r: 51, g: 102, b: 255, a: 255}
         backend: ui.null_backend()
-        tree: ui.box([
-            ui.node_color("Clicks: {n}", 160.0, 40.0, color),
-            ui.button("Click me", fn() {
-                count.set(count.get() + 1)
-            })
-        ])
+        tree: ui.box(
+            [
+                ui.node_color("Clicks: {n}", 160.0, 40.0, color),
+                ui.button("Click me", fn() {
+                    count.set(count.get() + 1)
+                }),
+            ],
+        )
         ui.mount(backend, tree, ui.constraint(0.0, 0.0, 300.0, 120.0))
     })
 }

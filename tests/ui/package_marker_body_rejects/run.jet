@@ -3,8 +3,11 @@
 Unreleased: struct {
     impl Diagnostic {
         code: "E0927"
+
         what: fn(self) -> String { "this package is not released yet" }
+
         why: fn(self) -> String { "the release rule rejects a 0.x version" }
+
         fix: fn(self) -> String { "publish a 1.0 version" }
     }
 }
@@ -14,9 +17,7 @@ Released: struct {
         sites: [.Package]
 
         expand: fn(self, target: Target) {
-            if target.version.starts_with("0.") {
-                reject(Unreleased{})
-            }
+            if target.version.starts_with("0.") -> reject(Unreleased{})
         }
     }
 }

@@ -372,7 +372,9 @@ parser_module_apply_cap: fn(state: &JetParserState, item: &&Item) -> Item {
         cap: parser_module_fx_cap(state, marker, definition.name) ?? return item.move()
         updated := definition
         updated.cap = Val(cap)
-        if definition.body == .Val(body) -> updated.body = Val(parser_module_body_caps(body.copy(), cap))
+        if definition.body == .Val(body) {
+            updated.body = Val(parser_module_body_caps(body.copy(), cap))
+        }
         return Item.CodeModule{value: updated}
     }
     item.move()
@@ -433,7 +435,9 @@ parser_module_body_caps: fn(body: [Item], cap: ModuleCap) -> [Item] Never! {
     capped := [Item]{}
     loop item in body {
         if item == {
-            .Func(definition) -> capped.push(Item.Func{value: parser_func_with_cap(definition, cap)})
+            .Func(definition) -> {
+                capped.push(Item.Func{value: parser_func_with_cap(definition, cap)})
+            }
             .Impl(definition) -> {
                 updated := definition
                 updated.methods = parser_methods_with_cap(definition.methods, cap)
@@ -458,7 +462,9 @@ parser_module_body_caps: fn(body: [Item], cap: ModuleCap) -> [Item] Never! {
             }
             .CodeModule(definition) -> {
                 updated := definition
-                if definition.body == .Val(inner) -> updated.body = Val(parser_module_body_caps(inner.copy(), cap))
+                if definition.body == .Val(inner) {
+                    updated.body = Val(parser_module_body_caps(inner.copy(), cap))
+                }
                 capped.push(Item.CodeModule{value: updated})
             }
             .GenericModule(definition) -> {
@@ -466,7 +472,9 @@ parser_module_body_caps: fn(body: [Item], cap: ModuleCap) -> [Item] Never! {
                 updated.body = parser_module_body_caps(definition.body, cap)
                 capped.push(Item.GenericModule{value: updated})
             }
-            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> capped.push(item.copy())
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {
+                capped.push(item.copy())
+            }
         }
     }
     capped
@@ -517,7 +525,9 @@ parser_module_body_visibility: fn(body: &&[Item], is_pub: Bool, is_package_pub: 
             .CodeModule(definition) -> {
                 updated := definition
                 package: parser_narrowed_package(definition.is_pub, definition.is_package_pub, is_package_pub)
-                if definition.body == .Val(inner) -> updated.body = Val(parser_module_body_visibility(inner.copy(), false, package))
+                if definition.body == .Val(inner) {
+                    updated.body = Val(parser_module_body_visibility(inner.copy(), false, package))
+                }
                 narrowed.push(Item.CodeModule{value: updated})
             }
             .GenericModule(definition) -> {
@@ -598,7 +608,9 @@ parser_module_body_visibility: fn(body: &&[Item], is_pub: Bool, is_package_pub: 
                 updated.is_package_pub = parser_narrowed_package(definition.is_pub, definition.is_package_pub, is_package_pub)
                 narrowed.push(Item.ProtocolDecl{value: updated})
             }
-            .EffectDecl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .TemplateLoop(_) | .MarkerDecl(_) | .FactDecl(_) -> narrowed.push(item)
+            .EffectDecl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .TemplateLoop(_) | .MarkerDecl(_) | .FactDecl(_) -> {
+                narrowed.push(item)
+            }
         }
     }
     narrowed
@@ -659,7 +671,9 @@ parser_parse_generic_module_after_name: fn(state: &JetParserState, modifiers: Pa
             }
             parser_bump(state)
         }
-        if parser_type_close_here(state) -> parser_take_type_close(state) else -> parser_expect(state, TOKEN_GT, "`>` after generic module type parameters")
+        if parser_type_close_here(state) -> parser_take_type_close(state) else {
+            parser_expect(state, TOKEN_GT, "`>` after generic module type parameters")
+        }
     }
     if parser_current_kind(state) == TOKEN_LPAREN {
         parser_bump(state)
@@ -732,7 +746,9 @@ parser_parse_module_alias_after_name: fn(state: &JetParserState, modifiers: Pars
             }
             parser_bump(state)
         }
-        if parser_type_close_here(state) { parser_take_type_close(state) } else { parser_expect(state, TOKEN_GT, "`>` after module alias type arguments") }
+        if parser_type_close_here(state) -> parser_take_type_close(state) else {
+            parser_expect(state, TOKEN_GT, "`>` after module alias type arguments")
+        }
     }
     if parser_current_kind(state) == TOKEN_LPAREN {
         parser_bump(state)
@@ -815,13 +831,15 @@ parser_parse_role_module: fn(state: &JetParserState, modifiers: ParsedItemModifi
                         parsed_services: parser_module_services_map(state)
                         loop service in parsed_services -> env_services.push(service)
                     }
-                    else -> env_fields.push(NamedExpr{name: field_name, name_span: field.span, value: parser_parse_expression(state, 1, 0).expr})
+                    else -> {
+                        env_fields.push(NamedExpr{name: field_name, name_span: field.span, value: parser_parse_expression(state, 1, 0).expr})
+                    }
                 }
             }
-            .System -> system_fields.push(parser_module_system_field(state))
-            .Image -> image_fields.push(parser_module_image_field(state))
-            .Fleet -> fleet_fields.push(parser_module_fleet_field(state))
-            .VMTest -> vmtest_fields.push(parser_module_vmtest_field(state))
+            .System -> { system_fields.push(parser_module_system_field(state)) }
+            .Image -> { image_fields.push(parser_module_image_field(state)) }
+            .Fleet -> { fleet_fields.push(parser_module_fleet_field(state)) }
+            .VMTest -> { vmtest_fields.push(parser_module_vmtest_field(state)) }
             .Profile -> {
                 field: parser_expect_name(state, "for a profile field")
                 parser_expect(state, TOKEN_COLON, "after a profile field")
@@ -915,7 +933,9 @@ parser_module_perf_budget_entry: fn(state: &JetParserState, require_head: Bool) 
             head: parser_bump(state)
             start = head.span
         }
-        require_head -> parser_add_error_here(state, "expected a `Budget` value", "performance budgets are typed records", "write `Budget{{ name: ..., metric: ..., limit: ... }}`")
+        require_head -> {
+            parser_add_error_here(state, "expected a `Budget` value", "performance budgets are typed records", "write `Budget{{ name: ..., metric: ..., limit: ... }}`")
+        }
         else -> {}
     }
     parser_expect(state, TOKEN_LBRACE, "`{{` after a budget type")
@@ -974,14 +994,20 @@ parser_module_perf_workload_entry: fn(state: &JetParserState, name: Token) -> Co
         value: parser_parse_expression(state, 1, 0)
         if parser_value(state, field) == {
             "target" -> {
-                if target != None -> parser_module_error(state, "E2903", field.span, "a compile workload repeats `target`", "each edit workload has one target", "keep one `target:` field")
+                if target != None {
+                    parser_module_error(state, "E2903", field.span, "a compile workload repeats `target`", "each edit workload has one target", "keep one `target:` field")
+                }
                 target = Val(value.expr)
             }
             "patch" -> {
-                if patch != None -> parser_module_error(state, "E2903", field.span, "a compile workload repeats `patch`", "each edit workload has one patch", "keep one `patch:` field")
+                if patch != None {
+                    parser_module_error(state, "E2903", field.span, "a compile workload repeats `patch`", "each edit workload has one patch", "keep one `patch:` field")
+                }
                 patch = Val(value.expr)
             }
-            else -> parser_module_error(state, "E2903", field.span, "unknown compiler workload field", "edit workloads contain target and patch", "write `target:` or `patch:`")
+            else -> {
+                parser_module_error(state, "E2903", field.span, "unknown compiler workload field", "edit workloads contain target and patch", "write `target:` or `patch:`")
+            }
         }
         if parser_current_kind(state) == TOKEN_COMMA -> parser_bump(state)
     }
@@ -991,8 +1017,12 @@ parser_module_perf_workload_entry: fn(state: &JetParserState, name: Token) -> Co
     }
     target_value: target ?? Expr.Unit{span: name.span, id: parser_node_id(state)}
     patch_value: patch ?? Expr.Unit{span: name.span, id: parser_node_id(state)}
-    if target == None -> parser_module_error(state, "E2903", name.span, "a compile workload is missing `target`", "each edit workload names the measured target", "add `target: \"cli\"`")
-    if patch == None -> parser_module_error(state, "E2903", name.span, "a compile workload is missing `patch`", "each edit workload names a deterministic source patch", "add `patch: \"path/to.patch\"`")
+    if target == None {
+        parser_module_error(state, "E2903", name.span, "a compile workload is missing `target`", "each edit workload names the measured target", "add `target: \"cli\"`")
+    }
+    if patch == None {
+        parser_module_error(state, "E2903", name.span, "a compile workload is missing `patch`", "each edit workload names a deterministic source patch", "add `patch: \"path/to.patch\"`")
+    }
     CompileWorkloadDecl{name: parser_value(state, name), name_span: name.span, target: target_value, patch: patch_value, span: parser_cover(name.span, close.span)}
 }
 
@@ -1055,8 +1085,8 @@ parser_module_system_value_end: fn(value: SystemFieldValue, fallback: Span) -> S
     if value == {
         .Platform(_, _, span) -> span
         .Packages(packages) -> expr_span(packages)
-        .Services(entries) -> { if entries.len() == 0 -> fallback else -> entries[entries.len() - 1].span }
-        .Options(entries) -> { if entries.len() == 0 -> fallback else -> entries[entries.len() - 1].span }
+        .Services(entries) -> if entries.len() == 0 -> fallback else -> entries[entries.len() - 1].span
+        .Options(entries) -> if entries.len() == 0 -> fallback else -> entries[entries.len() - 1].span
         .Other(other) -> expr_span(other)
     }
 }
@@ -1163,7 +1193,10 @@ parser_module_fleet_field: fn(state: &JetParserState) -> FleetField {
         "hosts" -> FleetFieldValue.Hosts{entries: parser_module_hosts_map(state)}
         else -> FleetFieldValue.Other{value: parser_parse_expression(state, 1, 0).expr}
     }
-    end: if value == { .Hosts(entries) -> { if entries.len() == 0 -> name.span else -> entries[entries.len() - 1].span } .Other(expr) -> expr_span(expr) }
+    end: if value == {
+        .Hosts(entries) -> if entries.len() == 0 -> name.span else -> entries[entries.len() - 1].span
+        .Other(expr) -> expr_span(expr)
+    }
     FleetField{name: parser_value(state, name), name_span: name.span, value: value, span: parser_cover(name.span, end)}
 }
 
@@ -1196,7 +1229,7 @@ parser_module_vmtest_field: fn(state: &JetParserState) -> VMTestField {
         else -> VMTestFieldValue.Other{value: parser_parse_expression(state, 1, 0).expr}
     }
     end: if value == {
-        .Hosts(entries) -> { if entries.len() == 0 -> name.span else -> entries[entries.len() - 1].span }
+        .Hosts(entries) -> if entries.len() == 0 -> name.span else -> entries[entries.len() - 1].span
         .Run(span) -> span
         .Other(expr) -> expr_span(expr)
     }
@@ -1213,7 +1246,9 @@ parser_module_hosts_map: fn(state: &JetParserState) -> [HostEntry] {
         host: parser_module_dashed_name(state, "for a host name")
         parser_expect(state, TOKEN_COLON, "after a host name")
         system: parser_expect_name(state, "for `system` in a host entry")
-        if parser_value(state, system) != "system" -> parser_module_error(state, "E0960", system.span, "a host entry must reference a system", "fleet hosts resolve through `system.<name>`", "write `host: system.machine`")
+        if parser_value(state, system) != "system" {
+            parser_module_error(state, "E0960", system.span, "a host entry must reference a system", "fleet hosts resolve through `system.<name>`", "write `host: system.machine`")
+        }
         parser_expect(state, TOKEN_DOT, "after `system` in a host entry")
         target: parser_module_dashed_name(state, "for a host system name")
         overrides := Span?{None}

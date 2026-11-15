@@ -55,7 +55,9 @@ store_explain_profile_provider_facts: fn(entry: StoreEntry, reports: &[ExplainRe
 store_explain_profile_generations: fn(entry: StoreEntry, profile_name: String, profile_path: String, profiles: &[ExplainProfile], reports: &[ExplainReport]) Never! {
     generation_dir: files.join(profile_path, "generations")
     generations: files.list_dir(generation_dir) ?? {
-        if !store_io_is_not_found(err) -> reports.push(ExplainReport.loss("profile {profile_name} provider facts are unavailable: could not read {generation_dir}: {err}"))
+        if !store_io_is_not_found(err) {
+            reports.push(ExplainReport.loss("profile {profile_name} provider facts are unavailable: could not read {generation_dir}: {err}"))
+        }
         return
     }
     loop generation in generations {
@@ -104,8 +106,12 @@ store_explain_generation_packages: fn(entry: StoreEntry, profile_name: String, n
         output_hash: store_explain_json_text(package, "output_hash") ?? ""
         raw_reference: store_explain_json_text(package, "raw") ?? ""
         target: store_explain_json_text(package, "target") ?? ""
-        if output_hash != entry.envelope.output_hash && raw_reference != entry.reference && target != entry.name -> next
-        if output_hash != entry.envelope.output_hash -> reports.push(ExplainReport.loss("{label} package identity does not retain the current output hash"))
+        if output_hash != entry.envelope.output_hash && raw_reference != entry.reference && target != entry.name {
+            next
+        }
+        if output_hash != entry.envelope.output_hash {
+            reports.push(ExplainReport.loss("{label} package identity does not retain the current output hash"))
+        }
         facts_value: package.get("provider_facts") ?? {
             reports.push(ExplainReport.loss("{label} package {entry.reference} lacks provider facts"))
             next
@@ -120,7 +126,7 @@ store_explain_generation_packages: fn(entry: StoreEntry, profile_name: String, n
         comparisons: [(field: String, expected: String, actual: String)]{
             (field: "reference", expected: raw_reference, actual: facts.reference),
             (field: "target", expected: target, actual: facts.target),
-            (field: "provider", expected: provider, actual: facts.provider)
+            (field: "provider", expected: provider, actual: facts.provider),
         }
         loop item_check in comparisons {
             if item_check.expected != "" && item_check.expected != item_check.actual {
@@ -130,7 +136,9 @@ store_explain_generation_packages: fn(entry: StoreEntry, profile_name: String, n
         if store_explain_json_text(package, "provider_facts_digest") == {
             .Val(expected) -> {
                 actual: facts.digest()
-                if expected != actual -> reports.push(ExplainReport.conflict("{label} provider-fact digest disagrees: {expected} vs {actual}"))
+                if expected != actual {
+                    reports.push(ExplainReport.conflict("{label} provider-fact digest disagrees: {expected} vs {actual}"))
+                }
             }
             .None -> {
                 reports.push(ExplainReport.loss("{label} package {entry.reference} lacks provider-fact digest"))
@@ -141,7 +149,7 @@ store_explain_generation_packages: fn(entry: StoreEntry, profile_name: String, n
 }
 
 // A string field of a JSON object, or None when absent or not a string.
-store_explain_json_text: fn(object: [String: Dyn], field: String) -> String? Never! {
+store_explain_json_text: fn(object: [String:Dyn], field: String) -> String? Never! {
     value: object.get(field) ?? return None
     pkg_json_text(value)
 }
@@ -151,7 +159,9 @@ store_explain_sorted_profiles: fn(profiles: [ExplainProfile]) -> [ExplainProfile
     sorted := [ExplainProfile]{}
     loop profile in profiles {
         at := sorted.len()
-        loop at > 0 && (profile.profile < sorted[at - 1].profile || (profile.profile == sorted[at - 1].profile && profile.generation < sorted[at - 1].generation)) -> at -= 1
+        loop at > 0 && (profile.profile < sorted[at - 1].profile || (profile.profile == sorted[at - 1].profile && profile.generation < sorted[at - 1].generation)) {
+            at -= 1
+        }
         sorted.insert(at, profile.copy())
     }
     sorted

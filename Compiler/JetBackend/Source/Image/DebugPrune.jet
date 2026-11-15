@@ -234,13 +234,11 @@ link_info_dropped_before: fn(drops: [Int], sums: [Int], at: Int) -> Int Never! {
     high := drops.len() >> 1
     loop low < high {
         middle: (low + high) >> 1
-        if drops[2 * middle] < at {
-            low = middle + 1
-        } else {
-            high = middle
-        }
+        if drops[2 * middle] < at -> low = middle + 1 else -> high = middle
     }
-    if (low > 0 && drops[2 * low - 1] > at) || (low < (drops.len() >> 1) && drops[2 * low] == at) -> return -1
+    if (low > 0 && drops[2 * low - 1] > at) || (low < (drops.len() >> 1) && drops[2 * low] == at) {
+        return -1
+    }
     sums[low]
 }
 
@@ -262,7 +260,9 @@ link_info_plan: fn(info: [U8], abbrev: [U8], text_start: Int, text_end: Int) -> 
         length: link_debug_le(info, unit, 4)
         if length < 8 || length >= 0xfffffff0 || unit + 4 + length > info.len() -> return None
         end: unit + 4 + length
-        if link_debug_le(info, unit + 4, 2) != 5 || (Int{info[unit + 6]}) != 1 || (Int{info[unit + 7]}) != 8 -> return None
+        if link_debug_le(info, unit + 4, 2) != 5 || (Int{info[unit + 6]}) != 1 || (Int{info[unit + 7]}) != 8 {
+            return None
+        }
         table: link_debug_abbrevs(abbrev, link_debug_le(info, unit + 8, 4)) ?? return None
         plan.units.push(unit)
         pos := unit + 12
@@ -291,9 +291,7 @@ link_info_plan: fn(info: [U8], abbrev: [U8], text_start: Int, text_end: Int) -> 
             if pos < 0 || pos > end -> return None
             if candidate {
                 if low_pc >= 0 && (low_pc < text_start || low_pc >= text_end) {
-                    if table.children[entry] {
-                        drop_start = die
-                    } else {
+                    if table.children[entry] -> drop_start = die else {
                         plan.drops.push(die)
                         plan.drops.push(pos)
                     }
@@ -308,7 +306,9 @@ link_info_plan: fn(info: [U8], abbrev: [U8], text_start: Int, text_end: Int) -> 
     }
     sums: link_info_sums(plan.drops)
     loop (k, place) in plan.refs {
-        if link_info_dropped_before(plan.drops, sums, plan.ref_units[k] + link_debug_le(info, place, 4)) < 0 -> return None
+        if link_info_dropped_before(plan.drops, sums, plan.ref_units[k] + link_debug_le(info, place, 4)) < 0 {
+            return None
+        }
     }
     Val(plan)
 }
@@ -333,7 +333,9 @@ link_info_rewrite: fn(info: &[U8], plan: LinkInfoPlan, lines: [Int:Int], lists: 
         offset: link_debug_le(info, at, 4)
         dwarf_patch_u32(info, at, lists.get(offset) ?? offset)
     }
-    if plan.drops.len() == 0 -> return
+    if plan.drops.len() == 0 {
+        return
+    }
     loop unit in plan.units {
         end: unit + 4 + link_debug_le(info, unit, 4)
         dropped: link_info_dropped_before(plan.drops, sums, end) - link_info_dropped_before(plan.drops, sums, unit)
@@ -363,11 +365,15 @@ link_line_prune: fn(line: &[U8], text_start: Int, text_end: Int, moved: &[Int:In
     loop at < line.len() {
         unit: at
         length: link_debug_le(line, unit, 4)
-        if length < 14 || length >= 0xfffffff0 || unit + 4 + length > line.len() || link_debug_le(line, unit + 4, 2) != 5 || (Int{line[unit + 6]}) != 8 -> return
+        if length < 14 || length >= 0xfffffff0 || unit + 4 + length > line.len() || link_debug_le(line, unit + 4, 2) != 5 || (Int{line[unit + 6]}) != 8 {
+            return
+        }
         end: unit + 4 + length
         program: unit + 12 + link_debug_le(line, unit + 8, 4)
         opcode_base: Int{line[unit + 17]}
-        if opcode_base < 1 || unit + 18 + opcode_base - 1 > program || program > end -> return
+        if opcode_base < 1 || unit + 18 + opcode_base - 1 > program || program > end {
+            return
+        }
         olds.push(unit)
         news.push(kept.len())
         kept.extend(line[unit..<program])
@@ -378,12 +384,16 @@ link_line_prune: fn(line: &[U8], text_start: Int, text_end: Int, moved: &[Int:In
             addressed := false
             ended := false
             loop !ended {
-                if pos >= end -> return
+                if pos >= end {
+                    return
+                }
                 op: Int{line[pos]}
                 pos += 1
                 if op == 0 {
                     size: link_debug_uleb(line, pos)
-                    if size < 1 || pos + size > end -> return
+                    if size < 1 || pos + size > end {
+                        return
+                    }
                     sub: Int{line[pos]}
                     // DW_LNE_set_address: the sequence's first decides.
                     if sub == 2 && !addressed && size == 9 {
@@ -399,8 +409,12 @@ link_line_prune: fn(line: &[U8], text_start: Int, text_end: Int, moved: &[Int:In
                     loop _ in 0..<(Int{line[unit + 17 + op]}) -> pos = link_debug_leb_end(line, pos)
                 }
             }
-            if pos > end -> return
-            if !addressed || (address >= text_start && address < text_end) -> kept.extend(line[sequence..<pos])
+            if pos > end {
+                return
+            }
+            if !addressed || (address >= text_start && address < text_end) {
+                kept.extend(line[sequence..<pos])
+            }
         }
         dwarf_patch_u32(kept, news[news.len() - 1], kept.len() - news[news.len() - 1] - 4)
         at = end
@@ -434,13 +448,9 @@ link_list_end: fn(lists: [U8], from: Int, end: Int) -> Int Never! {
         // default_location none.
         if kind == 2 || kind == 3 || kind == 4 {
             at = link_debug_leb_end(lists, link_debug_leb_end(lists, at))
-        } else if kind == 7 {
-            at += 16
-        } else if kind == 8 {
+        } else if kind == 7 { at += 16 } else if kind == 8 {
             at = link_debug_leb_end(lists, at + 8)
-        } else if kind != 5 {
-            return -1
-        }
+        } else if kind != 5 { return -1 }
         if at >= end -> return -1
         length: link_debug_uleb(lists, at)
         if length < 0 -> return -1
@@ -455,7 +465,9 @@ link_list_end: fn(lists: [U8], from: Int, end: Int) -> Int Never! {
 // were.
 link_lists_prune: fn(lists: &[U8], referred: [Int], moved: &[Int:Int]) Never! {
     loop k in 1..<referred.len() {
-        if referred[k] <= referred[k - 1] -> return
+        if referred[k] <= referred[k - 1] {
+            return
+        }
     }
     kept := [U8]{}
     olds := [Int]{}
@@ -465,15 +477,21 @@ link_lists_prune: fn(lists: &[U8], referred: [Int], moved: &[Int:Int]) Never! {
     loop at < lists.len() {
         unit: at
         length: link_debug_le(lists, unit, 4)
-        if length < 8 || length >= 0xfffffff0 || unit + 4 + length > lists.len() || link_debug_le(lists, unit + 4, 2) != 5 || link_debug_le(lists, unit + 8, 4) != 0 -> return
+        if length < 8 || length >= 0xfffffff0 || unit + 4 + length > lists.len() || link_debug_le(lists, unit + 4, 2) != 5 || link_debug_le(lists, unit + 8, 4) != 0 {
+            return
+        }
         end: unit + 4 + length
         new_unit: kept.len()
         kept.extend(lists[unit..<unit + 12])
         loop next_list < referred.len() && referred[next_list] < end {
             from: referred[next_list]
-            if from < unit + 12 -> return
+            if from < unit + 12 {
+                return
+            }
             to: link_list_end(lists, from, end)
-            if to < 0 -> return
+            if to < 0 {
+                return
+            }
             olds.push(from)
             news.push(kept.len())
             kept.extend(lists[from..<to])
@@ -482,7 +500,9 @@ link_lists_prune: fn(lists: &[U8], referred: [Int], moved: &[Int:Int]) Never! {
         dwarf_patch_u32(kept, new_unit, kept.len() - new_unit - 4)
         at = end
     }
-    if next_list != referred.len() -> return
+    if next_list != referred.len() {
+        return
+    }
     loop (k, old) in olds -> moved.add(old, news[k]).drop("list offsets are unique")
     lists = kept
 }
@@ -502,8 +522,12 @@ link_jetline_link: fn(table: &[U8], text_start: Int, text_end: Int) -> Bool Neve
         count: link_debug_le(table, at + 4, 4)
         strings: at + link_debug_le(table, at + 8, 4)
         rows: at + link_debug_le(table, at + 12, 4)
-        if length < 12 || end > table.len() || at + 16 + 32 * count > strings || strings > rows || rows > end -> return false
-        if !link_jetline_block(linked, table, at + 16, count, strings, rows, end, text_start, text_end) -> return false
+        if length < 12 || end > table.len() || at + 16 + 32 * count > strings || strings > rows || rows > end {
+            return false
+        }
+        if !link_jetline_block(linked, table, at + 16, count, strings, rows, end, text_start, text_end) {
+            return false
+        }
         at = end
     }
     table = linked
@@ -537,10 +561,14 @@ link_jetline_block: fn(linked: &[U8], table: [U8], records: Int, count: Int, str
         size: link_debug_le(table, record + 8, 4)
         name: strings + link_debug_le(table, record + 12, 4)
         file: strings + link_debug_le(table, record + 16, 4)
-        if !link_jetline_string(texts, moved, table, name, rows) || !link_jetline_string(texts, moved, table, file, rows) -> return false
+        if !link_jetline_string(texts, moved, table, name, rows) || !link_jetline_string(texts, moved, table, file, rows) {
+            return false
+        }
         from: rows + link_debug_le(table, record + 24, 4)
         to := from
-        loop _ in 0..<link_debug_le(table, record + 28, 4) -> to = link_debug_leb_end(table, link_debug_leb_end(table, to))
+        loop _ in 0..<link_debug_le(table, record + 28, 4) {
+            to = link_debug_leb_end(table, link_debug_leb_end(table, to))
+        }
         if from > end || to > end -> return false
         // Sorted by start, a start is never below the previous start; it is
         // below the previous end only where two records overlap.

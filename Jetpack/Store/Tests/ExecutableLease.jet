@@ -63,7 +63,7 @@ store_lease_test_publish: fn(protocol: ExecutableLeaseProtocol, root: String, co
         (package: "demo", version: "", reference: "", output: snapshot.digest),
         (package: "demo", version: "", reference: reference, output: ""),
         (package: "demo", version: "1\nforged", reference: reference, output: snapshot.digest),
-        (package: "demo", version: oversized, reference: reference, output: snapshot.digest)
+        (package: "demo", version: oversized, reference: reference, output: snapshot.digest),
     }
     loop case in cases {
         assert(protocol.request(LeaseOperation.Acquire, lease_id, 1, scope, snapshot.path, case.package, case.version, case.reference, case.output, "", members) == .Err(_))
@@ -77,10 +77,12 @@ store_lease_test_publish: fn(protocol: ExecutableLeaseProtocol, root: String, co
         signed: protocol.encode_request(malformed) ?? panic("sign malformed")
         assert(store_lease_test_is_err(protocol.accept_snapshot(signed, snapshot.digest, snapshot.path)))
     }
-    assert((if protocol.current_receipt(lease_id) == {
-        .Ok(found) -> found
-        .Err(error) -> panic("current")
-    }) == None)
+    assert(
+        (if protocol.current_receipt(lease_id) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("current")
+        }) == None,
+    )
     receipt: protocol.accept_snapshot(frame, snapshot.digest, snapshot.path) ?? panic("accept")
     assert_eq(receipt.version, "")
     assert_eq(receipt.reference, reference)
@@ -197,7 +199,9 @@ store_lease_test_publish: fn(protocol: ExecutableLeaseProtocol, root: String, co
 }
 
 #Test("missing lifetime marker without a receipt is not live proof") {
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     root: store_lease_test_scratch("marker-without-receipt")
     protocol: ExecutableLeaseProtocol.open(root) ?? panic("open")
     snapshot: store_lease_test_snapshot(root, "1-0-marker-without-receipt", "one")
@@ -215,7 +219,9 @@ store_lease_test_publish: fn(protocol: ExecutableLeaseProtocol, root: String, co
 }
 
 #Test("missing lifetime lock directory never proves a live snapshot idle") {
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     root: store_lease_test_scratch("lock-directory-interference")
     protocol: ExecutableLeaseProtocol.open(root) ?? panic("open")
     snapshot: store_lease_test_snapshot(root, "1-0-lock-directory-interference", "one")
@@ -246,7 +252,9 @@ store_lease_test_publish: fn(protocol: ExecutableLeaseProtocol, root: String, co
 }
 
 #Test("missing lifetime marker never proves a live snapshot idle") {
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     root: store_lease_test_scratch("marker-interference")
     protocol: ExecutableLeaseProtocol.open(root) ?? panic("open")
     live_root: files.join(files.join(root, "leases"), "1-0-marker-interference")

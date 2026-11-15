@@ -41,7 +41,7 @@ slice_u8: fn(bytes: [U8], start: Int, end: Int) -> [U8] Never! {
     loop {
         if i >= end || i >= bytes.len() -> return out
         out.push(bytes[i])
-        i = i + 1
+        i += 1
     }
 }
 
@@ -109,8 +109,7 @@ priv chacha20_core: module {
     }
 }
 
-#Overflow(.Wrapping)
-chacha20_block: fn(key: [U8], nonce: [U8], counter: Int) -> [U8] Never! {
+#Overflow(.Wrapping) chacha20_block: fn(key: [U8], nonce: [U8], counter: Int) -> [U8] Never! {
     state: chacha20_state(key, nonce, counter)
     w := chacha20_words()
     chacha20_rounds(state, w)
@@ -119,8 +118,7 @@ chacha20_block: fn(key: [U8], nonce: [U8], counter: Int) -> [U8] Never! {
     out
 }
 
-#Overflow(.Wrapping)
-qr: fn(s: &[U32], ia: Int, ib: Int, ic: Int, id: Int) Never! {
+#Overflow(.Wrapping) qr: fn(s: &[U32], ia: Int, ib: Int, ic: Int, id: Int) Never! {
     a := s[ia]
     b := s[ib]
     c := s[ic]
@@ -152,8 +150,7 @@ priv u32_words: module {
     }
 }
 
-#Overflow(.Wrapping)
-chacha20_xor: fn(key: [U8], nonce: [U8], counter: Int, plain: [U8]) -> [U8] Never! {
+#Overflow(.Wrapping) chacha20_xor: fn(key: [U8], nonce: [U8], counter: Int, plain: [U8]) -> [U8] Never! {
     state := chacha20_state(key, nonce, counter)
     w := chacha20_words()
     out := [U8]{}
@@ -216,7 +213,6 @@ chacha_poly_open: fn(key: [U8], nonce: [U8], aad: [U8], cipher: [U8]) -> [U8]? {
     if equal -> return Val(chacha20_xor(key, nonce, 1, ciphertext))
     None
 }
-
 
 hchacha20: fn(key: [U8], nonce16: [U8]) -> [U8] Never! {
     state: [U32]{
@@ -290,7 +286,8 @@ xchacha20poly1305_open: fn(key: [U8], nonce: [U8], cipher: [U8], aad: [U8]) -> [
 }
 
 /// RFC 9106 Argon2id with bounded portable memory and one to eight lanes.
-#Unsafe("crypto expert: the caller vouches for the password it hands the hash; its bytes stay in this call") argon2id: fn(password: Secret, salt: [U8], memory_kib: Int, iterations: Int, lanes: Int, output_len: Int) -> Secret CryptoError! {
+#Unsafe("crypto expert: the caller vouches for the password it hands the hash; its bytes stay in this call")
+argon2id: fn(password: Secret, salt: [U8], memory_kib: Int, iterations: Int, lanes: Int, output_len: Int) -> Secret CryptoError! {
     if password.bytes.len() > 1048576 || salt.len() < 8 || salt.len() > 64 || memory_kib < 8192 || memory_kib > 262144 || iterations < 1 || iterations > 10 || lanes < 1 || lanes > 8 || output_len < 16 || output_len > 64 {
         return Err(.Length)
     }
@@ -314,7 +311,9 @@ ed25519_verify_strict: fn(public: [U8], message: [U8], signature: [U8]) -> Bool 
     Ok(result == 1)
 }
 
-hkdf_sha256_raw: fn(ikm: [U8], salt: [U8], info: [U8], len: Int) -> Secret CryptoError! { crypto.hkdf_sha256(ikm, salt, info, len) }
+hkdf_sha256_raw: fn(ikm: [U8], salt: [U8], info: [U8], len: Int) -> Secret CryptoError! {
+    crypto.hkdf_sha256(ikm, salt, info, len)
+}
 
 x25519_raw: fn(secret_bytes: [U8], public_bytes: [U8]) -> Secret CryptoError! {
     if secret_bytes.len() != 32 || public_bytes.len() != 32 -> return Err(.KeyRejected)
@@ -329,13 +328,17 @@ all_zero: fn(bytes: [U8]) -> Bool Never! {
     diff == U8{0}
 }
 
-#Unsafe("crypto expert: the caller takes custody of the secret's raw bytes and wipes them") secret_bytes: fn(secret: Secret) -> [U8] Never! { secret.bytes.copy() }
+#Unsafe("crypto expert: the caller takes custody of the secret's raw bytes and wipes them")
+secret_bytes: fn(secret: Secret) -> [U8] Never! { secret.bytes.copy() }
 
-#Unsafe("crypto expert: the caller takes custody of the shared secret's raw bytes and wipes them") shared_secret_bytes: fn(secret: SharedSecret) -> [U8] Never! { secret.bytes.copy() }
+#Unsafe("crypto expert: the caller takes custody of the shared secret's raw bytes and wipes them")
+shared_secret_bytes: fn(secret: SharedSecret) -> [U8] Never! { secret.bytes.copy() }
 
-#Unsafe("crypto expert: the caller takes custody of the signing seed's raw bytes and wipes them") signing_key_bytes: fn(key: SigningKey) -> [U8] Never! { key.bytes.copy() }
+#Unsafe("crypto expert: the caller takes custody of the signing seed's raw bytes and wipes them")
+signing_key_bytes: fn(key: SigningKey) -> [U8] Never! { key.bytes.copy() }
 
-#Unsafe("crypto expert: the caller takes custody of the X25519 private key's raw bytes and wipes them") x25519_secret_bytes: fn(key: X25519SecretKey) -> [U8] Never! { key.bytes.copy() }
+#Unsafe("crypto expert: the caller takes custody of the X25519 private key's raw bytes and wipes them")
+x25519_secret_bytes: fn(key: X25519SecretKey) -> [U8] Never! { key.bytes.copy() }
 
 open_v1_body: fn(key: [U8], mode: U8, nonce: [U8], body: [U8]) -> [U8]? {
     if mode == (U8{1}) -> return chacha_poly_open(key, nonce, [U8]{}, body)
@@ -356,7 +359,6 @@ open_v1: fn(key: [U8], envelope: [U8]) -> [U8] CryptoError! {
     opened_bytes: opened ?? return Err(.OpenFailed)
     Ok(opened_bytes)
 }
-
 
 aes_gcm_seal: fn(key: [U8], nonce: [U8], aad: [U8], plain: [U8]) -> [U8] Never! {
     work := aes_workspace()
@@ -451,8 +453,8 @@ aes_ctr: fn(rk: [U8], j0: [U8], data: [U8], count: Int, state: &[U8], work: &[U6
         j := 0
         loop j < 16 && i < count {
             out.push(data[i].bit_xor(state[j]))
-            i = i + 1
-            j = j + 1
+            i += 1
+            j += 1
         }
     }
     out
@@ -496,13 +498,12 @@ ghash_blocks: fn(y: &[U64], high: U64, low: U64, data: [U8], count: Int) Never! 
         y[0] = y[0].bit_xor(a)
         y[1] = y[1].bit_xor(b)
         gf128_mul(y, high, low)
-        off = off + 16
+        off += 16
     }
 }
 
 // Masks are explicitly wrapping fixed-width subtraction.
-#Overflow(.Wrapping)
-gf128_mul: fn(x: &[U64], high: U64, low: U64) Never! {
+#Overflow(.Wrapping) gf128_mul: fn(x: &[U64], high: U64, low: U64) Never! {
     a := x[0]
     b := x[1]
     vh := high
@@ -522,7 +523,6 @@ gf128_mul: fn(x: &[U64], high: U64, low: U64) Never! {
     x[0] = zh
     x[1] = zl
 }
-
 
 // Six eight-plane banks, allocated once and reused by every round/block.
 aes_workspace: fn() -> [U64] Never! {
@@ -581,19 +581,19 @@ sub_bytes: fn(s: &[U8], w: &[U64]) Never! {
         w[p] = U64{0}
         loop lane in 0..<16 -> w[p] = w[p].bit_or((((U64{s[lane]} >> p).bit_and(U64{1})) << lane))
     }
-    aes_square(w, 0, 8)           // x^2
-    aes_multiply(w, 8, 0, 16)     // x^3
-    aes_square(w, 16, 24)         // x^6
-    aes_square(w, 24, 24)         // x^12
-    aes_multiply(w, 24, 16, 32)   // x^15
+    aes_square(w, 0, 8)  // x^2
+    aes_multiply(w, 8, 0, 16)  // x^3
+    aes_square(w, 16, 24)  // x^6
+    aes_square(w, 24, 24)  // x^12
+    aes_multiply(w, 24, 16, 32)  // x^15
     loop p in 0..<8 -> w[16 + p] = w[32 + p]
-    aes_square(w, 16, 16)         // x^30
-    aes_square(w, 16, 16)         // x^60
-    aes_square(w, 16, 16)         // x^120
-    aes_square(w, 16, 16)         // x^240
-    aes_multiply(w, 16, 24, 32)   // x^252
+    aes_square(w, 16, 16)  // x^30
+    aes_square(w, 16, 16)  // x^60
+    aes_square(w, 16, 16)  // x^120
+    aes_square(w, 16, 16)  // x^240
+    aes_multiply(w, 16, 24, 32)  // x^252
     loop p in 0..<8 -> w[16 + p] = w[32 + p]
-    aes_multiply(w, 16, 8, 32)    // x^254 (zero also follows this chain)
+    aes_multiply(w, 16, 8, 32)  // x^254 (zero also follows this chain)
     loop p in 0..<8 {
         w[p] = w[32 + p].bit_xor(w[32 + ((p + 4) %% 8)]).bit_xor(w[32 + ((p + 5) %% 8)]).bit_xor(w[32 + ((p + 6) %% 8)]).bit_xor(w[32 + ((p + 7) %% 8)])
         if ((0x63 >> p).bit_and(1)) != 0 -> w[p] = w[p].bit_xor(U64{65535})
@@ -684,8 +684,7 @@ mix_columns: fn(s: &[U8]) Never! {
     }
 }
 
-#Overflow(.Wrapping)
-xtime: fn(a: U8) -> U8 Never! {
+#Overflow(.Wrapping) xtime: fn(a: U8) -> U8 Never! {
     (a << 1).bit_xor((U8{0x1b}.bit_and((U8{0} - (a >> 7)))))
 }
 
@@ -765,7 +764,9 @@ argon2id_raw: fn(password: [U8], salt: [U8], memory_kib: Int, iterations: Int, l
             loop b in le_bytes(lane, 4) -> init_input.push(b)
             block_bytes: argon2_blake2b_long(init_input, 1024)
             position: lane * lane_length + block_index
-            loop word in 0..<128 -> memory[position * 128 + word] = load_le64(block_bytes, word * 8, 1024)
+            loop word in 0..<128 {
+                memory[position * 128 + word] = load_le64(block_bytes, word * 8, 1024)
+            }
         }
     }
     work := [U64]{}
@@ -802,7 +803,9 @@ argon2id_raw: fn(password: [U8], salt: [U8], memory_kib: Int, iterations: Int, l
                         index == 0 -> lane * lane_length + slice * segment_length - 1
                         else -> position - 1
                     }
-                    if data_independent && index %% 128 == 0 -> argon2_next_addresses(address_block, input_block, saved)
+                    if data_independent && index %% 128 == 0 {
+                        argon2_next_addresses(address_block, input_block, saved)
+                    }
                     random_word: argon2_random_word(memory, address_block, data_independent, index, previous_position * 128)
                     __argon2_reference_block(memory, reference, random_word, pass, slice, index, lane, lanes, segment_length, lane_length)
                     __argon2_fill_block(memory, work, saved, reference, previous_position * 128, position * 128, pass != 0)
@@ -942,8 +945,7 @@ argon2_round: fn(v: &[U64], i0: Int, i1: Int, i2: Int, i3: Int, i4: Int, i5: Int
 
 /// BlaMka G: BLAKE2b G with each x + y replaced by
 /// x + y + 2 * lo32(x) * lo32(y), all modulo 2^64.
-#Overflow(.Wrapping)
-argon2_g: fn(v: &[U64], ia: Int, ib: Int, ic: Int, id: Int) Never! {
+#Overflow(.Wrapping) argon2_g: fn(v: &[U64], ia: Int, ib: Int, ic: Int, id: Int) Never! {
     lo: U64{0xffffffff}
     a := v[ia]
     b := v[ib]
@@ -1206,8 +1208,7 @@ blake2b_compress: fn(h: &[U64], v: &[U64], m: &[U64], data: [U8], start: Int, en
 }
 
 /// BLAKE2b G (RFC 7693 3.1): right rotations by 32, 24, 16 and 63.
-#Overflow(.Wrapping)
-blake2b_mix: fn(v: &[U64], ia: Int, ib: Int, ic: Int, id: Int, x: U64, y: U64) Never! {
+#Overflow(.Wrapping) blake2b_mix: fn(v: &[U64], ia: Int, ib: Int, ic: Int, id: Int, x: U64, y: U64) Never! {
     a := v[ia]
     b := v[ib]
     c := v[ic]

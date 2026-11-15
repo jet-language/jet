@@ -16,23 +16,30 @@
 
 // The headless provider: 0 is absent, -1 declines, and nothing is staged.
 #Export(c) jet_ui_provider_capability: fn(capability: I64) -> I64 { I64{0} }
+
 #Export(c) jet_ui_provider_clipboard_get: fn() -> I64 { I64{-1} }
+
 #Export(c) jet_ui_provider_clipboard_set: fn(bytes: I64, length: I64) -> I64 { I64{-1} }
+
 #Export(c) jet_ui_provider_event_pop: fn(queue: I64) -> I64 { I64{-1} }
+
 #Export(c) jet_ui_provider_dialog_request: fn(kind: I64, bytes: I64, length: I64) -> I64 { I64{-1} }
+
 #Export(c) jet_ui_provider_dialog_result: fn(token: I64) -> I64 { I64{-1} }
+
 #Export(c) jet_ui_provider_key_claim: fn(bytes: I64, length: I64) -> I64 { I64{-1} }
+
 #Export(c) jet_ui_provider_take: fn(buffer: I64) {}
 
 // The staged text of `length` bytes as an owned string, into `some`; 0 when
 // the leaf staged none.
 ui_host_take_into: fn(length: I64, some: I64) -> I64 {
-    if (length < I64{0}) -> return I64{0}
+    if (length < I64{0}) { return I64{0} }
     buffer: jet_rt_alloc(if (length == I64{0}) -> I64{1} else -> length, I64{1})
     jet_ui_provider_take(buffer)
     text: rt_text_lossy(buffer, length)
     jet_rt_free(buffer, if (length == I64{0}) -> I64{1} else -> length, I64{1})
-    if (jet_rt_session_propagate() != I64{0}) -> return I64{0}
+    if (jet_rt_session_propagate() != I64{0}) { return I64{0} }
     trap_store(some, text)
     I64{1}
 }

@@ -52,12 +52,14 @@ X509CSR: struct {
 /// data[p..<end]. An error fails the parse when the extension is critical.
 /// The handler is pure, as X509ExtCallback is.
 X509CSRExtCallback: struct {
-    call: fn(X509CSR, [U8], asn1.ASN1Buf, Bool, Int, Int) x509.X509Error! -[]>
+    call: fn(X509CSR, [U8], asn1.ASN1Buf, Bool, Int, Int) -[]> x509.X509Error!
 }
 
 // The SEQUENCE and SET tags, constructed, and the [0] attributes tag.
 X509CSR_SEQUENCE: 0x30
+
 X509CSR_SET: 0x31
+
 X509CSR_ATTRIBUTES: 0xA0
 
 // The widest key size label csr_info prints, its NUL included
@@ -66,28 +68,31 @@ X509CSR_BEFORE_COLON: 14
 
 // The PEM armors of a request, the second the older one.
 X509CSR_PEM_BEGIN: "-----BEGIN CERTIFICATE REQUEST-----"
+
 X509CSR_PEM_END: "-----END CERTIFICATE REQUEST-----"
+
 X509CSR_PEM_NEW_BEGIN: "-----BEGIN NEW CERTIFICATE REQUEST-----"
+
 X509CSR_PEM_NEW_END: "-----END NEW CERTIFICATE REQUEST-----"
 
 /// An empty request (mbedtls_x509_csr_init).
 x509_csr_new: fn() -> X509CSR Never! {
     X509CSR{
-        raw: [U8]{}
-        cri: asn1.asn1_none()
-        version: 0
-        subject_raw: asn1.asn1_none()
-        subject: [asn1.NamedData]{}
-        pk: pk.pk_new()
-        key_usage: 0
-        ns_cert_type: 0
-        subject_alt_names: [asn1.ASN1Buf]{}
-        ext_types: 0
-        sig_oid: asn1.asn1_none()
-        sig: asn1.asn1_none()
-        sig_md: None
-        sig_pk: None
-        sig_opts: None
+        raw: [U8]{},
+        cri: asn1.asn1_none(),
+        version: 0,
+        subject_raw: asn1.asn1_none(),
+        subject: [asn1.NamedData]{},
+        pk: pk.pk_new(),
+        key_usage: 0,
+        ns_cert_type: 0,
+        subject_alt_names: [asn1.ASN1Buf]{},
+        ext_types: 0,
+        sig_oid: asn1.asn1_none(),
+        sig: asn1.asn1_none(),
+        sig_md: None,
+        sig_pk: None,
+        sig_opts: None,
     }
 }
 
@@ -114,7 +119,7 @@ x509_csr_parse_extensions: fn(csr: &X509CSR, data: [U8], p: &Int, end: Int, cb: 
         p += len
         is_critical := false
         if asn1.get_bool(data, p, end_ext_data) == {
-            .Ok(value) -> is_critical = value
+            .Ok(value) -> { is_critical = value }
             .Err(e) -> {
                 if e != .UnexpectedTag -> return Err(.InvalidExtensions(Val(e)))
             }
@@ -145,9 +150,15 @@ x509_csr_parse_extensions: fn(csr: &X509CSR, data: [U8], p: &Int, end: Int, cb: 
         if csr.ext_types.bit_and(ext_type) != 0 -> return Err(.InvalidExtensions(Val(.InvalidData)))
         csr.ext_types = csr.ext_types.bit_or(ext_type)
         if {
-            ext_type == oids.X509_EXT_KEY_USAGE -> csr.key_usage = x509.x509_get_key_usage(data, p, end_ext_data)
-            ext_type == oids.X509_EXT_SUBJECT_ALT_NAME -> csr.subject_alt_names = x509.x509_get_subject_alt_name(data, p, end_ext_data)
-            ext_type == oids.X509_EXT_NS_CERT_TYPE -> csr.ns_cert_type = x509.x509_get_ns_cert_type(data, p, end_ext_data)
+            ext_type == oids.X509_EXT_KEY_USAGE -> {
+                csr.key_usage = x509.x509_get_key_usage(data, p, end_ext_data)
+            }
+            ext_type == oids.X509_EXT_SUBJECT_ALT_NAME -> {
+                csr.subject_alt_names = x509.x509_get_subject_alt_name(data, p, end_ext_data)
+            }
+            ext_type == oids.X509_EXT_NS_CERT_TYPE -> {
+                csr.ns_cert_type = x509.x509_get_ns_cert_type(data, p, end_ext_data)
+            }
             else -> {
                 // Known to the OID table but not parsed here.
                 if is_critical -> return Err(.FeatureUnavailable(None))
@@ -227,7 +238,9 @@ x509_csr_parse_der: fn(buf: [U8]) -> X509CSR x509.X509Error! { x509_csr_parse_de
 
 /// x509_csr_parse_der with a handler for unknown extensions
 /// (mbedtls_x509_csr_parse_der_with_ext_cb).
-x509_csr_parse_der_with_ext_cb: fn(buf: [U8], cb: X509CSRExtCallback) -> X509CSR x509.X509Error! { x509_csr_parse_der_core(buf, Val(cb)) }
+x509_csr_parse_der_with_ext_cb: fn(buf: [U8], cb: X509CSRExtCallback) -> X509CSR x509.X509Error! {
+    x509_csr_parse_der_core(buf, Val(cb))
+}
 
 // The request's PEM block, under either armor.
 x509_csr_read_pem: fn(buf: [U8]) -> pem.PEMBlock pem.PEMError! {
@@ -265,7 +278,9 @@ x509_csr_info: fn(prefix: String, csr: X509CSR) -> [U8] x509.X509Error! {
     out.extend(x509.x509_dn_gets(csr.subject))
     out.extend("\n{prefix}signed using  : ".bytes())
     if csr.sig_pk == {
-        .Val(kind) -> out.extend(x509.x509_sig_alg_gets(data, csr.sig_oid, x509.X509SigAlg{md: csr.sig_md, pk: kind, pss: csr.sig_opts}))
+        .Val(kind) -> {
+            out.extend(x509.x509_sig_alg_gets(data, csr.sig_oid, x509.X509SigAlg{md: csr.sig_md, pk: kind, pss: csr.sig_opts}))
+        }
         .None -> out.extend("???".bytes())
     }
     key_size := x509.x509_key_size_helper(pk.pk_get_name(csr.pk))

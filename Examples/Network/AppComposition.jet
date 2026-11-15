@@ -14,7 +14,9 @@ use {
     web: core.web
 }
 
-Lookups: struct { count: Int }
+Lookups: struct {
+    count: Int
+}
 
 // The app-scoped resource: built once, then shared by every request.
 Catalog: struct {
@@ -32,7 +34,9 @@ count_lookup: fn(lookups: Shared<Lookups>) -> Int {
 price: fn(catalog: Catalog, item: String) -> HTTPResponse HTTPError! {
     seen: count_lookup(catalog.lookups)
     loop entry in catalog.prices {
-        if entry.item == item -> return Ok(http_server.response(200, "{catalog.name} {item} {entry.cents} (lookup {seen})"))
+        if entry.item == item {
+            return Ok(http_server.response(200, "{catalog.name} {item} {entry.cents} (lookup {seen})"))
+        }
     }
     Ok(http_server.response(404, "{catalog.name} has no {item} (lookup {seen})"))
 }
@@ -70,7 +74,7 @@ get: fn(addr: String, path: String) -> String NetError! {
 run: fn() (HTTPError | NetError | TaskFailure)! {
     // A missing dependency stops here, before anything binds.
     if compose(None) == {
-        .Val(_) -> print("composed with no catalog")
+        .Val(_) -> { print("composed with no catalog") }
         None -> print("nothing bound")
     }
 

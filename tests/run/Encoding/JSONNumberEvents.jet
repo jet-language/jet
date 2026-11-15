@@ -17,12 +17,12 @@ reject_json: fn(path: Path, canonical: Bool, text: String) (EncodingError | IOEr
     output: files.create(path)
     writer := json.writer(output, canonical: canonical)
     if writer.write(encoding.DataEvent.Number(text)) == {
-        .Ok(_) -> panic("JSON writer accepted Number")
+        .Ok(_) -> { panic("JSON writer accepted Number") }
         .Err(first) -> {
             print(first.kind == .Unsupported)
             print(first.byte_offset)
             if writer.write(encoding.DataEvent.Int(1)) == {
-                .Ok(_) -> panic("JSON writer lost its terminal error")
+                .Ok(_) -> { panic("JSON writer lost its terminal error") }
                 .Err(second) -> print(second == first)
             }
         }
@@ -33,7 +33,7 @@ reject_cbor: fn(path: Path, text: String) (EncodingError | IOError)! {
     output: files.create(path)
     writer := cbor.writer(output)
     if writer.write(encoding.DataEvent.Number(text)) == {
-        .Ok(_) -> panic("CBOR writer accepted Number")
+        .Ok(_) -> { panic("CBOR writer accepted Number") }
         .Err(error) -> {
             print(error.kind == .Unsupported)
             print(error.byte_offset)
@@ -47,7 +47,9 @@ run: fn() (DataError | EncodingError | IOError)! {
         loop event in json.events(tree) {
             if event == {
                 .Number(text) -> print(text)
-                .Null | .Bool(_) | .Int(_) | .Float(_) | .Text(_) | .Bytes(_) | .ArrayStart | .ArrayEnd | .ObjectStart | .Key(_) | .ObjectEnd -> panic("exact numeric lexeme lost")
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Text(_) | .Bytes(_) | .ArrayStart | .ArrayEnd | .ObjectStart | .Key(_) | .ObjectEnd -> {
+                    panic("exact numeric lexeme lost")
+                }
             }
         }
     }

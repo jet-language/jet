@@ -19,27 +19,27 @@ run: fn() {
     first := [Int]{}
     second := [Int]{}
     testing.world(
-    fn(world) {
-        start: world.now()
-        clock: time.unix_ms(time.now())
-        print("clock follows world: {clock == start}")
-        late: task nap("late", 50ms) ?? return
-        early: task nap("early", 20ms) ?? return
-        world.wait_idle()
-        print("advanced to {world.advance(30ms) - start}")
-        print("advanced to {world.advance(30ms) - start}")
-        print("{early.join() ?? "early lost"} then {late.join() ?? "late lost"}")
-        print("clock after: {time.unix_ms(time.now()) - start}")
-        random.seed(7)
-        first = draws()
-    },
+        fn(world) {
+            start: world.now()
+            clock: time.unix_ms(time.now())
+            print("clock follows world: {clock == start}")
+            late: task nap("late", 50ms) ?? return
+            early: task nap("early", 20ms) ?? return
+            world.wait_idle()
+            print("advanced to {world.advance(30ms) - start}")
+            print("advanced to {world.advance(30ms) - start}")
+            print("{early.join() ?? "early lost"} then {late.join() ?? "late lost"}")
+            print("clock after: {time.unix_ms(time.now()) - start}")
+            random.seed(7)
+            first = draws()
+        },
     )
     testing.world(
-    fn(world) {
-        random.seed(7)
-        second = draws()
-        print(world.history())
-    },
+        fn(world) {
+            random.seed(7)
+            second = draws()
+            print(world.history())
+        },
     )
     print("same draws: {first == second} {first.len()}")
 }

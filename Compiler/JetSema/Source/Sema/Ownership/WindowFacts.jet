@@ -63,16 +63,16 @@ sema_window_edge_key: fn(rows: [SemaWindowFunctionRow], positions: SemaWindowPos
     id: sema_window_position_id(positions, sema_window_plain_name(edge.callee))
     writer := -1
     loop index in positions.rows[id] {
-        if edge.index < rows[index].writes.len() && rows[index].writes[edge.index] && writer < 0 -> writer = index
+        if edge.index < rows[index].writes.len() && rows[index].writes[edge.index] && writer < 0 {
+            writer = index
+        }
     }
     if writer < 0 -> return ""
     if positions.rows[id].len() > 1 -> return "#unknown"
     sema_window_param_key(rows[writer].name, rows[writer].params[edge.index])
 }
 
-sema_window_param_key: fn(function: String, param: String) -> String Never! {
-    "{function}#{param}"
-}
+sema_window_param_key: fn(function: String, param: String) -> String Never! { "{function}#{param}" }
 
 // The plain function name a possibly module-qualified callee spelling names.
 sema_window_plain_name: fn(callee: String) -> String Never! {
@@ -88,7 +88,9 @@ sema_window_callee_key: fn(callee: String, param: String) -> String Never! {
 sema_window_collect_rows: fn(items: [Item], rows: &[SemaWindowFunctionRow]) {
     loop item in items {
         if item == {
-            .Func(func) -> rows.push(SemaWindowFunctionRow{name: func.name, params: loop param in func.params -> param.name, writes: loop param in func.params -> param.convention == AccessConvention.Write})
+            .Func(func) -> {
+                rows.push(SemaWindowFunctionRow{name: func.name, params: loop param in func.params -> param.name, writes: loop param in func.params -> param.convention == AccessConvention.Write})
+            }
             .CodeModule(definition) -> {
                 if definition.body == .Val(body) -> sema_window_collect_rows(body, rows)
             }
@@ -102,9 +104,11 @@ sema_window_collect_rows: fn(items: [Item], rows: &[SemaWindowFunctionRow]) {
 sema_window_collect_candidates: fn(items: [Item], rows: [SemaWindowFunctionRow], positions: SemaWindowPositions, candidates: &[SemaWindowCandidate]) {
     loop item in items {
         if item == {
-            .Func(func) -> sema_window_function_candidates(func, rows, positions, candidates)
+            .Func(func) -> { sema_window_function_candidates(func, rows, positions, candidates) }
             .CodeModule(definition) -> {
-                if definition.body == .Val(body) -> sema_window_collect_candidates(body, rows, positions, candidates)
+                if definition.body == .Val(body) {
+                    sema_window_collect_candidates(body, rows, positions, candidates)
+                }
             }
             .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
@@ -152,15 +156,21 @@ sema_fixed_length_write_params: fn(items: [Item]) -> [String] Never! {
 // bundle list.
 sema_fixed_length_write_params_in_graph: fn(graph: SemaRegistrationGraph) -> [String] Never! {
     rows := [SemaWindowFunctionRow]{}
-    loop module_index in 0..<graph.modules.len() -> sema_window_collect_rows(graph.modules[module_index].program.items, rows)
+    loop module_index in 0..<graph.modules.len() {
+        sema_window_collect_rows(graph.modules[module_index].program.items, rows)
+    }
     positions: sema_window_positions(rows)
     candidates := [SemaWindowCandidate]{}
-    loop module_index in 0..<graph.modules.len() -> sema_window_collect_candidates(graph.modules[module_index].program.items, rows, positions, candidates)
+    loop module_index in 0..<graph.modules.len() {
+        sema_window_collect_candidates(graph.modules[module_index].program.items, rows, positions, candidates)
+    }
     sema_window_fixed_length_params(candidates)
 }
 
 sema_window_function_candidates: fn(func: Func, rows: [SemaWindowFunctionRow], positions: SemaWindowPositions, candidates: &[SemaWindowCandidate]) {
-    if positions.rows[sema_window_position_id(positions, func.name)].len() > 1 -> return
+    if positions.rows[sema_window_position_id(positions, func.name)].len() > 1 {
+        return
+    }
     loop param_index in 0..<func.params.len() {
         if func.params[param_index].convention != AccessConvention.Write -> next
         is_list := if func.params[param_index].ty == {
@@ -287,8 +297,10 @@ sema_window_scan_body: fn(body: [Stmt], param: String, scan: &SemaWindowScan) {
 
 sema_window_scan_statement: fn(statement: Stmt, param: String, scan: &SemaWindowScan) {
     if statement == {
-        .Expr(expr) | .BreakValue(expr, _) | .Yield(expr, _) | .DeferClose(expr, _) -> sema_window_scan_expr(expr, param, scan)
-        .Val(binding) -> sema_window_scan_expr(binding.init, param, scan)
+        .Expr(expr) | .BreakValue(expr, _) | .Yield(expr, _) | .DeferClose(expr, _) -> {
+            sema_window_scan_expr(expr, param, scan)
+        }
+        .Val(binding) -> { sema_window_scan_expr(binding.init, param, scan) }
         .Assign(target, _, _, value) -> {
             if target == {
                 .Local(name, _) -> {
@@ -302,8 +314,8 @@ sema_window_scan_statement: fn(statement: Stmt, param: String, scan: &SemaWindow
             }
             sema_window_scan_expr(value, param, scan)
         }
-        .Return(value, _) -> sema_window_scan_optional(value, param, scan)
-        .BreakLabelValue(_, _, value, _) -> sema_window_scan_expr(value, param, scan)
+        .Return(value, _) -> { sema_window_scan_optional(value, param, scan) }
+        .BreakLabelValue(_, _, value, _) -> { sema_window_scan_expr(value, param, scan) }
         .While(cond, body, _, _, _) -> {
             sema_window_scan_expr(cond, param, scan)
             sema_window_scan_body(body, param, scan)
@@ -330,12 +342,18 @@ sema_window_scan_statement: fn(statement: Stmt, param: String, scan: &SemaWindow
             }
             if else_body == .Val(body) -> sema_window_scan_body(body, param, scan)
         }
-        .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Live(body, _) -> sema_window_scan_body(body, param, scan)
-        .Switched(_, body, _) | .Policy(_, body, _) | .ContextBlock(_, body, _) -> sema_window_scan_body(body, param, scan)
-        .Region(_, _, body, _) | .Layout(_, _, body, _) -> sema_window_scan_body(body, param, scan)
-        .ComptimeBlock(body, _, _) -> sema_window_scan_body(body, param, scan)
-        .Transact(_, _, body, _, _) -> sema_window_scan_body(body, param, scan)
-        .AuthorityScope(_, _, _, body, _) -> sema_window_scan_body(body, param, scan)
+        .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Live(body, _) -> {
+            sema_window_scan_body(body, param, scan)
+        }
+        .Switched(_, body, _) | .Policy(_, body, _) | .ContextBlock(_, body, _) -> {
+            sema_window_scan_body(body, param, scan)
+        }
+        .Region(_, _, body, _) | .Layout(_, _, body, _) -> {
+            sema_window_scan_body(body, param, scan)
+        }
+        .ComptimeBlock(body, _, _) -> { sema_window_scan_body(body, param, scan) }
+        .Transact(_, _, body, _, _) -> { sema_window_scan_body(body, param, scan) }
+        .AuthorityScope(_, _, _, body, _) -> { sema_window_scan_body(body, param, scan) }
         .CountedLoop(init, cond, step, body, _, _, _) -> {
             sema_window_scan_expr(init.init, param, scan)
             sema_window_scan_expr(cond, param, scan)
@@ -372,11 +390,15 @@ sema_window_scan_expr: fn(expr: Expr, param: String, scan: &SemaWindowScan) {
     if expr == {
         .Place(inner, access, _, _) -> {
             // A write window of the whole list (`edit: &xs`) can reach a resize.
-            if access == PlaceAccess.Write && sema_window_is_param(inner, param) -> scan.resizes = true
+            if access == PlaceAccess.Write && sema_window_is_param(inner, param) {
+                scan.resizes = true
+            }
             sema_window_scan_expr(inner, param, scan)
         }
         .MethodCall(receiver, method, _, _, _, args, _) -> {
-            if sema_window_is_param(receiver, param) && sema_window_method_may_resize(method) -> scan.resizes = true
+            if sema_window_is_param(receiver, param) && sema_window_method_may_resize(method) {
+                scan.resizes = true
+            }
             if sema_window_args_pass_param(args, param) -> scan.resizes = true
             sema_window_scan_expr(receiver, param, scan)
             sema_window_scan_args(args, param, scan)
@@ -388,7 +410,9 @@ sema_window_scan_expr: fn(expr: Expr, param: String, scan: &SemaWindowScan) {
         }
         .Call(call, _) -> {
             loop index in 0..<call.args.len() {
-                if sema_window_is_param(call.args[index].expr, param) -> scan.onward.push(SemaWindowEdge{callee: call.name, index: index})
+                if sema_window_is_param(call.args[index].expr, param) {
+                    scan.onward.push(SemaWindowEdge{callee: call.name, index: index})
+                }
             }
             sema_window_scan_args(call.args, param, scan)
         }
@@ -397,20 +421,34 @@ sema_window_scan_expr: fn(expr: Expr, param: String, scan: &SemaWindowScan) {
             sema_window_scan_expr(callee, param, scan)
             sema_window_scan_args(args, param, scan)
         }
-        .Str(parts, _, _) -> loop part in parts {
-            if part == .Interp(value, _) -> sema_window_scan_expr(value, param, scan)
+        .Str(parts, _, _) -> {
+            loop part in parts {
+                if part == .Interp(value, _) -> sema_window_scan_expr(value, param, scan)
+            }
         }
-        .ListLit(elements, _, _) -> loop element in elements -> sema_window_scan_expr(element, param, scan)
-        .CompareChain(operands, _, _, _, _) -> loop operand in operands -> sema_window_scan_expr(operand, param, scan)
-        .MapLit(entries, _, _) -> loop entry in entries {
-            sema_window_scan_expr(entry.key, param, scan)
-            sema_window_scan_expr(entry.value, param, scan)
+        .ListLit(elements, _, _) -> {
+            loop element in elements -> sema_window_scan_expr(element, param, scan)
         }
-        .MemberSpread(base, _, _, _) | .Spread(base, _, _) | .Deref(base, _, _) | .RawOf(base, _, _) | .Copy(base, _, _) -> sema_window_scan_expr(base, param, scan)
-        .Field(base, _, _, _) | .OptField(base, _, _, _, _, _) | .Tainted(base, _, _, _) | .Present(base, _, _) -> sema_window_scan_expr(base, param, scan)
-        .Ok(base, _, _) | .Err(base, _, _) | .Paren(base, _, _) | .Unary(_, base, _, _) -> sema_window_scan_expr(base, param, scan)
-        .PatternTest(subject, _, _, _) -> sema_window_scan_expr(subject, param, scan)
-        .PtrFromAddr(_, _, _, addr, _, _) -> sema_window_scan_expr(addr, param, scan)
+        .CompareChain(operands, _, _, _, _) -> {
+            loop operand in operands -> sema_window_scan_expr(operand, param, scan)
+        }
+        .MapLit(entries, _, _) -> {
+            loop entry in entries {
+                sema_window_scan_expr(entry.key, param, scan)
+                sema_window_scan_expr(entry.value, param, scan)
+            }
+        }
+        .MemberSpread(base, _, _, _) | .Spread(base, _, _) | .Deref(base, _, _) | .RawOf(base, _, _) | .Copy(base, _, _) -> {
+            sema_window_scan_expr(base, param, scan)
+        }
+        .Field(base, _, _, _) | .OptField(base, _, _, _, _, _) | .Tainted(base, _, _, _) | .Present(base, _, _) -> {
+            sema_window_scan_expr(base, param, scan)
+        }
+        .Ok(base, _, _) | .Err(base, _, _) | .Paren(base, _, _) | .Unary(_, base, _, _) -> {
+            sema_window_scan_expr(base, param, scan)
+        }
+        .PatternTest(subject, _, _, _) -> { sema_window_scan_expr(subject, param, scan) }
+        .PtrFromAddr(_, _, _, addr, _, _) -> { sema_window_scan_expr(addr, param, scan) }
         .Pipe(head, steps, _, _) -> {
             sema_window_scan_expr(head, param, scan)
             loop step in steps -> sema_window_scan_expr(step.value, param, scan)
@@ -436,12 +474,12 @@ sema_window_scan_expr: fn(expr: Expr, param: String, scan: &SemaWindowScan) {
         .OrFallback(value, fallback, _, _, _) -> {
             sema_window_scan_expr(value, param, scan)
             if fallback == {
-                .Value(inner) -> sema_window_scan_expr(inner, param, scan)
+                .Value(inner) -> { sema_window_scan_expr(inner, param, scan) }
                 .Block(body, inner, _) -> {
                     sema_window_scan_body(body, param, scan)
                     sema_window_scan_optional(inner, param, scan)
                 }
-                .Return(inner, _) -> sema_window_scan_optional(inner, param, scan)
+                .Return(inner, _) -> { sema_window_scan_optional(inner, param, scan) }
                 .Panic(_, args) -> sema_window_scan_args(args, param, scan)
                 .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
             }
@@ -453,27 +491,39 @@ sema_window_scan_expr: fn(expr: Expr, param: String, scan: &SemaWindowScan) {
             sema_window_scan_body(else_body, param, scan)
             sema_window_scan_expr(else_value, param, scan)
         }
-        .StructLit(_, _, _, _, fields, _, _, _) -> loop field in fields -> sema_window_scan_expr(field.value, param, scan)
-        .TupleLit(fields, _, _, _) -> loop field in fields -> sema_window_scan_expr(field.value, param, scan)
-        .EnumLit(_, _, _, args, _, _, _) -> loop arg in args {
-            if arg == {
-                .Positional(value) -> sema_window_scan_expr(value, param, scan)
-                .Named(_, value) -> sema_window_scan_expr(value, param, scan)
+        .StructLit(_, _, _, _, fields, _, _, _) -> {
+            loop field in fields -> sema_window_scan_expr(field.value, param, scan)
+        }
+        .TupleLit(fields, _, _, _) -> {
+            loop field in fields -> sema_window_scan_expr(field.value, param, scan)
+        }
+        .EnumLit(_, _, _, args, _, _, _) -> {
+            loop arg in args {
+                if arg == {
+                    .Positional(value) -> { sema_window_scan_expr(value, param, scan) }
+                    .Named(_, value) -> sema_window_scan_expr(value, param, scan)
+                }
             }
         }
         .Lambda(lambda, _) -> {
             if lambda.body == {
-                .Expr(value) -> sema_window_scan_expr(value, param, scan)
+                .Expr(value) -> { sema_window_scan_expr(value, param, scan) }
                 .Block(body) -> sema_window_scan_body(body, param, scan)
             }
         }
         .TypedLit(_, body, _, _) -> {
             if body == {
-                .Fields(fields) -> loop field in fields -> sema_window_scan_expr(field.value, param, scan)
-                .Elements(elements) -> loop element in elements -> sema_window_scan_expr(element, param, scan)
-                .Entries(entries) -> loop entry in entries {
-                    sema_window_scan_expr(entry.key, param, scan)
-                    sema_window_scan_expr(entry.value, param, scan)
+                .Fields(fields) -> {
+                    loop field in fields -> sema_window_scan_expr(field.value, param, scan)
+                }
+                .Elements(elements) -> {
+                    loop element in elements -> sema_window_scan_expr(element, param, scan)
+                }
+                .Entries(entries) -> {
+                    loop entry in entries {
+                        sema_window_scan_expr(entry.key, param, scan)
+                        sema_window_scan_expr(entry.value, param, scan)
+                    }
                 }
                 .Value(value) -> sema_window_scan_expr(value, param, scan)
                 .ByteText(_) | .Empty -> {}

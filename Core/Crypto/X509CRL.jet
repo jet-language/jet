@@ -58,28 +58,31 @@ X509CRL_SEQUENCE: 0x30
 
 // The PEM armor of a CRL.
 X509CRL_PEM_BEGIN: "-----BEGIN X509 CRL-----"
+
 X509CRL_PEM_END: "-----END X509 CRL-----"
 
 // The all-zero time of an absent nextUpdate.
-x509_crl_no_time: fn() -> x509.X509Time Never! { x509.X509Time{year: 0, mon: 0, day: 0, hour: 0, min: 0, sec: 0} }
+x509_crl_no_time: fn() -> x509.X509Time Never! {
+    x509.X509Time{year: 0, mon: 0, day: 0, hour: 0, min: 0, sec: 0}
+}
 
 /// An empty CRL (mbedtls_x509_crl_init).
 x509_crl_new: fn() -> X509Crl Never! {
     X509Crl{
-        raw: [U8]{}
-        tbs: asn1.asn1_none()
-        version: 0
-        sig_oid: asn1.asn1_none()
-        issuer_raw: asn1.asn1_none()
-        issuer: [asn1.NamedData]{}
-        this_update: x509_crl_no_time()
-        next_update: x509_crl_no_time()
-        entries: [X509CrlEntry]{}
-        crl_ext: asn1.asn1_none()
-        sig: asn1.asn1_none()
-        sig_md: None
-        sig_pk: None
-        sig_opts: None
+        raw: [U8]{},
+        tbs: asn1.asn1_none(),
+        version: 0,
+        sig_oid: asn1.asn1_none(),
+        issuer_raw: asn1.asn1_none(),
+        issuer: [asn1.NamedData]{},
+        this_update: x509_crl_no_time(),
+        next_update: x509_crl_no_time(),
+        entries: [X509CrlEntry]{},
+        crl_ext: asn1.asn1_none(),
+        sig: asn1.asn1_none(),
+        sig_md: None,
+        sig_pk: None,
+        sig_opts: None,
     }
 }
 
@@ -107,7 +110,7 @@ x509_crl_get_ext: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf x509.X509Err
         p += len
         is_critical := false
         if asn1.get_bool(data, p, end_ext_data) == {
-            .Ok(b) -> is_critical = b
+            .Ok(b) -> { is_critical = b }
             .Err(e) -> {
                 if e != .UnexpectedTag -> return Err(.InvalidExtensions(Val(e)))
             }
@@ -127,7 +130,7 @@ x509_crl_get_entry_ext: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf x509.X
     if end <= p -> return Ok(asn1.asn1_none())
     ext := asn1.ASN1Buf{tag_id: Int{data[p]}, p: p, len: 0}
     if asn1.get_tag(data, p, end, X509CRL_SEQUENCE) == {
-        .Ok(len) -> ext.len = len
+        .Ok(len) -> { ext.len = len }
         .Err(e) -> {
             if e == .UnexpectedTag -> return Ok(asn1.ASN1Buf{tag_id: ext.tag_id, p: -1, len: 0})
             return Err(.InvalidExtensions(Val(e)))
@@ -198,7 +201,7 @@ x509_crl_parse_der_core: fn(buf: [U8]) -> X509Crl x509.X509Error! {
     // thisUpdate, and nextUpdate when one follows
     crl.this_update = x509.x509_get_time(data, p, end)
     if x509.x509_get_time(data, p, end) == {
-        .Ok(t) -> crl.next_update = t
+        .Ok(t) -> { crl.next_update = t }
         .Err(e) -> {
             absent: if e == {
                 .InvalidDate(inner) -> inner == .Val(.UnexpectedTag) || inner == .Val(.OutOfData)
@@ -250,7 +253,9 @@ x509_crl_parse: fn(chain: &[X509Crl], buf: [U8]) x509.X509Error! {
         }
         if !is_pem || pem.text_len(rest) == 0 -> break
     }
-    if is_pem -> return
+    if is_pem {
+        return
+    }
     x509_crl_parse_der(chain, buf)
 }
 
@@ -272,7 +277,9 @@ x509_crl_info: fn(prefix: String, crl: X509Crl) -> [U8] x509.X509Error! {
     }
     out.extend("\n{prefix}signed using  : ".bytes())
     if crl.sig_pk == {
-        .Val(kind) -> out.extend(x509.x509_sig_alg_gets(data, crl.sig_oid, x509.X509SigAlg{md: crl.sig_md, pk: kind, pss: crl.sig_opts}))
+        .Val(kind) -> {
+            out.extend(x509.x509_sig_alg_gets(data, crl.sig_oid, x509.X509SigAlg{md: crl.sig_md, pk: kind, pss: crl.sig_opts}))
+        }
         .None -> out.extend("???".bytes())
     }
     out.extend("\n".bytes())

@@ -17,7 +17,9 @@ jet_driver_plugin_facts: fn(request: JetDriverCompileRequest, inputs: [SemaRegis
     root: jet_driver_entry_root_path(request.authorized_sources)
     artifacts := [String]{}
     loop input in inputs {
-        if input.package_identity == package_identity -> jet_driver_plugin_artifacts(artifacts, input.program)
+        if input.package_identity == package_identity {
+            jet_driver_plugin_artifacts(artifacts, input.program)
+        }
     }
     artifacts.sort()
     components := [SemaPluginComponent]{}
@@ -25,7 +27,9 @@ jet_driver_plugin_facts: fn(request: JetDriverCompileRequest, inputs: [SemaRegis
         path: if root == "" || artifact.starts_with("/") -> artifact else -> plugin_facts_files.join(root, artifact)
         bytes: plugin_facts_files.read_bytes(path) ?? next
         if jet_plugin_component_exports(bytes) == {
-            .Ok(exports) -> components.push(SemaPluginComponent{artifact: artifact.copy(), exports: exports})
+            .Ok(exports) -> {
+                components.push(SemaPluginComponent{artifact: artifact.copy(), exports: exports})
+            }
             .Err(_) -> next
         }
     }
@@ -35,16 +39,26 @@ jet_driver_plugin_facts: fn(request: JetDriverCompileRequest, inputs: [SemaRegis
 // The literal artifacts of every `.load("…")` call in the file, once each.
 jet_driver_plugin_artifacts: fn(artifacts: &[String], program: Program) {
     loop item in program.items {
-        if item == .Func(function) -> ast_visit_body(function.body, fn(expression: Expr) { jet_driver_note_plugin_artifact(artifacts, expression) }, false)
-        if item == .Test(test) -> ast_visit_body(test.body, fn(expression: Expr) { jet_driver_note_plugin_artifact(artifacts, expression) }, false)
+        if item == .Func(function) {
+            ast_visit_body(function.body, fn(expression: Expr) { jet_driver_note_plugin_artifact(artifacts, expression) }, false)
+        }
+        if item == .Test(test) {
+            ast_visit_body(test.body, fn(expression: Expr) { jet_driver_note_plugin_artifact(artifacts, expression) }, false)
+        }
         if item == .Impl(block) {
-            loop method in block.methods -> ast_visit_body(method.body, fn(expression: Expr) { jet_driver_note_plugin_artifact(artifacts, expression) }, false)
+            loop method in block.methods {
+                ast_visit_body(method.body, fn(expression: Expr) { jet_driver_note_plugin_artifact(artifacts, expression) }, false)
+            }
         }
         if item == .Struct(record) {
-            loop method in record.methods -> ast_visit_body(method.body, fn(expression: Expr) { jet_driver_note_plugin_artifact(artifacts, expression) }, false)
+            loop method in record.methods {
+                ast_visit_body(method.body, fn(expression: Expr) { jet_driver_note_plugin_artifact(artifacts, expression) }, false)
+            }
         }
         if item == .Enum(choice) {
-            loop method in choice.methods -> ast_visit_body(method.body, fn(expression: Expr) { jet_driver_note_plugin_artifact(artifacts, expression) }, false)
+            loop method in choice.methods {
+                ast_visit_body(method.body, fn(expression: Expr) { jet_driver_note_plugin_artifact(artifacts, expression) }, false)
+            }
         }
     }
     ast_visit_body(program.script_body, fn(expression: Expr) { jet_driver_note_plugin_artifact(artifacts, expression) }, false)
@@ -52,11 +66,15 @@ jet_driver_plugin_artifacts: fn(artifacts: &[String], program: Program) {
 
 jet_driver_note_plugin_artifact: fn(artifacts: &[String], expression: Expr) {
     if expression == .MethodCall(_, method, _, _, _, args, _) {
-        if method != "load" || args.len() == 0 -> return
+        if method != "load" || args.len() == 0 {
+            return
+        }
         if args[0].expr == .Str(parts, _, _) {
             text := ""
             loop part in parts {
-                if part == .Lit(value) { text = "{text}{value}" } else { return }
+                if part == .Lit(value) -> text = "{text}{value}" else {
+                    return
+                }
             }
             if text != "" && !artifacts.contains(text) -> artifacts.push(text)
         }

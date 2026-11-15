@@ -35,9 +35,15 @@ TooManyArguments: struct {
     count: Int
 
     impl Diagnostic {
-        what: fn(self) -> String { "command `{self.command}` takes {self.count} arguments, more than a console parses" }
+        what: fn(self) -> String {
+            "command `{self.command}` takes {self.count} arguments, more than a console parses"
+        }
+
         why: fn(self) -> String { "a console command takes at most three arguments" }
-        fix: fn(self) -> String { "pass `{self.command}` fewer arguments, or split it into smaller commands" }
+
+        fix: fn(self) -> String {
+            "pass `{self.command}` fewer arguments, or split it into smaller commands"
+        }
     }
 }
 
@@ -47,8 +53,16 @@ UnparsableArgument: struct {
     type: String
 
     impl Diagnostic {
-        what: fn(self) -> String { "command `{self.command}` takes `{self.param}: {self.type}`, which a console can't parse" }
-        why: fn(self) -> String { "a console parses each argument into a String, Int, Float or Bool" }
-        fix: fn(self) -> String { "declare `{self.param}` as a String, Int, Float or Bool, and build the `{self.type}` inside `{self.command}`" }
+        what: fn(self) -> String {
+            "command `{self.command}` takes `{self.param}: {self.type}`, which a console can't parse"
+        }
+
+        why: fn(self) -> String {
+            "a console parses each argument into a String, Int, Float or Bool"
+        }
+
+        fix: fn(self) -> String {
+            "declare `{self.param}` as a String, Int, Float or Bool, and build the `{self.type}` inside `{self.command}`"
+        }
     }
 }

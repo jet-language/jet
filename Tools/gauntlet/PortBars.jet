@@ -197,42 +197,62 @@ use {
 }
 
 ENTRIES_ROOT: "Tools/gauntlet/entries"
+
 // The review record, in the entry's directory.
 REVIEW_FILE: "review.json"
+
 // The launcher every run goes through, from the repository's root.
 LAUNCHER: "Tools/gauntlet/harness/launch.c"
+
 DEFAULT_RUNS: 5
+
 RUN_TIMEOUT_SECONDS: 600
+
 OUTPUT_LIMIT: 268435456
+
 BARS: [String]{"parity", "speed", "reasoning", "tokens"}
+
 // The fixed reviewer checklist (#5072 c14), each item scored for each program
 // 0 (no), 1 (partly) or 2 (yes): types visible at use, every failure path
 // visible at the call, no hidden global or mutable state, data flows top to
 // bottom, one obvious way per operation, and effects such as files, network
 // and processes visible.
 CHECKLIST: [String]{"types_visible_at_use", "failure_paths_visible_at_call", "no_hidden_global_or_mutable_state", "data_flows_top_to_bottom", "one_obvious_way_per_operation", "effects_visible"}
+
 CHECKLIST_TOP: 2
+
 // The fields of a review record; `helpers` (the hand-written helpers of each
 // program a library call would replace, by name) may be left out.
 REVIEW_FIELDS: [String]{"reviewer", "date", "checklist", "helpers"}
+
 SIDES: [String]{"original", "jet"}
+
 // The symbols of more than one byte, longest first.
 MULTI_SYMBOLS: [String]{"===", "!==", "...", "..<", "&&", "||", "??", "?.", "->", "=>", "==", "!=", "<=", ">=", "::", "..", ";;", "<<", ">>", "+=", "-=", "*=", "/=", "|>"}
+
 CONTROL_WORDS: [String]{"if", "else", "loop", "for", "while", "do", "switch", "try", "catch", "finally", "elif", "except", "with", "match", "case"}
+
 // The JavaScript words after which a `/` opens a regex literal.
 REGEX_KEYWORDS: [String]{"return", "typeof", "case", "do", "else", "in", "of", "new", "delete", "void", "throw", "instanceof", "yield", "await"}
+
 // The JavaScript words whose `(…)` head ends where a statement begins.
 REGEX_HEADS: [String]{"if", "while", "for", "with"}
+
 // The JavaScript words after which a `{` opens a block.
 BLOCK_WORDS: [String]{"else", "try", "finally", "do"}
+
 // The symbols after which a JavaScript `{` opens a block.
 BLOCK_SYMBOLS: [String]{")", ";", "{{", "}}", "=>"}
+
 SHELL_OPENERS: [String]{"if", "for", "while", "until", "case"}
+
 SHELL_CLOSERS: [String]{"fi", "done", "esac"}
+
 // The first tokens of a column-0 line that continue the statement before it
 // (REACH RULES): a closing bracket, a chained call, or the next clause of a
 // Python `if` or `try`.
 CONTINUATIONS: [String]{"}}", ")", "]", ".", "else", "elif", "except", "finally"}
+
 // The definitions a Jet program's own file runs from (REACH RULES).
 JET_ENTRIES: [String]{"run", "main"}
 
@@ -243,9 +263,18 @@ JudgeError: struct {
 
 judge_fail: fn(message: String) -> JudgeError Never! { JudgeError{message: "port-bars: {message}"} }
 
-Language: enum { Jet JavaScript Python Shell }
+Language: enum {
+    Jet
+    JavaScript
+    Python
+    Shell
+}
 
-TokenKind: enum { Word Text Symbol }
+TokenKind: enum {
+    Word
+    Text
+    Symbol
+}
 
 // One source token: a word's or symbol's text ("" for a string literal);
 // `first` marks the first token of its line and `column` the indentation
@@ -333,7 +362,11 @@ Report: struct {
 }
 
 // Every original round beats every Jet round, the reverse, or neither.
-Lead: enum { Win Loss Even }
+Lead: enum {
+    Win
+    Loss
+    Even
+}
 
 // ---- entries ----
 
@@ -398,23 +431,37 @@ read_entry: fn(repo: String, name: String) -[FS]> Entry Never! {
         entry.problems.push("`{dir}/entry.json` is not JSON: {err}")
         return entry
     }
-    if text_field(tree, "mode") != "tool" -> entry.problems.push("it is not a tool entry (\"mode\": \"tool\")")
+    if text_field(tree, "mode") != "tool" {
+        entry.problems.push("it is not a tool entry (\"mode\": \"tool\")")
+    }
     tool: field(tree, "tool")
     entry.original = text_field(tool, "original")
     entry.twin = text_field(tool, "jet")
     entry.fixtures = text_field(tool, "fixtures")
-    if entry.original == "" || !files.is_file(files.join(repo, entry.original)) -> entry.problems.push("its original `{entry.original}` does not exist")
-    if !entry.twin.ends_with(".jet") || !files.is_file(files.join(repo, entry.twin)) -> entry.problems.push("its Jet twin `{entry.twin}` does not exist")
-    if entry.fixtures != "" && !files.is_dir(files.join(repo, "{dir}/{entry.fixtures}")) -> entry.problems.push("its fixtures `{dir}/{entry.fixtures}` are not a directory")
+    if entry.original == "" || !files.is_file(files.join(repo, entry.original)) {
+        entry.problems.push("its original `{entry.original}` does not exist")
+    }
+    if !entry.twin.ends_with(".jet") || !files.is_file(files.join(repo, entry.twin)) {
+        entry.problems.push("its Jet twin `{entry.twin}` does not exist")
+    }
+    if entry.fixtures != "" && !files.is_dir(files.join(repo, "{dir}/{entry.fixtures}")) {
+        entry.problems.push("its fixtures `{dir}/{entry.fixtures}` are not a directory")
+    }
     if field(tool, "token_gaps") == .Array(gaps) {
         loop gap in gaps {
             named: if gap == .Text(written) -> written.copy() else -> ""
-            if named.starts_with("D-") || (named.starts_with("#") && named.contains(" c")) -> entry.token_gaps.push(named) else -> entry.problems.push("its `tool.token_gaps` holds {json.dumps(gap) ?? "a value"}, not a criterion (\"#5072 c36\") or a ballot (\"D-SH-RUN1\")")
+            if named.starts_with("D-") || (named.starts_with("#") && named.contains(" c")) {
+                entry.token_gaps.push(named)
+            } else {
+                entry.problems.push("its `tool.token_gaps` holds {json.dumps(gap) ?? "a value"}, not a criterion (\"#5072 c36\") or a ballot (\"D-SH-RUN1\")")
+            }
         }
     }
     programs: field(tool, "programs")
     loop key in keys_of(programs) {
-        if !SIDES.contains(key) -> entry.problems.push("`tool.programs.{key}` is not `original` or `jet`")
+        if !SIDES.contains(key) {
+            entry.problems.push("`tool.programs.{key}` is not `original` or `jet`")
+        }
     }
     loop side in 0..<SIDES.len() {
         named: if field(programs, SIDES[side]) == .Array(items) -> items.copy() else -> [Dyn]{}
@@ -425,10 +472,18 @@ read_entry: fn(repo: String, name: String) -[FS]> Entry Never! {
             path: root.head
             language: language_at(repo, path)
             if {
-                path == "" || !files.is_file(files.join(repo, path)) -> entry.problems.push("its `tool.programs.{SIDES[side]}` names {json.dumps(item) ?? "a value"}, not a repository file")
-                root.sep != "" && !one_word(root.tail) -> entry.problems.push("its `tool.programs.{SIDES[side]}` names `{written}`, whose definition after `#` is not a name")
-                side == 0 && language != language_at(repo, entry.original) -> entry.problems.push("its `tool.programs.original` names `{path}`, not in the original's language")
-                side == 1 && language != Val(Language.Jet) -> entry.problems.push("its `tool.programs.jet` names `{path}`, not a Jet program")
+                path == "" || !files.is_file(files.join(repo, path)) -> {
+                    entry.problems.push("its `tool.programs.{SIDES[side]}` names {json.dumps(item) ?? "a value"}, not a repository file")
+                }
+                root.sep != "" && !one_word(root.tail) -> {
+                    entry.problems.push("its `tool.programs.{SIDES[side]}` names `{written}`, whose definition after `#` is not a name")
+                }
+                side == 0 && language != language_at(repo, entry.original) -> {
+                    entry.problems.push("its `tool.programs.original` names `{path}`, not in the original's language")
+                }
+                side == 1 && language != Val(Language.Jet) -> {
+                    entry.problems.push("its `tool.programs.jet` names `{path}`, not a Jet program")
+                }
                 else -> entry.programs[side].push(written)
             }
         }
@@ -440,9 +495,7 @@ read_entry: fn(repo: String, name: String) -[FS]> Entry Never! {
         args := [String]{}
         if field(item, "args") == .Array(values) {
             loop value in values {
-                if value == .Text(word) {
-                    args.push(word.copy())
-                } else {
+                if value == .Text(word) -> args.push(word.copy()) else {
                     entry.problems.push("case {index + 1} has an `args` value that is not a string")
                 }
             }
@@ -459,11 +512,17 @@ read_entry: fn(repo: String, name: String) -[FS]> Entry Never! {
         }
         exit_value: field(item, "exit")
         code: int_of(exit_value) ?? 0
-        if !is_null(exit_value) && int_of(exit_value) == None -> entry.problems.push("case {index + 1}'s `exit` is not an integer")
+        if !is_null(exit_value) && int_of(exit_value) == None {
+            entry.problems.push("case {index + 1}'s `exit` is not an integer")
+        }
         expected: text_field(item, "expected")
-        if expected == "" || !files.is_file(files.join(repo, "{dir}/{expected}")) -> entry.problems.push("case {index + 1}'s expected output `{dir}/{expected}` does not exist")
+        if expected == "" || !files.is_file(files.join(repo, "{dir}/{expected}")) {
+            entry.problems.push("case {index + 1}'s expected output `{dir}/{expected}` does not exist")
+        }
         check: text_field(item, "check")
-        if check != "" && (!check.ends_with(".jet") || !files.is_file(files.join(repo, "{dir}/{check}"))) -> entry.problems.push("case {index + 1}'s check `{dir}/{check}` is not a Jet program")
+        if check != "" && (!check.ends_with(".jet") || !files.is_file(files.join(repo, "{dir}/{check}"))) {
+            entry.problems.push("case {index + 1}'s check `{dir}/{check}` is not a Jet program")
+        }
         entry.cases.push(Case{args: args, env: env, exit: code, expected: expected, check: check})
     }
     entry
@@ -490,7 +549,9 @@ tool_entries: fn(repo: String) -[FS]> [String] JudgeError! {
 // extension names, else the file itself through its `#!` line, as the
 // gauntlet harness runs it.
 original_command: fn(path: String) -> [String] Never! {
-    if path.ends_with(".mjs") || path.ends_with(".js") || path.ends_with(".cjs") || path.ends_with(".ts") -> return [String]{"node", path.copy()}
+    if path.ends_with(".mjs") || path.ends_with(".js") || path.ends_with(".cjs") || path.ends_with(".ts") {
+        return [String]{"node", path.copy()}
+    }
     if path.ends_with(".py") -> return [String]{"python3", path.copy()}
     if path.ends_with(".sh") || path.ends_with(".bash") -> return [String]{"bash", path.copy()}
     [String]{path.copy()}
@@ -507,7 +568,9 @@ jet_env: fn(jet: String) -[Env]> [EnvVar] Never! {
     out
 }
 
-not_run: fn(problem: String) -> Run Never! { Run{code: -1, output: "", errors: "", wall_ns: 0, peak_bytes: 0, problem: problem.copy()} }
+not_run: fn(problem: String) -> Run Never! {
+    Run{code: -1, output: "", errors: "", wall_ns: 0, peak_bytes: 0, problem: problem.copy()}
+}
 
 // Builds the launcher every run goes through, from the checkout holding this
 // tool (the judged tree need not hold one), into `work`: its path, or the
@@ -517,7 +580,9 @@ build_launcher: fn(work: String) -[Env, Exec, FS]> (path: String, problem: Strin
     source: files.join(repo_root(), LAUNCHER)
     built: files.join(work, "launch")
     receipt: process.cmd([String]{"cc", "-O2", "-o", built.copy(), source.copy()}).run() ?? return (path: "", problem: "`cc` cannot start: {err}")
-    if receipt.code != 0 -> return (path: "", problem: "the launcher {source} does not build: {receipt.errors.trim()}")
+    if receipt.code != 0 {
+        return (path: "", problem: "the launcher {source} does not build: {receipt.errors.trim()}")
+    }
     (path: built, problem: "")
 }
 
@@ -533,7 +598,9 @@ run_case: fn(argv: [String], case: Case, inherited: [EnvVar], fixtures: String, 
         // `cp -a` keeps a symbolic link as it is, so a relative one still
         // points inside the copy.
         copied: process.cmd([String]{"cp", "-a", "{fixtures}/.", cwd.copy()}).run() ?? return not_run("cp cannot start: {err}")
-        if copied.code != 0 -> return not_run("the fixtures cannot be copied: {copied.errors.trim()}")
+        if copied.code != 0 {
+            return not_run("the fixtures cannot be copied: {copied.errors.trim()}")
+        }
     }
     report: "{cwd}.launch"
     command := [String]{launcher.copy(), report.copy()}
@@ -551,8 +618,12 @@ run_case: fn(argv: [String], case: Case, inherited: [EnvVar], fixtures: String, 
         if fields[0] == "end" -> end = fields
     }
     files.remove_all(report) ?? ()
-    if receipt.timed_out -> return Run{code: 124, output: receipt.output.copy(), errors: receipt.errors.copy(), wall_ns: 0, peak_bytes: 0, problem: ""}
-    if end.len() != 8 -> return not_run("the launcher exited {receipt.code} without its report: {receipt.errors.trim()}")
+    if receipt.timed_out {
+        return Run{code: 124, output: receipt.output.copy(), errors: receipt.errors.copy(), wall_ns: 0, peak_bytes: 0, problem: ""}
+    }
+    if end.len() != 8 {
+        return not_run("the launcher exited {receipt.code} without its report: {receipt.errors.trim()}")
+    }
     wall: Int.parse(end[2]) ?? 0
     peak_kib: Int.parse(end[4]) ?? 0
     Run{code: receipt.code, output: receipt.output.copy(), errors: receipt.errors.copy(), wall_ns: wall, peak_bytes: peak_kib * 1024, problem: ""}
@@ -569,12 +640,16 @@ checked: fn(run: Run, check: String, jet: String, case: Case, inherited: [EnvVar
     loop setting in inherited.concat(case.env) -> spec = spec.env(setting.name, setting.value)
     receipt: spec.run() ?? return not_run("its check cannot start: {err}")
     files.remove(printed) ?? ()
-    if receipt.code != 0 || receipt.signal != None || receipt.timed_out -> return not_run("its check `{case.check}` fails (exit {receipt.code}): {shown(near(receipt.errors.trim().bytes(), 0))}")
+    if receipt.code != 0 || receipt.signal != None || receipt.timed_out {
+        return not_run("its check `{case.check}` fails (exit {receipt.code}): {shown(near(receipt.errors.trim().bytes(), 0))}")
+    }
     Run{code: run.code, output: receipt.output, errors: run.errors, wall_ns: run.wall_ns, peak_bytes: run.peak_bytes, problem: ""}
 }
 
 // `text` quoted on one line.
-shown: fn(text: String) -> String Never! { "\"{text.replace("\\", "\\\\").replace("\n", "\\n").replace("\t", "\\t")}\"" }
+shown: fn(text: String) -> String Never! {
+    "\"{text.replace("\\", "\\\\").replace("\n", "\\n").replace("\t", "\\t")}\""
+}
 
 // At most 40 bytes of `bytes` from `at`.
 near: fn(bytes: [U8], at: Int) -> String Never! {
@@ -599,7 +674,9 @@ mismatch: fn(expected: String, actual: String) -> String Never! {
 // Why one run failed its case, or "" when it passed.
 run_failure: fn(run: Run, case: Case, expected: String) -> String Never! {
     if run.problem != "" -> return run.problem.copy()
-    if run.code != case.exit -> return "exit {run.code}, not {case.exit}: {shown(near(run.errors.trim().bytes(), 0))}"
+    if run.code != case.exit {
+        return "exit {run.code}, not {case.exit}: {shown(near(run.errors.trim().bytes(), 0))}"
+    }
     mismatch(expected, run.output)
 }
 
@@ -612,7 +689,9 @@ byte_at: fn(bytes: [U8], at: Int) -> Int Never! {
 
 is_digit: fn(code: Int) -> Bool Never! { code >= 48 && code <= 57 }
 
-is_word_byte: fn(code: Int) -> Bool Never! { is_digit(code) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 || code >= 128 }
+is_word_byte: fn(code: Int) -> Bool Never! {
+    is_digit(code) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 || code >= 128
+}
 
 is_quote: fn(language: Language, code: Int) -> Bool Never! {
     if language == {
@@ -634,7 +713,9 @@ string_end: fn(bytes: [U8], at: Int, language: Language) -> Int Never! {
                 inner += 2
                 next
             }
-            if byte_at(bytes, inner) == quote && byte_at(bytes, inner + 1) == quote && byte_at(bytes, inner + 2) == quote -> return inner + 3
+            if byte_at(bytes, inner) == quote && byte_at(bytes, inner + 1) == quote && byte_at(bytes, inner + 2) == quote {
+                return inner + 3
+            }
             inner += 1
         }
     }
@@ -722,7 +803,9 @@ interpolated: fn(bytes: [U8], start: Int, end: Int, language: Language) -> Strin
     template: language == .JavaScript && code == 96
     prefix: String.from_bytes_lossy(bytes[start..<quote])
     formatted: language == .Python && (prefix.contains("f") || prefix.contains("F"))
-    if !(language == .Jet || template || formatted) || (byte_at(bytes, quote + 1) == code && byte_at(bytes, quote + 2) == code) -> return ""
+    if !(language == .Jet || template || formatted) || (byte_at(bytes, quote + 1) == code && byte_at(bytes, quote + 2) == code) {
+        return ""
+    }
     out := [U8]{}
     index := quote + 1
     loop index < end - 1 {
@@ -871,7 +954,9 @@ regex_opens: fn(list: [Token]) -> Bool Never! {
     if last.kind == .Text -> return false
     if last.kind == .Word -> return REGEX_KEYWORDS.contains(last.text)
     // `++` and `--` are two symbols: postfix after an operand, else prefix.
-    if (last.text == "+" || last.text == "-") && at >= 1 && list[at - 1].kind == .Symbol && list[at - 1].text == last.text -> return !operand_ends(list, at - 2)
+    if (last.text == "+" || last.text == "-") && at >= 1 && list[at - 1].kind == .Symbol && list[at - 1].text == last.text {
+        return !operand_ends(list, at - 2)
+    }
     if last.text == ")" -> return control_head(list, opener_of(list, at, "(", ")"))
     if last.text == "}}" -> return block_brace(list, opener_of(list, at, "{{", "}}"))
     last.text != "]"
@@ -891,9 +976,7 @@ regex_end: fn(bytes: [U8], at: Int) -> Int Never! {
         }
         if code == 47 && !in_class {
             index += 1
-            loop is_word_byte(byte_at(bytes, index)) {
-                index += 1
-            }
+            loop is_word_byte(byte_at(bytes, index)) -> index += 1
             return index
         }
         if code == 91 -> in_class = true
@@ -974,9 +1057,7 @@ tokens: fn(source: String, language: Language) -> [Token] Never! {
                 at = string_end(bytes, at, language)
                 kind = .Text
             }
-        } else {
-            at += symbol_len(bytes, at)
-        }
+        } else { at += symbol_len(bytes, at) }
         written: String.from_bytes_lossy(bytes[start..<at])
         text: if kind == .Text -> "" else -> written.copy()
         inner: if kind == .Text -> interpolated(bytes, start, at, language) else -> ""
@@ -990,19 +1071,25 @@ tokens: fn(source: String, language: Language) -> [Token] Never! {
 // by extension, else by its `#!` interpreter.
 language_of: fn(path: String, first_line: String) -> Language? Never! {
     if path.ends_with(".jet") -> return Val(Language.Jet)
-    if path.ends_with(".mjs") || path.ends_with(".js") || path.ends_with(".cjs") || path.ends_with(".ts") -> return Val(Language.JavaScript)
+    if path.ends_with(".mjs") || path.ends_with(".js") || path.ends_with(".cjs") || path.ends_with(".ts") {
+        return Val(Language.JavaScript)
+    }
     if path.ends_with(".py") -> return Val(Language.Python)
     if path.ends_with(".sh") || path.ends_with(".bash") -> return Val(Language.Shell)
     if !first_line.starts_with("#!") -> return None
     words := [String]{}
     loop word in first_line.slice(2, first_line.len()).trim().split(" ").to_list() {
-        if word.trim() != "" && !word.starts_with("-") && !word.contains("=") -> words.push(word.trim().rpartition("/").tail.copy())
+        if word.trim() != "" && !word.starts_with("-") && !word.contains("=") {
+            words.push(word.trim().rpartition("/").tail.copy())
+        }
     }
     if words.len() == 0 -> return None
     interpreter: if words[0] == "env" && words.len() > 1 -> words[1].copy() else -> words[0].copy()
     if interpreter == "node" -> return Val(Language.JavaScript)
     if interpreter.starts_with("python") -> return Val(Language.Python)
-    if interpreter == "sh" || interpreter == "bash" || interpreter == "dash" -> return Val(Language.Shell)
+    if interpreter == "sh" || interpreter == "bash" || interpreter == "dash" {
+        return Val(Language.Shell)
+    }
     if interpreter == "jet" -> return Val(Language.Jet)
     None
 }
@@ -1047,7 +1134,9 @@ quoted: fn(text: String) -> String Never! {
     quote: if {
         text.starts_with("'") -> "'"
         text.starts_with("\"") -> "\""
-        else -> return ""
+        else -> {
+            return ""
+        }
     }
     text.removeprefix(quote).partition(quote).head.copy()
 }
@@ -1224,10 +1313,14 @@ bound_words: fn(list: [Token], start: Int, end: Int) -> [String] Never! {
     loop at in start..<end {
         token: list[at]
         after: token_text(list, at + 1)
-        if token.kind == .Word && (after == ":" || (after == "->" && ["(", ","].contains(token_text(list, at - 1)))) -> out.push(token.text.copy())
+        if token.kind == .Word && (after == ":" || (after == "->" && ["(", ","].contains(token_text(list, at - 1)))) {
+            out.push(token.text.copy())
+        }
         if token.kind == .Word && token.text == "loop" {
             head := at + 1
-            loop head < end && !list[head].first && list[head].text != "in" && list[head].text != "{{" -> head += 1
+            loop head < end && !list[head].first && list[head].text != "in" && list[head].text != "{{" {
+                head += 1
+            }
             if token_text(list, head) == "in" {
                 loop bound in at + 1..<head {
                     if list[bound].kind == .Word -> out.push(list[bound].text.copy())
@@ -1242,7 +1335,9 @@ bound_words: fn(list: [Token], start: Int, end: Int) -> [String] Never! {
                 if text == "(" -> depth += 1
                 if text == ")" -> depth -= 1
                 if depth == 0 -> break
-                if list[inner].kind == .Word && token_text(list, inner - 1) != "." && !["(", "."].contains(token_text(list, inner + 1)) -> out.push(list[inner].text.copy())
+                if list[inner].kind == .Word && token_text(list, inner - 1) != "." && !["(", "."].contains(token_text(list, inner + 1)) {
+                    out.push(list[inner].text.copy())
+                }
                 inner += 1
             }
         }
@@ -1271,8 +1366,12 @@ free_words: fn(list: [Token], start: Int, end: Int, bound: [String]) -> [String]
     out := [String]{}
     loop at in start..<end {
         token: list[at]
-        if token.kind != .Word || token_text(list, at - 1) == "." || out.contains(token.text) -> next
-        if token_text(list, at + 1) == "(" || capitalized(token.text) || !bound.contains(token.text) -> out.push(token.text.copy())
+        if token.kind != .Word || token_text(list, at - 1) == "." || out.contains(token.text) {
+            next
+        }
+        if token_text(list, at + 1) == "(" || capitalized(token.text) || !bound.contains(token.text) {
+            out.push(token.text.copy())
+        }
     }
     out
 }
@@ -1328,20 +1427,26 @@ program: fn(repo: String, roots: [String], language: Language) -[FS]> Program Ne
             reached := [String]{}
             owner: owners[index].copy()
             if owner != "" {
-                loop target in package_sources(repo, owner, words) -> reached.push("{owner}\t{target}")
+                loop target in package_sources(repo, owner, words) {
+                    reached.push("{owner}\t{target}")
+                }
                 manifest: files.read(files.join(repo, "{owner}/package.jet")) ?? ""
                 loop dep in package_deps(manifest) {
                     pair: dep.partition("\t")
                     dir: normalized("{owner}/{pair.tail}")
                     if dir == "" -> next
-                    loop target in package_sources(repo, dir, package_names(text, pair.head)) -> reached.push("{dir}\t{target}")
+                    loop target in package_sources(repo, dir, package_names(text, pair.head)) {
+                        reached.push("{dir}\t{target}")
+                    }
                 }
             }
             loop dep in package_deps(text) {
                 pair: dep.partition("\t")
                 dir: normalized("{files.dirname(file)}/{pair.tail}")
                 if dir == "" -> next
-                loop target in package_sources(repo, dir, package_names(text, pair.head)) -> reached.push("{dir}\t{target}")
+                loop target in package_sources(repo, dir, package_names(text, pair.head)) {
+                    reached.push("{dir}\t{target}")
+                }
             }
             loop pair in reached {
                 split: pair.partition("\t")
@@ -1403,8 +1508,12 @@ unnamed_programs: fn(repo: String, found: Program, own: String) -[FS]> [String] 
         loop word in path_words(found.tokens[at].literal) {
             targets: [String]{normalized(word), normalized("{files.dirname(root)}/{word}")}
             loop target in targets {
-                if target == "" || out.contains(target) || found.paths.contains(target) || target.starts_with("{own}/") -> next
-                if language_of(target, "") == None || !files.is_file(files.join(repo, target)) -> next
+                if target == "" || out.contains(target) || found.paths.contains(target) || target.starts_with("{own}/") {
+                    next
+                }
+                if language_of(target, "") == None || !files.is_file(files.join(repo, target)) {
+                    next
+                }
                 out.push(target.copy())
             }
         }
@@ -1421,7 +1530,9 @@ unnamed_problems: fn(repo: String, entry: Entry, sides: [Program]) -[FS]> [Strin
     loop side in 0..<SIDES.len() {
         driver: sides[side].paths[0]
         if !driver.starts_with(DRIVERS) && !driver.starts_with("{entry.dir}/") -> next
-        loop named in unnamed_programs(repo, sides[side], entry.dir) -> out.push("its {SIDES[side]} driver `{driver}` names the repository program `{named}`, which `tool.programs.{SIDES[side]}` does not name")
+        loop named in unnamed_programs(repo, sides[side], entry.dir) {
+            out.push("its {SIDES[side]} driver `{driver}` names the repository program `{named}`, which `tool.programs.{SIDES[side]}` does not name")
+        }
     }
     out
 }
@@ -1438,7 +1549,9 @@ undeclared_entries: fn(sides: [Program], languages: [Language]) -> [String] Neve
             chosen: found.entries[file].copy()
             wanted: chosen.copy()
             declared: definitions(found.tokens, offset, end, file, languages[side]).any(fn(item) { item.owner == "" && item.name == wanted })
-            if chosen != "" && !declared -> out.push("its `tool.programs.{SIDES[side]}` names `{found.paths[file]}#{chosen}`, but `{found.paths[file]}` declares no `{chosen}`")
+            if chosen != "" && !declared {
+                out.push("its `tool.programs.{SIDES[side]}` names `{found.paths[file]}#{chosen}`, but `{found.paths[file]}` declares no `{chosen}`")
+            }
             offset = end
         }
     }
@@ -1458,7 +1571,9 @@ namespace_aliases: fn(text: String, language: Language) -> [String] Never! {
             if line == "use {{" -> in_use_block = true
             if in_use_block && line == "}}" -> in_use_block = false
             split: line.removeprefix("use ").partition(":")
-            if (in_use_block || line.starts_with("use ")) && quoted(split.tail.trim()) != "" -> out.push(split.head.trim())
+            if (in_use_block || line.starts_with("use ")) && quoted(split.tail.trim()) != "" {
+                out.push(split.head.trim())
+            }
         }
         if language == .JavaScript && line.starts_with("import * as ") {
             split: line.removeprefix("import * as ").partition(" from ")
@@ -1508,7 +1623,9 @@ word_at: fn(list: [Token], at: Int, end: Int) -> String Never! {
 // block belongs to.
 first_type: fn(list: [Token], at: Int, end: Int) -> String Never! {
     loop index in at..<end {
-        if list[index].kind == .Word && capitalized(list[index].text) -> return list[index].text.copy()
+        if list[index].kind == .Word && capitalized(list[index].text) {
+            return list[index].text.copy()
+        }
     }
     ""
 }
@@ -1542,8 +1659,12 @@ definition: fn(list: [Token], start: Int, end: Int, file: Int, language: Languag
         if {
             lead == "import" -> out.inert = true
             skip > at && ["{{", "*"].contains(text_before(list, skip, end)) -> out.inert = true
-            kind == "function" -> out.name = word_at(list, if text_before(list, skip + 1, end) == "*" -> skip + 2 else -> skip + 1, end)
-            ["class", "const", "let", "var"].contains(kind) -> out.name = word_at(list, skip + 1, end)
+            kind == "function" -> {
+                out.name = word_at(list, if text_before(list, skip + 1, end) == "*" -> skip + 2 else -> skip + 1, end)
+            }
+            ["class", "const", "let", "var"].contains(kind) -> {
+                out.name = word_at(list, skip + 1, end)
+            }
         }
     }
     if language == .Python {
@@ -1552,7 +1673,9 @@ definition: fn(list: [Token], start: Int, end: Int, file: Int, language: Languag
         if {
             kind == "import" || kind == "from" -> out.inert = true
             kind == "def" || kind == "class" -> out.name = word_at(list, named, end)
-            !CONTROL_WORDS.contains(kind) && ["=", ":"].contains(text_before(list, named, end)) -> out.name = kind.copy()
+            !CONTROL_WORDS.contains(kind) && ["=", ":"].contains(text_before(list, named, end)) -> {
+                out.name = kind.copy()
+            }
         }
     }
     out
@@ -1589,7 +1712,9 @@ plain_words: fn(list: [Token], start: Int, end: Int, language: Language, aliases
     loop at in start..<end {
         if list[at].kind != .Word -> next
         member: [".", "?."].contains(token_text(list, at - 1))
-        if (language != .Jet && !member) || (member && aliases.contains(token_text(list, at - 2))) -> out.push(list[at].text.copy())
+        if (language != .Jet && !member) || (member && aliases.contains(token_text(list, at - 2))) {
+            out.push(list[at].text.copy())
+        }
     }
     out
 }
@@ -1606,9 +1731,11 @@ referred: fn(list: [Token], item: Definition, inner: [Token], language: Language
 
 // Each word of the tokens `start..<end` of `list` written after a `.` into
 // `members`.
-note_members: fn(list: [Token], start: Int, end: Int, members: &[String: Bool]) Never! {
+note_members: fn(list: [Token], start: Int, end: Int, members: &[String:Bool]) Never! {
     loop at in start..<end {
-        if list[at].kind == .Word && [".", "?."].contains(token_text(list, at - 1)) -> members[list[at].text.copy()] = true
+        if list[at].kind == .Word && [".", "?."].contains(token_text(list, at - 1)) {
+            members[list[at].text.copy()] = true
+        }
     }
 }
 
@@ -1624,21 +1751,23 @@ reached_tokens: fn(found: Program, language: Language) -> [Token] Never! {
         offset = end
     }
     // "file\tname" for each name a file declares.
-    own := [String: Bool]{}
+    own := [String:Bool]{}
     // Whether each root declares one of JET_ENTRIES.
     entered := [Bool]{}
     loop entered.len() < found.roots -> entered.push(false)
     loop item in all {
         if item.name != "" && item.owner == "" -> own["{item.file}\t{item.name}"] = true
-        if item.file < found.roots && item.owner == "" && JET_ENTRIES.contains(item.name) -> entered[item.file] = true
+        if item.file < found.roots && item.owner == "" && JET_ENTRIES.contains(item.name) {
+            entered[item.file] = true
+        }
     }
     // The names reached code writes: "file\tname" when that file declares
     // the name, the bare name when it does not, and every bare name in
     // `written`; `members` holds the words it writes after a `.`.
-    named := [String: Bool]{}
-    anywhere := [String: Bool]{}
-    written := [String: Bool]{}
-    members := [String: Bool]{}
+    named := [String:Bool]{}
+    anywhere := [String:Bool]{}
+    written := [String:Bool]{}
+    members := [String:Bool]{}
     // Whether each token is in a reached definition.
     kept := [Bool]{}
     loop kept.len() < list.len() -> kept.push(false)
@@ -1722,9 +1851,7 @@ shell_fallbacks: fn(text: String) -> Int Never! {
     loop at in 0..<bytes.len() {
         if byte_at(bytes, at) != 36 || byte_at(bytes, at + 1) != 123 -> next
         index := at + 2
-        loop is_word_byte(byte_at(bytes, index)) {
-            index += 1
-        }
+        loop is_word_byte(byte_at(bytes, index)) -> index += 1
         if index == at + 2 && is_shell_special(byte_at(bytes, index)) -> index += 1
         if byte_at(bytes, index) == 58 -> index += 1
         operator: byte_at(bytes, index)
@@ -1735,7 +1862,11 @@ shell_fallbacks: fn(text: String) -> Int Never! {
 
 // Where a shell `case` block stands: before its `in`, in an arm's pattern,
 // or in an arm's commands.
-CaseState: enum { Header Pattern Body }
+CaseState: enum {
+    Header
+    Pattern
+    Body
+}
 
 // The arms of the shell `case` blocks in `list` but the default `*)`: each
 // arm's `pattern)`, after its block's `in` or the terminator before it, one of
@@ -1772,11 +1903,15 @@ shell_arms: fn(list: [Token]) -> Int Never! {
                         states[last] = .Body
                     }
                     // A leading `(` and the `&` of a `;;&` are no pattern.
-                    !(symbol && pattern == "" && (token.text == "(" || (token.text == "&" && before == ";;"))) -> pattern = "{pattern}{token.text}"
+                    !(symbol && pattern == "" && (token.text == "(" || (token.text == "&" && before == ";;"))) -> {
+                        pattern = "{pattern}{token.text}"
+                    }
                 }
             }
             .Body -> {
-                if symbol && (token.text == ";;" || (token.text == "&" && before == ";")) -> states[last] = .Pattern
+                if symbol && (token.text == ";;" || (token.text == "&" && before == ";")) {
+                    states[last] = .Pattern
+                }
             }
         }
     }
@@ -1821,7 +1956,9 @@ jet_if_branches: fn(list: [Token], at: Int) -> Int Never! {
             if brackets == 0 && token.text == "->" -> return 1
             if brackets == 0 && token.text == "{{" {
                 before: list[index - 1]
-                if index == at + 1 || (before.kind == .Symbol && before.text == "==") -> return jet_arms(list, index)
+                if index == at + 1 || (before.kind == .Symbol && before.text == "==") {
+                    return jet_arms(list, index)
+                }
                 return 1
             }
         }
@@ -1851,7 +1988,9 @@ control_brace: fn(list: [Token], head: Int, at: Int) -> Bool Never! {
     if lead.kind == .Word && CONTROL_WORDS.contains(lead.text) -> return true
     if lead.kind == .Symbol && lead.text == "}}" && head + 1 < list.len() {
         after: list[head + 1]
-        if after.kind == .Word && (after.text == "else" || after.text == "catch" || after.text == "finally") -> return true
+        if after.kind == .Word && (after.text == "else" || after.text == "catch" || after.text == "finally") {
+            return true
+        }
     }
     false
 }
@@ -1869,11 +2008,7 @@ brace_depth: fn(list: [Token]) -> Int Never! {
         if token.kind != .Symbol -> next
         if token.text == "{{" {
             control: control_brace(list, head, index)
-            if size < open.len() {
-                open[size] = control
-            } else {
-                open.push(control)
-            }
+            if size < open.len() -> open[size] = control else -> open.push(control)
             size += 1
             if control {
                 controls += 1
@@ -1925,7 +2060,9 @@ python_depth: fn(list: [Token]) -> Int Never! {
         }
         if token.kind == .Symbol {
             if token.text == "(" || token.text == "[" || token.text == "{{" -> brackets += 1
-            if (token.text == ")" || token.text == "]" || token.text == "}}") && brackets > 0 -> brackets -= 1
+            if (token.text == ")" || token.text == "]" || token.text == "}}") && brackets > 0 {
+                brackets -= 1
+            }
         }
     }
     deepest
@@ -1991,7 +2128,9 @@ review_of: fn(text: String) -> Review Never! {
     checklist: field(tree, "checklist")
     if !is_object(checklist) -> review.problems.push("it has no `checklist` object")
     loop key in keys_of(checklist) {
-        if !SIDES.contains(key) -> review.problems.push("`checklist.{key}` is not `original` or `jet`")
+        if !SIDES.contains(key) {
+            review.problems.push("`checklist.{key}` is not `original` or `jet`")
+        }
     }
     loop side in SIDES {
         scores: field(checklist, side)
@@ -2000,7 +2139,9 @@ review_of: fn(text: String) -> Review Never! {
             next
         }
         loop key in keys_of(scores) {
-            if !CHECKLIST.contains(key) -> review.problems.push("`checklist.{side}.{key}` is not a checklist item")
+            if !CHECKLIST.contains(key) {
+                review.problems.push("`checklist.{side}.{key}` is not a checklist item")
+            }
         }
         total := 0
         loop item in CHECKLIST {
@@ -2020,7 +2161,9 @@ review_of: fn(text: String) -> Review Never! {
         return review
     }
     loop key in keys_of(helpers) {
-        if !SIDES.contains(key) -> review.problems.push("`helpers.{key}` is not `original` or `jet`")
+        if !SIDES.contains(key) {
+            review.problems.push("`helpers.{key}` is not `original` or `jet`")
+        }
     }
     loop side in SIDES {
         listed: field(helpers, side)
@@ -2117,8 +2260,12 @@ lead_text: fn(result: Lead) -> String Never! {
 }
 
 speed_bar: fn(wall_original: [Int], wall_jet: [Int], peak_original: [Int], peak_jet: [Int], problems: [String]) -> Bar Never! {
-    if problems.len() > 0 -> return Bar{name: "speed", pass: false, detail: "not measured: {problems.join("; ")}"}
-    if least(peak_original) <= 0 || least(peak_jet) <= 0 -> return Bar{name: "speed", pass: false, detail: "not measured: a run's peak memory was not recorded"}
+    if problems.len() > 0 {
+        return Bar{name: "speed", pass: false, detail: "not measured: {problems.join("; ")}"}
+    }
+    if least(peak_original) <= 0 || least(peak_jet) <= 0 {
+        return Bar{name: "speed", pass: false, detail: "not measured: a run's peak memory was not recorded"}
+    }
     wall: lead(wall_jet, wall_original)
     peak: lead(peak_jet, peak_original)
     wall_text: "wall Jet/original {ratio(median(wall_jet), median(wall_original))} ({tenths(median(wall_jet), 1000000)} ms against {tenths(median(wall_original), 1000000)} ms; {lead_text(wall)})"
@@ -2188,7 +2335,9 @@ roots_of: fn(entry: Entry, side: Int) -> [String] Never! {
 }
 
 // Where side `side` runs case `index` of entry `name`.
-case_dir: fn(work: String, name: String, index: Int, side: Int) -> String Never! { files.join(work, "{name}/case-{index + 1}-{SIDES[side]}") }
+case_dir: fn(work: String, name: String, index: Int, side: Int) -> String Never! {
+    files.join(work, "{name}/case-{index + 1}-{SIDES[side]}")
+}
 
 // Judges the tool entry `name` of `repo` on every bar, running its programs
 // under `work` with `jet` and `runs` timing rounds.
@@ -2211,7 +2360,9 @@ judge: fn(repo: String, name: String, jet: String, runs: Int, work: String) -[En
     programs: [[String]]{original_command(files.join(repo, entry.original)), [String]{jet.copy(), files.join(repo, entry.twin), "--"}}
     fixtures: if entry.fixtures == "" -> "" else -> files.join(repo, "{entry.dir}/{entry.fixtures}")
     expected := [String]{}
-    loop case in entry.cases -> expected.push(files.read(files.join(repo, "{entry.dir}/{case.expected}")) ?? "")
+    loop case in entry.cases {
+        expected.push(files.read(files.join(repo, "{entry.dir}/{case.expected}")) ?? "")
+    }
 
     failures := [String]{}
     identical := 0
@@ -2245,7 +2396,9 @@ judge: fn(repo: String, name: String, jet: String, runs: Int, work: String) -[En
             peak := 0
             loop index in 0..<cases {
                 run: run_case(programs[side], entry.cases[index], inherited, fixtures, case_dir(work, name, index, side), launcher.path)
-                if run.problem != "" && problems.len() == 0 -> problems.push("case {index + 1} {SIDES[side]}: {run.problem}")
+                if run.problem != "" && problems.len() == 0 {
+                    problems.push("case {index + 1} {SIDES[side]}: {run.problem}")
+                }
                 wall += run.wall_ns
                 if run.peak_bytes > peak -> peak = run.peak_bytes
             }
@@ -2281,12 +2434,16 @@ measure_lines: fn(repo: String, name: String) -[FS]> [String] Never! {
         entry.twin = jet_program.copy()
         entry.problems = [String]{}
     }
-    if entry.problems.len() > 0 -> return [String]{"{name}\t-\t-\t-\t-\tcannot be measured: {entry.problems.join("; ")}"}
+    if entry.problems.len() > 0 {
+        return [String]{"{name}\t-\t-\t-\t-\tcannot be measured: {entry.problems.join("; ")}"}
+    }
     language: language_at(repo, entry.original) ?? return [String]{"{name}\t-\t-\t-\t-\tno token or proxy rule for the original `{entry.original}`'s language"}
     sides: [Program]{program(repo, roots_of(entry, 0), language), program(repo, roots_of(entry, 1), .Jet)}
     languages: [Language]{language, .Jet}
     unnamed: if tool -> unnamed_problems(repo, entry, sides).concat(undeclared_entries(sides, languages)) else -> [String]{}
-    if unnamed.len() > 0 -> return [String]{"{name}\t-\t-\t-\t-\tcannot be measured: {unnamed.join("; ")}"}
+    if unnamed.len() > 0 {
+        return [String]{"{name}\t-\t-\t-\t-\tcannot be measured: {unnamed.join("; ")}"}
+    }
     out := [String]{}
     loop side in 0..<2 {
         measured: proxies(reached_tokens(sides[side], languages[side]), languages[side])
@@ -2313,8 +2470,12 @@ report_lines: fn(report: Report) -> [String] Never! {
     }
     lost: lost_bars(report)
     if {
-        lost.len() == 0 -> out.push("{report.entry}\tverdict\tPASS\twins every bar; the repository may switch to the Jet twin")
-        else -> out.push("{report.entry}\tverdict\tFAIL\tloses {lost.join(", ")}; the original keeps running")
+        lost.len() == 0 -> {
+            out.push("{report.entry}\tverdict\tPASS\twins every bar; the repository may switch to the Jet twin")
+        }
+        else -> {
+            out.push("{report.entry}\tverdict\tFAIL\tloses {lost.join(", ")}; the original keeps running")
+        }
     }
     out
 }
@@ -2352,7 +2513,9 @@ work_dir: fn(label: String) -[Env, FS, Time]> String IOError! {
         loop entry in entries {
             fields: entry.name.split("_").to_list()
             pid: fields[fields.len() - 2].to_int() ?? next
-            if entry.is_dir && !files.exists("/proc/{pid}") -> files.remove_all(files.join(dir, entry.name)) ?? ()
+            if entry.is_dir && !files.exists("/proc/{pid}") {
+                files.remove_all(files.join(dir, entry.name)) ?? ()
+            }
         }
     }
     work: files.join(root, "port_bars_{label}_{sys.pid()}_{time.unix_ns()}")
@@ -2362,7 +2525,9 @@ work_dir: fn(label: String) -[Env, FS, Time]> String IOError! {
 
 cannot_run: fn(message: String) -[Exec, IO]> Never { process.fail(64, message) }
 
-usage: fn() -[Exec, IO]> Never { cannot_run("usage: jet Tools/gauntlet/PortBars.jet [--entry NAME] [--runs N] [--jet PATH] [--repo DIR] [--measure]") }
+usage: fn() -[Exec, IO]> Never {
+    cannot_run("usage: jet Tools/gauntlet/PortBars.jet [--entry NAME] [--runs N] [--jet PATH] [--repo DIR] [--measure]")
+}
 
 run: fn() {
     args: process.args()
@@ -2394,11 +2559,11 @@ run: fn() {
     if jet.contains("/") -> jet = absolute(jet)
     names := [String]{}
     if only != "" {
-        if !files.is_file(files.join(repo, "{ENTRIES_ROOT}/{only}/entry.json")) -> cannot_run("port-bars: there is no entry `{ENTRIES_ROOT}/{only}`")
+        if !files.is_file(files.join(repo, "{ENTRIES_ROOT}/{only}/entry.json")) {
+            cannot_run("port-bars: there is no entry `{ENTRIES_ROOT}/{only}`")
+        }
         names.push(only.copy())
-    } else {
-        names = tool_entries(repo) ?? return cannot_run(err.message)
-    }
+    } else { names = tool_entries(repo) ?? return cannot_run(err.message) }
     if measure {
         print("entry\tside\ttokens\tbranches\tdepth\tfiles")
         refused := 0
@@ -2440,7 +2605,9 @@ run: fn() {
     javascript: program(dir, ["Tools/fx/a.mjs"], .JavaScript)
     assert_eq(javascript.paths, ["Tools/fx/a.mjs", "Tools/fx/b.mjs", "Tools/fy/c.mjs"])
     each := 0
-    loop path in javascript.paths -> each += tokens(files.read(files.join(dir, path)) ?? "", .JavaScript).len()
+    loop path in javascript.paths {
+        each += tokens(files.read(files.join(dir, path)) ?? "", .JavaScript).len()
+    }
     assert_eq(javascript.tokens.len(), each)
     assert_eq(javascript.counts.len(), 3)
     assert_eq(proxies(javascript.tokens, .JavaScript), Proxies{branches: 2, depth: 0})
@@ -2477,7 +2644,9 @@ run: fn() {
     dir: work_dir("references") ?? panic("a scratch directory cannot be made: {err}")
     plant(dir, "Tools/kit/package.jet", "name: \"kit\"\nversion: \"0.0.1\"\n")
     plant(dir, "Tools/kit/Source/A.jet", "alpha: fn(x: Int?, iota: Int) -> Int {{\n    gamma: 3\n    loop delta in [1, 2] -> print(delta)\n    if x == .Val(.Some(epsilon)) -> print(epsilon)\n    list: [1].map(fn(eta) {{ eta + gamma + iota }})\n    zeta() + list.beta() + Theta{{kappa: 1}}.kappa\n}}\n")
-    loop name in ["beta", "gamma", "delta", "epsilon", "zeta", "eta", "iota", "kappa"] -> plant(dir, "Tools/kit/Source/{name}.jet", "{name}: fn() -> Int {{ 1 }}\n")
+    loop name in ["beta", "gamma", "delta", "epsilon", "zeta", "eta", "iota", "kappa"] {
+        plant(dir, "Tools/kit/Source/{name}.jet", "{name}: fn() -> Int {{ 1 }}\n")
+    }
     plant(dir, "Tools/kit/Source/theta.jet", "Theta: struct {{ kappa: Int }}\n")
     plant(dir, "Tools/fx/twin/run.jet", "package: {{\n    name: \"twin\"\n    version: \"0.0.1\"\n    deps: {{\n        kit: ../../kit,\n    }}\n}}\n\nuse kit.[alpha]\n\nrun: fn() {{ print(alpha(None, 1)) }}\n")
     assert_eq(program(dir, ["Tools/fx/twin/run.jet"], .Jet).paths, ["Tools/fx/twin/run.jet", "Tools/kit/Source/A.jet", "Tools/kit/Source/theta.jet", "Tools/kit/Source/zeta.jet"])

@@ -1,4 +1,3 @@
-
 // Resolve environment tokens against the effective environment before this line.
 kit_steps_env_token_end: fn(argument: String, start: Int) -> Int? {
     bytes: argument.bytes()
@@ -37,7 +36,9 @@ kit_steps_argv_env_valid: fn(argument: String) -> Bool {
         choices: body.split("|").to_list()
         if !kit_steps_env_name(choices[0]) -> return false
         loop choice in choices.slice(1, choices.len()) {
-            if choice.starts_with("env:") && !kit_steps_env_name(kit_steps_byte_slice(choice, 4, choice.count_bytes())) -> return false
+            if choice.starts_with("env:") && !kit_steps_env_name(kit_steps_byte_slice(choice, 4, choice.count_bytes())) {
+                return false
+            }
         }
         rest = kit_steps_byte_slice(rest, end, rest.count_bytes())
     }
@@ -84,12 +85,16 @@ kit_steps_whitespace_words: fn(text: String) -> [String] {
     loop index < bytes.len() {
         scalar: kit_steps_scalar(bytes, index)
         if kit_steps_unicode_space(scalar.value) {
-            if index > start -> words.push(String.from_bytes(bytes.slice(start, index)) ?? panic("word span is not UTF-8"))
+            if index > start {
+                words.push(String.from_bytes(bytes.slice(start, index)) ?? panic("word span is not UTF-8"))
+            }
             start = scalar.next
         }
         index = scalar.next
     }
-    if index > start -> words.push(String.from_bytes(bytes.slice(start, index)) ?? panic("word span is not UTF-8"))
+    if index > start {
+        words.push(String.from_bytes(bytes.slice(start, index)) ?? panic("word span is not UTF-8"))
+    }
     words
 }
 

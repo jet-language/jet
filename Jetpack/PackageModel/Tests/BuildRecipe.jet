@@ -1,7 +1,13 @@
 use {
     jet_pkg_model.[
-        BuildPlanFragment, BuildRecipe, BuildStep, PlanAuthority, PlanFragmentAction, PlanInput,
-        StagedPlanAction, StagedPlanError,
+        BuildPlanFragment,
+        BuildRecipe,
+        BuildStep,
+        PlanAuthority,
+        PlanFragmentAction,
+        PlanInput,
+        StagedPlanAction,
+        StagedPlanError,
     ]
     jetpack_foundation.[BuildEffect]
 }
@@ -108,7 +114,7 @@ pkg_test_staged_error: fn(action: StagedPlanAction, fragment: BuildPlanFragment)
     action: StagedPlanAction.new("discover", 0, 1, [PlanInput]{PlanInput.new("manifest", "sha256-input")}, PlanAuthority{tools: [String]{"planner", "planner-alt"}, effects: [BuildEffect]{BuildEffect.Exec, BuildEffect.FS}, platform: platform})
     fragment := pkg_test_staged_fragment(platform)
     fragment.actions[0].args = [String]{"--stable"}
-    fragment.actions[0].env = [String: String]{"STAGED_INPUT": "manifest"}
+    fragment.actions[0].env = [String:String]{"STAGED_INPUT": "manifest"}
     fragment.actions[0].effects = [BuildEffect]{BuildEffect.Exec, BuildEffect.FS}
 
     identity: pkg_test_staged_identity(action, fragment)
@@ -165,7 +171,7 @@ pkg_test_staged_error: fn(action: StagedPlanAction, fragment: BuildPlanFragment)
     // Dependency ordering must not make repeated builds diverge.
     assert_eq(
         recipe.build_identity_for_source_with_dependencies("tool", "./vendor/tool", "source", "linux-x86_64", [String]{"cc@default", "ar@default"}),
-        recipe.build_identity_for_source_with_dependencies("tool", "./vendor/tool", "source", "linux-x86_64", [String]{"ar@default", "cc@default"})
+        recipe.build_identity_for_source_with_dependencies("tool", "./vendor/tool", "source", "linux-x86_64", [String]{"ar@default", "cc@default"}),
     )
 }
 

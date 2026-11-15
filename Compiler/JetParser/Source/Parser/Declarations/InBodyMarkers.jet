@@ -50,9 +50,13 @@ ParserMarkerSplice: struct {
 // right after a marker name, so field, variant and statement markers and the
 // `#Name` value expression never read as one.
 parser_inbody_marker_ahead: fn(state: &JetParserState) -> Bool Never! {
-    if parser_current_kind(state) != TOKEN_HASH || parser_kind_at(state, 1) != TOKEN_IDENT -> return false
+    if parser_current_kind(state) != TOKEN_HASH || parser_kind_at(state, 1) != TOKEN_IDENT {
+        return false
+    }
     offset := 2
-    loop parser_kind_at(state, offset) == TOKEN_DOT && parser_kind_at(state, offset + 1) == TOKEN_IDENT -> offset += 2
+    loop parser_kind_at(state, offset) == TOKEN_DOT && parser_kind_at(state, offset + 1) == TOKEN_IDENT {
+        offset += 2
+    }
     parser_kind_at(state, offset) == TOKEN_COLON
 }
 
@@ -68,15 +72,21 @@ parser_skip_inbody_marker_lines: fn(state: &JetParserState, offset: Int) -> Int 
     at := offset
     loop parser_kind_at(state, at) == TOKEN_HASH && parser_kind_at(state, at + 1) == TOKEN_IDENT {
         name_end := at + 2
-        loop parser_kind_at(state, name_end) == TOKEN_DOT && parser_kind_at(state, name_end + 1) == TOKEN_IDENT -> name_end += 2
+        loop parser_kind_at(state, name_end) == TOKEN_DOT && parser_kind_at(state, name_end + 1) == TOKEN_IDENT {
+            name_end += 2
+        }
         if parser_kind_at(state, name_end) != TOKEN_COLON -> return at
         end := name_end + 1
         depth := 0
         loop {
             kind: parser_kind_at(state, end)
-            if kind == TOKEN_EOF || (depth == 0 && (kind == TOKEN_SEMI || kind == TOKEN_RBRACE)) -> break
+            if kind == TOKEN_EOF || (depth == 0 && (kind == TOKEN_SEMI || kind == TOKEN_RBRACE)) {
+                break
+            }
             if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> depth += 1
-            if (kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE) && depth > 0 -> depth -= 1
+            if (kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE) && depth > 0 {
+                depth -= 1
+            }
             end += 1
         }
         loop parser_kind_at(state, end) == TOKEN_SEMI -> end += 1
@@ -99,9 +109,7 @@ parser_parse_inbody_marker: fn(state: &JetParserState) -> Marker? {
     args := [MarkerCallArg]{}
     labels := [CallLabel?]{}
     required := [Int]{}
-    if value.kind == TOKEN_TRUE {
-        parser_bump(state)
-    } else if value.kind == TOKEN_FALSE {
+    if value.kind == TOKEN_TRUE -> parser_bump(state) else if value.kind == TOKEN_FALSE {
         parser_bump(state)
         negated = true
         if !owned_trait_auto_derive_marker(marker_name) {
@@ -133,7 +141,9 @@ parser_parse_inbody_marker_value: fn(state: &JetParserState, first: Token) -> Ex
     blocks: state.block_spans.len()
     else_arms: state.else_arms.len()
     parsed: parser_parse_expression(state, 1, 2)
-    if parser_marker_simple_value(parsed.expr) && parser_inbody_line_ends(state) && !parser_error_since(state, diagnostics) -> return Val(parsed.expr)
+    if parser_marker_simple_value(parsed.expr) && parser_inbody_line_ends(state) && !parser_error_since(state, diagnostics) {
+        return Val(parsed.expr)
+    }
     parser_rewind(state, position, diagnostics, blocks, else_arms)
     parser_report_inbody_parentheses(state, first.span.start)
     None
@@ -149,7 +159,9 @@ parser_report_inbody_parentheses: fn(state: &JetParserState, value_start: Int) {
         kind: parser_current_kind(state)
         if depth == 0 && (kind == TOKEN_SEMI || kind == TOKEN_RBRACE) -> break
         if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> depth += 1
-        if (kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE) && depth > 0 -> depth -= 1
+        if (kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE) && depth > 0 {
+            depth -= 1
+        }
         end = parser_bump(state).span.end
     }
     span: Span{start: value_start, end: end}
@@ -267,7 +279,9 @@ parser_marker_line_start: fn(source: [U8], offset: Int) -> Int Never! {
 parser_marker_line_indent: fn(source: [U8], offset: Int) -> String Never! {
     start: parser_marker_line_start(source, offset)
     end := start
-    loop end < offset && (parser_marker_byte(source, end) == 32 || parser_marker_byte(source, end) == 9) -> end += 1
+    loop end < offset && (parser_marker_byte(source, end) == 32 || parser_marker_byte(source, end) == 9) {
+        end += 1
+    }
     String.from_bytes(source.slice(start, end)) ?? ""
 }
 
@@ -276,14 +290,20 @@ parser_marker_line_indent: fn(source: [U8], offset: Int) -> String Never! {
 parser_marker_above_region: fn(source: [U8], above: [Marker]) -> Span Never! {
     start := above[0].span.start
     if parser_marker_byte(source, start) != 35 {
-        loop parser_marker_byte(source, start - 1) == 32 || parser_marker_byte(source, start - 1) == 9 -> start -= 1
+        loop parser_marker_byte(source, start - 1) == 32 || parser_marker_byte(source, start - 1) == 9 {
+            start -= 1
+        }
         if parser_marker_byte(source, start - 1) == 91 -> start -= 1
-        loop parser_marker_byte(source, start - 1) == 32 || parser_marker_byte(source, start - 1) == 9 -> start -= 1
+        loop parser_marker_byte(source, start - 1) == 32 || parser_marker_byte(source, start - 1) == 9 {
+            start -= 1
+        }
         if parser_marker_byte(source, start - 1) == 35 -> start -= 1
     }
     end := above[above.len() - 1].span.end
     probe := end
-    loop parser_marker_byte(source, probe) == 32 || parser_marker_byte(source, probe) == 9 -> probe += 1
+    loop parser_marker_byte(source, probe) == 32 || parser_marker_byte(source, probe) == 9 {
+        probe += 1
+    }
     if parser_marker_byte(source, probe) == 93 -> end = probe + 1
     Span{start: start, end: end}
 }
@@ -293,10 +313,16 @@ parser_marker_above_region: fn(source: [U8], above: [Marker]) -> Span Never! {
 parser_marker_line_cut: fn(source: [U8], span: Span) -> ParserMarkerSplice Never! {
     line: parser_marker_line_start(source, span.start)
     before := line
-    loop before < span.start && (parser_marker_byte(source, before) == 32 || parser_marker_byte(source, before) == 9) -> before += 1
+    loop before < span.start && (parser_marker_byte(source, before) == 32 || parser_marker_byte(source, before) == 9) {
+        before += 1
+    }
     after := span.end
-    loop parser_marker_byte(source, after) == 32 || parser_marker_byte(source, after) == 9 -> after += 1
-    if before == span.start && parser_marker_byte(source, after) == 10 -> return ParserMarkerSplice{start: line, end: after + 1, text: ""}
+    loop parser_marker_byte(source, after) == 32 || parser_marker_byte(source, after) == 9 {
+        after += 1
+    }
+    if before == span.start && parser_marker_byte(source, after) == 10 {
+        return ParserMarkerSplice{start: line, end: after + 1, text: ""}
+    }
     ParserMarkerSplice{start: span.start, end: after, text: ""}
 }
 
@@ -316,11 +342,7 @@ parser_marker_move_edit: fn(source: [U8], markers: [Marker], head: Int, close: I
     above := [Marker]{}
     within := [Marker]{}
     loop marker in markers {
-        if marker.inside {
-            within.push(marker.copy())
-        } else {
-            above.push(marker.copy())
-        }
+        if marker.inside -> within.push(marker.copy()) else -> above.push(marker.copy())
     }
     ordered := above.copy()
     loop marker in within -> ordered.push(marker)
@@ -331,7 +353,9 @@ parser_marker_move_edit: fn(source: [U8], markers: [Marker], head: Int, close: I
     if inside {
         if above.len() > 0 {
             end := region.end
-            loop parser_marker_byte(source, end) == 32 || parser_marker_byte(source, end) == 9 || parser_marker_byte(source, end) == 10 || parser_marker_byte(source, end) == 13 -> end += 1
+            loop parser_marker_byte(source, end) == 32 || parser_marker_byte(source, end) == 9 || parser_marker_byte(source, end) == 10 || parser_marker_byte(source, end) == 13 {
+                end += 1
+            }
             splices.push(ParserMarkerSplice{start: region.start, end: end, text: ""})
         }
     } else {
@@ -355,9 +379,7 @@ parser_marker_move_edit: fn(source: [U8], markers: [Marker], head: Int, close: I
             byte: parser_marker_byte(source, offset)
             if byte != 32 && byte != 9 -> blank = false
         }
-        if blank {
-            splices.push(ParserMarkerSplice{start: brace_line, end: brace_line, text: text})
-        } else {
+        if blank -> splices.push(ParserMarkerSplice{start: brace_line, end: brace_line, text: text}) else {
             splices.push(ParserMarkerSplice{start: close, end: close, text: "\n{text}{indent}"})
         }
     }
@@ -428,32 +450,48 @@ parser_marker_placement_edit_at: fn(source: [U8], offset: Int, inside: Bool) -> 
 parser_marker_placements: fn(source: [U8], inside: Bool, at: Int) -> [TextEdit] {
     parsed: parse_source(source)
     edits := [TextEdit]{}
-    loop item in parsed.program.items -> parser_marker_item_placement(source, item, inside, at, edits)
+    loop item in parsed.program.items {
+        parser_marker_item_placement(source, item, inside, at, edits)
+    }
     edits
 }
 
 parser_marker_item_placement: fn(source: [U8], item: Item, inside: Bool, at: Int, edits: &[TextEdit]) {
     if item == {
-        .Func(function) -> parser_marker_function_placement(source, function, inside, at, edits)
+        .Func(function) -> { parser_marker_function_placement(source, function, inside, at, edits) }
         .Struct(definition) -> {
             parser_marker_place(source, definition.type_markers, definition.span, inside, false, at, edits)
-            loop method in definition.methods -> parser_marker_function_placement(source, method, inside, at, edits)
-            loop block in definition.trait_impls -> parser_marker_block_placement(source, block, inside, at, edits)
+            loop method in definition.methods {
+                parser_marker_function_placement(source, method, inside, at, edits)
+            }
+            loop block in definition.trait_impls {
+                parser_marker_block_placement(source, block, inside, at, edits)
+            }
         }
         .Enum(definition) -> {
             parser_marker_place(source, definition.type_markers, definition.span, inside, false, at, edits)
-            loop method in definition.methods -> parser_marker_function_placement(source, method, inside, at, edits)
-            loop block in definition.trait_impls -> parser_marker_block_placement(source, block, inside, at, edits)
+            loop method in definition.methods {
+                parser_marker_function_placement(source, method, inside, at, edits)
+            }
+            loop block in definition.trait_impls {
+                parser_marker_block_placement(source, block, inside, at, edits)
+            }
         }
-        .Trait(definition) -> parser_marker_place(source, definition.markers, definition.span, inside, false, at, edits)
+        .Trait(definition) -> {
+            parser_marker_place(source, definition.markers, definition.span, inside, false, at, edits)
+        }
         .Impl(implementation) -> {
             parser_marker_place(source, implementation.markers, implementation.span, inside, false, at, edits)
-            loop method in implementation.methods -> parser_marker_function_placement(source, method, inside, at, edits)
+            loop method in implementation.methods {
+                parser_marker_function_placement(source, method, inside, at, edits)
+            }
         }
         .CodeModule(code_module) -> {
             parser_marker_place(source, code_module.markers, code_module.span, inside, true, at, edits)
             if code_module.body == .Val(body) {
-                loop nested in body -> parser_marker_item_placement(source, nested, inside, at, edits)
+                loop nested in body {
+                    parser_marker_item_placement(source, nested, inside, at, edits)
+                }
             }
         }
         .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
@@ -463,7 +501,9 @@ parser_marker_item_placement: fn(source: [U8], item: Item, inside: Bool, at: Int
 parser_marker_function_placement: fn(source: [U8], function: Func, inside: Bool, at: Int, edits: &[TextEdit]) {
     if inside {
         loop marker in function.markers {
-            if parser_marker_spells_body_shape(marker) -> return
+            if parser_marker_spells_body_shape(marker) {
+                return
+            }
         }
     }
     parser_marker_place(source, function.markers, function.span, inside, false, at, edits)
@@ -472,18 +512,26 @@ parser_marker_function_placement: fn(source: [U8], function: Func, inside: Bool,
 parser_marker_block_placement: fn(source: [U8], block: TraitImplBlock, inside: Bool, at: Int, edits: &[TextEdit]) {
     span: block.span ?? return
     parser_marker_place(source, block.markers, span, inside, false, at, edits)
-    loop method in block.methods -> parser_marker_function_placement(source, method, inside, at, edits)
+    loop method in block.methods {
+        parser_marker_function_placement(source, method, inside, at, edits)
+    }
 }
 
 // One declaration spanning `span`, whose body closes at its last byte. Its
 // text starts at the first non-blank byte of the line `span` starts on, so
 // a visibility word before the keyword stays after the markers.
 parser_marker_place: fn(source: [U8], markers: [Marker], span: Span, inside: Bool, same_line: Bool, at: Int, edits: &[TextEdit]) {
-    if markers.len() == 0 || span.end <= span.start -> return
+    if markers.len() == 0 || span.end <= span.start {
+        return
+    }
     head := parser_marker_line_start(source, span.start)
-    loop head < span.start && (parser_marker_byte(source, head) == 32 || parser_marker_byte(source, head) == 9) -> head += 1
+    loop head < span.start && (parser_marker_byte(source, head) == 32 || parser_marker_byte(source, head) == 9) {
+        head += 1
+    }
     edit: parser_marker_move_edit(source, markers, head, span.end - 1, inside, same_line) ?? return
     low: if edit.span.start < head -> edit.span.start else -> head
-    if at >= 0 && (at < low || at >= span.end) -> return
+    if at >= 0 && (at < low || at >= span.end) {
+        return
+    }
     edits.push(edit)
 }

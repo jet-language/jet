@@ -18,7 +18,7 @@ PrivateStage: struct {
     new: fn(output_root: String) -[FS, Env, Rand]> PrivateStage RecipeDiagnostic! {
         parent: recipe_output_parent(output_root) ?? return Err(RecipeDiagnostic.recipe_io("could not create private recipe stage", err))
         child: parent.exclusive_child("jet-recipe-stage") ?? return Err(RecipeDiagnostic.recipe_io("could not create private recipe stage", err))
-        Ok(PrivateStage{path: child.path, parent, name: child.name})
+        Ok(PrivateStage{path: child.path, parent: parent, name: child.name})
     }
 
     // A context whose output root is this private stage.
@@ -58,7 +58,7 @@ recipe_admit: fn(recipe: BuildRecipe, ctx: RecipeBuildContext) -[FS, Env, Rand]>
     plan: recipe_lower_to_plan(recipe, "pkg", ctx.tools)
     plan_fingerprint: recipe_plan_fingerprint(plan)
     order: recipe_admitted_step_order(plan, recipe.steps.len())
-    Ok(RecipeAdmission{plan_fingerprint, order})
+    Ok(RecipeAdmission{plan_fingerprint: plan_fingerprint, order: order})
 }
 
 // Run a recipe under the sandbox and return the build provenance.
@@ -101,7 +101,7 @@ recipe_run_logged: fn(recipe: BuildRecipe, ctx: RecipeBuildContext, transport: R
         step: recipe.steps[step_index]
         index: position + 1
         if recipe_run_step(step, staged_ctx, transport, report, true) == {
-            .Ok(_) -> attempt.push_step(recipe_step_log(step, index, total, ctx, "ok", "", ""))
+            .Ok(_) -> { attempt.push_step(recipe_step_log(step, index, total, ctx, "ok", "", "")) }
             .Err(error) -> {
                 attempt.push_step(recipe_step_log(step, index, total, ctx, "failed", "", "{error.code}: {error.what}\n{error.why}\n"))
                 staged.discard()
@@ -118,11 +118,15 @@ recipe_run_logged: fn(recipe: BuildRecipe, ctx: RecipeBuildContext, transport: R
 recipe_run_steps: fn(recipe: BuildRecipe, order: [Int], ctx: RecipeBuildContext, transport: RecipeTransport?) -[FS, Env, Exec, Net, Rand, Time.Wait]> RunReport RecipeDiagnostic! {
     if recipe_ensure_directory(ctx.output_root) == {
         .Ok(_) -> {}
-        .Err(error) -> { return Err(RecipeDiagnostic.recipe_io("could not create staged recipe output", error)) }
+        .Err(error) -> {
+            return Err(RecipeDiagnostic.recipe_io("could not create staged recipe output", error))
+        }
     }
     report := RunReport.new()
     loop step_index in order {
-        if step_index < 0 || step_index >= recipe.steps.len() -> return Err(RecipeDiagnostic.e1238_plan("admitted stage refers to a missing recipe step"))
+        if step_index < 0 || step_index >= recipe.steps.len() {
+            return Err(RecipeDiagnostic.e1238_plan("admitted stage refers to a missing recipe step"))
+        }
         recipe_run_step(recipe.steps[step_index], ctx, transport, report, false)
     }
     Ok(report)
@@ -132,9 +136,9 @@ recipe_run_steps: fn(recipe: BuildRecipe, order: [Int], ctx: RecipeBuildContext,
 // exec failure.
 recipe_run_step: fn(step: BuildStep, ctx: RecipeBuildContext, transport: RecipeTransport?, report: &RunReport, logged: Bool) RecipeDiagnostic! -[FS, Env, Exec, Net, Rand, Time.Wait]> {
     if step == {
-        .Fetch(url, sha256) -> recipe_do_fetch(url, sha256, ctx, transport, report)
-        .Exec(tool, args) -> recipe_do_exec(tool, args, ctx, report, logged)
-        .Install(src, dest) -> recipe_install_file(src, dest, ctx, report)
+        .Fetch(url, sha256) -> { recipe_do_fetch(url, sha256, ctx, transport, report) }
+        .Exec(tool, args) -> { recipe_do_exec(tool, args, ctx, report, logged) }
+        .Install(src, dest) -> { recipe_install_file(src, dest, ctx, report) }
         .InstallTree(src, dest) -> recipe_install_tree(src, dest, ctx, report)
     }
 }
@@ -146,13 +150,17 @@ recipe_install_file: fn(src: String, dest: String, ctx: RecipeBuildContext, repo
     if parent != "" {
         if recipe_ensure_directory(parent) == {
             .Ok(_) -> {}
-            .Err(error) -> { return Err(RecipeDiagnostic.recipe_io("could not create an install directory", error)) }
+            .Err(error) -> {
+                return Err(RecipeDiagnostic.recipe_io("could not create an install directory", error))
+            }
         }
     }
     metadata: files.stat(from) ?? return Err(RecipeDiagnostic.e1237_install("build step could not inspect `{src}`", "reading `{from}` failed: {err}", "make sure the source file exists in the staged tree."))
     if recipe_copy_regular_file_nofollow(from, target, metadata) == {
         .Ok(_) -> {}
-        .Err(error) -> { return Err(RecipeDiagnostic.e1237_install("build step could not install `{src}`", "copying `{from}` into the output root failed: {error.message()}", "make sure the source file exists in the staged tree.")) }
+        .Err(error) -> {
+            return Err(RecipeDiagnostic.e1237_install("build step could not install `{src}`", "copying `{from}` into the output root failed: {error.message()}", "make sure the source file exists in the staged tree."))
+        }
     }
     report.add_effect("write")
 }
@@ -162,7 +170,9 @@ recipe_install_tree: fn(src: String, dest: String, ctx: RecipeBuildContext, repo
     from: recipe_confined_source(ctx.source_dir, src, true)
     if recipe_copy_tree(from, target) == {
         .Ok(_) -> {}
-        .Err(error) -> { return Err(RecipeDiagnostic.e1237_install("build step could not install `{src}`", "copying `{from}` into the output root failed: {error.message()}", "make sure the source directory exists in the staged tree.")) }
+        .Err(error) -> {
+            return Err(RecipeDiagnostic.e1237_install("build step could not install `{src}`", "copying `{from}` into the output root failed: {error.message()}", "make sure the source directory exists in the staged tree."))
+        }
     }
     report.add_effect("write")
 }
@@ -252,7 +262,7 @@ recipe_replace_output: fn(parent: PinnedRecipeDirectory, from: String, to: Strin
 }
 
 recipe_step_log: fn(step: BuildStep, index: Int, total: Int, ctx: RecipeBuildContext, status: String, stdout: String, stderr: String) -> StepLog Never! {
-    StepLog{index, total, name: recipe_step_name(step), command: recipe_step_command(step), cwd: ctx.source_dir, status, stdout, stderr}
+    StepLog{index: index, total: total, name: recipe_step_name(step), command: recipe_step_command(step), cwd: ctx.source_dir, status: status, stdout: stdout, stderr: stderr}
 }
 
 recipe_step_name: fn(step: BuildStep) -> String Never! {

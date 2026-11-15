@@ -4,12 +4,17 @@ authority_sift: fn(data: I64, start: I64, count: I64) {
     root := start
     loop root < (count /% I64{2}) {
         child := root * I64{2} + I64{1}
-        if (child + I64{1} < count && jet_rt_string_compare(rt_text_word(wrapping(data + child * I64{8})), rt_text_word(wrapping(data + (child + I64{1}) * I64{8}))) < I64{0}) -> child += I64{1}
-        if (jet_rt_string_compare(rt_text_word(wrapping(data + root * I64{8})), rt_text_word(wrapping(data + child * I64{8}))) >= I64{0}) -> return
+        if (child + I64{1} < count && jet_rt_string_compare(rt_text_word(wrapping(data + child * I64{8})), rt_text_word(wrapping(data + (child + I64{1}) * I64{8}))) < I64{0}) {
+            child += I64{1}
+        }
+        if (jet_rt_string_compare(rt_text_word(wrapping(data + root * I64{8})), rt_text_word(wrapping(data + child * I64{8}))) >= I64{0}) {
+            return
+        }
         coll_i64_swap(data, root, child)
         root = child
     }
 }
+
 authority_sort: fn(data: I64, count: I64) {
     root := count /% I64{2}
     loop root > (I64{0}) {
@@ -23,6 +28,7 @@ authority_sort: fn(data: I64, count: I64) {
         authority_sift(data, I64{0}, end)
     }
 }
+
 #Export(c) jet_authority_from_rights: fn(slots: I64, count: I64) -> I64 {
     // Match list_in: a null pointer or nonpositive length denotes an empty list.
     length: if (slots == I64{0} || count <= I64{0}) -> I64{0} else -> count
@@ -47,28 +53,36 @@ authority_sort: fn(data: I64, count: I64) {
     rt_text_store(wrapping(result + DATA_SEQUENCE_LENGTH), unique)
     result
 }
+
 #Export(c) jet_rt_handle_clone_jet_authority: fn(value: I64) -> I64 {
     result: jet_rt_alloc(DATA_SEQUENCE_BYTES, I64{8})
     data_text_list_copy_into(value, result)
     result
 }
+
 #Export(c) jet_rt_handle_drop_jet_authority: fn(value: I64) {
-    if (value == I64{0}) -> return
+    if (value == I64{0}) {
+        return
+    }
     coll_text_list_drop(value, true)
     jet_rt_free(value, DATA_SEQUENCE_BYTES, I64{8})
 }
+
 #Export(c) jet_rt_handle_eq_jet_authority: fn(left: I64, right: I64) -> Bool {
     length: rt_text_word(wrapping(left + DATA_SEQUENCE_LENGTH))
-    if (length != rt_text_word(wrapping(right + DATA_SEQUENCE_LENGTH))) -> return false
+    if (length != rt_text_word(wrapping(right + DATA_SEQUENCE_LENGTH))) { return false }
     a: rt_text_word(wrapping(left + DATA_SEQUENCE_DATA))
     b: rt_text_word(wrapping(right + DATA_SEQUENCE_DATA))
     at := I64{0}
     loop at < length {
-        if (!jet_rt_string_eq(rt_text_word(wrapping(a + at * I64{8})), rt_text_word(wrapping(b + at * I64{8})))) -> return false
+        if (!jet_rt_string_eq(rt_text_word(wrapping(a + at * I64{8})), rt_text_word(wrapping(b + at * I64{8})))) {
+            return false
+        }
         at += I64{1}
     }
     true
 }
+
 // The one covers rule (spec.md "Effect scopes"), which the compiler's checks
 // ask too (jet_foundation EffectScope.jet): a right covers itself and every
 // leaf below it, a bare right covers every scoped instance of itself and its
@@ -79,31 +93,45 @@ authority_sort: fn(data: I64, count: I64) {
 //
 // The byte offset of the `("` that opens `right`'s scope argument, or -1
 // when `right` is bare.
-authority_scope_open: fn(right: I64) -> I64 { authority_scope_open_bytes(rt_text_data(right), rt_text_len(right)) }
+authority_scope_open: fn(right: I64) -> I64 {
+    authority_scope_open_bytes(rt_text_data(right), rt_text_len(right))
+}
+
 authority_scope_open_bytes: fn(data: I64, length: I64) -> I64 {
-    if (length < I64{4} || rt_text_byte(wrapping(wrapping(data + length) - I64{1})) != I64{41} || rt_text_byte(wrapping(wrapping(data + length) - I64{2})) != I64{34}) -> return I64{-1}
+    if (length < I64{4} || rt_text_byte(wrapping(wrapping(data + length) - I64{1})) != I64{41} || rt_text_byte(wrapping(wrapping(data + length) - I64{2})) != I64{34}) {
+        return I64{-1}
+    }
     at := I64{0}
     loop at + (I64{4}) <= length {
-        if (rt_text_byte(wrapping(data + at)) == I64{40} && rt_text_byte(wrapping(wrapping(data + at) + I64{1})) == I64{34}) -> return at
+        if (rt_text_byte(wrapping(data + at)) == I64{40} && rt_text_byte(wrapping(wrapping(data + at) + I64{1})) == I64{34}) {
+            return at
+        }
         at += I64{1}
     }
     I64{-1}
 }
+
 // Whether the bare right `held[0..held_len]` covers `need[0..need_len]`:
 // itself, and every leaf below it.
 authority_base_covers: fn(held: I64, held_len: I64, need: I64, need_len: I64) -> Bool {
-    if (held_len > need_len || !rt_text_equal_bytes(held, need, held_len)) -> return false
+    if (held_len > need_len || !rt_text_equal_bytes(held, need, held_len)) { return false }
     held_len == need_len || rt_text_byte(wrapping(need + held_len)) == I64{46}
 }
+
 // The scope law of a right's root: 1 for the paths of `FS`, 2 for the hosts
 // of `Net`, 0 for every other root, whose scopes cover by equality.
 authority_scope_kind: fn(base: I64, length: I64) -> I64 {
     root := I64{0}
     loop root < length && rt_text_byte(wrapping(base + root)) != (I64{46}) -> root += I64{1}
-    if (root == I64{2} && rt_text_byte(base) == I64{70} && rt_text_byte(wrapping(base + I64{1})) == I64{83}) -> return I64{1}
-    if (root == I64{3} && rt_text_byte(base) == I64{78} && rt_text_byte(wrapping(base + I64{1})) == I64{101} && rt_text_byte(wrapping(base + I64{2})) == I64{116}) -> return I64{2}
+    if (root == I64{2} && rt_text_byte(base) == I64{70} && rt_text_byte(wrapping(base + I64{1})) == I64{83}) {
+        return I64{1}
+    }
+    if (root == I64{3} && rt_text_byte(base) == I64{78} && rt_text_byte(wrapping(base + I64{1})) == I64{101} && rt_text_byte(wrapping(base + I64{2})) == I64{116}) {
+        return I64{2}
+    }
     I64{0}
 }
+
 // `path[0..length]` normalized into `out` (capacity `length + 1`), returning
 // the bytes written: `.` and empty components go, and `..` takes back the
 // component before it. An absolute path keeps its leading `/`, and a `..`
@@ -119,10 +147,14 @@ authority_path_normal: fn(path: I64, length: I64, out: I64) -> I64 {
         loop at < length && rt_text_byte(wrapping(path + at)) != (I64{47}) -> at += I64{1}
         size: at - start
         at += I64{1}
-        if (size == I64{0} || (size == I64{1} && rt_text_byte(wrapping(path + start)) == I64{46})) -> next
+        if (size == I64{0} || (size == I64{1} && rt_text_byte(wrapping(path + start)) == I64{46})) {
+            next
+        }
         if (size == I64{2} && rt_text_byte(wrapping(path + start)) == I64{46} && rt_text_byte(wrapping(wrapping(path + start) + I64{1})) == I64{46}) {
             last := used
-            loop last > floor && rt_text_byte(wrapping(wrapping(out + last) - I64{1})) != (I64{47}) -> last -= I64{1}
+            loop last > floor && rt_text_byte(wrapping(wrapping(out + last) - I64{1})) != (I64{47}) {
+                last -= I64{1}
+            }
             parent_is_up: used - last == I64{2} && rt_text_byte(wrapping(out + last)) == I64{46} && rt_text_byte(wrapping(wrapping(out + last) + I64{1})) == I64{46}
             if (used > floor && !parent_is_up) {
                 used = if last > floor -> last - I64{1} else -> floor
@@ -139,6 +171,7 @@ authority_path_normal: fn(path: I64, length: I64, out: I64) -> I64 {
     }
     used
 }
+
 // The path law: `held` covers `need` when its normalized components are a
 // prefix of the need's and the need does not climb past them with a kept
 // `..` (`..` never covers `../..`, nor `.` covers `../a`).
@@ -156,54 +189,73 @@ authority_path_covers: fn(held: I64, held_len: I64, need: I64, need_len: I64) ->
     jet_rt_free(need_out, need_len + I64{1}, I64{1})
     prefix && !climbs
 }
+
 // A host's length without the one trailing `.` of a fully qualified name.
 authority_host_len: fn(host: I64, length: I64) -> I64 {
-    if (length > I64{0} && rt_text_byte(wrapping(wrapping(host + length) - I64{1})) == I64{46}) -> return length - I64{1}
+    if (length > I64{0} && rt_text_byte(wrapping(wrapping(host + length) - I64{1})) == I64{46}) {
+        return length - I64{1}
+    }
     length
 }
+
 // The ASCII lower case of one byte.
 authority_lower: fn(byte: I64) -> I64 {
-    if (byte >= I64{65} && byte <= I64{90}) -> return byte + I64{32}
+    if (byte >= I64{65} && byte <= I64{90}) { return byte + I64{32} }
     byte
 }
+
 // The host law: equality after ASCII lower-casing.
 authority_host_covers: fn(held: I64, held_len: I64, need: I64, need_len: I64) -> Bool {
     h: authority_host_len(held, held_len)
-    if (h != authority_host_len(need, need_len)) -> return false
+    if (h != authority_host_len(need, need_len)) { return false }
     at := I64{0}
     loop at < h {
-        if (authority_lower(rt_text_byte(wrapping(held + at))) != authority_lower(rt_text_byte(wrapping(need + at)))) -> return false
+        if (authority_lower(rt_text_byte(wrapping(held + at))) != authority_lower(rt_text_byte(wrapping(need + at)))) {
+            return false
+        }
         at += I64{1}
     }
     true
 }
-authority_covers: fn(held: I64, requested: I64) -> Bool { authority_covers_bytes(rt_text_data(held), rt_text_len(held), rt_text_data(requested), rt_text_len(requested)) }
+
+authority_covers: fn(held: I64, requested: I64) -> Bool {
+    authority_covers_bytes(rt_text_data(held), rt_text_len(held), rt_text_data(requested), rt_text_len(requested))
+}
+
 // The covers rule over `held[0..length]` and `requested[0..other]`.
 authority_covers_bytes: fn(held: I64, length: I64, requested: I64, other: I64) -> Bool {
-    if (length == other && rt_text_equal_bytes(held, requested, length)) -> return true
+    if (length == other && rt_text_equal_bytes(held, requested, length)) { return true }
     held_open: authority_scope_open_bytes(held, length)
     need_open: authority_scope_open_bytes(requested, other)
     held_base: if (held_open < I64{0}) -> length else -> held_open
     need_base: if (need_open < I64{0}) -> other else -> need_open
     if !authority_base_covers(held, held_base, requested, need_base) -> return false
-    if (held_open < I64{0}) -> return true
-    if (need_open < I64{0}) -> return false
+    if (held_open < I64{0}) { return true }
+    if (need_open < I64{0}) { return false }
     held_scope: wrapping(wrapping(held + held_open) + I64{2})
     held_scope_len: length - held_open - I64{4}
     need_scope: wrapping(wrapping(requested + need_open) + I64{2})
     need_scope_len: other - need_open - I64{4}
     kind: authority_scope_kind(held, held_base)
-    if (kind == I64{1}) -> return authority_path_covers(held_scope, held_scope_len, need_scope, need_scope_len)
-    if (kind == I64{2}) -> return authority_host_covers(held_scope, held_scope_len, need_scope, need_scope_len)
+    if (kind == I64{1}) {
+        return authority_path_covers(held_scope, held_scope_len, need_scope, need_scope_len)
+    }
+    if (kind == I64{2}) {
+        return authority_host_covers(held_scope, held_scope_len, need_scope, need_scope_len)
+    }
     held_scope_len == need_scope_len && rt_text_equal_bytes(held_scope, need_scope, held_scope_len)
 }
+
 // The one covers rule as the jet.runtime.authority binding `covers`
 // (Public/Authority.jet), which the compiler's checks call (jet_foundation
 // Policy/EffectScope.jet): whether the right `held` covers the right `need`.
-#Export(c) jet_authority_right_covers: fn(held: I64, need: I64) -> Bool { authority_covers(held, need) }
+#Export(c) jet_authority_right_covers: fn(held: I64, need: I64) -> Bool {
+    authority_covers(held, need)
+}
+
 authority_narrow_failure: fn(requested: I64) -> I64 {
     length: rt_text_len(requested)
-    if (length > I64{9223372036854775807} - I64{60}) -> rt_text_capacity_stop()
+    if (length > I64{9223372036854775807} - I64{60}) { rt_text_capacity_stop() }
     message: rt_text_builder_with_capacity(length + I64{60})
     // One exact seed message: E0712: authority cannot narrow to `...` outside its held rights.
     jet_rt_string_builder_push(message, rt_static_text("E0712: authority cannot narrow to `"))
@@ -213,8 +265,9 @@ authority_narrow_failure: fn(requested: I64) -> I64 {
     // mechanism (task publication, otherwise root report/exit70), not a new stop.
     jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
     jet_rt_string_drop(message)
-    I64{0} // canonical stopped handle if the scheduler published the failure
+    I64{0}  // canonical stopped handle if the scheduler published the failure
 }
+
 #Export(c) jet_authority_with: fn(value: I64, requested: I64) -> I64 {
     length: rt_text_word(wrapping(value + DATA_SEQUENCE_LENGTH))
     data: rt_text_word(wrapping(value + DATA_SEQUENCE_DATA))
@@ -230,13 +283,16 @@ authority_narrow_failure: fn(requested: I64) -> I64 {
     }
     authority_narrow_failure(requested)
 }
+
 #Export(c) jet_authority_without: fn(value: I64, requested: I64) -> I64 {
     length: rt_text_word(wrapping(value + DATA_SEQUENCE_LENGTH))
     data: rt_text_word(wrapping(value + DATA_SEQUENCE_DATA))
     at := I64{0}
     kept := I64{0}
     loop at < length {
-        if (!authority_covers(requested, rt_text_word(wrapping(data + at * I64{8})))) -> kept += I64{1}
+        if (!authority_covers(requested, rt_text_word(wrapping(data + at * I64{8})))) {
+            kept += I64{1}
+        }
         at += I64{1}
     }
     result: data_sequence_new(kept, I64{8})
@@ -254,6 +310,7 @@ authority_narrow_failure: fn(requested: I64) -> I64 {
     rt_text_store(wrapping(result + DATA_SEQUENCE_LENGTH), kept)
     result
 }
+
 // The one Authority wire encoder: the sorted rights joined with LF, with no
 // trailing LF. A process policy and the checked plugin boundary both send this
 // text.
@@ -270,6 +327,7 @@ authority_narrow_failure: fn(requested: I64) -> I64 {
     }
     result
 }
+
 // The workspace rights are AUTHORITY_PROCESS_GRANTS' workspace rows
 // (ProcessGrants.jet), each an owned copy.
 authority_workspace_right: fn(index: I64) -> I64 {
@@ -278,6 +336,7 @@ authority_workspace_right: fn(index: I64) -> I64 {
     jet_rt_string_builder_push(text, right)
     text
 }
+
 #Export(c) jet_authority_workspace: fn() -> I64 {
     result: data_sequence_new(PROCESS_GRANT_WORKSPACE_COUNT, I64{8})
     data: rt_text_word(wrapping(result + DATA_SEQUENCE_DATA))
@@ -313,29 +372,38 @@ authority_workspace_right: fn(index: I64) -> I64 {
 // its row's FS and Net entries, one per line (a denial keeps its `!`); a
 // marker's is `@` and the effect it publishes.
 EFFECT_SCOPE_NODE_BYTES: I64{40}
+
 // The work area of one path check: a C path of up to 8200 bytes @0, a
 // realpath result @8200, the resolved resource @12296, a resolved scope root
 // @20496 and the refusing frame's verdict word @28696.
 EFFECT_SCOPE_WORK_BYTES: I64{28704}
+
 EFFECT_SCOPE_REAL: I64{8200}
+
 EFFECT_SCOPE_RESOURCE: I64{12296}
+
 EFFECT_SCOPE_ROOT: I64{20496}
+
 EFFECT_SCOPE_VERDICT: I64{28696}
+
 // The list head of the frames entered with none in force.
 effect_scope_roots := I64{0}
+
 // runtime-init: 4 when effect_scope_roots
 #Export(c) jet_rt_effect_scope_init: fn() {
-    if (effect_scope_roots != I64{0}) -> return
+    if (effect_scope_roots != I64{0}) {
+        return
+    }
     roots: jet_rt_alloc(I64{8}, I64{8})
     sync_store(roots, I64{0})
-    #Unsafe("runtime-init runs before any other thread exists") {
-        effect_scope_roots = roots
-    }
+    #Unsafe("runtime-init runs before any other thread exists") { effect_scope_roots = roots }
 }
 
 effect_scope_slot: fn() -> I64 { wrapping(context_current() + CONTEXT_EFFECT_SCOPE) }
 
-effect_scope_marker: fn(descriptor: I64, length: I64) -> Bool { length > I64{0} && rt_text_byte(descriptor) == I64{64} }
+effect_scope_marker: fn(descriptor: I64, length: I64) -> Bool {
+    length > I64{0} && rt_text_byte(descriptor) == I64{64}
+}
 
 // Enters the frame of static `descriptor[0..length]` under the one in force
 // and returns the one it replaces, which jet_rt_effect_scope_leave restores.
@@ -344,17 +412,19 @@ effect_scope_marker: fn(descriptor: I64, length: I64) -> Bool { length > I64{0} 
 #Export(c) jet_rt_effect_scope_enter: fn(descriptor: I64, length: I64) -> I64 {
     slot: effect_scope_slot()
     previous: sync_load(slot)
-    if (previous == I64{0} && effect_scope_marker(descriptor, length)) -> return previous
+    if (previous == I64{0} && effect_scope_marker(descriptor, length)) { return previous }
     at := previous
     loop at != (I64{0}) {
-        if (sync_load(wrapping(at + I64{8})) == descriptor) -> return previous
+        if (sync_load(wrapping(at + I64{8})) == descriptor) { return previous }
         at = sync_load(at)
     }
     sync_store(slot, effect_scope_node(previous, descriptor, length))
     previous
 }
 
-#Export(c) jet_rt_effect_scope_leave: fn(previous: I64) { sync_store(effect_scope_slot(), previous) }
+#Export(c) jet_rt_effect_scope_leave: fn(previous: I64) {
+    sync_store(effect_scope_slot(), previous)
+}
 
 // The interned frame of `descriptor` under `parent` (0: none in force). A
 // new one goes onto the front of its parent's child list by compare-and-swap;
@@ -367,7 +437,7 @@ effect_scope_node: fn(parent: I64, descriptor: I64, length: I64) -> I64 {
         node := head
         loop node != (I64{0}) {
             if (sync_load(wrapping(node + I64{8})) == descriptor) {
-                if (fresh != I64{0}) -> jet_rt_free(fresh, EFFECT_SCOPE_NODE_BYTES, I64{8})
+                if (fresh != I64{0}) { jet_rt_free(fresh, EFFECT_SCOPE_NODE_BYTES, I64{8}) }
                 return node
             }
             node = sync_load(wrapping(node + I64{32}))
@@ -380,7 +450,7 @@ effect_scope_node: fn(parent: I64, descriptor: I64, length: I64) -> I64 {
             sync_store(wrapping(fresh + I64{24}), I64{0})
         }
         sync_store(wrapping(fresh + I64{32}), head)
-        if (sync_cas(list, head, fresh) == head) -> return fresh
+        if (sync_cas(list, head, fresh) == head) { return fresh }
     }
 }
 
@@ -388,10 +458,12 @@ effect_scope_node: fn(parent: I64, descriptor: I64, length: I64) -> I64 {
 // `kind` (1 FS, 2 Net; authority_scope_kind), else 0.
 effect_scope_publisher: fn(kind: I64) -> I64 {
     node: sync_load(effect_scope_slot())
-    if (node == I64{0}) -> return I64{0}
+    if (node == I64{0}) { return I64{0} }
     data: sync_load(wrapping(node + I64{8}))
     size: sync_load(wrapping(node + I64{16}))
-    if (!effect_scope_marker(data, size) || authority_scope_kind(wrapping(data + I64{1}), size - I64{1}) != kind) -> return I64{0}
+    if (!effect_scope_marker(data, size) || authority_scope_kind(wrapping(data + I64{1}), size - I64{1}) != kind) {
+        return I64{0}
+    }
     node
 }
 
@@ -407,15 +479,19 @@ effect_scope_line_end: fn(data: I64, size: I64, at: I64) -> I64 {
 // follow a final link resolves the parent and keeps the final name. The
 // bytes written, or -1 when the path resolves to nothing.
 effect_scope_resolve: fn(path: I64, length: I64, follow: Bool, work: I64, out: I64) -> I64 {
-    if (length == I64{0} || length >= I64{4096}) -> return I64{-1}
-    if (follow || rt_text_byte(wrapping(wrapping(path + length) - I64{1})) == I64{47}) -> return effect_scope_resolve_prefix(path, length, work, out)
+    if (length == I64{0} || length >= I64{4096}) { return I64{-1} }
+    if (follow || rt_text_byte(wrapping(wrapping(path + length) - I64{1})) == I64{47}) {
+        return effect_scope_resolve_prefix(path, length, work, out)
+    }
     start := length
-    loop start > (I64{0}) && rt_text_byte(wrapping(wrapping(path + start) - I64{1})) != (I64{47}) -> start -= I64{1}
+    loop start > (I64{0}) && rt_text_byte(wrapping(wrapping(path + start) - I64{1})) != (I64{47}) {
+        start -= I64{1}
+    }
     size: length - start
     name: wrapping(path + start)
     dot: size == I64{1} && rt_text_byte(name) == I64{46}
     up: size == I64{2} && rt_text_byte(name) == I64{46} && rt_text_byte(wrapping(name + I64{1})) == I64{46}
-    if (dot || up) -> return effect_scope_resolve_prefix(path, length, work, out)
+    if (dot || up) { return effect_scope_resolve_prefix(path, length, work, out) }
     used := I64{0}
     if (start == I64{0}) {
         here: rt_static_text(".")
@@ -423,7 +499,7 @@ effect_scope_resolve: fn(path: I64, length: I64, follow: Bool, work: I64, out: I
     } else {
         used = effect_scope_resolve_prefix(path, if (start == I64{1}) -> I64{1} else -> start - I64{1}, work, out)
     }
-    if (used < I64{0}) -> return used
+    if (used < I64{0}) { return used }
     if (used != I64{1} || rt_text_byte(out) != I64{47}) {
         rt_text_put(wrapping(out + used), I64{47})
         used += I64{1}
@@ -448,11 +524,17 @@ effect_scope_resolve_prefix: fn(path: I64, length: I64, work: I64, out: I64) -> 
             rt_text_put(wrapping(work + cut), I64{0})
         }
         errno: process_realpath(work, real)
-        if (errno == I64{0}) -> break
-        if ((errno != I64{2} && errno != I64{20}) || cut == I64{0}) -> return I64{-1}
-        loop cut > (I64{0}) && rt_text_byte(wrapping(wrapping(path + cut) - I64{1})) == (I64{47}) -> cut -= I64{1}
-        loop cut > (I64{0}) && rt_text_byte(wrapping(wrapping(path + cut) - I64{1})) != (I64{47}) -> cut -= I64{1}
-        loop cut > (I64{1}) && rt_text_byte(wrapping(wrapping(path + cut) - I64{1})) == (I64{47}) -> cut -= I64{1}
+        if (errno == I64{0}) { break }
+        if ((errno != I64{2} && errno != I64{20}) || cut == I64{0}) { return I64{-1} }
+        loop cut > (I64{0}) && rt_text_byte(wrapping(wrapping(path + cut) - I64{1})) == (I64{47}) {
+            cut -= I64{1}
+        }
+        loop cut > (I64{0}) && rt_text_byte(wrapping(wrapping(path + cut) - I64{1})) != (I64{47}) {
+            cut -= I64{1}
+        }
+        loop cut > (I64{1}) && rt_text_byte(wrapping(wrapping(path + cut) - I64{1})) == (I64{47}) {
+            cut -= I64{1}
+        }
     }
     used := I64{0}
     loop rt_text_byte(wrapping(real + used)) != (I64{0}) -> used += I64{1}
@@ -471,7 +553,9 @@ effect_scope_resolve_prefix: fn(path: I64, length: I64, work: I64, out: I64) -> 
 // Whether resolved path `root[0..root_len]` contains resolved path
 // `path[0..length]`: itself, or a path below it by whole components.
 effect_scope_contains: fn(root: I64, root_len: I64, path: I64, length: I64) -> Bool {
-    if (root_len == I64{1} && rt_text_byte(root) == I64{47}) -> return length > I64{0} && rt_text_byte(path) == I64{47}
+    if (root_len == I64{1} && rt_text_byte(root) == I64{47}) {
+        return length > I64{0} && rt_text_byte(path) == I64{47}
+    }
     root_len <= length && rt_text_equal_bytes(root, path, root_len) && (root_len == length || rt_text_byte(wrapping(path + root_len)) == I64{47})
 }
 
@@ -480,8 +564,8 @@ effect_scope_contains: fn(root: I64, root_len: I64, path: I64, length: I64) -> B
 // covers). A folder scope is resolved like the resource, from the working
 // directory; a host covers by authority_host_covers.
 effect_scope_scope_covers: fn(kind: I64, scope: I64, scope_len: I64, resource: I64, length: I64, work: I64) -> Bool {
-    if (length < I64{0}) -> return false
-    if (kind == I64{2}) -> return authority_host_covers(scope, scope_len, resource, length)
+    if (length < I64{0}) { return false }
+    if (kind == I64{2}) { return authority_host_covers(scope, scope_len, resource, length) }
     root: wrapping(work + EFFECT_SCOPE_ROOT)
     root_len: effect_scope_resolve(scope, scope_len, true, work, root)
     root_len >= I64{0} && effect_scope_contains(root, root_len, resource, length)
@@ -512,7 +596,7 @@ effect_scope_verdict: fn(node: I64, base: I64, base_len: I64, kind: I64, resourc
         }
         at = end + I64{1}
     }
-    if (speaks && !allowed) -> return I64{1}
+    if (speaks && !allowed) { return I64{1} }
     I64{0}
 }
 
@@ -555,7 +639,7 @@ effect_scope_cause: fn(node: I64, verdict: I64, marker: I64, resource: I64, leng
     at := name_end + I64{1}
     loop at < size {
         end: effect_scope_line_end(data, size, at)
-        if (at != name_end + I64{1}) -> jet_rt_string_builder_push(text, rt_static_text(", "))
+        if (at != name_end + I64{1}) { jet_rt_string_builder_push(text, rt_static_text(", ")) }
         rt_text_append(text, wrapping(data + at), end - at)
         at = end + I64{1}
     }
@@ -570,7 +654,7 @@ effect_scope_cause: fn(node: I64, verdict: I64, marker: I64, resource: I64, leng
 // goes through `error`.
 effect_scope_admit_path: fn(path: I64, follow: Bool, operation: I64, error: I64) -> Bool {
     marker: effect_scope_publisher(I64{1})
-    if (marker == I64{0}) -> return true
+    if (marker == I64{0}) { return true }
     work: jet_rt_alloc(EFFECT_SCOPE_WORK_BYTES, I64{8})
     resource := wrapping(work + EFFECT_SCOPE_RESOURCE)
     length := effect_scope_resolve(rt_text_data(path), rt_text_len(path), follow, work, resource)
@@ -593,10 +677,12 @@ effect_scope_admit_path: fn(path: I64, follow: Bool, operation: I64, error: I64)
 // `error` as the leaf's error text.
 effect_scope_admit_host: fn(host: I64, error: I64) -> Bool {
     marker: effect_scope_publisher(I64{2})
-    if (marker == I64{0}) -> return true
+    if (marker == I64{0}) { return true }
     verdict: jet_rt_alloc(I64{8}, I64{8})
     node: effect_scope_refusing(marker, rt_text_data(host), rt_text_len(host), I64{0}, verdict)
-    if (node != I64{0}) -> rt_text_store(error, effect_scope_cause(node, sync_load(verdict), marker, rt_text_data(host), rt_text_len(host)))
+    if (node != I64{0}) {
+        rt_text_store(error, effect_scope_cause(node, sync_load(verdict), marker, rt_text_data(host), rt_text_len(host)))
+    }
     jet_rt_free(verdict, I64{8}, I64{8})
     node == I64{0}
 }

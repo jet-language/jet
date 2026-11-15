@@ -55,9 +55,7 @@ jet_cli_sem_json_span: fn(span: Span) -> String Never! {
     "{{\"start\":{span.start},\"end\":{span.end}}}"
 }
 
-jet_cli_sem_json_bool: fn(value: Bool) -> String Never! {
-    if value -> "true" else -> "false"
-}
+jet_cli_sem_json_bool: fn(value: Bool) -> String Never! { if value -> "true" else -> "false" }
 
 jet_cli_sem_json_optional: fn(value: String?) -> String Never! {
     text: value ?? return "null"
@@ -192,7 +190,9 @@ jet_cli_sem_json_kind: fn(kind: SemKind, stage: SemLocalStage?) -> String {
                         held: if value == "" -> "null" else -> jet_cli_json_string(value)
                         staged = ",\"stage\":{{\"when\":\"build\",\"value\":{held}}}"
                     }
-                    .Run(reason) -> staged = ",\"stage\":{{\"when\":\"run\",\"reason\":{jet_cli_json_string(reason)}}}"
+                    .Run(reason) -> {
+                        staged = ",\"stage\":{{\"when\":\"run\",\"reason\":{jet_cli_json_string(reason)}}}"
+                    }
                 }
             }
             "{{\"kind\":\"local\",\"mutable\":{jet_cli_sem_json_bool(mutable)},\"type\":{shown}{staged}}}"
@@ -243,7 +243,9 @@ jet_cli_sem_json_arithmetic: fn(fact: SemArithmetic) -> String Never! {
 }
 
 jet_cli_sem_json_origin: fn(member: SemMember) -> String Never! {
-    if member.origin == "trait_impl" || member.origin == "trait_requirement" -> return "{{\"kind\":{jet_cli_json_string(member.origin)},\"trait\":{jet_cli_json_string(member.origin_trait)}}}"
+    if member.origin == "trait_impl" || member.origin == "trait_requirement" {
+        return "{{\"kind\":{jet_cli_json_string(member.origin)},\"trait\":{jet_cli_json_string(member.origin_trait)}}}"
+    }
     "{{\"kind\":{jet_cli_json_string(member.origin)}}}"
 }
 
@@ -345,9 +347,7 @@ jet_cli_semindex_text: fn(index: SemIndex) -> String {
         loop contract in definition.trait_contracts {
             out = "{out}    implements {contract.trait_name}\n"
             loop entry in contract.associated_types {
-                if entry.ty == .Val(ty) {
-                    out = "{out}      type {entry.name} = {ty}\n"
-                } else {
+                if entry.ty == .Val(ty) -> out = "{out}      type {entry.name} = {ty}\n" else {
                     out = "{out}      type {entry.name}\n"
                 }
             }

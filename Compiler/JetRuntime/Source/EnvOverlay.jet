@@ -8,17 +8,11 @@ env_overlay_error_new: fn(kind: I64) -> I64 {
     value
 }
 
-#Export(c) jet_rt_record_new_env_error_invalid_name: fn() -> I64 {
-    env_overlay_error_new(I64{0})
-}
+#Export(c) jet_rt_record_new_env_error_invalid_name: fn() -> I64 { env_overlay_error_new(I64{0}) }
 
-#Export(c) jet_rt_record_new_env_error_invalid_value: fn() -> I64 {
-    env_overlay_error_new(I64{1})
-}
+#Export(c) jet_rt_record_new_env_error_invalid_value: fn() -> I64 { env_overlay_error_new(I64{1}) }
 
-#Export(c) jet_rt_record_new_env_error_non_unicode: fn() -> I64 {
-    env_overlay_error_new(I64{2})
-}
+#Export(c) jet_rt_record_new_env_error_non_unicode: fn() -> I64 { env_overlay_error_new(I64{2}) }
 
 #Export(c) jet_rt_record_tag_env_error: fn(value: I64) -> I64 {
     encoding_word(wrapping(value + ENCODING_ENUM_TAG))
@@ -34,23 +28,25 @@ env_overlay_root := I64{0}
 
 // runtime-init: 4 when env_overlay_root
 #Export(c) jet_rt_env_overlay_init: fn() {
-    if (env_overlay_root != I64{0}) -> return
+    if (env_overlay_root != I64{0}) {
+        return
+    }
     root: jet_rt_alloc(I64{40}, I64{8})
     index := I64{0}
     loop index < (I64{5}) {
         encoding_store(wrapping(root + index * I64{8}), I64{0})
         index += I64{1}
     }
-    #Unsafe("runtime-init runs before any other thread exists") {
-        env_overlay_root = root
-    }
+    #Unsafe("runtime-init runs before any other thread exists") { env_overlay_root = root }
 }
 
 env_overlay_equal: fn(left: I64, left_length: I64, right: I64, right_length: I64) -> Bool {
-    if (left_length != right_length) -> return false
+    if (left_length != right_length) { return false }
     index := I64{0}
     loop index < left_length {
-        if (rt_text_byte(wrapping(left + index)) != rt_text_byte(wrapping(right + index))) -> return false
+        if (rt_text_byte(wrapping(left + index)) != rt_text_byte(wrapping(right + index))) {
+            return false
+        }
         index += I64{1}
     }
     true
@@ -62,7 +58,9 @@ env_overlay_find: fn(key: I64, length: I64) -> I64 {
     index := I64{0}
     loop index < count {
         row: wrapping(rows + index * I64{40})
-        if env_overlay_equal(key, length, encoding_word(row), encoding_word(wrapping(row + I64{8}))) -> return index
+        if env_overlay_equal(key, length, encoding_word(row), encoding_word(wrapping(row + I64{8}))) {
+            return index
+        }
         index += I64{1}
     }
     I64{-1}
@@ -70,7 +68,7 @@ env_overlay_find: fn(key: I64, length: I64) -> I64 {
 
 env_overlay_row_release: fn(row: I64) {
     owned: encoding_word(wrapping(row + I64{32}))
-    if (owned != I64{0}) -> jet_rt_free(encoding_word(row), owned, I64{1})
+    if (owned != I64{0}) { jet_rt_free(encoding_word(row), owned, I64{1}) }
 }
 
 env_overlay_compact_at: fn(index: I64) {
@@ -100,18 +98,18 @@ env_overlay_layout_fault: fn(size: I64, align: I64) {
 
 env_overlay_reserve: fn(count: I64) -> Bool {
     capacity: encoding_word(wrapping(env_overlay_root + I64{32}))
-    if (count <= capacity) -> return true
+    if (count <= capacity) { return true }
     limit: I64{9223372036854775807} /% I64{40}
     if (count > limit) {
         env_overlay_layout_fault(I64{-1}, I64{8})
         return false
     }
-    next_capacity: if (capacity > limit /% I64{2}) -> limit else -> if (capacity == I64{0}) -> count else -> if (capacity * I64{2} < count) -> count else -> capacity * I64{2}
+    next_capacity: if (capacity > limit /% I64{2}) -> limit else if (capacity == I64{0}) -> count else if (capacity * I64{2} < count) -> count else -> capacity * I64{2}
     rows: jet_rt_alloc(next_capacity * I64{40}, I64{8})
     old_rows: encoding_word(wrapping(env_overlay_root + I64{16}))
     length: encoding_word(wrapping(env_overlay_root + I64{24}))
     rt_text_bytes_copy(rows, old_rows, length * I64{40})
-    if (capacity != I64{0}) -> jet_rt_free(old_rows, capacity * I64{40}, I64{8})
+    if (capacity != I64{0}) { jet_rt_free(old_rows, capacity * I64{40}, I64{8}) }
     encoding_store(wrapping(env_overlay_root + I64{16}), rows)
     encoding_store(wrapping(env_overlay_root + I64{32}), next_capacity)
     true
@@ -128,7 +126,7 @@ env_overlay_row_store: fn(row: I64, key: I64, key_length: I64, value: I64, value
 env_overlay_begin: fn() -> Bool {
     host_environment_require()
     sync_mutex_lock(env_overlay_root)
-    if (encoding_word(wrapping(env_overlay_root + I64{8})) != I64{0}) -> return true
+    if (encoding_word(wrapping(env_overlay_root + I64{8})) != I64{0}) { return true }
     if !env_overlay_reserve(host_env_length) -> return false
     index := I64{0}
     loop index < host_env_length {
@@ -137,7 +135,7 @@ env_overlay_begin: fn() -> Bool {
         key_length: encoding_word(wrapping(startup + I64{8}))
         value: wrapping(key + encoding_word(wrapping(startup + I64{16})))
         previous: env_overlay_find(key, key_length)
-        if (previous >= I64{0}) -> env_overlay_remove_at(previous)
+        if (previous >= I64{0}) { env_overlay_remove_at(previous) }
         length: encoding_word(wrapping(env_overlay_root + I64{24}))
         row: wrapping(encoding_word(wrapping(env_overlay_root + I64{16})) + length * I64{40})
         env_overlay_row_store(row, key, key_length, value, host_startup_byte_length(value), I64{0})
@@ -150,12 +148,12 @@ env_overlay_begin: fn() -> Bool {
 
 env_overlay_name_valid: fn(name: I64) -> Bool {
     length: rt_text_len(name)
-    if (length == I64{0}) -> return false
+    if (length == I64{0}) { return false }
     data: rt_text_data(name)
     index := I64{0}
     loop index < length {
         byte: rt_text_byte(wrapping(data + index))
-        if (byte == I64{0} || byte == I64{61}) -> return false
+        if (byte == I64{0} || byte == I64{61}) { return false }
         index += I64{1}
     }
     true
@@ -166,7 +164,7 @@ env_overlay_value_valid: fn(value: I64) -> Bool {
     data: rt_text_data(value)
     index := I64{0}
     loop index < length {
-        if (rt_text_byte(wrapping(data + index)) == I64{0}) -> return false
+        if (rt_text_byte(wrapping(data + index)) == I64{0}) { return false }
         index += I64{1}
     }
     true
@@ -211,7 +209,7 @@ env_overlay_try_set: fn(name: I64, value: I64, error_out: I64) -> I64 {
         storage == (I64{0}) -> {
             storage = jet_rt_alloc(bytes, I64{1})
             rt_text_bytes_copy(storage, rt_text_data(name), key_length)
-            if (previous >= I64{0}) -> env_overlay_remove_at(previous)
+            if (previous >= I64{0}) { env_overlay_remove_at(previous) }
         }
         else -> {
             // Keep the owned key and allocation capacity; only the new value
@@ -301,5 +299,5 @@ env_overlay_snapshot_drop: fn(rows: I64, length: I64) {
         env_overlay_row_release(wrapping(rows + index * I64{40}))
         index += I64{1}
     }
-    if (length != I64{0}) -> jet_rt_free(rows, length * I64{40}, I64{8})
+    if (length != I64{0}) { jet_rt_free(rows, length * I64{40}, I64{8}) }
 }

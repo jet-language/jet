@@ -1,4 +1,3 @@
-
 use {
     json: core.encoding.json
     data: core.data
@@ -58,15 +57,15 @@ run: fn() {
     }
     print(json.decode<U64>("18446744073709551615") ?? panic("u64 maximum"))
     if json.decode<U64>("18446744073709551616") == {
-        .Err(_) -> print("u64-overflow")
+        .Err(_) -> { print("u64-overflow") }
         .Ok(_) -> print("accepted")
     }
     if json.decode<U64>("-1") == {
-        .Err(_) -> print("u64-negative")
+        .Err(_) -> { print("u64-negative") }
         .Ok(_) -> print("accepted")
     }
     if json.decode<Int>("\"123\"") == {
-        .Err(_) -> print("quoted-int")
+        .Err(_) -> { print("quoted-int") }
         .Ok(_) -> print("accepted")
     }
     if json.decode<Float>("1e400") == {

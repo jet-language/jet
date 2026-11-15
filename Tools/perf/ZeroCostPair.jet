@@ -29,18 +29,29 @@ use {
 }
 
 PAIR: "Tools/perf/codegen-ceiling/zero-cost"
+
 LAUNCH: "Tools/gauntlet/harness/launch.c"
+
 JET_ENV: "Tools/agent/JetEnv.jet"
+
 ARMS: [String]{"kernel", "direct"}
+
 ARM_FILES: [[String]]{[String]{"package.jet", "kernel.jet", "main.jet"}, [String]{"main.jet"}}
+
 LEVELS: [String]{"-O1", "-O2"}
+
 // Each run's argument: about a fifth of a second of memory work per run.
 DEFAULT_N: "20000"
+
 // The shared harness's paired trials and bootstrap.
 DEFAULT_TRIALS: "100"
+
 BOOTSTRAP_RESAMPLES: 10000
+
 BOOTSTRAP_SEED: 2977
+
 BOOTSTRAP_LOWER_RANK: 250
+
 BOOTSTRAP_UPPER_RANK: 9750
 
 // One timed run, from the launcher's report.
@@ -69,7 +80,13 @@ Level: struct {
     direct_wall_ns: [Int]
 }
 
-Host: struct { platform: String, release: String, arch: String, cpu_model: String?, cpu_count: Int }
+Host: struct {
+    platform: String
+    release: String
+    arch: String
+    cpu_model: String?
+    cpu_count: Int
+}
 
 Receipt: struct {
     schema: String
@@ -86,7 +103,9 @@ fail: fn(message: String) -[Exec, IO]> Never { process.fail(1, "zero-cost pair: 
 
 argument: fn(argv: [String], name: String, fallback: String) -> String {
     loop at in 0..<argv.len() {
-        if argv[at] == name -> return if at + 1 < argv.len() -> argv[at + 1].copy() else -> fail("{name} needs a value")
+        if argv[at] == name {
+            return if at + 1 < argv.len() -> argv[at + 1].copy() else -> fail("{name} needs a value")
+        }
     }
     fallback.copy()
 }
@@ -108,7 +127,9 @@ build: fn(root: String, jet: [String], arm: Int, level: String, dir: String) -> 
     argv.extend([String]{"build", "--release", level, "main.jet"})
     built: process.cmd(argv).cwd(dir).run() ?? fail("{argv.join(" ")}: {err}")
     binary: files.join(dir, ".jet/build/main")
-    if !built.success || !files.exists(binary) -> fail("{ARMS[arm]} {level} does not build:\n{built.output}{built.errors}")
+    if !built.success || !files.exists(binary) {
+        fail("{ARMS[arm]} {level} does not build:\n{built.output}{built.errors}")
+    }
     binary
 }
 
@@ -125,13 +146,15 @@ run_of: fn(report: String) -> Run {
     }
     if end.len() != 8 -> fail("the launcher's report has no end line:\n{report}")
     if end[1] != "0" || end[7] != "0" -> fail("a timed run exited {end[1]} (exec errno {end[7]})")
-    Run{wall_ns: Int.parse(end[2]) ?? fail("wall time {end[2]}"), cycles, peak_kb: Int.parse(end[4]) ?? fail("peak {end[4]}")}
+    Run{wall_ns: Int.parse(end[2]) ?? fail("wall time {end[2]}"), cycles: cycles, peak_kb: Int.parse(end[4]) ?? fail("peak {end[4]}")}
 }
 
 // One timed run of `binary`, which must print `expected`.
 timed: fn(launch: String, report: String, binary: String, n: String, expected: String) -> Run {
     ran: process.cmd([String]{launch, report, binary, "--n", n}).run() ?? fail("{binary}: {err}")
-    if ran.output != expected -> fail("{binary} --n {n} printed other output than its pair:\n{ran.output}")
+    if ran.output != expected {
+        fail("{binary} --n {n} printed other output than its pair:\n{ran.output}")
+    }
     run_of(files.read(report) ?? fail("{report}: {err}"))
 }
 
@@ -164,7 +187,7 @@ metric: fn(kernel: [Int], direct: [Int]) -> Metric {
         upper < 1.0 -> "win"
         else -> "even"
     }
-    Metric{kernel_median, direct_median, ratio: Float.from_int(kernel_median) / Float.from_int(direct_median), lower95: lower, upper95: upper, verdict}
+    Metric{kernel_median: kernel_median, direct_median: direct_median, ratio: Float.from_int(kernel_median) / Float.from_int(direct_median), lower95: lower, upper95: upper, verdict: verdict}
 }
 
 // Both arms at one level, TRIALS paired runs, the kernel first on even
@@ -185,7 +208,7 @@ level_of: fn(launch: String, scratch: String, kernel: String, direct: String, le
     counted: kernel_runs.all(fn(run) { run.cycles >= 0 }) && direct_runs.all(fn(run) { run.cycles >= 0 })
     Level{
         level: level.copy(),
-        trials,
+        trials: trials,
         wall_ns: metric(kernel_wall, direct_wall),
         cycles_u: if counted -> Val(metric(kernel_runs.map(fn(run) { run.cycles }), direct_runs.map(fn(run) { run.cycles }))) else -> None,
         peak_rss_kb: metric(kernel_runs.map(fn(run) { run.peak_kb }), direct_runs.map(fn(run) { run.peak_kb })),
@@ -240,7 +263,9 @@ run: fn() {
         print("{level} {line_of("wall_ns", measured.wall_ns)}")
         if measured.cycles_u == .Val(cycles) -> print("{level} {line_of("cycles_u", cycles)}")
         print("{level} {line_of("peak_rss_kb", measured.peak_rss_kb)}")
-        if measured.wall_ns.verdict == "loss" || measured.peak_rss_kb.verdict == "loss" -> loss = true
+        if measured.wall_ns.verdict == "loss" || measured.peak_rss_kb.verdict == "loss" {
+            loss = true
+        }
         if measured.cycles_u == .Val(cycles) && cycles.verdict == "loss" -> loss = true
         levels.push(measured)
     }
@@ -248,14 +273,16 @@ run: fn() {
     receipt: Receipt{
         schema: "jet.perf.zero-cost-pair.v1",
         pair: PAIR,
-        n,
-        codegen,
-        levels,
+        n: n,
+        codegen: codegen,
+        levels: levels,
         host: Host{platform: sys.name(), release: sys.release(), arch: sys.arch(), cpu_model: cpu_model(), cpu_count: sys.cpu_count()},
         generated_command: "jet Tools/perf/ZeroCostPair.jet --n {n} --trials {trials}",
         verdict: verdict.copy(),
     }
-    if output != "" -> files.write(output, "{json.to_string_pretty(receipt) ?? fail("the receipt: {err}")}\n") ?? fail("{output}: {err}")
+    if output != "" {
+        files.write(output, "{json.to_string_pretty(receipt) ?? fail("the receipt: {err}")}\n") ?? fail("{output}: {err}")
+    }
     print("zero-cost pair: {verdict} (codegen {codegen})")
     if verdict != "pass" -> process.exit(1)
 }

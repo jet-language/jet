@@ -99,7 +99,6 @@
 // Calls and runtime routes use the System V ABI of the existing x86-64
 // selector; runtime symbols are the old backend's, so a program behaves the
 // same on both paths.
-
 use jet_foundation.[NameRows, TComptimeValue, Type, TypeTable, name_rows, name_rows_get, name_rows_hash, name_rows_set, name_rows_set_hashed, name_rows_value, sha256_bytes, sha256_hex, sha256_hex_bytes, stable_id]
 
 IROp: enum {
@@ -167,17 +166,20 @@ IROp: enum {
 // dividend is also proven nonnegative (OptRange.jet): its truncated quotient
 // needs no correction for a negative dividend (X64Select).
 IR_OVERFLOW_TRAP: 0
+
 IR_OVERFLOW_WRAP: 1
+
 IR_OVERFLOW_OPERANDS: 2
+
 IR_OVERFLOW_LEFT: 3
+
 IR_OVERFLOW_RIGHT: 4
+
 IR_OVERFLOW_NONNEG: 5
 
 // Whether overflow policy `c` wraps: the plain machine instruction, with no
 // test of an operand or the result.
-ir_overflow_wraps: fn(c: Int) -> Bool Never! {
-    c == IR_OVERFLOW_WRAP || c == IR_OVERFLOW_NONNEG
-}
+ir_overflow_wraps: fn(c: Int) -> Bool Never! { c == IR_OVERFLOW_WRAP || c == IR_OVERFLOW_NONNEG }
 
 // The stop polls (Build.jet ir_stop_poll): after a call, after a user
 // operation whose slow path can publish a numeric stop, and at a loop's
@@ -186,7 +188,9 @@ ir_overflow_wraps: fn(c: Int) -> Bool Never! {
 // jet_rt_session_turn): a stop poll after a call takes what the call
 // published, so a wait that returned its typed timeout keeps it.
 IR_STOP_POLL_KEY: "jet_ir_stop_poll#asm"
+
 IR_STOP_TRAP_KEY: "jet_ir_stop_trap#asm"
+
 IR_STOP_TURN_KEY: "jet_ir_stop_turn#asm"
 
 // Whether function key `key` is one of the stop polls.
@@ -208,10 +212,26 @@ IR_STACK_MARK_KEY: "jet_ir_stack_mark#asm"
 // (IRType.bits, IRType.signed); `Pointer` a raw address or an owned heap
 // carrier the runtime manages (String, List, boxes); `Aggregate` bytes
 // passed by hidden pointer (IRType.size).
-IRTypeKind: enum { Unit Bool Int Word Float Float32 Char String Pointer Aggregate }
+IRTypeKind: enum {
+    Unit
+    Bool
+    Int
+    Word
+    Float
+    Float32
+    Char
+    String
+    Pointer
+    Aggregate
+}
 
 // The System V class of one value.
-IRClass: enum { Integer Pointer Float Memory }
+IRClass: enum {
+    Integer
+    Pointer
+    Float
+    Memory
+}
 
 // One interned type row: the checked type and its machine layout.
 // `drop` is the runtime symbol that ends a value's life ("" when trivial);
@@ -234,7 +254,11 @@ IRType: struct {
     option_null: Bool{false}
 }
 
-IRSlotKind: enum { Param Local Temp }
+IRSlotKind: enum {
+    Param
+    Local
+    Temp
+}
 
 // IntBig's width for the test that an exact Int is inline at all (its
 // bits 63 and 62 agree).
@@ -337,8 +361,14 @@ ir_frame_bound_add: fn(bound: Int, inlined: Int) -> Int Never! {
 // web_direct_call). Inlining never takes one (OptInline.jet), so every call
 // stays one the host can replace.
 IR_HOST_PROVIDER: [String]{
-    "jet_ui_provider_capability", "jet_ui_provider_clipboard_get", "jet_ui_provider_clipboard_set",
-    "jet_ui_provider_dialog_request", "jet_ui_provider_dialog_result", "jet_ui_provider_event_pop", "jet_ui_provider_key_claim", "jet_ui_provider_take",
+    "jet_ui_provider_capability",
+    "jet_ui_provider_clipboard_get",
+    "jet_ui_provider_clipboard_set",
+    "jet_ui_provider_dialog_request",
+    "jet_ui_provider_dialog_result",
+    "jet_ui_provider_event_pop",
+    "jet_ui_provider_key_claim",
+    "jet_ui_provider_take",
     "jet_rt_host_frames",
 }
 
@@ -380,7 +410,9 @@ ir_loop_proof_rows: fn(m: IRModule) -> [String] Never! {
 ir_masked_branch_rows: fn(m: IRModule) -> [String] Never! {
     rows := [String]{}
     loop function in m.functions {
-        loop line in function.masked -> rows.push("masked {function.name} {function.source_file}:{line}: both arms run, the result is a masked select")
+        loop line in function.masked {
+            rows.push("masked {function.name} {function.source_file}:{line}: both arms run, the result is a masked select")
+        }
     }
     rows
 }
@@ -398,7 +430,12 @@ IRAsmLeaf: struct {
 // A word of a static object (IRModule.data_relocs) that holds an address:
 // data row `target` plus `addend` bytes, or (`text`) the immortal String of
 // data row `target`'s bytes, the same value a ConstText of that row gives.
-IRDataReloc: struct { offset: Int, target: Int, addend: Int, text: Bool }
+IRDataReloc: struct {
+    offset: Int
+    target: Int
+    addend: Int
+    text: Bool
+}
 
 // The program: interned types and names, read-only data rows, functions.
 // Every String-keyed table is a hashed `NameRows` (JetFoundation AST/Names:
@@ -547,7 +584,9 @@ ir_intern_type: fn(m: &IRModule, key: String, row: IRType) -> Int Never! {
     listed: name_rows_get(m.key_rows, key, hash) ?? -1
     if listed >= 0 {
         loop index in m.key_lists[listed] {
-            if m.types[index].kind == row.kind && m.types[index].size == row.size && m.types[index].bits == row.bits && m.types[index].signed == row.signed -> return index
+            if m.types[index].kind == row.kind && m.types[index].size == row.size && m.types[index].bits == row.bits && m.types[index].signed == row.signed {
+                return index
+            }
         }
     }
     full := "{ir_kind_name(row.kind)}:{row.size}:{row.bits}:{row.signed}:{key}"
@@ -559,9 +598,7 @@ ir_intern_type: fn(m: &IRModule, key: String, row: IRType) -> Int Never! {
         name_rows_set_hashed(m.type_rows, full, full_hash, found)
         m.type_keys.push(full.move())
     }
-    if listed >= 0 {
-        m.key_lists[listed].push(found)
-    } else {
+    if listed >= 0 -> m.key_lists[listed].push(found) else {
         name_rows_set_hashed(m.key_rows, key, hash, m.key_lists.len())
         m.key_lists.push([Int]{found})
     }
@@ -571,9 +608,7 @@ ir_intern_type: fn(m: &IRModule, key: String, row: IRType) -> Int Never! {
 // A type row's identity by content (its ir_intern_type key): the same in
 // every module that interns the type, whatever row it got there. Helper
 // keys spell a type row by it, never by the row.
-ir_row_key: fn(m: IRModule, row: Int) -> String Never! {
-    m.type_keys[row].copy()
-}
+ir_row_key: fn(m: IRModule, row: Int) -> String Never! { m.type_keys[row].copy() }
 
 // A function whose symbol is `prefix` and then its key's 64-bit stable
 // FNV-1a id as 16 lowercase hex digits, so a helper's or instance's symbol
@@ -651,11 +686,28 @@ ir_members_memo: fn(m: IRModule, table: NameRows, memo: String) -> [IRMember]? N
 
 ir_function_new: fn(name: String, key: String, symbol: String, source_file: String, line: Int) -> IRFunction Never! {
     IRFunction{
-        name: name, key: key, symbol: symbol, source_file: source_file, line: line,
-        param_count: 0, result: -1,
-        slot_type: [Int]{}, slot_kind: [IRSlotKind]{}, slot_name: [Int]{}, slot_line: [Int]{},
-        op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, code_line: [Int]{}, args: [Int]{},
-        open: [Int]{}, asm: None, inline_always: false, symbol_hash: U64{0},
+        name: name,
+        key: key,
+        symbol: symbol,
+        source_file: source_file,
+        line: line,
+        param_count: 0,
+        result: -1,
+        slot_type: [Int]{},
+        slot_kind: [IRSlotKind]{},
+        slot_name: [Int]{},
+        slot_line: [Int]{},
+        op: [IROp]{},
+        dst: [Int]{},
+        a: [Int]{},
+        b: [Int]{},
+        c: [Int]{},
+        code_line: [Int]{},
+        args: [Int]{},
+        open: [Int]{},
+        asm: None,
+        inline_always: false,
+        symbol_hash: U64{0},
     }
 }
 
@@ -744,9 +796,7 @@ ir_end: fn(f: &IRFunction, line: Int) Never! {
     if f.op[opener] == .If {
         f.c[opener] = end
         if f.b[opener] >= 0 -> f.a[f.b[opener]] = end
-    } else {
-        f.a[opener] = end
-    }
+    } else { f.a[opener] = end }
 }
 
 // The Br depth that reaches the open construct at instruction `target`.
@@ -909,13 +959,17 @@ ir_function_text: fn(m: IRModule, f: IRFunction) -> String Never! {
         loop _ in 0..<depth -> pad = "{pad}  "
         text := "{pad}{at}: {ir_op_name(op)}"
         if f.dst[at] >= 0 -> text = "{text} s{f.dst[at]} <-"
-        if op == .CallRuntime -> text = "{text} {m.names[f.a[at]]}" else -> text = "{text} {f.a[at]} {f.b[at]} {f.c[at]}"
+        if op == .CallRuntime -> text = "{text} {m.names[f.a[at]]}" else {
+            text = "{text} {f.a[at]} {f.b[at]} {f.c[at]}"
+        }
         if op == .Call || op == .CallRuntime || op == .CallIndirect {
             operands := [String]{}
             loop index in f.b[at]..<(f.b[at] + f.c[at]) -> operands.push("s{f.args[index]}")
             text = "{text} ({operands.join(", ")})"
         }
-        if op == .Call && f.a[at] >= 0 && f.a[at] < m.functions.len() -> text = "{text} ; {m.functions[f.a[at]].key}"
+        if op == .Call && f.a[at] >= 0 && f.a[at] < m.functions.len() {
+            text = "{text} ; {m.functions[f.a[at]].key}"
+        }
         lines.push(text)
         if op == .Block || op == .Loop || op == .If || op == .Else -> depth += 1
     }

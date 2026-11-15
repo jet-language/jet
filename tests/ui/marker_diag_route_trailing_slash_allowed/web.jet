@@ -6,7 +6,9 @@ BadPath: struct {
 
     impl Diagnostic {
         what: fn(self) -> String { "route path `{self.path}` doesn't start with `/`" }
+
         why: fn(self) -> String { "a route path is matched from the root of the site" }
+
         fix: fn(self) -> String { "write the path as `/{self.path}`" }
     }
 }
@@ -16,9 +18,16 @@ TrailingSlash: struct {
 
     impl Diagnostic {
         severity: .Warning
+
         what: fn(self) -> String { "route path `{self.path}` ends with `/`" }
-        why: fn(self) -> String { "`{self.path}` and the path without its last `/` are different routes" }
-        fix: fn(self) -> String { "drop the last `/`, or keep it with `#Allow(web.TrailingSlash, \"why\")`" }
+
+        why: fn(self) -> String {
+            "`{self.path}` and the path without its last `/` are different routes"
+        }
+
+        fix: fn(self) -> String {
+            "drop the last `/`, or keep it with `#Allow(web.TrailingSlash, \"why\")`"
+        }
     }
 }
 
@@ -29,9 +38,7 @@ Route: struct {
         sites: [.Function]
 
         expand: fn(self, target: Target) {
-            if !self.path.starts_with("/") {
-                reject(BadPath{path: self.path})
-            }
+            if !self.path.starts_with("/") -> reject(BadPath{path: self.path})
             if self.path != "/" && self.path.ends_with("/") {
                 reject(TrailingSlash{path: self.path})
             }

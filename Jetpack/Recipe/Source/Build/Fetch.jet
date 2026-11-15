@@ -11,9 +11,25 @@ RECIPE_MAX_READ_BYTES: 536870912
 
 // The credential field names a build-hook fetch URL may never carry.
 RECIPE_CREDENTIAL_KEYS: #run { [String]{
-    "auth", "authorization", "api_key", "apikey", "credential", "credentials", "password",
-    "passwd", "secret", "sig", "signature", "token", "access_token", "refresh_token",
-    "oauth_token", "client_secret", "private_key", "x_amz_credential", "x_amz_signature"
+    "auth",
+    "authorization",
+    "api_key",
+    "apikey",
+    "credential",
+    "credentials",
+    "password",
+    "passwd",
+    "secret",
+    "sig",
+    "signature",
+    "token",
+    "access_token",
+    "refresh_token",
+    "oauth_token",
+    "client_secret",
+    "private_key",
+    "x_amz_credential",
+    "x_amz_signature",
 } }
 
 // Credential-shaped suffixes of a field name.
@@ -43,7 +59,7 @@ recipe_do_fetch: fn(url: String, sha256: String, ctx: RecipeBuildContext, transp
             // Offline-satisfiable only after re-verifying the immutable key. A
             // corrupt or stale cache entry never becomes trusted input.
             if pkg_sha256_hex(cached_bytes) == sha256 {
-                report.fetches.push(FetchRecord{url, sha256})
+                report.fetches.push(FetchRecord{url: url, sha256: sha256})
                 report.add_effect("net.fetch")
                 return
             }
@@ -53,14 +69,18 @@ recipe_do_fetch: fn(url: String, sha256: String, ctx: RecipeBuildContext, transp
             }
         }
         .Err(error) -> {
-            if !error.is_not_found() -> return Err(RecipeDiagnostic.e1236_fetch(url, "reading cache: {error.message()}"))
+            if !error.is_not_found() {
+                return Err(RecipeDiagnostic.e1236_fetch(url, "reading cache: {error.message()}"))
+            }
         }
     }
     // Not cached: acquire the bytes. `file://` is offline-safe.
     bytes: if {
         url.starts_with("file://") -> recipe_read_file_nofollow(url.removeprefix("file://"), RECIPE_MAX_READ_BYTES) ?? return Err(RecipeDiagnostic.e1236_fetch(url, err.message()))
         // A network fetch under `--offline` with no cache hit is ungranted.
-        ctx.offline -> { return Err(RecipeDiagnostic.e1236_offline(url)) }
+        ctx.offline -> {
+            return Err(RecipeDiagnostic.e1236_offline(url))
+        }
         // No transport injected for a remote scheme: the build seam holds no
         // network capability. The caller must vendor or mirror the source.
         else -> {
@@ -68,7 +88,9 @@ recipe_do_fetch: fn(url: String, sha256: String, ctx: RecipeBuildContext, transp
             remote.fetch(url) ?? return Err(RecipeDiagnostic.e1236_fetch(url, err.message()))
         }
     }
-    if bytes.len() > RECIPE_MAX_READ_BYTES -> return Err(RecipeDiagnostic.e1236_fetch(url, "fetched content exceeds its size limit"))
+    if bytes.len() > RECIPE_MAX_READ_BYTES {
+        return Err(RecipeDiagnostic.e1236_fetch(url, "fetched content exceeds its size limit"))
+    }
     // Verify the locked hash before the bytes are ever used.
     got: pkg_sha256_hex(bytes)
     if got != sha256 -> return Err(RecipeDiagnostic.e1236_mismatch(url, sha256, got))
@@ -84,7 +106,7 @@ recipe_do_fetch: fn(url: String, sha256: String, ctx: RecipeBuildContext, transp
         .Err(error) -> return Err(RecipeDiagnostic.e1236_fetch(url, "syncing fetch cache: {error.message()}"))
         .Ok(_) -> {}
     }
-    report.fetches.push(FetchRecord{url, sha256})
+    report.fetches.push(FetchRecord{url: url, sha256: sha256})
     report.add_effect("net.fetch")
 }
 
@@ -106,7 +128,9 @@ recipe_is_hex_digit: fn(code: Int) -> Bool Never! {
 // `sha256:` prefix.
 recipe_digest_matches: fn(declared: String, actual_hex: String) -> Bool Never! {
     if declared == actual_hex -> return true
-    if declared.starts_with("sha256-") && declared.removeprefix("sha256-") == actual_hex -> return true
+    if declared.starts_with("sha256-") && declared.removeprefix("sha256-") == actual_hex {
+        return true
+    }
     declared.starts_with("sha256:") && declared.removeprefix("sha256:") == actual_hex
 }
 
@@ -209,8 +233,8 @@ recipe_hex_value: fn(code: Int) -> Int Never! {
 // The only environment a recipe tool may observe. The native backend clears
 // the inherited environment and maps `JET_BUILD_OUTPUT` to the private output
 // mount; this map carries only declared deterministic values, in key order.
-recipe_build_env: fn() -> [String: String] Never! {
-    env := [String: String]{}
+recipe_build_env: fn() -> [String:String] Never! {
+    env := [String:String]{}
     env[ENV_JET_PROFILE] = "default"
     env["SOURCE_DATE_EPOCH"] = "0"
     env

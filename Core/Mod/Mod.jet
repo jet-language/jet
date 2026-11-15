@@ -8,6 +8,7 @@ package: {
         mod: .Library{ entry: mod }
     }
 }
+
 use {
     core: core
     parse: core.text.parse
@@ -36,21 +37,21 @@ __LoadContext: struct {
     handle: Int
 
     impl Close {
-        close: fn(&&self) {
-            core.mod.__close_context(self.handle)
-        }
+        close: fn(&&self) { core.mod.__close_context(self.handle) }
     }
 }
 
 load: fn(path: String, grant: ModGrant) -[FS, Exec]> Mod ModError! {
-    if !core.mod.__supported() ->
+    if !core.mod.__supported() {
         return Err(ModError.Unsupported("Mod.load is not supported on target `{core.mod.__os()}`"))
+    }
     handle: core.mod.__read_context(path, grant.read) ?? return Err(mod_error(err))
     context: __LoadContext{handle: handle}
     core.mod.__parse_context(handle) ?? return Err(ModError.Invalid(err))
     core.mod.__check_context(handle) ?? return Err(mod_error(err))
-    if !core.mod.__context_digest(handle) ->
+    if !core.mod.__context_digest(handle) {
         return Err(ModError.Invalid("cannot map library payload: `{core.mod.__context_name(handle)}` has a content digest that does not match its metadata"))
+    }
     core.mod.__stage_context(handle) ?? return Err(ModError.Invalid(err))
     // A target without a native loader refuses as Unsupported.
     core.mod.__open_context(handle) ?? return Err(if err.starts_with("Unsupported: ") -> mod_error(err) else -> ModError.Invalid("cannot map library payload: {err}"))
@@ -66,6 +67,7 @@ load: fn(path: String, grant: ModGrant) -[FS, Exec]> Mod ModError! {
     // Finish consumes the raw owner; the lexical Close sees an empty slot.
     Ok(core.mod.__finish_context(handle))
 }
+
 CompiledModule: struct {
     path: String
     handle: Int
@@ -81,20 +83,24 @@ unload: fn(compiled: CompiledModule) -[FS]> CompiledModule ModError! {
 // The provider reports a refusal as `<Case>: <reason>`; an untagged reason is a
 // malformed request, so `Invalid`.
 mod_error: fn(reason: String) -> ModError Never! {
-    if reason.starts_with("Denied: ") -> return ModError.Denied(parse.strip_prefix(reason, "Denied: "))
-    if reason.starts_with("NotFound: ") -> return ModError.NotFound(parse.strip_prefix(reason, "NotFound: "))
-    if reason.starts_with("Invalid: ") -> return ModError.Invalid(parse.strip_prefix(reason, "Invalid: "))
-    if reason.starts_with("Unsupported: ") -> return ModError.Unsupported(parse.strip_prefix(reason, "Unsupported: "))
+    if reason.starts_with("Denied: ") {
+        return ModError.Denied(parse.strip_prefix(reason, "Denied: "))
+    }
+    if reason.starts_with("NotFound: ") {
+        return ModError.NotFound(parse.strip_prefix(reason, "NotFound: "))
+    }
+    if reason.starts_with("Invalid: ") {
+        return ModError.Invalid(parse.strip_prefix(reason, "Invalid: "))
+    }
+    if reason.starts_with("Unsupported: ") {
+        return ModError.Unsupported(parse.strip_prefix(reason, "Unsupported: "))
+    }
     ModError.Invalid(reason)
 }
 
-is_loaded: fn(compiled: CompiledModule) -> Bool Never! {
-    compiled.handle > 0
-}
+is_loaded: fn(compiled: CompiledModule) -> Bool Never! { compiled.handle > 0 }
 
-path: fn(compiled: CompiledModule) -> String Never! {
-    compiled.path
-}
+path: fn(compiled: CompiledModule) -> String Never! { compiled.path }
 
 #Test("module loader preserves tagged refusal categories and reasons") {
     assert_eq(mod_error("Denied: outside roots"), ModError.Denied("outside roots"))
@@ -103,4 +109,3 @@ path: fn(compiled: CompiledModule) -> String Never! {
     assert_eq(mod_error("Unsupported: target"), ModError.Unsupported("target"))
     assert_eq(mod_error("untagged"), ModError.Invalid("untagged"))
 }
-

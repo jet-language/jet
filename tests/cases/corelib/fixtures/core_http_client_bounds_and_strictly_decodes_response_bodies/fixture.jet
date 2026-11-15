@@ -14,6 +14,7 @@ fixture_build: fn(address: String) {
     build: process.cmd([jet, "build", "guest.jet"]).stdout(.Capture).stderr(.Capture).run() ?? panic("build guest")
     assert(build.code == 0, "original guest compilation must succeed")
 }
+
 fixture_run: fn() -> ProcessReceipt {
     process.cmd([".jet/build/guest"]).stdout(.Capture).stderr(.Capture).run() ?? panic("run original guest")
 }
@@ -23,6 +24,7 @@ http_body_bytes: fn(byte: U8, n: Int) -> [U8] {
     loop _i in 0..<n -> out.push(byte)
     out
 }
+
 http_bounds_original: fn() {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
@@ -37,13 +39,13 @@ http_bounds_original: fn() {
                 header: files.read_bytes("case-{i}.header") ?? panic("header")
                 net.tcp_write_all_bytes(stream, header) ?? panic("write header")
                 body := [U8]{}
-                if i == 0 -> body = http_body_bytes(U8{97}, 8388608)
-                else if i == 1 -> body = [U8]{255}
-                else if i == 2 -> body = "missing".bytes()
-                else if i == 3 -> body = http_body_bytes(U8{98}, 8388609)
-                else if i == 4 -> body = http_body_bytes(U8{99}, 8388608)
-                else if i == 5 -> body = http_body_bytes(U8{100}, 8388609)
-                else -> body = "no".bytes()
+                if i == 0 -> body = http_body_bytes(U8{97}, 8388608) else if i == 1 {
+                    body = [U8]{255}
+                } else if i == 2 { body = "missing".bytes() } else if i == 3 {
+                    body = http_body_bytes(U8{98}, 8388609)
+                } else if i == 4 { body = http_body_bytes(U8{99}, 8388608) } else if i == 5 {
+                    body = http_body_bytes(U8{100}, 8388609)
+                } else { body = "no".bytes() }
                 _body_write_result: net.tcp_write_all_bytes(stream, body)
                 if i == 4 || i == 5 || i == 7 {
                     tail: files.read_bytes(if i == 7 -> "partial-chunk-end.bin" else -> "chunk-end.bin") ?? panic("chunk tail")
@@ -59,4 +61,7 @@ http_bounds_original: fn() {
     assert(observed.code == 0, "original guest exit")
     assert(observed.output == "8388608\nunsupported HTTP body encoding\n404:missing\nHTTP body exceeds 8388608-byte limit\n8388608\nHTTP body exceeds 8388608-byte limit\nHTTP I/O failed during transport\nHTTP I/O failed during transport\ninvalid HTTP framing\ninvalid HTTP header\n", "original exact ten-case output")
 }
-#Test("core_http_client_bounds_and_strictly_decodes_response_bodies") { http_bounds_original() }
+
+#Test("core_http_client_bounds_and_strictly_decodes_response_bodies") {
+    http_bounds_original()
+}

@@ -1,6 +1,7 @@
 use archive: core.archive
+
 archive_view: fn() -> String {
-    bytes: [U8]{ 72, 101, 108, 108, 111 }
+    bytes: [U8]{72, 101, 108, 108, 111}
     zipped: archive.create("hello.txt", bytes) ?? [U8]{}
     empty: [U8]{}
     tarred := archive.tar_add(empty, "hello.txt", bytes) ?? [U8]{}
@@ -12,6 +13,7 @@ archive_view: fn() -> String {
     missing: archive.tar_get(tarred, "missing") ?? [U8]{}
     return "{zip_bytes}|{tar_bytes}|{names_json}|{missing.len()}"
 }
+
 EXPECTED: #run archive_view()
 
 run: fn() {

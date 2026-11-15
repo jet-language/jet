@@ -1,4 +1,3 @@
-
 use {
     compute: core.compute
     math: core.math
@@ -9,9 +8,7 @@ verify: fn(input: [Float], expected: [Float]) {
     spectrum: compute.fft(tensor) ?? panic("fft")
     actual: compute.to_list(spectrum)
     error := Float{0.0}
-    loop index in 0..<expected.len() {
-        error += math.abs(actual[index] - expected[index])
-    }
+    loop index in 0..<expected.len() -> error += math.abs(actual[index] - expected[index])
     print(actual.len() == expected.len() && error < 0.00001)
 }
 

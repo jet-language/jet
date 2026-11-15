@@ -24,10 +24,13 @@ use {
 
 /// MBEDTLS_SSL_COOKIE_TIMEOUT: a minute, in seconds.
 SSL_COOKIE_TIMEOUT: 60
+
 // COOKIE_MD_OUTLEN: the SHA-256 key and digest length.
 SSL_COOKIE_MD_OUTLEN: 32
+
 // COOKIE_HMAC_LEN: the HMAC bytes a cookie keeps.
 SSL_COOKIE_HMAC_LEN: 28
+
 // COOKIE_LEN: the time and the HMAC.
 SSL_COOKIE_LEN: 32
 
@@ -44,9 +47,7 @@ ssl_cookie_init: fn() -> SSLCookieContext Never! {
 }
 
 /// Set the seconds a cookie lives (mbedtls_ssl_cookie_set_timeout).
-ssl_cookie_set_timeout: fn(ctx: &SSLCookieContext, delay: Int) Never! {
-    ctx.timeout = delay
-}
+ssl_cookie_set_timeout: fn(ctx: &SSLCookieContext, delay: Int) Never! { ctx.timeout = delay }
 
 /// Draw the HMAC key from `rng` (mbedtls_ssl_cookie_setup).
 ssl_cookie_setup: fn<R: RNG>(ctx: &SSLCookieContext, rng: &R) ssldefs.SSLError! {
@@ -98,7 +99,9 @@ ssl_cookie_check: fn(ctx: SSLCookieContext, cookie: [U8], cli_id: [U8]) -> Bool 
     if cookie.len() != SSL_COOKIE_LEN -> return Ok(false)
     ref_hmac := if ssl_cookie_hmac(ctx, cookie, 0, cli_id) == {
         .Ok(h) -> h
-        .Err(_) -> return Ok(false)
+        .Err(_) -> {
+            return Ok(false)
+        }
     }
     differs: ctime.memcmp(cookie, 4, ref_hmac, 0, SSL_COOKIE_HMAC_LEN) != 0
     ssldefs.ssl_wipe(ref_hmac)

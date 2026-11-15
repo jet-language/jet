@@ -25,6 +25,7 @@
 //   1 until that writer itself clones.
 
 RC_ZERO_MARK: I64{4611686018427387904}
+
 RC_OWNER_BITS: I64{4611686018427387903}
 
 // `count` addresses the aligned prefix word of a live refcounted block the
@@ -41,9 +42,11 @@ rc_add: fn(count: I64, delta: I64) -> I64 { sync_add(count, delta) }
 rc_init: fn(count: I64) { rc_store(count, I64{1}) }
 
 #Export(c) jet_rt_rc_retain: fn(count: I64) {
-    if (rc_load(count) < I64{0}) -> return
+    if (rc_load(count) < I64{0}) {
+        return
+    }
     old: rc_add(count, I64{1})
-    if (old == I64{9223372036854775807}) -> jet_rt_panic_overflow()
+    if (old == I64{9223372036854775807}) { jet_rt_panic_overflow() }
 }
 
 // An ending process gives up no owner, so no last owner frees (#5478,
@@ -51,7 +54,7 @@ rc_init: fn(count: I64) { rc_store(count, I64{1}) }
 // false and its writer copies, as for any other shared block.
 #Export(c) jet_rt_rc_release: fn(count: I64) -> Bool {
     word: rc_load(count)
-    if (word < I64{0} || main_process_ending != I64{0}) -> return false
+    if (word < I64{0} || main_process_ending != I64{0}) { return false }
     if (word.bit_and(RC_OWNER_BITS) == I64{1}) {
         // The sole owner, as in unique: no other thread holds a reference
         // to retain, release or mark with, so the word cannot change and a
@@ -76,8 +79,12 @@ rc_init: fn(count: I64) { rc_store(count, I64{1}) }
 rc_mark_zero: fn(count: I64) {
     loop {
         word: rc_load(count)
-        if (word < I64{0} || word.bit_and(RC_ZERO_MARK) != I64{0}) -> return
-        if (sync_cas(count, word, word.bit_or(RC_ZERO_MARK)) == word) -> return
+        if (word < I64{0} || word.bit_and(RC_ZERO_MARK) != I64{0}) {
+            return
+        }
+        if (sync_cas(count, word, word.bit_or(RC_ZERO_MARK)) == word) {
+            return
+        }
     }
 }
 
@@ -89,14 +96,20 @@ rc_mark_zero: fn(count: I64) {
 // for lists, and static boxes carry an immortal (negative) word there.
 #Export(c) jet_rt_block_retain: fn(block: I64) { jet_rt_rc_retain(wrapping(block - I64{24})) }
 
-#Export(c) jet_rt_block_release: fn(block: I64) -> Bool { jet_rt_rc_release(wrapping(block - I64{24})) }
+#Export(c) jet_rt_block_release: fn(block: I64) -> Bool {
+    jet_rt_rc_release(wrapping(block - I64{24}))
+}
 
-#Export(c) jet_rt_block_unique: fn(block: I64) -> Bool { jet_rt_rc_unique(wrapping(block - I64{24})) }
+#Export(c) jet_rt_block_unique: fn(block: I64) -> Bool {
+    jet_rt_rc_unique(wrapping(block - I64{24}))
+}
 
 #Export(c) jet_rt_block_mark_zero: fn(block: I64) { rc_mark_zero(wrapping(block - I64{24})) }
 
 // `replica` is a fresh block the caller owns holding bytes of `block`: a copy
 // of a block marked zero-at-free carries the mark too.
 #Export(c) jet_rt_block_inherit_zero: fn(block: I64, replica: I64) {
-    if (rc_load(wrapping(block - I64{24})).bit_and(RC_ZERO_MARK) != I64{0}) -> rc_mark_zero(wrapping(replica - I64{24}))
+    if (rc_load(wrapping(block - I64{24})).bit_and(RC_ZERO_MARK) != I64{0}) {
+        rc_mark_zero(wrapping(replica - I64{24}))
+    }
 }

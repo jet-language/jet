@@ -9,6 +9,7 @@ AppAuthorizedDirectoryEntry: struct {
     // Rust `_` opt-out applies only to a Unicode basename, never lossy text.
     name_is_unicode: Bool
 }
+
 AppAuthorizedDirectory: struct {
     path: String
     entries: [AppAuthorizedDirectoryEntry]
@@ -59,10 +60,14 @@ app_route_file_address: fn(relative: String) -> AppRouteAddress {
             path = "{path}/{app_route_file_words(part)}"
             next
         }
-        if !part.starts_with("[") || !part.ends_with("]") || part.len() < 3 -> return AppRouteAddress{path: "", bad_part: Val(part)}
+        if !part.starts_with("[") || !part.ends_with("]") || part.len() < 3 {
+            return AppRouteAddress{path: "", bad_part: Val(part)}
+        }
         name: part.slice(1, part.len() - 1)
         loop scalar in unicode.scalars(name) {
-            if !sema_casing_is_alphanumeric(scalar) && scalar != "_" -> return AppRouteAddress{path: "", bad_part: Val(part)}
+            if !sema_casing_is_alphanumeric(scalar) && scalar != "_" {
+                return AppRouteAddress{path: "", bad_part: Val(part)}
+            }
         }
         words := [String]{}
         loop word in sema_casing_split_words(name) -> words.push(unicode.lower(word))

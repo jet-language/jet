@@ -23,11 +23,10 @@ use {
 }
 
 WIDTH: 2560
+
 HEIGHT: 1440
 
-shade: fn(r: Int, g: Int, b: Int, a: Int) -> Color {
-    Color{r: U8{r}, g: U8{g}, b: U8{b}, a: U8{a}}
-}
+shade: fn(r: Int, g: Int, b: Int, a: Int) -> Color { Color{r: U8{r}, g: U8{g}, b: U8{b}, a: U8{a}} }
 
 // One full frame of the dashboard.
 draw_dashboard: fn(frame: ui.Frame, index: Int) {
@@ -44,11 +43,15 @@ draw_dashboard: fn(frame: ui.Frame, index: Int) {
             frame.draw_rectangle_lines(x, y, 560, 560, shade(60, 64, 80, 255))
             frame.draw_rectangle_gradient_h(x, y, 560, 48, shade(232, 35, 42, 255), shade(120, 20, 26, 255))
             frame.draw_text("Panel {row * 4 + column + 1}", x + 16, y + 10, 28, shade(245, 245, 245, 255))
-            loop line in 0..<8 -> frame.draw_text("metric {line}: {(index * 7 + line * 13) % 1000} units", x + 24, y + 80 + line * 56, 22, shade(200, 204, 214, 255))
+            loop line in 0..<8 {
+                frame.draw_text("metric {line}: {(index * 7 + line * 13) % 1000} units", x + 24, y + 80 + line * 56, 22, shade(200, 204, 214, 255))
+            }
         }
     }
     // Labels along the top.
-    loop label in 0..<12 -> frame.draw_text("LABEL {label}", 80 + label * 200, 60, 18, shade(150, 156, 170, 255))
+    loop label in 0..<12 {
+        frame.draw_text("LABEL {label}", 80 + label * 200, 60, 18, shade(150, 156, 170, 255))
+    }
     // The reticle: two ring outlines and two diagonals, one-pixel runs, and
     // a crosshair of two straight runs.
     center_x: WIDTH /% 2

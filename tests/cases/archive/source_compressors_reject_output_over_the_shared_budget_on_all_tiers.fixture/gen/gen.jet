@@ -80,11 +80,7 @@ crc32_repeated: fn(b: Int, length: Int) -> Int Never! {
     loop index in 0..<256 {
         crc := index
         loop _ in 0..<8 {
-            if crc.bit_and(1) != 0 {
-                crc = (crc >> 1).bit_xor(0xedb88320)
-            } else {
-                crc = crc >> 1
-            }
+            if crc.bit_and(1) != 0 -> crc = (crc >> 1).bit_xor(0xedb88320) else -> crc = crc >> 1
         }
         table.push(crc)
     }
@@ -109,7 +105,7 @@ gzip_fixed_repeat_bomb: fn(output_len: Int, b: Int) -> [U8] Never! {
         bits_write(bits, code[0], code[1])
         bits_write(bits, symbol[1], symbol[2])
         bits_write(bits, 0, 5)
-        remaining = remaining - length
+        remaining -= length
     }
     loop _ in 0..<remaining -> bits_write(bits, literal[0], literal[1])
     end: fixed_code(256)
@@ -132,7 +128,7 @@ zstd_rle_frame: fn(output_len: Int, b: Int) -> [U8] Never! {
         frame.push(byte(header >> 8))
         frame.push(byte(header >> 16))
         frame.push(byte(b))
-        remaining = remaining - block
+        remaining -= block
     }
     frame
 }
@@ -209,7 +205,7 @@ tar_bomb_octal: fn(header: &[U8], start: Int, width: Int, value: Int) Never! {
     loop n > 0 {
         header[index] = byte(48 + n.bit_and(7))
         n = n >> 3
-        index = index - 1
+        index -= 1
     }
 }
 
@@ -226,11 +222,9 @@ append_tar_bomb_record: fn(output: &[U8], name: [U8], payload: [U8], kind: Int) 
     header[263] = U8{48}
     header[264] = U8{48}
     checksum := 0
-    loop item in header -> checksum = checksum + int(item)
+    loop item in header -> checksum += int(item)
     // format!("{checksum:06o}"), last six digits.
-    loop k in 0..<6 {
-        header[153 - k] = byte(48 + (checksum >> (3 * k)).bit_and(7))
-    }
+    loop k in 0..<6 -> header[153 - k] = byte(48 + (checksum >> (3 * k)).bit_and(7))
     header[154] = U8{0}
     loop item in header -> output.push(item)
     loop item in payload -> output.push(item)
@@ -270,7 +264,9 @@ run: fn() {
         tar_end(tar_names)
         write("tar_names.bin", tar_names)
         tar_entries := [U8]{}
-        loop index in 0..<4097 -> append_tar_bomb_record(tar_entries, "entry-{index}".bytes(), "x".bytes(), 48)
+        loop index in 0..<4097 {
+            append_tar_bomb_record(tar_entries, "entry-{index}".bytes(), "x".bytes(), 48)
+        }
         tar_end(tar_entries)
         write("tar_entries.bin", tar_entries)
     }

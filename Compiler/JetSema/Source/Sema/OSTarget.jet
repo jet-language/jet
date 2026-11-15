@@ -40,25 +40,37 @@ sema_os_target_check: fn(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic
         }
         sema_effect_publish_diagnostics(diagnostics, graph_module.source_segments, found)
     }
-    if gate_of_type.len() == 0 -> return
+    if gate_of_type.len() == 0 {
+        return
+    }
     loop graph_module in graph.modules {
         found := [Diagnostic]{}
         loop item in graph_module.program.items {
             if item == {
-                .Func(function) -> sema_os_target_signature(function, None, gate_of_type, found)
+                .Func(function) -> { sema_os_target_signature(function, None, gate_of_type, found) }
                 .Impl(implementation) -> {
-                    loop method in implementation.methods -> sema_os_target_signature(method, implementation.os_target, gate_of_type, found)
+                    loop method in implementation.methods {
+                        sema_os_target_signature(method, implementation.os_target, gate_of_type, found)
+                    }
                 }
                 .Struct(definition) -> {
-                    loop method in definition.methods -> sema_os_target_signature(method, None, gate_of_type, found)
+                    loop method in definition.methods {
+                        sema_os_target_signature(method, None, gate_of_type, found)
+                    }
                     loop block in definition.trait_impls {
-                        loop method in block.methods -> sema_os_target_signature(method, block.os_target, gate_of_type, found)
+                        loop method in block.methods {
+                            sema_os_target_signature(method, block.os_target, gate_of_type, found)
+                        }
                     }
                 }
                 .Enum(definition) -> {
-                    loop method in definition.methods -> sema_os_target_signature(method, None, gate_of_type, found)
+                    loop method in definition.methods {
+                        sema_os_target_signature(method, None, gate_of_type, found)
+                    }
                     loop block in definition.trait_impls {
-                        loop method in block.methods -> sema_os_target_signature(method, block.os_target, gate_of_type, found)
+                        loop method in block.methods {
+                            sema_os_target_signature(method, block.os_target, gate_of_type, found)
+                        }
                     }
                 }
                 .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
@@ -73,10 +85,15 @@ sema_os_target_mixed_axis: fn(ceiling: WebBucket?, os: String, item: String, spa
     row: diagnostic_registry_row("E-OSTARGET-MIXED-AXIS") ?? panic("E-OSTARGET-MIXED-AXIS has no registry row")
     os_name: sema_os_target_name(os)
     web: sema_web_bucket_name(bucket)
-    found.push(sema_error("E-OSTARGET-MIXED-AXIS", span,
-        row.what.replace("{{os}}", os_name).replace("{{web}}", web).replace("{{item}}", item),
-        row.why,
-        row.fix.replace("{{os}}", os_name)))
+    found.push(
+        sema_error(
+            "E-OSTARGET-MIXED-AXIS",
+            span,
+            row.what.replace("{{os}}", os_name).replace("{{web}}", web).replace("{{item}}", item),
+            row.why,
+            row.fix.replace("{{os}}", os_name),
+        ),
+    )
 }
 
 // A function's own gate is its owning impl's OS; `self` never names a gated
@@ -84,24 +101,39 @@ sema_os_target_mixed_axis: fn(ceiling: WebBucket?, os: String, item: String, spa
 // methods (`equal`, `compare`, ...) are the compiler's, never the user's
 // ungated use.
 sema_os_target_signature: fn(function: Func, own_gate: String?, gate_of_type: [String:String], found: &[Diagnostic]) {
-    if function.compiler_generated -> return
+    if function.compiler_generated {
+        return
+    }
     loop param in function.params {
         if param.name == "self" -> next
-        if param.ty == .Named(name) -> sema_os_target_flag(function, own_gate, name, gate_of_type, found)
+        if param.ty == .Named(name) {
+            sema_os_target_flag(function, own_gate, name, gate_of_type, found)
+        }
     }
-    if function.return_type == .Val(.Named(name)) -> sema_os_target_flag(function, own_gate, name, gate_of_type, found)
+    if function.return_type == .Val(.Named(name)) {
+        sema_os_target_flag(function, own_gate, name, gate_of_type, found)
+    }
 }
 
 sema_os_target_flag: fn(function: Func, own_gate: String?, type_name: String, gate_of_type: [String:String], found: &[Diagnostic]) {
-    if type_name == "" -> return
+    if type_name == "" {
+        return
+    }
     os: gate_of_type.get(type_name) ?? return
-    if own_gate == .Val(gate) && gate == os -> return
+    if own_gate == .Val(gate) && gate == os {
+        return
+    }
     row: diagnostic_registry_row("E-OSTARGET-UNMATCHED-CALL") ?? panic("E-OSTARGET-UNMATCHED-CALL has no registry row")
     os_name: sema_os_target_name(os)
-    found.push(sema_error("E-OSTARGET-UNMATCHED-CALL", function.name_span,
-        row.what.replace("{{caller}}", function.name).replace("{{gated_type}}", type_name).replace("{{os}}", os_name),
-        row.why,
-        row.fix.replace("{{caller}}", function.name).replace("{{gated_type}}", type_name).replace("{{os}}", os_name)))
+    found.push(
+        sema_error(
+            "E-OSTARGET-UNMATCHED-CALL",
+            function.name_span,
+            row.what.replace("{{caller}}", function.name).replace("{{gated_type}}", type_name).replace("{{os}}", os_name),
+            row.why,
+            row.fix.replace("{{caller}}", function.name).replace("{{gated_type}}", type_name).replace("{{os}}", os_name),
+        ),
+    )
 }
 
 // The parser spells an impl's OS as sema reads it (`linux`, `macos`,

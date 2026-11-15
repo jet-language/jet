@@ -45,7 +45,6 @@
 // prints (`ir.build`), and every compile-time batch and the comptime entry
 // program are linted before their x86-64 compile (`eval.batch`,
 // `eval.entry`, JetEval Native.jet).
-
 use jet_foundation.[BUILTIN_STATIC_ROWS, CORE_CALLS, CompilerThreads, FunctionCallMetadata, IR_RUNTIME_HANDLES, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, core_call_key, name_rows, name_rows_set, name_rows_value, type_name]
 
 // One finding. `function` is "name [key]" ("-" for a module row), `key`
@@ -96,91 +95,115 @@ IRLintContext: struct {
 // What a ConstText's data row or a ConstBigInt's name row holds
 // (IRLintContext.data_texts, name_decimals).
 IR_LINT_ROW_UNCHECKED: 0
+
 // UTF-8 text; for a name row, a decimal integer.
 IR_LINT_ROW_TEXT: 1
+
 // A static object (IRModule.data_relocs names it), not text.
 IR_LINT_ROW_OBJECT: 2
+
 // Bytes that are not UTF-8; for a name row, not a decimal integer.
 IR_LINT_ROW_BAD: 3
 
 // The rules. Every row names one.
 // A fixed value where its timing would show (ir_lint_fixed).
 IR_LINT_FIXED: "timing.fixed"
+
 IR_LINT_ARENA: "arena"
+
 IR_LINT_SLOT: "operand.slot"
+
 IR_LINT_REF: "operand.ref"
+
 IR_LINT_DST: "operand.dst"
+
 IR_LINT_KIND: "operand.kind"
+
 IR_LINT_IMM: "operand.imm"
+
 IR_LINT_LAYOUT: "typing.layout"
+
 IR_LINT_CONVERT: "typing.convert"
+
 IR_LINT_CLONE: "typing.clone"
+
 IR_LINT_CALL_ARITY: "call.arity"
+
 IR_LINT_CALL_ARG: "call.arg"
+
 IR_LINT_CALL_RESULT: "call.result"
+
 // A CallIndirect against the signature its code word's row carries.
 IR_LINT_INDIRECT: "call.indirect"
+
 IR_LINT_ROUTE: "route.call"
+
 // A ConstText's data row and a ConstBigInt's name row.
 IR_LINT_STATIC: "typing.data"
+
 // A Drop's or Close's routine against its slot.
 IR_LINT_DROP: "typing.drop"
+
 // An address result's width and a memory access's displacement and extent.
 IR_LINT_ACCESS: "typing.access"
+
 IR_LINT_CONTROL: "control.nesting"
+
 IR_LINT_DEPTH: "control.depth"
+
 IR_LINT_RETURN: "return"
+
 IR_LINT_TYPE_KIND: "type.kind"
+
 IR_LINT_TYPE_LAYOUT: "type.layout"
+
 IR_LINT_SSA: "ssa.form"
+
 IR_LINT_CORE_ARITY: "core.arity"
+
 // The route lint's gaps (ir_lint_route_gaps): a Core call row whose symbol
 // no runtime route carries, and a route or handle helper a runtime does not
 // export.
 IR_LINT_CORE_ROUTE: "core.route"
+
 IR_LINT_ROUTE_EXPORT: "route.export"
+
 // The row standing for a function's findings past IR_LINT_FUNCTION_LIMIT.
 IR_LINT_MORE: "more"
 
 // The role of one instruction field.
 IRLintRole: enum {
-    // Not read (any value).
     Unused
     Slot
-    // A slot or -1.
     SlotOrNone
-    // A row of IRModule.names.
     Name
-    // A row of IRModule.data.
     Data
-    // A row of IRModule.functions.
     Function
-    // The start of an args window of `c` slots.
     Args
     Count
-    // An instruction index (structured-control linkage).
     Index
     IndexOrNone
     Depth
     Immediate
 }
 
+// Not read (any value).
+// A slot or -1.
+// A row of IRModule.names.
+// A row of IRModule.data.
+// A row of IRModule.functions.
+// The start of an args window of `c` slots.
+// An instruction index (structured-control linkage).
+
 // The typing rule of an opcode, beyond its operand roles and kinds.
 IRLintTyping: enum {
-    // No operands (Nop, Unreachable): nothing to type.
     Empty
     Const
-    // dst, a and b of one layout; c an overflow policy.
     Arithmetic
-    // dst and a of one layout; b an Int or Word.
     Shift
-    // a and b of one layout, or both raw words (IR_LINT_RAW).
     Compare
-    // dst and a of one layout.
     Unary
     Convert
-    // dst and a of one register class (ir_lint_transfer); a Copy also
-    // needs a clone route for an owned value.
     Move
     Copy
     Concat
@@ -188,64 +211,90 @@ IRLintTyping: enum {
     Route
     Control
     Return
-    // A ConstText: its data row is UTF-8 text, not a static object; a Word
-    // result (the runtime library's static-text address) is one word.
     Text
-    // A ConstBigInt: its name row is a decimal integer.
     BigInt
-    // A Drop's slot lives in a general register when it has a drop, and a
-    // drop routine the module builds takes it as its one parameter and has
-    // no result; a Close's slot lives in a general register.
     Drop
-    // A CallIndirect: against the signature its code word's row carries
-    // (ir_lint_indirect).
     Indirect
-    // A FunctionAddress or DataAddress: a Word result is one word.
     Address
-    // A Load, Store or StreamStore: b fits a 32-bit displacement, and the
-    // value's bytes at b are inside the storage an Aggregate address holds.
     Memory
-    // A StackAddress: a its size, b its alignment; an Aggregate result fits
-    // the storage, a Word result is one word.
     Frame
-    // An Offset: inside the storage an Aggregate address holds, and an
-    // Aggregate result's bytes too.
     Offset
-    // A CopyBytes of c bytes from address b to address a, inside the
-    // storage of each that is an Aggregate.
     CopyBytes
-    // An IntBig: b a width 2..=IR_INT_INLINE_BITS.
     IntBig
 }
 
+// No operands (Nop, Unreachable): nothing to type.
+// dst, a and b of one layout; c an overflow policy.
+// dst and a of one layout; b an Int or Word.
+// a and b of one layout, or both raw words (IR_LINT_RAW).
+// dst and a of one layout.
+// dst and a of one register class (ir_lint_transfer); a Copy also
+// needs a clone route for an owned value.
+// A ConstText: its data row is UTF-8 text, not a static object; a Word
+// result (the runtime library's static-text address) is one word.
+// A ConstBigInt: its name row is a decimal integer.
+// A Drop's slot lives in a general register when it has a drop, and a
+// drop routine the module builds takes it as its one parameter and has
+// no result; a Close's slot lives in a general register.
+// A CallIndirect: against the signature its code word's row carries
+// (ir_lint_indirect).
+// A FunctionAddress or DataAddress: a Word result is one word.
+// A Load, Store or StreamStore: b fits a 32-bit displacement, and the
+// value's bytes at b are inside the storage an Aggregate address holds.
+// A StackAddress: a its size, b its alignment; an Aggregate result fits
+// the storage, a Word result is one word.
+// An Offset: inside the storage an Aggregate address holds, and an
+// Aggregate result's bytes too.
+// A CopyBytes of c bytes from address b to address a, inside the
+// storage of each that is an Aggregate.
+// An IntBig: b a width 2..=IR_INT_INLINE_BITS.
+
 // Slot kind bits (IRTypeKind, one bit each).
 IR_LINT_UNIT: 1
+
 IR_LINT_BOOL: 2
+
 IR_LINT_INT: 4
+
 IR_LINT_WORD: 8
+
 IR_LINT_FLOAT: 16
+
 IR_LINT_FLOAT32: 32
+
 IR_LINT_CHAR: 64
+
 IR_LINT_STRING: 128
+
 IR_LINT_POINTER: 256
+
 IR_LINT_AGGREGATE: 512
+
 IR_LINT_ANY: 1023
+
 // Arithmetic operands: exact Int, fixed-width words, IEEE floats.
 IR_LINT_NUMERIC: 60
+
 // Bitwise operands: Int, Word, Bool.
 IR_LINT_BITS: 14
+
 // Raw machine words, compared bit for bit: Bool, Word, Char, String and
 // Pointer (a null check compares a pointer with a zero word).
 IR_LINT_RAW: 458
+
 // Comparable operands: every kind that is one value (no Unit, no Aggregate).
 IR_LINT_SCALAR: 510
+
 // An address operand of Load, Store, Offset, CopyBytes: a pointer, the
 // address an Aggregate slot holds, a word, or a String's header pointer.
 IR_LINT_ADDRESS: 904
+
 // A frame address result.
 IR_LINT_ADDRESS_RESULT: 776
+
 // A code address result: a pointer or a word.
 IR_LINT_CODE_RESULT: 264
+
 // A ConstText result: a String, or the raw static-text address the
 // runtime library's `rt_static_text` yields as a Word (BuildLibrary.jet).
 IR_LINT_TEXT: 136
@@ -343,7 +392,8 @@ ir_lint_kind_bit: fn(kind: IRTypeKind) -> Int Never! {
 
 ir_lint_kinds_text: fn(kinds: Int) -> String Never! {
     names := [String]{}
-    loop kind in ([IRTypeKind]{IRTypeKind.Unit, IRTypeKind.Bool, IRTypeKind.Int, IRTypeKind.Word, IRTypeKind.Float, IRTypeKind.Float32, IRTypeKind.Char, IRTypeKind.String, IRTypeKind.Pointer, IRTypeKind.Aggregate}) {
+    loop kind in
+        ([IRTypeKind]{IRTypeKind.Unit, IRTypeKind.Bool, IRTypeKind.Int, IRTypeKind.Word, IRTypeKind.Float, IRTypeKind.Float32, IRTypeKind.Char, IRTypeKind.String, IRTypeKind.Pointer, IRTypeKind.Aggregate}) {
         if kinds.bit_and(ir_lint_kind_bit(kind)) != 0 -> names.push(ir_kind_name(kind))
     }
     names.join("|")
@@ -438,7 +488,9 @@ ir_lint_part: fn(slot: Shared<IRLintPart>, reads: Shared<IRLintReads>) -> Int {
     shared_reads: reads.guard_read()
     held := slot.guard_edit()
     found := [IRLintFinding]{}
-    loop f in held.value.functions -> ir_lint_function(shared_reads.value.views[0], shared_reads.value.context, f, shared_reads.value.pass, found)
+    loop f in held.value.functions {
+        ir_lint_function(shared_reads.value.views[0], shared_reads.value.context, f, shared_reads.value.pass, found)
+    }
     held.value.found = found.move()
     held.value.functions.len()
 }
@@ -619,7 +671,9 @@ ir_lint_types: fn(m: IRModule, pass: String, out: &[IRLintFinding]) Never! {
             out.push(IRLintFinding{function: "-", key: "", pass: pass.copy(), rule: IR_LINT_TYPE_KIND, message: "type row {row} of {type_name(ty.ty)} is {ir_kind_name(ty.kind)}, not {ir_lint_kinds_text(allowed)}"})
         }
         problem: ir_lint_layout_problem(ty)
-        if problem != "" -> out.push(IRLintFinding{function: "-", key: "", pass: pass.copy(), rule: IR_LINT_TYPE_LAYOUT, message: "type row {row} of {type_name(ty.ty)}: {problem}"})
+        if problem != "" {
+            out.push(IRLintFinding{function: "-", key: "", pass: pass.copy(), rule: IR_LINT_TYPE_LAYOUT, message: "type row {row} of {type_name(ty.ty)}: {problem}"})
+        }
     }
 }
 
@@ -654,19 +708,47 @@ ir_lint_type_kinds: fn(ty: Type) -> Int Never! {
 ir_lint_layout_problem: fn(ty: IRType) -> String Never! {
     if ty.clone != "" && ty.drop == "" -> return "clone {ty.clone} without a drop"
     if ty.kind == {
-        .Unit -> if ty.size != 0 -> return "Unit of size {ty.size}"
-        .Bool -> if ty.size != 1 -> return "Bool of size {ty.size}"
-        .Int | .Char -> if ty.size != 8 || ty.class != .Integer -> return "{ir_kind_name(ty.kind)} of size {ty.size}, class {ty.class}"
-        .Float -> if ty.size != 8 || ty.class != .Float -> return "Float of size {ty.size}, class {ty.class}"
-        .Float32 -> if ty.size != 4 || ty.class != .Float -> return "Float32 of size {ty.size}, class {ty.class}"
-        .String -> if ty.size != 8 -> return "String of size {ty.size}"
-        .Pointer -> if ty.size != 8 || ty.class != .Pointer -> return "Pointer of size {ty.size}, class {ty.class}"
+        .Unit -> {
+            if ty.size != 0 -> return "Unit of size {ty.size}"
+        }
+        .Bool -> {
+            if ty.size != 1 -> return "Bool of size {ty.size}"
+        }
+        .Int | .Char -> {
+            if ty.size != 8 || ty.class != .Integer {
+                return "{ir_kind_name(ty.kind)} of size {ty.size}, class {ty.class}"
+            }
+        }
+        .Float -> {
+            if ty.size != 8 || ty.class != .Float {
+                return "Float of size {ty.size}, class {ty.class}"
+            }
+        }
+        .Float32 -> {
+            if ty.size != 4 || ty.class != .Float {
+                return "Float32 of size {ty.size}, class {ty.class}"
+            }
+        }
+        .String -> {
+            if ty.size != 8 -> return "String of size {ty.size}"
+        }
+        .Pointer -> {
+            if ty.size != 8 || ty.class != .Pointer {
+                return "Pointer of size {ty.size}, class {ty.class}"
+            }
+        }
         .Word -> {
-            if ty.size != 1 && ty.size != 2 && ty.size != 4 && ty.size != 8 -> return "Word of size {ty.size}"
-            if ty.bits < 1 || ty.bits > 8 * ty.size -> return "Word of {ty.bits} bits in {ty.size} bytes"
+            if ty.size != 1 && ty.size != 2 && ty.size != 4 && ty.size != 8 {
+                return "Word of size {ty.size}"
+            }
+            if ty.bits < 1 || ty.bits > 8 * ty.size {
+                return "Word of {ty.bits} bits in {ty.size} bytes"
+            }
             if ty.class != .Integer -> return "Word of class {ty.class}"
             if ir_lint_untag(ty.ty) == .IntN(signed, bits) {
-                if bits != ty.bits || signed != ty.signed -> return "Word of {ty.bits} bits (signed {ty.signed}) for {type_name(ty.ty)}"
+                if bits != ty.bits || signed != ty.signed {
+                    return "Word of {ty.bits} bits (signed {ty.signed}) for {type_name(ty.ty)}"
+                }
             }
         }
         .Aggregate -> {
@@ -674,7 +756,9 @@ ir_lint_layout_problem: fn(ty: IRType) -> String Never! {
             if ty.class != .Pointer -> return "Aggregate of class {ty.class}"
         }
     }
-    if ty.align < 1 || ty.align > 16 || ty.align.bit_and(ty.align - 1) != 0 -> return "alignment {ty.align}"
+    if ty.align < 1 || ty.align > 16 || ty.align.bit_and(ty.align - 1) != 0 {
+        return "alignment {ty.align}"
+    }
     ""
 }
 
@@ -695,7 +779,9 @@ ir_lint_function: fn(m: IRModule, context: IRLintContext, f: IRFunction, pass: S
     before: out.len()
     if ir_lint_arena(m, f, pass, out) {
         if f.asm != None {
-            if f.op.len() > 0 -> out.push(ir_lint_finding(f, pass, IR_LINT_ARENA, "an asm leaf with {f.op.len()} instructions"))
+            if f.op.len() > 0 {
+                out.push(ir_lint_finding(f, pass, IR_LINT_ARENA, "an asm leaf with {f.op.len()} instructions"))
+            }
         } else {
             ir_lint_instructions(m, context, f, pass, out)
             if out.len() == before -> ir_lint_fixed(m, f, pass, out)
@@ -737,9 +823,13 @@ ir_lint_arena: fn(m: IRModule, f: IRFunction, pass: String, out: &[IRLintFinding
             sound = false
         }
         param: slot < f.param_count
-        if param != (f.slot_kind[slot] == .Param) -> out.push(ir_lint_finding(f, pass, IR_LINT_ARENA, "slot {slot} is {if param -> "a parameter" else -> "no parameter"} of {f.param_count} but {f.slot_kind[slot]}"))
+        if param != (f.slot_kind[slot] == .Param) {
+            out.push(ir_lint_finding(f, pass, IR_LINT_ARENA, "slot {slot} is {if param -> "a parameter" else -> "no parameter"} of {f.param_count} but {f.slot_kind[slot]}"))
+        }
     }
-    if f.open.len() > 0 -> out.push(ir_lint_finding(f, pass, IR_LINT_CONTROL, "{f.open.len()} constructs left open by its builder"))
+    if f.open.len() > 0 {
+        out.push(ir_lint_finding(f, pass, IR_LINT_CONTROL, "{f.open.len()} constructs left open by its builder"))
+    }
     sound
 }
 
@@ -758,7 +848,9 @@ ir_lint_kind: fn(m: IRModule, f: IRFunction, slot: Int) -> IRTypeKind Never! {
 // Load, Store, StreamStore, Offset or CopyBytes, a CallIndirect's callee, or
 // the operand of a word Add, Sub or Mul that does not wrap.
 ir_lint_fixed: fn(m: IRModule, f: IRFunction, pass: String, out: &[IRLintFinding]) Never! {
-    if !ir_timing_marked(f) -> return
+    if !ir_timing_marked(f) {
+        return
+    }
     fixed: ir_timing_fixed(f)
     loop at in 0..<f.op.len() {
         a: ir_timing_at(fixed, f.a[at])
@@ -792,9 +884,7 @@ ir_lint_instructions: fn(m: IRModule, context: IRLintContext, f: IRFunction, pas
         if mode < 0 {
             typing: context.typings[code]
             sound: ir_lint_operands(m, context, f, at, IR_LINT_OPS[code], pass, out)
-            if typing == .Control {
-                ir_lint_control(f, at, pass, open, elses, out)
-            } else if sound {
+            if typing == .Control -> ir_lint_control(f, at, pass, open, elses, out) else if sound {
                 ir_lint_typing(m, context, f, at, typing, pass, out)
             }
             next
@@ -819,9 +909,13 @@ ir_lint_instructions: fn(m: IRModule, context: IRLintContext, f: IRFunction, pas
             out.push(ir_lint_at(f, at, pass, IR_LINT_KIND, "a s{a} is {ir_kind_name(ir_lint_kind(m, f, a))}, not {ir_lint_kinds_text((mode >> 18).bit_and(IR_LINT_ANY))}"))
             sound = false
         }
-        if sound && mode.bit_and(IR_LINT_TYPED) != 0 -> ir_lint_typing(m, context, f, at, context.typings[code], pass, out)
+        if sound && mode.bit_and(IR_LINT_TYPED) != 0 {
+            ir_lint_typing(m, context, f, at, context.typings[code], pass, out)
+        }
     }
-    if open.len() > 0 -> out.push(ir_lint_finding(f, pass, IR_LINT_CONTROL, "{open.len()} constructs never closed (innermost at {open[open.len() - 1]})"))
+    if open.len() > 0 {
+        out.push(ir_lint_finding(f, pass, IR_LINT_CONTROL, "{open.len()} constructs never closed (innermost at {open[open.len() - 1]})"))
+    }
 }
 
 // Instruction `at`'s fields against its opcode's row `row` (roles and
@@ -838,11 +932,15 @@ ir_lint_operands: fn(m: IRModule, context: IRLintContext, f: IRFunction, at: Int
     before: out.len()
     if f.dst[at] >= 0 && row.dst != .Unused {
         kind: ir_lint_kind(m, f, f.dst[at])
-        if row.dst_kinds.bit_and(ir_lint_kind_bit(kind)) == 0 -> out.push(ir_lint_at(f, at, pass, IR_LINT_KIND, "dst s{f.dst[at]} is {ir_kind_name(kind)}, not {ir_lint_kinds_text(row.dst_kinds)}"))
+        if row.dst_kinds.bit_and(ir_lint_kind_bit(kind)) == 0 {
+            out.push(ir_lint_at(f, at, pass, IR_LINT_KIND, "dst s{f.dst[at]} is {ir_kind_name(kind)}, not {ir_lint_kinds_text(row.dst_kinds)}"))
+        }
     }
     if row.a == .Slot || (row.a == .SlotOrNone && f.a[at] >= 0) {
         kind: ir_lint_kind(m, f, f.a[at])
-        if row.a_kinds.bit_and(ir_lint_kind_bit(kind)) == 0 -> out.push(ir_lint_at(f, at, pass, IR_LINT_KIND, "a s{f.a[at]} is {ir_kind_name(kind)}, not {ir_lint_kinds_text(row.a_kinds)}"))
+        if row.a_kinds.bit_and(ir_lint_kind_bit(kind)) == 0 {
+            out.push(ir_lint_at(f, at, pass, IR_LINT_KIND, "a s{f.a[at]} is {ir_kind_name(kind)}, not {ir_lint_kinds_text(row.a_kinds)}"))
+        }
     }
     out.len() == before
 }
@@ -877,10 +975,18 @@ ir_lint_args_sound: fn(f: IRFunction, start: Int, count: Int) -> Bool Never! {
 
 // The rows of instruction `at`'s fields that do not play their roles.
 ir_lint_role_rows: fn(context: IRLintContext, f: IRFunction, at: Int, row: IRLintOp, pass: String, out: &[IRLintFinding]) Never! {
-    if !ir_lint_role(context, f, at, row.dst, f.dst[at]) -> out.push(ir_lint_at(f, at, pass, IR_LINT_DST, "dst: {ir_lint_role_problem(context, f, at, row.dst, f.dst[at])}"))
-    if !ir_lint_role(context, f, at, row.a, f.a[at]) -> out.push(ir_lint_at(f, at, pass, ir_lint_role_rule(row.a), "a: {ir_lint_role_problem(context, f, at, row.a, f.a[at])}"))
-    if !ir_lint_role(context, f, at, row.b, f.b[at]) -> out.push(ir_lint_at(f, at, pass, ir_lint_role_rule(row.b), "b: {ir_lint_role_problem(context, f, at, row.b, f.b[at])}"))
-    if !ir_lint_role(context, f, at, row.c, f.c[at]) -> out.push(ir_lint_at(f, at, pass, ir_lint_role_rule(row.c), "c: {ir_lint_role_problem(context, f, at, row.c, f.c[at])}"))
+    if !ir_lint_role(context, f, at, row.dst, f.dst[at]) {
+        out.push(ir_lint_at(f, at, pass, IR_LINT_DST, "dst: {ir_lint_role_problem(context, f, at, row.dst, f.dst[at])}"))
+    }
+    if !ir_lint_role(context, f, at, row.a, f.a[at]) {
+        out.push(ir_lint_at(f, at, pass, ir_lint_role_rule(row.a), "a: {ir_lint_role_problem(context, f, at, row.a, f.a[at])}"))
+    }
+    if !ir_lint_role(context, f, at, row.b, f.b[at]) {
+        out.push(ir_lint_at(f, at, pass, ir_lint_role_rule(row.b), "b: {ir_lint_role_problem(context, f, at, row.b, f.b[at])}"))
+    }
+    if !ir_lint_role(context, f, at, row.c, f.c[at]) {
+        out.push(ir_lint_at(f, at, pass, ir_lint_role_rule(row.c), "c: {ir_lint_role_problem(context, f, at, row.c, f.c[at])}"))
+    }
 }
 
 ir_lint_role_rule: fn(role: IRLintRole) -> String Never! {
@@ -935,13 +1041,17 @@ ir_lint_transfer: fn(m: IRModule, from: Int, to: Int) -> Bool Never! {
     if from == to -> return true
     kind: m.types[from].kind
     if ir_lint_class(kind) != ir_lint_class(m.types[to].kind) -> return false
-    if kind == .Aggregate && m.types[to].kind == .Aggregate -> return m.types[from].size == m.types[to].size
+    if kind == .Aggregate && m.types[to].kind == .Aggregate {
+        return m.types[from].size == m.types[to].size
+    }
     true
 }
 
 ir_lint_row_text: fn(m: IRModule, row: Int) -> String Never! {
     kind: m.types[row].kind
-    if kind == .Word || kind == .Aggregate -> return "{ir_kind_name(kind)}/{m.types[row].size} ({type_name(m.types[row].ty)})"
+    if kind == .Word || kind == .Aggregate {
+        return "{ir_kind_name(kind)}/{m.types[row].size} ({type_name(m.types[row].ty)})"
+    }
     "{ir_kind_name(kind)} ({type_name(m.types[row].ty)})"
 }
 
@@ -956,28 +1066,42 @@ ir_lint_typing: fn(m: IRModule, context: IRLintContext, f: IRFunction, at: Int, 
         .Empty | .Control -> {}
         .Text -> {
             state: if a < context.data_texts.len() -> context.data_texts[a] else -> IR_LINT_ROW_UNCHECKED
-            if state == IR_LINT_ROW_OBJECT -> out.push(ir_lint_at(f, at, pass, IR_LINT_STATIC, "data row {a} is a static object, not text"))
-            if state == IR_LINT_ROW_BAD -> out.push(ir_lint_at(f, at, pass, IR_LINT_STATIC, "data row {a} is not UTF-8 text"))
+            if state == IR_LINT_ROW_OBJECT {
+                out.push(ir_lint_at(f, at, pass, IR_LINT_STATIC, "data row {a} is a static object, not text"))
+            }
+            if state == IR_LINT_ROW_BAD {
+                out.push(ir_lint_at(f, at, pass, IR_LINT_STATIC, "data row {a} is not UTF-8 text"))
+            }
             ir_lint_word_result(m, context, f, at, IR_LINT_STATIC, pass, out)
         }
         .BigInt -> {
-            if a < context.name_decimals.len() && context.name_decimals[a] == IR_LINT_ROW_BAD -> out.push(ir_lint_at(f, at, pass, IR_LINT_STATIC, "name row {a} is not a decimal integer"))
+            if a < context.name_decimals.len() && context.name_decimals[a] == IR_LINT_ROW_BAD {
+                out.push(ir_lint_at(f, at, pass, IR_LINT_STATIC, "name row {a} is not a decimal integer"))
+            }
         }
-        .Drop -> ir_lint_drop(m, context, f, at, pass, out)
-        .Indirect -> ir_lint_indirect(m, context, f, at, pass, out)
-        .Address -> ir_lint_word_result(m, context, f, at, IR_LINT_ACCESS, pass, out)
+        .Drop -> { ir_lint_drop(m, context, f, at, pass, out) }
+        .Indirect -> { ir_lint_indirect(m, context, f, at, pass, out) }
+        .Address -> { ir_lint_word_result(m, context, f, at, IR_LINT_ACCESS, pass, out) }
         .Memory -> {
             value: if f.op[at] == .Load -> dst else -> c
             if {
-                b < IR_LINT_I32_MIN || b > IR_LINT_I32_MAX -> out.push(ir_lint_at(f, at, pass, IR_LINT_ACCESS, "displacement {b} does not fit 32 bits"))
-                else -> ir_lint_within(m, context, f, at, a, b, ir_lint_width(m.types[f.slot_type[value]]), value, pass, out)
+                b < IR_LINT_I32_MIN || b > IR_LINT_I32_MAX -> {
+                    out.push(ir_lint_at(f, at, pass, IR_LINT_ACCESS, "displacement {b} does not fit 32 bits"))
+                }
+                else -> {
+                    ir_lint_within(m, context, f, at, a, b, ir_lint_width(m.types[f.slot_type[value]]), value, pass, out)
+                }
             }
         }
         .Frame -> {
             if a < 0 -> out.push(ir_lint_at(f, at, pass, IR_LINT_IMM, "frame storage of {a} bytes"))
-            if b < 1 || b > 16 || b.bit_and(b - 1) != 0 -> out.push(ir_lint_at(f, at, pass, IR_LINT_IMM, "frame storage alignment {b}"))
+            if b < 1 || b > 16 || b.bit_and(b - 1) != 0 {
+                out.push(ir_lint_at(f, at, pass, IR_LINT_IMM, "frame storage alignment {b}"))
+            }
             td: f.slot_type[dst]
-            if context.kind_bits[td] == IR_LINT_AGGREGATE && m.types[td].size > a -> out.push(ir_lint_at(f, at, pass, IR_LINT_ACCESS, "s{dst} of {ir_lint_row_text(m, td)} in frame storage of {a} bytes"))
+            if context.kind_bits[td] == IR_LINT_AGGREGATE && m.types[td].size > a {
+                out.push(ir_lint_at(f, at, pass, IR_LINT_ACCESS, "s{dst} of {ir_lint_row_text(m, td)} in frame storage of {a} bytes"))
+            }
             ir_lint_word_result(m, context, f, at, IR_LINT_ACCESS, pass, out)
         }
         .Offset -> {
@@ -992,16 +1116,24 @@ ir_lint_typing: fn(m: IRModule, context: IRLintContext, f: IRFunction, at: Int, 
             if c < 0 -> out.push(ir_lint_at(f, at, pass, IR_LINT_IMM, "copy of {c} bytes"))
             if c >= 0 -> ir_lint_within(m, context, f, at, a, 0, c, -1, pass, out)
             if c >= 0 -> ir_lint_within(m, context, f, at, b, 0, c, -1, pass, out)
-            if context.kind_bits[f.slot_type[b]].bit_and(IR_LINT_ADDRESS) == 0 -> out.push(ir_lint_at(f, at, pass, IR_LINT_KIND, "b s{b} is {ir_kind_name(ir_lint_kind(m, f, b))}, not {ir_lint_kinds_text(IR_LINT_ADDRESS)}"))
+            if context.kind_bits[f.slot_type[b]].bit_and(IR_LINT_ADDRESS) == 0 {
+                out.push(ir_lint_at(f, at, pass, IR_LINT_KIND, "b s{b} is {ir_kind_name(ir_lint_kind(m, f, b))}, not {ir_lint_kinds_text(IR_LINT_ADDRESS)}"))
+            }
         }
         .IntBig -> {
-            if b < 2 || b > IR_INT_INLINE_BITS -> out.push(ir_lint_at(f, at, pass, IR_LINT_IMM, "int_big of width {b}"))
+            if b < 2 || b > IR_INT_INLINE_BITS {
+                out.push(ir_lint_at(f, at, pass, IR_LINT_IMM, "int_big of width {b}"))
+            }
         }
         .Const -> {
             bits: context.kind_bits[f.slot_type[dst]]
-            if bits == IR_LINT_BOOL && a != 0 && a != 1 -> out.push(ir_lint_at(f, at, pass, IR_LINT_IMM, "Bool constant {a}"))
+            if bits == IR_LINT_BOOL && a != 0 && a != 1 {
+                out.push(ir_lint_at(f, at, pass, IR_LINT_IMM, "Bool constant {a}"))
+            }
             // An exact Int constant is inline: bits 63 and 62 agree.
-            if bits == IR_LINT_INT && (a >= 4611686018427387904 || a < -4611686018427387904) -> out.push(ir_lint_at(f, at, pass, IR_LINT_IMM, "Int constant {a} is not inline"))
+            if bits == IR_LINT_INT && (a >= 4611686018427387904 || a < -4611686018427387904) {
+                out.push(ir_lint_at(f, at, pass, IR_LINT_IMM, "Int constant {a} is not inline"))
+            }
         }
         .Arithmetic -> {
             ta: f.slot_type[a]
@@ -1016,37 +1148,53 @@ ir_lint_typing: fn(m: IRModule, context: IRLintContext, f: IRFunction, at: Int, 
             proven: c == IR_OVERFLOW_OPERANDS || c == IR_OVERFLOW_LEFT || c == IR_OVERFLOW_RIGHT
             operands: proven && context.kind_bits[ta] == IR_LINT_INT && (f.op[at] == .Add || f.op[at] == .Sub || f.op[at] == .Mul)
             nonneg: c == IR_OVERFLOW_NONNEG && context.kind_bits[ta] == IR_LINT_INT && (f.op[at] == .Div || f.op[at] == .Rem)
-            if c != -1 && c != IR_OVERFLOW_TRAP && c != IR_OVERFLOW_WRAP && !operands && !nonneg -> out.push(ir_lint_at(f, at, pass, IR_LINT_IMM, "overflow policy {c}"))
+            if c != -1 && c != IR_OVERFLOW_TRAP && c != IR_OVERFLOW_WRAP && !operands && !nonneg {
+                out.push(ir_lint_at(f, at, pass, IR_LINT_IMM, "overflow policy {c}"))
+            }
         }
         .Shift -> {
             ta: f.slot_type[a]
             td: f.slot_type[dst]
-            if ta != td && !ir_lint_same(m, ta, td) -> out.push(ir_lint_at(f, at, pass, IR_LINT_LAYOUT, "s{dst} <- s{a} of {ir_lint_row_text(m, td)} and {ir_lint_row_text(m, ta)}"))
-            if context.kind_bits[f.slot_type[b]].bit_and(IR_LINT_INT + IR_LINT_WORD) == 0 -> out.push(ir_lint_at(f, at, pass, IR_LINT_KIND, "shift count s{b} is {ir_kind_name(ir_lint_kind(m, f, b))}"))
-            if c != -1 && c != IR_OVERFLOW_TRAP && c != IR_OVERFLOW_WRAP -> out.push(ir_lint_at(f, at, pass, IR_LINT_IMM, "overflow policy {c}"))
+            if ta != td && !ir_lint_same(m, ta, td) {
+                out.push(ir_lint_at(f, at, pass, IR_LINT_LAYOUT, "s{dst} <- s{a} of {ir_lint_row_text(m, td)} and {ir_lint_row_text(m, ta)}"))
+            }
+            if context.kind_bits[f.slot_type[b]].bit_and(IR_LINT_INT + IR_LINT_WORD) == 0 {
+                out.push(ir_lint_at(f, at, pass, IR_LINT_KIND, "shift count s{b} is {ir_kind_name(ir_lint_kind(m, f, b))}"))
+            }
+            if c != -1 && c != IR_OVERFLOW_TRAP && c != IR_OVERFLOW_WRAP {
+                out.push(ir_lint_at(f, at, pass, IR_LINT_IMM, "overflow policy {c}"))
+            }
         }
         .Compare -> {
             ta: f.slot_type[a]
             tb: f.slot_type[b]
             if ta != tb && !ir_lint_same(m, ta, tb) {
                 raw: context.kind_bits[ta].bit_or(context.kind_bits[tb])
-                if raw.bit_and(IR_LINT_RAW) != raw -> out.push(ir_lint_at(f, at, pass, IR_LINT_LAYOUT, "s{a}, s{b} of {ir_lint_row_text(m, ta)} and {ir_lint_row_text(m, tb)}"))
+                if raw.bit_and(IR_LINT_RAW) != raw {
+                    out.push(ir_lint_at(f, at, pass, IR_LINT_LAYOUT, "s{a}, s{b} of {ir_lint_row_text(m, ta)} and {ir_lint_row_text(m, tb)}"))
+                }
             }
         }
         .Unary -> {
             ta: f.slot_type[a]
             td: f.slot_type[dst]
-            if ta != td && !ir_lint_same(m, ta, td) -> out.push(ir_lint_at(f, at, pass, IR_LINT_LAYOUT, "s{dst} <- s{a} of {ir_lint_row_text(m, td)} and {ir_lint_row_text(m, ta)}"))
+            if ta != td && !ir_lint_same(m, ta, td) {
+                out.push(ir_lint_at(f, at, pass, IR_LINT_LAYOUT, "s{dst} <- s{a} of {ir_lint_row_text(m, td)} and {ir_lint_row_text(m, ta)}"))
+            }
         }
         .Move -> {
             ta: f.slot_type[a]
             td: f.slot_type[dst]
-            if ta != td && !ir_lint_transfer(m, ta, td) -> out.push(ir_lint_at(f, at, pass, IR_LINT_LAYOUT, "s{dst} <- s{a} of {ir_lint_row_text(m, td)} and {ir_lint_row_text(m, ta)}"))
+            if ta != td && !ir_lint_transfer(m, ta, td) {
+                out.push(ir_lint_at(f, at, pass, IR_LINT_LAYOUT, "s{dst} <- s{a} of {ir_lint_row_text(m, td)} and {ir_lint_row_text(m, ta)}"))
+            }
         }
         .Copy -> {
             source: f.slot_type[a]
             td: f.slot_type[dst]
-            if source != td && !ir_lint_transfer(m, source, td) -> out.push(ir_lint_at(f, at, pass, IR_LINT_LAYOUT, "s{dst} <- s{a} of {ir_lint_row_text(m, td)} and {ir_lint_row_text(m, source)}"))
+            if source != td && !ir_lint_transfer(m, source, td) {
+                out.push(ir_lint_at(f, at, pass, IR_LINT_LAYOUT, "s{dst} <- s{a} of {ir_lint_row_text(m, td)} and {ir_lint_row_text(m, source)}"))
+            }
             // A Copy of an owned value makes a second owner: an exact Int
             // or a String clones, an inline Int? clones as its Int, a box or
             // function value is shared; any other owned value only moves.
@@ -1067,18 +1215,24 @@ ir_lint_typing: fn(m: IRModule, context: IRLintContext, f: IRFunction, at: Int, 
             }
         }
         .Concat -> {
-            if context.kind_bits[f.slot_type[b]] != IR_LINT_STRING -> out.push(ir_lint_at(f, at, pass, IR_LINT_KIND, "b s{b} is {ir_kind_name(ir_lint_kind(m, f, b))}, not String"))
+            if context.kind_bits[f.slot_type[b]] != IR_LINT_STRING {
+                out.push(ir_lint_at(f, at, pass, IR_LINT_KIND, "b s{b} is {ir_kind_name(ir_lint_kind(m, f, b))}, not String"))
+            }
         }
-        .Call -> ir_lint_call(m, context, f, at, pass, out)
+        .Call -> { ir_lint_call(m, context, f, at, pass, out) }
         .Route -> {
             route: context.name_routes[a]
-            if route >= 0 && !ir_lint_route_sound(context, route, f, at) -> ir_lint_route(m, IR_RUNTIME_ROUTES[route], f, at, pass, out)
+            if route >= 0 && !ir_lint_route_sound(context, route, f, at) {
+                ir_lint_route(m, IR_RUNTIME_ROUTES[route], f, at, pass, out)
+            }
         }
         .Return -> {
             if a >= 0 {
                 ta: f.slot_type[a]
                 if f.result < 0 {
-                    if context.kind_bits[ta] != IR_LINT_UNIT -> out.push(ir_lint_at(f, at, pass, IR_LINT_RETURN, "s{a} of {ir_lint_row_text(m, ta)} from a function with no result"))
+                    if context.kind_bits[ta] != IR_LINT_UNIT {
+                        out.push(ir_lint_at(f, at, pass, IR_LINT_RETURN, "s{a} of {ir_lint_row_text(m, ta)} from a function with no result"))
+                    }
                 } else if f.result != ta && !ir_lint_same(m, f.result, ta) {
                     out.push(ir_lint_at(f, at, pass, IR_LINT_RETURN, "s{a} of {ir_lint_row_text(m, ta)} for result {ir_lint_row_text(m, f.result)}"))
                 }
@@ -1104,17 +1258,25 @@ ir_lint_call: fn(m: IRModule, context: IRLintContext, f: IRFunction, at: Int, pa
             param: context.params[first + index]
             if param < 0 || param >= m.types.len() -> next
             row: f.slot_type[f.args[start + index]]
-            if param != row && !ir_lint_same(m, param, row) -> out.push(ir_lint_at(f, at, pass, IR_LINT_CALL_ARG, "argument {index} s{f.args[start + index]} of {ir_lint_row_text(m, row)} for parameter {ir_lint_row_text(m, param)} of function {callee} {context.function_names[callee]}"))
+            if param != row && !ir_lint_same(m, param, row) {
+                out.push(ir_lint_at(f, at, pass, IR_LINT_CALL_ARG, "argument {index} s{f.args[start + index]} of {ir_lint_row_text(m, row)} for parameter {ir_lint_row_text(m, param)} of function {callee} {context.function_names[callee]}"))
+            }
         }
     }
     dst: f.dst[at]
-    if dst < 0 -> return
-    result: context.results[callee]
-    if result < 0 || result >= m.types.len() {
-        if context.kind_bits[f.slot_type[dst]] != IR_LINT_UNIT -> out.push(ir_lint_at(f, at, pass, IR_LINT_CALL_RESULT, "s{dst} of {ir_lint_row_text(m, f.slot_type[dst])} from function {callee} {context.function_names[callee]} with no result"))
+    if dst < 0 {
         return
     }
-    if result != f.slot_type[dst] && !ir_lint_same(m, result, f.slot_type[dst]) -> out.push(ir_lint_at(f, at, pass, IR_LINT_CALL_RESULT, "s{dst} of {ir_lint_row_text(m, f.slot_type[dst])} for result {ir_lint_row_text(m, result)} of function {callee} {context.function_names[callee]}"))
+    result: context.results[callee]
+    if result < 0 || result >= m.types.len() {
+        if context.kind_bits[f.slot_type[dst]] != IR_LINT_UNIT {
+            out.push(ir_lint_at(f, at, pass, IR_LINT_CALL_RESULT, "s{dst} of {ir_lint_row_text(m, f.slot_type[dst])} from function {callee} {context.function_names[callee]} with no result"))
+        }
+        return
+    }
+    if result != f.slot_type[dst] && !ir_lint_same(m, result, f.slot_type[dst]) {
+        out.push(ir_lint_at(f, at, pass, IR_LINT_CALL_RESULT, "s{dst} of {ir_lint_row_text(m, f.slot_type[dst])} for result {ir_lint_row_text(m, result)} of function {callee} {context.function_names[callee]}"))
+    }
 }
 
 // A CallIndirect through a code word whose row is IR_CODE_TYPE over a
@@ -1128,7 +1290,9 @@ ir_lint_call: fn(m: IRModule, context: IRLintContext, f: IRFunction, at: Int, pa
 ir_lint_indirect: fn(m: IRModule, context: IRLintContext, f: IRFunction, at: Int, pass: String, out: &[IRLintFinding]) Never! {
     code: f.a[at]
     if ir_lint_untag(m.types[f.slot_type[code]].ty) == .Apply(name, args) {
-        if name != IR_CODE_TYPE || args.len() != 1 -> return
+        if name != IR_CODE_TYPE || args.len() != 1 {
+            return
+        }
         if ir_lint_untag(args[0]) == .Fn(params, ret, _, _, metadata, _) {
             start: f.b[at]
             count: f.c[at]
@@ -1137,16 +1301,24 @@ ir_lint_indirect: fn(m: IRModule, context: IRLintContext, f: IRFunction, at: Int
                 return
             }
             boxed: f.args[start]
-            if context.kind_bits[f.slot_type[boxed]].bit_and(IR_LINT_POINTER + IR_LINT_WORD) == 0 -> out.push(ir_lint_at(f, at, pass, IR_LINT_INDIRECT, "box s{boxed} is {ir_kind_name(ir_lint_kind(m, f, boxed))}"))
+            if context.kind_bits[f.slot_type[boxed]].bit_and(IR_LINT_POINTER + IR_LINT_WORD) == 0 {
+                out.push(ir_lint_at(f, at, pass, IR_LINT_INDIRECT, "box s{boxed} is {ir_kind_name(ir_lint_kind(m, f, boxed))}"))
+            }
             loop (index, param) in params {
                 slot: f.args[start + 1 + index]
                 kinds: ir_lint_param_kinds(param, metadata, index)
-                if kinds.bit_and(context.kind_bits[f.slot_type[slot]]) == 0 -> out.push(ir_lint_at(f, at, pass, IR_LINT_INDIRECT, "argument {index} s{slot} is {ir_kind_name(ir_lint_kind(m, f, slot))}, not {ir_lint_kinds_text(kinds)} for {type_name(param)}"))
+                if kinds.bit_and(context.kind_bits[f.slot_type[slot]]) == 0 {
+                    out.push(ir_lint_at(f, at, pass, IR_LINT_INDIRECT, "argument {index} s{slot} is {ir_kind_name(ir_lint_kind(m, f, slot))}, not {ir_lint_kinds_text(kinds)} for {type_name(param)}"))
+                }
             }
             dst: f.dst[at]
-            if dst < 0 -> return
+            if dst < 0 {
+                return
+            }
             kinds: if ret == .Val(result) -> ir_lint_signature_kinds(result) else -> IR_LINT_UNIT
-            if kinds.bit_and(context.kind_bits[f.slot_type[dst]]) == 0 -> out.push(ir_lint_at(f, at, pass, IR_LINT_INDIRECT, "s{dst} is {ir_kind_name(ir_lint_kind(m, f, dst))}, not {ir_lint_kinds_text(kinds)} for the result of {type_name(args[0])}"))
+            if kinds.bit_and(context.kind_bits[f.slot_type[dst]]) == 0 {
+                out.push(ir_lint_at(f, at, pass, IR_LINT_INDIRECT, "s{dst} is {ir_kind_name(ir_lint_kind(m, f, dst))}, not {ir_lint_kinds_text(kinds)} for the result of {type_name(args[0])}"))
+            }
         }
     }
 }
@@ -1157,7 +1329,9 @@ ir_lint_indirect: fn(m: IRModule, context: IRLintContext, f: IRFunction, at: Int
 ir_lint_param_kinds: fn(ty: Type, metadata: FunctionCallMetadata?, index: Int) -> Int Never! {
     if metadata == .Val(known) {
         if index < known.variadic.len() && known.variadic[index] -> return IR_LINT_ANY
-        if index < known.conventions.len() && known.conventions[index] != .Read -> return IR_LINT_ANY
+        if index < known.conventions.len() && known.conventions[index] != .Read {
+            return IR_LINT_ANY
+        }
     }
     ir_lint_signature_kinds(ty)
 }
@@ -1182,26 +1356,35 @@ ir_lint_drop: fn(m: IRModule, context: IRLintContext, f: IRFunction, at: Int, pa
     slot: f.a[at]
     row: f.slot_type[slot]
     if f.op[at] == .Close {
-        if ir_lint_class(m.types[row].kind) != 0 -> out.push(ir_lint_at(f, at, pass, IR_LINT_DROP, "s{slot} of {ir_lint_row_text(m, row)} is no general word"))
+        if ir_lint_class(m.types[row].kind) != 0 {
+            out.push(ir_lint_at(f, at, pass, IR_LINT_DROP, "s{slot} of {ir_lint_row_text(m, row)} is no general word"))
+        }
         return
     }
     drop: m.types[row].drop
-    if drop == "" -> return
+    if drop == "" {
+        return
+    }
     if ir_lint_class(m.types[row].kind) != 0 {
         out.push(ir_lint_at(f, at, pass, IR_LINT_DROP, "s{slot} of {ir_lint_row_text(m, row)} with drop {drop} is no general word"))
         return
     }
     routine: if row < context.drop_functions.len() -> context.drop_functions[row] else -> -1
-    if routine < 0 || routine >= context.results.len() -> return
+    if routine < 0 || routine >= context.results.len() {
+        return
+    }
     first: context.param_start[routine]
     arity: context.param_start[routine + 1] - first
     param: if arity == 1 -> context.params[first] else -> -1
     takes: param >= 0 && param < m.types.len() && ir_lint_transfer(m, row, param)
-    if !takes || context.results[routine] >= 0 -> out.push(ir_lint_at(f, at, pass, IR_LINT_DROP, "s{slot} of {ir_lint_row_text(m, row)} with drop function {routine} {context.function_names[routine]} of {arity} parameters{if context.results[routine] >= 0 -> " and a result" else -> ""}"))
+    if !takes || context.results[routine] >= 0 {
+        out.push(ir_lint_at(f, at, pass, IR_LINT_DROP, "s{slot} of {ir_lint_row_text(m, row)} with drop function {routine} {context.function_names[routine]} of {arity} parameters{if context.results[routine] >= 0 -> " and a result" else -> ""}"))
+    }
 }
 
 // The 32-bit displacement range of a Load or Store.
 IR_LINT_I32_MIN: -2147483648
+
 IR_LINT_I32_MAX: 2147483647
 
 // The bytes a Load or Store of a value of row `ty` moves (x86-64
@@ -1223,9 +1406,13 @@ ir_lint_width: fn(ty: IRType) -> Int Never! {
 // is not in the IR.
 ir_lint_within: fn(m: IRModule, context: IRLintContext, f: IRFunction, at: Int, base: Int, offset: Int, width: Int, value: Int, pass: String, out: &[IRLintFinding]) Never! {
     row: f.slot_type[base]
-    if context.kind_bits[row] != IR_LINT_AGGREGATE -> return
+    if context.kind_bits[row] != IR_LINT_AGGREGATE {
+        return
+    }
     size: m.types[row].size
-    if offset >= 0 && offset + width <= size -> return
+    if offset >= 0 && offset + width <= size {
+        return
+    }
     what: if value >= 0 -> "s{value}" else -> "copy"
     out.push(ir_lint_at(f, at, pass, IR_LINT_ACCESS, "{what} of {width} bytes at {offset} outside s{base} of {ir_lint_row_text(m, row)}"))
 }
@@ -1234,7 +1421,9 @@ ir_lint_within: fn(m: IRModule, context: IRLintContext, f: IRFunction, at: Int, 
 ir_lint_word_result: fn(m: IRModule, context: IRLintContext, f: IRFunction, at: Int, rule: String, pass: String, out: &[IRLintFinding]) Never! {
     dst: f.dst[at]
     td: f.slot_type[dst]
-    if context.kind_bits[td] == IR_LINT_WORD && m.types[td].size != 8 -> out.push(ir_lint_at(f, at, pass, rule, "address in s{dst} of {ir_lint_row_text(m, td)}"))
+    if context.kind_bits[td] == IR_LINT_WORD && m.types[td].size != 8 {
+        out.push(ir_lint_at(f, at, pass, rule, "address in s{dst} of {ir_lint_row_text(m, td)}"))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1329,7 +1518,9 @@ ir_lint_route_sound: fn(context: IRLintContext, route: Int, f: IRFunction, at: I
     if f.c[at] != context.route_words[route] -> return false
     start: f.b[at]
     loop k in context.route_param_start[route]..<context.route_param_start[route + 1] {
-        if context.route_kinds[k].bit_and(context.kind_bits[f.slot_type[f.args[start + context.route_positions[k]]]]) == 0 -> return false
+        if context.route_kinds[k].bit_and(context.kind_bits[f.slot_type[f.args[start + context.route_positions[k]]]]) == 0 {
+            return false
+        }
     }
     dst: f.dst[at]
     if dst < 0 -> return true
@@ -1358,14 +1549,20 @@ ir_lint_route: fn(m: IRModule, route: IRRoute, f: IRFunction, at: Int, pass: Str
         if kinds != 0 {
             slot: f.args[start + position]
             kind: ir_lint_kind(m, f, slot)
-            if kinds.bit_and(ir_lint_kind_bit(kind)) == 0 -> out.push(ir_lint_at(f, at, pass, IR_LINT_ROUTE, "{route.export} parameter {index} ({param}) is s{slot} of {ir_kind_name(kind)}"))
+            if kinds.bit_and(ir_lint_kind_bit(kind)) == 0 {
+                out.push(ir_lint_at(f, at, pass, IR_LINT_ROUTE, "{route.export} parameter {index} ({param}) is s{slot} of {ir_kind_name(kind)}"))
+            }
         }
         position += ir_lint_param_words(param)
     }
     dst: f.dst[at]
-    if !result.value && dst >= 0 -> out.push(ir_lint_at(f, at, pass, IR_LINT_ROUTE, "{route.export} answers no value, written to s{dst}"))
+    if !result.value && dst >= 0 {
+        out.push(ir_lint_at(f, at, pass, IR_LINT_ROUTE, "{route.export} answers no value, written to s{dst}"))
+    }
     plain: if route.result == .Plain(_) -> true else -> false
-    if result.value && dst >= 0 && !plain && ir_lint_kind(m, f, dst) != .Word -> out.push(ir_lint_at(f, at, pass, IR_LINT_ROUTE, "{route.export} tag word written to s{dst} of {ir_kind_name(ir_lint_kind(m, f, dst))}"))
+    if result.value && dst >= 0 && !plain && ir_lint_kind(m, f, dst) != .Word {
+        out.push(ir_lint_at(f, at, pass, IR_LINT_ROUTE, "{route.export} tag word written to s{dst} of {ir_kind_name(ir_lint_kind(m, f, dst))}"))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1390,7 +1587,9 @@ ir_lint_control: fn(f: IRFunction, at: Int, pass: String, open: &[Int], elses: &
             return
         }
         opener: open[open.len() - 1]
-        if f.b[opener] != at -> out.push(ir_lint_at(f, at, pass, IR_LINT_CONTROL, "the If at {opener} names Else {f.b[opener]}"))
+        if f.b[opener] != at {
+            out.push(ir_lint_at(f, at, pass, IR_LINT_CONTROL, "the If at {opener} names Else {f.b[opener]}"))
+        }
         elses[elses.len() - 1] = at
         return
     }
@@ -1400,18 +1599,28 @@ ir_lint_control: fn(f: IRFunction, at: Int, pass: String, open: &[Int], elses: &
             return
         }
         seen: elses.pop() ?? -1
-        if f.a[at] != opener -> out.push(ir_lint_at(f, at, pass, IR_LINT_CONTROL, "names opener {f.a[at]}, not {opener}"))
+        if f.a[at] != opener {
+            out.push(ir_lint_at(f, at, pass, IR_LINT_CONTROL, "names opener {f.a[at]}, not {opener}"))
+        }
         if f.op[opener] == .If {
-            if f.c[opener] != at -> out.push(ir_lint_at(f, at, pass, IR_LINT_CONTROL, "the If at {opener} names End {f.c[opener]}"))
-            if f.b[opener] != seen -> out.push(ir_lint_at(f, at, pass, IR_LINT_CONTROL, "the If at {opener} names Else {f.b[opener]}, its Else is {seen}"))
-            if seen >= 0 && f.a[seen] != at -> out.push(ir_lint_at(f, at, pass, IR_LINT_CONTROL, "the Else at {seen} names End {f.a[seen]}"))
+            if f.c[opener] != at {
+                out.push(ir_lint_at(f, at, pass, IR_LINT_CONTROL, "the If at {opener} names End {f.c[opener]}"))
+            }
+            if f.b[opener] != seen {
+                out.push(ir_lint_at(f, at, pass, IR_LINT_CONTROL, "the If at {opener} names Else {f.b[opener]}, its Else is {seen}"))
+            }
+            if seen >= 0 && f.a[seen] != at {
+                out.push(ir_lint_at(f, at, pass, IR_LINT_CONTROL, "the Else at {seen} names End {f.a[seen]}"))
+            }
         } else if f.a[opener] != at {
             out.push(ir_lint_at(f, at, pass, IR_LINT_CONTROL, "the {ir_op_name(f.op[opener])} at {opener} names End {f.a[opener]}"))
         }
         return
     }
     depth: if op == .Br -> f.a[at] else -> f.b[at]
-    if depth >= open.len() -> out.push(ir_lint_at(f, at, pass, IR_LINT_DEPTH, "depth {depth} with {open.len()} open"))
+    if depth >= open.len() {
+        out.push(ir_lint_at(f, at, pass, IR_LINT_DEPTH, "depth {depth} with {open.len()} open"))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1428,7 +1637,9 @@ ir_lint_core_routes: fn() -> [IRLintFinding] Never! {
     loop row in CORE_CALLS {
         symbol: if row.symbol == {
             .Prelude(name) -> name
-            .SourceOwned -> { next }
+            .SourceOwned -> {
+                next
+            }
         }
         name: ir_route_symbol(symbol)
         if ir_route_builder_lowered(name) || ir_environment_route(name) != None -> next
@@ -1458,10 +1669,14 @@ ir_lint_route_gaps: fn(exports: [String]) -> [IRLintFinding] Never! {
     loop row in CORE_CALLS {
         symbol: if row.symbol == {
             .Prelude(name) -> name
-            .SourceOwned -> { next }
+            .SourceOwned -> {
+                next
+            }
         }
         name: ir_route_symbol(symbol)
-        if ir_route_builder_lowered(name) || ir_environment_route(name) != None || ir_runtime_route(name) != None -> next
+        if ir_route_builder_lowered(name) || ir_environment_route(name) != None || ir_runtime_route(name) != None {
+            next
+        }
         key: core_call_key(row)
         out.push(IRLintFinding{function: key.copy(), key: "", pass: "core.calls", rule: IR_LINT_CORE_ROUTE, message: "{key} names {name}, which no runtime route carries"})
     }
@@ -1470,10 +1685,14 @@ ir_lint_route_gaps: fn(exports: [String]) -> [IRLintFinding] Never! {
     // and each Authority static names its own `jet_authority_<method>` route.
     loop row in BUILTIN_STATIC_ROWS {
         if row.lowering == .PreludeStatic(rooted, path, _) {
-            if rooted && path == "JetAtomic" && (row.method == "new" || row.method == "try_new") -> next
+            if rooted && path == "JetAtomic" && (row.method == "new" || row.method == "try_new") {
+                next
+            }
             symbol: if rooted && path == "JetAuthority" -> "jet_authority_{row.method}" else -> "{path}::{row.method}"
             name: ir_route_symbol(symbol)
-            if ir_route_builder_lowered(name) || ir_environment_route(name) != None || ir_runtime_route(name) != None -> next
+            if ir_route_builder_lowered(name) || ir_environment_route(name) != None || ir_runtime_route(name) != None {
+                next
+            }
             out.push(IRLintFinding{function: "{row.owner}.{row.method}", key: "", pass: "core.statics", rule: IR_LINT_CORE_ROUTE, message: "{row.owner}.{row.method} names {name}, which no runtime route carries"})
         }
     }
@@ -1502,6 +1721,8 @@ IR_LINT_HANDLE_VERBS: #run { [String]{"drop", "clone", "display", "show", "debug
 // The findings' text, one line per row: "pass\tfunction\trule\tmessage".
 ir_lint_text: fn(findings: [IRLintFinding]) -> String Never! {
     lines := [String]{}
-    loop finding in findings -> lines.push("{finding.pass}\t{finding.function}\t{finding.rule}\t{finding.message}")
+    loop finding in findings {
+        lines.push("{finding.pass}\t{finding.function}\t{finding.rule}\t{finding.message}")
+    }
     lines.join("\n")
 }

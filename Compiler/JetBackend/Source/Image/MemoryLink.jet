@@ -65,7 +65,7 @@ link_image_u32: fn(bytes: [U8], at: Int) -> Int Never! {
 // A two's-complement 64-bit field.
 link_image_i64: fn(bytes: [U8], at: Int) -> Int Never! {
     high := link_image_u32(bytes, at + 4)
-    if high >= 0x80000000 -> high = high - 0x100000000
+    if high >= 0x80000000 -> high -= 0x100000000
     link_image_u32(bytes, at) + high * 0x100000000
 }
 
@@ -120,7 +120,9 @@ link_image_view: fn(c: &LinkContext, b: Int, gap_at: Int, gap: Int) -> LinkImage
     exports_size := 0
     loop k in 1..<shnum {
         h: v.shoff + 64 * k
-        if v.alloc_headers == k - 1 && (link_s64(c.bufs, b, h + 8).bit_and(2)) != 0 -> v.alloc_headers = k
+        if v.alloc_headers == k - 1 && (link_s64(c.bufs, b, h + 8).bit_and(2)) != 0 {
+            v.alloc_headers = k
+        }
         name: v.names_at + link_u32(c.bufs, b, h)
         if {
             link_u32(c.bufs, b, h + 4) == LINK_SHT_SYMTAB -> {
@@ -181,7 +183,9 @@ link_image_export: fn(c: LinkContext, view: LinkImageView, name: String) -> Int 
         if k == 0 -> return -1
         if k >= view.first_global && k < view.symtab_count {
             at: view.symtab_at + 24 * k
-            if link_u16(c.bufs, 1, at + 6) != 0 && link_name_has(c.bufs, 1, view.strtab_at + link_u32(c.bufs, 1, at), name, true) -> return k
+            if link_u16(c.bufs, 1, at + 6) != 0 && link_name_has(c.bufs, 1, view.strtab_at + link_u32(c.bufs, 1, at), name, true) {
+                return k
+            }
         }
         slot = (slot + 1).bit_and(mask)
     }
@@ -194,7 +198,9 @@ link_image_defines: fn(c: LinkContext, view: LinkImageView, name: String) -> Boo
     if view.exports_slots > 0 -> return link_image_export(c, view, name) >= 0
     loop k in view.first_global..<view.symtab_count {
         at: view.symtab_at + 24 * k
-        if link_u16(c.bufs, 1, at + 6) != 0 && link_name_has(c.bufs, 1, view.strtab_at + link_u32(c.bufs, 1, at), name, true) -> return true
+        if link_u16(c.bufs, 1, at + 6) != 0 && link_name_has(c.bufs, 1, view.strtab_at + link_u32(c.bufs, 1, at), name, true) {
+            return true
+        }
     }
     false
 }
@@ -234,9 +240,13 @@ link_bind_startup: fn(frames: Bool) -> LinkSynth Never! {
 link_bind_layout: fn(c: &LinkContext, view: LinkImageView) -> LinkLayout Never! {
     order: link_order(c)
     commons := false
-    loop g in 0..<c.g_name.len() { if c.g_kind[g] == LINK_G_COMMON -> commons = true }
+    loop g in 0..<c.g_name.len() {
+        if c.g_kind[g] == LINK_G_COMMON -> commons = true
+    }
     has_rw := c.got_keys.len() > 0 || commons
-    loop class in LINK_RELRO..<LINK_CLASSES { if order[class].len() > 0 -> has_rw = true }
+    loop class in LINK_RELRO..<LINK_CLASSES {
+        if order[class].len() > 0 -> has_rw = true
+    }
     phnum: view.phnum + 2 + (if has_rw -> 1 else -> 0)
     addr := view.program_base + LINK_PHDR_SIZE * phnum
     addr = link_place(c, order[LINK_RODATA], addr)
@@ -257,11 +267,28 @@ link_bind_layout: fn(c: &LinkContext, view: LinkImageView) -> LinkLayout Never! 
         addr += c.g_common_size[g]
     }
     LinkLayout{
-        order: order, phnum: phnum, r_end: r_end, text_start: text_start, text_end: text_end, rw_start: rw_start,
-        file_end: if has_rw -> file_end else -> rw_start, mem_end: if has_rw -> addr else -> rw_start,
-        has_rw: has_rw, has_tls: false, tdata_end: rw_start, init_start: rw_start, init_end: rw_start,
-        fini_start: rw_start, fini_end: rw_start, preinit_start: rw_start, preinit_end: rw_start,
-        bss_start: file_end, note_at: 0, notes: [Int:Int]{}, packed: false, rw_shift: 0,
+        order: order,
+        phnum: phnum,
+        r_end: r_end,
+        text_start: text_start,
+        text_end: text_end,
+        rw_start: rw_start,
+        file_end: if has_rw -> file_end else -> rw_start,
+        mem_end: if has_rw -> addr else -> rw_start,
+        has_rw: has_rw,
+        has_tls: false,
+        tdata_end: rw_start,
+        init_start: rw_start,
+        init_end: rw_start,
+        fini_start: rw_start,
+        fini_end: rw_start,
+        preinit_start: rw_start,
+        preinit_end: rw_start,
+        bss_start: file_end,
+        note_at: 0,
+        notes: [Int:Int]{},
+        packed: false,
+        rw_shift: 0,
     }
 }
 
@@ -305,7 +332,9 @@ link_bind_write: fn(c: &LinkContext, exe: &X64Executable, view: LinkImageView, l
     start: view.program_base
     link_phdr(out, start - c.base, 1, 4, start, l.r_end - start, l.r_end - start, LINK_PAGE)
     link_phdr(out, l.text_start - c.base, 1, 5, l.text_start, l.text_end - l.text_start, l.text_end - l.text_start, LINK_PAGE)
-    if l.has_rw -> link_phdr(out, l.rw_start - c.base, 1, 6, l.rw_start, l.file_end - l.rw_start, l.mem_end - l.rw_start, LINK_PAGE)
+    if l.has_rw {
+        link_phdr(out, l.rw_start - c.base, 1, 6, l.rw_start, l.file_end - l.rw_start, l.mem_end - l.rw_start, LINK_PAGE)
+    }
     loop k in 0..<view.phnum {
         at: view.phoff + LINK_PHDR_SIZE * k
         if link_u32(c.bufs, 1, at) != 1 -> out.extend(c.bufs[1][at..<at + LINK_PHDR_SIZE])
@@ -325,12 +354,20 @@ link_bind_sections: fn(c: &LinkContext, out: &[U8], origin: Int, view: LinkImage
     headers := [LinkSectionHeader]{}
     loop k in 1..<view.alloc_headers + 1 {
         h: view.shoff + 64 * k
-        headers.push(LinkSectionHeader{
-            name: link_cstr(c.bufs, 1, view.names_at + link_u32(c.bufs, 1, h)), kind: link_u32(c.bufs, 1, h + 4),
-            flags: link_s64(c.bufs, 1, h + 8), addr: link_s64(c.bufs, 1, h + 16), offset: link_s64(c.bufs, 1, h + 24),
-            size: link_s64(c.bufs, 1, h + 32), link: link_u32(c.bufs, 1, h + 40), info: link_u32(c.bufs, 1, h + 44),
-            align: link_s64(c.bufs, 1, h + 48), entry_size: link_s64(c.bufs, 1, h + 56),
-        })
+        headers.push(
+            LinkSectionHeader{
+                name: link_cstr(c.bufs, 1, view.names_at + link_u32(c.bufs, 1, h)),
+                kind: link_u32(c.bufs, 1, h + 4),
+                flags: link_s64(c.bufs, 1, h + 8),
+                addr: link_s64(c.bufs, 1, h + 16),
+                offset: link_s64(c.bufs, 1, h + 24),
+                size: link_s64(c.bufs, 1, h + 32),
+                link: link_u32(c.bufs, 1, h + 40),
+                info: link_u32(c.bufs, 1, h + 44),
+                align: link_s64(c.bufs, 1, h + 48),
+                entry_size: link_s64(c.bufs, 1, h + 56),
+            },
+        )
     }
     class_headers := [Int]{}
     loop _ in 0..<LINK_CLASSES -> class_headers.push(-1)
@@ -385,7 +422,9 @@ link_bind_sections: fn(c: &LinkContext, out: &[U8], origin: Int, view: LinkImage
         }
     }
     first_global: symtab.len().div_euclid(24)
-    if image_symbols -> symtab.extend(c.bufs[1][view.symtab_at + 24 * view.first_global..<view.symtab_at + 24 * view.symtab_count])
+    if image_symbols {
+        symtab.extend(c.bufs[1][view.symtab_at + 24 * view.first_global..<view.symtab_at + 24 * view.symtab_count])
+    }
     loop g in 0..<c.g_name.len() {
         if c.g_kind[g] != LINK_G_FILE || c.g_alias[g] >= 0 -> next
         s: c.g_section[g]
@@ -466,7 +505,9 @@ x64_executable_header: fn(exe: X64Executable) -> [U8] Never! {
     header := if exe.image.len() >= 64 -> exe.image[0..<64] else -> [U8]{}
     loop header.len() < 64 -> header.push(U8{0})
     loop (k, at) in exe.patch_at {
-        loop (j, byte) in exe.patch_bytes[k] { if at + j < 64 -> header[at + j] = byte }
+        loop (j, byte) in exe.patch_bytes[k] {
+            if at + j < 64 -> header[at + j] = byte
+        }
     }
     header
 }
@@ -474,7 +515,9 @@ x64_executable_header: fn(exe: X64Executable) -> [U8] Never! {
 // The file of `exe`, whose image part is whole (x64_executable_complete).
 x64_executable_bytes: fn(exe: &&X64Executable) -> [U8] Never! {
     if exe.image_end == 0 -> return exe.tail.move()
-    if exe.image_gap > 0 -> panic("x64_executable_bytes: the image part of {exe.image_path} was read without its loaded segments")
+    if exe.image_gap > 0 {
+        panic("x64_executable_bytes: the image part of {exe.image_path} was read without its loaded segments")
+    }
     out := exe.image[0..<exe.image_end]
     loop (k, at) in exe.patch_at {
         loop (j, byte) in exe.patch_bytes[k] -> out[at + j] = byte
@@ -546,7 +589,9 @@ x64_runtime_image_defines: fn(images: &[[U8]], gap_at: Int, gap: Int, names: [St
 }
 
 link_bind_bytes: fn(bound: &&X64BindResult) -> X64ExecutableResult Never! {
-    if bound.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: bound.errors.move()}
+    if bound.errors.len() > 0 {
+        return X64ExecutableResult{bytes: [U8]{}, errors: bound.errors.move()}
+    }
     X64ExecutableResult{bytes: x64_executable_bytes(bound.executable.move()), errors: [String]{}}
 }
 
@@ -599,7 +644,9 @@ link_bind_image: fn(name: String, program: &&[U8], image: &&[U8], gap_at: Int, g
             // Whether each global was undefined before binding; a name the
             // image's symbols repeat binds to the last of them.
             imports := [Bool]{}
-            loop g in 0..<c.g_name.len() -> imports.push(c.g_kind[g] == LINK_G_NONE && c.g_alias[g] < 0)
+            loop g in 0..<c.g_name.len() {
+                imports.push(c.g_kind[g] == LINK_G_NONE && c.g_alias[g] < 0)
+            }
             loop k in view.first_global..<view.symtab_count {
                 at: view.symtab_at + 24 * k
                 if link_u16(c.bufs, 1, at + 6) == 0 -> next

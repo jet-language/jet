@@ -9,17 +9,25 @@ jet_cli_live_event_minimum: fn(value: Int, key: String, bound: Int) -> Int JetCL
     }
     Ok(value)
 }
+
 jet_cli_live_event_closed: fn(value: String, key: String, allowed: [String]) JetCLIReadError! {
-    if !allowed.contains(value) -> return Err(jet_cli_read_error("runtime event observation has unknown `{key}` value"))
+    if !allowed.contains(value) {
+        return Err(jet_cli_read_error("runtime event observation has unknown `{key}` value"))
+    }
     return
 }
+
 jet_cli_live_event_render: fn(events: [JetLiveEvent]) -> String JetCLIReadError! {
-    if events.len() > 256 -> return Err(jet_cli_read_error("runtime event observation exceeds the 256-record limit"))
+    if events.len() > 256 {
+        return Err(jet_cli_read_error("runtime event observation exceeds the 256-record limit"))
+    }
     previous := 0
     lines := [String]{}
     loop event in events {
         sequence: jet_cli_live_event_minimum(event.sequence, "sequence", 0)
-        if sequence <= previous -> return Err(jet_cli_read_error("runtime event observation sequence is not strictly increasing"))
+        if sequence <= previous {
+            return Err(jet_cli_read_error("runtime event observation sequence is not strictly increasing"))
+        }
         previous = sequence
         jet_cli_live_event_closed(event.source, "source", [String]{"Event", "AsyncEvent", "DecisionHook"})
         event_id: jet_cli_live_event_minimum(event.event_id, "event_id", 0)

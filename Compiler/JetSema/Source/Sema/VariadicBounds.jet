@@ -17,10 +17,14 @@ sema_variadic_bounds_expand: fn(program: &Program) {
     fixed := [String:Int]{}
     loop item in program.items {
         if item == .Func(function) {
-            if sema_variadic_bound_traits(function, declared) != None -> fixed[function.name] = function.params.len() - 1
+            if sema_variadic_bound_traits(function, declared) != None {
+                fixed[function.name] = function.params.len() - 1
+            }
         }
     }
-    if fixed.len() == 0 -> return
+    if fixed.len() == 0 {
+        return
+    }
     calls := sema_inline_rewrite_empty()
     calls.variadic = fixed
     rewritten := [Item]{}
@@ -34,7 +38,9 @@ sema_variadic_bounds_expand: fn(program: &Program) {
                 // bounds: its one-argument arity is a generic function, so it
                 // is type-checked but never instantiated (#6449).
                 arities: calls.variadic_arities.get(function.name) ?? [Int]{1}
-                loop arity in arities -> expanded.push(Item.Func{value: sema_variadic_bound_specialize(function, bounds, arity)})
+                loop arity in arities {
+                    expanded.push(Item.Func{value: sema_variadic_bound_specialize(function, bounds, arity)})
+                }
                 next
             }
         }
@@ -51,14 +57,18 @@ sema_variadic_bound_traits: fn(function: Func, declared: [String:Bool]) -> [Stri
     if !last.variadic -> return None
     loops := 0
     uses := [Span]{}
-    loop statement in function.body -> sema_function_header_variadic_statement(statement, last.name, true, loops, uses)
+    loop statement in function.body {
+        sema_function_header_variadic_statement(statement, last.name, true, loops, uses)
+    }
     if loops != 1 || uses.len() > 0 -> return None
     if last.variadic_bound_list == .Val(list) {
         if list.len() == 0 -> return None
         return Val(list.copy())
     }
     if last.ty == .Named(name) {
-        if declared.get(name) != None || sema_type_builtin_trait_symbol(name) != None -> return Val([String]{name.copy()})
+        if declared.get(name) != None || sema_type_builtin_trait_symbol(name) != None {
+            return Val([String]{name.copy()})
+        }
     }
     None
 }
@@ -122,7 +132,9 @@ sema_variadic_bound_specialize: fn(function: Func, bounds: [String], arity: Int)
                 loop index in 0..<arity {
                     slot := sema_inline_rewrite_empty()
                     slot.values[variable] = Expr.Ident{name: sema_variadic_bound_slot_name(last.name, index), span: variable_span, id: AST_NODE_GENERATED}
-                    loop unrolled in sema_inline_rewrite_stmts(slot, loop_body) -> body.push(unrolled)
+                    loop unrolled in sema_inline_rewrite_stmts(slot, loop_body) {
+                        body.push(unrolled)
+                    }
                 }
             }
             next

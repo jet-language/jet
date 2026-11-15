@@ -10,7 +10,8 @@ use files: core.files
         source: "step: printf '%s' '{document}'\njson: stdout doc $ valid # original predicate\n"
         assert_eq(cases_test_advanced(root, "invalid", source).verdict.status, "FAIL")
     }
-    loop assertion in ["json: stdout doc $ valid", "json: stdout ndjson $ valid # original predicate", "json: stdout doc $.a valid # original predicate"] {
+    loop assertion in
+        ["json: stdout doc $ valid", "json: stdout ndjson $ valid # original predicate", "json: stdout doc $.a valid # original predicate"] {
         assert_eq(cases_test_advanced(root, "grammar", "step: printf null\n{assertion}\n").verdict.status, "REFUSED")
     }
     files.remove_all(root) ?? panic("remove JSON valid scratch")

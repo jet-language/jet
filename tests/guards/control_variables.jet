@@ -7,11 +7,15 @@ use control_variable_files: core.files
 // `set_var("NAME", `), names it in a setting record (`name: "NAME"`), or, in a
 // JavaScript file, keys an environment object with it (`{NAME: `).
 CONTROL_VARIABLE_REGISTRY: "Compiler/JetFoundation/Source/Registry/CLIControls.jet"
+
 CONTROL_VARIABLE_ROOTS: [String]{"Tools", ".agents", "AGENTS.md"}
 
 CONTROL_VARIABLE_SEED: "drives an admitted seed or the released jet, and a0.0.44 has no --keep-going flag; it moves to the flag when a release carries the flags (#6606 c9)"
+
 CONTROL_VARIABLE_TIMED: "times a seed, released or baseline jet, and its gauntlet fixture jet reads the variable; it moves to the flags when a release carries them (#6606 c9)"
+
 CONTROL_VARIABLE_RUNTIME: "names the ledger a generated program's runtime writes; the runtime reads only the variable, and no jet command runs there"
+
 CONTROL_VARIABLE_RECORD: "records the measurement a landed held patch was proved with"
 
 // Every setter the roots hold today, with how many lines set the variable in
@@ -70,7 +74,9 @@ control_variable_sets: fn(line: String, name: String, script: Bool) -> Bool {
         after: start + width
         if (start == 0 || !decision_id_word(bytes[start - 1])) && after < bytes.len() {
             following: Int{bytes[after]}
-            if following == 61 && (after + 1 >= bytes.len() || Int{bytes[after + 1]} != 61) -> return true
+            if following == 61 && (after + 1 >= bytes.len() || Int{bytes[after + 1]} != 61) {
+                return true
+            }
             if script && start > 0 && following == 58 && after + 1 < bytes.len() && (Int{bytes[after + 1]}) == 32 {
                 before: Int{bytes[start - 1]}
                 if before == 123 || before == 44 || before == 32 -> return true
@@ -84,16 +90,22 @@ control_variable_sets: fn(line: String, name: String, script: Bool) -> Bool {
 // Symbolic links, hidden entries below a root, installed node modules and
 // build output are not sources.
 control_variable_setters: fn(path: String, names: [String], out: &[String]) {
-    if control_variable_files.is_symlink(path) -> return
+    if control_variable_files.is_symlink(path) {
+        return
+    }
     if control_variable_files.is_dir(path) {
         loop child in (control_variable_files.list_dir(path) ?? panic("list {path}: {err}")) {
-            if child.name.starts_with(".") || child.name == "node_modules" || child.name == "target" -> next
+            if child.name.starts_with(".") || child.name == "node_modules" || child.name == "target" {
+                next
+            }
             control_variable_setters(child.path, names, out)
         }
         return
     }
     text: control_variable_files.read(path) ?? return
-    if !text.contains("JET_") -> return
+    if !text.contains("JET_") {
+        return
+    }
     script: path.ends_with(".mjs") || path.ends_with(".js") || path.ends_with(".ts")
     loop line in text.lines() {
         loop name in names {

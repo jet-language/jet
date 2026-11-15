@@ -9,9 +9,18 @@
 use {
     jet_foundation.[AST_NODE_GENERATED, AccessConvention, Diagnostic, Expr, Item, Param, ParamZone, Program, Span, TargetMachine]
     jet_sema.[
-        SemaComptimeDeclarationStage, SemaForeignProviderInput, SemaRegistrationPackagePolicy, SemaScriptVariable,
-        sema_collect_comptime_declarations, sema_registration_prepare_graph, sema_script_entry_local_types, sema_script_function, sema_script_function_hides,
-        sema_script_function_uses, sema_script_functions, sema_script_helper_writes,
+        SemaComptimeDeclarationStage,
+        SemaForeignProviderInput,
+        SemaRegistrationPackagePolicy,
+        SemaScriptVariable,
+        sema_collect_comptime_declarations,
+        sema_registration_prepare_graph,
+        sema_script_entry_local_types,
+        sema_script_function,
+        sema_script_function_hides,
+        sema_script_function_uses,
+        sema_script_functions,
+        sema_script_helper_writes,
     ]
 }
 
@@ -20,7 +29,9 @@ use {
 // functions reach none of its variables.
 jet_driver_script_helpers: fn(request: JetDriverCompileRequest, load: &JetDriverLoadResult, providers: [SemaForeignProviderInput], target_machine: TargetMachine) {
     reach: jet_driver_script_reach(load)
-    if reach.variables.len() == 0 -> return
+    if reach.variables.len() == 0 {
+        return
+    }
     names := [String]{}
     loop (_, named) in reach.variables {
         loop name in named {
@@ -31,9 +42,13 @@ jet_driver_script_helpers: fn(request: JetDriverCompileRequest, load: &JetDriver
     policies: jet_driver_registration_package_policies(request, load)
     typing := jet_driver_script_probe_stage(request, load, providers, target_machine, policies) ?? return
     variables: sema_script_entry_local_types(typing, names)
-    if variables.len() == 0 -> return
+    if variables.len() == 0 {
+        return
+    }
     candidates: jet_driver_script_add_parameters(load, reach.variables, variables)
-    if candidates.len() == 0 -> return
+    if candidates.len() == 0 {
+        return
+    }
     writing := jet_driver_script_probe_stage(request, load, providers, target_machine, policies) ?? return
     written := sema_script_helper_writes(writing, candidates)
     jet_driver_script_chain_writes(written, reach)
@@ -129,7 +144,9 @@ jet_driver_script_reach_chains: fn(named: &[[String]], calls: [[Int]], hidden: [
             loop callee in calls[caller] {
                 if callee == caller -> next
                 loop position in 0..<named[callee].len() {
-                    if named[caller].contains(named[callee][position]) || hidden[caller].contains(named[callee][position]) -> next
+                    if named[caller].contains(named[callee][position]) || hidden[caller].contains(named[callee][position]) {
+                        next
+                    }
                     // copy: the callee keeps its list
                     named[caller].push(named[callee][position].copy())
                     grew = true
@@ -204,7 +221,9 @@ jet_driver_script_settle_writes: fn(load: &JetDriverLoadResult, written: [String
                 writes: written.get(function.name) ?? next
                 updated := function
                 loop index in 0..<updated.params.len() {
-                    if updated.params[index].script_variable && !writes.contains(updated.params[index].name) -> updated.params[index].convention = AccessConvention.Read
+                    if updated.params[index].script_variable && !writes.contains(updated.params[index].name) {
+                        updated.params[index].convention = AccessConvention.Read
+                    }
                 }
                 load.modules[loaded_index].program.items[item_index] = Item.Func{value: updated}
             }

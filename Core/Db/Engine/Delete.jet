@@ -70,7 +70,9 @@ tab_is_read_only: fn(p: &cg.Parse, a: &ast.AST, t: Int) -> Bool Never! {
     if ex.is_virtual(p.db, t) -> return true
     flags: p.db.tables[t].tab_flags
     if flags.bit_and(ast.TF_READONLY.bit_or(ast.TF_SHADOW)) == 0 -> return false
-    if flags.bit_and(ast.TF_READONLY) != 0 -> return !cat.conn_writable_schema(p.db) && a.ctx.nested == 0
+    if flags.bit_and(ast.TF_READONLY) != 0 {
+        return !cat.conn_writable_schema(p.db) && a.ctx.nested == 0
+    }
     read_only_shadow_tables(p.db)
 }
 
@@ -148,13 +150,16 @@ autoincrement_end: fn(p: &cg.Parse, a: &ast.AST) Never! {
         _: cg.op3(p, opc.OP_LE, mem_id + 2, addr_le, mem_id)
         seq: p.db.schemas[p.db.dbs[info.i_db].schema].seq_tab
         ex.open_table(p, a, 0, info.i_db, seq, opc.OP_OPEN_WRITE)
-        first: cg.v_op_list(p, [aux.VdbeOpList]{
-            op_list_item(opc.OP_NOT_NULL, mem_id + 1, 2, 0),
-            op_list_item(opc.OP_NEW_ROWID, 0, mem_id + 1, 0),
-            op_list_item(opc.OP_MAKE_RECORD, mem_id - 1, 2, i_rec),
-            op_list_item(opc.OP_INSERT, 0, i_rec, mem_id + 1),
-            op_list_item(opc.OP_CLOSE, 0, 0, 0)
-        })
+        first: cg.v_op_list(
+            p,
+            [aux.VdbeOpList]{
+                op_list_item(opc.OP_NOT_NULL, mem_id + 1, 2, 0),
+                op_list_item(opc.OP_NEW_ROWID, 0, mem_id + 1, 0),
+                op_list_item(opc.OP_MAKE_RECORD, mem_id - 1, 2, i_rec),
+                op_list_item(opc.OP_INSERT, 0, i_rec, mem_id + 1),
+                op_list_item(opc.OP_CLOSE, 0, 0, 0),
+            },
+        )
         if first < 0 -> break
         p.f.v.ops[first + 3].p5 = conn.OPFLAG_APPEND
         cg.release_temp_reg(p, i_rec)
@@ -207,7 +212,9 @@ generate_row_delete: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_data_cur: Int, i_id
             cg.v_append_p4(p, conn.P4.Table(t))
         }
         if e_mode != we.ONEPASS_OFF -> cg.v_change_p5(p, conn.OPFLAG_AUXDELETE)
-        if i_idx_no_seek >= 0 && i_idx_no_seek != i_data_cur -> _: cg.op1(p, opc.OP_DELETE, i_idx_no_seek)
+        if i_idx_no_seek >= 0 && i_idx_no_seek != i_data_cur {
+            _: cg.op1(p, opc.OP_DELETE, i_idx_no_seek)
+        }
         p5: if e_mode == we.ONEPASS_MULTI -> conn.OPFLAG_SAVEPOSITION else -> 0
         cg.v_change_p5(p, p5)
     }
@@ -227,14 +234,22 @@ delete_from: fn(p: &cg.Parse, a: &ast.AST, src: Int, where_expr: Int) Never! -[D
 // The body of sqlite3DeleteFrom up to its delete_from_cleanup label.
 delete_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, where_expr: Int) Never! -[DB]> {
     t: src_list_lookup(p, a, src)
-    if t < 0 -> return
+    if t < 0 {
+        return
+    }
     b_complex := false
     g := p.up
-    if g.view_get_column_names(p, a, t) != 0 -> return
-    if is_read_only(p, a, t) -> return
+    if g.view_get_column_names(p, a, t) != 0 {
+        return
+    }
+    if is_read_only(p, a, t) {
+        return
+    }
     i_db: conn.schema_to_index(p.db, p.db.tables[t].schema)
     rcauth: cg.auth_check(p, a, conn.AUTH_DELETE, Val(p.db.tables[t].name.copy()), None, Val(p.db.dbs[i_db].name.copy()))
-    if rcauth == conn.AUTH_DENY -> return
+    if rcauth == conn.AUTH_DENY {
+        return
+    }
 
     // Assign cursor numbers to the table and all its indices.
     si: ast.src_item(a, src, 0)
@@ -276,14 +291,14 @@ delete_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, where_expr: Int) Never! -[D
         // The truncate optimization: a DELETE without a WHERE clause erases
         // the whole table.
         has_rowid: ex.has_rowid(p.db, t)
-        if has_rowid -> _: cg.op4_text(p, opc.OP_CLEAR, p.db.tables[t].tnum, i_db, cnt_arg, p.db.tables[t].name.copy())
+        if has_rowid {
+            _: cg.op4_text(p, opc.OP_CLEAR, p.db.tables[t].tnum, i_db, cnt_arg, p.db.tables[t].name.copy())
+        }
         jx := p.db.tables[t].index
         loop jx >= 0 {
             if p.db.indexes[jx].idx_type == ast.IDXTYPE_PRIMARYKEY && !has_rowid {
                 _: cg.op3(p, opc.OP_CLEAR, p.db.indexes[jx].tnum, i_db, cnt_arg)
-            } else {
-                _: cg.op2(p, opc.OP_CLEAR, p.db.indexes[jx].tnum, i_db)
-            }
+            } else { _: cg.op2(p, opc.OP_CLEAR, p.db.indexes[jx].tnum, i_db) }
             jx = p.db.indexes[jx].next
         }
     } else {
@@ -386,9 +401,7 @@ delete_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, where_expr: Int) Never! -[D
             } else if pk >= 0 {
                 addr_loop = cg.op1(p, opc.OP_REWIND, i_eph_cur)
                 _: cg.op2(p, opc.OP_ROW_DATA, i_eph_cur, i_key)
-            } else {
-                addr_loop = cg.op3(p, opc.OP_ROW_SET_READ, i_row_set, 0, i_key)
-            }
+            } else { addr_loop = cg.op3(p, opc.OP_ROW_SET_READ, i_row_set, 0, i_key) }
 
             // Delete the row.
             generate_row_delete(p, a, t, i_data_cur, i_idx_cur, i_key, n_key, a.ctx.nested == 0, e_one_pass, ai_cur[1])

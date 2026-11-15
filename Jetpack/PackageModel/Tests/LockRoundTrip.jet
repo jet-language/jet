@@ -4,25 +4,56 @@
 // Helpers live in LockEnvelope.jet.
 use {
     jet_pkg_model.[
-        BuildGrant, BuildStamp, ComptimeInput, DependencyProvenance, ForeignLanguage,
-        LockEnvelope, LockError, LockSource, LockedBrowser, LockedBuildContribution, LockedPackage,
-        LockedRevision, LockedSourceChannel, LockedToolchain, LockedWorkspaceMember, NixClosureRecord,
-        OverlayPolicy, OverlaySet, OverrideEnv, PKG_MAX_LOCK_BYTES, PKG_MAX_LOCK_VALUE_BYTES,
-        PKG_RUST_BRIDGE_PROVENANCE_PREFIX, PackageAuthority, PackageGrant, PackageOverride,
-        PartialNixClosure, PartialPackage, ProvenanceRequirement, ProviderAuthority, ProviderOverride,
-        ServiceTrust, TrustDecision, TrustPolicy, pkg_lock_load, pkg_lock_parse,
-        pkg_lock_parse_with_path, pkg_lock_read_text, pkg_lock_record_nix_realization,
-        pkg_lock_record_rust_bridge, pkg_lock_record_source_channel, pkg_lock_validate_package_nix,
-        pkg_lock_write, pkg_lock_write_atomically,
+        BuildGrant,
+        BuildStamp,
+        ComptimeInput,
+        DependencyProvenance,
+        ForeignLanguage,
+        LockEnvelope,
+        LockError,
+        LockSource,
+        LockedBrowser,
+        LockedBuildContribution,
+        LockedPackage,
+        LockedRevision,
+        LockedSourceChannel,
+        LockedToolchain,
+        LockedWorkspaceMember,
+        NixClosureRecord,
+        OverlayPolicy,
+        OverlaySet,
+        OverrideEnv,
+        PKG_MAX_LOCK_BYTES,
+        PKG_MAX_LOCK_VALUE_BYTES,
+        PKG_RUST_BRIDGE_PROVENANCE_PREFIX,
+        PackageAuthority,
+        PackageGrant,
+        PackageOverride,
+        PartialNixClosure,
+        PartialPackage,
+        ProvenanceRequirement,
+        ProviderAuthority,
+        ProviderOverride,
+        ServiceTrust,
+        TrustDecision,
+        TrustPolicy,
+        pkg_lock_load,
+        pkg_lock_parse,
+        pkg_lock_parse_with_path,
+        pkg_lock_read_text,
+        pkg_lock_record_nix_realization,
+        pkg_lock_record_rust_bridge,
+        pkg_lock_record_source_channel,
+        pkg_lock_validate_package_nix,
+        pkg_lock_write,
+        pkg_lock_write_atomically,
     ]
     jet_foundation.[Diagnostic, RuntimeLayer]
     jetpack_foundation.[UNIFIED_LOCK_FILE]
     files: core.files
 }
 
-pkg_lock_test_tricky: fn(label: String) -> String Never! {
-    "{label} \"quoted\" \\ slash"
-}
+pkg_lock_test_tricky: fn(label: String) -> String Never! { "{label} \"quoted\" \\ slash" }
 
 pkg_lock_test_parse_error: fn(raw: String) -> String Never! {
     if pkg_lock_parse(raw) == {
@@ -56,7 +87,7 @@ pkg_lock_test_v0_fixture: fn() -> String Never! {
         "[[comptime_inputs]]",
         "path = \".jet/generated/main/build_message.jet\"",
         "hash = \"sha256:00fa9b9434ab10a112651096960e698daf20f31ddfcd7f67601aceaf96efcdd4\"",
-        ""
+        "",
     }.join("\n")
 }
 
@@ -84,41 +115,49 @@ pkg_lock_test_reported: fn(error: LockError) -> Diagnostic Never! {
     lock := pkg_lock_test_base_lock([LockedPackage]{package}, [LockedToolchain]{})
     lock.workspace_source_digest = Val(pkg_lock_test_tricky("workspace-digest"))
     lock.build_stamp = Val(BuildStamp{git: Val(pkg_lock_test_tricky("git")), dirty: true, toolchain: pkg_lock_test_tricky("toolchain"), at: pkg_lock_test_tricky("timestamp")})
-    lock.build_contributions = [LockedBuildContribution]{LockedBuildContribution{
-        package: pkg_lock_test_tricky("contribution-package"),
-        key: pkg_lock_test_tricky("contribution-key"),
-        value: pkg_lock_test_tricky("contribution-value"),
-        scope: pkg_lock_test_tricky("contribution-scope"),
-        layer: pkg_lock_test_tricky("contribution-layer"),
-        source: pkg_lock_test_tricky("contribution-source"),
-        reason: pkg_lock_test_tricky("contribution-reason")
-    }}
-    lock.workspace_members = [LockedWorkspaceMember]{LockedWorkspaceMember{
-        name: pkg_lock_test_tricky("member-name"),
-        path: pkg_lock_test_tricky("member-path"),
-        source_digest: pkg_lock_test_tricky("member-source"),
-        canonical_path: pkg_lock_test_tricky("member-canonical"),
-        package_digest: pkg_lock_test_tricky("member-package")
-    }}
+    lock.build_contributions = [LockedBuildContribution]{
+        LockedBuildContribution{
+            package: pkg_lock_test_tricky("contribution-package"),
+            key: pkg_lock_test_tricky("contribution-key"),
+            value: pkg_lock_test_tricky("contribution-value"),
+            scope: pkg_lock_test_tricky("contribution-scope"),
+            layer: pkg_lock_test_tricky("contribution-layer"),
+            source: pkg_lock_test_tricky("contribution-source"),
+            reason: pkg_lock_test_tricky("contribution-reason"),
+        },
+    }
+    lock.workspace_members = [LockedWorkspaceMember]{
+        LockedWorkspaceMember{
+            name: pkg_lock_test_tricky("member-name"),
+            path: pkg_lock_test_tricky("member-path"),
+            source_digest: pkg_lock_test_tricky("member-source"),
+            canonical_path: pkg_lock_test_tricky("member-canonical"),
+            package_digest: pkg_lock_test_tricky("member-package"),
+        },
+    }
     lock.workspace_overlay_policy = OverlayPolicy{
-        overlays: [OverlaySet]{OverlaySet{
-            name: pkg_lock_test_tricky("overlay"),
-            provider: Val(ProviderOverride{provider: pkg_lock_test_tricky("provider"), channel: Val(pkg_lock_test_tricky("channel"))}),
-            packages: [PackageOverride]{PackageOverride{
-                package: pkg_lock_test_tricky("overlay-package"),
-                source: Val(pkg_lock_test_tricky("overlay-source")),
-                version: Val(pkg_lock_test_tricky("overlay-version")),
-                flags: [String]{pkg_lock_test_tricky("flag")},
-                priority: 7,
-                field_priorities: [String: Int]{"version": 7},
-                env: [OverrideEnv]{OverrideEnv{key: "RUST_SRC", value: pkg_lock_test_tricky("environment")}},
-                patches: [String]{pkg_lock_test_tricky("patch")},
-                allow_unfree: true
-            }}
-        }},
+        overlays: [OverlaySet]{
+            OverlaySet{
+                name: pkg_lock_test_tricky("overlay"),
+                provider: Val(ProviderOverride{provider: pkg_lock_test_tricky("provider"), channel: Val(pkg_lock_test_tricky("channel"))}),
+                packages: [PackageOverride]{
+                    PackageOverride{
+                        package: pkg_lock_test_tricky("overlay-package"),
+                        source: Val(pkg_lock_test_tricky("overlay-source")),
+                        version: Val(pkg_lock_test_tricky("overlay-version")),
+                        flags: [String]{pkg_lock_test_tricky("flag")},
+                        priority: 7,
+                        field_priorities: [String:Int]{"version": 7},
+                        env: [OverrideEnv]{OverrideEnv{key: "RUST_SRC", value: pkg_lock_test_tricky("environment")}},
+                        patches: [String]{pkg_lock_test_tricky("patch")},
+                        allow_unfree: true,
+                    },
+                },
+            },
+        },
         allow_unfree: [String]{pkg_lock_test_tricky("allow-unfree")},
         build_deny: [String]{pkg_lock_test_tricky("build-deny")},
-        build_grants: [BuildGrant]{BuildGrant{subject: pkg_lock_test_tricky("build-grant"), effects: [String]{pkg_lock_test_tricky("grant")}}}
+        build_grants: [BuildGrant]{BuildGrant{subject: pkg_lock_test_tricky("build-grant"), effects: [String]{pkg_lock_test_tricky("grant")}}},
     }
     lock.comptime_inputs = [ComptimeInput]{ComptimeInput{path: pkg_lock_test_tricky("comptime-path"), hash: "sha256-input"}}
     lock.toolchains = [LockedToolchain]{LockedToolchain{id: pkg_lock_test_tricky("toolchain-id"), channel: pkg_lock_test_tricky("toolchain-channel"), version: pkg_lock_test_tricky("toolchain-version"), envelope: envelope}}
@@ -179,8 +218,8 @@ pkg_lock_test_partial_nix: fn(output: String) -> PartialPackage Never! {
             references: Val(record.references),
             upstream_proof: Val(record.upstream_proof),
             cache_key: Val(record.cache_key),
-            project_cas_bundle: Val(record.project_cas_bundle)
-        })
+            project_cas_bundle: Val(record.project_cas_bundle),
+        }),
     }
 }
 
@@ -212,27 +251,39 @@ pkg_lock_test_finish_error: fn(partial: PartialPackage) -> String Never! {
     partial.receipt = Val("receipt")
     partial.provenance = Val(provenance)
     finished: partial.finish() ?? panic("matching owned Nix package must finish")
-    assert_eq(finished, LockedPackage{
-        name: "nix-owned", version: "1.2.3",
-        source: LockSource.Nix{reference: "nixpkgs#hello", output: output},
-        nix_closure: Val(pkg_lock_test_nix_closure(output)),
-        locked: Val(LockedRevision{rev: "revision", tree_hash: "tree", last_modified: 42}),
-        fingerprint: "fingerprint", content_hash: Val("content"),
-        dependencies: [String]{"dep"},
-        layer: Val(RuntimeLayer.Std), inferred_layer: Val(RuntimeLayer.Alloc),
-        effects: [String]{"FS.Read"}, effect_grants: [String]{"FS"},
-        required_effects: [String]{"Net.Connect"}, granted_effects: [String]{"Net"},
-        denied_effects: [String]{"Exec"}, effect_authority: Val("manifest"),
-        envelope: Val(envelope), receipt: Val("receipt"), provenance: Val(provenance)
-    })
+    assert_eq(
+        finished,
+        LockedPackage{
+            name: "nix-owned",
+            version: "1.2.3",
+            source: LockSource.Nix{reference: "nixpkgs#hello", output: output},
+            nix_closure: Val(pkg_lock_test_nix_closure(output)),
+            locked: Val(LockedRevision{rev: "revision", tree_hash: "tree", last_modified: 42}),
+            fingerprint: "fingerprint",
+            content_hash: Val("content"),
+            dependencies: [String]{"dep"},
+            layer: Val(RuntimeLayer.Std),
+            inferred_layer: Val(RuntimeLayer.Alloc),
+            effects: [String]{"FS.Read"},
+            effect_grants: [String]{"FS"},
+            required_effects: [String]{"Net.Connect"},
+            granted_effects: [String]{"Net"},
+            denied_effects: [String]{"Exec"},
+            effect_authority: Val("manifest"),
+            envelope: Val(envelope),
+            receipt: Val("receipt"),
+            provenance: Val(provenance),
+        },
+    )
 }
 
 #Test("lock finish keeps owned non-Nix source and envelope without closure") {
     envelope: pkg_lock_test_env("sha256-path", "aarch64-linux", "", "path")
     partial: PartialPackage{
-        name: Val("path-owned"), version: Val("2.0.0"),
+        name: Val("path-owned"),
+        version: Val("2.0.0"),
         source_raw: Val("{{ path = \"../dependency\" }}"),
-        envelope: Val(envelope)
+        envelope: Val(envelope),
     }
     finished: partial.finish() ?? panic("non-Nix package without closure must finish")
     assert_eq(finished.source, LockSource.Path("../dependency"))
@@ -348,9 +399,9 @@ pkg_lock_test_validation_error: fn(source: LockSource, closure: NixClosureRecord
             default: Val(TrustDecision.Prompt),
             ci_prompt: Val(TrustDecision.Deny),
             services: [ServiceTrust]{ServiceTrust{service: "stripe", decision: TrustDecision.Allow}},
-            require: Val(ProvenanceRequirement.Attested)
+            require: Val(ProvenanceRequirement.Attested),
         }),
-        providers: [ProviderAuthority]{ProviderAuthority{provider: "nix", registry: "nixpkgs", allow: [String]{"openssl"}, deny: [String]{"openssl-1.0"}}}
+        providers: [ProviderAuthority]{ProviderAuthority{provider: "nix", registry: "nixpkgs", allow: [String]{"openssl"}, deny: [String]{"openssl-1.0"}}},
     }
     lock := pkg_lock_test_base_lock([LockedPackage]{}, [LockedToolchain]{})
     lock.authority = Val(authority)
@@ -368,24 +419,28 @@ pkg_lock_test_validation_error: fn(source: LockSource, closure: NixClosureRecord
 
 #Test("lock roundtrips workspace overlay policy") {
     policy: OverlayPolicy{
-        overlays: [OverlaySet]{OverlaySet{
-            name: "rust",
-            provider: Val(ProviderOverride{provider: "nixpkgs", channel: Val("unstable")}),
-            packages: [PackageOverride]{PackageOverride{
-                package: "rustc",
-                source: Val("rust-overlay"),
-                version: Val("1.82"),
-                flags: [String]{"llvm"},
-                priority: 20,
-                field_priorities: [String: Int]{"version": 20, "env.RUST_SRC": 10},
-                env: [OverrideEnv]{OverrideEnv{key: "RUST_SRC", value: "src"}},
-                patches: [String]{"patches/rust.patch"},
-                allow_unfree: true
-            }}
-        }},
+        overlays: [OverlaySet]{
+            OverlaySet{
+                name: "rust",
+                provider: Val(ProviderOverride{provider: "nixpkgs", channel: Val("unstable")}),
+                packages: [PackageOverride]{
+                    PackageOverride{
+                        package: "rustc",
+                        source: Val("rust-overlay"),
+                        version: Val("1.82"),
+                        flags: [String]{"llvm"},
+                        priority: 20,
+                        field_priorities: [String:Int]{"version": 20, "env.RUST_SRC": 10},
+                        env: [OverrideEnv]{OverrideEnv{key: "RUST_SRC", value: "src"}},
+                        patches: [String]{"patches/rust.patch"},
+                        allow_unfree: true,
+                    },
+                },
+            },
+        },
         allow_unfree: [String]{"cuda"},
         build_deny: [String]{"network"},
-        build_grants: [BuildGrant]{BuildGrant{subject: "rustc", effects: [String]{"filesystem"}}}
+        build_grants: [BuildGrant]{BuildGrant{subject: "rustc", effects: [String]{"filesystem"}}},
     }
     lock := pkg_lock_test_base_lock([LockedPackage]{}, [LockedToolchain]{})
     lock.workspace_source_digest = Val("sha256-workspace")
@@ -514,7 +569,7 @@ pkg_lock_test_validation_error: fn(source: LockSource, closure: NixClosureRecord
     assert_eq(files.read(path) ?? panic("read"), original)
     oversized: pkg_lock_test_repeat("x", PKG_MAX_LOCK_BYTES + 1)
     if pkg_lock_write_atomically(scratch.path, oversized.bytes()) == {
-        .Ok(_) -> panic("oversized lock must be refused")
+        .Ok(_) -> { panic("oversized lock must be refused") }
         .Err(error) -> {
             assert(error.message().contains("internal error"))
             assert(error.message().contains("1 MiB"))
@@ -531,7 +586,7 @@ pkg_lock_test_validation_error: fn(source: LockSource, closure: NixClosureRecord
     files.write(outside_lock, sentinel) ?? panic("sentinel")
     files.symlink(outside_scratch.path, files.join(root_scratch.path, ".jet")) ?? panic("managed directory link")
     if pkg_lock_write_atomically(root_scratch.path, "new lock bytes\n".bytes()) == {
-        .Ok(_) -> panic("a managed-directory symlink must be rejected")
+        .Ok(_) -> { panic("a managed-directory symlink must be rejected") }
         .Err(error) -> assert(error.message().contains("could not atomically publish"))
     }
     assert_eq(files.read(outside_lock) ?? panic("read sentinel"), sentinel)
@@ -550,7 +605,7 @@ pkg_lock_test_validation_error: fn(source: LockSource, closure: NixClosureRecord
     files.rename(workspace, files.join(parent.path, "workspace-old")) ?? panic("move workspace")
     files.symlink(outside, workspace) ?? panic("swap ancestor")
     if pkg_lock_write_atomically(root, "new lock bytes\n".bytes()) == {
-        .Ok(_) -> panic("a swapped ancestor must be rejected")
+        .Ok(_) -> { panic("a swapped ancestor must be rejected") }
         .Err(error) -> assert(error.message().contains("could not atomically publish"))
     }
     assert_eq(files.read(outside_lock) ?? panic("read sentinel"), sentinel)
@@ -575,7 +630,7 @@ pkg_lock_test_validation_error: fn(source: LockSource, closure: NixClosureRecord
     path: files.join(scratch.path, UNIFIED_LOCK_FILE)
     files.write(path, "version = 1\n{pkg_lock_test_repeat("x", PKG_MAX_LOCK_VALUE_BYTES + 1)}\n") ?? panic("seed")
     if pkg_lock_read_text(path) == {
-        .Ok(_) -> panic("oversized line must be rejected")
+        .Ok(_) -> { panic("oversized line must be rejected") }
         .Err(error) -> assert(error.message().contains("1 MiB safety limit"))
     }
     assert_eq(pkg_lock_load(scratch.path), None)
@@ -586,7 +641,7 @@ pkg_lock_test_validation_error: fn(source: LockSource, closure: NixClosureRecord
     path: files.join(scratch.path, UNIFIED_LOCK_FILE)
     files.write(path, "version = 1\n{pkg_lock_test_repeat("x\n", PKG_MAX_LOCK_BYTES /% 2 + 1)}") ?? panic("seed")
     if pkg_lock_read_text(path) == {
-        .Ok(_) -> panic("oversized file must be rejected")
+        .Ok(_) -> { panic("oversized file must be rejected") }
         .Err(error) -> assert(error.message().contains("lock file exceeds"))
     }
     assert_eq(pkg_lock_load(scratch.path), None)

@@ -1,17 +1,18 @@
 // Claims ported from jet_pkg_model::DartBind tests.
 use jetpack_integrations.[
-    pkg_dart_parse, pkg_dart_render_c, pkg_dart_render_host, pkg_dart_render_jet,
+    pkg_dart_parse,
+    pkg_dart_render_c,
+    pkg_dart_render_host,
+    pkg_dart_render_jet,
 ]
 
 // The Source message of a Dart contract the binder must refuse.
 pkg_binders_test_dart_rejection: fn(source: String) -> String Never! {
     if pkg_dart_parse(source) == {
         .Ok(_) -> panic("an unsupported Dart contract was accepted")
-        .Err(error) -> {
-            if error == {
-                .Source(message) -> message
-                .IO(_) | .ToolMissing(_) | .SelectedToolMissing(_) | .ToolFailed(_, _, _) | .ToolchainRejected(_) | .ABIMismatch(_) | .UnsupportedHost(_) | .PlainToolMissing(_) | .PlainToolFailed(_, _, _) -> panic("a Dart contract failed outside source validation")
-            }
+        .Err(error) -> if error == {
+            .Source(message) -> message
+            .IO(_) | .ToolMissing(_) | .SelectedToolMissing(_) | .ToolFailed(_, _, _) | .ToolchainRejected(_) | .ABIMismatch(_) | .UnsupportedHost(_) | .PlainToolMissing(_) | .PlainToolFailed(_, _, _) -> panic("a Dart contract failed outside source validation")
         }
     }
 }
@@ -35,7 +36,7 @@ pkg_binders_test_dart_rejection: fn(source: String) -> String Never! {
     cases: [(source: String, message: String)]{
         (source: "@pragma('vm:entry-point')\nint takeError() => 0;\n", message: "Dart entry point `takeError` projects to reserved Jet name `take_error`"),
         (source: "@pragma('vm:entry-point')\nint abi() => 0;\n", message: "Dart entry point `abi` projects to reserved Jet name `abi`"),
-        (source: "@pragma('vm:entry-point')\nint compute(int abi) => abi;\n", message: "Dart parameter `abi` on `compute` projects to reserved Jet name `abi`")
+        (source: "@pragma('vm:entry-point')\nint compute(int abi) => abi;\n", message: "Dart parameter `abi` on `compute` projects to reserved Jet name `abi`"),
     }
     loop case in cases -> assert_eq(pkg_binders_test_dart_rejection(case.source), case.message)
 }
@@ -44,7 +45,7 @@ pkg_binders_test_dart_rejection: fn(source: String) -> String Never! {
     cases: [(source: String, message: String)]{
         (source: "@pragma('vm:entry-point')\nint later(int value) async => value;\n", message: "Dart entry point `later` cannot be async"),
         (source: "@pragma('vm:entry-point')\nint optional([int value]) => value;\n", message: "Dart entry point `optional` cannot use named or optional parameters"),
-        (source: "class Helpers {{\n  @pragma('vm:entry-point')\n  int hidden(int value) => value;\n}}\n", message: "no `@pragma('vm:entry-point')` top-level `int` or `double` functions were found")
+        (source: "class Helpers {{\n  @pragma('vm:entry-point')\n  int hidden(int value) => value;\n}}\n", message: "no `@pragma('vm:entry-point')` top-level `int` or `double` functions were found"),
     }
     loop case in cases -> assert_eq(pkg_binders_test_dart_rejection(case.source), case.message)
 }

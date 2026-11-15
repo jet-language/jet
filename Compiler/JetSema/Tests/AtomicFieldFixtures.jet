@@ -16,7 +16,9 @@ atomic_field_test_source: fn(name: String, source: String, accepted: Bool, atomi
     }
     if accepted && errors != 0 -> panic("{name}: scalar initializer was rejected")
     if !accepted && errors == 0 -> panic("{name}: invalid initializer was accepted")
-    if !accepted -> return
+    if !accepted {
+        return
+    }
     // check_program's standalone declaration-registration mode marks structs
     // incomplete independently; require the whole function's checked tree.
     if checked.functions.len() != 1 -> panic("{name}: field function was not checked")
@@ -28,18 +30,22 @@ atomic_field_test_source: fn(name: String, source: String, accepted: Bool, atomi
                 if fields.len() != 1 -> panic("{name}: field order/count changed")
                 field: fields[0]
                 if atomic {
-                    if sema_atomic_field_inner(field.field.ty) == None || body_type(function.tree, field.value) != field.field.ty -> panic("{name}: field lost its Atomic carrier")
+                    if sema_atomic_field_inner(field.field.ty) == None || body_type(function.tree, field.value) != field.field.ty {
+                        panic("{name}: field lost its Atomic carrier")
+                    }
                     if body_node(function.tree, field.value).kind == .StaticCall(owner, _, method, _, args) {
                         if owner == .Prelude(_, path, generics) {
-                            if path != "JetAtomic" || generics.len() != 1 || method.name != "new" || args.len() != 1 -> panic("{name}: wrong Atomic constructor")
+                            if path != "JetAtomic" || generics.len() != 1 || method.name != "new" || args.len() != 1 {
+                                panic("{name}: wrong Atomic constructor")
+                            }
                         } else {
                             panic("{name}: Atomic initializer must use canonical Prelude owner")
                         }
-                    } else {
-                        panic("{name}: Atomic initializer must be a typed constructor")
-                    }
+                    } else { panic("{name}: Atomic initializer must be a typed constructor") }
                 } else {
-                    if sema_atomic_field_inner(field.field.ty) != None -> panic("{name}: ordinary generic acquired an Atomic carrier")
+                    if sema_atomic_field_inner(field.field.ty) != None {
+                        panic("{name}: ordinary generic acquired an Atomic carrier")
+                    }
                 }
                 found = true
             }

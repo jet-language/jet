@@ -1,12 +1,13 @@
-
 use {
     json: core.encoding.json
     toml: core.encoding.toml
     csv: core.encoding.csv
 }
 
-#Codable(published)
-Config: struct { port: Int  host: String }
+#Codable(published) Config: struct {
+    port: Int
+    host: String
+}
 
 migration Config {
     add host: String = "localhost"
@@ -20,7 +21,7 @@ run: fn() [FieldError]! {
     rows: csv.decode<Config>("port\n4\n5\n")
     print("csv {rows.len()} {rows[1].port} {rows[1].host}")
     if json.decode<Config>("{{\"port\":\"nope\",\"host\":\"h\"}}") == {
-        .Ok(value) -> print("unexpected {value.port}")
+        .Ok(value) -> { print("unexpected {value.port}") }
         .Err(errors) -> print("error {errors.len()} {errors[0].path} {errors[0].reason}")
     }
 }

@@ -2,15 +2,15 @@
 WorkerError: struct {
     message: String
 }
+
 Value: struct {
     id: String
 }
-inner: fn() -> Bool WorkerError! {
-    return Err(WorkerError{message: "inner"})
-}
-fail_after: fn(error: WorkerError) -> Value WorkerError! {
-    return Err(error)
-}
+
+inner: fn() -> Bool WorkerError! { return Err(WorkerError{message: "inner"}) }
+
+fail_after: fn(error: WorkerError) -> Value WorkerError! { return Err(error) }
+
 checked: fn() -> Value WorkerError! {
     inner() ?? {
         return fail_after(err)

@@ -7,20 +7,34 @@
 use {
     jet_foundation.[Diagnostic, diagnostic_from_registry]
     jetpack_foundation.[
-        DEP_PROVIDER_C, PACKAGE_FILE, REF_PROVIDER_AT, SOURCE_ROOT_DIR, SYSTEM_LIB_TARGET,
+        DEP_PROVIDER_C,
+        PACKAGE_FILE,
+        REF_PROVIDER_AT,
+        SOURCE_ROOT_DIR,
+        SYSTEM_LIB_TARGET,
     ]
     files: core.files
     sys: core.sys
     process: core.process
     jet_pkg_model.[
-        CFFI, ForeignBridgeError, ForeignLanguage, PackageFacts, pkg_ascii_lower, pkg_bridge_error,
-        pkg_bridge_text_lines, pkg_bytes_is_word, pkg_bytes_skip_space, pkg_bytes_space_width,
-        pkg_bytes_text, pkg_extract_inline_package,
+        CFFI,
+        ForeignBridgeError,
+        ForeignLanguage,
+        PackageFacts,
+        pkg_ascii_lower,
+        pkg_bridge_error,
+        pkg_bridge_text_lines,
+        pkg_bytes_is_word,
+        pkg_bytes_skip_space,
+        pkg_bytes_space_width,
+        pkg_bytes_text,
+        pkg_extract_inline_package,
     ]
 }
 
 // `c@nixpkgs:<attr>` selects an explicit nixpkgs attribute.
 CFFI_NIXPKGS_TARGET_PREFIX: "nixpkgs:"
+
 // Libc-family names the platform always links and that have no `.pc` file.
 CFFI_ALWAYS_LINKED_LIBC: [String]{"c", "m", "pthread", "dl", "rt", "util"}
 
@@ -77,7 +91,7 @@ pkg_cffi_rustc_link_args_for_target_with_entry: fn(cffi: CFFI, project_root: Str
         if pkg_cffi_resolve_link_for_target_with_entry(lib, project_root, target, entry) == {
             .Ok(flags) -> {
                 if pkg_cffi_validate_link_inputs(lib, project_root, target, flags, cffi.overlay_overrides, entry) == {
-                    .Ok(_) -> pkg_cffi_append_link_flags(args, flags)
+                    .Ok(_) -> { pkg_cffi_append_link_flags(args, flags) }
                     .Err(error) -> {
                         loop diagnostic in error.diagnostics -> diagnostics.push(diagnostic)
                     }
@@ -92,7 +106,7 @@ pkg_cffi_rustc_link_args_for_target_with_entry: fn(cffi: CFFI, project_root: Str
     // own no generated C binding and skip C artifact validation.
     loop lib in cffi.link_closure.transitive {
         if pkg_cffi_resolve_link_for_target_with_entry(lib, project_root, target, entry) == {
-            .Ok(flags) -> pkg_cffi_append_link_flags(args, flags)
+            .Ok(flags) -> { pkg_cffi_append_link_flags(args, flags) }
             .Err(error) -> {
                 loop diagnostic in error.diagnostics -> diagnostics.push(diagnostic)
             }
@@ -148,7 +162,9 @@ pkg_cffi_resolve_link_for_target_with_entry: fn(lib: String, project_root: Strin
         flags: pkg_cffi_generated_link(language, lib, actual, dir, target) ?? return Err(pkg_cffi_error(pkg_cffi_e3201(lib)))
         return Ok(flags)
     }
-    if pkg_cffi_declared_c_dep_for_entry(lib, project_root, entry) == .Val(declared) -> return pkg_cffi_clib_link(lib, declared, project_root)
+    if pkg_cffi_declared_c_dep_for_entry(lib, project_root, entry) == .Val(declared) {
+        return pkg_cffi_clib_link(lib, declared, project_root)
+    }
     if pkg_cffi_pkg_config_link(lib) == .Found(flags) -> return Ok(flags)
     Err(pkg_cffi_error(pkg_cffi_e3201(lib)))
 }
@@ -163,7 +179,9 @@ pkg_cffi_host_shared_library: fn(stem: String) -[Env]> String Never! {
 pkg_cffi_recorded_runtime_dir: fn(dir: String, actual: String, kind: String, runtime: String) -[FS, Env]> String? Never! {
     recorded: files.read(files.join(dir, "{actual}.{kind}-path")) ?? return None
     runtime_dir: recorded.trim()
-    if !files.is_absolute(runtime_dir) || !files.is_file(files.join(runtime_dir, pkg_cffi_host_shared_library(runtime))) -> return None
+    if !files.is_absolute(runtime_dir) || !files.is_file(files.join(runtime_dir, pkg_cffi_host_shared_library(runtime))) {
+        return None
+    }
     Val(runtime_dir)
 }
 
@@ -229,7 +247,9 @@ pkg_cffi_pascal_link: fn(lib: String, dir: String, archive: String) -[FS, Env]> 
 
 // COM bindings link only for a Windows target from a Windows host.
 pkg_cffi_com_link: fn(dir: String, archive: String, target: String, static_link: String) -[FS, Env, Exec, Time.Wait]> LinkFlags? Never! {
-    if !pkg_ascii_lower(pkg_ffi_host_target()).contains("windows") || !pkg_ascii_lower(target).contains("windows") -> return None
+    if !pkg_ascii_lower(pkg_ffi_host_target()).contains("windows") || !pkg_ascii_lower(target).contains("windows") {
+        return None
+    }
     pkg_cffi_archive_link(dir, archive, [String]{static_link, "ole32", "oleaut32"})
 }
 
@@ -245,9 +265,7 @@ pkg_cffi_cpp_link: fn(lib: String, actual: String, dir: String, archive: String,
             value: line.removeprefix("target\t")
             if value == "" || value.contains("\t") || bound_target != None -> return None
             bound_target = Val(value)
-        } else if line.starts_with("target") {
-            return None
-        }
+        } else if line.starts_with("target") { return None }
     }
     if bound_target != Val(target) -> return None
     flags := LinkFlags.empty()
@@ -322,7 +340,9 @@ pkg_cffi_project_facts: fn(project_root: String) -[FS, Env]> PackageFacts? Never
 // attribute; `system` tries pkg-config, the always-linked libc set, then
 // nixpkgs; any other target is a local directory.
 pkg_cffi_clib_link: fn(lib: String, target: String, project_root: String) -[FS, Env, Exec, Time.Wait]> LinkFlags CFFIError! {
-    if target.starts_with(CFFI_NIXPKGS_TARGET_PREFIX) -> return pkg_cffi_provision_from_nixpkgs(lib, target.removeprefix(CFFI_NIXPKGS_TARGET_PREFIX), project_root)
+    if target.starts_with(CFFI_NIXPKGS_TARGET_PREFIX) {
+        return pkg_cffi_provision_from_nixpkgs(lib, target.removeprefix(CFFI_NIXPKGS_TARGET_PREFIX), project_root)
+    }
     if target == SYSTEM_LIB_TARGET {
         if pkg_cffi_pkg_config_link(lib) == .Found(flags) -> return Ok(flags)
         if CFFI_ALWAYS_LINKED_LIBC.contains(lib) {
@@ -418,15 +438,9 @@ pkg_cffi_parse_pkg_config: fn(text: String, lib: String) -> LinkFlags Never! {
     flags := LinkFlags.empty()
     loop token in pkg_cffi_whitespace_tokens(text) {
         if {
-            token.starts_with("-I") -> {
-                flags.include_dirs.push(token.removeprefix("-I"))
-            }
-            token.starts_with("-L") -> {
-                flags.lib_dirs.push(token.removeprefix("-L"))
-            }
-            token.starts_with("-l") -> {
-                flags.link_names.push(token.removeprefix("-l"))
-            }
+            token.starts_with("-I") -> { flags.include_dirs.push(token.removeprefix("-I")) }
+            token.starts_with("-L") -> { flags.lib_dirs.push(token.removeprefix("-L")) }
+            token.starts_with("-l") -> { flags.link_names.push(token.removeprefix("-l")) }
             else -> {}
         }
     }

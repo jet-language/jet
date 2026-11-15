@@ -8,9 +8,18 @@ use {
     files: core.files
     process: core.process
     jet_pkg_model.[
-        ArchiveInput, COverlayOverride, ForeignBridgeError, ForeignLanguage, ForeignProvenance,
-        pkg_bridge_error, pkg_bridge_local_archive_inputs, pkg_bridge_read_provenance,
-        pkg_bridge_sha_file, pkg_bridge_spawn_error, pkg_bridge_text_lines, pkg_com_validate_provenance,
+        ArchiveInput,
+        COverlayOverride,
+        ForeignBridgeError,
+        ForeignLanguage,
+        ForeignProvenance,
+        pkg_bridge_error,
+        pkg_bridge_local_archive_inputs,
+        pkg_bridge_read_provenance,
+        pkg_bridge_sha_file,
+        pkg_bridge_spawn_error,
+        pkg_bridge_text_lines,
+        pkg_com_validate_provenance,
         pkg_sha256_hex,
     ]
 }
@@ -51,12 +60,16 @@ pkg_cffi_validate_com_binding: fn(lib: String, directory: String, archive: Strin
 // A generated archive must hash to the digest its binding provenance
 // recorded, and so must every recorded source and local archive input.
 pkg_cffi_validate_generated_artifact: fn(provenance_path: String, archive: String, lib: String) CFFIError! -[FS]> {
-    if !files.is_file(provenance_path) -> return
+    if !files.is_file(provenance_path) {
+        return
+    }
     provenance: pkg_bridge_read_provenance(provenance_path) ?? return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "the binding provenance is invalid ({err.message})")))
     artifact_name: files.basename(archive)
     expected: provenance.value("artifact.{artifact_name}") ?? return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "the binding provenance has no digest for `{artifact_name}`")))
     actual: pkg_bridge_sha_file(archive) ?? return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "the generated archive could not be read ({err.message})")))
-    if expected != actual -> return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "the generated archive digest differs from its binding provenance; regenerate the binding")))
+    if expected != actual {
+        return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "the generated archive digest differs from its binding provenance; regenerate the binding")))
+    }
     pkg_cffi_validate_provenance_source_inputs(provenance, provenance_path, lib)
     pkg_cffi_validate_provenance_archive_inputs(provenance, provenance_path, lib)
 }
@@ -68,16 +81,22 @@ pkg_cffi_validate_provenance_source_inputs: fn(provenance: ForeignProvenance, pr
     loop role in CFFI_PROVENANCE_SOURCE_ROLES {
         digest_key: "{role}-sha256"
         if provenance.fields.get(role) == None {
-            if provenance.fields.has_key(digest_key) -> return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "the binding provenance has no path for `{role}`")))
+            if provenance.fields.has_key(digest_key) {
+                return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "the binding provenance has no path for `{role}`")))
+            }
             next
         }
         paths: provenance.fields[role]
         digests: provenance.fields.get(digest_key) ?? return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "the binding provenance has no digest for `{role}`")))
-        if paths.len() != digests.len() -> return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "the binding provenance has an incomplete `{role}` inventory")))
+        if paths.len() != digests.len() {
+            return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "the binding provenance has an incomplete `{role}` inventory")))
+        }
         loop index in 0..<paths.len() {
             path: paths[index]
             actual: pkg_bridge_sha_file(path) ?? return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "foreign `{role}` `{path}` could not be read ({err.message}); regenerate the binding")))
-            if actual != digests[index] -> return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "foreign `{role}` `{path}` differs from binding provenance; regenerate the binding")))
+            if actual != digests[index] {
+                return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "foreign `{role}` `{path}` differs from binding provenance; regenerate the binding")))
+            }
         }
     }
 }
@@ -87,14 +106,18 @@ pkg_cffi_validate_provenance_source_inputs: fn(provenance: ForeignProvenance, pr
 pkg_cffi_validate_provenance_archive_inputs: fn(provenance: ForeignProvenance, provenance_path: String, lib: String) CFFIError! -[FS]> {
     paths: provenance.fields.get("linked-archive") ?? [String]{}
     digests: provenance.fields.get("linked-archive-sha256") ?? [String]{}
-    if paths.len() != digests.len() -> return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "the binding provenance has an incomplete local archive inventory")))
+    if paths.len() != digests.len() {
+        return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "the binding provenance has an incomplete local archive inventory")))
+    }
     loop index in 0..<paths.len() {
         path: paths[index]
         actual: if files.read_bytes(path) == {
             .Ok(bytes) -> pkg_sha256_hex(bytes)
             .Err(_) -> "missing"
         }
-        if actual != digests[index] -> return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "local archive `{path}` differs from binding provenance; regenerate the binding")))
+        if actual != digests[index] {
+            return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "local archive `{path}` differs from binding provenance; regenerate the binding")))
+        }
     }
 }
 
@@ -103,14 +126,24 @@ pkg_cffi_validate_provenance_archive_inputs: fn(provenance: ForeignProvenance, p
 // symbol the cache binds (after overlay replacements).
 pkg_cffi_validate_c_binding: fn(lib: String, project_root: String, overlay_overrides: [COverlayOverride], entry: String?) CFFIError! -[FS, Env, Exec, Time.Wait]> {
     cache: pkg_cffi_binding_cache_file(project_root, ForeignLanguage.C, lib)
-    if !files.is_file(cache) -> return
+    if !files.is_file(cache) {
+        return
+    }
     provenance_path: pkg_cffi_sidecar(cache, "provenance")
-    if files.is_file(provenance_path) -> pkg_cffi_validate_c_binding_provenance(lib, project_root, cache, provenance_path, entry)
+    if files.is_file(provenance_path) {
+        pkg_cffi_validate_c_binding_provenance(lib, project_root, cache, provenance_path, entry)
+    }
     inputs: pkg_cffi_local_c_archive_inputs(project_root, lib, entry)
-    if inputs.len() == 0 -> return
+    if inputs.len() == 0 {
+        return
+    }
     input: inputs[0]
-    if !files.is_file(input.path) -> return
-    if input.bytes == None -> return Err(pkg_cffi_error(pkg_cffi_e3208(cache, lib, "the local archive `{input.path}` could not be read")))
+    if !files.is_file(input.path) {
+        return
+    }
+    if input.bytes == None {
+        return Err(pkg_cffi_error(pkg_cffi_e3208(cache, lib, "the local archive `{input.path}` could not be read")))
+    }
     source: files.read(cache) ?? return Err(pkg_cffi_error(pkg_cffi_e3208(cache, lib, "the generated C cache could not be read ({err})")))
     expected := pkg_cffi_binding_symbols(source)
     loop overlay in overlay_overrides {
@@ -123,13 +156,17 @@ pkg_cffi_validate_c_binding: fn(lib: String, project_root: String, overlay_overr
         remaining.sort()
         expected = remaining
     }
-    if expected.len() == 0 -> return
+    if expected.len() == 0 {
+        return
+    }
     defined: pkg_cffi_nm_symbols(input.path, false) ?? return Err(pkg_cffi_error(pkg_cffi_e3208(cache, lib, "could not inventory exported symbols in `{input.path}` ({err.message})")))
     missing := [String]{}
     loop symbol in expected {
         if !defined.contains(pkg_cffi_normalize_nm_symbol(symbol)) -> missing.push(symbol)
     }
-    if missing.len() == 0 -> return
+    if missing.len() == 0 {
+        return
+    }
     return Err(pkg_cffi_error(pkg_cffi_e3208(cache, lib, "the local archive `{input.path}` is missing bound export symbol(s): {missing.join(", ")}; the binding is stale")))
 }
 
@@ -137,10 +174,14 @@ pkg_cffi_validate_c_binding_provenance: fn(lib: String, project_root: String, ca
     provenance: pkg_bridge_read_provenance(provenance_path) ?? return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "the C binding provenance is invalid ({err.message})")))
     header: provenance.value("source") ?? return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "the C binding provenance has no source header")))
     expected: pkg_cffi_c_binding_identity_with_entry(project_root, lib, header, cache, entry) ?? return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "the C binding inputs could not be read ({err.message})")))
-    if provenance.identity != expected -> return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "the C header, generated cache, or local archive changed after binding; regenerate the binding")))
+    if provenance.identity != expected {
+        return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "the C header, generated cache, or local archive changed after binding; regenerate the binding")))
+    }
     expected_cache: provenance.value("artifact.{files.basename(cache)}")
     actual_cache: pkg_bridge_sha_file(cache) ?? return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "the generated C cache could not be read ({err.message})")))
-    if expected_cache != Val(actual_cache) -> return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "the generated C cache digest differs from its binding provenance; regenerate the binding")))
+    if expected_cache != Val(actual_cache) {
+        return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "the generated C cache digest differs from its binding provenance; regenerate the binding")))
+    }
 }
 
 // The native symbols a generated cache binds: the quoted target of every
@@ -172,16 +213,22 @@ pkg_cffi_validate_cpp_symbols: fn(actual: String, lib: String, generated_archive
             name.starts_with("framework=") -> bare = name.removeprefix("framework=")
             else -> {}
         }
-        if bare != generated_name && !pkg_cffi_cpp_runtime_library(bare, target) -> libraries.push(bare)
+        if bare != generated_name && !pkg_cffi_cpp_runtime_library(bare, target) {
+            libraries.push(bare)
+        }
     }
     inputs := [ArchiveInput]{}
     loop input in pkg_bridge_local_archive_inputs(flags.lib_dirs, libraries) {
         if files.is_file(input.path) -> inputs.push(input)
     }
-    if inputs.len() == 0 -> return
+    if inputs.len() == 0 {
+        return
+    }
     defined := [String]{}
     loop input in inputs {
-        if input.bytes == None -> return Err(pkg_cffi_error(pkg_cffi_e3208(generated_archive, lib, "the local archive `{input.path}` could not be read")))
+        if input.bytes == None {
+            return Err(pkg_cffi_error(pkg_cffi_e3208(generated_archive, lib, "the local archive `{input.path}` could not be read")))
+        }
         exported: pkg_cffi_nm_symbols(input.path, false) ?? return Err(pkg_cffi_error(pkg_cffi_e3208(generated_archive, lib, "could not inventory exported symbols in `{input.path}` ({err.message})")))
         loop symbol in exported {
             if !defined.contains(symbol) -> defined.push(symbol)
@@ -193,7 +240,9 @@ pkg_cffi_validate_cpp_symbols: fn(actual: String, lib: String, generated_archive
         if pkg_cffi_ignorable_cpp_symbol(symbol) || defined.contains(symbol) -> next
         missing.push(symbol)
     }
-    if missing.len() == 0 -> return
+    if missing.len() == 0 {
+        return
+    }
     return Err(pkg_cffi_error(pkg_cffi_e3208(generated_archive, lib, "local C++ archive inventory is missing bound symbol(s): {missing.join(", ")}; regenerate the binding or restore the archive")))
 }
 
@@ -236,12 +285,12 @@ pkg_cffi_parse_nm_symbols: fn(output: String, undefined: Bool) -> [String] Never
 }
 
 // Mach-O prefixes C symbols with one `_`.
-pkg_cffi_normalize_nm_symbol: fn(symbol: String) -> String Never! {
-    symbol.removeprefix("_")
-}
+pkg_cffi_normalize_nm_symbol: fn(symbol: String) -> String Never! { symbol.removeprefix("_") }
 
 CFFI_IGNORABLE_CPP_PREFIXES: [String]{"ZSt", "ZNSt", "ZNKSt", "ZNS", "ZNKS", "ZTI", "ZTV", "ZTS", "ZTT", "Zda", "Zdl", "Zna", "Znw", "atomic_", "dynamic_cast", "errno_location", "gthread", "pthread", "dl", "sched_", "stack_chk", "__"}
+
 CFFI_IGNORABLE_CPP_FRAGMENTS: [String]{"cxa", "gxx_personality", "Unwind"}
+
 CFFI_IGNORABLE_CPP_NAMES: [String]{"abort", "free", "malloc", "memcpy", "memmove", "memset", "strlen"}
 
 // C++ runtime, standard-library, and libc symbols a generated archive may

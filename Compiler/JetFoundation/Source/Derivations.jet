@@ -13,7 +13,9 @@ DerivationObservation: struct {
     counterexample_id: String?
 }
 
-DerivationPayload: enum { FrameSchedule(schedule: FrameSchedule) }
+DerivationPayload: enum {
+    FrameSchedule(schedule: FrameSchedule)
+}
 
 DerivationRecord: struct {
     id: String
@@ -30,7 +32,9 @@ DerivationRecord: struct {
     payload: DerivationPayload?
 }
 
-DerivationStore: struct { records: [DerivationRecord] }
+DerivationStore: struct {
+    records: [DerivationRecord]
+}
 
 derivation_identity: fn(source: String, build: String, run: String, target: String) -> DerivationIdentity Never! {
     DerivationIdentity{source: source, build: build, run: run, target: target}
@@ -90,6 +94,7 @@ derivation_record_json: fn(record: DerivationRecord) -> String Never! {
     payload := derivation_optional_payload_json(record.payload, "null")
     "{{\"assumptions\":[{assumptions}],\"claim\":{derivation_record_quote(record.claim)},\"disposition\":{derivation_disposition_name(record.disposition)},\"id\":{derivation_record_quote(record.id)},\"identity\":{{\"build\":{derivation_record_quote(record.identity.build)},\"run\":{derivation_record_quote(record.identity.run)},\"source\":{derivation_record_quote(record.identity.source)},\"target\":{derivation_record_quote(record.identity.target)}}},\"method\":{derivation_method_name(record.method)},\"observation\":{observation},\"payload\":{payload},\"premises\":[{premises}],\"producer\":{derivation_record_quote(record.producer)},\"rule\":{derivation_record_quote(record.rule)},\"subject\":{derivation_record_quote(record.subject)}}}"
 }
+
 derivation_optional_payload_json: fn(payload: DerivationPayload?, absent: String) -> String Never! {
     value: payload ?? return absent.copy()
     derivation_payload_json(value)
@@ -167,7 +172,10 @@ derivation_record_id: fn(record: DerivationRecord) -> String Never! {
     derivation_hash_hex(state)
 }
 
-DerivationHashState: struct { first: U64, second: U64 }
+DerivationHashState: struct {
+    first: U64
+    second: U64
+}
 
 derivation_method_raw: fn(method: DerivationMethod) -> String Never! {
     if method == {
@@ -182,7 +190,9 @@ derivation_method_raw: fn(method: DerivationMethod) -> String Never! {
 derivation_hash_frame: fn(state: &DerivationHashState, value: String) Never! {
     bytes := value.bytes()
     length := bytes.len()
-    loop index in 0..<8 -> derivation_hash_byte(state, U8{((length >> ((7 - index) * 8))).bit_and(255)})
+    loop index in 0..<8 {
+        derivation_hash_byte(state, U8{((length >> ((7 - index) * 8))).bit_and(255)})
+    }
     loop byte in bytes -> derivation_hash_byte(state, byte)
 }
 
@@ -197,8 +207,12 @@ derivation_hash_hex: fn(state: DerivationHashState) -> String Never! {
     first: Int{state.first}
     second: Int{state.second}
     output := [U8]{}
-    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> output.push(digits[((first >> shift)).bit_and(15)])
-    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> output.push(digits[((second >> shift)).bit_and(15)])
+    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) {
+        output.push(digits[((first >> shift)).bit_and(15)])
+    }
+    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) {
+        output.push(digits[((second >> shift)).bit_and(15)])
+    }
     String.from_bytes(output) ?? ""
 }
 
@@ -355,6 +369,4 @@ frame_retention_json: fn(row: FrameRetention) -> String Never! {
     "{{\"resource\":{derivation_json_quote(row.resource)},\"operation\":{derivation_json_quote(row.operation.to_string())},\"owner\":{derivation_json_quote(row.owner)},\"completion_token\":{token},\"completed\":{derivation_json_bool(row.completed)}}}"
 }
 
-derivation_json_bool: fn(value: Bool) -> String Never! {
-    if value -> "true" else -> "false"
-}
+derivation_json_bool: fn(value: Bool) -> String Never! { if value -> "true" else -> "false" }

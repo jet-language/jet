@@ -37,12 +37,16 @@ s3_guard_hostile_corpus: fn() {
 s3_guard_flagship_pipeline: fn() {
     output: files.read("Examples/Data/Analysis/DataAnalysis.out") ?? panic("read flagship data golden")
     needles: [String]{
-        "tickets: 5", "focused: 4", "owned: Core", "mean: Core", "describe: count=5",
-        "Core | ## 2", "svg bytes:", "status: core.data.csv native",
+        "tickets: 5",
+        "focused: 4",
+        "owned: Core",
+        "mean: Core",
+        "describe: count=5",
+        "Core | ## 2",
+        "svg bytes:",
+        "status: core.data.csv native",
     }
-    loop needle in needles {
-        assert(output.contains(needle), "flagship golden missing: {needle}")
-    }
+    loop needle in needles { assert(output.contains(needle), "flagship golden missing: {needle}") }
 }
 
 #Test("flagship example covers analysis pipeline") {

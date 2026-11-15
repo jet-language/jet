@@ -3,9 +3,7 @@
 // change as their default. A credential comes from the deployment, a password
 // lives only as its Argon2id hash, and a schema changes only through an
 // explicit, additive migration.
-use {
-    backend_starter_files: core.files
-}
+use backend_starter_files: core.files
 
 // The battery source the starters run on, and the maintained starter package.
 BACKEND_STARTER_SOURCES: [String]{
@@ -27,9 +25,7 @@ backend_starter_sources_under: fn(directory: String) -> [String] {
         if entry.name.starts_with(".") -> next
         if entry.is_dir {
             loop path in backend_starter_sources_under(entry.path) -> found.push(path)
-        } else if entry.name.ends_with(".jet") {
-            found.push(entry.path)
-        }
+        } else if entry.name.ends_with(".jet") { found.push(entry.path) }
     }
     found
 }
@@ -52,7 +48,9 @@ backend_starter_findings: fn(path: String, source: String) -> [String] {
             found.push("{path}:{line_number}: a secret built from a source literal")
         }
         loop name in BACKEND_STARTER_SECRET_NAMES {
-            if code.contains(name) -> found.push("{path}:{line_number}: a credential with a default value")
+            if code.contains(name) {
+                found.push("{path}:{line_number}: a credential with a default value")
+            }
         }
         loop call in BACKEND_STARTER_CREDENTIAL_CALLS {
             if code.split_once(call) == .Val(parts) {
@@ -64,7 +62,9 @@ backend_starter_findings: fn(path: String, source: String) -> [String] {
         }
         upper: code.to_upper()
         loop word in BACKEND_STARTER_DESTRUCTIVE {
-            if upper.contains(word.to_upper()) -> found.push("{path}:{line_number}: destructive schema change `{word}`")
+            if upper.contains(word.to_upper()) {
+                found.push("{path}:{line_number}: destructive schema change `{word}`")
+            }
         }
         if upper.contains("CREATE TABLE ") && !upper.contains("CREATE TABLE IF NOT EXISTS ") {
             found.push("{path}:{line_number}: a schema creation that is not an additive migration")
@@ -97,11 +97,14 @@ backend_starter_findings: fn(path: String, source: String) -> [String] {
         `password: process.env_get("BACKEND_OPERATOR_PASSWORD") ?? "change-me-later"`,
     }.join("\n")
     found: backend_starter_findings("sample.jet", sample)
-    assert_eq(found, [String]{
-        "sample.jet:1: `register_user(` takes a literal credential",
-        "sample.jet:2: a secret built from a source literal",
-        "sample.jet:3: destructive schema change `DROP TABLE`",
-        "sample.jet:4: a schema creation that is not an additive migration",
-        "sample.jet:7: a credential with a default value",
-    })
+    assert_eq(
+        found,
+        [String]{
+            "sample.jet:1: `register_user(` takes a literal credential",
+            "sample.jet:2: a secret built from a source literal",
+            "sample.jet:3: destructive schema change `DROP TABLE`",
+            "sample.jet:4: a schema creation that is not an additive migration",
+            "sample.jet:7: a credential with a default value",
+        },
+    )
 }

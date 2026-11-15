@@ -12,57 +12,59 @@
 BuiltinMethodReceiver: enum {
     String
     Bytes
-    // Int, Float, Bool, Char, the fixed widths, F32 and inline ranges.
     Scalar
-    // Float and F32.
     Float
-    // Int and the fixed-width integers.
     Integer
-    // Exact Int only.
     ExactInt
-    // Fixed-width integers only (`IntN`).
     FixedInt
     Ordering
-    // The `Range` value (`lo..hi`).
     Range
-    // `Atomic<T>` over a lock-free scalar; `AtomicAdd` also needs an addable
-    // scalar and `AtomicInt` an exact Int.
     Atomic
     AtomicAdd
     AtomicInt
 }
 
+// Int, Float, Bool, Char, the fixed widths, F32 and inline ranges.
+// Float and F32.
+// Int and the fixed-width integers.
+// Exact Int only.
+// Fixed-width integers only (`IntN`).
+// The `Range` value (`lo..hi`).
+// `Atomic<T>` over a lock-free scalar; `AtomicAdd` also needs an addable
+// scalar and `AtomicInt` an exact Int.
+
 BuiltinMethodLowering: enum {
     Builtin(operation: TBuiltinOp)
-    // `s.slice(a, b)`: TBuiltinOp.Slice carrying the receiver line.
     StringSlice
-    // `s.slice(range)`: the checked Range slice expression.
     StringRangeSlice
-    // Optional `(before, after)` splits; the op names the result tuple struct.
     StringSplitOnce
     StringCutLast
-    // `n.to_radix(base)`: TBuiltinOp.IntToRadix carrying the call line.
     IntToRadix
-    // `to_string` on a scalar: numeric receivers show through TNumericOp.ToShow,
-    // Bool, Char and inline ranges through TBuiltinOp.ToString.
     Show
-    // Float predicates and integer bit-population queries.
     Predicate
     BitCount
-    // Checked by sema_expr_check_binary / numeric unary.
     Arithmetic(operation: TBinaryOp)
     BitNot
-    // Exact Int Euclidean quotient and remainder (NumericBinaryMethod).
     Euclidean(remainder: Bool)
-    // Fixed-width rotation (`rotate_left`, `rotate_right`) on the overflow-word seam.
     Overflow(prefix: String, operation: String)
     Atomic
-    // A call of the Core source helper `owner.member(receiver, args…)`: the
-    // method's body is Jet in the `owner` module (String's pattern methods
-    // run the one core.regex engine), and the loader loads `owner` for the
-    // spelling.
     CoreSource(owner: String, member: String)
 }
+
+// `s.slice(a, b)`: TBuiltinOp.Slice carrying the receiver line.
+// `s.slice(range)`: the checked Range slice expression.
+// Optional `(before, after)` splits; the op names the result tuple struct.
+// `n.to_radix(base)`: TBuiltinOp.IntToRadix carrying the call line.
+// `to_string` on a scalar: numeric receivers show through TNumericOp.ToShow,
+// Bool, Char and inline ranges through TBuiltinOp.ToString.
+// Float predicates and integer bit-population queries.
+// Checked by sema_expr_check_binary / numeric unary.
+// Exact Int Euclidean quotient and remainder (NumericBinaryMethod).
+// Fixed-width rotation (`rotate_left`, `rotate_right`) on the overflow-word seam.
+// A call of the Core source helper `owner.member(receiver, args…)`: the
+// method's body is Jet in the `owner` module (String's pattern methods
+// run the one core.regex engine), and the loader loads `owner` for the
+// spelling.
 
 BuiltinMethodRow: struct {
     receiver: BuiltinMethodReceiver
@@ -209,7 +211,6 @@ BUILTIN_METHOD_ROWS: #run { [BuiltinMethodRow]{
     // A quoted pattern is a checked `Regex` literal here, so the call has no
     // compile or failure step.
     {receiver: BuiltinMethodReceiver.String, name: "has_line", parameters: [Type]{Type.Named{name: "Regex"}}, result: Type.Bool, access: AccessConvention.Read, lowering: BuiltinMethodLowering.CoreSource{owner: "core.regex", member: "__string_has_line"}},
-
     // Bytes: builder, read cursor and string-like reads (#1467).
     {receiver: BuiltinMethodReceiver.Bytes, name: "len", parameters: [Type]{}, result: Type.Int, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.ByteBufferMethod{method: "len"}}},
     {receiver: BuiltinMethodReceiver.Bytes, name: "capacity", parameters: [Type]{}, result: Type.Int, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.ByteBufferMethod{method: "capacity"}}},
@@ -279,7 +280,6 @@ BUILTIN_METHOD_ROWS: #run { [BuiltinMethodRow]{
     {receiver: BuiltinMethodReceiver.Bytes, name: "write_f64_be", parameters: [Type]{Type.Float}, result: Type.Named{name: "Unit"}, access: AccessConvention.Write, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.ByteBufferWrite{method: "write_f64_be"}}},
     {receiver: BuiltinMethodReceiver.Bytes, name: "write_bytes", parameters: [Type]{Type.List{element: Type.IntN{signed: false, bits: 8}}}, result: Type.Named{name: "Unit"}, access: AccessConvention.Write, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.ByteBufferWrite{method: "write_bytes"}}},
     {receiver: BuiltinMethodReceiver.Bytes, name: "write", parameters: [Type]{Type.List{element: Type.IntN{signed: false, bits: 8}}}, result: Type.Named{name: "Unit"}, access: AccessConvention.Write, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.ByteBufferWrite{method: "write"}}},
-
     // Numbers.
     {receiver: BuiltinMethodReceiver.Scalar, name: "to_string", parameters: [Type]{}, result: Type.String, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Show},
     {receiver: BuiltinMethodReceiver.Integer, name: "bit_and", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Arithmetic{operation: TBinaryOp.BitAnd}},
@@ -306,12 +306,10 @@ BUILTIN_METHOD_ROWS: #run { [BuiltinMethodRow]{
     // Rotations lower through the overflow-word seam that `wrapping(a + b)` uses.
     {receiver: BuiltinMethodReceiver.FixedInt, name: "rotate_left", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Overflow{prefix: "rotate_left", operation: "rotate"}},
     {receiver: BuiltinMethodReceiver.FixedInt, name: "rotate_right", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Overflow{prefix: "rotate_right", operation: "rotate"}},
-
     // Ordering combinators.
     {receiver: BuiltinMethodReceiver.Ordering, name: "then", parameters: [Type]{Type.Named{name: "Ordering"}}, result: Type.Named{name: "Ordering"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.OrderingThen}},
     {receiver: BuiltinMethodReceiver.Ordering, name: "reverse", parameters: [Type]{}, result: Type.Named{name: "Ordering"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.OrderingReverse}},
     {receiver: BuiltinMethodReceiver.Range, name: "contains", parameters: [Type]{Type.Int}, result: Type.Bool, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.Contains}},
-
     // Atomic<T> one lock-free scalar, read and written through a shared receiver.
     {receiver: BuiltinMethodReceiver.Atomic, name: "load", parameters: [Type]{}, result: Type.Named{name: "T"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Atomic},
     {receiver: BuiltinMethodReceiver.Atomic, name: "observe", parameters: [Type]{}, result: Type.Named{name: "T"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Atomic},
@@ -319,7 +317,7 @@ BUILTIN_METHOD_ROWS: #run { [BuiltinMethodRow]{
     {receiver: BuiltinMethodReceiver.Atomic, name: "publish", parameters: [Type]{Type.Named{name: "T"}}, result: Type.Named{name: "Unit"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Atomic},
     {receiver: BuiltinMethodReceiver.AtomicAdd, name: "add", parameters: [Type]{Type.Named{name: "T"}}, result: Type.Named{name: "T"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Atomic},
     {receiver: BuiltinMethodReceiver.AtomicInt, name: "try_add", parameters: [Type]{Type.Int}, result: Type.Result{ok: Type.Int, err: Type.Named{name: "AllocError"}}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Atomic},
-    {receiver: BuiltinMethodReceiver.Atomic, name: "compare_exchange", parameters: [Type]{Type.Named{name: "T"}, Type.Named{name: "T"}}, result: Type.Bool, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Atomic}
+    {receiver: BuiltinMethodReceiver.Atomic, name: "compare_exchange", parameters: [Type]{Type.Named{name: "T"}, Type.Named{name: "T"}}, result: Type.Bool, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Atomic},
 } }
 
 builtin_method_strip_tags: fn(ty: Type) -> Type Never! {
@@ -333,7 +331,9 @@ builtin_method_strip_tags: fn(ty: Type) -> Type Never! {
 builtin_method_atomic_scalar: fn(receiver: Type) -> Type? {
     if builtin_method_strip_tags(receiver) == {
         .Apply(name, args) -> {
-            if name == "Atomic" && args.len() == 1 && jet_target_layout_atomic_scalar_type(args[0]) -> return Val(args[0])
+            if name == "Atomic" && args.len() == 1 && jet_target_layout_atomic_scalar_type(args[0]) {
+                return Val(args[0])
+            }
             None
         }
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
@@ -381,7 +381,9 @@ builtin_method_row: fn(receiver: Type, method: String, argument_count: Int) -> B
 // The table is a read parameter, so the scan reads its rows in place.
 builtin_method_row_in: fn(rows: [BuiltinMethodRow], receiver: Type, method: String, argument_count: Int) -> BuiltinMethodRow? {
     loop row in rows {
-        if row.name == method && row.parameters.len() == argument_count && builtin_method_receiver_accepts(row.receiver, receiver) -> return Val(row)
+        if row.name == method && row.parameters.len() == argument_count && builtin_method_receiver_accepts(row.receiver, receiver) {
+            return Val(row)
+        }
     }
     None
 }

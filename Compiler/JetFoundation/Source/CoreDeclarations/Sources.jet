@@ -82,7 +82,9 @@ core_decl_fn_name: fn(line: String) -> String Never! {
 // core_decl_fn_name, also reading a `pub name: fn` line.
 core_decl_pub_fn_name: fn(line: String) -> String Never! {
     at: core_decl_attributes_end(line)
-    if at >= 0 && core_decl_word_then_space(line, at, "pub") -> return core_decl_fn_name_at(line, core_decl_skip_space(line.bytes(), at + 3))
+    if at >= 0 && core_decl_word_then_space(line, at, "pub") {
+        return core_decl_fn_name_at(line, core_decl_skip_space(line.bytes(), at + 3))
+    }
     core_decl_fn_name_at(line, at)
 }
 
@@ -112,7 +114,9 @@ core_decl_type_name: fn(line: String) -> String Never! {
     if start < 0 -> return ""
     at: if core_decl_word_then_space(line, start, "pub") -> core_decl_skip_space(bytes, start + 3) else -> start
     name_end: core_decl_name_end(bytes, at)
-    if name_end == at || !core_decl_declares_at(bytes, core_decl_generics_end(bytes, name_end)) -> return ""
+    if name_end == at || !core_decl_declares_at(bytes, core_decl_generics_end(bytes, name_end)) {
+        return ""
+    }
     foundation_byte_text(bytes, at, name_end)
 }
 
@@ -123,7 +127,9 @@ core_decl_top_declaration: fn(line: String) -> Bool Never! {
     bytes: line.bytes()
     if bytes.len() == 0 -> return false
     if (Int{bytes[0]}) == 35 -> return true
-    if line.starts_with("impl") && (bytes.len() == 4 || !core_decl_word(Int{bytes[4]})) -> return true
+    if line.starts_with("impl") && (bytes.len() == 4 || !core_decl_word(Int{bytes[4]})) {
+        return true
+    }
     at := 0
     if core_decl_word_then_space(line, 0, "pub") || core_decl_word_then_space(line, 0, "priv") {
         at = core_decl_skip_space(bytes, if line.starts_with("pub") -> 3 else -> 4)
@@ -139,9 +145,7 @@ core_decl_use_line: fn(text: String) -> CoreDeclUse? Never! {
 }
 
 // The target of one entry of a `use {` block, a comment-free, trimmed line.
-core_decl_use_entry: fn(text: String) -> CoreDeclUse? Never! {
-    core_decl_use_at(text, 0)
-}
+core_decl_use_entry: fn(text: String) -> CoreDeclUse? Never! { core_decl_use_at(text, 0) }
 
 // The `use` target starting at byte `start` of `text`.
 core_decl_use_at: fn(text: String, start: Int) -> CoreDeclUse? Never! {
@@ -155,8 +159,12 @@ core_decl_use_at: fn(text: String, start: Int) -> CoreDeclUse? Never! {
     }
     if core_decl_name_end(bytes, at) == at -> return None
     path_end: core_decl_path_end(bytes, at)
-    if core_decl_skip_space(bytes, path_end) >= bytes.len() -> return Val(CoreDeclUse{alias: alias, target: foundation_byte_text(bytes, at, path_end), items: None})
-    if (Int{bytes[path_end]}) != 91 || path_end - at < 2 || (Int{bytes[path_end - 1]}) != 46 -> return None
+    if core_decl_skip_space(bytes, path_end) >= bytes.len() {
+        return Val(CoreDeclUse{alias: alias, target: foundation_byte_text(bytes, at, path_end), items: None})
+    }
+    if (Int{bytes[path_end]}) != 91 || path_end - at < 2 || (Int{bytes[path_end - 1]}) != 46 {
+        return None
+    }
     close: core_decl_tail(text, path_end + 1).find("]")
     if close < 0 || core_decl_skip_space(bytes, path_end + 2 + close) < bytes.len() -> return None
     Val(CoreDeclUse{alias: alias, target: foundation_byte_text(bytes, at, path_end - 1), items: Val(foundation_byte_text(bytes, path_end + 1, path_end + 1 + close))})
@@ -267,9 +275,13 @@ core_decl_encoding_problem: fn(encoding: String, formats: [CoreDeclarationFormat
         if trimmed != "" -> cases.push(trimmed)
     }
     variants: loop format in formats -> format.variant
-    if cases.join(" ") != variants.join(" ") -> return "{CORE_DECLARATIONS_ENCODING_PATH}: EncodingFormat cases ({cases.join(" ")}) differ from the format_row lines in {CORE_DECLARATIONS_CORE_PATH} ({variants.join(" ")}); edit the rows, then make the enum repeat them in order"
+    if cases.join(" ") != variants.join(" ") {
+        return "{CORE_DECLARATIONS_ENCODING_PATH}: EncodingFormat cases ({cases.join(" ")}) differ from the format_row lines in {CORE_DECLARATIONS_CORE_PATH} ({variants.join(" ")}); edit the rows, then make the enum repeat them in order"
+    }
     loop format in formats {
-        if !encoding.contains(".{format.variant} -> \"{format.label}\"") -> return "{CORE_DECLARATIONS_ENCODING_PATH}: EncodingFormat.as_str does not label .{format.variant} as \"{format.label}\" like its format_row at {CORE_DECLARATIONS_CORE_PATH}:{format.line}"
+        if !encoding.contains(".{format.variant} -> \"{format.label}\"") {
+            return "{CORE_DECLARATIONS_ENCODING_PATH}: EncodingFormat.as_str does not label .{format.variant} as \"{format.label}\" like its format_row at {CORE_DECLARATIONS_CORE_PATH}:{format.line}"
+        }
     }
     ""
 }
@@ -294,13 +306,17 @@ core_decl_enum_body_start: fn(text: String, name: String) -> Int Never! {
             loop word > 0 && core_decl_space(Int{bytes[word - 1]}) -> word -= 1
             if word < at && word >= 3 && foundation_byte_text(bytes, word - 3, word) == "pub" {
                 pub_start := word - 3
-                loop pub_start > 0 && (Int{bytes[pub_start - 1]} == 32 || Int{bytes[pub_start - 1]} == 9) -> pub_start -= 1
+                loop pub_start > 0 && (Int{bytes[pub_start - 1]} == 32 || Int{bytes[pub_start - 1]} == 9) {
+                    pub_start -= 1
+                }
                 line_start = pub_start == 0 || Int{bytes[pub_start - 1]} == 10
             }
         }
         if !line_start -> next
         keyword: core_decl_skip_space(bytes, at + core_decl_len(needle))
-        if foundation_byte_text(bytes, keyword, if keyword + 4 <= bytes.len() -> keyword + 4 else -> bytes.len()) != "enum" -> next
+        if foundation_byte_text(bytes, keyword, if keyword + 4 <= bytes.len() -> keyword + 4 else -> bytes.len()) != "enum" {
+            next
+        }
         brace: core_decl_skip_space(bytes, keyword + 4)
         if brace < bytes.len() && (Int{bytes[brace]}) == 123 -> return brace + 1
     }
@@ -343,7 +359,9 @@ core_decl_enum_variants: fn(text: String, open: Int) -> [String] Never! {
             next
         }
         word_end := index + 1
-        loop word_end < code_bytes.len() && core_decl_word(Int{code_bytes[word_end]}) -> word_end += 1
+        loop word_end < code_bytes.len() && core_decl_word(Int{code_bytes[word_end]}) {
+            word_end += 1
+        }
         word: foundation_byte_text(code_bytes, index, word_end)
         if word == "fn" || word == "impl" -> break
         if core_decl_upper(code) -> variants.push(word)
@@ -364,20 +382,12 @@ core_decl_source_text: fn(sources: [CoreDeclarationFile], path: String) -> Strin
 // record field and literal owners, the enum payload rows and the Syntax
 // registry's TYPE_ constants by name, and a Core module's statics as
 // `<module>.<owner>`.
-core_decl_registry_types: fn() -> [String: Bool] CoreDeclarationError! {
-    names := [String: Bool]{}
-    loop row in IR_RUNTIME_HANDLES {
-        names[row.jet_name] = true
-    }
-    loop row in CORE_RECORD_FIELD_ROWS {
-        names[row.owner] = true
-    }
-    loop row in CORE_RECORD_LITERAL_ROWS {
-        names[row.owner] = true
-    }
-    loop row in CORE_ENUM_PAYLOAD_ROWS {
-        names[row.enum_name] = true
-    }
+core_decl_registry_types: fn() -> [String:Bool] CoreDeclarationError! {
+    names := [String:Bool]{}
+    loop row in IR_RUNTIME_HANDLES -> names[row.jet_name] = true
+    loop row in CORE_RECORD_FIELD_ROWS -> names[row.owner] = true
+    loop row in CORE_RECORD_LITERAL_ROWS -> names[row.owner] = true
+    loop row in CORE_ENUM_PAYLOAD_ROWS -> names[row.enum_name] = true
     loop row in BUILTIN_STATIC_ROWS {
         if row.module_name != "" -> names["{row.module_name}.{row.owner}"] = true
     }
@@ -393,17 +403,19 @@ core_decl_registry_types: fn() -> [String: Bool] CoreDeclarationError! {
 // Every type leaf of `listing`, a module with source rows, that none of its
 // sources (its rows and parts) declares and that is no `from(core.x)`
 // re-export and no name a compiler registry owns (`owned`).
-core_decl_undeclared_leaves: fn(declared: CoreDeclarations, sources: [CoreDeclarationFile], listing: CoreDeclarationModule, owned: [String: Bool]) -> [String] Never! {
+core_decl_undeclared_leaves: fn(declared: CoreDeclarations, sources: [CoreDeclarationFile], listing: CoreDeclarationModule, owned: [String:Bool]) -> [String] Never! {
     problems := [String]{}
     paths := [String]{}
     loop row in declared.source_rows {
-        if row.module_name == listing.name && !paths.contains(row.path) -> paths.push(row.path.copy())
+        if row.module_name == listing.name && !paths.contains(row.path) {
+            paths.push(row.path.copy())
+        }
     }
     if paths.len() == 0 -> return problems
     loop part in declared.parts {
         if part.owner == listing.name && !paths.contains(part.path) -> paths.push(part.path.copy())
     }
-    declares := [String: Bool]{}
+    declares := [String:Bool]{}
     loop path in paths {
         text: core_decl_source_text(sources, path) ?? next
         loop line in core_decl_source_lines(text) {
@@ -412,7 +424,9 @@ core_decl_undeclared_leaves: fn(declared: CoreDeclarations, sources: [CoreDeclar
         }
     }
     loop leaf in listing.types {
-        if leaf.from_module != "" || (declares.get(leaf.name) ?? false) || (owned.get(leaf.name) ?? false) || (owned.get("{listing.name}.{leaf.name}") ?? false) -> next
+        if leaf.from_module != "" || (declares.get(leaf.name) ?? false) || (owned.get(leaf.name) ?? false) || (owned.get("{listing.name}.{leaf.name}") ?? false) {
+            next
+        }
         problems.push("{CORE_DECLARATIONS_CORE_PATH}:{listing.line}: Core type leaf {leaf.name} of {listing.name} is declared by none of its sources ({paths.join(", ")}) and is no from() re-export, runtime handle, record, enum payload, {listing.name} static or Syntax TYPE_ constant; declare it in a source, re-export it with from(), or drop it")
     }
     problems
@@ -422,7 +436,9 @@ core_decl_undeclared_leaves: fn(declared: CoreDeclarations, sources: [CoreDeclar
 core_declarations_source_problems: fn(declared: CoreDeclarations, sources: [CoreDeclarationFile]) -> [String] Never! {
     problems := [String]{}
     loop file in sources {
-        if !file.path.starts_with("Core/") -> problems.push("Core source row {file.path} is outside Core/")
+        if !file.path.starts_with("Core/") {
+            problems.push("Core source row {file.path} is outside Core/")
+        }
     }
     owned: core_decl_registry_types() ?? return [String]{"{CORE_DECLARATIONS_CORE_PATH}: {err.message}"}
     loop listing in declared.modules {
@@ -430,7 +446,7 @@ core_declarations_source_problems: fn(declared: CoreDeclarations, sources: [Core
             problems.push(problem)
         }
     }
-    targets := [String: String]{}
+    targets := [String:String]{}
     loop row in declared.dispatchers {
         if row.kind == "receiver" || row.constructor != "CoreCallRecord::source_owned" -> next
         targets["{row.module_name}.{row.record.member}"] = row.record.source_target ?? row.record.member
@@ -447,21 +463,31 @@ core_declarations_source_problems: fn(declared: CoreDeclarations, sources: [Core
         functions: loop line in lines if core_decl_pub_fn_name(line) != "" -> core_decl_pub_fn_name(line)
         loop member in row.members {
             target: targets.get("{row.module_name}.{member}") ?? member
-            if !functions.contains(target) -> problems.push("{CORE_DECLARATIONS_CORE_PATH}:{row.line}: Core source module does not define owned member `{row.module_name}.{member}` target `{target}` in {row.path}")
+            if !functions.contains(target) {
+                problems.push("{CORE_DECLARATIONS_CORE_PATH}:{row.line}: Core source module does not define owned member `{row.module_name}.{member}` target `{target}` in {row.path}")
+            }
         }
         types: loop line in lines if core_decl_type_name(line) != "" -> core_decl_type_name(line)
         loop leaf in row.owned_types {
-            if !types.contains(leaf) -> problems.push("{CORE_DECLARATIONS_CORE_PATH}:{row.line}: Core source module does not declare owned type `{row.module_name}.{leaf}` in {row.path}")
+            if !types.contains(leaf) {
+                problems.push("{CORE_DECLARATIONS_CORE_PATH}:{row.line}: Core source module does not declare owned type `{row.module_name}.{leaf}` in {row.path}")
+            }
         }
         // Cutover end state: once an owned wrapper calls a runtime unit
         // instead of its `core.<module>.<member>` provider, the dispatcher
         // row (and the symbol it names) is dead and must go in the same change.
         locals: core_decl_source_locals(lines, units)
         loop dispatcher in declared.dispatchers {
-            if dispatcher.kind == "receiver" || dispatcher.module_name != row.module_name || !row.members.contains(dispatcher.member) -> next
-            if core_decl_first_owner(declared.source_rows, dispatcher.module_name, dispatcher.member) != row.line -> next
+            if dispatcher.kind == "receiver" || dispatcher.module_name != row.module_name || !row.members.contains(dispatcher.member) {
+                next
+            }
+            if core_decl_first_owner(declared.source_rows, dispatcher.module_name, dispatcher.member) != row.line {
+                next
+            }
             unit: core_decl_wrapper_unit(lines, locals, row.module_name, dispatcher.member)
-            if unit != "" -> problems.push("{CORE_DECLARATIONS_CORE_PATH}:{dispatcher.line}: dispatcher row `{dispatcher.module_name}.{dispatcher.member}` is dead: its owned wrapper `{dispatcher.member}: fn` in {row.path} (owns at line {row.line}) calls runtime unit `{unit}` instead of the provider; delete the row and the symbol it names")
+            if unit != "" {
+                problems.push("{CORE_DECLARATIONS_CORE_PATH}:{dispatcher.line}: dispatcher row `{dispatcher.module_name}.{dispatcher.member}` is dead: its owned wrapper `{dispatcher.member}: fn` in {row.path} (owns at line {row.line}) calls runtime unit `{unit}` instead of the provider; delete the row and the symbol it names")
+            }
         }
         // A Core.rows enum leaf of this module that the source defines lists
         // the variants the source declares.
@@ -472,7 +498,9 @@ core_declarations_source_problems: fn(declared: CoreDeclarations, sources: [Core
             if open < 0 -> next
             listed: core_decl_enum_variants(text, open).join("|")
             variants: leaf.variants.join("|")
-            if listed != variants -> problems.push("{CORE_DECLARATIONS_CORE_PATH}:{owner.line}: Core enum leaf {leaf.name} of {owner.name} lists {variants} but {row.path} declares {listed}")
+            if listed != variants {
+                problems.push("{CORE_DECLARATIONS_CORE_PATH}:{owner.line}: Core enum leaf {leaf.name} of {owner.name} lists {variants} but {row.path} declares {listed}")
+            }
         }
     }
     if declared.formats.len() > 0 {

@@ -13,14 +13,23 @@
 // the layer tar, the image config, and the manifest.
 
 IMAGE_OS: "linux"
+
 IMAGE_MEDIA_TYPE_MANIFEST: "application/vnd.oci.image.manifest.v1+json"
+
 IMAGE_MEDIA_TYPE_CONFIG: "application/vnd.oci.image.config.v1+json"
+
 IMAGE_MEDIA_TYPE_LAYER: "application/vnd.oci.image.layer.v1.tar"
+
 IMAGE_DEFAULT_PLATFORM: "linux.x64"
+
 IMAGE_DEFAULT_USER: 10001
+
 IMAGE_LAYOUT_VERSION: "1.0.0"
+
 IMAGE_MAX_BLOB_BYTES: 536870912
+
 IMAGE_MAX_JSON_BYTES: 1048576
+
 IMAGE_MAX_LAYER_PATH_BYTES: 100
 
 // One file layered into the image, relative to the image root (no leading
@@ -56,7 +65,7 @@ OCIBuildSpec: struct {
             env: [ImageEnvVar]{},
             expose: [Int]{},
             user: IMAGE_DEFAULT_USER,
-            healthcheck: None
+            healthcheck: None,
         }
     }
 }
@@ -76,7 +85,7 @@ OCILayerDescriptor: struct {
     size: Int
 
     tree: fn(self) -> Dyn Never! {
-        fields := [String: Dyn]{}
+        fields := [String:Dyn]{}
         fields["mediaType"] = Dyn.Text(self.media_type.copy())
         fields["digest"] = Dyn.Text(self.digest.copy())
         fields["size"] = Dyn.Int(self.size)
@@ -163,11 +172,13 @@ image_build_with_base: fn(spec: OCIBuildSpec, out_dir: String, ref_name: String,
     image_write_index(out_dir, manifest_digest, manifest_json.bytes().len(), ref_name)
     image_write_layout_file(files.join(out_dir, "oci-layout"), image_json_text(Dyn.Object(["imageLayoutVersion": Dyn.Text(IMAGE_LAYOUT_VERSION)])).bytes())
 
-    Ok(OCIBuiltImage{
-        out_dir: out_dir.copy(),
-        manifest_digest: "sha256:{manifest_digest}",
-        total_bytes: layer_tar.len() + config_json.bytes().len() + manifest_json.bytes().len()
-    })
+    Ok(
+        OCIBuiltImage{
+            out_dir: out_dir.copy(),
+            manifest_digest: "sha256:{manifest_digest}",
+            total_bytes: layer_tar.len() + config_json.bytes().len() + manifest_json.bytes().len(),
+        },
+    )
 }
 
 // Copy a validated local OCI layout to another local layout root. Every
@@ -175,7 +186,9 @@ image_build_with_base: fn(spec: OCIBuildSpec, out_dir: String, ref_name: String,
 // allowed. This is the local half of `--push`.
 image_copy_layout: fn(source: String, destination: String) ImageError! -[FS, Env, Rand]> {
     _: image_load_base(source)
-    if source == destination -> return
+    if source == destination {
+        return
+    }
     canonical_source: files.canonicalize(source)
     image_validate_real_path(destination)
     parent: files.dirname(destination)
@@ -187,7 +200,9 @@ image_copy_layout: fn(source: String, destination: String) ImageError! -[FS, Env
         return Err(image_invalid("OCI copy destination cannot be inside the source layout"))
     }
     if destination_exists {
-        if image_same_layout(canonical_source, probe) -> return
+        if image_same_layout(canonical_source, probe) {
+            return
+        }
         return Err(ImageError.AlreadyExists("OCI copy destination is not byte-identical; refusing an in-place merge"))
     }
     name: files.basename(destination)
@@ -206,7 +221,9 @@ image_copy_layout: fn(source: String, destination: String) ImageError! -[FS, Env
 // The canonical path the destination names (or will name once created).
 image_copy_probe: fn(destination: String, parent: String, destination_exists: Bool) -[FS, Env]> String ImageError! {
     if destination_exists {
-        if image_node(destination) != OCINode.Directory -> return Err(image_invalid("OCI copy destination is not a real directory"))
+        if image_node(destination) != OCINode.Directory {
+            return Err(image_invalid("OCI copy destination is not a real directory"))
+        }
         return Ok(files.canonicalize(destination))
     }
     name: files.basename(destination)
@@ -235,7 +252,9 @@ image_copy_layout_tree: fn(source: String, destination: String) ImageError! -[FS
             return Err(image_invalid("OCI layout contains an unsupported filesystem node"))
         }
         to_node: image_node(to) ?? OCINode.Missing
-        if to_node == OCINode.Symlink -> return Err(image_invalid("OCI copy destination contains a symlink"))
+        if to_node == OCINode.Symlink {
+            return Err(image_invalid("OCI copy destination contains a symlink"))
+        }
         if {
             from_node == OCINode.Directory -> {
                 if to_node != OCINode.Missing && to_node != OCINode.Directory {
@@ -258,14 +277,18 @@ image_copy_layout_tree: fn(source: String, destination: String) ImageError! -[FS
 image_same_layout: fn(left: String, right: String) -[FS]> Bool ImageError! {
     left_node: image_existing_node(left)
     right_node: image_existing_node(right)
-    if left_node == OCINode.Symlink || right_node == OCINode.Symlink -> return Err(image_invalid("OCI layout contains a symlink"))
+    if left_node == OCINode.Symlink || right_node == OCINode.Symlink {
+        return Err(image_invalid("OCI layout contains a symlink"))
+    }
     if (left_node == OCINode.Directory) != (right_node == OCINode.Directory) || left_node.is_file() != right_node.is_file() {
         return Ok(false)
     }
     if left_node.is_file() {
         return Ok(image_read_regular_bounded(left, IMAGE_MAX_BLOB_BYTES) == image_read_regular_bounded(right, IMAGE_MAX_BLOB_BYTES))
     }
-    if left_node != OCINode.Directory -> return Err(image_invalid("OCI layout contains an unsupported filesystem node"))
+    if left_node != OCINode.Directory {
+        return Err(image_invalid("OCI layout contains an unsupported filesystem node"))
+    }
     left_names := [String]{}
     loop entry in files.list_dir(left) -> left_names.push(entry.name)
     right_names := [String]{}
@@ -275,7 +298,9 @@ image_same_layout: fn(left: String, right: String) -[FS]> Bool ImageError! {
     if left_names.len() != right_names.len() -> return Ok(false)
     loop index in 0..<left_names.len() {
         if left_names[index] != right_names[index] -> return Ok(false)
-        if !image_same_layout(files.join(left, left_names[index]), files.join(right, right_names[index])) -> return Ok(false)
+        if !image_same_layout(files.join(left, left_names[index]), files.join(right, right_names[index])) {
+            return Ok(false)
+        }
     }
     Ok(true)
 }
@@ -291,7 +316,9 @@ image_write_blob: fn(out_dir: String, digest: String, data: [U8]) ImageError! -[
         if !existing.is_file() {
             return Err(image_invalid("OCI blob destination is not a regular file"))
         }
-        if image_read_regular_bounded(path, data.len()) == data -> return
+        if image_read_regular_bounded(path, data.len()) == data {
+            return
+        }
         return Err(ImageError.AlreadyExists("OCI blob `{digest}` already has conflicting bytes"))
     }
     temporary: image_with_extension(path, "partial-{sys.pid()}")
@@ -304,7 +331,9 @@ image_write_blob: fn(out_dir: String, digest: String, data: [U8]) ImageError! -[
 image_link_new_blob: fn(temporary: String, path: String, digest: String, data: [U8]) ImageError! -[FS]> {
     image_write_new_file(temporary, data)
     if files.hard_link(temporary, path) == .Err(error) {
-        if (image_node(path) ?? OCINode.Missing) == OCINode.Missing -> return Err(ImageError.IO(error))
+        if (image_node(path) ?? OCINode.Missing) == OCINode.Missing {
+            return Err(ImageError.IO(error))
+        }
         if image_read_regular_bounded(path, data.len()) != data {
             return Err(ImageError.AlreadyExists("OCI blob `{digest}` already has conflicting bytes"))
         }
@@ -312,14 +341,14 @@ image_link_new_blob: fn(temporary: String, path: String, digest: String, data: [
 }
 
 image_write_index: fn(out_dir: String, manifest_digest: String, manifest_size: Int, ref_name: String) ImageError! -[FS, Env]> {
-    annotations := [String: Dyn]{}
+    annotations := [String:Dyn]{}
     annotations["org.opencontainers.image.ref.name"] = Dyn.Text(ref_name.copy())
-    descriptor := [String: Dyn]{}
+    descriptor := [String:Dyn]{}
     descriptor["mediaType"] = Dyn.Text(IMAGE_MEDIA_TYPE_MANIFEST)
     descriptor["digest"] = Dyn.Text("sha256:{manifest_digest}")
     descriptor["size"] = Dyn.Int(manifest_size)
     descriptor["annotations"] = Dyn.Object(annotations)
-    index := [String: Dyn]{}
+    index := [String:Dyn]{}
     index["schemaVersion"] = Dyn.Int(2)
     index["manifests"] = Dyn.Array([Dyn]{Dyn.Object(descriptor)})
     text: image_json_text(Dyn.Object(index)) ?? return Err(err)
@@ -333,24 +362,26 @@ image_config_json: fn(spec: OCIBuildSpec, diff_ids: [String], architecture: Stri
     loop entry in image_sorted_env(spec.env) -> env.push(Dyn.Text("{entry.key}={entry.value}"))
     entrypoint := [Dyn]{}
     loop argument in spec.entrypoint -> entrypoint.push(Dyn.Text(argument))
-    exposed := [String: Dyn]{}
-    loop port in image_sorted_unique_ints(spec.expose) -> exposed["{port}/tcp"] = Dyn.Object([String: Dyn]{})
-    container := [String: Dyn]{}
+    exposed := [String:Dyn]{}
+    loop port in image_sorted_unique_ints(spec.expose) {
+        exposed["{port}/tcp"] = Dyn.Object([String:Dyn]{})
+    }
+    container := [String:Dyn]{}
     container["Env"] = Dyn.Array(env)
     container["ExposedPorts"] = Dyn.Object(exposed)
     container["Entrypoint"] = Dyn.Array(entrypoint)
     container["User"] = Dyn.Text("{spec.user}")
     if spec.healthcheck == .Val(command) {
-        health := [String: Dyn]{}
+        health := [String:Dyn]{}
         health["Test"] = Dyn.Array([Dyn]{Dyn.Text("CMD-SHELL"), Dyn.Text(command)})
         container["Healthcheck"] = Dyn.Object(health)
     }
     ids := [Dyn]{}
     loop digest in diff_ids -> ids.push(Dyn.Text(digest))
-    rootfs := [String: Dyn]{}
+    rootfs := [String:Dyn]{}
     rootfs["type"] = Dyn.Text("layers")
     rootfs["diff_ids"] = Dyn.Array(ids)
-    document := [String: Dyn]{}
+    document := [String:Dyn]{}
     document["architecture"] = Dyn.Text(architecture.copy())
     document["os"] = Dyn.Text(IMAGE_OS)
     document["config"] = Dyn.Object(container)
@@ -359,13 +390,13 @@ image_config_json: fn(spec: OCIBuildSpec, diff_ids: [String], architecture: Stri
 }
 
 image_manifest_json: fn(config_digest: String, config_size: Int, layers: [OCILayerDescriptor]) -> String ImageError! {
-    config := [String: Dyn]{}
+    config := [String:Dyn]{}
     config["mediaType"] = Dyn.Text(IMAGE_MEDIA_TYPE_CONFIG)
     config["digest"] = Dyn.Text("sha256:{config_digest}")
     config["size"] = Dyn.Int(config_size)
     descriptors := [Dyn]{}
     loop layer in layers -> descriptors.push(layer.tree())
-    manifest := [String: Dyn]{}
+    manifest := [String:Dyn]{}
     manifest["schemaVersion"] = Dyn.Int(2)
     manifest["mediaType"] = Dyn.Text(IMAGE_MEDIA_TYPE_MANIFEST)
     manifest["config"] = Dyn.Object(config)
@@ -428,7 +459,7 @@ image_load_base: fn(root: String) -[FS, Env]> OCIBaseLayout ImageError! {
         if bytes.len() != size || image_digest_for(bytes) != digest {
             return Err(image_invalid("OCI base layer failed its digest or size check"))
         }
-        layers.push(OCILayerDescriptor{media_type, digest, size})
+        layers.push(OCILayerDescriptor{media_type: media_type, digest: digest, size: size})
     }
     config_value: manifest.get("config") ?? return Err(image_invalid("OCI manifest has no config descriptor"))
     config_descriptor: image_object(config_value, "OCI config descriptor")
@@ -456,8 +487,10 @@ image_load_base: fn(root: String) -[FS, Env]> OCIBaseLayout ImageError! {
             .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(image_invalid("OCI config diff_ids contains a non-string"))
         }
     }
-    if diff_ids.len() != layers.len() -> return Err(image_invalid("OCI config diff_ids do not match manifest layers"))
-    Ok(OCIBaseLayout{root: files.canonicalize(root), platform, layers, diff_ids})
+    if diff_ids.len() != layers.len() {
+        return Err(image_invalid("OCI config diff_ids do not match manifest layers"))
+    }
+    Ok(OCIBaseLayout{root: files.canonicalize(root), platform: platform, layers: layers, diff_ids: diff_ids})
 }
 
 // Sort by path so declaration order never affects the layer (stable).
@@ -481,8 +514,12 @@ image_validate_layer_files: fn(layer_files: [LayerFile]) ImageError! {
         loop part in file.path.split("/").to_list() {
             if part == ".." -> return Err(image_invalid("OCI layer path escapes the image root"))
         }
-        if file.data.len() > IMAGE_MAX_BLOB_BYTES -> return Err(image_invalid("OCI layer file exceeds the 512 MiB limit"))
-        if seen.contains(file.path) -> return Err(image_invalid("OCI layer contains duplicate paths"))
+        if file.data.len() > IMAGE_MAX_BLOB_BYTES {
+            return Err(image_invalid("OCI layer file exceeds the 512 MiB limit"))
+        }
+        if seen.contains(file.path) {
+            return Err(image_invalid("OCI layer contains duplicate paths"))
+        }
         seen.push(file.path)
     }
     loop index in 1..<seen.len() {
@@ -506,7 +543,9 @@ image_read_text: fn(path: String) -[FS]> String ImageError! {
 }
 
 image_read_blob: fn(root: String, digest: String) -[FS]> [U8] ImageError! {
-    if image_node(root) != OCINode.Directory -> return Err(image_invalid("OCI layout root is not a real directory"))
+    if image_node(root) != OCINode.Directory {
+        return Err(image_invalid("OCI layout root is not a real directory"))
+    }
     hex: image_digest_hex(digest)
     cursor := root.copy()
     components: [String]{"blobs", "sha256", hex}
@@ -521,17 +560,19 @@ image_read_blob: fn(root: String, digest: String) -[FS]> [U8] ImageError! {
         .File(bytes) -> bytes
         .Missing | .Directory | .Symlink | .Special -> -1
     }
-    if size < 0 || size > IMAGE_MAX_BLOB_BYTES -> return Err(image_invalid("OCI blob is not a regular file within its limit"))
+    if size < 0 || size > IMAGE_MAX_BLOB_BYTES {
+        return Err(image_invalid("OCI blob is not a regular file within its limit"))
+    }
     bytes: image_read_regular_bounded(cursor, IMAGE_MAX_BLOB_BYTES)
     if pkg_sha256_hex(bytes) != hex -> return Err(image_invalid("OCI blob digest mismatch"))
     Ok(bytes)
 }
 
-image_object: fn(value: Dyn, label: String) -> [String: Dyn] ImageError! {
+image_object: fn(value: Dyn, label: String) -> [String:Dyn] ImageError! {
     if value == {
         // The object's ordered pairs, indexed by name.
         .Object(fields) -> {
-            members := [String: Dyn]{}
+            members := [String:Dyn]{}
             loop pair in fields -> members[pair.key] = pair.value
             Ok(members)
         }
@@ -547,7 +588,7 @@ image_array: fn(value: Dyn?, label: String) -> [Dyn] ImageError! {
     }
 }
 
-image_string_field: fn(object: [String: Dyn], field_name: String) -> String ImageError! {
+image_string_field: fn(object: [String:Dyn], field_name: String) -> String ImageError! {
     found: object.get(field_name) ?? return Err(image_invalid("OCI object field `{field_name}` is not a string"))
     if found == .Text(value) {
         if value != "" -> return Ok(value)
@@ -555,7 +596,7 @@ image_string_field: fn(object: [String: Dyn], field_name: String) -> String Imag
     Err(image_invalid("OCI object field `{field_name}` is not a string"))
 }
 
-image_number_field: fn(object: [String: Dyn], field_name: String) -> Int ImageError! {
+image_number_field: fn(object: [String:Dyn], field_name: String) -> Int ImageError! {
     refusal: image_invalid("OCI object field `{field_name}` is not a non-negative integer")
     value: object.get(field_name) ?? return Err(refusal)
     whole: value.decode<Int>() ?? return Err(refusal)
@@ -569,14 +610,14 @@ image_digest_hex: fn(digest: String) -> String ImageError! {
     raw: hex.bytes()
     if raw.len() != 64 -> return Err(image_invalid("OCI digest is not a SHA-256 value"))
     loop byte in raw {
-        if !trust_text_is_hex(Int{byte}) -> return Err(image_invalid("OCI digest is not a SHA-256 value"))
+        if !trust_text_is_hex(Int{byte}) {
+            return Err(image_invalid("OCI digest is not a SHA-256 value"))
+        }
     }
     Ok(hex)
 }
 
-image_digest_for: fn(bytes: [U8]) -> String Never! {
-    "sha256:{pkg_sha256_hex(bytes)}"
-}
+image_digest_for: fn(bytes: [U8]) -> String Never! { "sha256:{pkg_sha256_hex(bytes)}" }
 
 image_json_text: fn(value: Dyn) -> String ImageError! {
     text: json.to_string(value) ?? return Err(ImageError.InvalidData(err.reason))
@@ -595,26 +636,24 @@ image_read_regular_bounded: fn(path: String, limit: Int) -[FS]> [U8] ImageError!
         chunk: reader.read_bytes(65536)
         if chunk.len() == 0 -> break
         bytes.extend(chunk)
-        if bytes.len() > limit -> return Err(image_invalid("OCI input exceeded its bound while being read"))
+        if bytes.len() > limit {
+            return Err(image_invalid("OCI input exceeded its bound while being read"))
+        }
     }
     Ok(bytes)
 }
 
 image_node: fn(path: String) -[FS]> OCINode ImageError! {
     if files.stat(path) == {
-        .Ok(info) -> {
-            if {
-                info.is_symlink -> Ok(OCINode.Symlink)
-                info.is_dir -> Ok(OCINode.Directory)
-                info.is_file -> Ok(OCINode.File(info.size))
-                else -> Ok(OCINode.Special)
-            }
+        .Ok(info) -> if {
+            info.is_symlink -> Ok(OCINode.Symlink)
+            info.is_dir -> Ok(OCINode.Directory)
+            info.is_file -> Ok(OCINode.File(info.size))
+            else -> Ok(OCINode.Special)
         }
-        .Err(error) -> {
-            if error == {
-                .NotFound(_) -> Ok(OCINode.Missing)
-                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> Err(ImageError.IO(error))
-            }
+        .Err(error) -> if error == {
+            .NotFound(_) -> Ok(OCINode.Missing)
+            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> Err(ImageError.IO(error))
         }
     }
 }
@@ -635,7 +674,9 @@ image_load_optional_base: fn(base: String?) -[FS, Env]> OCIBaseLayout? ImageErro
 
 image_remove_stale_temporary: fn(path: String) ImageError! -[FS]> {
     node: image_node(path)
-    if node == OCINode.Missing -> return
+    if node == OCINode.Missing {
+        return
+    }
     if !node.is_file() -> return Err(image_invalid("OCI temporary output is not a regular file"))
     files.remove(path)
 }
@@ -701,19 +742,23 @@ image_ensure_real_layout_directory: fn(path: String) ImageError! -[FS, Env]> {
     node: image_node(path)
     if node == OCINode.Missing {
         files.create_dir_all(path)
-        if image_node(path) != OCINode.Directory -> return Err(image_invalid("OCI output path is not a real directory"))
+        if image_node(path) != OCINode.Directory {
+            return Err(image_invalid("OCI output path is not a real directory"))
+        }
         return
     }
-    if node != OCINode.Directory -> return Err(image_invalid("OCI output path is not a real directory"))
+    if node != OCINode.Directory {
+        return Err(image_invalid("OCI output path is not a real directory"))
+    }
 }
 
 // Rust `sorted_env`: key-sorted, with the last value for a repeated key.
 image_sorted_env: fn(entries: [ImageEnvVar]) -> [ImageEnvVar] Never! {
-    by_key := [String: String]{}
+    by_key := [String:String]{}
     loop entry in entries -> by_key[entry.key] = entry.value
     keys := by_key.keys().to_list()
     keys.sort()
-    loop key in keys -> ImageEnvVar{key, value: by_key[key]}
+    loop key in keys -> ImageEnvVar{key: key, value: by_key[key]}
 }
 
 image_sorted_unique_ints: fn(values: [Int]) -> [Int] Never! {
@@ -727,11 +772,7 @@ image_sorted_unique_ints: fn(values: [Int]) -> [Int] Never! {
 }
 
 // Best-effort cleanup (Rust `let _ = fs::remove_file(path)`).
-image_remove_quiet: fn(path: String) -[FS]> {
-    files.remove(path) ?? return
-}
+image_remove_quiet: fn(path: String) -[FS]> { files.remove(path) ?? return }
 
 // Best-effort cleanup (Rust `let _ = fs::remove_dir_all(path)`).
-image_remove_all_quiet: fn(path: String) -[FS]> {
-    files.remove_all(path) ?? return
-}
+image_remove_all_quiet: fn(path: String) -[FS]> { files.remove_all(path) ?? return }

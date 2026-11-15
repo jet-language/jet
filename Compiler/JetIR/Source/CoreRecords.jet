@@ -61,11 +61,9 @@ ir_bool_rows_equal: fn(left: [Bool], right: [Bool]) -> Bool Never! {
 ir_core_markers_equal: fn(left: CoreMarkerApplication?, right: CoreMarkerApplication?) -> Bool Never! {
     if left == {
         None -> right == None
-        Val(first) -> {
-            if right == {
-                None -> false
-                Val(second) -> first.member == second.member && first.since == second.since && first.replacement == second.replacement && first.removed_in == second.removed_in
-            }
+        Val(first) -> if right == {
+            None -> false
+            Val(second) -> first.member == second.member && first.since == second.since && first.replacement == second.replacement && first.removed_in == second.removed_in
         }
     }
 }
@@ -74,7 +72,9 @@ ir_core_access_rows_equal: fn(left: [CoreCallResourceAccess], right: [CoreCallRe
     if left.len() != right.len() -> return false
     index := 0
     loop index < left.len() {
-        if left[index].argument != right[index].argument || left[index].mode != right[index].mode -> return false
+        if left[index].argument != right[index].argument || left[index].mode != right[index].mode {
+            return false
+        }
         index += 1
     }
     true
@@ -83,11 +83,9 @@ ir_core_access_rows_equal: fn(left: [CoreCallResourceAccess], right: [CoreCallRe
 ir_core_completion_equal: fn(left: CoreCallCompletion?, right: CoreCallCompletion?) -> Bool Never! {
     if left == {
         None -> right == None
-        Val(first) -> {
-            if right == {
-                None -> false
-                Val(second) -> first.kind == second.kind && first.token == second.token && first.provider == second.provider
-            }
+        Val(first) -> if right == {
+            None -> false
+            Val(second) -> first.kind == second.kind && first.token == second.token && first.provider == second.provider
         }
     }
 }
@@ -95,27 +93,32 @@ ir_core_completion_equal: fn(left: CoreCallCompletion?, right: CoreCallCompletio
 ir_core_capability_equal: fn(left: CoreCapabilityContract, right: CoreCapabilityContract) -> Bool Never! {
     left.kind == right.kind && left.provider == right.provider && left.fallback == right.fallback && left.failure == right.failure
 }
+
 ir_authority_decisions_equal: fn(left: AuthorityDecision?, right: AuthorityDecision?) -> Bool Never! {
     if left == None -> return right == None
     if right == None -> return false
     first: left
     second: right
-    first.import.id == second.import.id
-        && first.import.operation == second.import.operation
-        && first.import.required_right == second.import.required_right
-        && ir_string_rows_equal(first.import.parameter_type_ids, second.import.parameter_type_ids)
-        && first.import.result_type_id == second.import.result_type_id
-        && first.authority_argument == second.authority_argument
-        && first.inherited == second.inherited
+    first.import.id == second.import.id && first.import.operation == second.import.operation && first.import.required_right == second.import.required_right && ir_string_rows_equal(first.import.parameter_type_ids, second.import.parameter_type_ids) && first.import.result_type_id == second.import.result_type_id && first.authority_argument == second.authority_argument && first.inherited == second.inherited
 }
 
 ir_core_records_match: fn(left: CoreCallRecord, right: CoreCallRecord) -> Bool Never! {
-    if left.module_name != right.module_name || left.member != right.member || !ir_string_rows_equal(left.receiver_types, right.receiver_types) -> return false
-    if left.signature.arity != right.signature.arity || left.signature.max_arity != right.signature.max_arity || !ir_bool_rows_equal(left.signature.borrow_mask, right.signature.borrow_mask) -> return false
-    if left.fallibility != right.fallibility || left.effect_kind != right.effect_kind || left.effect_leaf != right.effect_leaf || left.sink_class != right.sink_class -> return false
+    if left.module_name != right.module_name || left.member != right.member || !ir_string_rows_equal(left.receiver_types, right.receiver_types) {
+        return false
+    }
+    if left.signature.arity != right.signature.arity || left.signature.max_arity != right.signature.max_arity || !ir_bool_rows_equal(left.signature.borrow_mask, right.signature.borrow_mask) {
+        return false
+    }
+    if left.fallibility != right.fallibility || left.effect_kind != right.effect_kind || left.effect_leaf != right.effect_leaf || left.sink_class != right.sink_class {
+        return false
+    }
     if left.pure_route != right.pure_route || left.symbol != right.symbol -> return false
-    if left.coverage.bits != right.coverage.bits || left.aot_direct != right.aot_direct || left.native_int_result != right.native_int_result -> return false
-    if !ir_core_access_rows_equal(left.frame_accesses, right.frame_accesses) || !ir_core_completion_equal(left.frame_completion, right.frame_completion) || !ir_core_capability_equal(left.capability, right.capability) || !ir_string_rows_equal(left.ui_capabilities, right.ui_capabilities) -> return false
+    if left.coverage.bits != right.coverage.bits || left.aot_direct != right.aot_direct || left.native_int_result != right.native_int_result {
+        return false
+    }
+    if !ir_core_access_rows_equal(left.frame_accesses, right.frame_accesses) || !ir_core_completion_equal(left.frame_completion, right.frame_completion) || !ir_core_capability_equal(left.capability, right.capability) || !ir_string_rows_equal(left.ui_capabilities, right.ui_capabilities) {
+        return false
+    }
     ir_authority_decisions_equal(left.authority, right.authority) && ir_core_markers_equal(left.marker, right.marker)
 }
 
@@ -134,7 +137,9 @@ ir_canonical_core_record_in: fn(rows: [CoreCallRecord], record: CoreCallRecord) 
         }
     }
     canonical: found ?? panic("checked Core-call record is absent from the canonical registry")
-    if !ir_core_records_match(canonical, record) -> panic("checked Core-call metadata disagrees with the canonical registry")
+    if !ir_core_records_match(canonical, record) {
+        panic("checked Core-call metadata disagrees with the canonical registry")
+    }
     canonical
 }
 
@@ -203,7 +208,9 @@ ir_comptime_item_function: fn(request: SemaComptimeItemRequest, module_name: Str
     result_type := body_type(request.expression.tree, request.expression.root)
     if request.expected_type != None {
         expected: request.expected_type ?? panic("checked comptime item lost its expected type")
-        if type_identity_key(expected) != type_identity_key(result_type) -> panic("checked comptime item result disagrees with its expected type")
+        if type_identity_key(expected) != type_identity_key(result_type) {
+            panic("checked comptime item result disagrees with its expected type")
+        }
         result_type = expected
     }
     ir_comptime_item_shell(request.module_identity, module_name, ir_comptime_item_key(module_name, request.key), request.source_file, request.span, result_type)

@@ -9,15 +9,15 @@ fixture: explain_effects_ladder.fixture
 env: NO_COLOR=1
 step: jet check main.jet
 exit: 0
-step block: jet explain effects main.jet:6
+step block: jet explain effects main.jet:4
 exit: 0
-stdout: ~ "effects at main.jet:6, in `show`, nearest first" # the site and its function
-stdout: ~ "  block     #FX(FS.Read, IO)  main.jet:5" # the `#FX` block holding line 6 comes first, at the line that opens it
-stdout: ~ "  function  -[FS, IO]>        main.jet:4\n  type      (none written)\n  module    (none written)\n" # the type rung sits between function and module; neither is written here
+stdout: ~ "effects at main.jet:4, in `show`, nearest first" # the site and its function
+stdout: ~ "  block     #FX(FS.Read, IO)  main.jet:4" # the `#FX` block holding line 6 comes first, at the line that opens it
+stdout: ~ "  function  -[FS, IO]>        main.jet:3\n  type      (none written)\n  module    (none written)\n" # the type rung sits between function and module; neither is written here
 stdout: ~ "  package   allow: [FS]       package.jet:3" # the package row as written
 stdout: ~ "  run       everything else allowed; --deny wins" # the run rung
-stdout: ~ "reaches: FS.Read(\"rates.txt\") via pricing.rates (main.jet:6)" # the block reaches the read through the call
-stdout: ~ ", IO (main.jet:6)" # and prints directly
+stdout: ~ "reaches: FS.Read(\"rates.txt\") via pricing.rates (main.jet:4)" # the block reaches the read through the call
+stdout: ~ ", IO (main.jet:4)" # and prints directly
 step module: jet explain effects pricing.jet:3
 exit: 0
 stdout: ~ "effects at pricing.jet:3, in `rates`, nearest first" # a module file of the package
@@ -36,7 +36,7 @@ stdout: ~ "main.jet:1  #FX(!Net)  module pricing" # the module cap where pricing
 stdout: ~ "receipt.jet:1  #FX(!Exec)  file" # the file-head cap
 stdout: ~ "receipt.jet:4  #FX(FS.Read, IO)  trait Render" # the trait cap
 stdout: ~ "receipt.jet:9  #FX(FS.Read)  type Receipt" # the type cap
-step json: jet explain effects --json main.jet:6
+step json: jet explain effects --json main.jet:4
 exit: 0
 stdout: ~ "\"explain.effects\"" # one jet.status/v1 line
 stdout: ~ "\"rung\":\"block\"" # the rungs ride as objects

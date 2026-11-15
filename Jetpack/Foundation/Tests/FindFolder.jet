@@ -17,9 +17,7 @@ find_folder_test_root: fn(label: String) -[FS, Env]> String Never! {
 // `text` padded with spaces to `width`.
 find_folder_test_pad: fn(text: String, width: Int) -> String Never! {
     padded := text.copy()
-    loop padded.len() < width {
-        padded = "{padded} "
-    }
+    loop padded.len() < width -> padded = "{padded} "
     padded
 }
 
@@ -96,10 +94,13 @@ find_folder_test_reasons: fn(misses: [FolderMiss]) -> [String] Never! {
     found: search.found ?? panic("musl's libc.a was not found")
     assert_eq(files.basename(found.folder), "musl")
     assert_eq(found.sha256, crypto.sha256(musl).hex())
-    assert_eq(find_folder_test_reasons(search.misses), [String]{
-        "text: `libc.a` is not an ar archive",
-        "glibc: `libc.a` is not musl: it has no `__libc_start_main` and `__init_tls` objects",
-        "bare: musl's `libc.a` has no `crt1.o` beside it",
-    })
+    assert_eq(
+        find_folder_test_reasons(search.misses),
+        [String]{
+            "text: `libc.a` is not an ar archive",
+            "glibc: `libc.a` is not musl: it has no `__libc_start_main` and `__init_tls` objects",
+            "bare: musl's `libc.a` has no `crt1.o` beside it",
+        },
+    )
     files.remove_all(root).drop("the fixture is removed best-effort")
 }

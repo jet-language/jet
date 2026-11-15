@@ -19,7 +19,9 @@ WasmError: struct {
 }
 
 TWO_32: 4294967296
+
 TWO_63: 9223372036854775808
+
 TWO_64: 18446744073709551616
 
 // A signed value of `bits` bits (two's complement) from its unsigned pattern.
@@ -59,16 +61,14 @@ WasmReader: struct {
         WasmReader{bytes: bytes, at: 0, end: count}
     }
 
-    done: fn(self) -> Bool Never! {
-        self.at >= self.end
-    }
+    done: fn(self) -> Bool Never! { self.at >= self.end }
 
-    fail: fn(self, message: String) -> WasmError Never! {
-        WasmError.new(message, self.at)
-    }
+    fail: fn(self, message: String) -> WasmError Never! { WasmError.new(message, self.at) }
 
     byte: fn(&self) -> Int WasmError! {
-        if self.at >= self.end -> return Err(WasmError.new("unexpected end of section or function", self.at))
+        if self.at >= self.end {
+            return Err(WasmError.new("unexpected end of section or function", self.at))
+        }
         value: Int{self.bytes[self.at]}
         self.at += 1
         Ok(value)
@@ -109,20 +109,22 @@ WasmReader: struct {
                 if b.bit_and(0x40) != 0 -> result -= 1 << shift
                 low: 0 - (1 << (bits - 1))
                 high: 1 << (bits - 1)
-                if result < low || result >= high -> return Err(WasmError.new("integer too large", start))
+                if result < low || result >= high {
+                    return Err(WasmError.new("integer too large", start))
+                }
                 return Ok(result)
             }
         }
         Err(WasmError.new("integer representation too long", start))
     }
 
-    u32: fn(&self) -> Int WasmError! {
-        self.unsigned(32)
-    }
+    u32: fn(&self) -> Int WasmError! { self.unsigned(32) }
 
     // A little-endian fixed-width unsigned pattern of `count` bytes.
     fixed: fn(&self, count: Int) -> Int WasmError! {
-        if self.end - self.at < count -> return Err(WasmError.new("unexpected end of fixed-width value", self.at))
+        if self.end - self.at < count {
+            return Err(WasmError.new("unexpected end of fixed-width value", self.at))
+        }
         value := 0
         loop k in 0..<count -> value = value.bit_or(Int{self.bytes[self.at + k]} << (8 * k))
         self.at += count
@@ -130,7 +132,9 @@ WasmReader: struct {
     }
 
     slice: fn(&self, count: Int) -> [U8] WasmError! {
-        if count < 0 || self.end - self.at < count -> return Err(WasmError.new("length out of bounds", self.at))
+        if count < 0 || self.end - self.at < count {
+            return Err(WasmError.new("length out of bounds", self.at))
+        }
         slice: self.bytes[self.at..<(self.at + count)]
         self.at += count
         Ok(slice)

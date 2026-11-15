@@ -1,6 +1,5 @@
 // Workspace lock claims: the write path and its round trip through
 // PackageModel's `pkg_workspace_lock_load`.
-
 use {
     jetpack_foundation.[CONFIG_DEFAULT_DIR, PACKAGE_FILE, SOURCE_ROOT_DIR, UNIFIED_LOCK_FILE, WORKSPACE_FILE]
     jet_env_model.[envmodel_workspace_load]
@@ -14,7 +13,7 @@ env_wlock_test_dir: fn(label: String) -[FS]> String {
 }
 
 env_wlock_test_member: fn(name: String, path: String) -> WorkspacePlanMember {
-    WorkspacePlanMember{name, path, canonical_path: ""}
+    WorkspacePlanMember{name: name, path: path, canonical_path: ""}
 }
 
 env_wlock_test_manifest: fn(root: String, path: String, name: String) -[FS]> {
@@ -197,7 +196,7 @@ env_wlock_test_lock_text: fn(root: String) -[FS]> String {
     raw: "version = 1\n[[package]]\nname = \"broken\"\n"
     files.write(lock_path, raw) ?? panic("malformed lock")
     if env_workspace_lock_write(cache, root, WorkspacePlan.empty()) == {
-        .Ok(_) -> panic("a malformed lock must not be replaced")
+        .Ok(_) -> { panic("a malformed lock must not be replaced") }
         .Err(error) -> assert(error.message().contains("existing lock is malformed"))
     }
     assert_eq(files.read(lock_path) ?? panic("read lock"), raw)
@@ -221,7 +220,7 @@ env_wlock_test_lock_text: fn(root: String) -[FS]> String {
             plan.overlay_policy.build_grants.push(BuildGrant{subject: "app", effects: [String]{"Exec"}})
         }
         if env_workspace_lock_write(cache, root, plan) == {
-            .Ok(_) -> panic("forbidden workspace write succeeded")
+            .Ok(_) -> { panic("forbidden workspace write succeeded") }
             .Err(error) -> {
                 if error == {
                     .Gate(gate) -> {
@@ -231,7 +230,9 @@ env_wlock_test_lock_text: fn(root: String) -[FS]> String {
                         assert_eq(diagnostic.code, "E3415")
                         assert_eq(diagnostic.what, "The `{name}` gate at `{site}` is forbidden by `{policy}`.")
                     }
-                    .IO(_) | .InvalidData(_) | .InvalidInput(_) | .NotFound(_) | .Unsupported(_) | .Conflict(_) | .Other(_) | .Overlay(_) | .Transition(_) | .ManagedFile(_) | .Activation(_) -> panic("gate refusal was converted to an I/O error")
+                    .IO(_) | .InvalidData(_) | .InvalidInput(_) | .NotFound(_) | .Unsupported(_) | .Conflict(_) | .Other(_) | .Overlay(_) | .Transition(_) | .ManagedFile(_) | .Activation(_) -> {
+                        panic("gate refusal was converted to an I/O error")
+                    }
                 }
             }
         }

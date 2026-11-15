@@ -1,6 +1,17 @@
 use jet_pkg_model.[
-    ARCH_ARM64, ArtifactKind, OS_LINUX, PackageVariant, PlatformKey, VariantABI, VariantArch,
-    VariantCandidate, VariantLibc, VariantLinkage, VariantMapEntry, VariantOS, VariantRole,
+    ARCH_ARM64,
+    ArtifactKind,
+    OS_LINUX,
+    PackageVariant,
+    PlatformKey,
+    VariantABI,
+    VariantArch,
+    VariantCandidate,
+    VariantLibc,
+    VariantLinkage,
+    VariantMapEntry,
+    VariantOS,
+    VariantRole,
 ]
 
 #Test("variant defaults cover every axis") {
@@ -25,7 +36,7 @@ use jet_pkg_model.[
     // Two exact candidates tie through unmapped provider facts.
     second: VariantCandidate.new("openssl-b", need).with_provider_fact("conan.compiler.runtime", "libstdc++11")
     if need.select([VariantCandidate]{first, second}, [VariantMapEntry]{}) == {
-        .Ok(_) -> panic("expected Ambiguous")
+        .Ok(_) -> { panic("expected Ambiguous") }
         .Err(error) -> {
             if error == {
                 .Ambiguous(_, axis, labels) -> {

@@ -6,10 +6,15 @@
 // stream 1/2 names the capture it reads; stream 0 is the taken reader. No Rust
 // Rc/RefCell/Box offset is projected.
 PIPE_BYTES: I64{40}
+
 PIPE_REFS: I64{0}
+
 PIPE_BORROW: I64{8}
+
 PIPE_FD: I64{16}
+
 PIPE_SOURCE: I64{24}
+
 PIPE_STREAM: I64{32}
 
 pipe_borrow_stop: fn() {
@@ -24,11 +29,13 @@ pipe_borrow_stop: fn() {
     trap_msg_prelude_end()
     trap_footer(I64{0})
 }
+
 pipe_borrow_mut: fn(pipe: I64) -> I64 {
     if (fd_word(pipe, PIPE_BORROW) != I64{0}) { pipe_borrow_stop() }
     fd_put(pipe, PIPE_BORROW, I64{-1})
     fd_word(pipe, PIPE_FD)
 }
+
 pipe_unborrow: fn(pipe: I64) { fd_put(pipe, PIPE_BORROW, I64{0}) }
 
 // TAKES an independently owned reader FD72, obtained from
@@ -42,6 +49,7 @@ pipe_unborrow: fn(pipe: I64) { fd_put(pipe, PIPE_BORROW, I64{0}) }
     fd_put(pipe, PIPE_STREAM, I64{0})
     pipe
 }
+
 // The cell `child` owns for its stream `stream`, holding no reference to it:
 // while a clone of the cell lives elsewhere, that clone keeps the child.
 pipe_shared: fn(child: I64, stream: I64) -> I64 {
@@ -50,18 +58,21 @@ pipe_shared: fn(child: I64, stream: I64) -> I64 {
     fd_put(pipe, PIPE_STREAM, stream)
     pipe
 }
+
 // Rust's Option::take on the child's reader: every clone now reads EOF.
 pipe_detach: fn(pipe: I64) {
-    if (pipe != I64{0}) -> fd_put(pipe, PIPE_STREAM, I64{0})
+    if (pipe != I64{0}) { fd_put(pipe, PIPE_STREAM, I64{0}) }
 }
+
 pipe_clone: fn(pipe: I64) -> I64 {
     // Rc is !Send; do not turn the counter into Arc or allocate an outer box.
     refs: wrapping(fd_word(pipe, PIPE_REFS) + I64{1})
     fd_put(pipe, PIPE_REFS, refs)
     source: fd_word(pipe, PIPE_SOURCE)
-    if (refs == I64{2} && source != I64{0}) -> _ := jet_rt_handle_clone_process_child(source)
+    if (refs == I64{2} && source != I64{0}) { _ := jet_rt_handle_clone_process_child(source) }
     pipe
 }
+
 pipe_drop: fn(pipe: I64) {
     if (pipe == I64{0}) {
         return
@@ -80,9 +91,13 @@ pipe_drop: fn(pipe: I64) {
     jet_fd_drop_raw(fd_word(pipe, PIPE_FD))
     jet_rt_free(pipe, PIPE_BYTES, I64{8})
 }
+
 #Export(c) jet_rt_handle_clone_process_stdout_stream: fn(pipe: I64) -> I64 { pipe_clone(pipe) }
+
 #Export(c) jet_rt_handle_drop_process_stdout_stream: fn(pipe: I64) { pipe_drop(pipe) }
+
 #Export(c) jet_rt_handle_clone_process_stderr_stream: fn(pipe: I64) -> I64 { pipe_clone(pipe) }
+
 #Export(c) jet_rt_handle_drop_process_stderr_stream: fn(pipe: I64) { pipe_drop(pipe) }
 
 // Option::take drops the reader and is visible through every clone.
@@ -93,6 +108,7 @@ pipe_drop: fn(pipe: I64) {
     jet_fd_drop_raw(fd)
     pipe_unborrow(pipe)
 }
+
 pipe_output_name: fn() -> I64 {
     text: jet_rt_string_builder_new()
     rt_text_push_word(text, I64{2338339510832558704}, I64{8})
@@ -230,9 +246,7 @@ pipe_read: fn(pipe: I64, maximum: I64, output: I64, len: I64, error: I64) -> I64
     count := I64{0}
     failure := I64{0}
     fd_lock(fd)
-    if (fd_word(fd, I64{16}) != I64{0}) {
-        failure = I64{-9}
-    } else if (fd_word(fd, I64{40}) < I64{0}) {
+    if (fd_word(fd, I64{16}) != I64{0}) { failure = I64{-9} } else if (fd_word(fd, I64{40}) < I64{0}) {
         failure = fd_flush_locked(fd)
         if (failure == I64{0}) {
             fd_put(fd, I64{48}, I64{0})
@@ -266,5 +280,11 @@ pipe_read: fn(pipe: I64, maximum: I64, output: I64, len: I64, error: I64) -> I64
     compiler_fs_bytes_take(bytes, limit, count, output, len)
     I64{1}
 }
-#Export(c) jet_process_stdout_read: fn(pipe: I64, maximum: I64, output: I64, len: I64, error: I64) -> I64 { pipe_read(pipe, maximum, output, len, error) }
-#Export(c) jet_process_stderr_read: fn(pipe: I64, maximum: I64, output: I64, len: I64, error: I64) -> I64 { pipe_read(pipe, maximum, output, len, error) }
+
+#Export(c) jet_process_stdout_read: fn(pipe: I64, maximum: I64, output: I64, len: I64, error: I64) -> I64 {
+    pipe_read(pipe, maximum, output, len, error)
+}
+
+#Export(c) jet_process_stderr_read: fn(pipe: I64, maximum: I64, output: I64, len: I64, error: I64) -> I64 {
+    pipe_read(pipe, maximum, output, len, error)
+}

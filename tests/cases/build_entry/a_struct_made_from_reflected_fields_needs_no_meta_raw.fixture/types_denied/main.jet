@@ -9,11 +9,11 @@ build: fn(b: Build) -[!Meta.Types]> {
     app: b.add_executable("app", ["main.jet"], [])
     meta: b.compiler(app)
     fields := [CompilerField]{}
-    loop field in Row.reflect().fields -> fields.push(CompilerField{name: field.name.copy(), type: field.type.copy()})
+    loop field in Row.reflect().fields {
+        fields.push(CompilerField{name: field.name.copy(), type: field.type.copy()})
+    }
     meta.add_struct("Shape", fields, scope: "shape")
     b.default(app)
 }
 
-run: fn() {
-    print(Shape{id: I64{40}, total: I32{2}}.id)
-}
+run: fn() { print(Shape{id: I64{40}, total: I32{2}}.id) }

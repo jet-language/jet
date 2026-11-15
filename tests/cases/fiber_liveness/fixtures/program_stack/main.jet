@@ -10,18 +10,24 @@ package: {
     authority: { allow: [Env, Exec, FS, FS.Read, IO, Time, Time.Wait] }
 }
 
-use files: core.files
-use sys: core.sys
-use time: core.time
+use {
+    files: core.files
+    sys: core.sys
+    time: core.time
+}
 
 TASKS: 16
+
 PROGRAM_STACK: 8388608
+
 GROWTH_LIMIT: 1073741824
 
 vm_size: fn() -[FS]> Int {
     text: files.read("/proc/self/status") ?? panic("read status")
     loop line in text.lines() {
-        if line.starts_with("VmSize:") -> return (Int.parse(line.remove_prefix("VmSize:").remove_suffix("kB").trim()) ?? -1) * 1024
+        if line.starts_with("VmSize:") {
+            return (Int.parse(line.remove_prefix("VmSize:").remove_suffix("kB").trim()) ?? -1) * 1024
+        }
     }
     -1
 }

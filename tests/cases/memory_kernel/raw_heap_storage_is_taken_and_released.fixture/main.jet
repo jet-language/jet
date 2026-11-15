@@ -9,15 +9,11 @@ run: fn() {
             mem.copy(words, words.offset(2), 2)
             print("{words.*} {words.offset(1).*} {words.offset(2).*} {words.offset(3).*}")
             mem.free_raw(bytes)
-        } else {
-            print("refused")
-        }
+        } else { print("refused") }
         if mem.alloc_raw(24, 64) == .Val(wide) {
             print(mem.address_of(wide.*) % 64)
             mem.free_raw(wide)
-        } else {
-            print("refused")
-        }
+        } else { print("refused") }
         // Each align up to 8, the smallest head above 8, a block above the
         // small classes and a page-aligned one: every block keeps its
         // alignment and its last byte, and each release finds its layout.
@@ -27,12 +23,16 @@ run: fn() {
         loop at in 0..<sizes.len() {
             if mem.alloc_raw(sizes[at], aligns[at]) == .Val(block) {
                 mem.fill<U8>(block, U8{5}, sizes[at])
-                if (mem.address_of(block.*) % aligns[at] == 0 && block.byte_offset(sizes[at] - 1).* == U8{5}) -> kept += 1
+                if (mem.address_of(block.*) % aligns[at] == 0 && block.byte_offset(sizes[at] - 1).* == U8{5}) {
+                    kept += 1
+                }
                 mem.free_raw(block)
             }
         }
         print("{kept} shapes")
         if mem.alloc_raw(0, 8) == .Val(_) -> print("empty given") else -> print("empty refused")
-        if mem.alloc_raw(8, 3) == .Val(_) -> print("odd align given") else -> print("odd align refused")
+        if mem.alloc_raw(8, 3) == .Val(_) -> print("odd align given") else {
+            print("odd align refused")
+        }
     }
 }

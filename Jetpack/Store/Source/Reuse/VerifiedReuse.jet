@@ -32,7 +32,9 @@ store_reuse_newest: fn(entries: [StoreEntry], reference: String) -> StoreEntry? 
 
 // Rust `max_by(last_used_at, then id)`: a later equal element wins.
 store_reuse_newer: fn(candidate: StoreEntry, current: StoreEntry) -> Bool Never! {
-    if candidate.last_used_at != current.last_used_at -> return candidate.last_used_at > current.last_used_at
+    if candidate.last_used_at != current.last_used_at {
+        return candidate.last_used_at > current.last_used_at
+    }
     candidate.id >= current.id
 }
 
@@ -58,9 +60,7 @@ CacheVerification: struct {
     unsigned_local_allowed: Bool
     closure: Bool
 
-    trusted: fn(self) -> Bool Never! {
-        self.admission_trusted() && self.closure
-    }
+    trusted: fn(self) -> Bool Never! { self.admission_trusted() && self.closure }
 
     // Certifies the recorded output and producer, not permission to consume
     // an incomplete closure. Repair must re-establish `trusted()` first.
@@ -111,7 +111,7 @@ store_verify_cache_entry_with_graph: fn(verification: &StoreVerification, roots:
         .None -> false
     }
     closure: output_exists && policy && store_closure_is_reachable(roots, entry) && objects_rehash
-    outcome: CacheVerification{output_exists, output_digest, source, recipe, platform, policy, signature_verified, unsigned_local_allowed, closure}
+    outcome: CacheVerification{output_exists: output_exists, output_digest: output_digest, source: source, recipe: recipe, platform: platform, policy: policy, signature_verified: signature_verified, unsigned_local_allowed: unsigned_local_allowed, closure: closure}
     if !outcome.trusted() && sys.get(ENV_JETPACK_VERIFY_TRACE) != None {
         term.eprint("VERIFY-TRACE ref={entry.reference} id={entry.id} legs={outcome.debug()} hash_probe={store_reuse_hash_probe(verification, roots, entry)}")
     }
@@ -165,11 +165,17 @@ store_reuse_producer_authority_verified: fn(roots: HangarRoots, entry: StoreEntr
     if blocked -> return false
     producer: ProducerRecord.decode(entry.producer_record) ?? return false
     identity: expectation.identity
-    if producer.provider.trim() == "" || producer.immutable_source.trim() == "" || producer.source_digest.trim() == "" -> return false
+    if producer.provider.trim() == "" || producer.immutable_source.trim() == "" || producer.source_digest.trim() == "" {
+        return false
+    }
     if producer.facts.get("action.recipe") != Val(identity.recipe_fingerprint) -> return false
-    if producer.policy_facts != "policy={identity.policy_fingerprint}\nplatform={identity.platform}" -> return false
+    if producer.policy_facts != "policy={identity.policy_fingerprint}\nplatform={identity.platform}" {
+        return false
+    }
     attestation: producer.facts.get("cache.reproducibility") ?? return false
-    if !(attestation == "attested-v1" || attestation.starts_with("independent-agreeing-v1:")) -> return false
+    if !(attestation == "attested-v1" || attestation.starts_with("independent-agreeing-v1:")) {
+        return false
+    }
     provenance: CacheProvenance{
         reference: producer.facts.get("cache.reference") ?? "",
         source: producer.facts.get("cache.source") ?? "",
@@ -178,7 +184,7 @@ store_reuse_producer_authority_verified: fn(roots: HangarRoots, entry: StoreEntr
         output: producer.facts.get("cache.output") ?? "",
         platform: producer.facts.get("cache.platform") ?? "",
         sandbox: producer.facts.get("cache.sandbox") ?? "",
-        policy: producer.facts.get("cache.policy") ?? ""
+        policy: producer.facts.get("cache.policy") ?? "",
     }
     builder: trust_cache_builder_identity(producer.provider, producer.immutable_source, producer.source_digest)
     valid: if provenance.validate() == {
@@ -196,7 +202,9 @@ store_enforce_manifest_provenance_floor: fn(project: String?, package: String) R
     root: project ?? return
     manifest: if PackageFacts.load(root) == {
         .Ok(found) -> found ?? return
-        .Err(error) -> { return Err(RealizeError.Store(StoreError.Other("package trust manifest could not be loaded: {error.message()}"))) }
+        .Err(error) -> {
+            return Err(RealizeError.Store(StoreError.Other("package trust manifest could not be loaded: {error.message()}")))
+        }
     }
     trust: manifest.authority.trust ?? return
     requirement: trust.require ?? return
@@ -215,7 +223,7 @@ store_reuse_provenance_failure: fn(package: String, requirement: ProvenanceRequi
         actual: actual,
         reason: "the package trust policy requires {requirement.label()} provenance",
         disposition: "Jetpack rejected the package before provider, cache, or remote bytes became usable.",
-        fix_text: "Refresh `.jet/lock` with the required provenance, then retry."
+        fix_text: "Refresh `.jet/lock` with the required provenance, then retry.",
     }
 }
 
@@ -233,7 +241,9 @@ store_find_verified_by_reference: fn(verification: &StoreVerification, roots: Ha
     entries: store_list_unlocked(roots)
     loop entry in entries {
         if entry.reference != reference -> next
-        if store_verify_cache_entry_with_graph(verification, roots, entry, reference, expectation, Val(graph)).trusted() -> verified.push(entry)
+        if store_verify_cache_entry_with_graph(verification, roots, entry, reference, expectation, Val(graph)).trusted() {
+            verified.push(entry)
+        }
     }
     entry: store_reuse_newest(verified, reference) ?? return Ok(None)
     lease: store_snapshot_lease_unlocked(verification, roots, entry, None, true)
@@ -259,7 +269,7 @@ store_reuse_verified_user_profile_batch: fn(verification: &StoreVerification, ro
     if references.len() == 0 -> return None
     // Only a candidate probe: a mixed cache is still worth the locked
     // verification below.
-    candidate_refs := [String: Bool]{}
+    candidate_refs := [String:Bool]{}
     loop entry in store_list_read_only(roots) -> candidate_refs[entry.reference] = true
     any_candidate := false
     loop reference in references {
@@ -281,7 +291,9 @@ store_reuse_user_profile_batch_locked: fn(verification: &StoreVerification, root
         valid := [StoreEntry]{}
         loop entry in entries {
             if entry.reference != reference -> next
-            if store_verify_cache_entry_with_graph(verification, roots, entry, reference, expectation, Val(graph)).trusted() -> valid.push(entry)
+            if store_verify_cache_entry_with_graph(verification, roots, entry, reference, expectation, Val(graph)).trusted() {
+                valid.push(entry)
+            }
         }
         entry: store_reuse_newest(valid, reference) ?? next
         permitted: if store_require_entry_catalog_permission(entry, local_nix_catalog) == {
@@ -308,7 +320,7 @@ store_reuse_user_profile_batch_locked: fn(verification: &StoreVerification, root
 // changes. Each member is checked against the current provider identity and
 // closure under one Hangar lock; holes stay on the normal realization path
 // instead of invalidating unrelated verified members.
-store_reuse_verified_environment_members: fn(verification: &StoreVerification, roots: HangarRoots, selections: [EnvironmentSelection], expectations: [String: CacheExpectation], allow_local_nix_catalog: Bool) -> [VerifiedRealization]? StoreError! {
+store_reuse_verified_environment_members: fn(verification: &StoreVerification, roots: HangarRoots, selections: [EnvironmentSelection], expectations: [String:CacheExpectation], allow_local_nix_catalog: Bool) -> [VerifiedRealization]? StoreError! {
     if selections.len() == 0 || expectations.len() == 0 -> return Ok(None)
     hangar_lock: env_runtime_lock(roots.root, "hangar")
     graph: store_closure_graph_structure_unlocked(verification, roots)
@@ -319,7 +331,9 @@ store_reuse_verified_environment_members: fn(verification: &StoreVerification, r
         reference: selection.reference
         expectation: expectations.get(reference) ?? next
         entry: index.get(selection) ?? next
-        if !store_verify_cache_entry_with_graph(verification, roots, entry, reference, expectation, Val(graph)).trusted() -> next
+        if !store_verify_cache_entry_with_graph(verification, roots, entry, reference, expectation, Val(graph)).trusted() {
+            next
+        }
         store_require_entry_catalog_permission(entry, allow_local_nix_catalog)
         // The receipt stamp records external dependency metadata, but the
         // member proof has no prior digest for those auxiliary paths. The
@@ -343,9 +357,7 @@ store_reuse_verified_environment_members: fn(verification: &StoreVerification, r
         lease: store_snapshot_lease_unlocked(verification, roots, entry, Val(projection_index), true)
         if lease.status() == ConsumptionStatus.Consumable {
             realized.push(VerifiedRealization{entry: entry, source_state_value: SourceState.Cached, lease: lease})
-        } else {
-            lease.release()
-        }
+        } else { lease.release() }
     }
     if realized.len() == 0 -> return Ok(None)
     Ok(Val(realized))
@@ -361,9 +373,13 @@ store_snapshot_lease: fn(verification: &StoreVerification, roots: HangarRoots, e
 store_snapshot_leases_with_entries_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, selected: [StoreEntry], entries: [StoreEntry]) -> [CacheLease] StoreError! {
     projection_index: NixProjectionIndex.from_entries(entries)
     leases := [CacheLease]{}
-    loop entry in selected -> leases.push(store_snapshot_lease_unlocked(verification, roots, entry, Val(projection_index), false))
+    loop entry in selected {
+        leases.push(store_snapshot_lease_unlocked(verification, roots, entry, Val(projection_index), false))
+    }
     loop lease in leases {
-        if lease.status() != ConsumptionStatus.Consumable -> return Err(StoreError.NotFound("a warm environment output disappeared while leasing"))
+        if lease.status() != ConsumptionStatus.Consumable {
+            return Err(StoreError.NotFound("a warm environment output disappeared while leasing"))
+        }
     }
     Ok(leases)
 }

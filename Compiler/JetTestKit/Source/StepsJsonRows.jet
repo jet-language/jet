@@ -26,8 +26,12 @@ kit_steps_json_rows: fn(text: String, assertion: KitAssertion) -> String? {
     rows := [Dyn]{}
     loop value in selected {
         if value == {
-            .Array(items) -> { loop item in items -> rows.push(item) }
-            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> rows.push(value)
+            .Array(items) -> {
+                loop item in items -> rows.push(item)
+            }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {
+                rows.push(value)
+            }
         }
     }
     loop row in rows {

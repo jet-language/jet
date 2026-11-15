@@ -101,7 +101,9 @@ parser_marker_label: fn(marker: Marker, index: Int) -> String Never! {
 parser_parse_marker_impl: fn(state: &JetParserState, value: &StructDef) {
     start: parser_bump(state)
     repeated: value.marker != None
-    if repeated -> parser_add_error_code(state, "E0908", start.span, "`{value.name}` has a second `impl Marker` block", "a struct declares one marker, so its settings, group and template share one block", "move these members into the first `impl Marker` block")
+    if repeated {
+        parser_add_error_code(state, "E0908", start.span, "`{value.name}` has a second `impl Marker` block", "a struct declares one marker, so its settings, group and template share one block", "move these members into the first `impl Marker` block")
+    }
     trait_token: parser_bump(state)
     parser_expect(state, TOKEN_LBRACE, "`{{` to open the `impl Marker` body")
     declaration := MarkerDecl{name: value.name, name_span: value.name_span, is_pub: value.is_pub, is_package_pub: value.is_package_pub, params: [MarkerDeclParam]{}, body: None, span: value.name_span}
@@ -125,11 +127,15 @@ parser_parse_marker_impl: fn(state: &JetParserState, value: &StructDef) {
         break
     }
     parser_expect(state, TOKEN_RBRACE, "`}}` to close the `impl Marker` body")
-    if repeated -> return
+    if repeated {
+        return
+    }
     value.marker = Val(declaration)
     value.marker_span = Val(start.span)
     value.marker_expand_span = expand_span
-    if declaration.group != None -> return
+    if declaration.group != None {
+        return
+    }
     // The block itself prints as the marker member, so the impl is generated.
     value.trait_impls.push(TraitImplBlock{trait_name: parser_value(state, trait_token), trait_span: trait_token.span, operator_rhs: None, operator_marker: None, methods: [Func]{}, compiler_generated: true, assoc_type_impls: [NamedType]{}, constants: constants})
 }
@@ -154,10 +160,14 @@ parser_parse_marker_setting: fn(state: &JetParserState, declaration: &MarkerDecl
     span: parser_cover(name_token.span, parser_lookahead(state, -1).span)
     parser_finish_statement(state)
     fact: "${key}"
-    if key != "companion" -> constants.push(ImplConstValue{name: key, name_span: name_token.span, value: parsed.expr, span: span})
+    if key != "companion" {
+        constants.push(ImplConstValue{name: key, name_span: name_token.span, value: parsed.expr, span: span})
+    }
     // A setting given twice is reported on the constant (E0937).
     loop earlier in declaration.params {
-        if earlier.name == fact -> return
+        if earlier.name == fact {
+            return
+        }
     }
     declaration.params.push(MarkerDeclParam{name: fact, name_span: name_token.span, ty: None, value: Val(parsed.expr), variadic: false})
 }
@@ -182,7 +192,9 @@ parser_parse_marker_expand: fn(state: &JetParserState, declaration: &MarkerDecl)
     if !shaped {
         what: if method == "expand" -> "`expand: fn` doesn't match the `Marker` contract" else -> "`{method}` is not a method of `Marker`"
         parser_add_error_code(state, "E0907", signature, what, "`impl Marker` has one method, the template the compiler expands with the marked item bound to `target`", "write `expand: fn(self, target: Target) {{ … }}`")
-        loop parser_current_kind(state) != TOKEN_LBRACE && parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF -> parser_bump(state)
+        loop parser_current_kind(state) != TOKEN_LBRACE && parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF {
+            parser_bump(state)
+        }
         if parser_current_kind(state) != TOKEN_LBRACE -> return signature
     }
     body: parser_marker_body(state)
@@ -230,7 +242,9 @@ parser_finish_marker_struct: fn(state: &JetParserState, value: &StructDef) {
 parser_parse_fact_impl: fn(state: &JetParserState, value: &StructDef) {
     start: parser_bump(state)
     repeated: value.fact != None
-    if repeated -> parser_add_error_code(state, "E0908", start.span, "`{value.name}` has a second `impl Fact` block", "a struct declares one fact plane, so its settings share one block", "move these settings into the first `impl Fact` block")
+    if repeated {
+        parser_add_error_code(state, "E0908", start.span, "`{value.name}` has a second `impl Fact` block", "a struct declares one fact plane, so its settings share one block", "move these settings into the first `impl Fact` block")
+    }
     parser_bump(state)
     parser_expect(state, TOKEN_LBRACE, "`{{` to open the `impl Fact` body")
     params := [MarkerDeclParam]{}
@@ -250,7 +264,9 @@ parser_parse_fact_impl: fn(state: &JetParserState, value: &StructDef) {
         params.push(MarkerDeclParam{name: parser_value(state, name_token), name_span: name_token.span, ty: None, value: Val(parsed.expr), variadic: false})
     }
     parser_expect(state, TOKEN_RBRACE, "`}}` to close the `impl Fact` body")
-    if repeated -> return
+    if repeated {
+        return
+    }
     value.fact = Val(FactDecl{name: value.name, name_span: value.name_span, params: params, span: start.span})
 }
 
@@ -297,7 +313,9 @@ parser_marker_body: fn(state: &JetParserState) -> [DeriveBodyItem] {
                 modifiers: ParsedItemModifiers{is_pub: false, is_package_pub: false, is_comptime: false, markers: [Marker]{}, start_span: parser_current(state).span}
                 body.push(DeriveBodyItem.Item{value: parser_marker_body_item(state, modifiers)})
             }
-            parser_test_ahead(state) -> body.push(DeriveBodyItem.Item{value: parser_parse_test(state, [Marker]{})})
+            parser_test_ahead(state) -> {
+                body.push(DeriveBodyItem.Item{value: parser_parse_test(state, [Marker]{})})
+            }
             else -> body.push(DeriveBodyItem.Stmt{value: parser_parse_statement(state)})
         }
     }
@@ -402,7 +420,7 @@ parser_parse_marker_group_entries: fn(state: &JetParserState, declaration: Bool)
     span: parser_cover(hash.span, close.span)
     if declaration && markers.len() < 2 {
         parser_add_error_code(state, "E0999", span, "a named marker group needs at least two members", "a group names a marker stack, not a marker alias or an empty rule", "write the marker directly at its use site, or give the group at least two members")
-    } else if markers.len() == 1 -> parser_report_singleton_marker_group(state, span, markers[0])
+    } else if markers.len() == 1 { parser_report_singleton_marker_group(state, span, markers[0]) }
     // Rust `parse_marker_bracket_group`: a group on its own line still
     // attaches to the declaration below.
     parser_skip_semicolons(state)
@@ -413,7 +431,9 @@ parser_parse_marker_group_entries: fn(state: &JetParserState, declaration: Bool)
 // structural auto-derive engine can provide, bare or inside `#[…]`.
 parser_check_signed_marker: fn(state: &JetParserState, bang_start: Int, name: Token) {
     marker_name: parser_value(state, name)
-    if owned_trait_auto_derive_marker(marker_name) -> return
+    if owned_trait_auto_derive_marker(marker_name) {
+        return
+    }
     parser_add_fatal_code(state, "E0931", Span{start: bang_start, end: name.span.end}, "`!{marker_name}` is not a signed auto-derive trait", "`!` rejects compiler generation only for structurally auto-derived traits", "remove `!` from `#{marker_name}`, or use it with an auto-derived trait")
 }
 
@@ -453,7 +473,9 @@ parser_parse_marker_args: fn(state: &JetParserState, marker_name: String) -> Par
             labels.push(label)
             if parser_current_kind(state) == TOKEN_RPAREN -> break
             if parser_current_kind(state) != TOKEN_COMMA {
-                if parser_unclosed_delimiter(state, "call") -> return ParsedMarkerArgs{args: args, labels: labels, required: required}
+                if parser_unclosed_delimiter(state, "call") {
+                    return ParsedMarkerArgs{args: args, labels: labels, required: required}
+                }
                 token: parser_current(state)
                 parser_add_error(state, token.span, "expected `,` between marker arguments", "marker arguments are comma-separated", "add a comma or close the marker arguments")
                 break
@@ -471,7 +493,9 @@ parser_parse_marker_args: fn(state: &JetParserState, marker_name: String) -> Par
 // last argument it pushed.
 parser_parse_marker_value_arg: fn(state: &JetParserState, marker_name: String, label: CallLabel?, args: &[MarkerCallArg], labels: &[CallLabel?], required: &[Int]) -> CallLabel? {
     if parser_prep_verb_ahead(state, 0, TOKEN_LBRACE) && parser_text(state, parser_current(state)) == "#run" {
-        if parser_parse_marker_required_arg(state, args, marker_name, label) -> required.push(args.len() - 1)
+        if parser_parse_marker_required_arg(state, args, marker_name, label) {
+            required.push(args.len() - 1)
+        }
         return label.copy()
     }
     // A marker value is read, never written or taken. A name that reaches the
@@ -512,8 +536,12 @@ parser_parse_marker_required_arg: fn(state: &JetParserState, args: &[MarkerCallA
             return true
         }
     }
-    if condition -> parser_add_error_code(state, "E0391", span, "`#run {{ … }}` in a marker holds more than one value", "a `#Pre` or `#Post` condition decided while building is the one value its block ends with", "write `#run {{ condition }}` with one final expression")
-    if !condition -> parser_add_error_code(state, "E0391", span, "`#run {{ … }}` is used as a marker value this compiler does not decide while building", "today only a `#Pre` or `#Post` condition is decided while building, for each call", "write `#Pre(#run {{ condition }}, \"message\")` or `#Post(#run {{ condition }}, \"message\")`, or drop `#run`")
+    if condition {
+        parser_add_error_code(state, "E0391", span, "`#run {{ … }}` in a marker holds more than one value", "a `#Pre` or `#Post` condition decided while building is the one value its block ends with", "write `#run {{ condition }}` with one final expression")
+    }
+    if !condition {
+        parser_add_error_code(state, "E0391", span, "`#run {{ … }}` is used as a marker value this compiler does not decide while building", "today only a `#Pre` or `#Post` condition is decided while building, for each call", "write `#Pre(#run {{ condition }}, \"message\")` or `#Post(#run {{ condition }}, \"message\")`, or drop `#run`")
+    }
     args.push(MarkerCallArg.Expr{value: Expr.Unit{span: span, id: parser_node_id(state)}})
     false
 }
@@ -530,7 +558,9 @@ parser_marker_written_text: fn(state: &JetParserState, marker: Marker) -> String
 }
 
 parser_report_singleton_marker_group: fn(state: &JetParserState, span: Span, marker: Marker) {
-    if parser_aborting(state) -> return
+    if parser_aborting(state) {
+        return
+    }
     diagnostic: diagnostic_from_registry("E0999", Val(span), "one marker is written without brackets", "brackets group two or more markers; one marker stays bare", "replace `#[{marker.name}]` with `#{marker.name}`")
     written: parser_marker_written_text(state, marker) ?? {
         state.diagnostics.push(diagnostic)
@@ -543,12 +573,16 @@ parser_report_singleton_marker_group: fn(state: &JetParserState, span: Span, mar
 // distinct rules on one target are one ordered `#[A, B]` list. `chunks`
 // counts the bare markers and lists written; `span` covers all of them.
 parser_report_adjacent_markers: fn(state: &JetParserState, markers: [Marker], chunks: Int, bracket_chunks: Int, span: Span, noun: String) {
-    if (chunks == 1 && bracket_chunks == 1) || parser_aborting(state) -> return
+    if (chunks == 1 && bracket_chunks == 1) || parser_aborting(state) {
+        return
+    }
     distinct := [String]{}
     loop marker in markers {
         if !distinct.contains(marker.name) -> distinct.push(marker.name)
     }
-    if distinct.len() <= 1 -> return
+    if distinct.len() <= 1 {
+        return
+    }
     diagnostic: diagnostic_from_registry("E0999", Val(span), "adjacent {noun} markers belong in one bracket list", "two or more rules attached to one {noun} use one ordered `#[A, B]` group", "replace the adjacent markers with one bracket list")
     rendered := [String]{}
     loop marker in markers {

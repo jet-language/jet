@@ -14,7 +14,7 @@ pkg_lock_write: fn(input: LockFile) -> String Never! {
     // no later header would close `[build.stamp]`, and the parser would read
     // this field as a build-stamp key.
     if lock.workspace_source_digest == {
-        .Val(digest) -> out.push("workspace_source_digest = \"{pkg_lock_escape(digest)}\"\n")
+        .Val(digest) -> { out.push("workspace_source_digest = \"{pkg_lock_escape(digest)}\"\n") }
         .None -> {}
     }
 
@@ -22,7 +22,7 @@ pkg_lock_write: fn(input: LockFile) -> String Never! {
         .Val(stamp) -> {
             out.push("\n[build.stamp]\n")
             if stamp.git == {
-                .Val(git) -> out.push("git = \"{pkg_lock_escape(git)}\"\n")
+                .Val(git) -> { out.push("git = \"{pkg_lock_escape(git)}\"\n") }
                 .None -> {}
             }
             out.push("dirty = {pkg_lock_bool(stamp.dirty)}\n")
@@ -88,7 +88,7 @@ pkg_lock_write: fn(input: LockFile) -> String Never! {
     out.push("\n[root]\n")
     out.push("dependencies = {pkg_lock_string_array(lock.root_dependencies)}\n")
     if lock.authority == {
-        .Val(authority) -> out.push("authority = {pkg_lock_authority_value(authority)}\n")
+        .Val(authority) -> { out.push("authority = {pkg_lock_authority_value(authority)}\n") }
         .None -> {}
     }
 
@@ -112,62 +112,68 @@ pkg_lock_write_package: fn(out: &[String], package: LockedPackage) Never! {
     out.push(pkg_lock_string_field("version", package.version))
     out.push("source = {pkg_lock_source_value(package.source)}\n")
     if package.nix_closure == {
-        .Val(closure) -> pkg_lock_write_nix_closure(out, closure)
+        .Val(closure) -> { pkg_lock_write_nix_closure(out, closure) }
         .None -> {}
     }
     if package.locked == {
-        .Val(revision) -> out.push("locked = {{ rev = \"{pkg_lock_escape(revision.rev)}\", tree-hash = \"{pkg_lock_escape(revision.tree_hash)}\", last-modified = {revision.last_modified} }}\n")
+        .Val(revision) -> {
+            out.push("locked = {{ rev = \"{pkg_lock_escape(revision.rev)}\", tree-hash = \"{pkg_lock_escape(revision.tree_hash)}\", last-modified = {revision.last_modified} }}\n")
+        }
         .None -> {}
     }
     out.push(pkg_lock_string_field("fingerprint", package.fingerprint))
     // Content hash of the installed source tree.
     if package.content_hash == {
-        .Val(hash) -> out.push(pkg_lock_string_field("content-hash", hash))
+        .Val(hash) -> { out.push(pkg_lock_string_field("content-hash", hash)) }
         .None -> {}
     }
     out.push("dependencies = {pkg_lock_string_array(package.dependencies)}\n")
     if package.layer == {
-        .Val(layer) -> out.push("layer = \"{jet_ring_layer_name(layer)}\"\n")
+        .Val(layer) -> { out.push("layer = \"{jet_ring_layer_name(layer)}\"\n") }
         .None -> {}
     }
     if package.inferred_layer == {
-        .Val(layer) -> out.push("inferred-layer = \"{jet_ring_layer_name(layer)}\"\n")
+        .Val(layer) -> { out.push("inferred-layer = \"{jet_ring_layer_name(layer)}\"\n") }
         .None -> {}
     }
     // Per-dependency effect provenance and audited grants.
     if package.effects.len() > 0 -> out.push("effects = {pkg_lock_string_array(package.effects)}\n")
-    if package.effect_grants.len() > 0 -> out.push("effect-grants = {pkg_lock_string_array(package.effect_grants)}\n")
+    if package.effect_grants.len() > 0 {
+        out.push("effect-grants = {pkg_lock_string_array(package.effect_grants)}\n")
+    }
     required: package.required_effect_roles()
     granted: package.granted_effect_roles()
     if required.len() > 0 -> out.push("required-effects = {pkg_lock_string_array(required)}\n")
     if granted.len() > 0 -> out.push("granted-effects = {pkg_lock_string_array(granted)}\n")
-    if package.denied_effects.len() > 0 -> out.push("denied-effects = {pkg_lock_string_array(package.denied_effects)}\n")
+    if package.denied_effects.len() > 0 {
+        out.push("denied-effects = {pkg_lock_string_array(package.denied_effects)}\n")
+    }
     if package.effect_authority == {
-        .Val(authority) -> out.push(pkg_lock_string_field("effect-authority", authority))
+        .Val(authority) -> { out.push(pkg_lock_string_field("effect-authority", authority)) }
         .None -> {}
     }
     // (A4): the realized-output envelope, emitted once the
     // package is realized.
     if package.envelope == {
-        .Val(envelope) -> pkg_lock_write_envelope(out, envelope)
+        .Val(envelope) -> { pkg_lock_write_envelope(out, envelope) }
         .None -> {}
     }
     if package.receipt == {
-        .Val(receipt) -> out.push(pkg_lock_string_field("receipt", receipt))
+        .Val(receipt) -> { out.push(pkg_lock_string_field("receipt", receipt)) }
         .None -> {}
     }
     if package.provenance == {
         .Val(provenance) -> {
             if provenance.transparency == {
-                .Val(value) -> out.push(pkg_lock_string_field("provenance-transparency", value))
+                .Val(value) -> { out.push(pkg_lock_string_field("provenance-transparency", value)) }
                 .None -> {}
             }
             if provenance.publisher == {
-                .Val(value) -> out.push(pkg_lock_string_field("provenance-publisher", value))
+                .Val(value) -> { out.push(pkg_lock_string_field("provenance-publisher", value)) }
                 .None -> {}
             }
             if provenance.build == {
-                .Val(value) -> out.push(pkg_lock_string_field("provenance-build", value))
+                .Val(value) -> { out.push(pkg_lock_string_field("provenance-build", value)) }
                 .None -> {}
             }
         }
@@ -213,14 +219,22 @@ pkg_lock_write_envelope: fn(out: &[String], envelope: LockEnvelope) Never! {
     out.push(pkg_lock_string_field("output-hash", envelope.output_hash))
     out.push(pkg_lock_string_field("platform", envelope.platform))
     if envelope.signature != "" -> out.push(pkg_lock_string_field("signature", envelope.signature))
-    if envelope.catalog_tier != "" -> out.push(pkg_lock_string_field("catalog-tier", envelope.catalog_tier))
-    if envelope.catalog_trust != "" -> out.push(pkg_lock_string_field("catalog-trust", envelope.catalog_trust))
+    if envelope.catalog_tier != "" {
+        out.push(pkg_lock_string_field("catalog-tier", envelope.catalog_tier))
+    }
+    if envelope.catalog_trust != "" {
+        out.push(pkg_lock_string_field("catalog-trust", envelope.catalog_trust))
+    }
     out.push(pkg_lock_string_field("provenance", envelope.provenance))
 }
 
 pkg_lock_write_workspace_overlay_policy: fn(out: &[String], policy: OverlayPolicy) Never! {
-    if policy.allow_unfree.len() > 0 -> out.push("workspace_policy_allow_unfree = {pkg_lock_string_array(policy.allow_unfree)}\n")
-    if policy.build_deny.len() > 0 -> out.push("workspace_policy_build_deny = {pkg_lock_string_array(policy.build_deny)}\n")
+    if policy.allow_unfree.len() > 0 {
+        out.push("workspace_policy_allow_unfree = {pkg_lock_string_array(policy.allow_unfree)}\n")
+    }
+    if policy.build_deny.len() > 0 {
+        out.push("workspace_policy_build_deny = {pkg_lock_string_array(policy.build_deny)}\n")
+    }
     loop grant in policy.build_grants {
         out.push("\n[[workspace_build_grant]]\n")
         out.push(pkg_lock_string_field("package", grant.subject))
@@ -233,7 +247,7 @@ pkg_lock_write_workspace_overlay_policy: fn(out: &[String], policy: OverlayPolic
             .Val(provider) -> {
                 out.push(pkg_lock_string_field("provider", provider.provider))
                 if provider.channel == {
-                    .Val(channel) -> out.push(pkg_lock_string_field("channel", channel))
+                    .Val(channel) -> { out.push(pkg_lock_string_field("channel", channel)) }
                     .None -> {}
                 }
             }
@@ -244,14 +258,16 @@ pkg_lock_write_workspace_overlay_policy: fn(out: &[String], policy: OverlayPolic
             out.push(pkg_lock_string_field("overlay", overlay.name))
             out.push(pkg_lock_string_field("package", package.package))
             if package.source == {
-                .Val(source) -> out.push(pkg_lock_string_field("source", source))
+                .Val(source) -> { out.push(pkg_lock_string_field("source", source)) }
                 .None -> {}
             }
             if package.version == {
-                .Val(version) -> out.push(pkg_lock_string_field("version", version))
+                .Val(version) -> { out.push(pkg_lock_string_field("version", version)) }
                 .None -> {}
             }
-            if package.flags.len() > 0 -> out.push("flags = {pkg_lock_string_array(package.flags)}\n")
+            if package.flags.len() > 0 {
+                out.push("flags = {pkg_lock_string_array(package.flags)}\n")
+            }
             out.push("priority = {package.priority}\n")
             if package.field_priorities.len() > 0 {
                 // Field priorities are written in key order.
@@ -266,7 +282,9 @@ pkg_lock_write_workspace_overlay_policy: fn(out: &[String], policy: OverlayPolic
                 loop fact in package.env -> facts.push("{fact.key}={fact.value}")
                 out.push("env = {pkg_lock_string_array(facts)}\n")
             }
-            if package.patches.len() > 0 -> out.push("patches = {pkg_lock_string_array(package.patches)}\n")
+            if package.patches.len() > 0 {
+                out.push("patches = {pkg_lock_string_array(package.patches)}\n")
+            }
             if package.allow_unfree -> out.push("allow_unfree = true\n")
         }
     }
@@ -277,11 +295,11 @@ pkg_lock_authority_value: fn(authority: PackageAuthority) -> String Never! {
     fields := [String]{}
 
     if authority.allow == {
-        .Val(allow) -> fields.push("allow: {pkg_lock_string_array(allow)}")
+        .Val(allow) -> { fields.push("allow: {pkg_lock_string_array(allow)}") }
         .None -> {}
     }
     if authority.deny == {
-        .Val(deny) -> fields.push("deny: {pkg_lock_string_array(deny)}")
+        .Val(deny) -> { fields.push("deny: {pkg_lock_string_array(deny)}") }
         .None -> {}
     }
 
@@ -289,7 +307,9 @@ pkg_lock_authority_value: fn(authority: PackageAuthority) -> String Never! {
 
     if authority.grants.len() > 0 {
         grants := [String]{}
-        loop grant in authority.grants -> grants.push("\"{pkg_lock_escape(grant.package)}\": {pkg_lock_string_array(grant.rights)}")
+        loop grant in authority.grants {
+            grants.push("\"{pkg_lock_escape(grant.package)}\": {pkg_lock_string_array(grant.rights)}")
+        }
         fields.push("grants: {{ {grants.join(", ")} }}")
     }
 
@@ -297,20 +317,26 @@ pkg_lock_authority_value: fn(authority: PackageAuthority) -> String Never! {
         .Val(trust) -> {
             trust_fields := [String]{}
             if trust.default == {
-                .Val(decision) -> trust_fields.push("default: {pkg_lock_trust_decision(decision)}")
+                .Val(decision) -> {
+                    trust_fields.push("default: {pkg_lock_trust_decision(decision)}")
+                }
                 .None -> {}
             }
             if trust.ci_prompt == {
-                .Val(decision) -> trust_fields.push("ci: {{ prompt: {pkg_lock_trust_decision(decision)} }}")
+                .Val(decision) -> {
+                    trust_fields.push("ci: {{ prompt: {pkg_lock_trust_decision(decision)} }}")
+                }
                 .None -> {}
             }
             if trust.services.len() > 0 {
                 services := [String]{}
-                loop service in trust.services -> services.push("\"{pkg_lock_escape(service.service)}\": {pkg_lock_trust_decision(service.decision)}")
+                loop service in trust.services {
+                    services.push("\"{pkg_lock_escape(service.service)}\": {pkg_lock_trust_decision(service.decision)}")
+                }
                 trust_fields.push("services: {{ {services.join(", ")} }}")
             }
             if trust.require == {
-                .Val(require) -> trust_fields.push("require: {require.label()}")
+                .Val(require) -> { trust_fields.push("require: {require.label()}") }
                 .None -> {}
             }
             fields.push("trust: {{ {trust_fields.join(", ")} }}")
@@ -322,8 +348,12 @@ pkg_lock_authority_value: fn(authority: PackageAuthority) -> String Never! {
         providers := [String]{}
         loop provider in authority.providers {
             provider_fields := [String]{"registry: \"{pkg_lock_escape(provider.registry)}\""}
-            if provider.allow.len() > 0 -> provider_fields.push("allow: {pkg_lock_string_array(provider.allow)}")
-            if provider.deny.len() > 0 -> provider_fields.push("deny: {pkg_lock_string_array(provider.deny)}")
+            if provider.allow.len() > 0 {
+                provider_fields.push("allow: {pkg_lock_string_array(provider.allow)}")
+            }
+            if provider.deny.len() > 0 {
+                provider_fields.push("deny: {pkg_lock_string_array(provider.deny)}")
+            }
             providers.push("\"{pkg_lock_escape(provider.provider)}\": {{ {provider_fields.join(", ")} }}")
         }
         fields.push("providers: {{ {providers.join(", ")} }}")
@@ -369,7 +399,9 @@ pkg_lock_canonicalize: fn(lock: &LockFile) Never! {
     policy.allow_unfree = pkg_overlay_sorted_unique(policy.allow_unfree)
     policy.build_deny = pkg_overlay_sorted_unique(policy.build_deny)
     grants := [BuildGrant]{}
-    loop grant in policy.build_grants -> grants.push(BuildGrant{subject: grant.subject, effects: pkg_overlay_sorted_unique(grant.effects)})
+    loop grant in policy.build_grants {
+        grants.push(BuildGrant{subject: grant.subject, effects: pkg_overlay_sorted_unique(grant.effects)})
+    }
     grants.sort_by(fn(grant) { grant.subject })
     unique := [BuildGrant]{}
     loop grant in grants {
@@ -383,11 +415,11 @@ pkg_lock_canonicalize: fn(lock: &LockFile) Never! {
 // Keep one package per name at the position of its first record, holding
 // the last record's value.
 pkg_lock_last_by_name_in_order: fn(values: [LockedPackage]) -> [LockedPackage] Never! {
-    positions := [String: Int]{}
+    positions := [String:Int]{}
     canonical := [LockedPackage]{}
     loop value in values {
         if positions.get(value.name) == {
-            .Val(index) -> canonical[index] = value
+            .Val(index) -> { canonical[index] = value }
             .None -> {
                 positions[value.name] = canonical.len()
                 canonical.push(value.copy())
@@ -399,7 +431,7 @@ pkg_lock_last_by_name_in_order: fn(values: [LockedPackage]) -> [LockedPackage] N
 
 // Keep the last record per name, ordered by name.
 pkg_lock_last_members: fn(values: [LockedWorkspaceMember]) -> [LockedWorkspaceMember] Never! {
-    by_key := [String: LockedWorkspaceMember]{}
+    by_key := [String:LockedWorkspaceMember]{}
     loop value in values -> by_key[value.name] = value
     out := [LockedWorkspaceMember]{}
     loop key in pkg_lock_sorted_keys(by_key.keys().to_list()) -> out.push(by_key[key])
@@ -408,7 +440,7 @@ pkg_lock_last_members: fn(values: [LockedWorkspaceMember]) -> [LockedWorkspaceMe
 
 // Keep the last toolchain per id, ordered by id.
 pkg_lock_last_toolchains: fn(values: [LockedToolchain]) -> [LockedToolchain] Never! {
-    by_key := [String: LockedToolchain]{}
+    by_key := [String:LockedToolchain]{}
     loop value in values -> by_key[value.id] = value
     out := [LockedToolchain]{}
     loop key in pkg_lock_sorted_keys(by_key.keys().to_list()) -> out.push(by_key[key])
@@ -417,7 +449,7 @@ pkg_lock_last_toolchains: fn(values: [LockedToolchain]) -> [LockedToolchain] Nev
 
 // Keep the last browser per engine, ordered by engine.
 pkg_lock_last_browsers: fn(values: [LockedBrowser]) -> [LockedBrowser] Never! {
-    by_key := [String: LockedBrowser]{}
+    by_key := [String:LockedBrowser]{}
     loop value in values -> by_key[value.engine] = value
     out := [LockedBrowser]{}
     loop key in pkg_lock_sorted_keys(by_key.keys().to_list()) -> out.push(by_key[key])
@@ -426,7 +458,7 @@ pkg_lock_last_browsers: fn(values: [LockedBrowser]) -> [LockedBrowser] Never! {
 
 // Keep the last source channel per name, ordered by name.
 pkg_lock_last_source_channels: fn(values: [LockedSourceChannel]) -> [LockedSourceChannel] Never! {
-    by_key := [String: LockedSourceChannel]{}
+    by_key := [String:LockedSourceChannel]{}
     loop value in values -> by_key[value.name] = value
     out := [LockedSourceChannel]{}
     loop key in pkg_lock_sorted_keys(by_key.keys().to_list()) -> out.push(by_key[key])
@@ -435,7 +467,7 @@ pkg_lock_last_source_channels: fn(values: [LockedSourceChannel]) -> [LockedSourc
 
 // Keep the last comptime input per path, ordered by path.
 pkg_lock_last_comptime_inputs: fn(values: [ComptimeInput]) -> [ComptimeInput] Never! {
-    by_key := [String: ComptimeInput]{}
+    by_key := [String:ComptimeInput]{}
     loop value in values -> by_key[value.path] = value
     out := [ComptimeInput]{}
     loop key in pkg_lock_sorted_keys(by_key.keys().to_list()) -> out.push(by_key[key])
@@ -509,9 +541,7 @@ pkg_lock_string_array: fn(values: [String]) -> String Never! {
     "[{quoted.join(", ")}]"
 }
 
-pkg_lock_bool: fn(value: Bool) -> String Never! {
-    if value -> "true" else -> "false"
-}
+pkg_lock_bool: fn(value: Bool) -> String Never! { if value -> "true" else -> "false" }
 
 // Backslash, quote, newline, carriage return, and tab escapes.
 pkg_lock_escape: fn(value: String) -> String Never! {

@@ -13,9 +13,11 @@ fixture_build: fn(address: String) {
     build: process.cmd([jet, "build", "guest.jet"]).stdout(.Capture).stderr(.Capture).run() ?? panic("build guest")
     assert(build.code == 0, "original guest compilation must succeed")
 }
+
 fixture_run: fn() -> ProcessReceipt {
     process.cmd([".jet/build/guest"]).stdout(.Capture).stderr(.Capture).run() ?? panic("run original guest")
 }
+
 #Test("core_http_client_exposes_binary_body_once") {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))

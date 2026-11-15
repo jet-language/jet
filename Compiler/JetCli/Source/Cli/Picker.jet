@@ -26,9 +26,12 @@ use {
 
 // The selected row's reverse video and the frame's border, as SGR parameters.
 JET_CLI_PICKER_INVERT: "48;5;24;97;1"
+
 JET_CLI_PICKER_BORDER: "90"
+
 // The pseudo-category whose rows are diagnostic codes, typed rather than listed.
 JET_CLI_PICKER_CODES: "Error Codes"
+
 // Frames never get narrower than this many columns.
 JET_CLI_PICKER_MIN_WIDTH: 24
 
@@ -68,10 +71,8 @@ JetCLIPickerMode: enum {
 }
 
 JetCLIPickerKey: enum {
-    // One typed character.
     Text(text: String)
     Enter
-    // Alt+Enter (ESC then CR or LF): pick the command's example.
     AltEnter
     Escape
     Tab
@@ -81,20 +82,24 @@ JetCLIPickerKey: enum {
     Left
     Right
     F1
-    // Ctrl-C, Ctrl-D, or the end of input.
     Quit
-    // Any other key: ignored.
     Other
 }
+
+// One typed character.
+// Alt+Enter (ESC then CR or LF): pick the command's example.
+// Ctrl-C, Ctrl-D, or the end of input.
+// Any other key: ignored.
 
 JetCLIPickerAction: enum {
     Continue
     Quit
     EnterReference
     LeaveReference
-    // The picked command line; None picks nothing (a code page).
     Submit(command: String?)
 }
+
+// The picked command line; None picks nothing (a code page).
 
 JetCLIPickerState: struct {
     index: [JetCLIPickerEntry]
@@ -172,16 +177,18 @@ jet_cli_picker_index: fn() -> [JetCLIPickerEntry] Never! {
     loop at in jet_cli_commands_in("frequency") {
         command: JET_CLI_COMMANDS[at]
         if !jet_cli_command_listed(command.name) -> next
-        entries.push(JetCLIPickerEntry{
-            name: "{command.name}",
-            usage: jet_cli_command_usage(command.name),
-            summary: "{command.summary}",
-            category: jet_cli_palette_category(command.name),
-            flags: jet_cli_flags_for_command(command.name),
-            example: jet_cli_picker_example(command.name),
-            see_also: jet_cli_picker_see_also(command.name),
-            keywords: jet_cli_picker_keywords(command.name),
-        })
+        entries.push(
+            JetCLIPickerEntry{
+                name: "{command.name}",
+                usage: jet_cli_command_usage(command.name),
+                summary: "{command.summary}",
+                category: jet_cli_palette_category(command.name),
+                flags: jet_cli_flags_for_command(command.name),
+                example: jet_cli_picker_example(command.name),
+                see_also: jet_cli_picker_see_also(command.name),
+                keywords: jet_cli_picker_keywords(command.name),
+            },
+        )
     }
     entries
 }
@@ -254,7 +261,9 @@ jet_cli_picker_fuzzy: fn(query: String, hay: String, positions: &[Int]) -> Int? 
 jet_cli_picker_consider: fn(best: &JetCLIPickerHit?, entry: Int, query: String, hay: String) Never! {
     positions := [Int]{}
     score: jet_cli_picker_fuzzy(query, hay, positions) ?? return
-    if best == .Val(current) && score <= current.score -> return
+    if best == .Val(current) && score <= current.score {
+        return
+    }
     best = Val(JetCLIPickerHit{entry: entry, score: score, haystack: "{hay}", positions: positions})
 }
 
@@ -267,7 +276,9 @@ jet_cli_picker_search: fn(index: [JetCLIPickerEntry], query: String) -> JetCLIPi
     if wanted == "" -> return JetCLIPickerFound{code: None, commands: commands}
     code: wanted.to_upper()
     if jet_cli_is_diagnostic_code(code) {
-        if diagnostic_explanation(code) == .Val(explanation) -> return JetCLIPickerFound{code: Val(explanation), commands: commands}
+        if diagnostic_explanation(code) == .Val(explanation) {
+            return JetCLIPickerFound{code: Val(explanation), commands: commands}
+        }
     }
     lowered: wanted.to_ascii_lower()
     loop (at, entry) in index {
@@ -275,7 +286,9 @@ jet_cli_picker_search: fn(index: [JetCLIPickerEntry], query: String) -> JetCLIPi
         jet_cli_picker_consider(best, at, wanted, "{JET_CLI_BINARY} {entry.name}")
         jet_cli_picker_consider(best, at, wanted, entry.usage)
         jet_cli_picker_consider(best, at, wanted, entry.summary)
-        loop flag in entry.flags -> jet_cli_picker_consider(best, at, wanted, "{flag.long} {flag.help}")
+        loop flag in entry.flags {
+            jet_cli_picker_consider(best, at, wanted, "{flag.long} {flag.help}")
+        }
         if entry.example == .Val(example) -> jet_cli_picker_consider(best, at, wanted, example)
         loop other in entry.see_also -> jet_cli_picker_consider(best, at, wanted, other)
         loop keyword in entry.keywords -> jet_cli_picker_consider(best, at, wanted, keyword)
@@ -302,18 +315,14 @@ jet_cli_picker_at_least: fn(value: Int, low: Int) -> Int Never! {
     if value < low -> low else -> value
 }
 
-jet_cli_picker_floor: fn(value: Int) -> Int Never! {
-    if value < 0 -> 0 else -> value
-}
+jet_cli_picker_floor: fn(value: Int) -> Int Never! { if value < 0 -> 0 else -> value }
 
 jet_cli_picker_min: fn(left: Int, right: Int) -> Int Never! {
     if left < right -> left else -> right
 }
 
 // Whether `byte` starts a UTF-8 scalar (is not a continuation byte).
-jet_cli_picker_lead: fn(byte: U8) -> Bool Never! {
-    (byte.bit_and(U8{192})) != (U8{128})
-}
+jet_cli_picker_lead: fn(byte: U8) -> Bool Never! { (byte.bit_and(U8{192})) != (U8{128}) }
 
 // Visible columns of `text`: its scalars outside `ESC ... m` sequences.
 jet_cli_picker_cols: fn(text: String) -> Int Never! {
@@ -322,9 +331,7 @@ jet_cli_picker_cols: fn(text: String) -> Int Never! {
     loop byte in text.bytes() {
         if escaped {
             if byte == (U8{109}) -> escaped = false
-        } else if byte == (U8{27}) {
-            escaped = true
-        } else if jet_cli_picker_lead(byte) {
+        } else if byte == (U8{27}) { escaped = true } else if jet_cli_picker_lead(byte) {
             count += 1
         }
     }
@@ -472,7 +479,9 @@ jet_cli_picker_categorized: fn(state: JetCLIPickerState, expanded: Bool, height:
         }
     }
     start: jet_cli_picker_min(jet_cli_picker_floor(focus - (visible - 1)), jet_cli_picker_floor(body.len() - visible))
-    loop at in start..<jet_cli_picker_min(start + visible, body.len()) -> out.push(jet_cli_picker_row(width, body[at].text, body[at].selected, color))
+    loop at in start..<jet_cli_picker_min(start + visible, body.len()) {
+        out.push(jet_cli_picker_row(width, body[at].text, body[at].selected, color))
+    }
     out.push(jet_cli_picker_bottom(width, color))
     out.join("\n")
 }
@@ -492,7 +501,9 @@ jet_cli_picker_results: fn(state: JetCLIPickerState, height: Int?) -> String Nev
     query_line: if color -> "{diagnostic_theme_paint(true, DIAGNOSTIC_THEME_ACCENT, ">")} {diagnostic_theme_paint(true, DIAGNOSTIC_THEME_BOLD, state.query)}" else -> "> {state.query}"
     out.push(jet_cli_picker_row(width, query_line, false, color))
     out.push(jet_cli_picker_mid(width, color))
-    if hits.len() == 0 -> out.push(jet_cli_picker_row(width, diagnostic_theme_paint(color, DIAGNOSTIC_THEME_WARN, "no matches"), false, color))
+    if hits.len() == 0 {
+        out.push(jet_cli_picker_row(width, diagnostic_theme_paint(color, DIAGNOSTIC_THEME_WARN, "no matches"), false, color))
+    }
     example := String?{None}
     if hits.len() > 0 {
         if state.index[hits[0].entry].example == .Val(text) -> example = Val("{text}")
@@ -519,7 +530,9 @@ jet_cli_picker_results: fn(state: JetCLIPickerState, height: Int?) -> String Nev
         line: if color -> "{diagnostic_theme_paint(true, DIAGNOSTIC_THEME_DIM, "Example")} {diagnostic_theme_paint(true, DIAGNOSTIC_THEME_BOLD, text)}" else -> "Example  {text}"
         out.push(jet_cli_picker_row(width, line, false, color))
     }
-    if show_footer -> out.push(jet_cli_picker_row(width, diagnostic_theme_paint(color, DIAGNOSTIC_THEME_DIM, "↑↓ · ⏎ command · Alt+⏎ example · ⇥ detail · F1"), false, color))
+    if show_footer {
+        out.push(jet_cli_picker_row(width, diagnostic_theme_paint(color, DIAGNOSTIC_THEME_DIM, "↑↓ · ⏎ command · Alt+⏎ example · ⇥ detail · F1"), false, color))
+    }
     out.push(jet_cli_picker_bottom(width, color))
     out.join("\n")
 }
@@ -539,8 +552,12 @@ jet_cli_picker_detail: fn(entry: JetCLIPickerEntry, width: Int, color: Bool) -> 
         label: if at == 0 -> "Flags   " else -> "        "
         out.push(jet_cli_picker_row(width, "{label}{flag.long}  {flag.help}", false, color))
     }
-    if entry.example == .Val(example) -> out.push(jet_cli_picker_row(width, "Example {example}", false, color))
-    if entry.see_also.len() > 0 -> out.push(jet_cli_picker_row(width, "See Also  {entry.see_also.join(" · ")}", false, color))
+    if entry.example == .Val(example) {
+        out.push(jet_cli_picker_row(width, "Example {example}", false, color))
+    }
+    if entry.see_also.len() > 0 {
+        out.push(jet_cli_picker_row(width, "See Also  {entry.see_also.join(" · ")}", false, color))
+    }
     out.push(jet_cli_picker_mid(width, color))
     out.push(jet_cli_picker_row(width, diagnostic_theme_paint(color, DIAGNOSTIC_THEME_DIM, "⏎ {command} · Alt+⏎ example · F1 open in reference"), false, color))
     out.push(jet_cli_picker_bottom(width, color))
@@ -584,7 +601,9 @@ jet_cli_picker_wrap: fn(text: String, width: Int) -> [JetCLIPickerWrapped] Never
         }
         row.push(byte)
     }
-    if bytes.len() > 0 && bytes[bytes.len() - 1] != (U8{10}) -> rows.push(JetCLIPickerWrapped{text: String.from_bytes(row) ?? "", hard_break: false})
+    if bytes.len() > 0 && bytes[bytes.len() - 1] != (U8{10}) {
+        rows.push(JetCLIPickerWrapped{text: String.from_bytes(row) ?? "", hard_break: false})
+    }
     rows
 }
 
@@ -657,7 +676,9 @@ jet_cli_picker_reference: fn(state: JetCLIPickerState) -> String Never! {
 // The frame for the state as it stands.
 jet_cli_picker_render: fn(state: JetCLIPickerState) -> String Never! {
     lists: state.mode == .Results || state.mode == .Detail
-    if lists && state.found.code == .Val(explanation) -> return jet_cli_picker_text_view(diagnostic_explanation_render(explanation, state.color), state.width, state.height, state.res_scroll)
+    if lists && state.found.code == .Val(explanation) {
+        return jet_cli_picker_text_view(diagnostic_explanation_render(explanation, state.color), state.width, state.height, state.res_scroll)
+    }
     if state.mode == {
         .Categorized -> jet_cli_picker_categorized(state, state.cat_entry != None, Val(state.height))
         .Results -> jet_cli_picker_results(state, Val(state.height))
@@ -674,7 +695,9 @@ jet_cli_picker_render: fn(state: JetCLIPickerState) -> String Never! {
 
 // The command the results or the categorized view has selected.
 jet_cli_picker_current: fn(state: JetCLIPickerState) -> Int? Never! {
-    if state.res_selected >= 0 && state.res_selected < state.found.commands.len() -> return Val(state.found.commands[state.res_selected].entry)
+    if state.res_selected >= 0 && state.res_selected < state.found.commands.len() {
+        return Val(state.found.commands[state.res_selected].entry)
+    }
     jet_cli_picker_category_entry(state)
 }
 
@@ -724,9 +747,13 @@ jet_cli_picker_list_mode: fn(state: JetCLIPickerState) -> JetCLIPickerMode Never
 
 // A reference search selects the best command and opens its category.
 jet_cli_picker_reference_search: fn(state: &JetCLIPickerState) Never! {
-    if state.ref_query == "" -> return
+    if state.ref_query == "" {
+        return
+    }
     found: jet_cli_picker_search(state.index, state.ref_query)
-    if found.commands.len() == 0 -> return
+    if found.commands.len() == 0 {
+        return
+    }
     first: found.commands[0].entry
     loop (at, category) in state.categories {
         if category == state.index[first].category -> state.ref_category = at
@@ -744,7 +771,9 @@ jet_cli_picker_move: fn(state: &JetCLIPickerState, delta: Int) Never! {
             }
         }
         .Results -> {
-            if state.found.commands.len() > 0 -> state.res_selected = jet_cli_picker_step(state.res_selected, state.found.commands.len(), delta)
+            if state.found.commands.len() > 0 {
+                state.res_selected = jet_cli_picker_step(state.res_selected, state.found.commands.len(), delta)
+            }
         }
         .Reference -> {
             if state.ref_entry == .Val(current) {
@@ -800,20 +829,18 @@ jet_cli_picker_apply: fn(state: &JetCLIPickerState, key: JetCLIPickerKey) -> Jet
     if key == {
         .Quit -> JetCLIPickerAction.Quit
         .Other -> JetCLIPickerAction.Continue
-        .Escape -> {
-            if state.mode == {
-                .Detail -> {
-                    state.mode = jet_cli_picker_list_mode(state)
-                    state.res_scroll = 0
-                    JetCLIPickerAction.Continue
-                }
-                .Reference -> {
-                    state.mode = jet_cli_picker_list_mode(state)
-                    state.ref_scroll = 0
-                    JetCLIPickerAction.LeaveReference
-                }
-                .Categorized | .Results -> JetCLIPickerAction.Quit
+        .Escape -> if state.mode == {
+            .Detail -> {
+                state.mode = jet_cli_picker_list_mode(state)
+                state.res_scroll = 0
+                JetCLIPickerAction.Continue
             }
+            .Reference -> {
+                state.mode = jet_cli_picker_list_mode(state)
+                state.ref_scroll = 0
+                JetCLIPickerAction.LeaveReference
+            }
+            .Categorized | .Results -> JetCLIPickerAction.Quit
         }
         .F1 -> {
             if state.mode == .Reference -> return JetCLIPickerAction.Continue
@@ -840,7 +867,7 @@ jet_cli_picker_apply: fn(state: &JetCLIPickerState, key: JetCLIPickerKey) -> Jet
                         state.res_scroll = 0
                     }
                 }
-                .Detail -> state.mode = jet_cli_picker_list_mode(state)
+                .Detail -> { state.mode = jet_cli_picker_list_mode(state) }
                 .Reference -> {}
             }
             JetCLIPickerAction.Continue
@@ -871,7 +898,9 @@ jet_cli_picker_apply: fn(state: &JetCLIPickerState, key: JetCLIPickerKey) -> Jet
                 jet_cli_picker_reference_search(state)
                 return JetCLIPickerAction.Continue
             }
-            if text == "q" && state.query == "" && state.mode == .Categorized -> return JetCLIPickerAction.Quit
+            if text == "q" && state.query == "" && state.mode == .Categorized {
+                return JetCLIPickerAction.Quit
+            }
             state.query = "{state.query}{text}"
             state.found = jet_cli_picker_search(state.index, state.query)
             state.res_selected = 0
@@ -908,7 +937,9 @@ jet_cli_picker_apply: fn(state: &JetCLIPickerState, key: JetCLIPickerKey) -> Jet
                     state.cat_entry = Val(0)
                     return JetCLIPickerAction.Continue
                 }
-                if jet_cli_picker_category_entry(state) == None -> return JetCLIPickerAction.Continue
+                if jet_cli_picker_category_entry(state) == None {
+                    return JetCLIPickerAction.Continue
+                }
             }
             JetCLIPickerAction.Submit{command: jet_cli_picker_pick(state, example)}
         }
@@ -928,7 +959,9 @@ jet_cli_picker_keys: fn(bytes: [U8], rest: &[U8]) -> [JetCLIPickerKey] Never! {
             // CSI (ESC [) and SS3 (ESC O) run to a final byte in 64..126.
             if follow == 91 || follow == 79 {
                 end := at + 2
-                loop end < bytes.len() && (Int{bytes[end]} < 64 || Int{bytes[end]} > 126) -> end += 1
+                loop end < bytes.len() && (Int{bytes[end]} < 64 || Int{bytes[end]} > 126) {
+                    end += 1
+                }
                 if end >= bytes.len() {
                     loop index in at..<bytes.len() -> rest.push(bytes[index])
                     return keys
@@ -952,7 +985,7 @@ jet_cli_picker_keys: fn(bytes: [U8], rest: &[U8]) -> [JetCLIPickerKey] Never! {
             next
         }
         if byte == 9 || byte == 127 || byte == 8 || byte == 3 || byte == 4 {
-            keys.push(if byte == 9 -> JetCLIPickerKey.Tab else -> if byte == 3 || byte == 4 -> JetCLIPickerKey.Quit else -> JetCLIPickerKey.Backspace)
+            keys.push(if byte == 9 -> JetCLIPickerKey.Tab else if byte == 3 || byte == 4 -> JetCLIPickerKey.Quit else -> JetCLIPickerKey.Backspace)
             at += 1
             next
         }
@@ -961,7 +994,7 @@ jet_cli_picker_keys: fn(bytes: [U8], rest: &[U8]) -> [JetCLIPickerKey] Never! {
             at += 1
             next
         }
-        size: if byte >= 240 -> 4 else -> if byte >= 224 -> 3 else -> if byte >= 192 -> 2 else -> 1
+        size: if byte >= 240 -> 4 else if byte >= 224 -> 3 else if byte >= 192 -> 2 else -> 1
         if at + size > bytes.len() {
             loop index in at..<bytes.len() -> rest.push(bytes[index])
             return keys
@@ -986,7 +1019,9 @@ jet_cli_picker_sequence: fn(introducer: Int, bytes: [U8], from: Int, final: Int)
     if last == 68 -> return JetCLIPickerKey.Left
     if introducer == 79 && last == 80 -> return JetCLIPickerKey.F1
     // ESC [ 1 1 ~ is F1 on the terminals that send it as a function key.
-    if introducer == 91 && last == 126 && final - from == 2 && bytes[from] == (U8{49}) && bytes[from + 1] == (U8{49}) -> return JetCLIPickerKey.F1
+    if introducer == 91 && last == 126 && final - from == 2 && bytes[from] == (U8{49}) && bytes[from + 1] == (U8{49}) {
+        return JetCLIPickerKey.F1
+    }
     JetCLIPickerKey.Other
 }
 
@@ -996,7 +1031,7 @@ jet_cli_picker_sequence: fn(introducer: Int, bytes: [U8], from: Int, final: Int)
 // reports no size gets the smallest frame.
 jet_cli_picker_size: fn() -[IO]> (h: Int, w: Int) Never! {
     size: picker_rt.terminal8_stty() ?? (h: 0, w: 0)
-    columns: if size.w < 24 -> 24 else -> if size.w > 160 -> 160 else -> size.w
+    columns: if size.w < 24 -> 24 else if size.w > 160 -> 160 else -> size.w
     (h: if size.h < 5 -> 5 else -> size.h, w: columns)
 }
 
@@ -1014,7 +1049,9 @@ jet_cli_picker_clear: fn(drawn: Int, height: Int) -> String Never! {
 // count, or None when stderr refused the write.
 jet_cli_picker_draw: fn(drawn: Int, frame: String, height: Int) -[Time.Wait]> Int? Never! {
     lines: frame.split("\n").to_list()
-    if picker_rt.terminal8_write_stderr("{jet_cli_picker_clear(drawn, height)}{lines.join("\r\n")}", true) != None -> return None
+    if picker_rt.terminal8_write_stderr("{jet_cli_picker_clear(drawn, height)}{lines.join("\r\n")}", true) != None {
+        return None
+    }
     Val(lines.len())
 }
 
@@ -1051,7 +1088,9 @@ jet_cli_picker_close: fn(drawn: Int, height: Int, alternate: Bool) -[Time.Wait]>
 jet_cli_picker: fn(color: Bool) -[IO, Time.Wait]> JetCLIPlan? Never! {
     prefill: picker_rt.terminal8_env_has(ENV_JET_HELP_SHELL_PREFILL)
     if picker_rt.terminal8_machine_output() || !picker_rt.terminal8_stdin_tty() -> return None
-    if !picker_rt.terminal8_stdout_tty() && !(prefill && picker_rt.terminal8_stderr_tty()) -> return None
+    if !picker_rt.terminal8_stdout_tty() && !(prefill && picker_rt.terminal8_stderr_tty()) {
+        return None
+    }
     if !picker_rt.terminal8_mode_enter(true) -> return None
     size := jet_cli_picker_size()
     state := jet_cli_picker_state(size.w, size.h, color)
@@ -1098,7 +1137,9 @@ jet_cli_picker: fn(color: Bool) -[IO, Time.Wait]> JetCLIPlan? Never! {
                     }
                 }
                 .Submit(command) -> {
-                    if !jet_cli_picker_close(drawn, state.height, alternate) -> return Val(jet_cli_done("", "", 1))
+                    if !jet_cli_picker_close(drawn, state.height, alternate) {
+                        return Val(jet_cli_done("", "", 1))
+                    }
                     return Val(jet_cli_picker_outcome(command, prefill))
                 }
             }

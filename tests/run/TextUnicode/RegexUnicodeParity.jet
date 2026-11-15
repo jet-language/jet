@@ -8,9 +8,7 @@ show: fn(label: String, re: rx.Regex, text: String) {
     print("{label}: is={rx.is_match(re, text)} full={rx.full_match(re, text)} find='{found}' all={rx.find_all(re, text).len()}")
 }
 
-pat: fn(p: String) -> rx.Regex {
-    rx.compile(p) ?? panic("compile {p}")
-}
+pat: fn(p: String) -> rx.Regex { rx.compile(p) ?? panic("compile {p}") }
 
 ci: fn(p: String) -> rx.Regex {
     rx.compile_with(p, rx.flags(true, false, false)) ?? panic("compile {p}")
@@ -18,7 +16,7 @@ ci: fn(p: String) -> rx.Regex {
 
 verdict: fn(p: String) {
     if rx.compile(p) == {
-        .Ok(_) -> print("{p}: compiles")
+        .Ok(_) -> { print("{p}: compiles") }
         .Err(_) -> print("{p}: syntax error")
     }
 }

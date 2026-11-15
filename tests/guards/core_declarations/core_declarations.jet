@@ -6,11 +6,23 @@
 // disagrees with its declarations is refused.
 use {
     jet_foundation.[
-        CORE_DECLARATIONS, CORE_DECLARATIONS_CORE_PATH, CORE_DECLARATIONS_ENCODING_PATH,
-        CORE_DECLARATIONS_PARTS_PATH, CORE_DECLARATIONS_RUNTIME_FILES, CORE_DECLARATIONS_SYNTAX_FILES,
-        CoreDeclarationError, CoreDeclarationFile, CoreDeclarations, EFFECT_VOCABULARY_ROOTS,
-        EFFECT_VOCABULARY_ROWS, core_declarations_read, core_declarations_source_problems,
-        core_decl_lang_type_problem, core_decl_mem_problem, core_decl_mem_tier_problem, core_decl_syntax_constants,
+        CORE_DECLARATIONS,
+        CORE_DECLARATIONS_CORE_PATH,
+        CORE_DECLARATIONS_ENCODING_PATH,
+        CORE_DECLARATIONS_PARTS_PATH,
+        CORE_DECLARATIONS_RUNTIME_FILES,
+        CORE_DECLARATIONS_SYNTAX_FILES,
+        CoreDeclarationError,
+        CoreDeclarationFile,
+        CoreDeclarations,
+        EFFECT_VOCABULARY_ROOTS,
+        EFFECT_VOCABULARY_ROWS,
+        core_declarations_read,
+        core_declarations_source_problems,
+        core_decl_lang_type_problem,
+        core_decl_mem_problem,
+        core_decl_mem_tier_problem,
+        core_decl_syntax_constants,
     ]
     corpus_manifest.[guards_enter_root]
     core_guard_files: core.files
@@ -34,7 +46,9 @@ core_guard_sources: fn(declared: CoreDeclarations) -[FS]> [CoreDeclarationFile] 
     loop part in declared.parts {
         if !paths.contains(part.path) -> paths.push(part.path.copy())
     }
-    if !paths.contains(CORE_DECLARATIONS_ENCODING_PATH) -> paths.push(CORE_DECLARATIONS_ENCODING_PATH)
+    if !paths.contains(CORE_DECLARATIONS_ENCODING_PATH) {
+        paths.push(CORE_DECLARATIONS_ENCODING_PATH)
+    }
     loop path in paths -> CoreDeclarationFile{path: path.copy(), text: core_guard_files.read(path) ?? panic("{path} did not read")}
 }
 
@@ -57,10 +71,12 @@ core_guard_sources: fn(declared: CoreDeclarations) -[FS]> [CoreDeclarationFile] 
     declared: core_guard_declared() ?? panic("Core.rows was refused: {err.message}")
     // `from_addr` is tiered Audit but declared plain; `stream_store` is
     // tiered Import but declared `#Unsafe`.
-    drifted: [CoreDeclarationFile]{CoreDeclarationFile{
-        path: "Core/Mem/Mem.jet",
-        text: "from_addr: fn<T>(addr: Int) -> *T Never!\n#Unsafe(\"a reason\") stream_store: fn<T>(dst: &T, value: T) Never!\n",
-    }}
+    drifted: [CoreDeclarationFile]{
+        CoreDeclarationFile{
+            path: "Core/Mem/Mem.jet",
+            text: "from_addr: fn<T>(addr: Int) -> *T Never!\n#Unsafe(\"a reason\") stream_store: fn<T>(dst: &T, value: T) Never!\n",
+        },
+    }
     problem: core_decl_mem_tier_problem(declared, CORE_DECLARATIONS_SYNTAX_FILES, drifted) ?? panic("the core.mem tiers did not read: {err.message}")
     assert(problem.contains("not tiered Audit=stream_store"))
     assert(problem.contains(",from_addr,"))

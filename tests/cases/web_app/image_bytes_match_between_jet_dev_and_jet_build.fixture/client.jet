@@ -67,7 +67,9 @@ run: fn() {
     out: sys.get("IMAGE_HASHES_FILE") ?? panic("missing IMAGE_HASHES_FILE")
     page: String.from_bytes(get_body(port, "/")) ?? panic("page UTF-8")
     lines := [String]{}
-    loop address in addresses(page) -> lines.push("{address} {crypto.sha256(get_body(port, address)).hex()}\n")
+    loop address in addresses(page) {
+        lines.push("{address} {crypto.sha256(get_body(port, address)).hex()}\n")
+    }
     text: lines.join("")
     files.write(out, text) ?? panic("record hashes: {err}")
     print("{lines.len()} addresses")

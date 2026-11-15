@@ -6,17 +6,15 @@ Pixel: struct {
     c: U8
 }
 
-#MustUse
-Receipt: struct {
+#MustUse Receipt: struct {
     id: Int
 }
 
 #[Inline, MustUse]
-brightness: fn(pixel: Pixel) -> Int {
-    pixel.b * 2
-}
+brightness: fn(pixel: Pixel) -> Int { pixel.b * 2 }
 
 PIXEL_SIZE: #run { Pixel.reflect().layout.size ?? -1 }
+
 PIXEL_C: #run { Pixel.reflect().layout.fields[2].offset ?? -1 }
 
 issue: fn() -> Receipt { Receipt{id: 4} }

@@ -4,12 +4,24 @@ use {
     jet_foundation.[diagnostic_render]
     jet_pkg_model.[PublicationRegistryConfig]
     jetpack_publication.[
-        PublicationGateStatus, PublicationIndexEntry, publication_community_with_name,
-        publication_core_reviewed, publication_e1234, publication_e1235, publication_e1246,
-        publication_e1247, publication_ensure_index_clone, publication_pinned_public_key,
-        publication_sign_bytes, publication_verify, publication_verify_entry_tier,
+        PublicationGateStatus,
+        PublicationIndexEntry,
+        publication_community_with_name,
+        publication_core_reviewed,
+        publication_e1234,
+        publication_e1235,
+        publication_e1246,
+        publication_e1247,
+        publication_ensure_index_clone,
+        publication_pinned_public_key,
+        publication_sign_bytes,
+        publication_verify,
+        publication_verify_entry_tier,
         publication_verify_index_entry,
-        publication_keygen, publication_read_entries, publication_sign, publication_write_index_entry,
+        publication_keygen,
+        publication_read_entries,
+        publication_sign,
+        publication_write_index_entry,
     ]
     files: core.files
     sys: core.sys
@@ -20,18 +32,21 @@ use {
 publication_verify_test_entry: fn(name: String, version: String, hash: String, key: String, signature: String) -> PublicationIndexEntry Never! {
     PublicationIndexEntry{name: name, version: version, content_hash: hash, fingerprint: "sha256-fp", yanked: false, tier: .Core, gate_status: publication_core_reviewed(), public_key: key, signature: signature}
 }
+
 publication_verify_test_seed: fn(byte: U8) -> [U8] Never! {
     seed := [U8]{}
     loop index in 0..<32 -> seed.push(byte)
     seed
 }
+
 publication_verify_test_public: fn(seed: [U8]) -> String Never! {
     key: publication_verify_test_crypto.SigningKey.from_bytes(seed) ?? panic("fixture seed")
     publication_verify_test_hex.encode(key.public_key().bytes)
 }
+
 publication_verify_test_refusal: fn(all: [PublicationIndexEntry], entry: PublicationIndexEntry, required: Bool, code: String) Never! {
     if publication_verify_index_entry(all, entry, required, "jet") == {
-        .Err(error) -> assert_eq(error.diagnostic.code, code)
+        .Err(error) -> { assert_eq(error.diagnostic.code, code) }
         .Ok(_) -> panic("untrusted entry accepted")
     }
 }
@@ -44,6 +59,7 @@ publication_verify_test_refusal: fn(all: [PublicationIndexEntry], entry: Publica
     whitespace.signature = " \t\n"
     publication_verify_test_refusal([PublicationIndexEntry]{whitespace}, whitespace, true, "E1247")
 }
+
 #Test("publication registry signed entry without discoverable pin is E1246") {
     signed: publication_verify_test_entry("textkit", "1.0.0", "sha256-abc", "", "nonempty")
     publication_verify_test_refusal([PublicationIndexEntry]{signed}, signed, false, "E1246")
@@ -51,11 +67,13 @@ publication_verify_test_refusal: fn(all: [PublicationIndexEntry], entry: Publica
     candidate.public_key = "candidate-key"
     publication_verify_test_refusal([PublicationIndexEntry]{signed}, candidate, false, "E1246")
 }
+
 #Test("publication registry unsigned takeover is refused even when signing optional") {
     old: publication_verify_test_entry("textkit", "1.0.0", "sha256-old", "first-key", "")
     candidate: publication_verify_test_entry("textkit", "2.0.0", "sha256-new", "second-key", " \n")
     publication_verify_test_refusal([PublicationIndexEntry]{old, candidate}, candidate, false, "E1247")
 }
+
 #Test("publication registry sign_verify_roundtrip_and_tamper_e1246") {
     seed: publication_verify_test_seed(U8{17})
     public_key: publication_verify_test_public(seed)
@@ -68,6 +86,7 @@ publication_verify_test_refusal: fn(all: [PublicationIndexEntry], entry: Publica
     bad.content_hash = "sha256-TAMPEREDdeadbeef"
     publication_verify_test_refusal([PublicationIndexEntry]{bad}, bad, false, "E1246")
 }
+
 #Test("publication registry yanked first key remains pin and takeover verifies declared key") {
     seed_a: publication_verify_test_seed(U8{17})
     seed_b: publication_verify_test_seed(U8{29})
@@ -87,11 +106,13 @@ publication_verify_test_refusal: fn(all: [PublicationIndexEntry], entry: Publica
     pinned: publication_verify_test_entry("textkit", "3.0.0", hash, "", publication_sign_bytes(seed_a, hash) ?? panic("pinned signer"))
     assert_eq(publication_verify_index_entry(all, pinned, false, "jet") ?? panic("yank-inclusive pin"), [String]{})
 }
+
 #Test("publication registry malformed signature is hard E1246") {
     seed: publication_verify_test_seed(U8{17})
     entry: publication_verify_test_entry("textkit", "1.0.0", "sha256-abc", publication_verify_test_public(seed), "not-base64!")
     publication_verify_test_refusal([PublicationIndexEntry]{entry}, entry, false, "E1246")
 }
+
 #Test("publication registry core bypasses community gates but community requires all four") {
     entry := publication_verify_test_entry("communitykit", "1.0.0", "sha256-abc", "", "")
     publication_verify_entry_tier(entry) ?? panic("core")
@@ -100,7 +121,9 @@ publication_verify_test_refusal: fn(all: [PublicationIndexEntry], entry: Publica
     if publication_verify_entry_tier(entry) == {
         .Err(error) -> {
             assert_eq(error.diagnostic.code, "E2105")
-            loop gate in ([String]{"#935", "#431", "#1912", "#1913"}) -> assert(error.diagnostic.what.contains(gate))
+            loop gate in ([String]{"#935", "#431", "#1912", "#1913"}) {
+                assert(error.diagnostic.what.contains(gate))
+            }
         }
         .Ok(_) -> panic("closed community accepted")
     }
@@ -113,11 +136,12 @@ publication_verify_test_refusal: fn(all: [PublicationIndexEntry], entry: Publica
         if gate == 2 -> closed.gate_status.name = .NotRequired
         if gate == 3 -> closed.gate_status.liveness = .Blocked
         if publication_verify_entry_tier(closed) == {
-            .Err(error) -> assert_eq(error.diagnostic.code, "E2105")
+            .Err(error) -> { assert_eq(error.diagnostic.code, "E2105") }
             .Ok(_) -> panic("one closed gate accepted")
         }
     }
 }
+
 #Test("publication registry exact verification and immutability diagnostics") {
     signature: publication_e1246("textkit", "1.0.0")
     assert_eq(signature.code, "E1246")
@@ -135,6 +159,7 @@ publication_verify_test_refusal: fn(all: [PublicationIndexEntry], entry: Publica
     assert_eq(immutable.why, "Published versions are immutable — a version can never be overwritten or reused after a yank, so anyone who already locked it keeps building the exact same bytes.")
     assert_eq(immutable.fix, "Bump the version in `package.jet` and publish again, or `jet registry yank 1.0.0` the existing one first if it was a mistake (yanking hides it from new resolution; it does not free the version number for reuse).")
 }
+
 #Test("publication registry exact E1235 discards raw git detail") {
     diagnostic: publication_e1235("https://user:super-secret@example.invalid/registry.git?token=hidden", "git helper failed after receiving password super-secret")
     assert_eq(diagnostic.code, "E1235")
@@ -166,14 +191,14 @@ publication_verify_test_refusal: fn(all: [PublicationIndexEntry], entry: Publica
     files.create_dir_all(repo) ?? panic("repo")
     publication_write_index_entry(repo, v1) ?? panic("write1")
     if publication_write_index_entry(repo, v2) == {
-        .Err(error) -> assert("{error}".contains("no approved registry review"))
+        .Err(error) -> { assert("{error}".contains("no approved registry review")) }
         .Ok(_) -> panic("unreviewed takeover accepted")
     }
     review: files.join(repo, "reviews/textkit/2.0.0.review")
     files.create_dir_all(files.dirname(review)) ?? panic("review dir")
     files.write(review, "jet-registry-core-review-v1\npackage=textkit\nversion=2.0.0\nreviewer=registry-owner\ndecision=approved\n") ?? panic("review")
     if publication_write_index_entry(repo, wrong) == {
-        .Err(error) -> assert("{error}".contains("Signature verification failed"))
+        .Err(error) -> { assert("{error}".contains("Signature verification failed")) }
         .Ok(_) -> panic("old signer takeover accepted")
     }
     publication_write_index_entry(repo, v2) ?? panic("reviewed takeover")
@@ -181,7 +206,7 @@ publication_verify_test_refusal: fn(all: [PublicationIndexEntry], entry: Publica
     assert_eq(publication_verify_index_entry(all, v2, false, "jet") ?? panic("verify takeover"), [String]{})
     assert_eq(files.read_bytes(key_a.seed_path) ?? panic("unchanged seed"), original_seed)
     if previous_keys == {
-        .Val(value) -> sys.set("JET_KEYS_DIR", value)
+        .Val(value) -> { sys.set("JET_KEYS_DIR", value) }
         .None -> { _: sys.unset("JET_KEYS_DIR") ?? panic("restore env") }
     }
     files.remove_all(root) ?? panic("cleanup")
@@ -206,7 +231,7 @@ publication_verify_test_refusal: fn(all: [PublicationIndexEntry], entry: Publica
     bad.content_hash = "sha256-TAMPEREDdeadbeef"
     publication_verify_test_refusal([PublicationIndexEntry]{bad}, bad, false, "E1246")
     if previous_keys == {
-        .Val(value) -> sys.set("JET_KEYS_DIR", value)
+        .Val(value) -> { sys.set("JET_KEYS_DIR", value) }
         .None -> { _: sys.unset("JET_KEYS_DIR") ?? panic("restore env") }
     }
     files.remove_all(root) ?? panic("cleanup")
@@ -215,10 +240,11 @@ publication_verify_test_refusal: fn(all: [PublicationIndexEntry], entry: Publica
 #Test("publication registry original transport rejects and redacts embedded credentials") {
     // RegistryTransport and protected clone service are queued mandatory
     // dependencies (#4262/#3593/#3594); no test skip or mock.
-    loop url in ([String]{
+    loop url in
+        ([String]{
         "https://user:super-secret@example.invalid/registry.git",
         "https://example.invalid/registry.git?access_token=super-secret",
-        "file:///registry.git?access_token=super-secret"
+        "file:///registry.git?access_token=super-secret",
     }) {
         registry: PublicationRegistryConfig{name: "scratch", url: url, mirror: false, require_signed: false, tier: .Core}
         if publication_ensure_index_clone(registry) == {

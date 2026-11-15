@@ -222,7 +222,8 @@ kit_test_core_scratch: fn(label: String) -> String {
         assert_eq(run.limit_hit, "memory")
         assert_eq((kit_exec_process_failure(run) ?? panic("memory")).detail, "memory limit hit")
     }
-    loop run in [first_stall.join() ?? panic("stall"), second_stall.join() ?? panic("stall"), third_stall.join() ?? panic("stall"), fourth_stall.join() ?? panic("stall")] {
+    loop run in
+        [first_stall.join() ?? panic("stall"), second_stall.join() ?? panic("stall"), third_stall.join() ?? panic("stall"), fourth_stall.join() ?? panic("stall")] {
         assert(run.timed_out)
         assert_eq((kit_exec_process_failure(run) ?? panic("timeout")).status, "TIMEOUT")
     }
@@ -261,9 +262,7 @@ kit_test_pool_report: fn(env: KitEnv, root: String, index: Int, done: Sender<Int
     kit_test_pool_send(done, run.code).drop("nobody collects a stopped pool")
 }
 
-kit_test_pool_send: fn(done: Sender<Int>, code: Int) Err! {
-    done.send(code)
-}
+kit_test_pool_send: fn(done: Sender<Int>, code: Int) Err! { done.send(code) }
 
 // Every running entry holds two scheduler workers, its reporting task and its own, and
 // waits on its children itself (kit_exec_wait). A watcher task per child once left every
@@ -277,7 +276,9 @@ kit_test_pool_send: fn(done: Sender<Int>, code: Int) Err! {
     { sender: done, receiver: finished }: channel<Int>()
     seen := 0
     task.group pool(limit: jobs) {
-        loop index in 0..<jobs -> task kit_test_pool_report(env.copy(), root.copy(), index, done.copy())
+        loop index in 0..<jobs {
+            task kit_test_pool_report(env.copy(), root.copy(), index, done.copy())
+        }
         loop seen < jobs {
             code: finished.receive() ?? break
             assert_eq(code, 0)
@@ -383,7 +384,8 @@ kit_test_pool_send: fn(done: Sender<Int>, code: Int) Err! {
     kit_exec_write(files.join(project, ".jet/cache"), "stale\n")
     work: files.join(root, "work")
     kit_golden_stage(project, KitEntry{path: "group/main.jet", expected: "expected/main", project: "group", suite: "golden", mode: ""}, work)
-    loop kept in ["main.jet", "main.stdin", "helper.jet", "deep.jet", "data.txt", "support/other.jet"] {
+    loop kept in
+        ["main.jet", "main.stdin", "helper.jet", "deep.jet", "data.txt", "support/other.jet"] {
         assert(files.exists(files.join(work, kept)), "{kept} is staged")
     }
     loop left in ["other.jet", "other.stdin", ".jet"] {
@@ -460,7 +462,7 @@ kit_test_pool_send: fn(done: Sender<Int>, code: Int) Err! {
     // A 24 GiB scope with 1 GiB in use, on a host with room to spare.
     budget: kit_exec_room(100 * gib, 24 * gib, gib)
     assert_eq(budget, 23 * gib)
-    history := [String: KitHistory]{}
+    history := [String:KitHistory]{}
     history[kit_history_key("pool", "heavy")] = KitHistory{wall_ms: 600000, peak_kib: 12 * 1048576}
     history[kit_history_key("pool", "light")] = KitHistory{wall_ms: 60000, peak_kib: 7 * 1048576}
     keys: [kit_history_key("pool", "light"), kit_history_key("pool", "heavy"), kit_history_key("pool", "new")]
@@ -492,13 +494,13 @@ kit_test_pool_send: fn(done: Sender<Int>, code: Int) Err! {
     ]
     paths: ["ok", "three", "missing"]
     keys: paths.map(fn(path) { kit_history_key("pool", path) })
-    runs: kit_pool_run(specs, kit_schedule_claims(keys, [String: KitHistory]{}, 1073741824, 2, 0, 0))
+    runs: kit_pool_run(specs, kit_schedule_claims(keys, [String:KitHistory]{}, 1073741824, 2, 0, 0))
     assert_eq(runs.map(fn(run) { run.index }), [0, 1, 2])
     assert_eq((runs[0].receipt ?? panic("the first run has no receipt: {runs[0].error}")).code, 0)
     assert_eq((runs[1].receipt ?? panic("the second run has no receipt: {runs[1].error}")).code, 3)
     assert(runs[2].receipt == None && runs[2].error != "", "a spec that can't start keeps why")
     root: cases_test_root("pool-history")
-    kit_pool_save(root, "pool", paths, [String: KitHistory]{}, runs)
+    kit_pool_save(root, "pool", paths, [String:KitHistory]{}, runs)
     loaded: kit_history_load(root, ["pool"])
     first: loaded.get(kit_history_key("pool", "ok")) ?? panic("the first run's measurement wasn't kept")
     assert(first.wall_ms > 0 && first.peak_kib > 0, "a run keeps its wall time and peak")
@@ -513,7 +515,7 @@ kit_test_pool_send: fn(done: Sender<Int>, code: Int) Err! {
     assert_eq(kit_execute_budget(3 * gib, 16 * gib), 3 * gib)
     assert_eq(kit_execute_budget(0, 0), 0)
     entries: ["a", "b", "c", "d"].map(fn(name) { KitSelected{entry: KitEntry{path: name, expected: name, project: "", suite: "cases", mode: ""}, suite: "cases"} })
-    history := [String: KitHistory]{}
+    history := [String:KitHistory]{}
     history[kit_history_key("cases", "b")] = KitHistory{wall_ms: 100, peak_kib: 10240}
     history[kit_history_key("cases", "c")] = KitHistory{wall_ms: 9000, peak_kib: 8 * 1048576}
     history[kit_history_key("cases", "d")] = KitHistory{wall_ms: 9000, peak_kib: 512 * 1024}
@@ -561,13 +563,15 @@ kit_test_selected: fn(suite: String, path: String) -> KitSelected {
     root: cases_test_root("pool-order")
     names: ["a", "b", "c", "d", "e"]
     // Earlier entries sleep longer, so a wider pool finishes them out of order.
-    loop (index, name) in names -> cases_test_source(root, name, "step: jet -c 'sleep 0.{names.len() - 1 - index}'\nstdout: empty\nstderr: empty\n")
+    loop (index, name) in names {
+        cases_test_source(root, name, "step: jet -c 'sleep 0.{names.len() - 1 - index}'\nstdout: empty\nstderr: empty\n")
+    }
     corpus: names.map(fn(name) { KitSelected{entry: cases_test_entry(name), suite: "cases"} })
     context: cases_test_context(root, files.join(root, "scratch"))
     loop jobs in [1, 2, 5] {
         run_scratch: files.join(root, "run-{jobs}")
         files.create_dir_all(run_scratch) ?? panic("pool run scratch: {err}")
-        schedule: kit_execute_schedule(corpus, [String: KitHistory]{}, jobs, 0, 0)
+        schedule: kit_execute_schedule(corpus, [String:KitHistory]{}, jobs, 0, 0)
         rows := [String]{}
         loop run in kit_execute_entries(corpus, schedule, context.options, context.env, context.known, root, run_scratch) {
             loop result in run.results -> rows.push("{result.case} {result.status}")
@@ -588,7 +592,7 @@ kit_test_selected: fn(suite: String, path: String) -> KitSelected {
     cases_report: files.join(root, "cases.json")
     passed: KitCaseResult{suite: "cases", case: "tests/cases/a.case", tier: "-", status: "PASS", detail: "", exit: 0}
     failed: KitCaseResult{suite: "ui", case: "tests/ui/b.jet", tier: "-", status: "FAIL", detail: "snapshot", exit: 1}
-    reports := [String: String]{}
+    reports := [String:String]{}
     reports["ui"] = ui_report
     only_ui: kit_execute_finish("jet", [failed], ["ui"], ["ui"], Val(reports), "")
     assert_eq(only_ui.code, 1)

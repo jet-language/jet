@@ -16,10 +16,7 @@
 // - any other argument covers by equality.
 // A bare effect (`FS.Read`) covers every scoped instance of itself and of its
 // leaves. A scoped effect never covers the bare one.
-
-use {
-    rt_authority: jet.runtime.authority
-}
+use rt_authority: jet.runtime.authority
 
 // An effect name split at its scope argument: `FS.Read("templates/")` is
 // `FS.Read` with scope `templates/`; a name with no quoted argument is bare.
@@ -37,19 +34,13 @@ effect_scope_split: fn(name: String) -> EffectScopeName Never! {
 }
 
 // The written spelling of `base` scoped to `scope`.
-effect_scope_name: fn(base: String, scope: String) -> String Never! {
-    "{base}(\"{scope}\")"
-}
+effect_scope_name: fn(base: String, scope: String) -> String Never! { "{base}(\"{scope}\")" }
 
 // Whether `name` carries a scope argument.
-effect_scope_is_scoped: fn(name: String) -> Bool Never! {
-    effect_scope_split(name).scope != None
-}
+effect_scope_is_scoped: fn(name: String) -> Bool Never! { effect_scope_split(name).scope != None }
 
 // The bare effect `name` scopes (`FS.Read` for `FS.Read("assets/")`).
-effect_scope_base: fn(name: String) -> String Never! {
-    effect_scope_split(name).base
-}
+effect_scope_base: fn(name: String) -> String Never! { effect_scope_split(name).base }
 
 // A scope argument the laws accept: not empty, and free of the quote and
 // backslash a written row could not spell back.
@@ -105,9 +96,13 @@ effect_scope_covers: fn(bound: String, need: String) -> Bool Never! {
 // the callee's first parameter is `path`, and `declared` its declared row.
 effect_scope_published_effect: fn(callee_key: String, path_first: Bool, declared: [String]) -> String? Never! {
     if callee_key.ends_with(":<corelib>/core.http::get") -> return Val("Net")
-    if !callee_key.contains(":<corelib>/core.files::") || !path_first || declared.len() != 1 -> return None
+    if !callee_key.contains(":<corelib>/core.files::") || !path_first || declared.len() != 1 {
+        return None
+    }
     leaf: declared[0]
-    if effect_scope_kind(leaf) != "path" || !leaf.contains(".") || effect_scope_is_scoped(leaf) -> return None
+    if effect_scope_kind(leaf) != "path" || !leaf.contains(".") || effect_scope_is_scoped(leaf) {
+        return None
+    }
     // copy: the caller keeps its declared row.
     Val(leaf.copy())
 }
@@ -127,7 +122,9 @@ effect_scope_descriptor: fn(name: String, key: String, path_first: Bool, row: [S
     loop entry in written_row {
         if !entry.starts_with("!") && !entry.starts_with("..") -> allowed.push(entry.trim().copy())
     }
-    if effect_scope_published_effect(key, path_first, allowed) == .Val(published) -> return "@{published}"
+    if effect_scope_published_effect(key, path_first, allowed) == .Val(published) {
+        return "@{published}"
+    }
     entries := [String]{}
     scoped := false
     loop entry in written_row {

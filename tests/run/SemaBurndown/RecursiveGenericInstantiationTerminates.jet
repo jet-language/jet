@@ -18,10 +18,10 @@ Memo: struct<T> {
 }
 
 QueryEngine: struct<T> {
-    memos: [Key: Memo<T>]
+    memos: [Key:Memo<T>]
     revision: Int
 
-    new: fn() -> QueryEngine<T> { QueryEngine<T>{memos: [Key: Memo<T>]{}, revision: 0} }
+    new: fn() -> QueryEngine<T> { QueryEngine<T>{memos: [Key:Memo<T>]{}, revision: 0} }
 
     put: fn(&self, key: Key, value: T, deps: [Key]) {
         self.memos[key] = Memo<T>{value: value, deps: deps, rev: self.revision}
@@ -49,11 +49,13 @@ GCEntry: struct<O> {
 }
 
 GCState: struct<O> {
-    entries: [U64: GCEntry<O>]
+    entries: [U64:GCEntry<O>]
 
-    new: fn() -> GCState<O> { GCState<O>{entries: [U64: GCEntry<O>]{}} }
+    new: fn() -> GCState<O> { GCState<O>{entries: [U64:GCEntry<O>]{}} }
 
-    insert: fn(&self, id: U64, object: O) { self.entries[id] = GCEntry<O>{object: object, marked: false} }
+    insert: fn(&self, id: U64, object: O) {
+        self.entries[id] = GCEntry<O>{object: object, marked: false}
+    }
 
     count: fn(self) -> Int { self.entries.len() }
 }
@@ -68,9 +70,7 @@ Tree: struct<T> {
 
     count: fn(self) -> Int {
         total := 1
-        loop child in self.children {
-            total += child.count()
-        }
+        loop child in self.children -> total += child.count()
         total
     }
 }

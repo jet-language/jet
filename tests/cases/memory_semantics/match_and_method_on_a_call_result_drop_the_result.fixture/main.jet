@@ -13,6 +13,7 @@ package: {
 use files: core.files
 
 ROUNDS: 40000
+
 GROWTH_LIMIT_KB: 8192
 
 Row: struct {
@@ -24,9 +25,7 @@ Table: struct {
     rows: [Row]
     count: Int
 
-    total: fn(self) -> Int {
-        self.count + self.rows.len()
-    }
+    total: fn(self) -> Int { self.count + self.rows.len() }
 }
 
 Shape: enum {
@@ -51,17 +50,11 @@ make_rows: fn(n: Int) -> [Row] {
     rows
 }
 
-make_table: fn(n: Int) -> Table {
-    Table{rows: make_rows(n), count: n}
-}
+make_table: fn(n: Int) -> Table { Table{rows: make_rows(n), count: n} }
 
-make_option: fn(n: Int) -> Table? {
-    Val(make_table(n))
-}
+make_option: fn(n: Int) -> Table? { Val(make_table(n)) }
 
-make_shape: fn(n: Int) -> Shape {
-    Shape.Rows{rows: make_rows(n)}
-}
+make_shape: fn(n: Int) -> Shape { Shape.Rows{rows: make_rows(n)} }
 
 make_text: fn(n: Int) -> String {
     parts := [String]{}
@@ -92,19 +85,13 @@ if_pattern: fn() -> Int {
 }
 
 // A method of a struct on a fresh receiver.
-struct_method: fn() -> Int {
-    make_table(16).total()
-}
+struct_method: fn() -> Int { make_table(16).total() }
 
 // A chain of String methods on a fresh receiver.
-text_chain: fn() -> Int {
-    make_text(64).trim().len()
-}
+text_chain: fn() -> Int { make_text(64).trim().len() }
 
 // A field and a method through `?.` on a fresh Option.
-optional_chain: fn() -> Int {
-    (make_option(16)?.count ?? 0) + (make_option(16)?.total() ?? 0)
-}
+optional_chain: fn() -> Int { (make_option(16)?.count ?? 0) + (make_option(16)?.total() ?? 0) }
 
 // A fresh value compared and interpolated.
 compared_and_interpolated: fn() -> Int {
@@ -117,7 +104,9 @@ measure: fn(name: String, scenario: fn() -> Int) {
     start: status_kb("VmRSS:")
     loop _ in 1..<ROUNDS -> total += scenario()
     grown: status_kb("VmRSS:") - start
-    if grown > GROWTH_LIMIT_KB -> panic("{name}: the resident set grew {grown} kB over {ROUNDS} rounds")
+    if grown > GROWTH_LIMIT_KB {
+        panic("{name}: the resident set grew {grown} kB over {ROUNDS} rounds")
+    }
     print("{name}: {total}, every result dropped")
 }
 

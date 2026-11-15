@@ -20,9 +20,7 @@ Resource: struct {
 }
 
 run: fn() {
-    #Unsafe("the exit callback has no captured state") {
-        os.atexit(fn() { print("atexit") })
-    }
+    #Unsafe("the exit callback has no captured state") { os.atexit(fn() { print("atexit") }) }
     outer: scope.guard(fn() { print("guard outer") })
     inner: scope.guard(fn() { print("guard inner") })
     resource := Resource{name: "resource"}

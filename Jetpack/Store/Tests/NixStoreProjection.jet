@@ -7,6 +7,7 @@
 // harness; they belong with the Environment claims.
 
 STORE_TEST_PROJECTION_ROOT: "/nix/store/00000000000000000000000000000000-root"
+
 STORE_TEST_PROJECTION_LEAF: "/nix/store/11111111111111111111111111111111-leaf"
 
 // The admitted entry whose producer records `store_path`.
@@ -73,11 +74,11 @@ store_test_signed_narinfo: fn(store_path: String, nar_name: String, nar: [U8], r
 // caller shuts the server down with `store_test_stop_cache_server`.
 StoreTestCacheServer: struct {
     server: HTTPServer
-    serving: Task<Unit>
+    serving: Task<()>
     endpoint: String
 }
 
-store_test_start_cache_server: fn(roots: HangarRoots, routes: [String: [U8]]) -> StoreTestCacheServer Never! {
+store_test_start_cache_server: fn(roots: HangarRoots, routes: [String:[U8]]) -> StoreTestCacheServer Never! {
     site: files.join(roots.root, "projection-cache-site")
     loop route in routes {
         path: files.join(site, route.key.removeprefix("/"))
@@ -95,7 +96,7 @@ store_test_start_cache_server: fn(roots: HangarRoots, routes: [String: [U8]]) ->
     StoreTestCacheServer{server: server, serving: serving, endpoint: "http://{address}"}
 }
 
-store_test_stop_cache_server: fn(&&cache: StoreTestCacheServer) Never! {
+store_test_stop_cache_server: fn(cache: &&StoreTestCacheServer) Never! {
     _: cache.server.shutdown(time.duration_ms(100)) ?? panic("shutdown")
     cache.serving.join() ?? panic("server task")
 }
@@ -114,7 +115,7 @@ store_test_admit_signed_closure: fn(verification: &StoreVerification, roots: Han
     seed := [U8]{}
     loop _ in 0..<32 -> seed.push(U8{9})
     key_id: "jetpack-projection-test-1"
-    routes: [String: [U8]]{
+    routes: [String:[U8]]{
         "/nix-cache-info": "StoreDir: /nix/store\nWantMassQuery: 1\n".bytes(),
         "/00000000000000000000000000000000.narinfo": store_test_signed_narinfo(STORE_TEST_PROJECTION_ROOT, "root.nar", root_nar, [String]{STORE_TEST_PROJECTION_LEAF}, key_id, seed).bytes(),
         "/11111111111111111111111111111111.narinfo": store_test_signed_narinfo(STORE_TEST_PROJECTION_LEAF, "leaf.nar", leaf_nar, [String]{}, key_id, seed).bytes(),
@@ -140,8 +141,9 @@ store_test_admit_signed_closure: fn(verification: &StoreVerification, roots: Han
     root_path: (admitted.outputs.get("out") ?? panic("out output")).store_path
     entry: store_test_find_entry(entries, root_path)
     lease: store_snapshot_lease(verification, roots, entry) ?? panic("lease")
-    projected := [String: String]{}
-    loop item in store_nix_store_projection_for_entry(verification, roots, entry, lease.snapshot_root) ?? panic("projection") {
+    projected := [String:String]{}
+    loop item in
+        store_nix_store_projection_for_entry(verification, roots, entry, lease.snapshot_root) ?? panic("projection") {
         assert(!store_path_starts_with(item.source, "/nix/store"))
         projected[item.logical] = item.source
     }
@@ -155,7 +157,9 @@ store_test_admit_signed_closure: fn(verification: &StoreVerification, roots: Han
     loop pair in projected -> actual.push(pair.key.removeprefix("/nix/store/"))
     assert_eq(store_sorted_unique(actual), store_sorted_unique(expected))
     objects: files.join(roots.hangar_dir(), STORE_OBJECTS_DIR)
-    loop pair in projected -> assert(pair.value == lease.snapshot_root || store_path_starts_with(pair.value, objects))
+    loop pair in projected {
+        assert(pair.value == lease.snapshot_root || store_path_starts_with(pair.value, objects))
+    }
     lease.release()
     store_test_drop_roots(roots)
 }
@@ -176,7 +180,7 @@ store_test_admit_signed_closure: fn(verification: &StoreVerification, roots: Han
     store_make_tree_writable_for_removal(leaf) ?? panic("chmod leaf")
     files.remove_all(leaf) ?? panic("remove leaf")
     if store_snapshot_lease(verification, roots, entry) == {
-        .Ok(_) -> panic("missing closure object must reject the lease")
+        .Ok(_) -> { panic("missing closure object must reject the lease") }
         .Err(error) -> assert(error.message().contains("Hangar object"))
     }
     store_test_drop_roots(roots)
@@ -206,7 +210,7 @@ store_test_admit_signed_closure: fn(verification: &StoreVerification, roots: Han
     // path to different bytes or provenance. The original root stays
     // leasable afterwards.
     if store_test_register_conflict(verification, roots, conflict) == {
-        .Ok(_) -> panic("conflicting closure owner must be rejected at registration")
+        .Ok(_) -> { panic("conflicting closure owner must be rejected at registration") }
         .Err(error) -> assert(error.message().contains("conflicting bytes or provenance"))
     }
     lease: store_snapshot_lease(verification, roots, root_entry) ?? panic("the untouched root entry must still lease")

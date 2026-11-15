@@ -1,4 +1,7 @@
-Holder: struct { values: [Int] }
+Holder: struct {
+    values: [Int]
+}
+
 run: fn() {
     values := [1, 2, 3, 4]
     first: &values[0]
@@ -8,14 +11,14 @@ run: fn() {
     last = 9
     print("root: {first},{last}")
 
-    adjacent := Holder{ values: [10, 11, 12, 13] }
+    adjacent := Holder{values: [10, 11, 12, 13]}
     adjacent_first: &adjacent.values[0..1]
     adjacent_last: &adjacent.values[2..3]
     adjacent_first[0] = 18
     adjacent_last[0] = 19
     print("nested adjacent: {adjacent_first[0]},{adjacent_last[0]}")
 
-    interleaved := Holder{ values: [20, 21, 22, 23] }
+    interleaved := Holder{values: [20, 21, 22, 23]}
     interleaved_first: &interleaved.values[0..1]
     print("between nested")
     interleaved_last: &interleaved.values[2..3]
@@ -37,7 +40,9 @@ run: fn() {
     print("before replace: {before_replace}")
     replaced = [42, 43]
     after_replace: &replaced[1]
-    #Off(.Release) { print("unrelated debug") }
+    #Off(.Release) {
+        print("unrelated debug")
+    }
     after_replace = 49
     print("after replace: {after_replace}")
 }

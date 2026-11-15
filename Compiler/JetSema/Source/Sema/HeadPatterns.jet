@@ -44,8 +44,10 @@ sema_head_pattern_payload_types: fn(payload: VariantPayload) -> [Type] Never! {
     types := [Type]{}
     if payload == {
         .Unit -> {}
-        .Single(ty, _) -> types.push(ty.copy())
-        .Named(fields) -> loop field in fields -> types.push(field.ty)
+        .Single(ty, _) -> { types.push(ty.copy()) }
+        .Named(fields) -> {
+            loop field in fields -> types.push(field.ty)
+        }
     }
     types
 }
@@ -86,9 +88,7 @@ sema_head_pattern_fold_function: fn(heads: [Func], variants: [SemaHeadPatternVar
                         candidate_enum = row.enum_name
                         candidate_payload = row.payload
                     }
-                    row.enum_name != candidate_enum -> {
-                        ambiguous = true
-                    }
+                    row.enum_name != candidate_enum -> { ambiguous = true }
                 }
             }
         }
@@ -102,9 +102,7 @@ sema_head_pattern_fold_function: fn(heads: [Func], variants: [SemaHeadPatternVar
             invalid = true
         }
         if {
-            enum_name == None -> {
-                enum_name = Val(candidate_enum)
-            }
+            enum_name == None -> { enum_name = Val(candidate_enum) }
             else -> {
                 previous: enum_name ?? candidate_enum
                 if previous != candidate_enum {
@@ -127,11 +125,13 @@ sema_head_pattern_fold_function: fn(heads: [Func], variants: [SemaHeadPatternVar
         }
 
         subject := Expr.Ident{name: "__jet_multi_head_subject", span: folded.name_span, id: AST_NODE_GENERATED}
-        arms.push(SwitchArm{
-            cond: Expr.PatternTest{subject: subject, pattern: pattern, span: pattern_span, id: AST_NODE_GENERATED},
-            body: head.body,
-            span: pattern_span,
-        })
+        arms.push(
+            SwitchArm{
+                cond: Expr.PatternTest{subject: subject, pattern: pattern, span: pattern_span, id: AST_NODE_GENERATED},
+                body: head.body,
+                span: pattern_span,
+            },
+        )
     }
 
     if invalid || enum_name == None {
@@ -143,21 +143,23 @@ sema_head_pattern_fold_function: fn(heads: [Func], variants: [SemaHeadPatternVar
     full_span := Span{start: folded.span.start, end: last_head.span.end}
     subject_name := "__jet_multi_head_subject"
     subject := Expr.Ident{name: subject_name, span: folded.name_span, id: AST_NODE_GENERATED}
-    folded.params = [Param]{Param{
-        convention: AccessConvention.Read,
-        root: false,
-        name: subject_name,
-        name_span: folded.name_span,
-        public_label: None,
-        zone: ParamZone.Either,
-        ty: Type.Named{name: enum_name_value},
-        ty_span: folded.name_span,
-        default: None,
-        variadic: false,
-        variadic_bound_list: None,
-        declared_view_from_names: None,
-        declared_footprint: None,
-    }}
+    folded.params = [Param]{
+        Param{
+            convention: AccessConvention.Read,
+            root: false,
+            name: subject_name,
+            name_span: folded.name_span,
+            public_label: None,
+            zone: ParamZone.Either,
+            ty: Type.Named{name: enum_name_value},
+            ty_span: folded.name_span,
+            default: None,
+            variadic: false,
+            variadic_bound_list: None,
+            declared_view_from_names: None,
+            declared_footprint: None,
+        },
+    }
     folded.body = [Stmt]{Stmt.Switch{subject: subject, arms: arms, else_body: None, span: folded.name_span}}
     folded.span = full_span
     folded.return_view_provenance = None
@@ -175,14 +177,20 @@ sema_head_patterns_fold_items: fn(items: &[Item], diagnostics: &[Diagnostic]) Ne
     variants := [SemaHeadPatternVariant]{}
     loop item in items {
         if item == {
-            .Enum(definition) -> loop variant in definition.variants -> variants.push(SemaHeadPatternVariant{name: variant.name, enum_name: definition.name, payload: variant.payload})
+            .Enum(definition) -> {
+                loop variant in definition.variants {
+                    variants.push(SemaHeadPatternVariant{name: variant.name, enum_name: definition.name, payload: variant.payload})
+                }
+            }
             .Func(function) -> {
                 if function.head_pattern != None -> has_heads = true
             }
             .Struct(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
-    if !has_heads -> return
+    if !has_heads {
+        return
+    }
     groups := [SemaHeadPatternGroup]{}
     ordered := [SemaHeadPatternOrderedItem]{}
     loop item in items {
@@ -192,7 +200,9 @@ sema_head_patterns_fold_items: fn(items: &[Item], diagnostics: &[Diagnostic]) Ne
         }
         if head == .Val(function) {
             group_index := 0
-            loop group_index < groups.len() && groups[group_index].name != function.name -> group_index += 1
+            loop group_index < groups.len() && groups[group_index].name != function.name {
+                group_index += 1
+            }
             if group_index == groups.len() {
                 groups.push(SemaHeadPatternGroup{name: function.name, heads: [Func]{}})
                 ordered.push(SemaHeadPatternOrderedItem.Heads{group_index: group_index})
@@ -205,8 +215,10 @@ sema_head_patterns_fold_items: fn(items: &[Item], diagnostics: &[Diagnostic]) Ne
     folded := [Item]{}
     loop entry in ordered {
         if entry == {
-            .Item(item) -> folded.push(item)
-            .Heads(group_index) -> folded.push(Item.Func{value: sema_head_pattern_fold_function(groups[group_index].heads, variants, diagnostics)})
+            .Item(item) -> { folded.push(item) }
+            .Heads(group_index) -> {
+                folded.push(Item.Func{value: sema_head_pattern_fold_function(groups[group_index].heads, variants, diagnostics)})
+            }
         }
     }
     items = folded

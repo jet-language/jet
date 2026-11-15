@@ -5,9 +5,13 @@
 use jet_foundation.[Record]
 
 SEMANTIC_LOCK_VERSION_KEY: "semantic-lock-version"
+
 SEMANTIC_LOCK_RECORD_HEADER: "[[semantic_record]]"
+
 SEMANTIC_LOCK_RATIONALE_HEADER: "[[semantic_record.rationale]]"
+
 SEMANTIC_LOCK_INPUT_HEADER: "[[lock_input]]"
+
 SEMANTIC_LOCK_SOURCE_MAP_HEADER: "[[source_map]]"
 
 // The block a header line opens.
@@ -93,10 +97,10 @@ PartialSemanticRecord: struct {
     hash: String?
     platform: String?
     rationales: [LockRationale]
-    future_fields: [String: String]
+    future_fields: [String:String]
 
     empty: fn() -> PartialSemanticRecord Never! {
-        PartialSemanticRecord{kind: None, key: None, exact: None, hash: None, platform: None, rationales: [LockRationale]{}, future_fields: [String: String]{}}
+        PartialSemanticRecord{kind: None, key: None, exact: None, hash: None, platform: None, rationales: [LockRationale]{}, future_fields: [String:String]{}}
     }
 
     set: fn(&self, key: String, value: String) Never! {
@@ -114,8 +118,8 @@ PartialSemanticRecord: struct {
     finish: fn(self) -> SemanticRecord? Never! {
         kind: self.kind ?? return None
         key: self.key ?? return None
-        identity: LockIdentity{kind, key, exact: self.exact ?? "", hash: self.hash ?? "", platform: self.platform ?? ""}
-        Val(SemanticRecord{identity, rationales: self.rationales, future_fields: self.future_fields})
+        identity: LockIdentity{kind: kind, key: key, exact: self.exact ?? "", hash: self.hash ?? "", platform: self.platform ?? ""}
+        Val(SemanticRecord{identity: identity, rationales: self.rationales, future_fields: self.future_fields})
     }
 }
 
@@ -135,7 +139,7 @@ PartialLockInput: struct {
 
     finish: fn(self) -> LockInput? Never! {
         name: self.name ?? return None
-        Val(LockInput{name, url: self.url ?? "", follows: self.follows})
+        Val(LockInput{name: name, url: self.url ?? "", follows: self.follows})
     }
 }
 
@@ -154,7 +158,7 @@ PartialSourceMap: struct {
 
     finish: fn(self) -> SourceMapEntry? Never! {
         pattern: self.pattern ?? return None
-        Val(SourceMapEntry{pattern, sources: self.sources})
+        Val(SourceMapEntry{pattern: pattern, sources: self.sources})
     }
 }
 
@@ -180,7 +184,7 @@ SemanticLockReader: struct {
             input: PartialLockInput{name: None, url: None, follows: ""},
             in_input: false,
             source_map: PartialSourceMap{pattern: None, sources: [String]{}},
-            in_source_map: false
+            in_source_map: false,
         }
     }
 
@@ -195,7 +199,7 @@ SemanticLockReader: struct {
         self.flush_rationale()
         if self.in_record {
             if self.record.finish() == {
-                .Val(record) -> self.lock.records.push(record)
+                .Val(record) -> { self.lock.records.push(record) }
                 .None -> {}
             }
             self.in_record = false
@@ -203,7 +207,7 @@ SemanticLockReader: struct {
         }
         if self.in_input {
             if self.input.finish() == {
-                .Val(input) -> self.lock.inputs.push(input)
+                .Val(input) -> { self.lock.inputs.push(input) }
                 .None -> {}
             }
             self.in_input = false
@@ -211,7 +215,7 @@ SemanticLockReader: struct {
         }
         if self.in_source_map {
             if self.source_map.finish() == {
-                .Val(map) -> self.lock.source_maps.push(map)
+                .Val(map) -> { self.lock.source_maps.push(map) }
                 .None -> {}
             }
             self.in_source_map = false

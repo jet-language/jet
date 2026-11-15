@@ -6,6 +6,7 @@ package: {
     name: "s6_web_reload"
     authority: { allow: [Env, FS.Write, Net, Time] }
 }
+
 use {
     net: core.net
     time: core.time
@@ -13,9 +14,7 @@ use {
     sys: core.sys
 }
 
-reload_env: fn(name: String) -> String {
-    sys.get(name) ?? panic("missing {name}")
-}
+reload_env: fn(name: String) -> String { sys.get(name) ?? panic("missing {name}") }
 
 // One GET of `/__jet/reload`: the response text, or None while nothing
 // listens on the port.
@@ -65,7 +64,9 @@ run: fn() {
             if next_boot != "" && next_boot != boot -> later = response.copy()
         }
         if later == "" {
-            if time.instant() >= deadline -> panic("the restarted app did not answer with a new boot id")
+            if time.instant() >= deadline {
+                panic("the restarted app did not answer with a new boot id")
+            }
             time.sleep(100ms)
         }
     }

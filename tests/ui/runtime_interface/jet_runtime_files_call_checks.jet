@@ -15,7 +15,9 @@ entry_count: fn(root: String) -[FS.Read]> Int {
         if entry.at_end || entry.status_code != None -> break
         kind: files.entries_file_type(key, entry.child)
         if kind.directory || kind.file -> count += 1
-        if files.entries_before(key, entry.child, 0) -> count += files.entries_shown(key, entry.child).len()
+        if files.entries_before(key, entry.child, 0) {
+            count += files.entries_shown(key, entry.child).len()
+        }
         files.entries_release(key, entry.child)
     }
     files.entries_close(key)
@@ -30,9 +32,7 @@ copy_root: fn(source: String, destination: String) -[FS]> Bool {
     created.status_reason == None && copied.status_code == None
 }
 
-pure_reads: fn() -> Bool {
-    files.fault_should_fail("read") || files.os_family() == "windows"
-}
+pure_reads: fn() -> Bool { files.fault_should_fail("read") || files.os_family() == "windows" }
 
 run: fn() -[IO, FS]> {
     print(entry_count("."))

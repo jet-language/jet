@@ -54,9 +54,7 @@ sema_guest_export_native_symbol: fn(name: String) -> String Never! {
         n: Int{byte}
         if (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95 {
             bytes.push(byte)
-        } else {
-            bytes.push(U8{95})
-        }
+        } else { bytes.push(U8{95}) }
     }
     symbol := String.from_bytes(bytes) ?? ""
     if symbol == "" || (Int{bytes[0]} >= 48 && Int{bytes[0]} <= 57) -> symbol = "_{symbol}"
@@ -160,7 +158,9 @@ sema_guest_import_bridge_compatible: fn(function: Func) -> Bool Never! {
     loop parameter_index in 0..<function.params.len() {
         if function.params[parameter_index].convention == {
             .Read | .Write -> {
-                if !sema_guest_import_bridge_value(function.params[parameter_index].ty) -> return false
+                if !sema_guest_import_bridge_value(function.params[parameter_index].ty) {
+                    return false
+                }
             }
             .Move -> return false
         }
@@ -207,7 +207,9 @@ sema_guest_library_component_named: fn(graph: SemaRegistrationGraph, module_iden
                         .Unit -> true
                         .Single(payload, _) -> sema_guest_library_component_type(graph, owner, payload, seen)
                         .Named(fields) -> loop field in fields {
-                            if !sema_guest_library_component_type(graph, owner, field.ty, seen) -> break false
+                            if !sema_guest_library_component_type(graph, owner, field.ty, seen) {
+                                break false
+                            }
                         } ?? true
                     }
                     if !variant_safe {
@@ -216,8 +218,12 @@ sema_guest_library_component_named: fn(graph: SemaRegistrationGraph, module_iden
                     }
                 }
             }
-            .Distinct(definition) -> safe = sema_guest_library_component_type(graph, owner, definition.base, seen)
-            .TypeAlias(definition) -> safe = sema_guest_library_component_type(graph, owner, definition.target, seen)
+            .Distinct(definition) -> {
+                safe = sema_guest_library_component_type(graph, owner, definition.base, seen)
+            }
+            .TypeAlias(definition) -> {
+                safe = sema_guest_library_component_type(graph, owner, definition.target, seen)
+            }
             .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
@@ -231,7 +237,9 @@ sema_guest_library_component_signature: fn(graph: SemaRegistrationGraph, module_
     seen := [String:Bool]{}
     if !sema_guest_library_component_type(graph, module_identity, return_type, seen) -> return false
     loop parameter_index in 0..<function.params.len() {
-        if !sema_guest_library_component_type(graph, module_identity, function.params[parameter_index].ty, seen) -> return false
+        if !sema_guest_library_component_type(graph, module_identity, function.params[parameter_index].ty, seen) {
+            return false
+        }
     }
     true
 }
@@ -357,7 +365,9 @@ sema_guest_runtime_result: fn(ty: Type) -> Bool Never! {
 sema_guest_runtime_param: fn(convention: AccessConvention, ty: Type) -> Bool Never! {
     if convention == {
         .Read -> {
-            if ty == .Apply(name, args) -> return name == "View" && args.len() == 1 && sema_guest_runtime_scalar(args[0])
+            if ty == .Apply(name, args) {
+                return name == "View" && args.len() == 1 && sema_guest_runtime_scalar(args[0])
+            }
             sema_guest_runtime_value(ty)
         }
         .Write -> {
@@ -421,12 +431,16 @@ sema_guest_check_surfaces: fn(graph: &SemaRegistrationGraph) {
                         diagnostics.push(sema_guest_export_carrier_error(function, "declares the carrier `{carrier}`"))
                         failed = true
                     } else if !sema_guest_library_component_signature(graph, graph.modules[module_index].module_identity, function) {
-                        if !sema_guest_check_c_signature(graph, module_index, function, diagnostics) -> failed = true
+                        if !sema_guest_check_c_signature(graph, module_index, function, diagnostics) {
+                            failed = true
+                        }
                     }
                 }
             }
         }
-        loop diagnostic in diagnostics -> sema_registration_push_graph_diagnostic(graph, module_index, diagnostic)
+        loop diagnostic in diagnostics {
+            sema_registration_push_graph_diagnostic(graph, module_index, diagnostic)
+        }
     }
     symbols := [String:String]{}
     has_text_export := false
@@ -438,26 +452,36 @@ sema_guest_check_surfaces: fn(graph: &SemaRegistrationGraph) {
                 .Func(function) -> {
                     // A runtime binding names the runtime's own export, not a
                     // second owner of its symbol.
-                    if parser_guest_import_symbol(function) == .Val(symbol) && !sema_guest_runtime_binding(graph.modules[module_index].package_identity, function) -> sema_guest_record_symbol(symbols, symbol, owner, "guest imports", function.name, Val(function.name_span), diagnostics)
+                    if parser_guest_import_symbol(function) == .Val(symbol) && !sema_guest_runtime_binding(graph.modules[module_index].package_identity, function) {
+                        sema_guest_record_symbol(symbols, symbol, owner, "guest imports", function.name, Val(function.name_span), diagnostics)
+                    }
                     if module_index == entry_index && sema_function_is_guest_export(function) {
-                        if sema_guest_scalar_shape(function.params, sema_guest_export_return_type(function.return_type)) == (Val(SemaGuestScalar.Text)) -> has_text_export = true
+                        if sema_guest_scalar_shape(function.params, sema_guest_export_return_type(function.return_type)) == (Val(SemaGuestScalar.Text)) {
+                            has_text_export = true
+                        }
                         sema_guest_record_symbol(symbols, sema_guest_export_native_symbol(function.name), owner, "Library exports", function.name, Val(function.name_span), diagnostics)
                     }
                 }
                 .CModule(c_module) -> {
-                    loop foreign in c_module.functions -> sema_guest_record_symbol(symbols, foreign.rust_path, owner, "C module imports", foreign.name, Val(foreign.name_span), diagnostics)
+                    loop foreign in c_module.functions {
+                        sema_guest_record_symbol(symbols, foreign.rust_path, owner, "C module imports", foreign.name, Val(foreign.name_span), diagnostics)
+                    }
                 }
                 .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
         }
         if diagnostics.len() > 0 -> failed = true
-        loop diagnostic in diagnostics -> sema_registration_push_graph_diagnostic(graph, module_index, diagnostic)
+        loop diagnostic in diagnostics {
+            sema_registration_push_graph_diagnostic(graph, module_index, diagnostic)
+        }
     }
     if has_text_export {
         diagnostics := [Diagnostic]{}
         sema_guest_record_symbol(symbols, "jet_text_free", "<generated>", "generated C symbol", "jet_text_free", None, diagnostics)
         if diagnostics.len() > 0 -> failed = true
-        loop diagnostic in diagnostics -> sema_registration_push_graph_diagnostic(graph, -1, diagnostic)
+        loop diagnostic in diagnostics {
+            sema_registration_push_graph_diagnostic(graph, -1, diagnostic)
+        }
     }
     if failed -> graph.complete = false
 }
@@ -505,7 +529,9 @@ sema_guest_check_export_failures: fn(graph: SemaRegistrationGraph, modules: [Sem
     refused := false
     loop item in graph.modules[entry_index].program.items {
         if item == .Func(function) {
-            if !sema_function_is_guest_export(function) || sema_guest_declared_carrier(function.return_type) != None -> next
+            if !sema_function_is_guest_export(function) || sema_guest_declared_carrier(function.return_type) != None {
+                next
+            }
             loop body in modules[entry_index].functions {
                 if body.kind != TFuncKind.TopLevel || body.name != function.name -> next
                 if body.failure_carrier != TFailureCarrier.Infallible {

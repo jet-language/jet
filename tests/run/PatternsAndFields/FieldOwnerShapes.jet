@@ -3,11 +3,18 @@ package: {
     version: "0.1.0"
     authority: { allow: [IO, Mem.Alloc, Mem.Rc, Time.Wait] }
 }
+
 // Indexed/optional fields and read/write-window owners all use one checked
 // field-ID resolver. A view's tag must not become a nominal owner spelling.
 
-Box: struct<T> { value: T }
-Pair: struct { left: Int, right: Int }
+Box: struct<T> {
+    value: T
+}
+
+Pair: struct {
+    left: Int
+    right: Int
+}
 
 absent: fn() -> (left: Int, right: Int)? { None }
 
@@ -16,13 +23,9 @@ tuple_first: fn(pair: (left: Int, right: Int)) -> Int {
     first
 }
 
-indexed: fn(rows: [(left: Int, right: Int)]) -> Int {
-    rows[0].left + rows[0].right
-}
+indexed: fn(rows: [(left: Int, right: Int)]) -> Int { rows[0].left + rows[0].right }
 
-edit_indexed: fn(rows: &[(left: Int, right: Int)]) {
-    rows[0].left += 1
-}
+edit_indexed: fn(rows: &[(left: Int, right: Int)]) { rows[0].left += 1 }
 
 read_cell: fn(cell: Cell<Pair>) -> Int {
     guard: cell.guard_read()

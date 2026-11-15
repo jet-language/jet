@@ -6,7 +6,6 @@ package: {
 // FileReader.seek(position) moves the shared read position to an absolute
 // byte offset (Rust SeekFrom::Start): bytes a line read buffered ahead are
 // dropped, so read, read_line and lines all continue from `position`.
-
 use files: core.files
 
 text: fn(bytes: [U8]) -> String { String.from_bytes(bytes) ?? panic("utf8") }
@@ -36,7 +35,7 @@ run: fn() {
     reader.seek(100)
     print("past the end reads {reader.read_bytes(4).len()} bytes")
     if reader.seek(-1) == {
-        .Ok(_) -> print("seek(-1): accepted")
+        .Ok(_) -> { print("seek(-1): accepted") }
         .Err(error) -> print("seek(-1): {error == .InvalidInput(_)}")
     }
 }

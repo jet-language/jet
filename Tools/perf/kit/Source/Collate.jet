@@ -4,6 +4,7 @@
 // so far compare by case, lowercase first. Control characters are
 // ignorable. Any other byte sorts after the letters by its value.
 COLLATE_SPACES: [Int]{9, 10, 11, 12, 13, 32}
+
 COLLATE_ORDER: "_-,;:!?.'\"()[]{{}}@*/\\&#%`^+<=>|~$0123456789abcdefghijklmnopqrstuvwxyz"
 
 // The primary weight of `byte` (0 when it is ignorable), and whether it is
@@ -43,7 +44,9 @@ locale_compare: fn(a: String, b: String) -> Int Never! {
     right: collate_weights(b)
     common: if left.len() < right.len() -> left.len() else -> right.len()
     loop at in 0..<common {
-        if left[at].primary != right[at].primary -> return if left[at].primary < right[at].primary -> -1 else -> 1
+        if left[at].primary != right[at].primary {
+            return if left[at].primary < right[at].primary -> -1 else -> 1
+        }
     }
     if left.len() != right.len() -> return if left.len() < right.len() -> -1 else -> 1
     loop at in 0..<common {

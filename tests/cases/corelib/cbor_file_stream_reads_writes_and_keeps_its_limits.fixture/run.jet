@@ -32,7 +32,9 @@ float_widths_and_sticky_item_limit: fn() {
     source := cbor.reader(input) ?? panic("reader")
     expected: [DataEvent]{.ArrayStart, .Float(Float{1.5}), .Float(Float{100000.0}), .Float(Float{1.1}), .ArrayEnd}
     loop event in expected {
-        if source.next() == .Ok(read) -> assert_eq(read, Val(event)) else -> panic("float event reads")
+        if source.next() == .Ok(read) -> assert_eq(read, Val(event)) else {
+            panic("float event reads")
+        }
     }
     if source.next() == .Ok(end) -> assert_eq(end, None) else -> panic("end reads")
     files.write_bytes(path, [U8]{98, 97, 98}) ?? panic("fixture")
@@ -49,7 +51,9 @@ float_widths_and_sticky_item_limit: fn() {
         }
         .Val(_) | .None -> panic("item limit must fail")
     }
-    if limited.next() == .Err(failure) -> assert_eq(Val(failure), first) else -> panic("failure must be sticky")
+    if limited.next() == .Err(failure) -> assert_eq(Val(failure), first) else {
+        panic("failure must be sticky")
+    }
     print("every float width and a sticky item limit")
 }
 
@@ -69,7 +73,9 @@ sorted_keys_and_flush_before_the_root_ends: fn() {
     sink.finish() ?? panic("finish")
     sink.finish() ?? panic("repeat finish")
     assert_eq(files.read_bytes(path) ?? panic("read"), [U8]{162, 97, 98, 249, 62, 0, 98, 97, 97, 1})
-    if sink.write(DataEvent.Null) == .Err(failure) -> assert_eq(failure.reason, "write called after finish") else -> panic("write after finish must fail")
+    if sink.write(DataEvent.Null) == .Err(failure) {
+        assert_eq(failure.reason, "write called after finish")
+    } else { panic("write after finish must fail") }
     print("sorted keys, and a flush does not complete a container")
 }
 
@@ -80,15 +86,21 @@ incomplete_finish_and_root_total_limit: fn() {
     sink := cbor.writer(output) ?? panic("writer")
     sink.write(DataEvent.ArrayStart) ?? panic("start")
     sink.flush() ?? panic("flush incomplete")
-    if sink.finish() == .Err(failure) -> assert_eq(failure.reason, "finish requires one complete CBOR root") else -> panic("incomplete finish must fail")
-    if sink.flush() == .Err(failure) -> assert_eq(failure.reason, "finish requires one complete CBOR root") else -> panic("flush must retain first failure")
+    if sink.finish() == .Err(failure) {
+        assert_eq(failure.reason, "finish requires one complete CBOR root")
+    } else { panic("incomplete finish must fail") }
+    if sink.flush() == .Err(failure) {
+        assert_eq(failure.reason, "finish requires one complete CBOR root")
+    } else { panic("flush must retain first failure") }
     limited_output: files.create("{dir.path}/limit.cbor") ?? panic("create")
     limits := EncodingLimits.safe()
     limits.max_total_bytes = Val(1)
     limited := cbor.writer(limited_output, limits) ?? panic("writer")
     limited.write(DataEvent.ArrayStart) ?? panic("start")
     limited.write(DataEvent.Int(1)) ?? panic("item")
-    if limited.write(DataEvent.ArrayEnd) == .Err(failure) -> assert_eq(failure.reason, "max_total_bytes 1 exceeded") else -> panic("root wire limit must fail")
+    if limited.write(DataEvent.ArrayEnd) == .Err(failure) {
+        assert_eq(failure.reason, "max_total_bytes 1 exceeded")
+    } else { panic("root wire limit must fail") }
     print("a sticky incomplete finish, and the total limit checked at the root")
 }
 
@@ -104,7 +116,9 @@ full_width_integers: fn() {
     }
     output: files.create("{dir.path}/out.cbor") ?? panic("create")
     sink := cbor.writer(output) ?? panic("writer")
-    if sink.write(DataEvent.Int(18446744073709551616)) == .Err(failure) -> assert_eq(failure.kind, .Unsupported) else -> panic("2^64 written")
+    if sink.write(DataEvent.Int(18446744073709551616)) == .Err(failure) {
+        assert_eq(failure.kind, .Unsupported)
+    } else { panic("2^64 written") }
     print("integers out to 2^64-1 and -2^64, and a wider Int refused")
 }
 

@@ -1,6 +1,4 @@
-kit_steps_build_target_text: fn(text: String) -> Bool {
-    text.contains("{{jet-build-target}}")
-}
+kit_steps_build_target_text: fn(text: String) -> Bool { text.contains("{{jet-build-target}}") }
 
 kit_steps_build_target_used: fn(step: KitStep, plan: KitPlan) -> Bool {
     loop word in step.argv {
@@ -11,12 +9,16 @@ kit_steps_build_target_used: fn(step: KitStep, plan: KitPlan) -> Bool {
     }
     loop variable in step.environment {
         if variable.value == {
-            .Val(value) -> { if kit_steps_build_target_text(value) -> return true }
+            .Val(value) -> {
+                if kit_steps_build_target_text(value) -> return true
+            }
             .None -> {}
         }
     }
     loop assertion in step.assertions {
-        if kit_steps_build_target_text(assertion.path) || kit_steps_build_target_text(assertion.value) || kit_steps_build_target_text(assertion.extra) || kit_steps_build_target_text(assertion.transform) || kit_steps_build_target_text(assertion.json_path) -> return true
+        if kit_steps_build_target_text(assertion.path) || kit_steps_build_target_text(assertion.value) || kit_steps_build_target_text(assertion.extra) || kit_steps_build_target_text(assertion.transform) || kit_steps_build_target_text(assertion.json_path) {
+            return true
+        }
         loop alternative in assertion.alternatives {
             if kit_steps_build_target_text(alternative) -> return true
         }

@@ -15,7 +15,9 @@ merge: fn(left: String, right: String) -> String Never! {
 }
 
 append_state: fn(text: String, out: &[String]) {
-    if text.bytes().len() == 0 -> return
+    if text.bytes().len() == 0 {
+        return
+    }
     values: decode(text)
     if values != None {
         decoded: values
@@ -54,7 +56,7 @@ decode: fn(text: String) -> [String]? {
         if length < 0 || length > raw.len() - pos -> return None
         value: slice_bytes(raw, pos, pos + length) ?? return None
         values.push(value)
-        pos = pos + length
+        pos += length
     }
     if pos != raw.len() -> return None
     return Val(values)
@@ -77,7 +79,7 @@ find_byte: fn(raw: [U8], start: Int, needle: U8) -> Int Never! {
     i := start
     loop i < raw.len() {
         if raw[i] == needle -> return i
-        i = i + 1
+        i += 1
     }
     return -1
 }
@@ -87,19 +89,17 @@ slice_bytes: fn(raw: [U8], start: Int, end: Int) -> String? {
     i := start
     loop i < end {
         out.push(raw[i])
-        i = i + 1
+        i += 1
     }
     decoded: String.from_bytes(out) ?? return None
     return Val(decoded)
 }
- 
+
 c_int_max: fn() -> Int Never! { 9223372036854775807 }
 
 /// Internal seeded FNV-1a kernel shared by the shipped HLL and CMS algorithms.
 __fnv1a64: fn(key: String, seed: U64) -> U64 Never! {
     hash := seed
-    loop byte in key.bytes() {
-        hash = wrapping((hash.bit_xor(U64{byte})) * U64{1099511628211})
-    }
+    loop byte in key.bytes() -> hash = wrapping((hash.bit_xor(U64{byte})) * U64{1099511628211})
     hash
 }

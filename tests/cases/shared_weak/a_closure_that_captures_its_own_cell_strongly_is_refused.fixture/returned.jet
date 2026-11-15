@@ -13,9 +13,7 @@ Feed: struct {
     listeners: [fn() -> Int]
 }
 
-reader: fn(feed: Shared<Feed>) -> fn() -> Int {
-    fn() { feed.strong_count() }
-}
+reader: fn(feed: Shared<Feed>) -> fn() -> Int { fn() { feed.strong_count() } }
 
 run: fn() {
     feed: Shared{Feed{stream: Stream{fd: 7}, listeners: []}}

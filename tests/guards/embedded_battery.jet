@@ -4,14 +4,16 @@
 // battery names as open. It never presents the host replay as hardware proof.
 // The domain-foundations probe it replaced keeps only its dated report, and
 // that report points at the battery and the replay.
-use {
-    embedded_battery_files: core.files
-}
+use embedded_battery_files: core.files
 
 EMBEDDED_BATTERY_SOURCE: "Jetpack/Provider/Batteries/embedded/embedded.jet"
+
 EMBEDDED_BATTERY_EXAMPLE: "Examples/LowLevel/Embedded/Battery/run.jet"
+
 EMBEDDED_BATTERY_GOLDEN: "Examples/LowLevel/Embedded/Battery.out"
+
 EMBEDDED_BATTERY_README: "Examples/LowLevel/README.md"
+
 EMBEDDED_BATTERY_PROBE: "Tools/agent-eval/domain-foundations/area-embedded"
 
 // How the lines start that the replay prints so no reader takes it for
@@ -81,7 +83,9 @@ embedded_battery_unreached: fn(functions: [EmbeddedBatteryFunction], example: St
         loop function in functions {
             if function.name != caller -> next
             loop callee in functions {
-                if !reached.contains(callee.name) && embedded_battery_calls(function.body, callee.name) -> reached.push(callee.name)
+                if !reached.contains(callee.name) && embedded_battery_calls(function.body, callee.name) {
+                    reached.push(callee.name)
+                }
             }
         }
     }
@@ -124,7 +128,9 @@ embedded_battery_gates: fn(functions: [EmbeddedBatteryFunction]) -> [String] {
     assert(gates.len() > 0, "{EMBEDDED_BATTERY_SOURCE} names no open gate")
     printed := [String]{}
     loop line in golden.lines() {
-        if line.split_once("gate ") == .Val(parts) && parts.before == "" -> printed.push(parts.after)
+        if line.split_once("gate ") == .Val(parts) && parts.before == "" {
+            printed.push(parts.after)
+        }
     }
     assert_eq(printed, gates)
     loop line in EMBEDDED_BATTERY_HOST_ONLY {

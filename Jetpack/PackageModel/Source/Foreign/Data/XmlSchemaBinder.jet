@@ -6,6 +6,7 @@
 // Dyn, nested elements records, and repeated children lists.
 
 XML_NAMESPACE_URI: "http://www.w3.org/XML/1998/namespace"
+
 XMLNS_NAMESPACE_URI: "http://www.w3.org/2000/xmlns/"
 
 pkg_data_bind_xml: fn(input: String, root_name: String?) -> SchemaBuilder DataBindError! {
@@ -32,20 +33,16 @@ XMLNode: struct {
     name: String
     attrs: [(name: String, value: String)]
     content: [XMLContent]
-    namespaces: [String: String]
+    namespaces: [String:String]
 }
 
 XMLParser: struct {
     chars: [String]
     pos: Int
 
-    peek: fn(self) -> String Never! {
-        pkg_data_at(self.chars, self.pos)
-    }
+    peek: fn(self) -> String Never! { pkg_data_at(self.chars, self.pos) }
 
-    at_end: fn(self) -> Bool Never! {
-        self.pos >= self.chars.len()
-    }
+    at_end: fn(self) -> Bool Never! { self.pos >= self.chars.len() }
 
     starts_with: fn(self, text: String) -> Bool Never! {
         wanted: pkg_data_scalars(text)
@@ -61,9 +58,7 @@ XMLParser: struct {
         pkg_data_is_ascii_whitespace(following) || following == "?"
     }
 
-    at_space: fn(self) -> Bool Never! {
-        pkg_data_xml_is_space(self.peek())
-    }
+    at_space: fn(self) -> Bool Never! { pkg_data_xml_is_space(self.peek()) }
 
     skip_space: fn(&self) Never! {
         loop self.at_space() -> self.pos += 1
@@ -72,7 +67,9 @@ XMLParser: struct {
     read_name: fn(&self) -> String DataBindError! {
         if self.at_end() -> return Err(DataBindError{message: "XML name is missing"})
         first: self.peek()
-        if !pkg_data_xml_name_start(first) -> return Err(DataBindError{message: "XML has invalid name start {first}"})
+        if !pkg_data_xml_name_start(first) {
+            return Err(DataBindError{message: "XML has invalid name start {first}"})
+        }
         start: self.pos
         self.pos += 1
         loop !self.at_end() && pkg_data_xml_name_rest(self.peek()) -> self.pos += 1
@@ -85,7 +82,9 @@ XMLParser: struct {
 
     read_quoted_value: fn(&self, what: String) -> String DataBindError! {
         quote: self.peek()
-        if quote != "\"" && quote != "'" -> return Err(DataBindError{message: "XML {what} is not quoted"})
+        if quote != "\"" && quote != "'" {
+            return Err(DataBindError{message: "XML {what} is not quoted"})
+        }
         self.pos += 1
         start: self.pos
         loop !self.at_end() && self.peek() != quote -> self.pos += 1
@@ -98,9 +97,13 @@ XMLParser: struct {
 
     read_declaration_field: fn(&self, expected: String) -> String DataBindError! {
         name: self.read_name()
-        if name != expected -> return Err(DataBindError{message: "XML declaration expected {expected}"})
+        if name != expected {
+            return Err(DataBindError{message: "XML declaration expected {expected}"})
+        }
         self.skip_space()
-        if self.peek() != "=" -> return Err(DataBindError{message: "XML declaration field {expected} has no equals sign"})
+        if self.peek() != "=" {
+            return Err(DataBindError{message: "XML declaration field {expected} has no equals sign"})
+        }
         self.pos += 1
         self.skip_space()
         self.read_quoted_value("declaration value")
@@ -109,15 +112,21 @@ XMLParser: struct {
     consume_processing_instruction: fn(&self) DataBindError! {
         self.pos += 2
         target: self.read_name()
-        if pkg_data_eq_ignore_case(target, "xml") -> return Err(DataBindError{message: "XML processing-instruction target cannot be xml"})
+        if pkg_data_eq_ignore_case(target, "xml") {
+            return Err(DataBindError{message: "XML processing-instruction target cannot be xml"})
+        }
         if self.starts_with("?>") {
             self.pos += 2
             return
         }
-        if !self.at_space() -> return Err(DataBindError{message: "XML processing instruction needs whitespace after its target"})
+        if !self.at_space() {
+            return Err(DataBindError{message: "XML processing instruction needs whitespace after its target"})
+        }
         start: self.pos
         loop !self.at_end() && !self.starts_with("?>") -> self.pos += 1
-        if self.at_end() -> return Err(DataBindError{message: "XML processing instruction is not closed"})
+        if self.at_end() {
+            return Err(DataBindError{message: "XML processing instruction is not closed"})
+        }
         pkg_data_validate_xml_characters(pkg_data_slice(self.chars, start, self.pos))
         self.pos += 2
     }
@@ -125,28 +134,42 @@ XMLParser: struct {
     // `<?xml version="1.0" [encoding="UTF-8"] [standalone="yes|no"]?>`.
     consume_xml_declaration: fn(&self) DataBindError! {
         self.pos += 5
-        if !self.at_space() -> return Err(DataBindError{message: "XML declaration needs a version field"})
+        if !self.at_space() {
+            return Err(DataBindError{message: "XML declaration needs a version field"})
+        }
         self.skip_space()
         version: self.read_declaration_field("version")
-        if version != "1.0" -> return Err(DataBindError{message: "XML declaration version must be 1.0"})
+        if version != "1.0" {
+            return Err(DataBindError{message: "XML declaration version must be 1.0"})
+        }
         if !self.starts_with("?>") {
-            if !self.at_space() -> return Err(DataBindError{message: "XML declaration fields need whitespace separators"})
+            if !self.at_space() {
+                return Err(DataBindError{message: "XML declaration fields need whitespace separators"})
+            }
             self.skip_space()
             if self.starts_with("encoding") {
                 encoding: self.read_declaration_field("encoding")
-                if !pkg_data_eq_ignore_case(encoding, "UTF-8") -> return Err(DataBindError{message: "XML declaration encoding must be UTF-8"})
+                if !pkg_data_eq_ignore_case(encoding, "UTF-8") {
+                    return Err(DataBindError{message: "XML declaration encoding must be UTF-8"})
+                }
                 if !self.starts_with("?>") {
-                    if !self.at_space() -> return Err(DataBindError{message: "XML declaration fields need whitespace separators"})
+                    if !self.at_space() {
+                        return Err(DataBindError{message: "XML declaration fields need whitespace separators"})
+                    }
                     self.skip_space()
                 }
             }
             if !self.starts_with("?>") {
                 standalone: self.read_declaration_field("standalone")
-                if standalone != "yes" && standalone != "no" -> return Err(DataBindError{message: "XML declaration standalone must be yes or no"})
+                if standalone != "yes" && standalone != "no" {
+                    return Err(DataBindError{message: "XML declaration standalone must be yes or no"})
+                }
             }
         }
         self.skip_space()
-        if !self.starts_with("?>") -> return Err(DataBindError{message: "XML declaration has trailing content"})
+        if !self.starts_with("?>") {
+            return Err(DataBindError{message: "XML declaration has trailing content"})
+        }
         self.pos += 2
     }
 
@@ -157,7 +180,9 @@ XMLParser: struct {
         root := XMLNode?{None}
         loop !self.at_end() {
             if self.starts_with_xml_declaration() {
-                if !declaration_allowed -> return Err(DataBindError{message: "XML declaration is out of order"})
+                if !declaration_allowed {
+                    return Err(DataBindError{message: "XML declaration is out of order"})
+                }
                 self.consume_xml_declaration()
                 declaration_allowed = false
                 next
@@ -167,13 +192,15 @@ XMLParser: struct {
                 start: self.pos
                 loop !self.at_end() && self.peek() != "<" -> self.pos += 1
                 text: pkg_data_slice(self.chars, start, self.pos)
-                if text.contains("]]>") -> return Err(DataBindError{message: "XML text contains a close CDATA marker"})
+                if text.contains("]]>") {
+                    return Err(DataBindError{message: "XML text contains a close CDATA marker"})
+                }
                 pkg_data_validate_xml_entities(text)
-                if stack.len() > 0 {
-                    stack[stack.len() - 1].content.push(XMLContent.Text)
-                } else {
+                if stack.len() > 0 -> stack[stack.len() - 1].content.push(XMLContent.Text) else {
                     loop scalar in pkg_data_scalars(text) {
-                        if !pkg_data_xml_is_space(scalar) -> return Err(DataBindError{message: "XML has text outside its root element"})
+                        if !pkg_data_xml_is_space(scalar) {
+                            return Err(DataBindError{message: "XML has text outside its root element"})
+                        }
                     }
                 }
                 next
@@ -184,7 +211,9 @@ XMLParser: struct {
                 loop !self.at_end() && !self.starts_with("-->") -> self.pos += 1
                 if self.at_end() -> return Err(DataBindError{message: "XML comment is not closed"})
                 body: pkg_data_slice(self.chars, start, self.pos)
-                if body.contains("--") || body.ends_with("-") -> return Err(DataBindError{message: "XML comment contains an invalid double hyphen"})
+                if body.contains("--") || body.ends_with("-") {
+                    return Err(DataBindError{message: "XML comment contains an invalid double hyphen"})
+                }
                 pkg_data_validate_xml_characters(body)
                 if stack.len() > 0 -> stack[stack.len() - 1].content.push(XMLContent.Comment)
                 self.pos += 3
@@ -194,31 +223,43 @@ XMLParser: struct {
                 self.pos += 9
                 start: self.pos
                 loop !self.at_end() && !self.starts_with("]]>") -> self.pos += 1
-                if self.at_end() -> return Err(DataBindError{message: "XML CDATA section is not closed"})
+                if self.at_end() {
+                    return Err(DataBindError{message: "XML CDATA section is not closed"})
+                }
                 pkg_data_validate_xml_characters(pkg_data_slice(self.chars, start, self.pos))
-                if stack.len() == 0 -> return Err(DataBindError{message: "XML CDATA appears outside its root element"})
+                if stack.len() == 0 {
+                    return Err(DataBindError{message: "XML CDATA appears outside its root element"})
+                }
                 stack[stack.len() - 1].content.push(XMLContent.CData)
                 self.pos += 3
                 next
             }
             if self.starts_with("<?") {
                 self.consume_processing_instruction()
-                if stack.len() > 0 -> stack[stack.len() - 1].content.push(XMLContent.ProcessingInstruction)
+                if stack.len() > 0 {
+                    stack[stack.len() - 1].content.push(XMLContent.ProcessingInstruction)
+                }
                 next
             }
             if self.starts_with("</") {
                 self.pos += 2
                 raw_name: self.read_name()
                 self.skip_space()
-                if self.peek() != ">" -> return Err(DataBindError{message: "XML close tag has trailing content"})
+                if self.peek() != ">" {
+                    return Err(DataBindError{message: "XML close tag has trailing content"})
+                }
                 self.pos += 1
                 node: stack.pop() ?? return Err(DataBindError{message: "XML has an unmatched close tag"})
                 name: pkg_data_xml_resolve_name(raw_name, node.namespaces, true)
-                if node.name != name -> return Err(DataBindError{message: "XML close tag {raw_name} does not match {node.name}"})
+                if node.name != name {
+                    return Err(DataBindError{message: "XML close tag {raw_name} does not match {node.name}"})
+                }
                 root = pkg_data_xml_attach(stack, root, node)
                 next
             }
-            if self.starts_with("<!") -> return Err(DataBindError{message: "XML declaration is unsupported here"})
+            if self.starts_with("<!") {
+                return Err(DataBindError{message: "XML declaration is unsupported here"})
+            }
             self.pos += 1
             raw_name: self.read_name()
             raw_attrs := [(name: String, value: String)]{}
@@ -236,14 +277,20 @@ XMLParser: struct {
                     break
                 }
                 attr_name: self.read_name()
-                if attr_names.contains(attr_name) -> return Err(DataBindError{message: "XML has duplicate attribute {attr_name}"})
+                if attr_names.contains(attr_name) {
+                    return Err(DataBindError{message: "XML has duplicate attribute {attr_name}"})
+                }
                 attr_names.push(attr_name.copy())
                 self.skip_space()
-                if self.peek() != "=" -> return Err(DataBindError{message: "XML attribute {attr_name} has no equals sign"})
+                if self.peek() != "=" {
+                    return Err(DataBindError{message: "XML attribute {attr_name} has no equals sign"})
+                }
                 self.pos += 1
                 self.skip_space()
                 value: self.read_quoted_value("attribute {attr_name}")
-                if value.contains("<") -> return Err(DataBindError{message: "XML attribute {attr_name} contains <"})
+                if value.contains("<") {
+                    return Err(DataBindError{message: "XML attribute {attr_name} contains <"})
+                }
                 pkg_data_validate_xml_entities(value)
                 raw_attrs.push((name: attr_name, value: value))
             }
@@ -255,18 +302,20 @@ XMLParser: struct {
             loop attr in raw_attrs {
                 if attr.name == "xmlns" || attr.name.starts_with("xmlns:") -> next
                 expanded: pkg_data_xml_resolve_name(attr.name, namespaces, false)
-                if expanded_names.contains(expanded) -> return Err(DataBindError{message: "XML has duplicate attribute {expanded}"})
+                if expanded_names.contains(expanded) {
+                    return Err(DataBindError{message: "XML has duplicate attribute {expanded}"})
+                }
                 expanded_names.push(expanded.copy())
                 attrs.push((name: expanded, value: attr.value))
             }
             node: XMLNode{name: name, attrs: attrs, content: [XMLContent]{}, namespaces: namespaces}
-            if self_closing {
-                root = pkg_data_xml_attach(stack, root, node)
-            } else {
+            if self_closing -> root = pkg_data_xml_attach(stack, root, node) else {
                 stack.push(node)
             }
         }
-        if stack.len() > 0 -> return Err(DataBindError{message: "XML element {stack[0].name} is not closed"})
+        if stack.len() > 0 {
+            return Err(DataBindError{message: "XML element {stack[0].name} is not closed"})
+        }
         document: root ?? return Err(DataBindError{message: "XML has no root element"})
         Ok(document)
     }
@@ -283,12 +332,12 @@ pkg_data_xml_attach: fn(stack: &[XMLNode], root: XMLNode?, node: XMLNode) -> XML
     Ok(Val(node))
 }
 
-pkg_data_xml_initial_namespaces: fn() -> [String: String] Never! {
-    [String: String]{"xml": XML_NAMESPACE_URI}
+pkg_data_xml_initial_namespaces: fn() -> [String:String] Never! {
+    [String:String]{"xml": XML_NAMESPACE_URI}
 }
 
 // The namespace bindings in scope after an element's `xmlns` attributes.
-pkg_data_xml_resolve_namespaces: fn(inherited: [String: String], attrs: [(name: String, value: String)]) -> [String: String] DataBindError! {
+pkg_data_xml_resolve_namespaces: fn(inherited: [String:String], attrs: [(name: String, value: String)]) -> [String:String] DataBindError! {
     namespaces := inherited
     loop attr in attrs {
         if !attr.name.starts_with("xmlns:") {
@@ -296,15 +345,25 @@ pkg_data_xml_resolve_namespaces: fn(inherited: [String: String], attrs: [(name: 
             next
         }
         prefix: attr.name.removeprefix("xmlns:")
-        if prefix == "" || prefix == "xmlns" -> return Err(DataBindError{message: "XML namespace prefix {prefix} is reserved"})
-        if attr.value == "" -> return Err(DataBindError{message: "XML namespace prefix {prefix} has an empty URI"})
-        if prefix == "xml" && attr.value != XML_NAMESPACE_URI -> return Err(DataBindError{message: "XML prefix xml must use its reserved namespace URI"})
-        if attr.value == XMLNS_NAMESPACE_URI -> return Err(DataBindError{message: "XML namespace URI for xmlns is reserved"})
+        if prefix == "" || prefix == "xmlns" {
+            return Err(DataBindError{message: "XML namespace prefix {prefix} is reserved"})
+        }
+        if attr.value == "" {
+            return Err(DataBindError{message: "XML namespace prefix {prefix} has an empty URI"})
+        }
+        if prefix == "xml" && attr.value != XML_NAMESPACE_URI {
+            return Err(DataBindError{message: "XML prefix xml must use its reserved namespace URI"})
+        }
+        if attr.value == XMLNS_NAMESPACE_URI {
+            return Err(DataBindError{message: "XML namespace URI for xmlns is reserved"})
+        }
         namespaces[prefix] = attr.value
     }
     if namespaces.get("xml") == {
         .Val(xml_uri) -> {
-            if xml_uri != XML_NAMESPACE_URI -> return Err(DataBindError{message: "XML prefix xml must use its reserved namespace URI"})
+            if xml_uri != XML_NAMESPACE_URI {
+                return Err(DataBindError{message: "XML prefix xml must use its reserved namespace URI"})
+            }
         }
         .None -> {}
     }
@@ -313,13 +372,15 @@ pkg_data_xml_resolve_namespaces: fn(inherited: [String: String], attrs: [(name: 
 
 // A name in Clark notation (`{uri}local`) when a namespace applies. Only
 // elements take the default namespace.
-pkg_data_xml_resolve_name: fn(name: String, namespaces: [String: String], element: Bool) -> String DataBindError! {
+pkg_data_xml_resolve_name: fn(name: String, namespaces: [String:String], element: Bool) -> String DataBindError! {
     parts: name.split(":").to_list()
     if parts.len() > 1 {
         prefix: parts[0]
         local: name.removeprefix("{prefix}:")
         namespace: namespaces.get(prefix) ?? ""
-        if namespace == "" -> return Err(DataBindError{message: "XML name {name} uses an undeclared namespace prefix {prefix}"})
+        if namespace == "" {
+            return Err(DataBindError{message: "XML name {name} uses an undeclared namespace prefix {prefix}"})
+        }
         return Ok("{{{namespace}}}{local}")
     }
     if element {
@@ -354,16 +415,15 @@ pkg_data_scalar_of: fn(code: Int) -> String Never! {
 
 pkg_data_validate_xml_characters: fn(text: String) DataBindError! {
     loop scalar in pkg_data_scalars(text) {
-        if !pkg_data_xml_character_allowed(pkg_data_code(scalar)) -> return Err(DataBindError{message: "XML contains an invalid control character"})
+        if !pkg_data_xml_character_allowed(pkg_data_code(scalar)) {
+            return Err(DataBindError{message: "XML contains an invalid control character"})
+        }
     }
 }
 
 // XML 1.0 `Char`, without the C1 controls.
 pkg_data_xml_character_allowed: fn(code: Int) -> Bool Never! {
-    code == 9 || code == 10 || code == 13
-        || (code >= 0x20 && code <= 0xD7FF && !(code >= 0x7F && code <= 0x9F))
-        || (code >= 0xE000 && code <= 0xFFFD)
-        || (code >= 0x10000 && code <= 0x10FFFF)
+    code == 9 || code == 10 || code == 13 || (code >= 0x20 && code <= 0xD7FF && !(code >= 0x7F && code <= 0x9F)) || (code >= 0xE000 && code <= 0xFFFD) || (code >= 0x10000 && code <= 0x10FFFF)
 }
 
 // Every `&...;` is a predefined entity or a character reference to an
@@ -379,9 +439,13 @@ pkg_data_validate_xml_entities: fn(text: String) DataBindError! {
         start: index
         index += 1
         loop index < chars.len() && chars[index] != ";" -> index += 1
-        if index >= chars.len() -> return Err(DataBindError{message: "XML entity is not terminated"})
+        if index >= chars.len() {
+            return Err(DataBindError{message: "XML entity is not terminated"})
+        }
         entity: pkg_data_slice(chars, start + 1, index)
-        if !pkg_data_xml_entity_valid(entity) -> return Err(DataBindError{message: "XML entity {entity} is invalid"})
+        if !pkg_data_xml_entity_valid(entity) {
+            return Err(DataBindError{message: "XML entity {entity} is invalid"})
+        }
         index += 1
     }
 }
@@ -479,8 +543,12 @@ pkg_data_add_xml_record: fn(builder: &SchemaBuilder, preferred: String, nodes: [
         if pkg_data_xml_is_simple(node) -> simple_count += 1
     }
     mixed_count: nodes.len() - simple_count
-    if simple_count > 0 -> fields.push(FieldSeed{wire_name: "$text", ty: BoundType.Scalar("String"), optional: mixed_count > 0, note: None})
-    if mixed_count > 0 -> fields.push(FieldSeed{wire_name: "$content", ty: BoundType.Scalar("Dyn"), optional: simple_count > 0, note: None})
+    if simple_count > 0 {
+        fields.push(FieldSeed{wire_name: "$text", ty: BoundType.Scalar("String"), optional: mixed_count > 0, note: None})
+    }
+    if mixed_count > 0 {
+        fields.push(FieldSeed{wire_name: "$content", ty: BoundType.Scalar("Dyn"), optional: simple_count > 0, note: None})
+    }
     loop child_name in child_names {
         children := [XMLNode]{}
         present_count := 0

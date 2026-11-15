@@ -122,7 +122,9 @@ codable_options1_merge: fn(run: [CodableOptionsGroup]) -> CodableOptionsMerge {
             }
             if !codable_options1_retired(entry.name) -> next
             if entry.name != "CodableAsBase" -> wire = true
-            if entry.args != None && entry.name != "Discriminant" -> return CodableOptionsMerge{problem: Val("`#{entry.name}` takes no arguments")}
+            if entry.args != None && entry.name != "Discriminant" {
+                return CodableOptionsMerge{problem: Val("`#{entry.name}` takes no arguments")}
+            }
             if {
                 entry.name == "Encode" -> encode = true
                 entry.name == "Decode" -> decode = true
@@ -146,7 +148,9 @@ codable_options1_merge: fn(run: [CodableOptionsGroup]) -> CodableOptionsMerge {
             decode && !encode -> only = "only: .Decode"
         }
     }
-    if only != "" && args.any(fn(written) { written.contains("only:") }) -> return CodableOptionsMerge{problem: Val("`#Codable` already names its direction")}
+    if only != "" && args.any(fn(written) { written.contains("only:") }) {
+        return CodableOptionsMerge{problem: Val("`#Codable` already names its direction")}
+    }
     written := [String]{}
     if form != "" -> written.push(form.copy())
     loop arg in args -> written.push(arg.copy())
@@ -178,7 +182,9 @@ codable_options1_run_edits: fn(bytes: [U8], run: [CodableOptionsGroup], codable:
         if !changed -> next
         if entries.len() > 0 {
             text: if entries.len() == 1 -> "#{entries[0]}" else -> "#[{entries.join(", ")}]"
-            if text != codable_options1_text(bytes, group.start, group.end) -> edits.push(CodableOptionsEdit{start: group.start, end: group.end, text: text})
+            if text != codable_options1_text(bytes, group.start, group.end) {
+                edits.push(CodableOptionsEdit{start: group.start, end: group.end, text: text})
+            }
             next
         }
         start := group.start
@@ -187,9 +193,13 @@ codable_options1_run_edits: fn(bytes: [U8], run: [CodableOptionsGroup], codable:
         loop end < bytes.len() && (bytes[end] == 32 || bytes[end] == 9) -> end += 1
         alone: (start == 0 || bytes[start - 1] == 10) && (end == bytes.len() || bytes[end] == 10)
         if {
-            alone && end < bytes.len() -> edits.push(CodableOptionsEdit{start: start, end: end + 1, text: ""})
+            alone && end < bytes.len() -> {
+                edits.push(CodableOptionsEdit{start: start, end: end + 1, text: ""})
+            }
             alone -> edits.push(CodableOptionsEdit{start: start, end: end, text: ""})
-            codable_options1_escaped_break(bytes, start - 2) && codable_options1_escaped_break(bytes, end) -> edits.push(CodableOptionsEdit{start: start, end: end + 2, text: ""})
+            codable_options1_escaped_break(bytes, start - 2) && codable_options1_escaped_break(bytes, end) -> {
+                edits.push(CodableOptionsEdit{start: start, end: end + 2, text: ""})
+            }
             else -> edits.push(CodableOptionsEdit{start: group.start, end: end, text: ""})
         }
     }
@@ -198,7 +208,9 @@ codable_options1_run_edits: fn(bytes: [U8], run: [CodableOptionsGroup], codable:
 // The marker group whose `#` is at `at`; None when none starts there.
 codable_options1_group: fn(bytes: [U8], at: Int) -> CodableOptionsGroup? {
     if at >= bytes.len() || bytes[at] != 35 -> return None
-    if at > 0 && (codable_options1_word(bytes[at - 1]) || bytes[at - 1] == 35) && !codable_options1_escaped_break(bytes, at - 2) -> return None
+    if at > 0 && (codable_options1_word(bytes[at - 1]) || bytes[at - 1] == 35) && !codable_options1_escaped_break(bytes, at - 2) {
+        return None
+    }
     if at + 1 < bytes.len() && bytes[at + 1] == 91 {
         close: codable_options1_close(bytes, at + 1)
         if close < 0 -> return None
@@ -239,7 +251,9 @@ codable_options1_entry: fn(text: String) -> CodableOptionsEntry? {
     end := at
     loop end < bytes.len() && codable_options1_word(bytes[end]) -> end += 1
     name: codable_options1_text(bytes, at, end)
-    if end == bytes.len() -> return Val(CodableOptionsEntry{text: text.copy(), name: name, negated: negated})
+    if end == bytes.len() {
+        return Val(CodableOptionsEntry{text: text.copy(), name: name, negated: negated})
+    }
     if bytes[end] != 40 || codable_options1_close(bytes, end) != bytes.len() - 1 -> return None
     Val(CodableOptionsEntry{text: text.copy(), name: name, negated: negated, args: Val(codable_options1_text(bytes, end + 1, bytes.len() - 1))})
 }
@@ -265,13 +279,9 @@ codable_options1_close: fn(bytes: [U8], open: Int) -> Int {
 codable_options1_blank: fn(bytes: [U8], at: Int) -> Int {
     end := at
     loop end < bytes.len() {
-        if bytes[end] == 32 || bytes[end] == 9 || bytes[end] == 10 || bytes[end] == 13 {
-            end += 1
-        } else if codable_options1_escaped_break(bytes, end) {
+        if bytes[end] == 32 || bytes[end] == 9 || bytes[end] == 10 || bytes[end] == 13 -> end += 1 else if codable_options1_escaped_break(bytes, end) {
             end += 2
-        } else {
-            break
-        }
+        } else { break }
     }
     end
 }

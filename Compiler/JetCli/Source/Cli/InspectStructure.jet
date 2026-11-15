@@ -55,10 +55,14 @@ jet_cli_structure_report: fn(facts: [StructureFact], ledger: GateLedger, json: B
         return "{jet_cli_status_render("inspect.structure", true, [JetCLIStatusField]{jet_cli_status_field("structure", structure)})}\n"
     }
     output := "structure\n"
-    loop row in jet_cli_structure_rows() -> output = "{output}  {row.name}  safe={row.safe_direction}  gates={row.gates.join(", ")}\n"
+    loop row in jet_cli_structure_rows() {
+        output = "{output}  {row.name}  safe={row.safe_direction}  gates={row.gates.join(", ")}\n"
+    }
     output = "{output}facts: {facts.len()}\n"
     if facts.len() == 0 -> output = "{output}  (none in this program)\n"
-    loop fact in facts -> output = "{output}  {jet_cli_structure_kind(fact.kind)}  {fact.source}:{fact.span.start}..{fact.span.end}  {fact.subject}  {fact.status} — {fact.detail}\n"
+    loop fact in facts {
+        output = "{output}  {jet_cli_structure_kind(fact.kind)}  {fact.source}:{fact.span.start}..{fact.span.end}  {fact.subject}  {fact.status} — {fact.detail}\n"
+    }
     output = "{output}gates: {gates.len()}\n"
     if gates.len() == 0 -> output = "{output}  (none in this program)\n"
     loop entry in gates {
@@ -78,7 +82,9 @@ jet_cli_structure_core_type: fn(entry: CoreModuleTypeExport) -> JetCLIStatusValu
     }
     fields := [JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(entry.name)), jet_cli_status_field("kind", jet_cli_status_text(kind))}
     if entry.kind == {
-        .Enum(variants) -> fields.push(jet_cli_status_field("variants", jet_cli_status_texts(variants)))
+        .Enum(variants) -> {
+            fields.push(jet_cli_status_field("variants", jet_cli_status_texts(variants)))
+        }
         .Generic(arity) -> fields.push(jet_cli_status_field("arity", jet_cli_status_int(arity)))
         .Plain | .CryptoNominal -> {}
     }
@@ -100,13 +106,13 @@ jet_cli_structure_core: fn(json: Bool) -> JetDriverVerbOutput Never! {
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("inspect.structure", true, [JetCLIStatusField]{jet_cli_status_field("core", core)})}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
     output := "core\nbootstrap:\n"
-    loop (index, step) in CORE_BOOTSTRAP_STEPS -> output = "{output}  {index + 1}. {step.name}  depends_on [{if step.dependencies.len() == 0 -> "none" else -> step.dependencies.join(", ")}]\n"
+    loop (index, step) in CORE_BOOTSTRAP_STEPS {
+        output = "{output}  {index + 1}. {step.name}  depends_on [{if step.dependencies.len() == 0 -> "none" else -> step.dependencies.join(", ")}]\n"
+    }
     output = "{output}root types: {CORE_ROOT_TYPES.join(", ")}\nmodules: {CORE_MODULE_DECLARATIONS.len()}\n"
     loop core_module in CORE_MODULE_DECLARATIONS {
         output = "{output}  module {core_module.module_name}  depends_on [{if core_module.dependencies.len() == 0 -> "none" else -> core_module.dependencies.join(", ")}]\n    members: {core_module.members.join(", ")}\n"
-        if core_module.type_exports.len() == 0 {
-            output = "{output}    types: (none)\n"
-        } else {
+        if core_module.type_exports.len() == 0 -> output = "{output}    types: (none)\n" else {
             output = "{output}    types:\n"
             loop entry in core_module.type_exports {
                 kind: if entry.kind == {
@@ -136,8 +142,10 @@ jet_cli_structure_host: fn(file: String, color: Bool, json: Bool, threads: Int?,
         }
     }
     if compiled == {
-        .Refused(refusal) -> output = refusal.move()
-        .Compiled(result, snapshot) -> jet_cli_finish(jet_cli_inspect_noticed(notice, jet_cli_structure_result(file, color, json, result, snapshot)))
+        .Refused(refusal) -> { output = refusal.move() }
+        .Compiled(result, snapshot) -> {
+            jet_cli_finish(jet_cli_inspect_noticed(notice, jet_cli_structure_result(file, color, json, result, snapshot)))
+        }
     }
     output
 }
@@ -180,8 +188,12 @@ jet_cli_structure_result: fn(file: String, color: Bool, json: Bool, result: JetD
         loop row in ledger.diagnostic_rows {
             source: jet_cli_inspection_source(result, snapshot, row.source)
             if json {
-                loop report in jet_cli_reports_json(jet_cli_report_base(row.source), row.source, source, [Diagnostic]{row.diagnostic}) -> reports.push(report)
-            } else { stderr = "{stderr}{diagnostic_render_all(row.source, source, [Diagnostic]{row.diagnostic}, color)}" }
+                loop report in jet_cli_reports_json(jet_cli_report_base(row.source), row.source, source, [Diagnostic]{row.diagnostic}) {
+                    reports.push(report)
+                }
+            } else {
+                stderr = "{stderr}{diagnostic_render_all(row.source, source, [Diagnostic]{row.diagnostic}, color)}"
+            }
         }
         return JetDriverVerbOutput{stdout: if json -> jet_cli_status_render_with_reports("inspect.structure", false, reports, [JetCLIStatusField]{}) else -> "", stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }

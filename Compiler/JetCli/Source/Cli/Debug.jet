@@ -21,16 +21,22 @@ jet_cli_debug: fn(jet_argv: [String], args: [String], color: Bool) -[FS, Env, Ex
     dap := false
     breaks := [NativeBreak]{}
     loop (index, flag) in jet_argv {
-        if flag == "--raw-frames" || flag.starts_with("--record") || flag.starts_with("--replay") -> return jet_cli_not_ported("debug {flag.before("=")}", color)
+        if flag == "--raw-frames" || flag.starts_with("--record") || flag.starts_with("--replay") {
+            return jet_cli_not_ported("debug {flag.before("=")}", color)
+        }
         if flag == "--dap" -> dap = true
         if flag != "--break" && !flag.starts_with("--break=") -> next
         spec: if flag == "--break" && index + 1 < jet_argv.len() -> jet_argv[index + 1] else -> flag.after("--break=")
         wanted: jet_cli_debug_break(spec) ?? return jet_cli_fail("E2102", "`--break {spec}` isn't a breakpoint jet understands", jet_cli_why("E2102"), "write the file and the line, as `--break main.jet:12`", color, JET_DRIVER_EXIT_USAGE)
         breaks.push(wanted)
     }
-    if dap && breaks.len() > 0 -> return jet_cli_fail("E2102", "`--break` sets the console's breakpoints, but `--dap` takes them from the editor", jet_cli_why("E2102"), "drop `--break`, and set the breakpoints in the editor", color, JET_DRIVER_EXIT_USAGE)
+    if dap && breaks.len() > 0 {
+        return jet_cli_fail("E2102", "`--break` sets the console's breakpoints, but `--dap` takes them from the editor", jet_cli_why("E2102"), "drop `--break`, and set the breakpoints in the editor", color, JET_DRIVER_EXIT_USAGE)
+    }
     if args.len() < 2 -> return jet_cli_missing_target("debug", false)
-    if args.len() > 2 -> return jet_cli_fail("E2104", "`jet debug` takes one source file, but got `{args[2]}` too", jet_cli_why("E2104"), "Run `jet debug <file.jet>`.", color, JET_DRIVER_EXIT_USAGE)
+    if args.len() > 2 {
+        return jet_cli_fail("E2104", "`jet debug` takes one source file, but got `{args[2]}` too", jet_cli_why("E2104"), "Run `jet debug <file.jet>`.", color, JET_DRIVER_EXIT_USAGE)
+    }
     deep_checks := DeepChecks{}
     if deep_checks_read(jet_argv) == {
         .Refused(argument) -> return JetCLIPlan.Refused{report: deep_checks_malformed(argument), color: color, exit_code: JET_DRIVER_EXIT_USAGE, notice: ""}
@@ -89,7 +95,9 @@ jet_cli_debug_unavailable: fn(error: NativeDebugError, color: Bool) -> JetCLIPla
 jet_cli_debug_console: fn(session: &NativeSession, file: String, lines: [String], breaks: [NativeBreak], color: Bool) -[FS, Env, Exec, IO, Time.Wait]> JetCLIPlan Never! {
     echo: !cli_term.stdin().is_tty()
     opened := NativeDebugStep?{None}
-    if breaks.len() > 0 -> opened = Val(session.run_to(breaks, file, lines) ?? return jet_cli_debug_unavailable(err, color))
+    if breaks.len() > 0 {
+        opened = Val(session.run_to(breaks, file, lines) ?? return jet_cli_debug_unavailable(err, color))
+    }
     if breaks.len() == 0 {
         if session.open(file, lines) == {
             .Ok(step) -> opened = step
@@ -109,7 +117,7 @@ jet_cli_debug_console: fn(session: &NativeSession, file: String, lines: [String]
         // The end of stdin runs the program to its end.
         command := "continue"
         if input.read_line() == {
-            .Ok(read) -> command = read ?? "continue"
+            .Ok(read) -> { command = read ?? "continue" }
             .Err(_) -> {}
         }
         command = command.trim().copy()
@@ -126,7 +134,9 @@ jet_cli_debug_console: fn(session: &NativeSession, file: String, lines: [String]
 }
 
 jet_cli_debug_write: fn(text: String) Never! -[IO, Time.Wait]> {
-    if text.len() == 0 -> return
+    if text.len() == 0 {
+        return
+    }
     out := cli_term.stdout()
     out.write(text).drop("jet debug stdout")
     out.flush().drop("jet debug stdout")

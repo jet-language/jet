@@ -25,10 +25,14 @@ provider_find_canonical_package: fn(repo: String, requested: String) -[FS, Env]>
             return Err(ProviderReason{message: "{error}"})
         }
     }
-    if info.is_symlink -> return Err(ProviderReason{message: "canonical Package marker is a symlink: {root_marker}"})
+    if info.is_symlink {
+        return Err(ProviderReason{message: "canonical Package marker is a symlink: {root_marker}"})
+    }
     if !info.is_file -> return Ok(None)
     root: provider_load_canonical_facts(repo, root_marker)
-    if root.name == requested || root.outputs.has_key(requested) -> return Ok(Val(CanonicalPackage{root: repo, facts: root}))
+    if root.name == requested || root.outputs.has_key(requested) {
+        return Ok(Val(CanonicalPackage{root: repo, facts: root}))
+    }
     if root.members.len() == 0 -> return Ok(None)
     root.validate_members_in(repo) ?? return Err(ProviderReason{message: "canonical Package members are invalid: {err.message()}"})
     candidates := [CanonicalPackage]{}
@@ -63,23 +67,27 @@ provider_collect_canonical_packages: fn(repo: String, members: [MemberRef], requ
         }
         member_root: files.join(repo, pkg_normalize_member_path(relative))
         info: files.stat(member_root) ?? return Err(ProviderReason{message: "could not inspect Package member `{relative}`: {err}"})
-        if info.is_symlink || !info.is_dir -> return Err(ProviderReason{message: "Package member `{relative}` is not a regular directory"})
+        if info.is_symlink || !info.is_dir {
+            return Err(ProviderReason{message: "Package member `{relative}` is not a regular directory"})
+        }
         if discover {
             entries: files.list_dir(member_root) ?? return Err(ProviderReason{message: "could not read Package member discovery `{relative}`: {err}"})
             loop entry in entries {
                 entry_info: files.stat(entry.path) ?? return Err(ProviderReason{message: "{err}"})
                 name: entry.name
-                if entry_info.is_symlink || !entry_info.is_dir || name.starts_with(".") || name == "build" || name == "target" -> next
+                if entry_info.is_symlink || !entry_info.is_dir || name.starts_with(".") || name == "build" || name == "target" {
+                    next
+                }
                 provider_collect_one_canonical_package(entry.path, requested, seen, out)
             }
-        } else {
-            provider_collect_one_canonical_package(member_root, requested, seen, out)
-        }
+        } else { provider_collect_one_canonical_package(member_root, requested, seen, out) }
     }
 }
 
 provider_collect_one_canonical_package: fn(path: String, requested: String, seen: &[String], out: &[CanonicalPackage]) ProviderReason! -[FS, Env]> {
-    if seen.contains(path) -> return
+    if seen.contains(path) {
+        return
+    }
     seen.push(path.copy())
     candidates: [String]{files.join(path, PACKAGE_FILE)}
     marker := ""
@@ -87,14 +95,24 @@ provider_collect_one_canonical_package: fn(path: String, requested: String, seen
         if marker == "" && files.is_file(candidate) -> marker = candidate
     }
     loop candidate in candidates {
-        if marker == "" && (files.exists(candidate) || files.is_symlink(candidate)) -> marker = candidate
+        if marker == "" && (files.exists(candidate) || files.is_symlink(candidate)) {
+            marker = candidate
+        }
     }
-    if marker == "" -> return
+    if marker == "" {
+        return
+    }
     info: files.stat(marker) ?? return Err(ProviderReason{message: "{err}"})
-    if info.is_symlink -> return Err(ProviderReason{message: "Package marker is a symlink: {marker}"})
-    if !info.is_file -> return Err(ProviderReason{message: "Package marker is not a file: {marker}"})
+    if info.is_symlink {
+        return Err(ProviderReason{message: "Package marker is a symlink: {marker}"})
+    }
+    if !info.is_file {
+        return Err(ProviderReason{message: "Package marker is not a file: {marker}"})
+    }
     facts: provider_load_canonical_facts(path, marker)
-    if facts.name == requested || facts.outputs.has_key(requested) -> out.push(CanonicalPackage{root: path, facts})
+    if facts.name == requested || facts.outputs.has_key(requested) {
+        out.push(CanonicalPackage{root: path, facts: facts})
+    }
 }
 
 // The toolchain part of a cache identity. The host-specific cargo path never
@@ -156,10 +174,10 @@ provider_collect_core_files: fn(root: String, relative: String, out: &[(relative
     loop entry in entries {
         info: files.stat(entry.path) ?? return Err(ProviderReason{message: "{err}"})
         child: if relative == "" -> entry.name else -> "{relative}/{entry.name}"
-        if info.is_symlink -> return Err(ProviderReason{message: "core source tree contains symlink {entry.path}"})
-        if info.is_dir {
-            provider_collect_core_files(root, child, out)
-        } else if info.is_file {
+        if info.is_symlink {
+            return Err(ProviderReason{message: "core source tree contains symlink {entry.path}"})
+        }
+        if info.is_dir -> provider_collect_core_files(root, child, out) else if info.is_file {
             out.push((relative: child.replace("\\", "/"), path: entry.path))
         } else {
             return Err(ProviderReason{message: "core source tree contains non-file {entry.path}"})
@@ -306,14 +324,16 @@ provider_is_contained_relative: fn(path: String) -> Bool Never! {
 // regular files.
 provider_validate_core_source_tree: fn(root: String) ProviderReason! -[FS]> {
     info: files.stat(root) ?? return Err(ProviderReason{message: "{err}"})
-    if info.is_symlink || !info.is_dir -> return Err(ProviderReason{message: "core source root is not a real directory: {root}"})
+    if info.is_symlink || !info.is_dir {
+        return Err(ProviderReason{message: "core source root is not a real directory: {root}"})
+    }
     entries: files.list_dir(root) ?? return Err(ProviderReason{message: "{err}"})
     loop entry in entries {
         entry_info: files.stat(entry.path) ?? return Err(ProviderReason{message: "{err}"})
-        if entry_info.is_symlink -> return Err(ProviderReason{message: "core source tree contains symlink {entry.path}"})
-        if entry_info.is_dir {
-            provider_validate_core_source_tree(entry.path)
-        } else if !entry_info.is_file {
+        if entry_info.is_symlink {
+            return Err(ProviderReason{message: "core source tree contains symlink {entry.path}"})
+        }
+        if entry_info.is_dir -> provider_validate_core_source_tree(entry.path) else if !entry_info.is_file {
             return Err(ProviderReason{message: "core source tree contains non-file {entry.path}"})
         }
     }

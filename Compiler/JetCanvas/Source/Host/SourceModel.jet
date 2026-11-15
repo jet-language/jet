@@ -8,12 +8,16 @@ use {
 
 // The bytes a Canvas source read may return: the devserver response bound.
 SOURCE_MAX_BYTES: 67108864
+
 SOURCE_NEW_FILE_MODE: 438
+
 SOURCE_TEMP_ATTEMPTS: 100
 
 // Why a Canvas source path could not be read or written.
 #Error
-CanvasSourceError: struct { message: String }
+CanvasSourceError: struct {
+    message: String
+}
 
 canvas_source_error: fn(message: String) -> CanvasSourceError Never! {
     CanvasSourceError{message: message}
@@ -54,7 +58,9 @@ ensure_no_symlink_directory: fn(path: String) CanvasSourceError! {
                 if directory.create_directory(name) == {
                     .Ok(_) -> {}
                     .Err(.AlreadyExists(_)) -> {}
-                    .Err(error) -> { return Err(canvas_source_error("couldn't create Canvas directory `{name}`: {error}")) }
+                    .Err(error) -> {
+                        return Err(canvas_source_error("couldn't create Canvas directory `{name}`: {error}"))
+                    }
                 }
             }
         }
@@ -114,7 +120,9 @@ source_replace_if_unchanged: fn(path: String, expected: String?, candidate: Stri
             }
         }
         .None -> {
-            if current != None -> held.parent.remove(held.name) ?? return Err(canvas_source_error("couldn't remove Canvas source `{path}`: {err}"))
+            if current != None {
+                held.parent.remove(held.name) ?? return Err(canvas_source_error("couldn't remove Canvas source `{path}`: {err}"))
+            }
         }
     }
     Ok(ReplaceResult.Applied)
@@ -141,7 +149,9 @@ source_components: fn(path: String) -> [String] CanvasSourceError! {
     names := [String]{}
     loop part in path.split("/") {
         if part == "" || part == "." -> next
-        if part == ".." -> return Err(canvas_source_error("Canvas paths must not contain parent components"))
+        if part == ".." {
+            return Err(canvas_source_error("Canvas paths must not contain parent components"))
+        }
         names.push(part)
     }
     Ok(names)
@@ -149,7 +159,9 @@ source_components: fn(path: String) -> [String] CanvasSourceError! {
 
 source_open_parent: fn(path: String) -> SourceTarget CanvasSourceError! {
     names: source_components(path)
-    if names.len() == 0 || path.ends_with("/") -> return Err(canvas_source_error("Canvas source path has no file name"))
+    if names.len() == 0 || path.ends_with("/") {
+        return Err(canvas_source_error("Canvas source path has no file name"))
+    }
     parent := source_open_base(path)
     loop index in 0..<names.len() - 1 {
         parent = parent.open_directory(names[index]) ?? return Err(canvas_source_error("Canvas source paths must not traverse symlinks: `{names[index]}`: {err}"))
@@ -165,22 +177,32 @@ source_read_current: fn(parent: Directory, name: String) -> SourceCurrentFile? C
     reader := parent.open(name) ?? return Err(canvas_source_error("Canvas source paths must not traverse symlinks: `{name}`: {err}"))
     before: reader.stat() ?? return Err(canvas_source_error("couldn't inspect Canvas source `{name}`: {err}"))
     source_require_regular(before, name)
-    if before.size > SOURCE_MAX_BYTES -> return Err(canvas_source_error("file exceeds the devserver response limit"))
+    if before.size > SOURCE_MAX_BYTES {
+        return Err(canvas_source_error("file exceeds the devserver response limit"))
+    }
     bytes := [U8]{}
     loop {
         chunk: reader.read_bytes(SOURCE_MAX_BYTES + 1 - bytes.len()) ?? return Err(canvas_source_error("couldn't read Canvas source `{name}`: {err}"))
         if chunk.len() == 0 -> break
         loop byte in chunk -> bytes.push(byte)
-        if bytes.len() > SOURCE_MAX_BYTES -> return Err(canvas_source_error("file exceeds the devserver response limit"))
+        if bytes.len() > SOURCE_MAX_BYTES {
+            return Err(canvas_source_error("file exceeds the devserver response limit"))
+        }
     }
     after: reader.stat() ?? return Err(canvas_source_error("couldn't inspect Canvas source `{name}`: {err}"))
-    if after.id != before.id || !after.is_file || after.links != 1 -> return Err(canvas_source_error("Canvas source changed while it was being read"))
+    if after.id != before.id || !after.is_file || after.links != 1 {
+        return Err(canvas_source_error("Canvas source changed while it was being read"))
+    }
     Ok(Val(SourceCurrentFile{bytes: bytes, mode: before.mode}))
 }
 
 source_require_regular: fn(stat: Stat, name: String) CanvasSourceError! {
-    if !stat.is_file -> return Err(canvas_source_error("Canvas source path `{name}` is not a regular file"))
-    if stat.links != 1 -> return Err(canvas_source_error("Canvas source file `{name}` must not be a hard link"))
+    if !stat.is_file {
+        return Err(canvas_source_error("Canvas source path `{name}` is not a regular file"))
+    }
+    if stat.links != 1 {
+        return Err(canvas_source_error("Canvas source file `{name}` must not be a hard link"))
+    }
     Ok()
 }
 
@@ -208,15 +230,21 @@ source_replace: fn(target: SourceTarget, bytes: [U8], mode: Int?) CanvasSourceEr
                     source_remove_quietly(target.parent, name)
                     return Err(error)
                 }
-                if mode != None -> writer.set_mode(file_mode) ?? return Err(canvas_source_error("couldn't set Canvas source mode: {err}"))
+                if mode != None {
+                    writer.set_mode(file_mode) ?? return Err(canvas_source_error("couldn't set Canvas source mode: {err}"))
+                }
                 temporary = name
                 break
             }
             .Err(.AlreadyExists(_)) -> { next }
-            .Err(error) -> { return Err(canvas_source_error("couldn't create a Canvas source temporary file: {error}")) }
+            .Err(error) -> {
+                return Err(canvas_source_error("couldn't create a Canvas source temporary file: {error}"))
+            }
         }
     }
-    if temporary == "" -> return Err(canvas_source_error("could not allocate a Canvas source temporary file"))
+    if temporary == "" {
+        return Err(canvas_source_error("could not allocate a Canvas source temporary file"))
+    }
     if target.parent.rename(temporary, target.name) == .Err(error) {
         source_remove_quietly(target.parent, temporary)
         return Err(canvas_source_error("couldn't replace Canvas source `{target.name}`: {error}"))

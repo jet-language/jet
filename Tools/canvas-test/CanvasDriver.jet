@@ -16,6 +16,7 @@ use {
 }
 
 C_WAIT_MS: 8000
+
 C_POLL_MS: 80
 
 #Error
@@ -73,9 +74,13 @@ command: fn(bidi: BrowserProtocol, method: String, params: Dyn) -> Dyn Failure! 
     Ok(tree)
 }
 
-driver_command: fn(d: Driver, method: String, params: Dyn) -> Dyn Failure! { command(d.bidi, method, params) }
+driver_command: fn(d: Driver, method: String, params: Dyn) -> Dyn Failure! {
+    command(d.bidi, method, params)
+}
 
-context_param: fn(d: Driver) -> (key: String, value: Dyn) { (key: "context", value: Dyn.Text(d.context.copy())) }
+context_param: fn(d: Driver) -> (key: String, value: Dyn) {
+    (key: "context", value: Dyn.Text(d.context.copy()))
+}
 
 // Navigate the tab and wait for its load event.
 driver_navigate: fn(d: Driver, url: String) Failure! {
@@ -87,13 +92,19 @@ driver_navigate: fn(d: Driver, url: String) Failure! {
 // thrown page error fails with its text.
 driver_eval: fn(d: Driver, expression: String) -> Dyn Failure! {
     wrapped: "(async () => {{ const __jetValue = await ({expression}\n); return __jetValue === undefined ? 'null' : JSON.stringify(__jetValue); }})()"
-    reply: driver_command(d, "script.evaluate", obj([
-        (key: "expression", value: Dyn.Text(wrapped)),
-        (key: "target", value: obj([context_param(d)])),
-        (key: "awaitPromise", value: Dyn.Bool(true)),
-        (key: "resultOwnership", value: Dyn.Text("none")),
-        (key: "userActivation", value: Dyn.Bool(true)),
-    ]))
+    reply: driver_command(
+        d,
+        "script.evaluate",
+        obj(
+            [
+                (key: "expression", value: Dyn.Text(wrapped)),
+                (key: "target", value: obj([context_param(d)])),
+                (key: "awaitPromise", value: Dyn.Bool(true)),
+                (key: "resultOwnership", value: Dyn.Text("none")),
+                (key: "userActivation", value: Dyn.Bool(true)),
+            ],
+        ),
+    )
     if text(at(reply, "type")) != "success" {
         detail: text(at(reply, "exceptionDetails.text"))
         shown: if detail != "" -> detail else -> js(reply)
@@ -138,7 +149,9 @@ key_action: fn(kind: String, key: String) -> Dyn {
     obj([(key: "type", value: Dyn.Text(kind.copy())), (key: "value", value: Dyn.Text(webdriver_key(key)))])
 }
 
-pause_action: fn() -> Dyn { obj([(key: "type", value: Dyn.Text("pause")), (key: "duration", value: Dyn.Int(0))]) }
+pause_action: fn() -> Dyn {
+    obj([(key: "type", value: Dyn.Text("pause")), (key: "duration", value: Dyn.Int(0))])
+}
 
 // Pointer `actions` with `modifiers` held: the key source presses them
 // first, pauses through the pointer actions, then releases them.
@@ -183,11 +196,17 @@ driver_drag: fn(d: Driver, from: Point, to: Point, steps: Int, modifiers: [Strin
 }
 
 driver_wheel: fn(d: Driver, x: Float, y: Float, delta_x: Float, delta_y: Float) Failure! {
-    scroll: obj([
-        (key: "type", value: Dyn.Text("scroll")), (key: "x", value: Dyn.Int(round(x))), (key: "y", value: Dyn.Int(round(y))),
-        (key: "deltaX", value: Dyn.Int(round(delta_x))), (key: "deltaY", value: Dyn.Int(round(delta_y))),
-        (key: "origin", value: Dyn.Text("viewport")), (key: "duration", value: Dyn.Int(0)),
-    ])
+    scroll: obj(
+        [
+            (key: "type", value: Dyn.Text("scroll")),
+            (key: "x", value: Dyn.Int(round(x))),
+            (key: "y", value: Dyn.Int(round(y))),
+            (key: "deltaX", value: Dyn.Int(round(delta_x))),
+            (key: "deltaY", value: Dyn.Int(round(delta_y))),
+            (key: "origin", value: Dyn.Text("viewport")),
+            (key: "duration", value: Dyn.Int(0)),
+        ],
+    )
     driver_actions(d, [Dyn]{obj([(key: "type", value: Dyn.Text("wheel")), (key: "id", value: Dyn.Text("wheel")), (key: "actions", value: Dyn.Array([Dyn]{scroll}))])})
 }
 
@@ -240,10 +259,16 @@ webdriver_key: fn(key: String) -> String {
 
 // Install `function_declaration` before every document's own scripts; its id.
 driver_add_preload: fn(d: Driver, function_declaration: String) -> String Failure! {
-    reply: driver_command(d, "script.addPreloadScript", obj([
-        (key: "functionDeclaration", value: Dyn.Text(function_declaration.copy())),
-        (key: "contexts", value: Dyn.Array([Dyn]{Dyn.Text(d.context.copy())})),
-    ]))
+    reply: driver_command(
+        d,
+        "script.addPreloadScript",
+        obj(
+            [
+                (key: "functionDeclaration", value: Dyn.Text(function_declaration.copy())),
+                (key: "contexts", value: Dyn.Array([Dyn]{Dyn.Text(d.context.copy())})),
+            ],
+        ),
+    )
     Ok(text(at(reply, "script")))
 }
 

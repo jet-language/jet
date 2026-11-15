@@ -96,9 +96,13 @@ use {
 // declaration starts. A container body holds declarations; a shape body holds
 // fields, variants and methods; code holds statements.
 PARSER_COLON_FRAME_GROUP: 0
+
 PARSER_COLON_FRAME_CONTAINER: 1
+
 PARSER_COLON_FRAME_SHAPE: 2
+
 PARSER_COLON_FRAME_CODE: 3
+
 // File scope or a module body: a container where a module instance may sit.
 PARSER_COLON_FRAME_MODULE: 4
 
@@ -133,15 +137,21 @@ PARSER_COLON_HEAD_COMPTIME_BLOCK: -2
 parser_colon_body_frame: fn(head: Int, frame: Int) -> Int Never! {
     if head == TOKEN_KW_STRUCT || head == TOKEN_KW_ENUM -> return PARSER_COLON_FRAME_SHAPE
     if head == TOKEN_KW_MODULE -> return PARSER_COLON_FRAME_MODULE
-    if head == TOKEN_KW_IMPL || head == TOKEN_KW_TRAIT || head == TOKEN_KW_EXTERN || head == TOKEN_KW_TAG || head == TOKEN_KW_EFFECT -> return PARSER_COLON_FRAME_CONTAINER
-    if head == PARSER_COLON_HEAD_COMPTIME_BLOCK && (frame == PARSER_COLON_FRAME_MODULE || frame == PARSER_COLON_FRAME_CONTAINER) -> return frame
+    if head == TOKEN_KW_IMPL || head == TOKEN_KW_TRAIT || head == TOKEN_KW_EXTERN || head == TOKEN_KW_TAG || head == TOKEN_KW_EFFECT {
+        return PARSER_COLON_FRAME_CONTAINER
+    }
+    if head == PARSER_COLON_HEAD_COMPTIME_BLOCK && (frame == PARSER_COLON_FRAME_MODULE || frame == PARSER_COLON_FRAME_CONTAINER) {
+        return frame
+    }
     PARSER_COLON_FRAME_CODE
 }
 
 // A statement head's part in a marker declaration: none, the `impl Marker`
 // block, or the `expand` template written in it.
 PARSER_COLON_MARKER_NONE: 0
+
 PARSER_COLON_MARKER_IMPL: 1
+
 PARSER_COLON_MARKER_TEMPLATE: 2
 
 // The marker part of the head at `head`: `impl Marker {` opens the marker's
@@ -153,9 +163,13 @@ parser_colon_marker_head: fn(tokens: [Token], tables: TokenTables, head: Int) ->
     if name >= tokens.len() || tokens[name].kind != TOKEN_IDENT -> return PARSER_COLON_MARKER_NONE
     if tokens[head].kind == TOKEN_KW_IMPL && token_decoded(tables, tokens[name]) == "Marker" {
         open: parser_colon_code_at(tokens, name + 1)
-        if open < tokens.len() && tokens[open].kind == TOKEN_LBRACE -> return PARSER_COLON_MARKER_IMPL
+        if open < tokens.len() && tokens[open].kind == TOKEN_LBRACE {
+            return PARSER_COLON_MARKER_IMPL
+        }
     }
-    if tokens[head].kind == TOKEN_KW_FN && token_decoded(tables, tokens[name]) == "expand" -> return PARSER_COLON_MARKER_TEMPLATE
+    if tokens[head].kind == TOKEN_KW_FN && token_decoded(tables, tokens[name]) == "expand" {
+        return PARSER_COLON_MARKER_TEMPLATE
+    }
     PARSER_COLON_MARKER_NONE
 }
 
@@ -199,8 +213,12 @@ parser_colon_head_at: fn(tokens: [Token], start: Int) -> Int Never! {
         kind: tokens[index].kind
         if kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV {
             index = parser_colon_code_at(tokens, index + 1)
-            if index < tokens.len() && tokens[index].kind == TOKEN_LPAREN -> index = parser_colon_code_at(tokens, parser_colon_skip_group(tokens, index))
-            if index < tokens.len() && tokens[index].kind == TOKEN_COLON -> index = parser_colon_code_at(tokens, index + 1)
+            if index < tokens.len() && tokens[index].kind == TOKEN_LPAREN {
+                index = parser_colon_code_at(tokens, parser_colon_skip_group(tokens, index))
+            }
+            if index < tokens.len() && tokens[index].kind == TOKEN_COLON {
+                index = parser_colon_code_at(tokens, index + 1)
+            }
             next
         }
         if kind == TOKEN_PREP {
@@ -209,7 +227,9 @@ parser_colon_head_at: fn(tokens: [Token], start: Int) -> Int Never! {
         }
         if kind != TOKEN_HASH -> return index
         index = parser_colon_code_at(tokens, index + 1)
-        if index < tokens.len() && tokens[index].kind == TOKEN_BANG -> index = parser_colon_code_at(tokens, index + 1)
+        if index < tokens.len() && tokens[index].kind == TOKEN_BANG {
+            index = parser_colon_code_at(tokens, index + 1)
+        }
         if index < tokens.len() && tokens[index].kind == TOKEN_LBRACKET {
             index = parser_colon_code_at(tokens, parser_colon_skip_group(tokens, index))
             next
@@ -223,7 +243,9 @@ parser_colon_head_at: fn(tokens: [Token], start: Int) -> Int Never! {
         }
         // `#X: value` is an in-body marker line, not a marker before a head.
         if index < tokens.len() && tokens[index].kind == TOKEN_COLON -> return index
-        if index < tokens.len() && tokens[index].kind == TOKEN_LPAREN -> index = parser_colon_code_at(tokens, parser_colon_skip_group(tokens, index))
+        if index < tokens.len() && tokens[index].kind == TOKEN_LPAREN {
+            index = parser_colon_code_at(tokens, parser_colon_skip_group(tokens, index))
+        }
     }
     index
 }
@@ -233,7 +255,9 @@ parser_colon_head_at: fn(tokens: [Token], start: Int) -> Int Never! {
 // (`web-app`), which only a `module` head may carry.
 parser_colon_head_colon: fn(tokens: [Token], head: Int) -> Int Never! {
     index := head
-    if index < tokens.len() && tokens[index].kind == TOKEN_DOLLAR -> index = parser_colon_code_at(tokens, index + 1)
+    if index < tokens.len() && tokens[index].kind == TOKEN_DOLLAR {
+        index = parser_colon_code_at(tokens, index + 1)
+    }
     if index >= tokens.len() || !parser_colon_word(tokens[index].kind) -> return -1
     dashed := false
     index = parser_colon_code_at(tokens, index + 1)
@@ -268,13 +292,13 @@ parser_colon_fn_has_body: fn(tokens: [Token], keyword: Int) -> Bool Never! {
     loop index < tokens.len() {
         kind: tokens[index].kind
         if kind == TOKEN_EOF -> return false
-        if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET {
-            depth += 1
-        } else if kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET {
+        if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET -> depth += 1 else if kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET {
             depth -= 1
         } else if depth == 0 {
             if kind == TOKEN_LBRACE -> return true
-            if kind == TOKEN_SEMI || kind == TOKEN_RBRACE || kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV -> return false
+            if kind == TOKEN_SEMI || kind == TOKEN_RBRACE || kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV {
+                return false
+            }
             if kind == TOKEN_KW_FN -> types += 1
             if kind == TOKEN_UNIFIED_ARROW {
                 arrows += 1
@@ -341,7 +365,9 @@ parser_colon_instance_at: fn(tokens: [Token], tables: TokenTables, head: Int) ->
             if kind == TOKEN_LT -> depth += 1
             if kind == TOKEN_GT -> depth -= 1
             if kind == TOKEN_SHR -> depth -= 2
-            if kind == TOKEN_SEMI || kind == TOKEN_LBRACE || kind == TOKEN_RBRACE || kind == TOKEN_EOF -> return None
+            if kind == TOKEN_SEMI || kind == TOKEN_LBRACE || kind == TOKEN_RBRACE || kind == TOKEN_EOF {
+                return None
+            }
             if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET {
                 index = parser_colon_skip_group(tokens, index)
                 next
@@ -352,8 +378,12 @@ parser_colon_instance_at: fn(tokens: [Token], tables: TokenTables, head: Int) ->
         if depth != 0 -> return None
         index = parser_colon_code_at(tokens, index)
     }
-    if index < tokens.len() && tokens[index].kind == TOKEN_LPAREN -> index = parser_colon_code_at(tokens, parser_colon_skip_group(tokens, index))
-    if index < tokens.len() && tokens[index].kind != TOKEN_SEMI && tokens[index].kind != TOKEN_RBRACE && tokens[index].kind != TOKEN_EOF -> return None
+    if index < tokens.len() && tokens[index].kind == TOKEN_LPAREN {
+        index = parser_colon_code_at(tokens, parser_colon_skip_group(tokens, index))
+    }
+    if index < tokens.len() && tokens[index].kind != TOKEN_SEMI && tokens[index].kind != TOKEN_RBRACE && tokens[index].kind != TOKEN_EOF {
+        return None
+    }
     Val(ParserColonInstance{head: head, name: name_index(tokens[head].text), target: name_index(tokens[target].text), typed: typed, snake: parser_colon_snake(tables, tokens[head]) && parser_colon_snake(tables, tokens[target])})
 }
 
@@ -391,7 +421,9 @@ parser_colon_mark_instances: fn(tokens: &&[Token], candidates: [ParserColonInsta
     marked := [Token]{}
     next_candidate := 0
     loop index in 0..<tokens.len() {
-        loop next_candidate < candidates.len() && candidates[next_candidate].head < index -> next_candidate += 1
+        loop next_candidate < candidates.len() && candidates[next_candidate].head < index {
+            next_candidate += 1
+        }
         if next_candidate < candidates.len() && candidates[next_candidate].head == index && chosen[next_candidate] {
             at: tokens[index].span.start
             marked.push(Token{kind: TOKEN_KW_MODULE, span: Span{start: at, end: at}, text: name_empty(), decoded: name_empty(), literal: -1})
@@ -410,7 +442,9 @@ parser_colon_keyword_first: fn(tokens: [Token], head: Int, frame: Int) -> Bool N
     if !parser_colon_head_keyword(kind) -> return false
     if kind == TOKEN_KW_FN && frame == PARSER_COLON_FRAME_CODE -> return false
     word := parser_colon_code_at(tokens, head + 1)
-    if word < tokens.len() && tokens[word].kind == TOKEN_DOLLAR -> word = parser_colon_code_at(tokens, word + 1)
+    if word < tokens.len() && tokens[word].kind == TOKEN_DOLLAR {
+        word = parser_colon_code_at(tokens, word + 1)
+    }
     word < tokens.len() && parser_colon_word(tokens[word].kind)
 }
 
@@ -506,7 +540,9 @@ parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] 
             index += 1
             next
         }
-        if !at_start && index > head_end && parser_colon_member_frame(frame) && parser_colon_member_break(tokens, index, previous) -> at_start = true
+        if !at_start && index > head_end && parser_colon_member_frame(frame) && parser_colon_member_break(tokens, index, previous) {
+            at_start = true
+        }
         // A prepared binding inside a prepared value's braces ends that value,
         // as if its `}` came first.
         if at_start && frame == PARSER_COLON_FRAME_CODE && opens.len() > 0 && parser_colon_prepared_value_open(tokens, tables, opens[opens.len() - 1]) && parser_colon_prepared_binding_at(tokens, tables, index) {
@@ -533,14 +569,20 @@ parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] 
                 if keyword > head_end -> head_end = keyword
             } else {
                 if head > head_end -> head_end = head
-                if parser_colon_keyword_first(tokens, head, frame) -> tokens[head].kind = TOKEN_IDENT
+                if parser_colon_keyword_first(tokens, head, frame) {
+                    tokens[head].kind = TOKEN_IDENT
+                }
                 if frame == PARSER_COLON_FRAME_MODULE {
-                    if parser_colon_instance_at(tokens, tables, head) == .Val(candidate) -> candidates.push(candidate)
+                    if parser_colon_instance_at(tokens, tables, head) == .Val(candidate) {
+                        candidates.push(candidate)
+                    }
                 }
             }
             declared: parser_colon_declared_name(tokens, head)
             if declared >= 0 {
-                if tokens[head].kind == TOKEN_KW_MODULE -> modules[declared] = true else -> others[declared] = true
+                if tokens[head].kind == TOKEN_KW_MODULE -> modules[declared] = true else {
+                    others[declared] = true
+                }
             }
             head_kind = if head < tokens.len() -> tokens[head].kind else -> -1
             if head_kind == TOKEN_KW_LOOP || head_kind == TOKEN_KW_IF {
@@ -562,9 +604,15 @@ parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] 
             if current == TOKEN_LBRACE {
                 body: frame != PARSER_COLON_FRAME_GROUP && (!opened || head_kind == PARSER_COLON_HEAD_COMPTIME_BLOCK)
                 frame = if body -> parser_colon_body_frame(head_kind, frame) else -> PARSER_COLON_FRAME_CODE
-                if body && marker_body && head_marker == PARSER_COLON_MARKER_TEMPLATE -> frame = PARSER_COLON_FRAME_CONTAINER
-                if previous >= 0 && tokens[previous].kind == TOKEN_RPAREN && parser_colon_generate_call(tokens, tables, closed) -> frame = PARSER_COLON_FRAME_MODULE
-                if previous >= 0 && parser_colon_code_value(tokens, tables, previous) -> frame = PARSER_COLON_FRAME_MODULE
+                if body && marker_body && head_marker == PARSER_COLON_MARKER_TEMPLATE {
+                    frame = PARSER_COLON_FRAME_CONTAINER
+                }
+                if previous >= 0 && tokens[previous].kind == TOKEN_RPAREN && parser_colon_generate_call(tokens, tables, closed) {
+                    frame = PARSER_COLON_FRAME_MODULE
+                }
+                if previous >= 0 && parser_colon_code_value(tokens, tables, previous) {
+                    frame = PARSER_COLON_FRAME_MODULE
+                }
                 marker_body = body && head_marker == PARSER_COLON_MARKER_IMPL
                 saved_opened[saved_opened.len() - 1] = true
                 at_start = true

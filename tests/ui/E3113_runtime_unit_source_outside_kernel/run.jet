@@ -3,21 +3,17 @@
 // runtime source, and the memory kernel rule reads each raw intrinsic call
 // against its own source, naming that source and line when it refuses it.
 // [unit source: Compiler/JetRuntime/Source/RawWords.jet]
-#Unsafe("each caller vouches for the address") os_load_i64: fn(address: I64) -> I64 {
-    address
-}
+#Unsafe("each caller vouches for the address")
+os_load_i64: fn(address: I64) -> I64 { address }
 
 _word: fn(address: I64) -> I64 {
-    #Unsafe("the kernel's own leaf reads a word its caller lends") {
-        return os_load_i64(address)
-    }
+    #Unsafe("the kernel's own leaf reads a word its caller lends") { return os_load_i64(address) }
 }
+
 // [unit source: Compiler/JetRuntime/Source/Host.jet]
 
 _host_word: fn(address: I64) -> I64 {
-    #Unsafe("the host holds the word at this address") {
-        return os_load_i64(address)
-    }
+    #Unsafe("the host holds the word at this address") { return os_load_i64(address) }
 }
 
 run: fn() {}

@@ -2,9 +2,16 @@
 // rewriting and Core-private admission are independent of the linker live set.
 use {
     jet_driver.[
-        JetDriverCoreSource, JetDriverParseJob, JetDriverSourceUnit, jet_driver_core_text,
-        jet_driver_core_runtime_member_imports, jet_driver_core_runtime_row,
-        jet_driver_core_source_unit, jet_driver_core_unit, jet_driver_has_errors, jet_driver_parse_one,
+        JetDriverCoreSource,
+        JetDriverParseJob,
+        JetDriverSourceUnit,
+        jet_driver_core_text,
+        jet_driver_core_runtime_member_imports,
+        jet_driver_core_runtime_row,
+        jet_driver_core_source_unit,
+        jet_driver_core_unit,
+        jet_driver_has_errors,
+        jet_driver_parse_one,
         jet_driver_runtime_entry_row,
     ]
     jet_foundation.[Diagnostic, SourceFile, Span, compiler_threads_single]
@@ -22,7 +29,7 @@ jet_driver_runtime_test_row: fn(module_name: String, path: String, runtime: Bool
     controls := 0
     loop item in runtime.parsed.program.items {
         if item == {
-            .Func(value) -> functions.push(value.name)
+            .Func(value) -> { functions.push(value.name) }
             .Test(_) -> controls += 1
             .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
@@ -78,7 +85,9 @@ jet_driver_runtime_test_row: fn(module_name: String, path: String, runtime: Bool
     }
     if parsed.parsed.program.imports[1].kind == {
         .Module(name, _) -> assert_eq(name, "core.text.runtime.assets.x")
-        .File(_, _) | .Unqualified(_, _, _, _, _) -> panic("exact nested unit became a sibling member")
+        .File(_, _) | .Unqualified(_, _, _, _, _) -> {
+            panic("exact nested unit became a sibling member")
+        }
     }
 }
 

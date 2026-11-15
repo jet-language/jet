@@ -5,8 +5,11 @@ scan_test_require: fn(ok: Bool) {
         return
     }
     trap_exit(I64{1})
-    loop {}
+    loop {
+
+    }
 }
+
 scan_test_row: fn(row: I64, row_tag: I64, a: I64, b: I64, destination: I64, storage: I64) {
     coll_zero(row, I64{64})
     rt_text_store(row, row_tag)
@@ -16,11 +19,13 @@ scan_test_row: fn(row: I64, row_tag: I64, a: I64, b: I64, destination: I64, stor
     rt_text_store(row + I64{32}, destination)
     rt_text_store(row + I64{40}, storage)
 }
+
 scan_test_float: fn(text: I64, expected: I64) {
     scan_test_require(scan_decimal(rt_text_data(text), rt_text_len(text), I64{1}).valid)
     scan_test_require(scan_float_bits(rt_text_data(text), rt_text_len(text), I64{1}) == expected)
     jet_rt_string_drop(text)
 }
+
 scan_tests: fn() {
     jet_rt_alloc_init()
     scan_stream_tests()
@@ -133,17 +138,19 @@ scan_stream_tests: fn() {
     input: jet_rt_alloc(I64{64}, I64{8})
     slots: jet_rt_alloc(I64{32}, I64{8})
     rows: jet_rt_alloc(I64{64}, I64{8})
-    scan_test_f32(input, slots, I64{1065353216}) // 1.0
-    scan_test_f32(input, slots, I64{2147483648}) // -0.0
-    scan_test_f32(input, slots, I64{1}) // minimum subnormal
-    scan_test_f32(input, slots, I64{2139095040}) // +inf
-    scan_test_f32(input, slots, I64{2143363909}) // quiet NaN + payload
-    scan_test_f32(input, slots, I64{2139169605}) // signaling NaN + payload
+    scan_test_f32(input, slots, I64{1065353216})  // 1.0
+    scan_test_f32(input, slots, I64{2147483648})  // -0.0
+    scan_test_f32(input, slots, I64{1})  // minimum subnormal
+    scan_test_f32(input, slots, I64{2139095040})  // +inf
+    scan_test_f32(input, slots, I64{2143363909})  // quiet NaN + payload
+    scan_test_f32(input, slots, I64{2139169605})  // signaling NaN + payload
     stride := I64{1}
     loop stride <= (I64{8}) {
         at := I64{0}
         loop at < (I64{8}) {
-            if (stride == I64{1}) { rt_text_put(input + at, I64{255}) } else { rt_text_store(input + at * stride, I64{255}) }
+            if (stride == I64{1}) { rt_text_put(input + at, I64{255}) } else {
+                rt_text_store(input + at * stride, I64{255})
+            }
             at += I64{1}
         }
         reader: jet_reader_over(input, I64{8}, stride)
@@ -190,7 +197,7 @@ scan_stream_tests: fn() {
     jet_rt_handle_drop_jet_reader(empty)
     text: rt_text_builder_with_capacity(I64{8})
     rt_text_push_scalar(text, I64{8195})
-    rt_text_push_word(text, I64{25185}, I64{2}) // ab
+    rt_text_push_word(text, I64{25185}, I64{2})  // ab
     cursor: jet_cursor_over(text)
     jet_rt_string_drop(text)
     jet_cursor_skip_ws(cursor)

@@ -9,7 +9,6 @@
 // counter, so a live, still-growing (unterminated) trace shows the current
 // phase and how far along it is. --watch re-reads the file every 2 s (or the
 // given seconds). The same file also loads in https://ui.perfetto.dev.
-
 use {
     json: core.encoding.json
     files: core.files
@@ -18,32 +17,77 @@ use {
     time: core.time
 }
 
-Args: struct { unix_ms: Int?, items: Int?, peak_rss_kb: Int?, rss_kb: Int?, done: Int?, total: Int?, index: Int? }
-Event: struct { name: String, ph: String, cat: String?, ts: Int?, tid: Int, args: Args? }
-Span: struct { kind: String, label: String, ts: Int, args: Args? }
-Row: struct { kind: String, first: Int, count: Int{0}, open: Int{0}, total: Int{0}, max: Int{0}, items: Int?{None}, peak: Int{0} }
-Counter: struct { done: Int, total: Int, ts: Int, first_done: Int, first_ts: Int }
-Thread: struct { tid: Int, spans: [Span]{} }
+Args: struct {
+    unix_ms: Int?
+    items: Int?
+    peak_rss_kb: Int?
+    rss_kb: Int?
+    done: Int?
+    total: Int?
+    index: Int?
+}
+
+Event: struct {
+    name: String
+    ph: String
+    cat: String?
+    ts: Int?
+    tid: Int
+    args: Args?
+}
+
+Span: struct {
+    kind: String
+    label: String
+    ts: Int
+    args: Args?
+}
+
+Row: struct {
+    kind: String
+    first: Int
+    count: Int{0}
+    open: Int{0}
+    total: Int{0}
+    max: Int{0}
+    items: Int?{None}
+    peak: Int{0}
+}
+
+Counter: struct {
+    done: Int
+    total: Int
+    ts: Int
+    first_done: Int
+    first_ts: Int
+}
+
+Thread: struct {
+    tid: Int
+    spans: [Span]{[Span]{}}
+}
 
 seconds: fn(us: Float) -> String {
     x: us / 1e6
     if us >= 1e8 -> "{x:Fixed(0)}" else if us >= 1e7 -> "{x:Fixed(1)}" else -> "{x:Fixed(2)}"
 }
+
 mb: fn(kb: Int?) -> String { kb.map(fn(k) { "{(k + 512) /% 1024}" }) ?? "-" }
-row: fn(rows: &[Row], at: &[String: Int], kind: String, ts: Int) -> Int {
+
+row: fn(rows: &[Row], at: &[String:Int], kind: String, ts: Int) -> Int {
     at.get(kind) ?? {
         at[kind] = rows.len()
-        rows.push(Row{kind, first: ts})
+        rows.push(Row{kind: kind, first: ts})
         rows.len() - 1
     }
 }
 
 render: fn(file: String) -> String IOError! {
     rows := [Row]{}
-    at := [String: Int]{}
+    at := [String:Int]{}
     threads := [Thread]{}
-    thread_at := [Int: Int]{}
-    progress := [String: Counter]{}
+    thread_at := [Int:Int]{}
+    progress := [String:Counter]{}
     start := Int?{None}
     last := 0
     rss := Int?{None}
@@ -64,7 +108,7 @@ render: fn(file: String) -> String IOError! {
             threads.len() - 1
         }
         if event.ph == "B" {
-            threads[t].spans.push(Span{kind: event.cat ?? event.name, label: event.name, ts, args: event.args})
+            threads[t].spans.push(Span{kind: event.cat ?? event.name, label: event.name, ts: ts, args: event.args})
             _: row(rows, at, event.cat ?? event.name, ts)
         } else if event.ph == "E" {
             open: threads[t].spans.pop() ?? next
@@ -84,7 +128,7 @@ render: fn(file: String) -> String IOError! {
             done: event.args?.done ?? 0
             // A restart (done fell) begins a new rate window.
             keep: previous != None && done >= (previous?.done ?? 0)
-            progress[event.name] = Counter{done, total: event.args?.total ?? 0, ts, first_done: if keep -> previous?.first_done ?? 0 else -> done, first_ts: if keep -> previous?.first_ts ?? 0 else -> ts}
+            progress[event.name] = Counter{done: done, total: event.args?.total ?? 0, ts: ts, first_done: if keep -> previous?.first_done ?? 0 else -> done, first_ts: if keep -> previous?.first_ts ?? 0 else -> ts}
         }
     }
     // Spans still open count with their running time so far.
@@ -119,7 +163,9 @@ render: fn(file: String) -> String IOError! {
                 line = "{line}, {c.done}/{c.total} ({Float{100.0} * Float.from_int(c.done) / Float.from_int(c.total):Fixed(1)}%)"
                 since: c.done - c.first_done
                 elapsed: c.ts - c.first_ts
-                if since > 0 && elapsed > 0 -> line = "{line}, ~{seconds(Float.from_int(c.total - c.done) * Float.from_int(elapsed) / Float.from_int(since))} s left at the current rate"
+                if since > 0 && elapsed > 0 {
+                    line = "{line}, ~{seconds(Float.from_int(c.total - c.done) * Float.from_int(elapsed) / Float.from_int(since))} s left at the current rate"
+                }
             }
             lines.push(line)
         }

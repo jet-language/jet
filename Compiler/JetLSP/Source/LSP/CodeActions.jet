@@ -26,8 +26,12 @@ lsp_code_action_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String
         whole.extend(fix.edits.move())
         actions.push(lsp_action_json(view, fix.title, "quickfix", whole, preferred: preferred))
     }
-    if parser_marker_placement_edit_at(bytes, start, false) == .Val(edit) -> actions.push(lsp_action_json(view, "Write the markers above the declaration", "refactor.rewrite", [TextEdit]{edit}, preferred: false))
-    if parser_marker_placement_edit_at(bytes, start, true) == .Val(edit) -> actions.push(lsp_action_json(view, "Write the markers inside the declaration's body", "refactor.rewrite", [TextEdit]{edit}, preferred: false))
+    if parser_marker_placement_edit_at(bytes, start, false) == .Val(edit) {
+        actions.push(lsp_action_json(view, "Write the markers above the declaration", "refactor.rewrite", [TextEdit]{edit}, preferred: false))
+    }
+    if parser_marker_placement_edit_at(bytes, start, true) == .Val(edit) {
+        actions.push(lsp_action_json(view, "Write the markers inside the declaration's body", "refactor.rewrite", [TextEdit]{edit}, preferred: false))
+    }
     lsp_response(id, "[{actions.join(",")}]")
 }
 

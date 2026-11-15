@@ -53,12 +53,19 @@ use {
 }
 
 DEFAULT_BUDGET: "Tools/perf/budget/budget.json"
+
 ZERO: Float{0.0}
+
 HALF: Float{0.5}
+
 ONE: Float{1.0}
+
 THOUSAND: Float{1000.0}
+
 MILLION: Float{1000000.0}
+
 BILLION: Float{1000000000.0}
+
 USAGE: "usage: jet Tools/perf/budget/check <trace> [--column 225K|500K|1M] [--clock auto|proc_cpu|cpu|wall] [--lines N] [--budget FILE] [--strict]"
 
 #Error
@@ -146,21 +153,21 @@ parse_args: fn(args: [String]) -> Options CheckError! {
                 }
                 else -> options.budget = value
             }
-        } else if arg == "--strict" {
-            options.strict = true
-        } else if arg.starts_with("--") {
+        } else if arg == "--strict" { options.strict = true } else if arg.starts_with("--") {
             return Err(usage("unknown option {arg}"))
         } else if !options.trace_given {
             options.trace = arg
             options.trace_given = true
-        } else {
-            return Err(usage("unexpected argument {arg}"))
-        }
+        } else { return Err(usage("unexpected argument {arg}")) }
         index += 1
     }
     if !options.trace_given -> return Err(usage("no trace given"))
-    if options.clock != "auto" && options.clock != "proc_cpu" && options.clock != "cpu" && options.clock != "wall" -> return Err(usage("unknown clock {options.clock}"))
-    if options.lines_given && !(options.lines > ZERO) -> return Err(usage("--lines must be a positive number"))
+    if options.clock != "auto" && options.clock != "proc_cpu" && options.clock != "cpu" && options.clock != "wall" {
+        return Err(usage("unknown clock {options.clock}"))
+    }
+    if options.lines_given && !(options.lines > ZERO) {
+        return Err(usage("--lines must be a positive number"))
+    }
     Ok(options)
 }
 
@@ -253,18 +260,20 @@ collect: fn(events: [Dyn]) -> Trace Never! {
                 name_value: field(event, "name")
                 name_text: text_of(name_value)
                 label_sort: if present(name_value) -> js_string(name_value) else -> ""
-                spans.push(Span{
-                    kind: js_string(kind_value),
-                    kind_is_text: kind_text != None,
-                    label: js_string(name_value),
-                    label_is_text: name_text != None,
-                    label_sort: label_sort,
-                    start: ts ?? math.NAN,
-                    end: math.NAN,
-                    closed: false,
-                    args: Dyn.Null,
-                    ancestors: stacks[at],
-                })
+                spans.push(
+                    Span{
+                        kind: js_string(kind_value),
+                        kind_is_text: kind_text != None,
+                        label: js_string(name_value),
+                        label_is_text: name_text != None,
+                        label_sort: label_sort,
+                        start: ts ?? math.NAN,
+                        end: math.NAN,
+                        closed: false,
+                        args: Dyn.Null,
+                        ancestors: stacks[at],
+                    },
+                )
                 stacks[at].push(spans.len() - 1)
             } else {
                 if stacks[at].len() == 0 -> next
@@ -283,9 +292,7 @@ collect: fn(events: [Dyn]) -> Trace Never! {
             value: counted
             key: map_key(name_value, position)
             at: counter_index(counters, key)
-            if at < 0 {
-                counters.push(Counter{name: key, value: ZERO + value})
-            } else {
+            if at < 0 -> counters.push(Counter{name: key, value: ZERO + value}) else {
                 counters[at].value = counters[at].value + value
             }
         }
@@ -334,14 +341,16 @@ measure_row: fn(kinds: [String], excluded: [String], spans: [Span], clock: Strin
     count := 0
     loop index in 0..<spans.len() {
         if !included[index] || any_in(spans[index].ancestors, included) -> next
-        ns = ns + span_ns(spans[index], clock, notes)
+        ns += span_ns(spans[index], clock, notes)
         count += 1
     }
     removed := [Bool]{}
-    loop span in spans -> removed.push(span.kind_is_text && excluded.contains(span.kind) && any_in(span.ancestors, included))
+    loop span in spans {
+        removed.push(span.kind_is_text && excluded.contains(span.kind) && any_in(span.ancestors, included))
+    }
     loop index in 0..<spans.len() {
         if !removed[index] || any_in(spans[index].ancestors, removed) -> next
-        ns = ns - span_ns(spans[index], clock, notes)
+        ns -= span_ns(spans[index], clock, notes)
     }
     Measure{ns: ns, count: count}
 }
@@ -449,7 +458,9 @@ report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! 
     }
     trace: collect(read_events(trace_text))
     spans: trace.spans
-    if spans.len() == 0 -> return Outcome{out: [String]{}, err: [String]{"check: {options.trace} has no spans"}, code: 65}
+    if spans.len() == 0 {
+        return Outcome{out: [String]{}, err: [String]{"check: {options.trace} has no spans"}, code: 65}
+    }
     clock := options.clock
     if clock == "auto" {
         clock = "wall"
@@ -483,7 +494,7 @@ report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! 
     loop row in rows {
         if truthy(field(row, "residual")) -> next
         result: measure_row(texts(field(row, "spans")), texts(field(row, "exclude")), spans, clock, notes)
-        accounted = accounted + result.ns
+        accounted += result.ns
         measured.push(Measured{row: row, ns: result.ns, present: result.count > 0})
     }
     // Residual: the top-level spans (and, on the wall clock, the gaps between
@@ -491,11 +502,9 @@ report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! 
     loop row in rows {
         if !truthy(field(row, "residual")) -> next
         total := ZERO
-        if clock == "wall" {
-            total = trace.last_ts * THOUSAND
-        } else {
+        if clock == "wall" -> total = trace.last_ts * THOUSAND else {
             loop span in spans {
-                if span.ancestors.len() == 0 -> total = total + span_ns(span, clock, notes)
+                if span.ancestors.len() == 0 -> total += span_ns(span, clock, notes)
             }
             note: "{js_string(field(row, "id"))}: on the {clock} clock the gaps between top-level spans are not measured"
             if !notes.contains(note) -> notes.push(note)
@@ -510,8 +519,8 @@ report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! 
     cells := [[String]]{}
     loop entry in measured {
         limit: number_or_nan(field(entry.row, "budget") ?? Dyn.Null, column)
-        budget_sum = budget_sum + limit
-        if entry.present -> total_ns = total_ns + entry.ns
+        budget_sum += limit
+        if entry.present -> total_ns += entry.ns
         per_line: entry.ns / lines
         status := ""
         ratio := "-"
@@ -524,15 +533,17 @@ report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! 
             status = if over -> "OVER" else -> "ok"
             if over -> failed = true
         }
-        cells.push([String]{
-            js_string(field(entry.row, "id")),
-            js_string(field(entry.row, "phase")),
-            if entry.present -> fixed(entry.ns / BILLION, 2) else -> "-",
-            if entry.present -> grouped(per_line) else -> "-",
-            grouped(limit),
-            ratio,
-            status,
-        })
+        cells.push(
+            [String]{
+                js_string(field(entry.row, "id")),
+                js_string(field(entry.row, "phase")),
+                if entry.present -> fixed(entry.ns / BILLION, 2) else -> "-",
+                if entry.present -> grouped(per_line) else -> "-",
+                grouped(limit),
+                ratio,
+                status,
+            },
+        )
     }
     ratio_total: total_ns / lines / budget_sum
     total_over: total_ns / lines > budget_sum
@@ -585,10 +596,12 @@ report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! 
         if field(entry.row, "always_on") == .Val(always) {
             id: js_string(field(entry.row, "id"))
             always_ids.push(id.copy())
-            if entry.present -> always_ns = always_ns + entry.ns
-            always_budget = always_budget + number_or_nan(field(entry.row, "budget") ?? Dyn.Null, column)
+            if entry.present -> always_ns += entry.ns
+            always_budget += number_or_nan(field(entry.row, "budget") ?? Dyn.Null, column)
             loop kind in texts(field(always, "spans")) {
-                if !has_span(spans, kind) -> missing.push("{id} {kind} ({js_string(field(always, "check"))})")
+                if !has_span(spans, kind) {
+                    missing.push("{id} {kind} ({js_string(field(always, "check"))})")
+                }
             }
         }
     }
@@ -617,22 +630,22 @@ report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! 
             limit_value: number_field(field(unit, "budget") ?? Dyn.Null, column)
             per_unit: if has_value && value != ZERO && !math.is_nan(value) && entry.present -> entry.ns / value else -> math.NAN
             status := "-"
-            if !has_value {
-                status = "no counter"
-            } else if entry.present && limit_value != None {
+            if !has_value -> status = "no counter" else if entry.present && limit_value != None {
                 over: per_unit > limit_value
                 status = if over -> "OVER" else -> "ok"
                 if over -> failed = true
             }
-            unit_rows.push([String]{
-                js_string(field(entry.row, "id")),
-                js_string(counter_name),
-                if has_value -> grouped(value) else -> "-",
-                if per_unit >= THOUSAND -> grouped(per_unit) else -> fixed(per_unit, 1),
-                "ns/{js_string(field(unit, "unit"))}",
-                if limit_value == .Val(limit) -> grouped(limit) else -> "-",
-                status,
-            })
+            unit_rows.push(
+                [String]{
+                    js_string(field(entry.row, "id")),
+                    js_string(counter_name),
+                    if has_value -> grouped(value) else -> "-",
+                    if per_unit >= THOUSAND -> grouped(per_unit) else -> fixed(per_unit, 1),
+                    "ns/{js_string(field(unit, "unit"))}",
+                    if limit_value == .Val(limit) -> grouped(limit) else -> "-",
+                    status,
+                },
+            )
         }
     }
     out.push("")
@@ -662,8 +675,8 @@ report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! 
             items := ZERO
             loop entry in entries {
                 count += entry.count
-                ns = ns + entry.ns
-                items = items + entry.items
+                ns += entry.ns
+                items += entry.items
             }
             census.push([String]{item.name, item.kind, "{count}", fixed(ns / BILLION, 3), grouped(ns / lines), grouped(items)})
         }
@@ -695,13 +708,17 @@ has_span: fn(spans: [Span], kind: String) -> Bool Never! {
 
 // readFileSync's failure as node reports it (the path as given).
 read_failure: fn(path: String, error: IOError) -> CheckError Never! {
-    if files.is_dir(path) -> return CheckError{lines: [String]{"EISDIR: illegal operation on a directory, read"}, code: 1}
+    if files.is_dir(path) {
+        return CheckError{lines: [String]{"EISDIR: illegal operation on a directory, read"}, code: 1}
+    }
     reason: if error == .NotFound(_) -> "ENOENT: no such file or directory" else if error == .PermissionDenied(_) -> "EACCES: permission denied" else -> "{error}"
     CheckError{lines: [String]{"{reason}, open '{path}'"}, code: 1}
 }
 
 read_text: fn(path: String) -> String CheckError! {
-    if files.is_dir(path) -> return Err(CheckError{lines: [String]{"EISDIR: illegal operation on a directory, read"}, code: 1})
+    if files.is_dir(path) {
+        return Err(CheckError{lines: [String]{"EISDIR: illegal operation on a directory, read"}, code: 1})
+    }
     files.read(path) ?? return Err(read_failure(path, err))
 }
 
@@ -711,7 +728,9 @@ check: fn(args: [String]) -> Outcome CheckError! {
     budget_text: read_text(budget_path) ?? return Err(err)
     budget: json.parse(budget_text) ?? return Err(CheckError{lines: [String]{"{budget_path}: invalid JSON: {err}"}, code: 1})
     columns: texts(field(budget, "columns"))
-    if !columns.contains(options.column) -> return Err(usage("unknown column {options.column} (budget.json has {columns.join(", ")})"))
+    if !columns.contains(options.column) {
+        return Err(usage("unknown column {options.column} (budget.json has {columns.join(", ")})"))
+    }
     trace_text: read_text(options.trace) ?? return Err(err)
     Ok(report(options, budget, trace_text))
 }
@@ -729,11 +748,17 @@ check: fn(args: [String]) -> Outcome CheckError! {
 // --doc   the doc holding the limit table.
 
 DEFAULT_SIZE_DOC: "Docs/spec/reference/binary-size.md"
+
 HELLO_SOURCE: "Examples/Basics/Hello.jet"
+
 HELLO_EXECUTABLE: "Hello"
+
 HELLO_RUNS: 50
+
 GATE_HEADER: "| Measure | Limit |"
+
 HELLO_USAGE: "usage: jet Tools/perf/budget/check --hello [--jet PATH] [--runs N] [--doc FILE]"
+
 OUTPUT_LIMIT: 16777216
 
 HelloOptions: struct {
@@ -761,16 +786,22 @@ HelloMeasure: struct {
     starts: [Int]
 }
 
-gate_error: fn(message: String) -> CheckError Never! { CheckError{lines: [String]{"check: {message}"}, code: 1} }
+gate_error: fn(message: String) -> CheckError Never! {
+    CheckError{lines: [String]{"check: {message}"}, code: 1}
+}
 
-hello_usage: fn(message: String) -> CheckError Never! { CheckError{lines: [String]{"check: {message}", HELLO_USAGE}, code: 64} }
+hello_usage: fn(message: String) -> CheckError Never! {
+    CheckError{lines: [String]{"check: {message}", HELLO_USAGE}, code: 64}
+}
 
 parse_hello_args: fn(args: [String]) -> HelloOptions CheckError! {
     options := HelloOptions{jet: sys.get("JET") ?? "jet", runs: HELLO_RUNS, doc: DEFAULT_SIZE_DOC}
     index := 1
     loop index < args.len() {
         arg: args[index]
-        if arg != "--jet" && arg != "--runs" && arg != "--doc" -> return Err(hello_usage("unknown argument {arg}"))
+        if arg != "--jet" && arg != "--runs" && arg != "--doc" {
+            return Err(hello_usage("unknown argument {arg}"))
+        }
         index += 1
         if index >= args.len() -> return Err(hello_usage("{arg} needs a value"))
         value: args[index]
@@ -826,13 +857,17 @@ gate_limits: fn(doc: String, path: String) -> GateLimits CheckError! {
         if !line.starts_with("|") -> break
         cells := [String]{}
         loop cell in line.split("|") -> cells.push(cell.trim())
-        if cells.len() != 4 -> return Err(gate_error("{path}: the limit table row `{line}` is not `| measure | limit |`"))
+        if cells.len() != 4 {
+            return Err(gate_error("{path}: the limit table row `{line}` is not `| measure | limit |`"))
+        }
         if cells[2].replace("-", "").replace(":", "") == "" -> next
         limit: parse_limit(cells[1], cells[2]) ?? return Err(gate_error("{path}: `{cells[2]}` is not a size (B, KB, MB) or a time (ns, us, ms, s)"))
         if limit.time -> starts.push(limit) else -> sizes.push(limit)
     }
     if !inside -> return Err(gate_error("{path} has no `{GATE_HEADER}` limit table"))
-    if sizes.len() != 1 || starts.len() != 1 -> return Err(gate_error("{path}: the limit table needs one size row and one time row"))
+    if sizes.len() != 1 || starts.len() != 1 {
+        return Err(gate_error("{path}: the limit table needs one size row and one time row"))
+    }
     Ok(GateLimits{size: sizes[0], start: starts[0]})
 }
 
@@ -845,7 +880,9 @@ measure_hello: fn(options: HelloOptions) -> HelloMeasure CheckError! {
 
 measure_hello_in: fn(options: HelloOptions, folder: String) -> HelloMeasure CheckError! {
     build: process.cmd([String]{options.jet, "build", "--small", "--output-dir={folder}", HELLO_SOURCE}).output_limit(OUTPUT_LIMIT).run() ?? return Err(gate_error("cannot run {options.jet}: {err}"))
-    if !build.success -> return Err(gate_error("`{options.jet} build --small {HELLO_SOURCE}` exited {build.code}: {build.errors.trim().last_lines(6).join(" | ")}"))
+    if !build.success {
+        return Err(gate_error("`{options.jet} build --small {HELLO_SOURCE}` exited {build.code}: {build.errors.trim().last_lines(6).join(" | ")}"))
+    }
     executable: files.join(folder, HELLO_EXECUTABLE)
     stat: files.stat(executable) ?? return Err(gate_error("the build wrote no {executable}: {err}"))
     starts := [Int]{}
@@ -853,7 +890,9 @@ measure_hello_in: fn(options: HelloOptions, folder: String) -> HelloMeasure Chec
         started: time.instant()
         receipt: process.cmd([String]{executable}).output_limit(OUTPUT_LIMIT).run() ?? return Err(gate_error("cannot run {executable}: {err}"))
         ns: started.elapsed().ns
-        if !receipt.success -> return Err(gate_error("{executable} exited {receipt.code}: {receipt.errors.trim().last_lines(6).join(" | ")}"))
+        if !receipt.success {
+            return Err(gate_error("{executable} exited {receipt.code}: {receipt.errors.trim().last_lines(6).join(" | ")}"))
+        }
         starts.push(ns)
     }
     starts.sort()
@@ -931,10 +970,14 @@ test_span: fn(kind: String, start: Int, end: Int, proc_cpu_ns: Int, label: Strin
     }
 }
 
-test_counter: fn(name: String, value: Int) -> String Never! { "{{\"pid\":1,\"tid\":1,\"name\":\"{name}\",\"ph\":\"C\",\"ts\":0,\"args\":{{\"value\":{value}}}}}" }
+test_counter: fn(name: String, value: Int) -> String Never! {
+    "{{\"pid\":1,\"tid\":1,\"name\":\"{name}\",\"ph\":\"C\",\"ts\":0,\"args\":{{\"value\":{value}}}}}"
+}
 
 test_event: fn(kind: String, phase: String, ts: Int, proc_cpu_ns: Int) -> String Never! {
-    if phase == "B" -> return "{{\"pid\":1,\"tid\":1,\"name\":\"{kind}\",\"cat\":\"{kind}\",\"ph\":\"B\",\"ts\":{ts}}}"
+    if phase == "B" {
+        return "{{\"pid\":1,\"tid\":1,\"name\":\"{kind}\",\"cat\":\"{kind}\",\"ph\":\"B\",\"ts\":{ts}}}"
+    }
     "{{\"pid\":1,\"tid\":1,\"name\":\"{kind}\",\"cat\":\"{kind}\",\"ph\":\"E\",\"ts\":{ts},\"args\":{{\"proc_cpu_ns\":{proc_cpu_ns}}}}}"
 }
 
@@ -962,11 +1005,17 @@ tail: fn(cells: [String], from: Int, to: Int) -> String Never! {
     loop event in test_span("sources", 0, 1000, 1000000, "sources") -> events.push(event)
     events.push(test_event("load", "B", 1000, 0))
     loop event in test_span("parse", 1000, 5000, 3000000, "selfhost.jet") -> events.push(event)
-    loop event in test_span("load.marker_groups.relex", 5000, 6000, 1000000, "a.jet") -> events.push(event)
+    loop event in test_span("load.marker_groups.relex", 5000, 6000, 1000000, "a.jet") {
+        events.push(event)
+    }
     events.push(test_event("load", "E", 10000, 9000000))
     events.push(test_event("sema.finalize", "B", 20000, 0))
-    loop event in test_span("sema.bodies", 20000, 21000, 50000000, "sema.bodies") -> events.push(event)
-    loop event in test_span("sema.effects", 22000, 23000, 30000000, "sema.effects") -> events.push(event)
+    loop event in test_span("sema.bodies", 20000, 21000, 50000000, "sema.bodies") {
+        events.push(event)
+    }
+    loop event in test_span("sema.effects", 22000, 23000, 30000000, "sema.effects") {
+        events.push(event)
+    }
     events.push(test_event("sema.finalize", "E", 30000, 200000000))
     loop event in test_span("ir.opt", 30000, 40000, 200000000, "ir.opt") -> events.push(event)
     loop event in test_span("ir.x64", 40000, 50000, 10000000, "ir.x64") -> events.push(event)
@@ -1029,7 +1078,9 @@ tail: fn(cells: [String], from: Int, to: Int) -> String Never! {
 test_always_on_trace: fn(kinds: [String]) -> String Never! {
     events := [String]{test_counter("parse.user_lines", 1000000)}
     loop index in 0..<kinds.len() {
-        loop event in test_span(kinds[index], index * 1000, index * 1000 + 500, 1000000, kinds[index]) -> events.push(event)
+        loop event in test_span(kinds[index], index * 1000, index * 1000 + 500, 1000000, kinds[index]) {
+            events.push(event)
+        }
     }
     test_trace(events)
 }
@@ -1085,8 +1136,12 @@ TEST_LIMITS: "| Measure | Limit |\n|---|---:|\n| Hello binary size | 150 KB |\n|
     assert_eq(js_number(parsed.start.value), "4000000")
     assert_eq(parsed.start.measure, "Hello start time")
     if gate_limits("no table\n", "t.md") == .Ok(_) -> panic("a doc without the table must fail")
-    if gate_limits("| Measure | Limit |\n|---|---|\n| Hello binary size | 150 parsecs |\n| Hello start time | 4 ms |\n", "t.md") == .Ok(_) -> panic("an unknown unit must fail")
-    if gate_limits("| Measure | Limit |\n| a | 1 KB |\n| b | 2 KB |\n| c | 4 ms |\n", "t.md") == .Ok(_) -> panic("two size rows must fail")
+    if gate_limits("| Measure | Limit |\n|---|---|\n| Hello binary size | 150 parsecs |\n| Hello start time | 4 ms |\n", "t.md") == .Ok(_) {
+        panic("an unknown unit must fail")
+    }
+    if gate_limits("| Measure | Limit |\n| a | 1 KB |\n| b | 2 KB |\n| c | 4 ms |\n", "t.md") == .Ok(_) {
+        panic("two size rows must fail")
+    }
 }
 
 #Test("the hello gate passes within both limits, fails over either, and prints the card row") {
@@ -1112,6 +1167,10 @@ TEST_LIMITS: "| Measure | Limit |\n|---|---:|\n| Hello binary size | 150 KB |\n|
     assert_eq(options.runs, 7)
     assert_eq(options.jet, "/x/jet")
     assert_eq(options.doc, DEFAULT_SIZE_DOC)
-    if parse_hello_args([String]{"--hello", "--runs", "0"}) == .Ok(_) -> panic("--runs 0 must be a usage error")
-    if parse_hello_args([String]{"--hello", "--column", "1M"}) == .Ok(_) -> panic("a trace option must be a usage error")
+    if parse_hello_args([String]{"--hello", "--runs", "0"}) == .Ok(_) {
+        panic("--runs 0 must be a usage error")
+    }
+    if parse_hello_args([String]{"--hello", "--column", "1M"}) == .Ok(_) {
+        panic("a trace option must be a usage error")
+    }
 }

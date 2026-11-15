@@ -1,10 +1,12 @@
 use time: core.time
+
 time_view: fn() -> String {
     local: time.parse_time("23:59:58") ?? panic("time")
     datetime: time.from_unix_ms(-1)
     period: time.period(1, 2, 3)
     return "{local.hour()}:{local.minute()}:{local.second()}|{local.to_string()}|{datetime.to_timestamp()}|{datetime.to_unix_ms()}|{period.to_string()}"
 }
+
 EXPECTED: #run time_view()
 
 run: fn() {

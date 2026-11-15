@@ -106,7 +106,9 @@ sema_alias_globals_add: fn(globals: &SemaAliasGlobals, items: [Item], delta: Int
         }
         if globals.seen[id] == globals.stamp -> next
         globals.seen[id] = globals.stamp
-        if sema_alias_item_declares(item, name).meaning == .Type -> globals.types[id] = globals.types[id] + delta
+        if sema_alias_item_declares(item, name).meaning == .Type {
+            globals.types[id] = globals.types[id] + delta
+        }
     }
 }
 
@@ -145,7 +147,9 @@ sema_alias_items_bind_paths: fn(items: [Item]) -> Bool Never! {
 // The path of a plain `Name: path` binding: immutable, untyped, unmarked, and
 // a right-hand side that is only a dotted name.
 sema_alias_binding_path: fn(definition: ConstDef) -> [String]? Never! {
-    if definition.mutable || definition.is_comptime || definition.is_persist || definition.ty != None || definition.meta != None || definition.ct != None || definition.attrs.len() > 0 -> return None
+    if definition.mutable || definition.is_comptime || definition.is_persist || definition.ty != None || definition.meta != None || definition.ct != None || definition.attrs.len() > 0 {
+        return None
+    }
     sema_alias_expr_path(definition.value)
 }
 
@@ -175,7 +179,9 @@ sema_alias_collect_types: fn(inputs: [SemaRegistrationModuleInput], edges: [Sema
     loop item_index in 0..<items.len() {
         if items[item_index] == .Const(definition) {
             path: sema_alias_binding_path(definition) ?? next
-            if sema_alias_path_meaning(inputs, edges, rows, globals, SemaAliasSite{input: index, scope: scope, depth: 0}, path) == .Type -> keys.push(sema_alias_key(definition))
+            if sema_alias_path_meaning(inputs, edges, rows, globals, SemaAliasSite{input: index, scope: scope, depth: 0}, path) == .Type {
+                keys.push(sema_alias_key(definition))
+            }
         }
         if items[item_index] == .CodeModule(code_module) {
             if code_module.body == .Val(body) {
@@ -200,7 +206,9 @@ sema_alias_rewrite_items: fn(items: [Item], keys: [String]) -> [Item] Never! {
             }
             .CodeModule(code_module) -> {
                 row := code_module
-                if code_module.body == .Val(body) -> row.body = Val(sema_alias_rewrite_items(body, keys))
+                if code_module.body == .Val(body) {
+                    row.body = Val(sema_alias_rewrite_items(body, keys))
+                }
                 value = Item.CodeModule{value: row}
             }
             .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
@@ -218,7 +226,9 @@ sema_alias_path_meaning: fn(inputs: [SemaRegistrationModuleInput], edges: [SemaR
     loop level >= 0 {
         scope: site.scope.slice(0, level)
         declared: sema_alias_declared_in(inputs[site.input].program.items, scope, 0, path[0])
-        if declared.meaning != .Unknown -> return sema_alias_follow(inputs, edges, rows, globals, SemaAliasSite{input: site.input, scope: scope, depth: site.depth}, declared, path)
+        if declared.meaning != .Unknown {
+            return sema_alias_follow(inputs, edges, rows, globals, SemaAliasSite{input: site.input, scope: scope, depth: site.depth}, declared, path)
+        }
         imported: sema_alias_imported(inputs, edges, rows, globals, SemaAliasSite{input: site.input, scope: scope, depth: site.depth}, path, false)
         if imported != .Unknown -> return imported
         level -= 1
@@ -232,7 +242,9 @@ sema_alias_path_meaning: fn(inputs: [SemaRegistrationModuleInput], edges: [SemaR
 sema_alias_member_meaning: fn(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], rows: [U32:Int], globals: SemaAliasGlobals, site: SemaAliasSite, path: [String]) -> SemaAliasMeaning Never! {
     if site.depth > SEMA_ALIAS_MAX_DEPTH || path.len() == 0 -> return .Unknown
     declared: sema_alias_declared_in(inputs[site.input].program.items, site.scope, 0, path[0])
-    if declared.meaning != .Unknown -> return sema_alias_follow(inputs, edges, rows, globals, site, declared, path)
+    if declared.meaning != .Unknown {
+        return sema_alias_follow(inputs, edges, rows, globals, site, declared, path)
+    }
     sema_alias_imported(inputs, edges, rows, globals, site, path, true)
 }
 
@@ -261,7 +273,9 @@ sema_alias_declared_in: fn(items: [Item], scope: [String], from: Int, name: Stri
     if from < scope.len() {
         loop index in 0..<items.len() {
             if items[index] == .CodeModule(code_module) {
-                if code_module.name == scope[from] && code_module.body == .Val(body) -> return sema_alias_declared_in(body, scope, from + 1, name)
+                if code_module.name == scope[from] && code_module.body == .Val(body) {
+                    return sema_alias_declared_in(body, scope, from + 1, name)
+                }
             }
         }
         return SemaAliasDeclared{meaning: .Unknown, binding: None}
@@ -288,7 +302,9 @@ sema_alias_item_declares: fn(item: Item, name: String) -> SemaAliasDeclared Neve
         .CodeModule(value) -> sema_alias_meaning_if(value.name == name, .Module)
         .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> SemaAliasMeaning.Unknown
     }
-    if meaning == .Value && item == .Const(value) -> return SemaAliasDeclared{meaning: meaning, binding: sema_alias_binding_path(value)}
+    if meaning == .Value && item == .Const(value) {
+        return SemaAliasDeclared{meaning: meaning, binding: sema_alias_binding_path(value)}
+    }
     SemaAliasDeclared{meaning: meaning, binding: None}
 }
 
@@ -332,7 +348,9 @@ sema_alias_import_meaning: fn(inputs: [SemaRegistrationModuleInput], edges: [Sem
 // input declares first at its top level.
 sema_alias_global_type: fn(globals: SemaAliasGlobals, name: String) -> Bool Never! {
     if foundation_named_type(name) != (Type.Named{name: name}) -> return true
-    if name == "Unit" || name == "Never" || name == "Err" || sema_registration_core_builtin_is_name(name) || core_root_type(name) -> return true
+    if name == "Unit" || name == "Never" || name == "Err" || sema_registration_core_builtin_is_name(name) || core_root_type(name) {
+        return true
+    }
     id: name_index(name_find(globals.names, name) ?? return false)
     globals.types[id] > 0
 }

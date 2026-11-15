@@ -20,7 +20,9 @@ LSPServer: struct {
     // Every open document is overlaid, so a check sees unsaved imports too.
     check: fn(self, doc: LSPDocument) -> LSPChecked {
         overlays := [LSPOverlay]{}
-        loop (_, open) in self.diagnostic_state.docs -> overlays.push(LSPOverlay{path: open.path.copy(), source: open.text.copy()})
+        loop (_, open) in self.diagnostic_state.docs {
+            overlays.push(LSPOverlay{path: open.path.copy(), source: open.text.copy()})
+        }
         self.checker.check(doc.path, overlays)
     }
 
@@ -71,7 +73,9 @@ lsp_update_document: fn(state: &LSPDiagnosticState, params: Dyn?, is_open: Bool{
     }
     rows: if (lsp_param(params, "contentChanges") ?? return None) == {
         .Array(rows) -> rows
-        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return None }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {
+            return None
+        }
     }
     current: state.docs.get(uri) ?? return None
     if version <= current.version -> return None

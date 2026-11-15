@@ -4,9 +4,7 @@
 // moves it. A list that would pass 1 KiB starts over empty, which releases
 // its buffer. `n` passes over them; the sum adds each list's length after
 // each append.
-use {
-    mem: core.mem
-}
+use mem: core.mem
 
 #CLI
 Args: struct {
@@ -20,13 +18,13 @@ Op: struct {
 }
 
 OPS: 4096
+
 SLOTS: 256
+
 LIMIT: 1024
 
 // The next state of a 31-bit linear congruential generator.
-next: fn(state: Int) -> Int {
-    (state * 1103515245 + 12345).bit_and(2147483647)
-}
+next: fn(state: Int) -> Int { (state * 1103515245 + 12345).bit_and(2147483647) }
 
 // The operations: per operation one draw picks the count (its top bits a
 // class of up to 8, 16, 32 or 64 bytes, the count from bits 12 up) and a
@@ -40,7 +38,7 @@ operations: fn() -> [Op] {
         class: (state >> 28).bit_and(3)
         size: 1 + (state >> 12).bit_and((8 << class) - 1)
         state = next(state)
-        ops.push(Op{slot: (state >> 16).bit_and(SLOTS - 1), size})
+        ops.push(Op{slot: (state >> 16).bit_and(SLOTS - 1), size: size})
     }
     ops
 }
@@ -58,7 +56,7 @@ run: fn(args: Args) {
         loop _ in 0..<passes {
             loop op in ops {
                 if lists[op.slot].len() + op.size > LIMIT -> lists[op.slot] = [U8]{}
-                _: mem.list_append<U8>(lists[op.slot], from, op.size) // the resize
+                _: mem.list_append<U8>(lists[op.slot], from, op.size)  // the resize
                 total += lists[op.slot].len()
             }
         }

@@ -3,7 +3,6 @@
 // wrappers, C-ABI trampolines for the resident JIT, inline C/C++/asm glue,
 // and the embedded Core runtime modules), the native inline sources, and
 // the build script that compiles them for the selected target.
-
 use {
     jet_foundation.[AccessConvention, Type, measure_expression]
     jet_pkg_model.[pkg_ascii_lower]
@@ -11,7 +10,7 @@ use {
 
 // The fixed crate prelude: panic containment, the host failure reporter,
 // and the per-thread failure slot every trampoline reports through.
-FFI_WRAPPER_PRELUDE: #run { ```// Auto-generated FFI wrappers — do not edit.
+FFI_WRAPPER_PRELUDE: #run { ``// Auto-generated FFI wrappers — do not edit.
 #![allow(warnings)]
 
 type JetFfiReporter = extern "C" fn(*const u8, usize);
@@ -111,9 +110,9 @@ fn ffi_panic() -> ! {
     std::panic::resume_unwind(Box::new(format!("__jet_ffi_runtime__: {MESSAGE}")));
 }
 
-``` }
+`` }
 
-pkg_ffi_emit_cargo_toml: fn(crate_name: String, deps: [String: String]) -> String Never! {
+pkg_ffi_emit_cargo_toml: fn(crate_name: String, deps: [String:String]) -> String Never! {
     s := "[package]\nname = \"{crate_name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[workspace]\n\n[lib]\ncrate-type = [\"rlib\", \"cdylib\"]\n\n"
     if deps.len() == 0 -> return s
     s = "{s}[dependencies]\n"
@@ -126,20 +125,28 @@ pkg_ffi_emit_wrapper_lib_with_handles: fn(entries: [ExternEntry], handle_names: 
     out := FFI_WRAPPER_PRELUDE
     out = "{out}#[repr(C)]\npub struct JetFfiSlot {{\npub value: u64,\npub ptr: *mut u8,\npub len: usize,\n}}\n\n"
     out = "{out}{record_defs.source}"
-    loop descriptor in pkg_ffi_foreign_descriptor_stamps(entries) -> out = "{out}// jet-ffi-descriptor={descriptor}\n"
+    loop descriptor in pkg_ffi_foreign_descriptor_stamps(entries) {
+        out = "{out}// jet-ffi-descriptor={descriptor}\n"
+    }
     if entries.len() > 0 -> out = "{out}\n"
     has_trampoline := false
     loop entry in entries {
-        if pkg_ffi_emit_cabi_trampoline(entry, handle_names, record_defs) != None -> has_trampoline = true
+        if pkg_ffi_emit_cabi_trampoline(entry, handle_names, record_defs) != None {
+            has_trampoline = true
+        }
     }
-    if has_trampoline -> out = "{out}#[no_mangle]\npub unsafe extern \"C\" fn jet_ffi_cabi_free(ptr: *mut u8, len: usize) {{\n    if ptr.is_null() {{ return; }}\n    let _ = Vec::from_raw_parts(ptr, len, len);\n}}\n\n"
+    if has_trampoline {
+        out = "{out}#[no_mangle]\npub unsafe extern \"C\" fn jet_ffi_cabi_free(ptr: *mut u8, len: usize) {{\n    if ptr.is_null() {{ return; }}\n    let _ = Vec::from_raw_parts(ptr, len, len);\n}}\n\n"
+    }
     names := [String]{}
     loop entry in entries {
         if !names.contains(entry.jet_name) -> names.push(entry.jet_name)
     }
     loop entry in entries {
         out = "{out}{pkg_ffi_entry_wrapper(entry, names, record_defs)}"
-        if pkg_ffi_emit_cabi_trampoline(entry, handle_names, record_defs) == .Val(cabi) -> out = "{out}{cabi}\n"
+        if pkg_ffi_emit_cabi_trampoline(entry, handle_names, record_defs) == .Val(cabi) {
+            out = "{out}{cabi}\n"
+        }
         out = "{out}\n"
     }
     out
@@ -149,7 +156,9 @@ pkg_ffi_emit_wrapper_lib_with_handles: fn(entries: [ExternEntry], handle_names: 
 // C rows, or a Rust-ABI wrapper for `extern rust` rows.
 pkg_ffi_entry_wrapper: fn(entry: ExternEntry, names: [String], record_defs: CRecordDefinitions) -> String Never! {
     if entry.inline == .Val(inline) -> return pkg_ffi_emit_inline_wrapper_fn(entry, inline)
-    if entry.c_abi && !entry.has_list() && !entry.has_write() -> return pkg_ffi_emit_c_wrapper_fn(entry, names, record_defs)
+    if entry.c_abi && !entry.has_list() && !entry.has_write() {
+        return pkg_ffi_emit_c_wrapper_fn(entry, names, record_defs)
+    }
     if !entry.c_abi -> return pkg_ffi_emit_wrapper_fn(entry, names)
     ""
 }
@@ -164,7 +173,9 @@ pkg_ffi_callback_payload: fn(ty: Type) -> Type? Never! {
 
 // A generated `__jet_native_*` managed callback start row's payload type.
 pkg_ffi_managed_native_start: fn(entry: ExternEntry) -> Type? Never! {
-    if !entry.generated || !entry.jet_name.starts_with("__jet_native_") || entry.params.len() != 1 -> return None
+    if !entry.generated || !entry.jet_name.starts_with("__jet_native_") || entry.params.len() != 1 {
+        return None
+    }
     if entry.params[0].ty == {
         .Fn(params, ret, _, _, _, _) -> if ret == None && params.len() == 1 -> pkg_ffi_callback_payload(params[0]) else -> None
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
@@ -220,9 +231,7 @@ pkg_ffi_emit_c_wrapper_fn: fn(entry: ExternEntry, user_types: [String], record_d
                 setup.push("    let c{index} = std::ffi::CString::new(p{index}).unwrap_or_else(|_| ffi_panic());")
                 call_args.push("c{index}.as_ptr()")
             }
-            .Char -> {
-                call_args.push("p{index} as u32")
-            }
+            .Char -> { call_args.push("p{index} as u32") }
             .Int | .Float | .Bool | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
                 call_args.push("p{index}")
             }
@@ -322,25 +331,27 @@ pkg_ffi_asm_general_register: fn(register: String) -> Bool Never! {
 
 pkg_ffi_emit_asm_wrapper: fn(entry: ExternEntry, inline: InlineEntry) -> String Never! {
     contract: inline.asm_contract ?? return ""
-    if inline.param_names != entry.param_names || inline.param_names.len() != entry.params.len() -> return ""
+    if inline.param_names != entry.param_names || inline.param_names.len() != entry.params.len() {
+        return ""
+    }
     params := [String]{}
-    loop index in 0..<entry.params.len() -> params.push("p{index}: {pkg_ffi_inline_rust_param_type(entry.params[index].convention, entry.params[index].ty)}")
+    loop index in 0..<entry.params.len() {
+        params.push("p{index}: {pkg_ffi_inline_rust_param_type(entry.params[index].convention, entry.params[index].ty)}")
+    }
     ret: pkg_ffi_inline_return_type(entry.return_type)
     output_param := Int?{None}
     return_reg := String?{None}
     if contract.output == .Val(output) {
         if output == {
-            .Parameter(index) -> {
-                output_param = Val(index)
-            }
-            .Register(register) -> {
-                return_reg = Val(pkg_ffi_normalize_register(register))
-            }
+            .Parameter(index) -> { output_param = Val(index) }
+            .Register(register) -> { return_reg = Val(pkg_ffi_normalize_register(register)) }
         }
     }
     if (ret == "()") != (contract.output == None) -> return ""
     if output_param == .Val(index) {
-        if index >= entry.params.len() || inline.param_names[index] != entry.param_names[index] -> return ""
+        if index >= entry.params.len() || inline.param_names[index] != entry.param_names[index] {
+            return ""
+        }
     }
     operands := [String]{}
     result_expr := "()"
@@ -384,22 +395,24 @@ pkg_ffi_emit_asm_wrapper: fn(entry: ExternEntry, inline: InlineEntry) -> String 
             if !instructions[line_index].starts_with("push {{") -> next
             loop (index, name) in inline.param_names {
                 wanted: "push {{{name}}}"
-                if instructions[line_index] == wanted -> instructions[line_index] = "push qword ptr [{{__jet_args}} + {index * 8}]"
+                if instructions[line_index] == wanted {
+                    instructions[line_index] = "push qword ptr [{{__jet_args}} + {index * 8}]"
+                }
             }
         }
     } else {
         loop index in 0..<inline.param_names.len() {
             wanted_output: Val(index)
-            if output_param != wanted_output -> operands.push("{inline.param_names[index]} = in(reg) p{index}")
+            if output_param != wanted_output {
+                operands.push("{inline.param_names[index]} = in(reg) p{index}")
+            }
         }
     }
     all_args := [String]{}
     loop line in instructions -> all_args.push("\"{pkg_ffi_rust_string(line)}\"")
     loop operand in operands -> all_args.push(operand)
     declarations := ""
-    if ret != "()" && output_param == None {
-        declarations = "    let __jet_result: {ret};\n"
-    } else if output_param == .Val(index) {
+    if ret != "()" && output_param == None -> declarations = "    let __jet_result: {ret};\n" else if output_param == .Val(index) {
         declarations = "    let mut p{index} = p{index};\n"
     }
     if memory_inputs {
@@ -542,7 +555,9 @@ pkg_ffi_mut_pointer: fn(pointee: String?) -> String? Never! {
 // Native pointer representation is reserved for checked opaque-handle
 // facts; nominal records use their separate typed CModule path.
 pkg_ffi_cabi_native_type: fn(ty: Type, convention: AccessConvention, handle_names: [String], record_defs: CRecordDefinitions) -> String? Never! {
-    if convention != AccessConvention.Write -> return pkg_ffi_cabi_return_native_type(ty, handle_names, record_defs)
+    if convention != AccessConvention.Write {
+        return pkg_ffi_cabi_return_native_type(ty, handle_names, record_defs)
+    }
     if ty == {
         .List(_) -> Val("*mut std::os::raw::c_void")
         .String -> Val("*mut std::os::raw::c_char")
@@ -583,7 +598,9 @@ pkg_ffi_cabi_signed_integer: fn(ty: Type) -> Bool Never! {
 }
 
 FFI_LENGTH_NAMES: [String]{"n", "len", "length", "count", "size", "num", "number"}
+
 FFI_LENGTH_SUFFIXES: [String]{"_len", "_length", "_count", "_size", "_num", "_number"}
+
 FFI_LENGTH_PREFIXES: [String]{"len_", "length_", "count_", "size_", "num_", "number_"}
 
 // A parameter name that names a native element count.
@@ -621,7 +638,9 @@ pkg_ffi_cabi_return_count: fn(entry: ExternEntry) -> Int? Never! {
     loop index in 0..<entry.params.len() {
         param: entry.params[index]
         if param.convention != AccessConvention.Write || !pkg_ffi_cabi_integer(param.ty) -> next
-        if index < entry.param_names.len() && pkg_ffi_length_name(entry.param_names[index]) -> return Val(index)
+        if index < entry.param_names.len() && pkg_ffi_length_name(entry.param_names[index]) {
+            return Val(index)
+        }
     }
     None
 }
@@ -634,16 +653,24 @@ pkg_ffi_emit_cabi_trampoline: fn(entry: ExternEntry, handle_names: [String], rec
     has_list: entry.has_list()
     has_write: entry.has_write()
     direct_native: (entry.c_abi && has_list) || (has_write && (entry.c_abi || entry.inline != None))
-    if !direct_native && pkg_ffi_cabi_rejects_capability(entry, handle_names, record_defs) -> return None
+    if !direct_native && pkg_ffi_cabi_rejects_capability(entry, handle_names, record_defs) {
+        return None
+    }
     loop param in entry.params {
-        if !pkg_ffi_is_list(param.ty) && !pkg_ffi_cabi_value_shaped(param.ty, handle_names, record_defs) -> return None
+        if !pkg_ffi_is_list(param.ty) && !pkg_ffi_cabi_value_shaped(param.ty, handle_names, record_defs) {
+            return None
+        }
     }
     if entry.return_type == .Val(ret) {
-        if !pkg_ffi_is_list(ret) && !pkg_ffi_cabi_value_shaped(ret, handle_names, record_defs) -> return None
+        if !pkg_ffi_is_list(ret) && !pkg_ffi_cabi_value_shaped(ret, handle_names, record_defs) {
+            return None
+        }
     }
     if direct_native {
         loop param in entry.params {
-            if pkg_ffi_cabi_native_type(param.ty, param.convention, handle_names, record_defs) == None -> return None
+            if pkg_ffi_cabi_native_type(param.ty, param.convention, handle_names, record_defs) == None {
+                return None
+            }
         }
     }
     returns_list: if entry.return_type == {
@@ -709,7 +736,9 @@ pkg_ffi_cabi_direct_arg: fn(index: Int, convention: AccessConvention, ty: Type, 
             Val("p{index}_ptr as {native_ty}")
         }
         .Named(_) -> {
-            if !pkg_ffi_cabi_record_type(ty, handle_names, record_defs) -> return Val("args[{index}].value as usize as *mut std::os::raw::c_void")
+            if !pkg_ffi_cabi_record_type(ty, handle_names, record_defs) {
+                return Val("args[{index}].value as usize as *mut std::os::raw::c_void")
+            }
             setup.push(pkg_ffi_cabi_non_null_pointer(index))
             if written -> return Val("p{index}_ptr as {native_ty}")
             record_ty: record_defs.rust_type(ty) ?? return None
@@ -772,7 +801,9 @@ pkg_ffi_cabi_result: fn(entry: ExternEntry, call: String, direct_native: Bool, r
             count: return_count ?? panic("validated returned-list count")
             count_ty: pkg_ffi_cabi_scalar_type(entry.params[count].ty) ?? return None
             out := "    let result = {call};\n    let raw_len = unsafe {{ *(args[{count}].ptr as *const {count_ty}) }};\n"
-            if pkg_ffi_cabi_signed_integer(entry.params[count].ty) -> out = "{out}    if raw_len < 0 {{ ffi_panic(); }}\n"
+            if pkg_ffi_cabi_signed_integer(entry.params[count].ty) {
+                out = "{out}    if raw_len < 0 {{ ffi_panic(); }}\n"
+            }
             Val("{out}    let len = raw_len as usize;\n    if result.is_null() && len != 0 {{ ffi_panic(); }}\nout.ptr = result as *mut u8;\nout.len = len;\n")
         }
         .String -> {
@@ -784,7 +815,9 @@ pkg_ffi_cabi_result: fn(entry: ExternEntry, call: String, direct_native: Bool, r
         .Bool -> Val("    out.value = u64::from({call});\n")
         .Char -> Val("    out.value = ({call}) as u32 as u64;\n")
         .Named(_) -> {
-            if !pkg_ffi_cabi_record_type(ret, handle_names, record_defs) -> return Val("    out.value = ({call}) as usize as u64;\n")
+            if !pkg_ffi_cabi_record_type(ret, handle_names, record_defs) {
+                return Val("    out.value = ({call}) as usize as u64;\n")
+            }
             record_ty: record_defs.rust_type(ret) ?? return None
             Val("    let result = {call};\nlet bytes = unsafe {{ std::slice::from_raw_parts(\n(&result as *const {record_ty}).cast::<u8>(),\nstd::mem::size_of::<{record_ty}>(),\n) }}.to_vec().into_boxed_slice();\nout.len = bytes.len();\nout.ptr = Box::into_raw(bytes) as *mut u8;\n")
         }

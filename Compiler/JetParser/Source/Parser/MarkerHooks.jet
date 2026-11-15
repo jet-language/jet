@@ -50,7 +50,9 @@ parser_marker_scopes: fn(tokens: [Token], tables: TokenTables) -> [ParserMarkerS
             kind == TOKEN_RBRACE -> {
                 if braces.pop() == .Val(closed) && closed.module {
                     loop at in 0..<scopes.len() {
-                        if scopes[at].end < 0 && scopes[at].start == closed.start -> scopes[at].end = tokens[index].span.end
+                        if scopes[at].end < 0 && scopes[at].start == closed.start {
+                            scopes[at].end = tokens[index].span.end
+                        }
                     }
                 }
             }

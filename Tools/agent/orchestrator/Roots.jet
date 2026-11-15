@@ -22,7 +22,8 @@ use core.[files, process, sys]
 // The checkout is single-quoted, its own quotes escaped, so any path reads
 // back as itself.
 roots: fn() -> [String:String] {
-    sys.env_text("""
+    sys.env_text(
+        """
         JET_STATE_ROOT=${{JET_STATE_ROOT:-${{XDG_CACHE_HOME:-$HOME/.cache}}/jet-dev}}
         JET_SCRATCH_ROOT=${{JET_SCRATCH_ROOT:-$JET_STATE_ROOT}}
         JET_RUN_ROOT=${{JET_RUN_ROOT:-$JET_SCRATCH_ROOT/run}}
@@ -31,7 +32,9 @@ roots: fn() -> [String:String] {
         JET_SEEDS=${{JET_SEEDS:-${{XDG_DATA_HOME:-$HOME/.local/share}}/jet-seeds}}
         JET_SEED=${{JET_SEED:-$JET_SEEDS/current}}
         JET_DEV_WORKTREE=${{JET_DEV_WORKTREE:-'{files.normalize("{sys.executable()}/../../../..").replace("'", "'\\''")}'}}
-        """, sys.env_file("{sys.config_dir() ?? ""}/jet/env"))
+        """,
+        sys.env_file("{sys.config_dir() ?? ""}/jet/env"),
+    )
 }
 
 run: fn() {

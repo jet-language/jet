@@ -199,7 +199,9 @@ sema_comparability_auto_blocked_type: fn(graph: SemaRegistrationGraph, module_id
             resolved: sema_type_graph_lookup_symbol(graph, module_identity, name) ?? return trait_name == "Equatable" && sema_comparability_handle_without_eq(name)
             if sema_resolved_kind(graph, resolved) != SymbolKind.Type -> return false
             // A Core type shows through the library's own display.
-            if trait_name == "Printable" && module_is_core(resolved.target_module_identity) -> return false
+            if trait_name == "Printable" && module_is_core(resolved.target_module_identity) {
+                return false
+            }
             row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return false
             if !sema_comparability_first_visit(visited, row.module_index, row.row) -> return false
             // Matched in place: a pattern on the indexed path copies the whole item.
@@ -209,7 +211,9 @@ sema_comparability_auto_blocked_type: fn(graph: SemaRegistrationGraph, module_id
                 if !sema_comparability_auto_selected(sema_type_metadata_auto_derives(field_item, graph.modules[row.module_index].declared_trait_impls), trait_name) {
                     // A distinct or unit type shows by its own rule
                     // (sema_expression_displayable), not by a derive.
-                    if trait_name == "Printable" && !sema_comparability_struct_or_enum(field_item) -> return false
+                    if trait_name == "Printable" && !sema_comparability_struct_or_enum(field_item) {
+                        return false
+                    }
                     return sema_type_bound_satisfied(graph, ty, trait_name, module_identity) != (Val(true))
                 }
                 return sema_comparability_auto_blocked(graph, resolved.target_module_identity, field_item, trait_name, visited)
@@ -814,7 +818,9 @@ sema_comparability_nominal_written_order: fn(graph: SemaRegistrationGraph, row: 
     nominal: graph.modules[row.module_index].nominals[row.row]
     loop module_index in 0..<graph.modules.len() {
         loop impl_index in 0..<graph.modules[module_index].impls.len() {
-            if graph.modules[module_index].impls[impl_index].compiler_generated || sema_comparability_impl_generated(graph.modules[module_index].impls[impl_index].declaration) -> next
+            if graph.modules[module_index].impls[impl_index].compiler_generated || sema_comparability_impl_generated(graph.modules[module_index].impls[impl_index].declaration) {
+                next
+            }
             written: graph.modules[module_index].impls[impl_index].declaration.trait_name ?? next
             if written == "KeyBy" || !owned_trait_implies("KeyBy", written) -> next
             target_matches: sema_type_graph_impl_matches_nominal(graph, graph.modules[module_index].impls[impl_index], nominal) ?? next

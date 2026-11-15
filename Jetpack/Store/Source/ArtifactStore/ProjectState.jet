@@ -16,14 +16,23 @@
 // file reads as empty.
 use {
     jet_foundation.[
-        RecordField, RecordSection, RecordValue, record_blob_key, record_elements, record_encode,
-        record_open_schema, record_value_as_int, record_value_as_str, record_value_field,
+        RecordField,
+        RecordSection,
+        RecordValue,
+        record_blob_key,
+        record_elements,
+        record_encode,
+        record_open_schema,
+        record_value_as_int,
+        record_value_as_str,
+        record_value_field,
     ]
     files: core.files
     sys: core.sys
 }
 
 STORE_PROJECT_STAMPS_SCHEMA: "jet.stamps/v1"
+
 STORE_PROJECT_SECTION_ENTRIES: 1
 
 // The workspace-root `.jet/` folder.
@@ -84,11 +93,11 @@ store_project_entry_text: fn(entry: RecordValue, name: String) -> String? Never!
 
 // The `.jet/stamps` table.
 StampTable: struct {
-    priv entries: [String: ProjectStampedDigest]
+    priv entries: [String:ProjectStampedDigest]
     priv changed: Bool
 
     load: fn(workspace_root: String) -[FS]> StampTable Never! {
-        table := StampTable{entries: [String: ProjectStampedDigest]{}, changed: false}
+        table := StampTable{entries: [String:ProjectStampedDigest]{}, changed: false}
         bytes: files.read_bytes(files.join(store_project_state_dir(workspace_root), "stamps")) ?? return table
         reader: record_open_schema(bytes, STORE_PROJECT_STAMPS_SCHEMA).reader ?? return table
         entries: record_elements(reader, STORE_PROJECT_SECTION_ENTRIES).value ?? return table
@@ -129,20 +138,26 @@ StampTable: struct {
 
     // Persist the table when a lookup added or refreshed an entry.
     save: fn(self, workspace_root: String) ArtifactStoreError! -[FS, Env, Rand]> {
-        if !self.changed -> return
+        if !self.changed {
+            return
+        }
         paths := self.entries.keys().to_list()
         paths.sort()
         entries := [RecordValue]{}
         loop path in paths {
             entry: self.entries[path]
-            entries.push(RecordValue.Map{fields: [RecordField]{
-                {name: "path", value: RecordValue.Str{value: path}},
-                {name: "digest", value: RecordValue.Str{value: entry.digest}},
-                {name: "size", value: RecordValue.Int{value: entry.stamp.size}},
-                {name: "modified_ns", value: RecordValue.Int{value: entry.stamp.modified_ns}},
-                {name: "changed_ns", value: RecordValue.Int{value: entry.stamp.changed_ns}},
-                {name: "inode", value: RecordValue.Int{value: entry.stamp.inode}},
-            }})
+            entries.push(
+                RecordValue.Map{
+                    fields: [RecordField]{
+                        {name: "path", value: RecordValue.Str{value: path}},
+                        {name: "digest", value: RecordValue.Str{value: entry.digest}},
+                        {name: "size", value: RecordValue.Int{value: entry.stamp.size}},
+                        {name: "modified_ns", value: RecordValue.Int{value: entry.stamp.modified_ns}},
+                        {name: "changed_ns", value: RecordValue.Int{value: entry.stamp.changed_ns}},
+                        {name: "inode", value: RecordValue.Int{value: entry.stamp.inode}},
+                    },
+                },
+            )
         }
         encoded: record_encode(STORE_PROJECT_STAMPS_SCHEMA, [RecordSection]{RecordSection{id: STORE_PROJECT_SECTION_ENTRIES, elements: entries}})
         bytes: encoded.bytes ?? return Err(ArtifactStoreError.Config(encoded.problem ?? "stamp table encoding failed"))

@@ -10,6 +10,7 @@ use effect_name_files: core.files
 // be a declared root or leaf. Test sources are scanned too: a test that
 // means a stray name writes it inside a larger string, not as a list member.
 EFFECT_NAME_SOURCES: [String]{"Compiler/Prelude/Effects.jet", "Core/Effects/Effects.jet", "Core/Compiler/Meta.jet"}
+
 EFFECT_NAME_ROOTS: [String]{"Compiler", "Core", "Jetpack", "Tools/agent"}
 
 // The members of effect-shaped lists that are no effect, as `path: Name`,
@@ -129,21 +130,29 @@ effect_name_lists_in: fn(path: String, text: String, vocabulary: [String], out: 
             if !effect_name_shaped(member) -> shaped = false
             if vocabulary.contains(member) -> declared += 1
         }
-        if shaped && declared >= 2 && declared * 2 > members.len() -> out.push(EffectNameList{path: path, line: line, members: members})
+        if shaped && declared >= 2 && declared * 2 > members.len() {
+            out.push(EffectNameList{path: path, line: line, members: members})
+        }
     }
 }
 
 effect_name_scan: fn(path: String, vocabulary: [String], out: &[EffectNameList]) {
     kind: effect_name_files.stat(path) ?? return
-    if kind.is_symlink -> return
+    if kind.is_symlink {
+        return
+    }
     if kind.is_dir {
         loop child in (effect_name_files.list_dir(path) ?? panic("list {path}: {err}")) {
-            if child.name.starts_with(".") || child.name == "node_modules" || child.name == "target" || child.name == "Vendor" -> next
+            if child.name.starts_with(".") || child.name == "node_modules" || child.name == "target" || child.name == "Vendor" {
+                next
+            }
             effect_name_scan("{path}/{child.name}", vocabulary, out)
         }
         return
     }
-    if !path.ends_with(".jet") -> return
+    if !path.ends_with(".jet") {
+        return
+    }
     text: effect_name_files.read(path) ?? return
     effect_name_lists_in(path, text, vocabulary, out)
 }

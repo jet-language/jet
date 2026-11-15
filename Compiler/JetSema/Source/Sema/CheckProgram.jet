@@ -260,7 +260,9 @@ sema_target_check_socket_surfaces: fn(graph: SemaRegistrationGraph, used_core: [
             }
             loop operation in operations {
                 separator: operation.rfind(".")
-                if separator < 0 || foundation_byte_text(operation.bytes(), 0, separator) != surface -> next
+                if separator < 0 || foundation_byte_text(operation.bytes(), 0, separator) != surface {
+                    next
+                }
                 operation_key: "{graph.modules[module_row_index].module_identity.id}:{span.start}:{span.end}:E3305:{operation}"
                 if seen.get(operation_key) != None -> next
                 seen[operation_key] = true
@@ -375,18 +377,20 @@ sema_graph_modules_take_checked_facts: fn(modules: &[SemaGraphModuleResult]) -> 
     kept := [SemaGraphModuleResult]{}
     loop modules.len() > 0 {
         graph_module := modules.pop() ?? panic("a nonempty checked module list failed to pop")
-        taken.push(SemaCheckedFacts{
-            name_references: graph_module.name_references.move(),
-            call_facts: graph_module.call_facts.move(),
-            comptime_requests: graph_module.comptime_requests.move(),
-            comptime_body_sources: graph_module.comptime_body_sources.move(),
-            compute_facts: graph_module.compute_facts.move(),
-            copy_events: graph_module.copy_events.move(),
-            failure_facts: graph_module.failure_facts.move(),
-            impls: graph_module.impls.move(),
-            exports: graph_module.exports.move(),
-            imports: graph_module.imports.move(),
-        })
+        taken.push(
+            SemaCheckedFacts{
+                name_references: graph_module.name_references.move(),
+                call_facts: graph_module.call_facts.move(),
+                comptime_requests: graph_module.comptime_requests.move(),
+                comptime_body_sources: graph_module.comptime_body_sources.move(),
+                compute_facts: graph_module.compute_facts.move(),
+                copy_events: graph_module.copy_events.move(),
+                failure_facts: graph_module.failure_facts.move(),
+                impls: graph_module.impls.move(),
+                exports: graph_module.exports.move(),
+                imports: graph_module.imports.move(),
+            },
+        )
         graph_module.name_references = [SemaNameReferenceFact]{}
         graph_module.call_facts = [SemaCallSiteFact]{}
         graph_module.comptime_requests = [SemaComptimeRequest]{}
@@ -1813,7 +1817,9 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
             diagnostics.push(sema_error("E2914", func.name_span, "`#Reactive fn` must not return a value", "`#Reactive fn` lowers to a reactive effect scope — effects don't produce a value", "drop the return type, or use `#Reactive {{ … }}` inside a plain `fn`"))
         }
     }
-    if func.is_pure && stand_in == None -> sema_check_pure_live_blocks(context.function_name, func.body, diagnostics)
+    if func.is_pure && stand_in == None {
+        sema_check_pure_live_blocks(context.function_name, func.body, diagnostics)
+    }
 
     params := [TParameter]{}
     // The symbol id of an explicit read `self` (sema_place_borrow_function).
@@ -2059,9 +2065,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     }
     name_references.extend(context.name_references.move())
     context.name_references = [SemaNameReferenceFact]{}
-    if stand_in == None {
-        sema_single_use_leave_scope(scopes, state, diagnostics)
-    } else {
+    if stand_in == None -> sema_single_use_leave_scope(scopes, state, diagnostics) else {
         sema_scope_leave(scopes, state)
     }
     source_line := sema_source_line_at(updated.source_segments, func.name_span)
@@ -2070,7 +2074,9 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         sema_check_unsupported(context, "no source segment covers the declaration of `{func.name}` at offset {func.name_span.start}")
     }
     return_view_provenance := ViewProvenanceMap?{None}
-    if stand_in == None -> return_view_provenance = sema_function_return_view_provenance(func, context.return_view_provenance, diagnostics, complete)
+    if stand_in == None {
+        return_view_provenance = sema_function_return_view_provenance(func, context.return_view_provenance, diagnostics, complete)
+    }
     if !complete -> return sema_function_result(None, owner_key, context.move())
     source_line_value: source_line ?? return sema_function_result(None, owner_key, context.move())
     source_file: sema_source_file_at(updated.source_segments, fallback_source_file, updated.source_origin, func.span)
@@ -3138,7 +3144,9 @@ sema_check_registered_memory_position: fn(job: SemaBodyJob, module_index: Int, m
 // up here.
 sema_check_ready_memory_position: fn(ready: [SemaParallelBody], job_index: Int, job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Int? {
     last: ready.len() - 1
-    if last >= 0 && ready[last].job_index == job_index && ready[last].memory_known -> return ready[last].memory_position
+    if last >= 0 && ready[last].job_index == job_index && ready[last].memory_known {
+        return ready[last].memory_position
+    }
     sema_check_registered_memory_position(job, module_index, memory_plan, environment, program)
 }
 
@@ -4360,7 +4368,9 @@ sema_pass_fact_run: fn(job: Int, graph: SemaRegistrationGraph?, threads: Compile
             job == SEMA_PASS_FACT_FIXED_LENGTH -> {
                 facts.fixed_length_write_params = sema_fixed_length_write_params_in_graph(registered)
             }
-            else -> { facts.memory_plan = sema_function_memory_plan_from_graph(registered, threads) }
+            else -> {
+                facts.memory_plan = sema_function_memory_plan_from_graph(registered, threads)
+            }
         }
     }
 }
@@ -4610,12 +4620,8 @@ sema_check_prepared_none: fn() -> SemaPreparedBodies Never! {
 // callback or a changed top-level return-view scope requires the same check
 // inline; none of that provisional result's reports or facts are published.
 sema_check_take_body: fn(ready: &[SemaParallelBody], job_index: Int) -> SemaParallelBody? Never! {
-    loop ready.len() > 0 && ready[ready.len() - 1].job_index < job_index {
-        _ := ready.pop()
-    }
-    if ready.len() > 0 && ready[ready.len() - 1].job_index == job_index {
-        return ready.pop()
-    }
+    loop ready.len() > 0 && ready[ready.len() - 1].job_index < job_index -> _ := ready.pop()
+    if ready.len() > 0 && ready[ready.len() - 1].job_index == job_index -> return ready.pop()
     None
 }
 
@@ -4635,8 +4641,12 @@ sema_check_drain_body: fn(body: &&SemaParallelBody, diagnostics: &[Diagnostic], 
 // generated codecs and derived methods (SemaParallelBody.codec_demand), as
 // the module pass would have checking it itself.
 sema_check_body_demand_replay: fn(program: SemaProgramTables, body: SemaParallelBody) {
-    if body.codec_demand.len() == 0 && body.derive_demand.len() == 0 -> return
-    if program.registration_graph == .Val(graph) -> sema_demand_capture_replay(graph, body.codec_demand, body.derive_demand)
+    if body.codec_demand.len() == 0 && body.derive_demand.len() == 0 {
+        return
+    }
+    if program.registration_graph == .Val(graph) {
+        sema_demand_capture_replay(graph, body.codec_demand, body.derive_demand)
+    }
 }
 
 sema_check_module_function: fn(ready: &[SemaParallelBody], job_index: Int, scopes_changed: Bool, job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], count_work: Bool, functions_checked: &Int) -> SemaFunctionResult {
@@ -4816,7 +4826,9 @@ sema_check_parallel_jobs: fn(graph: SemaRegistrationGraph, module_index: Int, co
     source_module: graph.modules[module_index]
     core_wave: graph.core_wave_rows.len() > 0
     jobs := [SemaBodyJob]{}
-    if graph.codec_wave_rows.len() > 0 || graph.derive_wave_rows.len() > 0 || sema_core_bodies_held(graph, source_module) -> return jobs
+    if graph.codec_wave_rows.len() > 0 || graph.derive_wave_rows.len() > 0 || sema_core_bodies_held(graph, source_module) {
+        return jobs
+    }
     item_index := 0
     loop item in source_module.program.items {
         if item == .Func(func) {
@@ -5029,15 +5041,21 @@ sema_check_body_stream_part: fn(shared: Shared<SemaCheckShared>, cells: SemaStre
     part := SemaBodyPart{scopes: sema_scope_init(module_none()), bodies: [SemaParallelBody]{}, positions: [Int]{}}
     current := -1
     own_program := SemaProgramTables?{None}
-    if sema_check_body_demand_apart(inputs.value.programs[0]) -> own_program = Val(sema_comptime_function_thread_program(inputs.value.programs[0]))
+    if sema_check_body_demand_apart(inputs.value.programs[0]) {
+        own_program = Val(sema_comptime_function_thread_program(inputs.value.programs[0]))
+    }
     loop {
         step: sema_check_body_stream_next(stream, work)
         if step.action == {
             .Body -> {
                 if own_program == {
-                    .Val(program) -> sema_check_body_stream_job(program, inputs.value.memory_plans[0], cells, part, current, step.claim, wanted, changed)
+                    .Val(program) -> {
+                        sema_check_body_stream_job(program, inputs.value.memory_plans[0], cells, part, current, step.claim, wanted, changed)
+                    }
                     // Passed straight through: a local binding of a guarded row would copy it.
-                    .None -> sema_check_body_stream_job(inputs.value.programs[0], inputs.value.memory_plans[0], cells, part, current, step.claim, wanted, changed)
+                    .None -> {
+                        sema_check_body_stream_job(inputs.value.programs[0], inputs.value.memory_plans[0], cells, part, current, step.claim, wanted, changed)
+                    }
                 }
             }
             .Prep -> {
@@ -5057,7 +5075,9 @@ sema_check_body_stream_part: fn(shared: Shared<SemaCheckShared>, cells: SemaStre
 // stream's join. Wakes every waiting thread.
 sema_check_body_stream_stop: fn(cells: SemaStreamCells, stream: Shared<SemaBodyStream>, work: Condition, changed: Condition, failed: Bool) {
     sema_check_body_stream_end(stream, work, failed)
-    if !failed -> return
+    if !failed {
+        return
+    }
     loop at in 0..<cells.outs.len() {
         held: cells.outs[at].guard_edit()
         held.value.failed = true
@@ -5067,7 +5087,7 @@ sema_check_body_stream_stop: fn(cells: SemaStreamCells, stream: Shared<SemaBodyS
 
 sema_check_body_stream_end: fn(stream: Shared<SemaBodyStream>, work: Condition, failed: Bool) {
     held: stream.guard_edit()
-    if failed { held.value.failed = true } else { held.value.finished = true }
+    if failed -> held.value.failed = true else -> held.value.finished = true
     work.notify_all()
 }
 
@@ -5112,7 +5132,9 @@ sema_check_body_stream_publish: fn(out: Shared<SemaStreamOut>, part: &SemaBodyPa
         held.value.positions.push(position)
     }
     held.value.left -= 1
-    if held.value.left > 0 -> return
+    if held.value.left > 0 {
+        return
+    }
     held.value.ready = true
     changed.notify_all()
 }
@@ -5299,9 +5321,7 @@ sema_check_module_summary_scopes: fn(environment: &SemaScopeEnvironment, program
 sema_check_bodies_parallel: fn(shared: Shared<SemaCheckShared>, module_index: Int, scopes: &&SemaScopeTable, jobs: [SemaBodyJob], weights: [Int], workers: Int, trace_sink: CompilerTraceSink?) -> SemaPreparedBodies {
     prepared := SemaPreparedBodies{scopes: [SemaScopeTable]{}, bodies: [SemaParallelBody]{}}
     plan_jobs := [SemaBodyJob]{}
-    loop position in 0..<jobs.len() {
-        plan_jobs.push(jobs[position])
-    }
+    loop position in 0..<jobs.len() { plan_jobs.push(jobs[position]) }
     order := compiler_threads_heaviest_first(weights)
     plan: Shared{SemaBodyPlan{jobs: [SemaBodyJob]{}, order: [Int]{}}}
     sema_check_body_plan_fill(plan, plan_jobs, order)
@@ -5455,16 +5475,22 @@ sema_check_body_stream_lead: fn(shared: Shared<SemaCheckShared>, cells: SemaStre
     // The jobs it claims check as a stream thread's do, on a program of its
     // own when they record their demand apart (sema_check_body_stream_part).
     own_program := SemaProgramTables?{None}
-    if sema_check_body_demand_apart(inputs.value.programs[0]) -> own_program = Val(sema_comptime_function_thread_program(inputs.value.programs[0]))
+    if sema_check_body_demand_apart(inputs.value.programs[0]) {
+        own_program = Val(sema_comptime_function_thread_program(inputs.value.programs[0]))
+    }
     loop done < cells.outs.len() {
         step: sema_check_body_stream_lead_step(stream, work, done)
         if step.action == {
             .Body -> {
                 sema_check_body_progress(trace_sink, step.rank, step.total)
                 if own_program == {
-                    .Val(program) -> sema_check_body_stream_job(program, inputs.value.memory_plans[0], cells, part, current, step.claim, wanted, changed)
+                    .Val(program) -> {
+                        sema_check_body_stream_job(program, inputs.value.memory_plans[0], cells, part, current, step.claim, wanted, changed)
+                    }
                     // Passed straight through: a local binding of a guarded row would copy it.
-                    .None -> sema_check_body_stream_job(inputs.value.programs[0], inputs.value.memory_plans[0], cells, part, current, step.claim, wanted, changed)
+                    .None -> {
+                        sema_check_body_stream_job(inputs.value.programs[0], inputs.value.memory_plans[0], cells, part, current, step.claim, wanted, changed)
+                    }
                 }
             }
             .Prep -> {
@@ -5472,7 +5498,9 @@ sema_check_body_stream_lead: fn(shared: Shared<SemaCheckShared>, cells: SemaStre
                 sema_check_body_stream_open(cells, stream, work, changed, step.stream_module, step.tops, prep)
             }
             .Await -> {
-                if !sema_check_body_stream_await(cells, done, changed) -> return
+                if !sema_check_body_stream_await(cells, done, changed) {
+                    return
+                }
                 module_index: step.module_index
                 stream_jobs += step.total
                 bodies := sema_check_body_stream_take(cells, done, step.tops, step.total, step.prepared)
@@ -6105,9 +6133,7 @@ sema_check_soft_public_signature: fn(function: Func, declared: [String:Int], raw
     // A bound runs from the parameter's name to its `,`, `>` or default `=`.
     loop parameter in function.type_params {
         end := parameter.name_span.end
-        loop end < raw.len() && raw[end] != 44 && raw[end] != 62 && raw[end] != 61 {
-            end += 1
-        }
+        loop end < raw.len() && raw[end] != 44 && raw[end] != 62 && raw[end] != 61 -> end += 1
         ranges.push(Span{start: parameter.name_span.end, end: end})
     }
     loop range in ranges {
@@ -7889,11 +7915,15 @@ sema_comptime_precheck_claimers: fn(shared_state: Shared<SemaPrecheckShared>, pl
             row := claimed.pop() ?? break
             done.push(row)
         }
-        if memory_plan.len() == 0 -> sema_comptime_precheck_memory_plan(shared_state, threads, memory_plan)
+        if memory_plan.len() == 0 {
+            sema_comptime_precheck_memory_plan(shared_state, threads, memory_plan)
+        }
         return
     }
     if from >= workers {
-        if memory_plan.len() == 0 -> sema_comptime_precheck_memory_plan(shared_state, threads, memory_plan)
+        if memory_plan.len() == 0 {
+            sema_comptime_precheck_memory_plan(shared_state, threads, memory_plan)
+        }
         return
     }
     task.group sema_precheck_threads {
@@ -8174,9 +8204,7 @@ sema_comptime_function_thread_graph: fn(held: &&SemaRegistrationGraph?) -> SemaR
 // (sema_comptime_walk_close): `workers` tasks, each claiming queued jobs
 // under watch (sema_comptime_walk_watched). The result is the number of
 // checks the threads made.
-sema_comptime_walk_run: fn(walk: SemaComptimeWalk) -> Int {
-    sema_comptime_walk_threads(walk, 0)
-}
+sema_comptime_walk_run: fn(walk: SemaComptimeWalk) -> Int { sema_comptime_walk_threads(walk, 0) }
 
 sema_comptime_walk_threads: fn(walk: SemaComptimeWalk, from: Int) -> Int {
     if from >= walk.workers -> return 0
@@ -8340,7 +8368,9 @@ sema_comptime_walk_push: fn(walk: &SemaComptimeWalk, environment: &SemaScopeEnvi
         member_weights[group].push(weight)
         if weight > heaviest[group] -> heaviest[group] = weight
     }
-    if slots.len() == 0 -> return
+    if slots.len() == 0 {
+        return
+    }
     permit: walk.queue.guard_edit()
     loop group in compiler_threads_heaviest_first(heaviest) {
         loop member in compiler_threads_heaviest_first(member_weights[group]) {
@@ -8361,7 +8391,9 @@ sema_comptime_walk_push: fn(walk: &SemaComptimeWalk, environment: &SemaScopeEnvi
 // module whose scope was dropped is entered again when the driver next
 // queues one of its functions.
 sema_comptime_walk_evict: fn(walk: &SemaComptimeWalk, rows: Int, keep: [Int]) {
-    if walk.held_rows + rows <= SEMA_BODY_STREAM_SCOPE_ROWS -> return
+    if walk.held_rows + rows <= SEMA_BODY_STREAM_SCOPE_ROWS {
+        return
+    }
     permit: walk.queue.guard_edit()
     slot := 0
     loop slot < walk.slot_modules.len() && walk.held_rows > 0 && walk.held_rows + rows > SEMA_BODY_STREAM_SCOPE_ROWS {
@@ -8793,12 +8825,12 @@ sema_comptime_render_methods: fn(graph: SemaRegistrationGraph, memo: &SemaCompti
 // Adds nominal `nominal`'s methods, then those of the nominals it holds,
 // unless `seen` holds it.
 sema_comptime_render_visit: fn(memo: SemaComptimeRenderMemo, nominal: Int, seen: &[Int:Bool], found: &[(module_identity: ModuleID, key: String)]) {
-    if seen.get(nominal) != None -> return
+    if seen.get(nominal) != None {
+        return
+    }
     seen[nominal] = true
     found.extend(memo.methods[nominal])
-    loop child in memo.children[nominal] {
-        sema_comptime_render_visit(memo, child, seen, found)
-    }
+    loop child in memo.children[nominal] { sema_comptime_render_visit(memo, child, seen, found) }
 }
 
 // The rows of `memo` of the nominal types `ty` (named from
@@ -8876,7 +8908,9 @@ sema_comptime_render_nominal: fn(graph: SemaRegistrationGraph, memo: &SemaCompti
     if nominal.source == .SourceAST(item) {
         loop block in sema_registration_item_trait_blocks(item) {
             method_name: sema_comptime_render_method_name(block.trait_name, block.trait_name)
-            if method_name == "" || sema_comptime_derived_compare(method_name, block.compiler_generated) -> next
+            if method_name == "" || sema_comptime_derived_compare(method_name, block.compiler_generated) {
+                next
+            }
             loop method in nominal.methods {
                 if method.symbol.name != method_name -> next
                 loop written in block.methods {
@@ -9205,7 +9239,9 @@ sema_comptime_tree_module_state: fn(graph: SemaRegistrationGraph, tree: BodyTree
     if read.len() == 0 -> return None
     loop module_row in graph.modules {
         loop constant in module_row.constants {
-            if constant.declaration.mutable && !constant.declaration.is_comptime && read.get(constant.symbol.id.id) != None -> return Val("{constant.symbol.name}")
+            if constant.declaration.mutable && !constant.declaration.is_comptime && read.get(constant.symbol.id.id) != None {
+                return Val("{constant.symbol.name}")
+            }
         }
     }
     None
@@ -10156,7 +10192,9 @@ sema_comptime_dependency_cycle_diagnostic: fn(chain: [String], span: Span) -> Di
 sema_comptime_effect_sources: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, type_caps: [U32:SemaEffectTypeCap]) -> [SemaEffectFunctionSource] Never! {
     sources := [SemaEffectFunctionSource]{}
     compute_aliases: sema_kernel_compute_aliases(source_module, graph.module_table)
-    loop function in source_module.functions -> sources.push(sema_comptime_effect_source(graph, function.declaration, function.symbol.id, compute_aliases, true))
+    loop function in source_module.functions {
+        sources.push(sema_comptime_effect_source(graph, function.declaration, function.symbol.id, compute_aliases, true))
+    }
     loop nominal in source_module.nominals {
         block_traits: sema_effect_body_block_traits(graph, source_module.module_identity, nominal)
         loop (index, function) in nominal.methods {
@@ -11039,7 +11077,9 @@ sema_check_body_stream: fn(shared_state: Shared<SemaCheckShared>, host_hooks: Se
         method_bytes := 0
         wave_methods: if kind != SemaWaveKind.Modules -> sema_check_wave_method_jobs_in_shared(shared_state, module_index, method_bytes) else -> 0
         module_rows: sema_check_module_scope_rows_in_shared(shared_state, module_index)
-        if (module_jobs.len() > 0 || wave_methods > 0) && module_rows > scope_rows -> scope_rows = module_rows
+        if (module_jobs.len() > 0 || wave_methods > 0) && module_rows > scope_rows {
+            scope_rows = module_rows
+        }
         loop weight in weights -> body_work += weight
         body_work += if kind == SemaWaveKind.Core -> method_bytes else -> wave_methods * method_job_bytes
         job_count += module_jobs.len() + wave_methods
@@ -11084,7 +11124,9 @@ sema_check_body_stream: fn(shared_state: Shared<SemaCheckShared>, host_hooks: Se
     checks := [SemaDeclarationCheck]{}
     loop starts.len() > 0 {
         started := starts.pop() ?? break
-        if started.position < view_jobs.len() -> view_jobs[started.position] = started.view_summary_jobs.move()
+        if started.position < view_jobs.len() {
+            view_jobs[started.position] = started.view_summary_jobs.move()
+        }
         started.view_summary_jobs = None
         checks.push(started.move())
     }
@@ -11142,7 +11184,9 @@ sema_check_body_stream_release: fn(stream: Shared<SemaBodyStream>, work: Conditi
     }
     loop held.value.admitted < held.value.rows.len() {
         module_rows: held.value.rows[held.value.admitted]
-        if held.value.admitted > lead && held.value.held_rows + module_rows > SEMA_BODY_STREAM_SCOPE_ROWS -> break
+        if held.value.admitted > lead && held.value.held_rows + module_rows > SEMA_BODY_STREAM_SCOPE_ROWS {
+            break
+        }
         held.value.held_rows += module_rows
         held.value.admitted += 1
     }
@@ -11157,7 +11201,9 @@ sema_check_body_stream_release: fn(stream: Shared<SemaBodyStream>, work: Conditi
 sema_check_body_stream_next: fn(stream: Shared<SemaBodyStream>, work: Condition) -> SemaStreamStep {
     held: stream.guard_edit()
     held.wait(work, fn(value) { sema_check_body_stream_has_step(value) }) ?? panic("a body stream's thread could not wait for its work")
-    if held.value.failed || held.value.finished -> return sema_check_body_stream_step(SemaStreamAction.Stop)
+    if held.value.failed || held.value.finished {
+        return sema_check_body_stream_step(SemaStreamAction.Stop)
+    }
     if held.value.prep_next < held.value.admitted {
         stream_module: held.value.prep_next
         held.value.prep_next = stream_module + 1
@@ -11178,7 +11224,9 @@ sema_check_body_stream_has_step: fn(stream: SemaBodyStream) -> Bool {
 // job, or -1.
 sema_check_body_stream_open_module: fn(stream: SemaBodyStream) -> Int {
     loop stream_module in stream.claim_from..<stream.admitted {
-        if stream.stages[stream_module] == SemaStreamStage.Open && stream.next[stream_module] < stream.orders[stream_module].len() -> return stream_module
+        if stream.stages[stream_module] == SemaStreamStage.Open && stream.next[stream_module] < stream.orders[stream_module].len() {
+            return stream_module
+        }
     }
     -1
 }
@@ -11195,8 +11243,12 @@ sema_check_body_stream_lead_step: fn(stream: Shared<SemaBodyStream>, work: Condi
         held.value.prep_next = stream_module + 1
         return sema_check_body_stream_prep_step(held.value, stream_module)
     }
-    if held.value.stages[stream_module] == SemaStreamStage.Rescan -> return sema_check_body_stream_prep_step(held.value, stream_module)
-    if held.value.next[stream_module] < held.value.orders[stream_module].len() -> return sema_check_body_stream_claim(held.value, stream_module)
+    if held.value.stages[stream_module] == SemaStreamStage.Rescan {
+        return sema_check_body_stream_prep_step(held.value, stream_module)
+    }
+    if held.value.next[stream_module] < held.value.orders[stream_module].len() {
+        return sema_check_body_stream_claim(held.value, stream_module)
+    }
     step := sema_check_body_stream_step(SemaStreamAction.Await)
     step.module_index = held.value.module_indexes[stream_module]
     step.tops = held.value.tops[stream_module]
@@ -11234,7 +11286,9 @@ sema_check_body_stream_claim: fn(stream: &SemaBodyStream, stream_module: Int) ->
 sema_check_body_stream_advance: fn(stream: &SemaBodyStream) {
     loop stream.claim_from < stream.admitted {
         at: stream.claim_from
-        if stream.stages[at] != SemaStreamStage.Open || stream.next[at] < stream.orders[at].len() -> return
+        if stream.stages[at] != SemaStreamStage.Open || stream.next[at] < stream.orders[at].len() {
+            return
+        }
         stream.claim_from = at + 1
     }
 }
@@ -11286,7 +11340,9 @@ sema_check_body_stream_expect: fn(out: Shared<SemaStreamOut>, total: Int, codecs
     held.value.codec_demand = codecs.move()
     held.value.derive_demand = derived.move()
     held.value.left = total
-    if total > 0 -> return
+    if total > 0 {
+        return
+    }
     held.value.ready = true
     changed.notify_all()
 }
@@ -11296,10 +11352,14 @@ sema_check_body_stream_expect: fn(out: Shared<SemaStreamOut>, total: Int, codecs
 // module.
 sema_check_body_stream_replay: fn(cells: SemaStreamCells, stream_module: Int, program: SemaProgramTables) {
     held: cells.outs[stream_module].guard_edit()
-    if held.value.codec_demand.len() == 0 && held.value.derive_demand.len() == 0 -> return
+    if held.value.codec_demand.len() == 0 && held.value.derive_demand.len() == 0 {
+        return
+    }
     codecs: compiler_take_rows<String>(held.value.codec_demand)
     derived: compiler_take_rows<String>(held.value.derive_demand)
-    if program.registration_graph == .Val(graph) -> sema_demand_capture_replay(graph, codecs, derived)
+    if program.registration_graph == .Val(graph) {
+        sema_demand_capture_replay(graph, codecs, derived)
+    }
 }
 
 // A body stream module's preparation (sema_check_stream_module_prep): its
@@ -11549,7 +11609,9 @@ sema_failure_recheck_modules: fn(graph: SemaRegistrationGraph, modules: [SemaGra
 // (E0433). Its call sites keep the carrier they were checked against; lowering hands
 // a plain-return callee's value to any `Result` carrier a call site names.
 sema_failure_reconcile_infallible: fn(modules: &[SemaGraphModuleResult], projected: [String], symbols: SymbolTable) Never! {
-    if projected.len() == 0 -> return
+    if projected.len() == 0 {
+        return
+    }
     keys := [String:Bool]{}
     ids := [U32:Bool]{}
     loop key in projected {
@@ -11558,11 +11620,17 @@ sema_failure_reconcile_infallible: fn(modules: &[SemaGraphModuleResult], project
     }
     loop module_index in 0..<modules.len() {
         loop function_index in 0..<modules[module_index].functions.len() {
-            if keys.get(modules[module_index].functions[function_index].key) != None -> sema_failure_reconcile_function(modules[module_index].functions[function_index])
+            if keys.get(modules[module_index].functions[function_index].key) != None {
+                sema_failure_reconcile_function(modules[module_index].functions[function_index])
+            }
         }
         loop fact_index in 0..<modules[module_index].call_facts.len() {
-            if !modules[module_index].call_facts[fact_index].discarded_if_infallible || modules[module_index].call_facts[fact_index].discarded -> next
-            if modules[module_index].call_facts[fact_index].callee == .Val(callee) && ids.get(callee.id) != None -> modules[module_index].call_facts[fact_index].discarded = true
+            if !modules[module_index].call_facts[fact_index].discarded_if_infallible || modules[module_index].call_facts[fact_index].discarded {
+                next
+            }
+            if modules[module_index].call_facts[fact_index].callee == .Val(callee) && ids.get(callee.id) != None {
+                modules[module_index].call_facts[fact_index].discarded = true
+            }
         }
     }
 }
@@ -12008,7 +12076,9 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
         }
     }
     sema_failure_union_settle_reports(diagnostics)
-    loop settle_index in 0..<modules.len() -> sema_failure_union_settle_reports(modules[settle_index].diagnostics)
+    loop settle_index in 0..<modules.len() {
+        sema_failure_union_settle_reports(modules[settle_index].diagnostics)
+    }
     // The bundle list and the per-module lists each keep one report per
     // failure domain.
     bundle_domains := [String:Bool]{}
@@ -12316,7 +12386,9 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     loop module_index in 0..<final_graph.modules.len() {
         sema_lint_allowances(final_graph.modules[module_index].program, final_graph.modules[module_index].source_segments, allowances)
     }
-    if stood_in > 0 && rerun == "" && sema_error_count_since(diagnostics, late_start) > effects.exact_errors -> rerun = "reports"
+    if stood_in > 0 && rerun == "" && sema_error_count_since(diagnostics, late_start) > effects.exact_errors {
+        rerun = "reports"
+    }
     if stood_in > 0 && trace_sink == .Val(sink) {
         sink.progress("counters.sema.core_seal.stand_ins", stood_in, -1)
         if rerun != "" -> sink.progress("counters.sema.core_seal.reruns.{rerun}", 1, -1)
@@ -12335,7 +12407,9 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
         loop source_module in final_graph.modules -> programs.push(source_module.program)
     }
     core_bodies := [SemaCoreBody]{}
-    loop position in 0..<modules.len() -> compiler_transfer_rows<SemaCoreBody>(core_bodies, modules[position].core_bodies)
+    loop position in 0..<modules.len() {
+        compiler_transfer_rows<SemaCoreBody>(core_bodies, modules[position].core_bodies)
+    }
     bodies_file: if final_graph.core_seal -> sema_core_bodies_bytes(core_bodies.move(), sema_core_bodies_context(final_graph)) else -> [U8]{}
     result := SemaGraphResult{
         package_identity: final_graph.package_identity,
@@ -12707,7 +12781,9 @@ sema_finalize_side_checks: fn(graph: &&SemaRegistrationGraph, modules: &[SemaGra
     if workers <= 1 {
         sides: loop job in 0..<SEMA_FINALIZE_SIDE_JOBS -> sema_finalize_side_run(job, owned, modules)
         sema_finalize_side_join(sides, diagnostics, complete, effect_inputs, effect_prepared, liveness, taint)
-        loop module_row in modules -> typestate_found.extend(sema_typestate_check_module(owned, table, module_row))
+        loop module_row in modules {
+            typestate_found.extend(sema_typestate_check_module(owned, table, module_row))
+        }
         loop module_index in 0..<owned.modules.len() {
             context: sema_core_module_context(owned, owned.modules[module_index], modules[module_index].call_facts)
             collected := sema_core_collected_empty()

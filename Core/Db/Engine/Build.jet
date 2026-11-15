@@ -37,6 +37,7 @@ use {
 
 // LEGACY_SCHEMA_TABLE and LEGACY_TEMP_SCHEMA_TABLE (sqliteInt.h).
 LEGACY_SCHEMA_TABLE: "sqlite_master"
+
 LEGACY_TEMP_SCHEMA_TABLE: "sqlite_temp_master"
 
 // SQLITE_MAX_FILE_FORMAT (sqliteInt.h).
@@ -54,16 +55,14 @@ schema_table: fn(i_db: Int) -> String Never! {
 }
 
 // One byte of a name, 0 past its end (C's terminating NUL).
-name_byte: fn(z: [U8], i: Int) -> Int Never! {
-    if i < z.len() -> (Int{z[i]}) else -> 0
-}
+name_byte: fn(z: [U8], i: Int) -> Int Never! { if i < z.len() -> (Int{z[i]}) else -> 0 }
 
 // The connection-wide half of C's db->suppressErr++: the previous flags,
 // for unsuppress_err.
 suppress_err: fn(p: &cg.Parse, a: &ast.AST) -> (ast_flag: Bool, db_flag: Int) Never! {
     saved: (ast_flag: a.suppress_err, db_flag: p.db.suppress_err)
     a.suppress_err = true
-    p.db.suppress_err = p.db.suppress_err + 1
+    p.db.suppress_err += 1
     saved
 }
 
@@ -95,16 +94,16 @@ DBFixer: struct {
         walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
             if !self.b_temp -> ast.set_flags(a, e, ast.EP_FROM_DDL)
             if a.exprs[e].op == tk.TK_VARIABLE {
-                if self.busy {
-                    a.exprs[e].op = tk.TK_NULL
-                } else {
+                if self.busy -> a.exprs[e].op = tk.TK_NULL else {
                     ast.error(a, "{self.z_type} cannot use variables")
                     return ast.WRC_ABORT
                 }
             }
             ast.WRC_CONTINUE
         }
+
         walk_has_select_cb: fn(&self) -> Bool Never! { true }
+
         // fixSelectCb.
         walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! {
             list: a.selects[s].src
@@ -124,19 +123,26 @@ DBFixer: struct {
                     a.items[si].schema = self.schema
                     a.items[si].from_ddl = true
                 }
-                if !a.items[si].is_using && ast.walk_expr<DBFixer>(self, a, a.items[si].u3) != 0 -> return ast.WRC_ABORT
+                if !a.items[si].is_using && ast.walk_expr<DBFixer>(self, a, a.items[si].u3) != 0 {
+                    return ast.WRC_ABORT
+                }
             }
             w: a.selects[s].with_clause
             if w >= 0 {
                 loop c in a.withs[w].ctes.copy() {
-                    if ast.walk_select<DBFixer>(self, a, a.ctes[c].select) != 0 -> return ast.WRC_ABORT
+                    if ast.walk_select<DBFixer>(self, a, a.ctes[c].select) != 0 {
+                        return ast.WRC_ABORT
+                    }
                 }
             }
             ast.WRC_CONTINUE
         }
+
         // xSelectCallback2 is sqlite3WalkWinDefnDummyCallback.
         walk_has_select_cb2: fn(&self) -> Bool Never! { true }
+
         walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+
         walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { true }
     }
 }
@@ -196,8 +202,12 @@ dequote_token: fn(a: ast.AST, t: ast.SQLTok) -> ast.SQLTok Never! {
 // sqlite3NestedParse: run the statement fmt renders over args inside this
 // one (the Host's Gen.nested_parse saves and restores the Parse around it).
 nested_parse: fn(p: &cg.Parse, a: &ast.AST, fmt: String, args: [base.Mem]) Never! -[DB]> {
-    if a.ctx.nerr > 0 -> return
-    if a.ctx.parse_mode != ast.PARSE_MODE_NORMAL -> return
+    if a.ctx.nerr > 0 {
+        return
+    }
+    if a.ctx.parse_mode != ast.PARSE_MODE_NORMAL {
+        return
+    }
     z_sql: pf.mprintf(fmt.bytes(), args, p.db.limits[ast.LIMIT_LENGTH])
     if z_sql == .Val(sql) {
         g := p.up
@@ -277,7 +287,7 @@ open_schema_table: fn(p: &cg.Parse, i_db: Int) Never! {
 change_cookie: fn(p: &cg.Parse, i_db: Int) Never! {
     s: p.db.dbs[i_db].schema
     x := (p.db.schemas[s].schema_cookie + 1).bit_and(4294967295)
-    if x >= 2147483648 -> x = x - 4294967296
+    if x >= 2147483648 -> x -= 4294967296
     _: cg.op3(p, opc.OP_SET_COOKIE, i_db, btree.BTREE_SCHEMA_VERSION, x)
 }
 
@@ -306,7 +316,9 @@ start_table: fn(p: &cg.Parse, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok,
         name = name1
     } else {
         r: two_part_name(p, a, name1, name2)
-        if r.i_db < 0 -> return
+        if r.i_db < 0 {
+            return
+        }
         i_db = r.i_db
         name = r.name
         if is_temp && name2.n > 0 && i_db != 1 {
@@ -388,9 +400,7 @@ start_table: fn(p: &cg.Parse, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok,
         _: cg.op3(p, opc.OP_SET_COOKIE, i_db, btree.BTREE_FILE_FORMAT, file_format)
         _: cg.op3(p, opc.OP_SET_COOKIE, i_db, btree.BTREE_TEXT_ENCODING, p.db.enc)
         cg.v_jump_here(p, addr1)
-        if is_view || is_virtual {
-            _: cg.op2(p, opc.OP_INTEGER, 0, p.f.reg_root)
-        } else {
+        if is_view || is_virtual -> _: cg.op2(p, opc.OP_INTEGER, 0, p.f.reg_root) else {
             p.f.addr_cr_tab = cg.op3(p, opc.OP_CREATE_BTREE, i_db, p.f.reg_root, btree.BTREE_INTKEY)
         }
         open_schema_table(p, i_db)
@@ -410,7 +420,9 @@ STD_TYPE_AFF: [Int]{67, 65, 68, 68, 69, 66}
 // table being built.
 add_column: fn(p: &cg.Parse, a: &ast.AST, name0: ast.SQLTok, typ0: ast.SQLTok) Never! {
     t: p.f.new_table
-    if t < 0 -> return
+    if t < 0 {
+        return
+    }
     n_col: p.db.tables[t].cols.len()
     if n_col + 1 > p.db.limits[ast.LIMIT_COLUMN] {
         ast.error(a, "too many columns on {ast.text(p.db.tables[t].name)}")
@@ -424,7 +436,9 @@ add_column: fn(p: &cg.Parse, a: &ast.AST, name0: ast.SQLTok, typ0: ast.SQLTok) N
         loop typ.n > 0 && util.is_space(util.sql_byte(a.ctx.sql, typ.z + typ.n - 1)) -> typ.n -= 1
         if typ.n >= 9 && util.str_nicmp(a.ctx.sql[(typ.z + typ.n - 9)..<(typ.z + typ.n)].copy(), "generated".bytes(), 9) == 0 {
             typ.n -= 9
-            loop typ.n > 0 && util.is_space(util.sql_byte(a.ctx.sql, typ.z + typ.n - 1)) -> typ.n -= 1
+            loop typ.n > 0 && util.is_space(util.sql_byte(a.ctx.sql, typ.z + typ.n - 1)) {
+                typ.n -= 1
+            }
         }
     }
     e_type := conn.COLTYPE_CUSTOM
@@ -473,7 +487,9 @@ add_column: fn(p: &cg.Parse, a: &ast.AST, name0: ast.SQLTok, typ0: ast.SQLTok) N
 // sqlite3AddNotNull: NOT NULL on the last column.
 add_not_null: fn(p: &cg.Parse, a: &ast.AST, on_error: Int) Never! {
     t: p.f.new_table
-    if t < 0 || p.db.tables[t].cols.len() < 1 -> return
+    if t < 0 || p.db.tables[t].cols.len() < 1 {
+        return
+    }
     last: p.db.tables[t].cols.len() - 1
     p.db.tables[t].cols[last].not_null = on_error
     p.db.tables[t].tab_flags = p.db.tables[t].tab_flags.bit_or(ast.TF_HAS_NOT_NULL)
@@ -513,9 +529,7 @@ add_default_value: fn(p: &cg.Parse, a: &ast.AST, e: Int, start: Int, end: Int) N
 // sqlite3StringToId: a string literal used where an identifier belongs
 // becomes one.
 string_to_id: fn(a: &ast.AST, e: Int) Never! {
-    if a.exprs[e].op == tk.TK_STRING {
-        a.exprs[e].op = tk.TK_ID
-    } else if a.exprs[e].op == tk.TK_COLLATE && a.exprs[e].left >= 0 && a.exprs[a.exprs[e].left].op == tk.TK_STRING {
+    if a.exprs[e].op == tk.TK_STRING -> a.exprs[e].op = tk.TK_ID else if a.exprs[e].op == tk.TK_COLLATE && a.exprs[e].left >= 0 && a.exprs[a.exprs[e].left].op == tk.TK_STRING {
         a.exprs[a.exprs[e].left].op = tk.TK_ID
     }
 }
@@ -570,11 +584,11 @@ add_primary_key: fn(p: &cg.Parse, a: &ast.AST, list: Int, on_error: Int, auto_in
     if n_term == 1 && i_col >= 0 && ctype == conn.COLTYPE_INTEGER && sort_order != ast.SO_DESC {
         p.db.tables[t].ipkey = i_col
         p.db.tables[t].key_conf = on_error
-        if auto_inc -> p.db.tables[t].tab_flags = p.db.tables[t].tab_flags.bit_or(ast.TF_AUTOINCREMENT)
+        if auto_inc {
+            p.db.tables[t].tab_flags = p.db.tables[t].tab_flags.bit_or(ast.TF_AUTOINCREMENT)
+        }
         if ilist >= 0 -> p.f.i_pk_sort_order = a.lists[ilist].items[0].sort_flags
-    } else if auto_inc {
-        ast.error(a, "AUTOINCREMENT is only allowed on an INTEGER PRIMARY KEY")
-    } else {
+    } else if auto_inc { ast.error(a, "AUTOINCREMENT is only allowed on an INTEGER PRIMARY KEY") } else {
         create_index(p, a, ast.SQLTok{z: -1, n: 0}, ast.SQLTok{z: -1, n: 0}, -1, ilist, on_error, ast.SQLTok{z: -1, n: 0}, -1, sort_order, false, ast.IDXTYPE_PRIMARYKEY)
         ilist = -1
     }
@@ -599,17 +613,19 @@ add_check_constraint: fn(p: &cg.Parse, a: &ast.AST, e: Int, start: Int, end: Int
             loop z > s && util.is_space(util.sql_byte(a.ctx.sql, z - 1)) -> z -= 1
             ast.expr_list_set_name(a, p.db.tables[t].check, a.ctx.sql[s..<z].copy(), true)
         }
-    } else {
-        ast.expr_delete(a, e)
-    }
+    } else { ast.expr_delete(a, e) }
 }
 
 // sqlite3AddCollateType: COLLATE `name` on the last column.
 add_collate_type: fn(p: &cg.Parse, a: &ast.AST, name: ast.SQLTok) Never! {
     t: p.f.new_table
-    if t < 0 -> return
+    if t < 0 {
+        return
+    }
     i: p.db.tables[t].cols.len() - 1
-    z_coll: name_from_token(a, name) ?? { return }
+    z_coll: name_from_token(a, name) ?? {
+        return
+    }
     if cat.locate_coll_seq(p, a, z_coll) >= 0 {
         cat.column_set_coll(p.db, t, i, z_coll)
         ix := p.db.tables[t].index
@@ -655,7 +671,9 @@ add_generated: fn(p: &cg.Parse, a: &ast.AST, e0: Int, typ: ast.SQLTok) Never! {
     if e_type == conn.COLFLAG_VIRTUAL -> p.db.tables[t].n_nv_col -= 1
     p.db.tables[t].cols[i].col_flags = p.db.tables[t].cols[i].col_flags.bit_or(e_type)
     p.db.tables[t].tab_flags = p.db.tables[t].tab_flags.bit_or(e_type)
-    if p.db.tables[t].cols[i].col_flags.bit_and(conn.COLFLAG_PRIMKEY) != 0 -> make_column_part_of_primary_key(p, a, t, i)
+    if p.db.tables[t].cols[i].col_flags.bit_and(conn.COLFLAG_PRIMKEY) != 0 {
+        make_column_part_of_primary_key(p, a, t, i)
+    }
     if e >= 0 && a.exprs[e].op == tk.TK_ID -> e = ast.pexpr(a, tk.TK_UPLUS, e, -1)
     if e >= 0 && a.exprs[e].op != tk.TK_RAISE -> a.exprs[e].aff = p.db.tables[t].cols[i].affinity
     cat.column_set_expr(p, a, t, i, e)
@@ -678,11 +696,7 @@ estimate_index_width: fn(db: &conn.Conn, ix: Int) Never! {
     t: db.indexes[ix].table
     loop i in 0..<db.indexes[ix].n_column {
         x: db.indexes[ix].ai_column[i]
-        if x < 0 {
-            w += 1
-        } else {
-            w += db.tables[t].cols[x].sz_est
-        }
+        if x < 0 -> w += 1 else -> w += db.tables[t].cols[x].sz_est
     }
     db.indexes[ix].sz_idx_row = util.log_est(w * 4)
 }
@@ -693,9 +707,13 @@ estimate_index_width: fn(db: &conn.Conn, ix: Int) Never! {
 // table joins the schema. A WITHOUT ROWID table or CREATE TABLE ... AS
 // SELECT fails, as this build does not support them.
 end_table: fn(p: &cg.Parse, a: &ast.AST, cons0: ast.SQLTok, end: ast.SQLTok, tab_opts: Int, select: Int) Never! -[DB]> {
-    if end.z < 0 && select < 0 -> return
+    if end.z < 0 && select < 0 {
+        return
+    }
     t: p.f.new_table
-    if t < 0 -> return
+    if t < 0 {
+        return
+    }
     if select >= 0 {
         ast.error(a, "CREATE TABLE ... AS SELECT is not supported in this build")
         return
@@ -706,7 +724,9 @@ end_table: fn(p: &cg.Parse, a: &ast.AST, cons0: ast.SQLTok, end: ast.SQLTok, tab
             return
         }
         p.db.tables[t].tnum = p.db.init.new_tnum
-        if p.db.tables[t].tnum == 1 -> p.db.tables[t].tab_flags = p.db.tables[t].tab_flags.bit_or(ast.TF_READONLY)
+        if p.db.tables[t].tnum == 1 {
+            p.db.tables[t].tab_flags = p.db.tables[t].tab_flags.bit_or(ast.TF_READONLY)
+        }
     }
     tname: p.db.tables[t].name.copy()
     if tab_opts.bit_and(ast.TF_STRICT) != 0 {
@@ -759,9 +779,7 @@ end_table: fn(p: &cg.Parse, a: &ast.AST, cons0: ast.SQLTok, end: ast.SQLTok, tab
                     null_e: ast.expr_alloc(a, tk.TK_NULL, None, false)
                     cat.column_set_expr(p, a, t, ii, null_e)
                 }
-            } else {
-                n_ng += 1
-            }
+            } else { n_ng += 1 }
         }
         if n_ng == 0 {
             ast.error(a, "must have at least one non-generated column")
@@ -895,11 +913,7 @@ replace_indexes_last: fn(db: &conn.Conn, t: Int) Never! {
         if db.indexes[this].on_error == ast.OE_REPLACE {
             nxt := db.indexes[this].next
             loop nxt >= 0 && db.indexes[nxt].on_error != ast.OE_REPLACE {
-                if from < 0 {
-                    db.tables[t].index = nxt
-                } else {
-                    db.indexes[from].next = nxt
-                }
+                if from < 0 -> db.tables[t].index = nxt else -> db.indexes[from].next = nxt
                 db.indexes[this].next = db.indexes[nxt].next
                 db.indexes[nxt].next = this
                 from = nxt
@@ -916,7 +930,9 @@ replace_indexes_last: fn(db: &conn.Conn, t: Int) Never! {
 // left for the caller to free, or -1 when none is (none made, or linked).
 create_index_object: fn(p: &cg.Parse, a: &ast.AST, s: &CreateIndexState, name1: ast.SQLTok, name2: ast.SQLTok, tbl: Int, on_error: Int, start: ast.SQLTok, sort_order: Int, if_not_exist: Bool, idx_type: Int) -[DB]> Int Never! {
     if cg.n_err(a) > 0 -> return -1
-    if a.ctx.parse_mode == ast.PARSE_MODE_DECLARE_VTAB && idx_type != ast.IDXTYPE_PRIMARYKEY -> return -1
+    if a.ctx.parse_mode == ast.PARSE_MODE_DECLARE_VTAB && idx_type != ast.IDXTYPE_PRIMARYKEY {
+        return -1
+    }
     g := p.up
     if g.read_schema(p, a) != base.OK -> return -1
     if ast.has_explicit_nulls(a, s.list) -> return -1
@@ -960,16 +976,16 @@ create_index_object: fn(p: &cg.Parse, a: &ast.AST, s: &CreateIndexState, name1: 
     z_db: p.db.dbs[i_db].name.copy()
     z_name := [U8]{}
     if name.z >= 0 {
-        z_name = name_from_token(a, name) ?? { return -1 }
+        z_name = name_from_token(a, name) ?? {
+            return -1
+        }
         if check_object_name(p, a, z_name, "index", tname) != base.OK -> return -1
         if !p.db.init.busy && conn.find_table(p.db, z_name, Val(z_db)) >= 0 {
             ast.error(a, "there is already a table named {ast.text(z_name)}")
             return -1
         }
         if conn.find_index(p.db, z_name, Val(z_db)) >= 0 {
-            if !if_not_exist {
-                ast.error(a, "index {ast.text(z_name)} already exists")
-            } else {
+            if !if_not_exist -> ast.error(a, "index {ast.text(z_name)} already exists") else {
                 cg.code_verify_schema(p, a, i_db)
                 force_not_read_only(p)
             }
@@ -985,7 +1001,9 @@ create_index_object: fn(p: &cg.Parse, a: &ast.AST, s: &CreateIndexState, name1: 
         prefix: if cg.in_special_parse(a) -> "sqlite_butoindex" else -> "sqlite_autoindex"
         z_name = "{prefix}_{ast.text(tname)}_{n}".bytes()
     }
-    if cg.auth_check(p, a, conn.AUTH_INSERT, Val(schema_table(i_db).bytes()), None, Val(z_db)) != base.OK -> return -1
+    if cg.auth_check(p, a, conn.AUTH_INSERT, Val(schema_table(i_db).bytes()), None, Val(z_db)) != base.OK {
+        return -1
+    }
     code: if i_db == 1 -> conn.AUTH_CREATE_TEMP_INDEX else -> conn.AUTH_CREATE_INDEX
     if cg.auth_check(p, a, code, Val(z_name), Val(tname), Val(z_db)) != base.OK -> return -1
     if s.list < 0 {
@@ -1036,10 +1054,10 @@ create_index_object: fn(p: &cg.Parse, a: &ast.AST, s: &CreateIndexState, name1: 
             p.db.indexes[ix].b_has_expr = true
         } else {
             j = a.exprs[c_expr].icolumn
-            if j < 0 {
-                j = p.db.tables[tab].ipkey
-            } else {
-                if p.db.tables[tab].cols[j].not_null == ast.OE_NONE -> p.db.indexes[ix].uniq_not_null = false
+            if j < 0 -> j = p.db.tables[tab].ipkey else {
+                if p.db.tables[tab].cols[j].not_null == ast.OE_NONE {
+                    p.db.indexes[ix].uniq_not_null = false
+                }
                 if p.db.tables[tab].cols[j].col_flags.bit_and(conn.COLFLAG_VIRTUAL) != 0 {
                     p.db.indexes[ix].b_has_vcol = true
                     p.db.indexes[ix].b_has_expr = true
@@ -1048,9 +1066,7 @@ create_index_object: fn(p: &cg.Parse, a: &ast.AST, s: &CreateIndexState, name1: 
             p.db.indexes[ix].ai_column[i] = j
         }
         z_coll := "BINARY".bytes()
-        if a.exprs[item_e].op == tk.TK_COLLATE {
-            z_coll = a.exprs[item_e].token ?? z_coll
-        } else if j >= 0 {
+        if a.exprs[item_e].op == tk.TK_COLLATE -> z_coll = a.exprs[item_e].token ?? z_coll else if j >= 0 {
             if cat.column_coll(p.db.tables[tab].cols[j]) == .Val(c) -> z_coll = c
         }
         if !p.db.init.busy && cat.locate_coll_seq(p, a, z_coll) < 0 -> return ix
@@ -1079,7 +1095,9 @@ create_index_object: fn(p: &cg.Parse, a: &ast.AST, s: &CreateIndexState, name1: 
                 k := 0
                 loop k < n_key {
                     if p.db.indexes[o].ai_column[k] != p.db.indexes[ix].ai_column[k] -> break
-                    if util.str_icmp(p.db.indexes[o].coll[k], p.db.indexes[ix].coll[k]) != 0 -> break
+                    if util.str_icmp(p.db.indexes[o].coll[k], p.db.indexes[ix].coll[k]) != 0 {
+                        break
+                    }
                     k += 1
                 }
                 if k == n_key {
@@ -1087,7 +1105,9 @@ create_index_object: fn(p: &cg.Parse, a: &ast.AST, s: &CreateIndexState, name1: 
                         if !(p.db.indexes[o].on_error == ast.OE_DEFAULT || on_error == ast.OE_DEFAULT) {
                             ast.error(a, "conflicting ON CONFLICT clauses specified")
                         }
-                        if p.db.indexes[o].on_error == ast.OE_DEFAULT -> p.db.indexes[o].on_error = on_error
+                        if p.db.indexes[o].on_error == ast.OE_DEFAULT {
+                            p.db.indexes[o].on_error = on_error
+                        }
                     }
                     if idx_type == ast.IDXTYPE_PRIMARYKEY -> p.db.indexes[o].idx_type = idx_type
                     return ix
@@ -1150,13 +1170,17 @@ create_index_object: fn(p: &cg.Parse, a: &ast.AST, s: &CreateIndexState, name1: 
 refill_index: fn(p: &cg.Parse, a: &ast.AST, ix: Int, mem_root_page: Int) Never! -[DB]> {
     t: p.db.indexes[ix].table
     i_db: conn.schema_to_index(p.db, p.db.indexes[ix].schema)
-    if cg.auth_check(p, a, conn.AUTH_REINDEX, Val(p.db.indexes[ix].name.copy()), None, Val(p.db.dbs[i_db].name.copy())) != base.OK -> return
+    if cg.auth_check(p, a, conn.AUTH_REINDEX, Val(p.db.indexes[ix].name.copy()), None, Val(p.db.dbs[i_db].name.copy())) != base.OK {
+        return
+    }
     i_tab: p.f.n_tab
     i_idx: i_tab + 1
     i_sorter: i_tab + 2
     p.f.n_tab += 3
     cg.get_vdbe(p)
-    key: cat.key_info_of_index(p, a, ix) ?? { return }
+    key: cat.key_info_of_index(p, a, ix) ?? {
+        return
+    }
     _: cg.op4(p, opc.OP_SORTER_OPEN, i_sorter, 0, p.db.indexes[ix].n_key_col, conn.P4.KeyInfo(key.copy()))
     ex.open_table(p, a, i_tab, i_db, t, opc.OP_OPEN_READ)
     addr1 := cg.op2(p, opc.OP_REWIND, i_tab, 0)
@@ -1221,7 +1245,9 @@ destroy_table: fn(p: &cg.Parse, a: &ast.AST, t: Int) Never! -[DB]> {
             if (i_destroyed == 0 || i_idx < i_destroyed) && i_idx > largest -> largest = i_idx
             ix = p.db.indexes[ix].next
         }
-        if largest == 0 -> return
+        if largest == 0 {
+            return
+        }
         i_db: conn.schema_to_index(p.db, p.db.tables[t].schema)
         destroy_root_page(p, a, largest, i_db)
         i_destroyed = largest
@@ -1280,7 +1306,9 @@ drop_table: fn(p: &cg.Parse, a: &ast.AST, name: Int, is_view: Bool, no_err: Bool
 // The body of sqlite3DropTable up to exit_drop_table.
 drop_table_code: fn(p: &cg.Parse, a: &ast.AST, name: Int, is_view: Bool, no_err: Bool) Never! -[DB]> {
     g := p.up
-    if g.read_schema(p, a) != base.OK -> return
+    if g.read_schema(p, a) != base.OK {
+        return
+    }
     si: ast.src_item(a, name, 0)
     flags: if is_view -> cat.LOCATE_VIEW else -> 0
     t := -1
@@ -1288,9 +1316,7 @@ drop_table_code: fn(p: &cg.Parse, a: &ast.AST, name: Int, is_view: Bool, no_err:
         saved: suppress_err(p, a)
         t = cat.locate_table_item(p, a, flags, si)
         unsuppress_err(p, a, saved)
-    } else {
-        t = cat.locate_table_item(p, a, flags, si)
-    }
+    } else { t = cat.locate_table_item(p, a, flags, si) }
     if t < 0 {
         if no_err {
             item_db: a.items[si].database.copy()
@@ -1302,15 +1328,19 @@ drop_table_code: fn(p: &cg.Parse, a: &ast.AST, name: Int, is_view: Bool, no_err:
     i_db: conn.schema_to_index(p.db, p.db.tables[t].schema)
     z_db: p.db.dbs[i_db].name.copy()
     tname: p.db.tables[t].name.copy()
-    if cg.auth_check(p, a, conn.AUTH_DELETE, Val(schema_table(i_db).bytes()), None, Val(z_db)) != base.OK -> return
+    if cg.auth_check(p, a, conn.AUTH_DELETE, Val(schema_table(i_db).bytes()), None, Val(z_db)) != base.OK {
+        return
+    }
     code := conn.AUTH_DROP_TABLE
-    if is_view {
-        code = if i_db == 1 -> conn.AUTH_DROP_TEMP_VIEW else -> conn.AUTH_DROP_VIEW
-    } else if i_db == 1 {
+    if is_view -> code = if i_db == 1 -> conn.AUTH_DROP_TEMP_VIEW else -> conn.AUTH_DROP_VIEW else if i_db == 1 {
         code = conn.AUTH_DROP_TEMP_TABLE
     }
-    if cg.auth_check(p, a, code, Val(tname), None, Val(z_db)) != base.OK -> return
-    if cg.auth_check(p, a, conn.AUTH_DELETE, Val(tname), None, Val(z_db)) != base.OK -> return
+    if cg.auth_check(p, a, code, Val(tname), None, Val(z_db)) != base.OK {
+        return
+    }
+    if cg.auth_check(p, a, conn.AUTH_DELETE, Val(tname), None, Val(z_db)) != base.OK {
+        return
+    }
     if table_may_not_be_dropped(p.db, t) {
         ast.error(a, "table {ast.text(tname)} may not be dropped")
         return
@@ -1335,15 +1365,15 @@ drop_table_code: fn(p: &cg.Parse, a: &ast.AST, name: Int, is_view: Bool, no_err:
 // sqlite3BeginTransaction: BEGIN of kind TK_DEFERRED, TK_IMMEDIATE or
 // TK_EXCLUSIVE.
 begin_transaction: fn(p: &cg.Parse, a: &ast.AST, kind: Int) Never! -[DB]> {
-    if cg.auth_check(p, a, conn.AUTH_TRANSACTION, Val("BEGIN".bytes()), None, None) != base.OK -> return
+    if cg.auth_check(p, a, conn.AUTH_TRANSACTION, Val("BEGIN".bytes()), None, None) != base.OK {
+        return
+    }
     cg.get_vdbe(p)
     if kind != tk.TK_DEFERRED {
         loop i in 0..<p.db.dbs.len() {
             bt: p.db.dbs[i].bt
             e_txn_type := 1
-            if bt >= 0 && btree.btree_is_readonly(p.db.btrees[bt]) {
-                e_txn_type = 0
-            } else if kind == tk.TK_EXCLUSIVE {
+            if bt >= 0 && btree.btree_is_readonly(p.db.btrees[bt]) -> e_txn_type = 0 else if kind == tk.TK_EXCLUSIVE {
                 e_txn_type = 2
             }
             _: cg.op2(p, opc.OP_TRANSACTION, i, e_txn_type)
@@ -1358,7 +1388,9 @@ begin_transaction: fn(p: &cg.Parse, a: &ast.AST, kind: Int) Never! -[DB]> {
 end_transaction: fn(p: &cg.Parse, a: &ast.AST, op: Int) Never! -[DB]> {
     is_rollback: op == tk.TK_ROLLBACK
     what: if is_rollback -> "ROLLBACK" else -> "COMMIT"
-    if cg.auth_check(p, a, conn.AUTH_TRANSACTION, Val(what.bytes()), None, None) != base.OK -> return
+    if cg.auth_check(p, a, conn.AUTH_TRANSACTION, Val(what.bytes()), None, None) != base.OK {
+        return
+    }
     cg.get_vdbe(p)
     _: cg.op2(p, opc.OP_AUTO_COMMIT, 1, if is_rollback -> 1 else -> 0)
 }

@@ -9,11 +9,9 @@ acquire: fn(name: String) -> Lease? { Val(Lease{name: name.copy()}) }
 release: fn(lease: &&Lease) { print("released {lease.name}") }
 
 run: fn() {
-    if acquire("if") == .Val(lease) {
-        release(lease)
-    }
+    if acquire("if") == .Val(lease) -> release(lease)
     if acquire("arm") == {
-        .Val(lease) -> release(lease)
+        .Val(lease) -> { release(lease) }
         .None -> {}
     }
 }

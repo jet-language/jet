@@ -12,19 +12,19 @@ env_shell_clean_path: fn() -[Env]> String Never! {
 }
 
 // Rust Platform::path_separator for the running host.
-env_shell_path_separator: fn() -[Env]> String Never! {
-    pkg_path_separator_for_os(sys.name())
-}
+env_shell_path_separator: fn() -[Env]> String Never! { pkg_path_separator_for_os(sys.name()) }
 
 // Append `dir` once, preserving first-seen order.
-env_shell_push_unique: fn(seen: &[String: Bool], parts: &[String], dir: String) Never! {
-    if seen.has_key(dir) -> return
+env_shell_push_unique: fn(seen: &[String:Bool], parts: &[String], dir: String) Never! {
+    if seen.has_key(dir) {
+        return
+    }
     seen[dir] = true
     parts.push(dir.copy())
 }
 
 // The leased variable names in sorted order.
-env_shell_lease_var_names: fn(vars: [String: LeaseText]) -> [String] Never! {
+env_shell_lease_var_names: fn(vars: [String:LeaseText]) -> [String] Never! {
     names := vars.keys().to_list()
     names.sort()
     names
@@ -45,7 +45,7 @@ ShellRunOptions: struct {
 ShellEnv: struct {
     bin_dirs: [String]
     // Provider-owned runtime search paths projected into child processes.
-    vars: [String: String]
+    vars: [String:String]
     // Variables that must not leak from the parent shell into this env.
     unset_vars: [String]
     refs: [String]
@@ -56,7 +56,7 @@ ShellEnv: struct {
     cache_leases: [CacheLease]
     // Variables naming paths inside leased outputs. Only `apply_to_base`
     // renders them, for a child its leases were passed to.
-    lease_vars: [String: LeaseText]{[String: LeaseText]{}}
+    lease_vars: [String:LeaseText]{[String:LeaseText]{}}
 
     // Leased bin dirs, then our bin dirs, then `base_path`, deduped in
     // first-seen order.
@@ -79,7 +79,7 @@ ShellEnv: struct {
     // itself, without any leased directory.
     host_path: fn(self, base_path: String) -[Env]> String Never! {
         separator: env_shell_path_separator()
-        seen := [String: Bool]{}
+        seen := [String:Bool]{}
         parts := [String]{}
         loop dir in self.bin_dirs -> env_shell_push_unique(seen, parts, dir)
         loop dir in base_path.split(separator) {
@@ -102,7 +102,7 @@ ShellEnv: struct {
     // replaced by sealed canonical Hangar bin directories; a lease without
     // one makes the whole PATH unavailable.
     composed_path_for_parent: fn(self, base_path: String) -[FS, Env, Rand]> String? Never! {
-        seen := [String: Bool]{}
+        seen := [String:Bool]{}
         parts := [String]{}
         loop lease in self.cache_leases {
             if lease.child_bin_dir() == None -> next
@@ -121,15 +121,17 @@ ShellEnv: struct {
     // The declared and leased variables a parent shell exports, each leased
     // directory named by its sealed canonical Hangar object; None when a
     // leased variable has no durable root.
-    parent_vars: fn(self) -[FS, Env, Rand]> [String: String]? Never! {
+    parent_vars: fn(self) -[FS, Env, Rand]> [String:String]? Never! {
         out := self.vars
         if self.lease_vars.len() == 0 -> return Val(out)
-        roots := [Int: String]{}
+        roots := [Int:String]{}
         loop lease in self.cache_leases {
             durable: lease.durable_roots() ?? return None
             loop fd in durable.keys().to_list() -> roots[fd] = durable[fd]
         }
-        loop name in env_shell_lease_var_names(self.lease_vars) -> out[name] = self.lease_vars[name].render_durable(roots) ?? return None
+        loop name in env_shell_lease_var_names(self.lease_vars) {
+            out[name] = self.lease_vars[name].render_durable(roots) ?? return None
+        }
         Val(out)
     }
 
@@ -261,13 +263,11 @@ ShellEnv: struct {
                 }
                 ShellLaunch.plain(process.cmd([String]{path}).args_extend(rest))
             }
-            .None -> {
-                if env_shell_nix_projection_command(self, program, rest) == {
-                    .Ok(projected) -> projected ?? ShellLaunch.plain(process.cmd([String]{program}).args_extend(rest))
-                    .Err(error) -> {
-                        env_shell_report_nix_projection_error(Theme.resolve_choice(ColorChoice.Auto), program, error)
-                        return 126
-                    }
+            .None -> if env_shell_nix_projection_command(self, program, rest) == {
+                .Ok(projected) -> projected ?? ShellLaunch.plain(process.cmd([String]{program}).args_extend(rest))
+                .Err(error) -> {
+                    env_shell_report_nix_projection_error(Theme.resolve_choice(ColorChoice.Auto), program, error)
+                    return 126
                 }
             }
         }

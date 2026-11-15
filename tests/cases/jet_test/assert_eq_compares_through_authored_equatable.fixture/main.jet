@@ -4,9 +4,7 @@ Version: struct {
     build: String
 
     impl Equatable {
-        equal: fn(self, rhs: Version) -> Bool {
-            self.number == rhs.number
-        }
+        equal: fn(self, rhs: Version) -> Bool { self.number == rhs.number }
     }
 }
 
@@ -17,9 +15,7 @@ Box: struct {
     label: String
 
     impl Equatable {
-        equal: fn(self, rhs: Box) -> Bool {
-            self.size == rhs.size
-        }
+        equal: fn(self, rhs: Box) -> Bool { self.size == rhs.size }
     }
 
     impl Comparable {
@@ -49,18 +45,12 @@ Ranked: struct {
     }
 }
 
-version: fn(number: Int, build: String) -> Version {
-    Version{number: number, build: build}
-}
+version: fn(number: Int, build: String) -> Version { Version{number: number, build: build} }
 
 // Calls, not literals: `x == Box{…}` is a struct pattern test.
-sized: fn(size: Int, label: String) -> Box {
-    Box{size: size, label: label}
-}
+sized: fn(size: Int, label: String) -> Box { Box{size: size, label: label} }
 
-ranked: fn(rank: Int, note: String) -> Ranked {
-    Ranked{rank: rank, note: note}
-}
+ranked: fn(rank: Int, note: String) -> Ranked { Ranked{rank: rank, note: note} }
 
 #Test("assert_eq agrees with an authored equal") {
     assert(version(1, "a") == version(1, "b"))

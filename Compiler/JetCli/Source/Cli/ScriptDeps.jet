@@ -6,17 +6,28 @@ use {
     jet_driver.[JetDriverScriptDependency]
     jet_lexer.[lex_may_pin_inline_version]
     jet_pkg_model.[
-        InlineDep, InlineDepUnresolved, PKG_INLINE_DEPS_FIXTURES_ENV, PackageFacts,
-        pkg_inline_deps_collect, pkg_inline_deps_e1253, pkg_inline_deps_numeric_version,
-        pkg_inline_deps_resolve, pkg_inline_deps_valid_package_name,
+        InlineDep,
+        InlineDepUnresolved,
+        PKG_INLINE_DEPS_FIXTURES_ENV,
+        PackageFacts,
+        pkg_inline_deps_collect,
+        pkg_inline_deps_e1253,
+        pkg_inline_deps_numeric_version,
+        pkg_inline_deps_resolve,
+        pkg_inline_deps_valid_package_name,
     ]
     jet_driver.[
-        JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot,
+        JET_DRIVER_EXIT_OK,
+        JET_DRIVER_EXIT_USER_ERROR,
+        JetDriverAuthorizedSourceFile,
+        JetDriverAuthorizedSourceRoot,
         JetDriverVerbOutput,
     ]
     jet_foundation.[AppAuthorizedDirectory, Diagnostic, diagnostic_render_all]
     jetpack_foundation.[
-        FoundationDirectoryAuthority, TreeHashError, foundation_open_directory_authority,
+        FoundationDirectoryAuthority,
+        TreeHashError,
+        foundation_open_directory_authority,
     ]
     cli_files: core.files
     cli_sys: core.sys
@@ -39,15 +50,19 @@ jet_cli_script_dependency_fetch: fn(file: String, source: String, color: Bool, j
     script_dir: jet_cli_parent(entry_path) ?? return None
     if cli_files.exists(cli_files.join(script_dir, "package.jet")) -> return None
     inline: if PackageFacts.parse_inline(source, entry_path) == {
-        .Ok(value) -> { value }
-        .Err(_) -> { return None }
+        .Ok(value) -> value
+        .Err(_) -> {
+            return None
+        }
     }
     if inline == .Val(_) -> return None
     program: jet_cli_parsed_program(source) ?? return None
     missing := false
     batteries: jet_cli_batteries_dir(entry_path)
     loop dep in pkg_inline_deps_collect(program) {
-        if !pkg_inline_deps_valid_package_name(dep.name) || pkg_inline_deps_numeric_version(dep.selector) == None -> next
+        if !pkg_inline_deps_valid_package_name(dep.name) || pkg_inline_deps_numeric_version(dep.selector) == None {
+            next
+        }
         if pkg_inline_deps_resolve(dep, script_dir, batteries) == .Err(reason) {
             if reason == {
                 .UnknownPackage -> { missing = true }
@@ -94,13 +109,19 @@ jet_cli_script_dependency_roots: fn(roots: &[JetDriverAuthorizedSourceRoot], ent
             // The normal package loader owns malformed-carrier diagnostics;
             // do not attempt manifestless resolution before it reports them.
             inline: if PackageFacts.parse_inline(file.source, file.path) == {
-                .Ok(value) -> { value }
-                .Err(_) -> { return None }
+                .Ok(value) -> value
+                .Err(_) -> {
+                    return None
+                }
             }
             if inline == .Val(_) -> return None
         }
     }
-    entry: loop file in entry_root.files { if file.path == entry_path -> break file } ?? return None
+    entry: loop file in entry_root.files {
+        if file.path == entry_path {
+            break file
+        }
+    } ?? return None
     // A source with no `#` before a number pins nothing: no parse to find out.
     if !lex_may_pin_inline_version(entry.source.bytes()) -> return None
     program: jet_cli_parsed_program(entry.source) ?? return None
@@ -119,13 +140,17 @@ jet_cli_script_dependency_roots: fn(roots: &[JetDriverAuthorizedSourceRoot], ent
         authority := if jet_cli_script_dependency_authority(local_root, dep.name) == {
             .Val(held) -> Val(held)
             .None -> None
-            .Err(error) -> { return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, error, color)) }
+            .Err(error) -> {
+                return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, error, color))
+            }
         }
         if authority == None && cli_sys.get(PKG_INLINE_DEPS_FIXTURES_ENV) == .Val(fixtures) {
             authority = if jet_cli_script_dependency_authority(fixtures, dep.name) == {
                 .Val(held) -> Val(held)
                 .None -> None
-                .Err(error) -> { return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, error, color)) }
+                .Err(error) -> {
+                    return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, error, color))
+                }
             }
         }
         resolved: pkg_inline_deps_resolve(dep, script_dir, batteries) ?? return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, err, color))
@@ -136,10 +161,14 @@ jet_cli_script_dependency_roots: fn(roots: &[JetDriverAuthorizedSourceRoot], ent
         selected_id: selected.identity() ?? return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, .InvalidTree(TreeHashError.IO{path: resolved.dir, detail: "{err}"}), color))
         canonical: selected.path()
         stat: cli_files.stat(canonical) ?? return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, .InvalidTree(TreeHashError.IO{path: canonical, detail: "{err}"}), color))
-        if stat.id != selected_id -> return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, .InvalidTree(TreeHashError.IO{path: canonical, detail: "source root changed while held"}), color))
+        if stat.id != selected_id {
+            return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, .InvalidTree(TreeHashError.IO{path: canonical, detail: "source root changed while held"}), color))
+        }
         root_identity: jet_cli_identity_key("directory", stat)
         found := false
-        loop root in roots { if root.identity == root_identity -> found = true }
+        loop root in roots {
+            if root.identity == root_identity -> found = true
+        }
         if !found {
             files := [JetDriverAuthorizedSourceFile]{}
             directories := [AppAuthorizedDirectory]{}
@@ -152,7 +181,9 @@ jet_cli_script_dependency_roots: fn(roots: &[JetDriverAuthorizedSourceRoot], ent
         // The same full tree identity must survive source snapshot capture.
         // Held hashing rejects hardlinks and links, including ancestor swaps.
         content_hash: selected.tree_hash(true) ?? return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, .InvalidTree(TreeHashError.IO{path: canonical, detail: "{err}"}), color))
-        if content_hash != resolved.content_hash -> return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, .InvalidTree(TreeHashError.IO{path: canonical, detail: "source tree changed while admitted"}), color))
+        if content_hash != resolved.content_hash {
+            return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, .InvalidTree(TreeHashError.IO{path: canonical, detail: "source tree changed while admitted"}), color))
+        }
         admitted.push(JetDriverScriptDependency{name: dep.name, selector: dep.selector, resolved_version: resolved.resolved_version, content_hash: content_hash, root_identity: root_identity, span: dep.span})
     }
     None

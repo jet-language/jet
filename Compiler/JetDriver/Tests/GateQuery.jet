@@ -1,13 +1,27 @@
 // Assemble with the production Compiler source unit, replacing CLI Entry.
 use {
     jet_foundation.[
-        EffectModuleSource, GateEntry, GateKind, GateSet, PolicyDeclaration, PolicyKey, PolicyScope, PolicyValue, Span,
-        compiler_threads_single, name_ledger_declaration,
+        EffectModuleSource,
+        GateEntry,
+        GateKind,
+        GateSet,
+        PolicyDeclaration,
+        PolicyKey,
+        PolicyScope,
+        PolicyValue,
+        Span,
+        compiler_threads_single,
+        name_ledger_declaration,
     ]
     jet_driver.[
-        JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
-        JetDriverCompileRequest, JetDriverGatePolicy, JetDriverHostFacts,
-        jet_driver_gate_query, jet_driver_source_query,
+        JetDriverAuthorizedSourceFile,
+        JetDriverAuthorizedSourceRoot,
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileRequest,
+        JetDriverGatePolicy,
+        JetDriverHostFacts,
+        jet_driver_gate_query,
+        jet_driver_source_query,
     ]
     jet_eval.[jet_eval_default_config]
 }
@@ -15,18 +29,29 @@ use {
 gate_query_require: fn(ok: Bool, detail: String) Never! {
     if !ok -> panic("GateQuery: {detail}")
 }
+
 gate_query_external: fn(source: String) -> GateEntry Never! {
     GateEntry{kind: GateKind.TrustGrant, domain: "security", scope: "trust", source: source, span: None, subject: "fixture", reason: None, status: Val("recorded"), detail: "host grant", provenance: [source], operations: []}
 }
+
 gate_query_request: fn(source: String, policy: String?) -> JetDriverCompileRequest {
     files := [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/gates/run.jet", relative_path: "run.jet", identity: "gates-run", source: source}}
-    if policy == .Val(value) -> files.push(JetDriverAuthorizedSourceFile{path: "/gates/package.jet", relative_path: "package.jet", identity: "gates-package", source: "name: \"gates\"\npolicy: {{ {value} }}\n"})
+    if policy == .Val(value) {
+        files.push(JetDriverAuthorizedSourceFile{path: "/gates/package.jet", relative_path: "package.jet", identity: "gates-package", source: "name: \"gates\"\npolicy: {{ {value} }}\n"})
+    }
     files.push(JetDriverAuthorizedSourceFile{path: "/gates/helper.jet", relative_path: "helper.jet", identity: "gates-helper", source: "helper: fn() {{ undefined_helper() }}"})
     JetDriverCompileRequest{
         authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: "/gates", identity: "gates-root", allow_hardlinks: false, files: files, foreign_cache_files: []}}, entry_root_identity: "gates-root", entry_path: "/gates/run.jet"},
-        canonical_effects: EffectModuleSource{source: "", line_starts: [], decls: []}, core_sources: [], host_facts: JetDriverHostFacts{target_triple: None, active_os: None, compiler_identity: None}, eval_config: jet_eval_default_config(), record_store: None, trace_sink: None, compiler_threads: compiler_threads_single(),
+        canonical_effects: EffectModuleSource{source: "", line_starts: [], decls: []},
+        core_sources: [],
+        host_facts: JetDriverHostFacts{target_triple: None, active_os: None, compiler_identity: None},
+        eval_config: jet_eval_default_config(),
+        record_store: None,
+        trace_sink: None,
+        compiler_threads: compiler_threads_single(),
     }
 }
+
 #Test("gate_query") {
     request := gate_query_request("use \"helper\"\nrun: fn() {{ #Unsafe(\"audited fixture\") {{ }} undefined_call() }}", None)
     request.gate_set = GateSet{build_flag: true}

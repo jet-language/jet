@@ -11,7 +11,6 @@
 //
 // The running program's ops are Vdbe.ops, read where they lie; the loop
 // copies the integer operands of the op at Run.pc into the Run.
-
 use {
     base: __core_db_base
     util: __core_db_util
@@ -51,13 +50,21 @@ run_new: fn(enc: Int) -> Run Never! {
 // (jump_to_p2); either of those through check_for_interrupt; or one of
 // the tails, with Run.rc the result code of GO_ERROR and GO_RETURN.
 GO_NEXT: 0
+
 GO_JUMP: 1
+
 GO_NEXT_CHECK: 2
+
 GO_JUMP_CHECK: 3
+
 GO_ERROR: 4
+
 GO_NO_MEM: 5
+
 GO_TOO_BIG: 6
+
 GO_INTERRUPT: 7
+
 GO_RETURN: 8
 
 // Registers. Register p of the running program is Vdbe.mem index
@@ -171,9 +178,7 @@ filter_hash: fn(v: conn.Vdbe, p3: Int, n: Int) -> Int Never! {
         f: v.mem[i].flags
         if f.bit_and(base.MEM_INT.bit_or(base.MEM_INT_REAL)) != 0 {
             h = util.wrap_i64(h + v.mem[i].i)
-        } else if f.bit_and(base.MEM_REAL) != 0 {
-            h = util.wrap_i64(h + mem.int_value(v.mem[i]))
-        } else if f.bit_and(base.MEM_STR.bit_or(base.MEM_BLOB)) != 0 {
+        } else if f.bit_and(base.MEM_REAL) != 0 { h = util.wrap_i64(h + mem.int_value(v.mem[i])) } else if f.bit_and(base.MEM_STR.bit_or(base.MEM_BLOB)) != 0 {
             h = util.wrap_i64(h + 4093 + f.bit_and(base.MEM_STR.bit_or(base.MEM_BLOB)))
         }
     }
@@ -212,38 +217,98 @@ TestHost: struct {
 
     impl Host {
         vtab_has: fn(&self, _db: conn.Conn, _vt: Int, _method: Int) -[]> Bool Never! { false }
+
         vtab_version: fn(&self, _db: conn.Conn, _vt: Int) -[]> Int Never! { 0 }
-        vtab_call: fn(&self, _db: &conn.Conn, _vt: Int, _method: Int, _arg: Int) -[DB]> Int Never! { base.OK }
+
+        vtab_call: fn(&self, _db: &conn.Conn, _vt: Int, _method: Int, _arg: Int) -[DB]> Int Never! {
+            base.OK
+        }
+
         vtab_close: fn(&self, _db: &conn.Conn, _vt: Int, _cursor: Int) Never! -[DB]> {}
+
         vtab_take_errmsg: fn(&self, _db: conn.Conn, _vt: Int) -[]> [U8]? { None }
-        vtab_open: fn(&self, _db: &conn.Conn, _vt: Int, _cursor: &Int) -[DB]> Int Never! { base.ERROR }
-        vtab_filter: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe, _cursor: Int, _idx_num: Int, _idx_str: [U8]?, _arg: Int, _argc: Int) -[DB]> Int Never! { base.ERROR }
+
+        vtab_open: fn(&self, _db: &conn.Conn, _vt: Int, _cursor: &Int) -[DB]> Int Never! {
+            base.ERROR
+        }
+
+        vtab_filter: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe, _cursor: Int, _idx_num: Int, _idx_str: [U8]?, _arg: Int, _argc: Int) -[DB]> Int Never! {
+            base.ERROR
+        }
+
         vtab_eof: fn(&self, _db: &conn.Conn, _cursor: Int) -[DB]> Bool Never! { true }
+
         vtab_next: fn(&self, _db: &conn.Conn, _cursor: Int) -[DB]> Int Never! { base.ERROR }
-        vtab_column: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe, _cursor: Int, _col: Int) -[DB]> Int Never! { base.ERROR }
-        vtab_rowid: fn(&self, _db: &conn.Conn, _cursor: Int, _rowid: &Int) -[DB]> Int Never! { base.ERROR }
-        vtab_update: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe, _vt: Int, _arg: Int, _argc: Int, _rowid: &Int) -[DB]> Int Never! { base.ERROR }
-        vtab_rename: fn(&self, _db: &conn.Conn, _vt: Int, _name: [U8]) -[DB]> Int Never! { base.ERROR }
-        vtab_integrity: fn(&self, _db: &conn.Conn, _vt: Int, _schema: [U8], _table: [U8], _flags: Int, _msg: &[U8]?) -[DB]> Int Never! { base.OK }
-        vtab_call_create: fn(&self, _db: &conn.Conn, _i_db: Int, _name: [U8], _msg: &[U8]?) -[DB]> Int Never! { base.ERROR }
-        vtab_call_destroy: fn(&self, _db: &conn.Conn, _i_db: Int, _name: [U8]) -[DB]> Int Never! { base.ERROR }
+
+        vtab_column: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe, _cursor: Int, _col: Int) -[DB]> Int Never! {
+            base.ERROR
+        }
+
+        vtab_rowid: fn(&self, _db: &conn.Conn, _cursor: Int, _rowid: &Int) -[DB]> Int Never! {
+            base.ERROR
+        }
+
+        vtab_update: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe, _vt: Int, _arg: Int, _argc: Int, _rowid: &Int) -[DB]> Int Never! {
+            base.ERROR
+        }
+
+        vtab_rename: fn(&self, _db: &conn.Conn, _vt: Int, _name: [U8]) -[DB]> Int Never! {
+            base.ERROR
+        }
+
+        vtab_integrity: fn(&self, _db: &conn.Conn, _vt: Int, _schema: [U8], _table: [U8], _flags: Int, _msg: &[U8]?) -[DB]> Int Never! {
+            base.OK
+        }
+
+        vtab_call_create: fn(&self, _db: &conn.Conn, _i_db: Int, _name: [U8], _msg: &[U8]?) -[DB]> Int Never! {
+            base.ERROR
+        }
+
+        vtab_call_destroy: fn(&self, _db: &conn.Conn, _i_db: Int, _name: [U8]) -[DB]> Int Never! {
+            base.ERROR
+        }
+
         func_call: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe, _method: Int) Never! -[DB]> {}
+
         commit_hook: fn(&self, _db: &conn.Conn) -[DB]> Int Never! { 0 }
+
         rollback_hook: fn(&self, _db: &conn.Conn) Never! -[DB]> {}
+
         has_update_hook: fn(&self, _db: conn.Conn) -[]> Bool Never! { false }
+
         update_hook: fn(&self, _db: &conn.Conn, _op: Int, _db_name: [U8], _table: [U8], _rowid: Int) Never! -[DB]> {}
+
         progress: fn(&self, _db: &conn.Conn) -[DB]> Bool Never! {
             self.progress_calls += 1
             self.progress_calls == self.interrupt_at
         }
+
         trace: fn(&self, _db: &conn.Conn, _v: conn.Vdbe, _event: Int, _text: [U8]) Never! -[DB]> {}
+
         profile: fn(&self, _db: &conn.Conn, _v: conn.Vdbe, _elapsed_ns: Int) Never! -[DB]> {}
-        wal_hook: fn(&self, _db: &conn.Conn, _db_name: [U8], _n_frame: Int) -[DB]> Int Never! { base.OK }
-        sql_exec: fn(&self, _db: &conn.Conn, _sql: [U8], _quiet: Bool, _msg: &[U8]?) -[DB]> Int Never! { base.ERROR }
-        init_one: fn(&self, _db: &conn.Conn, _i_db: Int, _flags: Int, _msg: &[U8]?) -[DB]> Int Never! { base.OK }
-        parse_schema: fn(&self, _db: &conn.Conn, _i_db: Int, _where: [U8], _msg: &[U8]?) -[DB]> Int Never! { base.OK }
+
+        wal_hook: fn(&self, _db: &conn.Conn, _db_name: [U8], _n_frame: Int) -[DB]> Int Never! {
+            base.OK
+        }
+
+        sql_exec: fn(&self, _db: &conn.Conn, _sql: [U8], _quiet: Bool, _msg: &[U8]?) -[DB]> Int Never! {
+            base.ERROR
+        }
+
+        init_one: fn(&self, _db: &conn.Conn, _i_db: Int, _flags: Int, _msg: &[U8]?) -[DB]> Int Never! {
+            base.OK
+        }
+
+        parse_schema: fn(&self, _db: &conn.Conn, _i_db: Int, _where: [U8], _msg: &[U8]?) -[DB]> Int Never! {
+            base.OK
+        }
+
         load_analysis: fn(&self, _db: &conn.Conn, _i_db: Int) -[DB]> Int Never! { base.OK }
-        run_vacuum: fn(&self, _db: &conn.Conn, _i_db: Int, _into: base.Mem?, _msg: &[U8]?) -[DB]> Int Never! { base.ERROR }
+
+        run_vacuum: fn(&self, _db: &conn.Conn, _i_db: Int, _into: base.Mem?, _msg: &[U8]?) -[DB]> Int Never! {
+            base.ERROR
+        }
+
         reprepare: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe) -[DB]> Int Never! { base.ERROR }
     }
 }

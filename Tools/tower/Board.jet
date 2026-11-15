@@ -33,14 +33,23 @@ use {
 }
 
 TOOL: "/Tools/tower/Board.jet"
+
 MAX_JSON_BYTES: 268435456
+
 MANIFEST_BYTES: 1048576
+
 HISTORY_LAYOUT: "tower.history-shards/v1"
+
 HISTORY_KINDS: [String]{"decisions", "cards", "events"}
+
 BOOLEAN_FLAGS: [String]{"json", "archived", "open", "drafts", "docs"}
+
 VALUE_FLAGS: [String]{"data", "card", "epoch", "docs-root"}
+
 DOCS_DIR: "Docs"
+
 SPEC_EXTENSIONS: [String]{".md", ".json", ".txt"}
+
 CARD_WORDS: [String]{"card", "cards", "issue", "issues"}
 
 #Error
@@ -51,7 +60,7 @@ Failure: struct {
 
 Request: struct {
     words: [String]
-    flags: [String: String]
+    flags: [String:String]
 }
 
 // Where the board lives: its data directory and its live store file.
@@ -213,7 +222,7 @@ repo_root: fn() -[Env, FS]> String Never! {
 
 parse_request: fn(args: [String]) -> Request Failure! {
     words := [String]{}
-    flags := [String: String]{}
+    flags := [String:String]{}
     at := 0
     loop at < args.len() {
         arg: args[at]
@@ -283,7 +292,9 @@ linked_worktree: fn(path: String) -[FS]> (root: String, main: String)? {
                 if !line.starts_with("gitdir:") -> next
                 link: resolve(dir, line.removeprefix("gitdir:").trim())
                 parts: link.split("/").to_list()
-                if parts.len() < 4 || parts[parts.len() - 3] != ".git" || parts[parts.len() - 2] != "worktrees" -> return None
+                if parts.len() < 4 || parts[parts.len() - 3] != ".git" || parts[parts.len() - 2] != "worktrees" {
+                    return None
+                }
                 main := ""
                 loop at in 0..<parts.len() - 3 {
                     if parts[at] != "" -> main = "{main}/{parts[at]}"
@@ -330,14 +341,18 @@ locate: fn(request: Request, tower_data: String, cwd: String, repo: String) -[FS
     dir := resolve(cwd, ".")
     loop {
         if files.exists("{dir}/.tower/tower.json") {
-            if canonical_dir("{dir}/.tower") == .Val(found) -> return Ok(place_at(found.dir, cwd, tower_data, found.note))
+            if canonical_dir("{dir}/.tower") == .Val(found) {
+                return Ok(place_at(found.dir, cwd, tower_data, found.note))
+            }
         }
         if dir == "/" -> break
         dir = parent_of(dir)
     }
     if inside(repo, resolve(cwd, ".")) {
         if canonical_dir("{repo}/Tools/tower/.tower") == .Val(found) {
-            if files.exists("{found.dir}/tower.json") -> return Ok(place_at(found.dir, cwd, tower_data, found.note))
+            if files.exists("{found.dir}/tower.json") {
+                return Ok(place_at(found.dir, cwd, tower_data, found.note))
+            }
         }
     }
     Err(fail("E_NO_DATA", "no Tower data found — run `tower init` in your project root (or set TOWER_DATA)"))
@@ -372,9 +387,7 @@ with: fn(tree: Dyn, name: String, value: Dyn) -> Dyn Never! {
             if entry.key == name {
                 found = true
                 kept.push((key: entry.key.copy(), value: value.copy()))
-            } else {
-                kept.push((key: entry.key.copy(), value: entry.value.copy()))
-            }
+            } else { kept.push((key: entry.key.copy(), value: entry.value.copy())) }
         }
     }
     if !found -> kept.push((key: name.copy(), value: value.copy()))
@@ -437,14 +450,10 @@ truthy: fn(tree: Dyn) -> Bool Never! {
     }
 }
 
-is_null: fn(tree: Dyn) -> Bool Never! {
-    tree == .Null
-}
+is_null: fn(tree: Dyn) -> Bool Never! { tree == .Null }
 
 // `Number(ref.replace(/^#/, ''))` when it is a whole number.
-ref_number: fn(ref: String) -> Int? Never! {
-    whole(ref.removeprefix("#"))
-}
+ref_number: fn(ref: String) -> Int? Never! { whole(ref.removeprefix("#")) }
 
 // --- Loading -----------------------------------------------------------------
 
@@ -461,7 +470,9 @@ limits: fn() -> EncodingLimits Never! {
 
 read_source: fn(path: String, label: String) -[FS]> String Failure! {
     bytes: files.read_bytes(path) ?? return Err(fail("E_IO", "cannot read {label}: {path}: {err}"))
-    if bytes.len() > MAX_JSON_BYTES -> return Err(fail("E_INVALID", "{label} is larger than Tower reads: {path}"))
+    if bytes.len() > MAX_JSON_BYTES {
+        return Err(fail("E_INVALID", "{label} is larger than Tower reads: {path}"))
+    }
     source: String.from_bytes(bytes) ?? return Err(fail("E_INVALID", "{label} is not UTF-8: {path}"))
     Ok(source)
 }
@@ -485,7 +496,9 @@ read_board: fn(path: String, label: String) -[FS]> BoardFile Failure! {
     if tree == .Null -> return Ok(empty)
     if !(tree == .Object(_)) -> return Err(fail("E_INVALID", "{label} must be an object"))
     reasons := [String]{}
-    if json.decode<BoardFile>(source) == .Err(refused) -> reasons = refused.map(fn(error) { "{error.path}: {error.reason}" })
+    if json.decode<BoardFile>(source) == .Err(refused) {
+        reasons = refused.map(fn(error) { "{error.path}: {error.reason}" })
+    }
     Err(fail("E_INVALID", "{label} is not in Tower's format: {path}: {reasons.join("; ")}"))
 }
 
@@ -555,7 +568,9 @@ kept_decisions: fn(rows: &[DecisionRow], keep: ArchiveKeep) Never! {
 }
 
 load_shards: fn(place: Place, manifest: Dyn, keep: ArchiveKeep) -[FS]> Archive Failure! {
-    if !is_text(field(manifest, "layout"), HISTORY_LAYOUT) -> return Err(fail("E_INVALID", "history.json (sharded archive manifest): unknown layout {json.to_string(field(manifest, "layout")) ?? ""}"))
+    if !is_text(field(manifest, "layout"), HISTORY_LAYOUT) {
+        return Err(fail("E_INVALID", "history.json (sharded archive manifest): unknown layout {json.to_string(field(manifest, "layout")) ?? ""}"))
+    }
     if !files.is_dir("{place.dir}/history") -> return Err(shard_failure(""))
     cards := [CardRow]{}
     decisions := [DecisionRow]{}
@@ -565,7 +580,9 @@ load_shards: fn(place: Place, manifest: Dyn, keep: ArchiveKeep) -[FS]> Archive F
             path: "{place.dir}/history/{file}"
             if !files.exists(path) -> return Err(shard_failure(file))
             bytes: files.read_bytes(path) ?? return Err(fail("E_IO", "cannot read unsafe history shard {place.dir}/history/{file}: {err}"))
-            if (integer(field(shard, "bytes")) ?? -1) != bytes.len() || !is_text(field(shard, "sha256"), crypto.sha256(bytes).hex()) -> return Err(shard_failure(file))
+            if (integer(field(shard, "bytes")) ?? -1) != bytes.len() || !is_text(field(shard, "sha256"), crypto.sha256(bytes).hex()) {
+                return Err(shard_failure(file))
+            }
             source: String.from_bytes(bytes) ?? return Err(shard_failure(file))
             rows: json.decode<BoardFile>(source) ?? return Err(fail("E_INVALID", "history shard history/{file} is not in Tower's shard format"))
             count := 0
@@ -619,7 +636,9 @@ live_card: fn(row: CardRow, hidden: [String]) -> Dyn Failure! {
 // that predates the `supersededBy` field.
 live_decision: fn(row: DecisionRow, live: Live) -> Dyn Failure! {
     decision: normalize_decision(record_tree(row.record) ?? return Err(err)) ?? return Err(err)
-    if row.id == "D-VERDICT-1254-1" && !truthy(field(decision, "supersededBy")) && live.tier1 -> return Ok(with(decision, "supersededBy", Dyn.Text("D-ONCE-TIER1")))
+    if row.id == "D-VERDICT-1254-1" && !truthy(field(decision, "supersededBy")) && live.tier1 {
+        return Ok(with(decision, "supersededBy", Dyn.Text("D-ONCE-TIER1")))
+    }
     Ok(decision)
 }
 
@@ -666,8 +685,12 @@ visual_media: fn(value: Dyn) -> Dyn Failure! {
             (key: "alt", value: Dyn.Text(text(field(item, "alt")).trim())),
             (key: "caption", value: Dyn.Text(text(field(item, "caption")).trim())),
         }
-        if !is_null(field(item, "state")) -> pairs.push((key: "state", value: Dyn.Text(text(field(item, "state")).trim())))
-        if !is_null(field(item, "poster")) -> pairs.push((key: "poster", value: field(item, "poster")))
+        if !is_null(field(item, "state")) {
+            pairs.push((key: "state", value: Dyn.Text(text(field(item, "state")).trim())))
+        }
+        if !is_null(field(item, "poster")) {
+            pairs.push((key: "poster", value: field(item, "poster")))
+        }
         shaped.push(Dyn.Object(pairs))
     }
     Ok(Dyn.Array(shaped))
@@ -677,10 +700,14 @@ visual_media: fn(value: Dyn) -> Dyn Failure! {
 migrate_losses: fn(decision: Dyn) -> Dyn Never! {
     out := decision.copy()
     recommendation: field(out, "recommendation")
-    if has(recommendation, "losses") -> out = with(out, "recommendation", with(recommendation, "losses", migrated_losses(field(recommendation, "losses"))))
+    if has(recommendation, "losses") {
+        out = with(out, "recommendation", with(recommendation, "losses", migrated_losses(field(recommendation, "losses"))))
+    }
     surface: field(out, "surface")
     inner: field(surface, "recommendation")
-    if has(inner, "losses") -> out = with(out, "surface", with(surface, "recommendation", with(inner, "losses", migrated_losses(field(inner, "losses")))))
+    if has(inner, "losses") {
+        out = with(out, "surface", with(surface, "recommendation", with(inner, "losses", migrated_losses(field(inner, "losses")))))
+    }
     out
 }
 
@@ -694,7 +721,9 @@ migrated_losses: fn(losses: Dyn) -> Dyn Never! {
         }
         out := item.copy()
         if has(out, "whyUnavoidable") {
-            if !has(out, "mitigation") -> out = with(out, "mitigation", field(out, "whyUnavoidable"))
+            if !has(out, "mitigation") {
+                out = with(out, "mitigation", field(out, "whyUnavoidable"))
+            }
             out = without(out, "whyUnavoidable")
         }
         mitigation: text(field(out, "mitigation"))
@@ -728,28 +757,30 @@ milestone_criterion: fn(item: Dyn, at: Int) -> Dyn Failure! {
     source: if item == .Text(value) -> object([(key: String, value: Dyn)]{(key: "text", value: Dyn.Text(value.copy()))}) else -> item.copy()
     n: if is_null(field(source, "n")) -> Dyn.Int(at + 1) else -> field(source, "n")
     status: if is_null(field(source, "status")) -> Dyn.Text("open") else -> field(source, "status")
-    if !CRITERION_STATUSES.contains(text(status)) -> return Err(fail("E_INVALID", "milestone criterion {at + 1}.status must be open, met, or verified"))
+    if !CRITERION_STATUSES.contains(text(status)) {
+        return Err(fail("E_INVALID", "milestone criterion {at + 1}.status must be open, met, or verified"))
+    }
     evidence: if truthy(field(source, "evidence")) -> field(source, "evidence") else -> Dyn.Text("")
-    Ok(object([(key: String, value: Dyn)]{
-        (key: "n", value: n),
-        (key: "text", value: Dyn.Text(text(field(source, "text")).trim())),
-        (key: "status", value: status),
-        (key: "metBy", value: field(source, "metBy")),
-        (key: "verifiedBy", value: field(source, "verifiedBy")),
-        (key: "evidence", value: evidence),
-        (key: "at", value: field(source, "at")),
-    }))
+    Ok(
+        object(
+            [(key: String, value: Dyn)]{
+                (key: "n", value: n),
+                (key: "text", value: Dyn.Text(text(field(source, "text")).trim())),
+                (key: "status", value: status),
+                (key: "metBy", value: field(source, "metBy")),
+                (key: "verifiedBy", value: field(source, "verifiedBy")),
+                (key: "evidence", value: evidence),
+                (key: "at", value: field(source, "at")),
+            },
+        ),
+    )
 }
 
 milestone_criteria: fn(raw: Dyn) -> Dyn Failure! {
     list := [Dyn]{}
-    if raw == .Array(_) {
-        list = items(raw)
-    } else if has(raw, "items") && field(raw, "items") == .Array(_) {
+    if raw == .Array(_) -> list = items(raw) else if has(raw, "items") && field(raw, "items") == .Array(_) {
         list = items(field(raw, "items"))
-    } else if is_null(raw) || is_text(raw, "") {
-        return Ok(Dyn.Array([Dyn]{}))
-    } else {
+    } else if is_null(raw) || is_text(raw, "") { return Ok(Dyn.Array([Dyn]{})) } else {
         list.push(raw.copy())
     }
     shaped := [Dyn]{}
@@ -770,10 +801,14 @@ normalize_milestone: fn(milestone: Dyn) -> Dyn Failure! {
     out := with(milestone, "criteria", criteria)
     closeout: field(out, "closeout")
     if !is_null(closeout) {
-        if !(closeout == .Object(_)) || !hex_commit(text(field(closeout, "sourceCommit"))) || !truthy(field(closeout, "by")) || !truthy(field(closeout, "at")) -> out = without(out, "closeout")
+        if !(closeout == .Object(_)) || !hex_commit(text(field(closeout, "sourceCommit"))) || !truthy(field(closeout, "by")) || !truthy(field(closeout, "at")) {
+            out = without(out, "closeout")
+        }
     }
     status: text(field(out, "status"))
-    if !(status == "open" || status == "review-ready" || status == "met") -> out = with(out, "status", Dyn.Text("open"))
+    if !(status == "open" || status == "review-ready" || status == "met") {
+        out = with(out, "status", Dyn.Text("open"))
+    }
     if is_text(field(out, "status"), "met") && !truthy(field(out, "verification")) {
         out = with(out, "status", Dyn.Text("review-ready"))
         out = without(out, "metAt")
@@ -789,14 +824,14 @@ Linked: struct {
 
 // The cards linked to each milestone: archived first, a live card replacing
 // its archived copy in place (store.mjs cardsByMilestone).
-cards_by_milestone: fn(cards: [CardRow], archived: [CardRow]) -> [String: [Linked]] Never! {
-    index := [String: [Linked]]{}
+cards_by_milestone: fn(cards: [CardRow], archived: [CardRow]) -> [String:[Linked]] Never! {
+    index := [String:[Linked]]{}
     link_cards(index, archived)
     link_cards(index, cards)
     index
 }
 
-link_cards: fn(index: &[String: [Linked]], cards: [CardRow]) Never! {
+link_cards: fn(index: &[String:[Linked]], cards: [CardRow]) Never! {
     loop card in cards {
         if card.milestone == "" -> next
         linked := index.get(card.milestone) ?? [Linked]{}
@@ -814,7 +849,9 @@ sync_milestone: fn(milestone: Dyn, linked: [Linked]) -> Dyn Never! {
         cleared: without(without(without(milestone, "verification"), "metAt"), "closeout")
         return with(cleared, "status", Dyn.Text("open"))
     }
-    if is_text(field(milestone, "status"), "met") && truthy(field(milestone, "verification")) -> return milestone.copy()
+    if is_text(field(milestone, "status"), "met") && truthy(field(milestone, "verification")) {
+        return milestone.copy()
+    }
     with(without(without(milestone, "verification"), "metAt"), "status", Dyn.Text("review-ready"))
 }
 
@@ -822,12 +859,14 @@ milestone_progress: fn(milestone: Dyn, linked: [Linked]) -> Dyn Never! {
     done: linked.filter(fn(card) { card.phase == "done" }).len()
     ready: linked.len() > 0 && done == linked.len()
     met: ready && is_text(field(milestone, "status"), "met") && truthy(field(milestone, "verification"))
-    object([(key: String, value: Dyn)]{
-        (key: "total", value: Dyn.Int(linked.len())),
-        (key: "done", value: Dyn.Int(done)),
-        (key: "reviewReady", value: Dyn.Bool(ready)),
-        (key: "met", value: Dyn.Bool(met)),
-    })
+    object(
+        [(key: String, value: Dyn)]{
+            (key: "total", value: Dyn.Int(linked.len())),
+            (key: "done", value: Dyn.Int(done)),
+            (key: "reviewReady", value: Dyn.Bool(ready)),
+            (key: "met", value: Dyn.Bool(met)),
+        },
+    )
 }
 
 // --- Projection (store.mjs project) ------------------------------------------
@@ -865,10 +904,14 @@ lane_of: fn(card: Dyn, live: Live) -> Dyn Never! {
     phase: text(field(card, "phase"))
     id: text(field(card, "id"))
     if phase == "done" -> return object(lane("done", Dyn.Null, "Done"))
-    if phase == "frozen" -> return object(lane("frozen", Dyn.Text("owner"), "Frozen — owner reactivates it"))
+    if phase == "frozen" {
+        return object(lane("frozen", Dyn.Text("owner"), "Frozen — owner reactivates it"))
+    }
     open := [Dyn]{}
     loop decision in live.decisions {
-        if !decision.draft && decision.card_id == id && decision.status != "ratified" && decision.group != "acceptance" -> open.push(Dyn.Text(decision.id.copy()))
+        if !decision.draft && decision.card_id == id && decision.status != "ratified" && decision.group != "acceptance" {
+            open.push(Dyn.Text(decision.id.copy()))
+        }
     }
     if open.len() > 0 {
         plural: if open.len() > 1 -> "s" else -> ""
@@ -910,15 +953,21 @@ lane_of: fn(card: Dyn, live: Live) -> Dyn Never! {
         return object(lane("plan", Dyn.Text("agent"), label))
     }
     if phase == "ready" -> return object(lane("implement", Dyn.Text("agent"), "Ready to implement"))
-    if phase == "building" -> return object(lane("building", Dyn.Text("agent"), "Continue building"))
+    if phase == "building" {
+        return object(lane("building", Dyn.Text("agent"), "Continue building"))
+    }
     if phase == "verify" {
         if truthy(field(card, "needsAcceptance")) {
             ballot: "D-ACCEPT-{json.to_string(field(card, "num")) ?? ""}"
             accept_open := false
             loop decision in live.decisions {
-                if !decision.draft && decision.id == ballot && decision.status != "ratified" -> accept_open = true
+                if !decision.draft && decision.id == ballot && decision.status != "ratified" {
+                    accept_open = true
+                }
             }
-            if accept_open -> return object(lane("verify", Dyn.Text("owner"), "Owner visual/UX acceptance"))
+            if accept_open {
+                return object(lane("verify", Dyn.Text("owner"), "Owner visual/UX acceptance"))
+            }
             return object(lane("verify", Dyn.Text("agent"), "Finish criteria before owner visual review"))
         }
         return object(lane("verify", Dyn.Text("agent"), "Close when exit criteria are met"))
@@ -948,12 +997,14 @@ project_card: fn(live: Live, at: Int, hidden: [String]) -> Dyn Failure! {
     state: if linked.len() == 0 -> "none" else if open.len() > 0 -> "pending" else -> "cleared"
     ratified: linked.len() - open.len()
     total: linked.len()
-    clearance: object([(key: String, value: Dyn)]{
-        (key: "state", value: Dyn.Text(state)),
-        (key: "open", value: Dyn.Array(open)),
-        (key: "total", value: Dyn.Int(total)),
-        (key: "ratified", value: Dyn.Int(ratified)),
-    })
+    clearance: object(
+        [(key: String, value: Dyn)]{
+            (key: "state", value: Dyn.Text(state)),
+            (key: "open", value: Dyn.Array(open)),
+            (key: "total", value: Dyn.Int(total)),
+            (key: "ratified", value: Dyn.Int(ratified)),
+        },
+    )
     out := with(card, "clearance", clearance)
     out = with(out, "decisions", Dyn.Array(linked))
     out = with(out, "questions", Dyn.Array(questions))
@@ -986,16 +1037,22 @@ answer_request: fn(request: Request, place: Place) -[FS]> String Failure! {
     }
     if verb == "card show" {
         live: load_live(place) ?? return Err(err)
-        if find_by_ref(live.cards, ref) == .Val(at) -> return pretty(project_card(live, at, hidden_ids(live)) ?? return Err(err))
+        if find_by_ref(live.cards, ref) == .Val(at) {
+            return pretty(project_card(live, at, hidden_ids(live)) ?? return Err(err))
+        }
         archive: load_archive(place, ArchiveKeep.Card(ref.copy())) ?? return Err(err)
-        if find_by_ref(archive.cards, ref) == .Val(at) -> return pretty(archived_card(archive.cards[at]) ?? return Err(err))
+        if find_by_ref(archive.cards, ref) == .Val(at) {
+            return pretty(archived_card(archive.cards[at]) ?? return Err(err))
+        }
         return Err(fail("E_NOT_FOUND", "no card {ref}"))
     }
     if verb == "card list" {
         live: load_live(place) ?? return Err(err)
         hidden: hidden_ids(live)
         shown := [String]{}
-        loop at in 0..<live.cards.len() -> shown.push(pretty(project_card(live, at, hidden) ?? return Err(err)) ?? return Err(err))
+        loop at in 0..<live.cards.len() {
+            shown.push(pretty(project_card(live, at, hidden) ?? return Err(err)) ?? return Err(err))
+        }
         return Ok(pretty_list(shown))
     }
     if verb == "decision show" {
@@ -1079,21 +1136,21 @@ lint_request: fn(request: Request, place: Place) -[FS]> (shown: String, findings
 docs_findings: fn(place: Place, docs: String) -[FS]> [Dyn] Failure! {
     live: load_live(place) ?? return Err(err)
     archive: load_archive(place, ArchiveKeep.Index) ?? return Err(err)
-    known_cards := [String: Bool]{}
+    known_cards := [String:Bool]{}
     loop card in live.cards {
         if card.num == .Val(num) -> known_cards["{num}"] = true
     }
     loop card in archive.cards {
         if card.num == .Val(num) -> known_cards["{num}"] = true
     }
-    known_decisions := [String: Bool]{}
+    known_decisions := [String:Bool]{}
     loop decision in live.decisions -> known_decisions[decision.id.copy()] = true
     loop decision in archive.decisions -> known_decisions[decision.id.copy()] = true
     spec: "{docs}/spec"
     paths := [String]{}
     if files.is_dir(spec) -> spec_files(spec, paths) ?? return Err(err)
-    cards := Citations{order: [String]{}, slots: [String: Int]{}, locations: [[String]]{}}
-    decisions := Citations{order: [String]{}, slots: [String: Int]{}, locations: [[String]]{}}
+    cards := Citations{order: [String]{}, slots: [String:Int]{}, locations: [[String]]{}}
+    decisions := Citations{order: [String]{}, slots: [String:Int]{}, locations: [[String]]{}}
     loop path in paths {
         source: files.read(path) ?? return Err(fail("E_IO", "cannot read {path}: {err}"))
         shown: "{DOCS_DIR}/{path.removeprefix("{docs}/")}"
@@ -1106,7 +1163,9 @@ docs_findings: fn(place: Place, docs: String) -[FS]> [Dyn] Failure! {
                 }
             }
             loop id in decision_ids(bytes) {
-                if !placeholder_decision(id) && !known_decisions.has_key(id) -> cite(decisions, id, at)
+                if !placeholder_decision(id) && !known_decisions.has_key(id) {
+                    cite(decisions, id, at)
+                }
             }
         }
     }
@@ -1129,7 +1188,7 @@ docs_findings: fn(place: Place, docs: String) -[FS]> [Dyn] Failure! {
 // Every place each missing ID is cited, in first-citation order.
 Citations: struct {
     order: [String]
-    slots: [String: Int]
+    slots: [String:Int]
     locations: [[String]]
 }
 
@@ -1155,9 +1214,7 @@ spec_files: fn(dir: String, out: &[String]) Failure! -[FS]> {
     loop entry in listed {
         if entry.name.starts_with(".") -> next
         path: "{dir}/{entry.name}"
-        if entry.is_dir && !files.is_symlink(path) {
-            spec_files(path, out) ?? return Err(err)
-        } else {
+        if entry.is_dir && !files.is_symlink(path) -> spec_files(path, out) ?? return Err(err) else {
             folded: entry.name.lower()
             if SPEC_EXTENSIONS.any(fn(extension) { folded.ends_with(extension) }) -> out.push(path)
         }
@@ -1188,9 +1245,7 @@ decision_ids: fn(bytes: [U8]) -> [String] Never! {
         cursor := at + 1
         loop cursor + 1 < bytes.len() && bytes[cursor] == (U8{45}) && upper_or_digit(bytes[cursor + 1]) {
             cursor += 1
-            loop cursor < bytes.len() && upper_or_digit(bytes[cursor]) {
-                cursor += 1
-            }
+            loop cursor < bytes.len() && upper_or_digit(bytes[cursor]) -> cursor += 1
             if cursor == bytes.len() || !ascii_word(bytes[cursor]) -> end = cursor
         }
         if end < 0 {
@@ -1216,9 +1271,7 @@ card_refs: fn(bytes: [U8]) -> [String] Never! {
             next
         }
         end := at + 1
-        loop end < bytes.len() && bytes[end] >= (U8{48}) && bytes[end] <= (U8{57}) {
-            end += 1
-        }
+        loop end < bytes.len() && bytes[end] >= (U8{48}) && bytes[end] <= (U8{57}) -> end += 1
         if end == at + 1 || (end < bytes.len() && ascii_word(bytes[end])) {
             at += 1
             next
@@ -1239,9 +1292,7 @@ card_context: fn(bytes: [U8]) -> Bool Never! {
             next
         }
         start: at
-        loop at < bytes.len() && ascii_word(bytes[at]) {
-            at += 1
-        }
+        loop at < bytes.len() && ascii_word(bytes[at]) -> at += 1
         if CARD_WORDS.contains(String.from_bytes_lossy(bytes[start..<at]).lower()) -> return true
     }
     decision_ids(bytes).len() > 0
@@ -1257,9 +1308,7 @@ placeholder_decision: fn(id: String) -> Bool Never! {
 // `Number(ref.slice(1))` spelled as a card number key.
 card_key: fn(ref: String) -> String Never! {
     digits := ref.removeprefix("#")
-    loop digits.len() > 1 && digits.starts_with("0") {
-        digits = digits.removeprefix("0")
-    }
+    loop digits.len() > 1 && digits.starts_with("0") -> digits = digits.removeprefix("0")
     digits
 }
 
@@ -1448,11 +1497,14 @@ refusal: fn(place: Place, args: [String]) -[FS]> String Never! {
     loop item in items(json.parse(linted.shown) ?? panic("lint is not JSON: {err}")) {
         shown.push("{text(field(item, "rule"))}|{text(field(item, "ref"))}|{text(field(item, "msg"))}")
     }
-    assert_eq(shown, [String]{
-        "spec-card-ref-missing|#99|Docs/spec/law.md:1, Docs/spec/nested/more.md:1 cites #99, but Tower has no card record",
-        "spec-card-ref-missing|#0100|Docs/spec/nested/more.md:1 cites #0100, but Tower has no card record",
-        "spec-decision-ref-missing|D-MISSING1|Docs/spec/law.md:1, Docs/spec/nested/more.md:1 cites D-MISSING1, but Tower has no decision record",
-    })
+    assert_eq(
+        shown,
+        [String]{
+            "spec-card-ref-missing|#99|Docs/spec/law.md:1, Docs/spec/nested/more.md:1 cites #99, but Tower has no card record",
+            "spec-card-ref-missing|#0100|Docs/spec/nested/more.md:1 cites #0100, but Tower has no card record",
+            "spec-decision-ref-missing|D-MISSING1|Docs/spec/law.md:1, Docs/spec/nested/more.md:1 cites D-MISSING1, but Tower has no decision record",
+        },
+    )
     bare: parse_request([String]{"lint", "--docs", "--docs-root", "{place.dir}/none"}) ?? panic("request: {err.message}")
     clean: lint_request(bare, place) ?? panic("lint: {err.message}")
     assert_eq(clean.shown, "(clean)")

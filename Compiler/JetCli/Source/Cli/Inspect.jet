@@ -107,9 +107,13 @@ jet_cli_inspect_flag_takes_value: fn(argument: String) -> Bool Never! {
 
 // `parse_inspect_args` over the normalized argv (`inspect <plane> ...`).
 jet_cli_inspect_parse: fn(argv: [String]) -> JetCLIInspectParse Never! {
-    if argv.len() < 2 -> return JetCLIInspectParse.Failed{message: "missing inspect plane; choose types, rights, claims, shapes, decisions, structure, build, gates, memory, choices, or target"}
+    if argv.len() < 2 {
+        return JetCLIInspectParse.Failed{message: "missing inspect plane; choose types, rights, claims, shapes, decisions, structure, build, gates, memory, choices, or target"}
+    }
     plane: argv[1]
-    if !JET_CLI_INSPECT_PLANES.contains(plane) -> return JetCLIInspectParse.Failed{message: "unknown inspect plane `{plane}`; choose types, rights, claims, shapes, decisions, structure, build, gates, memory, choices, or target"}
+    if !JET_CLI_INSPECT_PLANES.contains(plane) {
+        return JetCLIInspectParse.Failed{message: "unknown inspect plane `{plane}`; choose types, rights, claims, shapes, decisions, structure, build, gates, memory, choices, or target"}
+    }
     target := String?{None}
     live := Int?{None}
     replay := String?{None}
@@ -118,10 +122,14 @@ jet_cli_inspect_parse: fn(argv: [String]) -> JetCLIInspectParse Never! {
     loop index < argv.len() {
         argument: argv[index]
         if argument == "--live" {
-            if index + 1 >= argv.len() -> return JetCLIInspectParse.Failed{message: "`--live` needs a process id"}
+            if index + 1 >= argv.len() {
+                return JetCLIInspectParse.Failed{message: "`--live` needs a process id"}
+            }
             value: argv[index + 1]
             pid: jet_cli_inspect_pid(value) ?? return JetCLIInspectParse.Failed{message: "`--live` expects a positive process id, got `{value}`"}
-            if pid == 0 -> return JetCLIInspectParse.Failed{message: "`--live` expects a positive process id"}
+            if pid == 0 {
+                return JetCLIInspectParse.Failed{message: "`--live` expects a positive process id"}
+            }
             live = Val(pid)
             options.push("--live")
             options.push(value.copy())
@@ -131,14 +139,18 @@ jet_cli_inspect_parse: fn(argv: [String]) -> JetCLIInspectParse Never! {
         if argument.starts_with("--live=") {
             value: argument.slice(7..<argument.len())
             pid: jet_cli_inspect_pid(value) ?? return JetCLIInspectParse.Failed{message: "`--live` expects a positive process id, got `{value}`"}
-            if pid == 0 -> return JetCLIInspectParse.Failed{message: "`--live` expects a positive process id"}
+            if pid == 0 {
+                return JetCLIInspectParse.Failed{message: "`--live` expects a positive process id"}
+            }
             live = Val(pid)
             options.push(argument.copy())
             index += 1
             next
         }
         if argument == "--replay" {
-            if index + 1 >= argv.len() || argv[index + 1].starts_with("-") -> return JetCLIInspectParse.Failed{message: "`--replay` needs a replay artifact path"}
+            if index + 1 >= argv.len() || argv[index + 1].starts_with("-") {
+                return JetCLIInspectParse.Failed{message: "`--replay` needs a replay artifact path"}
+            }
             value: argv[index + 1]
             replay = Val(value)
             options.push("--replay")
@@ -148,13 +160,17 @@ jet_cli_inspect_parse: fn(argv: [String]) -> JetCLIInspectParse Never! {
         }
         if argument.starts_with("--replay=") {
             value: argument.slice(9..<argument.len())
-            if value == "" -> return JetCLIInspectParse.Failed{message: "`--replay` needs a replay artifact path"}
+            if value == "" {
+                return JetCLIInspectParse.Failed{message: "`--replay` needs a replay artifact path"}
+            }
             replay = Val(value)
             options.push(argument.copy())
             index += 1
             next
         }
-        if argument == "--" -> return JetCLIInspectParse.Failed{message: "inspect planes do not accept a `--` command tail"}
+        if argument == "--" {
+            return JetCLIInspectParse.Failed{message: "inspect planes do not accept a `--` command tail"}
+        }
         if argument.starts_with("-") {
             options.push(argument.copy())
             if jet_cli_inspect_flag_takes_value(argument) && index + 1 < argv.len() && !argv[index + 1].starts_with("-") {
@@ -165,12 +181,18 @@ jet_cli_inspect_parse: fn(argv: [String]) -> JetCLIInspectParse Never! {
             index += 1
             next
         }
-        if target != None -> return JetCLIInspectParse.Failed{message: "inspect accepts at most one file or package target"}
+        if target != None {
+            return JetCLIInspectParse.Failed{message: "inspect accepts at most one file or package target"}
+        }
         target = Val(argument)
         index += 1
     }
-    if live != None && replay != None -> return JetCLIInspectParse.Failed{message: "inspect accepts at most one of `--live PID` or `--replay ARTIFACT`"}
-    if target != None && (live != None || replay != None) -> return JetCLIInspectParse.Failed{message: "inspect accepts a target, `--live PID`, or `--replay ARTIFACT` as one scope"}
+    if live != None && replay != None {
+        return JetCLIInspectParse.Failed{message: "inspect accepts at most one of `--live PID` or `--replay ARTIFACT`"}
+    }
+    if target != None && (live != None || replay != None) {
+        return JetCLIInspectParse.Failed{message: "inspect accepts a target, `--live PID`, or `--replay ARTIFACT` as one scope"}
+    }
     scope := JetCLIInspectScope.Package
     if target == .Val(path) -> scope = JetCLIInspectScope.Target{target: path}
     if live == .Val(pid) -> scope = JetCLIInspectScope.Live{pid: pid}
@@ -201,14 +223,20 @@ jet_cli_inspect_run: fn(request: JetCLIInspectRequest, color: Bool, json: Bool, 
             .File(path, notice) -> return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "replay", file: path, subject: Val(artifact), json: json, color: color, threads: threads, notice: notice, project: true}}
         }
     }
-    if plane == "decisions" || plane == "memory" || plane == "choices" -> return jet_cli_inspect_decisions(request, color, json, threads)
+    if plane == "decisions" || plane == "memory" || plane == "choices" {
+        return jet_cli_inspect_decisions(request, color, json, threads)
+    }
     if plane == "build" {
         loop option in request.options {
-            if option == "--coverage" || option.starts_with("--coverage=") -> return jet_cli_inspect_coverage(json, color)
+            if option == "--coverage" || option.starts_with("--coverage=") {
+                return jet_cli_inspect_coverage(json, color)
+            }
         }
     }
     // The Core catalog is the toolchain's, so it needs no target or project.
-    if plane == "structure" && request.options.contains("--core") -> return JetCLIPlan.Done{output: jet_cli_structure_core(json)}
+    if plane == "structure" && request.options.contains("--core") {
+        return JetCLIPlan.Done{output: jet_cli_structure_core(json)}
+    }
     file := ""
     notice := ""
     if jet_cli_inspect_entry(request.scope, plane, color) == {
@@ -227,7 +255,9 @@ jet_cli_inspect_run: fn(request: JetCLIInspectRequest, color: Bool, json: Bool, 
         "structure" -> return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "structure", file: file, subject: None, json: json, color: color, threads: threads, notice: notice, project: project}}
         "claims" -> return jet_cli_with_notices([String]{notice}, jet_cli_inspect_claims_manifest(file, json, color))
         "build" -> {
-            if request.options.contains("--times") -> return jet_cli_with_notices([String]{notice}, jet_cli_inspect_build_times(file, json, color))
+            if request.options.contains("--times") {
+                return jet_cli_with_notices([String]{notice}, jet_cli_inspect_build_times(file, json, color))
+            }
             return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "graph", file: file, subject: None, json: json, color: color, threads: threads, notice: notice, project: project}}
         }
         // Gates arm: `run` over the resolved entry followed by the plane flags
@@ -283,8 +313,8 @@ jet_cli_inspect_decisions: fn(request: JetCLIInspectRequest, color: Bool, json: 
             scope = "target"
             target = Val(path)
         }
-        .Live(_) -> scope = "live"
-        .Replay(_) -> scope = "replay"
+        .Live(_) -> { scope = "live" }
+        .Replay(_) -> { scope = "replay" }
         .Package -> {}
     }
     file := ""
@@ -333,7 +363,9 @@ jet_cli_inspect_word: fn(command: String) -> Bool Never! {
 jet_cli_inspect: fn(argv: [String], jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool, threads: Int?) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> JetCLIPlan Never! {
     command: args[0]
     inspect_env: command == "inspect" && args.len() > 1 && args[1] == "env"
-    if command == "inspect" && !inspect_env -> return jet_cli_inspect_plane(argv, color, json, threads)
+    if command == "inspect" && !inspect_env {
+        return jet_cli_inspect_plane(argv, color, json, threads)
+    }
     if command == {
         "graph" | "query" | "explain-build" -> return jet_cli_inspect_build_query(command, args, color, json, threads)
         "compiler" -> return jet_cli_inspect_compiler(args, color)
@@ -342,7 +374,9 @@ jet_cli_inspect: fn(argv: [String], jet_argv: [String], args: [String], color: B
         "impact" -> return jet_cli_inspect_impact(argv, color, json, threads)
         else -> {}
     }
-    if jet_cli_inspect_b(argv, command, jet_argv, args, color, quiet, json, threads) == .Val(plan) -> return plan
+    if jet_cli_inspect_b(argv, command, jet_argv, args, color, quiet, json, threads) == .Val(plan) {
+        return plan
+    }
     jet_cli_not_ported(jet_cli_dispatch_form(args), color)
 }
 
@@ -360,8 +394,12 @@ jet_cli_inspect_impact: fn(argv: [String], color: Bool, json: Bool, threads: Int
             if !argument.starts_with("-") -> positional.push(argument)
         }
     }
-    if positional.len() != 2 -> return jet_cli_fail("E2104", "`jet inspect impact` needs an entry file and a symbol name", jet_cli_why("E2104"), "jet inspect impact Examples/ErrorsAndEffects/Effects/Effects.jet report", color, JET_DRIVER_EXIT_USER_ERROR)
-    if depth == 0 -> return jet_cli_fail("E2104", "`--depth` must be at least 1", jet_cli_why("E2104"), input_fix, color, JET_DRIVER_EXIT_USER_ERROR)
+    if positional.len() != 2 {
+        return jet_cli_fail("E2104", "`jet inspect impact` needs an entry file and a symbol name", jet_cli_why("E2104"), "jet inspect impact Examples/ErrorsAndEffects/Effects/Effects.jet report", color, JET_DRIVER_EXIT_USER_ERROR)
+    }
+    if depth == 0 {
+        return jet_cli_fail("E2104", "`--depth` must be at least 1", jet_cli_why("E2104"), input_fix, color, JET_DRIVER_EXIT_USER_ERROR)
+    }
     // `render_check_failure` of the impact check never colors its report.
     JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "impact", file: jet_cli_inspect_absolute(positional[0]), subject: Val(positional[1]), json: json, color: false, threads: threads, notice: "", project: false, depth: depth}}
 }
@@ -509,29 +547,27 @@ jet_cli_coverage_facts: fn() -> JetCLICoverageFacts Never! {
         if row.structured_fix == .Val(fix) {
             if fix == .CryptoMisuse -> fix_edits = false
         }
-        if plane.trim() == "" -> return JetCLICoverageFacts.Invalid{message: "diagnostic coverage plane must not be empty"}
-        if fix_edits && row.no_fix_reason != None -> return JetCLICoverageFacts.Invalid{message: "coverage row in plane `{plane}` has both fix_edits and no_fix_reason"}
+        if plane.trim() == "" {
+            return JetCLICoverageFacts.Invalid{message: "diagnostic coverage plane must not be empty"}
+        }
+        if fix_edits && row.no_fix_reason != None {
+            return JetCLICoverageFacts.Invalid{message: "coverage row in plane `{plane}` has both fix_edits and no_fix_reason"}
+        }
         slot := facts.len()
-        if slots.get(plane) == .Val(found) {
-            slot = found
-        } else {
+        if slots.get(plane) == .Val(found) -> slot = found else {
             slots[plane] = slot
             facts.push(JetCLICoverageFact{plane: plane, rows: 0, edit_covered: 0, reason_covered: 0, behavior_reasons: 0, design_reasons: 0, ambiguous_reasons: 0, uncovered: 0})
         }
         facts[slot].rows += 1
-        if fix_edits {
-            facts[slot].edit_covered += 1
-        } else {
+        if fix_edits -> facts[slot].edit_covered += 1 else {
             if row.no_fix_reason == .Val(reason) {
                 facts[slot].reason_covered += 1
                 if reason.kind == {
-                    .Behavior -> facts[slot].behavior_reasons += 1
-                    .Design -> facts[slot].design_reasons += 1
+                    .Behavior -> { facts[slot].behavior_reasons += 1 }
+                    .Design -> { facts[slot].design_reasons += 1 }
                     .Ambiguous -> facts[slot].ambiguous_reasons += 1
                 }
-            } else {
-                facts[slot].uncovered += 1
-            }
+            } else { facts[slot].uncovered += 1 }
         }
     }
     planes := [String]{}
@@ -568,13 +604,19 @@ jet_cli_coverage_baseline: fn(text: String) -> JetCLICoverageBaseline Never! {
             if word != "" -> fields.push(word)
         }
         number: index + 1
-        if fields.len() != 4 -> return JetCLICoverageBaseline.Invalid{message: "coverage baseline line {number} must contain plane, edit count, reason count, and total"}
+        if fields.len() != 4 {
+            return JetCLICoverageBaseline.Invalid{message: "coverage baseline line {number} must contain plane, edit count, reason count, and total"}
+        }
         edit_covered: jet_cli_inspect_count(fields[1]) ?? return JetCLICoverageBaseline.Invalid{message: "invalid edit count on coverage baseline line {number}"}
         reason_covered: jet_cli_inspect_count(fields[2]) ?? return JetCLICoverageBaseline.Invalid{message: "invalid reason count on coverage baseline line {number}"}
         total: jet_cli_inspect_count(fields[3]) ?? return JetCLICoverageBaseline.Invalid{message: "invalid total on coverage baseline line {number}"}
-        if edit_covered + reason_covered > total -> return JetCLICoverageBaseline.Invalid{message: "coverage baseline line {number} counts more covered rows than total"}
+        if edit_covered + reason_covered > total {
+            return JetCLICoverageBaseline.Invalid{message: "coverage baseline line {number} counts more covered rows than total"}
+        }
         loop row in rows {
-            if row.plane == fields[0] -> return JetCLICoverageBaseline.Invalid{message: "duplicate coverage baseline plane `{fields[0]}`"}
+            if row.plane == fields[0] {
+                return JetCLICoverageBaseline.Invalid{message: "duplicate coverage baseline plane `{fields[0]}`"}
+            }
         }
         rows.push(JetCLICoverageBaselineRow{plane: fields[0], edit_covered: edit_covered, reason_covered: reason_covered, total: total})
     }
@@ -594,7 +636,9 @@ jet_cli_coverage_non_decreasing: fn(plane: String, previous: JetCLICoverageBasel
     if current.edit_covered < previous.edit_covered || current.reason_covered < previous.reason_covered || current.total < previous.total {
         return Val("coverage baseline decreased for plane `{plane}`")
     }
-    if current.edit_covered + current.reason_covered > current.total -> return Val("coverage counts exceed total for plane `{plane}`")
+    if current.edit_covered + current.reason_covered > current.total {
+        return Val("coverage counts exceed total for plane `{plane}`")
+    }
     None
 }
 
@@ -613,11 +657,15 @@ jet_cli_coverage_validate: fn(baseline: [JetCLICoverageBaselineRow], facts: [Jet
         }
         fact: found ?? return Val("coverage plane `{previous.plane}` disappeared")
         current: JetCLICoverageBaselineRow{plane: fact.plane, edit_covered: fact.edit_covered, reason_covered: fact.reason_covered, total: fact.rows}
-        if jet_cli_coverage_non_decreasing(previous.plane, previous, current) == .Val(message) -> return Val(message)
+        if jet_cli_coverage_non_decreasing(previous.plane, previous, current) == .Val(message) {
+            return Val(message)
+        }
         previous_uncovered: jet_cli_inspect_saturating_sub(previous.total, previous.edit_covered + previous.reason_covered)
         if current.total > previous.total {
             current_uncovered: jet_cli_inspect_saturating_sub(current.total, current.edit_covered + current.reason_covered)
-            if current_uncovered > previous_uncovered -> return Val("new row in open coverage plane `{previous.plane}` has neither fix_edits nor no_fix_reason")
+            if current_uncovered > previous_uncovered {
+                return Val("new row in open coverage plane `{previous.plane}` has neither fix_edits nor no_fix_reason")
+            }
         }
     }
     loop fact in facts {
@@ -625,22 +673,26 @@ jet_cli_coverage_validate: fn(baseline: [JetCLICoverageBaselineRow], facts: [Jet
         loop row in baseline {
             if row.plane == fact.plane -> known = true
         }
-        if !known && fact.uncovered > 0 -> return Val("new coverage plane `{fact.plane}` has a row with neither fix_edits nor no_fix_reason")
+        if !known && fact.uncovered > 0 {
+            return Val("new coverage plane `{fact.plane}` has a row with neither fix_edits nor no_fix_reason")
+        }
     }
     None
 }
 
 jet_cli_coverage_fact_value: fn(fact: JetCLICoverageFact) -> JetCLIStatusValue Never! {
-    jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("plane", jet_cli_status_text(fact.plane)),
-        jet_cli_status_field("rows", jet_cli_status_int(fact.rows)),
-        jet_cli_status_field("edit_covered", jet_cli_status_int(fact.edit_covered)),
-        jet_cli_status_field("reason_covered", jet_cli_status_int(fact.reason_covered)),
-        jet_cli_status_field("behavior_reasons", jet_cli_status_int(fact.behavior_reasons)),
-        jet_cli_status_field("design_reasons", jet_cli_status_int(fact.design_reasons)),
-        jet_cli_status_field("ambiguous_reasons", jet_cli_status_int(fact.ambiguous_reasons)),
-        jet_cli_status_field("uncovered", jet_cli_status_int(fact.uncovered)),
-    })
+    jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("plane", jet_cli_status_text(fact.plane)),
+            jet_cli_status_field("rows", jet_cli_status_int(fact.rows)),
+            jet_cli_status_field("edit_covered", jet_cli_status_int(fact.edit_covered)),
+            jet_cli_status_field("reason_covered", jet_cli_status_int(fact.reason_covered)),
+            jet_cli_status_field("behavior_reasons", jet_cli_status_int(fact.behavior_reasons)),
+            jet_cli_status_field("design_reasons", jet_cli_status_int(fact.design_reasons)),
+            jet_cli_status_field("ambiguous_reasons", jet_cli_status_int(fact.ambiguous_reasons)),
+            jet_cli_status_field("uncovered", jet_cli_status_int(fact.uncovered)),
+        },
+    )
 }
 
 // `run_build_coverage`: the diagnostic repair-coverage table and its ratchet
@@ -655,7 +707,9 @@ jet_cli_inspect_coverage: fn(json: Bool, color: Bool) -[FS, Env]> JetCLIPlan Nev
     }
     toolchain: if jet_cli_toolchain_root(cli_files.cwd() ?? ".") == {
         .Found(root) -> root
-        .Missing(what, fix) -> { return jet_cli_fail("E2105", what, jet_cli_why("E2105"), fix, color, JET_DRIVER_EXIT_USER_ERROR) }
+        .Missing(what, fix) -> {
+            return jet_cli_fail("E2105", what, jet_cli_why("E2105"), fix, color, JET_DRIVER_EXIT_USER_ERROR)
+        }
     }
     baseline_path: "{toolchain}/tests/diagnostics_coverage_baseline.txt"
     text: cli_files.read(baseline_path) ?? return jet_cli_fail("E2105", "can't read the diagnostic coverage baseline `{baseline_path}`", jet_cli_why("E2105"), "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `tests/`", color, JET_DRIVER_EXIT_USER_ERROR)
@@ -668,7 +722,9 @@ jet_cli_inspect_coverage: fn(json: Bool, color: Bool) -[FS, Env]> JetCLIPlan Nev
     if json {
         values: loop fact in facts -> jet_cli_coverage_fact_value(fact)
         fields := [JetCLIStatusField]{jet_cli_status_field("coverage", jet_cli_status_array(values))}
-        if validation == .Val(error) -> fields.push(jet_cli_status_field("validation_error", jet_cli_status_text(error)))
+        if validation == .Val(error) {
+            fields.push(jet_cli_status_field("validation_error", jet_cli_status_text(error)))
+        }
         return jet_cli_done("{jet_cli_status_render("inspect.build", validation == None, fields)}\n", "", JET_DRIVER_EXIT_OK)
     }
     out := "diagnostic coverage\nplane\trows\twith fix_edits\twith reason\tuncovered\tstate\n"
@@ -682,13 +738,19 @@ jet_cli_inspect_coverage: fn(json: Bool, color: Bool) -[FS, Env]> JetCLIPlan Nev
 
 // crates/jet-pkg-model `current_release_status`.
 JET_CLI_RELEASE_CHANNEL: "prerelease"
+
 JET_CLI_RELEASE_DISPOSITION: "current"
+
 JET_CLI_RELEASE_READINESS: "not-ready"
+
 JET_CLI_RELEASE_POLICY: "future-1.0"
+
 JET_CLI_RELEASE_POLICY_DISPOSITION: "planned"
+
 JET_CLI_RELEASE_POLICY_ACTIVE: false
 
 JET_CLI_CAPABILITY_RELATION_SCHEMA: "jet.capability.relation.v1"
+
 JET_CLI_RELEASE_CLAIM_SOURCE: "manifest.capability_relation.rows"
 
 // `run_build_query`: graph/subject queries evaluate a checked build; the bare
@@ -718,17 +780,21 @@ jet_cli_inspect_build_query: fn(command: String, args: [String], color: Bool, js
 // `compiler_api_error_json`: the versioned error document of one `jet inspect
 // compiler` operation.
 jet_cli_inspect_compiler_error: fn(operation: String, file: String, message: String) -> JetCLIPlan Never! {
-    error: jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("code", jet_cli_status_text("E0956")),
-        jet_cli_status_field("message", jet_cli_status_text(message)),
-    })
-    compiler: jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("schema_version", jet_cli_status_int(1)),
-        jet_cli_status_field("api_version", jet_cli_status_int(1)),
-        jet_cli_status_field("operation", jet_cli_status_text(operation)),
-        jet_cli_status_field("file", jet_cli_status_text(file)),
-        jet_cli_status_field("error", error),
-    })
+    error: jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("code", jet_cli_status_text("E0956")),
+            jet_cli_status_field("message", jet_cli_status_text(message)),
+        },
+    )
+    compiler: jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("schema_version", jet_cli_status_int(1)),
+            jet_cli_status_field("api_version", jet_cli_status_int(1)),
+            jet_cli_status_field("operation", jet_cli_status_text(operation)),
+            jet_cli_status_field("file", jet_cli_status_text(file)),
+            jet_cli_status_field("error", error),
+        },
+    )
     jet_cli_done("{jet_cli_status_render("inspect.compiler.{operation}", false, [JetCLIStatusField]{jet_cli_status_field("compiler", compiler)})}\n", "", JET_DRIVER_EXIT_OK)
 }
 
@@ -752,32 +818,40 @@ jet_cli_inspect_compiler: fn(args: [String], color: Bool) -[FS, Env, Exec, IO, F
     operation: if args.len() > 1 -> args[1] else -> ""
     file: if args.len() > 2 -> args[2] else -> ""
     reads: operation == "lex" || operation == "parse" || operation == "check" || operation == "source-map" || operation == "source_map"
-    if !reads -> return jet_cli_inspect_compiler_error(operation, file, "unsupported compiler operation; choose lex, parse, check, or source-map")
-    if cli_files.is_dir(file) -> return jet_cli_inspect_compiler_error(operation, file, "could not read compiler input: Is a directory (os error 21)")
-    if !cli_files.exists(file) -> return jet_cli_inspect_compiler_error(operation, file, "could not read compiler input: No such file or directory (os error 2)")
+    if !reads {
+        return jet_cli_inspect_compiler_error(operation, file, "unsupported compiler operation; choose lex, parse, check, or source-map")
+    }
+    if cli_files.is_dir(file) {
+        return jet_cli_inspect_compiler_error(operation, file, "could not read compiler input: Is a directory (os error 21)")
+    }
+    if !cli_files.exists(file) {
+        return jet_cli_inspect_compiler_error(operation, file, "could not read compiler input: No such file or directory (os error 2)")
+    }
     if !jet_cli_inspect_reads(file) {
-        if !jet_cli_inspect_reads_bytes(file) -> return jet_cli_inspect_compiler_error(operation, file, "could not read compiler input: Permission denied (os error 13)")
+        if !jet_cli_inspect_reads_bytes(file) {
+            return jet_cli_inspect_compiler_error(operation, file, "could not read compiler input: Permission denied (os error 13)")
+        }
         return jet_cli_inspect_compiler_error(operation, file, "could not read compiler input: stream did not contain valid UTF-8")
     }
-    if operation == "check" -> return JetCLIPlan.Done{output: jet_cli_inspect_compiler_check(file, cli_files.read(file) ?? "")}
+    if operation == "check" {
+        return JetCLIPlan.Done{output: jet_cli_inspect_compiler_check(file, cli_files.read(file) ?? "")}
+    }
     source: cli_files.read(file) ?? ""
     // `compiler_json` names source-map `source_map` in both the action and the
     // payload.
     name: if operation == "source-map" -> "source_map" else -> operation
     value := JetCLIStatusValue.Null
-    if operation == "lex" {
-        value = jet_cli_compiler_lexed(source)
-    } else if operation == "parse" {
+    if operation == "lex" -> value = jet_cli_compiler_lexed(source) else if operation == "parse" {
         value = jet_cli_compiler_syntax_tree(source)
-    } else {
-        value = jet_cli_compiler_source_map(source)
-    }
-    payload: jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("schema_version", jet_cli_status_int(1)),
-        jet_cli_status_field("api_version", jet_cli_status_int(1)),
-        jet_cli_status_field("operation", jet_cli_status_text(name)),
-        jet_cli_status_field("value", value),
-    })
+    } else { value = jet_cli_compiler_source_map(source) }
+    payload: jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("schema_version", jet_cli_status_int(1)),
+            jet_cli_status_field("api_version", jet_cli_status_int(1)),
+            jet_cli_status_field("operation", jet_cli_status_text(name)),
+            jet_cli_status_field("value", value),
+        },
+    )
     jet_cli_done("{jet_cli_status_render("inspect.compiler.{name}", true, [JetCLIStatusField]{jet_cli_status_field("compiler", payload)})}\n", "", JET_DRIVER_EXIT_OK)
 }
 
@@ -787,48 +861,137 @@ jet_cli_compiler_source_map: fn(rust_source: String) -> JetCLIStatusValue Never!
     map: jet_eval_compiler_services_source_map(rust_source)
     lines := [JetCLIStatusValue]{}
     loop line in map.generated_lines {
-        lines.push(jet_cli_status_object([JetCLIStatusField]{
-            jet_cli_status_field("generated_line", jet_cli_status_int(line.generated_line)),
-            jet_cli_status_field("source", jet_cli_status_optional_text(line.source)),
-            jet_cli_status_field("source_line", jet_cli_status_int(line.source_line)),
-        }))
+        lines.push(
+            jet_cli_status_object(
+                [JetCLIStatusField]{
+                    jet_cli_status_field("generated_line", jet_cli_status_int(line.generated_line)),
+                    jet_cli_status_field("source", jet_cli_status_optional_text(line.source)),
+                    jet_cli_status_field("source_line", jet_cli_status_int(line.source_line)),
+                },
+            ),
+        )
     }
-    jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("schema_version", jet_cli_status_int(1)),
-        jet_cli_status_field("api_version", jet_cli_status_int(1)),
-        jet_cli_status_field("sources", jet_cli_status_texts(map.sources)),
-        jet_cli_status_field("generated_lines", jet_cli_status_array(lines)),
-    })
+    jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("schema_version", jet_cli_status_int(1)),
+            jet_cli_status_field("api_version", jet_cli_status_int(1)),
+            jet_cli_status_field("sources", jet_cli_status_texts(map.sources)),
+            jet_cli_status_field("generated_lines", jet_cli_status_array(lines)),
+        },
+    )
 }
 
 // `token_kind_name`, indexed by the jet_lexer `TOKEN_*` tag.
 JET_CLI_TOKEN_KIND_NAMES: [String]{
-    "", "identifier", "literal.raw_string", "literal.string", "literal.int", "literal.float",
-    "literal.unit_number", "literal.char", "literal.true", "literal.false", "keyword.self",
-    "literal.null", "keyword.break", "keyword.return", "punctuation.right_paren",
-    "punctuation.right_bracket", "punctuation.right_brace", "operator.try", "operator.plus_plus",
-    "operator.minus_minus", "operator.greater", "operator.shift_right", "operator.fence_close",
-    "punctuation.dot", "operator.optional_field", "operator.and", "operator.or", "operator.add",
-    "operator.subtract", "operator.star", "operator.divide", "operator.floor_divide",
-    "operator.modulo", "operator.remainder", "operator.equal", "operator.not_equal",
-    "operator.less", "operator.less_equal", "operator.greater_equal", "operator.compare",
-    "operator.amp", "operator.alternative", "operator.caret", "operator.tilde_pipe",
-    "operator.shift_left", "operator.fallback", "punctuation.left_brace",
-    "punctuation.left_paren", "punctuation.left_bracket", "eof", "operator.not",
-    "operator.unified_arrow", "", "", "operator.assign", "comment.line",
-    "comment.block", "keyword.fn", "keyword.pub", "keyword.priv", "keyword.if", "keyword.else",
-    "keyword.in", "keyword.mutate", "keyword.move", "keyword.copy", "keyword.struct",
-    "keyword.enum", "keyword.impl", "keyword.trait", "keyword.tag", "keyword.effect",
-    "keyword.derive", "keyword.it", "keyword.const", "keyword.comptime", "keyword.loop",
-    "keyword.yield", "keyword.use", "keyword.extern", "keyword.module", "operator.fence_open",
-    "punctuation.colon", "punctuation.colon_colon", "operator.bind_mutable",
-    "punctuation.comma", "terminator", "operator.range", "operator.range_exclusive",
-    "operator.spread", "punctuation.at", "operator.tilde", "operator.tilde_pipe_assign",
-    "operator.trait_attach", "operator.add_assign", "operator.subtract_assign",
-    "operator.multiply_assign", "operator.divide_assign", "operator.floor_divide_assign",
-    "operator.modulo_assign", "operator.remainder_assign", "operator.amp_assign",
-    "operator.bit_or_assign", "operator.caret_assign", "operator.shift_left_assign",
-    "operator.shift_right_assign", "punctuation.hash", "punctuation.dollar", "operator.pipe",
+    "",
+    "identifier",
+    "literal.raw_string",
+    "literal.string",
+    "literal.int",
+    "literal.float",
+    "literal.unit_number",
+    "literal.char",
+    "literal.true",
+    "literal.false",
+    "keyword.self",
+    "literal.null",
+    "keyword.break",
+    "keyword.return",
+    "punctuation.right_paren",
+    "punctuation.right_bracket",
+    "punctuation.right_brace",
+    "operator.try",
+    "operator.plus_plus",
+    "operator.minus_minus",
+    "operator.greater",
+    "operator.shift_right",
+    "operator.fence_close",
+    "punctuation.dot",
+    "operator.optional_field",
+    "operator.and",
+    "operator.or",
+    "operator.add",
+    "operator.subtract",
+    "operator.star",
+    "operator.divide",
+    "operator.floor_divide",
+    "operator.modulo",
+    "operator.remainder",
+    "operator.equal",
+    "operator.not_equal",
+    "operator.less",
+    "operator.less_equal",
+    "operator.greater_equal",
+    "operator.compare",
+    "operator.amp",
+    "operator.alternative",
+    "operator.caret",
+    "operator.tilde_pipe",
+    "operator.shift_left",
+    "operator.fallback",
+    "punctuation.left_brace",
+    "punctuation.left_paren",
+    "punctuation.left_bracket",
+    "eof",
+    "operator.not",
+    "operator.unified_arrow",
+    "",
+    "",
+    "operator.assign",
+    "comment.line",
+    "comment.block",
+    "keyword.fn",
+    "keyword.pub",
+    "keyword.priv",
+    "keyword.if",
+    "keyword.else",
+    "keyword.in",
+    "keyword.mutate",
+    "keyword.move",
+    "keyword.copy",
+    "keyword.struct",
+    "keyword.enum",
+    "keyword.impl",
+    "keyword.trait",
+    "keyword.tag",
+    "keyword.effect",
+    "keyword.derive",
+    "keyword.it",
+    "keyword.const",
+    "keyword.comptime",
+    "keyword.loop",
+    "keyword.yield",
+    "keyword.use",
+    "keyword.extern",
+    "keyword.module",
+    "operator.fence_open",
+    "punctuation.colon",
+    "punctuation.colon_colon",
+    "operator.bind_mutable",
+    "punctuation.comma",
+    "terminator",
+    "operator.range",
+    "operator.range_exclusive",
+    "operator.spread",
+    "punctuation.at",
+    "operator.tilde",
+    "operator.tilde_pipe_assign",
+    "operator.trait_attach",
+    "operator.add_assign",
+    "operator.subtract_assign",
+    "operator.multiply_assign",
+    "operator.divide_assign",
+    "operator.floor_divide_assign",
+    "operator.modulo_assign",
+    "operator.remainder_assign",
+    "operator.amp_assign",
+    "operator.bit_or_assign",
+    "operator.caret_assign",
+    "operator.shift_left_assign",
+    "operator.shift_right_assign",
+    "punctuation.hash",
+    "punctuation.dollar",
+    "operator.pipe",
     "operator.pipe_value",
 }
 
@@ -855,7 +1018,9 @@ jet_cli_compiler_diagnostics: fn(diagnostics: [Diagnostic]) -> JetCLIStatusValue
             jet_cli_status_field("fix", jet_cli_status_text(diagnostic.fix)),
             jet_cli_status_field("span", jet_cli_compiler_optional_span(diagnostic.span)),
         }
-        if diagnostic.edit == .Val(found) -> fields.push(jet_cli_status_field("edit", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("span", jet_cli_compiler_span(found.span.start, found.span.end)), jet_cli_status_field("new_text", jet_cli_status_text(found.new_text))})))
+        if diagnostic.edit == .Val(found) {
+            fields.push(jet_cli_status_field("edit", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("span", jet_cli_compiler_span(found.span.start, found.span.end)), jet_cli_status_field("new_text", jet_cli_status_text(found.new_text))})))
+        }
         values.push(jet_cli_status_object(fields))
     }
     jet_cli_status_array(values)
@@ -913,24 +1078,34 @@ jet_cli_compiler_lexed: fn(source: String) -> JetCLIStatusValue Never! {
         start: token.span.start
         end: token.span.end
         text := ""
-        if start < end && end <= bytes.len() -> text = String.from_bytes(bytes[start..end - 1]) ?? ""
+        if start < end && end <= bytes.len() {
+            text = String.from_bytes(bytes[start..end - 1]) ?? ""
+        }
         kind := ""
-        if token.kind >= 0 && token.kind < JET_CLI_TOKEN_KIND_NAMES.len() -> kind = JET_CLI_TOKEN_KIND_NAMES[token.kind]
-        tokens.push(jet_cli_status_object([JetCLIStatusField]{
-            jet_cli_status_field("kind", jet_cli_status_text(kind)),
-            jet_cli_status_field("text", jet_cli_status_text(text)),
-            jet_cli_status_field("span", jet_cli_compiler_span(start, end)),
-            jet_cli_status_field("start", jet_cli_compiler_position(positions, start)),
-            jet_cli_status_field("end", jet_cli_compiler_position(positions, end)),
-        }))
+        if token.kind >= 0 && token.kind < JET_CLI_TOKEN_KIND_NAMES.len() {
+            kind = JET_CLI_TOKEN_KIND_NAMES[token.kind]
+        }
+        tokens.push(
+            jet_cli_status_object(
+                [JetCLIStatusField]{
+                    jet_cli_status_field("kind", jet_cli_status_text(kind)),
+                    jet_cli_status_field("text", jet_cli_status_text(text)),
+                    jet_cli_status_field("span", jet_cli_compiler_span(start, end)),
+                    jet_cli_status_field("start", jet_cli_compiler_position(positions, start)),
+                    jet_cli_status_field("end", jet_cli_compiler_position(positions, end)),
+                },
+            ),
+        )
     }
-    jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("schema_version", jet_cli_status_int(1)),
-        jet_cli_status_field("api_version", jet_cli_status_int(1)),
-        jet_cli_status_field("source", jet_cli_status_text(source)),
-        jet_cli_status_field("tokens", jet_cli_status_array(tokens)),
-        jet_cli_status_field("diagnostics", jet_cli_compiler_diagnostics(diagnostics)),
-    })
+    jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("schema_version", jet_cli_status_int(1)),
+            jet_cli_status_field("api_version", jet_cli_status_int(1)),
+            jet_cli_status_field("source", jet_cli_status_text(source)),
+            jet_cli_status_field("tokens", jet_cli_status_array(tokens)),
+            jet_cli_status_field("diagnostics", jet_cli_compiler_diagnostics(diagnostics)),
+        },
+    )
 }
 
 // `item_node`: one top-level item's kind, name, and name span.
@@ -1084,11 +1259,13 @@ jet_cli_compiler_item: fn(item: Item) -> JetCLIStatusValue Never! {
             end = value.name_span.end
         }
     }
-    jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("kind", jet_cli_status_text(kind)),
-        jet_cli_status_field("name", jet_cli_status_optional_text(name)),
-        jet_cli_status_field("span", jet_cli_compiler_span(start, end)),
-    })
+    jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("kind", jet_cli_status_text(kind)),
+            jet_cli_status_field("name", jet_cli_status_optional_text(name)),
+            jet_cli_status_field("span", jet_cli_compiler_span(start, end)),
+        },
+    )
 }
 
 // `parse_source` + `status_syntax_tree`: lexer diagnostics (or a malformed
@@ -1108,20 +1285,20 @@ jet_cli_compiler_syntax_tree: fn(source: String) -> JetCLIStatusValue Never! {
         loop diagnostic in parsed.diagnostics {
             if diagnostic.severity == DIAGNOSTIC_ERROR -> errors.push(diagnostic)
         }
-        if errors.len() > 0 {
-            diagnostics = errors
-        } else {
+        if errors.len() > 0 -> diagnostics = errors else {
             diagnostics = parsed.diagnostics
             loop item in parsed.program.items -> items.push(jet_cli_compiler_item(item))
         }
     }
-    jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("schema_version", jet_cli_status_int(1)),
-        jet_cli_status_field("api_version", jet_cli_status_int(1)),
-        jet_cli_status_field("source", jet_cli_status_text(source)),
-        jet_cli_status_field("items", jet_cli_status_array(items)),
-        jet_cli_status_field("diagnostics", jet_cli_compiler_diagnostics(diagnostics)),
-    })
+    jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("schema_version", jet_cli_status_int(1)),
+            jet_cli_status_field("api_version", jet_cli_status_int(1)),
+            jet_cli_status_field("source", jet_cli_status_text(source)),
+            jet_cli_status_field("items", jet_cli_status_array(items)),
+            jet_cli_status_field("diagnostics", jet_cli_compiler_diagnostics(diagnostics)),
+        },
+    )
 }
 
 // `OperatorImpl`, with its operand and result types by name.
@@ -1171,7 +1348,9 @@ jet_cli_inspect_rhs_local: fn(ty: Type, local: [String]) -> Bool Never! {
 
 jet_cli_inspect_has_operator: fn(impls: [JetCLIOperatorImpl], left: String, trait_name: String, rhs: String) -> Bool Never! {
     loop existing in impls {
-        if existing.left == left && existing.trait_name == trait_name && existing.rhs == rhs -> return true
+        if existing.left == left && existing.trait_name == trait_name && existing.rhs == rhs {
+            return true
+        }
     }
     false
 }
@@ -1181,13 +1360,19 @@ jet_cli_inspect_has_operator: fn(impls: [JetCLIOperatorImpl], left: String, trai
 // hook method's declared result is the row's result.
 jet_cli_inspect_register_trait: fn(owner: String, trait_name: String, methods: [Func], operator_rhs: Type?, local: [String], params: [String:[TypeParam]], impls: &[JetCLIOperatorImpl]) {
     method_name: jet_cli_inspect_operator_method(trait_name)
-    if method_name == "" -> return
+    if method_name == "" {
+        return
+    }
     owner_type: jet_cli_inspect_owner_type(owner, params)
     rhs_type: operator_rhs ?? owner_type
     rhs: type_name(rhs_type)
-    if jet_cli_inspect_has_operator(impls, owner, trait_name, rhs) -> return
+    if jet_cli_inspect_has_operator(impls, owner, trait_name, rhs) {
+        return
+    }
     rhs_local: operator_rhs != None && jet_cli_inspect_rhs_local(rhs_type, local)
-    if !local.contains(owner) && !rhs_local -> return
+    if !local.contains(owner) && !rhs_local {
+        return
+    }
     loop method in methods {
         if method.name != method_name -> next
         result: method.return_type ?? return
@@ -1201,7 +1386,9 @@ jet_cli_inspect_register_trait: fn(owner: String, trait_name: String, methods: [
 // in a type body register the same way.
 jet_cli_inspect_register_impl: fn(owner: String, trait_name: String, methods: [Func], operator_rhs: Type?, delegation: String?, local: [String], params: [String:[TypeParam]], impls: &[JetCLIOperatorImpl]) {
     if delegation != None {
-        if jet_cli_inspect_operator_method(trait_name) == "" -> return
+        if jet_cli_inspect_operator_method(trait_name) == "" {
+            return
+        }
         owner_type: jet_cli_inspect_owner_type(owner, params)
         rhs_type: operator_rhs ?? owner_type
         impls.push(JetCLIOperatorImpl{left: owner, trait_name: trait_name, rhs: type_name(rhs_type), result: type_name(owner_type), explicit_rhs: operator_rhs != None})
@@ -1213,7 +1400,9 @@ jet_cli_inspect_register_impl: fn(owner: String, trait_name: String, methods: [F
 // `register_synthetic_operators`: Core's typed vector/scalar hook rows unless
 // the module declares the same hook.
 jet_cli_inspect_synthetic_operator: fn(impls: &[JetCLIOperatorImpl], left: String, trait_name: String, rhs: String, result: String) {
-    if jet_cli_inspect_has_operator(impls, left, trait_name, rhs) -> return
+    if jet_cli_inspect_has_operator(impls, left, trait_name, rhs) {
+        return
+    }
     impls.push(JetCLIOperatorImpl{left: left, trait_name: trait_name, rhs: rhs, result: result, explicit_rhs: true})
 }
 
@@ -1225,9 +1414,9 @@ jet_cli_inspect_operator_impls: fn(program: Program) -> [JetCLIOperatorImpl] Nev
     local := [String]{}
     loop item in program.items {
         if item == {
-            .Struct(value) -> local.push(value.name)
-            .Enum(value) -> local.push(value.name)
-            .TypeAlias(value) -> local.push(value.name)
+            .Struct(value) -> { local.push(value.name) }
+            .Enum(value) -> { local.push(value.name) }
+            .TypeAlias(value) -> { local.push(value.name) }
             .Distinct(value) -> local.push(value.name)
             .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
@@ -1239,12 +1428,14 @@ jet_cli_inspect_operator_impls: fn(program: Program) -> [JetCLIOperatorImpl] Nev
             .Struct(value) -> {
                 if value.type_params.len() > 0 -> params[value.name] = value.type_params
             }
-            .Enum(value) -> params[value.name] = value.type_params
+            .Enum(value) -> { params[value.name] = value.type_params }
             .TypeAlias(value) -> {
                 if value.type_params.len() > 0 -> params[value.name] = value.type_params
             }
             .Impl(value) -> {
-                if value.trait_name == .Val(trait_name) -> jet_cli_inspect_register_impl(value.type_name, trait_name, value.methods, value.operator_rhs, value.delegation_field, local, params, impls)
+                if value.trait_name == .Val(trait_name) {
+                    jet_cli_inspect_register_impl(value.type_name, trait_name, value.methods, value.operator_rhs, value.delegation_field, local, params, impls)
+                }
             }
             .Func(_) | .Distinct(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
@@ -1252,10 +1443,14 @@ jet_cli_inspect_operator_impls: fn(program: Program) -> [JetCLIOperatorImpl] Nev
     loop item in program.items {
         if item == {
             .Struct(value) -> {
-                loop block in value.trait_impls -> jet_cli_inspect_register_impl(value.name, block.trait_name, block.methods, block.operator_rhs, block.delegation_field, local, params, impls)
+                loop block in value.trait_impls {
+                    jet_cli_inspect_register_impl(value.name, block.trait_name, block.methods, block.operator_rhs, block.delegation_field, local, params, impls)
+                }
             }
             .Enum(value) -> {
-                loop block in value.trait_impls -> jet_cli_inspect_register_impl(value.name, block.trait_name, block.methods, block.operator_rhs, block.delegation_field, local, params, impls)
+                loop block in value.trait_impls {
+                    jet_cli_inspect_register_impl(value.name, block.trait_name, block.methods, block.operator_rhs, block.delegation_field, local, params, impls)
+                }
             }
             .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
@@ -1291,7 +1486,9 @@ jet_cli_inspect_programs: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> [Pr
 jet_cli_inspect_types: fn(programs: [Program], json: Bool) -> JetDriverVerbOutput Never! {
     registered := [JetCLIOperatorImpl]{}
     loop program in programs {
-        loop implementation in jet_cli_inspect_operator_impls(program) -> registered.push(implementation)
+        loop implementation in jet_cli_inspect_operator_impls(program) {
+            registered.push(implementation)
+        }
     }
     slots := [String:Int]{}
     owners := [String]{}
@@ -1307,14 +1504,16 @@ jet_cli_inspect_types: fn(programs: [Program], json: Bool) -> JetDriverVerbOutpu
         if jet_cli_inspect_plain_number(rhs) && !jet_cli_inspect_plain_number(left) && owned_trait_commutative(implementation.trait_name) {
             explicit_reverse := false
             loop candidate in registered {
-                if candidate.explicit_rhs && candidate.left == rhs && candidate.trait_name == implementation.trait_name && candidate.rhs == left -> explicit_reverse = true
+                if candidate.explicit_rhs && candidate.left == rhs && candidate.trait_name == implementation.trait_name && candidate.rhs == left {
+                    explicit_reverse = true
+                }
             }
-            if !explicit_reverse -> rows.push("{rhs} {symbol} {left} -> {implementation.result}  mirror of {source}")
+            if !explicit_reverse {
+                rows.push("{rhs} {symbol} {left} -> {implementation.result}  mirror of {source}")
+            }
         }
         slot := grouped.len()
-        if slots.get(owner) == .Val(found) {
-            slot = found
-        } else {
+        if slots.get(owner) == .Val(found) -> slot = found else {
             slots[owner] = slot
             owners.push(owner)
             grouped.push([String]{})
@@ -1340,7 +1539,9 @@ jet_cli_inspect_types: fn(programs: [Program], json: Bool) -> JetDriverVerbOutpu
             loop row in rows -> out = "{out}  {row}\n"
         }
     }
-    if json -> out = "{jet_cli_status_render("inspect.types", true, [JetCLIStatusField]{jet_cli_status_field("types", jet_cli_status_array(values))})}\n"
+    if json {
+        out = "{jet_cli_status_render("inspect.types", true, [JetCLIStatusField]{jet_cli_status_field("types", jet_cli_status_array(values))})}\n"
+    }
     JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
@@ -1361,7 +1562,9 @@ jet_cli_inspect_check_failed: fn(job: JetCLIInspectJob, source: String, errors: 
 // `emit_diag`: one spanless report, the `cli` status line on stdout under
 // `--json`.
 jet_cli_replay_fail: fn(job: JetCLIInspectJob, code: String, what: String, why: String, fix: String, exit_code: Int) -> JetDriverVerbOutput Never! {
-    if job.json -> return JetDriverVerbOutput{stdout: jet_cli_fail_json(code, what, why, fix), stderr: "", exit_code: exit_code}
+    if job.json {
+        return JetDriverVerbOutput{stdout: jet_cli_fail_json(code, what, why, fix), stderr: "", exit_code: exit_code}
+    }
     jet_cli_report_output("", code, what, why, fix, job.color, exit_code)
 }
 
@@ -1371,7 +1574,9 @@ jet_cli_replay_path_problem: fn(path: String) -> String? Never! {
     if path == "" -> return Val("replay artifact path is empty")
     loop byte in path.bytes() {
         code: Int{byte}
-        if code == 0 || code == 92 -> return Val("replay artifact path must use forward-slash components")
+        if code == 0 || code == 92 {
+            return Val("replay artifact path must use forward-slash components")
+        }
     }
     absolute: path.starts_with("/")
     relative: if absolute -> path.slice(1..<path.len()) else -> path
@@ -1380,7 +1585,9 @@ jet_cli_replay_path_problem: fn(path: String) -> String? Never! {
         if part == "" -> return Val("replay artifact path must use non-empty components")
     }
     loop (index, part) in parts {
-        if part == ".." || (index == 0 && !absolute && part == ".") -> return Val("replay artifact path contains an unsafe component")
+        if part == ".." || (index == 0 && !absolute && part == ".") {
+            return Val("replay artifact path contains an unsafe component")
+        }
     }
     name: parts[parts.len() - 1]
     if name.starts_with(".") || !name.ends_with(".jetproof-replay") || name.len() == ".jetproof-replay".len() {
@@ -1393,7 +1600,9 @@ jet_cli_replay_name_problem: fn(name: String) -> String? Never! {
     valid := name != ""
     loop byte in name.bytes() {
         code: Int{byte}
-        if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 95) -> valid = false
+        if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 95) {
+            valid = false
+        }
     }
     if valid -> return None
     Val("replay NAME must be non-empty and contain only ASCII letters, digits, `-`, or `_`")
@@ -1432,17 +1641,21 @@ jet_cli_inspect_replay_host: fn(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     cwd: cli_files.cwd() ?? return jet_cli_replay_fail(job, "E3621", identity_what, "could not resolve the project root: {err}", identity_fix, JET_DRIVER_EXIT_USER_ERROR)
     absolute: if job.file.starts_with("/") -> job.file else -> jet_cli_entry_join(cwd, job.file)
     prefix: if cwd.ends_with("/") -> cwd else -> "{cwd}/"
-    if absolute != cwd && !absolute.starts_with(prefix) -> return jet_cli_replay_fail(job, "E3621", identity_what, "entry identity must be inside the current project", identity_fix, JET_DRIVER_EXIT_USER_ERROR)
+    if absolute != cwd && !absolute.starts_with(prefix) {
+        return jet_cli_replay_fail(job, "E3621", identity_what, "entry identity must be inside the current project", identity_fix, JET_DRIVER_EXIT_USER_ERROR)
+    }
     relative: if absolute == cwd -> "" else -> absolute.slice(prefix.len()..<absolute.len())
     clean := relative != "" && !relative.starts_with("/")
     loop part in relative.split("/").to_list() {
         if part == "" || part == "." || part == ".." -> clean = false
     }
-    if !clean -> return jet_cli_replay_fail(job, "E3621", identity_what, "entry identity must be a clean project-relative path", identity_fix, JET_DRIVER_EXIT_USER_ERROR)
+    if !clean {
+        return jet_cli_replay_fail(job, "E3621", identity_what, "entry identity must be a clean project-relative path", identity_fix, JET_DRIVER_EXIT_USER_ERROR)
+    }
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled: jet_cli_compile_file(job.file, job.color, job.threads, JetDriverCompileMode.Program)
     if compiled == {
-        .Refused(refusal) -> output = refusal.move()
+        .Refused(refusal) -> { output = refusal.move() }
         .Compiled(result, snapshot) -> {
             diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             checked: jet_cli_errors(diagnostics).len() == 0 && result.internal_problem == None
@@ -1461,19 +1674,29 @@ jet_cli_inspect_replay_artifact: fn(job: JetCLIInspectJob, artifact: String, abs
     name_fix: "write `--replay=NAME` with a valid replay name or artifact path"
     path := ""
     if artifact.ends_with(".jetproof-replay") || artifact.contains("/") {
-        if jet_cli_replay_path_problem(artifact) == .Val(problem) -> return jet_cli_replay_fail(job, "E2104", "invalid replay name", problem, name_fix, JET_DRIVER_EXIT_USAGE)
+        if jet_cli_replay_path_problem(artifact) == .Val(problem) {
+            return jet_cli_replay_fail(job, "E2104", "invalid replay name", problem, name_fix, JET_DRIVER_EXIT_USAGE)
+        }
         path = if jet_cli_replay_in_project_cache(artifact) -> jet_cli_entry_join(root, artifact) else -> artifact
     } else {
-        if jet_cli_replay_name_problem(artifact) == .Val(problem) -> return jet_cli_replay_fail(job, "E2104", "invalid replay name", problem, name_fix, JET_DRIVER_EXIT_USAGE)
+        if jet_cli_replay_name_problem(artifact) == .Val(problem) {
+            return jet_cli_replay_fail(job, "E2104", "invalid replay name", problem, name_fix, JET_DRIVER_EXIT_USAGE)
+        }
         path = jet_cli_entry_join(root, ".jet/replays/{artifact}.jetproof-replay")
     }
     unavailable: "replay artifact is corrupt or unavailable"
     recapture: "recapture the target and retry"
-    if jet_cli_replay_path_problem(path) == .Val(problem) -> return jet_cli_replay_fail(job, "E3622", unavailable, problem, recapture, JET_DRIVER_EXIT_USER_ERROR)
+    if jet_cli_replay_path_problem(path) == .Val(problem) {
+        return jet_cli_replay_fail(job, "E3622", unavailable, problem, recapture, JET_DRIVER_EXIT_USER_ERROR)
+    }
     resolved: if jet_cli_replay_in_project_cache(path) -> jet_cli_entry_join(root, path) else -> path
-    if jet_cli_replay_parent_problem(resolved) == .Val(problem) -> return jet_cli_replay_fail(job, "E3622", unavailable, problem, recapture, JET_DRIVER_EXIT_USER_ERROR)
+    if jet_cli_replay_parent_problem(resolved) == .Val(problem) {
+        return jet_cli_replay_fail(job, "E3622", unavailable, problem, recapture, JET_DRIVER_EXIT_USER_ERROR)
+    }
     stat: cli_files.stat(resolved) ?? return jet_cli_replay_fail(job, "E3622", unavailable, "could not inspect `{path}`: {err}", recapture, JET_DRIVER_EXIT_USER_ERROR)
-    if stat.is_symlink || !stat.is_file -> return jet_cli_replay_fail(job, "E3622", unavailable, "replay artifact is not a regular file: {path}", recapture, JET_DRIVER_EXIT_USER_ERROR)
+    if stat.is_symlink || !stat.is_file {
+        return jet_cli_replay_fail(job, "E3622", unavailable, "replay artifact is not a regular file: {path}", recapture, JET_DRIVER_EXIT_USER_ERROR)
+    }
     jet_cli_not_ported_output("inspect --replay", job.color)
 }
 
@@ -1503,7 +1726,9 @@ jet_cli_inspect_run_job: fn(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     if job.action == "provenance" -> return jet_cli_inspect_provenance_host(job)
     // Structure prints any retained partial facts ahead of failing diagnostics,
     // so it skips the generic check preflight below.
-    if job.action == "structure" -> return jet_cli_structure_host(job.file, job.color, job.json, job.threads, job.notice)
+    if job.action == "structure" {
+        return jet_cli_structure_host(job.file, job.color, job.json, job.threads, job.notice)
+    }
     if !cli_files.is_file(job.file) {
         missing: diagnostic_from_registry("E0603", None, "can't find the file `{jet_cli_inspect_absolute(job.file)}`", "a named `.jet` source path must point at an existing file", "check the spelling, or create the missing file")
         return jet_cli_inspect_check_failed(job, "", [Diagnostic]{missing})
@@ -1513,14 +1738,16 @@ jet_cli_inspect_run_job: fn(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     if job.action == "memory" -> return jet_cli_inspect_memory_host(job, source)
     if job.action == "choices" -> return jet_cli_inspect_choices_host(job, source)
     if job.action == "facts" -> return jet_cli_inspect_facts_host(job, source)
-    if job.action == "graph" || job.action == "query" || job.action == "explain-build" -> return jet_cli_inspect_checked_build_host(job)
+    if job.action == "graph" || job.action == "query" || job.action == "explain-build" {
+        return jet_cli_inspect_checked_build_host(job)
+    }
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     semantic: job.action == "rights" || job.action == "impact" || job.action == "shapes" || job.action == "expand" || job.action == "web-graph" || job.action == "routes" || job.action == "explain-effects"
     mode: if semantic -> JetDriverCompileMode.Doc else -> JetDriverCompileMode.Program
     watch: cli_time.start()
     compiled: jet_cli_compile_file(job.file, job.color, job.threads, mode)
     if compiled == {
-        .Refused(refusal) -> output = refusal.move()
+        .Refused(refusal) -> { output = refusal.move() }
         .Compiled(result, snapshot) -> {
             diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             errors: jet_cli_errors(diagnostics)
@@ -1534,15 +1761,29 @@ jet_cli_inspect_run_job: fn(job: JetCLIInspectJob) -> JetDriverVerbOutput {
                     output = JetDriverVerbOutput{stdout: report.stdout, stderr: failed.stderr, exit_code: failed.exit_code}
                 }
                 errors.len() > 0 -> output = jet_cli_inspect_check_failed(job, source, errors)
-                result.internal_problem != None -> output = jet_cli_ice(result.internal_problem ?? "")
-                job.action == "types" -> output = jet_cli_inspect_types(jet_cli_inspect_programs(snapshot), job.json)
-                job.action == "shapes" -> output = jet_cli_inspect_shapes(result.doc_modules, job.json, job.color)
-                job.action == "rights" -> output = jet_cli_inspect_rights(result, job.project, job.file, job.json)
-                job.action == "impact" -> output = jet_cli_inspect_impact_report(job, result, diagnostics.len(), watch.elapsed_millis())
-                job.action == "expand" -> output = jet_cli_inspect_expand_report(job, result, diagnostics.len(), watch.elapsed_millis())
+                result.internal_problem != None -> {
+                    output = jet_cli_ice(result.internal_problem ?? "")
+                }
+                job.action == "types" -> {
+                    output = jet_cli_inspect_types(jet_cli_inspect_programs(snapshot), job.json)
+                }
+                job.action == "shapes" -> {
+                    output = jet_cli_inspect_shapes(result.doc_modules, job.json, job.color)
+                }
+                job.action == "rights" -> {
+                    output = jet_cli_inspect_rights(result, job.project, job.file, job.json)
+                }
+                job.action == "impact" -> {
+                    output = jet_cli_inspect_impact_report(job, result, diagnostics.len(), watch.elapsed_millis())
+                }
+                job.action == "expand" -> {
+                    output = jet_cli_inspect_expand_report(job, result, diagnostics.len(), watch.elapsed_millis())
+                }
                 job.action == "web-graph" -> output = jet_cli_web_graph_report(result, job.json)
                 job.action == "routes" -> output = jet_cli_web_routes_report(result, job.json)
-                job.action == "explain-effects" -> output = jet_cli_explain_effects_report(result, job)
+                job.action == "explain-effects" -> {
+                    output = jet_cli_explain_effects_report(result, job)
+                }
                 else -> panic("inspect action has no canonical provider: {job.action}")
             }
             jet_cli_inspect_finish(job, output)
@@ -1563,7 +1804,9 @@ jet_cli_inspect_checked_build_host: fn(job: JetCLIInspectJob) -> JetDriverVerbOu
                 snapshot: request.authorized_sources
                 workspace := String?{None}
                 loop root in snapshot.roots {
-                    if root.identity == snapshot.entry_root_identity -> workspace = Val(root.canonical_path)
+                    if root.identity == snapshot.entry_root_identity {
+                        workspace = Val(root.canonical_path)
+                    }
                 }
                 root: workspace ?? return jet_cli_ice("the selected build entry has no authenticated source root")
                 program: jet_cli_build_record_program_at(snapshot.entry_path, root, cli_files.cwd() ?? return jet_cli_ice("could not read the build host working directory"))
@@ -1571,7 +1814,9 @@ jet_cli_inspect_checked_build_host: fn(job: JetCLIInspectJob) -> JetDriverVerbOu
                 record: if store.last_build_record(root, program) == {
                     .Val(value) -> Val(value)
                     .None -> None
-                    .Err(error) -> { return jet_cli_execute(jet_cli_inspect_b_report("E2104", "can't read authenticated build execution-node evidence", "{error}", "check the selected workspace last-run pointer and artifact store", job.color, job.json, JET_DRIVER_EXIT_USER_ERROR)) }
+                    .Err(error) -> {
+                        return jet_cli_execute(jet_cli_inspect_b_report("E2104", "can't read authenticated build execution-node evidence", "{error}", "check the selected workspace last-run pointer and artifact store", job.color, job.json, JET_DRIVER_EXIT_USER_ERROR))
+                    }
                 }
                 return jet_cli_build_nodes_host(request, scope, job.file, program, record, job.json, job.color, job.verbose)
             }
@@ -1623,7 +1868,9 @@ jet_cli_inspect_impact_report: fn(job: JetCLIInspectJob, result: JetDriverCompil
     }
     call_sites := [JetCLIImpactEdge]{}
     loop call in index.calls {
-        if call.callee == symbol -> call_sites.push(JetCLIImpactEdge{depth: 1, caller: call.caller, callee: call.callee, module_path: call.module_path, span: call.span})
+        if call.callee == symbol {
+            call_sites.push(JetCLIImpactEdge{depth: 1, caller: call.caller, callee: call.callee, module_path: call.module_path, span: call.span})
+        }
     }
     upstream := [JetCLIImpactEdge]{}
     downstream := [JetCLIImpactEdge]{}
@@ -1635,29 +1882,40 @@ jet_cli_inspect_impact_report: fn(job: JetCLIInspectJob, result: JetDriverCompil
     if job.json {
         check: jet_cli_inspect_check_value(source, elapsed_ms, diagnostics, JET_BUILD_DEFAULT_PROFILE)
         definition_value: if definition_module == .Val(name) -> jet_cli_status_text(name) else -> JetCLIStatusValue.Null
-        impact: jet_cli_status_object([JetCLIStatusField]{
-            jet_cli_status_field("symbol", jet_cli_status_text(symbol)),
-            jet_cli_status_field("found", jet_cli_status_bool(found)),
-            jet_cli_status_field("depth_limit", jet_cli_status_int(job.depth)),
-            jet_cli_status_field("definition_module", definition_value),
-            jet_cli_status_field("references", jet_cli_status_array(loop reference in references -> jet_cli_status_object([JetCLIStatusField]{
-                jet_cli_status_field("depth", jet_cli_status_int(1)),
-                jet_cli_status_field("name", jet_cli_status_text(reference.name)),
-                jet_cli_status_field("module_path", jet_cli_status_text(reference.module_path)),
-                jet_cli_status_field("span", jet_cli_compiler_span(reference.span.start, reference.span.end)),
-            }))),
-            jet_cli_status_field("call_sites", jet_cli_impact_edges_value(call_sites)),
-            jet_cli_status_field("upstream_callers", jet_cli_impact_edges_value(upstream)),
-            jet_cli_status_field("downstream_callees", jet_cli_impact_edges_value(downstream)),
-            jet_cli_status_field("check", check),
-        })
+        impact: jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field("symbol", jet_cli_status_text(symbol)),
+                jet_cli_status_field("found", jet_cli_status_bool(found)),
+                jet_cli_status_field("depth_limit", jet_cli_status_int(job.depth)),
+                jet_cli_status_field("definition_module", definition_value),
+                jet_cli_status_field(
+                    "references",
+                    jet_cli_status_array(
+                        loop reference in references -> jet_cli_status_object(
+                            [JetCLIStatusField]{
+                                jet_cli_status_field("depth", jet_cli_status_int(1)),
+                                jet_cli_status_field("name", jet_cli_status_text(reference.name)),
+                                jet_cli_status_field("module_path", jet_cli_status_text(reference.module_path)),
+                                jet_cli_status_field("span", jet_cli_compiler_span(reference.span.start, reference.span.end)),
+                            },
+                        ),
+                    ),
+                ),
+                jet_cli_status_field("call_sites", jet_cli_impact_edges_value(call_sites)),
+                jet_cli_status_field("upstream_callers", jet_cli_impact_edges_value(upstream)),
+                jet_cli_status_field("downstream_callees", jet_cli_impact_edges_value(downstream)),
+                jet_cli_status_field("check", check),
+            },
+        )
         status: if found -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("inspect.impact", found, [JetCLIStatusField]{jet_cli_status_field("impact", impact)})}\n", stderr: "", exit_code: status}
     }
     out := jet_cli_inspect_check_text(source, elapsed_ms, diagnostics, JET_BUILD_DEFAULT_PROFILE)
     if !found {
         out = "{out}symbol `{symbol}` not found in index\n"
-        if references.len() == 0 && call_sites.len() == 0 -> return JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        if references.len() == 0 && call_sites.len() == 0 {
+            return JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        }
         out = "{out}partial matches from name references/calls:\n"
     } else {
         defined: if definition_module == .Val(name) -> " (defined in {name})" else -> ""
@@ -1665,10 +1923,18 @@ jet_cli_inspect_impact_report: fn(job: JetCLIInspectJob, result: JetDriverCompil
     }
     out = "{out}  references:        {references.len()}\n  direct call sites: {call_sites.len()}\n"
     out = "{out}  upstream callers:  {upstream.len()} (depth <= {job.depth})\n  downstream callees:{downstream.len()} (depth <= {job.depth})\n"
-    loop reference in references -> out = "{out}  ref  {reference.module_path}:{reference.span.start}..{reference.span.end}\n"
-    loop edge in call_sites -> out = "{out}  call {edge.caller} -> {edge.callee} @ {edge.module_path}:{edge.span.start}..{edge.span.end}\n"
-    loop edge in upstream -> out = "{out}  upstream[d{edge.depth}] {edge.caller} -> {edge.callee} @ {edge.module_path}\n"
-    loop edge in downstream -> out = "{out}  downstream[d{edge.depth}] {edge.caller} -> {edge.callee} @ {edge.module_path}\n"
+    loop reference in references {
+        out = "{out}  ref  {reference.module_path}:{reference.span.start}..{reference.span.end}\n"
+    }
+    loop edge in call_sites {
+        out = "{out}  call {edge.caller} -> {edge.callee} @ {edge.module_path}:{edge.span.start}..{edge.span.end}\n"
+    }
+    loop edge in upstream {
+        out = "{out}  upstream[d{edge.depth}] {edge.caller} -> {edge.callee} @ {edge.module_path}\n"
+    }
+    loop edge in downstream {
+        out = "{out}  downstream[d{edge.depth}] {edge.caller} -> {edge.callee} @ {edge.module_path}\n"
+    }
     status: if found -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR
     JetDriverVerbOutput{stdout: out, stderr: "", exit_code: status}
 }
@@ -1677,7 +1943,9 @@ jet_cli_inspect_impact_report: fn(job: JetCLIInspectJob, result: JetDriverCompil
 // record impact and expand carry.
 jet_cli_inspect_check_value: fn(source: String, elapsed_ms: Int, diagnostics: Int, profile: String) -> JetCLIStatusValue Never! {
     fields := [JetCLIStatusField]{jet_cli_status_field("status", jet_cli_status_text("passed"))}
-    loop field in jet_cli_check_result_fields(source, elapsed_ms, diagnostics, profile) -> fields.push(field)
+    loop field in jet_cli_check_result_fields(source, elapsed_ms, diagnostics, profile) {
+        fields.push(field)
+    }
     jet_cli_status_object(fields)
 }
 
@@ -1689,21 +1957,27 @@ jet_cli_inspect_check_value: fn(source: String, elapsed_ms: Int, diagnostics: In
 jet_cli_check_result_fields: fn(source: String, elapsed_ms: Int, diagnostics: Int, profile: String) -> [JetCLIStatusField] Never! {
     rows := [JetCLIStatusValue]{}
     loop row in JET_CLI_EXPLICIT_FILE_PROOF_ROWS {
-        rows.push(jet_cli_status_object([JetCLIStatusField]{
-            jet_cli_status_field("output", jet_cli_status_text("not-applicable")),
-            jet_cli_status_field("name", jet_cli_status_text(row[0])),
-            jet_cli_status_field("status", jet_cli_status_text("not applicable")),
-            jet_cli_status_field("detail", jet_cli_status_text(row[1])),
-            jet_cli_status_field("diagnostic", jet_cli_status_text(row[2])),
-        }))
+        rows.push(
+            jet_cli_status_object(
+                [JetCLIStatusField]{
+                    jet_cli_status_field("output", jet_cli_status_text("not-applicable")),
+                    jet_cli_status_field("name", jet_cli_status_text(row[0])),
+                    jet_cli_status_field("status", jet_cli_status_text("not applicable")),
+                    jet_cli_status_field("detail", jet_cli_status_text(row[1])),
+                    jet_cli_status_field("diagnostic", jet_cli_status_text(row[2])),
+                },
+            ),
+        )
     }
-    provenance: jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("source", jet_cli_status_text(source)),
-        jet_cli_status_field("profile", jet_cli_status_text(profile)),
-        jet_cli_status_field("front_end", jet_cli_status_text(JET_CLI_CHECK_FRONT_END)),
-        jet_cli_status_field("programmable_build", jet_cli_status_text("not-selected")),
-        jet_cli_status_field("diagnostics", jet_cli_status_int(diagnostics)),
-    })
+    provenance: jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("source", jet_cli_status_text(source)),
+            jet_cli_status_field("profile", jet_cli_status_text(profile)),
+            jet_cli_status_field("front_end", jet_cli_status_text(JET_CLI_CHECK_FRONT_END)),
+            jet_cli_status_field("programmable_build", jet_cli_status_text("not-selected")),
+            jet_cli_status_field("diagnostics", jet_cli_status_int(diagnostics)),
+        },
+    )
     [JetCLIStatusField]{
         jet_cli_status_field("contract", jet_cli_status_text("jet.check/v1")),
         jet_cli_status_field("schema_version", jet_cli_status_int(1)),
@@ -1734,7 +2008,9 @@ jet_cli_inspect_expand_report: fn(job: JetCLIInspectJob, result: JetDriverCompil
         "inline" -> facts = jet_cli_expand_inline(result.doc_modules, job.json)
         "effects" -> facts = jet_cli_expand_effects(index)
         "derive" -> facts = jet_cli_expand_derive(index, result.doc_modules)
-        "web" -> facts = jet_cli_expand_web(result.doc_modules, result.entry_module_identity, job.json)
+        "web" -> {
+            facts = jet_cli_expand_web(result.doc_modules, result.entry_module_identity, job.json)
+        }
         "templates" -> facts = jet_cli_expand_templates(result.doc_modules)
         "callable-signature" -> facts = jet_cli_expand_callable(index, result.doc_modules)
         "memory" -> facts = jet_cli_expand_memory(result.doc_modules, index)
@@ -1766,13 +2042,17 @@ JET_CLI_EXPLICIT_FILE_PROOF_ROWS: [[String]]{
 JET_CLI_CHECK_FRONT_END: "jet_cli_compile_file"
 
 jet_cli_impact_edges_value: fn(edges: [JetCLIImpactEdge]) -> JetCLIStatusValue Never! {
-    jet_cli_status_array(loop edge in edges -> jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("depth", jet_cli_status_int(edge.depth)),
-        jet_cli_status_field("caller", jet_cli_status_text(edge.caller)),
-        jet_cli_status_field("callee", jet_cli_status_text(edge.callee)),
-        jet_cli_status_field("module_path", jet_cli_status_text(edge.module_path)),
-        jet_cli_status_field("span", jet_cli_compiler_span(edge.span.start, edge.span.end)),
-    }))
+    jet_cli_status_array(
+        loop edge in edges -> jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field("depth", jet_cli_status_int(edge.depth)),
+                jet_cli_status_field("caller", jet_cli_status_text(edge.caller)),
+                jet_cli_status_field("callee", jet_cli_status_text(edge.callee)),
+                jet_cli_status_field("module_path", jet_cli_status_text(edge.module_path)),
+                jet_cli_status_field("span", jet_cli_compiler_span(edge.span.start, edge.span.end)),
+            },
+        ),
+    )
 }
 
 // jet-impact `transitive_callers` (`upstream`) / `transitive_callees`: a

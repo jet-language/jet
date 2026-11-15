@@ -14,7 +14,7 @@ numeric_node_shift: fn(node: I64, bits: I64) {
         int_scale(node, I64{536870912}, I64{0})
         count -= I64{29}
     }
-    if (count != I64{0}) -> int_scale(node, I64{1} << count, I64{0})
+    if (count != I64{0}) { int_scale(node, I64{1} << count, I64{0}) }
 }
 
 numeric_node_power10: fn(node: I64, power: I64) {
@@ -28,7 +28,7 @@ numeric_node_power10: fn(node: I64, power: I64) {
         factor *= I64{10}
         count -= I64{1}
     }
-    if (factor != I64{1}) -> int_scale(node, factor, I64{0})
+    if (factor != I64{1}) { int_scale(node, factor, I64{0}) }
 }
 
 // Compare a with 2*b without allocating/copying a third workspace. A base1e9
@@ -37,14 +37,14 @@ numeric_node_compare_twice: fn(a: I64, b: I64) -> I64 {
     al: int_load(wrapping(a + I64{32}))
     bl: int_load(wrapping(b + I64{32}))
     doubled: bl + (if (int_get(b, bl - I64{1}) >= I64{500000000}) -> I64{1} else -> I64{0})
-    if (al != doubled) -> return if (al < doubled) -> I64{-1} else -> I64{1}
+    if (al != doubled) { return if (al < doubled) -> I64{-1} else -> I64{1} }
     at := al
     loop at > (I64{0}) {
         at -= I64{1}
         carry: if (at > I64{0} && int_get(b, at - I64{1}) >= I64{500000000}) -> I64{1} else -> I64{0}
         rhs: if (at == bl) -> I64{1} else -> (int_get(b, at) * I64{2} + carry) % I64{1000000000}
         lhs: int_get(a, at)
-        if (lhs != rhs) -> return if (lhs < rhs) -> I64{-1} else -> I64{1}
+        if (lhs != rhs) { return if (lhs < rhs) -> I64{-1} else -> I64{1} }
     }
     I64{0}
 }
@@ -54,7 +54,9 @@ numeric_node_compare_twice: fn(a: I64, b: I64) -> I64 {
 // Exact remainder comparison supplies guard+sticky together, including ties.
 numeric_float_ratio_bits: fn(numerator: I64, denominator: I64, decimal_exponent: I64) -> I64 {
     exponent := decimal_exponent * I64{3322} /% I64{1000}
-    if (exponent < I64{0}) -> numeric_node_shift(numerator, -exponent) else -> numeric_node_shift(denominator, exponent)
+    if (exponent < I64{0}) { numeric_node_shift(numerator, -exponent) } else {
+        numeric_node_shift(denominator, exponent)
+    }
     loop int_compare_abs(int_tag(numerator), int_tag(denominator)) < (I64{0}) {
         int_scale(numerator, I64{2}, I64{0})
         exponent -= I64{1}
@@ -63,8 +65,8 @@ numeric_float_ratio_bits: fn(numerator: I64, denominator: I64, decimal_exponent:
         int_scale(denominator, I64{2}, I64{0})
         exponent += I64{1}
     }
-    if (exponent > I64{1023}) -> return I64{9218868437227405312}
-    if (exponent < I64{-1075}) -> return I64{0}
+    if (exponent > I64{1023}) { return I64{9218868437227405312} }
+    if (exponent < I64{-1075}) { return I64{0} }
     if (exponent == I64{-1075}) {
         // Exactly half a minimum subnormal rounds to even zero.
         return if (int_compare_abs(int_tag(numerator), int_tag(denominator)) == I64{0}) -> I64{0} else -> I64{1}
@@ -80,15 +82,17 @@ numeric_float_ratio_bits: fn(numerator: I64, denominator: I64, decimal_exponent:
             int_sub_assign(numerator, int_tag(denominator))
         }
         at += I64{1}
-        if (at < count) -> int_scale(numerator, I64{2}, I64{0})
+        if (at < count) { int_scale(numerator, I64{2}, I64{0}) }
     }
     halfway: numeric_node_compare_twice(denominator, numerator)
-    if (halfway < I64{0} || (halfway == I64{0} && (mantissa.bit_and(I64{1})) != I64{0})) -> mantissa += I64{1}
+    if (halfway < I64{0} || (halfway == I64{0} && (mantissa.bit_and(I64{1})) != I64{0})) {
+        mantissa += I64{1}
+    }
     if !normal -> return mantissa
     if (mantissa == I64{9007199254740992}) {
         mantissa >>= I64{1}
         exponent += I64{1}
-        if (exponent > I64{1023}) -> return I64{9218868437227405312}
+        if (exponent > I64{1023}) { return I64{9218868437227405312} }
     }
     ((exponent + I64{1023}) << I64{52}).bit_or((mantissa - I64{4503599627370496}))
 }
@@ -109,7 +113,7 @@ numeric_float_error: fn(text: I64, err: I64) -> I64 {
     if (at < end) {
         byte: rt_text_byte(wrapping(data + at))
         if (byte == I64{43} || byte == I64{45}) {
-            if (byte == I64{45}) -> sign = I64{-9223372036854775808}
+            if (byte == I64{45}) { sign = I64{-9223372036854775808} }
             at += I64{1}
         }
     }
@@ -145,20 +149,18 @@ numeric_float_error: fn(text: I64, err: I64) -> I64 {
             at += I64{1}
             next
         }
-        if (byte < I64{48} || byte > I64{57}) -> break
+        if (byte < I64{48} || byte > I64{57}) { break }
         digits += I64{1}
         if dot -> fractional += I64{1}
         if (byte != I64{48}) {
-            if (first_nonzero < I64{0}) -> first_nonzero = at
+            if (first_nonzero < I64{0}) { first_nonzero = at }
             last_nonzero = at
             trailing = I64{0}
-        } else if (first_nonzero >= I64{0}) {
-            trailing += I64{1}
-        }
-        if (first_nonzero >= I64{0}) -> significant += I64{1}
+        } else if (first_nonzero >= I64{0}) { trailing += I64{1} }
+        if (first_nonzero >= I64{0}) { significant += I64{1} }
         at += I64{1}
     }
-    if (digits == I64{0}) -> return numeric_float_error(text, err)
+    if (digits == I64{0}) { return numeric_float_error(text, err) }
     explicit := I64{0}
     if (at < end && (rt_text_byte(wrapping(data + at)) == I64{101} || rt_text_byte(wrapping(data + at)) == I64{69})) {
         at += I64{1}
@@ -170,16 +172,16 @@ numeric_float_error: fn(text: I64, err: I64) -> I64 {
         exponent_start: at
         loop at < end {
             byte: rt_text_byte(wrapping(data + at))
-            if (byte < I64{48} || byte > I64{57}) -> break
+            if (byte < I64{48} || byte > I64{57}) { break }
             // Matches Rust parse_scientific: stop accumulating only AFTER the
             // previous magnitude reaches 0x10000; still validate every digit.
-            if (explicit < I64{65536}) -> explicit = explicit * I64{10} + byte - I64{48}
+            if (explicit < I64{65536}) { explicit = explicit * I64{10} + byte - I64{48} }
             at += I64{1}
         }
-        if (at == exponent_start) -> return numeric_float_error(text, err)
+        if (at == exponent_start) { return numeric_float_error(text, err) }
         if negative -> explicit = -explicit
     }
-    if (at != end) -> return numeric_float_error(text, err)
+    if (at != end) { return numeric_float_error(text, err) }
     if (first_nonzero < I64{0}) {
         sync_store(ok, sign)
         return I64{1}
@@ -208,14 +210,14 @@ numeric_float_error: fn(text: I64, err: I64) -> I64 {
         at = first_nonzero
         loop at <= last_nonzero {
             byte: rt_text_byte(wrapping(data + at))
-            if (byte != I64{46}) -> whole = whole * I64{10} + byte - I64{48}
+            if (byte != I64{46}) { whole = whole * I64{10} + byte - I64{48} }
             at += I64{1}
         }
         if (whole <= I64{9007199254740992}) {
             scale := Float{1.0}
             count := if (power < I64{0}) -> -power else -> power
             loop count > (I64{0}) {
-                scale = scale * Float{10.0}
+                scale *= Float{10.0}
                 count -= I64{1}
             }
             value: if (power < I64{0}) -> Float{whole} / scale else -> Float{whole} * scale
@@ -227,12 +229,14 @@ numeric_float_error: fn(text: I64, err: I64) -> I64 {
     at = first_nonzero
     loop at <= last_nonzero {
         byte: rt_text_byte(wrapping(data + at))
-        if (byte != I64{46}) -> int_scale(numerator, I64{10}, byte - I64{48})
+        if (byte != I64{46}) { int_scale(numerator, I64{10}, byte - I64{48}) }
         at += I64{1}
     }
     denominator: int_new(I64{40} + (if (power < I64{0}) -> -power /% I64{9} else -> I64{0}))
     int_set(denominator, I64{0}, I64{1})
-    if (power >= I64{0}) -> numeric_node_power10(numerator, power) else -> numeric_node_power10(denominator, -power)
+    if (power >= I64{0}) { numeric_node_power10(numerator, power) } else {
+        numeric_node_power10(denominator, -power)
+    }
     bits: numeric_float_ratio_bits(numerator, denominator, adjusted)
     int_free_node(numerator)
     int_free_node(denominator)

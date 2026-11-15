@@ -2,9 +2,18 @@
 use {
     jet_foundation.[DiagnosticFixApplicability, DiagnosticFixSafety, Span, TextEdit]
     jet_cli.[
-        JetCLIFix, JetCLIFixFile, JetCLIFixSkip, JetCLISemOp, JetCLISourceChange, jet_cli_commit_source_changes,
-        jet_cli_fix_checked, jet_cli_fix_errors, jet_cli_fix_log, jet_cli_fix_rewrite,
-        jet_cli_transaction_relative, jet_cli_undo_source_changes,
+        JetCLIFix,
+        JetCLIFixFile,
+        JetCLIFixSkip,
+        JetCLISemOp,
+        JetCLISourceChange,
+        jet_cli_commit_source_changes,
+        jet_cli_fix_checked,
+        jet_cli_fix_errors,
+        jet_cli_fix_log,
+        jet_cli_fix_rewrite,
+        jet_cli_transaction_relative,
+        jet_cli_undo_source_changes,
     ]
     cli_sys: core.sys
     cli_files: core.files
@@ -15,11 +24,10 @@ JetCLITransactionFixtureRoot: struct {
     path: String
 
     impl Close {
-        close: fn(&&self) -[FS]> {
-            cli_files.remove_all(self.path).drop("test project cleanup")
-        }
+        close: fn(&&self) -[FS]> { cli_files.remove_all(self.path).drop("test project cleanup") }
     }
 }
+
 #Test("source_transaction") {
     root: "{cli_sys.temp_dir()}/jet-source-transaction-{cli_process.current_pid()}"
     cli_files.create_dir_all(root) ?? panic("test project")
@@ -49,8 +57,8 @@ JetCLITransactionFixtureRoot: struct {
     assert(!journal)
     operations: jet_cli_fix_rewrite(`rün: fn() { 1 }`.bytes(), `rün: fn() { 2 }`.bytes())
     assert(operations.len() == 1)
-    if operations[0].from == .Val(from) -> assert(from == "1") else { panic("rewrite from missing") }
-    if operations[0].to == .Val(to) -> assert(to == "2") else { panic("rewrite to missing") }
+    if operations[0].from == .Val(from) -> assert(from == "1") else -> panic("rewrite from missing")
+    if operations[0].to == .Val(to) -> assert(to == "2") else -> panic("rewrite to missing")
     assert(jet_cli_fix_rewrite([U8]{255}, [U8]{254}).len() == 0)
     escaped: jet_cli_transaction_relative(root, "{root}/../outside.jet") == .Err(_)
     assert(escaped)

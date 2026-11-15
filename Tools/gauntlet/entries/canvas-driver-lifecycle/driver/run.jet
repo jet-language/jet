@@ -28,12 +28,29 @@ DRIVER: "/Tools/gauntlet/entries/canvas-driver-lifecycle/driver/run.jet"
 
 // The part of flake.lock that names the pinned nixpkgs. Its source decodes
 // only from GitHub, so a lock of any other type is refused.
-FlakeLock: struct { nodes: FlakeNodes }
-FlakeNodes: struct { nixpkgs: FlakeNode }
-FlakeNode: struct { locked: FlakeRevision }
-FlakeRevision: struct { type: FlakeSource, owner: String, repo: String, rev: String }
+FlakeLock: struct {
+    nodes: FlakeNodes
+}
+
+FlakeNodes: struct {
+    nixpkgs: FlakeNode
+}
+
+FlakeNode: struct {
+    locked: FlakeRevision
+}
+
+FlakeRevision: struct {
+    type: FlakeSource
+    owner: String
+    repo: String
+    rev: String
+}
+
 #Rename(.Lower)
-FlakeSource: enum { Github }
+FlakeSource: enum {
+    Github
+}
 
 // The nixpkgs revision that $FLAKE_LOCK, else `repo`'s flake.lock, pins, as a
 // flake reference.

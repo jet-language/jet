@@ -67,6 +67,7 @@ TGenericParam: struct {
     // Type.Measure length, and a body reads `N` as that Int.
     number: Bool{false}
 }
+
 TDeclarationFacts: struct {
     type_defs: [TTypeDef]
     traits: [TTraitDef]
@@ -81,6 +82,7 @@ TDeclarationOwnership: enum {
     WriteBorrow
     Move
 }
+
 TCoreBuiltinOwner: struct {
     symbol: SymbolID
     module_identity: ModuleID
@@ -153,6 +155,7 @@ TFunctionRef: struct {
     span: Span
     visibility: TVisibility
 }
+
 TCLIBinding: struct {
     name: String
     span: Span
@@ -192,10 +195,13 @@ TTypeDefKind: enum {
     Enum(variants: [TVariant], methods: [String])
     Distinct(base: Type, range: TIntegerRange?)
     Alias(target: Type)
-    // `base`: the member a dimensioned quantity is shown in.
     UnitFamily(members: [String], base: String?)
 }
-TCompilerBuiltin: enum { DefaultErr }
+
+// `base`: the member a dimensioned quantity is shown in.
+TCompilerBuiltin: enum {
+    DefaultErr
+}
 
 TTypeDef: struct {
     module_identity: ModuleID
@@ -309,9 +315,7 @@ target_os_gates: fn() -> String Never! {
 }
 
 // The `os` build option value and the impl gate spelling: `macos`.
-target_os_key: fn(os: TTargetOS) -> String Never! {
-    target_os_name(os).lower()
-}
+target_os_key: fn(os: TTargetOS) -> String Never! { target_os_name(os).lower() }
 
 // Whether a host triple can name `os`: Linux, macOS and Windows are native;
 // a web, Wasm or freestanding build names its OS through its target.

@@ -1,5 +1,5 @@
-
 SCRIPT_TEST_SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
 SCRIPT_TEST_SHA1: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 provider_script_test_authority: fn(kind: ScriptRegistryKind) -> RegistryAuthority Never! {
@@ -15,8 +15,8 @@ provider_script_test_packagist: fn(name: String, raw: String) -> [RegistryPackag
 }
 
 // The selected version of every package in a resolved closure.
-provider_script_test_selected: fn(closure: [RegistryPackage]) -> [String: String] Never! {
-    selected := [String: String]{}
+provider_script_test_selected: fn(closure: [RegistryPackage]) -> [String:String] Never! {
+    selected := [String:String]{}
     loop package in closure -> selected[package.name] = package.version
     selected
 }
@@ -44,8 +44,8 @@ provider_script_test_artifact: fn(name: String, version: String, path: String) -
     bytes: files.read_bytes(path) ?? panic("read {path}")
     RegistryArtifact{
         sha256: pkg_sha256_hex(bytes),
-        path,
-        package: RegistryPackage{name, version, url: "", integrity: RegistryIntegrity.SHA256(provider_script_test_repeat("0", 64)), dependencies: [RegistryDependency]{}, psr4: [String: [String]]{}},
+        path: path,
+        package: RegistryPackage{name: name, version: version, url: "", integrity: RegistryIntegrity.SHA256(provider_script_test_repeat("0", 64)), dependencies: [RegistryDependency]{}, psr4: [String:[String]]{}},
     }
 }
 
@@ -150,24 +150,26 @@ provider_script_test_cpan_refusal: fn(artifact: RegistryArtifact, out: String, s
             assert_eq(repository, "https://github.com/jet/app.git")
             assert_eq(locked, reference)
         }
-        .SHA256(_) | .SHA1(_) -> panic("a digestless GitHub zipball must carry immutable git integrity")
+        .SHA256(_) | .SHA1(_) -> {
+            panic("a digestless GitHub zipball must carry immutable git integrity")
+        }
     }
     attacker_doc: `{"packages":{"jet/app":[{"version":"2.0.0","type":"library","source":{"type":"git","url":"https://github.com/attacker/jet-app.git","reference":"REF"},"dist":{"type":"zip","url":"https://api.github.com/repos/jet/app/zipball/REF?source=https://github.com/attacker/jet-app.git","reference":"REF","shasum":""}}]}}`.replace("REF", reference)
     assert(provider_script_test_packagist("jet/app", attacker_doc) == .Err(_))
 
-    tampered: RegistryPackage{name: "jetapp", version: "2.0.0", url: "unused", integrity: RegistryIntegrity.SHA256(provider_script_test_repeat("00", 32)), dependencies: [RegistryDependency]{}, psr4: [String: [String]]{}}
+    tampered: RegistryPackage{name: "jetapp", version: "2.0.0", url: "unused", integrity: RegistryIntegrity.SHA256(provider_script_test_repeat("00", 32)), dependencies: [RegistryDependency]{}, psr4: [String:[String]]{}}
     assert(provider_script_verify_integrity(tampered, "changed source".bytes()) == .Err(_))
 }
 
 #Test("script registry solver backtracks across a diamond and cpan enumerates older releases") {
     ruby_repository: provider_script_registry(ProviderFamily.RubyGems).repository
-    ruby_info: [String: String]{
+    ruby_info: [String:String]{
         "root": "1.0 a:>= 1&< 3,b:= 1|checksum:{SCRIPT_TEST_SHA256}\n",
         "a": "2.0 c:>= 2|checksum:{SCRIPT_TEST_SHA256}\n1.0 c:< 2|checksum:{SCRIPT_TEST_SHA256}\n",
         "b": "1.0 c:< 2|checksum:{SCRIPT_TEST_SHA256}\n",
         "c": "2.0 |checksum:{SCRIPT_TEST_SHA256}\n1.0 |checksum:{SCRIPT_TEST_SHA256}\n",
     }
-    ruby_candidates := [String: [RegistryPackage]]{}
+    ruby_candidates := [String:[RegistryPackage]]{}
     loop entry in ruby_info {
         parsed: provider_rubygems_parse_info(ruby_repository, entry.key, entry.value) ?? panic("compact index parses")
         ruby_candidates[entry.key] = provider_script_sorted_candidates(parsed)
@@ -178,13 +180,13 @@ provider_script_test_cpan_refusal: fn(artifact: RegistryArtifact, out: String, s
     assert_eq(selected.get("a"), Val("1.0"))
     assert_eq(selected.get("c"), Val("1.0"))
 
-    composer_docs: [String: String]{
+    composer_docs: [String:String]{
         "vendor/root": `{"packages":{"vendor/root":[{"version":"1.0.0","dist":{"type":"zip","url":"/root.zip","shasum":"SHA1"},"require":{"vendor/a":"1.* | ^3.1","vendor/b":"1.0 - 2.0"}}]}}`,
         "vendor/a": `{"packages":{"vendor/a":[{"version":"3.2.0","dist":{"type":"zip","url":"/a3.zip","shasum":"SHA1"},"require":{"vendor/c":"^2.0"}},{"version":"1.5.0","dist":{"type":"zip","url":"/a1.zip","shasum":"SHA1"},"require":{"vendor/c":"1.*"}}]}}`,
         "vendor/b": `{"packages":{"vendor/b":[{"version":"2.0.7","dist":{"type":"zip","url":"/b.zip","shasum":"SHA1"},"require":{"vendor/c":"1.*"}}]}}`,
         "vendor/c": `{"packages":{"vendor/c":[{"version":"2.1.0","dist":{"type":"zip","url":"/c2.zip","shasum":"SHA1"}},{"version":"1.9.0","dist":{"type":"zip","url":"/c1.zip","shasum":"SHA1"}}]}}`,
     }
-    composer_candidates := [String: [RegistryPackage]]{}
+    composer_candidates := [String:[RegistryPackage]]{}
     loop entry in composer_docs {
         parsed: provider_script_test_packagist(entry.key, entry.value.replace("SHA1", SCRIPT_TEST_SHA1)) ?? panic("Packagist metadata parses")
         composer_candidates[entry.key] = provider_script_sorted_candidates(parsed)
@@ -202,7 +204,9 @@ provider_script_test_cpan_refusal: fn(artifact: RegistryArtifact, out: String, s
     assert_eq(versions, [String]{"2.0", "1.0"})
     older := false
     loop package in cpan {
-        if provider_script_version_satisfies(provider_script_registry(ProviderFamily.Cpan), package.version, "=1.0") -> older = true
+        if provider_script_version_satisfies(provider_script_registry(ProviderFamily.Cpan), package.version, "=1.0") {
+            older = true
+        }
     }
     assert(older)
 }
@@ -236,7 +240,9 @@ provider_script_test_cpan_refusal: fn(artifact: RegistryArtifact, out: String, s
 }
 
 #Test("script registry hostile archives reject runtime native extensions") {
-    if !provider_script_test_require_tools([String]{"tar", "gzip", "php"}) -> return
+    if !provider_script_test_require_tools([String]{"tar", "gzip", "php"}) {
+        return
+    }
     provider_script_test_require_zip()
     base: files.tmpdir("jet-script-native-") ?? panic("claim a directory")
 
@@ -261,7 +267,9 @@ provider_script_test_cpan_refusal: fn(artifact: RegistryArtifact, out: String, s
 }
 
 #Test("script registry checksum valid sparse archive is rejected before extraction") {
-    if !provider_script_test_require_tools([String]{"tar", "truncate"}) -> return
+    if !provider_script_test_require_tools([String]{"tar", "truncate"}) {
+        return
+    }
     base: files.tmpdir("jet-script-budget-") ?? panic("claim a directory")
 
     source: files.join(base, "source/Bad-1.0/lib")
@@ -281,7 +289,9 @@ provider_script_test_cpan_refusal: fn(artifact: RegistryArtifact, out: String, s
 
     total_root: files.join(base, "total/Total-1.0/lib")
     files.create_dir_all(total_root) ?? panic("total dir")
-    loop index in 0..<5 -> provider_script_test_run([String]{"truncate", "-s", "{60 * 1024 * 1024}", files.join(total_root, "Part{index}.pm")})
+    loop index in 0..<5 {
+        provider_script_test_run([String]{"truncate", "-s", "{60 * 1024 * 1024}", files.join(total_root, "Part{index}.pm")})
+    }
     total_archive: files.join(base, "Total-1.0.tar.gz")
     provider_script_test_run([String]{"tar", "--sparse", "-czf", total_archive, "-C", files.join(base, "total"), "Total-1.0"})
     total := provider_script_test_artifact("Total", "1.0", total_archive)
@@ -292,7 +302,9 @@ provider_script_test_cpan_refusal: fn(artifact: RegistryArtifact, out: String, s
 
     many_root: files.join(base, "many/Many-1.0/lib")
     files.create_dir_all(many_root) ?? panic("many dir")
-    loop index in 0..<PROVIDER_MAX_ARCHIVE_ENTRIES -> files.write(files.join(many_root, "M{index}.pm"), "") ?? panic("empty module")
+    loop index in 0..<PROVIDER_MAX_ARCHIVE_ENTRIES {
+        files.write(files.join(many_root, "M{index}.pm"), "") ?? panic("empty module")
+    }
     many_archive: files.join(base, "Many-1.0.tar.gz")
     provider_script_test_run([String]{"tar", "-czf", many_archive, "-C", files.join(base, "many"), "Many-1.0"})
     many := provider_script_test_artifact("Many", "1.0", many_archive)

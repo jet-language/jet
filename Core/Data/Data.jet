@@ -8,9 +8,9 @@ package: {
         data: .Library{ entry: data }
     }
 }
+
 use {
     core: core
-
     math: core.math
     encoding: core.encoding
     rt: jet.runtime.encoding
@@ -25,6 +25,7 @@ use {
     quantile_select.[finite_quantile, select_rank]
     rank_order.[rank_select_prototype, rank_select_range, rank_test_before, rank_test_refusing, rank_test_text_before, rank_test_values]
 }
+
 arrow: module
 
 loader: module
@@ -44,7 +45,6 @@ DataFormat: enum {
     Arrow
 }
 
-
 #Equatable
 DataErrorKind: enum {
     Decode
@@ -62,9 +62,11 @@ DataErrorKind: enum {
     WrongOwner
     StaleRevision
     InvalidValue
+
     impl Display {
         display: fn(self) -> String { data_error_kind_text(self) }
     }
+
     impl Debug {
         debug: fn(&&self) -> String { data_error_kind_text(self) }
     }
@@ -120,6 +122,7 @@ DataError: struct {
         }
     }
 }
+
 data_error: fn(kind: DataErrorKind, message: String, operation: String) -> DataError Never! {
     DataError{
         kind: kind,
@@ -157,7 +160,6 @@ nonfinite: fn(value: Float) -> Bool Never! {
     true
 }
 
-
 DataLineOptions: struct {
     title: String
     x_label: String
@@ -169,7 +171,6 @@ DataLineOptions: struct {
     legend: String
 }
 
-
 #Comparable
 DataFreshness: enum {
     Pending
@@ -179,6 +180,7 @@ DataFreshness: enum {
     Offline
     Cancelled
 }
+
 #[Comparable, Equatable]
 DataInvalidationCause: enum {
     NoCause
@@ -191,7 +193,6 @@ DataInvalidationCause: enum {
     Manual
 }
 
-
 #Equatable
 DataStatus: struct {
     step: String
@@ -202,7 +203,6 @@ DataStatus: struct {
     fallback: String
     replacement: String
 }
-
 
 #Equatable
 DataLimits: struct {
@@ -223,8 +223,6 @@ DataLimits: struct {
         }
     }
 }
-
-
 
 DataAuthority: struct {
     scope: String
@@ -313,9 +311,11 @@ DataWatchStatus: struct {
     invalidation_cause: String
     refreshing: Bool
     cancelled: Bool
+
     impl Display {
         display: fn(self) -> String { data_watch_status_text(self) }
     }
+
     impl Debug {
         debug: fn(&&self) -> String { data_watch_status_text(self) }
     }
@@ -354,6 +354,7 @@ DataPivotCell: struct {
     sum: Float
     mean: Float
 }
+
 #Equatable
 DataSummary: struct {
     count: Int
@@ -429,6 +430,7 @@ JetDataPlotMark: enum {
     Line
     Bar
     Point
+
     as_str: fn(self) -> String Never! {
         if self == {
             .Line -> "line"
@@ -446,6 +448,7 @@ JetDataPlotChannel: enum {
     Size
     Text
     Detail
+
     as_str: fn(self) -> String Never! {
         if self == {
             .X -> "x"
@@ -474,6 +477,7 @@ JetDataPlotFilterOp: enum {
     LessEqual
     Greater
     GreaterEqual
+
     as_str: fn(self) -> String Never! {
         if self == {
             .Equal -> "eq"
@@ -504,6 +508,7 @@ JetDataPlotScaleKind: enum {
     Log
     Band
     Point
+
     as_str: fn(self) -> String Never! {
         if self == {
             .Linear -> "linear"
@@ -512,6 +517,7 @@ JetDataPlotScaleKind: enum {
             .Point -> "point"
         }
     }
+
     needs_numeric: fn(self) -> Bool Never! { self == .Linear || self == .Log }
 }
 
@@ -526,6 +532,7 @@ JetDataPlotLegendPosition: enum {
     Right
     Bottom
     Left
+
     as_str: fn(self) -> String Never! {
         if self == {
             .Top -> "top"
@@ -540,6 +547,7 @@ JetDataPlotLegendPosition: enum {
 JetDataPlotFacetKind: enum {
     Row
     Column
+
     as_str: fn(self) -> String Never! {
         if self == {
             .Row -> "row"
@@ -555,6 +563,7 @@ JetDataPlotInteraction: enum {
     Zoom
     Pan
     Brush
+
     as_str: fn(self) -> String Never! {
         if self == {
             .Hover -> "hover"
@@ -572,6 +581,7 @@ JetDataPlotBackend: enum {
     Browser
     Native
     Export
+
     as_str: fn(self) -> String Never! {
         if self == {
             .Terminal -> "terminal"
@@ -587,6 +597,7 @@ JetDataPlotSupport: enum {
     Supported
     Degraded
     Unsupported
+
     as_str: fn(self) -> String Never! {
         if self == {
             .Supported -> "supported"
@@ -724,7 +735,9 @@ priv query_steps: fn(steps: [String], step: String) -> [String] Never! {
 priv query_rows: fn<T>(query: Query<T>) -> [T] DataError! {
     if query.__one_shot {
         state := query.__state.guard_edit()
-        if state.value.consumed -> return Err(data_error(DataErrorKind.State, "query has already been collected", "query.collect"))
+        if state.value.consumed {
+            return Err(data_error(DataErrorKind.State, "query has already been collected", "query.collect"))
+        }
         state.value.consumed = true
     }
     cell: query.__cell.guard_read()
@@ -745,13 +758,17 @@ __query_stream: fn<T>(source: DataStream<T>) -> Query<T> Never! {
     }
     query_make<T>([String]{"stream"}, true, limits.copy(), fn() {
         reader := source.copy()
-        if reader.cancelled -> return Err(data_error(DataErrorKind.State, "stream was cancelled", "data.stream"))
+        if reader.cancelled {
+            return Err(data_error(DataErrorKind.State, "stream was cancelled", "data.stream"))
+        }
         out := [T]{}
         loop {
             if __stream_pull<T>(reader) == {
                 .Ok(item) -> {
                     row: item ?? return Ok(out)
-                    if out.len() >= limits.max_output_rows -> return Err(data_error(DataErrorKind.Limit, "max_output_rows {limits.max_output_rows} exceeded", "collect"))
+                    if out.len() >= limits.max_output_rows {
+                        return Err(data_error(DataErrorKind.Limit, "max_output_rows {limits.max_output_rows} exceeded", "collect"))
+                    }
                     out.push(row)
                 }
                 .Err(failure) -> return Err(failure)
@@ -771,11 +788,13 @@ __stream_from: fn<T>(pull: &&fn() -> T? DataError!, limits: DataLimits) -> DataS
 // The next row of a stream: its owned items first, then its pull source.
 // End of input is a stable `None`; a source failure stays latched.
 __stream_pull: fn<T>(stream: &DataStream<T>) -> T? DataError! {
-    if stream.cancelled -> return Err(data_error(DataErrorKind.State, "stream was cancelled", "data.stream"))
+    if stream.cancelled {
+        return Err(data_error(DataErrorKind.State, "stream was cancelled", "data.stream"))
+    }
     if stream.index < 0 -> stream.index = 0
     if stream.index < stream.items.len() {
         value: stream.items[stream.index].copy()
-        stream.index = stream.index + 1
+        stream.index += 1
         return Ok(Val(value))
     }
     if stream.__source == {
@@ -783,7 +802,7 @@ __stream_pull: fn<T>(stream: &DataStream<T>) -> T? DataError! {
             cell := source.guard_edit()
             if cell.value.ahead_index < cell.value.ahead.len() {
                 value: cell.value.ahead[cell.value.ahead_index].copy()
-                cell.value.ahead_index = cell.value.ahead_index + 1
+                cell.value.ahead_index += 1
                 return Ok(Val(value))
             }
             if cell.value.terminal == {
@@ -849,14 +868,14 @@ __stream_remaining: fn<T>(stream: DataStream<T>) -> Int Never! {
             cell := source.guard_edit()
             reading := !cell.value.done
             if cell.value.terminal == {
-                .Val(_) -> reading = false
+                .Val(_) -> { reading = false }
                 .None -> {}
             }
             loop reading {
                 if cell.value.pull() == {
                     .Ok(item) -> {
                         if item == {
-                            .Val(row) -> cell.value.ahead.push(row)
+                            .Val(row) -> { cell.value.ahead.push(row) }
                             .None -> {
                                 cell.value.done = true
                                 reading = false
@@ -924,34 +943,34 @@ __PendingWindow: struct<T> {
 }
 
 // `stream.with_event_time(f)` with an `Int` result: Unix seconds.
-__stream_with_event_time: fn<T>(&&stream: Stream<T>, event_time: &&fn(T) -> Int Never!) -> StreamEventTime<T> Never! {
+__stream_with_event_time: fn<T>(stream: &&Stream<T>, event_time: &&fn(T) -> Int Never!) -> StreamEventTime<T> Never! {
     StreamEventTime<T>{events: stream_stamp_seconds<T>(stream.move(), event_time)}
 }
 
 // `stream.with_event_time(f)` with a `DateTime` result.
-__stream_with_event_datetime: fn<T>(&&stream: Stream<T>, event_time: &&fn(T) -> DateTime Never!) -> StreamEventTime<T> Never! {
+__stream_with_event_datetime: fn<T>(stream: &&Stream<T>, event_time: &&fn(T) -> DateTime Never!) -> StreamEventTime<T> Never! {
     StreamEventTime<T>{events: stream_stamp_datetime<T>(stream.move(), event_time)}
 }
 
-priv stream_stamp_seconds: fn<T>(&&stream: Stream<T>, event_time: &&fn(T) -> Int Never!) -> Stream<StreamEvent<T>> {
+priv stream_stamp_seconds: fn<T>(stream: &&Stream<T>, event_time: &&fn(T) -> Int Never!) -> Stream<StreamEvent<T>> {
     loop value in stream {
         at: time.from_unix_seconds(event_time(value))
         yield StreamEvent<T>{value: value, event_time: at}
     }
 }
 
-priv stream_stamp_datetime: fn<T>(&&stream: Stream<T>, event_time: &&fn(T) -> DateTime Never!) -> Stream<StreamEvent<T>> {
+priv stream_stamp_datetime: fn<T>(stream: &&Stream<T>, event_time: &&fn(T) -> DateTime Never!) -> Stream<StreamEvent<T>> {
     loop value in stream {
         at: event_time(value)
         yield StreamEvent<T>{value: value, event_time: at}
     }
 }
 
-__stream_key_by: fn<K, T>(&&source: StreamEventTime<T>, key: &&fn(T) -> K Never!) -> KeyedStream<K, T> Never! {
+__stream_key_by: fn<K, T>(source: &&StreamEventTime<T>, key: &&fn(T) -> K Never!) -> KeyedStream<K, T> Never! {
     KeyedStream<K, T>{events: stream_keyed<K, T>(source.events.move(), key)}
 }
 
-priv stream_keyed: fn<K, T>(&&stream: Stream<StreamEvent<T>>, key: &&fn(T) -> K Never!) -> Stream<__KeyedEvent<K, T>> {
+priv stream_keyed: fn<K, T>(stream: &&Stream<StreamEvent<T>>, key: &&fn(T) -> K Never!) -> Stream<__KeyedEvent<K, T>> {
     loop event in stream {
         yield __KeyedEvent<K, T>{key: key(event.value), event: event}
     }
@@ -960,7 +979,7 @@ priv stream_keyed: fn<K, T>(&&stream: Stream<StreamEvent<T>>, key: &&fn(T) -> K 
 // A `Stream<T>` function is a generator that yields only from its own body,
 // so `.window()` is this generator itself, with the generator's default
 // failure carrier.
-__stream_window: fn<K: Equatable, T>(&&source: KeyedStream<K, T>, width: time.Duration, watermark: time.Duration, late: LateEventDisposition) -> Stream<Window<K, T>> {
+__stream_window: fn<K: Equatable, T>(source: &&KeyedStream<K, T>, width: time.Duration, watermark: time.Duration, late: LateEventDisposition) -> Stream<Window<K, T>> {
     width_ns: width.ns
     lateness_ns: watermark.ns
     if width_ns <= 0 -> panic("stream window duration must be positive, got {width_ns}ns")
@@ -1002,13 +1021,13 @@ __stream_window: fn<K: Equatable, T>(&&source: KeyedStream<K, T>, width: time.Du
                     break
                 }
             }
-            if joined {
-                pending[position].events.push(keyed.event)
-            } else {
+            if joined -> pending[position].events.push(keyed.event) else {
                 pending.insert(position, __PendingWindow<T>{key_index: key_index, start_ns: start_ns, events: [StreamEvent<T>]{keyed.event}})
             }
         }
-        loop ready in stream_windows_ready<K, T>(keys, pending, width_ns, mark, false) -> yield ready
+        loop ready in stream_windows_ready<K, T>(keys, pending, width_ns, mark, false) {
+            yield ready
+        }
     }
     loop ready in stream_windows_ready<K, T>(keys, pending, width_ns, mark, true) -> yield ready
 }
@@ -1024,9 +1043,7 @@ priv stream_windows_ready: fn<K, T>(keys: [K], pending: &[__PendingWindow<T>], w
     loop open in pending {
         if flush || open.start_ns + width_ns <= watermark_ns {
             ready.push(Window<K, T>{key: keys[open.key_index], start: time.from_unix_nanoseconds(open.start_ns), end: time.from_unix_nanoseconds(open.start_ns + width_ns), events: open.events})
-        } else {
-            kept.push(open.copy())
-        }
+        } else { kept.push(open.copy()) }
     }
     pending = kept
     ready
@@ -1043,7 +1060,9 @@ __query_plan: fn<T>(query: Query<T>) -> [String] Never! { query.__steps.copy() }
 __query_collect: fn<T>(query: Query<T>) -> [T] DataError! {
     rows: query_rows<T>(query) ?? return Err(err)
     limits: query.__limits.copy()
-    if rows.len() > limits.max_output_rows -> return Err(data_error(DataErrorKind.Limit, "max_output_rows {limits.max_output_rows} exceeded", "query.collect"))
+    if rows.len() > limits.max_output_rows {
+        return Err(data_error(DataErrorKind.Limit, "max_output_rows {limits.max_output_rows} exceeded", "query.collect"))
+    }
     Ok(rows)
 }
 
@@ -1064,7 +1083,9 @@ __query_sort_by: fn<T>(query: Query<T>, key: &&fn(T) -> String) -> Query<T> Neve
     query_make<T>(query_steps(query.__steps, "sort_by"), false, query.__limits.copy(), fn() {
         rows: query_rows<T>(query) ?? return Err(err)
         limits: query.__limits.copy()
-        if rows.len() > limits.max_sort_rows -> return Err(data_error(DataErrorKind.Limit, "max_sort_rows {limits.max_sort_rows} exceeded", "query.sort_by"))
+        if rows.len() > limits.max_sort_rows {
+            return Err(data_error(DataErrorKind.Limit, "max_sort_rows {limits.max_sort_rows} exceeded", "query.sort_by"))
+        }
         keys := [String]{}
         loop row in rows {
             text: key(row.copy()) ?? return Err(data_error(DataErrorKind.State, "sort key callback failed", "query.sort_by"))
@@ -1122,19 +1143,21 @@ priv query_merge_order: fn(keys: [String], sql_order: Bool, descending: Bool) ->
             right := middle
             loop left < middle || right < end {
                 take_left := right >= end
-                if !take_left && left < middle -> take_left = query_order_before(keys, order[left], order[right], sql_order, descending)
+                if !take_left && left < middle {
+                    take_left = query_order_before(keys, order[left], order[right], sql_order, descending)
+                }
                 if take_left {
                     merged.push(order[left])
-                    left = left + 1
+                    left += 1
                 } else {
                     merged.push(order[right])
-                    right = right + 1
+                    right += 1
                 }
             }
             start = end
         }
         order = merged
-        width = width * 2
+        width *= 2
     }
     order
 }
@@ -1160,21 +1183,25 @@ priv query_extreme: fn<T, V: Comparable>(query: Query<T>, key: &&fn(T) -> V, max
         selected := [V]{}
         loop row in rows {
             candidate: key(row.copy()) ?? return Err(data_error(DataErrorKind.State, "extreme key callback failed", operation))
-            if selected.len() == 0 {
-                selected.push(candidate)
-            } else {
+            if selected.len() == 0 -> selected.push(candidate) else {
                 replace: if maximum -> candidate > selected[0] else -> candidate < selected[0]
                 if replace -> selected[0] = candidate
             }
         }
-        if selected.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "empty query has no extreme", operation))
+        if selected.len() == 0 {
+            return Err(data_error(DataErrorKind.Empty, "empty query has no extreme", operation))
+        }
         Ok(selected)
     })
 }
 
-__query_min: fn<T, V: Comparable>(query: Query<T>, key: &&fn(T) -> V) -> Query<V> Never! { query_extreme<T, V>(query, key, false) }
+__query_min: fn<T, V: Comparable>(query: Query<T>, key: &&fn(T) -> V) -> Query<V> Never! {
+    query_extreme<T, V>(query, key, false)
+}
 
-__query_max: fn<T, V: Comparable>(query: Query<T>, key: &&fn(T) -> V) -> Query<V> Never! { query_extreme<T, V>(query, key, true) }
+__query_max: fn<T, V: Comparable>(query: Query<T>, key: &&fn(T) -> V) -> Query<V> Never! {
+    query_extreme<T, V>(query, key, true)
+}
 
 __query_inner_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: &&fn(T) -> String, right_key: &&fn(U) -> String) -> Query<DataJoin<T, U>> Never! {
     query_make<DataJoin<T, U>>(query_steps(left.__steps, "inner_join"), true, left.__limits.copy(), fn() {
@@ -1193,10 +1220,15 @@ __query_left_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: &&fn(T) -
 }
 
 __query_group_by: fn<T, K>(query: Query<T>, key: &&fn(T) -> K) -> DataGroupedQuery<T, K> Never! {
-    DataGroupedQuery<T, K>{__query: query, __key: Shared{__QueryKeyCell<T, K>{key: fn(row: T) {
-        value: key(row) ?? return Err(data_error(DataErrorKind.State, "group key callback failed", "query.group_by"))
-        Ok(value)
-    }}}}
+    DataGroupedQuery<T, K>{
+        __query: query,
+        __key: Shared{__QueryKeyCell<T, K>{
+            key: fn(row: T) {
+                value: key(row) ?? return Err(data_error(DataErrorKind.State, "group key callback failed", "query.group_by"))
+                Ok(value)
+            },
+        }},
+    }
 }
 
 priv group_steps: fn<T, K>(grouped: DataGroupedQuery<T, K>, step: String) -> [String] Never! {
@@ -1215,11 +1247,7 @@ priv group_find: fn<K: Comparable>(keys: [K], order: [Int], key: K) -> Int Never
         middle: low + (high - low) /% 2
         compared: keys[order[middle]] <=> key
         if compared == Ordering.Equal -> return order[middle]
-        if compared == Ordering.Less {
-            low = middle + 1
-        } else {
-            high = middle
-        }
+        if compared == Ordering.Less -> low = middle + 1 else -> high = middle
     }
     -1 - low
 }
@@ -1246,16 +1274,18 @@ __group_count: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>) -> Query<Gr
         loop row in rows {
             group_key: cell.value.key(row.copy()) ?? return Err(err)
             found: group_find<K>(keys, order, group_key)
-            if found >= 0 {
-                counts[found] = counts[found] + 1
-            } else {
-                if keys.len() >= limits.max_groups -> return Err(data_error(DataErrorKind.Limit, "max_groups {limits.max_groups} exceeded", "query.group_by.count"))
+            if found >= 0 -> counts[found] = counts[found] + 1 else {
+                if keys.len() >= limits.max_groups {
+                    return Err(data_error(DataErrorKind.Limit, "max_groups {limits.max_groups} exceeded", "query.group_by.count"))
+                }
                 group_add<K>(keys, order, found, group_key)
                 counts.push(1)
             }
         }
         out := [Group<K, Int>]{}
-        loop index in 0..<keys.len() -> out.push(Group<K, Int>{key: keys[index].copy(), value: counts[index]})
+        loop index in 0..<keys.len() {
+            out.push(Group<K, Int>{key: keys[index].copy(), value: counts[index]})
+        }
         Ok(group_sorted<K, Int>(out))
     })
 }
@@ -1278,29 +1308,67 @@ __group_sum: fn<T, K: Comparable, V>(grouped: DataGroupedQuery<T, K>, value: &&f
                 total: add(totals[found].copy(), group_value) ?? return Err(data_error(DataErrorKind.Overflow, "group sum overflowed", "query.group_by.sum"))
                 totals[found] = total
             } else {
-                if keys.len() >= limits.max_groups -> return Err(data_error(DataErrorKind.Limit, "max_groups {limits.max_groups} exceeded", "query.group_by.sum"))
+                if keys.len() >= limits.max_groups {
+                    return Err(data_error(DataErrorKind.Limit, "max_groups {limits.max_groups} exceeded", "query.group_by.sum"))
+                }
                 group_add<K>(keys, order, found, group_key)
                 totals.push(group_value)
             }
         }
-        if keys.len() > limits.max_output_rows -> return Err(data_error(DataErrorKind.Limit, "max_output_rows {limits.max_output_rows} exceeded", "query.group_by.sum"))
+        if keys.len() > limits.max_output_rows {
+            return Err(data_error(DataErrorKind.Limit, "max_output_rows {limits.max_output_rows} exceeded", "query.group_by.sum"))
+        }
         out := [Group<K, V>]{}
-        loop index in 0..<keys.len() -> out.push(Group<K, V>{key: keys[index].copy(), value: totals[index].copy()})
+        loop index in 0..<keys.len() {
+            out.push(Group<K, V>{key: keys[index].copy(), value: totals[index].copy()})
+        }
         Ok(group_sorted<K, V>(out))
     })
 }
 
-__group_sum_int: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> Int) -> Query<Group<K, Int>> Never! { __group_sum<T, K, Int>(grouped, value, fn(left: Int, right: Int) { left + right }) }
-__group_sum_float: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> Float) -> Query<Group<K, Float>> Never! { __group_sum<T, K, Float>(grouped, value, fn(left: Float, right: Float) { left + right }) }
-__group_sum_f32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> F32) -> Query<Group<K, F32>> Never! { __group_sum<T, K, F32>(grouped, value, fn(left: F32, right: F32) { left + right }) }
-__group_sum_i8: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> I8) -> Query<Group<K, I8>> Never! { __group_sum<T, K, I8>(grouped, value, fn(left: I8, right: I8) { left + right }) }
-__group_sum_i16: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> I16) -> Query<Group<K, I16>> Never! { __group_sum<T, K, I16>(grouped, value, fn(left: I16, right: I16) { left + right }) }
-__group_sum_i32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> I32) -> Query<Group<K, I32>> Never! { __group_sum<T, K, I32>(grouped, value, fn(left: I32, right: I32) { left + right }) }
-__group_sum_i64: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> I64) -> Query<Group<K, I64>> Never! { __group_sum<T, K, I64>(grouped, value, fn(left: I64, right: I64) { left + right }) }
-__group_sum_u8: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> U8) -> Query<Group<K, U8>> Never! { __group_sum<T, K, U8>(grouped, value, fn(left: U8, right: U8) { left + right }) }
-__group_sum_u16: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> U16) -> Query<Group<K, U16>> Never! { __group_sum<T, K, U16>(grouped, value, fn(left: U16, right: U16) { left + right }) }
-__group_sum_u32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> U32) -> Query<Group<K, U32>> Never! { __group_sum<T, K, U32>(grouped, value, fn(left: U32, right: U32) { left + right }) }
-__group_sum_u64: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> U64) -> Query<Group<K, U64>> Never! { __group_sum<T, K, U64>(grouped, value, fn(left: U64, right: U64) { left + right }) }
+__group_sum_int: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> Int) -> Query<Group<K, Int>> Never! {
+    __group_sum<T, K, Int>(grouped, value, fn(left: Int, right: Int) { left + right })
+}
+
+__group_sum_float: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> Float) -> Query<Group<K, Float>> Never! {
+    __group_sum<T, K, Float>(grouped, value, fn(left: Float, right: Float) { left + right })
+}
+
+__group_sum_f32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> F32) -> Query<Group<K, F32>> Never! {
+    __group_sum<T, K, F32>(grouped, value, fn(left: F32, right: F32) { left + right })
+}
+
+__group_sum_i8: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> I8) -> Query<Group<K, I8>> Never! {
+    __group_sum<T, K, I8>(grouped, value, fn(left: I8, right: I8) { left + right })
+}
+
+__group_sum_i16: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> I16) -> Query<Group<K, I16>> Never! {
+    __group_sum<T, K, I16>(grouped, value, fn(left: I16, right: I16) { left + right })
+}
+
+__group_sum_i32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> I32) -> Query<Group<K, I32>> Never! {
+    __group_sum<T, K, I32>(grouped, value, fn(left: I32, right: I32) { left + right })
+}
+
+__group_sum_i64: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> I64) -> Query<Group<K, I64>> Never! {
+    __group_sum<T, K, I64>(grouped, value, fn(left: I64, right: I64) { left + right })
+}
+
+__group_sum_u8: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> U8) -> Query<Group<K, U8>> Never! {
+    __group_sum<T, K, U8>(grouped, value, fn(left: U8, right: U8) { left + right })
+}
+
+__group_sum_u16: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> U16) -> Query<Group<K, U16>> Never! {
+    __group_sum<T, K, U16>(grouped, value, fn(left: U16, right: U16) { left + right })
+}
+
+__group_sum_u32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> U32) -> Query<Group<K, U32>> Never! {
+    __group_sum<T, K, U32>(grouped, value, fn(left: U32, right: U32) { left + right })
+}
+
+__group_sum_u64: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> U64) -> Query<Group<K, U64>> Never! {
+    __group_sum<T, K, U64>(grouped, value, fn(left: U64, right: U64) { left + right })
+}
 
 __group_mean: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> Float) -> Query<Group<K, Float>> Never! {
     query_make<Group<K, Float>>(group_steps<T, K>(grouped, "mean"), true, grouped.__query.__limits.copy(), fn() {
@@ -1314,20 +1382,26 @@ __group_mean: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(
         loop row in rows {
             group_key: cell.value.key(row.copy()) ?? return Err(err)
             group_value: value(row.copy()) ?? return Err(data_error(DataErrorKind.State, "group value callback failed", "query.group_by.mean"))
-            if nonfinite(group_value) -> return Err(data_error(DataErrorKind.NonFinite, "group values must be finite", "query.group_by.mean"))
+            if nonfinite(group_value) {
+                return Err(data_error(DataErrorKind.NonFinite, "group values must be finite", "query.group_by.mean"))
+            }
             found: group_find<K>(keys, order, group_key)
             if found >= 0 {
                 totals[found] = totals[found] + group_value
                 counts[found] = counts[found] + 1
             } else {
-                if keys.len() >= limits.max_groups -> return Err(data_error(DataErrorKind.Limit, "max_groups {limits.max_groups} exceeded", "query.group_by.mean"))
+                if keys.len() >= limits.max_groups {
+                    return Err(data_error(DataErrorKind.Limit, "max_groups {limits.max_groups} exceeded", "query.group_by.mean"))
+                }
                 group_add<K>(keys, order, found, group_key)
                 totals.push(group_value)
                 counts.push(1)
             }
         }
         out := [Group<K, Float>]{}
-        loop index in 0..<keys.len() -> out.push(Group<K, Float>{key: keys[index].copy(), value: totals[index] / Float{counts[index]}})
+        loop index in 0..<keys.len() {
+            out.push(Group<K, Float>{key: keys[index].copy(), value: totals[index] / Float{counts[index]}})
+        }
         Ok(group_sorted<K, Float>(out))
     })
 }
@@ -1383,7 +1457,9 @@ __query_test_sales: fn() -> [__QueryTestSale] Never! {
     if __query_collect<Int>(mapped) == .Ok(_) -> panic("a mapped query collects once")
     assert_eq(__query_collect<Int>(__query_min<__QueryTestSale, Int>(query<__QueryTestSale>(rows), fn(sale) { sale.cents })) ?? panic("min"), [Int]{40})
     assert_eq(__query_collect<String>(__query_max<__QueryTestSale, String>(query<__QueryTestSale>(rows), fn(sale) { sale.item })) ?? panic("max"), [String]{"tools"})
-    if __query_collect<Int>(__query_min<__QueryTestSale, Int>(query<__QueryTestSale>([__QueryTestSale]{}), fn(sale) { sale.cents })) == .Ok(_) -> panic("an empty query has no minimum")
+    if __query_collect<Int>(__query_min<__QueryTestSale, Int>(query<__QueryTestSale>([__QueryTestSale]{}), fn(sale) { sale.cents })) == .Ok(_) {
+        panic("an empty query has no minimum")
+    }
     sums: __query_collect<Group<String, Int>>(__group_sum_int<__QueryTestSale, String>(__query_group_by<__QueryTestSale, String>(query<__QueryTestSale>(rows), fn(sale) { sale.item }), fn(sale) { sale.cents })) ?? panic("sum")
     assert_eq(sums.len(), 3)
     assert_eq(sums[0].key, "apps")
@@ -1488,7 +1564,7 @@ locator_format: fn(locator: String) -> String DataError! {
 
 #Test("load does not infer a format from a directory or query") {
     if load_default<Int>("dir.csv/items?format=.json") == {
-        .Ok(_) -> panic("extensionless source accepted")
+        .Ok(_) -> { panic("extensionless source accepted") }
         .Err(error) -> {
             assert(error.kind == .Bridge)
             assert_eq(error.operation, "data.load")
@@ -1496,7 +1572,7 @@ locator_format: fn(locator: String) -> String DataError! {
         }
     }
     if load_default<Int>("items.txt") == {
-        .Ok(_) -> panic("provider format accepted")
+        .Ok(_) -> { panic("provider format accepted") }
         .Err(error) -> {
             assert(error.kind == .Bridge)
             assert_eq(error.operation, "data.loader")
@@ -1573,7 +1649,9 @@ snapshot: fn<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSn
     source_material = data_loader_identity_part(source_material, data_loader_kind_text(loader.source.kind))
     source_material = data_loader_identity_part(source_material, loader.source.locator)
     source_material = data_loader_identity_part(source_material, loader.source.member)
-    loop parameter in loader.source.parameters -> source_material = data_loader_identity_part(source_material, parameter)
+    loop parameter in loader.source.parameters {
+        source_material = data_loader_identity_part(source_material, parameter)
+    }
     source_material = data_loader_identity_part(source_material, loader.authority.scope)
     source_material = data_loader_identity_part(source_material, loader.authority.revision)
     source_id: data_loader_digest(source_material.bytes())
@@ -1608,14 +1686,18 @@ snapshot: fn<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSn
 count: fn<T>(rows: [T]) -> Int Never! { rows.len() }
 
 describe: fn(values: [Float]) -> DataSummary DataError! {
-    if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "describe of empty data is undefined", "describe"))
+    if values.len() == 0 {
+        return Err(data_error(DataErrorKind.Empty, "describe of empty data is undefined", "describe"))
+    }
     total := Float{0.0}
     if compensated_sum(values, "describe") == {
         .Ok(value) -> total = value
         .Err(error) -> return Err(error)
     }
     mean_value := total / Float{values.len()}
-    if nonfinite(mean_value) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing mean", "describe"))
+    if nonfinite(mean_value) {
+        return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing mean", "describe"))
+    }
     // The sum has proved every value finite, so the extrema take one pass and
     // the median selects without validating again.
     minimum := values[0]
@@ -1624,7 +1706,9 @@ describe: fn(values: [Float]) -> DataSummary DataError! {
         if value < minimum -> minimum = value
         if value > maximum -> maximum = value
     }
-    if values.len() > DataLimits.safe().max_sort_rows -> return Err(data_error(DataErrorKind.Empty, "median failed while describing data", "describe"))
+    if values.len() > DataLimits.safe().max_sort_rows {
+        return Err(data_error(DataErrorKind.Empty, "median failed while describing data", "describe"))
+    }
     middle: finite_quantile(values, Float{0.5}) ?? return Err(data_error(DataErrorKind.Empty, "median failed while describing data", "describe"))
     spread := Float{0.0}
     if variance(values) == {
@@ -1632,26 +1716,29 @@ describe: fn(values: [Float]) -> DataSummary DataError! {
         .Err(error) -> return Err(error)
     }
     deviation := math.sqrt(spread)
-    if nonfinite(deviation) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing standard deviation", "describe"))
-    Ok(DataSummary{
-        count: values.len(),
-        sum: total,
-        mean: normalize_zero(mean_value),
-        min: normalize_zero(minimum),
-        max: normalize_zero(maximum),
-        median: normalize_zero(middle),
-        variance: normalize_zero(spread),
-        stddev: normalize_zero(deviation),
-    })
+    if nonfinite(deviation) {
+        return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing standard deviation", "describe"))
+    }
+    Ok(
+        DataSummary{
+            count: values.len(),
+            sum: total,
+            mean: normalize_zero(mean_value),
+            min: normalize_zero(minimum),
+            max: normalize_zero(maximum),
+            median: normalize_zero(middle),
+            variance: normalize_zero(spread),
+            stddev: normalize_zero(deviation),
+        },
+    )
 }
 
-
-sum: fn(values: [Float]) -> Float DataError! {
-    compensated_sum(values, "sum")
-}
+sum: fn(values: [Float]) -> Float DataError! { compensated_sum(values, "sum") }
 
 mean: fn(values: [Float]) -> Float DataError! {
-    if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "mean of empty data is undefined", "mean"))
+    if values.len() == 0 {
+        return Err(data_error(DataErrorKind.Empty, "mean of empty data is undefined", "mean"))
+    }
     total := Float{0.0}
     // Rust `jet_data_mean_checked` reports its summation failures as `sum`.
     if compensated_sum(values, "sum") == {
@@ -1659,51 +1746,73 @@ mean: fn(values: [Float]) -> Float DataError! {
         .Err(error) -> return Err(error)
     }
     mean_value := total / Float{values.len()}
-    if nonfinite(mean_value) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing mean", "mean"))
+    if nonfinite(mean_value) {
+        return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing mean", "mean"))
+    }
     Ok(normalize_zero(mean_value))
 }
 
 min: fn(values: [Float]) -> Float DataError! {
-    if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "min of empty data is undefined", "min"))
+    if values.len() == 0 {
+        return Err(data_error(DataErrorKind.Empty, "min of empty data is undefined", "min"))
+    }
     first: values[0]
-    if nonfinite(first) -> return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "min"))
+    if nonfinite(first) {
+        return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "min"))
+    }
     out := first
     loop value in values {
-        if nonfinite(value) -> return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "min"))
+        if nonfinite(value) {
+            return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "min"))
+        }
         if value < out -> out = value
     }
     Ok(normalize_zero(out))
 }
 
 max: fn(values: [Float]) -> Float DataError! {
-    if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "max of empty data is undefined", "max"))
+    if values.len() == 0 {
+        return Err(data_error(DataErrorKind.Empty, "max of empty data is undefined", "max"))
+    }
     first: values[0]
-    if nonfinite(first) -> return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "max"))
+    if nonfinite(first) {
+        return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "max"))
+    }
     out := first
     loop value in values {
-        if nonfinite(value) -> return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "max"))
+        if nonfinite(value) {
+            return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "max"))
+        }
         if value > out -> out = value
     }
     Ok(normalize_zero(out))
 }
 
 variance: fn(values: [Float]) -> Float DataError! {
-    if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "variance of empty data is undefined", "variance"))
+    if values.len() == 0 {
+        return Err(data_error(DataErrorKind.Empty, "variance of empty data is undefined", "variance"))
+    }
     mean_value := Float{0.0}
     m2 := Float{0.0}
     n := Float{0.0}
     loop value in values {
-        if nonfinite(value) -> return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "variance"))
-        n = n + Float{1.0}
+        if nonfinite(value) {
+            return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "variance"))
+        }
+        n += Float{1.0}
         delta := value - mean_value
-        mean_value = mean_value + delta / n
+        mean_value += delta / n
         delta2 := value - mean_value
-        m2 = m2 + delta * delta2
-        if nonfinite(mean_value) || nonfinite(m2) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing variance", "variance"))
+        m2 += delta * delta2
+        if nonfinite(mean_value) || nonfinite(m2) {
+            return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing variance", "variance"))
+        }
     }
     if m2 < (Float{0.0}) -> m2 = Float{0.0}
     result := m2 / n
-    if nonfinite(result) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing variance", "variance"))
+    if nonfinite(result) {
+        return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing variance", "variance"))
+    }
     Ok(normalize_zero(result))
 }
 
@@ -1714,28 +1823,39 @@ stddev: fn(values: [Float]) -> Float DataError! {
         .Err(error) -> return Err(error)
     }
     result := math.sqrt(value)
-    if nonfinite(result) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing standard deviation", "stddev"))
+    if nonfinite(result) {
+        return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing standard deviation", "stddev"))
+    }
     Ok(normalize_zero(result))
-
 }
 
 quantile: fn(values: [Float], q: Float) -> Float DataError! {
     if nonfinite(q) || q < (Float{0.0}) || q > (Float{1.0}) {
         return Err(data_error(DataErrorKind.InvalidArgument, "quantile q must be a finite value in 0.0 through 1.0", "quantile"))
     }
-    if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "quantile of empty data is undefined", "quantile"))
+    if values.len() == 0 {
+        return Err(data_error(DataErrorKind.Empty, "quantile of empty data is undefined", "quantile"))
+    }
     limits := DataLimits.safe()
-    if values.len() > limits.max_sort_rows -> return Err(data_error(DataErrorKind.Limit, "max_sort_rows exceeded", "quantile"))
+    if values.len() > limits.max_sort_rows {
+        return Err(data_error(DataErrorKind.Limit, "max_sort_rows exceeded", "quantile"))
+    }
     loop value in values {
-        if nonfinite(value) -> return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "quantile"))
+        if nonfinite(value) {
+            return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "quantile"))
+        }
     }
     finite_quantile(values, q)
 }
 
 rolling_mean: fn(values: [Float], window: Int) -> [Float] DataError! {
-    if window < 1 -> return Err(data_error(DataErrorKind.InvalidArgument, "rolling width must be positive", "rolling_mean"))
+    if window < 1 {
+        return Err(data_error(DataErrorKind.InvalidArgument, "rolling width must be positive", "rolling_mean"))
+    }
     limits := DataLimits.safe()
-    if values.len() > limits.max_output_rows -> return Err(data_error(DataErrorKind.Limit, "max_output_rows exceeded", "rolling_mean"))
+    if values.len() > limits.max_output_rows {
+        return Err(data_error(DataErrorKind.Limit, "max_output_rows exceeded", "rolling_mean"))
+    }
     loop index in 0..<values.len() {
         if nonfinite(values[index]) {
             return Err(data_error_at(DataErrorKind.NonFinite, "numeric input must be finite", "rolling_mean", index))
@@ -1752,7 +1872,9 @@ rolling_mean: fn(values: [Float], window: Int) -> [Float] DataError! {
         }
         n := i + 1 - start
         mean_value := total / Float{n}
-        if nonfinite(mean_value) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing rolling mean", "rolling_mean"))
+        if nonfinite(mean_value) {
+            return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing rolling mean", "rolling_mean"))
+        }
         out.push(normalize_zero(mean_value))
     }
     Ok(out)
@@ -1846,9 +1968,7 @@ join_index: fn(keys: [String]) -> __DataJoinIndex Never! {
     rows := [[Int]]{}
     loop at in 0..<keys.len() {
         position := 0
-        if positions.get(keys[at]) == .Val(found) {
-            position = found
-        } else {
+        if positions.get(keys[at]) == .Val(found) -> position = found else {
             position = rows.len()
             positions[keys[at].copy()] = position
             rows.push([Int]{})
@@ -1889,8 +2009,8 @@ pivot_sum: fn<T>(rows: [T], row_key: fn(T) -> String, column_key: fn(T) -> Strin
             next
         }
         cell := cells[found]
-        cell.count = cell.count + 1
-        cell.sum = cell.sum + amount
+        cell.count += 1
+        cell.sum += amount
         if nonfinite(cell.sum) {
             return Err(data_error(DataErrorKind.Overflow, "finite overflow while pivoting", "pivot_sum"))
         }
@@ -1902,7 +2022,9 @@ pivot_sum: fn<T>(rows: [T], row_key: fn(T) -> String, column_key: fn(T) -> Strin
     loop index in 0..<cells.len() {
         cell := cells[index]
         cell.mean = cell.sum / Float{cell.count}
-        if nonfinite(cell.mean) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while pivoting", "pivot_sum"))
+        if nonfinite(cell.mean) {
+            return Err(data_error(DataErrorKind.Overflow, "finite overflow while pivoting", "pivot_sum"))
+        }
         cell.sum = normalize_zero(cell.sum)
         cell.mean = normalize_zero(cell.mean)
         cells[index] = cell
@@ -1911,9 +2033,7 @@ pivot_sum: fn<T>(rows: [T], row_key: fn(T) -> String, column_key: fn(T) -> Strin
     Ok(cells)
 }
 
-plot: fn<T: Encode>(rows: [T]) -> JetDataPlot<T> DataError! {
-    core.data.plot<T>(rows)
-}
+plot: fn<T: Encode>(rows: [T]) -> JetDataPlot<T> DataError! { core.data.plot<T>(rows) }
 
 inspect: fn<T>(plot: JetDataPlot<T>) -> JetDataPlotInspection DataError! {
     plan: normalize_plot_plan(plot.plan)
@@ -2060,17 +2180,19 @@ make_loader: fn<T>(kind: DataLoaderKind, locator: String, member: String, parame
         backpressure: false,
         last_good: false,
     }
-    Ok(DataLoader<T>{
-        source: source,
-        format: format,
-        authority: authority,
-        limits: limits,
-        payload: None,
-        last_good: None,
-        cancelled: false,
-        offline: false,
-        status: status,
-    })
+    Ok(
+        DataLoader<T>{
+            source: source,
+            format: format,
+            authority: authority,
+            limits: limits,
+            payload: None,
+            last_good: None,
+            cancelled: false,
+            offline: false,
+            status: status,
+        },
+    )
 }
 
 public_parameters: fn(values: [String]) -> [String] Never! {
@@ -2144,7 +2266,9 @@ valid_public_text: fn(text: String, allow_empty: Bool) -> Bool Never! {
 valid_authority: fn(text: String) -> Bool Never! {
     normalized := upper(text)
     if normalized.starts_with("BEARER ") || normalized.starts_with("BASIC ") -> return false
-    if normalized.starts_with("PASSWORD=") || normalized.starts_with("SECRET=") || normalized.starts_with("TOKEN=") || normalized.starts_with("CREDENTIAL=") || normalized.starts_with("AUTHORIZATION=") -> return false
+    if normalized.starts_with("PASSWORD=") || normalized.starts_with("SECRET=") || normalized.starts_with("TOKEN=") || normalized.starts_with("CREDENTIAL=") || normalized.starts_with("AUTHORIZATION=") {
+        return false
+    }
     loop byte in text.bytes() {
         if byte == (U8{61}) || byte == (U8{38}) -> return false
     }
@@ -2166,7 +2290,6 @@ parse_format: fn(name: String) -> DataFormat? Never! {
     }
 }
 
-
 normalize_zero: fn(value: Float) -> Float Never! {
     if value == (Float{0.0}) -> return Float{0.0}
     value
@@ -2187,10 +2310,8 @@ compensated_sum_range: fn(values: [Float], start: Int, end: Int, operation: Stri
         next_total := total + value
         // Rust `jet_data_neumaier_sum`: the lost low part is formed before it
         // joins the running correction.
-        if math.fabs(total) >= math.fabs(value) {
-            correction = correction + ((total - next_total) + value)
-        } else {
-            correction = correction + ((value - next_total) + total)
+        if math.fabs(total) >= math.fabs(value) -> correction += ((total - next_total) + value) else {
+            correction += ((value - next_total) + total)
         }
         total = next_total
         if nonfinite(total) || nonfinite(correction) {
@@ -2198,9 +2319,12 @@ compensated_sum_range: fn(values: [Float], start: Int, end: Int, operation: Stri
         }
     }
     result := total + correction
-    if nonfinite(result) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while summing", operation))
+    if nonfinite(result) {
+        return Err(data_error(DataErrorKind.Overflow, "finite overflow while summing", operation))
+    }
     Ok(normalize_zero(result))
 }
+
 sort_pivot_cells: fn(cells: &[DataPivotCell]) Never! {
     loop i in 1..<cells.len() {
         j := i
@@ -2209,7 +2333,7 @@ sort_pivot_cells: fn(cells: &[DataPivotCell]) Never! {
             current := cells[j]
             cells[j] = cells[j - 1]
             cells[j - 1] = current
-            j = j - 1
+            j -= 1
         }
     }
 }
@@ -2234,7 +2358,6 @@ text_compare: fn(left: String, right: String) -> Int Never! {
     if a.len() > b.len() -> return 1
     0
 }
-
 
 snapshot_from_rows: fn<T>(rows: [T]) -> DataSnapshot<[T]> Never! {
     source := DataSourceIdentity{kind: DataLoaderKind.Value, locator: "rows", member: "", parameters: [String]{}}
@@ -2289,7 +2412,9 @@ priv quantile_select: module {
     interpolated: fn(low: Float, high: Float, frac: Float) -> Float DataError! {
         if frac == (Float{0.0}) -> return Ok(normalize_zero(low))
         result: low * (Float{1.0} - frac) + high * frac
-        if nonfinite(result) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while interpolating quantile", "quantile"))
+        if nonfinite(result) {
+            return Err(data_error(DataErrorKind.Overflow, "finite overflow while interpolating quantile", "quantile"))
+        }
         Ok(normalize_zero(result))
     }
 
@@ -2316,23 +2441,15 @@ priv quantile_select: module {
                 if value < pivot {
                     values[index] = values[less]
                     values[less] = value
-                    less = less + 1
-                    index = index + 1
+                    less += 1
+                    index += 1
                 } else if pivot < value {
-                    more = more - 1
+                    more -= 1
                     values[index] = values[more]
                     values[more] = value
-                } else {
-                    index = index + 1
-                }
+                } else { index += 1 }
             }
-            if rank < less {
-                end = less
-            } else if rank >= more {
-                start = more
-            } else {
-                return pivot
-            }
+            if rank < less -> end = less else if rank >= more -> start = more else -> return pivot
         }
     }
 
@@ -2349,7 +2466,7 @@ priv quantile_select: module {
             median: values[middle]
             values[middle] = values[lo + count]
             values[lo + count] = median
-            count = count + 1
+            count += 1
             start = end
         }
         select_rank(values, lo, lo + count, lo + (count - 1) /% 2)
@@ -2364,7 +2481,7 @@ priv quantile_select: module {
                 current: values[j]
                 values[j] = values[j - 1]
                 values[j - 1] = current
-                j = j - 1
+                j -= 1
             }
         }
     }
@@ -2442,29 +2559,21 @@ priv rank_order: module {
                     before(values[current], values[pivot]) -> {
                         order[index] = order[less]
                         order[less] = current
-                        less = less + 1
-                        index = index + 1
+                        less += 1
+                        index += 1
                     }
                     before(values[pivot], values[current]) -> {
-                        more = more - 1
+                        more -= 1
                         order[index] = order[more]
                         order[more] = current
                     }
-                    else -> {
-                        index = index + 1
-                    }
+                    else -> { index += 1 }
                 }
             }
             if {
-                rank < less -> {
-                    end = less
-                }
-                rank >= more -> {
-                    start = more
-                }
-                else -> {
-                    return order[rank]
-                }
+                rank < less -> { end = less }
+                rank >= more -> { start = more }
+                else -> { return order[rank] }
             }
         }
     }
@@ -2482,7 +2591,7 @@ priv rank_order: module {
             median: order[middle]
             order[middle] = order[lo + count]
             order[lo + count] = median
-            count = count + 1
+            count += 1
             start = end
         }
         rank_select_range<T, E>(values, order, lo, lo + count, lo + (count - 1) /% 2, before)
@@ -2497,7 +2606,7 @@ priv rank_order: module {
                 current: order[j]
                 order[j] = order[j - 1]
                 order[j - 1] = current
-                j = j - 1
+                j -= 1
             }
         }
     }
@@ -2519,7 +2628,9 @@ priv rank_order: module {
 
     rank_test_refusing: fn(a: Int, b: Int, calls: &Int, stop: Int) -> Bool DataError! {
         calls += 1
-        if calls == stop -> return Err(data_error(DataErrorKind.InvalidArgument, "comparison {stop} refused", "rank_select"))
+        if calls == stop {
+            return Err(data_error(DataErrorKind.InvalidArgument, "comparison {stop} refused", "rank_select"))
+        }
         Ok(a < b)
     }
 
@@ -2584,7 +2695,7 @@ priv rank_order: module {
     loop stop in stops {
         calls := 0
         if rank_select_prototype<Int, DataError>(mixed[0..<mixed.len()], 150, fn(a: Int, b: Int) { rank_test_refusing(a, b, calls, stop) }) == {
-            .Ok(_) -> assert(false)
+            .Ok(_) -> { assert(false) }
             .Err(error) -> assert_eq(error.reason, "comparison {stop} refused")
         }
         assert_eq(calls, stop)
@@ -2597,7 +2708,7 @@ priv rank_order: module {
         found: rank_select_prototype<String, Never>(words[0..<words.len()], rank, fn(a: String, b: String) { rank_test_text_before(a, b) })
         smaller := 0
         loop word in words {
-            if text_compare(word, words[found]) < 0 -> smaller = smaller + 1
+            if text_compare(word, words[found]) < 0 -> smaller += 1
         }
         assert(smaller <= rank)
     }
@@ -2615,7 +2726,9 @@ render_bar_text: fn(labels: [String], values: [Float]) -> String Never! {
         bar := ""
         if v >= (Float{0.0}) {
             width := 0
-            if maximum > (Float{0.0}) -> width = scale_between(v, Float{0.0}, maximum, 20 - baseline)
+            if maximum > (Float{0.0}) {
+                width = scale_between(v, Float{0.0}, maximum, 20 - baseline)
+            }
             loop _ in 0..<baseline -> bar = "{bar} "
             loop _ in 0..<width -> bar = "{bar}#"
         } else {
@@ -2646,7 +2759,7 @@ render_bar_svg: fn(labels: [String], values: [Float]) -> String Never! {
             if maximum > (Float{0.0}) -> bw = scale_between(v, Float{0.0}, maximum, 200 - baseline)
         } else {
             if minimum < (Float{0.0}) -> bw = scale_between(v, minimum, Float{0.0}, baseline)
-            x = x - bw
+            x -= bw
         }
         out = "{out}<text x=\"4\" y=\"{y + 12}\" font-size=\"12\">{xml_escape(labels[i])}</text>"
         out = "{out}<rect x=\"{x}\" y=\"{y}\" width=\"{bw}\" height=\"16\" fill=\"#4a90d9\"/>"
@@ -2656,9 +2769,7 @@ render_bar_svg: fn(labels: [String], values: [Float]) -> String Never! {
 
 render_line_text: fn(labels: [String], values: [Float]) -> String Never! {
     out := ""
-    loop i in 0..<labels.len() {
-        out = "{out}{labels[i]}={values[i]}\n"
-    }
+    loop i in 0..<labels.len() -> out = "{out}{labels[i]}={values[i]}\n"
     out
 }
 
@@ -2702,8 +2813,8 @@ value_bounds: fn(values: [Float]) -> (min: Float, max: Float) Never! {
         if value > maximum -> maximum = value
     }
     if minimum == maximum {
-        minimum = minimum - (Float{1.0})
-        maximum = maximum + (Float{1.0})
+        minimum -= (Float{1.0})
+        maximum += (Float{1.0})
     }
     (min: minimum, max: maximum)
 }
@@ -2716,16 +2827,19 @@ scale_between: fn(value: Float, minimum: Float, maximum: Float, extent: Int) -> 
     checked(Int{math.trunc(ratio * Float{extent})}) ?? panic("plot coordinate must be finite")
 }
 
-
 validate_line_options: fn(options: DataLineOptions, operation: String) DataError! {
     if options.reference != None {
         reference: options.reference ?? Float{0.0}
-        if nonfinite(reference) -> return Err(data_error(DataErrorKind.NonFinite, "reference line must be finite", operation))
+        if nonfinite(reference) {
+            return Err(data_error(DataErrorKind.NonFinite, "reference line must be finite", operation))
+        }
     }
     if options.style != "solid" && options.style != "dashed" && options.style != "dotted" {
         return Err(data_error(DataErrorKind.InvalidArgument, "line style must be solid, dashed, or dotted", operation))
     }
-    if options.color.len() == 0 -> return Err(data_error(DataErrorKind.InvalidArgument, "line color must not be empty", operation))
+    if options.color.len() == 0 {
+        return Err(data_error(DataErrorKind.InvalidArgument, "line color must not be empty", operation))
+    }
     return Ok()
 }
 
@@ -2742,14 +2856,16 @@ normalize_plot_plan: fn(plan: JetDataPlotPlan) -> JetDataPlotPlan DataError! {
     height := 24 * plan.labels.len() + 16
     if plan.mark == JetDataPlotMark.Line || plan.mark == JetDataPlotMark.Point -> height = 120
     if height < 16 -> height = 16
-    Ok(JetDataPlotPlan{
-        mark: plan.mark,
-        labels: plan.labels,
-        values: values,
-        layout: JetDataPlotLayout{width: 320, height: height},
-        encoding: plan.encoding,
-        schema: plan.schema,
-    })
+    Ok(
+        JetDataPlotPlan{
+            mark: plan.mark,
+            labels: plan.labels,
+            values: values,
+            layout: JetDataPlotLayout{width: 320, height: height},
+            encoding: plan.encoding,
+            schema: plan.schema,
+        },
+    )
 }
 
 plot_mark_name: fn(mark: JetDataPlotMark) -> String Never! {
@@ -2833,8 +2949,8 @@ render_line_options_svg: fn(labels: [String], values: [Float], options: DataLine
         if reference > maximum -> maximum = reference
     }
     if math.fabs(maximum - minimum) < 2.220446049250313e-16 {
-        minimum = minimum - Float{1.0}
-        maximum = maximum + Float{1.0}
+        minimum -= Float{1.0}
+        maximum += Float{1.0}
     }
     color: xml_escape(options.color)
     out := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"640\" height=\"360\" viewBox=\"0 0 640 360\"><title>{xml_escape(options.title)}</title><rect width=\"640\" height=\"360\" fill=\"white\"/>"
@@ -2864,7 +2980,9 @@ render_line_options_svg: fn(labels: [String], values: [Float], options: DataLine
     out = "{out}<text x=\"320\" y=\"24\" text-anchor=\"middle\" font-family=\"sans-serif\" font-size=\"16\">{xml_escape(options.title)}</text>"
     out = "{out}<text x=\"320\" y=\"350\" text-anchor=\"middle\" font-family=\"sans-serif\" font-size=\"12\">{xml_escape(options.x_label)}</text>"
     out = "{out}<text x=\"16\" y=\"180\" text-anchor=\"middle\" transform=\"rotate(-90 16 180)\" font-family=\"sans-serif\" font-size=\"12\">{xml_escape(options.y_label)}</text>"
-    if options.legend.len() > 0 -> out = "{out}<text x=\"496\" y=\"32\" font-family=\"sans-serif\" font-size=\"12\" fill=\"{color}\">{xml_escape(options.legend)}</text>"
+    if options.legend.len() > 0 {
+        out = "{out}<text x=\"496\" y=\"32\" font-family=\"sans-serif\" font-size=\"12\" fill=\"{color}\">{xml_escape(options.legend)}</text>"
+    }
     "{out}</svg>"
 }
 
@@ -2882,18 +3000,16 @@ xml_escape: fn(text: String) -> String Never! {
     chunk := [U8]{}
     loop byte in text.bytes() {
         entity := ""
-        if byte == (U8{38}) -> entity = "&amp;"
-        else if byte == (U8{60}) -> entity = "&lt;"
-        else if byte == (U8{62}) -> entity = "&gt;"
-        else if byte == (U8{34}) -> entity = "&quot;"
-        else if byte == (U8{39}) -> entity = "&apos;"
+        if byte == (U8{38}) -> entity = "&amp;" else if byte == (U8{60}) -> entity = "&lt;" else if byte == (U8{62}) {
+            entity = "&gt;"
+        } else if byte == (U8{34}) { entity = "&quot;" } else if byte == (U8{39}) {
+            entity = "&apos;"
+        }
         if entity.len() > 0 {
             chunk_text: String.from_bytes(chunk) ?? ""
             out = "{out}{chunk_text}{entity}"
             chunk = [U8]{}
-        } else {
-            chunk.push(byte)
-        }
+        } else { chunk.push(byte) }
     }
     tail: String.from_bytes(chunk) ?? ""
     out = "{out}{tail}"
@@ -2906,11 +3022,11 @@ trim: fn(text: String) -> String Never! {
     e := raw.len()
     loop s < e {
         n: raw[s]
-        if n == 32 || n == 9 || n == 10 || n == 13 -> s = s + 1 else { break }
+        if n == 32 || n == 9 || n == 10 || n == 13 -> s += 1 else { break }
     }
     loop e > s {
         n: raw[e - 1]
-        if n == 32 || n == 9 || n == 10 || n == 13 -> e = e - 1 else { break }
+        if n == 32 || n == 9 || n == 10 || n == 13 -> e -= 1 else { break }
     }
     if s == 0 && e == raw.len() -> return String.from_bytes(raw) ?? ""
     if e <= s -> return ""
@@ -2954,15 +3070,11 @@ data_loader_quote: fn(out: &[U8], text: String) Never! {
         } else if n == 10 || n == 13 || n == 9 {
             out.push(U8{92})
             out.push(if n == 10 -> U8{110} else if n == 13 -> U8{114} else -> U8{116})
-        } else if n < 32 || n == 127 {
-            data_loader_put_control(out, n)
-        } else if n == 194 && index + 1 < text.count_bytes() && (Int{encoding_stream.byte_at(text, index + 1)}) <= 159 {
+        } else if n < 32 || n == 127 { data_loader_put_control(out, n) } else if n == 194 && index + 1 < text.count_bytes() && (Int{encoding_stream.byte_at(text, index + 1)}) <= 159 {
             // Rust char::is_control includes the C1 scalars U+0080..U+009F.
             index += 1
             data_loader_put_control(out, Int{encoding_stream.byte_at(text, index)})
-        } else {
-            out.push(byte)
-        }
+        } else { out.push(byte) }
         index += 1
     }
     out.push(U8{34})
@@ -2985,11 +3097,11 @@ data_loader_render: fn(out: &[U8], tree: encoding.Dyn) Never! {
         }
     }
     if tree == {
-        .Null -> data_loader_put_text(out, "null")
-        .Bool(value) -> data_loader_put_text(out, if value -> "true" else -> "false")
-        .Int(value) -> data_loader_put_text(out, "{value}")
-        .Float(value) -> data_loader_put_text(out, "{value:Debug}")
-        .Text(value) -> data_loader_quote(out, value)
+        .Null -> { data_loader_put_text(out, "null") }
+        .Bool(value) -> { data_loader_put_text(out, if value -> "true" else -> "false") }
+        .Int(value) -> { data_loader_put_text(out, "{value}") }
+        .Float(value) -> { data_loader_put_text(out, "{value:Debug}") }
+        .Text(value) -> { data_loader_quote(out, value) }
         .Array(values) -> {
             out.push(U8{91})
             loop (index, value) in values {
@@ -3011,15 +3123,21 @@ data_loader_render: fn(out: &[U8], tree: encoding.Dyn) Never! {
             }
             out.push(U8{125})
         }
-        .DateTime(_) -> data_loader_quote(out, tree.to_text() ?? panic("DateTime always has an RFC 3339 representation"))
+        .DateTime(_) -> {
+            data_loader_quote(out, tree.to_text() ?? panic("DateTime always has an RFC 3339 representation"))
+        }
         .Number(_) | .Bytes(_) -> panic("unknown native Dyn carrier")
     }
 }
 
 data_loader_check_payload: fn(limits: DataLimits, bytes: Int, operation: String) DataError! {
-    if bytes > limits.encoding.max_item_bytes -> return Err(data_error(.Limit, "payload is {bytes} bytes; max_item_bytes is {limits.encoding.max_item_bytes}", operation))
+    if bytes > limits.encoding.max_item_bytes {
+        return Err(data_error(.Limit, "payload is {bytes} bytes; max_item_bytes is {limits.encoding.max_item_bytes}", operation))
+    }
     if limits.encoding.max_total_bytes == .Val(limit) {
-        if bytes > limit -> return Err(data_error(.Limit, "payload is {bytes} bytes; max_total_bytes is {limit}", operation))
+        if bytes > limit {
+            return Err(data_error(.Limit, "payload is {bytes} bytes; max_total_bytes is {limit}", operation))
+        }
     }
     Ok()
 }
@@ -3060,9 +3178,7 @@ data_loader_public_text_error: fn(label: String) -> DataError Never! {
 // its pending payload.
 data_loader_fail: fn<T>(loader: &DataLoader<T>, error: DataError) -> DataError Never! {
     cleanup := "payload-released"
-    if loader.source.kind == DataLoaderKind.Value {
-        cleanup = "retained"
-    } else {
+    if loader.source.kind == DataLoaderKind.Value -> cleanup = "retained" else {
         loader.payload = None
     }
     loader.status = DataLoaderStatus{
@@ -3080,16 +3196,26 @@ data_loader_fail: fn<T>(loader: &DataLoader<T>, error: DataError) -> DataError N
 
 // `validate_loader`: the public source identity and authority.
 data_loader_validate: fn<T>(loader: DataLoader<T>) DataError! {
-    if !valid_public_text(loader.source.locator, false) -> return Err(data_loader_public_text_error("source identity locator"))
-    if loader.source.member.len() > 0 && !valid_public_text(loader.source.member, false) -> return Err(data_loader_public_text_error("source identity member"))
+    if !valid_public_text(loader.source.locator, false) {
+        return Err(data_loader_public_text_error("source identity locator"))
+    }
+    if loader.source.member.len() > 0 && !valid_public_text(loader.source.member, false) {
+        return Err(data_loader_public_text_error("source identity member"))
+    }
     loop parameter in loader.source.parameters {
-        if !valid_public_text(parameter, true) -> return Err(data_loader_public_text_error("source identity parameter"))
+        if !valid_public_text(parameter, true) {
+            return Err(data_loader_public_text_error("source identity parameter"))
+        }
     }
     if loader.source.kind != DataLoaderKind.File && loader.source.member.len() > 0 {
         return Err(data_loader_error(DataErrorKind.InvalidArgument, "data.loader", "only file loaders may carry an archive member identity"))
     }
-    if !valid_public_text(loader.authority.scope, false) -> return Err(data_loader_public_text_error("authority scope"))
-    if !valid_public_text(loader.authority.revision, true) -> return Err(data_loader_public_text_error("authority revision"))
+    if !valid_public_text(loader.authority.scope, false) {
+        return Err(data_loader_public_text_error("authority scope"))
+    }
+    if !valid_public_text(loader.authority.revision, true) {
+        return Err(data_loader_public_text_error("authority revision"))
+    }
     if !valid_authority(loader.authority.scope) || !valid_authority(loader.authority.revision) {
         return Err(data_loader_error(DataErrorKind.InvalidArgument, "data.loader", "authority identity cannot carry credential material"))
     }
@@ -3100,7 +3226,7 @@ data_loader_validate: fn<T>(loader: DataLoader<T>) DataError! {
 // pending payload the next `snapshot` commits. An offline loader that holds a
 // last-good snapshot keeps it and reads nothing; a failed read is recorded in
 // the loader status.
-__read_file: fn<T>(loader: &DataLoader<T>, read: fn(String) -[FS]> [U8] Err!) -[FS]> DataError! {
+__read_file: fn<T>(loader: &DataLoader<T>, read: fn(String) -[FS]> [U8] Err!) DataError! -[FS]> {
     if loader.cancelled {
         return Err(data_loader_fail<T>(loader, data_loader_error(DataErrorKind.State, "data.loader", "loader was cancelled before read")))
     }
@@ -3174,11 +3300,11 @@ data_loader_tree: fn(payload: [U8], format: DataFormat, limits: DataLimits) -> D
         }
     } else if format == DataFormat.CSV {
         tree = data_loader_csv_tree(text, limits) ?? return Err(err)
-    } else {
-        tree = data_loader_jsonl_tree(text, limits) ?? return Err(err)
-    }
+    } else { tree = data_loader_jsonl_tree(text, limits) ?? return Err(err) }
     if tree == .Array(rows) {
-        if rows.len() > limits.max_output_rows -> return Err(data_loader_error(DataErrorKind.Limit, "data.loader", "max_output_rows {limits.max_output_rows} exceeded"))
+        if rows.len() > limits.max_output_rows {
+            return Err(data_loader_error(DataErrorKind.Limit, "data.loader", "max_output_rows {limits.max_output_rows} exceeded"))
+        }
     }
     Ok(tree)
 }
@@ -3193,12 +3319,8 @@ data_loader_json_reason: fn(prefix: String, failure: EncodingError) -> String Ne
 data_loader_decode: fn<T: Decode>(tree: Dyn, text_cells: Bool) -> T [FieldError]! {
     if !text_cells {
         if tree.decode<T>() == {
-            .Ok(value) -> {
-                return Ok(value)
-            }
-            .Err(failures) -> {
-                return Err(failures)
-            }
+            .Ok(value) -> { return Ok(value) }
+            .Err(failures) -> { return Err(failures) }
         }
     }
     previous: rt.text_cells_enter()
@@ -3220,18 +3342,28 @@ data_loader_csv_tree: fn(text: String, limits: DataLimits) -> Dyn DataError! {
     if records.len() == 0 -> return Ok(Dyn.Array([Dyn]{}))
     header: records[0].fields
     loop (index, name) in header {
-        if !valid_public_text(name, false) -> return Err(data_loader_public_text_error("CSV header"))
+        if !valid_public_text(name, false) {
+            return Err(data_loader_public_text_error("CSV header"))
+        }
         loop earlier in 0..<index {
-            if header[earlier] == name -> return Err(data_loader_error(DataErrorKind.Decode, "data.loader.csv", "duplicate CSV header `{name}`"))
+            if header[earlier] == name {
+                return Err(data_loader_error(DataErrorKind.Decode, "data.loader.csv", "duplicate CSV header `{name}`"))
+            }
         }
     }
     values := [Dyn]{}
     loop row in 1..<records.len() {
         fields: records[row].fields
-        if values.len() >= limits.max_output_rows -> return Err(data_loader_error(DataErrorKind.Limit, "data.loader.csv", "max_output_rows {limits.max_output_rows} exceeded"))
-        if fields.len() != header.len() -> return Err(data_loader_error(DataErrorKind.Decode, "data.loader.csv", "CSV row has {fields.len()} fields; header has {header.len()}"))
+        if values.len() >= limits.max_output_rows {
+            return Err(data_loader_error(DataErrorKind.Limit, "data.loader.csv", "max_output_rows {limits.max_output_rows} exceeded"))
+        }
+        if fields.len() != header.len() {
+            return Err(data_loader_error(DataErrorKind.Decode, "data.loader.csv", "CSV row has {fields.len()} fields; header has {header.len()}"))
+        }
         entries := [(key: String, value: Dyn)]{}
-        loop column in 0..<header.len() -> entries.push((key: header[column].copy(), value: Dyn.Text(fields[column].copy())))
+        loop column in 0..<header.len() {
+            entries.push((key: header[column].copy(), value: Dyn.Text(fields[column].copy())))
+        }
         values.push(encoding_stream.object_from_entries(entries))
     }
     Ok(Dyn.Array(values))
@@ -3243,7 +3375,9 @@ data_loader_jsonl_tree: fn(text: String, limits: DataLimits) -> Dyn DataError! {
     loop (index, raw_line) in text.split("\n").to_list() {
         line: trim(raw_line)
         if line.len() == 0 -> next
-        if values.len() >= limits.max_output_rows -> return Err(data_loader_error(DataErrorKind.Limit, "data.loader.jsonl", "max_output_rows {limits.max_output_rows} exceeded"))
+        if values.len() >= limits.max_output_rows {
+            return Err(data_loader_error(DataErrorKind.Limit, "data.loader.jsonl", "max_output_rows {limits.max_output_rows} exceeded"))
+        }
         if json_codec.parse(line) == {
             .Ok(value) -> values.push(value)
             .Err(failure) -> return Err(data_loader_error(DataErrorKind.Decode, "data.loader.jsonl", data_loader_json_reason("invalid JSONL record at line {index + 1}", failure)))
@@ -3260,28 +3394,34 @@ data_loader_schema: fn(tree: Dyn, format: DataFormat) -> DataSchema Never! {
     fields := [(name: String, type_name: String, nullable: Bool)]{}
     if tree == {
         .Object(_) -> {
-            loop entry in encoding_stream.object_entries(tree) -> data_schema_absorb(fields, entry.key, entry.value, entry.value == .Null)
+            loop entry in encoding_stream.object_entries(tree) {
+                data_schema_absorb(fields, entry.key, entry.value, entry.value == .Null)
+            }
         }
         .Array(values) -> {
             rows_seen := 0
             loop value in values {
                 if value == .Object(_) {
                     entries: encoding_stream.object_entries(value)
-                    loop entry in entries -> data_schema_absorb(fields, entry.key, entry.value, rows_seen > 0 || entry.value == .Null)
+                    loop entry in entries {
+                        data_schema_absorb(fields, entry.key, entry.value, rows_seen > 0 || entry.value == .Null)
+                    }
                     loop index in 0..<fields.len() {
                         present := false
                         loop entry in entries {
                             if entry.key == fields[index].name -> present = true
                         }
-                        if !present -> fields[index] = (name: fields[index].name.copy(), type_name: fields[index].type_name.copy(), nullable: true)
+                        if !present {
+                            fields[index] = (name: fields[index].name.copy(), type_name: fields[index].type_name.copy(), nullable: true)
+                        }
                     }
-                } else {
-                    data_schema_absorb(fields, "$", value, rows_seen > 0 || value == .Null)
-                }
+                } else { data_schema_absorb(fields, "$", value, rows_seen > 0 || value == .Null) }
                 rows_seen += 1
             }
         }
-        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> data_schema_absorb(fields, "$", tree, tree == .Null)
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> {
+            data_schema_absorb(fields, "$", tree, tree == .Null)
+        }
     }
     fields.sort_by(fn(left: (name: String, type_name: String, nullable: Bool), right: (name: String, type_name: String, nullable: Bool)) { left.name <=> right.name })
     format_name: data_format_text(format)
@@ -3317,7 +3457,9 @@ data_schema_merge: fn(left: String, right: String) -> (type_name: String, nullab
     }
     if left == "null" -> return (type_name: right.copy(), nullable: true)
     if right == "null" -> return (type_name: left.copy(), nullable: true)
-    if (left == "int" && right == "float") || (left == "float" && right == "int") -> return (type_name: "float", nullable: false)
+    if (left == "int" && right == "float") || (left == "float" && right == "int") {
+        return (type_name: "float", nullable: false)
+    }
     (type_name: "Any", nullable: false)
 }
 
@@ -3342,7 +3484,9 @@ data_schema_value_type: fn(value: Dyn) -> String Never! {
 data_loader_digest: fn(bytes: [U8]) -> String Never! { "sha256-{sha256(bytes).hex()}" }
 
 // `identity_part`: one length-delimited `len:value;` fact.
-data_loader_identity_part: fn(material: String, value: String) -> String Never! { "{material}{value.count_bytes()}:{value};" }
+data_loader_identity_part: fn(material: String, value: String) -> String Never! {
+    "{material}{value.count_bytes()}:{value};"
+}
 
 data_loader_kind_text: fn(kind: DataLoaderKind) -> String Never! {
     if kind == {
@@ -3404,12 +3548,15 @@ DataLoaderPortRecord: struct {
 
 #Test("data CSV and JSON preserve malformed input field-error strings") {
     if csv<Int>("n\n\"7\"x") == {
-        .Err(error) -> assert_eq(error.reason, "E2701: CSV row 2, line 2, column 4 — only quote, comma, CRLF, LF, or EOF may follow a closing quote")
+        .Err(error) -> {
+            assert_eq(error.reason, "E2701: CSV row 2, line 2, column 4 — only quote, comma, CRLF, LF, or EOF may follow a closing quote")
+        }
         .Ok(_) -> panic("malformed CSV accepted")
     }
     if json<Int>("[1e]") == {
-        .Err(error) -> assert_eq(error.reason, "invalid JSON (line 1): exponent must contain a digit")
+        .Err(error) -> {
+            assert_eq(error.reason, "invalid JSON (line 1): exponent must contain a digit")
+        }
         .Ok(_) -> panic("malformed JSON accepted")
     }
 }
-

@@ -8,6 +8,7 @@ package: {
         git: .Library{ entry: git }
     }
 }
+
 use {
     core: core
     internal.[git_add_path, git_commit_staged, git_extra, git_fields, git_ran]
@@ -54,9 +55,13 @@ Repo: struct {
         paths := [String]{}
         // `added TAB deleted TAB path` records, a renamed file under its new
         // path; the patch's `rename from` lines name the paths renames remove.
-        loop record in git_fields(receipt.output) -> git_add_path(paths, record.partition("\t").tail.partition("\t").tail)
+        loop record in git_fields(receipt.output) {
+            git_add_path(paths, record.partition("\t").tail.partition("\t").tail)
+        }
         loop line in (core.files.read(patch) ?? "").lines() {
-            if line.starts_with("rename from ") -> git_add_path(paths, line.removeprefix("rename from "))
+            if line.starts_with("rename from ") {
+                git_add_path(paths, line.removeprefix("rename from "))
+            }
         }
         paths
     }
@@ -102,8 +107,14 @@ Repo: struct {
             tested: core.files.join(dir, path)
             if {
                 core.files.is_symlink(mine) -> next
-                !core.files.exists(tested) -> { if core.files.exists(mine) -> found.push(Drift{path: path, tracked: true, tested: false}) }
-                (core.files.read_bytes(mine) ?? [U8]{}) != (core.files.read_bytes(tested) ?? [U8]{}) -> found.push(Drift{path: path, tracked: true, tested: true})
+                !core.files.exists(tested) -> {
+                    if core.files.exists(mine) {
+                        found.push(Drift{path: path, tracked: true, tested: false})
+                    }
+                }
+                (core.files.read_bytes(mine) ?? [U8]{}) != (core.files.read_bytes(tested) ?? [U8]{}) -> {
+                    found.push(Drift{path: path, tracked: true, tested: true})
+                }
             }
         }
         git_extra(dir, "", Set.from(tracked), skip, found)
@@ -114,11 +125,12 @@ Repo: struct {
 /// Why `land` or `commit` stopped; git's own message is on stderr.
 #Error
 GitError: enum {
-    /// The patch does not apply to the tree.
     NoApply
-    /// git refused the commit (a hook, nothing to commit) or did not run.
     NoCommit
 }
+
+/// The patch does not apply to the tree.
+/// git refused the commit (a hook, nothing to commit) or did not run.
 
 /// A commit `land` made: its short sha and every path it committed, in
 /// git's order.
@@ -169,7 +181,9 @@ priv internal: module {
         loop entry in core.files.list_dir(core.files.join(root, rel)) ?? [] {
             path: if rel == "" -> entry.name.copy() else -> "{rel}/{entry.name}"
             if {
-                entry.is_dir && !core.files.is_symlink(entry.path) -> { if !skip.contains(entry.name) -> git_extra(root, path, tracked, skip, found) }
+                entry.is_dir && !core.files.is_symlink(entry.path) -> {
+                    if !skip.contains(entry.name) -> git_extra(root, path, tracked, skip, found)
+                }
                 !tracked.has(path) -> found.push(Drift{path: path, tracked: false, tested: true})
             }
         }
@@ -182,7 +196,9 @@ priv internal: module {
     core.files.create_dir_all(work) ?? panic("work")
     w: repo(work)
     // A host without git has nothing to drive.
-    if !git_ran(w.spec(Sh{"git init -q"})) -> return
+    if !git_ran(w.spec(Sh{"git init -q"})) {
+        return
+    }
     assert(git_ran(w.spec(Sh{"git config user.name kat"})) && git_ran(w.spec(Sh{"git config user.email kat@example.com"})))
     assert_eq(w.head(), "")
     core.files.write(core.files.join(work, "a.txt"), "one\n") ?? panic("a")

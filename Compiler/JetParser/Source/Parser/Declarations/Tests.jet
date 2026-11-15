@@ -56,7 +56,9 @@ parser_parse_test: fn(state: &JetParserState, markers: [Marker]) -> Item {
     if parser_current_kind(state) == TOKEN_KW_FN {
         pre := [ContractClause]{}
         loop written in markers {
-            if written.name == "Pre" && parser_contract_clause(state, written) == .Val(clause) -> pre.push(clause)
+            if written.name == "Pre" && parser_contract_clause(state, written) == .Val(clause) {
+                pre.push(clause)
+            }
         }
         start: parser_bump(state)
         name: parser_expect_name(state, "after `fn` in a property test")

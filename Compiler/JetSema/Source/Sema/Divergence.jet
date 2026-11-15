@@ -11,27 +11,25 @@
 // stop. The result is a sema fact keyed by the function's symbol, never a
 // type; L2421 reads it (sema_lint_inferred_never_return). Core bodies are not
 // solved: their declared `Never` rows are the contract a caller sees.
-use {
-    jet_foundation.[
-        BinOp,
-        CallArg,
-        CompilerThreads,
-        Expr,
-        ForKind,
-        LValue,
-        OrFallback,
-        Param,
-        Span,
-        Stmt,
-        SwitchArm,
-        SymbolKind,
-        TypedLitBody,
-        compiler_threads_admit,
-        compiler_threads_heaviest_first,
-        name_rows_hash,
-        module_is_core,
-    ]
-}
+use jet_foundation.[
+    BinOp,
+    CallArg,
+    CompilerThreads,
+    Expr,
+    ForKind,
+    LValue,
+    OrFallback,
+    Param,
+    Span,
+    Stmt,
+    SwitchArm,
+    SymbolKind,
+    TypedLitBody,
+    compiler_threads_admit,
+    compiler_threads_heaviest_first,
+    name_rows_hash,
+    module_is_core,
+]
 
 // One body's ways out: a path reaches the next statement (`normal`), returns
 // to the caller, stops the program, or leaves the loop around it.
@@ -71,7 +69,9 @@ sema_divergence_solve: fn(graph: &&SemaRegistrationGraph, threads: CompilerThrea
     owned := graph.move()
     loop module_index in 0..<owned.modules.len() {
         loop row in 0..<owned.modules[module_index].functions.len() {
-            if sema_function_promises_never(owned.modules[module_index].functions[row].declaration) -> sema_divergence_mark(owned, module_index, row)
+            if sema_function_promises_never(owned.modules[module_index].functions[row].declaration) {
+                sema_divergence_mark(owned, module_index, row)
+            }
         }
     }
     rows := [SemaDivergenceRow]{}
@@ -90,7 +90,9 @@ sema_divergence_solve: fn(graph: &&SemaRegistrationGraph, threads: CompilerThrea
     queued := loop _ in rows -> false
     wave := [Int]{}
     loop slot in 0..<rows.len() {
-        if !owned.modules[rows[slot].module_index].functions[rows[slot].row].declaration.diverges -> wave.push(slot)
+        if !owned.modules[rows[slot].module_index].functions[rows[slot].row].declaration.diverges {
+            wave.push(slot)
+        }
     }
     loop wave.len() > 0 {
         modules := [Int]{}
@@ -122,7 +124,9 @@ sema_divergence_solve: fn(graph: &&SemaRegistrationGraph, threads: CompilerThrea
                 }
                 group: waiting_by_callee.get(callee) ?? next
                 // A body that calls one function twice waits on it once.
-                if waiting[group].len() > 0 && waiting[group][waiting[group].len() - 1] == slot -> next
+                if waiting[group].len() > 0 && waiting[group][waiting[group].len() - 1] == slot {
+                    next
+                }
                 waiting[group].push(slot)
             }
         }
@@ -142,7 +146,9 @@ sema_divergence_solve: fn(graph: &&SemaRegistrationGraph, threads: CompilerThrea
         wave = [Int]{}
         loop caller in next_wave {
             queued[caller] = false
-            if !owned.modules[rows[caller].module_index].functions[rows[caller].row].declaration.diverges -> wave.push(caller)
+            if !owned.modules[rows[caller].module_index].functions[rows[caller].row].declaration.diverges {
+                wave.push(caller)
+            }
         }
     }
     owned
@@ -261,13 +267,17 @@ sema_divergence_body: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceSco
 
 sema_divergence_exprs: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceScope, values: [Expr]) -> SemaDivergenceFlow Never! {
     flow := sema_divergence_normal()
-    loop value in values -> flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, value))
+    loop value in values {
+        flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, value))
+    }
     flow
 }
 
 sema_divergence_args: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceScope, args: [CallArg]) -> SemaDivergenceFlow Never! {
     flow := sema_divergence_normal()
-    loop arg in args -> flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, arg.expr))
+    loop arg in args {
+        flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, arg.expr))
+    }
     flow
 }
 
@@ -315,15 +325,15 @@ sema_divergence_lvalue: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceS
 // table has no miss path, while a guard table (no subject) may match no arm.
 sema_divergence_switch: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceScope, subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span) -> SemaDivergenceFlow Never! {
     head: sema_divergence_expr(graph, scope, subject)
-    if arms.len() == 0 -> return sema_divergence_then(head, sema_divergence_optional_body(graph, scope, else_body))
+    if arms.len() == 0 {
+        return sema_divergence_then(head, sema_divergence_optional_body(graph, scope, else_body))
+    }
     branches := sema_divergence_none()
     loop arm in arms {
         branches = sema_divergence_union(branches, sema_divergence_then(sema_divergence_expr(graph, scope, arm.cond), sema_divergence_body(graph, scope, arm.body)))
     }
     fallback := sema_divergence_none()
-    if else_body == .Val(body) {
-        fallback = sema_divergence_body(graph, scope, body)
-    } else if sema_stmt_refutable_is_subjectless_guard(subject, span) {
+    if else_body == .Val(body) -> fallback = sema_divergence_body(graph, scope, body) else if sema_stmt_refutable_is_subjectless_guard(subject, span) {
         fallback = sema_divergence_normal()
     }
     sema_divergence_then(head, sema_divergence_union(branches, fallback))
@@ -345,7 +355,9 @@ sema_divergence_stmt: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceSco
         .Expr(value) -> sema_divergence_expr(graph, scope, value)
         .Val(binding) -> {
             init: sema_divergence_expr(graph, scope, binding.init)
-            if binding.pattern == .Val(.Refutable(_, fallback, _, _)) -> return sema_divergence_then(init, sema_divergence_union(sema_divergence_normal(), sema_divergence_or_fallback(graph, scope, fallback)))
+            if binding.pattern == .Val(.Refutable(_, fallback, _, _)) {
+                return sema_divergence_then(init, sema_divergence_union(sema_divergence_normal(), sema_divergence_or_fallback(graph, scope, fallback)))
+            }
             init
         }
         .Assign(target, _, _, value) -> sema_divergence_then(sema_divergence_lvalue(graph, scope, target), sema_divergence_expr(graph, scope, value))
@@ -358,25 +370,27 @@ sema_divergence_stmt: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceSco
         .For(_, _, _, kind, body, _, _, _, _) -> sema_divergence_then(sema_divergence_for_kind(graph, scope, kind), sema_divergence_finite_loop(sema_divergence_body(graph, scope, body)))
         .CountedLoop(init, cond, step, body, _, _, _) -> {
             iteration := sema_divergence_body(graph, scope, body)
-            if step == .Val(each) -> iteration = sema_divergence_then(iteration, sema_divergence_stmt(graph, scope, each))
+            if step == .Val(each) {
+                iteration = sema_divergence_then(iteration, sema_divergence_stmt(graph, scope, each))
+            }
             sema_divergence_then(sema_divergence_then(sema_divergence_expr(graph, scope, init.init), sema_divergence_expr(graph, scope, cond)), sema_divergence_conditional_loop(cond, iteration))
         }
         .Switch(subject, arms, else_body, span) | .ComptimeSwitch(subject, arms, else_body, span) -> sema_divergence_switch(graph, scope, subject, arms, else_body, span)
         .Unsafe(_, audit, body, _) | .Impure(_, audit, body, _) -> sema_divergence_then(sema_divergence_optional(graph, scope, audit), sema_divergence_body(graph, scope, body))
         .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .Live(body, _) | .Transact(_, _, body, _, _) -> sema_divergence_body(graph, scope, body)
         .TaskGroup(_, _, args, body, _) -> sema_divergence_then(sema_divergence_then(sema_divergence_optional(graph, scope, args.limit), sema_divergence_optional(graph, scope, args.stack)), sema_divergence_body(graph, scope, body))
-        .ComptimeIf(_, _, then_body, else_body, _, selected_then) -> {
-            if selected_then == {
-                .Val(selected) -> {
-                    if selected -> return sema_divergence_body(graph, scope, then_body)
-                    sema_divergence_optional_body(graph, scope, else_body)
-                }
-                .None -> sema_divergence_union(sema_divergence_body(graph, scope, then_body), sema_divergence_optional_body(graph, scope, else_body))
+        .ComptimeIf(_, _, then_body, else_body, _, selected_then) -> if selected_then == {
+            .Val(selected) -> {
+                if selected -> return sema_divergence_body(graph, scope, then_body)
+                sema_divergence_optional_body(graph, scope, else_body)
             }
+            .None -> sema_divergence_union(sema_divergence_body(graph, scope, then_body), sema_divergence_optional_body(graph, scope, else_body))
         }
         .ContextBlock(fields, body, _) -> {
             flow := sema_divergence_normal()
-            loop field in fields -> flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, field.value))
+            loop field in fields {
+                flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, field.value))
+            }
             sema_divergence_then(flow, sema_divergence_body(graph, scope, body))
         }
         .AssumeDet(_, reason, body, _) -> sema_divergence_then(sema_divergence_expr(graph, scope, reason), sema_divergence_body(graph, scope, body))
@@ -392,7 +406,9 @@ sema_divergence_typed_lit: fn(graph: SemaRegistrationGraph, scope: &SemaDivergen
     if body == {
         .Fields(fields) -> {
             flow := sema_divergence_normal()
-            loop field in fields -> flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, field.value))
+            loop field in fields {
+                flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, field.value))
+            }
             flow
         }
         .Elements(elements) -> sema_divergence_exprs(graph, scope, elements)
@@ -414,7 +430,9 @@ sema_divergence_expr: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceSco
         .Str(parts, _, _) -> {
             flow := sema_divergence_normal()
             loop part in parts {
-                if part == .Interp(inner, _) -> flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, inner))
+                if part == .Interp(inner, _) {
+                    flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, inner))
+                }
             }
             flow
         }
@@ -433,7 +451,9 @@ sema_divergence_expr: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceSco
         .Slice(base, start, end, range, _, _) -> sema_divergence_then(sema_divergence_then(sema_divergence_then(sema_divergence_expr(graph, scope, base), sema_divergence_expr(graph, scope, start)), sema_divergence_expr(graph, scope, end)), sema_divergence_optional(graph, scope, range))
         .MethodCall(receiver, method, _, _, _, args, _) -> {
             flow: sema_divergence_then(sema_divergence_expr(graph, scope, receiver), sema_divergence_args(graph, scope, args))
-            if flow.normal && sema_divergence_member_call_diverges(graph, scope, receiver, method) -> return sema_divergence_stop(flow)
+            if flow.normal && sema_divergence_member_call_diverges(graph, scope, receiver, method) {
+                return sema_divergence_stop(flow)
+            }
             flow
         }
         // `receiver?.method(…)` runs nothing past a missing receiver.
@@ -443,7 +463,9 @@ sema_divergence_expr: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceSco
         }
         .Call(call, _) -> {
             args: sema_divergence_args(graph, scope, call.args)
-            if call.name == "panic" || sema_divergence_call_diverges(graph, scope, call.name) -> return sema_divergence_stop(args)
+            if call.name == "panic" || sema_divergence_call_diverges(graph, scope, call.name) {
+                return sema_divergence_stop(args)
+            }
             args
         }
         .Unary(_, inner, _, _) | .Deref(inner, _, _) | .RawOf(inner, _, _) | .Copy(inner, _, _) | .Place(inner, _, _, _) | .Field(inner, _, _, _) | .OptField(inner, _, _, _, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .Paren(inner, _, _) | .Tainted(inner, _, _, _) | .PatternTest(inner, _, _, _) -> sema_divergence_expr(graph, scope, inner)
@@ -451,7 +473,9 @@ sema_divergence_expr: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceSco
         .Binary(op, left, right, _, _) -> {
             left_flow: sema_divergence_expr(graph, scope, left)
             right_flow: sema_divergence_expr(graph, scope, right)
-            if op != BinOp.And && op != BinOp.Or -> return sema_divergence_then(left_flow, right_flow)
+            if op != BinOp.And && op != BinOp.Or {
+                return sema_divergence_then(left_flow, right_flow)
+            }
             if !left_flow.normal -> return left_flow
             sema_divergence_union(left_flow, right_flow)
         }
@@ -467,7 +491,9 @@ sema_divergence_expr: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceSco
         }
         .StructLit(_, _, _, _, fields, _, _, _) -> {
             flow := sema_divergence_normal()
-            loop field in fields -> flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, field.value))
+            loop field in fields {
+                flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, field.value))
+            }
             flow
         }
         .TypedLit(_, body, _, _) -> sema_divergence_typed_lit(graph, scope, body)
@@ -475,7 +501,9 @@ sema_divergence_expr: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceSco
             flow := sema_divergence_normal()
             loop arg in args {
                 if arg == {
-                    .Positional(inner) | .Named(_, inner) -> flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, inner))
+                    .Positional(inner) | .Named(_, inner) -> {
+                        flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, inner))
+                    }
                 }
             }
             flow
@@ -496,14 +524,18 @@ sema_divergence_expr: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceSco
         }
         .TupleLit(fields, _, _, _) -> {
             flow := sema_divergence_normal()
-            loop field in fields -> flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, field.value))
+            loop field in fields {
+                flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, field.value))
+            }
             flow
         }
         .CallValue(callee, args, _, _) -> sema_divergence_then(sema_divergence_expr(graph, scope, callee), sema_divergence_args(graph, scope, args))
         .PtrFromAddr(_, _, _, addr, _, _) -> sema_divergence_expr(graph, scope, addr)
         .Pipe(head, steps, _, _) -> {
             flow := sema_divergence_expr(graph, scope, head)
-            loop step in steps -> flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, step.value))
+            loop step in steps {
+                flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, step.value))
+            }
             flow
         }
     }
@@ -522,7 +554,9 @@ sema_divergence_call_diverges: fn(graph: SemaRegistrationGraph, scope: &SemaDive
 
 // `alias.member(…)` through a module the scope's module imports.
 sema_divergence_member_call_diverges: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceScope, receiver: Expr, member: String) -> Bool Never! {
-    if receiver == .Ident(alias, _, _) -> return sema_divergence_alias_call_diverges(graph, scope, alias, member)
+    if receiver == .Ident(alias, _, _) {
+        return sema_divergence_alias_call_diverges(graph, scope, alias, member)
+    }
     false
 }
 

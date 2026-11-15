@@ -695,7 +695,9 @@ sema_expr_check_operator: fn(op: BinOp, left: Expr, right: Expr, lhs: TExpr, rhs
         op == BinOp.Eq || op == BinOp.Ne -> {
             // Read in place through the pattern: a `??` binding copies the graph.
             if program.registration_graph == {
-                .Val(graph) -> { resolution = sema_expr_equality_resolution(graph, op, lhs.ty, rhs.ty, span, environment, program, scopes, diagnostics) }
+                .Val(graph) -> {
+                    resolution = sema_expr_equality_resolution(graph, op, lhs.ty, rhs.ty, span, environment, program, scopes, diagnostics)
+                }
                 .None -> return None
             }
         }
@@ -2294,7 +2296,7 @@ sema_expr_unit_conversion_is_finite: fn(source: SemaRegistrationUnitFact, destin
 // The largest finite Float, (2^53 - 1) * 2^971, as an exact Int.
 sema_expr_unit_float_max: fn() -> Int Never! {
     limit := 9007199254740991
-    loop _ in 0..<971 -> limit = limit * 2
+    loop _ in 0..<971 -> limit *= 2
     limit
 }
 
@@ -4079,7 +4081,9 @@ sema_expr_core_module_method_checked: fn(receiver: Expr, method: String, method_
     fetched := sema_call_try_comptime_fetch(module_name, method, args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if fetched.handled -> return SemaMethodSpecialCheck{handled: true, value: fetched.value}
     if !nested {
-        if sema_app_field_error_refused(module_name, method, args, environment, program, scopes, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        if sema_app_field_error_refused(module_name, method, args, environment, program, scopes, diagnostics) {
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
         live := sema_call_try_live(module_name, method, alias, alias_span, args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         if live.handled -> return SemaMethodSpecialCheck{handled: true, value: live.value}
     }

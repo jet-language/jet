@@ -31,13 +31,17 @@ impl ProviderFactReport {
                 losses.push("NuGet `PackageReference` has no Include or Update identity")
                 next
             }
-            if version == "" || !provider_exact_version(version) -> losses.push("NuGet PackageReference `{name}` has no resolved exact version")
+            if version == "" || !provider_exact_version(version) {
+                losses.push("NuGet PackageReference `{name}` has no resolved exact version")
+            }
             references.push(NuGetReference{name: name, version: version, opening: opening})
         }
         loop opening in provider_xml_opening_tags(document, "package") {
             name: provider_xml_attribute(opening, "id") ?? next
             version: provider_xml_attribute(opening, "version") ?? ""
-            if version == "" || !provider_exact_version(version) -> losses.push("NuGet package `{name}` has no resolved exact version")
+            if version == "" || !provider_exact_version(version) {
+                losses.push("NuGet package `{name}` has no resolved exact version")
+            }
             references.push(NuGetReference{name: name, version: version, opening: opening})
         }
         dependency_tags: provider_xml_opening_tags(document, "dependency")
@@ -49,10 +53,14 @@ impl ProviderFactReport {
             }
             version: provider_xml_attribute(opening, "version") ?? ""
             dependency_values.push(provider_format_dependency(name, version))
-            if version == "" || !provider_exact_version(version) -> losses.push("NuGet dependency `{name}` has no resolved exact version")
+            if version == "" || !provider_exact_version(version) {
+                losses.push("NuGet dependency `{name}` has no resolved exact version")
+            }
         }
         reference_values := [String]{}
-        loop reference in references -> reference_values.push(provider_format_dependency(reference.name, reference.version))
+        loop reference in references {
+            reference_values.push(provider_format_dependency(reference.name, reference.version))
+        }
         if {
             has_root -> {
                 facts.name = root_name ?? ""
@@ -72,13 +80,13 @@ impl ProviderFactReport {
         group_tags: provider_xml_opening_tags(document, "group")
         loop opening in group_tags {
             if provider_xml_attribute(opening, "targetFramework") == {
-                .Val(target) -> facts.platforms.push(target)
+                .Val(target) -> { facts.platforms.push(target) }
                 .None -> {}
             }
         }
         loop reference in references {
             if provider_xml_attribute(reference.opening, "targetFramework") == {
-                .Val(target) -> facts.platforms.push(target)
+                .Val(target) -> { facts.platforms.push(target) }
                 .None -> {}
             }
         }
@@ -94,7 +102,9 @@ impl ProviderFactReport {
             facts.add_typed_text("provider.nuget.dependency.reference.{index}", reference_values[index])
             loop key in reference_keys {
                 if provider_xml_attribute(references[index].opening, key) == {
-                    .Val(value) -> facts.add_typed_text("provider.nuget.dependency.reference.{index}.{key}", value)
+                    .Val(value) -> {
+                        facts.add_typed_text("provider.nuget.dependency.reference.{index}.{key}", value)
+                    }
                     .None -> {}
                 }
             }
@@ -103,29 +113,48 @@ impl ProviderFactReport {
         loop index in 0..<dependency_tags.len() {
             loop key in dependency_keys {
                 if provider_xml_attribute(dependency_tags[index], key) == {
-                    .Val(value) -> facts.add_typed_text("provider.nuget.dependency.nuspec.{index}.{key}", value)
+                    .Val(value) -> {
+                        facts.add_typed_text("provider.nuget.dependency.nuspec.{index}.{key}", value)
+                    }
                     .None -> {}
                 }
             }
         }
         metadata_elements: [(element: String, key: String)]{
-            (element: "authors", key: "authors"), (element: "owners", key: "owners"), (element: "license", key: "license"),
-            (element: "licenseExpression", key: "license_expression"), (element: "licenseUrl", key: "license_url"),
-            (element: "projectUrl", key: "project_url"), (element: "repositoryUrl", key: "repository_url"),
-            (element: "description", key: "description"), (element: "summary", key: "summary"),
-            (element: "releaseNotes", key: "release_notes"), (element: "copyright", key: "copyright"), (element: "tags", key: "tags"),
-            (element: "contentHash", key: "content_hash"), (element: "signature", key: "signature"), (element: "signatures", key: "signatures"),
-            (element: "signatureValidation", key: "signature_validation"), (element: "deprecated", key: "deprecated"),
-            (element: "deprecation", key: "deprecation"), (element: "vulnerability", key: "vulnerability"),
-            (element: "vulnerabilities", key: "vulnerabilities"), (element: "advisory", key: "advisory"), (element: "advisories", key: "advisories")
+            (element: "authors", key: "authors"),
+            (element: "owners", key: "owners"),
+            (element: "license", key: "license"),
+            (element: "licenseExpression", key: "license_expression"),
+            (element: "licenseUrl", key: "license_url"),
+            (element: "projectUrl", key: "project_url"),
+            (element: "repositoryUrl", key: "repository_url"),
+            (element: "description", key: "description"),
+            (element: "summary", key: "summary"),
+            (element: "releaseNotes", key: "release_notes"),
+            (element: "copyright", key: "copyright"),
+            (element: "tags", key: "tags"),
+            (element: "contentHash", key: "content_hash"),
+            (element: "signature", key: "signature"),
+            (element: "signatures", key: "signatures"),
+            (element: "signatureValidation", key: "signature_validation"),
+            (element: "deprecated", key: "deprecated"),
+            (element: "deprecation", key: "deprecation"),
+            (element: "vulnerability", key: "vulnerability"),
+            (element: "vulnerabilities", key: "vulnerabilities"),
+            (element: "advisory", key: "advisory"),
+            (element: "advisories", key: "advisories"),
         }
         loop entry in metadata_elements {
             values: provider_xml_tag_values(document, entry.element)
-            loop index in 0..<values.len() -> facts.add_typed_text("provider.nuget.metadata.{entry.key}.{index}", values[index])
+            loop index in 0..<values.len() {
+                facts.add_typed_text("provider.nuget.metadata.{entry.key}.{index}", values[index])
+            }
         }
         loop index in 0..<group_tags.len() {
             if provider_xml_attribute(group_tags[index], "targetFramework") == {
-                .Val(target) -> facts.add_typed_text("provider.nuget.platform.group.{index}", target)
+                .Val(target) -> {
+                    facts.add_typed_text("provider.nuget.platform.group.{index}", target)
+                }
                 .None -> {}
             }
         }
@@ -134,7 +163,9 @@ impl ProviderFactReport {
         loop index in 0..<repository_tags.len() {
             loop key in repository_keys {
                 if provider_xml_attribute(repository_tags[index], key) == {
-                    .Val(value) -> facts.add_typed_text("provider.nuget.source.repository.{index}.{key}", value)
+                    .Val(value) -> {
+                        facts.add_typed_text("provider.nuget.source.repository.{index}.{key}", value)
+                    }
                     .None -> {}
                 }
             }
@@ -142,14 +173,18 @@ impl ProviderFactReport {
         opening_facts: [String]{"signature", "signatures", "deprecation", "vulnerability", "advisory"}
         loop fact_name in opening_facts {
             openings: provider_xml_opening_tags(document, fact_name)
-            loop index in 0..<openings.len() -> facts.add_typed_text("provider.nuget.metadata.{fact_name}.opening.{index}", openings[index])
+            loop index in 0..<openings.len() {
+                facts.add_typed_text("provider.nuget.metadata.{fact_name}.opening.{index}", openings[index])
+            }
         }
         file_tags: provider_xml_opening_tags(document, "file")
         loop index in 0..<file_tags.len() {
             if provider_xml_attribute(file_tags[index], "src") == {
                 .Val(source) -> {
                     facts.add_typed_text("provider.nuget.hook.file.{index}", source)
-                    if source.contains("tools/") || source.contains("tools\\") -> facts.scripts.push(source)
+                    if source.contains("tools/") || source.contains("tools\\") {
+                        facts.scripts.push(source)
+                    }
                 }
                 .None -> {}
             }
@@ -167,7 +202,9 @@ impl ProviderFactReport {
         facts.source_identity = "nuget:{facts.name}@{facts.version}"
         report := ProviderFactReport.with_identity(facts)
         loop loss in losses -> report.losses.push(loss)
-        if multiple_references -> report.losses.push("NuGet metadata contains multiple packages; lock each package identity separately")
+        if multiple_references {
+            report.losses.push("NuGet metadata contains multiple packages; lock each package identity separately")
+        }
         if report.facts.version != "set" && report.facts.version != "" && !provider_exact_version(report.facts.version) {
             report.losses.push("NuGet package version is a range or mutable selector, not an exact identity")
         }
@@ -211,7 +248,9 @@ provider_xml_has_namespace: fn(document: String) -> Bool Never! {
         end: provider_xml_opening_end(bytes, start, bytes.len())
         if end < 0 -> break
         opening: pkg_bytes_text(bytes, start, end + 1)
-        if !opening.starts_with("<!") && !opening.starts_with("<?") && provider_xml_opening_name(opening).contains(":") -> return true
+        if !opening.starts_with("<!") && !opening.starts_with("<?") && provider_xml_opening_name(opening).contains(":") {
+            return true
+        }
         cursor = end + 1
     }
     false

@@ -1,7 +1,6 @@
 // Distinct conversion: a distinct value lays out as its base, so a conversion
 // reaches the base; a declared integer range is checked by the inline_range
 // route.
-
 use jet_foundation.[Span, TIntegerBounds, TNumericOp, Type]
 
 // `value.as(Name)` and the other conversions into a distinct type: a cast
@@ -14,9 +13,7 @@ ir_distinct_convert: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, arg
     }
     success := ty.copy()
     if fallible {
-        if ir_untag(success) == .Result(ok_ty, _) {
-            success = ok_ty
-        } else {
+        if ir_untag(success) == .Result(ok_ty, _) -> success = ok_ty else {
             return ir_fail_slot(b, span, "fallible distinct conversion into {ir_type_name(ty)}")
         }
     }

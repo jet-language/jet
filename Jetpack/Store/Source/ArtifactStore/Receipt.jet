@@ -14,18 +14,33 @@
 // time rather than known before the lookup.
 use {
     jet_foundation.[
-        Diagnostic, RecordField, RecordReader, RecordSection, RecordValue, record_element, record_elements,
-        record_encode, record_open_schema, record_value_as_str, record_value_field,
+        Diagnostic,
+        RecordField,
+        RecordReader,
+        RecordSection,
+        RecordValue,
+        record_element,
+        record_elements,
+        record_encode,
+        record_open_schema,
+        record_value_as_str,
+        record_value_field,
     ]
     files: core.files
 }
 
 STORE_RECEIPT_SCHEMA: "jet.receipt/v1"
+
 STORE_RECEIPT_SECTION_HEADER: 1
+
 STORE_RECEIPT_SECTION_MODULES: 2
+
 STORE_RECEIPT_SECTION_INPUTS: 3
+
 STORE_RECEIPT_SECTION_ORIGINS: 4
+
 STORE_RECEIPT_SECTION_DIAGNOSTICS: 5
+
 STORE_RECEIPT_SECTION_FACTS: 6
 
 // One leaf read by a recorded check: a project-relative path (or a stable label
@@ -76,23 +91,32 @@ ReceiptRecord: struct {
         diagnostics: store_encode_diagnostics(self.diagnostics, revisions)
         facts := [RecordValue]{}
         loop fact in self.facts {
-            facts.push(RecordValue.Map{fields: [RecordField]{
-                {name: "name", value: RecordValue.Str{value: fact.name}},
-                {name: "value", value: RecordValue.Str{value: fact.value}},
-            }})
+            facts.push(
+                RecordValue.Map{
+                    fields: [RecordField]{
+                        {name: "name", value: RecordValue.Str{value: fact.name}},
+                        {name: "value", value: RecordValue.Str{value: fact.value}},
+                    },
+                },
+            )
         }
-        header: RecordValue.Map{fields: [RecordField]{
-            {name: "verb", value: RecordValue.Str{value: self.verb}},
-            {name: "closure", value: RecordValue.Str{value: self.closure}},
-        }}
-        encoded: record_encode(STORE_RECEIPT_SCHEMA, [RecordSection]{
-            RecordSection{id: STORE_RECEIPT_SECTION_HEADER, elements: [RecordValue]{header}},
-            RecordSection{id: STORE_RECEIPT_SECTION_MODULES, elements: store_receipt_encode_inputs(self.modules)},
-            RecordSection{id: STORE_RECEIPT_SECTION_INPUTS, elements: store_receipt_encode_inputs(self.inputs)},
-            RecordSection{id: STORE_RECEIPT_SECTION_ORIGINS, elements: diagnostics.origins},
-            RecordSection{id: STORE_RECEIPT_SECTION_DIAGNOSTICS, elements: diagnostics.diagnostics},
-            RecordSection{id: STORE_RECEIPT_SECTION_FACTS, elements: facts},
-        })
+        header: RecordValue.Map{
+            fields: [RecordField]{
+                {name: "verb", value: RecordValue.Str{value: self.verb}},
+                {name: "closure", value: RecordValue.Str{value: self.closure}},
+            },
+        }
+        encoded: record_encode(
+            STORE_RECEIPT_SCHEMA,
+            [RecordSection]{
+                RecordSection{id: STORE_RECEIPT_SECTION_HEADER, elements: [RecordValue]{header}},
+                RecordSection{id: STORE_RECEIPT_SECTION_MODULES, elements: store_receipt_encode_inputs(self.modules)},
+                RecordSection{id: STORE_RECEIPT_SECTION_INPUTS, elements: store_receipt_encode_inputs(self.inputs)},
+                RecordSection{id: STORE_RECEIPT_SECTION_ORIGINS, elements: diagnostics.origins},
+                RecordSection{id: STORE_RECEIPT_SECTION_DIAGNOSTICS, elements: diagnostics.diagnostics},
+                RecordSection{id: STORE_RECEIPT_SECTION_FACTS, elements: facts},
+            },
+        )
         Ok(encoded.bytes ?? return Err(store_diagnostic_error(encoded.problem ?? "receipt encoding failed")))
     }
 
@@ -129,7 +153,7 @@ store_receipt_sorted_inputs: fn(inputs: [ReceiptInput]) -> [ReceiptInput] Never!
 
 // Rust `BTreeMap` insertion: name order, the last value for a name wins.
 store_receipt_sorted_facts: fn(facts: [ReceiptFact]) -> [ReceiptFact] Never! {
-    by_name := [String: String]{}
+    by_name := [String:String]{}
     loop fact in facts -> by_name[fact.name] = fact.value
     names := by_name.keys().to_list()
     names.sort()
@@ -141,10 +165,14 @@ store_receipt_sorted_facts: fn(facts: [ReceiptFact]) -> [ReceiptFact] Never! {
 store_receipt_encode_inputs: fn(inputs: [ReceiptInput]) -> [RecordValue] Never! {
     values := [RecordValue]{}
     loop input in inputs {
-        values.push(RecordValue.Map{fields: [RecordField]{
-            {name: "path", value: RecordValue.Str{value: input.path}},
-            {name: "digest", value: RecordValue.Str{value: input.digest}},
-        }})
+        values.push(
+            RecordValue.Map{
+                fields: [RecordField]{
+                    {name: "path", value: RecordValue.Str{value: input.path}},
+                    {name: "digest", value: RecordValue.Str{value: input.digest}},
+                },
+            },
+        )
     }
     values
 }
@@ -158,7 +186,9 @@ store_receipt_text: fn(value: RecordValue, name: String) -> String StoreDiagnost
 
 store_receipt_decode_inputs: fn(values: [RecordValue]) -> [ReceiptInput] StoreDiagnosticRecordError! {
     inputs := [ReceiptInput]{}
-    loop value in values -> inputs.push(ReceiptInput{path: store_receipt_text(value, "path"), digest: store_receipt_text(value, "digest")})
+    loop value in values {
+        inputs.push(ReceiptInput{path: store_receipt_text(value, "path"), digest: store_receipt_text(value, "digest")})
+    }
     Ok(inputs)
 }
 

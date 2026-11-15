@@ -23,40 +23,63 @@ use {
 
 // StrAccum.printfFlags (sqliteInt.h).
 PRINTF_INTERNAL: 1
+
 PRINTF_SQLFUNC: 2
+
 PRINTF_MALLOCED: 4
 
 // SQLITE_PRINT_BUF_SIZE, SQLITE_FP_PRECISION_LIMIT and SQLITE_MAX_LENGTH.
 PRINT_BUF_SIZE: 70
+
 FP_PRECISION_LIMIT: 100000000
+
 MAX_LENGTH: 1000000000
 
 // The conversion paradigms (etRADIX ... etINVALID).
 ET_RADIX: 0
+
 ET_FLOAT: 1
+
 ET_EXP: 2
+
 ET_GENERIC: 3
+
 ET_SIZE: 4
+
 ET_STRING: 5
+
 ET_DYNSTRING: 6
+
 ET_PERCENT: 7
+
 ET_CHARX: 8
+
 ET_SQLESCAPE: 9
+
 ET_SQLESCAPE2: 10
+
 ET_TOKEN: 11
+
 ET_SRCITEM: 12
+
 ET_POINTER: 13
+
 ET_SQLESCAPE3: 14
+
 ET_ORDINAL: 15
+
 ET_DECIMAL: 16
+
 ET_INVALID: 17
 
 // et_info.flags.
 FLAG_SIGNED: 1
+
 FLAG_STRING: 4
 
 // aDigits and aPrefix.
 DIGITS: "0123456789ABCDEF0123456789abcdef"
+
 PREFIX: [Int]{45, 120, 48, 0, 88, 48, 0}
 
 // One fmtinfo[] entry.
@@ -93,7 +116,7 @@ FMT_INFO: [PrintfInfo]{
     PrintfInfo{fmttype: 112, radix: 16, flags: 0, kind: ET_POINTER, charset: 0, prefix: 1},
     PrintfInfo{fmttype: 84, radix: 0, flags: 0, kind: ET_TOKEN, charset: 0, prefix: 0},
     PrintfInfo{fmttype: 83, radix: 0, flags: 0, kind: ET_SRCITEM, charset: 0, prefix: 0},
-    PrintfInfo{fmttype: 114, radix: 10, flags: 1, kind: ET_ORDINAL, charset: 0, prefix: 0}
+    PrintfInfo{fmttype: 114, radix: 10, flags: 1, kind: ET_ORDINAL, charset: 0, prefix: 0},
 }
 
 // ---------------------------------------------------------------------------
@@ -125,6 +148,7 @@ MemList: struct {
             if m.flags.bit_and(MEM_INT) != 0 -> return m.i
             0
         }
+
         double_arg: fn(&self) -> Float Never! {
             if self.used >= self.args.len() -> return Float{0}
             self.used += 1
@@ -133,6 +157,7 @@ MemList: struct {
             if m.flags.bit_and(MEM_INT) != 0 -> return util.int_to_double(m.i)
             Float{0}
         }
+
         next_text: fn(&self, out: &[U8]) -> Bool Never! {
             if self.used >= self.args.len() -> return false
             self.used += 1
@@ -145,9 +170,7 @@ MemList: struct {
     }
 }
 
-new_mem_list: fn(args: [Mem]) -> MemList Never! {
-    MemList{args: args, used: 0}
-}
+new_mem_list: fn(args: [Mem]) -> MemList Never! { MemList{args: args, used: 0} }
 
 // ---------------------------------------------------------------------------
 // The accumulator (sqlite3_str).
@@ -176,9 +199,7 @@ str_accum_init: fn(n: Int, mx: Int) -> StrAccum Never! {
 }
 
 // sqlite3_str_new: a heap accumulator limited to mx bytes.
-str_new: fn(mx: Int) -> StrAccum Never! {
-    str_accum_init(0, mx)
-}
+str_new: fn(mx: Int) -> StrAccum Never! { str_accum_init(0, mx) }
 
 // sqlite3StrAccumSetError.
 str_accum_set_error: fn(p: &StrAccum, e: Int) Never! {
@@ -218,7 +239,9 @@ str_append_char: fn(p: &StrAccum, n_in: Int, c: Int) Never! {
     n := n_in
     if p.text.len() + n >= p.n_alloc {
         n = str_accum_enlarge(p, n)
-        if n <= 0 -> return
+        if n <= 0 {
+            return
+        }
     }
     loop _k in 0..<n -> p.text.push(U8{c})
 }
@@ -228,15 +251,15 @@ str_append: fn(p: &StrAccum, z: [U8], at: Int, n_in: Int) Never! {
     n := n_in
     if p.text.len() + n >= p.n_alloc {
         n = str_accum_enlarge(p, n)
-        if n <= 0 -> return
+        if n <= 0 {
+            return
+        }
     }
     loop k in 0..<n -> p.text.push(z[at + k])
 }
 
 // sqlite3_str_appendall.
-str_append_all: fn(p: &StrAccum, z: [U8]) Never! {
-    str_append(p, z, 0, c_len(z))
-}
+str_append_all: fn(p: &StrAccum, z: [U8]) Never! { str_append(p, z, 0, c_len(z)) }
 
 // strlen of a C string: the bytes before the first 0x00.
 c_len: fn(z: [U8]) -> Int Never! {
@@ -296,21 +319,11 @@ str_vappendf: fn<A: PrintfArgs>(p: &StrAccum, fmt: [U8], args: &A) Never! {
         precision := -1
         done := false
         loop {
-            if c == 45 {
-                flag_leftjustify = true
-            } else if c == 43 {
-                flag_prefix = 43
-            } else if c == 32 {
+            if c == 45 -> flag_leftjustify = true else if c == 43 -> flag_prefix = 43 else if c == 32 {
                 flag_prefix = 32
-            } else if c == 35 {
-                flag_alternateform = true
-            } else if c == 33 {
-                flag_altform2 = true
-            } else if c == 48 {
+            } else if c == 35 { flag_alternateform = true } else if c == 33 { flag_altform2 = true } else if c == 48 {
                 flag_zeropad = true
-            } else if c == 44 {
-                thousand = 44
-            } else if c == 108 {
+            } else if c == 44 { thousand = 44 } else if c == 108 {
                 flag_long = 1
                 at += 1
                 c = sql_byte(fmt, at)
@@ -330,11 +343,7 @@ str_vappendf: fn<A: PrintfArgs>(p: &StrAccum, fmt: [U8], args: &A) Never! {
                     c = sql_byte(fmt, at)
                 }
                 width = wx.bit_and(2147483647)
-                if c != 46 && c != 108 {
-                    done = true
-                } else {
-                    at -= 1
-                }
+                if c != 46 && c != 108 -> done = true else -> at -= 1
             } else if c == 42 {
                 width = to_c_int(args.int_arg())
                 if width < 0 {
@@ -366,14 +375,8 @@ str_vappendf: fn<A: PrintfArgs>(p: &StrAccum, fmt: [U8], args: &A) Never! {
                     }
                     precision = px.bit_and(2147483647)
                 }
-                if c == 108 {
-                    at -= 1
-                } else {
-                    done = true
-                }
-            } else {
-                done = true
-            }
+                if c == 108 -> at -= 1 else -> done = true
+            } else { done = true }
             if done -> break
             at += 1
             c = sql_byte(fmt, at)
@@ -389,23 +392,27 @@ str_vappendf: fn<A: PrintfArgs>(p: &StrAccum, fmt: [U8], args: &A) Never! {
                 break
             }
         }
-        if xtype == ET_INVALID || xtype == ET_TOKEN || xtype == ET_SRCITEM -> return
+        if xtype == ET_INVALID || xtype == ET_TOKEN || xtype == ET_SRCITEM {
+            return
+        }
         // The conversion text and its length; for %c the leading copies are
         // already appended.
         out := [U8]{}
         if xtype == ET_POINTER || xtype == ET_ORDINAL || xtype == ET_RADIX || xtype == ET_DECIMAL {
             if xtype == ET_POINTER -> flag_long = 2
             if xtype != ET_DECIMAL -> thousand = 0
-            if !render_int(p, args, arg_list, info, xtype, flag_long, flag_prefix, flag_alternateform, flag_zeropad, thousand, width, precision, out) -> return
+            if !render_int(p, args, arg_list, info, xtype, flag_long, flag_prefix, flag_alternateform, flag_zeropad, thousand, width, precision, out) {
+                return
+            }
         } else if xtype == ET_FLOAT || xtype == ET_EXP || xtype == ET_GENERIC {
             realvalue: args.double_arg()
-            if !render_float(p, realvalue, info, xtype, flag_prefix, flag_alternateform, flag_altform2, flag_zeropad, flag_leftjustify, thousand, width, precision, out) -> return
+            if !render_float(p, realvalue, info, xtype, flag_prefix, flag_alternateform, flag_altform2, flag_zeropad, flag_leftjustify, thousand, width, precision, out) {
+                return
+            }
         } else if xtype == ET_SIZE {
             if !arg_list -> _: args.int_arg()
             width = 0
-        } else if xtype == ET_PERCENT {
-            out.push(U8{37})
-        } else if xtype == ET_CHARX {
+        } else if xtype == ET_PERCENT { out.push(U8{37}) } else if xtype == ET_CHARX {
             if arg_list {
                 z := [U8]{}
                 if args.next_text(z) {
@@ -418,12 +425,8 @@ str_vappendf: fn<A: PrintfArgs>(p: &StrAccum, fmt: [U8], args: &A) Never! {
                             k += 1
                         }
                     }
-                } else {
-                    out.push(U8{0})
-                }
-            } else {
-                util.write_utf8(out, util.as_u64(args.int_arg()).bit_and(4294967295))
-            }
+                } else { out.push(U8{0}) }
+            } else { util.write_utf8(out, util.as_u64(args.int_arg()).bit_and(4294967295)) }
             if precision > 1 {
                 width -= precision - 1
                 if width > 1 && !flag_leftjustify {
@@ -452,9 +455,7 @@ str_vappendf: fn<A: PrintfArgs>(p: &StrAccum, fmt: [U8], args: &A) Never! {
                 } else {
                     loop length < precision && sql_byte(z, length) != 0 -> length += 1
                 }
-            } else {
-                length = c_len(z)
-            }
+            } else { length = c_len(z) }
             loop k in 0..<length -> out.push(z[k])
         } else {
             // %q, %Q and %w.
@@ -475,7 +476,9 @@ str_vappendf: fn<A: PrintfArgs>(p: &StrAccum, fmt: [U8], args: &A) Never! {
                 k -= 1
             }
             need_quote: !isnull && xtype == ET_SQLESCAPE2
-            if nq + i + 3 > PRINT_BUF_SIZE && !temp_buf_ok(p, nq + i + 3) -> return
+            if nq + i + 3 > PRINT_BUF_SIZE && !temp_buf_ok(p, nq + i + 3) {
+                return
+            }
             if need_quote -> out.push(U8{q})
             loop j in 0..<i {
                 out.push(esc[j])
@@ -494,9 +497,7 @@ str_vappendf: fn<A: PrintfArgs>(p: &StrAccum, fmt: [U8], args: &A) Never! {
             if !flag_leftjustify -> str_append_char(p, width, 32)
             str_append(p, out, 0, out.len())
             if flag_leftjustify -> str_append_char(p, width, 32)
-        } else {
-            str_append(p, out, 0, out.len())
-        }
+        } else { str_append(p, out, 0, out.len()) }
         at += 1
     }
 }
@@ -586,11 +587,7 @@ render_float: fn(p: &StrAccum, realvalue: Float, info: PrintfInfo, xtype_in: Int
     if precision > FP_PRECISION_LIMIT -> precision = FP_PRECISION_LIMIT
     xtype := xtype_in
     iround := precision + 1
-    if xtype == ET_FLOAT {
-        iround = 0 - precision
-    } else if xtype == ET_GENERIC {
-        iround = precision
-    }
+    if xtype == ET_FLOAT -> iround = 0 - precision else if xtype == ET_GENERIC -> iround = precision
     s := fp_decode(realvalue, iround, if flag_altform2 -> 26 else -> 16)
     if s.is_special != 0 {
         if s.is_special == 2 {
@@ -603,9 +600,7 @@ render_float: fn(p: &StrAccum, realvalue: Float, info: PrintfInfo, xtype_in: Int
             s.i_dp = 1000
             s.n = 1
         } else {
-            if s.sign == 45 {
-                out.push(U8{45})
-            } else if flag_prefix != 0 {
+            if s.sign == 45 -> out.push(U8{45}) else if flag_prefix != 0 {
                 out.push(U8{flag_prefix})
             }
             loop b in "Inf".bytes() -> out.push(b)
@@ -618,10 +613,8 @@ render_float: fn(p: &StrAccum, realvalue: Float, info: PrintfInfo, xtype_in: Int
     flag_rtz := flag_altform2
     if xtype == ET_GENERIC {
         flag_rtz = !flag_alternateform
-        if exp < -4 || exp > precision {
-            xtype = ET_EXP
-        } else {
-            precision = precision - exp
+        if exp < -4 || exp > precision -> xtype = ET_EXP else {
+            precision -= exp
             xtype = ET_FLOAT
         }
     }
@@ -633,16 +626,12 @@ render_float: fn(p: &StrAccum, realvalue: Float, info: PrintfInfo, xtype_in: Int
     if prefix != 0 -> out.push(U8{prefix})
     // Digits before the decimal point.
     j := 0
-    if e2 < 0 {
-        out.push(U8{48})
-    } else {
+    if e2 < 0 -> out.push(U8{48}) else {
         loop e2 >= 0 {
             if j < s.n {
                 out.push(s.z[j])
                 j += 1
-            } else {
-                out.push(U8{48})
-            }
+            } else { out.push(U8{48}) }
             if thousand != 0 && e2 % 3 == 0 && e2 > 1 -> out.push(U8{thousand})
             e2 -= 1
         }
@@ -661,19 +650,13 @@ render_float: fn(p: &StrAccum, realvalue: Float, info: PrintfInfo, xtype_in: Int
         if j < s.n {
             out.push(s.z[j])
             j += 1
-        } else {
-            out.push(U8{48})
-        }
+        } else { out.push(U8{48}) }
     }
     // Trailing zeros, and a "." no digit follows.
     if flag_rtz && flag_dp {
         loop out[out.len() - 1] == (U8{48}) -> _: out.pop()
         if out[out.len() - 1] == (U8{46}) {
-            if flag_altform2 {
-                out.push(U8{48})
-            } else {
-                _: out.pop()
-            }
+            if flag_altform2 -> out.push(U8{48}) else -> _: out.pop()
         }
     }
     // The "eNNN" suffix.
@@ -683,9 +666,7 @@ render_float: fn(p: &StrAccum, realvalue: Float, info: PrintfInfo, xtype_in: Int
         if ex < 0 {
             out.push(U8{45})
             ex = 0 - ex
-        } else {
-            out.push(U8{43})
-        }
+        } else { out.push(U8{43}) }
         if ex >= 100 {
             out.push(U8{ex /% 100 + 48})
             ex = ex % 100

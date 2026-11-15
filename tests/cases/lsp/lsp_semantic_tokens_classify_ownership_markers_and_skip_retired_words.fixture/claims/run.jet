@@ -5,7 +5,11 @@ use {
     sys: core.sys
 }
 
-S5SemanticToken: struct { text: String, token_type: Int, modifiers: Int }
+S5SemanticToken: struct {
+    text: String
+    token_type: Int
+    modifiers: Int
+}
 
 s5_token_find: fn(text: String, marker: String, offset: Int) -> Int {
     bytes: text.bytes()
@@ -17,7 +21,7 @@ s5_token_find: fn(text: String, marker: String, offset: Int) -> Int {
             if bytes[index + part] != pattern[part] -> same = false
         }
         if same -> return index
-        index = index + 1
+        index += 1
     }
     panic("semantic token data delimiter missing")
 }
@@ -42,7 +46,7 @@ s5_token_u32: fn(text: String) -> Int? {
         if digit < 0 || digit > 9 -> return None
         if value > (4294967295 - digit) /% 10 -> return None
         value = value * 10 + digit
-        index = index + 1
+        index += 1
     }
     Val(value)
 }
@@ -62,12 +66,12 @@ s5_token_decode: fn(source: String, response: String) -> [S5SemanticToken] {
     offset := 0
     loop offset + 5 <= values.len() {
         delta: values[offset]
-        line_index = line_index + delta
+        line_index += delta
         column = if delta == 0 -> column + values[offset + 1] else -> values[offset + 1]
         length: values[offset + 2]
         text: if line_index < lines.len() -> s5_token_slice(lines[line_index], column, column + length) else -> ""
-        tokens.push(S5SemanticToken{text, token_type: values[offset + 3], modifiers: values[offset + 4]})
-        offset = offset + 5
+        tokens.push(S5SemanticToken{text: text, token_type: values[offset + 3], modifiers: values[offset + 4]})
+        offset += 5
     }
     tokens
 }
@@ -75,7 +79,9 @@ s5_token_decode: fn(source: String, response: String) -> [S5SemanticToken] {
 s5_token_assert: fn(tokens: [S5SemanticToken], text: String, kind: Int, modifier: Int) {
     found := false
     loop token in tokens {
-        if token.text == text && token.token_type == kind && (token.modifiers /% modifier) % 2 != 0 -> found = true
+        if token.text == text && token.token_type == kind && (token.modifiers /% modifier) % 2 != 0 {
+            found = true
+        }
     }
     assert(found, "missing semantic token {text} type {kind} modifier {modifier}")
 }
@@ -83,7 +89,7 @@ s5_token_assert: fn(tokens: [S5SemanticToken], text: String, kind: Int, modifier
 s5_token_count: fn(tokens: [S5SemanticToken], text: String, kind: Int) -> Int {
     count := 0
     loop token in tokens {
-        if token.text == text && token.token_type == kind -> count = count + 1
+        if token.text == text && token.token_type == kind -> count += 1
     }
     count
 }

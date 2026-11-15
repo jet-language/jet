@@ -65,9 +65,7 @@ store_begin_admission_failure: fn(point: AdmissionFailurePoint) -> Int Never! {
     previous
 }
 
-store_end_admission_failure: fn(previous: Int) Never! {
-    STORE_ADMISSION_FAILURE.armed = previous
-}
+store_end_admission_failure: fn(previous: Int) Never! { STORE_ADMISSION_FAILURE.armed = previous }
 
 store_injected_failure: fn(point: AdmissionFailurePoint) StoreError! {
     if STORE_ADMISSION_FAILURE.armed == point.tag() {
@@ -155,10 +153,12 @@ AdmissionTransaction: struct {
     // the closure delta in one shared order. The adapter supplies only the
     // representation-specific registration mode and already-built entries.
     commit: fn(&self, entries: &[StoreEntry], extra_receipts: [AdmissionReceipt], excluded: String?, mode: RegistrationMode, fresh_action_key: String?) -> Bool StoreError! {
-        if self.committed -> return Err(StoreError.Other("Hangar admission transaction already committed"))
+        if self.committed {
+            return Err(StoreError.Other("Hangar admission transaction already committed"))
+        }
         registered := false
         if self.commit_steps(entries, extra_receipts, excluded, mode, fresh_action_key) == {
-            .Ok(value) -> registered = value
+            .Ok(value) -> { registered = value }
             .Err(error) -> {
                 self.rollback()
                 return Err(error)
@@ -174,7 +174,9 @@ AdmissionTransaction: struct {
         store_injected_failure(AdmissionFailurePoint.AfterObjectPublication)
         receipts_dir: files.join(self.roots.hangar_dir(), STORE_RECEIPTS_DIR)
         loop receipt in extra_receipts {
-            if self.publish_receipt(receipt) -> self.receipts.push(files.join(receipts_dir, receipt.digest))
+            if self.publish_receipt(receipt) {
+                self.receipts.push(files.join(receipts_dir, receipt.digest))
+            }
         }
         loop index in 0..<entries.len() {
             entry := entries[index]
@@ -219,14 +221,18 @@ AdmissionTransaction: struct {
         store_ensure_real_directory(objects_dir, "Hangar object pool")
         incoming := 0
         already_counted := 0
-        counted := [String: Bool]{}
+        counted := [String:Bool]{}
         loop object in self.objects {
-            if object.repair_corrupt -> store_invalidate_verified_digest(verification, files.join(objects_dir, object.digest))
+            if object.repair_corrupt {
+                store_invalidate_verified_digest(verification, files.join(objects_dir, object.digest))
+            }
             if counted.has_key(object.digest) -> next
             counted[object.digest] = true
             destination: files.join(objects_dir, object.digest)
             if !self.object_is_verified(destination, object) {
-                if incoming > STORE_INT_MAX - object.bytes -> return Err(StoreError.Other("Hangar admission size overflowed"))
+                if incoming > STORE_INT_MAX - object.bytes {
+                    return Err(StoreError.Other("Hangar admission size overflowed"))
+                }
                 incoming += object.bytes
             }
             source_excluded: if excluded == {
@@ -235,7 +241,9 @@ AdmissionTransaction: struct {
             }
             if object.source != destination && self.source_is_internal(object.source) && !source_excluded {
                 size: store_admission_size(object.source)
-                if already_counted > STORE_INT_MAX - size -> return Err(StoreError.Other("Hangar admission size overflowed"))
+                if already_counted > STORE_INT_MAX - size {
+                    return Err(StoreError.Other("Hangar admission size overflowed"))
+                }
                 already_counted += size
             }
         }
@@ -277,7 +285,9 @@ AdmissionTransaction: struct {
         internal: self.source_is_internal(object.source)
 
         if object.source == destination {
-            if self.object_is_verified(destination, object) -> return
+            if self.object_is_verified(destination, object) {
+                return
+            }
             return Err(StoreError.InvalidData("canonical Hangar object `{destination}` does not match its digest"))
         }
 
@@ -319,14 +329,20 @@ AdmissionTransaction: struct {
                 files.rename(object.source, partial)
                 store_sync_store_directory(files.dirname(object.source))
             }
-            else -> store_copy_nofollow_tree(object.source, partial) ?? return Err(StoreError.Other(err.what()))
+            else -> {
+                store_copy_nofollow_tree(object.source, partial) ?? return Err(StoreError.Other(err.what()))
+            }
         }
         store_seal_node(partial)
         // A tree this process hashed and then renamed keeps its digest; only
         // a copied or unhashed source is hashed again here.
-        if internal -> store_carry_verified_digest(verification, object.source, partial, self.roots.hangar_dir(), object.allow_semantic_xattrs)
+        if internal {
+            store_carry_verified_digest(verification, object.source, partial, self.roots.hangar_dir(), object.allow_semantic_xattrs)
+        }
         actual: store_verified_output_hash(verification, partial, Val(self.roots.hangar_dir()), object.allow_semantic_xattrs)
-        if actual != object.digest -> return Err(StoreError.Other("Hangar object `{object.digest}` re-hashed as `{actual}`"))
+        if actual != object.digest {
+            return Err(StoreError.Other("Hangar object `{object.digest}` re-hashed as `{actual}`"))
+        }
         store_fsync_tree(partial)
         store_sync_store_directory(objects_dir)
         files.rename(partial, destination)
@@ -356,8 +372,12 @@ AdmissionTransaction: struct {
         path: files.join(receipts, receipt.digest)
         if files.stat(path) == {
             .Ok(metadata) -> {
-                if metadata.is_symlink || !metadata.is_file -> return Err(StoreError.InvalidData("Hangar receipt `{receipt.digest}` is not a regular file"))
-                if files.read_bytes(path) != receipt.bytes -> return Err(StoreError.InvalidData("Hangar receipt `{receipt.digest}` is corrupt"))
+                if metadata.is_symlink || !metadata.is_file {
+                    return Err(StoreError.InvalidData("Hangar receipt `{receipt.digest}` is not a regular file"))
+                }
+                if files.read_bytes(path) != receipt.bytes {
+                    return Err(StoreError.InvalidData("Hangar receipt `{receipt.digest}` is corrupt"))
+                }
                 return Ok(false)
             }
             .Err(error) -> {
@@ -377,18 +397,24 @@ AdmissionTransaction: struct {
     }
 
     remove_new_receipts: fn(&self) Never! {
-        loop path in self.receipts -> files.remove(path).drop("an unregistered receipt is swept by the next cleanup")
+        loop path in self.receipts {
+            files.remove(path).drop("an unregistered receipt is swept by the next cleanup")
+        }
         self.receipts = [String]{}
     }
 
     finish: fn(&self) Never! {
         loop published in self.published {
             if published.held_source == {
-                .Val(path) -> store_transaction_remove_node(path).drop("a consumed source is swept by staging recovery")
+                .Val(path) -> {
+                    store_transaction_remove_node(path).drop("a consumed source is swept by staging recovery")
+                }
                 .None -> {}
             }
             if published.backup == {
-                .Val(path) -> store_transaction_remove_node(path).drop("a replaced object is swept by staging recovery")
+                .Val(path) -> {
+                    store_transaction_remove_node(path).drop("a replaced object is swept by staging recovery")
+                }
                 .None -> {}
             }
         }
@@ -400,7 +426,9 @@ AdmissionTransaction: struct {
     // `Drop` for an uncommitted transaction.
     rollback: fn(&self) Never! {
         verification := self.verification.copy()
-        if self.committed -> return
+        if self.committed {
+            return
+        }
         index := self.published.len() - 1
         loop index >= 0 {
             store_transaction_undo(verification, self.roots.hangar_dir(), self.published[index])
@@ -419,8 +447,12 @@ store_transaction_undo: fn(verification: &StoreVerification, hangar: String, pub
         .Val(pending) -> {
             if files.lexists(pending) {
                 if {
-                    published.original_source != None && !files.lexists(published.original_source ?? "") -> files.rename(pending, published.original_source ?? "").drop("rollback restores what it can")
-                    else -> store_transaction_remove_node(pending).drop("rollback restores what it can")
+                    published.original_source != None && !files.lexists(published.original_source ?? "") -> {
+                        files.rename(pending, published.original_source ?? "").drop("rollback restores what it can")
+                    }
+                    else -> {
+                        store_transaction_remove_node(pending).drop("rollback restores what it can")
+                    }
                 }
             }
         }
@@ -434,13 +466,17 @@ store_transaction_undo: fn(verification: &StoreVerification, hangar: String, pub
                 store_make_tree_writable_for_removal(published.destination).drop("rollback restores what it can")
                 files.rename(published.destination, published.original_source ?? "").drop("rollback restores what it can")
             }
-            else -> store_transaction_remove_node(published.destination).drop("rollback restores what it can")
+            else -> {
+                store_transaction_remove_node(published.destination).drop("rollback restores what it can")
+            }
         }
     }
     if published.held_source == {
         .Val(held) -> {
             if {
-                published.original_source != None && files.lexists(held) && !files.lexists(published.original_source ?? "") -> files.rename(held, published.original_source ?? "").drop("rollback restores what it can")
+                published.original_source != None && files.lexists(held) && !files.lexists(published.original_source ?? "") -> {
+                    files.rename(held, published.original_source ?? "").drop("rollback restores what it can")
+                }
                 else -> store_transaction_remove_node(held).drop("rollback restores what it can")
             }
         }
@@ -449,7 +485,9 @@ store_transaction_undo: fn(verification: &StoreVerification, hangar: String, pub
     if published.backup == {
         .Val(backup) -> {
             if {
-                !files.lexists(published.destination) -> files.rename(backup, published.destination).drop("rollback restores what it can")
+                !files.lexists(published.destination) -> {
+                    files.rename(backup, published.destination).drop("rollback restores what it can")
+                }
                 else -> store_transaction_remove_node(backup).drop("rollback restores what it can")
             }
         }
@@ -466,7 +504,9 @@ store_transaction_publish_receipt: fn(partial: String, path: String, receipts: S
         if err == {
             .AlreadyExists(_) -> {
                 files.remove(partial).drop("the receipt partial is disposable")
-                if files.read_bytes(path) != receipt.bytes -> return Err(StoreError.InvalidData("Hangar receipt `{receipt.digest}` changed during publication"))
+                if files.read_bytes(path) != receipt.bytes {
+                    return Err(StoreError.InvalidData("Hangar receipt `{receipt.digest}` changed during publication"))
+                }
                 return Ok(false)
             }
             .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> return Err(StoreError.IO(err))
@@ -487,7 +527,9 @@ store_transaction_remove_node: fn(path: String) StoreError! {
     metadata: if files.stat(path) == {
         .Ok(metadata) -> metadata
         .Err(error) -> {
-            if StoreError.IO(error).is_not_found() -> return
+            if StoreError.IO(error).is_not_found() {
+                return
+            }
             return Err(StoreError.IO(error))
         }
     }

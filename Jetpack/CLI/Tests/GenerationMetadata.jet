@@ -1,8 +1,6 @@
 // Claims for the user-tools profile metadata.
 
-cli_generation_test_digest: fn(fill: String) -> String {
-    "sha256-{fill.repeat(64)}"
-}
+cli_generation_test_digest: fn(fill: String) -> String { "sha256-{fill.repeat(64)}" }
 
 cli_generation_test_store_root: fn() -> String {
     if sys.is_windows() -> "C:\\store" else -> "/store"
@@ -18,7 +16,7 @@ cli_generation_test_tool: fn(name: String, reference: String, output: String, bi
         store_root: cli_generation_test_store_root(),
         bins: [String]{bin},
         members: [String]{member},
-        projection_hashes: [String]{cli_generation_test_digest(projection)}
+        projection_hashes: [String]{cli_generation_test_digest(projection)},
     }
 }
 
@@ -26,7 +24,7 @@ cli_generation_test_metadata: fn() -> ToolGenerationMetadata {
     ToolGenerationMetadata{
         generation: 7,
         created_at: 1,
-        tools: [ToolGenerationTool]{cli_generation_test_tool("echo-args", "path:echo-args", "a", "echo-args", "echo-args", "b")}
+        tools: [ToolGenerationTool]{cli_generation_test_tool("echo-args", "path:echo-args", "a", "echo-args", "echo-args", "b")},
     }
 }
 

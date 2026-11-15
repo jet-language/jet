@@ -34,7 +34,6 @@
 // pages, each with its last frame, in the same order. SQLITE_BIGENDIAN is
 // 0 (the hosts are little-endian), so the index header is little-endian
 // and native checksums read little-endian words.
-
 use {
     base: __core_db_base
     util: __core_db_util
@@ -45,70 +44,109 @@ use {
 
 // wal.c constants.
 WAL_MAX_VERSION: 3007000
+
 WALINDEX_MAX_VERSION: 3007000
+
 WAL_WRITE_LOCK: 0
+
 WAL_ALL_BUT_WRITE: 1
+
 WAL_CKPT_LOCK: 1
+
 WAL_RECOVER_LOCK: 2
+
 WAL_NREADER: 5
+
 READMARK_NOT_USED: 4294967295
+
 WAL_FRAME_HDRSIZE: 24
+
 WAL_HDRSIZE: 32
+
 // 0x377f0682.
 WAL_MAGIC: 931071618
+
 HASHTABLE_NPAGE: 4096
+
 HASHTABLE_HASH_1: 383
+
 HASHTABLE_NSLOT: 8192
+
 HASHTABLE_NPAGE_ONE: 4062
+
 WALINDEX_PGSZ: 32768
+
 // sizeof(WalIndexHdr) * 2 + sizeof(WalCkptInfo).
 WALINDEX_HDR_SIZE: 136
+
 // The byte offset of aHash in a region (aPgno[HASHTABLE_NPAGE]).
 HASH_AT: 16384
+
 // SQLITE_MAX_PAGE_SIZE.
 WAL_MAX_PAGE_SIZE: 65536
 
 // Wal.exclusiveMode.
 WAL_NORMAL_MODE: 0
+
 WAL_EXCLUSIVE_MODE: 1
+
 WAL_HEAPMEMORY_MODE: 2
 
 // Wal.readOnly.
 WAL_RDWR: 0
+
 WAL_RDONLY: 1
+
 WAL_SHM_RDONLY: 2
 
 // walIndexReadHdr and walTryBeginRead: retry the read transaction.
 WAL_RETRY: -1
+
 WAL_RETRY_PROTOCOL_LIMIT: 100
 
 // sqlite3_wal_checkpoint_v2 modes (sqlite3.h SQLITE_CHECKPOINT_*).
 CHECKPOINT_PASSIVE: 0
+
 CHECKPOINT_FULL: 1
+
 CHECKPOINT_RESTART: 2
+
 CHECKPOINT_TRUNCATE: 3
 
 // WalIndexHdr field offsets (native byte order).
 HDR_VERSION: 0
+
 HDR_CHANGE: 8
+
 HDR_ISINIT: 12
+
 HDR_BIGEND: 13
+
 HDR_SZPAGE: 14
+
 HDR_MXFRAME: 16
+
 HDR_NPAGE: 20
+
 HDR_FRAME_CKSUM: 24
+
 HDR_SALT: 32
+
 HDR_CKSUM: 40
+
 HDR_SIZE: 48
 
 // WalCkptInfo field offsets in region 0.
 CKPT_NBACKFILL: 96
+
 CKPT_READMARK: 100
+
 CKPT_ATTEMPTED: 128
 
 // sqliteDefaultBusyCallback's delay schedule in milliseconds and the
 // running totals of it (main.c).
 BUSY_DELAYS: [Int]{1, 2, 5, 10, 15, 20, 25, 25, 25, 50, 50, 100}
+
 BUSY_TOTALS: [Int]{0, 1, 3, 8, 18, 33, 53, 78, 103, 128, 178, 228}
 
 // sqlite3.busyHandler with the default handler of sqlite3_busy_timeout:
@@ -231,7 +269,9 @@ wal_sync_flags: fn(f: Int) -> Int Never! { f.bit_and(3) }
 ckpt_sync_flags: fn(f: Int) -> Int Never! { (f >> 2).bit_and(3) }
 
 // walFrameOffset.
-wal_frame_offset: fn(frame: Int, sz_page: Int) -> Int Never! { WAL_HDRSIZE + (frame - 1) * (sz_page + WAL_FRAME_HDRSIZE) }
+wal_frame_offset: fn(frame: Int, sz_page: Int) -> Int Never! {
+    WAL_HDRSIZE + (frame - 1) * (sz_page + WAL_FRAME_HDRSIZE)
+}
 
 // The wal-index lives only in this connection's copies.
 wal_local: fn(w: Wal) -> Bool Never! { w.exclusive_mode == WAL_HEAPMEMORY_MODE || w.shm_unreliable }
@@ -271,7 +311,9 @@ wi_read: fn(w: &Wal, db: &file.SQLFile, offset: Int, buf: &[U8], at: Int, n: Int
 // Write data[at..<at+n] to region 0 at `offset`.
 wi_write: fn(w: &Wal, db: &file.SQLFile, offset: Int, data: [U8], at: Int, n: Int) Never! -[DB]> {
     if wal_local(w) {
-        if w.wi.len() == 0 || w.wi[0].len() == 0 -> return
+        if w.wi.len() == 0 || w.wi[0].len() == 0 {
+            return
+        }
         loop i in 0..<n -> w.wi[0][offset + i] = data[at + i]
         return
     }
@@ -322,7 +364,9 @@ wi_put2: fn(w: &Wal, i: Int, at: Int, v: Int) Never! {
 
 // memset of region i's copy over lo..<hi.
 wi_zero: fn(w: &Wal, i: Int, lo: Int, hi: Int) Never! {
-    if hi <= lo -> return
+    if hi <= lo {
+        return
+    }
     loop k in lo..<hi -> w.wi[i][k] = U8{0}
     wi_dirty(w, i, lo, hi)
 }
@@ -346,7 +390,9 @@ wal_flush: fn(w: &Wal, db: &file.SQLFile) Never! -[DB]> {
 
 // The region copies no longer show the shared memory (a new snapshot).
 wal_stale_all: fn(w: &Wal) Never! {
-    if wal_local(w) -> return
+    if wal_local(w) {
+        return
+    }
     loop i in 0..<w.wi.len() {
         w.wi_fresh[i] = false
         w.wi_lo[i] = 0
@@ -509,7 +555,9 @@ wal_lock_shared: fn(w: &Wal, db: &file.SQLFile, idx: Int) -[DB]> Int Never! {
 }
 
 wal_unlock_shared: fn(w: &Wal, db: &file.SQLFile, idx: Int) Never! -[DB]> {
-    if w.exclusive_mode != WAL_NORMAL_MODE -> return
+    if w.exclusive_mode != WAL_NORMAL_MODE {
+        return
+    }
     _: file.file_shm_lock(db, idx, 1, os.SHM_UNLOCK.bit_or(os.SHM_SHARED))
 }
 
@@ -519,7 +567,9 @@ wal_lock_exclusive: fn(w: &Wal, db: &file.SQLFile, idx: Int, n: Int) -[DB]> Int 
 }
 
 wal_unlock_exclusive: fn(w: &Wal, db: &file.SQLFile, idx: Int, n: Int) Never! -[DB]> {
-    if w.exclusive_mode != WAL_NORMAL_MODE -> return
+    if w.exclusive_mode != WAL_NORMAL_MODE {
+        return
+    }
     _: file.file_shm_lock(db, idx, n, os.SHM_UNLOCK.bit_or(os.SHM_EXCLUSIVE))
 }
 
@@ -529,7 +579,9 @@ wal_hash: fn(pgno: Int) -> Int Never! { (pgno * HASHTABLE_HASH_1).bit_and(HASHTA
 wal_next_hash: fn(k: Int) -> Int Never! { (k + 1).bit_and(HASHTABLE_NSLOT - 1) }
 
 // walFramePage: the hash table (region) of a frame.
-wal_frame_page: fn(frame: Int) -> Int Never! { (frame + HASHTABLE_NPAGE - HASHTABLE_NPAGE_ONE - 1) /% HASHTABLE_NPAGE }
+wal_frame_page: fn(frame: Int) -> Int Never! {
+    (frame + HASHTABLE_NPAGE - HASHTABLE_NPAGE_ONE - 1) /% HASHTABLE_NPAGE
+}
 
 // WalHashLoc: region `page`, whose aPgno starts at byte pgno_at; zero is
 // one less than the first frame it indexes.
@@ -554,16 +606,18 @@ wal_hash_get: fn(w: &Wal, db: &file.SQLFile, i: Int, loc: &WalHashLoc) -[DB]> In
             loc.pgno_at = 0
             loc.zero = HASHTABLE_NPAGE_ONE + (i - 1) * HASHTABLE_NPAGE
         }
-    } else if rc == base.OK {
-        rc = base.ERROR
-    }
+    } else if rc == base.OK { rc = base.ERROR }
     rc
 }
 
 // aPgno[k] and aHash[k] of a located hash table.
-loc_pgno: fn(w: Wal, loc: WalHashLoc, k: Int) -> Int Never! { le_get4(w.wi[loc.page], loc.pgno_at + 4 * k) }
+loc_pgno: fn(w: Wal, loc: WalHashLoc, k: Int) -> Int Never! {
+    le_get4(w.wi[loc.page], loc.pgno_at + 4 * k)
+}
 
-loc_hash: fn(w: Wal, loc: WalHashLoc, k: Int) -> Int Never! { le_get2(w.wi[loc.page], HASH_AT + 2 * k) }
+loc_hash: fn(w: Wal, loc: WalHashLoc, k: Int) -> Int Never! {
+    le_get2(w.wi[loc.page], HASH_AT + 2 * k)
+}
 
 // walFramePgno: the page of a frame whose region is loaded.
 wal_frame_pgno: fn(w: Wal, frame: Int) -> Int Never! {
@@ -576,9 +630,13 @@ wal_frame_pgno: fn(w: Wal, frame: Int) -> Int Never! {
 // hash table.
 wal_cleanup_hash: fn(w: &Wal, db: &file.SQLFile) Never! -[DB]> {
     mx: wal_mx_frame(w)
-    if mx == 0 -> return
+    if mx == 0 {
+        return
+    }
     loc := wal_hash_loc()
-    if wal_hash_get(w, db, wal_frame_page(mx), loc) != base.OK -> return
+    if wal_hash_get(w, db, wal_frame_page(mx), loc) != base.OK {
+        return
+    }
     limit: mx - loc.zero
     pg: loc.page
     loop k in 0..<HASHTABLE_NSLOT {
@@ -644,7 +702,9 @@ recover_log: fn(w: &Wal, db: &file.SQLFile, saved: &WalCksum) -[DB]> Int Never! 
     if rc != base.OK -> return rc
     magic: util.get4(buf, 0)
     sz_page: util.get4(buf, 8)
-    if util.clear_bits(magic, 1) != WAL_MAGIC || sz_page.bit_and(sz_page - 1) != 0 || sz_page > WAL_MAX_PAGE_SIZE || sz_page < 512 -> return base.OK
+    if util.clear_bits(magic, 1) != WAL_MAGIC || sz_page.bit_and(sz_page - 1) != 0 || sz_page > WAL_MAX_PAGE_SIZE || sz_page < 512 {
+        return base.OK
+    }
     w.hdr[HDR_BIGEND] = U8{magic.bit_and(1)}
     w.sz_page = sz_page
     w.n_ckpt = util.get4(buf, 12)
@@ -702,9 +762,7 @@ wal_index_recover: fn(w: &Wal, db: &file.SQLFile) -[DB]> Int Never! {
                 mark: if i == 1 && mx != 0 -> mx else -> READMARK_NOT_USED
                 wi_set4(w, db, CKPT_READMARK + 4 * i, mark)
                 wal_unlock_exclusive(w, db, read_lock(i), 1)
-            } else if rc != base.BUSY {
-                break
-            }
+            } else if rc != base.BUSY { break }
         }
     }
     wal_unlock_exclusive(w, db, i_lock, read_lock(0) - i_lock)
@@ -822,9 +880,7 @@ ckpt_backfill: fn(w: &Wal, db: &file.SQLFile, iter: WalIterator, mx_safe: Int, m
         n_size := 0
         rc = file.file_size(db, n_size)
         if rc == base.OK && n_size < n_req {
-            if n_size + 65536 + wal_mx_frame(w) * sz_page < n_req {
-                rc = base.CORRUPT
-            } else {
+            if n_size + 65536 + wal_mx_frame(w) * sz_page < n_req -> rc = base.CORRUPT else {
                 file.file_size_hint(db, n_req)
             }
         }
@@ -870,9 +926,7 @@ wal_checkpoint_run: fn(w: &Wal, db: &file.SQLFile, mode: Int, busy: &BusyHandler
                 } else if rc == base.BUSY {
                     mx_safe = y
                     x_busy = false
-                } else {
-                    return rc
-                }
+                } else { return rc }
             }
         }
         iter := WalIterator{pages: [Int]{}, frames: [Int]{}}
@@ -892,9 +946,7 @@ wal_checkpoint_run: fn(w: &Wal, db: &file.SQLFile, mode: Int, busy: &BusyHandler
         if rc == base.BUSY -> rc = base.OK
     }
     if rc == base.OK && mode != CHECKPOINT_PASSIVE {
-        if wi_get4(w, db, CKPT_NBACKFILL) < wal_mx_frame(w) {
-            rc = base.BUSY
-        } else if mode >= CHECKPOINT_RESTART {
+        if wi_get4(w, db, CKPT_NBACKFILL) < wal_mx_frame(w) -> rc = base.BUSY else if mode >= CHECKPOINT_RESTART {
             salt1: os.os_random_bytes(4)
             rc = wal_busy_lock(w, db, busy, x_busy, read_lock(1), WAL_NREADER - 1)
             if rc == base.OK {
@@ -931,9 +983,7 @@ wal_close: fn(w: &Wal, db: &file.SQLFile, sync_flags: Int, page_size: Int, check
             n_ckpt := 0
             rc = wal_checkpoint(w, db, CHECKPOINT_PASSIVE, no_busy, false, sync_flags, page_size, buf, n_log, n_ckpt)
             if rc == base.OK {
-                if !file.file_persist_wal(db) {
-                    is_delete = true
-                } else if w.mx_wal_size >= 0 {
+                if !file.file_persist_wal(db) -> is_delete = true else if w.mx_wal_size >= 0 {
                     wal_limit_size(w, 0)
                 }
             }
@@ -1076,9 +1126,7 @@ wal_begin_shm_unreliable: fn(w: &Wal, db: &file.SQLFile, changed: &Bool) -[DB]> 
         rc = file.file_shm_map(db, 0, WALINDEX_PGSZ, false, dummy)
         if rc != base.READONLY_CANTINIT {
             if rc == base.READONLY -> rc = WAL_RETRY
-        } else {
-            rc = shm_unreliable_check(w, db, changed)
-        }
+        } else { rc = shm_unreliable_check(w, db, changed) }
     }
     if rc != base.OK {
         wal_free_pages(w)
@@ -1102,16 +1150,12 @@ wal_try_begin_read: fn(w: &Wal, db: &file.SQLFile, changed: &Bool, use_wal: Bool
     if !use_wal {
         if !w.shm_unreliable -> rc = wal_index_read_hdr(w, db, changed)
         if rc == base.BUSY {
-            if w.wi.len() == 0 || w.wi[0].len() == 0 {
-                rc = WAL_RETRY
-            } else {
+            if w.wi.len() == 0 || w.wi[0].len() == 0 -> rc = WAL_RETRY else {
                 rc = wal_lock_shared(w, db, WAL_RECOVER_LOCK)
                 if rc == base.OK {
                     wal_unlock_shared(w, db, WAL_RECOVER_LOCK)
                     rc = WAL_RETRY
-                } else if rc == base.BUSY {
-                    rc = base.BUSY_RECOVERY
-                }
+                } else if rc == base.BUSY { rc = base.BUSY_RECOVERY }
             }
         }
         if rc != base.OK -> return rc
@@ -1127,9 +1171,7 @@ wal_try_begin_read: fn(w: &Wal, db: &file.SQLFile, changed: &Bool, use_wal: Bool
             }
             w.read_lock = 0
             return base.OK
-        } else if rc != base.BUSY {
-            return rc
-        }
+        } else if rc != base.BUSY { return rc }
     }
     mx_read_mark := 0
     mx_i := 0
@@ -1149,9 +1191,7 @@ wal_try_begin_read: fn(w: &Wal, db: &file.SQLFile, changed: &Bool, use_wal: Bool
                 mx_i = i
                 wal_unlock_exclusive(w, db, read_lock(i), 1)
                 break
-            } else if rc != base.BUSY {
-                return rc
-            }
+            } else if rc != base.BUSY { return rc }
         }
     }
     if mx_i == 0 -> return if rc == base.BUSY -> WAL_RETRY else -> base.READONLY_CANTINIT
@@ -1315,9 +1355,7 @@ wal_restart_log: fn(w: &Wal, db: &file.SQLFile) -[DB]> Int Never! {
         if rc == base.OK {
             wal_restart_hdr(w, db, salt1)
             wal_unlock_exclusive(w, db, read_lock(1), WAL_NREADER - 1)
-        } else if rc != base.BUSY {
-            return rc
-        }
+        } else if rc != base.BUSY { return rc }
     }
     wal_unlock_shared(w, db, read_lock(0))
     w.read_lock = -1
@@ -1527,9 +1565,7 @@ wal_checkpoint: fn(w: &Wal, db: &file.SQLFile, mode: Int, busy: &BusyHandler, us
         w.ckpt_lock = true
         if mode != CHECKPOINT_PASSIVE {
             rc = wal_busy_lock(w, db, busy, busy2, WAL_WRITE_LOCK, 1)
-            if rc == base.OK {
-                w.write_lock = true
-            } else if rc == base.BUSY {
+            if rc == base.OK -> w.write_lock = true else if rc == base.BUSY {
                 mode2 = CHECKPOINT_PASSIVE
                 busy2 = false
                 rc = base.OK
@@ -1538,9 +1574,7 @@ wal_checkpoint: fn(w: &Wal, db: &file.SQLFile, mode: Int, busy: &BusyHandler, us
     }
     if rc == base.OK -> rc = wal_index_read_hdr(w, db, changed)
     if rc == base.OK {
-        if wal_mx_frame(w) != 0 && wal_pagesize(w) != n_buf {
-            rc = base.CORRUPT
-        } else {
+        if wal_mx_frame(w) != 0 && wal_pagesize(w) != n_buf -> rc = base.CORRUPT else {
             rc = wal_checkpoint_run(w, db, mode2, busy, busy2, sync_flags, buf)
         }
         if rc == base.OK || rc == base.BUSY {

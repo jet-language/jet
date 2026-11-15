@@ -28,9 +28,7 @@ NativeDebugError: struct {
     detail: String
 
     // E2203, the registered failure of the native debugger.
-    diagnostic: fn(self) -> Diagnostic Never! {
-        native_debug_unavailable(self.detail)
-    }
+    diagnostic: fn(self) -> Diagnostic Never! { native_debug_unavailable(self.detail) }
 }
 
 // E2203 with `detail` as the reason the native debugger could not run.
@@ -131,13 +129,17 @@ NativeSession: struct {
     // A breakpoint on `line` of the Jet source `file` (its base name, as the
     // line table names it): its number, or None when no code is on that line.
     break_at: fn(&self, file: String, line: Int) -> Int? NativeDebugError! {
-        if !native_debug_control_free(file) -> return Err(NativeDebugError{detail: "the breakpoint path contains a control character"})
+        if !native_debug_control_free(file) {
+            return Err(NativeDebugError{detail: "the breakpoint path contains a control character"})
+        }
         self.set_breakpoint("breakpoint set -f {native_debug_quote(file)} -l {line}")
     }
 
     // A breakpoint at the start of the Jet function `function`.
     break_in: fn(&self, function: String) -> Int? NativeDebugError! {
-        if !native_debug_control_free(function) -> return Err(NativeDebugError{detail: "the function name contains a control character"})
+        if !native_debug_control_free(function) {
+            return Err(NativeDebugError{detail: "the function name contains a control character"})
+        }
         self.set_breakpoint("breakpoint set -n {native_debug_quote(function)}")
     }
 
@@ -165,7 +167,9 @@ NativeSession: struct {
     launch: fn(&self, args: [String]) -> NativeStop NativeDebugError! {
         quoted := [String]{}
         loop arg in args {
-            if !native_debug_control_free(arg) -> return Err(NativeDebugError{detail: "a program argument contains a control character"})
+            if !native_debug_control_free(arg) {
+                return Err(NativeDebugError{detail: "a program argument contains a control character"})
+            }
             quoted.push(native_debug_quote(arg))
         }
         command: if quoted.len() == 0 -> "process launch" else -> "process launch -- {quoted.join(" ")}"
@@ -254,7 +258,9 @@ NativeSession: struct {
             .Ok(_) -> {}
         }
         self.child.stdin.close()
-        loop _ in self.child.stdout.lines() {}
+        loop _ in self.child.stdout.lines() {
+
+        }
         if self.child.wait() == {
             .Err(_) -> {}
             .Ok(_) -> {}
@@ -371,11 +377,15 @@ NativeSession: struct {
     report: fn(&self, stop: NativeStop, file: String, lines: [String]) -> String NativeDebugError! {
         text := self.take_output()
         if stop.kind == {
-            .Exited -> text = "{text}{if stop.code == 0 -> "Program finished" else -> "Program finished with exit status {stop.code}"}\n"
-            .Signaled -> text = "{text}Program stopped by {stop.reason}\n"
+            .Exited -> {
+                text = "{text}{if stop.code == 0 -> "Program finished" else -> "Program finished with exit status {stop.code}"}\n"
+            }
+            .Signaled -> { text = "{text}Program stopped by {stop.reason}\n" }
             .Paused -> {
                 frame: stop.frame ?? NativeFrame{function: "?", file: "", line: 0}
-                if stop.reason.starts_with("breakpoint") -> text = "{text}{NATIVE_DEBUG_BREAKPOINT_HIT}  {frame.file}:{frame.line}  in {frame.function}()\n"
+                if stop.reason.starts_with("breakpoint") {
+                    text = "{text}{NATIVE_DEBUG_BREAKPOINT_HIT}  {frame.file}:{frame.line}  in {frame.function}()\n"
+                }
                 source: if frame.file == file && frame.line >= 1 && frame.line <= lines.len() -> lines[frame.line - 1] else -> ""
                 locals: self.locals() ?? return Err(err)
                 text = "{text}{frame.line} | {source}        <- here\n{native_debug_locals_line(locals)}\n"
@@ -391,13 +401,17 @@ NativeSession: struct {
         frames: self.backtrace() ?? return Err(err)
         stack := [FrameSnapshot]{}
         loop frame in frames {
-            if native_debug_jet_frame(frame) -> stack.insert(0, FrameSnapshot{function: frame.function, line: frame.line})
+            if native_debug_jet_frame(frame) {
+                stack.insert(0, FrameSnapshot{function: frame.function, line: frame.line})
+            }
         }
         if stack.len() == 0 -> return Ok(None)
         top: stack[stack.len() - 1]
         values := [ValueSnapshot]{}
         locals: self.locals() ?? return Err(err)
-        loop local in locals -> values.push(ValueSnapshot{name: local.name, type_name: local.type_name, value: local.value})
+        loop local in locals {
+            values.push(ValueSnapshot{name: local.name, type_name: local.type_name, value: local.value})
+        }
         Ok(Val(DebugSnapshot{function: top.function, line: top.line, locals: values, call_stack: stack}))
     }
 }
@@ -409,7 +423,7 @@ native_debug_build_argv: fn(jet: String, entry: String, out_dir: String, deep_ch
     argv := [String]{jet, "build", "-O0"}
     loop word in deep_checks_flags(deep_checks) -> argv.push(word)
     argv.push("--output-dir={out_dir}")
-    argv.push(entry.copy()) // copy: the command owns its words.
+    argv.push(entry.copy())  // copy: the command owns its words.
     argv
 }
 
@@ -451,6 +465,7 @@ NATIVE_DEBUG_READ_ROUNDS: 8
 
 // The most list elements and String bytes a readout shows.
 NATIVE_DEBUG_SHOWN_ITEMS: 16
+
 NATIVE_DEBUG_SHOWN_BYTES: 256
 
 // What one console command printed, and where it left the program.
@@ -568,14 +583,18 @@ native_debug_parse_stop: fn(output: String) -> NativeStop? Never! {
             code: Int.parse(trimmed.after(" exited with status = ").before(" ").trim()) ?? -1
             return Val(NativeStop{kind: NativeStopKind.Exited, reason: "exited", code: code, frame: None})
         }
-        if trimmed.contains("stop reason = ") && reason == "" -> reason = trimmed.after("stop reason = ").trim().copy()
+        if trimmed.contains("stop reason = ") && reason == "" {
+            reason = trimmed.after("stop reason = ").trim().copy()
+        }
         if frame == None -> frame = native_debug_parse_frame(line)
     }
     if reason == "" -> return None
     if reason.starts_with("signal ") {
         signal: reason.after("signal ").before(" ").replace(":", "").trim()
         // A breakpoint trap is a pause; any other signal ends the program.
-        if signal != "SIGTRAP" && signal != "SIGSTOP" -> return Val(NativeStop{kind: NativeStopKind.Signaled, reason: signal.copy(), code: -1, frame: frame})
+        if signal != "SIGTRAP" && signal != "SIGSTOP" {
+            return Val(NativeStop{kind: NativeStopKind.Signaled, reason: signal.copy(), code: -1, frame: frame})
+        }
     }
     Val(NativeStop{kind: NativeStopKind.Paused, reason: reason, code: 0, frame: frame})
 }
@@ -592,9 +611,13 @@ native_debug_parse_frame: fn(line: String) -> NativeFrame? Never! {
     if function.contains(" at ") -> function = function.before(" at ")
     if function.contains(" + ") -> function = function.before(" + ")
     if function.contains("(") -> function = function.before("(")
-    if !symbol.contains(" at ") -> return Val(NativeFrame{function: function.trim().copy(), file: "", line: 0})
+    if !symbol.contains(" at ") {
+        return Val(NativeFrame{function: function.trim().copy(), file: "", line: 0})
+    }
     location: symbol.after(" at ")
-    if !location.contains(":") -> return Val(NativeFrame{function: function.trim().copy(), file: location.trim().copy(), line: 0})
+    if !location.contains(":") {
+        return Val(NativeFrame{function: function.trim().copy(), file: location.trim().copy(), line: 0})
+    }
     after_file: location.after(":")
     line_text: if after_file.contains(":") -> after_file.before(":") else -> after_file
     line_number: Int.parse(line_text.trim()) ?? 0
@@ -689,7 +712,9 @@ native_debug_jet_type: fn(native_type: String) -> String Never! {
 // A row as a Jet value, None when its memory is unread or unreadable.
 native_debug_render: fn(row: NativeValue, memory: &NativeMemory) -> String? Never! {
     type_name: native_debug_jet_type(row.native_type)
-    if type_name.starts_with("[") && type_name.ends_with("]") -> return native_debug_list(type_name, row, memory)
+    if type_name.starts_with("[") && type_name.ends_with("]") {
+        return native_debug_list(type_name, row, memory)
+    }
     if type_name == {
         "Int" -> {
             word: Int.parse(row.raw) ?? return None
@@ -823,7 +848,9 @@ native_debug_list: fn(type_name: String, row: NativeValue, memory: &NativeMemory
 // are unreadable or not read yet (then they join memory.missing).
 native_debug_read: fn(memory: &NativeMemory, address: Int, size: Int, count: Int) -> [Int]? Never! {
     loop (index, read) in memory.reads {
-        if read.address == address && read.size == size && read.count == count -> return memory.values[index]
+        if read.address == address && read.size == size && read.count == count {
+            return memory.values[index]
+        }
     }
     if address <= 0 -> return None
     loop read in memory.missing {
@@ -860,7 +887,9 @@ native_debug_address: fn(raw: String) -> Int? Never! {
             byte >= (U8{48}) && byte <= (U8{57}) -> Int{byte} - 48
             byte >= (U8{97}) && byte <= (U8{102}) -> Int{byte} - 87
             byte >= (U8{65}) && byte <= (U8{70}) -> Int{byte} - 55
-            else -> return None
+            else -> {
+                return None
+            }
         }
         value = value * 16 + digit
     }

@@ -16,11 +16,14 @@ use {
 
 // The source trees the rule covers.
 IP_ROOTS: [String]{"Compiler", "Core", "Jetpack", "Examples", "tests", "Tools"}
+
 // The cross-language cases hold other languages' sources, not Jet's own.
 IP_EXCLUDED: "tests/cases/cross/"
 
 ip_parse: fn(path: String, source: String) -> ParseResult {
-    if path.starts_with("Core/") || path.starts_with("Compiler/Prelude/") -> return parse_generated_source(source.bytes())
+    if path.starts_with("Core/") || path.starts_with("Compiler/Prelude/") {
+        return parse_generated_source(source.bytes())
+    }
     parse_source(source.bytes())
 }
 

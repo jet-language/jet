@@ -17,6 +17,7 @@ rt_aead_tag: fn(key: I64, nonce: I64, aad: I64, aad_len: I64, cipher: I64, ciphe
     rt_poly_block(lengths, I64{16}, false, state)
     rt_poly_finish(state, auth_tag)
 }
+
 rt_crypto_aead_seal: fn(key: I64, nonce: I64, aad: I64, aad_len: I64, plain: I64, length: I64, output: I64, scratch: I64) -> Bool {
     if (aad_len < I64{0} || length < I64{0} || length > I64{274877906880}) {
         rt_crypto_wipe(scratch, I64{560})
@@ -30,6 +31,7 @@ rt_crypto_aead_seal: fn(key: I64, nonce: I64, aad: I64, aad_len: I64, plain: I64
     rt_crypto_wipe(scratch, I64{560})
     true
 }
+
 rt_crypto_aead_open: fn(key: I64, nonce: I64, aad: I64, aad_len: I64, cipher: I64, length: I64, output: I64, scratch: I64) -> Bool {
     if (aad_len < I64{0} || length < I64{16} || length - I64{16} > I64{274877906880}) {
         rt_crypto_wipe(scratch, I64{560})
@@ -47,17 +49,20 @@ rt_crypto_aead_open: fn(key: I64, nonce: I64, aad: I64, aad_len: I64, cipher: I6
     rt_crypto_wipe(scratch, I64{560})
     accepted
 }
+
 rt_aead_xkey: fn(key: I64, nonce: I64, scratch: I64) {
     rt_crypto_hchacha(key, nonce, wrapping(scratch + I64{560}), scratch)
     rt_crypto_wipe(wrapping(scratch + I64{592}), I64{4})
     rt_text_bytes_copy(wrapping(scratch + I64{596}), wrapping(nonce + I64{16}), I64{8})
 }
+
 rt_crypto_xaead_seal: fn(key: I64, nonce: I64, aad: I64, aad_len: I64, plain: I64, length: I64, output: I64, scratch: I64) -> Bool {
     rt_aead_xkey(key, nonce, scratch)
     accepted: rt_crypto_aead_seal(wrapping(scratch + I64{560}), wrapping(scratch + I64{592}), aad, aad_len, plain, length, output, scratch)
     rt_crypto_wipe(scratch, I64{608})
     accepted
 }
+
 rt_crypto_xaead_open: fn(key: I64, nonce: I64, aad: I64, aad_len: I64, cipher: I64, length: I64, output: I64, scratch: I64) -> Bool {
     rt_aead_xkey(key, nonce, scratch)
     accepted: rt_crypto_aead_open(wrapping(scratch + I64{560}), wrapping(scratch + I64{592}), aad, aad_len, cipher, length, output, scratch)

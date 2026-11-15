@@ -1,4 +1,3 @@
-
 use json: core.encoding.json
 
 run: fn() {
@@ -9,19 +8,19 @@ run: fn() {
     reencoded := json.to_string(encoded)
     roundtrip_wire := json.parse(reencoded) ?? panic("reparse")
     roundtrip := roundtrip_wire.decode<Repo>() ?? panic("decode roundtrip")
-    if roundtrip.name != repo.name { panic("name roundtrip") }
-    if roundtrip.stars != repo.stars { panic("stars roundtrip") }
-    if roundtrip.active != repo.active { panic("active roundtrip") }
-    if roundtrip.payload.len() != repo.payload.len() { panic("payload length roundtrip") }
-    if roundtrip.payload[0] != repo.payload[0] { panic("payload roundtrip") }
-    if roundtrip.payload[1] != repo.payload[1] { panic("payload roundtrip") }
-    if roundtrip.payload[2] != repo.payload[2] { panic("payload roundtrip") }
+    if roundtrip.name != repo.name -> panic("name roundtrip")
+    if roundtrip.stars != repo.stars -> panic("stars roundtrip")
+    if roundtrip.active != repo.active -> panic("active roundtrip")
+    if roundtrip.payload.len() != repo.payload.len() -> panic("payload length roundtrip")
+    if roundtrip.payload[0] != repo.payload[0] -> panic("payload roundtrip")
+    if roundtrip.payload[1] != repo.payload[1] -> panic("payload roundtrip")
+    if roundtrip.payload[2] != repo.payload[2] -> panic("payload roundtrip")
     if roundtrip.created.format_rfc3339() != repo.created.format_rfc3339() {
         panic("created roundtrip")
     }
     ttl := repo.ttl.in(.Seconds)
     roundtrip_ttl := roundtrip.ttl.in(.Seconds)
-    if roundtrip_ttl != ttl { panic("ttl roundtrip") }
+    if roundtrip_ttl != ttl -> panic("ttl roundtrip")
     print(repo.name)
     print(repo.stars)
     print(repo.active)

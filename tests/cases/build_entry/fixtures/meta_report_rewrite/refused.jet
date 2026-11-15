@@ -1,4 +1,3 @@
-
 // A Tidy lint whose structured fix names a replacement that can't take a
 // `print` call's place: `count` takes an Int and returns one.
 NoPrintInLib: struct {
@@ -6,8 +5,11 @@ NoPrintInLib: struct {
         code: "mypkg.NoPrintInLib"
         tier: .Tidy
         structured_fix: syntax.rewrite(callee: print, replacement: count)
+
         what: fn(self) -> String { "library code prints to the terminal" }
+
         why: fn(self) -> String { "the program that calls the library owns the terminal" }
+
         fix: fn(self) -> String { "count the message instead" }
     }
 }

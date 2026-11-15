@@ -15,8 +15,7 @@ pkg_test_authority_root: fn(label: String) -[FS, Env]> String Never! {
 
 pkg_test_authority_snapshot_probe: fn(resolver: AuthorityResolver, path: String, descendant: Bool) Never! -[FS, Env]> {
     directory: resolver.checked_directory(path) ?? panic("check directory")
-    if descendant -> assert(directory.handle == .Val(_))
-    else -> assert(directory.handle == None)
+    if descendant -> assert(directory.handle == .Val(_)) else -> assert(directory.handle == None)
     handle: resolver.directory_handle(directory)
     assert((handle.stat() ?? panic("held directory")).is_dir)
 }
@@ -68,7 +67,9 @@ pkg_test_authority_snapshot_probe: fn(resolver: AuthorityResolver, path: String,
 }
 
 #Test("authority world writable candidate is not an authority root") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     root: pkg_test_authority_root("world-writable")
     files.create_dir_all(root) ?? panic("mkdir")
     files.write(files.join(root, "workspace.jet"), "workspace: module {{}}\n") ?? panic("write")
@@ -83,7 +84,9 @@ pkg_test_authority_snapshot_probe: fn(resolver: AuthorityResolver, path: String,
 }
 
 #Test("authority source walk prunes nested projects before hostile entries") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     root: pkg_test_authority_root("nested-project")
     files.create_dir_all(root) ?? panic("mkdir")
     files.write(files.join(root, "main.jet"), "run: fn() {{}}\n") ?? panic("write main")
@@ -116,7 +119,7 @@ pkg_test_authority_snapshot_probe: fn(resolver: AuthorityResolver, path: String,
     files.write(files.join(current, "input.jet"), "// input\n") ?? panic("write")
     resolver: AuthorityResolver.open(root) ?? panic("open")
     if resolver.discover_source_files() == {
-        .Ok(_) -> panic("a hostile depth must be refused")
+        .Ok(_) -> { panic("a hostile depth must be refused") }
         .Err(error) -> assert(error.message().contains("depth bound"))
     }
     files.remove_all(root) ?? panic("cleanup")
@@ -131,7 +134,7 @@ pkg_test_authority_snapshot_probe: fn(resolver: AuthorityResolver, path: String,
     assert(receipt.success)
     resolver: AuthorityResolver.open(root) ?? panic("open")
     if resolver.checked_file("oversized.jet") == {
-        .Ok(_) -> panic("an oversized authority file must be refused")
+        .Ok(_) -> { panic("an oversized authority file must be refused") }
         .Err(error) -> assert(error.message().contains("read bound"))
     }
     files.remove_all(root) ?? panic("cleanup")

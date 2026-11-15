@@ -17,7 +17,7 @@ store_test_signed_entry: fn(roots: HangarRoots, label: String, reference: String
         envelope: envelope,
         cache_identity: store_test_identity(),
         references: [String]{},
-        named_outputs: [String: String]{},
+        named_outputs: [String:String]{},
         platform_artifact_kind: "",
         producer_record: "",
         receipt: "",
@@ -61,7 +61,7 @@ store_test_remote_expectation: fn() -> CacheExpectation Never! {
 #Test("store verified cache rejects deleted and tampered outputs") {
     verification := StoreVerification.new()
     roots: store_test_temp_roots()
-    ingested: store_test_ingest_fixture(verification, roots, "verified-cache", [String: String]{"out": "trusted"}, [String]{})
+    ingested: store_test_ingest_fixture(verification, roots, "verified-cache", [String:String]{"out": "trusted"}, [String]{})
     entry: ingested.entry
     out: entry.out
     reference: entry.reference
@@ -94,7 +94,7 @@ store_test_remote_expectation: fn() -> CacheExpectation Never! {
 #Test("store nix compat output fails closed without native store authority") {
     roots: store_test_temp_roots()
     if store_pin_nix_gc_root(files.join(roots.root, "entry"), "/nix/store/demo") == {
-        .Ok(_) -> panic("raw Nix output must be refused")
+        .Ok(_) -> { panic("raw Nix output must be refused") }
         .Err(error) -> assert(error.message().contains("needs a verified native store authority"))
     }
     store_test_drop_roots(roots)
@@ -120,10 +120,12 @@ store_test_remote_expectation: fn() -> CacheExpectation Never! {
     entry: store_test_signed_entry(roots, "signed-output", "cache:demo", "ed25519:abcd")
     expectation: store_test_remote_expectation()
     called := false
-    assert(!store_verify_configured_signature_with(roots, entry, expectation, fn(key: String, message: String, signature: String) {
-        called = true
-        true
-    }))
+    assert(
+        !store_verify_configured_signature_with(roots, entry, expectation, fn(key: String, message: String, signature: String) {
+            called = true
+            true
+        }),
+    )
     assert(!called)
     files.create_dir_all(files.join(roots.root, "trust")) ?? panic("trust dir")
     files.write(files.join(roots.root, "trust/cache.ed25519.pub"), "public-key") ?? panic("key file")

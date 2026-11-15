@@ -54,14 +54,14 @@ HandleOverlay: struct {
     // A C typedef, its generated Jet name, or an opaque struct tag mapped to a
     // close symbol; required when conventional discovery is absent or
     // ambiguous.
-    close_functions: [String: String]
+    close_functions: [String:String]
     // Per-handle concurrency declarations; missing entries stay unspecified.
-    thread_safety: [String: ThreadSafety]
+    thread_safety: [String:ThreadSafety]
     // Explicit transitive libraries this binding needs.
     links: [String]
 
     empty: fn() -> HandleOverlay Never! {
-        HandleOverlay{close_functions: [String: String]{}, thread_safety: [String: ThreadSafety]{}, links: [String]{}}
+        HandleOverlay{close_functions: [String:String]{}, thread_safety: [String:ThreadSafety]{}, links: [String]{}}
     }
 
     with_close: fn(self, handle: String, symbol: String) -> HandleOverlay Never! {
@@ -158,8 +158,8 @@ OpaqueHandleDiscovery: struct {
     // reason, so the binder reports them instead of pretending they are
     // scalars.
     unresolved: [(reason: String, typedef_name: String)]
-    priv opaque: [String: OpaqueHandleShape]
-    priv handle_indices: [String: Int]
+    priv opaque: [String:OpaqueHandleShape]
+    priv handle_indices: [String:Int]
 
     // Discover opaque struct-pointer typedefs and resolve their ownership
     // facts. `source` is the original header or the binder's cleaned
@@ -167,22 +167,24 @@ OpaqueHandleDiscovery: struct {
     discover: fn(source: String, lib: String, overlay: HandleOverlay) -> OpaqueHandleDiscovery Never! {
         declarations: pkg_opaque_split_declarations(pkg_opaque_strip_comments_and_directives(source))
         complete_tags: pkg_opaque_complete_struct_tags(declarations)
-        alias_decls := [String: OpaqueAliasDecl]{}
+        alias_decls := [String:OpaqueAliasDecl]{}
         loop declaration in declarations {
             if pkg_opaque_parse_typedef(declaration) == {
-                .Val(parsed) -> alias_decls[parsed.name] = parsed.decl
+                .Val(parsed) -> { alias_decls[parsed.name] = parsed.decl }
                 .None -> {}
             }
         }
-        opaque := [String: OpaqueHandleShape]{}
+        opaque := [String:OpaqueHandleShape]{}
         loop name in pkg_opaque_sorted_keys(alias_decls.keys().to_list()) {
             resolved: pkg_opaque_resolve_alias(name, alias_decls, complete_tags, [String]{}) ?? next
-            if resolved.pointer_depth <= 1 && !complete_tags.contains(resolved.struct_tag) -> opaque[name] = resolved
+            if resolved.pointer_depth <= 1 && !complete_tags.contains(resolved.struct_tag) {
+                opaque[name] = resolved
+            }
         }
         prototypes := [OpaqueCPrototype]{}
         loop declaration in declarations {
             if pkg_opaque_parse_prototype(declaration) == {
-                .Val(prototype) -> prototypes.push(prototype)
+                .Val(prototype) -> { prototypes.push(prototype) }
                 .None -> {}
             }
         }
@@ -196,7 +198,9 @@ OpaqueHandleDiscovery: struct {
             loop prototype in prototypes {
                 if prototype.params.len() != 1 -> next
                 if !pkg_opaque_matches_shape(prototype.params[0], typedef_name, shape) -> next
-                if pkg_opaque_conventional_close_name(prototype.name, typedef_name, shape.struct_tag) -> candidates.push(prototype.name)
+                if pkg_opaque_conventional_close_name(prototype.name, typedef_name, shape.struct_tag) {
+                    candidates.push(prototype.name)
+                }
             }
             jet_name: pkg_opaque_unique_name(used_names, foundation_generated_type_name(pkg_opaque_handle_name_seed(typedef_name), "Handle"))
             close := ""
@@ -223,16 +227,18 @@ OpaqueHandleDiscovery: struct {
                 }
             }
             safety: overlay.thread_safety_for(typedef_name, jet_name, shape.struct_tag)
-            handles.push(HandleFact{
-                typedef_name: typedef_name,
-                jet_name: jet_name,
-                close: close,
-                close_source: close_source,
-                thread_safety: safety,
-                link_closure: links.copy()
-            })
+            handles.push(
+                HandleFact{
+                    typedef_name: typedef_name,
+                    jet_name: jet_name,
+                    close: close,
+                    close_source: close_source,
+                    thread_safety: safety,
+                    link_closure: links.copy(),
+                },
+            )
         }
-        handle_indices := [String: Int]{}
+        handle_indices := [String:Int]{}
         loop index in 0..<handles.len() -> handle_indices[handles[index].typedef_name] = index
         OpaqueHandleDiscovery{handles: handles, unresolved: unresolved, opaque: opaque, handle_indices: handle_indices}
     }
@@ -272,7 +278,9 @@ pkg_opaque_sorted_keys: fn(keys: [String]) -> [String] Never! {
 
 // `name_t` names its handle `name`.
 pkg_opaque_handle_name_seed: fn(typedef_name: String) -> String Never! {
-    if typedef_name.ends_with("_t") && typedef_name != "_t" -> return typedef_name.removesuffix("_t")
+    if typedef_name.ends_with("_t") && typedef_name != "_t" {
+        return typedef_name.removesuffix("_t")
+    }
     typedef_name.copy()
 }
 
@@ -373,7 +381,7 @@ pkg_opaque_parameter_type: fn(input: String) -> String Never! {
 
 // Resolve a typedef through alias chains to its opaque shape; `path` holds
 // the aliases already on this chain so a cycle resolves to nothing.
-pkg_opaque_resolve_alias: fn(name: String, aliases: [String: OpaqueAliasDecl], complete_tags: [String], path: [String]) -> OpaqueHandleShape? Never! {
+pkg_opaque_resolve_alias: fn(name: String, aliases: [String:OpaqueAliasDecl], complete_tags: [String], path: [String]) -> OpaqueHandleShape? Never! {
     if path.contains(name) -> return None
     decl: aliases.get(name) ?? return None
     if decl.base == {
@@ -401,7 +409,9 @@ pkg_opaque_complete_struct_tags: fn(declarations: [String]) -> [String] Never! {
         }
         loop index in 0..<(tokens.len() - 2) {
             if tokens[index] != "struct" || !pkg_opaque_is_ident(tokens[index + 1]) -> next
-            if last_brace >= index + 2 && !complete.contains(tokens[index + 1]) -> complete.push(tokens[index + 1])
+            if last_brace >= index + 2 && !complete.contains(tokens[index + 1]) {
+                complete.push(tokens[index + 1])
+            }
         }
     }
     complete
@@ -432,10 +442,16 @@ pkg_opaque_parse_typedef: fn(declaration: String) -> (name: String, decl: Opaque
     }
     if {
         struct_position >= 0 -> {
-            if struct_position + 1 < type_tokens.len() && pkg_opaque_is_ident(type_tokens[struct_position + 1]) -> base = OpaqueAliasBase.Struct(type_tokens[struct_position + 1])
+            if struct_position + 1 < type_tokens.len() && pkg_opaque_is_ident(type_tokens[struct_position + 1]) {
+                base = OpaqueAliasBase.Struct(type_tokens[struct_position + 1])
+            }
         }
-        pointer_depth > 0 && type_tokens.contains("void") && pkg_opaque_only_void_pointer(type_tokens) -> base = OpaqueAliasBase.Opaque
-        type_tokens.len() == 1 && pkg_opaque_is_ident(type_tokens[0]) -> base = OpaqueAliasBase.Alias(type_tokens[0])
+        pointer_depth > 0 && type_tokens.contains("void") && pkg_opaque_only_void_pointer(type_tokens) -> {
+            base = OpaqueAliasBase.Opaque
+        }
+        type_tokens.len() == 1 && pkg_opaque_is_ident(type_tokens[0]) -> {
+            base = OpaqueAliasBase.Alias(type_tokens[0])
+        }
         else -> {}
     }
     Val((decl: OpaqueAliasDecl{base: base, pointer_depth: pointer_depth}, name: tokens[alias_position]))
@@ -549,7 +565,9 @@ pkg_opaque_tokenize: fn(text: String) -> [String] Never! {
             start = -1
         }
         if code == {
-            42 | 40 | 41 | 123 | 125 | 91 | 93 -> tokens.push(pkg_bytes_text(bytes, index, index + 1))
+            42 | 40 | 41 | 123 | 125 | 91 | 93 -> {
+                tokens.push(pkg_bytes_text(bytes, index, index + 1))
+            }
             else -> {}
         }
     }
@@ -594,7 +612,9 @@ pkg_opaque_strip_comments_and_directives: fn(text: String) -> String Never! {
         if {
             code == 47 && next_code == 42 -> {
                 index += 2
-                loop index + 1 < bytes.len() && !(Int{bytes[index]} == 42 && Int{bytes[index + 1]} == 47) -> index += 1
+                loop index + 1 < bytes.len() && !(Int{bytes[index]} == 42 && Int{bytes[index + 1]} == 47) {
+                    index += 1
+                }
                 index = if index + 2 < bytes.len() -> index + 2 else -> bytes.len()
                 kept.push(U8{32})
             }
@@ -629,7 +649,9 @@ pkg_opaque_strip_comments_and_directives: fn(text: String) -> String Never! {
 
 pkg_opaque_without_trailing_cr: fn(line: String) -> String Never! {
     bytes: line.bytes()
-    if bytes.len() > 0 && (Int{bytes[bytes.len() - 1]}) == 13 -> return pkg_bytes_text(bytes, 0, bytes.len() - 1)
+    if bytes.len() > 0 && (Int{bytes[bytes.len() - 1]}) == 13 {
+        return pkg_bytes_text(bytes, 0, bytes.len() - 1)
+    }
     line.copy()
 }
 

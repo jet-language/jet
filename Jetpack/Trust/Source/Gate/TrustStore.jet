@@ -12,7 +12,9 @@ use {
 }
 
 TRUST_HASH_PREFIX: "hash:"
+
 TRUST_PATTERN_PREFIX: "pattern:"
+
 TRUST_GRANT_PREFIX: "grant:"
 
 // The authority a typed grant carries. JetOS fleet/activation authorities
@@ -71,17 +73,13 @@ TrustGrant: struct {
     subject: String
     scope: String
 
-    key: fn(self) -> String Never! {
-        "{self.authority}:{self.subject}"
-    }
+    key: fn(self) -> String Never! { "{self.authority}:{self.subject}" }
 
     line: fn(self) -> String Never! {
         "{TRUST_GRANT_PREFIX}{trust_escape_component(self.scope)}:{trust_escape_component(self.authority)}:{trust_escape_component(self.subject)}"
     }
 
-    is: fn(self, authority: TrustAuthority) -> Bool Never! {
-        self.authority == authority.label()
-    }
+    is: fn(self, authority: TrustAuthority) -> Bool Never! { self.authority == authority.label() }
 }
 
 TrustRecord: enum {
@@ -91,8 +89,12 @@ TrustRecord: enum {
     Raw(line: String)
 
     parse: fn(line: String) -> TrustRecord Never! {
-        if line.starts_with(TRUST_HASH_PREFIX) -> return TrustRecord.Hash{hash: line.removeprefix(TRUST_HASH_PREFIX)}
-        if line.starts_with(TRUST_PATTERN_PREFIX) -> return TrustRecord.Pattern{pattern: line.removeprefix(TRUST_PATTERN_PREFIX)}
+        if line.starts_with(TRUST_HASH_PREFIX) {
+            return TrustRecord.Hash{hash: line.removeprefix(TRUST_HASH_PREFIX)}
+        }
+        if line.starts_with(TRUST_PATTERN_PREFIX) {
+            return TrustRecord.Pattern{pattern: line.removeprefix(TRUST_PATTERN_PREFIX)}
+        }
         if !line.starts_with(TRUST_GRANT_PREFIX) -> return TrustRecord.Raw{line: line.copy()}
         rest: line.removeprefix(TRUST_GRANT_PREFIX)
         scope: trust_text_split_first(rest, TRUST_COLON) ?? return TrustRecord.Raw{line: line.copy()}
@@ -106,8 +108,12 @@ trust_escape_component: fn(text: String) -> String Never! {
     out := [U8]{}
     loop byte in text.bytes() {
         if (Int{byte}) == {
-            37 -> loop escaped in "%25".bytes() -> out.push(escaped)
-            58 -> loop escaped in "%3A".bytes() -> out.push(escaped)
+            37 -> {
+                loop escaped in "%25".bytes() -> out.push(escaped)
+            }
+            58 -> {
+                loop escaped in "%3A".bytes() -> out.push(escaped)
+            }
             TRUST_NEWLINE | TRUST_CARRIAGE_RETURN -> {}
             else -> out.push(byte)
         }
@@ -178,9 +184,7 @@ trust_store_add_line: fn(store: String, line: String) -[FS]> Bool Never! {
 }
 
 // `jetpack config trust list`: every stored line.
-trust_list_entries: fn(store: String) -[FS]> [String] {
-    trust_store_lines(store)
-}
+trust_list_entries: fn(store: String) -[FS]> [String] { trust_store_lines(store) }
 
 // The typed view of the store.
 trust_list_records: fn(store: String) -[FS]> [TrustRecord] {
@@ -236,14 +240,18 @@ trust_is_trusted: fn(store: String, project_dir: String, hash: String) -[FS, Env
         if !line.starts_with(TRUST_PATTERN_PREFIX) -> next
         pattern: line.removeprefix(TRUST_PATTERN_PREFIX)
         path: subject ?? next
-        if trust_matches_pattern(pattern, path) || trust_matches_canonical_pattern(pattern, path) -> return true
+        if trust_matches_pattern(pattern, path) || trust_matches_canonical_pattern(pattern, path) {
+            return true
+        }
     }
     false
 }
 
 // A typed env grant names the project (pattern) or the exact hash.
 trust_grant_matches_project_or_hash: fn(grant: TrustGrant, project_dir: String, hash: String) -[FS, Env]> Bool {
-    if grant.subject == hash || grant.subject == trust_record_line_text(TRUST_HASH_PREFIX, hash) -> return true
+    if grant.subject == hash || grant.subject == trust_record_line_text(TRUST_HASH_PREFIX, hash) {
+        return true
+    }
     path: trust_project_subject(project_dir) ?? return false
     trust_matches_pattern(grant.subject, path) || trust_matches_canonical_pattern(grant.subject, path)
 }
@@ -265,9 +273,7 @@ trust_project_subject: fn(project_dir: String) -[FS, Env]> String? {
 }
 
 // `prefix` followed by `value`.
-trust_record_line_text: fn(prefix: String, value: String) -> String Never! {
-    "{prefix}{value}"
-}
+trust_record_line_text: fn(prefix: String, value: String) -> String Never! { "{prefix}{value}" }
 
 // Glob/prefix match: a trailing `*` is a prefix wildcard, otherwise an exact
 // or component-prefix match.
@@ -287,7 +293,9 @@ trust_matches_canonical_pattern: fn(pattern: String, subject: String) -[FS, Env]
 trust_component_prefix_matches: fn(prefix: String, subject: String) -> Bool Never! {
     if prefix == "" -> return true
     trimmed := prefix.copy()
-    loop trimmed.ends_with("/") || trimmed.ends_with("\\") -> trimmed = trimmed.removesuffix("/").removesuffix("\\")
+    loop trimmed.ends_with("/") || trimmed.ends_with("\\") {
+        trimmed = trimmed.removesuffix("/").removesuffix("\\")
+    }
     if trimmed == "" -> return subject.starts_with("/") || subject.starts_with("\\")
     if subject == trimmed -> return true
     if !subject.starts_with(trimmed) -> return false

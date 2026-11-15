@@ -1,14 +1,14 @@
-
-Window: struct { values: View<Int> }
+Window: struct {
+    values: View<Int>
+}
 
 window: fn(values: [Int]) -[]> Window {
     selected: values[0..1]
-    return Window{ values: selected }
+    return Window{values: selected}
 }
 
 run: fn() {
     handle: task window([7, 8])
-    print((handle.join() ?? Window{ values: [] }).values[0])
+    print((handle.join() ?? Window{values: []}).values[0])
 }
-
 // Known failing: JetSema does not check this ownership rule yet; this variant retains its original contract, not a skip.

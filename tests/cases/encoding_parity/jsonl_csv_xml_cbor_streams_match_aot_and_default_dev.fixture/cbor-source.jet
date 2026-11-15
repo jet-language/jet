@@ -1,10 +1,8 @@
-
 use {
     encoding: core.encoding
     fmt: core.encoding.cbor
     files: core.files
 }
-
 
 run: fn() {
     path := "{work}/packet.cbor"
@@ -25,15 +23,16 @@ run: fn() {
     reader := fmt.reader(input) ?? panic("reader")
     first: reader.next()
     if first == {
-        .Val(_) -> print(true)
+        .Val(_) -> { print(true) }
         .None -> print(false)
     }
-    whole := Dyn.Object([
-        "aa": Dyn.Int(1),
-        "b": Dyn.Int(2),
-        "f": Dyn.Float(1.5),
-        "z": Dyn.Float(-0.0),
-    ])
+    whole := Dyn.Object(
+        [
+            "aa": Dyn.Int(1),
+            "b": Dyn.Int(2),
+            "f": Dyn.Float(1.5),
+            "z": Dyn.Float(-0.0),
+        ],
+    )
     print((fmt.to_bytes_canonical(whole) ?? panic("whole")) == (files.read_bytes(path) ?? panic("bytes")))
 }
-

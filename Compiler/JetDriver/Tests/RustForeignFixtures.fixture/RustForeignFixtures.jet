@@ -3,12 +3,15 @@ use {
     jet_driver.[JetDriverRustForeignEntry, JetDriverRustForeignFacts, JetDriverRustForeignFunction, JetDriverRustForeignParam, jet_driver_rust_foreign_plan, JET_DRIVER_RUST_FOREIGN_TARGET]
     jet_foundation.[AccessConvention, Type, module_none]
 }
+
 rust_foreign_fixture_function: fn(name: String, path: String) -> JetDriverRustForeignFunction Never! {
     JetDriverRustForeignFunction{name: name, params: [JetDriverRustForeignParam]{JetDriverRustForeignParam{convention: AccessConvention.Read, name: "s", ty: Type.String}}, return_type: Val(Type.String), rust_path: path, generated: false, close: None}
 }
+
 rust_foreign_fixture_scalar: fn(name: String, ty: Type) -> JetDriverRustForeignEntry Never! {
     JetDriverRustForeignEntry{module_identity: module_none(), crate_spec: "std", declaration: JetDriverRustForeignFunction{name: name, params: [JetDriverRustForeignParam]{JetDriverRustForeignParam{convention: AccessConvention.Read, name: "value", ty: ty}}, return_type: Val(ty), rust_path: "std::convert::identity", generated: false, close: None}}
 }
+
 rust_foreign_fixture_facts: fn(name: String) -> JetDriverRustForeignFacts Never! {
     entries := [JetDriverRustForeignEntry]{JetDriverRustForeignEntry{module_identity: module_none(), crate_spec: "base64@0.22", declaration: rust_foreign_fixture_function(name, "base64::encode")}}
     entries.push(rust_foreign_fixture_scalar("identity_bool", Type.Bool))
@@ -21,6 +24,7 @@ rust_foreign_fixture_facts: fn(name: String) -> JetDriverRustForeignFacts Never!
     entries.push(JetDriverRustForeignEntry{module_identity: module_none(), crate_spec: "std", declaration: JetDriverRustForeignFunction{name: "panic_foreign", params: [JetDriverRustForeignParam]{JetDriverRustForeignParam{convention: AccessConvention.Read, name: "message", ty: Type.String}}, return_type: None, rust_path: "std::panic::panic_any", generated: false, close: None}})
     JetDriverRustForeignFacts{entries: entries, record_source: "", record_names: [String:String]{}}
 }
+
 run: fn() {
     facts: rust_foreign_fixture_facts("b64encode")
     plan: jet_driver_rust_foreign_plan(facts, "rustc\nfixture-toolchain", JET_DRIVER_RUST_FOREIGN_TARGET, "direct=;transitive=") ?? panic("helper plan: {err}")

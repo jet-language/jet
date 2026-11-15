@@ -102,9 +102,7 @@ advisory_lock: fn() {
     _released: other.lock()
 }
 
-scoped_lock: fn(directory: files.Directory) {
-    _lock: directory.lock()
-}
+scoped_lock: fn(directory: files.Directory) { _lock: directory.lock() }
 
 entry_names: fn() {
     scratch: files.temp_dir("descriptor-names")
@@ -131,7 +129,18 @@ run: fn() {
     print("directory listing preserves Unicode raw bytes: true")
 }
 
-#Test("descriptor read/write/fsync/stat/set_mode") { byte_io() }
-#Test("held atomic publication, identity and no-follow removal") { publication() }
-#Test("directory flock ownership across rename and close") { advisory_lock() }
-#Test("Directory.list raw basename and fresh listing") { entry_names() }
+#Test("descriptor read/write/fsync/stat/set_mode") {
+    byte_io()
+}
+
+#Test("held atomic publication, identity and no-follow removal") {
+    publication()
+}
+
+#Test("directory flock ownership across rename and close") {
+    advisory_lock()
+}
+
+#Test("Directory.list raw basename and fresh listing") {
+    entry_names()
+}

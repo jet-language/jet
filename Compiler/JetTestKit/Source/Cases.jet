@@ -28,7 +28,9 @@ kit_cases_retired: fn(root: String) -> [String] {
         if line == "" || line.starts_with("#") -> next
         fields: line.split("\t").to_list()
         assert(fields.len() == 2 && fields[1] != "", "retired case rows need an exact ID and reason")
-        if fields[0].starts_with("tests/cases/") && fields[1].starts_with("Retired with Rust:") -> retired.push(fields[0])
+        if fields[0].starts_with("tests/cases/") && fields[1].starts_with("Retired with Rust:") {
+            retired.push(fields[0])
+        }
     }
     retired
 }
@@ -49,8 +51,12 @@ kit_cases_run: fn(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
     source: files.read(files.join(context.root, entry.path)) ?? return [KitOutcome{verdict: kit_expect_verdict("ERROR", "read case: {err}"), run: kit_exec_failed("{err}")}]
     plan: kit_steps_parse_case(source)
     exact_id: context.options.cases != "" || context.options.filter == entry.path || kit_expect_named(context.options.bless.ids, entry.path)
-    if plan.error == "" && plan.opt_in != "" && !context.options.opt_in && !exact_id -> return [KitOutcome{verdict: kit_expect_verdict("OPT-IN", plan.opt_in), run: kit_steps_action_run()}]
-    if plan.error == "" && plan.repo_cwd != "" -> return [KitOutcome{verdict: kit_expect_verdict("REFUSED", "repo-cwd is golden-only; a case runs in its own work directory"), run: kit_exec_failed("repo-cwd is golden-only")}]
+    if plan.error == "" && plan.opt_in != "" && !context.options.opt_in && !exact_id {
+        return [KitOutcome{verdict: kit_expect_verdict("OPT-IN", plan.opt_in), run: kit_steps_action_run()}]
+    }
+    if plan.error == "" && plan.repo_cwd != "" {
+        return [KitOutcome{verdict: kit_expect_verdict("REFUSED", "repo-cwd is golden-only; a case runs in its own work directory"), run: kit_exec_failed("repo-cwd is golden-only")}]
+    }
     work: files.join(context.scratch, "work")
     files.create_dir_all(work) ?? return [KitOutcome{verdict: kit_expect_verdict("ERROR", "case work: {err}"), run: kit_exec_failed("{err}")}]
     // Steps owns the single grammar, host requirements, fixture state staging,
@@ -59,8 +65,15 @@ kit_cases_run: fn(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
     annotation: kit_cases_known_failure(entry, context.known, source)
     env := context.env
     if annotation != "" -> env.answer_limit = KIT_KNOWN_ANSWER_LIMIT
-    steps: kit_steps_context(plan, entry.path, env, work, context.scratch,
-        files.join(context.root, entry.project), context.bless)
+    steps: kit_steps_context(
+        plan,
+        entry.path,
+        env,
+        work,
+        context.scratch,
+        files.join(context.root, entry.project),
+        context.bless,
+    )
     [kit_cases_known_verdict(kit_steps_execute(steps, kit_steps_hooks()), annotation)]
 }
 
@@ -76,11 +89,13 @@ KIT_KNOWN_ANSWER_LIMIT: 3000000000
 // Header ownership wins over the central ledger for the same case. Besides FAIL,
 // an annotation owns a crashed process (ICE exit 101 or a signal), keeping its
 // ERROR detail. Other ERRORs and TIMEOUT are never owned.
-kit_cases_known_failure: fn(entry: KitEntry, known: [String: String], source: String) -> String {
+kit_cases_known_failure: fn(entry: KitEntry, known: [String:String], source: String) -> String {
     prefix: "# KNOWN-FAILING "
     loop raw in source.split("\n") {
         line: raw.trim().copy()
-        if line.starts_with(prefix) -> return kit_steps_byte_slice(line, prefix.count_bytes(), line.count_bytes()).trim()
+        if line.starts_with(prefix) {
+            return kit_steps_byte_slice(line, prefix.count_bytes(), line.count_bytes()).trim()
+        }
     }
     kit_known_ledger(known, entry.path)
 }
@@ -88,8 +103,8 @@ kit_cases_known_failure: fn(entry: KitEntry, known: [String: String], source: St
 // The accepted-failing ledger at `path` (the profile's `baseline`; "" is
 // none), read once per run: each row ID maps to "<card> <reason>". The first
 // row for an ID wins.
-kit_known_load: fn(path: String) -> [String: String] {
-    known := [String: String]{}
+kit_known_load: fn(path: String) -> [String:String] {
+    known := [String:String]{}
     if path == "" -> return known
     ledger: kit_exec_optional(path) ?? return known
     loop raw in ledger.split("\n") {
@@ -104,7 +119,7 @@ kit_known_load: fn(path: String) -> [String: String] {
 
 // The ledger row owning one corpus entry: a row ID names the entry path itself,
 // a file entry without `.jet`, or a project entry's directory.
-kit_known_ledger: fn(known: [String: String], path: String) -> String {
+kit_known_ledger: fn(known: [String:String], path: String) -> String {
     exact: known.get(path) ?? ""
     if exact != "" || !path.ends_with(".jet") -> return exact
     project: if path.ends_with("/run.jet") -> known.get(kit_steps_byte_slice(path, 0, path.count_bytes() - 8)) ?? "" else -> ""

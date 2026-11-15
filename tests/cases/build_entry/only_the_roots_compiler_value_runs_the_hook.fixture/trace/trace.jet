@@ -12,10 +12,13 @@ install: fn(meta: Compiler) {
         watch: .Functions{marked: Traced{}},
         fn(event) {
             if event == .Checked(.Function(f)) {
-                meta.rewrite_body(f, #code {
-                    print("hooked")
-                    #{f.body}
-                })
+                meta.rewrite_body(
+                    f,
+                    #code {
+                        print("hooked")
+                        #{f.body}
+                    },
+                )
             }
         },
     )

@@ -6,6 +6,7 @@ use {
     base64: core.encoding.base64
     base32: core.encoding.base32
 }
+
 verify: fn(root: String) -> Int {
     manifest: files.read(files.join(root, "MANIFEST.tsv")) ?? panic("manifest missing")
     count := 0
@@ -21,6 +22,7 @@ verify: fn(root: String) -> Int {
     }
     return count
 }
+
 run: fn() {
     root: sys.get("JET_ENCODING_ROOT") ?? panic("root required")
     verify(files.join(root, "local/cbor-hostile"))

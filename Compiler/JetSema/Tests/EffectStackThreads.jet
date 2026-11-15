@@ -4,10 +4,21 @@
 // checked program is the same on one thread and on eight.
 use {
     jet_sema.[
-        SemaBuildFacts, SemaComptimeFunctionResult, SemaComptimeItemValue, SemaForeignProviderInput,
-        SemaRegistrationForeignHandleFacts, SemaRegistrationHostHooks, SemaRegistrationImportEdge,
-        SemaRegistrationModuleInput, SemaRegistrationPackagePolicy, SemaSourceOrigin, SemaSourceSegment,
-        sema_collect_comptime_declarations, sema_finalize_registration_graph, sema_has_error_since, sema_registration_prepare_graph,
+        SemaBuildFacts,
+        SemaComptimeFunctionResult,
+        SemaComptimeItemValue,
+        SemaForeignProviderInput,
+        SemaRegistrationForeignHandleFacts,
+        SemaRegistrationHostHooks,
+        SemaRegistrationImportEdge,
+        SemaRegistrationModuleInput,
+        SemaRegistrationPackagePolicy,
+        SemaSourceOrigin,
+        SemaSourceSegment,
+        sema_collect_comptime_declarations,
+        sema_finalize_registration_graph,
+        sema_has_error_since,
+        sema_registration_prepare_graph,
     ]
     jet_parser.[parse_source]
     jet_driver.[jet_driver_canonical_effect_module]
@@ -89,9 +100,15 @@ effect_stack_threads_rows: fn(source: String, threads: CompilerThreads, failures
     source: effect_stack_threads_source(120)
     single: effect_stack_threads_rows(source, compiler_threads_single(), failures)
     eight: effect_stack_threads_rows(source, CompilerThreads{cap: Val(8), cores: 8, memory_available: None}, failures)
-    if single.len() != eight.len() -> failures.push("one thread checked {single.len()} rows, eight threads {eight.len()}")
-    loop (row, text) in single {
-        if row < eight.len() && eight[row] != text -> failures.push("row {row}: one thread {text}, eight threads {eight[row]}")
+    if single.len() != eight.len() {
+        failures.push("one thread checked {single.len()} rows, eight threads {eight.len()}")
     }
-    if failures.len() > 0 -> panic("EffectStackThreads collected {failures.len()} failures:\n{failures.join("\n")}")
+    loop (row, text) in single {
+        if row < eight.len() && eight[row] != text {
+            failures.push("row {row}: one thread {text}, eight threads {eight[row]}")
+        }
+    }
+    if failures.len() > 0 {
+        panic("EffectStackThreads collected {failures.len()} failures:\n{failures.join("\n")}")
+    }
 }

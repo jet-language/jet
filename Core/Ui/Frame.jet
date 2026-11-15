@@ -4,6 +4,7 @@ use {
     font: core.ui.font
     core.ui.[UIRect]
 }
+
 // __core_ui_frame — the window frame Jet draws for itself (client-side
 // decorations), a private part of core.ui.
 //
@@ -33,13 +34,18 @@ use {
 // The measures, in logical units. The window's corners are squircles
 // (superellipses of degree 4) RADIUS across.
 HEADER: 34
+
 RADIUS: 10
+
 // Room for the shadow on each side of the window.
 MARGIN: 64
+
 // How far outside the window's edge the pointer still grips it to resize,
 // and how near a corner an edge grip resizes both ways.
 GRIP: 8
+
 CORNER_GRIP: 20
+
 // The buttons' soft squares under the pointer. The close square is
 // BUTTON_INSET in from the header's top and from the window's right edge,
 // so it is centered down the header (8 + 18 + 8 = 34); each next one is a
@@ -47,44 +53,62 @@ CORNER_GRIP: 20
 // the header high, side by side from the window's edge: 28 x 34 units,
 // each holding its square.
 BUTTON_SIDE: 18
+
 BUTTON_INSET: 8
+
 BUTTON_STEP: 28
+
 // For a finger (`look.coarse`) the buttons spread out: each hit region is
 // a step wide and the header high, 46 x 34 units.
 BUTTON_STEP_COARSE: 46
+
 // The button glyphs: each fits a box this many units across, drawn with a
 // one-unit stroke.
 GLYPH: 10
+
 // The title's room starts this far in from the left edge, and ends this
 // far before the minimize button's square.
 TITLE_INSET: 10
+
 TITLE_GAP: 8
+
 // The keyboard focus ring: a square line this wide, this far outside the
 // focused button's square.
 FOCUS_GAP: 2
+
 FOCUS_LINE: Float{1.5}
+
 // The title's size, in the regular face.
 TITLE_SIZE: Float{13.0}
+
 // `button_index` of no button.
 NO_BUTTON: -1
+
 // The smallest window: room for a title and the spread-out buttons across,
 // and the shadow kit's box down.
 MIN_WIDTH: 176
+
 MIN_HEIGHT: 56
+
 // Two presses on the title this close together, in milliseconds, toggle
 // maximizing.
 DOUBLE_CLICK_MS: 400
+
 // The shadow kit's window, in logical units: just big enough that every
 // side has a straight run past its corners (2 * RADIUS + 2 wide, and the
 // longest shadow drop, 12, on each side of that tall).
 KIT_BOX_WIDTH: 26
+
 KIT_BOX_HEIGHT: 50
 
 // xdg_toplevel's resize edges, which these bits make: top 1, bottom 2,
 // left 4, right 8, and their sums for the corners.
 EDGE_TOP: 1
+
 EDGE_BOTTOM: 2
+
 EDGE_LEFT: 4
+
 EDGE_RIGHT: 8
 
 // The colors of one theme, 0xAARRGGBB with straight alpha.
@@ -113,9 +137,18 @@ Palette: struct {
 // for the close button under it, and a light focus ring.
 dark_palette: fn() -> Palette {
     Palette{
-        header_active: 0xFF0B0B0D, header_inactive: 0xFF0B0B0D, text_active: 0xFF9A9AA4, text_inactive: 0xFF80808A,
-        glyph_hover: 0xFFECECF0, outline: 0xFF1E1E22, button_idle: 0x00000000, button_hover: 0xFF1D1D21, button_press: 0xFF27272C,
-        close_hover: 0xFFE8232A, close_press: 0xFFE8232A, focus: 0xFFECECF0,
+        header_active: 0xFF0B0B0D,
+        header_inactive: 0xFF0B0B0D,
+        text_active: 0xFF9A9AA4,
+        text_inactive: 0xFF80808A,
+        glyph_hover: 0xFFECECF0,
+        outline: 0xFF1E1E22,
+        button_idle: 0x00000000,
+        button_hover: 0xFF1D1D21,
+        button_press: 0xFF27272C,
+        close_hover: 0xFFE8232A,
+        close_press: 0xFFE8232A,
+        focus: 0xFFECECF0,
     }
 }
 
@@ -123,17 +156,29 @@ dark_palette: fn() -> Palette {
 // on a pale header, with a dark focus ring and Jet red only for close.
 light_palette: fn() -> Palette {
     Palette{
-        header_active: 0xFFF4F4F6, header_inactive: 0xFFF4F4F6, text_active: 0xFF5A5A63, text_inactive: 0xFF66666F,
-        glyph_hover: 0xFF1C1C21, outline: 0xFFD6D6DC, button_idle: 0x00000000, button_hover: 0xFFE8E8EC, button_press: 0xFFDEDEE3,
-        close_hover: 0xFFE8232A, close_press: 0xFFE8232A, focus: 0xFF1C1C21,
+        header_active: 0xFFF4F4F6,
+        header_inactive: 0xFFF4F4F6,
+        text_active: 0xFF5A5A63,
+        text_inactive: 0xFF66666F,
+        glyph_hover: 0xFF1C1C21,
+        outline: 0xFFD6D6DC,
+        button_idle: 0x00000000,
+        button_hover: 0xFFE8E8EC,
+        button_press: 0xFFDEDEE3,
+        close_hover: 0xFFE8232A,
+        close_press: 0xFFE8232A,
+        focus: 0xFF1C1C21,
     }
 }
 
 palette: fn(look: FrameLook) -> Palette { if look.dark -> dark_palette() else -> light_palette() }
 
 SHADOW_ACTIVE: 0x59000000
+
 SHADOW_INACTIVE: 0x2E000000
+
 SHADOW_NEAR: 0x24000000
+
 WHITE: 0xFFFFFFFF
 
 // A title-bar button.
@@ -204,9 +249,7 @@ Painter: struct {
     kits: [Kit]
 }
 
-painter: fn() -> Painter {
-    Painter{face: font.regular(), cache: font.cache(), kits: [Kit]{}}
-}
+painter: fn() -> Painter { Painter{face: font.regular(), cache: font.cache(), kits: [Kit]{}} }
 
 // `logical` units in pixels at `scale120`, rounded half away from zero as
 // wp_fractional_scale_v1 asks.
@@ -225,7 +268,9 @@ spot: fn(x: Float, y: Float, width: Int, height: Int, look: FrameLook) -> FrameS
     h: Float{height}
     if x < 0.0 || y < 0.0 || x >= w || y >= h {
         grip: Float{GRIP}
-        if look.square || x < -grip || y < -grip || x >= w + grip || y >= h + grip -> return FrameSpot.Outside
+        if look.square || x < -grip || y < -grip || x >= w + grip || y >= h + grip {
+            return FrameSpot.Outside
+        }
         corner: Float{CORNER_GRIP}
         edge := 0
         if x < 0.0 -> edge += EDGE_LEFT else if x >= w -> edge += EDGE_RIGHT
@@ -328,13 +373,13 @@ title_left: fn(window: Float, start: Float, end: Float, advance: Float) -> Float
 
 // Which of `p.kits` is the kit for `look.active` at `scale120`, made once
 // and kept: the four latest stay.
-kit: fn(&p: Painter, look: FrameLook, scale120: Int) -> Int {
+kit: fn(p: &Painter, look: FrameLook, scale120: Int) -> Int {
     loop at in 0..<p.kits.len() {
-        if p.kits[at].active == look.active && p.kits[at].dark == look.dark && p.kits[at].scale120 == scale120 -> return at
+        if p.kits[at].active == look.active && p.kits[at].dark == look.dark && p.kits[at].scale120 == scale120 {
+            return at
+        }
     }
-    if p.kits.len() >= 4 {
-        _: p.kits.remove(0, .Slot)
-    }
+    if p.kits.len() >= 4 -> _: p.kits.remove(0, .Slot)
     p.kits.push(draw_kit(look, scale120))
     p.kits.len() - 1
 }
@@ -430,7 +475,7 @@ bottom_left_cover: fn(scale120: Int) -> [U8] {
 // ---- the header --------------------------------------------------------
 
 // The header of a `width`-pixel-wide window: `width` x px(HEADER) pixels.
-header: fn(&p: Painter, look: FrameLook, width: Int, scale120: Int) -> [U8] {
+header: fn(p: &Painter, look: FrameLook, width: Int, scale120: Int) -> [U8] {
     s: Float{scale120} / 120.0
     height: px(HEADER, scale120)
     colors: palette(look)
@@ -496,22 +541,28 @@ header: fn(&p: Painter, look: FrameLook, width: Int, scale120: Int) -> [U8] {
             fill = if held -> colors.close_press else -> colors.close_hover
             glyph = WHITE
         }
-        if alpha_of(fill) > 0 -> paint(pixels, width, height, box_mask(x0, y0, x1, y1, round, round, 0.0), fill)
+        if alpha_of(fill) > 0 {
+            paint(pixels, width, height, box_mask(x0, y0, x1, y1, round, round, 0.0), fill)
+        }
         button_glyph(pixels, width, height, look, which, square, scale120, glyph)
         out: (Float{FOCUS_GAP} + FOCUS_LINE) * s
-        if look.focus == which -> paint(pixels, width, height, box_mask(x0 - out, y0 - out, x1 + out, y1 + out, round + s * 2.0, round + s * 2.0, FOCUS_LINE * s), ring)
+        if look.focus == which {
+            paint(pixels, width, height, box_mask(x0 - out, y0 - out, x1 + out, y1 + out, round + s * 2.0, round + s * 2.0, FOCUS_LINE * s), ring)
+        }
     }
     pixels
 }
 
 // `title`'s width at `size` pixels.
-title_width: fn(face: font.Face, title: String, size: Float) -> Float { face.layout(title, size).advance }
+title_width: fn(face: font.Face, title: String, size: Float) -> Float {
+    face.layout(title, size).advance
+}
 
 // `title` to fit `room` pixels at `size` pixels: whole
 // if it fits, else cut at a grapheme boundary, at a word's end when one
 // fits, and ended with an ellipsis; empty when not even the ellipsis fits.
 // Combining sequences stay whole, and the text keeps its logical order.
-fit_title: fn(&p: Painter, title: String, size: Float, room: Float) -> String {
+fit_title: fn(p: &Painter, title: String, size: Float, room: Float) -> String {
     if title_width(p.face, title, size) <= room -> return title.copy()
     if title_width(p.face, "…", size) > room -> return ""
     parts: text.graphemes(title)
@@ -524,11 +575,7 @@ fit_title: fn(&p: Painter, title: String, size: Float, room: Float) -> String {
     high := parts.len()
     loop low < high {
         mid: (low + high + 1) /% 2
-        if title_width(p.face, "{prefixes[mid]}…", size) <= room {
-            low = mid
-        } else {
-            high = mid - 1
-        }
+        if title_width(p.face, "{prefixes[mid]}…", size) <= room -> low = mid else -> high = mid - 1
     }
     // Back to the last word's end inside that, if there is one.
     cut := low
@@ -564,12 +611,14 @@ glyph_stroke: fn(scale120: Int) -> Int { max_int(px(1, scale120), 1) }
 // so the X is drawn 0.15 pixels thinner: then all three carry one stroke's
 // ink per pixel of their length, to a few percent (the last test measures
 // it).
-button_glyph: fn(&pixels: [U8], width: Int, height: Int, look: FrameLook, which: FrameButton, square: UIRect, scale120: Int, color: Int) {
+button_glyph: fn(pixels: &[U8], width: Int, height: Int, look: FrameLook, which: FrameButton, square: UIRect, scale120: Int, color: Int) {
     g: glyph_side(square.width, scale120)
     w: glyph_stroke(scale120)
     x0: square.x + (square.width - g) /% 2
     y0: square.y + (square.height - g) /% 2
-    if which == .Minimize -> paint(pixels, width, height, rect_mask(x0, square.y + (square.height - w) /% 2, g, w), color)
+    if which == .Minimize {
+        paint(pixels, width, height, rect_mask(x0, square.y + (square.height - w) /% 2, g, w), color)
+    }
     if which == .Maximize {
         if look.maximized {
             // Restore: a square with another behind it, up and right by d.
@@ -579,9 +628,7 @@ button_glyph: fn(&pixels: [U8], width: Int, height: Int, look: FrameLook, which:
             paint(pixels, width, height, rect_mask(x0 + g - w, y0, w, g - d), color)
             paint(pixels, width, height, rect_mask(x0 + d, y0, w, d), color)
             paint(pixels, width, height, rect_mask(x0 + g - d, y0 + g - d - w, d, w), color)
-        } else {
-            box_lines(pixels, width, height, x0, y0, g, w, color)
-        }
+        } else { box_lines(pixels, width, height, x0, y0, g, w, color) }
     }
     if which == .Close {
         line: Float{w} - 0.15
@@ -597,7 +644,7 @@ button_glyph: fn(&pixels: [U8], width: Int, height: Int, look: FrameLook, which:
 
 // The outline of the `side`-pixel square at pixel (x, y), `line` pixels
 // wide inside it.
-box_lines: fn(&pixels: [U8], width: Int, height: Int, x: Int, y: Int, side: Int, line: Int, color: Int) {
+box_lines: fn(pixels: &[U8], width: Int, height: Int, x: Int, y: Int, side: Int, line: Int, color: Int) {
     paint(pixels, width, height, rect_mask(x, y, side, line), color)
     paint(pixels, width, height, rect_mask(x, y + side - line, side, line), color)
     paint(pixels, width, height, rect_mask(x, y + line, line, side - 2 * line), color)
@@ -614,7 +661,7 @@ transparent: fn(count: Int) -> [U8] {
 }
 
 // Paints `mask` in `color` onto the `width` x `height` pixels.
-paint: fn(&pixels: [U8], width: Int, height: Int, mask: font.GlyphMask, color: Int) {
+paint: fn(pixels: &[U8], width: Int, height: Int, mask: font.GlyphMask, color: Int) {
     font.blend(pixels, width, height, width * 4, mask, 0, 0, color, UIRect{x: 0, y: 0, width: width, height: height})
 }
 
@@ -854,14 +901,23 @@ app_icon: fn(side: Int) -> [U8] {
 // ---- numbers and colors ------------------------------------------------
 
 fmin: fn(a: Float, b: Float) -> Float { if a < b -> a else -> b }
+
 fmax: fn(a: Float, b: Float) -> Float { if a > b -> a else -> b }
+
 fabs: fn(a: Float) -> Float { if a < 0.0 -> -a else -> a }
+
 clamp01: fn(a: Float) -> Float { fmax(0.0, fmin(1.0, a)) }
+
 floor_int: fn(a: Float) -> Int { Int{math.floor(a)} }
+
 ceil_int: fn(a: Float) -> Int { Int{math.ceil(a)} }
+
 min_int: fn(a: Int, b: Int) -> Int { if a < b -> a else -> b }
+
 max_int: fn(a: Int, b: Int) -> Int { if a > b -> a else -> b }
+
 alpha_of: fn(color: Int) -> Int { (color >> 24).bit_and(255) }
+
 with_alpha: fn(color: Int, alpha: Int) -> Int { color.bit_and(16777215) + (alpha << 24) }
 
 // `top` (0xAARRGGBB, straight alpha) laid over the opaque `bottom`, in
@@ -961,6 +1017,7 @@ ink_cover: fn(bar: [U8], width: Int, area: UIRect, base: Int, ink: Int) -> Float
 
 // Twice a box's center, so a half pixel is a whole step.
 twice_center_x: fn(r: UIRect) -> Int { 2 * r.x + r.width }
+
 twice_center_y: fn(r: UIRect) -> Int { 2 * r.y + r.height }
 
 within_half: fn(a: Int, b: Int) -> Bool { a - b <= 1 && b - a <= 1 }

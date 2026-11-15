@@ -52,14 +52,14 @@ SemaModuleMetaSource: struct {
 }
 
 // The file-level alias the generated records name core.meta through.
-sema_module_meta_alias: fn() -> String Never! {
-    sema_inline_generated_path("meta.core.meta")
-}
+sema_module_meta_alias: fn() -> String Never! { sema_inline_generated_path("meta.core.meta") }
 
 // Whether `declaration` is the core.meta import the lowering adds;
 // registration binds it to the loaded core.meta module.
 sema_module_meta_import: fn(declaration: ImportDecl) -> Bool Never! {
-    if declaration.kind == .Module(name, _) -> return name == "core.meta" && declaration.alias == sema_module_meta_alias()
+    if declaration.kind == .Module(name, _) {
+        return name == "core.meta" && declaration.alias == sema_module_meta_alias()
+    }
     false
 }
 
@@ -80,7 +80,9 @@ sema_module_meta_wanted: fn(items: [Item], declared_module: String) -> Bool Neve
 // leading run of a module body is field lines.
 sema_module_meta_field_line: fn(item: Item) -> Bool Never! {
     if item == .Const(constant) {
-        if constant.mutable || constant.is_comptime || constant.is_persist || constant.name == "" -> return false
+        if constant.mutable || constant.is_comptime || constant.is_persist || constant.name == "" {
+            return false
+        }
         if constant.ty == .Val(.Named(type_name)) {
             if type_name == "__OutputDefaults" -> return false
         }
@@ -118,7 +120,9 @@ sema_module_meta_doc_line: fn(line: String) -> String? Never! {
     trimmed: line.trim()
     if !trimmed.starts_with(DOC_COMMENT_PREFIX) -> return None
     rest: String.from_bytes(trimmed.bytes()[DOC_COMMENT_PREFIX.bytes().len()..<trimmed.bytes().len()]) ?? ""
-    if rest.starts_with(" ") -> return Val(String.from_bytes(rest.bytes()[1..<rest.bytes().len()]) ?? "")
+    if rest.starts_with(" ") {
+        return Val(String.from_bytes(rest.bytes()[1..<rest.bytes().len()]) ?? "")
+    }
     Val(rest)
 }
 
@@ -166,8 +170,12 @@ sema_module_meta_package: fn(package: SemaModulePackage, span: Span) -> Expr Nev
         sema_module_meta_field("name", sema_module_meta_text(package.name, span), span),
         sema_module_meta_field("version", sema_module_meta_text(package.version, span), span),
     }
-    if package.edition == .Val(edition) -> fields.push(sema_module_meta_field("edition", sema_module_meta_text(edition, span), span))
-    if package.log == .Val(log) -> fields.push(sema_module_meta_field("log", sema_module_meta_text(log, span), span))
+    if package.edition == .Val(edition) {
+        fields.push(sema_module_meta_field("edition", sema_module_meta_text(edition, span), span))
+    }
+    if package.log == .Val(log) {
+        fields.push(sema_module_meta_field("log", sema_module_meta_text(log, span), span))
+    }
     Expr.StructLit{type_name: "{sema_module_meta_alias()}.Package", type_args: [Type]{}, import_ns: None, as_trait: None, fields: fields, inferred: false, span: span, id: AST_NODE_GENERATED}
 }
 
@@ -235,7 +243,9 @@ sema_module_meta_leaf: fn(declared_module: String) -> String Never! {
 // sema_module_meta_lower gives them. Only then does the compile need
 // core.meta.
 sema_module_meta_carries: fn(items: [Item], declared_module: String, reads: [String:Bool]) -> Bool Never! {
-    if declared_module != "" && sema_module_meta_has_record(items, sema_module_meta_leaf(declared_module), reads) -> return true
+    if declared_module != "" && sema_module_meta_has_record(items, sema_module_meta_leaf(declared_module), reads) {
+        return true
+    }
     loop item in items {
         if item == .CodeModule(definition) {
             if sema_module_meta_tree_has_record(definition, reads) -> return true
@@ -255,7 +265,9 @@ sema_module_meta_inline: fn(items: &[Item], meta_source: SemaModuleMetaSource, b
             if !sema_module_meta_tree_has_record(definition, meta_source.reads) -> next
             body := definition.body ?? next
             _ := sema_module_meta_inline(body, meta_source, bytes, diagnostics)
-            if sema_module_meta_has_record(body, definition.name, meta_source.reads) -> sema_module_meta_record(body, definition.name, sema_module_meta_doc_above(bytes, definition.span.start), meta_source, definition.name_span, diagnostics)
+            if sema_module_meta_has_record(body, definition.name, meta_source.reads) {
+                sema_module_meta_record(body, definition.name, sema_module_meta_doc_above(bytes, definition.span.start), meta_source, definition.name_span, diagnostics)
+            }
             // copy: the module is rebuilt around its lowered body.
             module_item := definition.copy()
             module_item.body = Val(body.move())
@@ -271,7 +283,9 @@ sema_module_meta_inline: fn(items: &[Item], meta_source: SemaModuleMetaSource, b
 // file's own when it is a file module, and each inline module body's.
 // `text` is the module's source text; the caller passes no Core source.
 sema_module_meta_lower: fn(program: &Program, declared_module: String, meta_source: SemaModuleMetaSource, text: String, diagnostics: &[Diagnostic]) {
-    if !sema_module_meta_wanted(program.items, declared_module) -> return
+    if !sema_module_meta_wanted(program.items, declared_module) {
+        return
+    }
     added := sema_module_meta_inline(program.items, meta_source, text.bytes(), diagnostics)
     span: Span{start: 0, end: 0}
     if declared_module != "" {
@@ -280,7 +294,9 @@ sema_module_meta_lower: fn(program: &Program, declared_module: String, meta_sour
             added = true
         }
     }
-    if !added -> return
+    if !added {
+        return
+    }
     program.imports.push(ImportDecl{kind: ImportKind.Module{name: "core.meta", span: span}, alias: sema_module_meta_alias(), alias_span: span, span: span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None})
 }
 
@@ -325,7 +341,9 @@ sema_module_meta_value_at: fn(bytes: [U8], end: Int) -> Bool Never! {
     if following == 58 || following == 40 -> return false
     if following != 46 -> return true
     member_end := at + 1
-    loop member_end < bytes.len() && sema_module_meta_word_byte(Int{bytes[member_end]}) -> member_end += 1
+    loop member_end < bytes.len() && sema_module_meta_word_byte(Int{bytes[member_end]}) {
+        member_end += 1
+    }
     member: String.from_bytes(bytes[at + 1..<member_end]) ?? return false
     if !sema_module_meta_compiler_field(member) -> return false
     after := member_end
@@ -368,13 +386,17 @@ sema_module_meta_mark_reads: fn(inputs: &[SemaRegistrationModuleInput]) {
         if module_is_core(input.module_identity) -> next
         sema_module_meta_declared_names(input.program.items, input.declared_module, names)
     }
-    if names.len() == 0 -> return
+    if names.len() == 0 {
+        return
+    }
     reads := [String:Bool]{}
     loop input in inputs {
         if module_is_core(input.module_identity) -> next
         sema_module_meta_value_reads(input.source, names, reads)
     }
-    if reads.len() == 0 -> return
+    if reads.len() == 0 {
+        return
+    }
     loop index in 0..<inputs.len() {
         if !module_is_core(inputs[index].module_identity) -> inputs[index].meta.reads = reads.copy()
     }

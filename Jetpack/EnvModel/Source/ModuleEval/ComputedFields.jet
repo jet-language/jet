@@ -3,9 +3,22 @@
 // in dependency order with recorded provenance.
 use {
     jet_foundation.[
-        CtEnumArg, CtKey, CtMapEntry, CtValue, Expr, ExprField, Func, NamedCtValue, Span, Type,
-        ast_comptime_key_compare, ast_comptime_key_from_value, comptime_walk_calls,
-        comptime_walk_identifiers, expr_span, type_name,
+        CtEnumArg,
+        CtKey,
+        CtMapEntry,
+        CtValue,
+        Expr,
+        ExprField,
+        Func,
+        NamedCtValue,
+        Span,
+        Type,
+        ast_comptime_key_compare,
+        ast_comptime_key_from_value,
+        comptime_walk_calls,
+        comptime_walk_identifiers,
+        expr_span,
+        type_name,
     ]
     jet_pkg_model.[pkg_bytes_text]
 }
@@ -16,7 +29,7 @@ use {
 ModuleEvalScope: struct {
     base_dir: String
     source: String
-    funcs: [String: Func]
+    funcs: [String:Func]
 }
 
 // One named field expression and the span that names it.
@@ -33,7 +46,7 @@ ComputedFieldProvenance: struct {
 }
 
 ComputedFields: struct {
-    values: [String: CtValue]
+    values: [String:CtValue]
     provenance: [ComputedFieldProvenance]
 }
 
@@ -51,7 +64,9 @@ envmodel_is_ambient_io_builtin: fn(name: String) -> Bool Never! {
 // Scan a field expression for an ambient-I/O call; the first one fires E3402.
 envmodel_check_build_io: fn(value: Expr) EnvModelEvalError! {
     loop site in comptime_walk_calls(value) {
-        if envmodel_is_ambient_io_builtin(site.name) -> return Err(EnvModelEvalError{diagnostic: envmodel_e3402(site.name, Val(site.span))})
+        if envmodel_is_ambient_io_builtin(site.name) {
+            return Err(EnvModelEvalError{diagnostic: envmodel_e3402(site.name, Val(site.span))})
+        }
     }
 }
 
@@ -61,7 +76,9 @@ envmodel_unparen: fn(expr: Expr) -> Expr Never! {
     loop {
         if current == {
             .Paren(inner, _, _) -> current = inner
-            .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> { return current }
+            .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {
+                return current
+            }
         }
     }
 }
@@ -100,7 +117,9 @@ envmodel_unparen_record: fn(expr: Expr) -> Expr Never! {
 envmodel_dependencies_for_expression: fn(expr: Expr, field_names: [String]) -> [String] Never! {
     dependencies := [String]{}
     loop site in comptime_walk_identifiers(expr) {
-        if field_names.contains(site.name) && !dependencies.contains(site.name) { dependencies.push(site.name) }
+        if field_names.contains(site.name) && !dependencies.contains(site.name) {
+            dependencies.push(site.name)
+        }
     }
     dependencies.sort()
     dependencies
@@ -109,7 +128,7 @@ envmodel_dependencies_for_expression: fn(expr: Expr, field_names: [String]) -> [
 // Evaluate one expression through the same purity and build-I/O gate used by
 // the named-field graph. Namespace-specific record shapes use this helper
 // for their nested values; they do not create a second evaluator.
-envmodel_evaluate_expression: fn(expr: Expr, globals: [String: CtValue], scope: ModuleEvalScope) -> CtValue EnvModelEvalError! {
+envmodel_evaluate_expression: fn(expr: Expr, globals: [String:CtValue], scope: ModuleEvalScope) -> CtValue EnvModelEvalError! {
     envmodel_check_build_io(expr)
     if envmodel_unparen_record(expr) == {
         .Ident(name, _, _) -> {
@@ -125,15 +144,21 @@ envmodel_evaluate_expression: fn(expr: Expr, globals: [String: CtValue], scope: 
         }
         .StructLit(type_name, _, _, _, fields, _, _, _) -> {
             lowered := [NamedCtValue]{}
-            loop field in fields -> lowered.push(NamedCtValue{name: field.name, value: envmodel_evaluate_expression(field.value, globals, scope)})
+            loop field in fields {
+                lowered.push(NamedCtValue{name: field.name, value: envmodel_evaluate_expression(field.value, globals, scope)})
+            }
             return Ok(CtValue.Struct{type_name: type_name, fields: lowered})
         }
         .EnumLit(type_name, variant, _, args, _, _, _) -> {
             lowered := [CtEnumArg]{}
             loop arg in args {
                 if arg == {
-                    .Positional(value) -> { lowered.push(CtEnumArg{label: None, value: envmodel_evaluate_expression(value, globals, scope)}) }
-                    .Named(label, value) -> { lowered.push(CtEnumArg{label: Val(label), value: envmodel_evaluate_expression(value, globals, scope)}) }
+                    .Positional(value) -> {
+                        lowered.push(CtEnumArg{label: None, value: envmodel_evaluate_expression(value, globals, scope)})
+                    }
+                    .Named(label, value) -> {
+                        lowered.push(CtEnumArg{label: Val(label), value: envmodel_evaluate_expression(value, globals, scope)})
+                    }
                 }
             }
             return Ok(CtValue.Enum{type_name: type_name, variant: variant, args: lowered})
@@ -158,7 +183,7 @@ envmodel_evaluate_expression: fn(expr: Expr, globals: [String: CtValue], scope: 
 // One module value through the Compiler's canonical comptime path (typed Jet
 // code checked, lowered to IR, and evaluated by JetEval) over this source's
 // pure functions; module values never declare extern names.
-envmodel_comptime_evaluate: fn(expr: Expr, globals: [String: CtValue], scope: ModuleEvalScope) -> CtValue EnvModelEvalError! {
+envmodel_comptime_evaluate: fn(expr: Expr, globals: [String:CtValue], scope: ModuleEvalScope) -> CtValue EnvModelEvalError! {
     comptime_evaluate(expr, scope.source, scope.funcs, scope.base_dir, globals) ?? return Err(EnvModelEvalError{diagnostic: err.diagnostic})
 }
 
@@ -179,7 +204,7 @@ envmodel_ct_map_insert: fn(entries: &[CtMapEntry], key: CtKey, value: CtValue) -
 // Resolve every named field in dependency order (sorted names first), then
 // record each field's dependencies and exact source text as provenance. A
 // dependency cycle is E0338 with the caller's why/fix copy.
-envmodel_evaluate_named_fields: fn(fields: [String: NamedFieldExpr], globals: [String: CtValue], scope: ModuleEvalScope, source: String?, cycle_why: String, cycle_fix: String) -> ComputedFields EnvModelEvalError! {
+envmodel_evaluate_named_fields: fn(fields: [String:NamedFieldExpr], globals: [String:CtValue], scope: ModuleEvalScope, source: String?, cycle_why: String, cycle_fix: String) -> ComputedFields EnvModelEvalError! {
     done := [String]{}
     stack := [String]{}
     values := globals
@@ -199,8 +224,10 @@ envmodel_evaluate_named_fields: fn(fields: [String: NamedFieldExpr], globals: [S
 
 // `done` holds fully resolved fields; a field on `stack` is being resolved,
 // so meeting it again is a cycle.
-envmodel_resolve_named_field: fn(name: String, fields: [String: NamedFieldExpr], field_names: [String], done: &[String], values: &[String: CtValue], stack: &[String], scope: ModuleEvalScope, cycle_why: String, cycle_fix: String) EnvModelEvalError! {
-    if done.contains(name) -> return
+envmodel_resolve_named_field: fn(name: String, fields: [String:NamedFieldExpr], field_names: [String], done: &[String], values: &[String:CtValue], stack: &[String], scope: ModuleEvalScope, cycle_why: String, cycle_fix: String) EnvModelEvalError! {
+    if done.contains(name) {
+        return
+    }
     named: fields.get(name) ?? return
     if stack.contains(name) {
         start := 0

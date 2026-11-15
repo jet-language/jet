@@ -3,10 +3,25 @@
 use {
     jet_driver.[JetDriverCompileRequest, JetDriverAuthorizedSourceSnapshot, JetDriverGateQueryResult, JetDriverSourceQueryModule, JetDriverVerbOutput, jet_driver_gate_query, jet_driver_present_diagnostics, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[
-        GateEntry, GateKind, GateLedger, Span, Diagnostic, gate_kind_name, gate_kind_parse,
-        gate_kind_is_security, gate_ledger_push, diagnostic_line_at, diagnostic_column_at,
-        diagnostic_render_all, diagnostic_from_registry, SourceFile,
-        BuildOptionChoice, BuildOptionLayer, BuildOptionsResolved, build_option_flags, build_option_removes_check,
+        GateEntry,
+        GateKind,
+        GateLedger,
+        Span,
+        Diagnostic,
+        gate_kind_name,
+        gate_kind_parse,
+        gate_kind_is_security,
+        gate_ledger_push,
+        diagnostic_line_at,
+        diagnostic_column_at,
+        diagnostic_render_all,
+        diagnostic_from_registry,
+        SourceFile,
+        BuildOptionChoice,
+        BuildOptionLayer,
+        BuildOptionsResolved,
+        build_option_flags,
+        build_option_removes_check,
     ]
     jetpack_trust.[TrustRecord]
 }
@@ -22,7 +37,9 @@ jet_cli_gates_entry: fn(args: [String]) -> String? Never! {
             skip = true
             next
         }
-        if argument.starts_with("--scope=") || argument.starts_with("--kind=") || argument.starts_with("--gate=") -> next
+        if argument.starts_with("--scope=") || argument.starts_with("--kind=") || argument.starts_with("--gate=") {
+            next
+        }
         if !argument.starts_with("-") -> return Val(argument)
     }
     None
@@ -48,10 +65,18 @@ jet_cli_gate_trust_entries: fn(path: String, records: [TrustRecord]) -> [GateEnt
     rows := [GateEntry]{}
     loop record in records {
         if record == {
-            .Hash(hash) -> rows.push(jet_cli_gate_external(GateKind.TrustGrant, "trust", path, hash, "trusted project hash", [path]))
-            .Pattern(pattern) -> rows.push(jet_cli_gate_external(GateKind.TrustGrant, "trust", path, pattern, "trusted project pattern", [path]))
-            .Grant(grant) -> rows.push(jet_cli_gate_external(GateKind.TrustGrant, grant.scope, path, "{grant.authority}:{grant.subject}", "trusted authority grant", [path]))
-            .Raw(line) -> rows.push(jet_cli_gate_external(GateKind.TrustGrant, "trust", path, line, "raw trust record", [path]))
+            .Hash(hash) -> {
+                rows.push(jet_cli_gate_external(GateKind.TrustGrant, "trust", path, hash, "trusted project hash", [path]))
+            }
+            .Pattern(pattern) -> {
+                rows.push(jet_cli_gate_external(GateKind.TrustGrant, "trust", path, pattern, "trusted project pattern", [path]))
+            }
+            .Grant(grant) -> {
+                rows.push(jet_cli_gate_external(GateKind.TrustGrant, grant.scope, path, "{grant.authority}:{grant.subject}", "trusted authority grant", [path]))
+            }
+            .Raw(line) -> {
+                rows.push(jet_cli_gate_external(GateKind.TrustGrant, "trust", path, line, "raw trust record", [path]))
+            }
         }
     }
     rows
@@ -59,8 +84,12 @@ jet_cli_gate_trust_entries: fn(path: String, records: [TrustRecord]) -> [GateEnt
 
 jet_cli_gate_invocation_kind: fn(argument: String) -> GateKind? Never! {
     if argument == "--force" -> return Val(GateKind.ForcePin)
-    if argument == "--gate" || argument.starts_with("--gate=") || argument == "--allow" || argument.starts_with("--allow=") || argument == "--allow-all" || argument == "-A" || argument == "--release" || argument == "--target" || argument == "--profile" || argument.starts_with("--target=") || argument.starts_with("--profile=") -> return Val(GateKind.BuildFlag)
-    if argument == "--deny" || argument.starts_with("--deny=") || argument == "--trust" || argument == "--online" || argument == "--try-anyway" || argument == "--offline" || argument == "--locked" -> return Val(GateKind.SessionFlag)
+    if argument == "--gate" || argument.starts_with("--gate=") || argument == "--allow" || argument.starts_with("--allow=") || argument == "--allow-all" || argument == "-A" || argument == "--release" || argument == "--target" || argument == "--profile" || argument.starts_with("--target=") || argument.starts_with("--profile=") {
+        return Val(GateKind.BuildFlag)
+    }
+    if argument == "--deny" || argument.starts_with("--deny=") || argument == "--trust" || argument == "--online" || argument == "--try-anyway" || argument == "--offline" || argument == "--locked" {
+        return Val(GateKind.SessionFlag)
+    }
     None
 }
 
@@ -73,12 +102,18 @@ jet_cli_gate_append_invocation: fn(ledger: &GateLedger, args: [String]) Never! {
         if separate && index + 1 < args.len() -> subject = "{argument} {args[index + 1]}"
         scope: if kind == GateKind.SessionFlag -> "session" else -> "build"
         gate_ledger_push(ledger, jet_cli_gate_external(kind, scope, "command line", subject, "written invocation choice", ["command line"]))
-        if argument == "--allow" || argument.starts_with("--allow=") || argument == "--allow-all" || argument == "-A" -> gate_ledger_push(ledger, jet_cli_gate_external(GateKind.DependencyGrant, "build", "command line", subject, "invocation authority grant", ["command line"]))
+        if argument == "--allow" || argument.starts_with("--allow=") || argument == "--allow-all" || argument == "-A" {
+            gate_ledger_push(ledger, jet_cli_gate_external(GateKind.DependencyGrant, "build", "command line", subject, "invocation authority grant", ["command line"]))
+        }
     }
     if build_option_flags(args) == .Resolved(flags, _) {
         loop choice in flags.written {
-            if build_option_removes_check(choice) -> gate_ledger_push(ledger, jet_cli_build_option_gate(GateKind.CheckRemoval, choice, "build option that removes a runtime check"))
-            if choice.name == "link_args" -> gate_ledger_push(ledger, jet_cli_build_option_gate(GateKind.LinkOverride, choice, "build option that adds native link inputs"))
+            if build_option_removes_check(choice) {
+                gate_ledger_push(ledger, jet_cli_build_option_gate(GateKind.CheckRemoval, choice, "build option that removes a runtime check"))
+            }
+            if choice.name == "link_args" {
+                gate_ledger_push(ledger, jet_cli_build_option_gate(GateKind.LinkOverride, choice, "build option that adds native link inputs"))
+            }
         }
     }
 }
@@ -110,28 +145,32 @@ jet_cli_gates_entry_json: fn(entry: GateEntry, modules: [JetDriverSourceQueryMod
         span = jet_cli_gates_span(site)
         location = jet_cli_gates_location(source, site)
     }
-    operations: loop operation in entry.operations -> jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("kind", jet_cli_status_text(operation.kind)),
-        jet_cli_status_field("span", jet_cli_gates_span(operation.span)),
-        jet_cli_status_field("location", jet_cli_gates_location(source, operation.span)),
-        jet_cli_status_field("required", jet_cli_status_texts(operation.required)),
-        jet_cli_status_field("asserted", jet_cli_status_texts(operation.asserted)),
-        jet_cli_status_field("discharged", jet_cli_status_bool(operation.discharged)),
-    })
-    jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("kind", jet_cli_status_text(gate_kind_name(entry.kind))),
-        jet_cli_status_field("domain", jet_cli_status_text(entry.domain)),
-        jet_cli_status_field("scope", jet_cli_status_text(entry.scope)),
-        jet_cli_status_field("source", jet_cli_status_text(entry.source)),
-        jet_cli_status_field("span", span),
-        jet_cli_status_field("location", location),
-        jet_cli_status_field("subject", jet_cli_status_text(entry.subject)),
-        jet_cli_status_field("reason", jet_cli_status_optional_text(entry.reason)),
-        jet_cli_status_field("status", jet_cli_status_optional_text(entry.status)),
-        jet_cli_status_field("detail", jet_cli_status_text(entry.detail)),
-        jet_cli_status_field("provenance", jet_cli_status_texts(entry.provenance)),
-        jet_cli_status_field("operations", jet_cli_status_array(operations)),
-    })
+    operations: loop operation in entry.operations -> jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("kind", jet_cli_status_text(operation.kind)),
+            jet_cli_status_field("span", jet_cli_gates_span(operation.span)),
+            jet_cli_status_field("location", jet_cli_gates_location(source, operation.span)),
+            jet_cli_status_field("required", jet_cli_status_texts(operation.required)),
+            jet_cli_status_field("asserted", jet_cli_status_texts(operation.asserted)),
+            jet_cli_status_field("discharged", jet_cli_status_bool(operation.discharged)),
+        },
+    )
+    jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("kind", jet_cli_status_text(gate_kind_name(entry.kind))),
+            jet_cli_status_field("domain", jet_cli_status_text(entry.domain)),
+            jet_cli_status_field("scope", jet_cli_status_text(entry.scope)),
+            jet_cli_status_field("source", jet_cli_status_text(entry.source)),
+            jet_cli_status_field("span", span),
+            jet_cli_status_field("location", location),
+            jet_cli_status_field("subject", jet_cli_status_text(entry.subject)),
+            jet_cli_status_field("reason", jet_cli_status_optional_text(entry.reason)),
+            jet_cli_status_field("status", jet_cli_status_optional_text(entry.status)),
+            jet_cli_status_field("detail", jet_cli_status_text(entry.detail)),
+            jet_cli_status_field("provenance", jet_cli_status_texts(entry.provenance)),
+            jet_cli_status_field("operations", jet_cli_status_array(operations)),
+        },
+    )
 }
 
 jet_cli_gates_matches: fn(entry: GateEntry, kind: GateKind?, scope: String?) -> Bool Never! {
@@ -174,7 +213,9 @@ jet_cli_gates_report: fn(ledger: GateLedger, modules: [JetDriverSourceQueryModul
                 entry: ledger.rows[selected[position]]
                 source: jet_cli_gates_source(modules, entry.source)
                 location := entry.source
-                if entry.span == .Val(site) -> location = "{entry.source}:{diagnostic_line_at(source, site.start)}:{diagnostic_column_at(source, site.start)}"
+                if entry.span == .Val(site) {
+                    location = "{entry.source}:{diagnostic_line_at(source, site.start)}:{diagnostic_column_at(source, site.start)}"
+                }
                 status: if entry.status == .Val(value) -> " status={value}" else -> ""
                 reason: if entry.reason == .Val(value) -> " reason={value}" else -> ""
                 out = "{out}    {location}  {entry.subject}  {entry.detail}{status}{reason}\n"
@@ -199,7 +240,9 @@ jet_cli_gates_diagnostics: fn(result: JetDriverGateQueryResult, snapshot: JetDri
         path: if diagnostic.origin == .Val(origin) -> origin.display else -> file
         source: if diagnostic.origin == .Val(origin) -> origin.source else -> jet_cli_gates_source(result.source.modules, path)
         if json {
-            loop report in jet_cli_reports_json(base, path, source, [Diagnostic]{diagnostic}) -> reports.push(report)
+            loop report in jet_cli_reports_json(base, path, source, [Diagnostic]{diagnostic}) {
+                reports.push(report)
+            }
         } else {
             if index > 0 -> stderr = "{stderr}\n"
             stderr = "{stderr}{diagnostic_render_all(path, source, [Diagnostic]{diagnostic}, color)}"
@@ -213,13 +256,17 @@ jet_cli_gates_diagnostics: fn(result: JetDriverGateQueryResult, snapshot: JetDri
 // lock/trust and invocation writers. Preserve raw argv after `inspect gates`.
 jet_cli_gates_host: fn(request: JetDriverCompileRequest, args: [String], file: String, color: Bool, json: Bool) -[FS, Env, Time]> JetDriverVerbOutput {
     result: jet_driver_gate_query(request)
-    if !result.source.complete -> return jet_cli_gates_diagnostics(result, request.authorized_sources, file, color, json)
+    if !result.source.complete {
+        return jet_cli_gates_diagnostics(result, request.authorized_sources, file, color, json)
+    }
     kind := GateKind?{None}
     if jet_cli_option_value(args, "--kind") == .Val(value) {
         parsed: gate_kind_parse(value) ?? return jet_cli_gates_usage("unknown gate kind `{value}`", "use one of unsafe, check_removal, link_override, impure, dependency_grant, build_flag, session_flag, trust_grant, force_pin, taint_scrub, duty_drop, state_transition, precision_demotion, nondeterministic, structure, or lint_allow", color, json)
         kind = Val(parsed)
     }
-    if !result.complete -> return jet_cli_gates_diagnostics(result, request.authorized_sources, file, color, json)
+    if !result.complete {
+        return jet_cli_gates_diagnostics(result, request.authorized_sources, file, color, json)
+    }
     scope: jet_cli_option_value(args, "--scope").map(fn(value) { value.to_ascii_lower() })
     JetDriverVerbOutput{stdout: jet_cli_gates_report(result.ledger, result.source.modules, kind, scope, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }

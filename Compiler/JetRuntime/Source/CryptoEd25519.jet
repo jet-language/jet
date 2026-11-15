@@ -22,6 +22,7 @@ rt_ed25519_x: fn(limb: I64) -> I64 {
         else -> I64{0x2169}
     }
 }
+
 rt_ed25519_d2: fn(limb: I64) -> I64 {
     if {
         (limb == I64{0}) -> I64{0xf159}
@@ -42,6 +43,7 @@ rt_ed25519_d2: fn(limb: I64) -> I64 {
         else -> I64{0x2406}
     }
 }
+
 rt_ed25519_add: fn(p: I64, q: I64, scratch: I64, d2: I64, work: I64) {
     a: scratch
     b: wrapping(scratch + I64{128})
@@ -70,12 +72,14 @@ rt_ed25519_add: fn(p: I64, q: I64, scratch: I64, d2: I64, work: I64) {
     rt_x25519_mul(wrapping(p + I64{256}), g, f, work)
     rt_x25519_mul(wrapping(p + I64{384}), e, h, work)
 }
+
 rt_ed25519_swap: fn(p: I64, q: I64, bit: I64) {
     rt_x25519_swap(p, q, bit)
     rt_x25519_swap(wrapping(p + I64{128}), wrapping(q + I64{128}), bit)
     rt_x25519_swap(wrapping(p + I64{256}), wrapping(q + I64{256}), bit)
     rt_x25519_swap(wrapping(p + I64{384}), wrapping(q + I64{384}), bit)
 }
+
 rt_ed25519_d2_init: fn(d2: I64) {
     i := I64{0}
     loop i < (I64{16}) {
@@ -83,6 +87,7 @@ rt_ed25519_d2_init: fn(d2: I64) {
         i += I64{1}
     }
 }
+
 rt_ed25519_base: fn(q: I64, work: I64) {
     rt_crypto_wipe(q, I64{512})
     i := I64{0}
@@ -95,6 +100,7 @@ rt_ed25519_base: fn(q: I64, work: I64) {
     rt_text_store(wrapping(q + I64{256}), I64{1})
     rt_x25519_mul(wrapping(q + I64{384}), q, wrapping(q + I64{128}), work)
 }
+
 // p/q are distinct owned point512 spans; q is consumed, scalar32 is borrowed.
 rt_ed25519_mul: fn(p: I64, q: I64, scalar: I64, temporaries: I64, d2: I64, work: I64) {
     rt_crypto_wipe(p, I64{512})
@@ -102,7 +108,7 @@ rt_ed25519_mul: fn(p: I64, q: I64, scalar: I64, temporaries: I64, d2: I64, work:
     rt_text_store(wrapping(p + I64{256}), I64{1})
     i := I64{255}
     loop {
-        if (i < I64{0}) -> break
+        if (i < I64{0}) { break }
         bit: (rt_text_byte(wrapping(scalar + i / I64{8})) >> (i % I64{8})).bit_and(I64{1})
         rt_ed25519_swap(p, q, bit)
         rt_ed25519_add(q, p, temporaries, d2, work)
@@ -111,14 +117,17 @@ rt_ed25519_mul: fn(p: I64, q: I64, scalar: I64, temporaries: I64, d2: I64, work:
         i -= I64{1}
     }
 }
+
 // Packing consumes p's affine coordinates; all spans are disjoint.
 rt_ed25519_pack: fn(output: I64, p: I64, inverse: I64, work: I64, reduced: I64, packed_x: I64) {
     rt_x25519_copy(inverse, wrapping(p + I64{256}))
     i := I64{253}
     loop {
-        if (i < I64{0}) -> break
+        if (i < I64{0}) { break }
         rt_x25519_mul(inverse, inverse, inverse, work)
-        if (i != I64{2} && i != I64{4}) -> rt_x25519_mul(inverse, inverse, wrapping(p + I64{256}), work)
+        if (i != I64{2} && i != I64{4}) {
+            rt_x25519_mul(inverse, inverse, wrapping(p + I64{256}), work)
+        }
         i -= I64{1}
     }
     rt_x25519_mul(p, p, inverse, work)
@@ -127,6 +136,7 @@ rt_ed25519_pack: fn(output: I64, p: I64, inverse: I64, work: I64, reduced: I64, 
     rt_x25519_pack(output, wrapping(p + I64{128}), reduced)
     rt_text_put(wrapping(output + I64{31}), rt_text_byte(wrapping(output + I64{31})).bit_or(((rt_text_byte(packed_x).bit_and(I64{1})) << I64{7})))
 }
+
 // Borrowed seed32/output32, disjoint caller scratch4096 aligned8, wiped.
 rt_crypto_ed25519_public: fn(seed: I64, output: I64, scratch: I64) {
     hash: wrapping(scratch + I64{704})
@@ -144,6 +154,7 @@ rt_crypto_ed25519_public: fn(seed: I64, output: I64, scratch: I64) {
     rt_ed25519_pack(output, p, temporaries, work, wrapping(scratch + I64{3200}), wrapping(scratch + I64{3328}))
     rt_crypto_wipe(scratch, I64{4096})
 }
+
 // TweetNaCl's radix256 scalar reduction modulo the Ed25519 group order.
 // Intermediate convolution/reduction bounds fit signed I64; indices and
 // carry loops are fixed, including all 32 secret scalar bytes.
@@ -169,10 +180,11 @@ rt_ed25519_l: fn(index: I64) -> I64 {
         else -> I64{0}
     }
 }
+
 rt_ed25519_mod_l: fn(output: I64, x: I64) {
     i := I64{63}
     loop {
-        if (i < I64{32}) -> break
+        if (i < I64{32}) { break }
         high: rt_text_word(wrapping(x + i * I64{8}))
         carry := I64{0}
         start: i - I64{32}
@@ -211,6 +223,7 @@ rt_ed25519_mod_l: fn(output: I64, x: I64) {
         i += I64{1}
     }
 }
+
 rt_ed25519_reduce: fn(hash: I64, x: I64) {
     i := I64{0}
     loop i < (I64{64}) {
@@ -220,6 +233,7 @@ rt_ed25519_reduce: fn(hash: I64, x: I64) {
     rt_crypto_wipe(hash, I64{64})
     rt_ed25519_mod_l(hash, x)
 }
+
 // Borrowed seed32/message, disjoint signature64 and exclusive aligned4832.
 // SHA512 expansion once, deterministic nonce, fixed-limb S=r+k*a modL.
 rt_crypto_ed25519_sign: fn(seed: I64, message: I64, length: I64, signature: I64, scratch: I64) {
@@ -269,6 +283,7 @@ rt_crypto_ed25519_sign: fn(seed: I64, message: I64, length: I64, signature: I64,
     rt_ed25519_mod_l(wrapping(signature + I64{32}), x)
     rt_crypto_wipe(scratch, I64{4832})
 }
+
 rt_ed25519_d: fn(index: I64) -> I64 {
     if {
         (index == I64{0}) -> I64{0x78a3}
@@ -289,6 +304,7 @@ rt_ed25519_d: fn(index: I64) -> I64 {
         else -> I64{0x5203}
     }
 }
+
 rt_ed25519_sqrt_i: fn(index: I64) -> I64 {
     if {
         (index == I64{0}) -> I64{0xa0b0}
@@ -309,6 +325,7 @@ rt_ed25519_sqrt_i: fn(index: I64) -> I64 {
         else -> I64{0x2b83}
     }
 }
+
 rt_ed25519_decode_constants: fn(scratch: I64) {
     rt_ed25519_d2_init(wrapping(scratch + I64{3072}))
     i := I64{0}
@@ -318,22 +335,25 @@ rt_ed25519_decode_constants: fn(scratch: I64) {
         i += I64{1}
     }
 }
+
 rt_ed25519_field_equal: fn(a: I64, b: I64, scratch: I64) -> Bool {
     rt_x25519_pack(wrapping(scratch + I64{4960}), a, wrapping(scratch + I64{3200}))
     rt_x25519_pack(wrapping(scratch + I64{4992}), b, wrapping(scratch + I64{3200}))
     return rt_crypto_equal(wrapping(scratch + I64{4960}), wrapping(scratch + I64{4992}), I64{32})
 }
+
 rt_ed25519_pow2523: fn(output: I64, base: I64, temporary: I64, work: I64) {
     rt_x25519_copy(temporary, base)
     i := I64{250}
     loop {
-        if (i < I64{0}) -> break
+        if (i < I64{0}) { break }
         rt_x25519_mul(temporary, temporary, temporary, work)
-        if (i != I64{1}) -> rt_x25519_mul(temporary, temporary, base, work)
+        if (i != I64{1}) { rt_x25519_mul(temporary, temporary, base, work) }
         i -= I64{1}
     }
     rt_x25519_copy(output, temporary)
 }
+
 // Decompress to -A, preserving the original compressed bytes for the hash.
 // This intentionally matches dalek's ZIP215-permissive public-key decode:
 // do not add a y<p or negative-zero encoding rejection.
@@ -370,7 +390,9 @@ rt_ed25519_decode: fn(point: I64, bytes: I64, scratch: I64) -> Bool {
     rt_x25519_mul(point, t, den, work)
     rt_x25519_mul(chk, point, point, work)
     rt_x25519_mul(chk, chk, den, work)
-    if !rt_ed25519_field_equal(chk, num, scratch) -> rt_x25519_mul(point, point, wrapping(scratch + I64{4736}), work)
+    if !rt_ed25519_field_equal(chk, num, scratch) {
+        rt_x25519_mul(point, point, wrapping(scratch + I64{4736}), work)
+    }
     rt_x25519_mul(chk, point, point, work)
     rt_x25519_mul(chk, chk, den, work)
     if !rt_ed25519_field_equal(chk, num, scratch) -> return false
@@ -385,6 +407,7 @@ rt_ed25519_decode: fn(point: I64, bytes: I64, scratch: I64) -> Bool {
     rt_x25519_mul(wrapping(point + I64{384}), point, wrapping(point + I64{128}), work)
     return true
 }
+
 // Verification inputs are public. Test 8P==identity, not torsion-freeness.
 rt_ed25519_small_order: fn(point: I64, scratch: I64) -> Bool {
     clone: wrapping(scratch + I64{4096})
@@ -404,18 +427,20 @@ rt_ed25519_small_order: fn(point: I64, scratch: I64) -> Bool {
     }
     return diff == I64{0}
 }
+
 rt_ed25519_scalar_canonical: fn(scalar: I64) -> Bool {
     i := I64{31}
     loop {
-        if (i < I64{0}) -> break
+        if (i < I64{0}) { break }
         byte: rt_text_byte(wrapping(scalar + i))
         limit: rt_ed25519_l(i)
-        if (byte < limit) -> return true
-        if (byte > limit) -> return false
+        if (byte < limit) { return true }
+        if (byte > limit) { return false }
         i -= I64{1}
     }
     return false
 }
+
 // Core's VerifyKey.from_bytes error policy uses decode separately from verify.
 // Borrowed public_key32 and exclusive aligned5472, always wiped.
 rt_crypto_ed25519_key_valid: fn(public_key: I64, scratch: I64) -> Bool {
@@ -424,6 +449,7 @@ rt_crypto_ed25519_key_valid: fn(public_key: I64, scratch: I64) -> Bool {
     rt_crypto_wipe(scratch, I64{5472})
     return ok
 }
+
 // EXACT dalek2.2.0 ordinary/strict paths, not an unasked stricter protocol:
 // both S<L, hash ORIGINAL R||A||message, compare canonical [S]B-[k]A bytes.
 // Strict additionally rejects small-order A/R; mixed-order A remains allowed.

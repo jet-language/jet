@@ -49,8 +49,14 @@ AESKey: struct {
 
     impl ForwardBlock {
         encrypt_one: fn(self, b: &[U8]) Never! { encrypt_in_place(self, b) }
-        ctr32_blocks: fn(self, ctr: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! { blocks(self, CTR32, ctr, src, off, count, out) }
-        cbc_blocks: fn(self, iv: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! { blocks(self, CBC_ENC, iv, src, off, count, out) }
+
+        ctr32_blocks: fn(self, ctr: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! {
+            blocks(self, CTR32, ctr, src, off, count, out)
+        }
+
+        cbc_blocks: fn(self, iv: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! {
+            blocks(self, CBC_ENC, iv, src, off, count, out)
+        }
     }
 }
 
@@ -67,15 +73,25 @@ AESKey: struct {
 // - XTS_ENC, XTS_DEC: iv is the tweak, multiplied by x after every block
 //   (IEEE 1619-2007 section 5.2).
 ECB_ENC: 0
+
 ECB_DEC: 1
+
 CBC_ENC: 2
+
 CBC_DEC: 3
+
 CTR: 4
+
 CTR32: 5
+
 CFB_ENC: 6
+
 CFB_DEC: 7
+
 OFB: 8
+
 XTS_ENC: 9
+
 XTS_DEC: 10
 
 // Exact-capacity buffers. Secret-bearing buffers are never grown
@@ -107,7 +123,9 @@ bytes_of: fn(src: [U8], off: Int, count: Int) -> [U8] Never! {
     out
 }
 
-wipe_words: fn(w: &[U64]) Never! { loop i in 0..<w.len() -> w[i] = U64{0} }
+wipe_words: fn(w: &[U64]) Never! {
+    loop i in 0..<w.len() -> w[i] = U64{0}
+}
 
 le32: fn(b: [U8], off: Int) -> U64 Never! {
     U64{b[off]}.bit_or(U64{b[off + 1]} << 8).bit_or(U64{b[off + 2]} << 16).bit_or(U64{b[off + 3]} << 24)
@@ -466,9 +484,7 @@ decrypt_planes: fn(k: AESKey, q: &[U64]) Never! {
 /// out[at..], in place. Unused slots carry zeros.
 crypt4: fn(k: AESKey, decrypt: Bool, q: &[U64], src: [U8], off: Int, count: Int, out: &[U8], at: Int) Never! {
     loop slot in 0..<4 {
-        if slot < count {
-            interleave_in(q, slot, src, off + 16 * slot)
-        } else {
+        if slot < count -> interleave_in(q, slot, src, off + 16 * slot) else {
             q[slot] = U64{0}
             q[slot + 4] = U64{0}
         }
@@ -490,8 +506,7 @@ sub_word: fn(q: &[U64], x: U64) -> U64 Never! {
 }
 
 // GF(2^8) doubling modulo x^8 + x^4 + x^3 + x + 1, without a branch.
-#Overflow(.Wrapping)
-xtime: fn(a: U8) -> U8 Never! {
+#Overflow(.Wrapping) xtime: fn(a: U8) -> U8 Never! {
     (a << 1).bit_xor(U8{0x1b}.bit_and(U8{0} - (a >> 7)))
 }
 
@@ -548,7 +563,9 @@ aes_rounds: fn(len: Int) -> Int? Never! {
         16 -> 10
         24 -> 12
         32 -> 14
-        else -> return None
+        else -> {
+            return None
+        }
     }
     Val(rounds)
 }
@@ -579,9 +596,7 @@ aes_expand: fn(key: [#Secret U8], rounds: Int, decrypt: Bool) -> AESKey Never! {
             tmp = ((tmp << 24).bit_or(tmp >> 8)).bit_and(U64{0xffffffff})
             tmp = sub_word(q, tmp).bit_xor(rcon)
             rcon = U64{xtime(low_byte(rcon))}
-        } else if nk > 6 && j == 4 {
-            tmp = sub_word(q, tmp)
-        }
+        } else if nk > 6 && j == 4 { tmp = sub_word(q, tmp) }
         w[i] = tmp.bit_xor(w[i - nk])
         j += 1
         if j == nk -> j = 0
@@ -635,8 +650,7 @@ increment: fn(ctr: &[U8], width: Int) Never! {
 /// The tweak times x in GF(2^128), little-endian (IEEE 1619-2007 section
 /// 5.2): a one-bit left shift with x^128 = x^7 + x^2 + x + 1, without a
 /// branch on the secret carry.
-#Overflow(.Wrapping)
-xts_double: fn(t: &[U8]) Never! {
+#Overflow(.Wrapping) xts_double: fn(t: &[U8]) Never! {
     a := U64{0}
     b := U64{0}
     loop i in 0..<8 {
@@ -656,15 +670,21 @@ xts_double: fn(t: &[U8]) Never! {
 /// and below). The host leaf runs them when it can; otherwise the
 /// bitsliced rounds run, four independent blocks at a time.
 blocks: fn(k: AESKey, op: Int, iv: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! {
-    if count <= 0 -> return
+    if count <= 0 {
+        return
+    }
     reserve(out, count * 16)
-    if core.crypto.__aes_blocks(if op == ECB_DEC || op == CBC_DEC || op == XTS_DEC -> k.dk else -> k.rk, k.rounds, op, iv, src, off, count, out) -> return
+    if core.crypto.__aes_blocks(if op == ECB_DEC || op == CBC_DEC || op == XTS_DEC -> k.dk else -> k.rk, k.rounds, op, iv, src, off, count, out) {
+        return
+    }
     blocks_portable(k, op, iv, src, off, count, out)
 }
 
 /// `blocks` on the bitsliced rounds alone.
 blocks_portable: fn(k: AESKey, op: Int, iv: &[U8], src: [#Secret U8], off: Int, count: Int, out: &[U8]) Never! {
-    if count <= 0 -> return
+    if count <= 0 {
+        return
+    }
     base: out.len()
     loop _ in 0..<count * 16 -> out.push(U8{0})
     q := words(8)
@@ -972,8 +992,7 @@ xts: fn(xk: XTSKey, decrypt: Bool, data_unit: [U8], src: [U8], off: Int, len: In
 /// The 16-byte block doubled in GF(2^128), big-endian (SP 800-38B section
 /// 6.1): a one-bit left shift, then 0x87 into the last byte when the shifted
 /// out bit was set, without a branch on it.
-#Overflow(.Wrapping)
-cmac_double: fn(b: &[U8]) Never! {
+#Overflow(.Wrapping) cmac_double: fn(b: &[U8]) Never! {
     carry: U8{0} - (b[0] >> 7)
     loop i in 0..<15 -> b[i] = (b[i] << 1).bit_or(b[i + 1] >> 7)
     b[15] = (b[15] << 1).bit_xor(U8{0x87}.bit_and(carry))
@@ -1025,14 +1044,16 @@ cmac_prf_128: fn(key: [U8], msg: [U8]) -> [U8] Never! {
 /// refused.
 #Error
 CipherError: enum {
-    /// A length or parameter outside the algorithm's limits.
     Input
-    /// The tag, the integrity check value or the padding did not verify.
     Auth
 }
 
+/// A length or parameter outside the algorithm's limits.
+/// The tag, the integrity check value or the padding did not verify.
+
 // SP 800-38F section 6.2: ICV1 for KW and the ICV2 prefix of KWP.
 KW_ICV1: 0xa6
+
 KWP_ICV2: [U8]{0xa6, 0x59, 0x59, 0xa6}
 
 /// W (SP 800-38F section 6.1, algorithm 1) over buf = A || R1 || ... || Rn
@@ -1127,9 +1148,7 @@ kw_unwrap: fn(k: AESKey, padded: Bool, wrapped: [U8]) -> [U8] CipherError! {
         if len < 24 || len > 0x200000000000000 || len %% 8 != 0 -> return Err(.Input)
     }
     buf := [U8]{}
-    if padded && len == 16 {
-        ecb(k, true, wrapped, 0, 1, buf)
-    } else {
+    if padded && len == 16 -> ecb(k, true, wrapped, 0, 1, buf) else {
         buf = bytes_of(wrapped, 0, len)
         kw_w_inverse(k, buf)
     }
@@ -1177,30 +1196,32 @@ kw_unwrapped_len: fn(plen: U64) -> Int Never! { Int{wrapping(U32{plen})} }
 
 /// All ones when a > b, else zero, for a and b below 2^63, without a
 /// branch.
-#Overflow(.Wrapping)
-ct_gt: fn(a: U64, b: U64) -> U64 Never! { U64{0} - ((b - a) >> 63) }
+#Overflow(.Wrapping) ct_gt: fn(a: U64, b: U64) -> U64 Never! { U64{0} - ((b - a) >> 63) }
 
 // ---------------------------------------------------------------------------
 // CBC padding (mbedtls cipher.c).
 
 CBCPadding: enum {
-    /// PKCS #7: n bytes of value n.
     PKCS7
-    /// ISO/IEC 7816-4: 0x80, then zeros.
     OneAndZeros
-    /// ANSI X.923: zeros, then the count.
     ZerosAndLen
-    /// Zeros; an all-zero tail is indistinguishable from padding.
     Zeros
-    /// No padding: the input must be whole blocks.
     Unpadded
 }
+
+/// PKCS #7: n bytes of value n.
+/// ISO/IEC 7816-4: 0x80, then zeros.
+/// ANSI X.923: zeros, then the count.
+/// Zeros; an all-zero tail is indistinguishable from padding.
+/// No padding: the input must be whole blocks.
 
 /// Fill out[data_len..<len] with `mode`'s padding, so out[0..<len] is one
 /// padded block (mbedtls's add_*_padding). `.Unpadded` writes nothing, as
 /// mbedtls has no add function for it.
 cbc_add_padding: fn(mode: CBCPadding, out: &[U8], len: Int, data_len: Int) Never! {
-    if mode == .Unpadded -> return
+    if mode == .Unpadded {
+        return
+    }
     fill: len - data_len
     loop i in data_len..<len {
         out[i] = if mode == {
@@ -1223,8 +1244,9 @@ CBCPaddingCheck: struct {
 }
 
 /// All ones when x is not zero, else zero, without a branch.
-#Overflow(.Wrapping)
-ct_nonzero: fn(x: U64) -> U64 Never! { U64{0} - ((x.bit_or(U64{0} - x)) >> 63) }
+#Overflow(.Wrapping) ct_nonzero: fn(x: U64) -> U64 Never! {
+    U64{0} - ((x.bit_or(U64{0} - x)) >> 63)
+}
 
 /// The padding of the `len`-byte block at input[off] (mbedtls's
 /// get_*_padding). Every byte is read and the result built from masks,
@@ -1234,8 +1256,7 @@ ct_nonzero: fn(x: U64) -> U64 Never! { U64{0} - ((x.bit_or(U64{0} - x)) >> 63) }
 /// - ZerosAndLen: the last byte n must be 1..len, after n - 1 zeros.
 /// - Zeros: the data ends at the last non-zero byte; never invalid.
 /// - Unpadded: all `len` bytes are data.
-#Overflow(.Wrapping)
-cbc_get_padding: fn(mode: CBCPadding, input: [U8], off: Int, len: Int) -> CBCPaddingCheck Never! {
+#Overflow(.Wrapping) cbc_get_padding: fn(mode: CBCPadding, input: [U8], off: Int, len: Int) -> CBCPaddingCheck Never! {
     total: U64{len}
     if mode == {
         .Unpadded -> CBCPaddingCheck{data_len: total, bad: U64{0}}

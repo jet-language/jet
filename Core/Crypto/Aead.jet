@@ -43,8 +43,7 @@ store_be64: fn(b: &[U8], off: Int, x: U64) Never! {
 
 /// The constant-time tag check: true when the first `n` bytes of `a` and
 /// `b` agree, from the OR of their differences only. The verdict is public.
-#Scrub(Secret)
-tags_equal: fn(a: [#Secret U8], b: [#Secret U8], n: Int) -> Bool Never! {
+#Scrub(Secret) tags_equal: fn(a: [#Secret U8], b: [#Secret U8], n: Int) -> Bool Never! {
     diff := U8{0}
     loop i in 0..<n -> diff = diff.bit_or(a[i].bit_xor(b[i]))
     diff == (U8{0})
@@ -60,8 +59,7 @@ min_int: fn(a: Int, b: Int) -> Int Never! { if a < b -> a else -> b }
 /// The low 64 bits of the carry-less product of x and y. Each operand is
 /// split into four masks with three zero bits between set bits, so the
 /// integer products cannot carry into a kept bit.
-#Overflow(.Wrapping)
-bmul64: fn(x: #Secret U64, y: #Secret U64) -> U64 Never! {
+#Overflow(.Wrapping) bmul64: fn(x: #Secret U64, y: #Secret U64) -> U64 Never! {
     m1: U64{0x1111111111111111}
     m2: U64{0x2222222222222222}
     m4: U64{0x4444444444444444}
@@ -138,15 +136,20 @@ gcm_key: fn<K: ForwardBlock>(c: K) -> GCMKey<K> Never! {
 /// (SP 800-38D algorithm 2, one step per block). The host leaf runs them
 /// when it can; otherwise the Jet carry-less multiply does.
 ghash: fn(k: GHASHKey, y: &[U8], data: [U8], off: Int, count: Int) Never! {
-    if count <= 0 -> return
-    if core.crypto.__ghash_blocks(k.h, y, data, off, count) -> return
+    if count <= 0 {
+        return
+    }
+    if core.crypto.__ghash_blocks(k.h, y, data, off, count) {
+        return
+    }
     ghash_portable(k, y, data, off, count)
 }
 
 /// `ghash` on the Jet carry-less multiply alone.
-#Overflow(.Wrapping)
-ghash_portable: fn(k: GHASHKey, y: &[U8], data: [#Secret U8], off: Int, count: Int) Never! {
-    if count <= 0 -> return
+#Overflow(.Wrapping) ghash_portable: fn(k: GHASHKey, y: &[U8], data: [#Secret U8], off: Int, count: Int) Never! {
+    if count <= 0 {
+        return
+    }
     h0: k.hw[0]
     h1: k.hw[1]
     h2: k.hw[2]
@@ -235,6 +238,7 @@ gcm_state: fn() -> GCM Never! {
 // SP 800-38D section 5.2.1.1: len(P) <= 2^39 - 256 bits, len(A) <= 2^64 - 1
 // bits (mbedtls caps the AAD at 2^61 - 1 bytes).
 GCM_MAX_DATA: 68719476704
+
 GCM_MAX_AAD: 2305843009213693951
 
 /// Start an operation under `iv` (SP 800-38D section 7.1, steps 2 and 3).
@@ -391,9 +395,13 @@ gcm_decrypt: fn<K: ForwardBlock>(k: GCMKey<K>, iv: [U8], aad: [U8], sealed: [U8]
 // CBC-MAC block B0 is enciphered once both are known.
 
 CCM_STARTED: 1
+
 CCM_LENGTHS_SET: 2
+
 CCM_AUTH_DATA_STARTED: 4
+
 CCM_AUTH_DATA_FINISHED: 8
+
 CCM_ERROR: 16
 
 /// The four mbedtls CCM modes. The CCM* modes admit a zero-length tag,
@@ -442,7 +450,9 @@ ccm_decrypting: fn(st: CCM) -> Bool Never! { st.mode == .Decrypt || st.mode == .
 has_bit: fn(state: Int, bit: Int) -> Bool Never! { (state /% bit) %% 2 == 1 }
 
 /// state | bit, for the state bits above.
-with_bit: fn(state: Int, bit: Int) -> Int Never! { if has_bit(state, bit) -> state else -> state + bit }
+with_bit: fn(state: Int, bit: Int) -> Int Never! {
+    if has_bit(state, bit) -> state else -> state + bit
+}
 
 /// Add `n` to the `q`-byte big-endian counter at the end of `ctr`, modulo
 /// 2^(8q) as mbedtls increments it. The counter is public.
@@ -525,9 +535,7 @@ ccm_update_ad: fn<K: ForwardBlock>(k: K, st: &CCM, aad: [U8]) -> Bool Never! {
         st.y[0] = st.y[0].bit_xor(U8{(st.ad_len /% 256) %% 256})
         st.y[1] = st.y[1].bit_xor(U8{st.ad_len %% 256})
         st.state = with_bit(st.state, CCM_AUTH_DATA_STARTED)
-    } else if st.processed + aad.len() > st.ad_len {
-        return false
-    }
+    } else if st.processed + aad.len() > st.ad_len { return false }
     at := 0
     loop at < aad.len() {
         offset: (st.processed + 2) %% 16
@@ -683,8 +691,7 @@ put_word32: fn(out: &[U8], at: Int, w: U32) Never! {
 /// state `s` into the 64 bytes of `ks`: the block function of RFC 8439
 /// section 2.3 when `feed` adds the input state back, the HChaCha20 core
 /// when it does not.
-#Overflow(.Wrapping)
-chacha20_core: fn(s: [U32], ks: &[U8], feed: Bool) Never! {
+#Overflow(.Wrapping) chacha20_core: fn(s: [U32], ks: &[U8], feed: Bool) Never! {
     x0 := s[0]
     x1 := s[1]
     x2 := s[2]
@@ -879,8 +886,7 @@ chacha20_room: fn(c: ChaCha20, size: Int) -> Bool Never! {
 }
 
 /// The next keystream block into `stream`, then the counter steps.
-#Overflow(.Wrapping)
-chacha20_next: fn(c: &ChaCha20) Never! {
+#Overflow(.Wrapping) chacha20_next: fn(c: &ChaCha20) Never! {
     chacha20_core(c.state, c.stream, true)
     c.state[12] = c.state[12] + U32{1}
     c.blocks_left -= 1
@@ -980,8 +986,7 @@ poly1305_key: fn(key: [#Secret U8]) -> Poly1305? Never! {
 
 /// poly1305_key's context for a 32-byte key. It returns no Option, so a
 /// caller holding a secret key needs no `??` on it.
-#Overflow(.Wrapping)
-poly1305_context: fn(key: [#Secret U8]) -> Poly1305 Never! {
+#Overflow(.Wrapping) poly1305_context: fn(key: [#Secret U8]) -> Poly1305 Never! {
     r := cipher.words(9)
     r[0] = cipher.le32(key, 0).bit_and(U64{0x3ffffff})
     r[1] = (cipher.le32(key, 3) >> 2).bit_and(U64{0x3ffff03})
@@ -997,8 +1002,7 @@ poly1305_context: fn(key: [#Secret U8]) -> Poly1305 Never! {
 /// h = (h + m_i + hibit 2^128) r mod 2^130 - 5 over `count` 16-byte blocks
 /// of `m` from `off`. `hibit` is 2^24 in limb 4 for a whole block, zero for
 /// the padded last one.
-#Overflow(.Wrapping)
-poly1305_blocks: fn(r: [#Secret U64], h: &[U64], m: [#Secret U8], off: Int, count: Int, hibit: U64) Never! {
+#Overflow(.Wrapping) poly1305_blocks: fn(r: [#Secret U64], h: &[U64], m: [#Secret U8], off: Int, count: Int, hibit: U64) Never! {
     mask: U64{0x3ffffff}
     five: U64{5}
     r0: r[0]
@@ -1048,8 +1052,7 @@ poly1305_blocks: fn(r: [#Secret U64], h: &[U64], m: [#Secret U8], off: Int, coun
 
 /// The bytes pending in `p`'s partial block. The count follows the input's
 /// length and never its bytes, so a keyed context still steers on it.
-#Scrub(Secret)
-poly1305_pending: fn(p: #Secret Poly1305) -> Int Never! { poly1305_fill_of(p) }
+#Scrub(Secret) poly1305_pending: fn(p: #Secret Poly1305) -> Int Never! { poly1305_fill_of(p) }
 
 poly1305_fill_of: fn(p: Poly1305) -> Int Never! { p.fill }
 
@@ -1084,8 +1087,7 @@ poly1305_update: fn(p: &Poly1305, m: [U8], off: Int, len: Int) Never! {
 
 /// The 16-byte tag (h + s) mod 2^128, with h fully reduced mod 2^130 - 5
 /// by a masked select (mbedtls_poly1305_finish).
-#Overflow(.Wrapping)
-poly1305_finish: fn(p: &Poly1305) -> [U8] Never! {
+#Overflow(.Wrapping) poly1305_finish: fn(p: &Poly1305) -> [U8] Never! {
     fill: poly1305_pending(p)
     if fill > 0 {
         p.buf[fill] = U8{1}
@@ -1166,8 +1168,11 @@ poly1305_mac: fn(key: [#Secret U8], msg: [U8]) -> [U8]? Never! {
 // ChaCha20-Poly1305 (RFC 8439 section 2.8; mbedtls chachapoly.c).
 
 CHACHAPOLY_INIT: 0
+
 CHACHAPOLY_AAD: 1
+
 CHACHAPOLY_CIPHERTEXT: 2
+
 CHACHAPOLY_FINISHED: 3
 
 /// A ChaCha20-Poly1305 context (mbedtls_chachapoly_context).

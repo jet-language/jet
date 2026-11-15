@@ -5,7 +5,7 @@
 use time: core.time
 
 spin: fn() -> Int {
-    { sender, receiver }: channel<Int>(capacity: 1)
+    (sender, receiver): channel<Int>(capacity: 1)
     turns := 0
     loop turns >= 0 {
         sender.send(1)
@@ -32,7 +32,7 @@ run: fn() {
         time.sleep(20ms)
         worker.cancel()
         if worker.join() == {
-            .Err(_) -> print("cancelled")
+            .Err(_) -> { print("cancelled") }
             .Ok(_) -> print("finished")
         }
     }

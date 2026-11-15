@@ -12,19 +12,23 @@ lowest: fn(debug: Bool, info: Bool, warn: Bool, error: Bool) -> String {
     }
 }
 
-level: fn() -[Log]> String { lowest(log.enabled(.Debug), log.enabled(.Info), log.enabled(.Warn), log.enabled(.Error)) }
+level: fn() -[Log]> String {
+    lowest(log.enabled(.Debug), log.enabled(.Info), log.enabled(.Warn), log.enabled(.Error))
+}
 
 db: module {
-    level: fn() -[Log]> String { lowest(log.enabled(.Debug), log.enabled(.Info), log.enabled(.Warn), log.enabled(.Error)) }
+    level: fn() -[Log]> String {
+        lowest(log.enabled(.Debug), log.enabled(.Info), log.enabled(.Warn), log.enabled(.Error))
+    }
 }
 
 web: module {
-    level: fn() -[Log]> String { lowest(log.enabled(.Debug), log.enabled(.Info), log.enabled(.Warn), log.enabled(.Error)) }
+    level: fn() -[Log]> String {
+        lowest(log.enabled(.Debug), log.enabled(.Info), log.enabled(.Warn), log.enabled(.Error))
+    }
 }
 
-report: fn() -[Log, IO]> {
-    print("shop={level()} shop.db={db.level()} shop.web={web.level()}")
-}
+report: fn() -[Log, IO]> { print("shop={level()} shop.db={db.level()} shop.web={web.level()}") }
 
 run: fn() -[Log, IO]> {
     report()

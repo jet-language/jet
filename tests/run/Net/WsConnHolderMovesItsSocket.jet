@@ -22,9 +22,7 @@ Child: struct {
     wire: Wire
 }
 
-adopt: fn(wire: &&Wire) -> Child {
-    Child{wire: wire}
-}
+adopt: fn(wire: &&Wire) -> Child { Child{wire: wire} }
 
 handle: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
     sock: ws.upgrade(req) ?? panic("upgrade")
@@ -45,9 +43,7 @@ run: fn() {
     held: adopt(wire)
     held.wire.conn.send_text("ping") ?? panic("client send")
     reply := held.wire.conn.recv() ?? panic("client recv")
-    loop !reply.is_text() {
-        reply = held.wire.conn.recv() ?? panic("client recv")
-    }
+    loop !reply.is_text() -> reply = held.wire.conn.recv() ?? panic("client recv")
     print(reply.text() ?? panic("reply text"))
     closed: held.wire.conn.recv() ?? panic("client close")
     print("closed {closed.is_close()}")

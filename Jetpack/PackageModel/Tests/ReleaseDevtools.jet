@@ -1,9 +1,14 @@
 use {
     jet_pkg_model.[
-        pkg_release_allowlist_contains, pkg_release_allowlist_parse, pkg_release_deployment_debug,
-        pkg_release_deployment_with_values, pkg_release_inspect_endpoint_enabled,
-        pkg_release_inspect_local_rail_enabled, pkg_release_inspect_parse,
-        pkg_release_policy_endpoint_enabled, pkg_release_policy_facts,
+        pkg_release_allowlist_contains,
+        pkg_release_allowlist_parse,
+        pkg_release_deployment_debug,
+        pkg_release_deployment_with_values,
+        pkg_release_inspect_endpoint_enabled,
+        pkg_release_inspect_local_rail_enabled,
+        pkg_release_inspect_parse,
+        pkg_release_policy_endpoint_enabled,
+        pkg_release_policy_facts,
         pkg_release_policy_from_manifest_profile,
     ]
     jet_foundation.[JetReleaseDevtoolsNetwork, JetReleaseDevtoolsPublication, JetReleaseInspect]
@@ -47,7 +52,7 @@ use {
     assert(!pkg_release_allowlist_contains(allowlist, "10.24.4.8"))
     assert(pkg_release_allowlist_contains(allowlist, "2001:db8:0:0:0:0:0:1"))
     if pkg_release_allowlist_parse("10.0.0.1/33") == {
-        .Ok(_) -> panic("a /33 IPv4 prefix is refused")
+        .Ok(_) -> { panic("a /33 IPv4 prefix is refused") }
         .Err(_) -> {}
     }
 }

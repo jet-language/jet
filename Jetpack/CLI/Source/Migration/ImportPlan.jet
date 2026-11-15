@@ -17,7 +17,7 @@ ImportPlan: struct {
     // One shared provider-fact record per imported provider reference.
     // Losses remain on the record so generated files cannot hide an
     // unresolved fact.
-    provider_facts: [String: ProviderFacts]
+    provider_facts: [String:ProviderFacts]
 
     empty: fn(kind: String) -> ImportPlan Never! {
         ImportPlan{
@@ -29,7 +29,7 @@ ImportPlan: struct {
             ffi_stubs: [FFIStub]{},
             todos: [ImportTodo]{},
             migration: [MigrationStatus]{},
-            provider_facts: [String: ProviderFacts]{}
+            provider_facts: [String:ProviderFacts]{},
         }
     }
 
@@ -55,7 +55,9 @@ ImportPlan: struct {
             existing.add_conflict("target", previous_target, facts.target, "provider.import")
         }
         if facts.resolved_source != "" -> existing.set_resolved_source(facts.resolved_source)
-        if facts.native_format != "" -> existing.set_native_document(facts.native_format, facts.native_document)
+        if facts.native_format != "" {
+            existing.set_native_document(facts.native_format, facts.native_document)
+        }
         keys := facts.facts.keys().to_list()
         keys.sort()
         loop key in keys {
@@ -182,9 +184,7 @@ ImportConflict: enum {
 }
 
 // TODO diagnostic codes await a ballot.
-cli_todo_diagnostics_need_ballot: fn() -> Bool Never! {
-    true
-}
+cli_todo_diagnostics_need_ballot: fn() -> Bool Never! { true }
 
 // The generated contents when the file is new or unchanged; a user-edited
 // file is a conflict.

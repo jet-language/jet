@@ -10,9 +10,12 @@ use {
 // The native data-directory leaf (macOS/Windows spell it
 // `Hangar`); explicit roots keep the historical lower-case child.
 HANGAR_NATIVE_SUBDIR_TITLE: "Hangar"
+
 HANGAR_LEGACY_SUBDIR: "hangar"
+
 // The explicit Jetpack root, which replaces the user data directory.
 HANGAR_ROOT_ENV: ENV_JETPACK_ROOT
+
 // The Hangar directory of verified single-file tools Jet pins by SHA-256
 // (`tools/<sha256>/<name>`), such as its Bubblewrap.
 HANGAR_TOOLS_DIR: "tools"
@@ -57,7 +60,9 @@ foundation_absolute_environment_path: fn(name: String) -[Env]> String? Never! {
 }
 
 foundation_user_data_root: fn() -[Env]> String Never! {
-    if sys.is_macos() -> return files.join(files.join(files.join(foundation_home_dir(), "Library"), "Application Support"), "Jet")
+    if sys.is_macos() {
+        return files.join(files.join(files.join(foundation_home_dir(), "Library"), "Application Support"), "Jet")
+    }
     if sys.is_windows() {
         local: foundation_environment_path("LOCALAPPDATA") ?? files.join(files.join(foundation_home_dir(), "AppData"), "Local")
         return files.join(local, "Jet")

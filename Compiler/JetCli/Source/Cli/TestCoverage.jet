@@ -29,7 +29,9 @@ jet_cli_coverage_functions: fn(file: String, functions: [FnBody], tests: [TTestF
     loop key in harnessed -> excluded[key.copy()] = true
     out := [JetCLICoverageFunction]{}
     loop function in functions {
-        if function.synthetic || function.source_file != file || function.name == "run" || excluded.get(function.key) != None -> next
+        if function.synthetic || function.source_file != file || function.name == "run" || excluded.get(function.key) != None {
+            next
+        }
         name: if function.kind == {
             .TopLevel -> function.name.copy()
             .Method(_, owner) -> "{jet_cli_coverage_owner(owner)}.{function.name}"
@@ -94,14 +96,18 @@ jet_cli_coverage_text: fn(file: String, functions: [JetCLICoverageFunction], hit
 
 // The `--json` status line: `"coverage":{"file","functions":[{name,line,covered}]}`.
 jet_cli_coverage_status: fn(file: String, functions: [JetCLICoverageFunction], hits: [Int:Bool]) -> String Never! {
-    rows: loop function in functions -> jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("name", jet_cli_status_text(function.name)),
-        jet_cli_status_field("line", jet_cli_status_int(function.line)),
-        jet_cli_status_field("covered", jet_cli_status_bool(hits.get(function.line) != None)),
-    })
-    payload: jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("file", jet_cli_status_text(file)),
-        jet_cli_status_field("functions", jet_cli_status_array(rows)),
-    })
+    rows: loop function in functions -> jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("name", jet_cli_status_text(function.name)),
+            jet_cli_status_field("line", jet_cli_status_int(function.line)),
+            jet_cli_status_field("covered", jet_cli_status_bool(hits.get(function.line) != None)),
+        },
+    )
+    payload: jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("file", jet_cli_status_text(file)),
+            jet_cli_status_field("functions", jet_cli_status_array(rows)),
+        },
+    )
     "{jet_cli_status_render("coverage", true, [JetCLIStatusField]{jet_cli_status_field("coverage", payload)})}\n"
 }

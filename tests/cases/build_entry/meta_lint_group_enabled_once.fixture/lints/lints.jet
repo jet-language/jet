@@ -5,8 +5,11 @@ NoPrintInLib: struct {
     impl Diagnostic {
         code: "lints.NoPrintInLib"
         tier: .Tidy
+
         what: fn(self) -> String { "library code prints to the terminal" }
+
         why: fn(self) -> String { "the program that calls the library owns the terminal" }
+
         fix: fn(self) -> String { "log the message instead" }
     }
 }
@@ -22,6 +25,4 @@ install: fn(meta: Compiler) {
 shout: fn(text: String) { print(text) }
 
 // A dependency's build never runs when a package imports it.
-build: fn(b: Build) {
-    panic("the lints package's build ran")
-}
+build: fn(b: Build) { panic("the lints package's build ran") }

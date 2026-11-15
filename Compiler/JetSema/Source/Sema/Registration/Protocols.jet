@@ -24,9 +24,13 @@ use {
 // The generated items enter just before their protocol declaration.
 sema_protocols_expand: fn(items: &[Item], diagnostics: &[Diagnostic]) {
     has_protocol: loop item in items {
-        if item == .ProtocolDecl(_) -> break true
+        if item == .ProtocolDecl(_) {
+            break true
+        }
     } ?? false
-    if !has_protocol -> return
+    if !has_protocol {
+        return
+    }
     expanded := [Item]{}
     loop item in items {
         if item == .ProtocolDecl(declaration) {
@@ -40,7 +44,9 @@ sema_protocols_expand: fn(items: &[Item], diagnostics: &[Diagnostic]) {
                 // registers; the generated handles name theirs here.
                 owners := sema_state_types_owners()
                 sema_state_types_collect(generated, owners)
-                loop value in sema_state_types_rewrite_items(generated, owners) -> expanded.push(value)
+                loop value in sema_state_types_rewrite_items(generated, owners) {
+                    expanded.push(value)
+                }
             }
         }
         expanded.push(item.copy())
@@ -86,7 +92,9 @@ sema_protocol_source: fn(declaration: ProtocolDecl) -> String Never! {
     server: "{declaration.name}.Server"
     states: loop index in 0..<(declaration.messages.len() + 1) -> "S{index}"
     lines := [String]{}
-    loop index in 0..<declaration.messages.len() -> lines.push("        {states[index]} -> {states[index + 1]}\n")
+    loop index in 0..<declaration.messages.len() {
+        lines.push("        {states[index]} -> {states[index + 1]}\n")
+    }
     lines.push("        {states[declaration.messages.len()]}\n")
     state_list: lines.join("")
     out := [String]{}
@@ -98,9 +106,7 @@ sema_protocol_source: fn(declaration: ProtocolDecl) -> String Never! {
         terminal: index + 1 == declaration.messages.len()
         if message.direction == ProtocolDirection.ClientToServer {
             out.push(sema_protocol_send_method(client, states, index, message, terminal))
-        } else {
-            out.push(sema_protocol_recv_method(client, states, index, message, terminal))
-        }
+        } else { out.push(sema_protocol_recv_method(client, states, index, message, terminal)) }
     }
     out.push("}}\n\n")
     out.push("impl {server} {{\n")
@@ -109,9 +115,7 @@ sema_protocol_source: fn(declaration: ProtocolDecl) -> String Never! {
         terminal: index + 1 == declaration.messages.len()
         if message.direction == ProtocolDirection.ClientToServer {
             out.push(sema_protocol_recv_method(server, states, index, message, terminal))
-        } else {
-            out.push(sema_protocol_send_method(server, states, index, message, terminal))
-        }
+        } else { out.push(sema_protocol_send_method(server, states, index, message, terminal)) }
     }
     out.push("}}")
     out.join("")

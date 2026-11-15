@@ -78,15 +78,37 @@ TREE_KINDS: [String]{"Source", "Tests"}
 
 // Shared dependencies reference canonical Compiler/ sources in this checkout.
 ALLOWED_PREFIXES: [String]{"Jetpack/", "Compiler/"}
+
 COMPILER_PACKAGES: "Tools/agent/CompilerPackages.jet"
 
 // The packages whose `use <package>.[names]` or `use <package>.name` lines the
 // unit blanks: it is one namespace.
 PACKAGE_NAMES: [String]{
-    "jet_foundation", "jet_lexer", "jet_parser", "jet_sema", "jet_eval", "jet_repl", "jet_driver", "jet_backend",
-    "jet_cli", "jet_testkit", "compiler_bootstrap", "jetpack_foundation", "jetpack_trust_root", "jet_pkg_model",
-    "jet_env_model", "jetpack_trust", "jetpack_artifact_store", "jetpack_build", "jetpack_nix_eval", "jetpack_nix",
-    "jetpack_store", "jetpack_publication", "jetpack_environment", "jetpack_secrets", "jetpack_integrations",
+    "jet_foundation",
+    "jet_lexer",
+    "jet_parser",
+    "jet_sema",
+    "jet_eval",
+    "jet_repl",
+    "jet_driver",
+    "jet_backend",
+    "jet_cli",
+    "jet_testkit",
+    "compiler_bootstrap",
+    "jetpack_foundation",
+    "jetpack_trust_root",
+    "jet_pkg_model",
+    "jet_env_model",
+    "jetpack_trust",
+    "jetpack_artifact_store",
+    "jetpack_build",
+    "jetpack_nix_eval",
+    "jetpack_nix",
+    "jetpack_store",
+    "jetpack_publication",
+    "jetpack_environment",
+    "jetpack_secrets",
+    "jetpack_integrations",
 }
 
 // Jetpack is a package/environment engine: it reads and writes the store,
@@ -116,7 +138,9 @@ run: fn() {
     config: env_config(mode, root, cwd) ?? refuse_as("jetpack-bootstrap", err.message)
     members: compiler_members(root, checkout_root(cwd)) ?? refuse_as("jetpack-bootstrap", err.message)
     done: assemble(config, members) ?? refuse_as("jetpack-bootstrap", err.message)
-    if done.skipped > 0 -> print("note: {done.skipped} unlisted file(s) in dependency areas are not part of this unit (another writer's work in progress)")
+    if done.skipped > 0 {
+        print("note: {done.skipped} unlisted file(s) in dependency areas are not part of this unit (another writer's work in progress)")
+    }
     print("assembled {done.units} Jet sources ({mode}, {done.claims} test claims) into {config.scratch}/project/src/jetpack.jet")
     print("source provenance: {config.scratch}/jetpack.map.json")
 }
@@ -131,7 +155,9 @@ refuse_as: fn(prefix: String, message: String) -> Never { process.fail(1, "{pref
 // The checkout that holds this script; its tools (CompilerPackages.jet) run from it.
 checkout_root: fn(cwd: String) -> String {
     script: resolve_path(cwd, sys.executable())
-    if !script.ends_with("/{SELF}") -> refuse_as("jetpack-bootstrap", "run {SELF} of a checkout with jet (this is {script})")
+    if !script.ends_with("/{SELF}") {
+        refuse_as("jetpack-bootstrap", "run {SELF} of a checkout with jet (this is {script})")
+    }
     script.removesuffix("/{SELF}")
 }
 
@@ -158,7 +184,9 @@ Assembled: struct {
 }
 
 env_config: fn(mode: String, root: String, cwd: String) -> Config Err! {
-    if mode != "check" && mode != "aot" && mode != "hosted" -> return Err("unknown mode {mode}; expected check, aot or hosted")
+    if mode != "check" && mode != "aot" && mode != "hosted" {
+        return Err("unknown mode {mode}; expected check, aot or hosted")
+    }
     listed: comma_list(process.env_get("JETPACK_BOOTSTRAP_AREAS") ?? "")
     areas: if listed.len() > 0 -> Val(listed) else -> [String]?{None}
     if mode == "hosted" && areas != None -> return Err("hosted builds require every Jetpack area")
@@ -234,14 +262,14 @@ Claim: struct {
 // The staged `embed_file` copies, in first-seen order, each with the file it copies.
 Embeds: struct {
     copies: [String]
-    targets: [String: String]
+    targets: [String:String]
 }
 
 // Assemble the unit `config` names into its scratch directory. `members` are
 // the compiler's library member files (Tools/agent/CompilerPackages.jet
 // sources), for the compiler-slice check.
 assemble: fn(config: Config, members: [String]) -> Assembled Err! {
-    embeds := Embeds{copies: [String]{}, targets: [String: String]{}}
+    embeds := Embeds{copies: [String]{}, targets: [String:String]{}}
     registered: read_manifest(config, "sources.list", embeds)
     drift: slice_drift(config.root, members)
     if drift.len() > 0 {
@@ -252,28 +280,38 @@ assemble: fn(config: Config, members: [String]) -> Assembled Err! {
     tests: read_manifest(config, "tests.list", embeds)
     if config.areas == .Val(selected) {
         listing: files.read("{config.root}/Jetpack/Bootstrap/sources.list") ?? return Err("cannot read Jetpack/Bootstrap/sources.list: {err}")
-        known := [String: Bool]{}
+        known := [String:Bool]{}
         loop line in split_lines(listing) {
             if section_header(line.trim()) == .Val(header) -> known[header.name] = true
         }
         loop area in selected {
-            if !(known.get(area) ?? false) -> return Err("JETPACK_BOOTSTRAP_AREAS names unknown section {area}")
+            if !(known.get(area) ?? false) {
+                return Err("JETPACK_BOOTSTRAP_AREAS names unknown section {area}")
+            }
         }
     }
-    seen := [String: Bool]{}
+    seen := [String:Bool]{}
     loop entry in registered {
-        if seen.get(entry.path) ?? false -> return Err("{entry.place}: duplicate source {entry.path}")
+        if seen.get(entry.path) ?? false {
+            return Err("{entry.place}: duplicate source {entry.path}")
+        }
         seen[entry.path] = true
     }
     loop entry in tests {
-        if seen.get(entry.path) ?? false -> return Err("{entry.place}: duplicate source {entry.path}")
+        if seen.get(entry.path) ?? false {
+            return Err("{entry.place}: duplicate source {entry.path}")
+        }
         seen[entry.path] = true
     }
     loop entry in registered {
-        if entry.path.contains("/Tests/") -> return Err("{entry.place}: test sources belong in tests.list")
+        if entry.path.contains("/Tests/") {
+            return Err("{entry.place}: test sources belong in tests.list")
+        }
     }
     loop entry in tests {
-        if !is_test_path(entry.path) -> return Err("{entry.place}: tests.list names only Jetpack/<Area>/Tests or shared Compiler/JetFoundation/Tests sources")
+        if !is_test_path(entry.path) {
+            return Err("{entry.place}: tests.list names only Jetpack/<Area>/Tests or shared Compiler/JetFoundation/Tests sources")
+        }
     }
     // Every Jetpack source and test file must be listed; an unlisted file is
     // either dead code or an ordering decision nobody made. When one area is
@@ -289,7 +327,7 @@ assemble: fn(config: Config, members: [String]) -> Assembled Err! {
             skipped += 1
             next
         }
-        blocking.push(found.path.copy()) // copy: the inventory row is dropped
+        blocking.push(found.path.copy())  // copy: the inventory row is dropped
     }
     if blocking.len() > 0 {
         listed := [String]{}
@@ -302,18 +340,20 @@ assemble: fn(config: Config, members: [String]) -> Assembled Err! {
     // that have no package.jet this way.
     if config.test_sections == .Val(sections) {
         loop section in sections {
-            if !has_section(tests, section) -> return Err("JETPACK_BOOTSTRAP_TEST_AREAS names {section}, which has no tests.list section with claims")
+            if !has_section(tests, section) {
+                return Err("JETPACK_BOOTSTRAP_TEST_AREAS names {section}, which has no tests.list section with claims")
+            }
         }
     }
     // The unit: the implementation files, then the selected tests.
     units := registered
-    test_paths := [String: Bool]{}
+    test_paths := [String:Bool]{}
     if config.mode != "hosted" {
         loop entry in tests {
             own_ok: if config.own == .Val(own) -> entry.section == own else -> true
             sections_ok: if config.test_sections == .Val(sections) -> has(sections, entry.section) else -> true
             if !own_ok || !sections_ok -> next
-            test_paths[entry.path.copy()] = true // copy: the unit entry keeps it
+            test_paths[entry.path.copy()] = true  // copy: the unit entry keeps it
             units.push(entry)
         }
     }
@@ -332,10 +372,10 @@ assemble: fn(config: Config, members: [String]) -> Assembled Err! {
     // repeated single-line Core import after its first occurrence is blanked
     // the same way (a duplicate import name is E0105), and grouped Core member
     // imports are deduplicated per member.
-    seen_imports := [String: Bool]{}
-    seen_members := [String: Bool]{}
+    seen_imports := [String:Bool]{}
+    seen_members := [String:Bool]{}
     claims := [Claim]{}
-    claim_seen := [String: Bool]{}
+    claim_seen := [String:Bool]{}
     output := [U8]{}
     next_line := 1
     mapped := [Mapped]{}
@@ -345,7 +385,9 @@ assemble: fn(config: Config, members: [String]) -> Assembled Err! {
         packages_blanked: blank_package_imports(unblock_uses(entry.text), PACKAGE_NAMES)
         members_kept: blank_repeated_members(packages_blanked, seen_members)
         text: blank_repeated_imports(members_kept, seen_imports)
-        if test_paths.get(entry.path) ?? false -> render_tests(text, entry.path, entry.section, claims, claim_seen) ?? return Err(err.message)
+        if test_paths.get(entry.path) ?? false {
+            render_tests(text, entry.path, entry.section, claims, claim_seen) ?? return Err(err.message)
+        }
         body: text.bytes()
         body_bytes: body.len()
         start_byte: output.len()
@@ -370,24 +412,28 @@ assemble: fn(config: Config, members: [String]) -> Assembled Err! {
             closed -> newlines
             else -> newlines + 1
         }
-        mapped.push(Mapped{
-            path: entry.path.copy(), // copy: the entry is dropped with the unit list
-            sha256: crypto.sha256(entry.bytes).hex(),
-            original_bytes: entry.bytes.len(),
-            original_lines: line_count,
-            line_starts: line_starts,
-            start_byte: start_byte,
-            end_byte: start_byte + body_bytes,
-            start_line: start_line,
-            end_line: start_line + line_count - 1,
-        })
+        mapped.push(
+            Mapped{
+                path: entry.path.copy(),  // copy: the entry is dropped with the unit list
+                sha256: crypto.sha256(entry.bytes).hex(),
+                original_bytes: entry.bytes.len(),
+                original_lines: line_count,
+                line_starts: line_starts,
+                start_byte: start_byte,
+                end_byte: start_byte + body_bytes,
+                start_line: start_line,
+                end_line: start_line + line_count - 1,
+            },
+        )
     }
 
     project: "{config.scratch}/project"
     source_dir: "{project}/src"
     protected: [String]{config.root, process.env_get("JET_TOOLCHAIN_ROOT") ?? "", files.cwd() ?? "", process.env_get("HOME") ?? ""}
     if files.exists(project) || files.is_symlink(project) {
-        if project_removal_refusal(project, protected) == .Val(why) -> return Err("refusing to remove {project}: {why}")
+        if project_removal_refusal(project, protected) == .Val(why) {
+            return Err("refusing to remove {project}: {why}")
+        }
         files.remove_all(project) ?? return Err("cannot remove {project}: {err}")
     }
     files.create_dir_all(source_dir) ?? return Err("cannot create {source_dir}: {err}")
@@ -412,26 +458,28 @@ assemble: fn(config: Config, members: [String]) -> Assembled Err! {
 // PROJECT_NAMES. An empty or stale scratch variable that lands the project on
 // a checkout, a toolchain root, the working directory or HOME is refused here.
 project_removal_refusal: fn(project: String, protected: [String]) -> String? {
-    if !project.starts_with("/") -> return Val("{if project == "" -> "an empty path" else -> project} is not an absolute path")
+    if !project.starts_with("/") {
+        return Val("{if project == "" -> "an empty path" else -> project} is not an absolute path")
+    }
     if files.is_symlink(project) -> return Val("it is a link, not a directory an assembly made")
     if !files.is_dir(project) -> return Val("it is not a directory")
     real: files.canonicalize(project) ?? return Val("it cannot be resolved: {err}")
     if real == "/" -> return Val("it is the filesystem root")
     loop guarded in protected {
         if guarded == "" -> next
-        held: files.canonicalize(guarded) ?? guarded.copy() // copy: an unresolvable path compares as given
+        held: files.canonicalize(guarded) ?? guarded.copy()  // copy: an unresolvable path compares as given
         if contained(real, held) -> return Val("it is or holds {guarded}")
     }
     entries: files.list_dir(project) ?? return Val("it cannot be listed: {err}")
     loop entry in entries {
-        if !PROJECT_NAMES.contains(entry.name) -> return Val("it holds {entry.name}, which no assembly writes")
+        if !PROJECT_NAMES.contains(entry.name) {
+            return Val("it holds {entry.name}, which no assembly writes")
+        }
     }
     None
 }
 
-append: fn(out: &[U8], text: String) {
-    out.extend(text.bytes())
-}
+append: fn(out: &[U8], text: String) { out.extend(text.bytes()) }
 
 // The source map: schema jet-bootstrap-source-map/v2.
 source_map: fn(config: Config, mapped: [Mapped], embeds: Embeds, claims: [Claim]) -> Dyn {
@@ -440,50 +488,64 @@ source_map: fn(config: Config, mapped: [Mapped], embeds: Embeds, claims: [Claim]
     loop row in mapped {
         starts := [Dyn]{}
         loop start in row.line_starts -> starts.push(Dyn.Int(start))
-        segments.push(Dyn.Object([String: Dyn]{
-            "generated": Dyn.Object([String: Dyn]{"start": Dyn.Int(row.start_byte), "end": Dyn.Int(row.end_byte)}),
-            "source_file": Dyn.Text(row.path.copy()), // copy: the file row names it too
-            "line_starts": Dyn.Array(starts.copy()), // copy: the file row lists them too
-        }))
-        file_rows.push(Dyn.Object([String: Dyn]{
-            "path": Dyn.Text(row.path.copy()), // copy: the segment named it first
-            "sha256": Dyn.Text(row.sha256.copy()), // copy: the row is borrowed
-            "original_bytes": Dyn.Int(row.original_bytes),
-            "original_lines": Dyn.Int(row.original_lines),
-            "line_starts": Dyn.Array(starts),
-            "generated_start_byte": Dyn.Int(row.start_byte),
-            "generated_end_byte_exclusive": Dyn.Int(row.end_byte),
-            "generated_start_line": Dyn.Int(row.start_line),
-            "generated_end_line": Dyn.Int(row.end_line),
-        }))
+        segments.push(
+            Dyn.Object(
+                [String:Dyn]{
+                    "generated": Dyn.Object([String:Dyn]{"start": Dyn.Int(row.start_byte), "end": Dyn.Int(row.end_byte)}),
+                    "source_file": Dyn.Text(row.path.copy()),  // copy: the file row names it too
+                    "line_starts": Dyn.Array(starts.copy()),  // copy: the file row lists them too
+                },
+            ),
+        )
+        file_rows.push(
+            Dyn.Object(
+                [String:Dyn]{
+                    "path": Dyn.Text(row.path.copy()),  // copy: the segment named it first
+                    "sha256": Dyn.Text(row.sha256.copy()),  // copy: the row is borrowed
+                    "original_bytes": Dyn.Int(row.original_bytes),
+                    "original_lines": Dyn.Int(row.original_lines),
+                    "line_starts": Dyn.Array(starts),
+                    "generated_start_byte": Dyn.Int(row.start_byte),
+                    "generated_end_byte_exclusive": Dyn.Int(row.end_byte),
+                    "generated_start_line": Dyn.Int(row.start_line),
+                    "generated_end_line": Dyn.Int(row.end_line),
+                },
+            ),
+        )
     }
     embedded := [Dyn]{}
     loop staged in embeds.copies {
         target: embeds.targets.get(staged) ?? ""
-        embedded.push(Dyn.Object([String: Dyn]{
-            "copy": Dyn.Text("src/{staged}"),
-            "source_file": Dyn.Text(relative_to(config.root, target)),
-        }))
+        embedded.push(
+            Dyn.Object(
+                [String:Dyn]{
+                    "copy": Dyn.Text("src/{staged}"),
+                    "source_file": Dyn.Text(relative_to(config.root, target)),
+                },
+            ),
+        )
     }
     names := [Dyn]{}
     sections := [Dyn]{}
     loop claim in claims {
-        names.push(Dyn.Text(claim.name.copy())) // copy: the claim list is borrowed
-        sections.push(Dyn.Text(claim.section.copy())) // copy: the claim list is borrowed
+        names.push(Dyn.Text(claim.name.copy()))  // copy: the claim list is borrowed
+        sections.push(Dyn.Text(claim.section.copy()))  // copy: the claim list is borrowed
     }
-    Dyn.Object([String: Dyn]{
-        "schema": Dyn.Text("jet-bootstrap-source-map/v2"),
-        "module": Dyn.Text("Jetpack"),
-        "mode": Dyn.Text(config.mode.copy()), // copy: the config is borrowed
-        "fallback_source_file": Dyn.Text("Jetpack"),
-        "source_segments": Dyn.Array(segments),
-        "files": Dyn.Array(file_rows),
-        // Each staged embed_file copy and the repository file it came from.
-        "embedded_files": Dyn.Array(embedded),
-        "tests": Dyn.Array(names),
-        // Each claim's tests.list section: the packages suite's row is `Jetpack/<section>: <claim>`.
-        "test_areas": Dyn.Array(sections),
-    })
+    Dyn.Object(
+        [String:Dyn]{
+            "schema": Dyn.Text("jet-bootstrap-source-map/v2"),
+            "module": Dyn.Text("Jetpack"),
+            "mode": Dyn.Text(config.mode.copy()),  // copy: the config is borrowed
+            "fallback_source_file": Dyn.Text("Jetpack"),
+            "source_segments": Dyn.Array(segments),
+            "files": Dyn.Array(file_rows),
+            // Each staged embed_file copy and the repository file it came from.
+            "embedded_files": Dyn.Array(embedded),
+            "tests": Dyn.Array(names),
+            // Each claim's tests.list section: the packages suite's row is `Jetpack/<section>: <claim>`.
+            "test_areas": Dyn.Array(sections),
+        },
+    )
 }
 
 // A Jetpack file under an area's Source or Tests tree, and its area folder.
@@ -501,7 +563,9 @@ inventory: fn(config: Config) -> [Inventoried] {
         if !area.is_dir || area.name == "Bootstrap" -> next
         if config.areas == .Val(selected) && !has(selected, area.name) -> next
         loop kind in TREE_KINDS {
-            loop path in jet_files_under(config.root, "Jetpack/{area.name}/{kind}") -> out.push(Inventoried{area: area.name.copy(), path: path}) // copy: every file of the area records it
+            loop path in jet_files_under(config.root, "Jetpack/{area.name}/{kind}") {
+                out.push(Inventoried{area: area.name.copy(), path: path})  // copy: every file of the area records it
+            }
         }
     }
     out
@@ -519,7 +583,9 @@ jet_files_under: fn(root: String, directory: String) -> [String] {
             out.extend(jet_files_under(root, path))
             next
         }
-        if entry.name.ends_with(".jet") && entry.name != "package.jet" && files.is_file("{root}/{path}") -> out.push(path)
+        if entry.name.ends_with(".jet") && entry.name != "package.jet" && files.is_file("{root}/{path}") {
+            out.push(path)
+        }
     }
     out
 }
@@ -527,7 +593,9 @@ jet_files_under: fn(root: String, directory: String) -> [String] {
 compare_bytes: fn(left: [U8], right: [U8]) -> Ordering {
     at := 0
     loop at < left.len() && at < right.len() {
-        if left[at] != right[at] -> return if left[at] < right[at] -> Ordering.Less else -> Ordering.Greater
+        if left[at] != right[at] {
+            return if left[at] < right[at] -> Ordering.Less else -> Ordering.Greater
+        }
         at += 1
     }
     compare_ints(left.len(), right.len())
@@ -620,11 +688,11 @@ section_header: fn(line: String) -> Header? {
 // The manifest `name` of the dependency sections from HEAD and the own area's
 // lines live, when JETPACK_BOOTSTRAP_DEPS_FROM_HEAD is set.
 merged_manifest: fn(config: Config, working: String, name: String) -> String Err! {
-    if !config.deps_from_head -> return working.copy() // copy: the working text is the manifest
+    if !config.deps_from_head -> return working.copy()  // copy: the working text is the manifest
     own: config.own ?? ""
     head_bytes: head_file(config.root, "Jetpack/Bootstrap/{name}") ?? return Err(err.message)
     head_text: String.from_bytes(head_bytes) ?? ""
-    head_sections := [String: [String]]{}
+    head_sections := [String:[String]]{}
     current := ""
     inside := false
     loop line in split_lines(head_text) {
@@ -658,7 +726,9 @@ merged_manifest: fn(config: Config, working: String, name: String) -> String Err
 // HEAD's bytes of `path` in the source root.
 head_file: fn(root: String, path: String) -> [U8] Err! {
     shown: process.cmd([String]{"git", "show", "HEAD:{path}"}).cwd(root).output_limit(268435456).run() ?? return Err("--deps-from-head: {path} is not in HEAD ({err})")
-    if !shown.success -> return Err("--deps-from-head: {path} is not in HEAD ({shown.errors.partition("\n").head})")
+    if !shown.success {
+        return Err("--deps-from-head: {path} is not in HEAD ({shown.errors.partition("\n").head})")
+    }
     Ok(shown.output.bytes())
 }
 
@@ -682,17 +752,23 @@ read_manifest: fn(config: Config, name: String, embeds: &Embeds) -> [Entry] Err!
             section = header.name
             in_section = true
             detail: header.detail.trim()
-            folders = if detail.starts_with("folders:") -> comma_list(detail.removeprefix("folders:")) else -> [String]{header.name.copy()} // copy: the section names it too
+            folders = if detail.starts_with("folders:") -> comma_list(detail.removeprefix("folders:")) else -> [String]{header.name.copy()}  // copy: the section names it too
             next
         }
         if source_path == "" || source_path.starts_with("#") -> next
         place: "{label}:{index + 1}"
         normalized: normalize_join(".", source_path)
-        if source_path.starts_with("/") || normalized == "" || !source_path.ends_with(".jet") -> return Err("{place}: expected a repository-relative .jet source path")
+        if source_path.starts_with("/") || normalized == "" || !source_path.ends_with(".jet") {
+            return Err("{place}: expected a repository-relative .jet source path")
+        }
         if source_path != normalized -> return Err("{place}: use the canonical path {normalized}")
-        if !ALLOWED_PREFIXES.any(fn(prefix) { source_path.starts_with(prefix) }) -> return Err("{place}: sources must live under {ALLOWED_PREFIXES.join(" or ")}")
+        if !ALLOWED_PREFIXES.any(fn(prefix) { source_path.starts_with(prefix) }) {
+            return Err("{place}: sources must live under {ALLOWED_PREFIXES.join(" or ")}")
+        }
         area: jetpack_area(source_path)
-        if area != "" && !has(folders, area) -> misplaced.push("{place}: {source_path} belongs under the `# == {area} ==` section")
+        if area != "" && !has(folders, area) {
+            misplaced.push("{place}: {source_path} belongs under the `# == {area} ==` section")
+        }
         if !in_section -> return Err("{place}: every source belongs to a `# == Area ==` section")
         if config.areas == .Val(selected) && !has(selected, section) -> next
         // Dependency references have the same live/HEAD rule, never a
@@ -701,7 +777,7 @@ read_manifest: fn(config: Config, name: String, embeds: &Embeds) -> [Entry] Err!
         bytes: if config.deps_from_head && !owned -> head_file(config.root, source_path) ?? return Err(err.message) else -> live_source(config.root, source_path, place) ?? return Err(err.message)
         source_text: String.from_bytes(bytes) ?? return Err("{source_path}: source is not valid UTF-8")
         rebased: rebase_embeds(config.root, source_text, source_path, place, embeds) ?? return Err(err.message)
-        entries.push(Entry{path: source_path, bytes: bytes, text: rebased, place: place, section: section.copy()}) // copy: every entry of the section records it
+        entries.push(Entry{path: source_path, bytes: bytes, text: rebased, place: place, section: section.copy()})  // copy: every entry of the section records it
     }
     if misplaced.len() > 0 -> return Err(misplaced.join("\njetpack-bootstrap: "))
     Ok(entries)
@@ -743,24 +819,30 @@ rebase_embeds: fn(root: String, text: String, source_path: String, place: String
         }
         open: at + 12
         end := open
-        loop end < raw.len() && raw[end] != (U8{34}) && raw[end] != (U8{92}) && raw[end] != (U8{123}) && raw[end] != (U8{125}) -> end += 1
+        loop end < raw.len() && raw[end] != (U8{34}) && raw[end] != (U8{92}) && raw[end] != (U8{123}) && raw[end] != (U8{125}) {
+            end += 1
+        }
         if end == open || !starts_at(raw, end, "\")") {
             out.push(raw[at])
             at += 1
             next
         }
         rel: text_of(raw, open, end)
-        if rel.starts_with("/") -> return Err("{place}: {source_path}: embed_file paths are relative to their source file")
+        if rel.starts_with("/") {
+            return Err("{place}: {source_path}: embed_file paths are relative to their source file")
+        }
         if rel.starts_with("toolchain:") {
             out.extend("embed_file(\"{rel}\")".bytes())
             at = end + 2
             next
         }
         target: normalize_join(files.dirname("{root}/{source_path}"), rel)
-        if target == "" || !contained(root, target) -> return Err("{place}: {source_path}: embed_file(\"{rel}\") resolves outside the source root")
+        if target == "" || !contained(root, target) {
+            return Err("{place}: {source_path}: embed_file(\"{rel}\") resolves outside the source root")
+        }
         staged: "embedded/{relative_to(root, target)}.embed"
-        if embeds.targets.get(staged) == None -> embeds.copies.push(staged.copy()) // copy: the target map keys it too
-        embeds.targets[staged.copy()] = target // copy: the call below names it
+        if embeds.targets.get(staged) == None -> embeds.copies.push(staged.copy())  // copy: the target map keys it too
+        embeds.targets[staged.copy()] = target  // copy: the call below names it
         out.extend("embed_file(\"{staged}\")".bytes())
         at = end + 2
     }
@@ -780,11 +862,15 @@ stage_toolchain: fn(root: String, scratch: String, protected: [String]) Err! {
     loop staged in ([String]{"Core", "Compiler"}) {
         path: "{scratch}/{staged}"
         if !files.exists(path) && !files.is_symlink(path) -> next
-        if toolchain_removal_refusal(path, staged, protected) == .Val(why) -> return Err("refusing to remove {path}: {why}")
+        if toolchain_removal_refusal(path, staged, protected) == .Val(why) {
+            return Err("refusing to remove {path}: {why}")
+        }
         files.remove_all(path) ?? return Err("cannot remove {path}: {err}")
     }
     loop tree in ([String]{"Core", "Compiler/Prelude", "Compiler/JetFoundation/Data/Syntax"}) {
-        if !files.is_dir("{root}/{tree}") -> return Err("cannot stage the unit's toolchain tree: the source root has no {tree}/")
+        if !files.is_dir("{root}/{tree}") {
+            return Err("cannot stage the unit's toolchain tree: the source root has no {tree}/")
+        }
         copy_tree("{root}/{tree}", "{scratch}/{tree}") ?? return Err(err.message)
     }
     files.write("{scratch}/Compiler/package.jet", TOOLCHAIN_WORKSPACE) ?? return Err("cannot write {scratch}/Compiler/package.jet: {err}")
@@ -802,7 +888,7 @@ toolchain_removal_refusal: fn(path: String, name: String, protected: [String]) -
     real: files.canonicalize(path) ?? return Val("it cannot be resolved: {err}")
     loop guarded in protected {
         if guarded == "" -> next
-        held: files.canonicalize(guarded) ?? guarded.copy() // copy: an unresolvable path compares as given
+        held: files.canonicalize(guarded) ?? guarded.copy()  // copy: an unresolvable path compares as given
         if contained(real, held) -> return Val("it is or holds {guarded}")
         if real == normalize_join(held, name) -> return Val("it is the {name}/ tree of {guarded}")
     }
@@ -833,7 +919,9 @@ claim_name: fn(line: String) -> String? {
     raw: line.bytes()
     if !starts_at(raw, 0, "#Test(\"") -> return None
     end := 7
-    loop end < raw.len() && raw[end] != (U8{34}) && raw[end] != (U8{92}) && raw[end] != (U8{123}) && raw[end] != (U8{125}) -> end += 1
+    loop end < raw.len() && raw[end] != (U8{34}) && raw[end] != (U8{92}) && raw[end] != (U8{123}) && raw[end] != (U8{125}) {
+        end += 1
+    }
     if end == 7 || !starts_at(raw, end, "\")") -> return None
     rest: text_of(raw, end + 2, raw.len()).trim_start()
     if !rest.starts_with("{{") || rest.removeprefix("{{").trim() != "" -> return None
@@ -844,14 +932,16 @@ claim_name: fn(line: String) -> String? {
 // starts at column zero. Claim names are plain text (no interpolation holes or
 // escapes) so the source map's claim ledger names exactly what `jet test`
 // prints.
-render_tests: fn(text: String, path: String, section: String, claims: &[Claim], seen: &[String: Bool]) Err! {
+render_tests: fn(text: String, path: String, section: String, claims: &[Claim], seen: &[String:Bool]) Err! {
     count := 0
     loop (index, line) in text.split("\n").to_list() {
         if claim_name(line) == .Val(name) {
             count += 1
-            if seen.get(name) ?? false -> return Err("{path}:{index + 1}: duplicate test claim \"{name}\"")
-            seen[name.copy()] = true // copy: the claim records it
-            claims.push(Claim{name: name, section: section.copy()}) // copy: every claim of the file records it
+            if seen.get(name) ?? false {
+                return Err("{path}:{index + 1}: duplicate test claim \"{name}\"")
+            }
+            seen[name.copy()] = true  // copy: the claim records it
+            claims.push(Claim{name: name, section: section.copy()})  // copy: every claim of the file records it
             next
         }
         trimmed: line.trim_start()
@@ -861,8 +951,12 @@ render_tests: fn(text: String, path: String, section: String, claims: &[Claim], 
     }
     // Shared test helpers live in `*Support.jet` files: helpers only, never claims.
     support: path.ends_with("Support.jet")
-    if support && count > 0 -> return Err("{path}: a *Support.jet test helper file must not declare #Test claims")
-    if !support && count == 0 -> return Err("{path}: a tests.list entry must declare at least one #Test claim (shared helpers go in a *Support.jet file)")
+    if support && count > 0 {
+        return Err("{path}: a *Support.jet test helper file must not declare #Test claims")
+    }
+    if !support && count == 0 {
+        return Err("{path}: a tests.list entry must declare at least one #Test claim (shared helpers go in a *Support.jet file)")
+    }
     Ok()
 }
 
@@ -906,24 +1000,24 @@ normalize_join: fn(directory: String, path: String) -> String {
 // The area graph of areas.list, checked against the manifests' sections.
 AreaGraph: struct {
     order: [String]
-    deps: [String: [String]]
-    sources: [String: [String]]
+    deps: [String:[String]]
+    sources: [String:[String]]
 
     // The area and its transitive dependencies, bottom-up.
     closure: fn(self, area: String) -> [String] Err! {
         if self.deps.get(area) == None -> return Err("unknown area {area}")
-        seen := [String: Bool]{}
-        pending := [String]{area.copy()} // copy: the walk owns its queue
+        seen := [String:Bool]{}
+        pending := [String]{area.copy()}  // copy: the walk owns its queue
         loop pending.len() > 0 {
             name: pending.pop() ?? ""
             if seen.get(name) ?? false -> next
-            seen[name.copy()] = true // copy: the name is walked below
+            seen[name.copy()] = true  // copy: the name is walked below
             direct: self.deps.get(name) ?? [String]{}
             loop dep in direct -> pending.push(dep)
         }
         out := [String]{}
         loop name in self.order {
-            if seen.get(name) ?? false -> out.push(name.copy()) // copy: the order stays the graph's
+            if seen.get(name) ?? false -> out.push(name.copy())  // copy: the order stays the graph's
         }
         Ok(out)
     }
@@ -932,12 +1026,12 @@ AreaGraph: struct {
 // Each section of manifest `file` with its listed paths, in section order.
 Sections: struct {
     names: [String]
-    paths: [String: [String]]
+    paths: [String:[String]]
 }
 
 manifest_sections: fn(root: String, file: String) -> Sections Err! {
     text: files.read("{root}/Jetpack/Bootstrap/{file}") ?? return Err("cannot read Jetpack/Bootstrap/{file}: {err}")
-    found := Sections{names: [String]{}, paths: [String: [String]]{}}
+    found := Sections{names: [String]{}, paths: [String:[String]]{}}
     current := ""
     inside := false
     loop raw in split_lines(text) {
@@ -945,14 +1039,14 @@ manifest_sections: fn(root: String, file: String) -> Sections Err! {
         if section_header(line) == .Val(header) {
             current = header.name
             inside = true
-            if found.paths.get(current) == None -> found.names.push(current.copy()) // copy: the map keys it too
-            found.paths[current.copy()] = [String]{} // copy: later lines file under it
+            if found.paths.get(current) == None -> found.names.push(current.copy())  // copy: the map keys it too
+            found.paths[current.copy()] = [String]{}  // copy: later lines file under it
             next
         }
         if !inside || line == "" || line.starts_with("#") -> next
         rows := found.paths.get(current) ?? [String]{}
         rows.push(line)
-        found.paths[current.copy()] = rows // copy: later lines file under it
+        found.paths[current.copy()] = rows  // copy: later lines file under it
     }
     Ok(found)
 }
@@ -960,40 +1054,52 @@ manifest_sections: fn(root: String, file: String) -> Sections Err! {
 area_graph: fn(root: String) -> AreaGraph Err! {
     text: files.read("{root}/Jetpack/Bootstrap/areas.list") ?? return Err("cannot read Jetpack/Bootstrap/areas.list: {err}")
     order := [String]{}
-    deps := [String: [String]]{}
+    deps := [String:[String]]{}
     loop (index, raw) in split_lines(text) {
         line: raw.trim()
         if line == "" || line.starts_with("#") -> next
         parts: line.partition(":")
-        if parts.sep == "" || parts.head == "" -> return Err("areas.list:{index + 1}: expected `Area: Dep, Dep`")
+        if parts.sep == "" || parts.head == "" {
+            return Err("areas.list:{index + 1}: expected `Area: Dep, Dep`")
+        }
         area: parts.head.trim()
         if deps.get(area) != None -> return Err("areas.list:{index + 1}: duplicate area {area}")
         direct := [String]{}
         loop piece in parts.tail.split(",") {
             dep: piece.trim()
             if dep == "" -> next
-            if deps.get(dep) == None -> return Err("areas.list:{index + 1}: {area} depends on {dep}, which must be declared earlier (bottom-up, no cycles)")
+            if deps.get(dep) == None {
+                return Err("areas.list:{index + 1}: {area} depends on {dep}, which must be declared earlier (bottom-up, no cycles)")
+            }
             direct.push(dep)
         }
-        deps[area.copy()] = direct // copy: the order lists it too
+        deps[area.copy()] = direct  // copy: the order lists it too
         order.push(area)
     }
     source_sections: manifest_sections(root, "sources.list") ?? return Err(err.message)
     test_sections: manifest_sections(root, "tests.list") ?? return Err(err.message)
     loop area in source_sections.names {
-        if deps.get(area) == None -> return Err("sources.list section {area} is missing from areas.list")
+        if deps.get(area) == None {
+            return Err("sources.list section {area} is missing from areas.list")
+        }
     }
     loop area in test_sections.names {
-        if deps.get(area) == None -> return Err("tests.list section {area} is missing from areas.list")
+        if deps.get(area) == None {
+            return Err("tests.list section {area} is missing from areas.list")
+        }
     }
     loop area in order {
-        if source_sections.paths.get(area) == None -> return Err("areas.list names {area}, which has no sources.list section")
+        if source_sections.paths.get(area) == None {
+            return Err("areas.list names {area}, which has no sources.list section")
+        }
     }
     Ok(AreaGraph{order: order, deps: deps, sources: source_sections.paths})
 }
 
 areas_command: fn(root: String, args: [String]) -> String Err! {
-    if args.len() == 0 -> return Err("usage: Assemble.jet areas closure <Area> | sources <Area> | populated")
+    if args.len() == 0 {
+        return Err("usage: Assemble.jet areas closure <Area> | sources <Area> | populated")
+    }
     graph: area_graph(root) ?? return Err(err.message)
     if args[0] == {
         "closure" -> {
@@ -1004,17 +1110,23 @@ areas_command: fn(root: String, args: [String]) -> String Err! {
         "sources" -> {
             if args.len() != 2 -> return Err("sources needs an area")
             listed := [String]{}
-            loop area in graph.closure(args[1]) ?? return Err(err.message) -> listed.extend(graph.sources.get(area) ?? [String]{})
+            loop area in graph.closure(args[1]) ?? return Err(err.message) {
+                listed.extend(graph.sources.get(area) ?? [String]{})
+            }
             Ok(listed.join("\n"))
         }
         "populated" -> {
-            if args.len() != 1 -> return Err("usage: Assemble.jet areas closure <Area> | sources <Area> | populated")
+            if args.len() != 1 {
+                return Err("usage: Assemble.jet areas closure <Area> | sources <Area> | populated")
+            }
             // Only areas with Jetpack sources are checkable units; reused
             // Compiler sections are dependencies.
             populated := [String]{}
             loop area in graph.order {
                 paths: graph.sources.get(area) ?? [String]{}
-                if paths.any(fn(path) { path.starts_with("Jetpack/") }) -> populated.push(area.copy()) // copy: the order stays the graph's
+                if paths.any(fn(path) { path.starts_with("Jetpack/") }) {
+                    populated.push(area.copy())  // copy: the order stays the graph's
+                }
             }
             Ok(populated.join("\n"))
         }
@@ -1031,7 +1143,9 @@ areas_command: fn(root: String, args: [String]) -> String Err! {
 compiler_members: fn(root: String, repo: String) -> [String] Err! {
     jet: tool_jet()
     listed: process.cmd([String]{jet, "{repo}/{COMPILER_PACKAGES}", "--root", root, "sources"}).output_limit(1073741824).run() ?? return Err("couldn't run `{jet} {COMPILER_PACKAGES} sources`: {err}")
-    if !listed.success -> return Err("`{COMPILER_PACKAGES} sources` exited {listed.code}: {process.combined_output(listed).trim_end()}")
+    if !listed.success {
+        return Err("`{COMPILER_PACKAGES} sources` exited {listed.code}: {process.combined_output(listed).trim_end()}")
+    }
     Ok(member_rows(listed.output))
 }
 
@@ -1045,7 +1159,7 @@ member_rows: fn(text: String) -> [String] {
         if fields.len() < 3 -> next
         path: fields[2]
         if path == "{fields[1]}/run.jet" || !path.starts_with("Compiler/") -> next
-        out.push(path.copy()) // copy: the row is dropped
+        out.push(path.copy())  // copy: the row is dropped
     }
     out
 }
@@ -1075,47 +1189,49 @@ Declaration: struct {
 // empty (the assembly reports it).
 SourceCache: struct {
     root: String
-    texts: [String: String]
+    texts: [String:String]
 
     code_of: fn(&self, path: String) -> String {
-        if self.texts.get(path) == .Val(known) -> return known.copy() // copy: the cache keeps it
+        if self.texts.get(path) == .Val(known) -> return known.copy()  // copy: the cache keeps it
         text: code(files.read("{self.root}/{path}") ?? "")
-        self.texts[path.copy()] = text.copy() // copy: the caller reads it too
+        self.texts[path.copy()] = text.copy()  // copy: the caller reads it too
         text
     }
 }
 
 // The slice's drift problems, in report order.
 slice_drift: fn(root: String, members: [String]) -> [String] {
-    cache := SourceCache{root: root, texts: [String: String]{}}
+    cache := SourceCache{root: root, texts: [String:String]{}}
     sources: files.read("{root}/Jetpack/Bootstrap/sources.list") ?? ""
     tests: files.read("{root}/Jetpack/Bootstrap/tests.list") ?? ""
     jetpack_list := listed_paths(sources)
     jetpack_list.extend(listed_paths(tests))
-    member_set := [String: Bool]{}
+    member_set := [String:Bool]{}
     loop path in members -> member_set[path] = true
     slice := [String]{}
-    listed_set := [String: Bool]{}
-    slice_packages := [String: Bool]{}
+    listed_set := [String:Bool]{}
+    slice_packages := [String:Bool]{}
     problems := [String]{}
     loop path in jetpack_list {
         if !path.starts_with("Compiler/") -> next
-        slice.push(path.copy()) // copy: the unit list keeps it
-        listed_set[path.copy()] = true // copy: the unit list keeps it
+        slice.push(path.copy())  // copy: the unit list keeps it
+        listed_set[path.copy()] = true  // copy: the unit list keeps it
         slice_packages[package_of(path)] = true
     }
     loop path in slice {
-        if !(member_set.get(path) ?? false) && !path.contains("/Tests/") -> problems.push("{path} is not a member of the compiler's packages")
+        if !(member_set.get(path) ?? false) && !path.contains("/Tests/") {
+            problems.push("{path} is not a member of the compiler's packages")
+        }
     }
     // Names declared by the unit itself, and the unlisted compiler files that
     // alone declare a name.
-    unit_declared := [String: Bool]{}
+    unit_declared := [String:Bool]{}
     loop path in jetpack_list {
         loop name in declared(cache.code_of(path)) -> unit_declared[name] = true
     }
     owner_paths := [String]{}
     owner_fns := [Bool]{}
-    owner_at := [String: Int]{}
+    owner_at := [String:Int]{}
     loop path in members {
         loop row in declarations(cache.code_of(path)) {
             if owner_at.get(row.name) != None {
@@ -1123,23 +1239,23 @@ slice_drift: fn(root: String, members: [String]) -> [String] {
                 next
             }
             owner_at[row.name] = owner_paths.len()
-            owner_paths.push(path.copy()) // copy: every name of the file records it
+            owner_paths.push(path.copy())  // copy: every name of the file records it
             owner_fns.push(row.is_fn)
         }
     }
     missing_order := [String]{}
-    missing := [String: [String]]{}
+    missing := [String:[String]]{}
     queue := jetpack_list.copy()
     at := 0
     loop at < queue.len() {
-        path: queue[at].copy() // copy: the queue grows below
+        path: queue[at].copy()  // copy: the queue grows below
         at += 1
         uses: referenced(cache.code_of(path))
         loop name in uses.names {
             if unit_declared.get(name) ?? false -> next
             slot: owner_at.get(name) ?? -1
             if slot < 0 -> next
-            owner: owner_paths[slot].copy() // copy: the owner table stays whole
+            owner: owner_paths[slot].copy()  // copy: the owner table stays whole
             if listed_set.get(owner) ?? false -> next
             if owner_fns[slot] && !(uses.called.get(name) ?? false) -> next
             if !(slice_packages.get(package_of(owner)) ?? false) {
@@ -1147,10 +1263,12 @@ slice_drift: fn(root: String, members: [String]) -> [String] {
                 next
             }
             if missing.get(owner) == None {
-                missing_order.push(owner.copy()) // copy: the missing map keys it too
-                missing[owner.copy()] = [String]{} // copy: the queue holds it too
-                queue.push(owner.copy()) // copy: its declarations are read below
-                loop declared_name in declared(cache.code_of(owner)) -> unit_declared[declared_name] = true
+                missing_order.push(owner.copy())  // copy: the missing map keys it too
+                missing[owner.copy()] = [String]{}  // copy: the queue holds it too
+                queue.push(owner.copy())  // copy: its declarations are read below
+                loop declared_name in declared(cache.code_of(owner)) {
+                    unit_declared[declared_name] = true
+                }
             }
             rows := missing.get(owner) ?? [String]{}
             line: "{name} (used by {path})"
@@ -1158,14 +1276,14 @@ slice_drift: fn(root: String, members: [String]) -> [String] {
             missing[owner] = rows
         }
     }
-    member_index := [String: Int]{}
+    member_index := [String:Int]{}
     loop (index, path) in members -> member_index[path] = index
     missing_order.sort_by(fn(left: String, right: String) { compare_ints(member_index.get(left) ?? 0, member_index.get(right) ?? 0) })
     loop owner in missing_order {
         rows: missing.get(owner) ?? [String]{}
         shown := [String]{}
         loop index in 0..<rows.len() {
-            if index < 3 -> shown.push(rows[index].copy()) // copy: the row list stays whole
+            if index < 3 -> shown.push(rows[index].copy())  // copy: the row list stays whole
         }
         more: if rows.len() > 3 -> ", +{rows.len() - 3}" else -> ""
         problems.push("{owner} must be listed: {shown.join(", ")}{more}")
@@ -1281,7 +1399,9 @@ declaration_at: fn(raw: [U8], at: Int) -> DeclarationAt {
     // `NAME` then blanks then `:` not followed by `=`.
     if at >= raw.len() || !is_upper(raw[at]) -> return none
     end := at + 1
-    loop end < raw.len() && (is_upper(raw[end]) || is_digit(raw[end]) || raw[end] == (U8{95})) -> end += 1
+    loop end < raw.len() && (is_upper(raw[end]) || is_digit(raw[end]) || raw[end] == (U8{95})) {
+        end += 1
+    }
     colon := end
     loop colon < raw.len() && is_space(raw[colon]) -> colon += 1
     if colon >= raw.len() || raw[colon] != (U8{58}) -> return none
@@ -1360,14 +1480,18 @@ enum_body_from: fn(raw: [U8], at: Int) -> EnumBody {
     if name_end == at || name_end >= raw.len() || raw[name_end] != (U8{58}) -> return none
     kind := name_end + 1
     loop kind < raw.len() && is_space(raw[kind]) -> kind += 1
-    if !starts_at(raw, kind, "enum") || (kind + 4 < raw.len() && is_ident_byte(raw[kind + 4])) -> return none
+    if !starts_at(raw, kind, "enum") || (kind + 4 < raw.len() && is_ident_byte(raw[kind + 4])) {
+        return none
+    }
     open := kind + 4
     loop open < raw.len() && raw[open] != (U8{123}) && raw[open] != (U8{10}) -> open += 1
     if open + 1 >= raw.len() || raw[open] != (U8{123}) || raw[open + 1] != (U8{10}) -> return none
     start: open + 2
     close := start
     loop close < raw.len() {
-        if raw[close] == (U8{125}) && (close == 0 || raw[close - 1] == (U8{10})) -> return EnumBody{start: start, end: close}
+        if raw[close] == (U8{125}) && (close == 0 || raw[close - 1] == (U8{10})) {
+            return EnumBody{start: start, end: close}
+        }
         close += 1
     }
     none
@@ -1410,14 +1534,14 @@ declared: fn(source: String) -> [String] {
 // A function is used only when called; a same-named local binding is not a use.
 Referenced: struct {
     names: [String]
-    called: [String: Bool]
+    called: [String:Bool]
 }
 
 referenced: fn(source: String) -> Referenced {
     raw: source.bytes()
     names := [String]{}
-    seen := [String: Bool]{}
-    called := [String: Bool]{}
+    seen := [String:Bool]{}
+    called := [String:Bool]{}
     at := 0
     loop at < raw.len() {
         if !is_ident_byte(raw[at]) {
@@ -1429,8 +1553,8 @@ referenced: fn(source: String) -> Referenced {
         if is_ident_start(raw[at]) {
             name: text_of(raw, at, end)
             if !(seen.get(name) ?? false) {
-                seen[name.copy()] = true // copy: the name list keeps it
-                names.push(name.copy()) // copy: the call check reads it
+                seen[name.copy()] = true  // copy: the name list keeps it
+                names.push(name.copy())  // copy: the call check reads it
             }
             paren := end
             loop paren < raw.len() && is_space(raw[paren]) -> paren += 1
@@ -1451,16 +1575,16 @@ is_digit: fn(byte: U8) -> Bool {
     code >= 48 && code <= 57
 }
 
-is_space: fn(b: U8) -> Bool { b == (U8{32}) || b == (U8{9}) || b == (U8{10}) || b == (U8{13}) || b == (U8{11}) || b == (U8{12}) }
+is_space: fn(b: U8) -> Bool {
+    b == (U8{32}) || b == (U8{9}) || b == (U8{10}) || b == (U8{13}) || b == (U8{11}) || b == (U8{12})
+}
 
 is_ident_start: fn(byte: U8) -> Bool {
     code: Int{byte}
     (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
 }
 
-is_ident_byte: fn(byte: U8) -> Bool {
-    is_ident_start(byte) || is_digit(byte)
-}
+is_ident_byte: fn(byte: U8) -> Bool { is_ident_start(byte) || is_digit(byte) }
 
 // --- import blanking -----------------------------------------------------------------
 
@@ -1576,7 +1700,9 @@ CoreGroup: struct {
 core_group: fn(raw: [U8], at: Int) -> CoreGroup? {
     if !starts_at(raw, at, "use core") -> return None
     cursor := at + 8
-    loop cursor + 1 < raw.len() && raw[cursor] == (U8{46}) && is_ident_start(raw[cursor + 1]) -> cursor = ident_end(raw, cursor + 1)
+    loop cursor + 1 < raw.len() && raw[cursor] == (U8{46}) && is_ident_start(raw[cursor + 1]) {
+        cursor = ident_end(raw, cursor + 1)
+    }
     if !starts_at(raw, cursor, ".[") -> return None
     close: find_byte(raw, cursor + 2, U8{93})
     if close < 0 -> return None
@@ -1585,7 +1711,7 @@ core_group: fn(raw: [U8], at: Int) -> CoreGroup? {
 
 // A repeated member of a grouped Core import is blanked, keeping every
 // surviving token at its offset; forms this does not recognize stay as written.
-blank_repeated_members: fn(text: String, seen: &[String: Bool]) -> String {
+blank_repeated_members: fn(text: String, seen: &[String:Bool]) -> String {
     raw: text.bytes()
     out := [U8]{}
     at := 0
@@ -1605,7 +1731,7 @@ blank_repeated_members: fn(text: String, seen: &[String: Bool]) -> String {
     String.from_bytes(out) ?? ""
 }
 
-member_imports: fn(whole: String, path: String, members: String, seen: &[String: Bool]) -> String {
+member_imports: fn(whole: String, path: String, members: String, seen: &[String:Bool]) -> String {
     parts: members.split(",").to_list()
     bindings := [String]{}
     loop part in parts {
@@ -1614,7 +1740,7 @@ member_imports: fn(whole: String, path: String, members: String, seen: &[String:
             bindings.push("")
             next
         }
-        if ident_end(name.bytes(), 0) != name.bytes().len() -> return whole.copy() // copy: an unrecognized form stays as written
+        if ident_end(name.bytes(), 0) != name.bytes().len() -> return whole.copy()  // copy: an unrecognized form stays as written
         bindings.push(name)
     }
     removed := false
@@ -1633,7 +1759,7 @@ member_imports: fn(whole: String, path: String, members: String, seen: &[String:
         seen[key] = true
         kept.push(true)
     }
-    if !removed -> return whole.copy() // copy: nothing repeated, the import stays as written
+    if !removed -> return whole.copy()  // copy: nothing repeated, the import stays as written
     last := -1
     loop index in 0..<kept.len() {
         if kept[index] -> last = index
@@ -1666,7 +1792,7 @@ is_core_import_line: fn(line: String) -> Bool {
 }
 
 // A Core import line repeated from an earlier file (or line) is blanked.
-blank_repeated_imports: fn(text: String, seen: &[String: Bool]) -> String {
+blank_repeated_imports: fn(text: String, seen: &[String:Bool]) -> String {
     lines := [String]{}
     loop line in text.split("\n") {
         if is_core_import_line(line) {
@@ -1754,7 +1880,7 @@ area_fixture_at: fn(root: String) -> String {
     put(root, "Core/Effects/Effects.jet", "// effects\n")
     put(root, "Compiler/Prelude/Core.rows", "// prelude\n")
     put(root, "Compiler/JetFoundation/Data/Syntax/Core.jet", "// syntax\n")
-    root.copy() // copy: the caller keeps its path
+    root.copy()  // copy: the caller keeps its path
 }
 
 fixture_config: fn(root: String, mode: String, own: String?, test_sections: [String]?) -> Config {
@@ -1764,7 +1890,7 @@ fixture_config: fn(root: String, mode: String, own: String?, test_sections: [Str
 map_field: fn(tree: Dyn, name: String) -> Dyn {
     if tree == .Object(entries) {
         loop entry in entries {
-            if entry.key == name -> return entry.value.copy() // copy: the tree is borrowed
+            if entry.key == name -> return entry.value.copy()  // copy: the tree is borrowed
         }
     }
     Dyn.Null
@@ -1775,8 +1901,8 @@ map_texts: fn(tree: Dyn, key: String) -> [String] {
     out := [String]{}
     if map_field(tree, key) == .Array(items) {
         loop item in items {
-            if item == .Text(text) -> out.push(text.copy()) // copy: the tree is dropped
-            if map_field(item, "path") == .Text(text) -> out.push(text.copy()) // copy: the tree is dropped
+            if item == .Text(text) -> out.push(text.copy())  // copy: the tree is dropped
+            if map_field(item, "path") == .Text(text) -> out.push(text.copy())  // copy: the tree is dropped
         }
     }
     out
@@ -1793,7 +1919,9 @@ read_map: fn(root: String, mode: String) -> Dyn {
         done: assemble(fixture_config(root, mode, Val("Engine"), None), [String]{}) ?? panic(err.message)
         assert_eq(done.claims, 1)
         map: read_map(root, mode)
-        if map_field(map, "mode") == .Text(found) -> assert_eq(found, mode) else -> panic("the map names no mode")
+        if map_field(map, "mode") == .Text(found) -> assert_eq(found, mode) else {
+            panic("the map names no mode")
+        }
         assert_eq(map_texts(map, "files").join(","), "Jetpack/Foundation/Source/Fixture.jet,Jetpack/Store/Source/Fixture.jet,Jetpack/CLI/Source/Fixture.jet,Jetpack/Store/Tests/Fixture.jet")
         assert_eq(map_texts(map, "tests").join(","), "store fixture")
         assert_eq(map_texts(map, "test_areas").join(","), "Engine")
@@ -1806,7 +1934,7 @@ read_map: fn(root: String, mode: String) -> Dyn {
     _ := assemble(fixture_config(root, "aot", Val("Engine"), Val([String]{"Engine"})), [String]{}) ?? panic(err.message)
     assert_eq(map_texts(read_map(root, "aot"), "test_areas").join(","), "Engine")
     if assemble(fixture_config(root, "aot", None, Val([String]{"CLI"})), [String]{}) == {
-        .Err(error) -> assert(error.message.contains("JETPACK_BOOTSTRAP_TEST_AREAS names CLI"))
+        .Err(error) -> { assert(error.message.contains("JETPACK_BOOTSTRAP_TEST_AREAS names CLI")) }
         .Ok(_) -> assert(false)
     }
     files.remove_all(root) ?? ()
@@ -1824,7 +1952,9 @@ read_map: fn(root: String, mode: String) -> Dyn {
     refusals := [String]{}
     loop manifest in manifests {
         put(root, "Jetpack/Bootstrap/sources.list", manifest)
-        if assemble(fixture_config(root, "check", None, None), [String]{}) == .Err(error) -> refusals.push(error.message.copy()) // copy: the error is dropped
+        if assemble(fixture_config(root, "check", None, None), [String]{}) == .Err(error) {
+            refusals.push(error.message.copy())  // copy: the error is dropped
+        }
     }
     assert_eq(refusals.join("\n"), "Jetpack/Bootstrap/sources.list:5: sources must live under Jetpack/ or Compiler/\nJetpack/Bootstrap/sources.list:5: {cli} belongs under the `# == CLI ==` section")
     files.remove_all(root) ?? ()
@@ -1834,7 +1964,9 @@ read_map: fn(root: String, mode: String) -> Dyn {
     root: area_fixture()
     put(root, "Jetpack/Foundation/Source/Extra.jet", "extra: fn() {{}}\n")
     if assemble(fixture_config(root, "check", None, None), [String]{}) == {
-        .Err(error) -> assert_eq(error.message, "Jetpack sources are not listed in Jetpack/Bootstrap/sources.list or tests.list; add them in explicit order:\n  Jetpack/Foundation/Source/Extra.jet")
+        .Err(error) -> {
+            assert_eq(error.message, "Jetpack sources are not listed in Jetpack/Bootstrap/sources.list or tests.list; add them in explicit order:\n  Jetpack/Foundation/Source/Extra.jet")
+        }
         .Ok(_) -> assert(false)
     }
     done: assemble(fixture_config(root, "check", Val("Engine"), None), [String]{}) ?? panic(err.message)
@@ -1849,7 +1981,9 @@ read_map: fn(root: String, mode: String) -> Dyn {
     root: area_fixture_at("{base}/project")
     landed: Config{mode: "check", root: root.copy(), areas: None, own: None, test_sections: None, deps_from_head: false, scratch: base.copy()}
     if assemble(landed, [String]{}) == {
-        .Err(error) -> assert_eq(error.message, "refusing to remove {root}: it is or holds {root}")
+        .Err(error) -> {
+            assert_eq(error.message, "refusing to remove {root}: it is or holds {root}")
+        }
         .Ok(_) -> panic("an assembly removed its own source tree")
     }
     assert(files.is_file("{root}/Jetpack/Bootstrap/sources.list"))
@@ -1903,7 +2037,7 @@ read_map: fn(root: String, mode: String) -> Dyn {
 
 #Test("embeds are rebased onto staged copies inside the project and toolchain names stay") {
     root: "/repo"
-    embeds := Embeds{copies: [String]{}, targets: [String: String]{}}
+    embeds := Embeds{copies: [String]{}, targets: [String:String]{}}
     text: rebase_embeds(root, "a: embed_file(\"data/x.txt\")\nb: embed_file(\"../y.bin\")\n", "Jetpack/Env/Source/A.jet", "sources.list:1", embeds) ?? panic(err.message)
     assert_eq(text, "a: embed_file(\"embedded/Jetpack/Env/Source/data/x.txt.embed\")\nb: embed_file(\"embedded/Jetpack/Env/y.bin.embed\")\n")
     assert_eq(embeds.copies.join(","), "embedded/Jetpack/Env/Source/data/x.txt.embed,embedded/Jetpack/Env/y.bin.embed")
@@ -1936,13 +2070,17 @@ read_map: fn(root: String, mode: String) -> Dyn {
     assert(!files.exists("{scratch}/Compiler/JetFoundation/Source"))
     // The source root's own trees are never removed as a stale staging.
     if stage_toolchain(root, root, [String]{root}) == {
-        .Err(error) -> assert_eq(error.message, "refusing to remove {root}/Core: it is the Core/ tree of {root}")
+        .Err(error) -> {
+            assert_eq(error.message, "refusing to remove {root}/Core: it is the Core/ tree of {root}")
+        }
         .Ok(_) -> assert(false)
     }
     assert(files.exists("{root}/Core/Effects/Effects.jet"))
     files.remove_all("{root}/Compiler/Prelude") ?? panic("{err}")
     if stage_toolchain(root, scratch, [String]{root}) == {
-        .Err(error) -> assert_eq(error.message, "cannot stage the unit's toolchain tree: the source root has no Compiler/Prelude/")
+        .Err(error) -> {
+            assert_eq(error.message, "cannot stage the unit's toolchain tree: the source root has no Compiler/Prelude/")
+        }
         .Ok(_) -> assert(false)
     }
     files.remove_all(root) ?? ()
@@ -1951,12 +2089,17 @@ read_map: fn(root: String, mode: String) -> Dyn {
 compiler_fixture: fn(items: String) -> String {
     root: normalize_join("/", files.mkdtemp("jetpack-compiler-slice") ?? panic("a temporary directory cannot be made: {err}"))
     fixture: [String]{
-        "Compiler/JetCli/package.jet", "name: \"jet-cli\"\n",
+        "Compiler/JetCli/package.jet",
+        "name: \"jet-cli\"\n",
         // Prelude source held in a raw string: its `Err: struct` declares nothing.
-        "Compiler/JetSema/Source/Derives.jet", "PRELUDE_SOURCE: #run {{ ```// The default error.\nErr: struct {{\n    message: String\n}}\n``` }}\n",
-        "Compiler/JetWasm/Source/Module.jet", "Export: struct {{\n    name: String\n}}\nwasm_size: fn() -> Int {{\n    0\n}}\n",
-        "Jetpack/Bootstrap/sources.list", "# == Compiler front end ==\nCompiler/JetFront/Source/Items.jet\n",
-        "Jetpack/Bootstrap/tests.list", "",
+        "Compiler/JetSema/Source/Derives.jet",
+        "PRELUDE_SOURCE: #run {{ ```// The default error.\nErr: struct {{\n    message: String\n}}\n``` }}\n",
+        "Compiler/JetWasm/Source/Module.jet",
+        "Export: struct {{\n    name: String\n}}\nwasm_size: fn() -> Int {{\n    0\n}}\n",
+        "Jetpack/Bootstrap/sources.list",
+        "# == Compiler front end ==\nCompiler/JetFront/Source/Items.jet\n",
+        "Jetpack/Bootstrap/tests.list",
+        "",
     }
     loop at in 0..<(fixture.len() /% 2) -> put(root, fixture[2 * at], fixture[2 * at + 1])
     put(root, "Compiler/JetFront/Source/Items.jet", items)
@@ -1987,8 +2130,8 @@ compiler_fixture: fn(items: String) -> String {
 }
 
 #Test("package imports and repeated Core imports blank in place") {
-    seen_imports := [String: Bool]{}
-    seen_members := [String: Bool]{}
+    seen_imports := [String:Bool]{}
+    seen_members := [String:Bool]{}
     first: blank_repeated_imports(blank_repeated_members(blank_package_imports(unblock_uses("use files: core.files\nuse core.text.[Text, Rune]\n"), PACKAGE_NAMES), seen_members), seen_imports)
     second: blank_repeated_imports(blank_repeated_members(blank_package_imports(unblock_uses("use jet_foundation.[found]\nuse jetpack_nix_eval.Row  \nuse {{\n    core.text.[Rune, Glyph]\n    files: core.files\n}}\n"), PACKAGE_NAMES), seen_members), seen_imports)
     assert_eq(first, "use files: core.files\nuse core.text.[Text, Rune]\n")

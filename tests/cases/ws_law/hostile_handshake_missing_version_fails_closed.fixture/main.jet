@@ -4,16 +4,20 @@ use {
     ws: core.net.ws
     server: core.http.server
 }
+
 handle: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
-    assert(if ws.upgrade(req) == {
-        .Ok(_) -> false
-        .Err(error) -> if error == {
-            .InvalidHandshake -> true
-            .InvalidURL | .Protocol | .Timeout | .Closed | .Cancelled | .UnsupportedTarget | .MessageTooLarge(_) | .IO(_) -> false
-        }
-    })
+    assert(
+        if ws.upgrade(req) == {
+            .Ok(_) -> false
+            .Err(error) -> if error == {
+                .InvalidHandshake -> true
+                .InvalidURL | .Protocol | .Timeout | .Closed | .Cancelled | .UnsupportedTarget | .MessageTooLarge(_) | .IO(_) -> false
+            }
+        },
+    )
     return Ok(server.response(400, "bad"))
 }
+
 run: fn() {
     cr: "\r"
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")

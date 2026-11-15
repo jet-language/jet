@@ -11,10 +11,6 @@ check: fn(n: Int) Rejected! -[IO]> {
     print("ok {n}")
 }
 
-accept_total: fn(handler: fn(Int) Never! -[IO]>, n: Int) Never! -[IO]> {
-    handler(n)
-}
+accept_total: fn(handler: fn(Int) -[IO]> Never!, n: Int) Never! -[IO]> { handler(n) }
 
-run: fn() {
-    accept_total(check, 2)
-}
+run: fn() { accept_total(check, 2) }

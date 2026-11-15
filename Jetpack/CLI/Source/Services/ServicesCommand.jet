@@ -4,11 +4,15 @@
 
 // The E1262 guidance for an unrecognized dev-service field.
 SERVICES_UNKNOWN_FIELD_WHY: "a dev-supervised `Service` stays open at parse time, but Jet's dev-runtime tier is the only consumer of its fields — an unrecognized key is almost always a typo."
+
 SERVICES_UNKNOWN_FIELD_FIX: "rename it to one of `enable`, `ports`, `run`, `shutdown`, `data_dir`, `ready`, `restart`, `watch`, `after`, `before_start`, or `sockets`, or remove it."
+
 // U12: the readiness-poll ceiling before E1261; tests shorten it through
 // this env var (the same test-only escape hatch as JETPACK_ROOT).
 SERVICES_HEALTH_TIMEOUT_ENV: ENV_JETPACK_SERVICE_HEALTH_TIMEOUT_MS
+
 SERVICES_HEALTH_TIMEOUT_SECONDS: 15
+
 SERVICES_PROBE_SAMPLES: 20
 
 // The `jet os services` verbs.
@@ -66,7 +70,7 @@ cli_validate_declared_secrets_with_reuse: fn(theme: Theme, project_dir: String, 
         if !reuse_verified_store {
             visiting := [String]{}
             if cli_secret_activation_missing(project_dir, spec, specs, visiting) == {
-                .Val(name) -> missing = Val(name)
+                .Val(name) -> { missing = Val(name) }
                 .None -> {}
                 .Err(error) -> {
                     theme.error("couldn't read secret named {spec.name}", error.message(), "")
@@ -82,7 +86,9 @@ cli_validate_declared_secrets_with_reuse: fn(theme: Theme, project_dir: String, 
             next
         }
         if spec.rotation == {
-            .MaxAge(seconds) -> cli_check_secret_rotation(theme, project_dir, spec, environment, seconds)
+            .MaxAge(seconds) -> {
+                cli_check_secret_rotation(theme, project_dir, spec, environment, seconds)
+            }
             .Unset -> {}
         }
     }
@@ -93,13 +99,17 @@ cli_validate_declared_secrets_with_reuse: fn(theme: Theme, project_dir: String, 
 cli_check_secret_rotation: fn(theme: Theme, project_dir: String, spec: SecretSpec, environment: String, seconds: Int) CLIError! -[IO, FS, Env, Time, Time.Wait]> {
     age: if trust_secrets_store_age(project_dir) == {
         .Val(found) -> found
-        .None -> { return }
+        .None -> {
+            return
+        }
         .Err(error) -> {
             theme.error("couldn't inspect secret rotation age", error.message(), "")
             return Err(CLIError.Reported(EXIT_USAGE))
         }
     }
-    if age.ns <= time.duration_seconds(seconds).ns -> return
+    if age.ns <= time.duration_seconds(seconds).ns {
+        return
+    }
     headline: "secret named {spec.name} is past its rotation age for environment {environment}"
     if spec.required {
         theme.error_coded("E1333", headline, "the required declaration's max-age policy is overdue.", "rotate the named secret and activate again.")
@@ -113,12 +123,10 @@ cli_check_secret_rotation: fn(theme: Theme, project_dir: String, spec: SecretSpe
 cli_secret_activation_missing: fn(project_dir: String, spec: SecretSpec, specs: [SecretSpec], visiting: &[String]) -[FS, Env, Exec, Time.Wait]> String? CLIError! {
     if visiting.contains(spec.name) -> return Ok(Val(spec.name))
     if spec.declaration == {
-        .Stored -> {
-            if trust_secrets_get(project_dir, spec.name) == {
-                .Val(_) -> Ok(None)
-                .None -> Ok(Val(spec.name))
-                .Err(error) -> Err(CLIError.Other(error.message()))
-            }
+        .Stored -> if trust_secrets_get(project_dir, spec.name) == {
+            .Val(_) -> Ok(None)
+            .None -> Ok(Val(spec.name))
+            .Err(error) -> Err(CLIError.Other(error.message()))
         }
         .Compose(_, from) -> {
             visiting.push(spec.name)
@@ -150,7 +158,9 @@ cli_service_before_start: fn(verification: &StoreVerification, cache: &Workspace
         theme.error_coded("E1262", "service `{svc.name}` has a field Jet doesn't recognize: `{field}`", SERVICES_UNKNOWN_FIELD_WHY, SERVICES_UNKNOWN_FIELD_FIX)
         return Err(ServicesError{message: "service `{svc.name}` has an unsupported field"})
     }
-    if !cli_run_before_start_jobs(verification, cache, theme, parsed, roots, project_dir, entry, svc) -> return Err(ServicesError{message: "before_start task for service `{svc.name}` failed"})
+    if !cli_run_before_start_jobs(verification, cache, theme, parsed, roots, project_dir, entry, svc) {
+        return Err(ServicesError{message: "before_start task for service `{svc.name}` failed"})
+    }
 }
 
 cli_report_service_start_error: fn(theme: Theme, title: String, error: String) Never! -[IO, Time.Wait]> {
@@ -216,7 +226,9 @@ cli_run_lifecycle_hooks_with_mode: fn(verification: &StoreVerification, cache: &
                     return Err(CLIError.Reported(code))
                 }
             }
-            .Command(command) -> cli_run_lifecycle_command(theme, project_dir, env, hook, command, phase, mode)
+            .Command(command) -> {
+                cli_run_lifecycle_command(theme, project_dir, env, hook, command, phase, mode)
+            }
         }
     }
 }
@@ -296,7 +308,9 @@ cli_selected_service_order: fn(services: [DevServicePlan], name: String?) -> [In
         if target < 0 && services[index].name == wanted -> target = index
     }
     if target < 0 -> return Err(ServicesError{message: "service `{wanted}` is not declared"})
-    if !services[target].enable -> return Err(ServicesError{message: "service `{wanted}` is disabled"})
+    if !services[target].enable {
+        return Err(ServicesError{message: "service `{wanted}` is disabled"})
+    }
     needed := [Int]{}
     pending := [Int]{target}
     loop pending.len() > 0 {
@@ -330,6 +344,7 @@ cli_services_order_or_report: fn(theme: Theme, services: [DevServicePlan], name:
 }
 
 SERVICES_ORDER_FIX_DECLARE: "declare each dependency once, keep it enabled, and remove dependency cycles."
+
 SERVICES_ORDER_FIX_CYCLES: "remove dependency cycles and unknown dependencies."
 
 // `jet os services up|down|health|logs|wait|restart|watch [<name>]` (U12).
@@ -349,7 +364,9 @@ cli_cmd_services: fn(verification: &StoreVerification, theme: Theme, parsed: CLI
     verb: ServicesVerb.parse(verb_word)
     if verb == .Val(known) {
         if known.gated() {
-            if trust_gate_with_environment(theme, trust_store_path(), project_dir, plan.refs, plan.table, plan.secrets, plan.environment, parsed.flags.trust) == .Val(code) -> return code
+            if trust_gate_with_environment(theme, trust_store_path(), project_dir, plan.refs, plan.table, plan.secrets, plan.environment, parsed.flags.trust) == .Val(code) {
+                return code
+            }
             cli_validate_declared_secrets(theme, project_dir, plan.secrets, plan.environment.active_environment) ?? return cli_exit_for(theme, err)
         }
     }
@@ -365,7 +382,9 @@ cli_cmd_services: fn(verification: &StoreVerification, theme: Theme, parsed: CLI
         theme.error(headline, "declare one under an `env.<name> {{ services: {{ … }} }}` role-module (U12).", "")
         if name == None {
             presets := [String]{}
-            loop preset in services_catalog_presets() -> presets.push("{preset.name} ({preset.package})")
+            loop preset in services_catalog_presets() {
+                presets.push("{preset.name} ({preset.package})")
+            }
             theme.detail("available typed presets: {presets.join(", ")}")
         }
         return EXIT_USAGE
@@ -477,9 +496,7 @@ cli_services_health: fn(verification: &StoreVerification, theme: Theme, parsed: 
     loop svc in targets {
         state: cli_service_health_label(services_health_one(project_dir, env, svc), false)
         all_healthy = all_healthy && state.healthy
-        if state.healthy {
-            theme.ok("service `{svc.name}`: {state.label}")
-        } else {
+        if state.healthy -> theme.ok("service `{svc.name}`: {state.label}") else {
             theme.error("service `{svc.name}`: {state.label}", "", "")
         }
     }
@@ -548,7 +565,9 @@ cli_cmd_service_probe: fn(verification: &StoreVerification, theme: Theme, parsed
         return EXIT_USAGE
     }
     project_dir: cli_current_dir()
-    if trust_gate_with_environment(theme, trust_store_path(), project_dir, plan.refs, plan.table, plan.secrets, plan.environment, parsed.flags.trust) == .Val(code) -> return code
+    if trust_gate_with_environment(theme, trust_store_path(), project_dir, plan.refs, plan.table, plan.secrets, plan.environment, parsed.flags.trust) == .Val(code) {
+        return code
+    }
     cli_validate_declared_secrets(theme, project_dir, plan.secrets, plan.environment.active_environment) ?? return cli_exit_for(theme, err)
     roots: pkg_resolve_roots()
     env := cli_compose_env(verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)

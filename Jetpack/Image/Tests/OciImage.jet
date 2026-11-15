@@ -2,12 +2,10 @@
 // reading and asserts nothing, so it has no claim here.
 
 image_test_bin: fn(path: String, contents: String) -> LayerFile {
-    LayerFile{path, data: contents.bytes(), mode: 493}
+    LayerFile{path: path, data: contents.bytes(), mode: 493}
 }
 
-image_test_dir: fn(prefix: String) -> String {
-    files.tmpdir(prefix) ?? panic("claim temp dir")
-}
+image_test_dir: fn(prefix: String) -> String { files.tmpdir(prefix) ?? panic("claim temp dir") }
 
 image_test_spec: fn(layer_files: [LayerFile]) -> OCIBuildSpec {
     OCIBuildSpec{
@@ -17,13 +15,11 @@ image_test_spec: fn(layer_files: [LayerFile]) -> OCIBuildSpec {
         env: [ImageEnvVar]{},
         expose: [Int]{},
         user: 10001,
-        healthcheck: None
+        healthcheck: None,
     }
 }
 
-image_test_tar: fn(layer_files: [LayerFile]) -> [U8] {
-    image_build_tar(layer_files)
-}
+image_test_tar: fn(layer_files: [LayerFile]) -> [U8] { image_build_tar(layer_files) }
 
 image_test_build: fn(spec: OCIBuildSpec, prefix: String) -> OCIBuiltImage {
     dir: files.join(image_test_dir(prefix), "layout")
@@ -102,8 +98,10 @@ image_test_build: fn(spec: OCIBuildSpec, prefix: String) -> OCIBuiltImage {
     image.files = [LayerFile]{image_test_bin("bin/app", "image")}
     image.platform = "linux.x64"
     if image_build_with_base(image, output_dir, "image", Val(base_dir)) == {
-        .Ok(_) -> panic("a base with a different platform must be rejected")
-        .Err(error) -> assert(error.message().contains("does not match image platform"), error.message())
+        .Ok(_) -> { panic("a base with a different platform must be rejected") }
+        .Err(error) -> {
+            assert(error.message().contains("does not match image platform"), error.message())
+        }
     }
 }
 
@@ -141,13 +139,13 @@ image_test_build: fn(spec: OCIBuildSpec, prefix: String) -> OCIBuiltImage {
         layer_paths: [String]{"bin/sh"},
         services: [String]{},
         base: false,
-        lock: "absent"
+        lock: "absent",
     }
     report: ProjectionReport{
         included: [String]{"environment:shell"},
         changed: [String]{"env:PORT"},
         omitted: [String]{"environment.secrets"},
-        rejected: [String]{}
+        rejected: [String]{},
     }
     names: [String]{"plan.json", "dossier.json"}
     loop name in names {

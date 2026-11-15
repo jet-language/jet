@@ -35,11 +35,16 @@ use {
 SUITES: [String]{"golden", "ui", "cases", "registries"}
 
 SELF: "Tools/ci/TestShards.jet"
+
 PACKAGE: "Compiler/package.jet"
+
 REGISTRY_SUITE: "registries"
+
 CORPORA_PROFILE: "corpora"
+
 // The testkit's suites: the corpus kinds `jet test` discovers and runs.
 KIT: "Compiler/JetTestKit/Source/Kit.jet"
+
 KIT_SUITES_DECL: "kit_suites: fn() -> [String] {{"
 
 // Seconds charged to a suite with no measured cost.
@@ -116,15 +121,25 @@ weighted_shards: fn(items: [WeightedItem], shard_index: Int, shard_count: Int, i
 }
 
 shard_plan: fn(args: [String]) -> ShardPlan ShardError! {
-    if args.len() != 2 -> return Err(ShardError{message: "usage: TestShards.jet SHARD_INDEX SHARD_COUNT", code: 64})
+    if args.len() != 2 {
+        return Err(ShardError{message: "usage: TestShards.jet SHARD_INDEX SHARD_COUNT", code: 64})
+    }
     index_text: args[0]
     count_text: args[1]
-    if !is_digits(count_text) -> return Err(ShardError{message: "error: SHARD_COUNT must be a positive integer, got '{count_text}'", code: 64})
+    if !is_digits(count_text) {
+        return Err(ShardError{message: "error: SHARD_COUNT must be a positive integer, got '{count_text}'", code: 64})
+    }
     shard_count: digits_value(count_text)
-    if shard_count < 1 -> return Err(ShardError{message: "error: SHARD_COUNT must be >= 1, got '{count_text}'", code: 64})
-    if !is_digits(index_text) -> return Err(ShardError{message: "error: SHARD_INDEX must be a non-negative integer, got '{index_text}'", code: 64})
+    if shard_count < 1 {
+        return Err(ShardError{message: "error: SHARD_COUNT must be >= 1, got '{count_text}'", code: 64})
+    }
+    if !is_digits(index_text) {
+        return Err(ShardError{message: "error: SHARD_INDEX must be a non-negative integer, got '{index_text}'", code: 64})
+    }
     shard_index: digits_value(index_text)
-    if shard_index >= shard_count -> return Err(ShardError{message: "error: SHARD_INDEX ({index_text}) must be < SHARD_COUNT ({count_text})", code: 64})
+    if shard_index >= shard_count {
+        return Err(ShardError{message: "error: SHARD_INDEX ({index_text}) must be < SHARD_COUNT ({count_text})", code: 64})
+    }
     items := [WeightedItem]{}
     loop suite in SUITES -> items.push(WeightedItem{weight: DEFAULT_WEIGHT, item: suite})
     plan: weighted_shards(items, shard_index, shard_count, index_text, count_text)
@@ -142,7 +157,9 @@ run: fn() {
         self_text: files.read(files.join(root, SELF)) ?? process.fail(1, "cannot read {SELF}: {err}")
         kit: files.read(files.join(root, KIT)) ?? process.fail(1, "cannot read {KIT}: {err}")
         problems: suite_problems(package, self_text, kit)
-        if problems.len() > 0 -> process.fail(1, "{SELF}: {problems.len()} problem(s) with SUITES:\n{problems.join("\n")}")
+        if problems.len() > 0 {
+            process.fail(1, "{SELF}: {problems.len()} problem(s) with SUITES:\n{problems.join("\n")}")
+        }
         print("{SELF}: SUITES ({SUITES.join(", ")}) are {PACKAGE} test profiles; the others than {REGISTRY_SUITE} are the testkit's suites and hold exactly the `{CORPORA_PROFILE}` profile")
         return
     }
@@ -153,8 +170,8 @@ run: fn() {
 
 // The test profiles of a package manifest's text: each
 // `NAME: TestProfile{ suites: [A, B], ... }` line, by name.
-test_profiles: fn(text: String) -> [String: [String]] Never! {
-    out := [String: [String]]{}
+test_profiles: fn(text: String) -> [String:[String]] Never! {
+    out := [String:[String]]{}
     loop line in text.split("\n").to_list() {
         parts: line.trim().split(": TestProfile{{").to_list()
         if parts.len() != 2 -> next
@@ -192,11 +209,15 @@ suite_problems: fn(package: String, self_text: String, kit: String) -> [String] 
     open: "SUITES: [String]{{"
     close: "}}"
     decl: "{open}{quoted.join(", ")}{close}"
-    if !self_text.split("\n").to_list().contains(decl) -> problems.push("{SELF} must declare SUITES on one line, `{decl}`: the release gate reads that line")
+    if !self_text.split("\n").to_list().contains(decl) {
+        problems.push("{SELF} must declare SUITES on one line, `{decl}`: the release gate reads that line")
+    }
     profiles: test_profiles(package)
     kit_names: kit_suite_names(kit)
     corpora: profiles.get(CORPORA_PROFILE) ?? [String]{}
-    if corpora.len() == 0 -> problems.push("{PACKAGE} declares no `{CORPORA_PROFILE}` test profile with suites")
+    if corpora.len() == 0 {
+        problems.push("{PACKAGE} declares no `{CORPORA_PROFILE}` test profile with suites")
+    }
     covered := [String]{}
     loop suite in SUITES {
         held: profiles.get(suite) ?? {
@@ -204,17 +225,25 @@ suite_problems: fn(package: String, self_text: String, kit: String) -> [String] 
             next
         }
         if suite == REGISTRY_SUITE -> next
-        if !kit_names.contains(suite) -> problems.push("native suite `{suite}` is no suite of the testkit's kit_suites ({KIT}), whose rows name their suite")
+        if !kit_names.contains(suite) {
+            problems.push("native suite `{suite}` is no suite of the testkit's kit_suites ({KIT}), whose rows name their suite")
+        }
         loop part in held {
-            if !corpora.contains(part) -> problems.push("native suite `{suite}` runs `{part}`, which the `{CORPORA_PROFILE}` profile lacks")
+            if !corpora.contains(part) {
+                problems.push("native suite `{suite}` runs `{part}`, which the `{CORPORA_PROFILE}` profile lacks")
+            }
             covered.push(part.copy())
         }
     }
     loop name in kit_names {
-        if name == REGISTRY_SUITE || !SUITES.contains(name) -> problems.push("the testkit's kit_suites ({KIT}) runs `{name}`, which is no kit suite of SUITES")
+        if name == REGISTRY_SUITE || !SUITES.contains(name) {
+            problems.push("the testkit's kit_suites ({KIT}) runs `{name}`, which is no kit suite of SUITES")
+        }
     }
     loop part in corpora {
-        if !covered.contains(part) -> problems.push("the `{CORPORA_PROFILE}` profile runs `{part}`, which no native suite's profile runs")
+        if !covered.contains(part) {
+            problems.push("the `{CORPORA_PROFILE}` profile runs `{part}`, which no native suite's profile runs")
+        }
     }
     problems
 }
@@ -243,7 +272,9 @@ plan_text: fn(args: [String]) -> String Never! {
 // The declarations of SUITES, the test profiles and kit_suites the way
 // SELF, PACKAGE and KIT spell them.
 SELF_FIXTURE: "use {{\n}}\n\nSUITES: [String]{{\"golden\", \"ui\", \"cases\", \"registries\"}}\n"
+
 PROFILES_FIXTURE: "    golden: TestProfile{{ suites: [golden, run], baseline: \"../tests/known-failing.tsv\" }},\n    ui: TestProfile{{ suites: [ui, ui_lint] }},\n    cases: TestProfile{{ suites: [cases] }},\n    registries: TestProfile{{ suites: [cases], opt_in: true }},\n    corpora: TestProfile{{ suites: [golden, run, ui, ui_lint, cases] }},\n"
+
 KIT_FIXTURE: "}}\n\nkit_suites: fn() -> [String] {{ [\"golden\", \"ui\", \"cases\"] }}\n\n"
 
 #Test("the check holds SUITES to the Compiler profiles, the testkit's suites and the release gate's corpora pool") {

@@ -4,6 +4,7 @@
 // beyond the five predefined entities are refused, not guessed.
 
 MAVEN_POM_NAMESPACE: "http://maven.apache.org/POM/4.0.0"
+
 MAVEN_XML_SCHEMA_NAMESPACE: "http://www.w3.org/2001/XMLSchema-instance"
 
 // One XML opening (or closing) tag found in a document.
@@ -27,7 +28,9 @@ impl ProviderFactReport {
         project_version: provider_xml_direct_child_values(document, "project", "version")
         parent_blocks: provider_xml_blocks(document, "parent")
         group := project_group.get(0) ?? ""
-        if project_group.len() == 0 && parent_blocks.len() > 0 -> group = provider_xml_tag(parent_blocks[0], "groupId") ?? ""
+        if project_group.len() == 0 && parent_blocks.len() > 0 {
+            group = provider_xml_tag(parent_blocks[0], "groupId") ?? ""
+        }
         facts := MetadataFacts.empty(ProviderFamily.Maven, project_artifact.get(0) ?? "")
         facts.version = project_version.get(0) ?? ""
         license_blocks: provider_xml_blocks(document, "license")
@@ -49,15 +52,21 @@ impl ProviderFactReport {
         project_fields: [String]{"packaging", "name", "description", "url"}
         loop key in project_fields {
             values: provider_xml_direct_child_values(document, "project", key)
-            loop index in 0..<values.len() -> facts.add_typed_text("provider.maven.project.{key}.{index}", values[index])
+            loop index in 0..<values.len() {
+                facts.add_typed_text("provider.maven.project.{key}.{index}", values[index])
+            }
         }
         raw_licenses: provider_xml_tag_values(document, "license")
-        loop index in 0..<raw_licenses.len() -> facts.add_typed_text("provider.maven.license.raw.{index}", raw_licenses[index])
+        loop index in 0..<raw_licenses.len() {
+            facts.add_typed_text("provider.maven.license.raw.{index}", raw_licenses[index])
+        }
         license_fields: [String]{"name", "url", "distribution"}
         loop index in 0..<license_blocks.len() {
             loop field in license_fields {
                 if provider_xml_tag(license_blocks[index], field) == {
-                    .Val(value) -> facts.add_typed_text("provider.maven.license.{field}.{index}", value)
+                    .Val(value) -> {
+                        facts.add_typed_text("provider.maven.license.{field}.{index}", value)
+                    }
                     .None -> {}
                 }
             }
@@ -67,13 +76,19 @@ impl ProviderFactReport {
         coordinates: [(field: String, values: [String])]{(field: "groupId", values: project_group), (field: "artifactId", values: project_artifact), (field: "version", values: project_version)}
         loop coordinate in coordinates {
             distinct: provider_distinct_values(coordinate.values)
-            if distinct.len() > 1 -> conflicts.push("Maven project declares conflicting {coordinate.field} values: {distinct.join(", ")}")
+            if distinct.len() > 1 {
+                conflicts.push("Maven project declares conflicting {coordinate.field} values: {distinct.join(", ")}")
+            }
         }
         if group == "" -> losses.push("Maven project has no exact groupId")
         if facts.name == "" -> losses.push("Maven project has no exact artifactId")
-        if !provider_maven_exact_value(facts.version) -> losses.push("Maven project version `{facts.version}` is not an exact version")
-        if group != "" && !provider_maven_exact_value(group) -> losses.push("Maven project groupId `{group}` is not an exact identity")
-        dependency_versions := [String: String]{}
+        if !provider_maven_exact_value(facts.version) {
+            losses.push("Maven project version `{facts.version}` is not an exact version")
+        }
+        if group != "" && !provider_maven_exact_value(group) {
+            losses.push("Maven project groupId `{group}` is not an exact identity")
+        }
+        dependency_versions := [String:String]{}
         dependency_blocks: provider_xml_blocks(document, "dependency")
         loop index in 0..<dependency_blocks.len() {
             block: dependency_blocks[index]
@@ -81,20 +96,30 @@ impl ProviderFactReport {
             dependency_group: provider_xml_tag(block, "groupId") ?? ""
             dependency_version: provider_xml_tag(block, "version") ?? ""
             declared_versions: provider_distinct_values(provider_xml_tag_values(block, "version"))
-            if declared_versions.len() > 1 -> conflicts.push("Maven dependency `{dependency_group}:{artifact}` declares conflicting version values: {declared_versions.join(", ")}")
+            if declared_versions.len() > 1 {
+                conflicts.push("Maven dependency `{dependency_group}:{artifact}` declares conflicting version values: {declared_versions.join(", ")}")
+            }
             declared_scope: provider_xml_tag(block, "scope")
             scope: declared_scope ?? "compile"
             coordinate: provider_format_dependency("{dependency_group}:{artifact}", dependency_version)
-            if artifact == "" || dependency_group == "" -> losses.push("Maven dependency {index} lacks an exact groupId or artifactId")
+            if artifact == "" || dependency_group == "" {
+                losses.push("Maven dependency {index} lacks an exact groupId or artifactId")
+            }
             if {
-                dependency_version == "" -> losses.push("Maven dependency `{coordinate}` has no exact version")
-                !provider_maven_exact_value(dependency_version) -> losses.push("Maven dependency `{coordinate}` has a non-exact version")
+                dependency_version == "" -> {
+                    losses.push("Maven dependency `{coordinate}` has no exact version")
+                }
+                !provider_maven_exact_value(dependency_version) -> {
+                    losses.push("Maven dependency `{coordinate}` has a non-exact version")
+                }
                 else -> {}
             }
             dependency_key: "{dependency_group}:{artifact}"
             if dependency_versions.get(dependency_key) == {
                 .Val(previous) -> {
-                    if previous != dependency_version -> conflicts.push("Maven dependency `{dependency_key}` declares conflicting version values: {previous}, {dependency_version}")
+                    if previous != dependency_version {
+                        conflicts.push("Maven dependency `{dependency_key}` declares conflicting version values: {previous}, {dependency_version}")
+                    }
                 }
                 .None -> {}
             }
@@ -102,11 +127,15 @@ impl ProviderFactReport {
             facts.dependencies.push(coordinate.copy())
             facts.add_typed_text("provider.maven.dependency.{index}.coordinate", coordinate)
             facts.add_typed_text("provider.maven.dependency.{index}.kind", scope)
-            if declared_scope == None -> facts.add_typed_text("provider.maven.dependency.{index}.scope.defaulted", "true")
+            if declared_scope == None {
+                facts.add_typed_text("provider.maven.dependency.{index}.scope.defaulted", "true")
+            }
             optional_fields: [String]{"optional", "type", "classifier", "systemPath"}
             loop field in optional_fields {
                 if provider_xml_tag(block, field) == {
-                    .Val(value) -> facts.add_typed_text("provider.maven.dependency.{index}.{field}", value)
+                    .Val(value) -> {
+                        facts.add_typed_text("provider.maven.dependency.{index}.{field}", value)
+                    }
                     .None -> {}
                 }
             }
@@ -125,20 +154,28 @@ impl ProviderFactReport {
             plugin_version: provider_xml_tag(block, "version") ?? ""
             plugin: provider_format_dependency("{plugin_group}:{artifact}", plugin_version)
             if artifact == "" -> losses.push("Maven build plugin {index} has no artifactId")
-            if !provider_maven_exact_value(plugin_version) -> losses.push("Maven build plugin `{plugin}` has no exact version")
+            if !provider_maven_exact_value(plugin_version) {
+                losses.push("Maven build plugin `{plugin}` has no exact version")
+            }
             facts.scripts.push(plugin.copy())
             facts.add_typed_text("provider.maven.hook.{index}", plugin)
             facts.add_typed_text("provider.maven.hook.{index}.group", plugin_group)
-            if declared_group == None -> facts.add_typed_text("provider.maven.hook.{index}.group.defaulted", "true")
+            if declared_group == None {
+                facts.add_typed_text("provider.maven.hook.{index}.group.defaulted", "true")
+            }
             goals: provider_xml_tag_values(block, "goal")
-            loop goal_index in 0..<goals.len() -> facts.add_typed_text("provider.maven.hook.{index}.goal.{goal_index}", goals[goal_index])
+            loop goal_index in 0..<goals.len() {
+                facts.add_typed_text("provider.maven.hook.{index}.goal.{goal_index}", goals[goal_index])
+            }
         }
         profile_blocks: provider_xml_blocks(document, "profile")
         profile_fields: [String]{"os", "arch", "jdk", "activeByDefault"}
         loop index in 0..<profile_blocks.len() {
             block: profile_blocks[index]
             if provider_xml_tag(block, "id") == {
-                .Val(id) -> facts.add_typed_text("provider.maven.variant.profile.{index}.id", id)
+                .Val(id) -> {
+                    facts.add_typed_text("provider.maven.variant.profile.{index}.id", id)
+                }
                 .None -> {}
             }
             loop field in profile_fields {
@@ -153,7 +190,9 @@ impl ProviderFactReport {
         loop index in 0..<scm_blocks.len() {
             loop field in scm_fields {
                 if provider_xml_tag(scm_blocks[index], field) == {
-                    .Val(value) -> facts.add_typed_text("provider.maven.source.scm.{field}.{index}", value)
+                    .Val(value) -> {
+                        facts.add_typed_text("provider.maven.source.scm.{field}.{index}", value)
+                    }
                     .None -> {}
                 }
             }
@@ -161,14 +200,18 @@ impl ProviderFactReport {
         repository_blocks: provider_xml_blocks(document, "repository")
         loop index in 0..<repository_blocks.len() {
             if provider_xml_tag(repository_blocks[index], "url") == {
-                .Val(url) -> facts.add_typed_text("provider.maven.source.repository.{index}", url)
+                .Val(url) -> {
+                    facts.add_typed_text("provider.maven.source.repository.{index}", url)
+                }
                 .None -> {}
             }
         }
         audit_tags: [String]{"signature", "sha1", "sha256", "yanked", "vulnerability", "advisory"}
         loop audit_tag in audit_tags {
             values: provider_xml_tag_values(document, audit_tag)
-            loop index in 0..<values.len() -> facts.add_typed_text("provider.maven.audit.{audit_tag}.{index}", values[index])
+            loop index in 0..<values.len() {
+                facts.add_typed_text("provider.maven.audit.{audit_tag}.{index}", values[index])
+            }
         }
         facts.dependencies = provider_sorted_unique(facts.dependencies)
         facts.dev_dependencies = provider_sorted_unique(facts.dev_dependencies)
@@ -185,7 +228,9 @@ impl ProviderFactReport {
 provider_maven_exact_value: fn(raw: String) -> Bool Never! {
     value: raw.trim()
     if value == "" || value.contains("${{") || value.contains(",") -> return false
-    if value.contains("[") || value.contains("]") || value.contains("(") || value.contains(")") -> return false
+    if value.contains("[") || value.contains("]") || value.contains("(") || value.contains(")") {
+        return false
+    }
     lower: pkg_ascii_lower(value)
     lower != "latest" && lower != "release"
 }
@@ -199,10 +244,14 @@ provider_maven_xml_loss: fn(document: String) -> String? Never! {
     loop cursor < bytes.len() {
         start: provider_find(bytes, "<".bytes(), cursor, bytes.len())
         if start < 0 {
-            if pkg_bytes_text(bytes, cursor, bytes.len()).trim() != "" && root_seen && stack.len() == 0 -> return Val("Maven POM has non-whitespace text outside the project element")
+            if pkg_bytes_text(bytes, cursor, bytes.len()).trim() != "" && root_seen && stack.len() == 0 {
+                return Val("Maven POM has non-whitespace text outside the project element")
+            }
             break
         }
-        if pkg_bytes_text(bytes, cursor, start).trim() != "" && (!root_seen || stack.len() == 0) -> return Val("Maven POM has text outside the project element")
+        if pkg_bytes_text(bytes, cursor, start).trim() != "" && (!root_seen || stack.len() == 0) {
+            return Val("Maven POM has text outside the project element")
+        }
         if pkg_bytes_starts_with(bytes, start, "<!--".bytes()) {
             close: provider_find(bytes, "-->".bytes(), start + 4, bytes.len())
             if close < 0 -> return Val("Maven POM has an unterminated XML comment")
@@ -232,14 +281,20 @@ provider_maven_xml_loss: fn(document: String) -> String? Never! {
         opening: pkg_bytes_text(bytes, start, end + 1)
         name: provider_xml_opening_name(opening)
         if name == "" -> return Val("Maven POM has an XML element with no name")
-        if name.contains(":") -> return Val("Maven POM uses a namespaced XML vocabulary that this provider cannot normalize")
-        if stack.len() > 0 && (opening.contains("xmlns=") || opening.contains("xmlns:")) -> return Val("Maven POM uses a nested XML namespace that this provider cannot normalize")
+        if name.contains(":") {
+            return Val("Maven POM uses a namespaced XML vocabulary that this provider cannot normalize")
+        }
+        if stack.len() > 0 && (opening.contains("xmlns=") || opening.contains("xmlns:")) {
+            return Val("Maven POM uses a nested XML namespace that this provider cannot normalize")
+        }
         closing: opening.starts_with("</")
         self_closing: opening.trim_end().ends_with("/>")
         if {
             closing -> {
                 if self_closing -> return Val("Maven POM has an invalid self-closing end element")
-                if stack.len() == 0 || stack[stack.len() - 1] != name -> return Val("Maven POM has mismatched closing element `{name}`")
+                if stack.len() == 0 || stack[stack.len() - 1] != name {
+                    return Val("Maven POM has mismatched closing element `{name}`")
+                }
                 stack = provider_without_last(stack)
             }
             stack.len() == 0 -> {
@@ -247,17 +302,23 @@ provider_maven_xml_loss: fn(document: String) -> String? Never! {
                 if name != "project" -> return Val("Maven POM has no project root element")
                 if provider_xml_attribute(opening, "xmlns") == {
                     .Val(namespace) -> {
-                        if namespace != MAVEN_POM_NAMESPACE -> return Val("Maven POM uses unsupported XML namespace `{namespace}`")
+                        if namespace != MAVEN_POM_NAMESPACE {
+                            return Val("Maven POM uses unsupported XML namespace `{namespace}`")
+                        }
                     }
                     .None -> {}
                 }
                 if provider_xml_attribute(opening, "xmlns:xsi") == {
                     .Val(namespace) -> {
-                        if namespace != MAVEN_XML_SCHEMA_NAMESPACE -> return Val("Maven POM uses unsupported XML namespace `{namespace}`")
+                        if namespace != MAVEN_XML_SCHEMA_NAMESPACE {
+                            return Val("Maven POM uses unsupported XML namespace `{namespace}`")
+                        }
                     }
                     .None -> {}
                 }
-                if opening.contains("xmlns:") && !opening.contains("xmlns:xsi=") -> return Val("Maven POM uses a namespaced XML vocabulary that this provider cannot normalize")
+                if opening.contains("xmlns:") && !opening.contains("xmlns:xsi=") {
+                    return Val("Maven POM uses a namespaced XML vocabulary that this provider cannot normalize")
+                }
                 root_seen = true
                 if !self_closing -> stack.push(name)
             }
@@ -310,7 +371,9 @@ provider_xml_opening_name: fn(opening: String) -> String Never! {
     loop rest.starts_with("/") -> rest = rest.removeprefix("/")
     bytes: rest.bytes()
     end := 0
-    loop end < bytes.len() && pkg_bytes_space_width(bytes, end) == 0 && (Int{bytes[end]}) != 62 && (Int{bytes[end]}) != 47 -> end += 1
+    loop end < bytes.len() && pkg_bytes_space_width(bytes, end) == 0 && (Int{bytes[end]}) != 62 && (Int{bytes[end]}) != 47 {
+        end += 1
+    }
     pkg_bytes_text(bytes, 0, end)
 }
 

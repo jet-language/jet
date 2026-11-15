@@ -35,8 +35,11 @@ use {
 }
 
 LEDGER: "Tools/agent/surface_budget.tsv"
+
 CORE_ROOT: "Core"
+
 CORE_SKIP: [String]{".jet", ".git", "target", "Tests", "Fixtures", "fixtures"}
+
 USAGE: "usage: jet Tools/agent/SurfaceBudget.jet [--check | --report | --ballot <before-root>]"
 
 // One counted kind of language surface.
@@ -103,7 +106,9 @@ count_kind: fn(kind: SurfaceKind, text: String) -> Int Never! {
     if kind == {
         .Keyword -> {
             loop line in block_lines(text, "LEXER_KEYWORDS") {
-                if line.trim().starts_with("{{constant:") && line.contains("retired: false") -> count += 1
+                if line.trim().starts_with("{{constant:") && line.contains("retired: false") {
+                    count += 1
+                }
             }
         }
         .LexicalForm -> {
@@ -207,8 +212,12 @@ budget_problems: fn(counts: [Int], ledger: String) -> [String] Never! {
     rows: ceiling_rows(ledger, problems)
     names: loop kind in SURFACE_KINDS -> kind_name(kind)
     loop row in rows {
-        if !names.contains(row.kind) -> problems.push("{LEDGER}:{row.line}: `{row.kind}` is no counted kind ({names.join(", ")})")
-        if names_decision(row.why) -> problems.push("{LEDGER}:{row.line}: the why `{row.why}` names a decision ID; say in words what the owner allowed or what was retired, and keep the ID on Tower")
+        if !names.contains(row.kind) {
+            problems.push("{LEDGER}:{row.line}: `{row.kind}` is no counted kind ({names.join(", ")})")
+        }
+        if names_decision(row.why) {
+            problems.push("{LEDGER}:{row.line}: the why `{row.why}` names a decision ID; say in words what the owner allowed or what was retired, and keep the ID on Tower")
+        }
     }
     loop (index, kind) in SURFACE_KINDS {
         name: kind_name(kind)
@@ -217,9 +226,15 @@ budget_problems: fn(counts: [Int], ledger: String) -> [String] Never! {
             if row.kind != name -> next
             // A kind's first row raises its ceiling from nothing.
             previous: ceiling ?? -1
-            if row.ceiling == previous -> problems.push("{LEDGER}:{row.line}: {name} repeats its ceiling {previous}")
-            if row.ceiling > previous && row.why == "" -> problems.push("{LEDGER}:{row.line}: raising the {name} ceiling to {row.ceiling} must say what the owner allowed")
-            if row.ceiling < previous && row.why == "" -> problems.push("{LEDGER}:{row.line}: lowering the {name} ceiling to {row.ceiling} must say what was retired")
+            if row.ceiling == previous {
+                problems.push("{LEDGER}:{row.line}: {name} repeats its ceiling {previous}")
+            }
+            if row.ceiling > previous && row.why == "" {
+                problems.push("{LEDGER}:{row.line}: raising the {name} ceiling to {row.ceiling} must say what the owner allowed")
+            }
+            if row.ceiling < previous && row.why == "" {
+                problems.push("{LEDGER}:{row.line}: lowering the {name} ceiling to {row.ceiling} must say what was retired")
+            }
             ceiling = Val(row.ceiling)
         }
         count: counts[index]
@@ -227,8 +242,12 @@ budget_problems: fn(counts: [Int], ledger: String) -> [String] Never! {
             problems.push("{name}: {LEDGER} has no ceiling row; its first row says what the owner allowed")
             next
         }
-        if count > limit -> problems.push("{name}: {count} counted in {kind_source(kind)}, over the ceiling {limit}: a new one needs an owner decision; once it is ratified, append `{name}<TAB>{count}<TAB><what the owner allowed>` to {LEDGER}")
-        if count < limit -> problems.push("{name}: {count} counted in {kind_source(kind)}, under the ceiling {limit}: a retirement lowers the ceiling; append `{name}<TAB>{count}<TAB><what was retired>` to {LEDGER}")
+        if count > limit {
+            problems.push("{name}: {count} counted in {kind_source(kind)}, over the ceiling {limit}: a new one needs an owner decision; once it is ratified, append `{name}<TAB>{count}<TAB><what the owner allowed>` to {LEDGER}")
+        }
+        if count < limit {
+            problems.push("{name}: {count} counted in {kind_source(kind)}, under the ceiling {limit}: a retirement lowers the ceiling; append `{name}<TAB>{count}<TAB><what was retired>` to {LEDGER}")
+        }
     }
     problems
 }
@@ -256,7 +275,9 @@ public_functions: fn(text: String) -> Int Never! {
         plain := true
         loop byte in name.bytes() {
             code: Int{byte}
-            if !((code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code == 95) -> plain = false
+            if !((code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code == 95) {
+                plain = false
+            }
         }
         rest: String.from_bytes_lossy(bytes[colon + 4..<bytes.len()])
         if plain && (rest.starts_with("(") || rest.starts_with(" ") || rest == "") -> count += 1
@@ -265,9 +286,9 @@ public_functions: fn(text: String) -> Int Never! {
 }
 
 // The public Core functions per module of the checkout at `root`.
-core_functions: fn(root: String) -[FS]> [String: Int] SurfaceBudgetError! {
+core_functions: fn(root: String) -[FS]> [String:Int] SurfaceBudgetError! {
     core: rooted(root, CORE_ROOT)
-    modules := [String: Int]{}
+    modules := [String:Int]{}
     loop entry in files.walk_files(core, skip: CORE_SKIP) {
         found: entry ?? return Err(budget_fail("could not walk {core}: {err}"))
         if !found.path.ends_with(".jet") -> next
@@ -284,7 +305,7 @@ delta: fn(before: Int, after: Int) -> String Never! {
 }
 
 // The counts and ceilings, then the public Core functions per module.
-report_text: fn(counts: [Int], ledger: String, modules: [String: Int]) -> String Never! {
+report_text: fn(counts: [Int], ledger: String, modules: [String:Int]) -> String Never! {
     problems := [String]{}
     rows: ceiling_rows(ledger, problems)
     out := "language surface (counted; a ceiling rises only by owner decision):\n"
@@ -310,9 +331,11 @@ report_text: fn(counts: [Int], ledger: String, modules: [String: Int]) -> String
 
 // A ballot's before/after: each count and each module's public Core
 // functions in the checkout before beside after, with the change.
-ballot_text: fn(before_root: String, before: [Int], after: [Int], before_modules: [String: Int], after_modules: [String: Int]) -> String Never! {
+ballot_text: fn(before_root: String, before: [Int], after: [Int], before_modules: [String:Int], after_modules: [String:Int]) -> String Never! {
     out := "surface ballot: {before_root} (before) -> this checkout (after)\n\nlanguage surface:\n"
-    loop (index, kind) in SURFACE_KINDS -> out = "{out}  {kind_name(kind)}: {before[index]} -> {after[index]} ({delta(before[index], after[index])})\n"
+    loop (index, kind) in SURFACE_KINDS {
+        out = "{out}  {kind_name(kind)}: {before[index]} -> {after[index]} ({delta(before[index], after[index])})\n"
+    }
     out = "{out}\npublic Core functions by module (reported, never gated):\n"
     names := before_modules.keys().to_list()
     loop name in after_modules.keys() {
@@ -342,10 +365,14 @@ surface_budget_main: fn(args: [String]) -[FS]> String SurfaceBudgetError! {
     ledger: read_text(LEDGER) ?? return Err(err)
     if args.len() == 0 || (mode == "--check" && args.len() == 1) {
         problems: budget_problems(counts, ledger)
-        if problems.len() > 0 -> return Err(budget_fail("{problems.len()} problem(s):\n{problems.join("\n")}"))
+        if problems.len() > 0 {
+            return Err(budget_fail("{problems.len()} problem(s):\n{problems.join("\n")}"))
+        }
         return Ok("surface budget: every count equals its ceiling")
     }
-    if mode == "--report" && args.len() == 1 -> return Ok(report_text(counts, ledger, core_functions("") ?? return Err(err)))
+    if mode == "--report" && args.len() == 1 {
+        return Ok(report_text(counts, ledger, core_functions("") ?? return Err(err)))
+    }
     if mode == "--ballot" && args.len() == 2 {
         before: surface_counts(args[1]) ?? return Err(err)
         before_modules: core_functions(args[1]) ?? return Err(err)
@@ -359,7 +386,9 @@ run: fn() { print(surface_budget_main(process.args()) ?? process.fail(1, err.mes
 // The ledger a fixture checks: every kind at the given ceiling.
 fixture_ledger: fn(ceilings: [Int]) -> String Never! {
     out := "# kind\tceiling\twhy\n"
-    loop (index, kind) in SURFACE_KINDS -> out = "{out}{kind_name(kind)}\t{ceilings[index]}\tthe surface when the budget began\n"
+    loop (index, kind) in SURFACE_KINDS {
+        out = "{out}{kind_name(kind)}\t{ceilings[index]}\tthe surface when the budget began\n"
+    }
     out
 }
 
@@ -432,10 +461,10 @@ fixture_ledger: fn(ceilings: [Int]) -> String Never! {
     assert_eq(core_module("Core", "Core/Http/Client.jet"), "Http")
     assert_eq(core_module("Core", "Core/Data/Arrow/Table.jet"), "Data/Arrow")
     assert_eq(core_module("old/Core", "old/Core/Top.jet"), "Core")
-    before := [String: Int]{}
+    before := [String:Int]{}
     before["Http"] = 10
     before["Text"] = 4
-    after := [String: Int]{}
+    after := [String:Int]{}
     after["Http"] = 12
     after["Text"] = 4
     after["Wasm"] = 3

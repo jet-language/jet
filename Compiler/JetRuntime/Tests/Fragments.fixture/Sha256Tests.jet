@@ -11,15 +11,19 @@
         rt_sha256_parts(input, split, input + split, length - split, output + I64{1}, scratch)
         at := I64{0}
         loop {
-            if (at >= I64{32}) -> break
-            if (rt_text_byte(output + I64{1} + at) != rt_text_byte(expected + at)) -> jet_rt_unreachable(I64{0}, I64{0})
+            if (at >= I64{32}) { break }
+            if (rt_text_byte(output + I64{1} + at) != rt_text_byte(expected + at)) {
+                jet_rt_unreachable(I64{0}, I64{0})
+            }
             at += I64{1}
         }
-        if (rt_text_byte(output) != I64{165} || rt_text_byte(output + I64{33}) != I64{90}) -> jet_rt_unreachable(I64{0}, I64{0})
+        if (rt_text_byte(output) != I64{165} || rt_text_byte(output + I64{33}) != I64{90}) {
+            jet_rt_unreachable(I64{0}, I64{0})
+        }
         at = I64{0}
         loop {
-            if (at >= I64{576}) -> break
-            if (rt_text_word(scratch + at) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+            if (at >= I64{576}) { break }
+            if (rt_text_word(scratch + at) != I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
             at += I64{8}
         }
         // Short vectors exercise every split; the million-byte KAT exercises
@@ -35,8 +39,10 @@
     jet_rt_native_sha256(input, length, output + I64{1}, scratch)
     at := I64{0}
     loop {
-        if (at >= I64{32}) -> break
-        if (rt_text_byte(output + I64{1} + at) != rt_text_byte(expected + at)) -> jet_rt_unreachable(I64{0}, I64{0})
+        if (at >= I64{32}) { break }
+        if (rt_text_byte(output + I64{1} + at) != rt_text_byte(expected + at)) {
+            jet_rt_unreachable(I64{0}, I64{0})
+        }
         at += I64{1}
     }
     // Every short-input split across four borrowed spans, including empty
@@ -50,20 +56,22 @@
                 rt_sha256_parts4(input, first, input + first, second - first, input + second, third - second, input + third, length - third, output + I64{1}, scratch)
                 at = I64{0}
                 loop {
-                    if (at >= I64{32}) -> break
-                    if (rt_text_byte(output + I64{1} + at) != rt_text_byte(expected + at)) -> jet_rt_unreachable(I64{0}, I64{0})
+                    if (at >= I64{32}) { break }
+                    if (rt_text_byte(output + I64{1} + at) != rt_text_byte(expected + at)) {
+                        jet_rt_unreachable(I64{0}, I64{0})
+                    }
                     at += I64{1}
                 }
                 at = I64{0}
                 loop {
-                    if (at >= I64{576}) -> break
-                    if (rt_text_word(scratch + at) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+                    if (at >= I64{576}) { break }
+                    if (rt_text_word(scratch + at) != I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
                     at += I64{8}
                 }
-                if (length > I64{64}) -> break
+                if (length > I64{64}) { break }
                 third += I64{1}
             }
-            if (length > I64{64}) -> break
+            if (length > I64{64}) { break }
             second += I64{1}
         }
         if (length > I64{64}) {

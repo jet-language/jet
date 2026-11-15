@@ -100,15 +100,15 @@ arrow_surface_scan: fn(bytes: [U8], tables: TokenTables, raw: [Token], hits: &[A
     loop (index, token) in tokens {
         if token.literal >= 0 {
             loop part in tables.literals[token.literal].string_parts {
-                if part.kind == STRING_PART_INTERPOLATION -> arrow_surface_scan(bytes, tables, part.tokens, hits)
+                if part.kind == STRING_PART_INTERPOLATION {
+                    arrow_surface_scan(bytes, tables, part.tokens, hits)
+                }
             }
         }
         following: index + 1 < tokens.len()
         if token.kind == TOKEN_FENCE_OPEN -> fences += 1
         if token.kind == TOKEN_FENCE_CLOSE {
-            if fences > 0 {
-                fences -= 1
-            } else {
+            if fences > 0 -> fences -= 1 else {
                 hits.push(ArrowSurfaceHit{offset: token.span.start, spelling: "`:>` arrow"})
             }
         }
@@ -130,8 +130,12 @@ arrow_surface_scan: fn(bytes: [U8], tables: TokenTables, raw: [Token], hits: &[A
         }
         if token.kind == TOKEN_BREAK && following {
             after: tokens[index + 1]
-            if after.kind == TOKEN_DOT && arrow_surface_touch(token, after) -> hits.push(ArrowSurfaceHit{offset: token.span.start, spelling: "dot loop exit"})
-            if arrow_surface_at_sign(bytes, after) -> hits.push(ArrowSurfaceHit{offset: token.span.start, spelling: "`@` loop exit"})
+            if after.kind == TOKEN_DOT && arrow_surface_touch(token, after) {
+                hits.push(ArrowSurfaceHit{offset: token.span.start, spelling: "dot loop exit"})
+            }
+            if arrow_surface_at_sign(bytes, after) {
+                hits.push(ArrowSurfaceHit{offset: token.span.start, spelling: "`@` loop exit"})
+            }
         }
         if arrow_surface_word(tables, token, "next") && following && arrow_surface_at_sign(bytes, tokens[index + 1]) {
             hits.push(ArrowSurfaceHit{offset: token.span.start, spelling: "`@` loop exit"})
@@ -263,7 +267,9 @@ arrow_surface_markdown_lines: fn(text: String) -> [ArrowSurfaceLine] {
         fence: arrow_surface_fence(line)
         if open {
             closes := false
-            if fence == .Val(found) -> closes = found.marker == open_marker && found.width >= open_width && found.rest.trim().is_empty()
+            if fence == .Val(found) {
+                closes = found.marker == open_marker && found.width >= open_width && found.rest.trim().is_empty()
+            }
             if !closes {
                 fenced.push(line)
                 next
@@ -281,7 +287,9 @@ arrow_surface_markdown_lines: fn(text: String) -> [ArrowSurfaceLine] {
             fenced = [String]{}
             next
         }
-        loop spelling in arrow_surface_inline_hits(line) -> out.push(ArrowSurfaceLine{line: index + 1, text: line, spelling: spelling})
+        loop spelling in arrow_surface_inline_hits(line) {
+            out.push(ArrowSurfaceLine{line: index + 1, text: line, spelling: spelling})
+        }
     }
     if open && jet -> arrow_surface_fence_lines(fenced, start_line, out)
     out
@@ -332,11 +340,15 @@ arrow_surface_paths: fn(root: String, out: &[String]) {
         kind: arrow_surface_files.stat(entry.path) ?? next
         if kind.is_symlink -> next
         if kind.is_dir {
-            if ARROW_SURFACE_SKIPPED_DIRS.contains(entry.name) || entry.name.starts_with("target-") || entry.name.starts_with("build-") || entry.name.starts_with("result-") -> next
+            if ARROW_SURFACE_SKIPPED_DIRS.contains(entry.name) || entry.name.starts_with("target-") || entry.name.starts_with("build-") || entry.name.starts_with("result-") {
+                next
+            }
             arrow_surface_paths(entry.path, out)
             next
         }
-        if entry.name.ends_with(".jet") || entry.name.ends_with(".fixed") || entry.name.ends_with(".md") -> out.push(entry.path.removeprefix("./"))
+        if entry.name.ends_with(".jet") || entry.name.ends_with(".fixed") || entry.name.ends_with(".md") {
+            out.push(entry.path.removeprefix("./"))
+        }
     }
 }
 
@@ -390,13 +402,17 @@ arrow_surface_ui_subject_lines: fn(path: String) -> [Int] {
         text: arrow_surface_files.read(path) ?? next
         if markdown {
             loop found in arrow_surface_markdown_lines(text) {
-                if !arrow_surface_exempt_line(found.text) -> failures.push("{path}:{found.line}: {found.spelling}: {found.text.trim()}")
+                if !arrow_surface_exempt_line(found.text) {
+                    failures.push("{path}:{found.line}: {found.spelling}: {found.text.trim()}")
+                }
             }
             next
         }
         subjects: arrow_surface_ui_subject_lines(path)
         loop found in arrow_surface_source_lines(text) {
-            if !subjects.contains(found.line) -> failures.push("{path}:{found.line}: {found.spelling}: {found.text.trim()}")
+            if !subjects.contains(found.line) {
+                failures.push("{path}:{found.line}: {found.spelling}: {found.text.trim()}")
+            }
         }
     }
     assert(failures.is_empty(), "superseded spellings (write `->`, `-[E]>`, `break(name)`, `next(name)`, `client: Msg(...)`, or a plain capture):\n{failures.join("\n")}")

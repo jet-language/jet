@@ -43,7 +43,9 @@ pkg_cbind_render_binding: fn(p: CProto, used_names: &[String], contract: Foreign
     loop idx in 0..<p.params.len() {
         if idx == context_index -> next
         raw: p.params[idx].trim()
-        if raw == "..." -> return Err(CBindingSkip{reason: "variadic (`...`) parameters aren't bindable"})
+        if raw == "..." {
+            return Err(CBindingSkip{reason: "variadic (`...`) parameters aren't bindable"})
+        }
         split: pkg_cbind_split_param_type_and_name(raw, idx)
         ty: split.ty
         jet_ty: pkg_cbind_render_param_type(p, idx, ty, length_param, contract, handles, catalog)
@@ -129,7 +131,9 @@ pkg_cbind_map_return_type: fn(c_type: String, contract: ForeignABIContract, hand
 pkg_cbind_array_length_param: fn(p: CProto, catalog: CTypeCatalog) -> Int? Never! {
     loop index in 0..<p.params.len() {
         split: pkg_cbind_split_param_type_and_name(p.params[index], index)
-        if !pkg_cbind_pointer_is_const(split.ty) && pkg_cbind_is_length_name(split.name) && catalog.map_length_type(split.ty) != None -> return Val(index)
+        if !pkg_cbind_pointer_is_const(split.ty) && pkg_cbind_is_length_name(split.name) && catalog.map_length_type(split.ty) != None {
+            return Val(index)
+        }
     }
     None
 }
@@ -139,7 +143,9 @@ pkg_cbind_has_companion_count: fn(p: CProto, pointer_index: Int, catalog: CTypeC
     loop index in 0..<p.params.len() {
         if index == pointer_index -> next
         split: pkg_cbind_split_param_type_and_name(p.params[index], index)
-        if pkg_cbind_pointer_base(split.ty).depth == 0 && pkg_cbind_is_length_name(split.name) && catalog.resolved_scalar(split.ty) != None -> return true
+        if pkg_cbind_pointer_base(split.ty).depth == 0 && pkg_cbind_is_length_name(split.name) && catalog.resolved_scalar(split.ty) != None {
+            return true
+        }
     }
     false
 }
@@ -190,6 +196,4 @@ pkg_cbind_map_type: fn(c_type: String, contract: ForeignABIContract, handles: Op
 }
 
 // A C symbol as a quoted Jet string literal.
-pkg_cbind_quote: fn(value: String) -> String Never! {
-    pkg_json_render(Dyn.Text(value.copy()))
-}
+pkg_cbind_quote: fn(value: String) -> String Never! { pkg_json_render(Dyn.Text(value.copy())) }

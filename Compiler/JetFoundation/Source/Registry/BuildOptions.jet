@@ -251,8 +251,10 @@ deep_checks_read: fn(argv: [String]) -> DeepChecksRead Never! {
         }
         if !argument.starts_with(prefix) -> next
         scope: argument.slice(prefix.len()..<argument.len())
-        if !deep_checks_scope_valid(scope) -> return DeepChecksRead.Refused{argument: argument.copy()} // copy: the refusal outlives argv.
-        if !request.scopes.contains(scope) -> request.scopes.push(scope.copy()) // copy: the request owns its scopes.
+        if !deep_checks_scope_valid(scope) {
+            return DeepChecksRead.Refused{argument: argument.copy()}  // copy: the refusal outlives argv.
+        }
+        if !request.scopes.contains(scope) -> request.scopes.push(scope.copy())  // copy: the request owns its scopes.
     }
     DeepChecksRead.Read{request: request}
 }
@@ -296,7 +298,7 @@ deep_checks_off: fn(request: DeepChecks) -> Bool Never! {
 deep_checks_key: fn(request: DeepChecks) -> String Never! {
     if deep_checks_off(request) -> return ""
     words := [String]{}
-    loop scope in request.scopes -> words.push(scope.copy()) // copy: sorted for the key; the request keeps argv order.
+    loop scope in request.scopes -> words.push(scope.copy())  // copy: sorted for the key; the request keeps argv order.
     words.sort()
     if request.all -> words.insert(0, "all")
     words.join(",")
@@ -340,9 +342,11 @@ deep_checks_unselected: fn(request: DeepChecks, paths: [String], holders: [Strin
         if kept -> next
         selected := [String]{}
         loop path in paths {
-            if deep_checks_selects(scope, path) && !selected.contains(path) -> selected.push(path.copy()) // copy: the report owns its paths.
+            if deep_checks_selects(scope, path) && !selected.contains(path) {
+                selected.push(path.copy())  // copy: the report owns its paths.
+            }
         }
-        found.push(DeepChecksUnselected{scope: scope.copy(), selected: selected}) // copy: the report outlives the request.
+        found.push(DeepChecksUnselected{scope: scope.copy(), selected: selected})  // copy: the report outlives the request.
     }
     found
 }
@@ -431,10 +435,11 @@ log_filter_module: fn(path: String) -> Bool Never! {
 }
 
 BuildOptionsResolved: enum {
-    // `notes` are the stderr lines naming each value a flag replaced.
     Resolved(options: BuildOptions, notes: [String])
     Refused(code: String, what: String, fix: String)
 }
+
+// `notes` are the stderr lines naming each value a flag replaced.
 
 build_option_row: fn(name: String) -> BuildOptionRow? {
     loop row in JET_BUILD_OPTIONS {
@@ -443,9 +448,7 @@ build_option_row: fn(name: String) -> BuildOptionRow? {
     None
 }
 
-build_option_flag: fn(name: String) -> String Never! {
-    "--{name.replace("_", "-")}"
-}
+build_option_flag: fn(name: String) -> String Never! { "--{name.replace("_", "-")}" }
 
 // The row a jet flag names: `--bounds` or `--bounds=off` the `bounds` row,
 // a level flag (`-O2`) its Level row.
@@ -464,9 +467,7 @@ build_option_flag_row: fn(argument: String) -> BuildOptionRow? {
 }
 
 // The flag of a Level row's value: `-O2` for `O2`.
-build_option_level_flag: fn(value: String) -> String Never! {
-    "-{value}"
-}
+build_option_level_flag: fn(value: String) -> String Never! { "-{value}" }
 
 // The value a level flag (`-O2`) names; None for any other word, which
 // includes a level past the last value.
@@ -552,14 +553,10 @@ build_option_items: fn(value: String) -> [String] Never! {
 }
 
 // The List value of `items`.
-build_option_list_value: fn(items: [String]) -> String Never! {
-    items.join("\n")
-}
+build_option_list_value: fn(items: [String]) -> String Never! { items.join("\n") }
 
 // `fatal, report or off`
-build_option_values_text: fn(row: BuildOptionRow) -> String Never! {
-    build_option_join(row.values)
-}
+build_option_values_text: fn(row: BuildOptionRow) -> String Never! { build_option_join(row.values) }
 
 // What a value of `row` is, as a fix names it: `one of fatal, report or
 // off`, `one of -O0, -O1 or -O2`, `a path or other text`, `one item per flag`.
@@ -632,7 +629,9 @@ JET_BUILD_DEFAULT_PROFILE: "dev"
 build_options_key: fn(options: BuildOptions) -> String Never! {
     out := if options.profile == "" -> JET_BUILD_DEFAULT_PROFILE else -> options.profile
     loop choice in options.values {
-        if !JET_BUILD_OPTIONS_UNKEYED.contains(choice.name) -> out = "{out};{choice.name}={choice.value}"
+        if !JET_BUILD_OPTIONS_UNKEYED.contains(choice.name) {
+            out = "{out};{choice.name}={choice.value}"
+        }
     }
     loop setting in options.settings -> out = "{out};set.{setting.name}={setting.value}"
     if options.observe -> out = "{out};observe"
@@ -704,13 +703,17 @@ build_option_flags: fn(argv: [String]) -> BuildOptionsResolved Never! {
         level: row.kind == BuildOptionKind.Level
         flag: if level -> build_option_level_flags_text(row) else -> build_option_flag(row.name)
         bare: argument == flag && row.kind == BuildOptionKind.Bool
-        if !level && !bare && !argument.starts_with("{flag}=") -> return BuildOptionsResolved.Refused{code: "E2104", what: "`{flag}` needs a value", fix: "write `{flag}=<value>` with {build_option_value_hint(row)}"}
+        if !level && !bare && !argument.starts_with("{flag}=") {
+            return BuildOptionsResolved.Refused{code: "E2104", what: "`{flag}` needs a value", fix: "write `{flag}=<value>` with {build_option_value_hint(row)}"}
+        }
         value: if {
             level -> argument.slice(1..<argument.len())
             bare -> "true"
             else -> argument.slice(flag.len() + 1..<argument.len())
         }
-        if !build_option_accepts(row, value) || (row.kind == BuildOptionKind.List && value == "") -> return BuildOptionsResolved.Refused{code: "E2104", what: "`{argument}` isn't a value of `{row.name}`", fix: "write `{flag}=<value>` with {build_option_value_hint(row)}"}
+        if !build_option_accepts(row, value) || (row.kind == BuildOptionKind.List && value == "") {
+            return BuildOptionsResolved.Refused{code: "E2104", what: "`{argument}` isn't a value of `{row.name}`", fix: "write `{flag}=<value>` with {build_option_value_hint(row)}"}
+        }
         // Each flag of a List row is one more item.
         if row.kind == BuildOptionKind.List {
             merged := false
@@ -723,7 +726,9 @@ build_option_flags: fn(argv: [String]) -> BuildOptionsResolved Never! {
             if merged -> next
         }
         loop earlier in flags {
-            if earlier.name == row.name && earlier.value != value -> return BuildOptionsResolved.Refused{code: "E2104", what: "`{earlier.written}` and `{argument}` disagree", fix: if level -> "pass one of {flag}" else -> "pass `{flag}` once"}
+            if earlier.name == row.name && earlier.value != value {
+                return BuildOptionsResolved.Refused{code: "E2104", what: "`{earlier.written}` and `{argument}` disagree", fix: if level -> "pass one of {flag}" else -> "pass `{flag}` once"}
+            }
         }
         flags.push(BuildOptionChoice{name: row.name.move(), value: value, layer: BuildOptionLayer.Flag, written: argument.copy(), site: "", pinned: false})
     }
@@ -746,7 +751,9 @@ build_options_resolve: fn(command: String, profile: String, written: [BuildOptio
                     return BuildOptionsResolved.Refused{code: "E2113", what: "`{row.name}` is pinned to `{current.value}` {current.site}, so `{choice.written}` can't change it", fix: "remove the flag, or remove the pin {current.site}"}
                 }
                 if current.layer == BuildOptionLayer.Profile || current.layer == BuildOptionLayer.Code {
-                    if current.value != choice.value -> notes.push("note: {choice.written} replaces {current.written} {current.site} for this run")
+                    if current.value != choice.value {
+                        notes.push("note: {choice.written} replaces {current.written} {current.site} for this run")
+                    }
                 }
             }
             current = choice.copy()

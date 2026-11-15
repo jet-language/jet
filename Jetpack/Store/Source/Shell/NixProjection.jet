@@ -58,10 +58,15 @@ fi
 ` }
 
 ENV_SHELL_NIX_STORE: "/nix/store"
+
 ENV_SHELL_UNSHARE_CANDIDATES: [String]{"/run/current-system/sw/bin/unshare", "/usr/bin/unshare", "/bin/unshare"}
+
 ENV_SHELL_MOUNT_CANDIDATES: [String]{"/run/current-system/sw/bin/mount", "/usr/bin/mount", "/bin/mount"}
+
 ENV_SHELL_SH_CANDIDATES: [String]{"/run/current-system/sw/bin/sh", "/usr/bin/sh", "/bin/sh"}
+
 ENV_SHELL_NAMESPACE_FLAGS: [String]{"--user", "--map-root-user", "--mount", "--propagation", "private"}
+
 ENV_SHELL_PROJECTION_HANDOFF_UNSUPPORTED: "running a leased Nix closure in its rootless `/nix/store` projection is not supported yet: Core cannot pass the namespace tools' open files to a child process"
 
 // Build the namespace command for `program`, or None when no leased Nix
@@ -75,7 +80,7 @@ env_shell_nix_projection_command: fn(env: ShellEnv, program: String, rest: [Stri
         }
         return Ok(None)
     }
-    projections := [String: LeaseText]{}
+    projections := [String:LeaseText]{}
     loop lease in env.cache_leases {
         loop path in lease.nix_store_projection() {
             if projections.get(path.logical) == .Val(existing) {
@@ -88,7 +93,9 @@ env_shell_nix_projection_command: fn(env: ShellEnv, program: String, rest: [Stri
         }
     }
     if projections.len() == 0 -> return Ok(None)
-    if !env.leases_executable(program) && env_shell_strip_path_prefix(program, ENV_SHELL_NIX_STORE) == None -> return Ok(None)
+    if !env.leases_executable(program) && env_shell_strip_path_prefix(program, ENV_SHELL_NIX_STORE) == None {
+        return Ok(None)
+    }
     if !files.is_dir("/proc/self/fd") {
         return Err(EnvironmentError.Unsupported("`/proc/self/fd` is unavailable for stable projection handles"))
     }
@@ -115,7 +122,7 @@ ShellProjectionMounts: struct {
 // Build the empty store directory and the fstab that mounts it and every
 // exact closure object. Bind-mounted logicals are verified inside the
 // namespace; symlink roots are created directly in the projected store.
-env_shell_projection_fstab: fn(projections: [String: String], scratch: &ShellScratch) -[FS, Env, Time]> ShellProjectionMounts EnvironmentError! {
+env_shell_projection_fstab: fn(projections: [String:String], scratch: &ShellScratch) -[FS, Env, Time]> ShellProjectionMounts EnvironmentError! {
     empty_store: env_shell_unique_tmp("jetpack-nix-store")
     files.create_dir_all(empty_store) ?? return Err(EnvironmentError.InvalidData("{err}"))
     scratch.scratch_dirs.push(empty_store.copy())
@@ -147,9 +154,7 @@ env_shell_projection_fstab: fn(projections: [String: String], scratch: &ShellScr
         }
         if node.is_dir {
             files.create_dir_all(mountpoint) ?? return Err(EnvironmentError.InvalidData("{err}"))
-        } else {
-            files.create(mountpoint) ?? return Err(EnvironmentError.InvalidData("{err}"))
-        }
+        } else { files.create(mountpoint) ?? return Err(EnvironmentError.InvalidData("{err}")) }
         fstab = "{fstab}{env_shell_fstab_field(canonical)} {env_shell_fstab_field(logical)} none bind,ro 0 0\n"
         bound_logicals.push(logical)
     }
@@ -162,7 +167,7 @@ env_shell_projection_fstab: fn(projections: [String: String], scratch: &ShellScr
 
 // The logical `/nix/store` name of `binary` when it lies inside a projected
 // closure object, by logical path or by the object's canonical source.
-env_shell_logical_executable_path: fn(projections: [String: String], binary: String) -[FS, Env]> String? Never! {
+env_shell_logical_executable_path: fn(projections: [String:String], binary: String) -[FS, Env]> String? Never! {
     loop logical in envmodel_sorted_keys(projections) {
         if env_shell_strip_path_prefix(binary, logical) == .Val(relative) {
             if relative != "" -> return Val(binary)
@@ -218,7 +223,11 @@ env_shell_first_file: fn(candidates: [String]) -[FS]> String? Never! {
 
 env_shell_report_nix_projection_error: fn(theme: Theme, program: String, error: EnvironmentError) Never! -[IO, Time.Wait]> {
     if error == {
-        .Unsupported(reason) -> theme.error_coded("E1351", "Nix closure execution is unavailable on this host.", "Jetpack could not create the isolated /nix/store projection: {reason}.", "Use a Linux host with unprivileged user and mount namespaces, or choose a native provider for this package.")
-        .IO(_) | .InvalidData(_) | .InvalidInput(_) | .NotFound(_) | .Conflict(_) | .Other(_) | .Overlay(_) | .Transition(_) | .ManagedFile(_) | .Activation(_) | .Gate(_) -> theme.error("could not project `{program}` through `/nix/store`", error.message(), "refresh the verified Hangar closure and run the command again")
+        .Unsupported(reason) -> {
+            theme.error_coded("E1351", "Nix closure execution is unavailable on this host.", "Jetpack could not create the isolated /nix/store projection: {reason}.", "Use a Linux host with unprivileged user and mount namespaces, or choose a native provider for this package.")
+        }
+        .IO(_) | .InvalidData(_) | .InvalidInput(_) | .NotFound(_) | .Conflict(_) | .Other(_) | .Overlay(_) | .Transition(_) | .ManagedFile(_) | .Activation(_) | .Gate(_) -> {
+            theme.error("could not project `{program}` through `/nix/store`", error.message(), "refresh the verified Hangar closure and run the command again")
+        }
     }
 }

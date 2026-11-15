@@ -84,7 +84,9 @@ descriptor_for_id: fn(id: String) -> NodeDescriptor Never! {
 
 insert_descriptor_id: fn(transaction: String, pure: Bool) -> String Never! {
     descriptor := if transaction == "insert_call" -> descriptor_for_id(if pure -> "function_pure" else -> "function_exec") else -> descriptor_for_transaction(transaction)
-    if !descriptor.palette.insertable -> panic("Canvas action descriptor `{descriptor.id}` is not insertable")
+    if !descriptor.palette.insertable {
+        panic("Canvas action descriptor `{descriptor.id}` is not insertable")
+    }
     descriptor.id
 }
 
@@ -102,7 +104,9 @@ palette_rank_fields: fn(id: String) -> String Never! {
 
 catalog_json: fn() -> String Never! {
     descriptors: node_descriptors()
-    if node_catalog_problem(descriptors) == .Val(problem) -> panic("invalid Canvas node catalog: {problem}")
+    if node_catalog_problem(descriptors) == .Val(problem) {
+        panic("invalid Canvas node catalog: {problem}")
+    }
     rows := [String]{}
     loop descriptor in descriptors -> rows.push(descriptor_json(descriptor))
     "[{rows.join(",")}]"
@@ -113,15 +117,25 @@ node_catalog_problem: fn(descriptors: [NodeDescriptor]) -> String? Never! {
     ids := [String:Bool]{}
     identities := [String:Bool]{}
     loop descriptor in descriptors {
-        if descriptor.id == "" || ids.has_key(descriptor.id) -> return Val("missing or duplicate id `{descriptor.id}`")
+        if descriptor.id == "" || ids.has_key(descriptor.id) {
+            return Val("missing or duplicate id `{descriptor.id}`")
+        }
         ids[descriptor.id] = true
         identity: "{descriptor.kind}/{descriptor.archetype}"
         if identities.has_key(identity) -> return Val("duplicate identity `{identity}`")
         identities[identity] = true
-        if !descriptor.projected && !descriptor.palette.insertable -> return Val("orphaned descriptor `{descriptor.id}`")
-        if descriptor.palette.insertable != (descriptor.transaction != None) -> return Val("insertable/transaction mismatch for `{descriptor.id}`")
-        if descriptor.palette.insertable && (!descriptor.palette.visible || descriptor.palette.category == "") -> return Val("non-visible insertable descriptor `{descriptor.id}`")
-        if descriptor.transaction == .Val(transaction) && !NODE_TRANSACTIONS.contains(transaction) -> return Val("unsupported transaction `{transaction}` for `{descriptor.id}`")
+        if !descriptor.projected && !descriptor.palette.insertable {
+            return Val("orphaned descriptor `{descriptor.id}`")
+        }
+        if descriptor.palette.insertable != (descriptor.transaction != None) {
+            return Val("insertable/transaction mismatch for `{descriptor.id}`")
+        }
+        if descriptor.palette.insertable && (!descriptor.palette.visible || descriptor.palette.category == "") {
+            return Val("non-visible insertable descriptor `{descriptor.id}`")
+        }
+        if descriptor.transaction == .Val(transaction) && !NODE_TRANSACTIONS.contains(transaction) {
+            return Val("unsupported transaction `{transaction}` for `{descriptor.id}`")
+        }
     }
     None
 }

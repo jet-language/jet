@@ -6,7 +6,7 @@ nixeval_test_json: fn(text: String) -> NixEvalJSON {
     NixEvalJSON.parse(text) ?? panic("fixture JSON must parse")
 }
 
-nixeval_test_object: fn(document: NixEvalJSON, index: Int) -> [String: Int] {
+nixeval_test_object: fn(document: NixEvalJSON, index: Int) -> [String:Int] {
     document.object(index) ?? panic("expected a JSON object")
 }
 
@@ -18,11 +18,11 @@ nixeval_test_string: fn(document: NixEvalJSON, index: Int) -> String {
     document.string(index) ?? panic("expected a JSON string")
 }
 
-nixeval_test_get: fn(fields: [String: Int], key: String) -> Int {
+nixeval_test_get: fn(fields: [String:Int], key: String) -> Int {
     fields.get(key) ?? panic("missing fixture field {key}")
 }
 
-nixeval_test_text: fn(document: NixEvalJSON, fields: [String: Int], key: String) -> String {
+nixeval_test_text: fn(document: NixEvalJSON, fields: [String:Int], key: String) -> String {
     nixeval_test_string(document, nixeval_test_get(fields, key))
 }
 
@@ -34,7 +34,9 @@ nixeval_test_integer: fn(document: NixEvalJSON, index: Int) -> Int {
 // Rust `fixture_strings`: a JSON array of strings.
 nixeval_test_strings: fn(document: NixEvalJSON, index: Int) -> [String] {
     strings := [String]{}
-    loop item in nixeval_test_array(document, index) -> strings.push(nixeval_test_string(document, item))
+    loop item in nixeval_test_array(document, index) {
+        strings.push(nixeval_test_string(document, item))
+    }
     strings
 }
 

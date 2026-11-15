@@ -23,9 +23,13 @@
 //   +32 batch start ns, +40 warmup or sample index, +48 sample totals.
 
 MEASURE_WARMUPS: I64{5}
+
 MEASURE_SAMPLES: I64{20}
+
 MEASURE_TARGET_NS: I64{1000000}
+
 MEASURE_MAX_BATCH: I64{1073741824}
+
 MEASURE_STATE_BYTES: I64{56}
 
 #Export(c) jet_rt_test_measure_begin: fn() -> I64 {
@@ -48,7 +52,7 @@ MEASURE_STATE_BYTES: I64{56}
 #Export(c) jet_rt_test_measure_next: fn(state: I64) -> Bool {
     phase: trap_word(wrapping(state + I64{8}))
     if (trap_word(state) == I64{0}) {
-        if (phase != I64{0}) -> return false
+        if (phase != I64{0}) { return false }
         trap_store(wrapping(state + I64{8}), I64{3})
         return true
     }
@@ -64,7 +68,7 @@ MEASURE_STATE_BYTES: I64{56}
         trap_store(wrapping(state + I64{32}), sync_now_ns())
         return true
     }
-    if (phase == I64{3}) -> return false
+    if (phase == I64{3}) { return false }
     done: trap_word(wrapping(state + I64{16}))
     batch: trap_word(wrapping(state + I64{24}))
     if (done < batch) {

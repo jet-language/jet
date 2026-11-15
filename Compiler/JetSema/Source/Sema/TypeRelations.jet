@@ -70,7 +70,6 @@ use jet_foundation.[
     TypeAliasDef,
 ]
 
-
 sema_type_arguments_have_open_shape: fn(types: [Type]) -> Bool Never! {
     loop ty in types {
         if sema_union_member_has_open_shape(ty) -> return true
@@ -160,7 +159,9 @@ sema_effect_bound_compatible: fn(required: [EffectRowEntry]?, offered: [EffectRo
     offered_row: offered ?? return false
     loop offered_entry in offered_row {
         found: loop required_entry in required_row {
-            if required_entry.name == offered_entry.name -> break true
+            if required_entry.name == offered_entry.name {
+                break true
+            }
         } ?? false
         if !found -> return false
     }
@@ -223,7 +224,9 @@ sema_view_source_path_equal: fn(left: ViewSourcePath, right: ViewSourcePath) -> 
 sema_view_sources_subset: fn(candidate: [ViewSourcePath], allowed: [ViewSourcePath]) -> Bool Never! {
     loop path in candidate {
         found: loop allowed_path in allowed {
-            if sema_view_source_path_equal(path, allowed_path) -> break true
+            if sema_view_source_path_equal(path, allowed_path) {
+                break true
+            }
         } ?? false
         if !found -> return false
     }
@@ -242,7 +245,9 @@ sema_function_obligations_satisfy: fn(offered: FunctionObligations, required: Fu
         offered_effects: offered.effect_bound ?? return false
         loop offered_effect in offered_effects {
             found: loop required_effect in required_effects {
-                if offered_effect == required_effect -> break true
+                if offered_effect == required_effect {
+                    break true
+                }
             } ?? false
             if !found -> return false
         }
@@ -255,7 +260,9 @@ sema_function_obligations_satisfy: fn(offered: FunctionObligations, required: Fu
         loop (index, required_row) in required_contract {
             offered_row: offered_contract[index]
             if offered_row.label != required_row.label -> return false
-            if offered_row.zone != ParamZone.Either && offered_row.zone != required_row.zone -> return false
+            if offered_row.zone != ParamZone.Either && offered_row.zone != required_row.zone {
+                return false
+            }
         }
     }
 
@@ -273,7 +280,9 @@ sema_function_obligations_satisfy: fn(offered: FunctionObligations, required: Fu
         loop required_entry in required_map.entries {
             offered_value: sema_view_provenance_at(offered_map, required_entry.slot) ?? return false
             if required_entry.value.mutable && !offered_value.mutable -> return false
-            if !sema_view_sources_subset(offered_value.sources, required_entry.value.sources) -> return false
+            if !sema_view_sources_subset(offered_value.sources, required_entry.value.sources) {
+                return false
+            }
         }
     }
     true
@@ -284,11 +293,15 @@ sema_type_function_obligations_parts: fn(effect_bound: [EffectRowEntry]?, param_
     variadic := [Bool]?{None}
     if call_metadata == .Val(metadata) {
         has_variadic: loop flag in metadata.variadic {
-            if flag -> break true
+            if flag {
+                break true
+            }
         } ?? false
         if has_variadic -> variadic = Val(metadata.variadic)
     }
-    if effect_names == None && param_contract == None && variadic == None && return_view_provenance == None -> return None
+    if effect_names == None && param_contract == None && variadic == None && return_view_provenance == None {
+        return None
+    }
     Val(FunctionObligations{effect_bound: effect_names, param_contract: param_contract, variadic: variadic, return_view_provenance: return_view_provenance})
 }
 
@@ -307,11 +320,15 @@ sema_type_obligations_nested: fn(required: Type, offered: Type) -> Bool Never! {
                     required_obligations: sema_type_function_obligations(required)
                     if required_obligations == .Val(required_rows) {
                         offered_obligations: sema_type_function_obligations(offered) ?? FunctionObligations{effect_bound: None, param_contract: None, variadic: None, return_view_provenance: None}
-                        if !sema_function_obligations_satisfy(offered_obligations, required_rows) -> return false
+                        if !sema_function_obligations_satisfy(offered_obligations, required_rows) {
+                            return false
+                        }
                     }
                     if required_params.len() != offered_params.len() -> return false
                     loop (index, required_param) in required_params {
-                        if !sema_type_obligations_nested(required_param, offered_params[index]) -> return false
+                        if !sema_type_obligations_nested(required_param, offered_params[index]) {
+                            return false
+                        }
                     }
                     if sema_fn_return_is_never(offered_ret) -> return true
                     return if required_ret == {
@@ -329,28 +346,68 @@ sema_type_obligations_nested: fn(required: Type, offered: Type) -> Bool Never! {
             }
             return true
         }
-        .List(required_inner) -> if offered == .List(offered_inner) -> return sema_type_obligations_nested(required_inner, offered_inner)
-        .Case(required_name, required_payload) -> if offered == .Case(offered_name, offered_payload) -> return required_name == offered_name && sema_type_obligations_nested(required_payload, offered_payload)
-        .Option(required_inner) -> if offered == .Option(offered_inner) -> return sema_type_obligations_nested(required_inner, offered_inner)
-        .Shared(required_inner) -> if offered == .Shared(offered_inner) -> return sema_type_obligations_nested(required_inner, offered_inner)
-        .Result(required_ok, required_err) -> if offered == .Result(offered_ok, offered_err) -> return sema_type_obligations_nested(required_ok, offered_ok) && sema_type_obligations_nested(required_err, offered_err)
-        .Map(required_key, _, required_value) -> if offered == .Map(offered_key, _, offered_value) -> return sema_type_obligations_nested(required_key, offered_key) && sema_type_obligations_nested(required_value, offered_value)
-        .Tuple(required_fields) -> if offered == .Tuple(offered_fields) {
-            if required_fields.len() != offered_fields.len() -> return false
-            loop (index, required_field) in required_fields {
-                offered_field: offered_fields[index]
-                if required_field.name != offered_field.name || !sema_type_obligations_nested(required_field.ty, offered_field.ty) -> return false
+        .List(required_inner) -> {
+            if offered == .List(offered_inner) {
+                return sema_type_obligations_nested(required_inner, offered_inner)
             }
-            return true
         }
-        .FixedList(required_elem, _) -> if offered == .FixedList(offered_elem, _) -> return sema_type_obligations_nested(required_elem, offered_elem)
-        .Quantity(required_base, _) -> if offered == .Quantity(offered_base, _) -> return sema_type_obligations_nested(required_base, offered_base)
-        .Union(required_members) -> if offered == .Union(offered_members) {
-            if required_members.len() != offered_members.len() -> return false
-            loop (index, required_member) in required_members {
-                if !sema_type_obligations_nested(required_member, offered_members[index]) -> return false
+        .Case(required_name, required_payload) -> {
+            if offered == .Case(offered_name, offered_payload) {
+                return required_name == offered_name && sema_type_obligations_nested(required_payload, offered_payload)
             }
-            return true
+        }
+        .Option(required_inner) -> {
+            if offered == .Option(offered_inner) {
+                return sema_type_obligations_nested(required_inner, offered_inner)
+            }
+        }
+        .Shared(required_inner) -> {
+            if offered == .Shared(offered_inner) {
+                return sema_type_obligations_nested(required_inner, offered_inner)
+            }
+        }
+        .Result(required_ok, required_err) -> {
+            if offered == .Result(offered_ok, offered_err) {
+                return sema_type_obligations_nested(required_ok, offered_ok) && sema_type_obligations_nested(required_err, offered_err)
+            }
+        }
+        .Map(required_key, _, required_value) -> {
+            if offered == .Map(offered_key, _, offered_value) {
+                return sema_type_obligations_nested(required_key, offered_key) && sema_type_obligations_nested(required_value, offered_value)
+            }
+        }
+        .Tuple(required_fields) -> {
+            if offered == .Tuple(offered_fields) {
+                if required_fields.len() != offered_fields.len() -> return false
+                loop (index, required_field) in required_fields {
+                    offered_field: offered_fields[index]
+                    if required_field.name != offered_field.name || !sema_type_obligations_nested(required_field.ty, offered_field.ty) {
+                        return false
+                    }
+                }
+                return true
+            }
+        }
+        .FixedList(required_elem, _) -> {
+            if offered == .FixedList(offered_elem, _) {
+                return sema_type_obligations_nested(required_elem, offered_elem)
+            }
+        }
+        .Quantity(required_base, _) -> {
+            if offered == .Quantity(offered_base, _) {
+                return sema_type_obligations_nested(required_base, offered_base)
+            }
+        }
+        .Union(required_members) -> {
+            if offered == .Union(offered_members) {
+                if required_members.len() != offered_members.len() -> return false
+                loop (index, required_member) in required_members {
+                    if !sema_type_obligations_nested(required_member, offered_members[index]) {
+                        return false
+                    }
+                }
+                return true
+            }
         }
         .Tagged(marker, inner) -> return marker == TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal} || sema_type_obligations_nested(inner, offered)
         .Int | .Float | .Bool | .String | .Char | .Named(_) | .Apply(_, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Measure(_) -> {}
@@ -367,26 +424,58 @@ sema_type_obligations_satisfy: fn(required: Type, offered: Type) -> Bool Never! 
 
 sema_type_carrier_compatible: fn(required: Type, offered: Type) -> Bool Never! {
     if required == {
-        .List(required_inner) -> if offered == .List(offered_inner) -> return sema_type_carrier_compatible(required_inner, offered_inner)
-        .Case(required_name, required_payload) -> if offered == .Case(offered_name, offered_payload) -> return required_name == offered_name && sema_type_carrier_compatible(required_payload, offered_payload)
-        .Option(required_inner) -> if offered == .Option(offered_inner) -> return sema_type_carrier_compatible(required_inner, offered_inner)
-        .Shared(required_inner) -> if offered == .Shared(offered_inner) -> return sema_type_carrier_compatible(required_inner, offered_inner)
-        .Map(required_key, _, required_value) -> if offered == .Map(offered_key, _, offered_value) -> return sema_type_carrier_compatible(required_key, offered_key) && sema_type_carrier_compatible(required_value, offered_value)
-        .FixedList(required_element, required_length) -> if offered == .FixedList(offered_element, offered_length) -> return required_length == offered_length && sema_type_carrier_compatible(required_element, offered_element)
-        .Tuple(required_fields) -> if offered == .Tuple(offered_fields) {
-            if required_fields.len() != offered_fields.len() -> return false
-            loop (index, required_field) in required_fields {
-                offered_field: offered_fields[index]
-                if required_field.name != offered_field.name || !sema_type_carrier_compatible(required_field.ty, offered_field.ty) -> return false
+        .List(required_inner) -> {
+            if offered == .List(offered_inner) {
+                return sema_type_carrier_compatible(required_inner, offered_inner)
             }
-            return true
         }
-        .Union(required_members) -> if offered == .Union(offered_members) {
-            if required_members.len() != offered_members.len() -> return false
-            loop (index, required_member) in required_members {
-                if !sema_type_carrier_compatible(required_member, offered_members[index]) -> return false
+        .Case(required_name, required_payload) -> {
+            if offered == .Case(offered_name, offered_payload) {
+                return required_name == offered_name && sema_type_carrier_compatible(required_payload, offered_payload)
             }
-            return true
+        }
+        .Option(required_inner) -> {
+            if offered == .Option(offered_inner) {
+                return sema_type_carrier_compatible(required_inner, offered_inner)
+            }
+        }
+        .Shared(required_inner) -> {
+            if offered == .Shared(offered_inner) {
+                return sema_type_carrier_compatible(required_inner, offered_inner)
+            }
+        }
+        .Map(required_key, _, required_value) -> {
+            if offered == .Map(offered_key, _, offered_value) {
+                return sema_type_carrier_compatible(required_key, offered_key) && sema_type_carrier_compatible(required_value, offered_value)
+            }
+        }
+        .FixedList(required_element, required_length) -> {
+            if offered == .FixedList(offered_element, offered_length) {
+                return required_length == offered_length && sema_type_carrier_compatible(required_element, offered_element)
+            }
+        }
+        .Tuple(required_fields) -> {
+            if offered == .Tuple(offered_fields) {
+                if required_fields.len() != offered_fields.len() -> return false
+                loop (index, required_field) in required_fields {
+                    offered_field: offered_fields[index]
+                    if required_field.name != offered_field.name || !sema_type_carrier_compatible(required_field.ty, offered_field.ty) {
+                        return false
+                    }
+                }
+                return true
+            }
+        }
+        .Union(required_members) -> {
+            if offered == .Union(offered_members) {
+                if required_members.len() != offered_members.len() -> return false
+                loop (index, required_member) in required_members {
+                    if !sema_type_carrier_compatible(required_member, offered_members[index]) {
+                        return false
+                    }
+                }
+                return true
+            }
         }
         // Rust `type_identity_with_callable_values`: two tags of one marker
         // compare their payloads; a `core.crypto` nominal tag on either side
@@ -394,26 +483,48 @@ sema_type_carrier_compatible: fn(required: Type, offered: Type) -> Bool Never! {
         // tagged `Secret` of a vault row).
         .Tagged(required_marker, required_inner) -> {
             if offered == .Tagged(offered_marker, offered_inner) {
-                if required_marker == offered_marker -> return sema_type_carrier_compatible(required_inner, offered_inner)
+                if required_marker == offered_marker {
+                    return sema_type_carrier_compatible(required_inner, offered_inner)
+                }
             }
-            if required_marker == (TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}) -> return sema_type_carrier_compatible(required_inner, offered)
+            if required_marker == (TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}) {
+                return sema_type_carrier_compatible(required_inner, offered)
+            }
         }
-        .Quantity(required_base, required_dimension) -> if offered == .Quantity(offered_base, offered_dimension) -> return required_dimension == offered_dimension && sema_type_carrier_compatible(required_base, offered_base)
-        .Result(required_ok, required_err) -> if offered == .Result(offered_ok, offered_err) -> return sema_type_carrier_compatible(required_ok, offered_ok) && sema_type_carrier_compatible(required_err, offered_err)
-        .Apply(required_name, required_args) -> if offered == .Apply(offered_name, offered_args) {
-            if required_name != offered_name || required_args.len() != offered_args.len() -> return false
-            loop (index, required_arg) in required_args {
-                if !sema_type_carrier_compatible(required_arg, offered_args[index]) -> return false
+        .Quantity(required_base, required_dimension) -> {
+            if offered == .Quantity(offered_base, offered_dimension) {
+                return required_dimension == offered_dimension && sema_type_carrier_compatible(required_base, offered_base)
             }
-            return true
+        }
+        .Result(required_ok, required_err) -> {
+            if offered == .Result(offered_ok, offered_err) {
+                return sema_type_carrier_compatible(required_ok, offered_ok) && sema_type_carrier_compatible(required_err, offered_err)
+            }
+        }
+        .Apply(required_name, required_args) -> {
+            if offered == .Apply(offered_name, offered_args) {
+                if required_name != offered_name || required_args.len() != offered_args.len() {
+                    return false
+                }
+                loop (index, required_arg) in required_args {
+                    if !sema_type_carrier_compatible(required_arg, offered_args[index]) {
+                        return false
+                    }
+                }
+                return true
+            }
         }
         .Fn(_, _, _, _, _, _) -> {
-            if offered == .Fn(_, _, _, _, _, _) -> return sema_function_types_compatible(required, offered)
+            if offered == .Fn(_, _, _, _, _, _) {
+                return sema_function_types_compatible(required, offered)
+            }
         }
         .Int | .Float | .Bool | .String | .Char | .Named(_) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Measure(_) -> {}
     }
     if offered == .Tagged(offered_marker, offered_inner) {
-        if offered_marker == (TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}) -> return sema_type_carrier_compatible(required, offered_inner)
+        if offered_marker == (TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}) {
+            return sema_type_carrier_compatible(required, offered_inner)
+        }
     }
     type_identity_equal(required, offered)
 }
@@ -427,7 +538,9 @@ sema_function_types_compatible: fn(required: Type, offered: Type) -> Bool Never!
                 .Fn(offered_params, offered_ret, offered_effects, _, _, _) -> {
                     if required_params.len() != offered_params.len() -> return false
                     loop (index, required_param) in required_params {
-                        if !sema_type_carrier_compatible(required_param, offered_params[index]) -> return false
+                        if !sema_type_carrier_compatible(required_param, offered_params[index]) {
+                            return false
+                        }
                     }
                     // A callable that never returns (`-> Never`: it panics,
                     // exits or loops) fits any return slot; no caller ever
@@ -461,7 +574,9 @@ sema_fn_return_is_never: fn(ret: Type?) -> Bool Never! {
 // success type; the fn-value adapter supplies the slot's carrier.
 sema_never_failing_return_fits: fn(required: Type, offered: Type) -> Bool Never! {
     if required == .Result(required_ok, _) {
-        if offered == .Result(offered_ok, offered_err) -> return offered_err == (Type.Named{name: "Never"}) && sema_type_carrier_compatible(required_ok, offered_ok)
+        if offered == .Result(offered_ok, offered_err) {
+            return offered_err == (Type.Named{name: "Never"}) && sema_type_carrier_compatible(required_ok, offered_ok)
+        }
     }
     false
 }
@@ -480,51 +595,99 @@ sema_never_failing_return_fits: fn(required: Type, offered: Type) -> Bool Never!
 // convert.
 sema_type_nested_fn_failure_gap: fn(required: Type, offered: Type, nested: Bool) -> Bool? Never! {
     if required == {
-        .Fn(required_params, required_ret, _, _, _, _) -> if offered == .Fn(offered_params, offered_ret, _, _, _, _) {
-            required_fails: sema_fn_return_fails(required_ret)
-            if nested && !sema_fn_return_is_never(required_ret) && !sema_fn_return_is_never(offered_ret) && required_fails != sema_fn_return_fails(offered_ret) -> return Val(required_fails)
-            if required_params.len() == offered_params.len() {
-                loop (index, required_param) in required_params {
-                    found: if nested -> sema_type_nested_fn_failure_gap(required_param, offered_params[index], true) else -> sema_type_parameter_fn_failure_gap(required_param, offered_params[index])
-                    if found == .Val(gap) -> return Val(gap)
+        .Fn(required_params, required_ret, _, _, _, _) -> {
+            if offered == .Fn(offered_params, offered_ret, _, _, _, _) {
+                required_fails: sema_fn_return_fails(required_ret)
+                if nested && !sema_fn_return_is_never(required_ret) && !sema_fn_return_is_never(offered_ret) && required_fails != sema_fn_return_fails(offered_ret) {
+                    return Val(required_fails)
+                }
+                if required_params.len() == offered_params.len() {
+                    loop (index, required_param) in required_params {
+                        found: if nested -> sema_type_nested_fn_failure_gap(required_param, offered_params[index], true) else -> sema_type_parameter_fn_failure_gap(required_param, offered_params[index])
+                        if found == .Val(gap) -> return Val(gap)
+                    }
+                }
+                if required_ret == .Val(required_value) && offered_ret == .Val(offered_value) {
+                    return sema_type_nested_fn_failure_gap(sema_fn_return_success(required_value), sema_fn_return_success(offered_value), true)
                 }
             }
-            if required_ret == .Val(required_value) && offered_ret == .Val(offered_value) -> return sema_type_nested_fn_failure_gap(sema_fn_return_success(required_value), sema_fn_return_success(offered_value), true)
         }
-        .List(required_inner) -> if offered == .List(offered_inner) -> return sema_type_nested_fn_failure_gap(required_inner, offered_inner, true)
-        .Option(required_inner) -> if offered == .Option(offered_inner) -> return sema_type_nested_fn_failure_gap(required_inner, offered_inner, true)
-        .Shared(required_inner) -> if offered == .Shared(offered_inner) -> return sema_type_nested_fn_failure_gap(required_inner, offered_inner, true)
-        .Map(required_key, _, required_value) -> if offered == .Map(offered_key, _, offered_value) {
-            if sema_type_nested_fn_failure_gap(required_key, offered_key, true) == .Val(found) -> return Val(found)
-            return sema_type_nested_fn_failure_gap(required_value, offered_value, true)
-        }
-        .FixedList(required_element, _) -> if offered == .FixedList(offered_element, _) -> return sema_type_nested_fn_failure_gap(required_element, offered_element, true)
-        .Tuple(required_fields) -> if offered == .Tuple(offered_fields) {
-            if required_fields.len() != offered_fields.len() -> return None
-            loop (index, required_field) in required_fields {
-                if sema_type_nested_fn_failure_gap(required_field.ty, offered_fields[index].ty, true) == .Val(found) -> return Val(found)
+        .List(required_inner) -> {
+            if offered == .List(offered_inner) {
+                return sema_type_nested_fn_failure_gap(required_inner, offered_inner, true)
             }
         }
-        .Union(required_members) -> if offered == .Union(offered_members) {
-            if required_members.len() != offered_members.len() -> return None
-            loop (index, required_member) in required_members {
-                if sema_type_nested_fn_failure_gap(required_member, offered_members[index], true) == .Val(found) -> return Val(found)
+        .Option(required_inner) -> {
+            if offered == .Option(offered_inner) {
+                return sema_type_nested_fn_failure_gap(required_inner, offered_inner, true)
             }
         }
-        .Result(required_ok, required_err) -> if offered == .Result(offered_ok, offered_err) {
-            if sema_type_nested_fn_failure_gap(required_ok, offered_ok, true) == .Val(found) -> return Val(found)
-            return sema_type_nested_fn_failure_gap(required_err, offered_err, true)
+        .Shared(required_inner) -> {
+            if offered == .Shared(offered_inner) {
+                return sema_type_nested_fn_failure_gap(required_inner, offered_inner, true)
+            }
         }
-        .Apply(required_name, required_args) -> if offered == .Apply(offered_name, offered_args) {
-            if required_name != offered_name || required_args.len() != offered_args.len() -> return None
-            loop (index, required_arg) in required_args {
-                if sema_type_nested_fn_failure_gap(required_arg, offered_args[index], true) == .Val(found) -> return Val(found)
+        .Map(required_key, _, required_value) -> {
+            if offered == .Map(offered_key, _, offered_value) {
+                if sema_type_nested_fn_failure_gap(required_key, offered_key, true) == .Val(found) {
+                    return Val(found)
+                }
+                return sema_type_nested_fn_failure_gap(required_value, offered_value, true)
+            }
+        }
+        .FixedList(required_element, _) -> {
+            if offered == .FixedList(offered_element, _) {
+                return sema_type_nested_fn_failure_gap(required_element, offered_element, true)
+            }
+        }
+        .Tuple(required_fields) -> {
+            if offered == .Tuple(offered_fields) {
+                if required_fields.len() != offered_fields.len() -> return None
+                loop (index, required_field) in required_fields {
+                    if sema_type_nested_fn_failure_gap(required_field.ty, offered_fields[index].ty, true) == .Val(found) {
+                        return Val(found)
+                    }
+                }
+            }
+        }
+        .Union(required_members) -> {
+            if offered == .Union(offered_members) {
+                if required_members.len() != offered_members.len() -> return None
+                loop (index, required_member) in required_members {
+                    if sema_type_nested_fn_failure_gap(required_member, offered_members[index], true) == .Val(found) {
+                        return Val(found)
+                    }
+                }
+            }
+        }
+        .Result(required_ok, required_err) -> {
+            if offered == .Result(offered_ok, offered_err) {
+                if sema_type_nested_fn_failure_gap(required_ok, offered_ok, true) == .Val(found) {
+                    return Val(found)
+                }
+                return sema_type_nested_fn_failure_gap(required_err, offered_err, true)
+            }
+        }
+        .Apply(required_name, required_args) -> {
+            if offered == .Apply(offered_name, offered_args) {
+                if required_name != offered_name || required_args.len() != offered_args.len() {
+                    return None
+                }
+                loop (index, required_arg) in required_args {
+                    if sema_type_nested_fn_failure_gap(required_arg, offered_args[index], true) == .Val(found) {
+                        return Val(found)
+                    }
+                }
             }
         }
         // A tag keeps its payload's representation; one tag over the slot
         // keeps the slot's own nesting.
         .Tagged(_, required_inner) -> return sema_type_nested_fn_failure_gap(required_inner, sema_expr_unwrap_tag(offered), nested)
-        .Case(_, required_payload) -> if offered == .Case(_, offered_payload) -> return sema_type_nested_fn_failure_gap(required_payload, offered_payload, true)
+        .Case(_, required_payload) -> {
+            if offered == .Case(_, offered_payload) {
+                return sema_type_nested_fn_failure_gap(required_payload, offered_payload, true)
+            }
+        }
         .Int | .Float | .Bool | .String | .Char | .Named(_) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> {}
     }
     None
@@ -539,13 +702,19 @@ sema_type_parameter_fn_failure_gap: fn(required: Type, offered: Type) -> Bool? N
     if required == .Fn(required_params, required_ret, _, _, _, _) {
         if offered == .Fn(offered_params, offered_ret, _, _, _, _) {
             never: sema_fn_return_is_never(required_ret) || sema_fn_return_is_never(offered_ret)
-            if !never && sema_fn_return_fails(required_ret) && !sema_fn_return_fails(offered_ret) -> return Val(true)
+            if !never && sema_fn_return_fails(required_ret) && !sema_fn_return_fails(offered_ret) {
+                return Val(true)
+            }
             if required_params.len() == offered_params.len() {
                 loop (index, required_param) in required_params {
-                    if sema_type_nested_fn_failure_gap(required_param, offered_params[index], true) == .Val(found) -> return Val(found)
+                    if sema_type_nested_fn_failure_gap(required_param, offered_params[index], true) == .Val(found) {
+                        return Val(found)
+                    }
                 }
             }
-            if required_ret == .Val(required_value) && offered_ret == .Val(offered_value) -> return sema_type_nested_fn_failure_gap(sema_fn_return_success(required_value), sema_fn_return_success(offered_value), true)
+            if required_ret == .Val(required_value) && offered_ret == .Val(offered_value) {
+                return sema_type_nested_fn_failure_gap(sema_fn_return_success(required_value), sema_fn_return_success(offered_value), true)
+            }
             return None
         }
     }
@@ -576,14 +745,20 @@ sema_type_assignable: fn(required: Type, offered: Type) -> Bool Never! {
     }
     if sema_type_compute_tensor_compatible(required, offered) -> return true
     if required == {
-        .List(required_element) -> if offered == .FixedList(offered_element, _) -> return type_identity_equal(required_element, offered_element)
+        .List(required_element) -> {
+            if offered == .FixedList(offered_element, _) {
+                return type_identity_equal(required_element, offered_element)
+            }
+        }
         .Union(members) -> {
             loop member in members {
                 if type_identity_equal(member, offered) -> return true
             }
             // A smaller union widens whole into one holding all its members.
             // A container of it does not (sema_type_carrier_compatible).
-            if offered == .Union(offered_members) -> return sema_type_union_covers(members, offered_members)
+            if offered == .Union(offered_members) {
+                return sema_type_union_covers(members, offered_members)
+            }
         }
         // A record whose members are the same named members in another
         // order converts by value. A container of it does not.
@@ -597,14 +772,20 @@ sema_type_assignable: fn(required: Type, offered: Type) -> Bool Never! {
 // record `required`, each of the same type, in another order: it converts
 // by value.
 sema_type_record_converts: fn(required: Type, offered: Type) -> Bool Never! {
-    required_fields: if required == .Tuple(fields) -> fields else -> { return false }
-    offered_fields: if offered == .Tuple(fields) -> fields else -> { return false }
+    required_fields: if required == .Tuple(fields) -> fields else -> {
+        return false
+    }
+    offered_fields: if offered == .Tuple(fields) -> fields else -> {
+        return false
+    }
     if required_fields.len() != offered_fields.len() -> return false
     reordered := false
     loop (index, required_field) in required_fields {
         if required_field.name != offered_fields[index].name -> reordered = true
         matched: loop offered_field in offered_fields {
-            if offered_field.name == required_field.name -> break type_identity_equal(required_field.ty, offered_field.ty)
+            if offered_field.name == required_field.name {
+                break type_identity_equal(required_field.ty, offered_field.ty)
+            }
         } ?? false
         if !matched -> return false
     }
@@ -615,7 +796,9 @@ sema_type_record_converts: fn(required: Type, offered: Type) -> Bool Never! {
 sema_type_union_covers: fn(members: [Type], offered_members: [Type]) -> Bool Never! {
     loop offered_member in offered_members {
         covered: loop member in members {
-            if type_identity_equal(member, offered_member) -> break true
+            if type_identity_equal(member, offered_member) {
+                break true
+            }
         } ?? false
         if !covered -> return false
     }
@@ -630,7 +813,9 @@ sema_type_compute_tensor_compatible: fn(required: Type, offered: Type) -> Bool N
 }
 
 sema_type_is_erased_tensor: fn(ty: Type) -> Bool Never! {
-    if ty == .Named(name) -> return name == "Tensor" || core_identity_is(name, "core.compute", "Tensor")
+    if ty == .Named(name) {
+        return name == "Tensor" || core_identity_is(name, "core.compute", "Tensor")
+    }
     false
 }
 
@@ -661,7 +846,9 @@ sema_type_graph_canonical_name_at: fn(graph: SemaRegistrationGraph, resolved: Se
     if nominal == .Val(row) {
         // The nominal is read in place: binding it copied the row and its Item.
         // Compiler-owned nominals keep the bare shared spelling (`Ordering`).
-        if graph.modules[row.module_index].nominals[row.row].compiler_owned -> return graph.modules[row.module_index].nominals[row.row].symbol.name
+        if graph.modules[row.module_index].nominals[row.row].compiler_owned {
+            return graph.modules[row.module_index].nominals[row.row].symbol.name
+        }
         return sema_registration_nominal_spelling(graph, row)
     }
     sema_resolved_name(graph, resolved)
@@ -679,12 +866,16 @@ sema_type_name_is_generic: fn(generic_params: [TGenericParam], name: String) -> 
 // caller by row: a lookup chain probes the String-keyed module map once, at
 // its entry, and never per name.
 sema_type_graph_resolve_named: fn(graph: SemaRegistrationGraph, name: String, caller: Int) -> Type Never! {
-    if name == "" || name == "Unit" || name == "Err" || name == "Never" -> return Type.Named{name: name}
+    if name == "" || name == "Unit" || name == "Err" || name == "Never" {
+        return Type.Named{name: name}
+    }
     // A bare `Group` the caller neither declares nor imports is the task
     // group handle `task.group` binds, never a Core struct spelled `Group`
     // (core.data's carrier, core.sys's group entry, core.ui.xkb's key group)
     // that happens to be loaded.
-    if name == "Group" && (caller < 0 || sema_registration_lookup_name_at(graph, caller, graph.modules[caller].module_identity, name) == None) -> return Type.Named{name: name}
+    if name == "Group" && (caller < 0 || sema_registration_lookup_name_at(graph, caller, graph.modules[caller].module_identity, name) == None) {
+        return Type.Named{name: name}
+    }
     resolved: sema_type_graph_lookup_symbol_at(graph, caller, name) ?? return Type.Named{name: name}
     if sema_resolved_kind(graph, resolved) == {
         .Trait -> Type.TraitObject{bounds: [String]{sema_type_graph_canonical_symbol_name(graph, resolved)}}
@@ -704,7 +895,9 @@ sema_type_graph_resolve_named: fn(graph: SemaRegistrationGraph, name: String, ca
                 }
                 return Type.Named{name: sema_type_graph_canonical_name_at(graph, resolved, nominal)}
             }
-            if module_is_core(resolved.source_module_identity) -> return sema_resolved_ty(graph, resolved) ?? Type.Named{name: name}
+            if module_is_core(resolved.source_module_identity) {
+                return sema_resolved_ty(graph, resolved) ?? Type.Named{name: name}
+            }
             Type.Named{name: name}
         }
         .Module | .Function | .Impl | .Constant | .Field | .Variant | .Parameter | .Local | .Import | .Foreign | .Label -> Type.Named{name: name}
@@ -713,7 +906,9 @@ sema_type_graph_resolve_named: fn(graph: SemaRegistrationGraph, name: String, ca
 
 sema_type_graph_resolve_apply_name: fn(graph: SemaRegistrationGraph, name: String, caller: Int) -> String Never! {
     resolved: sema_type_graph_lookup_symbol_at(graph, caller, name) ?? return name
-    if sema_type_source_owns_nominal(graph, name, caller) -> return sema_type_graph_canonical_symbol_name(graph, resolved)
+    if sema_type_source_owns_nominal(graph, name, caller) {
+        return sema_type_graph_canonical_symbol_name(graph, resolved)
+    }
     if sema_resolved_kind(graph, resolved) == SymbolKind.Type && module_is_core(resolved.source_module_identity) && sema_type_graph_resolved_nominal_row(graph, resolved) == None {
         if sema_resolved_ty(graph, resolved) == .Val(builtin) {
             if builtin == .Named(leaf) -> return leaf
@@ -801,7 +996,9 @@ sema_type_alias_cycles_check: fn(graph: &SemaRegistrationGraph) Never! {
     loop module_index in 0..<graph.modules.len() {
         loop row in 0..<graph.modules[module_index].nominals.len() {
             // Read in place: binding the row copied every nominal, methods included.
-            if graph.modules[module_index].nominals[row].kind != SemaRegistrationNominalKind.TypeAlias -> next
+            if graph.modules[module_index].nominals[row].kind != SemaRegistrationNominalKind.TypeAlias {
+                next
+            }
             positions[graph.modules[module_index].nominals[row].symbol.id.id] = rows.len()
             rows.push(SemaTypeAliasCycleRow{module_index: module_index, row: row, edges: [Int]{}})
         }
@@ -842,17 +1039,33 @@ sema_type_alias_cycles_check: fn(graph: &SemaRegistrationGraph) Never! {
 // (sema_type_qualified_name_unknown). Core source and an incomplete graph are
 // never judged here.
 sema_type_written_name_unknown: fn(graph: SemaRegistrationGraph, caller: Int, name: String, generic_names: [String]) -> Bool {
-    if !graph.complete || caller < 0 || module_is_core(graph.modules[caller].module_identity) -> return false
-    if name == "" || name.contains(":") || name.contains("$") || generic_names.contains(name) -> return false
-    if name.split_once(".") == .Val(qualified) -> return sema_type_qualified_name_unknown(graph, caller, name, qualified.before, qualified.after)
+    if !graph.complete || caller < 0 || module_is_core(graph.modules[caller].module_identity) {
+        return false
+    }
+    if name == "" || name.contains(":") || name.contains("$") || generic_names.contains(name) {
+        return false
+    }
+    if name.split_once(".") == .Val(qualified) {
+        return sema_type_qualified_name_unknown(graph, caller, name, qualified.before, qualified.after)
+    }
     if foundation_named_type(name) != (Type.Named{name: name}) -> return false
-    if name == "Self" || name == "Shared" || name == "Unit" || name == "Never" || name == "Err" || name == "Dyn" || name == "_" || name == "()" || name == "str" || name == "bytes" || name == "Complex" -> return false
-    if sema_reserved_type_name(name) || core_root_type(name) || sema_registration_core_builtin_is_name(name) || graph.compiler_builtin_rows.get(name) != None || sema_type_builtin_trait_symbol(name) != None -> return false
-    if sema_process_handle_type(name) || sema_call_http_known_receiver_type(name) || sema_call_reflection_synthetic_printable(name) || sema_stream_handle_owner(Type.Named{name: name}) != None -> return false
-    if sema_type_graph_lookup_symbol_at(graph, caller, name) != None || sema_type_resolve_nominal_row_at(graph, Type.Named{name: name}, caller) != None -> return false
+    if name == "Self" || name == "Shared" || name == "Unit" || name == "Never" || name == "Err" || name == "Dyn" || name == "_" || name == "()" || name == "str" || name == "bytes" || name == "Complex" {
+        return false
+    }
+    if sema_reserved_type_name(name) || core_root_type(name) || sema_registration_core_builtin_is_name(name) || graph.compiler_builtin_rows.get(name) != None || sema_type_builtin_trait_symbol(name) != None {
+        return false
+    }
+    if sema_process_handle_type(name) || sema_call_http_known_receiver_type(name) || sema_call_reflection_synthetic_printable(name) || sema_stream_handle_owner(Type.Named{name: name}) != None {
+        return false
+    }
+    if sema_type_graph_lookup_symbol_at(graph, caller, name) != None || sema_type_resolve_nominal_row_at(graph, Type.Named{name: name}, caller) != None {
+        return false
+    }
     // A standard or declared unit's type (`Meter`, an affine unit's `…Point`).
     if sema_registration_unit_fact_for_type(graph, Type.Named{name: name}) != None -> return false
-    if core_type_modules(name).len() > 0 || SEMA_TYPE_CORE_KNOWN_NAMES.contains(name) -> return false
+    if core_type_modules(name).len() > 0 || SEMA_TYPE_CORE_KNOWN_NAMES.contains(name) {
+        return false
+    }
     !sema_type_graph_declares_assoc_type(graph, name)
 }
 
@@ -862,8 +1075,12 @@ sema_type_written_name_unknown: fn(graph: SemaRegistrationGraph, caller: Int, na
 // module's name. A spelling whose module is in scope is that module's to
 // resolve, and a capitalized head (`Self.Item`) is a type's, not a module's.
 sema_type_qualified_name_unknown: fn(graph: SemaRegistrationGraph, caller: Int, name: String, alias: String, leaf: String) -> Bool {
-    if alias == "" || leaf == "" || leaf.contains(".") || alias == "core" || sema_checked_module_uppercase(alias) -> return false
-    if sema_type_graph_lookup_symbol_at(graph, caller, name) != None || core_module_for_alias(alias) != None -> return false
+    if alias == "" || leaf == "" || leaf.contains(".") || alias == "core" || sema_checked_module_uppercase(alias) {
+        return false
+    }
+    if sema_type_graph_lookup_symbol_at(graph, caller, name) != None || core_module_for_alias(alias) != None {
+        return false
+    }
     loop import in graph.modules[caller].imports {
         if import.declaration.alias == alias -> return false
     }
@@ -874,31 +1091,175 @@ sema_type_qualified_name_unknown: fn(graph: SemaRegistrationGraph, caller: Int, 
 // compiler-owned Core carriers a program may write bare that no Core export row
 // carries.
 SEMA_TYPE_CORE_KNOWN_NAMES: [String]{
-    "ArithmeticOperationInfo", "AssociatedTypeInfo", "AttributionInfo", "Build", "CSV", "CallableSignature", "CallingConvention", "Camera", "CaptureInfo", "CaptureMode",
-    "ClassificationInfo", "Closed", "ClosureInfo", "Code", "CommentInfo", "CommentKind", "Compiler",
-    "CompilerArithmeticOperation", "CompilerBuildProfile", "CompilerCall", "CompilerChecked", "CompilerDefinitionAnchor",
-    "CompilerDependency", "CompilerDiagnostic", "CompilerEffect", "CompilerEffectProvenance", "CompilerError", "CompilerField",
-    "CompilerGeneratedLine", "CompilerKeyValue", "CompilerLexed", "CompilerLock", "CompilerLockedPackage",
-    "CompilerManifest", "CompilerNode", "CompilerOutput", "CompilerOutputEntry", "CompilerPackage",
-    "CompilerPackageError", "CompilerPackageOutput", "CompilerPackageTarget", "CompilerProfile", "CompilerProfileSet",
-    "CompilerReference", "CompilerSourceMap", "CompilerStructuralNode", "CompilerSyntaxTree", "CompilerToken",
-    "CompilerViewProjection", "CompilerViewSource", "CompilerViewSourcePath", "ConstantInfo", "Constraint", "ContributionInfo", "ContributionKind", "DataGroupedQuery", "DeclarationKind", "DefaultInfo", "Dev",
-    "Device", "DimensionAxis", "DimensionInfo", "EffectInfo", "ExactnessInfo", "ExactnessKind", "Expired", "FactInfo",
-    "FactValue", "FfiCallbackEvent", "FfiCallbackRegistration", "FieldInfo", "FileLines", "ForeignEvidence", "ForeignInfo", "FrameId",
-    "FunctionInfo", "GameBackendType", "GameReplayType", "GameSceneType", "GenericBindingInfo", "HTTPClientType", "HTTPCompressEncoding",
-    "HTTPCookieJar", "HTTPProxy", "HTTPRedirectPolicy", "HTTPRetryPolicy", "HVar", "ItemInfo", "JSON",
-    "LayoutFact", "LayoutField", "LayoutInfo", "LengthVar", "LogSpan", "MarkerArgInfo",
-    "MarkerInfo", "Matrix", "MeasureInfo", "MethodInfo", "Mod", "ModGrant", "ModuleInfo", "MovednessInfo", "NetReadyInterest",
-    "NetShutdown", "NominalInfo", "NumericInfo", "ObligationInfo", "ObligationParamInfo", "OriginInfo", "PackageInfo", "ParamAccess", "ParamInfo", "ParamZone",
-    "PreparedCase", "PreparedField", "PreparedStruct", "PreparedValue",
-    "Ptr", "RealtimeReceipt", "ReduceOp", "ReflectionKind", "Screen", "SendabilityInfo", "SettingInfo", "SharedRevisionError", "SharedSnapshot",
-    "SourceSpan", "StateInfo", "Stream", "TLSClientConfig", "TLSClientConfigType",
-    "TLSClientIdentity", "TLSClientIdentityType", "TLSRootCertificates", "TLSRootCertificatesType", "TOML",
-    "TextWidth", "TextWidthAmbiguous", "TextWidthControls", "TraitInfo", "TransitionInfo", "TypeId", "TypeInfo", "TypeParamInfo",
-    "UIPreviewAccessibility", "UIPreviewAuthority", "UIPreviewContext", "UIPreviewEffect", "UIPreviewInputOverride",
-    "UIPreviewInputValue", "UIPreviewLifecycle", "UIPreviewSource", "UIPreviewTheme", "UIPreviewTraits",
-    "UnitScaleProvenanceInfo", "VVar", "Vec", "View", "ViewMut", "ViewProvenanceInfo", "WatchKind", "WebContext",
-    "WebFormTypedValidation", "WebMount", "WebRouterCacheState", "World", "WsMessage", "YAML",
+    "ArithmeticOperationInfo",
+    "AssociatedTypeInfo",
+    "AttributionInfo",
+    "Build",
+    "CSV",
+    "CallableSignature",
+    "CallingConvention",
+    "Camera",
+    "CaptureInfo",
+    "CaptureMode",
+    "ClassificationInfo",
+    "Closed",
+    "ClosureInfo",
+    "Code",
+    "CommentInfo",
+    "CommentKind",
+    "Compiler",
+    "CompilerArithmeticOperation",
+    "CompilerBuildProfile",
+    "CompilerCall",
+    "CompilerChecked",
+    "CompilerDefinitionAnchor",
+    "CompilerDependency",
+    "CompilerDiagnostic",
+    "CompilerEffect",
+    "CompilerEffectProvenance",
+    "CompilerError",
+    "CompilerField",
+    "CompilerGeneratedLine",
+    "CompilerKeyValue",
+    "CompilerLexed",
+    "CompilerLock",
+    "CompilerLockedPackage",
+    "CompilerManifest",
+    "CompilerNode",
+    "CompilerOutput",
+    "CompilerOutputEntry",
+    "CompilerPackage",
+    "CompilerPackageError",
+    "CompilerPackageOutput",
+    "CompilerPackageTarget",
+    "CompilerProfile",
+    "CompilerProfileSet",
+    "CompilerReference",
+    "CompilerSourceMap",
+    "CompilerStructuralNode",
+    "CompilerSyntaxTree",
+    "CompilerToken",
+    "CompilerViewProjection",
+    "CompilerViewSource",
+    "CompilerViewSourcePath",
+    "ConstantInfo",
+    "Constraint",
+    "ContributionInfo",
+    "ContributionKind",
+    "DataGroupedQuery",
+    "DeclarationKind",
+    "DefaultInfo",
+    "Dev",
+    "Device",
+    "DimensionAxis",
+    "DimensionInfo",
+    "EffectInfo",
+    "ExactnessInfo",
+    "ExactnessKind",
+    "Expired",
+    "FactInfo",
+    "FactValue",
+    "FfiCallbackEvent",
+    "FfiCallbackRegistration",
+    "FieldInfo",
+    "FileLines",
+    "ForeignEvidence",
+    "ForeignInfo",
+    "FrameId",
+    "FunctionInfo",
+    "GameBackendType",
+    "GameReplayType",
+    "GameSceneType",
+    "GenericBindingInfo",
+    "HTTPClientType",
+    "HTTPCompressEncoding",
+    "HTTPCookieJar",
+    "HTTPProxy",
+    "HTTPRedirectPolicy",
+    "HTTPRetryPolicy",
+    "HVar",
+    "ItemInfo",
+    "JSON",
+    "LayoutFact",
+    "LayoutField",
+    "LayoutInfo",
+    "LengthVar",
+    "LogSpan",
+    "MarkerArgInfo",
+    "MarkerInfo",
+    "Matrix",
+    "MeasureInfo",
+    "MethodInfo",
+    "Mod",
+    "ModGrant",
+    "ModuleInfo",
+    "MovednessInfo",
+    "NetReadyInterest",
+    "NetShutdown",
+    "NominalInfo",
+    "NumericInfo",
+    "ObligationInfo",
+    "ObligationParamInfo",
+    "OriginInfo",
+    "PackageInfo",
+    "ParamAccess",
+    "ParamInfo",
+    "ParamZone",
+    "PreparedCase",
+    "PreparedField",
+    "PreparedStruct",
+    "PreparedValue",
+    "Ptr",
+    "RealtimeReceipt",
+    "ReduceOp",
+    "ReflectionKind",
+    "Screen",
+    "SendabilityInfo",
+    "SettingInfo",
+    "SharedRevisionError",
+    "SharedSnapshot",
+    "SourceSpan",
+    "StateInfo",
+    "Stream",
+    "TLSClientConfig",
+    "TLSClientConfigType",
+    "TLSClientIdentity",
+    "TLSClientIdentityType",
+    "TLSRootCertificates",
+    "TLSRootCertificatesType",
+    "TOML",
+    "TextWidth",
+    "TextWidthAmbiguous",
+    "TextWidthControls",
+    "TraitInfo",
+    "TransitionInfo",
+    "TypeId",
+    "TypeInfo",
+    "TypeParamInfo",
+    "UIPreviewAccessibility",
+    "UIPreviewAuthority",
+    "UIPreviewContext",
+    "UIPreviewEffect",
+    "UIPreviewInputOverride",
+    "UIPreviewInputValue",
+    "UIPreviewLifecycle",
+    "UIPreviewSource",
+    "UIPreviewTheme",
+    "UIPreviewTraits",
+    "UnitScaleProvenanceInfo",
+    "VVar",
+    "Vec",
+    "View",
+    "ViewMut",
+    "ViewProvenanceInfo",
+    "WatchKind",
+    "WebContext",
+    "WebFormTypedValidation",
+    "WebMount",
+    "WebRouterCacheState",
+    "World",
+    "WsMessage",
+    "YAML",
 }
 
 // Whether any trait of the graph declares associated type `name`, which its
@@ -925,7 +1286,9 @@ sema_type_names_undeclared: fn(graph: SemaRegistrationGraph, caller: Int, ty: Ty
     if ty == {
         .Named(name) -> sema_type_written_name_unknown(graph, caller, name, generic_names) && !sema_type_graph_declares_name(graph, name)
         .Apply(name, args) -> {
-            if sema_type_written_name_unknown(graph, caller, name, generic_names) && !sema_type_graph_declares_name(graph, name) -> return true
+            if sema_type_written_name_unknown(graph, caller, name, generic_names) && !sema_type_graph_declares_name(graph, name) {
+                return true
+            }
             loop arg in args {
                 if sema_type_names_undeclared(graph, caller, arg, generic_names) -> return true
             }
@@ -954,7 +1317,9 @@ sema_type_names_undeclared: fn(graph: SemaRegistrationGraph, caller: Int, ty: Ty
             loop param in params {
                 if sema_type_names_undeclared(graph, caller, param, generic_names) -> return true
             }
-            if ret == .Val(returned) -> return sema_type_names_undeclared(graph, caller, returned, generic_names)
+            if ret == .Val(returned) {
+                return sema_type_names_undeclared(graph, caller, returned, generic_names)
+            }
             false
         }
         .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> false
@@ -966,7 +1331,9 @@ sema_type_names_undeclared: fn(graph: SemaRegistrationGraph, caller: Int, ty: Ty
 sema_type_graph_declares_name: fn(graph: SemaRegistrationGraph, name: String) -> Bool {
     loop module_index in 0..<graph.modules.len() {
         loop nominal_index in 0..<graph.modules[module_index].nominals.len() {
-            if graph.modules[module_index].nominals[nominal_index].symbol.name == name -> return true
+            if graph.modules[module_index].nominals[nominal_index].symbol.name == name {
+                return true
+            }
             loop param in graph.modules[module_index].nominals[nominal_index].generic_params {
                 if param.name == name -> return true
             }
@@ -998,26 +1365,44 @@ sema_type_graph_declares_name: fn(graph: SemaRegistrationGraph, name: String) ->
 sema_type_unknown_written_names: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type, span: Span, generic_names: [String], diagnostics: &[Diagnostic]) {
     if ty == {
         .Named(name) -> {
-            if sema_type_written_name_unknown(graph, caller, name, generic_names) -> diagnostics.push(sema_unknown_type_name(name, span, sema_type_declared_names(graph, caller)))
+            if sema_type_written_name_unknown(graph, caller, name, generic_names) {
+                diagnostics.push(sema_unknown_type_name(name, span, sema_type_declared_names(graph, caller)))
+            }
         }
         .Apply(name, args) -> {
-            if sema_type_written_name_unknown(graph, caller, name, generic_names) -> sema_unknown_generic_type_name(name, span, diagnostics)
-            loop arg in args -> sema_type_unknown_written_names(graph, caller, arg, span, generic_names, diagnostics)
+            if sema_type_written_name_unknown(graph, caller, name, generic_names) {
+                sema_unknown_generic_type_name(name, span, diagnostics)
+            }
+            loop arg in args {
+                sema_type_unknown_written_names(graph, caller, arg, span, generic_names, diagnostics)
+            }
         }
-        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) | .Case(_, inner) -> sema_type_unknown_written_names(graph, caller, inner, span, generic_names, diagnostics)
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) | .Case(_, inner) -> {
+            sema_type_unknown_written_names(graph, caller, inner, span, generic_names, diagnostics)
+        }
         .Map(key, _, value) | .Result(key, value) -> {
             sema_type_unknown_written_names(graph, caller, key, span, generic_names, diagnostics)
             sema_type_unknown_written_names(graph, caller, value, span, generic_names, diagnostics)
         }
         .Fn(params, ret, _, _, _, _) -> {
-            loop parameter in params -> sema_type_unknown_written_names(graph, caller, parameter, span, generic_names, diagnostics)
-            if ret == .Val(value) -> sema_type_unknown_written_names(graph, caller, value, span, generic_names, diagnostics)
+            loop parameter in params {
+                sema_type_unknown_written_names(graph, caller, parameter, span, generic_names, diagnostics)
+            }
+            if ret == .Val(value) {
+                sema_type_unknown_written_names(graph, caller, value, span, generic_names, diagnostics)
+            }
         }
         .Union(members) -> {
             sema_type_union_case_conflicts(members, span, diagnostics)
-            loop member in members -> sema_type_unknown_written_names(graph, caller, member, span, generic_names, diagnostics)
+            loop member in members {
+                sema_type_unknown_written_names(graph, caller, member, span, generic_names, diagnostics)
+            }
         }
-        .Tuple(fields) -> loop field in fields -> sema_type_unknown_written_names(graph, caller, field.ty, span, generic_names, diagnostics)
+        .Tuple(fields) -> {
+            loop field in fields {
+                sema_type_unknown_written_names(graph, caller, field.ty, span, generic_names, diagnostics)
+            }
+        }
         .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> {}
     }
 }
@@ -1055,13 +1440,23 @@ sema_type_unknown_measure_names: fn(graph: SemaRegistrationGraph, caller: Int, t
             }
             sema_type_unknown_measure_names(graph, caller, inner, span, generic_names, diagnostics)
         }
-        .Apply(_, args) | .Union(args) -> loop arg in args -> sema_type_unknown_measure_names(graph, caller, arg, span, generic_names, diagnostics)
-        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) | .Case(_, inner) -> sema_type_unknown_measure_names(graph, caller, inner, span, generic_names, diagnostics)
+        .Apply(_, args) | .Union(args) -> {
+            loop arg in args {
+                sema_type_unknown_measure_names(graph, caller, arg, span, generic_names, diagnostics)
+            }
+        }
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) | .Case(_, inner) -> {
+            sema_type_unknown_measure_names(graph, caller, inner, span, generic_names, diagnostics)
+        }
         .Map(key, _, value) | .Result(key, value) -> {
             sema_type_unknown_measure_names(graph, caller, key, span, generic_names, diagnostics)
             sema_type_unknown_measure_names(graph, caller, value, span, generic_names, diagnostics)
         }
-        .Tuple(fields) -> loop field in fields -> sema_type_unknown_measure_names(graph, caller, field.ty, span, generic_names, diagnostics)
+        .Tuple(fields) -> {
+            loop field in fields {
+                sema_type_unknown_measure_names(graph, caller, field.ty, span, generic_names, diagnostics)
+            }
+        }
         .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> {}
     }
 }
@@ -1077,7 +1472,9 @@ sema_type_measure_unknown_name: fn(graph: SemaRegistrationGraph, caller: Int, me
             if sema_type_graph_lookup_symbol_at(graph, caller, name) == None -> Val(name.copy()) else -> None
         }
         .Combined(_, _, left, right) -> {
-            if sema_type_measure_unknown_name(graph, caller, left, generic_names) == .Val(unknown) -> return Val(unknown)
+            if sema_type_measure_unknown_name(graph, caller, left, generic_names) == .Val(unknown) {
+                return Val(unknown)
+            }
             sema_type_measure_unknown_name(graph, caller, right, generic_names)
         }
         .Literal(_, _) | .SignedLiteral(_, _) -> None
@@ -1093,8 +1490,12 @@ sema_type_measure_unknown_name: fn(graph: SemaRegistrationGraph, caller: Int, me
 sema_type_func_unknown_names: fn(graph: SemaRegistrationGraph, caller: Int, func: Func, owner_names: [String], diagnostics: &[Diagnostic]) {
     generic_names := owner_names.copy()
     loop param in func.type_params -> generic_names.push(param.name)
-    loop param in func.params -> sema_type_unknown_written_names(graph, caller, param.ty, param.ty_span, generic_names, diagnostics)
-    if func.return_type == .Val(ty) -> sema_type_unknown_written_names(graph, caller, ty, func.return_type_span ?? func.name_span, generic_names, diagnostics)
+    loop param in func.params {
+        sema_type_unknown_written_names(graph, caller, param.ty, param.ty_span, generic_names, diagnostics)
+    }
+    if func.return_type == .Val(ty) {
+        sema_type_unknown_written_names(graph, caller, ty, func.return_type_span ?? func.name_span, generic_names, diagnostics)
+    }
 }
 
 sema_type_resolve_declared_recursive: fn(graph: SemaRegistrationGraph, ty: Type, caller: Int, generic_params: [TGenericParam]) -> Type Never! {
@@ -1102,7 +1503,9 @@ sema_type_resolve_declared_recursive: fn(graph: SemaRegistrationGraph, ty: Type,
         .Named(name) -> if sema_type_name_is_generic(generic_params, name) -> ty else -> sema_type_graph_resolve_named(graph, name, caller)
         .Apply(name, args) -> {
             rewritten: loop arg in args -> sema_type_resolve_type_argument(graph, arg, caller, generic_params)
-            if rewritten.len() == 1 && sema_type_core_pointer_name(graph, name, caller) -> return Type.Apply{name: "Ptr", args: rewritten}
+            if rewritten.len() == 1 && sema_type_core_pointer_name(graph, name, caller) {
+                return Type.Apply{name: "Ptr", args: rewritten}
+            }
             head: if sema_type_name_is_generic(generic_params, name) -> name else -> sema_type_graph_resolve_apply_name(graph, name, caller)
             // Invalid alias graphs are rejected during registration, before
             // consumers can recurse through their transparent targets; under
@@ -1133,7 +1536,9 @@ sema_type_resolve_declared_recursive: fn(graph: SemaRegistrationGraph, ty: Type,
             rewritten: loop parameter in params -> sema_type_resolve_declared_recursive(graph, parameter, caller, generic_params)
             // A plain branch, not `ret.map(…)`: a callback would capture (copy) the whole graph.
             resolved_ret := Type?{None}
-            if ret == .Val(value) -> resolved_ret = Val(sema_type_resolve_declared_recursive(graph, value, caller, generic_params))
+            if ret == .Val(value) {
+                resolved_ret = Val(sema_type_resolve_declared_recursive(graph, value, caller, generic_params))
+            }
             Type.Fn{params: rewritten, ret: resolved_ret, effect_bound: effects, param_contract: contract, call_metadata: metadata, return_view_provenance: provenance}
         }
         .TraitObject(bounds) -> Type.TraitObject{bounds: loop bound in bounds -> sema_type_graph_resolve_trait_bound(graph, bound, caller)}
@@ -1159,16 +1564,16 @@ sema_type_resolve_declared_recursive: fn(graph: SemaRegistrationGraph, ty: Type,
 // condition can't be decided, as when an argument is still a type parameter.
 // `module_index` is the alias's module, whose constants a condition may read.
 sema_type_alias_expanded: fn(graph: SemaRegistrationGraph, module_index: Int, definition: TypeAliasDef, args: [Type], names: [String]) -> Type? {
-    if definition.choices.len() == 0 -> return Val(sema_inference_substitute_type(definition.target, names, args))
+    if definition.choices.len() == 0 {
+        return Val(sema_inference_substitute_type(definition.target, names, args))
+    }
     values: sema_type_alias_number_values(graph, module_index, definition, args)
     loop choice in definition.choices {
         cond: choice.cond ?? return Val(sema_inference_substitute_type(choice.target, names, args))
         folded: sema_genmod_fold(cond, values, [String:Bool]{}) ?? return None
         if folded == .Bool(holds, _, _) {
             if holds -> return Val(sema_inference_substitute_type(choice.target, names, args))
-        } else {
-            return None
-        }
+        } else { return None }
     }
     None
 }
@@ -1181,11 +1586,15 @@ sema_type_alias_number_values: fn(graph: SemaRegistrationGraph, module_index: In
     loop (index, param) in definition.type_params {
         if index >= args.len() -> break
         if args[index] == .Measure(measure) {
-            if measure_literal_value(measure) == .Val(number) -> values[param.name] = Expr.Int{value: number, span: param.name_span, width: None, raw: None, id: AST_NODE_GENERATED}
+            if measure_literal_value(measure) == .Val(number) {
+                values[param.name] = Expr.Int{value: number, span: param.name_span, width: None, raw: None, id: AST_NODE_GENERATED}
+            }
         }
     }
     loop name in sema_type_alias_constant_names(definition) {
-        if sema_type_measure_constant(graph, module_index, name, 0) == .Val(number) -> values[name] = Expr.Int{value: number, span: definition.name_span, width: None, raw: None, id: AST_NODE_GENERATED}
+        if sema_type_measure_constant(graph, module_index, name, 0) == .Val(number) {
+            values[name] = Expr.Int{value: number, span: definition.name_span, width: None, raw: None, id: AST_NODE_GENERATED}
+        }
     }
     values
 }
@@ -1212,7 +1621,9 @@ sema_type_alias_constant_names: fn(definition: TypeAliasDef) -> [String] Never! 
 // is the number it holds, as a literal argument (`Packet<4>`) is.
 sema_type_resolve_type_argument: fn(graph: SemaRegistrationGraph, arg: Type, caller: Int, generic_params: [TGenericParam]) -> Type Never! {
     if arg == .Named(name) && !sema_type_name_is_generic(generic_params, name) {
-        if sema_type_measure_constant(graph, caller, name, 0) == .Val(value) && value >= 0 -> return Type.Measure{measure: Measure.Literal{kind: "length", value: value}}
+        if sema_type_measure_constant(graph, caller, name, 0) == .Val(value) && value >= 0 {
+            return Type.Measure{measure: Measure.Literal{kind: "length", value: value}}
+        }
     }
     sema_type_resolve_declared_recursive(graph, arg, caller, generic_params)
 }
@@ -1275,7 +1686,9 @@ sema_type_measure_constant: fn(graph: SemaRegistrationGraph, caller: Int, name: 
     loop constant_index in 0..<graph.modules[caller].constants.len() {
         if graph.modules[caller].constants[constant_index].symbol.name != name -> next
         if graph.modules[caller].constants[constant_index].declaration.mutable -> return None
-        if graph.modules[caller].constants[constant_index].declaration.ct == .Val(.Int(value)) -> return Val(value)
+        if graph.modules[caller].constants[constant_index].declaration.ct == .Val(.Int(value)) {
+            return Val(value)
+        }
         return sema_type_measure_fold(graph, caller, graph.modules[caller].constants[constant_index].declaration.value, depth + 1)
     }
     None
@@ -1326,7 +1739,9 @@ sema_type_core_pointer_name: fn(graph: SemaRegistrationGraph, name: String, call
         // `use core.mem` binds the submodule by its last segment, `mem`, to
         // its interned identity, which may have no module row of its own.
         loop binding in import.bindings {
-            if binding.local == qualified.before && binding.symbol.kind == SymbolKind.Import && module_text(graph.module_table, binding.target_module_identity) == "core.mem" -> return true
+            if binding.local == qualified.before && binding.symbol.kind == SymbolKind.Import && module_text(graph.module_table, binding.target_module_identity) == "core.mem" {
+                return true
+            }
         }
         if import.declaration.alias == qualified.before {
             target: sema_registration_module_index(graph, import.target_module_identity) ?? return false
@@ -1370,7 +1785,9 @@ sema_type_graph_lookup_symbol_at: fn(graph: SemaRegistrationGraph, caller: Int, 
     // A canonical nominal spelling's owner and leaf were cut with the graph
     // (SemaCanonicalNominals): the module and name the cut below finds.
     if graph.canonical_nominals == .Val(canonical_table) {
-        if name_rows_get_text(canonical_table.rows, name) == .Val(row) -> return sema_registration_lookup_name_at(graph, canonical_table.owners[row], graph.modules[canonical_table.owners[row]].module_identity, canonical_table.leaves[row])
+        if name_rows_get_text(canonical_table.rows, name) == .Val(row) {
+            return sema_registration_lookup_name_at(graph, canonical_table.owners[row], graph.modules[canonical_table.owners[row]].module_identity, canonical_table.leaves[row])
+        }
     }
     // The name is cut in place; no part list is built per lookup.
     if name.cut_last("::") == .Val(canonical) {
@@ -1388,13 +1805,17 @@ sema_type_graph_lookup_symbol_at: fn(graph: SemaRegistrationGraph, caller: Int, 
     core_trait := SemaRegistrationResolvedSymbol?{None}
     if bare_owner == .Val(owner_name) {
         // A prelude rename (`LocalDate as Date`) names the declared type.
-        if core_bare_source_declared(name) == .Val(declared) -> return sema_type_graph_bare_rename(graph, declared, owner_name)
+        if core_bare_source_declared(name) == .Val(declared) {
+            return sema_type_graph_bare_rename(graph, declared, owner_name)
+        }
         loop row in sema_registration_nominal_rows_named(graph, name) {
             // The module and nominal are passed as places: binding the module
             // copied it whole per row.
             found: sema_type_graph_bare_owned(graph.modules[row.module_index], graph.modules[row.module_index].nominals[row.row], row, owner_name)
             if found == None -> next
-            if graph.modules[row.module_index].nominals[row.row].kind != SemaRegistrationNominalKind.Trait -> return found
+            if graph.modules[row.module_index].nominals[row.row].kind != SemaRegistrationNominalKind.Trait {
+                return found
+            }
             core_trait = found
         }
     }
@@ -1409,10 +1830,12 @@ sema_type_graph_lookup_symbol_at: fn(graph: SemaRegistrationGraph, caller: Int, 
 // `module_row`, when it is one: a parameterless alias, or a trait (`Marker`,
 // `Diagnostic`), which the unique-owner scan leaves to Core's root traits.
 sema_type_graph_bare_owned: fn(module_row: SemaRegistrationModule, nominal: SemaRegistrationNominal, row: SemaRegistrationRowRef, owner_name: String) -> SemaRegistrationResolvedSymbol? Never! {
-    if module_row.module_name != owner_name
-        || !module_is_core(module_row.module_identity)
-        || nominal.symbol.visibility < 2 -> return None
-    if nominal.kind != SemaRegistrationNominalKind.Trait && (nominal.kind != SemaRegistrationNominalKind.TypeAlias || nominal.generic_params.len() != 0) -> return None
+    if module_row.module_name != owner_name || !module_is_core(module_row.module_identity) || nominal.symbol.visibility < 2 {
+        return None
+    }
+    if nominal.kind != SemaRegistrationNominalKind.Trait && (nominal.kind != SemaRegistrationNominalKind.TypeAlias || nominal.generic_params.len() != 0) {
+        return None
+    }
     Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Nominal{module_index: row.module_index, row: row.row}, source_module_identity: module_row.module_identity, target_module_identity: module_row.module_identity, visibility: nominal.symbol.visibility, nominal_row: Val(row)})
 }
 
@@ -1420,7 +1843,9 @@ sema_type_graph_bare_owned: fn(module_row: SemaRegistrationModule, nominal: Sema
 // bare.
 sema_type_graph_bare_rename: fn(graph: SemaRegistrationGraph, declared: String, owner_name: String) -> SemaRegistrationResolvedSymbol? Never! {
     loop row in sema_registration_nominal_rows_named(graph, declared) {
-        if graph.modules[row.module_index].module_name != owner_name || !module_is_core(graph.modules[row.module_index].module_identity) -> next
+        if graph.modules[row.module_index].module_name != owner_name || !module_is_core(graph.modules[row.module_index].module_identity) {
+            next
+        }
         identity: graph.modules[row.module_index].module_identity
         return Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Nominal{module_index: row.module_index, row: row.row}, source_module_identity: identity, target_module_identity: identity, visibility: graph.modules[row.module_index].nominals[row.row].symbol.visibility, nominal_row: Val(row)})
     }
@@ -1447,7 +1872,9 @@ sema_type_graph_unique_type_owner: fn(graph: SemaRegistrationGraph, caller_index
         carrier: boundary_head_carrier_module(name) ?? return None
         loop row in rows {
             carrier_row: graph.modules[row.module_index]
-            if carrier_row.module_name != carrier || !module_is_core(carrier_row.module_identity) -> next
+            if carrier_row.module_name != carrier || !module_is_core(carrier_row.module_identity) {
+                next
+            }
             symbol: carrier_row.nominals[row.row].symbol
             if symbol.name != name -> next
             return Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Nominal{module_index: row.module_index, row: row.row}, source_module_identity: carrier_row.module_identity, target_module_identity: carrier_row.module_identity, visibility: symbol.visibility, nominal_row: Val(row)})
@@ -1456,7 +1883,9 @@ sema_type_graph_unique_type_owner: fn(graph: SemaRegistrationGraph, caller_index
     }
     if caller_index < 0 -> return None
     scan := sema_type_graph_scan_type_owners(graph, caller_index, name, rows, SemaOwnerCount.Every)
-    if scan.ambiguous -> scan = sema_type_graph_scan_type_owners(graph, caller_index, name, rows, SemaOwnerCount.Reached)
+    if scan.ambiguous {
+        scan = sema_type_graph_scan_type_owners(graph, caller_index, name, rows, SemaOwnerCount.Reached)
+    }
     if scan.ambiguous -> return None
     chosen: scan.found ?? return None
     owner_row: graph.modules[chosen.module_index]
@@ -1487,14 +1916,18 @@ sema_type_graph_scan_type_owners: fn(graph: SemaRegistrationGraph, caller_index:
         alias_row: graph.modules[row.module_index]
         alias: alias_row.nominals[row.row]
         if alias.kind == SemaRegistrationNominalKind.TypeAlias && alias.generic_params.len() == 0 {
-            if module_is_core(alias_row.module_identity) && core_bare_source_module(name) == None && !core_root_type(name) -> next
+            if module_is_core(alias_row.module_identity) && core_bare_source_module(name) == None && !core_root_type(name) {
+                next
+            }
             item: sema_registration_nominal_source_item(alias.source) ?? next
             if item == .TypeAlias(definition) {
                 if definition.target == .Named(target_name) {
                     if (target_name.contains("::") || target_name.contains(".")) && sema_type_graph_leaf(target_name) == name {
                         home: sema_type_graph_lookup_symbol(graph, alias_row.module_identity, target_name)
                         if home == .Val(resolved) {
-                            if sema_type_graph_resolved_nominal_row(graph, resolved) == .Val(home_row) -> owner = home_row
+                            if sema_type_graph_resolved_nominal_row(graph, resolved) == .Val(home_row) {
+                                owner = home_row
+                            }
                         }
                     }
                 }
@@ -1508,19 +1941,23 @@ sema_type_graph_scan_type_owners: fn(graph: SemaRegistrationGraph, caller_index:
         // so only a generic `Group<K, V>` (core.data's) can own the bare applied
         // spelling; core.sys's and core.ui.xkb's records never compete for it.
         if name == "Group" && nominal.generic_params.len() == 0 -> next
-        if nominal.kind != SemaRegistrationNominalKind.Struct
-            && nominal.kind != SemaRegistrationNominalKind.Enum
-            && nominal.kind != SemaRegistrationNominalKind.Distinct
-            && nominal.kind != SemaRegistrationNominalKind.TypeAlias
+        if nominal.kind != SemaRegistrationNominalKind.Struct && nominal.kind != SemaRegistrationNominalKind.Enum && nominal.kind != SemaRegistrationNominalKind.Distinct && nominal.kind != SemaRegistrationNominalKind.TypeAlias && (nominal.kind != SemaRegistrationNominalKind.Trait || (module_is_core(owner_row.module_identity) && !core_root_type(name))) {
             // A trait in type position (`CompilerTraceSink?`) is a type too: a signature from
             // another package spells it bare where the caller holds its owner-qualified name.
             // A Core root trait (`__DecodeSource`, the source a generated decode reads) is
             // seen bare wherever Core is loaded, as a Core root value type is.
-            && (nominal.kind != SemaRegistrationNominalKind.Trait || (module_is_core(owner_row.module_identity) && !core_root_type(name))) -> next
-        if !sema_registration_visible(nominal.symbol.visibility, graph.modules[caller_index].module_identity, graph.modules[caller_index].package_identity, owner_row.module_identity, owner_row.package_identity) -> next
-        if count == SemaOwnerCount.Reached && !sema_registration_reaches(graph, caller_index, owner.module_index) -> next
+            next
+        }
+        if !sema_registration_visible(nominal.symbol.visibility, graph.modules[caller_index].module_identity, graph.modules[caller_index].package_identity, owner_row.module_identity, owner_row.package_identity) {
+            next
+        }
+        if count == SemaOwnerCount.Reached && !sema_registration_reaches(graph, caller_index, owner.module_index) {
+            next
+        }
         if found == .Val(previous) {
-            if previous.module_index != owner.module_index -> return SemaTypeOwnerScan{found: None, ambiguous: true}
+            if previous.module_index != owner.module_index {
+                return SemaTypeOwnerScan{found: None, ambiguous: true}
+            }
         }
         found = Val(owner)
     }
@@ -1573,7 +2010,9 @@ sema_type_lookup_nominal_row: fn(graph: SemaRegistrationGraph, resolved: SemaReg
 // one in a module the caller's package reaches; otherwise it is unknown.
 sema_type_unscoped_nominal_row: fn(graph: SemaRegistrationGraph, name: String, caller: Int) -> SemaRegistrationRowRef? {
     scan := sema_type_scan_unscoped_rows(graph, name, caller, SemaOwnerCount.Every)
-    if scan.ambiguous -> scan = sema_type_scan_unscoped_rows(graph, name, caller, SemaOwnerCount.Reached)
+    if scan.ambiguous {
+        scan = sema_type_scan_unscoped_rows(graph, name, caller, SemaOwnerCount.Reached)
+    }
     if scan.ambiguous -> return None
     scan.found
 }
@@ -1583,9 +2022,13 @@ sema_type_scan_unscoped_rows: fn(graph: SemaRegistrationGraph, name: String, cal
     found := SemaRegistrationRowRef?{None}
     loop row in sema_registration_nominal_rows_named(graph, name) {
         if module_is_core(graph.modules[row.module_index].module_identity) -> next
-        if count == SemaOwnerCount.Reached && !sema_registration_reaches(graph, caller, row.module_index) -> next
+        if count == SemaOwnerCount.Reached && !sema_registration_reaches(graph, caller, row.module_index) {
+            next
+        }
         if found == .Val(previous) {
-            if previous.module_index != row.module_index || previous.row != row.row -> return SemaTypeOwnerScan{found: None, ambiguous: true}
+            if previous.module_index != row.module_index || previous.row != row.row {
+                return SemaTypeOwnerScan{found: None, ambiguous: true}
+            }
         }
         found = Val(row)
     }
@@ -1626,7 +2069,9 @@ sema_type_graph_bound_symbol: fn(graph: SemaRegistrationGraph, module_identity: 
     resolved: sema_type_graph_lookup_symbol(graph, module_identity, name)
     builtin: sema_type_builtin_trait_symbol(name)
     if resolved == .Val(found) {
-        if builtin == None || sema_resolved_kind(graph, found) == SymbolKind.Trait -> return Val(found)
+        if builtin == None || sema_resolved_kind(graph, found) == SymbolKind.Trait {
+            return Val(found)
+        }
     }
     symbol: builtin ?? return None
     Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: symbol}, source_module_identity: module_none(), target_module_identity: module_none(), visibility: 2})
@@ -1650,7 +2095,9 @@ sema_type_graph_is_checked_text_impl: fn(graph: SemaRegistrationGraph, implement
 sema_type_graph_impl_matches_nominal: fn(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl, nominal: SemaRegistrationNominal) -> Bool? {
     if implementation.target_identity_key == nominal.identity_key -> return Val(true)
     if !module_is_none(implementation.target_module_identity) {
-        if implementation.target_module_identity == nominal.symbol.module_identity && implementation.target_type_name == nominal.symbol.name -> return Val(true)
+        if implementation.target_module_identity == nominal.symbol.module_identity && implementation.target_type_name == nominal.symbol.name {
+            return Val(true)
+        }
     }
     if !graph.impl_traits_indexed {
         target: sema_type_graph_impl_target_nominal(graph, implementation) ?? return None
@@ -1789,7 +2236,9 @@ sema_type_bound_satisfied_nominal: fn(graph: SemaRegistrationGraph, nominal: Sem
     if sema_type_graph_inline_impl_matches_trait(graph, nominal, trait_symbol) -> return Val(true)
     // No impl found is known once the nominal's and the trait's packages
     // registered in full (sema_registration_package_settled).
-    if unresolved_impl || !sema_registration_package_settled(graph, nominal.symbol.module_identity) || !sema_registration_package_settled(graph, trait_symbol.module_identity) -> return None
+    if unresolved_impl || !sema_registration_package_settled(graph, nominal.symbol.module_identity) || !sema_registration_package_settled(graph, trait_symbol.module_identity) {
+        return None
+    }
     return Val(false)
 }
 
@@ -1800,7 +2249,9 @@ sema_type_bound_satisfied_nominal: fn(graph: SemaRegistrationGraph, nominal: Sem
 sema_type_impl_conditions_met: fn(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl, actual: Type, generic_params: [TGenericParam]) -> Bool? {
     conditions: implementation.declaration.type_params
     if conditions.len() == 0 -> return Val(true)
-    arguments: if actual == .Apply(_, written) -> written else -> return None
+    arguments: if actual == .Apply(_, written) -> written else -> {
+        return None
+    }
     if arguments.len() != conditions.len() -> return None
     impl_module: sema_type_module_row(graph, implementation.source_module_identity)
     loop index in 0..<conditions.len() {
@@ -1823,7 +2274,9 @@ sema_type_conditional_impl_head: fn(graph: SemaRegistrationGraph, actual: Type, 
     trait_symbol: sema_type_graph_trait_symbol_at(graph, caller, bound_name) ?? return None
     loop module_index in 0..<graph.modules.len() {
         loop impl_index in 0..<graph.modules[module_index].impls.len() {
-            if graph.modules[module_index].impls[impl_index].declaration.type_params.len() == 0 -> next
+            if graph.modules[module_index].impls[impl_index].declaration.type_params.len() == 0 {
+                next
+            }
             trait_matches: sema_type_graph_impl_matches_trait(graph, graph.modules[module_index].impls[impl_index], trait_symbol) ?? next
             if !trait_matches -> next
             target_matches: sema_type_graph_impl_matches_nominal(graph, graph.modules[module_index].impls[impl_index], graph.modules[nominal_row.module_index].nominals[nominal_row.row]) ?? next
@@ -1869,7 +2322,9 @@ sema_type_builtin_bound_satisfied: fn(graph: SemaRegistrationGraph, actual_resol
         .Bool | .String | .Char -> return Val(scalar_family && !arithmetic && bound_name != "Numeric")
         .IntN(_, _) | .InlineRange(_, _, _) | .Float32 -> return Val(scalar_family)
         .List(inner) | .Option(inner) | .FixedList(inner, _) -> {
-            if structural -> return sema_type_bound_satisfied_at(graph, inner, bound_name, caller, generic_params)
+            if structural {
+                return sema_type_bound_satisfied_at(graph, inner, bound_name, caller, generic_params)
+            }
         }
         .Map(key, _, value) -> {
             if bound_name == "Equatable" {
@@ -1901,7 +2356,9 @@ sema_type_builtin_bound_satisfied: fn(graph: SemaRegistrationGraph, actual_resol
         .Tagged(_, inner) -> return sema_type_bound_satisfied_at(graph, inner, bound_name, caller, generic_params)
         .Named(name) -> {
             if sema_type_name_is_generic(generic_params, name) -> return None
-            if (name == "Decimal" || name == "Fraction") && owned_trait_implies("Numeric", bound_name) -> return Val(true)
+            if (name == "Decimal" || name == "Fraction") && owned_trait_implies("Numeric", bound_name) {
+                return Val(true)
+            }
             // `Duration` is the compiler-owned time carrier: its `==` and
             // ordering are built in, and it has no nominal row to carry an impl.
             if name == "Duration" && structural -> return Val(true)
@@ -1919,8 +2376,12 @@ sema_type_builtin_bound_satisfied_nominal: fn(graph: SemaRegistrationGraph, nomi
     // `Renderable` is anything interpolatable: a nominal that shows through
     // Display or Printable, or implements Renderable itself.
     if bound_name == "Renderable" {
-        if sema_type_builtin_bound_satisfied_nominal(graph, nominal, "Display") == (Val(true)) -> return Val(true)
-        if sema_type_builtin_bound_satisfied_nominal(graph, nominal, "Printable") == (Val(true)) -> return Val(true)
+        if sema_type_builtin_bound_satisfied_nominal(graph, nominal, "Display") == (Val(true)) {
+            return Val(true)
+        }
+        if sema_type_builtin_bound_satisfied_nominal(graph, nominal, "Printable") == (Val(true)) {
+            return Val(true)
+        }
     }
     unresolved_impl := false
     // Only impls declaring `bound_name` can match: with the registration index
@@ -1929,14 +2390,18 @@ sema_type_builtin_bound_satisfied_nominal: fn(graph: SemaRegistrationGraph, nomi
         graph.impl_traits_indexed -> {
             if graph.impl_trait_name_slots.get(bound_name) == .Val(found) {
                 loop impl_row in graph.impl_trait_name_buckets[found] {
-                    if sema_type_builtin_bound_impl_matches(graph, graph.modules[impl_row.module_index].impls[impl_row.row], nominal, bound_name, unresolved_impl) -> return Val(true)
+                    if sema_type_builtin_bound_impl_matches(graph, graph.modules[impl_row.module_index].impls[impl_row.row], nominal, bound_name, unresolved_impl) {
+                        return Val(true)
+                    }
                 }
             }
         }
         else -> {
             loop module_index in 0..<graph.modules.len() {
                 loop impl_index in 0..<graph.modules[module_index].impls.len() {
-                    if sema_type_builtin_bound_impl_matches(graph, graph.modules[module_index].impls[impl_index], nominal, bound_name, unresolved_impl) -> return Val(true)
+                    if sema_type_builtin_bound_impl_matches(graph, graph.modules[module_index].impls[impl_index], nominal, bound_name, unresolved_impl) {
+                        return Val(true)
+                    }
                 }
             }
         }
@@ -1944,24 +2409,34 @@ sema_type_builtin_bound_satisfied_nominal: fn(graph: SemaRegistrationGraph, nomi
     if nominal.source == .SourceAST(item) {
         if item == {
             .Struct(definition) -> {
-                if sema_type_blocks_or_derives_name(definition.trait_impls, definition.derives, bound_name) -> return Val(true)
+                if sema_type_blocks_or_derives_name(definition.trait_impls, definition.derives, bound_name) {
+                    return Val(true)
+                }
             }
             .Enum(definition) -> {
-                if sema_type_blocks_or_derives_name(definition.trait_impls, definition.derives, bound_name) -> return Val(true)
+                if sema_type_blocks_or_derives_name(definition.trait_impls, definition.derives, bound_name) {
+                    return Val(true)
+                }
             }
             .Distinct(definition) -> {
-                if sema_type_blocks_or_derives_name([TraitImplBlock]{}, definition.derives, bound_name) -> return Val(true)
+                if sema_type_blocks_or_derives_name([TraitImplBlock]{}, definition.derives, bound_name) {
+                    return Val(true)
+                }
             }
             .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
         // An eligible type with no authored `Debug` has the derived one.
         if bound_name == "Debug" {
             if sema_registration_module_index(graph, nominal.symbol.module_identity) == .Val(module_index) {
-                if sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).debug -> return Val(true)
+                if sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).debug {
+                    return Val(true)
+                }
             }
         }
     }
-    if unresolved_impl || !sema_registration_package_settled(graph, nominal.symbol.module_identity) -> return None
+    if unresolved_impl || !sema_registration_package_settled(graph, nominal.symbol.module_identity) {
+        return None
+    }
     Val(false)
 }
 
@@ -2005,15 +2480,21 @@ sema_type_bound_satisfied_at: fn(graph: SemaRegistrationGraph, actual: Type, bou
     if structural != None -> return structural
     generic_satisfied := sema_type_generic_bound_satisfied(graph, actual_resolved, bound_name, caller, generic_params)
     if generic_satisfied != None -> return generic_satisfied
-    if bound_name.starts_with("Quantity<") -> return Val(sema_registration_quantity_bound_satisfied(graph, actual_resolved, bound_name))
+    if bound_name.starts_with("Quantity<") {
+        return Val(sema_registration_quantity_bound_satisfied(graph, actual_resolved, bound_name))
+    }
     // An exact number (a `3.5` literal is a Decimal) interpolates through its
     // Core Display, so it is Renderable even where core.math declares no row.
-    if bound_name == "Renderable" && actual_resolved == .Named(name) && (name == "Decimal" || name == "Fraction") -> return Val(true)
+    if bound_name == "Renderable" && actual_resolved == .Named(name) && (name == "Decimal" || name == "Fraction") {
+        return Val(true)
+    }
     // A pool `ID<T>` is a compiler-owned slot and generation whose built-in
     // `==` compares only those two numbers and never touches `T`, so it meets
     // `Equatable` whatever `T` is. It has no nominal row to carry an impl; a
     // declared `ID` has one.
-    if bound_name == "Equatable" && actual_resolved == .Apply(name, _) && sema_serde_named_leaf(name) == "ID" && sema_type_resolve_nominal_row_at(graph, actual_resolved, caller) == None -> return Val(true)
+    if bound_name == "Equatable" && actual_resolved == .Apply(name, _) && sema_serde_named_leaf(name) == "ID" && sema_type_resolve_nominal_row_at(graph, actual_resolved, caller) == None {
+        return Val(true)
+    }
     // Interpolation prints a list or optional through its elements and a
     // nominal through its Display, so both are Printable the same way.
     if bound_name == "Printable" {
@@ -2021,7 +2502,9 @@ sema_type_bound_satisfied_at: fn(graph: SemaRegistrationGraph, actual: Type, bou
             .List(inner) | .Option(inner) | .FixedList(inner, _) -> return sema_type_bound_satisfied_at(graph, inner, bound_name, caller, generic_params)
             .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
         }
-        if sema_type_resolve_nominal_row_at(graph, actual_resolved, caller) != None && sema_type_bound_satisfied_at(graph, actual_resolved, "Display", caller, generic_params) == (Val(true)) -> return Val(true)
+        if sema_type_resolve_nominal_row_at(graph, actual_resolved, caller) != None && sema_type_bound_satisfied_at(graph, actual_resolved, "Display", caller, generic_params) == (Val(true)) {
+            return Val(true)
+        }
     }
     // Rust `TraitRegistry::implements_trait`: a scalar satisfies the builtin
     // trait family by name even where Core declares the trait (`Encode`); a
@@ -2057,7 +2540,9 @@ sema_type_codec_structural_bound: fn(graph: SemaRegistrationGraph, actual_resolv
             return Val(true)
         }
         .Named(name) -> {
-            if name == "Dyn" || name == "DateTime" || name == "ZonedDateTime" || name == "JSON" || name == "TOML" || name == "YAML" || name == "CSV" -> return Val(true)
+            if name == "Dyn" || name == "DateTime" || name == "ZonedDateTime" || name == "JSON" || name == "TOML" || name == "YAML" || name == "CSV" {
+                return Val(true)
+            }
         }
         .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
@@ -2174,7 +2659,9 @@ sema_type_core_leaf_name: fn(graph: SemaRegistrationGraph, name: String, caller:
     loop index in 0..<last -> owner_parts.push(parts[index])
     module_name: sema_registration_module_name(graph, sema_registration_module_id(graph, owner_parts.join("::"))) ?? return None
     if module_name == "core.crypto" -> return None
-    if boundary_head_owner_module(leaf) != None && boundary_head_carrier_module(leaf) != Val(module_name) -> return None
+    if boundary_head_owner_module(leaf) != None && boundary_head_carrier_module(leaf) != Val(module_name) {
+        return None
+    }
     exports: core_module_export(module_name) ?? return None
     if !exports.type_exports.contains(leaf) -> return None
     if sema_type_graph_lookup_symbol_at(graph, caller, leaf) != None -> return None
@@ -2204,7 +2691,9 @@ sema_type_associated_nominal: fn(graph: SemaRegistrationGraph, nominal: SemaRegi
             if !target_matches -> next
             associated_types: graph.modules[module_index].impls[impl_index].associated_types.len()
             loop associated_index in 0..<associated_types {
-                if graph.modules[module_index].impls[impl_index].associated_types[associated_index].symbol.name != associated_name -> next
+                if graph.modules[module_index].impls[impl_index].associated_types[associated_index].symbol.name != associated_name {
+                    next
+                }
                 if resolved_type != None -> return None
                 resolved_type = Val(sema_type_resolve_declared(graph, graph.modules[module_index].impls[impl_index].associated_types[associated_index].ty, graph.modules[module_index].impls[impl_index].source_module_identity))
             }
@@ -2214,7 +2703,9 @@ sema_type_associated_nominal: fn(graph: SemaRegistrationGraph, nominal: SemaRegi
     if nominal.source == .SourceAST(item) {
         loop block in sema_registration_item_trait_blocks(item) {
             trait_row: sema_checked_trait_nominal_row(graph, nominal.symbol.module_identity, block.trait_name) ?? next
-            if graph.modules[trait_row.module_index].nominals[trait_row.row].symbol.id != trait_symbol.id -> next
+            if graph.modules[trait_row.module_index].nominals[trait_row.row].symbol.id != trait_symbol.id {
+                next
+            }
             loop associated in block.assoc_type_impls {
                 if associated.name != associated_name -> next
                 if resolved_type != None -> return None

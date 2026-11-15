@@ -2,6 +2,7 @@
 // CLI assertions live in tests/cases/jetpack_platform. Env-gated; no public API.
 // #4838: invoke THIS FILE with --filter, never the directory.
 use platform_json: core.encoding.json
+
 store_platform_fixture_meta: fn(verification: &StoreVerification, roots: HangarRoots, id: String, timestamp: Int?) -> String {
     source: files.join(roots.root, "hangar-meta-src-{id}")
     files.create_dir_all(source) ?? panic("metadata source")
@@ -9,9 +10,12 @@ store_platform_fixture_meta: fn(verification: &StoreVerification, roots: HangarR
     request: IngestRequest{name: id, version: "1.0", reference: "fixture:{id}", cache_identity: CacheIdentity{source_fingerprint: "sha256-fixture-source-{id}", recipe_fingerprint: "sha256-fixture-recipe-{id}", policy_fingerprint: "policy=fixture", platform: pkg_host_platform()}, references: [String]{}, outputs: [String:String]{"out": source}, signature: "", provenance: "fixture", platform_artifact_kind: ""}
     entry: (store_ingest_tree(verification, roots, request) ?? panic("real ingest")).entry
     files.remove_all(source) ?? panic("remove source")
-    if timestamp == .Val(value) -> store_test_backdate_last_used_at(verification, roots, entry.id, value) ?? panic("backdate")
+    if timestamp == .Val(value) {
+        store_test_backdate_last_used_at(verification, roots, entry.id, value) ?? panic("backdate")
+    }
     files.join(roots.hangar_dir(), entry.id)
 }
+
 store_platform_setup: fn() {
     work: sys.get("JET_TEST_PLATFORM_SETUP") ?? return
     mode: sys.get("JET_TEST_PLATFORM_MODE") ?? panic("setup mode")
@@ -47,10 +51,13 @@ store_platform_setup: fn() {
     files.write(files.join(fixtures, "nixpkgs-native-jetpack.json"), platform_json.to_string(provider) ?? panic("provider fixture JSON")) ?? panic("provider fixture")
     release: Dyn.Object(["tag": Dyn.Text("v1.0.0"), "version": Dyn.Text("1.0.0"), "sha256": Dyn.Text(artifact_digest), "artifact": Dyn.Text(artifact_name)])
     files.write(files.join(fixtures, "jetpackage-omp.json"), platform_json.to_string(release) ?? panic("release fixture JSON")) ?? panic("release fixture")
-    if mode == "native" -> return
+    if mode == "native" {
+        return
+    }
     object: store_platform_fixture_meta(verification, roots, "platform-hostile-good", None)
     files.write(files.join(work, "fixture-object"), object) ?? panic("publish setup path")
 }
+
 #Test("S3 platform authentic fixture setup") {
     store_platform_setup()
 }

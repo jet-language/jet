@@ -8,13 +8,17 @@ TCostSite: struct {
     kind: TCostKind
     state: TCostState
 }
-TCostReport: struct { sites: [TCostSite]{[TCostSite]{}} }
+
+TCostReport: struct {
+    sites: [TCostSite]{[TCostSite]{}}
+}
 
 JetDriverCostQueryResult: struct {
     compile: JetDriverCompileResult
     report: TCostReport?
     gaps: [String]
 }
+
 jet_driver_cost_query: fn(request: &&JetDriverCompileRequest) -> JetDriverCostQueryResult {
     selected := request.move()
     selected.mode = JetDriverCompileMode.Doc

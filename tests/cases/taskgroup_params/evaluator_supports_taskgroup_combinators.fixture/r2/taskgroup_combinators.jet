@@ -1,4 +1,3 @@
-
 use time: core.time
 
 slow_seven: fn() -> Int {
@@ -13,13 +12,13 @@ slow_eleven: fn() -> Int {
 
 run: fn() {
     task.group all_group {
-        values: (task.all { 1, 2 }) ?? panic("all failed")
+        values: (task.all {1, 2}) ?? panic("all failed")
         print(values[0] + values[1])
     }
     task.group race_group {
-        print((task.race { slow_seven(), 8 }) ?? panic("race failed"))
+        print((task.race {slow_seven(), 8}) ?? panic("race failed"))
     }
     task.group any_group {
-        print((task.any { slow_eleven(), 12 }) ?? panic("any failed"))
+        print((task.any {slow_eleven(), 12}) ?? panic("any failed"))
     }
 }

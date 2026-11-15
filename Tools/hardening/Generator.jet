@@ -14,7 +14,6 @@
 // must be printed. A finding is minimized by dropping context instances
 // while the construct and the mismatch stay the same, then sealed as a
 // jet.hardening.repro.v1 bundle.
-
 use {
     crypto: core.crypto
     json: core.encoding.json
@@ -24,25 +23,39 @@ use {
 }
 
 GENERATOR_SEED: "2342"
+
 GENERATOR_CASES: 16
+
 GENERATOR_MAX_CASES: 128
+
 GENERATOR_MAX_CONTEXT: 2
+
 GENERATOR_SOURCE_LIMIT: 65536
+
 GENERATOR_MUTATOR: "construct-generator/1"
+
 GENERATOR_ORACLE: "tier-agreement"
+
 GENERATOR_ORACLE_VERSION: "1"
+
 CHECK_STAGE: "check"
 
 // The families the generated programs must reach (c36).
 CONSTRUCT_FAMILIES: [String]{"expressions", "statements", "control-flow", "patterns", "generics", "traits", "effects", "views", "comptime", "nested-places"}
+
 HOLE_INTS: [String]{"A", "B", "C"}
+
 HOLE_WORDS: [String]{"one", "two", "three"}
 
 // What one generated case showed.
 AGREEMENT: "agreement"
+
 REJECTED_VALID: "rejected-valid"
+
 UNLOWERED: "admitted-but-unlowered"
+
 OPTIMIZER_ONLY: "optimizer-only-meaning-change"
+
 OBSERVERLESS: "observerless"
 
 Production: struct {
@@ -372,9 +385,7 @@ print("value_$K {value_$K}")`,
     }
 }
 
-construct_id: fn(row: Production) -> String Never! {
-    "construct:{row.family}/{row.name}"
-}
+construct_id: fn(row: Production) -> String Never! { "construct:{row.family}/{row.name}" }
 
 of_family: fn(rows: [Production], family: String) -> [Production] Never! {
     out := [Production]{}
@@ -396,7 +407,9 @@ draw: fn(seed: String, index: Int, what: String, bound: Int) -> Int Never! {
 
 filled: fn(text: String, seed: String, index: Int, slot: Int) -> String Never! {
     out := text.replace("$K", "{slot}")
-    loop name in HOLE_INTS -> out = out.replace("${name}", "{1 + draw(seed, index, "{slot}{name}", 9)}")
+    loop name in HOLE_INTS {
+        out = out.replace("${name}", "{1 + draw(seed, index, "{slot}{name}", 9)}")
+    }
     flag: if draw(seed, index, "{slot}F", 2) == 0 -> "false" else -> "true"
     out = out.replace("$F", flag)
     out.replace("$W", HOLE_WORDS[draw(seed, index, "{slot}W", HOLE_WORDS.len())])
@@ -468,7 +481,9 @@ generate_program: fn(rows: [Production], seed: String, index: Int) -> Generated 
 // every template is admitted and runs on every tier.
 coverage_program: fn(seed: String) -> Generated Never! {
     instances := [Instance]{}
-    loop (slot, row) in productions() -> instances.push(instance(row, seed, GENERATOR_MAX_CASES, slot))
+    loop (slot, row) in productions() {
+        instances.push(instance(row, seed, GENERATOR_MAX_CASES, slot))
+    }
     program_of("coverage", "{seed}:coverage", GENERATOR_MAX_CASES, 0, instances)
 }
 
@@ -478,22 +493,32 @@ coverage_program: fn(seed: String) -> Generated Never! {
 validate_productions: fn(rows: [Production]) -> [String] Never! {
     problems := [String]{}
     loop family in CONSTRUCT_FAMILIES {
-        if of_family(rows, family).len() == 0 -> problems.push("missing production: no template generates {family}")
+        if of_family(rows, family).len() == 0 {
+            problems.push("missing production: no template generates {family}")
+        }
     }
     seen := [String]{}
     sink: "print(\"value_$K {{value_$K}}\")"
     loop row in rows {
         id: construct_id(row)
-        if !CONSTRUCT_FAMILIES.contains(row.family) -> problems.push("{id}: `{row.family}` is not a construct family")
+        if !CONSTRUCT_FAMILIES.contains(row.family) {
+            problems.push("{id}: `{row.family}` is not a construct family")
+        }
         if seen.contains(id) -> problems.push("{id}: the production is listed twice")
         seen.push(id.copy())
         if row.markers.len() == 0 -> problems.push("{id}: the production names no construct marker")
         template: "{row.decls}\n{row.body}"
         loop marker in row.markers {
-            if !template.contains(marker) -> problems.push("{id}: marker `{marker}` is not in the template")
+            if !template.contains(marker) {
+                problems.push("{id}: marker `{marker}` is not in the template")
+            }
         }
-        if !row.body.ends_with(sink) -> problems.push("{id}: the template does not end by printing value_$K")
-        if filled(template, GENERATOR_SEED, 0, 0).contains("$") -> problems.push("{id}: the template has a hole the generator does not fill")
+        if !row.body.ends_with(sink) {
+            problems.push("{id}: the template does not end by printing value_$K")
+        }
+        if filled(template, GENERATOR_SEED, 0, 0).contains("$") {
+            problems.push("{id}: the template has a hole the generator does not fill")
+        }
     }
     problems
 }
@@ -509,7 +534,9 @@ validate_program: fn(program: Generated) -> [String] Never! {
     problems := [String]{}
     id: program.case_id
     source: program.source
-    if source.len() > GENERATOR_SOURCE_LIMIT -> problems.push("{id}: {source.len()} bytes is over the {GENERATOR_SOURCE_LIMIT}-byte limit")
+    if source.len() > GENERATOR_SOURCE_LIMIT {
+        problems.push("{id}: {source.len()} bytes is over the {GENERATOR_SOURCE_LIMIT}-byte limit")
+    }
     if source.contains("$") -> problems.push("{id}: a hole is left unfilled")
     parsed: parse_source(source.bytes())
     loop diagnostic in parsed.diagnostics {
@@ -525,27 +552,37 @@ validate_program: fn(program: Generated) -> [String] Never! {
             if function.name == "run" -> run_found = true
             calls := [String]{}
             ast_visit_body(function.body, fn(expression: Expr) { note_call(calls, expression) }, true)
-            if calls.contains(function.name) -> problems.push("{id}: `{function.name}` calls itself, so it may not end")
+            if calls.contains(function.name) {
+                problems.push("{id}: `{function.name}` calls itself, so it may not end")
+            }
         }
     }
     if !run_found -> problems.push("{id}: no `run: fn()` executes the program")
     loop line in source.split("\n").to_list() {
         trimmed: line.trim()
-        if trimmed.starts_with("loop ") && !trimmed.contains(" in ") -> problems.push("{id}: `{trimmed}` is not a bounded loop")
+        if trimmed.starts_with("loop ") && !trimmed.contains(" in ") {
+            problems.push("{id}: `{trimmed}` is not a bounded loop")
+        }
     }
     loop item in program.instances {
         loop marker in item.markers {
-            if !source.contains(marker) -> problems.push("{id}: {item.construct_id} #{item.slot} lost its construct `{marker}`")
+            if !source.contains(marker) {
+                problems.push("{id}: {item.construct_id} #{item.slot} lost its construct `{marker}`")
+            }
         }
         name: "value_{item.slot}"
-        if trace(tree, name, "", "value", 0, name) == None -> problems.push("{id}: {item.construct_id} #{item.slot}: `{name}` never reaches an observer")
+        if trace(tree, name, "", "value", 0, name) == None {
+            problems.push("{id}: {item.construct_id} #{item.slot}: `{name}` never reaches an observer")
+        }
     }
     problems
 }
 
 // `cases` programs from `seed`, in case order, each validated.
 generate_programs: fn(seed: String, cases: Int) -> [Generated] Err! {
-    if cases < 1 || cases > GENERATOR_MAX_CASES -> return Err("the case count must be 1 to {GENERATOR_MAX_CASES}, not {cases}")
+    if cases < 1 || cases > GENERATOR_MAX_CASES {
+        return Err("the case count must be 1 to {GENERATOR_MAX_CASES}, not {cases}")
+    }
     rows: productions()
     table: validate_productions(rows)
     if table.len() > 0 -> return Err(table.join("\n"))
@@ -583,7 +620,9 @@ planted: fn(run: TierRun, program: Generated, plant: String) -> TierRun Never! {
     }
     prefix: "value_{program.primary} "
     lines := [String]{}
-    loop line in run.stdout.split("\n").to_list() -> lines.push(if line.starts_with(prefix) -> "{line}~" else -> line.copy())
+    loop line in run.stdout.split("\n").to_list() {
+        lines.push(if line.starts_with(prefix) -> "{line}~" else -> line.copy())
+    }
     out.stdout = lines.join("\n")
     out
 }
@@ -602,14 +641,18 @@ run_case: fn(program: Generated, jet: String, scratch: String, plant: String) -[
     check: run_tier(jet, CHECK_STAGE, path, "")
     runs := [TierRun]{}
     if check.exit == Val(0) && !check.timeout {
-        loop tier in regression_tiers() -> runs.push(planted(run_tier(jet, tier, path, ""), program, plant))
+        loop tier in regression_tiers() {
+            runs.push(planted(run_tier(jet, tier, path, ""), program, plant))
+        }
     }
     Ok(CaseRun{check: check, runs: runs})
 }
 
 first_error: fn(run: TierRun) -> String Never! {
     loop line in run.stderr.split("\n").to_list() {
-        if line.starts_with("Error") || line.starts_with("error") || line.starts_with("planted") -> return line.trim().copy()
+        if line.starts_with("Error") || line.starts_with("error") || line.starts_with("planted") {
+            return line.trim().copy()
+        }
     }
     ""
 }
@@ -645,23 +688,31 @@ finished_cleanly: fn(run: TierRun) -> Bool Never! {
 // `jet run` is an optimizer-only meaning change; and a value line missing
 // from the output is observerless.
 classify: fn(program: Generated, run: CaseRun) -> Verdict Never! {
-    if !finished_cleanly(run.check) -> return Verdict{class: REJECTED_VALID, tier: CHECK_STAGE, mismatch: "{REJECTED_VALID}|{CHECK_STAGE}|{ending(run.check)}"}
+    if !finished_cleanly(run.check) {
+        return Verdict{class: REJECTED_VALID, tier: CHECK_STAGE, mismatch: "{REJECTED_VALID}|{CHECK_STAGE}|{ending(run.check)}"}
+    }
     loop tier in regression_tiers() {
         found := false
         loop tier_run in run.runs {
             if tier_run.tier == tier -> found = true
         }
-        if !found -> return Verdict{class: UNLOWERED, tier: tier.copy(), mismatch: "{UNLOWERED}|{tier}|not run"}
+        if !found {
+            return Verdict{class: UNLOWERED, tier: tier.copy(), mismatch: "{UNLOWERED}|{tier}|not run"}
+        }
     }
     loop tier_run in run.runs {
-        if !finished_cleanly(tier_run) -> return Verdict{class: UNLOWERED, tier: tier_run.tier.copy(), mismatch: "{UNLOWERED}|{tier_run.tier}|{ending(tier_run)}"}
+        if !finished_cleanly(tier_run) {
+            return Verdict{class: UNLOWERED, tier: tier_run.tier.copy(), mismatch: "{UNLOWERED}|{tier_run.tier}|{ending(tier_run)}"}
+        }
     }
     reference := ""
     loop tier_run in run.runs {
         if tier_run.tier == JET_RUN -> reference = tier_run.stdout.copy()
     }
     loop tier_run in run.runs {
-        if tier_run.stdout != reference -> return Verdict{class: OPTIMIZER_ONLY, tier: tier_run.tier.copy(), mismatch: "{OPTIMIZER_ONLY}|{tier_run.tier}|{first_difference(reference, tier_run.stdout)}"}
+        if tier_run.stdout != reference {
+            return Verdict{class: OPTIMIZER_ONLY, tier: tier_run.tier.copy(), mismatch: "{OPTIMIZER_ONLY}|{tier_run.tier}|{first_difference(reference, tier_run.stdout)}"}
+        }
     }
     lines: reference.split("\n").to_list()
     loop item in program.instances {
@@ -670,7 +721,9 @@ classify: fn(program: Generated, run: CaseRun) -> Verdict Never! {
         loop line in lines {
             if line.starts_with(prefix) -> seen = true
         }
-        if !seen -> return Verdict{class: OBSERVERLESS, tier: JET_RUN, mismatch: "{OBSERVERLESS}|{JET_RUN}|value_{item.slot}"}
+        if !seen {
+            return Verdict{class: OBSERVERLESS, tier: JET_RUN, mismatch: "{OBSERVERLESS}|{JET_RUN}|value_{item.slot}"}
+        }
     }
     Verdict{class: AGREEMENT, tier: "", mismatch: ""}
 }
@@ -710,18 +763,22 @@ generated_severity: fn(class: String) -> String Never! {
 
 generator_commands: fn() -> [TierCommand] Never! {
     commands := [TierCommand]{TierCommand{tier: CHECK_STAGE, command: tier_command(CHECK_STAGE)}}
-    loop tier in regression_tiers() -> commands.push(TierCommand{tier: tier.copy(), command: tier_command(tier)})
+    loop tier in regression_tiers() {
+        commands.push(TierCommand{tier: tier.copy(), command: tier_command(tier)})
+    }
     commands
 }
 
 production_dyn: fn(row: Production) -> Dyn Never! {
-    Dyn.Object([String: Dyn]{
-        "body": Dyn.Text(row.body.copy()),
-        "decls": Dyn.Text(row.decls.copy()),
-        "family": Dyn.Text(row.family.copy()),
-        "markers": text_list(row.markers),
-        "name": Dyn.Text(row.name.copy()),
-    })
+    Dyn.Object(
+        [String:Dyn]{
+            "body": Dyn.Text(row.body.copy()),
+            "decls": Dyn.Text(row.decls.copy()),
+            "family": Dyn.Text(row.family.copy()),
+            "markers": text_list(row.markers),
+            "name": Dyn.Text(row.name.copy()),
+        },
+    )
 }
 
 // The configuration a finding was found under: every production, the
@@ -730,13 +787,17 @@ generator_config_hash: fn() -> String Never! {
     rows := [Dyn]{}
     loop row in productions() -> rows.push(production_dyn(row))
     commands := [Dyn]{}
-    loop command in generator_commands() -> commands.push(Dyn.Text("{command.tier}: {command.command}"))
-    config: Dyn.Object([String: Dyn]{
-        "commands": Dyn.Array(commands),
-        "max_context": Dyn.Int(GENERATOR_MAX_CONTEXT),
-        "productions": Dyn.Array(rows),
-        "source_limit": Dyn.Int(GENERATOR_SOURCE_LIMIT),
-    })
+    loop command in generator_commands() {
+        commands.push(Dyn.Text("{command.tier}: {command.command}"))
+    }
+    config: Dyn.Object(
+        [String:Dyn]{
+            "commands": Dyn.Array(commands),
+            "max_context": Dyn.Int(GENERATOR_MAX_CONTEXT),
+            "productions": Dyn.Array(rows),
+            "source_limit": Dyn.Int(GENERATOR_SOURCE_LIMIT),
+        },
+    )
     digest(json.canonical(config) ?? "")
 }
 
@@ -760,12 +821,16 @@ finding_bundle: fn(found: Minimized, identity: RunIdentity, mutation_arm: String
         if tier_run.tier == JET_RUN -> reference = tier_run.stdout.copy()
     }
     primary: primary_instance(program)
-    oracle_input: json.canonical(Dyn.Object([String: Dyn]{
-        "construct_id": Dyn.Text(primary.construct_id.copy()),
-        "instances": text_list(instance_ids(program)),
-        "seed": Dyn.Text(program.seed.copy()),
-        "source_sha256": Dyn.Text(digest(program.source)),
-    })) ?? return Err("{program.case_id} has no canonical form: {err}")
+    oracle_input: json.canonical(
+        Dyn.Object(
+            [String:Dyn]{
+                "construct_id": Dyn.Text(primary.construct_id.copy()),
+                "instances": text_list(instance_ids(program)),
+                "seed": Dyn.Text(program.seed.copy()),
+                "source_sha256": Dyn.Text(digest(program.source)),
+            },
+        ),
+    ) ?? return Err("{program.case_id} has no canonical form: {err}")
     input: ReproInput{
         run_id: "{identity.run_id}/{program.case_id}",
         started: identity.started.copy(),
@@ -788,20 +853,24 @@ finding_bundle: fn(found: Minimized, identity: RunIdentity, mutation_arm: String
         exit: failing.exit,
         signal: failing.signal.copy(),
         timeout: failing.timeout,
-        expected_relation: Dyn.Object([String: Dyn]{
-            "jet_run_stdout": Dyn.Text(reference),
-            "relation": Dyn.Text("jet check admits the program; every tier exits 0 and prints the bytes jet_run prints, with every value line"),
-        }),
-        actual_relation: Dyn.Object([String: Dyn]{
-            "class": Dyn.Text(verdict.class.copy()),
-            "dropped": text_list(found.dropped),
-            "mismatch": Dyn.Text(verdict.mismatch.copy()),
-            "tier": Dyn.Text(verdict.tier.copy()),
-        }),
+        expected_relation: Dyn.Object(
+            [String:Dyn]{
+                "jet_run_stdout": Dyn.Text(reference),
+                "relation": Dyn.Text("jet check admits the program; every tier exits 0 and prints the bytes jet_run prints, with every value line"),
+            },
+        ),
+        actual_relation: Dyn.Object(
+            [String:Dyn]{
+                "class": Dyn.Text(verdict.class.copy()),
+                "dropped": text_list(found.dropped),
+                "mismatch": Dyn.Text(verdict.mismatch.copy()),
+                "tier": Dyn.Text(verdict.tier.copy()),
+            },
+        ),
         normalization: [String]{},
         oracle: Oracle{name: GENERATOR_ORACLE, version: GENERATOR_ORACLE_VERSION, input_digest: digest(oracle_input), independence_class: "tier-self-diff"},
         classification: generated_severity(verdict.class),
-        tower_action: Dyn.Object([String: Dyn]{"action": Dyn.Text("create-or-update"), "by": Dyn.Text("hardening-rig"), "dedup_key": Dyn.Text("{primary.construct_id}|{verdict.class}")}),
+        tower_action: Dyn.Object([String:Dyn]{"action": Dyn.Text("create-or-update"), "by": Dyn.Text("hardening-rig"), "dedup_key": Dyn.Text("{primary.construct_id}|{verdict.class}")}),
     }
     make_repro(input)
 }
@@ -809,10 +878,12 @@ finding_bundle: fn(found: Minimized, identity: RunIdentity, mutation_arm: String
 // A bundle without the fields that only say when it ran. Two runs of one
 // seed on one compiler give the same stable digests in the same order.
 stable_digest: fn(bundle: Dyn) -> String Err! {
-    kept := [String: Dyn]{}
+    kept := [String:Dyn]{}
     if bundle == .Object(entries) {
         loop entry in entries {
-            if entry.key != "started" && entry.key != "finished" && entry.key != "run_id" && entry.key != "content_digest" -> kept[entry.key] = entry.value.copy()
+            if entry.key != "started" && entry.key != "finished" && entry.key != "run_id" && entry.key != "content_digest" {
+                kept[entry.key] = entry.value.copy()
+            }
         }
     }
     text: json.canonical(Dyn.Object(kept)) ?? return Err("the bundle has no canonical form: {err}")
@@ -825,7 +896,9 @@ clean_runs: fn(program: Generated) -> CaseRun Never! {
     stdout: "{lines.join("\n")}\n"
     check: TierRun{tier: CHECK_STAGE, command: tier_command(CHECK_STAGE), stdout: "", stderr: "", exit: Val(0), signal: None, timeout: false}
     runs := [TierRun]{}
-    loop tier in regression_tiers() -> runs.push(TierRun{tier: tier.copy(), command: tier_command(tier), stdout: stdout.copy(), stderr: "", exit: Val(0), signal: None, timeout: false})
+    loop tier in regression_tiers() {
+        runs.push(TierRun{tier: tier.copy(), command: tier_command(tier), stdout: stdout.copy(), stderr: "", exit: Val(0), signal: None, timeout: false})
+    }
     CaseRun{check: check, runs: runs}
 }
 
@@ -839,27 +912,37 @@ layer_controls: fn() -> [String] Never! {
     loop row in rows {
         if row.family != "views" -> missing.push(row.copy())
     }
-    if !validate_productions(missing).contains("missing production: no template generates views") -> survived.push("missing-production")
+    if !validate_productions(missing).contains("missing production: no template generates views") {
+        survived.push("missing-production")
+    }
     program: generate_program(rows, GENERATOR_SEED, 0)
     clean: clean_runs(program)
     if !case_passes(program, clean) -> survived.push("clean-baseline")
     unlowered := clean.copy()
     unlowered.runs = [TierRun]{}
     loop tier_run in clean.runs -> unlowered.runs.push(planted(tier_run, program, UNLOWERED))
-    if case_passes(program, unlowered) || classify(program, unlowered).class != UNLOWERED -> survived.push("admitted-but-unlowered")
+    if case_passes(program, unlowered) || classify(program, unlowered).class != UNLOWERED {
+        survived.push("admitted-but-unlowered")
+    }
     optimizer := clean.copy()
     optimizer.runs = [TierRun]{}
     loop tier_run in clean.runs -> optimizer.runs.push(planted(tier_run, program, OPTIMIZER_ONLY))
-    if case_passes(program, optimizer) || classify(program, optimizer).class != OPTIMIZER_ONLY -> survived.push("optimizer-only-meaning-change")
+    if case_passes(program, optimizer) || classify(program, optimizer).class != OPTIMIZER_ONLY {
+        survived.push("optimizer-only-meaning-change")
+    }
     primary: primary_instance(program)
     silent := [Instance]{}
     loop item in program.instances {
         quiet := item.copy()
-        if item.slot == primary.slot -> quiet.body = item.body.replace("print(\"value_{item.slot} {{value_{item.slot}}}\")", "_: value_{item.slot}")
+        if item.slot == primary.slot {
+            quiet.body = item.body.replace("print(\"value_{item.slot} {{value_{item.slot}}}\")", "_: value_{item.slot}")
+        }
         silent.push(quiet)
     }
     observerless: program_of(program.case_id, program.seed, program.index, program.primary, silent)
-    if case_passes(observerless, clean_runs(observerless)) || !validate_program(observerless).join("\n").contains("never reaches an observer") -> survived.push("observerless-generation")
+    if case_passes(observerless, clean_runs(observerless)) || !validate_program(observerless).join("\n").contains("never reaches an observer") {
+        survived.push("observerless-generation")
+    }
     quiet_run := clean.copy()
     quiet_run.runs = [TierRun]{}
     loop tier_run in clean.runs {
@@ -867,6 +950,8 @@ layer_controls: fn() -> [String] Never! {
         out.stdout = ""
         quiet_run.runs.push(out)
     }
-    if case_passes(program, quiet_run) || classify(program, quiet_run).class != OBSERVERLESS -> survived.push("observerless-output")
+    if case_passes(program, quiet_run) || classify(program, quiet_run).class != OBSERVERLESS {
+        survived.push("observerless-output")
+    }
     survived
 }

@@ -8,6 +8,7 @@ Res: struct {
         close: fn(&&self) { print("close {self.name}") }
     }
 }
+
 // Closes through the FileReader it holds, and the Res beside it.
 Checked: struct {
     tracer: Res
@@ -36,7 +37,7 @@ return_option_res: fn(name: String) -> Res? {
 
 check_option_res: fn() {
     if return_option_res("return option res") == {
-        .Val(got) -> print("got {got.name}")
+        .Val(got) -> { print("got {got.name}") }
         .None -> print("none")
     }
 }
@@ -49,7 +50,7 @@ return_result_res: fn(name: String) -> Res Err! {
 
 check_result_res: fn() {
     if return_result_res("return result res") == {
-        .Ok(got) -> print("got {got.name}")
+        .Ok(got) -> { print("got {got.name}") }
         .Err(error) -> print("failed {error}")
     }
 }
@@ -62,7 +63,7 @@ return_option_reader: fn(name: String) -> Checked? {
 
 check_option_reader: fn() {
     if return_option_reader("return option reader") == {
-        .Val(got) -> print("got {got.tracer.name}")
+        .Val(got) -> { print("got {got.tracer.name}") }
         .None -> print("none")
     }
 }
@@ -75,7 +76,7 @@ return_result_reader: fn(name: String) -> Checked Err! {
 
 check_result_reader: fn() {
     if return_result_reader("return result reader") == {
-        .Ok(got) -> print("got {got.tracer.name}")
+        .Ok(got) -> { print("got {got.tracer.name}") }
         .Err(error) -> print("failed {error}")
     }
 }

@@ -24,14 +24,10 @@ Event: enum {
     Named(z: Int, a: Int, k: Int)
 }
 
-consume_owned: fn(&&s: String) -> Int Never! {
-    s.len()
-}
+consume_owned: fn(s: &&String) -> Int Never! { s.len() }
 
 // `second` reads `s` before `first` takes it.
-build: fn(&&s: String) -> Pair Never! {
-    Pair{second: s.len(), first: consume_owned(s)}
-}
+build: fn(s: &&String) -> Pair Never! { Pair{second: s.len(), first: consume_owned(s)} }
 
 run: fn() {
     row: Row{a: mark("a", 2), z: mark("z", 1)}
@@ -41,5 +37,5 @@ run: fn() {
     pair: build("abc")
     print("{pair.first},{pair.second}")
     event: Event.Named{a: mark("a", 2), k: mark("k", 3), z: mark("z", 1)}
-    if event == .Named{z: z, a: a, k: k} -> print("{z},{a},{k}")
+    if event == .Named{z, a, k} -> print("{z},{a},{k}")
 }

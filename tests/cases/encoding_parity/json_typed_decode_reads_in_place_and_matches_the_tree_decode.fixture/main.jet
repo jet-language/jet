@@ -37,7 +37,7 @@ Row: struct {
     tags: [String]
     tag: Tag
     inner: Inner?
-    scores: [String: Int]
+    scores: [String:Int]
     level: Int{5}
     price: Usd
     ratio: Float
@@ -54,7 +54,7 @@ show_errors: fn(label: String, errors: [FieldError]) {
 
 check: fn<T: [Decode, Encode]>(label: String, text: String) {
     if json.decode<T>(text) == {
-        .Ok(value) -> print("{label} ok {json.to_string(value) ?? "?"}")
+        .Ok(value) -> { print("{label} ok {json.to_string(value) ?? "?"}") }
         .Err(errors) -> show_errors(label, errors)
     }
     tree: json.parse(text) ?? {
@@ -62,7 +62,7 @@ check: fn<T: [Decode, Encode]>(label: String, text: String) {
         return
     }
     if tree.decode<T>() == {
-        .Ok(value) -> print("{label} tree ok {json.to_string(value) ?? "?"}")
+        .Ok(value) -> { print("{label} tree ok {json.to_string(value) ?? "?"}") }
         .Err(errors) -> show_errors("{label} tree", errors)
     }
 }
@@ -103,7 +103,7 @@ run: fn() {
     check<Wrap<String>>("wrap-bad", "{{\"value\":3,\"list\":[\"a\",4]}}")
     check<Wrap<Inner>>("wrap-inner", "{{\"value\":{{\"x\":1}},\"list\":[{{\"y\":1}},{{\"x\":2,\"extra\":[1,{{}}]}}]}}")
     check<[Tag]>("tags", "[\"Red\",{{\"Level\":{{\"depth\":2}}}},\"Nope\",{{\"Level\":{{\"depth\":\"x\"}}}}]")
-    check<[String: [Int]]>("map", "{{\"a\":[1,2],\"b\":[],\"c\":[\"x\"],\"d\":null}}")
+    check<[String:[Int]]>("map", "{{\"a\":[1,2],\"b\":[],\"c\":[\"x\"],\"d\":null}}")
     check<[Int]?>("opt-list", "null")
     check<[Int?]>("opt-items", "[1,null,3]")
     check<Usd>("usd", "42")

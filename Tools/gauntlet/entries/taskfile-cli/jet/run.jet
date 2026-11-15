@@ -1,11 +1,16 @@
 use core.[encoding.json, files, process]
 
-Task: struct { id: Int, text: String, done: Bool }
-Store: struct { tasks: [Task] }
-
-save: fn(tasks: [Task]) Err! {
-    files.write("tasks.json", json.to_string(Store{tasks: tasks}))
+Task: struct {
+    id: Int
+    text: String
+    done: Bool
 }
+
+Store: struct {
+    tasks: [Task]
+}
+
+save: fn(tasks: [Task]) Err! { files.write("tasks.json", json.to_string(Store{tasks: tasks})) }
 
 run: fn() Err! {
     args: process.args()

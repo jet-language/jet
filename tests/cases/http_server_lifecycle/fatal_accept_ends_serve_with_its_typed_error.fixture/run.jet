@@ -20,8 +20,8 @@ use {
         _ := listening.shutdown()
     }
     if listening.serve() == {
-        .Ok(report) -> assert_eq(report.accepted, 0)
-        .Err(.IO(operation)) -> assert(operation.starts_with("accept: "))
+        .Ok(report) -> { assert_eq(report.accepted, 0) }
+        .Err(.IO(operation)) -> { assert(operation.starts_with("accept: ")) }
         .Err(_) -> assert(false)
     }
     stopper.join() ?? panic("stopper failed")

@@ -3,7 +3,6 @@
 // `ErrorKind::InvalidData` / `InvalidInput` / `Unsupported` refusals carry
 // their final text. Overlay failures keep the jet-pkg-model `OverlayError`
 // payload so `jet overlay` diagnostics render the same bytes.
-
 use {
     jet_env_model.[ManagedFile]
     jet_pkg_model.[OverlayError, PackageGateError]
@@ -44,11 +43,9 @@ EnvironmentError: enum {
     // Rust `error.kind() == ErrorKind::NotFound` across both carriers.
     is_not_found: fn(self) -> Bool Never! {
         if self == {
-            .IO(error) -> {
-                if error == {
-                    .NotFound(context) -> true
-                    .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> false
-                }
+            .IO(error) -> if error == {
+                .NotFound(context) -> true
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> false
             }
             .NotFound(text) -> true
             .InvalidData(_) | .InvalidInput(_) | .Unsupported(_) | .Conflict(_) | .Other(_) | .Overlay(_) | .Transition(_) | .ManagedFile(_) | .Activation(_) | .Gate(_) -> false

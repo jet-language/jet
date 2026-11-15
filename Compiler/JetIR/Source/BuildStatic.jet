@@ -697,9 +697,7 @@ ir_static_map_order: fn(m: &IRModule, p: IRProgram, shape: IRMapShape, entries: 
 // and read it back in its order (jet_eval_ir_data), each key once. None when
 // a key holds a member this does not order.
 ir_static_compound_order: fn(m: &IRModule, p: IRProgram, key_row: Int, entries: [TComptimeMapEntry]) -> [Int]? Never! {
-    if ir_static_own_order(m, p, key_row) {
-        return Val(loop index in 0..<entries.len() -> index)
-    }
+    if ir_static_own_order(m, p, key_row) -> return Val(loop index in 0..<entries.len() -> index)
     keys := [(key: [(n: Int, s: String)], at: Int)]{}
     loop (index, entry) in entries {
         atoms := [(n: Int, s: String)]{}
@@ -731,7 +729,9 @@ ir_static_own_order: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
     if p.render_impls.len() > 0 {
         type_key: ir_render_type_key(p.type_rows, p.types, m.types[row].ty)
         if p.render_impls.has_key("KeyBy|{type_key}") -> return true
-        if p.render_impls.get("Comparable|{type_key}") == .Val(index) && !p.functions[index].synthetic -> return true
+        if p.render_impls.get("Comparable|{type_key}") == .Val(index) && !p.functions[index].synthetic {
+            return true
+        }
     }
     members: ir_struct_members(m, p, definition, ir_type_args(ty)) ?? return false
     ir_static_own_members(m, p, members)

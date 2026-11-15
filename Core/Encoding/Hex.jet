@@ -19,7 +19,6 @@ pub use core.encoding.[HexError]
 // Both functions are pure. `encode` allocates `2 * data.len()` bytes of ASCII.
 u8_int: fn(b: U8) -> Int Never! { Int{b} }
 
-
 /// Encode `data` as lowercase hexadecimal text.
 encode: fn(data: [U8]) -> String Never! { encoding.bytes_to_hex(data) }
 
@@ -121,25 +120,25 @@ a2b_qp: fn(text: String) -> [U8] Never! {
     loop i < raw.len() {
         if raw[i] == (U8{61}) && i + 2 < raw.len() {
             if raw[i + 1] == (U8{10}) {
-                i = i + 2
+                i += 2
                 next
             }
             hi: digit(raw[i + 1]) ?? {
                 out.push(raw[i])
-                i = i + 1
+                i += 1
                 next
             }
             lo: digit(raw[i + 2]) ?? {
                 out.push(raw[i])
-                i = i + 1
+                i += 1
                 next
             }
             out.push(U8{hi * 16 + lo})
-            i = i + 3
+            i += 3
             next
         }
         out.push(raw[i])
-        i = i + 1
+        i += 1
     }
     out
 }
@@ -207,6 +206,7 @@ a2b_uu: fn(text: String) -> [U8] Never! {
     }
     out
 }
+
 qp_hex: fn(n: Int) -> U8 { nibble_upper(n) }
 
 uu_char: fn(n: Int) -> U8 {
@@ -240,9 +240,7 @@ dump: fn(data: [U8]) -> String Never! {
     offset := 0
     shifts: [Int]{28, 24, 20, 16, 12, 8, 4, 0}
     loop offset < data.len() {
-        loop shift in shifts {
-            out.push(encoding.hex_nibble((offset >> shift).bit_and(15)))
-        }
+        loop shift in shifts { out.push(encoding.hex_nibble((offset >> shift).bit_and(15))) }
         out.push(U8{32})
         out.push(U8{32})
         loop i in 0..<16 {
@@ -262,8 +260,7 @@ dump: fn(data: [U8]) -> String Never! {
         if end > data.len() -> end = data.len()
         loop i in offset..<end {
             n: u8_int(data[i])
-            if n >= 32 && n <= 126 -> out.push(data[i])
-            else -> out.push(U8{46})
+            if n >= 32 && n <= 126 -> out.push(data[i]) else -> out.push(U8{46})
         }
         out.push(U8{10})
         offset += 16
@@ -277,11 +274,13 @@ dump: fn(data: [U8]) -> String Never! {
     decoded: decode("aF00") ?? panic("valid hex")
     assert(decoded == [U8]{175, 0})
     if decode("f") == {
-        .Ok(_) -> panic("odd-length hex accepted")
-        .Err(error) -> assert(error.reason == "odd-length hex string; hex text encodes whole bytes, so the length must be even")
+        .Ok(_) -> { panic("odd-length hex accepted") }
+        .Err(error) -> {
+            assert(error.reason == "odd-length hex string; hex text encodes whole bytes, so the length must be even")
+        }
     }
     if decode("xz") == {
-        .Ok(_) -> panic("invalid hex digit accepted")
+        .Ok(_) -> { panic("invalid hex digit accepted") }
         .Err(error) -> assert(error.reason == "invalid hex digit; expected 0-9, a-f, or A-F")
     }
     assert(!is_hex(""))

@@ -72,9 +72,9 @@ run: fn() {
     rows: scene.query<Position, Velocity>()
     print("query={rows.len()} row={rows[0]}")
     scene.on_frame(
-    fn(frame) {
-        if frame.input.pressed("jump") -> print("scene_input={frame.index}")
-    },
+        fn(frame) {
+            if frame.input.pressed("jump") -> print("scene_input={frame.index}")
+        },
     )
 
     nodes: [battery.SceneNode]{
@@ -130,12 +130,12 @@ run: fn() {
     // `core.rt` owns callback scheduling and stream cancellation. The lambda
     // only consumes its reusable block, with no allocation, wait, or I/O.
     stream := rt.callback(
-    48000,
-    256,
-    fn(samples) {
-        total := Float{0.0}
-        loop sample in samples -> total += sample
-    },
+        48000,
+        256,
+        fn(samples) {
+            total := Float{0.0}
+            loop sample in samples -> total += sample
+        },
     )
     stream.next_deadline().drop("the stream is armed; this run does not schedule against its first deadline")
     stream.cancel()

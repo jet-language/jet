@@ -4,7 +4,7 @@ use {
 }
 
 safe: fn() -> cbor.CBOROptions {
-    return cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: false }
+    return cbor.CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: false}
 }
 
 show: fn(bytes: [U8]) -> String {
@@ -16,35 +16,39 @@ show: fn(bytes: [U8]) -> String {
 }
 
 show_strict: fn(bytes: [U8]) -> String {
-    if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true }) == {
+    if cbor.parse(bytes, cbor.CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true}) == {
         .Ok(_) -> return "ok"
         .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
+
 show_depth: fn(bytes: [U8]) -> String {
-    if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 1, max_items: 1000000, max_bytes: 1073741824, require_canonical: false }) == {
+    if cbor.parse(bytes, cbor.CBOROptions{max_depth: 1, max_items: 1000000, max_bytes: 1073741824, require_canonical: false}) == {
         .Ok(_) -> return "ok"
         .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
+
 show_items: fn(bytes: [U8]) -> String {
-    if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 256, max_items: 2, max_bytes: 1073741824, require_canonical: false }) == {
+    if cbor.parse(bytes, cbor.CBOROptions{max_depth: 256, max_items: 2, max_bytes: 1073741824, require_canonical: false}) == {
         .Ok(_) -> return "ok"
         .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
+
 show_bytes: fn(bytes: [U8]) -> String {
-    if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 2, require_canonical: false }) == {
+    if cbor.parse(bytes, cbor.CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 2, require_canonical: false}) == {
         .Ok(_) -> return "ok"
         .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
+
 show_alloc: fn(bytes: [U8]) -> String {
-    if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 3, require_canonical: false }) == {
+    if cbor.parse(bytes, cbor.CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 3, require_canonical: false}) == {
         .Ok(_) -> return "ok"
         .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
@@ -60,23 +64,31 @@ show_ints: fn(bytes: [U8]) -> String {
 }
 
 EXPECTED_MALFORMED: #run show([255])
+
 EXPECTED_TRUNCATED: #run show([129])
+
 EXPECTED_NONCANONICAL: #run show_strict([24, 1])
+
 EXPECTED_UNSUPPORTED: #run show([192, 1])
+
 EXPECTED_MISMATCH: #run show_ints([129, 97, 120])
+
 EXPECTED_DEPTH: #run show_depth([129, 129, 1])
+
 EXPECTED_ITEMS: #run show_items([130, 1, 2])
+
 EXPECTED_BYTES: #run show_bytes([130, 1, 2])
+
 EXPECTED_ALLOC: #run show_alloc([130, 1, 2])
 
 run: fn() {
-    malformed_wire := [U8]{ 255 }
-    truncated_wire := [U8]{ 129 }
-    noncanonical_wire := [U8]{ 24, 1 }
-    unsupported_wire := [U8]{ 192, 1 }
-    mismatch_wire := [U8]{ 129, 97, 120 }
-    depth_wire := [U8]{ 129, 129, 1 }
-    items_wire := [U8]{ 130, 1, 2 }
+    malformed_wire := [U8]{255}
+    truncated_wire := [U8]{129}
+    noncanonical_wire := [U8]{24, 1}
+    unsupported_wire := [U8]{192, 1}
+    mismatch_wire := [U8]{129, 97, 120}
+    depth_wire := [U8]{129, 129, 1}
+    items_wire := [U8]{130, 1, 2}
     actual_malformed := show(malformed_wire)
     actual_truncated := show(truncated_wire)
     actual_noncanonical := show_strict(noncanonical_wire)
@@ -87,7 +99,6 @@ run: fn() {
     actual_bytes := show_bytes(items_wire)
     actual_alloc := show_alloc(items_wire)
     comptime_diff_frame("{EXPECTED_MALFORMED}{EXPECTED_TRUNCATED}.copy(){EXPECTED_NONCANONICAL}.copy(){EXPECTED_UNSUPPORTED}.copy(){EXPECTED_MISMATCH}.copy(){EXPECTED_DEPTH}.copy(){EXPECTED_ITEMS}.copy(){EXPECTED_BYTES}.copy(){EXPECTED_ALLOC}.copy()", "{actual_malformed}{actual_truncated}.copy(){actual_noncanonical}.copy(){actual_unsupported}.copy(){actual_mismatch}.copy(){actual_depth}.copy(){actual_items}.copy(){actual_bytes}.copy(){actual_alloc}.copy()")
-
 }
 
 comptime_diff_frame: fn(expected_text: String, actual_text: String) {

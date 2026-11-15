@@ -38,13 +38,18 @@ number: fn(info: TypeInfo) -> String {
 NUMBERS: #run { [number(I32.reflect()), number(U8.reflect()), number(F32.reflect()), number(Int.reflect())] }
 
 PREPARED: #run { Square.reflect() }
+
 PAIR: #run { Pair<Int, String>.reflect() }
 
 describe: fn(info: TypeInfo) -> String {
     traits := [String]{}
-    loop implemented in info.traits -> traits.push("{implemented.name} ({implemented.methods.len()} methods)")
+    loop implemented in info.traits {
+        traits.push("{implemented.name} ({implemented.methods.len()} methods)")
+    }
     constants := [String]{}
-    loop constant in info.constants -> constants.push("{constant.trait_name}.{constant.name}: {constant.type.name} = {constant.value ?? "unknown"}")
+    loop constant in info.constants {
+        constants.push("{constant.trait_name}.{constant.name}: {constant.type.name} = {constant.value ?? "unknown"}")
+    }
     bindings := [String]{}
     loop binding in info.generic_bindings -> bindings.push("{binding.name} = {binding.type.name}")
     "{info.name}: traits [{traits.join(", ")}]; constants [{constants.join("; ")}]; bindings [{bindings.join(", ")}]"

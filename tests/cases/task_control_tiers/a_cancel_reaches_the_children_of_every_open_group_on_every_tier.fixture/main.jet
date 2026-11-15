@@ -6,9 +6,15 @@ use time: core.time
 
 failure_label: fn(error: TaskFailure) -> String {
     if error == {
-        .Cancelled -> { return "cancelled" }
-        .DeadlineBlown -> { return "deadline" }
-        .Panicked(_) -> { return "panicked" }
+        .Cancelled -> {
+            return "cancelled"
+        }
+        .DeadlineBlown -> {
+            return "deadline"
+        }
+        .Panicked(_) -> {
+            return "panicked"
+        }
     }
 }
 
@@ -52,7 +58,7 @@ run: fn() {
     _ := began.receive() ?? panic("the grandchild never started")
     worker.cancel()
     if worker.join() == {
-        .Err(error) -> print("opener: {failure_label(error)}")
+        .Err(error) -> { print("opener: {failure_label(error)}") }
         .Ok(_) -> print("opener: finished")
     }
     print("opener stopped early: {(time.unix_ns() - start) /% 1_000_000 < 2500}")
@@ -62,7 +68,7 @@ run: fn() {
     _ := held_began.receive() ?? panic("the shielded child never started")
     held.cancel()
     if held.join() == {
-        .Err(error) -> print("shielded opener: {failure_label(error)}")
+        .Err(error) -> { print("shielded opener: {failure_label(error)}") }
         .Ok(_) -> print("shielded opener: finished")
     }
 }

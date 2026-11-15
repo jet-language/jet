@@ -12,7 +12,7 @@ run: fn() {
     int_loader := data.file<[Dyn]>(
         "tests/fixtures/parquet_reader/int32_with_null_pages.parquet",
         "parquet",
-        data.DataLimits.safe()
+        data.DataLimits.safe(),
     ) ?? panic("int32 loader")
     files_data.read(int_loader) ?? panic("int32 read")
     int_snapshot: data.snapshot<[Dyn]>(int_loader) ?? panic("int32 snapshot")
@@ -39,7 +39,7 @@ run: fn() {
     dictionary_loader := data.file<[Dyn]>(
         "tests/fixtures/parquet_reader/alltypes_tiny_pages.parquet",
         "parquet",
-        data.DataLimits.safe()
+        data.DataLimits.safe(),
     ) ?? panic("dictionary loader")
     files_data.read(dictionary_loader) ?? panic("dictionary read")
     dictionary_snapshot: data.snapshot<[Dyn]>(dictionary_loader) ?? panic("dictionary snapshot")
@@ -54,11 +54,11 @@ run: fn() {
     malformed_loader := data.file<[Dyn]>(
         "tests/fixtures/parquet_reader/ARROW-RS-GH-6229-DICTHEADER.parquet",
         "parquet",
-        data.DataLimits.safe()
+        data.DataLimits.safe(),
     ) ?? panic("malformed loader")
     files_data.read(malformed_loader) ?? panic("malformed read")
     if data.snapshot<[Dyn]>(malformed_loader) == {
-        .Ok(_) -> print("malformed: unexpectedly accepted")
+        .Ok(_) -> { print("malformed: unexpectedly accepted") }
         .Err(err) -> print("malformed: rejected {err.kind:Debug} {err.operation}")
     }
 }

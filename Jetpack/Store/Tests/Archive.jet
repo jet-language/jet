@@ -9,9 +9,7 @@ store_archive_test_root: fn(label: String) -> String Never! {
 
 store_archive_test_bytes: fn(value: Int, count: Int) -> [U8] Never! {
     bytes := [U8]{}
-    loop _ in 0..<count {
-        bytes.push(U8{value})
-    }
+    loop _ in 0..<count { bytes.push(U8{value}) }
     bytes
 }
 
@@ -27,7 +25,9 @@ store_archive_test_cleanup: fn(root: String) Never! {
 }
 
 #Test("hangar archive tree removal drops a dangling symlink without following it") {
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     root: store_archive_test_root("remove-tree")
     outside: files.join(root, "outside")
     link: files.join(root, "link")
@@ -50,7 +50,9 @@ store_archive_test_cleanup: fn(root: String) Never! {
 }
 
 #Test("hangar archive generated signer key is private before publication") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     root: store_archive_test_root("generated-key")
     roots: HangarRoots.at(root)
     key: store_archive_signing_key(roots, None, true) ?? panic("generate signer key")
@@ -62,12 +64,14 @@ store_archive_test_cleanup: fn(root: String) Never! {
 }
 
 #Test("hangar archive signer key creation fails closed without private permissions") {
-    if sys.is_unix() -> return
+    if sys.is_unix() {
+        return
+    }
     root: files.join(sys.temp_dir(), "jet-archive-generated-key-{process.current_pid()}")
     store_archive_remove_tree(root).drop("a stale fixture may be absent")
     roots: HangarRoots.at(root)
     if store_archive_signing_key(roots, None, true) == {
-        .Ok(_) -> panic("key creation must fail without private file permissions")
+        .Ok(_) -> { panic("key creation must fail without private file permissions") }
         .Err(error) -> assert(error.message().contains("private file permissions on this platform"))
     }
     assert(!files.exists(root))
@@ -121,7 +125,7 @@ store_archive_test_cleanup: fn(root: String) Never! {
     assert(decoded.signature != None)
     decoded.verify_signature(roots, Val(key_path), false) ?? panic("attestation must verify")
     if store_attest_archive(roots, attested, key_path) == {
-        .Ok(_) -> panic("a signed archive must not be attested again")
+        .Ok(_) -> { panic("a signed archive must not be attested again") }
         .Err(error) -> assert(error.message().contains("must not carry a client signature"))
     }
     store_archive_test_cleanup(root)

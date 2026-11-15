@@ -17,10 +17,14 @@ use {
 run: fn() {
     base: process.env_get("BACKEND_URL") ?? "http://127.0.0.1:8080"
     health_response: http_client.request("GET", "{base}/health").send() ?? process.fail(1, "health: {err}")
-    if health_response.status() != 200 -> process.fail(1, "health: status {health_response.status()}")
+    if health_response.status() != 200 {
+        process.fail(1, "health: status {health_response.status()}")
+    }
     health: health_response.json<contract.Health>() ?? process.fail(1, "health body: {err}")
     print("client {contract.API_VERSION}: service {health.api} is {health.status}")
-    if (process.args().get(0) ?? "") == "health" -> return
+    if (process.args().get(0) ?? "") == "health" {
+        return
+    }
 
     user: process.env_get("BACKEND_USER") ?? "operator"
     password: process.env_get("BACKEND_PASSWORD") ?? process.fail(78, "BACKEND_PASSWORD must carry the credential to sign in with")

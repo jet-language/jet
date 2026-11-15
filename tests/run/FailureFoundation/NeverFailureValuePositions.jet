@@ -8,9 +8,7 @@ Shape: enum {
     Single(value: Int)
 }
 
-children: fn(n: Int) -> [Int] Never! {
-    [Int]{n, n + 1}
-}
+children: fn(n: Int) -> [Int] Never! { [Int]{n, n + 1} }
 
 upper: fn(text: String) -> String Never! { text.to_upper() }
 
@@ -44,9 +42,7 @@ total: fn(flag: Bool) -> Int Never! {
     if {
         flag -> {
             sum := 0
-            loop child in children(1) {
-                sum += child
-            }
+            loop child in children(1) -> sum += child
             sum
         }
         else -> 0
@@ -55,9 +51,7 @@ total: fn(flag: Bool) -> Int Never! {
 
 render: fn(flag: Bool, words: [String]) -> [String] {
     out := [String]{}
-    loop word in words {
-        out.push(if flag -> upper(word) else -> lower(word))
-    }
+    loop word in words { out.push(if flag -> upper(word) else -> lower(word)) }
     out
 }
 

@@ -236,7 +236,9 @@ jet_cli_find_generic_parts: fn(ty: String) -> [String]? Never! {
     open: jet_cli_find_byte(ty, 60, false)
     if open < 0 || !ty.ends_with(">") -> return None
     parts := [String]{jet_cli_find_text(ty, 0, open)}
-    loop part in jet_cli_find_split_top(jet_cli_find_text(ty, open + 1, ty.bytes().len() - 1), 44) -> parts.push(jet_cli_find_compact(part))
+    loop part in jet_cli_find_split_top(jet_cli_find_text(ty, open + 1, ty.bytes().len() - 1), 44) {
+        parts.push(jet_cli_find_compact(part))
+    }
     Val(parts)
 }
 
@@ -270,7 +272,7 @@ jet_cli_find_inner: fn(ty: String) -> String Never! {
 }
 
 // `type_matches`: single capital letters bind consistently.
-jet_cli_find_type_matches: fn(wanted_raw: String, candidate_raw: String, bindings: &[String: String]) -> Bool Never! {
+jet_cli_find_type_matches: fn(wanted_raw: String, candidate_raw: String, bindings: &[String:String]) -> Bool Never! {
     wanted: jet_cli_find_compact(wanted_raw)
     candidate: jet_cli_find_compact(candidate_raw)
     if jet_cli_find_is_type_variable(wanted) {
@@ -286,15 +288,21 @@ jet_cli_find_type_matches: fn(wanted_raw: String, candidate_raw: String, binding
         candidate_parts: jet_cli_find_split_top(jet_cli_find_inner(candidate), 44)
         if wanted_parts.len() != candidate_parts.len() -> return false
         loop index in 0..<wanted_parts.len() {
-            if !jet_cli_find_type_matches(wanted_parts[index], candidate_parts[index], bindings) -> return false
+            if !jet_cli_find_type_matches(wanted_parts[index], candidate_parts[index], bindings) {
+                return false
+            }
         }
         return true
     }
     if jet_cli_find_generic_parts(wanted) == .Val(wanted_parts) {
         if jet_cli_find_generic_parts(candidate) == .Val(candidate_parts) {
-            if !jet_cli_find_names_equal(wanted_parts[0], candidate_parts[0]) || wanted_parts.len() != candidate_parts.len() -> return false
+            if !jet_cli_find_names_equal(wanted_parts[0], candidate_parts[0]) || wanted_parts.len() != candidate_parts.len() {
+                return false
+            }
             loop index in 1..<wanted_parts.len() {
-                if !jet_cli_find_type_matches(wanted_parts[index], candidate_parts[index], bindings) -> return false
+                if !jet_cli_find_type_matches(wanted_parts[index], candidate_parts[index], bindings) {
+                    return false
+                }
             }
             return true
         }
@@ -304,9 +312,11 @@ jet_cli_find_type_matches: fn(wanted_raw: String, candidate_raw: String, binding
 
 jet_cli_find_shape_matches: fn(wanted: JetCLIFindShape, candidate: JetCLIFindShape) -> Bool Never! {
     if wanted.inputs.len() != candidate.inputs.len() -> return false
-    bindings := [String: String]{}
+    bindings := [String:String]{}
     loop index in 0..<wanted.inputs.len() {
-        if !jet_cli_find_type_matches(wanted.inputs[index], candidate.inputs[index], bindings) -> return false
+        if !jet_cli_find_type_matches(wanted.inputs[index], candidate.inputs[index], bindings) {
+            return false
+        }
     }
     jet_cli_find_type_matches(wanted.output, candidate.output, bindings)
 }
@@ -330,9 +340,7 @@ jet_cli_find_effect_fact: fn(symbol: SemSymbol, effects: [SemEffect]) -> SemEffe
     None
 }
 
-jet_cli_find_root: fn(name: String) -> String Never! {
-    name.split(".").to_list()[0]
-}
+jet_cli_find_root: fn(name: String) -> String Never! { name.split(".").to_list()[0] }
 
 // Does `actual` hold the wanted effect (exactly, as a leaf, as its root,
 // or by root)?
@@ -352,7 +360,9 @@ jet_cli_find_effect_reason: fn(wanted: String, fact: SemEffect) -> String Never!
     if fact.maximal -> return "holds {wanted} through an open effect set"
     actual: fact.inferred.join(", ")
     loop proof in fact.provenance {
-        if jet_cli_find_effect_covers(wanted, proof.effect_name) -> return "holds {wanted} (inferred: {actual}; via {proof.call_path.join(" -> ")})"
+        if jet_cli_find_effect_covers(wanted, proof.effect_name) {
+            return "holds {wanted} (inferred: {actual}; via {proof.call_path.join(" -> ")})"
+        }
     }
     "holds {wanted} (inferred: {actual})"
 }
@@ -382,21 +392,29 @@ jet_cli_find_matches: fn(symbols: [SemSymbol], effects: [SemEffect], mode: JetCL
         if mode == {
             .Signature(shape) -> {
                 candidate: jet_cli_find_signature_shape(symbol.signature) ?? next
-                if jet_cli_find_shape_matches(shape, candidate) -> why = "signature matches the requested type shape"
+                if jet_cli_find_shape_matches(shape, candidate) {
+                    why = "signature matches the requested type shape"
+                }
             }
             .Effect(name, text) -> {
                 fact: jet_cli_find_effect_fact(symbol, effects) ?? next
-                if jet_cli_find_effect_matches(name, fact) && jet_cli_find_text_matches(symbol, text) -> why = jet_cli_find_effect_reason(name, fact)
+                if jet_cli_find_effect_matches(name, fact) && jet_cli_find_text_matches(symbol, text) {
+                    why = jet_cli_find_effect_reason(name, fact)
+                }
             }
             .Example(raw, shape) -> {
                 if jet_cli_find_is_pure(symbol, effects) {
                     shape_match := false
                     if shape == .Val(wanted) {
-                        if jet_cli_find_signature_shape(symbol.signature) == .Val(candidate) -> shape_match = jet_cli_find_shape_matches(wanted, candidate)
+                        if jet_cli_find_signature_shape(symbol.signature) == .Val(candidate) {
+                            shape_match = jet_cli_find_shape_matches(wanted, candidate)
+                        }
                     }
                     documented := false
                     loop example in symbol.examples {
-                        if jet_cli_doc_collapse_whitespace(example) == jet_cli_doc_collapse_whitespace(raw) -> documented = true
+                        if jet_cli_doc_collapse_whitespace(example) == jet_cli_doc_collapse_whitespace(raw) {
+                            documented = true
+                        }
                     }
                     if {
                         shape_match -> why = "pure candidate has the same input/output shape"
@@ -406,7 +424,9 @@ jet_cli_find_matches: fn(symbols: [SemSymbol], effects: [SemEffect], mode: JetCL
                 }
             }
             .Text(query) -> {
-                if jet_cli_find_text_matches(symbol, query) -> why = "name or documentation matches the query"
+                if jet_cli_find_text_matches(symbol, query) {
+                    why = "name or documentation matches the query"
+                }
             }
         }
         if why == "" -> next
@@ -418,11 +438,13 @@ jet_cli_find_matches: fn(symbols: [SemSymbol], effects: [SemEffect], mode: JetCL
 
 jet_cli_find_render: fn(mode: JetCLIFindMode, query: String, matches: [JetCLIFindMatch], json: Bool) -> String Never! {
     if json {
-        values: loop item in matches -> jet_cli_status_object([JetCLIStatusField]{
-            jet_cli_status_field("name", jet_cli_status_text(item.name)),
-            jet_cli_status_field("signature", jet_cli_status_text(item.signature)),
-            jet_cli_status_field("why", jet_cli_status_text(item.why)),
-        })
+        values: loop item in matches -> jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field("name", jet_cli_status_text(item.name)),
+                jet_cli_status_field("signature", jet_cli_status_text(item.signature)),
+                jet_cli_status_field("why", jet_cli_status_text(item.why)),
+            },
+        )
         return "{jet_cli_status_render("find", true, [JetCLIStatusField]{jet_cli_status_field("query", jet_cli_status_text(query)), jet_cli_status_field("matches", jet_cli_status_array(values))})}\n"
     }
     heading: if mode == {
@@ -433,7 +455,9 @@ jet_cli_find_render: fn(mode: JetCLIFindMode, query: String, matches: [JetCLIFin
     }
     out := "find: {heading}\n"
     if matches.len() == 0 -> return "{out}  no matches\n"
-    loop (index, item) in matches -> out = "{out}  {index + 1}. {item.signature}\n     why: {item.why}\n"
+    loop (index, item) in matches {
+        out = "{out}  {index + 1}. {item.signature}\n     why: {item.why}\n"
+    }
     out
 }
 
@@ -448,14 +472,18 @@ jet_cli_find: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan
     loop index < args.len() {
         arg: args[index]
         if arg == "--effect" || arg == "--example" {
-            if index + 1 >= args.len() || args[index + 1].starts_with("--") -> return jet_cli_find_usage("`{arg}` needs a value", "run `jet find --help` for the query forms", color)
+            if index + 1 >= args.len() || args[index + 1].starts_with("--") {
+                return jet_cli_find_usage("`{arg}` needs a value", "run `jet find --help` for the query forms", color)
+            }
             if arg == "--effect" -> effect_name = Val(args[index + 1])
             if arg == "--example" -> example_raw = Val(args[index + 1])
             index += 2
             next
         }
         if arg == "-p" {
-            if index + 1 >= args.len() || args[index + 1].starts_with("-") -> return jet_cli_find_usage("`-p` needs a workspace member", "run `jet find --help` for the query forms", color)
+            if index + 1 >= args.len() || args[index + 1].starts_with("-") {
+                return jet_cli_find_usage("`-p` needs a workspace member", "run `jet find --help` for the query forms", color)
+            }
             member = Val(args[index + 1])
             index += 2
             next
@@ -463,12 +491,16 @@ jet_cli_find: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan
         if {
             arg.starts_with("--effect=") -> {
                 value: jet_cli_find_text(arg, 9, arg.bytes().len())
-                if value == "" -> return jet_cli_find_usage("`--effect` needs a value", "run `jet find --help` for the query forms", color)
+                if value == "" {
+                    return jet_cli_find_usage("`--effect` needs a value", "run `jet find --help` for the query forms", color)
+                }
                 effect_name = Val(value)
             }
             arg.starts_with("--example=") -> {
                 value: jet_cli_find_text(arg, 10, arg.bytes().len())
-                if value == "" -> return jet_cli_find_usage("`--example` needs a value", "run `jet find --help` for the query forms", color)
+                if value == "" {
+                    return jet_cli_find_usage("`--example` needs a value", "run `jet find --help` for the query forms", color)
+                }
                 example_raw = Val(value)
             }
             !arg.starts_with("-") -> positionals.push(arg.copy())
@@ -476,7 +508,9 @@ jet_cli_find: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan
         }
         index += 1
     }
-    if effect_name != None && example_raw != None -> return jet_cli_find_usage("`--effect` and `--example` cannot be combined", "use one find mode per command", color)
+    if effect_name != None && example_raw != None {
+        return jet_cli_find_usage("`--effect` and `--example` cannot be combined", "use one find mode per command", color)
+    }
     target := String?{None}
     target_index := -1
     loop (position, value) in positionals {
@@ -488,15 +522,21 @@ jet_cli_find: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan
         if position != target_index -> words.push(value)
     }
     text: words.join(" ")
-    if effect_name == None && example_raw == None && text == "" -> return jet_cli_find_usage("`jet find` needs a query or an effect filter", "use `jet find \"String -> Path\"` or `jet find --effect IO`", color)
+    if effect_name == None && example_raw == None && text == "" {
+        return jet_cli_find_usage("`jet find` needs a query or an effect filter", "use `jet find \"String -> Path\"` or `jet find --effect IO`", color)
+    }
     mode := JetCLIFindMode.Text{query: text}
     if effect_name == .Val(name) -> mode = JetCLIFindMode.Effect{name: name, text: text}
     if example_raw == .Val(raw) {
-        if raw.contains("=>") -> return jet_cli_find_usage("find examples use `->`", "write the input/output example with `->`", color)
+        if raw.contains("=>") {
+            return jet_cli_find_usage("find examples use `->`", "write the input/output example with `->`", color)
+        }
         mode = JetCLIFindMode.Example{raw: raw, shape: jet_cli_find_example_shape(raw)}
     }
     if effect_name == None && example_raw == None {
-        if text.contains("=>") -> return jet_cli_find_usage("find signatures use `->`", "write the input/output shape with `->`", color)
+        if text.contains("=>") {
+            return jet_cli_find_usage("find signatures use `->`", "write the input/output shape with `->`", color)
+        }
         if text.contains("->") {
             shape: jet_cli_find_parse_shape(text) ?? return jet_cli_find_usage("the find signature needs input and output types", "use `jet find \"String -> Path\"`", color)
             mode = JetCLIFindMode.Signature{shape: shape}
@@ -506,9 +546,7 @@ jet_cli_find: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan
     directory := String?{None}
     if target == .Val(raw) {
         if cli_files.is_dir(raw) -> directory = Val(raw) else -> entry = Val(raw)
-    } else {
-        directory = Val(cli_files.cwd() ?? ".")
-    }
+    } else { directory = Val(cli_files.cwd() ?? ".") }
     if directory == .Val(root) {
         notices := [String]{}
         resolved: jet_cli_resolve_bare_entry("find", root, member, false, color, notices)
@@ -529,8 +567,10 @@ jet_cli_compile_find: fn(file: String?, query: String, mode: JetCLIFindMode, jso
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled: jet_cli_compile_file(path, false, None, JetDriverCompileMode.Doc)
     if compiled == {
-        .Refused(refusal) -> output = refusal.move()
-        .Compiled(result, snapshot) -> jet_cli_finish(jet_cli_find_result(path, query, mode, json, result, snapshot))
+        .Refused(refusal) -> { output = refusal.move() }
+        .Compiled(result, snapshot) -> {
+            jet_cli_finish(jet_cli_find_result(path, query, mode, json, result, snapshot))
+        }
     }
     output
 }
@@ -539,7 +579,9 @@ jet_cli_find_result: fn(file: String, query: String, mode: JetCLIFindMode, json:
     if jet_cli_errors(result.diagnostics).len() > 0 {
         diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
         source: cli_files.read(file) ?? ""
-        if json -> return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("inspect", false, jet_cli_report_base(file), file, source, diagnostics), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        if json {
+            return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("inspect", false, jet_cli_report_base(file), file, source, diagnostics), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        }
         return JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, diagnostics, false), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)

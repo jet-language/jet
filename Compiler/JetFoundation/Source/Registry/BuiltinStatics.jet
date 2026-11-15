@@ -14,29 +14,31 @@
 // arguments, then the expected result, and otherwise default to `Int`.
 
 BuiltinStaticLowering: enum {
-    // The first value argument becomes the builtin receiver.
     ArgumentBuiltin(operation: TBuiltinOp)
-    // `Int.from_radix(text, base)`: the text is the receiver; the op carries the call line.
     IntFromRadix
-    // An inert Unit receiver; every value argument stays an argument.
     UnitBuiltin(operation: TBuiltinOp)
-    // A Prelude associated function; `generics` are the owner arguments, written
-    // over the row type parameters (`Type.Named(name)`) and substituted at the call.
     PreludeStatic(rooted: Bool, path: String, generics: [TPreludeArg])
-    // `Duration.<unit>(value)`: the checked Int or Float value selects the route.
     DurationNew(unit: String)
-    // A registered Core call; every value argument is a Core argument.
     CoreCall(module_name: String, member: String)
     EmptyMap
     Numeric(operation: TNumericOp)
     Precise(type_name: String, function: String)
 }
 
+// The first value argument becomes the builtin receiver.
+// `Int.from_radix(text, base)`: the text is the receiver; the op carries the call line.
+// An inert Unit receiver; every value argument stays an argument.
+// A Prelude associated function; `generics` are the owner arguments, written
+// over the row type parameters (`Type.Named(name)`) and substituted at the call.
+// `Duration.<unit>(value)`: the checked Int or Float value selects the route.
+// A registered Core call; every value argument is a Core argument.
+
 BuiltinStaticOwnerRule: enum {
     Inferred
-    // `Atomic<T>`: the owner names T explicitly and T is a lock-free scalar.
     AtomicScalar
 }
+
+// `Atomic<T>`: the owner names T explicitly and T is a lock-free scalar.
 
 BuiltinStaticRow: struct {
     // "" is an ambient built-in owner; otherwise the Core module exporting it.
@@ -180,7 +182,7 @@ BUILTIN_STATIC_ROWS: #run { [BuiltinStaticRow]{
     {module_name: "core.crypto", owner: "KeyUnlock", method: "Passphrase", type_params: [String]{}, owner_type_params: 0, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}, inner: Type.Named{name: "Secret"}}}, parameter_convention: AccessConvention.Read, return_type: Type.Named{name: "KeyUnlock"}, lowering: BuiltinStaticLowering.CoreCall{module_name: "core.crypto", member: "__vault_unlock_passphrase"}, arity_code: "E0104"},
     {module_name: "core.crypto.vault", owner: "WrappedVaultKey", method: "from_bytes", type_params: [String]{}, owner_type_params: 0, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{Type.List{element: Type.IntN{signed: false, bits: 8}}}, parameter_convention: AccessConvention.Read, return_type: Type.Result{ok: Type.Named{name: "WrappedVaultKey"}, err: Type.Named{name: "KeyWrapError"}}, lowering: BuiltinStaticLowering.CoreCall{module_name: "core.crypto", member: "__vault_wrapped_from_bytes"}, arity_code: "E0104"},
     {module_name: "core.crypto.vault", owner: "KeyUnlock", method: "Recipient", type_params: [String]{}, owner_type_params: 0, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}, inner: Type.Named{name: "X25519SecretKey"}}}, parameter_convention: AccessConvention.Read, return_type: Type.Named{name: "KeyUnlock"}, lowering: BuiltinStaticLowering.CoreCall{module_name: "core.crypto", member: "__vault_unlock_recipient"}, arity_code: "E0104"},
-    {module_name: "core.crypto.vault", owner: "KeyUnlock", method: "Passphrase", type_params: [String]{}, owner_type_params: 0, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}, inner: Type.Named{name: "Secret"}}}, parameter_convention: AccessConvention.Read, return_type: Type.Named{name: "KeyUnlock"}, lowering: BuiltinStaticLowering.CoreCall{module_name: "core.crypto", member: "__vault_unlock_passphrase"}, arity_code: "E0104"}
+    {module_name: "core.crypto.vault", owner: "KeyUnlock", method: "Passphrase", type_params: [String]{}, owner_type_params: 0, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}, inner: Type.Named{name: "Secret"}}}, parameter_convention: AccessConvention.Read, return_type: Type.Named{name: "KeyUnlock"}, lowering: BuiltinStaticLowering.CoreCall{module_name: "core.crypto", member: "__vault_unlock_passphrase"}, arity_code: "E0104"},
 } }
 
 // Numeric destination owners (`numeric_type_from_name`) and their host words.
@@ -196,7 +198,7 @@ BUILTIN_NUMERIC_KINDS: #run { [BuiltinNumericKind]{
     {name: "U64", ty: Type.IntN{signed: false, bits: 64}, rust: "u64", integer: true, fixed: true, signed: false, bits: 64},
     {name: "Float", ty: Type.Float, rust: "f64", integer: false, fixed: false, signed: true, bits: 64},
     {name: "F64", ty: Type.Float, rust: "f64", integer: false, fixed: false, signed: true, bits: 64},
-    {name: "F32", ty: Type.Float32, rust: "f32", integer: false, fixed: false, signed: true, bits: 32}
+    {name: "F32", ty: Type.Float32, rust: "f32", integer: false, fixed: false, signed: true, bits: 32},
 } }
 
 // Destination-owned `from_<source>` spellings (`NUMERIC_CONVERSION_SOURCES`;
@@ -218,7 +220,7 @@ BUILTIN_NUMERIC_SOURCES: #run { [BuiltinNumericSource]{
     {method: "from_f32", source: "F32"},
     {method: "from_float", source: "Float"},
     {method: "from_decimal", source: "Decimal"},
-    {method: "from_fraction", source: "Fraction"}
+    {method: "from_fraction", source: "Fraction"},
 } }
 
 builtin_numeric_kind: fn(name: String) -> BuiltinNumericKind? {
@@ -255,7 +257,7 @@ builtin_numeric_return: fn(source: BuiltinNumericKind, target: BuiltinNumericKin
 
 builtin_numeric_host_kind: fn(kind: BuiltinNumericKind) -> Int Never! {
     offset := if kind.signed -> 0 else -> 4
-    step := if kind.bits == 8 -> 0 else -> if kind.bits == 16 -> 1 else -> if kind.bits == 32 -> 2 else -> 3
+    step := if kind.bits == 8 -> 0 else if kind.bits == 16 -> 1 else if kind.bits == 32 -> 2 else -> 3
     offset + step
 }
 
@@ -268,14 +270,20 @@ builtin_numeric_operation: fn(source: BuiltinNumericKind, target: BuiltinNumeric
         // fixed source narrower than the target's precision is always exact.
         if source.integer {
             precision: if target.ty == Type.Float32 -> 24 else -> 53
-            if source.fixed && source.bits <= precision -> return TNumericOp.CastAs{dst_rust: target.rust}
+            if source.fixed && source.bits <= precision {
+                return TNumericOp.CastAs{dst_rust: target.rust}
+            }
             return TNumericOp.CheckedIntToFloat{source_signed: source.signed, target_f32: target.ty == Type.Float32, line: 0}
         }
         return TNumericOp.CastAs{dst_rust: target.rust}
     }
     // `U64` into `Int` rides an i64 word on the exact CastAs adapter.
-    if target.name == "Int" && source.integer && !source.signed -> return TNumericOp.CastAs{dst_rust: target.rust}
-    if source.name == "Int" && target.name != "Int" -> return TNumericOp.TryFrom{host_kind: builtin_numeric_host_kind(target)}
+    if target.name == "Int" && source.integer && !source.signed {
+        return TNumericOp.CastAs{dst_rust: target.rust}
+    }
+    if source.name == "Int" && target.name != "Int" {
+        return TNumericOp.TryFrom{host_kind: builtin_numeric_host_kind(target)}
+    }
     if builtin_numeric_widening(source, target) -> return TNumericOp.CastAs{dst_rust: target.rust}
     TNumericOp.TryFrom{host_kind: builtin_numeric_host_kind(target)}
 }

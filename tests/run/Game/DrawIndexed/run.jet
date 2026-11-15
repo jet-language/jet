@@ -4,6 +4,7 @@ package: {
     allow: [Env, FS, IO, Net, Time]
     }
 }
+
 use {
     files: core.files
     ui: core.ui
@@ -88,10 +89,14 @@ script: fn(held: [[String]]) -> [[ui.UIEvent]] {
     loop keys in held {
         events := [ui.UIEvent]{}
         loop name in before {
-            if !keys.contains(name) && key_named(name) == .Val(key) -> events.push(ui.UIEvent.KeyUp(key))
+            if !keys.contains(name) && key_named(name) == .Val(key) {
+                events.push(ui.UIEvent.KeyUp(key))
+            }
         }
         loop name in keys {
-            if !before.contains(name) && key_named(name) == .Val(key) -> events.push(ui.UIEvent.KeyDown(key))
+            if !before.contains(name) && key_named(name) == .Val(key) {
+                events.push(ui.UIEvent.KeyDown(key))
+            }
         }
         frames.push(events)
         before = keys.copy()

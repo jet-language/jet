@@ -4,9 +4,7 @@
 // through recursion.
 use math: core.math
 
-scale: fn(x: Float, k: Float) -> Float {
-    return x * k + 0.5
-}
+scale: fn(x: Float, k: Float) -> Float { return x * k + 0.5 }
 
 tree: fn(n: Int, x: Float) -> Float {
     if n < 2 -> return x
@@ -15,9 +13,7 @@ tree: fn(n: Int, x: Float) -> Float {
     return left + right + x
 }
 
-narrow: fn(x: F32, y: F32) -> F32 {
-    return x * y - x
-}
+narrow: fn(x: F32, y: F32) -> F32 { return x * y - x }
 
 run: fn() {
     a := Float{1.5}
@@ -34,15 +30,15 @@ run: fn() {
     loop step in 0..<20 {
         words.push("w{step}")
         a = scale(a, 1.01) - b * 0.001
-        b = b + math.floor(c * 1.5) * 0.01
+        b += math.floor(c * 1.5) * 0.01
         c = c * h + d
         d = (d + e) /% Float{3.0}
-        e = e - f * 0.01
-        f = f + g * h
+        e -= f * 0.01
+        f += g * h
         g = g * 1.0001 + j
-        h = h * 0.999
+        h *= 0.999
         i = i - a + scale(j, 2.0)
-        j = j * -1.0
+        j *= -1.0
     }
     print("{a} {b} {c} {d} {e}")
     print("{f} {g} {h} {i} {j}")

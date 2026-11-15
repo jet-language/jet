@@ -6,14 +6,18 @@ use {
 }
 
 jet_cli_schema_status_text: fn(snapshots: [SchemaSnapshot], pending: [String]) -> String Never! {
-    if snapshots.len() == 0 -> return "no published schemas yet.\nnote: a `#Codable(published)` struct is snapshotted into .jet/cache/schema/ on `jet registry publish`.\n"
+    if snapshots.len() == 0 {
+        return "no published schemas yet.\nnote: a `#Codable(published)` struct is snapshotted into .jet/cache/schema/ on `jet registry publish`.\n"
+    }
     out := "published schemas in this project:\n\n"
     loop snapshot in snapshots {
         out = "{out}  {snapshot.type_name} — published {snapshot.published_version}"
         if snapshot.squashed_before == .Val(before) -> out = "{out} (squashed before {before})"
         out = "{out}\n    {snapshot.fields.len()} field(s):\n"
         loop field in snapshot.fields -> out = "{out}      {field.name}: {field.ty}\n"
-        if pending.contains(snapshot.type_name) -> out = "{out}    pending: a breaking change vs this snapshot — `jet build` would report E0910\n"
+        if pending.contains(snapshot.type_name) {
+            out = "{out}    pending: a breaking change vs this snapshot — `jet build` would report E0910\n"
+        }
         out = "{out}\n"
     }
     out
@@ -43,7 +47,9 @@ jet_cli_schema_squash_summary: fn(count: Int, before: String) -> String Never! {
 jet_cli_schema_squash_host: fn(root: String, request: JetDriverCompileRequest?, before: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
     prepared: request ?? return jet_cli_maintenance_error("E2105", "couldn't load the project to read its current schema shape", None, color, json)
     loaded: jet_driver_source_query(prepared)
-    if !loaded.complete -> return jet_cli_maintenance_error("E2105", "couldn't load the project to read its current schema shape", None, color, json)
+    if !loaded.complete {
+        return jet_cli_maintenance_error("E2105", "couldn't load the project to read its current schema shape", None, color, json)
+    }
     // This public loader fact is supplied by SolSema2's source-query seam;
     // do not infer a version from syntax, display paths, or identity strings.
     version: loaded.entry_package_version ?? "0.0.0"

@@ -37,25 +37,15 @@ inferred: fn<T>(value: T) -> Int {
     size(items) + count(items)
 }
 
-explicit: fn<T>(value: T) -> Int {
-    1 + size<[T]>([T]{value})
-}
+explicit: fn<T>(value: T) -> Int { 1 + size<[T]>([T]{value}) }
 
-nested: fn<T>(value: T) -> Int {
-    count<[T]>([[T]]{[T]{value}, [T]{value, value}})
-}
+nested: fn<T>(value: T) -> Int { count<[T]>([[T]]{[T]{value}, [T]{value, value}}) }
 
-bounded: fn<T: Weighed>(value: T) -> Int {
-    heaviest([T]{value})
-}
+bounded: fn<T: Weighed>(value: T) -> Int { heaviest([T]{value}) }
 
-forwarded: fn<T>(values: [T]) -> T {
-    first(values)
-}
+forwarded: fn<T>(values: [T]) -> T { first(values) }
 
-listed: fn<T>(value: T) -> Int {
-    slots<[T]>() + slots<T>()
-}
+listed: fn<T>(value: T) -> Int { slots<[T]>() + slots<T>() }
 
 run: fn() {
     print(inferred(5))

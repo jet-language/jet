@@ -1,14 +1,23 @@
 // Engine-side overlay facts: semantic lock records, policy fingerprints, exact
 // invalidations and override drafting. The overlay policy model and its parser
 // live in PackageModel (OverlayPolicy.jet, OverlayParse.jet).
-
 use {
     jet_pkg_model.[
-        OverlayError, OverlayPolicy, OverlaySet, PackageOverride, ProviderOverride, ResolvedPackageOverride,
+        OverlayError,
+        OverlayPolicy,
+        OverlaySet,
+        PackageOverride,
+        ProviderOverride,
+        ResolvedPackageOverride,
         pkg_overlay_find_workspace_body_start,
     ]
     jetpack_trust.[
-        LockIdentity, LockRationale, LockRecordKind, OverlayFingerprint, OverlayInvalidation, SemanticRecord,
+        LockIdentity,
+        LockRationale,
+        LockRecordKind,
+        OverlayFingerprint,
+        OverlayInvalidation,
+        SemanticRecord,
         trust_overlay_invalidations,
     ]
 }
@@ -33,8 +42,8 @@ env_overlay_semantic_records: fn(policy: OverlayPolicy, owner: String, platform:
             if rationales.len() == 0 {
                 rationales.push(env_overlay_rationale(owner, "workspace package overlay", source_ref, overlay.provider, exact, fingerprint, recipe_id))
             }
-            identity: LockIdentity{kind: LockRecordKind.PackageOverlay, key: "{overlay.name}:{package.package}", exact, hash: fingerprint, platform}
-            records.push(SemanticRecord{identity, rationales, future_fields: env_overlay_fact_fields(resolved, overlay.name)})
+            identity: LockIdentity{kind: LockRecordKind.PackageOverlay, key: "{overlay.name}:{package.package}", exact: exact, hash: fingerprint, platform: platform}
+            records.push(SemanticRecord{identity: identity, rationales: rationales, future_fields: env_overlay_fact_fields(resolved, overlay.name)})
         }
     }
     Ok(records)
@@ -52,17 +61,17 @@ env_overlay_rationale: fn(owner: String, reason: String, source_ref: String, pro
     channel: if provider_override == .Val(found) -> (found.channel ?? "") else -> ""
     LockRationale{
         owner_package: owner,
-        reason,
-        source_ref,
-        provider,
+        reason: reason,
+        source_ref: source_ref,
+        provider: provider,
         channel_input: channel,
         exact_output: exact,
         policy_fingerprint: fingerprint,
-        recipe_id,
+        recipe_id: recipe_id,
         adapter_id: "workspace.overlay",
         signature: "",
         cache_provenance: "workspace.jet",
-        update_command: "jetpack override draft"
+        update_command: "jetpack override draft",
     }
 }
 
@@ -76,8 +85,8 @@ env_overlay_resolved_fingerprint: fn(resolved: ResolvedPackageOverride, overlay:
 }
 
 // Every resolved fact as a named future field, so a lock round trip keeps it.
-env_overlay_fact_fields: fn(resolved: ResolvedPackageOverride, overlay: String) -> [String: String] Never! {
-    fields := [String: String]{}
+env_overlay_fact_fields: fn(resolved: ResolvedPackageOverride, overlay: String) -> [String:String] Never! {
+    fields := [String:String]{}
     fields["overlay-fact-overlay"] = overlay
     fields["overlay-fact-package"] = resolved.package
     fields["overlay-fact-source"] = resolved.source ?? ""
@@ -94,7 +103,9 @@ env_overlay_fact_fields: fn(resolved: ResolvedPackageOverride, overlay: String) 
     priority_fields := [String]{}
     loop entry in resolved.field_priorities -> priority_fields.push(entry.key)
     priority_fields.sort()
-    loop field in priority_fields -> fields["overlay-field-priority.{field}"] = "{resolved.field_priorities[field]}"
+    loop field in priority_fields {
+        fields["overlay-field-priority.{field}"] = "{resolved.field_priorities[field]}"
+    }
     loop index in 0..<resolved.provenance.len() {
         fact: resolved.provenance[index]
         prefix: "overlay-provenance.{index}"
@@ -120,7 +131,7 @@ env_overlay_policy_fingerprints: fn(policy: OverlayPolicy) -> [OverlayFingerprin
 }
 
 // Diff two overlay policies into exact action invalidations (E4-JP13).
-env_overlay_invalidations_against: fn(before: OverlayPolicy, after: OverlayPolicy, actions_by_package: [String: [String]]) -> [OverlayInvalidation] OverlayError! {
+env_overlay_invalidations_against: fn(before: OverlayPolicy, after: OverlayPolicy, actions_by_package: [String:[String]]) -> [OverlayInvalidation] OverlayError! {
     Ok(trust_overlay_invalidations(env_overlay_policy_fingerprints(before), env_overlay_policy_fingerprints(after), actions_by_package))
 }
 
@@ -149,7 +160,9 @@ env_overlay_draft_block: fn(overlay: String, package: String, patch: String?, pr
     out := [String]{"    overlay {overlay} {{\n"}
     if provider == .Val(name) {
         if channel == {
-            .Val(selected) -> out.push("        provider: Provider.{name}(channel: \"{selected}\")\n")
+            .Val(selected) -> {
+                out.push("        provider: Provider.{name}(channel: \"{selected}\")\n")
+            }
             .None -> out.push("        provider: Provider.{name}\n")
         }
     }

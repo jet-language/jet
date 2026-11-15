@@ -35,9 +35,7 @@ Full: struct {
             Err(IOError.Other(IOContext{operation: .Write, resource: Val(self.device.copy()), os_code: Val(28), cause: Val("no space left")}))
         }
 
-        flush: fn(&self) IOError! {
-            self.flushes += 1
-        }
+        flush: fn(&self) IOError! { self.flushes += 1 }
     }
 }
 
@@ -58,11 +56,11 @@ run: fn() EncodingError! {
     disk := Full{device: "disk", flushes: 0}
     broken := csv.writer(disk) ?? return
     if broken.write(["x"]) == {
-        .Ok(_) -> print("wrote to a full sink")
+        .Ok(_) -> { print("wrote to a full sink") }
         .Err(error) -> {
             print("io {error.kind == .IO}")
             if error.cause() == {
-                .Val(cause) -> print("cause {cause.kind} {cause.os_code ?? 0} {cause.message}")
+                .Val(cause) -> { print("cause {cause.kind} {cause.os_code ?? 0} {cause.message}") }
                 None -> print("no cause")
             }
         }

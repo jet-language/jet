@@ -26,10 +26,14 @@ run: fn() {
 
     #Unsafe("fork and reap both children before returning") {
         first: sys.fork() ?? return
-        if first == 0 -> return
+        if first == 0 {
+            return
+        }
         print("wait status zero: {(sys.wait() ?? return) == 0}")
         second: sys.fork() ?? return
-        if second == 0 -> return
+        if second == 0 {
+            return
+        }
         print("waitpid status zero: {(sys.waitpid(second, 0) ?? return) == 0}")
     }
 }

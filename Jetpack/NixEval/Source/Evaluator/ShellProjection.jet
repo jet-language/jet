@@ -37,7 +37,9 @@ impl NixEvaluator {
         }
         output_path := [String]{}
         loop segment in output.split(".") {
-            if segment == "" -> return Err(NixEvalError.Invalid("devShell output selector must be a non-empty attribute path"))
+            if segment == "" {
+                return Err(NixEvalError.Invalid("devShell output selector must be a non-empty attribute path"))
+            }
             output_path.push(segment)
         }
         loop prefix in nixeval_shell_output_prefixes(self.system) {
@@ -60,19 +62,17 @@ impl NixEvaluator {
     direct_shell_argument: fn(&self, lambda: Int) -> NixEvalValue? Never! {
         node: self.exprs[lambda].copy()
         if node == {
-            .Lambda(pattern, _) -> {
-                if pattern == {
-                    .Name(_) -> Val(NixEvalValue.Packages(NixEvalPackageSet{prefix: "", overlay: None}))
-                    .Attrs(fields) -> {
-                        loop field in fields {
-                            if field.default != None -> next
-                            if field.name == {
-                                "legacyPackages" | "nixpkgs" | "pkgs" | "self" | "system" -> {}
-                                else -> return None
-                            }
+            .Lambda(pattern, _) -> if pattern == {
+                .Name(_) -> Val(NixEvalValue.Packages(NixEvalPackageSet{prefix: "", overlay: None}))
+                .Attrs(fields) -> {
+                    loop field in fields {
+                        if field.default != None -> next
+                        if field.name == {
+                            "legacyPackages" | "nixpkgs" | "pkgs" | "self" | "system" -> {}
+                            else -> return None
                         }
-                        Val(self.flake_arguments())
                     }
+                    Val(self.flake_arguments())
                 }
             }
             .Str(_) | .Interpolated(_) | .Path(_) | .Integer(_) | .Bool(_) | .Null | .Identifier(_) | .AttrSet(_) | .List(_) | .Apply(_, _) | .Select(_, _) | .Let(_, _) | .With(_, _) | .If(_, _, _) | .Merge(_, _) | .Equal(_, _, _) -> None
@@ -119,7 +119,7 @@ impl NixEvaluator {
                 forced: self.force(item)
                 raw: forced.package_text()
                 if nixeval_cross_package_name(raw) == {
-                    .Val(cross) -> cross_packages.push(cross)
+                    .Val(cross) -> { cross_packages.push(cross) }
                     .None -> packages.push(nixeval_package_name(raw))
                 }
             }
@@ -142,17 +142,21 @@ impl NixEvaluator {
                     .Str(value) | .Contextual(value, _) -> {
                         if !nixeval_is_blank(value) -> unsupported.push("shellHook")
                     }
-                    .Null | .Bool(_) | .Integer(_) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> unsupported.push("shellHook")
+                    .Null | .Bool(_) | .Integer(_) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> {
+                        unsupported.push("shellHook")
+                    }
                 }
             }
             .None -> {}
         }
-        Ok(NixEvalDevShell{
-            system: self.system,
-            packages: nixeval_sorted_unique(packages),
-            cross_packages: nixeval_sorted_unique(cross_packages),
-            unsupported: nixeval_sorted_unique(unsupported),
-        })
+        Ok(
+            NixEvalDevShell{
+                system: self.system,
+                packages: nixeval_sorted_unique(packages),
+                cross_packages: nixeval_sorted_unique(cross_packages),
+                unsupported: nixeval_sorted_unique(unsupported),
+            },
+        )
     }
 
     // The items of a devShell package field, which must be a literal list.
@@ -163,7 +167,9 @@ impl NixEvaluator {
                 return Ok(items)
             }
             .Err(error) -> {
-                if error.is_missing() -> return Err(NixEvalError.Unsupported("`{field}` must be a literal package list"))
+                if error.is_missing() {
+                    return Err(NixEvalError.Unsupported("`{field}` must be a literal package list"))
+                }
                 return Err(error)
             }
         }

@@ -2,13 +2,18 @@ use {
     math: core.math
     encoding: core.encoding
     jet_foundation.[
-        CtFloat, CtKey, CtMapEntry, CtValue, ast_comptime_value_json, foundation_json_quote,
+        CtFloat,
+        CtKey,
+        CtMapEntry,
+        CtValue,
+        ast_comptime_value_json,
+        foundation_json_quote,
     ]
 }
 
 require_unsupported: fn(value: CtValue, reason: String) Never! {
     if ast_comptime_value_json(value) == {
-        .Ok(_) -> panic("unsupported value was encoded")
+        .Ok(_) -> { panic("unsupported value was encoded") }
         .Err(error) -> {
             assert(error.format == encoding.EncodingFormat.JSON)
             assert(error.kind == encoding.EncodingErrorKind.Unsupported)

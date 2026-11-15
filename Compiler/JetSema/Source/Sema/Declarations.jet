@@ -71,6 +71,7 @@ sema_failure_contract_source: fn(return_type: Type?) -> String Never! {
 sema_failure_contract_is_default: fn(return_type: Type?) -> Bool Never! {
     failure_contract_from_return_type(return_type) == .Default(_, _)
 }
+
 // `export_signature`: failure inference's infallible rail is not a second
 // Component value. Keep genuinely fallible and diverging returns.
 sema_guest_export_value_type: fn(return_type: Type?) -> Type? Never! {
@@ -130,7 +131,9 @@ sema_function_param_types: fn(func: Func) -> [Type] Never! {
     params := [Type]{}
     loop parameter_index in 0..<func.params.len() {
         ty: type_with_effective_parameter_fn_return(func.params[parameter_index].ty)
-        if func.params[parameter_index].variadic -> params.push(Type.List{element: ty}) else -> params.push(ty)
+        if func.params[parameter_index].variadic -> params.push(Type.List{element: ty}) else {
+            params.push(ty)
+        }
     }
     params
 }
@@ -141,10 +144,16 @@ sema_function_param_contract: fn(func: Func) -> [CallContractRow]? {
     loop parameter_index in 0..<func.params.len() {
         label := func.params[parameter_index].name
         implicit_local_label: func.params[parameter_index].zone == ParamZone.Either && func.params[parameter_index].public_label == None
-        if func.params[parameter_index].public_label != None -> label = (func.params[parameter_index].public_label ?? CallLabel{name: "", span: func.params[parameter_index].name_span}).name
-        if func.params[parameter_index].zone == ParamZone.PositionalOnly || implicit_local_label -> label = ""
+        if func.params[parameter_index].public_label != None {
+            label = (func.params[parameter_index].public_label ?? CallLabel{name: "", span: func.params[parameter_index].name_span}).name
+        }
+        if func.params[parameter_index].zone == ParamZone.PositionalOnly || implicit_local_label {
+            label = ""
+        }
         contract.push(CallContractRow{label: label, zone: func.params[parameter_index].zone})
-        if label != "" || func.params[parameter_index].zone != ParamZone.Either -> has_contract = true
+        if label != "" || func.params[parameter_index].zone != ParamZone.Either {
+            has_contract = true
+        }
     }
     if has_contract -> Val(contract) else -> None
 }
@@ -207,7 +216,9 @@ sema_function_signature_view_provenance: fn(func: Func) -> ViewProvenanceMap? {
     // the caller's registered declaration.
     published := declared.copy()
     loop index in 0..<published.entries.len() {
-        if published.entries[index].slot.len() == 0 -> published.entries[index].value.mutable = mutable
+        if published.entries[index].slot.len() == 0 {
+            published.entries[index].value.mutable = mutable
+        }
     }
     Val(published)
 }

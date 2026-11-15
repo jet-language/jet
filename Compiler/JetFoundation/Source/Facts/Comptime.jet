@@ -19,7 +19,9 @@ TComptimeKey: enum {
 
 // An Int outside the i64 word is keyed by its BigInt decimal.
 checked_comptime_integer_key: fn(number: Int) -> TComptimeKey Never! {
-    if number < -9223372036854775807 - 1 || number > 9223372036854775807 -> return TComptimeKey.BigInt{decimal: "{number}"}
+    if number < -9223372036854775807 - 1 || number > 9223372036854775807 {
+        return TComptimeKey.BigInt{decimal: "{number}"}
+    }
     TComptimeKey.Int{value: number}
 }
 

@@ -5,6 +5,7 @@
 // missing until a normal resolver or update path records it.
 
 DISCOVERY_INDEX_DIR: "discovery"
+
 DISCOVERY_INDEX_FILE: "index.jsonl"
 
 // One documented configuration field of an indexed package.
@@ -28,9 +29,7 @@ PackageIndexEntry: struct {
     options: [PackageOptionField]
 
     // `source.name`.
-    display_ref: fn(self) -> String Never! {
-        "{self.source}.{self.name}"
-    }
+    display_ref: fn(self) -> String Never! { "{self.source}.{self.name}" }
 
     // The registry's maintainer gate projected as one package detail. The
     // gate status stays the signed source of truth; this is not a second
@@ -46,7 +45,9 @@ PackageIndexEntry: struct {
     // Fill what this record lacks from a later record of the same package.
     merge_from: fn(&self, other: PackageIndexEntry) Never! {
         if self.version == "" && other.version != "" -> self.version = other.version
-        if self.provenance == "declared" && other.provenance != "declared" -> self.provenance = other.provenance
+        if self.provenance == "declared" && other.provenance != "declared" {
+            self.provenance = other.provenance
+        }
         if self.tier == "not-registry" && other.tier != "not-registry" {
             self.tier = other.tier
             self.gate_status = other.gate_status
@@ -69,13 +70,9 @@ PackageIndexEntry: struct {
 PackageIndex: struct {
     packages: [PackageIndexEntry]
 
-    empty: fn() -> PackageIndex Never! {
-        PackageIndex{packages: [PackageIndexEntry]{}}
-    }
+    empty: fn() -> PackageIndex Never! { PackageIndex{packages: [PackageIndexEntry]{}} }
 
-    is_empty: fn(self) -> Bool Never! {
-        self.packages.len() == 0
-    }
+    is_empty: fn(self) -> Bool Never! { self.packages.len() == 0 }
 
     // Merge into an existing record of the same source and name, else add.
     add_package: fn(&self, record: PackageIndexEntry) Never! {
@@ -162,7 +159,9 @@ env_discovery_score: fn(record: PackageIndexEntry, q: String) -> Int? Never! {
     docs: pkg_ascii_lower(record.docs)
     option := false
     loop field in record.options {
-        if pkg_ascii_lower(field.name).contains(q) || pkg_ascii_lower(field.default).contains(q) || pkg_ascii_lower(field.docs).contains(q) -> option = true
+        if pkg_ascii_lower(field.name).contains(q) || pkg_ascii_lower(field.default).contains(q) || pkg_ascii_lower(field.docs).contains(q) {
+            option = true
+        }
     }
     if name == q || display == q -> return Val(0)
     if name.starts_with(q) || display.starts_with(q) -> return Val(1)
@@ -190,7 +189,9 @@ env_discovery_load: fn(project_dir: String) -[FS]> PackageIndex? ProviderReason!
         if line == "" -> next
         value: if json.parse(line) == {
             .Ok(tree) -> tree
-            .Err(error) -> { return Err(ProviderReason{message: "{path}:{number + 1}: {error.reason}"}) }
+            .Err(error) -> {
+                return Err(ProviderReason{message: "{path}:{number + 1}: {error.reason}"})
+            }
         }
         index.add_package(env_discovery_record_from_json(value))
     }
@@ -251,36 +252,40 @@ env_discovery_merge_store_entries: fn(index: &PackageIndex, store_entries: [Stor
                 reference = "{name}{REF_PROVIDER_AT}{source}"
             }
         }
-        index.add_package(PackageIndexEntry{
-            source,
-            name,
-            reference,
-            version: entry.version,
-            platforms: TIER_ONE_OSES,
-            docs: "{entry.reference} from hangar metadata",
-            provenance: "hangar:{entry.id}",
-            tier: "not-registry",
-            gate_status: "not-applicable",
-            options: env_discovery_service_option_fields(),
-        })
+        index.add_package(
+            PackageIndexEntry{
+                source: source,
+                name: name,
+                reference: reference,
+                version: entry.version,
+                platforms: TIER_ONE_OSES,
+                docs: "{entry.reference} from hangar metadata",
+                provenance: "hangar:{entry.id}",
+                tier: "not-registry",
+                gate_status: "not-applicable",
+                options: env_discovery_service_option_fields(),
+            },
+        )
     }
 }
 
 // `Pkg.adapt(...)` adapter packages.
 env_discovery_merge_adapters: fn(index: &PackageIndex, adapters: [AdapterPlan]) Never! {
     loop adapter in adapters {
-        index.add_package(PackageIndexEntry{
-            source: "adapt",
-            name: adapter.name,
-            reference: "adapt:{adapter.name}",
-            version: "",
-            platforms: TIER_ONE_OSES,
-            docs: "adapter package from {adapter.source}",
-            provenance: "env:Pkg.adapt",
-            tier: "not-registry",
-            gate_status: "not-applicable",
-            options: env_discovery_service_option_fields(),
-        })
+        index.add_package(
+            PackageIndexEntry{
+                source: "adapt",
+                name: adapter.name,
+                reference: "adapt:{adapter.name}",
+                version: "",
+                platforms: TIER_ONE_OSES,
+                docs: "adapter package from {adapter.source}",
+                provenance: "env:Pkg.adapt",
+                tier: "not-registry",
+                gate_status: "not-applicable",
+                options: env_discovery_service_option_fields(),
+            },
+        )
     }
 }
 
@@ -291,18 +296,20 @@ env_discovery_merge_lock: fn(index: &PackageIndex, lock: LockFile) Never! {
     loop package in lock.packages {
         if package.source == {
             .Registry(registry, reference, _, _, _, authority, tier, gate_status) -> {
-                index.add_package(PackageIndexEntry{
-                    source: registry,
-                    name: package.name,
-                    reference,
-                    version: package.version,
-                    platforms: TIER_ONE_OSES,
-                    docs: "package resolved from the Jet registry",
-                    provenance: "registry:{authority}",
-                    tier,
-                    gate_status,
-                    options: env_discovery_service_option_fields(),
-                })
+                index.add_package(
+                    PackageIndexEntry{
+                        source: registry,
+                        name: package.name,
+                        reference: reference,
+                        version: package.version,
+                        platforms: TIER_ONE_OSES,
+                        docs: "package resolved from the Jet registry",
+                        provenance: "registry:{authority}",
+                        tier: tier,
+                        gate_status: gate_status,
+                        options: env_discovery_service_option_fields(),
+                    },
+                )
             }
             .Root | .Path(_) | .Git(_, _) | .Nix(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Foreign(_, _, _) -> {}
         }
@@ -339,11 +346,11 @@ env_discovery_record_for_ref: fn(spec: RefSpec, version: String, provenance: Str
     PackageIndexEntry{
         source: env_discovery_published_source(spec.source.label()),
         name: spec.package,
-        reference,
-        version,
+        reference: reference,
+        version: version,
         platforms: TIER_ONE_OSES,
         docs: "{reference} from local Jetpack metadata",
-        provenance,
+        provenance: provenance,
         tier: "not-registry",
         gate_status: "not-applicable",
         options: env_discovery_service_option_fields(),
@@ -367,7 +374,9 @@ env_discovery_fixture_version: fn(fixtures: String?, spec: RefSpec) -[FS]> (vers
 // A version from the hangar record realized for exactly this ref.
 env_discovery_store_version: fn(entries: [StoreEntry], spec: RefSpec) -> (version: String, provenance: String)? Never! {
     loop entry in entries {
-        if entry.reference == spec.raw -> return Val((version: entry.version, provenance: "hangar:{entry.id}"))
+        if entry.reference == spec.raw {
+            return Val((version: entry.version, provenance: "hangar:{entry.id}"))
+        }
     }
     None
 }
@@ -376,7 +385,9 @@ env_discovery_store_version: fn(entries: [StoreEntry], spec: RefSpec) -> (versio
 env_discovery_provider_output_path: fn(text: String) -> String? Never! {
     value: if json.parse(text.trim()) == {
         .Ok(tree) -> tree
-        .Err(_) -> { return None }
+        .Err(_) -> {
+            return None
+        }
     }
     results: pkg_json_array(value) ?? return None
     if results.len() == 0 -> return None
@@ -450,19 +461,21 @@ env_discovery_record_tree: fn(record: PackageIndexEntry) -> Dyn Never! {
     loop option in record.options {
         options.push(Dyn.Object(["name": Dyn.Text(option.name), "default": Dyn.Text(option.default), "docs": Dyn.Text(option.docs)]))
     }
-    Dyn.Object([
-        "source": Dyn.Text(record.source.copy()),
-        "name": Dyn.Text(record.name.copy()),
-        "reference": Dyn.Text(record.reference.copy()),
-        "version": Dyn.Text(record.version.copy()),
-        "platforms": pkg_json_texts(record.platforms),
-        "docs": Dyn.Text(record.docs.copy()),
-        "provenance": Dyn.Text(record.provenance.copy()),
-        "tier": Dyn.Text(record.tier.copy()),
-        "gate_status": Dyn.Text(record.gate_status.copy()),
-        "maintainer_liveness": Dyn.Text(record.maintainer_liveness()),
-        "options": Dyn.Array(options),
-    ])
+    Dyn.Object(
+        [
+            "source": Dyn.Text(record.source.copy()),
+            "name": Dyn.Text(record.name.copy()),
+            "reference": Dyn.Text(record.reference.copy()),
+            "version": Dyn.Text(record.version.copy()),
+            "platforms": pkg_json_texts(record.platforms),
+            "docs": Dyn.Text(record.docs.copy()),
+            "provenance": Dyn.Text(record.provenance.copy()),
+            "tier": Dyn.Text(record.tier.copy()),
+            "gate_status": Dyn.Text(record.gate_status.copy()),
+            "maintainer_liveness": Dyn.Text(record.maintainer_liveness()),
+            "options": Dyn.Array(options),
+        ],
+    )
 }
 
 env_discovery_record_to_json: fn(record: PackageIndexEntry) -> String Never! {
@@ -471,26 +484,28 @@ env_discovery_record_to_json: fn(record: PackageIndexEntry) -> String Never! {
 
 env_discovery_record_from_json: fn(value: Dyn) -> PackageIndexEntry ProviderReason! {
     object: provider_json_object(value)
-    Ok(PackageIndexEntry{
-        source: env_discovery_required_text(object, "source"),
-        name: env_discovery_required_text(object, "name"),
-        reference: env_discovery_required_text(object, "reference"),
-        version: env_discovery_optional_text(object, "version", ""),
-        platforms: env_discovery_string_array(object.get("platforms")),
-        docs: env_discovery_optional_text(object, "docs", ""),
-        provenance: env_discovery_optional_text(object, "provenance", ""),
-        tier: env_discovery_optional_text(object, "tier", "not-registry"),
-        gate_status: env_discovery_optional_text(object, "gate_status", "not-applicable"),
-        options: env_discovery_option_array(object.get("options")),
-    })
+    Ok(
+        PackageIndexEntry{
+            source: env_discovery_required_text(object, "source"),
+            name: env_discovery_required_text(object, "name"),
+            reference: env_discovery_required_text(object, "reference"),
+            version: env_discovery_optional_text(object, "version", ""),
+            platforms: env_discovery_string_array(object.get("platforms")),
+            docs: env_discovery_optional_text(object, "docs", ""),
+            provenance: env_discovery_optional_text(object, "provenance", ""),
+            tier: env_discovery_optional_text(object, "tier", "not-registry"),
+            gate_status: env_discovery_optional_text(object, "gate_status", "not-applicable"),
+            options: env_discovery_option_array(object.get("options")),
+        },
+    )
 }
 
-env_discovery_required_text: fn(object: [String: Dyn], key: String) -> String ProviderReason! {
+env_discovery_required_text: fn(object: [String:Dyn], key: String) -> String ProviderReason! {
     value: object.get(key) ?? return Err(ProviderReason{message: "missing key `{key}`"})
     provider_json_string(value)
 }
 
-env_discovery_optional_text: fn(object: [String: Dyn], key: String, fallback: String) -> String Never! {
+env_discovery_optional_text: fn(object: [String:Dyn], key: String, fallback: String) -> String Never! {
     value: object.get(key) ?? return fallback
     pkg_json_text(value) ?? fallback
 }
@@ -500,7 +515,7 @@ env_discovery_string_array: fn(value: Dyn?) -> [String] Never! {
     out := [String]{}
     loop item in items {
         if pkg_json_text(item) == {
-            .Val(text) -> out.push(text)
+            .Val(text) -> { out.push(text) }
             .None -> {}
         }
     }
@@ -513,7 +528,7 @@ env_discovery_option_array: fn(value: Dyn?) -> [PackageOptionField] Never! {
     loop item in items {
         object: pkg_json_object(item) ?? next
         name: env_discovery_required_text(object, "name") ?? next
-        out.push(PackageOptionField{name, default: env_discovery_optional_text(object, "default", ""), docs: env_discovery_optional_text(object, "docs", "")})
+        out.push(PackageOptionField{name: name, default: env_discovery_optional_text(object, "default", ""), docs: env_discovery_optional_text(object, "docs", "")})
     }
     out
 }

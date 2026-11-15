@@ -58,7 +58,7 @@ JET_CLI_FLAG_TYPED_REASONS: #run { [JetCLIFlagTypedReason]{
 // The reason row `name` names, if one does.
 jet_cli_flag_typed_reason: fn(name: String) -> JetCLIFlagTypedReason? Never! {
     loop row in JET_CLI_FLAG_TYPED_REASONS {
-        if row.name == name -> return Val(row.copy()) // copy: the registry keeps its row.
+        if row.name == name -> return Val(row.copy())  // copy: the registry keeps its row.
     }
     None
 }
@@ -928,13 +928,17 @@ jet_cli_flag_rows: fn() -> [JetCLIFlagSpec] Never! {
                     // Each level is its own flag; the option has no `--name` flag.
                     loop value in option.values {
                         level_help := "{help}; this flag is {value}"
-                        if test_setting_row(option.name) == .Val(row) -> level_help = "{level_help}; with test: {jet_cli_test_setting_text(row)}"
+                        if test_setting_row(option.name) == .Val(row) {
+                            level_help = "{level_help}; with test: {jet_cli_test_setting_text(row)}"
+                        }
                         rows.push(JetCLIFlagSpec{long: build_option_level_flag(value), help: level_help})
                     }
                     next
                 }
                 flag: build_option_flag(option.name)
-                if jet_cli_test_setting_of_flag(flag) == .Val(row) -> help = "{help}; with test: {jet_cli_test_setting_text(row)}"
+                if jet_cli_test_setting_of_flag(flag) == .Val(row) {
+                    help = "{help}; with test: {jet_cli_test_setting_text(row)}"
+                }
                 rows.push(JetCLIFlagSpec{long: flag, help: help, value: jet_cli_build_option_value(option)})
             }
         }
@@ -947,10 +951,12 @@ jet_cli_flag_rows: fn() -> [JetCLIFlagSpec] Never! {
             if setting.kind == .Levels -> next
             flag: test_setting_flag(setting.name)
             // The lambdas take their own names: a capture moves the name it reads.
-            fixed_flag: flag.copy() // copy: the fixed-row lambda's own name.
+            fixed_flag: flag.copy()  // copy: the fixed-row lambda's own name.
             if JET_CLI_FIXED_FLAGS.any(fn(fixed) { fixed.long == fixed_flag }) -> next
-            option_flag: flag.copy() // copy: the build-option lambda's own name.
-            if JET_BUILD_OPTIONS.any(fn(option) { build_option_flag(option.name) == option_flag }) -> next
+            option_flag: flag.copy()  // copy: the build-option lambda's own name.
+            if JET_BUILD_OPTIONS.any(fn(option) { build_option_flag(option.name) == option_flag }) {
+                next
+            }
             rows.push(JetCLIFlagSpec{long: flag, help: jet_cli_test_setting_help(setting), value: jet_cli_test_setting_value(setting), typed: setting.typed})
         }
     }
@@ -976,7 +982,7 @@ jet_cli_test_setting_value: fn(setting: TestSettingRow) -> JetCLIFlagValue Never
 // The `jet test` setting whose flag is `flag`, if one is.
 jet_cli_test_setting_of_flag: fn(flag: String) -> TestSettingRow? Never! {
     loop setting in JET_TEST_SETTINGS {
-        if test_setting_flag(setting.name) == flag -> return Val(setting.copy()) // copy: the registry keeps its row.
+        if test_setting_flag(setting.name) == flag -> return Val(setting.copy())  // copy: the registry keeps its row.
     }
     None
 }

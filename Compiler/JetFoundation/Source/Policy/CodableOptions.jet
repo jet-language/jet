@@ -10,8 +10,11 @@
 // every option here.
 
 CODABLE_ONLY: "only"
+
 CODABLE_UNKNOWN: "unknown"
+
 CODABLE_TAG: "tag"
+
 CODABLE_PUBLISHED: "published"
 
 // The `#Codable` marker among `markers`, if one is written. `#!Codable`
@@ -46,7 +49,9 @@ codable_option_word: fn(marker: Marker, label: String) -> String? Never! {
 codable_form: fn(marker: Marker) -> String? Never! {
     loop index in 0..<marker.args.len() {
         if index < marker.arg_labels.len() && marker.arg_labels[index] != None -> next
-        if marker.args[index] == .Expr(value) && value == .EnumLit(_, variant, _, _, _, _, _) -> return Val(variant)
+        if marker.args[index] == .Expr(value) && value == .EnumLit(_, variant, _, _, _, _, _) {
+            return Val(variant)
+        }
     }
     None
 }
@@ -82,10 +87,14 @@ codable_denies_unknown: fn(markers: [Marker]) -> Bool Never! {
 // `published: true`).
 codable_published: fn(markers: [Marker]) -> Bool Never! {
     marker: codable_marker(markers) ?? return false
-    if codable_option(marker, CODABLE_PUBLISHED) == .Val(value) && value == .Bool(flag, _, _) -> return flag
+    if codable_option(marker, CODABLE_PUBLISHED) == .Val(value) && value == .Bool(flag, _, _) {
+        return flag
+    }
     loop index in 0..<marker.args.len() {
         if index < marker.arg_labels.len() && marker.arg_labels[index] != None -> next
-        if marker.args[index] == .Expr(value) && value == .Ident(name, _, _) && name == CODABLE_PUBLISHED -> return true
+        if marker.args[index] == .Expr(value) && value == .Ident(name, _, _) && name == CODABLE_PUBLISHED {
+            return true
+        }
     }
     false
 }
@@ -96,7 +105,9 @@ codable_published: fn(markers: [Marker]) -> Bool Never! {
 codable_tag_field: fn(markers: [Marker]) -> String? Never! {
     marker: codable_marker(markers) ?? return None
     value: codable_option(marker, CODABLE_TAG) ?? return None
-    if value == .EnumLit(_, variant, _, args, _, _, _) && variant == "Field" -> return Val(codable_tag_key(args) ?? "")
+    if value == .EnumLit(_, variant, _, args, _, _, _) && variant == "Field" {
+        return Val(codable_tag_key(args) ?? "")
+    }
     None
 }
 

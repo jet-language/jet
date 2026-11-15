@@ -5,28 +5,34 @@
 // The native [U8] carrier is packed, matching checked StorageLayout(U8)
 // and the generated C ABI's u8 elements. Every host byte-list seam shares it.
 RT_HOST_U8_STRIDE: I64{1}
-host_u8_get: fn(data: I64, index: I64) -> I64 { rt_text_byte(wrapping(data + index * RT_HOST_U8_STRIDE)) }
-host_u8_put: fn(data: I64, index: I64, byte: I64) { rt_text_put(wrapping(data + index * RT_HOST_U8_STRIDE), byte) }
+
+host_u8_get: fn(data: I64, index: I64) -> I64 {
+    rt_text_byte(wrapping(data + index * RT_HOST_U8_STRIDE))
+}
+
+host_u8_put: fn(data: I64, index: I64, byte: I64) {
+    rt_text_put(wrapping(data + index * RT_HOST_U8_STRIDE), byte)
+}
 
 // core.mem.__list_reserve_exact (Lists.jet lower_encoding_list_leaf): grow the
 // exclusively lent native List header to exactly len + additional elements of
 // `stride` bytes. Failure (negative/overflowing request, no memory) returns
 // false and keeps the original allocation intact; policy is authored in Jet.
 #Export(c) jet_rt_encoding_list_reserve_exact: fn(header: I64, stride: I64, additional: I64) -> Bool {
-    if (additional < I64{0} || stride <= I64{0} || header == I64{0}) -> return false
+    if (additional < I64{0} || stride <= I64{0} || header == I64{0}) { return false }
     length: trap_word(header)
     capacity: trap_word(wrapping(header + I64{8}))
-    if (additional > I64{9223372036854775807} - length) -> return false
+    if (additional > I64{9223372036854775807} - length) { return false }
     required: length + additional
-    if (required <= capacity) -> return true
-    if (required > I64{9223372036854775807} /% stride) -> return false
+    if (required <= capacity) { return true }
+    if (required > I64{9223372036854775807} /% stride) { return false }
     data: trap_word(wrapping(header + I64{16}))
     // An older list grows from its owner's allocator (Alloc.jet
     // alloc_grow_carrier).
     next: alloc_grow_try(if (capacity != I64{0}) -> data else -> I64{0}, header, required * stride, I64{8})
-    if (next == I64{0}) -> return false
-    if (length != I64{0}) -> rt_text_bytes_copy(next, data, length * stride)
-    if (capacity != I64{0}) -> jet_rt_free(data, capacity * stride, I64{8})
+    if (next == I64{0}) { return false }
+    if (length != I64{0}) { rt_text_bytes_copy(next, data, length * stride) }
+    if (capacity != I64{0}) { jet_rt_free(data, capacity * stride, I64{8}) }
     trap_store(wrapping(header + I64{8}), required)
     trap_store(wrapping(header + I64{16}), next)
     true
@@ -39,13 +45,15 @@ host_u8_put: fn(data: I64, index: I64, byte: I64) { rt_text_put(wrapping(data + 
 rt_host_u8_list_room: fn(header: I64, room: I64) {
     length: trap_word(header)
     capacity: trap_word(wrapping(header + I64{8}))
-    if (capacity - length >= room) -> return
+    if (capacity - length >= room) {
+        return
+    }
     grown := capacity * I64{2}
-    if (grown < length + room) -> grown = length + room
+    if (grown < length + room) { grown = length + room }
     data: trap_word(wrapping(header + I64{16}))
     next: alloc_grow(if (capacity != I64{0}) -> data else -> I64{0}, header, grown * RT_HOST_U8_STRIDE, I64{8})
-    if (length != I64{0}) -> rt_text_bytes_copy(next, data, length * RT_HOST_U8_STRIDE)
-    if (capacity != I64{0}) -> jet_rt_free(data, capacity * RT_HOST_U8_STRIDE, I64{8})
+    if (length != I64{0}) { rt_text_bytes_copy(next, data, length * RT_HOST_U8_STRIDE) }
+    if (capacity != I64{0}) { jet_rt_free(data, capacity * RT_HOST_U8_STRIDE, I64{8}) }
     trap_store(wrapping(header + I64{8}), grown)
     trap_store(wrapping(header + I64{16}), next)
 }
@@ -228,7 +236,9 @@ coll_bits_bound: fn(bits: I64, value: I64) -> I64 {
     data: trap_word(wrapping(bits + I64{16}))
     loop low < high {
         middle: low + (high - low) / I64{2}
-        if trap_word(wrapping(data + middle * I64{8})) < value -> low = middle + I64{1} else { high = middle }
+        if trap_word(wrapping(data + middle * I64{8})) < value -> low = middle + I64{1} else {
+            high = middle
+        }
     }
     low
 }
@@ -237,7 +247,9 @@ coll_bits_bound: fn(bits: I64, value: I64) -> I64 {
 
 #Export(c) jet_rt_native_bits_clear: fn(bits: I64) {
     capacity: trap_word(wrapping(bits + I64{8}))
-    if (capacity != I64{0}) { jet_rt_free(trap_word(wrapping(bits + I64{16})), capacity * I64{8}, I64{8}) }
+    if (capacity != I64{0}) {
+        jet_rt_free(trap_word(wrapping(bits + I64{16})), capacity * I64{8}, I64{8})
+    }
     coll_zero(bits, I64{24})
 }
 
@@ -259,14 +271,14 @@ coll_bits_bound: fn(bits: I64, value: I64) -> I64 {
     last: trap_word(wrapping(trap_word(wrapping(bits + I64{16})) + (count - I64{1}) * I64{8}))
     if (last == I64{9223372036854775807}) {
         jet_rt_panic_overflow()
-        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+        if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     }
     jet_int_owned_from_i64(last + I64{1})
 }
 
 #Export(c) jet_bit_set_has: fn(bits: I64, carrier: I64) -> Bool {
     value: jet_int_owned_to_i64(carrier)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return false
+    if (jet_scheduler_native_propagate() != I64{0}) { return false }
     at: coll_bits_bound(bits, value)
     if at == trap_word(bits) -> return false
     trap_word(wrapping(trap_word(wrapping(bits + I64{16})) + at * I64{8})) == value
@@ -274,7 +286,7 @@ coll_bits_bound: fn(bits: I64, value: I64) -> I64 {
 
 #Export(c) jet_bitset_add: fn(bits: I64, carrier: I64) -> Bool {
     value: jet_int_owned_to_i64(carrier)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return false
+    if (jet_scheduler_native_propagate() != I64{0}) { return false }
     if (value < I64{0}) { return false }
     at: coll_bits_bound(bits, value)
     length: trap_word(bits)
@@ -302,7 +314,9 @@ coll_bits_bound: fn(bits: I64, value: I64) -> I64 {
 
 #Export(c) jet_bitset_remove: fn(bits: I64, carrier: I64) {
     value: jet_int_owned_to_i64(carrier)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        return
+    }
     at := coll_bits_bound(bits, value)
     length: trap_word(bits)
     data: trap_word(wrapping(bits + I64{16}))
@@ -488,7 +502,9 @@ coll_i64_heap: fn(data: I64, length: I64, minimum: Bool) {
     index := length
     loop index > (I64{0}) {
         parent: (index - I64{1}) / I64{2}
-        if (trap_word(wrapping(result + index * I64{8})) >= trap_word(wrapping(result + parent * I64{8}))) { break }
+        if (trap_word(wrapping(result + index * I64{8})) >= trap_word(wrapping(result + parent * I64{8}))) {
+            break
+        }
         coll_i64_swap(result, index, parent)
         index = parent
     }
@@ -735,7 +751,9 @@ coll_ordered_map_render: fn(map: I64) -> I64 {
     jet_rt_string_builder_finish(text)
 }
 
-#Export(c) jet_rt_handle_display_jet_ordered_map: fn(map: I64) -> I64 { coll_ordered_map_render(map) }
+#Export(c) jet_rt_handle_display_jet_ordered_map: fn(map: I64) -> I64 {
+    coll_ordered_map_render(map)
+}
 
 #Export(c) jet_rt_handle_show_jet_ordered_map: fn(map: I64) -> I64 { coll_ordered_map_render(map) }
 
@@ -745,7 +763,7 @@ coll_i64_add: fn(left: I64, right: I64) -> I64 {
     result: wrapping(left + right)
     if (((left.bit_xor(result)).bit_and((right.bit_xor(result)))) < I64{0}) {
         jet_rt_panic_overflow()
-        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+        if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     }
     result
 }
@@ -754,7 +772,7 @@ coll_i64_sub: fn(left: I64, right: I64) -> I64 {
     result: wrapping(left - right)
     if (((left.bit_xor(right)).bit_and((left.bit_xor(result)))) < I64{0}) {
         jet_rt_panic_overflow()
-        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+        if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     }
     result
 }
@@ -798,7 +816,9 @@ coll_counter_delta: fn(counter: I64, key: I64, amount: I64) {
         if jet_rt_string_eq(trap_word(wrapping(keys + at * I64{8})), key) {
             found = true
             next: coll_i64_add(trap_word(wrapping(counts + at * I64{8})), amount)
-            if (jet_scheduler_native_propagate() != I64{0}) -> return
+            if (jet_scheduler_native_propagate() != I64{0}) {
+                return
+            }
             if (next == I64{0}) { coll_counter_remove(counter, at) } else {
                 trap_store(wrapping(counts + at * I64{8}), next)
                 at += I64{1}
@@ -812,7 +832,9 @@ coll_counter_delta: fn(counter: I64, key: I64, amount: I64) {
 
 #Export(c) jet_rt_handle_drop_jet_counter: fn(counter: I64) { coll_pair_drop(counter, true) }
 
-#Export(c) jet_rt_handle_clone_jet_counter: fn(counter: I64) -> I64 { coll_pair_copy(counter, true) }
+#Export(c) jet_rt_handle_clone_jet_counter: fn(counter: I64) -> I64 {
+    coll_pair_copy(counter, true)
+}
 
 #Export(c) jet_coll_counter_clear: fn(counter: I64) -> I64 { jet_coll_counter() }
 
@@ -860,7 +882,7 @@ coll_counter_get: fn(counter: I64, key: I64) -> I64 {
 
 #Export(c) jet_coll_counter_set_count: fn(counter: I64, key: I64, count: I64) -> I64 {
     amount: coll_i64_sub(count, coll_counter_get(counter, key))
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     jet_coll_counter_add(counter, key, amount)
 }
 
@@ -871,7 +893,7 @@ coll_counter_get: fn(counter: I64, key: I64) -> I64 {
     at := I64{0}
     loop at < length {
         total = coll_i64_add(total, trap_word(wrapping(counts + at * I64{8})))
-        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+        if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
         at += I64{1}
     }
     jet_int_owned_from_i64(total)
@@ -891,7 +913,7 @@ coll_counter_get: fn(counter: I64, key: I64) -> I64 {
         count: trap_word(wrapping(counts + at * I64{8}))
         if (count > I64{0}) {
             total = coll_i64_add(total, count)
-            if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+            if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
         }
         at += I64{1}
     }
@@ -992,7 +1014,9 @@ coll_counter_render: fn(counter: I64) -> I64 {
     jet_rt_string_builder_finish(text)
 }
 
-#Export(c) jet_rt_handle_display_jet_counter: fn(counter: I64) -> I64 { coll_counter_render(counter) }
+#Export(c) jet_rt_handle_display_jet_counter: fn(counter: I64) -> I64 {
+    coll_counter_render(counter)
+}
 
 #Export(c) jet_rt_handle_show_jet_counter: fn(counter: I64) -> I64 { coll_counter_render(counter) }
 
@@ -1037,7 +1061,9 @@ coll_chain_new: fn(length: I64) -> I64 {
     chain: coll_list_new()
     trap_store(chain, length)
     trap_store(wrapping(chain + I64{8}), length)
-    if (length != I64{0}) { trap_store(wrapping(chain + I64{16}), jet_rt_alloc(length * I64{48}, I64{8})) }
+    if (length != I64{0}) {
+        trap_store(wrapping(chain + I64{16}), jet_rt_alloc(length * I64{48}, I64{8}))
+    }
     chain
 }
 
@@ -1099,7 +1125,7 @@ coll_chain_value: fn(chain: I64, key: I64) -> I64 {
             values: trap_word(wrapping(layer + I64{24}))
             if (found >= values) {
                 jet_rt_panic_list_bounds(values, Int{found})
-                if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+                if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
                 return I64{0}
             }
             return trap_word(wrapping(trap_word(wrapping(layer + I64{40})) + found * I64{8}))
@@ -1111,7 +1137,7 @@ coll_chain_value: fn(chain: I64, key: I64) -> I64 {
 
 #Export(c) jet_coll_chain_get: fn(chain: I64, key: I64, some: I64) -> I64 {
     value: coll_chain_value(chain, key)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     if (value == I64{0}) { return I64{0} }
     trap_store(some, jet_rt_string_clone(value))
     I64{1}
@@ -1119,7 +1145,7 @@ coll_chain_value: fn(chain: I64, key: I64) -> I64 {
 
 #Export(c) jet_coll_chain_contains: fn(chain: I64, key: I64) -> Bool {
     value: coll_chain_value(chain, key)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return false
+    if (jet_scheduler_native_propagate() != I64{0}) { return false }
     value != I64{0}
 }
 
@@ -1181,9 +1207,7 @@ coll_loop_range_stop: fn(exhausted: Bool) {
     jet_rt_string_drop(reason)
     trap_header(I64{0})
     trap_write_word(I64{8028827855593824626}, I64{8})
-    if exhausted {
-        trap_write_static(rt_static_text("op value requested after exhaustion"))
-    } else {
+    if exhausted -> trap_write_static(rt_static_text("op value requested after exhaustion")) else {
         trap_write_static(rt_static_text("op stride must not be zero"))
     }
     trap_msg_prelude_end()
@@ -1192,11 +1216,11 @@ coll_loop_range_stop: fn(exhausted: Bool) {
 
 #Export(c) jet_loop_range_init: fn(start: I64, end: I64, step: I64, has_step: U8, exclusive: U8) -> I64 {
     stride: if (has_step == U8{0}) -> I64{1} else -> jet_int_owned_to_i64(step)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     first: jet_int_owned_to_i64(start)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     last: jet_int_owned_to_i64(end)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     if (stride == I64{0}) {
         coll_loop_range_stop(false)
         return I64{0}

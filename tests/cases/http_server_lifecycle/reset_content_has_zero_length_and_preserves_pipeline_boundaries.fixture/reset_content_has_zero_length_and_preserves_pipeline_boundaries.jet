@@ -6,7 +6,9 @@ use {
     net: core.net
 }
 
-S6ResetCalls: struct { value: Int }
+S6ResetCalls: struct {
+    value: Int
+}
 
 s6_reset_crlf: fn() -> String { "\r\n" }
 
@@ -27,11 +29,11 @@ s6_reset_exchange: fn(addr: String, lines: [String]) -> String {
     calls: Shared{S6ResetCalls{value: 0}}
     mux: web.app()
     mux.get("/reset", fn(_req: HTTPRequest) {
-        calls.value = calls.value + 1
+        calls.value += 1
         Ok(server.response(205, "must-not-publish").header("Content-Length", "999").header("Transfer-Encoding", "chunked").header("X-Origin", "reset"))
     })
     mux.get("/next", fn(_req: HTTPRequest) {
-        calls.value = calls.value + 1
+        calls.value += 1
         Ok(server.response(200, "next"))
     })
     bound: mux.bind("127.0.0.1:0") ?? panic("bind")

@@ -111,7 +111,9 @@ ssl_tls13_reset_key_share: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
 // a curve we have, or an FFDHE one (ssl_tls13_get_default_group_id).
 ssl_tls13_get_default_group_id: fn(ssl: &ssldefs.SSLContext) -> Int ssldefs.SSLError! {
     loop g in ssltls.ssl_get_groups(ssl) {
-        if ssltls.ssl_get_ecp_group_id_from_tls_id(g) != .Unknown && ssltls.ssl_tls13_named_group_is_ecdhe(g) -> return Ok(g)
+        if ssltls.ssl_get_ecp_group_id_from_tls_id(g) != .Unknown && ssltls.ssl_tls13_named_group_is_ecdhe(g) {
+            return Ok(g)
+        }
         if ssltls.ssl_tls13_named_group_is_ffdh(g) -> return Ok(g)
     }
     Err(.FeatureUnavailable)
@@ -130,7 +132,9 @@ ssl_tls13_write_key_share_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: Int, en
         group_id = ssl_tls13_get_default_group_id(ssl) ?? return Err(err)
     }
     client_shares: p
-    if !ssltls.ssl_tls13_named_group_is_ecdhe(group_id) && !ssltls.ssl_tls13_named_group_is_ffdh(group_id) -> return Err(.InternalError)
+    if !ssltls.ssl_tls13_named_group_is_ecdhe(group_id) && !ssltls.ssl_tls13_named_group_is_ffdh(group_id) {
+        return Err(.InternalError)
+    }
     group: p
     // The KeyShareEntry's group and key_exchange length.
     ssltls.ssl_chk_buf(p, end, 4) ?? return Err(err)
@@ -366,11 +370,15 @@ ssl_tls13_write_binders_of_pre_shared_key_ext: fn(ssl: &ssldefs.SSLContext, buf:
     ssltls.ssl_chk_buf(p, end, 2) ?? return Err(err)
     p += 2
     if ssl_tls13_ticket_get_psk(ssl) == {
-        .Val(t) -> p += ssl_tls13_write_binder(ssl, p, end, ssldefs.SSL_TLS1_3_PSK_RESUMPTION, t.md, t.psk) ?? return Err(err)
+        .Val(t) -> {
+            p += ssl_tls13_write_binder(ssl, p, end, ssldefs.SSL_TLS1_3_PSK_RESUMPTION, t.md, t.psk) ?? return Err(err)
+        }
         None -> {}
     }
     if ssl_tls13_psk_get_psk(ssl) == {
-        .Val(e) -> p += ssl_tls13_write_binder(ssl, p, end, ssldefs.SSL_TLS1_3_PSK_EXTERNAL, e.md, e.psk) ?? return Err(err)
+        .Val(e) -> {
+            p += ssl_tls13_write_binder(ssl, p, end, ssldefs.SSL_TLS1_3_PSK_EXTERNAL, e.md, e.psk) ?? return Err(err)
+        }
         None -> {}
     }
     ssldefs.ssl_put_u16(ssl.out_buf, buf, p - buf - 2)
@@ -382,7 +390,9 @@ ssl_tls13_write_binders_of_pre_shared_key_ext: fn(ssl: &ssldefs.SSLContext, buf:
 // (ssl_tls13_parse_server_pre_shared_key_ext's choice). None when we have
 // neither.
 ssl_tls13_selected_psk: fn(ssl: ssldefs.SSLContext, selected_identity: Int) -> (md: hashes.Md?, psk: [U8])? Never! {
-    if selected_identity == 0 && ssl_tls13_has_configured_ticket(ssl) -> return ssl_tls13_ticket_get_psk(ssl)
+    if selected_identity == 0 && ssl_tls13_has_configured_ticket(ssl) {
+        return ssl_tls13_ticket_get_psk(ssl)
+    }
     if !ssltls.ssl_conf_has_static_psk(ssl.conf) -> return None
     ssl_tls13_psk_get_psk(ssl)
 }
@@ -432,7 +442,9 @@ ssl_tls13_write_client_hello_exts: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: Int
 // What a ServerHello turned out to be (ssl_tls13_preprocess_server_hello's
 // SSL_SERVER_HELLO, SSL_SERVER_HELLO_HRR and SSL_SERVER_HELLO_TLS1_2).
 SSL_SH_KIND_SERVER_HELLO: 0
+
 SSL_SH_KIND_HRR: 1
+
 SSL_SH_KIND_TLS1_2: 2
 
 // The first seven bytes of the downgrade sentinels (RFC 8446 4.1.3).
@@ -472,7 +484,9 @@ ssl_tls13_is_downgrade_negotiation: fn(ssl: &ssldefs.SSLContext, buf: Int, end: 
 ssl_server_hello_is_hrr: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) -> Int ssldefs.SSLError! {
     magic: gen13.SSL_TLS1_3_HELLO_RETRY_REQUEST_MAGIC
     ssltls.ssl_chk_buf_read(ssl, buf, end, 2 + magic.len()) ?? return Err(err)
-    if ssldefs.ssl_range_eq(ssl.in_buf, buf + 2, magic, 0, magic.len()) -> return Ok(SSL_SH_KIND_HRR)
+    if ssldefs.ssl_range_eq(ssl.in_buf, buf + 2, magic, 0, magic.len()) {
+        return Ok(SSL_SH_KIND_HRR)
+    }
     Ok(SSL_SH_KIND_SERVER_HELLO)
 }
 
@@ -585,7 +599,9 @@ ssl_tls13_parse_server_hello: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int, i
     ssl.handshake.ciphersuite_info = Val(cs)
     ssl.spool[sn].start = ssldefs.ssl_time()
     ssltls.ssl_chk_buf_read(ssl, p, end, 1) ?? return Err(err)
-    if ssldefs.ssl_u8(ssl.in_buf, p) != ssldefs.SSL_COMPRESS_NULL -> return Err(ssl_tls13_server_hello_illegal(ssl))
+    if ssldefs.ssl_u8(ssl.in_buf, p) != ssldefs.SSL_COMPRESS_NULL {
+        return Err(ssl_tls13_server_hello_illegal(ssl))
+    }
     p += 1
     ssltls.ssl_chk_buf_read(ssl, p, end, 2) ?? return Err(err)
     extensions_len: ssldefs.ssl_get_u16(ssl.in_buf, p)
@@ -615,12 +631,8 @@ ssl_tls13_parse_server_hello: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int, i
             }
             if is_hrr {
                 ssl_tls13_parse_hrr_key_share_ext(ssl, p, extension_data_end) ?? return Err(err)
-            } else {
-                ssl_tls13_parse_key_share_ext(ssl, p, extension_data_end) ?? return Err(err)
-            }
-        } else {
-            return Err(.InternalError)
-        }
+            } else { ssl_tls13_parse_key_share_ext(ssl, p, extension_data_end) ?? return Err(err) }
+        } else { return Err(.InternalError) }
         p += extension_data_len
     }
 }
@@ -652,10 +664,10 @@ ssl_tls13_postprocess_server_hello_keys: fn<R: RNG>(ssl: &ssldefs.SSLContext, rn
         ssl.handshake.key_exchange_mode = ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL
     } else if received == psk_mask.bit_or(key_share_mask) {
         ssl.handshake.key_exchange_mode = ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_EPHEMERAL
-    } else {
+    } else { return Err(.HandshakeFailure) }
+    if !ssltls.ssl_conf_tls13_is_kex_mode_enabled(ssl, ssl.handshake.key_exchange_mode) {
         return Err(.HandshakeFailure)
     }
-    if !ssltls.ssl_conf_tls13_is_kex_mode_enabled(ssl, ssl.handshake.key_exchange_mode) -> return Err(.HandshakeFailure)
     // With no early data offered, no early secret is derived yet.
     keys13.ssl_tls13_key_schedule_stage_early(ssl) ?? return Err(err)
     keys13.ssl_tls13_compute_handshake_transform(ssl, rng) ?? return Err(err)
@@ -683,16 +695,16 @@ ssl_tls13_process_server_hello: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ss
     buf: body.buf
     end: body.buf + body.len
     kind: ssl_tls13_preprocess_server_hello(ssl, buf, end) ?? return Err(err)
-    if kind == SSL_SH_KIND_TLS1_2 -> return
+    if kind == SSL_SH_KIND_TLS1_2 {
+        return
+    }
     is_hrr: kind == SSL_SH_KIND_HRR
     if ssl.in_hslen != ssl.in_msglen {
         sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_UNEXPECTED_MESSAGE, .UnexpectedMessage)
         return Err(.UnexpectedMessage)
     }
     ssl_tls13_parse_server_hello(ssl, buf, end, is_hrr) ?? return Err(err)
-    if is_hrr {
-        gen13.ssl_reset_transcript_for_hrr(ssl) ?? return Err(err)
-    }
+    if is_hrr -> gen13.ssl_reset_transcript_for_hrr(ssl) ?? return Err(err)
     ssltls.ssl_add_hs_msg_to_checksum(ssl.handshake, ssldefs.SSL_HS_SERVER_HELLO, ssl.in_buf, buf, body.len)
     if is_hrr {
         ssl_tls13_postprocess_hrr(ssl) ?? return Err(err)
@@ -895,7 +907,9 @@ ssl_tls13_parse_new_session_ticket: fn(ssl: &ssldefs.SSLContext, buf: Int, end: 
     // ticket_lifetime, ticket_age_add and the ticket_nonce length.
     ssltls.ssl_chk_buf_read(ssl, p, end, 9) ?? return Err(err)
     ssl.spool[s].ticket_lifetime = ssldefs.ssl_get_u32(ssl.in_buf, p)
-    if ssl.spool[s].ticket_lifetime > ssldefs.SSL_TLS1_3_MAX_ALLOWED_TICKET_LIFETIME -> return Err(.IllegalParameter)
+    if ssl.spool[s].ticket_lifetime > ssldefs.SSL_TLS1_3_MAX_ALLOWED_TICKET_LIFETIME {
+        return Err(.IllegalParameter)
+    }
     ssl.spool[s].ticket_age_add = ssldefs.ssl_get_u32(ssl.in_buf, p + 4)
     ticket_nonce_len: ssldefs.ssl_u8(ssl.in_buf, p + 8)
     p += 9
@@ -964,8 +978,12 @@ ssl_tls13_process_new_session_ticket: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: 
 ssl_tls13_handshake_client_step: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     state: ssl.state
     if state == ssldefs.SSL_SERVER_HELLO -> return ssl_tls13_process_server_hello(ssl, rng)
-    if state == ssldefs.SSL_ENCRYPTED_EXTENSIONS -> return ssl_tls13_process_encrypted_extensions(ssl, rng)
-    if state == ssldefs.SSL_CERTIFICATE_REQUEST -> return ssl_tls13_process_certificate_request(ssl, rng)
+    if state == ssldefs.SSL_ENCRYPTED_EXTENSIONS {
+        return ssl_tls13_process_encrypted_extensions(ssl, rng)
+    }
+    if state == ssldefs.SSL_CERTIFICATE_REQUEST {
+        return ssl_tls13_process_certificate_request(ssl, rng)
+    }
     if state == ssldefs.SSL_SERVER_CERTIFICATE {
         // ssl_tls13_process_server_certificate.
         gen13.ssl_tls13_process_certificate(ssl, rng) ?? return Err(err)
@@ -979,7 +997,9 @@ ssl_tls13_handshake_client_step: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) s
         return
     }
     if state == ssldefs.SSL_SERVER_FINISHED -> return ssl_tls13_process_server_finished(ssl, rng)
-    if state == ssldefs.SSL_CLIENT_CERTIFICATE -> return ssl_tls13_write_client_certificate(ssl, rng)
+    if state == ssldefs.SSL_CLIENT_CERTIFICATE {
+        return ssl_tls13_write_client_certificate(ssl, rng)
+    }
     if state == ssldefs.SSL_CLIENT_CERTIFICATE_VERIFY {
         // ssl_tls13_write_client_certificate_verify.
         gen13.ssl_tls13_write_certificate_verify(ssl, rng) ?? return Err(err)
@@ -1010,6 +1030,8 @@ ssl_tls13_handshake_client_step: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) s
         sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_CLIENT_CERTIFICATE)
         return
     }
-    if state == ssldefs.SSL_TLS1_3_NEW_SESSION_TICKET -> return ssl_tls13_process_new_session_ticket(ssl, rng)
+    if state == ssldefs.SSL_TLS1_3_NEW_SESSION_TICKET {
+        return ssl_tls13_process_new_session_ticket(ssl, rng)
+    }
     Err(.BadInputData)
 }

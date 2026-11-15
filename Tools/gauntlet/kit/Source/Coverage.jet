@@ -18,9 +18,13 @@ use {
 }
 
 COVERAGE_MINIMUM_PROGRAMS: 30
+
 MEMORY_METRIC: "runtime_peak_rss_kb"
+
 WALL_METRIC: "runtime_wall_seconds"
+
 GAUNTLET_TIER: "aot"
+
 SCRIPTBENCH_TIER: "jet-bin"
 
 // A peer's twin: the file or directory holding its program (None when the
@@ -136,7 +140,10 @@ Reading: enum {
 #Error
 CoverageError: struct {
     message: String
-    impl Display { display: fn(self) -> String { self.message.copy() } }
+
+    impl Display {
+        display: fn(self) -> String { self.message.copy() }
+    }
 }
 
 // The JSON file `path` under `repo`.
@@ -158,13 +165,17 @@ load_corpus: fn(repo: String) -[FS]> [CoverageProgram] CoverageError! {
         entry: read_manifest(repo, "{dir}/entry.json")
         peers := [Twin]{}
         loop language in texts_at(entry, "languages") {
-            if language == "jet" || language == "jet-expert" || truthy_at(entry, "non_applicable/{language}") -> next
+            if language == "jet" || language == "jet-expert" || truthy_at(entry, "non_applicable/{language}") {
+                next
+            }
             peers.push(Twin{peer: language, path: Val(files.join(repo, "{dir}/{language_source_dir(language)}"))})
         }
         owners := [OwnerCard]{}
         if member(manifest, "loss_owners/{name}") == .Val(.Object(rows)) {
             loop row in rows {
-                if int_at(row.value, "") == .Val(card) -> owners.push(OwnerCard{category: row.key, card: card})
+                if int_at(row.value, "") == .Val(card) {
+                    owners.push(OwnerCard{category: row.key, card: card})
+                }
             }
         }
         programs.push(CoverageProgram{source: "gauntlet", name: name, key: name, cells: texts_at(entry, "cells"), peers: peers, owner_cards: owners, cards: []})
@@ -187,7 +198,9 @@ load_corpus: fn(repo: String) -[FS]> [CoverageProgram] CoverageError! {
 // one, or one without a peer twin on disk.
 corpus_issues: fn(programs: [CoverageProgram]) -[FS]> [String] {
     issues := [String]{}
-    if programs.len() < COVERAGE_MINIMUM_PROGRAMS -> issues.push("the corpus has {programs.len()} programs, fewer than {COVERAGE_MINIMUM_PROGRAMS}")
+    if programs.len() < COVERAGE_MINIMUM_PROGRAMS {
+        issues.push("the corpus has {programs.len()} programs, fewer than {COVERAGE_MINIMUM_PROGRAMS}")
+    }
     seen := [String]{}
     loop program in programs {
         id: "{program.source}/{program.name}"
@@ -224,7 +237,9 @@ column: fn(columns: [String], values: [String], name: String) -> String? {
 // The owner of a loss on `metric`: a workload's cards, a gauntlet program's
 // card for the metric's category, or "unowned".
 owner_of: fn(program: CoverageProgram, metric: String) -> String {
-    if program.source == "scriptbench" -> return if program.cards.len() > 0 -> program.cards.join(",") else -> "unowned"
+    if program.source == "scriptbench" {
+        return if program.cards.len() > 0 -> program.cards.join(",") else -> "unowned"
+    }
     category: loss_owner_category(metric) ?? return "unowned"
     loop owner in program.owner_cards {
         if owner.category == category -> return "#{owner.card}"
@@ -237,11 +252,15 @@ owner_of: fn(program: CoverageProgram, metric: String) -> String {
 gauntlet_reading: fn(result: Dyn?, peer: String, metric: String) -> Reading {
     found: result ?? return Reading.Uncovered("the program is not in the gauntlet report")
     comparison: member(found, "comparisons/{peer}") ?? return Reading.Uncovered("no {peer} comparison")
-    if text_at(comparison, "status") == Val("not_applicable") && text_at(comparison, "basis") == Val("declared-non-applicability") -> return Reading.NotApplicable
+    if text_at(comparison, "status") == Val("not_applicable") && text_at(comparison, "basis") == Val("declared-non-applicability") {
+        return Reading.NotApplicable
+    }
     row: member(comparison, "tiers/{GAUNTLET_TIER}/metrics/{metric}") ?? Dyn.Null
     if text_at(row, "status") == Val("not_applicable") -> return Reading.NotApplicable
     ratio: number_at(row, "ratio") ?? math.NAN
-    if !math.is_finite(ratio) || !(ratio > 0.0) -> return Reading.Uncovered(text_at(row, "reason") ?? "no {GAUNTLET_TIER} {metric} reading")
+    if !math.is_finite(ratio) || !(ratio > 0.0) {
+        return Reading.Uncovered(text_at(row, "reason") ?? "no {GAUNTLET_TIER} {metric} reading")
+    }
     if ratio < 1.0 -> return Reading.Won
     Reading.Lost(Lost{jet: number_at(row, "jet"), peer: number_at(row, "peer"), ratio: ratio})
 }
@@ -253,19 +272,21 @@ scriptbench_reading: fn(cells: [ScriptBenchCell], program: CoverageProgram, peer
     wanted: if metric == MEMORY_METRIC -> "rss" else -> "wall"
     loop cell in cells {
         // `Val((name))` compares with the name's value; `Val(name)` would bind a new one.
-        if cell.workload != Val((program.key)) || cell.tier != Val(SCRIPTBENCH_TIER) || cell.peer != Val((peer)) || cell.metric != Val((wanted)) -> next
+        if cell.workload != Val((program.key)) || cell.tier != Val(SCRIPTBENCH_TIER) || cell.peer != Val((peer)) || cell.metric != Val((wanted)) {
+            next
+        }
         if cell.verdict == Val("win") -> return Reading.Won
         ratio: cell_number(cell.ratio)
-        if !(ratio > 0.0) -> return Reading.Uncovered("{SCRIPTBENCH_TIER} {wanted} cell has no ratio")
+        if !(ratio > 0.0) {
+            return Reading.Uncovered("{SCRIPTBENCH_TIER} {wanted} cell has no ratio")
+        }
         return Reading.Lost(Lost{jet: Val(cell_number(cell.jet)), peer: Val(cell_number(cell.peer_value)), ratio: ratio})
     }
     Reading.Uncovered("no {SCRIPTBENCH_TIER} {wanted} cell")
 }
 
 // A cell's number; NaN when it holds none (a peer's `>60s`).
-cell_number: fn(text: String?) -> Float {
-    Float.parse(text ?? "") ?? math.NAN
-}
+cell_number: fn(text: String?) -> Float { Float.parse(text ?? "") ?? math.NAN }
 
 // The census: every loss and every uncovered reading of `programs`, from a
 // gauntlet report and ScriptBench cells, with the losses grouped by owner.
@@ -286,8 +307,10 @@ build_census: fn(programs: [CoverageProgram], report: Dyn, cells: [ScriptBenchCe
                 reading: if program.source == "gauntlet" -> gauntlet_reading(result, peer, metric) else -> scriptbench_reading(cells, program, peer, metric)
                 if reading == {
                     .NotApplicable -> {}
-                    .Uncovered(reason) -> uncovered.push(CoverageGap{source: program.source, program: program.name, cells: program.cells, peer: peer, metric: metric, reason: reason})
-                    .Won -> measured += 1
+                    .Uncovered(reason) -> {
+                        uncovered.push(CoverageGap{source: program.source, program: program.name, cells: program.cells, peer: peer, metric: metric, reason: reason})
+                    }
+                    .Won -> { measured += 1 }
                     .Lost(values) -> {
                         measured += 1
                         losses.push(CoverageLoss{source: program.source, program: program.name, cells: program.cells, peer: peer, metric: metric, jet: values.jet, peer_value: values.peer, ratio: values.ratio, owner: owner_of(program, metric)})
@@ -306,7 +329,7 @@ build_census: fn(programs: [CoverageProgram], report: Dyn, cells: [ScriptBenchCe
         measured: measured,
         losses: losses,
         uncovered: uncovered,
-        roots: owners.map(fn(owner) { LossRoot{losses: grouped.get(owner) ?? [], owner: owner} })
+        roots: owners.map(fn(owner) { LossRoot{losses: grouped.get(owner) ?? [], owner: owner} }),
     }
 }
 

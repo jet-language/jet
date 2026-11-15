@@ -19,8 +19,8 @@ csv_words_push: fn(list: I64, word: I64) {
     if (length == capacity) {
         grown: if (capacity == I64{0}) -> I64{4} else -> capacity * I64{2}
         buffer: jet_rt_alloc(grown * I64{8}, I64{8})
-        if (length != I64{0}) -> coll_copy(data, buffer, length * I64{8})
-        if (capacity != I64{0}) -> jet_rt_free(data, capacity * I64{8}, I64{8})
+        if (length != I64{0}) { coll_copy(data, buffer, length * I64{8}) }
+        if (capacity != I64{0}) { jet_rt_free(data, capacity * I64{8}, I64{8}) }
         trap_store(wrapping(list + I64{8}), grown)
         trap_store(wrapping(list + I64{16}), buffer)
         data = buffer
@@ -29,12 +29,16 @@ csv_words_push: fn(list: I64, word: I64) {
     trap_store(list, length + I64{1})
 }
 
-csv_words_get: fn(list: I64, index: I64) -> I64 { trap_word(wrapping(trap_word(wrapping(list + I64{16})) + index * I64{8})) }
+csv_words_get: fn(list: I64, index: I64) -> I64 {
+    trap_word(wrapping(trap_word(wrapping(list + I64{16})) + index * I64{8}))
+}
 
 // Releases a word list and its buffer; its words are already released.
 csv_words_free: fn(list: I64) {
     capacity: trap_word(wrapping(list + I64{8}))
-    if (capacity != I64{0}) -> jet_rt_free(trap_word(wrapping(list + I64{16})), capacity * I64{8}, I64{8})
+    if (capacity != I64{0}) {
+        jet_rt_free(trap_word(wrapping(list + I64{16})), capacity * I64{8}, I64{8})
+    }
     jet_rt_free(list, I64{24}, I64{8})
 }
 
@@ -59,23 +63,42 @@ csv_records_free: fn(records: I64) {
 
 // Parser state, one word each.
 CSV_FIELDS: I64{0}
+
 CSV_FIELD: I64{8}
+
 CSV_QUOTED: I64{16}
+
 CSV_AFTER_QUOTE: I64{24}
+
 CSV_PENDING_CR: I64{32}
+
 CSV_PENDING_LINE: I64{40}
+
 CSV_PENDING_COLUMN: I64{48}
+
 CSV_RECORD: I64{56}
+
 CSV_LINE: I64{64}
+
 CSV_COLUMN: I64{72}
+
 CSV_ENDED: I64{80}
+
 CSV_SAW_INPUT: I64{88}
+
 CSV_RECORDS: I64{96}
+
 CSV_STATE_BYTES: I64{104}
 
 csv_flag: fn(state: I64, offset: I64) -> Bool { trap_word(wrapping(state + offset)) != I64{0} }
-csv_set: fn(state: I64, offset: I64, value: Bool) { trap_store(wrapping(state + offset), if value -> I64{1} else -> I64{0}) }
-csv_add: fn(state: I64, offset: I64, amount: I64) { trap_store(wrapping(state + offset), trap_word(wrapping(state + offset)) + amount) }
+
+csv_set: fn(state: I64, offset: I64, value: Bool) {
+    trap_store(wrapping(state + offset), if value -> I64{1} else -> I64{0})
+}
+
+csv_add: fn(state: I64, offset: I64, amount: I64) {
+    trap_store(wrapping(state + offset), trap_word(wrapping(state + offset)) + amount)
+}
 
 // `fields.push(take(field))`.
 csv_close_field: fn(state: I64) {
@@ -113,7 +136,9 @@ csv_push: fn(state: I64, address: I64, width: I64) -> I64 {
     field: trap_word(wrapping(state + CSV_FIELD))
     csv_set(state, CSV_SAW_INPUT, true)
     if csv_flag(state, CSV_PENDING_CR) {
-        if (ch != I64{10}) -> return csv_error(state, trap_word(wrapping(state + CSV_PENDING_LINE)), trap_word(wrapping(state + CSV_PENDING_COLUMN)), rt_static_text("bare CR is not a record ending"))
+        if (ch != I64{10}) {
+            return csv_error(state, trap_word(wrapping(state + CSV_PENDING_LINE)), trap_word(wrapping(state + CSV_PENDING_COLUMN)), rt_static_text("bare CR is not a record ending"))
+        }
         csv_set(state, CSV_PENDING_CR, false)
         csv_add(state, CSV_LINE, I64{1})
         trap_store(wrapping(state + CSV_COLUMN), I64{0})
@@ -157,9 +182,7 @@ csv_push: fn(state: I64, address: I64, width: I64) -> I64 {
             }
             return csv_error(state, trap_word(wrapping(state + CSV_LINE)), trap_word(wrapping(state + CSV_COLUMN)), rt_static_text("only quote, comma, CRLF, LF, or EOF may follow a closing quote"))
         }
-        if (ch == I64{34}) {
-            csv_set(state, CSV_AFTER_QUOTE, true)
-        } else {
+        if (ch == I64{34}) { csv_set(state, CSV_AFTER_QUOTE, true) } else {
             rt_text_append(field, address, width)
             if (ch == I64{10}) {
                 csv_add(state, CSV_LINE, I64{1})
@@ -169,11 +192,11 @@ csv_push: fn(state: I64, address: I64, width: I64) -> I64 {
         return I64{0}
     }
     if (ch == I64{34}) {
-        if (rt_text_len(field) != I64{0}) -> return csv_error(state, trap_word(wrapping(state + CSV_LINE)), trap_word(wrapping(state + CSV_COLUMN)), rt_static_text("quote inside an unquoted field"))
+        if (rt_text_len(field) != I64{0}) {
+            return csv_error(state, trap_word(wrapping(state + CSV_LINE)), trap_word(wrapping(state + CSV_COLUMN)), rt_static_text("quote inside an unquoted field"))
+        }
         csv_set(state, CSV_QUOTED, true)
-    } else if (ch == I64{44}) {
-        csv_close_field(state)
-    } else if (ch == I64{13}) {
+    } else if (ch == I64{44}) { csv_close_field(state) } else if (ch == I64{13}) {
         csv_set(state, CSV_PENDING_CR, true)
         trap_store(wrapping(state + CSV_PENDING_LINE), trap_word(wrapping(state + CSV_LINE)))
         trap_store(wrapping(state + CSV_PENDING_COLUMN), trap_word(wrapping(state + CSV_COLUMN)))
@@ -181,17 +204,19 @@ csv_push: fn(state: I64, address: I64, width: I64) -> I64 {
         csv_add(state, CSV_LINE, I64{1})
         trap_store(wrapping(state + CSV_COLUMN), I64{0})
         csv_finish_record(state)
-    } else {
-        rt_text_append(field, address, width)
-    }
+    } else { rt_text_append(field, address, width) }
     I64{0}
 }
 
 // CsvParser::finish; 0 on success, otherwise the owned error message.
 csv_finish: fn(state: I64) -> I64 {
-    if csv_flag(state, CSV_PENDING_CR) -> return csv_error(state, trap_word(wrapping(state + CSV_PENDING_LINE)), trap_word(wrapping(state + CSV_PENDING_COLUMN)), rt_static_text("bare CR is not a record ending"))
-    if (csv_flag(state, CSV_QUOTED) && !csv_flag(state, CSV_AFTER_QUOTE)) -> return csv_error(state, trap_word(wrapping(state + CSV_LINE)), trap_word(wrapping(state + CSV_COLUMN)) + I64{1}, rt_static_text("quoted field ended before its closing quote"))
-    if (csv_flag(state, CSV_ENDED) || !csv_flag(state, CSV_SAW_INPUT)) -> return I64{0}
+    if csv_flag(state, CSV_PENDING_CR) {
+        return csv_error(state, trap_word(wrapping(state + CSV_PENDING_LINE)), trap_word(wrapping(state + CSV_PENDING_COLUMN)), rt_static_text("bare CR is not a record ending"))
+    }
+    if (csv_flag(state, CSV_QUOTED) && !csv_flag(state, CSV_AFTER_QUOTE)) {
+        return csv_error(state, trap_word(wrapping(state + CSV_LINE)), trap_word(wrapping(state + CSV_COLUMN)) + I64{1}, rt_static_text("quoted field ended before its closing quote"))
+    }
+    if (csv_flag(state, CSV_ENDED) || !csv_flag(state, CSV_SAW_INPUT)) { return I64{0} }
     csv_set(state, CSV_QUOTED, false)
     csv_set(state, CSV_AFTER_QUOTE, false)
     csv_finish_record(state)
@@ -220,7 +245,7 @@ csv_parse: fn(text: I64, out: I64) -> I64 {
         failure = csv_push(state, wrapping(data + at), width)
         at += width
     }
-    if (failure == I64{0}) -> failure = csv_finish(state)
+    if (failure == I64{0}) { failure = csv_finish(state) }
     csv_record_free(trap_word(wrapping(state + CSV_FIELDS)))
     jet_rt_string_drop(jet_rt_string_builder_finish(trap_word(wrapping(state + CSV_FIELD))))
     records: trap_word(wrapping(state + CSV_RECORDS))
@@ -292,10 +317,8 @@ csv_invoke: fn(invoke: I64, tree: I64, value: I64, status: I64, errors: I64, cou
             stopped = true
             next
         }
-        if (consumed != I64{0}) -> panic("typed CSV lends its Dyn input")
-        if (trap_word(outs) != I64{0}) {
-            coll_list_push(decoded, slot, meta)
-        } else {
+        if (consumed != I64{0}) { panic("typed CSV lends its Dyn input") }
+        if (trap_word(outs) != I64{0}) { coll_list_push(decoded, slot, meta) } else {
             count: trap_word(wrapping(outs + I64{16}))
             if (count != I64{0}) {
                 found: trap_word(wrapping(outs + I64{8}))
@@ -342,9 +365,11 @@ csv_invoke: fn(invoke: I64, tree: I64, value: I64, status: I64, errors: I64, cou
     stride: trap_word(meta)
     bytes: length * stride
     data: if (bytes == I64{0}) -> I64{0} else -> jet_rt_alloc(bytes, I64{8})
-    if (bytes != I64{0}) -> coll_copy(trap_word(wrapping(decoded + I64{16})), data, bytes)
+    if (bytes != I64{0}) { coll_copy(trap_word(wrapping(decoded + I64{16})), data, bytes) }
     capacity: trap_word(wrapping(decoded + I64{8}))
-    if (capacity != I64{0}) -> jet_rt_free(trap_word(wrapping(decoded + I64{16})), capacity * stride, I64{8})
+    if (capacity != I64{0}) {
+        jet_rt_free(trap_word(wrapping(decoded + I64{16})), capacity * stride, I64{8})
+    }
     jet_rt_free(decoded, I64{24}, I64{8})
     trap_store(values, length)
     trap_store(wrapping(values + I64{8}), length)

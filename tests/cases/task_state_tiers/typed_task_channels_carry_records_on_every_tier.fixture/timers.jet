@@ -14,9 +14,7 @@ Order: struct {
     tags: [String]
 }
 
-show: fn(order: Order) -> String {
-    "{order.id} {order.item} [{order.tags.join(",")}]"
-}
+show: fn(order: Order) -> String { "{order.id} {order.item} [{order.tags.join(",")}]" }
 
 state: fn<T>(value: T?) -> String {
     if value == {
@@ -27,7 +25,7 @@ state: fn<T>(value: T?) -> String {
 
 run: fn() {
     task.group g {
-        { sender, receiver }: channel<Order>(1)
+        (sender, receiver): channel<Order>(1)
         producer: task &&sender {
             sender.send(Order{id: 4, item: "soup", tags: [String]{"warm"}})
             sender.close()

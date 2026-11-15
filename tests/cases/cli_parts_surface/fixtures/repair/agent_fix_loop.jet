@@ -8,30 +8,52 @@ use {
     json: core.encoding.json
 }
 
-S1RepairFile: struct { path: String, source: String }
-S1RepairEdit: struct { code: String, file: String, start: Int, end: Int, new_text: String }
-S1RepairReport: struct { code: String, edits: [S1RepairEdit] }
-S1RepairDone: struct { state: [S1RepairFile], rounds: Int }
+S1RepairFile: struct {
+    path: String
+    source: String
+}
+
+S1RepairEdit: struct {
+    code: String
+    file: String
+    start: Int
+    end: Int
+    new_text: String
+}
+
+S1RepairReport: struct {
+    code: String
+    edits: [S1RepairEdit]
+}
+
+S1RepairDone: struct {
+    state: [S1RepairFile]
+    rounds: Int
+}
 
 s1_repair_field: fn(tree: encoding.Dyn, key: String) -> encoding.Dyn {
     tree.field(key) ?? panic("machine report missing {key}")
 }
+
 s1_repair_string: fn(tree: encoding.Dyn, key: String) -> String {
     value: s1_repair_field(tree, key)
     value.text() ?? panic("machine report {key} is not a string")
 }
+
 s1_repair_usize: fn(tree: encoding.Dyn, key: String) -> Int {
     value: s1_repair_field(tree, key)
     number: value.int() ?? panic("machine report {key} is not an integer")
     assert(number >= 0, "machine report {key} is negative")
     number
 }
+
 s1_repair_array: fn(value: encoding.Dyn) -> [encoding.Dyn] {
     if value == {
         .Array(items) -> return items
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> panic("machine status reports/fix_edits is not an array")
     }
 }
+
 s1_repair_parse_report: fn(value: encoding.Dyn) -> S1RepairReport {
     // The live machine report schema: jet.report/v3 inside a jet.status/v1 envelope.
     assert_eq(s1_repair_string(value, "schema"), "jet.report/v3")
@@ -39,18 +61,24 @@ s1_repair_parse_report: fn(value: encoding.Dyn) -> S1RepairReport {
     edits := [S1RepairEdit]{}
     loop edit in s1_repair_array(s1_repair_field(value, "fix_edits")) {
         span: s1_repair_field(edit, "span")
-        edits.push(S1RepairEdit{
-            code: code.copy(), file: s1_repair_string(edit, "file"),
-            start: s1_repair_usize(span, "start"), end: s1_repair_usize(span, "end"),
-            new_text: s1_repair_string(edit, "new_text"),
-        })
+        edits.push(
+            S1RepairEdit{
+                code: code.copy(),
+                file: s1_repair_string(edit, "file"),
+                start: s1_repair_usize(span, "start"),
+                end: s1_repair_usize(span, "end"),
+                new_text: s1_repair_string(edit, "new_text"),
+            },
+        )
     }
     S1RepairReport{code: code, edits: edits}
 }
+
 s1_repair_parse_reports: fn(status: encoding.Dyn) -> [S1RepairReport] {
     assert_eq(s1_repair_string(status, "schema"), "jet.status/v1")
     loop value in s1_repair_array(s1_repair_field(status, "reports")) -> s1_repair_parse_report(value)
 }
+
 s1_repair_check: fn(dir: String, jet: String, state: [S1RepairFile]) -> [S1RepairReport] {
     loop file in state -> files.write(file.path, file.source) ?? panic("fixture write")
     reports := [S1RepairReport]{}
@@ -73,13 +101,17 @@ s1_repair_check: fn(dir: String, jet: String, state: [S1RepairFile]) -> [S1Repai
     }
     reports
 }
+
 s1_repair_same: fn(left: [S1RepairFile], right: [S1RepairFile]) -> Bool Never! {
     if left.len() != right.len() -> return false
     loop index in 0..<left.len() {
-        if left[index].path != right[index].path || left[index].source != right[index].source -> return false
+        if left[index].path != right[index].path || left[index].source != right[index].source {
+            return false
+        }
     }
     true
 }
+
 s1_repair_codes: fn(reports: [S1RepairReport]) -> [String] Never! {
     codes := [String]{}
     loop report in reports {
@@ -88,16 +120,24 @@ s1_repair_codes: fn(reports: [S1RepairReport]) -> [String] Never! {
     codes.sort()
     codes
 }
+
 #Error
-S1RepairError: enum { Failed(String) }
+S1RepairError: enum {
+    Failed(String)
+}
+
 s1_repair_apply: fn(state: [S1RepairFile], reports: [S1RepairReport]) -> [S1RepairFile] S1RepairError! {
     // surface.rs1404-1453: group edits by file, reject untracked files, descending spans.
     paths := [String]{}
     loop file in state -> paths.push(file.path)
     loop report in reports {
-        if report.edits.len() == 0 -> return Err(S1RepairError.Failed("report {report.code} has no fix_edits"))
+        if report.edits.len() == 0 {
+            return Err(S1RepairError.Failed("report {report.code} has no fix_edits"))
+        }
         loop edit in report.edits {
-            if !paths.contains(edit.file) -> return Err(S1RepairError.Failed("fix_edit for {edit.code} names untracked file {edit.file}"))
+            if !paths.contains(edit.file) {
+                return Err(S1RepairError.Failed("fix_edit for {edit.code} names untracked file {edit.file}"))
+            }
         }
     }
     next_state := [S1RepairFile]{}
@@ -139,6 +179,7 @@ s1_repair_apply: fn(state: [S1RepairFile], reports: [S1RepairReport]) -> [S1Repa
     }
     Ok(next_state)
 }
+
 s1_repair_loop: fn(initial: [S1RepairFile], max_rounds: Int, dir: String, jet: String) -> S1RepairDone S1RepairError! {
     state := initial
     seen := [[S1RepairFile]]{}
@@ -149,16 +190,22 @@ s1_repair_loop: fn(initial: [S1RepairFile], max_rounds: Int, dir: String, jet: S
         if reports.len() == 0 -> return Ok(S1RepairDone{state: state, rounds: round})
         codes: s1_repair_codes(reports)
         loop old in seen {
-            if s1_repair_same(old, state) -> return Err(S1RepairError.Failed("repeated file state; offending code(s): {codes.join(", ")}"))
+            if s1_repair_same(old, state) {
+                return Err(S1RepairError.Failed("repeated file state; offending code(s): {codes.join(", ")}"))
+            }
         }
         if has_previous {
             introduced := [String]{}
             loop code in codes {
                 if !previous_codes.contains(code) -> introduced.push(code)
             }
-            if introduced.len() != 0 -> return Err(S1RepairError.Failed("fix_edit regression introduced report code(s): {introduced.join(", ")}"))
+            if introduced.len() != 0 {
+                return Err(S1RepairError.Failed("fix_edit regression introduced report code(s): {introduced.join(", ")}"))
+            }
         }
-        if round == max_rounds -> return Err(S1RepairError.Failed("round bound {max_rounds} exceeded; offending code(s): {codes.join(", ")}"))
+        if round == max_rounds {
+            return Err(S1RepairError.Failed("round bound {max_rounds} exceeded; offending code(s): {codes.join(", ")}"))
+        }
         seen.push(state.copy())
         if s1_repair_apply(state, reports) == {
             .Ok(next_state) -> state = next_state
@@ -169,6 +216,7 @@ s1_repair_loop: fn(initial: [S1RepairFile], max_rounds: Int, dir: String, jet: S
     }
     panic("repair loop unreachable")
 }
+
 #Test("agent fix loop corpus converges without report regression") {
     dir: sys.current_dir() ?? panic("cwd")
     jet: sys.get("JET_BIN") ?? panic("JET_BIN")
@@ -196,12 +244,18 @@ s1_repair_loop: fn(initial: [S1RepairFile], max_rounds: Int, dir: String, jet: S
             assert(found, "one repair-loop round must report edits for every fixture file")
         }
     }
-    loop count in counts -> assert(count > 0, "one repair-loop round must report edits for every fixture file")
+    loop count in counts {
+        assert(count > 0, "one repair-loop round must report edits for every fixture file")
+    }
     assert(counts[1] >= 3, "run.jet needs several errors")
     assert(counts[0] >= 3, "helper.jet needs several errors")
     if s1_repair_loop(initial.copy(), 0, dir, jet) == {
-        .Err(error) -> if error == {
-            .Failed(reason) -> assert(reason.contains("round bound 0") && reason.contains("E0102"), "bound failure must name offending code")
+        .Err(error) -> {
+            if error == {
+                .Failed(reason) -> {
+                    assert(reason.contains("round bound 0") && reason.contains("E0102"), "bound failure must name offending code")
+                }
+            }
         }
         .Ok(_) -> panic("expected bound failure")
     }

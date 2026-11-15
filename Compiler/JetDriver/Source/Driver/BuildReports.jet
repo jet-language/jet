@@ -5,30 +5,44 @@ use {
     jetpack_foundation.[BuildEffect]
     core.build.[BuildGraph, BuildGraphAction, BuildGraphFile]
     jet_build_session.[
-        BuildSessionAction, BuildSessionGeneratedModule, BuildSessionPlan, BuildSessionState, build_key_debug_text,
-        build_key_target_kind, build_session_project,
+        BuildSessionAction,
+        BuildSessionGeneratedModule,
+        BuildSessionPlan,
+        BuildSessionState,
+        build_key_debug_text,
+        build_key_target_kind,
+        build_session_project,
     ]
 }
 
-JetDriverBuildExplanation: struct { label: String provenance: [String] }
+JetDriverBuildExplanation: struct {
+    label: String
+    provenance: [String]
+}
+
 jet_driver_build_strings: fn(values: [String]) -> String Never! {
     rows: loop value in values -> foundation_json_quote(value)
     "[{rows.join(",")}]"
 }
+
 jet_driver_build_ints: fn(values: [Int]) -> String Never! {
     rows: loop value in values -> "{value}"
     "[{rows.join(",")}]"
 }
+
 jet_driver_build_id: fn(value: Int?) -> String Never! {
     if value == .Val(id) -> { "{id}" } else -> { "null" }
 }
+
 jet_driver_build_debug_ids: fn(values: [Int], kind: String) -> String Never! {
     rows: loop value in values -> "{kind}({value})"
     "[{rows.join(", ")}]"
 }
+
 jet_driver_build_file_json: fn(file: BuildGraphFile) -> String Never! {
     "{{\"path\":{foundation_json_quote(file.path)},\"owner\":{jet_driver_build_id(file.owner)},\"consumers\":{jet_driver_build_ints(file.consumers)},\"targets\":{jet_driver_build_ints(file.targets)}}}"
 }
+
 // A step is reused unless one of its effects is ambient, in the executor's words.
 jet_driver_build_action_reuse: fn(action: BuildSessionAction) -> String Never! {
     loop cap in action.caps {
@@ -37,20 +51,26 @@ jet_driver_build_action_reuse: fn(action: BuildSessionAction) -> String Never! {
     }
     "Reusable"
 }
+
 jet_driver_build_action_provenance: fn(action: BuildSessionAction) -> [String] Never! {
     [String]{"argv={action.argv.join(" ")}", "inputs={action.inputs.len()}", "outputs={action.outputs.len()}", "reuse={jet_driver_build_action_reuse(action)}"}
 }
+
 jet_driver_build_explanation: fn(plan: BuildSessionPlan, subject: String) -> JetDriverBuildExplanation Never! {
     permit: plan.storage.guard_read()
     loop target in permit.value.targets {
         // copy: `subject` is the caller's query argument (a read parameter), and the explanation
         // owns its label.
-        if target.name == subject -> return {label: subject.copy(), provenance: [String]{"kind={build_key_target_kind(target.kind)}", "sources={target.sources.len()}", "deps={target.deps.len()}", "actions={target.actions.len()}"}}
+        if target.name == subject {
+            return {label: subject.copy(), provenance: [String]{"kind={build_key_target_kind(target.kind)}", "sources={target.sources.len()}", "deps={target.deps.len()}", "actions={target.actions.len()}"}}
+        }
     }
     loop action in permit.value.actions {
         // copy: `subject` is the caller's query argument (a read parameter), and the explanation
         // owns its label.
-        if action.name == subject -> return {label: subject.copy(), provenance: jet_driver_build_action_provenance(action)}
+        if action.name == subject {
+            return {label: subject.copy(), provenance: jet_driver_build_action_provenance(action)}
+        }
     }
     graph: build_session_project(permit.value)
     owner := "None"
@@ -69,7 +89,9 @@ jet_driver_build_explanation: fn(plan: BuildSessionPlan, subject: String) -> Jet
             facts.push("generated={generated_row.name}")
             facts.push("id={generated_row.identity}")
             facts.push("digest={generated_row.source_digest}")
-            if generated_row.producer != None -> facts.push("made_by={jet_driver_build_generated_maker(generated_row)}")
+            if generated_row.producer != None {
+                facts.push("made_by={jet_driver_build_generated_maker(generated_row)}")
+            }
             loop step in generated_row.handoffs -> facts.push("handed={step}")
             if generated_row.authority == .Val(authority) -> facts.push("authority={authority}")
             if generated_row.consent == .Val(consent) -> facts.push("consent={consent}")
@@ -80,6 +102,7 @@ jet_driver_build_explanation: fn(plan: BuildSessionPlan, subject: String) -> Jet
     // its label.
     {label: subject.copy(), provenance: facts.move()}
 }
+
 jet_driver_build_plan_json: fn(plan: BuildSessionPlan) -> String Never! {
     permit: plan.storage.guard_read()
     graph: build_session_project(permit.value)
@@ -91,7 +114,11 @@ jet_driver_build_plan_json: fn(plan: BuildSessionPlan) -> String Never! {
     loop action in graph.actions {
         real: permit.value.actions[action.id]
         probe_rows: loop probe in real.probes -> foundation_json_quote(permit.value.probes[probe].name)
-        hit: if action.cache_hit == .Val(value) -> { if value -> { "hit" } else -> { "miss" } } else -> { "unknown" }
+        hit: if action.cache_hit == .Val(value) -> {
+            if value -> { "hit" } else -> { "miss" }
+        } else -> {
+            "unknown"
+        }
         provenance: jet_driver_build_action_provenance(real)
         actions.push("{{\"id\":{action.id},\"name\":{foundation_json_quote(action.name)},\"inputs\":{jet_driver_build_strings(action.inputs)},\"outputs\":{jet_driver_build_strings(action.outputs)},\"caps\":{jet_driver_build_strings(action.caps)},\"pools\":{jet_driver_build_strings(action.pools)},\"toolchain\":{foundation_json_quote(permit.value.toolchains[real.toolchain].name)},\"probes\":[{probe_rows.join(",")}],\"reuse\":{foundation_json_quote(jet_driver_build_action_reuse(real))},\"cache_status\":{foundation_json_quote(hit)},\"key\":{foundation_json_quote(action.key)},\"compiler_owned\":{action.compiler_owned},\"provenance\":{jet_driver_build_strings(provenance)}}}")
     }
@@ -102,14 +129,20 @@ jet_driver_build_plan_json: fn(plan: BuildSessionPlan) -> String Never! {
     probes := [String]{}
     loop probe in permit.value.probes {
         kind: if probe.kind == {
-            "find_program" -> { "FindProgram {{ program: {build_key_debug_text(probe.value)} }}" }
-            "find_folder" -> { "FindFolder {{ file: {build_key_debug_text(probe.value)} }}" }
-            "pkg_config" -> { "PkgConfig {{ package: {build_key_debug_text(probe.value)}, min_version: None }}" }
-            "header" -> { "HeaderCheck {{ header: {build_key_debug_text(probe.value)} }}" }
-            "compile_check" -> { "CompileCheck {{ name: {build_key_debug_text(probe.value)}, includes: [], code: {build_key_debug_text(probe.code)} }}" }
-            else -> { panic("invalid checked probe kind") }
+            "find_program" -> "FindProgram {{ program: {build_key_debug_text(probe.value)} }}"
+            "find_folder" -> "FindFolder {{ file: {build_key_debug_text(probe.value)} }}"
+            "pkg_config" -> "PkgConfig {{ package: {build_key_debug_text(probe.value)}, min_version: None }}"
+            "header" -> "HeaderCheck {{ header: {build_key_debug_text(probe.value)} }}"
+            "compile_check" -> "CompileCheck {{ name: {build_key_debug_text(probe.value)}, includes: [], code: {build_key_debug_text(probe.code)} }}"
+            else -> {
+                panic("invalid checked probe kind")
+            }
         }
-        reproducibility: if probe.reproducibility == "ambient" -> { "Ambient" } else -> { "Reproducible" }
+        reproducibility: if probe.reproducibility == "ambient" -> {
+            "Ambient"
+        } else -> {
+            "Reproducible"
+        }
         probes.push("{{\"name\":{foundation_json_quote(probe.name)},\"kind\":{foundation_json_quote(kind)},\"reproducibility\":{foundation_json_quote(reproducibility)}}}")
     }
     generated: loop generated_row in permit.value.generated -> jet_driver_build_generated_json(generated_row)
@@ -170,6 +203,7 @@ jet_driver_build_graph_json: fn(graph: BuildGraph, kept: [JetDriverBuildKept], g
     made: loop row in generated -> jet_driver_build_generated_json(row)
     "{{\"targets\":[{targets.join(",")}],\"actions\":[{actions.join(",")}],\"action_keys\":[{keys.join(",")}],\"cache_hits\":[{hits.join(",")}],\"files\":[{files.join(",")}],\"affected_files\":[{affected.join(",")}],\"nodes\":[{nodes.join(",")}],\"kept\":[{held.join(",")}],\"generated\":[{made.join(",")}]}}\n"
 }
+
 jet_driver_build_action_json: fn(action: BuildGraphAction) -> String Never! {
     hit: if action.cache_hit == .Val(value) -> "{value}" else -> "null"
     "{{\"id\":{action.id},\"name\":{foundation_json_quote(action.name)},\"kind\":{foundation_json_quote(action.kind)},\"inputs\":{jet_driver_build_strings(action.inputs)},\"outputs\":{jet_driver_build_strings(action.outputs)},\"target\":{jet_driver_build_id(action.target)},\"caps\":{jet_driver_build_strings(action.caps)},\"pools\":{jet_driver_build_strings(action.pools)},\"plugin\":{jet_driver_build_id(action.plugin)},\"compiler_owned\":{action.compiler_owned},\"key\":{foundation_json_quote(action.key)},\"cache_hit\":{hit}}}"
@@ -192,6 +226,7 @@ JetDriverBuildTime: struct {
     wall_ms: Int
     reused: Bool
 }
+
 jet_driver_build_times_json: fn(rows: [JetDriverBuildTime]) -> String Never! {
     written: loop row in rows -> "{{\"name\":{foundation_json_quote(row.name)},\"kind\":{foundation_json_quote(row.kind)},\"wall_ms\":{row.wall_ms},\"reused\":{row.reused}}}"
     "{{\"rows\":[{written.join(",")}]}}\n"

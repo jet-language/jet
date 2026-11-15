@@ -17,11 +17,15 @@ use {
 }
 
 JET_CLI_CRASH_BUILD: "Build "
+
 JET_CLI_CRASH_NAMES: " (names and lines: jet crash)"
+
 JET_CLI_CRASH_FRAME: "  0x"
 
 jet_cli_crash: fn(args: [String], color: Bool) -[FS, Env, IO]> JetCLIPlan Never! {
-    if args.len() > 1 -> return jet_cli_fail("E2104", "`jet crash` takes no arguments, but got `{args[1]}`", jet_cli_why("E2104"), "Pipe the report in instead: `jet crash < report.txt`.", color, JET_DRIVER_EXIT_USAGE)
+    if args.len() > 1 {
+        return jet_cli_fail("E2104", "`jet crash` takes no arguments, but got `{args[1]}`", jet_cli_why("E2104"), "Pipe the report in instead: `jet crash < report.txt`.", color, JET_DRIVER_EXIT_USAGE)
+    }
     text: cli_term.read_all_input() ?? return jet_cli_fail("E2105", "failed to read from stdin", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USAGE)
     lines: text.split("\n").to_list()
     build := -1
@@ -92,13 +96,9 @@ jet_cli_crash_hex: fn(text: String) -> Int? Never! {
     value := 0
     loop byte in text.bytes() {
         digit: Int{byte}
-        if digit >= 48 && digit <= 57 {
-            value = value * 16 + digit - 48
-        } else if digit >= 97 && digit <= 102 {
+        if digit >= 48 && digit <= 57 -> value = value * 16 + digit - 48 else if digit >= 97 && digit <= 102 {
             value = value * 16 + digit - 87
-        } else {
-            return None
-        }
+        } else { return None }
     }
     Val(value)
 }
@@ -117,7 +117,9 @@ jet_cli_crash_side: fn(store: String) -[FS, Env]> String? Never! {
 // The E3012 row's What, for the function `name`.
 jet_cli_crash_stop_what: fn(name: String) -> String Never! {
     row: diagnostic_registry_row("E3012") ?? panic("E3012 is not registered")
-    if !row.what.ends_with(" in `{{fn_name}}`") -> panic("E3012's What no longer ends in its function")
+    if !row.what.ends_with(" in `{{fn_name}}`") {
+        panic("E3012's What no longer ends in its function")
+    }
     row.what.replace("{{fn_name}}", name)
 }
 
@@ -163,9 +165,7 @@ jet_cli_crash_fault: fn(head: String, backtrace: Bool, addresses: [Int], table: 
         function: table.functions[found]
         if x64_jetline_line(table, function, pc) == .Val(line) {
             out = "{out}  {function.name} at {function.file}:{line}\n"
-        } else {
-            out = "{out}  {function.name}\n"
-        }
+        } else { out = "{out}  {function.name}\n" }
     }
     out
 }
@@ -194,9 +194,7 @@ jet_cli_crash_source: fn(function: X64JetlineFunction) -[FS]> String? Never! {
     Val(String.from_bytes(bytes[start..<end]) ?? return None)
 }
 
-jet_cli_crash_blank: fn(byte: Int) -> Bool Never! {
-    byte == 32 || byte == 9 || byte == 13
-}
+jet_cli_crash_blank: fn(byte: Int) -> Bool Never! { byte == 32 || byte == 9 || byte == 13 }
 
 jet_cli_crash_bytes: fn(path: String) -[FS]> [U8]? Never! {
     Val(cli_files.read_bytes(path) ?? return None)

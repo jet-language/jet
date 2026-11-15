@@ -44,7 +44,9 @@ use {
 sema_enum_numbers_expand: fn(items: &[Item], source: String, diagnostics: &[Diagnostic]) {
     loop index in 0..<items.len() {
         if items[index] == .Struct(definition) {
-            if sema_enum_numbers_marker(definition.type_markers, "Specified") == .Val(specified) -> diagnostics.push(sema_enum_numbers_unnumbered_specified(specified, "struct `{definition.name}`, which has no cases"))
+            if sema_enum_numbers_marker(definition.type_markers, "Specified") == .Val(specified) {
+                diagnostics.push(sema_enum_numbers_unnumbered_specified(specified, "struct `{definition.name}`, which has no cases"))
+            }
         }
         if items[index] == .Enum(definition) {
             sema_enum_numbers_check_specified(definition, diagnostics)
@@ -79,7 +81,9 @@ sema_enum_numbers_check_specified: fn(definition: EnumDef, diagnostics: &[Diagno
     next_number := 0
     loop variant in definition.variants {
         if variant.discriminant_expr == .Val(expression) {
-            if sema_enum_numbers_literal(expression) == .Val(written) -> next_number = if written == 9223372036854775807 -> written else -> written + 1
+            if sema_enum_numbers_literal(expression) == .Val(written) {
+                next_number = if written == 9223372036854775807 -> written else -> written + 1
+            }
             next
         }
         diagnostics.push(sema_error("E1124", variant.name_span, "case `{variant.name}` of `{definition.name}` states no number", "`#Specified` makes every case of `{definition.name}` state its number, so adding or moving a case renumbers no other", "write the number: `{variant.name} = {next_number}`"))
@@ -104,7 +108,9 @@ sema_enum_numbers_checked: fn(definition: EnumDef, backing: String, source: Stri
     loop variant in definition.variants {
         if !(variant.payload == .Unit) {
             diagnostic := sema_error("E1120", marker.span, "`#Layout({backing})` backs only a payload-free enum, and case `{variant.name}` of `{definition.name}` carries a payload", "a backing type gives each case one number; a case with fields is more than a number", "remove the payload from `{variant.name}`, or remove `#Layout({backing})` and convert with your own methods")
-            if sema_enum_numbers_marker_removal(marker, source) == .Val(edit) -> diagnostic = diagnostic_with_edit(diagnostic, edit)
+            if sema_enum_numbers_marker_removal(marker, source) == .Val(edit) {
+                diagnostic = diagnostic_with_edit(diagnostic, edit)
+            }
             diagnostics.push(diagnostic)
             return None
         }
@@ -148,7 +154,9 @@ sema_enum_numbers_checked: fn(definition: EnumDef, backing: String, source: Stri
         next_number = if number == 9223372036854775807 -> number else -> number + 1
     }
     if first_range >= 0 {
-        if sema_enum_numbers_widened(marker, backing, numbers) == .Val(edit) -> diagnostics[first_range] = diagnostic_with_edit(diagnostics[first_range], edit)
+        if sema_enum_numbers_widened(marker, backing, numbers) == .Val(edit) {
+            diagnostics[first_range] = diagnostic_with_edit(diagnostics[first_range], edit)
+        }
     }
     if !valid -> return None
     Val(numbers)
@@ -167,7 +175,9 @@ sema_enum_numbers_widened: fn(marker: Marker, backing: String, numbers: [Int]) -
     }
     candidates: if least < 0 || backing.starts_with("I") -> [String]{"I8", "I16", "I32", "I64"} else -> [String]{"U8", "U16", "U32", "U64"}
     loop candidate in candidates {
-        if jet_layout_integer_backing_min(candidate) <= least && jet_layout_integer_backing_max(candidate) >= greatest -> return Val(TextEdit{span: expr_span(written), new_text: candidate})
+        if jet_layout_integer_backing_min(candidate) <= least && jet_layout_integer_backing_max(candidate) >= greatest {
+            return Val(TextEdit{span: expr_span(written), new_text: candidate})
+        }
     }
     None
 }
@@ -182,10 +192,14 @@ sema_enum_numbers_marker_removal: fn(marker: Marker, source: String) -> TextEdit
     end: marker.span.end
     if start < 0 || end > raw.len() || start >= end || raw[start] != (U8{35}) -> return None
     line_start := start
-    loop line_start > 0 && (raw[line_start - 1] == (U8{32}) || raw[line_start - 1] == (U8{9})) -> line_start -= 1
+    loop line_start > 0 && (raw[line_start - 1] == (U8{32}) || raw[line_start - 1] == (U8{9})) {
+        line_start -= 1
+    }
     if line_start > 0 && raw[line_start - 1] != (U8{10}) -> return None
     line_end := end
-    loop line_end < raw.len() && (raw[line_end] == (U8{32}) || raw[line_end] == (U8{9}) || raw[line_end] == (U8{13})) -> line_end += 1
+    loop line_end < raw.len() && (raw[line_end] == (U8{32}) || raw[line_end] == (U8{9}) || raw[line_end] == (U8{13})) {
+        line_end += 1
+    }
     if line_end >= raw.len() || raw[line_end] != (U8{10}) -> return None
     Val(TextEdit{span: Span{start: line_start, end: line_end + 1}, new_text: ""})
 }
@@ -219,10 +233,14 @@ sema_enum_numbers_literal: fn(expression: Expr) -> Int? {
 // type can't hold apart from a number it holds that no case has.
 sema_enum_numbers_methods: fn(definition: EnumDef, backing: String, numbers: [Int], diagnostics: &[Diagnostic]) -> [Func]? {
     has_to_int: loop method in definition.methods {
-        if method.name == "to_int" -> break true
+        if method.name == "to_int" {
+            break true
+        }
     } ?? false
     has_from_int: loop method in definition.methods {
-        if method.name == "from_int" -> break true
+        if method.name == "from_int" {
+            break true
+        }
     } ?? false
     if has_to_int && has_from_int -> return Val([Func]{})
     name: definition.name
@@ -230,7 +248,9 @@ sema_enum_numbers_methods: fn(definition: EnumDef, backing: String, numbers: [In
     out.push("impl {name} {{\n")
     if !has_to_int {
         out.push("    to_int: fn(self) -> Int Never! {{\n        if self == {{\n")
-        loop index in 0..<numbers.len() -> out.push("            .{definition.variants[index].name} -> {numbers[index]}\n")
+        loop index in 0..<numbers.len() {
+            out.push("            .{definition.variants[index].name} -> {numbers[index]}\n")
+        }
         out.push("        }}\n    }}\n")
     }
     if !has_from_int {
@@ -240,9 +260,13 @@ sema_enum_numbers_methods: fn(definition: EnumDef, backing: String, numbers: [In
         greatest: jet_layout_integer_backing_max(backing)
         if least > -9223372036854775807 - 1 -> outside.push("value < {least}")
         if greatest < 9223372036854775807 -> outside.push("value > {greatest}")
-        if outside.len() > 0 -> out.push("        if {outside.join(" || ")} -> return Err(\"{{value}} doesn't fit `{backing}`, the backing of `{name}`\")\n")
+        if outside.len() > 0 {
+            out.push("        if {outside.join(" || ")} -> return Err(\"{{value}} doesn't fit `{backing}`, the backing of `{name}`\")\n")
+        }
         out.push("        if value == {{\n")
-        loop index in 0..<numbers.len() -> out.push("            {numbers[index]} -> Ok({name}.{definition.variants[index].name})\n")
+        loop index in 0..<numbers.len() {
+            out.push("            {numbers[index]} -> Ok({name}.{definition.variants[index].name})\n")
+        }
         out.push("            else -> Err(\"{{value}} is not a case number of `{name}`\")\n        }}\n    }}\n")
     }
     out.push("}}\n")

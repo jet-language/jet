@@ -2,7 +2,6 @@
 // directory `build` made (COMMIT, SEED and BUILD.json) or a release `admit`
 // admitted (RELEASE.json). Both ship
 // the seed files SHA256SUMS lists. Nothing here judges the facts; Gate.jet does.
-
 use {
     crypto: core.crypto
     files: core.files
@@ -18,13 +17,16 @@ SEED_FILES: [String]{"jet", "jet-cc", "jet-cxx", "jet-c++", "jetpack", "jet-runt
 
 // Where a tree declares its Jet version, and the declaration's prefix.
 JET_VERSION_SOURCE: "Jetpack/PackageModel/Source/Manifest/Manifest.jet"
+
 JET_VERSION_PREFIX: "JET_VERSION: \""
 
 // The JET_VERSION the tree at `root` declares, "" when it declares none.
 tree_jet_version: fn(root: String) -[FS]> String Never! {
     text: read_text(files.join(root, JET_VERSION_SOURCE)) ?? return ""
     loop line in text.split("\n").to_list() {
-        if !line.starts_with(JET_VERSION_PREFIX) || !line.ends_with("\"") || line.len() <= JET_VERSION_PREFIX.len() + 1 -> next
+        if !line.starts_with(JET_VERSION_PREFIX) || !line.ends_with("\"") || line.len() <= JET_VERSION_PREFIX.len() + 1 {
+            next
+        }
         return line.slice(JET_VERSION_PREFIX.len()..<line.len() - 1).copy()
     }
     ""
@@ -33,18 +35,31 @@ tree_jet_version: fn(root: String) -[FS]> String Never! {
 // The kinds of problem that block a release. Each blocked run records its
 // problems under these names in the audit trail.
 MISSING_RUNNER: "missing-runner"
+
 FLAKY: "flaky"
+
 SKIPPED: "skipped"
+
 FAILED: "failed"
+
 STALE: "stale"
+
 SIGNING: "signing"
+
 NONDETERMINISM: "nondeterminism"
+
 PARTIAL: "partial-publication"
+
 MISMATCH: "record-mismatch"
+
 MATRIX: "support-matrix"
+
 ADMISSION: "admission"
+
 REMOTE: "remote"
+
 PERSONAL: "personal-information"
+
 INPUT: "input"
 
 #Error
@@ -140,24 +155,25 @@ is_hex: fn(text: String, length: Int) -> Bool Never! {
 }
 
 // The part of `identity` (`jet@VERSION#SHA256`) after the `#`.
-identity_sha: fn(identity: String) -> String Never! {
-    identity.partition("#").tail.copy()
-}
+identity_sha: fn(identity: String) -> String Never! { identity.partition("#").tail.copy() }
 
 // The executable part that holds a jet's identity, and the one that holds
 // the identity of the jet that lowered its runtime (Compiler/JetCli
 // RuntimeEmbed.jet).
 IDENTITY_PART: "jet.identity"
+
 RUNTIME_PACKER_PART: "jet.runtime/IDENTITY"
+
 // The note type of an executable part (Compiler/JetBackend ELF.jet
 // ELF64_JET_PART_NOTE), and its owner, "Jet", as a little-endian word.
 PART_NOTE: 1246056449
+
 PART_OWNER: 0x0074654a
 
 // The little-endian number of `count` bytes at `at` of `bytes`.
 le_number: fn(bytes: [U8], at: Int, count: Int) -> Int Never! {
     value := 0
-    loop k in 0..<count -> value = value + Int{bytes[at + k]} * (1 << (8 * k))
+    loop k in 0..<count -> value += Int{bytes[at + k]} * (1 << (8 * k))
     value
 }
 
@@ -179,7 +195,9 @@ image_part: fn(image: [U8], name: String) -> (at: Int, size: Int)? Never! {
         from: le_number(image, row + 8, 8)
         size: le_number(image, row + 32, 8)
         if from < 0 || size < 16 + descriptor || from + size > image.len() -> next
-        if le_number(image, from, 4) != 4 || le_number(image, from + 8, 4) != PART_NOTE || le_number(image, from + 12, 4) != PART_OWNER -> next
+        if le_number(image, from, 4) != 4 || le_number(image, from + 8, 4) != PART_NOTE || le_number(image, from + 12, 4) != PART_OWNER {
+            next
+        }
         length: le_number(image, from + 4, 4)
         if length < descriptor || 16 + length > size || image[from + 16 + label.len()] != 0 -> next
         named := true
@@ -277,9 +295,7 @@ sums_text: fn(artifacts: [Artifact]) -> String Never! {
     "{lines.join("\n")}\n"
 }
 
-first_line: fn(text: String) -> String Never! {
-    text.partition("\n").head.trim().copy()
-}
+first_line: fn(text: String) -> String Never! { text.partition("\n").head.trim().copy() }
 
 // Reads `dir`. Missing or malformed inputs become problems, so one run
 // reports all of them.
@@ -290,7 +306,9 @@ read_release: fn(dir: String) -[FS]> Release Never! {
     required := [String]{"jet", "jet-runtime", "IDENTITY", "SHA256SUMS"}
     if !admitted -> required.extend([String]{"COMMIT", "SEED", "BUILD.json"})
     loop name in required {
-        if !files.exists(files.join(dir, name)) -> release.problems.push(problem(INPUT, "{dir} lacks {name}: not a release directory `build` made or a release `admit` admitted"))
+        if !files.exists(files.join(dir, name)) {
+            release.problems.push(problem(INPUT, "{dir} lacks {name}: not a release directory `build` made or a release `admit` admitted"))
+        }
     }
     if release.problems.len() > 0 -> return release
     release.identity = first_line(read_text(files.join(dir, "IDENTITY")) ?? "")
@@ -305,7 +323,9 @@ read_release: fn(dir: String) -[FS]> Release Never! {
     provenance_path: files.join(dir, "jet-runtime/provenance.json")
     if files.read_bytes(provenance_path) == .Ok(bytes) {
         release.runtime_provenance_sha256 = sha256_hex(bytes)
-        if read_json(provenance_path) == .Ok(provenance) -> release.runtime_compiler_sha256 = text_field(provenance, "compilerSha256")
+        if read_json(provenance_path) == .Ok(provenance) {
+            release.runtime_compiler_sha256 = text_field(provenance, "compilerSha256")
+        }
     }
     if admitted {
         record: read_json(files.join(dir, "RELEASE.json")) ?? {

@@ -33,7 +33,7 @@ run: fn() {
     received: message.fds.remove(0, .Slot) ?? panic("no descriptor arrived")
     inspect(received)
     if memory.write(4094, "jet".bytes()) == {
-        .Ok(_) -> print("out-of-bounds write accepted")
+        .Ok(_) -> { print("out-of-bounds write accepted") }
         .Err(_) -> print("out-of-bounds write refused")
     }
 
@@ -52,7 +52,7 @@ inspect: fn(received: sys.Fd) {
     retire(received.duplicate() ?? panic("duplicate: {err}"))
 }
 
-retire: fn(&&fd: sys.Fd) {
+retire: fn(fd: &&sys.Fd) {
     print(fd.size() ?? panic("duplicate size: {err}"))
     fd.close()
 }

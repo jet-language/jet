@@ -38,9 +38,7 @@ lsp_bool_member: fn(value: Dyn, key: String) -> Bool Never! {
 }
 
 // The member of a request's params.
-lsp_param: fn(params: Dyn?, key: String) -> Dyn? Never! {
-    lsp_member(params ?? return None, key)
-}
+lsp_param: fn(params: Dyn?, key: String) -> Dyn? Never! { lsp_member(params ?? return None, key) }
 
 lsp_is_object: fn(value: Dyn) -> Bool Never! {
     if value == {
@@ -49,7 +47,9 @@ lsp_is_object: fn(value: Dyn) -> Bool Never! {
     }
 }
 
-lsp_invalid_request: fn() -> LSPRPCError Never! { LSPRPCError{code: -32600, message: "Invalid Request"} }
+lsp_invalid_request: fn() -> LSPRPCError Never! {
+    LSPRPCError{code: -32600, message: "Invalid Request"}
+}
 
 // A JSON-RPC 2.0 message: an object whose `method` is a string, whose `id`
 // (when present) is a string, an integer or null, and whose `params` (when
@@ -69,7 +69,9 @@ lsp_parse_rpc_message: fn(body: String) -> Dyn LSPRPCError! {
     if lsp_member(message, "params") == .Val(params) {
         if params == {
             .Array(_) | .Object(_) -> {}
-            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> { return Err(lsp_invalid_request()) }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> {
+                return Err(lsp_invalid_request())
+            }
         }
     }
     Ok(message)

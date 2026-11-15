@@ -57,14 +57,14 @@ break_case: fn(row: String, sentence: Bool) Never! {
     assert_eq(text_public.words("Hi, κόσμε 123."), [String]{"Hi", "κόσμε", "123"})
     assert_eq(text_public.words("hello world's foo"), [String]{"hello", "world's", "foo"})
     assert_eq(text_public.words("can’t 3.14 a.b 1,000"), [String]{"can’t", "3.14", "a.b", "1,000"})
-    assert_eq(text_public.words("a;b"), [String]{"a", "b"}) // MidNum, WB6 needs MidLetter
-    assert_eq(text_public.words("a:b"), [String]{"a:b"}) // WB6/WB7 MidLetter
+    assert_eq(text_public.words("a;b"), [String]{"a", "b"})  // MidNum, WB6 needs MidLetter
+    assert_eq(text_public.words("a:b"), [String]{"a:b"})  // WB6/WB7 MidLetter
     assert_eq(text_public.words("a: b."), [String]{"a", "b"})
-    assert_eq(text_public.words("x²"), [String]{"x", "²"}) // U+00B2 is WB Other, No numeric
-    assert_eq(text_public.words("_foo_bar __ -"), [String]{"_foo_bar"}) // WB13a/b ExtendNumLet
+    assert_eq(text_public.words("x²"), [String]{"x", "²"})  // U+00B2 is WB Other, No numeric
+    assert_eq(text_public.words("_foo_bar __ -"), [String]{"_foo_bar"})  // WB13a/b ExtendNumLet
     assert_eq(text_public.words("カタカナ ひらがな"), [String]{"カタカナ", "ひ", "ら", "が", "な"})
     assert_eq(text_public.words("a  b"), [String]{"a", "b"})
-    assert_eq(text_segments.word_segments("a  b"), [String]{"a", "  ", "b"}) // WB3d
+    assert_eq(text_segments.word_segments("a  b"), [String]{"a", "  ", "b"})  // WB3d
     assert_eq(text_segments.word_segments(""), [String]{})
 }
 
@@ -95,12 +95,12 @@ break_case: fn(row: String, sentence: Bool) Never! {
     assert_eq(text_public.sentences(""), [String]{})
     assert_eq(text_public.sentences("One. Two!"), [String]{"One.", "Two!"})
     assert_eq(text_segments.sentence_segments("One. Two!"), [String]{"One. ", "Two!"})
-    assert_eq(text_public.sentences("Mr. smith went. Home"), [String]{"Mr. smith went.", "Home"}) // SB8
-    assert_eq(text_public.sentences("Pi is 3.14 today."), [String]{"Pi is 3.14 today."}) // SB6
-    assert_eq(text_public.sentences("e.G. Next"), [String]{"e.G.", "Next"}) // SB7 then SB11
-    assert_eq(text_public.sentences("Hello?! World"), [String]{"Hello?!", "World"}) // SB8a
-    assert_eq(text_public.sentences("(Hi.) Next"), [String]{"(Hi.)", "Next"}) // SB9-SB11 Close Sp
-    assert_eq(text_public.sentences("Etc., more"), [String]{"Etc., more"}) // SB8a SContinue
+    assert_eq(text_public.sentences("Mr. smith went. Home"), [String]{"Mr. smith went.", "Home"})  // SB8
+    assert_eq(text_public.sentences("Pi is 3.14 today."), [String]{"Pi is 3.14 today."})  // SB6
+    assert_eq(text_public.sentences("e.G. Next"), [String]{"e.G.", "Next"})  // SB7 then SB11
+    assert_eq(text_public.sentences("Hello?! World"), [String]{"Hello?!", "World"})  // SB8a
+    assert_eq(text_public.sentences("(Hi.) Next"), [String]{"(Hi.)", "Next"})  // SB9-SB11 Close Sp
+    assert_eq(text_public.sentences("Etc., more"), [String]{"Etc., more"})  // SB8a SContinue
     assert_eq(text_public.sentences("No end"), [String]{"No end"})
 }
 

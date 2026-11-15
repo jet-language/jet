@@ -13,7 +13,7 @@ build_test_root: fn(label: String) -[FS, Env]> String Never! {
 
 build_test_restore_env: fn(name: String, previous: String?) -[Env]> {
     if previous == {
-        .Val(value) -> sys.set(name, value)
+        .Val(value) -> { sys.set(name, value) }
         .None -> { sys.unset(name) ?? panic("restore environment") }
     }
 }
@@ -30,7 +30,9 @@ BUILD_TEST_COPY_SCRIPT: "read -r line < input.txt; printf %s \"$line\" > out.txt
 build_test_require_sandbox: fn() -[FS, Env, Exec, Time.Wait]> Bool {
     if sys.is_linux() && kit_require_tool("bwrap") == None -> return false
     status: foundation_native_sandbox_status()
-    if !status.available -> panic("this fixture needs the native sandbox backend ({status.mechanism}): {status.reason}")
+    if !status.available {
+        panic("this fixture needs the native sandbox backend ({status.mechanism}): {status.reason}")
+    }
     true
 }
 
@@ -60,20 +62,20 @@ build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildP
 #Test("declared build paths: relative paths are accepted, absolute and parent paths are refused") {
     assert_eq(build_path_new("src/main.c") ?? panic("relative path"), "src/main.c")
     if build_path_new("/etc/passwd") == {
-        .Err(error) -> assert(error == HermeticBuildError.InvalidPath("/etc/passwd"))
+        .Err(error) -> { assert(error == HermeticBuildError.InvalidPath("/etc/passwd")) }
         .Ok(_) -> panic("an absolute build path must be refused")
     }
     if build_path_new("../outside") == {
-        .Err(error) -> assert(error == HermeticBuildError.InvalidPath("../outside"))
+        .Err(error) -> { assert(error == HermeticBuildError.InvalidPath("../outside")) }
         .Ok(_) -> panic("a parent build path must be refused")
     }
     if build_path_new("  ") == {
-        .Err(error) -> assert(error == HermeticBuildError.EmptyPath)
+        .Err(error) -> { assert(error == HermeticBuildError.EmptyPath) }
         .Ok(_) -> panic("a blank build path must be refused")
     }
     build := HermeticBuildContext.new()
     if build.action("escape", ActionSpec.new([String]{"cc"}).with_outputs([String]{"../escape.o"})) == {
-        .Err(error) -> assert(error == HermeticBuildError.InvalidPath("../escape.o"))
+        .Err(error) -> { assert(error == HermeticBuildError.InvalidPath("../escape.o")) }
         .Ok(_) -> panic("an escaping output must be refused")
     }
     _: build.action("inside", ActionSpec.new([String]{"cc"}).with_outputs([String]{"build/inside.o"})) ?? panic("an inside output must be accepted")
@@ -82,7 +84,7 @@ build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildP
 #Test("resolve under: normal components join under the base, parent and root components are refused") {
     assert_eq(build_resolve_under("/base", "a/./b") ?? panic("normal path"), "/base/a/b")
     if build_resolve_under("/base", "a/../../etc") == {
-        .Ok(_) -> panic("a parent component must not resolve")
+        .Ok(_) -> { panic("a parent component must not resolve") }
         .Err(error) -> assert(error.kind == BuildIOKind.InvalidInput)
     }
     assert(build_resolve_under("/base", "/etc/passwd") == .Err(_))
@@ -94,7 +96,9 @@ build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildP
     marker: files.join(root, "ran")
     plan: build_test_plan([BuildEffect]{BuildEffect.Exec, BuildEffect.Net}, "printf ran > '{marker}'; {BUILD_TEST_COPY_SCRIPT}")
     if build_execute_build_plan(plan, root, None, [BuildEffect]{BuildEffect.Exec}) == {
-        .Err(error) -> assert(error == BuildExecutionError.MissingGrant{action: "write", capability: BuildEffect.Net})
+        .Err(error) -> {
+            assert(error == BuildExecutionError.MissingGrant{action: "write", capability: BuildEffect.Net})
+        }
         .Ok(_) -> panic("an ungranted Net ability must be refused")
     }
     assert(!files.exists(marker))
@@ -124,7 +128,9 @@ build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildP
     target: build.add_executable("probed", TargetSpec.new().with_probe(probe)) ?? panic("target")
     plan: build.plan_with_default(target) ?? panic("plan")
     if build_execute_build_plan(plan, root, None, [BuildEffect]{}) == {
-        .Err(error) -> assert(error == BuildExecutionError.MissingGrant{action: "probe has-sh", capability: BuildEffect.Exec})
+        .Err(error) -> {
+            assert(error == BuildExecutionError.MissingGrant{action: "probe has-sh", capability: BuildEffect.Exec})
+        }
         .Ok(_) -> panic("a probe without the Exec grant must be refused")
     }
     result: build_execute_build_plan(plan, root, None, [BuildEffect]{BuildEffect.Exec}) ?? panic("an Exec-granted find_program probe needs no child")
@@ -165,7 +171,9 @@ build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildP
 
 // The allowed neighbour of the refusal above, which needs the native backend.
 #Test("no unsandboxed fallback: with the backend available the same action runs and publishes only its declared output") {
-    if !build_test_require_sandbox() -> return
+    if !build_test_require_sandbox() {
+        return
+    }
     root: build_test_root("available")
     files.write(files.join(root, "input.txt"), "input") ?? panic("input")
     plan: build_test_plan([BuildEffect]{BuildEffect.Exec}, BUILD_TEST_COPY_SCRIPT)
@@ -176,7 +184,9 @@ build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildP
 }
 
 #Test("action reuse: compile caches are off without a store; with one an action with no ambient effect is restored until an input changes, one with an ambient effect always runs") {
-    if !build_test_require_sandbox() -> return
+    if !build_test_require_sandbox() {
+        return
+    }
     root: build_test_root("reuse")
     files.write(files.join(root, "input.txt"), "one") ?? panic("input")
     grants: [BuildEffect]{BuildEffect.Exec, BuildEffect.Time}
@@ -247,7 +257,9 @@ build_test_record_misses: fn(store: BuildArtifactStoreHandle, key: String) -[FS,
 }
 
 #Test("lost cache entries: declared inputs are never published, and a missing or truncated blob or record reads as a miss") {
-    if !build_test_require_sandbox() -> return
+    if !build_test_require_sandbox() {
+        return
+    }
     root: build_test_root("lost-entries")
     files.write(files.join(root, "input.txt"), "kept") ?? panic("input")
     store_root: files.join(root, ".jet-store")
@@ -267,7 +279,7 @@ build_test_record_misses: fn(store: BuildArtifactStoreHandle, key: String) -[FS,
     cc_plan: build.plan() ?? panic("plan")
     action: cc_plan.actions[handle.id]
     digest: lost.put_blob("object".bytes()) ?? panic("blob")
-    record: ActionResultRecord{key: "act-sha256:lost", outcome: ActionOutcome.Succeeded{exit_code: 0}, outputs: [ActionOutputRecord]{ActionOutputRecord{path: "a.o", digest, byte_len: 6}}, failure_report: None, status: ActionCacheStatus.Miss(.NoLocalActionRecord)}
+    record: ActionResultRecord{key: "act-sha256:lost", outcome: ActionOutcome.Succeeded{exit_code: 0}, outputs: [ActionOutputRecord]{ActionOutputRecord{path: "a.o", digest: digest, byte_len: 6}}, failure_report: None, status: ActionCacheStatus.Miss(.NoLocalActionRecord)}
     build_write_action_record(lost, "act-sha256:lost", record) ?? panic("write record")
     assert(!build_test_record_misses(lost, "act-sha256:lost"))
     blob: build_test_blob_path(lost_root, "object".bytes())
@@ -292,12 +304,16 @@ build_test_record_misses: fn(store: BuildArtifactStoreHandle, key: String) -[FS,
     files.symlink(outside, files.join(root, ".jet/build-sandbox")) ?? panic("link sandbox root")
     plan: build_test_plan([BuildEffect]{BuildEffect.Exec}, BUILD_TEST_COPY_SCRIPT)
     if build_execute_build_plan(plan, root, None, [BuildEffect]{BuildEffect.Exec}) == {
-        .Err(error) -> if error == {
-            .IO(action, detail) -> {
-                assert_eq(action, "write")
-                assert(detail.contains("is a symlink"))
+        .Err(error) -> {
+            if error == {
+                .IO(action, detail) -> {
+                    assert_eq(action, "write")
+                    assert(detail.contains("is a symlink"))
+                }
+                .MissingGrant(_, _) | .SandboxUnavailable(_) | .TimedOut(_, _) | .OverCPU(_, _, _, _) | .ProbeFailed(_, _) | .FolderNotFound(_, _, _) | .Reported(_) | .InvalidGraph(_) | .HandEdited(_, _) -> {
+                    panic("a symlinked sandbox root must be an I/O refusal")
+                }
             }
-            .MissingGrant(_, _) | .SandboxUnavailable(_) | .TimedOut(_, _) | .OverCPU(_, _, _, _) | .ProbeFailed(_, _) | .FolderNotFound(_, _, _) | .Reported(_) | .InvalidGraph(_) | .HandEdited(_, _) -> panic("a symlinked sandbox root must be an I/O refusal")
         }
         .Ok(_) -> panic("a symlinked sandbox root must be refused")
     }
@@ -318,7 +334,9 @@ build_test_record_misses: fn(store: BuildArtifactStoreHandle, key: String) -[FS,
     assert_eq(build_secure_read_file(root, files.join(root, "dir/file.txt"), BUILD_MAX_ACTION_FILE_BYTES) ?? panic("regular file"), "inside".bytes())
     assert_eq(build_secure_read_file(root, files.join(root, "dir/file.txt"), 6) ?? panic("a file at its exact limit"), "inside".bytes())
     if build_secure_read_file(root, files.join(root, "dir/file.txt"), 5) == {
-        .Err(error) -> assert(error == BuildIOError.new(.InvalidData, "cache entry exceeds its byte limit"))
+        .Err(error) -> {
+            assert(error == BuildIOError.new(.InvalidData, "cache entry exceeds its byte limit"))
+        }
         .Ok(_) -> panic("a file over its limit must be refused")
     }
     files.symlink(files.join(outside, "secret.txt"), files.join(root, "dir/link.txt")) ?? panic("final link")
@@ -330,7 +348,9 @@ build_test_record_misses: fn(store: BuildArtifactStoreHandle, key: String) -[FS,
         .Ok(_) -> panic("a directory is not a regular file")
     }
     if build_secure_read_file(root, "/etc/hostname", BUILD_MAX_ACTION_FILE_BYTES) == {
-        .Err(error) -> assert(error == BuildIOError.new(.InvalidInput, "cache path escapes root"))
+        .Err(error) -> {
+            assert(error == BuildIOError.new(.InvalidInput, "cache path escapes root"))
+        }
         .Ok(_) -> panic("a path outside the base must be refused")
     }
     files.remove_all(root).drop("test cleanup")
@@ -371,7 +391,9 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     assert(made.success)
     started: time.instant()
     if build_publish_sandbox_outputs(sandbox, root, action) == {
-        .Err(error) -> assert(error == BuildIOError.new(.PermissionDenied, "cache entry is not a regular file"))
+        .Err(error) -> {
+            assert(error == BuildIOError.new(.PermissionDenied, "cache entry is not a regular file"))
+        }
         .Ok(_) -> panic("a FIFO output must be refused")
     }
     assert(started.elapsed_millis() < 3000)
@@ -394,7 +416,9 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     assert_eq((files.stat(big) ?? panic("sparse size")).size, BUILD_MAX_ACTION_FILE_BYTES + 1)
     started: time.instant()
     if build_publish_sandbox_outputs(sandbox, root, action) == {
-        .Err(error) -> assert(error == BuildIOError.new(.InvalidData, "cache entry exceeds its byte limit"))
+        .Err(error) -> {
+            assert(error == BuildIOError.new(.InvalidData, "cache entry exceeds its byte limit"))
+        }
         .Ok(_) -> panic("an oversized output must be refused")
     }
     assert(started.elapsed_millis() < 3000)
@@ -469,7 +493,9 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     assert_eq(files.read(table) ?? panic("hand-edited kept output"), "edited")
     // A kept path must be one of the action's outputs.
     if build.action("stray", ActionSpec.new([String]{"gen"}).with_outputs([String]{"b.o"}).with_kept("c.txt", None)) == {
-        .Err(error) -> assert(error == HermeticBuildError.UndeclaredKeptOutput{action: "stray", output: "c.txt"})
+        .Err(error) -> {
+            assert(error == HermeticBuildError.UndeclaredKeptOutput{action: "stray", output: "c.txt"})
+        }
         .Ok(_) -> panic("a kept path that is not an output must be refused")
     }
     files.remove_all(root).drop("test cleanup")
@@ -539,7 +565,9 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     assert(files.is_dir(files.join(root, "out/bin")))
     files.symlink(outside, files.join(root, "linked")) ?? panic("parent link")
     if build_prepare_output_destination(root, files.join(root, "linked/app")) == {
-        .Err(error) -> assert(error == BuildIOError.new(.PermissionDenied, "build output parent `{files.join(root, "linked")}` is a symlink"))
+        .Err(error) -> {
+            assert(error == BuildIOError.new(.PermissionDenied, "build output parent `{files.join(root, "linked")}` is a symlink"))
+        }
         .Ok(_) -> panic("a linked output parent must be refused")
     }
     files.write(files.join(outside, "victim"), "keep") ?? panic("victim")
@@ -586,9 +614,18 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     files.create_dir_all(files.join(root, "bin")) ?? panic("bin")
     files.write(files.join(root, "bin/cc"), "#!/bin/sh\n") ?? panic("tool")
     toolchain: HermeticBuildToolchain{
-        id: 1, name: "cc", role: ToolchainRole.Target, host_triple: "host", target_triple: "x", sdk: None, linker: None, sysroot: None,
-        tools: [String: String]{}, resolution: ToolchainResolution.DeclaredOnly,
-        mounts: [BuildMount]{BuildMount{source: root, destination: "/toolchain", identity: ""}}, provenance: BuildProvenance.inferred_host(),
+        id: 1,
+        name: "cc",
+        role: ToolchainRole.Target,
+        host_triple: "host",
+        target_triple: "x",
+        sdk: None,
+        linker: None,
+        sysroot: None,
+        tools: [String:String]{},
+        resolution: ToolchainResolution.DeclaredOnly,
+        mounts: [BuildMount]{BuildMount{source: root, destination: "/toolchain", identity: ""}},
+        provenance: BuildProvenance.inferred_host(),
     }
     assert_eq(build_canonical_tool_path(toolchain, "/toolchain/bin/cc") ?? panic("mounted tool"), files.join(root, "bin/cc"))
     assert(build_canonical_tool_path(toolchain, "/toolchain/../etc/passwd") == None)
@@ -601,9 +638,18 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     assert(build_canonical_tool_path(toolchain, "/toolchainx/bin/cc") == None)
     // A non-normalized destination still matches its normalized tool paths.
     nested: HermeticBuildToolchain{
-        id: 2, name: "nested", role: ToolchainRole.Target, host_triple: "host", target_triple: "x", sdk: None, linker: None, sysroot: None,
-        tools: [String: String]{}, resolution: ToolchainResolution.DeclaredOnly,
-        mounts: [BuildMount]{BuildMount{source: root, destination: "/tc//nested/", identity: ""}}, provenance: BuildProvenance.inferred_host(),
+        id: 2,
+        name: "nested",
+        role: ToolchainRole.Target,
+        host_triple: "host",
+        target_triple: "x",
+        sdk: None,
+        linker: None,
+        sysroot: None,
+        tools: [String:String]{},
+        resolution: ToolchainResolution.DeclaredOnly,
+        mounts: [BuildMount]{BuildMount{source: root, destination: "/tc//nested/", identity: ""}},
+        provenance: BuildProvenance.inferred_host(),
     }
     assert_eq(build_canonical_tool_path(nested, "/tc/nested/bin/cc") ?? panic("non-normalized destination"), files.join(root, "bin/cc"))
     assert(build_canonical_tool_path(nested, "/tc/nested//etc/passwd") == None)
@@ -617,17 +663,17 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     foreign: other.toolchain("foreign", ToolchainSpec.host("x86_64-linux", BuildProvenance.inferred_host())) ?? panic("foreign toolchain")
     _: build.action("own", ActionSpec.new([String]{"cc"}).with_outputs([String]{"a.o"}).with_toolchain(own)) ?? panic("a same-context toolchain must be accepted")
     if build.action("foreign", ActionSpec.new([String]{"cc"}).with_outputs([String]{"b.o"}).with_toolchain(foreign)) == {
-        .Err(error) -> assert(error == HermeticBuildError.UnknownToolchain(foreign.id))
+        .Err(error) -> { assert(error == HermeticBuildError.UnknownToolchain(foreign.id)) }
         .Ok(_) -> panic("another context's toolchain must be refused")
     }
     foreign_action: other.action("x", ActionSpec.new([String]{"cc"}).with_outputs([String]{"c.o"})) ?? panic("foreign action")
     if build.add_executable("bad", TargetSpec.new().with_action(foreign_action)) == {
-        .Err(error) -> assert(error == HermeticBuildError.UnknownAction(foreign_action.id))
+        .Err(error) -> { assert(error == HermeticBuildError.UnknownAction(foreign_action.id)) }
         .Ok(_) -> panic("another context's action must be refused")
     }
     foreign_target: other.add_executable("t", TargetSpec.new()) ?? panic("foreign target")
     if build.plan_with_default(foreign_target) == {
-        .Err(error) -> assert(error == HermeticBuildError.UnknownTarget(foreign_target.id))
+        .Err(error) -> { assert(error == HermeticBuildError.UnknownTarget(foreign_target.id)) }
         .Ok(_) -> panic("another context's target must be refused")
     }
 }
@@ -640,7 +686,9 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     env: build_action_environment(plan.actions[handle.id])
     assert_eq(env.keys().to_list(), [String]{"PATH"})
     if build.action("undeclared", ActionSpec.new([String]{"cc"}).with_outputs([String]{"b.o"}).with_env_allowlist([String]{"HOME"})) == {
-        .Err(error) -> assert(error == HermeticBuildError.UndeclaredEnvName{action: "undeclared", key: "HOME"})
+        .Err(error) -> {
+            assert(error == HermeticBuildError.UndeclaredEnvName{action: "undeclared", key: "HOME"})
+        }
         .Ok(_) -> panic("an allowlist name without a declared value must be refused")
     }
 }
@@ -652,7 +700,9 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     assert(build.plan() == .Ok(_))
     build.action("third", ActionSpec.new([String]{"cc"}).with_outputs([String]{"a.o"})) ?? panic("third")
     if build.plan() == {
-        .Err(error) -> assert(error == HermeticBuildError.DuplicateBuildOutput{output: "a.o", first_action: "first", second_action: "third"})
+        .Err(error) -> {
+            assert(error == HermeticBuildError.DuplicateBuildOutput{output: "a.o", first_action: "first", second_action: "third"})
+        }
         .Ok(_) -> panic("a second owner of one output must be refused")
     }
 }
@@ -663,12 +713,14 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     build.action("near", ActionSpec.new([String]{"sh"}).with_outputs([String]{"database.txt"})) ?? panic("near")
     assert(build.plan() == .Ok(_))
     if build.action("escape", ActionSpec.new([String]{"sh"}).with_outputs([String]{"e.txt"}).with_folder("../up", None)) == {
-        .Err(error) -> assert(error == HermeticBuildError.InvalidPath("../up"))
+        .Err(error) -> { assert(error == HermeticBuildError.InvalidPath("../up")) }
         .Ok(_) -> panic("a folder outside the project must be refused")
     }
     build.action("inside", ActionSpec.new([String]{"sh"}).with_outputs([String]{"data/gen.txt"})) ?? panic("inside")
     if build.plan() == {
-        .Err(error) -> assert(error == HermeticBuildError.OutputInFolder{action: "read", output: "data/gen.txt", folder: "data"})
+        .Err(error) -> {
+            assert(error == HermeticBuildError.OutputInFolder{action: "read", output: "data/gen.txt", folder: "data"})
+        }
         .Ok(_) -> panic("an output inside a read folder must be refused")
     }
 }
@@ -682,11 +734,11 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     musl: build.probe("musl", ProbeSpec.find_folder("libc.a")) ?? panic("musl")
     shell: build.probe("shell", ProbeSpec.find_program("sh")) ?? panic("shell")
     if build.action("unused", ActionSpec.new([String]{"sh"}).with_outputs([String]{"a.txt"}).with_found_folder(".jet/found/musl", musl)) == {
-        .Err(error) -> assert(error == HermeticBuildError.UnknownProbe(musl.id))
+        .Err(error) -> { assert(error == HermeticBuildError.UnknownProbe(musl.id)) }
         .Ok(_) -> panic("the action must use the probe that finds its folder")
     }
     if build.action("program", ActionSpec.new([String]{"sh"}).with_outputs([String]{"b.txt"}).with_found_folder(".jet/found/shell", shell).with_probe(shell)) == {
-        .Err(error) -> assert(error == HermeticBuildError.UnknownProbe(shell.id))
+        .Err(error) -> { assert(error == HermeticBuildError.UnknownProbe(shell.id)) }
         .Ok(_) -> panic("only a find_folder probe finds a folder")
     }
     build.action("link", ActionSpec.new([String]{"sh"}).with_outputs([String]{"c.txt"}).with_found_folder(".jet/found/musl", musl).with_probe(musl)) ?? panic("link")
@@ -698,15 +750,15 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     cc: build.probe("cc", ProbeSpec.find_program("cc")) ?? panic("cc")
     musl: build.probe("musl", ProbeSpec.find_folder("libc.a")) ?? panic("musl")
     if build.action("unused", ActionSpec.new([String]{"sh", "cc"}).with_outputs([String]{"a.txt"}).with_found_program(1, "", cc)) == {
-        .Err(error) -> assert(error == HermeticBuildError.UnknownProbe(cc.id))
+        .Err(error) -> { assert(error == HermeticBuildError.UnknownProbe(cc.id)) }
         .Ok(_) -> panic("the action must use the probe that finds its program")
     }
     if build.action("folder", ActionSpec.new([String]{"sh", "libc.a"}).with_outputs([String]{"b.txt"}).with_found_program(1, "", musl).with_probe(musl)) == {
-        .Err(error) -> assert(error == HermeticBuildError.UnknownProbe(musl.id))
+        .Err(error) -> { assert(error == HermeticBuildError.UnknownProbe(musl.id)) }
         .Ok(_) -> panic("only a find_program probe finds a program")
     }
     if build.action("tool", ActionSpec.new([String]{"cc"}).with_outputs([String]{"c.txt"}).with_found_program(0, "", cc).with_probe(cc)) == {
-        .Err(error) -> assert(error == HermeticBuildError.EmptyActionArgv("tool"))
+        .Err(error) -> { assert(error == HermeticBuildError.EmptyActionArgv("tool")) }
         .Ok(_) -> panic("a found program passed to an action is one of its arguments")
     }
     build.action("compile", ActionSpec.new([String]{"sh", "--cc=cc"}).with_outputs([String]{"d.txt"}).with_found_program(1, "--cc=", cc).with_probe(cc)) ?? panic("compile")
@@ -744,12 +796,14 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     second: build_snapshot_folders(stamps, root, plan.actions[0]) ?? panic("second snapshot")
     assert((loop snapshot in second -> snapshot.path).contains("data/c.txt"))
     loop snapshot in second {
-        if snapshot.path == "data/a.txt" -> assert_eq(snapshot.digest, ContentDigest.from_bytes("AA".bytes()))
+        if snapshot.path == "data/a.txt" {
+            assert_eq(snapshot.digest, ContentDigest.from_bytes("AA".bytes()))
+        }
     }
     files.write(files.join(outside, "secret"), "secret") ?? panic("secret")
     files.symlink(files.join(outside, "secret"), files.join(root, "data/link")) ?? panic("link")
     if build_snapshot_folders(stamps, root, plan.actions[0]) == {
-        .Err(error) -> assert(error.kind == BuildIOKind.PermissionDenied)
+        .Err(error) -> { assert(error.kind == BuildIOKind.PermissionDenied) }
         .Ok(_) -> panic("a link out of the folder must be refused")
     }
     files.remove_all(root).drop("test cleanup")
@@ -757,7 +811,9 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
 }
 
 #Test("folder inputs: the folder is bound read-only at its path, and a changed file in it runs the action again") {
-    if !build_test_require_sandbox() -> return
+    if !build_test_require_sandbox() {
+        return
+    }
     root: build_test_root("folder-run")
     files.create_dir_all(files.join(root, "data")) ?? panic("data")
     files.write(files.join(root, "data/a.txt"), "one") ?? panic("a")
@@ -778,7 +834,9 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
 }
 
 #Test("found folders: the folder a find_folder probe chose is bound at its path, and a probe that finds none fails naming each folder") {
-    if !build_test_require_sandbox() -> return
+    if !build_test_require_sandbox() {
+        return
+    }
     root: build_test_root("found-folder")
     lib: build_test_root("found-folder-lib")
     files.write(files.join(lib, "marker.txt"), "found") ?? panic("marker")
@@ -799,15 +857,19 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     missing_target: missing.add_executable("o", TargetSpec.new().with_action(needs)) ?? panic("missing target")
     missing_plan: missing.plan_with_default(missing_target) ?? panic("missing plan")
     if build_execute_build_plan(missing_plan, root, None, [BuildEffect]{BuildEffect.Exec}) == {
-        .Err(error) -> if error == {
-            .FolderNotFound(name, file, searched) -> {
-                assert_eq(name, "absent")
-                assert_eq(file, "jet-test-no-such-file.a")
-                assert_eq(searched[0], "{files.join(root, "none")}: no `jet-test-no-such-file.a`")
-                assert_eq(searched[1], "{lib}: no `jet-test-no-such-file.a`")
-                assert_eq(searched[searched.len() - 1], "/usr/local/musl/lib: no `jet-test-no-such-file.a`")
+        .Err(error) -> {
+            if error == {
+                .FolderNotFound(name, file, searched) -> {
+                    assert_eq(name, "absent")
+                    assert_eq(file, "jet-test-no-such-file.a")
+                    assert_eq(searched[0], "{files.join(root, "none")}: no `jet-test-no-such-file.a`")
+                    assert_eq(searched[1], "{lib}: no `jet-test-no-such-file.a`")
+                    assert_eq(searched[searched.len() - 1], "/usr/local/musl/lib: no `jet-test-no-such-file.a`")
+                }
+                .MissingGrant(_, _) | .SandboxUnavailable(_) | .IO(_, _) | .TimedOut(_, _) | .OverCPU(_, _, _, _) | .ProbeFailed(_, _) | .Reported(_) | .InvalidGraph(_) | .HandEdited(_, _) -> {
+                    panic("a probe that finds no folder fails as FolderNotFound")
+                }
             }
-            .MissingGrant(_, _) | .SandboxUnavailable(_) | .IO(_, _) | .TimedOut(_, _) | .OverCPU(_, _, _, _) | .ProbeFailed(_, _) | .Reported(_) | .InvalidGraph(_) | .HandEdited(_, _) -> panic("a probe that finds no folder fails as FolderNotFound")
         }
         .Ok(_) -> panic("a probe that finds no folder must fail the build")
     }
@@ -824,7 +886,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     plan: build.plan() ?? panic("plan")
     action: plan.actions[handle.id]
     digest: store.put_blob("object".bytes()) ?? panic("blob")
-    record: ActionResultRecord{key: "act-sha256:k", outcome: ActionOutcome.Succeeded{exit_code: 0}, outputs: [ActionOutputRecord]{ActionOutputRecord{path: "a.o", digest, byte_len: 6, executable: true}}, failure_report: None, status: ActionCacheStatus.Miss(.NoLocalActionRecord)}
+    record: ActionResultRecord{key: "act-sha256:k", outcome: ActionOutcome.Succeeded{exit_code: 0}, outputs: [ActionOutputRecord]{ActionOutputRecord{path: "a.o", digest: digest, byte_len: 6, executable: true}}, failure_report: None, status: ActionCacheStatus.Miss(.NoLocalActionRecord)}
     build_write_action_record(store, "act-sha256:k", record) ?? panic("write record")
     read: if build_read_action_record(store, "act-sha256:k") == {
         .Ok(found) -> found
@@ -841,18 +903,24 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     assert(build_owner_executable(files.join(root, "a.o")) ?? panic("restored mode"))
     store.put_record("act-sha256:other", "act-sha256:k\noutcome=succeeded:0\n".bytes()) ?? panic("forged record")
     if build_read_action_record(store, "act-sha256:other") == {
-        .Err(error) -> assert(error == BuildIOError.new(.InvalidData, "action record key does not match its cache path"))
+        .Err(error) -> {
+            assert(error == BuildIOError.new(.InvalidData, "action record key does not match its cache path"))
+        }
         .Ok(_) -> panic("a record naming another key must be refused")
     }
     mismatched := found
-    mismatched.outputs = [ActionOutputRecord]{ActionOutputRecord{path: "b.o", digest, byte_len: 6}}
+    mismatched.outputs = [ActionOutputRecord]{ActionOutputRecord{path: "b.o", digest: digest, byte_len: 6}}
     if build_restore_action_outputs(store, root, action, mismatched) == {
-        .Err(error) -> assert(error == BuildIOError.new(.InvalidData, "cached output record does not exactly match action declarations"))
+        .Err(error) -> {
+            assert(error == BuildIOError.new(.InvalidData, "cached output record does not exactly match action declarations"))
+        }
         .Ok(_) -> panic("a record with other outputs must be refused")
     }
     store.put_record("act-sha256:failed", "act-sha256:failed\noutcome=failed:1\n".bytes()) ?? panic("failed record")
     if build_read_action_record(store, "act-sha256:failed") == {
-        .Err(error) -> assert(error == BuildIOError.new(.InvalidData, "failed action record and failure report disagree"))
+        .Err(error) -> {
+            assert(error == BuildIOError.new(.InvalidData, "failed action record and failure report disagree"))
+        }
         .Ok(_) -> panic("a failed record without its report must be refused")
     }
     files.remove_all(root).drop("test cleanup")
@@ -865,7 +933,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     decoded: build_report_from_json(wire) ?? panic("canonical report")
     assert_eq(build_report_to_json(decoded) ?? panic("decoded report wire"), wire)
     if build_report_from_json(wire.replace(",\"cause\":null", ", \"cause\":null")) == {
-        .Err(error) -> assert_eq(error.message, "error report is not canonical")
+        .Err(error) -> { assert_eq(error.message, "error report is not canonical") }
         .Ok(_) -> panic("a non-canonical report must be refused")
     }
     rendered: build_report_render(report)
@@ -889,13 +957,13 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     executable: build_resolve_program_path(plan, action.toolchain, "sh") ?? panic("sh")
     key: build_canonical_effective_action_key(plan, action, snapshots, [BuildEffect]{BuildEffect.Exec}, ContentDigest.from_bytes(files.read_bytes(executable) ?? panic("sh bytes")), [ContentDigest]{}, [BuildProbeFact]{})
     report: build_action_failure_report("write", 3, "")
-    build_write_action_record(store, key, ActionResultRecord{key, outcome: ActionOutcome.Failed{exit_code: 3}, outputs: [ActionOutputRecord]{}, failure_report: Val(report), status: ActionCacheStatus.Miss(.NoLocalActionRecord)}) ?? panic("record")
+    build_write_action_record(store, key, ActionResultRecord{key: key, outcome: ActionOutcome.Failed{exit_code: 3}, outputs: [ActionOutputRecord]{}, failure_report: Val(report), status: ActionCacheStatus.Miss(.NoLocalActionRecord)}) ?? panic("record")
     previous: sys.get("JETPACK_FAKE_SANDBOX")
     sys.set("JETPACK_FAKE_SANDBOX", "1")
     if build_execute_build_plan(plan, root, Val(store), [BuildEffect]{BuildEffect.Exec}) == {
         .Err(error) -> {
             build_test_restore_env("JETPACK_FAKE_SANDBOX", previous)
-            assert(error == BuildExecutionError.Reported{report})
+            assert(error == BuildExecutionError.Reported{report: report})
         }
         .Ok(_) -> {
             build_test_restore_env("JETPACK_FAKE_SANDBOX", previous)
@@ -906,17 +974,19 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
 }
 
 #Test("action timeout: a child inside its budget completes, one past it is killed, and a pipe-holding descendant is reaped on both paths") {
-    if !build_test_require_sandbox() -> return
+    if !build_test_require_sandbox() {
+        return
+    }
     root: build_test_root("timeout")
     bash: build_find_program_path("bash") ?? panic("bash is required for the sandbox descendant fixtures")
     exit_started: time.instant()
-    quick: foundation_run_native_sandboxed_with_timeout_and_mounts(bash, [String]{"-c", build_test_delayed_descendant("exit-marker", "exit 0")}, root, None, [String: String]{}, false, [NativeSandboxMount]{}, Val(time.duration_ms(5000))) ?? panic("quick child")
+    quick: foundation_run_native_sandboxed_with_timeout_and_mounts(bash, [String]{"-c", build_test_delayed_descendant("exit-marker", "exit 0")}, root, None, [String:String]{}, false, [NativeSandboxMount]{}, Val(time.duration_ms(5000))) ?? panic("quick child")
     assert(quick.receipt.success)
     assert(exit_started.elapsed_millis() < 3000)
     build_test_assert_descendant_reaped(files.join(root, "exit-marker"))
     timeout_started: time.instant()
-    if foundation_run_native_sandboxed_with_timeout_and_mounts(bash, [String]{"-c", build_test_delayed_descendant("timeout-marker", "while :; do :; done")}, root, None, [String: String]{}, false, [NativeSandboxMount]{}, Val(time.duration_ms(500))) == {
-        .Err(error) -> assert(error == NativeSandboxError.TimedOut{limit_ms: 500})
+    if foundation_run_native_sandboxed_with_timeout_and_mounts(bash, [String]{"-c", build_test_delayed_descendant("timeout-marker", "while :; do :; done")}, root, None, [String:String]{}, false, [NativeSandboxMount]{}, Val(time.duration_ms(500))) == {
+        .Err(error) -> { assert(error == NativeSandboxError.TimedOut{limit_ms: 500}) }
         .Ok(_) -> panic("a child past its budget must be killed")
     }
     assert(timeout_started.elapsed_millis() < 3000)
@@ -925,13 +995,17 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
 }
 
 #Test("probe budget: a probe inside its budget completes, one past it is killed and fails") {
-    if !build_test_require_sandbox() -> return
+    if !build_test_require_sandbox() {
+        return
+    }
     bash: build_find_program_path("bash") ?? panic("bash is required for the sandbox probe fixture")
     quick: build_run_probe_sandboxed(bash, [String]{"-c", "exit 0"}, None, time.duration_ms(5000)) ?? panic("quick probe")
     assert(quick.success)
     started: time.instant()
     if build_run_probe_sandboxed(bash, [String]{"-c", "while :; do :; done"}, None, time.duration_ms(500)) == {
-        .Err(error) -> assert(error == BuildExecutionError.IO{action: "build probe sandbox", detail: "sandbox process timed out after 500ms"})
+        .Err(error) -> {
+            assert(error == BuildExecutionError.IO{action: "build probe sandbox", detail: "sandbox process timed out after 500ms"})
+        }
         .Ok(_) -> panic("a probe past its budget must be killed")
     }
     assert(started.elapsed_millis() < 3000)
@@ -983,7 +1057,9 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     destinations: [String]{"toolchain", "/toolchain/../etc"}
     loop destination in destinations {
         if build.toolchain("bad-{destination.len()}", ToolchainSpec.target("x86_64-linux", provenance).with_read_only_mount_identity("/nix/store", destination, "sha256:x")) == {
-            .Err(error) -> assert(error == HermeticBuildError.InvalidPath("toolchain `bad-{destination.len()}` has an invalid read-only mount"))
+            .Err(error) -> {
+                assert(error == HermeticBuildError.InvalidPath("toolchain `bad-{destination.len()}` has an invalid read-only mount"))
+            }
             .Ok(_) -> panic("mount destination `{destination}` must be refused")
         }
     }

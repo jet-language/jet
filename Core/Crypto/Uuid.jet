@@ -6,12 +6,15 @@ use {
     crypto: core.crypto
     random: core.crypto.random
 }
+
 #Error
 UUIDError: struct {
     reason: String
+
     impl Display {
         display: fn(self) -> String { self.reason }
     }
+
     impl Debug {
         debug: fn(&&self) -> String Never! { self.reason }
     }
@@ -63,9 +66,7 @@ v5: fn(namespace: String, name: String) -> String UUIDError! {
     Ok(value)
 }
 
-uuid5: fn(namespace: String, name: String) -> String UUIDError! {
-    v5(namespace, name)
-}
+uuid5: fn(namespace: String, name: String) -> String UUIDError! { v5(namespace, name) }
 
 parse: fn(text: String) -> String UUIDError! {
     bytes: parse_uuid(text) ?? return Err(UUIDError{reason: "invalid UUID text"})

@@ -8,13 +8,12 @@
 // 2^-47 apart. Neither library is correctly rounded: near a zero of the
 // function both lose ulps while keeping the absolute error near 1e-16 times
 // its scale, and on the large values of Y_n the recurrence loses ulps.
-use {
-    math: core.math
-}
+use math: core.math
 
 CORPUS: #run embed_file("corpus/bessel.txt")
 
 ULPS: 256
+
 ABSOLUTE: Float{7.105427357601002e-15}
 
 hex_value: fn(b: U8) -> Int {
@@ -34,7 +33,7 @@ int_at: fn(raw: [U8], at: Int) -> Int {
 hex_word: fn(value: Float) -> String {
     digits: "0123456789abcdef".bytes()
     n := math.to_bits(value)
-    if n < 0 -> n = n + 0x1_0000_0000_0000_0000
+    if n < 0 -> n += 0x1_0000_0000_0000_0000
     out := [U8]{}
     loop _ in 0..<16 {
         out.push(digits[n %% 16])
@@ -72,17 +71,21 @@ run: fn() {
         x: math.from_bits(int_at(raw, at + 17))
         want_j: math.from_bits(int_at(raw, at + 34))
         want_y: math.from_bits(int_at(raw, at + 51))
-        at = at + 68
-        rows = rows + 1
+        at += 68
+        rows += 1
         j: math.bessel_j(n, x)
         if !matches(j, want_j) {
-            wrong_j = wrong_j + 1
-            if wrong_j <= 3 -> print("bessel_j({n}, {hex_word(x)}) = {hex_word(j)}, glibc {hex_word(want_j)}")
+            wrong_j += 1
+            if wrong_j <= 3 {
+                print("bessel_j({n}, {hex_word(x)}) = {hex_word(j)}, glibc {hex_word(want_j)}")
+            }
         }
         y: math.bessel_y(n, x)
         if !matches(y, want_y) {
-            wrong_y = wrong_y + 1
-            if wrong_y <= 3 -> print("bessel_y({n}, {hex_word(x)}) = {hex_word(y)}, glibc {hex_word(want_y)}")
+            wrong_y += 1
+            if wrong_y <= 3 {
+                print("bessel_y({n}, {hex_word(x)}) = {hex_word(y)}, glibc {hex_word(want_y)}")
+            }
         }
     }
     print("bessel_j: {rows} rows, {wrong_j} differ")

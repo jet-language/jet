@@ -53,9 +53,10 @@ run: fn() {
     print("stderr lines: {stray}")
     print("exit: {waited.code}")
 
-    loop spec in [process.cmd([exe, "child"]).stdout(.Stdout), process.cmd([exe, "child"]).stdin(.Stdout)] {
+    loop spec in
+        [process.cmd([exe, "child"]).stdout(.Stdout), process.cmd([exe, "child"]).stdin(.Stdout)] {
         if process.run_spec(spec) == {
-            .Ok(_) -> print("refused: no")
+            .Ok(_) -> { print("refused: no") }
             .Err(error) -> print("refused: {kind(error)}")
         }
     }

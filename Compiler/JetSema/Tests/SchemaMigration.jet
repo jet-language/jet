@@ -4,8 +4,12 @@
 use {
     jet_parser.[parse_source]
     jet_sema.[
-        SNAPSHOT_VERSION, SchemaSnapshot, SnapshotField, check_schema_migrations,
-        sema_program_tables_init, snapshot_from_struct,
+        SNAPSHOT_VERSION,
+        SchemaSnapshot,
+        SnapshotField,
+        check_schema_migrations,
+        sema_program_tables_init,
+        snapshot_from_struct,
     ]
     jet_foundation.[Diagnostic, Item, TTypeDef]
 }
@@ -13,14 +17,17 @@ use {
 schema_require: fn(ok: Bool, detail: String) Never! {
     if !ok -> panic("SchemaMigration: {detail}")
 }
+
 schema_items: fn(source: String) -> [Item] Never! {
     parsed: parse_source(source.bytes())
     schema_require(parsed.diagnostics.len() == 0, "fixture parses: {source}")
     parsed.program.items
 }
+
 schema_baseline: fn(fields: [SnapshotField]) -> [String:SchemaSnapshot] Never! {
     [String:SchemaSnapshot]{"Account": SchemaSnapshot{schema_version: U32{1}, type_name: "Account", published_version: "1.2.3", squashed_before: None, fields: fields}}
 }
+
 schema_has: fn(diagnostics: [Diagnostic], text: String) Never! {
     found := false
     loop diagnostic in diagnostics {
@@ -29,6 +36,7 @@ schema_has: fn(diagnostics: [Diagnostic], text: String) Never! {
     }
     schema_require(found, "expected diagnostic: {text}")
 }
+
 #Test("schema_migration") {
     wire: "schema_version = 1\ntype = Account\npublished_version = 1.2.3\nsquashed_before = 1.0.0\nfield name: String\nfield verified: Bool\n"
     decoded: SchemaSnapshot.parse(wire) ?? panic("snapshot codec")
@@ -40,10 +48,13 @@ schema_has: fn(diagnostics: [Diagnostic], text: String) Never! {
     schema_require(loose.schema_version == (U32{4294967295}) && loose.type_name == "New" && loose.fields[0].ty == "", "Rust parser grammar")
     loop version in ([String]{"", "+", "-1", "1_0", "4294967296", "１２"}) {
         invalid := false
-        if SchemaSnapshot.parse("schema_version = {version}\ntype = A\npublished_version = 1\n") == .Err(_) -> invalid = true
+        if SchemaSnapshot.parse("schema_version = {version}\ntype = A\npublished_version = 1\n") == .Err(_) {
+            invalid = true
+        }
         schema_require(invalid, "invalid u32 {version}")
     }
-    loop raw in ([String]{"type = A\npublished_version = 1\n", "schema_version = 1\npublished_version = 1\n", "schema_version = 1\ntype = A\n", "schema_version = 1\ntype = A\npublished_version = 1\nfield missing\n", "unknown = line\n"}) {
+    loop raw in
+        ([String]{"type = A\npublished_version = 1\n", "schema_version = 1\npublished_version = 1\n", "schema_version = 1\ntype = A\n", "schema_version = 1\ntype = A\npublished_version = 1\nfield missing\n", "unknown = line\n"}) {
         invalid := false
         if SchemaSnapshot.parse(raw) == .Err(_) -> invalid = true
         schema_require(invalid, "malformed snapshot")

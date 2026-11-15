@@ -17,7 +17,7 @@ Reading: struct {
 }
 
 show: fn(value: Int | String) -> String {
-    copied: value.copy() // copy: match consumes the scrutinee; the caller keeps its value
+    copied: value.copy()  // copy: match consumes the scrutinee; the caller keeps its value
     if copied == {
         .Int(n) -> { return "int {n}" }
         .String(s) -> { return "text {s}" }
@@ -25,9 +25,7 @@ show: fn(value: Int | String) -> String {
     return "unknown"
 }
 
-line: fn(codec: String, back: Reading) {
-    print("{codec}: {back.label} {show(back.value)}")
-}
+line: fn(codec: String, back: Reading) { print("{codec}: {back.label} {show(back.value)}") }
 
 run: fn() {
     rows: [Reading]{Reading{label: "n", value: 7}, Reading{label: "s", value: "seven"}}
@@ -45,9 +43,7 @@ run: fn() {
         line("cbor", (cbor.parse(cbor.to_bytes(row) ?? panic("cbor enc")) ?? panic("cbor parse")).decode<Reading>() ?? panic("cbor"))
     }
     // CSV rows.
-    loop back in csv.decode<Reading>(csv.to_string(rows)) ?? panic("csv") {
-        line("csv", back)
-    }
+    loop back in csv.decode<Reading>(csv.to_string(rows)) ?? panic("csv") { line("csv", back) }
     // A bare union value through JSON.
     number: json.decode<Int | String>("7") ?? panic("bare int")
     word: json.decode<Int | String>("\"seven\"") ?? panic("bare text")

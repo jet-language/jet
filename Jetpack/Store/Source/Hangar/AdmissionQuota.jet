@@ -3,9 +3,13 @@
 // evicting the least recently used unreachable objects to make room.
 
 STORE_DEFAULT_MAX_HANGAR_BYTES: 137438953472
+
 STORE_HANGAR_MAX_BYTES_ENV: ENV_JETPACK_HANGAR_MAX_BYTES
+
 STORE_HANGAR_MAX_BYTES_CONFIG: "config/hangar-max-bytes"
+
 STORE_ADMISSION_RESERVE_BYTES: 1048576
+
 STORE_INT_MAX: 9223372036854775807
 
 // One evictable Hangar object ordered by last use.
@@ -24,9 +28,7 @@ store_admission_reservation: fn(incoming_bytes: Int) -> Int Never! {
 }
 
 // The logical footprint of one admission source.
-store_admission_size: fn(path: String) -> Int StoreError! {
-    store_quota_footprint(path, None)
-}
+store_admission_size: fn(path: String) -> Int StoreError! { store_quota_footprint(path, None) }
 
 // Enforce the per-Hangar byte ceiling before a staged tree is published.
 //
@@ -39,13 +41,17 @@ store_ensure_hangar_capacity: fn(verification: &StoreVerification, roots: Hangar
     hangar: roots.hangar_dir()
     store_ensure_real_directory(hangar, "Hangar root")
     limit: store_quota_configured_limit(roots)
-    if store_quota_fits(hangar, incoming_bytes, limit, excluded) -> return
+    if store_quota_fits(hangar, incoming_bytes, limit, excluded) {
+        return
+    }
 
     live: store_live_roots_unlocked(verification, roots)
     _: store_sweep_build_scratch(hangar)
     retired := [String]{}
     store_quota_sweep_orphans(verification, roots, live, retired)
-    if store_quota_fits(hangar, incoming_bytes, limit, excluded) -> return
+    if store_quota_fits(hangar, incoming_bytes, limit, excluded) {
+        return
+    }
 
     candidates := [StoreQuotaCandidate]{}
     loop entry in store_object_dirs(hangar) {
@@ -66,7 +72,9 @@ store_ensure_hangar_capacity: fn(verification: &StoreVerification, roots: Hangar
         store_remove_hangar_node(verification, candidate.path)
         retired.push(candidate.id)
         store_quota_sweep_orphans(verification, roots, live, retired)
-        if store_quota_fits(hangar, incoming_bytes, limit, excluded) -> return
+        if store_quota_fits(hangar, incoming_bytes, limit, excluded) {
+            return
+        }
     }
 
     used: store_quota_footprint(hangar, excluded)
@@ -131,7 +139,9 @@ store_quota_walk: fn(path: String, excluded: String?, listed: Bool) -> Int Store
         }
     }
     if metadata.is_symlink || metadata.is_file -> return Ok(metadata.size)
-    if !metadata.is_dir -> return Err(StoreError.InvalidData("Hangar footprint contains an unsupported node: {path}"))
+    if !metadata.is_dir {
+        return Err(StoreError.InvalidData("Hangar footprint contains an unsupported node: {path}"))
+    }
     entries: if files.list_dir(path) == {
         .Ok(value) -> value
         .Err(error) -> {
@@ -142,7 +152,9 @@ store_quota_walk: fn(path: String, excluded: String?, listed: Bool) -> Int Store
     total := 0
     loop entry in entries {
         size: store_quota_walk(entry.path, excluded, true)
-        if total > STORE_INT_MAX - size -> return Err(StoreError.Other("Hangar footprint overflowed"))
+        if total > STORE_INT_MAX - size {
+            return Err(StoreError.Other("Hangar footprint overflowed"))
+        }
         total += size
     }
     Ok(total)
@@ -151,7 +163,9 @@ store_quota_walk: fn(path: String, excluded: String?, listed: Bool) -> Int Store
 store_quota_sweep_orphans: fn(verification: &StoreVerification, roots: HangarRoots, live: LiveRoots, retired: [String]) StoreError! {
     orphaned: store_collect_orphaned_canonical_objects(verification, roots, live, retired)
     loop object in orphaned -> store_remove_hangar_node(verification, object.path)
-    if orphaned.len() > 0 -> store_sync_store_directory(files.join(roots.hangar_dir(), STORE_OBJECTS_DIR))
+    if orphaned.len() > 0 {
+        store_sync_store_directory(files.join(roots.hangar_dir(), STORE_OBJECTS_DIR))
+    }
 
     // Receipt deletion is safe only when every package record has readable,
     // valid metadata. A damaged record must not turn this bounded path into a

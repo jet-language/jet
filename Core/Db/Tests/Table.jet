@@ -30,7 +30,7 @@ TableCard: struct {
     assert_eq((tasks.query() ?? panic("an empty table reads")).collect() ?? panic("the query collects"), [TableTask]{})
     assert_eq((tasks.add(TableTask{id: 2, title: "two"}) ?? panic("the first add")).title, "two")
     if tasks.add(TableTask{id: 2, title: "again"}) == {
-        .Ok(_) -> panic("a second add of key 2 was accepted")
+        .Ok(_) -> { panic("a second add of key 2 was accepted") }
         .Err(failure) -> assert_eq(failure.message(), "a row with that key exists")
     }
     _: tasks.put(TableTask{id: 1, title: "one"}) ?? panic("put a new row")
@@ -106,16 +106,20 @@ priv table_note_kept: fn(notes: db.Table<Int, TableNote>, id: Int) -[DB.Read, DB
 #Test("a guarded table asks its row policy about each read and write, as the task's caller") {
     store: db.open_memory()
     mia_adds: table_notes(store)
-    assert(app.as_caller<Bool>("mia", fn() {
-        _: mia_adds.add(TableNote{id: 1, owner: "mia", text: "mine"}) ?? panic("mia adds her note")
-        app.maybe_caller() == Val("mia")
-    }))
+    assert(
+        app.as_caller<Bool>("mia", fn() {
+            _: mia_adds.add(TableNote{id: 1, owner: "mia", text: "mine"}) ?? panic("mia adds her note")
+            app.maybe_caller() == Val("mia")
+        }),
+    )
     ben_adds: table_notes(store)
-    assert(app.as_caller<Bool>("ben", fn() {
-        forged: table_note_refused(ben_adds.add(TableNote{id: 2, owner: "mia", text: "forged"}))
-        _: ben_adds.add(TableNote{id: 2, owner: "ben", text: "his"}) ?? panic("ben adds his note")
-        forged && table_note_hidden(ben_adds, 1) && table_note_count(ben_adds) == 1
-    }))
+    assert(
+        app.as_caller<Bool>("ben", fn() {
+            forged: table_note_refused(ben_adds.add(TableNote{id: 2, owner: "mia", text: "forged"}))
+            _: ben_adds.add(TableNote{id: 2, owner: "ben", text: "his"}) ?? panic("ben adds his note")
+            forged && table_note_hidden(ben_adds, 1) && table_note_count(ben_adds) == 1
+        }),
+    )
     mia_reads: table_notes(store)
     assert_eq(app.as_caller("mia", fn() { (mia_reads.get(1) ?? panic("mia reads her note")).text }), "mine")
     // No caller is no one, never the system.
@@ -128,17 +132,21 @@ priv table_note_kept: fn(notes: db.Table<Int, TableNote>, id: Int) -[DB.Read, DB
     assert_eq(app.as_system(fn() { table_note_count(system_counts) }), 2)
     // A put over a row is judged on the stored row and on the new one.
     ben_takes: table_notes(store)
-    assert(app.as_caller<Bool>("ben", fn() {
-        taken: table_note_refused(ben_takes.put(TableNote{id: 1, owner: "ben", text: "taken"}))
-        taken && table_note_kept(ben_takes, 1)
-    }))
+    assert(
+        app.as_caller<Bool>("ben", fn() {
+            taken: table_note_refused(ben_takes.put(TableNote{id: 1, owner: "ben", text: "taken"}))
+            taken && table_note_kept(ben_takes, 1)
+        }),
+    )
     mia_edits: table_notes(store)
-    assert(app.as_caller<Bool>("mia", fn() {
-        given: table_note_refused(mia_edits.put(TableNote{id: 1, owner: "ben", text: "given"}))
-        _: mia_edits.put(TableNote{id: 1, owner: "mia", text: "edited"}) ?? panic("mia edits her note")
-        mia_edits.delete(1) ?? panic("mia deletes her note")
-        given
-    }))
+    assert(
+        app.as_caller<Bool>("mia", fn() {
+            given: table_note_refused(mia_edits.put(TableNote{id: 1, owner: "ben", text: "given"}))
+            _: mia_edits.put(TableNote{id: 1, owner: "mia", text: "edited"}) ?? panic("mia edits her note")
+            mia_edits.delete(1) ?? panic("mia deletes her note")
+            given
+        }),
+    )
     system_reads: table_notes(store)
     assert(app.as_system(fn() { table_note_hidden(system_reads, 1) }))
 }

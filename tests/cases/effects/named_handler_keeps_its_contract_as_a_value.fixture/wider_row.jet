@@ -6,10 +6,6 @@ tick: fn(n: Int) Never! -[Time.Wait, IO]> {
     print("tick {n}")
 }
 
-accept_wait: fn(handler: fn(Int) Never! -[Time.Wait]>, n: Int) Never! -[Time.Wait]> {
-    handler(n)
-}
+accept_wait: fn(handler: fn(Int) -[Time.Wait]> Never!, n: Int) Never! -[Time.Wait]> { handler(n) }
 
-run: fn() {
-    accept_wait(tick, 1)
-}
+run: fn() { accept_wait(tick, 1) }

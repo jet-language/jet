@@ -1,8 +1,17 @@
 // Release status, the authority diagnostic family, and the package metadata
 // policy surface.
 use jet_pkg_model.[
-    JET_VERSION, Manifest, PackageFacts, PolicySourceMap, pkg_ascii_lower, pkg_current_release_status,
-    pkg_jet_build_from_stamps, pkg_satisfies_constraint, pkg_version_banner, pkg_version_json, pkg_version_line,
+    JET_VERSION,
+    Manifest,
+    PackageFacts,
+    PolicySourceMap,
+    pkg_ascii_lower,
+    pkg_current_release_status,
+    pkg_jet_build_from_stamps,
+    pkg_satisfies_constraint,
+    pkg_version_banner,
+    pkg_version_json,
+    pkg_version_line,
 ]
 
 #Test("current release status is separate from package semver") {
@@ -61,7 +70,7 @@ use jet_pkg_model.[
             .Ok(_) -> panic("malformed authority must be rejected")
         }
         if Manifest.parse("package.jet", raw) == {
-            .Err(error) -> assert_eq(error.diagnostic.code, "E1221")
+            .Err(error) -> { assert_eq(error.diagnostic.code, "E1221") }
             .Ok(_) -> panic("malformed authority must use the authority diagnostic family")
         }
     }

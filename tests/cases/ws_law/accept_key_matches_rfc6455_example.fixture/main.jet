@@ -4,10 +4,12 @@ use {
     ws: core.net.ws
     server: core.http.server
 }
+
 handle: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
     sock: ws.upgrade(req) ?? panic("upgrade")
     return Ok(server.response(500, "unused"))
 }
+
 run: fn() {
     cr: "\r"
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
@@ -25,7 +27,9 @@ run: fn() {
     }
     accept := String?{None}
     loop line in headers.split("{cr}\n") {
-        if line.starts_with("Sec-WebSocket-Accept: ") -> accept = Val(line.removeprefix("Sec-WebSocket-Accept: "))
+        if line.starts_with("Sec-WebSocket-Accept: ") {
+            accept = Val(line.removeprefix("Sec-WebSocket-Accept: "))
+        }
     }
     assert_eq(accept ?? panic("missing accept value"), "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=")
     stream.close() ?? panic("close")

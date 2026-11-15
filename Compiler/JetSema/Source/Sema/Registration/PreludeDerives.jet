@@ -32,7 +32,9 @@ Equatable: struct {
                                     .#{left} -> {
                                         #loop field in left.reflect().fields {
                                             #if field.type.name == target.reflect().name {
-                                                if self.#{field}.equal(rhs.#{field}) == false -> return false
+                                                if self.#{field}.equal(rhs.#{field}) == false {
+                                                    return false
+                                                }
                                             } else {
                                                 if self.#{field} != rhs.#{field} -> return false
                                             }
@@ -215,29 +217,35 @@ __jet_ErrorContextFrame: struct {
     file: String
     line: Int
 }
+
 __jet_ErrorConversion: struct {
     source: String
     target: String
 }
+
 __jet_ErrorField: struct {
     name: String
     value: String
 }
+
 __jet_ErrorSpan: struct {
     start: Int
     end: Int
 }
+
 __jet_ErrorDetails: struct {
     variant: String
     fields: [__jet_ErrorField]
     source_span: __jet_ErrorSpan?
 }
+
 __jet_ErrorMetadata: struct {
     typed_identity: String?
     context_frames: [__jet_ErrorContextFrame]
     conversion_history: [__jet_ErrorConversion]
     details: __jet_ErrorDetails?
 }
+
 Err: struct {
     message: String
     code: String?
@@ -279,6 +287,7 @@ impl BuildError -> Err {
 impl BrowserError -> Err {
     return Err("{self}")
 }
+
 impl CBORError -> Err {
     return Err("{self}")
 }
@@ -380,13 +389,12 @@ impl UTF8Error -> Err {
 impl UUIDError -> Err {
     return Err("{self}")
 }
+
 impl XMLError -> Err {
     return Err("{self}")
 }
 
-
 impl WsError -> Err {
     return Err("{self}")
 }
-
 ``` }

@@ -31,7 +31,9 @@ use {
 }
 
 C_WAIT_MS: 30000
+
 C_POLL_MS: 80
+
 C_BODY_LIMIT: 268435456
 
 C_REFERENCE_STATE: "JSON.stringify((() => {{ const root = document.querySelector('[data-jet-edit-loop]'); return {{ marker: root?.getAttribute('data-jet-edit-loop') || '', interactions: Boolean(document.querySelector('[data-panel=\"interactions\"]')), form: Boolean(document.querySelector('form[action=\"/actions/ship-order-progressive\"]')), text: document.body?.innerText || '' }}; }})())"
@@ -45,6 +47,7 @@ C_FORM_SUBMIT: "(() => {{ const form = document.querySelector('form[action=\"/ac
 // Set before an action that loads a new document; its absence afterwards
 // proves the load happened.
 C_MARK_DOCUMENT: "window.__jetReferenceDocument = true"
+
 C_NEW_DOCUMENT: "typeof window.__jetReferenceDocument === 'undefined' && document.readyState === 'complete'"
 
 #Error
@@ -103,10 +106,12 @@ run: fn() {
     timing := Timing{value_ms: 0, diagnosis_ms: None, repair_ms: None}
     failure := ""
     if measure(r, live) == {
-        .Ok(found) -> timing = found
+        .Ok(found) -> { timing = found }
         .Err(error) -> failure = error.message
     }
-    if live.driver == .Val(d) -> d.session.close().drop("the engine also stops with the session's last owner")
+    if live.driver == .Val(d) {
+        d.session.close().drop("the engine also stops with the session's last owner")
+    }
     if live.server == .Val(child) {
         child.kill().drop("an exited dev server needs no signal")
         child.wait().drop("the dev server's receipt is not reported")
@@ -133,20 +138,22 @@ setup: fn(args: [String]) -> Run Failure! {
     loop_spec: field(app, "edit_loop")
     edit: field(loop_spec, "edit")
     project: files.cwd() ?? return Err(Failure{message: "the working directory is unreadable: {err}"})
-    Ok(Run{
-        metric: metric,
-        exercise: args.contains("--exercise"),
-        engine: option(args, "--browser") ?? "chromium",
-        jet_env: jet_env,
-        project: project.copy(),
-        entry: text(field(app, "entry")).removeprefix("{root}/"),
-        source: files.join(project, text(field(loop_spec, "file")).removeprefix("{root}/")),
-        edit: recipe(edit),
-        edit_marker: text(field(edit, "visible_marker")),
-        failure: recipe(field(loop_spec, "failure")),
-        repair: recipe(field(loop_spec, "repair")),
-        port: free_port(),
-    })
+    Ok(
+        Run{
+            metric: metric,
+            exercise: args.contains("--exercise"),
+            engine: option(args, "--browser") ?? "chromium",
+            jet_env: jet_env,
+            project: project.copy(),
+            entry: text(field(app, "entry")).removeprefix("{root}/"),
+            source: files.join(project, text(field(loop_spec, "file")).removeprefix("{root}/")),
+            edit: recipe(edit),
+            edit_marker: text(field(edit, "visible_marker")),
+            failure: recipe(field(loop_spec, "failure")),
+            repair: recipe(field(loop_spec, "repair")),
+            port: free_port(),
+        },
+    )
 }
 
 measure: fn(r: Run, live: &Live) -> Timing Failure! {
@@ -293,7 +300,9 @@ navigate_by_action: fn(d: Driver, action: String) -> String Failure! {
 
 has_field: fn(fields: [Dyn], name: String, expected: String) -> Bool {
     loop entry in fields {
-        if text(field(entry, "name")) == name && text(field(entry, "value")) == expected && field(entry, "required") == Dyn.Bool(true) -> return true
+        if text(field(entry, "name")) == name && text(field(entry, "value")) == expected && field(entry, "required") == Dyn.Bool(true) {
+            return true
+        }
     }
     false
 }
@@ -304,7 +313,9 @@ wait_reference_page: fn(d: Driver, marker: String) Failure! {
         if evaluate(d, C_REFERENCE_STATE) == .Val(raw) {
             if json.parse(raw) == .Ok(state) {
                 seen: text(field(state, "marker")) == marker || text(field(state, "text")).contains(marker)
-                if seen && field(state, "interactions") == Dyn.Bool(true) && field(state, "form") == Dyn.Bool(true) -> return Ok()
+                if seen && field(state, "interactions") == Dyn.Bool(true) && field(state, "form") == Dyn.Bool(true) {
+                    return Ok()
+                }
             }
         }
         time.sleep(time.duration_ms(C_POLL_MS))
@@ -313,9 +324,7 @@ wait_reference_page: fn(d: Driver, marker: String) Failure! {
 }
 
 // The dev server's build version; empty while it has none.
-dev_version: fn(port: Int) -> String {
-    dev_get(port, "/__jet_dev_version") ?? ""
-}
+dev_version: fn(port: Int) -> String { dev_get(port, "/__jet_dev_version") ?? "" }
 
 // Wait for a dev version other than `baseline` (any version when empty).
 wait_version: fn(port: Int, baseline: String) Failure! {
@@ -341,7 +350,9 @@ wait_page_contains: fn(port: Int, needle: String) Failure! {
 // The body of a 200 answer from the dev server.
 dev_get: fn(port: Int, path: String) -> String Failure! {
     response: client.get("http://127.0.0.1:{port}{path}") ?? return Err(Failure{message: "{path} request failed: {err}"})
-    if response.status() != 200 -> return Err(Failure{message: "{path} returned {response.status()}"})
+    if response.status() != 200 {
+        return Err(Failure{message: "{path} returned {response.status()}"})
+    }
     body: response.text(C_BODY_LIMIT) ?? return Err(Failure{message: "{path} body is not text: {err}"})
     Ok(body)
 }
@@ -375,23 +386,31 @@ value: fn(d: Driver, expression: String) -> String Failure! {
 // The page value of `expression` as `String(value)` after awaiting it, or
 // None when the page threw.
 evaluate: fn(d: Driver, expression: String) -> String? Failure! {
-    params: Dyn.Object([(key: String, value: Dyn)]{
-        (key: "expression", value: Dyn.Text("(async () => String(await ({expression})))()")),
-        (key: "target", value: Dyn.Object([(key: String, value: Dyn)]{(key: "context", value: Dyn.Text(d.context.copy()))})),
-        (key: "awaitPromise", value: Dyn.Bool(true)),
-        (key: "resultOwnership", value: Dyn.Text("none")),
-    })
+    params: Dyn.Object(
+        [(key: String, value: Dyn)]{
+            (key: "expression", value: Dyn.Text("(async () => String(await ({expression})))()")),
+            (key: "target", value: Dyn.Object([(key: String, value: Dyn)]{(key: "context", value: Dyn.Text(d.context.copy()))})),
+            (key: "awaitPromise", value: Dyn.Bool(true)),
+            (key: "resultOwnership", value: Dyn.Text("none")),
+        },
+    )
     reply: command(d.bidi, "script.evaluate", params)
     if text(field(reply, "type")) != "success" -> return Ok(None)
     Ok(Val(text(field(field(reply, "result"), "value"))))
 }
 
 navigate: fn(d: Driver, address: String) Failure! {
-    command(d.bidi, "browsingContext.navigate", Dyn.Object([(key: String, value: Dyn)]{
-        (key: "context", value: Dyn.Text(d.context.copy())),
-        (key: "url", value: Dyn.Text(address.copy())),
-        (key: "wait", value: Dyn.Text("complete")),
-    }))
+    command(
+        d.bidi,
+        "browsingContext.navigate",
+        Dyn.Object(
+            [(key: String, value: Dyn)]{
+                (key: "context", value: Dyn.Text(d.context.copy())),
+                (key: "url", value: Dyn.Text(address.copy())),
+                (key: "wait", value: Dyn.Text("complete")),
+            },
+        ),
+    )
     Ok()
 }
 

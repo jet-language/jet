@@ -3,39 +3,65 @@ use {
     jet_foundation.[DIAGNOSTIC_LINT, Diagnostic, diagnostic_from_registry]
     core.build.[BuildGraphNode, BuildGraphInputDigest]
     jet_driver.[
-        jet_driver_query_build_nodes, jet_driver_compile, jet_driver_source_query,
-        JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot,
-        JetDriverAuthorizedSourceSnapshot, JetDriverBuildQueryResult, JetDriverBuildQueryScope,
-        JetDriverCompileMode, JetDriverCompileRequest, JetDriverGeneratedModule,
-        jet_driver_build_plan_json, jet_driver_build_query_stopped, jet_driver_query_build_plan,
+        jet_driver_query_build_nodes,
+        jet_driver_compile,
+        jet_driver_source_query,
+        JET_DRIVER_EXIT_OK,
+        JET_DRIVER_EXIT_USER_ERROR,
+        JetDriverAuthorizedSourceFile,
+        JetDriverAuthorizedSourceRoot,
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverBuildQueryResult,
+        JetDriverBuildQueryScope,
+        JetDriverCompileMode,
+        JetDriverCompileRequest,
+        JetDriverGeneratedModule,
+        jet_driver_build_plan_json,
+        jet_driver_build_query_stopped,
+        jet_driver_query_build_plan,
     ]
     jet_cli.[
-        JET_CLI_EXIT_ICE, jet_cli_build_compile_observation, jet_cli_build_duration,
-        jet_cli_build_nodes_host, jet_cli_build_nodes_report, jet_cli_build_query_failure,
-        jet_cli_build_report, jet_cli_driver_request, jet_cli_native_session_at,
+        JET_CLI_EXIT_ICE,
+        jet_cli_build_compile_observation,
+        jet_cli_build_duration,
+        jet_cli_build_nodes_host,
+        jet_cli_build_nodes_report,
+        jet_cli_build_query_failure,
+        jet_cli_build_report,
+        jet_cli_driver_request,
+        jet_cli_native_session_at,
     ]
     jet_build_session.[
-        BuildSessionPolicy, BuildSessionValue, build_plan_graph, build_session_call,
-        build_session_finish, build_session_new,
+        BuildSessionPolicy,
+        BuildSessionValue,
+        build_plan_graph,
+        build_session_call,
+        build_session_finish,
+        build_session_new,
     ]
     jetpack_artifact_store.[BuildNodeRecord, BuildRecord, ObjectHandle]
     build_math: core.math
     build_sys: core.sys
     build_process: core.process
 }
+
 inspect_build_require: fn(ok: Bool, message: String) Never! {
     if !ok -> panic("InspectBuild: {message}")
 }
+
 inspect_build_node: fn(node: BuildGraphNode, kind: String, subject: String, key: String, inputs: [String]) Never! {
     inspect_build_require(node.kind == kind && node.subject == subject && node.key == key && node.inputs == inputs, "exact {kind} node {subject}")
 }
+
 inspect_build_request: fn() -> JetDriverCompileRequest {
     snapshot: JetDriverAuthorizedSourceSnapshot{
         roots: [JetDriverAuthorizedSourceRoot]{{canonical_path: "/inspect-build", identity: "build-root", allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{{path: "/inspect-build/main.jet", relative_path: "main.jet", identity: "build-source", source: "run: fn() {{}}"}}, foreign_cache_files: []}},
-        entry_root_identity: "build-root", entry_path: "/inspect-build/main.jet",
+        entry_root_identity: "build-root",
+        entry_path: "/inspect-build/main.jet",
     }
     jet_cli_driver_request(snapshot, [], Val(1), JetDriverCompileMode.Doc)
 }
+
 #Test("inspect_build") {
     empty: JetDriverBuildQueryResult{plan: None, graph: None, generated: [], diagnostics: [], complete: true, internal_problem: None}
     inspect_build_require(jet_cli_build_report(empty, None, false) == "default pipeline: no root fn build\n", "default pipeline human")
@@ -226,6 +252,7 @@ inspect_build_stopped_is_internal: fn(ran: [Diagnostic], refused: Bool, problem:
     failure: jet_cli_build_query_failure(response.request.move(), query, "main.jet", false, false, false)
     inspect_build_require(failure.exit_code == JET_CLI_EXIT_ICE && failure.stdout == "" && failure.stderr.contains("internal compiler error: {problem}") && !failure.stderr.contains("Shape"), "a staged build that failed internally is an internal compiler error: {problem}")
 }
+
 #Test("inspect_build staged internal problem") {
     // The trapped compile failed internally.
     inspect_build_stopped_is_internal([Diagnostic]{}, false, "the trapped compile lost its build entry")
@@ -254,6 +281,7 @@ inspect_build_runtime_dir: fn() -> String {
     _ := parts.pop()
     "{parts.join("/")}/jet-runtime"
 }
+
 #Test("inspect_build planned fn build") {
     scope := JetDriverBuildQueryScope{}
     planned := inspect_build_request()

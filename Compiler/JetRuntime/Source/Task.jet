@@ -10,12 +10,15 @@
 // (task_live_link) from task_state_new until its last ref drops. queueNext88
 // holds TASK_DEFERRED until a deferred task is claimed (task_claim).
 TASK_CONTEXT: I64{216}
+
 // A grouped task its handle's join follows at once
 // (jet_rt_native_group_spawn_joined) is not submitted: the join runs it on
 // the joining thread (task_run_joined), so a program whose only task is so
 // joined starts no carrier. Any other wait for it, a drain, submits it.
 TASK_DEFERRED: I64{-1}
+
 task_state_bytes: fn() -> I64 { TASK_CONTEXT + CONTEXT_RECORD_BYTES }
+
 // JetTaskFailure: ordinals 0/1/2.
 task_failure_new: fn(kind: I64, owned_reason: I64) -> I64 {
     failure: jet_rt_alloc(TASK_FAILURE_BYTES, I64{8})
@@ -23,33 +26,54 @@ task_failure_new: fn(kind: I64, owned_reason: I64) -> I64 {
     sync_store(wrapping(failure + TASK_FAILURE_REASON), owned_reason)
     failure
 }
-#Export(c) jet_rt_record_tag_jet_task_failure: fn(failure: I64) -> I64 { sync_load(wrapping(failure + TASK_FAILURE_TAG)) }
+
+#Export(c) jet_rt_record_tag_jet_task_failure: fn(failure: I64) -> I64 {
+    sync_load(wrapping(failure + TASK_FAILURE_TAG))
+}
+
 #Export(c) jet_rt_record_get_jet_task_failure_panicked: fn(failure: I64) -> I64 {
     if sync_load(wrapping(failure + TASK_FAILURE_TAG)) != TASK_FAILURE_PANICKED {
         rt_record_variant_panic()
-        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+        if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     }
     jet_rt_string_clone(sync_load(wrapping(failure + TASK_FAILURE_REASON)))
 }
-#Export(c) jet_rt_record_new_jet_task_failure_cancelled: fn() -> I64 { task_failure_new(TASK_FAILURE_CANCELLED, I64{0}) }
-#Export(c) jet_rt_record_new_jet_task_failure_deadline_blown: fn() -> I64 { task_failure_new(TASK_FAILURE_DEADLINE, I64{0}) }
-#Export(c) jet_rt_record_new_jet_task_failure_panicked: fn(reason: I64) -> I64 { task_failure_new(TASK_FAILURE_PANICKED, jet_rt_string_clone(reason)) }
+
+#Export(c) jet_rt_record_new_jet_task_failure_cancelled: fn() -> I64 {
+    task_failure_new(TASK_FAILURE_CANCELLED, I64{0})
+}
+
+#Export(c) jet_rt_record_new_jet_task_failure_deadline_blown: fn() -> I64 {
+    task_failure_new(TASK_FAILURE_DEADLINE, I64{0})
+}
+
+#Export(c) jet_rt_record_new_jet_task_failure_panicked: fn(reason: I64) -> I64 {
+    task_failure_new(TASK_FAILURE_PANICKED, jet_rt_string_clone(reason))
+}
+
 #Export(c) jet_rt_handle_clone_jet_task_failure: fn(failure: I64) -> I64 {
     kind: sync_load(wrapping(failure + TASK_FAILURE_TAG))
     reason: if kind == TASK_FAILURE_PANICKED -> jet_rt_string_clone(sync_load(wrapping(failure + TASK_FAILURE_REASON))) else -> I64{0}
     task_failure_new(kind, reason)
 }
+
 #Export(c) jet_rt_handle_drop_jet_task_failure: fn(failure: I64) {
-    if (failure == I64{0}) -> return
-    if sync_load(wrapping(failure + TASK_FAILURE_TAG)) == TASK_FAILURE_PANICKED -> jet_rt_string_drop(sync_load(wrapping(failure + TASK_FAILURE_REASON)))
+    if (failure == I64{0}) {
+        return
+    }
+    if sync_load(wrapping(failure + TASK_FAILURE_TAG)) == TASK_FAILURE_PANICKED {
+        jet_rt_string_drop(sync_load(wrapping(failure + TASK_FAILURE_REASON)))
+    }
     jet_rt_free(failure, TASK_FAILURE_BYTES, I64{8})
 }
+
 #Export(c) jet_rt_handle_eq_jet_task_failure: fn(left: I64, right: I64) -> Bool {
     kind: sync_load(wrapping(left + TASK_FAILURE_TAG))
     if kind != sync_load(wrapping(right + TASK_FAILURE_TAG)) -> return false
     if kind != TASK_FAILURE_PANICKED -> return true
     jet_rt_string_eq(sync_load(wrapping(left + TASK_FAILURE_REASON)), sync_load(wrapping(right + TASK_FAILURE_REASON)))
 }
+
 // Panicked is raw in show/display but Rust str Debug quoted in debug. Extend
 // the existing carrier in place. Normalize service outcome ordinals to
 // TaskFailure's terminal variants.
@@ -63,10 +87,13 @@ task_terminal_render: fn(result: I64, kind: I64, reason: I64, debug: Bool) {
     } else {
         rt_text_push_word(result, I64{7234306451155345744}, I64{8})
         rt_text_push_word(result, I64{40}, I64{1})
-        if debug { rt_text_push_rust_debug_str(result, reason) } else { jet_rt_string_builder_push(result, reason) }
+        if debug -> rt_text_push_rust_debug_str(result, reason) else {
+            jet_rt_string_builder_push(result, reason)
+        }
         rt_text_push_word(result, I64{41}, I64{1})
     }
 }
+
 task_failure_render: fn(failure: I64, debug: Bool) -> I64 {
     kind: sync_load(wrapping(failure + TASK_FAILURE_TAG))
     reason: if kind == TASK_FAILURE_PANICKED -> sync_load(wrapping(failure + TASK_FAILURE_REASON)) else -> I64{0}
@@ -74,9 +101,18 @@ task_failure_render: fn(failure: I64, debug: Bool) -> I64 {
     task_terminal_render(result, kind, reason, debug)
     result
 }
-#Export(c) jet_rt_handle_show_jet_task_failure: fn(failure: I64) -> I64 { task_failure_render(failure, false) }
-#Export(c) jet_rt_handle_display_jet_task_failure: fn(failure: I64) -> I64 { task_failure_render(failure, false) }
-#Export(c) jet_rt_handle_debug_jet_task_failure: fn(failure: I64) -> I64 { task_failure_render(failure, true) }
+
+#Export(c) jet_rt_handle_show_jet_task_failure: fn(failure: I64) -> I64 {
+    task_failure_render(failure, false)
+}
+
+#Export(c) jet_rt_handle_display_jet_task_failure: fn(failure: I64) -> I64 {
+    task_failure_render(failure, false)
+}
+
+#Export(c) jet_rt_handle_debug_jet_task_failure: fn(failure: I64) -> I64 {
+    task_failure_render(failure, true)
+}
 
 // Service TaskOutcome is a distinct registry-owned carrier, not TaskFailure.
 // The Rust originals fix these four ordinals.
@@ -86,7 +122,11 @@ task_outcome_new: fn(kind: I64, owned_reason: I64) -> I64 {
     sync_store(wrapping(outcome + TASK_OUTCOME_REASON), owned_reason)
     outcome
 }
-#Export(c) jet_rt_record_tag_jet_task_outcome: fn(outcome: I64) -> I64 { sync_load(wrapping(outcome + TASK_OUTCOME_TAG)) }
+
+#Export(c) jet_rt_record_tag_jet_task_outcome: fn(outcome: I64) -> I64 {
+    sync_load(wrapping(outcome + TASK_OUTCOME_TAG))
+}
+
 #Export(c) jet_rt_record_get_jet_task_outcome_panicked: fn(outcome: I64) -> I64 {
     if sync_load(wrapping(outcome + TASK_OUTCOME_TAG)) != TASK_OUTCOME_PANICKED {
         rt_record_variant_panic()
@@ -94,52 +134,84 @@ task_outcome_new: fn(kind: I64, owned_reason: I64) -> I64 {
     }
     jet_rt_string_clone(sync_load(wrapping(outcome + TASK_OUTCOME_REASON)))
 }
-#Export(c) jet_rt_record_new_jet_task_outcome_finished: fn() -> I64 { task_outcome_new(TASK_OUTCOME_FINISHED, I64{0}) }
-#Export(c) jet_rt_record_new_jet_task_outcome_panicked: fn(reason: I64) -> I64 { task_outcome_new(TASK_OUTCOME_PANICKED, jet_rt_string_clone(reason)) }
-#Export(c) jet_rt_record_new_jet_task_outcome_cancelled: fn() -> I64 { task_outcome_new(TASK_OUTCOME_CANCELLED, I64{0}) }
-#Export(c) jet_rt_record_new_jet_task_outcome_deadline_blown: fn() -> I64 { task_outcome_new(TASK_OUTCOME_DEADLINE, I64{0}) }
+
+#Export(c) jet_rt_record_new_jet_task_outcome_finished: fn() -> I64 {
+    task_outcome_new(TASK_OUTCOME_FINISHED, I64{0})
+}
+
+#Export(c) jet_rt_record_new_jet_task_outcome_panicked: fn(reason: I64) -> I64 {
+    task_outcome_new(TASK_OUTCOME_PANICKED, jet_rt_string_clone(reason))
+}
+
+#Export(c) jet_rt_record_new_jet_task_outcome_cancelled: fn() -> I64 {
+    task_outcome_new(TASK_OUTCOME_CANCELLED, I64{0})
+}
+
+#Export(c) jet_rt_record_new_jet_task_outcome_deadline_blown: fn() -> I64 {
+    task_outcome_new(TASK_OUTCOME_DEADLINE, I64{0})
+}
+
 #Export(c) jet_rt_handle_clone_jet_task_outcome: fn(outcome: I64) -> I64 {
     kind: sync_load(wrapping(outcome + TASK_OUTCOME_TAG))
     reason: if kind == TASK_OUTCOME_PANICKED -> jet_rt_string_clone(sync_load(wrapping(outcome + TASK_OUTCOME_REASON))) else -> I64{0}
     task_outcome_new(kind, reason)
 }
+
 #Export(c) jet_rt_handle_drop_jet_task_outcome: fn(outcome: I64) {
-    if (outcome == I64{0}) -> return
-    if sync_load(wrapping(outcome + TASK_OUTCOME_TAG)) == TASK_OUTCOME_PANICKED -> jet_rt_string_drop(sync_load(wrapping(outcome + TASK_OUTCOME_REASON)))
+    if (outcome == I64{0}) {
+        return
+    }
+    if sync_load(wrapping(outcome + TASK_OUTCOME_TAG)) == TASK_OUTCOME_PANICKED {
+        jet_rt_string_drop(sync_load(wrapping(outcome + TASK_OUTCOME_REASON)))
+    }
     jet_rt_free(outcome, TASK_OUTCOME_BYTES, I64{8})
 }
+
 #Export(c) jet_rt_handle_eq_jet_task_outcome: fn(left: I64, right: I64) -> Bool {
     kind: sync_load(wrapping(left + TASK_OUTCOME_TAG))
     if kind != sync_load(wrapping(right + TASK_OUTCOME_TAG)) -> return false
     if kind != TASK_OUTCOME_PANICKED -> return true
     jet_rt_string_eq(sync_load(wrapping(left + TASK_OUTCOME_REASON)), sync_load(wrapping(right + TASK_OUTCOME_REASON)))
 }
+
 // Byte contract: Core/Service/Service.jet:91-125 at 497daa7a0 (read-only).
 task_outcome_render: fn(outcome: I64, debug: Bool) -> I64 {
     kind: sync_load(wrapping(outcome + TASK_OUTCOME_TAG))
     result: jet_rt_string_builder_new()
-    if kind == TASK_OUTCOME_FINISHED {
-        rt_text_push_word(result, I64{7234303221339941190}, I64{8})
-    } else {
+    if kind == TASK_OUTCOME_FINISHED -> rt_text_push_word(result, I64{7234303221339941190}, I64{8}) else {
         terminal: if kind == TASK_OUTCOME_CANCELLED -> TASK_FAILURE_CANCELLED else if kind == TASK_OUTCOME_DEADLINE -> TASK_FAILURE_DEADLINE else -> TASK_FAILURE_PANICKED
         reason: if kind == TASK_OUTCOME_PANICKED -> sync_load(wrapping(outcome + TASK_OUTCOME_REASON)) else -> I64{0}
         task_terminal_render(result, terminal, reason, debug)
     }
     result
 }
-#Export(c) jet_rt_handle_show_jet_task_outcome: fn(outcome: I64) -> I64 { task_outcome_render(outcome, false) }
-#Export(c) jet_rt_handle_display_jet_task_outcome: fn(outcome: I64) -> I64 { task_outcome_render(outcome, false) }
-#Export(c) jet_rt_handle_debug_jet_task_outcome: fn(outcome: I64) -> I64 { task_outcome_render(outcome, true) }
+
+#Export(c) jet_rt_handle_show_jet_task_outcome: fn(outcome: I64) -> I64 {
+    task_outcome_render(outcome, false)
+}
+
+#Export(c) jet_rt_handle_display_jet_task_outcome: fn(outcome: I64) -> I64 {
+    task_outcome_render(outcome, false)
+}
+
+#Export(c) jet_rt_handle_debug_jet_task_outcome: fn(outcome: I64) -> I64 {
+    task_outcome_render(outcome, true)
+}
 
 task_retain: fn(child: I64) { _ := sync_add(child, I64{1}) }
+
 task_drop: fn(child: I64) {
-    if (child == I64{0}) -> return
-    if (sync_add(child, I64{-1}) != I64{1}) -> return
+    if (child == I64{0}) {
+        return
+    }
+    if (sync_add(child, I64{-1}) != I64{1}) {
+        return
+    }
     task_live_unlink(child)
     meta: sync_load(wrapping(child + I64{40}))
     slot: sync_load(wrapping(child + I64{48}))
-    if (sync_load(wrapping(child + I64{56})) != I64{0}) -> coll_slot_drop(slot, meta)
-    if (slot != child + I64{160}) -> jet_rt_free(slot, coll_size(meta), I64{8})
+    if (sync_load(wrapping(child + I64{56})) != I64{0}) { coll_slot_drop(slot, meta) }
+    if (slot != child + I64{160}) { jet_rt_free(slot, coll_size(meta), I64{8}) }
     coll_meta_drop(meta)
     scheduler_control_drop(sync_load(wrapping(child + I64{8})))
     sync_park_drop(sync_load(wrapping(child + I64{104})))
@@ -168,7 +240,7 @@ task_spawn_typed_deadline: fn(label: I64, env: I64, invoke: I64, release: I64, m
 // A task's state, registered but not yet submitted: a generator
 // (Generator.jet) records its producer before the producer can run.
 task_state_new: fn(site: I64, label: I64, env: I64, invoke: I64, release: I64, meta: I64, group: I64, permit: I64) -> I64 {
-    if (site < I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+    if (site < I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
     child: jet_rt_alloc(task_state_bytes(), I64{8})
     thread_zero(child, task_state_bytes())
     sync_store(child, I64{2})
@@ -184,7 +256,9 @@ task_state_new: fn(site: I64, label: I64, env: I64, invoke: I64, release: I64, m
     sync_store(wrapping(child + I64{80}), release)
     context_inherit(wrapping(child + TASK_CONTEXT))
     // A deadline inherited at spawn is the task's own from its first poll.
-    if (sync_load(wrapping(child + TASK_CONTEXT + CONTEXT_DEADLINE_PRESENT)) != I64{0}) -> scheduler_attention_set(control, SCHEDULER_ATTEND_DEADLINE, true)
+    if (sync_load(wrapping(child + TASK_CONTEXT + CONTEXT_DEADLINE_PRESENT)) != I64{0}) {
+        scheduler_attention_set(control, SCHEDULER_ATTEND_DEADLINE, true)
+    }
     sync_store(wrapping(child + I64{104}), sync_park_new())
     sync_store(wrapping(child + I64{96}), if (group != I64{0}) -> sync_load(wrapping(group + I64{72})) else -> fiber_stack_current())
     sync_store(wrapping(child + I64{136}), group)
@@ -192,7 +266,7 @@ task_state_new: fn(site: I64, label: I64, env: I64, invoke: I64, release: I64, m
     id: jet_rt_observe_task_register(control, site, label)
     sync_store(wrapping(control + I64{56}), id)
     sync_store(wrapping(child + I64{128}), jet_rt_observe_task_identity(id))
-    if (group != I64{0}) -> task_group_register(group, child)
+    if (group != I64{0}) { task_group_register(group, child) }
     task_live_link(child)
     world: world_current()
     if (world != I64{0}) {
@@ -205,6 +279,7 @@ task_state_new: fn(site: I64, label: I64, env: I64, invoke: I64, release: I64, m
 #Export(c) jet_rt_native_task_spawn: fn(site: I64, label: I64, env: I64, invoke: I64, release: I64, meta: I64) -> I64 {
     task_spawn_state(site, label, env, invoke, release, meta, I64{0}, I64{0})
 }
+
 #Export(c) jet_rt_native_group_spawn: fn(group: I64, site: I64, label: I64, env: I64, invoke: I64, release: I64, meta: I64) -> I64 {
     state: sync_load(group)
     permit: task_group_admit(state)
@@ -214,10 +289,13 @@ task_state_new: fn(site: I64, label: I64, env: I64, invoke: I64, release: I64, m
     }
     task_spawn_state(site, label, env, invoke, release, meta, state, permit)
 }
+
 // A deterministic world schedules every task it counts, so under one the
 // task is submitted as jet_rt_native_group_spawn's is.
 #Export(c) jet_rt_native_group_spawn_joined: fn(group: I64, site: I64, label: I64, env: I64, invoke: I64, release: I64, meta: I64) -> I64 {
-    if (world_current() != I64{0}) -> return jet_rt_native_group_spawn(group, site, label, env, invoke, release, meta)
+    if (world_current() != I64{0}) {
+        return jet_rt_native_group_spawn(group, site, label, env, invoke, release, meta)
+    }
     state: sync_load(group)
     permit: task_group_admit(state)
     if (jet_scheduler_native_propagate() != I64{0}) {
@@ -228,20 +306,35 @@ task_state_new: fn(site: I64, label: I64, env: I64, invoke: I64, release: I64, m
     sync_store(wrapping(child + I64{88}), TASK_DEFERRED)
     child
 }
+
 // A spawn a stop refused releases its admission and its captures.
 task_spawn_refused: fn(state: I64, permit: I64, env: I64, release: I64) {
     saved: jet_rt_session_cleanup_enter(jet_scheduler_native_status())
     jet_scheduler_shield_enter()
-    if (permit != I64{0}) -> task_group_release(state)
+    if (permit != I64{0}) { task_group_release(state) }
     coll_call1_unit(release, env)
     jet_scheduler_shield_leave()
     jet_rt_session_cleanup_leave(saved)
 }
-#Export(c) jet_rt_native_task_cancel: fn(child: I64) { scheduler_control_cancel(sync_load(wrapping(child + I64{8}))) }
-#Export(c) jet_rt_native_task_pause: fn(child: I64) { scheduler_control_pause(sync_load(wrapping(child + I64{8})), I64{0}) }
-#Export(c) jet_rt_native_task_pause_with_mode: fn(child: I64, mode: I64) { scheduler_control_pause(sync_load(wrapping(child + I64{8})), mode) }
-#Export(c) jet_rt_native_task_resume: fn(child: I64) { scheduler_control_resume(sync_load(wrapping(child + I64{8}))) }
+
+#Export(c) jet_rt_native_task_cancel: fn(child: I64) {
+    scheduler_control_cancel(sync_load(wrapping(child + I64{8})))
+}
+
+#Export(c) jet_rt_native_task_pause: fn(child: I64) {
+    scheduler_control_pause(sync_load(wrapping(child + I64{8})), I64{0})
+}
+
+#Export(c) jet_rt_native_task_pause_with_mode: fn(child: I64, mode: I64) {
+    scheduler_control_pause(sync_load(wrapping(child + I64{8})), mode)
+}
+
+#Export(c) jet_rt_native_task_resume: fn(child: I64) {
+    scheduler_control_resume(sync_load(wrapping(child + I64{8})))
+}
+
 #Export(c) jet_rt_native_task_detach: fn(child: I64) { task_drop(child) }
+
 #Export(c) jet_rt_native_task_drop: fn(child: I64) { task_drop(child) }
 
 task_run: fn(child: I64) {
@@ -275,7 +368,9 @@ task_run: fn(child: I64) {
     body: scheduler_body_enter()
     if (!aborted && jet_scheduler_native_propagate() == I64{0}) {
         _ := coll_call2(sync_load(wrapping(child + I64{72})), sync_load(wrapping(child + I64{64})), sync_load(wrapping(child + I64{48})))
-        if (jet_scheduler_native_propagate() == I64{0}) -> sync_store(wrapping(child + I64{56}), I64{1})
+        if (jet_scheduler_native_propagate() == I64{0}) {
+            sync_store(wrapping(child + I64{56}), I64{1})
+        }
     }
     finished: jet_scheduler_native_status()
     // Mint cleanup provenance while the actual Task frame is still active.
@@ -287,7 +382,9 @@ task_run: fn(child: I64) {
     scheduler_shield_leave_finished()
     jet_rt_session_cleanup_leave(release_cleanup)
     scheduler_task_completion_end(frame)
-    if (sync_load(wrapping(child + I64{144})) != I64{0}) -> task_group_release(sync_load(wrapping(child + I64{136})))
+    if (sync_load(wrapping(child + I64{144})) != I64{0}) {
+        task_group_release(sync_load(wrapping(child + I64{136})))
+    }
     // A cancellation the release shield's exit delivers once the body has
     // finished comes too late to stop it: the task keeps the body's outcome.
     late_cancel: finished == I64{0} && jet_scheduler_native_status() == I64{1}
@@ -326,7 +423,9 @@ task_run: fn(child: I64) {
 // A deferred task no join claimed runs on a carrier, as any other.
 task_drain: fn(child: I64) {
     if task_claim(child) -> scheduler_submit(child)
-    loop sync_load(wrapping(child + I64{24})) == (I64{0}) -> _ := sync_wait(child + I64{24}, I64{0}, I64{-1})
+    loop sync_load(wrapping(child + I64{24})) == (I64{0}) {
+        _ := sync_wait(child + I64{24}, I64{0}, I64{-1})
+    }
 }
 
 // Takes a deferred task (TASK_DEFERRED) to start it; false when it is not
@@ -379,7 +478,9 @@ task_run_joined: fn(child: I64) {
 // itself with its typed result, so that join parks without observing the
 // joiner's deadline: the two expire together, and the result wins.
 task_join_bounded: fn(child: I64) -> Bool {
-    if (sync_load(wrapping(child + I64{184})) == I64{0}) || !jet_ctx_deadline_present() -> return false
+    if (sync_load(wrapping(child + I64{184})) == I64{0}) || !jet_ctx_deadline_present() {
+        return false
+    }
     context: wrapping(child + TASK_CONTEXT)
     sync_load(wrapping(context + CONTEXT_DEADLINE_PRESENT)) != I64{0} && sync_load(wrapping(context + CONTEXT_DEADLINE_MS)) <= jet_ctx_deadline_ms()
 }
@@ -393,8 +494,8 @@ task_join_wait: fn(child: I64) -> I64 {
     bounded: task_join_bounded(child)
     if !typed -> _ := scheduler_deadline_check(kind)
     loop jet_scheduler_native_propagate() == (I64{0}) {
-        if (scheduler_wait_point_cancel_check() != I64{0}) -> break
-        if (sync_load(wrapping(child + I64{24})) != I64{0}) -> break
+        if (scheduler_wait_point_cancel_check() != I64{0}) { break }
+        if (sync_load(wrapping(child + I64{24})) != I64{0}) { break }
         _ := scheduler_yield_policy(kind, sync_load(wrapping(child + I64{104})), I64{-1}, !bounded)
     }
     if !typed -> _ := scheduler_deadline_check(kind)
@@ -422,7 +523,9 @@ task_panic_reason: fn(child: I64) -> I64 {
 task_panic_site_hand: fn(child: I64, reason: I64) {
     record: sync_load(wrapping(sync_load(wrapping(child + I64{8})) + I64{40}))
     site: sync_swap(wrapping(record + I64{56}), I64{0})
-    if (site == I64{0}) -> return
+    if (site == I64{0}) {
+        return
+    }
     control: scheduler_control_current()
     if (control == I64{0} || reason == I64{0}) {
         jet_rt_string_drop(site)
@@ -442,8 +545,12 @@ task_panic_message: fn(message: I64) -> I64 {
     data: sync_load(message)
     length: sync_load(wrapping(message + I64{8}))
     line_end := I64{0}
-    loop line_end < length && trap_byte(wrapping(data + line_end)) != (I64{10}) -> line_end += I64{1}
-    if (line_end < length && line_end > I64{0} && trap_byte(wrapping(wrapping(data + line_end) - I64{1})) == I64{13}) -> line_end -= I64{1}
+    loop line_end < length && trap_byte(wrapping(data + line_end)) != (I64{10}) {
+        line_end += I64{1}
+    }
+    if (line_end < length && line_end > I64{0} && trap_byte(wrapping(wrapping(data + line_end) - I64{1})) == I64{13}) {
+        line_end -= I64{1}
+    }
     delimiter := I64{-1}
     at := I64{0}
     loop at + (I64{3}) <= line_end {
@@ -464,14 +571,16 @@ task_panic_message: fn(message: I64) -> I64 {
     location := I64{-1}
     at = start
     loop at + (I64{5}) <= end {
-        if (trap_byte(wrapping(data + at)) == I64{32} && trap_byte(wrapping(wrapping(data + at) + I64{1})) == I64{40} && trap_byte(wrapping(wrapping(data + at) + I64{2})) == I64{97} && trap_byte(wrapping(wrapping(data + at) + I64{3})) == I64{116} && trap_byte(wrapping(wrapping(data + at) + I64{4})) == I64{32}) -> location = at
+        if (trap_byte(wrapping(data + at)) == I64{32} && trap_byte(wrapping(wrapping(data + at) + I64{1})) == I64{40} && trap_byte(wrapping(wrapping(data + at) + I64{2})) == I64{97} && trap_byte(wrapping(wrapping(data + at) + I64{3})) == I64{116} && trap_byte(wrapping(wrapping(data + at) + I64{4})) == I64{32}) {
+            location = at
+        }
         at += I64{1}
     }
     if (location >= I64{0} && end > start && trap_byte(wrapping(wrapping(data + end) - I64{1})) == I64{41}) {
         colon := false
         at = location + I64{5}
         loop at < end - (I64{1}) {
-            if (trap_byte(wrapping(data + at)) == I64{58}) -> colon = true
+            if (trap_byte(wrapping(data + at)) == I64{58}) { colon = true }
             at += I64{1}
         }
         if colon -> end = location
@@ -489,7 +598,7 @@ task_should_flatten: fn(child: I64, flatten: Bool) -> Bool {
 // initialized payload bytes. A parent stop never manufactures an out value.
 task_take_outcome: fn(child: I64, flatten: Bool, out: I64) -> I64 {
     sync_mutex_lock(wrapping(child + I64{16}))
-    if (sync_load(wrapping(child + I64{152})) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+    if (sync_load(wrapping(child + I64{152})) != I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
     sync_store(wrapping(child + I64{152}), I64{1})
     status: sync_load(wrapping(child + I64{32}))
     success := I64{0}
@@ -515,15 +624,11 @@ task_take_outcome: fn(child: I64, flatten: Bool, out: I64) -> I64 {
             jet_rt_free(raw, coll_result_size(ok_meta, error_meta), I64{8})
             sync_store(wrapping(child + I64{56}), I64{0})
         }
-    } else if (status == I64{2}) {
-        sync_store(out, task_failure_new(I64{1}, I64{0}))
-    } else if (status == I64{5}) {
+    } else if (status == I64{2}) { sync_store(out, task_failure_new(I64{1}, I64{0})) } else if (status == I64{5}) {
         reason: task_panic_reason(child)
         task_panic_site_hand(child, reason)
         sync_store(out, task_failure_new(I64{2}, reason))
-    } else {
-        sync_store(out, task_failure_new(I64{0}, I64{0}))
-    }
+    } else { sync_store(out, task_failure_new(I64{0}, I64{0})) }
     sync_mutex_unlock(wrapping(child + I64{16}))
     task_drop(child)
     success
@@ -533,7 +638,9 @@ task_take_outcome: fn(child: I64, flatten: Bool, out: I64) -> I64 {
 // stopping, whose join cancels and drains it on a carrier.
 #Export(c) jet_rt_native_task_join: fn(child: I64, flatten: I64, out: I64) -> I64 {
     if (child != I64{0} && task_claim(child)) {
-        if (jet_scheduler_native_propagate() == I64{0}) -> task_run_joined(child) else -> scheduler_submit(child)
+        if (jet_scheduler_native_propagate() == I64{0}) { task_run_joined(child) } else {
+            scheduler_submit(child)
+        }
     }
     if (task_join_wait(child) != I64{0}) {
         scheduler_control_cancel(sync_load(wrapping(child + I64{8})))
@@ -543,7 +650,10 @@ task_take_outcome: fn(child: I64, flatten: Bool, out: I64) -> I64 {
     }
     task_take_outcome(child, (flatten.bit_and(I64{255})) != I64{0}, out)
 }
-#Export(c) jet_task_join_result: fn(child: I64, out: I64) -> I64 { jet_rt_native_task_join(child, I64{1}, out) }
+
+#Export(c) jet_task_join_result: fn(child: I64, out: I64) -> I64 {
+    jet_rt_native_task_join(child, I64{1}, out)
+}
 
 // Completion frames are nested native List headers at TCB@80. Each callback
 // is a closure header [refs,code,release]. Batch-reverse order matches Rust;
@@ -560,6 +670,7 @@ scheduler_task_completion_begin: fn() -> I64 {
     scheduler_words_push(stack, frame)
     frame
 }
+
 // The last owner runs the box's release helper at 16 when it has one: a
 // box with nothing to release (a lambda with no captures) holds 0 there,
 // as JetIR ir_closure_unref reads it.
@@ -567,7 +678,7 @@ scheduler_closure_drop: fn(closure: I64) {
     count: sync_load(closure) - I64{1}
     sync_store(closure, count)
     release: sync_load(wrapping(closure + I64{16}))
-    if (count == I64{0} && release != I64{0}) -> coll_call1_unit(release, closure)
+    if (count == I64{0} && release != I64{0}) { coll_call1_unit(release, closure) }
 }
 
 scheduler_cleanup_closure_drop: fn(closure: I64) {
@@ -577,6 +688,7 @@ scheduler_cleanup_closure_drop: fn(closure: I64) {
     jet_scheduler_shield_leave()
     jet_rt_session_cleanup_leave(saved)
 }
+
 scheduler_cleanup_closure_run: fn(closure: I64) {
     saved: jet_rt_session_cleanup_enter(jet_scheduler_native_status())
     coll_call1_unit(sync_load(wrapping(closure + I64{8})), closure)
@@ -584,10 +696,13 @@ scheduler_cleanup_closure_run: fn(closure: I64) {
     // A first stop from a normal callback now owns its capture-drop scope.
     scheduler_cleanup_closure_drop(closure)
 }
+
 scheduler_task_completion_end: fn(frame: I64) {
     stack: sync_load(wrapping(thread_base() + I64{80}))
     index: sync_load(stack) - I64{1}
-    if sync_load(wrapping(sync_load(wrapping(stack + I64{16})) + index * I64{8})) != frame -> jet_rt_unreachable(I64{0}, I64{0})
+    if sync_load(wrapping(sync_load(wrapping(stack + I64{16})) + index * I64{8})) != frame {
+        jet_rt_unreachable(I64{0}, I64{0})
+    }
     loop sync_load(frame) != (I64{0}) {
         count := sync_load(frame)
         capacity: sync_load(wrapping(frame + I64{8}))
@@ -615,8 +730,11 @@ scheduler_task_completion_end: fn(frame: I64) {
 // main_exit_handlers_code), so a program that registers no exit handler
 // links no drain.
 task_exit_root := I64{0}
+
 #Export(c) jet_rt_task_exit_init: fn() {
-    if (task_exit_root != I64{0}) -> return
+    if (task_exit_root != I64{0}) {
+        return
+    }
     sync_mutex_lock(thread_tls_registry)
     if (task_exit_root == I64{0}) {
         root: jet_rt_alloc(I64{32}, I64{8})
@@ -628,10 +746,12 @@ task_exit_root := I64{0}
     }
     sync_mutex_unlock(thread_tls_registry)
 }
+
 // RuntimeLower resolves this checked address through its sole intrinsic table.
 rt_task_exit_run_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
+
 #Export(c) jet_rt_native_atexit: fn(closure: I64) {
     if (scheduler_control_status(scheduler_control_current()) != I64{0}) {
         scheduler_cleanup_closure_drop(closure)
@@ -643,9 +763,12 @@ rt_task_exit_run_address: fn() -> I64 {
     scheduler_words_push(wrapping(root + I64{8}), closure)
     sync_mutex_unlock(root)
 }
+
 #Export(c) jet_rt_task_exit_handlers: fn() {
     root: task_exit_root
-    if (root == I64{0}) -> return
+    if (root == I64{0}) {
+        return
+    }
     loop {
         sync_mutex_lock(root)
         count: sync_load(wrapping(root + I64{8}))
@@ -653,7 +776,9 @@ rt_task_exit_run_address: fn() -> I64 {
         data: sync_load(wrapping(root + I64{24}))
         thread_zero(wrapping(root + I64{8}), I64{24})
         sync_mutex_unlock(root)
-        if (count == I64{0}) -> return
+        if (count == I64{0}) {
+            return
+        }
         at := I64{0}
         loop at < count {
             scheduler_cleanup_closure_run(sync_load(wrapping(data + at * I64{8})))
@@ -662,6 +787,7 @@ rt_task_exit_run_address: fn() -> I64 {
         jet_rt_free(data, capacity * I64{8}, I64{8})
     }
 }
+
 // jet_rt_task_exit_handlers as main_exit_handlers_code calls it.
 #Export(c) jet_rt_task_exit_run: fn(_unused: I64) -> I64 {
     jet_rt_task_exit_handlers()
@@ -681,7 +807,7 @@ task_live_link: fn(child: I64) {
     sync_mutex_lock(wrapping(root + I64{240}))
     head: sync_load(wrapping(root + I64{248}))
     sync_store(wrapping(child + I64{200}), head)
-    if (head != I64{0}) -> sync_store(wrapping(head + I64{208}), child)
+    if (head != I64{0}) { sync_store(wrapping(head + I64{208}), child) }
     sync_store(wrapping(root + I64{248}), child)
     sync_mutex_unlock(wrapping(root + I64{240}))
 }
@@ -691,8 +817,10 @@ task_live_unlink: fn(child: I64) {
     sync_mutex_lock(wrapping(root + I64{240}))
     next: sync_load(wrapping(child + I64{200}))
     previous: sync_load(wrapping(child + I64{208}))
-    if (previous == I64{0}) -> sync_store(wrapping(root + I64{248}), next) else -> sync_store(wrapping(previous + I64{200}), next)
-    if (next != I64{0}) -> sync_store(wrapping(next + I64{208}), previous)
+    if (previous == I64{0}) { sync_store(wrapping(root + I64{248}), next) } else {
+        sync_store(wrapping(previous + I64{200}), next)
+    }
+    if (next != I64{0}) { sync_store(wrapping(next + I64{208}), previous) }
     sync_mutex_unlock(wrapping(root + I64{240}))
 }
 
@@ -714,7 +842,9 @@ task_live_cancel: fn(root: I64) {
         node = sync_load(wrapping(node + I64{200}))
     }
     sync_mutex_unlock(wrapping(root + I64{240}))
-    if (capacity == I64{0}) -> return
+    if (capacity == I64{0}) {
+        return
+    }
     controls: jet_rt_alloc(capacity * I64{8}, I64{8})
     count := I64{0}
     sync_mutex_lock(wrapping(root + I64{240}))
@@ -745,7 +875,7 @@ task_live_unfinished: fn(root: I64) -> I64 {
     count := I64{0}
     node := sync_load(wrapping(root + I64{248}))
     loop node != (I64{0}) {
-        if (sync_load(wrapping(node + I64{24})) == I64{0}) -> count += I64{1}
+        if (sync_load(wrapping(node + I64{24})) == I64{0}) { count += I64{1} }
         node = sync_load(wrapping(node + I64{200}))
     }
     sync_mutex_unlock(wrapping(root + I64{240}))
@@ -769,11 +899,14 @@ TASK_EXIT_DRAIN_NS: I64{1000000000}
         sync_thread_lock(root)
         settled: sync_load(wrapping(root + I64{8})) == I64{0} && sync_load(wrapping(root + I64{168})) == I64{0} && sync_load(wrapping(root + I64{40})) == sync_load(wrapping(root + I64{48}))
         sync_thread_unlock(root)
-        if (settled && jet_rt_observe_io_quiescent()) || time_host_monotonic_i64() >= deadline -> break
+        if (settled && jet_rt_observe_io_quiescent()) || time_host_monotonic_i64() >= deadline {
+            break
+        }
         fiber_spin_yield()
     }
     task_live_unfinished(root)
 }
+
 // RuntimeLower resolves this checked address through its sole intrinsic table.
 rt_task_exit_settle_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }

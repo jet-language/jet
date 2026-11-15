@@ -1,4 +1,3 @@
-
 Access: struct {
     impl Marker {
         sites: [.Type]
@@ -8,7 +7,7 @@ Access: struct {
             name: target.reflect().name
             param: info.type_params[0].name
             make: fn(value: &&#{param}) -> #{name}<#{param}> {
-                return #{name}<#{param}>{ value: value }
+                return #{name}<#{param}>{value: value}
             }
             marker: fn() -> Int { 17 }
             get_value: fn(self) -> #{param} { self.value.copy() }
@@ -35,20 +34,31 @@ NumericAccess: struct {
 }
 
 #Access
-Box: struct<T: Printable> { value: T }
+Box: struct<T: Printable> {
+    value: T
+}
+
 #Access
-StaticOnly: struct<T: Printable> { value: T }
-Wrapper: struct<U: Printable> { boxed: Box<U> }
+StaticOnly: struct<T: Printable> {
+    value: T
+}
+
+Wrapper: struct<U: Printable> {
+    boxed: Box<U>
+}
+
 #NumericAccess
-NumericBox: struct<T: [Printable, Add, Equatable]> { value: T }
+NumericBox: struct<T: [Printable, Add, Equatable]> {
+    value: T
+}
 
 run: fn() {
     number := Box<Int>.make(7)
-    decimal := Box<Float>{ value: 2.5 }
-    flag := Box<Bool>{ value: true }
-    letter := Box<Char>{ value: 'J' }
+    decimal := Box<Float>{value: 2.5}
+    flag := Box<Bool>{value: true}
+    letter := Box<Char>{value: 'J'}
     text := Box<String>.make("jet")
-    numeric := NumericBox<Float>{ value: 1.5 }
+    numeric := NumericBox<Float>{value: 1.5}
     print(number.get_value())
     print(decimal.get_value())
     print(flag.get_value())

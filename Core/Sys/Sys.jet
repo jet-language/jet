@@ -8,6 +8,7 @@ package: {
         sys: .Library{ entry: sys }
     }
 }
+
 use {
     core: core
     net: core.net
@@ -15,7 +16,6 @@ use {
     process_api: core.process
     text_parse: core.text.parse
     rt: jet.runtime.encoding
-
     core.encoding.[Dyn]
     core.sys.[EnvError]
     host_path: __core_files_path_components
@@ -25,22 +25,23 @@ use {
     process_errors.[process_error]
     id_rows.[ids_of, set_ids, database_lines, passwd_entry, group_entry]
 }
+
 // Reused from Foundation CLISchema/TargetWidth (a736ba79d). This pointer
 // record measures the selected build target, never the compiler host.
-#Layout(c)
-SysTargetPointer: struct { pointer: *Int }
+#Layout(c) SysTargetPointer: struct {
+    pointer: *Int
+}
 
 // Layout facts must be evaluated inside the selected-target comptime boundary,
 // not through an ordinary function checked outside compile-time context.
 // Each prepared binding has one final expression.
 SYS_TARGET_POINTER_BYTES: #run { SysTargetPointer.reflect().layout.size ?? panic("selected target has no concrete pointer layout") }
-SYS_TARGET_USIZE_MAX: #run {
-    if {
-        SYS_TARGET_POINTER_BYTES <= 0 || SYS_TARGET_POINTER_BYTES > 8 -> panic("selected target pointer width does not fit the U64 carrier")
-        SYS_TARGET_POINTER_BYTES == 8 -> U64{0xffffffffffffffff}
-        else -> (U64{1} << (8 * SYS_TARGET_POINTER_BYTES)) - U64{1}
-    }
-}
+
+SYS_TARGET_USIZE_MAX: #run { if {
+    SYS_TARGET_POINTER_BYTES <= 0 || SYS_TARGET_POINTER_BYTES > 8 -> panic("selected target pointer width does not fit the U64 carrier")
+    SYS_TARGET_POINTER_BYTES == 8 -> U64{0xffffffffffffffff}
+    else -> (U64{1} << (8 * SYS_TARGET_POINTER_BYTES)) - U64{1}
+} }
 
 usize_max: fn() -> U64 Never! { SYS_TARGET_USIZE_MAX }
 
@@ -51,21 +52,18 @@ usize_max: fn() -> U64 Never! { SYS_TARGET_USIZE_MAX }
     assert((maximum.bit_and(U64{255})) == U64{255})
 }
 
-
 // Source owns validation, Unicode policy and child overlays. The existing
 // process cell remains the sole writer until the pinned Shared root lands.
-get: fn(name: String) -[Env]> String? Never! {
-    decode_host_env(core.sys.__env_value(name))
-}
+get: fn(name: String) -[Env]> String? Never! { decode_host_env(core.sys.__env_value(name)) }
 
 set: fn(name: String, value: String) Never! -[Env]> {
     if validate_env_name(name) == {
-        .Err(error) -> panic("core.sys.set: {error}")
+        .Err(error) -> { panic("core.sys.set: {error}") }
         .Ok(_) -> {}
     }
     if has_nul(value) -> panic("core.sys.set: {EnvError.InvalidValue}")
     if core.sys.__env_set(name, value) == {
-        .Err(error) -> panic("core.sys.set: {error}")
+        .Err(error) -> { panic("core.sys.set: {error}") }
         .Ok(_) -> {}
     }
 }
@@ -75,9 +73,7 @@ unset: fn(name: String) -[Env]> Bool EnvError! {
     core.sys.__env_remove(name)
 }
 
-vars: fn() -[Env]> [String] EnvError! {
-    entry_names(__env_snapshot())
-}
+vars: fn() -[Env]> [String] EnvError! { entry_names(__env_snapshot()) }
 
 /// The process environment as a map: every variable whose name and value are
 /// UTF-8 text (one that is not is left out, as `get` reads it as unset).
@@ -86,8 +82,8 @@ vars: fn() -[Env]> [String] EnvError! {
 /// set("JET_DOCTEST_ENVIRONMENT", "on")
 /// environment().get("JET_DOCTEST_ENVIRONMENT") == Val("on") // => true
 /// ```
-environment: fn() -[Env]> [String: String] Never! {
-    found := [String: String]{}
+environment: fn() -[Env]> [String:String] Never! {
+    found := [String:String]{}
     loop entry in __env_snapshot() {
         name: String.from_bytes(entry.name) ?? next
         found[name] = String.from_bytes(entry.value) ?? next
@@ -101,13 +97,9 @@ __startup_env: fn() -> [(name: [U8], value: [U8])] Never! {
 }
 
 // Snapshot once, under the existing host cell's lock. No per-name rereads.
-__env_snapshot: fn() -> [(name: [U8], value: [U8])] Never! {
-    env_columns(core.sys.__env_columns())
-}
+__env_snapshot: fn() -> [(name: [U8], value: [U8])] Never! { env_columns(core.sys.__env_columns()) }
 
-__env_present: fn(name: String) -[Env]> Bool Never! {
-    core.sys.__env_value(name) != None
-}
+__env_present: fn(name: String) -[Env]> Bool Never! { core.sys.__env_value(name) != None }
 
 env_columns: fn(columns: [[U8]]) -> [(name: [U8], value: [U8])] Never! {
     entries := [(name: [U8], value: [U8])]{}
@@ -121,8 +113,13 @@ env_columns: fn(columns: [[U8]]) -> [(name: [U8], value: [U8])] Never! {
 
 // Prepare the child environment entirely in source. Explicit sets are applied
 // in order, then every removal.
-__env_compose: fn(snapshot: [(name: [U8], value: [U8])], clear: Bool,
-    names: [String], values: [String], removals: [String]) -> [(name: [U8], value: [U8])] IOError! {
+__env_compose: fn(
+    snapshot: [(name: [U8], value: [U8])],
+    clear: Bool,
+    names: [String],
+    values: [String],
+    removals: [String],
+) -> [(name: [U8], value: [U8])] IOError! {
     assert(names.len() == values.len())
     entries := if clear -> [(name: [U8], value: [U8])]{} else -> snapshot.copy()
     loop index in 0..<names.len() {
@@ -147,14 +144,21 @@ __env_compose: fn(snapshot: [(name: [U8], value: [U8])], clear: Bool,
 }
 
 env_process_error: fn(name: String, error: EnvError) -> IOError Never! {
-    IOError.InvalidInput(IOContext{
-        operation: .Resolve, resource: Val(name), os_code: None, cause: Val("{error}"),
-    })
+    IOError.InvalidInput(
+        IOContext{
+            operation: .Resolve,
+            resource: Val(name),
+            os_code: None,
+            cause: Val("{error}"),
+        },
+    )
 }
 
 remove_process_entries: fn(entries: &[(name: [U8], value: [U8])], name: [U8]) Never! {
     loop {
-        if !remove_entry(entries, name) -> return
+        if !remove_entry(entries, name) {
+            return
+        }
     }
 }
 
@@ -243,7 +247,9 @@ env_key_order: fn(keys: [[U8]]) -> [Int] Never! {
 
 #Test("environment names enumerate in key order, odd counts and runs included") {
     entries := [(name: [U8], value: [U8])]{}
-    loop name in ([String]{"PATH", "B", "HOME", "A", "TERM", "C", "A_1"}) -> entries.push((name: name.bytes(), value: "v".bytes()))
+    loop name in ([String]{"PATH", "B", "HOME", "A", "TERM", "C", "A_1"}) {
+        entries.push((name: name.bytes(), value: "v".bytes()))
+    }
     assert_eq(entry_names(entries) ?? panic("Unicode names enumerate"), [String]{"A", "A_1", "B", "C", "HOME", "PATH", "TERM"})
     assert_eq(entry_names([(name: [U8], value: [U8])]{}) ?? panic("no names enumerate"), [String]{})
 }
@@ -271,11 +277,11 @@ env_key_order: fn(keys: [[U8]]) -> [Int] Never! {
 }
 
 #Test("logical environment validates names and sorts names, not values") {
-    if validate_env_name("") == { .Err(_) -> {} .Ok(_) -> assert(false) }
-    if validate_env_name("A=B") == { .Err(_) -> {} .Ok(_) -> assert(false) }
+    if validate_env_name("") == { .Err(_) -> {}, .Ok(_) -> assert(false) }
+    if validate_env_name("A=B") == { .Err(_) -> {}, .Ok(_) -> assert(false) }
     entries: [(name: [U8], value: [U8])]{
         (name: "JET_ENV_Z".bytes(), value: "".bytes()),
-        (name: "JET_ENV_A".bytes(), value: "z".bytes())
+        (name: "JET_ENV_A".bytes(), value: "z".bytes()),
     }
     assert_eq(entry_names(entries) ?? panic("Unicode entries"), [String]{"JET_ENV_A", "JET_ENV_Z"})
 }
@@ -285,8 +291,13 @@ env_key_order: fn(keys: [[U8]]) -> [Int] Never! {
         (name: "JET_ENV_A".bytes(), value: [U8]{255}),
         (name: "JET_ENV_B".bytes(), value: "old".bytes()),
     }
-    composed: __env_compose(snapshot, false, [String]{"JET_ENV_B", "JET_ENV_B"},
-        [String]{"first", "second"}, [String]{"JET_ENV_B"}) ?? panic("valid overlay")
+    composed: __env_compose(
+        snapshot,
+        false,
+        [String]{"JET_ENV_B", "JET_ENV_B"},
+        [String]{"first", "second"},
+        [String]{"JET_ENV_B"},
+    ) ?? panic("valid overlay")
     assert_eq(composed, [(name: [U8], value: [U8])]{snapshot[0]})
     assert_eq(__env_compose(snapshot, true, [String]{}, [String]{}, [String]{}) ?? panic("clear"), [(name: [U8], value: [U8])]{})
 }
@@ -429,12 +440,12 @@ expand: fn(value: String) -[Env]> String Never! {
             after: raw[i + 1]
             if after == (U8{36}) {
                 out.push(byte)
-                i = i + 2
+                i += 2
                 next
             }
             if after == (U8{123}) {
                 close := i + 2
-                loop close < raw.len() && raw[close] != (U8{125}) -> close = close + 1
+                loop close < raw.len() && raw[close] != (U8{125}) -> close += 1
                 if close < raw.len() {
                     replacement: get(slice_ascii(raw, i + 2, close)) ?? ""
                     loop item in replacement.bytes() -> out.push(item)
@@ -443,7 +454,7 @@ expand: fn(value: String) -[Env]> String Never! {
                 }
             }
             end := i + 1
-            loop end < raw.len() && is_env_ident(raw[end]) -> end = end + 1
+            loop end < raw.len() && is_env_ident(raw[end]) -> end += 1
             if end > i + 1 {
                 replacement: get(slice_ascii(raw, i + 1, end)) ?? ""
                 loop item in replacement.bytes() -> out.push(item)
@@ -453,7 +464,7 @@ expand: fn(value: String) -[Env]> String Never! {
         }
         if byte == (U8{37}) {
             close := i + 1
-            loop close < raw.len() && is_env_ident(raw[close]) -> close = close + 1
+            loop close < raw.len() && is_env_ident(raw[close]) -> close += 1
             if close > i + 1 && close < raw.len() && raw[close] == (U8{37}) {
                 found: get(slice_ascii(raw, i + 1, close))
                 if found != None {
@@ -464,7 +475,7 @@ expand: fn(value: String) -[Env]> String Never! {
             }
         }
         out.push(byte)
-        i = i + 1
+        i += 1
     }
 }
 
@@ -473,7 +484,7 @@ expand: fn(value: String) -[Env]> String Never! {
 /// format is `env_text`'s, `$NAME` reads an earlier assignment, else the
 /// environment, and an assignment replaces the environment's value. No file at
 /// `path` leaves the environment as it is, as `[ -f path ] && . path` does.
-env_file: fn(path: String) -[Env, FS.Read]> [String: String] IOError! {
+env_file: fn(path: String) -[Env, FS.Read]> [String:String] IOError! {
     vars: environment()
     text := ""
     if files.read(path) == {
@@ -519,16 +530,23 @@ env_file: fn(path: String) -[Env, FS.Read]> [String: String] IOError! {
 /// (env_text("A=$(date)", vars) ?? [String: String]{"failed": "yes"}).get("failed") == Val("yes") // => true
 /// (env_text("readonly D=1\nD=2", vars) ?? [String: String]{"failed": "yes"}).get("failed") == Val("yes") // => true
 /// ```
-env_text: fn(text: String, vars: [String: String], source: String{"env text"}) -> [String: String] IOError! {
-    scope := EnvScope{vars: vars, assigned: [String: String]{}, readonly: [String]{}}
+env_text: fn(text: String, vars: [String:String], source: String{"env text"}) -> [String:String] IOError! {
+    scope := EnvScope{vars: vars, assigned: [String:String]{}, readonly: [String]{}}
     number := 0
     loop raw in text.lines() {
         number += 1
         line := EnvLine{raw: raw.bytes(), at: 0}
         reason: env_line(line, scope) ?? next
-        return Err(IOError.InvalidInput(IOContext{
-            operation: .Read, resource: Val("{source}:{number}"), os_code: None, cause: Val(reason),
-        }))
+        return Err(
+            IOError.InvalidInput(
+                IOContext{
+                    operation: .Read,
+                    resource: Val("{source}:{number}"),
+                    os_code: None,
+                    cause: Val(reason),
+                },
+            ),
+        )
     }
     Ok(scope.assigned)
 }
@@ -542,8 +560,8 @@ EnvLine: struct {
 /// What an env file is read against: the values from outside it (`vars`),
 /// what it has assigned so far, and the names it has made read-only.
 EnvScope: struct {
-    vars: [String: String]
-    assigned: [String: String]
+    vars: [String:String]
+    assigned: [String:String]
     readonly: [String]
 }
 
@@ -586,22 +604,30 @@ env_command: fn(line: &EnvLine, scope: &EnvScope) -> String? Never! {
     count := 0
     loop {
         env_blanks(line)
-        if line.at >= line.raw.len() || line.raw[line.at] == (U8{59}) || line.raw[line.at] == (U8{35}) -> break
+        if line.at >= line.raw.len() || line.raw[line.at] == (U8{59}) || line.raw[line.at] == (U8{35}) {
+            break
+        }
         start: line.at
         loop line.at < line.raw.len() && is_env_ident(line.raw[line.at]) -> line.at += 1
-        if line.at == start || env_digit(line.raw[start]) -> return Val("a command here is assignments, `NAME=value`, or `export` or `readonly` and names")
+        if line.at == start || env_digit(line.raw[start]) {
+            return Val("a command here is assignments, `NAME=value`, or `export` or `readonly` and names")
+        }
         name: slice_ascii(line.raw, start, line.at)
         count += 1
         append: line.at + 1 < line.raw.len() && line.raw[line.at] == (U8{43}) && line.raw[line.at + 1] == (U8{61})
         if append -> line.at += 1
         if line.at >= line.raw.len() || line.raw[line.at] != (U8{61}) {
-            if keyword == "" -> return Val("`{name}` is a command, which an env file does not run: quote a value that holds a space")
+            if keyword == "" {
+                return Val("`{name}` is a command, which an env file does not run: quote a value that holds a space")
+            }
             later.push((name: name, value: None))
             next
         }
         line.at += 1
         value := [U8]{}
-        if append -> loop byte in (env_lookup(name, scope) ?? "").bytes() -> value.push(byte)
+        if append {
+            loop byte in (env_lookup(name, scope) ?? "").bytes() -> value.push(byte)
+        }
         reason: env_word(line, scope, value, true, false)
         if reason != None -> return reason
         text: String.from_bytes(value) ?? return Val("the value of {name} is not UTF-8")
@@ -612,14 +638,18 @@ env_command: fn(line: &EnvLine, scope: &EnvScope) -> String? Never! {
         refused: env_assign(scope, name, text)
         if refused != None -> return refused
     }
-    if count == 0 && keyword != "" -> return Val("`{keyword}` with no names lists the variables, which an env file does not do")
+    if count == 0 && keyword != "" {
+        return Val("`{keyword}` with no names lists the variables, which an env file does not do")
+    }
     if count == 0 -> return Val("a `;` ends a command, and none is before it")
     loop item in later {
         if item.value == .Val(text) {
             refused: env_assign(scope, item.name, text)
             if refused != None -> return refused
         }
-        if keyword == "readonly" && !scope.readonly.contains(item.name) -> scope.readonly.push(item.name.copy())
+        if keyword == "readonly" && !scope.readonly.contains(item.name) {
+            scope.readonly.push(item.name.copy())
+        }
     }
     None
 }
@@ -709,7 +739,9 @@ env_word: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool, braced: B
             if reason != None -> return reason
             next
         }
-        if ([U8]{59, 38, 124, 60, 62, 40, 41, 96}).contains(c) -> return Val("`{slice_ascii(line.raw, line.at, line.at + 1)}` is shell syntax an env file does not run")
+        if ([U8]{59, 38, 124, 60, 62, 40, 41, 96}).contains(c) {
+            return Val("`{slice_ascii(line.raw, line.at, line.at + 1)}` is shell syntax an env file does not run")
+        }
         out.push(c)
         line.at += 1
     }
@@ -734,7 +766,9 @@ env_tilde: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool, braced: 
     if line.at < line.raw.len() {
         c: line.raw[line.at]
         ends: c == (U8{47}) || c == (U8{58}) || c == (U8{59}) || env_blank(c) || (braced && c == (U8{125}))
-        if !ends -> return Val("only `~` alone or before `/` or `:` expands here: write the path for `~user`")
+        if !ends {
+            return Val("only `~` alone or before `/` or `:` expands here: write the path for `~user`")
+        }
     }
     if !live -> return None
     home: env_lookup("HOME", scope) ?? return Val("`~` is HOME's value, and HOME is unset")
@@ -766,7 +800,9 @@ env_double: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool) -> Stri
             next
         }
         if c == (U8{96}) -> return Val("a backtick command is not run here")
-        if c == (U8{92}) && line.at + 1 < line.raw.len() && ([U8]{34, 36, 92, 96}).contains(line.raw[line.at + 1]) -> line.at += 1
+        if c == (U8{92}) && line.at + 1 < line.raw.len() && ([U8]{34, 36, 92, 96}).contains(line.raw[line.at + 1]) {
+            line.at += 1
+        }
         out.push(line.raw[line.at])
         line.at += 1
     }
@@ -794,7 +830,9 @@ env_dollar: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool) -> Stri
         return env_braced(line, scope, out, live)
     }
     if after == (U8{40}) -> return Val("a `$(` command is not run here")
-    if after == (U8{48}) || ([U8]{35, 63, 42, 64, 33, 36, 45, 39}).contains(after) -> return Val("`{slice_ascii(line.raw, line.at, line.at + 2)}` is a shell parameter an env file does not have")
+    if after == (U8{48}) || ([U8]{35, 63, 42, 64, 33, 36, 45, 39}).contains(after) {
+        return Val("`{slice_ascii(line.raw, line.at, line.at + 2)}` is a shell parameter an env file does not have")
+    }
     if env_digit(after) {
         line.at += 2
         return None
@@ -807,7 +845,11 @@ env_dollar: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool) -> Stri
     start: line.at + 1
     line.at = start
     loop line.at < line.raw.len() && is_env_ident(line.raw[line.at]) -> line.at += 1
-    if live -> loop byte in (env_lookup(slice_ascii(line.raw, start, line.at), scope) ?? "").bytes() -> out.push(byte)
+    if live {
+        loop byte in (env_lookup(slice_ascii(line.raw, start, line.at), scope) ?? "").bytes() {
+            out.push(byte)
+        }
+    }
     None
 }
 
@@ -831,7 +873,9 @@ env_braced: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool) -> Stri
     forms: "only `${{NAME}}` and `${{NAME` with `:-`, `-`, `:=`, `=`, `:+`, `+`, `:?` or `?` and a word expand here"
     start: line.at
     argument: line.at < line.raw.len() && env_digit(line.raw[line.at])
-    loop line.at < line.raw.len() && (if argument -> env_digit(line.raw[line.at]) else -> is_env_ident(line.raw[line.at])) -> line.at += 1
+    loop line.at < line.raw.len() && (if argument -> env_digit(line.raw[line.at]) else -> is_env_ident(line.raw[line.at])) {
+        line.at += 1
+    }
     if line.at == start -> return Val(forms)
     if line.at >= line.raw.len() -> return Val("a `${{` is not closed")
     name: slice_ascii(line.raw, start, line.at)
@@ -840,7 +884,9 @@ env_braced: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool) -> Stri
     if argument -> value = None
     if line.raw[line.at] == (U8{125}) {
         line.at += 1
-        if live -> loop byte in (value ?? "").bytes() -> out.push(byte)
+        if live {
+            loop byte in (value ?? "").bytes() -> out.push(byte)
+        }
         return None
     }
     colon: line.raw[line.at] == (U8{58})
@@ -857,7 +903,9 @@ env_braced: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool) -> Stri
     line.at += 1
     if !live -> return None
     if !takes {
-        if op != (U8{43}) -> loop byte in (value ?? "").bytes() -> out.push(byte)
+        if op != (U8{43}) {
+            loop byte in (value ?? "").bytes() -> out.push(byte)
+        }
         return None
     }
     if op == (U8{63}) && word.len() == 0 -> return Val("{name}: parameter null or not set")
@@ -945,9 +993,9 @@ getegid: fn() -[Env]> Int Never! { posix_identity(core.sys.__getegid()) }
 
 getpgrp: fn() -[Env]> Int Never! { posix_identity(core.sys.__getpgrp()) }
 
-#Unsafe("posix umask: the caller owns the process file-creation mask and restores it when other code relies on it") umask: fn(mask: Int) -[FS, Env]> Int Never! {
-    core.sys.__umask(mask) ?? 0
-}
+#Unsafe("posix umask: the caller owns the process file-creation mask and restores it when other code relies on it")
+umask: fn(mask: Int) -[FS, Env]> Int Never! { core.sys.__umask(mask) ?? 0 }
+
 exitcode: fn(code: Int) -> Int Never! { code }
 
 success: fn(code: Int) -> Bool Never! { code == 0 }
@@ -985,14 +1033,21 @@ times: fn() -[Env]> [Float] Never! {
     if !row.available -> return [Float]{0.0, 0.0, 0.0, 0.0, 0.0}
     ticks: if row.ticks < 1 -> 1 else -> row.ticks
     elapsed: if row.elapsed < 0 -> 0 else -> row.elapsed
-    [Float]{Float{row.user} / Float{ticks}, Float{row.system} / Float{ticks},
-        Float{row.child_user} / Float{ticks}, Float{row.child_system} / Float{ticks},
-        Float{elapsed} / Float{ticks}}
+    [Float]{
+        Float{row.user} / Float{ticks},
+        Float{row.system} / Float{ticks},
+        Float{row.child_user} / Float{ticks},
+        Float{row.child_system} / Float{ticks},
+        Float{elapsed} / Float{ticks},
+    }
 }
 
 /// Which processes `usage` measures: this program, or every child it has
 /// waited for.
-UsageOf: enum { Program Children }
+UsageOf: enum {
+    Program
+    Children
+}
 
 /// CPU time in user code and in the kernel, and the peak resident memory in
 /// bytes on every platform (Linux reports KiB; Core converts once).
@@ -1005,9 +1060,13 @@ ResourceUsage: struct {
 // Linux RLIMIT_* numbers of the five limits core.sys reads and sets.
 // memory is the address-space limit, the one ProcessSpec.memory_limit sets.
 SYS_LIMIT_CPU: 0
+
 SYS_LIMIT_STACK: 3
+
 SYS_LIMIT_CORE: 4
+
 SYS_LIMIT_NOFILE: 7
+
 SYS_LIMIT_AS: 9
 
 /// This program's CPU-time limit; None is unlimited. The kernel counts whole
@@ -1018,16 +1077,24 @@ cpu_time_limit: fn() -[Env]> (soft: Duration?, hard: Duration?) IOError! {
 }
 
 /// This program's address-space limit in bytes; None is unlimited.
-memory_limit: fn() -[Env]> (soft: Int?, hard: Int?) IOError! { limit_read(SYS_LIMIT_AS, "memory_limit") }
+memory_limit: fn() -[Env]> (soft: Int?, hard: Int?) IOError! {
+    limit_read(SYS_LIMIT_AS, "memory_limit")
+}
 
 /// This program's open-file limit; None is unlimited.
-open_file_limit: fn() -[Env]> (soft: Int?, hard: Int?) IOError! { limit_read(SYS_LIMIT_NOFILE, "open_file_limit") }
+open_file_limit: fn() -[Env]> (soft: Int?, hard: Int?) IOError! {
+    limit_read(SYS_LIMIT_NOFILE, "open_file_limit")
+}
 
 /// This program's core-file size limit in bytes; None is unlimited.
-core_file_limit: fn() -[Env]> (soft: Int?, hard: Int?) IOError! { limit_read(SYS_LIMIT_CORE, "core_file_limit") }
+core_file_limit: fn() -[Env]> (soft: Int?, hard: Int?) IOError! {
+    limit_read(SYS_LIMIT_CORE, "core_file_limit")
+}
 
 /// This program's stack size limit in bytes; None is unlimited.
-stack_limit: fn() -[Env]> (soft: Int?, hard: Int?) IOError! { limit_read(SYS_LIMIT_STACK, "stack_limit") }
+stack_limit: fn() -[Env]> (soft: Int?, hard: Int?) IOError! {
+    limit_read(SYS_LIMIT_STACK, "stack_limit")
+}
 
 /// Set this program's CPU-time limit; children inherit it. None is unlimited.
 set_cpu_time_limit: fn(soft: Duration?, hard: Duration?) IOError! -[Env, Exec]> {
@@ -1037,17 +1104,25 @@ set_cpu_time_limit: fn(soft: Duration?, hard: Duration?) IOError! -[Env, Exec]> 
 }
 
 /// Set this program's address-space limit in bytes; children inherit it.
-set_memory_limit: fn(soft: Int?, hard: Int?) IOError! -[Env, Exec]> { limit_write(SYS_LIMIT_AS, soft, hard, "set_memory_limit") }
+set_memory_limit: fn(soft: Int?, hard: Int?) IOError! -[Env, Exec]> {
+    limit_write(SYS_LIMIT_AS, soft, hard, "set_memory_limit")
+}
 
 /// Set this program's open-file limit; children inherit it.
-set_open_file_limit: fn(soft: Int?, hard: Int?) IOError! -[Env, Exec]> { limit_write(SYS_LIMIT_NOFILE, soft, hard, "set_open_file_limit") }
+set_open_file_limit: fn(soft: Int?, hard: Int?) IOError! -[Env, Exec]> {
+    limit_write(SYS_LIMIT_NOFILE, soft, hard, "set_open_file_limit")
+}
 
 /// Set this program's core-file size limit in bytes; `(0, hard)` turns off
 /// core dumps for this program and the children it starts afterwards.
-set_core_file_limit: fn(soft: Int?, hard: Int?) IOError! -[Env, Exec]> { limit_write(SYS_LIMIT_CORE, soft, hard, "set_core_file_limit") }
+set_core_file_limit: fn(soft: Int?, hard: Int?) IOError! -[Env, Exec]> {
+    limit_write(SYS_LIMIT_CORE, soft, hard, "set_core_file_limit")
+}
 
 /// Set this program's stack size limit in bytes; children inherit it.
-set_stack_limit: fn(soft: Int?, hard: Int?) IOError! -[Env, Exec]> { limit_write(SYS_LIMIT_STACK, soft, hard, "set_stack_limit") }
+set_stack_limit: fn(soft: Int?, hard: Int?) IOError! -[Env, Exec]> {
+    limit_write(SYS_LIMIT_STACK, soft, hard, "set_stack_limit")
+}
 
 /// CPU time and peak memory of this program, or the sum over every child it
 /// has waited for.
@@ -1104,8 +1179,16 @@ scheduling: fn(pid: Int{0}) -[Env]> Scheduling IOError! {
     if row.policy == 2 -> return Ok(Scheduling.RoundRobin{priority: row.priority})
     if row.policy == 3 -> return Ok(Scheduling.Batch)
     if row.policy == 5 -> return Ok(Scheduling.Idle)
-    Err(IOError.Unsupported(IOContext{operation: .Read, resource: Val("scheduling"), os_code: None,
-        cause: Val("kernel scheduling policy {row.policy} has no Scheduling arm")}))
+    Err(
+        IOError.Unsupported(
+            IOContext{
+                operation: .Read,
+                resource: Val("scheduling"),
+                os_code: None,
+                cause: Val("kernel scheduling policy {row.policy} has no Scheduling arm"),
+            },
+        ),
+    )
 }
 
 /// Set the scheduling of process `pid`, this program when 0; children it
@@ -1113,7 +1196,8 @@ scheduling: fn(pid: Int{0}) -[Env]> Scheduling IOError! {
 /// time and raising priority need CAP_SYS_NICE or an RLIMIT_RTPRIO allowance,
 /// else `IOError.PermissionDenied`. A real-time process that never waits can
 /// starve the rest of the machine.
-#Unsafe("posix set_scheduling: the caller owns the CPU share of the process it changes") set_scheduling: fn(policy: Scheduling, pid: Int{0}) IOError! -[Env, Exec]> {
+#Unsafe("posix set_scheduling: the caller owns the CPU share of the process it changes")
+set_scheduling: fn(policy: Scheduling, pid: Int{0}) IOError! -[Env, Exec]> {
     // SCHED_OTHER 0, SCHED_FIFO 1, SCHED_RR 2, SCHED_BATCH 3, SCHED_IDLE 5.
     row: if policy == {
         .Normal -> (kind: 0, priority: 0)
@@ -1123,8 +1207,16 @@ scheduling: fn(pid: Int{0}) -[Env]> Scheduling IOError! {
         .RoundRobin(priority) -> (kind: 2, priority: priority)
     }
     if (row.kind == 1 || row.kind == 2) && (row.priority < 1 || row.priority > 99) {
-        return Err(IOError.InvalidInput(IOContext{operation: .Write, resource: Val("set_scheduling"), os_code: None,
-            cause: Val("real-time priority {row.priority} is outside 1 to 99")}))
+        return Err(
+            IOError.InvalidInput(
+                IOContext{
+                    operation: .Write,
+                    resource: Val("set_scheduling"),
+                    os_code: None,
+                    cause: Val("real-time priority {row.priority} is outside 1 to 99"),
+                },
+            ),
+        )
     }
     result: core.sys.__sched_set(pid, row.kind, row.priority)
     if !result.available -> return Err(unsupported("set_scheduling"))
@@ -1235,11 +1327,20 @@ priv tree_stat_ticks: fn(stat: String) -> Int Never! {
 /// jumps in every process; `core.time.instant` and stopwatches do not, since
 /// they read the monotonic clock. Setting needs CAP_SYS_TIME, otherwise it is
 /// `IOError.PermissionDenied`. A time before 1970 is `IOError.InvalidInput`.
-#Unsafe("posix set_wall_clock: the caller owns the machine's wall clock, which every process reads") set_wall_clock: fn(time: DateTime) IOError! -[Env]> {
+#Unsafe("posix set_wall_clock: the caller owns the machine's wall clock, which every process reads")
+set_wall_clock: fn(time: DateTime) IOError! -[Env]> {
     ns: time.to_unix_ns() ?? -1
     if ns < 0 {
-        return Err(IOError.InvalidInput(IOContext{operation: .Write, resource: Val("set_wall_clock"), os_code: None,
-            cause: Val("{time.format_rfc3339()} is before 1970 or past the Unix nanosecond range")}))
+        return Err(
+            IOError.InvalidInput(
+                IOContext{
+                    operation: .Write,
+                    resource: Val("set_wall_clock"),
+                    os_code: None,
+                    cause: Val("{time.format_rfc3339()} is before 1970 or past the Unix nanosecond range"),
+                },
+            ),
+        )
     }
     row: core.sys.__clock_set(ns)
     if !row.available -> return Err(unsupported("set_wall_clock"))
@@ -1268,8 +1369,16 @@ limit_read: fn(resource: Int, operation: String) -[Env]> (soft: Int?, hard: Int?
 
 limit_write: fn(resource: Int, soft: Int?, hard: Int?, operation: String) IOError! {
     if (soft ?? 0) < 0 || (hard ?? 0) < 0 {
-        return Err(IOError.InvalidInput(IOContext{operation: .Write, resource: Val(operation), os_code: None,
-            cause: Val("a limit cannot be negative; pass None for unlimited")}))
+        return Err(
+            IOError.InvalidInput(
+                IOContext{
+                    operation: .Write,
+                    resource: Val(operation),
+                    os_code: None,
+                    cause: Val("a limit cannot be negative; pass None for unlimited"),
+                },
+            ),
+        )
     }
     row: core.sys.__set_rlimit(resource, soft ?? -1, hard ?? -1)
     if !row.available -> return Err(unsupported(operation))
@@ -1292,8 +1401,16 @@ limit_duration: fn(raw: Int?) -> Duration? {
 limit_seconds: fn(value: Duration?, operation: String) -> Int? IOError! {
     span: value ?? return Ok(None)
     if span.sign() < 0 {
-        return Err(IOError.InvalidInput(IOContext{operation: .Write, resource: Val(operation), os_code: None,
-            cause: Val("a CPU-time limit cannot be negative; pass None for unlimited")}))
+        return Err(
+            IOError.InvalidInput(
+                IOContext{
+                    operation: .Write,
+                    resource: Val(operation),
+                    os_code: None,
+                    cause: Val("a CPU-time limit cannot be negative; pass None for unlimited"),
+                },
+            ),
+        )
     }
     // Whole seconds, rounded up when a fraction of a second is left over.
     whole: span.total_seconds()
@@ -1322,43 +1439,48 @@ getsid: fn(pid: Int) -[Env]> Int IOError! {
     }
 }
 
-#Unsafe("posix getpriority: the caller vouches that `which` names this process or one it controls") getpriority: fn(which: Int) -[Env]> Int IOError! {
+#Unsafe("posix getpriority: the caller vouches that `which` names this process or one it controls")
+getpriority: fn(which: Int) -[Env]> Int IOError! {
     row: core.sys.__getpriority(which)
     if !row.available -> return Err(unsupported("getpriority"))
     if row.value == -1 && row.errno != 0 -> return Err(syscall_error(.Resolve, None, row.errno))
     Ok(row.value)
 }
 
-#Unsafe("posix setpriority: the caller owns the scheduling priority of the process it changes") setpriority: fn(which: Int, priority: Int) IOError! -[Env]> {
+#Unsafe("posix setpriority: the caller owns the scheduling priority of the process it changes")
+setpriority: fn(which: Int, priority: Int) IOError! -[Env]> {
     call_unit(core.sys.__setpriority(which, priority), "setpriority", .Write, None)
 }
 
-#Unsafe("posix utime: the caller owns the file whose timestamps it rewrites") utime: fn(path: String, atime: Int, mtime: Int) IOError! -[FS, Env]> {
-    if is_unix() && has_nul(path) -> return Err(syscall_input(.Write, Val(path), "path contains NUL"))
+#Unsafe("posix utime: the caller owns the file whose timestamps it rewrites")
+utime: fn(path: String, atime: Int, mtime: Int) IOError! -[FS, Env]> {
+    if is_unix() && has_nul(path) {
+        return Err(syscall_input(.Write, Val(path), "path contains NUL"))
+    }
     call_unit(core.sys.__utime(path, atime, mtime), "utime", .Write, Val(path))
 }
 
 sync: fn() Never! -[FS, Env]> { core.sys.__sync_os() }
 
-#Unsafe("posix stop: the caller accepts that the process ends here after the shared cleanup boundary") stop: fn(code: Int) Never! -[Env, Exec]> {
-    process_api.exit(code)
-}
+#Unsafe("posix stop: the caller accepts that the process ends here after the shared cleanup boundary")
+stop: fn(code: Int) Never! -[Env, Exec]> { process_api.exit(code) }
 
 set_current_dir: fn(path: String) IOError! -[FS, Env]> {
     if core.sys.__set_current_dir(path) == {
-        .Ok(_) -> Ok()
+        .Ok(_) -> { Ok() }
         .Err(cause) -> Err(syscall_input(.Resolve, Val(path), cause))
     }
 }
-#Unsafe("posix pipe: the caller owns both returned descriptors and closes each exactly once") pipe: fn() -[FS, Env]> [Int] IOError! {
+
+#Unsafe("posix pipe: the caller owns both returned descriptors and closes each exactly once")
+pipe: fn() -[FS, Env]> [Int] IOError! {
     row: core.sys.__pipe()
     _: call_value((available: row.available, value: row.value, errno: row.errno), "pipe", .Resolve, None)
     Ok([Int]{row.read_fd, row.write_fd})
 }
 
-#Unsafe("posix close_fd: the caller owns `fd` and nothing uses it after this call") close_fd: fn(fd: Int) Never! -[FS, Env]> {
-    core.sys.__close_fd_os(fd)
-}
+#Unsafe("posix close_fd: the caller owns `fd` and nothing uses it after this call")
+close_fd: fn(fd: Int) Never! -[FS, Env]> { core.sys.__close_fd_os(fd) }
 
 // An owned operating-system descriptor, closed exactly once when its owner
 // drops it. Descriptors arrive from `net.unix_receive`,
@@ -1385,7 +1507,9 @@ Fd: struct {
     size: fn(self) -[Env]> Int IOError! { core.sys.__fd_size_raw(self.token) }
 
     // A second descriptor for the same open file, owned on its own.
-    duplicate: fn(self) -[Env]> Fd IOError! { Ok(Fd{token: core.sys.__fd_duplicate_raw(self.token)}) }
+    duplicate: fn(self) -[Env]> Fd IOError! {
+        Ok(Fd{token: core.sys.__fd_duplicate_raw(self.token)})
+    }
 
     // The foreground process group of the terminal the descriptor is open
     // on. A descriptor that is no terminal fails (ENOTTY).
@@ -1394,7 +1518,7 @@ Fd: struct {
     // Makes `group`, a process group of this terminal's session, the
     // terminal's foreground group (job control: a shell hands it the
     // terminal, then takes it back).
-    set_process_group: fn(self, group: Int(1..2147483647)) -[Env]> IOError! {
+    set_process_group: fn(self, group: Int(1..2147483647)) IOError! -[Env]> {
         core.sys.__fd_set_process_group_raw(self.token, group)
     }
 
@@ -1476,13 +1600,17 @@ SharedMemory: struct {
     // Copies `bytes` in at byte `offset`.
     write: fn(&self, offset: Int(0..1073741824), bytes: [U8]) IOError! -[Env]> {
         count: Int(0..1073741824).from_int(bytes.len()) ?? return Err(syscall_input(.Write, None, "shared memory write is out of bounds"))
-        if !shared_range_valid(self, offset, count) -> return Err(syscall_input(.Write, None, "shared memory write is out of bounds"))
+        if !shared_range_valid(self, offset, count) {
+            return Err(syscall_input(.Write, None, "shared memory write is out of bounds"))
+        }
         core.sys.__shared_write_raw(self.token, offset, bytes)
     }
 
     // `count` bytes from byte `offset`.
     read: fn(self, offset: Int(0..1073741824), count: Int(0..1073741824)) -[Env]> [U8] IOError! {
-        if !shared_range_valid(self, offset, count) -> return Err(syscall_input(.Read, None, "shared memory read is out of bounds"))
+        if !shared_range_valid(self, offset, count) {
+            return Err(syscall_input(.Read, None, "shared memory read is out of bounds"))
+        }
         core.sys.__shared_read_raw(self.token, offset, count)
     }
 
@@ -1495,12 +1623,20 @@ SharedMemory: struct {
     // pixels, so its stride is at most 65536 bytes.
     write_pixels: fn(&self, offset: Int(0..1073741824), rgba: [U8], stride: Int(4..65536), x: Int(0..16384), y: Int(0..16384), width: Int(0..16384), height: Int(0..16384), format: PixelFormat) IOError! -[Env]> {
         row: Int{stride}
-        if row %% 4 != 0 -> return Err(syscall_input(.Write, None, "an RGBA row is a whole number of 4-byte pixels"))
-        if wrapping(x + width) > row /% 4 -> return Err(syscall_input(.Write, None, "the pixel rectangle lies outside the image"))
+        if row %% 4 != 0 {
+            return Err(syscall_input(.Write, None, "an RGBA row is a whole number of 4-byte pixels"))
+        }
+        if wrapping(x + width) > row /% 4 {
+            return Err(syscall_input(.Write, None, "the pixel rectangle lies outside the image"))
+        }
         end: wrapping(y + height) * row
-        if height > 0 && end > rgba.len() -> return Err(syscall_input(.Write, None, "the pixel rectangle lies outside the RGBA image"))
+        if height > 0 && end > rgba.len() {
+            return Err(syscall_input(.Write, None, "the pixel rectangle lies outside the RGBA image"))
+        }
         span: Int(0..1073741824).from_int(end) ?? return Err(syscall_input(.Write, None, "shared memory write is out of bounds"))
-        if height > 0 && !shared_range_valid(self, offset, span) -> return Err(syscall_input(.Write, None, "shared memory write is out of bounds"))
+        if height > 0 && !shared_range_valid(self, offset, span) {
+            return Err(syscall_input(.Write, None, "shared memory write is out of bounds"))
+        }
         order: if format == .XRGB8888 -> 0 else -> 1
         core.sys.__shared_write_pixels_raw(self.token, offset, rgba, row, x, y, width, height, order)
     }
@@ -1509,7 +1645,9 @@ SharedMemory: struct {
     // `offset`: a solid run of pixels.
     fill_u32: fn(&self, offset: Int(0..1073741824), count: Int(0..268435456), value: Int(0..4294967295)) IOError! -[Env]> {
         bytes: Int(0..1073741824).from_int(wrapping(count * 4)) ?? return Err(syscall_input(.Write, None, "shared memory fill is out of bounds"))
-        if !shared_range_valid(self, offset, bytes) -> return Err(syscall_input(.Write, None, "shared memory fill is out of bounds"))
+        if !shared_range_valid(self, offset, bytes) {
+            return Err(syscall_input(.Write, None, "shared memory fill is out of bounds"))
+        }
         core.sys.__shared_fill_raw(self.token, offset, count, value)
     }
 
@@ -1521,31 +1659,44 @@ SharedMemory: struct {
     // such ordering, so a byte region handed between processes is guarded
     // by a word.
     load: fn(self, offset: Int(0..1073741816)) -[Env]> Int IOError! {
-        if !shared_word_valid(self, offset) -> return Err(syscall_input(.Read, None, "a shared word is 8 aligned bytes inside the memory"))
+        if !shared_word_valid(self, offset) {
+            return Err(syscall_input(.Read, None, "a shared word is 8 aligned bytes inside the memory"))
+        }
         core.sys.__shared_load_raw(self.token, offset)
     }
 
     // Stores `value` atomically into the word at byte `offset`.
     store: fn(&self, offset: Int(0..1073741816), value: Int) IOError! -[Env]> {
-        if !shared_word_valid(self, offset) -> return Err(syscall_input(.Write, None, "a shared word is 8 aligned bytes inside the memory"))
-        if !shared_word_fits(value) -> return Err(syscall_input(.Write, None, "a shared word holds a signed 64-bit value"))
+        if !shared_word_valid(self, offset) {
+            return Err(syscall_input(.Write, None, "a shared word is 8 aligned bytes inside the memory"))
+        }
+        if !shared_word_fits(value) {
+            return Err(syscall_input(.Write, None, "a shared word holds a signed 64-bit value"))
+        }
         core.sys.__shared_store_raw(self.token, offset, value)
     }
 
     // Atomically replaces the word at byte `offset` with `replacement` if it
     // holds `expected`; whether it did.
     compare_exchange: fn(&self, offset: Int(0..1073741816), expected: Int, replacement: Int) -[Env]> Bool IOError! {
-        if !shared_word_valid(self, offset) -> return Err(syscall_input(.Write, None, "a shared word is 8 aligned bytes inside the memory"))
-        if !shared_word_fits(expected) || !shared_word_fits(replacement) -> return Err(syscall_input(.Write, None, "a shared word holds a signed 64-bit value"))
+        if !shared_word_valid(self, offset) {
+            return Err(syscall_input(.Write, None, "a shared word is 8 aligned bytes inside the memory"))
+        }
+        if !shared_word_fits(expected) || !shared_word_fits(replacement) {
+            return Err(syscall_input(.Write, None, "a shared word holds a signed 64-bit value"))
+        }
         swapped: core.sys.__shared_compare_exchange_raw(self.token, offset, expected, replacement)
         Ok(swapped == 1)
     }
 
     // A new descriptor for this memory, to pass to another process.
-    descriptor: fn(self) -[Env]> Fd IOError! { Ok(Fd{token: core.sys.__fd_duplicate_raw(self.token)}) }
+    descriptor: fn(self) -[Env]> Fd IOError! {
+        Ok(Fd{token: core.sys.__fd_duplicate_raw(self.token)})
+    }
 }
 
 FD_READ_MAX: 16777216
+
 SHARED_MEMORY_MAX: 1073741824
 
 // `size` zeroed bytes of shared memory, 1 B to 1 GiB.
@@ -1579,7 +1730,7 @@ priv fd_words: module {
     // The `index`th eight-byte little-endian word of `packed`.
     packed_word: fn(packed: [U8], index: Int) -> Int {
         word := 0
-        loop byte in 0..<8 { word = word * 256 + (Int{packed[index * 8 + 7 - byte]}) }
+        loop byte in 0..<8 -> word = word * 256 + (Int{packed[index * 8 + 7 - byte]})
         word
     }
 }
@@ -1592,36 +1743,45 @@ PixelFormat: enum {
     XBGR8888
 }
 
-atexit: fn(handler: fn()) Never! -[Env]> {
-    core.sys.__atexit_os(handler)
-}
+atexit: fn(handler: fn()) Never! -[Env]> { core.sys.__atexit_os(handler) }
 
 // Every registered handler runs, in registration order, once per SIGINT the
 // process receives, each under its own stop boundary on the runtime's signal
 // dispatcher thread (ProcessSignal.jet jet_rt_native_interrupt).
-on_interrupt: fn(handler: fn()) Never! -[Env]> {
-    core.sys.__interrupt_os(handler)
-}
+on_interrupt: fn(handler: fn()) Never! -[Env]> { core.sys.__interrupt_os(handler) }
 
-#Unsafe("posix mkfifo: the caller owns `path` and removes the named pipe it creates") mkfifo: fn(path: String, mode: Int) IOError! -[FS, Env]> {
-    if is_unix() && has_nul(path) -> return Err(syscall_input(.Resolve, Val(path), "path contains NUL"))
+#Unsafe("posix mkfifo: the caller owns `path` and removes the named pipe it creates")
+mkfifo: fn(path: String, mode: Int) IOError! -[FS, Env]> {
+    if is_unix() && has_nul(path) {
+        return Err(syscall_input(.Resolve, Val(path), "path contains NUL"))
+    }
     call_unit(core.sys.__mkfifo(path, mode), "mkfifo", .Resolve, Val(path))
 }
 
 /// The kind of device file `mknod` makes: a character device reads and
 /// writes a byte stream (a terminal, /dev/null), a block device reads and
 /// writes whole blocks (a disk).
-DeviceKind: enum { Character Block }
+DeviceKind: enum {
+    Character
+    Block
+}
 
 /// Make the device file `path` for device `major`:`minor` with permission
 /// bits `mode` (0o0..0o7777, before the umask). Only a privileged process
 /// may make a device file; others get an `IOError`. A FIFO is
 /// `mkfifo`, a regular file `files.create`.
-#Unsafe("posix mknod: the caller owns `path` and grants every process that may open it access to the device it names") mknod: fn(path: String, mode: Int, kind: DeviceKind, major: Int, minor: Int) IOError! -[FS, Env]> {
+#Unsafe("posix mknod: the caller owns `path` and grants every process that may open it access to the device it names")
+mknod: fn(path: String, mode: Int, kind: DeviceKind, major: Int, minor: Int) IOError! -[FS, Env]> {
     if has_nul(path) -> return Err(syscall_input(.Resolve, Val(path), "path contains NUL"))
-    if mode < 0 || mode > 4095 -> return Err(syscall_input(.Resolve, Val(path), "mode {mode} is outside 0o0..0o7777"))
-    if major < 0 || major > 4095 -> return Err(syscall_input(.Resolve, Val(path), "major {major} is outside 0..4095"))
-    if minor < 0 || minor > 1048575 -> return Err(syscall_input(.Resolve, Val(path), "minor {minor} is outside 0..1048575"))
+    if mode < 0 || mode > 4095 {
+        return Err(syscall_input(.Resolve, Val(path), "mode {mode} is outside 0o0..0o7777"))
+    }
+    if major < 0 || major > 4095 {
+        return Err(syscall_input(.Resolve, Val(path), "major {major} is outside 0..4095"))
+    }
+    if minor < 0 || minor > 1048575 {
+        return Err(syscall_input(.Resolve, Val(path), "minor {minor} is outside 0..1048575"))
+    }
     // Linux's dev_t: minor's low 8 bits, then major's 12, then minor's top 12.
     dev: minor % 256 + major * 256 + (minor /% 256) * 1048576
     file_type: if kind == {
@@ -1631,33 +1791,31 @@ DeviceKind: enum { Character Block }
     call_unit(core.sys.__mknod(path, mode + file_type, dev), "mknod", .Resolve, Val(path))
 }
 
-#Unsafe("posix fork: the caller handles both the parent and the child return and reaps the child") fork: fn() -[Env, Exec]> Int IOError! {
-    call_value(core.sys.__fork(), "fork", .Resolve, None)
-}
+#Unsafe("posix fork: the caller handles both the parent and the child return and reaps the child")
+fork: fn() -[Env, Exec]> Int IOError! { call_value(core.sys.__fork(), "fork", .Resolve, None) }
 
-#Unsafe("posix setsid: the caller owns the process session topology it changes") setsid: fn() -[Env, Exec]> Int IOError! {
-    call_value(core.sys.__setsid(), "setsid", .Write, None)
-}
+#Unsafe("posix setsid: the caller owns the process session topology it changes")
+setsid: fn() -[Env, Exec]> Int IOError! { call_value(core.sys.__setsid(), "setsid", .Write, None) }
 
-#Unsafe("posix wait: the caller owns the child processes it reaps") wait: fn() -[Env, Time.Wait]> Int IOError! {
+#Unsafe("posix wait: the caller owns the child processes it reaps")
+wait: fn() -[Env, Time.Wait]> Int IOError! {
     row: core.sys.__wait()
     _: call_value((available: row.available, value: row.value, errno: row.errno), "wait", .Close, None)
     Ok(row.status)
 }
 
-#Unsafe("posix waitpid: the caller owns the child process it reaps") waitpid: fn(pid: Int, options: Int) -[Env, Time.Wait]> Int IOError! {
+#Unsafe("posix waitpid: the caller owns the child process it reaps")
+waitpid: fn(pid: Int, options: Int) -[Env, Time.Wait]> Int IOError! {
     row: core.sys.__waitpid(pid, options)
     _: call_value((available: row.available, value: row.value, errno: row.errno), "waitpid", .Close, None)
     Ok(row.status)
 }
 
-#Unsafe("posix setuid: the caller drops or changes process credentials deliberately") setuid: fn(uid: Int) IOError! -[Env]> {
-    call_unit(core.sys.__setuid(uid), "setuid", .Write, None)
-}
+#Unsafe("posix setuid: the caller drops or changes process credentials deliberately")
+setuid: fn(uid: Int) IOError! -[Env]> { call_unit(core.sys.__setuid(uid), "setuid", .Write, None) }
 
-#Unsafe("posix setgid: the caller drops or changes process credentials deliberately") setgid: fn(gid: Int) IOError! -[Env]> {
-    call_unit(core.sys.__setgid(gid), "setgid", .Write, None)
-}
+#Unsafe("posix setgid: the caller drops or changes process credentials deliberately")
+setgid: fn(gid: Int) IOError! -[Env]> { call_unit(core.sys.__setgid(gid), "setgid", .Write, None) }
 
 /// A process's real, effective and saved user or group IDs. The kernel
 /// checks access against `effective`; `saved` lets a privileged program give
@@ -1680,14 +1838,16 @@ group_ids: fn() -[Env]> Ids IOError! { ids_of(1, "group_ids") }
 /// IDs, else `IOError.PermissionDenied`; an ID outside 0..4294967294 is
 /// `IOError.InvalidInput`. `seteuid(id)` is `set_user_ids(effective: id)`, and
 /// `setreuid` names the saved ID that it sets implicitly.
-#Unsafe("posix set_user_ids: the caller drops or changes process credentials deliberately") set_user_ids: fn(real: Int?{None}, effective: Int?{None}, saved: Int?{None}) IOError! -[Env]> {
+#Unsafe("posix set_user_ids: the caller drops or changes process credentials deliberately")
+set_user_ids: fn(real: Int?{None}, effective: Int?{None}, saved: Int?{None}) IOError! -[Env]> {
     set_ids(0, real, effective, saved, "set_user_ids")
 }
 
 /// Set this program's real, effective and saved group IDs together
 /// (setresgid), as `set_user_ids` does with CAP_SETGID. Supplementary groups
 /// stay as they are; `initgroups` sets them.
-#Unsafe("posix set_group_ids: the caller drops or changes process credentials deliberately") set_group_ids: fn(real: Int?{None}, effective: Int?{None}, saved: Int?{None}) IOError! -[Env]> {
+#Unsafe("posix set_group_ids: the caller drops or changes process credentials deliberately")
+set_group_ids: fn(real: Int?{None}, effective: Int?{None}, saved: Int?{None}) IOError! -[Env]> {
     set_ids(1, real, effective, saved, "set_group_ids")
 }
 
@@ -1788,8 +1948,16 @@ priv id_rows: module {
     id_input: fn(id: Int?, operation: String) IOError! {
         value: id ?? return Ok()
         if value < 0 || value > 4294967294 {
-            return Err(IOError.InvalidInput(IOContext{operation: .Write, resource: Val(operation), os_code: None,
-                cause: Val("ID {value} is outside 0..4294967294")}))
+            return Err(
+                IOError.InvalidInput(
+                    IOContext{
+                        operation: .Write,
+                        resource: Val(operation),
+                        os_code: None,
+                        cause: Val("ID {value} is outside 0..4294967294"),
+                    },
+                ),
+            )
         }
         Ok()
     }
@@ -1817,9 +1985,17 @@ priv id_rows: module {
         gid: text_parse.split_once(uid.tail, ":")
         gecos: text_parse.split_once(gid.tail, ":")
         home: text_parse.split_once(gecos.tail, ":")
-        if !name.found || !password.found || !uid.found || !gid.found || !gecos.found || !home.found -> return None
-        Val(User{name: name.head, uid: database_id(uid.head) ?? return None, gid: database_id(gid.head) ?? return None,
-            gecos: gecos.head, home: home.head, shell: home.tail})
+        if !name.found || !password.found || !uid.found || !gid.found || !gecos.found || !home.found {
+            return None
+        }
+        Val(User{
+            name: name.head,
+            uid: database_id(uid.head) ?? return None,
+            gid: database_id(gid.head) ?? return None,
+            gecos: gecos.head,
+            home: home.head,
+            shell: home.tail,
+        })
     }
 
     // name:password:gid:members, members comma-separated; an empty member
@@ -1865,30 +2041,34 @@ priv id_rows: module {
     assert_eq(lines, [String]{"a", "b"})
 }
 
-#Unsafe("posix setpgrp: the caller owns the process group topology it changes") setpgrp: fn() IOError! -[Env]> {
-    call_unit(core.sys.__setpgrp(), "setpgrp", .Write, None)
-}
+#Unsafe("posix setpgrp: the caller owns the process group topology it changes")
+setpgrp: fn() IOError! -[Env]> { call_unit(core.sys.__setpgrp(), "setpgrp", .Write, None) }
 
-#Unsafe("posix setpgid: the caller owns the process group topology it changes") setpgid: fn(pid: Int, pgid: Int) IOError! -[Env]> {
+#Unsafe("posix setpgid: the caller owns the process group topology it changes")
+setpgid: fn(pid: Int, pgid: Int) IOError! -[Env]> {
     call_unit(core.sys.__setpgid(pid, pgid), "setpgid", .Write, None)
 }
 
-#Unsafe("posix kill: the caller owns or is entitled to signal the target process") kill: fn(pid: Int, signal: Int) IOError! -[Env]> {
+#Unsafe("posix kill: the caller owns or is entitled to signal the target process")
+kill: fn(pid: Int, signal: Int) IOError! -[Env]> {
     call_unit(core.sys.__kill(pid, signal), "kill", .Write, None)
 }
 
 /// Restores signal `number`'s default action (SIG_DFL), so the signal raised
 /// next takes it: a supervisor re-raising its child's signal on itself. Any
 /// signal number, the fault signals too.
-#Unsafe("posix signal reset: the caller owns the process signal disposition it resets") reset_signal: fn(number: Int) IOError! -[Env]> {
+#Unsafe("posix signal reset: the caller owns the process signal disposition it resets")
+reset_signal: fn(number: Int) IOError! -[Env]> {
     call_unit(core.sys.__reset_signal(number), "reset_signal", .Write, None)
 }
 
-#Unsafe("posix initgroups: the caller changes supplementary groups deliberately") initgroups: fn(user: String, group: Int) IOError! -[Env]> {
-    if is_unix() && has_nul(user) -> return Err(syscall_input(.Write, None, "username contains NUL"))
+#Unsafe("posix initgroups: the caller changes supplementary groups deliberately")
+initgroups: fn(user: String, group: Int) IOError! -[Env]> {
+    if is_unix() && has_nul(user) {
+        return Err(syscall_input(.Write, None, "username contains NUL"))
+    }
     call_unit(core.sys.__initgroups(user, group), "initgroups", .Write, None)
 }
-
 
 platform: fn() -[Env]> String Never! { "{name()}-{arch()}" }
 
@@ -1906,7 +2086,9 @@ is_macos: fn() -[Env]> Bool Never! {
     platform_name == "macos" || platform_name == "darwin" || platform_name == "osx"
 }
 
-uname: fn() -[Env, FS, Exec, Time.Wait]> String Never! { "{name()} {release()} {version()} {arch()}" }
+uname: fn() -[Env, FS, Exec, Time.Wait]> String Never! {
+    "{name()} {release()} {version()} {arch()}"
+}
 
 sysname: fn() -[Env]> String Never! { name() }
 
@@ -1923,6 +2105,7 @@ linesep: fn() -[Env]> String Never! {
     if is_windows() -> return "\r\n"
     "\n"
 }
+
 is_env_ident: fn(byte: U8) -> Bool {
     n: byte
     if n >= 65 && n <= 90 -> return true
@@ -1937,7 +2120,7 @@ slice_ascii: fn(raw: [U8], start: Int, end: Int) -> String {
     loop {
         if i >= end -> return String.from_bytes(out) ?? ""
         out.push(raw[i])
-        i = i + 1
+        i += 1
     }
 }
 
@@ -1968,7 +2151,7 @@ posix_identity: fn(value: Int?) -> Int Never! { value ?? 0 }
 }
 
 #Test("env_text reads NAME=value lines as the shell sources them") {
-    vars := [String: String]{}
+    vars := [String:String]{}
     vars["HOME"] = "/home/u"
     vars["EMPTY"] = ""
     vars["JET_SCRATCH_ROOT"] = "/from/env"
@@ -1989,7 +2172,7 @@ posix_identity: fn(value: Int?) -> Int Never! { value ?? 0 }
 }
 
 #Test("env_text reads commands, export and readonly, +=, ~ and the other expansions as bash sources them") {
-    vars := [String: String]{}
+    vars := [String:String]{}
     vars["HOME"] = "/h"
     vars["EMPTY"] = ""
     // bash 5 printed these values after `env -i HOME=/h EMPTY= bash -c '. ./t.env'`.
@@ -2015,23 +2198,25 @@ posix_identity: fn(value: Int?) -> Int Never! { value ?? 0 }
     assert_eq(found.get("S"), Val("/h/z"))
     assert_eq(found.get("X"), Val("/h/z"))
     if env_text("readonly R=1\nR=2\n", vars) == {
-        .Err(.InvalidInput(context)) -> assert_eq(context.cause, Val("R: readonly variable"))
-        .Err(_) -> panic("a readonly assignment gave another error kind")
+        .Err(.InvalidInput(context)) -> { assert_eq(context.cause, Val("R: readonly variable")) }
+        .Err(_) -> { panic("a readonly assignment gave another error kind") }
         .Ok(_) -> panic("a readonly variable was assigned")
     }
 }
 
 #Test("env_text refuses what only a shell would run, naming the line") {
-    vars := [String: String]{}
+    vars := [String:String]{}
     refused: [String]{"A=$(id)", "A=`id`", "A=~/x", "A=x:~/y", "A=~ada/x", "A=~+", "A=$0", "A=${{0}}", "A=${{1=x}}", "A=${{#B}}", "A=${{B%c}}", "readonly R; R=1", "export", "; A=b", "A=b c", "A=b; c", "A=b|c", ": ${{A:=b}}", "A=\"b", "A='b", "A=${{B", "A=b\\", "A=${{UNSET_NAME:?is required}}", "1A=b", "A b"}
     loop line in refused {
         if env_text("OK=1\n{line}\n", vars, "probe") == {
-            .Err(.InvalidInput(context)) -> assert_eq(context.resource, Val("probe:2"))
-            .Err(_) -> panic("`{line}` gave another error kind")
+            .Err(.InvalidInput(context)) -> { assert_eq(context.resource, Val("probe:2")) }
+            .Err(_) -> { panic("`{line}` gave another error kind") }
             .Ok(_) -> panic("`{line}` was read")
         }
     }
-    if env_text("A=${{UNSET_NAME:?is required}}", vars) == .Err(.InvalidInput(context)) -> assert_eq(context.cause, Val("UNSET_NAME: is required"))
+    if env_text("A=${{UNSET_NAME:?is required}}", vars) == .Err(.InvalidInput(context)) {
+        assert_eq(context.cause, Val("UNSET_NAME: is required"))
+    }
 }
 
 #Test("env_file applies a file over the environment and reads a missing one as the environment") {
@@ -2059,9 +2244,7 @@ posix_identity: fn(value: Int?) -> Int Never! { value ?? 0 }
     assert(environment().get("JET_ENVIRONMENT_PROBE") == None)
 }
 
-host_env: fn(name: String) -[Env]> String? Never! {
-    decode_host_env(core.sys.__host_env(name))
-}
+host_env: fn(name: String) -[Env]> String? Never! { decode_host_env(core.sys.__host_env(name)) }
 
 decode_host_env: fn(raw: [U8]?) -> String? Never! {
     bytes: raw ?? return None
@@ -2085,7 +2268,7 @@ release_field: fn(config: String, key: String) -> String? Never! {
     start := 0
     loop start < raw.len() {
         end := start
-        loop end < raw.len() && raw[end] != (U8{10}) -> end = end + 1
+        loop end < raw.len() && raw[end] != (U8{10}) -> end += 1
         line_end := end
         // Rust lines accepts LF and CRLF, but does not split bare CR or the
         // additional Unicode/Python splitlines separators.
@@ -2094,12 +2277,12 @@ release_field: fn(config: String, key: String) -> String? Never! {
         i := 0
         loop matched && i < wanted.len() {
             if raw[start + i] != wanted[i] -> matched = false
-            i = i + 1
+            i += 1
         }
         if matched {
             value_start := start + wanted.len()
-            loop value_start < line_end && raw[value_start] == (U8{34}) -> value_start = value_start + 1
-            loop line_end > value_start && raw[line_end - 1] == (U8{34}) -> line_end = line_end - 1
+            loop value_start < line_end && raw[value_start] == (U8{34}) -> value_start += 1
+            loop line_end > value_start && raw[line_end - 1] == (U8{34}) -> line_end -= 1
             return Val(slice_ascii(raw, value_start, line_end))
         }
         start = end + 1
@@ -2189,18 +2372,24 @@ decode: fn<T: Decode>(prefix: String, file: String, allow: [String]) -[FS, Env, 
 __decode_tree: fn(prefix: String, file: String, allow: [String], names: [(env_name: String, key: String)]) -[FS, Env, Exec]> (tree: Dyn, origins: [(name: String, path: String)]) [FieldError]! {
     platform: if core.files.__path_windows() -> PathPlatform.Windows else -> PathPlatform.Unix
     path: host_path.from_text(file, platform)
-    if host_path.is_absolute(path) -> return Err(config_error("E2416: Dotenv.file must be project-relative"))
+    if host_path.is_absolute(path) {
+        return Err(config_error("E2416: Dotenv.file must be project-relative"))
+    }
     cursor := host_path.components(path)
     loop {
         part: host_path.next(path, cursor) ?? break
-        if part.kind == .ParentDir -> return Err(config_error("E2416: Dotenv.file must be project-relative"))
+        if part.kind == .ParentDir {
+            return Err(config_error("E2416: Dotenv.file must be project-relative"))
+        }
     }
     dotenv := String?{None}
     if file.len() > 0 {
         if core.sys.__dotenv_read(file) == {
-            .Ok(value) -> dotenv = Val(value)
+            .Ok(value) -> { dotenv = Val(value) }
             .Err(error) -> {
-                if !error.not_found -> return Err(config_error("E2416: cannot read Dotenv.file `{file}`: {error.cause}"))
+                if !error.not_found {
+                    return Err(config_error("E2416: cannot read Dotenv.file `{file}`: {error.cause}"))
+                }
             }
         }
     }
@@ -2271,12 +2460,16 @@ priv decode_secret: fn(text: String) -> Bool Never! {
 // the upper-cased segments joined by `__`. A list element has none.
 priv decode_variable: fn(path: String, prefix: String, names: [(env_name: String, key: String)]) -> String? Never! {
     if path.len() == 0 -> return None
-    loop byte in path.bytes() { if byte == (U8{91}) || byte == (U8{93}) -> return None }
+    loop byte in path.bytes() {
+        if byte == (U8{91}) || byte == (U8{93}) -> return None
+    }
     segments: path.split(".").to_list()
     if segments.len() == 1 {
         loop rename in names {
             if ascii_lower(rename.key) == ascii_lower(path) {
-                if prefix.len() > 0 && ascii_lower(rename.env_name).starts_with(ascii_lower(prefix)) -> return Val(rename.env_name)
+                if prefix.len() > 0 && ascii_lower(rename.env_name).starts_with(ascii_lower(prefix)) {
+                    return Val(rename.env_name)
+                }
                 return Val("{prefix}{rename.env_name}")
             }
         }
@@ -2284,10 +2477,22 @@ priv decode_variable: fn(path: String, prefix: String, names: [(env_name: String
     Val("{prefix}{ascii_upper(segments.join("__"))}")
 }
 
-config_error: fn(reason: String) -> [FieldError] Never! { [FieldError]{FieldError{path: "", reason: reason}} }
+config_error: fn(reason: String) -> [FieldError] Never! {
+    [FieldError]{FieldError{path: "", reason: reason}}
+}
 
-ConfigEntry: struct { name: String value: String segments: [String] }
-ConfigValue: struct { folded: String name: String value: String }
+ConfigEntry: struct {
+    name: String
+    value: String
+    segments: [String]
+}
+
+ConfigValue: struct {
+    folded: String
+    name: String
+    value: String
+}
+
 ConfigTree: enum {
     Text(String)
     Object([(key: String, value: ConfigTree)])
@@ -2296,17 +2501,23 @@ ConfigTree: enum {
 ascii_upper: fn(value: String) -> String Never! {
     out := [U8]{}
     loop byte in value.bytes() {
-        if byte >= (U8{97}) && byte <= (U8{122}) -> out.push(U8{Int{byte} - 32}) else -> out.push(byte)
+        if byte >= (U8{97}) && byte <= (U8{122}) -> out.push(U8{Int{byte} - 32}) else {
+            out.push(byte)
+        }
     }
     String.from_bytes(out) ?? panic("ASCII fold preserves UTF-8")
 }
 
 config_allowed: fn(name: String, allow: [String]) -> Bool Never! {
     if name.len() == 0 -> return false
-    loop byte in name.bytes() { if byte == (U8{61}) || byte == (U8{0}) -> return false }
+    loop byte in name.bytes() {
+        if byte == (U8{61}) || byte == (U8{0}) -> return false
+    }
     if allow.len() == 0 -> return true
     folded: ascii_lower(name)
-    loop candidate in allow { if ascii_lower(candidate) == folded -> return true }
+    loop candidate in allow {
+        if ascii_lower(candidate) == folded -> return true
+    }
     false
 }
 
@@ -2325,7 +2536,9 @@ config_find: fn(raw: [U8], needle: [U8]) -> Int? Never! {
     if needle.len() > raw.len() -> return None
     loop at in 0..<raw.len() - needle.len() + 1 {
         matched := true
-        loop i in 0..<needle.len() { if raw[at + i] != needle[i] -> matched = false }
+        loop i in 0..<needle.len() {
+            if raw[at + i] != needle[i] -> matched = false
+        }
         if matched -> return Val(at)
     }
     None
@@ -2342,6 +2555,7 @@ config_dotenv_value: fn(value: String) -> String Never! {
     comment: config_find(raw, " #".bytes()) ?? return trimmed
     core.text.trim_end(slice_ascii(raw, 0, comment))
 }
+
 // Dotenv syntax joins the same typed FieldError domain as Decode failures.
 
 config_entries: fn(prefix: String, dotenv: String?, allow: [String], process: [(name: String, value: String)]) -> [ConfigEntry] [FieldError]! {
@@ -2359,7 +2573,9 @@ config_entries: fn(prefix: String, dotenv: String?, allow: [String], process: [(
             line_index += 1
             if line.len() > 0 && line.bytes()[0] != (U8{35}) {
                 bytes: line.bytes()
-                if bytes.len() >= 7 && slice_ascii(bytes, 0, 7) == "export " -> line = slice_ascii(bytes, 7, bytes.len())
+                if bytes.len() >= 7 && slice_ascii(bytes, 0, 7) == "export " {
+                    line = slice_ascii(bytes, 7, bytes.len())
+                }
                 equal: config_find(line.bytes(), "=".bytes()) ?? return Err(config_error("E2416: invalid .env line {line_index}"))
                 name: core.text.trim(slice_ascii(line.bytes(), 0, equal))
                 if config_allowed(name, allow) {
@@ -2370,7 +2586,9 @@ config_entries: fn(prefix: String, dotenv: String?, allow: [String], process: [(
             start = end + 1
         }
     }
-    loop entry in process { if config_allowed(entry.name, allow) -> config_put(values, entry.name, entry.value) }
+    loop entry in process {
+        if config_allowed(entry.name, allow) -> config_put(values, entry.name, entry.value)
+    }
     // Same bytewise uppercase-name order as the native BTreeMap, including
     // punctuation. Lowercase sorting would move '_' before alphabetic keys.
     loop index in 1..<values.len() {
@@ -2398,13 +2616,15 @@ config_entries: fn(prefix: String, dotenv: String?, allow: [String], process: [(
                 if end > start -> segments.push(ascii_lower(slice_ascii(bytes, start, end)))
                 start = end + 2
             }
-            if segments.len() > 0 -> out.push(ConfigEntry{name: entry.name, value: entry.value, segments: segments})
+            if segments.len() > 0 {
+                out.push(ConfigEntry{name: entry.name, value: entry.value, segments: segments})
+            }
         }
     }
     Ok(out)
 }
 
-config_insert: fn(&&tree: ConfigTree, segments: [String], at: Int, value: String) -> ConfigTree Never! {
+config_insert: fn(tree: &&ConfigTree, segments: [String], at: Int, value: String) -> ConfigTree Never! {
     owned: tree.move()
     if owned.move() == {
         .Object(pairs) -> {
@@ -2432,7 +2652,7 @@ config_insert: fn(&&tree: ConfigTree, segments: [String], at: Int, value: String
     }
 }
 
-config_tree: fn(&&tree: ConfigTree) -> Dyn Never! {
+config_tree: fn(tree: &&ConfigTree) -> Dyn Never! {
     owned: tree.move()
     if owned.move() == {
         .Text(text) -> Dyn.Text(text)
@@ -2458,7 +2678,7 @@ config_tree: fn(&&tree: ConfigTree) -> Dyn Never! {
 
 #Test("Dotenv malformed unallowed lines still error and decoder secret errors are redacted") {
     if config_entries("", Val("not an assignment"), [String]{"ONLY_THIS"}, [(name: String, value: String)]{}) == {
-        .Err(errors) -> assert_eq(errors[0].reason, "E2416: invalid .env line 1")
+        .Err(errors) -> { assert_eq(errors[0].reason, "E2416: invalid .env line 1") }
         .Ok(_) -> assert(false)
     }
     no_names: [(env_name: String, key: String)]{}
@@ -2498,14 +2718,14 @@ config_tree: fn(&&tree: ConfigTree) -> Dyn Never! {
                 .Object(children) -> {
                     assert_eq(children.len(), 1)
                     if children[0].value == {
-                        .Text(text) -> assert_eq(text, "remote")
+                        .Text(text) -> { assert_eq(text, "remote") }
                         .Object(_) -> assert(false)
                     }
                 }
                 .Text(_) -> assert(false)
             }
             if pairs[0].value == {
-                .Text(text) -> assert_eq(text, "updated")
+                .Text(text) -> { assert_eq(text, "updated") }
                 .Object(_) -> assert(false)
             }
         }

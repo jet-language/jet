@@ -45,21 +45,28 @@
 //
 // Each site taken is one IROptReport.inlines row with the reason it was
 // taken; `jet inspect choices` lists them as its inlining choices.
-
 use jet_foundation.[Type, name_rows_set, name_rows_value]
 
 IR_OPT_INLINE_CALLEE_O1: 40
+
 IR_OPT_INLINE_BUDGET_O1: 200
+
 IR_OPT_INLINE_CALLEE_O2: 60
+
 IR_OPT_INLINE_BUDGET_O2: 400
+
 // The real instructions (ir_opt_size) the budgeted inlines may add to one
 // caller, half again the budget: cold arms cost nothing against the budget,
 // but their copies still grow the code.
 IR_OPT_INLINE_GROWTH_O1: 300
+
 IR_OPT_INLINE_GROWTH_O2: 600
+
 // A once-called callee (O2), and the caller size past which none is taken.
 IR_OPT_INLINE_ONCE_O2: 1500
+
 IR_OPT_INLINE_ONCE_CALLER_O2: 3000
+
 // The size limit of a marked callee under IROptInline.Marked: none.
 IR_OPT_INLINE_MARKED: 1000000000
 
@@ -103,7 +110,9 @@ ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction,
             size: if cost >= 0 -> ir_opt_size(bodies[caller.a[at]][0]) else -> 0
             if cost >= 0 && once && cost > limit {
                 selected = grown + size <= IR_OPT_INLINE_ONCE_CALLER_O2
-                if selected -> reason = "its only call, size {size} within the once-called limit {IR_OPT_INLINE_ONCE_O2}"
+                if selected {
+                    reason = "its only call, size {size} within the once-called limit {IR_OPT_INLINE_ONCE_O2}"
+                }
             } else if cost >= 0 {
                 selected = cost <= budget && size <= growth
                 if selected {
@@ -130,7 +139,9 @@ ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction,
     out.frame_bound = caller.frame_bound
     out.max_depth = caller.max_depth
     out.inline_sites = caller.inline_sites.copy()
-    loop slot in 0..<caller.slot_type.len() -> _ := ir_slot(out, caller.slot_type[slot], caller.slot_kind[slot], caller.slot_name[slot], caller.slot_line[slot])
+    loop slot in 0..<caller.slot_type.len() {
+        _ := ir_slot(out, caller.slot_type[slot], caller.slot_kind[slot], caller.slot_name[slot], caller.slot_line[slot])
+    }
     out.slot_fixed = caller.slot_fixed.copy()
     out.result = caller.result
     loop value in caller.args -> out.args.push(value)
@@ -163,18 +174,24 @@ ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction,
 // its host can replace.
 ir_opt_inline_size: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, at: Int, recursive: [Bool], limit: Int) -> Int Never! {
     callee_id: caller.a[at]
-    if callee_id < 0 || callee_id >= bodies.len() || recursive[callee_id] || bodies[callee_id].len() == 0 -> return -1
+    if callee_id < 0 || callee_id >= bodies.len() || recursive[callee_id] || bodies[callee_id].len() == 0 {
+        return -1
+    }
     callee: bodies[callee_id][0]
     if callee.asm != None -> return -1
     if callee.host_symbol != "" -> return -1
     // A last-owner routine stays one shared copy (BuildOwn.jet IR_LAST_OWNER).
     if callee.name == IR_LAST_OWNER && callee.source_file == "" -> return -1
     if caller.c[at] != callee.param_count -> return -1
-    if caller.dst[at] >= 0 && (callee.result < 0 || caller.slot_type[caller.dst[at]] != callee.result) -> return -1
+    if caller.dst[at] >= 0 && (callee.result < 0 || caller.slot_type[caller.dst[at]] != callee.result) {
+        return -1
+    }
     // A callee holding a fixed value (IRFunction.slot_fixed) whose result
     // the call does not hold as fixed reveals it (a `#Scrub` routine):
     // inlined, IR Lint's fixed rule would follow the value on past it.
-    if caller.dst[at] >= 0 && !caller.slot_fixed[caller.dst[at]] && ir_timing_marked(callee) -> return -1
+    if caller.dst[at] >= 0 && !caller.slot_fixed[caller.dst[at]] && ir_timing_marked(callee) {
+        return -1
+    }
     // A parameter becomes the call's argument slot: same type rows only.
     loop slot in 0..<callee.param_count {
         if caller.slot_type[caller.args[caller.b[at] + slot]] != callee.slot_type[slot] -> return -1
@@ -222,9 +239,13 @@ ir_opt_inline_reach: fn(sites: [Int], callee: Int, once_called: Bool, level: Int
     if inline == {
         .Off -> return -1
         .Marked -> return if marked -> IR_OPT_INLINE_MARKED else -> -1
-        .Auto -> if marked -> return IR_OPT_INLINE_MARKED
+        .Auto -> {
+            if marked -> return IR_OPT_INLINE_MARKED
+        }
     }
-    if once_called && callee >= 0 && callee < sites.len() && sites[callee] == 1 -> return IR_OPT_INLINE_ONCE_O2
+    if once_called && callee >= 0 && callee < sites.len() && sites[callee] == 1 {
+        return IR_OPT_INLINE_ONCE_O2
+    }
     if level >= 2 -> IR_OPT_INLINE_CALLEE_O2 else -> IR_OPT_INLINE_CALLEE_O1
 }
 
@@ -252,9 +273,13 @@ ir_opt_inline_quiet: fn(m: IRModule, f: IRFunction) -> Bool Never! {
 // none: it can neither divide by zero nor overflow.
 ir_opt_located: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     op: f.op[at]
-    if op != .Add && op != .Sub && op != .Mul && op != .Div && op != .Rem && op != .FloorDiv && op != .Mod && op != .Shl && op != .Shr && op != .Neg -> return false
+    if op != .Add && op != .Sub && op != .Mul && op != .Div && op != .Rem && op != .FloorDiv && op != .Mod && op != .Shl && op != .Shr && op != .Neg {
+        return false
+    }
     division: op == .Div || op == .Rem || op == .FloorDiv || op == .Mod
-    if division && ir_opt_divisor(f, at) == .Val(divisor) && divisor != 0 && divisor != -1 -> return false
+    if division && ir_opt_divisor(f, at) == .Val(divisor) && divisor != 0 && divisor != -1 {
+        return false
+    }
     kind: ir_x64_type(m, f, f.a[at]).kind
     if kind == {
         .Int -> division || op == .Shl || op == .Shr
@@ -268,7 +293,9 @@ ir_opt_located: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
 // ir_x64_allocate's `consts`).
 ir_opt_divisor: fn(f: IRFunction, at: Int) -> Int? Never! {
     slot: f.b[at]
-    if slot < f.param_count || slot >= f.slot_kind.len() || f.slot_kind[slot] != .Temp -> return None
+    if slot < f.param_count || slot >= f.slot_kind.len() || f.slot_kind[slot] != .Temp {
+        return None
+    }
     found := Int?{None}
     loop k in 0..<f.op.len() {
         if ir_x64_write(f, k) != slot -> next
@@ -355,7 +382,9 @@ ir_opt_emit_mapped: fn(f: &IRFunction, callee: IRFunction, k: Int, map: [Int], l
     b := callee.b[k]
     c := callee.c[k]
     if op == {
-        .Copy | .Move | .Drop | .Close | .Neg | .Not | .Sqrt | .IntBig | .Convert | .Load | .Offset | .If | .BrIf | .CallIndirect -> a = map[a]
+        .Copy | .Move | .Drop | .Close | .Neg | .Not | .Sqrt | .IntBig | .Convert | .Load | .Offset | .If | .BrIf | .CallIndirect -> {
+            a = map[a]
+        }
         .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Concat | .CopyBytes -> {
             a = map[a]
             b = map[b]

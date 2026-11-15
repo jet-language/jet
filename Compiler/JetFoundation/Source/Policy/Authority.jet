@@ -10,6 +10,7 @@
 // jet_foundation::Syntax::EFFECT_LEAF_EXEC_ARGS: reading the program's own
 // arguments, a leaf of `Exec`. The `Exec` root also covers spawning processes.
 AUTHORITY_EXEC_ARGS_LEAF: "Exec.Args"
+
 // Ending the program's own process, a leaf of `Exec`.
 AUTHORITY_EXEC_EXIT_LEAF: "Exec.Exit"
 
@@ -22,11 +23,14 @@ authority_own_process_leaf: fn(right: String) -> Bool Never! {
 // The beginner floor every program holds: print, allocate, and read
 // arguments. Never the `Exec` root.
 AUTHORITY_AMBIENT_BASIC_EFFECTS: #run { [String]{"IO", "Mem.Alloc", AUTHORITY_EXEC_ARGS_LEAF} }
+
 // The deny-only stop root.
 AUTHORITY_PANIC_ROOT: "Panic"
+
 // jet_foundation::Syntax::EFFECT_LEAF_TIME_WAIT: waiting on the program's own
 // work, a deny-only leaf.
 AUTHORITY_TIME_WAIT_LEAF: "Time.Wait"
+
 // The deny-only root of reaching `#Unsafe` code outside Core.
 AUTHORITY_UNSAFE_ROOT: "Unsafe"
 
@@ -201,9 +205,7 @@ CanonicalAuthority: struct {
         CanonicalAuthority{holds: authority_holds(holds)}
     }
 
-    allows: fn(self, right: String) -> Bool Never! {
-        authority_covers_any(self.holds, right)
-    }
+    allows: fn(self, right: String) -> Bool Never! { authority_covers_any(self.holds, right) }
 
     // True when this authority can satisfy a host operation declaring
     // `right`; a scoped hold (`FS.Read("/data")`) also satisfies the bare

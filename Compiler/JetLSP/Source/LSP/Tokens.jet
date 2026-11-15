@@ -10,18 +10,29 @@ use {
 }
 
 LSP_TOKEN_KEYWORD: 0
+
 LSP_TOKEN_TYPE: 1
+
 LSP_TOKEN_FUNCTION: 2
+
 LSP_TOKEN_VARIABLE: 3
+
 LSP_TOKEN_PARAMETER: 4
+
 LSP_TOKEN_PROPERTY: 5
+
 LSP_TOKEN_ENUM_MEMBER: 6
+
 LSP_TOKEN_STRING: 7
+
 LSP_TOKEN_NUMBER: 8
+
 LSP_TOKEN_COMMENT: 9
+
 LSP_TOKEN_NAMESPACE: 11
 
 LSP_MODIFIER_DECLARATION: 1
+
 LSP_MODIFIER_READONLY: 2
 
 // A name's class: its semantic token type and modifier bits.
@@ -71,7 +82,9 @@ lsp_name_classes: fn(view: LSPView) -> [Int:LSPNameClass] Never! {
         if lsp_anchor_class(anchor.kind) == .Val(class) -> classes[reference.span.end] = class
     }
     loop definition in index.definitions {
-        if definition.def.module_path == module_path -> classes[definition.def.def_span.end] = lsp_definition_class(definition.def.kind)
+        if definition.def.module_path == module_path {
+            classes[definition.def.def_span.end] = lsp_definition_class(definition.def.kind)
+        }
     }
     classes
 }
@@ -79,10 +92,18 @@ lsp_name_classes: fn(view: LSPView) -> [Int:LSPNameClass] Never! {
 lsp_token_class: fn(token: Token, classes: [Int:LSPNameClass]) -> LSPNameClass? Never! {
     kind: token.kind
     if kind == TOKEN_IDENT -> return classes.get(token.span.end)
-    if (kind >= TOKEN_TRUE && kind <= TOKEN_RETURN) || (kind >= TOKEN_KW_FN && kind <= TOKEN_KW_MODULE) -> return Val(LSPNameClass{kind: LSP_TOKEN_KEYWORD, modifiers: 0})
-    if kind == TOKEN_STRING || kind == TOKEN_RAW_STRING || kind == TOKEN_CHAR -> return Val(LSPNameClass{kind: LSP_TOKEN_STRING, modifiers: 0})
-    if kind == TOKEN_INT || kind == TOKEN_FLOAT || kind == TOKEN_UNIT_NUMBER -> return Val(LSPNameClass{kind: LSP_TOKEN_NUMBER, modifiers: 0})
-    if kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT -> return Val(LSPNameClass{kind: LSP_TOKEN_COMMENT, modifiers: 0})
+    if (kind >= TOKEN_TRUE && kind <= TOKEN_RETURN) || (kind >= TOKEN_KW_FN && kind <= TOKEN_KW_MODULE) {
+        return Val(LSPNameClass{kind: LSP_TOKEN_KEYWORD, modifiers: 0})
+    }
+    if kind == TOKEN_STRING || kind == TOKEN_RAW_STRING || kind == TOKEN_CHAR {
+        return Val(LSPNameClass{kind: LSP_TOKEN_STRING, modifiers: 0})
+    }
+    if kind == TOKEN_INT || kind == TOKEN_FLOAT || kind == TOKEN_UNIT_NUMBER {
+        return Val(LSPNameClass{kind: LSP_TOKEN_NUMBER, modifiers: 0})
+    }
+    if kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT {
+        return Val(LSPNameClass{kind: LSP_TOKEN_COMMENT, modifiers: 0})
+    }
     None
 }
 

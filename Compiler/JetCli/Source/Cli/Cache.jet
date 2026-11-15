@@ -16,13 +16,20 @@ use {
         diagnostic_from_registry,
     ]
     jetpack_artifact_store.[
-        ArtifactPruneReport, ArtifactStore, ArtifactStoreError, ArtifactStoreStatus,
+        ArtifactPruneReport,
+        ArtifactStore,
+        ArtifactStoreError,
+        ArtifactStoreStatus,
         store_artifact_parse_size,
     ]
     jet_driver.[JetDriverVerbOutput]
 }
 
-JetCLICacheRequest: enum { Status Prune(bytes: Int) Limit(bytes: Int) }
+JetCLICacheRequest: enum {
+    Status
+    Prune(bytes: Int)
+    Limit(bytes: Int)
+}
 
 jet_cli_cache_size: fn(value: String) -> Int JetCLIReadError! {
     Ok(store_artifact_parse_size(value) ?? return Err(jet_cli_read_error("invalid cache size `{value}`: {err.message()}")))
@@ -40,27 +47,37 @@ jet_cli_cache_parse: fn(args: [String]) -> JetCLICacheRequest JetCLIReadError! {
             next
         }
         if arg == "--color" {
-            if index + 1 >= args.len() -> return Err(jet_cli_read_error("`jet cache --color` needs auto, always, or never"))
+            if index + 1 >= args.len() {
+                return Err(jet_cli_read_error("`jet cache --color` needs auto, always, or never"))
+            }
             index += 2
             next
         }
         if arg == "--to" || arg == "--host" {
-            if index + 1 >= args.len() -> return Err(jet_cli_read_error("`jet cache {arg}` needs a size"))
-            if option != None -> return Err(jet_cli_read_error("`jet cache` accepts one size option"))
+            if index + 1 >= args.len() {
+                return Err(jet_cli_read_error("`jet cache {arg}` needs a size"))
+            }
+            if option != None {
+                return Err(jet_cli_read_error("`jet cache` accepts one size option"))
+            }
             option = Val(arg)
             value = args[index + 1]
             index += 2
             next
         }
         if arg.starts_with("--to=") || arg.starts_with("--host=") {
-            if option != None -> return Err(jet_cli_read_error("`jet cache` accepts one size option"))
+            if option != None {
+                return Err(jet_cli_read_error("`jet cache` accepts one size option"))
+            }
             is_to: arg.starts_with("--to=")
             option = Val(if is_to -> "--to" else -> "--host")
             value = arg.slice(if is_to -> 5 else -> 7, arg.len())
             index += 1
             next
         }
-        if arg.starts_with("-") -> return Err(jet_cli_read_error("unknown `jet cache` flag `{arg}`"))
+        if arg.starts_with("-") {
+            return Err(jet_cli_read_error("unknown `jet cache` flag `{arg}`"))
+        }
         if command != None -> return Err(jet_cli_read_error("`jet cache` accepts one command"))
         command = Val(arg)
         index += 1
@@ -68,15 +85,21 @@ jet_cli_cache_parse: fn(args: [String]) -> JetCLICacheRequest JetCLIReadError! {
     selected: command ?? return Err(jet_cli_read_error("missing `jet cache` command"))
     if selected == {
         "status" -> {
-            if option != None -> return Err(jet_cli_read_error("`jet cache status` does not take a size option"))
+            if option != None {
+                return Err(jet_cli_read_error("`jet cache status` does not take a size option"))
+            }
             Ok(JetCLICacheRequest.Status)
         }
         "prune" -> {
-            if option != .Val("--to") -> return Err(jet_cli_read_error("`jet cache prune` requires `--to <size>`"))
+            if option != .Val("--to") {
+                return Err(jet_cli_read_error("`jet cache prune` requires `--to <size>`"))
+            }
             Ok(JetCLICacheRequest.Prune{bytes: jet_cli_cache_size(value)})
         }
         "limit" -> {
-            if option != .Val("--host") -> return Err(jet_cli_read_error("`jet cache limit` requires `--host <size>`"))
+            if option != .Val("--host") {
+                return Err(jet_cli_read_error("`jet cache limit` requires `--host <size>`"))
+            }
             Ok(JetCLICacheRequest.Limit{bytes: jet_cli_cache_size(value)})
         }
         else -> Err(jet_cli_read_error("`{selected}` isn't a jet cache command"))
@@ -92,7 +115,9 @@ jet_cli_cache_format_size: fn(bytes: Int) -> String Never! {
         value /= 1024.0
         unit += 1
     }
-    if cache_math.fmod(value, 1.0) == 0.0 || value >= 10.0 -> return "{value:Fixed(0)} {units[unit]}"
+    if cache_math.fmod(value, 1.0) == 0.0 || value >= 10.0 {
+        return "{value:Fixed(0)} {units[unit]}"
+    }
     "{value:Fixed(1)} {units[unit]}"
 }
 
@@ -119,22 +144,30 @@ jet_cli_cache_status: fn(store: ArtifactStore, status: ArtifactStoreStatus, json
     lto := 0
     loop entry in status.entries {
         if entry.kind == {
-            .Blob -> blobs += 1
-            .Action -> records += 1
+            .Blob -> { blobs += 1 }
+            .Action -> { records += 1 }
             .LTO -> lto += 1
         }
     }
     if json {
         available: if status.available_bytes == .Val(value) -> jet_cli_status_int(value) else -> JetCLIStatusValue.Null
         host_limit: if status.host_limit_bytes == .Val(value) -> jet_cli_status_int(value) else -> JetCLIStatusValue.Null
-        cache: jet_cli_status_object([JetCLIStatusField]{
-            jet_cli_status_field("available_bytes", available), jet_cli_status_field("blobs", jet_cli_status_int(blobs)),
-            jet_cli_status_field("entries", jet_cli_status_int(status.entries.len())), jet_cli_status_field("footprint_bytes", jet_cli_status_int(status.footprint_bytes)),
-            jet_cli_status_field("host_limit_bytes", host_limit), jet_cli_status_field("limit_bytes", jet_cli_status_int(status.limit_bytes)),
-            jet_cli_status_field("live_leases", jet_cli_status_int(status.live_leases)), jet_cli_status_field("records", jet_cli_status_int(records)),
-            jet_cli_status_field("reserve_bytes", jet_cli_status_int(status.reserve_bytes)), jet_cli_status_field("root", jet_cli_status_text(status.root)),
-            jet_cli_status_field("tiers", jet_cli_status_texts(status.tiers)), jet_cli_status_field("thinlto_caches", jet_cli_status_int(lto)),
-        })
+        cache: jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field("available_bytes", available),
+                jet_cli_status_field("blobs", jet_cli_status_int(blobs)),
+                jet_cli_status_field("entries", jet_cli_status_int(status.entries.len())),
+                jet_cli_status_field("footprint_bytes", jet_cli_status_int(status.footprint_bytes)),
+                jet_cli_status_field("host_limit_bytes", host_limit),
+                jet_cli_status_field("limit_bytes", jet_cli_status_int(status.limit_bytes)),
+                jet_cli_status_field("live_leases", jet_cli_status_int(status.live_leases)),
+                jet_cli_status_field("records", jet_cli_status_int(records)),
+                jet_cli_status_field("reserve_bytes", jet_cli_status_int(status.reserve_bytes)),
+                jet_cli_status_field("root", jet_cli_status_text(status.root)),
+                jet_cli_status_field("tiers", jet_cli_status_texts(status.tiers)),
+                jet_cli_status_field("thinlto_caches", jet_cli_status_int(lto)),
+            },
+        )
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("cache.status", true, [JetCLIStatusField]{jet_cli_status_field("cache", cache)})}\n", stderr: "", exit_code: 0}
     }
     source: if status.host_limit_bytes != None -> "host policy" else if store.config().cap_bytes() != None -> ENV_JET_STORE_CAP_BYTES else -> "adaptive rule"
@@ -146,12 +179,17 @@ jet_cli_cache_prune: fn(report: ArtifactPruneReport, json: Bool) -> JetDriverVer
     difference: report.before_bytes - report.after_bytes
     freed: if difference > 0 -> difference else -> 0
     if json {
-        cache: jet_cli_status_object([JetCLIStatusField]{
-            jet_cli_status_field("after_bytes", jet_cli_status_int(report.after_bytes)), jet_cli_status_field("before_bytes", jet_cli_status_int(report.before_bytes)),
-            jet_cli_status_field("blocked", jet_cli_status_bool(report.blocked)), jet_cli_status_field("freed_bytes", jet_cli_status_int(freed)),
-            jet_cli_status_field("pinned_bytes", jet_cli_status_int(report.pinned_bytes)), jet_cli_status_field("removed_entries", jet_cli_status_int(report.removed.len())),
-            jet_cli_status_field("target_bytes", jet_cli_status_int(report.target_bytes)),
-        })
+        cache: jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field("after_bytes", jet_cli_status_int(report.after_bytes)),
+                jet_cli_status_field("before_bytes", jet_cli_status_int(report.before_bytes)),
+                jet_cli_status_field("blocked", jet_cli_status_bool(report.blocked)),
+                jet_cli_status_field("freed_bytes", jet_cli_status_int(freed)),
+                jet_cli_status_field("pinned_bytes", jet_cli_status_int(report.pinned_bytes)),
+                jet_cli_status_field("removed_entries", jet_cli_status_int(report.removed.len())),
+                jet_cli_status_field("target_bytes", jet_cli_status_int(report.target_bytes)),
+            },
+        )
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("cache.prune", true, [JetCLIStatusField]{jet_cli_status_field("cache", cache)})}\n", stderr: "", exit_code: 0}
     }
     out := "prune      {jet_cli_cache_format_size(report.before_bytes)} -> {jet_cli_cache_format_size(report.after_bytes)} (target {jet_cli_cache_format_size(report.target_bytes)})\nremoved    {report.removed.len()} entries · freed {jet_cli_cache_format_size(freed)}\npinned     {jet_cli_cache_format_size(report.pinned_bytes)}\n"

@@ -3,6 +3,7 @@ package: {
     version: "0.1.0"
     authority: { allow: [IO, Mem.Alloc, Mem.Rc] }
 }
+
 // A type may hold strong `Shared` edges to its own kind. Building a graph out of
 // new cells never closes a loop: E0221 rejects only a write that stores a cell
 // which may already reach the written one (see tests/ui/shared_strong_cycle*).
@@ -35,9 +36,7 @@ run: fn() {
     // A strong linked list built by prepending: each new cell points at the
     // old head, which nothing new points back to.
     head := Shared<Node>?{None}
-    loop value in 1..<5 {
-        head = Val(Shared{Node{value: value, next: head}})
-    }
+    loop value in 1..<5 -> head = Val(Shared{Node{value: value, next: head}})
     print("list total={total(head)}")
     // Appending a new cell writes into an existing one, and stays acyclic.
     tail: Shared{Node{value: 10, next: None}}

@@ -8,19 +8,13 @@ TDigest: struct {
         display: fn(self) -> String { "TDigest" }
     }
 
-    new: fn() -> TDigest Never! {
-        TDigest{centroids: [Centroid]{}}
-    }
+    new: fn() -> TDigest Never! { TDigest{centroids: [Centroid]{}} }
 
     /// Record one sample with the shipped unit weight.
-    add: fn(&self, value: Float) Never! {
-        add_sample(self.centroids, value)
-    }
+    add: fn(&self, value: Float) Never! { add_sample(self.centroids, value) }
 
     /// Return the first centroid whose cumulative weight reaches q * total.
-    quantile: fn(self, q: Float) -> Float Never! {
-        step_quantile(self.centroids, q)
-    }
+    quantile: fn(self, q: Float) -> Float Never! { step_quantile(self.centroids, q) }
 }
 
 Centroid: struct {
@@ -38,7 +32,7 @@ insertion_index: fn(values: [Centroid], value: Float) -> Int Never! {
         half: size /% 2
         middle: base + half
         if values[middle].mean < value -> base = middle
-        size = size - half
+        size -= half
     }
     if values[base].mean < value -> base + 1 else -> base
 }
@@ -49,12 +43,12 @@ add_sample: fn(values: &[Centroid], value: Float) Never! {
     at := values.len() - 1
     loop at > index {
         values[at] = values[at - 1].copy()
-        at = at - 1
+        at -= 1
     }
     values[index] = Centroid{mean: value, weight: Float{1.0}}
 
     total := Float{0.0}
-    loop centroid in values -> total = total + centroid.weight
+    loop centroid in values -> total += centroid.weight
     last := 0
     cumulative := values[0].weight
     loop i in 1..<values.len() {
@@ -70,9 +64,9 @@ add_sample: fn(values: &[Centroid], value: Float) Never! {
                 weight: weight,
             }
         } else {
-            last = last + 1
+            last += 1
             values[last] = sample
-            cumulative = cumulative + sample.weight
+            cumulative += sample.weight
         }
     }
     loop values.len() > last + 1 -> _: values.pop()
@@ -81,11 +75,11 @@ add_sample: fn(values: &[Centroid], value: Float) Never! {
 step_quantile: fn(values: [Centroid], q: Float) -> Float Never! {
     if values.len() == 0 -> return Float{0.0}
     total := Float{0.0}
-    loop centroid in values -> total = total + centroid.weight
+    loop centroid in values -> total += centroid.weight
     target: q * total
     cumulative := Float{0.0}
     loop centroid in values {
-        cumulative = cumulative + centroid.weight
+        cumulative += centroid.weight
         if cumulative >= target -> return centroid.mean
     }
     values[values.len() - 1].mean

@@ -60,11 +60,7 @@ env_file_call_args_after: fn(after: String) -> String? Never! {
         current: scalars[index]
         if in_quote {
             out.push(current.copy())
-            if escaped {
-                escaped = false
-            } else if current == "\\" {
-                escaped = true
-            } else if current == "\"" {
+            if escaped -> escaped = false else if current == "\\" -> escaped = true else if current == "\"" {
                 in_quote = false
             }
             next

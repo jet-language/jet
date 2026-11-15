@@ -38,7 +38,9 @@ run: fn() {
         }
         return abort("proof-source: {problem}")
     }
-    if args.len() < 1 || args.len() > 2 || args[0].starts_with("-") -> return abort("usage: jet Tools/agent/ProofSource.jet SHA [REPOSITORY] | check SOURCE SHA")
+    if args.len() < 1 || args.len() > 2 || args[0].starts_with("-") {
+        return abort("usage: jet Tools/agent/ProofSource.jet SHA [REPOSITORY] | check SOURCE SHA")
+    }
     repository: files.absolute(if args.len() == 2 -> args[1] else -> ".") ?? return abort("proof-source: the repository cannot be resolved: {err}")
     candidates: "{scratch_root()}/candidates"
     files.create_dir_all(candidates) ?? return abort("proof-source: `{candidates}` cannot be created: {err}")
@@ -69,7 +71,9 @@ git: fn(repository: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait
 
 tool: fn(argv: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> String? Never! {
     ran: process.cmd(argv).run() ?? return Val("{argv[0]} failed: {err}")
-    if ran.code != 0 || ran.signal != None -> return Val("{argv[0]} failed: {ran.code}{ran.errors.trim_end()}")
+    if ran.code != 0 || ran.signal != None {
+        return Val("{argv[0]} failed: {ran.code}{ran.errors.trim_end()}")
+    }
     None
 }
 
@@ -108,7 +112,7 @@ publish: fn(repository: String, commit: String, temporary: String, destination: 
             term.eprint("proof-source: unsupported proof source entry {path}: {fields.join(" ")}")
             return false
         }
-        tracked.push(Dyn.Object([String: Dyn]{"path": Dyn.Text(path), "mode": Dyn.Text(fields[0].copy()), "blob": Dyn.Text(fields[2].copy())}))
+        tracked.push(Dyn.Object([String:Dyn]{"path": Dyn.Text(path), "mode": Dyn.Text(fields[0].copy()), "blob": Dyn.Text(fields[2].copy())}))
     }
     archive: "{temporary}/source.tar"
     failed: tool([String]{"git", "-C", repository, "archive", "--format=tar", "--output={archive}", commit}) ?? tool([String]{"tar", "-xf", archive, "-C", "{temporary}/source"}) ?? ""
@@ -118,7 +122,7 @@ publish: fn(repository: String, commit: String, temporary: String, destination: 
     }
     files.remove(archive) ?? return false
     tree: git(repository, [String]{"rev-parse", "{commit}^{{tree}}"}) ?? return false
-    manifest: Dyn.Object([String: Dyn]{"schema": Dyn.Text(SOURCE_SCHEMA), "commit": Dyn.Text(commit.copy()), "tree": Dyn.Text(tree.trim().copy()), "files": Dyn.Array(tracked.copy())})
+    manifest: Dyn.Object([String:Dyn]{"schema": Dyn.Text(SOURCE_SCHEMA), "commit": Dyn.Text(commit.copy()), "tree": Dyn.Text(tree.trim().copy()), "files": Dyn.Array(tracked.copy())})
     text: json.dumps(manifest) ?? return false
     files.write("{temporary}/source.manifest.json", "{text}\n") ?? return false
     if pinned_source_problem("{temporary}/source", commit) == .Val(problem) {
@@ -143,13 +147,17 @@ pinned_source_problem: fn(source: String, expected: String) -[FS]> String? Never
     loop entry in entries {
         path: text_field(entry, "path")
         mode: text_field(entry, "mode")
-        if path == "" || path.starts_with("/") || path.split("/").to_list().contains("..") -> return Val("invalid proof source path {path}")
+        if path == "" || path.starts_with("/") || path.split("/").to_list().contains("..") {
+            return Val("invalid proof source path {path}")
+        }
         file: "{source}/{path}"
         changed: "pinned proof source changed: {path}"
         meta: files.stat(file) ?? return Val("{changed} ({err})")
         link: mode == "120000"
         if link && !meta.is_symlink -> return Val(changed)
-        if !link && (!meta.is_file || executable(meta.mode) != (mode == "100755")) -> return Val(changed)
+        if !link && (!meta.is_file || executable(meta.mode) != (mode == "100755")) {
+            return Val(changed)
+        }
         bytes: if link -> (files.read_link(file) ?? return Val(changed)).bytes() else -> files.read_bytes(file) ?? return Val(changed)
         if blob_hash(bytes) != text_field(entry, "blob") -> return Val(changed)
     }
@@ -204,10 +212,10 @@ guard_fixture: fn(name: String) -[Env, FS, Time]> String {
     files.set_mode("{dir}/source/entry.jet", 0o644) ?? panic("mode: {err}")
     files.symlink("entry.jet", "{dir}/source/alias.jet") ?? panic("alias: {err}")
     listed: [Dyn]{
-        Dyn.Object([String: Dyn]{"path": Dyn.Text("entry.jet"), "mode": Dyn.Text("100644"), "blob": Dyn.Text(blob_hash(text.bytes()))}),
-        Dyn.Object([String: Dyn]{"path": Dyn.Text("alias.jet"), "mode": Dyn.Text("120000"), "blob": Dyn.Text(blob_hash("entry.jet".bytes()))}),
+        Dyn.Object([String:Dyn]{"path": Dyn.Text("entry.jet"), "mode": Dyn.Text("100644"), "blob": Dyn.Text(blob_hash(text.bytes()))}),
+        Dyn.Object([String:Dyn]{"path": Dyn.Text("alias.jet"), "mode": Dyn.Text("120000"), "blob": Dyn.Text(blob_hash("entry.jet".bytes()))}),
     }
-    manifest: Dyn.Object([String: Dyn]{"schema": Dyn.Text(SOURCE_SCHEMA), "commit": Dyn.Text("a".repeat(40)), "files": Dyn.Array(listed)})
+    manifest: Dyn.Object([String:Dyn]{"schema": Dyn.Text(SOURCE_SCHEMA), "commit": Dyn.Text("a".repeat(40)), "files": Dyn.Array(listed)})
     files.write("{dir}/source.manifest.json", json.dumps(manifest) ?? panic("manifest")) ?? panic("manifest: {err}")
     dir
 }
@@ -233,7 +241,9 @@ guard_fixture: fn(name: String) -[Env, FS, Time]> String {
     missing: guard_fixture("missing")
     files.remove("{missing}/source/entry.jet") ?? panic("remove: {err}")
     assert((pinned_source_problem("{missing}/source", commit) ?? "").starts_with("pinned proof source changed: entry.jet ("))
-    loop dir in ([String]{bytes, mode, link, missing}) -> files.remove_all(dir) ?? panic("cleanup: {err}")
+    loop dir in ([String]{bytes, mode, link, missing}) {
+        files.remove_all(dir) ?? panic("cleanup: {err}")
+    }
 }
 
 #Test("an export extracts a completed tar file and publishes once with no archive left behind") {

@@ -45,9 +45,7 @@ cli_config_trust: fn(theme: Theme, parsed: CLIParsed, verb: String?) -[IO, FS, E
         }
         CONFIG_TRUST_VERB_LIST -> {
             entries: trust_list_entries(store)
-            if entries.len() == 0 {
-                theme.status("no trust entries yet.")
-            } else {
+            if entries.len() == 0 -> theme.status("no trust entries yet.") else {
                 loop entry in entries -> theme.detail(entry)
             }
             EXIT_OK

@@ -8,7 +8,7 @@
     files.create_dir_all(object) ?? panic("fixture object")
     files.write(files.join(object, "meta.json"), "x".repeat((1 << 20) + 1)) ?? panic("oversized fixture bytes")
     if store_list_checked(verification, roots) == {
-        .Ok(_) -> panic("oversized metadata was accepted")
+        .Ok(_) -> { panic("oversized metadata was accepted") }
         .Err(error) -> assert(error.message().contains("exceeds 1048576 bytes"))
     }
     store_test_drop_roots(roots)
@@ -20,7 +20,7 @@
     files.write(files.join(source, "payload"), "orphaned bytes\n") ?? panic("source payload")
     roots: HangarRoots{root: root, dev_mode: false}
     verification := StoreVerification.new()
-    request: IngestRequest{name: "canonical-gc", version: "1", reference: "path:canonical-gc", cache_identity: CacheIdentity{source_fingerprint: "sha256:canonical-gc-source", recipe_fingerprint: "sha256:canonical-gc-recipe", policy_fingerprint: "sha256:canonical-gc-policy", platform: pkg_host_platform()}, references: [String]{}, outputs: [String: String]{"out": source}, signature: "", provenance: "canonical GC test", platform_artifact_kind: ""}
+    request: IngestRequest{name: "canonical-gc", version: "1", reference: "path:canonical-gc", cache_identity: CacheIdentity{source_fingerprint: "sha256:canonical-gc-source", recipe_fingerprint: "sha256:canonical-gc-recipe", policy_fingerprint: "sha256:canonical-gc-policy", platform: pkg_host_platform()}, references: [String]{}, outputs: [String:String]{"out": source}, signature: "", provenance: "canonical GC test", platform_artifact_kind: ""}
     entry: (store_ingest_tree(verification, roots, request) ?? panic("canonical ingest")).entry
     output: entry.out
     receipt: files.join(files.join(roots.hangar_dir(), "receipts"), entry.receipt)

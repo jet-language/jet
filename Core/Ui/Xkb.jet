@@ -4,6 +4,7 @@ use {
     core.ui.[UIError]
     internal.[lex, keysym_names, parse_keymap, compile, key_at, press_text, ui_key, refresh, update_key, one_sym, real_mod_index, hex, test_keymap_source, test_keymap, exercise]
 }
+
 // core.ui.xkb — the XKB keyboard engine for native windows, in pure Jet.
 //
 // `keymap` compiles an XKB text-v1 keymap (the include-resolved text a
@@ -28,44 +29,70 @@ use {
 // Keysym names, values and texts come from the generated Core/Ui/XkbTables.jet.
 
 SHIFT: 1
+
 LOCK: 2
+
 CONTROL: 4
+
 REAL_MODS: 255
+
 ALL_MODS: 4294967295
+
 // Keysyms a keymap names but the keysym table does not know get ids from
 // here up, so interprets still match them by name.
 SYNTHETIC_KEYSYM: 2130706432
 
 T_WORD: 1
+
 T_NUMBER: 2
+
 T_STRING: 3
+
 T_KEY: 4
+
 T_PUNCT: 5
+
 T_END: 6
 
 ACT_NONE: 0
+
 ACT_SET_MODS: 1
+
 ACT_LATCH_MODS: 2
+
 ACT_LOCK_MODS: 3
+
 ACT_SET_GROUP: 4
+
 ACT_LATCH_GROUP: 5
+
 ACT_LOCK_GROUP: 6
+
 // Pointer buttons, controls, screen switches and Terminate break a latch.
 ACT_BREAKS_LATCH: 7
+
 ACT_OTHER: 8
 
 MATCH_NONE_OF: 0
+
 MATCH_ANY_OR_NONE: 1
+
 MATCH_ANY_OF: 2
+
 MATCH_ALL_OF: 3
+
 MATCH_EXACTLY: 4
 
 LATCH_NONE: 0
+
 LATCH_KEY_DOWN: 1
+
 LATCH_PENDING: 2
 
 GROUPS_WRAP: 0
+
 GROUPS_CLAMP: 1
+
 GROUPS_REDIRECT: 2
 
 /// Key repeat timing from wl_keyboard.repeat_info: `rate` repeats per second
@@ -84,9 +111,7 @@ Repeat: struct {
     }
 
     /// The repeats that fall due while the hold grows from `from_ms` to `to_ms`.
-    between: fn(self, from_ms: Int, to_ms: Int) -> Int {
-        self.due(to_ms) - self.due(from_ms)
-    }
+    between: fn(self, from_ms: Int, to_ms: Int) -> Int { self.due(to_ms) - self.due(from_ms) }
 }
 
 Token: struct {
@@ -177,10 +202,10 @@ Filter: struct {
 Parser: struct {
     toks: [Token]
     at: Int
-    names: [String: Int]
-    synthetic: [String: Int]
-    codes: [String: Int]
-    aliases: [String: String]
+    names: [String:Int]
+    synthetic: [String:Int]
+    codes: [String:Int]
+    aliases: [String:String]
     vmods: [String]
     vmod_fixed: [Int]
     types: [KeyType]
@@ -188,7 +213,7 @@ Parser: struct {
     default_repeat: Bool
     default_level_one: Bool
     keys: [KeyDef]
-    key_index: [String: Int]
+    key_index: [String:Int]
     modmap: [ModmapEntry]
     layouts: [String]
 }
@@ -217,7 +242,7 @@ Keymap: struct {
     priv layouts: [String]
     priv vmod_names: [String]
     priv vmod_masks: [Int]
-    priv sym_names: [Int: String]
+    priv sym_names: [Int:String]
 
     /// Sets the state from the compositor's wl_keyboard.modifiers event.
     /// From then on the compositor owns the state and `press` stops
@@ -261,7 +286,9 @@ Keymap: struct {
             index: self.by_code[keycode]
             if index < 0 -> next
             groups: self.keys[index].groups
-            if groups.len() > 0 && groups[0].levels.len() > 0 && groups[0].levels[0].len() > 0 -> out.push(keycode - 8)
+            if groups.len() > 0 && groups[0].levels.len() > 0 && groups[0].levels[0].len() > 0 {
+                out.push(keycode - 8)
+            }
         }
         out
     }
@@ -286,7 +313,9 @@ Keymap: struct {
 
     /// The active layout's name (name[GroupN]), else "Group N".
     layout: fn(self) -> String {
-        if self.group >= 0 && self.group < self.layouts.len() && self.layouts[self.group] != "" -> return self.layouts[self.group].copy()
+        if self.group >= 0 && self.group < self.layouts.len() && self.layouts[self.group] != "" {
+            return self.layouts[self.group].copy()
+        }
         "Group {self.group + 1}"
     }
 
@@ -297,7 +326,9 @@ Keymap: struct {
         real: real_mod_index(name)
         if real >= 0 -> return (self.mods >> real).bit_and(1) == 1
         loop v in 0..<self.vmod_names.len() {
-            if self.vmod_names[v].lower() == name.lower() -> return self.vmod_masks[v] != 0 && self.mods.bit_and(self.vmod_masks[v]) != 0
+            if self.vmod_names[v].lower() == name.lower() {
+                return self.vmod_masks[v] != 0 && self.mods.bit_and(self.vmod_masks[v]) != 0
+            }
         }
         false
     }
@@ -306,10 +337,22 @@ Keymap: struct {
 /// Compiles an XKB text-v1 keymap. Every failure is `UIError.Protocol`.
 keymap: fn(bytes: [U8]) -> Keymap UIError! {
     p := Parser{
-        toks: lex(bytes), at: 0, names: keysym_names(), synthetic: [String: Int]{},
-        codes: [String: Int]{}, aliases: [String: String]{}, vmods: [String]{}, vmod_fixed: [Int]{},
-        types: [KeyType]{}, interps: [Interp]{}, default_repeat: true, default_level_one: false,
-        keys: [KeyDef]{}, key_index: [String: Int]{}, modmap: [ModmapEntry]{}, layouts: [String]{},
+        toks: lex(bytes),
+        at: 0,
+        names: keysym_names(),
+        synthetic: [String:Int]{},
+        codes: [String:Int]{},
+        aliases: [String:String]{},
+        vmods: [String]{},
+        vmod_fixed: [Int]{},
+        types: [KeyType]{},
+        interps: [Interp]{},
+        default_repeat: true,
+        default_level_one: false,
+        keys: [KeyDef]{},
+        key_index: [String:Int]{},
+        modmap: [ModmapEntry]{},
+        layouts: [String]{},
     }
     parse_keymap(p)
     compile(p)
@@ -378,12 +421,8 @@ priv internal: module {
             if c == 10 {
                 line += 1
                 i += 1
-            } else if c == 32 || c == 9 || c == 13 || c == 12 || c == 0 {
-                i += 1
-            } else if c == 35 || (c == 47 && i + 1 < n && Int{source[i + 1]} == 47) {
-                loop i < n && (Int{source[i]}) != 10 {
-                    i += 1
-                }
+            } else if c == 32 || c == 9 || c == 13 || c == 12 || c == 0 { i += 1 } else if c == 35 || (c == 47 && i + 1 < n && Int{source[i + 1]} == 47) {
+                loop i < n && (Int{source[i]}) != 10 -> i += 1
             } else if c == 34 {
                 start_line: line
                 text := [U8]{}
@@ -400,29 +439,23 @@ priv internal: module {
             } else if c == 60 {
                 start: i + 1
                 i += 1
-                loop i < n && (Int{source[i]}) != 62 && (Int{source[i]}) != 10 {
-                    i += 1
+                loop i < n && (Int{source[i]}) != 62 && (Int{source[i]}) != 10 -> i += 1
+                if i >= n || (Int{source[i]}) != 62 {
+                    return Err(syntax(line, "unterminated key name"))
                 }
-                if i >= n || (Int{source[i]}) != 62 -> return Err(syntax(line, "unterminated key name"))
                 name: String.from_bytes(source[start..<i]) ?? return Err(syntax(line, "a key name is not UTF-8"))
                 i += 1
                 out.push(Token{kind: T_KEY, text: name, value: 0, line: line})
             } else if is_word_byte(c) {
                 start: i
-                loop i < n && is_word_byte(Int{source[i]}) {
-                    i += 1
-                }
+                loop i < n && is_word_byte(Int{source[i]}) -> i += 1
                 word: source[start..<i]
                 text: String.from_bytes(word) ?? ""
                 value: if c >= 48 && c <= 57 -> number_value(word) else -> Int{-1}
                 if value >= 0 {
                     out.push(Token{kind: T_NUMBER, text: text, value: value, line: line})
-                } else {
-                    out.push(Token{kind: T_WORD, text: text, value: 0, line: line})
-                }
-            } else if c >= 128 {
-                return Err(syntax(line, "unexpected non-ASCII byte"))
-            } else {
+                } else { out.push(Token{kind: T_WORD, text: text, value: 0, line: line}) }
+            } else if c >= 128 { return Err(syntax(line, "unexpected non-ASCII byte")) } else {
                 out.push(Token{kind: T_PUNCT, text: utf8(c), value: 0, line: line})
                 i += 1
             }
@@ -447,11 +480,11 @@ priv internal: module {
         p.toks[p.at].text.lower()
     }
 
-    advance: fn(&p: Parser) {
+    advance: fn(p: &Parser) {
         if p.toks[p.at].kind != T_END -> p.at += 1
     }
 
-    accept: fn(&p: Parser, ch: String) -> Bool {
+    accept: fn(p: &Parser, ch: String) -> Bool {
         if !is_punct(p, ch) -> return false
         p.at += 1
         true
@@ -465,34 +498,40 @@ priv internal: module {
         "'{t.text}'"
     }
 
-    expect: fn(&p: Parser, ch: String) UIError! {
+    expect: fn(p: &Parser, ch: String) UIError! {
         if !accept(p, ch) -> return Err(syntax(line_at(p), "expected '{ch}', found {describe(p)}"))
         Ok()
     }
 
-    expect_word: fn(&p: Parser) -> String UIError! {
+    expect_word: fn(p: &Parser) -> String UIError! {
         if !is_word(p) -> return Err(syntax(line_at(p), "expected a name, found {describe(p)}"))
         text: p.toks[p.at].text.copy()
         p.at += 1
         Ok(text)
     }
 
-    expect_string: fn(&p: Parser) -> String UIError! {
-        if kind_at(p) != T_STRING -> return Err(syntax(line_at(p), "expected a string, found {describe(p)}"))
+    expect_string: fn(p: &Parser) -> String UIError! {
+        if kind_at(p) != T_STRING {
+            return Err(syntax(line_at(p), "expected a string, found {describe(p)}"))
+        }
         text: p.toks[p.at].text.copy()
         p.at += 1
         Ok(text)
     }
 
-    expect_key: fn(&p: Parser) -> String UIError! {
-        if kind_at(p) != T_KEY -> return Err(syntax(line_at(p), "expected a key name, found {describe(p)}"))
+    expect_key: fn(p: &Parser) -> String UIError! {
+        if kind_at(p) != T_KEY {
+            return Err(syntax(line_at(p), "expected a key name, found {describe(p)}"))
+        }
         text: p.toks[p.at].text.copy()
         p.at += 1
         Ok(text)
     }
 
-    expect_number: fn(&p: Parser) -> Int UIError! {
-        if kind_at(p) != T_NUMBER -> return Err(syntax(line_at(p), "expected a number, found {describe(p)}"))
+    expect_number: fn(p: &Parser) -> Int UIError! {
+        if kind_at(p) != T_NUMBER {
+            return Err(syntax(line_at(p), "expected a number, found {describe(p)}"))
+        }
         value: p.toks[p.at].value
         p.at += 1
         Ok(value)
@@ -500,7 +539,7 @@ priv internal: module {
 
     // Skips tokens up to the end of the current statement: past its `;`, or up
     // to a closing `}` (or `,` when `items`) at nesting depth 0.
-    skip_statement: fn(&p: Parser, items: Bool) UIError! {
+    skip_statement: fn(p: &Parser, items: Bool) UIError! {
         depth := 0
         loop {
             k: kind_at(p)
@@ -521,7 +560,7 @@ priv internal: module {
 
     // The 1-based index after `name` in a level or group name (`Level2`,
     // `Group1`), or a plain number.
-    indexed: fn(&p: Parser, prefix: String) -> Int UIError! {
+    indexed: fn(p: &Parser, prefix: String) -> Int UIError! {
         if kind_at(p) == T_NUMBER -> return Ok(expect_number(p))
         word: word_lower(p)
         if word.starts_with(prefix) {
@@ -535,15 +574,17 @@ priv internal: module {
     }
 
     // A 0-based group index from `[N]` / `[GroupN]`.
-    group_index: fn(&p: Parser) -> Int UIError! {
+    group_index: fn(p: &Parser) -> Int UIError! {
         expect(p, "[")
         group: indexed(p, "group")
         expect(p, "]")
-        if group < 1 || group > 32 -> return Err(syntax(line_at(p), "group {group} is out of range"))
+        if group < 1 || group > 32 {
+            return Err(syntax(line_at(p), "group {group} is out of range"))
+        }
         Ok(group - 1)
     }
 
-    parse_bool: fn(&p: Parser) -> Bool UIError! {
+    parse_bool: fn(p: &Parser) -> Bool UIError! {
         word: expect_word(p).lower()
         if word == "true" || word == "yes" || word == "on" -> return Ok(true)
         if word == "false" || word == "no" || word == "off" -> return Ok(false)
@@ -573,23 +614,17 @@ priv internal: module {
 
     // A modifier mask: real and virtual modifier names, `none`, `all` or a
     // number, joined by `+`. Virtual modifier i is bit 8 + i.
-    mod_expr: fn(&p: Parser) -> Int UIError! {
+    mod_expr: fn(p: &Parser) -> Int UIError! {
         mask := 0
         loop {
-            if kind_at(p) == T_NUMBER {
-                mask = mask.bit_or(expect_number(p))
-            } else {
+            if kind_at(p) == T_NUMBER -> mask = mask.bit_or(expect_number(p)) else {
                 name: expect_word(p)
                 lower: name.lower()
                 real: real_mod_index(name)
                 vmod: vmod_index(p, name)
-                if lower == "all" {
-                    mask = ALL_MODS
-                } else if real >= 0 {
+                if lower == "all" -> mask = ALL_MODS else if real >= 0 {
                     mask = mask.bit_or(1 << real)
-                } else if vmod >= 0 {
-                    mask = mask.bit_or(1 << (8 + vmod))
-                } else if lower != "none" {
+                } else if vmod >= 0 { mask = mask.bit_or(1 << (8 + vmod)) } else if lower != "none" {
                     return Err(syntax(line_at(p), "unknown modifier '{name}'"))
                 }
             }
@@ -600,7 +635,7 @@ priv internal: module {
 
     // `virtual_modifiers A, B = 0x4000;`: declares virtual modifiers, with an
     // optional fixed mapping.
-    virtual_modifiers: fn(&p: Parser) UIError! {
+    virtual_modifiers: fn(p: &Parser) UIError! {
         loop {
             name: expect_word(p)
             fixed := Int{-1}
@@ -609,7 +644,9 @@ priv internal: module {
             if index >= 0 {
                 if fixed >= 0 -> p.vmod_fixed[index] = fixed
             } else {
-                if p.vmods.len() >= 24 -> return Err(syntax(line_at(p), "more than 24 virtual modifiers"))
+                if p.vmods.len() >= 24 {
+                    return Err(syntax(line_at(p), "more than 24 virtual modifiers"))
+                }
                 p.vmods.push(name)
                 p.vmod_fixed.push(fixed)
             }
@@ -624,8 +661,8 @@ priv internal: module {
         value
     }
 
-    keysym_names: fn() -> [String: Int] {
-        out := [String: Int]{}
+    keysym_names: fn() -> [String:Int] {
+        out := [String:Int]{}
         values: tables.XKB_KEYSYM_VALUES
         names: tables.XKB_KEYSYM_NAMES.split("\n").to_list()
         loop i in 0..<names.len() {
@@ -636,7 +673,7 @@ priv internal: module {
 
     // The keysym a name spells: a known name, `U<hex>` (the Latin-1 keysym for
     // a Latin-1 scalar), or a synthetic id for a name the table does not know.
-    keysym_named: fn(&p: Parser, name: String) -> Int {
+    keysym_named: fn(p: &Parser, name: String) -> Int {
         if p.names.get(name) == .Val(value) -> return value
         if name.len() >= 5 && name.starts_with("U") {
             digits: name.remove_prefix("U")
@@ -661,11 +698,7 @@ priv internal: module {
             mid: (lo + hi) /% 2
             value: be(rows, mid * 7, 4)
             if value == sym -> return be(rows, mid * 7 + 4, 3)
-            if value < sym {
-                lo = mid + 1
-            } else {
-                hi = mid
-            }
+            if value < sym -> lo = mid + 1 else -> hi = mid
         }
         0
     }
@@ -683,9 +716,7 @@ priv internal: module {
 
     utf8: fn(scalar: Int) -> String {
         out := [U8]{}
-        if scalar < 128 {
-            out.push(U8{scalar})
-        } else if scalar < 2048 {
+        if scalar < 128 -> out.push(U8{scalar}) else if scalar < 2048 {
             out.push(U8{192 + (scalar >> 6)})
             out.push(U8{128 + scalar.bit_and(63)})
         } else if scalar < 65536 {
@@ -772,11 +803,7 @@ priv internal: module {
             mid: (lo + hi) /% 2
             value: be(rows, mid * 9, 4)
             if value == sym -> return mid
-            if value < sym {
-                lo = mid + 1
-            } else {
-                hi = mid
-            }
+            if value < sym -> lo = mid + 1 else -> hi = mid
         }
         Int{-1}
     }
@@ -826,9 +853,11 @@ priv internal: module {
         out
     }
 
-    parse_keymap: fn(&p: Parser) UIError! {
+    parse_keymap: fn(p: &Parser) UIError! {
         loop is_word(p) && word_lower(p) != "xkb_keymap" -> advance(p)
-        if word_lower(p) != "xkb_keymap" -> return Err(syntax(line_at(p), "expected xkb_keymap, found {describe(p)}"))
+        if word_lower(p) != "xkb_keymap" {
+            return Err(syntax(line_at(p), "expected xkb_keymap, found {describe(p)}"))
+        }
         advance(p)
         if kind_at(p) == T_STRING -> advance(p)
         expect(p, "{{")
@@ -842,18 +871,14 @@ priv internal: module {
                     break
                 }
             }
-            if section == "" -> return Err(syntax(line_at(p), "expected a keymap section, found {describe(p)}"))
+            if section == "" {
+                return Err(syntax(line_at(p), "expected a keymap section, found {describe(p)}"))
+            }
             if kind_at(p) == T_STRING -> advance(p)
             expect(p, "{{")
-            if section == "xkb_keycodes" {
-                keycodes(p)
-            } else if section == "xkb_types" {
-                types(p)
-            } else if section == "xkb_compatibility" || section == "xkb_compatibility_map" || section == "xkb_compat" || section == "xkb_compat_map" {
+            if section == "xkb_keycodes" -> keycodes(p) else if section == "xkb_types" -> types(p) else if section == "xkb_compatibility" || section == "xkb_compatibility_map" || section == "xkb_compat" || section == "xkb_compat_map" {
                 compat(p)
-            } else if section == "xkb_symbols" {
-                symbols(p)
-            } else {
+            } else if section == "xkb_symbols" { symbols(p) } else {
                 loop !is_punct(p, "}}") -> skip_statement(p, false)
             }
             expect(p, "}}")
@@ -861,20 +886,20 @@ priv internal: module {
         }
         expect(p, "}}")
         _: accept(p, ";")
-        if kind_at(p) != T_END -> return Err(syntax(line_at(p), "unexpected {describe(p)} after the keymap"))
+        if kind_at(p) != T_END {
+            return Err(syntax(line_at(p), "unexpected {describe(p)} after the keymap"))
+        }
         Ok()
     }
 
-    keycodes: fn(&p: Parser) UIError! {
+    keycodes: fn(p: &Parser) UIError! {
         loop !is_punct(p, "}}") {
             if kind_at(p) == T_KEY {
                 name: expect_key(p)
                 expect(p, "=")
                 code: expect_number(p)
                 if code > 65535 -> return Err(syntax(line_at(p), "keycode {code} is out of range"))
-                if p.codes.get(name) == .Val(_) {
-                    p.codes[name] = code
-                } else {
+                if p.codes.get(name) == .Val(_) -> p.codes[name] = code else {
                     _: p.codes.add(name, code)
                 }
                 expect(p, ";")
@@ -885,14 +910,12 @@ priv internal: module {
                 target: expect_key(p)
                 expect(p, ";")
                 if p.aliases.get(alias) == None -> _: p.aliases.add(alias, target)
-            } else {
-                skip_statement(p, false)
-            }
+            } else { skip_statement(p, false) }
         }
         Ok()
     }
 
-    types: fn(&p: Parser) UIError! {
+    types: fn(p: &Parser) UIError! {
         loop !is_punct(p, "}}") {
             word: word_lower(p)
             if word == "virtual_modifiers" {
@@ -901,9 +924,7 @@ priv internal: module {
             } else if word == "type" {
                 advance(p)
                 key_type(p)
-            } else {
-                skip_statement(p, false)
-            }
+            } else { skip_statement(p, false) }
         }
         Ok()
     }
@@ -915,7 +936,7 @@ priv internal: module {
         Int{-1}
     }
 
-    key_type: fn(&p: Parser) UIError! {
+    key_type: fn(p: &Parser) UIError! {
         name: expect_string(p)
         expect(p, "{{")
         mods := 0
@@ -936,12 +957,12 @@ priv internal: module {
                 expect(p, "=")
                 level: indexed(p, "level")
                 expect(p, ";")
-                if level < 1 || level > 256 -> return Err(syntax(line_at(p), "level {level} is out of range"))
+                if level < 1 || level > 256 {
+                    return Err(syntax(line_at(p), "level {level} is out of range"))
+                }
                 if level > levels -> levels = level
                 at: entry_for(entries, entry_mods)
-                if at >= 0 {
-                    entries[at].level = level - 1
-                } else {
+                if at >= 0 -> entries[at].level = level - 1 else {
                     entries.push(TypeEntry{mods: entry_mods, mask: 0, level: level - 1, preserve: 0, preserve_mask: 0})
                 }
             } else if word == "preserve" {
@@ -953,14 +974,10 @@ priv internal: module {
                 preserve: mod_expr(p)
                 expect(p, ";")
                 at: entry_for(entries, entry_mods)
-                if at >= 0 {
-                    entries[at].preserve = preserve
-                } else {
+                if at >= 0 -> entries[at].preserve = preserve else {
                     entries.push(TypeEntry{mods: entry_mods, mask: 0, level: 0, preserve: preserve, preserve_mask: 0})
                 }
-            } else {
-                skip_statement(p, false)
-            }
+            } else { skip_statement(p, false) }
         }
         expect(p, "}}")
         expect(p, ";")
@@ -999,21 +1016,17 @@ priv internal: module {
     }
 
     // `Name(arg, arg=value, !flag)`.
-    action: fn(&p: Parser) -> Action UIError! {
+    action: fn(p: &Parser) -> Action UIError! {
         name: expect_word(p)
         out := no_action()
         out.kind = action_kind(name)
         expect(p, "(")
         loop !is_punct(p, ")") {
             negated: accept(p, "!") || accept(p, "~")
-            if !is_word(p) {
-                skip_statement(p, true)
-            } else {
+            if !is_word(p) -> skip_statement(p, true) else {
                 arg: word_lower(p)
                 advance(p)
-                if is_punct(p, "[") {
-                    skip_statement(p, true)
-                } else if !accept(p, "=") {
+                if is_punct(p, "[") -> skip_statement(p, true) else if !accept(p, "=") {
                     if arg == "clearlocks" -> out.clear_locks = !negated
                     if arg == "latchtolock" -> out.latch_to_lock = !negated
                 } else if arg == "modifiers" || arg == "mods" {
@@ -1021,17 +1034,13 @@ priv internal: module {
                     if lookup == "modmapmods" || lookup == "usemodmapmods" {
                         advance(p)
                         out.modmap = true
-                    } else {
-                        out.mods = mod_expr(p)
-                    }
+                    } else { out.mods = mod_expr(p) }
                 } else if arg == "group" {
                     relative: is_punct(p, "+") || is_punct(p, "-")
                     negative: accept(p, "-")
                     _: accept(p, "+")
                     value: indexed(p, "group")
-                    if relative {
-                        out.group = if negative -> 0 - value else -> value
-                    } else {
+                    if relative -> out.group = if negative -> 0 - value else -> value else {
                         out.absolute = true
                         out.group = value - 1
                     }
@@ -1043,9 +1052,7 @@ priv internal: module {
                     value: parse_bool(p)
                     if arg == "clearlocks" -> out.clear_locks = value
                     if arg == "latchtolock" -> out.latch_to_lock = value
-                } else {
-                    skip_statement(p, true)
-                }
+                } else { skip_statement(p, true) }
             }
             if !accept(p, ",") -> break
         }
@@ -1053,7 +1060,7 @@ priv internal: module {
         Ok(out)
     }
 
-    compat: fn(&p: Parser) UIError! {
+    compat: fn(p: &Parser) UIError! {
         loop !is_punct(p, "}}") {
             word: word_lower(p)
             if word == "virtual_modifiers" {
@@ -1062,9 +1069,7 @@ priv internal: module {
             } else if word == "interpret" {
                 advance(p)
                 interpret(p)
-            } else {
-                skip_statement(p, false)
-            }
+            } else { skip_statement(p, false) }
         }
         Ok()
     }
@@ -1080,7 +1085,7 @@ priv internal: module {
         }
     }
 
-    interpret: fn(&p: Parser) UIError! {
+    interpret: fn(p: &Parser) UIError! {
         if accept(p, ".") {
             field: expect_word(p).lower()
             expect(p, "=")
@@ -1090,9 +1095,7 @@ priv internal: module {
             } else if field == "repeat" {
                 p.default_repeat = parse_bool(p)
                 expect(p, ";")
-            } else {
-                skip_statement(p, false)
-            }
+            } else { skip_statement(p, false) }
             return Ok()
         }
         any := false
@@ -1134,7 +1137,9 @@ priv internal: module {
                 expect(p, "=")
                 name: expect_word(p)
                 rule.vmod = vmod_index(p, name)
-                if rule.vmod < 0 && name.lower() != "none" -> return Err(syntax(line_at(p), "unknown virtual modifier '{name}'"))
+                if rule.vmod < 0 && name.lower() != "none" {
+                    return Err(syntax(line_at(p), "unknown virtual modifier '{name}'"))
+                }
                 expect(p, ";")
             } else if field == "usemodmapmods" || field == "usemodmap" {
                 advance(p)
@@ -1146,9 +1151,7 @@ priv internal: module {
                 expect(p, "=")
                 rule.repeat = parse_bool(p)
                 expect(p, ";")
-            } else {
-                skip_statement(p, false)
-            }
+            } else { skip_statement(p, false) }
         }
         expect(p, "}}")
         expect(p, ";")
@@ -1156,14 +1159,14 @@ priv internal: module {
         Ok()
     }
 
-    level_one: fn(&p: Parser) -> Bool UIError! {
+    level_one: fn(p: &Parser) -> Bool UIError! {
         word: expect_word(p).lower()
         if word == "level1" || word == "levelone" -> return Ok(true)
         if word == "anylevel" || word == "any" -> return Ok(false)
         Err(syntax(line_at(p), "expected level1 or AnyLevel, found '{word}'"))
     }
 
-    symbols: fn(&p: Parser) UIError! {
+    symbols: fn(p: &Parser) UIError! {
         loop !is_punct(p, "}}") {
             word: word_lower(p)
             if word == "virtual_modifiers" {
@@ -1184,24 +1187,34 @@ priv internal: module {
                 _: accept(p, ";")
                 loop p.layouts.len() <= group -> p.layouts.push("")
                 p.layouts[group] = name
-            } else {
-                skip_statement(p, false)
-            }
+            } else { skip_statement(p, false) }
         }
         Ok()
     }
 
     // The key a symbols name refers to, through an alias; -1 if no keycode.
-    key_slot: fn(&p: Parser, name: String) -> Int {
+    key_slot: fn(p: &Parser, name: String) -> Int {
         if p.key_index.get(name) == .Val(index) -> return index
         real := name.copy()
         if p.aliases.get(name) == .Val(target) -> real = target.copy()
         if p.key_index.get(real) == .Val(index) -> return index
         code: p.codes.get(real) ?? return -1
-        p.keys.push(KeyDef{
-            name: real.copy(), code: code, groups: [Group]{}, explicit_actions: false, repeat: -1, vmods: 0,
-            explicit_vmods: false, modmap: 0, vmodmap: 0, out_of_range: GROUPS_WRAP, redirect: 0, repeats: true,
-        })
+        p.keys.push(
+            KeyDef{
+                name: real.copy(),
+                code: code,
+                groups: [Group]{},
+                explicit_actions: false,
+                repeat: -1,
+                vmods: 0,
+                explicit_vmods: false,
+                modmap: 0,
+                vmodmap: 0,
+                out_of_range: GROUPS_WRAP,
+                redirect: 0,
+                repeats: true,
+            },
+        )
         _: p.key_index.add(real.copy(), p.keys.len() - 1)
         if real != name -> _: p.key_index.add(name.copy(), p.keys.len() - 1)
         p.keys.len() - 1
@@ -1211,11 +1224,11 @@ priv internal: module {
         Group{type_name: "", explicit_type: false, type: 0, levels: [[Int]]{}, actions: [Action]{}}
     }
 
-    ensure_group: fn(&groups: [Group], group: Int) {
+    ensure_group: fn(groups: &[Group], group: Int) {
         loop groups.len() <= group -> groups.push(empty_group())
     }
 
-    keysym_token: fn(&p: Parser) -> Int UIError! {
+    keysym_token: fn(p: &Parser) -> Int UIError! {
         if kind_at(p) == T_NUMBER {
             value: expect_number(p)
             return Ok(if value <= 9 -> 48 + value else -> value)
@@ -1225,7 +1238,7 @@ priv internal: module {
     }
 
     // `[ a, A, {b, c}, NoSymbol ]`: each level's keysyms.
-    symbol_list: fn(&p: Parser) -> [[Int]] UIError! {
+    symbol_list: fn(p: &Parser) -> [[Int]] UIError! {
         expect(p, "[")
         levels := [[Int]]{}
         loop !is_punct(p, "]") {
@@ -1248,7 +1261,7 @@ priv internal: module {
         Ok(levels)
     }
 
-    action_list: fn(&p: Parser) -> [Action] UIError! {
+    action_list: fn(p: &Parser) -> [Action] UIError! {
         expect(p, "[")
         out := [Action]{}
         loop !is_punct(p, "]") {
@@ -1265,16 +1278,14 @@ priv internal: module {
                 }
                 expect(p, "}}")
                 out.push(first)
-            } else {
-                out.push(action(p))
-            }
+            } else { out.push(action(p)) }
             if !accept(p, ",") -> break
         }
         expect(p, "]")
         Ok(out)
     }
 
-    key_def: fn(&p: Parser) UIError! {
+    key_def: fn(p: &Parser) UIError! {
         name: expect_key(p)
         index: key_slot(p, name)
         expect(p, "{{")
@@ -1340,15 +1351,15 @@ priv internal: module {
                     advance(p)
                     on := true
                     if accept(p, "=") -> on = parse_bool(p)
-                    if on -> out_of_range = if field == "groupswrap" || field == "wrapgroups" -> GROUPS_WRAP else -> GROUPS_CLAMP
+                    if on {
+                        out_of_range = if field == "groupswrap" || field == "wrapgroups" -> GROUPS_WRAP else -> GROUPS_CLAMP
+                    }
                 } else if field == "groupsredirect" || field == "redirectgroups" {
                     advance(p)
                     expect(p, "=")
                     out_of_range = GROUPS_REDIRECT
                     redirect = indexed(p, "group") - 1
-                } else {
-                    skip_statement(p, true)
-                }
+                } else { skip_statement(p, true) }
             }
             if !accept(p, ",") -> break
         }
@@ -1369,10 +1380,12 @@ priv internal: module {
         Ok()
     }
 
-    modifier_map: fn(&p: Parser) UIError! {
+    modifier_map: fn(p: &Parser) UIError! {
         name: expect_word(p)
         mod: real_mod_index(name)
-        if mod < 0 && name.lower() != "none" -> return Err(syntax(line_at(p), "modifier_map needs a real modifier, found '{name}'"))
+        if mod < 0 && name.lower() != "none" {
+            return Err(syntax(line_at(p), "modifier_map needs a real modifier, found '{name}'"))
+        }
         expect(p, "{{")
         loop !is_punct(p, "}}") {
             if kind_at(p) == T_KEY {
@@ -1416,11 +1429,15 @@ priv internal: module {
         }
         upper_pair: keysym_is_lower(level_sym(group, 2)) && keysym_is_upper(level_sym(group, 3))
         if width <= 4 {
-            if alphabetic -> return if upper_pair -> "FOUR_LEVEL_ALPHABETIC" else -> "FOUR_LEVEL_SEMIALPHABETIC"
+            if alphabetic {
+                return if upper_pair -> "FOUR_LEVEL_ALPHABETIC" else -> "FOUR_LEVEL_SEMIALPHABETIC"
+            }
             if keypad -> return "FOUR_LEVEL_KEYPAD"
             return "FOUR_LEVEL"
         }
-        if alphabetic -> return if upper_pair -> "EIGHT_LEVEL_ALPHABETIC" else -> "EIGHT_LEVEL_SEMIALPHABETIC"
+        if alphabetic {
+            return if upper_pair -> "EIGHT_LEVEL_ALPHABETIC" else -> "EIGHT_LEVEL_SEMIALPHABETIC"
+        }
         "EIGHT_LEVEL"
     }
 
@@ -1452,15 +1469,13 @@ priv internal: module {
         mask
     }
 
-    compile: fn(&p: Parser) -> Keymap UIError! {
+    compile: fn(p: &Parser) -> Keymap UIError! {
         // Key modifier maps: a key name, or the first key typing the keysym.
         loop m in 0..<p.modmap.len() {
             entry: p.modmap[m].copy()
             if entry.mod < 0 -> next
             index := Int{-1}
-            if entry.key != "" {
-                index = key_slot(p, entry.key)
-            } else {
+            if entry.key != "" -> index = key_slot(p, entry.key) else {
                 index = key_for_sym(p, entry.sym)
             }
             if index >= 0 -> p.keys[index].modmap = p.keys[index].modmap.bit_or(1 << entry.mod)
@@ -1470,7 +1485,9 @@ priv internal: module {
         order := [Int]{}
         loop class in 0..<10 {
             loop i in 0..<p.interps.len() {
-                if (if p.interps[i].any -> 5 else -> 0) + match_rank(p.interps[i].match) == class -> order.push(i)
+                if (if p.interps[i].any -> 5 else -> 0) + match_rank(p.interps[i].match) == class {
+                    order.push(i)
+                }
             }
         }
         // Types, interprets and the virtual modifier map of every key.
@@ -1480,7 +1497,9 @@ priv internal: module {
                 name: if key.groups[g].explicit_type -> key.groups[g].type_name.copy() else -> automatic_type(key.groups[g])
                 found: type_named(p, name)
                 key.groups[g].type = if found >= 0 -> found else -> fallback_type(p)
-                loop key.groups[g].actions.len() < key.groups[g].levels.len() -> key.groups[g].actions.push(no_action())
+                loop key.groups[g].actions.len() < key.groups[g].levels.len() {
+                    key.groups[g].actions.push(no_action())
+                }
             }
             vmodmap := 0
             if !key.explicit_actions {
@@ -1493,7 +1512,9 @@ priv internal: module {
                             if (g == 0 && l == 0) || !rule.level_one {
                                 if rule.vmod >= 0 -> vmodmap = vmodmap.bit_or(1 << rule.vmod)
                             }
-                            if rule.action.kind != ACT_NONE -> key.groups[g].actions[l] = rule.action.copy()
+                            if rule.action.kind != ACT_NONE {
+                                key.groups[g].actions[l] = rule.action.copy()
+                            }
                             break
                         }
                     }
@@ -1541,23 +1562,43 @@ priv internal: module {
         loop k in 0..<p.keys.len() -> by_code[p.keys[k].code] = k
         counts := [Int]{}
         loop _ in 0..<32 -> counts.push(0)
-        sym_names := [Int: String]{}
+        sym_names := [Int:String]{}
         values: tables.XKB_KEYSYM_VALUES
         names: tables.XKB_KEYSYM_NAMES.split("\n").to_list()
         loop i in 0..<names.len() {
             value: be(values, i * 4, 4)
             if sym_names.get(value) == None -> _: sym_names.add(value, names[i].copy())
         }
-        Ok(Keymap{
-            keys: p.keys.copy(), by_code: by_code, types: p.types.copy(), group_count: group_count,
-            base_mods: 0, latched_mods: 0, locked_mods: 0, base_group: 0, latched_group: 0, locked_group: 0,
-            mods: 0, group: 0, set_mods: 0, clear_mods: 0, mod_counts: counts, filters: [Filter]{}, server: false, compose: -1,
-            layouts: p.layouts.copy(), vmod_names: p.vmods.copy(), vmod_masks: vmod_masks, sym_names: sym_names,
-        })
+        Ok(
+            Keymap{
+                keys: p.keys.copy(),
+                by_code: by_code,
+                types: p.types.copy(),
+                group_count: group_count,
+                base_mods: 0,
+                latched_mods: 0,
+                locked_mods: 0,
+                base_group: 0,
+                latched_group: 0,
+                locked_group: 0,
+                mods: 0,
+                group: 0,
+                set_mods: 0,
+                clear_mods: 0,
+                mod_counts: counts,
+                filters: [Filter]{},
+                server: false,
+                compose: -1,
+                layouts: p.layouts.copy(),
+                vmod_names: p.vmods.copy(),
+                vmod_masks: vmod_masks,
+                sym_names: sym_names,
+            },
+        )
     }
 
     // The ONE_LEVEL type, standing in for a type the keymap does not define.
-    fallback_type: fn(&p: Parser) -> Int {
+    fallback_type: fn(p: &Parser) -> Int {
         found: type_named(p, "ONE_LEVEL")
         if found >= 0 -> return found
         p.types.push(KeyType{name: "ONE_LEVEL", mods: 0, mask: 0, levels: 1, entries: [TypeEntry]{}})
@@ -1602,7 +1643,9 @@ priv internal: module {
         group: km.group
         if group >= 0 && group < count -> return group
         if key.out_of_range == GROUPS_CLAMP -> return if group < 0 -> 0 else -> count - 1
-        if key.out_of_range == GROUPS_REDIRECT -> return if key.redirect >= 0 && key.redirect < count -> key.redirect else -> 0
+        if key.out_of_range == GROUPS_REDIRECT {
+            return if key.redirect >= 0 && key.redirect < count -> key.redirect else -> 0
+        }
         wrap(group, count)
     }
 
@@ -1691,7 +1734,9 @@ priv internal: module {
         text := ""
         if syms.len() == 1 {
             scalar: keysym_scalar(one)
-            if scalar > 0 -> text = utf8(if scalar < 128 && transforms(km, index, CONTROL) -> to_control(scalar) else -> scalar)
+            if scalar > 0 {
+                text = utf8(if scalar < 128 && transforms(km, index, CONTROL) -> to_control(scalar) else -> scalar)
+            }
         } else {
             loop sym in syms {
                 scalar: keysym_scalar(sym)
@@ -1708,7 +1753,7 @@ priv internal: module {
     // xkb_compose_state_feed: a modifier keysym passes; a keysym continuing the
     // pending sequence composes ("" until it reaches a result); any other
     // keysym cancels a pending sequence ("") or types its own text.
-    press_text: fn(&km: Keymap, index: Int) -> String {
+    press_text: fn(km: &Keymap, index: Int) -> String {
         one: one_sym(km, index)
         if keysym_is_modifier(one) -> return key_text(km, index, one)
         pending: km.compose
@@ -1768,7 +1813,7 @@ priv internal: module {
         }
     }
 
-    refresh: fn(&km: Keymap) {
+    refresh: fn(km: &Keymap) {
         km.locked_group = wrap(km.locked_group, km.group_count)
         km.group = wrap(km.base_group + km.latched_group + km.locked_group, km.group_count)
         km.mods = km.base_mods.bit_or(km.latched_mods).bit_or(km.locked_mods)
@@ -1778,7 +1823,7 @@ priv internal: module {
 
     // xkb_state_update_key: run the held keys' filters, start the pressed key's
     // action, then recount the base modifiers.
-    update_key: fn(&km: Keymap, index: Int, down: Bool) {
+    update_key: fn(km: &Keymap, index: Int, down: Bool) {
         code: km.keys[index].code
         km.set_mods = 0
         km.clear_mods = 0
@@ -1816,11 +1861,9 @@ priv internal: module {
         refresh(km)
     }
 
-    start_filter: fn(&km: Keymap, f: Int) {
+    start_filter: fn(km: &Keymap, f: Int) {
         act: km.filters[f].action.copy()
-        if act.kind == ACT_SET_MODS {
-            km.set_mods = act.mask
-        } else if act.kind == ACT_LATCH_MODS {
+        if act.kind == ACT_SET_MODS -> km.set_mods = act.mask else if act.kind == ACT_LATCH_MODS {
             km.filters[f].latch = LATCH_KEY_DOWN
             km.set_mods = act.mask
         } else if act.kind == ACT_LOCK_MODS {
@@ -1843,12 +1886,16 @@ priv internal: module {
 
     // One held key's filter seeing key `index` go down or up; true swallows the
     // event (no new action starts).
-    filter_key: fn(&km: Keymap, f: Int, code: Int, index: Int, down: Bool) -> Bool {
+    filter_key: fn(km: &Keymap, f: Int, code: Int, index: Int, down: Bool) -> Bool {
         act: km.filters[f].action.copy()
         mine: km.filters[f].code == code
-        if act.kind == ACT_LATCH_MODS || act.kind == ACT_LATCH_GROUP -> return latch_filter(km, f, code, index, down)
+        if act.kind == ACT_LATCH_MODS || act.kind == ACT_LATCH_GROUP {
+            return latch_filter(km, f, code, index, down)
+        }
         if !mine {
-            if act.kind == ACT_SET_MODS || act.kind == ACT_SET_GROUP -> km.filters[f].action.clear_locks = false
+            if act.kind == ACT_SET_MODS || act.kind == ACT_SET_GROUP {
+                km.filters[f].action.clear_locks = false
+            }
             return false
         }
         if down {
@@ -1871,7 +1918,7 @@ priv internal: module {
         true
     }
 
-    latch_filter: fn(&km: Keymap, f: Int, code: Int, index: Int, down: Bool) -> Bool {
+    latch_filter: fn(km: &Keymap, f: Int, code: Int, index: Int, down: Bool) -> Bool {
         act: km.filters[f].action.copy()
         group_latch: act.kind == ACT_LATCH_GROUP
         latch := km.filters[f].latch
@@ -1892,9 +1939,7 @@ priv internal: module {
                 return true
             }
             if breaks_latch(next_action) {
-                if group_latch {
-                    km.latched_group -= act.group
-                } else {
+                if group_latch -> km.latched_group -= act.group else {
                     km.latched_mods = clear_bits(km.latched_mods, act.mask)
                 }
                 km.filters[f].active = false
@@ -1903,16 +1948,12 @@ priv internal: module {
         } else if !down && km.filters[f].code == code {
             if group_latch {
                 km.base_group = km.filters[f].saved
-                if latch == LATCH_NONE {
-                    km.filters[f].active = false
-                } else {
+                if latch == LATCH_NONE -> km.filters[f].active = false else {
                     latch = LATCH_PENDING
                     km.latched_group += if act.absolute -> act.group - km.base_group else -> act.group
                 }
             } else if latch == LATCH_NONE || (act.clear_locks && km.locked_mods.bit_and(act.mask) == act.mask) {
-                if latch == LATCH_PENDING {
-                    km.latched_mods = clear_bits(km.latched_mods, act.mask)
-                } else {
+                if latch == LATCH_PENDING -> km.latched_mods = clear_bits(km.latched_mods, act.mask) else {
                     km.clear_mods = act.mask
                 }
                 km.locked_mods = clear_bits(km.locked_mods, act.mask)
@@ -1922,9 +1963,7 @@ priv internal: module {
                 km.clear_mods = act.mask
                 km.latched_mods = km.latched_mods.bit_or(act.mask)
             }
-        } else if down && latch == LATCH_KEY_DOWN {
-            latch = LATCH_NONE
-        }
+        } else if down && latch == LATCH_KEY_DOWN { latch = LATCH_NONE }
         km.filters[f].latch = latch
         false
     }
@@ -2041,7 +2080,7 @@ priv internal: module {
 
     // Drives every key of `km` through presses, releases and hostile compositor
     // modifiers; none of it may stop the program.
-    exercise: fn(&km: Keymap) {
+    exercise: fn(km: &Keymap) {
         loop code in 0..<300 {
             _: km.press(code, true)
             _: km.repeats(code)
@@ -2142,7 +2181,7 @@ priv internal: module {
 
 #Test("a malformed keymap is a protocol error") {
     if keymap("xkb_keymap {{ xkb_symbols {{ key <AD01> {{ [ q, Q }}; }}; }};".bytes()) == {
-        .Ok(_) -> panic("a malformed keymap compiled")
+        .Ok(_) -> { panic("a malformed keymap compiled") }
         .Err(error) -> assert(error == .Protocol("xkb keymap line 1: expected ']', found '}}'"))
     }
 }

@@ -58,9 +58,13 @@ jet_cli_architecture_calls: fn(index: SemIndex) -> [JetCLIArchitectureCall] Neve
         from: caller ?? next
         reference := SemRef?{None}
         loop candidate in index.references {
-            if candidate.module_path != edge.module_path || candidate.target == None || candidate.span.start > edge.span.end || edge.span.start > candidate.span.end -> next
+            if candidate.module_path != edge.module_path || candidate.target == None || candidate.span.start > edge.span.end || edge.span.start > candidate.span.end {
+                next
+            }
             if reference == .Val(best) {
-                if candidate.span.end - candidate.span.start >= best.span.end - best.span.start -> next
+                if candidate.span.end - candidate.span.start >= best.span.end - best.span.start {
+                    next
+                }
             }
             reference = Val(candidate)
         }
@@ -113,7 +117,9 @@ jet_cli_architecture_row: fn(index: SemIndex, kind: String, subject: String, cal
         }
         loop effect_row in index.effects {
             if effect_row.function != call.caller_name -> next
-            if effect_row.inferred.len() > 0 -> boundaries.push("effects {call.caller_name}: {effect_row.inferred.join(", ")}")
+            if effect_row.inferred.len() > 0 {
+                boundaries.push("effects {call.caller_name}: {effect_row.inferred.join(", ")}")
+            }
             break
         }
     }
@@ -185,35 +191,43 @@ jet_cli_architecture_value: fn(inspection: JetCLIArchitectureInspection) -> JetC
     rows := [JetCLIStatusValue]{}
     loop row in inspection.rows {
         evidence: loop entry in row.evidence -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("role", jet_cli_status_text(entry.role)), jet_cli_status_field("module", jet_cli_status_text(entry.module_path)), jet_cli_status_field("span", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("start", jet_cli_status_int(entry.span.start)), jet_cli_status_field("end", jet_cli_status_int(entry.span.end))}))})
-        rows.push(jet_cli_status_object([JetCLIStatusField]{
-            jet_cli_status_field("kind", jet_cli_status_text(row.kind)),
-            jet_cli_status_field("subject", jet_cli_status_text(row.subject)),
-            jet_cli_status_field("scope", jet_cli_status_text(row.scope)),
-            jet_cli_status_field("source_evidence", jet_cli_status_array(evidence)),
-            jet_cli_status_field("affected_boundaries", jet_cli_status_texts(row.boundaries)),
-            jet_cli_status_field("behavioral_checks", jet_cli_status_array(jet_cli_architecture_behavior())),
-            jet_cli_status_field("uncertainty", jet_cli_status_texts(row.uncertainty)),
-            jet_cli_status_field("operator_action", jet_cli_status_text("review_or_reject")),
-        }))
+        rows.push(
+            jet_cli_status_object(
+                [JetCLIStatusField]{
+                    jet_cli_status_field("kind", jet_cli_status_text(row.kind)),
+                    jet_cli_status_field("subject", jet_cli_status_text(row.subject)),
+                    jet_cli_status_field("scope", jet_cli_status_text(row.scope)),
+                    jet_cli_status_field("source_evidence", jet_cli_status_array(evidence)),
+                    jet_cli_status_field("affected_boundaries", jet_cli_status_texts(row.boundaries)),
+                    jet_cli_status_field("behavioral_checks", jet_cli_status_array(jet_cli_architecture_behavior())),
+                    jet_cli_status_field("uncertainty", jet_cli_status_texts(row.uncertainty)),
+                    jet_cli_status_field("operator_action", jet_cli_status_text("review_or_reject")),
+                },
+            ),
+        )
     }
     fields := [JetCLIStatusField]{jet_cli_status_field("status", jet_cli_status_text(if inspection.reason == None -> "advisory" else -> "unavailable")), jet_cli_status_field("rows", jet_cli_status_array(rows)), jet_cli_status_field("operator_action", jet_cli_status_text("review_or_reject"))}
-    if inspection.reason == .Val(reason) -> fields.push(jet_cli_status_field("reason", jet_cli_status_text(reason)))
+    if inspection.reason == .Val(reason) {
+        fields.push(jet_cli_status_field("reason", jet_cli_status_text(reason)))
+    }
     jet_cli_status_object(fields)
 }
 
 jet_cli_architecture_text: fn(inspection: JetCLIArchitectureInspection) -> String Never! {
     output := "architecture advice (advisory, operator may reject):\n"
-    if inspection.reason == .Val(reason) {
-        output = "{output}  status: unavailable — {reason}\n"
-    } else if inspection.rows.len() == 0 {
+    if inspection.reason == .Val(reason) -> output = "{output}  status: unavailable — {reason}\n" else if inspection.rows.len() == 0 {
         output = "{output}  no checked agreement candidate; local complexity is not proof of a cross-boundary invariant\n"
     } else {
         loop row in inspection.rows {
             output = "{output}  {row.kind} `{row.subject}` [{row.scope}]\n"
-            loop evidence in row.evidence -> output = "{output}    evidence: {evidence.role} {evidence.module_path}:{evidence.span.start}..{evidence.span.end}\n"
+            loop evidence in row.evidence {
+                output = "{output}    evidence: {evidence.role} {evidence.module_path}:{evidence.span.start}..{evidence.span.end}\n"
+            }
             loop boundary in row.boundaries -> output = "{output}    boundary: {boundary}\n"
             output = "{output}    check: checked_reference_resolution=passed (the compiler semantic index resolved the definitions and call sites)\n    check: consumer_behavior=not_run (this read-only inspection does not execute user code)\n    check: cross_mode_agreement=unknown (no runtime or change-task receipt was supplied)\n"
-            loop uncertainty in row.uncertainty -> output = "{output}    uncertainty: {uncertainty}\n"
+            loop uncertainty in row.uncertainty {
+                output = "{output}    uncertainty: {uncertainty}\n"
+            }
         }
     }
     "{output}  measurement: benchmark/change-task not measured; no advantage claim\n"

@@ -34,16 +34,27 @@
 // frees a node a task still sees. `context.get` (ir_context_get) copies the
 // value of the first node with its key (jet_ctx_value_find).
 CONTEXT_TCB_SLOT: I64{48}
+
 CONTEXT_TCB_ROOT: I64{456}
+
 CONTEXT_RECORD_BYTES: I64{48}
+
 CONTEXT_DEADLINE_PRESENT: I64{0}
+
 CONTEXT_DEADLINE_MS: I64{8}
+
 CONTEXT_EFFECT_SCOPE: I64{16}
+
 CONTEXT_ALLOCATOR: I64{24}
+
 CONTEXT_VALUES: I64{32}
+
 CONTEXT_SCRATCH: I64{40}
+
 CONTEXT_NODE_RELEASE: I64{16}
+
 CONTEXT_NODE_KEY: I64{24}
+
 CONTEXT_NODE_NEXT: I64{32}
 
 context_current: fn() -> I64 { sync_load(wrapping(thread_base() + CONTEXT_TCB_SLOT)) }
@@ -54,7 +65,9 @@ context_current: fn() -> I64 { sync_load(wrapping(thread_base() + CONTEXT_TCB_SL
 context_tcb_bytes: fn() -> I64 { ALLOC_WINDOW_ROWS + wrapping(ALLOC_WINDOW_CLASSES * I64{8}) }
 
 // A zeroed root record is the empty root context.
-context_tcb_install_root: fn(tcb: I64) { sync_store(wrapping(tcb + CONTEXT_TCB_SLOT), tcb + CONTEXT_TCB_ROOT) }
+context_tcb_install_root: fn(tcb: I64) {
+    sync_store(wrapping(tcb + CONTEXT_TCB_SLOT), tcb + CONTEXT_TCB_ROOT)
+}
 
 // Drops the scratch arena of a TCB's root record: a thread's detach and a
 // fiber's teardown (Thread.jet, Fiber.jet).
@@ -65,7 +78,7 @@ context_tcb_release: fn(tcb: I64) { context_scratch_drop(wrapping(tcb + CONTEXT_
 context_scratch_arena: fn(record: I64) -> I64 {
     slot: wrapping(record + CONTEXT_SCRATCH)
     kept: sync_load(slot)
-    if (kept != I64{0}) -> return kept
+    if (kept != I64{0}) { return kept }
     arena: jet_arena_new()
     sync_store(slot, arena)
     arena
@@ -76,7 +89,9 @@ context_scratch_arena: fn(record: I64) -> I64 {
 context_scratch_drop: fn(record: I64) {
     slot: wrapping(record + CONTEXT_SCRATCH)
     arena: sync_load(slot)
-    if (arena == I64{0}) -> return
+    if (arena == I64{0}) {
+        return
+    }
     sync_store(slot, I64{0})
     jet_rt_handle_drop_jet_arena(arena)
 }
@@ -108,15 +123,17 @@ context_scratch_drop: fn(record: I64) {
 CONTEXT_BLOCK_HEADER: I64{16}
 
 #Export(c) jet_ctx_allocator_take: fn(size: I64, align: I64) -> I64 {
-    if (size < I64{0} || align <= I64{0} || align.bit_and(wrapping(align - I64{1})) != I64{0}) -> return I64{0}
+    if (size < I64{0} || align <= I64{0} || align.bit_and(wrapping(align - I64{1})) != I64{0}) {
+        return I64{0}
+    }
     carrier: context_user_carrier()
-    if (carrier != I64{0}) -> return context_user_take(carrier, size, align)
+    if (carrier != I64{0}) { return context_user_take(carrier, size, align) }
     alignment: if (align < I64{8}) -> I64{8} else -> align
     slack: wrapping(CONTEXT_BLOCK_HEADER + wrapping(alignment - I64{8}))
-    if (size > wrapping(I64{9223372036854775807} - slack)) -> return I64{0}
+    if (size > wrapping(I64{9223372036854775807} - slack)) { return I64{0} }
     total: wrapping(size + slack)
     value: jet_rt_alloc_value_try(total, I64{8})
-    if (value == I64{0}) -> return I64{0}
+    if (value == I64{0}) { return I64{0} }
     address: wrapping(wrapping(value + CONTEXT_BLOCK_HEADER) + wrapping(alignment - I64{1})).bit_and(wrapping(I64{0} - alignment))
     sync_store(wrapping(address - I64{16}), total)
     sync_store(wrapping(address - I64{8}), value)
@@ -124,7 +141,9 @@ CONTEXT_BLOCK_HEADER: I64{16}
 }
 
 #Export(c) jet_ctx_allocator_give: fn(address: I64, size: I64) {
-    if (address == I64{0}) -> return
+    if (address == I64{0}) {
+        return
+    }
     carrier: context_user_owner(address)
     if (carrier != I64{0}) {
         _: alloc_user_call(carrier, ALLOC_USER_GIVE, size, address)
@@ -134,16 +153,16 @@ CONTEXT_BLOCK_HEADER: I64{16}
 }
 
 #Export(c) jet_ctx_allocator_room: fn(address: I64) -> I64 {
-    if (address == I64{0} || context_user_owner(address) != I64{0}) -> return I64{0}
+    if (address == I64{0} || context_user_owner(address) != I64{0}) { return I64{0} }
     wrapping(wrapping(sync_load(wrapping(address - I64{8})) + sync_load(wrapping(address - I64{16}))) - address)
 }
 
 // The current record's carrier when a user allocator's handler serves it,
 // else 0 (an arena's carrier has no handler; Alloc.jet alloc_user_carrier_new).
 context_user_carrier: fn() -> I64 {
-    if (alloc_class_limit == I64{0}) -> return I64{0}
+    if (alloc_class_limit == I64{0}) { return I64{0} }
     slot: alloc_user_slot()
-    if (slot == I64{0}) -> return I64{0}
+    if (slot == I64{0}) { return I64{0} }
     carrier: sync_load(slot)
     if (carrier == I64{0} || sync_load(wrapping(carrier + I64{8})) == I64{0}) -> I64{0} else -> carrier
 }
@@ -154,9 +173,9 @@ context_user_carrier: fn() -> I64 {
 // back and counts as a refusal, and the region's record then names
 // `carrier`, so context_user_owner finds the allocator again at the give.
 context_user_take: fn(carrier: I64, size: I64, align: I64) -> I64 {
-    if (jet_rt_session_propagate() != I64{0}) -> return I64{0}
+    if (jet_rt_session_propagate() != I64{0}) { return I64{0} }
     block: alloc_user_call(carrier, ALLOC_USER_TAKE, size, align)
-    if (block == I64{0}) -> return I64{0}
+    if (block == I64{0}) { return I64{0} }
     last: wrapping(block + (if (size == I64{0}) -> I64{0} else -> wrapping(size - I64{1})))
     record: if (block.bit_and(wrapping(align - I64{1})) != I64{0}) -> I64{0} else -> alloc_page_region(block)
     if (record == I64{0} || alloc_page_region(last) != record) {
@@ -204,7 +223,9 @@ context_release: fn(record: I64) {
 context_values_release: fn(node: I64) {
     at := node
     loop at != (I64{0}) {
-        if !jet_rt_native_closure_unref(at) -> return
+        if !jet_rt_native_closure_unref(at) {
+            return
+        }
         next: sync_load(wrapping(at + CONTEXT_NODE_NEXT))
         coll_call1_unit(sync_load(wrapping(at + CONTEXT_NODE_RELEASE)), at)
         at = next
@@ -226,7 +247,9 @@ context_values_release: fn(node: I64) {
     left := count
     loop left > (I64{0}) {
         node: sync_load(head)
-        if node == (I64{0}) -> return
+        if node == (I64{0}) {
+            return
+        }
         next: sync_load(wrapping(node + CONTEXT_NODE_NEXT))
         if next != (I64{0}) -> jet_rt_native_closure_retain(next)
         sync_store(head, next)
@@ -286,7 +309,9 @@ context_values_release: fn(node: I64) {
     sync_store(slot, sync_load(save))
     alloc_cache_sync(thread_base())
     carrier: sync_load(wrapping(save + I64{8}))
-    if (carrier == I64{0}) -> return
+    if (carrier == I64{0}) {
+        return
+    }
     alloc_arena_rewind(carrier)
     alloc_user_drop(carrier)
 }
@@ -330,7 +355,9 @@ rt_context_on_stop_address: fn() -> I64 {
 }
 
 #Export(c) jet_ctx_on_stop_arm: fn() {
-    if (context_on_stop_rail_code != I64{0}) -> return
+    if (context_on_stop_rail_code != I64{0}) {
+        return
+    }
     #Unsafe("an idempotent install: every writer stores the same code address") {
         context_on_stop_rail_code = rt_context_on_stop_address()
     }
@@ -354,11 +381,17 @@ rt_context_on_stop_address: fn() -> I64 {
 // returns. A thread without a TCB or a record runs none.
 context_on_stop_run: fn(kind: I64, a: I64, b: I64, c: I64, d: I64) {
     base: thread_base()
-    if (base == I64{0} || base == thread_detached_base()) -> return
+    if (base == I64{0} || base == thread_detached_base()) {
+        return
+    }
     record: sync_load(wrapping(base + CONTEXT_TCB_SLOT))
-    if (record == I64{0}) -> return
+    if (record == I64{0}) {
+        return
+    }
     node: jet_ctx_value_find(CONTEXT_ON_STOP_KEY)
-    if (node == I64{0}) -> return
+    if (node == I64{0}) {
+        return
+    }
     head: wrapping(record + CONTEXT_VALUES)
     saved: sync_load(head)
     sync_store(head, sync_load(wrapping(node + CONTEXT_NODE_NEXT)))
@@ -376,11 +409,11 @@ context_on_stop_run: fn(kind: I64, a: I64, b: I64, c: I64, d: I64) {
 // The StopKind index of trap_stop kind `kind`; a require stop's (4) own kind
 // `a` is 0 assert, 1 assert_eq, 2 panic or 3 a contract clause.
 context_on_stop_kind: fn(kind: I64, a: I64) -> I64 {
-    if (kind == I64{2}) -> return I64{4}
-    if (kind == I64{3}) -> return I64{3}
-    if (kind == I64{5}) -> return I64{5}
-    if (kind != I64{4} || a == I64{2}) -> return I64{0}
-    if (a == I64{3}) -> return I64{2}
+    if (kind == I64{2}) { return I64{4} }
+    if (kind == I64{3}) { return I64{3} }
+    if (kind == I64{5}) { return I64{5} }
+    if (kind != I64{4} || a == I64{2}) { return I64{0} }
+    if (a == I64{3}) { return I64{2} }
     I64{1}
 }
 
@@ -390,11 +423,11 @@ context_on_stop_kind: fn(kind: I64, a: I64) -> I64 {
 // require stop's kind, message and an assert_eq's two sides; 5 a `#Todo`'s
 // file, line and expected type.
 context_on_stop_message: fn(kind: I64, a: I64, b: I64, c: I64, d: I64) -> I64 {
-    if (kind == I64{2}) -> return trap_shift_reason(d, a, b, c)
-    if (kind == I64{3}) -> return trap_list_bounds_reason(a, b)
+    if (kind == I64{2}) { return trap_shift_reason(d, a, b, c) }
+    if (kind == I64{3}) { return trap_list_bounds_reason(a, b) }
     if (kind == I64{4}) {
         if (a != I64{1}) {
-            if (b == I64{0}) -> return rt_text_copy(I64{0}, I64{0})
+            if (b == I64{0}) { return rt_text_copy(I64{0}, I64{0}) }
             return jet_rt_string_clone(b)
         }
         message: jet_rt_string_builder_new()

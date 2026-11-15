@@ -41,14 +41,16 @@ run: fn() {
     print(r.read_u16_le() ?? 99)
     print(header(r) ?? -1)
     if header(r) == {
-        .Ok(value) -> print("unexpected {value}")
+        .Ok(value) -> { print("unexpected {value}") }
         .Err(error) -> print("short header: {error.message}")
     }
     print(r.read_u8() ?? 200)
-    print(r.read_u8() ?? {
-        print("ambient: {err}")
-        201
-    })
+    print(
+        r.read_u8() ?? {
+            print("ambient: {err}")
+            201
+        },
+    )
 
     print(sum_records([U8]{5, 0, 0, 0, 2, 0x61, 0x62, 9, 0, 0, 0, 1, 0x63}))
     print(sum_records([U8]{5, 0, 0, 0}))

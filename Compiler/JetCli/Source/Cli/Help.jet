@@ -11,6 +11,8 @@ jet_cli_help: fn(jet_argv: [String], args: [String], bespoke: String?, color: Bo
         if !jet_cli_form_ported(args[1]) -> return jet_cli_not_ported(args[1], color)
         return jet_cli_renderable(bespoke ?? jet_cli_command_help(args[1]), json)
     }
-    if jet_argv.contains("--all") -> return jet_cli_renderable("{jet_cli_usage_page(order, version)}{jet_cli_not_built_page()}", json)
+    if jet_argv.contains("--all") {
+        return jet_cli_renderable("{jet_cli_usage_page(order, version)}{jet_cli_not_built_page()}", json)
+    }
     jet_cli_renderable(jet_cli_usage_page(order, version), json)
 }

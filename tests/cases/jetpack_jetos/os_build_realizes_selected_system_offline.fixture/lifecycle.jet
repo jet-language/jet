@@ -6,7 +6,16 @@ use {
     json: core.encoding.json
     core.encoding.Dyn
 }
-RootProof: struct { kind: String, id: String, producer: String, witness: String, targets: [String], phase: String }
+
+RootProof: struct {
+    kind: String
+    id: String
+    producer: String
+    witness: String
+    targets: [String]
+    phase: String
+}
+
 digit: fn(byte: U8) -> Int {
     n: Int{byte}
     if n >= 48 && n <= 57 -> return n - 48
@@ -14,17 +23,24 @@ digit: fn(byte: U8) -> Int {
     if n >= 65 && n <= 70 -> return n - 55
     panic("invalid lifecycle hex")
 }
+
 decode: fn(value: String) -> String {
     assert(value.bytes().len() % 2 == 0, "invalid lifecycle hex")
     bytes: value.bytes()
     out := [U8]{}
-    loop i in 0..<(bytes.len() /% 2) -> out.push(U8{digit(bytes[i * 2]) * 16 + digit(bytes[i * 2 + 1])})
+    loop i in 0..<(bytes.len() /% 2) {
+        out.push(U8{digit(bytes[i * 2]) * 16 + digit(bytes[i * 2 + 1])})
+    }
     String.from_bytes(out) ?? panic("lifecycle UTF-8")
 }
+
 root_index: fn(roots: [RootProof], id: String) -> Int {
-    loop i in 0..<roots.len() { if roots[i].id == id -> return i }
+    loop i in 0..<roots.len() {
+        if roots[i].id == id -> return i
+    }
     -1
 }
+
 run: fn() {
     args: process.args()
     assert(args.len() == 1)
@@ -68,7 +84,7 @@ run: fn() {
         root: roots[root_index(roots, id)]
         targets := [Dyn]{}
         loop target in root.targets -> targets.push(Dyn.Text(target))
-        observed.push(Dyn.Object([String: Dyn]{"kind": Dyn.Text(root.kind), "id": Dyn.Text(root.id), "producer": Dyn.Text(root.producer), "witness": Dyn.Text(root.witness), "targets": Dyn.Array(targets), "phase": Dyn.Text(root.phase)}))
+        observed.push(Dyn.Object([String:Dyn]{"kind": Dyn.Text(root.kind), "id": Dyn.Text(root.id), "producer": Dyn.Text(root.producer), "witness": Dyn.Text(root.witness), "targets": Dyn.Array(targets), "phase": Dyn.Text(root.phase)}))
     }
     print(json.to_string(Dyn.Array(observed)))
 }

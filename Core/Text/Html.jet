@@ -18,12 +18,11 @@ escape: fn(text: String) -> String Never! { escape_quote(text, true) }
 escape_quote: fn(text: String, quote: Bool) -> String Never! {
     out := ""
     loop ch in unicode.scalars(text) {
-        if ch == "&" -> out = "{out}&amp;"
-        else if ch == "<" -> out = "{out}&lt;"
-        else if ch == ">" -> out = "{out}&gt;"
-        else if quote && ch == "\"" -> out = "{out}&quot;"
-        else if quote && ch == "'" -> out = "{out}&#x27;"
-        else -> out = "{out}{ch}"
+        if ch == "&" -> out = "{out}&amp;" else if ch == "<" -> out = "{out}&lt;" else if ch == ">" {
+            out = "{out}&gt;"
+        } else if quote && ch == "\"" { out = "{out}&quot;" } else if quote && ch == "'" {
+            out = "{out}&#x27;"
+        } else { out = "{out}{ch}" }
     }
     out
 }
@@ -35,13 +34,13 @@ unescape: fn(text: String) -> String Never! {
     loop i < raw.len() {
         if raw[i] != (U8{38}) {
             out.push(raw[i])
-            i = i + 1
+            i += 1
             next
         }
         semi := i + 1
         loop semi < raw.len() && semi - i <= 32 {
             if raw[semi] == (U8{59}) -> break
-            semi = semi + 1
+            semi += 1
         }
         if semi < raw.len() && raw[semi] == (U8{59}) {
             name: String.from_bytes(slice_b(raw, i + 1, semi)) ?? ""
@@ -54,7 +53,7 @@ unescape: fn(text: String) -> String Never! {
             }
         }
         out.push(raw[i])
-        i = i + 1
+        i += 1
     }
     String.from_bytes(out) ?? text
 }
@@ -66,14 +65,14 @@ strip_tags: fn(text: String) -> String Never! {
     loop i < raw.len() {
         if raw[i] != (U8{60}) {
             out.push(raw[i])
-            i = i + 1
+            i += 1
             next
         }
         close := i + 1
-        loop close < raw.len() && raw[close] != (U8{62}) -> close = close + 1
+        loop close < raw.len() && raw[close] != (U8{62}) -> close += 1
         if close >= raw.len() {
             out.push(raw[i])
-            i = i + 1
+            i += 1
             next
         }
         i = close + 1
@@ -82,7 +81,9 @@ strip_tags: fn(text: String) -> String Never! {
 }
 
 unescape_and_strip: fn(text: String) -> String Never! { unescape(strip_tags(text)) }
+
 attr_escape: fn(text: String) -> String Never! { escape_quote(text, true) }
+
 text_escape: fn(text: String) -> String Never! { escape_quote(text, false) }
 
 // Checked HTML markup. `HTML{"…{value}…"}` escapes each hole unless the hole
@@ -91,17 +92,21 @@ text_escape: fn(text: String) -> String Never! { escape_quote(text, false) }
 // `HTML.raw(text)` is the audited escape hatch.
 HTML: struct {
     markup: String
+
     impl Display {
         display: fn(self) -> String { self.markup.copy() }
     }
+
     impl Debug {
         debug: fn(&&self) -> String { self.markup }
     }
+
     impl Equatable {
         equal: fn(self, rhs: HTML) -> Bool { self.markup == rhs.markup }
     }
 
     text: fn(self) -> String Never! { self.markup.copy() }
+
     raw: fn(text: String) -> HTML Never! { HTML{markup: text.copy()} }
 
     // A checked `HTML{…}` literal: each hole becomes markup, an HTML value as it
@@ -130,9 +135,7 @@ HTML: struct {
                 } else if state == HTML_AFTER_EQUALS || state == HTML_UNQUOTED_VALUE {
                     hole = html_value_hole(hole, true)
                     if hole != "" -> state = HTML_UNQUOTED_VALUE
-                } else {
-                    state = html_state_after(state, hole)
-                }
+                } else { state = html_state_after(state, hole) }
                 markup = "{markup}{hole}{parts[index + 1]}"
                 state = html_state_after(state, parts[index + 1])
             }
@@ -145,10 +148,15 @@ HTML: struct {
 // list, just after an attribute's `=`, or inside an unquoted, "…" or '…'
 // attribute value.
 HTML_TEXT: 0
+
 HTML_TAG: 1
+
 HTML_AFTER_EQUALS: 2
+
 HTML_UNQUOTED_VALUE: 3
+
 HTML_DOUBLE_VALUE: 4
+
 HTML_SINGLE_VALUE: 5
 
 // The markup state after `text`, read from `state`.
@@ -159,19 +167,16 @@ priv html_state_after: fn(state: Int, text: String) -> Int Never! {
         if at == HTML_TEXT {
             if b == 60 -> at = HTML_TAG
         } else if at == HTML_TAG {
-            if b == 62 -> at = HTML_TEXT
-            else if b == 61 -> at = HTML_AFTER_EQUALS
+            if b == 62 -> at = HTML_TEXT else if b == 61 -> at = HTML_AFTER_EQUALS
         } else if at == HTML_AFTER_EQUALS {
-            if b == 34 -> at = HTML_DOUBLE_VALUE
-            else if b == 39 -> at = HTML_SINGLE_VALUE
-            else if b == 62 -> at = HTML_TEXT
-            else if !html_space(b) -> at = HTML_UNQUOTED_VALUE
+            if b == 34 -> at = HTML_DOUBLE_VALUE else if b == 39 -> at = HTML_SINGLE_VALUE else if b == 62 {
+                at = HTML_TEXT
+            } else if !html_space(b) { at = HTML_UNQUOTED_VALUE }
         } else if at == HTML_UNQUOTED_VALUE {
-            if b == 62 -> at = HTML_TEXT
-            else if html_space(b) -> at = HTML_TAG
+            if b == 62 -> at = HTML_TEXT else if html_space(b) -> at = HTML_TAG
         } else if at == HTML_DOUBLE_VALUE {
             if b == 34 -> at = HTML_TAG
-        } else if b == 39 -> at = HTML_TAG
+        } else if b == 39 { at = HTML_TAG }
     }
     at
 }
@@ -187,14 +192,12 @@ priv html_value_hole: fn(hole: String, unquoted: Bool) -> String Never! {
     loop byte in hole.bytes() {
         b: Int{byte}
         entity := ""
-        if b == 34 -> entity = "&quot;"
-        else if b == 39 -> entity = "&#x27;"
-        else if b == 60 -> entity = "&lt;"
-        else if b == 62 -> entity = "&gt;"
-        else if unquoted && (html_space(b) || b == 61 || b == 96) -> entity = "&#{b};"
-        if entity == "" {
-            out.push(byte)
-        } else {
+        if b == 34 -> entity = "&quot;" else if b == 39 -> entity = "&#x27;" else if b == 60 {
+            entity = "&lt;"
+        } else if b == 62 { entity = "&gt;" } else if unquoted && (html_space(b) || b == 61 || b == 96) {
+            entity = "&#{b};"
+        }
+        if entity == "" -> out.push(byte) else {
             loop e in entity.bytes() -> out.push(e)
         }
     }
@@ -228,9 +231,8 @@ entity: fn(name: String) -> String {
         digit := if base == 16 -> hex_val(raw[i]) else -> decimal_val(raw[i])
         d: digit ?? return ""
         // Saturate outside the scalar range, but still validate every digit.
-        if n > (1114111 - d) /% base -> n = 1114112
-        else -> n = n * base + d
-        i = i + 1
+        if n > (1114111 - d) /% base -> n = 1114112 else -> n = n * base + d
+        i += 1
     }
     scalar(n)
 }
@@ -238,8 +240,7 @@ entity: fn(name: String) -> String {
 scalar: fn(n: Int) -> String {
     if n == 0 || n > 1114111 || (n >= 55296 && n <= 57343) -> return "�"
     out := [U8]{}
-    if n < 128 -> out.push(U8{n})
-    else if n < 2048 {
+    if n < 128 -> out.push(U8{n}) else if n < 2048 {
         out.push(U8{(192).bit_or((n >> 6))})
         out.push(U8{(128).bit_or(((n).bit_and(63)))})
     } else if n < 65536 {
@@ -275,6 +276,6 @@ slice_b: fn(raw: [U8], start: Int, end: Int) -> [U8] {
     loop {
         if i >= end || i < 0 || i >= raw.len() -> return out
         out.push(raw[i])
-        i = i + 1
+        i += 1
     }
 }

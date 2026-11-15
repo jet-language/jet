@@ -36,12 +36,16 @@ compiler_transfer_rows: fn<T>(to: &[T], from: &[T]) Never! {
 // a borrowed indexed place and no owning payload is copied.
 compiler_apply_order: fn<T>(rows: &[T], order: [Int]) Never! {
     count: rows.len()
-    if count < 2 -> return
+    if count < 2 {
+        return
+    }
     changed := false
     loop index in 0..<count {
         if order[index] != index -> changed = true
     }
-    if !changed -> return
+    if !changed {
+        return
+    }
     destinations := [Int]{}
     slots := [T?]{}
     loop index in 0..<count {
@@ -106,10 +110,28 @@ SemaCollectionOperation: enum {
 
 // Receiver families a row applies to. `List` covers fixed lists and `Iter`
 // covers view iterators; `Sequence` is the shared list-and-iterator surface.
-CollectionReceivers: enum { List Iter View Sequence Map Set Rank Bits Tally Cache Queue PriorityQueue }
+CollectionReceivers: enum {
+    List
+    Iter
+    View
+    Sequence
+    Map
+    Set
+    Rank
+    Bits
+    Tally
+    Cache
+    Queue
+    PriorityQueue
+}
 
 // Receiver ownership. `Sequence` borrows a list or view and consumes an iterator.
-CollectionAccess: enum { Read Write Move Sequence }
+CollectionAccess: enum {
+    Read
+    Write
+    Move
+    Sequence
+}
 
 // Positional argument shapes. The callback shapes name their parameter and
 // return types; `Seed` is checked from the written expression.
@@ -190,9 +212,10 @@ CollectionResult: enum {
     WriteViewPair
     WriteViewList
     DisjointUnit
-    // `bits()`: the U64 word of a Set stored as bits.
     Bits
 }
+
+// `bits()`: the U64 word of a Set stored as bits.
 
 // The checked operation a row produces. Fixed operations carry their builtin
 // or closure op; the others select one from the checked callback and element
@@ -261,7 +284,11 @@ CollectionLaw: enum {
 // Current: checked and lowered on every engine. SourceOnly: checked by the
 // self-hosted compiler before every engine carries it. Proposed: ratified but
 // not accepted by the checker yet.
-CollectionStatus: enum { Current SourceOnly Proposed }
+CollectionStatus: enum {
+    Current
+    SourceOnly
+    Proposed
+}
 
 CollectionLawFacts: struct {
     law: CollectionLaw
@@ -323,8 +350,9 @@ COLLECTION_LAWS: #run { [CollectionLawFacts]{
     {law: CollectionLaw.SortBy, timing: "eager, in place", result: "Unit, or a Result when the key callback can fail", callbacks: "key or comparator calls in the sort's order; count and order are unspecified", stop: "not applicable", failure: "the first callback Err is the result", buffering: "the list and its keys"},
     {law: CollectionLaw.Search, timing: "eager", result: "an optional index", callbacks: "once per probed item, in binary-search order", stop: "stops at the match", failure: "absence is None", buffering: "none"},
     {law: CollectionLaw.MergeEntries, timing: "eager", result: "a fresh map", callbacks: "once per key present in both maps", stop: "every entry is read", failure: "none", buffering: "the output map"},
-    {law: CollectionLaw.Pull, timing: "one item per call", result: "an Option of the next item", callbacks: "none", stop: "exactly the returned item is consumed; the remainder stays in the source", failure: "end is None", buffering: "none"}
+    {law: CollectionLaw.Pull, timing: "one item per call", result: "an Option of the next item", callbacks: "none", stop: "exactly the returned item is consumed; the remainder stays in the source", failure: "end is None", buffering: "none"},
 } }
+
 // END COLLECTION LAWS
 
 // BEGIN COLLECTION OPERATIONS
@@ -581,8 +609,9 @@ COLLECTION_OPERATIONS: #run { [CollectionOperationRow]{
     {receivers: CollectionReceivers.Bits, name: "len", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Int, op: CollectionOp.Builtin{op: TBuiltinOp.LenList}, law: CollectionLaw.Measure, empty: "0", status: CollectionStatus.Current},
     {receivers: CollectionReceivers.Bits, name: "count", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Int, op: CollectionOp.Builtin{op: TBuiltinOp.BitSetCount}, law: CollectionLaw.Measure, empty: "0", status: CollectionStatus.Current},
     {receivers: CollectionReceivers.Bits, name: "is_empty", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, law: CollectionLaw.Measure, empty: "true", status: CollectionStatus.Current},
-    {receivers: CollectionReceivers.Bits, name: "to_list", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.ElementList, op: CollectionOp.Builtin{op: TBuiltinOp.BitSetToList}, law: CollectionLaw.Build, empty: "empty list", status: CollectionStatus.Current}
+    {receivers: CollectionReceivers.Bits, name: "to_list", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.ElementList, op: CollectionOp.Builtin{op: TBuiltinOp.BitSetToList}, law: CollectionLaw.Build, empty: "empty list", status: CollectionStatus.Current},
 } }
+
 // END COLLECTION OPERATIONS
 
 sema_collection_kind: fn(ty: Type) -> SemaCollectionKind? {
@@ -595,17 +624,35 @@ sema_collection_kind: fn(ty: Type) -> SemaCollectionKind? {
         // copy: `key` and `value` are payloads of read parameter `ty`, which keeps the originals; the new SemaCollectionKind.Map's fields own `key` and `value`
         .Map(key, _, value) -> Val(SemaCollectionKind.Map{key: key.copy(), value: value.copy()})
         .Apply(name, args) -> {
-            if name == "Iter" && args.len() == 1 -> return Val(SemaCollectionKind.Iter{element: args[0]})
-            if name == "ViewIter" && args.len() == 1 -> return Val(SemaCollectionKind.ViewIter{element: args[0]})
+            if name == "Iter" && args.len() == 1 {
+                return Val(SemaCollectionKind.Iter{element: args[0]})
+            }
+            if name == "ViewIter" && args.len() == 1 {
+                return Val(SemaCollectionKind.ViewIter{element: args[0]})
+            }
             // A write window reads like the view it is; its writes go through
             // its elements.
-            if (name == "View" || name == "ViewMut") && args.len() == 1 -> return Val(SemaCollectionKind.View{element: args[0]})
-            if name == "Set" && args.len() == 1 -> return Val(SemaCollectionKind.Set{element: args[0]})
-            if name == "Rank" && args.len() == 1 -> return Val(SemaCollectionKind.Rank{element: args[0]})
-            if name == "Tally" && args.len() == 1 -> return Val(SemaCollectionKind.Tally{element: args[0]})
-            if name == "Queue" && args.len() == 1 -> return Val(SemaCollectionKind.Queue{element: args[0]})
-            if name == "PriorityQueue" && args.len() == 1 -> return Val(SemaCollectionKind.PriorityQueue{element: args[0]})
-            if name == "Cache" && args.len() == 2 -> return Val(SemaCollectionKind.Cache{key: args[0], value: args[1]})
+            if (name == "View" || name == "ViewMut") && args.len() == 1 {
+                return Val(SemaCollectionKind.View{element: args[0]})
+            }
+            if name == "Set" && args.len() == 1 {
+                return Val(SemaCollectionKind.Set{element: args[0]})
+            }
+            if name == "Rank" && args.len() == 1 {
+                return Val(SemaCollectionKind.Rank{element: args[0]})
+            }
+            if name == "Tally" && args.len() == 1 {
+                return Val(SemaCollectionKind.Tally{element: args[0]})
+            }
+            if name == "Queue" && args.len() == 1 {
+                return Val(SemaCollectionKind.Queue{element: args[0]})
+            }
+            if name == "PriorityQueue" && args.len() == 1 {
+                return Val(SemaCollectionKind.PriorityQueue{element: args[0]})
+            }
+            if name == "Cache" && args.len() == 2 {
+                return Val(SemaCollectionKind.Cache{key: args[0], value: args[1]})
+            }
             None
         }
         .Named(name) -> {
@@ -698,9 +745,8 @@ collection_row_takes_argument: fn(row: CollectionOperationRow, index: Int) -> Bo
 // only home. Source-owned Core declarations are admitted by registration, not
 // by weakening this predicate for users or for unrelated Core modules.
 SEMA_RESERVED_TYPES: [String]{"HashMap", "BTreeMap", "Map", "Char", "Bits", "Bytes", "Set", "Rank", "PriorityQueue", "Cache", "Iter", "ViewIter", "MemoStats", "RemoveBy", "Ordering", "Range", "SharedGuard", "Shared.Weak", "Condition", "Tally", "Queue", "Decimal", "Duration", "DurationUnit", "RangeError", "ExpiringValue", "Authority", "Validate", "BuildContext", "BuildPlan", "BuildAction", "BuildTarget", "BuildToolchain", "BuildProbe", "BuildSigningIdentity", "BuildFile", "BuildError", "ProgramInfo", "Cell", "CellReadGuard", "CellEditGuard", "Solver", "Unit"}
-sema_reserved_type_name: fn(name: String) -> Bool Never! {
-    SEMA_RESERVED_TYPES.contains(name)
-}
+
+sema_reserved_type_name: fn(name: String) -> Bool Never! { SEMA_RESERVED_TYPES.contains(name) }
 
 sema_collection_receiver_element: fn(receiver: Type) -> Type? {
     kind: sema_collection_kind(receiver) ?? return None
@@ -711,7 +757,6 @@ sema_collection_is_list: fn(receiver: Type) -> Bool Never! {
     kind: sema_collection_kind(receiver) ?? return false
     sema_collection_family(kind) == CollectionReceivers.List
 }
-
 
 sema_collection_is_map: fn(receiver: Type) -> Bool Never! {
     kind: sema_collection_kind(receiver) ?? return false
@@ -746,7 +791,9 @@ sema_collection_method_contract_in: fn(rows: [CollectionOperationRow], receiver:
 
 // Mem is the effect of every exclusive (in-place) collection operation.
 sema_collection_method_effect_row: fn(contract: SemaCollectionMethodContract, span: Span) -> [EffectRowEntry] Never! {
-    if contract.row.access == CollectionAccess.Write -> return [EffectRowEntry]{EffectRowEntry{name: "Mem", span: span}}
+    if contract.row.access == CollectionAccess.Write {
+        return [EffectRowEntry]{EffectRowEntry{name: "Mem", span: span}}
+    }
     [EffectRowEntry]{}
 }
 
@@ -794,7 +841,9 @@ sema_collection_method_argument_type: fn(contract: SemaCollectionMethodContract,
         .DisjointFn -> Val(sema_collection_fn([Type]{Type.Apply{name: "ViewMut", args: [Type]{element}}, Type.Apply{name: "ViewMut", args: [Type]{element}}}, None))
         .Accumulator -> Val(sema_collection_fn([Type]{seed_ty, element}, None))
         .Comparator -> {
-            if comparator -> return Val(sema_collection_fn([Type]{element, element}, Val(Type.Named{name: "Ordering"})))
+            if comparator {
+                return Val(sema_collection_fn([Type]{element, element}, Val(Type.Named{name: "Ordering"})))
+            }
             Val(sema_collection_fn([Type]{element}, None))
         }
         .EntryFn -> Val(sema_collection_fn([Type]{key, element}, None))
@@ -820,7 +869,9 @@ sema_collection_method_result_type: fn(contract: SemaCollectionMethodContract, c
         // A Result callback's first error ends a sequence `each` (`Unit E!`).
         .Unit -> {
             if contract.row.op == .SeqEach && callback == .Result(_, err) {
-                if err != (Type.Named{name: "Never"}) -> return Val(Type.Result{ok: Type.Named{name: "Unit"}, err: err})
+                if err != (Type.Named{name: "Never"}) {
+                    return Val(Type.Result{ok: Type.Named{name: "Unit"}, err: err})
+                }
             }
             Val(Type.Named{name: "Unit"})
         }
@@ -848,41 +899,39 @@ sema_collection_method_result_type: fn(contract: SemaCollectionMethodContract, c
         .LazyIndexed -> Val(sema_collection_output_iter(contract, Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "idx", ty: Type.Int}, TypeTupleField{name: "item", ty: element}}}))
         .LazyIndexes -> Val(sema_collection_output_iter(contract, Type.Int))
         .LazyScan -> Val(sema_collection_output_iter(contract, callback))
-        .LazyFilterMap -> {
-            if callback == {
-                .Option(payload) | .Result(payload, _) -> Val(sema_collection_output_iter(contract, payload))
-                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
-            }
+        .LazyFilterMap -> if callback == {
+            .Option(payload) | .Result(payload, _) -> Val(sema_collection_output_iter(contract, payload))
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
         }
         // A Result callback's error ends the mapping (`[U] E!`); a `Never`
         // error cannot, and any other callback, an Option one included, is
         // the element type itself.
-        .Mapped -> {
-            if callback == {
-                .Result(ok, err) -> {
-                    if err == (Type.Named{name: "Never"}) -> return Val(if eager -> Type.List{element: ok} else -> sema_collection_output_iter(contract, ok))
-                    Val(Type.Result{ok: if eager -> Type.List{element: ok} else -> sema_collection_output_iter(contract, ok), err: err})
+        .Mapped -> if callback == {
+            .Result(ok, err) -> {
+                if err == (Type.Named{name: "Never"}) {
+                    return Val(if eager -> Type.List{element: ok} else -> sema_collection_output_iter(contract, ok))
                 }
-                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> Val(if eager -> Type.List{element: callback} else -> sema_collection_output_iter(contract, callback))
+                Val(Type.Result{ok: if eager -> Type.List{element: ok} else -> sema_collection_output_iter(contract, ok), err: err})
             }
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> Val(if eager -> Type.List{element: callback} else -> sema_collection_output_iter(contract, callback))
         }
         .Filtered -> {
             filtered := if eager -> Type.List{element: element} else -> sema_collection_output_iter(contract, element)
             sema_collection_filtered(filtered, callback)
         }
-        .ListMapped -> {
-            if callback == {
-                .Result(ok, err) -> {
-                    if err == (Type.Named{name: "Never"}) -> return Val(Type.List{element: ok})
-                    Val(Type.Result{ok: Type.List{element: ok}, err: err})
-                }
-                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> Val(Type.List{element: callback})
+        .ListMapped -> if callback == {
+            .Result(ok, err) -> {
+                if err == (Type.Named{name: "Never"}) -> return Val(Type.List{element: ok})
+                Val(Type.Result{ok: Type.List{element: ok}, err: err})
             }
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> Val(Type.List{element: callback})
         }
         .ListFiltered -> sema_collection_filtered(Type.List{element: element}, callback)
         .EntryMapped -> Val(Type.Map{key: key, key_span: None, value: callback})
         .EntryFiltered -> {
-            if callback == Type.Bool -> return Val(Type.Map{key: key, key_span: None, value: element})
+            if callback == Type.Bool {
+                return Val(Type.Map{key: key, key_span: None, value: element})
+            }
             None
         }
         .FlatMapped -> {
@@ -892,35 +941,31 @@ sema_collection_method_result_type: fn(contract: SemaCollectionMethodContract, c
             } ?? return None
             Val(if family == CollectionReceivers.List -> Type.List{element: inner} else -> sema_collection_output_iter(contract, inner))
         }
-        .Flattened -> {
-            if element == {
-                .List(inner) | .FixedList(inner, _) -> Val(if family == CollectionReceivers.List -> Type.List{element: inner} else -> sema_collection_output_iter(contract, inner))
-                .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
-            }
+        .Flattened -> if element == {
+            .List(inner) | .FixedList(inner, _) -> Val(if family == CollectionReceivers.List -> Type.List{element: inner} else -> sema_collection_output_iter(contract, inner))
+            .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
         }
         .Folded -> {
             if callback_return != None -> return Val(callback)
             seed
         }
-        .Sorted -> {
-            if callback == {
-                .Result(_, err) -> Val(Type.Result{ok: Type.Named{name: "Unit"}, err: err})
-                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> Val(Type.Named{name: "Unit"})
-            }
+        .Sorted -> if callback == {
+            .Result(_, err) -> Val(Type.Result{ok: Type.Named{name: "Unit"}, err: err})
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> Val(Type.Named{name: "Unit"})
         }
         .Grouped -> Val(Type.Map{key: callback, key_span: None, value: Type.List{element: element}})
         .CountedBy -> Val(Type.Map{key: callback, key_span: None, value: Type.Int})
         .Partitioned -> Val(Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "false_", ty: Type.List{element: element}}, TypeTupleField{name: "true_", ty: Type.List{element: element}}}})
         .Counts -> Val(Type.Map{key: element, key_span: None, value: Type.Int})
-        .Unzipped -> {
-            if element == {
-                .Tuple(fields) -> {
-                    output := [TypeTupleField]{}
-                    loop field in fields -> output.push(TypeTupleField{name: field.name, ty: Type.List{element: field.ty}})
-                    Val(Type.Tuple{fields: output})
+        .Unzipped -> if element == {
+            .Tuple(fields) -> {
+                output := [TypeTupleField]{}
+                loop field in fields {
+                    output.push(TypeTupleField{name: field.name, ty: Type.List{element: field.ty}})
                 }
-                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
+                Val(Type.Tuple{fields: output})
             }
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
         }
         .SplitPair -> Val(Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "left", ty: Type.List{element: element}}, TypeTupleField{name: "right", ty: Type.List{element: element}}}})
         .WriteViewPair -> Val(Type.Result{ok: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "left", ty: Type.Apply{name: "ViewMut", args: [Type]{element}}}, TypeTupleField{name: "right", ty: Type.Apply{name: "ViewMut", args: [Type]{element}}}}}, err: Type.String})
@@ -928,12 +973,10 @@ sema_collection_method_result_type: fn(contract: SemaCollectionMethodContract, c
         .DisjointUnit -> Val(Type.Result{ok: Type.Tuple{fields: [TypeTupleField]{}}, err: Type.String})
         .Bits -> Val(Type.IntN{signed: false, bits: 64})
         .MinMax -> Val(Type.Option{inner: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "min", ty: element}, TypeTupleField{name: "max", ty: element}}}})
-        .TryCollected -> {
-            if element == {
-                .Result(ok, err) -> Val(Type.Result{ok: Type.List{element: ok}, err: err})
-                .Option(inner) -> Val(Type.Option{inner: Type.List{element: inner}})
-                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
-            }
+        .TryCollected -> if element == {
+            .Result(ok, err) -> Val(Type.Result{ok: Type.List{element: ok}, err: err})
+            .Option(inner) -> Val(Type.Option{inner: Type.List{element: inner}})
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
         }
     }
 }
@@ -976,33 +1019,41 @@ sema_collection_method_operation: fn(contract: SemaCollectionMethodContract, arg
         .SetBits -> SemaCollectionOperation.SetBits
         .ListShuffle -> SemaCollectionOperation.ListShuffle
         .Copy -> panic("copy rows are checked by the explicit copy path before operation selection")
-        .SeqMap -> SemaCollectionOperation.Closure{operation: if {
-            fallible -> TClosureOp.TryMap
-            is_view -> TClosureOp.ViewMap
-            callback_mutable -> TClosureOp.MapMut
-            else -> TClosureOp.Map
-        }}
+        .SeqMap -> SemaCollectionOperation.Closure{
+            operation: if {
+                fallible -> TClosureOp.TryMap
+                is_view -> TClosureOp.ViewMap
+                callback_mutable -> TClosureOp.MapMut
+                else -> TClosureOp.Map
+            },
+        }
         .SeqFilter -> SemaCollectionOperation.Closure{operation: if fallible -> TClosureOp.TryFilter else -> TClosureOp.Filter}
-        .SeqEach -> SemaCollectionOperation.Closure{operation: if {
-            fallible -> TClosureOp.TryEach
-            callback_mutable -> TClosureOp.EachMut
-            else -> TClosureOp.Each
-        }}
+        .SeqEach -> SemaCollectionOperation.Closure{
+            operation: if {
+                fallible -> TClosureOp.TryEach
+                callback_mutable -> TClosureOp.EachMut
+                else -> TClosureOp.Each
+            },
+        }
         // A list folds through the borrowed view route (the step reads each
         // element), so the receiver is never copied to be consumed.
         .SeqFold -> SemaCollectionOperation.Closure{operation: if is_view || sema_collection_family(contract.kind) == CollectionReceivers.List -> TClosureOp.ViewFold else -> TClosureOp.Fold}
-        .SetMap -> SemaCollectionOperation.SetClosure{operation: if {
-            fallible -> TClosureOp.TryMap
-            callback_mutable -> TClosureOp.MapMut
-            else -> TClosureOp.Map
-        }}
+        .SetMap -> SemaCollectionOperation.SetClosure{
+            operation: if {
+                fallible -> TClosureOp.TryMap
+                callback_mutable -> TClosureOp.MapMut
+                else -> TClosureOp.Map
+            },
+        }
         .SetFilter -> SemaCollectionOperation.SetClosure{operation: if fallible -> TClosureOp.TryFilter else -> TClosureOp.Filter}
         .SetEach -> SemaCollectionOperation.SetClosure{operation: if callback_mutable -> TClosureOp.EachMut else -> TClosureOp.Each}
-        .SortBy -> SemaCollectionOperation.Closure{operation: if {
-            comparator -> TClosureOp.SortByCompare
-            fallible -> TClosureOp.TrySortBy
-            else -> TClosureOp.SortBy
-        }}
+        .SortBy -> SemaCollectionOperation.Closure{
+            operation: if {
+                comparator -> TClosureOp.SortByCompare
+                fallible -> TClosureOp.TrySortBy
+                else -> TClosureOp.SortBy
+            },
+        }
         .SortByDesc -> SemaCollectionOperation.Closure{operation: if fallible -> TClosureOp.TrySortByDesc else -> TClosureOp.SortByDesc}
         .Sum -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.Sum{float: is_float, f32: is_f32}}
         .Product -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.Product{float: is_float}}

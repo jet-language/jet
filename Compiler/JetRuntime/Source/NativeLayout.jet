@@ -4,7 +4,7 @@
 #Export(c) jet_rt_layout_new: fn(name: I64) -> I64 {
     inner: jet_rt_alloc(LAYOUT_INNER_BYTES, I64{8})
     coll_zero(inner, LAYOUT_INNER_BYTES)
-    layout_put(inner, I64{2}) // returned Handle and registry each own one ref
+    layout_put(inner, I64{2})  // returned Handle and registry each own one ref
     layout_put(wrapping(inner + I64{8}), jet_rt_string_clone(name))
     layout_list_init(wrapping(inner + I64{16}))
     layout_list_init(wrapping(inner + I64{40}))
@@ -20,19 +20,23 @@
     layout_put(wrapping(result + I64{8}), id)
     result
 }
+
 #Export(c) jet_rt_layout_constant: fn(value: Float) -> I64 {
     result: jet_rt_alloc(LAYOUT_EXPR_BYTES, I64{8})
     coll_zero(result, LAYOUT_EXPR_BYTES)
     layout_float_put(wrapping(result + I64{264}), value)
     result
 }
+
 #Export(c) jet_rt_layout_variable: fn(handle: I64, box_name: I64, anchor: I64) -> I64 {
     inner: layout_word(handle)
     vars: wrapping(inner + I64{16})
     index := I64{0}
     loop index < layout_word(vars) {
         slot: layout_word(wrapping(vars + I64{16})) + index * I64{24}
-        if jet_rt_string_eq(layout_word(slot), box_name) && jet_rt_string_eq(layout_word(wrapping(slot + I64{8})), anchor) { break }
+        if jet_rt_string_eq(layout_word(slot), box_name) && jet_rt_string_eq(layout_word(wrapping(slot + I64{8})), anchor) {
+            break
+        }
         index += I64{1}
     }
     if (index == layout_word(vars)) {
@@ -55,6 +59,7 @@
     layout_put(wrapping(result + I64{280}), layout_word(wrapping(handle + I64{8})))
     result
 }
+
 layout_combine: fn(left: I64, right: I64, sign: Float) -> I64 {
     result: layout_expr_copy(left)
     count := layout_word(wrapping(result + I64{256}))
@@ -90,11 +95,20 @@ layout_combine: fn(left: I64, right: I64, sign: Float) -> I64 {
     }
     result
 }
-#Export(c) jet_rt_layout_add: fn(left: I64, right: I64) -> I64 { layout_combine(left, right, Float{1.0}) }
-#Export(c) jet_rt_layout_sub: fn(left: I64, right: I64) -> I64 { layout_combine(left, right, Float{-1.0}) }
+
+#Export(c) jet_rt_layout_add: fn(left: I64, right: I64) -> I64 {
+    layout_combine(left, right, Float{1.0})
+}
+
+#Export(c) jet_rt_layout_sub: fn(left: I64, right: I64) -> I64 {
+    layout_combine(left, right, Float{-1.0})
+}
+
 layout_normalize: fn(row: I64) {
     rhs: layout_float(wrapping(row + I64{264}))
-    if !(rhs < Float{0.0}) -> return
+    if !(rhs < Float{0.0}) {
+        return
+    }
     layout_float_put(wrapping(row + I64{264}), -rhs)
     at := I64{0}
     loop at < layout_word(wrapping(row + I64{256})) {
@@ -105,6 +119,7 @@ layout_normalize: fn(row: I64) {
     op: layout_word(wrapping(row + I64{272}))
     if (op != I64{2}) { layout_put(wrapping(row + I64{272}), I64{1} - op) }
 }
+
 // Le0/Ge1/Eq2, Required0/Strong1/Medium2/Weak3.
 #Export(c) jet_rt_layout_compare: fn(left: I64, right: I64, op: I64) -> I64 {
     combined: layout_combine(left, right, Float{-1.0})
@@ -136,6 +151,7 @@ layout_normalize: fn(row: I64) {
     layout_put(wrapping(result + I64{8}), index)
     result
 }
+
 #Export(c) jet_rt_layout_strength: fn(constraint: I64, strength: I64) -> I64 {
     inner: layout_word(constraint)
     rows: wrapping(inner + I64{40})
@@ -147,15 +163,22 @@ layout_normalize: fn(row: I64) {
     layout_put(wrapping(inner + I64{136}), I64{1})
     constraint
 }
+
 #Export(c) jet_rt_layout_suggest: fn(handle: I64, expression: I64, value: Float) {
-    if (layout_word(wrapping(expression + I64{256})) != I64{1}) -> return
-    if !(layout_abs(layout_float(wrapping(expression + I64{8})) - Float{1.0}) < LAYOUT_EPS) -> return
+    if (layout_word(wrapping(expression + I64{256})) != I64{1}) {
+        return
+    }
+    if !(layout_abs(layout_float(wrapping(expression + I64{8})) - Float{1.0}) < LAYOUT_EPS) {
+        return
+    }
     inner: layout_word(handle)
     edits: wrapping(inner + I64{64})
     index: layout_word(expression)
     at := I64{0}
     loop at < layout_word(edits) {
-        if (layout_word(wrapping(layout_word(wrapping(edits + I64{16})) + at * I64{16})) == index) { break }
+        if (layout_word(wrapping(layout_word(wrapping(edits + I64{16})) + at * I64{16})) == index) {
+            break
+        }
         at += I64{1}
     }
     slot := I64{0}
@@ -170,16 +193,21 @@ layout_normalize: fn(row: I64) {
     }
     layout_put(wrapping(inner + I64{136}), I64{1})
 }
+
 layout_resolve: fn(inner: I64) {
-    if (layout_word(wrapping(inner + I64{136})) == I64{0}) -> return
+    if (layout_word(wrapping(inner + I64{136})) == I64{0}) {
+        return
+    }
     layout_solve(inner)
     layout_put(wrapping(inner + I64{136}), I64{0})
 }
+
 #Export(c) jet_rt_layout_is_feasible: fn(handle: I64) -> Bool {
     inner: layout_word(handle)
     layout_resolve(inner)
     layout_word(wrapping(inner + I64{144})) == I64{0}
 }
+
 // Returns owned List24 of owned E4 Texts (native [Text] ABI).
 #Export(c) jet_rt_layout_conflict: fn(handle: I64) -> I64 {
     inner: layout_word(handle)
@@ -194,6 +222,7 @@ layout_resolve: fn(inner: I64) {
     }
     result
 }
+
 // The compiled form of conflict(): the [Text] buffer goes to `out` (none
 // for an empty List) and the length is returned; the IR's List header owns
 // the buffer.
@@ -204,6 +233,7 @@ layout_resolve: fn(inner: I64) {
     jet_rt_free(list, DATA_SEQUENCE_BYTES, I64{8})
     length
 }
+
 #Export(c) jet_rt_layout_value: fn(handle: I64, expression: I64) -> Float {
     inner: layout_word(handle)
     layout_resolve(inner)

@@ -3,6 +3,7 @@ use {
     core.files
     core.sys
 }
+
 native_metadata_check: fn() {
     store: sys.get("TOOL_STORE") ?? panic("TOOL_STORE")
     entries: files.list_dir("{store}/hangar") ?? panic("Hangar listing: {err}")
@@ -13,12 +14,15 @@ native_metadata_check: fn() {
         if files.is_file(path.copy()) {
             found_any = true
             metadata: files.read(path) ?? panic("Hangar metadata: {err}")
-            if metadata.contains("omp@releases") && !metadata.contains("/nix/store/") -> matched = true
+            if metadata.contains("omp@releases") && !metadata.contains("/nix/store/") {
+                matched = true
+            }
         }
     }
     assert(found_any, "native install did not register Hangar metadata")
     assert(matched, "native package was not recorded as a Hangar-owned output")
 }
+
 #Test("native Hangar registration") {
     native_metadata_check()
 }

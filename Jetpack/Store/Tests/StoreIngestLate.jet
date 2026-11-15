@@ -21,7 +21,7 @@
     roots: store_test_temp_roots()
     loop index in 0..<8 {
         writer_roots: HangarRoots{root: roots.root, dev_mode: true}
-        _: store_test_ingest_fixture(verification, writer_roots, "concurrent-{index}", [String: String]{"out": "bytes-{index}"}, [String]{})
+        _: store_test_ingest_fixture(verification, writer_roots, "concurrent-{index}", [String:String]{"out": "bytes-{index}"}, [String]{})
     }
     assert_eq((store_closure_graph(verification, roots) ?? panic("graph")).records.len(), 8)
     store_test_drop_roots(roots)
@@ -31,7 +31,7 @@
     verification := StoreVerification.new()
     roots: store_test_temp_roots()
     loop index in 0..<70 {
-        _: store_test_ingest_fixture(verification, roots, "compact-{index}", [String: String]{"out": "compact-bytes-{index}"}, [String]{})
+        _: store_test_ingest_fixture(verification, roots, "compact-{index}", [String:String]{"out": "compact-bytes-{index}"}, [String]{})
     }
     assert_eq((store_closure_graph(verification, roots) ?? panic("graph")).records.len(), 70)
     assert(store_test_count_transactions(files.join(roots.hangar_dir(), "closure-db/journal")) < 10)
@@ -43,7 +43,7 @@
     roots: store_test_temp_roots()
     previous := 0
     loop index in 0..<70 {
-        _: store_test_ingest_fixture(verification, roots, "reader-compact-{index}", [String: String]{"out": "reader-compact-bytes-{index}"}, [String]{})
+        _: store_test_ingest_fixture(verification, roots, "reader-compact-{index}", [String:String]{"out": "reader-compact-bytes-{index}"}, [String]{})
         count: (store_closure_graph(verification, roots) ?? panic("graph")).records.len()
         assert(count >= previous)
         previous = count
@@ -56,15 +56,15 @@
     verification := StoreVerification.new()
     roots: store_test_temp_roots()
     // Two distinct object digests that share an identical file payload.
-    sources: [String: String]{"cas-c": "c-only", "cas-d": "d-only"}
+    sources: [String:String]{"cas-c": "c-only", "cas-d": "d-only"}
     loop source in sources {
         path: files.join(roots.root, source.key)
         files.create_dir_all(path) ?? panic("dir")
         files.write(files.join(path, "payload"), "shared-cas-bytes") ?? panic("payload")
         files.write(files.join(path, "unique"), source.value) ?? panic("unique")
     }
-    third: store_ingest_tree(verification, roots, store_test_path_request("cas-c", "path:cas-c", [String: String]{"out": files.join(roots.root, "cas-c")}, "")) ?? panic("ingest c")
-    fourth: store_ingest_tree(verification, roots, store_test_path_request("cas-d", "path:cas-d", [String: String]{"out": files.join(roots.root, "cas-d")}, "")) ?? panic("ingest d")
+    third: store_ingest_tree(verification, roots, store_test_path_request("cas-c", "path:cas-c", [String:String]{"out": files.join(roots.root, "cas-c")}, "")) ?? panic("ingest c")
+    fourth: store_ingest_tree(verification, roots, store_test_path_request("cas-d", "path:cas-d", [String:String]{"out": files.join(roots.root, "cas-d")}, "")) ?? panic("ingest d")
     assert(third.entry.envelope.output_hash != fourth.entry.envelope.output_hash)
 
     // Registration shares payload bytes with the machine CAS pool.
@@ -115,7 +115,7 @@
     source: files.join(roots.root, "reseal-src")
     files.create_dir_all(source) ?? panic("dir")
     files.write(files.join(source, "payload"), "reseal-bytes") ?? panic("payload")
-    ingested: store_ingest_tree(verification, roots, store_test_path_request("reseal", "path:reseal", [String: String]{"out": source}, "")) ?? panic("ingest")
+    ingested: store_ingest_tree(verification, roots, store_test_path_request("reseal", "path:reseal", [String:String]{"out": source}, "")) ?? panic("ingest")
     out: ingested.entry.out
     digest: ingested.entry.envelope.output_hash
     // A private byte-equal copy replaces the pool link, and the object is
@@ -154,7 +154,7 @@ store_test_validate_hit: fn(verification: &StoreVerification, roots: HangarRoots
     files.symlink(outside, files.join(hangar, "objects")) ?? panic("objects link")
     verification := StoreVerification.new()
     if store_optimize_cas_pool(verification, roots) == {
-        .Ok(_) -> panic("a symlinked object pool must be refused")
+        .Ok(_) -> { panic("a symlinked object pool must be refused") }
         .Err(error) -> assert(error.message().contains("object pool"))
     }
     assert_eq(files.read(files.join(outside, "live")) ?? panic("read"), "must survive")
@@ -186,7 +186,7 @@ store_test_validate_hit: fn(verification: &StoreVerification, roots: HangarRoots
 #Test("store cleanup protects named outputs from canonical gc") {
     verification := StoreVerification.new()
     roots: store_test_temp_roots()
-    _: store_test_ingest_fixture(verification, roots, "named-output-gc", [String: String]{"out": "primary", "dev": "secondary"}, [String]{})
+    _: store_test_ingest_fixture(verification, roots, "named-output-gc", [String:String]{"out": "primary", "dev": "secondary"}, [String]{})
     orphaned: store_collect_orphaned_canonical_objects(verification, roots, LiveRoots.empty(), [String]{}) ?? panic("collect")
     assert_eq(orphaned.len(), 0)
     store_test_drop_roots(roots)
@@ -195,7 +195,7 @@ store_test_validate_hit: fn(verification: &StoreVerification, roots: HangarRoots
 #Test("store cleanup quarantines projection with proven missing output") {
     verification := StoreVerification.new()
     roots: store_test_temp_roots()
-    entry: store_test_ingest_fixture(verification, roots, "missing-output", [String: String]{"out": "bytes"}, [String]{}).entry
+    entry: store_test_ingest_fixture(verification, roots, "missing-output", [String:String]{"out": "bytes"}, [String]{}).entry
     store_make_tree_writable_for_removal(entry.out) ?? panic("chmod")
     files.remove_all(entry.out) ?? panic("remove output")
     files.write(files.join(files.join(roots.hangar_dir(), entry.id), "meta.json"), entry.meta_json()) ?? panic("meta")
@@ -216,7 +216,7 @@ store_test_validate_hit: fn(verification: &StoreVerification, roots: HangarRoots
     files.write(files.join(outside, "live"), "must survive") ?? panic("live")
     files.symlink(outside, files.join(hangar, "build-scratch")) ?? panic("scratch link")
     if store_clean_plan(verification, roots) == {
-        .Ok(_) -> panic("a symlinked build scratch must be refused")
+        .Ok(_) -> { panic("a symlinked build scratch must be refused") }
         .Err(error) -> assert(error.message().contains("build scratch"))
     }
     assert_eq(files.read(files.join(outside, "live")) ?? panic("read"), "must survive")
@@ -225,15 +225,17 @@ store_test_validate_hit: fn(verification: &StoreVerification, roots: HangarRoots
 
 #Test("store ingest rejects semantic xattr without platform artifact kind") {
     verification := StoreVerification.new()
-    if !sys.is_linux() -> return
+    if !sys.is_linux() {
+        return
+    }
     roots: store_test_temp_roots()
     source: files.join(roots.root, "xattr-src")
     files.create_dir_all(source) ?? panic("dir")
     file: files.join(source, "payload")
     files.write(file, "xattr-bytes") ?? panic("payload")
     files.set_extended_attribute(file, "user.jet.test", "keep".bytes()) ?? panic("set xattr")
-    if store_ingest_tree(verification, roots, store_test_path_request("xattr", "path:xattr", [String: String]{"out": source}, "")) == {
-        .Ok(_) -> panic("a semantic xattr needs a platform artifact kind")
+    if store_ingest_tree(verification, roots, store_test_path_request("xattr", "path:xattr", [String:String]{"out": source}, "")) == {
+        .Ok(_) -> { panic("a semantic xattr needs a platform artifact kind") }
         .Err(error) -> {
             assert_eq(error.code(), "E1315")
             assert(error.what().contains("semantic xattr") || error.why().contains("semantic xattr"))
@@ -244,7 +246,9 @@ store_test_validate_hit: fn(verification: &StoreVerification, roots: HangarRoots
 
 #Test("store ingest keeps semantic xattr with platform artifact kind") {
     verification := StoreVerification.new()
-    if !sys.is_linux() -> return
+    if !sys.is_linux() {
+        return
+    }
     roots: store_test_temp_roots()
     source: files.join(roots.root, "xattr-ok")
     files.create_dir_all(source) ?? panic("dir")
@@ -252,7 +256,7 @@ store_test_validate_hit: fn(verification: &StoreVerification, roots: HangarRoots
     files.write(file, "xattr-bytes") ?? panic("payload")
     files.set_extended_attribute(source, "user.jet.directory", "directory".bytes()) ?? panic("set dir xattr")
     files.set_extended_attribute(file, "user.jet.test", "keep".bytes()) ?? panic("set xattr")
-    request := store_test_path_request("xattr-ok", "path:xattr-ok", [String: String]{"out": source}, "")
+    request := store_test_path_request("xattr-ok", "path:xattr-ok", [String:String]{"out": source}, "")
     request.platform_artifact_kind = "macos-app"
     ingested: store_ingest_tree(verification, roots, request) ?? panic("ingest")
     first_hash: ingested.entry.envelope.output_hash
@@ -269,28 +273,34 @@ store_test_validate_hit: fn(verification: &StoreVerification, roots: HangarRoots
 
 #Test("store ingest rejects semantic directory xattr without platform kind") {
     verification := StoreVerification.new()
-    if !sys.is_linux() -> return
+    if !sys.is_linux() {
+        return
+    }
     roots: store_test_temp_roots()
     source: files.join(roots.root, "xattr-directory-reject")
     files.create_dir_all(source) ?? panic("dir")
     files.set_extended_attribute(source, "user.jet.directory", "reject".bytes()) ?? panic("set xattr")
-    if store_ingest_tree(verification, roots, store_test_path_request("xattr-directory", "path:xattr-directory", [String: String]{"out": source}, "")) == {
-        .Ok(_) -> panic("a semantic directory xattr needs a platform kind")
-        .Err(error) -> assert(error.what().contains("semantic xattr") || error.why().contains("semantic xattr"))
+    if store_ingest_tree(verification, roots, store_test_path_request("xattr-directory", "path:xattr-directory", [String:String]{"out": source}, "")) == {
+        .Ok(_) -> { panic("a semantic directory xattr needs a platform kind") }
+        .Err(error) -> {
+            assert(error.what().contains("semantic xattr") || error.why().contains("semantic xattr"))
+        }
     }
     store_test_drop_roots(roots)
 }
 
 #Test("store ingest symlink xattr is nofollow rejected digested and copied") {
     verification := StoreVerification.new()
-    if !sys.is_macos() -> return
+    if !sys.is_macos() {
+        return
+    }
     roots: store_test_temp_roots()
     source: files.join(roots.root, "xattr-symlink")
     files.create_dir_all(source) ?? panic("dir")
     files.write(files.join(source, "target"), "bytes") ?? panic("target")
     files.symlink("target", files.join(source, "link")) ?? panic("link")
     files.set_extended_attribute(files.join(source, "link"), "user.jet.symlink", "first".bytes()) ?? panic("set xattr")
-    plain: store_test_path_request("xattr-symlink", "path:xattr-symlink", [String: String]{"out": source}, "")
+    plain: store_test_path_request("xattr-symlink", "path:xattr-symlink", [String:String]{"out": source}, "")
     assert(store_ingest_tree(verification, roots, plain) == .Err(_))
     kinded := plain
     kinded.platform_artifact_kind = "macos-tree"

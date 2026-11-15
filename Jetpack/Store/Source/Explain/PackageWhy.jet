@@ -9,12 +9,10 @@ WhyLocation: struct {
     line: Int?
     text: String?
 
-    not_found: fn() -> WhyLocation Never! {
-        WhyLocation{path: "not found", line: None, text: None}
-    }
+    not_found: fn() -> WhyLocation Never! { WhyLocation{path: "not found", line: None, text: None} }
 
     to_tree: fn(self) -> Dyn Never! {
-        object := [String: Dyn]{}
+        object := [String:Dyn]{}
         object["path"] = Dyn.Text(self.path.copy())
         object["line"] = store_explain_optional_int(self.line)
         object["text"] = if self.text == {
@@ -76,7 +74,7 @@ PackageWhy: struct {
         }
         requesting: store_why_requesting_projection(store_sorted_unique(names), store_sorted_unique(qualified))
         provider := ""
-        facts := [String: String]{}
+        facts := [String:String]{}
         source := ""
         source_digest := ""
         if explanation.provider == {
@@ -95,37 +93,39 @@ PackageWhy: struct {
             }
             .None -> {}
         }
-        Ok(PackageWhy{
-            query: explanation.query,
-            package: package,
-            available: explanation.entry != None,
-            requesting: requesting,
-            origin: store_why_origin_projection(roots, provider, facts, source, source_digest),
-            trust: store_why_trust_projection(provider, facts),
-            disk: store_why_disk_projection(explanation.graph),
-            dependents: store_why_dependent_projection(explanation.graph),
-            receipt: receipt
-        })
+        Ok(
+            PackageWhy{
+                query: explanation.query,
+                package: package,
+                available: explanation.entry != None,
+                requesting: requesting,
+                origin: store_why_origin_projection(roots, provider, facts, source, source_digest),
+                trust: store_why_trust_projection(provider, facts),
+                disk: store_why_disk_projection(explanation.graph),
+                dependents: store_why_dependent_projection(explanation.graph),
+                receipt: receipt,
+            },
+        )
     }
 
     to_json: fn(self) -> String ReportError! {
-        requesting := [String: Dyn]{}
+        requesting := [String:Dyn]{}
         requesting["env_file"] = self.requesting.env_file.to_tree()
         requesting["lock_file"] = self.requesting.lock_file.to_tree()
-        origin := [String: Dyn]{}
+        origin := [String:Dyn]{}
         origin["catalog"] = Dyn.Text(self.origin.catalog.copy())
         origin["endpoint"] = Dyn.Text(self.origin.endpoint.copy())
         origin["cache_endpoint"] = Dyn.Text(self.origin.cache_endpoint.copy())
         origin["signature_chain"] = Dyn.Text(self.origin.signature_chain.copy())
         origin["source"] = Dyn.Text(self.origin.source.copy())
         origin["source_digest"] = Dyn.Text(self.origin.source_digest.copy())
-        trust := [String: Dyn]{}
+        trust := [String:Dyn]{}
         trust["grade"] = Dyn.Text(self.trust.grade.copy())
         trust["reason"] = Dyn.Text(self.trust.reason.copy())
-        disk := [String: Dyn]{}
+        disk := [String:Dyn]{}
         disk["bytes"] = store_explain_optional_int(self.disk.bytes)
         disk["objects"] = Dyn.Int(self.disk.objects)
-        payload := [String: Dyn]{}
+        payload := [String:Dyn]{}
         payload["query"] = Dyn.Text(self.query.copy())
         payload["package"] = Dyn.Text(self.package.copy())
         payload["available"] = Dyn.Bool(self.available)
@@ -206,7 +206,9 @@ WhyLine: struct {
 store_why_source_line: fn(raw: String, names: [String], qualified: [String]) -> WhyLine? Never! {
     lines: store_text_lines(raw)
     loop index in 0..<lines.len() {
-        if store_why_source_line_matches(lines[index], names, qualified) -> return Val(WhyLine{line: index + 1, text: lines[index].trim()})
+        if store_why_source_line_matches(lines[index], names, qualified) {
+            return Val(WhyLine{line: index + 1, text: lines[index].trim()})
+        }
     }
     None
 }
@@ -239,12 +241,16 @@ store_why_matching_lock_block: fn(block: [WhyLine], names: [String], qualified: 
     loop entry in block {
         lock_name: store_why_lock_name(entry.text) ?? next
         loop name in names {
-            if name != "" && lock_name == name -> return Val(WhyLine{line: entry.line, text: entry.text.trim()})
+            if name != "" && lock_name == name {
+                return Val(WhyLine{line: entry.line, text: entry.text.trim()})
+            }
         }
     }
     loop entry in block {
         loop reference in qualified {
-            if reference != "" && entry.text.contains(reference) -> return Val(WhyLine{line: entry.line, text: entry.text.trim()})
+            if reference != "" && entry.text.contains(reference) {
+                return Val(WhyLine{line: entry.line, text: entry.text.trim()})
+            }
         }
     }
     None
@@ -294,7 +300,9 @@ store_why_package_token_byte: fn(code: Int) -> Bool Never! {
 // The value of a `name = "…"` lock line.
 store_why_lock_name: fn(line: String) -> String? Never! {
     trimmed: line.trim()
-    if !trimmed.starts_with("name = \"") || !trimmed.ends_with("\"") || trimmed.bytes().len() < 9 -> return None
+    if !trimmed.starts_with("name = \"") || !trimmed.ends_with("\"") || trimmed.bytes().len() < 9 {
+        return None
+    }
     Val(trimmed.removeprefix("name = \"").removesuffix("\""))
 }
 
@@ -320,26 +328,30 @@ store_why_compact_line: fn(line: String) -> String Never! {
 
 // Where the bytes came from: the catalog, index endpoint, cache endpoint,
 // signature chain, and source identity recorded by the producer.
-store_why_origin_projection: fn(roots: HangarRoots, provider: String, fact_map: [String: String], source: String, source_digest: String) -> WhyOrigin Never! {
+store_why_origin_projection: fn(roots: HangarRoots, provider: String, fact_map: [String:String], source: String, source_digest: String) -> WhyOrigin Never! {
     tier: fact_map.get("nix.index.tier")
     catalog: store_why_catalog_origin(tier, fact_map, provider)
     nix: provider == "nix"
     cache_endpoint := fact_map.get("nix.cache.endpoint")
-    if cache_endpoint == None && nix -> cache_endpoint = store_why_config_value(roots, "config/nix-cache-v1.endpoint")
+    if cache_endpoint == None && nix {
+        cache_endpoint = store_why_config_value(roots, "config/nix-cache-v1.endpoint")
+    }
     if cache_endpoint == None && nix -> cache_endpoint = Val("https://cache.nixos.org")
     if cache_endpoint == None -> cache_endpoint = fact_map.get("source.url")
     cache: cache_endpoint ?? "not recorded"
     // A signed-index endpoint is the strongest catalog origin; otherwise the
     // configured cache endpoint still answers where the bytes came from.
     endpoint := fact_map.get("nix.index.endpoint")
-    if endpoint == None && nix -> endpoint = store_why_config_value(roots, "config/nix-index-v1.endpoint")
+    if endpoint == None && nix {
+        endpoint = store_why_config_value(roots, "config/nix-index-v1.endpoint")
+    }
     if endpoint == None {
         endpoint = if nix && cache != "not recorded" -> Val(cache) else -> fact_map.get("source.url")
     }
     signature_chain := fact_map.get("nix.index.signature-chain")
     if signature_chain == None {
         if fact_map.get("artifact.verification") == {
-            .Val(verification) -> signature_chain = Val("not applicable ({verification})")
+            .Val(verification) -> { signature_chain = Val("not applicable ({verification})") }
             .None -> {}
         }
     }
@@ -349,11 +361,11 @@ store_why_origin_projection: fn(roots: HangarRoots, provider: String, fact_map: 
         cache_endpoint: cache,
         signature_chain: signature_chain ?? "not recorded",
         source: if source == "" -> "not recorded" else -> source,
-        source_digest: if source_digest == "" -> "not recorded" else -> source_digest
+        source_digest: if source_digest == "" -> "not recorded" else -> source_digest,
     }
 }
 
-store_why_catalog_origin: fn(tier: String?, fact_map: [String: String], provider: String) -> String Never! {
+store_why_catalog_origin: fn(tier: String?, fact_map: [String:String], provider: String) -> String Never! {
     if tier == {
         .Val(found_tier) -> {
             proof: fact_map.get("nix.index.proof.v1") ?? return found_tier
@@ -394,7 +406,7 @@ store_why_config_value: fn(roots: HangarRoots, relative: String) -> String? Neve
 }
 
 // The admission grade the producer facts support.
-store_why_trust_projection: fn(provider: String, fact_map: [String: String]) -> WhyTrust Never! {
+store_why_trust_projection: fn(provider: String, fact_map: [String:String]) -> WhyTrust Never! {
     tier: fact_map.get("nix.index.tier") ?? ""
     source_kind: fact_map.get("source.kind") ?? ""
     index_trust: fact_map.get("nix.index.trust") ?? ""

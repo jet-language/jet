@@ -87,7 +87,9 @@ lsp_fixes_from_diagnostics: fn(diagnostics: &&[Diagnostic]) -> [LSPFix] Never! {
         }
         if diagnostic.structured == .Val(structured) {
             if structured == .SuggestedEdits(alternatives) {
-                loop edit in alternatives -> fixes.push(LSPFix{title: diagnostic.fix, edit: edit, applicability: applicability, safety: safety})
+                loop edit in alternatives {
+                    fixes.push(LSPFix{title: diagnostic.fix, edit: edit, applicability: applicability, safety: safety})
+                }
             }
         }
     }

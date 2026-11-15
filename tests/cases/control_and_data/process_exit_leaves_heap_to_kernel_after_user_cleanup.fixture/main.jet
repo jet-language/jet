@@ -32,9 +32,7 @@ fill: fn() -> [U8] {
 }
 
 run: fn() {
-    #Unsafe("the exit callback has no captured state") {
-        os.atexit(fn() { print("atexit") })
-    }
+    #Unsafe("the exit callback has no captured state") { os.atexit(fn() { print("atexit") }) }
     guard: scope.guard(fn() { print("guard") })
     key := Key{secret: crypto.Secret.from_text("hunter2")}
     defer close(key)

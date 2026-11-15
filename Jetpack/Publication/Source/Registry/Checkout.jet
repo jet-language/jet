@@ -33,9 +33,15 @@ publication_checkout_cleanup_problem: fn(checkout: PublicationPublishCheckout, e
 }
 
 publication_checkout_cleanup_diagnostic: fn(checkout: PublicationPublishCheckout, error: IOError) -> PublicationDiagnosticError Never! {
-    PublicationDiagnosticError{diagnostic: diagnostic_from_registry("E2105", None, publication_checkout_cleanup_problem(checkout, error),
-        "a publication clone is private scratch state, so Jet removes it before reporting the publication result",
-        "remove the named checkout directory, then run the command again")}
+    PublicationDiagnosticError{
+        diagnostic: diagnostic_from_registry(
+            "E2105",
+            None,
+            publication_checkout_cleanup_problem(checkout, error),
+            "a publication clone is private scratch state, so Jet removes it before reporting the publication result",
+            "remove the named checkout directory, then run the command again",
+        ),
+    }
 }
 
 publication_attach_checkout_cleanup: fn(primary: PublicationDiagnosticError, checkout: PublicationPublishCheckout, error: IOError) -> PublicationDiagnosticError Never! {
@@ -51,7 +57,9 @@ publication_cleanup_publish_checkout: fn(checkout: PublicationPublishCheckout) I
     if !files.basename(checkout.root).starts_with(PUBLICATION_CHECKOUT_PREFIX) || files.join(checkout.root, "checkout") != checkout.path {
         return Err(publication_read_error(.InvalidInput, checkout.root, "refusing to remove a directory that is not a publication checkout"))
     }
-    if !files.exists(checkout.root) -> return
+    if !files.exists(checkout.root) {
+        return
+    }
     files.remove_all(checkout.root)
 }
 
@@ -73,7 +81,9 @@ publication_prepare_publish_checkout: fn(registry: PublicationRegistryConfig) -[
     checkout: PublicationPublishCheckout{path: files.join(scratch, "checkout"), root: scratch}
     command: publication_registry_git_command(transport) ?? return Err(publication_checkout_failure(checkout, publication_registry_cache_error(registry, "{err}")))
     cloned: command.args_extend([String]{"clone", "--", transport.remote(registry.url), checkout.path}).run() ?? return Err(publication_checkout_failure(checkout, publication_registry_cache_error(registry, "{err}")))
-    if !cloned.success -> return Err(publication_checkout_failure(checkout, publication_registry_cache_error(registry, "git clone exited with {cloned.code}")))
+    if !cloned.success {
+        return Err(publication_checkout_failure(checkout, publication_registry_cache_error(registry, "git clone exited with {cloned.code}")))
+    }
     Ok(checkout)
 }
 
@@ -126,8 +136,12 @@ publication_push_index_inner: fn(registry: PublicationRegistryConfig, repo: Stri
     publication_checkout_git(registry, transport, repo, [String]{"config", "user.email", "jet-publish@localhost"}).drop("a failed identity write surfaces as the commit failure")
     publication_checkout_git(registry, transport, repo, [String]{"config", "user.name", "jet registry publish"}).drop("a failed identity write surfaces as the commit failure")
     cached: publication_checkout_git(registry, transport, repo, [String]{"diff", "--cached", "--quiet"})
-    if !cached.success -> return Err(publication_registry_cache_error(registry, "publication checkout contains pre-staged changes"))
-    if paths.len() == 0 -> return Err(publication_registry_cache_error(registry, "publication has no explicit paths"))
+    if !cached.success {
+        return Err(publication_registry_cache_error(registry, "publication checkout contains pre-staged changes"))
+    }
+    if paths.len() == 0 {
+        return Err(publication_registry_cache_error(registry, "publication has no explicit paths"))
+    }
     stage := paths.copy()
     if expected == .Val(entry) {
         if !entry.yanked {
@@ -148,30 +162,46 @@ publication_push_index_inner: fn(registry: PublicationRegistryConfig, repo: Stri
     added: publication_checkout_git(registry, transport, repo, add)
     if !added.success -> return Err(publication_registry_cache_error(registry, "git add failed"))
     staged: publication_checkout_git(registry, transport, repo, [String]{"diff", "--cached", "--name-only"})
-    if !staged.success -> return Err(publication_registry_cache_error(registry, "git staged-path inspection failed"))
+    if !staged.success {
+        return Err(publication_registry_cache_error(registry, "git staged-path inspection failed"))
+    }
     loop line in staged.output.lines() {
         if line.trim() == "" -> next
-        if !publication_staged_path_allowed(allowed, line) -> return Err(publication_registry_cache_error(registry, "publication attempted to stage a path outside its transaction"))
+        if !publication_staged_path_allowed(allowed, line) {
+            return Err(publication_registry_cache_error(registry, "publication attempted to stage a path outside its transaction"))
+        }
     }
     committed: publication_checkout_git(registry, transport, repo, [String]{"commit", "-m", message})
-    if !committed.success && !committed.output.contains("nothing to commit") -> return Err(publication_registry_cache_error(registry, "git commit failed"))
+    if !committed.success && !committed.output.contains("nothing to commit") {
+        return Err(publication_registry_cache_error(registry, "git commit failed"))
+    }
     head: publication_checkout_git(registry, transport, repo, [String]{"rev-parse", "--abbrev-ref", "HEAD"})
     branch: head.output.trim()
-    if branch == "" || branch == "HEAD" || branch == "." || branch == ".." -> return Err(publication_registry_cache_error(registry, "publication checkout has no named branch"))
+    if branch == "" || branch == "HEAD" || branch == "." || branch == ".." {
+        return Err(publication_registry_cache_error(registry, "publication checkout has no named branch"))
+    }
     pushed: publication_checkout_git(registry, transport, repo, [String]{"push", "origin", "HEAD:refs/heads/{branch}"})
-    if pushed.success -> return
+    if pushed.success {
+        return
+    }
     // A concurrent publisher may have won the immutable version. Accept only
     // a byte-identical winner; rebasing append-only index files could merge
     // two conflicting same-version lines.
     fetched: publication_checkout_git(registry, transport, repo, [String]{"fetch", "origin"})
-    if !fetched.success -> return Err(publication_registry_cache_error(registry, "git fetch failed after a concurrent push"))
+    if !fetched.success {
+        return Err(publication_registry_cache_error(registry, "git fetch failed after a concurrent push"))
+    }
     if expected == .Val(entry) {
         if publication_remote_contains_entry(registry, transport, repo, "origin/{branch}", entry) {
             winner: publication_verify_remote_winner(registry, entry)
-            if winner -> return
+            if winner {
+                return
+            }
         }
     }
-    if recover_race -> return publication_rebuild_publication_after_race(registry, repo, message, expected)
+    if recover_race {
+        return publication_rebuild_publication_after_race(registry, repo, message, expected)
+    }
     Err(publication_registry_cache_error(registry, "concurrent registry publication changed an immutable version"))
 }
 
@@ -180,7 +210,7 @@ publication_verify_remote_winner: fn(registry: PublicationRegistryConfig, expect
     verdict := false
     failure := PublicationDiagnosticError?{None}
     if publication_verify_remote_winner_in(registry, checkout.path, expected) == {
-        .Ok(matched) -> verdict = matched
+        .Ok(matched) -> { verdict = matched }
         .Err(error) -> failure = Val(error)
     }
     if publication_finish_publish_checkout(checkout, failure) == .Val(error) -> return Err(error)
@@ -202,7 +232,9 @@ publication_rebuild_publication_after_race: fn(registry: PublicationRegistryConf
     entry: expected ?? return Err(publication_registry_cache_error(registry, "concurrent publication cannot be rebuilt without an immutable entry"))
     checkout: publication_prepare_publish_checkout(registry)
     failure := PublicationDiagnosticError?{None}
-    if publication_rebuild_publication_in(registry, checkout.path, stale_repo, message, entry) == .Err(error) -> failure = Val(error)
+    if publication_rebuild_publication_in(registry, checkout.path, stale_repo, message, entry) == .Err(error) {
+        failure = Val(error)
+    }
     if publication_finish_publish_checkout(checkout, failure) == .Val(error) -> return Err(error)
 }
 
@@ -211,22 +243,34 @@ publication_rebuild_publication_in: fn(registry: PublicationRegistryConfig, repo
     paths := [String]{index}
     if expected.yanked {
         flipped: publication_mark_yanked(repo, expected.name, expected.version) ?? return Err(publication_registry_cache_error(registry, "{err}"))
-        if !flipped -> return Err(publication_registry_cache_error(registry, "concurrent yank lost its immutable registry entry"))
+        if !flipped {
+            return Err(publication_registry_cache_error(registry, "concurrent yank lost its immutable registry entry"))
+        }
     } else {
         existing: if publication_find_entry(repo, expected.name, expected.version) == {
             .Ok(found) -> found
-            .Err(error) -> { return Err(publication_registry_cache_error(registry, "{error}")) }
+            .Err(error) -> {
+                return Err(publication_registry_cache_error(registry, "{error}"))
+            }
         }
         if existing == .Val(found) {
-            if found != expected -> return Err(PublicationDiagnosticError{diagnostic: publication_e1234(expected.name, expected.version)})
+            if found != expected {
+                return Err(PublicationDiagnosticError{diagnostic: publication_e1234(expected.name, expected.version)})
+            }
         } else if publication_write_index_entry(repo, expected) == .Err(error) {
             if error == {
-                .AlreadyExists(_) -> { return Err(PublicationDiagnosticError{diagnostic: publication_e1234(expected.name, expected.version)}) }
-                .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> { return Err(publication_registry_cache_error(registry, "{error}")) }
+                .AlreadyExists(_) -> {
+                    return Err(PublicationDiagnosticError{diagnostic: publication_e1234(expected.name, expected.version)})
+                }
+                .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> {
+                    return Err(publication_registry_cache_error(registry, "{error}"))
+                }
             }
         }
         source: publication_artifact_path(stale_repo, expected.name, expected.version) ?? return Err(publication_registry_cache_error(registry, "{err}"))
-        if !files.is_dir(source) -> return Err(publication_registry_cache_error(registry, "concurrent publication lost its staged source artifact"))
+        if !files.is_dir(source) {
+            return Err(publication_registry_cache_error(registry, "concurrent publication lost its staged source artifact"))
+        }
         publication_publish_artifact(repo, source, expected.name, expected.version, expected.content_hash) ?? return Err(publication_registry_cache_error(registry, "{err}"))
         paths.push(publication_artifact_path(repo, expected.name, expected.version) ?? return Err(publication_registry_cache_error(registry, "{err}")))
     }
@@ -248,7 +292,9 @@ publication_remote_contains_entry: fn(registry: PublicationRegistryConfig, trans
     relative: publication_checkout_relative(repo, index) ?? return false
     shown: if publication_checkout_git(registry, transport, repo, [String]{"show", "{remote}:{relative}"}) == {
         .Ok(ran) -> ran
-        .Err(_) -> { return false }
+        .Err(_) -> {
+            return false
+        }
     }
     if !shown.success -> return false
     matched := false
@@ -262,7 +308,8 @@ publication_remote_contains_entry: fn(registry: PublicationRegistryConfig, trans
     if !publication_checkout_remote_has(registry, transport, repo, remote, artifact) -> return false
     metadata: publication_registry_package_metadata_path(repo, expected.name) ?? return false
     transparency: files.join(repo, "transparency")
-    loop path in ([String]{metadata, files.join(transparency, "log"), files.join(transparency, "checkpoint")}) {
+    loop path in
+        ([String]{metadata, files.join(transparency, "log"), files.join(transparency, "checkpoint")}) {
         if !publication_checkout_remote_has(registry, transport, repo, remote, path) -> return false
     }
     true

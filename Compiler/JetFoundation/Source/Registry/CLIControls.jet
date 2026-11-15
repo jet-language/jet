@@ -52,7 +52,7 @@ jet_cli_control_flag: fn(control: JetCLIControlSpec) -> String Never! {
 // The control whose flag is `flag` (the word before any `=`), if one is.
 jet_cli_control_of_flag: fn(flag: String) -> JetCLIControlSpec? Never! {
     loop control in JET_CLI_CONTROLS {
-        if jet_cli_control_flag(control) == flag -> return Val(control.copy()) // copy: the registry keeps its row.
+        if jet_cli_control_flag(control) == flag -> return Val(control.copy())  // copy: the registry keeps its row.
     }
     None
 }
@@ -60,7 +60,7 @@ jet_cli_control_of_flag: fn(flag: String) -> JetCLIControlSpec? Never! {
 // The control named `name`, if one is.
 jet_cli_control_named: fn(name: String) -> JetCLIControlSpec? Never! {
     loop control in JET_CLI_CONTROLS {
-        if control.name == name -> return Val(control.copy()) // copy: the registry keeps its row.
+        if control.name == name -> return Val(control.copy())  // copy: the registry keeps its row.
     }
     None
 }
@@ -76,7 +76,7 @@ jet_cli_control_flag_row: fn(control: JetCLIControlSpec) -> JetCLIFlagSpec Never
         assert(!variables.contains(control.variable), "{control.variable} backs two controls")
         variables.push(control.variable.copy())
         flag: jet_cli_control_flag(control)
-        wanted: flag.copy() // copy: the lambda's own name; a capture moves the name it reads.
+        wanted: flag.copy()  // copy: the lambda's own name; a capture moves the name it reads.
         rows: JET_CLI_FLAGS.filter(fn(row) { row.long == wanted })
         assert_eq(rows.len(), 1)
         assert_eq(rows[0].help, "With {control.scope}: {control.help}")

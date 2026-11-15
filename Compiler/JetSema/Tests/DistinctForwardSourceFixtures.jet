@@ -13,7 +13,8 @@ use {
     if parsed.diagnostics.len() != 0 -> panic("the fixture source must parse")
     forwarded: sema_derive_distinct_forward_source(parsed.program.items)
     text: forwarded.get("Score") ?? panic("no forwarded source for Score")
-    loop expected in ["impl Score.Equatable {{", "self.raw() == rhs.raw()", "impl Score.Comparable {{", "self.raw() < rhs.raw()"] {
+    loop expected in
+        ["impl Score.Equatable {{", "self.raw() == rhs.raw()", "impl Score.Comparable {{", "self.raw() < rhs.raw()"] {
         if !text.contains(expected) -> panic("forwarded source lacks `{expected}`:\n{text}")
     }
 }

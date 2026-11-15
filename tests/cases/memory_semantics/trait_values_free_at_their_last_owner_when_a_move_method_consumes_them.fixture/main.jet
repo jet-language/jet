@@ -25,12 +25,9 @@ Worker: struct {
     n: Int
 
     impl Sink {
-        finish: fn(&&self) -[]> Int {
-            self.n + 2
-        }
-        peek: fn(self) -[]> Int {
-            self.n + 1
-        }
+        finish: fn(&&self) -[]> Int { self.n + 2 }
+
+        peek: fn(self) -[]> Int { self.n + 1 }
     }
 }
 
@@ -38,9 +35,7 @@ Holder: struct {
     sink: Sink
 }
 
-make: fn(s: Shared<Context>, n: Int) -> Sink {
-    Worker{context: s.copy(), n: n}
-}
+make: fn(s: Shared<Context>, n: Int) -> Sink { Worker{context: s.copy(), n: n} }
 
 // Grows more than this (kB) over the measured rounds: a leak.
 GROWTH_KB: 8192
@@ -94,6 +89,8 @@ run: fn() {
     before: resident_kb()
     second: rounds(s, warm, 9 * warm)
     grown: resident_kb() - before
-    if grown > GROWTH_KB -> panic("consumed boxes: resident set grew {grown} kB over {8 * warm} rounds")
+    if grown > GROWTH_KB {
+        panic("consumed boxes: resident set grew {grown} kB over {8 * warm} rounds")
+    }
     print("rounds flat, checksum {first + second}, dropped {s.strong_count()}")
 }

@@ -16,8 +16,6 @@ remaining_ms: fn(expires_at_ms: Int, now_ms: Int) -> Int Never! {
     if now_ms >= expires_at_ms -> return 0
     // When `now_ms` is negative, subtraction can exceed the positive Int
     // range even though the interval is valid.  Saturate instead of wrapping.
-    if now_ms < 0 && expires_at_ms > 9223372036854775807 + now_ms {
-        return 9223372036854775807
-    }
+    if now_ms < 0 && expires_at_ms > 9223372036854775807 + now_ms -> return 9223372036854775807
     expires_at_ms - now_ms
 }

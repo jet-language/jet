@@ -39,17 +39,17 @@ run: fn() {
     tui_backend: ui.tui_backend()
     render_backend: tui_backend.copy()
     ui.reactive_render(
-    fn() {
-        save_action: ui.node_shortcut(ui.button("Save", fn() { save_requested.set(true) }), battery.save_shortcut())
-        editor: battery.editor_view(draft.get(), selected.get(), theme.get(), settings_open.get())
-        tree: ui.box(
-        [
-            editor,
-            save_action,
-        ],
-        )
-        ui.mount(render_backend, tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
-    },
+        fn() {
+            save_action: ui.node_shortcut(ui.button("Save", fn() { save_requested.set(true) }), battery.save_shortcut())
+            editor: battery.editor_view(draft.get(), selected.get(), theme.get(), settings_open.get())
+            tree: ui.box(
+                [
+                    editor,
+                    save_action,
+                ],
+            )
+            ui.mount(render_backend, tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
+        },
     )
 
     focus: battery.focus_group()

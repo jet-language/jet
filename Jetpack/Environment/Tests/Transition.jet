@@ -1,4 +1,3 @@
-
 use files: core.files
 
 TRANSITION_TEST_ENV_PACKAGE: #run "name: \"demo\"\nenvironments: {{ development: Environment{{ tools: [\"git\"] }} }}\n"
@@ -67,22 +66,35 @@ env_transition_test_error: fn(result: TransitionResult EnvironmentError!, what: 
     assert_eq(decoded, Val(bytes))
     assert_eq(env_transition_encode_state(None), "-")
     assert_eq(env_transition_encode_state(Val([U8]{})), "f")
-    assert_eq(if env_transition_decode_state(Val("-"), "fixture.journal") == {
-        .Ok(state) -> state
-        .Err(error) -> panic("decode absent")
-    }, [U8]?{None})
-    assert_eq(if env_transition_decode_state(Val("f"), "fixture.journal") == {
-        .Ok(state) -> state
-        .Err(error) -> panic("decode empty")
-    }, Val([U8]{}))
+    assert_eq(
+        if env_transition_decode_state(Val("-"), "fixture.journal") == {
+            .Ok(state) -> state
+            .Err(error) -> panic("decode absent")
+        },
+        [U8]?{None},
+    )
+    assert_eq(
+        if env_transition_decode_state(Val("f"), "fixture.journal") == {
+            .Ok(state) -> state
+            .Err(error) -> panic("decode empty")
+        },
+        Val([U8]{}),
+    )
     binary: [U8]{0, 10, 13, 34, 124, 128, 255}
     assert_eq(env_transition_encode_state(Val(binary)), "f000a0d227c80ff")
-    assert_eq(if env_transition_decode_state(Val("f000a0d227c80ff"), "fixture.journal") == {
-        .Ok(state) -> state
-        .Err(error) -> panic("decode binary")
-    }, Val(binary))
-    if env_transition_decode_state(Val("f0"), "fixture.journal") == .Ok(_) -> panic("odd hex must be refused")
-    if env_transition_decode_state(Val("fgg"), "fixture.journal") == .Ok(_) -> panic("nonhex must be refused")
+    assert_eq(
+        if env_transition_decode_state(Val("f000a0d227c80ff"), "fixture.journal") == {
+            .Ok(state) -> state
+            .Err(error) -> panic("decode binary")
+        },
+        Val(binary),
+    )
+    if env_transition_decode_state(Val("f0"), "fixture.journal") == .Ok(_) {
+        panic("odd hex must be refused")
+    }
+    if env_transition_decode_state(Val("fgg"), "fixture.journal") == .Ok(_) {
+        panic("nonhex must be refused")
+    }
 }
 
 #Test("environment split and fold restore exact root") {

@@ -15,17 +15,27 @@ pkg_entry_workspace_error: fn(error: AuthorityError) -> ManifestError Never! {
 }
 
 pkg_inline_body_error: fn(error: PackageParseError, span: Span) -> ManifestError Never! {
-    ManifestError{diagnostic: diagnostic_from_registry("E1362", Val(span),
-        "the inline Package body is malformed",
-        error.message(),
-        "fix the inline Package fields, then retry")}
+    ManifestError{
+        diagnostic: diagnostic_from_registry(
+            "E1362",
+            Val(span),
+            "the inline Package body is malformed",
+            error.message(),
+            "fix the inline Package fields, then retry",
+        ),
+    }
 }
 
 pkg_inline_manifest_conflict: fn(span: Span?) -> ManifestError Never! {
-    ManifestError{diagnostic: diagnostic_from_registry("E1363", span,
-        "an inline Package conflicts with package.jet",
-        "one project cannot carry both an inline Package block and a package.jet manifest",
-        "remove package.jet or remove the inline Package block")}
+    ManifestError{
+        diagnostic: diagnostic_from_registry(
+            "E1363",
+            span,
+            "an inline Package conflicts with package.jet",
+            "one project cannot carry both an inline Package block and a package.jet manifest",
+            "remove package.jet or remove the inline Package block",
+        ),
+    }
 }
 
 // E1331's Why is the typed read cause: the native open failure of a missing
@@ -38,9 +48,15 @@ pkg_unreadable_entry: fn(entry: String, error: AuthorityError) -> ManifestError 
         .NotText(_, _) -> "stream did not contain valid UTF-8"
         .ManifestParse(_, _) | .Symlink(_) | .WrongKind(_, _, _) | .Escapes(_) | .WorkspaceAmbiguous(_) | .WorkspaceNoModule | .NestedMembers(_, _) | .Invalid(_, _) | .Changed(_) | .Unsupported(_) -> error.message()
     }
-    ManifestError{diagnostic: diagnostic_from_registry("E1331", None,
-        "entry `{entry}` cannot be read", detail,
-        "restore the entry source, then retry")}
+    ManifestError{
+        diagnostic: diagnostic_from_registry(
+            "E1331",
+            None,
+            "entry `{entry}` cannot be read",
+            detail,
+            "restore the entry source, then retry",
+        ),
+    }
 }
 
 // Preserve no-follow authority refusals rather than reporting a linked entry
@@ -101,7 +117,9 @@ pkg_find_package_roots_checked: fn(cache: &WorkspaceDeclarationCache, start: Str
     loop {
         authority: if AuthorityResolver.open_for_authority_walk(dir) == {
             .Ok(found) -> found
-            .Err(error) -> { return Err(pkg_entry_authority_error(error)) }
+            .Err(error) -> {
+                return Err(pkg_entry_authority_error(error))
+            }
         }
         walked: authority != None
         // Explicit shared-directory boundaries are still inspected; upward
@@ -113,14 +131,10 @@ pkg_find_package_roots_checked: fn(cache: &WorkspaceDeclarationCache, start: Str
             .None -> AuthorityResolver.open(dir) ?? return Err(pkg_entry_authority_error(err))
         }
         workspace := false
-        if walked {
-            workspace = pkg_entry_has_workspace(resolver, cache)
-        }
+        if walked -> workspace = pkg_entry_has_workspace(resolver, cache)
         has_manifest: if resolver.checked_manifest(".") == {
             .Ok(manifest) -> {
-                if !walked {
-                    _: pkg_entry_has_workspace(resolver, cache)
-                }
+                if !walked -> _: pkg_entry_has_workspace(resolver, cache)
                 resolver.revalidate_file(manifest.file) ?? return Err(pkg_entry_authority_error(err))
                 true
             }
@@ -136,12 +150,8 @@ pkg_find_package_roots_checked: fn(cache: &WorkspaceDeclarationCache, start: Str
                         seeking_inline = false
                         if !walked && !has_manifest && pkg_entry_has_workspace(resolver, cache) == .Err(error) {
                             inline_error = Val(error)
-                        } else {
-                            inline_root = Val(dir.copy())
-                        }
-                    } else if workspace || has_manifest {
-                        seeking_inline = false
-                    }
+                        } else { inline_root = Val(dir.copy()) }
+                    } else if workspace || has_manifest { seeking_inline = false }
                 }
                 .Err(error) -> {
                     seeking_inline = false
@@ -239,9 +249,13 @@ pkg_package_facts_from_checked_entry: fn(resolver: AuthorityResolver, entry: Che
             }
         }
         compose_error := PackageParseError?{None}
-        if pkg_load_compose_and_validate(facts, resolver) == .Err(error) -> compose_error = Val(error)
+        if pkg_load_compose_and_validate(facts, resolver) == .Err(error) {
+            compose_error = Val(error)
+        }
         resolver.revalidate_file(entry) ?? return Err(pkg_entry_authority_error(err))
-        if compose_error == .Val(error) -> return Err(pkg_inline_body_error(error, inline.body_span))
+        if compose_error == .Val(error) {
+            return Err(pkg_inline_body_error(error, inline.body_span))
+        }
         return Ok(Val(facts))
     }
     root: manifest_root ?? return Ok(None)

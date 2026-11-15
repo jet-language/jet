@@ -47,7 +47,9 @@ GROWTH: "push append insert extend reserve push_str add add_new setdefault updat
 SKIPPED: [String]{"Tools/tower/", "tests/ui/", "Docs/audits/", "Docs/research/", "Docs/proposals/"}
 
 HANDLER: " ?? panic(\"no memory\")"
+
 CASE: "OutOfMemory"
+
 MESSAGE: "memory allocation refused"
 
 #Error
@@ -99,7 +101,7 @@ Edit: struct {
 // The rewrite of every source: its edits in offset order and the sites left
 // for a hand fix.
 Plan: struct {
-    edits: [Int: [Edit]]
+    edits: [Int:[Edit]]
     manual: [String]
     admitted: Int
     converted: Int
@@ -116,13 +118,9 @@ is_name_byte: fn(code: Int) -> Bool Never! {
     (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 || (code >= 48 && code <= 57)
 }
 
-is_digit: fn(code: Int) -> Bool Never! {
-    code >= 48 && code <= 57
-}
+is_digit: fn(code: Int) -> Bool Never! { code >= 48 && code <= 57 }
 
-is_space: fn(code: Int) -> Bool Never! {
-    code == 32 || code == 9 || code == 13
-}
+is_space: fn(code: Int) -> Bool Never! { code == 32 || code == 9 || code == 13 }
 
 slice: fn(bytes: [U8], start: Int, end: Int) -> String {
     String.from_bytes_lossy(bytes[start..<end])
@@ -339,8 +337,8 @@ CallNames: struct {
     direct: Bool
 }
 
-call_names: fn(code: [U8], open: Int, close: Int, growth: [String: Bool]) -> CallNames {
-    seen := [String: Bool]{}
+call_names: fn(code: [U8], open: Int, close: Int, growth: [String:Bool]) -> CallNames {
+    seen := [String:Bool]{}
     names := [String]{}
     direct := false
     at := open
@@ -375,7 +373,7 @@ call_names: fn(code: [U8], open: Int, close: Int, growth: [String: Bool]) -> Cal
 }
 
 // The declaration whose `fn` keyword ends at `from`, when it has a body.
-fn_decl: fn(code: [U8], line: Int, name: String, from: Int, growth: [String: Bool]) -> FnDecl? {
+fn_decl: fn(code: [U8], line: Int, name: String, from: Int, growth: [String:Bool]) -> FnDecl? {
     depth := 0
     at := from
     open := -1
@@ -410,7 +408,9 @@ fn_decl: fn(code: [U8], line: Int, name: String, from: Int, growth: [String: Boo
             byte(code, bang - 1) == 41 -> contract_start = group_start(code, bang - 1)
             else -> {
                 start := bang
-                loop start > from && !is_space(byte(code, start - 1)) && byte(code, start - 1) != 10 && byte(code, start - 1) != 62 -> start -= 1
+                loop start > from && !is_space(byte(code, start - 1)) && byte(code, start - 1) != 10 && byte(code, start - 1) != 62 {
+                    start -= 1
+                }
                 contract_start = start
             }
         }
@@ -467,14 +467,16 @@ top_members: fn(code: [U8], start: Int, end: Int) -> [String] {
     }
     kept := [String]{}
     loop member in members {
-        if member != "" && !member.starts_with("impl ") && !member.starts_with("#") -> kept.push(member.copy())
+        if member != "" && !member.starts_with("impl ") && !member.starts_with("#") {
+            kept.push(member.copy())
+        }
     }
     kept
 }
 
 // The declarations of one file: functions at any indent, and top-level
 // enums and structs.
-load_source: fn(path: String, text: String, growth: [String: Bool]) -> Source {
+load_source: fn(path: String, text: String, growth: [String:Bool]) -> Source {
     code: code_only(text)
     fns := [FnDecl]{}
     types := [TypeDecl]{}
@@ -483,7 +485,9 @@ load_source: fn(path: String, text: String, growth: [String: Bool]) -> Source {
     loop at < code.len() {
         start := at
         loop byte(code, start) == 32 || byte(code, start) == 9 -> start += 1
-        if word_at(code, start + 1, "run") && byte(code, start) == 35 && byte(code, start + 4) == 32 -> start += 5
+        if word_at(code, start + 1, "run") && byte(code, start) == 35 && byte(code, start + 4) == 32 {
+            start += 5
+        }
         stop: name_end(code, start)
         if stop > start {
             after := stop
@@ -493,7 +497,9 @@ load_source: fn(path: String, text: String, growth: [String: Bool]) -> Source {
                 name: slice(code, start, stop)
                 if {
                     word_at(code, after + 2, "fn") -> {
-                        if fn_decl(code, line, name, after + 4, growth) == .Val(decl) -> fns.push(decl)
+                        if fn_decl(code, line, name, after + 4, growth) == .Val(decl) {
+                            fns.push(decl)
+                        }
                     }
                     start == at && (word_at(code, after + 2, "enum") || word_at(code, after + 2, "struct")) -> {
                         if type_decl(code, name, stop, after + 2) == .Val(decl) -> types.push(decl)
@@ -509,8 +515,8 @@ load_source: fn(path: String, text: String, growth: [String: Bool]) -> Source {
 }
 
 // The names that reach a growth call, closed over calls by name.
-allocating_names: fn(sources: [Source]) -> [String: Bool] {
-    reached := [String: Bool]{}
+allocating_names: fn(sources: [Source]) -> [String:Bool] {
+    reached := [String:Bool]{}
     loop source in sources {
         loop decl in source.fns {
             if decl.direct -> reached[decl.name.copy()] = true
@@ -537,15 +543,15 @@ allocating_names: fn(sources: [Source]) -> [String: Bool] {
 
 // The names whose every declaration allocates with an inferred contract:
 // calls to them become fallible.
-newly_fallible: fn(sources: [Source], reached: [String: Bool]) -> [String: Bool] {
-    verdict := [String: Bool]{}
+newly_fallible: fn(sources: [Source], reached: [String:Bool]) -> [String:Bool] {
+    verdict := [String:Bool]{}
     loop source in sources {
         loop decl in source.fns {
             fallible: reached.has_key(decl.name) && decl.bang < 0
             verdict[decl.name.copy()] = fallible && (verdict.get(decl.name) ?? true)
         }
     }
-    kept := [String: Bool]{}
+    kept := [String:Bool]{}
     loop (name, fallible) in verdict {
         if fallible -> kept[name.copy()] = true
     }
@@ -565,16 +571,22 @@ leaf: fn(name: String) -> String {
     last
 }
 
-type_choice: fn(contract: String, domains: String, sources: [Source], from: Int, declared: [String: [Int]]) -> TypeChoice {
-    if domains == "admit" || contract.starts_with("(") -> return TypeChoice{how: "admit", source: -1, decl: -1}
+type_choice: fn(contract: String, domains: String, sources: [Source], from: Int, declared: [String:[Int]]) -> TypeChoice {
+    if domains == "admit" || contract.starts_with("(") {
+        return TypeChoice{how: "admit", source: -1, decl: -1}
+    }
     found: pick_decl(declared.get(leaf(contract)) ?? [Int]{}, sources, from)
     if found.len() == 0 {
         how: if domains == "mix" && !declared.has_key(leaf(contract)) -> "admit" else -> "manual"
         return TypeChoice{how: how, source: -1, decl: -1}
     }
     decl: sources[found[0]].types[found[1]]
-    if decl.kind == "enum" && domains == "mix" -> return TypeChoice{how: "admit", source: -1, decl: -1}
-    if decl.generic || (decl.kind == "struct" && !decl.message_only) -> return TypeChoice{how: "manual", source: -1, decl: -1}
+    if decl.kind == "enum" && domains == "mix" {
+        return TypeChoice{how: "admit", source: -1, decl: -1}
+    }
+    if decl.generic || (decl.kind == "struct" && !decl.message_only) {
+        return TypeChoice{how: "manual", source: -1, decl: -1}
+    }
     TypeChoice{how: "convert", source: found[0], decl: found[1]}
 }
 
@@ -613,7 +625,7 @@ directory: fn(path: String) -> String {
 
 // Adds `edit` to `source`'s edits in offset order; an insertion at an offset
 // already edited goes after the earlier one.
-put_edit: fn(edits: &[Int: [Edit]], source: Int, edit: Edit) {
+put_edit: fn(edits: &[Int:[Edit]], source: Int, edit: Edit) {
     if !edits.has_key(source) -> edits[source] = [Edit]{}
     index := edits[source].len()
     loop index > 0 && edits[source][index - 1].start > edit.start -> index -= 1
@@ -652,7 +664,7 @@ whole_statement: fn(code: [U8], start: Int, end: Int) -> Bool Never! {
 }
 
 // The handler insertions in one `Never!` body, and the sites left over.
-handle_body: fn(source: Source, index: Int, decl: FnDecl, growth: [String: Bool], fallible: [String: Bool], edits: &[Int: [Edit]], manual: &[String]) -> Int {
+handle_body: fn(source: Source, index: Int, decl: FnDecl, growth: [String:Bool], fallible: [String:Bool], edits: &[Int:[Edit]], manual: &[String]) -> Int {
     code: source.code
     handled := 0
     at := decl.open
@@ -677,7 +689,9 @@ handle_body: fn(source: Source, index: Int, decl: FnDecl, growth: [String: Bool]
                     put_edit(edits, index, Edit{start: end, end: end, text: HANDLER})
                     handled += 1
                 }
-                else -> manual.push("{source.path}:{decl.line}: `{name}(…)` in `{decl.name}` is not a whole statement; handle its AllocError by hand")
+                else -> {
+                    manual.push("{source.path}:{decl.line}: `{name}(…)` in `{decl.name}` is not a whole statement; handle its AllocError by hand")
+                }
             }
         }
         at = stop
@@ -692,10 +706,10 @@ already_handled: fn(code: [U8], end: Int) -> Bool Never! {
     byte(code, after) == 63 && byte(code, after + 1) == 63
 }
 
-plan_edits: fn(sources: [Source], domains: String, never: String, growth: [String: Bool]) -> Plan {
+plan_edits: fn(sources: [Source], domains: String, never: String, growth: [String:Bool]) -> Plan {
     reached: allocating_names(sources)
     fallible: newly_fallible(sources, reached)
-    declared := [String: [Int]]{}
+    declared := [String:[Int]]{}
     loop (index, source) in sources {
         loop (position, decl) in source.types {
             found := declared.get(decl.name) ?? [Int]{}
@@ -704,9 +718,9 @@ plan_edits: fn(sources: [Source], domains: String, never: String, growth: [Strin
             declared[decl.name.copy()] = found
         }
     }
-    edits := [Int: [Edit]]{}
+    edits := [Int:[Edit]]{}
     manual := [String]{}
-    converted_types := [String: Bool]{}
+    converted_types := [String:Bool]{}
     admitted := 0
     converted := 0
     dropped := 0
@@ -722,7 +736,9 @@ plan_edits: fn(sources: [Source], domains: String, never: String, growth: [Strin
                         put_edit(edits, index, Edit{start: start, end: decl.bang + 1, text: ""})
                         dropped += 1
                     }
-                    "handle" -> handled += handle_body(source, index, decl, growth, fallible, edits, manual)
+                    "handle" -> {
+                        handled += handle_body(source, index, decl, growth, fallible, edits, manual)
+                    }
                     else -> {}
                 }
                 next
@@ -732,12 +748,18 @@ plan_edits: fn(sources: [Source], domains: String, never: String, growth: [Strin
             if choice.how == {
                 "admit" -> {
                     if {
-                        contract.starts_with("(") -> put_edit(edits, index, Edit{start: decl.bang - 1, end: decl.bang - 1, text: " | AllocError"})
-                        else -> put_edit(edits, index, Edit{start: decl.contract_start, end: decl.bang, text: "({contract} | AllocError)"})
+                        contract.starts_with("(") -> {
+                            put_edit(edits, index, Edit{start: decl.bang - 1, end: decl.bang - 1, text: " | AllocError"})
+                        }
+                        else -> {
+                            put_edit(edits, index, Edit{start: decl.contract_start, end: decl.bang, text: "({contract} | AllocError)"})
+                        }
                     }
                     admitted += 1
                 }
-                "manual" -> manual.push("{source.path}:{decl.line}: `{decl.name}` returns `{contract}!`, which no rule converts; choose by hand")
+                "manual" -> {
+                    manual.push("{source.path}:{decl.line}: `{decl.name}` returns `{contract}!`, which no rule converts; choose by hand")
+                }
                 else -> {
                     domain: sources[choice.source].types[choice.decl]
                     owner: sources[choice.source]
@@ -798,7 +820,9 @@ tracked: fn(paths: [String]) -[Exec, IO, Time.Wait]> [String] ContractError! {
     if paths.len() == 0 -> argv.push(".")
     loop path in paths -> argv.push(path.copy())
     receipt: process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? return Err(ContractError{message: "cannot run git ls-files: {err}"})
-    if receipt.code != 0 -> return Err(ContractError{message: "git ls-files failed ({receipt.code}): {receipt.errors}"})
+    if receipt.code != 0 {
+        return Err(ContractError{message: "git ls-files failed ({receipt.code}): {receipt.errors}"})
+    }
     found := [String]{}
     loop line in receipt.output.split("\n") {
         if line.ends_with(".jet") && !skipped(line) -> found.push(line.copy())
@@ -811,11 +835,11 @@ area: fn(path: String) -> String {
     ""
 }
 
-census: fn(sources: [Source], growth: [String: Bool]) -[IO]> {
+census: fn(sources: [Source], growth: [String:Bool]) -[IO]> {
     reached: allocating_names(sources)
     fallible: newly_fallible(sources, reached)
-    tally := [String: Int]{}
-    domains := [String: Int]{}
+    tally := [String:Int]{}
+    domains := [String:Int]{}
     total := 0
     allocating := 0
     loop source in sources {
@@ -832,7 +856,9 @@ census: fn(sources: [Source], growth: [String: Bool]) -[IO]> {
             }
             key: "{area(source.path)}\t{kind}"
             tally[key] = (tally.get(key) ?? 0) + 1
-            if kind == "typed" -> domains[decl.contract.copy()] = (domains.get(decl.contract) ?? 0) + 1
+            if kind == "typed" {
+                domains[decl.contract.copy()] = (domains.get(decl.contract) ?? 0) + 1
+            }
         }
     }
     print("functions\t{total}\tallocating\t{allocating}\tnewly-fallible names\t{fallible.len()}")
@@ -867,10 +893,14 @@ contracts_main: fn(args: [String]) -[Exec, FS, IO, Time.Wait]> Int ContractError
             else -> paths.push(arg.copy())
         }
     }
-    if domains != "" && domains != "admit" && domains != "convert" && domains != "mix" -> return Err(ContractError{message: "unknown --domains={domains}\n{USAGE}"})
-    if never != "" && never != "drop" && never != "handle" -> return Err(ContractError{message: "unknown --never={never}\n{USAGE}"})
+    if domains != "" && domains != "admit" && domains != "convert" && domains != "mix" {
+        return Err(ContractError{message: "unknown --domains={domains}\n{USAGE}"})
+    }
+    if never != "" && never != "drop" && never != "handle" {
+        return Err(ContractError{message: "unknown --never={never}\n{USAGE}"})
+    }
     if !counting && domains == "" && never == "" -> return Err(ContractError{message: USAGE})
-    growth := [String: Bool]{}
+    growth := [String:Bool]{}
     loop word in GROWTH.split(" ") -> growth[word.copy()] = true
     sources := [Source]{}
     loop path in tracked(paths) ?? return Err(err) {
@@ -888,7 +918,9 @@ contracts_main: fn(args: [String]) -[Exec, FS, IO, Time.Wait]> Int ContractError
         changed += 1
         if {
             check -> term.eprint("{source.path}: {edits.len()} contract edit(s)")
-            else -> files.write(source.path, apply(source.text, edits)) ?? return Err(ContractError{message: "cannot write {source.path}: {err}"})
+            else -> {
+                files.write(source.path, apply(source.text, edits)) ?? return Err(ContractError{message: "cannot write {source.path}: {err}"})
+            }
         }
     }
     loop line in plan.manual -> term.eprint(line)
@@ -910,8 +942,8 @@ run: fn() {
     }
 }
 
-test_growth: fn() -> [String: Bool] {
-    growth := [String: Bool]{}
+test_growth: fn() -> [String:Bool] {
+    growth := [String:Bool]{}
     loop word in GROWTH.split(" ") -> growth[word.copy()] = true
     growth
 }

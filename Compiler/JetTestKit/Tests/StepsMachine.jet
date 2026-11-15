@@ -15,15 +15,35 @@ use files: core.files
     kit_exec_write(files.join(directory, "relay.txt"), "{relay}\n{row}\n{truncated}\n")
     assert_eq(cases_test_advanced(root, "relay", "step: cat\nstdin: relay.txt\nstdout: machine-output = [browser-relay,status,status] # original predicate\n").verdict.status, "PASS")
     surfaces: [
-        ["diagnostics", "\"diagnostics\":[]"], ["semindex", "\"semindex\":{{}}"], ["compiler", "\"compiler\":{{}}"],
-        ["canvas", "\"canvas\":{{}}"], ["structural_merge", "\"structural_merge\":{{}}"], ["budget", "\"budget\":{{}}"],
-        ["perf", "\"perf\":{{}}"], ["gc", "\"gc\":{{}}"], ["browser.relay", "\"browser\":{{\"relay\":{{}}}}"],
-        ["status", "\"status_report\":{{}}"], ["review", "\"review\":{{}}"], ["fill", "\"fill\":{{}}"],
-        ["import", "\"import\":{{}}"], ["inspect.dossier", "\"dossier\":{{}}"], ["inspect.impact", "\"impact\":{{}}"],
-        ["inspect.live", "\"live\":{{}}"], ["fmt", "\"fmt\":{{}}"], ["eval", "\"value\":null"], ["coverage", "\"coverage\":{{}}"],
-        ["test", "\"test\":{{}}"], ["inspect.build", "\"build\":{{}}"], ["inspect.parts", "\"parts\":[]"],
-        ["inspect.gates", "\"gates\":{{}}"], ["inspect.unsafe", "\"gates\":[]"], ["find", "\"matches\":[]"],
-        ["audit.copies", "\"copies\":[]"], ["try", "\"name\":\"example\""], ["remote.bind", "\"builder\":\"local\""], ["remote.list", "\"builders\":[]"]
+        ["diagnostics", "\"diagnostics\":[]"],
+        ["semindex", "\"semindex\":{{}}"],
+        ["compiler", "\"compiler\":{{}}"],
+        ["canvas", "\"canvas\":{{}}"],
+        ["structural_merge", "\"structural_merge\":{{}}"],
+        ["budget", "\"budget\":{{}}"],
+        ["perf", "\"perf\":{{}}"],
+        ["gc", "\"gc\":{{}}"],
+        ["browser.relay", "\"browser\":{{\"relay\":{{}}}}"],
+        ["status", "\"status_report\":{{}}"],
+        ["review", "\"review\":{{}}"],
+        ["fill", "\"fill\":{{}}"],
+        ["import", "\"import\":{{}}"],
+        ["inspect.dossier", "\"dossier\":{{}}"],
+        ["inspect.impact", "\"impact\":{{}}"],
+        ["inspect.live", "\"live\":{{}}"],
+        ["fmt", "\"fmt\":{{}}"],
+        ["eval", "\"value\":null"],
+        ["coverage", "\"coverage\":{{}}"],
+        ["test", "\"test\":{{}}"],
+        ["inspect.build", "\"build\":{{}}"],
+        ["inspect.parts", "\"parts\":[]"],
+        ["inspect.gates", "\"gates\":{{}}"],
+        ["inspect.unsafe", "\"gates\":[]"],
+        ["find", "\"matches\":[]"],
+        ["audit.copies", "\"copies\":[]"],
+        ["try", "\"name\":\"example\""],
+        ["remote.bind", "\"builder\":\"local\""],
+        ["remote.list", "\"builders\":[]"],
     ]
     loop (index, surface) in surfaces {
         document: "{{\"schema\":\"jet.status/v1\",\"action\":\"{surface[0]}\",\"ok\":true,\"reports\":[],\"payload\":{{{surface[1]}}}}}\n"
@@ -31,7 +51,8 @@ use files: core.files
         kind: if surface[0] == "browser.relay" -> "browser-relay" else -> "status"
         assert_eq(cases_test_advanced(root, "surface-{index}", "step: cat\nstdin: surface.txt\nstdout: machine-output = [{kind}] # original predicate\n").verdict.status, "PASS")
     }
-    loop pair in [["{{\"schema_version\":1,\"facts\":[]}}", "missing `schema`"], ["{{\"schema\":\"jet.report/v1\",\"moment\":\"tool\",\"status\":\"ok\",\"ok\":true}}", "expected `jet.report/v3`"]] {
+    loop pair in
+        [["{{\"schema_version\":1,\"facts\":[]}}", "missing `schema`"], ["{{\"schema\":\"jet.report/v1\",\"moment\":\"tool\",\"status\":\"ok\",\"ok\":true}}", "expected `jet.report/v3`"]] {
         kit_exec_write(files.join(directory, "invalid.txt"), pair[0])
         result: cases_test_advanced(root, "legacy", "step: cat\nstdin: invalid.txt\nstdout: machine-output = [report] # original predicate\n")
         assert_eq(result.verdict.status, "FAIL")

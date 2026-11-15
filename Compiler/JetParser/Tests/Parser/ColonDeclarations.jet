@@ -35,7 +35,7 @@ colon_test_trait: fn(program: Program, name: String) -> String {
 
 #Test("colon declarations read as the items their keyword heads declared") {
     program: parser_test_program(
-    `limit: 3
+        `limit: 3
 Point: struct {
     x: Int
 }
@@ -66,7 +66,7 @@ run: fn() {}
 
 #Test("one-line type, trait and impl bodies hold colon members") {
     program: parser_test_program(
-    `Point: struct { x: Int, y: Int }
+        `Point: struct { x: Int, y: Int }
 Shape: trait { area: fn(self) -> Int }
 impl Point.Shape { area: fn(self) -> Int { self.x * self.y } }
 run: fn() {}
@@ -93,7 +93,7 @@ run: fn() {
 
 #Test("a binding of a module path is an instance or an alias, any other binding a constant") {
     program: parser_test_program(
-    `cache: module<K>(capacity: Int) {
+        `cache: module<K>(capacity: Int) {
     size: fn() -> Int { capacity }
 }
 int_cache: cache<Int>(32)
@@ -121,7 +121,7 @@ run: fn() { print(int_cache.size()) }
 
 #Test("a `#code` block reads `name: fn` as a function wherever the value is written") {
     program: parser_test_program(
-    `run: fn() {
+        `run: fn() {
     keep(#code {
         greeting: fn() -> String { "hi" }
     })
@@ -129,16 +129,16 @@ run: fn() { print(int_cache.size()) }
 `,
     )
     run: loop item in program.items {
-        if item == .Func(f) && f.name == "run" -> break f
+        if item == .Func(f) && f.name == "run" {
+            break f
+        }
     } ?? panic("run")
     names := [String]{}
     loop statement in run.body {
         if statement == .Expr(outer_expr) && outer_expr == .Call(outer, _) && outer.args[0].expr == .Call(code, _) {
             items: code.args[0].flags.template_items ?? panic("template items")
             loop body_item in items {
-                if body_item == .Item(item) && item == .Func(f) {
-                    names.push(f.name)
-                }
+                if body_item == .Item(item) && item == .Func(f) -> names.push(f.name)
             }
         }
     }

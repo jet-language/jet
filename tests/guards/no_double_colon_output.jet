@@ -85,7 +85,9 @@ dc_digits: fn(bytes: [U8], start: Int, end: Int) -> Bool {
 dc_foreign: fn(bytes: [U8], at: Int) -> Bool {
     if dc_byte(bytes, at - 1) == 93 -> return true
     start := at
-    loop start > 0 && dc_word(dc_byte(bytes, start - 1)) && dc_byte(bytes, start - 2) != 92 -> start -= 1
+    loop start > 0 && dc_word(dc_byte(bytes, start - 1)) && dc_byte(bytes, start - 2) != 92 {
+        start -= 1
+    }
     end := at + 2
     loop end < bytes.len() && dc_word(dc_byte(bytes, end)) -> end += 1
     if (start < at || end > at + 2) && dc_group(bytes, start, at) && dc_group(bytes, at + 2, end) {
@@ -94,7 +96,9 @@ dc_foreign: fn(bytes: [U8], at: Int) -> Bool {
         if elided || neighbors || dc_digits(bytes, at + 2, end) -> return true
     }
     root := start
-    loop root > 0 && (dc_word(dc_byte(bytes, root - 1)) || dc_byte(bytes, root - 1) == 58) -> root -= 1
+    loop root > 0 && (dc_word(dc_byte(bytes, root - 1)) || dc_byte(bytes, root - 1) == 58) {
+        root -= 1
+    }
     first := root
     loop first < at && dc_byte(bytes, first) != 58 -> first += 1
     DC_RUST_ROOTS.contains(dc_text(bytes, root, first))
@@ -155,15 +159,21 @@ dc_case_expected: fn(line: String) -> String? {
 // CLI, REPL or terminal transcript.
 dc_golden: fn(path: String) -> Bool {
     name: path.rpartition("/").tail
-    if name == "stderr" || name == "stdout" || name == "expected.stdout" || name == "expected.stderr" -> return true
-    if name.ends_with(".stderr") || name.ends_with(".stdout") || name.ends_with(".out") || name.ends_with(".expected") -> return true
+    if name == "stderr" || name == "stdout" || name == "expected.stdout" || name == "expected.stderr" {
+        return true
+    }
+    if name.ends_with(".stderr") || name.ends_with(".stdout") || name.ends_with(".out") || name.ends_with(".expected") {
+        return true
+    }
     name.ends_with(".txt") && (path.starts_with("tests/cli/") || path.starts_with("tests/repl/") || path.starts_with("tests/cases/terminal/"))
 }
 
 // One finding per golden or case line that spells a `::`.
 dc_output_findings: fn(path: String, text: String, findings: &[String]) {
     golden: dc_golden(path)
-    if !golden && !path.ends_with(".case") -> return
+    if !golden && !path.ends_with(".case") {
+        return
+    }
     loop (index, line) in text.lines() {
         expected: if golden -> Val(line.copy()) else -> dc_case_expected(line)
         if expected == .Val(spelled) {
@@ -190,13 +200,17 @@ dc_source_findings: fn(found: [String:Int]) -> [String] {
     loop path in found.keys() {
         count: found[path]
         if allowed.get(path) == .Val(expected) {
-            if count != expected -> findings.push("{path}: {count} lines write `::`, the list allows {expected}; update its DC_SOURCE_ALLOWED row")
+            if count != expected {
+                findings.push("{path}: {count} lines write `::`, the list allows {expected}; update its DC_SOURCE_ALLOWED row")
+            }
         } else {
             findings.push("{path}: {count} lines write `::`, and no DC_SOURCE_ALLOWED row; spell the path with `.`")
         }
     }
     loop row in DC_SOURCE_ALLOWED {
-        if found.get(row.path) == None -> findings.push("{row.path}: no line writes `::`; delete its DC_SOURCE_ALLOWED row")
+        if found.get(row.path) == None {
+            findings.push("{row.path}: no line writes `::`; delete its DC_SOURCE_ALLOWED row")
+        }
     }
     findings.sort()
     findings

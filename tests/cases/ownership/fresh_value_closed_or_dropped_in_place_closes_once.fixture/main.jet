@@ -10,6 +10,7 @@ Res: struct {
         close: fn(&&self) { print("close {self.name}") }
     }
 }
+
 Plain: struct {
     id: Int
 
@@ -17,8 +18,11 @@ Plain: struct {
         close: fn(&&self) { print("close plain {self.id}") }
     }
 }
+
 make: fn(name: String) -> Res { Res{name: name} }
+
 attempt: fn(name: String) -> Res IOError! { Ok(Res{name: name}) }
+
 maybe: fn(name: String) -> Res? { Val(Res{name: name}) }
 
 run: fn() {

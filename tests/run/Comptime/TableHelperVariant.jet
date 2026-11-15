@@ -2,7 +2,10 @@
 // assign the explicit named-payload form `Enum.Variant{...}` to a field. The
 // compile-time evaluator gives the literal its enum identity, exactly as the
 // compiled program does.
-Route: enum { Missing Add }
+Route: enum {
+    Missing
+    Add
+}
 
 Plan: enum {
     Unplanned
@@ -15,9 +18,7 @@ Row: struct {
     plan: Plan
 }
 
-row: fn(name: String) -> Row Never! {
-    Row{name: name, route: Route.Missing, plan: Plan.Unplanned}
-}
+row: fn(name: String) -> Row Never! { Row{name: name, route: Route.Missing, plan: Plan.Unplanned} }
 
 with_route: fn(value: &&Row, route: Route) -> Row Never! {
     updated := value
@@ -28,7 +29,7 @@ with_route: fn(value: &&Row, route: Route) -> Row Never! {
 
 ROWS: #run { [Row]{
     row("plain"),
-    with_route(row("routed"), Route.Add)
+    with_route(row("routed"), Route.Add),
 } }
 
 route_name: fn(route: Route) -> String {

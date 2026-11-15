@@ -8,6 +8,7 @@ package: {
         parse: .Library{ entry: parse }
     }
 }
+
 use {
     unicode: core.text
     parse_unicode_string: core.text.runtime.kernel_unicode_string
@@ -28,11 +29,11 @@ split: fn(text: String, sep: String) -> [String] Never! {
     loop i + needle.len() <= raw.len() {
         if match_at(raw, i, needle) {
             out.push(slice_b(raw, start, i))
-            i = i + needle.len()
+            i += needle.len()
             start = i
             next
         }
-        i = i + 1
+        i += 1
     }
     out.push(slice_b(raw, start, raw.len()))
     out
@@ -46,13 +47,13 @@ rsplit: fn(text: String, sep: String, maxsplit: Int) -> [String] Never! {
     i := 0
     loop i < keep {
         if i == 0 -> head = parts[0] else -> head = "{head}{sep}{parts[i]}"
-        i = i + 1
+        i += 1
     }
     out := [String]{head}
     i = keep
     loop i < parts.len() {
         out.push(parts[i])
-        i = i + 1
+        i += 1
     }
     out
 }
@@ -97,7 +98,7 @@ rfind: fn(text: String, needle: String) -> Int Never! {
     i := raw.len() - nd.len()
     loop i >= 0 {
         if match_at(raw, i, nd) -> return i
-        i = i - 1
+        i -= 1
     }
     -1
 }
@@ -110,7 +111,7 @@ count: fn(text: String, needle: String) -> Int Never! {
     loop {
         j: find(slice_str(text, i, text.bytes().len()), needle)
         if j < 0 -> return n
-        n = n + 1
+        n += 1
         i = i + j + step
     }
 }
@@ -126,7 +127,7 @@ replace: fn(text: String, old: String, new: String, count: Int) -> String Never!
         if j < 0 || (count >= 0 && done >= count) -> return "{out}{rest}"
         out = "{out}{slice_str(rest, 0, j)}{new}"
         i = i + j + old.bytes().len()
-        done = done + 1
+        done += 1
     }
 }
 
@@ -189,7 +190,7 @@ parse_int_base: fn(text: String, base: Int) -> Int? Never! {
         if d < 0 || d >= base -> return None
         n = n * base + d
         any = true
-        i = i + 1
+        i += 1
     }
     if !any -> return None
     Val(sign * n)
@@ -216,31 +217,31 @@ parse_float: fn(text: String) -> Float? Never! {
         if d < 48 || d > 57 -> return None
         acc = acc * Float{10} + Float{d - 48}
         seen = true
-        i = i + 1
+        i += 1
     }
     if i < raw.len() && raw[i] == (U8{46}) {
-        i = i + 1
+        i += 1
         place := Float{1} / Float{10}
         loop i < raw.len() {
             n: raw[i]
             if n == 101 || n == 69 -> break
             d: n
             if d < 48 || d > 57 -> return None
-            acc = acc + Float{d - 48} * place
-            place = place / Float{10}
+            acc += Float{d - 48} * place
+            place /= Float{10}
             seen = true
-            i = i + 1
+            i += 1
         }
     }
     if i < raw.len() && (raw[i] == (U8{101}) || raw[i] == (U8{69})) {
-        i = i + 1
+        i += 1
         exp_sign := 1
         if {
             i < raw.len() && raw[i] == (U8{45}) -> {
                 exp_sign = -1
-                i = i + 1
+                i += 1
             }
-            i < raw.len() && raw[i] == (U8{43}) -> { i = i + 1 }
+            i < raw.len() && raw[i] == (U8{43}) -> { i += 1 }
         }
         exp := 0
         if i >= raw.len() -> return None
@@ -249,15 +250,15 @@ parse_float: fn(text: String) -> Float? Never! {
             if d < 48 || d > 57 -> return None
             exp = exp * 10 + (d - 48)
             if exp > 10000 -> return None
-            i = i + 1
+            i += 1
         }
         pow := Float{1}
         k := 0
         loop k < exp {
-            pow = pow * Float{10}
-            k = k + 1
+            pow *= Float{10}
+            k += 1
         }
-        if exp_sign < 0 -> acc = acc / pow else -> acc = acc * pow
+        if exp_sign < 0 -> acc /= pow else -> acc *= pow
     }
     if !seen || i != raw.len() -> return None
     Val(sign * acc)
@@ -285,7 +286,6 @@ is_alnum: fn(text: String) -> Bool Never! {
 
 chars: fn(text: String) -> [String] Never! { unicode.scalars(text) }
 
-
 match_at: fn(raw: [U8], i: Int, needle: [U8]) -> Bool {
     loop j in 0..<needle.len() {
         if raw[i + j] != needle[j] -> return false
@@ -299,7 +299,7 @@ slice_b: fn(raw: [U8], start: Int, end: Int) -> String {
     loop {
         if i >= end || i >= raw.len() -> return String.from_bytes(out) ?? ""
         out.push(raw[i])
-        i = i + 1
+        i += 1
     }
 }
 
@@ -318,7 +318,7 @@ join: fn(parts: [String], sep: String) -> String Never! {
     i := 0
     loop i < parts.len() {
         if i == 0 -> s = parts[0] else -> s = "{s}{sep}{parts[i]}"
-        i = i + 1
+        i += 1
     }
     s
 }
@@ -337,11 +337,11 @@ splitlines: fn(text: String, keepends: Bool) -> [String] Never! {
             if keepends -> out.push(slice_b(raw, start, i + eat)) else {
                 out.push(slice_b(raw, start, end))
             }
-            i = i + eat
+            i += eat
             start = i
             next
         }
-        i = i + 1
+        i += 1
     }
     if start <= raw.len() -> out.push(slice_b(raw, start, raw.len()))
     out
@@ -353,7 +353,7 @@ lstrip: fn(text: String) -> String Never! {
     loop i < raw.len() {
         n: raw[i]
         if n != 32 && n != 9 && n != 10 && n != 13 -> return slice_b(raw, i, raw.len())
-        i = i + 1
+        i += 1
     }
     ""
 }
@@ -364,7 +364,7 @@ rstrip: fn(text: String) -> String Never! {
     loop i > 0 {
         n: raw[i - 1]
         if n != 32 && n != 9 && n != 10 && n != 13 -> return slice_b(raw, 0, i)
-        i = i - 1
+        i -= 1
     }
     ""
 }
@@ -414,7 +414,7 @@ capitalize: fn(text: String) -> String Never! {
     i := 1
     loop i < raw.len() {
         out.push(ascii_case(raw[i], false))
-        i = i + 1
+        i += 1
     }
     String.from_bytes(out) ?? text
 }
@@ -443,7 +443,7 @@ capwords: fn(text: String) -> String Never! {
     i := 0
     loop i < parts.len() {
         parts[i] = capitalize(parts[i])
-        i = i + 1
+        i += 1
     }
     join(parts, " ")
 }
@@ -567,11 +567,7 @@ is_title: fn(text: String) -> Bool Never! {
             if starts_word != expect_upper -> return false
             has_cased = true
             expect_upper = false
-        } else if unicode.is_alphabetic(ch) {
-            return false
-        } else {
-            expect_upper = true
-        }
+        } else if unicode.is_alphabetic(ch) { return false } else { expect_upper = true }
     }
     has_cased
 }
@@ -603,11 +599,17 @@ is_identifier: fn(text: String) -> Bool Never! {
 
 /// Python `str` spellings over the same UTF-8 byte-preserving primitives.
 startswith: fn(text: String, prefix: String) -> Bool Never! { starts_with(text, prefix) }
+
 endswith: fn(text: String, suffix: String) -> Bool Never! { ends_with(text, suffix) }
+
 removeprefix: fn(text: String, prefix: String) -> String Never! { strip_prefix(text, prefix) }
+
 removesuffix: fn(text: String, suffix: String) -> String Never! { strip_suffix(text, suffix) }
+
 rindex: fn(text: String, needle: String) -> Int Never! { rfind(text, needle) }
+
 encode: fn(text: String) -> [U8] Never! { text.bytes() }
+
 isalpha: fn(text: String) -> Bool Never! {
     if text.bytes().len() == 0 -> return false
     loop b in text.bytes() {
@@ -616,16 +618,27 @@ isalpha: fn(text: String) -> Bool Never! {
     }
     true
 }
+
 isdecimal: fn(text: String) -> Bool Never! { is_digit(text) }
+
 isnumeric: fn(text: String) -> Bool Never! { is_digit(text) }
+
 isalnum: fn(text: String) -> Bool Never! { is_alnum(text) }
+
 isascii: fn(text: String) -> Bool Never! { is_ascii(text) }
+
 isdigit: fn(text: String) -> Bool Never! { is_digit(text) }
+
 isidentifier: fn(text: String) -> Bool Never! { is_identifier(text) }
+
 islower: fn(text: String) -> Bool Never! { is_lower(text) }
+
 isspace: fn(text: String) -> Bool Never! { is_space(text) }
+
 istitle: fn(text: String) -> Bool Never! { is_title(text) }
+
 isupper: fn(text: String) -> Bool Never! { is_upper(text) }
+
 isprintable: fn(text: String) -> Bool Never! {
     loop b in text.bytes() {
         n: b
@@ -633,6 +646,7 @@ isprintable: fn(text: String) -> Bool Never! {
     }
     true
 }
+
 /// Expand tab stops in decoded-scalar columns, resetting at either CR or LF.
 expandtabs: fn(text: String, tabsize: Int) -> String Never! {
     out := ""
@@ -646,17 +660,16 @@ expandtabs: fn(text: String, tabsize: Int) -> String Never! {
                 spaces := 0
                 if width > 0 -> spaces = width - (column % width)
                 loop _ in 0..<spaces -> out = "{out} "
-                column = column + spaces
+                column += spaces
             }
             else -> {
                 out = "{out}{ch}"
-                if n == 10 || n == 13 -> column = 0 else -> column = column + 1
+                if n == 10 || n == 13 -> column = 0 else -> column += 1
             }
         }
     }
     out
 }
-
 
 find_from: fn(text: String, needle: String, start: Int) -> Int Never! {
     s := start
@@ -717,7 +730,7 @@ split_ws: fn(text: String) -> [String] Never! {
             }
             start < 0 -> { start = i }
         }
-        i = i + 1
+        i += 1
     }
     out
 }
@@ -737,11 +750,11 @@ unescape_c: fn(text: String) -> String Never! {
                 n == 34 -> { out.push(U8{34}) }
                 else -> { out.push(raw[i + 1]) }
             }
-            i = i + 2
+            i += 2
             next
         }
         out.push(raw[i])
-        i = i + 1
+        i += 1
     }
     String.from_bytes(out) ?? text
 }
@@ -774,11 +787,10 @@ repeat_char: fn(ch: String, n: Int) -> String {
     i := 0
     loop i < n {
         s = "{s}{ch}"
-        i = i + 1
+        i += 1
     }
     s
 }
-
 
 ascii_case: fn(b: U8, upper: Bool) -> U8 {
     n: b
@@ -808,7 +820,7 @@ ascii_case: fn(b: U8, upper: Bool) -> U8 {
 __string_trim_newlines: fn(text: String) -> String Never! {
     raw: text.bytes()
     end := raw.len()
-    loop end > 0 && raw[end - 1] == (U8{10}) -> end = end - 1
+    loop end > 0 && raw[end - 1] == (U8{10}) -> end -= 1
     if end == raw.len() -> return text.copy()
     kept := [U8]{}
     loop at in 0..<end -> kept.push(raw[at])
@@ -925,7 +937,9 @@ priv version_prefix_len: fn(name: [U8]) -> Int Never! {
         prefix = at
         loop at + 1 < name.len() && name[at] == (U8{46}) && (version_letter(name[at + 1]) || name[at + 1] == (U8{126})) {
             at += 2
-            loop at < name.len() && (version_letter(name[at]) || version_digit(name[at]) || name[at] == (U8{126})) -> at += 1
+            loop at < name.len() && (version_letter(name[at]) || version_digit(name[at]) || name[at] == (U8{126})) {
+                at += 1
+            }
         }
     }
     prefix
@@ -973,9 +987,13 @@ priv version_weight: fn(name: [U8], at: Int, end: Int) -> Int Never! {
 priv version_digit: fn(byte: U8) -> Bool Never! { byte >= (U8{48}) && byte <= (U8{57}) }
 
 // Whether `name[at]` is before `end` and outside a digit run.
-priv version_text_at: fn(name: [U8], at: Int, end: Int) -> Bool Never! { at < end && !version_digit(name[at]) }
+priv version_text_at: fn(name: [U8], at: Int, end: Int) -> Bool Never! {
+    at < end && !version_digit(name[at])
+}
 
-priv version_letter: fn(byte: U8) -> Bool Never! { (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122})) }
+priv version_letter: fn(byte: U8) -> Bool Never! {
+    (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122}))
+}
 
 #Test("compare_version is GNU sort -V order") {
     rows := [String]{"6067c10", "file.tar.gz", "a1", "1.10", "", "B", "1.0", "..", "6067c9", "a01", "1.9", ".hidden", "file.tar", "1.0~rc1", "a", ".", "1.2", "x.1", "x-1"}

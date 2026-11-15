@@ -1,10 +1,13 @@
 sort_key: fn(n: Int) -> String Never! { "{n}" }
+
 stopping_sort_key: fn(n: Int, seen: &String) -> String Err! {
     seen += "{n}"
-    if n == 1 { return Err("stop", code: "E_SORT") }
+    if n == 1 -> return Err("stop", code: "E_SORT")
     return "{n}"
 }
+
 unit: fn() {}
+
 run: fn() {
     ascending := [3, 1, 2]
     ascending.sort_by(fn(n: Int) { sort_key(n) })

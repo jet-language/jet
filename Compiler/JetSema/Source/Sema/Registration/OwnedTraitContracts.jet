@@ -50,12 +50,16 @@ sema_owned_render: fn(method: OwnedMethod, names: [String], types: [Type]) -> St
     parts := [String]{}
     if method.receiver == {
         .Static -> {}
-        .Any -> parts.push("self")
+        .Any -> { parts.push("self") }
         .Fixed(access) -> parts.push("{access_sigil(access)}self")
     }
-    loop param in method.params -> parts.push("{param.name}: {access_sigil(param.access)}{type_name(sema_inference_substitute_type(param.ty, names, types))}")
+    loop param in method.params {
+        parts.push("{param.name}: {access_sigil(param.access)}{type_name(sema_inference_substitute_type(param.ty, names, types))}")
+    }
     rendered: "{method.name}: fn({parts.join(", ")})"
-    if method.returns == .Val(returned) -> return "`{rendered} -> {type_name(sema_inference_substitute_type(returned, names, types))}`"
+    if method.returns == .Val(returned) {
+        return "`{rendered} -> {type_name(sema_inference_substitute_type(returned, names, types))}`"
+    }
     "`{rendered}`"
 }
 
@@ -79,17 +83,27 @@ sema_owned_returns_nothing: fn(returned: Type?) -> Bool Never! {
 sema_owned_method_matches: fn(wanted: OwnedMethod, actual: Func, names: [String], types: [Type]) -> Bool Never! {
     has_self: sema_owned_has_self(actual)
     if wanted.receiver == {
-        .Static -> if has_self -> return false
-        .Any -> if !has_self -> return false
-        .Fixed(access) -> if !has_self || actual.params[0].convention != access -> return false
+        .Static -> {
+            if has_self -> return false
+        }
+        .Any -> {
+            if !has_self -> return false
+        }
+        .Fixed(access) -> {
+            if !has_self || actual.params[0].convention != access -> return false
+        }
     }
     offset: if has_self -> 1 else -> 0
     if actual.params.len() != wanted.params.len() + offset -> return false
     loop index in 0..<wanted.params.len() {
         param: actual.params[index + offset]
-        if wanted.params[index].access != AccessConvention.Read && param.convention != wanted.params[index].access -> return false
+        if wanted.params[index].access != AccessConvention.Read && param.convention != wanted.params[index].access {
+            return false
+        }
         written: sema_inference_substitute_type(param.ty, names, types)
-        if !type_identity_equal(written, sema_inference_substitute_type(wanted.params[index].ty, names, types)) -> return false
+        if !type_identity_equal(written, sema_inference_substitute_type(wanted.params[index].ty, names, types)) {
+            return false
+        }
     }
     if wanted.returns == .Val(expected) {
         returned: actual.return_type ?? return false
@@ -105,7 +119,9 @@ sema_owned_check_methods: fn(trait_name: String, declared: [OwnedMethod], associ
     missing := [String]{}
     loop wanted in declared {
         present: loop method in methods {
-            if method.name == wanted.name -> break true
+            if method.name == wanted.name {
+                break true
+            }
         } ?? false
         if !present -> missing.push(wanted.name)
     }
@@ -115,14 +131,14 @@ sema_owned_check_methods: fn(trait_name: String, declared: [OwnedMethod], associ
     unbound := [String]{}
     loop name in associated_names {
         bound: loop binding in associated {
-            if binding.name == name -> break Val(binding.ty.copy())
+            if binding.name == name {
+                break Val(binding.ty.copy())
+            }
         } ?? None
         if bound == .Val(ty) {
             names.push(name.copy())
             types.push(ty)
-        } else {
-            unbound.push(name.copy())
-        }
+        } else { unbound.push(name.copy()) }
     }
     if unbound.len() > 0 {
         diagnostics.push(sema_owned_unbound(trait_name, unbound, span))
@@ -137,7 +153,9 @@ sema_owned_check_methods: fn(trait_name: String, declared: [OwnedMethod], associ
     valid := missing.len() == 0
     loop method in methods {
         wanted: loop candidate in declared {
-            if candidate.name == method.name -> break Val(candidate)
+            if candidate.name == method.name {
+                break Val(candidate)
+            }
         } ?? None
         contract: wanted ?? next
         if !sema_owned_method_matches(contract, method, names, types) {
@@ -154,13 +172,21 @@ sema_owned_check_methods: fn(trait_name: String, declared: [OwnedMethod], associ
 sema_owned_operator_valid: fn(hook: String, result: Type?, rhs: Type, methods: [Func]) -> Bool Never! {
     if methods.len() != 1 -> return false
     method: methods[0]
-    if method.name != hook || method.type_params.len() != 0 || method.params.len() < 2 -> return false
+    if method.name != hook || method.type_params.len() != 0 || method.params.len() < 2 {
+        return false
+    }
     receiver: method.params[0]
-    if receiver.name != "self" || receiver.convention != AccessConvention.Read || receiver.variadic || receiver.default != None -> return false
+    if receiver.name != "self" || receiver.convention != AccessConvention.Read || receiver.variadic || receiver.default != None {
+        return false
+    }
     other: method.params[1]
-    if other.convention != AccessConvention.Read || !type_identity_equal(other.ty, rhs) || other.variadic || other.default != None -> return false
+    if other.convention != AccessConvention.Read || !type_identity_equal(other.ty, rhs) || other.variadic || other.default != None {
+        return false
+    }
     written: method.return_type ?? return false
-    if result == .Val(expected) -> return type_identity_equal(sema_owned_infallible(written), expected)
+    if result == .Val(expected) {
+        return type_identity_equal(sema_owned_infallible(written), expected)
+    }
     true
 }
 
@@ -170,17 +196,25 @@ sema_owned_check_operator: fn(trait_name: String, hook: String, result: Type?, r
     result_text: if result == .Val(expected) -> type_name(expected) else -> "a declared result type"
     expected: "`{hook}: fn(self, rhs: {type_name(rhs)}) -> {result_text}`"
     hook_index: loop index in 0..<methods.len() {
-        if methods[index].name == hook -> break Val(index)
+        if methods[index].name == hook {
+            break Val(index)
+        }
     } ?? None
     found: hook_index ?? {
         diagnostics.push(sema_owned_missing(trait_name, [String]{hook}, span))
-        loop method in methods -> diagnostics.push(sema_owned_mismatch(trait_name, hook, expected, method.name_span))
+        loop method in methods {
+            diagnostics.push(sema_owned_mismatch(trait_name, hook, expected, method.name_span))
+        }
         return false
     }
     valid: sema_owned_operator_valid(hook, result, rhs, methods)
-    if !valid -> diagnostics.push(sema_owned_mismatch(trait_name, hook, expected, methods[found].name_span))
+    if !valid {
+        diagnostics.push(sema_owned_mismatch(trait_name, hook, expected, methods[found].name_span))
+    }
     loop index in 0..<methods.len() {
-        if index != found -> diagnostics.push(sema_owned_mismatch(trait_name, hook, expected, methods[index].name_span))
+        if index != found {
+            diagnostics.push(sema_owned_mismatch(trait_name, hook, expected, methods[index].name_span))
+        }
     }
     valid
 }
@@ -263,7 +297,9 @@ sema_owned_check_literal: fn(trait_name: String, source: Type, owner_type: Type,
             .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
         }
     }
-    if !valid -> diagnostics.push(sema_owned_mismatch(trait_name, "from_literal", "`#run from_literal: fn(value: {type_name(source)}) -> {owner}`", hook.name_span))
+    if !valid {
+        diagnostics.push(sema_owned_mismatch(trait_name, "from_literal", "`#run from_literal: fn(value: {type_name(source)}) -> {owner}`", hook.name_span))
+    }
     valid
 }
 
@@ -347,47 +383,85 @@ sema_owned_check_checked_text: fn(methods: [Func], associated: [NamedType], dist
         return false
     }
     count: diagnostics.len()
-    if errors.len() == 0 -> diagnostics.push(sema_owned_unbound(trait_name, [String]{"Error"}, span))
-    loop index in 1..<errors.len() -> diagnostics.push(sema_owned_mismatch(trait_name, "type Error", "one `type Error = …` binding", associated[errors[index]].span))
-    loop index in 1..<hole_bindings.len() -> diagnostics.push(sema_owned_mismatch(trait_name, "type Hole", "one `type Hole = …` binding", associated[hole_bindings[index]].span))
-    if hole_bindings.len() > 0 && builds.len() == 0 -> diagnostics.push(sema_owned_mismatch(trait_name, "type Hole", "a `build` method that receives the holes", associated[hole_bindings[0]].span))
+    if errors.len() == 0 {
+        diagnostics.push(sema_owned_unbound(trait_name, [String]{"Error"}, span))
+    }
+    loop index in 1..<errors.len() {
+        diagnostics.push(sema_owned_mismatch(trait_name, "type Error", "one `type Error = …` binding", associated[errors[index]].span))
+    }
+    loop index in 1..<hole_bindings.len() {
+        diagnostics.push(sema_owned_mismatch(trait_name, "type Hole", "one `type Hole = …` binding", associated[hole_bindings[index]].span))
+    }
+    if hole_bindings.len() > 0 && builds.len() == 0 {
+        diagnostics.push(sema_owned_mismatch(trait_name, "type Hole", "a `build` method that receives the holes", associated[hole_bindings[0]].span))
+    }
     loop binding in associated {
-        if binding.name != "Error" && binding.name != "Hole" -> diagnostics.push(sema_owned_mismatch(trait_name, "type {binding.name}", "only `type Error = …` and `type Hole = …`", binding.span))
+        if binding.name != "Error" && binding.name != "Hole" {
+            diagnostics.push(sema_owned_mismatch(trait_name, "type {binding.name}", "only `type Error = …` and `type Hole = …`", binding.span))
+        }
     }
     checks: loop index in 0..<methods.len() if methods[index].name == "check" -> index
     holes: loop index in 0..<methods.len() if methods[index].name == "encode_hole" -> index
-    if checks.len() == 0 -> diagnostics.push(sema_owned_missing(trait_name, [String]{"check"}, span))
-    if holes.len() == 0 -> diagnostics.push(sema_owned_missing(trait_name, [String]{"encode_hole"}, span))
-    loop index in 1..<checks.len() -> diagnostics.push(sema_owned_mismatch(trait_name, "check", check_expected, methods[checks[index]].name_span))
-    loop index in 1..<holes.len() -> diagnostics.push(sema_owned_mismatch(trait_name, "encode_hole", hole_expected, methods[holes[index]].name_span))
-    loop index in 1..<builds.len() -> diagnostics.push(sema_owned_mismatch(trait_name, "build", build_expected, methods[builds[index]].name_span))
+    if checks.len() == 0 {
+        diagnostics.push(sema_owned_missing(trait_name, [String]{"check"}, span))
+    }
+    if holes.len() == 0 {
+        diagnostics.push(sema_owned_missing(trait_name, [String]{"encode_hole"}, span))
+    }
+    loop index in 1..<checks.len() {
+        diagnostics.push(sema_owned_mismatch(trait_name, "check", check_expected, methods[checks[index]].name_span))
+    }
+    loop index in 1..<holes.len() {
+        diagnostics.push(sema_owned_mismatch(trait_name, "encode_hole", hole_expected, methods[holes[index]].name_span))
+    }
+    loop index in 1..<builds.len() {
+        diagnostics.push(sema_owned_mismatch(trait_name, "build", build_expected, methods[builds[index]].name_span))
+    }
     if checks.len() > 0 {
         check: methods[checks[0]]
         check_ok := check.type_params.len() == 0 && sema_owned_plain_param(check, Type.String) && sema_owned_pure(check) && errors.len() > 0
         if check_ok {
             check_ok = false
             if check.return_type == .Val(returned) {
-                if returned == .Result(ok, err) -> check_ok = ok == (Type.Named{name: "Unit"}) && type_identity_equal(err, error_type)
+                if returned == .Result(ok, err) {
+                    check_ok = ok == (Type.Named{name: "Unit"}) && type_identity_equal(err, error_type)
+                }
             }
         }
-        if !check_ok -> diagnostics.push(sema_owned_mismatch(trait_name, "check", check_expected, check.name_span))
+        if !check_ok {
+            diagnostics.push(sema_owned_mismatch(trait_name, "check", check_expected, check.name_span))
+        }
     }
     if holes.len() > 0 {
         hole: methods[holes[0]]
         hole_ok := sema_owned_plain_param(hole, Type.Named{name: "T"}) && sema_owned_pure(hole) && hole.type_params.len() == 1
-        if hole_ok -> hole_ok = hole.type_params[0].name == "T" && hole.type_params[0].bounds == ([String]{"Printable"})
-        if hole_ok -> hole_ok = if hole.return_type == .Val(returned) -> type_identity_equal(returned, hole_type) else -> false
-        if !hole_ok -> diagnostics.push(sema_owned_mismatch(trait_name, "encode_hole", hole_expected, hole.name_span))
+        if hole_ok {
+            hole_ok = hole.type_params[0].name == "T" && hole.type_params[0].bounds == ([String]{"Printable"})
+        }
+        if hole_ok {
+            hole_ok = if hole.return_type == .Val(returned) -> type_identity_equal(returned, hole_type) else -> false
+        }
+        if !hole_ok {
+            diagnostics.push(sema_owned_mismatch(trait_name, "encode_hole", hole_expected, hole.name_span))
+        }
     }
     if builds.len() > 0 {
         build: methods[builds[0]]
         build_ok := build.type_params.len() == 0 && sema_owned_pure(build) && build.params.len() == 2
-        if build_ok -> build_ok = sema_owned_list_param(build.params[0], Type.String) && sema_owned_list_param(build.params[1], hole_type)
-        if build_ok -> build_ok = if build.return_type == .Val(returned) -> sema_owned_owner_name(returned) == owner_name else -> false
-        if !build_ok -> diagnostics.push(sema_owned_mismatch(trait_name, "build", build_expected, build.name_span))
+        if build_ok {
+            build_ok = sema_owned_list_param(build.params[0], Type.String) && sema_owned_list_param(build.params[1], hole_type)
+        }
+        if build_ok {
+            build_ok = if build.return_type == .Val(returned) -> sema_owned_owner_name(returned) == owner_name else -> false
+        }
+        if !build_ok {
+            diagnostics.push(sema_owned_mismatch(trait_name, "build", build_expected, build.name_span))
+        }
     }
     loop method in methods {
-        if method.name != "check" && method.name != "encode_hole" && method.name != "build" -> diagnostics.push(sema_owned_mismatch(trait_name, method.name, "only `check`, `encode_hole` and `build`", method.name_span))
+        if method.name != "check" && method.name != "encode_hole" && method.name != "build" {
+            diagnostics.push(sema_owned_mismatch(trait_name, method.name, "only `check`, `encode_hole` and `build`", method.name_span))
+        }
     }
     diagnostics.len() == count
 }

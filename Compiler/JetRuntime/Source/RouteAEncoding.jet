@@ -67,9 +67,13 @@ encoding_cause_take: fn(kind: I64, present: Bool, code: I64, message: I64) -> I6
 }
 
 // The EncodingCause of an OS error.
-encoding_cause_errno: fn(code: I64) -> I64 { encoding_cause_take(rt_io_error_kind_name(code), true, code, host_errno_cause(code)) }
+encoding_cause_errno: fn(code: I64) -> I64 {
+    encoding_cause_take(rt_io_error_kind_name(code), true, code, host_errno_cause(code))
+}
 
-encoding_cause_custom: fn(kind: I64, message: I64) -> I64 { encoding_cause_take(kind, false, I64{0}, jet_rt_string_clone(message)) }
+encoding_cause_custom: fn(kind: I64, message: I64) -> I64 {
+    encoding_cause_take(kind, false, I64{0}, jet_rt_string_clone(message))
+}
 
 encoding_fail: fn(cause: I64, error: I64) -> I64 {
     encoding_store(error, cause)
@@ -84,7 +88,9 @@ encoding_fail: fn(cause: I64, error: I64) -> I64 {
 // bytes_written104 interrupts112, read_total120 write_total128, read plan
 // words136/len144/cap152 + idx160, write plan words168/len176/cap184 + idx192.
 ENCODING_HOSTILE_BYTES: I64{200}
+
 ENCODING_IO_CHUNK: I64{65536}
+
 encoding_hostile_key := I64{0}
 
 // runtime-init: 3 when encoding_hostile_key
@@ -98,21 +104,20 @@ encoding_hostile_key := I64{0}
 
 encoding_env_flag: fn(name: I64) -> Bool {
     value: host_environment_value(name)
-    if (value == I64{0}) -> return false
+    if (value == I64{0}) { return false }
     length: host_startup_byte_length(value)
     !(length == I64{1} && rt_text_byte(value) == I64{48})
 }
 
 // str::trim's Unicode White_Space set.
 encoding_white_space: fn(scalar: I64) -> Bool {
-    (scalar >= I64{9} && scalar <= I64{13}) || scalar == I64{32} || scalar == I64{133} || scalar == I64{160} || scalar == I64{5760} ||
-        (scalar >= I64{8192} && scalar <= I64{8202}) || scalar == I64{8232} || scalar == I64{8233} || scalar == I64{8239} || scalar == I64{8287} || scalar == I64{12288}
+    (scalar >= I64{9} && scalar <= I64{13}) || scalar == I64{32} || scalar == I64{133} || scalar == I64{160} || scalar == I64{5760} || (scalar >= I64{8192} && scalar <= I64{8202}) || scalar == I64{8232} || scalar == I64{8233} || scalar == I64{8239} || scalar == I64{8287} || scalar == I64{12288}
 }
 
 encoding_scalar_at: fn(data: I64, at: I64) -> I64 {
     lead: rt_text_byte(wrapping(data + at))
     width: rt_text_width(wrapping(data + at))
-    if (width == I64{1}) -> return lead
+    if (width == I64{1}) { return lead }
     value := lead.bit_and(if (width == I64{2}) -> I64{31} else if (width == I64{3}) -> I64{15} else -> I64{7})
     index := I64{1}
     loop index < width {
@@ -125,11 +130,15 @@ encoding_scalar_at: fn(data: I64, at: I64) -> I64 {
 // Trimmed [start, end) of data[start..end).
 encoding_trim: fn(data: I64, start: I64, end: I64, out: I64) {
     from := start
-    loop from < end && encoding_white_space(encoding_scalar_at(data, from)) -> from += rt_text_width(wrapping(data + from))
+    loop from < end && encoding_white_space(encoding_scalar_at(data, from)) {
+        from += rt_text_width(wrapping(data + from))
+    }
     to := end
     loop to > from {
         back := to - I64{1}
-        loop back > from && (rt_text_byte(wrapping(data + back)).bit_and(I64{192})) == (I64{128}) -> back -= I64{1}
+        loop back > from && (rt_text_byte(wrapping(data + back)).bit_and(I64{192})) == (I64{128}) {
+            back -= I64{1}
+        }
         if !encoding_white_space(encoding_scalar_at(data, back)) -> break
         to = back
     }
@@ -141,13 +150,13 @@ encoding_trim: fn(data: I64, start: I64, end: I64, out: I64) {
 // overflow past `limit` (an unsigned bound in U64 bits). -1: Err.
 encoding_parse_unsigned: fn(data: I64, start: I64, end: I64, limit: U64) -> I64 {
     at := start
-    if (at < end && rt_text_byte(wrapping(data + at)) == I64{43}) -> at += I64{1}
-    if (at >= end) -> return I64{-1}
+    if (at < end && rt_text_byte(wrapping(data + at)) == I64{43}) { at += I64{1} }
+    if (at >= end) { return I64{-1} }
     value := U64{0}
     loop at < end {
         digit: rt_text_byte(wrapping(data + at)) - I64{48}
-        if (digit < I64{0} || digit > I64{9}) -> return I64{-1}
-        if (value > (limit - wrapping(U64{digit})) /% U64{10}) -> return I64{-1}
+        if (digit < I64{0} || digit > I64{9}) { return I64{-1} }
+        if (value > (limit - wrapping(U64{digit})) /% U64{10}) { return I64{-1} }
         value = value * U64{10} + wrapping(U64{digit})
         at += I64{1}
     }
@@ -157,7 +166,7 @@ encoding_parse_unsigned: fn(data: I64, start: I64, end: I64, limit: U64) -> I64 
 // std::env::var(name).ok().and_then(|v| v.parse().ok()); -1 when absent.
 encoding_env_number: fn(name: I64, limit: U64) -> I64 {
     value: rt_env_get(name)
-    if (value == I64{0}) -> return I64{-1}
+    if (value == I64{0}) { return I64{-1} }
     parsed: encoding_parse_unsigned(rt_text_data(value), I64{0}, rt_text_len(value), limit)
     jet_rt_string_drop(value)
     parsed
@@ -166,7 +175,9 @@ encoding_env_number: fn(name: I64, limit: U64) -> I64 {
 // jet_encoding_hostile_parse_plan into the words at `plan`.
 encoding_env_plan: fn(name: I64, plan: I64) {
     value: rt_env_get(name)
-    if (value == I64{0}) -> return
+    if (value == I64{0}) {
+        return
+    }
     data: rt_text_data(value)
     length: rt_text_len(value)
     scratch: jet_rt_alloc(I64{16}, I64{8})
@@ -179,7 +190,7 @@ encoding_env_plan: fn(name: I64, plan: I64) {
         to: rt_text_word(wrapping(scratch + I64{8}))
         if (to > from) {
             number: encoding_parse_unsigned(data, from, to, U64{9223372036854775807})
-            if (number > I64{0}) -> files_words_push(plan, number)
+            if (number > I64{0}) { files_words_push(plan, number) }
         }
         start = end + I64{1}
     }
@@ -198,7 +209,7 @@ encoding_hostile_state: fn() -> I64 {
         jet_rt_tls_set(encoding_hostile_key, state)
     }
     active: rt_text_word(state)
-    if (active == I64{1}) -> return I64{0}
+    if (active == I64{1}) { return I64{0} }
     if (active == I64{0}) {
         if !encoding_env_flag(env_name_jet_enc_hostile_io()) {
             rt_text_store(state, I64{1})
@@ -230,12 +241,14 @@ encoding_hostile_write_chunk: fn(state: I64, remaining: I64) -> I64 {
     if (count != I64{0}) {
         index: rt_text_word(wrapping(state + I64{192}))
         cap: rt_text_word(wrapping(rt_text_word(wrapping(state + I64{168})) + (if (index < count) -> index else -> count - I64{1}) * I64{8}))
-        if (index < count) -> rt_text_store(wrapping(state + I64{192}), index + I64{1})
+        if (index < count) { rt_text_store(wrapping(state + I64{192}), index + I64{1}) }
         bounded: if (cap < remaining) -> cap else -> remaining
         return if (bounded < ENCODING_IO_CHUNK) -> bounded else -> ENCODING_IO_CHUNK
     }
     chunk: rt_text_word(wrapping(state + I64{16}))
-    if (chunk == I64{0}) -> return if (remaining < ENCODING_IO_CHUNK) -> remaining else -> ENCODING_IO_CHUNK
+    if (chunk == I64{0}) {
+        return if (remaining < ENCODING_IO_CHUNK) -> remaining else -> ENCODING_IO_CHUNK
+    }
     if (chunk < remaining) -> chunk else -> remaining
 }
 
@@ -253,22 +266,24 @@ encoding_hostile_write: fn(state: I64, writer: I64, bytes: I64, length: I64) -> 
     }
     limited: rt_text_word(wrapping(state + I64{56})) != I64{0}
     limit: rt_text_word(wrapping(state + I64{64}))
-    if (limited && !alloc_unsigned_less(rt_text_word(wrapping(state + I64{128})), limit)) -> return I64{2}
+    if (limited && !alloc_unsigned_less(rt_text_word(wrapping(state + I64{128})), limit)) {
+        return I64{2}
+    }
     offset := I64{0}
     loop offset < length {
         chunk: encoding_hostile_write_chunk(state, length - offset)
         total: rt_text_word(wrapping(state + I64{128}))
         if (limited && alloc_unsigned_less(limit, total + chunk)) {
             allowed: limit - total
-            if (allowed == I64{0}) -> return I64{2}
+            if (allowed == I64{0}) { return I64{2} }
             failure: host_write_all(fd_word(writer, I64{8}), bytes + offset, allowed)
-            if (failure != I64{0}) -> return failure
+            if (failure != I64{0}) { return failure }
             rt_text_store(wrapping(state + I64{128}), total + allowed)
             rt_text_store(wrapping(state + I64{104}), rt_text_word(wrapping(state + I64{104})) + allowed)
             return I64{2}
         }
         failure: host_write_all(fd_word(writer, I64{8}), bytes + offset, chunk)
-        if (failure != I64{0}) -> return failure
+        if (failure != I64{0}) { return failure }
         rt_text_store(wrapping(state + I64{128}), total + chunk)
         rt_text_store(wrapping(state + I64{104}), rt_text_word(wrapping(state + I64{104})) + chunk)
         offset += chunk
@@ -280,7 +295,7 @@ encoding_hostile_write: fn(state: I64, writer: I64, bytes: I64, length: I64) -> 
 encoding_hostile_flush_interrupted: fn(state: I64) -> Bool {
     rt_text_store(wrapping(state + I64{88}), rt_text_word(wrapping(state + I64{88})) + I64{1})
     pending: rt_text_word(wrapping(state + I64{32}))
-    if (pending == I64{0}) -> return false
+    if (pending == I64{0}) { return false }
     rt_text_store(wrapping(state + I64{112}), rt_text_word(wrapping(state + I64{112})) + I64{1})
     rt_text_store(wrapping(state + I64{32}), pending - I64{1})
     true
@@ -293,11 +308,13 @@ encoding_hostile_read_cap: fn(state: I64, length: I64) -> I64 {
     if (count != I64{0}) {
         index: rt_text_word(wrapping(state + I64{160}))
         cap: rt_text_word(wrapping(rt_text_word(wrapping(state + I64{136})) + (if (index < count) -> index else -> count - I64{1}) * I64{8}))
-        if (index < count) -> rt_text_store(wrapping(state + I64{160}), index + I64{1})
+        if (index < count) { rt_text_store(wrapping(state + I64{160}), index + I64{1}) }
         bounded: if (cap < length) -> cap else -> length
         return if (bounded < ENCODING_IO_CHUNK) -> bounded else -> ENCODING_IO_CHUNK
     }
-    if (rt_text_word(wrapping(state + I64{8})) != I64{0}) -> return if (length < I64{1}) -> length else -> I64{1}
+    if (rt_text_word(wrapping(state + I64{8})) != I64{0}) {
+        return if (length < I64{1}) -> length else -> I64{1}
+    }
     if (length < ENCODING_IO_CHUNK) -> length else -> ENCODING_IO_CHUNK
 }
 
@@ -313,7 +330,9 @@ encoding_hostile_read_gate: fn(state: I64) -> I64 {
         return I64{1}
     }
     limited: rt_text_word(wrapping(state + I64{40})) != I64{0}
-    if (limited && !alloc_unsigned_less(rt_text_word(wrapping(state + I64{120})), rt_text_word(wrapping(state + I64{48})))) -> return I64{2}
+    if (limited && !alloc_unsigned_less(rt_text_word(wrapping(state + I64{120})), rt_text_word(wrapping(state + I64{48})))) {
+        return I64{2}
+    }
     I64{0}
 }
 
@@ -335,7 +354,7 @@ encoding_hostile_read_done: fn(state: I64, count: I64) -> Bool {
     nul := false
     loop at < count {
         byte: host_u8_get(data, at)
-        if (byte == I64{0}) -> nul = true
+        if (byte == I64{0}) { nul = true }
         rt_text_put(wrapping(name + at), byte)
         at += I64{1}
     }
@@ -353,7 +372,7 @@ encoding_hostile_read_done: fn(state: I64, count: I64) -> Bool {
     mode: rt_text_word(wrapping(facts + I64{16}))
     jet_rt_free(facts, I64{128}, I64{8})
     jet_rt_free(name, count + I64{1}, I64{1})
-    if (result < I64{0}) -> return encoding_fail(encoding_cause_errno(-result), error)
+    if (result < I64{0}) { return encoding_fail(encoding_cause_errno(-result), error) }
     rt_text_store(ok, if ((mode.bit_and(I64{61440})) == I64{32768}) -> I64{1} else -> I64{0})
     I64{1}
 }

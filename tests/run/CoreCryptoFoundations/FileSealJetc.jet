@@ -24,7 +24,7 @@ run: fn() {
     back: crypto.X25519PublicKey.from_text(text) ?? panic("from_text")
     print("from_text round trip: {back.bytes == public.bytes}")
     if crypto.X25519PublicKey.from_text(text.to_upper()) == {
-        .Ok(_) -> print("uppercase text: accepted")
+        .Ok(_) -> { print("uppercase text: accepted") }
         .Err(error) -> print("uppercase text: {error}")
     }
 
@@ -51,7 +51,7 @@ run: fn() {
     print("opened equals plaintext: {(files.read_bytes(opened) ?? panic("read opened")) == plain}")
 
     if sealed.open(identity, source: envelope, destination: opened) == {
-        .Ok(_) -> print("open over an existing file: accepted")
+        .Ok(_) -> { print("open over an existing file: accepted") }
         .Err(error) -> print("open over an existing file: {error}")
     }
 }

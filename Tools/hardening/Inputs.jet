@@ -6,7 +6,9 @@ use {
 }
 
 EXCLUSIONS_PATH: "tests/conformance/exclusions.tsv"
+
 CORPUS_ROOT: "tests/conformance/corpus"
+
 REGISTRY_DIR: "Compiler/JetFoundation/Source/Registry"
 
 Inputs: struct {
@@ -50,7 +52,9 @@ jet_files: fn(root: String, relative: String, out: &[String]) Err! -[FS]> {
 }
 
 has_path: fn(list: [SourceFile], path: String) -> Bool Never! {
-    loop file in list { if file.path == path -> return true }
+    loop file in list {
+        if file.path == path -> return true
+    }
     false
 }
 
@@ -89,7 +93,7 @@ load_inputs: fn(root: String) -[FS]> Inputs Err! {
 // Every input file once, sorted by path: the source snapshot.
 snapshot_files: fn(inputs: Inputs) -> [SourceFile] Never! {
     out := [SourceFile]{}
-    seen := [String: Bool]{}
+    seen := [String:Bool]{}
     groups: [[SourceFile]]{inputs.registry_files, inputs.route_files, inputs.core_sources, inputs.special_files, inputs.witnesses, inputs.generator_files, [SourceFile]{SourceFile{path: SPECIAL_ROUTES_PATH, text: inputs.specials_text.copy()}, SourceFile{path: EXCLUSIONS_PATH, text: inputs.exclusions_text.copy()}}}
     loop group in groups {
         loop file in group {

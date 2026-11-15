@@ -1,4 +1,3 @@
-
 use {
     crypto: core.crypto
     vault: core.crypto.vault
@@ -7,6 +6,7 @@ use {
 inspect: fn(secret: &ExpiringSecret<crypto.SigningKey>) -[]> Bool {
     return secret.with(fn(borrowed) { borrowed.public_key() }) == .Ok(_)
 }
+
 run: fn() {
     ttl := Duration.seconds(1) ?? panic("duration")
     key := crypto.SigningKey.new_random() ?? panic("key")

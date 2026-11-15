@@ -1,4 +1,3 @@
-
 use {
     data: core.data
     files_data: core.files.data
@@ -14,16 +13,12 @@ run: fn() {
     raw: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0"
     rows: data.csv<Ticket>(raw) ?? panic("bad csv")
     cols: data.schema(rows)
-    loop c in cols {
-        print("{c.name}:{c.type_name}")
-    }
+    loop c in cols { print("{c.name}:{c.type_name}") }
     selected: data.query(rows)
         .filter(fn(t) { t.minutes >= 5.0 })
         .collect() ?? panic("filter")
     print("selected:{selected.len()}")
-    loop t in selected {
-        print("{t.team}:{t.minutes}")
-    }
+    loop t in selected { print("{t.team}:{t.minutes}") }
     loop status in files_data.status() {
         if status.step == "core.data.schema" -> print("{status.step}:{status.path}")
     }

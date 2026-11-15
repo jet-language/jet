@@ -835,7 +835,9 @@ run_fmt: fn(formatter: Formatter, sources: [String], outcome: &FmtOutcome) -[Exe
     unlocated: failure == "" && fmt_unlocated_refusal(receipt.errors)
     if failure != "" || unlocated {
         if sources.len() == 1 {
-            if unlocated -> outcome.unparsed.push(sources[0].copy()) else -> outcome.failed.push(FmtFailure{path: sources[0].copy(), what: failure})
+            if unlocated -> outcome.unparsed.push(sources[0].copy()) else {
+                outcome.failed.push(FmtFailure{path: sources[0].copy(), what: failure})
+            }
             return Ok(1)
         }
         half: sources.len() /% 2
@@ -845,7 +847,9 @@ run_fmt: fn(formatter: Formatter, sources: [String], outcome: &FmtOutcome) -[Exe
     }
     if fmt_refused_source(receipt.errors) == .Val(refused) {
         at: sources.index_of(refused) ?? return Err(CorpusError{message: "`{formatter.jet} fmt` refused `{refused}`, which this run did not pass it:\n{receipt.errors}"})
-        if fmt_meaning_change(receipt.errors) == .Val(change) -> outcome.changed.push(FmtFailure{path: refused.copy(), what: change}) else -> outcome.unparsed.push(refused.copy())
+        if fmt_meaning_change(receipt.errors) == .Val(change) {
+            outcome.changed.push(FmtFailure{path: refused.copy(), what: change})
+        } else { outcome.unparsed.push(refused.copy()) }
         before: run_fmt(formatter, sources[0..<at], outcome) ?? return Err(err)
         after: run_fmt(formatter, sources[at + 1..<sources.len()], outcome) ?? return Err(err)
         return Ok(1 + before + after)
@@ -864,7 +868,9 @@ run_fmt: fn(formatter: Formatter, sources: [String], outcome: &FmtOutcome) -[Exe
 // refused.
 fmt_crash: fn(signal: Int?, code: Int, finished: [Int], errors: String) -> String Never! {
     if signal == .Val(number) -> return "crash: `jet fmt` stopped on signal {number}"
-    if finished.contains(code) || fmt_refused_source(errors) != None || fmt_unlocated_refusal(errors) -> return ""
+    if finished.contains(code) || fmt_refused_source(errors) != None || fmt_unlocated_refusal(errors) {
+        return ""
+    }
     "crash: `jet fmt` exited {code}: {first_line(errors)}"
 }
 

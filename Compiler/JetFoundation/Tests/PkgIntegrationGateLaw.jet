@@ -2,9 +2,20 @@
 // key/site/org-source gate_refusal subclaims remain compiler-lib ledger.
 // PENDING-SAME-HEAD nested package-test admission.
 use jet_foundation.[
-    GateSet, POLICY_RULES, PolicyDeclaration, PolicyKey, PolicyScope, PolicyValue, Span,
-    gate_kind_parse, gate_kind_policy_key, policy_default_gate_value, policy_key_is_audited_gate,
-    policy_key_name, policy_parse_value, policy_resolve_with_gates,
+    GateSet,
+    POLICY_RULES,
+    PolicyDeclaration,
+    PolicyKey,
+    PolicyScope,
+    PolicyValue,
+    Span,
+    gate_kind_parse,
+    gate_kind_policy_key,
+    policy_default_gate_value,
+    policy_key_is_audited_gate,
+    policy_key_name,
+    policy_parse_value,
+    policy_resolve_with_gates,
 ]
 
 s5_gate_law_declaration: fn(key: PolicyKey, value: PolicyValue, scope: PolicyScope, source: String) -> PolicyDeclaration {
@@ -22,7 +33,7 @@ s5_gate_law_declaration: fn(key: PolicyKey, value: PolicyValue, scope: PolicySco
         assert_eq(gate_kind_policy_key(kind), key)
         declarations: [PolicyDeclaration]{
             s5_gate_law_declaration(key, PolicyValue.Forbid, PolicyScope.Organization, "org-policy.jet"),
-            s5_gate_law_declaration(key, PolicyValue.GateOnly, PolicyScope.Package, "package.jet")
+            s5_gate_law_declaration(key, PolicyValue.GateOnly, PolicyScope.Package, "package.jet"),
         }
         refused: if policy_resolve_with_gates(key, declarations, GateSet{allowed: [key]}) == {
             .Err(_) -> true

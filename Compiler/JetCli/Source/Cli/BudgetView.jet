@@ -8,9 +8,7 @@
 // that can't be read or verified is rejected with its reason, never skipped.
 // Every read goes through a directory held open from `root`, so a link can't
 // redirect it (RootedStore.jet).
-use {
-    jet_foundation.[CanonicalJSON, canonical_json_parse, perf_verify_budget_report]
-}
+use jet_foundation.[CanonicalJSON, canonical_json_parse, perf_verify_budget_report]
 
 // MAX_REPORT_BYTES: a larger report is not projected.
 JET_CLI_BUDGET_REPORT_LIMIT: 16777216
@@ -75,7 +73,7 @@ jet_cli_budget_read_compatible: fn(root: String, sources: [JetCLIBudgetSource]) 
         if held.read(entry.name, JET_CLI_BUDGET_REPORT_LIMIT) == {
             .Ok(found) -> {
                 if found == {
-                    .Val(contents) -> bytes = contents
+                    .Val(contents) -> { bytes = contents }
                     None -> {
                         projection.rejected.push("{label}: unreadable: it was removed while it was read")
                         next
@@ -120,8 +118,12 @@ jet_cli_budget_read_compatible: fn(root: String, sources: [JetCLIBudgetSource]) 
 // over a warning over a pass, then unavailable evidence over measured, then
 // the smaller report id, so the choice never depends on file names.
 jet_cli_budget_worse: fn(fact: JetCLIBudgetFact, known: JetCLIBudgetFact) -> Bool Never! {
-    if jet_cli_budget_rank(fact.outcome) != jet_cli_budget_rank(known.outcome) -> return jet_cli_budget_rank(fact.outcome) > jet_cli_budget_rank(known.outcome)
-    if (fact.evidence == "unavailable") != (known.evidence == "unavailable") -> return fact.evidence == "unavailable"
+    if jet_cli_budget_rank(fact.outcome) != jet_cli_budget_rank(known.outcome) {
+        return jet_cli_budget_rank(fact.outcome) > jet_cli_budget_rank(known.outcome)
+    }
+    if (fact.evidence == "unavailable") != (known.evidence == "unavailable") {
+        return fact.evidence == "unavailable"
+    }
     fact.report_id < known.report_id
 }
 
@@ -215,9 +217,7 @@ jet_cli_budget_relative: fn(root: String, message: String) -> String Never! {
         if rest.starts_with("/") {
             tail: rest.removeprefix("/")
             out = "{out}{tail}"
-        } else if jet_cli_budget_name_continues(rest) {
-            out = "{out}{root}{rest}"
-        } else {
+        } else if jet_cli_budget_name_continues(rest) { out = "{out}{root}{rest}" } else {
             out = "{out}.{rest}"
         }
     }
@@ -249,7 +249,7 @@ jet_cli_budget_name_continues: fn(rest: String) -> Bool Never! {
     }
     changed: [JetCLIBudgetSource]{JetCLIBudgetSource{path: "src/run.jet", sha256: "bb"}}
     if jet_cli_budget_facts("a.json", report, changed) == {
-        .Ok(found) -> assert(found == None)
+        .Ok(found) -> { assert(found == None) }
         .Err(error) -> panic(error.message)
     }
     assert_eq(jet_cli_budget_relative("/p", "store directory is a symlink: /p/.jet/perf"), "store directory is a symlink: .jet/perf")

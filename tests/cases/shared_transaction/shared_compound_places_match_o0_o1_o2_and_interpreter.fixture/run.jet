@@ -3,13 +3,17 @@ package: {
     version: "0.1.0"
     authority: { allow: [IO, Mem.Alloc, Mem.Rc, Time.Wait] }
 }
+
 // Every projection below a shared cell writes its payload in one locked step.
-Counter: struct { hits: Int }
+Counter: struct {
+    hits: Int
+}
+
 Storage: struct {
-    items: [String: String]
+    items: [String:String]
     numbers: [Int]
     nested: Counter
-    records: [String: Counter]
+    records: [String:Counter]
 }
 
 show: fn(store: Shared<Storage>) {
@@ -22,10 +26,10 @@ show: fn(store: Shared<Storage>) {
 
 run: fn() {
     store: Shared{Storage{
-        items: [String: String]{},
+        items: [String:String]{},
         numbers: [1, 2],
         nested: Counter{hits: 0},
-        records: [String: Counter]{},
+        records: [String:Counter]{},
     }}
     store.items["a"] = "dark"
     store.numbers[0] = 7

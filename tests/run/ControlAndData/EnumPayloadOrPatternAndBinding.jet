@@ -5,6 +5,7 @@ Conn: enum {
     Idle(Int)
     Closed
 }
+
 describe: fn(c: Conn) -> String {
     if c == {
         .Active(id) | .Reconnecting(id) -> { return "live:{id}" }
@@ -14,6 +15,7 @@ describe: fn(c: Conn) -> String {
     }
     return "unknown"
 }
+
 run: fn() {
     print(describe(Conn.Active(42)))
     print(describe(Conn.Reconnecting(7)))

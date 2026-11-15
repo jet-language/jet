@@ -13,9 +13,7 @@ nixeval_slice: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
 }
 
 // Push one byte value in 0..=255 (always in range by construction).
-nixeval_push_byte: fn(out: &[U8], value: Int) Never! {
-    out.push(checked(U8{value}) ?? U8{0})
-}
+nixeval_push_byte: fn(out: &[U8], value: Int) Never! { out.push(checked(U8{value}) ?? U8{0}) }
 
 nixeval_push_text: fn(out: &[U8], text: String) Never! {
     loop byte in text.bytes() -> out.push(byte)
@@ -43,9 +41,7 @@ nixeval_scalar: fn(bytes: [U8], index: Int) -> Int Never! {
         3 -> lead % 16
         else -> lead % 8
     }
-    loop offset in 1..<width {
-        value = value * 64 + nixeval_byte(bytes, index + offset) % 64
-    }
+    loop offset in 1..<width -> value = value * 64 + nixeval_byte(bytes, index + offset) % 64
     value
 }
 
@@ -86,9 +82,7 @@ nixeval_is_ascii_whitespace: fn(byte: Int) -> Bool Never! {
     byte == 32 || byte == 9 || byte == 10 || byte == 12 || byte == 13
 }
 
-nixeval_is_ascii_digit: fn(byte: Int) -> Bool Never! {
-    byte >= 48 && byte <= 57
-}
+nixeval_is_ascii_digit: fn(byte: Int) -> Bool Never! { byte >= 48 && byte <= 57 }
 
 nixeval_is_ascii_alpha: fn(byte: Int) -> Bool Never! {
     (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
@@ -233,8 +227,8 @@ nixeval_sorted: fn(names: [String]) -> [String] Never! {
 }
 
 // A copy of `map` whose insertion order is its key order.
-nixeval_key_ordered: fn(map: [String: String]) -> [String: String] Never! {
-    ordered := [String: String]{}
+nixeval_key_ordered: fn(map: [String:String]) -> [String:String] Never! {
+    ordered := [String:String]{}
     loop name in nixeval_sorted(map.keys().to_list()) -> ordered[name] = map[name]
     ordered
 }

@@ -53,14 +53,18 @@ Census: struct {
 
 // Wants `name` for `from` unless it is defined or already wanted.
 want: fn(census: &Census, name: String, from: String) {
-    if census.defined.has(name) || census.wanted.has(name) -> return
+    if census.defined.has(name) || census.wanted.has(name) {
+        return
+    }
     census.wanted.add(name.copy())
     census.wants.push((name: name.copy(), from: from.copy()))
 }
 
 elf_symbols: fn(bytes: [U8], name: String) -> Symbols {
     // The magic and EI_CLASS ELFCLASS64.
-    if bytes.len() < 64 || (binary.unpack(">IB", bytes.slice(0, 5)) ?? []) != [ELF_MAGIC, 2] -> process.fail(1, "{name}: not an ELF64 object")
+    if bytes.len() < 64 || (binary.unpack(">IB", bytes.slice(0, 5)) ?? []) != [ELF_MAGIC, 2] {
+        process.fail(1, "{name}: not an ELF64 object")
+    }
     // The little-endian fields `format` reads from the `size` bytes at `at`.
     fields: fn(at: Int, format: String, size: Int) -> [Int] { binary.unpack(format, bytes.slice(at, at + size)) ?? process.fail(1, "an ELF64 object ends inside the {size} bytes at {at}") }
     // e_shoff, e_flags, e_ehsize, e_phentsize, e_phnum, e_shentsize, e_shnum
@@ -141,7 +145,9 @@ run: fn() {
     options: args.slice(0, split).filter(fn(arg) { arg.starts_with("--") })
     objects: args.slice(0, split).filter(fn(arg) { !arg.starts_with("--") })
     loop option in options {
-        if !["--start", "--expect-none"].contains(option) && !option.starts_with("--root=") && !option.starts_with("--provided=") -> process.fail(1, "unknown option {option}")
+        if !["--start", "--expect-none"].contains(option) && !option.starts_with("--root=") && !option.starts_with("--provided=") {
+            process.fail(1, "unknown option {option}")
+        }
     }
     if objects.len() == 0 -> process.fail(1, "no object to census")
 
@@ -159,8 +165,10 @@ run: fn() {
     outside.sort()
 
     members := [Symbols]{}
-    loop path in args.slice(split + 1, args.len()) -> members.extend(archive_members(files.read_bytes(path), files.basename(path)))
-    index := [String: Int]{}
+    loop path in args.slice(split + 1, args.len()) {
+        members.extend(archive_members(files.read_bytes(path), files.basename(path)))
+    }
+    index := [String:Int]{}
     loop at in 0..<members.len() {
         loop name in members[at].defines {
             if !index.has_key(name) -> index[name] = at

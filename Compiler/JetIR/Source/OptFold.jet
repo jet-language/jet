@@ -14,7 +14,6 @@
 // glue, so the classes start as one and split until no class holds bodies
 // that differ: copies that only reach copies of each other stay one. A
 // function whose address is taken keeps it.
-
 use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, name_hash, name_index, name_intern, name_rows_value, name_table]
 
 // Folds the copies among `m.functions`' bodies `functions`; returns how many
@@ -144,7 +143,9 @@ ir_opt_fold_shape_parts: fn(m: IRModule, rows: [Int], parts: &[[IRFunction]], at
 // One part's functions and their shapes.
 ir_opt_fold_part: fn(m: IRModule, rows: [Int], functions: &&[IRFunction]) -> IROptFoldPart Never! {
     part := IROptFoldPart{functions: functions.move(), shapes: [IROptFoldShape]{}}
-    loop row in 0..<part.functions.len() -> part.shapes.push(ir_opt_fold_shape_of(m, part.functions[row], rows))
+    loop row in 0..<part.functions.len() {
+        part.shapes.push(ir_opt_fold_shape_of(m, part.functions[row], rows))
+    }
     part
 }
 
@@ -333,7 +334,7 @@ ir_opt_fold_shape: fn(m: IRModule, f: IRFunction, rows: [Int]) -> IROptFoldShape
     loop arg in f.args -> parts.push("{arg}")
     text: parts.join("|")
     spread: ir_opt_fold_spread(text)
-    IROptFoldShape{text, reached, spread}
+    IROptFoldShape{text: text, reached: reached, spread: spread}
 }
 
 // A cheap hash of shape text `text` that spreads shapes over the grouping
@@ -368,5 +369,7 @@ ir_opt_fold_key: fn(first: [Int], id: Int, shape: Int, reached: [Int]) -> String
     assert_eq(ir_opt_fold_identical(one, alone, compiler_threads_single()), 11)
     assert_eq(ir_opt_fold_identical(eight, shared, CompilerThreads{cap: Val(8), cores: 8, memory_available: None}), 11)
     assert_eq(shared.len(), alone.len())
-    loop id in 0..<alone.len() -> assert_eq(ir_function_text(eight, shared[id]), ir_function_text(one, alone[id]))
+    loop id in 0..<alone.len() {
+        assert_eq(ir_function_text(eight, shared[id]), ir_function_text(one, alone[id]))
+    }
 }

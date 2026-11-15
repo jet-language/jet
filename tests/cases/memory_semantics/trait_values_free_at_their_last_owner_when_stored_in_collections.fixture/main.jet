@@ -22,12 +22,9 @@ Worker: struct {
     n: Int
 
     impl Sink {
-        finish: fn(&&self) -[]> Int {
-            self.n + 2
-        }
-        peek: fn(self) -[]> Int {
-            self.n + 1
-        }
+        finish: fn(&&self) -[]> Int { self.n + 2 }
+
+        peek: fn(self) -[]> Int { self.n + 1 }
     }
 }
 
@@ -36,9 +33,7 @@ Rack: struct {
     spare: Sink?
 }
 
-make: fn(s: Shared<Context>, n: Int) -> Sink {
-    Worker{context: s.copy(), n: n}
-}
+make: fn(s: Shared<Context>, n: Int) -> Sink { Worker{context: s.copy(), n: n} }
 
 listed: fn(s: Shared<Context>) {
     list := [Sink]{make(s, 1), make(s, 2)}

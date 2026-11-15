@@ -60,7 +60,7 @@ s6_browser_wait: fn(port: String, path: String, condition: String, previous: Str
                     if condition == "new_nonce" {
                         nonce: s6_browser_nonce(body)
                         if nonce == {
-                            .Val(next) -> accepted = next != previous
+                            .Val(next) -> { accepted = next != previous }
                             .None -> { _ := 0 }
                         }
                     }
@@ -107,7 +107,5 @@ s6_browser_wait: fn(port: String, path: String, condition: String, previous: Str
         assert(stale.status == 403)
         accepted: s6_browser_request(port, "POST", "/__jet_perf_browser?nonce={nonce}", event) ?? panic("rebuilt beacon POST")
         assert(accepted.status == 204)
-    } else {
-        panic("unknown client phase {phase}")
-    }
+    } else { panic("unknown client phase {phase}") }
 }

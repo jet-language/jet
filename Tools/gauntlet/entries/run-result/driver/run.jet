@@ -24,9 +24,7 @@ use {
 USAGE: "usage: driver results MATRIX DIR"
 
 // The JSON file `name`.
-input: fn(name: String) -> Dyn {
-    read_json(name) ?? process.fail(1, "{name} is not a JSON file")
-}
+input: fn(name: String) -> Dyn { read_json(name) ?? process.fail(1, "{name} is not a JSON file") }
 
 print_results: fn(matrix: Dyn, dir: String) {
     listed: files.list_dir(dir) ?? process.fail(1, "{dir} is not a directory")
@@ -43,7 +41,9 @@ run: fn() {
     args: process.args()
     command: args.get(0) ?? ""
     if {
-        command == "results" && args.len() >= 3 -> print_results(if args[1] == "-" -> Dyn.Null else -> input(args[1]), args[2])
+        command == "results" && args.len() >= 3 -> {
+            print_results(if args[1] == "-" -> Dyn.Null else -> input(args[1]), args[2])
+        }
         else -> process.fail(64, USAGE)
     }
 }

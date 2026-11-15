@@ -17,9 +17,7 @@ Solver: struct {
     checked: Int
     failures: Int
 
-    new: fn(seed: Int) -> Solver Never! {
-        Solver{seed: seed, checked: 0, failures: 0}
-    }
+    new: fn(seed: Int) -> Solver Never! { Solver{seed: seed, checked: 0, failures: 0} }
 
     require: fn(&self, ok: Bool) Never! {
         self.checked += 1
@@ -114,7 +112,6 @@ Factorization: struct {
     pivot_threshold: Float
 }
 
-
 C_MAX_ELEMENTS: 16777216
 
 validate_matrix: fn(shape: [Int], data: [Float], profile: String) ComputeError! {
@@ -153,7 +150,6 @@ validate_rhs: fn(shape: [Int], data: [Float], profile: String) ComputeError! {
     return
 }
 
-
 checked_numel: fn(shape: [Int]) -> Int ComputeError! {
     if shape.len() == 0 -> return Err(ComputeError.Shape)
     n := 1
@@ -164,7 +160,7 @@ checked_numel: fn(shape: [Int]) -> Int ComputeError! {
             next
         }
         if n > C_MAX_ELEMENTS /% dim -> return Err(ComputeError.Shape)
-        n = n * dim
+        n *= dim
     }
     Ok(n)
 }
@@ -235,7 +231,7 @@ solve_factors: fn(factors: Factorization, n: Int, rhs: [Float], rhs_cols: Int, p
     }
     i := n
     loop i > 0 {
-        i = i - 1
+        i -= 1
         diagonal: factors.factors[i * n + i]
         if abs_f(diagonal) <= factors.pivot_threshold -> return Err(ComputeError.Singular)
         loop j in 0..<rhs_cols {
@@ -250,14 +246,12 @@ solve_factors: fn(factors: Factorization, n: Int, rhs: [Float], rhs_cols: Int, p
     work
 }
 
-
 tensor_profile: fn(tensor: Tensor) -> String ComputeError! {
     receipt: compute.placement(tensor)
     if receipt.contains("profile=F32Strict+Reproducible,") -> return "F32Strict+Reproducible"
     if receipt.contains("profile=F64Strict+Reproducible,") -> return "F64Strict+Reproducible"
     Err(ComputeError.Serialization)
 }
-
 
 f32_round_value: fn(value: Float) -> Float ComputeError! {
     if value == (Float{0.0}) -> return value
@@ -277,7 +271,7 @@ f32_round_value: fn(value: Float) -> Float ComputeError! {
         remainder: math.fmod(lower, (Float{2.0})) ?? return Err(ComputeError.Arithmetic)
         if remainder != (Float{0.0}) -> round_up = true
     }
-    if round_up -> rounded = rounded + Float{1.0}
+    if round_up -> rounded += Float{1.0}
     result: math.ldexp(rounded, 0 - scale) ?? return Err(ComputeError.Arithmetic)
     if negative -> return Float{0.0} - result
     result
@@ -294,14 +288,14 @@ f32_representable: fn(value: Float) -> Bool ComputeError! {
     rounded == value
 }
 
-
-
 abs_f: fn(value: Float) -> Float Never! {
     if value < 0.0 -> return 0.0 - value
     value
 }
 
-math_is_finite: fn(value: Float) -> Bool Never! { core.math.isfinite(value) ?? panic("finite check failed") }
+math_is_finite: fn(value: Float) -> Bool Never! {
+    core.math.isfinite(value) ?? panic("finite check failed")
+}
 
 profile_round: fn(value: Float, profile: String) -> Float ComputeError! {
     if !math_is_finite(value) -> return Err(ComputeError.Arithmetic)

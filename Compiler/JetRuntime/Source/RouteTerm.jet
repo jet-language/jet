@@ -23,7 +23,7 @@ term_read_line: fn(value: I64) -> I64 {
         buffered: term_input_buffered()
         if (buffered == I64{0}) {
             got: term_input_fill(true, true)
-            if (got == I64{0}) -> break
+            if (got == I64{0}) { break }
             if (got < I64{0}) {
                 failure = -got
                 break
@@ -34,7 +34,7 @@ term_read_line: fn(value: I64) -> I64 {
         run: rt_line_run(start, buffered)
         rt_text_append(value, start, run)
         term_input_consume(run)
-        if (rt_text_byte(wrapping(wrapping(start + run) - I64{1})) == I64{10}) -> break
+        if (rt_text_byte(wrapping(wrapping(start + run) - I64{1})) == I64{10}) { break }
     }
     sync_mutex_unlock(terminal_input_root)
     failure
@@ -146,17 +146,19 @@ stdin_line_scan: fn(start: I64, count: I64) -> I64 {
     loop at < words {
         raw: rt_text_word(wrapping(start + at))
         word: raw.bit_xor(I64{723401728380766730})
-        if (wrapping(word - I64{72340172838076673}).bit_and(word.bit_xor(I64{-1})).bit_and(I64{-9187201950435737472}) != I64{0}) -> break
+        if (wrapping(word - I64{72340172838076673}).bit_and(word.bit_xor(I64{-1})).bit_and(I64{-9187201950435737472}) != I64{0}) {
+            break
+        }
         seen = seen.bit_or(raw)
         at = wrapping(at + I64{8})
     }
     loop at < count {
         byte: rt_text_byte(wrapping(start + at))
         at = wrapping(at + I64{1})
-        if (byte == I64{10}) -> break
+        if (byte == I64{10}) { break }
         seen = seen.bit_or(byte)
     }
-    if (seen.bit_and(I64{-9187201950435737472}) != I64{0}) -> return wrapping(I64{0} - at)
+    if (seen.bit_and(I64{-9187201950435737472}) != I64{0}) { return wrapping(I64{0} - at) }
     at
 }
 
@@ -169,7 +171,7 @@ stdin_utf8_error: fn(error: I64) -> I64 {
 // stdin IOError (stdin_line_take).
 #Export(c) jet_stdin_line_raw: fn(some: I64, line: I64, error: I64) -> I64 {
     value: stdin_line_take(error)
-    if (value < I64{0}) -> return I64{0}
+    if (value < I64{0}) { return I64{0} }
     if (value == I64{0}) {
         rt_text_store(some, I64{0})
         return I64{1}
@@ -190,8 +192,8 @@ stdin_utf8_error: fn(error: I64) -> I64 {
         return I64{2}
     }
     value: stdin_line_take(error)
-    if (value < I64{0}) -> return I64{2}
-    if (value == I64{0}) -> return I64{0}
+    if (value < I64{0}) { return I64{2} }
+    if (value == I64{0}) { return I64{0} }
     rt_text_store(output, value)
     I64{1}
 }
@@ -210,7 +212,7 @@ stdin_utf8_error: fn(error: I64) -> I64 {
     loop {
         if (term_input_buffered() == I64{0}) {
             got: term_input_fill(false, true)
-            if (got == I64{0}) -> break
+            if (got == I64{0}) { break }
             if (got < I64{0}) {
                 failure = host_errno_cause(-got)
                 break
@@ -225,7 +227,9 @@ stdin_utf8_error: fn(error: I64) -> I64 {
         }
     }
     sync_mutex_unlock(terminal_input_root)
-    if (failure == I64{0}) -> failure = text_bytes_utf8_error(rt_text_data(value), rt_text_len(value))
+    if (failure == I64{0}) {
+        failure = text_bytes_utf8_error(rt_text_data(value), rt_text_len(value))
+    }
     // The caller lends the tuple's Text word and Option<Text> tag/payload words.
     if (failure != I64{0}) {
         jet_rt_string_drop(value)
@@ -251,7 +255,7 @@ stdin_utf8_error: fn(error: I64) -> I64 {
         sync_mutex_lock(terminal_input_root)
         got = term_input_take(buffer, capacity)
         sync_mutex_unlock(terminal_input_root)
-        if (got == I64{-9}) -> got = I64{0}
+        if (got == I64{-9}) { got = I64{0} }
     }
     if (got < I64{0}) {
         jet_rt_free(buffer, capacity, I64{8})
@@ -264,9 +268,7 @@ stdin_utf8_error: fn(error: I64) -> I64 {
     if (buffer == I64{0}) {
         rt_text_store(data, I64{0})
         rt_text_store(length, I64{0})
-    } else {
-        compiler_fs_bytes_take(buffer, capacity, got, data, length)
-    }
+    } else { compiler_fs_bytes_take(buffer, capacity, got, data, length) }
     rt_text_store(error_tag, I64{0})
 }
 
@@ -277,7 +279,7 @@ stdin_utf8_error: fn(error: I64) -> I64 {
     sync_mutex_lock(terminal_input_root)
     got := term_input_take(buffer, I64{6})
     sync_mutex_unlock(terminal_input_root)
-    if (got < I64{0}) -> got = I64{0}
+    if (got < I64{0}) { got = I64{0} }
     compiler_fs_bytes_take(buffer, I64{8}, got, data, length)
     rt_text_store(platform, I64{1})
 }
@@ -316,7 +318,7 @@ stdin_utf8_error: fn(error: I64) -> I64 {
 // The process environment's JET_MACHINE_OUTPUT is exactly "1".
 #Export(c) jet_term_machine_output: fn() -> Bool {
     value: host_environment_value(env_name_jet_machine_output())
-    if (value == I64{0}) -> return false
+    if (value == I64{0}) { return false }
     rt_text_byte(value) == I64{49} && rt_text_byte(wrapping(value + I64{1})) == I64{0}
 }
 
@@ -328,9 +330,7 @@ term_mode_saved_key: fn() -> I64 {
     if (term_mode_key == I64{0}) {
         host_lock()
         if (term_mode_key == I64{0}) {
-            #Unsafe("written under the host lock") {
-                term_mode_key = jet_rt_tls_key_new(I64{0})
-            }
+            #Unsafe("written under the host lock") { term_mode_key = jet_rt_tls_key_new(I64{0}) }
         }
         host_unlock()
     }
@@ -340,7 +340,9 @@ term_mode_saved_key: fn() -> I64 {
 // musl's tcgetattr: ioctl(fd, TCGETS, termios), 0 or -1.
 term_tcgetattr: fn(fd: I64, termios: I64) -> I64 {
     #Unsafe("TCGETS writes the kernel termios into the caller's writable 64-byte struct") {
-        if (os_syscall_i64(I64{16}, fd, I64{21505}, termios, I64{0}, I64{0}, I64{0}) < I64{0}) -> return I64{-1}
+        if (os_syscall_i64(I64{16}, fd, I64{21505}, termios, I64{0}, I64{0}, I64{0}) < I64{0}) {
+            return I64{-1}
+        }
     }
     I64{0}
 }
@@ -348,7 +350,9 @@ term_tcgetattr: fn(fd: I64, termios: I64) -> I64 {
 // musl's tcsetattr(fd, TCSANOW, termios): ioctl(fd, TCSETS, termios), 0 or -1.
 term_tcsetattr: fn(fd: I64, termios: I64) -> I64 {
     #Unsafe("TCSETS reads the kernel termios from the caller's initialized struct") {
-        if (os_syscall_i64(I64{16}, fd, I64{21506}, termios, I64{0}, I64{0}, I64{0}) < I64{0}) -> return I64{-1}
+        if (os_syscall_i64(I64{16}, fd, I64{21506}, termios, I64{0}, I64{0}, I64{0}) < I64{0}) {
+            return I64{-1}
+        }
     }
     I64{0}
 }
@@ -388,7 +392,9 @@ term_tcsetattr: fn(fd: I64, termios: I64) -> I64 {
 #Export(c) jet_term_mode_leave: fn() {
     key: term_mode_saved_key()
     node: jet_rt_tls_get(key)
-    if (node == I64{0}) -> return
+    if (node == I64{0}) {
+        return
+    }
     jet_rt_tls_set(key, trap_word(node))
     _ := term_tcsetattr(I64{0}, node + I64{8})
     jet_rt_free(node, I64{72}, I64{8})

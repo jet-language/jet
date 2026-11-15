@@ -16,9 +16,13 @@
 // caller's timeout; every syscall retries EINTR.
 
 HOST_DESCRIPTOR_ENTRY: I64{32}
+
 HOST_DESCRIPTOR_INDEX_BITS: I64{20}
+
 HOST_DESCRIPTOR_INDEX_MASK: I64{1048575}
+
 HOST_SHARED_MAX: I64{1073741824}
+
 HOST_READ_MAX: I64{16777216}
 
 // Header: +0 mutex, +8 entries, +16 capacity, +24 issued entries. Entry:
@@ -28,12 +32,12 @@ host_descriptor_table := I64{0}
 
 // runtime-init: 20 when host_descriptor_table
 #Export(c) jet_rt_descriptor_table_init: fn() {
-    if (host_descriptor_table != I64{0}) -> return
+    if (host_descriptor_table != I64{0}) {
+        return
+    }
     table: jet_rt_alloc(I64{32}, I64{8})
     thread_zero(table, I64{32})
-    #Unsafe("runtime-init runs before any other thread exists") {
-        host_descriptor_table = table
-    }
+    #Unsafe("runtime-init runs before any other thread exists") { host_descriptor_table = table }
 }
 
 host_descriptor_entry_at: fn(index: I64) -> I64 {
@@ -42,12 +46,12 @@ host_descriptor_entry_at: fn(index: I64) -> I64 {
 
 // The entry a live token names, or 0. The caller holds the table mutex.
 host_descriptor_find: fn(token: I64) -> I64 {
-    if (token <= I64{0}) -> return I64{0}
+    if (token <= I64{0}) { return I64{0} }
     index: token.bit_and(HOST_DESCRIPTOR_INDEX_MASK)
-    if (index >= net_word(host_descriptor_table, I64{24})) -> return I64{0}
+    if (index >= net_word(host_descriptor_table, I64{24})) { return I64{0} }
     entry: host_descriptor_entry_at(index)
-    if (net_word(entry, I64{0}) < I64{0}) -> return I64{0}
-    if (net_word(entry, I64{24}) != (token >> HOST_DESCRIPTOR_INDEX_BITS)) -> return I64{0}
+    if (net_word(entry, I64{0}) < I64{0}) { return I64{0} }
+    if (net_word(entry, I64{24}) != (token >> HOST_DESCRIPTOR_INDEX_BITS)) { return I64{0} }
     entry
 }
 
@@ -134,23 +138,29 @@ host_descriptor_release: fn(token: I64) {
         alloc_unmap(address, size)
     }
     // close is not retried: Linux releases the descriptor even when it reports EINTR.
-    if (descriptor >= I64{0}) -> _ := host_call(I64{3}, descriptor, I64{0}, I64{0})
+    if (descriptor >= I64{0}) { _ := host_call(I64{3}, descriptor, I64{0}, I64{0}) }
 }
 
-host_descriptor_closed: fn(operation: I64, error: I64) -> I64 { compiler_fs_errno(operation, I64{0}, I64{9}, error) }
+host_descriptor_closed: fn(operation: I64, error: I64) -> I64 {
+    compiler_fs_errno(operation, I64{0}, I64{9}, error)
+}
 
-host_descriptor_range: fn(operation: I64, error: I64) -> I64 { compiler_fs_errno(operation, I64{0}, I64{22}, error) }
+host_descriptor_range: fn(operation: I64, error: I64) -> I64 {
+    compiler_fs_errno(operation, I64{0}, I64{22}, error)
+}
 
 // A syscall through host_call, retried while it reports EINTR.
 host_call_restarting: fn(number: I64, a1: I64, a2: I64, a3: I64) -> I64 {
     result := I64{-4}
-    loop result == (I64{-4}) { result = host_call(number, a1, a2, a3) }
+    loop result == (I64{-4}) -> result = host_call(number, a1, a2, a3)
     result
 }
 
 #Export(c) jet_sys_fd_close_raw: fn(token: I64) {
     native: host_native_int(token)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        return
+    }
     host_descriptor_release(native)
 }
 
@@ -159,10 +169,10 @@ host_call_restarting: fn(number: I64, a1: I64, a2: I64, a3: I64) -> I64 {
     native: host_native_int(token)
     at: host_native_int(offset)
     requested: host_native_int(limit)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
-    if (at < I64{0} || requested < I64{1}) -> return host_descriptor_range(HOST_IO_OP_READ, error)
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
+    if (at < I64{0} || requested < I64{1}) { return host_descriptor_range(HOST_IO_OP_READ, error) }
     descriptor: host_descriptor_number(native)
-    if (descriptor < I64{0}) -> return host_descriptor_closed(HOST_IO_OP_READ, error)
+    if (descriptor < I64{0}) { return host_descriptor_closed(HOST_IO_OP_READ, error) }
     cap: if (requested < HOST_READ_MAX) -> requested else -> HOST_READ_MAX
     bytes: jet_rt_alloc_8(cap)
     count := I64{-4}
@@ -182,14 +192,14 @@ host_call_restarting: fn(number: I64, a1: I64, a2: I64, a3: I64) -> I64 {
 // fstat st_size.
 #Export(c) jet_sys_fd_size_raw: fn(token: I64, output: I64, error: I64) -> I64 {
     native: host_native_int(token)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     descriptor: host_descriptor_number(native)
-    if (descriptor < I64{0}) -> return host_descriptor_closed(HOST_IO_OP_READ, error)
+    if (descriptor < I64{0}) { return host_descriptor_closed(HOST_IO_OP_READ, error) }
     stat: jet_rt_alloc(I64{144}, I64{8})
     result: host_call_restarting(I64{5}, descriptor, stat, I64{0})
     size: net_word(stat, I64{48})
     jet_rt_free(stat, I64{144}, I64{8})
-    if (result < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, -result, error)
+    if (result < I64{0}) { return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, -result, error) }
     rt_text_store(output, jet_int_owned_from_i64(size))
     I64{1}
 }
@@ -198,11 +208,11 @@ host_call_restarting: fn(number: I64, a1: I64, a2: I64, a3: I64) -> I64 {
 // under its own token, never mapped.
 #Export(c) jet_sys_fd_duplicate_raw: fn(token: I64, output: I64, error: I64) -> I64 {
     native: host_native_int(token)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     descriptor: host_descriptor_number(native)
-    if (descriptor < I64{0}) -> return host_descriptor_closed(HOST_IO_OP_READ, error)
+    if (descriptor < I64{0}) { return host_descriptor_closed(HOST_IO_OP_READ, error) }
     copied: host_call_restarting(I64{72}, descriptor, I64{1030}, I64{3})
-    if (copied < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, -copied, error)
+    if (copied < I64{0}) { return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, -copied, error) }
     filed: host_descriptor_insert(copied, I64{0}, I64{0})
     if (filed < I64{0}) {
         _ := host_call(I64{3}, copied, I64{0}, I64{0})
@@ -216,15 +226,15 @@ host_call_restarting: fn(number: I64, a1: I64, a2: I64, a3: I64) -> I64 {
 // descriptor is open on.
 #Export(c) jet_sys_fd_process_group_raw: fn(token: I64, output: I64, error: I64) -> I64 {
     native: host_native_int(token)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     descriptor: host_descriptor_number(native)
-    if (descriptor < I64{0}) -> return host_descriptor_closed(HOST_IO_OP_READ, error)
+    if (descriptor < I64{0}) { return host_descriptor_closed(HOST_IO_OP_READ, error) }
     group: jet_rt_alloc(I64{8}, I64{8})
     thread_zero(group, I64{8})
     result: host_call(I64{16}, descriptor, I64{21519}, group)
     value: net_load_uint(group, I64{4})
     jet_rt_free(group, I64{8}, I64{8})
-    if (result < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, -result, error)
+    if (result < I64{0}) { return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, -result, error) }
     rt_text_store(output, jet_int_owned_from_i64(value))
     I64{1}
 }
@@ -234,16 +244,18 @@ host_call_restarting: fn(number: I64, a1: I64, a2: I64, a3: I64) -> I64 {
 #Export(c) jet_sys_fd_set_process_group_raw: fn(token: I64, group: I64, error: I64) -> I64 {
     native: host_native_int(token)
     wanted: host_native_int(group)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     descriptor: host_descriptor_number(native)
-    if (descriptor < I64{0}) -> return host_descriptor_closed(HOST_IO_OP_WRITE, error)
-    if (wanted < I64{0} || wanted > I64{2147483647}) -> return host_descriptor_range(HOST_IO_OP_WRITE, error)
+    if (descriptor < I64{0}) { return host_descriptor_closed(HOST_IO_OP_WRITE, error) }
+    if (wanted < I64{0} || wanted > I64{2147483647}) {
+        return host_descriptor_range(HOST_IO_OP_WRITE, error)
+    }
     cell: jet_rt_alloc(I64{8}, I64{8})
     thread_zero(cell, I64{8})
     net_store_uint(cell, I64{4}, wanted)
     result: host_call(I64{16}, descriptor, I64{21520}, cell)
     jet_rt_free(cell, I64{8}, I64{8})
-    if (result < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, I64{0}, -result, error)
+    if (result < I64{0}) { return compiler_fs_errno(HOST_IO_OP_WRITE, I64{0}, -result, error) }
     I64{1}
 }
 
@@ -252,28 +264,28 @@ host_call_restarting: fn(number: I64, a1: I64, a2: I64, a3: I64) -> I64 {
 // ordinary pipe; jet_sys_fd_read_raw and jet_sys_fd_write_raw wait in
 // ppoll first, so neither blocks past its timeout.
 #Export(c) jet_sys_fd_pipe_raw: fn(output: I64, length: I64, error: I64) -> I64 {
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     ends: jet_rt_alloc(I64{8}, I64{8})
     thread_zero(ends, I64{8})
     made: host_call_restarting(I64{293}, ends, I64{524288}, I64{0})
     reader: net_load_uint(ends, I64{4})
     writer: net_load_uint(wrapping(ends + I64{4}), I64{4})
     jet_rt_free(ends, I64{8}, I64{8})
-    if (made < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, -made, error)
+    if (made < I64{0}) { return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, -made, error) }
     host_descriptor_pair_take(reader, writer, I64{0}, I64{2}, output, length, error)
 }
 
 // socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC): two connected blocking
 // stream ends, as pipe's two tokens. Each end reads what the other writes.
 #Export(c) jet_sys_fd_socket_pair_raw: fn(output: I64, length: I64, error: I64) -> I64 {
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     ends: jet_rt_alloc(I64{8}, I64{8})
     thread_zero(ends, I64{8})
     made: host_call4(I64{53}, I64{1}, I64{524289}, I64{0}, ends)
     first: net_load_uint(ends, I64{4})
     second: net_load_uint(wrapping(ends + I64{4}), I64{4})
     jet_rt_free(ends, I64{8}, I64{8})
-    if (made < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, -made, error)
+    if (made < I64{0}) { return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, -made, error) }
     host_descriptor_pair_take(first, second, I64{0}, I64{2}, output, length, error)
 }
 
@@ -282,7 +294,7 @@ host_call_restarting: fn(number: I64, a1: I64, a2: I64, a3: I64) -> I64 {
 // ptsname buffer): the primary's token, the secondary's token and the pts
 // number, eight little-endian bytes each.
 #Export(c) jet_sys_fd_pseudoterminal_raw: fn(output: I64, length: I64, error: I64) -> I64 {
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     // "/dev/ptmx\0" at 0, the ioctl int at 16.
     scratch: jet_rt_alloc(I64{24}, I64{8})
     thread_zero(scratch, I64{24})
@@ -327,7 +339,7 @@ host_descriptor_pair_take: fn(first: I64, second: I64, extra: I64, words: I64, o
     bytes: jet_rt_alloc_8(size)
     net_store_uint(bytes, I64{8}, first_token)
     net_store_uint(wrapping(bytes + I64{8}), I64{8}, second_token)
-    if (words == I64{3}) -> net_store_uint(wrapping(bytes + I64{16}), I64{8}, extra)
+    if (words == I64{3}) { net_store_uint(wrapping(bytes + I64{16}), I64{8}, extra) }
     compiler_fs_bytes_take(bytes, size, size, output, length)
     I64{1}
 }
@@ -374,13 +386,13 @@ host_descriptor_wait: fn(descriptor: I64, events: I64, limit: I64) -> I64 {
     native: host_native_int(token)
     requested: host_native_int(limit)
     wait: host_native_int(timeout)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
-    if (requested < I64{1}) -> return host_descriptor_range(HOST_IO_OP_READ, error)
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
+    if (requested < I64{1}) { return host_descriptor_range(HOST_IO_OP_READ, error) }
     descriptor: host_descriptor_number(native)
-    if (descriptor < I64{0}) -> return host_descriptor_closed(HOST_IO_OP_READ, error)
+    if (descriptor < I64{0}) { return host_descriptor_closed(HOST_IO_OP_READ, error) }
     ready: host_descriptor_wait(descriptor, I64{1}, wait)
-    if (ready < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, -ready, error)
-    if (ready == I64{0}) -> return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, I64{110}, error)
+    if (ready < I64{0}) { return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, -ready, error) }
+    if (ready == I64{0}) { return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, I64{110}, error) }
     cap: if (requested < HOST_READ_MAX) -> requested else -> HOST_READ_MAX
     bytes: jet_rt_alloc_8(cap)
     count := I64{-4}
@@ -405,32 +417,32 @@ host_descriptor_wait: fn(descriptor: I64, events: I64, limit: I64) -> I64 {
 #Export(c) jet_sys_fd_write_raw: fn(token: I64, data: I64, length: I64, timeout: I64, output: I64, error: I64) -> I64 {
     native: host_native_int(token)
     wait: host_native_int(timeout)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     descriptor: host_descriptor_number(native)
-    if (descriptor < I64{0}) -> return host_descriptor_closed(HOST_IO_OP_WRITE, error)
+    if (descriptor < I64{0}) { return host_descriptor_closed(HOST_IO_OP_WRITE, error) }
     if (length <= I64{0}) {
         rt_text_store(output, jet_int_owned_from_i64(I64{0}))
         return I64{1}
     }
     ready: host_descriptor_wait(descriptor, I64{4}, wait)
-    if (ready < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, I64{0}, -ready, error)
-    if (ready == I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, I64{0}, I64{110}, error)
+    if (ready < I64{0}) { return compiler_fs_errno(HOST_IO_OP_WRITE, I64{0}, -ready, error) }
+    if (ready == I64{0}) { return compiler_fs_errno(HOST_IO_OP_WRITE, I64{0}, I64{110}, error) }
     count: if (length < I64{4096}) -> length else -> I64{4096}
     packed: if (RT_HOST_U8_STRIDE == I64{1}) -> data else -> jet_rt_alloc(count, I64{8})
-    if (RT_HOST_U8_STRIDE != I64{1}) -> net_copy_packed(data, count, packed)
+    if (RT_HOST_U8_STRIDE != I64{1}) { net_copy_packed(data, count, packed) }
     wrote := I64{-4}
     loop wrote == (I64{-4}) {
         #Unsafe("packed lends count bytes; write retains no pointer and the caller's Fd keeps the descriptor open") {
             wrote = os_syscall_i64(I64{1}, descriptor, packed, count, I64{0}, I64{0}, I64{0})
         }
     }
-    if (RT_HOST_U8_STRIDE != I64{1}) -> jet_rt_free(packed, count, I64{8})
+    if (RT_HOST_U8_STRIDE != I64{1}) { jet_rt_free(packed, count, I64{8}) }
     // EAGAIN: another writer filled the pipe since it polled writable.
     if (wrote == I64{-11}) {
         rt_text_store(output, jet_int_owned_from_i64(I64{0}))
         return I64{1}
     }
-    if (wrote < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, I64{0}, -wrote, error)
+    if (wrote < I64{0}) { return compiler_fs_errno(HOST_IO_OP_WRITE, I64{0}, -wrote, error) }
     rt_text_store(output, jet_int_owned_from_i64(wrote))
     I64{1}
 }
@@ -439,17 +451,23 @@ host_descriptor_wait: fn(descriptor: I64, events: I64, limit: I64) -> I64 {
 // with F_SEAL_SHRINK|F_SEAL_GROW, then mapped shared read-write.
 #Export(c) jet_sys_shared_create_raw: fn(size: I64, output: I64, error: I64) -> I64 {
     bytes: host_native_int(size)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
-    if (bytes < I64{1} || bytes > HOST_SHARED_MAX) -> return host_descriptor_range(HOST_IO_OP_WRITE, error)
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
+    if (bytes < I64{1} || bytes > HOST_SHARED_MAX) {
+        return host_descriptor_range(HOST_IO_OP_WRITE, error)
+    }
     name: jet_rt_alloc(I64{16}, I64{8})
     // "jet-shared\0" as little-endian words.
     rt_text_store(name, I64{8241983636957848938})
     rt_text_store(wrapping(name + I64{8}), I64{25701})
     descriptor: host_call_restarting(I64{319}, name, I64{3}, I64{0})
     jet_rt_free(name, I64{16}, I64{8})
-    if (descriptor < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, I64{0}, -descriptor, error)
+    if (descriptor < I64{0}) {
+        return compiler_fs_errno(HOST_IO_OP_WRITE, I64{0}, -descriptor, error)
+    }
     failure := host_call_restarting(I64{77}, descriptor, bytes, I64{0})
-    if (failure >= I64{0}) -> failure = host_call_restarting(I64{72}, descriptor, I64{1033}, I64{6})
+    if (failure >= I64{0}) {
+        failure = host_call_restarting(I64{72}, descriptor, I64{1033}, I64{6})
+    }
     address := I64{0}
     if (failure >= I64{0}) {
         // A fresh shared mapping of this sealed memfd; host_descriptor_release
@@ -493,11 +511,13 @@ host_shared_span: fn(token: I64, offset: I64, count: I64) -> I64 {
 #Export(c) jet_sys_shared_write_raw: fn(token: I64, offset: I64, data: I64, length: I64, error: I64) -> I64 {
     native: host_native_int(token)
     at: host_native_int(offset)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     base: host_shared_span(native, at, length)
-    if (base == I64{0}) -> return host_descriptor_range(HOST_IO_OP_WRITE, error)
+    if (base == I64{0}) { return host_descriptor_range(HOST_IO_OP_WRITE, error) }
     if (length > I64{0}) {
-        if (RT_HOST_U8_STRIDE == I64{1}) { rt_text_bytes_copy(base, data, length) } else { net_copy_packed(data, length, base) }
+        if (RT_HOST_U8_STRIDE == I64{1}) { rt_text_bytes_copy(base, data, length) } else {
+            net_copy_packed(data, length, base)
+        }
     }
     I64{1}
 }
@@ -517,14 +537,18 @@ host_shared_span: fn(token: I64, offset: I64, count: I64) -> I64 {
     width: host_native_int(columns)
     height: host_native_int(rows)
     layout: host_native_int(order)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
-    if (layout < I64{0} || layout > I64{1} || row_bytes <= I64{0} || row_bytes.bit_and(I64{3}) != I64{0} || row_bytes > HOST_SHARED_MAX) -> return host_descriptor_range(HOST_IO_OP_WRITE, error)
-    if (x < I64{0} || y < I64{0} || width < I64{0} || height < I64{0} || width > row_bytes /% I64{4} - x || height > HOST_SHARED_MAX /% row_bytes - y) -> return host_descriptor_range(HOST_IO_OP_WRITE, error)
-    if (width == I64{0} || height == I64{0}) -> return I64{1}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
+    if (layout < I64{0} || layout > I64{1} || row_bytes <= I64{0} || row_bytes.bit_and(I64{3}) != I64{0} || row_bytes > HOST_SHARED_MAX) {
+        return host_descriptor_range(HOST_IO_OP_WRITE, error)
+    }
+    if (x < I64{0} || y < I64{0} || width < I64{0} || height < I64{0} || width > row_bytes /% I64{4} - x || height > HOST_SHARED_MAX /% row_bytes - y) {
+        return host_descriptor_range(HOST_IO_OP_WRITE, error)
+    }
+    if (width == I64{0} || height == I64{0}) { return I64{1} }
     end: (y + height) * row_bytes
-    if (end > length) -> return host_descriptor_range(HOST_IO_OP_WRITE, error)
+    if (end > length) { return host_descriptor_range(HOST_IO_OP_WRITE, error) }
     base: host_shared_span(native, at, end)
-    if (base == I64{0}) -> return host_descriptor_range(HOST_IO_OP_WRITE, error)
+    if (base == I64{0}) { return host_descriptor_range(HOST_IO_OP_WRITE, error) }
     span: width * I64{4}
     row := y
     loop row < y + height {
@@ -536,7 +560,9 @@ host_shared_span: fn(token: I64, offset: I64, count: I64) -> I64 {
             rt_text_store(wrapping(base + start + index), host_pixels_padded(rt_text_word(wrapping(data + start + index)), layout))
             index += I64{8}
         }
-        if (index < span) -> net_store_uint(wrapping(base + start + index), I64{4}, host_pixels_padded(net_load_uint(wrapping(data + start + index), I64{4}), layout).bit_and(I64{4294967295}))
+        if (index < span) {
+            net_store_uint(wrapping(base + start + index), I64{4}, host_pixels_padded(net_load_uint(wrapping(data + start + index), I64{4}), layout).bit_and(I64{4294967295}))
+        }
         row += I64{1}
     }
     I64{1}
@@ -546,7 +572,7 @@ host_shared_span: fn(token: I64, offset: I64, count: I64) -> I64 {
 host_pixels_padded: fn(pair: I64, layout: I64) -> I64 {
     // 0xFF000000FF000000: both padding bytes.
     padding: I64{-72057589759737856}
-    if (layout == I64{1}) -> return pair.bit_or(padding)
+    if (layout == I64{1}) { return pair.bit_or(padding) }
     // 0x000000FF000000FF and 0x0000FF000000FF00.
     red_blue: I64{1095216660735}
     green: I64{280375465148160}
@@ -558,9 +584,9 @@ host_pixels_padded: fn(pair: I64, layout: I64) -> I64 {
     native: host_native_int(token)
     at: host_native_int(offset)
     total: host_native_int(count)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     base: host_shared_span(native, at, total)
-    if (base == I64{0}) -> return host_descriptor_range(HOST_IO_OP_READ, error)
+    if (base == I64{0}) { return host_descriptor_range(HOST_IO_OP_READ, error) }
     if (total == I64{0}) {
         rt_text_store(output, I64{0})
         rt_text_store(length, I64{0})
@@ -579,10 +605,12 @@ host_pixels_padded: fn(pair: I64, layout: I64) -> I64 {
     at: host_native_int(offset)
     total: host_native_int(count)
     pixel: host_native_int(value).bit_and(I64{4294967295})
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
-    if (total < I64{0} || total > HOST_SHARED_MAX) -> return host_descriptor_range(HOST_IO_OP_WRITE, error)
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
+    if (total < I64{0} || total > HOST_SHARED_MAX) {
+        return host_descriptor_range(HOST_IO_OP_WRITE, error)
+    }
     base: host_shared_span(native, at, total * I64{4})
-    if (base == I64{0}) -> return host_descriptor_range(HOST_IO_OP_WRITE, error)
+    if (base == I64{0}) { return host_descriptor_range(HOST_IO_OP_WRITE, error) }
     pair: pixel.bit_or(pixel << I64{32})
     index := I64{0}
     // host_shared_span proved count * 4 bytes from `base` lie inside the live
@@ -591,7 +619,7 @@ host_pixels_padded: fn(pair: I64, layout: I64) -> I64 {
         rt_text_store(wrapping(base + index * I64{4}), pair)
         index += I64{2}
     }
-    if (index < total) -> net_store_uint(wrapping(base + index * I64{4}), I64{4}, pixel)
+    if (index < total) { net_store_uint(wrapping(base + index * I64{4}), I64{4}, pixel) }
     I64{1}
 }
 
@@ -599,7 +627,7 @@ host_pixels_padded: fn(pair: I64, layout: I64) -> I64 {
 // `offset` is a multiple of 8 and the word lies inside it, else 0. The
 // mapping is page-aligned, so the word is aligned for the atomic mappings.
 host_shared_word: fn(token: I64, offset: I64) -> I64 {
-    if (offset.bit_and(I64{7}) != I64{0}) -> return I64{0}
+    if (offset.bit_and(I64{7}) != I64{0}) { return I64{0} }
     host_shared_span(token, offset, I64{8})
 }
 
@@ -610,9 +638,9 @@ host_shared_word: fn(token: I64, offset: I64) -> I64 {
 #Export(c) jet_sys_shared_load_raw: fn(token: I64, offset: I64, output: I64, error: I64) -> I64 {
     native: host_native_int(token)
     at: host_native_int(offset)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     place: host_shared_word(native, at)
-    if (place == I64{0}) -> return host_descriptor_range(HOST_IO_OP_READ, error)
+    if (place == I64{0}) { return host_descriptor_range(HOST_IO_OP_READ, error) }
     rt_text_store(output, jet_int_owned_from_i64(atomic_word_load(place)))
     I64{1}
 }
@@ -621,9 +649,9 @@ host_shared_word: fn(token: I64, offset: I64) -> I64 {
     native: host_native_int(token)
     at: host_native_int(offset)
     word: host_native_int(value)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     place: host_shared_word(native, at)
-    if (place == I64{0}) -> return host_descriptor_range(HOST_IO_OP_WRITE, error)
+    if (place == I64{0}) { return host_descriptor_range(HOST_IO_OP_WRITE, error) }
     atomic_word_store(place, word)
     I64{1}
 }
@@ -634,9 +662,9 @@ host_shared_word: fn(token: I64, offset: I64) -> I64 {
     at: host_native_int(offset)
     old: host_native_int(expected)
     fresh: host_native_int(replacement)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     place: host_shared_word(native, at)
-    if (place == I64{0}) -> return host_descriptor_range(HOST_IO_OP_WRITE, error)
+    if (place == I64{0}) { return host_descriptor_range(HOST_IO_OP_WRITE, error) }
     swapped: if atomic_word_cas(place, old, fresh) -> I64{1} else -> I64{0}
     rt_text_store(output, jet_int_owned_from_i64(swapped))
     I64{1}

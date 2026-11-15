@@ -22,16 +22,16 @@ run: fn() {
     print("{ns.compare(ms)} {ms.lazy().compare(ns)} {ns.compare(ns)} {ns.len()} {ms[2]}")
     rs: [String Err!]{ok("x"), ok("y")}
     if rs.try_collect() == {
-        .Ok(vs) -> print("{vs.len()} {rs.len()} {vs[0]}")
+        .Ok(vs) -> { print("{vs.len()} {rs.len()} {vs[0]}") }
         .Err(e) -> print("unexpected: {e.message}")
     }
     if rs.copy().try_collect() == {
-        .Ok(vs) -> print("{vs.len()} {rs.len()} {vs[1]}")
+        .Ok(vs) -> { print("{vs.len()} {rs.len()} {vs[1]}") }
         .Err(e) -> print("unexpected: {e.message}")
     }
     fs: [String Err!]{checked("m"), checked("bad")}
     if fs.try_collect() == {
-        .Ok(vs) -> print("unexpected: {vs.len()}")
+        .Ok(vs) -> { print("unexpected: {vs.len()}") }
         .Err(e) -> print("{e.message} {fs.len()}")
     }
     xss: [[String]]{[String]{"p", "q"}, [String]{"r"}}

@@ -41,17 +41,19 @@ GlyphRun: struct {
 }
 
 system: fn(style: FontStyle) -> FontFace Never! {
-    if style == FontStyle.Monospace -> return FontFace{family: "monospace", size: 14.0, style: style}
+    if style == FontStyle.Monospace {
+        return FontFace{family: "monospace", size: 14.0, style: style}
+    }
     if style == FontStyle.Title -> return FontFace{family: "system-ui", size: 24.0, style: style}
     FontFace{family: "system-ui", size: 14.0, style: style}
 }
 
-shape_with: fn(face: FontFace, text: String) -> GlyphRun Never! {
-    shape_fallback(face, text)
-}
+shape_with: fn(face: FontFace, text: String) -> GlyphRun Never! { shape_fallback(face, text) }
 
 shape: fn(text: String, face: FontFace) -> GlyphRun Never! {
-    if !(face.size > 0.0 && face.size - face.size == 0.0) -> panic("font shaping contract failure: font size must be finite and positive")
+    if !(face.size > 0.0 && face.size - face.size == 0.0) {
+        panic("font shaping contract failure: font size must be finite and positive")
+    }
     shape_fallback(face, text)
 }
 
@@ -63,14 +65,16 @@ shape_fallback: fn(face: FontFace, text: String) -> GlyphRun {
     loop i < raw.len() {
         pair: decode_cp(raw, i)
         width: glyph_advance(face, pair.cp)
-        glyphs.push(Glyph{
-            id: pair.cp,
-            cluster: i,
-            x: advance,
-            y: 0.0,
-            advance_x: width,
-            advance_y: 0.0,
-        })
+        glyphs.push(
+            Glyph{
+                id: pair.cp,
+                cluster: i,
+                x: advance,
+                y: 0.0,
+                advance_x: width,
+                advance_y: 0.0,
+            },
+        )
         advance += width
         i = pair.next
     }
@@ -133,12 +137,9 @@ decode_cp: fn(raw: [U8], i: Int) -> DecodePair {
         cp = ((cp << 6)).bit_or(((byte).bit_and(63)))
         k += 1
     }
-    if cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF) {
-        return DecodePair{cp: 65533, next: i + 1}
-    }
+    if cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF) -> return DecodePair{cp: 65533, next: i + 1}
     DecodePair{cp: cp, next: i + width}
 }
-
 
 #Test("system font styles have canonical family and size defaults") {
     body: system(.Body)

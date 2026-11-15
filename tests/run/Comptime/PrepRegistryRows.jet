@@ -45,9 +45,7 @@ sink_rank: fn(module_name: String) -> Int {
     }
 }
 
-label_of: fn(sink: Sink) -> String {
-    sink.label()
-}
+label_of: fn(sink: Sink) -> String { sink.label() }
 
 shape_width: fn(shape: Shape) -> Int {
     if shape == {
@@ -88,10 +86,15 @@ order_rank: fn(order: Ordering) -> Int {
 }
 
 SHAPES: #run numeric_union()
+
 RANKS: #run { [Int]{sink_rank("core.log"), sink_rank("core.term")} }
+
 IS_CREDENTIAL: #run { [Bool]{Sink.Credential == Sink.Credential, Sink.Other == Sink.Credential} }
+
 LABELS: #run { [String]{label_of(Sink.Credential), label_of(Sink.Other)} }
+
 EFFECTS: #run { [String]{effect_label("core.time"), effect_label("core.compute"), effect_label("core.text")} }
+
 ORDERS: #run { [Int]{order_rank(sink_order(Sink.Credential)), order_rank(sink_order(Sink.Other))} }
 
 run: fn() {

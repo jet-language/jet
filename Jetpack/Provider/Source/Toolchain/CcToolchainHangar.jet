@@ -39,9 +39,13 @@ provider_cc_toolchain_resolve_for_target: fn(verification: &StoreVerification, h
 
 // The Hangar roots whose `hangar_dir()` is exactly `hangar`.
 provider_cc_roots_for_hangar: fn(hangar: String) -> HangarRoots CcToolchainError! {
-    if hangar == "" || hangar == "/" -> return Err(CcToolchainError.Invalid("Hangar root has no parent"))
+    if hangar == "" || hangar == "/" {
+        return Err(CcToolchainError.Invalid("Hangar root has no parent"))
+    }
     roots: HangarRoots{root: files.dirname(hangar), dev_mode: files.basename(hangar) == "Hangar"}
-    if roots.hangar_dir() != hangar -> return Err(CcToolchainError.Invalid("unsupported Hangar layout `{hangar}`"))
+    if roots.hangar_dir() != hangar {
+        return Err(CcToolchainError.Invalid("unsupported Hangar layout `{hangar}`"))
+    }
     Ok(roots)
 }
 
@@ -52,7 +56,9 @@ provider_cc_fact: fn(producer: ProducerRecord, entry_id: String, key: String) ->
 
 provider_cc_descriptor_from_entry: fn(roots: HangarRoots, entry: StoreEntry, producer: ProducerRecord) -[FS, Env]> CcToolchainDescriptor CcToolchainError! {
     schema: provider_cc_fact(producer, entry.id, "cc.schema")
-    if schema != CC_TOOLCHAIN_SCHEMA -> return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry.id}` has an unsupported descriptor schema"))
+    if schema != CC_TOOLCHAIN_SCHEMA {
+        return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry.id}` has an unsupported descriptor schema"))
+    }
     hangar: roots.hangar_dir()
     root: provider_cc_checked_entry_root(hangar, entry)
     layout_text: provider_cc_fact(producer, entry.id, "cc.layout")
@@ -82,7 +88,7 @@ provider_cc_descriptor_from_entry: fn(roots: HangarRoots, entry: StoreEntry, pro
         mounts: [CcMount]{provider_cc_fixture_mount(root, bundle_sha256)},
         references: entry.references,
         envelope: entry.envelope,
-        producer: producer
+        producer: producer,
     }
     if layout == CcToolchainLayout.Pack {
         pack_root: provider_cc_checked_object_digest_path(hangar, provider_cc_fact(producer, entry.id, "cc.compiler.root.sha256"), "C toolchain pack")
@@ -153,7 +159,7 @@ provider_cc_validate_descriptor: fn(descriptor: CcToolchainDescriptor, entry: St
         (name: "compiler", path: descriptor.compiler),
         (name: "c++ compiler", path: descriptor.cxx),
         (name: "linker", path: descriptor.linker),
-        (name: "sysroot", path: descriptor.sysroot)
+        (name: "sysroot", path: descriptor.sysroot),
     }
     loop item in paths {
         provider_cc_validate_relative_path(item.path) ?? {
@@ -176,7 +182,7 @@ provider_cc_validate_descriptor: fn(descriptor: CcToolchainDescriptor, entry: St
         return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry.id}` bundle digest changed: expected {descriptor.bundle_sha256}, got {actual_bundle}"))
     }
     if descriptor.layout == {
-        .Fixture -> provider_cc_validate_fixture_roots(descriptor, entry.id)
+        .Fixture -> { provider_cc_validate_fixture_roots(descriptor, entry.id) }
         .Pack -> provider_cc_validate_pack_roots(descriptor, entry.id, hangar_root)
     }
 }
@@ -304,7 +310,9 @@ provider_cc_checked_relative_path: fn(root: String, relative: String, label: Str
         metadata: files.stat(current) ?? {
             return Err(CcToolchainError.Invalid("C toolchain {label} path is unavailable: {err}"))
         }
-        if metadata.is_symlink -> return Err(CcToolchainError.Invalid("C toolchain {label} path traverses a symlink"))
+        if metadata.is_symlink {
+            return Err(CcToolchainError.Invalid("C toolchain {label} path traverses a symlink"))
+        }
     }
     Ok(current)
 }
@@ -315,8 +323,12 @@ provider_cc_read_bounded_file: fn(path: String, limit: Int, label: String) -[FS]
     metadata: files.stat(path) ?? {
         return Err(CcToolchainError.Invalid("read {label}: {err}"))
     }
-    if metadata.is_symlink || !metadata.is_file -> return Err(CcToolchainError.Invalid("{label} is not a regular file"))
-    if metadata.size > limit -> return Err(CcToolchainError.Invalid("{label} exceeds its size limit"))
+    if metadata.is_symlink || !metadata.is_file {
+        return Err(CcToolchainError.Invalid("{label} is not a regular file"))
+    }
+    if metadata.size > limit {
+        return Err(CcToolchainError.Invalid("{label} exceeds its size limit"))
+    }
     reader := files.open(path, links: .Refuse) ?? {
         return Err(CcToolchainError.Invalid("read {label}: {err}"))
     }
@@ -327,7 +339,9 @@ provider_cc_read_bounded_file: fn(path: String, limit: Int, label: String) -[FS]
         }
         if chunk.len() == 0 -> break
         loop byte in chunk -> bytes.push(byte)
-        if bytes.len() > limit -> return Err(CcToolchainError.Invalid("{label} exceeds its size limit"))
+        if bytes.len() > limit {
+            return Err(CcToolchainError.Invalid("{label} exceeds its size limit"))
+        }
     }
     Ok(bytes)
 }

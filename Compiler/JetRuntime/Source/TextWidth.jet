@@ -29,7 +29,7 @@ text_grapheme_next: fn(data: I64, length: I64, start: I64, carried: I64) -> (end
         previous = current
         at += rt_text_width(wrapping(data + at))
         ri = if (cc == I64{6}) -> wrapping(ri + I64{1}) else -> I64{0}
-        if (cc != I64{4} && cc != I64{5}) -> saw_pic = unicode_is_extended_pictographic(current)
+        if (cc != I64{4} && cc != I64{5}) { saw_pic = unicode_is_extended_pictographic(current) }
         // InCB Extend (3) keeps the pending conjunct state unchanged.
         if (incb == I64{2}) {
             incb_pending = true
@@ -48,14 +48,16 @@ text_grapheme_next: fn(data: I64, length: I64, start: I64, carried: I64) -> (end
 // Grapheme_Cluster_Break tags: 1 CR, 2 LF, 3 Control, 4 Extend, 5 ZWJ, 6 RI, 7
 // Prepend, 8 SpacingMark, 9 L, 10 V, 11 T, 12 LV, 13 LVT.
 text_grapheme_break_classes: fn(pc: I64, cc: I64) -> Bool {
-    if (pc == I64{1} && cc == I64{2}) -> return false
-    if (pc == I64{1} || pc == I64{2} || pc == I64{3}) -> return true
-    if (cc == I64{1} || cc == I64{2} || cc == I64{3}) -> return true
-    if (pc == I64{9} && (cc == I64{9} || cc == I64{10} || cc == I64{12} || cc == I64{13})) -> return false
-    if ((pc == I64{12} || pc == I64{10}) && (cc == I64{10} || cc == I64{11})) -> return false
-    if ((pc == I64{13} || pc == I64{11}) && cc == I64{11}) -> return false
-    if (cc == I64{4} || cc == I64{5} || cc == I64{8}) -> return false
-    if (pc == I64{7}) -> return false
+    if (pc == I64{1} && cc == I64{2}) { return false }
+    if (pc == I64{1} || pc == I64{2} || pc == I64{3}) { return true }
+    if (cc == I64{1} || cc == I64{2} || cc == I64{3}) { return true }
+    if (pc == I64{9} && (cc == I64{9} || cc == I64{10} || cc == I64{12} || cc == I64{13})) {
+        return false
+    }
+    if ((pc == I64{12} || pc == I64{10}) && (cc == I64{10} || cc == I64{11})) { return false }
+    if ((pc == I64{13} || pc == I64{11}) && cc == I64{11}) { return false }
+    if (cc == I64{4} || cc == I64{5} || cc == I64{8}) { return false }
+    if (pc == I64{7}) { return false }
     true
 }
 
@@ -63,7 +65,7 @@ text_grapheme_break_classes: fn(pc: I64, cc: I64) -> Bool {
 // keycaps, RI pairs, VS16 emoji and any wide/emoji-presentation scalar are two;
 // an all-zero-width cluster is zero; anything else is one.
 text_cluster_width: fn(data: I64, start: I64, end: I64) -> I64 {
-    if (start >= end) -> return I64{0}
+    if (start >= end) { return I64{0} }
     base: rt_text_decode(wrapping(data + start))
     if unicode_is_control(base) -> return I64{0}
     count := I64{0}
@@ -76,19 +78,19 @@ text_cluster_width: fn(data: I64, start: I64, end: I64) -> I64 {
     at := start
     loop at < end {
         cp: rt_text_decode(wrapping(data + at))
-        if (count == I64{1}) -> second = cp
-        if (count == I64{2}) -> third = cp
+        if (count == I64{1}) { second = cp }
+        if (count == I64{2}) { third = cp }
         count += I64{1}
-        if (cp == I64{65039}) -> variation = true
+        if (cp == I64{65039}) { variation = true }
         if unicode_is_emoji(cp) -> emoji = true
-        if (unicode_is_east_asian_wide(cp) || unicode_is_emoji_presentation(cp)) -> wide = true
+        if (unicode_is_east_asian_wide(cp) || unicode_is_emoji_presentation(cp)) { wide = true }
         if !unicode_is_zero_width(cp) -> visible = true
         at += rt_text_width(wrapping(data + at))
     }
     keycap_base: (base >= I64{48} && base <= I64{57}) || base == I64{35} || base == I64{42}
     keycap: keycap_base && ((count == I64{2} && second == I64{8419}) || (count == I64{3} && second == I64{65039} && third == I64{8419}))
     ri_pair: unicode_grapheme_class(base) == I64{6} && count >= I64{2} && unicode_grapheme_class(second) == I64{6}
-    if (keycap || ri_pair || (variation && emoji) || wide) -> return I64{2}
+    if (keycap || ri_pair || (variation && emoji) || wide) { return I64{2} }
     if !visible -> return I64{0}
     I64{1}
 }
@@ -132,7 +134,9 @@ text_fill_columns: fn(target: I64, fill: I64, columns: I64) {
         return
     }
     used: rt_text_len(target)
-    if (rt_text_reserve_extra(target, rt_text_data(target), used, repeats * unit + remainder) == I64{0}) -> return
+    if (rt_text_reserve_extra(target, rt_text_data(target), used, repeats * unit + remainder) == I64{0}) {
+        return
+    }
     at := I64{0}
     loop at < repeats {
         rt_text_append(target, data, unit)
@@ -149,7 +153,7 @@ text_pad: fn(value: I64, width: I64, fill: I64, side: I64) -> I64 {
         return I64{0}
     }
     gap := wrapping(text_route_native(width) - text_display_width(value))
-    if (gap < I64{0}) -> gap = I64{0}
+    if (gap < I64{0}) { gap = I64{0} }
     before: if {
         (side == I64{0}) -> gap
         (side == I64{2}) -> gap /% I64{2}
@@ -162,6 +166,14 @@ text_pad: fn(value: I64, width: I64, fill: I64, side: I64) -> I64 {
     result
 }
 
-#Export(c) jet_text_pad_start_ref: fn(value: I64, width: I64, fill: I64) -> I64 { text_pad(value, width, fill, I64{0}) }
-#Export(c) jet_text_pad_end_ref: fn(value: I64, width: I64, fill: I64) -> I64 { text_pad(value, width, fill, I64{1}) }
-#Export(c) jet_text_center_ref: fn(value: I64, width: I64, fill: I64) -> I64 { text_pad(value, width, fill, I64{2}) }
+#Export(c) jet_text_pad_start_ref: fn(value: I64, width: I64, fill: I64) -> I64 {
+    text_pad(value, width, fill, I64{0})
+}
+
+#Export(c) jet_text_pad_end_ref: fn(value: I64, width: I64, fill: I64) -> I64 {
+    text_pad(value, width, fill, I64{1})
+}
+
+#Export(c) jet_text_center_ref: fn(value: I64, width: I64, fill: I64) -> I64 {
+    text_pad(value, width, fill, I64{2})
+}

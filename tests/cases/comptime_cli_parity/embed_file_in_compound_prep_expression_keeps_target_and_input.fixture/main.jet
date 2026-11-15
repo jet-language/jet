@@ -2,16 +2,16 @@
 // interpolation hole, and elements of a joined list, one of them in a
 // subfolder. Each call reads its own checked target relative to this file.
 SIZE: #run { embed_file("data.txt").len() + 1 }
+
 QUOTED: #run "[{embed_file("data.txt")}]"
-JOINED: #run {
-    [String]{
-        "(",
-        embed_file("data.txt"),
-        "|",
-        embed_file("more/notes.txt"),
-        ")",
-    }.join("")
-}
+
+JOINED: #run { [String]{
+    "(",
+    embed_file("data.txt"),
+    "|",
+    embed_file("more/notes.txt"),
+    ")",
+}.join("") }
 
 run: fn() {
     print(SIZE)

@@ -35,13 +35,13 @@ CBIND_CALLBACK_MARKER: "__jet_callback__"
 
 // Header type facts shared by prototype rendering and generated C records.
 CTypeCatalog: struct {
-    aliases: [String: String]
-    records: [String: CStructDef]
-    names: [String: String]
+    aliases: [String:String]
+    records: [String:CStructDef]
+    names: [String:String]
 
     parse: fn(source: String, handles: OpaqueHandleDiscovery) -> CTypeCatalog Never! {
         declarations: pkg_opaque_split_declarations(source)
-        catalog := CTypeCatalog{aliases: [String: String]{}, records: [String: CStructDef]{}, names: [String: String]{}}
+        catalog := CTypeCatalog{aliases: [String:String]{}, records: [String:CStructDef]{}, names: [String:String]{}}
         used_names := [String]{}
         loop handle in handles.handles -> used_names.push(handle.jet_name)
         raw_records := [(jet_name: String, record: CRawRecord)]{}
@@ -52,7 +52,7 @@ CTypeCatalog: struct {
                     seed: record.alias ?? (record.struct_tag ?? "CRecord")
                     jet_name: pkg_bind_unique_name(used_names, foundation_generated_type_name(pkg_cbind_trim_end_matches(seed, "_t"), "CRecord"))
                     if record.struct_tag == {
-                        .Val(struct_tag) -> catalog.names[struct_tag] = jet_name
+                        .Val(struct_tag) -> { catalog.names[struct_tag] = jet_name }
                         .None -> {}
                     }
                     if record.alias == {
@@ -75,7 +75,7 @@ CTypeCatalog: struct {
                 .None -> {}
             }
             if pkg_cbind_parse_scalar_or_alias_typedef(declaration) == {
-                .Val(typedef) -> catalog.aliases[typedef.alias] = typedef.target
+                .Val(typedef) -> { catalog.aliases[typedef.alias] = typedef.target }
                 .None -> {}
             }
         }
@@ -88,11 +88,11 @@ CTypeCatalog: struct {
             def: CStructDef{jet_name: entry.jet_name, fields: fields}
             catalog.records[key] = def
             if entry.record.struct_tag == {
-                .Val(struct_tag) -> catalog.records[struct_tag] = def
+                .Val(struct_tag) -> { catalog.records[struct_tag] = def }
                 .None -> {}
             }
             if entry.record.alias == {
-                .Val(alias) -> catalog.records[alias] = def
+                .Val(alias) -> { catalog.records[alias] = def }
                 .None -> {}
             }
         }
@@ -230,7 +230,7 @@ pkg_cbind_parse_complete_record: fn(decl: String) -> CRawRecord? Never! {
     Val(CRawRecord{
         struct_tag: pkg_cbind_first_ident_word(prefix),
         alias: pkg_cbind_first_ident_word(suffix),
-        body: pkg_bytes_text(bytes, open + 1, close)
+        body: pkg_bytes_text(bytes, open + 1, close),
     })
 }
 
@@ -257,7 +257,9 @@ pkg_cbind_parse_callback_alias: fn(decl: String) -> (alias: String, target: Stri
     params_open: pkg_cbind_find(bytes, "(", alias_end + 1)
     if params_open < 0 -> return None
     params_close: pkg_cbind_rfind_byte(bytes, 41)
-    if params_close <= params_open || pkg_bytes_text(bytes, params_close + 1, bytes.len()).trim() != "" -> return None
+    if params_close <= params_open || pkg_bytes_text(bytes, params_close + 1, bytes.len()).trim() != "" {
+        return None
+    }
     ret: pkg_cbind_normalize_type(pkg_bytes_text(bytes, 8, pointer).trim())
     if ret == "" -> return None
     params: pkg_cbind_split_params(pkg_bytes_text(bytes, params_open + 1, params_close)) ?? return None
@@ -273,7 +275,9 @@ pkg_cbind_parse_callback_alias: fn(decl: String) -> (alias: String, target: Stri
 pkg_cbind_parse_scalar_or_alias_typedef: fn(raw_decl: String) -> (alias: String, target: String)? Never! {
     decl: raw_decl.trim()
     tokens: pkg_cbind_words(decl)
-    if tokens.len() == 0 || tokens[0] != "typedef" || decl.contains("{{") || decl.contains("(") -> return None
+    if tokens.len() == 0 || tokens[0] != "typedef" || decl.contains("{{") || decl.contains("(") {
+        return None
+    }
     alias := ""
     position := tokens.len() - 1
     loop position >= 0 {
@@ -288,7 +292,9 @@ pkg_cbind_parse_scalar_or_alias_typedef: fn(raw_decl: String) -> (alias: String,
     alias_pos: pkg_cbind_rfind(bytes, alias)
     if alias_pos < 7 -> return None
     target: pkg_bytes_text(bytes, 7, alias_pos).trim()
-    if target == "" || pkg_cbind_normalize_type(target) == pkg_cbind_normalize_type(alias) -> return None
+    if target == "" || pkg_cbind_normalize_type(target) == pkg_cbind_normalize_type(alias) {
+        return None
+    }
     Val((alias: alias, target: target))
 }
 
@@ -300,7 +306,9 @@ pkg_cbind_parse_record_fields: fn(body: String, catalog: CTypeCatalog) -> [(name
     fields := [(name: String, ty: String)]{}
     loop index in 0..<declarations.len() {
         declaration: declarations[index].trim()
-        if declaration == "" || declaration.contains(":") || declaration.contains(",") -> return None
+        if declaration == "" || declaration.contains(":") || declaration.contains(",") {
+            return None
+        }
         split: pkg_cbind_split_param_type_and_name(declaration, index)
         if !pkg_cbind_is_ident(split.name) -> return None
         ty: catalog.map_layout_type(split.ty) ?? return None
@@ -544,6 +552,7 @@ pkg_cbind_callback_scalar_type: fn(c_type: String) -> String? Never! {
 }
 
 CBIND_LENGTH_SUFFIXES: [String]{"_len", "_length", "_count", "_size", "_num", "_number"}
+
 CBIND_LENGTH_PREFIXES: [String]{"len_", "length_", "count_", "size_", "num_", "number_"}
 
 // Parameter names that may carry an element count.

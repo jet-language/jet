@@ -144,7 +144,9 @@ jet_cli_lowering_inputs: fn(request: &&JetDriverCompileRequest, trace_sink: JetC
     if trace_sink == .Val(sink) -> sink.begin("keepgoing.report", "", -1, -1)
     problem: jet_cli_keep_going_report(front.compile.keep_going_rows)
     if trace_sink == .Val(sink) -> sink.end("keepgoing.report", front.compile.keep_going_rows.len())
-    if problem != "" -> return JetDriverLoweringInputsResult{compile: jet_driver_compile_escaped_failure(problem), inputs: None}
+    if problem != "" {
+        return JetDriverLoweringInputsResult{compile: jet_driver_compile_escaped_failure(problem), inputs: None}
+    }
     front
 }
 
@@ -152,15 +154,15 @@ jet_cli_lowering_inputs: fn(request: &&JetDriverCompileRequest, trace_sink: JetC
 // (JetDriverCompileResult.comptime_debug_trace), written to stderr as the
 // compile ends, ahead of anything the verb reports.
 jet_cli_comptime_debug_trace: fn(result: JetDriverCompileResult) {
-    if result.comptime_debug_trace == "" -> return
+    if result.comptime_debug_trace == "" {
+        return
+    }
     stderr_handle := cli_term.stderr()
     stderr_handle.write(result.comptime_debug_trace).drop("jet stderr")
 }
 
 // `--keep-going` selects the all-phases collector.
-jet_cli_keep_going_enabled: fn() -> Bool Never! {
-    jet_cli_control_on("keep_going")
-}
+jet_cli_keep_going_enabled: fn() -> Bool Never! { jet_cli_control_on("keep_going") }
 
 // Writes the TSV failure census `rows` to the `--keep-going-report` file
 // when one is named; the write's failure text, else "".
@@ -213,7 +215,9 @@ jet_cli_keep_going_append: fn(rows: [String]) -> String Never! {
 jet_cli_runtime_library: fn(request: &&JetDriverCompileRequest, prefix: String, lifecycle: String?, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetDriverCompileResult {
     selected := request.move()
     selected.release_state_aside = true
-    if cli_sys.get(ENV_JET_FRONT_CORE_OBJECT_OUTPUT) == .Val(core_prefix) -> return jet_cli_runtime_with_core(selected, prefix, lifecycle, core_prefix, compiler_threads, trace_sink)
+    if cli_sys.get(ENV_JET_FRONT_CORE_OBJECT_OUTPUT) == .Val(core_prefix) {
+        return jet_cli_runtime_with_core(selected, prefix, lifecycle, core_prefix, compiler_threads, trace_sink)
+    }
     alone: jet_cli_runtime_ir(jet_cli_lowering_inputs(selected, trace_sink), prefix, lifecycle, compiler_threads, trace_sink)
     if alone.move() == {
         .Stopped(result) -> result
@@ -280,12 +284,17 @@ JetCLIRuntimeIR: enum {
 // The runtime library's object (jet_cli_runtime_object): its bytes, written
 // to `{prefix}.o` with its export list, ABI, thread receipt and interface,
 // else the problem that stops the build.
-JetCLIRuntimeObject: struct { bytes: [U8], problem: String }
+JetCLIRuntimeObject: struct {
+    bytes: [U8]
+    problem: String
+}
 
 jet_cli_runtime_ir: fn(front: &&JetDriverLoweringInputsResult, prefix: String, lifecycle: String?, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLIRuntimeIR {
     owned := front.move()
     result := owned.compile.move()
-    if !result.complete || result.internal_problem != None -> return JetCLIRuntimeIR.Stopped{result: result}
+    if !result.complete || result.internal_problem != None {
+        return JetCLIRuntimeIR.Stopped{result: result}
+    }
     checked := owned.inputs.move() ?? return jet_cli_runtime_stopped("the runtime front end returned no checked inputs")
     // The lifecycle list, the export and interface rows and the checked
     // declarations the IR build reads.
@@ -296,7 +305,9 @@ jet_cli_runtime_ir: fn(front: &&JetDriverLoweringInputsResult, prefix: String, l
     interface_rows := [RuntimeInterfaceRow]{}
     loop row in checked.c_exports {
         found: row.runtime_interface ?? next
-        if found.declaration == "" -> return jet_cli_runtime_stopped("the runtime's public function `{found.module_name}.{found.member}` has a signature the jet.runtime interface can't render (type parameters, or a parameter convention, default or variadic) or is `priv(package)`")
+        if found.declaration == "" {
+            return jet_cli_runtime_stopped("the runtime's public function `{found.module_name}.{found.member}` has a signature the jet.runtime interface can't render (type parameters, or a parameter convention, default or variadic) or is `priv(package)`")
+        }
         interface_rows.push(RuntimeInterfaceRow{module_name: found.module_name.copy(), member: found.member.copy(), declaration: found.declaration.copy(), symbol: found.symbol.copy()})
     }
     interface_text: jet_driver_runtime_interface_file(interface_rows)
@@ -306,12 +317,16 @@ jet_cli_runtime_ir: fn(front: &&JetDriverLoweringInputsResult, prefix: String, l
     library := ir_build_library(checked.functions.move(), checked.decls, checked.symbols.move(), declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), rows, lifecycle_text.split("\n").to_list(), compiler_threads)
     if trace_sink == .Val(sink) -> sink.end("ir.build", library.program.functions.len())
     issues := compiler_take_rows<String>(library.errors)
-    loop failure in library.failures -> issues.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
+    loop failure in library.failures {
+        issues.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
+    }
     // The memory term is read now: the front end before this holds most of it.
     threads: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
     if issues.len() == 0 {
         if trace_sink == .Val(sink) -> sink.begin("ir.lint", "", -1, -1)
-        loop finding in ir_lint_module(library.program, "ir.build", threads) -> issues.push(jet_cli_runtime_lint_issue(finding))
+        loop finding in ir_lint_module(library.program, "ir.build", threads) {
+            issues.push(jet_cli_runtime_lint_issue(finding))
+        }
         if trace_sink == .Val(sink) -> sink.end("ir.lint", library.program.functions.len())
     }
     if issues.len() == 0 {
@@ -319,7 +334,9 @@ jet_cli_runtime_ir: fn(front: &&JetDriverLoweringInputsResult, prefix: String, l
         _ := ir_optimize_module(library.program, ir_opt_options(1), threads)
         if trace_sink == .Val(sink) -> sink.end("ir.opt", library.program.functions.len())
         if trace_sink == .Val(sink) -> sink.begin("ir.lint", "", -1, -1)
-        loop finding in ir_lint_module(library.program, "ir.opt", threads) -> issues.push(jet_cli_runtime_lint_issue(finding))
+        loop finding in ir_lint_module(library.program, "ir.opt", threads) {
+            issues.push(jet_cli_runtime_lint_issue(finding))
+        }
         if trace_sink == .Val(sink) -> sink.end("ir.lint", library.program.functions.len())
     }
     if issues.len() > 0 {
@@ -409,9 +426,7 @@ jet_cli_runtime_pack: fn(result: &&JetDriverCompileResult, prefix: String, objec
                     return jet_driver_compile_escaped_failure("linking the runtime and Core for the runtime image failed; see {prefix}.pack-issues")
                 }
                 prelinked = both.bytes.move()
-            } else {
-                prelinked = linked.bytes.move()
-            }
+            } else { prelinked = linked.bytes.move() }
             image: x64_link_runtime_image(pack_path, prelinked.move())
             if image.errors.len() > 0 {
                 cli_files.write("{prefix}.pack-issues", image.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime image findings: {err}")
@@ -427,17 +442,17 @@ jet_cli_runtime_pack: fn(result: &&JetDriverCompileResult, prefix: String, objec
 // Unset, the tree is found (jet_cli_toolchain_root); with no tree, jet
 // compiles against the Core sources built into it (jet_cli_core_sources).
 JET_CLI_TOOLCHAIN_ROOT_ENV: ENV_JET_TOOLCHAIN_ROOT
+
 // This compiler's identity (`name@version#<source id>`). Unset, it is the
 // jet's identity part, else the IDENTITY file beside the jet executable
 // (jet_cli_compiler_identity).
 JET_CLI_COMPILER_IDENTITY_ENV: ENV_JET_COMPILER_IDENTITY
+
 // Beside the jet executable: the file holding its identity on one line.
 JET_CLI_IDENTITY_FILE: "IDENTITY"
 
 // The directory holding the running jet executable.
-jet_cli_executable_dir: fn() -[Env]> String Never! {
-    jet_cli_parent(cli_sys.executable()) ?? "/"
-}
+jet_cli_executable_dir: fn() -[Env]> String Never! { jet_cli_parent(cli_sys.executable()) ?? "/" }
 
 // The running compiler's identity: JET_COMPILER_IDENTITY, else its identity
 // part (jet_cli_identity_part: every jet the compiler build ships carries
@@ -488,7 +503,9 @@ JetCLIToolchainRoot: enum {
 // then reads the Core sources built into jet, and only the tools that need
 // a checkout's other files refuse.
 jet_cli_toolchain_root: fn(input: String) -> JetCLIToolchainRoot Never! {
-    if cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) == .Val(root) -> return JetCLIToolchainRoot.Found{root: root}
+    if cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) == .Val(root) {
+        return JetCLIToolchainRoot.Found{root: root}
+    }
     start: cli_files.realpath(input) ?? input
     current := start
     loop {
@@ -503,8 +520,11 @@ jet_cli_toolchain_root: fn(input: String) -> JetCLIToolchainRoot Never! {
 }
 
 JET_CLI_MAX_TREE_DEPTH: 256
+
 JET_CLI_MAX_SOURCE_BYTES: 536870912
+
 JET_CLI_MAX_SOURCE_TOTAL: 4294967296
+
 JET_CLI_MAX_SOURCE_FILES: 1000000
 
 // A directory holding one of these is its own project, outside the walk.
@@ -516,15 +536,17 @@ JET_CLI_SKIPPED_NAMES: [String]{"target", "build", "node_modules", "bin"}
 
 // Generated foreign-binding caches and the sidecars each binding may carry.
 JET_CLI_FOREIGN_CACHE_DIRECTORIES: [String]{".jet/bindings/c", ".jet/bindings/cpp"}
+
 JET_CLI_FOREIGN_CACHE_SIDECARS: [String]{"metadata", "provenance"}
 
 JetCLICompiled: enum {
-    // The driver ran; `snapshot` is the source snapshot it compiled, kept for
-    // presenting diagnostics against the files that own them.
     Compiled(result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot)
-    // The host could not assemble the request: write these bytes and exit.
     Refused(output: JetDriverVerbOutput)
 }
+
+// The driver ran; `snapshot` is the source snapshot it compiled, kept for
+// presenting diagnostics against the files that own them.
+// The host could not assemble the request: write these bytes and exit.
 
 // `root` joined with a root-relative path (Loader.jet `jet_driver_authority_path`).
 jet_cli_authority_path: fn(root: String, relative: String) -> String Never! {
@@ -535,7 +557,9 @@ jet_cli_authority_path: fn(root: String, relative: String) -> String Never! {
 // `identity_key` over `FileIdentity::from_metadata`. Directory identity is
 // pinned to the opened object, not its mutable listing.
 jet_cli_identity_key: fn(kind: String, stat: cli_files.Stat) -> String Never! {
-    if kind == "directory" -> return "authority-file-v1;kind=directory;length=0;modified_ns=none;device={stat.id.device};inode={stat.id.inode}"
+    if kind == "directory" {
+        return "authority-file-v1;kind=directory;length=0;modified_ns=none;device={stat.id.device};inode={stat.id.inode}"
+    }
     modified: if stat.modified.to_unix_ns() == {
         .Ok(value) -> if value >= 0 -> "{value}" else -> "none"
         .Err(_) -> "none"
@@ -565,10 +589,16 @@ JetCLISourceBudget: struct {
 }
 
 jet_cli_source_read_limit: fn(budget: JetCLISourceBudget, size: Int, path: String) -> Int JetCLIReadError! {
-    if size > JET_CLI_MAX_SOURCE_BYTES -> return Err(jet_cli_read_error("`{path}` exceeds the {JET_CLI_MAX_SOURCE_BYTES}-byte file bound"))
-    if budget.files >= JET_CLI_MAX_SOURCE_FILES -> return Err(jet_cli_read_error("authorized sources exceed the {JET_CLI_MAX_SOURCE_FILES}-file bound at `{path}`"))
+    if size > JET_CLI_MAX_SOURCE_BYTES {
+        return Err(jet_cli_read_error("`{path}` exceeds the {JET_CLI_MAX_SOURCE_BYTES}-byte file bound"))
+    }
+    if budget.files >= JET_CLI_MAX_SOURCE_FILES {
+        return Err(jet_cli_read_error("authorized sources exceed the {JET_CLI_MAX_SOURCE_FILES}-file bound at `{path}`"))
+    }
     remaining: JET_CLI_MAX_SOURCE_TOTAL - budget.bytes
-    if size > remaining -> return Err(jet_cli_read_error("authorized sources exceed the {JET_CLI_MAX_SOURCE_TOTAL}-byte total bound at `{path}`"))
+    if size > remaining {
+        return Err(jet_cli_read_error("authorized sources exceed the {JET_CLI_MAX_SOURCE_TOTAL}-byte total bound at `{path}`"))
+    }
     Ok(if remaining < JET_CLI_MAX_SOURCE_BYTES -> remaining else -> JET_CLI_MAX_SOURCE_BYTES)
 }
 
@@ -585,26 +615,36 @@ jet_cli_walk_sources: fn(root: String, relative: String, depth: Int, files: &[Je
     chain := [cli_files.Directory]{}
     names := [String]{}
     initial: jet_cli_hold_root_chain(directory, chain, names) ?? return Val(err.message)
-    if jet_cli_build_read_chain_current(chain, names, initial) == .Err(problem) -> return Val(problem.message)
-    if jet_cli_walk_held_sources(root, relative, depth, chain[chain.len() - 1], files, directories, retain_directories, budget) == .Val(problem) -> return Val(problem)
-    if jet_cli_build_read_chain_current(chain, names, initial) == .Err(problem) -> return Val(problem.message)
+    if jet_cli_build_read_chain_current(chain, names, initial) == .Err(problem) {
+        return Val(problem.message)
+    }
+    if jet_cli_walk_held_sources(root, relative, depth, chain[chain.len() - 1], files, directories, retain_directories, budget) == .Val(problem) {
+        return Val(problem)
+    }
+    if jet_cli_build_read_chain_current(chain, names, initial) == .Err(problem) {
+        return Val(problem.message)
+    }
     None
 }
 
 jet_cli_walk_held_sources: fn(root: String, relative: String, depth: Int, held: cli_files.Directory, files: &[JetDriverAuthorizedSourceFile], directories: &[AppAuthorizedDirectory], retain_directories: Bool, budget: &JetCLISourceBudget) -[FS]> String? Never! {
     directory: if relative == "" -> root else -> jet_cli_authority_path(root, relative)
     listing: held.list() ?? return Val("cannot list `{directory}`: {err}")
-    if listing.len() > JET_CLI_MAX_SOURCE_FILES - budget.entries -> return Val("the source walk exceeds the {JET_CLI_MAX_SOURCE_FILES}-entry bound at `{directory}`")
+    if listing.len() > JET_CLI_MAX_SOURCE_FILES - budget.entries {
+        return Val("the source walk exceeds the {JET_CLI_MAX_SOURCE_FILES}-entry bound at `{directory}`")
+    }
     budget.entries += listing.len()
     if retain_directories {
         entries := [AppAuthorizedDirectoryEntry]{}
         loop entry in listing {
-            entries.push(AppAuthorizedDirectoryEntry{
-                name: entry.name,
-                path: jet_cli_authority_path(directory, entry.name),
-                is_directory: entry.is_dir,
-                name_is_unicode: entry.name_is_unicode,
-            })
+            entries.push(
+                AppAuthorizedDirectoryEntry{
+                    name: entry.name,
+                    path: jet_cli_authority_path(directory, entry.name),
+                    is_directory: entry.is_dir,
+                    name_is_unicode: entry.name_is_unicode,
+                },
+            )
         }
         directories.push(AppAuthorizedDirectory{path: directory, entries: entries})
     }
@@ -629,13 +669,21 @@ jet_cli_walk_held_sources: fn(root: String, relative: String, depth: Int, held: 
             opened: child_held.stat() ?? return Val("cannot inspect `{path}`: {err}")
             if opened.id != stat.id -> return Val("`{path}` changed while it was held")
             if jet_cli_held_project_boundary(child_held) == {
-                .Ok(boundary) -> { if boundary -> next }
+                .Ok(boundary) -> {
+                    if boundary -> next
+                }
                 .Err(problem) -> { return Val(problem.message) }
             }
-            if depth >= JET_CLI_MAX_TREE_DEPTH -> return Val("the source walk exceeds the {JET_CLI_MAX_TREE_DEPTH}-level depth bound at `{path}`")
-            if jet_cli_walk_held_sources(root, child, depth + 1, child_held, files, directories, retain_directories, budget) == .Val(problem) -> return Val(problem)
+            if depth >= JET_CLI_MAX_TREE_DEPTH {
+                return Val("the source walk exceeds the {JET_CLI_MAX_TREE_DEPTH}-level depth bound at `{path}`")
+            }
+            if jet_cli_walk_held_sources(root, child, depth + 1, child_held, files, directories, retain_directories, budget) == .Val(problem) {
+                return Val(problem)
+            }
             current: held.entry_stat(name) ?? return Val("cannot inspect `{path}`: {err}")
-            if !current.is_dir || current.is_symlink || current.id != stat.id -> return Val("`{path}` changed while it was held")
+            if !current.is_dir || current.is_symlink || current.id != stat.id {
+                return Val("`{path}` changed while it was held")
+            }
             next
         }
         if !name.ends_with(".jet") -> next
@@ -644,7 +692,9 @@ jet_cli_walk_held_sources: fn(root: String, relative: String, depth: Int, held: 
         read: jet_cli_read_held_source(held, name, limit) ?? return Val("cannot read `{path}`: {err.message}")
         budget.bytes += read.stat.size
         budget.files += 1
-        if !jet_cli_build_read_same_file(stat, read.stat) -> return Val("`{path}` changed while it was held")
+        if !jet_cli_build_read_same_file(stat, read.stat) {
+            return Val("`{path}` changed while it was held")
+        }
         source: String.from_bytes(read.bytes.move()) ?? return Val("cannot read `{path}`: file is not valid UTF-8")
         // A script (a `#!/...` launch line) is a standalone program wherever
         // it lives, never a member of the package around it.
@@ -689,7 +739,9 @@ jet_cli_reach_sources: fn(root: String, entry: String, files: &[JetDriverAuthori
         if !stat.is_file -> return Err(jet_cli_read_error("`{path}` is not a regular file"))
         limit: jet_cli_source_read_limit(budget, stat.size, path) ?? return Err(err)
         read: jet_cli_read_rooted_source(root, relative, limit) ?? return Err(jet_cli_read_error("cannot read `{path}`: {err.message}"))
-        if !jet_cli_build_read_same_file(stat, read.stat) -> return Err(jet_cli_read_error("`{path}` changed while it was held"))
+        if !jet_cli_build_read_same_file(stat, read.stat) {
+            return Err(jet_cli_read_error("`{path}` changed while it was held"))
+        }
         budget.bytes += read.stat.size
         budget.files += 1
         source: String.from_bytes(read.bytes.move()) ?? return Err(jet_cli_read_error("cannot read `{path}`: file is not valid UTF-8"))
@@ -722,7 +774,9 @@ jet_cli_reached_paths: fn(root: String, relative: String, program: Program, pend
     loop row in scoped {
         declaration: row.declaration
         // Core, foreign and versioned imports name no file of the folder.
-        if jet_driver_is_foreign_provider_import(declaration) || jet_driver_core_import_module(declaration) != None || declaration.inline_version != None -> next
+        if jet_driver_is_foreign_provider_import(declaration) || jet_driver_core_import_module(declaration) != None || declaration.inline_version != None {
+            next
+        }
         if declaration.kind == {
             .File(path, _) -> {
                 resolved: jet_driver_file_import_path(relative, path)
@@ -759,7 +813,9 @@ jet_cli_reached_paths: fn(root: String, relative: String, program: Program, pend
 // loader's order (Loader.jet jet_driver_find_module_import_target); none
 // for a name with an unsafe component, which the loader refuses.
 jet_cli_module_candidates: fn(name: String) -> [String] Never! {
-    if name.len() == 0 || name == "." || name == ".." || name.contains("/") || name.contains("\\") -> return [String]{}
+    if name.len() == 0 || name == "." || name == ".." || name.contains("/") || name.contains("\\") {
+        return [String]{}
+    }
     pascal: jet_driver_pascal_segment(name)
     [String]{"{name}.jet", "{pascal}.jet", "{name}/run.jet", "{pascal}/run.jet"}
 }
@@ -803,7 +859,9 @@ jet_cli_cache_file: fn(root: String, relative: String, budget: &JetCLISourceBudg
     if !stat.is_file -> return Err(jet_cli_read_error("`{path}` is not a regular file"))
     limit: jet_cli_source_read_limit(budget, stat.size, path)
     read: jet_cli_read_rooted_source(root, relative, limit) ?? return Err(jet_cli_read_error("cannot read `{path}`: {err.message}"))
-    if !jet_cli_build_read_same_file(stat, read.stat) -> return Err(jet_cli_read_error("`{path}` changed while it was held"))
+    if !jet_cli_build_read_same_file(stat, read.stat) {
+        return Err(jet_cli_read_error("`{path}` changed while it was held"))
+    }
     budget.bytes += read.stat.size
     budget.files += 1
     Ok(JetCLICacheSource{relative_path: relative, read: read})
@@ -820,16 +878,24 @@ jet_cli_foreign_cache_files: fn(root: String, caches: &[JetDriverAuthorizedSourc
             if err == .NotFound(_) -> next
             return Val("cannot inspect `{directory}`: {err}")
         }
-        if directory_info.is_symlink || !directory_info.is_dir -> return Val("`{directory}` is not a real directory")
+        if directory_info.is_symlink || !directory_info.is_dir {
+            return Val("`{directory}` is not a real directory")
+        }
         held: jet_cli_rooted_open_root(directory) ?? return Val(err.message)
         held_info: held.stat() ?? return Val("cannot inspect `{directory}`: {err}")
-        if held_info.id != directory_info.id -> return Val("`{directory}` changed while it was held")
+        if held_info.id != directory_info.id {
+            return Val("`{directory}` changed while it was held")
+        }
         entries: held.list() ?? return Val("cannot list `{directory}`: {err}")
-        if entries.len() > JET_CLI_MAX_SOURCE_FILES -> return Val("cache discovery exceeds the {JET_CLI_MAX_SOURCE_FILES}-entry bound")
+        if entries.len() > JET_CLI_MAX_SOURCE_FILES {
+            return Val("cache discovery exceeds the {JET_CLI_MAX_SOURCE_FILES}-entry bound")
+        }
         discovery := JetCLISourceBudget{entries: entries.len(), bytes: 0, files: 0}
         bindings := [JetCLICacheSource]{}
         loop entry in entries {
-            if !entry.name_is_unicode -> return Val("`{directory}` contains a cache name that cannot be addressed as UTF-8")
+            if !entry.name_is_unicode {
+                return Val("`{directory}` contains a cache name that cannot be addressed as UTF-8")
+            }
             name: entry.name
             relative: "{cache_directory}/{name}"
             path: jet_cli_authority_path(root, relative)
@@ -846,7 +912,9 @@ jet_cli_foreign_cache_files: fn(root: String, caches: &[JetDriverAuthorizedSourc
                 if shared_limit < limit -> limit = shared_limit
             }
             read: jet_cli_read_held_source(held, name, limit) ?? return Val("cannot read `{path}`: {err.message}")
-            if !jet_cli_build_read_same_file(stat, read.stat) -> return Val("`{path}` changed while it was held")
+            if !jet_cli_build_read_same_file(stat, read.stat) {
+                return Val("`{path}` changed while it was held")
+            }
             discovery.bytes += read.stat.size
             discovery.files += 1
             if adapted -> next
@@ -855,7 +923,9 @@ jet_cli_foreign_cache_files: fn(root: String, caches: &[JetDriverAuthorizedSourc
             bindings.push(JetCLICacheSource{relative_path: relative, read: read})
         }
         current: cli_files.stat(directory) ?? return Val("cannot revalidate `{directory}`: {err}")
-        if !current.is_dir || current.is_symlink || current.id != held_info.id -> return Val("`{directory}` changed while it was held")
+        if !current.is_dir || current.is_symlink || current.id != held_info.id {
+            return Val("`{directory}` changed while it was held")
+        }
         // The reference discovers all bindings first, then opens metadata and
         // provenance in that order. Convert UTF-8 only after final path sorting.
         loop binding in bindings {
@@ -887,10 +957,10 @@ jet_cli_foreign_cache_files: fn(root: String, caches: &[JetDriverAuthorizedSourc
 // the carrier is the one the driver selects (jet_driver_root_inline_carrier):
 // the entry file's own block (`entry`, the entry root's entry path; "" for a
 // dependency root), else the first stock entry's.
-jet_cli_root_dependencies: fn(root: JetDriverAuthorizedSourceRoot, entry: String) -> [String: DepSpec] Never! {
+jet_cli_root_dependencies: fn(root: JetDriverAuthorizedSourceRoot, entry: String) -> [String:DepSpec] Never! {
     loop file in root.files {
         if file.relative_path != "package.jet" -> next
-        manifest: pkg_manifest_parse(file.path, file.source) ?? return [String: DepSpec]{}
+        manifest: pkg_manifest_parse(file.path, file.source) ?? return [String:DepSpec]{}
         return manifest.dependencies
     }
     loop file in root.files {
@@ -903,18 +973,20 @@ jet_cli_root_dependencies: fn(root: JetDriverAuthorizedSourceRoot, entry: String
             if jet_cli_inline_dependencies(file) == .Val(dependencies) -> return dependencies
         }
     }
-    [String: DepSpec]{}
+    [String:DepSpec]{}
 }
 
 // The dependencies of `file`'s inline `package:` block: none for a malformed
 // block (the driver reports it), or None when the file carries no block.
-jet_cli_inline_dependencies: fn(file: JetDriverAuthorizedSourceFile) -> [String: DepSpec]? Never! {
+jet_cli_inline_dependencies: fn(file: JetDriverAuthorizedSourceFile) -> [String:DepSpec]? Never! {
     inline: if PackageFacts.parse_inline(file.source, file.path) == {
         .Ok(value) -> value
-        .Err(_) -> { return Val([String: DepSpec]{}) }
+        .Err(_) -> {
+            return Val([String:DepSpec]{})
+        }
     }
     if inline == .Val(carrier) {
-        manifest: pkg_to_manifest(carrier.facts, file.source) ?? return Val([String: DepSpec]{})
+        manifest: pkg_to_manifest(carrier.facts, file.source) ?? return Val([String:DepSpec]{})
         return Val(manifest.dependencies)
     }
     None
@@ -931,7 +1003,7 @@ JetCLIRootPathReach: struct {
     sibling_dirs: [String]
 }
 
-jet_cli_root_path_reach: fn(entry: String, dependencies: [String: DepSpec]) -[FS]> JetCLIRootPathReach Never! {
+jet_cli_root_path_reach: fn(entry: String, dependencies: [String:DepSpec]) -[FS]> JetCLIRootPathReach Never! {
     declared := [String]{}
     sibling_dirs := [String]{}
     loop spec in dependencies.values() {
@@ -982,14 +1054,18 @@ jet_cli_path_dependency_roots: fn(roots: &[JetDriverAuthorizedSourceRoot], entry
                 // No battery leaves the dependency unbound: the driver emits
                 // E0603 at the declaration.
                 battery: jet_cli_first_party_battery(name, source, entry) ?? next
-                if jet_cli_authorize_dependency_root(roots, battery, color) == .Val(refusal) -> return Val(refusal)
+                if jet_cli_authorize_dependency_root(roots, battery, color) == .Val(refusal) {
+                    return Val(refusal)
+                }
                 next
             }
             if dependencies[name] == .Git(_, _) {
                 // The source-store entry `jet fetch` pinned in the project's
                 // lock; checking it against the lock is `jet build --locked`.
                 directory: jet_cli_locked_git_root(entry, name) ?? return Val(jet_cli_report_output("", "E1202", "git dependency `{name}` is not fetched: `.jet/lock` pins no revision for it", jet_cli_diagnostic_copy("E1202").why, "run `jet fetch`, then build again", color, JET_DRIVER_EXIT_USER_ERROR))
-                if jet_cli_authorize_dependency_root(roots, directory, color) == .Val(refusal) -> return Val(refusal)
+                if jet_cli_authorize_dependency_root(roots, directory, color) == .Val(refusal) {
+                    return Val(refusal)
+                }
                 next
             }
             if dependencies[name] == .Path(relative) {
@@ -1005,7 +1081,9 @@ jet_cli_path_dependency_roots: fn(roots: &[JetDriverAuthorizedSourceRoot], entry
                 if index != 0 && !declared_by_root && !jet_cli_dependency_within(canonical, parent) {
                     return Val(jet_cli_path_dependency_escape(name, relative, parent, color))
                 }
-                if jet_cli_authorize_dependency_root(roots, canonical, color) == .Val(refusal) -> return Val(refusal)
+                if jet_cli_authorize_dependency_root(roots, canonical, color) == .Val(refusal) {
+                    return Val(refusal)
+                }
             }
         }
         index += 1
@@ -1034,7 +1112,9 @@ JET_CLI_BATTERIES_DIR: "Jetpack/Provider/Batteries"
 jet_cli_batteries_dir: fn(entry: String) -[FS, Env]> String? Never! {
     toolchain: if jet_cli_toolchain_root(entry) == {
         .Found(root) -> root
-        .Missing(_, _) -> { return None }
+        .Missing(_, _) -> {
+            return None
+        }
     }
     Val(cli_files.realpath(jet_cli_authority_path(toolchain, JET_CLI_BATTERIES_DIR)) ?? return None)
 }
@@ -1053,7 +1133,9 @@ jet_cli_first_party_battery: fn(name: String, source: String, entry: String) -[F
     manifest_path: jet_cli_authority_path(directory, "package.jet")
     text: cli_files.read(manifest_path) ?? return None
     manifest: pkg_manifest_parse(manifest_path, text) ?? return None
-    if manifest.package.name != name || !(jet_driver_version_selector_matches(selector, manifest.package.version) ?? false) -> return None
+    if manifest.package.name != name || !(jet_driver_version_selector_matches(selector, manifest.package.version) ?? false) {
+        return None
+    }
     Val(cli_files.realpath(directory) ?? return None)
 }
 
@@ -1087,7 +1169,9 @@ jet_cli_source_root: fn(entry_path: String) -[FS]> String Never! {
     start: jet_cli_parent(entry_path) ?? "/"
     current := start
     loop {
-        if cli_files.is_file(jet_cli_authority_path(current, "package.jet")) && !jet_cli_is_toolchain_core(current) -> return current
+        if cli_files.is_file(jet_cli_authority_path(current, "package.jet")) && !jet_cli_is_toolchain_core(current) {
+            return current
+        }
         if current == "/" -> return start
         current = jet_cli_parent(current) ?? return start
     }
@@ -1163,7 +1247,9 @@ jet_cli_cgroup_bytes: fn(file: String) -[FS]> Int? Never! {
 jet_cli_allowed_cpus: fn() -[FS]> [Int]? Never! {
     status: cli_files.read("/proc/self/status") ?? return None
     loop line in status.lines() {
-        if line.starts_with("Cpus_allowed_list:") -> return jet_cli_cpu_list(line.slice(18..<line.len()).trim())
+        if line.starts_with("Cpus_allowed_list:") {
+            return jet_cli_cpu_list(line.slice(18..<line.len()).trim())
+        }
     }
     None
 }
@@ -1176,9 +1262,7 @@ jet_cli_cpu_list: fn(text: String) -> [Int]? Never! {
         bounds: part.split("-").to_list()
         first: Int.parse(bounds[0]) ?? return None
         last: if bounds.len() == 2 -> Int.parse(bounds[1]) ?? return None else -> first
-        loop cpu in first..<(last + 1) {
-            cpus.push(cpu)
-        }
+        loop cpu in first..<(last + 1) { cpus.push(cpu) }
     }
     Val(cpus)
 }
@@ -1290,12 +1374,12 @@ jet_cli_core_sources: fn(input: String) -> JetCLICoreSources Never! {
         rows: jet_cli_toolchain_core_rows(toolchain) ?? return JetCLICoreSources.Missing{what: err.message, fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, and keep its `{CORE_DECLARATIONS_PARTS_PATH}` rows whole"}
         loop row in rows {
             core_path: jet_cli_authority_path(toolchain, row.path)
-            if !cli_files.is_file(core_path) -> return JetCLICoreSources.Missing{what: "can't read the Core library source `{core_path}`", fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`"}
+            if !cli_files.is_file(core_path) {
+                return JetCLICoreSources.Missing{what: "can't read the Core library source `{core_path}`", fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`"}
+            }
             core_sources.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, text: jet_driver_core_text_file(core_path, JetCLICoreSourceReader{})})
         }
-    } else {
-        core_sources.extend(jet_cli_builtin_core_rows())
-    }
+    } else { core_sources.extend(jet_cli_builtin_core_rows()) }
     // The jet.runtime interface modules ride with Core: they are embedded in
     // jet whether or not a toolchain tree is present (RuntimeInterface.jet).
     core_sources.extend(jet_driver_runtime_interface_sources())
@@ -1336,7 +1420,9 @@ jet_cli_tree_core_rows: fn(parts: [CoreDeclarationSource]) -> [CoreSourceOwnedRo
         }
         if placed -> next
         placed = true
-        loop part in parts -> rows.push(CoreSourceOwnedRow{module_name: part.module_name.copy(), alias: part.alias.copy(), path: part.path.copy(), owner: part.owner.copy(), owned_members: part.members.copy(), type_exports: [String]{}, impl_types: part.impl_types.copy(), runtime: false})
+        loop part in parts {
+            rows.push(CoreSourceOwnedRow{module_name: part.module_name.copy(), alias: part.alias.copy(), path: part.path.copy(), owner: part.owner.copy(), owned_members: part.members.copy(), type_exports: [String]{}, impl_types: part.impl_types.copy(), runtime: false})
+        }
     }
     rows
 }
@@ -1349,6 +1435,7 @@ JetCLICoreSourceReader: struct {
             text: cli_files.read(file) ?? return None
             Val(text)
         }
+
         read_bytes: fn(self, file: String) -[FS.Read]> [U8] JetDriverBuildInputError! {
             bytes: cli_files.read_bytes(file) ?? return Err(JetDriverBuildInputError{message: jet_cli_io_error_text(err)})
             Ok(bytes)
@@ -1361,9 +1448,8 @@ JetCLICoreSourceReader: struct {
 // (`Core/Ui/XkbTables/keysym_values.bin`) from the assets built into it.
 JetCLIBuiltinCoreSourceReader: struct {
     impl JetDriverCoreSourceReader {
-        read: fn(self, file: String) -[FS.Read]> String? {
-            jet_cli_core_source_text(file)
-        }
+        read: fn(self, file: String) -[FS.Read]> String? { jet_cli_core_source_text(file) }
+
         read_bytes: fn(self, file: String) -[FS.Read]> [U8] JetDriverBuildInputError! {
             if jet_cli_core_asset_bytes(file) == .Val(bytes) -> return Ok(bytes)
             text: jet_cli_core_source_text(file) ?? return Err(JetDriverBuildInputError{message: "`{file}` is not a Core source or asset built into this jet"})
@@ -1410,7 +1496,9 @@ JetCLIToolchainPackages: struct {
             workspace_manifest: jet_cli_entry_join(workspace, JET_CLI_PACKAGE_FILE)
             loop member in jet_cli_manifest_facts(cli_files.read(workspace_manifest) ?? "", workspace_manifest).members {
                 directory: cli_files.canonicalize(jet_cli_entry_join(workspace, member.path)) ?? next
-                if directory.starts_with("{root}/") && !found.contains(directory) -> found.push(directory)
+                if directory.starts_with("{root}/") && !found.contains(directory) {
+                    found.push(directory)
+                }
             }
             index := 0
             loop index < found.len() {
@@ -1422,16 +1510,21 @@ JetCLIToolchainPackages: struct {
                 loop name in manifest.dependencies.keys() {
                     if manifest.dependencies[name] == .Path(path) {
                         target: cli_files.canonicalize(jet_cli_entry_join(directory, path)) ?? next
-                        if target.starts_with("{root}/") && !found.contains(target) -> found.push(target)
+                        if target.starts_with("{root}/") && !found.contains(target) {
+                            found.push(target)
+                        }
                     }
                 }
             }
             found
         }
+
         package_of: fn(self, root: String, file: String) -[FS.Read]> String? {
             directory := cli_files.dirname(file)
             loop directory.starts_with("{root}/") {
-                if cli_files.canonicalize(jet_cli_entry_join(directory, JET_CLI_PACKAGE_FILE)) == .Ok(_) -> return Val(directory)
+                if cli_files.canonicalize(jet_cli_entry_join(directory, JET_CLI_PACKAGE_FILE)) == .Ok(_) {
+                    return Val(directory)
+                }
                 directory = cli_files.dirname(directory)
             }
             None
@@ -1510,7 +1603,9 @@ jet_cli_native_session: fn() -> Shared<JetEvalNativeSession>? Never! {
 // runtime key.
 jet_cli_native_session_at: fn(runtime_dir: String) -> Shared<JetEvalNativeSession>? Never! {
     if jet_cli_runtime_key(runtime_dir) == None -> return None
-    if jet_cli_runtime_embedded() -> return Val(jet_eval_native_session(JET_CLI_SELF_EXECUTABLE, JetCLINativeImageReader{embedded: true}))
+    if jet_cli_runtime_embedded() {
+        return Val(jet_eval_native_session(JET_CLI_SELF_EXECUTABLE, JetCLINativeImageReader{embedded: true}))
+    }
     Val(jet_eval_native_session("{runtime_dir}/{JET_CLI_RUNTIME_IMAGE_FILE}", JetCLINativeImageReader{embedded: false}))
 }
 
@@ -1541,6 +1636,7 @@ JetCLIBuildInputs: struct {
             resolved: jet_cli_build_resolve(path) ?? return Err(JetDriverBuildInputError{message: err.message})
             Ok(resolved)
         }
+
         entries: fn(self, directory: String) -[FS.Read]> [JetDriverBuildEntry] JetDriverBuildInputError! {
             listed: cli_files.list_dir(directory) ?? return Err(JetDriverBuildInputError{message: jet_cli_io_error_text(err)})
             out := [JetDriverBuildEntry]{}
@@ -1550,14 +1646,23 @@ JetCLIBuildInputs: struct {
             }
             Ok(out)
         }
+
         read: fn(self, path: String, limit: Int) -[FS.Read]> [U8] JetDriverBuildInputError! {
-            if limit < 0 || limit > 536870912 -> return Err(JetDriverBuildInputError{message: "file read bound exceeds the tree hashing bound"})
+            if limit < 0 || limit > 536870912 {
+                return Err(JetDriverBuildInputError{message: "file read bound exceeds the tree hashing bound"})
+            }
             expected: cli_files.stat(path) ?? return Err(JetDriverBuildInputError{message: jet_cli_io_error_text(err)})
-            if expected.is_symlink || !expected.is_file -> return Err(JetDriverBuildInputError{message: "file is not a regular file"})
+            if expected.is_symlink || !expected.is_file {
+                return Err(JetDriverBuildInputError{message: "file is not a regular file"})
+            }
             reader := cli_files.open(path, .Refuse) ?? return Err(JetDriverBuildInputError{message: jet_cli_io_error_text(err)})
             opened: reader.stat() ?? return Err(JetDriverBuildInputError{message: jet_cli_io_error_text(err)})
-            if !opened.is_file || expected.id != opened.id || expected.size != opened.size || expected.modified != opened.modified || expected.changed != opened.changed -> return Err(JetDriverBuildInputError{message: "file changed before reading"})
-            if expected.size > limit -> return Err(JetDriverBuildInputError{message: "file exceeds its read bound"})
+            if !opened.is_file || expected.id != opened.id || expected.size != opened.size || expected.modified != opened.modified || expected.changed != opened.changed {
+                return Err(JetDriverBuildInputError{message: "file changed before reading"})
+            }
+            if expected.size > limit {
+                return Err(JetDriverBuildInputError{message: "file exceeds its read bound"})
+            }
             bytes := [U8]{}
             bytes.try_reserve(if expected.size < 65536 -> expected.size else -> 65536) ?? return Err(JetDriverBuildInputError{message: "cannot reserve file read buffer: {err}"})
             loop {
@@ -1565,7 +1670,9 @@ JetCLIBuildInputs: struct {
                 chunk: reader.read_bytes(if remaining < 65536 -> remaining else -> 65536) ?? return Err(JetDriverBuildInputError{message: jet_cli_io_error_text(err)})
                 if chunk.len() == 0 -> break
                 bytes.extend(chunk)
-                if bytes.len() > limit -> return Err(JetDriverBuildInputError{message: "file exceeds its read bound"})
+                if bytes.len() > limit {
+                    return Err(JetDriverBuildInputError{message: "file exceeds its read bound"})
+                }
             }
             after: reader.stat() ?? return Err(JetDriverBuildInputError{message: jet_cli_io_error_text(err)})
             path_after: cli_files.stat(path) ?? return Err(JetDriverBuildInputError{message: jet_cli_io_error_text(err)})
@@ -1574,6 +1681,7 @@ JetCLIBuildInputs: struct {
             }
             Ok(bytes)
         }
+
         read_rooted: fn(self, root: String, relative: String, limit: Int) -[FS.Read]> [U8] JetDriverBuildInputError! {
             bytes: jet_cli_build_read_rooted(root, relative, limit) ?? return Err(JetDriverBuildInputError{message: err.message})
             Ok(bytes)
@@ -1595,12 +1703,18 @@ JetCLIHeldSource: struct {
 }
 
 jet_cli_read_rooted_source: fn(root: String, relative: String, limit: Int) -[FS.Read]> JetCLIHeldSource JetCLIReadError! {
-    if limit < 0 || limit > JET_CLI_MAX_SOURCE_BYTES -> return Err(jet_cli_read_error("file read bound exceeds the tree hashing bound"))
-    if relative.starts_with("/") -> return Err(jet_cli_read_error("file authority path must be relative and normalized"))
+    if limit < 0 || limit > JET_CLI_MAX_SOURCE_BYTES {
+        return Err(jet_cli_read_error("file read bound exceeds the tree hashing bound"))
+    }
+    if relative.starts_with("/") {
+        return Err(jet_cli_read_error("file authority path must be relative and normalized"))
+    }
     parts := [String]{}
     loop part in relative.split("/") {
         if part == "" || part == "." -> next
-        if part == ".." -> return Err(jet_cli_read_error("file authority path must be relative and normalized"))
+        if part == ".." {
+            return Err(jet_cli_read_error("file authority path must be relative and normalized"))
+        }
         loop byte in part.bytes() {
             if byte == (U8{0}) -> return Err(jet_cli_read_error("file authority path contains NUL"))
         }
@@ -1616,9 +1730,13 @@ jet_cli_read_rooted_source: fn(root: String, relative: String, limit: Int) -[FS.
         names.push(parts[index])
     }
     name: parts[parts.len() - 1]
-    if jet_cli_build_read_chain_current(directories, names, initial) == .Err(error) -> return Err(error)
+    if jet_cli_build_read_chain_current(directories, names, initial) == .Err(error) {
+        return Err(error)
+    }
     read: jet_cli_read_held_source(directories[directories.len() - 1], name, limit)
-    if jet_cli_build_read_chain_current(directories, names, initial) == .Err(_) -> return Err(jet_cli_read_error("file changed while it was being read"))
+    if jet_cli_build_read_chain_current(directories, names, initial) == .Err(_) {
+        return Err(jet_cli_read_error("file changed while it was being read"))
+    }
     Ok(read)
 }
 
@@ -1627,7 +1745,9 @@ jet_cli_hold_root_chain: fn(root: String, directories: &[cli_files.Directory], n
     directories.push(cli_files.open_directory(initial) ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err))))
     loop part in root.split("/") {
         if part == "" || part == "." -> next
-        if part == ".." -> return Err(jet_cli_read_error("file authority root must not contain parent components"))
+        if part == ".." {
+            return Err(jet_cli_read_error("file authority root must not contain parent components"))
+        }
         loop byte in part.bytes() {
             if byte == (U8{0}) -> return Err(jet_cli_read_error("file authority path contains NUL"))
         }
@@ -1641,15 +1761,27 @@ jet_cli_hold_root_chain: fn(root: String, directories: &[cli_files.Directory], n
 // Both source snapshots and build input reads consume this same opened file.
 // The stat in the snapshot therefore describes exactly the bytes read.
 jet_cli_read_held_source: fn(directory: cli_files.Directory, name: String, limit: Int) -[FS.Read]> JetCLIHeldSource JetCLIReadError! {
-    if limit < 0 || limit > JET_CLI_MAX_SOURCE_BYTES -> return Err(jet_cli_read_error("file read bound exceeds the tree hashing bound"))
+    if limit < 0 || limit > JET_CLI_MAX_SOURCE_BYTES {
+        return Err(jet_cli_read_error("file read bound exceeds the tree hashing bound"))
+    }
     reader := directory.open(name) ?? return Err(jet_cli_build_rooted_open_error(err))
     expected: reader.stat() ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
-    if !expected.is_file -> return Err(jet_cli_read_error("file authority input is not a regular file"))
-    if expected.links != 1 -> return Err(jet_cli_read_error("file authority input has multiple hard links"))
+    if !expected.is_file {
+        return Err(jet_cli_read_error("file authority input is not a regular file"))
+    }
+    if expected.links != 1 {
+        return Err(jet_cli_read_error("file authority input has multiple hard links"))
+    }
     current: directory.entry_stat(name) ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
-    if !current.is_file -> return Err(jet_cli_read_error("file authority input is not a regular file"))
-    if current.links != 1 -> return Err(jet_cli_read_error("file authority input has multiple hard links"))
-    if !jet_cli_build_read_same_file(expected, current) -> return Err(jet_cli_read_error("file authority input moved while it was held"))
+    if !current.is_file {
+        return Err(jet_cli_read_error("file authority input is not a regular file"))
+    }
+    if current.links != 1 {
+        return Err(jet_cli_read_error("file authority input has multiple hard links"))
+    }
+    if !jet_cli_build_read_same_file(expected, current) {
+        return Err(jet_cli_read_error("file authority input moved while it was held"))
+    }
     if expected.size > limit -> return Err(jet_cli_read_error("file exceeds its read bound"))
     bytes := [U8]{}
     bytes.try_reserve(if expected.size < 65536 -> expected.size else -> 65536) ?? return Err(jet_cli_read_error("cannot reserve file read buffer: {err}"))
@@ -1675,11 +1807,15 @@ jet_cli_build_read_same_file: fn(left: cli_files.Stat, right: cli_files.Stat) ->
 jet_cli_build_read_chain_current: fn(directories: &[cli_files.Directory], names: &[String], initial: String) -[FS.Read]> Bool JetCLIReadError! {
     base: cli_files.stat(initial) ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
     held_base: directories[0].stat() ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
-    if !base.is_dir || base.is_symlink || base.id != held_base.id -> return Err(jet_cli_read_error("file authority directory moved while it was held"))
+    if !base.is_dir || base.is_symlink || base.id != held_base.id {
+        return Err(jet_cli_read_error("file authority directory moved while it was held"))
+    }
     loop index in 0..<names.len() {
         named: directories[index].entry_stat(names[index]) ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
         held: directories[index + 1].stat() ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
-        if !named.is_dir || named.is_symlink || named.id != held.id -> return Err(jet_cli_read_error("file authority directory moved while it was held"))
+        if !named.is_dir || named.is_symlink || named.id != held.id {
+            return Err(jet_cli_read_error("file authority directory moved while it was held"))
+        }
     }
     Ok(true)
 }
@@ -1709,7 +1845,9 @@ jet_cli_build_resolve: fn(path: String) -[FS.Read]> JetDriverBuildPath JetCLIRea
         }
         candidate: "{resolved}/{part}"
         info: cli_files.stat(candidate) ?? {
-            if err == .NotFound(_) -> return Ok(JetDriverBuildPath{exists: false, path: candidate, file: false, links: 0})
+            if err == .NotFound(_) {
+                return Ok(JetDriverBuildPath{exists: false, path: candidate, file: false, links: 0})
+            }
             return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
         }
         if !info.is_symlink {
@@ -1717,7 +1855,9 @@ jet_cli_build_resolve: fn(path: String) -[FS.Read]> JetDriverBuildPath JetCLIRea
             next
         }
         followed += 1
-        if followed > 40 -> return Err(jet_cli_read_error("Too many levels of symbolic links (os error 40)"))
+        if followed > 40 {
+            return Err(jet_cli_read_error("Too many levels of symbolic links (os error 40)"))
+        }
         target: cli_files.read_link(candidate) ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
         spliced: if target.starts_with("/") -> target else -> "{resolved}/{target}"
         rest := spliced.split("/").to_list()
@@ -1761,7 +1901,9 @@ JetCLIOverlay: struct {
 // jet_cli_compile_prepared.
 jet_cli_compile_entry: fn(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, target_machine: String{""}, hold_check_state: Bool{false}) -> JetCLICompiled {
     overlays := [JetCLIOverlay]{}
-    if entry_source == .Val(replacement) -> overlays.push(JetCLIOverlay{path: file, source: replacement})
+    if entry_source == .Val(replacement) {
+        overlays.push(JetCLIOverlay{path: file, source: replacement})
+    }
     jet_cli_compile_overlays(file, file, overlays, color, threads, mode, trace_sink, settings, profile, target_machine, hold_check_state: hold_check_state)
 }
 
@@ -1794,9 +1936,13 @@ jet_cli_relative_precedes: fn(left: String, right: String) -> Bool Never! {
 jet_cli_outside_walk: fn(root: String, relative: String) -[FS]> Bool Never! {
     directory := root
     loop name in relative.split("/") {
-        if name == "" || name.starts_with(".") || JET_CLI_SKIPPED_NAMES.contains(name) -> return true
+        if name == "" || name.starts_with(".") || JET_CLI_SKIPPED_NAMES.contains(name) {
+            return true
+        }
         if directory != root {
-            if cli_files.is_symlink(directory) || jet_cli_is_project_boundary(directory) -> return true
+            if cli_files.is_symlink(directory) || jet_cli_is_project_boundary(directory) {
+                return true
+            }
         }
         directory = jet_cli_authority_path(directory, name)
     }
@@ -1905,7 +2051,9 @@ jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDr
             // Prelude source's check nor `jet check Core` does, as they check
             // that Core.
             if selected.mode == JetDriverCompileMode.Check && !prelude && !every_core_body && jet_cli_core_binding_built_in(jet_cli_core_binding(snapshot.entry_path, selected.core_tests)) {
-                if jet_cli_core_bodies_lend(selected) == .Val(problem) -> return JetCLICompiled.Refused{output: jet_cli_ice(problem)}
+                if jet_cli_core_bodies_lend(selected) == .Val(problem) {
+                    return JetCLICompiled.Refused{output: jet_cli_ice(problem)}
+                }
             }
             // The runtime-library seam is `jet doc`'s (Host.jet jet_cli_doc_result):
             // a check, test or build under a stray JET_FRONT_LIBRARY_OBJECT_OUTPUT
@@ -1928,11 +2076,12 @@ jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDr
 // `jet dev`): the driver's compile stopped before lowering, with the checked
 // inputs the native route builds from (Host.jet jet_cli_native_executable).
 JetCLIExecutableCompiled: enum {
-    // `inputs` is None when the compile stopped before lowering; the result's
-    // diagnostics say why. `snapshot` as in JetCLICompiled.Compiled.
     Checked(result: JetDriverCompileResult, inputs: JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot)
     Refused(output: JetDriverVerbOutput)
 }
+
+// `inputs` is None when the compile stopped before lowering; the result's
+// diagnostics say why. `snapshot` as in JetCLICompiled.Compiled.
 
 // The executable compile of `file` (its source walk is the `sources` span),
 // starting at the function `entry` when one is selected.
@@ -1966,14 +2115,18 @@ jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, optio
             // An OS-less build (`os: web`) folds `#build.target.os` on its own OS,
             // which no host triple names.
             os_option: build_options_value(options, "os")
-            if target_os_parse(os_option) == .Val(os) && !target_os_native(os) -> selected.build_os = os_option
+            if target_os_parse(os_option) == .Val(os) && !target_os_native(os) {
+                selected.build_os = os_option
+            }
             // copy: the caller's options keep the machine for the image refusal.
             selected.target_machine = options.target_machine.copy()
             selected.setting_overrides = options.settings.copy()
             selected.gate_set.allowed = options.gates.copy()
             contributed := jet_cli_contributed_request(selected, color)
             // copy: `refusal` is a payload view of `contributed`.
-            if contributed.refusal == .Val(refusal) -> return JetCLIExecutableCompiled.Refused{output: refusal.copy()}
+            if contributed.refusal == .Val(refusal) {
+                return JetCLIExecutableCompiled.Refused{output: refusal.copy()}
+            }
             compiled_request := contributed.request.move()
             if entry != None -> compiled_request.selected_entry = entry.copy()
             compiled_request.deep_checks = options.deep_checks.copy()
@@ -1992,7 +2145,9 @@ jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, optio
             // syntax-decisions.md:7421-7429) and reports E0101 when none is
             // selected and the manifest binds no `outputs.*.entry`; the driver
             // starts at the selected Output's function, else that binding.
-            if compiled_request.selected_entry == None -> compiled_request.output_intent = SemaOutputIntent.Run
+            if compiled_request.selected_entry == None {
+                compiled_request.output_intent = SemaOutputIntent.Run
+            }
             // copy: a three-field row; the request moves into the compiler below.
             compiler_threads: compiled_request.compiler_threads.copy()
             // A run binds its Core calls to the Core library's code this jet
@@ -2027,15 +2182,15 @@ jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, optio
                     hooks: compiled_request.eval_config.host_hooks.guard_edit()
                     hooks.value.core_seal = Val(JetCLICoreSealRead{binding: binding})
                 }
-                else -> {
-                    _: jet_cli_core_binding_built_in(binding)
-                }
+                else -> { _: jet_cli_core_binding_built_in(binding) }
             }
             // A run whose tree's Core is not yet compared checks its Core
             // bodies from text, so it still reads that Core only if its
             // demand names a deferred body.
             if jet_cli_core_binding_bound(binding) {
-                if jet_cli_core_bodies_lend(compiled_request) == .Val(problem) -> return JetCLIExecutableCompiled.Refused{output: jet_cli_ice(problem)}
+                if jet_cli_core_bodies_lend(compiled_request) == .Val(problem) {
+                    return JetCLIExecutableCompiled.Refused{output: jet_cli_ice(problem)}
+                }
             }
             front := jet_cli_lowering_inputs(compiled_request, trace_sink)
             front.compile.core_built_in = jet_cli_core_binding_bound(binding)
@@ -2098,17 +2253,23 @@ jet_cli_prepare_overlays: fn(anchor: String, entry: String, overlays: [JetCLIOve
 jet_cli_prepare_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, color: Bool, threads: Int?, mode: JetDriverCompileMode, core_input: String?{None}, core_tests: String{""}, core_tested_source: String?{None}) -> JetCLIPrepared {
     core_sources := if jet_cli_core_sources(core_input ?? snapshot.entry_path) == {
         .Loaded(sources) -> sources
-        .Missing(what, fix) -> { return jet_cli_prepare_refused(what, fix, color) }
+        .Missing(what, fix) -> {
+            return jet_cli_prepare_refused(what, fix, color)
+        }
     }
     if core_tested_source == .Val(text) {
         // A fresh cell: copies of a row share theirs (jet_driver_core_text).
         loop index in 0..<core_sources.len() {
-            if core_sources[index].path == core_tests -> core_sources[index].text = jet_driver_core_text(text)
+            if core_sources[index].path == core_tests {
+                core_sources[index].text = jet_driver_core_text(text)
+            }
         }
     }
     organization := if pkg_load_organization_gate_policy() == {
         .Ok(policy) -> policy
-        .Err(error) -> return JetCLIPrepared.Refused{output: JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems("", "", error.diagnostics, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
+        .Err(error) -> {
+            return JetCLIPrepared.Refused{output: JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems("", "", error.diagnostics, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
+        }
     }
     request := jet_cli_driver_request(snapshot, core_sources, threads, mode)
     request.organization_policy = organization.declarations.move()
@@ -2140,7 +2301,9 @@ jet_cli_core_check_source: fn() -> String Never! {
 jet_cli_core_test_path: fn(file: String) -[FS, Env]> String? Never! {
     root: if jet_cli_toolchain_root(file) == {
         .Found(found) -> cli_files.realpath(found) ?? return None
-        .Missing(_, _) -> return None
+        .Missing(_, _) -> {
+            return None
+        }
     }
     path: cli_files.realpath(file) ?? return None
     prefix: "{root}/"
@@ -2159,11 +2322,15 @@ jet_cli_core_test_path: fn(file: String) -[FS, Env]> String? Never! {
 jet_cli_core_test_source: fn(file: String, path: String) -[FS, Env]> String Never! {
     toolchain: if jet_cli_toolchain_root(file) == {
         .Found(found) -> found
-        .Missing(_, _) -> return ""
+        .Missing(_, _) -> {
+            return ""
+        }
     }
     rows: jet_cli_toolchain_core_rows(toolchain) ?? return ""
     loop row in rows {
-        if row.path == path -> return "use _core_test: {if row.owner != "" -> row.owner else -> row.module_name}\n"
+        if row.path == path {
+            return "use _core_test: {if row.owner != "" -> row.owner else -> row.module_name}\n"
+        }
     }
     ""
 }
@@ -2180,7 +2347,9 @@ JetCLICoreTestFiles: struct {
 jet_cli_core_test_files: fn(directory: String) -[FS, Env]> JetCLICoreTestFiles? Never! {
     root: if jet_cli_toolchain_root(directory) == {
         .Found(found) -> cli_files.realpath(found) ?? return None
-        .Missing(_, _) -> return None
+        .Missing(_, _) -> {
+            return None
+        }
     }
     path: cli_files.realpath(directory) ?? return None
     if path != "{root}/Core" && !path.starts_with("{root}/Core/") -> return None
@@ -2192,7 +2361,9 @@ jet_cli_core_test_files: fn(directory: String) -[FS, Env]> JetCLICoreTestFiles? 
         file: jet_cli_authority_path(root, row.path)
         source: cli_files.read(file) ?? next
         tested: source.starts_with("#Test(") || source.contains("\n#Test(")
-        if !tested && jet_cli_doc_discover_doctests(JetCLIDocUnit{path: row.path, source: source}).len() == 0 -> next
+        if !tested && jet_cli_doc_discover_doctests(JetCLIDocUnit{path: row.path, source: source}).len() == 0 {
+            next
+        }
         found.names.push(row.path.copy())
         found.files.push(file)
     }
@@ -2204,7 +2375,9 @@ jet_cli_core_test_files: fn(directory: String) -[FS, Env]> JetCLICoreTestFiles? 
 // line is a `#!/...` launch line (Authority.jet `jet_cli_is_script`).
 jet_cli_entry_is_script: fn(entry_path: String, overlays: [JetCLIOverlay]) -[FS, Env]> Bool Never! {
     loop overlay in overlays {
-        if jet_cli_overlay_path(overlay.path) == entry_path -> return jet_cli_is_script(overlay.source)
+        if jet_cli_overlay_path(overlay.path) == entry_path {
+            return jet_cli_is_script(overlay.source)
+        }
     }
     reader := cli_files.open(entry_path, .Refuse) ?? return false
     head: reader.read_bytes(3) ?? return false
@@ -2256,11 +2429,15 @@ jet_cli_prepare_snapshot: fn(anchor: String, entry: String, overlays: [JetCLIOve
         relative: entry_path.slice(prefix.len()..<entry_path.len())
         if !jet_cli_outside_walk(root, relative) {
             stat: cli_files.stat(entry_path) ?? return jet_cli_snapshot_refused("can't securely read the sources under `{root}`: cannot inspect `{entry_path}`: {err}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
-            if stat.is_symlink -> return jet_cli_snapshot_refused("can't securely read the sources under `{root}`: `{entry_path}` is a symbolic link", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
+            if stat.is_symlink {
+                return jet_cli_snapshot_refused("can't securely read the sources under `{root}`: `{entry_path}` is a symbolic link", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
+            }
             if stat.is_file {
                 limit: jet_cli_source_read_limit(budget, stat.size, entry_path) ?? return jet_cli_snapshot_refused(err.message, "reduce the source tree size", color)
                 read: jet_cli_read_rooted_source(root, relative, limit) ?? return jet_cli_snapshot_refused("can't securely read the sources under `{root}`: cannot read `{entry_path}`: {err.message}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
-                if !jet_cli_build_read_same_file(stat, read.stat) -> return jet_cli_snapshot_refused("`{entry_path}` changed while it was held", "retry with a stable source tree", color)
+                if !jet_cli_build_read_same_file(stat, read.stat) {
+                    return jet_cli_snapshot_refused("`{entry_path}` changed while it was held", "retry with a stable source tree", color)
+                }
                 budget.bytes += read.stat.size
                 budget.files += 1
                 source: String.from_bytes(read.bytes.move()) ?? return jet_cli_snapshot_refused("cannot read `{entry_path}`: file is not valid UTF-8", "save the source as UTF-8", color)
@@ -2298,24 +2475,34 @@ jet_cli_prepare_snapshot: fn(anchor: String, entry: String, overlays: [JetCLIOve
     }
     // A header import's missing or stale C cache is bound now, so the cache
     // read below sees it (CHeaderBind.jet).
-    if jet_cli_c_bind_refresh(root, entry_path, files, color) == .Val(refusal) -> return JetCLISnapshotted.Refused{output: refusal}
+    if jet_cli_c_bind_refresh(root, entry_path, files, color) == .Val(refusal) {
+        return JetCLISnapshotted.Refused{output: refusal}
+    }
     caches := [JetDriverAuthorizedSourceFile]{}
     if jet_cli_foreign_cache_files(root, caches, budget) == .Val(problem) {
         return jet_cli_snapshot_refused("can't securely read the foreign bindings under `{root}`: {problem}", "remove the symbolic link or unreadable file, or regenerate the bindings with `jet bind`", color)
     }
     current_root: cli_files.stat(root) ?? return jet_cli_snapshot_refused("cannot revalidate source root `{root}`: {err}", "retry with a stable source tree", color)
-    if !current_root.is_dir || current_root.is_symlink || current_root.id != root_stat.id -> return jet_cli_snapshot_refused("source root `{root}` changed while it was held", "retry with a stable source tree", color)
+    if !current_root.is_dir || current_root.is_symlink || current_root.id != root_stat.id {
+        return jet_cli_snapshot_refused("source root `{root}` changed while it was held", "retry with a stable source tree", color)
+    }
     root_identity: jet_cli_identity_key("directory", root_stat)
     roots := [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: root, identity: root_identity, allow_hardlinks: false, files: files, foreign_cache_files: caches, directories: directories}}
     script_dependencies := [JetDriverScriptDependency]{}
-    if jet_cli_script_dependency_roots(roots, entry_path, script_dependencies, color) == .Val(refusal) -> return JetCLISnapshotted.Refused{output: refusal}
-    if jet_cli_path_dependency_roots(roots, entry_path, color) == .Val(refusal) -> return JetCLISnapshotted.Refused{output: refusal}
-    JetCLISnapshotted.Held{snapshot: JetDriverAuthorizedSourceSnapshot{
-        roots: roots,
-        entry_root_identity: root_identity,
-        entry_path: entry_path,
-        script_dependencies: script_dependencies,
-    }}
+    if jet_cli_script_dependency_roots(roots, entry_path, script_dependencies, color) == .Val(refusal) {
+        return JetCLISnapshotted.Refused{output: refusal}
+    }
+    if jet_cli_path_dependency_roots(roots, entry_path, color) == .Val(refusal) {
+        return JetCLISnapshotted.Refused{output: refusal}
+    }
+    JetCLISnapshotted.Held{
+        snapshot: JetDriverAuthorizedSourceSnapshot{
+            roots: roots,
+            entry_root_identity: root_identity,
+            entry_path: entry_path,
+            script_dependencies: script_dependencies,
+        },
+    }
 }
 
 // The snapshot path of `path` when one of `overlays` holds it.
@@ -2354,17 +2541,21 @@ jet_cli_overlaid_path: fn(path: String, overlays: [JetCLIOverlay]) -[FS, Env]> S
 // package build splices its steps' files into its own
 // (jet_cli_trace_splice).
 JET_CLI_TRACE_STDERR: "/dev/stderr"
+
 // Minimum spacing of the progress events of one kind; the last item is always
 // written.
 JET_CLI_TRACE_PROGRESS_MS: 200
+
 // A progress kind reads the clock on its first call and then once every this
 // many calls (and on its last item), so a per-item kind costs no clock read
 // per item.
 JET_CLI_TRACE_PROGRESS_STRIDE: 16
+
 // A phase span's begin or end below the top level reuses the process's clocks
 // and memory read this recently (ms), so steps that repeat per item (a
 // comptime item's `comptime.apply`) share one `/proc/self` read.
 JET_CLI_TRACE_PROCESS_MS: 50
+
 // A process spliced into the trace (jet_cli_trace_splice) has its lanes
 // numbered from this many times its place, apart from jet's own.
 JET_CLI_TRACE_SPLICE_LANES: 1000000
@@ -2448,12 +2639,16 @@ JetCLITraceSink: struct {
             ts: jet_cli_trace_micros(self.start_us)
             id: cli_tasks.current_task()
             permit := self.state.guard_edit()
-            if !permit.value.writing -> return
+            if !permit.value.writing {
+                return
+            }
             task: jet_cli_trace_lane(permit.value, id)
             stack := permit.value.stacks.get(task) ?? return
             position := stack.len() - 1
             loop position >= 0 && stack[position].kind != name -> position -= 1
-            if position < 0 -> return
+            if position < 0 {
+                return
+            }
             line := ""
             loop stack.len() > position + 1 {
                 abandoned: stack.pop() ?? break
@@ -2479,12 +2674,18 @@ JetCLITraceSink: struct {
                 return
             }
             last_item: total > 0 && done + 1 >= total
-            if !jet_cli_trace_progress_due(self.state, name, last_item) -> return
+            if !jet_cli_trace_progress_due(self.state, name, last_item) {
+                return
+            }
             now: jet_cli_trace_clock_us()
             permit := self.state.guard_edit()
-            if !permit.value.writing -> return
+            if !permit.value.writing {
+                return
+            }
             if permit.value.progress_at.get(name) == .Val(previous) {
-                if !last_item && now - previous < JET_CLI_TRACE_PROGRESS_MS * 1000 -> return
+                if !last_item && now - previous < JET_CLI_TRACE_PROGRESS_MS * 1000 {
+                    return
+                }
             }
             permit.value.progress_at[name] = now
             task: jet_cli_trace_lane(permit.value, cli_tasks.current_task())
@@ -2500,13 +2701,9 @@ JetCLITraceSink: struct {
             jet_cli_trace_write(self.target, permit.value, line)
         }
 
-        functions: fn(self) -[]> Bool Never! {
-            self.functions
-        }
+        functions: fn(self) -[]> Bool Never! { self.functions }
 
-        cpu_ns: fn(self) -[Time]> Int Never! {
-            cli_tasks.cpu_ns()
-        }
+        cpu_ns: fn(self) -[Time]> Int Never! { cli_tasks.cpu_ns() }
     }
 
     // A `counters.<phase>.<name>` progress kind: one #4319 scaling counter
@@ -2514,7 +2711,9 @@ JetCLITraceSink: struct {
     // with `--phase-counters`, as a `JET_PHASE_COUNTERS` stderr line.
     counter: fn(self, kind: String, value: Int) Never! -[FS, Time]> {
         parts := kind.split(".").to_list()
-        if parts.len() < 3 -> return
+        if parts.len() < 3 {
+            return
+        }
         counter_name: parts.pop() ?? return
         phase := parts[1]
         loop index in 2..<parts.len() -> phase = "{phase}.{parts[index]}"
@@ -2550,7 +2749,7 @@ JetCLITraceMemory: struct {
 jet_cli_trace_sink: fn() -> JetCLITraceSink? {
     chosen: if jet_cli_control("trace").value == {
         .Bool(on) -> if on -> "-" else -> ""
-        .Text(file) -> file.copy() // copy: the control's value is dropped here.
+        .Text(file) -> file.copy()  // copy: the control's value is dropped here.
         .Null | .Integer(_) | .Float(_) | .Array(_) | .Object(_) -> ""
     }
     if chosen == "" -> return None
@@ -2560,7 +2759,9 @@ jet_cli_trace_sink: fn() -> JetCLITraceSink? {
     start_us: jet_cli_trace_clock_us()
     executable: cli_sys.executable().split("/").to_list()
     process := "jet"
-    if executable.len() > 0 && executable[executable.len() - 1] != "" -> process = executable[executable.len() - 1]
+    if executable.len() > 0 && executable[executable.len() - 1] != "" {
+        process = executable[executable.len() - 1]
+    }
     functions: (jet_cli_control_text("trace_detail") ?? "") == "functions"
     detail: if functions -> "true" else -> "false"
     opening: if human -> "[{jet_cli_trace_clock(0)}] trace: {process} pid {pid}, functions {detail}\n" else -> "[\n{{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":{pid},\"tid\":0,\"args\":{{\"name\":{foundation_json_quote(process)}}}}},\n"
@@ -2619,9 +2820,7 @@ jet_cli_trace_boxed: fn(sink: JetCLITraceSink?) -> CompilerTraceSink? Never! {
     Val(jet_cli_trace_object(opened.copy()))
 }
 
-jet_cli_trace_object: fn(sink: &&JetCLITraceSink) -> CompilerTraceSink Never! {
-    sink.move()
-}
+jet_cli_trace_object: fn(sink: &&JetCLITraceSink) -> CompilerTraceSink Never! { sink.move() }
 
 // Adds `text`, the trace file another jet process wrote (`--trace=FILE`; a
 // package build's step, BuildExecute.jet jet_cli_build_splice_traces), to
@@ -2634,9 +2833,13 @@ jet_cli_trace_object: fn(sink: &&JetCLITraceSink) -> CompilerTraceSink Never! {
 // left out; a file whose `trace.start` names no clock has no place on this
 // clock and adds nothing. The readable stream takes no other process's trace.
 jet_cli_trace_splice: fn(sink: JetCLITraceSink, label: String, text: String) Never! {
-    if sink.human -> return
+    if sink.human {
+        return
+    }
     permit := sink.state.guard_edit()
-    if !permit.value.writing -> return
+    if !permit.value.writing {
+        return
+    }
     process: sink.pid + permit.value.spliced + 1
     lanes: (permit.value.spliced + 1) * JET_CLI_TRACE_SPLICE_LANES
     name := "\"jet\""
@@ -2645,7 +2848,9 @@ jet_cli_trace_splice: fn(sink: JetCLITraceSink, label: String, text: String) Nev
     loop line in text.lines() {
         if line.starts_with("{{\"name\":\"process_name\",") {
             at: line.find(JET_CLI_TRACE_NAME_ARG)
-            if at >= 0 && line.ends_with("}}}},") -> name = foundation_byte_text(line.bytes(), at + JET_CLI_TRACE_NAME_ARG.len(), line.count_bytes() - 3)
+            if at >= 0 && line.ends_with("}}}},") {
+                name = foundation_byte_text(line.bytes(), at + JET_CLI_TRACE_NAME_ARG.len(), line.count_bytes() - 3)
+            }
             next
         }
         if line.starts_with("{{\"name\":\"trace.start\",") {
@@ -2656,7 +2861,9 @@ jet_cli_trace_splice: fn(sink: JetCLITraceSink, label: String, text: String) Nev
         moved_by: shift ?? next
         if jet_cli_trace_moved(line, process, lanes, moved_by) == .Val(moved) -> events.push(moved)
     }
-    if shift == None -> return
+    if shift == None {
+        return
+    }
     permit.value.spliced += 1
     quoted: foundation_json_quote("{label}: ")
     opening: "{{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":{process},\"tid\":0,\"args\":{{\"name\":{quoted.slice(0, quoted.len() - 1)}{name.slice(1, name.len())}}}}},\n"
@@ -2691,7 +2898,9 @@ jet_cli_trace_moved: fn(line: String, process: Int, lanes: Int, shift: Int) -> S
     if tid.from < pid.to -> return None
     lead := line.slice(0, pid.from)
     if jet_cli_trace_field(line, "ts") == .Val(ts) {
-        if ts.to <= pid.from -> lead = "{line.slice(0, ts.from)}{ts.value + shift}{line.slice(ts.to, pid.from)}"
+        if ts.to <= pid.from {
+            lead = "{line.slice(0, ts.from)}{ts.value + shift}{line.slice(ts.to, pid.from)}"
+        }
     }
     Val("{lead}{process}{line.slice(pid.to, tid.from)}{lanes + tid.value}{line.slice(tid.to, line.len())}\n")
 }
@@ -2715,11 +2924,15 @@ jet_cli_trace_open: fn(sink: JetCLITraceSink, name: String, detail: String, args
     label: if detail == "" -> name else -> detail
     cpu_ns: cli_tasks.cpu_ns()
     permit := sink.state.guard_edit()
-    if !permit.value.writing -> return
+    if !permit.value.writing {
+        return
+    }
     task: jet_cli_trace_lane(permit.value, id)
     stack := permit.value.stacks.get(task) ?? [JetCLITraceSpan]{}
     start := JetCLITraceUsage{cpu_ns: cpu_ns, proc_cpu_ns: -1, majflt: -1}
-    if !item -> start = jet_cli_trace_process(permit.value, (sink.start_us + ts) /% 1000, cpu_ns, stack.len() == 0)
+    if !item {
+        start = jet_cli_trace_process(permit.value, (sink.start_us + ts) /% 1000, cpu_ns, stack.len() == 0)
+    }
     line := ""
     if sink.human {
         shown: if detail == "" -> "" else -> " {detail}"
@@ -2828,9 +3041,7 @@ jet_cli_trace_micros: fn(start_us: Int) -[Time]> Int Never! {
 }
 
 // The trace's clock: the host's monotonic clock in µs.
-jet_cli_trace_clock_us: fn() -[Time]> Int Never! {
-    cli_time.instant().start_ns /% 1000
-}
+jet_cli_trace_clock_us: fn() -[Time]> Int Never! { cli_time.instant().start_ns /% 1000 }
 
 // The decimal number `bytes[from..<to]`, or -1 when it is empty or holds a
 // non-digit.

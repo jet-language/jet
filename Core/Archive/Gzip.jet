@@ -35,6 +35,7 @@ compress: fn(data: [U8]) -> [U8] GzipFileError! {
     loop k in 0..<4 -> out.push(wrapping(U8{n >> (k * 8)}))
     Ok(out)
 }
+
 /// Decode one RFC 1952 member. Malformed headers, deflate, trailers, and
 /// checksums return a typed `GzipFileError`; valid empty members return `Ok([])`.
 decompress: fn(data: [U8]) -> [U8] GzipFileError! {
@@ -49,19 +50,19 @@ decompress: fn(data: [U8]) -> [U8] GzipFileError! {
     if ((flags).bit_and(4)) != 0 {
         if i + 2 > trailer -> return Err(GzipFileError.Malformed)
         xlen: (u8_int(data[i])).bit_or((u8_int(data[i + 1]) << 8))
-        i = i + 2
+        i += 2
         if i + xlen > trailer -> return Err(GzipFileError.Malformed)
-        i = i + xlen
+        i += xlen
     }
     if ((flags).bit_and(8)) != 0 {
         terminated := false
         loop i < trailer {
             if data[i] == (U8{0}) {
-                i = i + 1
+                i += 1
                 terminated = true
                 break
             }
-            i = i + 1
+            i += 1
         }
         if !terminated -> return Err(GzipFileError.Malformed)
     }
@@ -69,11 +70,11 @@ decompress: fn(data: [U8]) -> [U8] GzipFileError! {
         terminated := false
         loop i < trailer {
             if data[i] == (U8{0}) {
-                i = i + 1
+                i += 1
                 terminated = true
                 break
             }
-            i = i + 1
+            i += 1
         }
         if !terminated -> return Err(GzipFileError.Malformed)
     }
@@ -83,7 +84,7 @@ decompress: fn(data: [U8]) -> [U8] GzipFileError! {
         if ((crc32(slice_u8(data, 0, i))).bit_and(65535)) != header_crc {
             return Err(GzipFileError.Checksum)
         }
-        i = i + 2
+        i += 2
     }
     if i > trailer -> return Err(GzipFileError.Malformed)
     // ISIZE is only the size modulo 2^32, so it cannot bound memory. The
@@ -98,9 +99,7 @@ decompress: fn(data: [U8]) -> [U8] GzipFileError! {
             return Err(GzipFileError.Malformed)
         }
     }
-    if crc32(body) != read_u32le(data, trailer) {
-        return Err(GzipFileError.Checksum)
-    }
+    if crc32(body) != read_u32le(data, trailer) -> return Err(GzipFileError.Checksum)
     if ((body.len()).bit_and(4294967295)) != read_u32le(data, trailer + 4) {
         return Err(GzipFileError.Checksum)
     }
@@ -118,7 +117,7 @@ isize: fn(data: [U8]) -> Int Never! {
     k := 0
     loop k < 4 {
         n = (n).bit_or((u8_int(data[i + k]) << (k * 8)))
-        k = k + 1
+        k += 1
     }
     n
 }
@@ -128,6 +127,7 @@ magic: fn() -> [U8] Never! { [U8]{(U8{31}), (U8{139}), (U8{8})} }
 crc: fn(data: [U8]) -> Int Never! { crc32(data) }
 
 compress_text: fn(text: String) -> [U8] GzipFileError! { compress(text.bytes()) }
+
 decompress_text: fn(data: [U8]) -> String GzipFileError! {
     body: decompress(data)
     String.from_bytes(body) ?? return Err(GzipFileError.Malformed)
@@ -143,11 +143,13 @@ host_write_bytes: fn(path: String, data: [U8]) -> Bool GzipFileError! {
     core.files.write_bytes(path, data) ?? return Err(GzipFileError.Write)
     Ok(true)
 }
+
 compress_file: fn(src: String, dst: String) -> Bool GzipFileError! {
     data: host_read_bytes(src)
     encoded: compress(data)
     host_write_bytes(dst, encoded)
 }
+
 decompress_file: fn(src: String, dst: String) -> Bool GzipFileError! {
     data: host_read_bytes(src)
     body: decompress(data)

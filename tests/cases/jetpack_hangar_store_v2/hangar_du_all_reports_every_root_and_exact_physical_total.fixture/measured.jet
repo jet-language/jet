@@ -21,6 +21,8 @@ measured_bytes: fn(path: String, seen: &[files.FileID]) -> Int {
 run: fn() {
     seen := [files.FileID]{}
     total := 0
-    loop root in ["shared-cas", "jet-omp/hangar", "jet-omp2/hangar"] -> total += measured_bytes(root, seen)
+    loop root in ["shared-cas", "jet-omp/hangar", "jet-omp2/hangar"] {
+        total += measured_bytes(root, seen)
+    }
     print(total)
 }

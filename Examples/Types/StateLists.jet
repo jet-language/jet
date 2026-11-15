@@ -15,11 +15,14 @@ Lamp: struct {
         Off -> On
         On -> Off
     }
+
     watts: Int
 
     // A constructor's result type names the start state.
     make: fn(watts: Int) -> Lamp.Off { Lamp{watts: watts} }
+
     turn_on: fn(self: &&Lamp.Off) -> Lamp.On { self }
+
     turn_off: fn(self: &&Lamp.On) -> Lamp.Off { self }
 }
 
@@ -31,17 +34,23 @@ Order: struct {
         Cancelled
         Open: Draft | Confirmed
     }
+
     id: Int
 
     start: fn(id: Int) -> Order.Draft { Order{id: id} }
+
     confirm: fn(self: &&Order.Draft) -> Order.Confirmed { self }
+
     ship: fn(self: &&Order.Confirmed) -> Order.Shipped { self }
+
     cancel: fn(self: &&Order.Open) -> Order.Cancelled { self }
 }
 
 // Parameters name a state, a set, or a group.
 receipt: fn(order: Order.Shipped) -> String { "shipped {order.id}" }
+
 edit: fn(order: Order.Draft | Order.Confirmed) -> String { "edit {order.id}" }
+
 remind: fn(order: Order.Open) -> String { "order {order.id} is open" }
 
 // In an enum the states are its cases, with their data.
@@ -49,6 +58,7 @@ Door: enum {
     Shut
     Open
     Locked(code: Int)
+
     state {
         Shut -> Open, Locked
         Open -> Shut
@@ -56,7 +66,9 @@ Door: enum {
     }
 
     open: fn(self: Door.Shut) -> Door.Open { .Open }
+
     lock: fn(self: Door.Shut, code: Int) -> Door.Locked { .Locked(code: code) }
+
     // Staying in `Locked` is not a move, so only `Locked -> Shut` is checked.
     unlock: fn(self: Door.Locked, key: Int) -> Door.Shut | Door.Locked {
         if self == {
@@ -67,6 +79,7 @@ Door: enum {
             .Shut | .Open -> self.copy()
         }
     }
+
     label: fn(self) -> String {
         if self == {
             .Shut -> "shut"

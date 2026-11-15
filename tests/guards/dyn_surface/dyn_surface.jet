@@ -42,10 +42,14 @@ dyn_surface_path_segment: fn(bytes: [U8], start: Int, end: Int) -> Bool {
 
 dyn_surface_collect: fn(bytes: [U8], tables: TokenTables, tokens: [Token], identifier: String, offsets: &[Int]) {
     loop token in tokens {
-        if token.kind == TOKEN_IDENT && token_decoded(tables, token) == identifier && !dyn_surface_path_segment(bytes, token.span.start, token.span.end) -> offsets.push(token.span.start)
+        if token.kind == TOKEN_IDENT && token_decoded(tables, token) == identifier && !dyn_surface_path_segment(bytes, token.span.start, token.span.end) {
+            offsets.push(token.span.start)
+        }
         if token.literal < 0 -> next
         loop part in tables.literals[token.literal].string_parts {
-            if part.kind == STRING_PART_INTERPOLATION -> dyn_surface_collect(bytes, tables, part.tokens, identifier, offsets)
+            if part.kind == STRING_PART_INTERPOLATION {
+                dyn_surface_collect(bytes, tables, part.tokens, identifier, offsets)
+            }
         }
     }
 }
@@ -103,7 +107,9 @@ dyn_surface_inline_code_has: fn(line: String, identifier: String) -> Bool {
             run := 0
             loop close + run < bytes.len() && (Int{bytes[close + run]}) == 96 -> run += 1
             if run == delimiter {
-                if dyn_surface_source_offsets(dyn_surface_slice(bytes, content_start, close), identifier).len() > 0 -> return true
+                if dyn_surface_source_offsets(dyn_surface_slice(bytes, content_start, close), identifier).len() > 0 {
+                    return true
+                }
                 at = close + run
                 matched = true
                 break
@@ -159,9 +165,13 @@ dyn_surface_markdown_lines: fn(text: String, identifier: String) -> [DynSurfaceL
             fenced = [String]{}
             next
         }
-        if dyn_surface_inline_code_has(line, identifier) -> out.push(DynSurfaceLine{line: index + 1, text: line})
+        if dyn_surface_inline_code_has(line, identifier) {
+            out.push(DynSurfaceLine{line: index + 1, text: line})
+        }
     }
-    if open -> dyn_surface_fence_lines("{fenced.join("\n")}\n", start_line, source_lines, identifier, out)
+    if open {
+        dyn_surface_fence_lines("{fenced.join("\n")}\n", start_line, source_lines, identifier, out)
+    }
     out
 }
 
@@ -185,7 +195,9 @@ dyn_surface_historical: fn(line: String) -> Bool {
         text: dyn_surface_files.read(path) ?? panic("cannot read Dyn inventory surface {path}")
         if path.ends_with(".md") {
             loop found in dyn_surface_markdown_lines(text, "Data") {
-                if !dyn_surface_historical(found.text) -> failures.push("{path}:{found.line}: {found.text.trim()}")
+                if !dyn_surface_historical(found.text) {
+                    failures.push("{path}:{found.line}: {found.text.trim()}")
+                }
             }
             next
         }
@@ -201,9 +213,13 @@ dyn_surface_historical: fn(line: String) -> Bool {
 #Test("dyn_name_check_distinguishes_prose_and_type_names") {
     guards_enter_root()
     lawful_rows: [String]{"| `conn.send_text(text)` | Data frames; client frames are masked |", "| Data ownership | Official UCD inputs are checked in. |"}
-    loop lawful in lawful_rows -> assert(dyn_surface_markdown_lines(lawful, "Data").is_empty(), lawful)
+    loop lawful in lawful_rows {
+        assert(dyn_surface_markdown_lines(lawful, "Data").is_empty(), lawful)
+    }
     prohibited_spans: [String]{"`Data.Object`", "`[Data]`", "`Data?`"}
-    loop prohibited in prohibited_spans -> assert_eq(dyn_surface_markdown_lines(prohibited, "Data").len(), 1)
+    loop prohibited in prohibited_spans {
+        assert_eq(dyn_surface_markdown_lines(prohibited, "Data").len(), 1)
+    }
     assert_eq(dyn_surface_line_numbers(dyn_surface_markdown_lines("~~~jet\nvalue: Data\n~~~", "Data")), [Int]{2})
     // A shorter inner fence line does not close the block. Jet lexes a backtick
     // run as raw text, so the width rule is pinned with tilde fences.

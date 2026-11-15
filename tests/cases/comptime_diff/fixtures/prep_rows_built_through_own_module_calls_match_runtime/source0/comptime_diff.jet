@@ -1,5 +1,6 @@
-
-Cov: struct { bits: Int }
+Cov: struct {
+    bits: Int
+}
 
 Route: enum {
     NoRoute
@@ -23,10 +24,10 @@ rec_with_coverage: fn(member: String, coverage: Cov) -> Rec Never! {
     row
 }
 
-ROWS: #run { [Rec]{ rec_new("a"), rec_with_coverage("b", Cov{bits: 2}) } }
+ROWS: #run { [Rec]{rec_new("a"), rec_with_coverage("b", Cov{bits: 2})} }
 
 run: fn() {
-    rows: [Rec]{ rec_new("a"), rec_with_coverage("b", Cov{bits: 2}) }
+    rows: [Rec]{rec_new("a"), rec_with_coverage("b", Cov{bits: 2})}
     print("{ROWS[1].member} {ROWS[1].coverage.bits} {ROWS[1].route == Route.NoRoute}")
     print("{rows[1].member} {rows[1].coverage.bits} {rows[1].route == Route.NoRoute}")
 }

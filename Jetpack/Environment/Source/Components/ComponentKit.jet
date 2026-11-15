@@ -6,7 +6,6 @@
 // template of this package, not one of its sources. The copies share their
 // project package's one namespace, so starters declare no `run` and keep their
 // views as methods. This is a small fixed catalog, not a package registry.
-
 use files: core.files
 
 // The directory components are copied into, relative to a project root.
@@ -22,8 +21,11 @@ StarterComponent: struct {
 // Module-level constants: `#run` evaluates a binding's whole value, so each
 // starter's text is bound here and the list below reads the names.
 ENV_STARTER_BUTTON: #run embed_file("Starters/Button.jet.template")
+
 ENV_STARTER_LABEL: #run embed_file("Starters/Label.jet.template")
+
 ENV_STARTER_INPUT: #run embed_file("Starters/Input.jet.template")
+
 ENV_STARTER_CONTAINER: #run embed_file("Starters/Container.jet.template")
 
 env_starter_components: fn() -> [StarterComponent] Never! {
@@ -49,9 +51,10 @@ env_component_find: fn(name: String) -> StarterComponent? Never! {
 #Error
 ComponentError: enum {
     IO(IOError)
+    AlreadyExists(String)
+
     // The destination already exists. Never silently clobbered: it may be a
     // user's already-customized copy.
-    AlreadyExists(String)
 
     message: fn(self) -> String Never! {
         if self == {

@@ -9,8 +9,12 @@ use {
     core.encoding.[Dyn]
     jet_cli.[
         JetCLICommandSettingLayer,
-        jet_cli_command_layers_at, jet_cli_command_settings_words, jet_cli_settings_controls,
-        jet_cli_settings_word, jet_cli_user_config_dir, jet_cli_user_settings_file,
+        jet_cli_command_layers_at,
+        jet_cli_command_settings_words,
+        jet_cli_settings_controls,
+        jet_cli_settings_word,
+        jet_cli_user_config_dir,
+        jet_cli_user_settings_file,
     ]
     jet_foundation.[Diagnostic]
 }
@@ -18,7 +22,9 @@ use {
 // A fresh scratch directory for one test.
 command_layers_scratch: fn(name: String) -> String Never! {
     root: "{layers_test_sys.temp_dir()}/jet-command-layers-{layers_test_process.current_pid()}-{name}"
-    if layers_test_files.exists(root) -> layers_test_files.remove_all(root) ?? panic("clear {root}: {err}")
+    if layers_test_files.exists(root) {
+        layers_test_files.remove_all(root) ?? panic("clear {root}: {err}")
+    }
     layers_test_files.create_dir_all(root) ?? panic("command-layers scratch {root}: {err}")
     root
 }
@@ -28,7 +34,7 @@ command_layers_scratch: fn(name: String) -> String Never! {
 command_layers_shown: fn(value: Dyn) -> String Never! {
     if value == {
         .Bool(on) -> if on -> "true" else -> "false"
-        .Text(text) -> text.copy() // copy: the value keeps its text.
+        .Text(text) -> text.copy()  // copy: the value keeps its text.
         .Array(items) -> {
             shown := [String]{}
             loop item in items -> shown.push(command_layers_shown(item))
@@ -84,11 +90,11 @@ command_layers_refused: fn(directory: String, config: String?) -> [Diagnostic] N
     assert_eq(command_layers_shown(layers[1].settings[1].value), "net,exec")
     // The package's trace replaces the user's; a list is never merged.
     if jet_cli_command_settings_words("check", [String]{"check"}, layers) == {
-        .Words(words) -> assert_eq(words, [String]{"--trace={root}/shop/out/trace.json"})
+        .Words(words) -> { assert_eq(words, [String]{"--trace={root}/shop/out/trace.json"}) }
         .Refused(reports) -> panic("refused: {reports[0].what}")
     }
     if jet_cli_command_settings_words("fmt", [String]{"fmt"}, layers) == {
-        .Words(words) -> assert_eq(words, [String]{"--check"})
+        .Words(words) -> { assert_eq(words, [String]{"--check"}) }
         .Refused(reports) -> panic("refused: {reports[0].what}")
     }
 }

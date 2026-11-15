@@ -69,11 +69,11 @@ run: fn() {
     many_right := [Owner]{}
     loop index in 0..<1000 -> many_right.push(Owner{team: "k", name: "n"})
     if data.inner_join<Order, Owner>(many_left, many_right, fn(o: Order) { o.team }, fn(w: Owner) { w.team }) == {
-        .Ok(rows) -> print("unexpected ok {rows.len()}")
+        .Ok(rows) -> { print("unexpected ok {rows.len()}") }
         .Err(error) -> print("limit: {error.operation}: {error.reason}")
     }
     if data.left_join<Order, Owner>(many_left, many_right, fn(o: Order) { o.team }, fn(w: Owner) { w.team }) == {
-        .Ok(rows) -> print("unexpected ok {rows.len()}")
+        .Ok(rows) -> { print("unexpected ok {rows.len()}") }
         .Err(error) -> print("limit: {error.operation}: {error.reason}")
     }
 }

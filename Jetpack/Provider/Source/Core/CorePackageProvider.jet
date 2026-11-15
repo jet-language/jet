@@ -26,7 +26,9 @@ CoreProvider: struct {
     plan_downloads: fn(self, verification: &StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -> DownloadPlan ProviderError! {
         plan := DownloadPlan.empty()
         loop spec in specs {
-            if self.requires_acquisition(spec, table) -> plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
+            if self.requires_acquisition(spec, table) {
+                plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
+            }
         }
         Ok(plan)
     }
@@ -37,7 +39,9 @@ CoreProvider: struct {
         repo: provider_source_repo(upstream, spec.package, ctx)
         canonical_package: if provider_find_canonical_package(repo, spec.package) == {
             .Ok(found) -> found
-            .Err(error) -> { return Err(ProviderError.CoreBuild(error.message)) }
+            .Err(error) -> {
+                return Err(ProviderError.CoreBuild(error.message))
+            }
         }
         src_dir := ""
         canonical := PackageFacts?{None}
@@ -46,7 +50,9 @@ CoreProvider: struct {
         if canonical_package == {
             .Val(found) -> {
                 source: found.facts.source ?? "."
-                if !provider_is_contained_relative(source) -> return Err(ProviderError.CoreBuild("canonical Package source `{source}` escapes {found.root}"))
+                if !provider_is_contained_relative(source) {
+                    return Err(ProviderError.CoreBuild("canonical Package source `{source}` escapes {found.root}"))
+                }
                 // The default `source: "."` is the member root itself: a
                 // trailing `.` component cannot be copied as a tree.
                 relative: pkg_normalize_member_path(source)
@@ -59,7 +65,9 @@ CoreProvider: struct {
                 src_dir = pkg_discover_module_in(repo, spec.package) ?? return Err(provider_core_discovery_error(repo, err))
             }
         }
-        if !files.is_dir(src_dir) -> return Err(ProviderError.CoreBuild("package source {src_dir} does not exist"))
+        if !files.is_dir(src_dir) {
+            return Err(ProviderError.CoreBuild("package source {src_dir} does not exist"))
+        }
         provider_validate_core_source_tree(src_dir) ?? return Err(ProviderError.CoreBuild(err.message))
         // Content-address the materialized package so identical sources share
         // a store entry and changes get a fresh one.
@@ -83,13 +91,13 @@ CoreProvider: struct {
         envelope: Envelope.for_output(out_dir, spec.raw, artifact.recipe_id)
         recipe_identity: provider_core_recipe_identity(src_dir, spec.package, manifest, kind, canonical, toolchain) ?? return Err(ProviderError.CoreBuild(err.message))
         identity: provider_plain_cache_identity(fingerprint, recipe_identity, ctx)
-        plan_facts := [String: String]{
+        plan_facts := [String:String]{
             "action.kind": "core-build",
             "action.recipe": recipe_identity,
             "build.sandbox": artifact.sandbox_class,
             "build.sandbox_policy": artifact.sandbox_policy,
         }
-        producer_facts := [String: String]{
+        producer_facts := [String:String]{
             "source.kind": "core-package-tree",
             "source.tree_schema": PROVIDER_CORE_TREE_SCHEMA,
             "source.tree_fingerprint": fingerprint,
@@ -105,20 +113,22 @@ CoreProvider: struct {
             producer_facts["build.trust"] = "private-untrusted"
         }
         producer: provider_producer_record("core", "cas:{fingerprint}", fingerprint, plan_facts, provider_toolchain_facts(toolchain), identity, producer_facts)
-        Ok(Realized{
-            name: spec.package,
-            version,
-            reference: spec.raw,
-            out: out_dir,
-            bin: artifact.bin,
-            rlib: artifact.rlib,
-            envelope,
-            cache_identity: identity,
-            source_state: SourceState.Built,
-            named_outputs: [String: String]{"out": out_dir},
-            references: [String]{},
-            producer,
-        })
+        Ok(
+            Realized{
+                name: spec.package,
+                version: version,
+                reference: spec.raw,
+                out: out_dir,
+                bin: artifact.bin,
+                rlib: artifact.rlib,
+                envelope: envelope,
+                cache_identity: identity,
+                source_state: SourceState.Built,
+                named_outputs: [String:String]{"out": out_dir},
+                references: [String]{},
+                producer: producer,
+            },
+        )
     }
 }
 
@@ -178,7 +188,9 @@ provider_manifest_kind: fn(manifest: PackageFacts?, package: String) -> PackageK
 provider_core_cache_expectation: fn(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> CacheExpectation? Never! {
     resolved: provider_core_resolve_source(spec, table, ctx) ?? return None
     toolchain: CargoToolchain.resolve_for_core(ctx.offline)
-    if ctx.offline && files.is_file(files.join(resolved.src_dir, "Cargo.toml")) && !provider_toolchain_pinned(toolchain) -> return None
+    if ctx.offline && files.is_file(files.join(resolved.src_dir, "Cargo.toml")) && !provider_toolchain_pinned(toolchain) {
+        return None
+    }
     fingerprint: provider_core_tree_fingerprint(resolved.src_dir) ?? return None
     recipe: provider_core_recipe_identity(resolved.src_dir, spec.package, resolved.manifest, resolved.kind, resolved.canonical, toolchain) ?? return None
     Val(CacheExpectation{
@@ -226,7 +238,7 @@ provider_core_resolve_source: fn(spec: RefSpec, table: SourceTable, ctx: Provide
         .None -> None
     }
     kind: canonical_kind ?? (provider_manifest_kind(manifest, spec.package) ?? provider_infer_package_kind(src_dir))
-    Ok(CoreResolvedSource{upstream, src_dir, manifest, canonical, kind})
+    Ok(CoreResolvedSource{upstream: upstream, src_dir: src_dir, manifest: manifest, canonical: canonical, kind: kind})
 }
 
 // The exact approval subject of a core Cargo build hook; non-executing core
@@ -234,7 +246,9 @@ provider_core_resolve_source: fn(spec: RefSpec, table: SourceTable, ctx: Provide
 provider_core_approval_facts: fn(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> String? ProviderReason! {
     resolved: provider_core_resolve_source(spec, table, ctx)
     source_digest: provider_core_tree_fingerprint(resolved.src_dir)
-    if resolved.kind != PackageKind.Library || !files.is_file(files.join(resolved.src_dir, "Cargo.toml")) -> return Ok(None)
+    if resolved.kind != PackageKind.Library || !files.is_file(files.join(resolved.src_dir, "Cargo.toml")) {
+        return Ok(None)
+    }
     toolchain: CargoToolchain.resolve_for_core(ctx.offline)
     if ctx.offline && !provider_toolchain_pinned(toolchain) -> return Ok(None)
     recipe: provider_core_recipe_identity(resolved.src_dir, spec.package, resolved.manifest, resolved.kind, resolved.canonical, toolchain)
@@ -255,10 +269,14 @@ CargoBuildScratch: struct {
         root: files.join(hangar_dir, STORE_BUILD_SCRATCH_DIR)
         if files.stat(root) == {
             .Ok(info) -> {
-                if info.is_symlink || !info.is_dir -> return Err(CargoBuildError.Failed("build scratch root is not a directory: {root}"))
+                if info.is_symlink || !info.is_dir {
+                    return Err(CargoBuildError.Failed("build scratch root is not a directory: {root}"))
+                }
             }
             .Err(error) -> {
-                if !store_io_is_not_found(error) -> return Err(CargoBuildError.Failed("could not inspect build scratch root: {error}"))
+                if !store_io_is_not_found(error) {
+                    return Err(CargoBuildError.Failed("could not inspect build scratch root: {error}"))
+                }
                 files.create_dir_all(root) ?? return Err(CargoBuildError.Failed("could not create build scratch root: {err}"))
             }
         }
@@ -267,8 +285,12 @@ CargoBuildScratch: struct {
         path: files.join(root, "{key}-{pid}-{nonce}")
         if files.stat(path) == {
             .Ok(info) -> {
-                if info.is_symlink || !info.is_dir -> return Err(CargoBuildError.Failed("build scratch path is not a directory: {path}"))
-                if store_active_tmp_marker_is_live(path) -> return Err(CargoBuildError.Failed("build scratch path is already active: {path}"))
+                if info.is_symlink || !info.is_dir {
+                    return Err(CargoBuildError.Failed("build scratch path is not a directory: {path}"))
+                }
+                if store_active_tmp_marker_is_live(path) {
+                    return Err(CargoBuildError.Failed("build scratch path is already active: {path}"))
+                }
                 files.remove_all(path) ?? return Err(CargoBuildError.Failed("could not clear build scratch: {err}"))
             }
             .Err(_) -> {}
@@ -276,7 +298,7 @@ CargoBuildScratch: struct {
         files.create_dir_all(path) ?? return Err(CargoBuildError.Failed("could not create build scratch: {err}"))
         started: time.unix_ns() /% 1000000000
         files.write(files.join(path, STORE_ACTIVE_TMP_MARKER), "pid={pid}\nstarted={started}\n") ?? return Err(CargoBuildError.Failed("could not mark build scratch active: {err}"))
-        Ok(CargoBuildScratch{path})
+        Ok(CargoBuildScratch{path: path})
     }
 
     remove: fn(self) Never! -[FS]> {
@@ -327,18 +349,24 @@ provider_core_manifest_facts: fn(repo: String) -[FS, Env]> PackageFacts? Provide
 // package look built. The build runs the resolved toolchain's cargo inside
 // the native sandbox; a pinned cargo must live in the immutable tool closure.
 provider_build_rlib_from_cargo: fn(pkg_dir: String, hangar_dir: String, toolchain: CargoToolchain, offline: Bool) -[FS, Env, Exec, Time, Time.Wait]> CargoBuildReceipt CargoBuildError! {
-    if offline && !toolchain.pinned -> return Err(CargoBuildError.Failed("offline Core builds require a pinned realized toolchain"))
+    if offline && !toolchain.pinned {
+        return Err(CargoBuildError.Failed("offline Core builds require a pinned realized toolchain"))
+    }
     if offline {
         lock_regular: if files.stat(files.join(pkg_dir, "Cargo.lock")) == {
             .Ok(info) -> info.is_file && !info.is_symlink
             .Err(_) -> false
         }
-        if !lock_regular -> return Err(CargoBuildError.Failed("offline Core builds require a regular Cargo.lock"))
+        if !lock_regular {
+            return Err(CargoBuildError.Failed("offline Core builds require a regular Cargo.lock"))
+        }
     }
     if toolchain.pinned {
         hangar: files.canonicalize(hangar_dir) ?? return Err(CargoBuildError.Failed("could not resolve the immutable tool closure: {err}"))
         cargo: files.canonicalize(toolchain.cargo) ?? return Err(CargoBuildError.Failed("could not resolve pinned cargo in the immutable tool closure: {err}"))
-        if !foundation_paths.is_relative_to(foundation_paths.of(cargo), foundation_paths.of(hangar)) -> return Err(CargoBuildError.Failed("pinned cargo is outside the immutable tool closure"))
+        if !foundation_paths.is_relative_to(foundation_paths.of(cargo), foundation_paths.of(hangar)) {
+            return Err(CargoBuildError.Failed("pinned cargo is outside the immutable tool closure"))
+        }
     }
     if provider_find_rlib_in(pkg_dir) == {
         .Val(existing) -> return Ok(CargoBuildReceipt{rlib: existing, sandbox_class: "non-executing", sandbox_policy: "no child launched (rlib already present)"})
@@ -365,7 +393,7 @@ provider_build_rlib_in_scratch: fn(pkg_dir: String, scratch: CargoBuildScratch, 
     if offline -> args.push("--offline")
     files.create_dir_all(files.join(scratch.path, "home")) ?? return Err(CargoBuildError.Failed("could not create Cargo home: {err}"))
     files.create_dir_all(files.join(scratch.path, "cargo-home")) ?? return Err(CargoBuildError.Failed("could not create Cargo cache home: {err}"))
-    env: [String: String]{
+    env: [String:String]{
         "CARGO_HOME": "/work/output/cargo-home",
         "CARGO_TARGET_DIR": "/work/output",
         "HOME": "/work/output/home",
@@ -385,7 +413,9 @@ provider_build_rlib_in_scratch: fn(pkg_dir: String, scratch: CargoBuildScratch, 
     loop entry in entries {
         if built == "" && provider_is_lib_rlib(entry.name) -> built = entry.path
     }
-    if built == "" -> return Err(CargoBuildError.Failed("sandboxed cargo produced no lib*.rlib artifact"))
+    if built == "" {
+        return Err(CargoBuildError.Failed("sandboxed cargo produced no lib*.rlib artifact"))
+    }
     destination: files.join(pkg_dir, files.basename(built))
     files.copy2(built, destination) ?? return Err(CargoBuildError.Failed("could not copy rlib into package object: {err}"))
     Ok(CargoBuildReceipt{rlib: destination, sandbox_class: sandboxed.mechanism, sandbox_policy: sandboxed.policy})

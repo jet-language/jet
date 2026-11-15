@@ -21,7 +21,9 @@ ds_fixture_module: fn(source: String) -> Bool {
         line: raw.trim().copy()
         if !line.starts_with("//") -> next
         directive: dc_slice(line, 2, line.count_bytes()).trim().copy()
-        if directive == "@fixture_module" || directive.starts_with("@fixture_module ") || directive.starts_with("@fixture_module\t") -> return true
+        if directive == "@fixture_module" || directive.starts_with("@fixture_module ") || directive.starts_with("@fixture_module\t") {
+            return true
+        }
     }
     false
 }
@@ -31,7 +33,9 @@ ds_fixture_module: fn(source: String) -> Bool {
 // `<dir>/stderr`, a workspace directory owns `<dir>.stderr`, and a loose
 // source owns `<stem>.stderr`, or `<stem>.warn` in a lint corpus.
 ds_ui_expected: fn(directory: String, lint: Bool, out: &[String]) {
-    if !ds_files.exists(directory) -> return
+    if !ds_files.exists(directory) {
+        return
+    }
     loop child in (ds_files.list_dir(directory) ?? panic("list {directory}: {err}")) {
         if child.name.starts_with(".") -> next
         shown: ds_files.join(directory, child.name)
@@ -40,9 +44,7 @@ ds_ui_expected: fn(directory: String, lint: Bool, out: &[String]) {
                 out.push(ds_files.join(shown, "stderr"))
             } else if ds_files.exists(ds_files.join(shown, "workspace.jet")) {
                 out.push("{shown}.stderr")
-            } else {
-                ds_ui_expected(shown, lint, out)
-            }
+            } else { ds_ui_expected(shown, lint, out) }
         } else if child.name.ends_with(".jet") && !child.name.ends_with(".fixed.jet") && child.name != "package.jet" && child.name != "workspace.jet" && !ds_fixture_module(dc_read(shown)) {
             out.push("{dc_slice(shown, 0, shown.count_bytes() - 4)}{if lint -> ".warn" else -> ".stderr"}")
         }
@@ -59,7 +61,9 @@ ds_report_fixture_snapshot_paths: fn() -> [String] {
     loop row in DS_REPORT_FIXTURE_DIRS {
         if !ds_files.exists(row.directory) -> next
         loop child in (ds_files.list_dir(row.directory) ?? panic("list {row.directory}: {err}")) {
-            if !child.is_dir && child.name.ends_with(row.suffix) -> paths.push(ds_files.join(row.directory, child.name))
+            if !child.is_dir && child.name.ends_with(row.suffix) {
+                paths.push(ds_files.join(row.directory, child.name))
+            }
         }
     }
     paths.sort()
@@ -100,7 +104,9 @@ ds_known_failing: fn() -> [String] {
 ds_entry: fn(path: String) -> String {
     if path.ends_with("/stderr") -> return dc_slice(path, 0, path.count_bytes() - 7)
     loop suffix in [".stderr", ".warn", ".txt"] {
-        if path.ends_with(suffix) -> return dc_slice(path, 0, path.count_bytes() - suffix.count_bytes())
+        if path.ends_with(suffix) {
+            return dc_slice(path, 0, path.count_bytes() - suffix.count_bytes())
+        }
     }
     path.copy()
 }
@@ -147,7 +153,9 @@ ds_part: fn(line: String, label: String) -> Bool {
                 if index > start && index < end && ds_opener(other) != "" -> end = index
             }
             what: line.index("]: ") ?? -1
-            if what < 0 || dc_slice(line, what + 3, line.count_bytes()).trim() == "" -> failures.push("{path}:{start + 1} lost What for {id}")
+            if what < 0 || dc_slice(line, what + 3, line.count_bytes()).trim() == "" {
+                failures.push("{path}:{start + 1} lost What for {id}")
+            }
             why := false
             fix := false
             more := false
@@ -159,7 +167,9 @@ ds_part: fn(line: String, label: String) -> Bool {
             }
             if !why -> failures.push("{path}:{start + 1} lost Why for {id}")
             if !fix -> failures.push("{path}:{start + 1} lost Fix for {id}")
-            if !more -> failures.push("{path}:{start + 1} lost the `More: jet-lang.dev/e/{code}` link for {id}")
+            if !more {
+                failures.push("{path}:{start + 1} lost the `More: jet-lang.dev/e/{code}` link for {id}")
+            }
         }
     }
     assert_eq(failures.join("\n"), "")
@@ -223,7 +233,8 @@ ds_set_diff: fn(left: [String], right: [String]) -> (left_only: [String], right_
 #Test("diagnostic_voice_scope_includes_owned_runtime_artifacts") {
     guards_enter_root()
     paths: dc_snapshot_texts().map(fn(snapshot) { snapshot.path })
-    loop expected in ["tests/fixtures/module-eval-diagnostics/E0970.stderr", "tests/fixtures/module-eval-diagnostics/E0971.stderr", "tests/cli/doctor_l2101.txt", "tests/cli/fetch_no_git_e1203.txt"] {
+    loop expected in
+        ["tests/fixtures/module-eval-diagnostics/E0970.stderr", "tests/fixtures/module-eval-diagnostics/E0971.stderr", "tests/cli/doctor_l2101.txt", "tests/cli/fetch_no_git_e1203.txt"] {
         assert(dc_has(paths, expected), "voice scan omitted {expected}")
     }
 }

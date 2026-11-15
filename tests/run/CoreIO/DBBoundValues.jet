@@ -29,7 +29,7 @@ run: fn() {
 
     table: "person"
     if admin.query(SQL{"SELECT id FROM {table}"}) == {
-        .Ok(_) -> print("hole as table name: accepted")
+        .Ok(_) -> { print("hole as table name: accepted") }
         .Err(_) -> print("hole as table name: rejected")
     }
 
@@ -49,7 +49,7 @@ run: fn() {
     spoof_id: 5
     spoof_name: "claims bob"
     if alice.execute(SQL{"INSERT INTO person (id, owner, name) VALUES ({spoof_id}, {bob_owner}, {spoof_name})"}) == {
-        .Ok(_) -> print("alice inserting owner=bob: accepted")
+        .Ok(_) -> { print("alice inserting owner=bob: accepted") }
         .Err(_) -> print("alice inserting owner=bob: rejected")
     }
     spoof_row: admin.query_one(SQL{"SELECT owner FROM person WHERE id = {spoof_id}"}) ?? panic("spoof select")
@@ -58,7 +58,7 @@ run: fn() {
     print("bob sees: {count(bob)}")
     print("admin sees: {count(admin)}")
     if alice.execute(SQL{"UPDATE person SET owner = {bob_owner} WHERE id = {alice_id}"}) == {
-        .Ok(_) -> print("owner change: accepted")
+        .Ok(_) -> { print("owner change: accepted") }
         .Err(_) -> print("owner change: rejected")
     }
 
@@ -66,14 +66,14 @@ run: fn() {
     kept_id: 4
     kept_name: "kept?"
     if db.transaction(alice, "bad batch", [SQL{"INSERT INTO person (id, owner, name) VALUES ({kept_id}, {alice_owner}, {kept_name})"}, SQL{"INSERT INTO person (id, owner, name) VALUES ({alice_id}, {alice_owner}, {kept_name})"}]) == {
-        .Ok(steps) -> print("policy transaction: committed {steps}")
+        .Ok(steps) -> { print("policy transaction: committed {steps}") }
         .Err(_) -> print("policy transaction: rolled back")
     }
     print("alice count unchanged: {count(alice) == before}")
 
     _closed: alice.close()
     if alice.query(SQL{"SELECT id FROM person"}) == {
-        .Ok(_) -> print("query after close: accepted")
+        .Ok(_) -> { print("query after close: accepted") }
         .Err(_) -> print("query after close: rejected")
     }
 }

@@ -1,9 +1,20 @@
 // Existing Policy/Gates APIs only. Private GateSet::parse spelling has no Jet
 // counterpart; separately archived.
 use jet_foundation.[
-    GateSet, POLICY_RULES, PolicyCombine, PolicyDeclaration, PolicyKey, PolicyScope, PolicyValue,
-    Span, policy_key_is_audited_gate, policy_key_name, policy_key_parse, policy_parse_value,
-    policy_resolve, policy_resolve_with_gates,
+    GateSet,
+    POLICY_RULES,
+    PolicyCombine,
+    PolicyDeclaration,
+    PolicyKey,
+    PolicyScope,
+    PolicyValue,
+    Span,
+    policy_key_is_audited_gate,
+    policy_key_name,
+    policy_key_parse,
+    policy_parse_value,
+    policy_resolve,
+    policy_resolve_with_gates,
 ]
 
 s6_policy_declaration: fn(key: PolicyKey, value: PolicyValue, scope: PolicyScope, source: String) -> PolicyDeclaration {
@@ -13,7 +24,7 @@ s6_policy_declaration: fn(key: PolicyKey, value: PolicyValue, scope: PolicyScope
 #Test("organization obligations floor rejects package relaxation") {
     declarations: [PolicyDeclaration]{
         s6_policy_declaration(PolicyKey.Unsafe, PolicyValue.Obligations, PolicyScope.Organization, "/admin/policy.jet"),
-        s6_policy_declaration(PolicyKey.Unsafe, PolicyValue.Relaxed, PolicyScope.Package, "package.jet")
+        s6_policy_declaration(PolicyKey.Unsafe, PolicyValue.Relaxed, PolicyScope.Package, "package.jet"),
     }
     widening: if policy_resolve(PolicyKey.Unsafe, declarations) == {
         .Err(error) -> if error == {

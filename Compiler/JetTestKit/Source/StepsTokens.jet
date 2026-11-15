@@ -28,8 +28,12 @@ kit_steps_exe_suffix: fn() -> String {
 // The host-dependent file-name suffix tokens: `{sys:dll-suffix}` and `{sys:exe-suffix}`.
 kit_steps_sys_expand: fn(text: String) -> String {
     expanded := text
-    if expanded.contains("{{sys:dll-suffix}}") -> expanded = expanded.replace("{{sys:dll-suffix}}", kit_steps_dll_suffix())
-    if expanded.contains("{{sys:exe-suffix}}") -> expanded = expanded.replace("{{sys:exe-suffix}}", kit_steps_exe_suffix())
+    if expanded.contains("{{sys:dll-suffix}}") {
+        expanded = expanded.replace("{{sys:dll-suffix}}", kit_steps_dll_suffix())
+    }
+    if expanded.contains("{{sys:exe-suffix}}") {
+        expanded = expanded.replace("{{sys:exe-suffix}}", kit_steps_exe_suffix())
+    }
     expanded
 }
 
@@ -63,13 +67,17 @@ kit_steps_runtime_expand: fn(text: String, context: KitStepCtx, state: KitStepSt
         expanded = expanded.replace("{{pid:{pending.label}}}", "{pending.child.id()}")
     }
     if expanded.contains("{{pid:") -> return None
-    loop reserved in state.free_ports -> expanded = expanded.replace("{{free-port:{reserved.name}}}", "{reserved.port}")
+    loop reserved in state.free_ports {
+        expanded = expanded.replace("{{free-port:{reserved.name}}}", "{reserved.port}")
+    }
     if expanded.contains("{{free-port:") -> return None
     loop capture in state.captures {
         token: "{{cap:{capture.name}}}"
         if capture.value == {
             .Text(value) -> expanded = expanded.replace(token, value)
-            .Bytes(_) | .Numbers(_) | .Tree(_) | .Absent -> { if expanded.contains(token) -> return None }
+            .Bytes(_) | .Numbers(_) | .Tree(_) | .Absent -> {
+                if expanded.contains(token) -> return None
+            }
         }
     }
     if expanded.contains("{{cap:") -> return None
@@ -95,7 +103,9 @@ kit_steps_resolve_step: fn(original: KitStep, context: KitStepCtx, state: KitSte
     if conditional_env {
         selected := [KitEnvVar]{}
         loop variable in original.environment {
-            if kit_steps_conditions(variable.conditions, context, state) -> selected.push(variable.copy())
+            if kit_steps_conditions(variable.conditions, context, state) {
+                selected.push(variable.copy())
+            }
         }
         // Select before expanding values: unselected branches may name tools
         // or captures unavailable on this host.
@@ -104,7 +114,9 @@ kit_steps_resolve_step: fn(original: KitStep, context: KitStepCtx, state: KitSte
     step.replacements = context.plan.replacements
     loop rule in original.replacements -> step.replacements.push(rule.copy())
     argv := [String]{}
-    loop word in original.argv -> argv.push(kit_steps_runtime_expand(word, context, state) ?? return None)
+    loop word in original.argv {
+        argv.push(kit_steps_runtime_expand(word, context, state) ?? return None)
+    }
     step.argv = argv
     step.cwd = kit_steps_runtime_expand(original.cwd, context, state) ?? return None
     step.stdin = kit_steps_runtime_expand(original.stdin, context, state) ?? return None
@@ -112,12 +124,16 @@ kit_steps_resolve_step: fn(original: KitStep, context: KitStepCtx, state: KitSte
     step.stderr_target = kit_steps_runtime_expand(original.stderr_target, context, state) ?? return None
     loop i in 0..<step.environment.len() {
         if step.environment[i].value == {
-            .Val(value) -> step.environment[i].value = Val(kit_steps_runtime_expand(value, context, state) ?? return None)
+            .Val(value) -> {
+                step.environment[i].value = Val(kit_steps_runtime_expand(value, context, state) ?? return None)
+            }
             .None -> {}
         }
     }
     // A capture's or await's own assertions may name the value it captures; they resolve once it ran.
-    if original.action != "capture" && original.action != "await" -> step.assertions = kit_steps_resolve_assertions(original.assertions, context, state) ?? return None
+    if original.action != "capture" && original.action != "await" {
+        step.assertions = kit_steps_resolve_assertions(original.assertions, context, state) ?? return None
+    }
     if step.action == "wait" || step.action == "close" {
         loop pending in state.children {
             if pending.label == step.label {
@@ -145,7 +161,9 @@ kit_steps_resolve_assertions: fn(original: [KitAssertion], context: KitStepCtx, 
         // NonZ assertion conditions are selected after the command. Leave its
         // PID untouched only on unsupported hosts so the checker can refuse
         // after condition selection, without changing Linux token precedence.
-        if !(assertions[i].stream == "process" && kit_steps_process_nonzombie_mode(assertions[i].mode) && sys.name() != "linux") -> assertions[i].path = kit_steps_runtime_expand(assertions[i].path, context, state) ?? return None
+        if !(assertions[i].stream == "process" && kit_steps_process_nonzombie_mode(assertions[i].mode) && sys.name() != "linux") {
+            assertions[i].path = kit_steps_runtime_expand(assertions[i].path, context, state) ?? return None
+        }
         assertions[i].json_path = kit_steps_runtime_expand(assertions[i].json_path, context, state) ?? return None
         // Keep predicate values unexpanded: the checker chooses raw or normalized
         // matching based on the presence of path tokens in the original value.
@@ -168,7 +186,9 @@ kit_steps_replace: fn(text: String, rules: [KitReplacement], context: KitStepCtx
     loop rule in rules {
         from := rule.from
         to: rule.to
-        if normalized && !rule.literal_from -> from = kit_steps_normalize(from, context.env, context.work, context.scratch, context.plan.normalize, state.built, source_name)
+        if normalized && !rule.literal_from {
+            from = kit_steps_normalize(from, context.env, context.work, context.scratch, context.plan.normalize, state.built, source_name)
+        }
         result = result.replace(from, to)
     }
     result
@@ -182,7 +202,9 @@ kit_steps_free_port_names: fn(text: String) -> [String]? {
         after: start + 11
         end: kit_steps_byte_index(kit_steps_byte_slice(rest, after, rest.count_bytes()), "}}") ?? return None
         name: kit_steps_byte_slice(rest, after, after + end)
-        if name == "" || name.contains(" ") || name.contains("{{") || name.contains(":") -> return None
+        if name == "" || name.contains(" ") || name.contains("{{") || name.contains(":") {
+            return None
+        }
         names.push(name)
         rest = kit_steps_byte_slice(rest, after + end + 1, rest.count_bytes())
     }
@@ -219,16 +241,22 @@ kit_steps_free_ports: fn(context: KitStepCtx, count: Int, ports: &[Int]) -> KitV
     }
     probe: files.join(directory, "free_port.jet")
     result: kit_exec_invoke(context.env, [context.env.jet, "run", probe, "--", "{count}"], directory, context.scratch, "")
-    if kit_exec_process_failure(result) == .Val(failure) -> return Val(kit_expect_verdict(failure.status, "free-port probe: {failure.detail}"))
+    if kit_exec_process_failure(result) == .Val(failure) {
+        return Val(kit_expect_verdict(failure.status, "free-port probe: {failure.detail}"))
+    }
     if result.code != 0 {
         first: kit_exec_first_line(result.stderr)
         return Val(kit_expect_verdict("ERROR", "free-port probe failed (exit {result.code}): {if first == "" -> "no stderr" else -> first}"))
     }
     loop line in result.stdout.trim().split("\n") {
         port: Int.parse(line.copy()) ?? return Val(kit_expect_verdict("ERROR", "free-port probe printed a line that is not a port"))
-        if port < 1 || port > 65535 -> return Val(kit_expect_verdict("ERROR", "free-port probe returned an invalid port"))
+        if port < 1 || port > 65535 {
+            return Val(kit_expect_verdict("ERROR", "free-port probe returned an invalid port"))
+        }
         ports.push(port)
     }
-    if ports.len() != count -> return Val(kit_expect_verdict("ERROR", "free-port probe printed {ports.len()} ports for {count} names"))
+    if ports.len() != count {
+        return Val(kit_expect_verdict("ERROR", "free-port probe printed {ports.len()} ports for {count} names"))
+    }
     None
 }

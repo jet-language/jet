@@ -159,7 +159,9 @@ run: fn() {
     print("pick for String and for Int are distinct instances: {picked.identity != pick.reflect(types: [Int]).identity}")
     print("pick of a and b is {pick("a", "b")}")
     loop param in apply.reflect().signature.params {
-        if param.type.signature == None -> print("apply {param.name} takes {param.type.name}, no function")
+        if param.type.signature == None {
+            print("apply {param.name} takes {param.type.name}, no function")
+        }
         callee: param.type.signature ?? next
         takes: (loop inner in callee.params -> inner.type.name).join(", ")
         callee_row: if callee.effects.declared == .Val(row) -> "[{row.join(", ")}]" else -> "no row"

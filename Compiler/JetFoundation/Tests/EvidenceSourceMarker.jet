@@ -1,8 +1,17 @@
 // 4c7227ad5: evidence diagnostic source marker admits only 0 and 1; assemble with Compiler and run.
 use jet_foundation.[
-    EvidenceDiagnostic, EvidenceKind, EvidenceOutcome, EvidenceProducerKind, EvidenceRecord,
-    EvidenceSource, evidence_build_empty, evidence_cursor, evidence_decode_record,
-    evidence_encode_record, evidence_identity_for_record, evidence_record_new,
+    EvidenceDiagnostic,
+    EvidenceKind,
+    EvidenceOutcome,
+    EvidenceProducerKind,
+    EvidenceRecord,
+    EvidenceSource,
+    evidence_build_empty,
+    evidence_cursor,
+    evidence_decode_record,
+    evidence_encode_record,
+    evidence_identity_for_record,
+    evidence_record_new,
     evidence_revision_empty,
 ]
 
@@ -31,11 +40,7 @@ evidence_marker_encode: fn(record: EvidenceRecord) -> [U8] {
 evidence_marker_with: fn(bytes: [U8], at: Int, marker: U8) -> [U8] {
     out := [U8]{}
     loop index in 0..<bytes.len() {
-        if index == at {
-            out.push(marker)
-        } else {
-            out.push(bytes[index])
-        }
+        if index == at -> out.push(marker) else -> out.push(bytes[index])
     }
     out
 }
@@ -57,21 +62,23 @@ evidence_marker_decode_error: fn(bytes: [U8]) -> String {
     // first differing byte is the marker itself.
     at := -1
     loop index in 0..<none_bytes.len() {
-        if at == -1 && none_bytes[index] != some_bytes[index] {
-            at = index
-        }
+        if at == -1 && none_bytes[index] != some_bytes[index] -> at = index
     }
     evidence_marker_require(at >= 0, "marker byte located")
 
     zero_cursor := evidence_cursor(none_bytes, 0, U64.MAX)
     if evidence_decode_record(zero_cursor) == {
-        .Ok(decoded) -> evidence_marker_require(decoded.record.diagnostics[0].source == None, "marker 0 decodes without source")
+        .Ok(decoded) -> {
+            evidence_marker_require(decoded.record.diagnostics[0].source == None, "marker 0 decodes without source")
+        }
         .Err(error) -> panic("evidence source marker contract: marker 0 refused: {error.message}")
     }
 
     one_cursor := evidence_cursor(some_bytes, 0, U64.MAX)
     if evidence_decode_record(one_cursor) == {
-        .Ok(decoded) -> evidence_marker_require(decoded.record.diagnostics[0].source == (Val(EvidenceSource{path: "source.jet", line: U32{3}, column: U32{4}})), "marker 1 decodes source")
+        .Ok(decoded) -> {
+            evidence_marker_require(decoded.record.diagnostics[0].source == (Val(EvidenceSource{path: "source.jet", line: U32{3}, column: U32{4}})), "marker 1 decodes source")
+        }
         .Err(error) -> panic("evidence source marker contract: marker 1 refused: {error.message}")
     }
 

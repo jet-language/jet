@@ -43,7 +43,9 @@ run: fn() {
     print("active={active} salary={salary}")
     broken: "{text}x"
     if json.decode<[Person]>(broken) == {
-        .Err(errors) -> print("trailing text: {errors.len()} {errors[0].path == ""} {errors[0].reason}")
+        .Err(errors) -> {
+            print("trailing text: {errors.len()} {errors[0].path == ""} {errors[0].reason}")
+        }
         .Ok(_) -> panic("trailing text accepted")
     }
 }

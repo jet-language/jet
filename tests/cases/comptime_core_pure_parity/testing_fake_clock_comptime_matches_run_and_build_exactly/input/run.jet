@@ -1,8 +1,10 @@
 package: { name: "run", authority: { allow: [Time] } }
+
 use {
     testing: core.testing
     time: core.time
 }
+
 testing_fake_clock_view: fn() -> String {
     clock := testing.fake_clock(42)
     canonical := Clock.new(42)
@@ -16,6 +18,7 @@ testing_fake_clock_view: fn() -> String {
     canonical_ticked: canonical.tick(8)
     return "{initial}|{ticked}|{after_tick}|{advanced}|{after_advance}|{waited}|{clock.now()}|{canonical_ticked}|{canonical.now()}"
 }
+
 EXPECTED: #run testing_fake_clock_view()
 
 run: fn() {

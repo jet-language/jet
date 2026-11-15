@@ -22,7 +22,9 @@ use {
 }
 
 JET_COMPILER_SERVICE_VERB: "__jetpack"
+
 JET_COMPILER_SERVICE_COMPTIME_EVALUATE: "comptime-evaluate"
+
 JET_COMPILER_SERVICE_CHECK_ENTRY: "check-entry"
 
 // A config value that could not be evaluated: the diagnostic, placed on the
@@ -33,6 +35,7 @@ ComptimeEvalError: struct {
 }
 
 JET_CONFIG_VALUE_NAME: "JET_CONFIG_VALUE"
+
 JET_CONFIG_VALUE_FILE: "jet_config_value.jet"
 
 // E0956 for one config value; `span` is the config expression's own span, or
@@ -193,7 +196,9 @@ CompilerServiceTagged: struct {
 
 compiler_service_tagged: fn(value: Dyn) -> CompilerServiceTagged? Never! {
     if value == .Object(fields) {
-        if fields.len() == 1 -> return Val(CompilerServiceTagged{label: fields[0].key, payload: fields[0].value})
+        if fields.len() == 1 {
+            return Val(CompilerServiceTagged{label: fields[0].key, payload: fields[0].value})
+        }
     }
     None
 }
@@ -237,7 +242,9 @@ compiler_service_value_wire: fn(value: CtValue) -> Dyn? Never! {
         }
         .Struct(type_name, fields) -> {
             items := [Dyn]{}
-            loop field in fields -> items.push(Dyn.Object(["name": Dyn.Text(field.name), "value": compiler_service_value_wire(field.value) ?? return None]))
+            loop field in fields {
+                items.push(Dyn.Object(["name": Dyn.Text(field.name), "value": compiler_service_value_wire(field.value) ?? return None]))
+            }
             Val(compiler_service_tag("Struct", Dyn.Object(["type": Dyn.Text(type_name), "fields": Dyn.Array(items)])))
         }
         .Enum(type_name, variant, args) -> {
@@ -276,7 +283,9 @@ compiler_service_value_from_wire: fn(value: Dyn) -> CtValue? Never! {
             return None
         }
         "Char" -> {
-            if payload == .Text(text) -> return Val(CtValue.Char{value: compiler_service_char(text) ?? return None})
+            if payload == .Text(text) {
+                return Val(CtValue.Char{value: compiler_service_char(text) ?? return None})
+            }
             return None
         }
         "Str" -> {
@@ -386,7 +395,9 @@ compiler_service_key_from_wire: fn(value: Dyn) -> CtKey? Never! {
             return None
         }
         "Char" -> {
-            if payload == .Text(text) -> return Val(CtKey.Char{value: compiler_service_char(text) ?? return None})
+            if payload == .Text(text) {
+                return Val(CtKey.Char{value: compiler_service_char(text) ?? return None})
+            }
             return None
         }
         "Tuple" -> Val(CtKey.Tuple{fields: compiler_service_named_keys_from_wire(payload) ?? return None})
@@ -407,20 +418,24 @@ compiler_service_key_from_wire: fn(value: Dyn) -> CtKey? Never! {
 // The diagnostic moves in; its texts move into the wire, uncopied.
 compiler_service_diagnostic_wire: fn(diagnostic: &&Diagnostic) -> Dyn Never! {
     span: if diagnostic.span == .Val(found) -> Dyn.Object(["start": Dyn.Int(found.start), "end": Dyn.Int(found.end)]) else -> Dyn.Null
-    Dyn.Object([
-        "severity": Dyn.Int(diagnostic.severity),
-        "code": Dyn.Text(diagnostic.code.move()),
-        "span": span,
-        "what": Dyn.Text(diagnostic.what.move()),
-        "why": Dyn.Text(diagnostic.why.move()),
-        "fix": Dyn.Text(diagnostic.fix.move()),
-    ])
+    Dyn.Object(
+        [
+            "severity": Dyn.Int(diagnostic.severity),
+            "code": Dyn.Text(diagnostic.code.move()),
+            "span": span,
+            "what": Dyn.Text(diagnostic.what.move()),
+            "why": Dyn.Text(diagnostic.why.move()),
+            "fix": Dyn.Text(diagnostic.fix.move()),
+        ],
+    )
 }
 
 compiler_service_diagnostic_from_wire: fn(value: Dyn) -> Diagnostic? Never! {
     span := Span?{None}
     if compiler_service_get(value, "span") == .Val(found) {
-        if found != Dyn.Null -> span = Val(Span{start: compiler_service_int(found, "start") ?? return None, end: compiler_service_int(found, "end") ?? return None})
+        if found != Dyn.Null {
+            span = Val(Span{start: compiler_service_int(found, "start") ?? return None, end: compiler_service_int(found, "end") ?? return None})
+        }
     }
     Val(Diagnostic{
         severity: compiler_service_int(value, "severity") ?? return None,
@@ -450,7 +465,9 @@ compiler_service_comptime_request_from: fn(request: Dyn) -> (program: String, ba
 compiler_service_comptime_response: fn(outcome: &&JetConfigOutcome) -> String Never! {
     if outcome == {
         .Value(value) -> {
-            if compiler_service_value_wire(value) == .Val(wire) -> return compiler_service_render(Dyn.Object(["value": wire]))
+            if compiler_service_value_wire(value) == .Val(wire) {
+                return compiler_service_render(Dyn.Object(["value": wire]))
+            }
             compiler_service_render(Dyn.Object(["error": compiler_service_diagnostic_wire(jet_config_eval_diagnostic(None, "this config value's result has a shape a config value can't hold"))]))
         }
         .Refused(diagnostic) -> compiler_service_render(Dyn.Object(["error": compiler_service_diagnostic_wire(diagnostic)]))
@@ -460,8 +477,12 @@ compiler_service_comptime_response: fn(outcome: &&JetConfigOutcome) -> String Ne
 // The outcome a comptime-evaluate response carries, or None for a response
 // that is not one.
 compiler_service_comptime_outcome: fn(response: Dyn) -> JetConfigOutcome? Never! {
-    if compiler_service_get(response, "value") == .Val(wire) -> return Val(JetConfigOutcome.Value{value: compiler_service_value_from_wire(wire) ?? return None})
-    if compiler_service_get(response, "error") == .Val(wire) -> return Val(JetConfigOutcome.Refused{diagnostic: compiler_service_diagnostic_from_wire(wire) ?? return None})
+    if compiler_service_get(response, "value") == .Val(wire) {
+        return Val(JetConfigOutcome.Value{value: compiler_service_value_from_wire(wire) ?? return None})
+    }
+    if compiler_service_get(response, "error") == .Val(wire) {
+        return Val(JetConfigOutcome.Refused{diagnostic: compiler_service_diagnostic_from_wire(wire) ?? return None})
+    }
     None
 }
 

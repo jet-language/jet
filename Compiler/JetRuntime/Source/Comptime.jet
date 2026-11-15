@@ -6,11 +6,14 @@
 // check. No exact Int. TCB frame/scope ownership is documented in Thread.jet
 // (65ba90e97).
 COMPTIME_ROOT_BYTES: I64{48}
+
 comptime_root := I64{0}
 
 // runtime-init: 3 when comptime_root
 #Export(c) jet_rt_comptime_init: fn() {
-    if (comptime_root != I64{0}) -> return
+    if (comptime_root != I64{0}) {
+        return
+    }
     root: jet_rt_alloc(COMPTIME_ROOT_BYTES, I64{8})
     #Unsafe("runtime-init runs before any other thread exists") { comptime_root = root }
     thread_zero(comptime_root, COMPTIME_ROOT_BYTES)
@@ -18,6 +21,7 @@ comptime_root := I64{0}
 }
 
 comptime_frame_reset: fn() { thread_zero(wrapping(thread_base() + I64{256}), I64{32}) }
+
 comptime_site: fn(owner: I64, start: I64, end: I64) {
     base: thread_base()
     sync_store(wrapping(base + I64{264}), owner)
@@ -80,9 +84,7 @@ comptime_publish_locked: fn(kind: I64, status: I64) {
     sync_mutex_lock(comptime_root)
     if (sync_load(wrapping(comptime_root + I64{8})) != I64{0}) {
         remaining: sync_load(wrapping(comptime_root + I64{16}))
-        if world_unsigned_before(remaining, units) {
-            comptime_publish_locked(I64{3}, I64{2})
-        } else {
+        if world_unsigned_before(remaining, units) -> comptime_publish_locked(I64{3}, I64{2}) else {
             sync_store(wrapping(comptime_root + I64{16}), wrapping(remaining - units))
         }
     }
@@ -101,7 +103,7 @@ comptime_publish_locked: fn(kind: I64, status: I64) {
     if (sync_load(wrapping(comptime_root + I64{8})) != I64{0}) {
         base: thread_base()
         depth := sync_load(wrapping(base + I64{256}))
-        if (depth != I64{-1}) -> depth = wrapping(depth + I64{1})
+        if (depth != I64{-1}) { depth = wrapping(depth + I64{1}) }
         sync_store(wrapping(base + I64{256}), depth)
         comptime_site(owner, start, end)
         if world_unsigned_before(sync_load(wrapping(comptime_root + I64{24})), depth) {
@@ -117,7 +119,7 @@ comptime_publish_locked: fn(kind: I64, status: I64) {
 #Export(c) jet_rt_comptime_leave: fn() {
     address: wrapping(thread_base() + I64{256})
     depth: sync_load(address)
-    if (depth != I64{0}) -> sync_store(address, wrapping(depth - I64{1}))
+    if (depth != I64{0}) { sync_store(address, wrapping(depth - I64{1})) }
 }
 
 // Rust: extern "C" jet_rt_comptime_end(). Reset the calling frame and restore
@@ -182,7 +184,7 @@ comptime_publish_locked: fn(kind: I64, status: I64) {
     budget_site: sync_load(wrapping(comptime_root + I64{40})) != I64{0}
     sync_mutex_unlock(comptime_root)
     control: scheduler_control_current()
-    if (control == I64{0}) -> return I64{0}
+    if (control == I64{0}) { return I64{0} }
     sync_mutex_lock(wrapping(control + I64{72}))
     record: sync_load(wrapping(control + I64{40}))
     if (record == I64{0}) {
@@ -213,11 +215,7 @@ comptime_json_message_size: fn(data: I64, length: I64) -> I64 {
         byte: trap_byte(wrapping(data + index))
         if (byte == I64{34} || byte == I64{92} || byte == I64{10} || byte == I64{13} || byte == I64{9}) {
             size += I64{2}
-        } else if (byte < I64{32}) {
-            size += I64{6}
-        } else {
-            size += I64{1}
-        }
+        } else if (byte < I64{32}) { size += I64{6} } else { size += I64{1} }
         index += I64{1}
     }
     size
@@ -385,8 +383,10 @@ comptime_channel_write: fn(fd: I64, data: I64, length: I64) {
     at := I64{0}
     loop at < length {
         written: trap_syscall(I64{1}, fd, data + at, length - at, I64{0}, I64{0}, I64{0})
-        if (written == I64{-4}) -> next
-        if (written <= I64{0}) -> return
+        if (written == I64{-4}) { next }
+        if (written <= I64{0}) {
+            return
+        }
         at += written
     }
 }

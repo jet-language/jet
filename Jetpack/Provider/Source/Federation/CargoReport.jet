@@ -30,7 +30,9 @@ impl ProviderFactReport {
             loop entry in package_values {
                 if entry.key == key -> values.push(entry.value)
             }
-            if provider_distinct_values(values).len() > 1 -> conflicts.push("Cargo package declares conflicting `{key}` values")
+            if provider_distinct_values(values).len() > 1 {
+                conflicts.push("Cargo package declares conflicting `{key}` values")
+            }
         }
         losses := [String]{}
         loop entry in package_values {
@@ -38,13 +40,15 @@ impl ProviderFactReport {
                 losses.push("Cargo package field `{entry.key}` must be a TOML string")
             }
         }
-        native_values := [String: String]{}
+        native_values := [String:String]{}
         loop index in 0..<assignments.len() {
             entry: assignments[index]
             native_key: if entry.array_table -> "provider.cargo.native.lock.{entry.section}.{index}.{entry.key}" else -> "provider.cargo.native.manifest.{entry.section}.{entry.key}"
             if native_values.get(native_key) == {
                 .Val(previous) -> {
-                    if previous != entry.value -> conflicts.push("Cargo native field {native_key} has conflicting values")
+                    if previous != entry.value {
+                        conflicts.push("Cargo native field {native_key} has conflicting values")
+                    }
                 }
                 .None -> {}
             }
@@ -52,23 +56,31 @@ impl ProviderFactReport {
             facts.add_typed_text(native_key, entry.value)
             if provider_cargo_dependency_kind(entry.section) == {
                 .Val(kind) -> {
-                    if !provider_toml_dependency_value(entry.value) -> losses.push("Cargo dependency `{entry.key}` must be a string or inline table")
+                    if !provider_toml_dependency_value(entry.value) {
+                        losses.push("Cargo dependency `{entry.key}` must be a string or inline table")
+                    }
                     facts.add_typed_text("provider.cargo.dependency.{kind.label()}.{entry.key}", entry.value)
                     if kind == {
-                        .Runtime -> facts.dependencies.push(entry.key)
-                        .Dev -> facts.dev_dependencies.push(entry.key)
+                        .Runtime -> { facts.dependencies.push(entry.key) }
+                        .Dev -> { facts.dev_dependencies.push(entry.key) }
                         .Build -> facts.build_dependencies.push(entry.key)
                     }
-                    if entry.section.starts_with("target.") -> facts.platforms.push(provider_cargo_target_platform(entry.section))
+                    if entry.section.starts_with("target.") {
+                        facts.platforms.push(provider_cargo_target_platform(entry.section))
+                    }
                 }
                 .None -> {}
             }
-            if entry.section == "features" -> facts.add_typed_text("provider.cargo.variant.feature.{entry.key}", entry.value)
+            if entry.section == "features" {
+                facts.add_typed_text("provider.cargo.variant.feature.{entry.key}", entry.value)
+            }
             if entry.section == "package" && entry.key == "build" {
                 build_value: provider_toml_value_text(entry.value)
                 if {
                     build_value == "false" -> {}
-                    !provider_toml_string_value(entry.value) -> losses.push("Cargo package field `build` must be a string or false")
+                    !provider_toml_string_value(entry.value) -> {
+                        losses.push("Cargo package field `build` must be a string or false")
+                    }
                     else -> {
                         facts.scripts.push(build_value)
                         facts.add_typed_text("provider.cargo.hook.build", entry.value)
@@ -77,7 +89,9 @@ impl ProviderFactReport {
             }
             if entry.section == "package" {
                 if entry.key == {
-                    "repository" | "homepage" | "authors" | "publish" | "links" -> facts.add_typed_text("provider.cargo.source.{entry.key}", entry.value)
+                    "repository" | "homepage" | "authors" | "publish" | "links" -> {
+                        facts.add_typed_text("provider.cargo.source.{entry.key}", entry.value)
+                    }
                     else -> {}
                 }
             }
@@ -103,7 +117,7 @@ impl ProviderFactReport {
                 names := [String]{}
                 loop record in lock_records {
                     if record.get("name") == {
-                        .Val(value) -> names.push(provider_toml_value_text(value))
+                        .Val(value) -> { names.push(provider_toml_value_text(value)) }
                         .None -> {}
                     }
                 }
@@ -122,7 +136,9 @@ impl ProviderFactReport {
             loop key in string_keys {
                 if record.get(key) == {
                     .Val(value) -> {
-                        if !provider_toml_string_value(value) -> losses.push("Cargo.lock field `{key}` for package `{name}` must be a TOML string")
+                        if !provider_toml_string_value(value) {
+                            losses.push("Cargo.lock field `{key}` for package `{name}` must be a TOML string")
+                        }
                     }
                     .None -> {}
                 }
@@ -137,7 +153,9 @@ impl ProviderFactReport {
                         projection_key: "provider.cargo.lock.{name}.{key}"
                         if facts.first_typed(projection_key) == {
                             .Val(previous) -> {
-                                if previous != value -> conflicts.push("Cargo.lock field {projection_key} has conflicting values")
+                                if previous != value {
+                                    conflicts.push("Cargo.lock field {projection_key} has conflicting values")
+                                }
                             }
                             .None -> {}
                         }
@@ -150,10 +168,12 @@ impl ProviderFactReport {
                 .Val(source) -> provider_toml_value_text(source).starts_with("registry+")
                 .None -> false
             }
-            if registry_source && !record.has_key("checksum") -> losses.push("Cargo.lock registry package `{name}` has no checksum")
+            if registry_source && !record.has_key("checksum") {
+                losses.push("Cargo.lock registry package `{name}` has no checksum")
+            }
             if name == facts.name {
                 if record.get("checksum") == {
-                    .Val(checksum) -> facts.integrity_hash = provider_toml_value_text(checksum)
+                    .Val(checksum) -> { facts.integrity_hash = provider_toml_value_text(checksum) }
                     .None -> {}
                 }
             }
@@ -305,14 +325,14 @@ provider_cargo_target_platform: fn(section: String) -> String Never! {
 }
 
 // One record per `[[package]]` entry; a repeated `name` starts the next.
-provider_cargo_lock_records: fn(assignments: [TOMLAssignment]) -> [[String: String]] Never! {
-    records := [[String: String]]{}
-    current := [String: String]{}
+provider_cargo_lock_records: fn(assignments: [TOMLAssignment]) -> [[String:String]] Never! {
+    records := [[String:String]]{}
+    current := [String:String]{}
     loop entry in assignments {
         if !entry.array_table || entry.section != "package" -> next
         if entry.key == "name" && current.has_key("name") {
             records.push(current)
-            current = [String: String]{}
+            current = [String:String]{}
         }
         current[entry.key] = entry.value
     }

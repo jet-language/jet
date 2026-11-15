@@ -5,9 +5,28 @@
 // bytes are distinct names.
 
 PATH_LAW_RESERVED_NAMES: #run { [String]{
-    "CON", "PRN", "AUX", "NUL",
-    "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-    "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    "COM1",
+    "COM2",
+    "COM3",
+    "COM4",
+    "COM5",
+    "COM6",
+    "COM7",
+    "COM8",
+    "COM9",
+    "LPT1",
+    "LPT2",
+    "LPT3",
+    "LPT4",
+    "LPT5",
+    "LPT6",
+    "LPT7",
+    "LPT8",
+    "LPT9",
 } }
 
 // Path-law failure (E1299) with a stable code the CLI and tests match on.
@@ -17,9 +36,7 @@ PathLawError: struct {
     path: String
     detail: String
 
-    what: fn(self) -> String Never! {
-        "store path rejected: `{self.path}`"
-    }
+    what: fn(self) -> String Never! { "store path rejected: `{self.path}`" }
 
     why: fn(self) -> String Never! {
         "Hangar Store v2 path law ({self.code}) forbids this name: {self.detail}."
@@ -29,9 +46,7 @@ PathLawError: struct {
         "Rename the entry to a portable store path: no reserved Windows names, no trailing `.`/` `, no case-fold collisions with a sibling, and no `.`/`..` components."
     }
 
-    message: fn(self) -> String Never! {
-        "{self.what()} — {self.detail}"
-    }
+    message: fn(self) -> String Never! { "{self.what()} — {self.detail}" }
 }
 
 // Reject one path component under the native ingest law.
@@ -42,12 +57,18 @@ pkg_validate_path_component: fn(name: [U8]) PathLawError! {
 // Validate one component; Nix admission (`allow_nix_store_symlinks`) accepts
 // exactly Nix's own component law: any byte except `/` and NUL, not `.`/`..`.
 pkg_validate_path_component_with_mode: fn(name: [U8], allow_nix_store_symlinks: Bool) PathLawError! {
-    if name.len() == 0 -> return Err(PathLawError{code: "empty", path: "", detail: "empty path component"})
-    if name.contains(U8{0}) -> return Err(PathLawError{code: "nul", path: pkg_lossy_text(name), detail: "NUL byte in path component"})
+    if name.len() == 0 {
+        return Err(PathLawError{code: "empty", path: "", detail: "empty path component"})
+    }
+    if name.contains(U8{0}) {
+        return Err(PathLawError{code: "nul", path: pkg_lossy_text(name), detail: "NUL byte in path component"})
+    }
     if name == ".".bytes() || name == "..".bytes() {
         return Err(PathLawError{code: "dot", path: pkg_lossy_text(name), detail: "`.` and `..` are not store path components"})
     }
-    if allow_nix_store_symlinks -> return
+    if allow_nix_store_symlinks {
+        return
+    }
     if name.contains(U8{92}) {
         return Err(PathLawError{code: "backslash", path: pkg_lossy_text(name), detail: "backslash is not a portable path component outside Nix admission"})
     }
@@ -61,31 +82,35 @@ pkg_validate_path_component_with_mode: fn(name: [U8], allow_nix_store_symlinks: 
 }
 
 // Validate every component of a relative store path under the native law.
-pkg_validate_rel_path: fn(rel: String) PathLawError! {
-    pkg_validate_rel_path_with_mode(rel, false)
-}
+pkg_validate_rel_path: fn(rel: String) PathLawError! { pkg_validate_rel_path_with_mode(rel, false) }
 
 // Validate a relative store path; the empty path is the output root itself.
 // Like Rust `Path::components`, an interior `.` is skipped while a leading
 // `.` and every `..` are rejected.
 pkg_validate_rel_path_with_mode: fn(rel: String, allow_nix_store_symlinks: Bool) PathLawError! {
-    if rel.starts_with("/") -> return Err(PathLawError{code: "absolute", path: rel, detail: "store paths must be relative"})
+    if rel.starts_with("/") {
+        return Err(PathLawError{code: "absolute", path: rel, detail: "store paths must be relative"})
+    }
     parts: rel.split("/").to_list()
     loop index in 0..<parts.len() {
         part: parts[index]
         if part == "" -> next
         if part == "." {
-            if index == 0 -> return Err(PathLawError{code: "dot", path: rel, detail: "`.` and `..` are not store path components"})
+            if index == 0 {
+                return Err(PathLawError{code: "dot", path: rel, detail: "`.` and `..` are not store path components"})
+            }
             next
         }
-        if part == ".." -> return Err(PathLawError{code: "dot", path: rel, detail: "`.` and `..` are not store path components"})
+        if part == ".." {
+            return Err(PathLawError{code: "dot", path: rel, detail: "`.` and `..` are not store path components"})
+        }
         pkg_validate_path_component_with_mode(part.bytes(), allow_nix_store_symlinks)
     }
 }
 
 // Reject case-fold collisions among sibling directory entry names.
 pkg_reject_casefold_collisions: fn(names: [[U8]]) PathLawError! {
-    folded := [String: [U8]]{}
+    folded := [String:[U8]]{}
     loop name in names {
         key: pkg_hex_bytes(pkg_ascii_fold(name))
         if folded.get(key) == {

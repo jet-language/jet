@@ -102,12 +102,13 @@ SigningKey: struct {
 // How a webhook's sender signs a delivery: an HMAC-SHA256, hex-encoded,
 // under the webhook's key.
 Signature: enum {
-    // GitHub: `X-Hub-Signature-256: sha256=<mac>`, the MAC of the body.
     GitHub
-    // Stripe: `Stripe-Signature: t=<seconds>,v1=<mac>`, the MAC of
-    // `<seconds>.<body>`; any one `v1` entry may match.
     Stripe
 }
+
+// GitHub: `X-Hub-Signature-256: sha256=<mac>`, the MAC of the body.
+// Stripe: `Stripe-Signature: t=<seconds>,v1=<mac>`, the MAC of
+// `<seconds>.<body>`; any one `v1` entry may match.
 
 // The request header that carries a delivery's `signature`.
 priv webhook_header: fn(signature: Signature) -> String Never! {
@@ -228,7 +229,9 @@ CallError: enum {
 // that walks to a stored field of a struct argument of the method that
 // reports it (E2813), so the error shows beside that field, as a failed
 // `validate` check does.
-field_error: fn(at: String, reason: String) -> FieldError Never! { FieldError{path: at, reason: reason} }
+field_error: fn(at: String, reason: String) -> FieldError Never! {
+    FieldError{path: at, reason: reason}
+}
 
 // The largest reply a remote call reads.
 REMOTE_MAX_REPLY: 16777216
@@ -386,7 +389,9 @@ state: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> Load
         }
         return Loadable.Failed(err)
     }
-    if live_json.to_string<T>(value) == .Ok(encoded) -> live_store(binding.id, "ok:{encoded}", now, Val(seen.generation))
+    if live_json.to_string<T>(value) == .Ok(encoded) {
+        live_store(binding.id, "ok:{encoded}", now, Val(seen.generation))
+    }
     Loadable.Loaded(value)
 }
 
@@ -492,9 +497,13 @@ priv(package) live_reads: module {
             seen: live_cell_load()
             registry := live_decode(seen) ?? return
             index: live_index(registry, id) ?? return
-            if registry.records[index].source == source || registry.records[index].reads.contains(source) -> return
+            if registry.records[index].source == source || registry.records[index].reads.contains(source) {
+                return
+            }
             registry.records[index].reads.push(source.copy())  // copy: a lost race retries with the same source
-            if live_cell_replace(seen, live_encode(registry)) -> return
+            if live_cell_replace(seen, live_encode(registry)) {
+                return
+            }
         }
     }
 }
@@ -774,7 +783,9 @@ live_current: fn(id: Int, now: Int) -> LiveCurrent {
         registry := live_decode(seen) ?? return LiveCurrent{value: None, generation: 0}
         index: live_index(registry, id) ?? return LiveCurrent{value: None, generation: 0}
         generation: registry.records[index].generation
-        if registry.records[index].value == "" -> return LiveCurrent{value: None, generation: generation}
+        if registry.records[index].value == "" {
+            return LiveCurrent{value: None, generation: generation}
+        }
         dirty: registry.records[index].dirty
         held: now < registry.records[index].held_ns
         every_ns: registry.records[index].every_ns
@@ -787,9 +798,7 @@ live_current: fn(id: Int, now: Int) -> LiveCurrent {
             registry.window_runs = 0
         }
         event := ""
-        if registry.window_runs < LIVE_MAX_RERUNS_PER_SECOND {
-            registry.window_runs += 1
-        } else {
+        if registry.window_runs < LIVE_MAX_RERUNS_PER_SECOND -> registry.window_runs += 1 else {
             ends: registry.window_ns + LIVE_RERUN_WINDOW_NS
             registry.records[index].held_ns = ends
             registry.capped += 1
@@ -840,7 +849,9 @@ live_store: fn(id: Int, value: String, now: Int, started: Int?) {
             registry.changes += 1
         }
         overtaken := false
-        if started == .Val(generation) && registry.records[index].generation != generation -> overtaken = true
+        if started == .Val(generation) && registry.records[index].generation != generation {
+            overtaken = true
+        }
         // The hub event this store publishes: a hold's start or its end.
         event := ""
         if overtaken {
@@ -885,9 +896,7 @@ live_invalidate: fn(source: String, key: String?) {
             // whole-source one also reaches every binding that read it.
             if registry.records[index].source == source {
                 if key == .Val(only) && registry.records[index].key != only -> next
-            } else if key != None || !registry.records[index].reads.contains(source) {
-                next
-            }
+            } else if key != None || !registry.records[index].reads.contains(source) { next }
             registry.records[index].dirty = true
             registry.records[index].generation += 1
             id: registry.records[index].id
@@ -911,7 +920,9 @@ live_invalidate: fn(source: String, key: String?) {
 // re-read it after `after_ms`, since a read before then gets its held stale
 // result.
 live_event: fn(id: Int, after_ms: Int?) -> String {
-    if after_ms == .Val(ms) -> return "{{\"live\":\"invalidate\",\"binding\":{id},\"after_ms\":{ms}}}"
+    if after_ms == .Val(ms) {
+        return "{{\"live\":\"invalidate\",\"binding\":{id},\"after_ms\":{ms}}}"
+    }
     "{{\"live\":\"invalidate\",\"binding\":{id}}}"
 }
 

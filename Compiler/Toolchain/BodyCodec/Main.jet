@@ -24,14 +24,20 @@ use {
 }
 
 WRITE_COMMAND: "jet Compiler/Toolchain/BodyCodec/Main.jet --write"
+
 FOUNDATION_SOURCE: "Compiler/JetFoundation/Source"
+
 SEMA_SOURCE: "Compiler/JetSema/Source"
+
 BODY_CODEC: "Compiler/JetFoundation/Source/Facts/BodyCodec.jet"
+
 SYNTAX_CODEC: "Compiler/JetFoundation/Source/Facts/SyntaxCodec.jet"
+
 // The hand-written half: a named type whose put it declares
 // (`body_codec_put_<lowercase name>`), such as a fixed-width integer or an id
 // that names a row of a compile's own tables, is written by it.
 BODY_CODEC_ROWS: "Compiler/JetFoundation/Source/Facts/BodyCodecRows.jet"
+
 HAND_PUT: "body_codec_put_"
 
 // One generated file: the codec of every named type `roots` reach, from the
@@ -152,7 +158,9 @@ top_level_name: fn(line: String) -> String Never! {
     parts[0]
 }
 
-word_scalar: fn(piece: String) -> Bool Never! { piece.is_alphabetic() || piece.is_numeric() || piece == "_" }
+word_scalar: fn(piece: String) -> Bool Never! {
+    piece.is_alphabetic() || piece.is_numeric() || piece == "_"
+}
 
 // The struct, enum and alias declarations of every file under `dir`; when
 // the target imports from a package and `dir` is not its own, those it adds
@@ -171,7 +179,9 @@ read_shapes: fn(out: &CodecOut, dir: String, target: CodecTarget) BodyCodecError
         text: files.read(path) ?? return Err(codec_fail("cannot read {path}: {err}"))
         parsed: parse_source(text.bytes())
         loop diagnostic in parsed.diagnostics {
-            if diagnostic.severity == DIAGNOSTIC_ERROR -> return Err(codec_fail("{path} does not parse: {diagnostic.what}"))
+            if diagnostic.severity == DIAGNOSTIC_ERROR {
+                return Err(codec_fail("{path} does not parse: {diagnostic.what}"))
+            }
         }
         loop item in parsed.program.items.move() -> add_item(out, item.move())
     }
@@ -214,12 +224,16 @@ add_enum: fn(out: &CodecOut, def: &&EnumDef) Never! {
     loop variant in def.variants.move() {
         row := CodecVariant{name: variant.name.move(), unit: false, single: false, fields: [CodecField]{}}
         if variant.payload.move() == {
-            .Unit -> row.unit = true
+            .Unit -> { row.unit = true }
             .Single(ty, _) -> {
                 row.single = true
                 row.fields.push(CodecField{name: "", ty: ty.move()})
             }
-            .Named(fields) -> loop field in fields.move() -> row.fields.push(CodecField{name: field.name.move(), ty: field.ty.move()})
+            .Named(fields) -> {
+                loop field in fields.move() {
+                    row.fields.push(CodecField{name: field.name.move(), ty: field.ty.move()})
+                }
+            }
         }
         shape.variants.push(row.move())
     }
@@ -256,14 +270,24 @@ resolved: fn(out: CodecOut, ty: Type, at: String) -> Type BodyCodecError! {
         position: out.index.get(name) ?? return Err(codec_fail("{at}: no struct, enum or alias {name}"))
         shape: out.shapes[position]
         if shape.twice -> return Err(codec_fail("{at}: {name} is declared more than once"))
-        if shape.generic -> return Err(codec_fail("{at}: {name} is generic, which the codec does not write"))
+        if shape.generic {
+            return Err(codec_fail("{at}: {name} is generic, which the codec does not write"))
+        }
         if shape.alias == .Val(target) -> return resolved(out, target, "{at} ({name})")
         return Ok(ty)
     }
-    if ty == .List(element) -> return Ok(Type.List{element: resolved(out, element, at) ?? return Err(err)})
-    if ty == .Option(inner) -> return Ok(Type.Option{inner: resolved(out, inner, at) ?? return Err(err)})
-    if ty == .Map(key, _, value) -> return Ok(Type.Map{key: resolved(out, key, at) ?? return Err(err), key_span: None, value: resolved(out, value, at) ?? return Err(err)})
-    if ty == .Int || ty == .Float || ty == .Bool || ty == .Char || ty == .String || ty == .IntN(_, _) -> return Ok(ty)
+    if ty == .List(element) {
+        return Ok(Type.List{element: resolved(out, element, at) ?? return Err(err)})
+    }
+    if ty == .Option(inner) {
+        return Ok(Type.Option{inner: resolved(out, inner, at) ?? return Err(err)})
+    }
+    if ty == .Map(key, _, value) {
+        return Ok(Type.Map{key: resolved(out, key, at) ?? return Err(err), key_span: None, value: resolved(out, value, at) ?? return Err(err)})
+    }
+    if ty == .Int || ty == .Float || ty == .Bool || ty == .Char || ty == .String || ty == .IntN(_, _) {
+        return Ok(ty)
+    }
     Err(codec_fail("{at}: its declared type has no codec here"))
 }
 
@@ -386,7 +410,9 @@ settle: fn(out: &CodecOut) BodyCodecError! {
     }
     loop name in out.reached {
         position: out.index.get(name) ?? return Err(codec_fail("no struct or enum {name}"))
-        if !out.shapes[position].ends -> return Err(codec_fail("{name} has no value a failed read can end on"))
+        if !out.shapes[position].ends {
+            return Err(codec_fail("{name} has no value a failed read can end on"))
+        }
     }
     Ok()
 }
@@ -417,16 +443,18 @@ put_call: fn(ty: Type, value: String) -> String Never! {
     "body_codec_put_{mangled(ty)}(out, {value})"
 }
 
-get_call: fn(ty: Type) -> String Never! {
-    "body_codec_get_{mangled(ty)}(bytes, input)"
-}
+get_call: fn(ty: Type) -> String Never! { "body_codec_get_{mangled(ty)}(bytes, input)" }
 
 // The put and get functions of the list, option or map type `ty`, and of
 // those its parts are, once each.
 write_container: fn(out: &CodecOut, ty: Type) Never! {
     name: mangled(ty)
-    if ty == .Named(_) || ty == .Int || ty == .Float || ty == .Bool || ty == .Char || ty == .String || ty == .IntN(_, _) -> return
-    if out.written.get(name) != None || out.hand.get("{HAND_PUT}{name}") != None -> return
+    if ty == .Named(_) || ty == .Int || ty == .Float || ty == .Bool || ty == .Char || ty == .String || ty == .IntN(_, _) {
+        return
+    }
+    if out.written.get(name) != None || out.hand.get("{HAND_PUT}{name}") != None {
+        return
+    }
     out.written[name] = true
     text: spelled(ty)
     if ty == .List(element) -> return write_list(out, name, text, element)
@@ -557,7 +585,9 @@ write_enum: fn(out: &CodecOut, name: String, shape: CodecShape) Never! {
         binds: loop (field_index, _) in variant.fields -> "p{field_index}"
         lines.push("        .{variant.name}({binds.join(", ")}) -> {{")
         lines.push("            body_codec_put_tag(out, {index})")
-        loop (field_index, field) in variant.fields -> lines.push("            {put_call(field.ty, "p{field_index}")}")
+        loop (field_index, field) in variant.fields {
+            lines.push("            {put_call(field.ty, "p{field_index}")}")
+        }
         lines.push("        }}")
     }
     lines.push("    }}")
@@ -623,7 +653,9 @@ render: fn(target: CodecTarget) -[FS]> String BodyCodecError! {
     uses: if importing -> imports_of(out, target.package, body, target.named) else -> ""
     // Written as `jet fmt` writes it, so the formatter leaves the file as is.
     formatted: jet_format_source("{target.header}\n{uses}{body}\n", false)
-    if !formatted.ok -> return Err(codec_fail("the formatter refused the generated codec {target.output}: {formatted.diagnostics:Debug}"))
+    if !formatted.ok {
+        return Err(codec_fail("the formatter refused the generated codec {target.output}: {formatted.diagnostics:Debug}"))
+    }
     Ok(formatted.text)
 }
 
@@ -665,7 +697,9 @@ is_imported: fn(out: CodecOut, word: String) -> Bool Never! {
 
 body_codec_main: fn(args: [String]) -[FS]> String BodyCodecError! {
     mode: if args.len() == 0 -> "--check" else -> args[0]
-    if args.len() > 1 || (mode != "--check" && mode != "--write") -> return Err(codec_fail("usage: jet Compiler/Toolchain/BodyCodec/Main.jet [--check|--write]"))
+    if args.len() > 1 || (mode != "--check" && mode != "--write") {
+        return Err(codec_fail("usage: jet Compiler/Toolchain/BodyCodec/Main.jet [--check|--write]"))
+    }
     reports := [String]{}
     loop target in codec_targets() {
         generated: render(target) ?? return Err(err)
@@ -674,7 +708,9 @@ body_codec_main: fn(args: [String]) -[FS]> String BodyCodecError! {
             reports.push("body codec matches: {target.output}")
             next
         }
-        if mode != "--write" -> return Err(codec_fail("{target.output} differs from what the declarations generate; run {WRITE_COMMAND} from the checkout root"))
+        if mode != "--write" {
+            return Err(codec_fail("{target.output} differs from what the declarations generate; run {WRITE_COMMAND} from the checkout root"))
+        }
         files.write(target.output, generated) ?? return Err(codec_fail("cannot write {target.output}: {err}"))
         reports.push("body codec written: {target.output}")
     }

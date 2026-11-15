@@ -8,24 +8,27 @@ ip_show_segment: fn(value: I64, index: I64) -> I64 {
     at: wrapping(wrapping(value + I64{8}) + index * I64{2})
     (rt_text_byte(at) << I64{8}).bit_or(rt_text_byte(wrapping(at + I64{1})))
 }
+
 ip_show_v4: fn(target: I64, value: I64, offset: I64) {
     at := I64{0}
     loop at < (I64{4}) {
-        if (at != I64{0}) -> rt_text_push_scalar(target, I64{46})
+        if (at != I64{0}) { rt_text_push_scalar(target, I64{46}) }
         rt_text_push_number(target, rt_text_byte(wrapping(wrapping(wrapping(value + I64{8}) + offset) + at)))
         at += I64{1}
     }
 }
+
 ip_show_hex: fn(target: I64, segment: I64) {
     shift := I64{12}
     loop shift > (I64{0}) && (segment >> shift) == (I64{0}) -> shift -= I64{4}
     loop {
         digit: (segment >> shift).bit_and(I64{15})
         rt_text_push_scalar(target, if (digit < I64{10}) -> I64{48} + digit else -> I64{87} + digit)
-        if (shift == I64{0}) -> break
+        if (shift == I64{0}) { break }
         shift -= I64{4}
     }
 }
+
 // Append into a caller-owned builder without allocating a temporary Text.
 ip_show_into: fn(result: I64, value: I64) {
     if (rt_text_word(value) == I64{4}) {
@@ -48,7 +51,7 @@ ip_show_into: fn(result: I64, value: I64) {
     at := I64{0}
     loop at < (I64{8}) {
         if (ip_show_segment(value, at) == I64{0}) {
-            if (current_length == I64{0}) -> current_start = at
+            if (current_length == I64{0}) { current_start = at }
             current_length += I64{1}
             if (current_length > best_length) {
                 best_start = current_start
@@ -67,12 +70,15 @@ ip_show_into: fn(result: I64, value: I64) {
             rt_text_push_word(result, I64{14906}, I64{2})
             at += best_length
         } else {
-            if (at != I64{0} && at != best_start + best_length) -> rt_text_push_scalar(result, I64{58})
+            if (at != I64{0} && at != best_start + best_length) {
+                rt_text_push_scalar(result, I64{58})
+            }
             ip_show_hex(result, ip_show_segment(value, at))
             at += I64{1}
         }
     }
 }
+
 #Export(c) jet_rt_handle_show_jet_ip_addr: fn(value: I64) -> I64 {
     result: jet_rt_string_builder_new()
     ip_show_into(result, value)

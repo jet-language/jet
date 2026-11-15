@@ -1,5 +1,6 @@
 // A local cannot spell a carrier annotation; the sibling supplies it.
 join_payload: fn() -> (value: Int, tag: Int) Err! { return Ok((value: 7, tag: 0)) }
+
 err_first: fn(flag: Bool) -> Int {
     result: if flag -> Err("bad") else -> join_payload()
     if result == {
@@ -7,6 +8,7 @@ err_first: fn(flag: Bool) -> Int {
         .Err(error) -> 0
     }
 }
+
 err_last: fn(flag: Bool) -> Int {
     result: if flag -> join_payload() else -> Err("bad")
     if result == {
@@ -14,6 +16,7 @@ err_last: fn(flag: Bool) -> Int {
         .Err(error) -> 0
     }
 }
+
 run: fn() {
     print(err_first(false))
     print(err_last(true))

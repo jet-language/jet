@@ -1,33 +1,37 @@
 package: { name: "run", authority: { allow: [FS, FS.Read, FS.Write] } }
+
 use files: core.files
 
-Pair: struct { left: files.TempFile, right: files.TempFile }
-Envelope: struct { pair: Pair, sibling: files.TempFile }
+Pair: struct {
+    left: files.TempFile
+    right: files.TempFile
+}
+
+Envelope: struct {
+    pair: Pair
+    sibling: files.TempFile
+}
 
 GenericPair: struct<T, U> {
     first: T
     second: U
 }
 
-
-paths: fn(pair: Pair) -> [String] {
-    [pair.left.path, pair.right.path]
-}
+paths: fn(pair: Pair) -> [String] { [pair.left.path, pair.right.path] }
 
 generic_partial: fn<U>(value: U) -> Bool {
     pair := GenericPair<U, files.TempFile>{
         first: value,
-        second: files.temp_file("generic-partial") ?? panic("generic")
+        second: files.temp_file("generic-partial") ?? panic("generic"),
     }
     close(pair.second)
     true
 }
 
-
 exercise: fn(move_first: Bool) -> String {
     pair := Pair{
         left: files.temp_file("partial-left") ?? panic("left"),
-        right: files.temp_file("partial-right") ?? panic("right")
+        right: files.temp_file("partial-right") ?? panic("right"),
     }
     first: pair.left.path
     sibling: pair.right.path
@@ -48,7 +52,7 @@ exercise: fn(move_first: Bool) -> String {
     print(files.exists(sibling))
     pair = Pair{
         left: files.temp_file("partial-replacement-left") ?? panic("replace left"),
-        right: files.temp_file("partial-replacement-right") ?? panic("replace right")
+        right: files.temp_file("partial-replacement-right") ?? panic("replace right"),
     }
     print(!files.exists(sibling))
     survivor: pair.right.path
@@ -61,9 +65,9 @@ nested: fn() -> [String] {
     outer := Envelope{
         pair: Pair{
             left: files.temp_file("nested-left") ?? panic("left"),
-            right: files.temp_file("nested-right") ?? panic("right")
+            right: files.temp_file("nested-right") ?? panic("right"),
         },
-        sibling: files.temp_file("nested-sibling") ?? panic("sibling")
+        sibling: files.temp_file("nested-sibling") ?? panic("sibling"),
     }
     old_left: outer.pair.left.path
     right: outer.pair.right.path

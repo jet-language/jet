@@ -44,7 +44,9 @@ store_hex8: fn(value: Int) -> String Never! {
 }
 
 store_share_tree_files: fn(verification: &StoreVerification, roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) StoreError! -[FS, Env, Time]> {
-    if allow_semantic_xattrs -> return
+    if allow_semantic_xattrs {
+        return
+    }
     shared_lock: store_with_shared_cas_lock(roots)
     store_share_tree_files_unlocked(verification, roots, root, allow_semantic_xattrs)
 }
@@ -75,7 +77,9 @@ store_share_tree_files_unlocked_with_report: fn(verification: &StoreVerification
     used := Set<String>.new()
     report := SharedCASReport{optimized_files: 0, optimized_bytes: 0}
     touched := false
-    loop index in 0..<paths.len() -> store_share_file(paths[index], infos[index], digests[index], shared, used, report, touched)
+    loop index in 0..<paths.len() {
+        store_share_file(paths[index], infos[index], digests[index], shared, used, report, touched)
+    }
     // Linking a file into the pool leaves the object tree as it was. A swap
     // to an existing pool entry renames inside the tree, and a retried
     // publish can meet an object left writable; either needs the tree
@@ -88,14 +92,18 @@ store_share_tree_files_unlocked_with_report: fn(verification: &StoreVerification
 // Every regular file below `path`, in sorted walk order.
 store_collect_share_candidates: fn(path: String, paths: &[String], infos: &[files.Stat]) StoreError! -[FS]> {
     info: files.stat(path)
-    if info.is_symlink -> return
+    if info.is_symlink {
+        return
+    }
     if info.is_dir {
         entries := files.list_dir(path)
         entries.sort_by(fn(entry: files.DirEntry) { entry.name })
         loop entry in entries -> store_collect_share_candidates(entry.path, paths, infos)
         return
     }
-    if !info.is_file -> return
+    if !info.is_file {
+        return
+    }
     paths.push(path.copy())
     infos.push(info)
 }
@@ -111,7 +119,9 @@ store_share_file: fn(path: String, info: files.Stat, digest_hex: String, shared:
         used.add(key)
         return
     }
-    if used.has(key) -> return
+    if used.has(key) {
+        return
+    }
     used.add(key.copy())
     // The pool entry carries the key's mode, so a file still holding write
     // bits is sealed before it can become one.
@@ -131,7 +141,9 @@ store_share_file: fn(path: String, info: files.Stat, digest_hex: String, shared:
             replaced = false
             ()
         }
-        if !replaced -> return
+        if !replaced {
+            return
+        }
     }
     report.optimized_files += 1
     report.optimized_bytes += source_len
@@ -167,7 +179,9 @@ store_ensure_shared_file: fn(shared: String, key: String, source_path: String, s
         files.remove(corrupt).drop("the swept-aside pool entry is garbage")
     }
     files.hard_link(source_path, destination) ?? {
-        if store_io_is_already_exists(err) -> return store_ensure_shared_file(shared, key, source_path, source, mode)
+        if store_io_is_already_exists(err) {
+            return store_ensure_shared_file(shared, key, source_path, source, mode)
+        }
         if !store_io_link_refused(err) -> return Ok(None)
         return store_copy_shared_file(shared, key, source_path, source, mode)
     }
@@ -200,7 +214,9 @@ store_copy_shared_file: fn(shared: String, key: String, source_path: String, sou
     files.rename(partial, destination) ?? {
         failure: err
         files.remove(partial).drop("the unpublished partial is scratch")
-        if store_io_is_already_exists(failure) -> return store_ensure_shared_file(shared, key, source_path, source, mode)
+        if store_io_is_already_exists(failure) {
+            return store_ensure_shared_file(shared, key, source_path, source, mode)
+        }
         return Err(StoreError.IO(failure))
     }
     Ok(Val(destination))

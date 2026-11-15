@@ -1,12 +1,12 @@
 // A hole table `if H[_] { candidate -> body }` parses to the table written
 // out by hand: each arm tests the header with its candidate in the hole.
-use {
-    jet_parser.[jet_format_source, jfmt_structure, parse_source]
-}
+use jet_parser.[jet_format_source, jfmt_structure, parse_source]
 
 hole_structure: fn(source: String) -> String {
     parsed: parse_source(source.bytes())
-    loop diagnostic in parsed.diagnostics -> assert(diagnostic.severity != 1, "a hole table parses without errors")
+    loop diagnostic in parsed.diagnostics {
+        assert(diagnostic.severity != 1, "a hole table parses without errors")
+    }
     jfmt_structure(parsed.program)
 }
 
@@ -19,7 +19,9 @@ hole_error_codes: fn(source: String) -> String {
     parsed: parse_source(source.bytes())
     codes := ""
     loop diagnostic in parsed.diagnostics {
-        if diagnostic.severity == 1 -> codes = if codes == "" -> "{diagnostic.code}" else -> "{codes},{diagnostic.code}"
+        if diagnostic.severity == 1 {
+            codes = if codes == "" -> "{diagnostic.code}" else -> "{codes},{diagnostic.code}"
+        }
     }
     codes
 }

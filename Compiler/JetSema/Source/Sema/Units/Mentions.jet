@@ -10,36 +10,45 @@ SemaUnitSuffixMention: struct {
     from_span: Span?
     digit_span: Span?
 }
+
 SemaUnitSourceMentions: struct {
     identifiers: [String:Span]
     unqualified: [String:Bool]
     suffixes: [SemaUnitSuffixMention]
 }
+
 // Rust `is_alphanumeric() || == '_'` on the scalar bytes[at..<end]; ASCII
 // scalars are decided from the byte without building a String.
 sema_units_ident: fn(bytes: [U8], at: Int, end: Int) -> Bool Never! {
     byte: bytes[at]
-    if byte < (U8{128}) -> return byte == (U8{95}) || (byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122}))
+    if byte < (U8{128}) {
+        return byte == (U8{95}) || (byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122}))
+    }
     scalar: String.from_bytes(bytes[at..<end]) ?? return false
     units_unicode.is_alphabetic(scalar) || units_unicode.is_numeric(scalar)
 }
+
 sema_units_scalar_end: fn(bytes: [U8], at: Int) -> Int Never! {
     end := at + 1
     loop end < bytes.len() && bytes[end] >= (U8{128}) && bytes[end] <= (U8{191}) -> end += 1
     end
 }
+
 // A suffix is kept only when a catalog member name is a prefix of it: those
 // are the only suffixes sema_units_member and sema_units_member_span read,
 // and leaving the others out changes neither answer (the suffixes a member
 // prefixes sit together in the sorted list).
 sema_units_mention_suffix: fn(rows: &[String:SemaUnitSuffixMention], names: SemaUnitsCatalogNames, bytes: [U8], start: Int, end: Int, from: Bool) Never! {
-    if start == end || !sema_units_member_prefixed(names, bytes, start, end) -> return
+    if start == end || !sema_units_member_prefixed(names, bytes, start, end) {
+        return
+    }
     text: String.from_bytes(bytes[start..<end]) ?? return
     row := rows.get(text) ?? SemaUnitSuffixMention{text: text, from_span: None, digit_span: None}
     if from && row.from_span == None -> row.from_span = Val(Span{start: start, end: end})
     if !from && row.digit_span == None -> row.digit_span = Val(Span{start: start, end: end})
     rows[text] = row
 }
+
 // Whether a catalog member name is a prefix of bytes[start..<end], looked up
 // by its bytes for each member length.
 sema_units_member_prefixed: fn(names: SemaUnitsCatalogNames, bytes: [U8], start: Int, end: Int) -> Bool Never! {
@@ -49,6 +58,7 @@ sema_units_member_prefixed: fn(names: SemaUnitsCatalogNames, bytes: [U8], start:
     }
     false
 }
+
 // Only identifiers named in `names.wanted` (the catalog's family names and
 // member type names, the only names ever looked up; sema_units_catalog_names)
 // are indexed, and only suffixes a member name prefixes: the maps stay
@@ -82,7 +92,9 @@ sema_units_source_mentions: fn(source: String, names: SemaUnitsCatalogNames) -> 
         loop at < count {
             run_byte: bytes[at]
             if run_byte < (U8{128}) {
-                if !(run_byte == (U8{95}) || (run_byte >= (U8{48}) && run_byte <= (U8{57})) || (run_byte >= (U8{65}) && run_byte <= (U8{90})) || (run_byte >= (U8{97}) && run_byte <= (U8{122}))) -> break
+                if !(run_byte == (U8{95}) || (run_byte >= (U8{48}) && run_byte <= (U8{57})) || (run_byte >= (U8{65}) && run_byte <= (U8{90})) || (run_byte >= (U8{97}) && run_byte <= (U8{122}))) {
+                    break
+                }
                 at += 1
             } else {
                 end: sema_units_scalar_end(bytes, at)
@@ -93,14 +105,20 @@ sema_units_source_mentions: fn(source: String, names: SemaUnitsCatalogNames) -> 
         if name_find_bytes(names.wanted, bytes, start, at) != None {
             run: String.from_bytes(bytes[start..<at]) ?? ""
             if identifiers.get(run) == None -> identifiers[run] = Span{start: start, end: at}
-            if (start == 0 || bytes[start - 1] != (U8{46})) && unqualified.get(run) == None -> unqualified[run] = true
+            if (start == 0 || bytes[start - 1] != (U8{46})) && unqualified.get(run) == None {
+                unqualified[run] = true
+            }
         }
         // Every scalar start of the run, as the ident loop above visited them.
         offset := start
         loop offset < at {
             here: bytes[offset]
-            if offset > start && bytes[offset - 1] >= (U8{48}) && bytes[offset - 1] <= (U8{57}) && (here < (U8{48}) || here > (U8{57})) -> sema_units_mention_suffix(suffixes, names, bytes, offset, at, false)
-            if here == (U8{102}) && offset + 5 <= at && bytes[offset + 1] == (U8{114}) && bytes[offset + 2] == (U8{111}) && bytes[offset + 3] == (U8{109}) && bytes[offset + 4] == (U8{95}) -> sema_units_mention_suffix(suffixes, names, bytes, offset + 5, at, true)
+            if offset > start && bytes[offset - 1] >= (U8{48}) && bytes[offset - 1] <= (U8{57}) && (here < (U8{48}) || here > (U8{57})) {
+                sema_units_mention_suffix(suffixes, names, bytes, offset, at, false)
+            }
+            if here == (U8{102}) && offset + 5 <= at && bytes[offset + 1] == (U8{114}) && bytes[offset + 2] == (U8{111}) && bytes[offset + 3] == (U8{109}) && bytes[offset + 4] == (U8{95}) {
+                sema_units_mention_suffix(suffixes, names, bytes, offset + 5, at, true)
+            }
             offset = if here < (U8{128}) -> offset + 1 else -> sema_units_scalar_end(bytes, offset)
         }
     }
@@ -109,23 +127,22 @@ sema_units_source_mentions: fn(source: String, names: SemaUnitsCatalogNames) -> 
     sorted.sort_by(fn(left: SemaUnitSuffixMention, right: SemaUnitSuffixMention) { left.text <=> right.text })
     SemaUnitSourceMentions{identifiers: identifiers.move(), unqualified: unqualified.move(), suffixes: sorted.move()}
 }
+
 sema_units_identifier: fn(mentions: SemaUnitSourceMentions, name: String) -> Bool Never! {
     mentions.identifiers.get(name) != None
 }
+
 // Rust partition_point: the first suffix not less than the member.
 sema_units_suffix_start: fn(mentions: SemaUnitSourceMentions, member: String) -> Int Never! {
     low := 0
     high := mentions.suffixes.len()
     loop low < high {
         middle: low + (high - low) /% 2
-        if mentions.suffixes[middle].text < member {
-            low = middle + 1
-        } else {
-            high = middle
-        }
+        if mentions.suffixes[middle].text < member -> low = middle + 1 else -> high = middle
     }
     low
 }
+
 // Whether the source mentions catalog member `member`, whose type name
 // (sema_registration_unit_type_name) is `type_name`.
 sema_units_member: fn(mentions: SemaUnitSourceMentions, member: String, type_name: String) -> Bool Never! {
@@ -133,9 +150,11 @@ sema_units_member: fn(mentions: SemaUnitSourceMentions, member: String, type_nam
     at: sema_units_suffix_start(mentions, member)
     at < mentions.suffixes.len() && mentions.suffixes[at].text.starts_with(member)
 }
+
 sema_units_identifier_span: fn(mentions: SemaUnitSourceMentions, name: String) -> Span? {
     mentions.identifiers.get(name)
 }
+
 // Rust source_unit_member_span: whole type name, then earliest from_, then
 // earliest digit suffix. Prefix suffix matches deliberately need no end boundary.
 // `type_name` is the member's type name (sema_registration_unit_type_name).
@@ -147,10 +166,14 @@ sema_units_member_span: fn(mentions: SemaUnitSourceMentions, member: String, typ
     loop at < mentions.suffixes.len() && mentions.suffixes[at].text.starts_with(member) {
         row: mentions.suffixes[at]
         if row.from_span == .Val(span) {
-            if from == None || span.start < (from ?? span).start -> from = Val(Span{start: span.start, end: span.start + member.bytes().len()})
+            if from == None || span.start < (from ?? span).start {
+                from = Val(Span{start: span.start, end: span.start + member.bytes().len()})
+            }
         }
         if row.digit_span == .Val(span) {
-            if digit == None || span.start < (digit ?? span).start -> digit = Val(Span{start: span.start, end: span.start + member.bytes().len()})
+            if digit == None || span.start < (digit ?? span).start {
+                digit = Val(Span{start: span.start, end: span.start + member.bytes().len()})
+            }
         }
         at += 1
     }

@@ -1,11 +1,11 @@
 use core.mem
+
 leak: fn(depth: Int) -> Int {
     cell: depth
-    if depth == 0 {
-        return mem.address_of(cell)
-    }
+    if depth == 0 -> return mem.address_of(cell)
     return leak(depth - 1)
 }
+
 run: fn() {
     addr: leak(2)
     #Unsafe("the recursive address outlives its owning Jet frame") {

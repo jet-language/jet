@@ -57,15 +57,16 @@ Expr: enum {
     CallValue(callee: Expr, args: [CallArg], span: Span, id: Int)
     PtrFromAddr(alias: String, alias_span: Span, elem: Type, addr: Expr, span: Span, id: Int)
     ComptimeName(name: String, span: Span, value: CtValue?, id: Int)
-    // A generic type written where a value goes (`show(Box<Int>)`), kept
-    // whole so the tree shows its type arguments; sema refuses it as a type,
-    // not a value (E0636).
     TypeValue(ty: Type, span: Span, id: Int)
     Paren(value: Expr, span: Span, id: Int)
-    // `head |> step |> step`: each step reads the value of the
-    // line above as `<>`, which the parser spells as the step's hidden name.
     Pipe(head: Expr, steps: [PipeStep], span: Span, id: Int)
 }
+
+// A generic type written where a value goes (`show(Box<Int>)`), kept
+// whole so the tree shows its type arguments; sema refuses it as a type,
+// not a value (E0636).
+// `head |> step |> step`: each step reads the value of the
+// line above as `<>`, which the parser spells as the step's hidden name.
 
 // One `|> value` step of a pipe. `name` is the hidden binding that holds the
 // value the step receives; every `<>` in `value` is an `Ident` of it, and
@@ -323,11 +324,12 @@ StrFormat: enum {
     Bin
     Oct
     Unit(format: UnitFormat)
-    // The computed number of the selector in the part just before this one
-    // (`{x:Pad(width)}`: the part `x:Pad`, then `width:Count`), whose own
-    // number is then 0. A literal number stays the selector's constant.
     Count
 }
+
+// The computed number of the selector in the part just before this one
+// (`{x:Pad(width)}`: the part `x:Pad`, then `width:Count`), whose own
+// number is then 0. A literal number stays the selector's constant.
 
 UnitFormat: enum {
     Symbol
@@ -355,7 +357,9 @@ LambdaBody: enum {
 // otherwise.
 ast_lambda_single_expr_span: fn(body: LambdaBody) -> Span? Never! {
     if body == .Expr(value) -> return Val(expr_span(value))
-    if body == .Block(statements) && statements.len() == 1 && statements[0] == .Expr(value) -> return Val(expr_span(value))
+    if body == .Block(statements) && statements.len() == 1 && statements[0] == .Expr(value) {
+        return Val(expr_span(value))
+    }
     None
 }
 
@@ -543,6 +547,7 @@ FrameRetention: struct {
 DerivationRef: struct {
     id: String
 }
+
 // S71 the ordinary call that `receiver?.method(args)` runs on the
 // present payload. Syntax walkers reuse their `MethodCall` facts through it.
 expr_optional_method_call_as_call: fn(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg]) -> Expr Never! {

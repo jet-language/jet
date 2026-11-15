@@ -4,30 +4,43 @@
 // `net_word` borrows a word of a complete initialized network header;
 // `net_put` owns the header or holds its mutex. RawWords.jet performs the access.
 net_word: fn(value: I64, offset: I64) -> I64 { rt_text_word(wrapping(value + offset)) }
+
 net_put: fn(value: I64, offset: I64, word: I64) { rt_text_store(wrapping(value + offset), word) }
+
 net_copy: fn(value: I64, size: I64) -> I64 {
     result: jet_rt_alloc(size, I64{8})
     rt_text_bytes_copy(result, value, size)
     result
 }
+
 net_equal: fn(a: I64, b: I64, size: I64) -> Bool {
     at := I64{0}
     loop at < size {
-        if (net_word(a, at) != net_word(b, at)) -> return false
+        if (net_word(a, at) != net_word(b, at)) { return false }
         at = wrapping(at + I64{8})
     }
     true
 }
+
 #Export(c) jet_rt_handle_clone_jet_ip_addr: fn(value: I64) -> I64 { net_copy(value, I64{24}) }
-#Export(c) jet_rt_handle_drop_jet_ip_addr: fn(value: I64) { if (value != I64{0}) -> jet_rt_free(value, I64{24}, I64{8}) }
+
+#Export(c) jet_rt_handle_drop_jet_ip_addr: fn(value: I64) {
+    if (value != I64{0}) { jet_rt_free(value, I64{24}, I64{8}) }
+}
+
 #Export(c) jet_rt_handle_eq_jet_ip_addr: fn(a: I64, b: I64) -> Bool { net_equal(a, b, I64{24}) }
+
 #Export(c) jet_rt_handle_clone_jet_socket_addr: fn(value: I64) -> I64 { net_copy(value, I64{56}) }
-#Export(c) jet_rt_handle_drop_jet_socket_addr: fn(value: I64) { if (value != I64{0}) -> jet_rt_free(value, I64{56}, I64{8}) }
+
+#Export(c) jet_rt_handle_drop_jet_socket_addr: fn(value: I64) {
+    if (value != I64{0}) { jet_rt_free(value, I64{56}, I64{8}) }
+}
+
 #Export(c) jet_rt_handle_eq_jet_socket_addr: fn(a: I64, b: I64) -> Bool { net_equal(a, b, I64{56}) }
 
 // The C boundary borrows native [U8] data; Lower owns its capacity/drop.
 #Export(c) jet_net_raw_ip_from_bytes: fn(bytes: I64, length: I64) -> I64 {
-    if (length != I64{4} && length != I64{16}) -> host_record_index_refused()
+    if (length != I64{4} && length != I64{16}) { host_record_index_refused() }
     value: jet_rt_alloc(I64{24}, I64{8})
     net_put(value, I64{0}, if (length == I64{4}) -> I64{4} else -> I64{6})
     net_put(value, I64{8}, I64{0})
@@ -40,6 +53,7 @@ net_equal: fn(a: I64, b: I64, size: I64) -> Bool {
     }
     value
 }
+
 #Export(c) jet_net_raw_ip_bytes: fn(value: I64, data_out: I64) -> I64 {
     length: if (net_word(value, I64{0}) == I64{4}) -> I64{4} else -> I64{16}
     data: jet_rt_alloc(length * RT_HOST_U8_STRIDE, I64{8})
@@ -53,7 +67,9 @@ net_equal: fn(a: I64, b: I64, size: I64) -> Bool {
     rt_text_store(data_out, data)
     length
 }
+
 #Export(c) jet_net_raw_ip_is_v4: fn(value: I64) -> Bool { net_word(value, I64{0}) == I64{4} }
+
 // Explicit PARAM-ONLY narrow widening: each unsigned scalar discards upper bits.
 #Export(c) jet_net_raw_socket_from_parts: fn(ip: I64, port: I64, flow: I64, scope: I64) -> I64 {
     value: jet_rt_alloc(I64{56}, I64{8})
@@ -65,10 +81,13 @@ net_equal: fn(a: I64, b: I64, size: I64) -> Bool {
     net_put(value, I64{48}, I64{0})
     value
 }
+
 #Export(c) jet_net_raw_socket_ip: fn(value: I64) -> I64 { net_copy(value, I64{24}) }
+
 #Export(c) jet_net_raw_socket_port: fn(value: I64) -> I64 { net_word(value, I64{24}) }
+
 #Export(c) jet_net_raw_socket_scope: fn(value: I64, output: I64) -> I64 {
-    if (net_word(value, I64{0}) == I64{4}) -> return I64{0}
+    if (net_word(value, I64{0}) == I64{4}) { return I64{0} }
     net_put(output, I64{0}, net_word(value, I64{40}))
     I64{1}
 }
@@ -84,6 +103,7 @@ net_load_uint: fn(bytes: I64, width: I64) -> I64 {
     }
     result
 }
+
 net_store_uint: fn(bytes: I64, width: I64, value: I64) {
     at := I64{0}
     // `bytes` owns `width` writable little-endian bytes (width <= 8).
@@ -92,7 +112,11 @@ net_store_uint: fn(bytes: I64, width: I64, value: I64) {
         at = wrapping(at + I64{1})
     }
 }
-net_swap16: fn(value: I64) -> I64 { ((value.bit_and(I64{255})) << I64{8}).bit_or(((value >> I64{8}).bit_and(I64{255}))) }
+
+net_swap16: fn(value: I64) -> I64 {
+    ((value.bit_and(I64{255})) << I64{8}).bit_or(((value >> I64{8}).bit_and(I64{255})))
+}
+
 // Fills caller-owned 32B scratch; IPv4=16B, IPv6=28B. No heap conversion.
 #Export(c) jet_socket_address_encode_raw: fn(value: I64, output: I64) -> I64 {
     net_put(output, I64{0}, I64{0})
@@ -113,10 +137,13 @@ net_swap16: fn(value: I64) -> I64 { ((value.bit_and(I64{255})) << I64{8}).bit_or
     net_store_uint(wrapping(output + I64{24}), I64{4}, net_word(value, I64{40}))
     I64{28}
 }
+
 // Copies one OS answer into inline Socket56, preserving v6 flow/scope.
 net_socket_decode: fn(bytes: I64, length: I64, output: I64) -> Bool {
     family: if (length >= I64{2}) -> net_load_uint(bytes, I64{2}) else -> I64{0}
-    if ((family == I64{2} && length < I64{16}) || (family == I64{10} && length < I64{28}) || (family != I64{2} && family != I64{10})) -> return false
+    if ((family == I64{2} && length < I64{16}) || (family == I64{10} && length < I64{28}) || (family != I64{2} && family != I64{10})) {
+        return false
+    }
     at := I64{0}
     loop at < (I64{56}) {
         net_put(output, at, I64{0})
@@ -133,4 +160,7 @@ net_socket_decode: fn(bytes: I64, length: I64, output: I64) -> Bool {
     }
     true
 }
-#Export(c) jet_socket_address_decode_raw: fn(bytes: I64, length: I64, output: I64) -> Bool { net_socket_decode(bytes, length, output) }
+
+#Export(c) jet_socket_address_decode_raw: fn(bytes: I64, length: I64, output: I64) -> Bool {
+    net_socket_decode(bytes, length, output)
+}

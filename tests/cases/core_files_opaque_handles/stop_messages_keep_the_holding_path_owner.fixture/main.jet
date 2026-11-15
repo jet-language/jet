@@ -11,35 +11,23 @@ held: fn() -[FS]> Int {
     count
 }
 
-lock: fn(name: String) -[FS, Env]> FileLock {
-    files.lock(name) ?? panic("lock {name}")
-}
+lock: fn(name: String) -[FS, Env]> FileLock { files.lock(name) ?? panic("lock {name}") }
 
-consume_lock: fn(&&l: FileLock) -[FS]> Int {
-    held()
-}
+consume_lock: fn(l: &&FileLock) -[FS]> Int { held() }
 
 // A stop's message runs only where the check fails: where it holds, the
 // parameter still owns the lock, which closes as this returns.
-assert_message: fn(&&l: FileLock, n: Int) -[FS]> Int {
+assert_message: fn(l: &&FileLock, n: Int) -[FS]> Int {
     assert(n > 0, "{consume_lock(l.move())}")
     n
 }
 
-#Pre(n > 0, "{consume_lock(l.move())}")
-pre_message: fn(&&l: FileLock, n: Int) -[FS]> Int {
-    n
-}
+#Pre(n > 0, "{consume_lock(l.move())}") pre_message: fn(l: &&FileLock, n: Int) -[FS]> Int { n }
 
-#Post(n > 0, "{consume_lock(l.move())}")
-post_message: fn(&&l: FileLock, n: Int) -[FS]> Int {
-    n
-}
+#Post(n > 0, "{consume_lock(l.move())}") post_message: fn(l: &&FileLock, n: Int) -[FS]> Int { n }
 
 run: fn() -[IO, FS, Env]> {
-    loop name in ["a", "b", "c"] {
-        files.write("{name}.lk", "") ?? panic("write {name}")
-    }
+    loop name in ["a", "b", "c"] { files.write("{name}.lk", "") ?? panic("write {name}") }
     asserted: assert_message(lock("a.lk"), 3)
     print("assert message {asserted} {held()}")
     pre: pre_message(lock("b.lk"), 4)

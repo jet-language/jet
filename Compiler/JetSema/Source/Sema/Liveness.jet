@@ -41,11 +41,13 @@ SemaLivenessResult: struct {
 }
 
 sema_liveness_verdict: fn(code: String, name: String, source: String, span: Span, detail: String, diagnostic: Diagnostic, verdicts: &[SemaLivenessVerdict]) Never! {
-    verdicts.push(SemaLivenessVerdict{
-        code: code,
-        diagnostic: Val(diagnostic),
-        fact: StructureFact{kind: StructureFactKind.Liveness, subject: name, source: source, span: span, status: "unreachable", detail: detail, gate: None},
-    })
+    verdicts.push(
+        SemaLivenessVerdict{
+            code: code,
+            diagnostic: Val(diagnostic),
+            fact: StructureFact{kind: StructureFactKind.Liveness, subject: name, source: source, span: span, status: "unreachable", detail: detail, gate: None},
+        },
+    )
 }
 
 // L0101: the ownership check reports a local binding no expression reads,
@@ -60,11 +62,13 @@ sema_liveness_unused_bindings: fn(diagnostics: [Diagnostic], source: String, ver
         renamed: edit.new_text.split_once("_") ?? next
         if renamed.before != "" || renamed.after == "" -> next
         name: renamed.after
-        verdicts.push(SemaLivenessVerdict{
-            code: "L0101",
-            diagnostic: None,
-            fact: StructureFact{kind: StructureFactKind.Liveness, subject: name, source: source, span: span, status: "unused", detail: "binding is never read", gate: None},
-        })
+        verdicts.push(
+            SemaLivenessVerdict{
+                code: "L0101",
+                diagnostic: None,
+                fact: StructureFact{kind: StructureFactKind.Liveness, subject: name, source: source, span: span, status: "unused", detail: "binding is never read", gate: None},
+            },
+        )
     }
 }
 
@@ -99,9 +103,13 @@ sema_liveness_unused_imports: fn(program: Program, foreign_aliases: [String], so
                     local: sema_registration_import_local(item)
                     span := module_alias_span
                     item_span := module_alias_span
-                    if index < declaration.item_spans.len() -> item_span = declaration.item_spans[index]
+                    if index < declaration.item_spans.len() {
+                        item_span = declaration.item_spans[index]
+                    }
                     if {
-                        index < declaration.local_spans.len() -> span = declaration.local_spans[index]
+                        index < declaration.local_spans.len() -> {
+                            span = declaration.local_spans[index]
+                        }
                         index < declaration.item_spans.len() -> span = item_span
                     }
                     // An alias written before the path (`biggest: numeric.max`)
@@ -111,8 +119,12 @@ sema_liveness_unused_imports: fn(program: Program, foreign_aliases: [String], so
                     // carries no edit there.
                     edit := TextEdit?{None}
                     if {
-                        item.alias != None || span.end <= module_alias_span.start -> edit = Val(TextEdit{span: span, new_text: "_{local}"})
-                        items.len() == 1 && item_span.start == module_alias_span.end + 1 -> edit = Val(TextEdit{span: Span{start: module_alias_span.start, end: item_span.end}, new_text: "_{local}: {module_alias}.{item.original}"})
+                        item.alias != None || span.end <= module_alias_span.start -> {
+                            edit = Val(TextEdit{span: span, new_text: "_{local}"})
+                        }
+                        items.len() == 1 && item_span.start == module_alias_span.end + 1 -> {
+                            edit = Val(TextEdit{span: Span{start: module_alias_span.start, end: item_span.end}, new_text: "_{local}: {module_alias}.{item.original}"})
+                        }
                     }
                     sema_liveness_note_import(program, foreign_aliases, local, source, span, edit, verdicts)
                 }
@@ -122,13 +134,17 @@ sema_liveness_unused_imports: fn(program: Program, foreign_aliases: [String], so
 }
 
 sema_liveness_note_import: fn(program: Program, foreign_aliases: [String], name: String, source: String, span: Span, edit: TextEdit?, verdicts: &[SemaLivenessVerdict]) Never! {
-    if name == "" || name.starts_with("_") || span.start >= span.end -> return
-    if program.used_import_names.contains(name) || foreign_aliases.contains(name) -> return
-    if core_bare_source_module(name) == .Val(owner) && core_module_has_type(owner, name) -> return
-    diagnostic := sema_lint("L0103", span, "Import `{name}` is never used.", "An unused import adds a name and dependency to the file without contributing to checked code.", "Remove the import, or rename `{name}` to `_{name}` when the import is intentionally kept.")
-    if edit == .Val(fix) {
-        diagnostic = diagnostic_with_edit(diagnostic, fix)
+    if name == "" || name.starts_with("_") || span.start >= span.end {
+        return
     }
+    if program.used_import_names.contains(name) || foreign_aliases.contains(name) {
+        return
+    }
+    if core_bare_source_module(name) == .Val(owner) && core_module_has_type(owner, name) {
+        return
+    }
+    diagnostic := sema_lint("L0103", span, "Import `{name}` is never used.", "An unused import adds a name and dependency to the file without contributing to checked code.", "Remove the import, or rename `{name}` to `_{name}` when the import is intentionally kept.")
+    if edit == .Val(fix) -> diagnostic = diagnostic_with_edit(diagnostic, fix)
     sema_liveness_verdict("L0103", name, source, span, "import is never read", diagnostic, verdicts)
 }
 
@@ -143,7 +159,9 @@ sema_liveness_inline_asm_gate_aliases: fn(module_row: SemaRegistrationModule, al
             if sema_checked_ascii_lower(inline.lang) == "asm" -> has_asm = true
         }
     }
-    if !has_asm -> return
+    if !has_asm {
+        return
+    }
     loop declaration in module_row.program.imports {
         if declaration.kind == {
             .Module(name, _) -> {
@@ -151,7 +169,9 @@ sema_liveness_inline_asm_gate_aliases: fn(module_row: SemaRegistrationModule, al
             }
             .Unqualified(module_alias, _, items, _, _) -> {
                 loop item in items {
-                    if module_alias == "core.mem" || "{module_alias}.{item.original}" == "core.mem" -> aliases.push(sema_registration_import_local(item))
+                    if module_alias == "core.mem" || "{module_alias}.{item.original}" == "core.mem" {
+                        aliases.push(sema_registration_import_local(item))
+                    }
                 }
             }
             .File(_, _) -> {}
@@ -214,7 +234,9 @@ sema_liveness_is_root: fn(function: Func, is_entry: Bool) -> Bool Never! {
     }
     // A `#Export(c)` function is called by its C symbol, which no Jet
     // reference records.
-    if function.is_job || function.web_marker == .Val(.WasmExport) || sema_function_is_guest_export(function) -> return true
+    if function.is_job || function.web_marker == .Val(.WasmExport) || sema_function_is_guest_export(function) {
+        return true
+    }
     // A declared `impl Source -> Target` is used by the fallible calls whose
     // failure it converts, which leave no call site or name reference; like
     // any impl it is not dead code.
@@ -237,43 +259,61 @@ sema_liveness_note_site: fn(candidates: &SemaLivenessCandidates, graph: SemaRegi
         // checked rows. Byte offsets from two files are not caller identities.
         if candidate.private {
             if caller_key != "" {
-                if caller_key == symbol_table_key(graph.symbols, id) -> return
+                if caller_key == symbol_table_key(graph.symbols, id) {
+                    return
+                }
             } else {
-                if site.start >= candidate.body.start && site.end <= candidate.body.end -> return
+                if site.start >= candidate.body.start && site.end <= candidate.body.end {
+                    return
+                }
             }
         }
         if candidate.private -> candidates.reached[row] = true
         return
     }
-    if graph.modules[source_index].package_identity != candidate.package_identity -> return
-    if !candidate.private || sema_registration_package_is_namespace(candidate.package_identity) -> candidates.reached[row] = true
+    if graph.modules[source_index].package_identity != candidate.package_identity {
+        return
+    }
+    if !candidate.private || sema_registration_package_is_namespace(candidate.package_identity) {
+        candidates.reached[row] = true
+    }
 }
 
 sema_liveness_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> SemaLivenessResult {
     verdicts := [SemaLivenessVerdict]{}
     // A skipped body (sema_checked_unusable_bodies) leaves its references
     // uncounted, so no verdict holds.
-    if modules.len() != graph.modules.len() || graph.unusable_bodies.len() > 0 -> return SemaLivenessResult{diagnostics: [Diagnostic]{}, facts: [StructureFact]{}}
+    if modules.len() != graph.modules.len() || graph.unusable_bodies.len() > 0 {
+        return SemaLivenessResult{diagnostics: [Diagnostic]{}, facts: [StructureFact]{}}
+    }
     candidates := SemaLivenessCandidates{ids: [U32:Int]{}, rows: [SemaLivenessCandidate]{}, reached: [Bool]{}}
     loop (module_index, module_row) in graph.modules {
         if module_row.source_origin != SemaSourceOrigin.Snapshot -> next
         is_entry: module_row.module_identity == graph.entry_module_identity
         loop function in module_row.functions {
             symbol: function.symbol
-            if symbol.visibility > 1 || sema_liveness_ignored(sema_inline_member_source_name(symbol.name)) || symbol.span.start >= symbol.span.end -> next
+            if symbol.visibility > 1 || sema_liveness_ignored(sema_inline_member_source_name(symbol.name)) || symbol.span.start >= symbol.span.end {
+                next
+            }
             // A runtime binding is the jet.runtime interface's member: Core,
             // not the runtime package, calls a `priv` one (#6615).
-            if sema_liveness_is_root(function.declaration, is_entry) || sema_guest_runtime_binding(module_row.package_identity, function.declaration) -> next
+            if sema_liveness_is_root(function.declaration, is_entry) || sema_guest_runtime_binding(module_row.package_identity, function.declaration) {
+                next
+            }
             sema_liveness_add_candidate(candidates, symbol.id, SemaLivenessCandidate{module_index: module_index, body: function.declaration.span, package_identity: module_row.package_identity, private: symbol.visibility == 0})
         }
         loop constant in module_row.constants {
             symbol: constant.symbol
-            if symbol.visibility != 1 || sema_liveness_ignored(sema_inline_member_source_name(symbol.name)) || symbol.span.start >= symbol.span.end -> next
+            if symbol.visibility != 1 || sema_liveness_ignored(sema_inline_member_source_name(symbol.name)) || symbol.span.start >= symbol.span.end {
+                next
+            }
             sema_liveness_add_candidate(candidates, symbol.id, SemaLivenessCandidate{module_index: module_index, body: symbol.span, package_identity: module_row.package_identity, private: false})
         }
     }
     loop (source_index, checked) in modules {
-        loop reference in checked.name_references -> sema_liveness_note_site(candidates, graph, source_index, reference.symbol.id, reference.span, "")
+        loop reference in checked.name_references {
+            sema_liveness_note_site(candidates, graph, source_index, reference.symbol.id, reference.span, "")
+        }
         loop call in checked.call_facts {
             callee: call.callee ?? next
             sema_liveness_note_site(candidates, graph, source_index, callee, call.span, call.caller_key)
@@ -356,22 +396,36 @@ sema_liveness_unreachable_reexports: fn(graph: SemaRegistrationGraph, module_ind
                 if sema_liveness_ignored(local) -> next
                 span := Span{start: 0, end: 0}
                 if {
-                    index < import.declaration.local_spans.len() -> span = import.declaration.local_spans[index]
-                    index < import.declaration.item_spans.len() -> span = import.declaration.item_spans[index]
+                    index < import.declaration.local_spans.len() -> {
+                        span = import.declaration.local_spans[index]
+                    }
+                    index < import.declaration.item_spans.len() -> {
+                        span = import.declaration.item_spans[index]
+                    }
                 }
                 if span.start >= span.end -> next
                 consumed: loop (consumer_index, consumer) in graph.modules {
-                    if consumer_index == module_index || consumer.package_identity != module_row.package_identity -> next
+                    if consumer_index == module_index || consumer.package_identity != module_row.package_identity {
+                        next
+                    }
                     found: loop candidate in consumer.imports {
                         if candidate.target_module_identity != module_row.module_identity -> next
                         hit: loop binding in candidate.bindings {
-                            if binding.original == local -> break true
+                            if binding.original == local {
+                                break true
+                            }
                         } ?? false
-                        if hit -> break true
+                        if hit {
+                            break true
+                        }
                     } ?? false
-                    if found -> break true
+                    if found {
+                        break true
+                    }
                 } ?? false
-                if !consumed -> sema_liveness_unreachable_export(local, module_row.source_file, span, verdicts)
+                if !consumed {
+                    sema_liveness_unreachable_export(local, module_row.source_file, span, verdicts)
+                }
             }
         }
     }

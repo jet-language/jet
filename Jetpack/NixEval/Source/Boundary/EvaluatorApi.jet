@@ -7,11 +7,17 @@
 // so an evaluation that consults an authority carries that effect.
 
 NIXEVAL_INPUT_BYTES: 1048576
+
 NIXEVAL_TOKEN_LIMIT: 65536
+
 NIXEVAL_EXPRESSION_LIMIT: 256
+
 NIXEVAL_IMPORT_LIMIT: 64
+
 NIXEVAL_STRING_BYTES: 1048576
+
 NIXEVAL_MEMORY_BYTES: 16777216
+
 NIXEVAL_LATENCY_MICROS: 1000000
 
 // The one failure carrier of the NixEval area. Public evaluation entry points
@@ -94,20 +100,19 @@ NixEvalAuthority: struct {
 
 // One bounded question to the explicit evaluator authority.
 NixEvalRequest: enum {
-    // A project-relative source, scoped to the external flake importing it.
     Import(path: String, flake: String?)
     CrossTarget(String)
     ExternalFlake(String)
     Fetch(kind: String, url: String, hash: String, name: String, revision: String)
 
+    // A project-relative source, scoped to the external flake importing it.
+
     // The request spelling the authority answers.
     text: fn(self) -> String Never! {
         if self == {
-            .Import(path, flake) -> {
-                if flake == {
-                    .Val(scope) -> "@flake-import:{scope}\n{path}"
-                    .None -> path
-                }
+            .Import(path, flake) -> if flake == {
+                .Val(scope) -> "@flake-import:{scope}\n{path}"
+                .None -> path
             }
             .CrossTarget(target) -> "@target:{target}"
             .ExternalFlake(reference) -> "@flake:{reference}"
@@ -179,7 +184,7 @@ NixEvalDerivation: struct {
     system: String
     builder: String
     args: [String]
-    env: [String: String]
+    env: [String:String]
     input_sources: [String]
     outputs: [NixEvalDerivationOutput]
 }

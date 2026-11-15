@@ -5,34 +5,61 @@
 // PackageModel's `pkg_bytes_*` helpers; ASCII whitespace is Rust's
 // `u8::is_ascii_whitespace` set.
 use jet_pkg_model.[
-    pkg_bytes_skip_space, pkg_bytes_space_width, pkg_bytes_starts_with, pkg_bytes_text,
+    pkg_bytes_skip_space,
+    pkg_bytes_space_width,
+    pkg_bytes_starts_with,
+    pkg_bytes_text,
     pkg_sha256_hex,
 ]
 
 TRUST_TAB: 9
+
 TRUST_NEWLINE: 10
+
 TRUST_FORM_FEED: 12
+
 TRUST_CARRIAGE_RETURN: 13
+
 TRUST_SPACE: 32
+
 TRUST_QUOTE: 34
+
 TRUST_HASH: 35
+
 TRUST_AMPERSAND: 38
+
 TRUST_APOSTROPHE: 39
+
 TRUST_OPEN_PAREN: 40
+
 TRUST_CLOSE_PAREN: 41
+
 TRUST_COMMA: 44
+
 TRUST_DASH: 45
+
 TRUST_DOT: 46
+
 TRUST_SLASH: 47
+
 TRUST_COLON: 58
+
 TRUST_SEMICOLON: 59
+
 TRUST_EQUALS: 61
+
 TRUST_QUESTION: 63
+
 TRUST_OPEN_SQUARE: 91
+
 TRUST_BACKSLASH: 92
+
 TRUST_CLOSE_SQUARE: 93
+
 TRUST_UNDERSCORE: 95
+
 TRUST_OPEN_BRACE: 123
+
 TRUST_CLOSE_BRACE: 125
 
 // The two halves around one separator byte.
@@ -93,7 +120,9 @@ trust_text_split_last_text: fn(text: String, needle: String) -> TrustTextSplit? 
     pattern: needle.bytes()
     at := raw.len() - pattern.len()
     loop at >= 0 {
-        if pkg_bytes_starts_with(raw, at, pattern) -> return Val(TrustTextSplit{before: pkg_bytes_text(raw, 0, at), after: pkg_bytes_text(raw, at + pattern.len(), raw.len())})
+        if pkg_bytes_starts_with(raw, at, pattern) {
+            return Val(TrustTextSplit{before: pkg_bytes_text(raw, 0, at), after: pkg_bytes_text(raw, at + pattern.len(), raw.len())})
+        }
         at -= 1
     }
     None
@@ -144,7 +173,9 @@ trust_text_lines: fn(text: String) -> [String] Never! {
         newline: trust_text_find_byte(raw, TRUST_NEWLINE, start)
         end: if newline < 0 -> raw.len() else -> newline
         content_end := end
-        if newline >= 0 && content_end > start && (Int{raw[content_end - 1]}) == TRUST_CARRIAGE_RETURN -> content_end -= 1
+        if newline >= 0 && content_end > start && (Int{raw[content_end - 1]}) == TRUST_CARRIAGE_RETURN {
+            content_end -= 1
+        }
         lines.push(pkg_bytes_text(raw, start, content_end))
         start = end + 1
     }

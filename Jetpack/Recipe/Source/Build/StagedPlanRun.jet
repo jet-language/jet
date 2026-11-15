@@ -49,13 +49,13 @@ StagedPlanEmitter: struct {
 // Capability-limited input view for the plan callback.
 PlanSandbox: struct {
     priv source_dir: String
-    priv declared_inputs: [String: String]
+    priv declared_inputs: [String:String]
     priv observed_inputs: [String]
 
     new: fn(source_dir: String, inputs: [PlanInput]) -> PlanSandbox Never! {
-        declared := [String: String]{}
+        declared := [String:String]{}
         loop input in inputs -> declared[input.path] = input.digest
-        PlanSandbox{source_dir, declared_inputs: declared, observed_inputs: [String]{}}
+        PlanSandbox{source_dir: source_dir, declared_inputs: declared, observed_inputs: [String]{}}
     }
 
     // Read one exact declared input and verify its locked digest before the
@@ -64,11 +64,15 @@ PlanSandbox: struct {
         declared_digest: self.declared_inputs.get(path) ?? return Err(StagedPlanActionError.UndeclaredAccess("input `{path}`"))
         source: if recipe_confined_source(self.source_dir, path, false) == {
             .Ok(resolved) -> resolved
-            .Err(error) -> { return Err(StagedPlanActionError.Failed("{error.code}: {error.what}")) }
+            .Err(error) -> {
+                return Err(StagedPlanActionError.Failed("{error.code}: {error.what}"))
+            }
         }
         bytes: if recipe_read_file_nofollow(source, RECIPE_MAX_READ_BYTES) == {
             .Ok(read) -> read
-            .Err(error) -> { return Err(StagedPlanActionError.Failed("could not read declared input `{path}`: {error.message()}")) }
+            .Err(error) -> {
+                return Err(StagedPlanActionError.Failed("could not read declared input `{path}`: {error.message()}"))
+            }
         }
         digest: pkg_sha256_hex(bytes)
         if !recipe_digest_matches(declared_digest, digest) {
@@ -92,9 +96,7 @@ PlanSandbox: struct {
         Err(StagedPlanActionError.UndeclaredAccess("package resolution `{package}`"))
     }
 
-    observed_inputs: fn(self) -> [String] Never! {
-        self.observed_inputs
-    }
+    observed_inputs: fn(self) -> [String] Never! { self.observed_inputs }
 
     // Every declared input is read and digest-checked, even ones the
     // callback did not open.
@@ -107,7 +109,7 @@ PlanSandbox: struct {
 
 // Run one finite sandboxed plan action, lower its fragment into the ordinary
 // BuildPlan graph, and atomically publish the resulting stage.
-recipe_run_staged_plan_action: fn(action: StagedPlanAction, ctx: StagedPlanContext, tools: [String: String], emitter: StagedPlanEmitter) -[FS, Env, Rand]> StagedPlanReport RecipeDiagnostic! {
+recipe_run_staged_plan_action: fn(action: StagedPlanAction, ctx: StagedPlanContext, tools: [String:String], emitter: StagedPlanEmitter) -[FS, Env, Rand]> StagedPlanReport RecipeDiagnostic! {
     if action.validate_declaration() == {
         .Ok(_) -> {}
         .Err(error) -> { return Err(recipe_staged_plan_model_error(error)) }
@@ -115,7 +117,9 @@ recipe_run_staged_plan_action: fn(action: StagedPlanAction, ctx: StagedPlanConte
     sandbox := PlanSandbox.new(ctx.source_dir, action.inputs)
     fragment: if emitter.emit(sandbox) == {
         .Ok(emitted) -> emitted
-        .Err(error) -> { return Err(recipe_staged_plan_action_error(error)) }
+        .Err(error) -> {
+            return Err(recipe_staged_plan_action_error(error))
+        }
     }
     if sandbox.verify_declared_inputs() == {
         .Ok(_) -> {}
@@ -123,12 +127,14 @@ recipe_run_staged_plan_action: fn(action: StagedPlanAction, ctx: StagedPlanConte
     }
     facts: if recipe_staged_plan_facts(action, fragment) == {
         .Ok(checked) -> checked
-        .Err(error) -> { return Err(recipe_staged_plan_model_error(error)) }
+        .Err(error) -> {
+            return Err(recipe_staged_plan_model_error(error))
+        }
     }
     plan: recipe_lower_staged_plan_action(action, fragment, tools)
     plan_fingerprint: recipe_plan_fingerprint(plan)
     artifact_dir: recipe_publish_staged_plan_artifact(ctx.artifact_root, action, fragment, facts.lock, plan_fingerprint)
-    Ok(StagedPlanReport{action_identity: facts.identity, fragment_digest: facts.fragment_digest, plan_fingerprint, artifact_dir, lock: facts.lock})
+    Ok(StagedPlanReport{action_identity: facts.identity, fragment_digest: facts.fragment_digest, plan_fingerprint: plan_fingerprint, artifact_dir: artifact_dir, lock: facts.lock})
 }
 
 // The model-checked identity facts of one fragment.
@@ -143,32 +149,38 @@ recipe_staged_plan_facts: fn(action: StagedPlanAction, fragment: BuildPlanFragme
     identity: action.identity(fragment)
     fragment_digest: action.fragment_digest(fragment)
     lock: action.lock(fragment)
-    Ok(StagedPlanFacts{identity, fragment_digest, lock})
+    Ok(StagedPlanFacts{identity: identity, fragment_digest: fragment_digest, lock: lock})
 }
 
 // Lower a validated staged fragment into the same finite action graph
 // ordinary package recipes use. The planner node owns the canonical fragment;
 // every emitted action depends on it and on its declared predecessors.
-recipe_lower_staged_plan_action: fn(action: StagedPlanAction, fragment: BuildPlanFragment, tools: [String: String]) -[FS, Env, Rand]> HermeticBuildPlan RecipeDiagnostic! {
+recipe_lower_staged_plan_action: fn(action: StagedPlanAction, fragment: BuildPlanFragment, tools: [String:String]) -[FS, Env, Rand]> HermeticBuildPlan RecipeDiagnostic! {
     if action.validate(fragment) == {
         .Ok(_) -> {}
         .Err(error) -> { return Err(recipe_staged_plan_model_error(error)) }
     }
     identity: if action.identity(fragment) == {
         .Ok(value) -> value
-        .Err(error) -> { return Err(recipe_staged_plan_model_error(error)) }
+        .Err(error) -> {
+            return Err(recipe_staged_plan_model_error(error))
+        }
     }
     fragment_digest: if action.fragment_digest(fragment) == {
         .Ok(value) -> value
-        .Err(error) -> { return Err(recipe_staged_plan_model_error(error)) }
+        .Err(error) -> {
+            return Err(recipe_staged_plan_model_error(error))
+        }
     }
     namespace: recipe_staged_plan_namespace(action.name, identity)
     plan_output: ".jet/staged-plan/{namespace}/fragment.plan"
 
     ordered := fragment.actions
     ordered.sort_by(fn(emitted) { emitted.name })
-    marker_paths := [String: String]{}
-    loop index in 0..<ordered.len() -> marker_paths[ordered[index].name] = ".jet/staged-plan/{namespace}/actions/{index}.stamp"
+    marker_paths := [String:String]{}
+    loop index in 0..<ordered.len() {
+        marker_paths[ordered[index].name] = ".jet/staged-plan/{namespace}/actions/{index}.stamp"
+    }
     markers: marker_paths.values().to_list()
     loop emitted in ordered {
         loop output in emitted.outputs {
@@ -209,10 +221,14 @@ recipe_lower_staged_plan_action: fn(action: StagedPlanAction, fragment: BuildPla
     }
     planner_spec = recipe_add_authority_tool_paths(planner_spec, action.authority.tools, tools)
     planner_spec = recipe_add_authority_labels(planner_spec, action.authority.tools, action.authority.effects)
-    loop build_effect in action.authority.effects -> planner_spec = planner_spec.with_cap(build_effect)
+    loop build_effect in action.authority.effects {
+        planner_spec = planner_spec.with_cap(build_effect)
+    }
     planner_handle: if plan_ctx.action("staged-plan-{namespace}-planner", planner_spec) == {
         .Ok(handle) -> handle
-        .Err(error) -> { return Err(RecipeDiagnostic.e1238_plan("staged planner action is invalid: {error.debug_text()}")) }
+        .Err(error) -> {
+            return Err(RecipeDiagnostic.e1238_plan("staged planner action is invalid: {error.debug_text()}"))
+        }
     }
 
     action_handles := [HermeticActionHandle]{planner_handle}
@@ -268,7 +284,9 @@ recipe_lower_staged_plan_action: fn(action: StagedPlanAction, fragment: BuildPla
         spec = recipe_add_authority_labels(spec, action.authority.tools, action.authority.effects)
         handle: if plan_ctx.action("staged-plan-{namespace}-action-{index}", spec) == {
             .Ok(handle) -> handle
-            .Err(error) -> { return Err(RecipeDiagnostic.e1238_plan("staged emitted action `{emitted.name}` is invalid: {error.debug_text()}")) }
+            .Err(error) -> {
+                return Err(RecipeDiagnostic.e1238_plan("staged emitted action `{emitted.name}` is invalid: {error.debug_text()}"))
+            }
         }
         action_handles.push(handle)
     }
@@ -283,7 +301,9 @@ recipe_lower_staged_plan_action: fn(action: StagedPlanAction, fragment: BuildPla
     loop handle in action_handles -> target_spec = target_spec.with_action(handle)
     target: if plan_ctx.add_package("staged-plan-{namespace}", target_spec) == {
         .Ok(target) -> target
-        .Err(error) -> { return Err(RecipeDiagnostic.e1238_plan("staged plan target is invalid: {error.debug_text()}")) }
+        .Err(error) -> {
+            return Err(RecipeDiagnostic.e1238_plan("staged plan target is invalid: {error.debug_text()}"))
+        }
     }
     if plan_ctx.plan_with_default(target) == {
         .Ok(plan) -> Ok(plan)
@@ -292,7 +312,7 @@ recipe_lower_staged_plan_action: fn(action: StagedPlanAction, fragment: BuildPla
 }
 
 // `authority.tool.<index>.path` labels for the sorted authority tools.
-recipe_add_authority_tool_paths: fn(spec: ActionSpec, authority_tools: [String], tools: [String: String]) -[FS, Env]> ActionSpec RecipeDiagnostic! {
+recipe_add_authority_tool_paths: fn(spec: ActionSpec, authority_tools: [String], tools: [String:String]) -[FS, Env]> ActionSpec RecipeDiagnostic! {
     sorted := authority_tools
     sorted.sort()
     out := spec
@@ -309,9 +329,13 @@ recipe_add_authority_labels: fn(spec: ActionSpec, tools: [String], effects: [Bui
     sorted_tools := tools
     sorted_tools.sort()
     out := spec
-    loop index in 0..<sorted_tools.len() -> out = out.with_label("authority.tool.{index}", sorted_tools[index])
+    loop index in 0..<sorted_tools.len() {
+        out = out.with_label("authority.tool.{index}", sorted_tools[index])
+    }
     sorted_effects: BuildEffect.sorted(effects)
-    loop index in 0..<sorted_effects.len() -> out = out.with_label("authority.effect.{index}", sorted_effects[index].flag())
+    loop index in 0..<sorted_effects.len() {
+        out = out.with_label("authority.effect.{index}", sorted_effects[index].flag())
+    }
     out
 }
 
@@ -362,7 +386,9 @@ recipe_safe_plan_component: fn(value: String) -> String Never! {
 recipe_publish_staged_plan_artifact: fn(artifact_root: String, action: StagedPlanAction, fragment: BuildPlanFragment, lock: StagedPlanLock, plan_fingerprint: String) -[FS, Env, Rand]> String RecipeDiagnostic! {
     parent: if PinnedRecipeDirectory.open_or_create(artifact_root) == {
         .Ok(held) -> held
-        .Err(error) -> { return Err(RecipeDiagnostic.recipe_io("could not create staged-plan artifact root", error)) }
+        .Err(error) -> {
+            return Err(RecipeDiagnostic.recipe_io("could not create staged-plan artifact root", error))
+        }
     }
     namespace: recipe_staged_plan_namespace(action.name, lock.action_identity)
     artifact: files.join(parent.path(), namespace)
@@ -370,7 +396,9 @@ recipe_publish_staged_plan_artifact: fn(artifact_root: String, action: StagedPla
     lock_text: lock.render()
     exists: if parent.existing_directory(namespace) == {
         .Ok(found) -> found
-        .Err(error) -> { return Err(RecipeDiagnostic.recipe_io("could not inspect staged-plan artifact", error)) }
+        .Err(error) -> {
+            return Err(RecipeDiagnostic.recipe_io("could not inspect staged-plan artifact", error))
+        }
     }
     if exists {
         same_fragment: (files.read_bytes(files.join(artifact, "fragment.plan")) ?? [U8]{}) == fragment_bytes
@@ -381,7 +409,9 @@ recipe_publish_staged_plan_artifact: fn(artifact_root: String, action: StagedPla
     }
     staging: if parent.exclusive_child("jet-staged-plan") == {
         .Ok(child) -> child
-        .Err(error) -> { return Err(RecipeDiagnostic.recipe_io("could not create staged-plan scratch", error)) }
+        .Err(error) -> {
+            return Err(RecipeDiagnostic.recipe_io("could not create staged-plan scratch", error))
+        }
     }
     if recipe_write_staged_plan_files(staging.path, fragment_bytes, lock_text, plan_fingerprint) == {
         .Ok(_) -> {}
@@ -408,15 +438,21 @@ StagedPlanWriteFailure: struct {
 
 recipe_write_staged_plan_files: fn(staging: String, fragment_bytes: [U8], lock_text: String, plan_fingerprint: String) StagedPlanWriteFailure! -[FS]> {
     if files.write_bytes(files.join(staging, "fragment.plan"), fragment_bytes) == {
-        .Err(error) -> { return Err(StagedPlanWriteFailure{what: "could not write staged-plan fragment", error: RecipeError.IO(error)}) }
+        .Err(error) -> {
+            return Err(StagedPlanWriteFailure{what: "could not write staged-plan fragment", error: RecipeError.IO(error)})
+        }
         .Ok(_) -> {}
     }
     if files.write(files.join(staging, "lock"), lock_text) == {
-        .Err(error) -> { return Err(StagedPlanWriteFailure{what: "could not write staged-plan lock", error: RecipeError.IO(error)}) }
+        .Err(error) -> {
+            return Err(StagedPlanWriteFailure{what: "could not write staged-plan lock", error: RecipeError.IO(error)})
+        }
         .Ok(_) -> {}
     }
     if files.write(files.join(staging, "plan.fingerprint"), plan_fingerprint) == {
-        .Err(error) -> { return Err(StagedPlanWriteFailure{what: "could not write staged-plan fingerprint", error: RecipeError.IO(error)}) }
+        .Err(error) -> {
+            return Err(StagedPlanWriteFailure{what: "could not write staged-plan fingerprint", error: RecipeError.IO(error)})
+        }
         .Ok(_) -> {}
     }
 }

@@ -35,7 +35,9 @@ parser_policy_file_decl_ahead: fn(state: &JetParserState) -> Bool Never! {
     if name.kind != TOKEN_IDENT || parser_value(state, name) != "Policy" -> return false
     if parser_kind_at(state, 2) != TOKEN_LPAREN -> return false
     // A callable policy starts with a policy call.
-    if parser_kind_at(state, 3) == TOKEN_IDENT && parser_kind_at(state, 4) == TOKEN_LPAREN -> return false
+    if parser_kind_at(state, 3) == TOKEN_IDENT && parser_kind_at(state, 4) == TOKEN_LPAREN {
+        return false
+    }
     offset := 2
     depth := 0
     loop parser_kind_at(state, offset) != TOKEN_EOF {
@@ -127,9 +129,7 @@ parser_callable_policy_marker: fn(marker: Marker) -> Bool Never! {
             loop argument in call.args {
                 if argument.label != None || argument.spread -> return false
             }
-        } else {
-            return false
-        }
+        } else { return false }
     }
     true
 }

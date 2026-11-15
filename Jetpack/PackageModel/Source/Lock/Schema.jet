@@ -5,14 +5,18 @@
 use jet_foundation.[Diagnostic, RuntimeLayer]
 
 PKG_LOCK_VERSION: 1
+
 // `provenance.build` prefix that marks a package record as projected from a
 // Rust FFI bridge build; `pkg_lock_record_rust_bridge` replaces every such
 // record.
 PKG_RUST_BRIDGE_PROVENANCE_PREFIX: "jet-ffi-bridge:"
+
 // Hard upper bound for one committed lockfile. A lock is a human-reviewed
 // artifact; exceeding this limit indicates a serializer invariant failure.
 PKG_MAX_LOCK_BYTES: 1048576
+
 PKG_MAX_LOCK_VALUE_BYTES: 1048576
+
 // The largest accepted `nix-size`: 16 GiB.
 PKG_MAX_NIX_NAR_SIZE: 17179869184
 
@@ -21,16 +25,17 @@ PKG_MAX_NIX_NAR_SIZE: 17179869184
 // `pkg_lock_parse_with_path` maps it to E1214 without re-reading a message.
 #Error
 LockError: enum {
-    // Schema, record, or recorder failure with its complete message.
     Invalid(String)
-    // The top-level `version` names a schema this reader does not support.
     UnsupportedVersion(String)
-    // Reading or opening lock bytes failed at the file system.
     IO(IOError)
-    // A generated record is missing one concrete fact.
     Incomplete(LockCompletenessError)
-    // A registered host diagnostic (E1202, E1205, E1214, E3502, E3512).
     Reported(Diagnostic)
+
+    // Schema, record, or recorder failure with its complete message.
+    // The top-level `version` names a schema this reader does not support.
+    // Reading or opening lock bytes failed at the file system.
+    // A generated record is missing one concrete fact.
+    // A registered host diagnostic (E1202, E1205, E1214, E3502, E3512).
 
     message: fn(self) -> String Never! {
         if self == {
@@ -111,7 +116,9 @@ LockedPackage: struct {
             .LuaRocks(_, output, _, _, _) -> output
             .Registry(_, _, output, _, _, _, _, _) -> output
             .Foreign(_, _, output) -> output
-            .Root | .Path(_) | .Git(_, _) -> { return None }
+            .Root | .Path(_) | .Git(_, _) -> {
+                return None
+            }
         }
         if output == "" -> return None
         Val(output)
@@ -197,7 +204,7 @@ LockedPackage: struct {
         locked_hash := self.content_hash
         if locked_hash == None {
             if self.locked == {
-                .Val(revision) -> locked_hash = Val(revision.tree_hash)
+                .Val(revision) -> { locked_hash = Val(revision.tree_hash) }
                 .None -> {}
             }
         }
@@ -228,7 +235,7 @@ LockedPackage: struct {
         build_value := pkg_lock_nonblank(provenance.build)
         if build_value == None {
             if self.envelope == {
-                .Val(envelope) -> build_value = pkg_lock_nonblank(Val(envelope.provenance))
+                .Val(envelope) -> { build_value = pkg_lock_nonblank(Val(envelope.provenance)) }
                 .None -> {}
             }
         }
@@ -247,7 +254,7 @@ LockedPackage: struct {
             required_effects: self.required_effect_roles(),
             granted_effects: self.granted_effect_roles(),
             denied_effects: self.denied_effects,
-            authority: self.effect_authority ?? "not recorded"
+            authority: self.effect_authority ?? "not recorded",
         }
     }
 
@@ -260,7 +267,9 @@ LockedPackage: struct {
             else -> {}
         }
         if envelope.catalog_trust.contains("unverified") -> return "unverified-mapping"
-        if envelope.signature != "" || (envelope.catalog_tier == "official-signed" && envelope.catalog_trust == "verified") -> return "signed"
+        if envelope.signature != "" || (envelope.catalog_tier == "official-signed" && envelope.catalog_trust == "verified") {
+            return "signed"
+        }
         if pkg_lock_is_reproduced_evidence(envelope.provenance) -> return "reproduced"
         if self.provenance_build() == {
             .Val(build) -> {
@@ -277,18 +286,32 @@ LockedPackage: struct {
     // package loader.
     validate_completeness: fn(self) LockCompletenessError! {
         name: if self.name.trim() == "" -> "<unnamed>" else -> self.name
-        if self.version.trim() == "" -> return Err(LockCompletenessError.dependency(name, "version"))
+        if self.version.trim() == "" {
+            return Err(LockCompletenessError.dependency(name, "version"))
+        }
         if self.source == {
             .Path(path) -> {
-                if path.trim() == "" -> return Err(LockCompletenessError.dependency(name, "source.path"))
-                if pkg_lock_nonblank(self.content_hash) == None -> return Err(LockCompletenessError.dependency(name, "content-hash"))
+                if path.trim() == "" {
+                    return Err(LockCompletenessError.dependency(name, "source.path"))
+                }
+                if pkg_lock_nonblank(self.content_hash) == None {
+                    return Err(LockCompletenessError.dependency(name, "content-hash"))
+                }
             }
             .Git(url, selector) -> {
-                if url.trim() == "" -> return Err(LockCompletenessError.dependency(name, "source.url"))
-                if selector.trim() == "" -> return Err(LockCompletenessError.dependency(name, "source.selector"))
+                if url.trim() == "" {
+                    return Err(LockCompletenessError.dependency(name, "source.url"))
+                }
+                if selector.trim() == "" {
+                    return Err(LockCompletenessError.dependency(name, "source.selector"))
+                }
                 revision: self.locked ?? return Err(LockCompletenessError.dependency(name, "locked"))
-                if revision.rev.trim() == "" -> return Err(LockCompletenessError.dependency(name, "locked.rev"))
-                if revision.tree_hash.trim() == "" && pkg_lock_nonblank(self.content_hash) == None -> return Err(LockCompletenessError.dependency(name, "locked.tree-hash"))
+                if revision.rev.trim() == "" {
+                    return Err(LockCompletenessError.dependency(name, "locked.rev"))
+                }
+                if revision.tree_hash.trim() == "" && pkg_lock_nonblank(self.content_hash) == None {
+                    return Err(LockCompletenessError.dependency(name, "locked.tree-hash"))
+                }
             }
             .Root | .Nix(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Registry(_, _, _, _, _, _, _, _) | .Foreign(_, _, _) -> {}
         }
@@ -299,23 +322,24 @@ LockSource: enum {
     Root
     Path(String)
     Git(url: String, selector: String)
-    // A package realized through the Nix compatibility
-    // provider. `reference` is the source ref (`openssl@nixpkgs`); `output`
-    // is the portable Hangar content digest. The complete replay identity is
-    // the mandatory `LockedPackage.nix_closure`.
     Nix(reference: String, output: String)
-    // Exact CRAN closure pinned by SHA-256 and realized output.
     Cran(reference: String, output: String, source_hash: String, repository: String, authority: String)
-    // Exact LuaRocks closure and output.
     LuaRocks(reference: String, output: String, source_hash: String, repository: String, authority: String)
-    // PERL1/PHP1: exact foreign scripting-registry closure.
-    // `tier` is `core`/`community` for Jet's registry and `not-applicable`
-    // elsewhere; `gate_status` is the registry's canonical gate summary.
     Registry(registry: String, reference: String, output: String, source_hash: String, repository: String, authority: String, tier: String, gate_status: String)
-    // The exact foreign package provider ref and the verified
-    // Hangar projection that materialized its binding.
     Foreign(language: ForeignLanguage, reference: String, output: String)
 }
+
+// A package realized through the Nix compatibility
+// provider. `reference` is the source ref (`openssl@nixpkgs`); `output`
+// is the portable Hangar content digest. The complete replay identity is
+// the mandatory `LockedPackage.nix_closure`.
+// Exact CRAN closure pinned by SHA-256 and realized output.
+// Exact LuaRocks closure and output.
+// PERL1/PHP1: exact foreign scripting-registry closure.
+// `tier` is `core`/`community` for Jet's registry and `not-applicable`
+// elsewhere; `gate_status` is the registry's canonical gate summary.
+// The exact foreign package provider ref and the verified
+// Hangar projection that materialized its binding.
 
 LockedRevision: struct {
     rev: String
@@ -358,39 +382,71 @@ NixClosureRecord: struct {
             (name: "compression", value: self.compression),
             (name: "upstream-proof", value: self.upstream_proof),
             (name: "cache-key", value: self.cache_key),
-            (name: "project-cas-bundle", value: self.project_cas_bundle)
+            (name: "project-cas-bundle", value: self.project_cas_bundle),
         }
         loop field in fields {
-            if field.value.trim() == "" -> return Err(LockError.Invalid("Nix closure record is missing `{field.name}`"))
-            if pkg_lock_has_unsafe_path_byte(field.value) -> return Err(LockError.Invalid("Nix closure record `{field.name}` contains a host path or unsafe control byte"))
+            if field.value.trim() == "" {
+                return Err(LockError.Invalid("Nix closure record is missing `{field.name}`"))
+            }
+            if pkg_lock_has_unsafe_path_byte(field.value) {
+                return Err(LockError.Invalid("Nix closure record `{field.name}` contains a host path or unsafe control byte"))
+            }
         }
         if self.channel == {
             "nixpkgs-unstable" | "nixos-unstable" -> {}
-            else -> { return Err(LockError.Invalid("Nix closure record has an unsupported channel")) }
+            else -> {
+                return Err(LockError.Invalid("Nix closure record has an unsupported channel"))
+            }
         }
-        if !pkg_lock_is_lower_hex(self.revision, 40) -> return Err(LockError.Invalid("Nix closure record revision must be exactly 40 lowercase hexadecimal characters"))
+        if !pkg_lock_is_lower_hex(self.revision, 40) {
+            return Err(LockError.Invalid("Nix closure record revision must be exactly 40 lowercase hexadecimal characters"))
+        }
         if self.system == {
             "x86_64-linux" | "aarch64-linux" | "x86_64-darwin" | "aarch64-darwin" -> {}
-            else -> { return Err(LockError.Invalid("Nix closure record has an unsupported system")) }
+            else -> {
+                return Err(LockError.Invalid("Nix closure record has an unsupported system"))
+            }
         }
-        if !pkg_lock_is_lower_hex(self.index_authority, 64) -> return Err(LockError.Invalid("Nix closure record index authority must be a 64-character lowercase SHA-256"))
-        if !pkg_lock_is_lower_hex(self.derivation, 64) -> return Err(LockError.Invalid("Nix closure record derivation must be a 64-character lowercase SHA-256"))
-        if !pkg_lock_is_cas_digest(self.output) -> return Err(LockError.Invalid("Nix closure record output is not a canonical CAS digest"))
-        if !pkg_lock_is_nar_hash(self.nar_hash) -> return Err(LockError.Invalid("Nix closure record NarHash is not canonical"))
+        if !pkg_lock_is_lower_hex(self.index_authority, 64) {
+            return Err(LockError.Invalid("Nix closure record index authority must be a 64-character lowercase SHA-256"))
+        }
+        if !pkg_lock_is_lower_hex(self.derivation, 64) {
+            return Err(LockError.Invalid("Nix closure record derivation must be a 64-character lowercase SHA-256"))
+        }
+        if !pkg_lock_is_cas_digest(self.output) {
+            return Err(LockError.Invalid("Nix closure record output is not a canonical CAS digest"))
+        }
+        if !pkg_lock_is_nar_hash(self.nar_hash) {
+            return Err(LockError.Invalid("Nix closure record NarHash is not canonical"))
+        }
         if self.compression == {
             "none" | "zstd" -> {}
-            else -> { return Err(LockError.Invalid("Nix closure record uses unsupported compression")) }
+            else -> {
+                return Err(LockError.Invalid("Nix closure record uses unsupported compression"))
+            }
         }
-        if !pkg_lock_is_cas_digest(self.upstream_proof) -> return Err(LockError.Invalid("Nix closure record upstream proof is not a canonical digest"))
-        if !pkg_lock_is_lower_hex(self.cache_key, 64) -> return Err(LockError.Invalid("Nix closure record cache key must be a 64-character lowercase SHA-256"))
-        if !pkg_lock_is_cas_digest(self.project_cas_bundle) -> return Err(LockError.Invalid("Nix closure record CAS bundle is not a canonical digest"))
+        if !pkg_lock_is_cas_digest(self.upstream_proof) {
+            return Err(LockError.Invalid("Nix closure record upstream proof is not a canonical digest"))
+        }
+        if !pkg_lock_is_lower_hex(self.cache_key, 64) {
+            return Err(LockError.Invalid("Nix closure record cache key must be a 64-character lowercase SHA-256"))
+        }
+        if !pkg_lock_is_cas_digest(self.project_cas_bundle) {
+            return Err(LockError.Invalid("Nix closure record CAS bundle is not a canonical digest"))
+        }
         seen := [String]{}
         loop reference in self.references {
-            if !pkg_lock_is_cas_digest(reference) -> return Err(LockError.Invalid("Nix closure record contains an invalid reference identity"))
-            if seen.contains(reference) -> return Err(LockError.Invalid("Nix closure record repeats an ordered reference"))
+            if !pkg_lock_is_cas_digest(reference) {
+                return Err(LockError.Invalid("Nix closure record contains an invalid reference identity"))
+            }
+            if seen.contains(reference) {
+                return Err(LockError.Invalid("Nix closure record repeats an ordered reference"))
+            }
             seen.push(reference.copy())
         }
-        if self.size == 0 || self.size > PKG_MAX_NIX_NAR_SIZE -> return Err(LockError.Invalid("Nix closure record has an invalid NAR size"))
+        if self.size == 0 || self.size > PKG_MAX_NIX_NAR_SIZE {
+            return Err(LockError.Invalid("Nix closure record has an invalid NAR size"))
+        }
     }
 }
 
@@ -414,8 +470,12 @@ LockEnvelope: struct {
     // pair distinguishes a verified signed manifest from an unsigned local
     // index.
     validate_nix_catalog: fn(self) LockError! {
-        if self.catalog_tier == "official-signed" && self.catalog_trust == "verified" -> return
-        if self.catalog_tier == "local-unofficial" && self.catalog_trust == "unverified" -> return
+        if self.catalog_tier == "official-signed" && self.catalog_trust == "verified" {
+            return
+        }
+        if self.catalog_tier == "local-unofficial" && self.catalog_trust == "unverified" {
+            return
+        }
         return Err(LockError.Invalid("Nix lock requires a recognized, consistent catalog tier and trust"))
     }
 }
@@ -435,7 +495,9 @@ LockedToolchain: struct {
         name: if self.channel.trim() == "" -> "jet" else -> self.channel
         fields: [(field: String, value: String)]{(field: "id", value: self.id), (field: "channel", value: self.channel), (field: "version", value: self.version)}
         loop entry in fields {
-            if entry.value.trim() == "" -> return Err(LockCompletenessError.missing(LockIncompleteKind.Toolchain, name, entry.field, LockRegeneration.toolchain()))
+            if entry.value.trim() == "" {
+                return Err(LockCompletenessError.missing(LockIncompleteKind.Toolchain, name, entry.field, LockRegeneration.toolchain()))
+            }
         }
     }
 }
@@ -452,7 +514,9 @@ LockedSourceChannel: struct {
         name: if self.name.trim() == "" -> "<unnamed>" else -> self.name
         fields: [(field: String, value: String)]{(field: "name", value: self.name), (field: "channel", value: self.channel), (field: "exact", value: self.exact)}
         loop entry in fields {
-            if entry.value.trim() == "" -> return Err(LockCompletenessError.missing(LockIncompleteKind.SourceChannel, name, entry.field, LockRegeneration.source_channel(self.name)))
+            if entry.value.trim() == "" {
+                return Err(LockCompletenessError.missing(LockIncompleteKind.SourceChannel, name, entry.field, LockRegeneration.source_channel(self.name)))
+            }
         }
     }
 }
@@ -545,7 +609,7 @@ LockFile: struct {
             source_channels: [LockedSourceChannel]{},
             build_stamp: None,
             build_contributions: [LockedBuildContribution]{},
-            semantic_text: ""
+            semantic_text: "",
         }
     }
 

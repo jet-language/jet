@@ -10,8 +10,10 @@ package: {
     authority: { allow: [FS, FS.Read, IO, Mem.Alloc, Time, Time.Wait] }
 }
 
-use files: core.files
-use time: core.time
+use {
+    files: core.files
+    time: core.time
+}
 
 TASKS: 2000
 
@@ -20,7 +22,9 @@ waiter: fn(rx: Receiver<Int>) -> Int { rx.receive() ?? -1 }
 threads: fn() -[FS]> Int {
     text: files.read("/proc/self/status") ?? panic("read status")
     loop line in text.lines() {
-        if line.starts_with("Threads:") -> return Int.parse(line.remove_prefix("Threads:").trim()) ?? -1
+        if line.starts_with("Threads:") {
+            return Int.parse(line.remove_prefix("Threads:").trim()) ?? -1
+        }
     }
     -1
 }

@@ -53,12 +53,16 @@ jet_cli_check_receipt_target: fn(owned: [String]) -> String? Never! {
 // the generated tree count.
 jet_cli_check_tree_inputs: fn(path: String, out: &[String]) Never! -[FS]> {
     info: cli_files.stat(path) ?? return
-    if info.is_symlink -> return
+    if info.is_symlink {
+        return
+    }
     if info.is_file {
         out.push(path.copy())
         return
     }
-    if !info.is_dir -> return
+    if !info.is_dir {
+        return
+    }
     held: JetCLIRootedDirectory.open(path, [String]{}, false) ?? return
     entries: held.list() ?? return
     generated: path.contains("/.jet/generated")
@@ -88,7 +92,9 @@ jet_cli_check_tree_inputs: fn(path: String, out: &[String]) Never! -[FS]> {
 jet_cli_check_receipt_paths: fn(cache: &WorkspaceDeclarationCache, cwd: String, target: String?, file: String) -[FS, Env]> [String] Never! {
     paths := [String]{}
     raw: target ?? {
-        loop root in jet_cli_receipt_authority_roots(cache, cwd) -> jet_cli_check_tree_inputs(root, paths)
+        loop root in jet_cli_receipt_authority_roots(cache, cwd) {
+            jet_cli_check_tree_inputs(root, paths)
+        }
         return paths
     }
     absolute: if raw.starts_with("/") -> raw else -> jet_cli_rooted_join(cwd, raw)
@@ -156,7 +162,9 @@ jet_cli_check_context_identity: fn(cache: &WorkspaceDeclarationCache, cwd: Strin
         jet_cli_check_context_path(identity, "root", generated)
         files := [String]{}
         jet_cli_check_tree_inputs(generated, files)
-        loop file in jet_cli_lock_canonical(files) -> jet_cli_check_context_path(identity, "file", file)
+        loop file in jet_cli_lock_canonical(files) {
+            jet_cli_check_context_path(identity, "file", file)
+        }
     }
 }
 
@@ -178,8 +186,12 @@ jet_cli_check_receipt_stored: fn(project_root: String, context_key: String) -[FS
     pointers: JetCLIRootedDirectory.open(project_root, contexts, false)
     pointer: if pointers.read(context_key, 4096) == {
         .Val(bytes) -> bytes
-        .None -> { return Ok(None) }
-        .Err(error) -> { return Err(error) }
+        .None -> {
+            return Ok(None)
+        }
+        .Err(error) -> {
+            return Err(error)
+        }
     }
     key: String.from_bytes(pointer) ?? return Ok(None)
     if !jet_driver_run_receipt_is_digest(key) -> return Ok(None)
@@ -188,8 +200,12 @@ jet_cli_check_receipt_stored: fn(project_root: String, context_key: String) -[FS
     held: JetCLIRootedDirectory.open(project_root, objects, false)
     raw: if held.read(key, JET_DRIVER_RUN_RECEIPT_MAX_BYTES) == {
         .Val(bytes) -> bytes
-        .None -> { return Ok(None) }
-        .Err(error) -> { return Err(error) }
+        .None -> {
+            return Ok(None)
+        }
+        .Err(error) -> {
+            return Err(error)
+        }
     }
     receipt: jet_driver_run_receipt_decode(raw) ?? return Ok(None)
     if receipt.claim.key != key || receipt.claim.verb != "check" -> return Ok(None)
@@ -248,13 +264,19 @@ jet_cli_check_receipt_current: fn(receipt: JetDriverRunReceipt, identity: [U8], 
     if claim != receipt.claim {
         if verbose {
             changes: jet_cli_check_receipt_changes(receipt.claim.inputs, claim.inputs)
-            if changes.len() == 0 -> jet_cli_write_notice("receipt: check invalidated (entry candidates or authority context changed)\n")
-            loop path in changes -> jet_cli_write_notice("receipt: check invalidated (input changed: `{path}`)\n")
+            if changes.len() == 0 {
+                jet_cli_write_notice("receipt: check invalidated (entry candidates or authority context changed)\n")
+            }
+            loop path in changes {
+                jet_cli_write_notice("receipt: check invalidated (input changed: `{path}`)\n")
+            }
         }
         return None
     }
     if receipt.digest != jet_driver_run_receipt_digest(receipt) {
-        if verbose -> jet_cli_write_notice("receipt: check invalidated (receipt authentication changed)\n")
+        if verbose {
+            jet_cli_write_notice("receipt: check invalidated (receipt authentication changed)\n")
+        }
         return None
     }
     jet_cli_check_receipt_replay(receipt, args, notice, verbose)
@@ -296,7 +318,9 @@ jet_cli_check_receipt_begin: fn(args: [String], plan: JetCLIPlan) -> JetCLICheck
     paths: jet_cli_check_receipt_paths(cache, cwd, target, file)
     if jet_cli_check_receipt_stored(project_root, context_key) == {
         .Val(receipt) -> {
-            if jet_cli_check_receipt_current(receipt, identity, paths, args, notice, verbose) == .Val(output) -> return JetCLICheckReceiptStep.Replay{output: output}
+            if jet_cli_check_receipt_current(receipt, identity, paths, args, notice, verbose) == .Val(output) {
+                return JetCLICheckReceiptStep.Replay{output: output}
+            }
         }
         .None -> {}
         .Err(error) -> {
@@ -353,7 +377,9 @@ jet_cli_check_receipt_store: fn(recording: JetCLICheckRecording, output: JetDriv
 
 // A Jet defect (status 101) is never a receipt.
 jet_cli_check_receipt_publish: fn(recording: JetCLICheckRecording, output: JetDriverVerbOutput, compiled: [JetDriverRunReceiptInput]) {
-    if output.exit_code == JET_CLI_EXIT_ICE -> return
+    if output.exit_code == JET_CLI_EXIT_ICE {
+        return
+    }
     if jet_cli_check_receipt_store(recording, output, compiled) == .Err(error) {
         jet_cli_write_notice(jet_cli_history_notice("staging optional receipt job", error.message))
     }

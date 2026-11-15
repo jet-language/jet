@@ -48,7 +48,7 @@ NixImportPackage: struct {
 
 cli_import_nix_facts: fn(source_path: String, facts_json: String) -> ImportPlan Never! {
     plan := ImportPlan.empty("nix")
-    object: cli_import_json_object(facts_json) ?? [String: Dyn]{}
+    object: cli_import_json_object(facts_json) ?? [String:Dyn]{}
     report: provider_normalize_document(ProviderFamily.Nix, facts_json)
     name: if report.facts.name == "" -> cli_import_nix_string(object, "name") ?? "nix-import" else -> report.facts.name
     version: if report.facts.version == "" || report.facts.version == "set" -> "0.1.0" else -> report.facts.version
@@ -63,7 +63,9 @@ cli_import_nix_facts: fn(source_path: String, facts_json: String) -> ImportPlan 
                         plan.import_nix_package(index, packages[index], source_path, facts_json)
                     }
                 }
-                .None -> plan.record_provider_finding(source_path, "Nix `packages` must be an array of package names or exact records")
+                .None -> {
+                    plan.record_provider_finding(source_path, "Nix `packages` must be an array of package names or exact records")
+                }
             }
         }
         .None -> {}
@@ -92,8 +94,12 @@ impl ImportPlan {
         facts.set_native_document("flake-facts.json", facts_json)
         facts.add_fact("package.name", ProviderFactValue.Text(package.name), source_path)
         if package.immutable_source == {
-            .Val(source) -> if facts.resolved_source == "" -> facts.set_resolved_source(source)
-            .None -> facts.add_loss("provider.source", "Nix package entry has no immutable source identity", source_path)
+            .Val(source) -> {
+                if facts.resolved_source == "" -> facts.set_resolved_source(source)
+            }
+            .None -> {
+                facts.add_loss("provider.source", "Nix package entry has no immutable source identity", source_path)
+            }
         }
         if !package.exact {
             reason: "imported Nix package has no exact version, revision, or digest; retain the flake lock before realization"
@@ -118,7 +124,7 @@ impl ImportPlan {
 }
 
 // A non-blank text field of `object`.
-cli_import_nix_string: fn(object: [String: Dyn], key: String) -> String? Never! {
+cli_import_nix_string: fn(object: [String:Dyn], key: String) -> String? Never! {
     value: object.get(key) ?? return None
     text: pkg_json_text(value) ?? return None
     if text.trim() == "" -> return None
@@ -126,7 +132,7 @@ cli_import_nix_string: fn(object: [String: Dyn], key: String) -> String? Never! 
 }
 
 // The first non-blank text field among `keys`.
-cli_import_nix_first_string: fn(object: [String: Dyn], keys: [String]) -> String? Never! {
+cli_import_nix_first_string: fn(object: [String:Dyn], keys: [String]) -> String? Never! {
     loop key in keys {
         found: cli_import_nix_string(object, key) ?? next
         return Val(found)
@@ -136,7 +142,9 @@ cli_import_nix_first_string: fn(object: [String: Dyn], keys: [String]) -> String
 
 // Carry a package report's source, facts, losses, and conflicts onto `target`.
 cli_import_merge_provider_projection: fn(target: &ProviderFacts, source: ProviderFacts, source_path: String) Never! {
-    if target.resolved_source == "" && source.resolved_source != "" -> target.set_resolved_source(source.resolved_source)
+    if target.resolved_source == "" && source.resolved_source != "" {
+        target.set_resolved_source(source.resolved_source)
+    }
     keys := source.facts.keys().to_list()
     keys.sort()
     loop key in keys {
@@ -213,7 +221,9 @@ cli_import_cargo: fn(cargo_toml: String, cargo_lock: String) -> ImportPlan Never
     plan.packages.push(ImportedPackage{name: name, version: version})
     native_document: "Cargo.toml:\n{cargo_toml}\nCargo.lock:\n{cargo_lock}"
     root_facts: cli_import_retain_normalized_root(plan, ProviderFamily.Cargo, native_document, root_reference, "Cargo.toml")
-    if cargo_lock.trim() == "" -> plan.record_provider_finding("Cargo.lock", "Cargo.lock is missing; dependency identities remain unresolved")
+    if cargo_lock.trim() == "" {
+        plan.record_provider_finding("Cargo.lock", "Cargo.lock is missing; dependency identities remain unresolved")
+    }
     sections: cli_import_cargo_dependency_sections(cargo_toml)
     loop section in sections {
         dependencies: cli_import_dependency_keys(cargo_toml, section.header)
@@ -253,24 +263,34 @@ impl ImportPlan {
         facts.add_fact("package.name", ProviderFactValue.Text(dep), table_source)
         facts.add_fact("package.dependency_kind", ProviderFactValue.Text(kind), table_source)
         if section.platform == {
-            .Val(platform) -> facts.add_fact("package.platform", ProviderFactValue.Text(platform), table_source)
+            .Val(platform) -> {
+                facts.add_fact("package.platform", ProviderFactValue.Text(platform), table_source)
+            }
             .None -> {}
         }
         if {
-            versions.len() > 1 -> facts.add_conflict("provider.selector.version", versions[0], versions.slice(1, versions.len()).join(","), "Cargo.lock")
+            versions.len() > 1 -> {
+                facts.add_conflict("provider.selector.version", versions[0], versions.slice(1, versions.len()).join(","), "Cargo.lock")
+            }
             locked != "" -> {
                 facts.set_resolved_source("cargo:{dep}@{locked}")
                 facts.add_fact("package.version", ProviderFactValue.Text(locked), "Cargo.lock.version")
                 if cli_import_lock_field(cargo_lock, dep, "source") == {
-                    .Val(source) -> facts.add_fact("provider.source", ProviderFactValue.Text(source), "Cargo.lock.source")
+                    .Val(source) -> {
+                        facts.add_fact("provider.source", ProviderFactValue.Text(source), "Cargo.lock.source")
+                    }
                     .None -> {}
                 }
                 if cli_import_lock_field(cargo_lock, dep, "checksum") == {
-                    .Val(checksum) -> facts.add_fact("package.integrity", ProviderFactValue.Text(checksum), "Cargo.lock.checksum")
+                    .Val(checksum) -> {
+                        facts.add_fact("package.integrity", ProviderFactValue.Text(checksum), "Cargo.lock.checksum")
+                    }
                     .None -> {}
                 }
             }
-            else -> facts.add_loss("provider.selector", "Cargo.lock has no exact version for this dependency", "Cargo.lock")
+            else -> {
+                facts.add_loss("provider.selector", "Cargo.lock has no exact version for this dependency", "Cargo.lock")
+            }
         }
         self.retain_provider_facts_with_source(facts, "Cargo.toml")
         self.ffi_stubs.push(FFIStub{path: "ffi/{dep}.jet", symbol: dep})
@@ -281,7 +301,7 @@ impl ImportPlan {
 
 cli_import_npm: fn(package_json: String) -> ImportPlan Never! {
     plan := ImportPlan.empty("npm")
-    object: cli_import_json_object(package_json) ?? [String: Dyn]{}
+    object: cli_import_json_object(package_json) ?? [String:Dyn]{}
     source_name: pkg_json_text(object.get("name") ?? Dyn.Null) ?? ""
     source_version: pkg_json_text(object.get("version") ?? Dyn.Null) ?? ""
     name: if source_name == "" -> "npm-import" else -> source_name
@@ -351,10 +371,14 @@ impl ImportPlan {
                         facts.set_resolved_source("npm:{name}@{pinned}")
                         facts.add_fact("package.version", ProviderFactValue.Text(pinned), "package.json exact selector")
                     }
-                    .None -> facts.add_loss("provider.selector", "npm dependency request is not an exact lock identity", field_source)
+                    .None -> {
+                        facts.add_loss("provider.selector", "npm dependency request is not an exact lock identity", field_source)
+                    }
                 }
             }
-            .None -> facts.add_loss("package.request", "npm dependency request must be a string", field_source)
+            .None -> {
+                facts.add_loss("package.request", "npm dependency request must be a string", field_source)
+            }
         }
         self.retain_provider_facts_with_source(facts, "package.json")
     }
@@ -411,7 +435,7 @@ cli_import_swiftpm: fn(name: String, revision: String) -> ImportPlan Never! {
 // ── Document helpers ──
 
 // The top-level object of a JSON document, or None when it is not one.
-cli_import_json_object: fn(text: String) -> [String: Dyn]? Never! {
+cli_import_json_object: fn(text: String) -> [String:Dyn]? Never! {
     if pkg_json_parse_protocol(text) == {
         .Parsed(tree) -> pkg_json_object(tree)
         .Failed(_) -> None
@@ -469,7 +493,9 @@ cli_import_unquote_toml_value: fn(raw: String) -> String Never! {
     if bytes.len() >= 2 {
         first: Int{bytes[0]}
         last: Int{bytes[bytes.len() - 1]}
-        if (first == 34 && last == 34) || (first == 39 && last == 39) -> return String.from_bytes(bytes.slice(1, bytes.len() - 1)) ?? value
+        if (first == 34 && last == 34) || (first == 39 && last == 39) {
+            return String.from_bytes(bytes.slice(1, bytes.len() - 1)) ?? value
+        }
     }
     value
 }
@@ -480,8 +506,8 @@ cli_import_trim_chars: fn(value: String, chars: String) -> String Never! {
     set: chars.bytes()
     start := 0
     end := bytes.len()
-    loop start < end && set.contains(bytes[start]) -> start = start + 1
-    loop end > start && set.contains(bytes[end - 1]) -> end = end - 1
+    loop start < end && set.contains(bytes[start]) -> start += 1
+    loop end > start && set.contains(bytes[end - 1]) -> end -= 1
     String.from_bytes(bytes.slice(start, end)) ?? value
 }
 

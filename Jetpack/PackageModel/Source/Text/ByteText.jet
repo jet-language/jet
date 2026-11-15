@@ -45,7 +45,9 @@ pkg_bytes_space_width: fn(raw: [U8], at: Int) -> Int Never! {
         0xE1 -> if second == 0x9A && third == 0x80 -> 3 else -> 0
         // U+2000..U+200A, U+2028, U+2029, U+202F, U+205F
         0xE2 -> {
-            if second == 0x80 && ((third >= 0x80 && third <= 0x8A) || third == 0xA8 || third == 0xA9 || third == 0xAF) -> return 3
+            if second == 0x80 && ((third >= 0x80 && third <= 0x8A) || third == 0xA8 || third == 0xA9 || third == 0xAF) {
+                return 3
+            }
             if second == 0x81 && third == 0x9F -> return 3
             0
         }
@@ -69,9 +71,13 @@ pkg_bytes_skip_space: fn(raw: [U8], at: Int) -> Int Never! {
 // (a colon declaration head such as `workspace: module`), else -1.
 pkg_bytes_colon_keyword_end: fn(raw: [U8], at: Int, keyword: [U8]) -> Int Never! {
     colon: pkg_bytes_skip_space(raw, at)
-    if pkg_bytes_code(raw, colon) != 58 || pkg_bytes_code(raw, colon + 1) == 58 || pkg_bytes_code(raw, colon + 1) == 61 -> return -1
+    if pkg_bytes_code(raw, colon) != 58 || pkg_bytes_code(raw, colon + 1) == 58 || pkg_bytes_code(raw, colon + 1) == 61 {
+        return -1
+    }
     start: pkg_bytes_skip_space(raw, colon + 1)
-    if !pkg_bytes_starts_with(raw, start, keyword) || pkg_bytes_is_word(pkg_bytes_code(raw, start + keyword.len())) -> return -1
+    if !pkg_bytes_starts_with(raw, start, keyword) || pkg_bytes_is_word(pkg_bytes_code(raw, start + keyword.len())) {
+        return -1
+    }
     start + keyword.len()
 }
 

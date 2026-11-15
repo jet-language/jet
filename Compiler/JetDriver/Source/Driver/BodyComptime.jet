@@ -123,7 +123,9 @@ jet_driver_comptime_diagnostic_key: fn(diagnostic: Diagnostic) -> String Never! 
 // (or added before it). The keys of the existing diagnostics are taken once
 // per call instead of recomputing every existing key for each addition.
 jet_driver_comptime_diagnostics_add: fn(diagnostics: &[Diagnostic], incoming: [Diagnostic]) Never! {
-    if incoming.len() == 0 -> return
+    if incoming.len() == 0 {
+        return
+    }
     seen := [String:Bool]{}
     loop existing in diagnostics -> seen[jet_driver_comptime_diagnostic_key(existing)] = true
     loop diagnostic in incoming {
@@ -133,6 +135,7 @@ jet_driver_comptime_diagnostics_add: fn(diagnostics: &[Diagnostic], incoming: [D
         diagnostics.push(diagnostic.copy())
     }
 }
+
 // A run returns its one graph on every exit, with later edits in its trail.
 jet_driver_comptime_take_registration: fn(finished: &&SemaRegistrationGraph?, partial: &&SemaRegistrationGraph?) -> SemaRegistrationGraph Never! {
     if finished == .Val(graph) -> return graph.move()
@@ -147,7 +150,9 @@ jet_driver_comptime_body_source_add: fn(
 ) Never! {
     item := sema_comptime_body_item_source(source)
     key: "{item.module_identity.id}\n{item.key}"
-    if known.get(key) != None -> return
+    if known.get(key) != None {
+        return
+    }
     known[key] = true
     sources.push(item)
 }
@@ -174,7 +179,9 @@ jet_driver_pending_comptime_body_sources: fn(
     // than rescanning every value per source.
     present := [String:Bool]{}
     loop value in values {
-        if value.kind == SemaComptimeItemKind.BodyExpression -> present["{value.module_identity.id}\n{value.key}"] = true
+        if value.kind == SemaComptimeItemKind.BodyExpression {
+            present["{value.module_identity.id}\n{value.key}"] = true
+        }
     }
     pending := [SemaComptimeBodySource]{}
     loop source in jet_driver_comptime_body_sources(modules) {
@@ -233,8 +240,16 @@ jet_driver_orchestrate_comptime_bodies: fn(
     diagnostics: &[Diagnostic],
 ) -> JetDriverComptimeBodyResult {
     jet_driver_comptime_body_pass(
-        graph, stage, initial_graph, initial_values, initial_functions,
-        initial_trace, load, request, diagnostics, 0,
+        graph,
+        stage,
+        initial_graph,
+        initial_values,
+        initial_functions,
+        initial_trace,
+        load,
+        request,
+        diagnostics,
+        0,
     )
 }
 
@@ -259,16 +274,24 @@ jet_driver_comptime_body_pass: fn(
     functions := initial_functions.move()
     trace := initial_trace.move()
     if current_graph.modules.len() != registration.modules.len() {
-        return jet_driver_comptime_body_returning(jet_driver_comptime_body_failure(
-            current_graph, values, functions, trace,
-            Val("semantic body rechecking did not return every registered module"),
-        ), registration)
+        return jet_driver_comptime_body_returning(
+            jet_driver_comptime_body_failure(
+                current_graph,
+                values,
+                functions,
+                trace,
+                Val("semantic body rechecking did not return every registered module"),
+            ),
+            registration,
+        )
     }
     jet_driver_comptime_diagnostics_add(diagnostics, current_graph.diagnostics)
     jet_driver_trace_step_begin(request.trace_sink, "comptime.body.pending")
     pending := jet_driver_pending_comptime_body_sources(current_graph.modules, values)
     jet_driver_trace_step_end(request.trace_sink, "comptime.body.pending", pending.len())
-    if request.trace_sink == .Val(sink) -> sink.progress("counters.comptime.bodies_pending", pending.len(), -1)
+    if request.trace_sink == .Val(sink) {
+        sink.progress("counters.comptime.bodies_pending", pending.len(), -1)
+    }
     if current_graph.complete && pending.len() == 0 && !jet_driver_has_errors(current_graph.diagnostics) {
         return jet_driver_comptime_body_returning(jet_driver_comptime_body_result(current_graph, values, functions, trace, true, false), registration)
     }
@@ -286,10 +309,16 @@ jet_driver_comptime_body_pass: fn(
     }
     pass: completed_passes + 1
     if pass > 256 {
-        return jet_driver_comptime_body_returning(jet_driver_comptime_body_failure(
-            current_graph, values, functions, trace,
-            Val("body comptime rechecking exceeded its bounded progress limit"),
-        ), registration)
+        return jet_driver_comptime_body_returning(
+            jet_driver_comptime_body_failure(
+                current_graph,
+                values,
+                functions,
+                trace,
+                Val("body comptime rechecking exceeded its bounded progress limit"),
+            ),
+            registration,
+        )
     }
     body_sources := [SemaComptimeItemSource]{}
     known := [String:Bool]{}
@@ -314,10 +343,16 @@ jet_driver_comptime_body_pass: fn(
     }
     if run.values.len() <= values.len() {
         sema_graph_trail_undo(registration, run.trail)
-        return jet_driver_comptime_body_returning(jet_driver_comptime_body_failure(
-            current_graph, values, functions, trace,
-            Val("body comptime rechecking made no staged-value progress"),
-        ), registration)
+        return jet_driver_comptime_body_returning(
+            jet_driver_comptime_body_failure(
+                current_graph,
+                values,
+                functions,
+                trace,
+                Val("body comptime rechecking made no staged-value progress"),
+            ),
+            registration,
+        )
     }
     earlier_values := values.move()
     earlier_functions := functions.move()
@@ -342,16 +377,30 @@ jet_driver_comptime_body_pass: fn(
             if differences.len() > 0 {
                 lines: differences.join("\n")
                 sema_graph_trail_undo(registration, run.trail)
-                return jet_driver_comptime_body_returning(jet_driver_comptime_body_failure(
-                    current_graph, values, functions, trace,
-                    Val("JET_RECHECK_VERIFY: the spliced local values differ from the full recheck:\n{lines}"),
-                ), registration)
+                return jet_driver_comptime_body_returning(
+                    jet_driver_comptime_body_failure(
+                        current_graph,
+                        values,
+                        functions,
+                        trace,
+                        Val("JET_RECHECK_VERIFY: the spliced local values differ from the full recheck:\n{lines}"),
+                    ),
+                    registration,
+                )
             }
         }
         sema_graph_trail_undo(registration, run.trail)
         return jet_driver_comptime_body_pass(
-            registration, stage, current_graph, values, functions, trace,
-            load, request, diagnostics, pass,
+            registration,
+            stage,
+            current_graph,
+            values,
+            functions,
+            trace,
+            load,
+            request,
+            diagnostics,
+            pass,
         )
     }
     // The refused splice was the last reader of the values and closures the
@@ -361,16 +410,31 @@ jet_driver_comptime_body_pass: fn(
     // The run's graph already carries every value: the recheck finalizes it
     // in place instead of copying the registration graph.
     rechecked := jet_driver_recheck_comptime_bodies(
-        registration, run.trail, stage, current_graph, body_sources,
-        values, functions, request, pass,
+        registration,
+        run.trail,
+        stage,
+        current_graph,
+        body_sources,
+        values,
+        functions,
+        request,
+        pass,
     )
     restored := rechecked.registration_graph.move()
     rechecked.registration_graph = None
     registration = restored.move() ?? panic("body finalization lost its registration graph")
     sema_graph_trail_undo(registration, run.trail)
     jet_driver_comptime_body_pass(
-        registration, stage, rechecked, values, functions, trace,
-        load, request, diagnostics, pass,
+        registration,
+        stage,
+        rechecked,
+        values,
+        functions,
+        trace,
+        load,
+        request,
+        diagnostics,
+        pass,
     )
 }
 
@@ -389,16 +453,28 @@ jet_driver_recheck_differences: fn(spliced: SemaGraphResult, full: SemaGraphResu
         theirs: full.modules[module_index]
         name: module_text(table, ours.module_identity)
         jet_driver_recheck_body_differences(name, ours.functions, theirs.functions, differences)
-        if "{ours.call_facts:Debug}" != "{theirs.call_facts:Debug}" -> differences.push("{name}: call facts differ")
-        if "{ours.name_references:Debug}" != "{theirs.name_references:Debug}" -> differences.push("{name}: name references differ")
-        if "{ours.comptime_body_sources:Debug}" != "{theirs.comptime_body_sources:Debug}" -> differences.push("{name}: body comptime sites differ")
-        if "{ours.diagnostics:Debug}" != "{theirs.diagnostics:Debug}" -> differences.push("{name}: diagnostics differ: {jet_driver_recheck_diagnostic_difference(ours.diagnostics, theirs.diagnostics)}")
-        if "{ours.failure_facts:Debug}" != "{theirs.failure_facts:Debug}" -> differences.push("{name}: failure facts differ")
+        if "{ours.call_facts:Debug}" != "{theirs.call_facts:Debug}" {
+            differences.push("{name}: call facts differ")
+        }
+        if "{ours.name_references:Debug}" != "{theirs.name_references:Debug}" {
+            differences.push("{name}: name references differ")
+        }
+        if "{ours.comptime_body_sources:Debug}" != "{theirs.comptime_body_sources:Debug}" {
+            differences.push("{name}: body comptime sites differ")
+        }
+        if "{ours.diagnostics:Debug}" != "{theirs.diagnostics:Debug}" {
+            differences.push("{name}: diagnostics differ: {jet_driver_recheck_diagnostic_difference(ours.diagnostics, theirs.diagnostics)}")
+        }
+        if "{ours.failure_facts:Debug}" != "{theirs.failure_facts:Debug}" {
+            differences.push("{name}: failure facts differ")
+        }
         our_rows := ours.copy()
         our_rows.functions = [FnBody]{}
         their_rows := theirs.copy()
         their_rows.functions = [FnBody]{}
-        if "{our_rows:Debug}" != "{their_rows:Debug}" -> differences.push("{name}: module rows differ")
+        if "{our_rows:Debug}" != "{their_rows:Debug}" {
+            differences.push("{name}: module rows differ")
+        }
         if differences.len() >= 20 -> return differences
     }
     if jet_driver_recheck_graph_rows(spliced) != jet_driver_recheck_graph_rows(full) {
@@ -420,7 +496,9 @@ jet_driver_recheck_first_missing: fn(diagnostics: [Diagnostic], others: [Diagnos
     present := [String:Bool]{}
     loop diagnostic in others -> present["{diagnostic:Debug}"] = true
     loop diagnostic in diagnostics {
-        if present.get("{diagnostic:Debug}") == None -> return "{diagnostic.code} at {diagnostic.span:Debug}: {diagnostic.what}"
+        if present.get("{diagnostic:Debug}") == None {
+            return "{diagnostic.code} at {diagnostic.span:Debug}: {diagnostic.what}"
+        }
     }
     "none"
 }
@@ -438,7 +516,9 @@ jet_driver_recheck_graph_rows: fn(graph: SemaGraphResult) -> String Never! {
 jet_driver_recheck_body_differences: fn(name: String, ours: [FnBody], theirs: [FnBody], differences: &[String]) Never! {
     if ours.len() == theirs.len() {
         loop index in 0..<ours.len() {
-            if "{ours[index]:Debug}" != "{theirs[index]:Debug}" -> differences.push("{name}: body {ours[index].key} differs")
+            if "{ours[index]:Debug}" != "{theirs[index]:Debug}" {
+                differences.push("{name}: body {ours[index].key} differs")
+            }
         }
         return
     }
@@ -447,10 +527,14 @@ jet_driver_recheck_body_differences: fn(name: String, ours: [FnBody], theirs: [F
     kept := [String:Bool]{}
     loop function in ours {
         kept[function.key] = true
-        if rechecked.get(function.key) == None -> differences.push("{name}: body {function.key} checked only in the splice")
+        if rechecked.get(function.key) == None {
+            differences.push("{name}: body {function.key} checked only in the splice")
+        }
     }
     loop function in theirs {
-        if kept.get(function.key) == None -> differences.push("{name}: body {function.key} checked only in the recheck")
+        if kept.get(function.key) == None {
+            differences.push("{name}: body {function.key} checked only in the recheck")
+        }
     }
 }
 
@@ -472,7 +556,9 @@ jet_driver_validate_checked_text: fn(
     known := [String:Bool]{}
     loop module_index in 0..<initial_graph.modules.len() {
         loop call in initial_graph.modules[module_index].comptime_requests {
-            if call.checked_text == .Val(evaluation) -> jet_driver_comptime_checked_text_source_add(sources, known, evaluation)
+            if call.checked_text == .Val(evaluation) {
+                jet_driver_comptime_checked_text_source_add(sources, known, evaluation)
+            }
         }
     }
     if sources.len() == 0 {
@@ -511,13 +597,16 @@ jet_driver_validate_checked_text: fn(
     }
     merged_graph := initial_graph.move()
     if jet_driver_merge_checked_text_functions(merged_graph, registration.module_table, run.functions) == .Val(problem) {
-        return jet_driver_comptime_body_returning(jet_driver_comptime_body_failure(
-            merged_graph,
-            run.values,
-            run.functions,
-            trace,
-            Val(problem),
-        ), registration)
+        return jet_driver_comptime_body_returning(
+            jet_driver_comptime_body_failure(
+                merged_graph,
+                run.values,
+                run.functions,
+                trace,
+                Val(problem),
+            ),
+            registration,
+        )
     }
     registration = jet_driver_merged_names(merged_graph, registration, request.compiler_threads)
     jet_driver_comptime_body_returning(jet_driver_comptime_body_result(merged_graph, run.values, run.functions, trace, true, false), registration)
@@ -639,8 +728,15 @@ jet_driver_land_local_values: fn(
         graph_facts: lent.graph_facts.move()
         lent.graph_facts = None
         run := jet_driver_run_comptime(
-            registration, [SemaGraphModuleResult]{}, graph_facts, body_sources, values, functions,
-            request, run_diagnostics, lent.memory_plan,
+            registration,
+            [SemaGraphModuleResult]{},
+            graph_facts,
+            body_sources,
+            values,
+            functions,
+            request,
+            run_diagnostics,
+            lent.memory_plan,
         )
         returned: run.graph_facts.move()
         run.graph_facts = None
@@ -666,7 +762,9 @@ jet_driver_land_local_values: fn(
         // The closures the pass adds are demanded in the next round of the
         // Core demand, after the bodies whose sites they serve.
         jet_driver_trace_step_begin(request.trace_sink, "comptime.land.carry")
-        loop index in functions.len()..<run.functions.len() -> run.functions[index].demand_round = bodies.core_tally.rounds
+        loop index in functions.len()..<run.functions.len() {
+            run.functions[index].demand_round = bodies.core_tally.rounds
+        }
         values = run.values.move()
         functions = run.functions.move()
         jet_driver_comptime_trace_append(trace, run.trace)
@@ -714,7 +812,9 @@ jet_driver_carried_return: fn(carried: &[SemaPassFacts], lent: &&JetDriverLentFa
 jet_driver_local_values_open: fn(bodies: SemaFinalizeBodies, stage: SemaComptimeDeclarationStage, functions: [SemaComptimeFunctionResult]) -> Bool Never! {
     if !bodies.complete || sema_local_values_blocked(stage.diagnostics) -> return false
     loop graph_module in bodies.modules {
-        if !graph_module.complete || sema_local_values_blocked(graph_module.diagnostics) -> return false
+        if !graph_module.complete || sema_local_values_blocked(graph_module.diagnostics) {
+            return false
+        }
     }
     function_diagnostics := [Diagnostic]{}
     sema_comptime_function_diagnostics(functions, function_diagnostics) && !sema_local_values_blocked(function_diagnostics)
@@ -765,7 +865,11 @@ jet_driver_verify_landed_values: fn(
     registration.core_stand_ins = None
     _ := sema_local_splice_demand_swap(registration, held)
     differences := jet_driver_recheck_differences(landed, full, registration.module_table)
-    if full.core_stand_in_rerun != "" -> differences.push("the full recheck's Core stand-ins would not do ({full.core_stand_in_rerun}) where the landed finalization's did")
-    if differences.len() > 0 -> problem = Val("JET_RECHECK_VERIFY: the local values landed before the whole-program passes differ from the full recheck:\n{differences.join("\n")}")
+    if full.core_stand_in_rerun != "" {
+        differences.push("the full recheck's Core stand-ins would not do ({full.core_stand_in_rerun}) where the landed finalization's did")
+    }
+    if differences.len() > 0 {
+        problem = Val("JET_RECHECK_VERIFY: the local values landed before the whole-program passes differ from the full recheck:\n{differences.join("\n")}")
+    }
     registration
 }

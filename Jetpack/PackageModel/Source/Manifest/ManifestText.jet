@@ -35,9 +35,11 @@ pkg_top_level_commas: fn(body: String) -> [String] Never! {
             34 -> quoted = true
             40 | 91 | 123 -> depth += 1
             41 | 93 | 125 -> depth -= 1
-            44 -> if depth == 0 {
-                out.push(pkg_bytes_text(raw, start, index))
-                start = index + 1
+            44 -> {
+                if depth == 0 {
+                    out.push(pkg_bytes_text(raw, start, index))
+                    start = index + 1
+                }
             }
             else -> {}
         }
@@ -194,7 +196,7 @@ pkg_parse_list: fn(value: String) -> [String] Never! {
     if text.starts_with("[") {
         rest: text.removeprefix("[")
         if pkg_text_rfind_byte(rest, 93) == {
-            .Val(end) -> body = pkg_binder_slice(rest, 0, end)
+            .Val(end) -> { body = pkg_binder_slice(rest, 0, end) }
             .None -> {}
         }
     }
@@ -228,7 +230,9 @@ pkg_split_field: fn(value: String) -> ManifestEntry? Never! {
             40 | 91 | 123 -> depth += 1
             41 | 93 | 125 -> depth -= 1
             58 -> {
-                if depth == 0 -> return Val(ManifestEntry{key: pkg_bytes_text(raw, 0, index).trim(), value: pkg_bytes_text(raw, index + 1, raw.len()).trim()})
+                if depth == 0 {
+                    return Val(ManifestEntry{key: pkg_bytes_text(raw, 0, index).trim(), value: pkg_bytes_text(raw, index + 1, raw.len()).trim()})
+                }
             }
             else -> {}
         }
@@ -265,8 +269,10 @@ pkg_split_package_binding: fn(entry: String) -> ManifestBinding? Never! {
             34 -> quoted = true
             40 | 91 | 123 -> depth += 1
             41 | 93 | 125 -> depth -= 1
-            58 -> if depth == 0 {
-                return Val(ManifestBinding{left: pkg_bytes_text(raw, 0, index), right: pkg_bytes_text(raw, index + 1, raw.len())})
+            58 -> {
+                if depth == 0 {
+                    return Val(ManifestBinding{left: pkg_bytes_text(raw, 0, index), right: pkg_bytes_text(raw, index + 1, raw.len())})
+                }
             }
             else -> {}
         }
@@ -320,21 +326,27 @@ pkg_top_level_entry_spans: fn(value: String) -> [EditSpan] Never! {
             next
         }
         if depth == 0 && (code == 44 || code == 10) {
-            if pkg_bytes_text(raw, start, index).trim() != "" -> entries.push(EditSpan{start: start, end: index})
+            if pkg_bytes_text(raw, start, index).trim() != "" {
+                entries.push(EditSpan{start: start, end: index})
+            }
             start = index + 1
             index += 1
             next
         }
         width: pkg_bytes_space_width(raw, index)
         if depth == 0 && width > 0 && pkg_implicit_field_start(raw, index, pkg_bytes_text(raw, start, index)) {
-            if pkg_bytes_text(raw, start, index).trim() != "" -> entries.push(EditSpan{start: start, end: index})
+            if pkg_bytes_text(raw, start, index).trim() != "" {
+                entries.push(EditSpan{start: start, end: index})
+            }
             index = pkg_bytes_skip_space(raw, index)
             start = index
             next
         }
         index += if width > 0 -> width else -> 1
     }
-    if pkg_bytes_text(raw, start, raw.len()).trim() != "" -> entries.push(EditSpan{start: start, end: raw.len()})
+    if pkg_bytes_text(raw, start, raw.len()).trim() != "" {
+        entries.push(EditSpan{start: start, end: raw.len()})
+    }
     entries
 }
 
@@ -346,10 +358,14 @@ pkg_implicit_field_start: fn(raw: [U8], index: Int, current: String) -> Bool Nev
     trimmed: current.trim_end().bytes()
     if trimmed.len() == 0 -> return false
     last: Int{trimmed[trimmed.len() - 1]}
-    if !((pkg_bytes_is_word(last) && last != 95) || last == 125 || last == 93 || last == 41 || last == 34) -> return false
+    if !((pkg_bytes_is_word(last) && last != 95) || last == 125 || last == 93 || last == 41 || last == 34) {
+        return false
+    }
     cursor := pkg_bytes_skip_space(raw, index)
     first: pkg_bytes_code(raw, cursor)
-    if !((first >= 65 && first <= 90) || (first >= 97 && first <= 122) || first == 95) -> return false
+    if !((first >= 65 && first <= 90) || (first >= 97 && first <= 122) || first == 95) {
+        return false
+    }
     cursor += 1
     loop pkg_bytes_is_word(pkg_bytes_code(raw, cursor)) -> cursor += 1
     cursor = pkg_bytes_skip_space(raw, cursor)
@@ -379,10 +395,12 @@ pkg_top_level_lines_or_commas: fn(body: String) -> [String] Never! {
             34 -> quoted = true
             40 | 91 | 123 -> depth += 1
             41 | 93 | 125 -> depth -= 1
-            44 | 10 -> if depth == 0 {
-                current: pkg_bytes_text(raw, start, index)
-                if current.trim() != "" -> out.push(current)
-                start = index + 1
+            44 | 10 -> {
+                if depth == 0 {
+                    current: pkg_bytes_text(raw, start, index)
+                    if current.trim() != "" -> out.push(current)
+                    start = index + 1
+                }
             }
             else -> {}
         }
@@ -405,7 +423,9 @@ pkg_named_entries_checked: fn(body: String, scope: String) -> [ManifestEntry] Pa
     seen := [String]{}
     loop entry in pkg_top_level_entries(body) {
         field: pkg_split_field(entry) ?? return Err(PackageParseError.MalformedField("{scope}: {entry}"))
-        if seen.contains(field.key) -> return Err(PackageParseError.Composition("`{scope}.{field.key}` is declared more than once"))
+        if seen.contains(field.key) {
+            return Err(PackageParseError.Composition("`{scope}.{field.key}` is declared more than once"))
+        }
         seen.push(field.key)
         entries.push(field)
     }
@@ -435,7 +455,9 @@ pkg_is_ascii_identifier: fn(value: String) -> Bool Never! {
     raw: value.bytes()
     if raw.len() == 0 -> return false
     first: Int{raw[0]}
-    if !((first >= 65 && first <= 90) || (first >= 97 && first <= 122) || first == 95) -> return false
+    if !((first >= 65 && first <= 90) || (first >= 97 && first <= 122) || first == 95) {
+        return false
+    }
     loop index in 1..<raw.len() {
         if !pkg_bytes_is_word(Int{raw[index]}) -> return false
     }

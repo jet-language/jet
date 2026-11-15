@@ -1,13 +1,29 @@
 // Evaluator claims, driven by the committed nix-compat differential fixtures
 // (embedded verbatim below).
 use jetpack_nix_eval.[
-    NIXEVAL_EXPRESSION_LIMIT, NIXEVAL_LATENCY_MICROS, NIXEVAL_MEMORY_BYTES,
-    NIXEVAL_NIXPKGS_NAR_HASH, NIXEVAL_NIXPKGS_REVISION, NIXEVAL_TOKEN_LIMIT, NixEvalAuthority,
-    NixEvalDerivation, NixEvalDerivationOutput, NixEvalDevShell, NixEvalError, NixEvalJSON,
-    NixEvalOracleIdentity, NixEvalOracleManifest, nixeval_budget, nixeval_evaluate_derivation,
-    nixeval_evaluate_derivation_output, nixeval_evaluate_derivation_with_import_authority,
-    nixeval_evaluate_devshell, nixeval_evaluate_devshell_output,
-    nixeval_evaluate_devshell_with_import_authority, nixeval_push_text, nixeval_required_systems,
+    NIXEVAL_EXPRESSION_LIMIT,
+    NIXEVAL_LATENCY_MICROS,
+    NIXEVAL_MEMORY_BYTES,
+    NIXEVAL_NIXPKGS_NAR_HASH,
+    NIXEVAL_NIXPKGS_REVISION,
+    NIXEVAL_TOKEN_LIMIT,
+    NixEvalAuthority,
+    NixEvalDerivation,
+    NixEvalDerivationOutput,
+    NixEvalDevShell,
+    NixEvalError,
+    NixEvalJSON,
+    NixEvalOracleIdentity,
+    NixEvalOracleManifest,
+    nixeval_budget,
+    nixeval_evaluate_derivation,
+    nixeval_evaluate_derivation_output,
+    nixeval_evaluate_derivation_with_import_authority,
+    nixeval_evaluate_devshell,
+    nixeval_evaluate_devshell_output,
+    nixeval_evaluate_devshell_with_import_authority,
+    nixeval_push_text,
+    nixeval_required_systems,
 ]
 
 // tests/fixtures/nix-compat/stage-a.json
@@ -160,7 +176,7 @@ NIXEVAL_TEST_STAGE_A_JSON: #run { ``{
 `` }
 
 // tests/fixtures/nix-compat/stage-a-authority.json
-NIXEVAL_TEST_STAGE_A_AUTHORITY_JSON: #run { ``{
+NIXEVAL_TEST_STAGE_A_AUTHORITY_JSON: #run { `{
   "schema": 1,
   "oracle": {
     "nix_version": "2.34.8",
@@ -188,10 +204,10 @@ NIXEVAL_TEST_STAGE_A_AUTHORITY_JSON: #run { ``{
     }
   ]
 }
-`` }
+` }
 
 // tests/fixtures/nix-compat/stage-a-derivation.json
-NIXEVAL_TEST_STAGE_A_DERIVATION_JSON: #run { ``{
+NIXEVAL_TEST_STAGE_A_DERIVATION_JSON: #run { `{
   "schema": 1,
   "oracle": {
     "nix_version": "2.34.8",
@@ -278,7 +294,7 @@ NIXEVAL_TEST_STAGE_A_DERIVATION_JSON: #run { ``{
     }
   ]
 }
-`` }
+` }
 
 // tests/fixtures/nix-compat/breadth.json
 NIXEVAL_TEST_BREADTH_JSON: #run { ``{
@@ -533,20 +549,24 @@ nixeval_test_resource_limit: fn(error: NixEvalError) -> String {
 
 // An authority answering only the listed requests, like the Rust closures
 // over a BTreeMap; unlisted requests are denied with `<label> `<request>``.
-nixeval_test_map_authority: fn(files: [String: String], label: String) -> NixEvalAuthority {
+nixeval_test_map_authority: fn(files: [String:String], label: String) -> NixEvalAuthority {
     responses: files.copy()
     prefix: label.copy()
-    NixEvalAuthority{answer: fn(request: String) -[]> {
-        if responses.get(request) == {
-            .Val(text) -> Ok(text)
-            .None -> Err(NixEvalError.Denied("{prefix} `{request}`"))
-        }
-    }}
+    NixEvalAuthority{
+        answer: fn(request: String) -[]> {
+            if responses.get(request) == {
+                .Val(text) -> Ok(text)
+                .None -> Err(NixEvalError.Denied("{prefix} `{request}`"))
+            }
+        },
+    }
 }
 
-nixeval_test_string_map: fn(document: NixEvalJSON, index: Int) -> [String: String] {
-    values := [String: String]{}
-    loop entry in nixeval_test_object(document, index) -> values[entry.key] = nixeval_test_string(document, entry.value)
+nixeval_test_string_map: fn(document: NixEvalJSON, index: Int) -> [String:String] {
+    values := [String:String]{}
+    loop entry in nixeval_test_object(document, index) {
+        values[entry.key] = nixeval_test_string(document, entry.value)
+    }
     values
 }
 
@@ -567,9 +587,11 @@ nixeval_test_breadth_variant: fn(source: String, seed: Int) -> String {
     }
 }
 
-nixeval_test_seeds: fn(document: NixEvalJSON, root: [String: Int]) -> [Int] {
+nixeval_test_seeds: fn(document: NixEvalJSON, root: [String:Int]) -> [Int] {
     seeds := [Int]{}
-    loop seed in nixeval_test_array(document, nixeval_test_get(root, "fuzz_seeds")) -> seeds.push(nixeval_test_integer(document, seed))
+    loop seed in nixeval_test_array(document, nixeval_test_get(root, "fuzz_seeds")) {
+        seeds.push(nixeval_test_integer(document, seed))
+    }
     seeds
 }
 
@@ -581,7 +603,8 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
 }
 
 #Test("nixeval native devshell projects literal packages and loss facts") {
-    evaluated: nixeval_test_shell(`
+    evaluated: nixeval_test_shell(
+        `
         {
           outputs = { devShells.x86_64-linux.default = pkgs.mkShell {
             packages = [ pkgs.ripgrep pkgs.fd ];
@@ -589,7 +612,9 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
             shellHook = "export FOO=1";
           }; };
         }
-        `, "x86_64-linux")
+        `,
+        "x86_64-linux",
+    )
     assert_eq(evaluated.system, "x86_64-linux")
     assert_eq(evaluated.packages, [String]{"fd", "nodejs", "ripgrep"})
     assert_eq(evaluated.unsupported, [String]{"shellHook"})
@@ -654,9 +679,7 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
 
 #Test("nixeval native devshell rejects truncated expressions without panicking") {
     sources: [String]{"let", "let value =", "[", "{{ outputs =", "(pkgs.mkShell"}
-    loop source in sources {
-        nixeval_test_shell_error(source, "x86_64-linux")
-    }
+    loop source in sources { nixeval_test_shell_error(source, "x86_64-linux") }
 }
 
 #Test("nixeval native evaluator rejects oversized input before parsing") {
@@ -664,7 +687,7 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
     assert_eq(nixeval_test_shell_error(source, "x86_64-linux"), NixEvalError.InputTooLarge)
     assert_eq(nixeval_test_derivation_error(source, "x86_64-linux"), NixEvalError.InputTooLarge)
     if nixeval_evaluate_derivation_output(source, "x86_64-linux", "out") == {
-        .Ok(_) -> panic("oversized derivation output source must fail")
+        .Ok(_) -> { panic("oversized derivation output source must fail") }
         .Err(error) -> assert_eq(error, NixEvalError.InputTooLarge)
     }
 }
@@ -683,12 +706,15 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
 }
 
 #Test("nixeval native devshell preserves string contexts during projection") {
-    evaluated: nixeval_test_shell(`{
+    evaluated: nixeval_test_shell(
+        `{
           devShells.x86_64-linux.default = pkgs.mkShell {
             packages = [ "${pkgs.fd}" (builtins.toString pkgs.ripgrep) ];
             shellHook = "echo ${pkgs.fd}";
           };
-        }`, "x86_64-linux")
+        }`,
+        "x86_64-linux",
+    )
     assert_eq(evaluated.packages, [String]{"fd", "ripgrep"})
     assert_eq(evaluated.unsupported, [String]{"shellHook"})
 }
@@ -701,7 +727,7 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
 }
 
 #Test("nixeval native devshell imports bounded relative sources") {
-    files := [String: String]{}
+    files := [String:String]{}
     files["sub/shell.nix"] = `{ pkgs }: pkgs.mkShell { packages = [ "${pkgs.fd}" ]; buildInputs = import ../inputs.nix pkgs; }`
     files["inputs.nix"] = "pkgs: [ (builtins.toString pkgs.ripgrep) ]"
     authority: nixeval_test_map_authority(files, "missing test import")
@@ -719,12 +745,14 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
     escape_authority: NixEvalAuthority{answer: fn(request: String) -[]> { Ok("{request}: not used") }}
     escape: nixeval_test_authority_shell_error("{{ devShells.x86_64-linux.default = import ../outside.nix; }}", "x86_64-linux", escape_authority)
     assert(nixeval_test_unsupported(escape).contains("escapes"))
-    cycle_authority: NixEvalAuthority{answer: fn(request: String) -[]> {
-        if request == {
-            "a.nix" -> Ok("import ./a.nix")
-            else -> Ok("pkgs.fd")
-        }
-    }}
+    cycle_authority: NixEvalAuthority{
+        answer: fn(request: String) -[]> {
+            if request == {
+                "a.nix" -> Ok("import ./a.nix")
+                else -> Ok("pkgs.fd")
+            }
+        },
+    }
     cycle: nixeval_test_authority_shell_error("{{ devShells.x86_64-linux.default = import ./a.nix; }}", "x86_64-linux", cycle_authority)
     assert(nixeval_test_invalid(cycle).contains("cyclic"))
 }
@@ -753,7 +781,7 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
         system: nixeval_test_text(document, value_case, "system")
         output := "default"
         if value_case.get("output") == {
-            .Val(output_index) -> output = document.string(output_index) ?? "default"
+            .Val(output_index) -> { output = document.string(output_index) ?? "default" }
             .None -> {}
         }
         evaluated: nixeval_evaluate_devshell_output(source, system, output) ?? panic("pinned Stage A devShell value must evaluate")
@@ -807,7 +835,7 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
         assert_eq(nixeval_test_strings(document, nixeval_test_get(nix_value, "packages")), packages)
         output := "default"
         if value.get("output") == {
-            .Val(output_index) -> output = document.string(output_index) ?? "default"
+            .Val(output_index) -> { output = document.string(output_index) ?? "default" }
             .None -> {}
         }
         loop seed in seeds {
@@ -862,7 +890,8 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
 }
 
 #Test("nixeval native derivation builds a pure request with required builtins") {
-    evaluated: nixeval_test_derivation(`
+    evaluated: nixeval_test_derivation(
+        `
         builtins.derivationStrict {
           name = builtins.concatStringsSep "-" [ "hello" "native" ];
           system = builtins.currentSystem;
@@ -871,7 +900,9 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
           message = builtins.toJSON (builtins.fromJSON "{\"ok\":true,\"count\":2}");
           source = builtins.storePath "/nix/store/0123456789abcdfghijklmnpqrsvwxyz-source";
         }
-        `, "x86_64-linux")
+        `,
+        "x86_64-linux",
+    )
     assert_eq(evaluated.name, "hello-native")
     assert_eq(evaluated.system, "x86_64-linux")
     assert_eq(evaluated.builder, "/bin/sh")
@@ -884,7 +915,8 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
 }
 
 #Test("nixeval native derivation keeps lazy fields lazy until strict") {
-    evaluated: nixeval_test_shell(`
+    evaluated: nixeval_test_shell(
+        `
         let d = builtins.derivation {
           name = "lazy";
           system = "x86_64-linux";
@@ -892,9 +924,12 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
           unused = unused;
         };
         in { devShells.x86_64-linux.default = pkgs.mkShell { packages = [ d.type ]; }; }
-        `, "x86_64-linux")
+        `,
+        "x86_64-linux",
+    )
     assert_eq(evaluated.packages, [String]{"derivation"})
-    error: nixeval_test_shell_error(`
+    error: nixeval_test_shell_error(
+        `
         let d = builtins.derivationStrict {
           name = "strict";
           system = "x86_64-linux";
@@ -902,7 +937,9 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
           unused = unused;
         };
         in { devShells.x86_64-linux.default = pkgs.mkShell { packages = [ d.type ]; }; }
-        `, "x86_64-linux")
+        `,
+        "x86_64-linux",
+    )
     assert(nixeval_test_invalid(error).contains("missing foreign flake value `unused`"))
 }
 
@@ -950,7 +987,7 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
         assert_eq(evaluated.input_sources, nixeval_test_strings(document, nixeval_test_get(expected, "input_sources")))
         expected_outputs := [Int]{}
         if expected.get("outputs") == {
-            .Val(outputs) -> expected_outputs = nixeval_test_array(document, outputs)
+            .Val(outputs) -> { expected_outputs = nixeval_test_array(document, outputs) }
             .None -> expected_outputs.push(nixeval_test_get(expected, "output"))
         }
         assert_eq(evaluated.outputs.len(), expected_outputs.len())
@@ -964,7 +1001,8 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
 }
 
 #Test("nixeval native devshell treats indented hooks as unsupported loss") {
-    evaluated: nixeval_test_shell(`{
+    evaluated: nixeval_test_shell(
+        `{
           devShells.x86_64-linux.default = pkgs.mkShell {
             packages = [ pkgs.fd ];
             shellHook = ''
@@ -972,13 +1010,16 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
               export FOO=1
             '';
           };
-        }`, "x86_64-linux")
+        }`,
+        "x86_64-linux",
+    )
     assert_eq(evaluated.packages, [String]{"fd"})
     assert_eq(evaluated.unsupported, [String]{"shellHook"})
 }
 
 #Test("nixeval native devshell applies bounded package overlays") {
-    evaluated: nixeval_test_shell(`
+    evaluated: nixeval_test_shell(
+        `
         let overlay = final: prev: { custom = prev.fd; };
         in {
           devShells.x86_64-linux.default =
@@ -986,12 +1027,15 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
               packages = [ (import pkgs { overlays = [ overlay ]; }).custom ];
             };
         }
-        `, "x86_64-linux")
+        `,
+        "x86_64-linux",
+    )
     assert_eq(evaluated.packages, [String]{"fd"})
 }
 
 #Test("nixeval native devshell overlay final sees following override and prev stays stable") {
-    evaluated: nixeval_test_shell(`
+    evaluated: nixeval_test_shell(
+        `
         let first = final: prev: {
           from_prev = prev.fd;
           from_final = final.future;
@@ -1010,32 +1054,43 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
               ];
             };
         }
-        `, "x86_64-linux")
+        `,
+        "x86_64-linux",
+    )
     assert_eq(evaluated.packages, [String]{"fd", "ripgrep"})
 }
 
 #Test("nixeval native devshell merge keeps overlay packages lazy") {
-    evaluated: nixeval_test_shell(`
+    evaluated: nixeval_test_shell(
+        `
         let overlayPkgs = pkgs // { custom = pkgs.ripgrep; };
         in { devShells.x86_64-linux.default = overlayPkgs.mkShell { packages = [ overlayPkgs.custom ]; }; }
-        `, "x86_64-linux")
+        `,
+        "x86_64-linux",
+    )
     assert_eq(evaluated.packages, [String]{"ripgrep"})
 }
 
 #Test("nixeval native evaluator rejects fetchers and cross system packages without authority") {
-    fetch_error: nixeval_test_shell_error(`{
+    fetch_error: nixeval_test_shell_error(
+        `{
           devShells.x86_64-linux.default = pkgs.mkShell {
             packages = [ (builtins.fetchurl { url = "https://example.invalid/source"; }) ];
           };
-        }`, "x86_64-linux")
+        }`,
+        "x86_64-linux",
+    )
     assert(nixeval_test_unsupported(fetch_error).contains("explicit fetch authority"))
     cross_error: nixeval_test_shell_error("{{ devShells.x86_64-linux.default = pkgs.mkShell {{ packages = [ pkgs.pkgsCross.aarch64-multiplatform.foo ]; }}; }}", "x86_64-linux")
     assert(nixeval_test_unsupported(cross_error).contains("explicit target"))
-    external_flake_error: nixeval_test_shell_error(`{
+    external_flake_error: nixeval_test_shell_error(
+        `{
           devShells.x86_64-linux.default = pkgs.mkShell {
             packages = [ (builtins.getFlake "github:NixOS/nixpkgs") ];
           };
-        }`, "x86_64-linux")
+        }`,
+        "x86_64-linux",
+    )
     reason: nixeval_test_unsupported(external_flake_error)
     assert(reason.contains("external flakes") && reason.contains("provider authority"))
 }
@@ -1056,7 +1111,9 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
         assert_eq(nixeval_test_strings(document, nixeval_test_get(nix_value, "packages")), expected_packages)
         nix_cross_packages := [String]{}
         if nix_value.get("cross_packages") == {
-            .Val(cross_index) -> nix_cross_packages = nixeval_test_strings(document, cross_index)
+            .Val(cross_index) -> {
+                nix_cross_packages = nixeval_test_strings(document, cross_index)
+            }
             .None -> {}
         }
         assert_eq(nix_cross_packages, expected_cross_packages)

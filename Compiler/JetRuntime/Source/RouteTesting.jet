@@ -2,7 +2,10 @@
 // lifecycle ordering stay in Core.
 
 // The thread's one pending testing failure (TestScope.jet).
-#Export(c) jet_testing_record_failure: fn(message: I64, detail: I64) { jet_rt_testing_record_failure(message, detail) }
+#Export(c) jet_testing_record_failure: fn(message: I64, detail: I64) {
+    jet_rt_testing_record_failure(message, detail)
+}
+
 #Export(c) jet_testing_clear_failure: fn() { jet_rt_testing_clear_failure() }
 
 // testing.skip: `line` (Core's `skipped: <reason>`) joins the running unit's
@@ -17,7 +20,7 @@ testing_flag: fn(value: Bool) -> I64 { if value -> I64{1} else -> I64{0} }
 testing_has_nul: fn(text: I64) -> Bool {
     at := I64{0}
     loop at < rt_text_len(text) {
-        if (rt_text_byte(wrapping(rt_text_data(text) + at)) == I64{0}) -> return true
+        if (rt_text_byte(wrapping(rt_text_data(text) + at)) == I64{0}) { return true }
         at += I64{1}
     }
     false
@@ -31,31 +34,51 @@ testing_evidence_new: fn(ok: I64, text: I64, missing: I64) -> I64 {
     rt_text_store(wrapping(value + I64{16}), missing)
     value
 }
-#Export(c) jet_rt_record_new_jet_testing_evidence_read: fn(ok: Bool, text: I64, missing: Bool) -> I64 { testing_evidence_new(testing_flag(ok), jet_rt_string_clone(text), testing_flag(missing)) }
-#Export(c) jet_rt_record_get_jet_testing_evidence_read_ok: fn(value: I64) -> Bool { rt_text_word(value) != I64{0} }
-#Export(c) jet_rt_record_get_jet_testing_evidence_read_text: fn(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(wrapping(value + I64{8}))) }
-#Export(c) jet_rt_record_get_jet_testing_evidence_read_missing: fn(value: I64) -> Bool { rt_text_word(wrapping(value + I64{16})) != I64{0} }
-#Export(c) jet_rt_handle_clone_jet_testing_evidence_read: fn(value: I64) -> I64 { testing_evidence_new(rt_text_word(value), jet_rt_string_clone(rt_text_word(wrapping(value + I64{8}))), rt_text_word(wrapping(value + I64{16}))) }
+
+#Export(c) jet_rt_record_new_jet_testing_evidence_read: fn(ok: Bool, text: I64, missing: Bool) -> I64 {
+    testing_evidence_new(testing_flag(ok), jet_rt_string_clone(text), testing_flag(missing))
+}
+
+#Export(c) jet_rt_record_get_jet_testing_evidence_read_ok: fn(value: I64) -> Bool {
+    rt_text_word(value) != I64{0}
+}
+
+#Export(c) jet_rt_record_get_jet_testing_evidence_read_text: fn(value: I64) -> I64 {
+    jet_rt_string_clone(rt_text_word(wrapping(value + I64{8})))
+}
+
+#Export(c) jet_rt_record_get_jet_testing_evidence_read_missing: fn(value: I64) -> Bool {
+    rt_text_word(wrapping(value + I64{16})) != I64{0}
+}
+
+#Export(c) jet_rt_handle_clone_jet_testing_evidence_read: fn(value: I64) -> I64 {
+    testing_evidence_new(rt_text_word(value), jet_rt_string_clone(rt_text_word(wrapping(value + I64{8}))), rt_text_word(wrapping(value + I64{16})))
+}
+
 #Export(c) jet_rt_handle_drop_jet_testing_evidence_read: fn(value: I64) {
-    if (value == I64{0}) -> return
+    if (value == I64{0}) {
+        return
+    }
     jet_rt_string_drop(rt_text_word(wrapping(value + I64{8})))
     jet_rt_free(value, I64{24}, I64{8})
 }
+
 #Export(c) jet_rt_handle_eq_jet_testing_evidence_read: fn(left: I64, right: I64) -> Bool {
-    rt_text_word(left) == rt_text_word(right) && rt_text_word(wrapping(left + I64{16})) == rt_text_word(wrapping(right + I64{16})) &&
-        jet_rt_string_eq(rt_text_word(wrapping(left + I64{8})), rt_text_word(wrapping(right + I64{8})))
+    rt_text_word(left) == rt_text_word(right) && rt_text_word(wrapping(left + I64{16})) == rt_text_word(wrapping(right + I64{16})) && jet_rt_string_eq(rt_text_word(wrapping(left + I64{8})), rt_text_word(wrapping(right + I64{8})))
 }
 
 // std::fs::read_to_string: NotFound is `missing`; every other failure
 // (including invalid UTF-8 and std's NUL refusal) is not.
 #Export(c) jet_testing_evidence_read_raw: fn(path: I64) -> I64 {
-    if testing_has_nul(path) -> return testing_evidence_new(I64{0}, jet_rt_string_builder_new(), I64{0})
+    if testing_has_nul(path) {
+        return testing_evidence_new(I64{0}, jet_rt_string_builder_new(), I64{0})
+    }
     scratch: jet_rt_alloc(I64{8}, I64{8})
     status: env_read_file(path, scratch)
     out: rt_text_word(scratch)
     jet_rt_free(scratch, I64{8}, I64{8})
-    if (status == I64{1}) -> return testing_evidence_new(I64{1}, out, I64{0})
-    if (status < I64{0}) -> jet_rt_string_drop(out)
+    if (status == I64{1}) { return testing_evidence_new(I64{1}, out, I64{0}) }
+    if (status < I64{0}) { jet_rt_string_drop(out) }
     testing_evidence_new(I64{0}, jet_rt_string_builder_new(), if (status == I64{0}) -> I64{1} else -> I64{0})
 }
 
@@ -66,15 +89,31 @@ testing_facts_new: fn(pid: I64, thread: I64) -> I64 {
     rt_text_store(wrapping(value + I64{8}), thread)
     value
 }
-#Export(c) jet_rt_record_new_jet_testing_temp_facts: fn(pid: I64, thread: I64) -> I64 { testing_facts_new(pid, jet_rt_string_clone(thread)) }
-#Export(c) jet_rt_record_get_jet_testing_temp_facts_pid: fn(value: I64) -> I64 { rt_text_word(value) }
-#Export(c) jet_rt_record_get_jet_testing_temp_facts_thread: fn(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(wrapping(value + I64{8}))) }
-#Export(c) jet_rt_handle_clone_jet_testing_temp_facts: fn(value: I64) -> I64 { testing_facts_new(rt_text_word(value), jet_rt_string_clone(rt_text_word(wrapping(value + I64{8})))) }
+
+#Export(c) jet_rt_record_new_jet_testing_temp_facts: fn(pid: I64, thread: I64) -> I64 {
+    testing_facts_new(pid, jet_rt_string_clone(thread))
+}
+
+#Export(c) jet_rt_record_get_jet_testing_temp_facts_pid: fn(value: I64) -> I64 {
+    rt_text_word(value)
+}
+
+#Export(c) jet_rt_record_get_jet_testing_temp_facts_thread: fn(value: I64) -> I64 {
+    jet_rt_string_clone(rt_text_word(wrapping(value + I64{8})))
+}
+
+#Export(c) jet_rt_handle_clone_jet_testing_temp_facts: fn(value: I64) -> I64 {
+    testing_facts_new(rt_text_word(value), jet_rt_string_clone(rt_text_word(wrapping(value + I64{8}))))
+}
+
 #Export(c) jet_rt_handle_drop_jet_testing_temp_facts: fn(value: I64) {
-    if (value == I64{0}) -> return
+    if (value == I64{0}) {
+        return
+    }
     jet_rt_string_drop(rt_text_word(wrapping(value + I64{8})))
     jet_rt_free(value, I64{16}, I64{8})
 }
+
 #Export(c) jet_rt_handle_eq_jet_testing_temp_facts: fn(left: I64, right: I64) -> Bool {
     rt_text_word(left) == rt_text_word(right) && jet_rt_string_eq(rt_text_word(wrapping(left + I64{8})), rt_text_word(wrapping(right + I64{8})))
 }
@@ -82,6 +121,7 @@ testing_facts_new: fn(pid: I64, thread: I64) -> I64 {
 // std::thread::ThreadId: a process-unique counter, assigned to a thread the
 // first time it is asked for and kept for its lifetime.
 testing_thread_key := I64{0}
+
 testing_thread_next := I64{0}
 
 testing_thread_id: fn() -> I64 {
@@ -97,9 +137,7 @@ testing_thread_id: fn() -> I64 {
     id := jet_rt_tls_get(testing_thread_key)
     if (id == I64{0}) {
         host_lock()
-        #Unsafe("written under the host lock") {
-            testing_thread_next = testing_thread_next + I64{1}
-        }
+        #Unsafe("written under the host lock") { testing_thread_next += I64{1} }
         id = testing_thread_next
         host_unlock()
         jet_rt_tls_set(testing_thread_key, id)
@@ -124,24 +162,35 @@ testing_thread_id: fn() -> I64 {
     rt_text_store(wrapping(value + I64{24}), jet_rt_string_clone(text))
     value
 }
+
 #Export(c) jet_rt_record_get_jet_testing_temp_path_path: fn(value: I64) -> I64 { value }
-#Export(c) jet_rt_record_get_jet_testing_temp_path_text: fn(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(wrapping(value + I64{24}))) }
+
+#Export(c) jet_rt_record_get_jet_testing_temp_path_text: fn(value: I64) -> I64 {
+    jet_rt_string_clone(rt_text_word(wrapping(value + I64{24})))
+}
+
 #Export(c) jet_rt_handle_clone_jet_testing_temp_path: fn(value: I64) -> I64 {
     result: jet_rt_alloc(I64{32}, I64{8})
     data_u8_list_copy_into(value, result)
     rt_text_store(wrapping(result + I64{24}), jet_rt_string_clone(rt_text_word(wrapping(value + I64{24}))))
     result
 }
+
 #Export(c) jet_rt_handle_drop_jet_testing_temp_path: fn(value: I64) {
-    if (value == I64{0}) -> return
+    if (value == I64{0}) {
+        return
+    }
     data_u8_list_drop_fields(value)
     jet_rt_string_drop(rt_text_word(wrapping(value + I64{24})))
     jet_rt_free(value, I64{32}, I64{8})
 }
+
 #Export(c) jet_rt_handle_eq_jet_testing_temp_path: fn(left: I64, right: I64) -> Bool {
     length: rt_text_word(left)
-    if (length != rt_text_word(right)) -> return false
-    if !rt_text_equal_bytes(rt_text_word(wrapping(left + I64{16})), rt_text_word(wrapping(right + I64{16})), length) -> return false
+    if (length != rt_text_word(right)) { return false }
+    if !rt_text_equal_bytes(rt_text_word(wrapping(left + I64{16})), rt_text_word(wrapping(right + I64{16})), length) {
+        return false
+    }
     jet_rt_string_eq(rt_text_word(wrapping(left + I64{24})), rt_text_word(wrapping(right + I64{24})))
 }
 
@@ -155,15 +204,15 @@ testing_thread_id: fn() -> I64 {
     if (base == I64{0}) {
         base = rt_text_data(rt_static_text("/tmp"))
         base_length = I64{4}
-    } else {
-        base_length = host_startup_byte_length(base)
-    }
+    } else { base_length = host_startup_byte_length(base) }
     bytes: jet_rt_string_builder_new()
     name_length: rt_text_len(name)
     absolute: name_length > I64{0} && rt_text_byte(rt_text_data(name)) == I64{47}
     if !absolute {
         rt_text_append(bytes, base, base_length)
-        if (base_length > I64{0} && rt_text_byte(wrapping(wrapping(base + base_length) - I64{1})) != I64{47}) -> rt_text_append(bytes, rt_text_data(rt_static_text("/")), I64{1})
+        if (base_length > I64{0} && rt_text_byte(wrapping(wrapping(base + base_length) - I64{1})) != I64{47}) {
+            rt_text_append(bytes, rt_text_data(rt_static_text("/")), I64{1})
+        }
     }
     rt_text_append(bytes, rt_text_data(name), name_length)
     length: rt_text_len(bytes)
@@ -184,19 +233,37 @@ testing_remove_new: fn(ok: I64, missing: I64, cause: I64) -> I64 {
     rt_text_store(wrapping(value + I64{16}), cause)
     value
 }
-#Export(c) jet_rt_record_new_jet_testing_temp_remove: fn(ok: Bool, missing: Bool, cause: I64) -> I64 { testing_remove_new(testing_flag(ok), testing_flag(missing), jet_rt_string_clone(cause)) }
-#Export(c) jet_rt_record_get_jet_testing_temp_remove_ok: fn(value: I64) -> Bool { rt_text_word(value) != I64{0} }
-#Export(c) jet_rt_record_get_jet_testing_temp_remove_missing: fn(value: I64) -> Bool { rt_text_word(wrapping(value + I64{8})) != I64{0} }
-#Export(c) jet_rt_record_get_jet_testing_temp_remove_cause: fn(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(wrapping(value + I64{16}))) }
-#Export(c) jet_rt_handle_clone_jet_testing_temp_remove: fn(value: I64) -> I64 { testing_remove_new(rt_text_word(value), rt_text_word(wrapping(value + I64{8})), jet_rt_string_clone(rt_text_word(wrapping(value + I64{16})))) }
+
+#Export(c) jet_rt_record_new_jet_testing_temp_remove: fn(ok: Bool, missing: Bool, cause: I64) -> I64 {
+    testing_remove_new(testing_flag(ok), testing_flag(missing), jet_rt_string_clone(cause))
+}
+
+#Export(c) jet_rt_record_get_jet_testing_temp_remove_ok: fn(value: I64) -> Bool {
+    rt_text_word(value) != I64{0}
+}
+
+#Export(c) jet_rt_record_get_jet_testing_temp_remove_missing: fn(value: I64) -> Bool {
+    rt_text_word(wrapping(value + I64{8})) != I64{0}
+}
+
+#Export(c) jet_rt_record_get_jet_testing_temp_remove_cause: fn(value: I64) -> I64 {
+    jet_rt_string_clone(rt_text_word(wrapping(value + I64{16})))
+}
+
+#Export(c) jet_rt_handle_clone_jet_testing_temp_remove: fn(value: I64) -> I64 {
+    testing_remove_new(rt_text_word(value), rt_text_word(wrapping(value + I64{8})), jet_rt_string_clone(rt_text_word(wrapping(value + I64{16}))))
+}
+
 #Export(c) jet_rt_handle_drop_jet_testing_temp_remove: fn(value: I64) {
-    if (value == I64{0}) -> return
+    if (value == I64{0}) {
+        return
+    }
     jet_rt_string_drop(rt_text_word(wrapping(value + I64{16})))
     jet_rt_free(value, I64{24}, I64{8})
 }
+
 #Export(c) jet_rt_handle_eq_jet_testing_temp_remove: fn(left: I64, right: I64) -> Bool {
-    rt_text_word(left) == rt_text_word(right) && rt_text_word(wrapping(left + I64{8})) == rt_text_word(wrapping(right + I64{8})) &&
-        jet_rt_string_eq(rt_text_word(wrapping(left + I64{16})), rt_text_word(wrapping(right + I64{16})))
+    rt_text_word(left) == rt_text_word(right) && rt_text_word(wrapping(left + I64{8})) == rt_text_word(wrapping(right + I64{8})) && jet_rt_string_eq(rt_text_word(wrapping(left + I64{16})), rt_text_word(wrapping(right + I64{16})))
 }
 
 // std::fs::remove_dir_all over the opaque path bytes.
@@ -204,8 +271,12 @@ testing_remove_new: fn(ok: I64, missing: I64, cause: I64) -> I64 {
     path: rt_text_copy(data, length)
     result: if testing_has_nul(path) -> I64{-2147483648} else -> files_remove_dir_all(path)
     jet_rt_string_drop(path)
-    if (result == I64{-2147483648}) -> return testing_remove_new(I64{0}, I64{0}, jet_rt_string_clone(rt_static_text("file name contained an unexpected NUL byte")))
-    if (result < I64{0}) -> return testing_remove_new(I64{0}, if (result == I64{-2}) -> I64{1} else -> I64{0}, host_errno_cause(-result))
+    if (result == I64{-2147483648}) {
+        return testing_remove_new(I64{0}, I64{0}, jet_rt_string_clone(rt_static_text("file name contained an unexpected NUL byte")))
+    }
+    if (result < I64{0}) {
+        return testing_remove_new(I64{0}, if (result == I64{-2}) -> I64{1} else -> I64{0}, host_errno_cause(-result))
+    }
     testing_remove_new(I64{1}, I64{0}, jet_rt_string_builder_new())
 }
 
@@ -216,15 +287,31 @@ testing_create_new: fn(ok: I64, cause: I64) -> I64 {
     rt_text_store(wrapping(value + I64{8}), cause)
     value
 }
-#Export(c) jet_rt_record_new_jet_testing_temp_create: fn(ok: Bool, cause: I64) -> I64 { testing_create_new(testing_flag(ok), jet_rt_string_clone(cause)) }
-#Export(c) jet_rt_record_get_jet_testing_temp_create_ok: fn(value: I64) -> Bool { rt_text_word(value) != I64{0} }
-#Export(c) jet_rt_record_get_jet_testing_temp_create_cause: fn(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(wrapping(value + I64{8}))) }
-#Export(c) jet_rt_handle_clone_jet_testing_temp_create: fn(value: I64) -> I64 { testing_create_new(rt_text_word(value), jet_rt_string_clone(rt_text_word(wrapping(value + I64{8})))) }
+
+#Export(c) jet_rt_record_new_jet_testing_temp_create: fn(ok: Bool, cause: I64) -> I64 {
+    testing_create_new(testing_flag(ok), jet_rt_string_clone(cause))
+}
+
+#Export(c) jet_rt_record_get_jet_testing_temp_create_ok: fn(value: I64) -> Bool {
+    rt_text_word(value) != I64{0}
+}
+
+#Export(c) jet_rt_record_get_jet_testing_temp_create_cause: fn(value: I64) -> I64 {
+    jet_rt_string_clone(rt_text_word(wrapping(value + I64{8})))
+}
+
+#Export(c) jet_rt_handle_clone_jet_testing_temp_create: fn(value: I64) -> I64 {
+    testing_create_new(rt_text_word(value), jet_rt_string_clone(rt_text_word(wrapping(value + I64{8}))))
+}
+
 #Export(c) jet_rt_handle_drop_jet_testing_temp_create: fn(value: I64) {
-    if (value == I64{0}) -> return
+    if (value == I64{0}) {
+        return
+    }
     jet_rt_string_drop(rt_text_word(wrapping(value + I64{8})))
     jet_rt_free(value, I64{16}, I64{8})
 }
+
 #Export(c) jet_rt_handle_eq_jet_testing_temp_create: fn(left: I64, right: I64) -> Bool {
     rt_text_word(left) == rt_text_word(right) && jet_rt_string_eq(rt_text_word(wrapping(left + I64{8})), rt_text_word(wrapping(right + I64{8})))
 }
@@ -255,29 +342,35 @@ testing_mkdir: fn(path: I64, length: I64) -> I64 {
 // then its separators (a root keeps its "/"); -1 when there is no parent.
 testing_parent_length: fn(path: I64, length: I64) -> I64 {
     end := length
-    loop end > (I64{1}) && rt_text_byte(wrapping(wrapping(path + end) - I64{1})) == (I64{47}) -> end -= I64{1}
-    if (end == I64{1} && rt_text_byte(path) == I64{47}) -> return I64{-1}
-    loop end > (I64{0}) && rt_text_byte(wrapping(wrapping(path + end) - I64{1})) != (I64{47}) -> end -= I64{1}
-    loop end > (I64{1}) && rt_text_byte(wrapping(wrapping(path + end) - I64{1})) == (I64{47}) -> end -= I64{1}
+    loop end > (I64{1}) && rt_text_byte(wrapping(wrapping(path + end) - I64{1})) == (I64{47}) {
+        end -= I64{1}
+    }
+    if (end == I64{1} && rt_text_byte(path) == I64{47}) { return I64{-1} }
+    loop end > (I64{0}) && rt_text_byte(wrapping(wrapping(path + end) - I64{1})) != (I64{47}) {
+        end -= I64{1}
+    }
+    loop end > (I64{1}) && rt_text_byte(wrapping(wrapping(path + end) - I64{1})) == (I64{47}) {
+        end -= I64{1}
+    }
     end
 }
 
 // std DirBuilder::create_dir_all (mode 0o777). Returns 0 or -errno; -1 with
 // errno 0 is std's "failed to create whole tree".
 testing_create_dir_all: fn(path: I64, length: I64) -> I64 {
-    if (length == I64{0}) -> return I64{0}
+    if (length == I64{0}) { return I64{0} }
     first: testing_mkdir(path, length)
-    if (first == I64{0}) -> return I64{0}
+    if (first == I64{0}) { return I64{0} }
     if (first != I64{-2}) {
         if testing_is_dir(path, length) -> return I64{0}
         return first
     }
     parent: testing_parent_length(path, length)
-    if (parent < I64{0}) -> return I64{-2147483647}
+    if (parent < I64{0}) { return I64{-2147483647} }
     upper: testing_create_dir_all(path, parent)
-    if (upper < I64{0}) -> return upper
+    if (upper < I64{0}) { return upper }
     second: testing_mkdir(path, length)
-    if (second == I64{0} || testing_is_dir(path, length)) -> return I64{0}
+    if (second == I64{0} || testing_is_dir(path, length)) { return I64{0} }
     second
 }
 
@@ -286,10 +379,14 @@ testing_create_dir_all: fn(path: I64, length: I64) -> I64 {
     owned: rt_text_copy(data, length)
     nul: testing_has_nul(owned)
     jet_rt_string_drop(owned)
-    if nul -> return testing_create_new(I64{0}, jet_rt_string_clone(rt_static_text("file name contained an unexpected NUL byte")))
+    if nul {
+        return testing_create_new(I64{0}, jet_rt_string_clone(rt_static_text("file name contained an unexpected NUL byte")))
+    }
     result: testing_create_dir_all(data, length)
-    if (result == I64{-2147483647}) -> return testing_create_new(I64{0}, jet_rt_string_clone(rt_static_text("failed to create whole tree")))
-    if (result < I64{0}) -> return testing_create_new(I64{0}, host_errno_cause(-result))
+    if (result == I64{-2147483647}) {
+        return testing_create_new(I64{0}, jet_rt_string_clone(rt_static_text("failed to create whole tree")))
+    }
+    if (result < I64{0}) { return testing_create_new(I64{0}, host_errno_cause(-result)) }
     testing_create_new(I64{1}, jet_rt_string_builder_new())
 }
 
@@ -297,8 +394,8 @@ testing_create_dir_all: fn(path: I64, length: I64) -> I64 {
 // words.
 #Export(c) jet_testing_text_window_raw: fn(text: I64, start: I64, end: I64) -> I64 {
     first: jet_int_owned_to_i64(start)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     last: jet_int_owned_to_i64(end)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     rt_text_copy(wrapping(rt_text_data(text) + first), last - first)
 }

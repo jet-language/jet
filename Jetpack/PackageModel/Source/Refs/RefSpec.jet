@@ -7,59 +7,66 @@
 //   `owner/my-fastfetch-jet-config@github`
 //   `./my-env`
 use jetpack_foundation.[
-    REF_CHANNEL_AUTO, REF_CHANNEL_LATEST, REF_CHANNEL_MAIN, REF_CHANNEL_MARKER, REF_PROVIDER_AT,
-    REF_SEPARATOR, REF_SOURCE_JETPACK, REF_SOURCE_NIXPKGS,
+    REF_CHANNEL_AUTO,
+    REF_CHANNEL_LATEST,
+    REF_CHANNEL_MAIN,
+    REF_CHANNEL_MARKER,
+    REF_PROVIDER_AT,
+    REF_SEPARATOR,
+    REF_SOURCE_JETPACK,
+    REF_SOURCE_NIXPKGS,
 ]
 
 // Where a ref is resolved from. The built-in sources need no declaration;
 // `Named` is a source declared in an `env.jet` that resolves to an
 // upstream/pin through a `SourceTable`.
 RefSource: enum {
-    // The canonical Jetpack package catalog.
     Jetpack
+    Nixpkgs
+    Github
+    Path
+    Cran
+    LuaRocks
+    RubyGems
+    Cpan
+    Packagist
+    JetRegistry
+    Npm
+    Cargo
+    PyPI
+    SwiftPM
+    Maven
+    NuGet
+    Conan
+    Vcpkg
+    Homebrew
+    Binary
+    Releases
+    Named(String)
+
+    // The canonical Jetpack package catalog.
     // The nixpkgs collection, retained as an internal migration alias; its
     // locked identity is canonicalized to `jetpack`.
-    Nixpkgs
     // A GitHub repo holding an `env.jet` (or a translatable `flake.nix`).
-    Github
     // A local directory holding a pack file or used as a flake fallback.
-    Path
     // A package from the CRAN R package registry.
-    Cran
     // A package from the LuaRocks registry.
-    LuaRocks
     // A package from RubyGems.
-    RubyGems
     // A distribution from CPAN.
-    Cpan
     // A package from Packagist.
-    Packagist
     // A package from Jet's first-party registry.
-    JetRegistry
     // A package from npm.
-    Npm
     // A package from Cargo.
-    Cargo
     // A distribution from PyPI.
-    PyPI
     // A package from Swift Package Manager.
-    SwiftPM
     // A package from Maven.
-    Maven
     // A package from NuGet.
-    NuGet
     // A package from Conan.
-    Conan
     // A port from vcpkg.
-    Vcpkg
     // A formula or cask from Homebrew.
-    Homebrew
     // A verified binary artifact named by URL and digest.
-    Binary
     // A verified release artifact admitted directly by Jetpack (card #2166).
-    Releases
     // A pack-declared named source, e.g. `stable` -> a pinned nixpkgs.
-    Named(String)
 
     // The source token as written after the `@` in a ref: the provider row
     // that names this built-in source, or the declared name.
@@ -77,9 +84,7 @@ RefSource: enum {
     }
 
     // Whether `name` is one of the built-in source keywords.
-    is_builtin: fn(name: String) -> Bool Never! {
-        RefSource.builtin(name) != None
-    }
+    is_builtin: fn(name: String) -> Bool Never! { RefSource.builtin(name) != None }
 
     // Resolve the source half of a `package@source` ref: a public built-in or
     // a declared named source. `path` and `nixpkgs` are internal source
@@ -149,11 +154,12 @@ ProviderKind: enum {
     Vcpkg
     Homebrew
     Binary
-    // A native Jetpack release-artifact recipe.
     JetPackage
+    Infer
+
+    // A native Jetpack release-artifact recipe.
     // Decide `Nix` vs `Core` at realize time by peeking the source's
     // `package.jet` (U9). Only the typed `…@github` surface produces this.
-    Infer
 
     // The provider row's name; `Infer` has no row because it is resolved
     // before any listing or diagnostic.
@@ -252,12 +258,13 @@ ProviderFamily: enum {
 
 // Who is allowed to move a source pin.
 ChannelPolicy: enum {
-    // No channel marker: the declaration never moves.
     Pinned
-    // Existing channel declarations move only through `jetpack update`.
     Manual
-    // `#auto`: realization refreshes the channel and writes the exact pin back.
     Automatic
+
+    // No channel marker: the declaration never moves.
+    // Existing channel declarations move only through `jetpack update`.
+    // `#auto`: realization refreshes the channel and writes the exact pin back.
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -308,13 +315,11 @@ SourceTableEntry: struct {
 // the provider that realizes it. Built-in sources always resolve and are not
 // stored here. Every listing is in name order.
 SourceTable: struct {
-    priv named: [String: SourceTableEntry]
+    priv named: [String:SourceTableEntry]
 
     // A table with no declared sources: only the built-ins resolve. This is
     // the table for direct CLI refs (`jetpack use fastfetch@jetpack`).
-    empty: fn() -> SourceTable Never! {
-        SourceTable{named: [String: SourceTableEntry]{}}
-    }
+    empty: fn() -> SourceTable Never! { SourceTable{named: [String:SourceTableEntry]{}} }
 
     // Build from declarations; a repeated name keeps its last declaration.
     from_decls: fn(decls: [NamedSourceDecl]) -> SourceTable Never! {
@@ -328,21 +333,23 @@ SourceTable: struct {
     // Add a declaration when a CLI surface supplies a built-in native catalog
     // entry alongside project declarations. An existing name is kept.
     ensure_decl: fn(&self, name: String, upstream: String, via: ProviderKind) Never! {
-        if self.named.has_key(name) -> return
+        if self.named.has_key(name) {
+            return
+        }
         self.named[name] = SourceTableEntry{upstream: upstream, via: via, policy: ChannelPolicy.for_upstream(upstream), raw: upstream}
     }
 
     // Set the authoring policy and raw source spelling for a declaration.
     set_channel_metadata: fn(&self, name: String, policy: ChannelPolicy, raw: String) Never! {
-        if !self.named.has_key(name) -> return
+        if !self.named.has_key(name) {
+            return
+        }
         self.named[name].policy = policy
         self.named[name].raw = raw
     }
 
     // The upstream/pin a declared name resolves to, if any.
-    upstream: fn(self, name: String) -> String? Never! {
-        self.named.get(name)?.upstream
-    }
+    upstream: fn(self, name: String) -> String? Never! { self.named.get(name)?.upstream }
 
     // The provider a declared name uses (`nix` when undeclared).
     provider: fn(self, name: String) -> ProviderKind Never! {
@@ -355,9 +362,7 @@ SourceTable: struct {
     }
 
     // The original source spelling used for manifest writeback.
-    source_ref: fn(self, name: String) -> String? Never! {
-        self.named.get(name)?.raw
-    }
+    source_ref: fn(self, name: String) -> String? Never! { self.named.get(name)?.raw }
 
     // Declared names, sorted; used to make "unknown source" errors helpful.
     declared_names: fn(self) -> [String] Never! {
@@ -378,7 +383,9 @@ SourceTable: struct {
 
     // Replace one declared source's upstream after reading an exact lock entry.
     set_upstream: fn(&self, name: String, upstream: String) Never! {
-        if !self.named.has_key(name) -> return
+        if !self.named.has_key(name) {
+            return
+        }
         self.named[name].upstream = upstream
     }
 
@@ -409,9 +416,7 @@ RefSpec: struct {
 
     // Classify a `name['#'selector]['@'source]` ref against built-in sources.
     // This is the strict path for direct CLI refs.
-    classify: fn(raw: String) -> RefSpec RefError! {
-        RefSpec.classify_in(raw, SourceTable.empty())
-    }
+    classify: fn(raw: String) -> RefSpec RefError! { RefSpec.classify_in(raw, SourceTable.empty()) }
 
     // Classify a ref, accepting built-in sources plus any named source declared
     // in `table`. Puts the package before `@`; a local
@@ -420,14 +425,18 @@ RefSpec: struct {
     // package name.
     classify_in: fn(input: String, table: SourceTable) -> RefSpec RefError! {
         raw: input.trim()
-        if pkg_is_bare_path(raw) && !raw.contains(REF_PROVIDER_AT) -> return Ok(RefSpec{source: RefSource.Path, package: raw, raw: raw})
+        if pkg_is_bare_path(raw) && !raw.contains(REF_PROVIDER_AT) {
+            return Ok(RefSpec{source: RefSource.Path, package: raw, raw: raw})
+        }
         if raw.cut_last(REF_PROVIDER_AT) == {
             .Val(halves) -> {
                 package: halves.before
                 if halves.after == "" || package == "" -> return Err(RefError.EmptyHalf(raw))
                 if !pkg_ref_valid_target(package) -> return Err(RefError.Malformed(raw))
                 split: pkg_ref_split_selector(halves.after)
-                if split.empty_half || !pkg_ref_valid_source(split.source) -> return Err(RefError.Malformed(raw))
+                if split.empty_half || !pkg_ref_valid_source(split.source) {
+                    return Err(RefError.Malformed(raw))
+                }
                 source: RefSource.resolve(split.source, raw, table)
                 if split.selector == {
                     .Val(selector) -> return Ok(RefSpec{source: source, package: "{package}{REF_CHANNEL_MARKER}{selector}", raw: raw})
@@ -447,7 +456,9 @@ RefSpec: struct {
         // A bare package is the Jetpack catalog spelling.
         // Workspace-aware callers probe their member index before reaching
         // this branch; a direct classifier has no workspace to consult.
-        if raw != "" && !raw.contains("/") -> return RefSpec.classify_in(pkg_with_default_source(raw), table)
+        if raw != "" && !raw.contains("/") {
+            return RefSpec.classify_in(pkg_with_default_source(raw), table)
+        }
         Err(RefError.MissingSeparator(raw))
     }
 
@@ -506,26 +517,27 @@ RefSpec: struct {
 // ref forms.
 #Error
 RefError: enum {
-    // No `@` separator at all, e.g. `fastfetch`.
     MissingSeparator(String)
-    // An empty source or package half, e.g. `@jetpack` or `fastfetch@`.
     EmptyHalf(String)
+    Malformed(String)
+    UnknownSource(source: String, raw: String, declared: [String])
+    AmbiguousBare(String)
+    AmbiguousMember(query: String, candidates: [String])
+    UnknownMember(query: String, suggestions: [String])
+
+    // No `@` separator at all, e.g. `fastfetch`.
+    // An empty source or package half, e.g. `@jetpack` or `fastfetch@`.
     // Neither a `package@source[#version]` ref nor a bare local path: a `#`
     // or whitespace before `@`, or an internal source word (`path`,
     // `nixpkgs`) after it.
-    Malformed(String)
     // The source suffix is neither a built-in nor a declared named source.
     // `declared` lists the pack's named sources so the message can help.
-    UnknownSource(source: String, raw: String, declared: [String])
     // Bare name with no source suffix, and no workspace member
     // matches, or the match was ambiguous.
-    AmbiguousBare(String)
     // E1230: a bare or path-form ref matched more than one workspace member.
     // `candidates` are the members' relative paths.
-    AmbiguousMember(query: String, candidates: [String])
     // E1231: a bare or path-form ref matched no workspace member.
     // `suggestions` are the closest member names/paths, for a did-you-mean.
-    UnknownMember(query: String, suggestions: [String])
 
     // The registered diagnostic code for the errors that carry one.
     code: fn(self) -> String? Never! {
@@ -553,9 +565,7 @@ WorkspaceIndex: struct {
 
     // An index with no members: path refs remain unresolved, while bare
     // package refs fall through to the Jetpack catalog.
-    empty: fn() -> WorkspaceIndex Never! {
-        WorkspaceIndex{members: [WorkspaceMember]{}}
-    }
+    empty: fn() -> WorkspaceIndex Never! { WorkspaceIndex{members: [WorkspaceMember]{}} }
 
     // Build from a workspace plan's members. Paths are normalized (leading
     // `./` and trailing `/` trimmed) so a query and a stored path compare
@@ -569,17 +579,13 @@ WorkspaceIndex: struct {
     }
 
     // True when the index has no members (no workspace, or an empty one).
-    is_empty: fn(self) -> Bool Never! {
-        self.members.len() == 0
-    }
+    is_empty: fn(self) -> Bool Never! { self.members.len() == 0 }
 
     // Labels for did-you-mean suggestions in the same address space as the
     // query: bare names for bare refs, normalized paths for path refs.
     candidate_labels: fn(self, path_form: Bool) -> [String] Never! {
         out := [String]{}
-        loop member in self.members {
-            out.push(if path_form -> member.path else -> member.name)
-        }
+        loop member in self.members { out.push(if path_form -> member.path else -> member.name) }
         out
     }
 
@@ -808,7 +814,9 @@ ProviderRef: struct {
         if halves.after == "" || halves.before == "" -> return Err(RefError.EmptyHalf(raw))
         if !pkg_ref_valid_target(halves.before) -> return Err(RefError.Malformed(raw))
         split: pkg_ref_split_selector(halves.after)
-        if split.empty_half || !pkg_ref_valid_source(split.source) -> return Err(RefError.Malformed(raw))
+        if split.empty_half || !pkg_ref_valid_source(split.source) {
+            return Err(RefError.Malformed(raw))
+        }
         provider: RefSource.builtin(split.source) ?? return Err(RefError.UnknownSource{source: split.source, raw: raw, declared: [String]{}})
         if provider == {
             .Path | .Nixpkgs -> return Err(RefError.Malformed(raw))
@@ -826,11 +834,9 @@ ProviderRef: struct {
         if value == {
             REF_CHANNEL_AUTO -> (channel: Val(ChannelRef.Latest), policy: ChannelPolicy.Automatic, target: target)
             REF_CHANNEL_LATEST -> (channel: Val(ChannelRef.Latest), policy: ChannelPolicy.Manual, target: target)
-            else -> {
-                if ChannelRef.parse_selector(value) == {
-                    .Val(channel) -> (channel: Val(channel), policy: ChannelPolicy.Manual, target: target)
-                    .None -> (channel: None, policy: ChannelPolicy.Pinned, target: "{target}{REF_CHANNEL_MARKER}{value}")
-                }
+            else -> if ChannelRef.parse_selector(value) == {
+                .Val(channel) -> (channel: Val(channel), policy: ChannelPolicy.Manual, target: target)
+                .None -> (channel: None, policy: ChannelPolicy.Pinned, target: "{target}{REF_CHANNEL_MARKER}{value}")
             }
         }
     }
@@ -843,7 +849,9 @@ pkg_canonical_locked_ref: fn(raw: String) -> String Never! {
     canonical: raw.trim()
     halves: canonical.cut_last(REF_PROVIDER_AT) ?? return canonical
     source: pkg_ref_split_selector(halves.after)
-    if source.source != REF_SOURCE_NIXPKGS && source.source != REF_SOURCE_JETPACK -> return canonical
+    if source.source != REF_SOURCE_NIXPKGS && source.source != REF_SOURCE_JETPACK {
+        return canonical
+    }
     suffix: if source.selector == {
         .Val(selector) -> "{REF_CHANNEL_MARKER}{selector}"
         .None -> ""

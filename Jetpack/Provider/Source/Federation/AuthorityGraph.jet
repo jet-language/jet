@@ -15,20 +15,26 @@ ProviderObject: struct {
     // A binary artifact: its hash and platform are its identity, and it runs
     // no build.
     binary: fn(name: String, hash: String, platform: String, signature: String) -> ProviderObject ProviderGraphError! {
-        if hash.trim() == "" -> return Err(ProviderGraphError{message: "binary provider requires a hash"})
-        if platform.trim() == "" -> return Err(ProviderGraphError{message: "binary provider requires a platform"})
+        if hash.trim() == "" {
+            return Err(ProviderGraphError{message: "binary provider requires a hash"})
+        }
+        if platform.trim() == "" {
+            return Err(ProviderGraphError{message: "binary provider requires a platform"})
+        }
         exact_identity: "binary:{name}:{platform}:{hash}"
-        Ok(ProviderObject{
-            family: ProviderFamily.Binary,
-            ref_key: name,
-            exact_identity: exact_identity,
-            hash: hash,
-            platform: platform,
-            signature: signature,
-            audit: [String]{"hash verified before realization"},
-            sandbox_effects: [String]{"no build execution"},
-            build_effects: [String]{}
-        })
+        Ok(
+            ProviderObject{
+                family: ProviderFamily.Binary,
+                ref_key: name,
+                exact_identity: exact_identity,
+                hash: hash,
+                platform: platform,
+                signature: signature,
+                audit: [String]{"hash verified before realization"},
+                sandbox_effects: [String]{"no build execution"},
+                build_effects: [String]{},
+            },
+        )
     }
 }
 
@@ -56,19 +62,17 @@ ProviderGraphError: struct {
 AuthorityGraph: struct {
     locked_objects: [ProviderObject]
 
-    empty: fn() -> AuthorityGraph Never! {
-        AuthorityGraph{locked_objects: [ProviderObject]{}}
-    }
+    empty: fn() -> AuthorityGraph Never! { AuthorityGraph{locked_objects: [ProviderObject]{}} }
 
-    add_locked: fn(&self, object: ProviderObject) Never! {
-        self.locked_objects.push(object.copy())
-    }
+    add_locked: fn(&self, object: ProviderObject) Never! { self.locked_objects.push(object.copy()) }
 
     // Offline, a request is satisfied only by a locked object with the same
     // family, ref, identity, hash, and platform; online it needs the family's
     // fetch grant.
     fetch_allowed: fn(self, request: ProviderRequest) -> FetchDecision Never! {
-        if !request.offline -> return FetchDecision.AllowedNetworkWithGrant{authority: "provider.fetch.{request.family.label()}"}
+        if !request.offline {
+            return FetchDecision.AllowedNetworkWithGrant{authority: "provider.fetch.{request.family.label()}"}
+        }
         loop object in self.locked_objects {
             if object.family == request.family && object.ref_key == request.ref_key && object.exact_identity == request.exact_identity && object.hash == request.hash && object.platform == request.platform {
                 return FetchDecision.AllowedOfflineSatisfied

@@ -11,17 +11,13 @@ held: fn() -[FS]> Int {
     count
 }
 
-lock: fn(name: String) -[FS, Env]> FileLock {
-    files.lock(name) ?? panic("lock {name}")
-}
+lock: fn(name: String) -[FS, Env]> FileLock { files.lock(name) ?? panic("lock {name}") }
 
-consume_lock: fn(&&l: FileLock) -[FS]> Int {
-    held()
-}
+consume_lock: fn(l: &&FileLock) -[FS]> Int { held() }
 
 // Only the selected arm of a readiness table runs: the 0ms timer wins, so
 // the arm that moves the lock does not run and the parameter still owns it.
-moving_arm_last: fn(&&l: FileLock) -[FS]> Int {
+moving_arm_last: fn(l: &&FileLock) -[FS]> Int {
     result := 0
     if {
         after 0ms -> result = 2
@@ -30,7 +26,7 @@ moving_arm_last: fn(&&l: FileLock) -[FS]> Int {
     result
 }
 
-moving_arm_first: fn(&&l: FileLock) -[FS]> Int {
+moving_arm_first: fn(l: &&FileLock) -[FS]> Int {
     result := 0
     if {
         after 10s -> result = consume_lock(l.move())
@@ -40,7 +36,7 @@ moving_arm_first: fn(&&l: FileLock) -[FS]> Int {
 }
 
 // The moving arm is the one selected.
-moving_arm_selected: fn(&&l: FileLock) -[FS]> Int {
+moving_arm_selected: fn(l: &&FileLock) -[FS]> Int {
     result := 0
     if {
         after 0ms -> result = consume_lock(l.move())
@@ -50,9 +46,7 @@ moving_arm_selected: fn(&&l: FileLock) -[FS]> Int {
 }
 
 run: fn() -[IO, FS, Env]> {
-    loop name in ["a", "b", "c"] {
-        files.write("{name}.lk", "") ?? panic("write {name}")
-    }
+    loop name in ["a", "b", "c"] { files.write("{name}.lk", "") ?? panic("write {name}") }
     last: moving_arm_last(lock("a.lk"))
     print("moving arm last {last} {held()}")
     first: moving_arm_first(lock("b.lk"))

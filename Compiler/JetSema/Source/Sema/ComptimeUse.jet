@@ -76,7 +76,9 @@ sema_comptime_use_check: fn(graph: &&SemaRegistrationGraph, threads: CompilerThr
     owned := graph.move()
     count: owned.modules.len()
     own_callees := [[String:Bool]]{}
-    loop module_index in 0..<count -> own_callees.push(sema_comptime_use_own_callees(owned.modules[module_index].program.items))
+    loop module_index in 0..<count {
+        own_callees.push(sema_comptime_use_own_callees(owned.modules[module_index].program.items))
+    }
     rows := [Int]{}
     weights := [Int]{}
     work := 0
@@ -104,7 +106,9 @@ sema_comptime_use_check: fn(graph: &&SemaRegistrationGraph, threads: CompilerThr
         slot := found.pop() ?? break
         row := slot.move() ?? panic("a module's #run use scan left its slot")
         module_found := row.comptime.move() ?? panic("a #run use scan found no module scan")
-        loop diagnostic in module_found.diagnostics -> sema_registration_push_graph_diagnostic(owned, module_found.module_index, diagnostic)
+        loop diagnostic in module_found.diagnostics {
+            sema_registration_push_graph_diagnostic(owned, module_found.module_index, diagnostic)
+        }
         runtime_names[module_found.module_index] = module_found.runtime_names.move()
         scanned[module_found.module_index] = true
     }
@@ -176,7 +180,9 @@ sema_graph_scan: fn(scan: &&SemaGraphScan, workers: Int) -> SemaGraphScanDone {
     found := [SemaGraphScanFound?]{}
     loop _ in 0..<owned.rows.len() -> found.push(None)
     if workers <= 1 {
-        loop position in 0..<owned.rows.len() -> found[position] = Val(sema_graph_scan_row(owned, position))
+        loop position in 0..<owned.rows.len() {
+            found[position] = Val(sema_graph_scan_row(owned, position))
+        }
         graph := owned.graphs.pop() ?? panic("the scanned graph left its scan")
         return SemaGraphScanDone{graph: graph, modules: owned.modules.move(), rows: owned.rows.move(), order: owned.order.move(), found: found}
     }
@@ -193,9 +199,15 @@ sema_graph_scan_row: fn(scan: SemaGraphScan, position: Int) -> SemaGraphScanFoun
     row: scan.rows[position]
     found := SemaGraphScanFound{position: position, comptime: None, qualified: None, divergence: None}
     if {
-        scan.own_callees == .Val(callees) -> found.comptime = Val(sema_comptime_use_scan_module(scan.graphs[0], row, callees))
-        scan.divergence == .Val(wave) -> found.divergence = Val(sema_divergence_walk(scan.graphs[0], row, wave.functions[position]))
-        else -> found.qualified = Val(sema_registration_qualified_scan(scan.graphs[0], row, scan.qualified))
+        scan.own_callees == .Val(callees) -> {
+            found.comptime = Val(sema_comptime_use_scan_module(scan.graphs[0], row, callees))
+        }
+        scan.divergence == .Val(wave) -> {
+            found.divergence = Val(sema_divergence_walk(scan.graphs[0], row, wave.functions[position]))
+        }
+        else -> {
+            found.qualified = Val(sema_registration_qualified_scan(scan.graphs[0], row, scan.qualified))
+        }
     }
     found
 }
@@ -203,7 +215,9 @@ sema_graph_scan_row: fn(scan: SemaGraphScan, position: Int) -> SemaGraphScanFoun
 // Runs scan threads `from..<workers`, one task each, and moves each row's
 // findings a thread returned into its slot of `found`.
 sema_graph_scan_threads: fn(shared_state: Shared<SemaGraphScan>, from: Int, workers: Int, found: &[SemaGraphScanFound?]) {
-    if from >= workers -> return
+    if from >= workers {
+        return
+    }
     task.group sema_graph_scan_group {
         head: task sema_graph_scan_claimed(shared_state)
         sema_graph_scan_threads(shared_state, from + 1, workers, found)
@@ -256,8 +270,12 @@ sema_comptime_use_scan_for: fn(graph: SemaRegistrationGraph, module_index: Int, 
         callees: own_callees[target]
         if callees.len() == 0 -> next
         if import.declaration.kind == {
-            .Unqualified(_, _, items, _, _) -> loop item in items {
-                if callees.has_key(item.original) -> scan.comptime_callees[member_import_local(item.original, item.alias)] = true
+            .Unqualified(_, _, items, _, _) -> {
+                loop item in items {
+                    if callees.has_key(item.original) {
+                        scan.comptime_callees[member_import_local(item.original, item.alias)] = true
+                    }
+                }
             }
             .File(_, _) | .Module(_, _) -> {
                 alias: import_alias(import.declaration)
@@ -266,7 +284,9 @@ sema_comptime_use_scan_for: fn(graph: SemaRegistrationGraph, module_index: Int, 
         }
     }
     direct := module_row.source_segments.len() == 0
-    if module_row.source_segments.len() == 1 -> direct = module_row.source_segments[0].generated.start == 0 && module_row.source_segments[0].source_start == 0
+    if module_row.source_segments.len() == 1 {
+        direct = module_row.source_segments[0].generated.start == 0 && module_row.source_segments[0].source_start == 0
+    }
     if direct -> scan.source = module_row.source.bytes()
     scan
 }
@@ -274,8 +294,14 @@ sema_comptime_use_scan_for: fn(graph: SemaRegistrationGraph, module_index: Int, 
 sema_comptime_use_bind_imports: fn(imports: [ImportDecl], scan: &SemaComptimeUseScan) Never! {
     loop declaration in imports {
         if declaration.kind == {
-            .Unqualified(_, _, items, _, _) -> loop item in items -> sema_comptime_use_bind_import(member_import_local(item.original, item.alias), declaration.comptime_span, scan)
-            .File(_, _) | .Module(_, _) -> sema_comptime_use_bind_import(import_alias(declaration), declaration.comptime_span, scan)
+            .Unqualified(_, _, items, _, _) -> {
+                loop item in items {
+                    sema_comptime_use_bind_import(member_import_local(item.original, item.alias), declaration.comptime_span, scan)
+                }
+            }
+            .File(_, _) | .Module(_, _) -> {
+                sema_comptime_use_bind_import(import_alias(declaration), declaration.comptime_span, scan)
+            }
         }
     }
 }
@@ -291,10 +317,18 @@ sema_comptime_use_own_callees: fn(items: [Item]) -> [String:Bool] Never! {
     callees := [String:Bool]{}
     loop item in items {
         if item == {
-            .Func(function) -> if function.is_comptime -> callees[function.name] = true
-            .Struct(definition) -> sema_comptime_use_method_callees(definition.name, definition.methods, definition.trait_impls, callees)
-            .Enum(definition) -> sema_comptime_use_method_callees(definition.name, definition.methods, definition.trait_impls, callees)
-            .Impl(definition) -> sema_comptime_use_method_callees(definition.type_name, definition.methods, [TraitImplBlock]{}, callees)
+            .Func(function) -> {
+                if function.is_comptime -> callees[function.name] = true
+            }
+            .Struct(definition) -> {
+                sema_comptime_use_method_callees(definition.name, definition.methods, definition.trait_impls, callees)
+            }
+            .Enum(definition) -> {
+                sema_comptime_use_method_callees(definition.name, definition.methods, definition.trait_impls, callees)
+            }
+            .Impl(definition) -> {
+                sema_comptime_use_method_callees(definition.type_name, definition.methods, [TraitImplBlock]{}, callees)
+            }
             .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
@@ -331,11 +365,17 @@ sema_comptime_use_items: fn(items: [Item], scan: &SemaComptimeUseScan) {
             .Enum(definition) -> {
                 loop variant in definition.variants {
                     if variant.payload == {
-                        .Single(ty, span) -> sema_comptime_use_type(ty, span, scan)
-                        .Named(fields) -> loop field in fields -> sema_comptime_use_type(field.ty, field.ty_span, scan)
+                        .Single(ty, span) -> { sema_comptime_use_type(ty, span, scan) }
+                        .Named(fields) -> {
+                            loop field in fields {
+                                sema_comptime_use_type(field.ty, field.ty_span, scan)
+                            }
+                        }
                         .Unit -> {}
                     }
-                    if variant.discriminant_expr == .Val(value) -> sema_comptime_use_expr(value, scan)
+                    if variant.discriminant_expr == .Val(value) {
+                        sema_comptime_use_expr(value, scan)
+                    }
                 }
                 sema_comptime_use_flush(scan)
                 sema_comptime_use_methods(definition.methods, definition.trait_impls, scan)
@@ -351,7 +391,9 @@ sema_comptime_use_items: fn(items: [Item], scan: &SemaComptimeUseScan) {
                 // A constant computed while building is read at build time; a
                 // runtime read of it is checked where it is read.
                 if !definition.is_comptime {
-                    if definition.ty == .Val(ty) -> sema_comptime_use_type(ty, definition.name_span, scan)
+                    if definition.ty == .Val(ty) {
+                        sema_comptime_use_type(ty, definition.name_span, scan)
+                    }
                     scan.wrap = Val(expr_span(definition.value))
                     sema_comptime_use_expr(definition.value, scan)
                     scan.wrap = None
@@ -395,9 +437,13 @@ sema_comptime_use_methods: fn(methods: [Func], trait_impls: [TraitImplBlock], sc
 }
 
 sema_comptime_use_func: fn(function: Func, scan: &SemaComptimeUseScan) {
-    if function.is_comptime -> return
+    if function.is_comptime {
+        return
+    }
     sema_comptime_use_params(function.params, scan)
-    if function.return_type == .Val(ty) -> sema_comptime_use_type(ty, function.return_type_span ?? function.name_span, scan)
+    if function.return_type == .Val(ty) {
+        sema_comptime_use_type(ty, function.return_type_span ?? function.name_span, scan)
+    }
     sema_comptime_use_body(function.body, scan)
     sema_comptime_use_flush(scan)
 }
@@ -420,7 +466,9 @@ sema_comptime_use_flush: fn(scan: &SemaComptimeUseScan) {
         prefix: scan.comptime_locals.get(reference.name) ?? next
         diagnostic := diagnostic_with_edit(sema_error("E0944", reference.span, "`{reference.name}` comes from a `#run use` import, but this code runs in the shipped program", "A `#run use` import exists only while building, so the shipped program does not contain its module", "Import it with plain `use`, or move this use into compile-time code: a `#run {{ … }}` block, a `#run fn`, or a value computed while building"), TextEdit{span: prefix, new_text: ""})
         if reference.wrap == .Val(value_span) {
-            if sema_comptime_use_wrap_edit(scan.source, value_span) == .Val(alternative) -> diagnostic = diagnostic_with_alternative_edit(diagnostic, alternative)
+            if sema_comptime_use_wrap_edit(scan.source, value_span) == .Val(alternative) {
+                diagnostic = diagnostic_with_alternative_edit(diagnostic, alternative)
+            }
         }
         scan.diagnostics.push(diagnostic)
     }
@@ -446,7 +494,9 @@ sema_comptime_use_reference: fn(name: String, span: Span, scan: &SemaComptimeUse
         }
     }
     root: if end == bytes.len() -> name else -> String.from_bytes(bytes[0..<end]) ?? return
-    if !scan.import_locals.has_key(root) -> return
+    if !scan.import_locals.has_key(root) {
+        return
+    }
     root_span: if end == bytes.len() || span.end - span.start < end -> span else -> Span{start: span.start, end: span.start + end}
     scan.pending.push(SemaComptimeUseReference{name: root, span: root_span, wrap: scan.wrap})
 }
@@ -470,7 +520,7 @@ sema_comptime_use_binding: fn(binding: Binding, scan: &SemaComptimeUseScan) {
                 sema_comptime_use_reference(type_name, type_span, scan)
                 sema_comptime_use_bind_names(fields, scan)
             }
-            .List(elems, _) | .Tuple(elems, _) -> sema_comptime_use_bind_names(elems, scan)
+            .List(elems, _) | .Tuple(elems, _) -> { sema_comptime_use_bind_names(elems, scan) }
             .Refutable(_, fallback, names, _) -> {
                 sema_comptime_use_bind_names(names, scan)
                 sema_comptime_use_fallback(fallback, scan)
@@ -478,8 +528,12 @@ sema_comptime_use_binding: fn(binding: Binding, scan: &SemaComptimeUseScan) {
         }
     }
     // `x: #run { … }` is computed while building.
-    if binding.is_comptime -> return
-    if binding.ty == .Val(ty) -> sema_comptime_use_type(ty, binding.ty_span ?? binding.name_span, scan)
+    if binding.is_comptime {
+        return
+    }
+    if binding.ty == .Val(ty) {
+        sema_comptime_use_type(ty, binding.ty_span ?? binding.name_span, scan)
+    }
     outer: scan.wrap
     if outer == None && !binding.mutable -> scan.wrap = Val(expr_span(binding.init))
     sema_comptime_use_expr(binding.init, scan)
@@ -488,20 +542,24 @@ sema_comptime_use_binding: fn(binding: Binding, scan: &SemaComptimeUseScan) {
 
 sema_comptime_use_stmt: fn(statement: Stmt, scan: &SemaComptimeUseScan) {
     if statement == {
-        .Expr(value) | .DeferClose(value, _) | .BreakValue(value, _) | .Yield(value, _) | .BreakLabelValue(_, _, value, _) -> sema_comptime_use_expr(value, scan)
-        .Val(binding) -> sema_comptime_use_binding(binding, scan)
+        .Expr(value) | .DeferClose(value, _) | .BreakValue(value, _) | .Yield(value, _) | .BreakLabelValue(_, _, value, _) -> {
+            sema_comptime_use_expr(value, scan)
+        }
+        .Val(binding) -> { sema_comptime_use_binding(binding, scan) }
         .Assign(target, _, _, value) -> {
             if target == {
                 .Index(base, index, _, _) -> {
                     sema_comptime_use_expr(base, scan)
                     sema_comptime_use_expr(index, scan)
                 }
-                .Field(base, _, _) -> sema_comptime_use_expr(base, scan)
+                .Field(base, _, _) -> { sema_comptime_use_expr(base, scan) }
                 .Local(_, _) -> {}
             }
             sema_comptime_use_expr(value, scan)
         }
-        .Return(value, _) -> if value == .Val(returned) -> sema_comptime_use_expr(returned, scan)
+        .Return(value, _) -> {
+            if value == .Val(returned) -> sema_comptime_use_expr(returned, scan)
+        }
         .While(condition, body, _, _, _) -> {
             sema_comptime_use_expr(condition, scan)
             sema_comptime_use_body(body, scan)
@@ -540,7 +598,9 @@ sema_comptime_use_stmt: fn(statement: Stmt, scan: &SemaComptimeUseScan) {
             if else_body == .Val(body) -> sema_comptime_use_body(body, scan)
         }
         .ComptimeBlock(_, _, _) -> {}
-        .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .AuthorityScope(_, _, _, body, _) | .Live(body, _) | .Transact(_, _, body, _, _) | .Layout(_, _, body, _) -> sema_comptime_use_body(body, scan)
+        .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .AuthorityScope(_, _, _, body, _) | .Live(body, _) | .Transact(_, _, body, _, _) | .Layout(_, _, body, _) -> {
+            sema_comptime_use_body(body, scan)
+        }
         .Unsafe(_, reason, body, _) | .Impure(_, reason, body, _) -> {
             if reason == .Val(value) -> sema_comptime_use_expr(value, scan)
             sema_comptime_use_body(body, scan)
@@ -582,7 +642,9 @@ sema_comptime_use_arm_cond: fn(condition: Expr, scan: &SemaComptimeUseScan) {
                     .Positional(value) | .Named(_, value) -> {
                         if value == {
                             .Ident(name, _, _) -> scan.bound[name] = true
-                            .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> sema_comptime_use_expr(value, scan)
+                            .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {
+                                sema_comptime_use_expr(value, scan)
+                            }
                         }
                     }
                 }
@@ -595,12 +657,14 @@ sema_comptime_use_arm_cond: fn(condition: Expr, scan: &SemaComptimeUseScan) {
 
 sema_comptime_use_fallback: fn(fallback: OrFallback, scan: &SemaComptimeUseScan) {
     if fallback == {
-        .Value(value) -> sema_comptime_use_expr(value, scan)
+        .Value(value) -> { sema_comptime_use_expr(value, scan) }
         .Block(body, value, _) -> {
             sema_comptime_use_body(body, scan)
             if value == .Val(result) -> sema_comptime_use_expr(result, scan)
         }
-        .Return(value, _) -> if value == .Val(returned) -> sema_comptime_use_expr(returned, scan)
+        .Return(value, _) -> {
+            if value == .Val(returned) -> sema_comptime_use_expr(returned, scan)
+        }
         .Panic(_, args) -> sema_comptime_use_args(args, scan)
         .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
     }
@@ -616,19 +680,27 @@ sema_comptime_use_type_args: fn(types: [Type], span: Span, scan: &SemaComptimeUs
 
 sema_comptime_use_expr: fn(expression: Expr, scan: &SemaComptimeUseScan) {
     if expression == {
-        .Ident(name, span, _) -> sema_comptime_use_reference(name, span, scan)
-        .Str(parts, _, _) -> loop part in parts {
-            if part == .Interp(value, _) -> sema_comptime_use_expr(value, scan)
+        .Ident(name, span, _) -> { sema_comptime_use_reference(name, span, scan) }
+        .Str(parts, _, _) -> {
+            loop part in parts {
+                if part == .Interp(value, _) -> sema_comptime_use_expr(value, scan)
+            }
         }
-        .ListLit(values, _, _) | .CompareChain(values, _, _, _, _) -> loop value in values -> sema_comptime_use_expr(value, scan)
-        .MemberSpread(value, _, _, _) | .Spread(value, _, _) | .Deref(value, _, _) | .RawOf(value, _, _) | .Copy(value, _, _) | .Place(value, _, _, _) | .Field(value, _, _, _) | .OptField(value, _, _, _, _, _) | .Present(value, _, _) | .Ok(value, _, _) | .Err(value, _, _) | .Paren(value, _, _) | .Unary(_, value, _, _) | .Tainted(value, _, _, _) -> sema_comptime_use_expr(value, scan)
+        .ListLit(values, _, _) | .CompareChain(values, _, _, _, _) -> {
+            loop value in values -> sema_comptime_use_expr(value, scan)
+        }
+        .MemberSpread(value, _, _, _) | .Spread(value, _, _) | .Deref(value, _, _) | .RawOf(value, _, _) | .Copy(value, _, _) | .Place(value, _, _, _) | .Field(value, _, _, _) | .OptField(value, _, _, _, _, _) | .Present(value, _, _) | .Ok(value, _, _) | .Err(value, _, _) | .Paren(value, _, _) | .Unary(_, value, _, _) | .Tainted(value, _, _, _) -> {
+            sema_comptime_use_expr(value, scan)
+        }
         .Try(value, _, _, context, _) -> {
             sema_comptime_use_expr(value, scan)
             if context == .Val(note) -> sema_comptime_use_expr(note, scan)
         }
-        .MapLit(entries, _, _) -> loop entry in entries {
-            sema_comptime_use_expr(entry.key, scan)
-            sema_comptime_use_expr(entry.value, scan)
+        .MapLit(entries, _, _) -> {
+            loop entry in entries {
+                sema_comptime_use_expr(entry.key, scan)
+                sema_comptime_use_expr(entry.value, scan)
+            }
         }
         .Index(base, index, _, _, _) -> {
             sema_comptime_use_expr(base, scan)
@@ -645,7 +717,11 @@ sema_comptime_use_expr: fn(expression: Expr, scan: &SemaComptimeUseScan) {
             sema_comptime_use_expr(end, scan)
         }
         // A long `a + b + c …` chain is read in one frame.
-        .Binary(_, left, right, _, _) -> loop operand in expr_binary_operands(left, right) -> sema_comptime_use_expr(operand, scan)
+        .Binary(_, left, right, _, _) -> {
+            loop operand in expr_binary_operands(left, right) {
+                sema_comptime_use_expr(operand, scan)
+            }
+        }
         .Call(call, _) -> {
             sema_comptime_use_reference(call.name, call.name_span, scan)
             sema_comptime_use_type_args(call.type_args, call.name_span, scan)
@@ -669,7 +745,7 @@ sema_comptime_use_expr: fn(expression: Expr, scan: &SemaComptimeUseScan) {
         }
         .StructLit(type_name, type_args, import_ns, _, fields, inferred, span, _) -> {
             if import_ns == {
-                .Val(namespace) -> sema_comptime_use_reference(namespace, span, scan)
+                .Val(namespace) -> { sema_comptime_use_reference(namespace, span, scan) }
                 .None -> {
                     if !inferred -> sema_comptime_use_reference(type_name, span, scan)
                 }
@@ -680,11 +756,17 @@ sema_comptime_use_expr: fn(expression: Expr, scan: &SemaComptimeUseScan) {
         .TypedLit(head, body, span, _) -> {
             if head == .Val(ty) -> sema_comptime_use_type(ty, span, scan)
             if body == {
-                .Fields(fields) -> loop field in fields -> sema_comptime_use_expr(field.value, scan)
-                .Elements(values) -> loop value in values -> sema_comptime_use_expr(value, scan)
-                .Entries(entries) -> loop entry in entries {
-                    sema_comptime_use_expr(entry.key, scan)
-                    sema_comptime_use_expr(entry.value, scan)
+                .Fields(fields) -> {
+                    loop field in fields -> sema_comptime_use_expr(field.value, scan)
+                }
+                .Elements(values) -> {
+                    loop value in values -> sema_comptime_use_expr(value, scan)
+                }
+                .Entries(entries) -> {
+                    loop entry in entries {
+                        sema_comptime_use_expr(entry.key, scan)
+                        sema_comptime_use_expr(entry.value, scan)
+                    }
                 }
                 .Value(value) -> sema_comptime_use_expr(value, scan)
                 .ByteText(_) | .Empty -> {}
@@ -693,7 +775,9 @@ sema_comptime_use_expr: fn(expression: Expr, scan: &SemaComptimeUseScan) {
         .EnumLit(type_name, _, _, args, leading_dot, span, _) -> {
             if !leading_dot && type_name != "" -> sema_comptime_use_reference(type_name, span, scan)
             loop argument in args {
-                if argument == { .Positional(value) | .Named(_, value) -> sema_comptime_use_expr(value, scan) }
+                if argument == {
+                    .Positional(value) | .Named(_, value) -> sema_comptime_use_expr(value, scan)
+                }
             }
         }
         .PatternTest(subject, pattern, _, _) -> {
@@ -718,10 +802,12 @@ sema_comptime_use_expr: fn(expression: Expr, scan: &SemaComptimeUseScan) {
         .Lambda(lambda, _) -> {
             loop param in lambda.params {
                 scan.bound[param.name] = true
-                if param.ty == .Val(ty) -> sema_comptime_use_type(ty, param.ty_span ?? param.name_span, scan)
+                if param.ty == .Val(ty) {
+                    sema_comptime_use_type(ty, param.ty_span ?? param.name_span, scan)
+                }
             }
             if lambda.body == {
-                .Expr(value) -> sema_comptime_use_expr(value, scan)
+                .Expr(value) -> { sema_comptime_use_expr(value, scan) }
                 .Block(body) -> sema_comptime_use_body(body, scan)
             }
         }
@@ -745,13 +831,17 @@ sema_comptime_use_expr: fn(expression: Expr, scan: &SemaComptimeUseScan) {
 // (`[T; N]`'s `N`, a `Measure`) is fixed while building.
 sema_comptime_use_type: fn(ty: Type, span: Span, scan: &SemaComptimeUseScan) Never! {
     if ty == {
-        .Named(name) -> sema_comptime_use_reference(name, span, scan)
+        .Named(name) -> { sema_comptime_use_reference(name, span, scan) }
         .Apply(name, args) -> {
             sema_comptime_use_reference(name, span, scan)
             loop arg in args -> sema_comptime_use_type(arg, span, scan)
         }
-        .TraitObject(bounds) -> loop bound in bounds -> sema_comptime_use_reference(bound, span, scan)
-        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .Case(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_comptime_use_type(inner, span, scan)
+        .TraitObject(bounds) -> {
+            loop bound in bounds -> sema_comptime_use_reference(bound, span, scan)
+        }
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .Case(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> {
+            sema_comptime_use_type(inner, span, scan)
+        }
         .Map(key, _, value) -> {
             sema_comptime_use_type(key, span, scan)
             sema_comptime_use_type(value, span, scan)
@@ -764,8 +854,12 @@ sema_comptime_use_type: fn(ty: Type, span: Span, scan: &SemaComptimeUseScan) Nev
             loop param in params -> sema_comptime_use_type(param, span, scan)
             if ret == .Val(returned) -> sema_comptime_use_type(returned, span, scan)
         }
-        .Union(members) -> loop member in members -> sema_comptime_use_type(member, span, scan)
-        .Tuple(fields) -> loop field in fields -> sema_comptime_use_type(field.ty, span, scan)
+        .Union(members) -> {
+            loop member in members -> sema_comptime_use_type(member, span, scan)
+        }
+        .Tuple(fields) -> {
+            loop field in fields -> sema_comptime_use_type(field.ty, span, scan)
+        }
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Measure(_) -> {}
     }
 }
@@ -777,7 +871,9 @@ sema_comptime_use_record_targets: fn(graph: &SemaRegistrationGraph) Never! {
     loop module_row in graph.modules {
         plain := [U32:Bool]{}
         loop import in module_row.imports {
-            if import.declaration.comptime_span == None -> plain[import.target_module_identity.id] = true
+            if import.declaration.comptime_span == None {
+                plain[import.target_module_identity.id] = true
+            }
         }
         loop import in module_row.imports {
             prefix: import.declaration.comptime_span ?? next
@@ -802,10 +898,14 @@ sema_comptime_use_build_only: fn(graph: SemaRegistrationGraph, runtime_names: [[
             target: sema_registration_module_index(graph, import.target_module_identity) ?? next
             if target == module_index -> next
             imported[target] = true
-            if scanned[module_index] && !import.declaration.is_pub && !import.declaration.is_package_pub && !sema_comptime_use_import_runtime(import.declaration, runtime_names[module_index]) -> next
+            if scanned[module_index] && !import.declaration.is_pub && !import.declaration.is_package_pub && !sema_comptime_use_import_runtime(import.declaration, runtime_names[module_index]) {
+                next
+            }
             edges[module_index].push(target)
             loop binding in import.bindings {
-                if binding.target_module_index == .Val(owner) && owner != module_index -> edges[module_index].push(owner)
+                if binding.target_module_index == .Val(owner) && owner != module_index {
+                    edges[module_index].push(owner)
+                }
             }
         }
     }
@@ -839,7 +939,9 @@ sema_comptime_use_import_runtime: fn(declaration: ImportDecl, runtime_names: [St
     if declaration.kind == {
         .Unqualified(_, _, items, _, _) -> {
             loop item in items {
-                if runtime_names.has_key(member_import_local(item.original, item.alias)) -> return true
+                if runtime_names.has_key(member_import_local(item.original, item.alias)) {
+                    return true
+                }
             }
             false
         }
@@ -859,7 +961,9 @@ sema_comptime_use_build_only_shape: fn(graph: SemaRegistrationGraph, module_inde
         if item == {
             .Test(_) | .CodeModule(_) | .ExternRust(_) | .CModule(_) -> return false
             .Func(function) -> {
-                if function.is_job || function.every != None || function.web_marker != None || function.kernel != None || function.markers.len() > 0 -> return false
+                if function.is_job || function.every != None || function.web_marker != None || function.kernel != None || function.markers.len() > 0 {
+                    return false
+                }
             }
             .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Module(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
@@ -872,9 +976,13 @@ sema_comptime_use_build_only_shape: fn(graph: SemaRegistrationGraph, module_inde
 // comes from a module this module imports only with `#run use`: the
 // shipped program has no such module to hold it.
 sema_comptime_use_value_read: fn(name: String, ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
-    if scopes.comptime_execution_depth > 0 || (scopes.location_function ?? environment.function_name) == "build" -> return
+    if scopes.comptime_execution_depth > 0 || (scopes.location_function ?? environment.function_name) == "build" {
+        return
+    }
     if program.registration_graph == .Val(graph) {
-        if graph.comptime_use_targets.len() == 0 -> return
+        if graph.comptime_use_targets.len() == 0 {
+            return
+        }
         prefix: sema_comptime_use_value_prefix(graph, ty, environment.module_identity) ?? return
         diagnostics.push(diagnostic_with_edit(sema_error("E0944", span, "`{name}` is a value computed while building, and its type comes from a `#run use` module", "A `#run use` module exists only while building, so the shipped program cannot hold a value of its types", "Import that module with plain `use`, or read `{name}` only in compile-time code"), TextEdit{span: prefix, new_text: ""}))
     }
@@ -882,23 +990,37 @@ sema_comptime_use_value_read: fn(name: String, ty: Type, span: Span, environment
 
 sema_comptime_use_value_prefix: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: ModuleID) -> Span? {
     if sema_type_resolve_nominal_row(graph, ty, module_identity) == .Val(row) {
-        if graph.comptime_use_targets.get("{module_identity.id}\n{graph.modules[row.module_index].module_identity.id}") == .Val(prefix) -> return Val(prefix)
+        if graph.comptime_use_targets.get("{module_identity.id}\n{graph.modules[row.module_index].module_identity.id}") == .Val(prefix) {
+            return Val(prefix)
+        }
     }
     if ty == {
         .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .Case(_, inner) | .FixedList(inner, _) -> return sema_comptime_use_value_prefix(graph, inner, module_identity)
         .Map(key, _, value) -> {
-            if sema_comptime_use_value_prefix(graph, key, module_identity) == .Val(prefix) -> return Val(prefix)
+            if sema_comptime_use_value_prefix(graph, key, module_identity) == .Val(prefix) {
+                return Val(prefix)
+            }
             return sema_comptime_use_value_prefix(graph, value, module_identity)
         }
         .Result(ok, failure) -> {
-            if sema_comptime_use_value_prefix(graph, ok, module_identity) == .Val(prefix) -> return Val(prefix)
+            if sema_comptime_use_value_prefix(graph, ok, module_identity) == .Val(prefix) {
+                return Val(prefix)
+            }
             return sema_comptime_use_value_prefix(graph, failure, module_identity)
         }
-        .Apply(_, args) | .Union(args) -> loop arg in args {
-            if sema_comptime_use_value_prefix(graph, arg, module_identity) == .Val(prefix) -> return Val(prefix)
+        .Apply(_, args) | .Union(args) -> {
+            loop arg in args {
+                if sema_comptime_use_value_prefix(graph, arg, module_identity) == .Val(prefix) {
+                    return Val(prefix)
+                }
+            }
         }
-        .Tuple(fields) -> loop field in fields {
-            if sema_comptime_use_value_prefix(graph, field.ty, module_identity) == .Val(prefix) -> return Val(prefix)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if sema_comptime_use_value_prefix(graph, field.ty, module_identity) == .Val(prefix) {
+                    return Val(prefix)
+                }
+            }
         }
         .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> {}
     }

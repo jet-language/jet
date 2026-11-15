@@ -1,5 +1,6 @@
 // The public SQL kernel is the one grammar and scalar policy owner.
 use sql_kernel: core.db.sql
+
 #Test("SQL canonical tokenizer retains Unicode strings and comments") {
     tokens: sql_kernel.sql_tokens("SELECT 'x'';é', value /* outer */ FROM source -- tail\nWHERE value >= 2;") ?? panic("tokens")
     assert_eq(tokens, [String]{"SELECT", "'x'';é'", ",", "value", "FROM", "source", "WHERE", "value", ">=", "2", ";"})
@@ -7,6 +8,7 @@ use sql_kernel: core.db.sql
     assert(sql_kernel.sql_tokens("SELECT 'open") == .Err(_))
     assert(sql_kernel.sql_tokens("SELECT value /* open") == .Err(_))
 }
+
 #Test("SQL numeric comparison does not coerce a text literal to numeric") {
     assert(sql_kernel.compare_sql_cell("10", ">", "2"))
     assert(!sql_kernel.compare_sql_cell("10", ">", "'2'"))
@@ -15,6 +17,7 @@ use sql_kernel: core.db.sql
     assert_eq(sql_kernel.identifier(Val("'9id'"), "column") ?? panic("quoted identifier"), "9id")
     assert(sql_kernel.identifier(Val("9id"), "column") == .Err(_))
 }
+
 #Test("SQL sum uses wide integer accumulation before narrowing") {
     indices: [U64]{U64{0}, U64{1}, U64{2}}
     cell: fn(index: U64, field: String) -> sql_kernel.JetSQLValue? {
@@ -29,6 +32,7 @@ use sql_kernel: core.db.sql
     count: sql_kernel.sql_aggregate_value(indices, sql_kernel.JetSQLAggregate.Count, None, cell)
     assert_eq(count, sql_kernel.JetSQLValue.Int(I64{3}))
 }
+
 #Test("SQL named result fields retain ordinal and column lookup") {
     row: sql_kernel.JetSQLResultRow{
         fields: [(field: String, value: sql_kernel.JetSQLValue)]{
@@ -42,6 +46,7 @@ use sql_kernel: core.db.sql
     assert_eq(sql_kernel.sql_output_value(row, "0"), None)
     assert_eq(sql_kernel.sql_output_value(row, "3"), None)
 }
+
 #Test("SQL public parsing and ordered projection resolve private helpers and carriers") {
     query: sql_kernel.parse_sql_query("SELECT value FROM source ORDER BY value DESC") ?? panic("query")
     cell: fn(index: U64, field: String) -> sql_kernel.JetSQLValue? {

@@ -3,12 +3,8 @@
 // pthread symbol (symbols.mjs).
 run: fn() {
     workers := [Task<Int>]{}
-    loop index in 0..<16 {
-        workers.push(task { index * index })
-    }
+    loop index in 0..<16 { workers.push(task { index * index }) }
     sum := 0
-    loop worker in workers {
-        sum += worker.join() ?? panic("task")
-    }
+    loop worker in workers -> sum += worker.join() ?? panic("task")
     print("tasks 16 sum {sum}")
 }

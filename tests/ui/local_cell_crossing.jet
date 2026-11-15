@@ -1,5 +1,7 @@
-use web: core.web
-use server: core.http.server
+use {
+    web: core.web
+    server: core.http.server
+}
 
 cross_task: fn(cell: Cell<Int>) {
     worker: task {
@@ -8,17 +10,13 @@ cross_task: fn(cell: Cell<Int>) {
     worker.join() ?? panic("task failed")
 }
 
-cross_shared: fn(cell: Cell<Int>) {
-    _: Shared{cell}
-}
+cross_shared: fn(cell: Cell<Int>) { _: Shared{cell} }
 
 LocalCache: struct {
-    cell: Cell<Int>,
+    cell: Cell<Int>
 }
 
-cross_shared_nested: fn(cache: LocalCache) {
-    _: Shared{cache}
-}
+cross_shared_nested: fn(cache: LocalCache) { _: Shared{cache} }
 
 cross_http: fn() {
     cell: Cell.new(0)

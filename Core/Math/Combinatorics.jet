@@ -44,7 +44,7 @@ product: fn<T>(items: [T], repeat: Int) -> [[T]] Never! {
             }
         }
         out = nxt
-        r = r + 1
+        r += 1
     }
     out
 }
@@ -70,7 +70,7 @@ perm_rec: fn<T>(items: [T], k: Int, used: [Bool], cur: [T]) -> [[T]] {
             kids: perm_rec<T>(items, k, next_used, next_cur)
             loop row in kids -> out.push(row.copy())
         }
-        i = i + 1
+        i += 1
     }
     out
 }
@@ -84,7 +84,7 @@ comb_rec: fn<T>(items: [T], k: Int, start: Int, cur: [T]) -> [[T]] {
         next_cur.push(items[i].copy())
         kids: comb_rec<T>(items, k, i + 1, next_cur)
         loop row in kids -> out.push(row.copy())
-        i = i + 1
+        i += 1
     }
     out
 }
@@ -98,7 +98,7 @@ comb_rep_rec: fn<T>(items: [T], k: Int, start: Int, cur: [T]) -> [[T]] {
         next_cur.push(items[i].copy())
         kids: comb_rep_rec<T>(items, k, i, next_cur)
         loop row in kids -> out.push(row.copy())
-        i = i + 1
+        i += 1
     }
     out
 }
@@ -107,13 +107,13 @@ multinomial: fn(parts: [Int]) -> Int? Never! {
     n := 0
     loop p in parts {
         if p < 0 -> return None
-        n = n + p
+        n += p
     }
     acc := 1
     loop p in parts {
         c: math.binomial(n, p) ?? return None
-        acc = acc * c
-        n = n - p
+        acc *= c
+        n -= p
     }
     Val(acc)
 }
@@ -123,8 +123,8 @@ rising_factorial: fn(n: Int, k: Int) -> Int? Never! {
     acc := 1
     i := 0
     loop i < k {
-        acc = acc * (n + i)
-        i = i + 1
+        acc *= (n + i)
+        i += 1
     }
     Val(acc)
 }
@@ -140,7 +140,7 @@ compress: fn<T>(items: [T], mask: [Bool]) -> [T] Never! {
     i := 0
     loop i < items.len() {
         if i < mask.len() && mask[i] -> out.push(items[i].copy())
-        i = i + 1
+        i += 1
     }
     out
 }
@@ -163,8 +163,8 @@ count_from: fn(start: Int, step: Int, n: Int) -> [Int] Never! {
     i := 0
     loop i < n {
         out.push(v)
-        v = v + step
-        i = i + 1
+        v += step
+        i += 1
     }
     out
 }
@@ -185,7 +185,7 @@ zip_longest: fn<T>(left: [T], right: [T], fill: T) -> [[T]] Never! {
         a: if i < left.len() -> left[i].copy() else -> fill.copy()
         b: if i < right.len() -> right[i].copy() else -> fill.copy()
         out.push([T]{a, b})
-        i = i + 1
+        i += 1
     }
     out
 }

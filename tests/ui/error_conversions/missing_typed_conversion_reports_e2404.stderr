@@ -1,5 +1,5 @@
 Error [jet.InvalidOutput]: Output entry `run` has the wrong callable contract
-  --> tests/ui/error_conversions/missing_typed_conversion_reports_e2404.jet:11:1
+  --> tests/ui/error_conversions/missing_typed_conversion_reports_e2404.jet:13:1
     |
  11 | run: fn() -> Int TargetErr! {
     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -8,10 +8,10 @@ Error [jet.InvalidOutput]: Output entry `run` has the wrong callable contract
 More: jet-lang.dev/e/E1321
 
 Error [jet.ErrorNotPropagatable]: `read` fails with `SourceErr`, which can't propagate into `TargetErr` here
-  --> tests/ui/error_conversions/missing_typed_conversion_reports_e2404.jet:12:12
+  --> tests/ui/error_conversions/missing_typed_conversion_reports_e2404.jet:14:12
     |
  12 |     value: read()
     |            ^^^^
- Why: `read` is defined at `missing_typed_conversion_reports_e2404.jet:7:1` with effective failure contract `explicit SourceErr!`; the caller's `explicit TargetErr!` contract has no route from `SourceErr` to `TargetErr`
+ Why: `read` is defined at `missing_typed_conversion_reports_e2404.jet:11:1` with effective failure contract `explicit SourceErr!`; the caller's `explicit TargetErr!` contract has no route from `SourceErr` to `TargetErr`
  Fix: Declare the caller with `SourceErr` as its failure domain, or add `impl TargetErr.From(SourceErr) { … }`; otherwise handle `read` locally with `??`
 More: jet-lang.dev/e/E2404

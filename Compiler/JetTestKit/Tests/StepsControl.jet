@@ -65,7 +65,8 @@ use {
         files.remove_all(root) ?? panic("remove process repeat CPU scratch")
     }
     env: KitEnv{root: "", scratch: "", jet: "", jetpack: "", timeout: 5s, memory_limit: 0}
-    loop row in [(condition: "process 1 alive timeout 1s", wall: 10000000000), (condition: "process 1 alive timeout 3s", wall: 13000000000), (condition: "file: x exists timeout 3s", wall: 3000000000)] {
+    loop row in
+        [(condition: "process 1 alive timeout 1s", wall: 10000000000), (condition: "process 1 alive timeout 3s", wall: 13000000000), (condition: "file: x exists timeout 3s", wall: 3000000000)] {
         plan: kit_steps_parse_case("repeat while {row.condition} every 1ms fail \"x\"\nend repeat\n")
         assert_eq(plan.error, "")
         assert_eq(kit_steps_repeat_wall(plan.steps[0], env), row.wall)
@@ -96,7 +97,8 @@ use {
     assert_eq(cases_test_advanced(root, "quoted", source).verdict.status, "PASS")
     assert_eq(cases_test_advanced(root, "wrong", "{source}cap:joined: = \"wrong\"\n").verdict.status, "FAIL")
     assert_eq(cases_test_advanced(root, "missing", "for line file absent as row\nstep: true\nend for\n").verdict.status, "ERROR")
-    loop selector in ["file", "file ../escape", "file {{root}}/escape", "file {{tmp}}/../escape", "file? value", "files value", "file value of prior"] {
+    loop selector in
+        ["file", "file ../escape", "file {{root}}/escape", "file {{tmp}}/../escape", "file? value", "files value", "file value of prior"] {
         plan: kit_steps_parse_case("for line {selector} as row\nstep: true\nend for\n")
         assert(plan.error.contains("invalid bounded loop"))
     }
@@ -106,11 +108,13 @@ use {
 #Test("non-zombie probes preserve distinct services and agent proc-stat laws") {
     assert_eq(kit_steps_process_nonzombie_probe(None, "alive-nonzombie"), None)
     assert_eq(kit_steps_process_nonzombie_probe(None, "proc-readable-nonzombie"), Val(false))
-    loop stat in ["", "malformed", "1 (name)", "1 (name) ", "1 (name) R 0", "1 (name) Zeta 0", "1 (name) ZZ 0", "1 (name) Z) R 0", "1 (name) Z 0) R 0"] {
+    loop stat in
+        ["", "malformed", "1 (name)", "1 (name) ", "1 (name) R 0", "1 (name) Zeta 0", "1 (name) ZZ 0", "1 (name) Z) R 0", "1 (name) Z 0) R 0"] {
         assert_eq(kit_steps_process_nonzombie_probe(Val(stat), "alive-nonzombie"), None)
         assert_eq(kit_steps_process_nonzombie_probe(Val(stat), "proc-readable-nonzombie"), Val(true))
     }
-    loop stat in ["1 (name) Z", "1 (name) Z 0", "1 (embedded) name) Z 0", "1 (name) \tZ\n0", "1 (name)  Z 0", "1 (name) Z 0"] {
+    loop stat in
+        ["1 (name) Z", "1 (name) Z 0", "1 (embedded) name) Z 0", "1 (name) \tZ\n0", "1 (name)  Z 0", "1 (name) Z 0"] {
         assert_eq(kit_steps_process_nonzombie_probe(Val(stat), "alive-nonzombie"), Val(false))
         assert_eq(kit_steps_process_nonzombie_probe(Val(stat), "proc-readable-nonzombie"), Val(false))
     }
@@ -127,13 +131,16 @@ use {
         assert_eq(plan.error, "")
         assert_eq(plan.steps[0].argv[4], mode)
     }
-    loop mode in ["nonzombie", "non-zombie", "alive-non-zombie", "proc-nonzombie", "proc-readable", "proc-readable-non-zombie"] {
+    loop mode in
+        ["nonzombie", "non-zombie", "alive-non-zombie", "proc-nonzombie", "proc-readable", "proc-readable-non-zombie"] {
         assert(kit_steps_parse_case("repeat while process -1 {mode} timeout 1s every 1ms fail \"deadline\"\nend repeat\n").error.contains("invalid bounded loop"))
     }
 }
 
 #Test("non-zombie repeats observe real children reaping deadlines and absent proc entries") {
-    if sys.name() != "linux" -> return
+    if sys.name() != "linux" {
+        return
+    }
     root: cases_test_root("control-nonzombie")
     loop mode in ["alive-nonzombie", "proc-readable-nonzombie"] {
         stopped: "requires: os-name:linux\nspawn peer: jet -c 'exec sleep 20'\nrepeat while process {{pid:peer}} {mode} timeout 1s every 1ms fail \"process remained alive\"\nsignal peer: KILL\nwait peer timeout 1s\nexit: any # explicit signal is an expected stop\nend repeat\n"

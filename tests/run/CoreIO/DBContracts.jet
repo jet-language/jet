@@ -10,8 +10,10 @@ package: {
     authority: { allow: [DB, DB.Read, DB.Write, IO, Mem.Alloc, Time.Wait] }
 }
 
-use db: core.db
-use time: core.time
+use {
+    db: core.db
+    time: core.time
+}
 
 #Codable
 Item: struct {
@@ -35,9 +37,15 @@ wait_for_lease: fn(pool: DBPool, started: Sender<Int>) -[DB, Time.Wait]> String 
 
 failure_label: fn(error: TaskFailure) -> String {
     if error == {
-        .Panicked(reason) -> { return "panicked: {reason}" }
-        .DeadlineBlown -> { return "deadline" }
-        .Cancelled -> { return "cancelled" }
+        .Panicked(reason) -> {
+            return "panicked: {reason}"
+        }
+        .DeadlineBlown -> {
+            return "deadline"
+        }
+        .Cancelled -> {
+            return "cancelled"
+        }
     }
 }
 
@@ -71,7 +79,7 @@ run: fn() {
     print("typed column: {db.row_text(third, "name") ?? "(none)"}")
     wrong: scope.query_one(SQL{"SELECT name FROM item WHERE id = 1"}) ?? panic("select one")
     if db.row_int(wrong, "name") == {
-        .Ok(_) -> print("text column as Int: accepted")
+        .Ok(_) -> { print("text column as Int: accepted") }
         .Err(error) -> print("text column as Int: {error.message()}")
     }
 
@@ -85,7 +93,7 @@ run: fn() {
     duplicate: 1
     batch: [SQL{"INSERT INTO item (id, name, price, stocked) VALUES (4, 'washer', 1.0, true)"}, SQL{"INSERT INTO item (id, name, price, stocked) VALUES ({duplicate}, 'clash', 1.0, true)"}]
     if db.transaction(scope, "restock", batch) == {
-        .Ok(steps) -> print("failed batch: committed {steps}")
+        .Ok(steps) -> { print("failed batch: committed {steps}") }
         .Err(_) -> print("failed batch: rolled back, unchanged {count(scope) == before}")
     }
 
@@ -93,7 +101,7 @@ run: fn() {
     pool: db.pool(":memory:", max: 1) ?? panic("pool")
     held: pool.acquire(deadline: 100ms) ?? panic("first lease")
     if pool.acquire(deadline: 20ms) == {
-        .Ok(_) -> print("second lease while held: granted")
+        .Ok(_) -> { print("second lease while held: granted") }
         .Err(error) -> print("second lease while held: {error.message()}")
     }
     held.close() ?? panic("release")
@@ -108,7 +116,7 @@ run: fn() {
     time.sleep(20ms)
     waiter.cancel()
     if waiter.join() == {
-        .Ok(outcome) -> print(outcome)
+        .Ok(outcome) -> { print(outcome) }
         .Err(error) -> print("waiter: {failure_label(error)}")
     }
     blocker.close() ?? panic("blocker release")
@@ -117,24 +125,24 @@ run: fn() {
 
     // Draining refuses new leases; the held one still releases, then drain ends.
     if pool.drain(deadline: 20ms) == {
-        .Ok(receipt) -> print("drain with a lease out: {receipt}")
+        .Ok(receipt) -> { print("drain with a lease out: {receipt}") }
         .Err(error) -> print("drain with a lease out: {error.message()}")
     }
     if pool.acquire(deadline: 20ms) == {
-        .Ok(_) -> print("lease while draining: granted")
+        .Ok(_) -> { print("lease while draining: granted") }
         .Err(error) -> print("lease while draining: {error.message()}")
     }
     next.close() ?? panic("final release")
     print("drained: {pool.drain() ?? panic("drain")}")
     if pool.acquire(deadline: 20ms) == {
-        .Ok(_) -> print("lease after drain: granted")
+        .Ok(_) -> { print("lease after drain: granted") }
         .Err(error) -> print("lease after drain: {error.message()}")
     }
 
     // Use after close: the connection refuses work and says why.
     print("close: {conn.close()}")
     if scope.query(SQL{"SELECT id FROM item"}) == {
-        .Ok(_) -> print("query after close: accepted")
+        .Ok(_) -> { print("query after close: accepted") }
         .Err(error) -> print("query after close: {error.message()}")
     }
     print("connection: {conn}")

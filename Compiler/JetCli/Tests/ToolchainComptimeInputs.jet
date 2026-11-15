@@ -55,14 +55,16 @@ toolchain_inputs_test_refused: fn(adapter: JetDriverComptimeInputs, builtin: Str
     // copy: each adapter shares the one tree cell, so the package census runs once.
     tree: Shared{JetDriverToolchainTree{root: root.copy(), reader: JetCLIToolchainPackages{}, packages: None}}
     member: toolchain_inputs_test_adapter("{root}/Compiler/Member/main.jet", Val(tree.copy()), log.copy())
-    if toolchain_inputs_test_text(member, "embed_file", "toolchain:Data/table.txt") == .String(text) -> assert_eq(text, "row\n") else -> panic("embed_file gives text")
+    if toolchain_inputs_test_text(member, "embed_file", "toolchain:Data/table.txt") == .String(text) {
+        assert_eq(text, "row\n")
+    } else { panic("embed_file gives text") }
     dep: toolchain_inputs_test_adapter("{root}/Dep/Nested/lib.jet", Val(tree.copy()), log.copy())
     if toolchain_inputs_test_text(dep, "find", "toolchain:Data/rows/*.txt") == .List(values) {
         assert_eq(values.len(), 2)
-        if values[0] == .String(first) -> assert_eq(first, "Data/rows/a.txt") else -> panic("find gives paths")
-    } else {
-        panic("find gives a list")
-    }
+        if values[0] == .String(first) -> assert_eq(first, "Data/rows/a.txt") else {
+            panic("find gives paths")
+        }
+    } else { panic("find gives a list") }
     assert_eq(tree.guard_read().value.packages, Val([String]{"{root}/Compiler", "{root}/Compiler/Member", "{root}/Dep"}))
     names: loop record in log.guard_read().value.records -> record.path
     assert_eq(names, [String]{"toolchain:Data/table.txt", "toolchain:Data/rows/a.txt", "toolchain:Data/rows/b.txt", "toolchain:Data/rows/*.txt"})

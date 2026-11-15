@@ -36,9 +36,15 @@ broken: fn(n: Int) -> Int {
 
 failure_label: fn(error: TaskFailure) -> String {
     if error == {
-        .Cancelled -> { return "cancelled" }
-        .DeadlineBlown -> { return "deadline" }
-        .Panicked(_) -> { return "panicked" }
+        .Cancelled -> {
+            return "cancelled"
+        }
+        .DeadlineBlown -> {
+            return "deadline"
+        }
+        .Panicked(_) -> {
+            return "panicked"
+        }
     }
 }
 
@@ -57,12 +63,10 @@ run: fn() {
         handler: task {
             marker: Marker{name: "the handler's marker"}
             defer close(marker)
-            #Deadline(20ms) {
-                print(spin(counter))
-            }
+            #Deadline(20ms) { print(spin(counter)) }
         }
         if handler.join() == {
-            .Ok(_) -> print("the handler finished")
+            .Ok(_) -> { print("the handler finished") }
             .Err(error) -> print("the handler: {failure_label(error)}")
         }
     }

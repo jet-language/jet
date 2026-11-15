@@ -34,7 +34,9 @@ MigrationOutcome: struct {
 // file's ```jet fences and prose code spans, or any other text, such as an
 // expected output, line by line.
 lambda_shape1_file: fn(path: String, text: String, source: Bool) -> MigrationOutcome {
-    if source || path.ends_with(".jet") || path.ends_with(".template") -> return lambda_shape1_source(path, text)
+    if source || path.ends_with(".jet") || path.ends_with(".template") {
+        return lambda_shape1_source(path, text)
+    }
     if path.ends_with(".md") -> return lambda_shape1_markdown(path, text)
     lambda_shape1_lines(path, text)
 }
@@ -82,10 +84,14 @@ lambda_shape1_source: fn(path: String, text: String) -> MigrationOutcome {
         }
         if {
             lambda_shape1_text(bytes, token.span.start, token.span.end).contains("`") -> {
-                if token.kind == TOKEN_STRING -> rewritten += lambda_shape1_spans(bytes, token.span.start, token.span.end, 96, true, edits)
+                if token.kind == TOKEN_STRING {
+                    rewritten += lambda_shape1_spans(bytes, token.span.start, token.span.end, 96, true, edits)
+                }
             }
             // An interpolated literal's holes are code, read with the file's.
-            token.literal < 0 || !lexed.tables.literals[token.literal].string_parts.any(fn(part) { part.kind == STRING_PART_INTERPOLATION }) -> rewritten += lambda_shape1_snippet(bytes, token, edits)
+            token.literal < 0 || !lexed.tables.literals[token.literal].string_parts.any(fn(part) { part.kind == STRING_PART_INTERPOLATION }) -> {
+                rewritten += lambda_shape1_snippet(bytes, token, edits)
+            }
         }
     }
     if edits.len() == 0 -> return MigrationOutcome{text: text, rewritten: 0, skipped: skipped}
@@ -129,10 +135,14 @@ lambda_shape1_quoted: fn(path: String, bytes: [U8], token: Token, skipped: &[Str
     outcome: lambda_shape1_source("{path}:{lambda_shape1_line(bytes, token.span.start)}", inner)
     if outcome.rewritten == 0 -> return None
     parsed: parse_generated_source(outcome.text.bytes())
-    if parsed.program.items.len() == 0 || parsed.diagnostics.any(fn(d) { d.code.starts_with("E") }) -> return None
+    if parsed.program.items.len() == 0 || parsed.diagnostics.any(fn(d) { d.code.starts_with("E") }) {
+        return None
+    }
     loop reason in outcome.skipped -> skipped.push(reason.copy())
     replaced: if token.kind == TOKEN_RAW_STRING -> outcome.text.copy() else -> lambda_shape1_quote(outcome.text)
-    if token.kind == TOKEN_RAW_STRING && replaced.contains(lambda_shape1_text(bytes, token.span.start, token.span.start + quote)) -> return None
+    if token.kind == TOKEN_RAW_STRING && replaced.contains(lambda_shape1_text(bytes, token.span.start, token.span.start + quote)) {
+        return None
+    }
     Val(LambdaShapeQuoted{start: token.span.start + quote, end: token.span.end - quote, text: replaced, rewritten: outcome.rewritten})
 }
 
@@ -148,7 +158,9 @@ lambda_shape1_scan: fn(path: String, bytes: [U8], tables: TokenTables, raw: [Tok
         token: tokens[index]
         if token.literal >= 0 {
             loop part in tables.literals[token.literal].string_parts {
-                if part.kind == STRING_PART_INTERPOLATION -> rewritten += lambda_shape1_scan(path, bytes, tables, part.tokens, TOKEN_LPAREN, edits, skipped)
+                if part.kind == STRING_PART_INTERPOLATION {
+                    rewritten += lambda_shape1_scan(path, bytes, tables, part.tokens, TOKEN_LPAREN, edits, skipped)
+                }
             }
         }
         enclosing: if stack.len() > 0 -> stack[stack.len() - 1] else -> outer
@@ -165,19 +177,29 @@ lambda_shape1_scan: fn(path: String, bytes: [U8], tables: TokenTables, raw: [Tok
                 reason: if end < 0 -> "unclosed group" else -> lambda_shape1_site_edits(bytes, tokens, index, params_end, body, end, edits)
                 if {
                     reason == "" -> rewritten += 1
-                    else -> skipped.push("{path}:{lambda_shape1_line(bytes, token.span.start)}: {reason}")
+                    else -> {
+                        skipped.push("{path}:{lambda_shape1_line(bytes, token.span.start)}: {reason}")
+                    }
                 }
             }
         }
         opened: stack.len()
         if {
             // A marker's arguments: enclosing `#` keeps them from leading.
-            token.kind == TOKEN_LPAREN && index >= 2 && tokens[index - 1].kind == TOKEN_IDENT && tokens[index - 2].kind == TOKEN_HASH -> stack.push(TOKEN_HASH)
+            token.kind == TOKEN_LPAREN && index >= 2 && tokens[index - 1].kind == TOKEN_IDENT && tokens[index - 2].kind == TOKEN_HASH -> {
+                stack.push(TOKEN_HASH)
+            }
             // A collection literal's elements are values, as in `[…]`.
-            token.kind == TOKEN_LBRACE && lambda_shape1_collection(tokens, index) -> stack.push(TOKEN_LBRACKET)
-            token.kind == TOKEN_LPAREN || token.kind == TOKEN_LBRACKET || token.kind == TOKEN_LBRACE -> stack.push(token.kind)
+            token.kind == TOKEN_LBRACE && lambda_shape1_collection(tokens, index) -> {
+                stack.push(TOKEN_LBRACKET)
+            }
+            token.kind == TOKEN_LPAREN || token.kind == TOKEN_LBRACKET || token.kind == TOKEN_LBRACE -> {
+                stack.push(token.kind)
+            }
         }
-        if stack.len() > opened -> blocks.push(token.kind == TOKEN_LBRACE && lambda_shape1_block(tokens, index))
+        if stack.len() > opened {
+            blocks.push(token.kind == TOKEN_LBRACE && lambda_shape1_block(tokens, index))
+        }
         if (token.kind == TOKEN_RPAREN || token.kind == TOKEN_RBRACKET || token.kind == TOKEN_RBRACE) && stack.len() > 0 {
             _: stack.pop()
             _: blocks.pop()
@@ -212,17 +234,27 @@ lambda_shape1_leads: fn(bytes: [U8], tokens: [Token], index: Int, enclosing: Int
     if kind != TOKEN_LPAREN && kind != TOKEN_IDENT -> return false
     if enclosing == TOKEN_HASH -> return false
     if kind == TOKEN_IDENT && lambda_shape1_capital(bytes, tokens[index]) -> return false
-    if kind == TOKEN_LPAREN && index + 1 < tokens.len() && tokens[index + 1].kind == TOKEN_IDENT && lambda_shape1_capital(bytes, tokens[index + 1]) && !(index + 2 < tokens.len() && tokens[index + 2].kind == TOKEN_COLON) -> return false
-    if index == 0 -> return enclosing == TOKEN_LPAREN || (enclosing == LAMBDA_SHAPE_SPAN && kind == TOKEN_LPAREN)
+    if kind == TOKEN_LPAREN && index + 1 < tokens.len() && tokens[index + 1].kind == TOKEN_IDENT && lambda_shape1_capital(bytes, tokens[index + 1]) && !(index + 2 < tokens.len() && tokens[index + 2].kind == TOKEN_COLON) {
+        return false
+    }
+    if index == 0 {
+        return enclosing == TOKEN_LPAREN || (enclosing == LAMBDA_SHAPE_SPAN && kind == TOKEN_LPAREN)
+    }
     before: tokens[index - 1].kind
     if before == TOKEN_COMMA -> return enclosing == TOKEN_LPAREN || enclosing == TOKEN_LBRACKET
     if span && kind == TOKEN_IDENT {
-        if index + 1 >= tokens.len() || tokens[index].span.end == tokens[index + 1].span.start -> return false
+        if index + 1 >= tokens.len() || tokens[index].span.end == tokens[index + 1].span.start {
+            return false
+        }
         return before == TOKEN_LPAREN || before == TOKEN_LBRACKET
     }
-    if before == TOKEN_LBRACE -> return enclosing == TOKEN_LBRACKET || (block && kind == TOKEN_LPAREN) || (index >= 2 && tokens[index - 2].kind == TOKEN_IDENT && lambda_shape1_text(bytes, tokens[index - 2].span.start, tokens[index - 2].span.end) == "via")
+    if before == TOKEN_LBRACE {
+        return enclosing == TOKEN_LBRACKET || (block && kind == TOKEN_LPAREN) || (index >= 2 && tokens[index - 2].kind == TOKEN_IDENT && lambda_shape1_text(bytes, tokens[index - 2].span.start, tokens[index - 2].span.end) == "via")
+    }
     if before == TOKEN_SEMI -> return block && kind == TOKEN_LPAREN
-    if before == TOKEN_IDENT -> return !span && kind == TOKEN_LPAREN && tokens[index - 1].span.end < tokens[index].span.start && !lambda_shape1_capital(bytes, tokens[index - 1])
+    if before == TOKEN_IDENT {
+        return !span && kind == TOKEN_LPAREN && tokens[index - 1].span.end < tokens[index].span.start && !lambda_shape1_capital(bytes, tokens[index - 1])
+    }
     before == TOKEN_LPAREN || before == TOKEN_LBRACKET || before == TOKEN_COLON || before == TOKEN_EQ || before == TOKEN_COLON_EQ || before == TOKEN_UNIFIED_ARROW || before == TOKEN_RETURN || before == TOKEN_QUESTION_QUESTION || before == TOKEN_PIPE_GT
 }
 
@@ -304,7 +336,9 @@ lambda_shape1_snippet: fn(bytes: [U8], token: Token, edits: &[LambdaShapeEdit]) 
     from: token.span.start + quote
     to: token.span.end - quote
     inner_raw: lambda_shape1_text(bytes, from, to)
-    if raw_string || !inner_raw.contains("\\") -> return lambda_shape1_plain(bytes, from, to, !raw_string, edits)
+    if raw_string || !inner_raw.contains("\\") {
+        return lambda_shape1_plain(bytes, from, to, !raw_string, edits)
+    }
     inner: lambda_shape1_unquote(inner_raw) ?? return 0
     if lambda_shape1_quote(inner) != inner_raw -> return 0
     inner_bytes: inner.bytes()
@@ -351,9 +385,13 @@ lambda_shape1_span: fn(bytes: [U8], from: Int, to: Int, mode: Int, doubled: Bool
 lambda_shape1_after_arrow: fn(tokens: [Token], at: Int) -> Int {
     if at >= tokens.len() -> return -1
     if tokens[at].kind == TOKEN_UNIFIED_ARROW -> return at + 1
-    if tokens[at].kind != TOKEN_MINUS || at + 1 >= tokens.len() || tokens[at + 1].kind != TOKEN_LBRACKET || tokens[at].span.end != tokens[at + 1].span.start -> return -1
+    if tokens[at].kind != TOKEN_MINUS || at + 1 >= tokens.len() || tokens[at + 1].kind != TOKEN_LBRACKET || tokens[at].span.end != tokens[at + 1].span.start {
+        return -1
+    }
     close: lambda_shape1_match(tokens, at + 1)
-    if close < 0 || close + 1 >= tokens.len() || tokens[close + 1].kind != TOKEN_GT || tokens[close].span.end != tokens[close + 1].span.start -> return -1
+    if close < 0 || close + 1 >= tokens.len() || tokens[close + 1].kind != TOKEN_GT || tokens[close].span.end != tokens[close + 1].span.start {
+        return -1
+    }
     close + 2
 }
 
@@ -364,7 +402,9 @@ lambda_shape1_after_arrow: fn(tokens: [Token], at: Int) -> Int {
 // `{`. -1 when a value body inside a `(…)` or `[…]` opened in these tokens
 // (`opened`) runs past the text, which is then prose with a stray parenthesis.
 lambda_shape1_body_end: fn(bytes: [U8], tokens: [Token], body: Int, enclosing: Int, opened: Bool) -> Int {
-    if tokens[body].kind == TOKEN_LBRACE && lambda_shape1_match(tokens, body) < 0 -> return tokens[body].span.end
+    if tokens[body].kind == TOKEN_LBRACE && lambda_shape1_match(tokens, body) < 0 {
+        return tokens[body].span.end
+    }
     depth := 0
     last := body
     index := body
@@ -372,8 +412,12 @@ lambda_shape1_body_end: fn(bytes: [U8], tokens: [Token], body: Int, enclosing: I
         kind: tokens[index].kind
         closer: kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE
         if depth == 0 && index > body {
-            if kind == TOKEN_COMMA || closer || (kind == TOKEN_SEMI && tokens[index].span.end > tokens[index].span.start && bytes[tokens[index].span.start] == 59) -> break
-            if enclosing == TOKEN_LBRACE && lambda_shape1_newline(bytes, tokens[index - 1].span.end, tokens[index].span.start) && !lambda_shape1_continues(tokens, index) -> break
+            if kind == TOKEN_COMMA || closer || (kind == TOKEN_SEMI && tokens[index].span.end > tokens[index].span.start && bytes[tokens[index].span.start] == 59) {
+                break
+            }
+            if enclosing == TOKEN_LBRACE && lambda_shape1_newline(bytes, tokens[index - 1].span.end, tokens[index].span.start) && !lambda_shape1_continues(tokens, index) {
+                break
+            }
         }
         if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> depth += 1
         if closer {
@@ -383,7 +427,9 @@ lambda_shape1_body_end: fn(bytes: [U8], tokens: [Token], body: Int, enclosing: I
         last = index
         index += 1
     }
-    if index == tokens.len() && opened && (enclosing == TOKEN_LPAREN || enclosing == TOKEN_LBRACKET) -> return -1
+    if index == tokens.len() && opened && (enclosing == TOKEN_LPAREN || enclosing == TOKEN_LBRACKET) {
+        return -1
+    }
     tokens[last].span.end
 }
 
@@ -418,10 +464,14 @@ lambda_shape1_site_edits: fn(bytes: [U8], tokens: [Token], first: Int, params_en
     }
     close_params: if bare -> ")" else -> ""
     body_kind: tokens[body].kind
-    if end <= body_start || body_kind == TOKEN_COMMA || body_kind == TOKEN_RPAREN || body_kind == TOKEN_RBRACKET || body_kind == TOKEN_RBRACE -> return "empty body"
+    if end <= body_start || body_kind == TOKEN_COMMA || body_kind == TOKEN_RPAREN || body_kind == TOKEN_RBRACKET || body_kind == TOKEN_RBRACE {
+        return "empty body"
+    }
     edits.push(LambdaShapeEdit{start: start, end: start, text: if bare -> "fn(" else -> "fn"})
     edits.push(LambdaShapeEdit{start: head_end, end: body_start, text: "{close_params}{row}{open_body}"})
-    if !braced -> edits.push(LambdaShapeEdit{start: end, end: end, text: if split -> "\n{lambda_shape1_indent(bytes, start)}}}" else -> " }}", order: start})
+    if !braced {
+        edits.push(LambdaShapeEdit{start: end, end: end, text: if split -> "\n{lambda_shape1_indent(bytes, start)}}}" else -> " }}", order: start})
+    }
     ""
 }
 

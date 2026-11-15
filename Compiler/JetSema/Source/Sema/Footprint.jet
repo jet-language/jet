@@ -31,7 +31,9 @@ SemaFootprintUses: struct {
             }
             .MemberSpread(base, members, _, _) -> {
                 if sema_footprint_self_span(base) == .Val(self_span) {
-                    loop member in members -> sema_footprint_note_field(self, member.name, member.span)
+                    loop member in members {
+                        sema_footprint_note_field(self, member.name, member.span)
+                    }
                     self.settled[self_span.start] = true
                 }
             }
@@ -40,14 +42,14 @@ SemaFootprintUses: struct {
                     // A stored function value called through its field.
                     if self.known.contains(method) {
                         sema_footprint_note_field(self, method, method_span)
-                    } else {
-                        self.calls.push(NamedSpan{name: method, span: method_span})
-                    }
+                    } else { self.calls.push(NamedSpan{name: method, span: method_span}) }
                     self.settled[self_span.start] = true
                 }
             }
             .Ident(name, span, _) -> {
-                if name == "self" && self.settled.get(span.start) == None && self.whole == None -> self.whole = Val(span)
+                if name == "self" && self.settled.get(span.start) == None && self.whole == None {
+                    self.whole = Val(span)
+                }
             }
             .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
         }
@@ -78,7 +80,9 @@ sema_footprint_note_field: fn(uses: &SemaFootprintUses, name: String, span: Span
         if uses.whole == None -> uses.whole = Val(span)
         return
     }
-    if uses.names.contains(name) -> return
+    if uses.names.contains(name) {
+        return
+    }
     uses.names.push(name.copy())
     uses.spans.push(span.copy())
 }
@@ -92,7 +96,9 @@ sema_footprint_has_receiver: fn(method: Func) -> Bool Never! {
 
 sema_footprint_body_uses: fn(method: Func, known: [String]) -> SemaFootprintUses {
     uses := SemaFootprintUses{known: known, names: [String]{}, spans: [Span]{}, calls: [NamedSpan]{}, whole: None, settled: [Int:Bool]{}}
-    loop statement in method.body -> ast_visit_statement(statement, fn(expression: Expr) { uses.visit(expression) }, true)
+    loop statement in method.body {
+        ast_visit_statement(statement, fn(expression: Expr) { uses.visit(expression) }, true)
+    }
     uses
 }
 
@@ -124,7 +130,9 @@ sema_footprint_check: fn(items: [Item]) -> [Diagnostic] {
                 }
                 sema_footprint_add_owner(owners, definition.name, methods, stated)
             }
-            .Impl(definition) -> sema_footprint_add_owner(owners, definition.type_name, definition.methods, stated)
+            .Impl(definition) -> {
+                sema_footprint_add_owner(owners, definition.type_name, definition.methods, stated)
+            }
             .Func(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
@@ -158,9 +166,7 @@ sema_footprint_solve_owner: fn(owner: SemaFootprintOwner, known: [String], diagn
     // receiver or is declared more than once.
     index := [String:Int]{}
     loop (position, method) in owner.methods {
-        if index.get(method.name) != None {
-            index[method.name] = -1
-        } else {
+        if index.get(method.name) != None -> index[method.name] = -1 else {
             index[method.name] = if sema_footprint_has_receiver(method) -> position else -> -1
         }
     }
@@ -195,9 +201,7 @@ sema_footprint_solve_owner: fn(owner: SemaFootprintOwner, known: [String], diagn
                             next_footprint.spans.push(call.span)
                         }
                     }
-                } else {
-                    next_footprint.whole = Val(call.span)
-                }
+                } else { next_footprint.whole = Val(call.span) }
                 if next_footprint.whole != None || next_footprint.names.len() != own.names.len() {
                     solved[position] = Val(next_footprint)
                     changed = true
@@ -236,6 +240,8 @@ sema_footprint_solve_owner: fn(owner: SemaFootprintOwner, known: [String], diagn
                 }
             }
         }
-        if found -> diagnostics.push(sema_error("E0231", outside.span, "`{method.name}` uses {outside.what} outside its stated footprint `{shown}`", "callers and the published API see the stated footprint, so the body must stay inside it", "add the field to the receiver's footprint, or change `{method.name}` to stay inside `{shown}`"))
+        if found {
+            diagnostics.push(sema_error("E0231", outside.span, "`{method.name}` uses {outside.what} outside its stated footprint `{shown}`", "callers and the published API see the stated footprint, so the body must stay inside it", "add the field to the receiver's footprint, or change `{method.name}` to stay inside `{shown}`"))
+        }
     }
 }

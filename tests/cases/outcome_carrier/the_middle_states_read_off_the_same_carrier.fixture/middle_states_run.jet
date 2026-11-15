@@ -1,4 +1,3 @@
-
 ImportErr: struct {
     broken: Int
     partial: [String]
@@ -8,9 +7,7 @@ ImportErr: struct {
 import_rows: fn(label: String, rows: [String]) -> [String] ImportErr! {
     good: rows.filter(fn(row) { row != "" })
     broken: rows.len() - good.len()
-    if broken > 0 {
-        return Err(ImportErr{ broken: broken, partial: good, notes: [label.copy()] })
-    }
+    if broken > 0 -> return Err(ImportErr{broken: broken, partial: good, notes: [label.copy()]})
     return Ok(good)
 }
 

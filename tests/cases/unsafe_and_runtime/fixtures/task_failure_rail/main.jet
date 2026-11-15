@@ -1,16 +1,15 @@
-
 use time: core.time
 
 boom: fn() -> Int {
     panic("boom")
     return 0
 }
+
 deadline: fn() -> Int {
-    #Deadline(0ms) {
-        time.sleep(1ms)
-    }
+    #Deadline(0ms) { time.sleep(1ms) }
     return 0
 }
+
 panic_rail: fn() {
     task.group workers {
         failed: task boom()
@@ -26,9 +25,10 @@ panic_rail: fn() {
         }
     }
 }
+
 all_rail: fn() {
     task.group workers {
-        if (task.all { boom(), 2 }) == {
+        if (task.all {boom(), 2}) == {
             .Err(error) -> {
                 if error == {
                     .Panicked(reason) -> { print("panic:{reason}") }
@@ -40,6 +40,7 @@ all_rail: fn() {
         }
     }
 }
+
 deadline_rail: fn() {
     task.group workers {
         expired: task deadline()
@@ -55,6 +56,7 @@ deadline_rail: fn() {
         }
     }
 }
+
 cancel_rail: fn() {
     task.group workers {
         cancelled: task {
@@ -73,6 +75,7 @@ cancel_rail: fn() {
         }
     }
 }
+
 run: fn() {
     panic_rail()
     all_rail()

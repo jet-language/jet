@@ -9,11 +9,12 @@ use jet_foundation.[CallArg, Diagnostic, Expr, ExprField, ImplConstValue, Module
 // What checking a trait constant's value found.
 SemaTraitConstantEval: enum {
     Value(value: TComptimeValue)
-    // A value of some other type.
     WrongType
-    // Not a literal, an enum case, a record or a list of them.
     NotCompileTime
 }
+
+// A value of some other type.
+// Not a literal, an enum case, a record or a list of them.
 
 // The declaration of a record constant's type: the struct and the module it
 // is written in, which its field types resolve in.
@@ -142,21 +143,31 @@ sema_trait_constants_check_impl: fn(graph: SemaRegistrationGraph, module_identit
 sema_trait_constant_report: fn(result: SemaTraitConstantEval, name: String, declared: Type, trait_name: String, span: Span, diagnostics: &[Diagnostic]) Never! {
     if result == {
         .Value(_) -> {}
-        .WrongType -> diagnostics.push(sema_error("E0934", span, "the value of trait constant `{name}` is not of type `{type_name(declared)}`", "`{trait_name}` declares `{name}: {type_name(declared)}`, and each value has that type", "write a value of type `{type_name(declared)}`"))
-        .NotCompileTime -> diagnostics.push(sema_error("E0935", span, "the value of trait constant `{name}` is not known at compile time", "a trait constant is read from its type without running code, so its value is a literal, an enum case or a list of them", "write the value as a literal, an enum case or a list literal"))
+        .WrongType -> {
+            diagnostics.push(sema_error("E0934", span, "the value of trait constant `{name}` is not of type `{type_name(declared)}`", "`{trait_name}` declares `{name}: {type_name(declared)}`, and each value has that type", "write a value of type `{type_name(declared)}`"))
+        }
+        .NotCompileTime -> {
+            diagnostics.push(sema_error("E0935", span, "the value of trait constant `{name}` is not known at compile time", "a trait constant is read from its type without running code, so its value is a literal, an enum case or a list of them", "write the value as a literal, an enum case or a list literal"))
+        }
     }
 }
 
 // `expr` as a value of resolved type `ty`. Type names `expr` writes resolve
 // in `module_identity`; `ty` was resolved in `type_module`.
 sema_trait_constant_eval: fn(graph: SemaRegistrationGraph, expr: Expr, ty: Type, module_identity: ModuleID, type_module: ModuleID) -> SemaTraitConstantEval Never! {
-    if expr == .Paren(inner, _, _) -> return sema_trait_constant_eval(graph, inner, ty, module_identity, type_module)
+    if expr == .Paren(inner, _, _) {
+        return sema_trait_constant_eval(graph, inner, ty, module_identity, type_module)
+    }
     if ty == {
         .Option(inner) -> return sema_trait_constant_eval_option(graph, expr, ty, inner, module_identity, type_module)
         .List(element) -> return sema_trait_constant_eval_list(graph, expr, ty, element, module_identity, type_module)
         .Named(name) -> {
-            if sema_trait_constant_enum_variants(graph, type_module, name) == .Val(variants) -> return sema_trait_constant_eval_enum(graph, expr, name, variants, module_identity)
-            if sema_trait_constant_record(graph, type_module, name) == .Val(record) -> return sema_trait_constant_eval_record(graph, expr, name, record, module_identity)
+            if sema_trait_constant_enum_variants(graph, type_module, name) == .Val(variants) {
+                return sema_trait_constant_eval_enum(graph, expr, name, variants, module_identity)
+            }
+            if sema_trait_constant_record(graph, type_module, name) == .Val(record) {
+                return sema_trait_constant_eval_record(graph, expr, name, record, module_identity)
+            }
         }
         .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
@@ -190,11 +201,7 @@ sema_trait_constant_literal: fn(expr: Expr) -> TComptimeValue? Never! {
         .Str(parts, _, _) -> {
             text := ""
             loop part in parts {
-                if part == .Lit(piece) {
-                    text = "{text}{piece}"
-                } else {
-                    return None
-                }
+                if part == .Lit(piece) -> text = "{text}{piece}" else -> return None
             }
             return Val(TComptimeValue.String{value: text})
         }
@@ -217,14 +224,18 @@ sema_trait_constant_fit: fn(literal: TComptimeValue, ty: Type) -> TComptimeValue
             if ty == {
                 .Int -> return Val(TComptimeValue.Int{value: value})
                 .IntN(signed, bits) -> {
-                    if sema_trait_constant_int_fits(value, signed, bits) -> return Val(TComptimeValue.Int{value: value})
+                    if sema_trait_constant_int_fits(value, signed, bits) {
+                        return Val(TComptimeValue.Int{value: value})
+                    }
                     return None
                 }
                 .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return None
             }
         }
         .Float(value, bits) -> {
-            if ty == .Float && bits == 64 -> return Val(TComptimeValue.Float{value: value, bits: 64})
+            if ty == .Float && bits == 64 {
+                return Val(TComptimeValue.Float{value: value, bits: 64})
+            }
             if ty == .Float32 -> return Val(TComptimeValue.Float{value: value, bits: 32})
             return None
         }
@@ -240,7 +251,7 @@ sema_trait_constant_int_fits: fn(value: Int, signed: Bool, bits: Int) -> Bool Ne
     if bits >= 64 -> return signed || value >= 0
     limit := 1
     width: if signed -> bits - 1 else -> bits
-    loop _ in 0..<width -> limit = limit * 2
+    loop _ in 0..<width -> limit *= 2
     if signed -> return value >= 0 - limit && value < limit
     value >= 0 && value < limit
 }
@@ -252,9 +263,13 @@ sema_trait_constant_eval_option: fn(graph: SemaRegistrationGraph, expr: Expr, ty
         .Absent(_, _) -> return SemaTraitConstantEval.Value{value: TComptimeValue.Failed{report: TComptimeReport.Clean{ty: ty.copy()}}}
         .Present(value, _, _) -> return sema_trait_constant_present(sema_trait_constant_eval(graph, value, inner, module_identity, type_module))
         .EnumLit(type_name, variant, _, args, _, _, _) -> {
-            if type_name == "" && variant == "None" && args.len() == 0 -> return SemaTraitConstantEval.Value{value: TComptimeValue.Failed{report: TComptimeReport.Clean{ty: ty.copy()}}}
+            if type_name == "" && variant == "None" && args.len() == 0 {
+                return SemaTraitConstantEval.Value{value: TComptimeValue.Failed{report: TComptimeReport.Clean{ty: ty.copy()}}}
+            }
             if type_name == "" && variant == "Val" && args.len() == 1 {
-                if args[0] == .Positional(value) -> return sema_trait_constant_present(sema_trait_constant_eval(graph, value, inner, module_identity, type_module))
+                if args[0] == .Positional(value) {
+                    return sema_trait_constant_present(sema_trait_constant_eval(graph, value, inner, module_identity, type_module))
+                }
             }
         }
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Tainted(_, _, _, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
@@ -263,7 +278,9 @@ sema_trait_constant_eval_option: fn(graph: SemaRegistrationGraph, expr: Expr, ty
 }
 
 sema_trait_constant_present: fn(result: &&SemaTraitConstantEval) -> SemaTraitConstantEval Never! {
-    if result == .Value(value) -> return SemaTraitConstantEval.Value{value: TComptimeValue.Present{value: value.copy()}}
+    if result == .Value(value) {
+        return SemaTraitConstantEval.Value{value: TComptimeValue.Present{value: value.copy()}}
+    }
     result
 }
 
@@ -292,11 +309,7 @@ sema_trait_constant_eval_elements: fn(graph: SemaRegistrationGraph, values: [Exp
     checked := [TComptimeValue]{}
     loop item in values {
         result: sema_trait_constant_eval(graph, item, element, module_identity, type_module)
-        if result == .Value(value) {
-            checked.push(value.copy())
-        } else {
-            return result
-        }
+        if result == .Value(value) -> checked.push(value.copy()) else -> return result
     }
     SemaTraitConstantEval.Value{value: TComptimeValue.List{values: checked}}
 }
@@ -306,7 +319,9 @@ sema_trait_constant_eval_elements: fn(graph: SemaRegistrationGraph, values: [Exp
 sema_trait_constant_enum_variants: fn(graph: SemaRegistrationGraph, type_module: ModuleID, name: String) -> [String]? Never! {
     resolved: sema_type_graph_lookup_symbol(graph, type_module, name) ?? return None
     row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return None
-    if graph.modules[row.module_index].nominals[row.row].kind != SemaRegistrationNominalKind.Enum -> return None
+    if graph.modules[row.module_index].nominals[row.row].kind != SemaRegistrationNominalKind.Enum {
+        return None
+    }
     names := [String]{}
     loop variant in graph.modules[row.module_index].nominals[row.row].variants {
         if variant.payload == .Unit -> names.push(variant.symbol.name.copy())
@@ -337,12 +352,16 @@ sema_trait_constant_eval_record: fn(graph: SemaRegistrationGraph, expr: Expr, na
     if expr == {
         .StructLit(type_name, type_args, _, _, fields, _, _, _) -> {
             if type_args.len() > 0 -> return SemaTraitConstantEval.WrongType
-            if type_name != "" && sema_checked_qualify_type(graph, Type.Named{name: type_name.copy()}, module_identity) != expected_type -> return SemaTraitConstantEval.WrongType
+            if type_name != "" && sema_checked_qualify_type(graph, Type.Named{name: type_name.copy()}, module_identity) != expected_type {
+                return SemaTraitConstantEval.WrongType
+            }
             written = fields.copy()
         }
         .TypedLit(head, body, _, _) -> {
             if head == .Val(head_type) {
-                if sema_checked_qualify_type(graph, head_type, module_identity) != expected_type -> return SemaTraitConstantEval.WrongType
+                if sema_checked_qualify_type(graph, head_type, module_identity) != expected_type {
+                    return SemaTraitConstantEval.WrongType
+                }
             }
             if body == {
                 .Fields(fields) -> written = fields.copy()
@@ -381,9 +400,7 @@ sema_trait_constant_eval_record: fn(graph: SemaRegistrationGraph, expr: Expr, na
         }
         if result == .Value(value) {
             values.push(TComptimeField{name: declared.name.copy(), value: value.copy()})
-        } else {
-            return result
-        }
+        } else { return result }
     }
     SemaTraitConstantEval.Value{value: TComptimeValue.Struct{type_name: name.copy(), fields: values}}
 }
@@ -415,7 +432,9 @@ sema_trait_constant_eval_enum: fn(graph: SemaRegistrationGraph, expr: Expr, name
 // and their types are compared. None for any other method call.
 sema_trait_constant_rewrite: fn(name: String, receiver: Expr, method: String, args: [CallArg]) -> SemaTraitConstantEval? Never! {
     // `name` is resolved: Core's enum carries the core.prelude identity.
-    if name != "DiagnosticEdit" && !core_identity_is(name, "core.prelude", "DiagnosticEdit") -> return None
+    if name != "DiagnosticEdit" && !core_identity_is(name, "core.prelude", "DiagnosticEdit") {
+        return None
+    }
     if method != "rewrite" || !sema_trait_constant_is_syntax(receiver) -> return None
     callee := String?{None}
     replacement := String?{None}
@@ -431,10 +450,16 @@ sema_trait_constant_rewrite: fn(name: String, receiver: Expr, method: String, ar
     }
     from: callee ?? return None
     to: replacement ?? return None
-    Val(SemaTraitConstantEval.Value{value: TComptimeValue.Enum{type_name: name.copy(), variant: "Rewrite", args: [TComptimeEnumArg]{
-        TComptimeEnumArg{name: Val("callee"), value: TComptimeValue.String{value: from}},
-        TComptimeEnumArg{name: Val("replacement"), value: TComptimeValue.String{value: to}},
-    }}})
+    Val(SemaTraitConstantEval.Value{
+        value: TComptimeValue.Enum{
+            type_name: name.copy(),
+            variant: "Rewrite",
+            args: [TComptimeEnumArg]{
+                TComptimeEnumArg{name: Val("callee"), value: TComptimeValue.String{value: from}},
+                TComptimeEnumArg{name: Val("replacement"), value: TComptimeValue.String{value: to}},
+            },
+        },
+    })
 }
 
 sema_trait_constant_is_syntax: fn(receiver: Expr) -> Bool Never! {
@@ -460,7 +485,9 @@ sema_trait_constant_enum_case: fn(graph: SemaRegistrationGraph, written: String,
         if written_type != expected_type -> return SemaTraitConstantEval.WrongType
     }
     loop known in variants {
-        if known == variant -> return SemaTraitConstantEval.Value{value: TComptimeValue.Enum{type_name: name.copy(), variant: variant.copy(), args: [TComptimeEnumArg]{}}}
+        if known == variant {
+            return SemaTraitConstantEval.Value{value: TComptimeValue.Enum{type_name: name.copy(), variant: variant.copy(), args: [TComptimeEnumArg]{}}}
+        }
     }
     SemaTraitConstantEval.WrongType
 }
@@ -484,7 +511,9 @@ sema_expression_trait_constant: fn(type_name: String, member: String, member_spa
         value: sema_node(context, sema_decode_env_names_type(), NodeKind.TraitConst{owner: Type.Named{name: type_name.copy()}, trait_name: "Decode", name: member.copy()}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
     }
-    if program.registration_graph == .Val(graph) -> return sema_expression_trait_constant_in(graph, type_name, member, member_span, span, expected, environment, program, scopes, context, diagnostics)
+    if program.registration_graph == .Val(graph) {
+        return sema_expression_trait_constant_in(graph, type_name, member, member_span, span, expected, environment, program, scopes, context, diagnostics)
+    }
     SemaMethodSpecialCheck{handled: false, value: None}
 }
 
@@ -509,7 +538,9 @@ sema_expression_trait_constant_in: fn(graph: SemaRegistrationGraph, type_name: S
         }
     }
     if !generic {
-        if sema_expression_type_symbol(scopes, environment, program, type_name) == None -> return unhandled
+        if sema_expression_type_symbol(scopes, environment, program, type_name) == None {
+            return unhandled
+        }
         resolved: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), type_name) ?? return unhandled
         owner_row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return unhandled
         owner: sema_trait_constant_head(sema_checked_qualify_type(graph, Type.Named{name: type_name.copy()}, environment.module_identity)) ?? return unhandled
@@ -569,8 +600,12 @@ sema_trait_constant_collect_impls: fn(graph: SemaRegistrationGraph, owner_row: S
     item: sema_registration_nominal_source_item(graph.modules[owner_row.module_index].nominals[owner_row.row].source)
     if item == .Val(source) {
         if source == {
-            .Struct(definition) -> sema_trait_constant_collect_blocks(graph, owner_module, definition.trait_impls, member, found)
-            .Enum(definition) -> sema_trait_constant_collect_blocks(graph, owner_module, definition.trait_impls, member, found)
+            .Struct(definition) -> {
+                sema_trait_constant_collect_blocks(graph, owner_module, definition.trait_impls, member, found)
+            }
+            .Enum(definition) -> {
+                sema_trait_constant_collect_blocks(graph, owner_module, definition.trait_impls, member, found)
+            }
             .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
@@ -615,15 +650,21 @@ sema_trait_constant_collect: fn(graph: SemaRegistrationGraph, row: SemaRegistrat
             loop constant in written {
                 if constant.name == declaration.name {
                     given = true
-                    if sema_trait_constant_eval(graph, constant.value, ty, module_identity, trait_module) == .Value(result) -> value = Val(result.copy())
+                    if sema_trait_constant_eval(graph, constant.value, ty, module_identity, trait_module) == .Value(result) {
+                        value = Val(result.copy())
+                    }
                     break
                 }
             }
             if !given && declaration.default == .Val(default_value) {
-                if sema_trait_constant_eval(graph, default_value, ty, trait_module, trait_module) == .Value(result) -> value = Val(result.copy())
+                if sema_trait_constant_eval(graph, default_value, ty, trait_module, trait_module) == .Value(result) {
+                    value = Val(result.copy())
+                }
             }
         }
         found.push(SemaTraitConstantFound{name: declaration.name.copy(), trait_name: trait_name.copy(), ty: ty, value: value})
-        if member != None -> return
+        if member != None {
+            return
+        }
     }
 }

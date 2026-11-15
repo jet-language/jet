@@ -4,18 +4,28 @@
 // into one snapshot.
 
 STORE_JOURNAL_DIR: "journal"
+
 STORE_JOURNAL_COMPACT_AFTER: 64
+
 // Compact on size as well as count: replay cost is bytes parsed, not file
 // count. A 59-transaction journal reached 57 MiB and made every graph load
 // re-parse and re-hash all of it.
 STORE_JOURNAL_COMPACT_AFTER_BYTES: 4194304
+
 STORE_MAX_CLOSURE_OBJECTS: 1000000
+
 STORE_MAX_CLOSURE_RECORDS: 1000000
+
 STORE_MAX_CLOSURE_DELETIONS: 1000000
+
 STORE_MAX_CLOSURE_TRANSACTIONS: 100000
+
 STORE_CLOSURE_DB_DIR: "closure-db"
+
 STORE_JOURNAL_PARTIAL_SUFFIX: ".partial"
+
 STORE_JOURNAL_TXN_SUFFIX: ".txn"
+
 STORE_JOURNAL_HEADER: "jet-closure-journal-v1"
 
 ClosureJournalKind: enum {
@@ -121,15 +131,23 @@ store_load_graph_mode_with_proofs: fn(verification: &StoreVerification, roots: H
 }
 
 store_apply_entry: fn(graph: &ClosureGraph, entry: ClosureJournalEntry) StoreError! {
-    if entry.objects.len() > STORE_MAX_CLOSURE_OBJECTS -> return Err(StoreError.Other("closure transaction exceeds {STORE_MAX_CLOSURE_OBJECTS} objects"))
-    if entry.records.len() > STORE_MAX_CLOSURE_RECORDS -> return Err(StoreError.Other("closure transaction exceeds {STORE_MAX_CLOSURE_RECORDS} records"))
-    if entry.deleted_records.len() > STORE_MAX_CLOSURE_DELETIONS -> return Err(StoreError.Other("closure transaction exceeds {STORE_MAX_CLOSURE_DELETIONS} deleted records"))
+    if entry.objects.len() > STORE_MAX_CLOSURE_OBJECTS {
+        return Err(StoreError.Other("closure transaction exceeds {STORE_MAX_CLOSURE_OBJECTS} objects"))
+    }
+    if entry.records.len() > STORE_MAX_CLOSURE_RECORDS {
+        return Err(StoreError.Other("closure transaction exceeds {STORE_MAX_CLOSURE_RECORDS} records"))
+    }
+    if entry.deleted_records.len() > STORE_MAX_CLOSURE_DELETIONS {
+        return Err(StoreError.Other("closure transaction exceeds {STORE_MAX_CLOSURE_DELETIONS} deleted records"))
+    }
     if entry.kind != ClosureJournalKind.Snapshot {
         new_objects := 0
         loop object in entry.objects {
             if !graph.objects.has_key(object.digest) -> new_objects += 1
         }
-        if graph.objects.len() + new_objects > STORE_MAX_CLOSURE_OBJECTS -> return Err(StoreError.Other("closure graph exceeds {STORE_MAX_CLOSURE_OBJECTS} objects"))
+        if graph.objects.len() + new_objects > STORE_MAX_CLOSURE_OBJECTS {
+            return Err(StoreError.Other("closure graph exceeds {STORE_MAX_CLOSURE_OBJECTS} objects"))
+        }
         deleted_count := 0
         loop id in entry.deleted_records {
             if graph.records.has_key(id) -> deleted_count += 1
@@ -137,9 +155,13 @@ store_apply_entry: fn(graph: &ClosureGraph, entry: ClosureJournalEntry) StoreErr
         record_count := graph.records.len() - deleted_count
         if record_count < 0 -> record_count = 0
         loop record in entry.records {
-            if !graph.records.has_key(record.id) || entry.deleted_records.contains(record.id) -> record_count += 1
+            if !graph.records.has_key(record.id) || entry.deleted_records.contains(record.id) {
+                record_count += 1
+            }
         }
-        if record_count > STORE_MAX_CLOSURE_RECORDS -> return Err(StoreError.Other("closure graph exceeds {STORE_MAX_CLOSURE_RECORDS} records"))
+        if record_count > STORE_MAX_CLOSURE_RECORDS {
+            return Err(StoreError.Other("closure graph exceeds {STORE_MAX_CLOSURE_RECORDS} records"))
+        }
         if graph.deleted_records.len() + entry.deleted_records.len() > STORE_MAX_CLOSURE_DELETIONS {
             return Err(StoreError.Other("closure graph exceeds {STORE_MAX_CLOSURE_DELETIONS} deleted records"))
         }
@@ -154,12 +176,14 @@ store_apply_entry: fn(graph: &ClosureGraph, entry: ClosureJournalEntry) StoreErr
     loop object in entry.objects {
         if graph.objects.get(object.digest) == {
             .Val(existing) -> {
-                if existing != object -> return Err(StoreError.Other("closure object `{object.digest}` changed immutable descriptor"))
+                if existing != object {
+                    return Err(StoreError.Other("closure object `{object.digest}` changed immutable descriptor"))
+                }
             }
             .None -> graph.objects[object.digest] = object
         }
     }
-    actions := [String: CanonicalActionRecord]{}
+    actions := [String:CanonicalActionRecord]{}
     loop record in graph.sorted_records() -> store_merge_action_record(actions, record)
     loop record in entry.records {
         store_merge_action_record(actions, record)
@@ -200,14 +224,22 @@ store_validate_record_shape: fn(roots: HangarRoots, graph: ClosureGraph, record:
     }
     loop name in store_sorted_keys(record.outputs) {
         digest: record.outputs[name]
-        if !store_valid_output_name(name) -> return Err(StoreError.Other("closure record `{id}` has invalid output name `{name}`"))
-        if !graph.objects.has_key(digest) -> return Err(StoreError.Other("closure record `{id}` output `{name}` references missing object `{digest}`"))
+        if !store_valid_output_name(name) {
+            return Err(StoreError.Other("closure record `{id}` has invalid output name `{name}`"))
+        }
+        if !graph.objects.has_key(digest) {
+            return Err(StoreError.Other("closure record `{id}` output `{name}` references missing object `{digest}`"))
+        }
     }
     loop missing in record.references {
-        if !graph.objects.has_key(missing) -> return Err(StoreError.Other("closure record `{id}` references missing object `{missing}`"))
+        if !graph.objects.has_key(missing) {
+            return Err(StoreError.Other("closure record `{id}` references missing object `{missing}`"))
+        }
     }
     legacy: record.producer_record == "" && record.package_meta == ""
-    if allow_legacy && legacy -> return
+    if allow_legacy && legacy {
+        return
+    }
     ProducerRecord.decode(record.producer_record) ?? return Err(StoreError.Other("closure record `{id}` has invalid producer record: {err.message()}"))
     meta: pkg_parse_meta(record.package_meta) ?? return Err(StoreError.Other("closure record `{id}` has invalid package metadata"))
     store_validate_receipt_projection(roots, id, meta, allow_legacy)
@@ -226,15 +258,21 @@ store_validate_graph_structure_mode: fn(roots: HangarRoots, graph: ClosureGraph,
     hangar: roots.hangar_dir()
     loop digest in store_sorted_object_keys(graph.objects) {
         object: graph.objects[digest]
-        if digest == "" || digest != object.digest || object.path == "" -> return Err(StoreError.Other("invalid closure object descriptor `{digest}`"))
+        if digest == "" || digest != object.digest || object.path == "" {
+            return Err(StoreError.Other("invalid closure object descriptor `{digest}`"))
+        }
         store_validate_object_descriptor(hangar, digest, object)
     }
     loop id in graph.deleted_records {
-        if id == "" || graph.records.has_key(id) -> return Err(StoreError.Other("invalid deleted closure record `{id}`"))
+        if id == "" || graph.records.has_key(id) {
+            return Err(StoreError.Other("invalid deleted closure record `{id}`"))
+        }
     }
-    actions := [String: CanonicalActionRecord]{}
+    actions := [String:CanonicalActionRecord]{}
     loop record in graph.sorted_records() {
-        if record.id == "" || record.action_key == "" -> return Err(StoreError.Other("invalid closure record `{record.id}`"))
+        if record.id == "" || record.action_key == "" {
+            return Err(StoreError.Other("invalid closure record `{record.id}`"))
+        }
         store_validate_record_shape(roots, graph, record, allow_legacy)
         store_merge_action_record(actions, record)
     }
@@ -242,7 +280,9 @@ store_validate_graph_structure_mode: fn(roots: HangarRoots, graph: ClosureGraph,
 }
 
 store_validate_applied_entry: fn(roots: HangarRoots, graph: ClosureGraph, entry: ClosureJournalEntry, allow_legacy: Bool) StoreError! {
-    if entry.kind == ClosureJournalKind.Snapshot -> return store_validate_graph_structure_mode(roots, graph, allow_legacy)
+    if entry.kind == ClosureJournalKind.Snapshot {
+        return store_validate_graph_structure_mode(roots, graph, allow_legacy)
+    }
     hangar: roots.hangar_dir()
     loop id in entry.deleted_records {
         if id == "" || graph.records.has_key(id) || !graph.deleted_records.contains(id) {
@@ -250,11 +290,15 @@ store_validate_applied_entry: fn(roots: HangarRoots, graph: ClosureGraph, entry:
         }
     }
     loop object in entry.objects {
-        if object.digest == "" || object.path == "" -> return Err(StoreError.Other("invalid closure object descriptor `{object.digest}`"))
+        if object.digest == "" || object.path == "" {
+            return Err(StoreError.Other("invalid closure object descriptor `{object.digest}`"))
+        }
         store_validate_object_descriptor(hangar, object.digest, object)
     }
     loop record in entry.records {
-        if record.id == "" || record.action_key == "" -> return Err(StoreError.Other("invalid closure record `{record.id}`"))
+        if record.id == "" || record.action_key == "" {
+            return Err(StoreError.Other("invalid closure record `{record.id}`"))
+        }
         store_validate_record_shape(roots, graph, record, allow_legacy)
         _: store_canonical_action_projection(record)
     }
@@ -272,7 +316,9 @@ store_validate_graph_store_proofs: fn(verification: &StoreVerification, roots: H
 
 store_validate_receipt_projection: fn(roots: HangarRoots, id: String, meta: ParsedMeta, allow_legacy: Bool) StoreError! {
     if meta.receipt == "" {
-        if allow_legacy -> return
+        if allow_legacy {
+            return
+        }
         return Err(StoreError.Other("closure record `{id}` has no Hangar receipt"))
     }
     if !store_valid_receipt_digest(meta.receipt) {
@@ -290,16 +336,22 @@ store_validate_receipt_projection: fn(roots: HangarRoots, id: String, meta: Pars
         .Err(error) -> {
             // Locked recovery materializes a missing immutable object from
             // the authoritative closure record immediately after loading.
-            if StoreError.IO(error).is_not_found() && allow_legacy -> return
+            if StoreError.IO(error).is_not_found() && allow_legacy {
+                return
+            }
             return Err(StoreError.Other("closure record `{id}` cannot read Hangar receipt `{path}`: {error}"))
         }
     }
-    if bytes != expected_bytes -> return Err(StoreError.Other("closure record `{id}` Hangar receipt is corrupt"))
+    if bytes != expected_bytes {
+        return Err(StoreError.Other("closure record `{id}` Hangar receipt is corrupt"))
+    }
 }
 
 store_validate_record_store_proof: fn(verification: &StoreVerification, roots: HangarRoots, record: ClosureRecord, allow_legacy: Bool) StoreError! {
     legacy: record.producer_record == "" && record.package_meta == ""
-    if (allow_legacy && legacy) || record.references.len() > 0 -> return
+    if (allow_legacy && legacy) || record.references.len() > 0 {
+        return
+    }
     producer: ProducerRecord.decode(record.producer_record) ?? return Err(StoreError.Other("closure record `{record.id}` has invalid producer record: {err.message()}"))
     meta: pkg_parse_meta(record.package_meta) ?? return Err(StoreError.Other("closure record `{record.id}` has invalid package metadata"))
     if !store_validates_complete_closure(verification, roots, record, meta, producer) {
@@ -313,7 +365,7 @@ store_valid_output_name: fn(name: String) -> Bool Never! {
     name != "" && name != "." && name != ".."
 }
 
-store_merge_action_record: fn(actions: &[String: CanonicalActionRecord], record: ClosureRecord) StoreError! {
+store_merge_action_record: fn(actions: &[String:CanonicalActionRecord], record: ClosureRecord) StoreError! {
     projection: store_canonical_action_projection(record)
     if actions.get(record.action_key) == {
         .Val(existing) -> {
@@ -326,20 +378,24 @@ store_merge_action_record: fn(actions: &[String: CanonicalActionRecord], record:
 }
 
 store_canonical_action_projection: fn(record: ClosureRecord) -> CanonicalActionRecord StoreError! {
-    if record.producer_record == "" -> return Ok(CanonicalActionRecord{outputs: record.outputs, references: record.references})
+    if record.producer_record == "" {
+        return Ok(CanonicalActionRecord{outputs: record.outputs, references: record.references})
+    }
     producer: ProducerRecord.decode(record.producer_record) ?? return Err(StoreError.Other("closure record `{record.id}` has invalid producer record: {err.message()}"))
-    outputs := [String: String]{}
+    outputs := [String:String]{}
     if {
         producer.provider == "nix" -> outputs = store_nix_action_outputs(producer, record)
         else -> outputs = record.outputs
     }
-    if outputs.len() == 0 -> return Err(StoreError.Other("closure record `{record.id}` has no canonical action output projection"))
+    if outputs.len() == 0 {
+        return Err(StoreError.Other("closure record `{record.id}` has no canonical action output projection"))
+    }
     Ok(CanonicalActionRecord{outputs: outputs, references: record.references})
 }
 
 // The canonical outputs of a Nix record: only outputs its producer names.
-store_nix_action_outputs: fn(producer: ProducerRecord, record: ClosureRecord) -> [String: String] Never! {
-    outputs := [String: String]{}
+store_nix_action_outputs: fn(producer: ProducerRecord, record: ClosureRecord) -> [String:String] Never! {
+    outputs := [String:String]{}
     loop key in store_sorted_keys(producer.facts) {
         if !key.starts_with("nix.output.") -> next
         name: key.removeprefix("nix.output.")
@@ -358,12 +414,16 @@ store_journal_kind: fn(line: String) -> ClosureJournalKind? Never! {
 }
 
 store_merge_action_projection: fn(action: &CanonicalActionRecord, projection: CanonicalActionRecord, action_key: String) StoreError! {
-    if action.references != projection.references -> return Err(StoreError.Other("action `{action_key}` has conflicting dependency references"))
+    if action.references != projection.references {
+        return Err(StoreError.Other("action `{action_key}` has conflicting dependency references"))
+    }
     loop name in store_sorted_keys(projection.outputs) {
         digest: projection.outputs[name]
         if action.outputs.get(name) == {
             .Val(existing) -> {
-                if existing != digest -> return Err(StoreError.Other("action `{action_key}` output `{name}` maps to conflicting bytes `{existing}` and `{digest}`"))
+                if existing != digest {
+                    return Err(StoreError.Other("action `{action_key}` output `{name}` maps to conflicting bytes `{existing}` and `{digest}`"))
+                }
             }
             .None -> action.outputs[name] = digest
         }
@@ -385,7 +445,9 @@ store_validates_complete_closure: fn(verification: &StoreVerification, roots: Ha
         // same byte proof used by Core applies here.
         "jetpackage" | "jet-cc" -> output == local && store_rehashes_as_recorded(verification, roots, meta, record)
         "nix" -> {
-            if output == local -> return store_rehashes_as_recorded(verification, roots, meta, record)
+            if output == local {
+                return store_rehashes_as_recorded(verification, roots, meta, record)
+            }
             if !store_path_starts_with(output, "/nix/store") -> return false
             root: files.join(files.join(roots.hangar_dir(), record.id), STORE_NIX_GC_ROOT)
             if !files.exists(root) -> return false
@@ -440,7 +502,9 @@ store_compact_if_needed: fn(verification: &StoreVerification, roots: HangarRoots
             info: files.stat(path) ?? next
             total_bytes += info.size
         }
-        if paths.len() <= 1 || total_bytes <= STORE_JOURNAL_COMPACT_AFTER_BYTES -> return
+        if paths.len() <= 1 || total_bytes <= STORE_JOURNAL_COMPACT_AFTER_BYTES {
+            return
+        }
     }
     graph: store_load_graph_structure_mode(verification, roots, false)
     objects := [ClosureObject]{}
@@ -517,8 +581,12 @@ store_render_journal_entry: fn(entry: ClosureJournalEntry) -> String Never! {
     loop record in records {
         id: store_hex_text(record.id)
         out = "{out}record\t{id}\t{store_hex_text(record.primary)}\t{store_hex_text(record.action_key)}\t{store_hex_text(record.producer_record)}\t{store_hex_text(record.package_meta)}\n"
-        loop name in store_sorted_keys(record.outputs) -> out = "{out}output\t{id}\t{store_hex_text(name)}\t{store_hex_text(record.outputs[name])}\n"
-        loop reference in record.references -> out = "{out}reference\t{id}\t{store_hex_text(reference)}\n"
+        loop name in store_sorted_keys(record.outputs) {
+            out = "{out}output\t{id}\t{store_hex_text(name)}\t{store_hex_text(record.outputs[name])}\n"
+        }
+        loop reference in record.references {
+            out = "{out}reference\t{id}\t{store_hex_text(reference)}\n"
+        }
     }
     deleted := entry.deleted_records.copy()
     deleted.sort()
@@ -532,13 +600,17 @@ store_parse_journal_entry: fn(raw: String) -> ClosureJournalEntry StoreError! {
     if !halves.after.ends_with("\n") -> return Err(StoreError.Other("truncated checksum frame"))
     checksum: pkg_bytes_text(halves.after.bytes(), 0, halves.after.bytes().len() - 1)
     if !store_is_lower_hex(checksum, 64) -> return Err(StoreError.Other("invalid checksum frame"))
-    if store_sha256_hex(body.bytes()) != checksum -> return Err(StoreError.Other("checksum mismatch"))
+    if store_sha256_hex(body.bytes()) != checksum {
+        return Err(StoreError.Other("checksum mismatch"))
+    }
     lines: store_text_lines(body)
-    if lines.len() == 0 || lines[0] != STORE_JOURNAL_HEADER -> return Err(StoreError.Other("unsupported journal version"))
+    if lines.len() == 0 || lines[0] != STORE_JOURNAL_HEADER {
+        return Err(StoreError.Other("unsupported journal version"))
+    }
     if lines.len() < 2 -> return Err(StoreError.Other("missing journal kind"))
     kind: store_journal_kind(lines[1]) ?? return Err(StoreError.Other("missing journal kind"))
     objects := [ClosureObject]{}
-    records := [String: ClosureRecord]{}
+    records := [String:ClosureRecord]{}
     deleted_records := [String]{}
     loop index in 2..<lines.len() {
         line: lines[index]
@@ -546,24 +618,32 @@ store_parse_journal_entry: fn(raw: String) -> ClosureJournalEntry StoreError! {
         field_kind: fields[0]
         if {
             field_kind == "object" && fields.len() == 4 && (fields[3] == "0" || fields[3] == "1") -> {
-                if objects.len() >= STORE_MAX_CLOSURE_OBJECTS -> return Err(StoreError.Other("closure transaction exceeds {STORE_MAX_CLOSURE_OBJECTS} objects"))
+                if objects.len() >= STORE_MAX_CLOSURE_OBJECTS {
+                    return Err(StoreError.Other("closure transaction exceeds {STORE_MAX_CLOSURE_OBJECTS} objects"))
+                }
                 objects.push(ClosureObject{digest: store_journal_unhex(fields[1]), path: store_journal_unhex(fields[2]), external: fields[3] == "1"})
             }
             field_kind == "record" && (fields.len() == 6 || fields.len() == 4) -> {
                 id: store_journal_unhex(fields[1])
-                if records.has_key(id) -> return Err(StoreError.Other("duplicate closure record `{id}`"))
-                if records.len() >= STORE_MAX_CLOSURE_RECORDS -> return Err(StoreError.Other("closure transaction exceeds {STORE_MAX_CLOSURE_RECORDS} records"))
+                if records.has_key(id) {
+                    return Err(StoreError.Other("duplicate closure record `{id}`"))
+                }
+                if records.len() >= STORE_MAX_CLOSURE_RECORDS {
+                    return Err(StoreError.Other("closure transaction exceeds {STORE_MAX_CLOSURE_RECORDS} records"))
+                }
                 primary: store_journal_unhex(fields[2])
                 action_key: store_journal_unhex(fields[3])
                 producer_record: if fields.len() == 6 -> store_journal_unhex(fields[4]) else -> ""
                 package_meta: if fields.len() == 6 -> store_journal_unhex(fields[5]) else -> ""
-                records[id] = ClosureRecord{id: id, primary: primary, action_key: action_key, outputs: [String: String]{}, references: [String]{}, producer_record: producer_record, package_meta: package_meta}
+                records[id] = ClosureRecord{id: id, primary: primary, action_key: action_key, outputs: [String:String]{}, references: [String]{}, producer_record: producer_record, package_meta: package_meta}
             }
             field_kind == "output" && fields.len() == 4 -> {
                 id: store_journal_unhex(fields[1])
                 record := records.get(id) ?? return Err(StoreError.Other("output precedes record `{id}`"))
                 name: store_journal_unhex(fields[2])
-                if record.outputs.has_key(name) -> return Err(StoreError.Other("duplicate output `{name}` in closure record `{id}`"))
+                if record.outputs.has_key(name) {
+                    return Err(StoreError.Other("duplicate output `{name}` in closure record `{id}`"))
+                }
                 record.outputs[name] = store_journal_unhex(fields[3])
                 records[id] = record
             }
@@ -576,7 +656,9 @@ store_parse_journal_entry: fn(raw: String) -> ClosureJournalEntry StoreError! {
                 records[id] = record
             }
             field_kind == "delete" && fields.len() == 2 -> {
-                if deleted_records.len() >= STORE_MAX_CLOSURE_DELETIONS -> return Err(StoreError.Other("closure transaction exceeds {STORE_MAX_CLOSURE_DELETIONS} deleted records"))
+                if deleted_records.len() >= STORE_MAX_CLOSURE_DELETIONS {
+                    return Err(StoreError.Other("closure transaction exceeds {STORE_MAX_CLOSURE_DELETIONS} deleted records"))
+                }
                 deleted_records.push(store_journal_unhex(fields[1]))
             }
             else -> return Err(StoreError.Other("invalid journal line `{line}`"))
@@ -628,9 +710,13 @@ store_journal_dir: fn(roots: HangarRoots) -> String Never! {
 }
 
 store_journal_ensure_directory_durable: fn(path: String) StoreError! {
-    if files.is_dir(path) -> return
+    if files.is_dir(path) {
+        return
+    }
     parent: files.dirname(path)
-    if parent == "" || parent == path -> return Err(StoreError.Other("closure database path has no parent"))
+    if parent == "" || parent == path {
+        return Err(StoreError.Other("closure database path has no parent"))
+    }
     store_journal_ensure_directory_durable(parent)
     if files.create_dir_all(path) == {
         .Ok(_) -> {
@@ -638,7 +724,9 @@ store_journal_ensure_directory_durable: fn(path: String) StoreError! {
             store_sync_store_directory(parent)
         }
         .Err(error) -> {
-            if StoreError.IO(error).is_already_exists() && files.is_dir(path) -> return
+            if StoreError.IO(error).is_already_exists() && files.is_dir(path) {
+                return
+            }
             return Err(StoreError.IO(error))
         }
     }

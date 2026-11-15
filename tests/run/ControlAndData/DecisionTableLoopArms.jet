@@ -20,7 +20,9 @@ check: fn(n: Int) -> Int Problem! {
 
 halve: fn(n: Int) -> Int Problem! {
     kept: if {
-        n < 0 -> return Err(Problem.Negative(n))
+        n < 0 -> {
+            return Err(Problem.Negative(n))
+        }
         else -> n /% 2
     }
     Ok(kept)
@@ -40,7 +42,9 @@ value_arms: fn() {
     loop n in 0..<10 {
         step: if n == {
             1 -> next
-            7 -> break
+            7 -> {
+                break
+            }
             else -> n * 10
         }
         picked += step
@@ -68,7 +72,9 @@ binding_conditions: fn() {
 first_ok: fn(n: Int) -> Int Problem! {
     first: if check(n) == {
         .Ok(next) -> next
-        .Err(failure) -> return Err(failure)
+        .Err(failure) -> {
+            return Err(failure)
+        }
     }
     Ok(first + 1)
 }

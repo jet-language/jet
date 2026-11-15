@@ -30,16 +30,14 @@ s5_status: fn(port: Int, state: String, timeout_ms: Int) -> String {
 #Test("original first-save revision facts") {
     port: s5_web_port()
     phase: sys.get("S5_PHASE") ?? panic("phase")
-    if phase == "accepted" {
-        assert_eq(s5_changed(port, "1", 60000), "2")
-    } else if phase == "rejected" {
+    if phase == "accepted" -> assert_eq(s5_changed(port, "1", 60000), "2") else if phase == "rejected" {
         error: s5_status(port, "error", 60000)
         assert(error.contains("\"version\":2,"))
         assert(error.contains("\"code\":\"E0003\""))
         assert(error.contains("\"candidate\":3,"))
         assert(error.contains("\"diagnostic_revision\":3,"))
         assert(error.contains("\"accepted_revision\":2,"))
-        assert(error.contains((String.from_bytes([U8]{34,108,97,115,116,95,103,111,111,100,95,114,101,118,105,115,105,111,110,34,58,50,125}) ?? panic("literal UTF-8"))))
+        assert(error.contains((String.from_bytes([U8]{34, 108, 97, 115, 116, 95, 103, 111, 111, 100, 95, 114, 101, 118, 105, 115, 105, 111, 110, 34, 58, 50, 125}) ?? panic("literal UTF-8"))))
     } else {
         assert_eq(s5_changed(port, "2", 60000), "3")
         ready: s5_status(port, "ready", 10000)

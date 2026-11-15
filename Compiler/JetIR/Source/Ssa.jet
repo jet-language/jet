@@ -25,11 +25,21 @@
 // header), so one pass of Cooper-Harvey-Kennedy finds the immediate
 // dominators.
 
-IRSsaKind: enum { Param Def Phi Undef }
+IRSsaKind: enum {
+    Param
+    Def
+    Phi
+    Undef
+}
 
 // Where an edge into a join leaves: falling through (a Loop's entry, an
 // Else, an End), a Br, a BrIf, or an If without an Else's false branch.
-IRSsaEdgeKind: enum { Fall Br BrIf IfFalse }
+IRSsaEdgeKind: enum {
+    Fall
+    Br
+    BrIf
+    IfFalse
+}
 
 IRSsa: struct {
     // Per value: its slot (and so its type row), kind, and the parameter
@@ -227,12 +237,37 @@ ir_ssa_exposed: fn(f: IRFunction) -> [Bool] Never! {
 
 ir_ssa_new: fn(f: IRFunction) -> IRSsa Never! {
     s := IRSsa{
-        val_slot: [Int]{}, val_kind: [IRSsaKind]{}, val_at: [Int]{}, repl: [Int]{}, undef: [Int]{},
-        def: [Int]{}, use_a: [Int]{}, use_b: [Int]{}, use_c: [Int]{}, block: [Int]{}, use_args: [Int]{},
-        preds: [[Int]]{}, idom: [Int]{}, pre: [Int]{}, post: [Int]{},
-        join_of: [Int]{}, join_opener: [Int]{}, join_slots: [[Int]]{}, join_phis: [[Int]]{}, join_edges: [[Int]]{}, join_block: [Int]{},
-        edge_kind: [IRSsaEdgeKind]{}, edge_at: [Int]{}, edge_block: [Int]{}, edge_join: [Int]{}, edge_start: [Int]{}, edge_vals: [Int]{}, edge_pos: [Int]{},
-        phi_join: [Int]{}, phi_index: [Int]{}, phi_val: [Int]{},
+        val_slot: [Int]{},
+        val_kind: [IRSsaKind]{},
+        val_at: [Int]{},
+        repl: [Int]{},
+        undef: [Int]{},
+        def: [Int]{},
+        use_a: [Int]{},
+        use_b: [Int]{},
+        use_c: [Int]{},
+        block: [Int]{},
+        use_args: [Int]{},
+        preds: [[Int]]{},
+        idom: [Int]{},
+        pre: [Int]{},
+        post: [Int]{},
+        join_of: [Int]{},
+        join_opener: [Int]{},
+        join_slots: [[Int]]{},
+        join_phis: [[Int]]{},
+        join_edges: [[Int]]{},
+        join_block: [Int]{},
+        edge_kind: [IRSsaEdgeKind]{},
+        edge_at: [Int]{},
+        edge_block: [Int]{},
+        edge_join: [Int]{},
+        edge_start: [Int]{},
+        edge_vals: [Int]{},
+        edge_pos: [Int]{},
+        phi_join: [Int]{},
+        phi_index: [Int]{},
+        phi_val: [Int]{},
     }
     loop _ in 0..<f.slot_type.len() -> s.undef.push(-1)
     loop _ in 0..<f.op.len() {
@@ -252,7 +287,9 @@ ir_ssa_reads: fn(s: &IRSsa, f: IRFunction, at: Int, current: [Int]) Never! {
     op: f.op[at]
     a: f.a[at]
     if op == {
-        .Copy | .Move | .Drop | .Close | .Neg | .Not | .Sqrt | .IntBig | .Convert | .Load | .Offset | .If | .BrIf -> s.use_a[at] = ir_ssa_read(s, current, a)
+        .Copy | .Move | .Drop | .Close | .Neg | .Not | .Sqrt | .IntBig | .Convert | .Load | .Offset | .If | .BrIf -> {
+            s.use_a[at] = ir_ssa_read(s, current, a)
+        }
         .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Concat | .CopyBytes -> {
             s.use_a[at] = ir_ssa_read(s, current, a)
             s.use_b[at] = ir_ssa_read(s, current, f.b[at])
@@ -263,9 +300,13 @@ ir_ssa_reads: fn(s: &IRSsa, f: IRFunction, at: Int, current: [Int]) Never! {
         }
         .Call | .CallRuntime | .CallIndirect -> {
             if op == .CallIndirect -> s.use_a[at] = ir_ssa_read(s, current, a)
-            loop index in f.b[at]..<(f.b[at] + f.c[at]) -> s.use_args[index] = ir_ssa_read(s, current, f.args[index])
+            loop index in f.b[at]..<(f.b[at] + f.c[at]) {
+                s.use_args[index] = ir_ssa_read(s, current, f.args[index])
+            }
         }
-        .Return -> { if a >= 0 -> s.use_a[at] = ir_ssa_read(s, current, a) }
+        .Return -> {
+            if a >= 0 -> s.use_a[at] = ir_ssa_read(s, current, a)
+        }
         .Nop | .Const | .ConstText | .ConstBigInt | .FunctionAddress | .DataAddress | .StackAddress | .Block | .Loop | .Else | .End | .Br | .Unreachable -> {}
     }
 }
@@ -327,9 +368,7 @@ ir_ssa_build: fn(f: IRFunction) -> IRSsa Never! {
                     loop (k, slot) in s.join_slots[join] -> current[slot] = saved[top][k]
                     block = ir_ssa_block(s, [Int]{branch[top]})
                     live = true
-                } else {
-                    live = false
-                }
+                } else { live = false }
             }
             .End -> {
                 opener: open.pop() ?? panic("ir_ssa_build: End without an open construct")
@@ -428,7 +467,9 @@ ir_ssa_dominators: fn(s: &IRSsa) Never! {
         s.pre.push(0)
         s.post.push(0)
     }
-    if count == 0 -> return
+    if count == 0 {
+        return
+    }
     s.idom[0] = 0
     loop block in 1..<count {
         dom := -1
@@ -507,21 +548,29 @@ ir_ssa_live: fn(s: IRSsa, f: IRFunction) -> [Bool] Never! {
         ir_ssa_mark(s, live, work, s.use_c[at])
         op: f.op[at]
         if op == .Call || op == .CallRuntime || op == .CallIndirect {
-            loop index in f.b[at]..<(f.b[at] + f.c[at]) -> ir_ssa_mark(s, live, work, s.use_args[index])
+            loop index in f.b[at]..<(f.b[at] + f.c[at]) {
+                ir_ssa_mark(s, live, work, s.use_args[index])
+            }
         }
     }
     loop work.len() > 0 {
         value: work.pop() ?? break
         phi: s.val_at[value]
-        loop k in 0..<s.join_edges[s.phi_join[phi]].len() -> ir_ssa_mark(s, live, work, ir_ssa_phi_arg(s, phi, k))
+        loop k in 0..<s.join_edges[s.phi_join[phi]].len() {
+            ir_ssa_mark(s, live, work, ir_ssa_phi_arg(s, phi, k))
+        }
     }
     live
 }
 
 ir_ssa_mark: fn(s: IRSsa, live: &[Bool], work: &[Int], used: Int) Never! {
-    if used < 0 -> return
+    if used < 0 {
+        return
+    }
     value: ir_ssa_find(s, used)
-    if live[value] -> return
+    if live[value] {
+        return
+    }
     live[value] = true
     if s.val_kind[value] == .Phi -> work.push(value)
 }
@@ -539,9 +588,13 @@ ir_ssa_verify: fn(f: IRFunction, s: IRSsa) -> [String] Never! {
         ir_ssa_check(f, s, errors, s.use_b[at], f.b[at], block, at)
         ir_ssa_check(f, s, errors, s.use_c[at], f.c[at], block, at)
         if op == .Call || op == .CallRuntime || op == .CallIndirect {
-            loop index in f.b[at]..<(f.b[at] + f.c[at]) -> ir_ssa_check(f, s, errors, s.use_args[index], f.args[index], block, at)
+            loop index in f.b[at]..<(f.b[at] + f.c[at]) {
+                ir_ssa_check(f, s, errors, s.use_args[index], f.args[index], block, at)
+            }
         }
-        if s.def[at] >= 0 && s.val_slot[s.def[at]] != ir_x64_write(f, at) -> errors.push("{f.key}: instruction {at} defines a value of slot {s.val_slot[s.def[at]]}")
+        if s.def[at] >= 0 && s.val_slot[s.def[at]] != ir_x64_write(f, at) {
+            errors.push("{f.key}: instruction {at} defines a value of slot {s.val_slot[s.def[at]]}")
+        }
     }
     loop phi in 0..<s.phi_val.len() {
         value: s.phi_val[phi]
@@ -554,16 +607,26 @@ ir_ssa_verify: fn(f: IRFunction, s: IRSsa) -> [String] Never! {
         loop k in 0..<s.join_edges[join].len() {
             edge: s.join_edges[join][k]
             arg: ir_ssa_find(s, ir_ssa_phi_arg(s, phi, k))
-            if !ir_ssa_available(s, arg, s.edge_block[edge], s.edge_at[edge]) -> errors.push("{f.key}: phi {value} argument {arg} is not available on edge {edge}")
-            if f.slot_type[s.val_slot[arg]] != f.slot_type[s.val_slot[value]] -> errors.push("{f.key}: phi {value} argument {arg} has another type")
+            if !ir_ssa_available(s, arg, s.edge_block[edge], s.edge_at[edge]) {
+                errors.push("{f.key}: phi {value} argument {arg} is not available on edge {edge}")
+            }
+            if f.slot_type[s.val_slot[arg]] != f.slot_type[s.val_slot[value]] {
+                errors.push("{f.key}: phi {value} argument {arg} has another type")
+            }
         }
     }
     errors
 }
 
 ir_ssa_check: fn(f: IRFunction, s: IRSsa, errors: &[String], used: Int, slot: Int, block: Int, at: Int) Never! {
-    if used < 0 -> return
+    if used < 0 {
+        return
+    }
     value: ir_ssa_find(s, used)
-    if !ir_ssa_available(s, value, block, at) -> errors.push("{f.key}: value {value} read at {at} is not available there")
-    if f.slot_type[s.val_slot[value]] != f.slot_type[slot] -> errors.push("{f.key}: value {value} read at {at} has another type than slot {slot}")
+    if !ir_ssa_available(s, value, block, at) {
+        errors.push("{f.key}: value {value} read at {at} is not available there")
+    }
+    if f.slot_type[s.val_slot[value]] != f.slot_type[slot] {
+        errors.push("{f.key}: value {value} read at {at} has another type than slot {slot}")
+    }
 }

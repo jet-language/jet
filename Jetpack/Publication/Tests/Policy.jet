@@ -2,18 +2,39 @@
 use {
     jet_pkg_model.[LockSource, PackagePolicy, PackagePolicyException, PolicySourceMap, pkg_lock_write]
     jetpack_publication.[
-        PUBLICATION_U64_MAX, PublicationAdvisory, PublicationAdvisoryFeed, PublicationDiagnosticError,
-        PublicationGateState, PublicationIndexEntry, PublicationNamePolicyDecision,
-        PublicationNamePolicyFinding, PublicationPackagePolicyError, PublicationPackagePolicyReceipt,
-        publication_active_source_exception_at, publication_advisory_feed_payload,
-        publication_advisory_feed_text, publication_advisory_gate_status, publication_advisory_now,
-        publication_advisory_trust_path, publication_authorize_package_candidate,
-        publication_blocked_reasons, publication_community_gate_error, publication_community_gate_status,
-        publication_community_open, publication_community_with_name, publication_matching_source_rule,
-        publication_package_policy_diagnostic, publication_package_policy_edge_diagnostic,
-        publication_parse_advisory_feed, publication_parse_spdx_expression, publication_pattern_matches,
-        publication_policy_fingerprint, publication_policy_fingerprint_text,
-        publication_policy_receipt_summary, publication_sign_bytes, publication_validate_spdx_license,
+        PUBLICATION_U64_MAX,
+        PublicationAdvisory,
+        PublicationAdvisoryFeed,
+        PublicationDiagnosticError,
+        PublicationGateState,
+        PublicationIndexEntry,
+        PublicationNamePolicyDecision,
+        PublicationNamePolicyFinding,
+        PublicationPackagePolicyError,
+        PublicationPackagePolicyReceipt,
+        publication_active_source_exception_at,
+        publication_advisory_feed_payload,
+        publication_advisory_feed_text,
+        publication_advisory_gate_status,
+        publication_advisory_now,
+        publication_advisory_trust_path,
+        publication_authorize_package_candidate,
+        publication_blocked_reasons,
+        publication_community_gate_error,
+        publication_community_gate_status,
+        publication_community_open,
+        publication_community_with_name,
+        publication_matching_source_rule,
+        publication_package_policy_diagnostic,
+        publication_package_policy_edge_diagnostic,
+        publication_parse_advisory_feed,
+        publication_parse_spdx_expression,
+        publication_pattern_matches,
+        publication_policy_fingerprint,
+        publication_policy_fingerprint_text,
+        publication_policy_receipt_summary,
+        publication_sign_bytes,
+        publication_validate_spdx_license,
     ]
     files: core.files
     sys: core.sys
@@ -26,12 +47,14 @@ publication_policy_test_ids: fn(raw: String) -> [String] Never! {
         .Err(error) -> panic(error.detail)
     }
 }
+
 publication_policy_test_spdx_error: fn(raw: String) -> String Never! {
     if publication_parse_spdx_expression(raw) == {
         .Ok(_) -> panic("expected invalid SPDX")
         .Err(error) -> return error.detail
     }
 }
+
 #Test("publication policy SPDX operators precedence parentheses and dedup") {
     assert_eq(publication_policy_test_ids("MIT OR Apache-2.0 AND GPL-2.0+ WITH Classpath-exception-2.0"), [String]{"Apache-2.0", "Classpath-exception-2.0", "GPL-2.0+", "MIT"})
     assert_eq(publication_policy_test_ids("(MIT OR Apache-2.0) AND MIT"), [String]{"Apache-2.0", "MIT"})
@@ -40,6 +63,7 @@ publication_policy_test_spdx_error: fn(raw: String) -> String Never! {
     whitespace: String.from_bytes([U8]{226, 128, 131, 77, 73, 84, 194, 133, 79, 82, 227, 128, 128, 77, 73, 84}) ?? panic("Unicode whitespace fixture")
     assert_eq(publication_policy_test_ids(whitespace), [String]{"MIT"})
 }
+
 #Test("publication policy SPDX exact errors and precedence") {
     assert_eq(publication_policy_test_spdx_error(""), "the expression is empty")
     assert_eq(publication_policy_test_spdx_error(" \t\n"), "the expression is empty")
@@ -49,8 +73,13 @@ publication_policy_test_spdx_error: fn(raw: String) -> String Never! {
     assert_eq(publication_policy_test_spdx_error("(MIT"), "missing closing parenthesis")
     assert_eq(publication_policy_test_spdx_error("((MIT)"), "missing closing parenthesis")
     assert_eq(publication_policy_test_spdx_error("()"), "unexpected closing parenthesis")
-    loop raw in ([String]{"AND MIT", "OR MIT", "WITH MIT", "MIT AND", "MIT OR", "(", "MIT OR AND Apache-2.0"}) -> assert_eq(publication_policy_test_spdx_error(raw), "expected an SPDX license identifier")
-    loop raw in ([String]{"MIT WITH", "MIT WITH (X)", "MIT WITH AND", "MIT WITH )"}) -> assert_eq(publication_policy_test_spdx_error(raw), "`WITH` must be followed by an SPDX exception identifier")
+    loop raw in
+        ([String]{"AND MIT", "OR MIT", "WITH MIT", "MIT AND", "MIT OR", "(", "MIT OR AND Apache-2.0"}) {
+        assert_eq(publication_policy_test_spdx_error(raw), "expected an SPDX license identifier")
+    }
+    loop raw in ([String]{"MIT WITH", "MIT WITH (X)", "MIT WITH AND", "MIT WITH )"}) {
+        assert_eq(publication_policy_test_spdx_error(raw), "`WITH` must be followed by an SPDX exception identifier")
+    }
     assert_eq(publication_policy_test_spdx_error("MIT WITH X WITH Y"), "expected an SPDX operator or closing parenthesis")
     assert_eq(publication_policy_test_spdx_error("MIT AND )"), "unexpected closing parenthesis")
     assert_eq(publication_policy_test_spdx_error("MIT, Apache"), "unsupported character `,`")
@@ -69,12 +98,14 @@ publication_policy_test_receipt: fn(result: PublicationPackagePolicyReceipt Publ
         .Err(error) -> panic(error.detail)
     }
 }
+
 publication_policy_test_error: fn(result: PublicationPackagePolicyReceipt PublicationPackagePolicyError!) -> PublicationPackagePolicyError Never! {
     if result == {
         .Ok(_) -> panic("expected policy refusal")
         .Err(error) -> return error
     }
 }
+
 #Test("publication policy valid_spdx_and_mapped_source_emit_receipt") {
     policy := PackagePolicy.default()
     policy.licenses = Val([String]{"MIT", "Apache-2.0"})
@@ -86,9 +117,10 @@ publication_policy_test_error: fn(result: PublicationPackagePolicyReceipt Public
     assert_eq(receipt.exception, None)
     assert_eq(receipt.license, "MIT OR Apache-2.0")
 }
+
 #Test("publication policy invalid_license_and_unmapped_source_fail_closed") {
     if publication_validate_spdx_license(Val("not a license")) == {
-        .Ok(_) -> panic("invalid SPDX accepted")
+        .Ok(_) -> { panic("invalid SPDX accepted") }
         .Err(_) -> {}
     }
     policy := PackagePolicy.default()
@@ -98,6 +130,7 @@ publication_policy_test_error: fn(result: PublicationPackagePolicyReceipt Public
     assert_eq(error.detail, "`widget#1.0.0` source authority `public` is not allowed by its source mapping")
     assert_eq(error.fix, "use an allowed source for `widget`, or add `public` to its `policy.sources` rule")
 }
+
 #Test("publication policy license error and allow list precedence") {
     policy := PackagePolicy.default()
     loop license in ([String?]{None, Val(""), Val(" \t\n")}) {
@@ -122,6 +155,7 @@ publication_policy_test_error: fn(result: PublicationPackagePolicyReceipt Public
     policy.licenses = Val([String]{})
     assert_eq(publication_policy_test_error(publication_authorize_package_candidate(policy, "x", "1", Val("MIT"), "local")).detail, "`x#1` license `MIT` is outside the SPDX allow-list")
 }
+
 #Test("publication policy source longest prefix exact and last tie") {
     rules: [PolicySourceMap]{
         {pattern: "*", sources: [String]{"default"}},
@@ -129,7 +163,8 @@ publication_policy_test_error: fn(result: PublicationPackagePolicyReceipt Public
         {pattern: "Acme.Widget*", sources: [String]{"prefix"}},
         {pattern: "Acme.Widget", sources: [String]{"exact"}},
         {pattern: "Acme.Widget*", sources: [String]{"later-prefix"}},
-        {pattern: "Acme.Widget", sources: [String]{"last-exact"}}}
+        {pattern: "Acme.Widget", sources: [String]{"last-exact"}},
+    }
     assert_eq(publication_matching_source_rule(rules, "Acme.Widget"), Val(5))
     assert_eq(publication_matching_source_rule(rules, "Acme.Widget.Sub"), Val(4))
     assert_eq(publication_matching_source_rule(rules, "Acme.Other"), Val(1))
@@ -145,6 +180,7 @@ publication_policy_test_error: fn(result: PublicationPackagePolicyReceipt Public
     policy.exceptions = [PackagePolicyException]{PackagePolicyException{id: "e", scope: "y#2", reason: "reviewed", expires_at: 9223372036854775807}}
     assert_eq(publication_policy_test_error(publication_authorize_package_candidate(policy, "y", "2", Val("MIT"), "public")).detail, error.detail)
 }
+
 #Test("publication policy source exception exact identity strict expiry first active") {
     expired: PackagePolicyException{id: "expired", scope: "x#1", reason: "old", expires_at: 100}
     active: PackagePolicyException{id: "active", scope: "x#1", reason: "reviewed", expires_at: 101}
@@ -161,6 +197,7 @@ publication_policy_test_error: fn(result: PublicationPackagePolicyReceipt Public
     assert_eq(receipt.exception, Val("id=review;scope=x#1;reason=approved;expires=9223372036854775807"))
     assert_eq(publication_policy_receipt_summary(receipt), "package=x#1;license=MIT;source=local;source-rule=default;fingerprint={receipt.fingerprint};exception=id=review;scope=x#1;reason=approved;expires=9223372036854775807")
 }
+
 #Test("publication policy fingerprint exact Rust debug canonical bytes") {
     policy := PackagePolicy.default()
     assert_eq(publication_policy_fingerprint_text(policy), "licenses=None;sources=[];exceptions=[]")
@@ -186,6 +223,7 @@ publication_policy_test_error: fn(result: PublicationPackagePolicyReceipt Public
     duplicates.licenses = Val([String]{})
     assert_eq(publication_policy_fingerprint_text(duplicates), "licenses=Some([]);sources=[];exceptions=[]")
 }
+
 #Test("publication policy edge and candidate diagnostic exact context") {
     error: PublicationPackagePolicyError{detail: "missing evidence", fix: "repair the source"}
     candidate: publication_package_policy_diagnostic(error)
@@ -203,6 +241,7 @@ publication_policy_test_error: fn(result: PublicationPackagePolicyReceipt Public
     assert_eq(refusal.what, "Community-tier package `widget` 1.0.0 is refused: #1913 maintainer liveness gate(s) are closed")
     assert(refusal.why.contains("#935 live signature chain, #431 advisory audit, #1912 name policy, #1913 maintainer liveness"))
 }
+
 #Test("publication policy community missing and malformed advisory evidence closes gates") {
     scratch: sys.get("JET_SCRATCH_ROOT") ?? (sys.get("JET_STATE_ROOT") ?? files.join(sys.get("XDG_CACHE_HOME") ?? files.join(sys.get("HOME") ?? panic("HOME"), ".cache"), "jet-dev"))
     root: files.join(scratch, "policy-gates-{sys.pid()}")
@@ -228,6 +267,7 @@ publication_policy_test_error: fn(result: PublicationPackagePolicyReceipt Public
 publication_policy_test_resign: fn(feed: &PublicationAdvisoryFeed, seed: [U8]) PublicationDiagnosticError! {
     feed.signature = publication_sign_bytes(seed, publication_advisory_crypto.sha256(publication_advisory_feed_payload(feed).bytes()).hex())
 }
+
 // #4438: real Core time.now ABI; #4326: canonical Lock Parse codec defaults.
 #Test("publication policy community signed audit clean vulnerability maturity and stale") {
     assert_eq(sys.get("JET_ADVISORY_DB"), None)

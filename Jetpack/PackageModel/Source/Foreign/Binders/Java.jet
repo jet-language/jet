@@ -10,7 +10,6 @@ use {
     sys: core.sys
 }
 
-
 // A JVM binding also names the directory holding the embeddable `libjvm`.
 JavaBindResult: struct {
     source: String
@@ -96,10 +95,14 @@ pkg_java_bind: fn(source_path: String, source: String, lib: String, cache: Strin
     pkg_binder_require_lib_name(lib)
     path: pkg_binder_canonicalize(source_path, "could not resolve Java source")
     on_disk: pkg_binder_read_text(path, "could not read Java source")
-    if on_disk != source -> return Err(ForeignBindError.Source("Java source text does not match the declared source file"))
+    if on_disk != source {
+        return Err(ForeignBindError.Source("Java source text does not match the declared source file"))
+    }
     descriptor: pkg_binder_descriptor_for(ForeignLanguage.Java, "Java")
     class: pkg_java_file_stem(path)
-    if !pkg_binder_is_ident(class) -> return Err(ForeignBindError.Source("Java source needs an identifier filename matching its public class"))
+    if !pkg_binder_is_ident(class) {
+        return Err(ForeignBindError.Source("Java source needs an identifier filename matching its public class"))
+    }
     pkg_binder_create_dir_all(cache, "could not create JVM binding cache")
     classes: files.join(cache, "{lib}.classes")
     pkg_binder_remove_tree_quiet(classes)
@@ -110,7 +113,9 @@ pkg_java_bind: fn(source_path: String, source: String, lib: String, cache: Strin
     java_home: sys.get("JAVA_HOME") ?? return Err(ForeignBindError.ToolMissing("JAVA_HOME"))
     host: BinderHostOS.current()
     jvm_dir: files.join(java_home, "lib/server")
-    if !files.is_file(files.join(jvm_dir, host.shared_library("jvm", "jvm.dll"))) -> return Err(ForeignBindError.Source("provisioned OpenJDK has no embedded libjvm runtime"))
+    if !files.is_file(files.join(jvm_dir, host.shared_library("jvm", "jvm.dll"))) {
+        return Err(ForeignBindError.Source("provisioned OpenJDK has no embedded libjvm runtime"))
+    }
     abi: "jet_java_{lib}"
     bridge: files.join(cache, "{abi}.c")
     object: files.join(cache, "{abi}.o")
@@ -160,7 +165,7 @@ pkg_java_bind: fn(source_path: String, source: String, lib: String, cache: Strin
         (name: "javac-toolchain", value: javac_identity),
         (name: "javap-toolchain", value: javap_identity),
         (name: "cc", value: cc_identity),
-        (name: "ar", value: ar_identity)
+        (name: "ar", value: ar_identity),
     }
     archive_digest: pkg_bridge_sha_file(archive) ?? return Err(pkg_binder_scalar_bridge_error(err))
     artifacts: [(name: String, digest: String)]{(name: files.basename(archive), digest: archive_digest)}
@@ -197,8 +202,12 @@ pkg_java_parse_javap: fn(class: String, text: String) -> JavaSurface ForeignBind
         descriptor: stripped.trim()
         if sig.contains(" {class}(") || sig.starts_with("public {class}(") {
             types: pkg_java_descriptor_types(descriptor)
-            if types.result != JavaScalar.Void -> return Err(ForeignBindError.Source("JVM constructor descriptor must return void"))
-            if has_ctor -> return Err(ForeignBindError.Source("overloaded constructors need an explicit overlay"))
+            if types.result != JavaScalar.Void {
+                return Err(ForeignBindError.Source("JVM constructor descriptor must return void"))
+            }
+            if has_ctor {
+                return Err(ForeignBindError.Source("overloaded constructors need an explicit overlay"))
+            }
             ctor = types.params
             has_ctor = true
             next
@@ -208,21 +217,31 @@ pkg_java_parse_javap: fn(class: String, text: String) -> JavaSurface ForeignBind
         words: pkg_binder_words(pkg_binder_slice(sig, 0, open).trim())
         name: if words.len() > 0 -> words[words.len() - 1] else -> ""
         if !pkg_binder_is_ident(name) -> next
-        if names.contains(name) -> return Err(ForeignBindError.Source("overloaded Java method `{name}` needs an explicit overlay"))
+        if names.contains(name) {
+            return Err(ForeignBindError.Source("overloaded Java method `{name}` needs an explicit overlay"))
+        }
         names.push(name.copy())
         types: pkg_java_descriptor_types(descriptor)
-        if types.result == JavaScalar.Void -> return Err(ForeignBindError.Source("void Java method `{name}` needs a typed overlay"))
+        if types.result == JavaScalar.Void {
+            return Err(ForeignBindError.Source("void Java method `{name}` needs a typed overlay"))
+        }
         methods.push(JavaMethod{name: name, params: types.params, result: types.result, is_static: sig.contains(" static ")})
     }
-    if !has_ctor -> return Err(ForeignBindError.Source("no supported public constructor was discovered"))
-    if methods.len() == 0 -> return Err(ForeignBindError.Source("no supported public Java methods were discovered"))
+    if !has_ctor {
+        return Err(ForeignBindError.Source("no supported public constructor was discovered"))
+    }
+    if methods.len() == 0 {
+        return Err(ForeignBindError.Source("no supported public Java methods were discovered"))
+    }
     Ok(JavaSurface{class: class, ctor: ctor, methods: methods})
 }
 
 // `(JD)J`-style descriptors over long, double, and void only.
 pkg_java_descriptor_types: fn(value: String) -> JavaDescriptorTypes ForeignBindError! {
     close: pkg_binder_find(value, ")", 0)
-    if close < 0 || !value.starts_with("(") -> return Err(ForeignBindError.Source("malformed JVM descriptor"))
+    if close < 0 || !value.starts_with("(") {
+        return Err(ForeignBindError.Source("malformed JVM descriptor"))
+    }
     unsupported: "unsupported JVM descriptor `{value}`; use long/double/void"
     raw: value.bytes()
     params := [JavaScalar]{}
@@ -293,7 +312,7 @@ pkg_java_receiver: fn(method: JavaMethod, receiver: String) -> String Never! {
 pkg_java_render_c: fn(lib: String, surface: JavaSurface, classes: String) -> String Never! {
     abi: "jet_java_{lib}"
     class: pkg_java_c_escape(surface.class)
-    out := [String]{pkg_binder_fill_template(PKG_JAVA_BRIDGE_C, [String: String]{"abi": abi, "classes": pkg_java_c_escape(classes)})}
+    out := [String]{pkg_binder_fill_template(PKG_JAVA_BRIDGE_C, [String:String]{"abi": abi, "classes": pkg_java_c_escape(classes)})}
     ctor_descriptor: pkg_java_descriptor(surface.ctor, JavaScalar.Void)
     out.push("int64_t {abi}_new({pkg_java_params_c(surface.ctor)}){{last_error=0;JNIEnv*e=env();if(!e)return 0;jclass c=(*e)->FindClass(e,\"{class}\");if(!c){{fail(e);return 0;}}jmethodID m=(*e)->GetMethodID(e,c,\"<init>\",\"{ctor_descriptor}\");if(!m){{fail(e);return 0;}}{pkg_java_emit_jvalues(surface.ctor)}jobject local=(*e)->NewObjectA(e,c,m,a);if(!local||(*e)->ExceptionCheck(e)){{fail(e);return 0;}}jobject global=(*e)->NewGlobalRef(e,local);(*e)->DeleteLocalRef(e,local);if(!global){{fail(e);return 0;}}pthread_mutex_lock(&lock);for(int i=0;i<1024;i++){{if(!handles[i]){{handles[i]=global;pthread_mutex_unlock(&lock);return i+1;}}}}pthread_mutex_unlock(&lock);(*e)->DeleteGlobalRef(e,global);fail(e);return 0;}}\n")
     loop method in surface.methods {
@@ -344,7 +363,7 @@ pkg_java_c_escape: fn(value: String) -> String Never! {
 
 // The lazy-JVM prelude of the JNI bridge. Holes: `abi` and the c-escaped
 // `classes` class path.
-PKG_JAVA_BRIDGE_C: #run { ```#include <jni.h>
+PKG_JAVA_BRIDGE_C: #run { `#include <jni.h>
 #include <stdint.h>
 #include <pthread.h>
 #include <stdlib.h>
@@ -356,4 +375,4 @@ static JNIEnv* env(void){JNIEnv*e=0;pthread_mutex_lock(&lock);if(!vm){JavaVMOpti
 static jobject get_handle(JNIEnv*e,int64_t h){if(h<1||h>1024){fail(e);return 0;}pthread_mutex_lock(&lock);jobject v=handles[h-1];pthread_mutex_unlock(&lock);if(!v)fail(e);return v;}
 int64_t @@abi@@_take_error(void){int64_t v=last_error;last_error=0;if(vm)(*vm)->DetachCurrentThread(vm);return v;}
 void @@abi@@_close(int64_t h){JNIEnv*e=env();if(!e||h<1||h>1024)return;pthread_mutex_lock(&lock);jobject v=handles[h-1];handles[h-1]=0;pthread_mutex_unlock(&lock);if(v)(*e)->DeleteGlobalRef(e,v);(*vm)->DetachCurrentThread(vm);}
-``` }
+` }

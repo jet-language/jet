@@ -30,19 +30,30 @@
 // keys, keeps process wall time apart from adapter-reported codec time, keeps
 // unavailable cells, and compares no peer implementation. A bad option is
 // exit 2.
-use core.[files, math, process, regex, sys, time]
-use core.text.fmt
-use core.encoding.json
+use {
+    core.[files, math, process, regex, sys, time]
+    core.text.fmt
+    core.encoding.json
+}
 
 HARNESS: "Tools/perf/enum_codec_bench/run.jet"
+
 PROTOCOL_VERSION: 1
+
 FORMS: ["external", "internal", "untagged", "adjacent"]
+
 CASES: ["payload", "evolution", "unknown", "malformed"]
+
 OPERATIONS: ["encode", "decode"]
+
 ENTRYPOINT: "core.encoding.json.to_string/decode<T>"
+
 UNAVAILABLE: "canonical enum codec command was not provided; static mode does not execute Core"
+
 ADJACENT_UNAVAILABLE: "adjacent tag/content codec entry point is unavailable by contract; this cell is never substituted with an external serializer"
+
 TRUTHY: ["1", "true", "yes", "on"]
+
 // The default scratch parent, the original's Path.home() / ".cache" / "jet-dev" / "enum-codec-bench".
 SCRATCH_DEFAULT_PARTS: ["~", ".cache", "jet-dev", "enum-codec-bench"]
 
@@ -87,8 +98,11 @@ FORM_INFO: [
 // shlex.split's words, and the pieces of one: plain text, a backslash
 // escape, a single-quoted run or a double-quoted run.
 WORD: Regex{"(?:[^ \t\r\n'\"\\]|\\.|'[^']*'|\"(?:[^\"\\]|\\.)*\")+"}
+
 PIECE: Regex{"([^ \t\r\n'\"\\]+)|\\(.)|'([^']*)'|\"((?:[^\"\\]|\\.)*)\""}
+
 REPR_ESCAPES: ["\\": "\\\\", "\n": "\\n", "\r": "\\r", "\t": "\\t", "'": "\\'", "\"": "\\\""]
+
 DIGITS: Regex{"[0-9]+"}
 
 #CLI
@@ -165,10 +179,18 @@ run: fn(args: Args) Err! {
     bounds: [(value: args.samples, low: 1, high: 99), (value: args.rounds, low: 1, high: 1000000), (value: args.memory_limit_mib, low: 1, high: 65536), (value: args.max_output_bytes, low: 1, high: 16777216)]
     in_range: bounds.all(fn(bound) { bound.value >= bound.low && bound.value <= bound.high })
     timeout: args.timeout ?? args.timeout_seconds
-    if !in_range || !math.is_finite(timeout) || timeout <= 0.0 || timeout > 3600.0 -> usage_error("--samples 1..99, --rounds 1..1000000, --timeout-seconds above 0 and at most 3600, --memory-limit-mib 1..65536, --max-output-bytes 1..16777216")
-    if args.run && args.dry_run -> usage_error("argument --dry-run: not allowed with argument --run")
-    if args.profile != "release" && args.profile != "debug" -> usage_error("argument --profile: invalid choice: {python_repr(args.profile)} (choose from 'release', 'debug')")
-    if args.run && (args.command ?? "x").trim() == "" -> usage_error("--command must not be empty when --run is used")
+    if !in_range || !math.is_finite(timeout) || timeout <= 0.0 || timeout > 3600.0 {
+        usage_error("--samples 1..99, --rounds 1..1000000, --timeout-seconds above 0 and at most 3600, --memory-limit-mib 1..65536, --max-output-bytes 1..16777216")
+    }
+    if args.run && args.dry_run {
+        usage_error("argument --dry-run: not allowed with argument --run")
+    }
+    if args.profile != "release" && args.profile != "debug" {
+        usage_error("argument --profile: invalid choice: {python_repr(args.profile)} (choose from 'release', 'debug')")
+    }
+    if args.run && (args.command ?? "x").trim() == "" {
+        usage_error("--command must not be empty when --run is used")
+    }
     command: args.command ?? ""
     measuring: args.run && command != ""
     // Static mode is the default even when the environment names a command;
@@ -178,24 +200,32 @@ run: fn(args: Args) Err! {
     bench: Bench{root: root, command: command, scratch: "", samples: args.samples, rounds: args.rounds, timeout_seconds: timeout, memory_limit_mib: args.memory_limit_mib, max_output_bytes: args.max_output_bytes, profile: args.profile}
     unmeasured: if command == "" -> "runtime requested without an existing canonical codec command; no command was executed" else -> "static/dry mode selected; provide --run and an existing canonical codec command to measure this cell"
     cells: if measuring -> measured_cells(bench, scratch_root) ?? usage_error(err.message) else -> static_cells(unmeasured)
-    report: Dyn{[String: Dyn]{
-        "benchmark": "enum-codec-wave-a-v1",
-        "card": 3151,
-        "mode": if args.run -> "run" else -> "dry-run",
-        "protocol_version": PROTOCOL_VERSION,
-        "harness": HARNESS,
-        "static_validation": static_validation() ?? usage_error("workload validation failed: {err.message}"),
-        "workload": workload_description(),
-        "metadata": metadata(args, command),
-        "limits": Dyn{[String: Dyn]{
-            "samples": args.samples, "rounds": args.rounds, "timeout_seconds": Dyn.Float(timeout),
-            "memory_limit_mib": args.memory_limit_mib, "max_output_bytes": args.max_output_bytes, "scratch_root": scratch_root,
-        }},
-        "cells": Dyn.Array(cells.map(fn(cell) { cell_tree(cell) })),
-        "summary": summarize(cells),
-        "peer_comparison": Dyn{[String: Dyn]{"status": "not_run", "reason": "peer comparison is outside card #3151 harness scope", "performance_win_claim": false, "arms": Dyn.Array([Dyn]{})}},
-        "receipt": Dyn{[String: Dyn]{"status": "not_available", "text": Dyn.Null, "reason": "no canonical runtime receipt is claimed by this harness"}},
-    }}
+    report: Dyn{
+        [String:Dyn]{
+            "benchmark": "enum-codec-wave-a-v1",
+            "card": 3151,
+            "mode": if args.run -> "run" else -> "dry-run",
+            "protocol_version": PROTOCOL_VERSION,
+            "harness": HARNESS,
+            "static_validation": static_validation() ?? usage_error("workload validation failed: {err.message}"),
+            "workload": workload_description(),
+            "metadata": metadata(args, command),
+            "limits": Dyn{
+                [String:Dyn]{
+                    "samples": args.samples,
+                    "rounds": args.rounds,
+                    "timeout_seconds": Dyn.Float(timeout),
+                    "memory_limit_mib": args.memory_limit_mib,
+                    "max_output_bytes": args.max_output_bytes,
+                    "scratch_root": scratch_root,
+                }
+            },
+            "cells": Dyn.Array(cells.map(fn(cell) { cell_tree(cell) })),
+            "summary": summarize(cells),
+            "peer_comparison": Dyn{[String:Dyn]{"status": "not_run", "reason": "peer comparison is outside card #3151 harness scope", "performance_win_claim": false, "arms": Dyn.Array([Dyn]{})}},
+            "receipt": Dyn{[String:Dyn]{"status": "not_available", "text": Dyn.Null, "reason": "no canonical runtime receipt is claimed by this harness"}},
+        }
+    }
     // json.canonical writes every object's keys sorted, and parsing keeps
     // their order: the report as json.dumps(sort_keys=True, indent=2) writes it.
     print(json.to_string_pretty(json.parse(json.canonical(report))))
@@ -224,8 +254,12 @@ path_text: fn(path: String) -> String Never! {
 safe_scratch_root: fn(root: String, raw: String) -> String Err! {
     resolved: resolve(files.resolve(raw))
     if resolved == "/" -> return Err("scratch root must not be the filesystem root")
-    if within(resolved, resolve("/tmp")) -> return Err("scratch root must not be /tmp or a child of /tmp")
-    if within(resolved, resolve(files.join(root, "target"))) -> return Err("scratch root must not be the repository target directory")
+    if within(resolved, resolve("/tmp")) {
+        return Err("scratch root must not be /tmp or a child of /tmp")
+    }
+    if within(resolved, resolve(files.join(root, "target"))) {
+        return Err("scratch root must not be the repository target directory")
+    }
     files.create_dir_all(resolved) ?? return Err("scratch root is not writable: {resolved}")
     Ok(resolved)
 }
@@ -246,12 +280,16 @@ static_validation: fn() -> Dyn Err! {
     loop form in FORMS {
         loop case in CASES {
             wire: WIRE_PAYLOADS[form][case]
-            if wire == "" || wire.contains("\n") -> return Err("wire fixture is empty or multiline: {form}/{case}")
+            if wire == "" || wire.contains("\n") {
+                return Err("wire fixture is empty or multiline: {form}/{case}")
+            }
         }
     }
-    if WORKLOAD_CASES["payload"].semantic_value != "Command.Write(\"hello\")" -> return Err("known payload semantic value changed")
+    if WORKLOAD_CASES["payload"].semantic_value != "Command.Write(\"hello\")" {
+        return Err("known payload semantic value changed")
+    }
     names: ["form_inventory", "case_inventory", "equal_known_payload", "wire_fixtures_are_bounded", "adjacent_is_explicitly_unavailable"]
-    Ok(Dyn{[String: Dyn]{"status": "ok", "checks": Dyn.Array(names.map(fn(name) { Dyn{[String: Dyn]{"name": name, "status": "ok"}} }))}})
+    Ok(Dyn{[String:Dyn]{"status": "ok", "checks": Dyn.Array(names.map(fn(name) { Dyn{[String:Dyn]{"name": name, "status": "ok"}} }))}})
 }
 
 workload_description: fn() -> Dyn Never! {
@@ -269,23 +307,25 @@ workload_description: fn() -> Dyn Never! {
         entry["wire_is_fixture_only"] = true
         cases.push(entry)
     }
-    payload_by_form := Dyn{[String: Dyn]{}}
+    payload_by_form := Dyn{[String:Dyn]{}}
     loop form in FORMS -> payload_by_form[form] = Dyn.Text(WIRE_PAYLOADS[form]["payload"])
-    Dyn{[String: Dyn]{
-        "id": "enum-codec-wave-a-v1",
-        "card": 3151,
-        "protocol_version": PROTOCOL_VERSION,
-        "enum": "Command",
-        "variants": Dyn.Array([Dyn]{Dyn{[String: Dyn]{"name": "Read", "payload": "unit"}}, Dyn{[String: Dyn]{"name": "Write", "payload": "String"}}}),
-        "forms": Dyn.Array(forms),
-        "cases": Dyn.Array(cases),
-        "equal_payload": Dyn{[String: Dyn]{"case": "payload", "semantic_value": WORKLOAD_CASES["payload"].semantic_value, "wire_payload_by_form": payload_by_form}},
-        "no_peer_comparison": true,
-    }}
+    Dyn{
+        [String:Dyn]{
+            "id": "enum-codec-wave-a-v1",
+            "card": 3151,
+            "protocol_version": PROTOCOL_VERSION,
+            "enum": "Command",
+            "variants": Dyn.Array([Dyn]{Dyn{[String:Dyn]{"name": "Read", "payload": "unit"}}, Dyn{[String:Dyn]{"name": "Write", "payload": "String"}}}),
+            "forms": Dyn.Array(forms),
+            "cases": Dyn.Array(cases),
+            "equal_payload": Dyn{[String:Dyn]{"case": "payload", "semantic_value": WORKLOAD_CASES["payload"].semantic_value, "wire_payload_by_form": payload_by_form}},
+            "no_peer_comparison": true,
+        }
+    }
 }
 
 wires: fn(form: String, cases: [String]) -> Dyn Never! {
-    out := Dyn{[String: Dyn]{}}
+    out := Dyn{[String:Dyn]{}}
     loop case in cases -> out[case] = Dyn.Text(WIRE_PAYLOADS[form][case])
     out
 }
@@ -302,32 +342,42 @@ metadata: fn(args: Args, command: String) -> Dyn Never! {
     optimized: process.env_get("JET_ENUM_CODEC_OPTIMIZED")
     release: args.profile == "release"
     configured: command != ""
-    Dyn{[String: Dyn]{
-        "compiler": Dyn{[String: Dyn]{
-            "name": compiler,
-            "version": Dyn.Text(setting(args.compiler_version, "JET_ENUM_CODEC_COMPILER_VERSION")),
-            "source": if compiler != "unavailable" -> "environment-or-cli" else -> "unavailable",
-        }},
-        "toolchain": Dyn{[String: Dyn]{"name": Dyn.Text(setting(args.toolchain, "JET_ENUM_CODEC_TOOLCHAIN"))}},
-        "library": Dyn{[String: Dyn]{
-            "name": Dyn.Text(setting(args.library, "JET_ENUM_CODEC_LIBRARY")),
-            "version": Dyn.Text(setting(args.library_version, "JET_ENUM_CODEC_LIBRARY_VERSION")),
-            "entrypoint": Dyn.Text(process.env_get("JET_ENUM_CODEC_ENTRYPOINT") ?? ENTRYPOINT),
-            "status": if configured -> "provided-command-not-verified" else -> "canonical-entrypoint-not-provided",
-        }},
-        "optimized": Dyn{[String: Dyn]{
-            "requested_profile": args.profile,
-            "requested": release,
-            "verified": if optimized == .Val(text) -> Dyn.Bool(TRUTHY.contains(text.trim().lower())) else -> Dyn.Null,
-            "settings": Dyn{[String: Dyn]{
-                "profile": args.profile,
-                "debug_assertions": if release -> Dyn.Bool(false) else -> Dyn.Null,
-                "lto": Dyn.Text(process.env_get("JET_ENUM_CODEC_LTO") ?? "unavailable"),
-            }},
-        }},
-        "command": Dyn{[String: Dyn]{"configured": configured, "template": if configured -> Dyn.Text(command.copy()) else -> Dyn.Text("unavailable")}},
-        "repository_commit": Dyn.Text(process.env_get("JET_ENUM_CODEC_COMMIT") ?? "unavailable"),
-    }}
+    Dyn{
+        [String:Dyn]{
+            "compiler": Dyn{
+                [String:Dyn]{
+                    "name": compiler,
+                    "version": Dyn.Text(setting(args.compiler_version, "JET_ENUM_CODEC_COMPILER_VERSION")),
+                    "source": if compiler != "unavailable" -> "environment-or-cli" else -> "unavailable",
+                }
+            },
+            "toolchain": Dyn{[String:Dyn]{"name": Dyn.Text(setting(args.toolchain, "JET_ENUM_CODEC_TOOLCHAIN"))}},
+            "library": Dyn{
+                [String:Dyn]{
+                    "name": Dyn.Text(setting(args.library, "JET_ENUM_CODEC_LIBRARY")),
+                    "version": Dyn.Text(setting(args.library_version, "JET_ENUM_CODEC_LIBRARY_VERSION")),
+                    "entrypoint": Dyn.Text(process.env_get("JET_ENUM_CODEC_ENTRYPOINT") ?? ENTRYPOINT),
+                    "status": if configured -> "provided-command-not-verified" else -> "canonical-entrypoint-not-provided",
+                }
+            },
+            "optimized": Dyn{
+                [String:Dyn]{
+                    "requested_profile": args.profile,
+                    "requested": release,
+                    "verified": if optimized == .Val(text) -> Dyn.Bool(TRUTHY.contains(text.trim().lower())) else -> Dyn.Null,
+                    "settings": Dyn{
+                        [String:Dyn]{
+                            "profile": args.profile,
+                            "debug_assertions": if release -> Dyn.Bool(false) else -> Dyn.Null,
+                            "lto": Dyn.Text(process.env_get("JET_ENUM_CODEC_LTO") ?? "unavailable"),
+                        }
+                    },
+                }
+            },
+            "command": Dyn{[String:Dyn]{"configured": configured, "template": if configured -> Dyn.Text(command.copy()) else -> Dyn.Text("unavailable")}},
+            "repository_commit": Dyn.Text(process.env_get("JET_ENUM_CODEC_COMMIT") ?? "unavailable"),
+        }
+    }
 }
 
 // The cell before anything runs: unavailable, its fixture byte count only.
@@ -335,14 +385,32 @@ base_cell: fn(form: String, case: String, operation: String) -> Matrix Never! {
     wire: WIRE_PAYLOADS[form][case]
     witness: WORKLOAD_CASES[case]
     Matrix{
-        id: "{form}/{case}/{operation}", form: form, case: case, operation: operation,
-        source_expression: witness.source_expression, wire_payload: wire, wire_payload_bytes: wire.bytes().len(),
-        decode_expectation: witness.decode_expectation, status: "unavailable", reason: UNAVAILABLE, sample_results: [Dyn]{},
-        process_wall_median_ns: None, codec_median_ns: None, encode_median_ns: None, decode_median_ns: None,
-        encode_time_ns: None, decode_time_ns: None, allocation_count: None, allocation_median: None,
-        encoded_bytes: wire.bytes().len(), encoded_bytes_status: "fixture", allocation_status: "unavailable", timing_status: "unavailable",
+        id: "{form}/{case}/{operation}",
+        form: form,
+        case: case,
+        operation: operation,
+        source_expression: witness.source_expression,
+        wire_payload: wire,
+        wire_payload_bytes: wire.bytes().len(),
+        decode_expectation: witness.decode_expectation,
+        status: "unavailable",
+        reason: UNAVAILABLE,
+        sample_results: [Dyn]{},
+        process_wall_median_ns: None,
+        codec_median_ns: None,
+        encode_median_ns: None,
+        decode_median_ns: None,
+        encode_time_ns: None,
+        decode_time_ns: None,
+        allocation_count: None,
+        allocation_median: None,
+        encoded_bytes: wire.bytes().len(),
+        encoded_bytes_status: "fixture",
+        allocation_status: "unavailable",
+        timing_status: "unavailable",
         field_status: FieldStatus{
-            encoded_bytes: "fixture", allocation_count: "unavailable",
+            encoded_bytes: "fixture",
+            allocation_count: "unavailable",
             encode_median_ns: if operation == "decode" -> "not_applicable" else -> "unavailable",
             decode_median_ns: if operation == "encode" -> "not_applicable" else -> "unavailable",
         },
@@ -371,7 +439,8 @@ with_reason: fn(base: Matrix, fixed: (status: String, reason: String)) -> Matrix
 // the report writes it as null.
 cell_tree: fn(cell: Matrix) -> Dyn Never! {
     tree := cell.encode()
-    loop key in ["process_wall_median_ns", "codec_median_ns", "encode_median_ns", "decode_median_ns", "encode_time_ns", "decode_time_ns", "allocation_count", "allocation_median"] {
+    loop key in
+        ["process_wall_median_ns", "codec_median_ns", "encode_median_ns", "decode_median_ns", "encode_time_ns", "decode_time_ns", "allocation_count", "allocation_median"] {
         if tree.get(key) == .None -> tree[key] = Dyn.Null
     }
     tree
@@ -455,7 +524,9 @@ measure_cell: fn(bench: Bench, base: Matrix) -> Matrix Err! {
         cell.allocation_status = if cell.allocation_median != None -> "measured" else -> "adapter_allocation_count_unavailable"
         cell.encoded_bytes_status = if cell.operation == "encode" -> "verified" else -> "fixture"
     }
-    if cell.operation == "encode" -> cell.encode_median_ns = cell.codec_median_ns else -> cell.decode_median_ns = cell.codec_median_ns
+    if cell.operation == "encode" -> cell.encode_median_ns = cell.codec_median_ns else {
+        cell.decode_median_ns = cell.codec_median_ns
+    }
     cell.encode_time_ns = cell.encode_median_ns
     cell.decode_time_ns = cell.decode_median_ns
     if cell.encode_median_ns != None -> cell.field_status.encode_median_ns = "measured"
@@ -499,8 +570,14 @@ sample: fn(bench: Bench, cell: Matrix, input: String, expected: String, index: I
         if files.exists(stale) -> files.remove(stale)
     }
     values: [
-        "operation": cell.operation, "form": cell.form, "case": cell.case, "input": input, "expected": expected,
-        "output": output, "metrics": metrics_path, "rounds": "{bench.rounds}",
+        "operation": cell.operation,
+        "form": cell.form,
+        "case": cell.case,
+        "input": input,
+        "expected": expected,
+        "output": output,
+        "metrics": metrics_path,
+        "rounds": "{bench.rounds}",
     ]
     argv: command_argv(bench.command, values)
     expected_bytes: cell.wire_payload.bytes().len()
@@ -509,7 +586,7 @@ sample: fn(bench: Bench, cell: Matrix, input: String, expected: String, index: I
         .cpu_time_limit(time.duration_seconds(max(1, checked(Int{math.ceil(bench.timeout_seconds)}) ?? 1)))
         .memory_limit(bench.memory_limit_mib * 1048576).output_limit(bench.max_output_bytes)
     watch: time.start()
-    tree := Dyn{[String: Dyn]{"codec_ns": Dyn.Null, "allocation_count": Dyn.Null, "encoded_bytes": expected_bytes, "stderr": ""}}
+    tree := Dyn{[String:Dyn]{"codec_ns": Dyn.Null, "allocation_count": Dyn.Null, "encoded_bytes": expected_bytes, "stderr": ""}}
     receipt: spec.run() ?? {
         tree["wall_ns"] = time.elapsed(watch).ns
         tree["returncode"] = Dyn.Null
@@ -586,7 +663,9 @@ errored: fn(tree: Dyn, reason: String) -> Sample Never! {
 read_bounded: fn(path: String, limit: Int) -> [U8] Err! {
     if !files.exists(path) -> return Ok([U8]{})
     bytes: files.read_bytes(path) ?? return Ok([U8]{})
-    if bytes.len() > limit -> return Err("adapter output exceeded {limit} bytes: {files.basename(path)}")
+    if bytes.len() > limit {
+        return Err("adapter output exceeded {limit} bytes: {files.basename(path)}")
+    }
     Ok(bytes)
 }
 
@@ -607,16 +686,20 @@ count: fn(metrics: Dyn, field: String) -> Int? Err! {
     value: metrics.get(field) ?? return Ok(None)
     if value == .Int(number) && number >= 0 -> return Ok(Val(number))
     // A JSON integer parses as its digits.
-    if value == .Number(digits) && DIGITS.full_match(digits) -> return Ok(Val(Int.parse(digits) ?? 0))
+    if value == .Number(digits) && DIGITS.full_match(digits) {
+        return Ok(Val(Int.parse(digits) ?? 0))
+    }
     Err("metrics field {field} must be a non-negative integer")
 }
 
 // The adapter's argv: the command split as shlex.split splits it, each
 // placeholder word formatted; with no placeholder, the protocol options
 // appended.
-command_argv: fn(command: String, values: [String: String]) -> [String] Err! {
+command_argv: fn(command: String, values: [String:String]) -> [String] Err! {
     left: WORD.replace(command, "").trim()
-    if left != "" -> return Err("invalid command quoting: {if left.ends_with("\\") -> "No escaped character" else -> "No closing quotation"}")
+    if left != "" {
+        return Err("invalid command quoting: {if left.ends_with("\\") -> "No escaped character" else -> "No closing quotation"}")
+    }
     parts: WORD.find_all(command).map(fn(word) { unquote(word) })
     if parts.len() == 0 -> return Err("configured command is empty")
     argv := [String]{}
@@ -631,7 +714,8 @@ command_argv: fn(command: String, values: [String: String]) -> [String] Err! {
         argv.push(formatted)
     }
     if !placeholder {
-        loop name in ["operation", "form", "case", "input", "expected", "output", "metrics", "rounds"] {
+        loop name in
+            ["operation", "form", "case", "input", "expected", "output", "metrics", "rounds"] {
             argv.push("--{name}")
             argv.push(values[name].copy())
         }
@@ -641,7 +725,7 @@ command_argv: fn(command: String, values: [String: String]) -> [String] Err! {
 
 // str.format over one word: `{{` and `}}` are braces and `{name}` is the
 // value of name; any other field is None.
-format_word: fn(word: String, values: [String: String]) -> String? Never! {
+format_word: fn(word: String, values: [String:String]) -> String? Never! {
     out := ""
     rest := word.copy()
     loop rest != "" {
@@ -651,7 +735,9 @@ format_word: fn(word: String, values: [String: String]) -> String? Never! {
                 close: rest.index_of("}}") ?? return None
                 (text: values.get(rest.slice(1, close)) ?? return None, used: close + 1)
             }
-            rest.starts_with("}}") -> return None
+            rest.starts_with("}}") -> {
+                return None
+            }
             else -> (text: rest.slice(0, 1), used: 1)
         }
         out = "{out}{step.text}"
@@ -670,7 +756,9 @@ unquote: fn(word: String) -> String Never! {
 // a single quote and no double quote; backslashes, that quote and control
 // characters escaped.
 python_repr: fn(text: String) -> String Never! {
-    if text.contains("'") && !text.contains("\"") -> return "\"{Regex{"[\\\x{{0}}-\x{{1F}}\x{{7F}}]"}.replace_all_with(text, fn(found) { repr_escape(found.text) })}\""
+    if text.contains("'") && !text.contains("\"") {
+        return "\"{Regex{"[\\\x{{0}}-\x{{1F}}\x{{7F}}]"}.replace_all_with(text, fn(found) { repr_escape(found.text) })}\""
+    }
     "'{Regex{"[\\\x{{0}}-\x{{1F}}\x{{7F}}']"}.replace_all_with(text, fn(found) { repr_escape(found.text) })}'"
 }
 
@@ -693,20 +781,18 @@ general: fn(value: Float) -> String Never! {
 trimmed: fn(text: String) -> String Never! {
     if !text.contains(".") -> return text.copy()
     out := text.copy()
-    loop out.ends_with("0") {
-        out = out.remove_suffix("0")
-    }
+    loop out.ends_with("0") -> out = out.remove_suffix("0")
     out.remove_suffix(".")
 }
 
 summarize: fn(cells: [Matrix]) -> Dyn Never! {
-    counts := Dyn{[String: Dyn]{}}
-    tally := [String: Int]{}
+    counts := Dyn{[String:Dyn]{}}
+    tally := [String:Int]{}
     unavailable := [Dyn]{}
     loop cell in cells {
         tally[cell.status] = (tally.get(cell.status) ?? 0) + 1
         if cell.status == "unavailable" || cell.status == "unsupported" {
-            unavailable.push(Dyn{[String: Dyn]{"id": cell.id, "status": cell.status, "reason": cell.reason}})
+            unavailable.push(Dyn{[String:Dyn]{"id": cell.id, "status": cell.status, "reason": cell.reason}})
         }
     }
     loop entry in tally -> counts[entry.key] = entry.value
@@ -717,11 +803,13 @@ summarize: fn(cells: [Matrix]) -> Dyn Never! {
         measured > 0 -> "partial"
         else -> "unavailable"
     }
-    Dyn{[String: Dyn]{
-        "status": status,
-        "cell_counts": counts,
-        "measured_cells": measured,
-        "unavailable_cells": Dyn.Array(unavailable.copy()),
-        "measurement_cells_remain_unavailable": unavailable.len() > 0,
-    }}
+    Dyn{
+        [String:Dyn]{
+            "status": status,
+            "cell_counts": counts,
+            "measured_cells": measured,
+            "unavailable_cells": Dyn.Array(unavailable.copy()),
+            "measurement_cells_remain_unavailable": unavailable.len() > 0,
+        }
+    }
 }

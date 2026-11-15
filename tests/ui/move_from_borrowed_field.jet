@@ -13,9 +13,7 @@ Root: struct {
     session: Session
 }
 
-consume: fn(s: Session) -> Int {
-    s.id
-}
+consume: fn(s: Session) -> Int { s.id }
 
 take_field: fn(r: &Root) -> Int {
     taken := r.session.move()
@@ -28,13 +26,9 @@ replace_field: fn(r: &Root) -> Int {
     consume(taken)
 }
 
-wrap_field: fn(r: Root) -> Root {
-    Root{session: r.session.move()}
-}
+wrap_field: fn(r: Root) -> Root { Root{session: r.session.move()} }
 
-return_field: fn(r: Root) -> Session {
-    r.session.move()
-}
+return_field: fn(r: Root) -> Session { r.session.move() }
 
 run: fn() {
     root := Root{session: Session{id: 3, names: [String]{}}}

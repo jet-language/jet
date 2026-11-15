@@ -60,7 +60,9 @@ sema_root_call_named: fn(method: String, environment: SemaScopeEnvironment, prog
     if method == "print" -> return true
     if sema_scope_resolve_index(scopes, method) == .Val(nearest) {
         symbol: sema_scope_binding_symbol(environment, scopes, nearest)
-        if symbol.kind == SymbolKind.Function && sema_contract_function_facts(environment, program, symbol.id) == .Val(facts) && facts.root_receiver -> return true
+        if symbol.kind == SymbolKind.Function && sema_contract_function_facts(environment, program, symbol.id) == .Val(facts) && facts.root_receiver {
+            return true
+        }
     }
     sema_root_call_imported(method, None, environment, program).len() > 0
 }
@@ -76,7 +78,9 @@ sema_root_call_imported: fn(method: String, receiver: Type?, environment: SemaSc
         aliases := [String]{}
         loop import_row in graph.modules[module_index].imports {
             loop binding in import_row.bindings {
-                if binding.symbol.kind != SymbolKind.Import || binding.declaration_position != None -> next
+                if binding.symbol.kind != SymbolKind.Import || binding.declaration_position != None {
+                    next
+                }
                 aliases.push(binding.local)
             }
         }
@@ -90,11 +94,15 @@ sema_root_call_imported: fn(method: String, receiver: Type?, environment: SemaSc
             export: sema_registration_resolve_export(graph, target_index, method, environment.module_identity, environment.package_identity, [String]{}) ?? next
             row: sema_call_export_function_row(environment, program, export) ?? next
             registered: graph.modules[row.module_index].functions[row.row]
-            if registered.declaration.params.len() == 0 || !registered.declaration.params[0].root -> next
+            if registered.declaration.params.len() == 0 || !registered.declaration.params[0].root {
+                next
+            }
             if receiver == .Val(receiver_type) {
                 generic_names: loop param in registered.generic_params -> param.name
                 signature: sema_type_resolve_declared_with_generics(graph, registered.signature, export.source_module_identity, loop param in registered.generic_params -> TGenericParam{name: param.name, bounds: [SymbolID]{}})
-                if !sema_root_call_param_accepts(signature, generic_names, receiver_type, environment, program) -> next
+                if !sema_root_call_param_accepts(signature, generic_names, receiver_type, environment, program) {
+                    next
+                }
             }
             targets.push(SemaRootCallTarget{alias: Val(alias), shown: "{alias}.{method}"})
         }
@@ -109,7 +117,9 @@ sema_root_call_imported: fn(method: String, receiver: Type?, environment: SemaSc
 sema_root_call_owner_declares: fn(receiver_type: Type, method: String, method_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
     graph: program.registration_graph ?? return false
     receiver_name: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver_type)) ?? return false
-    if graph.source_impl_owner_modules.get(receiver_name) == None && sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(receiver_name)).len() == 0 -> return false
+    if graph.source_impl_owner_modules.get(receiver_name) == None && sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(receiver_name)).len() == 0 {
+        return false
+    }
     probe := [Diagnostic]{}
     sema_expr_registration_method_candidates(graph, environment.module_identity, receiver_type, method, [Type]{}, [Type]{}, method_span, environment, program, probe).len() > 0
 }
@@ -128,18 +138,24 @@ sema_root_call_try: fn(receiver: Expr, method: String, method_span: Span, type_a
     if method == "print" && !local && sema_call_gate_is_unshadowed(method, scopes) && sema_call_ambient_printable(receiver_type, environment, program) {
         candidates.push(SemaRootCallTarget{alias: None, shown: "core.term.print"})
     }
-    loop imported in sema_root_call_imported(method, Val(receiver_type), environment, program) -> candidates.push(imported)
+    loop imported in sema_root_call_imported(method, Val(receiver_type), environment, program) {
+        candidates.push(imported)
+    }
     if candidates.len() == 0 -> return unhandled
     failed: SemaMethodSpecialCheck{handled: true, value: None}
     if sema_root_call_owner_declares(receiver_type, method, method_span, environment, program) {
         diagnostics.push(sema_error("E0105", method_span, "dot call `.{method}()` conflicts with a method on `{type_name(receiver_type)}`", "a `#Root` function cannot silently compete with a real instance method", "rename the `#Root` function or call it as `{method}(value, …)`"))
-        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
+        loop argument in args {
+            _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
+        }
         return failed
     }
     if candidates.len() > 1 {
         names: loop candidate in candidates -> candidate.shown
         diagnostics.push(sema_error("E0105", method_span, "dot call `.{method}()` is ambiguous", "more than one imported `#Root` function accepts this receiver: {names.join(", ")}", "call one function explicitly: `{method}(value, …)`"))
-        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
+        loop argument in args {
+            _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
+        }
         return failed
     }
     call_args := [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver, span: method_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}

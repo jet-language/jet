@@ -5,7 +5,9 @@
 
 // Plain lease text as a child sees it; no lease descriptor is involved.
 cli_test_plain: fn(text: LeaseText?) -> String? {
-    if text == .Val(value) -> return Val(value.render(LeaseBinding.empty()) ?? panic("plain text renders unbound"))
+    if text == .Val(value) {
+        return Val(value.render(LeaseBinding.empty()) ?? panic("plain text renders unbound"))
+    }
     None
 }
 
@@ -31,8 +33,10 @@ cli_test_provider_paths: fn(file: String, value: String) -> String? {
 
 #Test("cli activation denies a task secret missing from the declared list") {
     if cli_validate_task_secret_allowlist("vault-check", "database_password", [SecretSpec]{SecretSpec.stored("api_key")}) == {
-        .Ok(_) -> panic("activation must deny a task secret outside its declared list")
-        .Err(error) -> assert(error.message().contains("lost secret `database_password` before activation"), "unexpected activation denial")
+        .Ok(_) -> { panic("activation must deny a task secret outside its declared list") }
+        .Err(error) -> {
+            assert(error.message().contains("lost secret `database_password` before activation"), "unexpected activation denial")
+        }
     }
 }
 
@@ -40,7 +44,7 @@ cli_test_provider_paths: fn(file: String, value: String) -> String? {
     root: files.tmpdir("jetpack-dotenv-allowlist-") ?? panic("claim scratch dir")
     files.write(files.join(root, ".env"), "ALLOWED=from-dotenv\nUNLISTED=must-not-load\n") ?? panic("write .env")
     values: cli_read_dotenv_snapshot(root, ".env", [String]{"ALLOWED"}) ?? panic("read dotenv")
-    assert(values == [String: String]{"ALLOWED": "from-dotenv"})
+    assert(values == [String:String]{"ALLOWED": "from-dotenv"})
     files.remove_all(root).drop("scratch cleanup")
 }
 
@@ -50,7 +54,7 @@ cli_test_provider_paths: fn(file: String, value: String) -> String? {
     files.write(outside, "ALLOWED=outside\nUNLISTED=outside\n") ?? panic("write outside")
     files.hard_link(outside, files.join(root, ".env")) ?? panic("hard link .env")
     if cli_read_dotenv_snapshot(root, ".env", [String]{"ALLOWED"}) == {
-        .Ok(_) -> panic("hardlinked dotenv must not reach environment composition")
+        .Ok(_) -> { panic("hardlinked dotenv must not reach environment composition") }
         .Err(error) -> assert(error.message().contains("hard link"), error.message())
     }
     assert_eq(files.read(outside) ?? panic("read outside"), "ALLOWED=outside\nUNLISTED=outside\n")
@@ -62,37 +66,52 @@ cli_test_provider_paths: fn(file: String, value: String) -> String? {
     definitions := [String]{}
     loop tool in CLI_NATIVE_DEV_TOOLS -> definitions.push(tool.definition)
     assert_eq(definitions, [String]{"jetDev", "jetpackDev"})
-    tools: cli_native_dev_tool_paths([String: String]{"JET": "/opt/jet/bin/jet", "JETPACK": "/opt/jetpack/bin/jetpack", "PATH": "/usr/bin"})
-    assert_eq(tools, [(command: String, binary: String)]{
-        (command: "jet", binary: "/opt/jet/bin/jet"),
-        (command: "jetpack", binary: "/opt/jetpack/bin/jetpack")
-    })
-    assert_eq(cli_native_dev_tool_paths([String: String]{"JET": "/opt/jet/bin/jet", "JETPACK": ""}), [(command: String, binary: String)]{
-        (command: "jet", binary: "/opt/jet/bin/jet")
-    })
+    tools: cli_native_dev_tool_paths([String:String]{"JET": "/opt/jet/bin/jet", "JETPACK": "/opt/jetpack/bin/jetpack", "PATH": "/usr/bin"})
+    assert_eq(
+        tools,
+        [(command: String, binary: String)]{
+            (command: "jet", binary: "/opt/jet/bin/jet"),
+            (command: "jetpack", binary: "/opt/jetpack/bin/jetpack"),
+        },
+    )
+    assert_eq(
+        cli_native_dev_tool_paths([String:String]{"JET": "/opt/jet/bin/jet", "JETPACK": ""}),
+        [(command: String, binary: String)]{
+            (command: "jet", binary: "/opt/jet/bin/jet"),
+        },
+    )
 }
 
 #Test("cli native projection derives root timezone and loader paths") {
-    projection: cli_native_environment_projection("/workspace/jet", [(name: String, output: LeaseText)]{
-        (name: "tzdata", output: LeaseText.plain("/hangar/tzdata-1")),
-        (name: "vulkan-loader", output: LeaseText.plain("/hangar/vulkan-1"))
-    }, [(command: String, binary: String)]{
-        (command: "jet", binary: "/opt/jet/bin/jet"),
-        (command: "jetpack", binary: "/opt/jet/bin/jetpack")
-    }, Val("/host/lib"))
+    projection: cli_native_environment_projection(
+        "/workspace/jet",
+        [(name: String, output: LeaseText)]{
+            (name: "tzdata", output: LeaseText.plain("/hangar/tzdata-1")),
+            (name: "vulkan-loader", output: LeaseText.plain("/hangar/vulkan-1")),
+        },
+        [(command: String, binary: String)]{
+            (command: "jet", binary: "/opt/jet/bin/jet"),
+            (command: "jetpack", binary: "/opt/jet/bin/jetpack"),
+        },
+        Val("/host/lib"),
+    )
     assert_eq(projection.bin_dirs(), [String]{"/opt/jet/bin"})
     vars: projection.env_vars()
     assert_eq(vars.get("JET_ROOT"), Val("/workspace/jet"))
     assert_eq(vars.get("JET_ENV_DISABLE"), Val("1"))
     leased: projection.lease_vars()
     assert_eq(cli_test_plain(leased.get("TZDIR")), Val("/hangar/tzdata-1/share/zoneinfo"))
-    if sys.name() == "linux" -> assert_eq(cli_test_plain(leased.get("LD_LIBRARY_PATH")), Val("/hangar/vulkan-1/lib:/host/lib"))
+    if sys.name() == "linux" {
+        assert_eq(cli_test_plain(leased.get("LD_LIBRARY_PATH")), Val("/hangar/vulkan-1/lib:/host/lib"))
+    }
     assert_eq(projection.activation, NativeActivation.Disabled)
 }
 
 #Test("cli native output manifest keeps output selection and target condition typed") {
     selections := [String]{}
-    loop fact in CLI_NATIVE_OUTPUT_FACTS -> selections.push("{fact.package}|{fact.relative}|{fact.variable}")
+    loop fact in CLI_NATIVE_OUTPUT_FACTS {
+        selections.push("{fact.package}|{fact.relative}|{fact.variable}")
+    }
     assert_eq(selections, [String]{"tzdata|share/zoneinfo|TZDIR", "vulkan-loader|lib|LD_LIBRARY_PATH"})
     assert_eq(CLI_NATIVE_OUTPUT_FACTS[0].platform, NativeOutputPlatform.Any)
     assert_eq(CLI_NATIVE_OUTPUT_FACTS[1].platform, NativeOutputPlatform.Linux)

@@ -33,16 +33,22 @@ use {
 
 // MAX_KEY_BYTES: the key bytes a cipher may take.
 SSL_TICKET_MAX_KEY_BYTES: 32
+
 // TICKET_KEY_NAME_BYTES (MBEDTLS_SSL_TICKET_KEY_NAME_BYTES).
 SSL_TICKET_KEY_NAME_BYTES: 4
+
 // TICKET_IV_BYTES.
 SSL_TICKET_IV_BYTES: 12
+
 // TICKET_CRYPT_LEN_BYTES.
 SSL_TICKET_CRYPT_LEN_BYTES: 2
+
 // TICKET_AUTH_TAG_BYTES.
 SSL_TICKET_AUTH_TAG_BYTES: 16
+
 // TICKET_ADD_DATA_LEN: key_name, iv and the state's length.
 SSL_TICKET_ADD_DATA_LEN: 18
+
 // TICKET_MIN_LEN: the additional data and the tag.
 SSL_TICKET_MIN_LEN: 34
 
@@ -137,11 +143,9 @@ ssl_ticket_key_set: fn(key: &SSLTicketKey, k: [U8]) -> ssldefs.SSLError? Never! 
 // (mbedtls_cipher_auth_encrypt_ext).
 ssl_ticket_key_seal: fn(key: &SSLTicketKey, iv: [U8], ad: [U8], state: [U8]) -> [U8] ssldefs.SSLError! {
     if &key.cipher == {
-        .Val(c) -> {
-            if layer.cipher_auth_encrypt_ext(c, iv, ad, state, SSL_TICKET_AUTH_TAG_BYTES) == {
-                .Ok(out) -> Ok(out)
-                .Err(e) -> Err(.Cipher(e))
-            }
+        .Val(c) -> if layer.cipher_auth_encrypt_ext(c, iv, ad, state, SSL_TICKET_AUTH_TAG_BYTES) == {
+            .Ok(out) -> Ok(out)
+            .Err(e) -> Err(.Cipher(e))
         }
         None -> Err(.BadInputData)
     }
@@ -152,13 +156,11 @@ ssl_ticket_key_seal: fn(key: &SSLTicketKey, iv: [U8], ad: [U8], state: [U8]) -> 
 // authenticate, as ssl_ticket.c maps MBEDTLS_ERR_CIPHER_AUTH_FAILED.
 ssl_ticket_key_open: fn(key: &SSLTicketKey, iv: [U8], ad: [U8], sealed: [U8]) -> [U8] ssldefs.SSLError! {
     if &key.cipher == {
-        .Val(c) -> {
-            if layer.cipher_auth_decrypt_ext(c, iv, ad, sealed, SSL_TICKET_AUTH_TAG_BYTES) == {
-                .Ok(out) -> Ok(out)
-                .Err(e) -> {
-                    if e == .AuthFailed -> return Err(.InvalidMac)
-                    Err(.Cipher(e))
-                }
+        .Val(c) -> if layer.cipher_auth_decrypt_ext(c, iv, ad, sealed, SSL_TICKET_AUTH_TAG_BYTES) == {
+            .Ok(out) -> Ok(out)
+            .Err(e) -> {
+                if e == .AuthFailed -> return Err(.InvalidMac)
+                Err(.Cipher(e))
             }
         }
         None -> Err(.BadInputData)
@@ -170,10 +172,14 @@ ssl_ticket_key_open: fn(key: &SSLTicketKey, iv: [U8], ad: [U8], sealed: [U8]) ->
 // (ssl_ticket_update_keys). A key with lifetime 0 never expires.
 ssl_ticket_update_keys: fn(ctx: &SSLTicketContext) ssldefs.SSLError! {
     lifetime: ctx.keys[ctx.active].lifetime
-    if lifetime == 0 -> return
+    if lifetime == 0 {
+        return
+    }
     current_time: ssldefs.ssl_time()
     key_time: ctx.keys[ctx.active].generation_time
-    if current_time >= key_time && current_time - key_time < lifetime -> return
+    if current_time >= key_time && current_time - key_time < lifetime {
+        return
+    }
     ctx.active = 1 - ctx.active
     ssl_ticket_gen_key(ctx, ctx.active)
 }
@@ -187,7 +193,9 @@ ssl_ticket_rotate: fn(ctx: &SSLTicketContext, name: [U8], k: [U8], lifetime: Int
     // C's key context before setup has key length 0 and no cipher.
     bitlen: ssl_ticket_key_bits(ctx.keys[idx])
     if bitlen < 0 -> return Err(.Cipher(.BadInputData))
-    if name.len() < SSL_TICKET_KEY_NAME_BYTES || k.len() * 8 < bitlen -> return Err(.Cipher(.BadInputData))
+    if name.len() < SSL_TICKET_KEY_NAME_BYTES || k.len() * 8 < bitlen {
+        return Err(.Cipher(.BadInputData))
+    }
     if ssl_ticket_key_set(ctx.keys[idx], k) == {
         .Val(e) -> return Err(e)
         None -> {}

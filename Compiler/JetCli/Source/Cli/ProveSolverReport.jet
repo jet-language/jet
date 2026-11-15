@@ -60,7 +60,9 @@ jet_cli_prove_solver: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMem
             rows[index].outcome = JetCLISolverOutcome.Unknown(JetCLISolverUnknownAt{reason: "structural_limit", steps: 0})
             next
         }
-        if rows[index].obligation.formula == .Val(formula) -> rows[index].outcome = jet_cli_solver_checked_outcome(formula)
+        if rows[index].obligation.formula == .Val(formula) {
+            rows[index].outcome = jet_cli_solver_checked_outcome(formula)
+        }
     }
     Ok(rows)
 }
@@ -85,9 +87,13 @@ jet_cli_solver_inputs: fn(prepared: &&JetCLIPrepared) -> JetCLISolverFront {
 jet_cli_solver_obligation_id: fn(identity: JetCLIProveIdentity, kind: String, path: String, source: String, span: Span, formula_sha: String) -> String Never! {
     out := [U8]{}
     fields: [String]{
-        identity.input_sha256, kind, path,
-        "{diagnostic_line_at(source, span.start)}", "{diagnostic_column_at(source, span.start)}",
-        "{diagnostic_line_at(source, span.end)}", "{diagnostic_column_at(source, span.end)}",
+        identity.input_sha256,
+        kind,
+        path,
+        "{diagnostic_line_at(source, span.start)}",
+        "{diagnostic_column_at(source, span.start)}",
+        "{diagnostic_line_at(source, span.end)}",
+        "{diagnostic_column_at(source, span.end)}",
         formula_sha,
     }
     loop field in fields -> jet_driver_run_receipt_frame(out, field.bytes())
@@ -96,9 +102,15 @@ jet_cli_solver_obligation_id: fn(identity: JetCLIProveIdentity, kind: String, pa
 
 jet_cli_solver_row_order: fn(left: JetCLISolverRow, right: JetCLISolverRow) -> Ordering Never! {
     if left.path != right.path -> return left.path <=> right.path
-    if left.obligation.span.start != right.obligation.span.start -> return left.obligation.span.start <=> right.obligation.span.start
-    if left.obligation.span.end != right.obligation.span.end -> return left.obligation.span.end <=> right.obligation.span.end
-    if left.obligation.kind != right.obligation.kind -> return left.obligation.kind <=> right.obligation.kind
+    if left.obligation.span.start != right.obligation.span.start {
+        return left.obligation.span.start <=> right.obligation.span.start
+    }
+    if left.obligation.span.end != right.obligation.span.end {
+        return left.obligation.span.end <=> right.obligation.span.end
+    }
+    if left.obligation.kind != right.obligation.kind {
+        return left.obligation.kind <=> right.obligation.kind
+    }
     left.obligation_id <=> right.obligation_id
 }
 
@@ -121,18 +133,20 @@ jet_cli_solver_rows: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMemb
             loop obligation in jet_cli_solver_obligations(inputs.functions, callees, file, member.source) {
                 formula_sha: if obligation.formula == .Val(formula) -> jet_cli_solver_formula_sha256(formula) else -> ""
                 obligation_id: jet_cli_solver_obligation_id(identity, obligation.kind, member.path, member.source, obligation.span, formula_sha)
-                rows.push(JetCLISolverRow{
-                    obligation: obligation,
-                    path: member.path.copy(),
-                    line: diagnostic_line_at(member.source, obligation.span.start),
-                    column: diagnostic_column_at(member.source, obligation.span.start),
-                    end_line: diagnostic_line_at(member.source, obligation.span.end),
-                    end_column: diagnostic_column_at(member.source, obligation.span.end),
-                    id: jet_cli_prove_evidence_id(identity, "solver", member.path, jet_cli_prove_span_text(member.source, obligation.span), obligation_id),
-                    obligation_id: obligation_id,
-                    formula_sha: formula_sha,
-                    outcome: JetCLISolverOutcome.Unknown(JetCLISolverUnknownAt{reason: obligation.reason.copy(), steps: 0}),
-                })
+                rows.push(
+                    JetCLISolverRow{
+                        obligation: obligation,
+                        path: member.path.copy(),
+                        line: diagnostic_line_at(member.source, obligation.span.start),
+                        column: diagnostic_column_at(member.source, obligation.span.start),
+                        end_line: diagnostic_line_at(member.source, obligation.span.end),
+                        end_column: diagnostic_column_at(member.source, obligation.span.end),
+                        id: jet_cli_prove_evidence_id(identity, "solver", member.path, jet_cli_prove_span_text(member.source, obligation.span), obligation_id),
+                        obligation_id: obligation_id,
+                        formula_sha: formula_sha,
+                        outcome: JetCLISolverOutcome.Unknown(JetCLISolverUnknownAt{reason: obligation.reason.copy(), steps: 0}),
+                    },
+                )
             }
         }
     }
@@ -154,10 +168,14 @@ jet_cli_solver_checked_outcome: fn(formula: JetCLISolverFormula) -> JetCLISolver
     outcome: jet_cli_solver_prove(formula)
     if outcome == {
         .Proved(proved) -> {
-            if !jet_cli_solver_certificate_valid(formula, proved.certificate) -> panic("the solver's certificate failed its independent check for formula {jet_cli_solver_formula_sha256(formula)}")
+            if !jet_cli_solver_certificate_valid(formula, proved.certificate) {
+                panic("the solver's certificate failed its independent check for formula {jet_cli_solver_formula_sha256(formula)}")
+            }
         }
         .Disproved(disproved) -> {
-            if !jet_cli_solver_counterexample_holds(formula, disproved.values) -> panic("the solver's counterexample failed its independent check for formula {jet_cli_solver_formula_sha256(formula)}")
+            if !jet_cli_solver_counterexample_holds(formula, disproved.values) {
+                panic("the solver's counterexample failed its independent check for formula {jet_cli_solver_formula_sha256(formula)}")
+            }
         }
         .Unknown(_) -> {}
     }
@@ -223,8 +241,12 @@ jet_cli_solver_human: fn(rows: [JetCLISolverRow]) -> String Never! {
     loop row in rows {
         text = "{text}  {jet_cli_solver_status(row)}  {row.obligation.kind} at {row.path}:{row.line}:{row.column}\n"
         if row.outcome == {
-            .Proved(proved) -> text = "{text}  backend {JET_CLI_SOLVER_BACKEND}-v{JET_CLI_SOLVER_BACKEND_VERSION}; steps {proved.steps}/{JET_CLI_SOLVER_MAX_STEPS}\n"
-            .Disproved(disproved) -> text = "{text}  backend {JET_CLI_SOLVER_BACKEND}-v{JET_CLI_SOLVER_BACKEND_VERSION}; steps {disproved.steps}/{JET_CLI_SOLVER_MAX_STEPS}\n"
+            .Proved(proved) -> {
+                text = "{text}  backend {JET_CLI_SOLVER_BACKEND}-v{JET_CLI_SOLVER_BACKEND_VERSION}; steps {proved.steps}/{JET_CLI_SOLVER_MAX_STEPS}\n"
+            }
+            .Disproved(disproved) -> {
+                text = "{text}  backend {JET_CLI_SOLVER_BACKEND}-v{JET_CLI_SOLVER_BACKEND_VERSION}; steps {disproved.steps}/{JET_CLI_SOLVER_MAX_STEPS}\n"
+            }
             .Unknown(unknown) -> {
                 detail: if unknown.reason == row.obligation.reason && row.obligation.detail != "" -> " ({row.obligation.detail})" else -> ""
                 text = "{text}  reason: {unknown.reason}{detail}\n"
@@ -247,9 +269,12 @@ jet_cli_solver_values_text: fn(values: [JetCLISolverValue]) -> String Never! {
 // What the claim asks of `result` in words, when it is `result <op> rhs`.
 jet_cli_solver_return_rule: fn(claim: String) -> String? Never! {
     rules: [[String]]{
-        [String]{"result >= ", "is at least "}, [String]{"result <= ", "is at most "},
-        [String]{"result != ", "differs from "}, [String]{"result == ", "equals "},
-        [String]{"result > ", "is greater than "}, [String]{"result < ", "is less than "},
+        [String]{"result >= ", "is at least "},
+        [String]{"result <= ", "is at most "},
+        [String]{"result != ", "differs from "},
+        [String]{"result == ", "equals "},
+        [String]{"result > ", "is greater than "},
+        [String]{"result < ", "is less than "},
     }
     loop rule in rules {
         if claim.starts_with(rule[0]) -> return Val("{rule[1]}`{claim.removeprefix(rule[0])}`")

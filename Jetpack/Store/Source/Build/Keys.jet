@@ -1,7 +1,6 @@
 // Canonical action identities, plain and effective. Plugins, generated
 // modules and fact contributions are not part of the build surface (see
 // Model.jet), so they encode in their empty form.
-
 use {
     jetpack_foundation.[BuildEffect]
     jet_pkg_model.[JET_VERSION]
@@ -28,9 +27,7 @@ BuildKeyWriter: struct {
         loop byte in raw -> self.bytes.push(byte)
     }
 
-    flag: fn(&self, value: Bool) Never! {
-        self.bytes.push(if value -> U8{1} else -> U8{0})
-    }
+    flag: fn(&self, value: Bool) Never! { self.bytes.push(if value -> U8{1} else -> U8{0}) }
 
     texts: fn(&self, values: [String]) Never! {
         self.number(values.len())
@@ -38,7 +35,7 @@ BuildKeyWriter: struct {
     }
 
     // Rust `BTreeMap<String, String>`: entries in key order.
-    map: fn(&self, values: [String: String]) Never! {
+    map: fn(&self, values: [String:String]) Never! {
         keys := values.keys().to_list()
         keys.sort()
         self.number(keys.len())
@@ -48,9 +45,7 @@ BuildKeyWriter: struct {
         }
     }
 
-    finish: fn(self) -> String Never! {
-        "act-sha256:{crypto.sha256(self.bytes).hex()}"
-    }
+    finish: fn(self) -> String Never! { "act-sha256:{crypto.sha256(self.bytes).hex()}" }
 }
 
 build_canonical_action_key: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, inputs: [ActionInputSnapshot]) -> String Never! {
@@ -169,7 +164,9 @@ build_canonical_action_key: fn(plan: HermeticBuildPlan, action: HermeticBuildAct
 // plan, so the Rust unknown-action error has no Jet counterpart.
 build_complete_recipe_fingerprint: fn(plan: HermeticBuildPlan) -> String Never! {
     keys := [String]{}
-    loop action in plan.actions -> keys.push(build_canonical_action_key(plan, action, [ActionInputSnapshot]{}))
+    loop action in plan.actions {
+        keys.push(build_canonical_action_key(plan, action, [ActionInputSnapshot]{}))
+    }
     keys.sort()
     bytes := "jet.plan-fingerprint.v1".bytes()
     bytes.push(U8{0})
@@ -182,7 +179,7 @@ build_complete_recipe_fingerprint: fn(plan: HermeticBuildPlan) -> String Never! 
 
 // Rust `map_debug`: entries in key order, each `<len>:<key>:<len>:<value>`
 // with byte lengths, concatenated.
-build_fact_map: fn(values: [String: String]) -> String Never! {
+build_fact_map: fn(values: [String:String]) -> String Never! {
     keys := values.keys().to_list()
     keys.sort()
     out := ""
@@ -199,9 +196,9 @@ build_fact_digest: fn(w: BuildKeyWriter) -> String Never! {
 }
 
 // Rust `allowlisted_env`: the whole env map when the allowlist is empty.
-build_allowlisted_env: fn(action: HermeticBuildAction) -> [String: String] Never! {
+build_allowlisted_env: fn(action: HermeticBuildAction) -> [String:String] Never! {
     if action.env_allowlist.len() == 0 -> return action.env
-    out := [String: String]{}
+    out := [String:String]{}
     loop key in action.env.keys() {
         if action.env_allowlist.contains(key) -> out[key] = action.env[key]
     }
@@ -356,7 +353,7 @@ hermetic_build_key_probe: fn(w: &BuildKeyWriter, plan: HermeticBuildPlan, probe:
 
 build_key_provenance: fn(w: &BuildKeyWriter, provenance: BuildProvenance) Never! {
     if provenance.source == {
-        .InferredHost -> w.text("inferred-host")
+        .InferredHost -> { w.text("inferred-host") }
         .JetpackDependency(dep) -> {
             w.text("jetpack-dependency")
             w.text(dep)

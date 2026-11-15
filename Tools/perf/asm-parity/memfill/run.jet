@@ -2,9 +2,7 @@
 // from 1 byte to 16 KiB, weighted to the small ones, each at an offset of 0
 // to 63 bytes into one block with a byte of its own. `n` passes over them;
 // the sum is the first and the last byte each fill wrote.
-use {
-    mem: core.mem
-}
+use mem: core.mem
 
 #CLI
 Args: struct {
@@ -19,15 +17,15 @@ Op: struct {
 }
 
 OPS: 4096
+
 // The largest size, and the room past it for the offsets, in one
 // page-aligned block, as the reference lays it out.
 LARGEST: 16384
+
 FILL_ROOM: 64
 
 // The next state of a 31-bit linear congruential generator.
-next: fn(state: Int) -> Int {
-    (state * 1103515245 + 12345).bit_and(2147483647)
-}
+next: fn(state: Int) -> Int { (state * 1103515245 + 12345).bit_and(2147483647) }
 
 // The fills: per fill one draw picks the size (its top three bits a size
 // class of up to 8, 16, 32, 64, 128, 512, 2048 or 16384 bytes, the size from
@@ -42,7 +40,7 @@ operations: fn() -> [Op] {
         bits: if class < 5 -> class + 3 else if class == 5 -> 9 else if class == 6 -> 11 else -> 14
         size: 1 + (state >> 12).bit_and((1 << bits) - 1)
         state = next(state)
-        ops.push(Op{size, to: (state >> 16).bit_and(63), value: (state >> 22).bit_and(255)})
+        ops.push(Op{size: size, to: (state >> 16).bit_and(63), value: (state >> 22).bit_and(255)})
     }
     ops
 }

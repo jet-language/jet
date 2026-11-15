@@ -29,9 +29,7 @@ NameTable: struct {
 NAME_TABLE_INITIAL_SLOTS: 1024
 
 // A table whose id 0 is the empty spelling (`name_empty`).
-name_table: fn() -> NameTable Never! {
-    name_table_sized(NAME_TABLE_INITIAL_SLOTS)
-}
+name_table: fn() -> NameTable Never! { name_table_sized(NAME_TABLE_INITIAL_SLOTS) }
 
 // An empty table of at least `slots` slots to start; it grows as
 // `name_table` does. A small table (a body's own symbol keys) starts small.
@@ -48,21 +46,13 @@ name_table_sized: fn(slots: Int) -> NameTable Never! {
 }
 
 // The empty spelling; every `name_table()` interns it first.
-name_empty: fn() -> Name Never! {
-    Name{id: U32{0}}
-}
+name_empty: fn() -> Name Never! { Name{id: U32{0}} }
 
-name_index: fn(name: Name) -> Int Never! {
-    Int{name.id}
-}
+name_index: fn(name: Name) -> Int Never! { Int{name.id} }
 
-name_text: fn(table: NameTable, name: Name) -> String Never! {
-    table.texts[Int{name.id}]
-}
+name_text: fn(table: NameTable, name: Name) -> String Never! { table.texts[Int{name.id}] }
 
-name_count: fn(table: NameTable) -> Int Never! {
-    table.texts.len()
-}
+name_count: fn(table: NameTable) -> Int Never! { table.texts.len() }
 
 name_start: fn(table: NameTable, id: Int) -> Int Never! {
     if id == 0 -> 0 else -> table.ends[id - 1]
@@ -70,7 +60,9 @@ name_start: fn(table: NameTable, id: Int) -> Int Never! {
 
 name_hash: fn(bytes: [U8], start: Int, end: Int) -> Int Never! {
     hash := U32{0x811c9dc5}
-    loop index in start..<end -> hash = wrapping((hash.bit_xor(U32{bytes[index]})) * U32{0x01000193})
+    loop index in start..<end {
+        hash = wrapping((hash.bit_xor(U32{bytes[index]})) * U32{0x01000193})
+    }
     Int{hash}
 }
 
@@ -173,7 +165,9 @@ name_pool_adopt: fn(table: &NameTable, shared: NameTable, own: &NameTable) Never
             next
         }
         slot: name_slot(own, hash, table.bytes, start, end)
-        if own.slots[slot] == 0 -> _ := name_insert(own, slot, hash, table.bytes, start, end, name_text(table, Name{id: U32{id}})) else -> table.texts[id] = name_text(own, Name{id: U32{own.slots[slot] - 1}})
+        if own.slots[slot] == 0 {
+            _ := name_insert(own, slot, hash, table.bytes, start, end, name_text(table, Name{id: U32{id}}))
+        } else { table.texts[id] = name_text(own, Name{id: U32{own.slots[slot] - 1}}) }
     }
 }
 
@@ -184,7 +178,9 @@ name_pool_fold: fn(shared: &NameTable, own: NameTable) Never! {
         start: name_start(own, id)
         end: own.ends[id]
         slot: name_slot(shared, own.hashes[id], own.bytes, start, end)
-        if shared.slots[slot] == 0 -> _ := name_insert(shared, slot, own.hashes[id], own.bytes, start, end, name_text(own, Name{id: U32{id}}))
+        if shared.slots[slot] == 0 {
+            _ := name_insert(shared, slot, own.hashes[id], own.bytes, start, end, name_text(own, Name{id: U32{id}}))
+        }
     }
 }
 
@@ -205,29 +201,21 @@ ModuleTable: struct {
 }
 
 MODULE_CORE_PREFIX: "<corelib>/"
+
 MODULE_CORE_BIT: U32{0x80000000}
+
 MODULE_ROW_BITS: U32{0x7fffffff}
 
-module_table: fn() -> ModuleTable Never! {
-    ModuleTable{identities: name_table()}
-}
+module_table: fn() -> ModuleTable Never! { ModuleTable{identities: name_table()} }
 
-module_none: fn() -> ModuleID Never! {
-    ModuleID{id: U32{0}}
-}
+module_none: fn() -> ModuleID Never! { ModuleID{id: U32{0}} }
 
-module_is_none: fn(module_id: ModuleID) -> Bool Never! {
-    module_id.id == U32{0}
-}
+module_is_none: fn(module_id: ModuleID) -> Bool Never! { module_id.id == U32{0} }
 
 // The table row of `module_id`: 0 for no module, below `module_count`.
-module_index: fn(module_id: ModuleID) -> Int Never! {
-    Int{module_id.id.bit_and(MODULE_ROW_BITS)}
-}
+module_index: fn(module_id: ModuleID) -> Int Never! { Int{module_id.id.bit_and(MODULE_ROW_BITS)} }
 
-module_count: fn(table: ModuleTable) -> Int Never! {
-    name_count(table.identities)
-}
+module_count: fn(table: ModuleTable) -> Int Never! { name_count(table.identities) }
 
 module_is_core: fn(module_id: ModuleID) -> Bool Never! {
     module_id.id.bit_and(MODULE_CORE_BIT) != U32{0}
@@ -256,9 +244,7 @@ module_text: fn(table: ModuleTable, module_id: ModuleID) -> String Never! {
 // The low 30 bits of `text.hash()`: a small Int whose low bits index slots.
 // A lookup computes it once (in place, no byte copy) and passes it with the
 // spelling to every `NameRows` it visits.
-name_rows_hash: fn(text: String) -> Int Never! {
-    Int{text.hash().bit_and(U64{0x3fffffff})}
-}
+name_rows_hash: fn(text: String) -> Int Never! { Int{text.hash().bit_and(U64{0x3fffffff})} }
 
 // A String -> Int map (A1): open addressing over each key's `s.hash()`.
 // A lookup hashes its key once and compares one candidate instead of

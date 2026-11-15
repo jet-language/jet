@@ -16,10 +16,11 @@ StoreError: enum {
     PermissionDenied(String)
     Unsupported(String)
     Interrupted(String)
-    // Rust `Lifecycle::CasConflict` (io kind AlreadyExists), recognized by
-    // external-root callers the way Rust downcasts it.
     LifecycleConflict(expected: String?, current: String?)
     Other(String)
+
+    // Rust `Lifecycle::CasConflict` (io kind AlreadyExists), recognized by
+    // external-root callers the way Rust downcasts it.
 
     message: fn(self) -> String Never! {
         if self == {

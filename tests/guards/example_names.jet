@@ -14,19 +14,71 @@ use example_name_files: core.files
 // The initialisms a name spells in capitals. A TitleCased spelling of one
 // (`Http`, `Json`, `Ids`) is a finding.
 EXAMPLE_NAME_ACRONYMS: [String]{
-    "TLS", "HTTP", "HTTPS", "JSON", "SQL", "URL", "CSV", "API", "HTML", "CSS",
-    "GPU", "TCP", "UDP", "DNS", "IO", "UI", "CLI", "REPL", "LSP", "FFI", "SIMD",
-    "UTF8", "XML", "YAML", "TOML", "UUID", "JWT", "SHA", "AES", "RSA", "WASM",
-    "WASI", "JIT", "AST", "IR", "OS", "ID", "PNG", "PCM", "CPU", "RNG", "CRDT",
-    "EETF", "COM", "PHP", "WS", "MOTD", "CA", "EDA",
+    "TLS",
+    "HTTP",
+    "HTTPS",
+    "JSON",
+    "SQL",
+    "URL",
+    "CSV",
+    "API",
+    "HTML",
+    "CSS",
+    "GPU",
+    "TCP",
+    "UDP",
+    "DNS",
+    "IO",
+    "UI",
+    "CLI",
+    "REPL",
+    "LSP",
+    "FFI",
+    "SIMD",
+    "UTF8",
+    "XML",
+    "YAML",
+    "TOML",
+    "UUID",
+    "JWT",
+    "SHA",
+    "AES",
+    "RSA",
+    "WASM",
+    "WASI",
+    "JIT",
+    "AST",
+    "IR",
+    "OS",
+    "ID",
+    "PNG",
+    "PCM",
+    "CPU",
+    "RNG",
+    "CRDT",
+    "EETF",
+    "COM",
+    "PHP",
+    "WS",
+    "MOTD",
+    "CA",
+    "EDA",
 }
 
 // The files a tool finds by exact name: the command role files and reserved
 // sources (Compiler/JetCli/Source/Cli/Entry.jet:75-77) and the directory
 // module file (`name/module.jet`, Compiler/JetDriver/Source/Driver/Loader.jet:2377-2381).
 EXAMPLE_NAME_ROLE_FILES: [String]{
-    "run.jet", "build.jet", "dev.jet", "test.jet", "package.jet", "pkg.jet",
-    "env.jet", "config.jet", "workspace.jet", "module.jet",
+    "run.jet",
+    "build.jet",
+    "dev.jet",
+    "test.jet",
+    "package.jet",
+    "pkg.jet",
+    "env.jet",
+    "config.jet",
+    "workspace.jet",
+    "module.jet",
 }
 
 // A folder holding one of these is a project: golden discovery runs it as one
@@ -47,7 +99,9 @@ EXAMPLE_NAME_SKIPPED: [ExampleNameKept]{
 }
 
 EXAMPLE_NAME_FOREIGN_STEM: "a foreign source's stem is its library name (Compiler/JetCli/Source/Cli/ForeignBind.jet:230-241), which names the binding module `<language>.<lib>` and its cache `.jet/bindings/<language>/<lib>.jet` (Compiler/JetDriver/Source/Driver/ForeignProviders.jet:131-133); a module name is snake_case (Compiler/JetFoundation/Data/Syntax/Spellings.jet:313)"
+
 EXAMPLE_NAME_HEADER_STEM: "a header's basename is the C library `#Import c.<lib>` names (Compiler/JetDriver/Source/Driver/ForeignProviders.jet:144-173)"
+
 EXAMPLE_NAME_PLUGIN_STEM: "a plugin artifact's stem names its interface snapshot `plugin__<stem>.api` (Compiler/JetSema/Source/Sema/Registration/PluginInterfaces.jet:119-135,262-270; Compiler/JetDriver/Source/Driver/PluginFacts.jet:17-20)"
 
 EXAMPLE_NAME_KEPT: [ExampleNameKept]{
@@ -80,7 +134,9 @@ EXAMPLE_NAME_KEPT: [ExampleNameKept]{
 }
 
 example_name_upper: fn(byte: U8) -> Bool Never! { Int{byte} >= 65 && Int{byte} <= 90 }
+
 example_name_lower: fn(byte: U8) -> Bool Never! { Int{byte} >= 97 && Int{byte} <= 122 }
+
 example_name_digit: fn(byte: U8) -> Bool Never! { Int{byte} >= 48 && Int{byte} <= 57 }
 
 // `[A-Z][A-Za-z0-9]*`
@@ -88,7 +144,9 @@ example_name_title: fn(word: String) -> Bool Never! {
     bytes: word.bytes()
     if bytes.len() == 0 || !example_name_upper(bytes[0]) -> return false
     loop byte in bytes {
-        if !example_name_upper(byte) && !example_name_lower(byte) && !example_name_digit(byte) -> return false
+        if !example_name_upper(byte) && !example_name_lower(byte) && !example_name_digit(byte) {
+            return false
+        }
     }
     true
 }
@@ -98,7 +156,9 @@ example_name_snake: fn(word: String) -> Bool Never! {
     bytes: word.bytes()
     if bytes.len() == 0 || !example_name_lower(bytes[0]) -> return false
     loop byte in bytes {
-        if !example_name_lower(byte) && !example_name_digit(byte) && byte != (U8{95}) -> return false
+        if !example_name_lower(byte) && !example_name_digit(byte) && byte != (U8{95}) {
+            return false
+        }
     }
     true
 }
@@ -122,9 +182,7 @@ example_name_acronym_at: fn(word: [U8], at: Int, acronym: [U8]) -> Bool Never! {
         actual: Int{word[at + index]}
         if example_name_upper(acronym[index]) {
             if actual != expected + 32 -> return false
-        } else if actual != expected {
-            return false
-        }
+        } else if actual != expected { return false }
     }
     end: at + acronym.len()
     if end >= word.len() || !example_name_lower(word[end]) -> return true
@@ -151,7 +209,9 @@ example_name_lowered_acronyms: fn(word: String) -> [String] Never! {
 example_name_title_problem: fn(word: String) -> String? Never! {
     if !example_name_title(word) -> return Val("`{word}` is not TitleCase")
     lowered: example_name_lowered_acronyms(word)
-    if lowered.len() > 0 -> return Val("`{word}` spells {lowered.join(", ")} in lowercase; write initialisms in capitals")
+    if lowered.len() > 0 {
+        return Val("`{word}` spells {lowered.join(", ")} in lowercase; write initialisms in capitals")
+    }
     None
 }
 
@@ -173,7 +233,9 @@ example_name_file_problem: fn(name: String, in_project: Bool) -> String? Never! 
     parts: name.split(".").to_list()
     stem: parts[0]
     loop index in 1..<parts.len() {
-        if !example_name_suffix(parts[index]) -> return Val("suffix `.{parts[index]}` of `{name}` is not lowercase")
+        if !example_name_suffix(parts[index]) {
+            return Val("suffix `.{parts[index]}` of `{name}` is not lowercase")
+        }
     }
     if in_project && name.ends_with(".jet") {
         if example_name_snake(stem) -> return None
@@ -201,12 +263,16 @@ example_name_walk: fn(root: String, directory: String, in_project: Bool, finding
         if example_name_listed(EXAMPLE_NAME_SKIPPED, relative) -> next
         kind: example_name_files.stat(entry.path) ?? panic("stat {entry.path}: {err}")
         if kind.is_dir && !kind.is_symlink {
-            if example_name_directory_problem(entry.path, entry.name) == .Val(problem) -> findings.push("{entry.path}: {problem}")
+            if example_name_directory_problem(entry.path, entry.name) == .Val(problem) {
+                findings.push("{entry.path}: {problem}")
+            }
             example_name_walk(root, entry.path, project, findings)
             next
         }
         if example_name_listed(EXAMPLE_NAME_KEPT, relative) -> next
-        if example_name_file_problem(entry.name, project) == .Val(problem) -> findings.push("{entry.path}: {problem}")
+        if example_name_file_problem(entry.name, project) == .Val(problem) {
+            findings.push("{entry.path}: {problem}")
+        }
     }
 }
 
@@ -237,14 +303,38 @@ example_name_findings: fn(root: String) -> [String] {
 #Test("the name rule rejects planted bad names") {
     root: example_name_files.mkdtemp("example-names") ?? panic("a temporary directory cannot be made: {err}")
     planted: [String]{
-        "Good.jet", "Good.out", "Good.err.out", "HTTPServer.jet", "OSIDs.jet", "README.md",
-        "snake_case.jet", "kebab-case.jet", "lowerFirst.jet", "HttpServer.jet", "OSIds.jet", "WebWasmCallback.jet", "Utf8Text.jet", "Good.Err.out",
-        "Project/run.jet", "Project/helper_module.jet", "Project/Helper.jet", "Project/Assets/Logo.png", "Project/assets/Logo.png", "Project/banner/module.jet", "Project/Banner/module.jet",
-        "Data/sample.txt", "Data/Sample.txt", "Json/Typed.jet", ".jet/state.jet", "fixture-state/cache/plugin__x.api",
+        "Good.jet",
+        "Good.out",
+        "Good.err.out",
+        "HTTPServer.jet",
+        "OSIDs.jet",
+        "README.md",
+        "snake_case.jet",
+        "kebab-case.jet",
+        "lowerFirst.jet",
+        "HttpServer.jet",
+        "OSIds.jet",
+        "WebWasmCallback.jet",
+        "Utf8Text.jet",
+        "Good.Err.out",
+        "Project/run.jet",
+        "Project/helper_module.jet",
+        "Project/Helper.jet",
+        "Project/Assets/Logo.png",
+        "Project/assets/Logo.png",
+        "Project/banner/module.jet",
+        "Project/Banner/module.jet",
+        "Data/sample.txt",
+        "Data/Sample.txt",
+        "Json/Typed.jet",
+        ".jet/state.jet",
+        "fixture-state/cache/plugin__x.api",
     }
     loop name in planted {
         path: "{root}/{name}"
-        if name.contains("/") -> example_name_files.create_dir_all(example_name_files.dirname(path)) ?? panic("create {path}: {err}")
+        if name.contains("/") {
+            example_name_files.create_dir_all(example_name_files.dirname(path)) ?? panic("create {path}: {err}")
+        }
         example_name_files.write(path, "") ?? panic("write {path}: {err}")
     }
     flagged := [String]{}
@@ -252,20 +342,23 @@ example_name_findings: fn(root: String) -> [String] {
         named: finding.split_once(": ") ?? panic("a finding names no reason: {finding}")
         flagged.push(named.before.removeprefix("{root}/"))
     }
-    assert_eq(flagged, [String]{
-        "Data/sample.txt",
-        "Good.Err.out",
-        "HttpServer.jet",
-        "Json",
-        "OSIds.jet",
-        "Project/Banner",
-        "Project/Helper.jet",
-        "Project/assets",
-        "Utf8Text.jet",
-        "WebWasmCallback.jet",
-        "kebab-case.jet",
-        "lowerFirst.jet",
-        "snake_case.jet",
-    })
+    assert_eq(
+        flagged,
+        [String]{
+            "Data/sample.txt",
+            "Good.Err.out",
+            "HttpServer.jet",
+            "Json",
+            "OSIds.jet",
+            "Project/Banner",
+            "Project/Helper.jet",
+            "Project/assets",
+            "Utf8Text.jet",
+            "WebWasmCallback.jet",
+            "kebab-case.jet",
+            "lowerFirst.jet",
+            "snake_case.jet",
+        },
+    )
     example_name_files.remove_all(root) ?? panic("cleanup {root}: {err}")
 }

@@ -9,25 +9,23 @@ services_test_scratch: fn(label: String) -> String {
 services_test_env: fn() -> ShellEnv {
     ShellEnv{
         bin_dirs: [String]{},
-        vars: [String: String]{},
+        vars: [String:String]{},
         unset_vars: [String]{},
         refs: [String]{},
         label: "jetpack",
         prompt_path: PromptPathMode.Short,
         prompt_strip: PromptStripMode.Off,
-        cache_leases: [CacheLease]{}
+        cache_leases: [CacheLease]{},
     }
 }
 
 // A command with `;` runs through `sh -c`; anything else splits on spaces.
 services_test_plan: fn(name: String, command: String) -> DevServicePlan {
     run: if command.contains(";") -> [String]{"sh", "-c", command} else -> trust_text_words(command)
-    DevServicePlan{name, enable: true, run: Val(run)}
+    DevServicePlan{name: name, enable: true, run: Val(run)}
 }
 
-services_test_host: fn() -> ServiceHost {
-    ServiceHost.InProcess
-}
+services_test_host: fn() -> ServiceHost { ServiceHost.InProcess }
 
 services_test_read_pid: fn(dir: String) -> Int? {
     record: services_read_process_state(dir) ?? return None
@@ -223,7 +221,9 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
 }
 
 #Test("data dir symlink escape is rejected before start") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     dir: services_test_scratch("data-dir-symlink")
     outside: services_test_scratch("data-dir-outside")
     files.symlink(outside, files.join(dir, "escape")) ?? panic("symlink")
@@ -237,7 +237,9 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
 }
 
 #Test("watch and socket symlink escapes are rejected before creation") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     dir: services_test_scratch("service-path-symlink")
     outside: services_test_scratch("service-path-outside")
     files.symlink(outside, files.join(dir, "watch-root")) ?? panic("watch symlink")
@@ -266,7 +268,9 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
     files.write(files.join(dir, "src/nested/lib.jet"), "lib: fn() {{}}\n") ?? panic("write lib")
 
     first: services_watch_stamps(dir, [String]{files.join(dir, "src")}) ?? panic("first stamps")
-    loop index in 1..<first.len() -> assert(first[index - 1] <= first[index], "watch stamps must be sorted")
+    loop index in 1..<first.len() {
+        assert(first[index - 1] <= first[index], "watch stamps must be sorted")
+    }
     found := false
     loop stamp in first {
         if stamp.contains("nested/lib.jet") -> found = true
@@ -289,10 +293,12 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
     }
     started: found ?? panic("fixture must start")
     services_monitor_service(services_test_host(), started, dir, env, service)
-    assert((if services_read_process_state(services_service_dir(dir, "fixture")) == {
-        .Ok(present) -> present
-        .Err(failure) -> panic("read state")
-    }) == None)
+    assert(
+        (if services_read_process_state(services_service_dir(dir, "fixture")) == {
+            .Ok(present) -> present
+            .Err(failure) -> panic("read state")
+        }) == None,
+    )
 }
 
 #Test("health gate probes a tcp port") {
@@ -323,7 +329,9 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
 }
 
 #Test("service spawn exports allocated port and socket activation paths") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     dir: services_test_scratch("activation")
     service := services_test_plan("fixture", "printf '%s\\n%s\\n' \"$JETPACK_SERVICE_PORT\" \"$JETPACK_SERVICE_SOCKET_0\" > activation; sleep 30")
     service.ports = [Int]{0}
@@ -332,7 +340,9 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
 
     activation: files.join(services_service_dir(dir, "fixture"), "data/activation")
     deadline: services_now_ms() + 2000
-    loop !files.exists(activation) && services_now_ms() < deadline -> time.sleep(time.duration_ms(10))
+    loop !files.exists(activation) && services_now_ms() < deadline {
+        time.sleep(time.duration_ms(10))
+    }
     text: files.read(activation) ?? panic("the child must receive the activation environment")
     lines: services_lines(text)
     assert_eq(lines.len(), 2)
@@ -418,7 +428,9 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
 }
 
 #Test("down stops persisted authority after leader exit") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     dir: services_test_scratch("leader-exit-authority")
     plan: services_test_plan("fixture", "sleep 30 & child=$!; echo $child > child.pid")
     env := services_test_env()
@@ -444,7 +456,9 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
 }
 
 #Test("down retries cleanup failed authority after leader exit") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     dir: services_test_scratch("cleanup-failed-authority")
     plan: services_test_plan("fixture", "sleep 30 & child=$!; echo $child > child.pid")
     env := services_test_env()
@@ -479,7 +493,9 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
 }
 
 #Test("supervisor cleanup stops persisted authority after leader exit") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     dir: services_test_scratch("supervisor-leader-exit-authority")
     plan: services_test_plan("fixture", "sleep 30 & child=$!; echo $child > child.pid")
     env := services_test_env()
@@ -497,10 +513,12 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
     services_finish_supervisor(services_test_host(), dir, plan, started, Val("service exited unexpectedly"))
     started.child.wait() ?? panic("reap leader")
     assert(!services_test_is_alive(child_pid), "supervisor cleanup must stop the authority")
-    assert((if services_read_process_state(services_service_dir(dir, "fixture")) == {
-        .Ok(present) -> present
-        .Err(failure) -> panic("read state")
-    }) == None)
+    assert(
+        (if services_read_process_state(services_service_dir(dir, "fixture")) == {
+            .Ok(present) -> present
+            .Err(failure) -> panic("read state")
+        }) == None,
+    )
     lifecycle: if services_read_lifecycle(services_service_dir(dir, "fixture")) == {
         .Ok(present) -> present
         .Err(failure) -> panic("read lifecycle")
@@ -511,15 +529,31 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
 }
 
 #Test("term kill and final liveness failures propagate") {
-    term: services_test_error_of(services_stop_process_with(42, None, 0, fn(action) {
-        if action == StopAction.Term -> return Err(ServicesError.new("TERM failed"))
-        Err(ServicesError.new("KILL failed"))
-    }, fn() { Ok(true) }))
+    term: services_test_error_of(
+        services_stop_process_with(
+            42,
+            None,
+            0,
+            fn(action) {
+                if action == StopAction.Term -> return Err(ServicesError.new("TERM failed"))
+                Err(ServicesError.new("KILL failed"))
+            },
+            fn() { Ok(true) },
+        ),
+    )
     assert_eq(term, "TERM failed; KILL failed")
 
-    kill: services_test_error_of(services_stop_process_with(42, None, 0, fn(action) {
-        if action == StopAction.Kill -> return Err(ServicesError.new("KILL failed"))
-    }, fn() { Ok(true) }))
+    kill: services_test_error_of(
+        services_stop_process_with(
+            42,
+            None,
+            0,
+            fn(action) {
+                if action == StopAction.Kill -> return Err(ServicesError.new("KILL failed"))
+            },
+            fn() { Ok(true) },
+        ),
+    )
     assert_eq(kill, "KILL failed")
 
     alive: services_test_error_of(services_stop_process_with(42, None, 0, fn(action) {}, fn() { Ok(true) }))
@@ -531,12 +565,18 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
     // The process ignores TERM: alive at the post-grace check, gone once KILLed.
     // `run` owns `actions`, so liveness counts its own checks.
     checks := 0
-    services_stop_process_with(42, Val(ShutdownPolicy.Term{grace_ms: 0}), 0, fn(action) {
-        actions.push(action.copy())
-    }, fn() {
-        checks += 1
-        Ok(checks == 1)
-    }) ?? panic("escalated stop")
+    services_stop_process_with(
+        42,
+        Val(ShutdownPolicy.Term{grace_ms: 0}),
+        0,
+        fn(action) {
+            actions.push(action.copy())
+        },
+        fn() {
+            checks += 1
+            Ok(checks == 1)
+        },
+    ) ?? panic("escalated stop")
     assert_eq(actions, [StopAction]{StopAction.Term, StopAction.Kill})
 }
 
@@ -544,30 +584,40 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
     dir: services_test_scratch("process-state")
     state: ServiceProcessState{pid: 42, start_identity: "linux-proc-start:9001", containment: None}
     files.write(services_pid_path(dir), "version=1\npid={state.pid}\nstart={state.start_identity}\n") ?? panic("write state")
-    assert_eq(if services_read_process_state(dir) == {
-        .Ok(present) -> present
-        .Err(failure) -> panic("read verified")
-    }, Val(PersistedProcessState.Verified(state)))
+    assert_eq(
+        if services_read_process_state(dir) == {
+            .Ok(present) -> present
+            .Err(failure) -> panic("read verified")
+        },
+        Val(PersistedProcessState.Verified(state)),
+    )
     files.write(services_pid_path(dir), "42\n") ?? panic("write legacy")
-    assert_eq(if services_read_process_state(dir) == {
-        .Ok(present) -> present
-        .Err(failure) -> panic("read legacy")
-    }, Val(PersistedProcessState.LegacyPID(42)))
+    assert_eq(
+        if services_read_process_state(dir) == {
+            .Ok(present) -> present
+            .Err(failure) -> panic("read legacy")
+        },
+        Val(PersistedProcessState.LegacyPID(42)),
+    )
 }
 
 #Test("incomplete process state fails closed") {
     dir: services_test_scratch("incomplete-process-state")
     state_path: services_pid_path(dir)
     files.write(state_path, "version=1\npid=42\n") ?? panic("write pid only")
-    assert((if services_read_process_state(dir) == {
-        .Ok(value) -> panic("expected a services error")
-        .Err(failure) -> failure.message
-    }).contains("is invalid"))
+    assert(
+        (if services_read_process_state(dir) == {
+            .Ok(value) -> panic("expected a services error")
+            .Err(failure) -> failure.message
+        }).contains("is invalid"),
+    )
     files.write(state_path, "version=1\nstart=linux-proc-start:9001\n") ?? panic("write start only")
-    assert((if services_read_process_state(dir) == {
-        .Ok(value) -> panic("expected a services error")
-        .Err(failure) -> failure.message
-    }).contains("is invalid"))
+    assert(
+        (if services_read_process_state(dir) == {
+            .Ok(value) -> panic("expected a services error")
+            .Err(failure) -> failure.message
+        }).contains("is invalid"),
+    )
 }
 
 #Test("process state rejects unknown duplicate and malformed fields") {
@@ -578,19 +628,24 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
         "version=1\npid=42\npid=43\nstart=x\n",
         "version=1\npid=nope\nstart=x\n",
         "version=1\npid=0\nstart=x\n",
-        "\n"
+        "\n",
     }
     loop raw in samples {
         files.write(state_path, raw) ?? panic("write sample")
-        assert((if services_read_process_state(dir) == {
-            .Ok(value) -> panic("expected a services error")
-            .Err(failure) -> failure.message
-        }).contains("is invalid"), raw)
+        assert(
+            (if services_read_process_state(dir) == {
+                .Ok(value) -> panic("expected a services error")
+                .Err(failure) -> failure.message
+            }).contains("is invalid"),
+            raw,
+        )
     }
 }
 
 #Test("socket preparation failure removes prior reservations") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     dir: services_test_scratch("socket-cleanup")
     files.write(files.join(dir, "blocked"), "not a socket") ?? panic("write blocker")
     error: (if services_prepare_sockets(dir, [String]{"first.sock", "blocked"}) == {
@@ -646,12 +701,14 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
     second: services_process_start_identity(pid) ?? panic("own identity")
     assert_eq(first, second)
     assert(first.starts_with("linux-proc-start:"), first)
-    assert(services_process_matches_start(ServiceProcessState{pid, start_identity: first, containment: None}) ?? panic("match own identity"))
-    assert(!(services_process_matches_start(ServiceProcessState{pid, start_identity: "linux-proc-start:0", containment: None}) ?? panic("probe a stale identity")))
+    assert(services_process_matches_start(ServiceProcessState{pid: pid, start_identity: first, containment: None}) ?? panic("match own identity"))
+    assert(!(services_process_matches_start(ServiceProcessState{pid: pid, start_identity: "linux-proc-start:0", containment: None}) ?? panic("probe a stale identity")))
 }
 
 #Test("service log redirect keeps argv with spaces, quotes and a leading dash") {
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     dir: services_test_scratch("log-redirect")
     stdout_path: files.join(dir, "stdout.log")
     stderr_path: files.join(dir, "stderr.log")
@@ -667,7 +724,9 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
 // told not to. The fake records the argv it receives; the service's run args
 // must arrive byte for byte, behind `--expand-environment=no`.
 #Test("a service arg with a dollar brace name reaches the fake systemd-run unchanged") {
-    if !sys.is_linux() -> return
+    if !sys.is_linux() {
+        return
+    }
     dir: services_test_scratch("systemd-argv")
     bin: files.join(dir, "bin")
     files.create_dir_all(bin) ?? panic("create fake systemd bin")
@@ -756,7 +815,7 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
         assert_eq(presets[index].package, packages[index])
         assert_eq(presets[index].default_port, port)
         assert_eq(services_catalog_pkg_ref(name), Val(packages[index]))
-        plan: DevServicePlan{name, enable: true, ports: [Int]{port}}
+        plan: DevServicePlan{name: name, enable: true, ports: [Int]{port}}
         if name == "adminer" {
             assert_eq(services_catalog_executable(name), None)
             image_error: (if services_image_run_command(plan) == {
@@ -787,14 +846,22 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
                 assert(services_test_has_pair(command, "-h", "127.0.0.1"))
                 assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec{command: "pg_isready -h 127.0.0.1 -p 5432"}))
             }
-            "mysql" -> assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec{command: "mysqladmin ping -h 127.0.0.1 -P 3306 -u root"}))
-            "mariadb" -> assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec{command: "mariadb-admin ping -h 127.0.0.1 -P 3306 -u root"}))
-            "nginx" -> assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec{command: "curl -fsS http://127.0.0.1:8080/"}))
+            "mysql" -> {
+                assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec{command: "mysqladmin ping -h 127.0.0.1 -P 3306 -u root"}))
+            }
+            "mariadb" -> {
+                assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec{command: "mariadb-admin ping -h 127.0.0.1 -P 3306 -u root"}))
+            }
+            "nginx" -> {
+                assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec{command: "curl -fsS http://127.0.0.1:8080/"}))
+            }
             "minio" -> {
                 assert(services_test_has_pair(command, "--address", "127.0.0.1:9000"))
                 assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec{command: "curl -fsS http://127.0.0.1:9000/minio/health/live"}))
             }
-            "blackfire" | "tailscale" -> assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec{command: "true"}))
+            "blackfire" | "tailscale" -> {
+                assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec{command: "true"}))
+            }
             else -> assert_eq(resolved.ready_probe, Val(services_tcp_readiness(port)))
         }
     }
@@ -840,13 +907,16 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
         pid: Val(42),
         unit: Val("jetpack-test.scope"),
         guardian: None,
-        dependencies: [String]{"database", "cache"}
+        dependencies: [String]{"database", "cache"},
     }
     services_write_lifecycle(dir, facts) ?? panic("write lifecycle")
-    assert_eq(if services_read_lifecycle(dir) == {
-        .Ok(present) -> present
-        .Err(failure) -> panic("read lifecycle")
-    }, Val(facts))
+    assert_eq(
+        if services_read_lifecycle(dir) == {
+            .Ok(present) -> present
+            .Err(failure) -> panic("read lifecycle")
+        },
+        Val(facts),
+    )
 }
 
 #Test("lifecycle facts reject inconsistent authority claims") {
@@ -860,7 +930,7 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
         pid: Val(42),
         unit: Val("jetpack-test.scope"),
         guardian: None,
-        dependencies: [String]{}
+        dependencies: [String]{},
     }
     services_write_lifecycle(dir, facts) ?? panic("write lifecycle")
     error: (if services_read_lifecycle(dir) == {

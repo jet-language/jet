@@ -4,7 +4,6 @@
 // semantics; the builder only marshals typed slots through a nine-word
 // element descriptor and helper functions built once per type (lazy.clone,
 // lazy.drop, lazy.equal, lazy.show, lazy.compare, lazy.callback).
-
 use jet_foundation.[AccessConvention, BodyCallArg, Span, Type, TClosureOp, TLocal, TypeTupleField, name_rows_set, name_rows_value, type_carrier_identity]
 
 // The C export of an Iter route symbol: `jet_iter_take` is
@@ -113,10 +112,14 @@ ir_lazy_can_clone: fn(m: &IRModule, p: IRProgram, ty: Type, seen: &[String:Bool]
             .Enum(variants, _) -> {
                 loop variant in variants {
                     if variant.payload == {
-                        .Single(inner) -> { if !ir_lazy_can_clone(m, p, inner, seen) -> return false }
+                        .Single(inner) -> {
+                            if !ir_lazy_can_clone(m, p, inner, seen) -> return false
+                        }
                         .Named(fields) -> {
                             loop field in fields {
-                                if !field.computed && !ir_lazy_can_clone(m, p, field.ty, seen) -> return false
+                                if !field.computed && !ir_lazy_can_clone(m, p, field.ty, seen) {
+                                    return false
+                                }
                             }
                         }
                         .Unit -> {}
@@ -150,33 +153,19 @@ ir_lazy_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, ty: 
     m.functions.push(ir_hashed_function("lazy.{role}", key, "jet_ir_lazy_{role}_", "", 0))
     name_rows_set(m.function_rows, key, id)
     a := ir_builder_new(m.functions[id].copy())
-    if role == "clone" {
-        ir_lazy_clone_body(m, p, a, ty, span)
-    } else if role == "drop" {
+    if role == "clone" -> ir_lazy_clone_body(m, p, a, ty, span) else if role == "drop" {
         ir_lazy_drop_body(m, p, a, ty, span)
-    } else if role == "retire" {
-        ir_lazy_retire_body(m, p, a, ty, span)
-    } else if role == "equal" {
+    } else if role == "retire" { ir_lazy_retire_body(m, p, a, ty, span) } else if role == "equal" {
         ir_lazy_equal_body(m, p, a, ty, span)
-    } else if role == "show" {
-        ir_lazy_show_body(m, p, a, ty, IRRender.Show, span)
-    } else if role == "debug" {
+    } else if role == "show" { ir_lazy_show_body(m, p, a, ty, IRRender.Show, span) } else if role == "debug" {
         ir_lazy_show_body(m, p, a, ty, IRRender.Debug, span)
-    } else if role == "release" {
-        ir_task_release_body(m, a)
-    } else if role == "line_next" {
+    } else if role == "release" { ir_task_release_body(m, a) } else if role == "line_next" {
         ir_line_next_body(m, p, a, ty, span)
-    } else if role == "line_release" {
-        ir_line_release_body(m, p, a, ty, false, span)
-    } else if role == "line_release_boxed" {
+    } else if role == "line_release" { ir_line_release_body(m, p, a, ty, false, span) } else if role == "line_release_boxed" {
         ir_line_release_body(m, p, a, ty, true, span)
-    } else if role == "line_clone" {
-        ir_line_clone_body(m, p, a, ty, span)
-    } else if role == "compare" {
+    } else if role == "line_clone" { ir_line_clone_body(m, p, a, ty, span) } else if role == "compare" {
         ir_lazy_compare_body(m, p, a, ty, span)
-    } else if role == "indexed" {
-        ir_lazy_indexed_body(m, p, a, ty, span)
-    } else {
+    } else if role == "indexed" { ir_lazy_indexed_body(m, p, a, ty, span) } else {
         ir_lazy_callback_body(m, p, a, ty, role == "callback_write", role == "carried", span)
     }
     failed: ir_failed(a)
@@ -234,7 +223,9 @@ ir_lazy_retire_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, spa
     value: ir_load_at(m, a, source, 0, row)
     if value >= 0 {
         glue: ir_close_glue(m, p, a, row, false, span)
-        if ir_failed(a) -> return
+        if ir_failed(a) {
+            return
+        }
         if glue >= 0 -> ir_close_call(a, glue, value)
         if ir_has_drop(m, a, value) -> ir_emit(a.f, IROp.Drop, -1, value, -1, -1, a.line)
     }
@@ -252,9 +243,7 @@ ir_lazy_equal_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span
     left: ir_load_at(m, a, left_slot, 0, row)
     right: ir_load_at(m, a, right_slot, 0, row)
     same := -1
-    if left < 0 {
-        same = ir_int_constant(m, a, bool_row, 1)
-    } else {
+    if left < 0 -> same = ir_int_constant(m, a, bool_row, 1) else {
         same = ir_equal(m, p, a, left, right, span)
     }
     ir_emit(a.f, IROp.Return, -1, same, -1, -1, a.line)
@@ -270,7 +259,9 @@ ir_lazy_show_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, mode:
     row: ir_value_type(m, p, ty) ?? return ir_fail(a, span, "type {ir_type_name(ty)}")
     value: ir_load_at(m, a, slot, 0, row)
     text: ir_render(m, p, a, ty, value, mode, span)
-    if ir_failed(a) || text < 0 -> return
+    if ir_failed(a) || text < 0 {
+        return
+    }
     fresh: a.fresh[text]
     owned: if fresh -> text else -> ir_runtime(m, a, "jet_rt_string_clone", [Int]{text}, string_row)
     ir_emit(a.f, IROp.Return, -1, owned, -1, -1, a.line)
@@ -291,7 +282,9 @@ ir_lazy_compare_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, sp
         return
     }
     kind: ir_kind_of(m, a, left)
-    if kind == .Pointer || kind == .Aggregate || ir_option_inline(m, row) -> return ir_fail(a, span, "ordering of {ir_type_name(ty)} is not lowered at O0 yet")
+    if kind == .Pointer || kind == .Aggregate || ir_option_inline(m, row) {
+        return ir_fail(a, span, "ordering of {ir_type_name(ty)} is not lowered at O0 yet")
+    }
     right: ir_load_at(m, a, right_slot, 0, row)
     less := -1
     greater := -1
@@ -344,9 +337,7 @@ ir_lazy_callback_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, l
     if ir_untag(ty) == .Fn(fn_params, fn_ret, _, _, _, _) {
         params = fn_params
         returned = fn_ret
-    } else {
-        return ir_fail(a, span, "lazy callback through {ir_type_name(ty)}")
-    }
+    } else { return ir_fail(a, span, "lazy callback through {ir_type_name(ty)}") }
     env: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "env"))
     inputs := [Int]{}
     loop index in 0..<params.len() {
@@ -358,7 +349,9 @@ ir_lazy_callback_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, l
         row: ir_value_type(m, p, param) ?? return ir_fail(a, span, "type {ir_type_name(param)}")
         if ir_lazy_access(ty, index) == .Write {
             // The kernels lend their inputs as shared slots: no mutable cell.
-            if !lend_write -> return ir_fail(a, span, "Iter borrowed callback argument {index} requires a mutable host input")
+            if !lend_write {
+                return ir_fail(a, span, "Iter borrowed callback argument {index} requires a mutable host input")
+            }
             // A write parameter of a non-aggregate type is its slot's
             // address (BuildExpr.jet ir_param_slot); an aggregate's value is
             // its address already.
@@ -398,7 +391,9 @@ ir_lazy_indexed_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, sp
     pointer_row: ir_pointer_row(m)
     word_row: ir_word_row(m)
     a.f.result = word_row
-    fields: if ir_untag(ty) == .Tuple(checked) -> checked else -> { return ir_fail(a, span, "indexed pair {ir_type_name(ty)}") }
+    fields: if ir_untag(ty) == .Tuple(checked) -> checked else -> {
+        return ir_fail(a, span, "indexed pair {ir_type_name(ty)}")
+    }
     members: ir_tuple_members(m, p, fields) ?? return ir_fail(a, span, "indexed pair {ir_type_name(ty)}")
     if members.len() != 2 -> return ir_fail(a, span, "indexed pair {ir_type_name(ty)}")
     index_member := members[0]
@@ -455,7 +450,9 @@ ir_lazy_meta: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, span: Span
     // An inline Option carrier is no box: the runtime's iter_unbox reads its
     // word (JetRuntime Iter.jet ITER_INLINE_OPTION), whose None is the Int
     // niche, so an optional raw pointer (None null) is not a carrier yet.
-    if m.types[row].option_null -> return ir_fail_slot(b, span, "a lazy chain over {ir_type_name(ty)} is not lowered yet")
+    if m.types[row].option_null {
+        return ir_fail_slot(b, span, "a lazy chain over {ir_type_name(ty)} is not lowered yet")
+    }
     kind: ir_lazy_kind(m, p, ty) + (if ir_option_inline(m, row) -> IR_LAZY_INLINE_OPTION else -> 0)
     zero: ir_word_const(m, b, 0)
     clone := zero
@@ -506,7 +503,9 @@ ir_lazy_meta: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, span: Span
 ir_lazy_meta_trait: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, meta: Int, ty: Type, role: String, span: Span) Never! {
     offset: if role == "show" || role == "debug" -> 24 else if role == "equal" -> 32 else -> 40
     id: ir_lazy_helper(m, p, b, role, ty, span)
-    if id < 0 -> return
+    if id < 0 {
+        return
+    }
     callback: ir_lazy_address(m, b, id)
     ir_emit(b.f, IROp.Store, -1, meta, offset, callback, b.line)
 }
@@ -518,7 +517,9 @@ ir_lazy_meta_trait: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, meta: Int, ty:
 // the frame's to drop; a variable moved into the route is cleared, so its
 // scope-end drop (jet_rt_native_iter_drop, null-safe) does nothing.
 ir_lazy_consumed: fn(m: &IRModule, b: &IRBuilder, slot: Int) Never! {
-    if slot < 0 -> return
+    if slot < 0 {
+        return
+    }
     if b.fresh[slot] {
         b.fresh[slot] = false
         return
@@ -597,7 +598,9 @@ ir_row_lacks_clone: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
 // by construction (sema), so lowering one that is not fresh is an internal
 // error (I2), never a runtime call through a null clone.
 ir_lazy_iter_from_list: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, element: Type, meta: Int, row: Int, span: Span) -> Int Never! {
-    if !(list >= 0 && b.fresh[list]) && !ir_lazy_type_can_clone(m, p, element) -> return ir_fail_slot(b, span, "an Iter over a shared [{ir_type_name(element)}], whose items have no clone")
+    if !(list >= 0 && b.fresh[list]) && !ir_lazy_type_can_clone(m, p, element) {
+        return ir_fail_slot(b, span, "an Iter over a shared [{ir_type_name(element)}], whose items have no clone")
+    }
     moved: ir_lazy_moved(m, b, list)
     ir_runtime(m, b, "jet_rt_native_iter_from_list", [Int]{list, meta, moved}, row)
 }
@@ -643,8 +646,12 @@ ir_lazy_compared: fn(symbol: String) -> Bool Never! {
 // Whether ir_lazy_route builds the route `symbol` over a first operand of
 // type `source_ty`.
 ir_lazy_symbol: fn(symbol: String, source_ty: Type) -> Bool Never! {
-    if symbol == "jet_iter_empty" || symbol == "jet_iter_indexes" || symbol == "jet_iter_enumerate" -> return true
-    if symbol == "jet_iter_from_vec" || symbol == "jet_iter_string_split" || symbol == "jet_iter_string_rsplit" -> return true
+    if symbol == "jet_iter_empty" || symbol == "jet_iter_indexes" || symbol == "jet_iter_enumerate" {
+        return true
+    }
+    if symbol == "jet_iter_from_vec" || symbol == "jet_iter_string_split" || symbol == "jet_iter_string_rsplit" {
+        return true
+    }
     if symbol == "jet_list_try_collect" && ir_untag(source_ty) == .List(_) -> return true
     if ir_iter_element(source_ty) == None -> return false
     symbol == "jet_list_sum" || symbol == "jet_list_sum_fixed_f64" || symbol == "jet_list_product" || ir_lazy_plain(symbol) || ir_lazy_counted(symbol) || ir_lazy_nested(symbol) || ir_lazy_compared(symbol) || symbol == "jet_std_io_progress_iter" || symbol == "jet_list_try_collect" || symbol == "jet_iter_split_at"
@@ -787,12 +794,16 @@ ir_lazy_route: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, ty:
         if meta < 0 -> return -1
         call_args := [Int]{}
         if symbol == "jet_iter_indexes" {
-            if operands.len() != 1 -> return ir_fail_slot(b, span, "Iter indexes has no checked count")
+            if operands.len() != 1 {
+                return ir_fail_slot(b, span, "Iter indexes has no checked count")
+            }
             count: ir_lazy_count(m, b, operands[0], span)
             if ir_failed(b) -> return -1
             call_args.push(count)
         } else if symbol == "jet_iter_enumerate" {
-            if operands.len() != 2 || operands[0] < 0 || operands[1] < 0 -> return ir_fail_slot(b, span, "Iter enumerate has no checked callback")
+            if operands.len() != 2 || operands[0] < 0 || operands[1] < 0 {
+                return ir_fail_slot(b, span, "Iter enumerate has no checked callback")
+            }
             closure_ty: ir_lazy_slot_type(m, b, operands[1])
             id: ir_lazy_helper(m, p, b, "callback", closure_ty, span)
             if id < 0 -> return -1
@@ -809,11 +820,15 @@ ir_lazy_route: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, ty:
         out: ir_lazy_runtime(m, b, ir_lazy_runtime_symbol(symbol), call_args, result_row, if symbol == "jet_iter_enumerate" -> operands[0] else -> -1)
         return out
     }
-    if operands.len() == 0 || operands[0] < 0 -> return ir_fail_slot(b, span, "Iter route {symbol} has no checked source")
+    if operands.len() == 0 || operands[0] < 0 {
+        return ir_fail_slot(b, span, "Iter route {symbol} has no checked source")
+    }
     source: operands[0]
     if symbol == "jet_iter_from_vec" -> return ir_lazy_from_list(m, p, b, source, result_row, span)
     if symbol == "jet_iter_string_split" || symbol == "jet_iter_string_rsplit" {
-        if operands.len() != 2 -> return ir_fail_slot(b, span, "String Iter source {symbol} has no checked separator")
+        if operands.len() != 2 {
+            return ir_fail_slot(b, span, "String Iter source {symbol} has no checked separator")
+        }
         elem: ir_iter_element(ty) ?? return ir_fail_slot(b, span, "String Iter source {symbol} has no checked element type")
         meta: ir_lazy_meta(m, p, b, elem, span)
         if meta < 0 -> return -1
@@ -852,14 +867,18 @@ ir_lazy_route: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, ty:
     by_address: symbol == "jet_iter_intersperse" || symbol == "jet_iter_last_index_of"
     call_args := [Int]{handle}
     if ir_lazy_counted(symbol) || symbol == "jet_iter_chunks" || symbol == "jet_iter_windows" || splits {
-        if operands.len() != 2 -> return ir_fail_slot(b, span, "Iter route {symbol} has no checked count")
+        if operands.len() != 2 {
+            return ir_fail_slot(b, span, "Iter route {symbol} has no checked count")
+        }
         count: ir_lazy_count(m, b, operands[1], span)
         if ir_failed(b) -> return -1
         call_args.push(count)
     } else {
         loop index in 1..<operands.len() {
             value: operands[index]
-            if value < 0 -> return ir_fail_slot(b, span, "Iter route {symbol} operand without a value")
+            if value < 0 {
+                return ir_fail_slot(b, span, "Iter route {symbol} operand without a value")
+            }
             slot: if by_address -> ir_lazy_value_slot(m, b, value) else -> value
             call_args.push(slot)
         }
@@ -873,14 +892,20 @@ ir_lazy_route: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, ty:
         meta: ir_lazy_meta(m, p, b, elem, span)
         if meta < 0 -> return -1
         if symbol == "jet_iter_join" -> ir_lazy_meta_trait(m, p, b, meta, elem, "show", span)
-        if symbol == "jet_iter_dedup" || symbol == "jet_iter_last_index_of" -> ir_lazy_meta_trait(m, p, b, meta, elem, "equal", span)
-        if symbol == "jet_iter_is_sorted" || symbol == "jet_iter_compare" -> ir_lazy_meta_trait(m, p, b, meta, elem, "compare", span)
+        if symbol == "jet_iter_dedup" || symbol == "jet_iter_last_index_of" {
+            ir_lazy_meta_trait(m, p, b, meta, elem, "equal", span)
+        }
+        if symbol == "jet_iter_is_sorted" || symbol == "jet_iter_compare" {
+            ir_lazy_meta_trait(m, p, b, meta, elem, "compare", span)
+        }
         if ir_failed(b) -> return -1
         call_args.push(meta)
         if symbol == "jet_iter_compare" {
             // The runtime snapshots the other operand from a List header; an
             // Iter operand is drained into a fresh List the runtime takes over.
-            if operands.len() != 2 -> return ir_fail_slot(b, span, "Iter compare has no checked operand")
+            if operands.len() != 2 {
+                return ir_fail_slot(b, span, "Iter compare has no checked operand")
+            }
             other: operands[1]
             other_ty: ir_lazy_slot_type(m, b, other)
             if ir_iter_element(other_ty) == .Val(other_elem) {
@@ -890,11 +915,11 @@ ir_lazy_route: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, ty:
                 call_args[1] = drained
                 taken: ir_word_const(m, b, 1)
                 call_args.push(taken)
-            } else {
-                call_args.push(ir_lazy_moved(m, b, other))
-            }
+            } else { call_args.push(ir_lazy_moved(m, b, other)) }
         } else if by_address {
-            if operands.len() != 2 -> return ir_fail_slot(b, span, "Iter route {symbol} has no checked value")
+            if operands.len() != 2 {
+                return ir_fail_slot(b, span, "Iter route {symbol} has no checked value")
+            }
             call_args.push(ir_lazy_moved(m, b, operands[1]))
         }
     } else if collects {
@@ -918,7 +943,9 @@ ir_lazy_route: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, ty:
         fields := [TypeTupleField]{}
         if ir_untag(ty) == .Tuple(pair) -> fields = pair
         members: ir_tuple_members(m, p, fields) ?? return ir_type_fail(b, span, ty)
-        if members.len() != 2 -> return ir_fail_slot(b, span, "Iter split_at has no checked pair of Lists")
+        if members.len() != 2 {
+            return ir_fail_slot(b, span, "Iter split_at has no checked pair of Lists")
+        }
         size: m.types[result_row].size
         out: ir_fresh_temp(m, b, result_row)
         ir_emit(b.f, IROp.StackAddress, out, size, 8, -1, b.line)
@@ -938,9 +965,7 @@ ir_lazy_route: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, ty:
         box_row: ir_pointer_row(m)
         boxed: ir_lazy_runtime(m, b, runtime, call_args, box_row, handle)
         out = ir_option_unbox(m, p, b, boxed, result_row)
-    } else {
-        out = ir_lazy_runtime(m, b, runtime, call_args, result_row, handle)
-    }
+    } else { out = ir_lazy_runtime(m, b, runtime, call_args, result_row, handle) }
     loop index in 1..<operands.len() -> ir_release(m, b, operands[index])
     out
 }
@@ -983,7 +1008,9 @@ ir_iter_walks: fn(receiver_ty: Type, operation: TClosureOp) -> Bool Never! {
 // Opens a walk over the items of `source`, of row `row`: a List's elements
 // (ir_walk_open) or an Iter's items as they are pulled (ir_pull_open).
 ir_items_open: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, source: Int, row: Int, span: Span) -> IRWalk Never! {
-    if ir_iter_element(ir_lazy_slot_type(m, b, source)) != None -> return ir_pull_open(m, p, b, source, row, span)
+    if ir_iter_element(ir_lazy_slot_type(m, b, source)) != None {
+        return ir_pull_open(m, p, b, source, row, span)
+    }
     ir_walk_open(m, b, source, row)
 }
 
@@ -996,9 +1023,7 @@ ir_items_open: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, source: Int, row: I
 ir_pull_open: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, source: Int, row: Int, span: Span) -> IRWalk Never! {
     slot_ty: Type.Option{inner: m.types[row].ty.copy()}
     slot_row := ir_pointer_row(m)
-    if ir_value_type(m, p, slot_ty) == .Val(known) {
-        slot_row = known
-    } else {
+    if ir_value_type(m, p, slot_ty) == .Val(known) -> slot_row = known else {
         _: ir_type_fail(b, span, slot_ty)
     }
     // An inline Option item's block is no Option box: the item is dropped
@@ -1045,15 +1070,21 @@ ir_lazy_closure_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, checked_ty
     receiver_type: ir_ty(p, b, receiver)
     receiver_ty: receiver_type
     if ir_iter_element(receiver_ty) != None {
-        if ir_lazy_searches(operation) -> return ir_lazy_search(m, p, b, checked_ty, receiver, operation, args, span)
+        if ir_lazy_searches(operation) {
+            return ir_lazy_search(m, p, b, checked_ty, receiver, operation, args, span)
+        }
     }
     route: ir_closure_route(operation, receiver_ty)
     symbol: route.symbol
     scans: symbol == "jet_iter_scan"
     list_source: ir_lazy_list_callback_route(symbol) || (symbol == "jet_iter_is_sorted_by" && ir_iter_element(receiver_ty) == None)
-    if !scans && !ir_lazy_callback_route(symbol) && !list_source -> return ir_fail_slot(b, span, "closure method {ir_closure_op_name(operation)} on {ir_type_name(receiver_type)}")
+    if !scans && !ir_lazy_callback_route(symbol) && !list_source {
+        return ir_fail_slot(b, span, "closure method {ir_closure_op_name(operation)} on {ir_type_name(receiver_type)}")
+    }
     expected: if scans -> 2 else -> 1
-    if args.len() != expected -> return ir_fail_slot(b, span, "Iter closure adapter {symbol} has no single checked callback")
+    if args.len() != expected {
+        return ir_fail_slot(b, span, "Iter closure adapter {symbol} has no single checked callback")
+    }
     closure_expr: args[args.len() - 1]
     closure_ty: ir_ty(p, b, closure_expr)
     closure_ret := Type?{None}
@@ -1124,7 +1155,9 @@ ir_lazy_closure_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, checked_ty
     meta: ir_lazy_meta(m, p, b, output_ty, span)
     if meta < 0 -> return -1
     if symbol == "jet_iter_dedup_by" -> ir_lazy_meta_trait(m, p, b, meta, output_ty, "equal", span)
-    if symbol == "jet_iter_is_sorted_by" -> ir_lazy_meta_trait(m, p, b, meta, output_ty, "compare", span)
+    if symbol == "jet_iter_is_sorted_by" {
+        ir_lazy_meta_trait(m, p, b, meta, output_ty, "compare", span)
+    }
     if ir_failed(b) -> return -1
     runtime: if symbol == "jet_list_take_while_iter" -> "jet_rt_native_iter_take_while" else if symbol == "jet_list_skip_while_iter" -> "jet_rt_native_iter_skip_while" else if symbol == "jet_list_filter_map_iter" -> "jet_rt_native_iter_filter_map" else -> ir_lazy_runtime_symbol(symbol)
     call_args := [Int]{source, closure, callback, release, meta}
@@ -1140,10 +1173,10 @@ ir_lazy_closure_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, checked_ty
         box_row: ir_pointer_row(m)
         boxed: ir_lazy_runtime(m, b, runtime, call_args, box_row, source)
         out = ir_option_unbox(m, p, b, boxed, result_row)
-    } else {
-        out = ir_lazy_runtime(m, b, runtime, call_args, result_row, source)
+    } else { out = ir_lazy_runtime(m, b, runtime, call_args, result_row, source) }
+    if ir_never_carrier_success(checked_ty) != None {
+        return ir_result_box(m, p, b, checked_ty, true, out)
     }
-    if ir_never_carrier_success(checked_ty) != None -> return ir_result_box(m, p, b, checked_ty, true, out)
     out
 }
 
@@ -1160,7 +1193,9 @@ ir_lazy_searches: fn(operation: TClosureOp) -> Bool Never! {
 ir_lazy_search: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, receiver: Int, operation: TClosureOp, args: [Int], span: Span) -> Int Never! {
     receiver_ty: ir_ty(p, b, receiver)
     element_ty: ir_iter_element(receiver_ty) ?? return ir_fail_slot(b, span, "closure method {ir_closure_op_name(operation)} on {ir_type_name(receiver_ty)}")
-    if args.len() != 1 -> return ir_fail_slot(b, span, "Iter {ir_closure_op_name(operation)} has no single checked callback")
+    if args.len() != 1 {
+        return ir_fail_slot(b, span, "Iter {ir_closure_op_name(operation)} has no single checked callback")
+    }
     position: operation == .Position
     counting: operation == .CountWhere
     all: operation == .All
@@ -1184,7 +1219,9 @@ ir_lazy_search: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, r
         counting -> ir_word_const(m, b, 0)
         else -> ir_temp(m, b, bool_row)
     }
-    if !position && !counting -> ir_emit(b.f, IROp.Const, decided, if all -> 1 else -> 0, -1, -1, b.line)
+    if !position && !counting {
+        ir_emit(b.f, IROp.Const, decided, if all -> 1 else -> 0, -1, -1, b.line)
+    }
     exit: ir_open(b.f, IROp.Block, b.line)
     _: ir_open(b.f, IROp.Loop, b.line)
     // An inline Option item's slot is no Option box: the item is dropped and
@@ -1200,9 +1237,7 @@ ir_lazy_search: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, r
         if ir_has_drop(m, b, item) -> ir_emit(b.f, IROp.Drop, -1, item, -1, -1, b.line)
         eight: ir_word_const(m, b, 8)
         ir_free(m, b, pulled, eight)
-    } else {
-        ir_release(m, b, pulled)
-    }
+    } else { ir_release(m, b, pulled) }
     stop := keep
     if all {
         no: ir_int_constant(m, b, bool_row, 0)
@@ -1260,7 +1295,9 @@ ir_lazy_place: fn(p: IRProgram, b: IRBuilder, value: Int) -> Int Never! {
 ir_lazy_next: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, span: Span) -> Int Never! {
     place: ir_lazy_place(p, b, receiver)
     place_ty: ir_ty(p, b, place)
-    if ir_iter_element(place_ty) == None -> return ir_fail_slot(b, span, "next on {ir_type_name(place_ty)}")
+    if ir_iter_element(place_ty) == None {
+        return ir_fail_slot(b, span, "next on {ir_type_name(place_ty)}")
+    }
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     handle: ir_expr(m, p, b, place)
     if ir_failed(b) || handle < 0 -> return -1
@@ -1290,15 +1327,23 @@ ir_lazy_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, vari
     element_ty: ir_iter_element(collection_ty) ?? return ir_fail(b, span, "loop over {ir_type_name(collection_ty)}")
     row: ir_value_type(m, p, element_ty) ?? return ir_fail(b, span, "type {ir_type_name(element_ty)}")
     if step == None && row == ir_string_row(m) && ir_body_node(p, b, collection).kind == .BuiltinMethod(text, operation, args) {
-        if operation == .Split && args.len() == 1 && ir_text_walk_receiver(m, p, b, text) -> return ir_text_walk(m, p, b, label, variable, variable_two, text, args[0], body, span)
+        if operation == .Split && args.len() == 1 && ir_text_walk_receiver(m, p, b, text) {
+            return ir_text_walk(m, p, b, label, variable, variable_two, text, args[0], body, span)
+        }
     }
     if step == None && ir_body_node(p, b, collection).kind == .HandleMethod(receiver, operation, _) {
-        if operation == .LinesIter -> return ir_input_lines_walk(m, p, b, label, variable, receiver, body, span)
+        if operation == .LinesIter {
+            return ir_input_lines_walk(m, p, b, label, variable, receiver, body, span)
+        }
     }
     source: ir_expr(m, p, b, collection)
-    if ir_failed(b) || source < 0 -> return
+    if ir_failed(b) || source < 0 {
+        return
+    }
     stride: ir_walk_stride(m, p, b, step)
-    if ir_failed(b) || (step != None && stride < 0) -> return
+    if ir_failed(b) || (step != None && stride < 0) {
+        return
+    }
     ir_lazy_walk_source(m, p, b, label, variable, variable_two, source, row, stride, body, span)
 }
 
@@ -1323,18 +1368,26 @@ ir_text_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, vari
     row: ir_string_row(m)
     splits: sep_node >= 0
     text_value: ir_expr(m, p, b, text_node)
-    if ir_failed(b) || text_value < 0 -> return
+    if ir_failed(b) || text_value < 0 {
+        return
+    }
     sep_value: if splits -> ir_expr(m, p, b, sep_node) else -> -1
-    if ir_failed(b) || (splits && sep_value < 0) -> return
+    if ir_failed(b) || (splits && sep_value < 0) {
+        return
+    }
     ir_scope_open(b)
     text: ir_own(m, p, b, text_value)
-    if ir_failed(b) || text < 0 -> return
+    if ir_failed(b) || text < 0 {
+        return
+    }
     b.fresh[text] = false
     b.bindings.push(IRBinding{name: "", slot: text, owned: true})
     sep := -1
     if splits {
         sep = ir_own(m, p, b, sep_value)
-        if ir_failed(b) || sep < 0 -> return
+        if ir_failed(b) || sep < 0 {
+            return
+        }
         b.fresh[sep] = false
         b.bindings.push(IRBinding{name: "", slot: sep, owned: true})
     }
@@ -1400,7 +1453,9 @@ ir_list_walk_takes: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, collection_ty:
         .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
     if !listed -> return false
-    if !b.fresh[list] && !ir_movable_binding(b, list) && !(by_value && ir_owned_binding(b, list)) -> return false
+    if !b.fresh[list] && !ir_movable_binding(b, list) && !(by_value && ir_owned_binding(b, list)) {
+        return false
+    }
     if ir_close_handle(m, row) -> return true
     ir_close_glue(m, p, b, row, false, span) >= 0
 }
@@ -1419,19 +1474,27 @@ ir_list_walk_taken: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?
     if by_value && !b.fresh[list] && ir_owned_binding(b, list) -> b.moving = list
     owned: ir_own(m, p, b, list)
     meta: ir_lazy_meta(m, p, b, element, span)
-    if meta < 0 -> return
+    if meta < 0 {
+        return
+    }
     glue: ir_close_glue(m, p, b, row, false, span)
-    if ir_failed(b) -> return
+    if ir_failed(b) {
+        return
+    }
     if glue >= 0 {
         retire: ir_lazy_helper(m, p, b, "retire", element, span)
-        if retire < 0 -> return
+        if retire < 0 {
+            return
+        }
         address: ir_lazy_address(m, b, retire)
         ir_emit(b.f, IROp.Store, -1, meta, 16, address, b.line)
     }
     iter_ty: Type.Apply{name: "Iter", args: [Type]{element}}
     iter_row: ir_value_type(m, p, iter_ty) ?? return ir_fail(b, span, "loop over {ir_type_name(collection_ty)}")
     source: ir_lazy_iter_from_list(m, p, b, owned, element, meta, iter_row, span)
-    if source < 0 -> return
+    if source < 0 {
+        return
+    }
     ir_lazy_walk_source(m, p, b, label, variable, variable_two, source, row, stride, body, span)
 }
 
@@ -1449,19 +1512,27 @@ ir_lines_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, var
     row: ir_string_row(m)
     handle_ty: ir_ty(p, b, ir_lazy_place(p, b, collection))
     handle: ir_expr(m, p, b, collection)
-    if ir_failed(b) || handle < 0 -> return
+    if ir_failed(b) || handle < 0 {
+        return
+    }
     if export == "jet_rt_native_iter_stdin_lines" && step == None && b.fresh[handle] {
         if ir_stdin_line_error(m, p, handle_ty) == .Val(failure_ty) {
             ir_release(m, b, handle)
             return ir_stdin_lines_walk(m, p, b, label, variable, variable_two, failure_ty, body, span)
         }
     }
-    if step == None && export != "jet_rt_native_iter_process_lines" -> return ir_line_next_walk(m, p, b, label, variable, variable_two, handle_ty, handle, b.fresh[handle], body, span)
+    if step == None && export != "jet_rt_native_iter_process_lines" {
+        return ir_line_next_walk(m, p, b, label, variable, variable_two, handle_ty, handle, b.fresh[handle], body, span)
+    }
     stride: ir_walk_stride(m, p, b, step)
-    if ir_failed(b) || (step != None && stride < 0) -> return
+    if ir_failed(b) || (step != None && stride < 0) {
+        return
+    }
     moved: ir_lazy_moved(m, b, handle)
     source: ir_lines_source(m, p, b, handle_ty, handle, moved, export, "line_release", span)
-    if source < 0 -> return
+    if source < 0 {
+        return
+    }
     ir_release(m, b, handle)
     ir_lazy_walk_source(m, p, b, label, variable, variable_two, source, row, stride, body, span)
 }
@@ -1496,7 +1567,9 @@ ir_lines_iter: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, span
 ir_input_lines_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, receiver: Int, body: [Int], span: Span) Never! {
     handle_ty: ir_ty(p, b, receiver)
     handle: ir_expr(m, p, b, receiver)
-    if ir_failed(b) || handle < 0 -> return
+    if ir_failed(b) || handle < 0 {
+        return
+    }
     ir_line_next_walk(m, p, b, label, variable, None, handle_ty, handle, true, body, span)
 }
 
@@ -1509,7 +1582,9 @@ ir_input_lines_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String
 // owner's. With `variable_two` the first binding counts the lines from 0.
 ir_line_next_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, handle_ty: Type, handle: Int, owned: Bool, body: [Int], span: Span) Never! {
     next_helper: ir_lazy_helper(m, p, b, "line_next", handle_ty, span)
-    if next_helper < 0 -> return
+    if next_helper < 0 {
+        return
+    }
     pointer_row: ir_pointer_row(m)
     word_row: ir_word_row(m)
     int_row: ir_type_row(m, Type.Int) ?? 0
@@ -1615,19 +1690,27 @@ ir_line_next_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, handle_ty: Type
     // A stdin handle reads through the runtime's line leaf: no Result or
     // Option box per line (RouteTerm.jet jet_stdin_lines_next). So does a
     // file handle (CompilerFileLeaves.jet jet_file_reader_lines_next).
-    if ir_stdin_line_error(m, p, handle_ty) == .Val(failure_ty) -> return ir_leaf_line_next(m, p, a, -1, output, failure_ty, span)
+    if ir_stdin_line_error(m, p, handle_ty) == .Val(failure_ty) {
+        return ir_leaf_line_next(m, p, a, -1, output, failure_ty, span)
+    }
     if ir_line_reader_owner(handle_ty) == "FileReader" {
-        if ir_line_word_error(m, p, row) == .Val(failure_ty) -> return ir_leaf_line_next(m, p, a, payload, output, failure_ty, span)
+        if ir_line_word_error(m, p, row) == .Val(failure_ty) {
+            return ir_leaf_line_next(m, p, a, payload, output, failure_ty, span)
+        }
     }
     // So does the ambient `input` while it names no files.
     if ir_line_reader_owner(handle_ty) == "__InputLines" {
-        if !ir_input_stdin_line_next(m, p, a, payload, output, row, span) -> return
+        if !ir_input_stdin_line_next(m, p, a, payload, output, row, span) {
+            return
+        }
     }
     access: ir_receiver_access(p.functions[row].kind)
     result := -1
     if access == "static" {
         params: p.functions[row].params
-        if params.len() != 1 || params[0].convention != .Read -> return ir_fail(a, span, "line reader {key} that does not read one handle")
+        if params.len() != 1 || params[0].convention != .Read {
+            return ir_fail(a, span, "line reader {key} that does not read one handle")
+        }
         callee: ir_function_row_id(m, p, row, [Type]{}) ?? return ir_fail(a, span, "call of {key}")
         returned: ir_executable_return(p.functions[row]) ?? return ir_fail(a, span, "line reader {key} without a result")
         result_row: ir_value_type(m, p, returned) ?? return ir_fail(a, span, "type {ir_type_name(returned)}")
@@ -1645,21 +1728,19 @@ ir_line_next_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, handle_ty: Type
                 ir_emit(a.f, IROp.StackAddress, receiver, 8, 8, -1, a.line)
                 ir_emit(a.f, IROp.Store, -1, receiver, 0, payload, a.line)
             }
-        } else if access != "read" {
-            return ir_fail(a, span, "line reader receiver {access}")
-        }
+        } else if access != "read" { return ir_fail(a, span, "line reader receiver {access}") }
         result = ir_call(m, p, a, key, [Type]{}, receiver, [IRWriteBack]{}, [BodyCallArg]{}, span)
     }
-    if ir_failed(a) || result < 0 -> return
+    if ir_failed(a) || result < 0 {
+        return
+    }
     result_ty: m.types[a.f.slot_type[result]].ty
     line_ty := Type.String
     error_ty := Type.String
     if ir_untag(result_ty) == .Result(ok, err) {
         line_ty = ok
         error_ty = err
-    } else {
-        return ir_fail(a, span, "line reader result {ir_type_name(result_ty)}")
-    }
+    } else { return ir_fail(a, span, "line reader result {ir_type_name(result_ty)}") }
     option_row: ir_value_type(m, p, line_ty) ?? return ir_fail(a, span, "type {ir_type_name(line_ty)}")
     error_row: ir_value_type(m, p, error_ty) ?? return ir_fail(a, span, "type {ir_type_name(error_ty)}")
     ok: ir_result_is_ok(m, a, result)
@@ -1679,7 +1760,9 @@ ir_line_next_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, handle_ty: Type
     ir_end(a.f, a.line)
     error: ir_box_take(m, p, a, result, 8, error_row)
     text: ir_render(m, p, a, error_ty, error, IRRender.Display, span)
-    if ir_failed(a) || text < 0 -> return
+    if ir_failed(a) || text < 0 {
+        return
+    }
     data: ir_load_word(m, a, text, 0)
     length: ir_load_word(m, a, text, 8)
     _: ir_runtime(m, a, "jet_rt_panic_message", [Int]{data, length}, -1)
@@ -1742,7 +1825,9 @@ ir_leaf_line_next: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, reader: Int, ou
     two: ir_word_const(m, a, 2)
     failed: ir_bool_op(m, a, IROp.Eq, status, two)
     ir_open_if(a.f, failed, a.line)
-    if !ir_stdin_line_panic(m, p, a, error_slot, error_ty, span) -> return
+    if !ir_stdin_line_panic(m, p, a, error_slot, error_ty, span) {
+        return
+    }
     stopped: ir_word_const(m, a, -1)
     ir_emit(a.f, IROp.Return, -1, stopped, -1, -1, a.line)
     ir_end(a.f, a.line)
@@ -1797,7 +1882,9 @@ ir_stdin_lines_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String
     status: ir_runtime(m, b, "jet_stdin_lines_next", [Int]{line_slot, error_slot}, word_row)
     failed: ir_bool_op(m, b, IROp.Eq, status, two)
     ir_open_if(b.f, failed, b.line)
-    if !ir_stdin_line_panic(m, p, b, error_slot, error_ty, span) -> return
+    if !ir_stdin_line_panic(m, p, b, error_slot, error_ty, span) {
+        return
+    }
     leave: ir_depth(b.f, exit)
     ir_emit(b.f, IROp.Br, -1, leave, -1, -1, b.line)
     ir_end(b.f, b.line)
@@ -1969,7 +2056,9 @@ ir_walk_countdown: fn(m: &IRModule, b: &IRBuilder, stride: Int) -> Int Never! {
 // Opens the guard of a step's body: it runs when the countdown is 0, which
 // restarts it at the stride. ir_walk_stride_leave closes it.
 ir_walk_stride_enter: fn(m: &IRModule, b: &IRBuilder, countdown: Int, stride: Int) Never! {
-    if countdown < 0 -> return
+    if countdown < 0 {
+        return
+    }
     zero: ir_word_const(m, b, 0)
     due: ir_bool_op(m, b, IROp.Eq, countdown, zero)
     ir_open_if(b.f, due, b.line)
@@ -1982,7 +2071,9 @@ ir_walk_stride_leave: fn(b: &IRBuilder, countdown: Int) Never! {
 
 // After each step, whether its body ran or not.
 ir_walk_stride_tick: fn(m: &IRModule, b: &IRBuilder, countdown: Int) Never! {
-    if countdown < 0 -> return
+    if countdown < 0 {
+        return
+    }
     one: ir_word_const(m, b, 1)
     ir_emit(b.f, IROp.Sub, countdown, countdown, one, IR_OVERFLOW_WRAP, b.line)
 }
@@ -2000,8 +2091,12 @@ ir_walk_stride_tick: fn(m: &IRModule, b: &IRBuilder, countdown: Int) Never! {
 // it retires.
 ir_shared_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], shared_ty: Type, span: Span) -> Int Never! {
     cell_inner: ir_local_cell_inner(shared_ty)
-    inner: if ir_untag(shared_ty) == .Shared(value) -> value else if cell_inner == .Val(value) -> value else -> { return ir_fail_slot(b, span, "Shared.new producing {ir_type_name(shared_ty)}") }
-    if inputs.len() != 1 || inputs[0] < 0 -> return ir_fail_slot(b, span, "Shared.new with {inputs.len()} arguments")
+    inner: if ir_untag(shared_ty) == .Shared(value) -> value else if cell_inner == .Val(value) -> value else -> {
+        return ir_fail_slot(b, span, "Shared.new producing {ir_type_name(shared_ty)}")
+    }
+    if inputs.len() != 1 || inputs[0] < 0 {
+        return ir_fail_slot(b, span, "Shared.new with {inputs.len()} arguments")
+    }
     row: ir_value_type(m, p, shared_ty) ?? return ir_type_fail(b, span, shared_ty)
     value: inputs[0]
     owned: if b.fresh[value] -> value else -> ir_copy_value(m, p, b, value, span)
@@ -2032,7 +2127,9 @@ ir_shared_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], shar
 // and hands back the permit; the guard's checked read/edit provenance must
 // match the method.
 ir_shared_guard: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, editable: Bool, span: Span) -> Int Never! {
-    if ir_shared_guard_editable(ty) != Val((editable)) -> return ir_fail_slot(b, span, "Shared guard acquisition without its checked read/edit provenance")
+    if ir_shared_guard_editable(ty) != Val((editable)) {
+        return ir_fail_slot(b, span, "Shared guard acquisition without its checked read/edit provenance")
+    }
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     shared: ir_expr(m, p, b, receiver)
     if ir_failed(b) || shared < 0 -> return -1
@@ -2047,8 +2144,12 @@ ir_shared_guard: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
 // guard's checked read/edit provenance must match the method.
 ir_shared_guard_within: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, editable: Bool, args: [Int], span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
-    guard_ty: if ir_untag(ty) == .Option(inner) -> inner else -> { return ir_fail_slot(b, span, "Shared guard attempt producing {ir_type_name(ty)}") }
-    if ir_shared_guard_editable(guard_ty) != Val((editable)) -> return ir_fail_slot(b, span, "Shared guard attempt without its checked read/edit provenance")
+    guard_ty: if ir_untag(ty) == .Option(inner) -> inner else -> {
+        return ir_fail_slot(b, span, "Shared guard attempt producing {ir_type_name(ty)}")
+    }
+    if ir_shared_guard_editable(guard_ty) != Val((editable)) {
+        return ir_fail_slot(b, span, "Shared guard attempt without its checked read/edit provenance")
+    }
     guard_row: ir_value_type(m, p, guard_ty) ?? return ir_type_fail(b, span, guard_ty)
     shared: ir_expr(m, p, b, receiver)
     if ir_failed(b) || shared < 0 -> return -1
@@ -2062,9 +2163,7 @@ ir_shared_guard_within: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, 
         wait = ir_runtime(m, b, "jet_int_owned_to_i64", [Int]{ns}, word_row)
         ir_release(m, b, ns)
         ir_release(m, b, limit)
-    } else {
-        wait = ir_word_const(m, b, 0)
-    }
+    } else { wait = ir_word_const(m, b, 0) }
     out: ir_out_slot(m, b, 1)
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     mode: ir_word_const(m, b, if editable -> 1 else -> 0)
@@ -2086,11 +2185,13 @@ ir_shared_guard_within: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, 
 // cell it was captured from, the committed revision it saw, and the
 // captured value.
 ir_shared_snapshot_carrier: fn(inner: Type, captured: Type) -> Type Never! {
-    Type.Tuple{fields: [TypeTupleField]{
-        TypeTupleField{name: "owner", ty: Type.Shared{inner: inner}},
-        TypeTupleField{name: "revision", ty: Type.IntN{signed: true, bits: 64}},
-        TypeTupleField{name: "value", ty: captured},
-    }}
+    Type.Tuple{
+        fields: [TypeTupleField]{
+            TypeTupleField{name: "owner", ty: Type.Shared{inner: inner}},
+            TypeTupleField{name: "revision", ty: Type.IntN{signed: true, bits: 64}},
+            TypeTupleField{name: "value", ty: captured},
+        },
+    }
 }
 
 // The `T` and captured `U` of a `SharedSnapshot<T, U>`.
@@ -2108,7 +2209,9 @@ ir_shared_capture: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
     snapshot_args: ir_shared_snapshot_args(ty) ?? return ir_fail_slot(b, span, "Shared capture producing {ir_type_name(ty)}")
     captured_ty: snapshot_args[1].copy()
     receiver_ty: ir_ty(p, b, receiver)
-    inner: if ir_untag(receiver_ty) == .Shared(value) -> value else -> { return ir_fail_slot(b, span, "Shared capture of {ir_type_name(receiver_ty)}") }
+    inner: if ir_untag(receiver_ty) == .Shared(value) -> value else -> {
+        return ir_fail_slot(b, span, "Shared capture of {ir_type_name(receiver_ty)}")
+    }
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     inner_row: ir_value_type(m, p, inner) ?? return ir_type_fail(b, span, inner)
     captured_row: ir_value_type(m, p, captured_ty) ?? return ir_type_fail(b, span, captured_ty)
@@ -2134,9 +2237,7 @@ ir_shared_capture: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
         value = ir_call_callback(m, p, b, closure, closure_ty, [Int]{view}, captured_row, span)
         if ir_failed(b) -> return -1
         value = ir_own(m, p, b, value)
-    } else if view >= 0 {
-        value = ir_copy_value(m, p, b, view, span)
-    }
+    } else if view >= 0 { value = ir_copy_value(m, p, b, view, span) }
     _: ir_runtime(m, b, "jet_rt_native_shared_read_guard_drop", [Int]{permit}, -1)
     snapshot: ir_fresh_temp(m, b, row)
     ir_emit(b.f, IROp.StackAddress, snapshot, m.types[row].size, 8, -1, b.line)
@@ -2158,9 +2259,13 @@ ir_shared_capture: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
 // here. The snapshot is consumed either way. Exhausted revisions stop in the
 // runtime, so the result is always `Ok`.
 ir_shared_try_replace: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
-    if args.len() != 2 -> return ir_fail_slot(b, span, "Shared try_replace with {args.len()} arguments")
+    if args.len() != 2 {
+        return ir_fail_slot(b, span, "Shared try_replace with {args.len()} arguments")
+    }
     receiver_ty: ir_ty(p, b, receiver)
-    inner: if ir_untag(receiver_ty) == .Shared(value) -> value else -> { return ir_fail_slot(b, span, "Shared try_replace on {ir_type_name(receiver_ty)}") }
+    inner: if ir_untag(receiver_ty) == .Shared(value) -> value else -> {
+        return ir_fail_slot(b, span, "Shared try_replace on {ir_type_name(receiver_ty)}")
+    }
     inner_row: ir_value_type(m, p, inner) ?? return ir_type_fail(b, span, inner)
     snapshot_ty: ir_ty(p, b, args[0])
     snapshot_row: ir_value_type(m, p, snapshot_ty) ?? return ir_type_fail(b, span, snapshot_ty)
@@ -2231,9 +2336,7 @@ ir_shared_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, r
         result = ir_fresh_temp(m, b, row)
         ir_emit(b.f, IROp.StackAddress, result, ir_align8(m.types[row].size), 8, -1, b.line)
         out = result
-    } else {
-        out = ir_out_slot(m, b, 1)
-    }
+    } else { out = ir_out_slot(m, b, 1) }
     _: ir_runtime(m, b, runtime, [Int]{shared, closure, invoke, out}, -1)
     if row >= 0 && !inline {
         result = ir_load_at(m, b, out, 0, row)
@@ -2285,7 +2388,9 @@ ir_shared_owner_word: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, re
 // true), else None.
 ir_shared_upgrade: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
-    shared_ty: if ir_untag(ty) == .Option(inner) -> inner else -> { return ir_fail_slot(b, span, "Shared.Weak.upgrade producing {ir_type_name(ty)}") }
+    shared_ty: if ir_untag(ty) == .Option(inner) -> inner else -> {
+        return ir_fail_slot(b, span, "Shared.Weak.upgrade producing {ir_type_name(ty)}")
+    }
     shared_row: ir_value_type(m, p, shared_ty) ?? return ir_type_fail(b, span, shared_ty)
     weak: ir_expr(m, p, b, receiver)
     if ir_failed(b) || weak < 0 -> return -1
@@ -2320,7 +2425,9 @@ ir_shared_guard_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, g
 // slot as the guard acquired from guard_read/guard_edit does. -1 with `b`
 // failed on an error.
 ir_shared_guard_payload: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, guard: Int, span: Span) -> Int Never! {
-    if ir_shared_guard_inner(ir_ty(p, b, guard)) == None -> return ir_fail_slot(b, span, "Shared guard dereference of a value that is not a SharedGuard")
+    if ir_shared_guard_inner(ir_ty(p, b, guard)) == None {
+        return ir_fail_slot(b, span, "Shared guard dereference of a value that is not a SharedGuard")
+    }
     held: ir_expr(m, p, b, guard)
     if ir_failed(b) || held < 0 -> return -1
     pointer_row: ir_pointer_row(m)
@@ -2367,20 +2474,32 @@ ir_cell_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
     guard: ir_cell_guard_editable(receiver_ty)
     inner: ir_cell_value_type(receiver_ty) ?? return ir_fail_slot(b, span, "Cell method {method} of {ir_type_name(receiver_ty)}")
     if guard == None {
-        if method == "cell.read" || method == "cell.edit" -> return ir_shared_read(m, p, b, ty, receiver, args, method, if method == "cell.edit" -> "jet_rt_native_shared_edit" else -> "jet_rt_native_shared_read", span)
-        if (method == "guard_read" || method == "guard_edit") && args.len() == 0 -> return ir_cell_guard(m, p, b, ty, receiver, method == "guard_edit", span)
-        if method == "get_or_set" && args.len() == 1 -> return ir_cell_get_or_set(m, p, b, ty, inner, receiver, args[0], span)
+        if method == "cell.read" || method == "cell.edit" {
+            return ir_shared_read(m, p, b, ty, receiver, args, method, if method == "cell.edit" -> "jet_rt_native_shared_edit" else -> "jet_rt_native_shared_read", span)
+        }
+        if (method == "guard_read" || method == "guard_edit") && args.len() == 0 {
+            return ir_cell_guard(m, p, b, ty, receiver, method == "guard_edit", span)
+        }
+        if method == "get_or_set" && args.len() == 1 {
+            return ir_cell_get_or_set(m, p, b, ty, inner, receiver, args[0], span)
+        }
     } else if method == "cell_read_guard.read" || method == "cell_edit_guard.read" || method == "cell_edit_guard.edit" {
         return ir_shared_read(m, p, b, ty, receiver, args, method, "jet_rt_native_cell_guard_with", span)
     }
-    if method == "get" && args.len() == 0 -> return ir_cell_get(m, p, b, ty, receiver, guard != None, span)
-    if (method == "set" || method == "replace") && args.len() == 1 && guard != (Val(false)) -> return ir_cell_store(m, p, b, inner, receiver, args[0], guard != None, method == "replace", span)
+    if method == "get" && args.len() == 0 {
+        return ir_cell_get(m, p, b, ty, receiver, guard != None, span)
+    }
+    if (method == "set" || method == "replace") && args.len() == 1 && guard != (Val(false)) {
+        return ir_cell_store(m, p, b, inner, receiver, args[0], guard != None, method == "replace", span)
+    }
     ir_fail_slot(b, span, "Cell method {method} of {ir_type_name(receiver_ty)}")
 }
 
 // `cell.guard_read()` / `cell.guard_edit()`: an owned guard token.
 ir_cell_guard: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, editable: Bool, span: Span) -> Int Never! {
-    if ir_cell_guard_editable(ty) != (Val(editable)) -> return ir_fail_slot(b, span, "Cell guard producing {ir_type_name(ty)}")
+    if ir_cell_guard_editable(ty) != (Val(editable)) {
+        return ir_fail_slot(b, span, "Cell guard producing {ir_type_name(ty)}")
+    }
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     cell: ir_expr(m, p, b, receiver)
     if ir_failed(b) || cell < 0 -> return -1
@@ -2429,9 +2548,7 @@ ir_cell_store: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inner: Type, receiv
             b.fresh[result] = true
         }
         ir_store_at(m, p, b, address, 0, slot)
-    } else {
-        ir_assign_at(m, p, b, address, row, None, slot, value_ty, false, span)
-    }
+    } else { ir_assign_at(m, p, b, address, row, None, slot, value_ty, false, span) }
     if !guarded -> ir_cell_access_end(m, b, token)
     ir_release(m, b, holder)
     result
@@ -2491,7 +2608,9 @@ ir_cell_guard_project: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, r
         members = ir_tuple_members(m, p, fields) ?? return ir_type_fail(b, span, ty)
         loop member in members -> guard_rows.push(member.ty)
     }
-    if guard_rows.len() != paths.len() -> return ir_fail_slot(b, span, "Cell guard projection of {paths.len()} paths producing {ir_type_name(ty)}")
+    if guard_rows.len() != paths.len() {
+        return ir_fail_slot(b, span, "Cell guard projection of {paths.len()} paths producing {ir_type_name(ty)}")
+    }
     token: ir_expr(m, p, b, receiver)
     if ir_failed(b) || token < 0 -> return -1
     pointer_row: ir_pointer_row(m)
@@ -2501,7 +2620,9 @@ ir_cell_guard_project: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, r
         row := inner_row
         loop name in path {
             member: ir_member_of_row(m, p, row, name) ?? return ir_fail_slot(b, span, "Cell guard projection .{name} of {ir_type_name(m.types[row].ty)}")
-            if member.boxed -> return ir_fail_slot(b, span, "Cell guard projection .{name} through a recursive edge of {ir_type_name(m.types[row].ty)}")
+            if member.boxed {
+                return ir_fail_slot(b, span, "Cell guard projection .{name} through a recursive edge of {ir_type_name(m.types[row].ty)}")
+            }
             next: ir_temp(m, b, pointer_row)
             ir_emit(b.f, IROp.Offset, next, address, member.offset, -1, b.line)
             address = next

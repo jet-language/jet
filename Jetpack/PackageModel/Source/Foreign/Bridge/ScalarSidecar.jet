@@ -12,7 +12,6 @@ use {
     process: core.process
 }
 
-
 FOREIGN_SCALAR_BRIDGE_SCHEMA: "jet-ffi-scalar-sidecar-v1"
 
 // One scalar function in the common checked sidecar ABI.
@@ -38,7 +37,9 @@ pkg_bridge_scalar_bridge_identity: fn(descriptor: BinderDescriptor, lib: String,
 // renderer; adapters may add declaration files or other local inputs.
 pkg_bridge_scalar_bridge_identity_with_sources: fn(descriptor: BinderDescriptor, lib: String, abi: String, runtime: String, sources: [BridgeSource], worker: String, functions: [ScalarBridgeFunction]) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
     pkg_bridge_validate_scalar_bridge(abi, descriptor, functions)
-    if abi != "{descriptor.language.bridge_prefix()}{lib}" -> return Err(pkg_bridge_error("foreign bridge ABI name does not match its descriptor language"))
+    if abi != "{descriptor.language.bridge_prefix()}{lib}" {
+        return Err(pkg_bridge_error("foreign bridge ABI name does not match its descriptor language"))
+    }
     pkg_bridge_scalar_bridge_identity_with_descriptor(descriptor.language.root(), lib, abi, runtime, descriptor.stamp(), sources, worker, functions)
 }
 
@@ -55,7 +56,9 @@ pkg_bridge_scalar_bridge_identity_with_descriptor: fn(language: String, lib: Str
     identity.field("ar", pkg_bridge_tool_identity("ar").bytes())
     identity.field("descriptor", descriptor.bytes())
     loop source in sources {
-        if source.role == "" -> return Err(pkg_bridge_error("foreign bridge source roles cannot be empty"))
+        if source.role == "" {
+            return Err(pkg_bridge_error("foreign bridge source roles cannot be empty"))
+        }
         identity.field("{source.role}_path", source.path.bytes())
         source_bytes: files.read_bytes(source.path) ?? return Err(pkg_bridge_error("could not read {source.path} for bridge identity: {err}"))
         identity.field("{source.role}_bytes", source_bytes)
@@ -64,7 +67,9 @@ pkg_bridge_scalar_bridge_identity_with_descriptor: fn(language: String, lib: Str
     identity.field("worker_bytes", worker_bytes)
     loop function in functions {
         identity.field("function", function.name.bytes())
-        loop parameter in function.params -> identity.field("parameter", parameter.debug_name().bytes())
+        loop parameter in function.params {
+            identity.field("parameter", parameter.debug_name().bytes())
+        }
         identity.field("result", function.result.debug_name().bytes())
     }
     Ok(identity.finish())
@@ -98,7 +103,9 @@ pkg_bridge_compile_scalar_sidecar_with_identity_and_sources: fn(cache: String, i
     pkg_bridge_validate_scalar_bridge(abi, descriptor, functions)
     lib: pkg_bridge_scalar_bridge_library(abi, descriptor)
     expected_identity: pkg_bridge_scalar_bridge_identity_with_sources(descriptor, lib, abi, runtime, sources, worker, functions)
-    if expected_identity != identity -> return Err(pkg_bridge_error("foreign bridge identity does not match its descriptor inputs"))
+    if expected_identity != identity {
+        return Err(pkg_bridge_error("foreign bridge identity does not match its descriptor inputs"))
+    }
     files.create_dir_all(cache) ?? return Err(pkg_bridge_error("could not create foreign binding cache: {err}"))
     store: files.join(files.join(cache, ".bridges"), identity)
     cached_archive: files.join(store, "lib{abi}.a")
@@ -122,7 +129,9 @@ pkg_bridge_compile_scalar_sidecar_with_identity_and_sources: fn(cache: String, i
     archived: process.cmd([String]{"ar", "rcs", staged_archive, object}).run() ?? return Err(pkg_bridge_error(pkg_bridge_spawn_error("ar", err)))
     files.remove(c_path) ?? ()
     files.remove(object) ?? ()
-    if !archived.success -> return Err(pkg_bridge_error("ar rejected the foreign bridge: {archived.errors.trim()}"))
+    if !archived.success {
+        return Err(pkg_bridge_error("ar rejected the foreign bridge: {archived.errors.trim()}"))
+    }
     files.rename(staged_archive, cached_archive) ?? {
         files.remove(staged_archive) ?? ()
         return Err(pkg_bridge_error("could not publish cached foreign bridge: {err}"))
@@ -152,7 +161,9 @@ pkg_bridge_write_scalar_provenance_with_sources: fn(cache: String, lib: String, 
     loop entry in sources {
         if entry.path == source -> has_primary = true
     }
-    if !has_primary -> return Err(pkg_bridge_error("foreign bridge provenance sources omit the primary source"))
+    if !has_primary {
+        return Err(pkg_bridge_error("foreign bridge provenance sources omit the primary source"))
+    }
     contract: descriptor_row.contract
     descriptor: descriptor_row.stamp()
     language: descriptor_row.language
@@ -164,7 +175,9 @@ pkg_bridge_write_scalar_provenance_with_sources: fn(cache: String, lib: String, 
     worker_digest: pkg_bridge_sha_file(worker)
     archive_digest: pkg_bridge_sha_file(archive)
     source_rows := [String]{}
-    loop entry in sources -> source_rows.push("{entry.role}:{entry.path}:{pkg_bridge_sha_file(entry.path)}")
+    loop entry in sources {
+        source_rows.push("{entry.role}:{entry.path}:{pkg_bridge_sha_file(entry.path)}")
+    }
     boundary_identity: ForeignBoundaryIdentity.new(source_rows.join("|"), "none", "descriptor={descriptor}", "worker:{worker}:{worker_digest}", "runtime={runtime_toolchain};cc={cc};ar={ar}", pkg_bridge_foreign_host_target())
     boundary := ForeignBoundaryContract.new(descriptor_row, lib, boundary_identity)
     coverage: ForeignArtifactCoverage.new("{archive}:sha256-{archive_digest}", pkg_bridge_foreign_host_target(), boundary.identity.generator).with_transitive_dependencies([String]{}).with_reachable_callbacks([String]{}).with_compiler_flags([String]{})
@@ -190,7 +203,7 @@ pkg_bridge_write_scalar_provenance_with_sources: fn(cache: String, lib: String, 
         (name: "provider", value: descriptor_row.provider.debug_name()),
         (name: "runtime-toolchain", value: runtime_toolchain),
         (name: "cc", value: cc),
-        (name: "ar", value: ar)
+        (name: "ar", value: ar),
     }
     loop field in boundary.provenance_fields() -> fields.push(field)
     loop entry in sources {
@@ -244,7 +257,7 @@ pkg_bridge_scalar_jet_params: fn(function: ScalarBridgeFunction) -> String Forei
     Ok(params.join(", "))
 }
 
-FOREIGN_SCALAR_C_PRELUDE: #run { ```#include <ctype.h>
+FOREIGN_SCALAR_C_PRELUDE: #run { `#include <ctype.h>
 #include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -261,7 +274,7 @@ static int jet_invoke(const char *command, char *output, size_t capacity) {
     if (status != 0 || strncmp(output, "OK ", 3) != 0) { jet_failed = 3; return 0; }
     return 1;
 }
-``` }
+` }
 
 pkg_bridge_render_scalar_c: fn(abi: String, runtime: String, worker: String, source: String, descriptor: BinderDescriptor, functions: [ScalarBridgeFunction]) -> String ForeignBridgeError! {
     quoted_worker: pkg_bridge_c_escape(pkg_bridge_shell_quote(worker))
@@ -344,15 +357,23 @@ pkg_bridge_scalar_zero_value: fn(scalar: ForeignScalar) -> String? Never! {
 
 pkg_bridge_validate_scalar_bridge: fn(abi: String, descriptor: BinderDescriptor, functions: [ScalarBridgeFunction]) ForeignBridgeError! {
     pkg_bridge_scalar_bridge_library(abi, descriptor)
-    if !descriptor.contract.same_as(ForeignABIContract.message()) -> return Err(pkg_bridge_error("foreign binder `{descriptor.language.root()}` does not expose the checked adapter contract"))
+    if !descriptor.contract.same_as(ForeignABIContract.message()) {
+        return Err(pkg_bridge_error("foreign binder `{descriptor.language.root()}` does not expose the checked adapter contract"))
+    }
     required: [BinderCapability]{BinderCapability.TypedStub, BinderCapability.SafeWrapper, BinderCapability.OwnershipConversion, BinderCapability.LayoutValidation, BinderCapability.ErrorConversion, BinderCapability.CacheProvenance}
     loop capability in required {
-        if !descriptor.capabilities.contains(capability) -> return Err(pkg_bridge_error("foreign binder `{descriptor.language.root()}` is missing capability `{capability.debug_name()}`"))
+        if !descriptor.capabilities.contains(capability) {
+            return Err(pkg_bridge_error("foreign binder `{descriptor.language.root()}` is missing capability `{capability.debug_name()}`"))
+        }
     }
     names := [String]{}
     loop function in functions {
-        if !pkg_bridge_is_identifier(function.name) -> return Err(pkg_bridge_error("invalid foreign function name `{function.name}`"))
-        if names.contains(function.name) -> return Err(pkg_bridge_error("duplicate foreign function `{function.name}`"))
+        if !pkg_bridge_is_identifier(function.name) {
+            return Err(pkg_bridge_error("invalid foreign function name `{function.name}`"))
+        }
+        if names.contains(function.name) {
+            return Err(pkg_bridge_error("duplicate foreign function `{function.name}`"))
+        }
         names.push(function.name)
         scalars := function.params
         scalars.push(function.result)

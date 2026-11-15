@@ -9,7 +9,9 @@ trust_canonical_root: fn(root: TUFRootMetadata) -> String Never! {
         keys: root.role(role) ?? next
         out.push("role.{role.label()}={keys.threshold}@{keys.key_ids.join(",")}\n")
     }
-    loop key_id in trust_sorted_text_keys(root.public_key_ids) -> out.push("key.{key_id}={root.public_key_ids[key_id]}\n")
+    loop key_id in trust_sorted_text_keys(root.public_key_ids) {
+        out.push("key.{key_id}={root.public_key_ids[key_id]}\n")
+    }
     loop delegation in root.delegations {
         out.push("delegation.{delegation.name}={delegation.role.threshold}@{delegation.role.key_ids.join(",")}|{delegation.path_prefixes.join(",")}|{delegation.terminating}\n")
     }
@@ -25,8 +27,12 @@ trust_canonical_targets: fn(targets: TargetsMetadata) -> String Never! {
         hash: meta.hashes.get("sha256") ?? ""
         out.push("target.{path}={meta.length}:{hash}\n")
         trust_append_framed(out, "target-meta", [String]{path, "{meta.length}"})
-        loop algorithm in trust_sorted_text_keys(meta.hashes) -> trust_append_framed(out, "target-hash", [String]{path, algorithm, meta.hashes[algorithm]})
-        loop name in trust_sorted_text_keys(meta.custom) -> trust_append_framed(out, "target-custom", [String]{path, name, meta.custom[name]})
+        loop algorithm in trust_sorted_text_keys(meta.hashes) {
+            trust_append_framed(out, "target-hash", [String]{path, algorithm, meta.hashes[algorithm]})
+        }
+        loop name in trust_sorted_text_keys(meta.custom) {
+            trust_append_framed(out, "target-custom", [String]{path, name, meta.custom[name]})
+        }
     }
     out.join("")
 }
@@ -40,7 +46,9 @@ trust_canonical_snapshot: fn(snapshot: SnapshotMetadata) -> String Never! {
         hash: entry.hashes.get("sha256") ?? ""
         out.push("meta.{name}={entry.version}:{hash}:{entry.length}\n")
         trust_append_framed(out, "snapshot-meta", [String]{name, "{entry.version}", "{entry.length}"})
-        loop algorithm in trust_sorted_text_keys(entry.hashes) -> trust_append_framed(out, "snapshot-hash", [String]{name, algorithm, entry.hashes[algorithm]})
+        loop algorithm in trust_sorted_text_keys(entry.hashes) {
+            trust_append_framed(out, "snapshot-hash", [String]{name, algorithm, entry.hashes[algorithm]})
+        }
     }
     out.join("")
 }
@@ -50,7 +58,9 @@ trust_canonical_timestamp: fn(timestamp: TimestampMetadata) -> String Never! {
     hash: entry.hashes.get("sha256") ?? ""
     out := [String]{"jet-tuf-timestamp-v1\nversion={timestamp.version}\nexpires={timestamp.expires_unix}\nsnapshot={entry.version}:{hash}:{entry.length}\n"}
     trust_append_framed(out, "timestamp-snapshot", [String]{"{entry.version}", "{entry.length}"})
-    loop algorithm in trust_sorted_text_keys(entry.hashes) -> trust_append_framed(out, "timestamp-hash", [String]{algorithm, entry.hashes[algorithm]})
+    loop algorithm in trust_sorted_text_keys(entry.hashes) {
+        trust_append_framed(out, "timestamp-hash", [String]{algorithm, entry.hashes[algorithm]})
+    }
     out.join("")
 }
 
@@ -62,7 +72,7 @@ trust_append_framed: fn(out: &[String], label: String, values: [String]) Never! 
     out.push(line.join(""))
 }
 
-trust_sorted_text_keys: fn(map: [String: String]) -> [String] Never! {
+trust_sorted_text_keys: fn(map: [String:String]) -> [String] Never! {
     keys := map.keys().to_list()
     keys.sort()
     keys

@@ -23,7 +23,7 @@ Slot: enum {
 }
 
 bump: fn(machine: &Machine) -> Bool {
-    machine.n = machine.n + 1
+    machine.n += 1
     machine.log.push("bumped")
     true
 }
@@ -41,14 +41,14 @@ retire: fn(result: &Res) -> Bool {
 
 tick: fn(result: &Res) {
     if &result.count == {
-        .Val(count) -> count = count + 10
+        .Val(count) -> { count += 10 }
         None -> {}
     }
 }
 
 double: fn(slot: &Slot) {
     if &slot == {
-        .Held(value) -> value = value * 2
+        .Held(value) -> { value *= 2 }
         .Empty -> {}
     }
 }
@@ -65,7 +65,7 @@ run: fn() {
     slot := Slot.Held(21)
     double(slot)
     if slot == {
-        .Held(value) -> print(value)
+        .Held(value) -> { print(value) }
         .Empty -> print("empty")
     }
 }

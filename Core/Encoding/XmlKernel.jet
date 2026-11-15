@@ -6,7 +6,10 @@ use {
     stream: __core_encoding_stream
 }
 
-ErrorLocation: struct { line: Int?, column: Int? }
+ErrorLocation: struct {
+    line: Int?
+    column: Int?
+}
 
 checked: fn(value: Dyn) -> Dyn xml.XMLFault! {
     validate_tree(value) ?? return Err(err)
@@ -16,8 +19,14 @@ checked: fn(value: Dyn) -> Dyn xml.XMLFault! {
 validate_tree: fn(value: Dyn) xml.XMLFault! {
     if value == {
         .Null | .Bool(_) | .Int(_) | .Text(_) -> {}
-        .Array(values) -> { loop item in values -> validate_tree(item) ?? return Err(err) }
-        .Object(_) -> { loop entry in stream.object_entries(value) -> validate_tree(entry.value) ?? return Err(err) }
+        .Array(values) -> {
+            loop item in values -> validate_tree(item) ?? return Err(err)
+        }
+        .Object(_) -> {
+            loop entry in stream.object_entries(value) {
+                validate_tree(entry.value) ?? return Err(err)
+            }
+        }
         .Float(_) | .Bytes(_) -> {
             return Err(shape_error("XML tree cannot contain non-integer numbers or Bytes values"))
         }
@@ -99,8 +108,14 @@ public_error: fn(error: xml.XMLFault) -> XMLError Never! {
         .Shape -> XMLReason.Shape
         .Unsupported -> XMLReason.Unsupported
     }
-    XMLError{kind: kind, byte_offset: Val(error.offset), line: error.line,
-        column: error.column, path: error.path, reason: error.reason}
+    XMLError{
+        kind: kind,
+        byte_offset: Val(error.offset),
+        line: error.line,
+        column: error.column,
+        path: error.path,
+        reason: error.reason,
+    }
 }
 
 parse_options: fn(options: XMLParseOptions) -> xml.ParseOptions Never! {
@@ -110,13 +125,19 @@ parse_options: fn(options: XMLParseOptions) -> xml.ParseOptions Never! {
         .Resolve(values) -> xml.EntityPolicy.Resolve(values.copy())
     }
     limits: options.limits
-    xml.ParseOptions{entities: entities, limits: xml.Limits{
-        max_depth: limits.max_depth, max_nodes: limits.max_nodes,
-        max_attributes_per_element: limits.max_attributes_per_element,
-        max_name_bytes: limits.max_name_bytes, max_text_bytes: limits.max_text_bytes,
-        max_entity_declarations: limits.max_entity_declarations,
-        max_entity_depth: limits.max_entity_depth,
-        max_entity_replacement_bytes: limits.max_entity_replacement_bytes}}
+    xml.ParseOptions{
+        entities: entities,
+        limits: xml.Limits{
+            max_depth: limits.max_depth,
+            max_nodes: limits.max_nodes,
+            max_attributes_per_element: limits.max_attributes_per_element,
+            max_name_bytes: limits.max_name_bytes,
+            max_text_bytes: limits.max_text_bytes,
+            max_entity_declarations: limits.max_entity_declarations,
+            max_entity_depth: limits.max_entity_depth,
+            max_entity_replacement_bytes: limits.max_entity_replacement_bytes,
+        },
+    }
 }
 
 render_encoding: fn(value: XMLEncoding) -> xml.RenderEncoding Never! {
@@ -146,15 +167,14 @@ canonical_options: fn(value: XMLCanonical) -> xml.CanonicalOptions Never! {
 field_error: fn(error: XMLError) -> [FieldError] Never! {
     location := " at byte {error.byte_offset ?? 0}"
     if error.line == .Val(line) {
-        if error.column == .Val(column) -> location = "{location} (line {line}, column {column})"
-        else { location = "{location} (line {line})" }
-    } else if error.column == .Val(column) {
-        location = "{location} (column {column})"
-    }
+        if error.column == .Val(column) -> location = "{location} (line {line}, column {column})" else {
+            location = "{location} (line {line})"
+        }
+    } else if error.column == .Val(column) { location = "{location} (column {column})" }
     path := error.path
-    if path == "$" -> path = ""
-    else if path.starts_with("$.") -> path = path.slice(2, path.len())
-    else if path.starts_with("$") -> path = path.slice(1, path.len())
+    if path == "$" -> path = "" else if path.starts_with("$.") -> path = path.slice(2, path.len()) else if path.starts_with("$") {
+        path = path.slice(1, path.len())
+    }
     kind: reason_name(error.kind)
     [FieldError]{FieldError{path: path, reason: "XML {kind}{location}: {error.reason}"}}
 }
@@ -179,7 +199,7 @@ reason_name: fn(value: XMLReason) -> String Never! {
 #Test("XML validation rejects public floating point and byte tree carriers") {
     loop value in ([Dyn]{Dyn.Float(1.5), Dyn.Bytes([U8]{1})}) {
         if validate_tree(value) == {
-            .Err(error) -> assert(error.kind == xml.Reason.Shape)
+            .Err(error) -> { assert(error.kind == xml.Reason.Shape) }
             .Ok(_) -> panic("non-XML public carrier was accepted")
         }
     }

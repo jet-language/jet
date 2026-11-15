@@ -18,7 +18,9 @@ use {
 // The CPUs this process may run on, as the kernel lists them (`0-15`, `3,5-7`).
 allowed_cpus: fn() -> String IOError! {
     loop line in files.read("/proc/self/status").lines() {
-        if line.starts_with("Cpus_allowed_list:") -> return (line.split(":").to_list().get(1) ?? "").trim()
+        if line.starts_with("Cpus_allowed_list:") {
+            return (line.split(":").to_list().get(1) ?? "").trim()
+        }
     }
     ""
 }
@@ -32,7 +34,7 @@ why: fn(error: IOError) -> String {
 
 refuse: fn(exe: String, cpus: [Int]) {
     if process.run_spec(process.cmd([exe, "cpus"]).cpu_affinity(cpus)) == {
-        .Ok(_) -> print("refused: no")
+        .Ok(_) -> { print("refused: no") }
         .Err(error) -> print("refused: {why(error)}")
     }
 }

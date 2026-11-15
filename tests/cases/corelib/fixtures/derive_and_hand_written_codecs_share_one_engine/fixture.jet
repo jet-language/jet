@@ -1,8 +1,9 @@
-
 use json: core.encoding.json
 
 #Codable
-DerivedEmail: struct { address: String }
+DerivedEmail: struct {
+    address: String
+}
 
 HandEmail: struct {
     address: String
@@ -15,13 +16,14 @@ HandEmail: struct {
         decode: fn(tree: Dyn) -> HandEmail [FieldError]! {
             field: tree.field("address") ?? Dyn.Text("")
             address: field.text() ?? ""
-            return Ok(HandEmail{ address: address })
+            return Ok(HandEmail{address: address})
         }
     }
 }
+
 run: fn() {
-    derived: DerivedEmail{ address: "ada@jet" }
-    hand: HandEmail{ address: "ada@jet" }
+    derived: DerivedEmail{address: "ada@jet"}
+    hand: HandEmail{address: "ada@jet"}
     derived_wire: json.to_string(derived)
     hand_wire: json.to_string(hand)
     derived_bytes: derived_wire.bytes()

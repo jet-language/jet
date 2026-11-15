@@ -2,21 +2,23 @@
 // The converted call below is the successful counterpart: its declared rail
 // is accepted and therefore adds no mismatch report.
 #Error
-SourceErr: enum { One }
-
-#Error
-TargetErr: enum { One }
-
-#Error
-OtherErr: enum { One }
-
-inferred: fn() -> Int {
-    return Err("missing")
+SourceErr: enum {
+    One
 }
 
-explicit: fn() -> Int SourceErr! {
-    return Err(SourceErr.One)
+#Error
+TargetErr: enum {
+    One
 }
+
+#Error
+OtherErr: enum {
+    One
+}
+
+inferred: fn() -> Int { return Err("missing") }
+
+explicit: fn() -> Int SourceErr! { return Err(SourceErr.One) }
 
 impl TargetErr.From(SourceErr) {
     from: fn(error: SourceErr) -> TargetErr { return TargetErr.One }
@@ -27,9 +29,7 @@ converted: fn() -> Int TargetErr! {
     return Ok(0)
 }
 
-other: fn() -> Int OtherErr! {
-    return Err(OtherErr.One)
-}
+other: fn() -> Int OtherErr! { return Err(OtherErr.One) }
 
 job: fn() -> Int TargetErr! {
     inferred()

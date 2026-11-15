@@ -40,7 +40,9 @@ SemaLoopScan: struct {
 // Records the facts of every counted loop of `tree` that sema can prove
 // (none in a `#Scalar` function).
 sema_loop_facts: fn(tree: &BodyTree, scalar: Bool) Never! {
-    if scalar -> return
+    if scalar {
+        return
+    }
     loop index in 0..<tree.stmts.len() {
         if tree.stmts[index] == {
             .ForRange(label, local, start, end, step, exclusive, body, vectorization, span) -> {
@@ -103,7 +105,7 @@ sema_loop_scan_stmt: fn(tree: BodyTree, row: Int, scan: &SemaLoopScan) Never! {
             if bound.name == scan.local -> scan.readable = false
             sema_loop_scan_expr(tree, init, scan)
         }
-        .ExprStmt(value, _) -> sema_loop_scan_expr(tree, value, scan)
+        .ExprStmt(value, _) -> { sema_loop_scan_expr(tree, value, scan) }
         .If(condition, then_body, else_body, _, _) -> {
             sema_loop_scan_condition(tree, condition, scan)
             loop inner in then_body -> sema_loop_scan_stmt(tree, inner, scan)
@@ -115,15 +117,19 @@ sema_loop_scan_stmt: fn(tree: BodyTree, row: Int, scan: &SemaLoopScan) Never! {
             scan.early_exit = true
             if value == .Val(returned) -> sema_loop_scan_expr(tree, returned, scan)
         }
-        .Break(_, _) | .Continue(_, _) -> scan.early_exit = true
-        .Inline(rows, _) -> loop inner in rows -> sema_loop_scan_stmt(tree, inner, scan)
-        .Contract(_) | .ContractScope(_, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .BreakValue(_, _, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .DebugOnly(_, _) | .DeepCheck(_, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .UnsafeBlock(_, _, _) | .SentryPolicy(_, _, _) | .Impure(_, _) | .Reactive(_, _) | .Region(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .Defer(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> scan.readable = false
+        .Break(_, _) | .Continue(_, _) -> { scan.early_exit = true }
+        .Inline(rows, _) -> {
+            loop inner in rows -> sema_loop_scan_stmt(tree, inner, scan)
+        }
+        .Contract(_) | .ContractScope(_, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .BreakValue(_, _, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .DebugOnly(_, _) | .DeepCheck(_, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .UnsafeBlock(_, _, _) | .SentryPolicy(_, _, _) | .Impure(_, _) | .Reactive(_, _) | .Region(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .Defer(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> {
+            scan.readable = false
+        }
     }
 }
 
 sema_loop_scan_condition: fn(tree: BodyTree, condition: BodyIfCond, scan: &SemaLoopScan) Never! {
     if condition == {
-        .Plain(value) -> sema_loop_scan_expr(tree, value, scan)
+        .Plain(value) -> { sema_loop_scan_expr(tree, value, scan) }
         .And(left, right) -> {
             sema_loop_scan_condition(tree, left, scan)
             sema_loop_scan_condition(tree, right, scan)
@@ -140,9 +146,7 @@ sema_loop_scan_write: fn(tree: BodyTree, target: Int, scan: &SemaLoopScan) Never
         name: sema_loop_local_name(tree, base) ?? ""
         if sema_loop_scan_access(tree, base, index, scan) && name != "" {
             if !scan.written.contains(name) -> scan.written.push(name)
-        } else {
-            scan.independent = false
-        }
+        } else { scan.independent = false }
         sema_loop_scan_expr(tree, index, scan)
         return
     }
@@ -158,9 +162,7 @@ sema_loop_scan_access: fn(tree: BodyTree, base: Int, index: Int, scan: &SemaLoop
     if name == "" -> scan.aliasing_free = false
     at_index: (sema_loop_local_name(tree, index) ?? "") == scan.local
     length: sema_loop_fixed_length(body_type(tree, base)) ?? -1
-    if at_index && name != "" && length >= scan.extent {
-        scan.proven.push(index)
-    } else {
+    if at_index && name != "" && length >= scan.extent -> scan.proven.push(index) else {
         scan.effect_free = false
     }
     at_index
@@ -192,15 +194,19 @@ sema_loop_scan_expr: fn(tree: BodyTree, id: Int, scan: &SemaLoopScan) Never! {
             sema_loop_scan_expr(tree, lhs, scan)
             sema_loop_scan_expr(tree, rhs, scan)
         }
-        .CompareChain(operands, _, _) -> loop operand in operands -> sema_loop_scan_expr(tree, operand, scan)
+        .CompareChain(operands, _, _) -> {
+            loop operand in operands -> sema_loop_scan_expr(tree, operand, scan)
+        }
         .Unary(_, operand) -> {
             // An Int negation can overflow; Float and Bool operators cannot stop.
             ty: body_type(tree, id)
             if ty != Type.Float && ty != Type.Bool -> scan.effect_free = false
             sema_loop_scan_expr(tree, operand, scan)
         }
-        .Move(value) | .Clone(value, _) | .ExplicitCopy(value) -> sema_loop_scan_expr(tree, value, scan)
-        .Field(receiver, _) -> sema_loop_scan_expr(tree, receiver, scan)
+        .Move(value) | .Clone(value, _) | .ExplicitCopy(value) -> {
+            sema_loop_scan_expr(tree, value, scan)
+        }
+        .Field(receiver, _) -> { sema_loop_scan_expr(tree, receiver, scan) }
         .Index(base, index, _, _, _, _) -> {
             if scan.element == None -> scan.element = Val(body_type(tree, id))
             if !sema_loop_scan_access(tree, base, index, scan) {
@@ -214,6 +220,8 @@ sema_loop_scan_expr: fn(tree: BodyTree, id: Int, scan: &SemaLoopScan) Never! {
             scan.effect_free = false
             loop arg in args -> sema_loop_scan_expr(tree, arg.value, scan)
         }
-        .StrLit(_) | .InlineBlock(_) | .Uninit | .CtLit(_) | .GlobalShared(_, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .RequireStop(_, _, _) | .StructLit(_) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) -> scan.readable = false
+        .StrLit(_) | .InlineBlock(_) | .Uninit | .CtLit(_) | .GlobalShared(_, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .RequireStop(_, _, _) | .StructLit(_) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) -> {
+            scan.readable = false
+        }
     }
 }

@@ -52,8 +52,12 @@ sema_effect_type_shapes: fn(graph: SemaRegistrationGraph, source_module: SemaReg
     loop nominal in source_module.nominals {
         key: symbol_table_key(graph.symbols, nominal.symbol.id)
         shape := SemaEffectTypeShape{key: key.copy(), span: nominal.symbol.span, sources: [SemaEffectTypeSource]{}}
-        loop function in nominal.methods -> shape.sources.push(sema_effect_type_method_source(graph, function))
-        loop field in nominal.fields -> sema_effect_type_add_held(graph, module_identity, field.symbol.name, field.symbol.span, field.ty, shape.sources)
+        loop function in nominal.methods {
+            shape.sources.push(sema_effect_type_method_source(graph, function))
+        }
+        loop field in nominal.fields {
+            sema_effect_type_add_held(graph, module_identity, field.symbol.name, field.symbol.span, field.ty, shape.sources)
+        }
         loop variant in nominal.variants {
             payload: variant.payload_type ?? next
             sema_effect_type_add_held(graph, module_identity, variant.symbol.name, variant.symbol.span, payload, shape.sources)
@@ -71,12 +75,18 @@ sema_effect_type_shapes: fn(graph: SemaRegistrationGraph, source_module: SemaReg
         target: symbol_table_key(graph.symbols, target_id)
         span: implementation.symbol.span
         shape := SemaEffectTypeShape{key: target.copy(), span: span, sources: [SemaEffectTypeSource]{}}
-        loop function in implementation.methods -> shape.sources.push(sema_effect_type_method_source(graph, function))
+        loop function in implementation.methods {
+            shape.sources.push(sema_effect_type_method_source(graph, function))
+        }
         shapes.push(shape)
         trait_name: implementation.trait_name ?? next
         trait_symbol := implementation.trait_symbol
-        if trait_symbol == None -> trait_symbol = sema_type_graph_trait_symbol(graph, module_identity, trait_name)
-        if trait_symbol == .Val(symbol) -> shapes.push(sema_effect_type_impl_shape(symbol_table_key(graph.symbols, symbol.id), target, implementation.target_type_name, span))
+        if trait_symbol == None {
+            trait_symbol = sema_type_graph_trait_symbol(graph, module_identity, trait_name)
+        }
+        if trait_symbol == .Val(symbol) {
+            shapes.push(sema_effect_type_impl_shape(symbol_table_key(graph.symbols, symbol.id), target, implementation.target_type_name, span))
+        }
     }
     shapes
 }
@@ -104,34 +114,56 @@ sema_effect_type_add_held: fn(graph: SemaRegistrationGraph, module_identity: Mod
                 effect_name: sema_effect_parse_name(entry.name) ?? next
                 _ := sema_effect_set_add(effects, effect_name)
             }
-            if effects.len() > 0 -> sources.push(SemaEffectTypeSource{kind: "field", label: label.copy(), effects: effects, type_key: "", span: span})
+            if effects.len() > 0 {
+                sources.push(SemaEffectTypeSource{kind: "field", label: label.copy(), effects: effects, type_key: "", span: span})
+            }
         }
-        .Named(name) -> sema_effect_type_add_named(graph, module_identity, label, span, name, sources)
+        .Named(name) -> {
+            sema_effect_type_add_named(graph, module_identity, label, span, name, sources)
+        }
         .Apply(name, args) -> {
             sema_effect_type_add_named(graph, module_identity, label, span, name, sources)
-            loop arg in args -> sema_effect_type_add_held(graph, module_identity, label, span, arg, sources)
+            loop arg in args {
+                sema_effect_type_add_held(graph, module_identity, label, span, arg, sources)
+            }
         }
         .TraitObject(bounds) -> {
-            loop bound_name in bounds -> sema_effect_type_add_named(graph, module_identity, label, span, bound_name, sources)
+            loop bound_name in bounds {
+                sema_effect_type_add_named(graph, module_identity, label, span, bound_name, sources)
+            }
         }
-        .List(element) -> sema_effect_type_add_held(graph, module_identity, label, span, element, sources)
-        .FixedList(element, _) -> sema_effect_type_add_held(graph, module_identity, label, span, element, sources)
+        .List(element) -> {
+            sema_effect_type_add_held(graph, module_identity, label, span, element, sources)
+        }
+        .FixedList(element, _) -> {
+            sema_effect_type_add_held(graph, module_identity, label, span, element, sources)
+        }
         .Map(key, _, value) -> {
             sema_effect_type_add_held(graph, module_identity, label, span, key, sources)
             sema_effect_type_add_held(graph, module_identity, label, span, value, sources)
         }
-        .Shared(inner) -> sema_effect_type_add_held(graph, module_identity, label, span, inner, sources)
-        .Option(inner) -> sema_effect_type_add_held(graph, module_identity, label, span, inner, sources)
-        .Tagged(_, inner) | .Case(_, inner) -> sema_effect_type_add_held(graph, module_identity, label, span, inner, sources)
+        .Shared(inner) -> {
+            sema_effect_type_add_held(graph, module_identity, label, span, inner, sources)
+        }
+        .Option(inner) -> {
+            sema_effect_type_add_held(graph, module_identity, label, span, inner, sources)
+        }
+        .Tagged(_, inner) | .Case(_, inner) -> {
+            sema_effect_type_add_held(graph, module_identity, label, span, inner, sources)
+        }
         .Result(ok, err) -> {
             sema_effect_type_add_held(graph, module_identity, label, span, ok, sources)
             sema_effect_type_add_held(graph, module_identity, label, span, err, sources)
         }
         .Tuple(fields) -> {
-            loop field in fields -> sema_effect_type_add_held(graph, module_identity, label, span, field.ty, sources)
+            loop field in fields {
+                sema_effect_type_add_held(graph, module_identity, label, span, field.ty, sources)
+            }
         }
         .Union(members) -> {
-            loop member in members -> sema_effect_type_add_held(graph, module_identity, label, span, member, sources)
+            loop member in members {
+                sema_effect_type_add_held(graph, module_identity, label, span, member, sources)
+            }
         }
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> {}
     }
@@ -142,12 +174,18 @@ sema_effect_type_add_held: fn(graph: SemaRegistrationGraph, module_identity: Mod
 sema_effect_type_add_named: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, label: String, span: Span, name: String, sources: &[SemaEffectTypeSource]) Never! {
     key := ""
     if sema_type_graph_lookup_symbol(graph, module_identity, name) == .Val(resolved) {
-        if sema_type_graph_resolved_nominal_row(graph, resolved) == .Val(row) -> key = symbol_table_key(graph.symbols, graph.modules[row.module_index].nominals[row.row].symbol.id)
+        if sema_type_graph_resolved_nominal_row(graph, resolved) == .Val(row) {
+            key = symbol_table_key(graph.symbols, graph.modules[row.module_index].nominals[row.row].symbol.id)
+        }
     }
     if key == "" {
-        if sema_type_graph_trait_symbol(graph, module_identity, name) == .Val(symbol) -> key = symbol_table_key(graph.symbols, symbol.id)
+        if sema_type_graph_trait_symbol(graph, module_identity, name) == .Val(symbol) {
+            key = symbol_table_key(graph.symbols, symbol.id)
+        }
     }
-    if key == "" -> return
+    if key == "" {
+        return
+    }
     sources.push(SemaEffectTypeSource{kind: "field type", label: label.copy(), effects: [String]{}, type_key: key, span: span})
 }
 
@@ -169,11 +207,13 @@ SemaEffectTypeSolvedAt: struct {
 // `modules` publish for it; a source naming a type no module declares adds
 // nothing.
 sema_effect_graph_type_rows: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> [SemaEffectTypeRow] Never! {
-    solved_at := [String: SemaEffectTypeSolvedAt]{}
+    solved_at := [String:SemaEffectTypeSolvedAt]{}
     loop (module_row, checked) in modules {
-        loop (function_row, function) in checked.functions -> solved_at[function.key] = SemaEffectTypeSolvedAt{module_row: module_row, function_row: function_row}
+        loop (function_row, function) in checked.functions {
+            solved_at[function.key] = SemaEffectTypeSolvedAt{module_row: module_row, function_row: function_row}
+        }
     }
-    index := [String: Int]{}
+    index := [String:Int]{}
     rows := [SemaEffectTypeRow]{}
     loop source_module in graph.modules {
         loop shape in sema_effect_type_shapes(graph, source_module) {
@@ -211,7 +251,9 @@ sema_effect_graph_type_rows: fn(graph: SemaRegistrationGraph, modules: [SemaGrap
                 if from == target -> next
                 adds: rows[from].effects.copy()
                 loop effect_name in adds {
-                    if sema_effect_type_row_add(rows[target], effect_name, position) -> changed = true
+                    if sema_effect_type_row_add(rows[target], effect_name, position) {
+                        changed = true
+                    }
                 }
             }
         }

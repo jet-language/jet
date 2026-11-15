@@ -25,20 +25,26 @@ BuildStamp: struct {
 // clock: a missing stamp is a stale lock input.
 pkg_lock_build_stamp: fn(project_root: String, locked: Bool) -[FS, Exec, Time, Time.Wait]> BuildStamp LockError! {
     if pkg_lock_load(project_root) == {
-        .Val(lock) -> if lock.build_stamp == {
-            .Val(stamp) -> { return Ok(stamp) }
-            .None -> {}
+        .Val(lock) -> {
+            if lock.build_stamp == {
+                .Val(stamp) -> { return Ok(stamp) }
+                .None -> {}
+            }
         }
         .None -> {}
     }
-    if locked -> return Err(LockError.Invalid("locked build has no `[build.stamp]` in `{files.join(project_root, UNIFIED_LOCK_FILE)}`"))
+    if locked {
+        return Err(LockError.Invalid("locked build has no `[build.stamp]` in `{files.join(project_root, UNIFIED_LOCK_FILE)}`"))
+    }
     Ok(pkg_lock_capture_build_stamp(project_root))
 }
 
 // Pin provenance on every writer of the unified lock. Existing stamps are
 // immutable; a new lock gets one capture at the write boundary.
 pkg_lock_ensure_build_stamp: fn(project_root: String, lock: &LockFile) -[Exec, Time, Time.Wait]> {
-    if lock.build_stamp == None -> lock.build_stamp = Val(pkg_lock_capture_build_stamp(project_root))
+    if lock.build_stamp == None {
+        lock.build_stamp = Val(pkg_lock_capture_build_stamp(project_root))
+    }
 }
 
 pkg_lock_capture_build_stamp: fn(project_root: String) -[Exec, Time, Time.Wait]> BuildStamp {

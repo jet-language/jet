@@ -68,6 +68,7 @@ TestSettingError: struct {
 // step. Each `t.<setting>(…)` call appends `name<TAB>value<NL>` to it; any
 // run without it ignores the calls.
 TEST_SETTINGS_PLAN_ENV: ENV_JET_TEST_PLAN
+
 // Set in each child of a run to its settings, one `name<TAB>value<TAB>source`
 // line each: the child takes them as decided and runs no plan step of its own.
 TEST_SETTINGS_ENV: ENV_JET_TEST_SETTINGS
@@ -135,9 +136,7 @@ test_setting_row: fn(name: String) -> TestSettingRow? {
     None
 }
 
-test_setting_flag: fn(name: String) -> String Never! {
-    "--{name.replace("_", "-")}"
-}
+test_setting_flag: fn(name: String) -> String Never! { "--{name.replace("_", "-")}" }
 
 // The row a flag (`--shard` or `--shard=3/8`, `-u`, a level flag `-O2`)
 // names.
@@ -234,13 +233,11 @@ test_setting_value: fn(row: TestSettingRow, text: String) -> String? Never! {
             if row.name == "grade" && trimmed != "generated" -> return None
             Val(trimmed.copy())
         }
-        .Capture -> {
-            if {
-                trimmed == "failed" || trimmed == "failure" || trimmed == "failures" -> Val("failed")
-                trimmed == "all" -> Val("all")
-                trimmed == "none" || trimmed == "off" -> Val("none")
-                else -> None
-            }
+        .Capture -> if {
+            trimmed == "failed" || trimmed == "failure" || trimmed == "failures" -> Val("failed")
+            trimmed == "all" -> Val("all")
+            trimmed == "none" || trimmed == "off" -> Val("none")
+            else -> None
         }
         .Shard -> {
             parts: trimmed.split("/").to_list()
@@ -252,7 +249,9 @@ test_setting_value: fn(row: TestSettingRow, text: String) -> String? Never! {
         }
         .Levels -> {
             inner := trimmed.copy()
-            if inner.starts_with("[") && inner.ends_with("]") -> inner = inner.slice(1..<inner.len() - 1)
+            if inner.starts_with("[") && inner.ends_with("]") {
+                inner = inner.slice(1..<inner.len() - 1)
+            }
             levels := [String]{}
             loop part in inner.split(",").to_list() {
                 level: part.trim().replace("\"", "")
@@ -268,14 +267,10 @@ test_setting_value: fn(row: TestSettingRow, text: String) -> String? Never! {
             if trimmed.ends_with("ms") {
                 unit = 1
                 digits = trimmed.removesuffix("ms")
-            } else if trimmed.ends_with("s") {
-                digits = trimmed.removesuffix("s")
-            } else if trimmed.ends_with("m") {
+            } else if trimmed.ends_with("s") { digits = trimmed.removesuffix("s") } else if trimmed.ends_with("m") {
                 unit = 60000
                 digits = trimmed.removesuffix("m")
-            } else {
-                return None
-            }
+            } else { return None }
             // At most nine digits, so the product stays far inside Int.
             plain: digits.replace("_", "")
             if plain.bytes().len() > 9 -> return None
@@ -303,11 +298,26 @@ TestSettingSizeUnit: struct {
 
 // Longest suffix first, so `gib` is not read as `b`.
 TEST_SETTING_SIZE_UNITS: #run { [TestSettingSizeUnit]{
-    {suffix: "GiB", bytes: 1073741824}, {suffix: "gib", bytes: 1073741824}, {suffix: "GB", bytes: 1073741824}, {suffix: "gb", bytes: 1073741824},
-    {suffix: "MiB", bytes: 1048576}, {suffix: "mib", bytes: 1048576}, {suffix: "MB", bytes: 1048576}, {suffix: "mb", bytes: 1048576},
-    {suffix: "KiB", bytes: 1024}, {suffix: "kib", bytes: 1024}, {suffix: "KB", bytes: 1024}, {suffix: "kb", bytes: 1024},
-    {suffix: "G", bytes: 1073741824}, {suffix: "g", bytes: 1073741824}, {suffix: "M", bytes: 1048576}, {suffix: "m", bytes: 1048576},
-    {suffix: "K", bytes: 1024}, {suffix: "k", bytes: 1024}, {suffix: "B", bytes: 1}, {suffix: "b", bytes: 1},
+    {suffix: "GiB", bytes: 1073741824},
+    {suffix: "gib", bytes: 1073741824},
+    {suffix: "GB", bytes: 1073741824},
+    {suffix: "gb", bytes: 1073741824},
+    {suffix: "MiB", bytes: 1048576},
+    {suffix: "mib", bytes: 1048576},
+    {suffix: "MB", bytes: 1048576},
+    {suffix: "mb", bytes: 1048576},
+    {suffix: "KiB", bytes: 1024},
+    {suffix: "kib", bytes: 1024},
+    {suffix: "KB", bytes: 1024},
+    {suffix: "kb", bytes: 1024},
+    {suffix: "G", bytes: 1073741824},
+    {suffix: "g", bytes: 1073741824},
+    {suffix: "M", bytes: 1048576},
+    {suffix: "m", bytes: 1048576},
+    {suffix: "K", bytes: 1024},
+    {suffix: "k", bytes: 1024},
+    {suffix: "B", bytes: 1},
+    {suffix: "b", bytes: 1},
 } }
 
 // A nonnegative decimal of at most nine digits.
@@ -359,9 +369,13 @@ test_settings_shard_part: fn(settings: [TestSetting], part: Int) -> Int Never! {
     Int.parse(parts[part]) ?? 1
 }
 
-test_settings_shard_index: fn(settings: [TestSetting]) -> Int Never! { test_settings_shard_part(settings, 0) }
+test_settings_shard_index: fn(settings: [TestSetting]) -> Int Never! {
+    test_settings_shard_part(settings, 0)
+}
 
-test_settings_shard_count: fn(settings: [TestSetting]) -> Int Never! { test_settings_shard_part(settings, 1) }
+test_settings_shard_count: fn(settings: [TestSetting]) -> Int Never! {
+    test_settings_shard_part(settings, 1)
+}
 
 // The levels of the `optimize` value, in order; empty when unset.
 test_settings_levels: fn(settings: [TestSetting]) -> [String] Never! {
@@ -405,10 +419,14 @@ test_settings_parse_lines: fn(text: String, source: String) -> [TestSetting] Tes
         late: line.starts_with(TEST_SETTING_AFTER_RUN)
         parts: line.removeprefix(TEST_SETTING_AFTER_RUN).split("\t").to_list()
         row := test_setting_row(parts[0]) ?? return Err(TestSettingError{message: "`{parts[0]}` is not a `jet test` setting"})
-        if late -> return Err(TestSettingError{message: "`t.{row.name}(…)` comes after `t.run()`, whose tests already ran without it"})
+        if late {
+            return Err(TestSettingError{message: "`t.{row.name}(…)` comes after `t.run()`, whose tests already ran without it"})
+        }
         raw: if parts.len() > 1 -> parts[1].copy() else -> ""
         value: test_setting_value(row, raw) ?? return Err(TestSettingError{message: "`t.{row.name}(…)` needs {test_setting_hint(row)}, not `{raw}`"})
-        if !row.ported -> return Err(TestSettingError{message: "`t.{row.name}(…)` is not ported to the Jet test runner yet"})
+        if !row.ported {
+            return Err(TestSettingError{message: "`t.{row.name}(…)` is not ported to the Jet test runner yet"})
+        }
         from: if parts.len() > 2 -> parts[2].copy() else -> source.copy()
         test_settings_put(settings, TestSetting{name: row.name.move(), value: value, source: from})
     }

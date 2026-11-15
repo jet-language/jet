@@ -23,7 +23,8 @@ run: fn() {
     work: files.join(root, "work")
     files.create_dir_all(work)
     w: git.repo(work)
-    loop line in [Sh{"git init -q"}, Sh{"git config user.name lander"}, Sh{"git config user.email lander@example.com"}] {
+    loop line in
+        [Sh{"git init -q"}, Sh{"git config user.name lander"}, Sh{"git config user.email lander@example.com"}] {
         if !w.spec(line).run().success -> return print("git is not available")
     }
     files.write(files.join(work, "a.txt"), "one\n")

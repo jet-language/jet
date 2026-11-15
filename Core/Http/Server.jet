@@ -32,6 +32,7 @@ Get: struct {
         sites: [.Method]
     }
 }
+
 Post: struct {
     path: String | Path
 
@@ -39,6 +40,7 @@ Post: struct {
         sites: [.Method]
     }
 }
+
 Put: struct {
     path: String | Path
 
@@ -46,6 +48,7 @@ Put: struct {
         sites: [.Method]
     }
 }
+
 Delete: struct {
     path: String | Path
 
@@ -53,6 +56,7 @@ Delete: struct {
         sites: [.Method]
     }
 }
+
 Patch: struct {
     path: String | Path
 
@@ -60,6 +64,7 @@ Patch: struct {
         sites: [.Method]
     }
 }
+
 Head: struct {
     path: String | Path
 
@@ -67,6 +72,7 @@ Head: struct {
         sites: [.Method]
     }
 }
+
 Options: struct {
     path: String | Path
 
@@ -74,6 +80,7 @@ Options: struct {
         sites: [.Method]
     }
 }
+
 // `#Server.Custom(token, path)`: a route of the custom method `token`, a
 // static String kept in its exact case (core.http `__method_token_check`).
 Custom: struct {
@@ -86,24 +93,39 @@ Custom: struct {
 }
 
 C_MAX_HEAD_BYTES: 32768
+
 C_MAX_LINE_BYTES: 8192
+
 C_MAX_FIELDS: 100
+
 C_MAX_BODY_BYTES: 1048576
+
 C_MAX_CHUNK_DIGITS: 8
+
 C_READ_BYTES: 16384
+
 C_IO_NS: 30000000000
+
 C_ACCEPT_ONCE_NS: 5000000000
+
 C_ACCEPT_POLL_NS: 50000000
+
 C_MAX_REQUEST_ID_BYTES: 128
+
 // Connections served at once, and from one peer address: one past either is
 // answered 503 and closed.
 C_MAX_CONNECTIONS: 10000
+
 C_MAX_PEER_CONNECTIONS: 256
+
 C_DRAIN_POLL_MS: 5
+
 // The built-in readiness probe's path (HTTPReadiness); a route of the app on
 // it takes its place.
 C_READY_PATH: "/__jet/ready"
+
 C_ACCEPT_BACKOFF_MIN_MS: 5
+
 C_ACCEPT_BACKOFF_MAX_MS: 1000
 
 HTTPCorsOrigins: enum {
@@ -160,7 +182,9 @@ HTTPReadiness: enum {
     Draining
     Closed
 
-    impl Display { display: fn(self) -> String { readiness_word(self) } }
+    impl Display {
+        display: fn(self) -> String { readiness_word(self) }
+    }
 }
 
 priv HTTPHandlerCell: struct {
@@ -230,7 +254,9 @@ HTTPMux: struct {
 // a refused route names its line.
 priv route_add: fn(mux: HTTPMux, method: String, pattern: String, handler: HTTPHandler, contract: String, at: SourceLocation) Never! {
     parsed: route_parse(pattern)
-    if parsed.problem != "" -> route_stop("E2805", "Invalid HTTP route `{pattern}`: {parsed.problem}.", at)
+    if parsed.problem != "" {
+        route_stop("E2805", "Invalid HTTP route `{pattern}`: {parsed.problem}.", at)
+    }
     mux_register(mux, method, pattern, parsed.segments, handler, contract, at)
 }
 
@@ -238,7 +264,9 @@ priv route_add: fn(mux: HTTPMux, method: String, pattern: String, handler: HTTPH
 // gets its path inputs from the pattern registered.
 priv route_add_dynamic: fn(mux: HTTPMux, method: String, pattern: String, handler: HTTPHandler, contract: String, at: SourceLocation) Never! {
     parsed: route_parse(pattern)
-    if parsed.problem != "" -> route_stop("E2805", "Invalid HTTP route `{pattern}`: {parsed.problem}.", at)
+    if parsed.problem != "" {
+        route_stop("E2805", "Invalid HTTP route `{pattern}`: {parsed.problem}.", at)
+    }
     checked: route_contract(method, pattern, parsed.segments, contract, at)
     mux_register(mux, method, pattern, parsed.segments, handler, checked, at)
 }
@@ -248,7 +276,9 @@ priv route_add_dynamic: fn(mux: HTTPMux, method: String, pattern: String, handle
 // completes the contract (`"method":""`). A static token was checked while
 // building and registers as any verb does.
 priv route_add_custom: fn(mux: HTTPMux, method: String, pattern: String, handler: HTTPHandler, contract: String, at: SourceLocation) Never! {
-    if http.__method_token_check(method) == .Err(refused) -> route_stop("E2808", "HTTP route method `{method}` is refused: {refused.reason}.", at)
+    if http.__method_token_check(method) == .Err(refused) {
+        route_stop("E2808", "HTTP route method `{method}` is refused: {refused.reason}.", at)
+    }
     route_add_dynamic(mux, method, pattern, handler, contract, at)
 }
 
@@ -261,7 +291,9 @@ priv layer_add: fn(mux: HTTPMux, layer: &&fn(HTTPHandler) -[Net, FS.Read]> HTTPH
 priv mux_register: fn(mux: HTTPMux, method: String, pattern: String, segments: [__HTTPSegment], handler: HTTPHandler, contract: String, at: SourceLocation) Never! {
     shape: route_shape(segments)
     loop existing in mux_routes(mux) {
-        if existing.method == method && route_shape(existing.segments) == shape -> route_stop("E2804", "Two routes both match `{method} {pattern}`; the other is `{existing.pattern}` at {existing.at.file}:{existing.at.line}.", at)
+        if existing.method == method && route_shape(existing.segments) == shape {
+            route_stop("E2804", "Two routes both match `{method} {pattern}`; the other is `{existing.pattern}` at {existing.at.file}:{existing.at.line}.", at)
+        }
     }
     guard := mux.__state.guard_edit()
     guard.value.routes.push(HTTPRoute{method: method, pattern: pattern, segments: segments, handler: handler, contract: contract, at: at})
@@ -287,7 +319,7 @@ priv HTTPServerState: struct {
     live: Int{0}
     refusing: Int{0}
     completed: Int{0}
-    peers: [String: Int]{}
+    peers: [String:Int]{[String:Int]{}}
     grace_ns: Int{-1}
     drained: Bool{false}
 }
@@ -332,13 +364,13 @@ HTTPServer: struct {
             listener: server_listener(self) ?? break
             if listener.accept(deadline: Duration{ns: C_ACCEPT_POLL_NS}) == {
                 .Ok(stream) -> {
-                    accepted = accepted + 1
+                    accepted += 1
                     backoff = 0
                     peer: peer_host(stream)
                     if server_stopping(self) {
                         // A shutdown began while this accept waited: the
                         // server reads Draining, so the connection is told so.
-                        overloaded = overloaded + 1
+                        overloaded += 1
                         take_while_draining(self, stream)
                     } else if admit(self.__state, peer) {
                         state: self.__state
@@ -348,10 +380,12 @@ HTTPServer: struct {
                         // The stream reaches its task in a one-item list,
                         // as it reaches the TLS handshake.
                         handoff: Shared{[TCPStream]{stream}}
-                        connection: task &&handoff { serve_admitted(state, handoff, peer, tls, mux, deadline) }
+                        connection: task &&handoff {
+                            serve_admitted(state, handoff, peer, tls, mux, deadline)
+                        }
                         connection.detach()
                     } else {
-                        overloaded = overloaded + 1
+                        overloaded += 1
                         refuse(stream, self.__tls)
                     }
                 }
@@ -359,9 +393,7 @@ HTTPServer: struct {
                     // A cancelled accept (the serving task's cancel, or the
                     // process's on a delivered `process.on_signal` signal)
                     // stops serving as a shutdown does: the report stands.
-                    if accept_cancelled(error) {
-                        running = false
-                    } else if accept_transient(error) {
+                    if accept_cancelled(error) -> running = false else if accept_transient(error) {
                         // A failed accept the listener recovers from waits,
                         // doubling from 5 ms to 1 s, instead of retrying at
                         // once; the connections being served go on.
@@ -392,17 +424,15 @@ HTTPServer: struct {
                 if server_listener(self) == .Val(listener) {
                     if listener.accept(deadline: Duration{ns: C_DRAIN_POLL_MS * 1000000}) == {
                         .Ok(stream) -> {
-                            accepted = accepted + 1
-                            overloaded = overloaded + 1
+                            accepted += 1
+                            overloaded += 1
                             take_while_draining(self, stream)
                         }
                         .Err(error) -> {
                             if !accept_timed_out(error) -> core.tasks.sleep(C_DRAIN_POLL_MS)
                         }
                     }
-                } else {
-                    core.tasks.sleep(C_DRAIN_POLL_MS)
-                }
+                } else { core.tasks.sleep(C_DRAIN_POLL_MS) }
             }
         }
         server_close_listener(self)
@@ -413,15 +443,15 @@ HTTPServer: struct {
         Ok(report)
     }
 
-    wait: fn(self) -[Net, FS.Read, Time]> HTTPShutdownReport HTTPError! {
-        self.serve()
-    }
+    wait: fn(self) -[Net, FS.Read, Time]> HTTPShutdownReport HTTPError! { self.serve() }
 
     // `serve` answers the connections in flight before it reports, for at
     // most `grace` (none by default), and shutdown waits for that report.
     shutdown: fn(self, grace: Duration{0ms}) -[Net]> HTTPShutdownReport HTTPError! {
         phase: server_request_stop(self, grace)
-        if phase == 0 -> return Ok(HTTPShutdownReport{accepted: 0, overloaded: 0, completed: 0, cancelled: 0})
+        if phase == 0 {
+            return Ok(HTTPShutdownReport{accepted: 0, overloaded: 0, completed: 0, cancelled: 0})
+        }
         if phase == 1 {
             _: self.__finished.receive() ?? 0
             server_signal_done(self.__done).drop("the server holds its own finish end")
@@ -432,9 +462,7 @@ HTTPServer: struct {
 
 // The finish signal; the server holds the receiving end, so only a cancelled
 // wait refuses it.
-priv server_signal_done: fn(done: Sender<Int>) Err! {
-    done.send(1)
-}
+priv server_signal_done: fn(done: Sender<Int>) Err! { done.send(1) }
 
 priv server_begin: fn(server: HTTPServer) -> Bool Never! {
     guard := server.__state.guard_edit()
@@ -545,7 +573,7 @@ priv admit: fn(state: Shared<HTTPServerState>, peer: String) -> Bool Never! {
     guard := state.guard_edit()
     held: guard.value.peers.get(peer) ?? 0
     if guard.value.live >= C_MAX_CONNECTIONS || held >= C_MAX_PEER_CONNECTIONS -> return false
-    guard.value.live = guard.value.live + 1
+    guard.value.live += 1
     guard.value.peers[peer] = held + 1
     true
 }
@@ -555,8 +583,10 @@ priv admit: fn(state: Shared<HTTPServerState>, peer: String) -> Bool Never! {
 priv admit_refusing: fn(state: Shared<HTTPServerState>, peer: String) -> Bool Never! {
     guard := state.guard_edit()
     held: guard.value.peers.get(peer) ?? 0
-    if guard.value.live + guard.value.refusing >= C_MAX_CONNECTIONS || held >= C_MAX_PEER_CONNECTIONS -> return false
-    guard.value.refusing = guard.value.refusing + 1
+    if guard.value.live + guard.value.refusing >= C_MAX_CONNECTIONS || held >= C_MAX_PEER_CONNECTIONS {
+        return false
+    }
+    guard.value.refusing += 1
     guard.value.peers[peer] = held + 1
     true
 }
@@ -564,11 +594,7 @@ priv admit_refusing: fn(state: Shared<HTTPServerState>, peer: String) -> Bool Ne
 // One connection of `peer` gives its count back.
 priv peer_leave: fn(state: &HTTPServerState, peer: String) Never! {
     held: state.peers.get(peer) ?? 1
-    if held <= 1 {
-        _: state.peers.remove(peer)
-    } else {
-        state.peers[peer] = held - 1
-    }
+    if held <= 1 -> _: state.peers.remove(peer) else -> state.peers[peer] = held - 1
 }
 
 // One admitted connection's task: the TLS handshake and its request, then its
@@ -578,8 +604,8 @@ priv serve_admitted: fn(state: Shared<HTTPServerState>, handoff: Shared<[TCPStre
     #Shield {
         answered: serve_taken(state, handoff, tls, mux, deadline, false)
         guard := state.guard_edit()
-        guard.value.live = guard.value.live - 1
-        if answered -> guard.value.completed = guard.value.completed + 1
+        guard.value.live -= 1
+        if answered -> guard.value.completed += 1
         peer_leave(guard.value, peer)
     }
 }
@@ -596,9 +622,7 @@ priv take_while_draining: fn(server: HTTPServer, stream: &&TCPStream) Never! -[N
         handoff: Shared{[TCPStream]{stream}}
         refusal: task &&handoff { serve_refusing(state, handoff, peer, tls, mux, deadline) }
         refusal.detach()
-    } else {
-        refuse(stream, server.__tls)
-    }
+    } else { refuse(stream, server.__tls) }
 }
 
 // A connection taken while draining: its request is answered 503, or by the
@@ -607,7 +631,7 @@ priv serve_refusing: fn(state: Shared<HTTPServerState>, handoff: Shared<[TCPStre
     #Shield {
         _: serve_taken(state, handoff, tls, mux, deadline, true)
         guard := state.guard_edit()
-        guard.value.refusing = guard.value.refusing - 1
+        guard.value.refusing -= 1
         peer_leave(guard.value, peer)
     }
 }
@@ -734,19 +758,17 @@ response: fn(status: Int, body: String) -> HTTPResponse Never! {
 
 // Head policy stays in Jet: an out-of-range status is a 500.
 response_body: fn(status: Int, body: &&Body, headers: &&Headers) -> HTTPResponse Never! {
-    if status < 100 || status > 599 -> return core.http.make_response(500, core.http.body_text(status_text(500)), headers)
+    if status < 100 || status > 599 {
+        return core.http.make_response(500, core.http.body_text(status_text(500)), headers)
+    }
     core.http.make_response(status, body, headers)
 }
 
 // The server's own error page body, `404 Not Found`: the status and its
 // reason from the one table, `http.reason_phrase`, that the status line uses.
-priv status_text: fn(status: Int) -> String Never! {
-    "{status} {http.reason_phrase(status)}"
-}
+priv status_text: fn(status: Int) -> String Never! { "{status} {http.reason_phrase(status)}" }
 
-priv status_page: fn(status: Int) -> HTTPResponse Never! {
-    response(status, status_text(status))
-}
+priv status_page: fn(status: Int) -> HTTPResponse Never! { response(status, status_text(status)) }
 
 json: fn<T: Encode>(status: Int, body: T) -> HTTPResponse HTTPError! {
     text: json_codec.to_string(body.encode()) ?? return Err(HTTPError.InvalidFraming)
@@ -833,15 +855,12 @@ cors_policy: fn(origins: [String] | HTTPCorsOrigins, methods: [String]{[String]{
     }
 }
 
-
 access_log: fn(request: HTTPRequest, status: Int) -[Net]> String Never! {
     template: access_log_template(request)
     access_log_parts(request.method, request.path, template, status)
 }
 
-access_log_template: fn(request: HTTPRequest) -> String? Never! {
-    request.__route_template.copy()
-}
+access_log_template: fn(request: HTTPRequest) -> String? Never! { request.__route_template.copy() }
 
 access_log_parts: fn(method: String, path: String, template: String?, status: Int) -> String Never! {
     route: template ?? access_log_path(path)
@@ -851,11 +870,10 @@ access_log_parts: fn(method: String, path: String, template: String?, status: In
 access_log_path: fn(path: String) -> String Never! {
     raw: path.bytes()
     end := 0
-    loop end < raw.len() && raw[end] != (U8{63}) -> end = end + 1
+    loop end < raw.len() && raw[end] != (U8{63}) -> end += 1
     if end == raw.len() -> return path.copy()
     String.from_bytes(raw.slice(0, end)) ?? panic("query separator is not a UTF-8 boundary")
 }
-
 
 cors_join: fn(values: [String], fallback: &&String) -> String Never! {
     if values.len() == 0 -> return fallback
@@ -894,20 +912,24 @@ priv cors_apply: fn(policy: HTTPCorsPolicy, next: HTTPHandler, request: HTTPRequ
         fields = http.headers_set(fields, "access-control-allow-origin", allowed)
         fields = http.headers_set(fields, "access-control-allow-methods", policy.allow_methods)
         fields = http.headers_set(fields, "access-control-allow-headers", policy.allow_headers)
-        if policy.credentials -> fields = http.headers_set(fields, "access-control-allow-credentials", "true")
-        if policy.max_age_secs > 0 -> fields = http.headers_set(fields, "access-control-max-age", "{policy.max_age_secs}")
+        if policy.credentials {
+            fields = http.headers_set(fields, "access-control-allow-credentials", "true")
+        }
+        if policy.max_age_secs > 0 {
+            fields = http.headers_set(fields, "access-control-max-age", "{policy.max_age_secs}")
+        }
         empty: http.body_empty()
         return Ok(response_body(204, empty, fields))
     }
     answered := next.handle(request) ?? return Err(err)
     answered.headers = http.headers_set(answered.headers, "access-control-allow-origin", allowed)
     vary: answered.header("vary") ?? ""
-    if vary == "" {
-        answered.headers = http.headers_set(answered.headers, "vary", "origin")
-    } else if !list_has_token(vary, "origin") {
+    if vary == "" -> answered.headers = http.headers_set(answered.headers, "vary", "origin") else if !list_has_token(vary, "origin") {
         answered.headers = http.headers_set(answered.headers, "vary", "{vary}, origin")
     }
-    if policy.credentials -> answered.headers = http.headers_set(answered.headers, "access-control-allow-credentials", "true")
+    if policy.credentials {
+        answered.headers = http.headers_set(answered.headers, "access-control-allow-credentials", "true")
+    }
     Ok(answered)
 }
 
@@ -918,7 +940,9 @@ priv request_id_handler: fn(next: HTTPHandler) -> HTTPHandler Never! {
 priv request_id_apply: fn(next: HTTPHandler, request: HTTPRequest) -> HTTPResponse HTTPError! {
     id: request.header("x-request-id") ?? ""
     answered := next.handle(request) ?? return Err(err)
-    if id != "" && answered.header("x-request-id") == None -> answered.headers = http.headers_set(answered.headers, "x-request-id", id)
+    if id != "" && answered.header("x-request-id") == None {
+        answered.headers = http.headers_set(answered.headers, "x-request-id", id)
+    }
     Ok(answered)
 }
 
@@ -937,16 +961,14 @@ priv mux_layers: fn(mux: HTTPMux) -> [Shared<HTTPLayerCell>] Never! {
 
 priv mux_next_seq: fn(mux: HTTPMux) -> Int Never! {
     guard := mux.__state.guard_edit()
-    guard.value.request_seq = guard.value.request_seq + 1
+    guard.value.request_seq += 1
     guard.value.request_seq
 }
 
 // A served request's handler run, cancellation deferred until it answers.
 priv dispatch_shielded: fn(mux: HTTPMux, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
     reply := status_page(500)
-    #Shield {
-        reply = __dispatch(mux, request)
-    }
+    #Shield { reply = __dispatch(mux, request) }
     reply
 }
 
@@ -956,7 +978,7 @@ __dispatch: fn(mux: HTTPMux, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse
     current := __handler(fn(routed: HTTPRequest) { select(mux, routed) })
     i := layers.len()
     loop i > 0 {
-        i = i - 1
+        i -= 1
         layer: layers[i].guard_read()
         current = layer.value.wrap(current)
     }
@@ -1028,11 +1050,15 @@ priv mux_pick: fn(mux: HTTPMux, request: HTTPRequest) -> HTTPPick Never! {
         route: routes[index]
         if !route_matches(route.segments, segments) -> next
         if !list_contains(matched, route.method) -> matched.push(route.method)
-        if route.method != request.method && !(request.method == "HEAD" && route.method == "GET") -> next
+        if route.method != request.method && !(request.method == "HEAD" && route.method == "GET") {
+            next
+        }
         if best < 0 || route_better(route.segments, routes[best].segments) -> best = index
     }
     if best < 0 {
-        if matched.len() == 0 -> return HTTPPick{answer: Val(status_page(404)), index: -1, request: request, routes: routes}
+        if matched.len() == 0 {
+            return HTTPPick{answer: Val(status_page(404)), index: -1, request: request, routes: routes}
+        }
         refused := status_page(405)
         refused.headers = http.headers_set(refused.headers, "Allow", allow_value(matched))
         return HTTPPick{answer: Val(refused), index: -1, request: request, routes: routes}
@@ -1067,7 +1093,7 @@ priv sorted_text: fn(values: [String]) -> [String] Never! {
     out := [String]{}
     loop value in values {
         at := out.len()
-        loop at > 0 && text_less(value, out[at - 1]) -> at = at - 1
+        loop at > 0 && text_less(value, out[at - 1]) -> at -= 1
         rebuilt := [String]{}
         loop i in 0..<out.len() {
             if i == at -> rebuilt.push(value.copy())
@@ -1085,7 +1111,7 @@ priv text_less: fn(left: String, right: String) -> Bool Never! {
     i := 0
     loop i < a.len() && i < b.len() {
         if a[i] != b[i] -> return (Int{a[i]}) < (Int{b[i]})
-        i = i + 1
+        i += 1
     }
     a.len() < b.len()
 }
@@ -1116,7 +1142,7 @@ priv comma_items: fn(list: String) -> [String] Never! {
             if item != "" -> out.push(item)
             start = i + 1
         }
-        i = i + 1
+        i += 1
     }
     out
 }
@@ -1154,17 +1180,21 @@ priv route_parse: fn(pattern: String) -> HTTPParsedRoute Never! {
             piece: raw.slice(start, i)
             if piece.len() == 0 -> return route_problem("empty path segment")
             if closed -> return route_problem("a catch-all must be the last segment")
-            if http.index_byte(piece, 123) >= 0 || http.index_byte(piece, 125) >= 0 -> return route_problem("braces are not route syntax; write `:name`")
+            if http.index_byte(piece, 123) >= 0 || http.index_byte(piece, 125) >= 0 {
+                return route_problem("braces are not route syntax; write `:name`")
+            }
             first: Int{piece[0]}
             if first == 58 || first == 42 {
                 name_bytes: piece.slice(1, piece.len())
-                if !route_name_ok(name_bytes) -> return route_problem("a parameter needs a name of letters, digits and `_`")
+                if !route_name_ok(name_bytes) {
+                    return route_problem("a parameter needs a name of letters, digits and `_`")
+                }
                 name: String.from_bytes(name_bytes) ?? return route_problem("parameter name is not UTF-8")
-                if list_contains(names, name) -> return route_problem("parameter `{name}` appears twice")
+                if list_contains(names, name) {
+                    return route_problem("parameter `{name}` appears twice")
+                }
                 names.push(name.copy())
-                if first == 58 {
-                    segments.push(__HTTPSegment.Param(name))
-                } else {
+                if first == 58 -> segments.push(__HTTPSegment.Param(name)) else {
                     segments.push(__HTTPSegment.CatchAll(name))
                     closed = true
                 }
@@ -1174,7 +1204,7 @@ priv route_parse: fn(pattern: String) -> HTTPParsedRoute Never! {
             }
             start = i + 1
         }
-        i = i + 1
+        i += 1
     }
     HTTPParsedRoute{segments: segments, problem: ""}
 }
@@ -1240,9 +1270,7 @@ priv contract_set: fn(fields: [(key: String, value: Dyn)], name: String, value: 
         if pair.key == name {
             out.push((key: name.copy(), value: value.copy()))
             found = true
-        } else {
-            out.push(pair.copy())
-        }
+        } else { out.push(pair.copy()) }
     }
     if !found -> panic("checked HTTP route descriptor has no `{name}`")
     out
@@ -1262,7 +1290,9 @@ priv route_complete_contract: fn(method: String, pattern: String, segments: [__H
     loop segment in segments {
         name: if segment == {
             .Param(found) | .CatchAll(found) -> found
-            .Static(_) -> { next }
+            .Static(_) -> {
+                next
+            }
         }
         bound := false
         loop parameter in parameters {
@@ -1282,8 +1312,12 @@ priv route_complete_contract: fn(method: String, pattern: String, segments: [__H
         catch_all := Bool?{None}
         loop segment in segments {
             if segment == {
-                .Param(candidate) -> { if candidate == name -> catch_all = Val(false) }
-                .CatchAll(candidate) -> { if candidate == name -> catch_all = Val(true) }
+                .Param(candidate) -> {
+                    if candidate == name -> catch_all = Val(false)
+                }
+                .CatchAll(candidate) -> {
+                    if candidate == name -> catch_all = Val(true)
+                }
                 .Static(_) -> {}
             }
         }
@@ -1316,12 +1350,22 @@ priv route_require_contract: fn(method: String, pattern: String, contract: Strin
     }
     names: [String]{"method", "pattern", "path", "operation_id", "summary", "parameters", "request_body", "responses", "security", "provenance"}
     loop field in names {
-        if contract_kind(fields, field) == "" -> route_stop("E2805", "{invalid} has no `{field}`.", at)
+        if contract_kind(fields, field) == "" {
+            route_stop("E2805", "{invalid} has no `{field}`.", at)
+        }
     }
-    if (contract_text(fields, "method") ?? "") != method || (contract_text(fields, "pattern") ?? "") != pattern -> route_stop("E2805", "{invalid} names another route.", at)
-    if contract_kind(fields, "responses") != "array" -> route_stop("E2805", "{invalid} has invalid responses.", at)
-    if contract_kind(fields, "parameters") != "array" -> route_stop("E2805", "{invalid} has invalid parameters.", at)
-    if contract_kind(fields, "security") != "array" -> route_stop("E2805", "{invalid} has an invalid security policy.", at)
+    if (contract_text(fields, "method") ?? "") != method || (contract_text(fields, "pattern") ?? "") != pattern {
+        route_stop("E2805", "{invalid} names another route.", at)
+    }
+    if contract_kind(fields, "responses") != "array" {
+        route_stop("E2805", "{invalid} has invalid responses.", at)
+    }
+    if contract_kind(fields, "parameters") != "array" {
+        route_stop("E2805", "{invalid} has invalid parameters.", at)
+    }
+    if contract_kind(fields, "security") != "array" {
+        route_stop("E2805", "{invalid} has an invalid security policy.", at)
+    }
     body: contract_member(fields, "request_body") ?? route_stop("E2805", "{invalid} has an invalid request body.", at)
     valid: if body == {
         .Null -> true
@@ -1358,7 +1402,7 @@ priv path_segments: fn(path: String) -> [String]? Never! {
             out.push(piece)
             start = i + 1
         }
-        i = i + 1
+        i += 1
     }
     Val(out)
 }
@@ -1377,10 +1421,10 @@ priv segment_decode: fn(raw: [U8]) -> String? Never! {
             value: hi * 16 + lo
             if value == 47 -> return None
             out.push(U8{value})
-            i = i + 3
+            i += 3
         } else {
             out.push(raw[i])
-            i = i + 1
+            i += 1
         }
     }
     text: String.from_bytes(out) ?? return None
@@ -1408,12 +1452,10 @@ priv route_params: fn(pattern: [__HTTPSegment], path: [String]) -> [Header] Neve
     loop i in 0..<pattern.len() {
         if pattern[i] == {
             .Static(_) -> {}
-            .Param(name) -> out.push(Header{name: name, value: path[i]})
+            .Param(name) -> { out.push(Header{name: name, value: path[i]}) }
             .CatchAll(name) -> {
                 rest := ""
-                loop j in i..<path.len() {
-                    rest = if j == i -> path[j] else -> "{rest}/{path[j]}"
-                }
+                loop j in i..<path.len() -> rest = if j == i -> path[j] else -> "{rest}/{path[j]}"
                 out.push(Header{name: name, value: rest})
             }
         }
@@ -1481,7 +1523,7 @@ priv HTTPSecure: struct {
     // Whether every byte was sent within the deadline.
     write_all: fn([U8], Duration) -[Net, Time.Wait]> Bool
     // Sends close_notify and closes the socket the stream owns.
-    close: fn() -[Net, Time.Wait]> Unit
+    close: fn() -[Net, Time.Wait]> ()
 }
 
 // The accepted stream, which the connection now owns, after the server
@@ -1530,9 +1572,7 @@ priv serve_connection: fn(stream: HTTPConn, mux: HTTPMux, deadline: Duration?, s
                 handling: task { dispatch_shielded(mux, routed) }
                 reply: handling.join() ?? status_page(500)
                 upgraded = http.cell_upgraded(cell)
-                if upgraded {
-                    answered = true
-                } else if !drain_ended(server) {
+                if upgraded -> answered = true else if !drain_ended(server) {
                     bytes: response_wire(request.method, reply) ?? error_wire(500)
                     answered = __send(stream, bytes, rt.clock_mono_ns() + budget)
                 }
@@ -1585,7 +1625,7 @@ __send: fn(stream: HTTPConn, bytes: [U8], end_ns: Int) -[Net, Time.Wait]> Bool N
 
 // Append what the peer sends next; false at end of stream. Both streams
 // append with read_into, so a connection's reads reuse their buffers.
-priv wire_fill: fn(stream: HTTPConn, &wire: HTTPWire) -[Net, Time.Wait]> Bool HTTPFault! {
+priv wire_fill: fn(stream: HTTPConn, wire: &HTTPWire) -[Net, Time.Wait]> Bool HTTPFault! {
     remaining: wire.end_ns - rt.clock_mono_ns()
     if remaining <= 0 -> return Err(.Reply(408))
     if stream.tls == .Val(secure) {
@@ -1610,7 +1650,7 @@ priv wire_fill: fn(stream: HTTPConn, &wire: HTTPWire) -[Net, Time.Wait]> Bool HT
 }
 
 // Fill until `need` bytes are buffered; a short stream is a bad request.
-priv wire_need: fn(stream: HTTPConn, &wire: HTTPWire, need: Int) HTTPFault! -[Net, Time.Wait]> {
+priv wire_need: fn(stream: HTTPConn, wire: &HTTPWire, need: Int) HTTPFault! -[Net, Time.Wait]> {
     loop wire.buffer.len() < need {
         more: wire_fill(stream, wire) ?? return Err(err)
         if !more -> return Err(.Reply(400))
@@ -1619,7 +1659,7 @@ priv wire_need: fn(stream: HTTPConn, &wire: HTTPWire, need: Int) HTTPFault! -[Ne
 }
 
 // The index of the CRLF ending the line at `from`, filling as needed.
-priv wire_line: fn(stream: HTTPConn, &wire: HTTPWire, from: Int) -[Net, Time.Wait]> Int HTTPFault! {
+priv wire_line: fn(stream: HTTPConn, wire: &HTTPWire, from: Int) -[Net, Time.Wait]> Int HTTPFault! {
     at := crlf_at(wire.buffer, from)
     loop at < 0 {
         if wire.buffer.len() - from > C_MAX_LINE_BYTES -> return Err(.Reply(400))
@@ -1634,7 +1674,7 @@ priv crlf_at: fn(raw: [U8], from: Int) -> Int Never! {
     i := from
     loop i + 1 < raw.len() {
         if raw[i] == (U8{13}) && raw[i + 1] == (U8{10}) -> return i
-        i = i + 1
+        i += 1
     }
     -1
 }
@@ -1658,7 +1698,7 @@ priv field_line: fn(raw: [U8]) -> Header? Never! {
     Val(Header{name: name, value: http.trim(value)})
 }
 
-priv read_request: fn(stream: HTTPConn, &wire: HTTPWire) -[Net, Time.Wait]> HTTPRequest HTTPFault! {
+priv read_request: fn(stream: HTTPConn, wire: &HTTPWire) -[Net, Time.Wait]> HTTPRequest HTTPFault! {
     split := http.find_double_crlf(wire.buffer)
     loop split < 0 {
         if wire.buffer.len() > C_MAX_HEAD_BYTES -> return Err(.Reply(431))
@@ -1723,7 +1763,9 @@ priv read_request: fn(stream: HTTPConn, &wire: HTTPWire) -[Net, Time.Wait]> HTTP
     if declared.len() > 0 && !chunked -> return Err(.Reply(400))
     if http.headers_get(fields, "expect") == .Val(expect) {
         if !http11 || http.ascii_lower(expect) != "100-continue" -> return Err(.Reply(417))
-        if !__send(stream, "HTTP/1.1 100 Continue\r\n\r\n".bytes(), wire.end_ns) -> return Err(.Drop)
+        if !__send(stream, "HTTP/1.1 100 Continue\r\n\r\n".bytes(), wire.end_ns) {
+            return Err(.Drop)
+        }
     }
     content := [U8]{}
     trailers := Headers?{None}
@@ -1737,7 +1779,7 @@ priv read_request: fn(stream: HTTPConn, &wire: HTTPWire) -[Net, Time.Wait]> HTTP
     }
     body := http.body_bytes(content)
     if String.from_bytes(content) == {
-        .Ok(text) -> body = http.body_text(text)
+        .Ok(text) -> { body = http.body_text(text) }
         .Err(_) -> {}
     }
     request := http.server_request(method, target, body, fields)
@@ -1758,7 +1800,7 @@ priv chunk_size: fn(line: [U8]) -> Int? Never! {
     Val(size)
 }
 
-priv read_chunked: fn(stream: HTTPConn, &wire: HTTPWire, start: Int, declared: [String]) -[Net, Time.Wait]> HTTPChunked HTTPFault! {
+priv read_chunked: fn(stream: HTTPConn, wire: &HTTPWire, start: Int, declared: [String]) -[Net, Time.Wait]> HTTPChunked HTTPFault! {
     at := start
     body := [U8]{}
     loop {
@@ -1769,7 +1811,9 @@ priv read_chunked: fn(stream: HTTPConn, &wire: HTTPWire, start: Int, declared: [
         if body.len() + size > C_MAX_BODY_BYTES -> return Err(.Reply(413))
         wire_need(stream, wire, at + size + 2) ?? return Err(err)
         loop b in wire.buffer.slice(at, at + size) -> body.push(b)
-        if wire.buffer[at + size] != (U8{13}) || wire.buffer[at + size + 1] != (U8{10}) -> return Err(.Reply(400))
+        if wire.buffer[at + size] != (U8{13}) || wire.buffer[at + size + 1] != (U8{10}) {
+            return Err(.Reply(400))
+        }
         at = at + size + 2
     }
     trailers := http.headers()
@@ -1789,7 +1833,7 @@ priv error_wire: fn(status: Int) -[Time]> [U8] Never! {
     "HTTP/1.1 {status} {http.reason_phrase(status)}\r\nDate: {imf_now()}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".bytes()
 }
 
-priv push_text: fn(&out: [U8], text: String) Never! {
+priv push_text: fn(out: &[U8], text: String) Never! {
     loop b in text.bytes() -> out.push(b)
 }
 
@@ -1809,7 +1853,9 @@ priv response_wire: fn(method: String, reply: HTTPResponse) -[Net, Time]> [U8] H
     trailer_lowers := [String]{}
     loop field in trailer_fields.fields {
         lower: http.ascii_lower(field.name)
-        if !http.client_header_name(field.name) || !http.client_header_value(field.value) || forbidden_trailer(lower) -> return Err(.InvalidHeader)
+        if !http.client_header_name(field.name) || !http.client_header_value(field.value) || forbidden_trailer(lower) {
+            return Err(.InvalidHeader)
+        }
         if !list_contains(trailer_lowers, lower) {
             trailer_lowers.push(lower)
             trailer_names.push(field.name)
@@ -1827,13 +1873,9 @@ priv response_wire: fn(method: String, reply: HTTPResponse) -[Net, Time]> [U8] H
     }
     if chunked {
         names := ""
-        loop name in trailer_names {
-            names = if names == "" -> name else -> "{names}, {name}"
-        }
+        loop name in trailer_names -> names = if names == "" -> name else -> "{names}, {name}"
         push_text(out, "Transfer-Encoding: chunked\r\nTrailer: {names}\r\n")
-    } else if status == 205 {
-        push_text(out, "Content-Length: 0\r\n")
-    } else if !no_body {
+    } else if status == 205 { push_text(out, "Content-Length: 0\r\n") } else if !no_body {
         push_text(out, "Content-Length: {content.len()}\r\n")
     }
     push_text(out, "Connection: close\r\n\r\n")
@@ -1876,7 +1918,7 @@ priv HTTPRange: struct {
 priv trim_trailing_slashes: fn(prefix: String) -> String Never! {
     raw: prefix.bytes()
     end := raw.len()
-    loop end > 0 && raw[end - 1] == (U8{47}) -> end = end - 1
+    loop end > 0 && raw[end - 1] == (U8{47}) -> end -= 1
     String.from_bytes(raw.slice(0, end)) ?? ""
 }
 
@@ -1921,7 +1963,7 @@ priv range_spec: fn(spec: String, length: Int) -> HTTPRange? Never! {
 priv mime: fn(path: String) -> String Never! {
     raw: path.bytes()
     dot := raw.len() - 1
-    loop dot >= 0 && raw[dot] != (U8{46}) && raw[dot] != (U8{47}) -> dot = dot - 1
+    loop dot >= 0 && raw[dot] != (U8{46}) && raw[dot] != (U8{47}) -> dot -= 1
     if dot < 0 || raw[dot] != (U8{46}) -> return "application/octet-stream"
     extension: http.ascii_lower(String.from_bytes(raw.slice(dot + 1, raw.len())) ?? "")
     if extension == "css" -> return "text/css; charset=utf-8"
@@ -1944,7 +1986,9 @@ priv static_target: fn(mount: HTTPStaticMount, relative: String) -[FS.Read]> HTT
     loop segment in relative.split("/").to_list() {
         if segment == "" -> next
         if segment == "." || segment == ".." -> return None
-        if http.index_byte_str(segment, 92) >= 0 || http.index_byte_str(segment, 0) >= 0 -> return None
+        if http.index_byte_str(segment, 92) >= 0 || http.index_byte_str(segment, 0) >= 0 {
+            return None
+        }
         if !mount.dotfiles && segment.starts_with(".") -> return None
         current = "{current}/{segment}"
         entry: core.files.stat(current) ?? return None
@@ -1985,9 +2029,7 @@ priv static_serve: fn(mount: HTTPStaticMount, request: HTTPRequest) -[FS.Read]> 
     fields = http.headers_set(fields, "etag", etag)
     fields = http.headers_set(fields, "last-modified", modified)
     fresh := false
-    if request.header("if-none-match") == .Val(tags) {
-        fresh = etag_matches(tags, etag)
-    } else if request.header("if-modified-since") == .Val(since) {
+    if request.header("if-none-match") == .Val(tags) -> fresh = etag_matches(tags, etag) else if request.header("if-modified-since") == .Val(since) {
         fresh = since == modified
     }
     if fresh {
@@ -2032,7 +2074,7 @@ __hex: fn(value: Int) -> String Never! {
     out := [U8]{}
     i := digits.len()
     loop i > 0 {
-        i = i - 1
+        i -= 1
         out.push(digits[i])
     }
     String.from_bytes(out) ?? "0"
@@ -2044,9 +2086,7 @@ priv pad: fn(value: Int, width: Int) -> String Never! {
     text
 }
 
-priv imf_now: fn() -[Time]> String Never! {
-    imf_date(core.time.now_utc().to_timestamp())
-}
+priv imf_now: fn() -[Time]> String Never! { imf_date(core.time.now_utc().to_timestamp()) }
 
 // `Www, DD Mon YYYY HH:MM:SS GMT` for Unix `seconds` (before 1970 reads as
 // the epoch).
@@ -2129,7 +2169,7 @@ priv imf_date: fn(seconds: Int) -> String Never! {
 
 #Test("JSON response encoding rejects non-finite numbers on the HTTP error rail") {
     if json(200, Float.NAN) == {
-        .Err(error) -> assert(error == .InvalidFraming)
+        .Err(error) -> { assert(error == .InvalidFraming) }
         .Ok(_) -> panic("non-finite JSON response accepted")
     }
     response: json(201, "witness") ?? panic("JSON response")

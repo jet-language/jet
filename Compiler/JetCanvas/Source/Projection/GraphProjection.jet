@@ -135,16 +135,24 @@ collect_item_graphs: fn(index: SemIndex, doc: JetDriverDocModule, entry: Bool, i
                 add_function_graph(index, doc, entry, f, name, sink)
             }
             .Struct(s) -> {
-                loop method in s.methods -> add_function_graph(index, doc, entry, method, "{s.name}.{method.name}", sink)
+                loop method in s.methods {
+                    add_function_graph(index, doc, entry, method, "{s.name}.{method.name}", sink)
+                }
             }
             .Enum(e) -> {
-                loop method in e.methods -> add_function_graph(index, doc, entry, method, "{e.name}.{method.name}", sink)
+                loop method in e.methods {
+                    add_function_graph(index, doc, entry, method, "{e.name}.{method.name}", sink)
+                }
             }
             .Impl(i) -> {
-                loop method in i.methods -> add_function_graph(index, doc, entry, method, "{i.type_name}.{method.name}", sink)
+                loop method in i.methods {
+                    add_function_graph(index, doc, entry, method, "{i.type_name}.{method.name}", sink)
+                }
             }
             .CodeModule(m) -> {
-                if m.body == .Val(body) -> collect_item_graphs(index, doc, entry, body, Val(m.name), sink)
+                if m.body == .Val(body) {
+                    collect_item_graphs(index, doc, entry, body, Val(m.name), sink)
+                }
             }
             .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
@@ -153,8 +161,12 @@ collect_item_graphs: fn(index: SemIndex, doc: JetDriverDocModule, entry: Bool, i
 
 add_function_graph: fn(index: SemIndex, doc: JetDriverDocModule, entry: Bool, f: Func, ledger_name: String, sink: &GraphSink) {
     graph: project_func(index, doc.path, doc.source, f)
-    loop inline in graph.inline_exprs -> sink.inline_exprs.push(InlineExpr{id: inline.id, span: inline.span})
-    if entry -> sink.anchors.push(GraphEditAnchor{graph_id: graph.graph_id, insert_offset: insert_offset(doc.source, f), fallible: function_is_fallible(f)})
+    loop inline in graph.inline_exprs {
+        sink.inline_exprs.push(InlineExpr{id: inline.id, span: inline.span})
+    }
+    if entry {
+        sink.anchors.push(GraphEditAnchor{graph_id: graph.graph_id, insert_offset: insert_offset(doc.source, f), fallible: function_is_fallible(f)})
+    }
     collect_node_refs(graph, sink.node_refs)
     sink.graphs.push(graph_to_json(graph, f, doc.source, module_function_visibility(doc, ledger_name)))
 }
@@ -271,6 +283,10 @@ project_func: fn(index: SemIndex, module_display: String, module_src: String, f:
 }
 
 collect_node_refs: fn(graph: GraphBuilder, out: &[NodeQueryRef]) {
-    loop node in graph.nodes -> out.push(NodeQueryRef{graph_id: graph.graph_id, node_id: node.id, kind: node.kind, title: node.title, span: node.span})
-    loop inline in graph.inline_exprs -> out.push(NodeQueryRef{graph_id: graph.graph_id, node_id: inline.node_id, kind: "inline:{inline.role}", title: inline.source, span: inline.span})
+    loop node in graph.nodes {
+        out.push(NodeQueryRef{graph_id: graph.graph_id, node_id: node.id, kind: node.kind, title: node.title, span: node.span})
+    }
+    loop inline in graph.inline_exprs {
+        out.push(NodeQueryRef{graph_id: graph.graph_id, node_id: inline.node_id, kind: "inline:{inline.role}", title: inline.source, span: inline.span})
+    }
 }

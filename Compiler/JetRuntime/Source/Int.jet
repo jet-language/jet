@@ -53,7 +53,9 @@ int_len: fn(value: I64) -> I64 {
 
 int_limb: fn(value: I64, index: I64) -> I64 {
     if index >= int_len(value) -> return I64{0}
-    if !int_inline(value) -> return int_u32(wrapping(int_load(wrapping(int_node(value) + I64{24})) + index * I64{4}))
+    if !int_inline(value) {
+        return int_u32(wrapping(int_load(wrapping(int_node(value) + I64{24})) + index * I64{4}))
+    }
     magnitude := if (value < I64{0}) -> -value else -> value
     at := I64{0}
     loop at < index {
@@ -110,7 +112,9 @@ int_try_new: fn(cap: I64, requested: I64) -> I64 {
     node
 }
 
-int_get: fn(node: I64, index: I64) -> I64 { int_u32(wrapping(int_load(wrapping(node + I64{24})) + index * I64{4})) }
+int_get: fn(node: I64, index: I64) -> I64 {
+    int_u32(wrapping(int_load(wrapping(node + I64{24})) + index * I64{4}))
+}
 
 int_set: fn(node: I64, index: I64, limb: I64) {
     int_put_u32(wrapping(int_load(wrapping(node + I64{24})) + index * I64{4}), limb)
@@ -138,7 +142,9 @@ int_normalize: fn(node: I64) {
     length := int_load(wrapping(node + I64{32}))
     loop length > (I64{1}) && int_get(node, length - I64{1}) == (I64{0}) -> length -= I64{1}
     int_store(wrapping(node + I64{32}), length)
-    if (length == I64{1} && int_get(node, I64{0}) == I64{0}) { int_store(wrapping(node + I64{16}), I64{0}) }
+    if (length == I64{1} && int_get(node, I64{0}) == I64{0}) {
+        int_store(wrapping(node + I64{16}), I64{0})
+    }
 }
 
 int_fits: fn(value: I64, bound: U64) -> Bool {
@@ -296,7 +302,7 @@ int_try_add: fn(left: I64, right: I64, output: I64, requested: I64, probed: I64)
         rl: int_len(right)
         length: if ll > rl -> ll else -> rl
         node: int_try_new(length + I64{1}, requested)
-        if (node == I64{0}) -> return false
+        if (node == I64{0}) { return false }
         int_add_fill(node, left, right, length, ln)
         int_store(output, int_pack(node))
         return true
@@ -305,7 +311,7 @@ int_try_add: fn(left: I64, right: I64, output: I64, requested: I64, probed: I64)
     smaller: if (order > I64{0}) -> right else -> left
     length: int_len(larger)
     node: int_try_new(length, requested)
-    if (node == I64{0}) -> return false
+    if (node == I64{0}) { return false }
     int_sub_fill(node, larger, smaller, length, if (order > I64{0}) -> ln else -> rn)
     int_store(output, int_pack(node))
     true
@@ -379,7 +385,9 @@ int_try_add: fn(left: I64, right: I64, output: I64, requested: I64, probed: I64)
 // product limbs at `out`, from limb `offset` on. The limb at offset + length
 // is still zero (earlier passes wrote below it), so the carry is stored there.
 int_mul_pass: fn(out: I64, limbs: I64, length: I64, factor: I64, offset: I64) {
-    if (factor == I64{0}) { return }
+    if (factor == I64{0}) {
+        return
+    }
     base: wrapping(out + offset * I64{4})
     carry := I64{0}
     j := I64{0}
@@ -475,7 +483,9 @@ int_stop: fn(file: I64, file_len: I64, line: I64, reason: I64) {
         else -> rt_static_text("Value doesn't fit in destination type")
     }
     trap_stop(I64{1}, rt_text_data(message), rt_text_len(message), I64{0}, I64{0})
-    if rt_task_panic_publish(rt_text_data(message), rt_text_len(message), I64{1}) -> return
+    if rt_task_panic_publish(rt_text_data(message), rt_text_len(message), I64{1}) {
+        return
+    }
     trap_header(I64{1})
     trap_write_static(message)
     trap_msg_message_end()
@@ -488,7 +498,7 @@ int_stop: fn(file: I64, file_len: I64, line: I64, reason: I64) {
     bound: if int_negative(value) -> U64{9223372036854775808} else -> U64{9223372036854775807}
     if !int_fits(value, bound) {
         int_stop(I64{0}, I64{0}, I64{0}, I64{4})
-        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+        if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     }
     int_word(value)
 }
@@ -511,12 +521,12 @@ int_stop: fn(file: I64, file_len: I64, line: I64, reason: I64) {
 #Export(c) jet_int_checked_fixed: fn(value: I64, kind: I64, file: I64, file_len: I64, line: I64) -> I64 {
     if (kind < I64{0} || kind > I64{7}) {
         int_stop(file, file_len, line, I64{3})
-        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+        if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     }
     negative: int_negative(value)
     if (kind >= I64{4} && negative) {
         int_stop(file, file_len, line, I64{3})
-        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+        if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     }
     bound := U64{18446744073709551615}
     if {
@@ -533,7 +543,7 @@ int_stop: fn(file: I64, file_len: I64, line: I64, reason: I64) {
     }
     if !int_fits(value, bound) {
         int_stop(file, file_len, line, I64{3})
-        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+        if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     }
     int_word(value)
 }
@@ -574,7 +584,7 @@ int_sub_assign: fn(node: I64, value: I64) {
 int_division: fn(left: I64, right: I64, file: I64, file_len: I64, line: I64, kind: I64) -> I64 {
     if (right == I64{0}) {
         int_stop(file, file_len, line, I64{0})
-        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+        if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     }
     // Operands that fit a machine word divide in one instruction; only wider
     // values take the limb-by-limb long division below. Magnitudes up to
@@ -737,14 +747,14 @@ int_scale: fn(node: I64, factor: I64, add: I64) {
 int_shift_count: fn(count: I64, file: I64, len: I64, line: I64) -> I64 {
     if int_negative(count) || !int_fits(count, U64{9223372036854775807}) {
         int_stop(file, len, line, I64{2})
-        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+        if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     }
     int_word(count)
 }
 
 #Export(c) jet_int_shl: fn(value: I64, count: I64, file: I64, len: I64, line: I64) -> I64 {
     bits: int_shift_count(count, file, len, line)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     if (value == I64{0}) { return I64{0} }
     if (int_inline(value) && bits < I64{63}) {
         shifted: value << bits
@@ -762,7 +772,7 @@ int_shift_count: fn(count: I64, file: I64, len: I64, line: I64) -> I64 {
 
 #Export(c) jet_int_shr: fn(value: I64, count: I64, file: I64, len: I64, line: I64) -> I64 {
     bits: int_shift_count(count, file, len, line)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     if int_inline(value) {
         step: if (bits > I64{63}) -> I64{63} else -> bits
         return value >> step
@@ -771,7 +781,9 @@ int_shift_count: fn(count: I64, file: I64, len: I64, line: I64) -> I64 {
     remaining := bits
     lost := false
     loop remaining > (I64{0}) {
-        if (int_load(wrapping(node + I64{32})) == I64{1} && int_get(node, I64{0}) == I64{0}) { break }
+        if (int_load(wrapping(node + I64{32})) == I64{1} && int_get(node, I64{0}) == I64{0}) {
+            break
+        }
         step: if (remaining > I64{29}) -> I64{29} else -> remaining
         if (int_div_small(node, I64{1} << step) != I64{0}) { lost = true }
         remaining -= step
@@ -786,7 +798,7 @@ int_shift_count: fn(count: I64, file: I64, len: I64, line: I64) -> I64 {
 #Export(c) jet_int_pow: fn(value: I64, exponent: I64, file: I64, len: I64, line: I64) -> I64 {
     if int_negative(exponent) {
         int_stop(file, len, line, I64{1})
-        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+        if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     }
     if (exponent == I64{0}) { return I64{1} }
     if (value == I64{0} || value == I64{1}) { return value }
@@ -991,12 +1003,12 @@ int_bitwise: fn(left: I64, right: I64, kind: I64) -> I64 {
 int_inline_to_f64: fn(value: I64) -> Float {
     magnitude: if (value < I64{0}) -> -value else -> value
     width: int_word_bits(magnitude)
-    if (width <= I64{53}) -> return Float{value}
+    if (width <= I64{53}) { return Float{value} }
     dropped: width - I64{53}
     mantissa := magnitude >> dropped
     lost: magnitude.bit_and((I64{1} << dropped) - I64{1})
     half: I64{1} << (dropped - I64{1})
-    if (lost > half || (lost == half && mantissa.bit_and(I64{1}) != I64{0})) -> mantissa += I64{1}
+    if (lost > half || (lost == half && mantissa.bit_and(I64{1}) != I64{0})) { mantissa += I64{1} }
     result: int_scale_f64(Float{mantissa}, dropped)
     if (value < I64{0}) -> -result else -> result
 }
@@ -1006,9 +1018,11 @@ int_inline_to_f64: fn(value: I64) -> Float {
 // magnitudes' quotient is taken to 55..62 bits with a sticky remainder, so
 // the only rounding is the final one.
 int_ratio_to_f64: fn(left: I64, right: I64) -> Float {
-    if (left == I64{0}) -> return Float{0.0}
+    if (left == I64{0}) { return Float{0.0} }
     limit: I64{9007199254740992}
-    if (int_inline(left) && int_inline(right) && left <= limit && left >= -limit && right <= limit && right >= -limit) -> return Float{left} / Float{right}
+    if (int_inline(left) && int_inline(right) && left <= limit && left >= -limit && right <= limit && right >= -limit) {
+        return Float{left} / Float{right}
+    }
     negative: int_negative(left) != int_negative(right)
     numerator: int_magnitude(left)
     denominator: int_magnitude(right)
@@ -1028,9 +1042,7 @@ int_ratio_to_f64: fn(left: I64, right: I64) -> Float {
             word = whole
             sticky = rest != I64{0}
             settled = true
-        } else {
-            shift += I64{58} - width
-        }
+        } else { shift += I64{58} - width }
         if !settled -> jet_rt_int_drop(whole)
         jet_rt_int_drop(rest)
     }
@@ -1040,14 +1052,16 @@ int_ratio_to_f64: fn(left: I64, right: I64) -> Float {
     // floor(log2(|left / right|)).
     exponent: width - I64{1} - shift
     infinity: Float{1.0} / Float{0.0}
-    if (exponent > I64{1023}) -> return if negative -> -infinity else -> infinity
+    if (exponent > I64{1023}) { return if negative -> -infinity else -> infinity }
     precision: if (exponent < I64{-1022}) -> exponent + I64{1075} else -> I64{53}
-    if (precision < I64{0}) -> return if negative -> -Float{0.0} else -> Float{0.0}
+    if (precision < I64{0}) { return if negative -> -Float{0.0} else -> Float{0.0} }
     dropped: width - precision
     mantissa := word >> dropped
     lost: word.bit_and((I64{1} << dropped) - I64{1})
     half: I64{1} << (dropped - I64{1})
-    if (lost > half || (lost == half && (sticky || mantissa.bit_and(I64{1}) != I64{0}))) -> mantissa += I64{1}
+    if (lost > half || (lost == half && (sticky || mantissa.bit_and(I64{1}) != I64{0}))) {
+        mantissa += I64{1}
+    }
     result: int_scale_f64(Float{mantissa}, dropped - shift)
     if negative -> -result else -> result
 }
@@ -1101,14 +1115,12 @@ int_scale_f64: fn(value: Float, power: I64) -> Float {
 // rather than the seed's narrowing message.
 #Export(c) jet_inline_range_from_int: fn(value: I64, lo: I64, hi: I64, output: I64, error: I64) -> I64 {
     low: host_native_int(lo)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     high: host_native_int(hi)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     inside := false
     raw := value
-    if int_inline(value) {
-        inside = raw >= low && raw <= high
-    } else {
+    if int_inline(value) -> inside = raw >= low && raw <= high else {
         bound: if int_negative(value) -> U64{9223372036854775808} else -> U64{9223372036854775807}
         if int_fits(value, bound) {
             raw = int_word(value)

@@ -38,7 +38,9 @@ parser_parse_protocol: fn(state: &JetParserState, modifiers: ParsedItemModifiers
             next
         }
         messages.push(parser_protocol_message(state))
-        if parser_current_kind(state) == TOKEN_COMMA || parser_current_kind(state) == TOKEN_SEMI -> parser_bump(state)
+        if parser_current_kind(state) == TOKEN_COMMA || parser_current_kind(state) == TOKEN_SEMI {
+            parser_bump(state)
+        }
     }
     close: parser_expect(state, TOKEN_RBRACE, "`}}` after protocol messages")
     Item.ProtocolDecl{value: ProtocolDecl{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, messages: messages, span: parser_cover(start.span, close.span)}}

@@ -46,9 +46,7 @@ Reset: struct {
     }
 }
 
-field_text: fn(event: Dyn, name: String) -> String {
-    (event.field(name) ?? return "").text() ?? ""
-}
+field_text: fn(event: Dyn, name: String) -> String { (event.field(name) ?? return "").text() ?? "" }
 
 event_line: fn(event: Dyn) -> String {
     kind: field_text(event, "$xml_event")
@@ -87,12 +85,12 @@ run: fn() EncodingError! {
     loop event in tree -> print(event_line(event))
     broken_csv := csv.reader(Reset{peer: "socket"}) ?? return Err(err)
     if broken_csv.next() == {
-        .Ok(_) -> print("csv read past a failed source")
+        .Ok(_) -> { print("csv read past a failed source") }
         .Err(error) -> print("csv {cause_line(error)}")
     }
     broken_xml := xml.reader(Reset{peer: "socket"}) ?? return Err(err)
     if broken_xml.next() == {
-        .Ok(_) -> print("xml read past a failed source")
+        .Ok(_) -> { print("xml read past a failed source") }
         .Err(error) -> print("xml {cause_line(error)}")
     }
 }

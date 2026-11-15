@@ -65,7 +65,9 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
         spans: sema_web_rows(modules[module_index].functions)
         sema_web_collect(program.items, program.web_target_ceiling, None, None, file_prefix, module_index, registration, spans, metas, types, abi_types: active)
     }
-    if metas.len() == 0 -> return
+    if metas.len() == 0 {
+        return
+    }
     buckets := [WebBucket]{}
     reasons := [String]{}
     any_js := false
@@ -114,7 +116,9 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
                     changed = true
                 } else if buckets[caller] == .JS && buckets[callee] == .Wasm && metas[callee].marker == None && metas[callee].ceiling == None {
                     buckets[callee] = WebBucket.JS
-                    if active -> reasons[callee] = "called by `{metas[caller].name}`, which runs in JS"
+                    if active {
+                        reasons[callee] = "called by `{metas[caller].name}`, which runs in JS"
+                    }
                     changed = true
                 }
             }
@@ -123,18 +127,26 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
     loop at in 0..<metas.len() {
         if metas[at].row < 0 -> next
         modules[metas[at].slot].functions[metas[at].row].web_bucket = Val(buckets[at])
-        if active -> modules[metas[at].slot].functions[metas[at].row].web_reason = reasons[at].copy()
+        if active {
+            modules[metas[at].slot].functions[metas[at].row].web_reason = reasons[at].copy()
+        }
     }
-    if !active -> return
+    if !active {
+        return
+    }
     loop at in 0..<metas.len() {
         meta: metas[at]
         found := [Diagnostic]{}
         if meta.marker == .Val(.WasmExport) {
             loop param in meta.params {
-                if !sema_web_abi_safe(param, types) -> found.push(sema_web_abi_type(param, "on a `#Export(wasm)` parameter", meta.name_span))
+                if !sema_web_abi_safe(param, types) {
+                    found.push(sema_web_abi_type(param, "on a `#Export(wasm)` parameter", meta.name_span))
+                }
             }
             if meta.ret == .Val(ret) {
-                if !sema_web_abi_safe(ret, types) -> found.push(sema_web_abi_type(ret, "as a `#Export(wasm)` return type", meta.name_span))
+                if !sema_web_abi_safe(ret, types) {
+                    found.push(sema_web_abi_type(ret, "as a `#Export(wasm)` return type", meta.name_span))
+                }
             }
         }
         uses_browser: buckets[at] == .Wasm && sema_web_uses_browser(modules, meta)
@@ -150,7 +162,9 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
             // pin is the E-WEB-TARGET-BROWSER above, and a Core helper that
             // uses no `Browser` serves both sides, whichever caller pulled
             // its bucket (Rust partitioned user functions only).
-            if module_is_core(graph.modules[metas[callee].registration].module_identity) && (uses_browser || !sema_web_uses_browser(modules, metas[callee])) -> next
+            if module_is_core(graph.modules[metas[callee].registration].module_identity) && (uses_browser || !sema_web_uses_browser(modules, metas[callee])) {
+                next
+            }
             found.push(sema_error("E-WEB-CROSS-PARTITION", meta.name_span, "`{meta.key}` is compiled to {sema_web_bucket_name(buckets[at])} but calls `{metas[callee].name}`, which lives in {sema_web_bucket_name(buckets[callee])}", "the web backend keeps DOM/view code in JS and compute in WASM; a direct call across that boundary is not allowed yet", "move the call behind a generated bridge, colocate both functions in the same bucket, or adjust their `#Target(Wasm|JS)` markers"))
         }
         if found.len() == 0 -> next
@@ -165,7 +179,9 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
 // (CoreDemand.jet) reports what checking every body would.
 sema_web_partition_active: fn(graph: SemaRegistrationGraph) -> Bool Never! {
     loop module_index in 0..<graph.modules.len() {
-        if graph.modules[module_index].program.web_target_ceiling != None || sema_web_items_marked(graph.modules[module_index].program.items) -> return true
+        if graph.modules[module_index].program.web_target_ceiling != None || sema_web_items_marked(graph.modules[module_index].program.items) {
+            return true
+        }
     }
     false
 }
@@ -215,18 +231,24 @@ sema_web_methods_marked: fn(methods: [Func]) -> Bool Never! {
 sema_web_collect: fn(items: [Item], file_ceiling: WebBucket?, module_ceiling: WebBucket?, module_prefix: String?, file_prefix: String?, module_index: Int, registration: Int, spans: SemaWebRows, metas: &[SemaWebMeta], types: &SemaWebTypes, abi_types: Bool{false}) Never! {
     loop item in items {
         if item == {
-            .Func(function) -> sema_web_push(function, None, file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
+            .Func(function) -> {
+                sema_web_push(function, None, file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
+            }
             .Struct(structure) -> {
                 if abi_types {
                     type_id: sema_web_type_id(types, structure.name)
                     if types.struct_at[type_id] < 0 {
                         types.struct_at[type_id] = types.structs.len()
-                        types.structs.push(structure.copy()) // copy: the program's items keep the declaration
+                        types.structs.push(structure.copy())  // copy: the program's items keep the declaration
                     }
                 }
-                loop method in structure.methods -> sema_web_push(method, Val(structure.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
+                loop method in structure.methods {
+                    sema_web_push(method, Val(structure.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
+                }
                 loop implementation in structure.trait_impls {
-                    loop method in implementation.methods -> sema_web_push(method, Val(structure.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
+                    loop method in implementation.methods {
+                        sema_web_push(method, Val(structure.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
+                    }
                 }
             }
             .Enum(enumeration) -> {
@@ -234,16 +256,22 @@ sema_web_collect: fn(items: [Item], file_ceiling: WebBucket?, module_ceiling: We
                     type_id: sema_web_type_id(types, enumeration.name)
                     if types.enum_at[type_id] < 0 {
                         types.enum_at[type_id] = types.enums.len()
-                        types.enums.push(enumeration.copy()) // copy: the program's items keep the declaration
+                        types.enums.push(enumeration.copy())  // copy: the program's items keep the declaration
                     }
                 }
-                loop method in enumeration.methods -> sema_web_push(method, Val(enumeration.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
+                loop method in enumeration.methods {
+                    sema_web_push(method, Val(enumeration.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
+                }
                 loop implementation in enumeration.trait_impls {
-                    loop method in implementation.methods -> sema_web_push(method, Val(enumeration.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
+                    loop method in implementation.methods {
+                        sema_web_push(method, Val(enumeration.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
+                    }
                 }
             }
             .Impl(implementation) -> {
-                loop method in implementation.methods -> sema_web_push(method, Val(implementation.type_name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
+                loop method in implementation.methods {
+                    sema_web_push(method, Val(implementation.type_name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
+                }
             }
             .CodeModule(code_module) -> {
                 if code_module.body == .Val(body) {
@@ -297,9 +325,7 @@ sema_web_row: fn(rows: SemaWebRows, span: Span) -> Int Never! {
 sema_web_push: fn(function: Func, owner: String?, file_ceiling: WebBucket?, module_ceiling: WebBucket?, module_prefix: String?, file_prefix: String?, module_index: Int, registration: Int, spans: SemaWebRows, metas: &[SemaWebMeta]) Never! {
     name: if owner == .Val(owner_name) -> "{owner_name}::{function.name}" else -> function.name
     key := name
-    if module_prefix == .Val(module_name) {
-        key = "{module_name}::{name}"
-    } else if file_prefix == .Val(alias) {
+    if module_prefix == .Val(module_name) -> key = "{module_name}::{name}" else if file_prefix == .Val(alias) {
         key = "{alias}::{name}"
     }
     row: sema_web_row(spans, function.span)
@@ -351,10 +377,14 @@ sema_web_bucket_reason: fn(meta: SemaWebMeta, browser: Bool{false}) -> String Ne
         return "pinned by `{pin}`"
     }
     if browser -> return "uses the `Browser` effect"
-    if meta.ceiling == .Val(ceiling) -> return "its module's `#Target({sema_web_bucket_name(ceiling)})` ceiling"
+    if meta.ceiling == .Val(ceiling) {
+        return "its module's `#Target({sema_web_bucket_name(ceiling)})` ceiling"
+    }
     if meta.ret == .Val(ret) {
         if ret == .Apply(name, args) {
-            if name == "Stream" && args.len() == 1 -> return "returns a `Stream`, which runs as a JS generator"
+            if name == "Stream" && args.len() == 1 {
+                return "returns a `Stream`, which runs as a JS generator"
+            }
         }
     }
     "the default for code that nothing places in JS"

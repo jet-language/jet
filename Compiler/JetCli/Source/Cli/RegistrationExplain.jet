@@ -36,11 +36,15 @@ jet_cli_registration_truth_explanation: fn(index: Int) -> DiagnosticExplanation 
 jet_cli_explain_registration: fn(query: String, color: Bool, json: Bool) -> JetCLIPlan? Never! {
     name: query.trim()
     loop index in 0..<REGISTRATION_FACT_ROWS.len() {
-        if REGISTRATION_FACT_ROWS[index].name == name -> return Val(jet_cli_explanation_output(jet_cli_registration_fact_explanation(index), color, json))
+        if REGISTRATION_FACT_ROWS[index].name == name {
+            return Val(jet_cli_explanation_output(jet_cli_registration_fact_explanation(index), color, json))
+        }
     }
     loop index in 0..<REGISTRATION_TRUTH_ROWS.len() {
         row: REGISTRATION_TRUTH_ROWS[index]
-        if row.name == name -> return Val(jet_cli_explanation_output(jet_cli_registration_truth_explanation(index), color, json))
+        if row.name == name {
+            return Val(jet_cli_explanation_output(jet_cli_registration_truth_explanation(index), color, json))
+        }
     }
     None
 }

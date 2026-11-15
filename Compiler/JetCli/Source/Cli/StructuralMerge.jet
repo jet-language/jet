@@ -72,7 +72,9 @@ jet_cli_struct_fail: fn(what: String, fix: String) -> JetDriverVerbOutput Never!
 
 jet_cli_struct_index_error: fn(context: String, diagnostics: [Diagnostic]) -> JetDriverVerbOutput Never! {
     output := jet_cli_report_output("", "E2105", context, jet_cli_why("E2105"), "correct source errors; structural tools never merge unchecked code", false, JET_DRIVER_EXIT_USER_ERROR)
-    loop diagnostic in diagnostics -> output.stderr = "{output.stderr}  {diagnostic.code}: {diagnostic.what}\n"
+    loop diagnostic in diagnostics {
+        output.stderr = "{output.stderr}  {diagnostic.code}: {diagnostic.what}\n"
+    }
     output
 }
 
@@ -177,7 +179,7 @@ jet_cli_struct_match: fn(base: [JetCLIStructUnit], side: [JetCLIStructUnit], ope
         if selected.len() == 1 {
             result[row] = selected[0]
             used[selected[0]] = true
-        } else if selected.len() > 1 -> ambiguous[row] = selected
+        } else if selected.len() > 1 { ambiguous[row] = selected }
     }
     JetCLIStructMatches{matched: result, ambiguous: ambiguous}
 }
@@ -337,7 +339,7 @@ jet_cli_struct_merge_units: fn(base: JetCLIStructDocument, ours: JetCLIStructDoc
         chosen := String?{None}
         if o.fact.content_id == t.fact.content_id -> chosen = Val(o.source) else if o.fact.content_id == original.fact.content_id {
             chosen = Val(t.source)
-        } else if t.fact.content_id == original.fact.content_id -> chosen = Val(o.source) else {
+        } else if t.fact.content_id == original.fact.content_id { chosen = Val(o.source) } else {
             chosen = jet_cli_struct_merge_rename(original, o, t, ours_ops, theirs_ops)
         }
         if chosen == .Val(source) -> text = "{text}{leading}{source}" else {

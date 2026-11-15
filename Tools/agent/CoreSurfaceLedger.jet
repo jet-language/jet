@@ -27,8 +27,11 @@ use {
 }
 
 TOOL: "/Tools/agent/CoreSurfaceLedger.jet"
+
 RUNTIME_LEDGER_PATH: ".jet/reports/core-surface-ledger.json"
+
 PYTHON_SURFACE_PATH: "Docs/spec/reference/python-surface.json"
+
 // Decisions and card owners come only from the board of the tree under check,
 // never from another checkout's live board, so the same tree checks the same
 // way in a git worktree and in a plain export. Read-only, through that tree's
@@ -36,50 +39,79 @@ PYTHON_SURFACE_PATH: "Docs/spec/reference/python-surface.json"
 // ratified decision or a done card retires to history.json, and a declined row
 // or a closed owner must still resolve once it has.
 TOWER_DATA_DIR: "Tools/tower/.tower"
+
 TOWER_BOARD_PATH: "Tools/tower/.tower/tower.json"
+
 TOWER_BOARD_TOOL: "Tools/tower/Board.jet"
+
 CORE_SOURCE_PATH: "Compiler/Prelude/Core.rows"
+
 // The Core rows with no Core.rows declaration: typed fixed-signature members,
 // built-in receiver methods, and the lowering-owned extension calls.
 CORE_SURFACE_INVENTORY_PATH: "Compiler/Prelude/CoreSurfaceInventory.rows"
+
 CORE_CALL_EXTENSIONS_PATH: "Compiler/JetFoundation/Source/Registry/CoreCallExtensions.jet"
+
 // The Jet tables an inventory `receivers` row reads receiver methods from, and
 // the sema sources a `methods` row's names must be spelled in.
 BUILTIN_METHODS_PATH: "Compiler/JetFoundation/Source/Registry/BuiltinMethods.jet"
+
 BUILTIN_STATICS_PATH: "Compiler/JetFoundation/Source/Registry/BuiltinStatics.jet"
+
 COLLECTIONS_PATH: "Compiler/JetFoundation/Source/Collections.jet"
+
 CORE_SOURCE_PARTS_PATH: "Compiler/Prelude/CoreSourceParts.tsv"
+
 SEMA_SOURCE_DIR: "Compiler/JetSema/Source"
+
 // The owner-controlled syntax registry: every Syntax string constant a Core.rows
 // dispatcher row or the core.mem tier map names.
 SYNTAX_DIR: "Compiler/JetFoundation/Data/Syntax"
+
 CORE_API_LAWS_PATH: "Docs/spec/stdlib-api-laws.md"
+
 SYNTAX_REFERENCE_PATH: "Docs/spec/reference/syntax-surface.jet"
+
 AGENT_MANIFEST_PATH: "tests/agent_workloads/manifest.tsv"
+
 AGENT_RECEIPT_PATH: "tests/agent_workloads/baselines/receipt.tsv"
+
 AGENT_REVIEW_PATH: "tests/agent_workloads/core_api_fixture_reviews.tsv"
+
 AGENT_CORPUS_ROOT: "tests/agent_workloads"
+
 AGENT_DOMAIN_CONTRACT_PATH: "tests/agent_workloads/domain_contract.tsv"
+
 AGENT_WORKLOAD_POLICY_PATH: "tests/agent_workloads/policy.tsv"
+
 AGENT_CHECKSUMS_PATH: "tests/agent_workloads/SHA256SUMS"
+
 // The Jet ports of the corpus runner: the equivalent-adapter case and the
 // reviewed manifest and baseline guards.
 AGENT_RUNNER_SOURCE_PATHS: [String]{
     "tests/cases/agent_workloads/equivalent_adapters_complete_declared_tasks.case",
     "tests/guards/agent_workloads_reviewed.jet",
 }
+
 CORE_API_REVIEW_TEST_PATH: "tests/guards/core_surface_ledger_reviewed.jet"
+
 CORE_API_REVIEW_TEST: "tests/guards/core_surface_ledger_reviewed.jet::Core surface ledger teaches the same ratified API layering"
+
 CORE_API_REVIEW_COMMAND: "jet Tools/agent/CoreSurfaceLedger.jet --check"
+
 // The Jet ports of the editor tests that teach the Core gate forms.
 EDITOR_COVERAGE_PATHS: [String]{
     "tests/cases/lsp/lsp_completion_returns_items.case",
     "tests/cases/lsp/lsp_signature_help_returns_active_parameter.case",
     "tests/cases/lsp/lsp_hover_returns_signature.case",
 }
+
 CORE_CONFORMANCE_PATH: "tests/conformance/fixture-bindings.tsv"
+
 CORE_CONFORMANCE_FIXTURE_ROOT: "tests/conformance/corpus"
+
 AGENT_BASELINE_ADAPTERS: [String]{"bash", "python", "node"}
+
 AGENT_RUNNER_MARKERS: [String]{
     "#Test(\"manifest_is_complete_frozen_and_non_vacuous\")",
     "#Test(\"recorded_baselines_cover_frozen_tasks\")",
@@ -93,6 +125,7 @@ AGENT_RUNNER_MARKERS: [String]{
     "copy: {{root}}/tests/agent_workloads/baselines/receipt.tsv pins.tsv",
     "cap:pin_version: = \"{{cap:version_bash}}\"",
 }
+
 CORE_API_REVIEW_CHECKS: [String]{
     "workflow-closure",
     "construct-classifications",
@@ -100,6 +133,7 @@ CORE_API_REVIEW_CHECKS: [String]{
     "syntax-coverage",
     "fixture-selection",
 }
+
 CORE_API_SYNTAX_MARKERS: [String]{
     "values: ...String",
     "[...tags",
@@ -110,23 +144,35 @@ CORE_API_SYNTAX_MARKERS: [String]{
     "wrap(call)",
     "#Policy(",
 }
+
 // The frozen corpus manifest's evidence label for the equivalent-adapter run.
 // It stays data; its Jet port is AGENT_RUNNER_SOURCE_PATHS.
 AGENT_RUNNER: "tests/agent_workloads.rs::equivalent_adapters_complete_declared_tasks"
+
 AGENT_SCORING: "#769:v1;exit=0;stdout=exact;cold=recorded;warm=equal;input=unchanged;scratch=closed"
+
 EXECUTION_CHECKS: [String]{"pinned-tool-version", "cold-and-warm-run", "exact-stdout", "unchanged-input", "clean-scratch"}
+
 EVIDENCE_COUNT_FIELDS: [String]{"tokens", "statements", "calls", "namedTemporaries"}
+
 EVIDENCE_REQUIRED_COUNT_FIELDS: [String]{"tokens", "statements", "calls", "namedTemporaries", "imports", "requiredPolicy", "requiredErrorHandling"}
+
 EVIDENCE_INCLUDES: [String]{"imports", "required-policy", "required-error-handling"}
+
 EVIDENCE_CLASSIFICATIONS: [String]{"task-essential", "clarity-bearing", "guarantee-bearing", "expert-control", "incidental-ceremony"}
+
 CONSTRUCT_BENEFITS: [String]{"claimedClarity", "reasoningBenefit", "localFactBenefit", "guaranteeBenefit", "expertControlBenefit"}
+
 CASE_KINDS: [String]{"beginner", "expert-policy", "failure", "lifecycle"}
+
 // A suffix that only restates the same workflow in another representation.
 // Anything else is a distinct capability: zip_pad is not zip, count_by is not
 // len, and crediting them to the base manufactured equals.
 RESTATING_SUFFIXES: [String]{"bytes", "utc", "hex", "text", "str", "string", "at", "all"}
+
 // A surface JSON file is one item far above the default 16 MiB item limit.
 SURFACE_ITEM_LIMIT: 268435456
+
 OUTPUT_LIMIT: 268435456
 
 #Error
@@ -134,9 +180,7 @@ LedgerError: struct {
     message: String
 }
 
-fail: fn(message: String) -> LedgerError Never! {
-    LedgerError{message: message.copy()}
-}
+fail: fn(message: String) -> LedgerError Never! { LedgerError{message: message.copy()} }
 
 // Every language the owner named on 2026-08-03, each with a recorded surface
 // read from that language's own primary source. Python keeps its interpreter
@@ -297,10 +341,32 @@ CONTAINER_ALIASES: [(name: String, container: String)]{
 // and `--check` rejects a name that recurs without an entry, so a refresh cannot
 // quietly introduce an unreviewed one.
 CROSS_DOMAIN_POOLED: [String]{
-    "clone", "copy", "deepcopy", "copyinto", "copyto", "equal", "isequal", "deepequal",
-    "cmp", "compare", "hash", "tostring", "tostr", "isempty", "clear", "contains",
-    "iter", "iterator", "capacity", "reserve", "resize", "setlen", "sizehint", "drain",
-    "sizeof", "bytesize",
+    "clone",
+    "copy",
+    "deepcopy",
+    "copyinto",
+    "copyto",
+    "equal",
+    "isequal",
+    "deepequal",
+    "cmp",
+    "compare",
+    "hash",
+    "tostring",
+    "tostr",
+    "isempty",
+    "clear",
+    "contains",
+    "iter",
+    "iterator",
+    "capacity",
+    "reserve",
+    "resize",
+    "setlen",
+    "sizehint",
+    "drain",
+    "sizeof",
+    "bytesize",
 }
 
 // Every other recurring name: the spelling repeats but the operation does not.
@@ -310,54 +376,390 @@ CROSS_DOMAIN_POOLED: [String]{
 // under-score, never invent a gap. Listing them is the record that each was
 // looked at rather than defaulted.
 CROSS_DOMAIN_DISTINCT: [String]{
-    "append", "delete", "in", "length", "size", "truncate", "unlink", "abort",
-    "abs", "absolutepath", "addcleanup", "addelement", "all", "and", "any", "appendtext",
-    "args", "available", "average", "base", "big", "binarysearch", "binarysearchby", "breakpoint",
-    "broadcast", "buffered", "bufferedreader", "bufferedwriter", "byteoffset", "bytes", "capitalize", "casefold",
-    "charset", "chdir", "chmod", "chown", "chr", "chunk", "classify", "cleanup",
-    "clockgetres", "clockgettime", "close", "closeread", "collect", "command", "compact", "compareto",
-    "complex", "components", "concat", "connect", "containsvalue", "context", "copyfile", "create",
-    "createconnection", "createserver", "ctime", "data", "datetimeformat", "decode", "deconstruct", "dedup",
-    "default", "deleteat", "detach", "difference", "dir", "display", "div", "divide",
-    "divmod", "droplast", "dump", "each", "enable", "encode", "endswith", "entry",
-    "eof", "equals", "error", "escape", "escapestring", "eval", "evalfile", "exception",
-    "exec", "exists", "exit", "exitcode", "exited", "expand", "fd", "fdatasync",
-    "fdopen", "feed", "filename", "fileno", "filetype", "fill", "filter", "finalize",
-    "find", "findlast", "first", "firstindex", "flags", "flatmap", "flatten", "flush",
-    "fold", "fork", "formatstring", "formatter", "from", "fromhex", "fromkeys", "fullname",
-    "get", "getattribute", "getbuffer", "getbytes", "getfield", "gethostname", "getint32", "getopts",
-    "getpid", "group", "groupby", "groups", "handle", "help", "hex", "id",
-    "include", "indent", "indexed", "indexof", "init", "insertrange", "intern", "intersection",
-    "isascii", "isatty", "iscontrol", "isdefined", "isdigit", "iselement", "isexecutable", "isexported",
-    "isalphabetic", "isnumeric", "iswhitespace", "chars", "isfifo", "ishexdigit", "isidentifier", "isless",
-    "isletter", "isloopback", "islower", "isnormalized", "isnullorempty", "isnumber", "isprint", "ispunct",
-    "isreadable", "isreadonly", "isset", "issigned", "issorted", "issortedby", "isspace", "issymbol",
-    "issymlink", "istitle", "isupper", "isvalid", "iswritable", "join", "joinpath", "keepalive",
-    "key", "keys", "kill", "kind", "last", "lastindexof", "len", "lines",
-    "link", "list", "ljust", "map", "mapkeys", "mapof", "mapreduce", "match",
-    "matches", "max", "merge", "metadata", "methods", "min", "minmax", "minus",
-    "mkdir", "mod", "move", "new", "next", "normalize", "not", "now",
-    "oct", "one", "only", "open", "options", "or", "ord", "out",
-    "parse", "parseaddress", "partition", "path", "pathconf", "peercert", "perm", "permute",
-    "pid", "pipe", "plus", "poll", "pop", "popat", "popen", "popfirst",
-    "posixpath", "pread", "prefix", "prepend", "println", "processexited", "product", "push",
-    "pwrite", "quote", "random", "range", "raw", "read", "readbyte", "readbytes",
-    "reader", "readexactly", "readline", "readuntil", "recv", "reduceright", "register", "relative",
-    "relativeto", "release", "remove", "removefirst", "removeprefix", "removerange", "removesuffix", "repeat",
-    "replace", "repr", "resolve", "reverse", "rewind", "rjust", "rotate", "rotateleft",
-    "round", "rpartition", "rsplit", "run", "scan", "seek", "send", "sendfile",
-    "server", "set", "setdefault", "setenv", "setfloat64", "setlimit", "shift", "shuffle",
-    "shutdown", "signal", "skip", "slice", "socket", "sockettype", "sort", "span",
-    "splice", "split", "splitonce", "stack", "start", "startswith", "starttimer", "stats",
-    "step", "sticky", "stop", "stoptimer", "string", "stripprefix", "struct", "success",
-    "sum", "swap", "swapcase", "sync", "tail", "take", "tell", "throw",
-    "time", "timens", "timeout", "timer", "title", "totitle", "toboolean", "tobyte",
-    "tobytearray", "tochararray", "todouble", "tofloat", "tohexstring", "tolist", "tolower", "topath",
-    "toset", "toupper", "transcode", "trim", "trimend", "trimstart", "trylock", "type",
-    "typeassert", "typeof", "union", "unlock", "unquote", "unwrap", "unzip", "update",
-    "urandom", "use", "userinfo", "utime", "valid", "validate", "value", "valueof",
-    "values", "var", "verifyhostname", "verifymode", "version", "wait", "waitall", "with",
-    "wrap", "write", "writebyte", "writelines", "writer", "writeto", "xor", "zero",
+    "append",
+    "delete",
+    "in",
+    "length",
+    "size",
+    "truncate",
+    "unlink",
+    "abort",
+    "abs",
+    "absolutepath",
+    "addcleanup",
+    "addelement",
+    "all",
+    "and",
+    "any",
+    "appendtext",
+    "args",
+    "available",
+    "average",
+    "base",
+    "big",
+    "binarysearch",
+    "binarysearchby",
+    "breakpoint",
+    "broadcast",
+    "buffered",
+    "bufferedreader",
+    "bufferedwriter",
+    "byteoffset",
+    "bytes",
+    "capitalize",
+    "casefold",
+    "charset",
+    "chdir",
+    "chmod",
+    "chown",
+    "chr",
+    "chunk",
+    "classify",
+    "cleanup",
+    "clockgetres",
+    "clockgettime",
+    "close",
+    "closeread",
+    "collect",
+    "command",
+    "compact",
+    "compareto",
+    "complex",
+    "components",
+    "concat",
+    "connect",
+    "containsvalue",
+    "context",
+    "copyfile",
+    "create",
+    "createconnection",
+    "createserver",
+    "ctime",
+    "data",
+    "datetimeformat",
+    "decode",
+    "deconstruct",
+    "dedup",
+    "default",
+    "deleteat",
+    "detach",
+    "difference",
+    "dir",
+    "display",
+    "div",
+    "divide",
+    "divmod",
+    "droplast",
+    "dump",
+    "each",
+    "enable",
+    "encode",
+    "endswith",
+    "entry",
+    "eof",
+    "equals",
+    "error",
+    "escape",
+    "escapestring",
+    "eval",
+    "evalfile",
+    "exception",
+    "exec",
+    "exists",
+    "exit",
+    "exitcode",
+    "exited",
+    "expand",
+    "fd",
+    "fdatasync",
+    "fdopen",
+    "feed",
+    "filename",
+    "fileno",
+    "filetype",
+    "fill",
+    "filter",
+    "finalize",
+    "find",
+    "findlast",
+    "first",
+    "firstindex",
+    "flags",
+    "flatmap",
+    "flatten",
+    "flush",
+    "fold",
+    "fork",
+    "formatstring",
+    "formatter",
+    "from",
+    "fromhex",
+    "fromkeys",
+    "fullname",
+    "get",
+    "getattribute",
+    "getbuffer",
+    "getbytes",
+    "getfield",
+    "gethostname",
+    "getint32",
+    "getopts",
+    "getpid",
+    "group",
+    "groupby",
+    "groups",
+    "handle",
+    "help",
+    "hex",
+    "id",
+    "include",
+    "indent",
+    "indexed",
+    "indexof",
+    "init",
+    "insertrange",
+    "intern",
+    "intersection",
+    "isascii",
+    "isatty",
+    "iscontrol",
+    "isdefined",
+    "isdigit",
+    "iselement",
+    "isexecutable",
+    "isexported",
+    "isalphabetic",
+    "isnumeric",
+    "iswhitespace",
+    "chars",
+    "isfifo",
+    "ishexdigit",
+    "isidentifier",
+    "isless",
+    "isletter",
+    "isloopback",
+    "islower",
+    "isnormalized",
+    "isnullorempty",
+    "isnumber",
+    "isprint",
+    "ispunct",
+    "isreadable",
+    "isreadonly",
+    "isset",
+    "issigned",
+    "issorted",
+    "issortedby",
+    "isspace",
+    "issymbol",
+    "issymlink",
+    "istitle",
+    "isupper",
+    "isvalid",
+    "iswritable",
+    "join",
+    "joinpath",
+    "keepalive",
+    "key",
+    "keys",
+    "kill",
+    "kind",
+    "last",
+    "lastindexof",
+    "len",
+    "lines",
+    "link",
+    "list",
+    "ljust",
+    "map",
+    "mapkeys",
+    "mapof",
+    "mapreduce",
+    "match",
+    "matches",
+    "max",
+    "merge",
+    "metadata",
+    "methods",
+    "min",
+    "minmax",
+    "minus",
+    "mkdir",
+    "mod",
+    "move",
+    "new",
+    "next",
+    "normalize",
+    "not",
+    "now",
+    "oct",
+    "one",
+    "only",
+    "open",
+    "options",
+    "or",
+    "ord",
+    "out",
+    "parse",
+    "parseaddress",
+    "partition",
+    "path",
+    "pathconf",
+    "peercert",
+    "perm",
+    "permute",
+    "pid",
+    "pipe",
+    "plus",
+    "poll",
+    "pop",
+    "popat",
+    "popen",
+    "popfirst",
+    "posixpath",
+    "pread",
+    "prefix",
+    "prepend",
+    "println",
+    "processexited",
+    "product",
+    "push",
+    "pwrite",
+    "quote",
+    "random",
+    "range",
+    "raw",
+    "read",
+    "readbyte",
+    "readbytes",
+    "reader",
+    "readexactly",
+    "readline",
+    "readuntil",
+    "recv",
+    "reduceright",
+    "register",
+    "relative",
+    "relativeto",
+    "release",
+    "remove",
+    "removefirst",
+    "removeprefix",
+    "removerange",
+    "removesuffix",
+    "repeat",
+    "replace",
+    "repr",
+    "resolve",
+    "reverse",
+    "rewind",
+    "rjust",
+    "rotate",
+    "rotateleft",
+    "round",
+    "rpartition",
+    "rsplit",
+    "run",
+    "scan",
+    "seek",
+    "send",
+    "sendfile",
+    "server",
+    "set",
+    "setdefault",
+    "setenv",
+    "setfloat64",
+    "setlimit",
+    "shift",
+    "shuffle",
+    "shutdown",
+    "signal",
+    "skip",
+    "slice",
+    "socket",
+    "sockettype",
+    "sort",
+    "span",
+    "splice",
+    "split",
+    "splitonce",
+    "stack",
+    "start",
+    "startswith",
+    "starttimer",
+    "stats",
+    "step",
+    "sticky",
+    "stop",
+    "stoptimer",
+    "string",
+    "stripprefix",
+    "struct",
+    "success",
+    "sum",
+    "swap",
+    "swapcase",
+    "sync",
+    "tail",
+    "take",
+    "tell",
+    "throw",
+    "time",
+    "timens",
+    "timeout",
+    "timer",
+    "title",
+    "totitle",
+    "toboolean",
+    "tobyte",
+    "tobytearray",
+    "tochararray",
+    "todouble",
+    "tofloat",
+    "tohexstring",
+    "tolist",
+    "tolower",
+    "topath",
+    "toset",
+    "toupper",
+    "transcode",
+    "trim",
+    "trimend",
+    "trimstart",
+    "trylock",
+    "type",
+    "typeassert",
+    "typeof",
+    "union",
+    "unlock",
+    "unquote",
+    "unwrap",
+    "unzip",
+    "update",
+    "urandom",
+    "use",
+    "userinfo",
+    "utime",
+    "valid",
+    "validate",
+    "value",
+    "valueof",
+    "values",
+    "var",
+    "verifyhostname",
+    "verifymode",
+    "version",
+    "wait",
+    "waitall",
+    "with",
+    "wrap",
+    "write",
+    "writebyte",
+    "writelines",
+    "writer",
+    "writeto",
+    "xor",
+    "zero",
     "zip",
 }
 
@@ -494,7 +896,13 @@ SYNONYM_GROUPS: [[String]]{
 // a container, and DateTime.Add is date arithmetic, not appending. Folding them
 // scored core.math.clear and core.time.push as real gaps.
 TYPE_ONLY_GROUP_HEADS: [String]{
-    "push", "pop", "len", "get", "remove", "clear", "contains",
+    "push",
+    "pop",
+    "len",
+    "get",
+    "remove",
+    "clear",
+    "contains",
 }
 
 // Jet splits some workflows across Core modules where another language keeps
@@ -670,7 +1078,6 @@ RATIFIED_DECLINES: [(id: String, decision: String, spelling: String)]{
     (id: "gap.core.mem.replace", decision: "D-CORESURF-SMALL1", spelling: "the take operator (^) + assignment"),
 }
 
-
 // ---- Text helpers ---------------------------------------------------------
 
 // The text of bytes `start..<end` of `text` (indexes from text.bytes()).
@@ -682,12 +1089,16 @@ byte_len: fn(text: String) -> Int Never! { text.bytes().len() }
 
 byte_tail: fn(text: String, start: Int) -> String Never! { byte_slice(text, start, byte_len(text)) }
 
-is_letter_byte: fn(code: Int) -> Bool Never! { (code >= 97 && code <= 122) || (code >= 65 && code <= 90) }
+is_letter_byte: fn(code: Int) -> Bool Never! {
+    (code >= 97 && code <= 122) || (code >= 65 && code <= 90)
+}
 
 is_digit_byte: fn(code: Int) -> Bool Never! { code >= 48 && code <= 57 }
 
 // `[A-Za-z0-9_]`, a regex word character.
-is_word_code: fn(code: Int) -> Bool Never! { is_letter_byte(code) || is_digit_byte(code) || code == 95 }
+is_word_code: fn(code: Int) -> Bool Never! {
+    is_letter_byte(code) || is_digit_byte(code) || code == 95
+}
 
 // `^[A-Za-z_][A-Za-z0-9_]*$`.
 is_identifier: fn(name: String) -> Bool Never! {
@@ -753,7 +1164,7 @@ sorted_unique: fn(values: [String]) -> [String] Never! {
 
 // `values` with later repeats dropped, first-seen order kept.
 first_seen: fn(values: [String]) -> [String] Never! {
-    seen := [String: Bool]{}
+    seen := [String:Bool]{}
     out := [String]{}
     loop value in values {
         if seen.get(value) != None -> next
@@ -773,7 +1184,9 @@ read_source: fn(root: String, path: String) -[FS]> String LedgerError! {
 
 jtext: fn(value: String) -> Dyn Never! { Dyn.Text(value.copy()) }
 
-texts: fn(values: [String]) -> Dyn Never! { Dyn.Array(loop value in values -> Dyn.Text(value.copy())) }
+texts: fn(values: [String]) -> Dyn Never! {
+    Dyn.Array(loop value in values -> Dyn.Text(value.copy()))
+}
 
 // Field `key` of object `value`; Null when absent or when `value` is no object.
 field: fn(value: Dyn, key: String) -> Dyn Never! { value.get(key) ?? Dyn.Null }
@@ -866,7 +1279,9 @@ entries: fn(value: Dyn) -> [(key: String, value: Dyn)] Never! {
     [(key: String, value: Dyn)]{}
 }
 
-keys_of: fn(value: Dyn) -> [String] Never! { loop entry in entries(value) -> entry.key.copy() }
+keys_of: fn(value: Dyn) -> [String] Never! {
+    loop entry in entries(value) -> entry.key.copy()
+}
 
 // The text items of an array, non-text items skipped.
 text_items: fn(value: Dyn) -> [String] Never! {
@@ -890,10 +1305,10 @@ same_texts: fn(value: Dyn, want: [String]) -> Bool Never! { same(value, texts(wa
 // first name of its first group, once over every group and once over the
 // groups that also apply in a module namespace.
 Synonyms: struct {
-    index: [String: [String]]
-    index_module: [String: [String]]
-    canonical: [String: String]
-    canonical_module: [String: String]
+    index: [String:[String]]
+    index_module: [String:[String]]
+    canonical: [String:String]
+    canonical_module: [String:String]
 }
 
 normalize: fn(name: String) -> String Never! {
@@ -907,7 +1322,7 @@ normalize: fn(name: String) -> String Never! {
     String.from_bytes_lossy(out)
 }
 
-add_keys: fn(index: &[String: [String]], key: String, keys: [String]) {
+add_keys: fn(index: &[String:[String]], key: String, keys: [String]) {
     known := index.get(key) ?? [String]{}
     loop other in keys {
         if !known.contains(other) -> known.push(other.copy())
@@ -916,10 +1331,10 @@ add_keys: fn(index: &[String: [String]], key: String, keys: [String]) {
 }
 
 synonyms: fn() -> Synonyms Never! {
-    index := [String: [String]]{}
-    index_module := [String: [String]]{}
-    canonical := [String: String]{}
-    canonical_module := [String: String]{}
+    index := [String:[String]]{}
+    index_module := [String:[String]]{}
+    canonical := [String:String]{}
+    canonical_module := [String:String]{}
     loop group in SYNONYM_GROUPS {
         keys: loop name in group -> normalize(name)
         type_only: TYPE_ONLY_GROUP_HEADS.contains(keys[0])
@@ -937,7 +1352,9 @@ synonyms: fn() -> Synonyms Never! {
 // A container is a type when it is one of Jet's things you hold, not a module
 // namespace. Both witness pooling and the collection-verb synonym groups read
 // this: a module gains no clear because a List has one.
-is_type_container: fn(container: String) -> Bool Never! { !container.starts_with("core.") && container != "app" }
+is_type_container: fn(container: String) -> Bool Never! {
+    !container.starts_with("core.") && container != "app"
+}
 
 // The canonical key of an operation is the first name of its synonym group, so
 // is_subset, is_subset_of and issubset are one gap rather than three.
@@ -963,7 +1380,9 @@ synonyms_for: fn(names: Synonyms, member: String, container: String) -> [String]
 is_named_operation: fn(name: String) -> Bool Never! {
     if name == "" -> return false
     last: Int{name.bytes()[byte_len(name) - 1]}
-    if last == 33 || last == 63 || last == 61 -> return is_identifier(byte_slice(name, 0, byte_len(name) - 1))
+    if last == 33 || last == 63 || last == 61 {
+        return is_identifier(byte_slice(name, 0, byte_len(name) - 1))
+    }
     is_identifier(name)
 }
 
@@ -1025,7 +1444,9 @@ fixture_bindings: fn(source: String) -> [Binding] LedgerError! {
             bindings.push(Binding{row: row.copy(), paths: [String]{}})
             at = bindings.len() - 1
         }
-        if bindings[at].paths.contains(path) -> return Err(fail("{where}duplicate fixture binding path: {row} -> {path}"))
+        if bindings[at].paths.contains(path) {
+            return Err(fail("{where}duplicate fixture binding path: {row} -> {path}"))
+        }
         bindings[at].paths.push(path.copy())
     }
     Ok(bindings)
@@ -1098,31 +1519,39 @@ ModuleFact: struct {
 // sema checks receiver methods against these rows, so reading them here keeps
 // the inventory receiver-aware with no second copy.
 ReceiverTables: struct {
-    builtin: [String: [String]]
-    collection: [String: [String]]
-    statics: [String: [String]]
+    builtin: [String:[String]]
+    collection: [String:[String]]
+    statics: [String:[String]]
     numeric: [String]
-    module_paths: [String: [String]]
-    sema_names: [String: Bool]
+    module_paths: [String:[String]]
+    sema_names: [String:Bool]
 }
 
-record_name: fn(table: &[String: [String]], key: String, name: String) {
+record_name: fn(table: &[String:[String]], key: String, name: String) {
     known := table.get(key) ?? [String]{}
     if !known.contains(name) -> known.push(name.copy())
     table[key] = known
 }
 
 BUILTIN_ROW: Regex{"receiver: BuiltinMethodReceiver\.([A-Za-z]+), name: \x22([^\x22]+)\x22"}
+
 COLLECTION_ROW: Regex{"receivers: CollectionReceivers\.([A-Za-z]+), name: \x22([^\x22]+)\x22.*status: CollectionStatus\.([A-Za-z]+)"}
+
 STATIC_ROW: Regex{"\x7Bmodule_name: \x22([^\x22]*)\x22, owner: \x22([^\x22]+)\x22, method: \x22([^\x22]+)\x22"}
+
 CONVERSION_ROW: Regex{"\{{method: \x22([^\x22]+)\x22, source: \x22[^\x22]+\x22\}}"}
+
 SEMA_LITERAL: Regex{"\x22([A-Za-z_][A-Za-z0-9_]*)\x22"}
+
 INVENTORY_ROW: Regex{"^(fixed_sig|receivers|methods)\s+(\S+)\s+\{{\s*([^{{}}]*?)\s*\}}$"}
+
 RECEIVER_SOURCE: Regex{"^(builtin|collection|static|numeric|type):([A-Za-z_][A-Za-z0-9_.]*)$"}
+
 IMPL_HEADER: Regex{"^(?:impl\s+([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]*>)?(?:\.[A-Za-z_.]+)?|([A-Za-z_][A-Za-z0-9_]*):\s*struct(?:<[^>]*>)?)\s*\x7B"}
+
 METHOD_HEADER: Regex{"^\s+([A-Za-z_][A-Za-z0-9_]*):\s*fn\b.*\x7B"}
 
-walk_sema: fn(root: String, directory: String, spelled: &[String: Bool]) -[FS]> Int LedgerError! {
+walk_sema: fn(root: String, directory: String, spelled: &[String:Bool]) -[FS]> Int LedgerError! {
     listed: files.list_dir("{root}/{directory}") ?? return Err(fail("cannot list {directory}: {err}"))
     names := loop entry in listed -> entry.name.copy()
     names.sort()
@@ -1139,13 +1568,15 @@ walk_sema: fn(root: String, directory: String, spelled: &[String: Bool]) -[FS]> 
     Ok(0)
 }
 
-jet_receiver_tables: fn(root: String, module_paths: [String: [String]]) -[FS]> ReceiverTables LedgerError! {
-    builtin := [String: [String]]{}
-    collection := [String: [String]]{}
-    statics := [String: [String]]{}
+jet_receiver_tables: fn(root: String, module_paths: [String:[String]]) -[FS]> ReceiverTables LedgerError! {
+    builtin := [String:[String]]{}
+    collection := [String:[String]]{}
+    statics := [String:[String]]{}
     numeric := [String]{}
     loop line in split_lines(read_source(root, BUILTIN_METHODS_PATH) ?? return Err(err)) {
-        if BUILTIN_ROW.match(line) == .Val(row) -> record_name(builtin, row.group(1) ?? "", row.group(2) ?? "")
+        if BUILTIN_ROW.match(line) == .Val(row) {
+            record_name(builtin, row.group(1) ?? "", row.group(2) ?? "")
+        }
     }
     // `collection_receivers_accept`: a Sequence row serves List and Iter; a
     // Proposed row is not checked by sema.
@@ -1156,9 +1587,7 @@ jet_receiver_tables: fn(root: String, module_paths: [String: [String]]) -[FS]> R
         if (row.group(1) ?? "") == "Sequence" {
             record_name(collection, "List", name)
             record_name(collection, "Iter", name)
-        } else {
-            record_name(collection, row.group(1) ?? "", name)
-        }
+        } else { record_name(collection, row.group(1) ?? "", name) }
     }
     loop line in split_lines(read_source(root, BUILTIN_STATICS_PATH) ?? return Err(err)) {
         if STATIC_ROW.match(line) == .Val(row) {
@@ -1171,7 +1600,7 @@ jet_receiver_tables: fn(root: String, module_paths: [String: [String]]) -[FS]> R
             if !numeric.contains(method) -> numeric.push(method)
         }
     }
-    sema_names := [String: Bool]{}
+    sema_names := [String:Bool]{}
     walk_sema(root, SEMA_SOURCE_DIR, sema_names) ?? return Err(err)
     Ok(ReceiverTables{builtin: builtin, collection: collection, statics: statics, numeric: numeric, module_paths: module_paths.copy(), sema_names: sema_names})
 }
@@ -1191,11 +1620,15 @@ receiver_source_methods: fn(root: String, tables: ReceiverTables, item: String, 
     if kind == "numeric" && key == "conversions" -> methods = tables.numeric.copy()
     if kind == "type" {
         dot: key.rfind(".")
-        if dot < 0 -> return Err(fail("{context} names a type outside any Core source module: {item}"))
+        if dot < 0 {
+            return Err(fail("{context} names a type outside any Core source module: {item}"))
+        }
         paths: tables.module_paths.get(byte_slice(key, 0, dot)) ?? return Err(fail("{context} names a type outside any Core source module: {item}"))
         methods = core_type_methods(root, paths, byte_tail(key, dot + 1)) ?? return Err(err)
     }
-    if methods.len() == 0 -> return Err(fail("{context} names a receivers source with no methods: {item}"))
+    if methods.len() == 0 {
+        return Err(fail("{context} names a receivers source with no methods: {item}"))
+    }
     Ok(methods)
 }
 
@@ -1274,7 +1707,7 @@ core_type_methods: fn(root: String, paths: [String], type_name: String) -[FS]> [
 // tables, so the inventory follows the compiler. A methods row names only the
 // methods sema checks in code with no table to read; each must be spelled in
 // sema and must not already come from the container's receivers.
-core_surface_inventory: fn(root: String, modules: [ModuleFact], module_paths: [String: [String]]) -[FS]> Inventory LedgerError! {
+core_surface_inventory: fn(root: String, modules: [ModuleFact], module_paths: [String:[String]]) -[FS]> Inventory LedgerError! {
     source: read_source(root, CORE_SURFACE_INVENTORY_PATH) ?? return Err(err)
     known: loop entry in modules -> entry.name.copy()
     tables: jet_receiver_tables(root, module_paths) ?? return Err(err)
@@ -1294,11 +1727,15 @@ core_surface_inventory: fn(root: String, modules: [ModuleFact], module_paths: [S
             return Err(fail("{context} has an empty or repeated name"))
         }
         if kind == "fixed_sig" {
-            if !known.contains(name) -> return Err(fail("{context} names an unknown Core module: {name}"))
+            if !known.contains(name) {
+                return Err(fail("{context} names an unknown Core module: {name}"))
+            }
             if fixed_modules.contains(name) -> return Err(fail("{context} repeats module {name}"))
             fixed_modules.push(name.copy())
             loop member in listed {
-                if !is_identifier(member) -> return Err(fail("{context} has an invalid member: {member}"))
+                if !is_identifier(member) {
+                    return Err(fail("{context} has an invalid member: {member}"))
+                }
                 pair: "{name}.{member}"
                 if !pairs.contains(pair) -> pairs.push(pair)
             }
@@ -1306,7 +1743,9 @@ core_surface_inventory: fn(root: String, modules: [ModuleFact], module_paths: [S
         }
         into: if kind == "receivers" -> derived else -> declared
         loop entry in into {
-            if entry.type_name == name -> return Err(fail("{context} repeats {kind} container {name}"))
+            if entry.type_name == name {
+                return Err(fail("{context} repeats {kind} container {name}"))
+            }
         }
         if kind == "receivers" {
             methods := [String]{}
@@ -1319,7 +1758,9 @@ core_surface_inventory: fn(root: String, modules: [ModuleFact], module_paths: [S
             next
         }
         loop method in listed {
-            if !is_identifier(method) -> return Err(fail("{context} has an invalid method: {method}"))
+            if !is_identifier(method) {
+                return Err(fail("{context} has an invalid method: {method}"))
+            }
             if tables.sema_names.get(method) == None {
                 return Err(fail("{context} declares `{name}.{method}`, but no sema source spells that method; delete the stale name"))
             }
@@ -1342,13 +1783,17 @@ core_surface_inventory: fn(root: String, modules: [ModuleFact], module_paths: [S
                 return Err(fail("{CORE_SURFACE_INVENTORY_PATH} line {entry.source_line} declares {entry.type_name} methods its receivers row already reads from the Jet tables: {repeated.join(", ")}"))
             }
             loop method in entry.methods {
-                if !collections[at].methods.contains(method) -> collections[at].methods.push(method.copy())
+                if !collections[at].methods.contains(method) {
+                    collections[at].methods.push(method.copy())
+                }
             }
             next
         }
         collections.push(entry.copy())
     }
-    if pairs.len() == 0 || collections.len() == 0 -> return Err(fail("{CORE_SURFACE_INVENTORY_PATH} has an empty table"))
+    if pairs.len() == 0 || collections.len() == 0 {
+        return Err(fail("{CORE_SURFACE_INVENTORY_PATH} has an empty table"))
+    }
     sorted_pairs := pairs
     sorted_pairs.sort()
     loop at in 0..<collections.len() -> collections[at].methods.sort()
@@ -1386,7 +1831,9 @@ python_surface: fn(root: String) -[FS]> Dyn LedgerError! {
         members := [String]{}
         if key.starts_with("type:") {
             found: field(field(snapshot, "builtinTypes"), name)
-            if !truthy(found) -> return Err(fail("Python builtin type absent from the snapshot: {name}"))
+            if !truthy(found) {
+                return Err(fail("Python builtin type absent from the snapshot: {name}"))
+            }
             members = text_items(field(found, "members"))
         } else {
             found: field(field(snapshot, "stdlibModules"), name)
@@ -1423,9 +1870,7 @@ python_surface: fn(root: String) -[FS]> Dyn LedgerError! {
         loop (position, entry) in containers {
             if entry.key == absent.container -> at = position
         }
-        if at >= 0 {
-            containers[at] = (key: absent.container.copy(), value: record)
-        } else {
+        if at >= 0 -> containers[at] = (key: absent.container.copy(), value: record) else {
             containers.push((key: absent.container.copy(), value: record))
         }
     }
@@ -1443,11 +1888,13 @@ python_surface: fn(root: String) -[FS]> Dyn LedgerError! {
     surface["runtime"] = jtext("python {text_of(field(snapshot, "pythonVersion"))}")
     if has_field(snapshot, "scopeRule") -> surface["scopeRule"] = field(snapshot, "scopeRule")
     surface["unassignedSources"] = unassigned
-    surface["officialReferences"] = texts([String]{
-        "https://docs.python.org/3/library/functions.html",
-        "https://docs.python.org/3/library/stdtypes.html",
-        "https://docs.python.org/3/library/index.html",
-    })
+    surface["officialReferences"] = texts(
+        [String]{
+            "https://docs.python.org/3/library/functions.html",
+            "https://docs.python.org/3/library/stdtypes.html",
+            "https://docs.python.org/3/library/index.html",
+        },
+    )
     count: containers.len()
     surface["containers"] = Dyn.Object(containers)
     totals := Dyn.object()
@@ -1462,7 +1909,9 @@ load_surfaces: fn(root: String) -[FS]> [SurfaceEntry] LedgerError! {
     surfaces := [SurfaceEntry]{}
     loop entry in SURFACE_FILES {
         surface: parse_json(read_source(root, entry.path) ?? return Err(err), entry.path) ?? return Err(err)
-        if !truthy(field(surface, "containers")) -> return Err(fail("surface has no containers: {entry.path}"))
+        if !truthy(field(surface, "containers")) {
+            return Err(fail("surface has no containers: {entry.path}"))
+        }
         surfaces.push(SurfaceEntry{language: entry.language.copy(), path: entry.path.copy(), surface: surface})
     }
     surfaces.push(SurfaceEntry{language: "Python", path: PYTHON_SURFACE_PATH, surface: python_surface(root) ?? return Err(err)})
@@ -1487,7 +1936,7 @@ SurfaceRecord: struct {
     has_reason: Bool
     attribution: String
     operations: [String]
-    first: [String: Int]
+    first: [String:Int]
 }
 
 LanguageSurface: struct {
@@ -1495,7 +1944,7 @@ LanguageSurface: struct {
     path: String
     names: [String]
     records: [SurfaceRecord]
-    position: [String: Int]
+    position: [String:Int]
 }
 
 index_surfaces: fn(surfaces: [SurfaceEntry]) -> [LanguageSurface] Never! {
@@ -1503,25 +1952,27 @@ index_surfaces: fn(surfaces: [SurfaceEntry]) -> [LanguageSurface] Never! {
     loop entry in surfaces {
         names := [String]{}
         records := [SurfaceRecord]{}
-        position := [String: Int]{}
+        position := [String:Int]{}
         loop container in entries(field(entry.surface, "containers")) {
             if !is_object(container.value) -> next
             operations: text_items(field(container.value, "operations"))
-            first := [String: Int]{}
+            first := [String:Int]{}
             loop (at, operation) in operations {
                 key: normalize(operation)
                 if first.get(key) == None -> first[key] = at
             }
             position[container.key] = records.len()
             names.push(container.key.copy())
-            records.push(SurfaceRecord{
-                present: truthy(field(container.value, "present")),
-                reason: field(container.value, "reason"),
-                has_reason: has_field(container.value, "reason"),
-                attribution: text_field(container.value, "attribution"),
-                operations: operations,
-                first: first,
-            })
+            records.push(
+                SurfaceRecord{
+                    present: truthy(field(container.value, "present")),
+                    reason: field(container.value, "reason"),
+                    has_reason: has_field(container.value, "reason"),
+                    attribution: text_field(container.value, "attribution"),
+                    operations: operations,
+                    first: first,
+                },
+            )
         }
         out.push(LanguageSurface{language: entry.language.copy(), path: entry.path.copy(), names: names, records: records, position: position})
     }
@@ -1537,7 +1988,7 @@ index_surfaces: fn(surfaces: [SurfaceEntry]) -> [LanguageSurface] Never! {
 // qualifier is not itself a member there, so zip_pad keeps its zip.
 container_prefixes: fn(members: [String]) -> [String] Never! {
     heads := [String]{}
-    counts := [String: Int]{}
+    counts := [String:Int]{}
     loop member in members {
         cut: member.find("_")
         if cut <= 0 -> next
@@ -1585,10 +2036,10 @@ qualifier_base: fn(member: String, siblings: [String]) -> String Never! {
 JetSide: struct {
     containers: [String]
     members: [[String]]
-    position: [String: Int]
+    position: [String:Int]
     prefixes: [[String]]
-    domains: [String: Int]
-    domain_keys: [[String: Bool]]
+    domains: [String:Int]
+    domain_keys: [[String:Bool]]
 }
 
 add_member: fn(side: &JetSide, container: String, member: String) {
@@ -1611,12 +2062,14 @@ cover_keys: fn(names: Synonyms, side: &JetSide) {
         if slot < 0 {
             slot = side.domain_keys.len()
             side.domains[domain] = slot
-            side.domain_keys.push([String: Bool]{})
+            side.domain_keys.push([String:Bool]{})
         }
         loop member in side.members[at] {
             // A type name must not cover a competitor's operation.
             if is_type_item(member) -> next
-            loop key in keys_for_member(names, member, side.prefixes[at], container) -> side.domain_keys[slot][key] = true
+            loop key in keys_for_member(names, member, side.prefixes[at], container) {
+                side.domain_keys[slot][key] = true
+            }
         }
     }
 }
@@ -1694,9 +2147,7 @@ competitor_cells: fn(surfaces: [LanguageSurface], container: String, member: Str
         }
         if hit_container != "" {
             cells.push(CompetitorCell{language: surface.language.copy(), status: "has", operation: hit_operation, found_in: hit_container, reason: Dyn.Null, has_reason: false})
-        } else {
-            cells.push(plain_cell(surface.language, "lacks"))
-        }
+        } else { cells.push(plain_cell(surface.language, "lacks")) }
     }
     cells
 }
@@ -1822,8 +2273,8 @@ module_fact_named: fn(modules: [ModuleFact], name: String) -> ModuleFact? Never!
 build_rows: fn(root: String, names: Synonyms, modules: [ModuleFact], inventory: Inventory, surfaces: [LanguageSurface], bindings: [Binding]) -[FS]> JetRows LedgerError! {
     // Two passes: the Jet side decides which keys are covered before any verdict
     // is taken, so a container's own naming pattern is known up front.
-    side := JetSide{containers: [String]{}, members: [[String]]{}, position: [String: Int]{}, prefixes: [[String]]{}, domains: [String: Int]{}, domain_keys: [[String: Bool]]{}}
-    module_keys := [String: Bool]{}
+    side := JetSide{containers: [String]{}, members: [[String]]{}, position: [String:Int]{}, prefixes: [[String]]{}, domains: [String:Int]{}, domain_keys: [[String:Bool]]{}}
+    module_keys := [String:Bool]{}
     loop entry in modules {
         loop member in entry.members {
             module_keys["{entry.name}.{member}"] = true
@@ -1864,7 +2315,7 @@ build_rows: fn(root: String, names: Synonyms, modules: [ModuleFact], inventory: 
         }
     }
     order: collated(loop row in rows -> row.id)
-    position := [String: Int]{}
+    position := [String:Int]{}
     loop (at, row) in rows -> position[row.id] = at
     sorted := loop id in order -> rows[position.get(id) ?? 0].copy()
     Ok(JetRows{rows: sorted, side: side})
@@ -1890,14 +2341,14 @@ competitor_rows: fn(names: Synonyms, surfaces: [LanguageSurface], jet: JetRows) 
     // each Jet member happened to match left every other spelling of the same
     // workflow scored as a gap: List.push matched Rust append, and Rust push,
     // Ruby push and Python append all still counted as separate losses.
-    jet_containers := [String: Bool]{}
+    jet_containers := [String:Bool]{}
     loop row in jet.rows -> jet_containers[row.container] = true
 
     // A gap is one workflow Jet lacks, not one row per language. Ten languages
     // shipping sqrt is one missing operation with ten witnesses, and minting a
     // row each multiplied the backlog by the size of the comparison set.
     gaps := [Gap]{}
-    gap_at := [String: Int]{}
+    gap_at := [String:Int]{}
     loop surface in surfaces {
         loop (at, container) in surface.names {
             if !surface.records[at].present -> next
@@ -1931,7 +2382,9 @@ competitor_rows: fn(names: Synonyms, surfaces: [LanguageSurface], jet: JetRows) 
                     gap_at[id] = index
                     gaps.push(Gap{id: id, container: container.copy(), key: key, containers: [String]{}, languages: [String]{}, operations: [String]{}, found_in: [String]{}, evidence: [String]{}})
                 }
-                if !gaps[index].containers.contains(container) -> gaps[index].containers.push(container.copy())
+                if !gaps[index].containers.contains(container) {
+                    gaps[index].containers.push(container.copy())
+                }
                 // One row per distinct operation per language: Ruby ships chop and
                 // chop!, which are one workflow spelled twice. Record where the
                 // witness was seen: a merged gap spans containers, so the spelling
@@ -1955,9 +2408,9 @@ competitor_rows: fn(names: Synonyms, surfaces: [LanguageSurface], jet: JetRows) 
     // you hold; it does not transfer into a module namespace. `core.math` gains
     // no `clear` because a List has one, and reading it that way invented gaps
     // like `core.sys.hash` and `core.time.push`.
-    pooled_names := [String: Bool]{}
+    pooled_names := [String:Bool]{}
     loop name in CROSS_DOMAIN_POOLED -> pooled_names[name] = true
-    pooled := [String: [String]]{}
+    pooled := [String:[String]]{}
     loop gap in gaps {
         if pooled_names.get(gap.key) == None || gap.containers.len() == 0 -> next
         all_types := true
@@ -1983,41 +2436,43 @@ competitor_rows: fn(names: Synonyms, surfaces: [LanguageSurface], jet: JetRows) 
             at: gap.languages.index_of(language) ?? 0
             cells.push(CompetitorCell{language: language.copy(), status: "has", operation: gap.operations[at].copy(), found_in: gap.found_in[at].copy(), reason: Dyn.Null, has_reason: false})
         }
-        rows.push(Row{
-            id: gap.id.copy(),
-            kind: "competitor_operation",
-            module_name: "",
-            type_name: "",
-            function: "",
-            member: gap.key.copy(),
-            source_line: -1,
-            containers: containers.copy(),
-            languages: languages.copy(),
-            qualifies: "",
-            container: containers[0].copy(),
-            jet_spelling: None,
-            workflow: "operation {languages.len()} of {surfaces.len()} compared languages ship in {gap.container}, with no matching Jet spelling",
-            // One language shipping a name is not evidence that Jet is missing a
-            // workflow: 8446 of 9117 gaps had a single witness, and they are that
-            // language's own internals, such as Rust's align_to and as_mut_ptr,
-            // which a memory-safe language cannot and should not expose. A gap two
-            // compared languages agree on is a real one. Single-witness rows stay in
-            // the ledger and stay counted; they are recorded, not scored.
-            verdict: if scored >= 2 -> "jet_loses" else -> "single_witness",
-            witness_count: languages.len(),
-            // Present only where the two differ, so a reader can see at a glance that
-            // this row was scored on pooled evidence rather than its own.
-            pooled_witness_count: if scored != languages.len() -> scored else -> -1,
-            competitors: cells,
-            evidence: sorted_unique(gap.evidence),
-            declined_by: "",
-        })
+        rows.push(
+            Row{
+                id: gap.id.copy(),
+                kind: "competitor_operation",
+                module_name: "",
+                type_name: "",
+                function: "",
+                member: gap.key.copy(),
+                source_line: -1,
+                containers: containers.copy(),
+                languages: languages.copy(),
+                qualifies: "",
+                container: containers[0].copy(),
+                jet_spelling: None,
+                workflow: "operation {languages.len()} of {surfaces.len()} compared languages ship in {gap.container}, with no matching Jet spelling",
+                // One language shipping a name is not evidence that Jet is missing a
+                // workflow: 8446 of 9117 gaps had a single witness, and they are that
+                // language's own internals, such as Rust's align_to and as_mut_ptr,
+                // which a memory-safe language cannot and should not expose. A gap two
+                // compared languages agree on is a real one. Single-witness rows stay in
+                // the ledger and stay counted; they are recorded, not scored.
+                verdict: if scored >= 2 -> "jet_loses" else -> "single_witness",
+                witness_count: languages.len(),
+                // Present only where the two differ, so a reader can see at a glance that
+                // this row was scored on pooled evidence rather than its own.
+                pooled_witness_count: if scored != languages.len() -> scored else -> -1,
+                competitors: cells,
+                evidence: sorted_unique(gap.evidence),
+                declined_by: "",
+            },
+        )
     }
     rows
 }
 
 apply_ratified_declines: fn(rows: &[Row]) -> Int LedgerError! {
-    seen := [String: Bool]{}
+    seen := [String:Bool]{}
     loop at in 0..<rows.len() {
         loop entry in RATIFIED_DECLINES {
             if entry.id != rows[at].id -> next
@@ -2034,7 +2489,9 @@ apply_ratified_declines: fn(rows: &[Row]) -> Int LedgerError! {
     loop entry in RATIFIED_DECLINES {
         if seen.get(entry.id) == None -> missing.push(entry.id.copy())
     }
-    if missing.len() > 0 -> return Err(fail("RATIFIED_DECLINES names a row the ledger no longer mints: {missing.join(", ")}"))
+    if missing.len() > 0 {
+        return Err(fail("RATIFIED_DECLINES names a row the ledger no longer mints: {missing.join(", ")}"))
+    }
     Ok(0)
 }
 
@@ -2068,9 +2525,7 @@ row_dyn: fn(row: Row) -> Dyn Never! {
         if row.kind == "collection_method_return" {
             source["type"] = jtext(row.type_name)
             source["function"] = jtext(row.function)
-        } else {
-            source["module"] = jtext(row.module_name)
-        }
+        } else { source["module"] = jtext(row.module_name) }
         source["member"] = jtext(row.member)
         source["sourceLine"] = Dyn.Int(row.source_line)
     }
@@ -2082,7 +2537,9 @@ row_dyn: fn(row: Row) -> Dyn Never! {
     out["verdict"] = jtext(row.verdict)
     if row.kind == "competitor_operation" {
         out["witnessCount"] = Dyn.Int(row.witness_count)
-        if row.pooled_witness_count >= 0 -> out["pooledWitnessCount"] = Dyn.Int(row.pooled_witness_count)
+        if row.pooled_witness_count >= 0 {
+            out["pooledWitnessCount"] = Dyn.Int(row.pooled_witness_count)
+        }
     }
     out["competitors"] = cells_dyn(row.competitors)
     out["evidence"] = texts(row.evidence)
@@ -2133,7 +2590,9 @@ tower_record: fn(result: ProcessReceipt IOError!, what: String) -> Dyn LedgerErr
 }
 
 tower_board: fn(root: String) -[Env, Exec, FS, Time.Wait]> Board LedgerError! {
-    if !files.exists("{root}/{TOWER_BOARD_PATH}") -> return Ok(Board{readable: false, cards: [BoardCard]{}, decisions: [BoardDecision]{}})
+    if !files.exists("{root}/{TOWER_BOARD_PATH}") {
+        return Ok(Board{readable: false, cards: [BoardCard]{}, decisions: [BoardDecision]{}})
+    }
     nums := [Int]{}
     loop entry in CLUSTER_OWNER {
         if !nums.contains(entry.card) -> nums.push(entry.card)
@@ -2209,12 +2668,8 @@ loss_clusters: fn(rows: [Row], board: Board) -> Dyn Never! {
         card: owner_card(container)
         record: if card >= 0 && board.readable -> board_card(board, card) else -> None
         state := "needs_card"
-        if card >= 0 && !board.readable {
-            state = "unverified"
-        } else {
-            if record == .Val(found) {
-                state = if found.phase != "done" -> "live" else -> "closed"
-            } else {
+        if card >= 0 && !board.readable -> state = "unverified" else {
+            if record == .Val(found) -> state = if found.phase != "done" -> "live" else -> "closed" else {
                 if card >= 0 -> state = "missing"
             }
         }
@@ -2263,7 +2718,7 @@ Repeat: struct {
 
 repeated_operations: fn(rows: [Row]) -> [Repeat] Never! {
     repeats := [Repeat]{}
-    at_key := [String: Int]{}
+    at_key := [String:Int]{}
     loop row in rows {
         if row.verdict != "jet_loses" -> next
         at := at_key.get(row.member) ?? -1
@@ -2276,7 +2731,9 @@ repeated_operations: fn(rows: [Row]) -> [Repeat] Never! {
     }
     kept := [(count: Int, key: [U8], at: Int)]{}
     loop (at, item) in repeats {
-        if item.containers.len() >= 3 -> kept.push((count: item.containers.len(), key: text.collation_key(item.operation), at: at))
+        if item.containers.len() >= 3 {
+            kept.push((count: item.containers.len(), key: text.collation_key(item.operation), at: at))
+        }
     }
     kept.sort_by(fn(left: (count: Int, key: [U8], at: Int), right: (count: Int, key: [U8], at: Int)) { count_then_key(left.count, left.key, right.count, right.key) })
     out := [Repeat]{}
@@ -2301,7 +2758,7 @@ repeats_dyn: fn(repeats: [Repeat]) -> Dyn Never! {
 }
 
 uncompared_domains: fn(modules: [ModuleFact], containers: [String]) -> [String] Never! {
-    recorded := [String: Bool]{}
+    recorded := [String:Bool]{}
     loop name in containers -> recorded[name] = true
     out := [String]{}
     loop entry in modules {
@@ -2337,7 +2794,8 @@ source_files: fn(root: String, bindings: [Binding]) -[FS]> Dyn LedgerError! {
     }
     syntax.sort()
     loop name in syntax -> paths.push("{SYNTAX_DIR}/{name}")
-    loop path in ([String]{
+    loop path in
+        ([String]{
         PYTHON_SURFACE_PATH,
         CORE_API_LAWS_PATH,
         SYNTAX_REFERENCE_PATH,
@@ -2353,7 +2811,8 @@ source_files: fn(root: String, bindings: [Binding]) -[FS]> Dyn LedgerError! {
     paths.push(CORE_CONFORMANCE_PATH)
     loop path in conformance_fixture_paths(bindings) -> paths.push(path)
     loop path in EDITOR_COVERAGE_PATHS -> paths.push(path)
-    loop path in ([String]{
+    loop path in
+        ([String]{
         "tests/lsp/02_hover.json",
         "tests/ui/variadic_not_last.stderr",
         "tests/ui/spread_bad_call.stderr",
@@ -2376,7 +2835,7 @@ source_files: fn(root: String, bindings: [Binding]) -[FS]> Dyn LedgerError! {
 // ---- Core API gate: frozen fixtures -----------------------------------------
 
 // One frozen TSV manifest: each row by its header's column names.
-tsv_records: fn(root: String, path: String) -[FS]> [[String: String]] LedgerError! {
+tsv_records: fn(root: String, path: String) -[FS]> [[String:String]] LedgerError! {
     source: read_source(root, path) ?? return Err(err)
     rows := [[String]]{}
     loop row in source.tsv_records() {
@@ -2384,11 +2843,13 @@ tsv_records: fn(root: String, path: String) -[FS]> [[String: String]] LedgerErro
     }
     if rows.len() < 2 -> return Err(fail("empty frozen TSV manifest: {path}"))
     header: rows[0]
-    records := [[String: String]]{}
+    records := [[String:String]]{}
     loop index in 1..<rows.len() {
         cells: rows[index]
-        if cells.len() != header.len() -> return Err(fail("malformed frozen TSV row {path}:{index + 1}"))
-        record := [String: String]{}
+        if cells.len() != header.len() {
+            return Err(fail("malformed frozen TSV row {path}:{index + 1}"))
+        }
+        record := [String:String]{}
         loop (at, name) in header -> record[name] = cells[at].copy()
         records.push(record)
     }
@@ -2396,7 +2857,7 @@ tsv_records: fn(root: String, path: String) -[FS]> [[String: String]] LedgerErro
 }
 
 // Column `name` of a frozen TSV row; "" when the manifest has no such column.
-cell: fn(record: [String: String], name: String) -> String Never! {
+cell: fn(record: [String:String], name: String) -> String Never! {
     if record.get(name) == .Val(value) -> return value.copy()
     ""
 }
@@ -2405,7 +2866,9 @@ cell: fn(record: [String: String], name: String) -> String Never! {
 // adapter_stem mapping. This is only a path lookup; scoring stays in the
 // runner named by the frozen contract below.
 agent_adapter_stem: fn(task_id: String) -> String LedgerError! {
-    if task_id == "repository-marker-scan" || task_id == "repository-marker-scan-empty" -> return Ok("repository_marker_scan")
+    if task_id == "repository-marker-scan" || task_id == "repository-marker-scan-empty" {
+        return Ok("repository_marker_scan")
+    }
     if task_id == "repository-semantic-inspection" -> return Ok("repository_semantic_inspection")
     if task_id == "repository-semantic-edit" -> return Ok("repository_semantic_edit")
     if task_id == "git-diff-review" || task_id == "git-diff-empty" -> return Ok("git_diff_review")
@@ -2446,7 +2909,9 @@ fixture_source_digest: fn(root: String, paths: [String]) -[FS]> String LedgerErr
 }
 
 safe_fixture_relative_path: fn(path: String) -> Bool Never! {
-    if path == "" || path.starts_with("/") || path.contains("\\") || path.contains(":") -> return false
+    if path == "" || path.starts_with("/") || path.contains("\\") || path.contains(":") {
+        return false
+    }
     loop part in path.split("/") {
         if part == "" || part == "." || part == ".." -> return false
     }
@@ -2454,7 +2919,9 @@ safe_fixture_relative_path: fn(path: String) -> Bool Never! {
 }
 
 fixture_absolute_path: fn(root: String, relative_path: String) -[FS]> String LedgerError! {
-    if !safe_fixture_relative_path(relative_path) -> return Err(fail("invalid Core API fixture path: {relative_path}"))
+    if !safe_fixture_relative_path(relative_path) {
+        return Err(fail("invalid Core API fixture path: {relative_path}"))
+    }
     absolute: "{root}/{relative_path}"
     if !files.exists(absolute) -> return Err(fail("missing Core API fixture path: {relative_path}"))
     Ok(absolute)
@@ -2475,7 +2942,9 @@ walk_fixture_input: fn(root: String, current: String, found: &[String]) -[FS]> I
             walk_fixture_input(root, child, found) ?? return Err(err)
             next
         }
-        if !files.is_file(child) -> return Err(fail("unsupported Core API fixture input entry: {child}"))
+        if !files.is_file(child) {
+            return Err(fail("unsupported Core API fixture input entry: {child}"))
+        }
         digest: file_digest(child) ?? return Err(err)
         found.push("{byte_tail(child, byte_len(root) + 1)}\t{digest}\n")
     }
@@ -2485,10 +2954,10 @@ walk_fixture_input: fn(root: String, current: String, found: &[String]) -[FS]> I
 fixture_input_digest: fn(root: String, relative_path: String) -[FS]> String LedgerError! {
     path: fixture_absolute_path(root, "{AGENT_CORPUS_ROOT}/{relative_path}") ?? return Err(err)
     found := [String]{}
-    if files.is_dir(path) {
-        walk_fixture_input(path, path, found) ?? return Err(err)
-    } else {
-        if !files.is_file(path) -> return Err(fail("unsupported Core API fixture input: {relative_path}"))
+    if files.is_dir(path) -> walk_fixture_input(path, path, found) ?? return Err(err) else {
+        if !files.is_file(path) {
+            return Err(fail("unsupported Core API fixture input: {relative_path}"))
+        }
         digest: file_digest(path) ?? return Err(err)
         found.push("{byte_tail(relative_path, relative_path.rfind("/") + 1)}\t{digest}\n")
     }
@@ -2522,20 +2991,16 @@ fixture_source_token_count: fn(root: String, path: String) -[FS]> Int LedgerErro
 }
 
 review_boolean: fn(value: String, name: String, task_id: String) -> Bool LedgerError! {
-    if value != "true" && value != "false" -> return Err(fail("Core API fixture review has invalid {name}: {task_id}"))
+    if value != "true" && value != "false" {
+        return Err(fail("Core API fixture review has invalid {name}: {task_id}"))
+    }
     Ok(value == "true")
 }
 
 accepted_fixture_review: fn(review: Dyn, task_id: String, source_digest: Dyn, input_digest: Dyn, expected_digest: Dyn, has_python: Bool) -> Bool Never! {
     if !is_object(review) -> return false
     guarantees: if has_python -> "not-emulated" else -> "not-applicable"
-    text_is(review, "status", "accepted") && non_empty(field(review, "reviewer")) &&
-        non_empty(field(review, "method")) && text_is(review, "fixtureTask", task_id) &&
-        bool_is(review, "sameTaskInputOutcome", true) && bool_is(review, "idiomatic", true) &&
-        bool_is(review, "minimal", true) && bool_is(review, "normalLanguageContract", true) &&
-        text_is(review, "pythonGuarantees", guarantees) &&
-        field(review, "sourceDigest") == source_digest && field(review, "inputDigest") == input_digest &&
-        field(review, "expectedDigest") == expected_digest && non_empty(field(review, "evidence"))
+    text_is(review, "status", "accepted") && non_empty(field(review, "reviewer")) && non_empty(field(review, "method")) && text_is(review, "fixtureTask", task_id) && bool_is(review, "sameTaskInputOutcome", true) && bool_is(review, "idiomatic", true) && bool_is(review, "minimal", true) && bool_is(review, "normalLanguageContract", true) && text_is(review, "pythonGuarantees", guarantees) && field(review, "sourceDigest") == source_digest && field(review, "inputDigest") == input_digest && field(review, "expectedDigest") == expected_digest && non_empty(field(review, "evidence"))
 }
 
 // `Number(text)` for a frozen receipt count.
@@ -2560,25 +3025,30 @@ core_api_fixture_contract: fn(root: String) -[FS]> Dyn LedgerError! {
     manifest: tsv_records(root, AGENT_MANIFEST_PATH) ?? return Err(err)
     receipts: tsv_records(root, AGENT_RECEIPT_PATH) ?? return Err(err)
     reviews: tsv_records(root, AGENT_REVIEW_PATH) ?? return Err(err)
-    task_ids := [String: Bool]{}
+    task_ids := [String:Bool]{}
     loop row in manifest -> task_ids[cell(row, "task_id")] = true
-    review_at := [String: Int]{}
+    review_at := [String:Int]{}
     loop (at, review) in reviews {
         task: cell(review, "task_id")
-        if review_at.get(task) != None -> return Err(fail("duplicate Core API fixture review: {task}"))
-        if task_ids.get(task) == None -> return Err(fail("Core API fixture review names an unknown task: {task}"))
+        if review_at.get(task) != None {
+            return Err(fail("duplicate Core API fixture review: {task}"))
+        }
+        if task_ids.get(task) == None {
+            return Err(fail("Core API fixture review names an unknown task: {task}"))
+        }
         review_at[task] = at
     }
-    receipts_at := [String: [Int]]{}
+    receipts_at := [String:[Int]]{}
     pinned := Dyn.object()
     run_ids := [String]{}
     machines := [String]{}
     loop (at, receipt) in receipts {
         task: cell(receipt, "task_id")
-        if task_ids.get(task) == None -> return Err(fail("Core API fixture receipt names an unknown task: {task}"))
+        if task_ids.get(task) == None {
+            return Err(fail("Core API fixture receipt names an unknown task: {task}"))
+        }
         adapter: cell(receipt, "adapter")
-        if !AGENT_BASELINE_ADAPTERS.contains(adapter) || !non_empty(jtext(cell(receipt, "tool_version"))) ||
-            !non_empty(jtext(cell(receipt, "run_id"))) || !non_empty(jtext(cell(receipt, "machine"))) {
+        if !AGENT_BASELINE_ADAPTERS.contains(adapter) || !non_empty(jtext(cell(receipt, "tool_version"))) || !non_empty(jtext(cell(receipt, "run_id"))) || !non_empty(jtext(cell(receipt, "machine"))) {
             return Err(fail("Core API fixture receipt has invalid identity: {task}"))
         }
         run_ids.push(cell(receipt, "run_id"))
@@ -2591,7 +3061,9 @@ core_api_fixture_contract: fn(root: String) -[FS]> Dyn LedgerError! {
         known.push(at)
         receipts_at[task] = known
     }
-    if first_seen(run_ids).len() != 1 || first_seen(machines).len() != 1 -> return Err(fail("Core API fixture receipt mixes run identities"))
+    if first_seen(run_ids).len() != 1 || first_seen(machines).len() != 1 {
+        return Err(fail("Core API fixture receipt mixes run identities"))
+    }
     tasks := [Dyn]{}
     loop row in manifest {
         task_id: cell(row, "task_id")
@@ -2599,23 +3071,29 @@ core_api_fixture_contract: fn(root: String) -[FS]> Dyn LedgerError! {
         loop adapter in cell(row, "adapters").split(",") {
             if adapter != "" -> adapters.push(adapter.copy())
         }
-        task_receipts := [[String: String]]{}
+        task_receipts := [[String:String]]{}
         task_receipt_at: receipts_at.get(task_id) ?? [Int]{}
         loop at in task_receipt_at -> task_receipts.push(receipts[at].copy())
         at_review: review_at.get(task_id) ?? return Err(fail("missing Core API fixture review: {task_id}"))
         review: reviews[at_review]
         tool_versions := Dyn.object()
-        loop receipt in task_receipts -> tool_versions[cell(receipt, "adapter")] = jtext(cell(receipt, "tool_version"))
+        loop receipt in task_receipts {
+            tool_versions[cell(receipt, "adapter")] = jtext(cell(receipt, "tool_version"))
+        }
         stem: agent_adapter_stem(task_id) ?? return Err(err)
         source_paths := [String]{}
         loop adapter in adapters {
             path: "tests/agent_workloads/adapters/{stem}.{adapter_suffix(adapter)}"
-            if adapter_suffix(adapter) == "" || !files.exists("{root}/{path}") -> return Err(fail("frozen Core API fixture source is missing: {path}"))
+            if adapter_suffix(adapter) == "" || !files.exists("{root}/{path}") {
+                return Err(fail("frozen Core API fixture source is missing: {path}"))
+            }
             source_paths.push(path)
         }
         inputs: first_seen(loop receipt in task_receipts -> cell(receipt, "input_sha256"))
         expecteds: first_seen(loop receipt in task_receipts -> cell(receipt, "expected_sha256"))
-        if inputs.len() != 1 || expecteds.len() != 1 -> return Err(fail("Core API fixture receipts disagree on task identity: {task_id}"))
+        if inputs.len() != 1 || expecteds.len() != 1 {
+            return Err(fail("Core API fixture receipts disagree on task identity: {task_id}"))
+        }
         source_digest: fixture_source_digest(root, source_paths) ?? return Err(err)
         independent := Dyn.object()
         independent["status"] = jtext(cell(review, "status"))
@@ -2731,7 +3209,9 @@ core_api_jet_win: fn(row: Row) -> Dyn LedgerError! {
     loop item in row.evidence {
         if item.trim() != "" -> evidence.push(item.copy())
     }
-    if evidence.len() == 0 -> return Err(fail("Core API workflow has no Jet-win evidence: {row.id}"))
+    if evidence.len() == 0 {
+        return Err(fail("Core API workflow has no Jet-win evidence: {row.id}"))
+    }
     property := ""
     metric := ""
     method := ""
@@ -2805,7 +3285,9 @@ space_len: fn(bytes: [U8], at: Int) -> Int Never! {
     third: if at + 2 < bytes.len() -> (Int{bytes[at + 2]}) else -> -1
     if lead == 194 && second == 160 -> return 2
     if lead == 225 && second == 154 && third == 128 -> return 3
-    if lead == 226 && second == 128 && ((third >= 128 && third <= 138) || third == 168 || third == 169 || third == 175) -> return 3
+    if lead == 226 && second == 128 && ((third >= 128 && third <= 138) || third == 168 || third == 169 || third == 175) {
+        return 3
+    }
     if lead == 226 && second == 129 && third == 159 -> return 3
     if lead == 227 && second == 128 && third == 128 -> return 3
     if lead == 239 && second == 187 && third == 191 -> return 3
@@ -2837,9 +3319,7 @@ quoted_end: fn(bytes: [U8], at: Int, quote: Int) -> Int Never! {
         if code == 92 {
             if probe + 1 >= bytes.len() || is_line_break(bytes, probe + 1) -> return -1
             probe += 1 + char_len(Int{bytes[probe + 1]})
-        } else {
-            probe += char_len(code)
-        }
+        } else { probe += char_len(code) }
     }
 }
 
@@ -2920,7 +3400,9 @@ source_tokens: fn(bytes: [U8]) -> Int Never! {
         }
         if is_digit_byte(code) {
             at = digits_end(bytes, at)
-            if at + 1 < bytes.len() && (Int{bytes[at]}) == 46 && is_digit_byte(Int{bytes[at + 1]}) -> at = digits_end(bytes, at + 1)
+            if at + 1 < bytes.len() && (Int{bytes[at]}) == 46 && is_digit_byte(Int{bytes[at + 1]}) {
+                at = digits_end(bytes, at + 1)
+            }
             next
         }
         operator: operator_len(bytes, at)
@@ -3094,12 +3576,16 @@ jet_sources: fn(row: Row) -> [String] Never! {
 core_api_inventory_evidence: fn(root: String, cache: &MetricsCache, row: Row, surfaces: [LanguageSurface], cases: [String]) -[FS]> Dyn LedgerError! {
     sources: jet_sources(row)
     arms := Dyn.object()
-    if sources.len() > 0 -> arms["jet"] = source_boundary_counts(root, cache, sources, cases) ?? return Err(err)
+    if sources.len() > 0 {
+        arms["jet"] = source_boundary_counts(root, cache, sources, cases) ?? return Err(err)
+    }
     lookups := row.evidence.copy()
     loop cell in row.competitors {
         if cell.status != "has" -> next
         path: surface_path(surfaces, cell.language)
-        if path == "" -> return Err(fail("Core API workflow has no surface for {cell.language}: {row.id}"))
+        if path == "" {
+            return Err(fail("Core API workflow has no surface for {cell.language}: {row.id}"))
+        }
         arms[cell.language] = source_boundary_counts(root, cache, [String]{path}, cases) ?? return Err(err)
         lookups.push("surface:{path}")
     }
@@ -3131,14 +3617,18 @@ core_api_inventory_evidence: fn(root: String, cache: &MetricsCache, row: Row, su
 core_api_workflow_manifest: fn(root: String, rows: [Row], entries_in: [SurfaceEntry], surfaces: [LanguageSurface]) -[FS]> [Dyn] LedgerError! {
     versions := Dyn.object()
     loop entry in entries_in {
-        if has_field(entry.surface, "runtime") -> versions[entry.language] = field(entry.surface, "runtime")
+        if has_field(entry.surface, "runtime") {
+            versions[entry.language] = field(entry.surface, "runtime")
+        }
     }
     cache := MetricsCache{paths: [String]{}, metrics: [Metrics]{}}
     workflows := [Dyn]{}
     loop row in rows {
         competitor_sources := [String]{}
         loop cell in row.competitors {
-            if cell.status == "has" -> competitor_sources.push(surface_path(surfaces, cell.language))
+            if cell.status == "has" {
+                competitor_sources.push(surface_path(surfaces, cell.language))
+            }
         }
         competitor_sources.sort()
         sources := jet_sources(row)
@@ -3267,10 +3757,14 @@ core_structure: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Dyn Ledg
     ran: process.run_all([ProcessSpec]{spec}, 1) ?? return Err(fail("{argv.join(" ")} could not start: {err}"))
     receipt: ran[0] ?? return Err(fail("{argv.join(" ")} could not start: {err}"))
     // `--json` prints the refusal's report on stdout.
-    if receipt.code != 0 || receipt.signal != None || receipt.timed_out -> return Err(fail("Command failed: {argv.join(" ")}: {receipt.output.trim()}"))
+    if receipt.code != 0 || receipt.signal != None || receipt.timed_out {
+        return Err(fail("Command failed: {argv.join(" ")}: {receipt.output.trim()}"))
+    }
     answer: json.parse(receipt.output) ?? return Err(fail("{argv.join(" ")} printed no JSON: {err}"))
     core: field(answer, "core")
-    if !has_field(core, "modules") || !has_field(core, "sources") -> return Err(fail("{argv.join(" ")} printed no Core modules and sources"))
+    if !has_field(core, "modules") || !has_field(core, "sources") {
+        return Err(fail("{argv.join(" ")} printed no Core modules and sources"))
+    }
     Ok(core)
 }
 
@@ -3313,8 +3807,8 @@ module_facts: fn(facts: Dyn) -> [ModuleFact] Never! {
 // The Core source paths of each public module: its Core.rows source modules,
 // then the compiler-private parts it owns, in load order. Runtime units belong
 // to no module's receivers.
-core_module_paths: fn(core: Dyn) -> [String: [String]] Never! {
-    out := [String: [String]]{}
+core_module_paths: fn(core: Dyn) -> [String:[String]] Never! {
+    out := [String:[String]]{}
     loop source in items(field(core, "sources")) {
         if field(source, "runtime") == .Bool(true) -> next
         owner: text_field(source, "owner")
@@ -3379,7 +3873,9 @@ build_ledger: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Built Ledg
         }
         losses := 0
         loop row in rows {
-            if row.verdict == "jet_loses" && row.kind == "competitor_operation" && row.languages.contains(entry.language) -> losses += 1
+            if row.verdict == "jet_loses" && row.kind == "competitor_operation" && row.languages.contains(entry.language) {
+                losses += 1
+            }
         }
         language := Dyn.object()
         copy_field(language, entry.surface, "sourceKind", "sourceKind")
@@ -3542,8 +4038,7 @@ validate_inventory_evidence: fn(workflow: Dyn) -> Int LedgerError! {
     loop item in EVIDENCE_INCLUDES {
         if !has_text(includes, item) -> lacks_include = true
     }
-    if !is_object(counts) || !text_is(counts, "unit", "lexical-token") || !is_array(includes) || lacks_include ||
-        !non_empty(field(counts, "basis")) || !is_object(arms) || entries(arms).len() == 0 {
+    if !is_object(counts) || !text_is(counts, "unit", "lexical-token") || !is_array(includes) || lacks_include || !non_empty(field(counts, "basis")) || !is_object(arms) || entries(arms).len() == 0 {
         return Err(fail("Core API workflow evidence is missing rawSourceCounts: {id}"))
     }
     loop arm in entries(arms) {
@@ -3556,10 +4051,14 @@ validate_inventory_evidence: fn(workflow: Dyn) -> Int LedgerError! {
         }
     }
     loop name in ([String]{"mandatoryConceptIds", "hiddenFacts", "nonlocalLookups"}) {
-        if !is_array(field(evidence, name)) || any_blank(field(evidence, name)) -> return Err(fail("Core API workflow evidence has invalid {name}: {id}"))
+        if !is_array(field(evidence, name)) || any_blank(field(evidence, name)) {
+            return Err(fail("Core API workflow evidence has invalid {name}: {id}"))
+        }
     }
     loop item in items(field(evidence, "mandatoryConceptIds")) {
-        if !non_empty(item) -> return Err(fail("Core API workflow evidence has an empty mandatory concept id: {id}"))
+        if !non_empty(item) {
+            return Err(fail("Core API workflow evidence has an empty mandatory concept id: {id}"))
+        }
     }
     Ok(0)
 }
@@ -3569,15 +4068,11 @@ validate_jet_win: fn(workflow: Dyn) -> Int LedgerError! {
     win: field(field(workflow, "evidence"), "jetWin")
     compensates: field(win, "compensates")
     boolean: if compensates == .Bool(_) -> true else -> false
-    if !is_object(win) || !text_is(win, "status", "accepted") || !non_empty(field(win, "property")) ||
-        !non_empty(field(win, "evidenceRef")) || !text_is(win, "kind", "machine") || !boolean {
+    if !is_object(win) || !text_is(win, "status", "accepted") || !non_empty(field(win, "property")) || !non_empty(field(win, "evidenceRef")) || !text_is(win, "kind", "machine") || !boolean {
         return Err(fail("Core API workflow lacks an accepted Jet win: {id}"))
     }
     measurement: field(win, "measurement")
-    if !is_object(measurement) || !non_empty(field(measurement, "metric")) ||
-        !non_empty(field(measurement, "method")) || !non_empty(field(measurement, "comparison")) ||
-        field(measurement, "rowVerdict") != field(field(workflow, "outcome"), "ledgerVerdict") ||
-        !int_is(measurement, "jet", 1) || !int_is(measurement, "competitor", 0) {
+    if !is_object(measurement) || !non_empty(field(measurement, "metric")) || !non_empty(field(measurement, "method")) || !non_empty(field(measurement, "comparison")) || field(measurement, "rowVerdict") != field(field(workflow, "outcome"), "ledgerVerdict") || !int_is(measurement, "jet", 1) || !int_is(measurement, "competitor", 0) {
         return Err(fail("Core API workflow has incomplete Jet-win measurement: {id}"))
     }
     Ok(0)
@@ -3586,7 +4081,9 @@ validate_jet_win: fn(workflow: Dyn) -> Int LedgerError! {
 // An extra construct with a known classification, every cost field, and a
 // claimed product benefit.
 complete_construct: fn(construct: Dyn) -> Bool Never! {
-    if !is_object(construct) || !EVIDENCE_CLASSIFICATIONS.contains(text_field(construct, "classification")) -> return false
+    if !is_object(construct) || !EVIDENCE_CLASSIFICATIONS.contains(text_field(construct, "classification")) {
+        return false
+    }
     loop name in ([String]{"span", "cost", "rejectedShorterForm", "lostValue", "reviewerVerdict"}) {
         if !non_empty(field(construct, name)) -> return false
     }
@@ -3604,8 +4101,7 @@ validate_measured_evidence: fn(workflow: Dyn) -> Int LedgerError! {
     loop item in EVIDENCE_INCLUDES {
         if !has_text(includes, item) -> lacks_include = true
     }
-    if !is_object(counts) || !text_is(counts, "unit", "lexical-token") || !is_array(includes) || lacks_include ||
-        !is_object(arms) || entries(arms).len() == 0 {
+    if !is_object(counts) || !text_is(counts, "unit", "lexical-token") || !is_array(includes) || lacks_include || !is_object(arms) || entries(arms).len() == 0 {
         return Err(fail("measured evidence has incomplete raw source counts: {id}"))
     }
     loop arm in entries(arms) {
@@ -3613,13 +4109,20 @@ validate_measured_evidence: fn(workflow: Dyn) -> Int LedgerError! {
         loop name in EVIDENCE_REQUIRED_COUNT_FIELDS {
             if !non_negative_int(field(arm.value, name)) -> incomplete = true
         }
-        if incomplete -> return Err(fail("measured evidence has incomplete raw source counts for {id} arm {arm.key}"))
+        if incomplete {
+            return Err(fail("measured evidence has incomplete raw source counts for {id} arm {arm.key}"))
+        }
     }
-    loop name in ([String]{"mandatoryConceptIds", "hiddenFacts", "nonlocalLookups", "extraConstructs"}) {
-        if !is_array(field(evidence, name)) || any_blank(field(evidence, name)) -> return Err(fail("measured evidence has invalid {name}: {id}"))
+    loop name in
+        ([String]{"mandatoryConceptIds", "hiddenFacts", "nonlocalLookups", "extraConstructs"}) {
+        if !is_array(field(evidence, name)) || any_blank(field(evidence, name)) {
+            return Err(fail("measured evidence has invalid {name}: {id}"))
+        }
     }
     loop item in items(field(evidence, "mandatoryConceptIds")) {
-        if !non_empty(item) -> return Err(fail("measured evidence has an empty mandatory concept id: {id}"))
+        if !non_empty(item) {
+            return Err(fail("measured evidence has an empty mandatory concept id: {id}"))
+        }
     }
     burden: field(evidence, "reasoningBurden")
     status: text_field(burden, "status")
@@ -3629,22 +4132,23 @@ validate_measured_evidence: fn(workflow: Dyn) -> Int LedgerError! {
     review: field(evidence, "independentFixtureReview")
     has_python: has_text(field(field(workflow, "sourceBoundary"), "competitors"), PYTHON_SURFACE_PATH)
     guarantees: if has_python -> "not-emulated" else -> "not-applicable"
-    if !truthy(review) || !text_is(review, "status", "accepted") || !non_empty(field(review, "reviewer")) ||
-        !non_empty(field(review, "fixtureTask")) || !bool_is(review, "sameTaskInputOutcome", true) ||
-        !bool_is(review, "idiomatic", true) || !bool_is(review, "minimal", true) ||
-        !bool_is(review, "normalLanguageContract", true) || !text_is(review, "pythonGuarantees", guarantees) {
+    if !truthy(review) || !text_is(review, "status", "accepted") || !non_empty(field(review, "reviewer")) || !non_empty(field(review, "fixtureTask")) || !bool_is(review, "sameTaskInputOutcome", true) || !bool_is(review, "idiomatic", true) || !bool_is(review, "minimal", true) || !bool_is(review, "normalLanguageContract", true) || !text_is(review, "pythonGuarantees", guarantees) {
         return Err(fail("measured evidence lacks independent fixture acceptance: {id}"))
     }
     validate_jet_win(workflow) ?? return Err(err)
     loop construct in items(field(evidence, "extraConstructs")) {
-        if !complete_construct(construct) -> return Err(fail("measured evidence has an incomplete extra-construct record: {id}"))
-        if text_is(construct, "classification", "incidental-ceremony") -> return Err(fail("incidental ceremony is unexplained: {id}"))
+        if !complete_construct(construct) {
+            return Err(fail("measured evidence has an incomplete extra-construct record: {id}"))
+        }
+        if text_is(construct, "classification", "incidental-ceremony") {
+            return Err(fail("incidental ceremony is unexplained: {id}"))
+        }
     }
     Ok(0)
 }
 
 // One frozen receipt row as the fixture contract records it.
-receipt_dyn: fn(receipt: [String: String]) -> Dyn Never! {
+receipt_dyn: fn(receipt: [String:String]) -> Dyn Never! {
     entry := Dyn.object()
     entry["adapter"] = jtext(cell(receipt, "adapter"))
     entry["sourceTokens"] = number_dyn(cell(receipt, "source_tokens"))
@@ -3674,35 +4178,30 @@ validate_core_api_fixture_execution: fn(root: String, fixture: Dyn) -[FS]> Int L
     checksums: read_source(root, AGENT_CHECKSUMS_PATH) ?? return Err(err)
     domain_contract: read_source(root, AGENT_DOMAIN_CONTRACT_PATH) ?? return Err(err)
     policy: read_source(root, AGENT_WORKLOAD_POLICY_PATH) ?? return Err(err)
-    if !truthy(execution) || !same_texts(field(execution, "source"), AGENT_RUNNER_SOURCE_PATHS) ||
-        !text_is(execution, "test", AGENT_RUNNER) || !text_is(execution, "checksumManifest", AGENT_CHECKSUMS_PATH) ||
-        !text_is(execution, "runnerDigest", runner_digest) ||
-        !text_is(execution, "checksumDigest", sha_hex(checksums)) ||
-        !text_is(execution, "domainContract", AGENT_DOMAIN_CONTRACT_PATH) ||
-        !text_is(execution, "domainContractDigest", sha_hex(domain_contract)) ||
-        !text_is(execution, "policyDigest", sha_hex(without_trailing_newlines(policy))) ||
-        !same_texts(field(execution, "checks"), EXECUTION_CHECKS) ||
-        !same_texts(field(execution, "runnerMarkers"), AGENT_RUNNER_MARKERS) {
+    if !truthy(execution) || !same_texts(field(execution, "source"), AGENT_RUNNER_SOURCE_PATHS) || !text_is(execution, "test", AGENT_RUNNER) || !text_is(execution, "checksumManifest", AGENT_CHECKSUMS_PATH) || !text_is(execution, "runnerDigest", runner_digest) || !text_is(execution, "checksumDigest", sha_hex(checksums)) || !text_is(execution, "domainContract", AGENT_DOMAIN_CONTRACT_PATH) || !text_is(execution, "domainContractDigest", sha_hex(domain_contract)) || !text_is(execution, "policyDigest", sha_hex(without_trailing_newlines(policy))) || !same_texts(field(execution, "checks"), EXECUTION_CHECKS) || !same_texts(field(execution, "runnerMarkers"), AGENT_RUNNER_MARKERS) {
         return Err(fail("Core API fixture execution contract drifted"))
     }
     runner_parts := [String]{}
-    loop path in AGENT_RUNNER_SOURCE_PATHS -> runner_parts.push(read_source(root, path) ?? return Err(err))
+    loop path in AGENT_RUNNER_SOURCE_PATHS {
+        runner_parts.push(read_source(root, path) ?? return Err(err))
+    }
     runner: runner_parts.join("\n")
     loop marker in AGENT_RUNNER_MARKERS {
-        if !runner.contains(marker) -> return Err(fail("Core API fixture runner lost deterministic check: {marker}"))
+        if !runner.contains(marker) {
+            return Err(fail("Core API fixture runner lost deterministic check: {marker}"))
+        }
     }
 
     selection: field(fixture, "selection")
-    if !truthy(selection) || !text_is(selection, "source", AGENT_REVIEW_PATH) || !text_is(selection, "field", "task_id") ||
-        !bool_is(selection, "oneReviewPerTask", true) || !bool_is(selection, "sameTaskInputOutcome", true) {
+    if !truthy(selection) || !text_is(selection, "source", AGENT_REVIEW_PATH) || !text_is(selection, "field", "task_id") || !bool_is(selection, "oneReviewPerTask", true) || !bool_is(selection, "sameTaskInputOutcome", true) {
         return Err(fail("Core API fixture selection contract drifted"))
     }
 
     manifest: tsv_records(root, AGENT_MANIFEST_PATH) ?? return Err(err)
-    manifest_at := [String: Int]{}
+    manifest_at := [String:Int]{}
     loop (at, row) in manifest -> manifest_at[cell(row, "task_id")] = at
     tasks: items(field(fixture, "tasks"))
-    task_at := [String: Int]{}
+    task_at := [String:Int]{}
     task_names := [String]{}
     loop (at, task) in tasks {
         name: spelled(field(task, "task"))
@@ -3712,7 +4211,9 @@ validate_core_api_fixture_execution: fn(root: String, fixture: Dyn) -[FS]> Int L
     }
     manifest_names := sorted_unique(loop row in manifest -> cell(row, "task_id"))
     task_names.sort()
-    if task_names != manifest_names -> return Err(fail("Core API fixture selection does not cover the frozen manifest"))
+    if task_names != manifest_names {
+        return Err(fail("Core API fixture selection does not cover the frozen manifest"))
+    }
 
     pinned: field(fixture, "pinnedRun")
     adapters_sorted := AGENT_BASELINE_ADAPTERS.copy()
@@ -3725,13 +4226,15 @@ validate_core_api_fixture_execution: fn(root: String, fixture: Dyn) -[FS]> Int L
     receipts: tsv_records(root, AGENT_RECEIPT_PATH) ?? return Err(err)
     seen := [String]{}
     projected := [String]{}
-    current := [String: String]{}
+    current := [String:String]{}
     loop receipt in receipts {
         task_id: cell(receipt, "task_id")
         at_row: manifest_at.get(task_id) ?? return Err(fail("Core API fixture receipt names an unknown task: {task_id}"))
         row: manifest[at_row]
         adapter: cell(receipt, "adapter")
-        if !AGENT_BASELINE_ADAPTERS.contains(adapter) -> return Err(fail("Core API fixture receipt names an unpinned adapter: {adapter}"))
+        if !AGENT_BASELINE_ADAPTERS.contains(adapter) {
+            return Err(fail("Core API fixture receipt names an unpinned adapter: {adapter}"))
+        }
         key: "{adapter}{nul()}{task_id}"
         if seen.contains(key) -> return Err(fail("duplicate Core API fixture receipt: {key}"))
         seen.push(key.copy())
@@ -3741,27 +4244,35 @@ validate_core_api_fixture_execution: fn(root: String, fixture: Dyn) -[FS]> Int L
                 if stored == .Null && text_is(candidate, "adapter", adapter) -> stored = candidate
             }
         }
-        if stored == .Null || !same(stored, receipt_dyn(receipt)) -> return Err(fail("Core API fixture receipt projection drifted: {key}"))
+        if stored == .Null || !same(stored, receipt_dyn(receipt)) {
+            return Err(fail("Core API fixture receipt projection drifted: {key}"))
+        }
         projected.push(key.copy())
         if !text_is(pinned, "runId", cell(receipt, "run_id")) || !text_is(pinned, "machine", cell(receipt, "machine")) {
             return Err(fail("Core API fixture receipt run identity drifted: {key}"))
         }
         version: cell(receipt, "tool_version")
-        if version.trim() == "" -> return Err(fail("Core API fixture receipt has no tool version: {key}"))
+        if version.trim() == "" {
+            return Err(fail("Core API fixture receipt has no tool version: {key}"))
+        }
         if current.get(adapter) == .Val(known) {
-            if known != version -> return Err(fail("Core API fixture tool version is not pinned: {adapter}"))
+            if known != version {
+                return Err(fail("Core API fixture tool version is not pinned: {adapter}"))
+            }
         }
         current[adapter] = version
-        if !text_is(field(pinned, "toolVersions"), adapter, version) -> return Err(fail("Core API fixture receipt disagrees with pinned tool: {key}"))
-        if !text_is(execution, "policyDigest", cell(receipt, "policy_digest")) || cell(receipt, "scoring") != AGENT_SCORING ||
-            cell(receipt, "exit_code") != "0" || cell(receipt, "expressibility") != "supported" || cell(receipt, "finding") != "none" ||
-            cell(receipt, "output_stable") != "true" {
+        if !text_is(field(pinned, "toolVersions"), adapter, version) {
+            return Err(fail("Core API fixture receipt disagrees with pinned tool: {key}"))
+        }
+        if !text_is(execution, "policyDigest", cell(receipt, "policy_digest")) || cell(receipt, "scoring") != AGENT_SCORING || cell(receipt, "exit_code") != "0" || cell(receipt, "expressibility") != "supported" || cell(receipt, "finding") != "none" || cell(receipt, "output_stable") != "true" {
             return Err(fail("Core API fixture receipt is not a deterministic pass: {key}"))
         }
         stem: agent_adapter_stem(task_id) ?? return Err(err)
         source: "tests/agent_workloads/adapters/{stem}.{adapter_suffix(adapter)}"
         words: fixture_source_token_count(root, source) ?? return Err(err)
-        if number_dyn(cell(receipt, "source_tokens")) != Dyn.Int(words) -> return Err(fail("Core API fixture source count drifted: {key}"))
+        if number_dyn(cell(receipt, "source_tokens")) != Dyn.Int(words) {
+            return Err(fail("Core API fixture source count drifted: {key}"))
+        }
         input_digest: fixture_input_digest(root, cell(row, "input")) ?? return Err(err)
         expected_path: "{AGENT_CORPUS_ROOT}/{cell(row, "expected")}"
         expected_file: fixture_absolute_path(root, expected_path) ?? return Err(err)
@@ -3769,8 +4280,11 @@ validate_core_api_fixture_execution: fn(root: String, fixture: Dyn) -[FS]> Int L
         if cell(receipt, "input_sha256") != input_digest || cell(receipt, "expected_sha256") != expected_digest {
             return Err(fail("Core API fixture input or outcome digest drifted: {key}"))
         }
-        loop name in ([String]{"stdout_sha256", "stderr_sha256", "warm_stdout_sha256", "warm_stderr_sha256"}) {
-            if !is_hex64(cell(receipt, name)) -> return Err(fail("Core API fixture receipt has invalid {name}: {key}"))
+        loop name in
+            ([String]{"stdout_sha256", "stderr_sha256", "warm_stdout_sha256", "warm_stderr_sha256"}) {
+            if !is_hex64(cell(receipt, name)) {
+                return Err(fail("Core API fixture receipt has invalid {name}: {key}"))
+            }
         }
         if !safe_fixture_relative_path(cell(receipt, "stdout_file")) || !safe_fixture_relative_path(cell(receipt, "stderr_file")) {
             return Err(fail("Core API fixture receipt artifact path escaped its root: {key}"))
@@ -3780,8 +4294,7 @@ validate_core_api_fixture_execution: fn(root: String, fixture: Dyn) -[FS]> Int L
         expected: files.read_bytes(expected_file) ?? return Err(fail("cannot read {expected_file}: {err}"))
         stdout_digest: crypto.sha256(stdout).hex()
         stderr_digest: fixture_artifact_digest(root, cell(receipt, "stderr_file")) ?? return Err(err)
-        if stdout_digest != cell(receipt, "stdout_sha256") || cell(receipt, "warm_stdout_sha256") != cell(receipt, "stdout_sha256") ||
-            stdout_digest != cell(receipt, "expected_sha256") || stdout != expected || stderr_digest != cell(receipt, "stderr_sha256") {
+        if stdout_digest != cell(receipt, "stdout_sha256") || cell(receipt, "warm_stdout_sha256") != cell(receipt, "stdout_sha256") || stdout_digest != cell(receipt, "expected_sha256") || stdout != expected || stderr_digest != cell(receipt, "stderr_sha256") {
             return Err(fail("Core API fixture output artifact drifted: {key}"))
         }
     }
@@ -3802,7 +4315,9 @@ validate_core_api_fixture_execution: fn(root: String, fixture: Dyn) -[FS]> Int L
         stem: agent_adapter_stem(task_id) ?? return Err(err)
         expected_sources := [String]{}
         loop adapter in cell(row, "adapters").split(",") {
-            if adapter != "" -> expected_sources.push("tests/agent_workloads/adapters/{stem}.{adapter_suffix(adapter)}")
+            if adapter != "" {
+                expected_sources.push("tests/agent_workloads/adapters/{stem}.{adapter_suffix(adapter)}")
+            }
         }
         input_digest: fixture_input_digest(root, cell(row, "input")) ?? return Err(err)
         expected_file: fixture_absolute_path(root, "{AGENT_CORPUS_ROOT}/{cell(row, "expected")}") ?? return Err(err)
@@ -3810,12 +4325,7 @@ validate_core_api_fixture_execution: fn(root: String, fixture: Dyn) -[FS]> Int L
         at_task: task_at.get(task_id) ?? return Err(fail("Core API fixture selection is stale: {task_id}"))
         task: tasks[at_task]
         source_digest: fixture_source_digest(root, expected_sources) ?? return Err(err)
-        if !text_is(task, "domain", cell(row, "domain")) || !text_is(task, "case", cell(row, "case")) ||
-            !text_is(task, "input", cell(row, "input")) || !text_is(task, "expected", cell(row, "expected")) ||
-            !text_is(task, "outcome", cell(row, "declared_outcome")) ||
-            !text_is(task, "inputDigest", input_digest) || !text_is(task, "expectedDigest", expected_digest) ||
-            !same_texts(field(field(task, "sourceBoundary"), "userAuthored"), expected_sources) ||
-            !text_is(task, "sourceDigest", source_digest) {
+        if !text_is(task, "domain", cell(row, "domain")) || !text_is(task, "case", cell(row, "case")) || !text_is(task, "input", cell(row, "input")) || !text_is(task, "expected", cell(row, "expected")) || !text_is(task, "outcome", cell(row, "declared_outcome")) || !text_is(task, "inputDigest", input_digest) || !text_is(task, "expectedDigest", expected_digest) || !same_texts(field(field(task, "sourceBoundary"), "userAuthored"), expected_sources) || !text_is(task, "sourceDigest", source_digest) {
             return Err(fail("Core API fixture selection is stale: {task_id}"))
         }
     }
@@ -3864,23 +4374,33 @@ diagnostic_entries: fn(source: String) -> [[String]] Never! {
 validate_core_api_syntax_coverage: fn(root: String) -[FS]> Int LedgerError! {
     syntax: read_source(root, SYNTAX_REFERENCE_PATH) ?? return Err(err)
     loop marker in CORE_API_SYNTAX_MARKERS {
-        if !syntax.contains(marker) -> return Err(fail("syntax reference does not teach Core gate form: {marker}"))
+        if !syntax.contains(marker) {
+            return Err(fail("syntax reference does not teach Core gate form: {marker}"))
+        }
     }
     editor_parts := [String]{}
-    loop path in EDITOR_COVERAGE_PATHS -> editor_parts.push(read_source(root, path) ?? return Err(err))
+    loop path in EDITOR_COVERAGE_PATHS {
+        editor_parts.push(read_source(root, path) ?? return Err(err))
+    }
     editor: editor_parts.join("\n")
-    loop marker in ([String]{
+    loop marker in
+        ([String]{
         "lsp_completion_returns_items",
         "lsp_signature_help_returns_active_parameter",
         "rest: ...String",
         "lsp_hover_returns_signature",
         "connect: fn(host: String, /",
     }) {
-        if !editor.contains(marker) -> return Err(fail("editor coverage does not teach Core gate form: {marker}"))
+        if !editor.contains(marker) {
+            return Err(fail("editor coverage does not teach Core gate form: {marker}"))
+        }
     }
     hover: read_source(root, "tests/lsp/02_hover.json") ?? return Err(err)
-    if hover.contains("=>") || !hover.contains("-[IO]>") -> return Err(fail("hover fixture teaches a retired arrow or misses `-[IO]>`"))
-    loop pair in ([(path: String, name: String)]{
+    if hover.contains("=>") || !hover.contains("-[IO]>") {
+        return Err(fail("hover fixture teaches a retired arrow or misses `-[IO]>`"))
+    }
+    loop pair in
+        ([(path: String, name: String)]{
         (path: "tests/ui/variadic_not_last.stderr", name: "jet.MisplacedVariadicParameter"),
         (path: "tests/ui/spread_bad_call.stderr", name: "jet.SpreadWithoutVariadic"),
         (path: "tests/ui/yield_type_mismatch.stderr", name: "jet.YieldTypeMismatch"),
@@ -3902,7 +4422,9 @@ validate_core_api_syntax_coverage: fn(root: String) -[FS]> Int LedgerError! {
             }
             complete = has_error && has_why && has_fix
         }
-        if !complete -> return Err(fail("diagnostic coverage lacks a complete registered report: {pair.path} {pair.name}"))
+        if !complete {
+            return Err(fail("diagnostic coverage lacks a complete registered report: {pair.path} {pair.name}"))
+        }
     }
     Ok(0)
 }
@@ -3912,19 +4434,19 @@ validate_fresh_review: fn(root: String, ledger: Dyn, workflows: [Dyn]) -[FS]> In
     review: field(gate, "freshReview")
     loop name in text_items(field(review, "checks")) {
         if name == "workflow-closure" {
-            row_ids := [String: Bool]{}
+            row_ids := [String:Bool]{}
             loop row in items(field(ledger, "rows")) -> row_ids[text_field(row, "id")] = true
-            workflow_ids := [String: Bool]{}
+            workflow_ids := [String:Bool]{}
             loop workflow in workflows {
                 id: text_field(workflow, "id")
-                if !is_object(workflow) || !non_empty(field(workflow, "id")) || workflow_ids.get(id) != None ||
-                    row_ids.get(id) == None || !text_is(workflow, "task", "core-api/{id}") ||
-                    !truthy(field(workflow, "input")) || !text_is(field(workflow, "input"), "row", id) {
+                if !is_object(workflow) || !non_empty(field(workflow, "id")) || workflow_ids.get(id) != None || row_ids.get(id) == None || !text_is(workflow, "task", "core-api/{id}") || !truthy(field(workflow, "input")) || !text_is(field(workflow, "input"), "row", id) {
                     return Err(fail("fresh Core API review found workflow-closure drift"))
                 }
                 workflow_ids[id] = true
             }
-            if workflow_ids.len() != row_ids.len() -> return Err(fail("fresh Core API review found workflow-closure drift"))
+            if workflow_ids.len() != row_ids.len() {
+                return Err(fail("fresh Core API review found workflow-closure drift"))
+            }
             next
         }
         if name == "construct-classifications" {
@@ -3932,8 +4454,7 @@ validate_fresh_review: fn(root: String, ledger: Dyn, workflows: [Dyn]) -[FS]> In
                 evidence: field(workflow, "evidence")
                 if !text_is(evidence, "status", "measured") -> next
                 loop construct in items(field(evidence, "extraConstructs")) {
-                    if !is_object(construct) || !EVIDENCE_CLASSIFICATIONS.contains(text_field(construct, "classification")) ||
-                        text_is(construct, "classification", "incidental-ceremony") || no_benefit(construct) {
+                    if !is_object(construct) || !EVIDENCE_CLASSIFICATIONS.contains(text_field(construct, "classification")) || text_is(construct, "classification", "incidental-ceremony") || no_benefit(construct) {
                         return Err(fail("fresh Core API review found construct-classification drift: {text_field(workflow, "id")}"))
                     }
                 }
@@ -3946,9 +4467,7 @@ validate_fresh_review: fn(root: String, ledger: Dyn, workflows: [Dyn]) -[FS]> In
                 if !text_is(evidence, "status", "measured") -> next
                 burden: field(evidence, "reasoningBurden")
                 status: text_field(burden, "status")
-                if !truthy(burden) || (status != "better" && status != "equal" && status != "worse") ||
-                    !non_empty(field(burden, "evidence")) ||
-                    (status == "worse" && !bool_is(field(evidence, "jetWin"), "compensates", true)) {
+                if !truthy(burden) || (status != "better" && status != "equal" && status != "worse") || !non_empty(field(burden, "evidence")) || (status == "worse" && !bool_is(field(evidence, "jetWin"), "compensates", true)) {
                     return Err(fail("fresh Core API review found reasoning-evidence drift: {text_field(workflow, "id")}"))
                 }
             }
@@ -3980,39 +4499,41 @@ heading_count: fn(policy: String, heading: String) -> Int Never! {
 
 validate_core_api_gate: fn(root: String, ledger: Dyn) -[FS]> Int LedgerError! {
     gate: field(ledger, "coreApiGate")
-    if !truthy(gate) || !int_is(gate, "schemaVersion", 1) -> return Err(fail("missing Core API gate schema"))
-    if !int_is(gate, "ownerCard", 1398) || !text_is(gate, "policyDocument", CORE_API_LAWS_PATH) ||
-        !text_is(gate, "policyAnchor", "## Competitive Core API gate") {
+    if !truthy(gate) || !int_is(gate, "schemaVersion", 1) {
+        return Err(fail("missing Core API gate schema"))
+    }
+    if !int_is(gate, "ownerCard", 1398) || !text_is(gate, "policyDocument", CORE_API_LAWS_PATH) || !text_is(gate, "policyAnchor", "## Competitive Core API gate") {
         return Err(fail("Core API gate is not attached to the existing Core API rubric"))
     }
     if !text_is(field(gate, "inventory"), "source", "rows") || !bool_is(field(gate, "inventory"), "manualWorkflowInventory", false) {
         return Err(fail("Core API gate must consume ledger rows as its only workflow inventory"))
     }
     policy: read_source(root, CORE_API_LAWS_PATH) ?? return Err(err)
-    if heading_count(policy, "## Competitive Core API gate") != 1 ||
-        !policy.contains("Python is the calibration arm") ||
-        !policy.contains("Raw counts are evidence, not a universal ratio") ||
-        !policy.contains("Incidental ceremony fails") ||
-        !policy.contains("coreApiGate.workflowManifest") {
+    if heading_count(policy, "## Competitive Core API gate") != 1 || !policy.contains("Python is the calibration arm") || !policy.contains("Raw counts are evidence, not a universal ratio") || !policy.contains("Incidental ceremony fails") || !policy.contains("coreApiGate.workflowManifest") {
         return Err(fail("Core API rubric is missing its single Python superiority gate"))
     }
     validate_core_api_syntax_coverage(root) ?? return Err(err)
     rows: items(field(ledger, "rows"))
-    row_at := [String: Int]{}
+    row_at := [String:Int]{}
     loop (at, row) in rows -> row_at[text_field(row, "id")] = at
     workflows: items(field(gate, "workflowManifest"))
     if !is_array(field(gate, "workflowManifest")) || workflows.len() != row_at.len() {
         return Err(fail("Core API gate workflow manifest does not cover every ledger row"))
     }
-    workflow_ids := [String: Bool]{}
+    workflow_ids := [String:Bool]{}
     case_counts := Dyn.object()
     loop workflow in workflows {
         id: text_field(workflow, "id")
-        if workflow_ids.get(id) != None -> return Err(fail("duplicate Core API workflow task: {id}"))
+        if workflow_ids.get(id) != None {
+            return Err(fail("duplicate Core API workflow task: {id}"))
+        }
         workflow_ids[id] = true
         at_row: row_at.get(id) ?? return Err(fail("Core API workflow task names a row outside the ledger: {id}"))
-        loop name in ([String]{"task", "input", "outcome", "allowedDependency", "toolVersions", "sourceBoundary", "competingCoreWorkflow", "cases", "scope", "evidence"}) {
-            if missing(workflow, name) -> return Err(fail("Core API workflow is missing {name}: {id}"))
+        loop name in
+            ([String]{"task", "input", "outcome", "allowedDependency", "toolVersions", "sourceBoundary", "competingCoreWorkflow", "cases", "scope", "evidence"}) {
+            if missing(workflow, name) {
+                return Err(fail("Core API workflow is missing {name}: {id}"))
+            }
         }
         input: field(workflow, "input")
         status: text_field(input, "fixtureStatus")
@@ -4020,9 +4541,7 @@ validate_core_api_gate: fn(root: String, ledger: Dyn) -[FS]> Int LedgerError! {
             return Err(fail("Core API workflow input is not frozen before comparison: {id}"))
         }
         boundary: field(workflow, "sourceBoundary")
-        if !truthy(field(workflow, "competingCoreWorkflow")) || !truthy(field(boundary, "fixtureManifest")) ||
-            !truthy(field(boundary, "userAuthoredRoot")) || !is_array(field(boundary, "jet")) ||
-            !is_array(field(boundary, "competitors")) || !bool_is(boundary, "generatedSourceExcluded", true) {
+        if !truthy(field(workflow, "competingCoreWorkflow")) || !truthy(field(boundary, "fixtureManifest")) || !truthy(field(boundary, "userAuthoredRoot")) || !is_array(field(boundary, "jet")) || !is_array(field(boundary, "competitors")) || !bool_is(boundary, "generatedSourceExcluded", true) {
             return Err(fail("Core API workflow lacks a source boundary: {id}"))
         }
         row: rows[at_row]
@@ -4036,10 +4555,7 @@ validate_core_api_gate: fn(root: String, ledger: Dyn) -[FS]> Int LedgerError! {
         loop entry in versions {
             if !non_empty(entry.value) -> blank_version = true
         }
-        if !text_is(workflow, "task", "core-api/{id}") || !text_is(input, "row", id) ||
-            field(workflow, "competingCoreWorkflow") != field(row, "workflow") ||
-            !truthy(field(workflow, "allowedDependency")) || allowed.len() == 0 || blank_dependency ||
-            versions.len() == 0 || blank_version {
+        if !text_is(workflow, "task", "core-api/{id}") || !text_is(input, "row", id) || field(workflow, "competingCoreWorkflow") != field(row, "workflow") || !truthy(field(workflow, "allowedDependency")) || allowed.len() == 0 || blank_dependency || versions.len() == 0 || blank_version {
             return Err(fail("Core API workflow frozen task record drifted: {id}"))
         }
         cases: field(workflow, "cases")
@@ -4054,33 +4570,46 @@ validate_core_api_gate: fn(root: String, ledger: Dyn) -[FS]> Int LedgerError! {
         scope: field(workflow, "scope")
         excluded: truthy(field(scope, "excluded"))
         decline: field(scope, "decline")
-        if excluded && !truthy(decline) -> return Err(fail("Core API workflow is hidden without a ratified scope decision: {id}"))
+        if excluded && !truthy(decline) {
+            return Err(fail("Core API workflow is hidden without a ratified scope decision: {id}"))
+        }
         if excluded && (!text_is(row, "verdict", "declined") || field(decline, "decision") != field(row, "declinedBy")) {
             return Err(fail("Core API workflow is hidden without a matching ratified scope decision: {id}"))
         }
-        if !excluded && truthy(decline) && !truthy(field(decline, "scored")) -> return Err(fail("Core API design decline is not scored: {id}"))
+        if !excluded && truthy(decline) && !truthy(field(decline, "scored")) {
+            return Err(fail("Core API design decline is not scored: {id}"))
+        }
         loop kind in kinds {
             case_counts[kind] = Dyn.Int(if field(case_counts, kind) == .Int(count) -> count + 1 else -> 1)
         }
         evidence: field(workflow, "evidence")
-        loop name in ([String]{"rawSourceCounts", "mandatoryConceptIds", "hiddenFacts", "nonlocalLookups", "extraConstructs", "reasoningBurden", "independentFixtureReview", "jetWin"}) {
-            if !has_field(evidence, name) -> return Err(fail("Core API workflow evidence is missing {name}: {id}"))
+        loop name in
+            ([String]{"rawSourceCounts", "mandatoryConceptIds", "hiddenFacts", "nonlocalLookups", "extraConstructs", "reasoningBurden", "independentFixtureReview", "jetWin"}) {
+            if !has_field(evidence, name) {
+                return Err(fail("Core API workflow evidence is missing {name}: {id}"))
+            }
         }
         evidence_status: text_field(evidence, "status")
-        if evidence_status != "pending-fixture" && evidence_status != "measured" -> return Err(fail("invalid Core API workflow evidence status: {id}"))
+        if evidence_status != "pending-fixture" && evidence_status != "measured" {
+            return Err(fail("invalid Core API workflow evidence status: {id}"))
+        }
         if evidence_status == "pending-fixture" {
             validate_inventory_evidence(workflow) ?? return Err(err)
             validate_jet_win(workflow) ?? return Err(err)
-        } else {
-            validate_measured_evidence(workflow) ?? return Err(err)
+        } else { validate_measured_evidence(workflow) ?? return Err(err) }
+    }
+    if workflow_ids.len() != row_at.len() {
+        return Err(fail("Core API workflow manifest row coverage drifted"))
+    }
+    loop kind in CASE_KINDS {
+        if field(case_counts, kind) == .Null {
+            return Err(fail("Core API workflow inventory has no {kind} cases"))
         }
     }
-    if workflow_ids.len() != row_at.len() -> return Err(fail("Core API workflow manifest row coverage drifted"))
-    loop kind in CASE_KINDS {
-        if field(case_counts, kind) == .Null -> return Err(fail("Core API workflow inventory has no {kind} cases"))
-    }
     summary: field(gate, "summary")
-    if !same(field(summary, "caseCounts"), case_counts) -> return Err(fail("Core API workflow case counts drifted"))
+    if !same(field(summary, "caseCounts"), case_counts) {
+        return Err(fail("Core API workflow case counts drifted"))
+    }
     pending := 0
     wins := 0
     loop workflow in workflows {
@@ -4097,26 +4626,23 @@ validate_core_api_gate: fn(root: String, ledger: Dyn) -[FS]> Int LedgerError! {
     fixture: field(gate, "fixtureContract")
     fresh: field(gate, "freshReview")
     review_source: read_source(root, CORE_API_REVIEW_TEST_PATH) ?? return Err(err)
-    if !truthy(fresh) || !text_is(fresh, "method", "fresh-context-release-check") ||
-        !text_is(fresh, "command", CORE_API_REVIEW_COMMAND) ||
-        !text_is(fresh, "source", CORE_API_REVIEW_TEST) ||
-        !text_is(fresh, "sourceDigest", sha_hex(review_source)) ||
-        !same_texts(field(fresh, "checks"), CORE_API_REVIEW_CHECKS) {
+    if !truthy(fresh) || !text_is(fresh, "method", "fresh-context-release-check") || !text_is(fresh, "command", CORE_API_REVIEW_COMMAND) || !text_is(fresh, "source", CORE_API_REVIEW_TEST) || !text_is(fresh, "sourceDigest", sha_hex(review_source)) || !same_texts(field(fresh, "checks"), CORE_API_REVIEW_CHECKS) {
         return Err(fail("Core API gate is missing its fresh-review contract"))
     }
-    if !truthy(fixture) || !text_is(fixture, "manifest", AGENT_MANIFEST_PATH) || !text_is(fixture, "receipt", AGENT_RECEIPT_PATH) ||
-        !text_is(fixture, "review", AGENT_REVIEW_PATH) ||
-        !text_is(fixture, "runner", AGENT_RUNNER) || !text_is(fixture, "scoring", AGENT_SCORING) {
+    if !truthy(fixture) || !text_is(fixture, "manifest", AGENT_MANIFEST_PATH) || !text_is(fixture, "receipt", AGENT_RECEIPT_PATH) || !text_is(fixture, "review", AGENT_REVIEW_PATH) || !text_is(fixture, "runner", AGENT_RUNNER) || !text_is(fixture, "scoring", AGENT_SCORING) {
         return Err(fail("Core API gate does not reuse the frozen agent corpus contract"))
     }
     tasks: items(field(fixture, "tasks"))
-    if !is_array(field(fixture, "tasks")) || tasks.len() == 0 -> return Err(fail("Core API gate has no frozen fixture tasks"))
-    task_ids := [String: Bool]{}
+    if !is_array(field(fixture, "tasks")) || tasks.len() == 0 {
+        return Err(fail("Core API gate has no frozen fixture tasks"))
+    }
+    task_ids := [String:Bool]{}
     loop task in tasks {
         name: spelled(field(task, "task"))
         if task_ids.get(name) != None -> return Err(fail("duplicate Core API fixture task: {name}"))
         task_ids[name] = true
-        loop key in ([String]{"input", "outcome", "allowedDependency", "toolVersions", "sourceBoundary", "sourceDigest", "inputDigest", "expectedDigest", "adapters", "scoring", "runner", "receipts", "independentFixtureReview"}) {
+        loop key in
+            ([String]{"input", "outcome", "allowedDependency", "toolVersions", "sourceBoundary", "sourceDigest", "inputDigest", "expectedDigest", "adapters", "scoring", "runner", "receipts", "independentFixtureReview"}) {
             if missing(task, key) -> return Err(fail("Core API fixture is missing {key}: {name}"))
         }
         boundary: field(task, "sourceBoundary")
@@ -4135,25 +4661,22 @@ validate_core_api_gate: fn(root: String, ledger: Dyn) -[FS]> Int LedgerError! {
         source_digest: fixture_source_digest(root, text_items(field(boundary, "userAuthored"))) ?? return Err(err)
         bad_receipt := false
         loop receipt in receipts {
-            if !adapters.contains(text_field(receipt, "adapter")) || !non_empty(field(receipt, "toolVersion")) ||
-                !non_negative_int(field(receipt, "sourceTokens")) || !int_is(receipt, "exitCode", 0) ||
-                !bool_is(receipt, "outputStable", true) || field(receipt, "scoring") != field(fixture, "scoring") ||
-                !non_empty(field(receipt, "policyDigest")) || field(receipt, "inputSha256") != field(task, "inputDigest") ||
-                field(receipt, "expectedSha256") != field(task, "expectedDigest") {
+            if !adapters.contains(text_field(receipt, "adapter")) || !non_empty(field(receipt, "toolVersion")) || !non_negative_int(field(receipt, "sourceTokens")) || !int_is(receipt, "exitCode", 0) || !bool_is(receipt, "outputStable", true) || field(receipt, "scoring") != field(fixture, "scoring") || !non_empty(field(receipt, "policyDigest")) || field(receipt, "inputSha256") != field(task, "inputDigest") || field(receipt, "expectedSha256") != field(task, "expectedDigest") {
                 bad_receipt = true
             }
         }
         review: field(task, "independentFixtureReview")
-        if field(task, "scoring") != field(fixture, "runner") || field(task, "runner") != field(fixture, "runner") ||
-            receipt_adapters != competitor_adapters || !text_is(task, "sourceDigest", source_digest) ||
-            !non_empty(field(task, "inputDigest")) || !non_empty(field(task, "expectedDigest")) || bad_receipt ||
-            !accepted_fixture_review(review, name, field(task, "sourceDigest"), field(task, "inputDigest"), field(task, "expectedDigest"), adapters.contains("python")) {
-            if truthy(review) && !text_is(review, "status", "accepted") -> return Err(fail("Core API fixture review is not accepted: {name}"))
+        if field(task, "scoring") != field(fixture, "runner") || field(task, "runner") != field(fixture, "runner") || receipt_adapters != competitor_adapters || !text_is(task, "sourceDigest", source_digest) || !non_empty(field(task, "inputDigest")) || !non_empty(field(task, "expectedDigest")) || bad_receipt || !accepted_fixture_review(review, name, field(task, "sourceDigest"), field(task, "inputDigest"), field(task, "expectedDigest"), adapters.contains("python")) {
+            if truthy(review) && !text_is(review, "status", "accepted") {
+                return Err(fail("Core API fixture review is not accepted: {name}"))
+            }
             return Err(fail("Core API fixture lacks accepted independent review: {name}"))
         }
         loop receipt in receipts {
             adapter: text_field(receipt, "adapter")
-            if !adapters.contains(adapter) || adapter == "jet" -> return Err(fail("Core API fixture does not name its existing runner: {name}"))
+            if !adapters.contains(adapter) || adapter == "jet" {
+                return Err(fail("Core API fixture does not name its existing runner: {name}"))
+            }
         }
     }
     validate_core_api_fixture_execution(root, fixture) ?? return Err(err)
@@ -4163,43 +4686,55 @@ validate_core_api_gate: fn(root: String, ledger: Dyn) -[FS]> Int LedgerError! {
 
 validate_surfaces: fn(ledger: Dyn, surfaces: [SurfaceEntry]) -> Int LedgerError! {
     containers: canonical_containers(surfaces)
-    if surfaces.len() < 11 -> return Err(fail("the owner named eleven languages; only {surfaces.len()} surfaces are recorded"))
+    if surfaces.len() < 11 {
+        return Err(fail("the owner named eleven languages; only {surfaces.len()} surfaces are recorded"))
+    }
     loop entry in surfaces {
         records: entries(field(entry.surface, "containers"))
-        recorded := [String: Bool]{}
+        recorded := [String:Bool]{}
         loop record in records -> recorded[record.key] = true
         missing_names := [String]{}
         loop name in containers {
             if recorded.get(name) == None -> missing_names.push(name.copy())
         }
-        if missing_names.len() > 0 -> return Err(fail("hidden exclusion: {entry.language} records no verdict for {missing_names.join(", ")}"))
+        if missing_names.len() > 0 {
+            return Err(fail("hidden exclusion: {entry.language} records no verdict for {missing_names.join(", ")}"))
+        }
         loop record in records {
             present: truthy(field(record.value, "present"))
-            if !present && !truthy(field(record.value, "reason")) -> return Err(fail("hidden exclusion: {entry.language} marks {record.key} absent with no reason"))
-            if present && items(field(record.value, "operations")).len() == 0 -> return Err(fail("empty recorded container: {entry.language} {record.key}"))
+            if !present && !truthy(field(record.value, "reason")) {
+                return Err(fail("hidden exclusion: {entry.language} marks {record.key} absent with no reason"))
+            }
+            if present && items(field(record.value, "operations")).len() == 0 {
+                return Err(fail("empty recorded container: {entry.language} {record.key}"))
+            }
         }
-        if !truthy(field(entry.surface, "sourceKind")) || !truthy(field(entry.surface, "scopeRule")) ||
-            items(field(entry.surface, "officialReferences")).len() == 0 {
+        if !truthy(field(entry.surface, "sourceKind")) || !truthy(field(entry.surface, "scopeRule")) || items(field(entry.surface, "officialReferences")).len() == 0 {
             return Err(fail("surface without recorded provenance: {entry.language}"))
         }
         // One source feeds one container. This was asserted in prose and never
         // enforced, and R's base package really did feed core.math and
         // core.math.random, so one function minted two gaps.
-        owner := [String: String]{}
+        owner := [String:String]{}
         loop record in records {
             if !truthy(field(record.value, "present")) -> next
-            loop key in ([String]{"packages", "files", "types", "manualPages", "modules", "pythonSources"}) {
+            loop key in
+                ([String]{"packages", "files", "types", "manualPages", "modules", "pythonSources"}) {
                 loop source in items(field(record.value, key)) {
                     name: spelled(source)
                     if owner.get(name) == .Val(seen) {
-                        if seen != record.key -> return Err(fail("one source feeds two containers in {entry.language}: {name} is claimed by {seen} and {record.key}"))
+                        if seen != record.key {
+                            return Err(fail("one source feeds two containers in {entry.language}: {name} is claimed by {seen} and {record.key}"))
+                        }
                     }
                     owner[name] = record.key.copy()
                 }
             }
         }
     }
-    if !same_texts(field(ledger, "canonicalContainers"), containers) -> return Err(fail("ledger container set drifted from the recorded surfaces"))
+    if !same_texts(field(ledger, "canonicalContainers"), containers) {
+        return Err(fail("ledger container set drifted from the recorded surfaces"))
+    }
     Ok(0)
 }
 
@@ -4209,7 +4744,7 @@ validate_surfaces: fn(ledger: Dyn, surfaces: [SurfaceEntry]) -> Int LedgerError!
 // an unreviewed repeat and have it quietly keep per-domain scoring.
 validate_repeated_names: fn(rows: [Dyn], pooled: [String], distinct: [String]) -> Int LedgerError! {
     keys := [String]{}
-    at_key := [String: Int]{}
+    at_key := [String:Int]{}
     witnesses := [[String]]{}
     domains := [[String]]{}
     loop row in rows {
@@ -4228,7 +4763,9 @@ validate_repeated_names: fn(rows: [Dyn], pooled: [String], distinct: [String]) -
         domain: if parts.len() > 1 -> parts[1].copy() else -> "undefined"
         if !domains[at].contains(domain) -> domains[at].push(domain)
         loop entry in entries(field(row, "competitors")) {
-            if text_is(entry.value, "status", "has") && !witnesses[at].contains(entry.key) -> witnesses[at].push(entry.key.copy())
+            if text_is(entry.value, "status", "has") && !witnesses[at].contains(entry.key) {
+                witnesses[at].push(entry.key.copy())
+            }
         }
     }
     unclassified := [String]{}
@@ -4240,18 +4777,22 @@ validate_repeated_names: fn(rows: [Dyn], pooled: [String], distinct: [String]) -
         unclassified.push(key.copy())
     }
     unclassified.sort()
-    if unclassified.len() > 0 -> return Err(fail("unclassified repeated operation name: {unclassified.join(", ")} — add each to CROSS_DOMAIN_POOLED or CROSS_DOMAIN_DISTINCT"))
+    if unclassified.len() > 0 {
+        return Err(fail("unclassified repeated operation name: {unclassified.join(", ")} — add each to CROSS_DOMAIN_POOLED or CROSS_DOMAIN_DISTINCT"))
+    }
     Ok(0)
 }
 
 // Every operation each recorded present container holds, keyed
 // language, container and operation.
-surface_operations: fn(surfaces: [SurfaceEntry]) -> [String: Bool] Never! {
-    known := [String: Bool]{}
+surface_operations: fn(surfaces: [SurfaceEntry]) -> [String:Bool] Never! {
+    known := [String:Bool]{}
     loop entry in surfaces {
         loop record in entries(field(entry.surface, "containers")) {
             if !truthy(field(record.value, "present")) -> next
-            loop operation in text_items(field(record.value, "operations")) -> known["{entry.language}\t{record.key}\t{operation}"] = true
+            loop operation in text_items(field(record.value, "operations")) {
+                known["{entry.language}\t{record.key}\t{operation}"] = true
+            }
         }
     }
     known
@@ -4269,8 +4810,8 @@ validate_rows: fn(ledger: Dyn, surfaces: [SurfaceEntry]) -> Int LedgerError! {
     validate_repeated_names(rows, CROSS_DOMAIN_POOLED, CROSS_DOMAIN_DISTINCT) ?? return Err(err)
     known: surface_operations(surfaces)
     languages := loop entry in surfaces -> entry.language.copy()
-    ids := [String: Bool]{}
-    source_keys := [String: Bool]{}
+    ids := [String:Bool]{}
+    source_keys := [String:Bool]{}
     verdicts: [String]{"equal", "jet_wins", "jet_loses", "single_witness", "not_compared", "declined", "type_item"}
     loop row in rows {
         id: text_field(row, "id")
@@ -4278,12 +4819,20 @@ validate_rows: fn(ledger: Dyn, surfaces: [SurfaceEntry]) -> Int LedgerError! {
         ids[id] = true
         source: field(row, "source")
         source_key: "{text_field(source, "kind")}:{first_truthy_text(source, [String]{"module", "type", "container"})}:{spelled(field(source, "member"))}"
-        if source_keys.get(source_key) != None -> return Err(fail("duplicate source row: {source_key}"))
+        if source_keys.get(source_key) != None {
+            return Err(fail("duplicate source row: {source_key}"))
+        }
         source_keys[source_key] = true
-        if !truthy(field(row, "workflow")) || !truthy(field(row, "verdict")) || !truthy(field(row, "container")) -> return Err(fail("incomplete row: {id}"))
+        if !truthy(field(row, "workflow")) || !truthy(field(row, "verdict")) || !truthy(field(row, "container")) {
+            return Err(fail("incomplete row: {id}"))
+        }
         verdict: text_field(row, "verdict")
-        if !verdicts.contains(verdict) -> return Err(fail("invalid verdict in {id}: {spelled(field(row, "verdict"))}"))
-        if verdict != "jet_loses" && verdict != "single_witness" && !truthy(field(row, "jetSpelling")) -> return Err(fail("row without a Jet spelling: {id}"))
+        if !verdicts.contains(verdict) {
+            return Err(fail("invalid verdict in {id}: {spelled(field(row, "verdict"))}"))
+        }
+        if verdict != "jet_loses" && verdict != "single_witness" && !truthy(field(row, "jetSpelling")) {
+            return Err(fail("row without a Jet spelling: {id}"))
+        }
         container: text_field(row, "container")
         any_has := false
         // A row may not assert an operation the recorded surface does not have.
@@ -4301,8 +4850,12 @@ validate_rows: fn(ledger: Dyn, surfaces: [SurfaceEntry]) -> Int LedgerError! {
                 return Err(fail("unverified competitor claim in {id}: {entry.key} {operation}"))
             }
         }
-        if verdict == "type_item" && !is_type_item(text_field(source, "member")) -> return Err(fail("row scored as a type but named like an operation: {id}"))
-        if verdict == "equal" && !any_has -> return Err(fail("equal verdict with no matching competitor operation: {id}"))
+        if verdict == "type_item" && !is_type_item(text_field(source, "member")) {
+            return Err(fail("row scored as a type but named like an operation: {id}"))
+        }
+        if verdict == "equal" && !any_has {
+            return Err(fail("equal verdict with no matching competitor operation: {id}"))
+        }
     }
     Ok(0)
 }
@@ -4317,31 +4870,43 @@ validate_owners: fn(ledger: Dyn, board: Board) -> Int LedgerError! {
         card: if board.readable && number >= 0 -> board_card(board, number) else -> None
         state: text_field(cluster, "ownerState")
         if state == "live" {
-            if !board.readable -> return Err(fail("cluster claims a live owner but no board is readable: {container}"))
-            if card == .Val(found) {
-                if found.phase == "done" -> return Err(fail("stale owner: {container} names closed card #{owner}"))
-            } else {
-                return Err(fail("stale owner: {container} names missing card #{owner}"))
+            if !board.readable {
+                return Err(fail("cluster claims a live owner but no board is readable: {container}"))
             }
+            if card == .Val(found) {
+                if found.phase == "done" {
+                    return Err(fail("stale owner: {container} names closed card #{owner}"))
+                }
+            } else { return Err(fail("stale owner: {container} names missing card #{owner}")) }
         }
         // A closed cluster is a dead owner holding real losses. It was reported
         // and never checked, so the card could be reopened, renumbered or deleted
         // and the ledger would keep pointing at it.
         if state == "closed" {
-            if !board.readable -> return Err(fail("cluster names a closed owner but no board is readable: {container}"))
+            if !board.readable {
+                return Err(fail("cluster names a closed owner but no board is readable: {container}"))
+            }
             if card == .Val(found) {
-                if found.phase != "done" -> return Err(fail("stale owner: {container} reports card #{owner} as closed, but the board has it in {found.phase}"))
+                if found.phase != "done" {
+                    return Err(fail("stale owner: {container} reports card #{owner} as closed, but the board has it in {found.phase}"))
+                }
             } else {
                 return Err(fail("stale owner: {container} reports closed card #{owner}, which is not on the board"))
             }
-            if int_is(cluster, "lossCount", 0) -> return Err(fail("cluster {container} reports a closed owner with no losses"))
+            if int_is(cluster, "lossCount", 0) {
+                return Err(fail("cluster {container} reports a closed owner with no losses"))
+            }
         }
-        if state == "needs_card" && (!has_field(cluster, "ownerCard") || field(cluster, "ownerCard") != .Null) -> return Err(fail("cluster {container} both names card #{owner} and claims to need one"))
+        if state == "needs_card" && (!has_field(cluster, "ownerCard") || field(cluster, "ownerCard") != .Null) {
+            return Err(fail("cluster {container} both names card #{owner} and claims to need one"))
+        }
     }
     loop row in items(field(ledger, "rows")) {
         if !text_is(row, "verdict", "declined") -> next
         id: text_field(row, "id")
-        if !truthy(field(row, "declinedBy")) -> return Err(fail("declined row without a decision id: {id}"))
+        if !truthy(field(row, "declinedBy")) {
+            return Err(fail("declined row without a decision id: {id}"))
+        }
         declined_by: spelled(field(row, "declinedBy"))
         status := ""
         known := false
@@ -4354,7 +4919,9 @@ validate_owners: fn(ledger: Dyn, board: Board) -> Int LedgerError! {
             }
         }
         if !known -> return Err(fail("declined row names an unknown decision: {declined_by}"))
-        if status != "ratified" -> return Err(fail("unratified scope exclusion in {id}: {declined_by}"))
+        if status != "ratified" {
+            return Err(fail("unratified scope exclusion in {id}: {declined_by}"))
+        }
     }
     Ok(0)
 }
@@ -4387,7 +4954,9 @@ validate_ledger: fn(root: String, built: Built) -[FS]> Int LedgerError! {
 without_generated_on: fn(ledger: Dyn) -> Dyn Never! {
     kept := [(key: String, value: Dyn)]{}
     loop entry in entries(ledger) {
-        if entry.key != "generatedOn" -> kept.push((key: entry.key.copy(), value: entry.value.copy()))
+        if entry.key != "generatedOn" {
+            kept.push((key: entry.key.copy(), value: entry.value.copy()))
+        }
     }
     Dyn.Object(kept)
 }
@@ -4458,31 +5027,39 @@ release_mode: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String Led
         if status == "stale" {
             failures.push(ReleaseFailure{task: task, reason: "fixture is stale"})
         } else {
-            if status != "fresh" && status != "accepted" -> failures.push(ReleaseFailure{task: task, reason: "fixture is not bound to an accepted frozen source"})
+            if status != "fresh" && status != "accepted" {
+                failures.push(ReleaseFailure{task: task, reason: "fixture is not bound to an accepted frozen source"})
+            }
         }
         if !text_is(evidence, "status", "measured") {
             failures.push(ReleaseFailure{task: task, reason: "missing measured source-cost, concept, hidden-fact, lookup, ceremony, review, and Jet-win evidence"})
             next
         }
-        if !truthy(field(evidence, "rawSourceCounts")) || !is_array(field(evidence, "mandatoryConceptIds")) ||
-            !is_array(field(evidence, "hiddenFacts")) || !is_array(field(evidence, "nonlocalLookups")) ||
-            !is_array(field(evidence, "extraConstructs")) || !truthy(field(evidence, "reasoningBurden")) ||
-            !truthy(field(evidence, "independentFixtureReview")) || !truthy(field(evidence, "jetWin")) {
+        if !truthy(field(evidence, "rawSourceCounts")) || !is_array(field(evidence, "mandatoryConceptIds")) || !is_array(field(evidence, "hiddenFacts")) || !is_array(field(evidence, "nonlocalLookups")) || !is_array(field(evidence, "extraConstructs")) || !truthy(field(evidence, "reasoningBurden")) || !truthy(field(evidence, "independentFixtureReview")) || !truthy(field(evidence, "jetWin")) {
             failures.push(ReleaseFailure{task: task, reason: "measured evidence record is incomplete"})
         }
         loop construct in items(field(evidence, "extraConstructs")) {
             if !EVIDENCE_CLASSIFICATIONS.contains(text_field(construct, "classification")) {
                 failures.push(ReleaseFailure{task: task, reason: "extra construct has no valid classification"})
             }
-            loop name in ([String]{"span", "cost", "rejectedShorterForm", "lostValue", "reviewerVerdict"}) {
-                if field(construct, name) == .Null || text_is(construct, name, "") -> failures.push(ReleaseFailure{task: task, reason: "extra construct is missing {name}"})
+            loop name in
+                ([String]{"span", "cost", "rejectedShorterForm", "lostValue", "reviewerVerdict"}) {
+                if field(construct, name) == .Null || text_is(construct, name, "") {
+                    failures.push(ReleaseFailure{task: task, reason: "extra construct is missing {name}"})
+                }
             }
             claimed := false
             loop name in CONSTRUCT_BENEFITS {
-                if field(construct, name) != .Null && !text_is(construct, name, "") -> claimed = true
+                if field(construct, name) != .Null && !text_is(construct, name, "") {
+                    claimed = true
+                }
             }
-            if !claimed -> failures.push(ReleaseFailure{task: task, reason: "extra construct has no claimed product benefit"})
-            if text_is(construct, "classification", "incidental-ceremony") -> failures.push(ReleaseFailure{task: task, reason: "incidental ceremony is unexplained"})
+            if !claimed {
+                failures.push(ReleaseFailure{task: task, reason: "extra construct has no claimed product benefit"})
+            }
+            if text_is(construct, "classification", "incidental-ceremony") {
+                failures.push(ReleaseFailure{task: task, reason: "incidental ceremony is unexplained"})
+            }
         }
         win: field(evidence, "jetWin")
         if text_is(field(evidence, "reasoningBurden"), "status", "worse") && !bool_is(win, "compensates", true) {
@@ -4491,7 +5068,9 @@ release_mode: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String Led
         if !text_is(field(evidence, "independentFixtureReview"), "status", "accepted") {
             failures.push(ReleaseFailure{task: task, reason: "fixture lacks independent idiomatic/minimal acceptance"})
         }
-        if !text_is(win, "status", "accepted") -> failures.push(ReleaseFailure{task: task, reason: "missing evidence-backed Jet win"})
+        if !text_is(win, "status", "accepted") {
+            failures.push(ReleaseFailure{task: task, reason: "missing evidence-backed Jet win"})
+        }
     }
     if failures.len() > 0 {
         shown := [String]{}
@@ -4544,7 +5123,9 @@ edited: fn(value: Dyn, path: [String], kind: String, new_value: Dyn) -> Dyn Neve
         if rest.len() == 0 && kind == "remove" -> next
         kept.push((key: entry.key.copy(), value: edited(entry.value, rest, kind, new_value)))
     }
-    if !found && rest.len() == 0 && kind == "set" -> kept.push((key: step.copy(), value: new_value.copy()))
+    if !found && rest.len() == 0 && kind == "set" {
+        kept.push((key: step.copy(), value: new_value.copy()))
+    }
     Dyn.Object(kept)
 }
 
@@ -4578,16 +5159,21 @@ holds: fn(name: String, outcome: Int LedgerError!) -> String LedgerError! {
 // gaps until the collection groups stopped applying outside container types.
 collection_verbs_stay_in_containers: fn() -> Int LedgerError! {
     names: synonyms()
-    loop pair in ([(operation: String, container: String)]{
+    loop pair in
+        ([(operation: String, container: String)]{
         (operation: "truncate", container: "core.math"),
         (operation: "add", container: "core.time"),
         (operation: "reset", container: "core.time"),
     }) {
         key: canonical_key(names, pair.operation, pair.container)
-        if key != normalize(pair.operation) -> return Err(fail("a collection verb matched in a module namespace: {pair.operation} in {pair.container} became {key}"))
+        if key != normalize(pair.operation) {
+            return Err(fail("a collection verb matched in a module namespace: {pair.operation} in {pair.container} became {key}"))
+        }
     }
     // The same verbs must still fold inside a container type.
-    if canonical_key(names, "truncate", "List") != "clear" -> return Err(fail("truncate stopped folding into clear inside a container type"))
+    if canonical_key(names, "truncate", "List") != "clear" {
+        return Err(fail("truncate stopped folding into clear inside a container type"))
+    }
     Ok(0)
 }
 
@@ -4643,12 +5229,27 @@ hostile_fixtures: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String
     zeros: "0".repeat(64)
     results := [String]{}
 
-    results.push(rejects("Core API workflow manifest drops a ledger row", "Core API gate workflow manifest does not cover every ledger row",
-        validate_core_api_gate(root, edited(ledger, [String]{"coreApiGate", "workflowManifest"}, "pop", Dyn.Null))) ?? return Err(err))
-    results.push(rejects("Core API workflow omits evidence fields", "Core API workflow evidence is missing rawSourceCounts",
-        validate_core_api_gate(root, edited(ledger, [String]{"coreApiGate", "workflowManifest", "0", "evidence", "rawSourceCounts"}, "remove", Dyn.Null))) ?? return Err(err))
-    results.push(rejects("Core API workflow omits its Jet win", "Core API workflow lacks an accepted Jet win",
-        validate_core_api_gate(root, edited(ledger, [String]{"coreApiGate", "workflowManifest", "0", "evidence", "jetWin"}, "set", Dyn.Null))) ?? return Err(err))
+    results.push(
+        rejects(
+            "Core API workflow manifest drops a ledger row",
+            "Core API gate workflow manifest does not cover every ledger row",
+            validate_core_api_gate(root, edited(ledger, [String]{"coreApiGate", "workflowManifest"}, "pop", Dyn.Null)),
+        ) ?? return Err(err),
+    )
+    results.push(
+        rejects(
+            "Core API workflow omits evidence fields",
+            "Core API workflow evidence is missing rawSourceCounts",
+            validate_core_api_gate(root, edited(ledger, [String]{"coreApiGate", "workflowManifest", "0", "evidence", "rawSourceCounts"}, "remove", Dyn.Null)),
+        ) ?? return Err(err),
+    )
+    results.push(
+        rejects(
+            "Core API workflow omits its Jet win",
+            "Core API workflow lacks an accepted Jet win",
+            validate_core_api_gate(root, edited(ledger, [String]{"coreApiGate", "workflowManifest", "0", "evidence", "jetWin"}, "set", Dyn.Null)),
+        ) ?? return Err(err),
+    )
 
     arms := Dyn.object()
     jet_arm := Dyn.object()
@@ -4663,7 +5264,8 @@ hostile_fixtures: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String
     burden["evidence"] = jtext("fixture review")
     workflow_path: [String]{"coreApiGate", "workflowManifest", "0"}
     measured := edited(ledger, [String]{"coreApiGate", "workflowManifest", "0", "input", "fixtureStatus"}, "set", jtext("accepted"))
-    loop change in ([(name: String, value: Dyn)]{
+    loop change in
+        ([(name: String, value: Dyn)]{
         (name: "status", value: jtext("measured")),
         (name: "rawSourceCounts", value: counts),
         (name: "mandatoryConceptIds", value: Dyn.Array([Dyn]{})),
@@ -4679,23 +5281,58 @@ hostile_fixtures: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String
         path.push(change.name.copy())
         measured = edited(measured, path, "set", change.value)
     }
-    results.push(rejects("measured evidence omits raw source dimensions", "measured evidence has incomplete raw source counts",
-        validate_core_api_gate(root, measured)) ?? return Err(err))
+    results.push(
+        rejects(
+            "measured evidence omits raw source dimensions",
+            "measured evidence has incomplete raw source counts",
+            validate_core_api_gate(root, measured),
+        ) ?? return Err(err),
+    )
 
-    results.push(rejects("Core API fixture loses independent acceptance", "Core API fixture lacks accepted independent review",
-        validate_core_api_gate(root, edited(ledger, [String]{"coreApiGate", "fixtureContract", "tasks", "0", "independentFixtureReview", "minimal"}, "set", Dyn.Bool(false)))) ?? return Err(err))
-    results.push(rejects("Core API fixture loses deterministic runner binding", "Core API fixture execution contract drifted",
-        validate_core_api_gate(root, edited(ledger, [String]{"coreApiGate", "fixtureContract", "execution", "runnerDigest"}, "set", jtext(zeros)))) ?? return Err(err))
-    results.push(rejects("Core API fixture output artifact drifts", "Core API fixture receipt projection drifted",
-        validate_core_api_gate(root, edited(ledger, [String]{"coreApiGate", "fixtureContract", "tasks", "0", "receipts", "0", "stdoutSha256"}, "set", jtext(zeros)))) ?? return Err(err))
-    results.push(rejects("Core API fixture selection drifts", "Core API fixture selection contract drifted",
-        validate_core_api_gate(root, edited(ledger, [String]{"coreApiGate", "fixtureContract", "selection", "field"}, "set", jtext("domain")))) ?? return Err(err))
-    results.push(rejects("Core API fresh review loses a check", "Core API gate is missing its fresh-review contract",
-        validate_core_api_gate(root, edited(ledger, [String]{"coreApiGate", "freshReview", "checks"}, "pop", Dyn.Null))) ?? return Err(err))
+    results.push(
+        rejects(
+            "Core API fixture loses independent acceptance",
+            "Core API fixture lacks accepted independent review",
+            validate_core_api_gate(root, edited(ledger, [String]{"coreApiGate", "fixtureContract", "tasks", "0", "independentFixtureReview", "minimal"}, "set", Dyn.Bool(false))),
+        ) ?? return Err(err),
+    )
+    results.push(
+        rejects(
+            "Core API fixture loses deterministic runner binding",
+            "Core API fixture execution contract drifted",
+            validate_core_api_gate(root, edited(ledger, [String]{"coreApiGate", "fixtureContract", "execution", "runnerDigest"}, "set", jtext(zeros))),
+        ) ?? return Err(err),
+    )
+    results.push(
+        rejects(
+            "Core API fixture output artifact drifts",
+            "Core API fixture receipt projection drifted",
+            validate_core_api_gate(root, edited(ledger, [String]{"coreApiGate", "fixtureContract", "tasks", "0", "receipts", "0", "stdoutSha256"}, "set", jtext(zeros))),
+        ) ?? return Err(err),
+    )
+    results.push(
+        rejects(
+            "Core API fixture selection drifts",
+            "Core API fixture selection contract drifted",
+            validate_core_api_gate(root, edited(ledger, [String]{"coreApiGate", "fixtureContract", "selection", "field"}, "set", jtext("domain"))),
+        ) ?? return Err(err),
+    )
+    results.push(
+        rejects(
+            "Core API fresh review loses a check",
+            "Core API gate is missing its fresh-review contract",
+            validate_core_api_gate(root, edited(ledger, [String]{"coreApiGate", "freshReview", "checks"}, "pop", Dyn.Null)),
+        ) ?? return Err(err),
+    )
     hidden := edited(ledger, [String]{"coreApiGate", "workflowManifest", "0", "scope", "excluded"}, "set", Dyn.Bool(true))
     hidden = edited(hidden, [String]{"coreApiGate", "workflowManifest", "0", "scope", "decline"}, "set", Dyn.Null)
-    results.push(rejects("Core API workflow hides an unratified decline", "hidden without a ratified scope decision",
-        validate_core_api_gate(root, hidden)) ?? return Err(err))
+    results.push(
+        rejects(
+            "Core API workflow hides an unratified decline",
+            "hidden without a ratified scope decision",
+            validate_core_api_gate(root, hidden),
+        ) ?? return Err(err),
+    )
 
     // A recurring name that nobody classified must stop the run. Without this,
     // a refresh that introduces one would silently keep per-domain scoring, and
@@ -4705,14 +5342,24 @@ hostile_fixtures: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String
     // A POOLED name that still has competitor_operation rows in 2+ domains
     // after synonym folds. `clone` collapsed to a single domain.
     rows: items(field(ledger, "rows"))
-    results.push(rejects("a recurring operation name nobody classified", "unclassified repeated operation name",
-        validate_repeated_names(rows, without_name(CROSS_DOMAIN_POOLED, "hash"), without_name(CROSS_DOMAIN_DISTINCT, "hash"))) ?? return Err(err))
+    results.push(
+        rejects(
+            "a recurring operation name nobody classified",
+            "unclassified repeated operation name",
+            validate_repeated_names(rows, without_name(CROSS_DOMAIN_POOLED, "hash"), without_name(CROSS_DOMAIN_DISTINCT, "hash")),
+        ) ?? return Err(err),
+    )
 
     jet_at: must_index(row_index(rows, "equal"), "the ledger has no equal row") ?? return Err(err)
     loss_at: must_index(row_index(rows, "jet_loses"), "the ledger has no loss row") ?? return Err(err)
 
-    results.push(rejects("duplicate row id", "duplicate row id:",
-        validate_rows(edited(ledger, [String]{"rows"}, "push", rows[0]), surfaces)) ?? return Err(err))
+    results.push(
+        rejects(
+            "duplicate row id",
+            "duplicate row id:",
+            validate_rows(edited(ledger, [String]{"rows"}, "push", rows[0]), surfaces),
+        ) ?? return Err(err),
+    )
     matched := -1
     loop (at, entry) in entries(field(rows[jet_at], "competitors")) {
         if matched < 0 && text_is(entry.value, "status", "has") -> matched = at
@@ -4722,25 +5369,50 @@ hostile_fixtures: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String
     fabricated := Dyn.object()
     fabricated["status"] = jtext("has")
     fabricated["operation"] = jtext("jet_ledger_operation_that_does_not_exist")
-    results.push(rejects("fabricated competitor member", "unverified competitor claim in",
-        validate_rows(edited(ledger, [String]{"rows", "{jet_at}", "competitors", language}, "set", fabricated), surfaces)) ?? return Err(err))
+    results.push(
+        rejects(
+            "fabricated competitor member",
+            "unverified competitor claim in",
+            validate_rows(edited(ledger, [String]{"rows", "{jet_at}", "competitors", language}, "set", fabricated), surfaces),
+        ) ?? return Err(err),
+    )
     lacking := Dyn.object()
     lacking["status"] = jtext("lacks")
     lacking["operation"] = Dyn.Null
     emptied := Dyn.object()
     loop entry in entries(field(rows[jet_at], "competitors")) -> emptied[entry.key] = lacking.copy()
-    results.push(rejects("equal verdict with no competitor operation", "equal verdict with no matching competitor operation:",
-        validate_rows(edited(ledger, [String]{"rows", "{jet_at}", "competitors"}, "set", emptied), surfaces)) ?? return Err(err))
-    results.push(rejects("unmapped shipped method", "row without a Jet spelling:",
-        validate_rows(edited(ledger, [String]{"rows", "{jet_at}", "jetSpelling"}, "set", Dyn.Null), surfaces)) ?? return Err(err))
-    results.push(rejects("invalid verdict", "invalid verdict in",
-        validate_rows(edited(ledger, [String]{"rows", "{jet_at}", "verdict"}, "set", jtext("probably_fine")), surfaces)) ?? return Err(err))
+    results.push(
+        rejects(
+            "equal verdict with no competitor operation",
+            "equal verdict with no matching competitor operation:",
+            validate_rows(edited(ledger, [String]{"rows", "{jet_at}", "competitors"}, "set", emptied), surfaces),
+        ) ?? return Err(err),
+    )
+    results.push(
+        rejects(
+            "unmapped shipped method",
+            "row without a Jet spelling:",
+            validate_rows(edited(ledger, [String]{"rows", "{jet_at}", "jetSpelling"}, "set", Dyn.Null), surfaces),
+        ) ?? return Err(err),
+    )
+    results.push(
+        rejects(
+            "invalid verdict",
+            "invalid verdict in",
+            validate_rows(edited(ledger, [String]{"rows", "{jet_at}", "verdict"}, "set", jtext("probably_fine")), surfaces),
+        ) ?? return Err(err),
+    )
 
     rust_at: must_index(surface_index(surfaces, "Rust"), "no Rust surface is recorded") ?? return Err(err)
     skipped := surfaces.copy()
     skipped[rust_at].surface = edited(skipped[rust_at].surface, [String]{"containers", text_items(field(ledger, "canonicalContainers"))[0]}, "remove", Dyn.Null)
-    results.push(rejects("hidden exclusion: a language skips a container", "records no verdict for",
-        validate_surfaces(ledger, skipped)) ?? return Err(err))
+    results.push(
+        rejects(
+            "hidden exclusion: a language skips a container",
+            "records no verdict for",
+            validate_surfaces(ledger, skipped),
+        ) ?? return Err(err),
+    )
     absent := -1
     loop (at, entry) in entries(field(surfaces[rust_at].surface, "containers")) {
         if absent < 0 && !truthy(field(entry.value, "present")) -> absent = at
@@ -4749,19 +5421,34 @@ hostile_fixtures: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String
     absent_name: entries(field(surfaces[rust_at].surface, "containers"))[absent_at].key.copy()
     unreasoned := surfaces.copy()
     unreasoned[rust_at].surface = edited(unreasoned[rust_at].surface, [String]{"containers", absent_name, "reason"}, "remove", Dyn.Null)
-    results.push(rejects("hidden exclusion: absent container with no reason", "absent with no reason",
-        validate_surfaces(ledger, unreasoned)) ?? return Err(err))
+    results.push(
+        rejects(
+            "hidden exclusion: absent container with no reason",
+            "absent with no reason",
+            validate_surfaces(ledger, unreasoned),
+        ) ?? return Err(err),
+    )
     dropped := [SurfaceEntry]{}
     loop entry in surfaces {
         if entry.language != "Julia" -> dropped.push(entry.copy())
     }
-    results.push(rejects("a language is dropped from the comparison", "the owner named eleven languages",
-        validate_surfaces(ledger, dropped)) ?? return Err(err))
+    results.push(
+        rejects(
+            "a language is dropped from the comparison",
+            "the owner named eleven languages",
+            validate_surfaces(ledger, dropped),
+        ) ?? return Err(err),
+    )
     go_at: must_index(surface_index(surfaces, "Go"), "no Go surface is recorded") ?? return Err(err)
     unscoped := surfaces.copy()
     unscoped[go_at].surface = edited(unscoped[go_at].surface, [String]{"scopeRule"}, "remove", Dyn.Null)
-    results.push(rejects("surface without recorded provenance", "surface without recorded provenance:",
-        validate_surfaces(ledger, unscoped)) ?? return Err(err))
+    results.push(
+        rejects(
+            "surface without recorded provenance",
+            "surface without recorded provenance:",
+            validate_surfaces(ledger, unscoped),
+        ) ?? return Err(err),
+    )
 
     // The cluster is synthesised, not found. Once every cluster has a live card
     // there is no closed one to break, and searching for one made the fixture
@@ -4769,30 +5456,52 @@ hostile_fixtures: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String
     // The card is one no real cluster names, so reopening it on a copy of the
     // board can only trip the synthesised cluster.
     owned := [Int]{}
-    loop cluster in items(field(ledger, "lossClusters")) -> owned.push(int_of(field(cluster, "ownerCard")) ?? -1)
+    loop cluster in items(field(ledger, "lossClusters")) {
+        owned.push(int_of(field(cluster, "ownerCard")) ?? -1)
+    }
     done := -1
     loop card in board.cards {
         if done < 0 && card.phase == "done" && !owned.contains(card.num) -> done = card.num
     }
     done_card: must_index(done, "the board has no done card to build the fixture from") ?? return Err(err)
-    results.push(rejects("stale owner: cluster claims a closed card", "names closed card #",
-        validate_owners(edited(ledger, [String]{"lossClusters"}, "push", fixture_cluster("LedgerFixtureClosed", done_card, "live")), board)) ?? return Err(err))
+    results.push(
+        rejects(
+            "stale owner: cluster claims a closed card",
+            "names closed card #",
+            validate_owners(edited(ledger, [String]{"lossClusters"}, "push", fixture_cluster("LedgerFixtureClosed", done_card, "live")), board),
+        ) ?? return Err(err),
+    )
     must_index(items(field(ledger, "lossClusters")).len() - 1, "the ledger has no loss cluster") ?? return Err(err)
     missing_card := edited(ledger, [String]{"lossClusters", "0", "ownerState"}, "set", jtext("live"))
     missing_card = edited(missing_card, [String]{"lossClusters", "0", "ownerCard"}, "set", Dyn.Int(999999))
-    results.push(rejects("stale owner: cluster claims a card that is not on the board", "names missing card #",
-        validate_owners(missing_card, board)) ?? return Err(err))
+    results.push(
+        rejects(
+            "stale owner: cluster claims a card that is not on the board",
+            "names missing card #",
+            validate_owners(missing_card, board),
+        ) ?? return Err(err),
+    )
     reopened := board.copy()
     loop at in 0..<reopened.cards.len() {
         if reopened.cards[at].num == done_card -> reopened.cards[at].phase = "building"
     }
-    results.push(rejects("closed owner that the board has reopened", "but the board has it in",
-        validate_owners(edited(ledger, [String]{"lossClusters"}, "push", fixture_cluster("LedgerFixtureReopened", done_card, "closed")), reopened)) ?? return Err(err))
+    results.push(
+        rejects(
+            "closed owner that the board has reopened",
+            "but the board has it in",
+            validate_owners(edited(ledger, [String]{"lossClusters"}, "push", fixture_cluster("LedgerFixtureReopened", done_card, "closed")), reopened),
+        ) ?? return Err(err),
+    )
     // A cluster is synthesised rather than found: once every cluster has a
     // card, searching the live ledger would fail on setup instead of proving
     // the gate.
-    results.push(rejects("cluster both names a card and claims to need one", "claims to need one",
-        validate_owners(edited(ledger, [String]{"lossClusters"}, "push", fixture_cluster("LedgerFixtureContainer", -1, "needs_card")), board)) ?? return Err(err))
+    results.push(
+        rejects(
+            "cluster both names a card and claims to need one",
+            "claims to need one",
+            validate_owners(edited(ledger, [String]{"lossClusters"}, "push", fixture_cluster("LedgerFixtureContainer", -1, "needs_card")), board),
+        ) ?? return Err(err),
+    )
 
     // The board holds no unratified decision today, so the fixture injects one.
     // Reading the live board would let the fixture pass by finding nothing.
@@ -4800,26 +5509,51 @@ hostile_fixtures: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String
     open_board.decisions.push(BoardDecision{id: "D-LEDGER-FIXTURE-1", status: "open"})
     unratified := edited(ledger, [String]{"rows", "{loss_at}", "verdict"}, "set", jtext("declined"))
     unratified = edited(unratified, [String]{"rows", "{loss_at}", "declinedBy"}, "set", jtext("D-LEDGER-FIXTURE-1"))
-    results.push(rejects("unratified scope exclusion", "unratified scope exclusion in",
-        validate_owners(unratified, open_board)) ?? return Err(err))
+    results.push(
+        rejects(
+            "unratified scope exclusion",
+            "unratified scope exclusion in",
+            validate_owners(unratified, open_board),
+        ) ?? return Err(err),
+    )
     unknown := edited(ledger, [String]{"rows", "{loss_at}", "verdict"}, "set", jtext("declined"))
     unknown = edited(unknown, [String]{"rows", "{loss_at}", "declinedBy"}, "set", jtext("D-LEDGER-NO-SUCH-DECISION"))
-    results.push(rejects("decline naming a decision the board does not have", "declined row names an unknown decision:",
-        validate_owners(unknown, board)) ?? return Err(err))
-    results.push(rejects("decline with no decision id", "declined row without a decision id:",
-        validate_owners(edited(ledger, [String]{"rows", "{loss_at}", "verdict"}, "set", jtext("declined")), board)) ?? return Err(err))
+    results.push(
+        rejects(
+            "decline naming a decision the board does not have",
+            "declined row names an unknown decision:",
+            validate_owners(unknown, board),
+        ) ?? return Err(err),
+    )
+    results.push(
+        rejects(
+            "decline with no decision id",
+            "declined row without a decision id:",
+            validate_owners(edited(ledger, [String]{"rows", "{loss_at}", "verdict"}, "set", jtext("declined")), board),
+        ) ?? return Err(err),
+    )
 
     uncompared: text_items(field(ledger, "uncomparedDomains"))
     must_index(uncompared.len() - 1, "the ledger lists no uncompared domain") ?? return Err(err)
     rest := [String]{}
     loop at in 1..<uncompared.len() -> rest.push(uncompared[at].copy())
-    results.push(rejects("hidden uncompared Core domain", "uncompared Core domains are not fully listed",
-        validate_coverage(edited(ledger, [String]{"uncomparedDomains"}, "set", texts(rest)), built.modules)) ?? return Err(err))
+    results.push(
+        rejects(
+            "hidden uncompared Core domain",
+            "uncompared Core domains are not fully listed",
+            validate_coverage(edited(ledger, [String]{"uncomparedDomains"}, "set", texts(rest)), built.modules),
+        ) ?? return Err(err),
+    )
 
     // Each drift is compared against a fresh rebuild of the same tree.
     rebuilt: build_ledger(root) ?? return Err(err)
-    results.push(rejects("source-surface drift", "core surface ledger drifted",
-        compare_ledger(edited(ledger, [String]{"sourceFiles", "0", "sha256"}, "set", jtext(zeros)), rebuilt.ledger)) ?? return Err(err))
+    results.push(
+        rejects(
+            "source-surface drift",
+            "core surface ledger drifted",
+            compare_ledger(edited(ledger, [String]{"sourceFiles", "0", "sha256"}, "set", jtext(zeros)), rebuilt.ledger),
+        ) ?? return Err(err),
+    )
     jet_id: text_field(rows[jet_at], "id")
     loss_id: text_field(rows[loss_at], "id")
     without_jet := [Dyn]{}
@@ -4829,10 +5563,20 @@ hostile_fixtures: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String
         if id != jet_id -> without_jet.push(row.copy())
         if id != loss_id -> without_loss.push(row.copy())
     }
-    results.push(rejects("a shipped method is dropped from the ledger", "core surface ledger drifted",
-        compare_ledger(edited(ledger, [String]{"rows"}, "set", Dyn.Array(without_jet)), rebuilt.ledger)) ?? return Err(err))
-    results.push(rejects("a competitor member is dropped from the ledger", "core surface ledger drifted",
-        compare_ledger(edited(ledger, [String]{"rows"}, "set", Dyn.Array(without_loss)), rebuilt.ledger)) ?? return Err(err))
+    results.push(
+        rejects(
+            "a shipped method is dropped from the ledger",
+            "core surface ledger drifted",
+            compare_ledger(edited(ledger, [String]{"rows"}, "set", Dyn.Array(without_jet)), rebuilt.ledger),
+        ) ?? return Err(err),
+    )
+    results.push(
+        rejects(
+            "a competitor member is dropped from the ledger",
+            "core surface ledger drifted",
+            compare_ledger(edited(ledger, [String]{"rows"}, "set", Dyn.Array(without_loss)), rebuilt.ledger),
+        ) ?? return Err(err),
+    )
 
     results.push("core surface ledger: {results.len()} fixtures all held")
     Ok(results.join("\n"))
@@ -4865,7 +5609,8 @@ run: fn() { print(ledger_main(process.args()) ?? process.fail(1, err.message)) }
 #Test("edited sets, adds, removes, pops and pushes the item at a path") {
     doc: parse_json("{{\"a\": {{\"b\": [1, 2]}}, \"c\": \"x\"}}", "doc") ?? panic("the fixture document did not parse: {err.message}")
     three: parse_json("3", "three") ?? panic("the fixture number did not parse: {err.message}")
-    loop step in ([(path: [String], kind: String, value: Dyn, want: String)]{
+    loop step in
+        ([(path: [String], kind: String, value: Dyn, want: String)]{
         (path: [String]{"c"}, kind: "set", value: jtext("y"), want: "{{\"a\": {{\"b\": [1, 2]}}, \"c\": \"y\"}}"),
         (path: [String]{"d"}, kind: "set", value: jtext("z"), want: "{{\"a\": {{\"b\": [1, 2]}}, \"c\": \"x\", \"d\": \"z\"}}"),
         (path: [String]{"c"}, kind: "remove", value: Dyn.Null, want: "{{\"a\": {{\"b\": [1, 2]}}}}"),

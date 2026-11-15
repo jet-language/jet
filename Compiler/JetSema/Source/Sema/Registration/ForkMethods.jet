@@ -44,7 +44,7 @@ sema_fork_methods_expand: fn(items: &[Item]) Never! {
                 loop variant in definition.variants {
                     if variant.payload == {
                         .Unit -> {}
-                        .Single(ty, _) -> payloads.push(ty.copy())
+                        .Single(ty, _) -> { payloads.push(ty.copy()) }
                         .Named(fields) -> {
                             loop field in fields -> payloads.push(field.ty.copy())
                         }
@@ -64,7 +64,9 @@ sema_fork_methods_expand: fn(items: &[Item]) Never! {
     loop index in 0..<items.len() {
         if items[index] == {
             .Struct(definition) -> {
-                if !sema_fork_methods_wanted(definition.name, definition.type_params, definition.methods, parts, params) -> next
+                if !sema_fork_methods_wanted(definition.name, definition.type_params, definition.methods, parts, params) {
+                    next
+                }
                 updated := definition.copy()
                 method := sema_fork_method(definition.name, definition.name_span)
                 method.is_pub = definition.is_pub
@@ -73,7 +75,9 @@ sema_fork_methods_expand: fn(items: &[Item]) Never! {
                 items[index] = Item.Struct{value: updated}
             }
             .Enum(definition) -> {
-                if !sema_fork_methods_wanted(definition.name, definition.type_params, definition.methods, parts, params) -> next
+                if !sema_fork_methods_wanted(definition.name, definition.type_params, definition.methods, parts, params) {
+                    next
+                }
                 updated := definition.copy()
                 method := sema_fork_method(definition.name, definition.name_span)
                 method.is_pub = definition.is_pub
@@ -113,12 +117,16 @@ sema_fork_methods_wanted: fn(name: String, type_params: [TypeParam], methods: [F
 // has no parts a copy rebuilds, so none of them is walked.
 sema_fork_methods_names: fn(ty: Type, bound: [String], parts: [String:[Type]], params: [String:[String]], reached: &[String:Bool]) Never! {
     if ty == {
-        .Named(name) -> sema_fork_methods_name(name, bound, parts, params, reached)
+        .Named(name) -> { sema_fork_methods_name(name, bound, parts, params, reached) }
         .Apply(name, args) -> {
-            loop argument in args -> sema_fork_methods_names(argument, bound, parts, params, reached)
+            loop argument in args {
+                sema_fork_methods_names(argument, bound, parts, params, reached)
+            }
             sema_fork_methods_name(name, bound, parts, params, reached)
         }
-        .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .Case(_, inner) | .InlineRange(inner, _, _) -> sema_fork_methods_names(inner, bound, parts, params, reached)
+        .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .Case(_, inner) | .InlineRange(inner, _, _) -> {
+            sema_fork_methods_names(inner, bound, parts, params, reached)
+        }
         .Map(key, _, value) -> {
             sema_fork_methods_names(key, bound, parts, params, reached)
             sema_fork_methods_names(value, bound, parts, params, reached)
@@ -138,7 +146,9 @@ sema_fork_methods_names: fn(ty: Type, bound: [String], parts: [String:[Type]], p
 }
 
 sema_fork_methods_name: fn(name: String, bound: [String], parts: [String:[Type]], params: [String:[String]], reached: &[String:Bool]) Never! {
-    if bound.contains(name) || reached.get(name) != None -> return
+    if bound.contains(name) || reached.get(name) != None {
+        return
+    }
     reached[name.copy()] = true
     own: parts.get(name) ?? return
     own_bound: params.get(name) ?? [String]{}

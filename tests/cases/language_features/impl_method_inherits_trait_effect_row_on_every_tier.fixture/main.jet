@@ -15,7 +15,10 @@ Point: struct {
 describe: fn<T: Show>(value: T) -[]> String { value.show() }
 
 #Error
-TokenError: enum { Empty TooLong }
+TokenError: enum {
+    Empty
+    TooLong
+}
 
 Token: distinct String
 
@@ -28,15 +31,11 @@ impl Token.CheckedText {
         return Ok()
     }
 
-    encode_hole: fn<T: Printable>(value: T) -> String {
-        return "[{value}]"
-    }
+    encode_hole: fn<T: Printable>(value: T) -> String { return "[{value}]" }
 }
 
 reveal: fn(value: Token) {
-    #Unsafe("the case prints the checked text") {
-        print(value.raw())
-    }
+    #Unsafe("the case prints the checked text") { print(value.raw()) }
 }
 
 run: fn() {

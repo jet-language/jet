@@ -22,7 +22,9 @@ jet_driver_c_dependencies: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> [J
             target := dependency.source.removeprefix("c@").trim()
             lexed: lex_config(target.bytes())
             tokens: lexed.tokens
-            if tokens.len() > 0 && (tokens[0].kind == TOKEN_STRING || tokens[0].kind == TOKEN_RAW_STRING) -> target = token_decoded(lexed.tables, tokens[0])
+            if tokens.len() > 0 && (tokens[0].kind == TOKEN_STRING || tokens[0].kind == TOKEN_RAW_STRING) {
+                target = token_decoded(lexed.tables, tokens[0])
+            }
             declarations.push(JetDriverCDependency{library: dependency.name, root: snapshot.roots[index].canonical_path, target: target})
         }
     }
@@ -31,7 +33,10 @@ jet_driver_c_dependencies: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> [J
 
 // One parameter of an inline C body's C ABI: its checked type, by pointer
 // when the declaration writes it.
-JetDriverInlineCParam: struct { ty: Type, write: Bool }
+JetDriverInlineCParam: struct {
+    ty: Type
+    write: Bool
+}
 
 // One `#FFI(c)` (or `#FFI(cpp)`) inline body of the checked foreign rows:
 // its checked C ABI, the triple-quoted body within its declaration span
@@ -99,7 +104,9 @@ jet_driver_foreign_link_live: fn(facts: JetDriverForeignLinkFacts, live: [String
     modules := [U32:Bool]{}
     loop declaration in facts.declarations {
         if live.get(declaration.symbol) == None -> next
-        if declaration.language == "c" || declaration.language == "rust" -> kept.c_or_rust_rows = true
+        if declaration.language == "c" || declaration.language == "rust" {
+            kept.c_or_rust_rows = true
+        }
         modules[declaration.module_identity.id] = true
         kept.declarations.push(declaration.copy())
     }
@@ -109,7 +116,9 @@ jet_driver_foreign_link_live: fn(facts: JetDriverForeignLinkFacts, live: [String
         if modules.get(provider.module_identity.id) == None -> next
         jet_driver_foreign_push_unique(kept.libraries, provider.library)
         loop library in provider.direct_links -> jet_driver_foreign_push_unique(direct, library)
-        loop library in provider.transitive_links -> jet_driver_foreign_push_unique(transitive, library)
+        loop library in provider.transitive_links {
+            jet_driver_foreign_push_unique(transitive, library)
+        }
         kept.providers.push(provider.copy())
     }
     kept.libraries.sort()
@@ -183,7 +192,9 @@ jet_driver_foreign_line: fn(lines: &JetDriverForeignLines, source_files: [Source
     slot := lines.files.get(path) ?? -1
     if slot < 0 {
         found: loop (index, source_file) in source_files {
-            if source_file.path == path -> break index
+            if source_file.path == path {
+                break index
+            }
         } ?? -1
         if found < 0 -> return 0
         positions := [Int]{}
@@ -225,7 +236,9 @@ jet_driver_foreign_link_facts: fn(modules: [SemaGraphModuleResult], source_files
         loop provider in semantic_module.foreign_providers {
             jet_driver_foreign_push_unique(facts.libraries, provider.library)
             loop library in provider.direct_links -> jet_driver_foreign_push_unique(direct, library)
-            loop library in provider.transitive_links -> jet_driver_foreign_push_unique(transitive, library)
+            loop library in provider.transitive_links {
+                jet_driver_foreign_push_unique(transitive, library)
+            }
             facts.providers.push(JetDriverForeignProvider{module_identity: provider.module_identity, library: provider.library, direct_links: provider.direct_links, transitive_links: provider.transitive_links})
         }
         loop (row_index, row) in semantic_module.foreign_functions {
@@ -250,27 +263,31 @@ jet_driver_foreign_link_facts: fn(modules: [SemaGraphModuleResult], source_files
     lines := JetDriverForeignLines{}
     loop (index, position) in order {
         row: modules[modules_of[position]].foreign_functions[rows[position]]
-        facts.declarations.push(JetDriverForeignDeclaration{
-            name: row.name,
-            language: jet_driver_foreign_language_head(row.language),
-            symbol: row.symbol,
-            path: row.source_file,
-            line: jet_driver_foreign_line(lines, source_files, row.source_file, row.span.start),
-            module_identity: row.module_identity,
-        })
+        facts.declarations.push(
+            JetDriverForeignDeclaration{
+                name: row.name,
+                language: jet_driver_foreign_language_head(row.language),
+                symbol: row.symbol,
+                path: row.source_file,
+                line: jet_driver_foreign_line(lines, source_files, row.source_file, row.span.start),
+                module_identity: row.module_identity,
+            },
+        )
         if !row.path.starts_with("jet_ffi_") || row.symbol != "jet_inline_{row.path}" -> next
         head: jet_driver_foreign_language_head(row.language)
         if head != "c" && head != "cpp" -> next
         params: loop param in row.params -> JetDriverInlineCParam{ty: param.ty, write: param.convention == AccessConvention.Write}
-        facts.inline_c.push(JetDriverInlineC{
-            index: index,
-            name: row.name,
-            symbol: row.symbol,
-            params: params,
-            return_type: row.return_type,
-            body: jet_driver_inline_c_body(source_files, row.source_file, row.span.start, row.span.end),
-            cpp: head == "cpp",
-        })
+        facts.inline_c.push(
+            JetDriverInlineC{
+                index: index,
+                name: row.name,
+                symbol: row.symbol,
+                params: params,
+                return_type: row.return_type,
+                body: jet_driver_inline_c_body(source_files, row.source_file, row.span.start, row.span.end),
+                cpp: head == "cpp",
+            },
+        )
     }
     facts
 }

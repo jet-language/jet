@@ -35,8 +35,16 @@ use {
         pkg_strip_overlay_policy,
     ]
     jet_foundation.[
-        CtValue, Diagnostic, Expr, Func, Item, ModuleDecl, Span, comptime_walk_calls,
-        diagnostic_from_registry, expr_span,
+        CtValue,
+        Diagnostic,
+        Expr,
+        Func,
+        Item,
+        ModuleDecl,
+        Span,
+        comptime_walk_calls,
+        diagnostic_from_registry,
+        expr_span,
     ]
     jet_lexer.[lex]
     jet_parser.[parse_lexed_with_source, parser_line_starts]
@@ -90,7 +98,9 @@ envmodel_workspace_load_checked: fn(cache: &WorkspaceDeclarationCache, dir: Stri
 envmodel_workspace_load_checked_with_resolver: fn(cache: &WorkspaceDeclarationCache, resolver: AuthorityResolver) -[FS, Env, Exec, Time.Wait]> WorkspaceSnapshot? EnvModelEvalError! {
     resolved: if resolver.resolve_workspace_source(cache) == {
         .Ok(found) -> found
-        .Err(error) -> { return Err(EnvModelEvalError{diagnostic: error.workspace_diagnostic()}) }
+        .Err(error) -> {
+            return Err(EnvModelEvalError{diagnostic: error.workspace_diagnostic()})
+        }
     }
     source: resolved ?? return Ok(None)
     resolver.revalidate_source(source)
@@ -133,7 +143,7 @@ envmodel_changed_workspace_source_diagnostic: fn(dir: String) -> Diagnostic Neve
         None,
         "workspace authority changed during resolution",
         "the checked workspace source at `{dir}` changed identity or role before its plan was used",
-        "restore one stable workspace source and retry"
+        "restore one stable workspace source and retry",
     )
 }
 
@@ -187,13 +197,19 @@ envmodel_workspace_file_name: fn(path: String) -> String Never! {
 envmodel_workspace_evaluate_with_resolver: fn(src: String, base_dir: String, role: WorkspaceSourceRole, resolver: AuthorityResolver) -[FS, Env, Exec, Time.Wait]> WorkspacePlan EnvModelEvalError! {
     overlay_policy: if pkg_parse_workspace_policy(src) == {
         .Ok(policy) -> policy
-        .Err(error) -> { return Err(EnvModelEvalError{diagnostic: envmodel_workspace_policy_diagnostic(error)}) }
+        .Err(error) -> {
+            return Err(EnvModelEvalError{diagnostic: envmodel_workspace_policy_diagnostic(error)})
+        }
     }
     eval_src: pkg_strip_overlay_policy(src)
     lexed: lex(eval_src.bytes())
-    if lexed.diagnostics.len() > 0 -> return Err(EnvModelEvalError{diagnostic: lexed.diagnostics[0]})
+    if lexed.diagnostics.len() > 0 {
+        return Err(EnvModelEvalError{diagnostic: lexed.diagnostics[0]})
+    }
     parsed: parse_lexed_with_source(lexed, eval_src.bytes(), parser_line_starts(eval_src.bytes()))
-    if parsed.diagnostics.len() > 0 -> return Err(EnvModelEvalError{diagnostic: parsed.diagnostics[parsed.diagnostics.len() - 1]})
+    if parsed.diagnostics.len() > 0 {
+        return Err(EnvModelEvalError{diagnostic: parsed.diagnostics[parsed.diagnostics.len() - 1]})
+    }
     program: parsed.program
 
     // Find `workspace: module { … }`. An authority-only source has no required
@@ -204,7 +220,9 @@ envmodel_workspace_evaluate_with_resolver: fn(src: String, base_dir: String, rol
     code_workspace := false
     workspace_declarations := 0
     loop item in program.items {
-        if item == .Module(declaration) && declaration.name == NS_WORKSPACE && declaration.auto_discovered -> workspace_declarations += 1
+        if item == .Module(declaration) && declaration.name == NS_WORKSPACE && declaration.auto_discovered {
+            workspace_declarations += 1
+        }
         if item == .CodeModule(declaration) && declaration.name == NS_WORKSPACE {
             workspace_declarations += 1
             if declaration.body != None -> code_workspace = true
@@ -218,9 +236,13 @@ envmodel_workspace_evaluate_with_resolver: fn(src: String, base_dir: String, rol
         return Ok(WorkspacePlan{members: [WorkspacePlanMember]{}, comptime_inputs: [ComptimeInput]{}, overlay_policy: overlay_policy, source_digest: pkg_sha256_hex(src.bytes())})
     }
 
-    if workspace_declarations != 1 -> return Err(EnvModelEvalError{diagnostic: pkg_e0995_no_workspace_module()})
+    if workspace_declarations != 1 {
+        return Err(EnvModelEvalError{diagnostic: pkg_e0995_no_workspace_module()})
+    }
     workspace_module: ws_module ?? return Err(EnvModelEvalError{diagnostic: pkg_e0995_no_workspace_module()})
-    if workspace_module.members.len() == 0 -> return Err(EnvModelEvalError{diagnostic: pkg_e0995_no_workspace_module()})
+    if workspace_module.members.len() == 0 {
+        return Err(EnvModelEvalError{diagnostic: pkg_e0995_no_workspace_module()})
+    }
 
     // The comptime context a `members:` expression evaluates against: every
     // top-level `fn` (callable) and every top-level `const`/`#run`
@@ -228,17 +250,19 @@ envmodel_workspace_evaluate_with_resolver: fn(src: String, base_dir: String, rol
     // can build on an earlier one. This lets `members:` compose a sibling
     // `PACKAGES: […]` or call a local helper `fn`, not only inline
     // literals and the `find("./dir")` fast path.
-    funcs := [String: Func]{}
+    funcs := [String:Func]{}
     loop item in program.items {
         if item == {
             .Func(func) -> funcs[func.name] = func
             .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
-    globals := [String: CtValue]{}
+    globals := [String:CtValue]{}
     loop item in program.items {
         if item == {
-            .Const(constant) -> globals[constant.name] = comptime_evaluate(constant.value, src, funcs, base_dir, globals) ?? return Err(EnvModelEvalError{diagnostic: err.diagnostic})
+            .Const(constant) -> {
+                globals[constant.name] = comptime_evaluate(constant.value, src, funcs, base_dir, globals) ?? return Err(EnvModelEvalError{diagnostic: err.diagnostic})
+            }
             .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
@@ -261,7 +285,9 @@ envmodel_workspace_evaluate_with_resolver: fn(src: String, base_dir: String, rol
 // The first auto-discovered `workspace: module { … }` declaration.
 envmodel_workspace_module: fn(items: [Item]) -> ModuleDecl? Never! {
     loop item in items {
-        if item == .Module(declaration) && declaration.name == NS_WORKSPACE && declaration.auto_discovered -> return Val(declaration)
+        if item == .Module(declaration) && declaration.name == NS_WORKSPACE && declaration.auto_discovered {
+            return Val(declaration)
+        }
     }
     None
 }
@@ -283,21 +309,21 @@ envmodel_workspace_policy_diagnostic: fn(error: OverlayError) -> Diagnostic Neve
             None,
             "This root build asks for authority missing from its declaration, `#Impure` gate, or effective policy.",
             error.message(),
-            "Declare the effect, gate the ambient operation with `#Impure(\"reason\")`, and grant the effect through CLI/package/workspace policy."
+            "Declare the effect, gate the ambient operation with `#Impure(\"reason\")`, and grant the effect through CLI/package/workspace policy.",
         )
         unsupported_policy -> diagnostic_from_registry(
             "E3503",
             None,
             "workspace build policy contains an unsupported field",
             error.message(),
-            "use `policy: {{ deny: #(…) }}` or subject-scoped `policy: {{ grants: {{ \"package\": #(…) }} }}`"
+            "use `policy: {{ deny: #(…) }}` or subject-scoped `policy: {{ grants: {{ \"package\": #(…) }} }}`",
         )
         else -> diagnostic_from_registry(
             "E0998",
             None,
             "workspace overlay policy is malformed",
             error.message(),
-            "write `overlay <name> {{ provider: Provider.nixpkgs(channel: \"...\"); package(\"pkg\").patches += [patch(\"path.patch\")] }}`"
+            "write `overlay <name> {{ provider: Provider.nixpkgs(channel: \"...\"); package(\"pkg\").patches += [patch(\"path.patch\")] }}`",
         )
     }
 }
@@ -312,55 +338,69 @@ WorkspaceMemberIdentity: struct {
 // names are unique, and a member cannot introduce another member list.
 envmodel_workspace_validate_member_path: fn(rel_path: String, resolver: AuthorityResolver, members: [WorkspacePlanMember], span: Span?) -[FS, Env]> WorkspaceMemberIdentity EnvModelEvalError! {
     if envmodel_workspace_escapes_root(rel_path) {
-        return Err(envmodel_error(
-            "E1322",
-            "workspace member `{rel_path}` escapes the workspace root",
-            "Package membership is rooted in the workspace and cannot follow an absolute or `..` path",
-            "use a relative member path below the workspace root, or use `find(\"./packages\")`",
-            span
-        ))
+        return Err(
+            envmodel_error(
+                "E1322",
+                "workspace member `{rel_path}` escapes the workspace root",
+                "Package membership is rooted in the workspace and cannot follow an absolute or `..` path",
+                "use a relative member path below the workspace root, or use `find(\"./packages\")`",
+                span,
+            ),
+        )
     }
     member: if resolver.checked_member(rel_path) == {
         .Ok(checked) -> checked
-        .Err(error) -> { return Err(envmodel_workspace_authority_error(error, span)) }
+        .Err(error) -> {
+            return Err(envmodel_workspace_authority_error(error, span))
+        }
     }
-    if resolver.revalidate_member(member) == .Err(error) -> return Err(envmodel_workspace_authority_error(error, span))
+    if resolver.revalidate_member(member) == .Err(error) {
+        return Err(envmodel_workspace_authority_error(error, span))
+    }
     path: member.manifest.file.path
     has_members: member.manifest.facts.members.len() > 0
     name: member.manifest.facts.name
     canonical_path: if resolver.relative_identity(member.directory) == {
         .Ok(identity) -> identity
-        .Err(error) -> { return Err(envmodel_workspace_authority_error(error, span)) }
+        .Err(error) -> {
+            return Err(envmodel_workspace_authority_error(error, span))
+        }
     }
     loop existing in members {
         if existing.canonical_path == canonical_path {
-            return Err(envmodel_error(
-                "E1324",
-                "workspace member `{rel_path}` has the same physical identity as another member",
-                "a workspace member is identified by its real directory, not by two spelling variants",
-                "keep one member path for this directory",
-                span
-            ))
+            return Err(
+                envmodel_error(
+                    "E1324",
+                    "workspace member `{rel_path}` has the same physical identity as another member",
+                    "a workspace member is identified by its real directory, not by two spelling variants",
+                    "keep one member path for this directory",
+                    span,
+                ),
+            )
         }
     }
     if has_members {
-        return Err(envmodel_error(
-            "E1323",
-            "member package `{rel_path}` at `{path}` declares `members`",
-            "Package membership has depth cap one: only the workspace root may list members; the declaration comes from `{path}`",
-            "remove the inner `members:` field from `{path}` and lift its references into the workspace root",
-            span
-        ))
+        return Err(
+            envmodel_error(
+                "E1323",
+                "member package `{rel_path}` at `{path}` declares `members`",
+                "Package membership has depth cap one: only the workspace root may list members; the declaration comes from `{path}`",
+                "remove the inner `members:` field from `{path}` and lift its references into the workspace root",
+                span,
+            ),
+        )
     }
     loop existing in members {
         if existing.name == name {
-            return Err(envmodel_error(
-                "E1325",
-                "workspace member name `{name}` is declared more than once",
-                "Package references use a stable name; two physical members cannot claim the same name",
-                "rename one package or remove the duplicate member reference",
-                span
-            ))
+            return Err(
+                envmodel_error(
+                    "E1325",
+                    "workspace member name `{name}` is declared more than once",
+                    "Package references use a stable name; two physical members cannot claim the same name",
+                    "rename one package or remove the duplicate member reference",
+                    span,
+                ),
+            )
         }
     }
     Ok(WorkspaceMemberIdentity{name: name, canonical_path: canonical_path})
@@ -399,20 +439,22 @@ WorkspaceMembersValue: struct {
 // any Tier-1 comptime inputs it recorded. `find("./dir")` is the fast path (no
 // comptime inputs); anything else evaluates through the Compiler's comptime
 // path against the workspace file's top-level `fn`s and `const`s.
-envmodel_workspace_eval_members_expr: fn(expr: Expr, src: String, base_dir: String, resolver: AuthorityResolver, funcs: [String: Func], globals: [String: CtValue]) -[FS, Env, Exec, Time.Wait]> WorkspaceMembersValue EnvModelEvalError! {
+envmodel_workspace_eval_members_expr: fn(expr: Expr, src: String, base_dir: String, resolver: AuthorityResolver, funcs: [String:Func], globals: [String:CtValue]) -[FS, Env, Exec, Time.Wait]> WorkspaceMembersValue EnvModelEvalError! {
     // Fast path: workspace `find("./dir")` scans for package directories. This
     // manifest helper is separate from comptime `find(glob) -> [String]`,
     // which records matched file hashes for ordinary Jet comptime bindings.
     if expr == .Call(call, _) && call.name == BUILTIN_FIND {
         span: call.name_span
         if call.args.len() == 0 {
-            return Err(envmodel_error(
-                "E0996",
-                "`find` in `members:` needs a path argument",
-                "Write `find(\"./packages\")` to discover all packages under that directory",
-                "Example: `members: find(\"./packages\")`",
-                Val(span)
-            ))
+            return Err(
+                envmodel_error(
+                    "E0996",
+                    "`find` in `members:` needs a path argument",
+                    "Write `find(\"./packages\")` to discover all packages under that directory",
+                    "Example: `members: find(\"./packages\")`",
+                    Val(span),
+                ),
+            )
         }
         arg: call.args[0]
         // A non-literal `find` argument (e.g. `find(base + "/pkgs")`) is a
@@ -422,14 +464,18 @@ envmodel_workspace_eval_members_expr: fn(expr: Expr, src: String, base_dir: Stri
             scan_dir: envmodel_workspace_validate_find_scan_dir(dir, resolver, span)
             arg_span: expr_span(arg.expr)
             paths := [WorkspaceMemberPath]{}
-            loop found in envmodel_workspace_find_package_dirs(scan_dir, resolver, span) -> paths.push(WorkspaceMemberPath{path: found, span: arg_span})
+            loop found in envmodel_workspace_find_package_dirs(scan_dir, resolver, span) {
+                paths.push(WorkspaceMemberPath{path: found, span: arg_span})
+            }
             return Ok(WorkspaceMembersValue{paths: paths, inputs: [ComptimeInput]{}})
         }
     }
     // `members: []` names no member. Typed Jet needs the element type of an
     // empty list, which only this field knows (member paths are strings),
     // so it never reaches the compiler, where `[]` alone is E0501.
-    if expr == .ListLit(items, _, _) && items.len() == 0 -> return Ok(WorkspaceMembersValue{paths: [WorkspaceMemberPath]{}, inputs: [ComptimeInput]{}})
+    if expr == .ListLit(items, _, _) && items.len() == 0 {
+        return Ok(WorkspaceMembersValue{paths: [WorkspaceMemberPath]{}, inputs: [ComptimeInput]{}})
+    }
 
     // General case: evaluate through comptime and expect a list of strings.
     // The workspace lock records every Tier-1 input (`embed_file`,
@@ -444,7 +490,9 @@ envmodel_workspace_eval_members_expr: fn(expr: Expr, src: String, base_dir: Stri
     }
     value: comptime_evaluate(expr, src, funcs, base_dir, globals) ?? return Err(EnvModelEvalError{diagnostic: err.diagnostic})
     paths := [WorkspaceMemberPath]{}
-    loop path in envmodel_workspace_string_list(value, span) -> paths.push(WorkspaceMemberPath{path: path, span: span})
+    loop path in envmodel_workspace_string_list(value, span) {
+        paths.push(WorkspaceMemberPath{path: path, span: span})
+    }
     Ok(WorkspaceMembersValue{paths: paths, inputs: [ComptimeInput]{}})
 }
 
@@ -464,7 +512,9 @@ envmodel_workspace_member_path_string: fn(value: CtValue) -> String? Never! {
 envmodel_workspace_literal_string: fn(expr: Expr) -> String? Never! {
     parts: if expr == {
         .Str(literal_parts, _, _) -> literal_parts
-        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> { return None }
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {
+            return None
+        }
     }
     text := [String]{}
     loop part in parts {
@@ -481,24 +531,28 @@ envmodel_workspace_string_list: fn(value: CtValue, span: Span) -> [String] EnvMo
     items: if value == {
         .List(values) -> values
         .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {
-            return Err(envmodel_error(
-                "E0996",
-                "`members:` must evaluate to a list of package paths",
-                "The `members:` value must evaluate to a `[String]` — a list of relative package directory paths",
-                "Example: `members: find(\"./packages\")` or `members: [\"./pkg/hello\"]`",
-                Val(span)
-            ))
+            return Err(
+                envmodel_error(
+                    "E0996",
+                    "`members:` must evaluate to a list of package paths",
+                    "The `members:` value must evaluate to a `[String]` — a list of relative package directory paths",
+                    "Example: `members: find(\"./packages\")` or `members: [\"./pkg/hello\"]`",
+                    Val(span),
+                ),
+            )
         }
     }
     out := [String]{}
     loop item in items {
-        path: envmodel_workspace_member_path_string(item) ?? return Err(envmodel_error(
-            "E0996",
-            "`members:` list must contain strings (package paths)",
-            "Each element should be a relative path to a package directory",
-            "Example: `members: [\"./packages/hello\", \"./packages/ranker\"]`",
-            Val(span)
-        ))
+        path: envmodel_workspace_member_path_string(item) ?? return Err(
+            envmodel_error(
+                "E0996",
+                "`members:` list must contain strings (package paths)",
+                "Each element should be a relative path to a package directory",
+                "Example: `members: [\"./packages/hello\", \"./packages/ranker\"]`",
+                Val(span),
+            ),
+        )
         out.push(path)
     }
     Ok(out)
@@ -508,19 +562,23 @@ envmodel_workspace_string_list: fn(value: CtValue, span: Span) -> [String] EnvMo
 
 envmodel_workspace_validate_find_scan_dir: fn(raw: String, resolver: AuthorityResolver, span: Span) -[FS, Env]> String EnvModelEvalError! {
     if raw == "" || envmodel_workspace_escapes_root(raw) {
-        return Err(envmodel_error(
-            "E1322",
-            "`find` path `{raw}` escapes the workspace root",
-            "workspace discovery follows only relative paths below the workspace root; absolute and `..` paths are rejected",
-            "use a relative path such as `find(\"./packages\")`",
-            Val(span)
-        ))
+        return Err(
+            envmodel_error(
+                "E1322",
+                "`find` path `{raw}` escapes the workspace root",
+                "workspace discovery follows only relative paths below the workspace root; absolute and `..` paths are rejected",
+                "use a relative path such as `find(\"./packages\")`",
+                Val(span),
+            ),
+        )
     }
     relative: envmodel_workspace_strip_cur_dir(raw)
     if resolver.checked_directory(relative) == {
         .Ok(directory) -> Ok(directory.path)
         .Err(error) -> {
-            if error.is_missing() -> return Err(EnvModelEvalError{diagnostic: envmodel_workspace_e0997_find_dir_missing(files.join(resolver.root, relative), span)})
+            if error.is_missing() {
+                return Err(EnvModelEvalError{diagnostic: envmodel_workspace_e0997_find_dir_missing(files.join(resolver.root, relative), span)})
+            }
             Err(envmodel_workspace_authority_error(error, Val(span)))
         }
     }
@@ -542,7 +600,9 @@ envmodel_workspace_strip_cur_dir: fn(raw: String) -> String Never! {
 envmodel_workspace_find_package_dirs: fn(scan_dir: String, resolver: AuthorityResolver, span: Span) -[FS, Env]> [String] EnvModelEvalError! {
     discovered: if resolver.discover_members(scan_dir) == {
         .Ok(found) -> found
-        .Err(error) -> { return Err(envmodel_workspace_authority_error(error, Val(span))) }
+        .Err(error) -> {
+            return Err(envmodel_workspace_authority_error(error, Val(span)))
+        }
     }
     paths := [String]{}
     loop member in discovered -> paths.push(member.directory.relative)
@@ -558,6 +618,6 @@ envmodel_workspace_e0997_find_dir_missing: fn(dir: String, span: Span) -> Diagno
         Val(span),
         "`find` can't read the directory `{dir}`",
         "`find` scans that directory for subdirectories containing `package.jet`; the directory must exist relative to `workspace.jet`",
-        "Create the directory, or fix the path so it points at your packages folder"
+        "Create the directory, or fix the path so it points at your packages folder",
     )
 }

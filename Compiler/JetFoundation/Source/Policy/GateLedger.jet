@@ -15,13 +15,14 @@ GateKind: enum {
     Nondeterministic
     Structure
     LintAllow
-    // A build option value that removes a runtime memory-safety check
-    // (`bounds: off`, `bounds: report`; JetFoundation BuildOptions.jet).
     CheckRemoval
-    // The `link_args` build option: native link inputs
-    // the program's own declarations don't name.
     LinkOverride
 }
+
+// A build option value that removes a runtime memory-safety check
+// (`bounds: off`, `bounds: report`; JetFoundation BuildOptions.jet).
+// The `link_args` build option: native link inputs
+// the program's own declarations don't name.
 
 gate_kind_policy_key: fn(kind: GateKind) -> PolicyKey Never! {
     if kind == {
@@ -44,9 +45,7 @@ gate_kind_policy_key: fn(kind: GateKind) -> PolicyKey Never! {
     }
 }
 
-gate_kind_name: fn(kind: GateKind) -> String Never! {
-    policy_key_name(gate_kind_policy_key(kind))
-}
+gate_kind_name: fn(kind: GateKind) -> String Never! { policy_key_name(gate_kind_policy_key(kind)) }
 
 gate_kind_parse: fn(value: String) -> GateKind? Never! {
     if value.trim().to_ascii_lower() == {

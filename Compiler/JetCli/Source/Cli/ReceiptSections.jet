@@ -76,7 +76,9 @@ jet_cli_receipt_section_record_decode: fn(bytes: [U8]) -> JetCLIReceiptSectionRe
     schema_digest: jet_cli_receipt_section_record_text(cursor, "schema digest")
     payload_digest: jet_cli_receipt_section_record_text(cursor, "payload digest")
     value: jet_driver_run_receipt_take(cursor)
-    if cursor.at != bytes.len() -> return Err(jet_cli_read_error("receipt section record has trailing bytes"))
+    if cursor.at != bytes.len() {
+        return Err(jet_cli_read_error("receipt section record has trailing bytes"))
+    }
     section: JetDriverRunReceiptSection{name: name, type_name: type_name, schema_digest: schema_digest, payload_digest: payload_digest, bytes: value}
     jet_driver_run_receipt_section_validate(section)
     record: JetCLIReceiptSectionRecord{claim_key: claim_key, parent_digest: parent_digest, section: section}

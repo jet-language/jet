@@ -18,7 +18,9 @@ trace_skeleton_content_json: fn(value: TraceSkeleton) -> CanonicalJSON JetTraceE
     loop index in 0..<value.game_draw_events.len() -> draw_order.push(index)
     draw_order.sort_by(fn(left: Int, right: Int) { (event_index: value.game_draw_events[left].event_index, sequence: value.game_draw_events[left].sequence) <=> (event_index: value.game_draw_events[right].event_index, sequence: value.game_draw_events[right].sequence) })
     draws := [CanonicalJSON]{}
-    loop index in draw_order -> draws.push(trace_game_draw_event_to_json(value.game_draw_events[index]))
+    loop index in draw_order {
+        draws.push(trace_game_draw_event_to_json(value.game_draw_events[index]))
+    }
     tasks := [CanonicalJSON]{}
     loop item in value.tasks -> tasks.push(trace_task_to_json(item))
     locks := [CanonicalJSON]{}
@@ -58,13 +60,30 @@ trace_skeleton_content_json: fn(value: TraceSkeleton) -> CanonicalJSON JetTraceE
         receipt_bytes[left] <=> receipt_bytes[right]
     })
     receipts := [CanonicalJSON]{}
-    loop index in receipt_order -> receipts.push(trace_receipt_section_to_json(value.receipt_sections[index]))
-    jettrace_object([CanonicalJSONField]{
-        jettrace_field("allocations", .Array(allocations.move())), jettrace_field("game_draw_events", .Array(draws.move())), jettrace_field("game_frames", .Array(frames.move())),
-        jettrace_field("argv", .Array(argv.move())), jettrace_field("browser", .Array(browser.move())), jettrace_field("capture_policy", capture_policy_to_json(value.capture_policy)),
-        jettrace_field("command", .String(value.command.copy())), jettrace_field("hardware", trace_hardware_to_json(value.hardware)), jettrace_field("io", .Array(io.move())),
-        jettrace_field("locks", .Array(locks.move())), jettrace_field("native", .Array(native.move())), jettrace_field("samples", .Array(samples.move())), jettrace_field("profile", profile),
-        jettrace_field("source_identity", .Array(identity.move())), jettrace_field("source_maps", .Array(maps.move())), jettrace_field("receipt_sections", .Array(receipts.move())),
-        jettrace_field("spans", .Array(spans.move())), jettrace_field("tasks", .Array(tasks.move())), jettrace_field("toolchain", trace_toolchain_to_json(value.toolchain))
-    })
+    loop index in receipt_order {
+        receipts.push(trace_receipt_section_to_json(value.receipt_sections[index]))
+    }
+    jettrace_object(
+        [CanonicalJSONField]{
+            jettrace_field("allocations", .Array(allocations.move())),
+            jettrace_field("game_draw_events", .Array(draws.move())),
+            jettrace_field("game_frames", .Array(frames.move())),
+            jettrace_field("argv", .Array(argv.move())),
+            jettrace_field("browser", .Array(browser.move())),
+            jettrace_field("capture_policy", capture_policy_to_json(value.capture_policy)),
+            jettrace_field("command", .String(value.command.copy())),
+            jettrace_field("hardware", trace_hardware_to_json(value.hardware)),
+            jettrace_field("io", .Array(io.move())),
+            jettrace_field("locks", .Array(locks.move())),
+            jettrace_field("native", .Array(native.move())),
+            jettrace_field("samples", .Array(samples.move())),
+            jettrace_field("profile", profile),
+            jettrace_field("source_identity", .Array(identity.move())),
+            jettrace_field("source_maps", .Array(maps.move())),
+            jettrace_field("receipt_sections", .Array(receipts.move())),
+            jettrace_field("spans", .Array(spans.move())),
+            jettrace_field("tasks", .Array(tasks.move())),
+            jettrace_field("toolchain", trace_toolchain_to_json(value.toolchain)),
+        },
+    )
 }

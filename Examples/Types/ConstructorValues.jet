@@ -26,13 +26,9 @@ describe: fn(message: Message) -> String {
     }
 }
 
-build: fn(make: fn(String) -> Message, body: String) -> Message {
-    make(body)
-}
+build: fn(make: fn(String) -> Message, body: String) -> Message { make(body) }
 
-pair_with: fn(make: fn(*, left: Int, right: Int) -> Message) -> Message {
-    make(right: 2, left: 1)
-}
+pair_with: fn(make: fn(*, left: Int, right: Int) -> Message) -> Message { make(right: 2, left: 1) }
 
 fill: fn(make: fn(Int) -> Holder<Int>, value: Int) -> Int {
     if make(value) == {
@@ -43,9 +39,7 @@ fill: fn(make: fn(Int) -> Holder<Int>, value: Int) -> Int {
 
 // A payload that can't be copied out of a read parameter is taken, so the
 // constructor fits a function type that marks the take.
-takes: fn(make: fn(&&FileWriter) -> Sink) -> String {
-    "takes its writer"
-}
+takes: fn(make: fn(&&FileWriter) -> Sink) -> String { "takes its writer" }
 
 run: fn() {
     // A single payload stays positional.

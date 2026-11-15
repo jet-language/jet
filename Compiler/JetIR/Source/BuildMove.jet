@@ -17,12 +17,12 @@
 // heap first (ir_move_heap). So no part is served by a younger allocator
 // than the part holding it, and a part that need not move holds none that
 // does.
-
 use jet_foundation.[Span, Type, name_rows_set, name_rows_value]
 
 // The runtime's move into the carrier word in a slot (0: the heap), and into
 // the allocator owning the storage an address slot names.
 IR_MOVE_ENTER: "jet_rt_move_enter"
+
 IR_MOVE_ENTER_AT: "jet_rt_move_enter_at"
 
 // Whether a value of type row `row` can hold a part a block's allocator
@@ -41,9 +41,7 @@ ir_move_list: fn(m: IRModule, row: Int) -> Bool Never! {
     m.types[row].kind == .Aggregate && ir_untag(m.types[row].ty) == .List(_)
 }
 
-ir_move_text: fn(m: IRModule, row: Int) -> Bool Never! {
-    m.types[row].kind == .String
-}
+ir_move_text: fn(m: IRModule, row: Int) -> Bool Never! { m.types[row].kind == .String }
 
 // Moves `value`, a value the caller holds, into the allocator `enter`
 // (IR_MOVE_ENTER, IR_MOVE_ENTER_AT) names for the word in `target`: a box
@@ -51,11 +49,17 @@ ir_move_text: fn(m: IRModule, row: Int) -> Bool Never! {
 // address) moves its parts in place. Nothing moves outside a program's
 // module, or while no block's allocator serves the thread.
 ir_move_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, enter: String, target: Int) Never! {
-    if value < 0 || !m.user_values || ir_failed(b) -> return
+    if value < 0 || !m.user_values || ir_failed(b) {
+        return
+    }
     row: b.f.slot_type[value]
-    if !ir_move_needs(m, p, row) -> return
+    if !ir_move_needs(m, p, row) {
+        return
+    }
     helper: ir_move_helper(m, p, b, row)
-    if helper < 0 -> return
+    if helper < 0 {
+        return
+    }
     saved: ir_move_open(m, b, enter, target)
     start: ir_args(b.f, [Int]{value})
     dst: if m.types[row].kind == .Aggregate -> -1 else -> value
@@ -72,7 +76,9 @@ ir_move_stored: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, base: In
 // Moves the value of type row `row` just stored at byte `offset` of `base`
 // into the allocator `enter` names for the word in `target`.
 ir_move_stored_into: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, base: Int, offset: Int, enter: String, target: Int) Never! {
-    if !m.user_values || ir_failed(b) || !ir_move_needs(m, p, row) -> return
+    if !m.user_values || ir_failed(b) || !ir_move_needs(m, p, row) {
+        return
+    }
     saved: ir_move_open(m, b, enter, target)
     ir_move_at(m, p, b, row, base, offset)
     ir_move_close(m, b, saved)
@@ -83,7 +89,9 @@ ir_move_stored_into: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, bas
 // there already (Build.jet ir_member_write), so only its value moves.
 ir_move_member_stored: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, member: IRMember) Never! {
     if !member.boxed -> return ir_move_stored(m, p, b, member.ty, base, member.offset)
-    if !m.user_values || ir_failed(b) || !ir_move_needs(m, p, member.ty) -> return
+    if !m.user_values || ir_failed(b) || !ir_move_needs(m, p, member.ty) {
+        return
+    }
     saved: ir_move_open(m, b, IR_MOVE_ENTER_AT, base)
     pointer_row: ir_pointer_row(m)
     wrapper: ir_temp(m, b, pointer_row)
@@ -96,7 +104,9 @@ ir_move_member_stored: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, 
 // container (a Map's, Set's or Cache's entries, a Shared cell, a channel, a
 // closure's or task's environment) or a module store.
 ir_move_heap: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int) Never! {
-    if value < 0 || !m.user_values || ir_failed(b) || !ir_move_needs(m, p, b.f.slot_type[value]) -> return
+    if value < 0 || !m.user_values || ir_failed(b) || !ir_move_needs(m, p, b.f.slot_type[value]) {
+        return
+    }
     zero: ir_word_const(m, b, 0)
     ir_move_value(m, p, b, value, IR_MOVE_ENTER, zero)
 }
@@ -108,16 +118,18 @@ ir_move_heap: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int) Never! {
 // inside every open block, or in a body with none, holds the current
 // allocator's values already.
 ir_move_binding: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) Never! {
-    if slot < 0 || !m.user_values || ir_failed(b) || !ir_move_needs(m, p, b.f.slot_type[slot]) -> return
-    index := 0
-    loop index < b.bindings.len() && b.bindings[index].slot != slot {
-        index += 1
+    if slot < 0 || !m.user_values || ir_failed(b) || !ir_move_needs(m, p, b.f.slot_type[slot]) {
+        return
     }
+    index := 0
+    loop index < b.bindings.len() && b.bindings[index].slot != slot -> index += 1
     save := -1
     loop frame in b.transactions {
         if save < 0 && frame.allocator >= 0 && index < frame.bindings -> save = frame.allocator
     }
-    if save < 0 -> return
+    if save < 0 {
+        return
+    }
     target: ir_load_word(m, b, save, 0)
     ir_move_value(m, p, b, slot, IR_MOVE_ENTER, target)
 }
@@ -126,12 +138,16 @@ ir_move_binding: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) Never!
 // opened inside `loops` open loops (0: a return leaves them all) into the
 // allocator current where the outermost of them began.
 ir_move_leaving: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, loops: Int) Never! {
-    if value < 0 || !m.user_values || ir_failed(b) || !ir_move_needs(m, p, b.f.slot_type[value]) -> return
+    if value < 0 || !m.user_values || ir_failed(b) || !ir_move_needs(m, p, b.f.slot_type[value]) {
+        return
+    }
     save := -1
     loop frame in b.transactions {
         if save < 0 && frame.allocator >= 0 && frame.loops >= loops -> save = frame.allocator
     }
-    if save < 0 -> return
+    if save < 0 {
+        return
+    }
     target: ir_load_word(m, b, save, 0)
     ir_move_value(m, p, b, value, IR_MOVE_ENTER, target)
 }
@@ -158,7 +174,9 @@ ir_move_close: fn(m: &IRModule, b: &IRBuilder, saved: Int) Never! {
 // aggregate moves its parts in place.
 ir_move_at: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, base: Int, offset: Int) Never! {
     helper: ir_move_helper(m, p, b, row)
-    if helper < 0 -> return
+    if helper < 0 {
+        return
+    }
     part: ir_load_at(m, b, base, offset, row)
     start: ir_args(b.f, [Int]{part})
     if m.types[row].kind == .Aggregate {
@@ -193,12 +211,8 @@ ir_move_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int N
             // Text.jet jet_rt_string_move).
             moved: ir_runtime(m, a, "jet_rt_string_move", [Int]{value}, row)
             ir_emit(a.f, IROp.Move, value, moved, -1, -1, a.line)
-        } else {
-            ir_move_box_body(m, p, a, row, value)
-        }
-    } else if ir_move_list(m, row) {
-        ir_move_list_body(m, p, a, row, value)
-    } else {
+        } else { ir_move_box_body(m, p, a, row, value) }
+    } else if ir_move_list(m, row) { ir_move_list_body(m, p, a, row, value) } else {
         members: ir_inline_members(m, p, row) ?? [IRMember]{}
         loop member in members -> ir_move_part(m, p, a, value, member)
     }
@@ -232,16 +246,12 @@ ir_move_box_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, row: Int, boxed:
     replica: ir_runtime(m, a, "jet_rt_alloc_value", [Int]{bytes, align}, row)
     if sizes.len() == 0 {
         ir_emit(a.f, IROp.CopyBytes, -1, replica, boxed, ir_box_bytes(m, p, row), a.line)
-    } else {
-        _: ir_runtime(m, a, "jet_rt_mem_move", [Int]{replica, boxed, bytes}, -1)
-    }
+    } else { _: ir_runtime(m, a, "jet_rt_mem_move", [Int]{replica, boxed, bytes}, -1) }
     loop shape in shapes {
         if !ir_move_shape_copies(m, p, shape) -> next
         opened: ir_box_shape_open(m, a, replica, shape)
         loop member in shape.members {
-            if member.boxed {
-                ir_wrapper_copy(m, a, replica, member)
-            } else if ir_copy_needs(m, p, member.ty) {
+            if member.boxed -> ir_wrapper_copy(m, a, replica, member) else if ir_copy_needs(m, p, member.ty) {
                 ir_copy_fixup_at(m, p, a, member.ty, replica, member.offset)
             }
         }
@@ -274,7 +284,9 @@ ir_move_shape_copies: fn(m: &IRModule, p: IRProgram, shape: IRBoxShape) -> Bool 
 // Moves member `member` of the value at `base` in the running move.
 ir_move_part: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, member: IRMember) Never! {
     if member.boxed -> return ir_move_wrapper(m, p, b, base, member)
-    if !ir_move_needs(m, p, member.ty) -> return
+    if !ir_move_needs(m, p, member.ty) {
+        return
+    }
     ir_move_at(m, p, b, member.ty, base, member.offset)
 }
 

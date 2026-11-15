@@ -2,9 +2,19 @@
 // the `dev:` development policy.
 use {
     jetpack_foundation.[
-        BUILD_CTOR, BUILD_FIELD_ALLOW, BUILD_FIELD_DEBUG_INFO, BUILD_FIELD_OPTIMIZE, BUILD_FIELD_PANIC,
-        BUILD_FIELD_SETTINGS, BUILD_FIELD_SMALL, BUILD_OPTIMIZE_O0, BUILD_OPTIMIZE_O1,
-        BUILD_OPTIMIZE_O2, BUILD_PANIC_ABORT, BUILD_PANIC_UNWIND, BUILD_PROFILE_RELEASE,
+        BUILD_CTOR,
+        BUILD_FIELD_ALLOW,
+        BUILD_FIELD_DEBUG_INFO,
+        BUILD_FIELD_OPTIMIZE,
+        BUILD_FIELD_PANIC,
+        BUILD_FIELD_SETTINGS,
+        BUILD_FIELD_SMALL,
+        BUILD_OPTIMIZE_O0,
+        BUILD_OPTIMIZE_O1,
+        BUILD_OPTIMIZE_O2,
+        BUILD_PANIC_ABORT,
+        BUILD_PANIC_UNWIND,
+        BUILD_PROFILE_RELEASE,
     ]
     jet_foundation.[BuildOptionKind, BuildOptionRow, JetReleaseInspect, authority_root, build_option_accepts, build_option_list_value, build_option_profile_hint, build_option_refusal, build_option_row]
 }
@@ -23,9 +33,7 @@ BuildOptimize: enum {
         }
     }
 
-    cache_tag: fn(self) -> String Never! {
-        "opt:{self.as_str()}"
-    }
+    cache_tag: fn(self) -> String Never! { "opt:{self.as_str()}" }
 }
 
 BuildPanic: enum {
@@ -37,9 +45,7 @@ BuildPanic: enum {
 DevRecordsBudget: struct {
     max_bytes: Int
 
-    default: fn() -> DevRecordsBudget Never! {
-        DevRecordsBudget{max_bytes: 268435456}
-    }
+    default: fn() -> DevRecordsBudget Never! { DevRecordsBudget{max_bytes: 268435456} }
 }
 
 DevCaptureSetting: enum {
@@ -61,9 +67,7 @@ DevPolicy: struct {
     swap: Bool
     records: DevRecordsPolicy
 
-    default: fn() -> DevPolicy Never! {
-        DevPolicy{swap: true, records: DevRecordsPolicy.default()}
-    }
+    default: fn() -> DevPolicy Never! { DevPolicy{swap: true, records: DevRecordsPolicy.default()} }
 }
 
 // One named build profile declared in `build: { … }`. Like every build option,
@@ -76,7 +80,7 @@ BuildProfileDef: struct {
     small: Bool
     panic: BuildPanic?
     // Profile contributions to declared typed settings.
-    settings: [String: String]
+    settings: [String:String]
     // Release-only devtools presence form.
     inspect: JetReleaseInspect
     // Game packaging policy resolved from this named profile.
@@ -99,7 +103,9 @@ pkg_parse_dev: fn(value: String) -> DevPolicy PackageParseError! {
     loop entry in pkg_key_value_entries(body) {
         if entry.key == {
             "swap" -> {
-                if seen_swap -> return Err(PackageParseError.Composition("dev policy field `swap` is declared more than once"))
+                if seen_swap {
+                    return Err(PackageParseError.Composition("dev policy field `swap` is declared more than once"))
+                }
                 seen_swap = true
                 policy.swap = if entry.value.trim() == {
                     "true" -> true
@@ -110,7 +116,9 @@ pkg_parse_dev: fn(value: String) -> DevPolicy PackageParseError! {
                 }
             }
             "records" -> {
-                if seen_records -> return Err(PackageParseError.Composition("dev policy field `records` is declared more than once"))
+                if seen_records {
+                    return Err(PackageParseError.Composition("dev policy field `records` is declared more than once"))
+                }
                 seen_records = true
                 policy.records = pkg_parse_dev_records(entry.value)
             }
@@ -128,7 +136,9 @@ pkg_parse_dev_records: fn(value: String) -> DevRecordsPolicy PackageParseError! 
     loop entry in pkg_key_value_entries(body) {
         if entry.key == {
             "capture" -> {
-                if seen_capture -> return Err(PackageParseError.Composition("dev.records field `capture` is declared more than once"))
+                if seen_capture {
+                    return Err(PackageParseError.Composition("dev.records field `capture` is declared more than once"))
+                }
                 seen_capture = true
                 policy.capture = if pkg_unquote(entry.value) == {
                     "default" -> DevCaptureSetting.Default
@@ -140,7 +150,9 @@ pkg_parse_dev_records: fn(value: String) -> DevRecordsPolicy PackageParseError! 
                 }
             }
             "budget" -> {
-                if seen_budget -> return Err(PackageParseError.Composition("dev.records field `budget` is declared more than once"))
+                if seen_budget {
+                    return Err(PackageParseError.Composition("dev.records field `budget` is declared more than once"))
+                }
                 seen_budget = true
                 policy.budget = pkg_parse_dev_records_budget(entry.value)
             }
@@ -155,8 +167,12 @@ pkg_parse_dev_records_budget: fn(value: String) -> DevRecordsBudget PackageParse
     budget := DevRecordsBudget.default()
     seen_size := false
     loop entry in pkg_key_value_entries(body) {
-        if entry.key != "size" -> return Err(PackageParseError.Composition("dev.records.budget has unknown field `{entry.key}` (allowed: size)"))
-        if seen_size -> return Err(PackageParseError.Composition("dev.records.budget field `size` is declared more than once"))
+        if entry.key != "size" {
+            return Err(PackageParseError.Composition("dev.records.budget has unknown field `{entry.key}` (allowed: size)"))
+        }
+        if seen_size {
+            return Err(PackageParseError.Composition("dev.records.budget field `size` is declared more than once"))
+        }
         seen_size = true
         budget.max_bytes = pkg_parse_dev_record_bytes(entry.value)
     }
@@ -183,8 +199,12 @@ pkg_parse_dev_record_bytes: fn(value: String) -> Int PackageParseError! {
         }
     }
     count: pkg_parse_u64(pkg_without_whitespace(digits.replace("_", ""))) ?? return Err(PackageParseError.Composition("dev.records.budget.size must be a positive whole-byte quantity"))
-    if count == 0 -> return Err(PackageParseError.Composition("dev.records.budget.size must be a positive whole-byte quantity"))
-    if count > PKG_MAX_U64_IN_INT /% multiplier -> return Err(PackageParseError.Composition("dev.records.budget.size does not fit in 64 bits"))
+    if count == 0 {
+        return Err(PackageParseError.Composition("dev.records.budget.size must be a positive whole-byte quantity"))
+    }
+    if count > PKG_MAX_U64_IN_INT /% multiplier {
+        return Err(PackageParseError.Composition("dev.records.budget.size does not fit in 64 bits"))
+    }
     Ok(count * multiplier)
 }
 
@@ -194,7 +214,9 @@ pkg_parse_build: fn(body: String) -> [BuildProfileDef] PackageParseError! {
     seen := [String]{}
     loop entry in pkg_key_value_entries(body) {
         name: entry.key
-        if seen.contains(name) -> return Err(PackageParseError.Composition("build field `{name}` is declared more than once"))
+        if seen.contains(name) {
+            return Err(PackageParseError.Composition("build field `{name}` is declared more than once"))
+        }
         seen.push(name.copy())
         if name == BUILD_FIELD_ALLOW -> next
         profiles.push(pkg_parse_build_profile(name, entry.value.trim()))
@@ -221,7 +243,7 @@ pkg_parse_build_profile: fn(name: String, value: String) -> BuildProfileDef Pack
         debug_info: false,
         small: false,
         panic: None,
-        settings: [String: String]{},
+        settings: [String:String]{},
         inspect: JetReleaseInspect.Local,
         game_development_stripping: None,
         game_cook_mode: None,
@@ -229,7 +251,9 @@ pkg_parse_build_profile: fn(name: String, value: String) -> BuildProfileDef Pack
     seen_fields := [String]{}
     loop field in pkg_key_value_entries(inner) {
         key: field.key
-        if seen_fields.contains(key) -> return Err(PackageParseError.Composition("build profile `{name}.{key}` is declared more than once"))
+        if seen_fields.contains(key) {
+            return Err(PackageParseError.Composition("build profile `{name}.{key}` is declared more than once"))
+        }
         seen_fields.push(key.copy())
         if key == {
             BUILD_FIELD_OPTIMIZE -> optimize_value = Val(pkg_unquote(field.value))
@@ -237,28 +261,34 @@ pkg_parse_build_profile: fn(name: String, value: String) -> BuildProfileDef Pack
             BUILD_FIELD_SMALL -> profile.small = pkg_parse_build_bool(name, field.value)
             BUILD_FIELD_PANIC -> {
                 spelled: pkg_unquote(field.value)
-                if spelled == BUILD_PANIC_ABORT {
-                    profile.panic = Val(BuildPanic.Abort)
-                } else if spelled == BUILD_PANIC_UNWIND {
+                if spelled == BUILD_PANIC_ABORT -> profile.panic = Val(BuildPanic.Abort) else if spelled == BUILD_PANIC_UNWIND {
                     profile.panic = Val(BuildPanic.Unwind)
                 } else {
                     return Err(PackageParseError.Composition("build profile `{name}` has an unknown `panic:` value — use `abort` or `unwind`"))
                 }
             }
             RELEASE_INSPECT_FIELD -> {
-                if name != BUILD_PROFILE_RELEASE -> return Err(PackageParseError.Composition("build profile `{name}` may declare `inspect:` only on `release`"))
+                if name != BUILD_PROFILE_RELEASE {
+                    return Err(PackageParseError.Composition("build profile `{name}` may declare `inspect:` only on `release`"))
+                }
                 profile.inspect = pkg_release_inspect_parse(field.value) ?? return Err(PackageParseError.Composition("build profile `{name}` has an invalid `inspect:` value `{field.value.trim()}` — {RELEASE_INSPECT_EXPECTED}"))
             }
-            "game_development_stripping" -> profile.game_development_stripping = Val(pkg_parse_build_bool(name, field.value))
+            "game_development_stripping" -> {
+                profile.game_development_stripping = Val(pkg_parse_build_bool(name, field.value))
+            }
             "game_cook_mode" -> {
                 mode: pkg_unquote(field.value)
-                if mode != "fast" && mode != "reproducible" && mode != "scripts-only" -> return Err(PackageParseError.Composition("build profile `{name}` has an unknown `game_cook_mode:` value `{mode}`"))
+                if mode != "fast" && mode != "reproducible" && mode != "scripts-only" {
+                    return Err(PackageParseError.Composition("build profile `{name}` has an unknown `game_cook_mode:` value `{mode}`"))
+                }
                 profile.game_cook_mode = Val(mode)
             }
             BUILD_FIELD_SETTINGS -> {
                 settings_body: pkg_strip_wrapped(pkg_trim_start_matches(field.value, ".").trim(), "{{", "}}") ?? return Err(PackageParseError.Composition("build profile `{name}` needs `settings: {{ key: value, … }}`"))
                 loop setting in pkg_key_value_entries(settings_body.trim()) {
-                    if profile.settings.has_key(setting.key) -> return Err(PackageParseError.Composition("build profile `{name}.settings.{setting.key}` is declared more than once"))
+                    if profile.settings.has_key(setting.key) {
+                        return Err(PackageParseError.Composition("build profile `{name}.settings.{setting.key}` is declared more than once"))
+                    }
                     profile.settings[setting.key] = pkg_unquote(setting.value)
                 }
             }
@@ -267,7 +297,9 @@ pkg_parse_build_profile: fn(name: String, value: String) -> BuildProfileDef Pack
                 // `bounds: off`): the CLI resolves it with the profile layer.
                 if build_option_row(key) == .Val(row) {
                     chosen: pkg_build_option_value(row, field.value) ?? return Err(PackageParseError.Composition("build profile `{name}` field `{key}:` needs {build_option_profile_hint(row)}"))
-                    if !build_option_accepts(row, chosen) -> return Err(PackageParseError.Composition("build profile `{name}` has an unknown `{key}:` value `{chosen}` — use {build_option_profile_hint(row)}"))
+                    if !build_option_accepts(row, chosen) {
+                        return Err(PackageParseError.Composition("build profile `{name}` has an unknown `{key}:` value `{chosen}` — use {build_option_profile_hint(row)}"))
+                    }
                 } else if build_option_refusal(key) == .Val(refusal) {
                     return Err(PackageParseError.Composition("build profile `{name}` field `{key}` isn't a build option: {refusal.law}"))
                 } else {
@@ -277,13 +309,9 @@ pkg_parse_build_profile: fn(name: String, value: String) -> BuildProfileDef Pack
         }
     }
     if optimize_value == .Val(selected) {
-        if selected == BUILD_OPTIMIZE_O0 {
-            profile.optimize = Val(BuildOptimize.O0)
-        } else if selected == BUILD_OPTIMIZE_O1 {
+        if selected == BUILD_OPTIMIZE_O0 -> profile.optimize = Val(BuildOptimize.O0) else if selected == BUILD_OPTIMIZE_O1 {
             profile.optimize = Val(BuildOptimize.O1)
-        } else if selected == BUILD_OPTIMIZE_O2 {
-            profile.optimize = Val(BuildOptimize.O2)
-        } else {
+        } else if selected == BUILD_OPTIMIZE_O2 { profile.optimize = Val(BuildOptimize.O2) } else {
             return Err(PackageParseError.Composition("build profile `{name}` has an unknown `optimize:` value `{selected}` — use O0, O1 or O2"))
         }
     }
@@ -312,12 +340,16 @@ pkg_parse_build_allow: fn(body: String) -> [String] PackageParseError! {
     seen_allow := false
     loop entry in pkg_key_value_entries(body) {
         if entry.key != BUILD_FIELD_ALLOW -> next
-        if seen_allow -> return Err(PackageParseError.BadEffectsBlock("`build.allow:` is declared more than once"))
+        if seen_allow {
+            return Err(PackageParseError.BadEffectsBlock("`build.allow:` is declared more than once"))
+        }
         seen_allow = true
         inner: pkg_strip_wrapped(entry.value.trim(), "#(", ")") ?? return Err(PackageParseError.BadEffectsBlock("`build.allow:` must be an effect tuple like `#(FS, Exec)`"))
         loop piece in pkg_top_level_commas(inner) {
             name: pkg_unquote(piece.trim())
-            if !pkg_effect_root_known(authority_root(name)) -> return Err(PackageParseError.BadEffectsBlock("`{name}` isn't a known build effect"))
+            if !pkg_effect_root_known(authority_root(name)) {
+                return Err(PackageParseError.BadEffectsBlock("`{name}` isn't a known build effect"))
+            }
             allow.push(name)
         }
     }

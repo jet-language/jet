@@ -22,11 +22,17 @@
 
 // PgHdr.flags (pcache.h).
 PGHDR_CLEAN: 1
+
 PGHDR_DIRTY: 2
+
 PGHDR_WRITEABLE: 4
+
 PGHDR_NEED_SYNC: 8
+
 PGHDR_DONT_WRITE: 16
+
 PGHDR_MMAP: 32
+
 PGHDR_WAL_APPEND: 64
 
 // The null slot.
@@ -41,14 +47,16 @@ PCACHE1_MAX_PAGES: 2147418112
 Bitvec: struct {
     live: Bool
     size: Int
-    members: [Int: Bool]
+    members: [Int:Bool]
 }
 
 // The null Bitvec.
-bitvec_none: fn() -> Bitvec Never! { Bitvec{live: false, size: 0, members: [Int: Bool]{}} }
+bitvec_none: fn() -> Bitvec Never! { Bitvec{live: false, size: 0, members: [Int:Bool]{}} }
 
 // sqlite3BitvecCreate.
-bitvec_create: fn(size: Int) -> Bitvec Never! { Bitvec{live: true, size: size, members: [Int: Bool]{}} }
+bitvec_create: fn(size: Int) -> Bitvec Never! {
+    Bitvec{live: true, size: size, members: [Int:Bool]{}}
+}
 
 // sqlite3BitvecTest: false for the null Bitvec and for i outside 1..size.
 bitvec_test: fn(b: Bitvec, i: Int) -> Bool Never! {
@@ -64,13 +72,17 @@ bitvec_test_not_null: fn(b: Bitvec, i: Int) -> Bool Never! {
 
 // sqlite3BitvecSet; i is in 1..size.
 bitvec_set: fn(b: &Bitvec, i: Int) Never! {
-    if !b.live -> return
+    if !b.live {
+        return
+    }
     _: b.members.add(i, true)
 }
 
 // sqlite3BitvecClear.
 bitvec_clear: fn(b: &Bitvec, i: Int) Never! {
-    if !b.live -> return
+    if !b.live {
+        return
+    }
     _: b.members.remove(i)
 }
 
@@ -128,7 +140,7 @@ PCache: struct {
     open: Bool
     // PCache1: apHash, the free slots, nPage, nRecyclable, iMaxKey, nMax,
     // nMin and n90pct.
-    hash: [Int: Int]
+    hash: [Int:Int]
     free: [Int]
     npage: Int
     nrecyclable: Int
@@ -148,7 +160,7 @@ PCache: struct {
 
 // A cache before sqlite3PcacheOpen (the zeroed PCache inside a new Pager).
 pcache_unopened: fn() -> PCache Never! {
-    PCache{pages: [PgHdr]{}, dirty: NO_PAGE, dirty_tail: NO_PAGE, synced: NO_PAGE, nref_sum: 0, sz_cache: 0, sz_spill: 0, sz_page: 0, sz_extra: 0, purgeable: false, create: 0, open: false, hash: [Int: Int]{}, free: [Int]{}, npage: 0, nrecyclable: 0, max_key: 0, nmax: 0, nmin: 0, n90pct: 0, group_max_page: 0, group_min_page: 0, mx_pinned: 10, npurgeable: 0, lru_head: NO_PAGE, lru_tail: NO_PAGE}
+    PCache{pages: [PgHdr]{}, dirty: NO_PAGE, dirty_tail: NO_PAGE, synced: NO_PAGE, nref_sum: 0, sz_cache: 0, sz_spill: 0, sz_page: 0, sz_extra: 0, purgeable: false, create: 0, open: false, hash: [Int:Int]{}, free: [Int]{}, npage: 0, nrecyclable: 0, max_key: 0, nmax: 0, nmin: 0, n90pct: 0, group_max_page: 0, group_min_page: 0, mx_pinned: 10, npurgeable: 0, lru_head: NO_PAGE, lru_tail: NO_PAGE}
 }
 
 // ---- pcache1.c --------------------------------------------------------
@@ -157,7 +169,7 @@ pcache_unopened: fn() -> PCache Never! {
 // was destroyed first).
 p1_create: fn(c: &PCache, purgeable: Bool) Never! {
     c.pages = [PgHdr]{}
-    c.hash = [Int: Int]{}
+    c.hash = [Int:Int]{}
     c.free = [Int]{}
     c.npage = 0
     c.nrecyclable = 0
@@ -236,9 +248,13 @@ p1_alloc_page: fn(c: &PCache) -> Int Never! {
 
 // pcache1Cachesize.
 p1_cachesize: fn(c: &PCache, max: Int) Never! {
-    if !c.purgeable -> return
+    if !c.purgeable {
+        return
+    }
     n := max.bit_and(4294967295)
-    if n > PCACHE1_MAX_PAGES - c.group_max_page + c.nmax -> n = PCACHE1_MAX_PAGES - c.group_max_page + c.nmax
+    if n > PCACHE1_MAX_PAGES - c.group_max_page + c.nmax {
+        n = PCACHE1_MAX_PAGES - c.group_max_page + c.nmax
+    }
     c.group_max_page += n - c.nmax
     c.mx_pinned = c.group_max_page + 10 - c.group_min_page
     c.nmax = n
@@ -248,7 +264,9 @@ p1_cachesize: fn(c: &PCache, max: Int) Never! {
 
 // pcache1Shrink.
 p1_shrink: fn(c: &PCache) Never! {
-    if !c.purgeable -> return
+    if !c.purgeable {
+        return
+    }
     saved: c.group_max_page
     c.group_max_page = 0
     p1_enforce_max_page(c)
@@ -343,7 +361,7 @@ p1_destroy: fn(c: &PCache) Never! {
     c.mx_pinned = c.group_max_page + 10 - c.group_min_page
     p1_enforce_max_page(c)
     c.pages = [PgHdr]{}
-    c.hash = [Int: Int]{}
+    c.hash = [Int:Int]{}
     c.free = [Int]{}
     c.npage = 0
     c.nrecyclable = 0
@@ -355,7 +373,9 @@ p1_destroy: fn(c: &PCache) Never! {
 
 // pcacheManageDirtyList's addRemove bits.
 DIRTYLIST_REMOVE: 1
+
 DIRTYLIST_ADD: 2
+
 DIRTYLIST_FRONT: 3
 
 // pcacheManageDirtyList.
@@ -365,9 +385,7 @@ manage_dirty_list: fn(c: &PCache, s: Int, add_remove: Int) Never! {
         next: c.pages[s].dirty_next
         prev: c.pages[s].dirty_prev
         if next != NO_PAGE -> c.pages[next].dirty_prev = prev else -> c.dirty_tail = prev
-        if prev != NO_PAGE {
-            c.pages[prev].dirty_next = next
-        } else {
+        if prev != NO_PAGE -> c.pages[prev].dirty_next = next else {
             c.dirty = next
             if c.dirty == NO_PAGE -> c.create = 2
         }
@@ -375,9 +393,7 @@ manage_dirty_list: fn(c: &PCache, s: Int, add_remove: Int) Never! {
     if add_remove.bit_and(DIRTYLIST_ADD) != 0 {
         c.pages[s].dirty_prev = NO_PAGE
         c.pages[s].dirty_next = c.dirty
-        if c.dirty != NO_PAGE {
-            c.pages[c.dirty].dirty_prev = s
-        } else {
+        if c.dirty != NO_PAGE -> c.pages[c.dirty].dirty_prev = s else {
             c.dirty_tail = s
             if c.purgeable -> c.create = 1
         }
@@ -419,7 +435,9 @@ pcache_open: fn(c: &PCache, sz_page: Int, sz_extra: Int, purgeable: Bool) Never!
 
 // sqlite3PcacheSetPageSize: a new pcache1 cache for the new page size.
 pcache_set_page_size: fn(c: &PCache, sz_page: Int) Never! {
-    if c.sz_page == 0 -> return
+    if c.sz_page == 0 {
+        return
+    }
     if c.open -> p1_destroy(c)
     c.sz_page = sz_page
     p1_create(c, c.purgeable)
@@ -441,7 +459,9 @@ pcache_stress_victim: fn(c: &PCache) -> Int Never! {
     if c.create == 2 -> return NO_PAGE
     if c.npage <= c.sz_spill -> return NO_PAGE
     p := c.synced
-    loop p != NO_PAGE && (c.pages[p].nref > 0 || c.pages[p].flags.bit_and(PGHDR_NEED_SYNC) != 0) -> p = c.pages[p].dirty_prev
+    loop p != NO_PAGE && (c.pages[p].nref > 0 || c.pages[p].flags.bit_and(PGHDR_NEED_SYNC) != 0) {
+        p = c.pages[p].dirty_prev
+    }
     c.synced = p
     if p == NO_PAGE {
         p = c.dirty_tail
@@ -452,9 +472,7 @@ pcache_stress_victim: fn(c: &PCache) -> Int Never! {
 
 // The second half of sqlite3PcacheFetchStress: fetch with create flag 2,
 // which always yields a page.
-pcache_fetch_stress: fn(c: &PCache, pgno: Int) -> Int Never! {
-    p1_fetch(c, pgno, 2)
-}
+pcache_fetch_stress: fn(c: &PCache, pgno: Int) -> Int Never! { p1_fetch(c, pgno, 2) }
 
 // sqlite3PcacheFetchFinish (with pcacheFetchFinishWithInit).
 pcache_fetch_finish: fn(c: &PCache, pgno: Int, s: Int) -> Int Never! {
@@ -478,7 +496,9 @@ pcache_release: fn(c: &PCache, s: Int) Never! {
     c.nref_sum -= 1
     c.pages[s].nref -= 1
     if c.pages[s].nref == 0 {
-        if c.pages[s].flags.bit_and(PGHDR_CLEAN) != 0 -> pcache_unpin(c, s) else -> manage_dirty_list(c, s, DIRTYLIST_FRONT)
+        if c.pages[s].flags.bit_and(PGHDR_CLEAN) != 0 -> pcache_unpin(c, s) else {
+            manage_dirty_list(c, s, DIRTYLIST_FRONT)
+        }
     }
 }
 
@@ -498,7 +518,9 @@ pcache_drop: fn(c: &PCache, s: Int) Never! {
 // sqlite3PcacheMakeDirty.
 pcache_make_dirty: fn(c: &PCache, s: Int) Never! {
     flags: c.pages[s].flags
-    if flags.bit_and(PGHDR_CLEAN.bit_or(PGHDR_DONT_WRITE)) == 0 -> return
+    if flags.bit_and(PGHDR_CLEAN.bit_or(PGHDR_DONT_WRITE)) == 0 {
+        return
+    }
     f := flags.bit_and(PGHDR_DONT_WRITE.bit_not())
     if f.bit_and(PGHDR_CLEAN) != 0 {
         c.pages[s].flags = f.bit_xor(PGHDR_DIRTY.bit_or(PGHDR_CLEAN))
@@ -551,13 +573,17 @@ pcache_move: fn(c: &PCache, s: Int, new_pgno: Int) Never! {
     }
     p1_rekey(c, s, new_pgno)
     c.pages[s].pgno = new_pgno
-    if c.pages[s].flags.bit_and(PGHDR_DIRTY) != 0 && c.pages[s].flags.bit_and(PGHDR_NEED_SYNC) != 0 -> manage_dirty_list(c, s, DIRTYLIST_FRONT)
+    if c.pages[s].flags.bit_and(PGHDR_DIRTY) != 0 && c.pages[s].flags.bit_and(PGHDR_NEED_SYNC) != 0 {
+        manage_dirty_list(c, s, DIRTYLIST_FRONT)
+    }
 }
 
 // sqlite3PcacheTruncate: drop every page past pgno. With pgno 0 and pages
 // still referenced, page 1 stays, zeroed.
 pcache_truncate: fn(c: &PCache, pgno_in: Int) Never! {
-    if !c.open -> return
+    if !c.open {
+        return
+    }
     pgno := pgno_in
     p := c.dirty
     loop p != NO_PAGE {
@@ -588,7 +614,7 @@ pcache_clear: fn(c: &PCache) Never! { pcache_truncate(c, 0) }
 // (pcacheSortDirtyList's merge sort gives the same order).
 pcache_dirty_list: fn(c: PCache) -> [Int] Never! {
     pgnos := [Int]{}
-    by_pgno := [Int: Int]{}
+    by_pgno := [Int:Int]{}
     p := c.dirty
     loop p != NO_PAGE {
         pgnos.push(c.pages[p].pgno)

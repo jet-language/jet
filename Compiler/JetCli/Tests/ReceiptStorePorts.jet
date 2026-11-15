@@ -6,7 +6,12 @@
 use {
     jet_driver.[JetDriverRecordLink, JetDriverRunReceipt, JetDriverRunReceiptClaim, JetDriverRunReceiptSection]
     jet_cli.[
-        jet_cli_comparison_input_paths, jet_cli_receipt_claim, jet_cli_receipt_list, jet_cli_receipt_lookup, jet_cli_receipt_prepare, jet_cli_receipt_publish,
+        jet_cli_comparison_input_paths,
+        jet_cli_receipt_claim,
+        jet_cli_receipt_list,
+        jet_cli_receipt_lookup,
+        jet_cli_receipt_prepare,
+        jet_cli_receipt_publish,
     ]
     jet_pkg_model.[WorkspaceDeclarationCache]
     rsp_files: core.files
@@ -21,11 +26,10 @@ RspFixtureRoot: struct {
     path: String
 
     impl Close {
-        close: fn(&&self) -[FS]> {
-            rsp_files.remove_all(self.path).drop("test root cleanup")
-        }
+        close: fn(&&self) -[FS]> { rsp_files.remove_all(self.path).drop("test root cleanup") }
     }
 }
+
 rsp_root: fn(label: String) -[FS, Env]> String {
     root: rsp_files.join(rsp_sys.temp_dir(), "jet-receipts-{label}-{rsp_process.current_pid()}")
     rsp_files.remove_all(root).drop("a stale test root may be absent")
@@ -114,7 +118,8 @@ rsp_list_current: fn(store: String) -[FS, Time.Wait]> Int {
     workspace_lock: "{root}/.jet/lock"
     package_lock: "{package}/.jet/lock"
     generated: "{package}/.jet/generated/inputs.jet"
-    loop directory in ([String]{"{package}/src", "{root}/.jet", "{package}/.jet", "{package}/.jet/generated"}) {
+    loop directory in
+        ([String]{"{package}/src", "{root}/.jet", "{package}/.jet", "{package}/.jet/generated"}) {
         rsp_files.create_dir_all(directory) ?? panic("create {directory}")
     }
     rsp_write(workspace, "workspace: module {{ members: [\"packages/app\"] }}\n")

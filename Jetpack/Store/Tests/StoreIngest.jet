@@ -7,7 +7,7 @@ store_test_ingest_request: fn(name: String, reference: String, source: String, r
         reference: reference,
         cache_identity: store_test_identity(),
         references: references,
-        outputs: [String: String]{"out": source},
+        outputs: [String:String]{"out": source},
         signature: "",
         provenance: provenance,
         platform_artifact_kind: "",
@@ -27,7 +27,7 @@ store_test_assert_nothing_published: fn(verification: &StoreVerification, roots:
     messages: [String]{"piped lease keeper stdin", "piped lease keeper stdout"}
     loop message in messages {
         if store_required_child_pipe(Int?{None}, message) == {
-            .Ok(_) -> panic("a missing pipe must fail")
+            .Ok(_) -> { panic("a missing pipe must fail") }
             .Err(error) -> {
                 assert(error == .Other(_))
                 assert_eq(error.message(), message)
@@ -39,7 +39,7 @@ store_test_assert_nothing_published: fn(verification: &StoreVerification, roots:
 #Test("store ingest atomic dedupes same bytes and records referrers") {
     verification := StoreVerification.new()
     roots: store_test_temp_roots()
-    sources: [String: String]{"src-a": "same-bytes", "src-b": "same-bytes", "src-c": "different"}
+    sources: [String:String]{"src-a": "same-bytes", "src-b": "same-bytes", "src-c": "different"}
     loop source in sources {
         path: files.join(roots.root, source.key)
         files.create_dir_all(path) ?? panic("fixture dir")
@@ -65,7 +65,7 @@ store_test_assert_nothing_published: fn(verification: &StoreVerification, roots:
     source: files.join(roots.root, "late-ingest-output")
     request: store_test_ingest_request("late-ingest", "path:late-ingest", source, [String]{}, "")
     if store_ingest_tree(verification, roots, request) == {
-        .Ok(_) -> panic("a missing output must fail")
+        .Ok(_) -> { panic("a missing output must fail") }
         .Err(error) -> {
             assert(error == .IO(_))
             assert_eq(error.code(), "E1315")
@@ -101,11 +101,13 @@ store_test_assert_nothing_published: fn(verification: &StoreVerification, roots:
     files.write(hangar, "not a directory") ?? panic("hangar file")
     expected: "Hangar root is not a real directory; repair the path before writing"
     if store_ingest_tree(verification, roots, store_test_ingest_request("hangar-file", "path:hangar-file", source, [String]{}, "")) == {
-        .Ok(_) -> panic("a non-directory Hangar root must fail")
+        .Ok(_) -> { panic("a non-directory Hangar root must fail") }
         .Err(error) -> {
             if error == {
                 .IO(message) -> assert_eq(message, expected)
-                .PathLaw(_) | .Mutated(_) | .Invalid(_) -> panic("a Hangar store failure must lift to IngestError.IO")
+                .PathLaw(_) | .Mutated(_) | .Invalid(_) -> {
+                    panic("a Hangar store failure must lift to IngestError.IO")
+                }
             }
             assert_eq(error.code(), "E1315")
             assert_eq(error.what(), "hangar ingest failed: {expected}")
@@ -131,15 +133,20 @@ store_test_assert_nothing_published: fn(verification: &StoreVerification, roots:
     assert_eq(lifted.what(), "hangar ingest failed: cannot seal a non-canonical Hangar object")
     data: store_ingest_store_error(StoreError.InvalidData("{hangar} is not a real directory; repair the path before writing"))
     if data == {
-        .IO(message) -> assert_eq(message, "/hangar is not a real directory; repair the path before writing")
+        .IO(message) -> {
+            assert_eq(message, "/hangar is not a real directory; repair the path before writing")
+        }
         .PathLaw(_) | .Mutated(_) | .Invalid(_) -> panic("InvalidData must lift to IngestError.IO")
     }
     io: IOError.NotFound(IOContext{operation: .Read, resource: Val(hangar), os_code: None, cause: Val("gone")})
     if store_ingest_store_error(StoreError.IO(io)) == {
         .IO(message) -> assert_eq(message, "{io}")
-        .PathLaw(_) | .Mutated(_) | .Invalid(_) -> panic("a wrapped IOError must lift to IngestError.IO")
+        .PathLaw(_) | .Mutated(_) | .Invalid(_) -> {
+            panic("a wrapped IOError must lift to IngestError.IO")
+        }
     }
-    loop error in ([StoreError]{
+    loop error in
+        ([StoreError]{
         StoreError.NotFound("missing object"),
         StoreError.AlreadyExists("existing object"),
         StoreError.PermissionDenied("protected object"),
@@ -151,7 +158,9 @@ store_test_assert_nothing_published: fn(verification: &StoreVerification, roots:
         uplift: store_ingest_store_error(error)
         if uplift == {
             .IO(message) -> assert_eq(message, error.message())
-            .PathLaw(_) | .Mutated(_) | .Invalid(_) -> panic("each StoreError kind must lift to IngestError.IO")
+            .PathLaw(_) | .Mutated(_) | .Invalid(_) -> {
+                panic("each StoreError kind must lift to IngestError.IO")
+            }
         }
         assert_eq(uplift.code(), "E1315")
         assert_eq(uplift.why(), error.message())
@@ -179,7 +188,7 @@ store_test_assert_nothing_published: fn(verification: &StoreVerification, roots:
         }
     }
     if store_ingest_tree_observed(verification, roots, request, Val(hook)) == {
-        .Ok(_) -> panic("source mutation must not return a success receipt")
+        .Ok(_) -> { panic("source mutation must not return a success receipt") }
         .Err(error) -> {
             assert(error == .Mutated(_))
             assert_eq(error.code(), "E1315")
@@ -203,12 +212,12 @@ store_test_assert_nothing_published: fn(verification: &StoreVerification, roots:
 #Test("store ingest retry after object publish seals before metadata") {
     verification := StoreVerification.new()
     roots: store_test_temp_roots()
-    first: store_test_ingest_fixture(verification, roots, "retry-crash", [String: String]{"out": "retry"}, [String]{})
+    first: store_test_ingest_fixture(verification, roots, "retry-crash", [String:String]{"out": "retry"}, [String]{})
     object: first.entry.out
     store_make_tree_writable_for_removal(object) ?? panic("chmod")
     files.remove_all(files.join(roots.hangar_dir(), first.entry.id)) ?? panic("remove record dir")
     files.remove_all(files.join(roots.hangar_dir(), "closure-db")) ?? panic("remove closure db")
-    retry: store_test_ingest_fixture(verification, roots, "retry-crash", [String: String]{"out": "retry"}, [String]{})
+    retry: store_test_ingest_fixture(verification, roots, "retry-crash", [String:String]{"out": "retry"}, [String]{})
     assert(retry.deduplicated)
     assert_eq(((files.stat(object) ?? panic("stat")).mode).bit_and(146), 0)
     assert_eq(((files.stat(files.join(object, "payload")) ?? panic("stat")).mode).bit_and(146), 0)
@@ -224,7 +233,7 @@ store_test_assert_nothing_published: fn(verification: &StoreVerification, roots:
     files.create_dir_all(source) ?? panic("fixture dir")
     files.write(files.join(source, "CON"), "nope") ?? panic("fixture reserved")
     if store_ingest_tree(verification, roots, store_test_ingest_request("bad", "path:bad", source, [String]{}, "")) == {
-        .Ok(_) -> panic("a reserved name must be refused")
+        .Ok(_) -> { panic("a reserved name must be refused") }
         .Err(error) -> {
             assert_eq(error.code(), "E1299")
             assert(error.what().contains("store path") || error.why().contains("reserved") || error.why().contains("CON") || error.message().contains("reserved"))
@@ -245,7 +254,7 @@ store_test_assert_nothing_published: fn(verification: &StoreVerification, roots:
         request := store_test_ingest_request("bad-output-name", "path:bad-output-name", source, [String]{}, "")
         request.outputs[alias] = source
         if store_ingest_tree(verification, roots, request) == {
-            .Ok(_) -> panic("output alias `{alias}` must be refused")
+            .Ok(_) -> { panic("output alias `{alias}` must be refused") }
             .Err(error) -> {
                 assert_eq(error.code(), "E1315")
                 assert(error.what().contains("one path component"))
@@ -262,7 +271,7 @@ store_test_assert_nothing_published: fn(verification: &StoreVerification, roots:
     source_roots: store_test_temp_roots()
     source_project: files.join(source_roots.root, "project")
     files.create_dir_all(source_project) ?? panic("project dir")
-    source := store_test_ingest_fixture(verification, source_roots, "locked-nix", [String: String]{"out": "portable"}, [String]{}).entry
+    source := store_test_ingest_fixture(verification, source_roots, "locked-nix", [String:String]{"out": "portable"}, [String]{}).entry
     assert(store_remove_closure_record(verification, source_roots, source.id) ?? panic("remove record"))
     revision: store_test_repeat("a", 40)
     signed_manifest: store_test_repeat("b", 64)
@@ -275,7 +284,7 @@ store_test_assert_nothing_published: fn(verification: &StoreVerification, roots:
     producer.provider = "nix"
     producer.immutable_source = "nix-source-locked-nix"
     producer.source_digest = source.envelope.output_hash
-    extra: [String: String]{
+    extra: [String:String]{
         "nix.index.channel": "nixpkgs-unstable",
         "nix.index.revision": revision,
         "nix.index.system": system,

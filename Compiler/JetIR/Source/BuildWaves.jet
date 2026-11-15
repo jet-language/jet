@@ -8,7 +8,6 @@
 // content and numbers every row by first use in a walk from the jobs taken in
 // key order, so the module is the same whichever thread built a job and in
 // whatever order the jobs were built.
-
 use jet_foundation.[CompilerThreads, FnBody, TConstantDef, TImplDef, TTypeDef, Type, compiler_take_rows, compiler_threads_failure_text, symbol_table]
 
 // Building one checked function's body costs about this on one thread, so the
@@ -82,7 +81,9 @@ IRBuildBell: struct {
     seats: [IRBuildSeat]
 }
 
-IRBuildSeat: struct { job: Atomic<Int> }
+IRBuildSeat: struct {
+    job: Atomic<Int>
+}
 
 // How parts ended: the jobs they built, and the first failed part's panic
 // text (empty when none failed) with the queue index of the job it was
@@ -262,14 +263,12 @@ ir_build_queue_add: fn(queue: Shared<IRBuildQueue>, found: &&[IRWaveJob]) {
         held.value.jobs.push(job)
         ir_build_note(held.value, index)
         if lambda -> held.value.own[part].push(index) else -> held.value.claimable.push(index)
-        held.value.waiting = held.value.waiting + 1
+        held.value.waiting += 1
     }
 }
 
 // Whether `job` builds a plain function, found by its checked row.
-ir_waves_plain: fn(job: IRWaveJob) -> Bool {
-    job.lambda < 0 && job.args.len() == 0
-}
+ir_waves_plain: fn(job: IRWaveJob) -> Bool { job.lambda < 0 && job.args.len() == 0 }
 
 // Whether a job of `job`'s function is queued.
 ir_build_known: fn(q: IRBuildQueue, job: IRWaveJob) -> Bool Never! {
@@ -282,9 +281,7 @@ ir_build_note: fn(q: &IRBuildQueue, index: Int) Never! {
     if ir_waves_plain(q.jobs[index]) {
         row: q.jobs[index].row
         q.row_jobs[row] = index
-    } else {
-        q.keyed_jobs[q.jobs[index].key.copy()] = index
-    }
+    } else { q.keyed_jobs[q.jobs[index].key.copy()] = index }
 }
 
 // Part `part`'s next job, its own lambda jobs first; `busy` is whether the
@@ -298,14 +295,14 @@ ir_build_claim: fn(queue: Shared<IRBuildQueue>, part: Int, busy: Bool) -> IRBuil
         held.value.own_claimed[part] = taken + 1
     } else if held.value.claimed < held.value.claimable.len() {
         index = held.value.claimable[held.value.claimed]
-        held.value.claimed = held.value.claimed + 1
+        held.value.claimed += 1
     }
     if index >= 0 {
-        held.value.waiting = held.value.waiting - 1
-        if !busy -> held.value.busy = held.value.busy + 1
+        held.value.waiting -= 1
+        if !busy -> held.value.busy += 1
         return IRBuildClaim{index: index, job: held.value.jobs[index].copy(), busy: true, idled: false, done: false}
     }
-    if busy -> held.value.busy = held.value.busy - 1
+    if busy -> held.value.busy -= 1
     IRBuildClaim{index: -1, job: IRWaveJob{key: "", row: -1, args: [Type]{}, lambda: -1, part: -1, local: -1}, busy: false, idled: busy, done: held.value.waiting == 0 && held.value.busy == 0}
 }
 
@@ -367,7 +364,9 @@ ir_build_part: fn(inputs: Shared<IRWaveInputs>, slot: Shared<IRWaveWorker>, queu
         if claim.idled -> _: rings.value.rings.add(1)
         if claim.done -> break
         if claim.index < 0 {
-            loop rings.value.rings.load() == seen {}
+            loop rings.value.rings.load() == seen {
+
+            }
             next
         }
         rings.value.seats[part].job.store(claim.index)
@@ -404,7 +403,9 @@ ir_wave_job: fn(m: &IRModule, p: IRProgram, job: IRWaveJob, part: Int) -> IRWave
     local := job.local
     if job.lambda < 0 {
         local = ir_function_id(m, p, p.functions[job.row].key, job.args) ?? panic("an IR build job names no checked function")
-        if m.functions[local].key != job.key -> panic("IR build job {job.key} rebuilt as {m.functions[local].key}")
+        if m.functions[local].key != job.key {
+            panic("IR build job {job.key} rebuilt as {m.functions[local].key}")
+        }
     }
     before: m.queue.len()
     failures := [IRBuildFailure]{}

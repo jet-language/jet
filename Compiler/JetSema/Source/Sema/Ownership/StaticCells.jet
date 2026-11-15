@@ -42,7 +42,9 @@ sema_ownership_place_refuses_write: fn(state: SemaOwnershipState, place: SemaOwn
 
 sema_ownership_push_once: fn(diagnostic: Diagnostic, diagnostics: &[Diagnostic]) {
     loop previous in diagnostics {
-        if previous.code == diagnostic.code && previous.span == diagnostic.span && previous.what == diagnostic.what -> return
+        if previous.code == diagnostic.code && previous.span == diagnostic.span && previous.what == diagnostic.what {
+            return
+        }
     }
     diagnostics.push(diagnostic.copy())
 }

@@ -140,7 +140,9 @@ channel_select_remove: fn(channel: I64, node: I64) {
     sync_mutex_lock(channel)
     woken: (sync_load(wrapping(node + I64{16})).bit_and(I64{2})) != I64{0}
     channel_wait_remove(channel, node, false)
-    if (woken && sync_load(wrapping(channel + I64{16})) != I64{0}) { channel_wake_one(channel, false) }
+    if (woken && sync_load(wrapping(channel + I64{16})) != I64{0}) {
+        channel_wake_one(channel, false)
+    }
     channel_update(channel)
     sync_mutex_unlock(channel)
 }
@@ -182,7 +184,9 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
     reason := I64{0}
     received := false
     loop {
-        if (scheduler_wait_point_cancel_check() != I64{0} || scheduler_root_cancel_observed()) { break }
+        if (scheduler_wait_point_cancel_check() != I64{0} || scheduler_root_cancel_observed()) {
+            break
+        }
         sync_mutex_lock(channel)
         if channel_pop_locked(channel, out) {
             received = true
@@ -220,7 +224,9 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
     bound := I64{-1}
     if ((bounded.bit_and(I64{255})) != I64{0}) {
         bound = jet_int_owned_to_i64(capacity)
-        if (jet_scheduler_native_propagate() != I64{0}) -> return
+        if (jet_scheduler_native_propagate() != I64{0}) {
+            return
+        }
         // Public bound validation is owned by the current Core channel body;
         // the scheduler reference itself defaults capacity.max(1).
         if (bound < I64{1}) { bound = I64{1} }
@@ -241,7 +247,9 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
     reason := I64{0}
     accepted := I64{0}
     loop {
-        if (scheduler_wait_point_cancel_check() != I64{0} || scheduler_root_cancel_observed()) { break }
+        if (scheduler_wait_point_cancel_check() != I64{0} || scheduler_root_cancel_observed()) {
+            break
+        }
         sync_mutex_lock(channel)
         if (sync_load(wrapping(channel + I64{88})) != I64{0} || sync_load(wrapping(channel + I64{128})) == I64{0}) {
             channel_update(channel)
@@ -352,13 +360,21 @@ channel_word: fn(channel: I64, offset: I64) -> I64 {
     value
 }
 
-#Export(c) jet_rt_native_receiver_is_timer: fn(channel: I64) -> I64 { if (channel_word(channel, I64{104}) == I64{1}) -> I64{1} else -> I64{0} }
+#Export(c) jet_rt_native_receiver_is_timer: fn(channel: I64) -> I64 {
+    if (channel_word(channel, I64{104}) == I64{1}) -> I64{1} else -> I64{0}
+}
 
-#Export(c) jet_rt_native_receiver_is_interval: fn(channel: I64) -> I64 { if (channel_word(channel, I64{104}) == I64{2}) -> I64{1} else -> I64{0} }
+#Export(c) jet_rt_native_receiver_is_interval: fn(channel: I64) -> I64 {
+    if (channel_word(channel, I64{104}) == I64{2}) -> I64{1} else -> I64{0}
+}
 
-#Export(c) jet_rt_native_receiver_is_cancelled: fn(channel: I64) -> I64 { if (channel_word(channel, I64{96}) != I64{0}) -> I64{1} else -> I64{0} }
+#Export(c) jet_rt_native_receiver_is_cancelled: fn(channel: I64) -> I64 {
+    if (channel_word(channel, I64{96}) != I64{0}) -> I64{1} else -> I64{0}
+}
 
-#Export(c) jet_rt_native_receiver_delay_ms: fn(channel: I64) -> I64 { jet_int_owned_from_i64(channel_word(channel, I64{112})) }
+#Export(c) jet_rt_native_receiver_delay_ms: fn(channel: I64) -> I64 {
+    jet_int_owned_from_i64(channel_word(channel, I64{112}))
+}
 
 #Export(c) jet_rt_native_receiver_try_receive: fn(channel: I64, meta: I64) -> I64 {
     sync_mutex_lock(channel)
@@ -396,7 +412,9 @@ channel_reserve_send: fn(channel: I64, meta: I64) -> I64 {
     reason := I64{0}
     reservation := I64{0}
     loop {
-        if (scheduler_wait_point_cancel_check() != I64{0} || scheduler_root_cancel_observed()) { break }
+        if (scheduler_wait_point_cancel_check() != I64{0} || scheduler_root_cancel_observed()) {
+            break
+        }
         sync_mutex_lock(channel)
         if (sync_load(wrapping(channel + I64{88})) != I64{0} || sync_load(wrapping(channel + I64{128})) == I64{0}) {
             channel_update(channel)
@@ -599,7 +617,9 @@ channel_select_drop_inputs: fn(receivers: I64, count: I64, capacity: I64, conver
         }
         reason: channel_text(I64{2})
         loop {
-            if (scheduler_wait_point_cancel_check() != I64{0} || scheduler_root_cancel_observed()) { break }
+            if (scheduler_wait_point_cancel_check() != I64{0} || scheduler_root_cancel_observed()) {
+                break
+            }
             at = I64{0}
             loop at < count {
                 channel: sync_load(wrapping(receivers + at * I64{8}))

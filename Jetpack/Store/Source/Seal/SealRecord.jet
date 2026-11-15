@@ -6,9 +6,13 @@
 // small; rebuilding the table never opens a content file.
 
 STORE_SEALS_DIR: "seals"
+
 STORE_SEAL_MAGIC: "jet-hangar-seal-v1"
+
 STORE_SEAL_SCHEMA: "1"
+
 STORE_MAX_SEAL_BYTES: 512
+
 STORE_SEAL_PARTIAL_SUFFIX: ".partial"
 
 STORE_SEAL_SEQUENCE: Shared{ProcessSequence{next: 0}}
@@ -20,32 +24,34 @@ StoreVerification: struct {
     state: Shared<StoreVerificationState>
 
     new: fn() -[Env]> StoreVerification Never! {
-        StoreVerification{state: Shared{StoreVerificationState{
-            seal_memo_armed: false,
-            seal_memo: [String: String]{},
-            seal_census_enabled: sys.get(ENV_JETPACK_SEAL_CENSUS) != None,
-            seal_census: [String: Int]{},
-            verified_digests: [String: VerifiedDigestMemo]{},
-            verified_digest_hash_counts: [String: Int]{},
-            proven_members: [String: Bool]{},
-            planned_narinfos: [String: [String: FetchedInfo]]{},
-        }}}
+        StoreVerification{
+            state: Shared{StoreVerificationState{
+                seal_memo_armed: false,
+                seal_memo: [String:String]{},
+                seal_census_enabled: sys.get(ENV_JETPACK_SEAL_CENSUS) != None,
+                seal_census: [String:Int]{},
+                verified_digests: [String:VerifiedDigestMemo]{},
+                verified_digest_hash_counts: [String:Int]{},
+                proven_members: [String:Bool]{},
+                planned_narinfos: [String:[String:FetchedInfo]]{},
+            }},
+        }
     }
 }
 
 StoreVerificationState: struct {
     seal_memo_armed: Bool
-    seal_memo: [String: String]
+    seal_memo: [String:String]
     seal_census_enabled: Bool
-    seal_census: [String: Int]
-    verified_digests: [String: VerifiedDigestMemo]
-    verified_digest_hash_counts: [String: Int]
+    seal_census: [String:Int]
+    verified_digests: [String:VerifiedDigestMemo]
+    verified_digest_hash_counts: [String:Int]
     // Closure members proven against their seals, keyed by
     // `store_proven_member_key(hangar, digest)` (Rust `PROVEN_MEMBERS`).
-    proven_members: [String: Bool]
+    proven_members: [String:Bool]
     // The signed narinfos the last Nix download plan verified, keyed by
     // `store_nix_planned_key(roots, endpoint)` (Rust `PLANNED_NARINFOS`).
-    planned_narinfos: [String: [String: FetchedInfo]]
+    planned_narinfos: [String:[String:FetchedInfo]]
 }
 
 SealRootKind: enum {
@@ -81,7 +87,9 @@ SealRecord: struct {
 store_seal_census_note: fn(verification: &StoreVerification, path: String) Never! {
     state: verification.state
     permit := state.guard_edit()
-    if !permit.value.seal_census_enabled -> return
+    if !permit.value.seal_census_enabled {
+        return
+    }
     permit.value.seal_census[path] = (permit.value.seal_census.get(path) ?? 0) + 1
 }
 
@@ -107,7 +115,7 @@ store_seal_census_report: fn(verification: &StoreVerification) -> String? Never!
     Val(out)
 }
 
-store_sorted_keys_int: fn(map: [String: Int]) -> [String] Never! {
+store_sorted_keys_int: fn(map: [String:Int]) -> [String] Never! {
     keys := map.keys().to_list()
     keys.sort()
     keys
@@ -137,14 +145,18 @@ store_seal_memo_get: fn(verification: &StoreVerification, path: String) -> Strin
 store_seal_memo_put: fn(verification: &StoreVerification, path: String, digest: String) Never! {
     state: verification.state
     permit := state.guard_edit()
-    if !permit.value.seal_memo_armed -> return
+    if !permit.value.seal_memo_armed {
+        return
+    }
     permit.value.seal_memo[path] = digest
 }
 
 store_seal_memo_forget: fn(verification: &StoreVerification, path: String) Never! {
     state: verification.state
     permit := state.guard_edit()
-    if !permit.value.seal_memo_armed -> return
+    if !permit.value.seal_memo_armed {
+        return
+    }
     permit.value.seal_memo.remove(path).drop("an absent seal memo is already forgotten")
 }
 
@@ -212,10 +224,14 @@ store_remove_seal: fn(verification: &StoreVerification, path: String, hangar: St
     seal: files.join(files.join(hangar, STORE_SEALS_DIR), digest)
     if files.stat(seal) == {
         .Ok(metadata) -> {
-            if metadata.is_symlink || !metadata.is_file -> return Err(StoreError.InvalidData("Hangar seal is not a regular file: {seal}"))
+            if metadata.is_symlink || !metadata.is_file {
+                return Err(StoreError.InvalidData("Hangar seal is not a regular file: {seal}"))
+            }
             files.remove(seal)
         }
-        .Err(error) -> if !StoreError.IO(error).is_not_found() -> return Err(StoreError.IO(error))
+        .Err(error) -> {
+            if !StoreError.IO(error).is_not_found() -> return Err(StoreError.IO(error))
+        }
     }
 }
 
@@ -267,7 +283,9 @@ store_seal_read_record: fn(path: String) -> SealRecord? StoreError! {
             return Err(StoreError.IO(error))
         }
     }
-    if metadata.is_symlink || !metadata.is_file || metadata.size > STORE_MAX_SEAL_BYTES -> return Ok(None)
+    if metadata.is_symlink || !metadata.is_file || metadata.size > STORE_MAX_SEAL_BYTES {
+        return Ok(None)
+    }
     bytes: files.read_bytes(path)
     if bytes.len() > STORE_MAX_SEAL_BYTES -> return Ok(None)
     text: String.from_bytes(bytes) ?? ""
@@ -277,7 +295,9 @@ store_seal_read_record: fn(path: String) -> SealRecord? StoreError! {
 store_seal_parse_record: fn(text: String) -> SealRecord? Never! {
     lines: store_text_lines(text)
     if lines.len() != 5 || lines[0] != STORE_SEAL_MAGIC || lines[1] != "schema=1" -> return None
-    if !lines[2].starts_with("digest=") || !lines[3].starts_with("root-kind=") || !lines[4].starts_with("tuples=") -> return None
+    if !lines[2].starts_with("digest=") || !lines[3].starts_with("root-kind=") || !lines[4].starts_with("tuples=") {
+        return None
+    }
     digest: lines[2].removeprefix("digest=")
     if !store_seal_valid_digest(digest) -> return None
     root_kind: SealRootKind.parse(lines[3].removeprefix("root-kind=")) ?? return None

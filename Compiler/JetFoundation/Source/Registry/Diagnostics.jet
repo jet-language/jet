@@ -1,7 +1,11 @@
 use diagnostic_unicode: core.text
 
 // A retired row is never reported; it stays so `jet explain` reads old logs.
-DiagnosticRegistryStatus: enum { Active Reserved Retired }
+DiagnosticRegistryStatus: enum {
+    Active
+    Reserved
+    Retired
+}
 
 DiagnosticRegistryFix: enum {
     SourceEdit
@@ -50,9 +54,24 @@ DiagnosticRegistryRow: struct {
 // part of the toolchain that reports the row; a joined value such as
 // `parse/sema` names every part that does. Status is its own column.
 DIAGNOSTIC_STAGES: [String]{
-    "build", "comptime", "compile", "driver", "jet", "jetpack", "lex", "lex/sema", "load",
-    "parse", "parse/sema", "repl", "runtime", "sema", "sema/build", "sema/jetpack",
-    "sema/runtime", "tooling",
+    "build",
+    "comptime",
+    "compile",
+    "driver",
+    "jet",
+    "jetpack",
+    "lex",
+    "lex/sema",
+    "load",
+    "parse",
+    "parse/sema",
+    "repl",
+    "runtime",
+    "sema",
+    "sema/build",
+    "sema/jetpack",
+    "sema/runtime",
+    "tooling",
 }
 
 diagnostic_stage_is_registered: fn(stage: String) -> Bool Never! {
@@ -97,9 +116,7 @@ diagnostic_is_whitespace_at: fn(source: [U8], index: Int) -> Bool Never! {
     }
 }
 
-diagnostic_is_sentence_digit: fn(value: Int) -> Bool Never! {
-    value >= 48 && value <= 57
-}
+diagnostic_is_sentence_digit: fn(value: Int) -> Bool Never! { value >= 48 && value <= 57 }
 
 diagnostic_sentence_case_line: fn(value: String) -> String Never! {
     bytes := value.bytes()
@@ -136,7 +153,9 @@ diagnostic_sentence_case_line: fn(value: String) -> String Never! {
         if diagnostic_is_whitespace_at(bytes, index) || character == 44 || character == 59 || character == 58 || character == 40 || character == 41 || character == 91 || character == 93 || character == 33 {
             // A call chain (`relay → inc writes …`) opens with a function
             // name, which keeps its own case.
-            if character == 32 && diagnostic_byte_at(bytes, index + 1) == 226 && diagnostic_byte_at(bytes, index + 2) == 134 && diagnostic_byte_at(bytes, index + 3) == 146 -> preserve = true
+            if character == 32 && diagnostic_byte_at(bytes, index + 1) == 226 && diagnostic_byte_at(bytes, index + 2) == 134 && diagnostic_byte_at(bytes, index + 3) == 146 {
+                preserve = true
+            }
             finished = true
             index += width
             next
@@ -149,7 +168,9 @@ diagnostic_sentence_case_line: fn(value: String) -> String Never! {
         }
         token_len += 1
         if token_len != 2 || character != 110 -> is_fn = false
-        if diagnostic_is_sentence_digit(character) || character == 95 || character == 47 || character == 92 || character == 64 || character == 35 -> preserve = true
+        if diagnostic_is_sentence_digit(character) || character == 95 || character == 47 || character == 92 || character == 64 || character == 35 {
+            preserve = true
+        }
         index += width
     }
     if first >= 0 && !preserve && !(is_fn && token_len == 2) {
@@ -253,7 +274,9 @@ diagnostic_identity_push: fn(bytes: [U8], index: Int, found: &[DiagnosticIdentit
         if diagnostic_byte_at(bytes, cursor) != 58 -> return -1
         cursor += 1
         path_start: cursor
-        loop cursor < bytes.len() && !diagnostic_identity_ends(diagnostic_byte_at(bytes, cursor)) && !diagnostic_colons_at(bytes, cursor) -> cursor += 1
+        loop cursor < bytes.len() && !diagnostic_identity_ends(diagnostic_byte_at(bytes, cursor)) && !diagnostic_colons_at(bytes, cursor) {
+            cursor += 1
+        }
         stem_start := path_start
         stem_end := cursor
         loop at in path_start..<cursor {
@@ -308,7 +331,9 @@ diagnostic_identity_plain_use: fn(context: [U8], identities: [DiagnosticIdentity
             after: diagnostic_byte_at(context, index + word.len())
             member: after == 46 && diagnostic_is_word_byte(diagnostic_byte_at(context, index + word.len() + 1))
             literal: after == 123
-            if !diagnostic_is_word_byte(before) && before != 46 && before != 47 && before != 58 && !diagnostic_is_word_byte(after) && after != 45 && after != 58 && !member && !literal -> return true
+            if !diagnostic_is_word_byte(before) && before != 46 && before != 47 && before != 58 && !diagnostic_is_word_byte(after) && after != 45 && after != 58 && !member && !literal {
+                return true
+            }
         }
         index += 1
     }
@@ -414,7 +439,9 @@ diagnostic_registry_project_row: fn(diagnostic: &&Diagnostic, row: DiagnosticReg
 // (diagnostic_display_identities), with clashes judged over the whole message.
 diagnostic_from_registry: fn(code: String, span: Span?, what: String, why: String, fix: String) -> Diagnostic Never! {
     row: diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no generated Source registry row")
-    if row.status == DiagnosticRegistryStatus.Retired -> panic("diagnostic `{code}` is retired and is never reported")
+    if row.status == DiagnosticRegistryStatus.Retired {
+        panic("diagnostic `{code}` is retired and is never reported")
+    }
     clashes: diagnostic_identity_clashes("{what}\n{why}\n{fix}".bytes())
     diagnostic: Diagnostic{
         moment: row.moment,
@@ -434,9 +461,13 @@ diagnostic_from_registry: fn(code: String, span: Span?, what: String, why: Strin
 diagnostic_registry_with_edit: fn(diagnostic: &&Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
     row: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
-    if updated.no_fix_reason != None || row.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
+    if updated.no_fix_reason != None || row.no_fix_reason != None {
+        panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
+    }
     fix: row.structured_fix ?? panic("updated `{updated.code}` has no registry-owned edit channel")
-    if !diagnostic_registry_is_source_edit(fix) -> panic("updated `{updated.code}` has no Source edit registry channel")
+    if !diagnostic_registry_is_source_edit(fix) {
+        panic("updated `{updated.code}` has no Source edit registry channel")
+    }
     updated.edit = Val(edit)
     updated.applicability = diagnostic_registry_applicability(row, true)
     updated.safety = row.fix_safety
@@ -452,10 +483,7 @@ diagnostic_registry_is_source_edit: fn(fix: DiagnosticRegistryFix) -> Bool Never
 
 diagnostic_registry_is_generated_edit: fn(fix: DiagnosticRegistryFix) -> Bool Never! {
     if fix == {
-        .GeneratedMarkerGroup
-        | .GeneratedMissingArms
-        | .GeneratedScriptRun
-        | .GeneratedRedundantTailReturn -> true
+        .GeneratedMarkerGroup | .GeneratedMissingArms | .GeneratedScriptRun | .GeneratedRedundantTailReturn -> true
         .SourceEdit | .SuggestedSourceEdit | .CryptoMisuse | .Replace(_, _) | .Remove(_) -> false
     }
 }
@@ -470,10 +498,16 @@ diagnostic_registry_safety_auto_apply: fn(safety: DiagnosticFixSafety) -> Bool N
 diagnostic_registry_with_edit_grade: fn(diagnostic: &&Diagnostic, edit: TextEdit, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
     updated := diagnostic
     row: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
-    if updated.no_fix_reason != None || row.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
+    if updated.no_fix_reason != None || row.no_fix_reason != None {
+        panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
+    }
     fix: row.structured_fix ?? panic("updated `{updated.code}` has no registry-owned edit channel")
-    if !diagnostic_registry_is_source_edit(fix) -> panic("updated `{updated.code}` has no Source edit registry channel")
-    if applicability == DiagnosticFixApplicability.Safe && !diagnostic_registry_safety_auto_apply(safety) -> panic("safe updated edit `{updated.code}` must have an auto-applicable safety grade")
+    if !diagnostic_registry_is_source_edit(fix) {
+        panic("updated `{updated.code}` has no Source edit registry channel")
+    }
+    if applicability == DiagnosticFixApplicability.Safe && !diagnostic_registry_safety_auto_apply(safety) {
+        panic("safe updated edit `{updated.code}` must have an auto-applicable safety grade")
+    }
     updated.edit = Val(edit)
     updated.applicability = Val(applicability)
     updated.safety = Val(safety)
@@ -483,9 +517,13 @@ diagnostic_registry_with_edit_grade: fn(diagnostic: &&Diagnostic, edit: TextEdit
 diagnostic_registry_with_structured_edit: fn(diagnostic: &&Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
     row: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
-    if updated.no_fix_reason != None || row.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
+    if updated.no_fix_reason != None || row.no_fix_reason != None {
+        panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
+    }
     fix: row.structured_fix ?? panic("updated `{updated.code}` has no registry-owned generated edit channel")
-    if !diagnostic_registry_is_generated_edit(fix) -> panic("updated `{updated.code}` has no generated structured edit registry channel")
+    if !diagnostic_registry_is_generated_edit(fix) {
+        panic("updated `{updated.code}` has no generated structured edit registry channel")
+    }
     updated.edit = Val(edit)
     updated.applicability = diagnostic_registry_applicability(row, true)
     updated.safety = row.fix_safety
@@ -496,7 +534,9 @@ diagnostic_registry_with_source_derived_suggestion: fn(diagnostic: &&Diagnostic,
     updated := diagnostic
     if updated.edit != None -> panic("updated `{updated.code}` already carries an edit")
     row: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
-    if row.no_fix_reason == None -> panic("updated `{updated.code}` has no explanatory row reason to replace")
+    if row.no_fix_reason == None {
+        panic("updated `{updated.code}` has no explanatory row reason to replace")
+    }
     updated.no_fix_reason = None
     updated.applicability = Val(DiagnosticFixApplicability.Suggested)
     updated.safety = Val(DiagnosticFixSafety.NeedsReview)
@@ -511,7 +551,9 @@ diagnostic_registry_with_source_derived_suggestion: fn(diagnostic: &&Diagnostic,
 diagnostic_registry_with_migration_edit: fn(diagnostic: &&Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
     if updated.edit != None -> panic("updated `{updated.code}` already carries an edit")
-    if diagnostic_registry_row(updated.code) == None -> panic("updated `{updated.code}` has no generated Source registry row")
+    if diagnostic_registry_row(updated.code) == None {
+        panic("updated `{updated.code}` has no generated Source registry row")
+    }
     updated.no_fix_reason = None
     updated.applicability = Val(DiagnosticFixApplicability.Safe)
     updated.safety = Val(DiagnosticFixSafety.BehaviorPreserving)
@@ -521,8 +563,12 @@ diagnostic_registry_with_migration_edit: fn(diagnostic: &&Diagnostic, edit: Text
 
 diagnostic_registry_with_alternative_edit: fn(diagnostic: &&Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
-    if updated.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and no-fix reason")
-    if updated.edit == None || updated.applicability == None || updated.safety == None -> panic("updated `{updated.code}` needs a graded primary edit before an alternative")
+    if updated.no_fix_reason != None {
+        panic("updated `{updated.code}` cannot carry an edit and no-fix reason")
+    }
+    if updated.edit == None || updated.applicability == None || updated.safety == None {
+        panic("updated `{updated.code}` needs a graded primary edit before an alternative")
+    }
     if updated.structured == None {
         updated.structured = Val(DiagnosticStructured.SuggestedEdits{edits: [TextEdit]{edit}})
         return updated
@@ -538,4 +584,3 @@ diagnostic_registry_with_alternative_edit: fn(diagnostic: &&Diagnostic, edit: Te
         .CryptoMisuse(_, _, _, _) | .BuildError(_) | .RuntimeHostFault(_) -> panic("updated `{updated.code}` cannot carry source edit alternatives with another structured payload")
     }
 }
-

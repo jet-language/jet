@@ -9,17 +9,20 @@
 // address (in the node, or in its wrapper box); a runtime tree's sequence is
 // a pointer to a separately allocated header.
 compiler_dyn_row: fn(schema: I64, kind: I64) -> I64 { schema + I64{16} + kind * I64{64} }
+
 // The ZonedDateTime fact `index` (ir_dyn_datetime_facts order) after the rows.
 compiler_dyn_datetime_fact: fn(schema: I64, index: I64) -> I64 {
     dyn_word(wrapping(compiler_dyn_row(schema, dyn_word(wrapping(schema + I64{8}))) + index * I64{8}))
 }
+
 // Whether this program carries Core's ZonedDateTime layout; a program that
 // never loads core.time has facts of -1 and stops here instead of bridging.
 compiler_dyn_datetime_bridged: fn(schema: I64) -> Bool {
-    if (compiler_dyn_datetime_fact(schema, I64{0}) >= I64{0}) -> return true
+    if (compiler_dyn_datetime_fact(schema, I64{0}) >= I64{0}) { return true }
     compiler_dyn_stop(rt_static_text("Dyn.DateTime needs core.time, which this program does not load"))
     false
 }
+
 // The runtime DateTime glue [secs, nanos, leap, offset] of the native
 // ZonedDateTime at `address`: its instant and the zone's UTC offset at that
 // instant, looked up exactly as Core/Time/Time.jet civil_zone_info does.
@@ -27,9 +30,9 @@ compiler_dyn_datetime_from_native: fn(schema: I64, address: I64) -> I64 {
     if !compiler_dyn_datetime_bridged(schema) -> return I64{0}
     secs_word: dyn_word(wrapping(address + compiler_dyn_datetime_fact(schema, I64{0})))
     secs: jet_int_owned_to_i64(secs_word)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     nanos: jet_int_owned_to_i64(dyn_word(wrapping(address + compiler_dyn_datetime_fact(schema, I64{1}))))
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     leap: if (rt_text_byte(wrapping(address + compiler_dyn_datetime_fact(schema, I64{2}))) != I64{0}) -> I64{1} else -> I64{0}
     transitions: wrapping(address + compiler_dyn_datetime_fact(schema, I64{4}))
     transition_data: dyn_word(wrapping(transitions + DATA_SEQUENCE_DATA))
@@ -44,7 +47,7 @@ compiler_dyn_datetime_from_native: fn(schema: I64, address: I64) -> I64 {
     index := I64{0}
     if (lo > I64{0}) {
         index = jet_int_owned_to_i64(dyn_word(wrapping(wrapping(transition_data + (lo - I64{1}) * transition_stride) + compiler_dyn_datetime_fact(schema, I64{7}))))
-        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+        if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     }
     infos: wrapping(address + compiler_dyn_datetime_fact(schema, I64{8}))
     if (index < I64{0} || index >= dyn_word(wrapping(infos + DATA_SEQUENCE_LENGTH))) {
@@ -53,7 +56,7 @@ compiler_dyn_datetime_from_native: fn(schema: I64, address: I64) -> I64 {
     }
     info: wrapping(dyn_word(wrapping(infos + DATA_SEQUENCE_DATA)) + index * compiler_dyn_datetime_fact(schema, I64{9}))
     offset: jet_int_owned_to_i64(dyn_word(wrapping(info + compiler_dyn_datetime_fact(schema, I64{10}))))
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     glue: jet_rt_alloc(DYN_DATETIME_BYTES, I64{8})
     dyn_store(wrapping(glue + DYN_DATETIME_SECS), secs)
     dyn_store(wrapping(glue + DYN_DATETIME_NANOS), nanos)
@@ -61,6 +64,7 @@ compiler_dyn_datetime_from_native: fn(schema: I64, address: I64) -> I64 {
     dyn_store(wrapping(glue + DYN_DATETIME_OFFSET), offset)
     glue
 }
+
 // Fills the zeroed native ZonedDateTime at `address` from the runtime glue:
 // its instant in the fixed-offset zone Core/Time/Time.jet civil_fixed_zone
 // builds ("UTC" for a zero offset, else "±HH:MM", one info, no transitions).
@@ -94,6 +98,7 @@ compiler_dyn_datetime_to_native: fn(schema: I64, glue: I64, address: I64) {
     coll_copy(infos, wrapping(address + compiler_dyn_datetime_fact(schema, I64{8})), DATA_SEQUENCE_BYTES)
     jet_rt_free(infos, DATA_SEQUENCE_BYTES, I64{8})
 }
+
 // Private cleanup of a native ZonedDateTime this bridge built.
 compiler_dyn_datetime_native_drop: fn(schema: I64, address: I64) {
     jet_rt_int_drop(dyn_word(wrapping(address + compiler_dyn_datetime_fact(schema, I64{0}))))
@@ -109,7 +114,9 @@ compiler_dyn_datetime_native_drop: fn(schema: I64, address: I64) {
         jet_rt_int_drop(dyn_word(wrapping(slot + compiler_dyn_datetime_fact(schema, I64{7}))))
         at += I64{1}
     }
-    if (transition_capacity != I64{0}) -> jet_rt_free(dyn_word(wrapping(transitions + DATA_SEQUENCE_DATA)), transition_capacity * transition_stride, I64{8})
+    if (transition_capacity != I64{0}) {
+        jet_rt_free(dyn_word(wrapping(transitions + DATA_SEQUENCE_DATA)), transition_capacity * transition_stride, I64{8})
+    }
     infos: wrapping(address + compiler_dyn_datetime_fact(schema, I64{8}))
     info_capacity: dyn_word(wrapping(infos + DATA_SEQUENCE_CAPACITY))
     info_stride: compiler_dyn_datetime_fact(schema, I64{9})
@@ -118,27 +125,35 @@ compiler_dyn_datetime_native_drop: fn(schema: I64, address: I64) {
         jet_rt_int_drop(dyn_word(wrapping(wrapping(dyn_word(wrapping(infos + DATA_SEQUENCE_DATA)) + at * info_stride) + compiler_dyn_datetime_fact(schema, I64{10}))))
         at += I64{1}
     }
-    if (info_capacity != I64{0}) -> jet_rt_free(dyn_word(wrapping(infos + DATA_SEQUENCE_DATA)), info_capacity * info_stride, I64{8})
+    if (info_capacity != I64{0}) {
+        jet_rt_free(dyn_word(wrapping(infos + DATA_SEQUENCE_DATA)), info_capacity * info_stride, I64{8})
+    }
 }
+
 compiler_dyn_native_payload: fn(row: I64, native: I64) -> I64 {
     address: wrapping(native + dyn_word(wrapping(row + I64{8})))
-    if (dyn_word(wrapping(row + I64{16})) != I64{0}) -> return dyn_word(address)
+    if (dyn_word(wrapping(row + I64{16})) != I64{0}) { return dyn_word(address) }
     address
 }
+
 // The registered E3001 stop for a native value its checked schema cannot
 // carry; a task body propagates it to the caller.
-compiler_dyn_stop: fn(message: I64) { jet_rt_panic_message(rt_text_data(message), rt_text_len(message)) }
+compiler_dyn_stop: fn(message: I64) {
+    jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
+}
+
 // The semantic row of `native`'s tag; -1 after a stop for an absent tag.
 compiler_dyn_semantic_kind: fn(schema: I64, native: I64) -> I64 {
     native_tag: dyn_word(native)
     kind := I64{0}
     loop kind < dyn_word(wrapping(schema + I64{8})) {
-        if (dyn_word(compiler_dyn_row(schema, kind)) == native_tag) -> return kind
+        if (dyn_word(compiler_dyn_row(schema, kind)) == native_tag) { return kind }
         kind += I64{1}
     }
     compiler_dyn_stop(rt_static_text("native Dyn tag is absent from its checked schema"))
     I64{-1}
 }
+
 compiler_dyn_sequence_from_native: fn(schema: I64, row: I64, native: I64, kind: I64) -> I64 {
     length: dyn_word(wrapping(native + DATA_SEQUENCE_LENGTH))
     source: dyn_word(wrapping(native + DATA_SEQUENCE_DATA))
@@ -150,16 +165,12 @@ compiler_dyn_sequence_from_native: fn(schema: I64, row: I64, native: I64, kind: 
     loop at < length {
         slot: wrapping(source + at * source_stride)
         target: wrapping(data + at * stride)
-        if (kind == DYN_BYTE_LIST) {
-            host_u8_put(data, at, rt_text_byte(slot))
-        } else if (kind == DYN_OBJECT) {
+        if (kind == DYN_BYTE_LIST) { host_u8_put(data, at, rt_text_byte(slot)) } else if (kind == DYN_OBJECT) {
             key: dyn_word(wrapping(slot + dyn_word(wrapping(row + I64{40}))))
             child: dyn_word(wrapping(slot + dyn_word(wrapping(row + I64{48}))))
             dyn_store(wrapping(target + DYN_ENTRY_KEY), jet_rt_string_clone(key))
             dyn_store(wrapping(target + DYN_ENTRY_VALUE), jet_rt_dyn_from_native(schema, child))
-        } else {
-            dyn_store(target, jet_rt_dyn_from_native(schema, dyn_word(slot)))
-        }
+        } else { dyn_store(target, jet_rt_dyn_from_native(schema, dyn_word(slot))) }
         at += I64{1}
         dyn_store(wrapping(result + DATA_SEQUENCE_LENGTH), at)
         if (kind != DYN_BYTE_LIST && jet_scheduler_native_propagate() != I64{0}) {
@@ -170,28 +181,32 @@ compiler_dyn_sequence_from_native: fn(schema: I64, row: I64, native: I64, kind: 
     dyn_store(wrapping(result + DATA_SEQUENCE_LENGTH), length)
     result
 }
+
 #Export(c) jet_rt_dyn_from_native: fn(schema: I64, native: I64) -> I64 {
     kind: compiler_dyn_semantic_kind(schema, native)
-    if (kind < I64{0}) -> return I64{0}
-    if (kind == DYN_NULL) -> return dyn_new(kind, I64{0})
+    if (kind < I64{0}) { return I64{0} }
+    if (kind == DYN_NULL) { return dyn_new(kind, I64{0}) }
     row: compiler_dyn_row(schema, kind)
     address: compiler_dyn_native_payload(row, native)
     if (kind == DYN_DATETIME) {
         glue: compiler_dyn_datetime_from_native(schema, address)
-        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+        if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
         return dyn_new(kind, glue)
     }
-    if (kind == DYN_BOOL) -> return dyn_new(kind, if (rt_text_byte(address) != I64{0}) -> I64{1} else -> I64{0})
+    if (kind == DYN_BOOL) {
+        return dyn_new(kind, if (rt_text_byte(address) != I64{0}) -> I64{1} else -> I64{0})
+    }
     if (kind == DYN_BYTE_LIST || kind >= DYN_ARRAY) {
         sequence: compiler_dyn_sequence_from_native(schema, row, address, kind)
-        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+        if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
         return dyn_new(kind, sequence)
     }
     payload: dyn_word(address)
-    if (kind == DYN_INT) -> return dyn_new(kind, jet_rt_int_clone(payload))
-    if (kind == DYN_FLOAT) -> return dyn_new(kind, payload)
+    if (kind == DYN_INT) { return dyn_new(kind, jet_rt_int_clone(payload)) }
+    if (kind == DYN_FLOAT) { return dyn_new(kind, payload) }
     dyn_new(kind, jet_rt_string_clone(payload))
 }
+
 compiler_dyn_sequence_to_native: fn(schema: I64, row: I64, sequence: I64, kind: I64) -> I64 {
     length: dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
     source: dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA))
@@ -203,16 +218,12 @@ compiler_dyn_sequence_to_native: fn(schema: I64, row: I64, sequence: I64, kind: 
     loop at < length {
         slot: wrapping(source + at * source_stride)
         target: wrapping(data + at * stride)
-        if (kind == DYN_BYTE_LIST) {
-            rt_text_put(target, host_u8_get(source, at))
-        } else if (kind == DYN_OBJECT) {
+        if (kind == DYN_BYTE_LIST) { rt_text_put(target, host_u8_get(source, at)) } else if (kind == DYN_OBJECT) {
             key: dyn_word(wrapping(slot + DYN_ENTRY_KEY))
             child: dyn_word(wrapping(slot + DYN_ENTRY_VALUE))
             dyn_store(wrapping(target + dyn_word(wrapping(row + I64{40}))), jet_rt_string_clone(key))
             dyn_store(wrapping(target + dyn_word(wrapping(row + I64{48}))), jet_rt_dyn_to_native(schema, child))
-        } else {
-            dyn_store(target, jet_rt_dyn_to_native(schema, dyn_word(slot)))
-        }
+        } else { dyn_store(target, jet_rt_dyn_to_native(schema, dyn_word(slot))) }
         at += I64{1}
         dyn_store(wrapping(result + DATA_SEQUENCE_LENGTH), at)
         if (kind != DYN_BYTE_LIST && jet_scheduler_native_propagate() != I64{0}) {
@@ -223,6 +234,7 @@ compiler_dyn_sequence_to_native: fn(schema: I64, row: I64, sequence: I64, kind: 
     dyn_store(wrapping(result + DATA_SEQUENCE_LENGTH), length)
     result
 }
+
 #Export(c) jet_rt_dyn_to_native: fn(schema: I64, tree: I64) -> I64 {
     kind: dyn_word(wrapping(tree + DYN_TAG))
     row: compiler_dyn_row(schema, kind)
@@ -230,7 +242,7 @@ compiler_dyn_sequence_to_native: fn(schema: I64, row: I64, sequence: I64, kind: 
     native: jet_rt_alloc(bytes, I64{8})
     coll_zero(native, bytes)
     dyn_store(native, dyn_word(row))
-    if (kind == DYN_NULL) -> return native
+    if (kind == DYN_NULL) { return native }
     address := native + dyn_word(wrapping(row + I64{8}))
     if (dyn_word(wrapping(row + I64{16})) != I64{0}) {
         wrapper_bytes: dyn_word(wrapping(row + I64{24}))
@@ -240,17 +252,15 @@ compiler_dyn_sequence_to_native: fn(schema: I64, row: I64, sequence: I64, kind: 
         address = wrapper
     }
     payload: dyn_word(wrapping(tree + DYN_PAYLOAD))
-    if (kind == DYN_BOOL) {
-        rt_text_put(address, payload)
-    } else if (kind == DYN_INT) {
+    if (kind == DYN_BOOL) { rt_text_put(address, payload) } else if (kind == DYN_INT) {
         dyn_store(address, jet_rt_int_clone(payload))
-    } else if (kind == DYN_FLOAT) {
-        dyn_store(address, payload)
-    } else if (kind == DYN_NUMBER || kind == DYN_TEXT) {
+    } else if (kind == DYN_FLOAT) { dyn_store(address, payload) } else if (kind == DYN_NUMBER || kind == DYN_TEXT) {
         dyn_store(address, jet_rt_string_clone(payload))
     } else if (kind == DYN_DATETIME) {
         if !compiler_dyn_datetime_bridged(schema) {
-            if (dyn_word(wrapping(row + I64{16})) != I64{0}) -> jet_rt_free(address, dyn_word(wrapping(row + I64{24})), I64{8})
+            if (dyn_word(wrapping(row + I64{16})) != I64{0}) {
+                jet_rt_free(address, dyn_word(wrapping(row + I64{24})), I64{8})
+            }
             jet_rt_free(native, bytes, I64{8})
             return I64{0}
         }
@@ -258,7 +268,9 @@ compiler_dyn_sequence_to_native: fn(schema: I64, row: I64, sequence: I64, kind: 
     } else {
         converted: compiler_dyn_sequence_to_native(schema, row, payload, kind)
         if (jet_scheduler_native_propagate() != I64{0}) {
-            if (dyn_word(wrapping(row + I64{16})) != I64{0}) -> jet_rt_free(address, dyn_word(wrapping(row + I64{24})), I64{8})
+            if (dyn_word(wrapping(row + I64{16})) != I64{0}) {
+                jet_rt_free(address, dyn_word(wrapping(row + I64{24})), I64{8})
+            }
             jet_rt_free(native, bytes, I64{8})
             return I64{0}
         }
@@ -283,30 +295,29 @@ compiler_dyn_native_sequence_drop: fn(schema: I64, row: I64, sequence: I64, kind
         if (kind == DYN_OBJECT) {
             jet_rt_string_drop(dyn_word(wrapping(slot + dyn_word(wrapping(row + I64{40})))))
             compiler_dyn_native_drop(schema, dyn_word(wrapping(slot + dyn_word(wrapping(row + I64{48})))))
-        } else {
-            compiler_dyn_native_drop(schema, dyn_word(slot))
-        }
+        } else { compiler_dyn_native_drop(schema, dyn_word(slot)) }
         at += I64{1}
     }
-    if (capacity != I64{0}) -> jet_rt_free(data, capacity * stride, I64{8})
+    if (capacity != I64{0}) { jet_rt_free(data, capacity * stride, I64{8}) }
     if shell -> jet_rt_free(sequence, DATA_SEQUENCE_BYTES, I64{8})
 }
+
 compiler_dyn_native_drop: fn(schema: I64, native: I64) {
-    if (native == I64{0}) -> return
+    if (native == I64{0}) {
+        return
+    }
     kind: compiler_dyn_semantic_kind(schema, native)
     row: compiler_dyn_row(schema, kind)
     if (kind > DYN_NULL) {
         address: compiler_dyn_native_payload(row, native)
-        if (kind == DYN_INT) {
-            jet_rt_int_drop(dyn_word(address))
-        } else if (kind == DYN_NUMBER || kind == DYN_TEXT) {
+        if (kind == DYN_INT) { jet_rt_int_drop(dyn_word(address)) } else if (kind == DYN_NUMBER || kind == DYN_TEXT) {
             jet_rt_string_drop(dyn_word(address))
-        } else if (kind == DYN_DATETIME) {
-            compiler_dyn_datetime_native_drop(schema, address)
-        } else if (kind == DYN_BYTE_LIST || kind >= DYN_ARRAY) {
+        } else if (kind == DYN_DATETIME) { compiler_dyn_datetime_native_drop(schema, address) } else if (kind == DYN_BYTE_LIST || kind >= DYN_ARRAY) {
             compiler_dyn_native_sequence_drop(schema, row, address, kind, false)
         }
-        if (dyn_word(wrapping(row + I64{16})) != I64{0}) -> jet_rt_free(address, dyn_word(wrapping(row + I64{24})), I64{8})
+        if (dyn_word(wrapping(row + I64{16})) != I64{0}) {
+            jet_rt_free(address, dyn_word(wrapping(row + I64{24})), I64{8})
+        }
     }
     jet_rt_free(native, dyn_word(schema), I64{8})
 }

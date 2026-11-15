@@ -2,9 +2,16 @@
 // cache identity, and structured hostile-tree failures.
 use {
     jet_pkg_model.[
-        InlineDep, InlineDepResolved, InlineDepUnresolved, ScriptCacheIdentity,
-        ScriptDependencyIdentity, pkg_inline_deps_best_match, pkg_inline_deps_cache_identity,
-        pkg_inline_deps_e1253, pkg_inline_deps_is_pinned, pkg_inline_deps_resolve,
+        InlineDep,
+        InlineDepResolved,
+        InlineDepUnresolved,
+        ScriptCacheIdentity,
+        ScriptDependencyIdentity,
+        pkg_inline_deps_best_match,
+        pkg_inline_deps_cache_identity,
+        pkg_inline_deps_e1253,
+        pkg_inline_deps_is_pinned,
+        pkg_inline_deps_resolve,
     ]
     jet_foundation.[Span]
     jetpack_foundation.[MAX_TREE_DEPTH]
@@ -17,7 +24,9 @@ pkg_inline_deps_test_dep: fn(name: String) -> InlineDep Never! {
 
 pkg_inline_deps_test_candidates: fn(pairs: [String]) -> [(version: String, dir: String)] Never! {
     out := [(version: String, dir: String)]{}
-    loop index in 0..<(pairs.len() /% 2) -> out.push((version: pairs[index * 2], dir: pairs[index * 2 + 1]))
+    loop index in 0..<(pairs.len() /% 2) {
+        out.push((version: pairs[index * 2], dir: pairs[index * 2 + 1]))
+    }
     out
 }
 
@@ -92,11 +101,17 @@ pkg_inline_deps_test_unresolved_from: fn(dep: InlineDep, script_dir: String, bat
     dependency: pkg_inline_deps_test_dep("hostile")
     error: pkg_inline_deps_test_unresolved(dependency, root.path)
     if error == {
-        .InvalidTree(tree_error) -> if tree_error == {
-            .Symlink(path) -> assert(path.ends_with("src/loop"))
-            .IO(_, _) | .Special(_) | .InvalidName(_) | .TooLarge(_, _) -> panic("expected a symlink tree failure")
+        .InvalidTree(tree_error) -> {
+            if tree_error == {
+                .Symlink(path) -> assert(path.ends_with("src/loop"))
+                .IO(_, _) | .Special(_) | .InvalidName(_) | .TooLarge(_, _) -> {
+                    panic("expected a symlink tree failure")
+                }
+            }
         }
-        .InvalidName | .InvalidSelector | .UnknownPackage | .NoMatch -> panic("expected an invalid tree failure")
+        .InvalidName | .InvalidSelector | .UnknownPackage | .NoMatch -> {
+            panic("expected an invalid tree failure")
+        }
     }
     diagnostic: pkg_inline_deps_e1253(dependency, error)
     assert_eq(diagnostic.code, "E1253")
@@ -114,11 +129,17 @@ pkg_inline_deps_test_unresolved_from: fn(dep: InlineDep, script_dir: String, bat
     files.write(files.join(current, "payload.jet"), "stable\n") ?? panic("payload")
     error: pkg_inline_deps_test_unresolved(pkg_inline_deps_test_dep("hostile"), root.path)
     if error == {
-        .InvalidTree(tree_error) -> if tree_error == {
-            .TooLarge(_, limit) -> assert_eq(limit, MAX_TREE_DEPTH)
-            .IO(_, _) | .Symlink(_) | .Special(_) | .InvalidName(_) -> panic("expected a tree bound failure")
+        .InvalidTree(tree_error) -> {
+            if tree_error == {
+                .TooLarge(_, limit) -> assert_eq(limit, MAX_TREE_DEPTH)
+                .IO(_, _) | .Symlink(_) | .Special(_) | .InvalidName(_) -> {
+                    panic("expected a tree bound failure")
+                }
+            }
         }
-        .InvalidName | .InvalidSelector | .UnknownPackage | .NoMatch -> panic("expected an invalid tree failure")
+        .InvalidName | .InvalidSelector | .UnknownPackage | .NoMatch -> {
+            panic("expected an invalid tree failure")
+        }
     }
 }
 
@@ -131,7 +152,9 @@ pkg_inline_deps_test_unresolved_from: fn(dep: InlineDep, script_dir: String, bat
     error: pkg_inline_deps_test_unresolved(dependency, missing.path)
     if error == {
         .UnknownPackage -> {}
-        .InvalidName | .InvalidSelector | .NoMatch | .InvalidTree(_) -> panic("an absent package must be unknown")
+        .InvalidName | .InvalidSelector | .NoMatch | .InvalidTree(_) -> {
+            panic("an absent package must be unknown")
+        }
     }
     assert_eq(pkg_inline_deps_e1253(dependency, error).code, "E1253")
     assert(!files.exists(files.join(missing.path, ".jet")), "a missing dependency must not materialize a cache or lock tree")
@@ -145,7 +168,9 @@ pkg_inline_deps_test_unresolved_from: fn(dep: InlineDep, script_dir: String, bat
     hostile_error: pkg_inline_deps_test_unresolved(hostile_dependency, hostile.path)
     if hostile_error == {
         .InvalidTree(_) -> {}
-        .InvalidName | .InvalidSelector | .UnknownPackage | .NoMatch -> panic("a hostile tree must be an invalid tree failure")
+        .InvalidName | .InvalidSelector | .UnknownPackage | .NoMatch -> {
+            panic("a hostile tree must be an invalid tree failure")
+        }
     }
     hostile_diagnostic: pkg_inline_deps_e1253(hostile_dependency, hostile_error)
     assert_eq(hostile_diagnostic.code, "E1253")
@@ -170,18 +195,24 @@ pkg_inline_deps_test_unresolved_from: fn(dep: InlineDep, script_dir: String, bat
     assert(resolved.content_hash.starts_with("sha256-"))
     if pkg_inline_deps_test_unresolved_from(exact, script.path, None) == {
         .UnknownPackage -> {}
-        .InvalidName | .InvalidSelector | .NoMatch | .InvalidTree(_) -> panic("without a batteries directory the battery is unknown")
+        .InvalidName | .InvalidSelector | .NoMatch | .InvalidTree(_) -> {
+            panic("without a batteries directory the battery is unknown")
+        }
     }
     wrong: InlineDep{name: "web", selector: "2", span: Span{start: 0, end: 0}}
     if pkg_inline_deps_test_unresolved_from(wrong, script.path, Val(batteries.path)) == {
         .NoMatch -> {}
-        .InvalidName | .InvalidSelector | .UnknownPackage | .InvalidTree(_) -> panic("a battery at another version must not resolve")
+        .InvalidName | .InvalidSelector | .UnknownPackage | .InvalidTree(_) -> {
+            panic("a battery at another version must not resolve")
+        }
     }
     local: files.join(script.path, ".jet/inline-deps/web/0.2.0")
     files.create_dir_all(local) ?? panic("local copy")
     files.write(files.join(local, "web.jet"), "greet: fn() -> String {{ \"local\" }}\n") ?? panic("local source")
     if pkg_inline_deps_test_unresolved_from(exact, script.path, Val(batteries.path)) == {
         .NoMatch -> {}
-        .InvalidName | .InvalidSelector | .UnknownPackage | .InvalidTree(_) -> panic("a local copy without the version keeps the battery out")
+        .InvalidName | .InvalidSelector | .UnknownPackage | .InvalidTree(_) -> {
+            panic("a local copy without the version keeps the battery out")
+        }
     }
 }

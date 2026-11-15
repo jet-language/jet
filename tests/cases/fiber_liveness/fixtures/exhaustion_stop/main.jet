@@ -15,23 +15,27 @@ package: {
     authority: { allow: [Env, Exec, Exec.Args, FS, FS.Read, IO, Mem.Alloc] }
 }
 
-use files: core.files
-use process: core.process
-use sys: core.sys
+use {
+    files: core.files
+    process: core.process
+    sys: core.sys
+}
 
 ROUNDS: 20
+
 TASKS: 64
+
 ROOM: 786432
 
-work: fn(i: Int) -> Int {
-    i % 5
-}
+work: fn(i: Int) -> Int { i % 5 }
 
 // A /proc status field's number ("VmSize:\t 123 kB").
 census: fn(prefix: String) -[FS]> Int {
     text: files.read("/proc/self/status") ?? panic("read status")
     loop line in text.lines() {
-        if line.starts_with(prefix) -> return Int.parse(line.remove_prefix(prefix).remove_suffix("kB").trim()) ?? -1
+        if line.starts_with(prefix) {
+            return Int.parse(line.remove_prefix(prefix).remove_suffix("kB").trim()) ?? -1
+        }
     }
     -1
 }
@@ -56,9 +60,7 @@ contended: fn() {
 
 grow: fn() -> Int {
     values := [Int]{}
-    loop {
-        values.push(values.len())
-    }
+    loop { values.push(values.len()) }
     values.len()
 }
 
@@ -70,5 +72,7 @@ exhausted: fn() {
 
 run: fn() {
     mode: process.args()
-    if mode.len() > 0 && mode[0] == "contended" -> contended() else if mode.len() > 0 && mode[0] == "exhausted" -> exhausted() else -> panic("usage: main contended|exhausted")
+    if mode.len() > 0 && mode[0] == "contended" -> contended() else if mode.len() > 0 && mode[0] == "exhausted" {
+        exhausted()
+    } else { panic("usage: main contended|exhausted") }
 }

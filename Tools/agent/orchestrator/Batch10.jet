@@ -60,7 +60,9 @@ quarantine: fn(integ: String, run: [String], hits: [Bool]) -> (blamed: [String],
         name: files.basename(run[at])
         if files.read_or("{integ}/{name}.status", "").trim() == "NOAPPLY" -> next
         his: lead(name)
-        if hits[at] || blamed.any(fn(other) { lead(other) == his }) -> blamed.push(name) else -> keep.push(run[at])
+        if hits[at] || blamed.any(fn(other) { lead(other) == his }) -> blamed.push(name) else {
+            keep.push(run[at])
+        }
     }
     (blamed: blamed, keep: keep)
 }
@@ -81,7 +83,9 @@ error_lines: fn(integ: String) -> [String] {
         if {
             line.starts_with("Error [") -> in_error = true
             line.starts_with("Warning [") || line.starts_with("Note [") -> in_error = false
-            in_error && quoted.match(line) == .Val(m) && m.groups[0].trim().len() > 8 -> out.push(m.groups[0].trim())
+            in_error && quoted.match(line) == .Val(m) && m.groups[0].trim().len() > 8 -> {
+                out.push(m.groups[0].trim())
+            }
         }
     }
     out
@@ -93,17 +97,23 @@ run: fn() {
     // One batch at a time: two runs of the same BATCH would write into one integ dir.
     _held: files.try_lock("{main}/integ/.batch.lock") ?? fail("batch: another batch holds the lock", 75)
     args: process.args()
-    if args.len() == 0 -> process.fail(1, "usage: jet Tools/agent/orchestrator/Batch10.jet BATCH SUB...")
+    if args.len() == 0 {
+        process.fail(1, "usage: jet Tools/agent/orchestrator/Batch10.jet BATCH SUB...")
+    }
     batch: args[0]
     run := [String]{}
     loop given in args.slice(1, args.len()) {
         sub: given.removesuffix("/")
         seeds: files.read_or("{sub}/meta", "").lines().filter(fn(line) { line.starts_with("seed:") })
         seed: if seeds.len() > 0 -> seeds[0].removeprefix("seed:").trim() else -> ""
-        if seed != "" && seed != "none" -> print("HELD {files.basename(sub)} (seed: {seed})") else -> run.push(sub)
+        if seed != "" && seed != "none" -> print("HELD {files.basename(sub)} (seed: {seed})") else {
+            run.push(sub)
+        }
     }
     // rc 2: the export or the apply step stopped (integrate10 printed why); there is no census to attribute.
-    if (Sh{"jet -A {integrate} {batch}"}.extend(run).status()) == 2 -> fail("batch: integrate stopped before the census (rc 2)", 2)
+    if (Sh{"jet -A {integrate} {batch}"}.extend(run).status()) == 2 {
+        fail("batch: integrate stopped before the census (rc 2)", 2)
+    }
     integ: "{main}/integ/{batch}"
     if files.is_file("{integ}/REGENFAIL") {
         // Blame the SUBs whose added lines carry a name the failing generator quotes (`core.math.__from_bits_f32` gives
@@ -111,7 +121,9 @@ run: fn() {
         names: (loop m in regex.compile("`([^`]+)`").matches(read_all(integ, "regen.*.out")) -> m.groups[0].rpartition(".").tail).filter(fn(name) { name.len() > 3 })
         word: regex.compile("\\b({(loop name in names -> regex.escape(name)).join("|")})\\b")
         split: quarantine(integ, run, loop sub in run -> names.len() > 0 && adds_word(files.read_or("{sub}/patch", ""), word))
-        if split.blamed.len() == 0 -> fail("batch: a generator failed but no submission adds a name it quotes; see {integ}/REPORT.md", 1)
+        if split.blamed.len() == 0 {
+            fail("batch: a generator failed but no submission adds a name it quotes; see {integ}/REPORT.md", 1)
+        }
         print("QUARANTINED (regen) {split.blamed.join(" ")}")
         process.exit(Sh{"jet -A {integrate} {"{batch}-r"}"}.extend(split.keep).status())
     }
@@ -126,7 +138,9 @@ run: fn() {
         hits.push(paths.concat(loop path in paths -> path.removesuffix(".jet")).any(fn(line) { rows.contains(line) }) || added(if rebased != "" -> rebased else -> files.read_or("{sub}/patch", "")).any(fn(line) { errors.contains(line) }))
     }
     split: quarantine(integ, run, hits)
-    if split.blamed.len() == 0 -> fail("batch: the census failed but no row or error line names a submission; see {integ}/REPORT.md", 1)
+    if split.blamed.len() == 0 {
+        fail("batch: the census failed but no row or error line names a submission; see {integ}/REPORT.md", 1)
+    }
     print("QUARANTINED {split.blamed.join(" ")}")
     if split.keep.len() == 0 -> process.exit(1)
     code: Sh{"jet -A {integrate} {"{batch}-r"}"}.extend(split.keep).status()

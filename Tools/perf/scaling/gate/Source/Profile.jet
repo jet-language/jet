@@ -15,28 +15,44 @@ use {
 }
 
 PERF_PINNED: "/nix/store/v5fs9a5z17j8pfd2kfxs44hv5p3yq6ap-perf-linux-7.0.11/bin/perf"
+
 TOP: 12
+
 // JSON never reads as Bytes, so this stands for JavaScript's `undefined`.
 UNDEFINED: Dyn.Bytes([U8]{})
 
 // `perf script` lines: a sample header `  <time>:` unless it is a frame line
 // `  <address> <symbol>`. (A `Regex{…}` literal reads its backslashes as written.)
 SAMPLE_LINE: Regex{"^\s*(\d+\.\d+):"}
+
 FRAME_ADDRESS: Regex{"^\s+[0-9a-f]+\s"}
+
 FRAME_LINE: Regex{"^\s+[0-9a-f]+\s+(.+)$"}
+
 // Demangling drops the `+0x..` offset, the ` (dso)` suffix and the Rust `::h<hash>`.
 FRAME_OFFSET: Regex{"\+0x[0-9a-f]+$"}
+
 FRAME_DSO: Regex{" \(.*\)$"}
+
 RUST_HASH: Regex{"::h[0-9a-f]{{16}}$"}
+
 // The compiler's own code: a `jetc_*`/`jet_*` path, or a Jet compiler function name.
 OWNED_PATH: Regex{"^<?(jetc_\w+|jet_\w+)::"}
+
 OWNED_NAME: Regex{"^(sema|jet|mir|tir|parser|lexer|lower|codegen|emit|optimize|ast|type|symbol|registration)_\w+$"}
+
 JETC_PREFIX: Regex{"^<?jetc_\w+::"}
+
 SOURCE_PREFIX: Regex{"^__jet_src_\w*?_c_c"}
+
 GENERIC_TAIL: Regex{"[<>].*$"}
+
 RUST_PATH: Regex{"^jet_\w+::"}
+
 RUST_SYMBOL: Regex{"^<?(jet_[a-z_]+)::(.*)$"}
+
 RUST_SEGMENT: Regex{"^[A-Za-z_]\w*$"}
+
 FN_DECL: Regex{"^\s*(?:pub\s+)?(\w+):\s*fn\b"}
 
 // A top-level phase span (label == kind) in unix seconds.
@@ -48,7 +64,7 @@ Interval: struct {
 
 // Symbol counts in first-seen order; `at` is each symbol's row.
 Counts: struct {
-    at: [String: Int]
+    at: [String:Int]
     rows: [(symbol: String, count: Int)]
 }
 
@@ -72,7 +88,9 @@ shown: fn(value: Dyn, key: String) -> String Never! {
 }
 
 // A numeric field, NaN when absent or not a number.
-number: fn(value: Dyn, key: String) -> Float Never! { (value.get(key) ?? Dyn.Null).float() ?? math.NAN }
+number: fn(value: Dyn, key: String) -> Float Never! {
+    (value.get(key) ?? Dyn.Null).float() ?? math.NAN
+}
 
 // Trace time 0 is the `trace.start` event's `args.unix_ms`. Spans pair per
 // thread and kind (`${tid}\0${cat}`, kept unambiguous by the length prefix);
@@ -80,12 +98,14 @@ number: fn(value: Dyn, key: String) -> Float Never! { (value.get(key) ?? Dyn.Nul
 // first-opened order, running to infinity.
 phase_intervals: fn(events: [Dyn]) -> [Interval] Never! {
     origin: if events.find(fn(event) { shown(event, "name") == "trace.start" }) == .Val(start) -> number(start.get("args") ?? Dyn.Null, "unix_ms") / Float{1000.0} else -> Float{0.0}
-    slots := [String: Int]{}
+    slots := [String:Int]{}
     open := [(phase: String, starts: [Float])]{}
     intervals := [Interval]{}
     loop event in events {
         ph: shown(event, "ph")
-        if (ph != "B" && ph != "E") || (event.get("name") ?? UNDEFINED) != (event.get("cat") ?? UNDEFINED) -> next
+        if (ph != "B" && ph != "E") || (event.get("name") ?? UNDEFINED) != (event.get("cat") ?? UNDEFINED) {
+            next
+        }
         phase: shown(event, "cat")
         tid: shown(event, "tid")
         key: "{tid.len()}:{tid}{phase}"
@@ -103,18 +123,24 @@ phase_intervals: fn(events: [Dyn]) -> [Interval] Never! {
         intervals.push(Interval{phase: phase, start: begun, end: t})
     }
     loop span in open {
-        loop begun in span.starts -> intervals.push(Interval{phase: span.phase.copy(), start: begun, end: math.INFINITY})
+        loop begun in span.starts {
+            intervals.push(Interval{phase: span.phase.copy(), start: begun, end: math.INFINITY})
+        }
     }
     intervals
 }
 
-demangle: fn(symbol: String) -> String Never! { RUST_HASH.replace_first(FRAME_DSO.replace_first(FRAME_OFFSET.replace_first(symbol, ""), ""), "") }
+demangle: fn(symbol: String) -> String Never! {
+    RUST_HASH.replace_first(FRAME_DSO.replace_first(FRAME_OFFSET.replace_first(symbol, ""), ""), "")
+}
 
-owned: fn(symbol: String) -> Bool Never! { OWNED_PATH.is_match(symbol) || OWNED_NAME.is_match(symbol) }
+owned: fn(symbol: String) -> Bool Never! {
+    OWNED_PATH.is_match(symbol) || OWNED_NAME.is_match(symbol)
+}
 
 // Every `name: fn` in the `.jet` files under `dir` to its
 // `Compiler/<file>:<line>`; the first declaration in the sorted walk wins.
-index_functions: fn(repo: String, dir: String, index: &[String: String]) {
+index_functions: fn(repo: String, dir: String, index: &[String:String]) {
     loop walked in files.walk_files(dir) {
         entry: walked ?? next
         if !entry.relative.ends_with(".jet") -> next
@@ -132,7 +158,7 @@ index_functions: fn(repo: String, dir: String, index: &[String: String]) {
 // A symbol's source, `<file> <name>`: a Jet compiler function from `index`,
 // else a Rust `jet_*` symbol's deepest existing crate module file, else the
 // crate's lib.rs; None when neither applies.
-resolve: fn(symbol: String, repo: String, index: [String: String]) -> String? Never! {
+resolve: fn(symbol: String, repo: String, index: [String:String]) -> String? Never! {
     parts: SOURCE_PREFIX.replace_first(JETC_PREFIX.replace_first(symbol, ""), "").split("::").to_list()
     name: GENERIC_TAIL.replace_first(parts[parts.len() - 1], "")
     if index.get(name) == .Val(jet) {
@@ -151,7 +177,9 @@ resolve: fn(symbol: String, repo: String, index: [String: String]) -> String? Ne
     }
     loop base in deepest {
         loop candidate in ["{base}.rs", "{base}/mod.rs"] {
-            if files.exists(files.join(repo, candidate)) -> return Val("{candidate} {segments[segments.len() - 1]}")
+            if files.exists(files.join(repo, candidate)) {
+                return Val("{candidate} {segments[segments.len() - 1]}")
+            }
         }
     }
     Val("{crate}/lib.rs {name}")
@@ -179,11 +207,13 @@ count: fn(counts: &Counts, symbol: String) {
 
 // The TOP most counted symbols under `below`, by count (a tie keeps the
 // first seen first), with their share of `total` and their source.
-ranked: fn(counts: Counts, total: Int, below: Float, repo: String, index: [String: String]) -> [Row] Never! {
+ranked: fn(counts: Counts, total: Int, below: Float, repo: String, index: [String:String]) -> [Row] Never! {
     rows := counts.rows.filter(fn(row) { Float{row.count} < below })
     rows.sort_by(fn(a, b) { b.count <=> a.count })
     out := [Row]{}
-    loop row in rows.take(TOP) -> out.push(Row{share: Float{row.count} / Float{max(1, total)}, symbol: row.symbol.copy(), source: resolve(row.symbol, repo, index)})
+    loop row in rows.take(TOP) {
+        out.push(Row{share: Float{row.count} / Float{max(1, total)}, symbol: row.symbol.copy(), source: resolve(row.symbol, repo, index)})
+    }
     out
 }
 
@@ -199,7 +229,9 @@ perf_binary: fn() -[Env]> String Never! { process.env_get("PERF") ?? PERF_PINNED
 
 // The argv prefix that records a compile into `dir`/perf.data with realtime
 // timestamps and frame-pointer call graphs.
-wrap: fn(dir: String) -[Env]> [String] Never! { [perf_binary(), "record", "-q", "-F", "199", "-k", "CLOCK_REALTIME", "--call-graph", "fp", "-m", "16", "-o", files.join(dir, "perf.data"), "--"] }
+wrap: fn(dir: String) -[Env]> [String] Never! {
+    [perf_binary(), "record", "-q", "-F", "199", "-k", "CLOCK_REALTIME", "--call-graph", "fp", "-m", "16", "-o", files.join(dir, "perf.data"), "--"]
+}
 
 // `dir/perf.data` through `perf script`, attributed to the `wanted` phases of
 // `trace_file` (its object rows; a partial or unparsable row is skipped).
@@ -213,12 +245,12 @@ profile: fn(dir: String, trace_file: String, wanted: [String], repo: String) -> 
         event: json.parse(line) ?? next
         events.push(event)
     }
-    slots := [String: Int]{}
+    slots := [String:Int]{}
     tallies := [PhaseCounts]{}
     loop phase in wanted {
         if slots.has_key(phase) -> next
         slots[phase.copy()] = tallies.len()
-        tallies.push(PhaseCounts{phase: phase.copy(), samples: 0, own: Counts{at: [String: Int]{}, rows: []}, inclusive: Counts{at: [String: Int]{}, rows: []}})
+        tallies.push(PhaseCounts{phase: phase.copy(), samples: 0, own: Counts{at: [String:Int]{}, rows: []}, inclusive: Counts{at: [String:Int]{}, rows: []}})
     }
     intervals := [Interval]{}
     loop interval in phase_intervals(events) {
@@ -233,7 +265,9 @@ profile: fn(dir: String, trace_file: String, wanted: [String], repo: String) -> 
             next
         }
         frame: FRAME_LINE.match(line) ?? next
-        if samples.len() > 0 -> samples[samples.len() - 1].frames.push(demangle(frame.group(1) ?? ""))
+        if samples.len() > 0 {
+            samples[samples.len() - 1].frames.push(demangle(frame.group(1) ?? ""))
+        }
     }
     _: child.wait()
     loop sample in samples {
@@ -247,10 +281,12 @@ profile: fn(dir: String, trace_file: String, wanted: [String], repo: String) -> 
             count(tallies[at].inclusive, frame)
         }
     }
-    index := [String: String]{}
+    index := [String:String]{}
     if samples.len() > 0 -> index_functions(repo, files.join(repo, "Compiler"), index)
     tallies.sort_by(fn(a, b) { key_rank(a.phase) <=> key_rank(b.phase) })
     phases := [PhaseProfile]{}
-    loop tally in tallies -> phases.push(PhaseProfile{phase: tally.phase.copy(), samples: tally.samples, own: ranked(tally.own, tally.samples, math.INFINITY, repo, index), inclusive: ranked(tally.inclusive, tally.samples, Float{0.95} * Float{tally.samples}, repo, index)})
+    loop tally in tallies {
+        phases.push(PhaseProfile{phase: tally.phase.copy(), samples: tally.samples, own: ranked(tally.own, tally.samples, math.INFINITY, repo, index), inclusive: ranked(tally.inclusive, tally.samples, Float{0.95} * Float{tally.samples}, repo, index)})
+    }
     Ok(phases)
 }

@@ -2,7 +2,9 @@
 // tokenizer or worker skip, as the Rust tests do, when no `php` is on PATH.
 use {
     jet_pkg_model.[
-        ForeignLanguage, pkg_binder_remove_tree_quiet, pkg_binder_resolved_tool_path,
+        ForeignLanguage,
+        pkg_binder_remove_tree_quiet,
+        pkg_binder_resolved_tool_path,
         pkg_worker_require_supported_host,
     ]
     jetpack_integrations.[pkg_php_render_jet, pkg_php_render_worker]
@@ -14,7 +16,7 @@ use {
 PKG_PHP_TEST_SKIP: "skipping PhpBind test: the PHP executable is unavailable in this development environment"
 
 // Every PHP string form and nested function that discovery must ignore.
-PKG_PHP_TEST_STATIC_SOURCE: #run { ```<?php
+PKG_PHP_TEST_STATIC_SOURCE: #run { ``<?php
 // function fake($input) {}
 /* function fake_block($input) {} */
 # function fake_hash($input) {}
@@ -32,7 +34,7 @@ $anonymous = function ($input) { return $input; };
 if (false) { function nested_conditional($input) { return $input; } }
 function price_cart(array $input): array { return $input; }
 class Hidden { function method($input) {} }
-``` }
+`` }
 
 #Test("php discovery is static and ignores every php string form and nested function") {
     found: pkg_binder_resolved_tool_path("php")
@@ -56,7 +58,7 @@ class Hidden { function method($input) {} }
         "<?php function bad(&$input) {{}}",
         "<?php function bad(...$input) {{}}",
         "<?php function bad($input = null) {{}}",
-        "<?php function bad($input, $other) {{}}"
+        "<?php function bad($input, $other) {{}}",
     }
     loop index in 0..<sources.len() {
         message: if pkg_binders_test_php_discover(php, sources[index], index + 1) == {

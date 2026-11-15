@@ -117,7 +117,9 @@ parser_scan_contract_member: fn(state: JetParserState, start: Int) -> Int Never!
                 depth -= 1
                 if depth == 0 -> return index + 1
             }
-            if current == TOKEN_LBRACE || current == TOKEN_RBRACE || current == TOKEN_SEMI || current == TOKEN_EOF -> return -1
+            if current == TOKEN_LBRACE || current == TOKEN_RBRACE || current == TOKEN_SEMI || current == TOKEN_EOF {
+                return -1
+            }
             index += 1
         }
         return -1
@@ -140,7 +142,9 @@ parser_scan_contract_member: fn(state: JetParserState, start: Int) -> Int Never!
             if current == TOKEN_LT -> depth += 1
             if current == TOKEN_GT -> depth -= 1
             if current == TOKEN_SHR -> depth -= 2
-            if current == TOKEN_LBRACE || current == TOKEN_RBRACE || current == TOKEN_SEMI || current == TOKEN_EOF -> return -1
+            if current == TOKEN_LBRACE || current == TOKEN_RBRACE || current == TOKEN_SEMI || current == TOKEN_EOF {
+                return -1
+            }
             cursor += 1
             if depth <= 0 -> break
         }
@@ -215,7 +219,9 @@ parser_type_starts: fn(kind: Int) -> Bool Never! {
 
 // `#TagName Type`: a value-tag prefix on a type. The tag is a PascalCase name.
 parser_type_tag_ahead: fn(state: &JetParserState) -> Bool Never! {
-    if parser_current_kind(state) != TOKEN_HASH || parser_kind_at(state, 1) != TOKEN_IDENT -> return false
+    if parser_current_kind(state) != TOKEN_HASH || parser_kind_at(state, 1) != TOKEN_IDENT {
+        return false
+    }
     parser_pascal_name(parser_value_at(state, 1))
 }
 
@@ -232,7 +238,6 @@ parser_tokens_text: fn(state: JetParserState, first: Int, end: Int) -> String Ne
     }
     out
 }
-
 
 parser_add_type_mark_error: fn(state: &JetParserState, code: String, span: Span, what: String, why: String, fix: String, replacement: String) {
     diagnostic: diagnostic_from_registry(code, Val(span), what, why, fix)
@@ -262,7 +267,9 @@ parser_parse_type_union_tail: fn(state: &JetParserState, first: ParsedType, dept
 // opens no inline range. After a `|` (`in_union`) that is enough; a first
 // member is a case only when a `|` follows its `)`. A bare name is a type.
 parser_union_case_ahead: fn(state: &JetParserState, in_union: Bool) -> Bool Never! {
-    if state.pending_type_gt || parser_current_kind(state) != TOKEN_IDENT || parser_kind_at(state, 1) != TOKEN_LPAREN -> return false
+    if state.pending_type_gt || parser_current_kind(state) != TOKEN_IDENT || parser_kind_at(state, 1) != TOKEN_LPAREN {
+        return false
+    }
     opened: parser_kind_at(state, 2)
     if opened == TOKEN_INT || opened == TOKEN_MINUS || opened == TOKEN_RPAREN -> return false
     if in_union -> return true
@@ -317,7 +324,9 @@ parser_parse_type_atom: fn(state: &JetParserState, depth: Int) -> ParsedType {
 // range follows `base`.
 parser_parse_inline_range: fn(state: &JetParserState, base: ParsedType) -> ParsedType? {
     if state.pending_type_gt || parser_current_kind(state) != TOKEN_LPAREN -> return None
-    if parser_kind_at(state, 1) != TOKEN_INT && parser_kind_at(state, 1) != TOKEN_MINUS -> return None
+    if parser_kind_at(state, 1) != TOKEN_INT && parser_kind_at(state, 1) != TOKEN_MINUS {
+        return None
+    }
     open: parser_bump(state)
     lower: parser_distinct_range_bound(state, "as the range's lower bound")
     parser_expect(state, TOKEN_DOT_DOT, "between the range's bounds")
@@ -359,7 +368,9 @@ parser_parse_type_base: fn(state: &JetParserState, depth: Int) -> ParsedType {
             if kind != TOKEN_IDENT && kind != TOKEN_SELF && !site_value {
                 found: parser_text(state, start)
                 parser_add_error(state, start.span, "expected a type, found `{found}`", "a type position needs a type constructor or a declared type name", "write a type name such as `Int`, `String?`, or `[U8]")
-                if kind != TOKEN_EOF && kind != TOKEN_RBRACE && kind != TOKEN_COMMA -> parser_bump(state)
+                if kind != TOKEN_EOF && kind != TOKEN_RBRACE && kind != TOKEN_COMMA {
+                    parser_bump(state)
+                }
                 return ParsedType{ty: Type.Named{name: "__jet_error"}, span: start.span}
             }
             // (E1107): the per-container prefix spelling `columnar [T]` is
@@ -473,7 +484,9 @@ parser_parse_tuple_type: fn(state: &JetParserState, depth: Int) -> ParsedType {
         if parser_current_kind(state) == TOKEN_RPAREN -> break
     }
     close: parser_expect(state, TOKEN_RPAREN, "`)` after the tuple type")
-    if fields.len() == 1 && fields[0].name == "" -> return ParsedType{ty: fields[0].ty, span: parser_cover(open.span, close.span)}
+    if fields.len() == 1 && fields[0].name == "" {
+        return ParsedType{ty: fields[0].ty, span: parser_cover(open.span, close.span)}
+    }
     ParsedType{ty: Type.Tuple{fields: fields}, span: parser_cover(open.span, close.span)}
 }
 
@@ -513,9 +526,7 @@ parser_parse_function_type_from: fn(state: &JetParserState, depth: Int, start: S
                 }
                 token.kind == TOKEN_STAR -> {
                     parser_bump(state)
-                    if saw_star {
-                        parser_report_fn_type_zone(state, token.span)
-                    } else {
+                    if saw_star -> parser_report_fn_type_zone(state, token.span) else {
                         saw_star = true
                         zone = ParamZone.LabelOnly
                     }
@@ -590,7 +601,9 @@ parser_parse_function_type_from: fn(state: &JetParserState, depth: Int, start: S
             parser_bump(state)
             arrow_return = true
             result = parser_parse_unit_fallible_return(state)
-            if !parser_has_type(result) && parser_type_starts_here(state) -> result = Val(parser_parse_type(state, depth + 1))
+            if !parser_has_type(result) && parser_type_starts_here(state) {
+                result = Val(parser_parse_type(state, depth + 1))
+            }
         }
         else -> result = parser_parse_unit_fallible_return(state)
     }
@@ -610,7 +623,9 @@ parser_parse_function_type_from: fn(state: &JetParserState, depth: Int, start: S
     return_view: parser_parse_opt_declared_view_from(state, owners)
     if effect_bound == None && parser_func_effect_starts_here(state) {
         late_first: parser_current_kind(state)
-        if late_first == TOKEN_MINUS && parser_kind_at(state, 1) == TOKEN_LBRACKET -> effect_bound = Val(parser_parse_effect_arrow_row(state))
+        if late_first == TOKEN_MINUS && parser_kind_at(state, 1) == TOKEN_LBRACKET {
+            effect_bound = Val(parser_parse_effect_arrow_row(state))
+        }
     }
     end = parser_lookahead(state, -1).span
     // Only a marked parameter needs call metadata; its names repeat the contract's labels so
@@ -659,9 +674,7 @@ parser_parse_applied_type: fn(state: &JetParserState, name: String, prefix: Span
         loop {
             if shaped {
                 args.push(Type.Measure{measure: parser_parse_measure(state, "shape", depth + 1)})
-            } else {
-                args.push(parser_parse_type_argument(state, depth + 1))
-            }
+            } else { args.push(parser_parse_type_argument(state, depth + 1)) }
             if parser_type_close_here(state) -> break
             if parser_current_kind(state) != TOKEN_COMMA {
                 token: parser_current(state)

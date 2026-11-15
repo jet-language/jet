@@ -9,7 +9,9 @@ use {
 
 pkg_test_binder_effect_problem: fn(binder: BinderDescriptor) -> String {
     root: binder.effect_root
-    if root == "FFI" || (root.starts_with("FFI.") && EFFECT_VOCABULARY_LEAVES.contains(root)) -> return ""
+    if root == "FFI" || (root.starts_with("FFI.") && EFFECT_VOCABULARY_LEAVES.contains(root)) {
+        return ""
+    }
     "{binder.language.root()} publishes `{root}`, which Compiler/Prelude/Effects.jet doesn't declare"
 }
 

@@ -30,21 +30,25 @@ cli_test_catalog_package_fixtures: fn(root: String, name: String) -[FS, Env]> St
     files.create_dir_all(output_bin) ?? panic("create catalog package bin")
     tool_bin: files.join(root, "bin")
     if files.is_dir(tool_bin) {
-        loop entry in files.list_dir(tool_bin) ?? panic("list catalog tools") -> cli_test_write_script(files.join(output_bin, entry.name), CLI_TEST_CATALOG_TOOL)
+        loop entry in files.list_dir(tool_bin) ?? panic("list catalog tools") {
+            cli_test_write_script(files.join(output_bin, entry.name), CLI_TEST_CATALOG_TOOL)
+        }
     }
     store_seal_local_output(output) ?? panic("seal catalog package: {err.message()}")
     output_hash: pkg_try_output_hash_of(output) ?? panic("hash catalog package: {err.message()}")
-    jetpack_import: Dyn.Object([
-        "closedGraph": Dyn.Object(["root": Dyn.Object(["dependencies": Dyn.Array([Dyn]{})])]),
-        "selectedOutputs": Dyn.Object(["out": Dyn.Text(output.copy())]),
-        "dependencies": Dyn.Array([Dyn]{}),
-        "sources": Dyn.Array([Dyn]{}),
-        "hashes": Dyn.Object(["out": Dyn.Text(output_hash)]),
-        "losses": Dyn.Array([Dyn]{}),
-        "proof": Dyn.Object(["source": Dyn.Text("services-catalog")]),
-        "recipe": Dyn.Object(["kind": Dyn.Text("compatibility")]),
-        "lock": Dyn.Object(["system": Dyn.Text("x86_64-linux")]),
-    ])
+    jetpack_import: Dyn.Object(
+        [
+            "closedGraph": Dyn.Object(["root": Dyn.Object(["dependencies": Dyn.Array([Dyn]{})])]),
+            "selectedOutputs": Dyn.Object(["out": Dyn.Text(output.copy())]),
+            "dependencies": Dyn.Array([Dyn]{}),
+            "sources": Dyn.Array([Dyn]{}),
+            "hashes": Dyn.Object(["out": Dyn.Text(output_hash)]),
+            "losses": Dyn.Array([Dyn]{}),
+            "proof": Dyn.Object(["source": Dyn.Text("services-catalog")]),
+            "recipe": Dyn.Object(["kind": Dyn.Text("compatibility")]),
+            "lock": Dyn.Object(["system": Dyn.Text("x86_64-linux")]),
+        ],
+    )
     record: Dyn.Object(["drvPath": Dyn.Text("/nix/store/0fixture00000000000000000000-{package}.drv"), "outputs": Dyn.Object(["out": Dyn.Text(output.copy())]), "jetpackImport": jetpack_import])
     files.write(files.join(fixtures, "jetpack-{package}.json"), cli_json_render(Dyn.Array([Dyn]{record}))) ?? panic("write catalog package fixture")
     fixtures
@@ -61,18 +65,18 @@ cli_test_remove_catalog_tools: fn(root: String) -[FS, Env]> {
 cli_test_catalog_tool_env: fn(root: String, systemd_bin: String?) -> ShellEnv {
     bin_dirs := [String]{files.join(root, "bin")}
     if systemd_bin == {
-        .Val(bin) -> bin_dirs.push(bin.copy())
+        .Val(bin) -> { bin_dirs.push(bin.copy()) }
         .None -> {}
     }
     ShellEnv{
         bin_dirs: bin_dirs,
-        vars: [String: String]{},
+        vars: [String:String]{},
         unset_vars: [String]{},
         refs: [String]{},
         label: "catalog-test",
         prompt_path: PromptPathMode.Short,
         prompt_strip: PromptStripMode.Off,
-        cache_leases: [CacheLease]{}
+        cache_leases: [CacheLease]{},
     }
 }
 
@@ -94,7 +98,9 @@ cli_test_catalog_worker: fn(claim: ServicesClaim, tools: String, fake: FakeSyste
 }
 
 #Test("services production catalog services prepare state and pass readiness") {
-    if !sys.is_linux() -> return
+    if !sys.is_linux() {
+        return
+    }
     claim: ServicesClaim.new("catalog-production")
     tools: files.tmpdir("jet-catalog-production-tools-") ?? panic("claim tool scratch")
     cli_test_install_catalog_tools(tools)
@@ -112,7 +118,9 @@ cli_test_catalog_worker: fn(claim: ServicesClaim, tools: String, fake: FakeSyste
             "redis" -> assert(files.is_file(files.join(data_dir, ".service-running")))
             "postgres" -> assert(files.is_file(files.join(data_dir, "PG_VERSION")))
             "mysql" | "mariadb" -> assert(files.is_dir(files.join(data_dir, "mysql")))
-            "minio" | "blackfire" | "tideways" -> assert(files.is_file(files.join(data_dir, ".service-running")))
+            "minio" | "blackfire" | "tideways" -> {
+                assert(files.is_file(files.join(data_dir, ".service-running")))
+            }
             "nginx" -> {
                 ports: files.read(files.join(service_dir, "ports")) ?? panic("read nginx ports")
                 port: Int.parse(ports.lines().get(0) ?? "") ?? panic("nginx port is an integer")
@@ -131,7 +139,9 @@ cli_test_catalog_worker: fn(claim: ServicesClaim, tools: String, fake: FakeSyste
 }
 
 #Test("services production adminer preset fails closed without php projection") {
-    if !sys.is_linux() -> return
+    if !sys.is_linux() {
+        return
+    }
     claim: ServicesClaim.new("adminer-owner-gate")
     tools: files.tmpdir("jet-adminer-owner-gate-tools-") ?? panic("claim tool scratch")
     fake: claim.fake ?? panic("Linux claims install the fake systemd")
@@ -146,7 +156,9 @@ cli_test_catalog_worker: fn(claim: ServicesClaim, tools: String, fake: FakeSyste
 }
 
 #Test("services production minio preset port conflict has terminal state") {
-    if !sys.is_linux() -> return
+    if !sys.is_linux() {
+        return
+    }
     claim: ServicesClaim.new("minio-port-conflict")
     tools: files.tmpdir("jet-minio-port-conflict-tools-") ?? panic("claim tool scratch")
     cli_test_install_catalog_tools(tools)
@@ -168,7 +180,9 @@ cli_test_catalog_worker: fn(claim: ServicesClaim, tools: String, fake: FakeSyste
 }
 
 #Test("services production postgres preset initialization failure has terminal state") {
-    if !sys.is_linux() -> return
+    if !sys.is_linux() {
+        return
+    }
     claim: ServicesClaim.new("postgres-init-failure")
     tools: files.tmpdir("jet-postgres-init-failure-tools-") ?? panic("claim tool scratch")
     cli_test_install_catalog_tools(tools)

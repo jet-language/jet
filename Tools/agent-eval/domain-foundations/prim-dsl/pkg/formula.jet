@@ -35,16 +35,16 @@ recalc: fn(cells: [String:CalcCell], previous: [String:Int], changed: String) ->
             }
         }
     }
-    return RecalcResult{ values: values, touched: touched }
+    return RecalcResult{values: values, touched: touched}
 }
 
 sample: fn() -> [String] {
     cells := [String:CalcCell]{
-        "a": CalcCell{ kind: 0, value: 2, left: "", right: "", deps: [] },
-        "one": CalcCell{ kind: 0, value: 1, left: "", right: "", deps: [] },
-        "b": CalcCell{ kind: 1, value: 0, left: "a", right: "one", deps: ["a", "one"] },
-        "total": CalcCell{ kind: 1, value: 0, left: "b", right: "a", deps: ["b", "a"] },
-        "unrelated": CalcCell{ kind: 0, value: 99, left: "", right: "", deps: [] }
+        "a": CalcCell{kind: 0, value: 2, left: "", right: "", deps: []},
+        "one": CalcCell{kind: 0, value: 1, left: "", right: "", deps: []},
+        "b": CalcCell{kind: 1, value: 0, left: "a", right: "one", deps: ["a", "one"]},
+        "total": CalcCell{kind: 1, value: 0, left: "b", right: "a", deps: ["b", "a"]},
+        "unrelated": CalcCell{kind: 0, value: 99, left: "", right: "", deps: []},
     }
     first: recalc(cells, [String:Int]{"one": 1}, "a")
     cells["a"].value = 5
@@ -53,6 +53,6 @@ sample: fn() -> [String] {
     second_total: second.values.get("total") ?? 0
     return [
         "first total={first_total} touched={first.touched}",
-        "second total={second_total} touched={second.touched}"
+        "second total={second_total} touched={second.touched}",
     ]
 }

@@ -4,14 +4,15 @@ use {
     cbor: core.encoding.cbor
     hex: core.encoding.hex
 }
+
 ENCODED: #run hex.encode(cbor.to_bytes(json.parse("{{\"a\":1,\"b\":[1,2,3],\"c\":-7}}") ?? panic("bad json")) ?? panic("bad cbor"))
+
 PARSED: #run { json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1,\"b\":[1,2,3]}}") ?? panic("bad json")) ?? panic("bad cbor")) ?? panic("bad parse")) ?? panic("JSON encode") }
 
 run: fn() {
     r: hex.encode(cbor.to_bytes(json.parse("{{\"a\":1,\"b\":[1,2,3],\"c\":-7}}") ?? panic("bad json")) ?? panic("bad cbor"))
     p: json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1,\"b\":[1,2,3]}}") ?? panic("bad json")) ?? panic("bad cbor")) ?? panic("bad parse")) ?? panic("JSON encode")
     comptime_diff_frame("{ENCODED}|{PARSED}", "{r}|{p}")
-
 }
 
 comptime_diff_frame: fn(expected_text: String, actual_text: String) {

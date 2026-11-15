@@ -73,9 +73,7 @@ served: fn(surface: String, app: App) (HTTPError | NetError | TaskFailure)! {
     addr: listener.local_addr() ?? panic("address failed")
     count: REQUESTS.len()
     t: task {
-        loop _ in 0..<count {
-            app.serve_once(listener) ?? panic("serve failed")
-        }
+        loop _ in 0..<count { app.serve_once(listener) ?? panic("serve failed") }
     }
     loop request in REQUESTS {
         parts: request.split(" ").to_list()

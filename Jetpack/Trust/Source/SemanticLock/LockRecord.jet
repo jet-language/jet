@@ -25,10 +25,11 @@ LockRecordKind: enum {
     FlakeComposition
     FlakeUnsupported
     FlakeEvaluator
-    // Selected typed variant domain (E4-JP15).
     Variant
-    // A kind this reader does not know, kept verbatim for round trips.
     Future(String)
+
+    // Selected typed variant domain (E4-JP15).
+    // A kind this reader does not know, kept verbatim for round trips.
 
     label: fn(self) -> String Never! {
         if self == {
@@ -83,9 +84,7 @@ LockIdentity: struct {
     platform: String
 
     // `kind:key`: the merge and explain key.
-    semantic_key: fn(self) -> String Never! {
-        "{self.kind.label()}:{self.key}"
-    }
+    semantic_key: fn(self) -> String Never! { "{self.kind.label()}:{self.key}" }
 
     // Every machine fact; two records agree exactly when these agree.
     machine_identity: fn(self) -> String Never! {
@@ -136,10 +135,10 @@ SemanticRecord: struct {
     identity: LockIdentity
     rationales: [LockRationale]
     // Fields written by a newer lock, kept by key for round trips.
-    future_fields: [String: String]
+    future_fields: [String:String]
 
     new: fn(identity: LockIdentity, rationale: LockRationale) -> SemanticRecord Never! {
-        SemanticRecord{identity, rationales: [LockRationale]{rationale}, future_fields: [String: String]{}}
+        SemanticRecord{identity: identity, rationales: [LockRationale]{rationale}, future_fields: [String:String]{}}
     }
 }
 
@@ -166,7 +165,7 @@ SemanticLockFile: struct {
     }
 
     with_records: fn(records: [SemanticRecord]) -> SemanticLockFile Never! {
-        SemanticLockFile{records, inputs: [LockInput]{}, source_maps: [SourceMapEntry]{}}
+        SemanticLockFile{records: records, inputs: [LockInput]{}, source_maps: [SourceMapEntry]{}}
     }
 
     // Drop every record of `kind` whose key is `key`.
@@ -207,7 +206,7 @@ SemanticLockFile: struct {
     // Record a selected typed variant (E4-JP15). `platform` holds the
     // canonical `PackageVariant::identity_key()`.
     record_selected_variant: fn(&self, package: String, variant_identity: String, hash: String, reason: String) Never! {
-        identity: LockIdentity{kind: LockRecordKind.Variant, key: package, exact: variant_identity, hash, platform: variant_identity}
+        identity: LockIdentity{kind: LockRecordKind.Variant, key: package, exact: variant_identity, hash: hash, platform: variant_identity}
         rationale := LockRationale.empty()
         rationale.owner_package = package
         rationale.reason = reason
@@ -228,7 +227,7 @@ SemanticLockFile: struct {
 
     // Record a workspace catalog selection (E4-JP13).
     record_catalog_selection: fn(&self, owner: String, logical_name: String, provider_ref: String, hash: String, platform: String, rationale: String) Never! {
-        identity: LockIdentity{kind: LockRecordKind.Package, key: logical_name, exact: provider_ref, hash, platform}
+        identity: LockIdentity{kind: LockRecordKind.Package, key: logical_name, exact: provider_ref, hash: hash, platform: platform}
         provider: if trust_text_split_first(provider_ref, TRUST_COLON) == {
             .Val(parts) -> parts.before
             .None -> provider_ref.copy()

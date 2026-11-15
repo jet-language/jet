@@ -4,12 +4,25 @@
 // the fixed point over a recursive and a mutually recursive type.
 use {
     jet_sema.[
-        SemaBuildFacts, SemaComptimeFunctionResult, SemaComptimeItemValue, SemaEffectTypeRow,
-        SemaForeignProviderInput, SemaRegistrationForeignHandleFacts, SemaRegistrationGraph,
-        SemaRegistrationHostHooks, SemaRegistrationImportEdge, SemaRegistrationModuleInput,
-        SemaRegistrationPackagePolicy, SemaSourceOrigin, SemaSourceSegment,
-        sema_collect_comptime_declarations, sema_effect_graph_type_rows, sema_finalize_registration_graph,
-        sema_has_error_since, sema_registration_prepare_graph, sema_type_graph_trait_symbol,
+        SemaBuildFacts,
+        SemaComptimeFunctionResult,
+        SemaComptimeItemValue,
+        SemaEffectTypeRow,
+        SemaForeignProviderInput,
+        SemaRegistrationForeignHandleFacts,
+        SemaRegistrationGraph,
+        SemaRegistrationHostHooks,
+        SemaRegistrationImportEdge,
+        SemaRegistrationModuleInput,
+        SemaRegistrationPackagePolicy,
+        SemaSourceOrigin,
+        SemaSourceSegment,
+        sema_collect_comptime_declarations,
+        sema_effect_graph_type_rows,
+        sema_finalize_registration_graph,
+        sema_has_error_since,
+        sema_registration_prepare_graph,
+        sema_type_graph_trait_symbol,
     ]
     jet_parser.[parse_source]
     jet_driver.[jet_driver_canonical_effect_module]
@@ -85,7 +98,9 @@ effect_type_row_expect: fn(graph: SemaRegistrationGraph, rows: [SemaEffectTypeRo
         return
     }
     source: row.sources[position]
-    if source.kind != kind || source.label != label -> failures.push("{name}: {effect_name} comes from {source.kind} `{source.label}`, expected {kind} `{label}`")
+    if source.kind != kind || source.label != label {
+        failures.push("{name}: {effect_name} comes from {source.kind} `{source.label}`, expected {kind} `{label}`")
+    }
 }
 
 effect_type_row_run: fn() {
@@ -97,7 +112,9 @@ effect_type_row_run: fn() {
     stage.graph = None
     graph = declared.move() ?? panic("EffectTypeRowFixtures: the declaration pass lost its registration graph")
     checked := sema_finalize_registration_graph(graph.copy(), None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None)
-    if !checked.complete -> panic("EffectTypeRowFixtures: the body and effect check failed {checked.diagnostics:Debug}")
+    if !checked.complete {
+        panic("EffectTypeRowFixtures: the body and effect check failed {checked.diagnostics:Debug}")
+    }
     rows: sema_effect_graph_type_rows(graph, checked.modules)
     // A method's solved row.
     effect_type_row_expect(graph, rows, "Logger", "IO", "method", "say", failures)
@@ -121,7 +138,9 @@ effect_type_row_run: fn() {
     effect_type_row_expect(graph, rows, "Shape", "IO", "impl", "Square", failures)
     effect_type_row_expect(graph, rows, "Canvas", "IO", "field type", "shapes", failures)
     effect_type_row_expect(graph, rows, "Canvas", "Env", "", "", failures)
-    if failures.len() > 0 -> panic("EffectTypeRowFixtures collected {failures.len()} failures:\n{failures.join("\n")}")
+    if failures.len() > 0 {
+        panic("EffectTypeRowFixtures collected {failures.len()} failures:\n{failures.join("\n")}")
+    }
 }
 
 #Test("effect_type_row_fixtures") {

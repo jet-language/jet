@@ -44,6 +44,7 @@ DRIVER: "/Tools/gauntlet/entries/run-stage-entry/driver/run.jet"
 
 // The keys whose numbers are not measurements.
 KEPT: ["artifact_bytes", "binary_bytes", "bytes", "count", "exit_code", "exitCode", "loc", "resolution_ns", "source_bytes", "source_tokens", "tokens", "wasm_bytes"]
+
 // The keys whose text follows from a measurement; each entry of a `verdicts`
 // map reads as a `verdict`.
 DERIVED: ["cache_state", "status", "verdict"]
@@ -127,5 +128,7 @@ stage: fn(dir: String, runs: String, dev: String, measure: [String]?) {
 
 run: fn() {
     args: process.args()
-    if args.get(0) == Val("stage") && args.len() >= 4 -> stage(args[1], args[2], args[3], if args.len() >= 5 -> Val(args[4].split(",").to_list()) else -> None) else -> process.fail(64, USAGE)
+    if args.get(0) == Val("stage") && args.len() >= 4 {
+        stage(args[1], args[2], args[3], if args.len() >= 5 -> Val(args[4].split(",").to_list()) else -> None)
+    } else { process.fail(64, USAGE) }
 }

@@ -9,18 +9,15 @@ Res: struct {
         close: fn(&&self) { print("close {self.name}") }
     }
 }
+
 Holder: struct {
     res: Res
     label: String
 }
 
-holder: fn(name: String) -> Holder {
-    Holder{res: Res{name: name}, label: name}
-}
+holder: fn(name: String) -> Holder { Holder{res: Res{name: name}, label: name} }
 
-present: fn(carrier: Holder?) -> Bool {
-    carrier != None
-}
+present: fn(carrier: Holder?) -> Bool { carrier != None }
 
 field_unmarked: fn() -> Res? {
     h: holder("field")
@@ -33,7 +30,7 @@ payload_unmarked: fn() -> Res? {
     carrier: Val(holder("payload"))
     out := Holder?{None}
     if carrier == {
-        .Val(found) -> out = Val(found)
+        .Val(found) -> { out = Val(found) }
         .None -> {}
     }
     if out == {
@@ -82,13 +79,11 @@ subject_used_after_payload_move: fn() -> Holder? {
     carrier: Val(holder("subject"))
     out := Holder?{None}
     if carrier == {
-        .Val(found) -> out = Val(found.move())
+        .Val(found) -> { out = Val(found.move()) }
         .None -> {}
     }
     print(present(carrier))
     out
 }
 
-run: fn() {
-    print("unreached")
-}
+run: fn() { print("unreached") }

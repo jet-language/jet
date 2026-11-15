@@ -84,9 +84,7 @@ pkg_cpp_c_params: fn(params: [CppParam]) -> String Never! {
     if params.len() == 0 -> return "void"
     parts := [String]{}
     loop param in params {
-        if param.kind == CppScalar.Callback {
-            parts.push("int64_t (*{param.name})(int64_t)")
-        } else {
+        if param.kind == CppScalar.Callback -> parts.push("int64_t (*{param.name})(int64_t)") else {
             parts.push("{param.kind.c()} {param.name}")
         }
     }

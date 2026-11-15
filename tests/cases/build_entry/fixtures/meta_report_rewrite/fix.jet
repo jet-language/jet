@@ -1,4 +1,3 @@
-
 // A Tidy lint whose structured fix calls `note` instead of `print`, keeping
 // each call's arguments.
 NoPrintInLib: struct {
@@ -6,8 +5,11 @@ NoPrintInLib: struct {
         code: "mypkg.NoPrintInLib"
         tier: .Tidy
         structured_fix: syntax.rewrite(callee: print, replacement: note)
+
         what: fn(self) -> String { "library code prints to the terminal" }
+
         why: fn(self) -> String { "the program that calls the library owns the terminal" }
+
         fix: fn(self) -> String { "write the message to stderr with `note`" }
     }
 }

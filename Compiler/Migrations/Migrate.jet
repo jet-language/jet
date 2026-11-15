@@ -43,7 +43,9 @@ run: fn() {
     args: process.args()
     names := [String]{}
     loop known in migration_plans() -> names.push(known.name.copy())
-    if args.len() == 0 || !names.contains(args[0]) -> panic("usage: Migrate.jet -- <plan> [--write] [--list FILE] [--source-list FILE] PATH...; plans: {names.join(", ")}")
+    if args.len() == 0 || !names.contains(args[0]) {
+        panic("usage: Migrate.jet -- <plan> [--write] [--list FILE] [--source-list FILE] PATH...; plans: {names.join(", ")}")
+    }
     plan: args[0]
     write := false
     paths := [String]{}

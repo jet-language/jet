@@ -11,52 +11,145 @@
 use {
     jet_foundation.[Type]
     jet_ir.[
-        IRFunction, IRModule, IROp, IRSlotKind, IR_OVERFLOW_WRAP, ir_args, ir_depth, ir_else, ir_emit, ir_end,
-        ir_hashed_function, ir_open, ir_open_if, ir_slot, ir_type_row, ir_word_row,
+        IRFunction,
+        IRModule,
+        IROp,
+        IRSlotKind,
+        IR_OVERFLOW_WRAP,
+        ir_args,
+        ir_depth,
+        ir_else,
+        ir_emit,
+        ir_end,
+        ir_hashed_function,
+        ir_open,
+        ir_open_if,
+        ir_slot,
+        ir_type_row,
+        ir_word_row,
     ]
     jet_wasm.[
-        WasmCode, WasmError, WasmFuncType, WASM_BLOCK_EMPTY, WASM_F32, WASM_F64, WASM_I32, WASM_OP_BLOCK, WASM_OP_BR,
-        WASM_OP_BR_IF, WASM_OP_BR_TABLE, WASM_OP_CALL, WASM_OP_CALL_INDIRECT, WASM_OP_DATA_DROP, WASM_OP_DROP,
-        WASM_OP_ELEM_DROP, WASM_OP_ELSE, WASM_OP_END, WASM_OP_F32_CONST, WASM_OP_F64_CONST, WASM_OP_GLOBAL_GET,
-        WASM_OP_GLOBAL_SET, WASM_OP_I32_CONST, WASM_OP_I64_CONST, WASM_OP_IF, WASM_OP_LOCAL_GET, WASM_OP_LOCAL_SET,
-        WASM_OP_LOCAL_TEE, WASM_OP_LOOP, WASM_OP_MEMORY_COPY, WASM_OP_MEMORY_FILL, WASM_OP_MEMORY_GROW,
-        WASM_OP_MEMORY_INIT, WASM_OP_MEMORY_SIZE, WASM_OP_NOP, WASM_OP_REF_FUNC, WASM_OP_REF_IS_NULL, WASM_OP_REF_NULL,
-        WASM_OP_RETURN, WASM_OP_SELECT, WASM_OP_SELECT_T, WASM_OP_TABLE_COPY, WASM_OP_TABLE_FILL, WASM_OP_TABLE_GET,
-        WASM_OP_TABLE_GROW, WASM_OP_TABLE_INIT, WASM_OP_TABLE_SET, WASM_OP_TABLE_SIZE, WASM_OP_UNREACHABLE,
+        WasmCode,
+        WasmError,
+        WasmFuncType,
+        WASM_BLOCK_EMPTY,
+        WASM_F32,
+        WASM_F64,
+        WASM_I32,
+        WASM_OP_BLOCK,
+        WASM_OP_BR,
+        WASM_OP_BR_IF,
+        WASM_OP_BR_TABLE,
+        WASM_OP_CALL,
+        WASM_OP_CALL_INDIRECT,
+        WASM_OP_DATA_DROP,
+        WASM_OP_DROP,
+        WASM_OP_ELEM_DROP,
+        WASM_OP_ELSE,
+        WASM_OP_END,
+        WASM_OP_F32_CONST,
+        WASM_OP_F64_CONST,
+        WASM_OP_GLOBAL_GET,
+        WASM_OP_GLOBAL_SET,
+        WASM_OP_I32_CONST,
+        WASM_OP_I64_CONST,
+        WASM_OP_IF,
+        WASM_OP_LOCAL_GET,
+        WASM_OP_LOCAL_SET,
+        WASM_OP_LOCAL_TEE,
+        WASM_OP_LOOP,
+        WASM_OP_MEMORY_COPY,
+        WASM_OP_MEMORY_FILL,
+        WASM_OP_MEMORY_GROW,
+        WASM_OP_MEMORY_INIT,
+        WASM_OP_MEMORY_SIZE,
+        WASM_OP_NOP,
+        WASM_OP_REF_FUNC,
+        WASM_OP_REF_IS_NULL,
+        WASM_OP_REF_NULL,
+        WASM_OP_RETURN,
+        WASM_OP_SELECT,
+        WASM_OP_SELECT_T,
+        WASM_OP_TABLE_COPY,
+        WASM_OP_TABLE_FILL,
+        WASM_OP_TABLE_GET,
+        WASM_OP_TABLE_GROW,
+        WASM_OP_TABLE_INIT,
+        WASM_OP_TABLE_SET,
+        WASM_OP_TABLE_SIZE,
+        WASM_OP_UNREACHABLE,
     ]
 }
 
 // Instance record offsets (PluginHost.jet PG_INST_*).
 PLUG_INST_TRAP: 0
+
 PLUG_INST_FUEL: 16
+
 PLUG_INST_DEPTH: 24
+
 PLUG_INST_MEMORIES: 48
+
 PLUG_INST_GLOBALS: 64
 
 // Trap codes (PluginHost.jet pg_trap_text).
 PLUG_TRAP_UNREACHABLE: 0
+
 PLUG_TRAP_MEMORY: 1
+
 PLUG_TRAP_DIVIDE: 2
+
 PLUG_TRAP_OVERFLOW: 3
+
 PLUG_TRAP_STACK: 8
 
 // Guest calls nest at most this deep (each is a native frame).
 PLUG_DEPTH_LIMIT: 1000
 
 PLUG_FRAME_BLOCK: 0
+
 PLUG_FRAME_LOOP: 1
+
 PLUG_FRAME_IF: 2
+
 PLUG_FRAME_BODY: 3
 
 // The runtime helpers the translated code calls.
 PLUG_RUNTIME_NAMES: [
-    "jet_plugin_frame", "jet_plugin_trap", "jet_plugin_fuel", "jet_plugin_memory_grow", "jet_plugin_memory_fill", "jet_plugin_memory_copy",
-    "jet_plugin_memory_init", "jet_plugin_data_drop", "jet_plugin_table_size", "jet_plugin_table_grow",
-    "jet_plugin_table_get", "jet_plugin_table_set", "jet_plugin_table_fill", "jet_plugin_table_copy",
-    "jet_plugin_table_init", "jet_plugin_elem_drop", "jet_plugin_table_fid", "jet_plugin_clz", "jet_plugin_ctz",
-    "jet_plugin_popcnt", "jet_plugin_trunc", "jet_plugin_f64_from_u64", "jet_plugin_f32_from_i64", "jet_plugin_f64_min",
-    "jet_plugin_f64_max", "jet_plugin_f64_copysign", "jet_plugin_f64_abs", "jet_plugin_f64_neg", "jet_plugin_f64_nearest",
-    "jet_plugin_host_import", "jet_std_math_ceil", "jet_std_math_floor", "jet_std_math_trunc", "jet_std_math_sqrt",
+    "jet_plugin_frame",
+    "jet_plugin_trap",
+    "jet_plugin_fuel",
+    "jet_plugin_memory_grow",
+    "jet_plugin_memory_fill",
+    "jet_plugin_memory_copy",
+    "jet_plugin_memory_init",
+    "jet_plugin_data_drop",
+    "jet_plugin_table_size",
+    "jet_plugin_table_grow",
+    "jet_plugin_table_get",
+    "jet_plugin_table_set",
+    "jet_plugin_table_fill",
+    "jet_plugin_table_copy",
+    "jet_plugin_table_init",
+    "jet_plugin_elem_drop",
+    "jet_plugin_table_fid",
+    "jet_plugin_clz",
+    "jet_plugin_ctz",
+    "jet_plugin_popcnt",
+    "jet_plugin_trunc",
+    "jet_plugin_f64_from_u64",
+    "jet_plugin_f32_from_i64",
+    "jet_plugin_f64_min",
+    "jet_plugin_f64_max",
+    "jet_plugin_f64_copysign",
+    "jet_plugin_f64_abs",
+    "jet_plugin_f64_neg",
+    "jet_plugin_f64_nearest",
+    "jet_plugin_host_import",
+    "jet_std_math_ceil",
+    "jet_std_math_floor",
+    "jet_std_math_trunc",
+    "jet_std_math_sqrt",
 ]
 
 // The IR type rows of the guest's values: i64 and references are words.
@@ -160,9 +253,7 @@ PlugCx: struct {
     dummy: Int
     at: Int
 
-    temp: fn(&self, row: Int) -> Int Never! {
-        ir_slot(self.f, row, IRSlotKind.Temp, -1, 0)
-    }
+    temp: fn(&self, row: Int) -> Int Never! { ir_slot(self.f, row, IRSlotKind.Temp, -1, 0) }
 
     emit: fn(&self, op: IROp, dst: Int, a: Int, b: Int, c: Int) Never! {
         _: ir_emit(self.f, op, dst, a, b, c, 0)
@@ -174,9 +265,7 @@ PlugCx: struct {
         slot
     }
 
-    word: fn(&self, value: Int) -> Int Never! {
-        self.konst(self.rows.word, value)
-    }
+    word: fn(&self, value: Int) -> Int Never! { self.konst(self.rows.word, value) }
 
     // A wrapping integer operation, or a float one.
     op2: fn(&self, op: IROp, row: Int, left: Int, right: Int) -> Int Never! {
@@ -241,7 +330,9 @@ PlugCx: struct {
     // Pushes a finished call's results: `first` as returned, the rest read
     // back from its out area.
     push_results: fn(&self, ty: WasmFuncType, first: Int, area: Int) Never! {
-        if ty.results.len() == 0 -> return
+        if ty.results.len() == 0 {
+            return
+        }
         self.push(first)
         loop k in 1..<ty.results.len() {
             value: self.load(plug_row(self.rows, ty.results[k]), area, (k - 1) * 8)
@@ -249,9 +340,7 @@ PlugCx: struct {
         }
     }
 
-    push: fn(&self, slot: Int) Never! {
-        self.stack.push(slot)
-    }
+    push: fn(&self, slot: Int) Never! { self.stack.push(slot) }
 
     pop: fn(&self) -> Int Never! {
         self.stack.pop() ?? panic("plugin translation popped an empty operand stack")
@@ -270,9 +359,7 @@ PlugCx: struct {
     }
 
     truncate: fn(&self, height: Int) Never! {
-        loop self.stack.len() > height {
-            _: self.stack.pop()
-        }
+        loop self.stack.len() > height -> _: self.stack.pop()
     }
 
     // Copies `values` into `slots`, through fresh temporaries when a value
@@ -293,9 +380,7 @@ PlugCx: struct {
         loop (k, slot) in slots -> self.emit(IROp.Copy, slot, sources[k], -1, -1)
     }
 
-    ret_dummy: fn(&self) Never! {
-        self.emit(IROp.Return, -1, self.dummy, -1, -1)
-    }
+    ret_dummy: fn(&self) Never! { self.emit(IROp.Return, -1, self.dummy, -1, -1) }
 
     // Records trap `code` at this instruction and returns.
     trap: fn(&self, code: Int) Never! {
@@ -391,13 +476,9 @@ PlugCx: struct {
         self.cmp(IROp.Ne, value, zero)
     }
 
-    promote: fn(&self, value: Int) -> Int Never! {
-        self.convert(self.rows.f64, value)
-    }
+    promote: fn(&self, value: Int) -> Int Never! { self.convert(self.rows.f64, value) }
 
-    demote: fn(&self, value: Int) -> Int Never! {
-        self.convert(self.rows.f32, value)
-    }
+    demote: fn(&self, value: Int) -> Int Never! { self.convert(self.rows.f32, value) }
 
     // A value's bits read back as `row` through frame storage.
     reinterpret: fn(&self, value: Int, row: Int) -> Int Never! {
@@ -467,7 +548,9 @@ PlugCx: struct {
             one: self.word(1)
             less: self.op2(IROp.Sub, self.rows.word, left, one)
             self.store(self.inst, PLUG_INST_DEPTH, less)
-            loop k in 1..<frame.result_slots.len() -> self.store(self.out, (k - 1) * 8, frame.result_slots[k])
+            loop k in 1..<frame.result_slots.len() {
+                self.store(self.out, (k - 1) * 8, frame.result_slots[k])
+            }
             self.emit(IROp.Return, -1, if frame.result_slots.len() > 0 -> frame.result_slots[0] else -> -1, -1, -1)
             self.dead = true
             return
@@ -492,10 +575,18 @@ PlugCx: struct {
             results.push(slot)
         }
         opener: if kind == PLUG_FRAME_IF -> ir_open_if(self.f, test, 0) else -> ir_open(self.f, if kind == PLUG_FRAME_LOOP -> IROp.Loop else -> IROp.Block, 0)
-        self.frames.push(PlugFrame{
-            kind: kind, opener: opener, height: self.stack.len(), params: sig.params, results: sig.results,
-            param_slots: params, result_slots: results, has_else: false,
-        })
+        self.frames.push(
+            PlugFrame{
+                kind: kind,
+                opener: opener,
+                height: self.stack.len(),
+                params: sig.params,
+                results: sig.results,
+                param_slots: params,
+                result_slots: results,
+                has_else: false,
+            },
+        )
         loop slot in params -> self.push(slot)
         if kind == PLUG_FRAME_LOOP -> self.fuel()
     }
@@ -512,8 +603,19 @@ plug_translate: fn(kit: PlugKit, scope: PlugScope, fid: Int, ty: WasmFuncType, c
     rows: kit.rows
     cx := PlugCx{
         f: ir_hashed_function("plugin.wasm", "#plugin.wasm<{kit.artifact}>#{fid}", "jet_ir_plugin_", "", 0),
-        rows: rows, names: kit.names, fid: fid, inst: 0, out: -1, locals: [Int]{}, stack: [Int]{}, frames: [PlugFrame]{},
-        flags: [Int:Int]{}, dead: false, skip: 0, dummy: -1, at: code.start,
+        rows: rows,
+        names: kit.names,
+        fid: fid,
+        inst: 0,
+        out: -1,
+        locals: [Int]{},
+        stack: [Int]{},
+        frames: [PlugFrame]{},
+        flags: [Int:Int]{},
+        dead: false,
+        skip: 0,
+        dummy: -1,
+        at: code.start,
     }
     cx.f.result = if ty.results.len() > 0 -> plug_row(rows, ty.results[0]) else -> -1
     cx.inst = ir_slot(cx.f, rows.word, IRSlotKind.Param, -1, 0)
@@ -552,18 +654,10 @@ plug_op: fn(cx: &PlugCx, kit: PlugKit, scope: PlugScope, code: WasmCode, k: Int)
     rows: cx.rows
     if cx.dead {
         if {
-            op == WASM_OP_BLOCK || op == WASM_OP_LOOP || op == WASM_OP_IF -> {
-                cx.skip += 1
-            }
-            op == WASM_OP_END && cx.skip > 0 -> {
-                cx.skip -= 1
-            }
-            op == WASM_OP_ELSE && cx.skip == 0 -> {
-                cx.enter_else()
-            }
-            op == WASM_OP_END -> {
-                cx.leave()
-            }
+            op == WASM_OP_BLOCK || op == WASM_OP_LOOP || op == WASM_OP_IF -> { cx.skip += 1 }
+            op == WASM_OP_END && cx.skip > 0 -> { cx.skip -= 1 }
+            op == WASM_OP_ELSE && cx.skip == 0 -> { cx.enter_else() }
+            op == WASM_OP_END -> { cx.leave() }
         }
         return
     }
@@ -573,23 +667,15 @@ plug_op: fn(cx: &PlugCx, kit: PlugKit, scope: PlugScope, code: WasmCode, k: Int)
             cx.dead = true
         }
         op == WASM_OP_NOP -> {}
-        op == WASM_OP_BLOCK -> {
-            cx.open(PLUG_FRAME_BLOCK, plug_block_sig(scope, a), -1)
-        }
-        op == WASM_OP_LOOP -> {
-            cx.open(PLUG_FRAME_LOOP, plug_block_sig(scope, a), -1)
-        }
+        op == WASM_OP_BLOCK -> { cx.open(PLUG_FRAME_BLOCK, plug_block_sig(scope, a), -1) }
+        op == WASM_OP_LOOP -> { cx.open(PLUG_FRAME_LOOP, plug_block_sig(scope, a), -1) }
         op == WASM_OP_IF -> {
             condition: cx.pop()
             test: cx.truth(condition)
             cx.open(PLUG_FRAME_IF, plug_block_sig(scope, a), test)
         }
-        op == WASM_OP_ELSE -> {
-            cx.enter_else()
-        }
-        op == WASM_OP_END -> {
-            cx.leave()
-        }
+        op == WASM_OP_ELSE -> { cx.enter_else() }
+        op == WASM_OP_END -> { cx.leave() }
         op == WASM_OP_BR -> {
             cx.branch(a)
             cx.dead = true
@@ -648,9 +734,7 @@ plug_op: fn(cx: &PlugCx, kit: PlugKit, scope: PlugScope, code: WasmCode, k: Int)
             cx.check(true)
             cx.push_results(ty, result, area)
         }
-        op == WASM_OP_DROP -> {
-            _: cx.pop()
-        }
+        op == WASM_OP_DROP -> { _: cx.pop() }
         op == WASM_OP_SELECT || op == WASM_OP_SELECT_T -> {
             condition: cx.pop()
             second: cx.pop()
@@ -706,9 +790,7 @@ plug_op: fn(cx: &PlugCx, kit: PlugKit, scope: PlugScope, code: WasmCode, k: Int)
             _: cx.rt("jet_plugin_table_set", [Int]{cx.inst, table, index, value, fid, at}, -1)
             cx.check(false)
         }
-        op >= 0x28 && op <= 0x3e -> {
-            plug_memory_access(cx, scope, op, b)
-        }
+        op >= 0x28 && op <= 0x3e -> { plug_memory_access(cx, scope, op, b) }
         op == WASM_OP_MEMORY_SIZE -> {
             memories: cx.load(rows.word, cx.inst, PLUG_INST_MEMORIES)
             size: cx.load(rows.word, memories, scope.memory * 24 + 8)
@@ -743,33 +825,15 @@ plug_op: fn(cx: &PlugCx, kit: PlugKit, scope: PlugScope, code: WasmCode, k: Int)
             value: cx.konst(rows.f64, a)
             cx.push(value)
         }
-        op >= 0x45 && op <= 0x4f -> {
-            plug_int_compare(cx, op - 0x45, false)
-        }
-        op >= 0x50 && op <= 0x5a -> {
-            plug_int_compare(cx, op - 0x50, true)
-        }
-        op >= 0x5b && op <= 0x60 -> {
-            plug_float_compare(cx, op - 0x5b, true)
-        }
-        op >= 0x61 && op <= 0x66 -> {
-            plug_float_compare(cx, op - 0x61, false)
-        }
-        op >= 0x67 && op <= 0x78 -> {
-            plug_int_arith(cx, op - 0x67, false)
-        }
-        op >= 0x79 && op <= 0x8a -> {
-            plug_int_arith(cx, op - 0x79, true)
-        }
-        op >= 0x8b && op <= 0x98 -> {
-            plug_float_arith(cx, op - 0x8b, true)
-        }
-        op >= 0x99 && op <= 0xa6 -> {
-            plug_float_arith(cx, op - 0x99, false)
-        }
-        op >= 0xa7 && op <= 0xc4 -> {
-            plug_convert(cx, op)
-        }
+        op >= 0x45 && op <= 0x4f -> { plug_int_compare(cx, op - 0x45, false) }
+        op >= 0x50 && op <= 0x5a -> { plug_int_compare(cx, op - 0x50, true) }
+        op >= 0x5b && op <= 0x60 -> { plug_float_compare(cx, op - 0x5b, true) }
+        op >= 0x61 && op <= 0x66 -> { plug_float_compare(cx, op - 0x61, false) }
+        op >= 0x67 && op <= 0x78 -> { plug_int_arith(cx, op - 0x67, false) }
+        op >= 0x79 && op <= 0x8a -> { plug_int_arith(cx, op - 0x79, true) }
+        op >= 0x8b && op <= 0x98 -> { plug_float_arith(cx, op - 0x8b, true) }
+        op >= 0x99 && op <= 0xa6 -> { plug_float_arith(cx, op - 0x99, false) }
+        op >= 0xa7 && op <= 0xc4 -> { plug_convert(cx, op) }
         op == WASM_OP_REF_NULL -> {
             value: cx.word(0)
             cx.push(value)
@@ -790,9 +854,7 @@ plug_op: fn(cx: &PlugCx, kit: PlugKit, scope: PlugScope, code: WasmCode, k: Int)
             value: cx.pop()
             plug_trunc(cx, value, n % 4 < 2, (n % 2) + (if n >= 4 -> 2 else -> 0) + 4)
         }
-        op >= WASM_OP_MEMORY_INIT && op <= WASM_OP_TABLE_FILL -> {
-            plug_bulk(cx, scope, op, a, b)
-        }
+        op >= WASM_OP_MEMORY_INIT && op <= WASM_OP_TABLE_FILL -> { plug_bulk(cx, scope, op, a, b) }
         else -> {
             return Err(WasmError.new("function {cx.fid}: instruction 0x{op} is not supported by the plugin engine", cx.at))
         }
@@ -809,9 +871,7 @@ plug_memory_access: fn(cx: &PlugCx, scope: PlugScope, op: Int, offset: Int) Neve
             narrow = rows.word
             width = 8
         }
-        op == 0x2a || op == 0x38 -> {
-            narrow = rows.f32
-        }
+        op == 0x2a || op == 0x38 -> { narrow = rows.f32 }
         op == 0x2b || op == 0x39 -> {
             narrow = rows.f64
             width = 8
@@ -832,9 +892,7 @@ plug_memory_access: fn(cx: &PlugCx, scope: PlugScope, op: Int, offset: Int) Neve
             narrow = rows.u16
             width = 2
         }
-        op == 0x35 -> {
-            narrow = rows.u32
-        }
+        op == 0x35 -> { narrow = rows.u32 }
     }
     if op <= 0x35 {
         result: if {
@@ -935,9 +993,7 @@ plug_int_arith: fn(cx: &PlugCx, index: Int, wide: Bool) Never! {
             }
             op: if index <= 7 -> IROp.Div else -> IROp.Rem
             if {
-                index % 2 == 0 -> {
-                    result = cx.op2(op, row, left, right)
-                }
+                index % 2 == 0 -> { result = cx.op2(op, row, left, right) }
                 else -> {
                     ul: cx.unsigned(left, wide)
                     ur: cx.unsigned(right, wide)
@@ -950,12 +1006,8 @@ plug_int_arith: fn(cx: &PlugCx, index: Int, wide: Bool) Never! {
             mask: cx.konst(row, width - 1)
             count: cx.op2(IROp.BitAnd, row, right, mask)
             if {
-                index == 13 -> {
-                    result = cx.op2(IROp.Shl, row, left, count)
-                }
-                index == 14 -> {
-                    result = cx.op2(IROp.Shr, row, left, count)
-                }
+                index == 13 -> { result = cx.op2(IROp.Shl, row, left, count) }
+                index == 14 -> { result = cx.op2(IROp.Shr, row, left, count) }
                 index == 15 -> {
                     ul: cx.unsigned(left, wide)
                     shifted: cx.op2(IROp.Shr, urow, ul, count)
@@ -1076,15 +1128,9 @@ plug_convert: fn(cx: &PlugCx, op: Int) Never! {
     }
     result := -1
     if {
-        op == 0xa7 -> {
-            result = cx.narrow32(value)
-        }
-        op == 0xac -> {
-            result = cx.emit_copy(rows.word, value)
-        }
-        op == 0xad -> {
-            result = cx.zext(value)
-        }
+        op == 0xa7 -> { result = cx.narrow32(value) }
+        op == 0xac -> { result = cx.emit_copy(rows.word, value) }
+        op == 0xad -> { result = cx.zext(value) }
         op == 0xb4 || op == 0xb5 -> {
             // i64 to f32 rounds once in the runtime; through an f64 it would round twice.
             unsigned: cx.word(op - 0xb4)
@@ -1098,24 +1144,12 @@ plug_convert: fn(cx: &PlugCx, op: Int) Never! {
             widened: if n == 3 -> cx.rt("jet_plugin_f64_from_u64", [Int]{value}, rows.f64) else -> cx.convert(rows.f64, wide)
             result = if op <= 0xb3 -> cx.demote(widened) else -> widened
         }
-        op == 0xb6 -> {
-            result = cx.demote(value)
-        }
-        op == 0xbb -> {
-            result = cx.promote(value)
-        }
-        op == 0xbc -> {
-            result = cx.reinterpret(value, rows.i32)
-        }
-        op == 0xbd -> {
-            result = cx.reinterpret(value, rows.word)
-        }
-        op == 0xbe -> {
-            result = cx.reinterpret(value, rows.f32)
-        }
-        op == 0xbf -> {
-            result = cx.reinterpret(value, rows.f64)
-        }
+        op == 0xb6 -> { result = cx.demote(value) }
+        op == 0xbb -> { result = cx.promote(value) }
+        op == 0xbc -> { result = cx.reinterpret(value, rows.i32) }
+        op == 0xbd -> { result = cx.reinterpret(value, rows.word) }
+        op == 0xbe -> { result = cx.reinterpret(value, rows.f32) }
+        op == 0xbf -> { result = cx.reinterpret(value, rows.f64) }
         else -> {
             // extend8_s … extend32_s: the i32 forms (0xc0, 0xc1) and the i64 forms.
             bits: if {
@@ -1200,8 +1234,20 @@ plug_bulk: fn(cx: &PlugCx, scope: PlugScope, op: Int, a: Int, b: Int) Never! {
 
 plug_cx: fn(kit: PlugKit, f: &&IRFunction, fid: Int) -> PlugCx Never! {
     PlugCx{
-        f: f.move(), rows: kit.rows, names: kit.names, fid: fid, inst: 0, out: -1, locals: [Int]{}, stack: [Int]{}, frames: [PlugFrame]{},
-        flags: [Int:Int]{}, dead: false, skip: 0, dummy: -1, at: 0,
+        f: f.move(),
+        rows: kit.rows,
+        names: kit.names,
+        fid: fid,
+        inst: 0,
+        out: -1,
+        locals: [Int]{},
+        stack: [Int]{},
+        frames: [PlugFrame]{},
+        flags: [Int:Int]{},
+        dead: false,
+        skip: 0,
+        dummy: -1,
+        at: 0,
     }
 }
 
@@ -1300,9 +1346,7 @@ plug_import_stub: fn(kit: PlugKit, fid: Int, import: Int, ty: WasmFuncType) -> I
     raw: cx.rt("jet_plugin_host_import", [Int]{cx.inst, index, area, count}, rows.word)
     cx.check(false)
     if {
-        row < 0 -> {
-            cx.emit(IROp.Return, -1, -1, -1, -1)
-        }
+        row < 0 -> { cx.emit(IROp.Return, -1, -1, -1, -1) }
         else -> {
             result: if {
                 row == rows.i32 -> cx.narrow32(raw)

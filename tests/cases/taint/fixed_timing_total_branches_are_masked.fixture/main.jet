@@ -2,18 +2,13 @@
 // both arms run and the result is selected with no jump.
 Key: tag { deny: [Exec], timing: .Fixed }
 
-#Scrub(Key)
-reveal: fn(value: #Key U64) -> U64 { value }
+#Scrub(Key) reveal: fn(value: #Key U64) -> U64 { value }
 
-#Scrub(Key)
-reveal_flag: fn(value: #Key Bool) -> Bool { value }
+#Scrub(Key) reveal_flag: fn(value: #Key Bool) -> Bool { value }
 
-#Scrub(Key)
-reveal_byte: fn(value: #Key U8) -> U8 { value }
+#Scrub(Key) reveal_byte: fn(value: #Key U8) -> U8 { value }
 
-pick: fn(k: #Key U64, a: U64, b: U64) -> U64 {
-    if k == (U64{1}) -> a else -> b
-}
+pick: fn(k: #Key U64, a: U64, b: U64) -> U64 { if k == (U64{1}) -> a else -> b }
 
 order: fn(k: #Key U64, a: U64, b: U64) -> U64 {
     low := a
@@ -34,16 +29,12 @@ same: fn(k: #Key U64, v: U64) -> Bool {
 grade: fn(k: #Key U64) -> U64 {
     r := U64{0}
     if k > (U64{10}) {
-        if k > (U64{100}) -> r = U64{3} else -> r = U64{2}
-    } else if k > (U64{5}) {
-        r = U64{1}
-    }
+        if k > (U64{100}) -> r = U64{3} else { r = U64{2} }
+    } else if k > (U64{5}) { r = U64{1} }
     r
 }
 
-small: fn(k: #Key U8) -> U8 {
-    if k < (U8{128}) -> k.bit_xor(U8{255}) else -> k
-}
+small: fn(k: #Key U8) -> U8 { if k < (U8{128}) -> k.bit_xor(U8{255}) else -> k }
 
 run: fn() {
     print("pick {reveal(pick(#Key U64{1}, U64{7}, U64{9}))} {reveal(pick(#Key U64{2}, U64{7}, U64{9}))}")

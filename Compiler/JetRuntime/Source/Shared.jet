@@ -22,9 +22,13 @@ shared_count_retain: fn(cell: I64, pin: Bool) -> Bool {
     }
     false
 }
+
 shared_retain: fn(shared: I64) {
-    if !shared_count_retain(shared, false) && jet_rt_session_propagate() == (I64{0}) -> shared_guard_invalid()
+    if !shared_count_retain(shared, false) && jet_rt_session_propagate() == (I64{0}) {
+        shared_guard_invalid()
+    }
 }
+
 // Reserve a physical borrow while a logical owner is still live. Mutex
 // serialization with retirement closes the last-owner/acquire race.
 shared_borrow_pin: fn(cell: I64) -> Bool {
@@ -34,6 +38,7 @@ shared_borrow_pin: fn(cell: I64) -> Bool {
     sync_mutex_unlock(wrapping(cell + I64{8}))
     retained
 }
+
 shared_borrow_unpin: fn(cell: I64) {
     sync_mutex_lock(wrapping(cell + I64{8}))
     _ := sync_add(wrapping(cell + I64{72}), I64{-1})
@@ -49,10 +54,11 @@ shared_borrow_unpin: fn(cell: I64) {
 // ordering or deadlock-freedom changes (the mutex is never held while
 // pausing). Returns false when the caller should block.
 SHARED_SPIN_ROUNDS: I64{64}
+
 SHARED_SPIN_PAUSES: I64{32}
 
 shared_spin: fn(mutex: I64, round: I64) -> Bool {
-    if (round >= SHARED_SPIN_ROUNDS) -> return false
+    if (round >= SHARED_SPIN_ROUNDS) { return false }
     sync_mutex_unlock(mutex)
     pauses := I64{0}
     #Unsafe("x86 pause only hints that this thread is waiting in a spin loop; no memory is touched") {
@@ -65,7 +71,9 @@ shared_spin: fn(mutex: I64, round: I64) -> Bool {
     true
 }
 
-shared_acquire: fn(shared: I64, editable: Bool) { _ := shared_acquire_until(shared, editable, I64{-1}) }
+shared_acquire: fn(shared: I64, editable: Bool) {
+    _ := shared_acquire_until(shared, editable, I64{-1})
+}
 
 // Takes the permit unless `deadline_ns` (sync_now_ns; -1: none) passes
 // first, true when it was taken. A waiting writer that gives up withdraws
@@ -141,7 +149,9 @@ shared_revision_stop: fn() {
 }
 
 #Export(c) jet_rt_native_shared_read: fn(shared: I64, env: I64, invoke: I64, out: I64) {
-    if !shared_borrow_pin(shared) -> return
+    if !shared_borrow_pin(shared) {
+        return
+    }
     shared_acquire(shared, false)
     _ := coll_call3(invoke, env, sync_load(wrapping(shared + I64{64})), out)
     // No output is inspected here: a stopped callback leaves it uninitialized.
@@ -150,7 +160,9 @@ shared_revision_stop: fn() {
 }
 
 #Export(c) jet_rt_native_shared_edit: fn(shared: I64, env: I64, invoke: I64, out: I64) {
-    if !shared_borrow_pin(shared) -> return
+    if !shared_borrow_pin(shared) {
+        return
+    }
     shared_acquire(shared, true)
     revision: sync_load(wrapping(shared + I64{48}))
     if (revision == I64{-1}) {
@@ -216,9 +228,7 @@ shared_guard_token: fn(guard: I64) -> I64 { guard.bit_and(I64{-4}) }
 // The root guard a guard projects.
 shared_guard_root: fn(guard: I64) -> I64 {
     root := guard
-    loop shared_guard_projected(root) {
-        root = sync_load(shared_guard_token(root))
-    }
+    loop shared_guard_projected(root) -> root = sync_load(shared_guard_token(root))
     root
 }
 
@@ -229,7 +239,7 @@ shared_guard_unproject: fn(guard: I64) -> I64 {
     current := guard
     loop shared_guard_projected(current) {
         token: shared_guard_token(current)
-        if (sync_add(wrapping(token + I64{16}), I64{-1}) != I64{1}) -> return I64{0}
+        if (sync_add(wrapping(token + I64{16}), I64{-1}) != I64{1}) { return I64{0} }
         current = sync_load(token)
         jet_rt_free(token, I64{24}, I64{8})
     }
@@ -312,13 +322,21 @@ shared_guard_payload: fn(guard: I64) -> I64 {
     true
 }
 
-#Export(c) jet_rt_native_shared_read_guard_read: fn(guard: I64) -> I64 { shared_guard_payload(guard) }
+#Export(c) jet_rt_native_shared_read_guard_read: fn(guard: I64) -> I64 {
+    shared_guard_payload(guard)
+}
 
-#Export(c) jet_rt_native_shared_read_guard_deref: fn(guard: I64) -> I64 { shared_guard_payload(guard) }
+#Export(c) jet_rt_native_shared_read_guard_deref: fn(guard: I64) -> I64 {
+    shared_guard_payload(guard)
+}
 
-#Export(c) jet_rt_native_shared_edit_guard_read: fn(guard: I64) -> I64 { shared_guard_payload(guard) }
+#Export(c) jet_rt_native_shared_edit_guard_read: fn(guard: I64) -> I64 {
+    shared_guard_payload(guard)
+}
 
-#Export(c) jet_rt_native_shared_edit_guard_edit: fn(guard: I64) -> I64 { shared_guard_payload(guard) }
+#Export(c) jet_rt_native_shared_edit_guard_edit: fn(guard: I64) -> I64 {
+    shared_guard_payload(guard)
+}
 
 // The slot a guard lends, whichever permit it holds.
 #Export(c) jet_rt_native_shared_guard_payload: fn(guard: I64) -> I64 { shared_guard_payload(guard) }
@@ -334,7 +352,9 @@ shared_guard_payload: fn(guard: I64) -> I64 {
 
 #Export(c) jet_rt_native_shared_read_guard_drop: fn(guard: I64) {
     root: shared_guard_unproject(guard)
-    if root == (I64{0}) -> return
+    if root == (I64{0}) {
+        return
+    }
     cell: shared_guard_cell(root)
     if shared_guard_held(root) -> shared_release(cell, false)
     jet_rt_native_shared_drop(cell)
@@ -342,7 +362,9 @@ shared_guard_payload: fn(guard: I64) -> I64 {
 
 #Export(c) jet_rt_native_shared_edit_guard_drop: fn(guard: I64) {
     root: shared_guard_unproject(guard)
-    if root == (I64{0}) -> return
+    if root == (I64{0}) {
+        return
+    }
     cell: shared_guard_cell(root)
     if !shared_guard_held(root) {
         jet_rt_native_shared_drop(cell)
@@ -418,6 +440,7 @@ shared_count_release: fn(shared: I64, pin: Bool) {
     if next == (I64{0}) -> shared_weak_release(shared)
     if temporary_weak -> shared_weak_release(shared)
 }
+
 #Export(c) jet_rt_native_shared_drop: fn(shared: I64) {
     if shared != (I64{0}) -> shared_count_release(shared, false)
 }
@@ -446,9 +469,7 @@ shared_weak_release: fn(weak: I64) {
     false
 }
 
-#Export(c) jet_rt_native_shared_weak_drop: fn(weak: I64) {
-    shared_weak_release(weak)
-}
+#Export(c) jet_rt_native_shared_weak_drop: fn(weak: I64) { shared_weak_release(weak) }
 
 // Process-pinned publication registry, shared with World-lifetime site reset.
 // Reset is quiescent (all World children joined); retained nodes dedupe the
@@ -459,7 +480,9 @@ shared_registered := I64{0}
 #Export(c) jet_rt_shared_init: fn() {
     if (shared_registered == I64{0}) {
         registered: jet_rt_alloc(I64{16}, I64{8})
-        #Unsafe("runtime-init runs before any other thread exists") { shared_registered = registered }
+        #Unsafe("runtime-init runs before any other thread exists") {
+            shared_registered = registered
+        }
         sync_store(shared_registered, I64{0})
         sync_store(wrapping(shared_registered + I64{8}), I64{1})
     }
@@ -513,14 +536,17 @@ shared_registry_publish: fn(expected: I64, candidate: I64) -> Bool {
 #Export(c) jet_rt_shared_owner_strong_count: fn(owner: I64) -> I64 {
     sync_load(owner).bit_and(I64{4294967295})
 }
+
 #Export(c) jet_rt_shared_owner_pin: fn(owner: I64, out: I64) -> Bool {
     if !shared_count_retain(owner, true) -> return false
     sync_store(out, owner)
     true
 }
+
 #Export(c) jet_rt_shared_pin_drop: fn(pin: I64) {
     if pin != (I64{0}) -> shared_count_release(pin, true)
 }
+
 shared_alias_next: fn() -> I64 {
     next := sync_load(wrapping(shared_registered + I64{8}))
     loop {
@@ -533,6 +559,7 @@ shared_alias_next: fn() -> I64 {
         next = previous
     }
 }
+
 #Export(c) jet_rt_shared_owner_alias: fn(owner: I64, out: I64) -> Bool {
     alias: jet_rt_alloc(I64{24}, I64{8})
     if !jet_rt_native_shared_weak_upgrade(owner, alias) {
@@ -550,12 +577,14 @@ shared_alias_next: fn() -> I64 {
     sync_store(out, alias)
     true
 }
-#Export(c) jet_rt_shared_alias_token: fn(alias: I64) -> I64 {
-    sync_load(wrapping(alias + I64{8}))
-}
+
+#Export(c) jet_rt_shared_alias_token: fn(alias: I64) -> I64 { sync_load(wrapping(alias + I64{8})) }
+
 #Export(c) jet_rt_shared_alias_drop: fn(owned_slot: I64) {
     alias: sync_load(owned_slot)
-    if alias == (I64{0}) -> return
+    if alias == (I64{0}) {
+        return
+    }
     sync_store(owned_slot, I64{0})
     if sync_load(wrapping(alias + I64{16})) != (I64{0}) {
         sync_store(wrapping(alias + I64{16}), I64{0})
@@ -577,6 +606,7 @@ shared_alias_next: fn() -> I64 {
     sync_store(wrapping(guard + I64{32}), I64{1})
     guard
 }
+
 #Export(c) jet_rt_shared_guard_clone: fn(guard: I64) -> I64 {
     refs: sync_load(wrapping(guard + I64{32}))
     if refs == (I64{2147483647}) {
@@ -586,9 +616,11 @@ shared_alias_next: fn() -> I64 {
     sync_store(wrapping(guard + I64{32}), refs + I64{1})
     guard
 }
+
 #Export(c) jet_rt_shared_guard_held: fn(guard: I64) -> Bool {
     sync_load(wrapping(guard + I64{16})) != I64{0}
 }
+
 #Export(c) jet_rt_shared_guard_root_ptr: fn(guard: I64) -> I64 {
     if !jet_rt_shared_guard_held(guard) {
         shared_guard_invalid()
@@ -596,6 +628,7 @@ shared_alias_next: fn() -> I64 {
     }
     sync_load(wrapping(sync_load(guard) + I64{64}))
 }
+
 #Export(c) jet_rt_shared_guard_revision: fn(guard: I64) -> I64 {
     if !jet_rt_shared_guard_held(guard) {
         shared_guard_invalid()
@@ -603,6 +636,7 @@ shared_alias_next: fn() -> I64 {
     }
     sync_load(wrapping(sync_load(guard) + I64{48}))
 }
+
 #Export(c) jet_rt_shared_guard_mark_dirty: fn(guard: I64) {
     if !jet_rt_shared_guard_held(guard) || sync_load(wrapping(guard + I64{8})) == (I64{0}) {
         shared_guard_invalid()
@@ -610,8 +644,11 @@ shared_alias_next: fn() -> I64 {
     }
     sync_store(wrapping(guard + I64{24}), I64{1})
 }
+
 shared_physical_guard_release: fn(guard: I64, commit: Bool) {
-    if !jet_rt_shared_guard_held(guard) -> return
+    if !jet_rt_shared_guard_held(guard) {
+        return
+    }
     cell: sync_load(guard)
     editable: sync_load(wrapping(guard + I64{8})) != I64{0}
     exhausted := false
@@ -625,6 +662,7 @@ shared_physical_guard_release: fn(guard: I64, commit: Bool) {
     shared_release(cell, editable)
     if exhausted -> shared_revision_stop()
 }
+
 #Export(c) jet_rt_shared_guard_publish_and_release: fn(guard: I64) {
     if !jet_rt_shared_guard_held(guard) || sync_load(wrapping(guard + I64{8})) == (I64{0}) {
         shared_guard_invalid()
@@ -632,9 +670,11 @@ shared_physical_guard_release: fn(guard: I64, commit: Bool) {
     }
     shared_physical_guard_release(guard, true)
 }
+
 #Export(c) jet_rt_shared_guard_abort_release: fn(guard: I64) {
     shared_physical_guard_release(guard, false)
 }
+
 #Export(c) jet_rt_shared_guard_reacquire_and_refresh: fn(guard: I64, cancel_flag: I64) -> Bool {
     if jet_rt_shared_guard_held(guard) {
         shared_guard_invalid()
@@ -671,10 +711,13 @@ shared_physical_guard_release: fn(guard: I64, commit: Bool) {
         _ := sync_cond_wait(wrapping(cell + I64{16}), mutex, sync_deadline(I64{10000000}))
     }
 }
+
 #Export(c) jet_rt_shared_guard_drop: fn(guard: I64) {
     refs: sync_load(wrapping(guard + I64{32}))
     sync_store(wrapping(guard + I64{32}), refs - I64{1})
-    if refs != (I64{1}) -> return
+    if refs != (I64{1}) {
+        return
+    }
     // Release protocol before user drop glue can reenter Shared. A suspended
     // guard has no permit to release, but still owns its pin/lifetime borrow.
     shared_physical_guard_release(guard, true)
@@ -718,12 +761,16 @@ cell_guard_token: fn(guard: I64, address: I64) -> I64 {
 // `guard.read(f)` / `guard.edit(f)`: the callback over the lent value.
 #Export(c) jet_rt_native_cell_guard_with: fn(token: I64, env: I64, invoke: I64, out: I64) {
     address: jet_rt_native_cell_guard_address(token)
-    if address == (I64{0}) -> return
+    if address == (I64{0}) {
+        return
+    }
     _ := coll_call3(invoke, env, address, out)
 }
 
 #Export(c) jet_rt_native_cell_guard_drop: fn(token: I64) {
-    if token == (I64{0}) -> return
+    if token == (I64{0}) {
+        return
+    }
     jet_rt_shared_guard_drop(sync_load(token))
     jet_rt_free(token, I64{16}, I64{8})
 }

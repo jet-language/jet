@@ -102,7 +102,9 @@ probe_axis_tool: fn(env_runner: String, cwd: String, tool: Dyn, jet_bin: String)
 probe_jet_binary: fn(jet_bin: String) -> Dyn {
     resolved: files.resolve(jet_bin) ?? jet_bin.copy()
     stat: files.stat(resolved, Val(.Follow)) ?? {
-        if err == .NotFound(_) -> return jet_probe("unavailable", "Jet binary is absent: {resolved}")
+        if err == .NotFound(_) {
+            return jet_probe("unavailable", "Jet binary is absent: {resolved}")
+        }
         return jet_probe("probe_failed", "could not inspect Jet binary {resolved}: {err}")
     }
     if !stat.is_file -> return jet_probe("probe_failed", "Jet binary is not a file: {resolved}")
@@ -128,7 +130,9 @@ jet_probe: fn(status: String, reason: String) -> Dyn {
 // and 127 when it could not start.
 run_probe_command: fn(env_runner: String, cwd: String, command: [String]) -> ToolRun {
     receipt: process.cmd([env_runner].concat(command)).cwd(cwd).timeout(10s).run() ?? return ToolRun{code: 127, stdout: "", stderr: "{err}"}
-    if receipt.timed_out -> return ToolRun{code: 124, stdout: receipt.output, stderr: "timeout after 10s"}
+    if receipt.timed_out {
+        return ToolRun{code: 124, stdout: receipt.output, stderr: "timeout after 10s"}
+    }
     ToolRun{code: if receipt.signal == None -> receipt.code else -> 128, stdout: receipt.output, stderr: receipt.errors}
 }
 
@@ -143,9 +147,7 @@ tool_version_command: fn(tool: String) -> [String] {
 }
 
 // `text` as one single-quoted shell word.
-shell_quoted: fn(text: String) -> String {
-    "'{text.replace("'", "'\\''")}'"
-}
+shell_quoted: fn(text: String) -> String { "'{text.replace("'", "'\\''")}'" }
 
 // The text before the first line break of `text`.
 first_line: fn(text: String) -> String {

@@ -15,8 +15,12 @@ jet_cli_inspect_target: fn(request: JetCLIInspectRequest, color: Bool{false}, js
     fix: "run `jet inspect target <machine>` with one of {JET_DRIVER_TARGET_MACHINE_NAMES.join(", ")}"
     machine: if request.scope == {
         .Target(named) -> jet_driver_target_machine_by_name(named, JET_VERSION) ?? return jet_cli_fail("E3302", "target `{named}` is not available", "the name is not a declared target machine", fix, color, JET_DRIVER_EXIT_USAGE)
-        .Package -> return jet_cli_inspect_target_list(json: json)
-        .Live(_) | .Replay(_) -> return jet_cli_fail("E2104", "`jet inspect target` reads no live process or replay", jet_cli_why("E2104"), fix, color, JET_DRIVER_EXIT_USAGE)
+        .Package -> {
+            return jet_cli_inspect_target_list(json: json)
+        }
+        .Live(_) | .Replay(_) -> {
+            return jet_cli_fail("E2104", "`jet inspect target` reads no live process or replay", jet_cli_why("E2104"), fix, color, JET_DRIVER_EXIT_USAGE)
+        }
     }
     dossier: jet_target_machine_dossier_json(machine) ?? return jet_cli_fail("E3302", "target `{machine.name}` keeps no dossier", "its audit policy has no dossier lens", fix, color, JET_DRIVER_EXIT_USAGE)
     if json {
@@ -48,20 +52,29 @@ jet_cli_inspect_target_list: fn(json: Bool{false}) -> JetCLIPlan Never! {
         machines.push(machine)
     }
     if json {
-        rows: loop machine in machines -> jet_cli_status_object([JetCLIStatusField]{
-            jet_cli_status_field("name", jet_cli_status_text(machine.name)),
-            jet_cli_status_field("triple", jet_cli_status_text(machine.triple)),
-            jet_cli_status_field("environment", jet_cli_status_text(jet_target_environment_identity(machine))),
-            jet_cli_status_field("execution", jet_cli_status_object([JetCLIStatusField]{
-                jet_cli_status_field("aot", jet_cli_status_bool(true)),
-                jet_cli_status_field("dev", jet_cli_status_bool(!machine.no_os)),
-            })),
-        })
+        rows: loop machine in machines -> jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field("name", jet_cli_status_text(machine.name)),
+                jet_cli_status_field("triple", jet_cli_status_text(machine.triple)),
+                jet_cli_status_field("environment", jet_cli_status_text(jet_target_environment_identity(machine))),
+                jet_cli_status_field(
+                    "execution",
+                    jet_cli_status_object(
+                        [JetCLIStatusField]{
+                            jet_cli_status_field("aot", jet_cli_status_bool(true)),
+                            jet_cli_status_field("dev", jet_cli_status_bool(!machine.no_os)),
+                        },
+                    ),
+                ),
+            },
+        )
         line: jet_cli_status_render("inspect.target", true, [JetCLIStatusField]{jet_cli_status_field("targets", jet_cli_status_array(rows))})
         return JetCLIPlan.Done{output: JetDriverVerbOutput{stdout: "{line}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}}
     }
     out := "target machines\n"
-    loop machine in machines -> out = "{out}  {machine.name} ({machine.triple}, {jet_target_environment_identity(machine)}): runs {jet_cli_inspect_target_runs(machine)}\n"
+    loop machine in machines {
+        out = "{out}  {machine.name} ({machine.triple}, {jet_target_environment_identity(machine)}): runs {jet_cli_inspect_target_runs(machine)}\n"
+    }
     out = "{out}run `jet inspect target <machine>` for one machine's dossier\n"
     JetCLIPlan.Done{output: JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_OK}}
 }

@@ -71,7 +71,7 @@ ExplainReport: struct {
             "E1340",
             self.message,
             if conflict -> "two persisted Hangar facts disagree, so the explanation cannot claim one identity" else -> "a persisted Hangar fact needed by this explanation is unavailable or lossy",
-            if conflict -> "repair the conflicting Hangar or provider record, then run `jet explain` again" else -> "run `jetpack hangar verify` and repair or rebuild the affected package before relying on this fact"
+            if conflict -> "repair the conflicting Hangar or provider record, then run `jet explain` again" else -> "run `jetpack hangar verify` and repair or rebuild the affected package before relying on this fact",
         )
         tree: report.to_tree()
         if tree == {
@@ -102,7 +102,7 @@ ExplainEntry: struct {
     last_used_at: Int
 
     to_tree: fn(self) -> Dyn Never! {
-        object := [String: Dyn]{}
+        object := [String:Dyn]{}
         object["id"] = Dyn.Text(self.id.copy())
         object["name"] = Dyn.Text(self.name.copy())
         object["version"] = Dyn.Text(self.version.copy())
@@ -126,7 +126,7 @@ ExplainObject: struct {
     owners: [String]
 
     to_tree: fn(self) -> Dyn Never! {
-        object := [String: Dyn]{}
+        object := [String:Dyn]{}
         object["digest"] = Dyn.Text(self.digest.copy())
         object["path"] = Dyn.Text(self.path.copy())
         object["external"] = Dyn.Bool(self.external)
@@ -148,7 +148,7 @@ ExplainGraph: struct {
     }
 
     to_tree: fn(self) -> Dyn Never! {
-        object := [String: Dyn]{}
+        object := [String:Dyn]{}
         object["direct_dependencies"] = store_explain_objects_tree(self.direct_dependencies)
         object["dependencies"] = store_explain_objects_tree(self.dependencies)
         object["direct_referrers"] = store_explain_objects_tree(self.direct_referrers)
@@ -171,7 +171,7 @@ ExplainProfile: struct {
     provider_facts: ProviderFacts
 
     to_tree: fn(self) -> Dyn Never! {
-        object := [String: Dyn]{}
+        object := [String:Dyn]{}
         object["profile"] = Dyn.Text(self.profile.copy())
         object["generation"] = Dyn.Int(self.generation)
         object["output_hash"] = Dyn.Text(self.output_hash.copy())
@@ -186,19 +186,19 @@ ExplainProvider: struct {
     source_digest: String
     toolchain_facts: String
     policy_facts: String
-    producer_facts: [String: String]
+    producer_facts: [String:String]
     provider_facts: ProviderFacts?
     locked_provider_facts: ProviderFacts?
     profile_facts: [ExplainProfile]
     native_document: String
 
     to_tree: fn(self) -> Dyn Never! {
-        facts := [String: Dyn]{}
+        facts := [String:Dyn]{}
         fact_keys: store_sorted_keys(self.producer_facts)
         loop key in fact_keys -> facts[key] = Dyn.Text(self.producer_facts[key].copy())
         profiles := [Dyn]{}
         loop profile in self.profile_facts -> profiles.push(profile.to_tree())
-        object := [String: Dyn]{}
+        object := [String:Dyn]{}
         object["provider"] = Dyn.Text(self.provider.copy())
         object["immutable_source"] = Dyn.Text(self.immutable_source.copy())
         object["source_digest"] = Dyn.Text(self.source_digest.copy())
@@ -231,7 +231,7 @@ ExplainRoot: struct {
     reason: String
 
     to_tree: fn(self) -> Dyn Never! {
-        object := [String: Dyn]{}
+        object := [String:Dyn]{}
         object["kind"] = Dyn.Text(self.kind.copy())
         object["id"] = Dyn.Text(self.id.copy())
         object["producer"] = Dyn.Text(self.producer.copy())
@@ -256,7 +256,7 @@ ExplainLiveness: struct {
     to_tree: fn(self) -> Dyn Never! {
         roots := [Dyn]{}
         loop root in self.roots -> roots.push(root.to_tree())
-        object := [String: Dyn]{}
+        object := [String:Dyn]{}
         object["live"] = Dyn.Bool(self.live)
         object["reason"] = Dyn.Text(self.reason.copy())
         object["roots"] = Dyn.Array(roots)
@@ -279,7 +279,7 @@ ExplainAttempt: struct {
     }
 
     to_tree: fn(self) -> Dyn Never! {
-        object := [String: Dyn]{}
+        object := [String:Dyn]{}
         object["id"] = Dyn.Text(self.id.copy())
         object["package"] = Dyn.Text(self.package.copy())
         object["reference"] = Dyn.Text(self.reference.copy())
@@ -302,7 +302,7 @@ ExplainCacheAdmission: struct {
     reason: String
 
     to_tree: fn(self) -> Dyn Never! {
-        object := [String: Dyn]{}
+        object := [String:Dyn]{}
         object["role"] = Dyn.Text(self.role.copy())
         object["decision"] = Dyn.Text(self.decision.copy())
         object["builder"] = Dyn.Text(self.builder.copy())
@@ -333,19 +333,19 @@ ExplainRebuild: struct {
     decision: String
     reason: String
     action_key: String
-    cache_identity: [String: String]
+    cache_identity: [String:String]
     cache_admissions: [ExplainCacheAdmission]
-    checks: [String: String]
+    checks: [String:String]
     attempt: ExplainAttempt?
 
     empty: fn() -> ExplainRebuild Never! {
-        ExplainRebuild{decision: "", reason: "", action_key: "", cache_identity: [String: String]{}, cache_admissions: [ExplainCacheAdmission]{}, checks: [String: String]{}, attempt: None}
+        ExplainRebuild{decision: "", reason: "", action_key: "", cache_identity: [String:String]{}, cache_admissions: [ExplainCacheAdmission]{}, checks: [String:String]{}, attempt: None}
     }
 
     to_tree: fn(self) -> Dyn Never! {
         admissions := [Dyn]{}
         loop admission in self.cache_admissions -> admissions.push(admission.to_tree())
-        object := [String: Dyn]{}
+        object := [String:Dyn]{}
         object["decision"] = Dyn.Text(self.decision.copy())
         object["reason"] = Dyn.Text(self.reason.copy())
         object["action_key"] = Dyn.Text(self.action_key.copy())
@@ -361,8 +361,8 @@ ExplainRebuild: struct {
 }
 
 // A text map as an object in key order (Rust `BTreeMap`).
-store_explain_sorted_text_map: fn(map: [String: String]) -> Dyn Never! {
-    object := [String: Dyn]{}
+store_explain_sorted_text_map: fn(map: [String:String]) -> Dyn Never! {
+    object := [String:Dyn]{}
     keys: store_sorted_keys(map)
     loop key in keys -> object[key] = Dyn.Text(map[key].copy())
     Dyn.Object(object)
@@ -387,7 +387,7 @@ PackageExplain: struct {
             if report.kind == ExplainReportKind.Conflict -> conflicted = true
             reports.push(report.to_tree())
         }
-        payload := [String: Dyn]{}
+        payload := [String:Dyn]{}
         payload["query"] = Dyn.Text(self.query.copy())
         payload["lens"] = Dyn.Text(self.lens.copy())
         payload["entry"] = if self.entry == {
@@ -415,22 +415,30 @@ PackageExplain: struct {
             .None -> {
                 out = "{out}entry    - (no realized StoreEntry)\n"
                 if self.rebuild.attempt == {
-                    .Val(attempt) -> out = "{out}ref      {attempt.reference}\nprovider {attempt.provider}\nstatus   {attempt.status}\nlogs     jet logs {attempt.package}\n"
+                    .Val(attempt) -> {
+                        out = "{out}ref      {attempt.reference}\nprovider {attempt.provider}\nstatus   {attempt.status}\nlogs     jet logs {attempt.package}\n"
+                    }
                     .None -> {}
                 }
             }
         }
         if self.provider == {
-            .Val(provider) -> out = "{out}{store_explain_provider_text(provider)}"
+            .Val(provider) -> { out = "{out}{store_explain_provider_text(provider)}" }
             .None -> {}
         }
         lens: ExplainLens.parse(self.lens) ?? ExplainLens.All
         if lens == {
-            .All -> out = "{out}{store_explain_graph_text(self.graph)}{store_explain_liveness_text(self.liveness)}{store_explain_rebuild_text(self.rebuild)}"
-            .WhyDepends -> out = "{out}{store_explain_objects_text("direct dependencies", self.graph.direct_dependencies)}"
-            .WhatDepends -> out = "{out}{store_explain_objects_text("direct referrers", self.graph.direct_referrers)}"
-            .Closure -> out = "{out}{store_explain_objects_text("closure", self.graph.closure)}"
-            .WhyLive -> out = "{out}{store_explain_liveness_text(self.liveness)}"
+            .All -> {
+                out = "{out}{store_explain_graph_text(self.graph)}{store_explain_liveness_text(self.liveness)}{store_explain_rebuild_text(self.rebuild)}"
+            }
+            .WhyDepends -> {
+                out = "{out}{store_explain_objects_text("direct dependencies", self.graph.direct_dependencies)}"
+            }
+            .WhatDepends -> {
+                out = "{out}{store_explain_objects_text("direct referrers", self.graph.direct_referrers)}"
+            }
+            .Closure -> { out = "{out}{store_explain_objects_text("closure", self.graph.closure)}" }
+            .WhyLive -> { out = "{out}{store_explain_liveness_text(self.liveness)}" }
             .Rebuild -> out = "{out}{store_explain_rebuild_text(self.rebuild)}"
         }
         if self.reports.len() > 0 {
@@ -496,7 +504,9 @@ store_explain_rebuild_text: fn(rebuild: ExplainRebuild) -> String Never! {
     check_keys: store_sorted_keys(rebuild.checks)
     loop key in check_keys -> out = "{out}check {key} {rebuild.checks[key]}\n"
     if rebuild.attempt == {
-        .Val(attempt) -> out = "{out}attempt {attempt.id} {attempt.status} {attempt.reference}\n"
+        .Val(attempt) -> {
+            out = "{out}attempt {attempt.id} {attempt.status} {attempt.reference}\n"
+        }
         .None -> {}
     }
     out
@@ -528,7 +538,9 @@ store_explain_package: fn(verification: &StoreVerification, roots: HangarRoots, 
             if completed.provider_facts == {
                 .Val(source) -> {
                     if completed.locked_provider_facts == {
-                        .Val(locked) -> store_explain_compare_provider_identity(source, locked, reports)
+                        .Val(locked) -> {
+                            store_explain_compare_provider_identity(source, locked, reports)
+                        }
                         .None -> {}
                     }
                 }
@@ -549,12 +561,14 @@ store_explain_without_entry: fn(roots: HangarRoots, query: String, lens: Explain
     package: store_explain_package_name(query)
     attempt: if recipe_debug_latest(roots.hangar_dir(), package) == {
         .Ok(latest) -> latest ?? return Ok(None)
-        .Err(error) -> { return Err(StoreError.Other("could not read build attempt for `{query}`: {error}")) }
+        .Err(error) -> {
+            return Err(StoreError.Other("could not read build attempt for `{query}`: {error}"))
+        }
     }
     rebuild: store_explain_rebuild_without_entry(attempt)
     reports: [ExplainReport]{
         ExplainReport.loss("no realized StoreEntry exists for `{query}`; dependency, closure, and liveness facts are unavailable"),
-        ExplainReport.loss(rebuild.reason)
+        ExplainReport.loss(rebuild.reason),
     }
     liveness := ExplainLiveness.empty()
     liveness.reason = "no realized StoreEntry can be matched to a root"
@@ -573,7 +587,9 @@ store_explain_find_entry: fn(entries: [StoreEntry], query: String) -> StoreEntry
     package: store_explain_package_name(query)
     matches := [StoreEntry]{}
     loop entry in entries {
-        if entry.name == package || store_explain_package_name(entry.reference) == package -> matches.push(entry.copy())
+        if entry.name == package || store_explain_package_name(entry.reference) == package {
+            matches.push(entry.copy())
+        }
     }
     sorted: store_reuse_entries_by_id(matches)
     if sorted.len() > 1 -> return Err(store_explain_ambiguous_query(query, sorted))
@@ -646,7 +662,9 @@ store_explain_receipt_projection: fn(roots: HangarRoots, entry: StoreEntry, grap
                 if files.read_bytes(path) == {
                     .Ok(bytes) -> {
                         actual: "sha256-{pkg_sha256_hex(bytes)}"
-                        if actual != entry.receipt -> reports.push(ExplainReport.conflict("Hangar receipt `{entry.receipt}` is corrupt: content hashes as `{actual}`"))
+                        if actual != entry.receipt {
+                            reports.push(ExplainReport.conflict("Hangar receipt `{entry.receipt}` is corrupt: content hashes as `{actual}`"))
+                        }
                     }
                     .Err(error) -> {
                         reports.push(ExplainReport.loss("Hangar receipt `{entry.receipt}` could not be read: {error}"))
@@ -672,7 +690,9 @@ store_explain_receipt_projection: fn(roots: HangarRoots, entry: StoreEntry, grap
                     if pkg_parse_meta(record.package_meta) == {
                         .Val(meta) -> {
                             disagrees: meta.receipt != entry.receipt || meta.name != entry.name || meta.version != entry.version || meta.reference != entry.reference || meta.envelope.output_hash != entry.envelope.output_hash
-                            if disagrees -> reports.push(ExplainReport.conflict("Hangar closure record `{entry.id}` disagrees with the Store receipt projection"))
+                            if disagrees {
+                                reports.push(ExplainReport.conflict("Hangar closure record `{entry.id}` disagrees with the Store receipt projection"))
+                            }
                         }
                         .None -> {}
                     }
@@ -718,7 +738,7 @@ store_explain_provider_projection: fn(entry: StoreEntry, reports: &[ExplainRepor
         }
     }
     if facts == {
-        .Val(decoded) -> store_explain_check_embedded_facts(entry, producer, decoded, reports)
+        .Val(decoded) -> { store_explain_check_embedded_facts(entry, producer, decoded, reports) }
         .None -> {}
     }
     Val(ExplainProvider{provider: producer.provider, immutable_source: producer.immutable_source, source_digest: producer.source_digest, toolchain_facts: producer.toolchain_facts, policy_facts: producer.policy_facts, producer_facts: producer.facts, provider_facts: facts, locked_provider_facts: None, profile_facts: [ExplainProfile]{}, native_document: entry.producer_record})
@@ -728,11 +748,9 @@ store_explain_check_embedded_facts: fn(entry: StoreEntry, producer: ProducerReco
     entry_facts: ProviderFacts.for_reference("", entry.reference)
     canonical_entry: entry_facts.qualified_reference()
     authority_matches: if facts.facts.get("provider.authority") == {
-        .Val(value) -> {
-            if value == {
-                .Text(authority) -> authority == entry_facts.provider
-                .Null | .Bool(_) | .Number(_) | .List(_) | .Map(_) -> false
-            }
+        .Val(value) -> if value == {
+            .Text(authority) -> authority == entry_facts.provider
+            .Null | .Bool(_) | .Number(_) | .List(_) | .Map(_) -> false
         }
         .None -> false
     }
@@ -749,7 +767,9 @@ store_explain_check_embedded_facts: fn(entry: StoreEntry, producer: ProducerReco
     if producer.facts.get("provider-facts-digest") == {
         .Val(expected) -> {
             actual: facts.digest()
-            if expected != actual -> reports.push(ExplainReport.conflict("embedded provider-facts digest differs from its producer record: `{expected}` vs `{actual}`"))
+            if expected != actual {
+                reports.push(ExplainReport.conflict("embedded provider-facts digest differs from its producer record: `{expected}` vs `{actual}`"))
+            }
         }
         .None -> {
             reports.push(ExplainReport.loss("producer record has provider facts but no provider-facts digest"))
@@ -760,8 +780,12 @@ store_explain_check_embedded_facts: fn(entry: StoreEntry, producer: ProducerReco
 }
 
 store_explain_report_provider_facts: fn(facts: ProviderFacts, reports: &[ExplainReport]) Never! {
-    loop loss in facts.losses -> reports.push(ExplainReport.loss("provider fact `{loss.key}` is lossy: {loss.reason} ({loss.source})"))
-    loop conflict in facts.conflicts -> reports.push(ExplainReport.conflict("provider fact `{conflict.key}` conflicts: {conflict.left} vs {conflict.right} ({conflict.source})"))
+    loop loss in facts.losses {
+        reports.push(ExplainReport.loss("provider fact `{loss.key}` is lossy: {loss.reason} ({loss.source})"))
+    }
+    loop conflict in facts.conflicts {
+        reports.push(ExplainReport.conflict("provider fact `{conflict.key}` conflicts: {conflict.left} vs {conflict.right} ({conflict.source})"))
+    }
 }
 
 store_explain_report_provider_validation: fn(facts: ProviderFacts, context: String, reports: &[ExplainReport]) Never! {
@@ -796,13 +820,17 @@ store_explain_locked_provider_facts: fn(entry: StoreEntry, reports: &[ExplainRep
     loop record in lock.records {
         record_matches: store_explain_lock_record_matches_entry(record, entry, canonical_entry)
         raw: record.future_fields.get("provider-facts") ?? {
-            if record_matches -> reports.push(ExplainReport.loss("locked provider record `{record.identity.exact}` lacks its full provider-facts carrier"))
+            if record_matches {
+                reports.push(ExplainReport.loss("locked provider record `{record.identity.exact}` lacks its full provider-facts carrier"))
+            }
             next
         }
         facts: if ProviderFacts.from_json(raw) == {
             .Ok(decoded) -> decoded
             .Err(error) -> {
-                if record_matches -> reports.push(ExplainReport.loss("locked provider facts for {record.identity.exact} could not be decoded: {error.message}"))
+                if record_matches {
+                    reports.push(ExplainReport.loss("locked provider facts for {record.identity.exact} could not be decoded: {error.message}"))
+                }
                 next
             }
         }
@@ -879,7 +907,7 @@ store_explain_compare_provider_identity: fn(source: ProviderFacts, locked: Provi
         (field: "provider", left: source.provider, right: locked.provider),
         (field: "reference", left: source.reference, right: locked.reference),
         (field: "target", left: source.target, right: locked.target),
-        (field: "resolved_source", left: source.resolved_source, right: locked.resolved_source)
+        (field: "resolved_source", left: source.resolved_source, right: locked.resolved_source),
     }
     loop item in fields {
         if item.left != "" && item.right != "" && item.left != item.right {
@@ -888,10 +916,14 @@ store_explain_compare_provider_identity: fn(source: ProviderFacts, locked: Provi
     }
     source_ref: source.qualified_reference()
     locked_ref: locked.qualified_reference()
-    if source_ref != locked_ref -> reports.push(ExplainReport.conflict("provider selector differs between producer and lock: `{source_ref}` vs `{locked_ref}`"))
+    if source_ref != locked_ref {
+        reports.push(ExplainReport.conflict("provider selector differs between producer and lock: `{source_ref}` vs `{locked_ref}`"))
+    }
     source_digest: source.digest()
     locked_digest: locked.digest()
-    if source_digest != locked_digest -> reports.push(ExplainReport.conflict("provider fact digest differs between producer and lock: `{source_digest}` vs `{locked_digest}`"))
+    if source_digest != locked_digest {
+        reports.push(ExplainReport.conflict("provider fact digest differs between producer and lock: `{source_digest}` vs `{locked_digest}`"))
+    }
 }
 
 // Dependency, referrer, and closure views of the entry's output digest.
@@ -905,7 +937,9 @@ store_explain_graph_projection: fn(entries: [StoreEntry], entry: StoreEntry, gra
             if output.value == digest -> record_exists = true
         }
     }
-    if !record_exists -> reports.push(ExplainReport.loss("closure graph has no record for StoreEntry `{entry.id}` / output `{digest}`"))
+    if !record_exists {
+        reports.push(ExplainReport.loss("closure graph has no record for StoreEntry `{entry.id}` / output `{digest}`"))
+    }
     direct: found.direct_references(digest)
     transitive: found.transitive_references(digest)
     direct_referrers: found.referrers(digest)
@@ -914,7 +948,9 @@ store_explain_graph_projection: fn(entries: [StoreEntry], entry: StoreEntry, gra
     views: [[String]]{direct, transitive, direct_referrers, referrers, closure}
     loop view in views {
         loop value in view {
-            if !found.objects.has_key(value) && value != digest -> reports.push(ExplainReport.loss("closure edge references unknown object `{value}`"))
+            if !found.objects.has_key(value) && value != digest {
+                reports.push(ExplainReport.loss("closure edge references unknown object `{value}`"))
+            }
         }
     }
     ExplainGraph{
@@ -922,7 +958,7 @@ store_explain_graph_projection: fn(entries: [StoreEntry], entry: StoreEntry, gra
         dependencies: store_explain_object_views(entries, found, transitive),
         direct_referrers: store_explain_object_views(entries, found, direct_referrers),
         referrers: store_explain_object_views(entries, found, referrers),
-        closure: store_explain_object_views(entries, found, closure)
+        closure: store_explain_object_views(entries, found, closure),
     }
 }
 
@@ -957,7 +993,7 @@ store_explain_object_projection: fn(entries: [StoreEntry], graph: ClosureGraph, 
             .None -> false
         },
         known: object != None,
-        owners: store_sorted_unique(owners)
+        owners: store_sorted_unique(owners),
     }
 }
 
@@ -992,22 +1028,26 @@ store_explain_liveness_projection: fn(verification: &StoreVerification, roots: H
                     if target == entry.id || target == entry.envelope.output_hash -> protects = true
                     if graph == {
                         .Val(found) -> {
-                            if found.closure(target).contains(entry.envelope.output_hash) -> protects = true
+                            if found.closure(target).contains(entry.envelope.output_hash) {
+                                protects = true
+                            }
                         }
                         .None -> {}
                     }
                 }
                 if !protects -> next
-                reasons.push(ExplainRoot{
-                    kind: root.identity.kind.wire(),
-                    id: root.identity.id.as_str(),
-                    producer: root.identity.producer.as_str(),
-                    phase: store_explain_root_phase(root.phase),
-                    label: root.metadata.label ?? "",
-                    reference: root.metadata.reference ?? "",
-                    targets: root.protected_targets,
-                    reason: "active lifecycle root protects this object or its closure"
-                })
+                reasons.push(
+                    ExplainRoot{
+                        kind: root.identity.kind.wire(),
+                        id: root.identity.id.as_str(),
+                        producer: root.identity.producer.as_str(),
+                        phase: store_explain_root_phase(root.phase),
+                        label: root.metadata.label ?? "",
+                        reference: root.metadata.reference ?? "",
+                        targets: root.protected_targets,
+                        reason: "active lifecycle root protects this object or its closure",
+                    },
+                )
             }
         }
         .Err(error) -> {
@@ -1024,7 +1064,9 @@ store_explain_sorted_roots: fn(roots: [ExplainRoot]) -> [ExplainRoot] Never! {
     sorted := [ExplainRoot]{}
     loop root in roots {
         at := sorted.len()
-        loop at > 0 && (root.kind < sorted[at - 1].kind || (root.kind == sorted[at - 1].kind && root.id < sorted[at - 1].id)) -> at -= 1
+        loop at > 0 && (root.kind < sorted[at - 1].kind || (root.kind == sorted[at - 1].kind && root.id < sorted[at - 1].id)) {
+            at -= 1
+        }
         sorted.insert(at, root.copy())
     }
     sorted
@@ -1081,7 +1123,9 @@ store_explain_project_lock_matches: fn(entry: StoreEntry, reports: &[ExplainRepo
         }
     }
     loop toolchain in lock.toolchains {
-        if toolchain.id == entry.id || (output_hash != "" && toolchain.envelope.output_hash == output_hash) -> return true
+        if toolchain.id == entry.id || (output_hash != "" && toolchain.envelope.output_hash == output_hash) {
+            return true
+        }
     }
     false
 }
@@ -1099,7 +1143,7 @@ store_explain_provider_is_usable: fn(provider: ExplainProvider) -> Bool Never! {
 // Whether the stored output, its digest, the closure action record, the
 // producer provenance, and the receipt still support the realized result.
 store_explain_rebuild_projection: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, graph: ClosureGraph?, provider: ExplainProvider?, receipt_ok: Bool, reports: &[ExplainReport]) -> ExplainRebuild Never! {
-    checks := [String: String]{}
+    checks := [String:String]{}
     provider_usable: if provider == {
         .Val(found) -> store_explain_provider_is_usable(found)
         .None -> false
@@ -1107,7 +1151,9 @@ store_explain_rebuild_projection: fn(verification: &StoreVerification, roots: Ha
     admissions := [ExplainCacheAdmission]{}
     if store_cache_admissions_for_explain(roots, entry) == {
         .Ok(found) -> {
-            loop admission in found -> admissions.push(ExplainCacheAdmission{role: admission.role, decision: admission.decision.as_str(), builder: admission.builder, provenance: admission.provenance, receipt_version: admission.receipt_version, receipt_expires_unix: admission.receipt_expires_unix, reason: admission.reason})
+            loop admission in found {
+                admissions.push(ExplainCacheAdmission{role: admission.role, decision: admission.decision.as_str(), builder: admission.builder, provenance: admission.provenance, receipt_version: admission.receipt_version, receipt_expires_unix: admission.receipt_expires_unix, reason: admission.reason})
+            }
         }
         .Err(error) -> {
             reports.push(ExplainReport.loss("cache admission state is unavailable: {error.message()}"))
@@ -1137,9 +1183,7 @@ store_explain_rebuild_projection: fn(verification: &StoreVerification, roots: Ha
                 reports.push(ExplainReport.loss("stored output digest could not be verified: {error.message()}"))
             }
         }
-    } else {
-        checks["output_digest"] = "missing"
-    }
+    } else { checks["output_digest"] = "missing" }
     action_key: store_entry_action_key(entry)
     action_recorded := false
     if graph == {
@@ -1156,13 +1200,17 @@ store_explain_rebuild_projection: fn(verification: &StoreVerification, roots: Ha
     checks["closure"] = if action_recorded -> "recorded" else -> "missing"
     checks["producer"] = if provider_usable -> "decoded" else -> "missing"
     checks["receipt"] = if receipt_ok -> "verified" else -> "unavailable"
-    if !output_exists -> reports.push(ExplainReport.loss("stored output path `{entry.out}` is missing or invalid"))
-    if !action_recorded -> reports.push(ExplainReport.loss("stored action `{action_key}` has no matching closure record"))
+    if !output_exists {
+        reports.push(ExplainReport.loss("stored output path `{entry.out}` is missing or invalid"))
+    }
+    if !action_recorded {
+        reports.push(ExplainReport.loss("stored action `{action_key}` has no matching closure record"))
+    }
     attempt := ExplainAttempt?{None}
     if recipe_debug_latest(roots.hangar_dir(), entry.name) == {
         .Ok(found) -> {
             if found == {
-                .Val(latest) -> attempt = Val(ExplainAttempt.from_attempt(latest))
+                .Val(latest) -> { attempt = Val(ExplainAttempt.from_attempt(latest)) }
                 .None -> {}
             }
         }
@@ -1171,7 +1219,7 @@ store_explain_rebuild_projection: fn(verification: &StoreVerification, roots: Ha
         }
     }
     decision: store_explain_rebuild_decision(attempt, output_exists, output_digest, action_recorded, provider_usable, receipt_ok)
-    cache_identity := [String: String]{}
+    cache_identity := [String:String]{}
     cache_identity["source"] = entry.cache_identity.source_fingerprint
     cache_identity["recipe"] = entry.cache_identity.recipe_fingerprint
     cache_identity["policy"] = entry.cache_identity.policy_fingerprint
@@ -1192,7 +1240,9 @@ RebuildDecision: struct {
 store_explain_rebuild_decision: fn(attempt: ExplainAttempt?, output_exists: Bool, output_digest: Bool?, action_recorded: Bool, provider_usable: Bool, receipt_ok: Bool) -> RebuildDecision Never! {
     if attempt == {
         .Val(latest) -> {
-            if latest.status == "failed" -> return RebuildDecision.required("latest recorded build attempt failed at step {latest.failed_step}")
+            if latest.status == "failed" {
+                return RebuildDecision.required("latest recorded build attempt failed at step {latest.failed_step}")
+            }
         }
         .None -> {}
     }

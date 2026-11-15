@@ -29,7 +29,9 @@ SemaCallGeometryTransformParts: struct {
 sema_geometry_nominal_leaf: fn(name: String) -> String Never! {
     if !core_source_owns_type(name) -> return name.copy()
     parts: name.split("::").to_list()
-    if parts.len() >= 2 && core_identity_module(name) == (Val("core.math")) -> return parts[parts.len() - 1].copy()
+    if parts.len() >= 2 && core_identity_module(name) == (Val("core.math")) {
+        return parts[parts.len() - 1].copy()
+    }
     name.copy()
 }
 
@@ -38,7 +40,9 @@ sema_geometry_restore_owner: fn(ty: Type, source: Type) -> Type Never! {
     // caller's checked type (a read parameter), which stays on its node.
     name: if source == {
         .Named(owner) | .Apply(owner, _) -> owner
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> { return ty.copy() }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
+            return ty.copy()
+        }
     }
     leaf: sema_geometry_nominal_leaf(name)
     // copy: the restored type is a new owned Type. When the leaf already matches it equals `ty`,
@@ -75,9 +79,7 @@ sema_call_geometry_intrinsic_type: fn(ty: Type, environment: SemaScopeEnvironmen
         }
         if sema_geometry_nominal_leaf(name) != name -> return true
         return sema_type_resolve_nominal_row(graph, ty, environment.module_identity) == None
-    } else {
-        return false
-    }
+    } else { return false }
 }
 
 sema_call_geometry_transform_parts: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaCallGeometryTransformParts? {
@@ -86,9 +88,7 @@ sema_call_geometry_transform_parts: fn(ty: Type, environment: SemaScopeEnvironme
         .Apply(name, args) -> (sema_geometry_nominal_leaf(name) == "Transform" && args.len() == 2) || (sema_geometry_nominal_leaf(name) == "Transform2" && args.len() == 3)
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
-    if !matches {
-        return None
-    }
+    if !matches -> return None
     if !sema_call_geometry_intrinsic_type(resolved, environment, program) -> return None
     if resolved == {
         .Apply(name, args) -> {
@@ -100,7 +100,9 @@ sema_call_geometry_transform_parts: fn(ty: Type, environment: SemaScopeEnvironme
             }
             return None
         }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> { return None }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
+            return None
+        }
     }
 }
 
@@ -119,12 +121,8 @@ sema_call_geometry_space: fn(ty: Type) -> Type? {
             if name == "ScreenPoint" || name == "ScreenDelta" {
                 return Val(Type.Named{name: "Screen"})
             }
-            if name == "WorldPoint" || name == "WorldDelta" {
-                return Val(Type.Named{name: "World"})
-            }
-            if name == "ViewPoint" || name == "ViewDelta" {
-                return Val(Type.Named{name: "View"})
-            }
+            if name == "WorldPoint" || name == "WorldDelta" -> return Val(Type.Named{name: "World"})
+            if name == "ViewPoint" || name == "ViewDelta" -> return Val(Type.Named{name: "View"})
             if name == "CameraPoint" || name == "CameraDelta" {
                 return Val(Type.Named{name: "Camera"})
             }
@@ -163,7 +161,9 @@ sema_call_geometry_transform_method_return_inner: fn(receiver_type: Type, method
     parts: sema_call_geometry_transform_parts(receiver_type, environment, program) ?? return None
     if method == "then" && args.len() == 1 {
         next: sema_call_geometry_transform_parts(args[0], environment, program) ?? return None
-        if !type_identity_equal(parts.scalar, next.scalar) || !type_identity_equal(parts.to, next.from) -> return None
+        if !type_identity_equal(parts.scalar, next.scalar) || !type_identity_equal(parts.to, next.from) {
+            return None
+        }
         return Val(Type.Result{ok: sema_call_geometry_transform_type(parts, parts.from, next.to), err: Type.Named{name: "TransformError"}})
     }
     if method == "inverse" && args.len() == 0 {
@@ -172,19 +172,25 @@ sema_call_geometry_transform_method_return_inner: fn(receiver_type: Type, method
     if method == "point" && args.len() == 1 {
         point_type: sema_call_resolved_type(args[0], environment, program)
         point_space: sema_call_geometry_space(point_type) ?? return None
-        if !sema_call_geometry_is_point(point_type) || !type_identity_equal(point_space, parts.from) -> return None
+        if !sema_call_geometry_is_point(point_type) || !type_identity_equal(point_space, parts.from) {
+            return None
+        }
         return Val(Type.Result{ok: sema_call_geometry_generic("Point2", parts.scalar, parts.to), err: Type.Named{name: "TransformError"}})
     }
     if method == "point_at_depth" && args.len() == 2 {
         point_type: sema_call_resolved_type(args[0], environment, program)
         point_space: sema_call_geometry_space(point_type) ?? return None
-        if !sema_call_geometry_is_point(point_type) || !type_identity_equal(point_space, parts.from) -> return None
+        if !sema_call_geometry_is_point(point_type) || !type_identity_equal(point_space, parts.from) {
+            return None
+        }
         return Val(Type.Result{ok: sema_call_geometry_generic("Point2", parts.scalar, parts.to), err: Type.Named{name: "TransformError"}})
     }
     if method == "ray" && args.len() == 1 {
         point_type: sema_call_resolved_type(args[0], environment, program)
         point_space: sema_call_geometry_space(point_type) ?? return None
-        if !sema_call_geometry_is_point(point_type) || !type_identity_equal(point_space, parts.from) -> return None
+        if !sema_call_geometry_is_point(point_type) || !type_identity_equal(point_space, parts.from) {
+            return None
+        }
         return Val(Type.Result{ok: Type.Apply{name: "Ray2", args: [Type]{parts.scalar, parts.from, parts.to}}, err: Type.Named{name: "TransformError"}})
     }
     None
@@ -218,13 +224,15 @@ sema_call_geometry_report_transform_chain_mismatch: fn(receiver: Type, method: S
     first: sema_call_geometry_transform_parts(first_type, environment, program) ?? return false
     second: sema_call_geometry_transform_parts(second_type, environment, program) ?? return false
     if type_identity_equal(first.to, second.from) -> return false
-    diagnostics.push(sema_error(
-        "E2521",
-        span,
-        "Cannot compose `{type_name(sema_geometry_diagnostic_type(first_type))}` with `{type_name(sema_geometry_diagnostic_type(second_type))}`: `{type_name(first.to)}` does not match `{type_name(second.from)}`.",
-        "A transform chain is valid only when the destination of the first transform is the source of the next one.",
-        "Reverse or replace one transform so both middle spaces are the same.",
-    ))
+    diagnostics.push(
+        sema_error(
+            "E2521",
+            span,
+            "Cannot compose `{type_name(sema_geometry_diagnostic_type(first_type))}` with `{type_name(sema_geometry_diagnostic_type(second_type))}`: `{type_name(first.to)}` does not match `{type_name(second.from)}`.",
+            "A transform chain is valid only when the destination of the first transform is the source of the next one.",
+            "Reverse or replace one transform so both middle spaces are the same.",
+        ),
+    )
     true
 }
 
@@ -233,13 +241,15 @@ sema_call_geometry_report_method_error: fn(receiver: Type, owner: String, method
     actual_type: if args.len() > 0 -> sema_call_resolved_type(args[0], environment, program) else -> Type.Named{name: "Unknown"}
     expected := type_name(expected_type)
     actual := if args.len() > 0 -> type_name(sema_call_geometry_space(actual_type) ?? actual_type) else -> "<missing>"
-    diagnostics.push(sema_error(
-        "E2520",
-        span,
-        "`{owner}.{method}` needs `{expected}` space, got `{actual}`.",
-        "Coordinate-space tags are ordinary type facts; combining different spaces would make a numerically valid result mean the wrong thing.",
-        "Use a `{expected}` point or displacement, or convert it with a checked transform.",
-    ))
+    diagnostics.push(
+        sema_error(
+            "E2520",
+            span,
+            "`{owner}.{method}` needs `{expected}` space, got `{actual}`.",
+            "Coordinate-space tags are ordinary type facts; combining different spaces would make a numerically valid result mean the wrong thing.",
+            "Use a `{expected}` point or displacement, or convert it with a checked transform.",
+        ),
+    )
 }
 
 sema_call_geometry_argument_types: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [Type] Never! {
@@ -276,13 +286,17 @@ sema_call_try_geometry: fn(receiver: Expr, receiver_value: TExpr, method: String
     parts: sema_call_geometry_transform_parts(receiver_value.ty, environment, program) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     expected_count: sema_call_geometry_method_arg_count(method)
     if expected_count == None {
-        if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
         arg_types: sema_call_geometry_argument_types(updated_args, environment, program, scopes, state, tail_store, context, diagnostics)
         sema_call_geometry_report_method_error(receiver_value.ty, parts.name, method, arg_types, span, environment, program, diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if updated_args.len() != (expected_count) {
-        if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
         arg_types: sema_call_geometry_argument_types(updated_args, environment, program, scopes, state, tail_store, context, diagnostics)
         sema_call_geometry_report_method_error(receiver_value.ty, parts.name, method, arg_types, span, environment, program, diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
@@ -309,14 +323,20 @@ sema_call_try_geometry: fn(receiver: Expr, receiver_value: TExpr, method: String
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     ownership := sema_ownership_check_method_call(state, "{parts.name}.{method}", receiver, AccessConvention.Read, sema_call_geometry_method_params(types), updated_args, scopes, span, diagnostics)
-    if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !ownership.accepted || !ownership.complete {
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
     result_type: sema_call_geometry_transform_method_return(receiver_value.ty, method, types, environment, program) ?? {
         chain_mismatch := sema_call_geometry_report_transform_chain_mismatch(receiver_value.ty, method, types, span, environment, program, diagnostics)
-        if !chain_mismatch -> sema_call_geometry_report_method_error(receiver_value.ty, parts.name, method, types, span, environment, program, diagnostics)
+        if !chain_mismatch {
+            sema_call_geometry_report_method_error(receiver_value.ty, parts.name, method, types, span, environment, program, diagnostics)
+        }
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     value: sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.MathMethod{type_name: parts.name, method: method}, args: values}, span)
-    if !sema_effect_record_intrinsic_fact(environment, program, scopes, context, "{parts.name}.{method}", span, sema_call_geometry_call_facts(result_type), diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_effect_record_intrinsic_fact(environment, program, scopes, context, "{parts.name}.{method}", span, sema_call_geometry_call_facts(result_type), diagnostics) {
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 

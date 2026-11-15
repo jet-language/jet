@@ -1,6 +1,5 @@
 // Overlay claims: semantic lock records, confined patch application,
 // staging/rollback and override drafting.
-
 use {
     jet_pkg_model.[pkg_parse_workspace_policy]
     files: core.files
@@ -44,9 +43,7 @@ env_overlay_test_error: fn(result: [PatchApplication] OverlayError!) -> String {
     }
 }
 
-env_overlay_test_read: fn(path: String) -[FS]> String {
-    files.read(path) ?? panic("read {path}")
-}
+env_overlay_test_read: fn(path: String) -[FS]> String { files.read(path) ?? panic("read {path}") }
 
 env_overlay_test_write: fn(path: String, text: String) -[FS]> {
     files.create_dir_all(files.dirname(path)) ?? panic("parent of {path}")
@@ -142,7 +139,9 @@ env_overlay_test_write: fn(path: String, text: String) -[FS]> {
 }
 
 #Test("overlay hardlinked patch input is rejected without writing the source") {
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     root: env_overlay_test_root("patch-hardlink")
     workspace: files.join(root, "workspace")
     source: files.join(root, "source")
@@ -155,7 +154,7 @@ env_overlay_test_write: fn(path: String, text: String) -[FS]> {
     package := PackageOverride.new("pkg")
     package.patches = [String]{"patches/change.patch"}
     if env_apply_overlay_patches(workspace, source, package) == {
-        .Ok(_) -> panic("a hard-linked patch must be refused")
+        .Ok(_) -> { panic("a hard-linked patch must be refused") }
         .Err(error) -> assert(error.message().contains("hard-linked"))
     }
     assert_eq(env_overlay_test_read(files.join(source, "file.txt")), "one\n")
@@ -164,7 +163,9 @@ env_overlay_test_write: fn(path: String, text: String) -[FS]> {
 }
 
 #Test("overlay hardlinked target input is rejected without writing outside") {
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     root: env_overlay_test_root("target-hardlink")
     source: files.join(root, "source")
     outside: files.join(root, "outside")
@@ -179,7 +180,9 @@ env_overlay_test_write: fn(path: String, text: String) -[FS]> {
 }
 
 #Test("overlay patch ancestor swap keeps the read on the held parent") {
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     root: env_overlay_test_root("patch-ancestor-swap")
     workspace: files.join(root, "workspace")
     source: files.join(root, "source")
@@ -210,7 +213,9 @@ env_overlay_test_write: fn(path: String, text: String) -[FS]> {
 }
 
 #Test("overlay final target swap to a symlink is rejected without touching outside") {
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     root: env_overlay_test_root("final-swap")
     source: files.join(root, "source")
     outside: files.join(root, "outside")
@@ -222,7 +227,7 @@ env_overlay_test_write: fn(path: String, text: String) -[FS]> {
     files.remove(files.join(source, "tree/file.txt")) ?? panic("remove target")
     files.symlink(files.join(outside, "sentinel"), files.join(source, "tree/file.txt")) ?? panic("plant the symlink")
     if env_overlay_commit_staged(authority, stage, fn(path: String) -[FS]> {}) == {
-        .Ok(_) -> panic("a swapped target must be refused")
+        .Ok(_) -> { panic("a swapped target must be refused") }
         .Err(error) -> assert(error.message().contains("symlink"))
     }
     assert_eq(env_overlay_test_read(files.join(outside, "sentinel")), "keep\n")
@@ -231,7 +236,9 @@ env_overlay_test_write: fn(path: String, text: String) -[FS]> {
 }
 
 #Test("overlay target ancestor swap keeps the write on the held parent") {
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     root: env_overlay_test_root("target-ancestor-swap")
     source: files.join(root, "source")
     outside: files.join(root, "outside")
@@ -251,7 +258,9 @@ env_overlay_test_write: fn(path: String, text: String) -[FS]> {
 }
 
 #Test("overlay target ancestor swap rollback failure stays on the held parent") {
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     root: env_overlay_test_root("target-ancestor-rollback")
     source: files.join(root, "source")
     outside: files.join(root, "outside")
@@ -273,7 +282,7 @@ env_overlay_test_write: fn(path: String, text: String) -[FS]> {
         files.rename(files.join(held_moved, "one.txt"), held_saved) ?? panic("hold committed bytes")
         files.create_dir_all(files.join(held_moved, "one.txt")) ?? panic("block rollback publication")
     }) == {
-        .Ok(_) -> panic("the second commit must fail")
+        .Ok(_) -> { panic("the second commit must fail") }
         .Err(error) -> {
             assert(error.message().contains("could not commit patched file"))
             assert(error.message().contains("rollback failed"))

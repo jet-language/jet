@@ -50,9 +50,7 @@ run: fn() {
     print("from the heap: {take_and_give(64)}")
     region: mem.Region.reserve(1 << 20) ?? panic("reserve")
     counter := Counter{region: region, kept: [mem.Block]{}, taken: 0, given: 0}
-    #Context(allocator: counter) {
-        print("from the counter: {take_and_give(64)}")
-    }
+    #Context(allocator: counter) { print("from the counter: {take_and_give(64)}") }
     print("served by the counter: {counter.taken > 0}")
     print("all given back: {counter.taken == counter.given}")
     #Unsafe("the counter's kept blocks were claimed from its region, which unmaps them all") {

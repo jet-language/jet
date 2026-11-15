@@ -1,7 +1,6 @@
 // KNOWN-FAILING #4843, refusal before lock publication.
 // Exact E3415/key diagnostic restored by the #4843 owner's typed Gate error.
 // PENDING-SAME-HEAD nested package-test admission.
-
 use {
     jetpack_foundation.[UNIFIED_LOCK_FILE]
     jet_pkg_model.[pkg_parse_workspace_policy]
@@ -27,7 +26,9 @@ use {
                 .Gate(gate) -> {
                     found := false
                     loop diagnostic in gate.diagnostics {
-                        if diagnostic.code == "E3415" && diagnostic.what.contains(key) -> found = true
+                        if diagnostic.code == "E3415" && diagnostic.what.contains(key) {
+                            found = true
+                        }
                     }
                     found
                 }

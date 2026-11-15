@@ -40,15 +40,23 @@ use {
 jet_config_evaluate_program: fn(program: String, base_dir: String) -> JetConfigOutcome {
     core_sources: if jet_cli_core_sources(base_dir) == {
         .Loaded(sources) -> sources
-        .Missing(what, fix) -> { return JetConfigOutcome.Refused{diagnostic: diagnostic_from_registry("E2105", None, what, jet_cli_why("E2105"), fix)} }
+        .Missing(what, fix) -> {
+            return JetConfigOutcome.Refused{diagnostic: diagnostic_from_registry("E2105", None, what, jet_cli_why("E2105"), fix)}
+        }
     }
     result: jet_config_compile(program, core_sources, base_dir) ?? return JetConfigOutcome.Refused{diagnostic: jet_config_eval_diagnostic(None, "this config value could not be evaluated: {err}")}
     loop diagnostic in result.diagnostics {
-        if diagnostic.severity == DIAGNOSTIC_ERROR -> return JetConfigOutcome.Refused{diagnostic: diagnostic_from_registry(diagnostic.code, None, diagnostic.what, diagnostic.why, diagnostic.fix)}
+        if diagnostic.severity == DIAGNOSTIC_ERROR {
+            return JetConfigOutcome.Refused{diagnostic: diagnostic_from_registry(diagnostic.code, None, diagnostic.what, diagnostic.why, diagnostic.fix)}
+        }
     }
-    if result.internal_problem == .Val(problem) -> return JetConfigOutcome.Refused{diagnostic: jet_config_eval_diagnostic(None, "this config value could not be evaluated: {problem}")}
+    if result.internal_problem == .Val(problem) {
+        return JetConfigOutcome.Refused{diagnostic: jet_config_eval_diagnostic(None, "this config value could not be evaluated: {problem}")}
+    }
     loop value in result.comptime_values {
-        if value.kind != SemaComptimeItemKind.Constant || !value.key.ends_with(":{JET_CONFIG_VALUE_NAME}") -> next
+        if value.kind != SemaComptimeItemKind.Constant || !value.key.ends_with(":{JET_CONFIG_VALUE_NAME}") {
+            next
+        }
         converted: sema_user_template_ct_value(value.value) ?? return JetConfigOutcome.Refused{diagnostic: jet_config_eval_diagnostic(None, "this config value's result has a shape a config value can't hold")}
         return JetConfigOutcome.Value{value: converted}
     }
@@ -64,17 +72,18 @@ jet_config_compile: fn(program: String, core_sources: [JetDriverCoreSource], bas
     path: if root == "/" -> "/{JET_CONFIG_VALUE_FILE}" else -> "{root}/{JET_CONFIG_VALUE_FILE}"
     identity: "config-value-root:{root}"
     snapshot: JetDriverAuthorizedSourceSnapshot{
-        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{
-            canonical_path: root,
-            identity: identity,
-            allow_hardlinks: false,
-            files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: path, relative_path: JET_CONFIG_VALUE_FILE, identity: "config-value-file:{path}", source: program}},
-            foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
-        }},
+        roots: [JetDriverAuthorizedSourceRoot]{
+            JetDriverAuthorizedSourceRoot{
+                canonical_path: root,
+                identity: identity,
+                allow_hardlinks: false,
+                files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: path, relative_path: JET_CONFIG_VALUE_FILE, identity: "config-value-file:{path}", source: program}},
+                foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+            },
+        },
         entry_root_identity: identity,
         entry_path: path,
     }
     request := jet_cli_driver_request(snapshot, core_sources, None, JetDriverCompileMode.Comptime)
     jet_driver_compile(request)
 }
-

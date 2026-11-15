@@ -8,6 +8,7 @@
 // the quoted scalar and table fields the provider needs; no Lua code runs.
 
 LUAROCKS_RECIPE_ID: "luarocks-provider-v1"
+
 LUAROCKS_DEFAULT_REPOSITORY: "https://luarocks.org"
 
 // One rockspec dependency: a rock and its `(operator, version)` constraints.
@@ -26,7 +27,7 @@ LuaRockspec: struct {
     // Sorted by name.
     dependencies: [LuaRocksDependency]
     // Builtin module name -> relative `.lua` path.
-    modules: [String: String]
+    modules: [String:String]
     platforms: [String]
 }
 
@@ -55,19 +56,23 @@ LuaRocksProvider: struct {
         authority: provider_luarocks_cache_authority(ctx) ?? return None
         identity := provider_cache_identity(locked.source_hash, LUAROCKS_RECIPE_ID, ctx, authority.provenance())
         identity.platform = provider_registry_locked_platform(locked.envelope)
-        Val(CacheExpectation{identity, owned_output: Val(locked.output), allow_unsigned_local: true})
+        Val(CacheExpectation{identity: identity, owned_output: Val(locked.output), allow_unsigned_local: true})
     }
 
     // Rock metadata carries no trusted sizes: every ref is a new item of
     // unknown size.
     plan_downloads: fn(self, verification: &StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -> DownloadPlan ProviderError! {
         plan := DownloadPlan.empty()
-        loop spec in specs -> plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
+        loop spec in specs {
+            plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
+        }
         Ok(plan)
     }
 
     realize: fn(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
-        if ctx.offline -> return Err(ProviderError.Offline("`{spec.raw}` is not in the verified hangar and --offline forbids LuaRocks metadata or source fetches"))
+        if ctx.offline {
+            return Err(ProviderError.Offline("`{spec.raw}` is not in the verified hangar and --offline forbids LuaRocks metadata or source fetches"))
+        }
         realized: provider_luarocks_realize(spec, ctx) ?? return Err(err.into_provider(RegistryErrorKind.LuaRocks))
         Ok(realized)
     }
@@ -98,7 +103,7 @@ provider_luarocks_realize: fn(spec: RefSpec, ctx: ProviderCtx) -[IO, FS, Env, Ex
     manifest: provider_registry_read_text(manifest_path, "could not read LuaRocks manifest")
     provider_luarocks_require_manifest_version(manifest, root_ref.name, root_ref.version)
 
-    resolver := LuaRocksResolver{authority, repository, manifest, scratch, specs: [String: LuaRockspec]{}, active: [String]{}}
+    resolver := LuaRocksResolver{authority: authority, repository: repository, manifest: manifest, scratch: scratch, specs: [String:LuaRockspec]{}, active: [String]{}}
     resolver.resolve(root_ref.name, root_ref.version)
     specs: resolver.specs
     order: provider_luarocks_dependency_order(root_ref.name, specs)
@@ -115,7 +120,7 @@ provider_luarocks_realize: fn(spec: RefSpec, ctx: ProviderCtx) -[IO, FS, Env, Ex
         if source_hash != rockspec.source_hash {
             return Err(RegistryError.Reason("LuaRocks source hash mismatch for `{rockspec.name}` (rockspec {rockspec.source_hash}, fetched {source_hash})"))
         }
-        artifacts.push(LuaRocksArtifact{spec: rockspec, rockspec_path, source_path, rockspec_hash: pkg_sha256_hex(rockspec_bytes), source_hash})
+        artifacts.push(LuaRocksArtifact{spec: rockspec, rockspec_path: rockspec_path, source_path: source_path, rockspec_hash: pkg_sha256_hex(rockspec_bytes), source_hash: source_hash})
     }
     source_hash: provider_luarocks_closure_hash(artifacts)
     if ctx.project_dir == {
@@ -140,7 +145,9 @@ provider_luarocks_realize: fn(spec: RefSpec, ctx: ProviderCtx) -[IO, FS, Env, Ex
     provider_registry_create_dir_all(lua_dir, "could not stage LuaRocks output")
     provider_registry_create_dir_all(c_dir, "could not stage LuaRocks output")
     provider_registry_create_dir_all(sources, "could not stage LuaRocks output")
-    loop artifact in artifacts -> provider_luarocks_preserve_and_install(artifact, sources, lua_dir, scratch)
+    loop artifact in artifacts {
+        provider_luarocks_preserve_and_install(artifact, sources, lua_dir, scratch)
+    }
     provider_luarocks_write_runtime_files(out_dir)
     provider_registry_write_text(files.join(out_dir, "luarocks.provenance"), provider_luarocks_render_provenance(repository, fetch_authority, source_hash, artifacts), "could not write LuaRocks provenance")
     provider_registry_seal(out_dir, "could not seal LuaRocks output")
@@ -152,31 +159,37 @@ provider_luarocks_realize: fn(spec: RefSpec, ctx: ProviderCtx) -[IO, FS, Env, Ex
         dependencies.push("{dependency.name}#version={dependency.version}")
     }
     if ctx.project_dir == {
-        .Val(project) -> pkg_lock_record_luarocks_realization(project, root.name, root.version, spec.raw, out_dir, source_hash, repository, fetch_authority, dependencies, provider_registry_lock_envelope(envelope))
+        .Val(project) -> {
+            pkg_lock_record_luarocks_realization(project, root.name, root.version, spec.raw, out_dir, source_hash, repository, fetch_authority, dependencies, provider_registry_lock_envelope(envelope))
+        }
         .None -> {}
     }
     identity: provider_cache_identity(source_hash, LUAROCKS_RECIPE_ID, ctx, fetch_authority)
     objects := [RegistrySourceObject]{}
-    loop artifact in artifacts -> objects.push(RegistrySourceObject{name: artifact.spec.name, sha256: artifact.source_hash, file_name: files.basename(artifact.source_path)})
+    loop artifact in artifacts {
+        objects.push(RegistrySourceObject{name: artifact.spec.name, sha256: artifact.source_hash, file_name: files.basename(artifact.source_path)})
+    }
     edges: provider_registry_dependency_objects(root.name, objects)
     facts := edges.facts
     facts["repository"] = repository
     facts["fetch.authority"] = fetch_authority
-    producer: provider_registry_producer("luarocks", "luarocks-install", source_hash, repository, fetch_authority, root.version, [String: String]{}, LUAROCKS_RECIPE_ID, identity, facts)
-    Ok(Realized{
-        name: root.name,
-        version: root.version,
-        reference: spec.raw,
-        out: out_dir,
-        bin: files.join(out_dir, "bin"),
-        rlib: "",
-        envelope,
-        cache_identity: identity,
-        source_state: SourceState.Built,
-        named_outputs: [String: String]{"out": out_dir},
-        references: edges.references,
-        producer,
-    })
+    producer: provider_registry_producer("luarocks", "luarocks-install", source_hash, repository, fetch_authority, root.version, [String:String]{}, LUAROCKS_RECIPE_ID, identity, facts)
+    Ok(
+        Realized{
+            name: root.name,
+            version: root.version,
+            reference: spec.raw,
+            out: out_dir,
+            bin: files.join(out_dir, "bin"),
+            rlib: "",
+            envelope: envelope,
+            cache_identity: identity,
+            source_state: SourceState.Built,
+            named_outputs: [String:String]{"out": out_dir},
+            references: edges.references,
+            producer: producer,
+        },
+    )
 }
 
 // `name#version=<exact>` (or `name#<exact>`); a bare name is mutable.
@@ -190,10 +203,16 @@ provider_luarocks_parse_ref: fn(raw: String) -> (name: String, version: String) 
         .Val(pair) -> pair.after
         .None -> ""
     }
-    if !provider_luarocks_valid_component(name) -> return Err(RegistryError.Reason("invalid LuaRocks package name `{name}`"))
-    if selector == "" -> return Err(RegistryError.Reason("LuaRocks ref `{raw}` is mutable; use `{name}#version=<exact>`"))
+    if !provider_luarocks_valid_component(name) {
+        return Err(RegistryError.Reason("invalid LuaRocks package name `{name}`"))
+    }
+    if selector == "" {
+        return Err(RegistryError.Reason("LuaRocks ref `{raw}` is mutable; use `{name}#version=<exact>`"))
+    }
     version: selector.removeprefix("version=")
-    if !provider_luarocks_valid_component(version) -> return Err(RegistryError.Reason("invalid LuaRocks version `{version}`"))
+    if !provider_luarocks_valid_component(version) {
+        return Err(RegistryError.Reason("invalid LuaRocks version `{version}`"))
+    }
     Ok((name: name, version: version))
 }
 
@@ -202,7 +221,9 @@ provider_luarocks_valid_component: fn(value: String) -> Bool Never! {
     if value == "" || value == "." || value == ".." -> return false
     loop byte in value.bytes() {
         code: Int{byte}
-        if !provider_registry_is_ascii_alnum(code) && code != 46 && code != 45 && code != 95 -> return false
+        if !provider_registry_is_ascii_alnum(code) && code != 46 && code != 45 && code != 95 {
+            return false
+        }
     }
     true
 }
@@ -215,18 +236,22 @@ LuaRocksResolver: struct {
     repository: String
     manifest: String
     scratch: String
-    specs: [String: LuaRockspec]
+    specs: [String:LuaRockspec]
     active: [String]
 
     resolve: fn(&self, name: String, version: String) RegistryError! -[FS, Net, Time.Wait, Env]> {
         if self.specs.get(name) == {
             .Val(existing) -> {
-                if existing.version != version -> return Err(RegistryError.Reason("LuaRocks closure selects `{name}` as both {existing.version} and {version}"))
+                if existing.version != version {
+                    return Err(RegistryError.Reason("LuaRocks closure selects `{name}` as both {existing.version} and {version}"))
+                }
                 return
             }
             .None -> {}
         }
-        if self.active.contains(name) -> return Err(RegistryError.Reason("LuaRocks dependency cycle includes `{name}`"))
+        if self.active.contains(name) {
+            return Err(RegistryError.Reason("LuaRocks dependency cycle includes `{name}`"))
+        }
         self.active.push(name.copy())
         provider_luarocks_require_manifest_version(self.manifest, name, version)
         path: files.join(self.scratch, "{name}-{version}.rockspec")
@@ -245,7 +270,9 @@ LuaRocksResolver: struct {
             selected := ""
             found := false
             loop candidate in versions {
-                if !provider_luarocks_requirements_satisfied(candidate, dependency.requirements) -> next
+                if !provider_luarocks_requirements_satisfied(candidate, dependency.requirements) {
+                    next
+                }
                 if !found || provider_luarocks_compare_versions(candidate, selected) != Ordering.Less {
                     selected = candidate
                     found = true
@@ -271,7 +298,9 @@ provider_luarocks_parse_rockspec: fn(raw: String) -> LuaRockspec RegistryError! 
     source: provider_luarocks_assignment_table(raw, "source")
     source_url: provider_luarocks_table_string(source, "url")
     source_hash: provider_luarocks_table_string(source, "sha256")
-    if !provider_registry_valid_hex(source_hash, 64) -> return Err(RegistryError.Reason("rockspec `{name}` needs a SHA-256 source hash"))
+    if !provider_registry_valid_hex(source_hash, 64) {
+        return Err(RegistryError.Reason("rockspec `{name}` needs a SHA-256 source hash"))
+    }
     dependencies: if provider_luarocks_assignment_table_optional(raw, "dependencies") == {
         .Val(table) -> provider_luarocks_parse_dependencies(table)
         .None -> [LuaRocksDependency]{}
@@ -285,7 +314,9 @@ provider_luarocks_parse_rockspec: fn(raw: String) -> LuaRockspec RegistryError! 
         return Err(RegistryError.Reason("LuaRocks package `{name}` uses a native or command build; this provider currently accepts only auditable builtin module maps"))
     }
     modules: provider_luarocks_keyed_strings(provider_luarocks_table_table(build, "modules"))
-    if modules.len() == 0 -> return Err(RegistryError.Reason("rockspec `{name}` has no installable modules"))
+    if modules.len() == 0 {
+        return Err(RegistryError.Reason("rockspec `{name}` has no installable modules"))
+    }
     module_names: provider_luarocks_sorted_keys(modules)
     loop module_name in module_names {
         path: modules[module_name]
@@ -293,7 +324,7 @@ provider_luarocks_parse_rockspec: fn(raw: String) -> LuaRockspec RegistryError! 
             return Err(RegistryError.Reason("rockspec `{name}` contains unsafe or native module mapping `{module_name}` = `{path}`"))
         }
     }
-    Ok(LuaRockspec{name, version, source_url, source_hash: pkg_ascii_lower(source_hash), dependencies, modules, platforms})
+    Ok(LuaRockspec{name: name, version: version, source_url: source_url, source_hash: pkg_ascii_lower(source_hash), dependencies: dependencies, modules: modules, platforms: platforms})
 }
 
 // `"name op version, op version"` entries, sorted by name.
@@ -304,7 +335,9 @@ provider_luarocks_parse_dependencies: fn(raw: String) -> [LuaRocksDependency] Re
         words: provider_registry_words(item)
         if words.len() == 0 -> next
         name: words[0]
-        if !provider_luarocks_valid_component(name) -> return Err(RegistryError.Reason("unsafe LuaRocks dependency `{name}`"))
+        if !provider_luarocks_valid_component(name) {
+            return Err(RegistryError.Reason("unsafe LuaRocks dependency `{name}`"))
+        }
         requirements := [(operator: String, wanted: String)]{}
         rest: provider_registry_tail(item, name.bytes().len()).trim()
         pieces: rest.split(",").to_list()
@@ -323,28 +356,32 @@ provider_luarocks_parse_dependencies: fn(raw: String) -> [LuaRocksDependency] Re
             }
             requirements.push((operator: operator, wanted: wanted))
         }
-        out.push(LuaRocksDependency{name, requirements})
+        out.push(LuaRocksDependency{name: name, requirements: requirements})
     }
     out.sort_by(fn(dependency) { dependency.name })
     Ok(out)
 }
 
 // Dependencies before dependents, each once, `lua` itself excluded.
-provider_luarocks_dependency_order: fn(root: String, specs: [String: LuaRockspec]) -> [String] RegistryError! {
-    walk := LuaRocksOrderWalk{specs, active: [String]{}, done: [String]{}, out: [String]{}}
+provider_luarocks_dependency_order: fn(root: String, specs: [String:LuaRockspec]) -> [String] RegistryError! {
+    walk := LuaRocksOrderWalk{specs: specs, active: [String]{}, done: [String]{}, out: [String]{}}
     walk.visit(root)
     Ok(walk.out)
 }
 
 LuaRocksOrderWalk: struct {
-    specs: [String: LuaRockspec]
+    specs: [String:LuaRockspec]
     active: [String]
     done: [String]
     out: [String]
 
     visit: fn(&self, name: String) RegistryError! {
-        if self.done.contains(name) -> return
-        if self.active.contains(name) -> return Err(RegistryError.Reason("LuaRocks dependency cycle includes `{name}`"))
+        if self.done.contains(name) {
+            return
+        }
+        if self.active.contains(name) {
+            return Err(RegistryError.Reason("LuaRocks dependency cycle includes `{name}`"))
+        }
         self.active.push(name.copy())
         spec: self.specs.get(name) ?? return Err(RegistryError.Reason("missing resolved LuaRocks dependency `{name}`"))
         loop dependency in spec.dependencies {
@@ -370,7 +407,9 @@ provider_luarocks_preserve_and_install: fn(artifact: LuaRocksArtifact, sources: 
     loop module_name in module_names {
         relative: artifact.spec.modules[module_name]
         source: files.join(root, relative)
-        if !files.is_file(source) -> return Err(RegistryError.Reason("module `{module_name}` source `{relative}` is missing"))
+        if !files.is_file(source) {
+            return Err(RegistryError.Reason("module `{module_name}` source `{relative}` is missing"))
+        }
         target: files.join(lua_dir, "{module_name.replace(".", "/")}.lua")
         provider_registry_create_dir_all(files.dirname(target), "could not create module directory")
         provider_registry_copy(source, target, "could not install module `{module_name}`")
@@ -383,7 +422,9 @@ provider_luarocks_validate_archive: fn(path: String) RegistryError! -[FS]> {
     provider_registry_validate_tar_archive(path, true)
     listing: provider_registry_tar_listing(path, true) ?? return Err(RegistryError.Reason("LuaRocks source is not a readable tar.gz archive"))
     loop entry in listing {
-        if entry.name == "" || !provider_registry_safe_relative(entry.name) -> return Err(RegistryError.Reason("LuaRocks archive contains unsafe path `{entry.name}`"))
+        if entry.name == "" || !provider_registry_safe_relative(entry.name) {
+            return Err(RegistryError.Reason("LuaRocks archive contains unsafe path `{entry.name}`"))
+        }
     }
     loop entry in listing {
         if entry.kind == {
@@ -435,14 +476,18 @@ provider_luarocks_closure_hash: fn(artifacts: [LuaRocksArtifact]) -> String Neve
 
 provider_luarocks_render_provenance: fn(repository: String, fetch_authority: String, source_hash: String, artifacts: [LuaRocksArtifact]) -[Env]> String Never! {
     lines := [String]{"schema=jet-luarocks-provider-v1\nrepository={repository}\nfetch_authority={fetch_authority}\nsource_hash={source_hash}\nplatform={pkg_host_platform()}\n"}
-    loop artifact in artifacts -> lines.push("package={artifact.spec.name}:{artifact.spec.version}:rockspec={artifact.rockspec_hash}:source={artifact.source_hash}\n")
+    loop artifact in artifacts {
+        lines.push("package={artifact.spec.name}:{artifact.spec.version}:rockspec={artifact.rockspec_hash}:source={artifact.source_hash}\n")
+    }
     lines.join("")
 }
 
 // `supported_platforms`: an empty list allows every host; `!name` denies a
 // host; positive names allow only those hosts (`unix` covers non-Windows).
 provider_luarocks_ensure_platform_supported: fn(platforms: [String]) RegistryError! -[Env]> {
-    if platforms.len() == 0 -> return
+    if platforms.len() == 0 {
+        return
+    }
     windows: sys.is_windows()
     host: if {
         windows -> "windows"
@@ -454,15 +499,15 @@ provider_luarocks_ensure_platform_supported: fn(platforms: [String]) RegistryErr
     loop platform in platforms {
         if platform.starts_with("!") {
             if platform == ("!{host}") || (!windows && platform == "!unix") -> denied = true
-        } else {
-            positive.push(platform.copy())
-        }
+        } else { positive.push(platform.copy()) }
     }
     allowed := positive.len() == 0
     loop platform in positive {
         if platform == host || (!windows && platform == "unix") -> allowed = true
     }
-    if denied || !allowed -> return Err(RegistryError.Reason("LuaRocks package does not support host platform `{host}`"))
+    if denied || !allowed {
+        return Err(RegistryError.Reason("LuaRocks package does not support host platform `{host}`"))
+    }
 }
 
 provider_luarocks_requirements_satisfied: fn(version: String, requirements: [(operator: String, wanted: String)]) -> Bool Never! {
@@ -492,11 +537,9 @@ provider_luarocks_compare_versions: fn(left: String, right: String) -> Ordering 
         a: if index < left_parts.len() -> left_parts[index] else -> "0"
         b: if index < right_parts.len() -> right_parts[index] else -> "0"
         order: if provider_registry_parse_u64(a) == {
-            .Val(x) -> {
-                if provider_registry_parse_u64(b) == {
-                    .Val(y) -> x <=> y
-                    .None -> a <=> b
-                }
+            .Val(x) -> if provider_registry_parse_u64(b) == {
+                .Val(y) -> x <=> y
+                .None -> a <=> b
             }
             .None -> a <=> b
         }
@@ -568,7 +611,9 @@ provider_luarocks_parse_quoted: fn(input: String) -> (value: String, used: Int) 
     raw: input.trim_start().bytes()
     if raw.len() == 0 -> return Err(RegistryError.Reason("missing quoted value"))
     quote: Int{raw[0]}
-    if quote != 39 && quote != 34 -> return Err(RegistryError.Reason("provider metadata requires quoted string values"))
+    if quote != 39 && quote != 34 {
+        return Err(RegistryError.Reason("provider metadata requires quoted string values"))
+    }
     out := [U8]{}
     escaped := false
     loop index in 1..<raw.len() {
@@ -593,7 +638,9 @@ provider_luarocks_parse_quoted: fn(input: String) -> (value: String, used: Int) 
 provider_luarocks_balanced_table: fn(input: String) -> (inner: String, used: Int) RegistryError! {
     trimmed: input.trim_start()
     offset: input.bytes().len() - trimmed.bytes().len()
-    if !trimmed.starts_with("{{") -> return Err(RegistryError.Reason("provider metadata requires a table"))
+    if !trimmed.starts_with("{{") {
+        return Err(RegistryError.Reason("provider metadata requires a table"))
+    }
     bytes: trimmed.bytes()
     depth := 0
     quote := 0
@@ -618,7 +665,9 @@ provider_luarocks_balanced_table: fn(input: String) -> (inner: String, used: Int
                 code == 123 -> depth += 1
                 code == 125 -> {
                     depth -= 1
-                    if depth == 0 -> return Ok((inner: pkg_bytes_text(bytes, 1, index), used: offset + index + 1))
+                    if depth == 0 {
+                        return Ok((inner: pkg_bytes_text(bytes, 1, index), used: offset + index + 1))
+                    }
                 }
                 else -> {}
             }
@@ -639,16 +688,14 @@ provider_luarocks_string_values: fn(raw: String) -> [String] RegistryError! {
             quoted: provider_luarocks_parse_quoted(provider_registry_tail(raw, index))
             out.push(quoted.value)
             index += quoted.used
-        } else {
-            index += 1
-        }
+        } else { index += 1 }
     }
     Ok(out)
 }
 
 // A `modules = { name = "path", ["a.b"] = "path" }` body, one entry per line.
-provider_luarocks_keyed_strings: fn(raw: String) -> [String: String] RegistryError! {
-    out := [String: String]{}
+provider_luarocks_keyed_strings: fn(raw: String) -> [String:String] RegistryError! {
+    out := [String:String]{}
     lines: provider_lines(raw)
     loop raw_line in lines {
         line := raw_line.trim()
@@ -697,13 +744,17 @@ provider_luarocks_manifest_versions: fn(raw: String, name: String) -> [String] R
     loop version in versions {
         if distinct.len() == 0 || distinct[distinct.len() - 1] != version -> distinct.push(version)
     }
-    if distinct.len() == 0 -> return Err(RegistryError.Reason("LuaRocks manifest has no versions for `{name}`"))
+    if distinct.len() == 0 {
+        return Err(RegistryError.Reason("LuaRocks manifest has no versions for `{name}`"))
+    }
     Ok(distinct)
 }
 
 provider_luarocks_require_manifest_version: fn(raw: String, name: String, version: String) RegistryError! {
     versions: provider_luarocks_manifest_versions(raw, name)
-    if !versions.contains(version) -> return Err(RegistryError.Reason("LuaRocks manifest has no `{name}` version `{version}`"))
+    if !versions.contains(version) {
+        return Err(RegistryError.Reason("LuaRocks manifest has no `{name}` version `{version}`"))
+    }
 }
 
 // The table assigned to `["wanted"]`, `['wanted']`, or `wanted`.
@@ -728,7 +779,7 @@ provider_luarocks_keyed_table: fn(raw: String, wanted: String) -> String? Never!
 }
 
 // Map keys in byte order (a `BTreeMap` walk).
-provider_luarocks_sorted_keys: fn(map: [String: String]) -> [String] Never! {
+provider_luarocks_sorted_keys: fn(map: [String:String]) -> [String] Never! {
     keys := map.keys().to_list()
     keys.sort()
     keys

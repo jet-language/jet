@@ -74,13 +74,15 @@ sema_expression_index_kind: fn(kind: IndexKind, base: Type) -> TIndexKind Never!
 
 sema_expression_integer_index: fn(value: TExpr, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if sema_expr_is_integer(value.ty) -> return true
-    diagnostics.push(sema_error(
-        "E0505",
-        span,
-        "an index must be an Int, not {type_name(value.ty)}",
-        "indexed storage is addressed by whole-number positions",
-        "use an Int index here",
-    ))
+    diagnostics.push(
+        sema_error(
+            "E0505",
+            span,
+            "an index must be an Int, not {type_name(value.ty)}",
+            "indexed storage is addressed by whole-number positions",
+            "use an Int index here",
+        ),
+    )
     false
 }
 
@@ -174,8 +176,12 @@ sema_expression_exact_move: fn(value: Expr, span: Span, expected: Type?, environ
     checked: sema_check_expression(value, expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     if sema_ownership_type_is_copy(checked.ty) -> return Val(checked)
     // A computed field has no storage to give away.
-    if sema_expression_refuse_computed_place(checked, "taken", environment, program, scopes, diagnostics) -> return None
-    if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, diagnostics, true) -> return None
+    if sema_expression_refuse_computed_place(checked, "taken", environment, program, scopes, diagnostics) {
+        return None
+    }
+    if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, diagnostics, true) {
+        return None
+    }
     // A field below an element (`items[i].tags.move()`): the element keeps
     // owning its fields, so the value can only be a copy, spelled `.copy()`.
     if sema_expression_place_below_element(value) {
@@ -205,7 +211,9 @@ sema_expression_exact_move: fn(value: Expr, span: Span, expected: Type?, environ
     // `p.move()` of a match payload takes it out of its subject, never a copy.
     payload: sema_ownership_move_pattern_payload(state, value, span, scopes, diagnostics)
     if payload < 0 -> return None
-    if !sema_ownership_consume_expression(state, Expr.Place{value: value, access: PlaceAccess.Take, span: span, id: AST_NODE_GENERATED}, scopes, "`{sema_expression_move_mark_text(value)}.move()`", diagnostics) -> return None
+    if !sema_ownership_consume_expression(state, Expr.Place{value: value, access: PlaceAccess.Take, span: span, id: AST_NODE_GENERATED}, scopes, "`{sema_expression_move_mark_text(value)}.move()`", diagnostics) {
+        return None
+    }
     moved: if payload > 0 -> sema_expression_payload_take(checked) else -> checked.move()
     Val(sema_tree_node(moved.ty, TExprKind.Move{value: moved}, span))
 }
@@ -223,7 +231,9 @@ sema_expression_payload_take: fn(value: &&TExpr) -> TExpr Never! {
 }
 
 sema_expression_place: fn(value: Expr, access: PlaceAccess, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if access == PlaceAccess.Take -> return sema_expression_exact_move(value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if access == PlaceAccess.Take {
+        return sema_expression_exact_move(value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
     if !sema_expression_is_place(value) {
         nested: sema_check_expression(value, None, environment, program, scopes, state, tail_store, context, diagnostics)
         diagnostics.push(sema_error("E0213", span, "a window must start from a place", "a borrowed place needs stable storage", "bind a temporary before taking a place"))
@@ -239,7 +249,9 @@ sema_expression_place: fn(value: Expr, access: PlaceAccess, span: Span, expected
     checked: checked_value ?? return None
     convention: if access == PlaceAccess.Write -> AccessConvention.Write else -> AccessConvention.Read
     // A computed field has no storage to lend for writing.
-    if convention == AccessConvention.Write && sema_expression_refuse_computed_place(checked, "lent for writing", environment, program, scopes, diagnostics) -> return None
+    if convention == AccessConvention.Write && sema_expression_refuse_computed_place(checked, "lent for writing", environment, program, scopes, diagnostics) {
+        return None
+    }
     // (Rust `Expr::Place`): a subrange of a declared view
     // takes its write window from the view's own access; a `View<T>` never
     // lends one.
@@ -256,8 +268,8 @@ sema_expression_place: fn(value: Expr, access: PlaceAccess, span: Span, expected
     element := Type?{None}
     if checked.kind == .Slice(_, _, _, _, _) {
         if checked.ty == {
-            .List(item) -> element = Val(item)
-            .FixedList(item, _) -> element = Val(item)
+            .List(item) -> { element = Val(item) }
+            .FixedList(item, _) -> { element = Val(item) }
             .Apply(view_name, view_args) -> {
                 if view_name == "View" && view_args.len() == 1 -> element = Val(view_args[0])
             }
@@ -273,7 +285,9 @@ sema_expression_deref: fn(value: Expr, span: Span, expected: Type?, environment:
     checked: sema_check_expression(value, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     if checked.ty == .Apply(name, args) {
         if name == "Ptr" && args.len() == 1 {
-            if !sema_expr_require_unsafe("pointer dereference", span, context, diagnostics) -> return None
+            if !sema_expr_require_unsafe("pointer dereference", span, context, diagnostics) {
+                return None
+            }
             result: sema_tree_node(args[0], TExprKind.Deref{value: checked}, span)
             return sema_expr_expected_owned(result, expected, environment, program, diagnostics)
         }
@@ -312,12 +326,14 @@ sema_expression_tuple_field: fn(base: TExpr, member: String, span: Span, diagnos
 sema_expression_carrier_type_symbol: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String) -> Symbol? {
     carrier: boundary_head_carrier_module(name) ?? return None
     if program.registration_graph == .Val(graph) {
-    loop module_row_index in 0..<graph.modules.len() {
-        if graph.modules[module_row_index].module_name != carrier -> next
-        loop nominal_index in 0..<graph.modules[module_row_index].nominals.len() {
-            if graph.modules[module_row_index].nominals[nominal_index].symbol.name == name -> return Val(graph.modules[module_row_index].nominals[nominal_index].symbol)
+        loop module_row_index in 0..<graph.modules.len() {
+            if graph.modules[module_row_index].module_name != carrier -> next
+            loop nominal_index in 0..<graph.modules[module_row_index].nominals.len() {
+                if graph.modules[module_row_index].nominals[nominal_index].symbol.name == name {
+                    return Val(graph.modules[module_row_index].nominals[nominal_index].symbol)
+                }
+            }
         }
-    }
     }
     None
 }
@@ -329,12 +345,16 @@ sema_expression_shared_guard_value: fn(ty: Type) -> SemaCallMemoryGuard? {
     marker := TagMarker.Internal{internal_tag: InternalTag.SharedGuardRead}
     guard_type := ty
     if ty == .Tagged(found, inner) {
-        if found != (TagMarker.Internal{internal_tag: InternalTag.SharedGuardRead}) && found != (TagMarker.Internal{internal_tag: InternalTag.SharedGuardEdit}) -> return None
+        if found != (TagMarker.Internal{internal_tag: InternalTag.SharedGuardRead}) && found != (TagMarker.Internal{internal_tag: InternalTag.SharedGuardEdit}) {
+            return None
+        }
         marker = found
         guard_type = inner
     }
     if guard_type == .Apply(name, args) {
-        if name == "SharedGuard" && args.len() == 1 -> return Val(SemaCallMemoryGuard{value_type: args[0], marker: marker, editable: marker == (TagMarker.Internal{internal_tag: InternalTag.SharedGuardEdit})})
+        if name == "SharedGuard" && args.len() == 1 {
+            return Val(SemaCallMemoryGuard{value_type: args[0], marker: marker, editable: marker == (TagMarker.Internal{internal_tag: InternalTag.SharedGuardEdit})})
+        }
     }
     None
 }
@@ -368,11 +388,17 @@ sema_expression_field_visible: fn(is_pub: Bool, is_package_pub: Bool, owner_modu
     owner_id := module_none()
     if program.registration_graph == .Val(graph) {
         owner_id = owner_module
-        if sema_registration_module_index(graph, owner_id) == .Val(owner_index) -> owner_package = graph.modules[owner_index].package_identity
+        if sema_registration_module_index(graph, owner_id) == .Val(owner_index) {
+            owner_package = graph.modules[owner_index].package_identity
+        }
     }
     visibility: if is_package_pub -> 1 else -> 0
-    if !sema_registration_visible(visibility, environment.module_identity, environment.package_identity, owner_id, owner_package) -> return false
-    if visibility == 0 && !generated && sema_expression_kernel_field_hidden(owner_id, environment, program) -> return false
+    if !sema_registration_visible(visibility, environment.module_identity, environment.package_identity, owner_id, owner_package) {
+        return false
+    }
+    if visibility == 0 && !generated && sema_expression_kernel_field_hidden(owner_id, environment, program) {
+        return false
+    }
     declared: inline_module ?? return true
     generated || (use_span.start >= declared.start && use_span.end <= declared.end)
 }
@@ -460,7 +486,9 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
     }
     if owner_name != "" {
         owner := sema_expression_type_symbol(scopes, environment, program, owner_name)
-        if owner == None -> owner = sema_expression_carrier_type_symbol(environment, program, owner_name)
+        if owner == None {
+            owner = sema_expression_carrier_type_symbol(environment, program, owner_name)
+        }
         if owner == .Val(owner_symbol) {
             context.name_references.push(SemaNameReferenceFact{span: span, symbol: owner_symbol, kind: "type"})
             // The struct's fields, read at the declaration without copying
@@ -480,7 +508,7 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
                         field_ty: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner_symbol.module_identity, field.ty, names), names, owner_args)
                         owner_key: sema_program_symbol_key(program, owner_symbol.id)
                         field_id: sema_symbol_id(program, context, SymbolKind.Field, sema_scope_module_text(environment, program, owner_symbol.module_identity), owner_key, field.name)
-                        field_symbol: Symbol{id: field_id, kind: SymbolKind.Field, name: field.name, module_identity: owner_symbol.module_identity, owner: Val(owner_key), span: field.name_span, ty: Val(field_ty), visibility: if field.is_pub -> 2 else -> if field.is_package_pub -> 1 else -> 0}
+                        field_symbol: Symbol{id: field_id, kind: SymbolKind.Field, name: field.name, module_identity: owner_symbol.module_identity, owner: Val(owner_key), span: field.name_span, ty: Val(field_ty), visibility: if field.is_pub -> 2 else if field.is_package_pub -> 1 else -> 0}
                         context.name_references.push(SemaNameReferenceFact{span: span, symbol: field_symbol, kind: "field"})
                         reference := sema_expression_field_ref(field_symbol, Val(owner_symbol.id), field_ty)
                         reference.boxed = sema_scope_environment_boxed_edge(environment, program, owner_symbol.id, member)
@@ -501,9 +529,7 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
                 diagnostic: sema_error("E0302", span, "`{owner_name}` has no field `{member}`", "field access only works on names declared in the struct", fix)
                 if suggestion == .Val(candidate) {
                     diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: candidate}))
-                } else {
-                    diagnostics.push(diagnostic)
-                }
+                } else { diagnostics.push(diagnostic) }
                 return None
             }
         }
@@ -525,7 +551,9 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
     // `EXACTNESS.kind`) exists only as a compile-time value; its rows are typed
     // for prepared-constant paths, which codegen folds to their values.
     reflection: sema_fact_reflection_field(base, member, span, context)
-    if reflection == .Val(value) -> return sema_expr_expected(value, expected, environment, program, diagnostics)
+    if reflection == .Val(value) {
+        return sema_expr_expected(value, expected, environment, program, diagnostics)
+    }
     // A `VJPRun` carries
     // `.value`, `.pull(seed)` and `.grads` (field_type); any other member falls
     // through to the undeclared-field error below.
@@ -582,15 +610,19 @@ sema_expression_as_field: fn(offered: Type, required: Type, use_span: Span, envi
     struct_def: sema_scope_declaration_struct(environment, program, owner_symbol.id) ?? return None
     if struct_def.type_params.len() != owner_args.len() -> return None
     loop field in struct_def.fields {
-        if field.computed != None || sema_registration_as_marker(field.serde_markers) == None -> next
-        if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner_symbol.module_identity, struct_def.inline_module, use_span, false, environment, program) -> return None
+        if field.computed != None || sema_registration_as_marker(field.serde_markers) == None {
+            next
+        }
+        if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner_symbol.module_identity, struct_def.inline_module, use_span, false, environment, program) {
+            return None
+        }
         names: loop param in struct_def.type_params -> param.name
         field_ty: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner_symbol.module_identity, field.ty, names), names, owner_args)
         fits: sema_expr_expected_assignable(required, sema_expr_expected_type(field_ty, environment, program), environment, program) ?? return None
         if !fits -> return None
         owner_key: sema_program_symbol_key(program, owner_symbol.id)
         field_id: sema_symbol_find(program, symbol_key_text(SymbolKind.Field, sema_scope_module_text(environment, program, owner_symbol.module_identity), owner_key, field.name)) ?? return None
-        field_symbol: Symbol{id: field_id, kind: SymbolKind.Field, name: field.name, module_identity: owner_symbol.module_identity, owner: Val(owner_key), span: field.name_span, ty: Val(field_ty), visibility: if field.is_pub -> 2 else -> if field.is_package_pub -> 1 else -> 0}
+        field_symbol: Symbol{id: field_id, kind: SymbolKind.Field, name: field.name, module_identity: owner_symbol.module_identity, owner: Val(owner_key), span: field.name_span, ty: Val(field_ty), visibility: if field.is_pub -> 2 else if field.is_package_pub -> 1 else -> 0}
         reference := sema_expression_field_ref(field_symbol, Val(owner_symbol.id), field_ty)
         reference.boxed = sema_scope_environment_boxed_edge(environment, program, owner_symbol.id, field.name)
         return Val(SemaExpressionAsField{ty: field_ty, field: reference})
@@ -629,7 +661,9 @@ sema_expression_module_record_field: fn(record: TExpr, member: String, environme
 // unit-seed pull's `G`.
 sema_expression_vjp_run_field: fn(gradient: Type, member: String) -> Type? {
     if member == "value" -> return Val(Type.Named{name: "Tensor"})
-    if member == "pull" -> return Val(Type.Fn{params: [Type]{Type.Named{name: "Tensor"}}, ret: Val(gradient), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None})
+    if member == "pull" {
+        return Val(Type.Fn{params: [Type]{Type.Named{name: "Tensor"}}, ret: Val(gradient), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None})
+    }
     if member == "grads" -> return Val(gradient)
     None
 }
@@ -649,7 +683,9 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
     // `context` nothing in scope declares, or an import of `core.context`),
     // reads the task context.
     if base == .Ident(root, root_span, _) {
-        if sema_context_root(root, root_span, environment, program, scopes, context) -> return sema_expression_context_read(member, Span{start: span.end - member.len(), end: span.end}, span, expected, environment, program, scopes, context, diagnostics)
+        if sema_context_root(root, root_span, environment, program, scopes, context) {
+            return sema_expression_context_read(member, Span{start: span.end - member.len(), end: span.end}, span, expected, environment, program, scopes, context, diagnostics)
+        }
     }
     // `#package.*` / `#build.*` fold from the build snapshot.
     build_fact: sema_fact_build_read(base, member, span, expected, environment, program, context, diagnostics)
@@ -672,7 +708,9 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
     if sema_expression_numeric_bound_type(base, member) == .Val(bound_type) {
         // Rust `numeric_const_type`: a numeric constant is a value, not a
         // call, so the site is known-pure rather than an unknown callee.
-        if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "{type_name(bound_type)}.{member}", span, [EffectRowEntry]{}, diagnostics) -> return None
+        if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "{type_name(bound_type)}.{member}", span, [EffectRowEntry]{}, diagnostics) {
+            return None
+        }
         bound: sema_tree_node(bound_type, TExprKind.HostCall{call: THostCall.NumericBounds{ty: bound_type, member: member}}, span)
         return sema_expr_expected_owned(bound, expected, environment, program, diagnostics)
     }
@@ -731,7 +769,9 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
     // copy: the owner read is reported at the member name, so it checks the
     // place under that span; `field` itself spans the whole path. With no
     // live view the check cannot fail and reads nothing else, so it is skipped.
-    if state.views.len() > 0 && !sema_ownership_check_owner_read(state, Expr.Field{base: base.copy(), member: member, span: member_span, id: AST_NODE_GENERATED}, scopes, diagnostics) -> return None
+    if state.views.len() > 0 && !sema_ownership_check_owner_read(state, Expr.Field{base: base.copy(), member: member, span: member_span, id: AST_NODE_GENERATED}, scopes, diagnostics) {
+        return None
+    }
     // A projected base suppresses descendant moves, but still answers for
     // moves of itself or its ancestors. The complete place checks all moves.
     moved_ok: if context.suppress_partial_move_root_read -> sema_ownership_check_root_base_use(state, field, scopes, diagnostics) else -> sema_ownership_check_moved_place_use(state, field, scopes, diagnostics)
@@ -752,8 +792,12 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
     context.suppress_partial_move_root_read = previous_root_read
     if checked_base_value == .Val(probe_value) {
         rewritten := sema_shared_access_desugar_field_read(base, member, span, probe_value.ty, scopes)
-        if rewritten == None -> rewritten = sema_expression_rows_view(base, member, span, probe_value.ty, environment, program, scopes)
-        if rewritten == None -> rewritten = sema_expression_computed_field_read(base, member, span, probe_value.ty, environment, program, scopes)
+        if rewritten == None {
+            rewritten = sema_expression_rows_view(base, member, span, probe_value.ty, environment, program, scopes)
+        }
+        if rewritten == None {
+            rewritten = sema_expression_computed_field_read(base, member, span, probe_value.ty, environment, program, scopes)
+        }
         if rewritten == None {
             swizzle: sema_expression_core_vector_swizzle(base, member, span, probe_value.ty, environment, program, diagnostics)
             if swizzle.invalid -> return None
@@ -789,7 +833,9 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
         return sema_expr_expected_owned(value, expected, environment, program, diagnostics)
     }
     sema_ownership_note_close_owner(state, base, checked_base.ty, environment, program, scopes)
-    if !sema_expression_secret_exposure_allowed(checked_base.ty, member, span, environment, program, context, diagnostics) -> return None
+    if !sema_expression_secret_exposure_allowed(checked_base.ty, member, span, environment, program, context, diagnostics) {
+        return None
+    }
     value: sema_expression_field_checked(checked_base, member, span, expected, environment, program, scopes, context, diagnostics) ?? return None
     // Lambda capture moves ask whether the captured field is a copy type.
     sema_ownership_note_place_type(state, span, value.ty)
@@ -819,8 +865,12 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
 // region (Ownership/Checks.jet sema_ownership_scratch_read). IR
 // BuildTransact.jet ir_context_read and ir_context_get lower them.
 sema_expression_context_read: fn(member: String, member_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if member == "trace" -> return sema_expression_context_trace(span, expected, environment, program, scopes, context, diagnostics)
-    if member == "allocator" -> return sema_expression_context_allocator(span, expected, environment, program, scopes, context, diagnostics)
+    if member == "trace" {
+        return sema_expression_context_trace(span, expected, environment, program, scopes, context, diagnostics)
+    }
+    if member == "allocator" {
+        return sema_expression_context_allocator(span, expected, environment, program, scopes, context, diagnostics)
+    }
     keyed: if sema_context_field_module(member) != None -> sema_context_field_key(member, program) else -> SemaContextFieldKey?{None}
     ty: if keyed == {
         .Val(field) -> field.key.ty.copy()
@@ -834,13 +884,17 @@ sema_expression_context_read: fn(member: String, member_span: Span, span: Span, 
             }
         }
     }
-    if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "context.{member}", span, [EffectRowEntry]{}, diagnostics) -> return None
+    if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "context.{member}", span, [EffectRowEntry]{}, diagnostics) {
+        return None
+    }
     call: if keyed == {
         .Val(field) -> THostCall.ContextGet{key: field.key.key, default: sema_context_field_default(field, ty, span, context), equatable: sema_type_equatable(environment, program, ty)}
         .None -> THostCall.ContextRead{field: member}
     }
     read: sema_tree_node(ty, TExprKind.HostCall{call: call}, span)
-    if member == "scratch" -> return sema_expr_expected(read, expected, environment, program, diagnostics)
+    if member == "scratch" {
+        return sema_expr_expected(read, expected, environment, program, diagnostics)
+    }
     sema_expr_expected_owned(read, expected, environment, program, diagnostics)
 }
 
@@ -859,7 +913,9 @@ sema_context_read_fields: fn() -> [String] Never! { [String]{"deadline", "thread
 // effect, and a `#Memo` function that can read it keys its results on the
 // frames (Effects/Checks.jet sema_effect_context_reach).
 sema_expression_context_trace: fn(span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "context.trace", span, [EffectRowEntry]{}, diagnostics) -> return None
+    if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "context.trace", span, [EffectRowEntry]{}, diagnostics) {
+        return None
+    }
     unavailable: sema_error("E0906", span, "the source `core.debug.__trace_records` declaration for `context.trace` is unavailable", "`context.trace` makes its records through the Core debug source", "restore the `core.debug` source module")
     identity: sema_call_core_module_identity(environment, program, "core.debug") ?? {
         diagnostics.push(unavailable)
@@ -884,7 +940,9 @@ sema_expression_context_trace: fn(span: Span, expected: Type?, environment: Sema
 // heap, so the value is the same one wherever it is read, passed or kept.
 // Like every context read it records no effect.
 sema_expression_context_allocator: fn(span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "context.allocator", span, [EffectRowEntry]{}, diagnostics) -> return None
+    if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "context.allocator", span, [EffectRowEntry]{}, diagnostics) {
+        return None
+    }
     unavailable: sema_error("E0906", span, "the source `core.mem.__context_allocator` declaration for `context.allocator` is unavailable", "`context.allocator` is read through the Core mem source", "restore the `core.mem` source module")
     identity: sema_call_core_module_identity(environment, program, "core.mem") ?? {
         diagnostics.push(unavailable)
@@ -910,10 +968,10 @@ sema_expression_context_allocator: fn(span: Span, expected: Type?, environment: 
 sema_expression_rows_view: fn(base: Expr, member: String, span: Span, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Expr? {
     if member == "__rows" -> return None
     if sema_expr_unwrap_tag(ty) == .Apply(name, args) {
-        if args.len() != 1 || !sema_expression_rows_type(name, "Rows", environment, program, scopes) -> return None
-    } else {
-        return None
-    }
+        if args.len() != 1 || !sema_expression_rows_type(name, "Rows", environment, program, scopes) {
+            return None
+        }
+    } else { return None }
     row: Expr.Ident{name: "__row", span: span, id: AST_NODE_GENERATED}
     item: Expr.Field{base: row, member: member, span: span, id: AST_NODE_GENERATED}
     rows: Expr.Field{base: base.copy(), member: "__rows", span: span, id: AST_NODE_GENERATED}
@@ -930,7 +988,9 @@ sema_expression_rows_view: fn(base: Expr, member: String, span: Span, ty: Type, 
 // of its generated getter (Registration `sema_derive_computed_getters`).
 // None for a stored field or any other base.
 sema_expression_computed_field_read: fn(base: Expr, member: String, span: Span, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Expr? {
-    if sema_expression_computed_field_named(ty, member, false, environment, program, scopes) == None -> return None
+    if sema_expression_computed_field_named(ty, member, false, environment, program, scopes) == None {
+        return None
+    }
     Val(Expr.MethodCall{receiver: base.copy(), method: sema_computed_field_getter(member), method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED})
 }
 
@@ -971,7 +1031,9 @@ SemaComputedPlace: struct {
 sema_expression_computed_place: fn(place: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> SemaComputedPlace? {
     if place.kind == {
         .Field(receiver, field) -> {
-            if sema_expression_computed_field_named(receiver.ty, field.name, false, environment, program, scopes) == .Val(member) -> return Val(SemaComputedPlace{owner: receiver.ty.copy(), member: member, span: place.span})
+            if sema_expression_computed_field_named(receiver.ty, field.name, false, environment, program, scopes) == .Val(member) {
+                return Val(SemaComputedPlace{owner: receiver.ty.copy(), member: member, span: place.span})
+            }
             return sema_expression_computed_place(receiver, environment, program, scopes)
         }
         .MethodCall(receiver, method, _, _) -> {
@@ -1022,7 +1084,9 @@ sema_expression_terminal_fact: fn(member: String, member_span: Span, expected: T
 
 sema_expression_struct_static_member_error: fn(type_name: String, member: String, states: [String], span: Span) -> Diagnostic Never! {
     loop state in states {
-        if state == member -> return sema_error("E0302", span, "`{type_name}.{member}` is not a value", "struct fields need a value before the dot; typestate names are compile-time facts, not runtime values", "use a `{type_name}` value before a field, or call a static method on `{type_name}`")
+        if state == member {
+            return sema_error("E0302", span, "`{type_name}.{member}` is not a value", "struct fields need a value before the dot; typestate names are compile-time facts, not runtime values", "use a `{type_name}` value before a field, or call a static method on `{type_name}`")
+        }
     }
     sema_error("E0302", span, "`{type_name}` has no static member `{member}`", "`{type_name}` names a struct type; fields need a value before the dot", "use a `{type_name}` value before an instance field, or call a static method that exists on `{type_name}`")
 }
@@ -1034,7 +1098,9 @@ sema_expression_struct_static_member_error: fn(type_name: String, member: String
 // one; any other is the call path's import-member report, not an untyped base.
 sema_expression_module_constant: fn(alias: String, member: String, member_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     index: sema_scope_resolve_index(scopes, alias) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    if scopes.bindings[index].symbol.kind != SymbolKind.Import -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if scopes.bindings[index].symbol.kind != SymbolKind.Import {
+        return SemaMethodSpecialCheck{handled: false, value: None}
+    }
     if program.registration_graph == .Val(graph) {
         // An inline module of the imported file (`lib.inner`) is its record.
         if sema_expression_module_nested_record(graph, alias, member, environment, program) == .Val(nested) {
@@ -1068,7 +1134,9 @@ sema_expression_module_nested_record: fn(graph: SemaRegistrationGraph, alias: St
     module_id: sema_registration_module_id(graph, imported.module_identity)
     module_index: sema_registration_module_index(graph, module_id) ?? return None
     loop surface in graph.modules[module_index].inline_bindings.modules {
-        if surface.name != member || surface.private_to != None || surface.constants.get(SEMA_MODULE_META) == None -> next
+        if surface.name != member || surface.private_to != None || surface.constants.get(SEMA_MODULE_META) == None {
+            next
+        }
         return sema_registration_lookup_name(graph, module_id, sema_inline_member_name(surface.path, SEMA_MODULE_META))
     }
     None
@@ -1082,7 +1150,9 @@ sema_expression_module_nested_record: fn(graph: SemaRegistrationGraph, alias: St
 // Core module paths such as `core.text.wrap` name published modules and keep
 // their own route.
 sema_expression_module_file_child: fn(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol, alias: String, member: String, member_span: Span) -> Diagnostic? {
-    if module_is_core(resolved.target_module_identity) || sema_resolved_kind(graph, resolved) != SymbolKind.Import -> return None
+    if module_is_core(resolved.target_module_identity) || sema_resolved_kind(graph, resolved) != SymbolKind.Import {
+        return None
+    }
     owner_index: sema_registration_module_index(graph, resolved.target_module_identity) ?? return None
     loop declaration in graph.modules[owner_index].declarations {
         if declaration == .CodeModule(definition) && definition.name == member && definition.body == None {
@@ -1123,12 +1193,16 @@ sema_expression_core_nested_constant: fn(alias: String, nested: String, member: 
 sema_expression_module_constant_read: fn(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol, label: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     kind: sema_resolved_kind(graph, resolved)
     source_function: kind == SymbolKind.Function && !module_is_core(resolved.source_module_identity)
-    if kind != SymbolKind.Constant && !source_function -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if kind != SymbolKind.Constant && !source_function {
+        return SemaMethodSpecialCheck{handled: false, value: None}
+    }
     symbol: sema_resolved_symbol(graph, resolved)
     if source_function {
         signature: symbol.ty ?? return SemaMethodSpecialCheck{handled: false, value: None}
         context.name_references.push(SemaNameReferenceFact{span: span, symbol: symbol, kind: "function"})
-        if sema_expr_marked_function_value(label, symbol.id, span, expected, environment, program, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        if sema_expr_marked_function_value(label, symbol.id, span, expected, environment, program, diagnostics) {
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
         value_type: sema_function_value_type(program, signature, symbol.module_identity, expected)
         // A C `#Import` function crosses only by a direct call: as a value it
         // would be a Jet function type, which has no C ABI (Rust `e3203`).
@@ -1158,15 +1232,21 @@ sema_expression_module_member_unknown: fn(graph: SemaRegistrationGraph, module_i
     module_index: sema_registration_module_index(graph, module_identity) ?? return None
     loop import in graph.modules[module_index].imports {
         loop binding in import.bindings {
-            if binding.local != alias || binding.symbol.kind != SymbolKind.Import || binding.declaration_position != None -> next
+            if binding.local != alias || binding.symbol.kind != SymbolKind.Import || binding.declaration_position != None {
+                next
+            }
             target_index: sema_registration_module_index(graph, binding.target_module_identity) ?? return None
             target: graph.modules[target_index]
             declared_private: if sema_registration_direct_symbol(target, member) == {
                 .Val(declared) -> !sema_registration_visible(declared.visibility, module_identity, graph.modules[module_index].package_identity, target.module_identity, target.package_identity)
                 .None -> false
             }
-            if module_is_core(target.module_identity) && !declared_private -> return Val(sema_expression_core_member_unknown(target, member, member_span))
-            if sema_registration_direct_symbol(target, member) != None -> return Val(sema_error("E0605", member_span, "`{alias}.{member}` is private to its module", "a `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module", "use `{alias}.{member}` from inside its module, or remove `priv` from its module or field"))
+            if module_is_core(target.module_identity) && !declared_private {
+                return Val(sema_expression_core_member_unknown(target, member, member_span))
+            }
+            if sema_registration_direct_symbol(target, member) != None {
+                return Val(sema_error("E0605", member_span, "`{alias}.{member}` is private to its module", "a `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module", "use `{alias}.{member}` from inside its module, or remove `priv` from its module or field"))
+            }
             return Val(sema_call_import_member_unknown(target.module_name, member, member_span))
         }
     }
@@ -1177,7 +1257,9 @@ sema_expression_module_member_unknown: fn(graph: SemaRegistrationGraph, module_i
 // (`math.pi` for `PI`) is the suggestion, ahead of the module's call menu.
 sema_expression_core_member_unknown: fn(module_row: SemaRegistrationModule, member: String, member_span: Span) -> Diagnostic {
     loop symbol in module_row.symbols {
-        if symbol.kind != SymbolKind.Constant || symbol.name == member || symbol.name.lower() != member.lower() -> next
+        if symbol.kind != SymbolKind.Constant || symbol.name == member || symbol.name.lower() != member.lower() {
+            next
+        }
         diagnostic: sema_error("E1004", member_span, "`{module_row.module_name}` has no item `{member}`", "standard library modules expose a fixed set of public items", "did you mean `{symbol.name}`?")
         return diagnostic_with_edit(diagnostic, TextEdit{span: member_span, new_text: symbol.name})
     }
@@ -1219,7 +1301,9 @@ sema_expression_bound_method: fn(base: Expr, member: String, span: Span, receive
     }
     conventions := [AccessConvention]{}
     if slot == .Fn(_, _, _, _, call_metadata, _) {
-        loop index in 0..<count -> conventions.push(sema_call_fn_param_convention(call_metadata, index))
+        loop index in 0..<count {
+            conventions.push(sema_call_fn_param_convention(call_metadata, index))
+        }
     }
     hidden: pipe_value_name(expr_source_start(base))
     // copy: the generated read owns its receiver; `base` is the caller's AST
@@ -1280,7 +1364,9 @@ sema_expression_declares_field: fn(receiver: Type, member: String, environment: 
     found_name: if pinned == .Val(target) -> sema_expr_type_base_name(sema_expr_unwrap_tag(target)) else -> sema_expr_type_base_name(sema_expr_unwrap_tag(receiver))
     owner_name: found_name ?? return false
     owner := sema_expression_type_symbol(scopes, environment, program, owner_name)
-    if owner == None -> owner = sema_expression_carrier_type_symbol(environment, program, owner_name)
+    if owner == None {
+        owner = sema_expression_carrier_type_symbol(environment, program, owner_name)
+    }
     symbol: owner ?? return false
     struct_def: sema_scope_declaration_struct(environment, program, symbol.id) ?? return false
     loop field in struct_def.fields {
@@ -1337,10 +1423,14 @@ sema_expression_core_vector_swizzle: fn(base: Expr, member: String, span: Span, 
 // `F64x2`) a value of `ty` is, when Core's source declares it.
 sema_expression_core_vector_name: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
     leaf: sema_expr_math_leaf_name(ty) ?? return None
-    if leaf != "Vec2" && leaf != "Vec3" && leaf != "Vec4" && leaf != "F32x4" && leaf != "F64x2" -> return None
+    if leaf != "Vec2" && leaf != "Vec3" && leaf != "Vec4" && leaf != "F32x4" && leaf != "F64x2" {
+        return None
+    }
     if program.registration_graph == .Val(graph) {
         row: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return None
-        if core_source_owns_type("{module_text(graph.module_table, graph.modules[row.module_index].nominals[row.row].symbol.module_identity)}::{graph.modules[row.module_index].nominals[row.row].symbol.name}") -> return Val(leaf)
+        if core_source_owns_type("{module_text(graph.module_table, graph.modules[row.module_index].nominals[row.row].symbol.module_identity)}::{graph.modules[row.module_index].nominals[row.row].symbol.name}") {
+            return Val(leaf)
+        }
     }
     None
 }
@@ -1407,7 +1497,9 @@ sema_expression_numeric_bound_type: fn(base: Expr, member: String) -> Type? {
     if base == .Ident(owner_name, _, _) {
         kind: builtin_numeric_kind(owner_name) ?? return None
         if member == "MIN" || member == "MAX" -> return Val(kind.ty)
-        if !kind.integer && (member == "INFINITY" || member == "NEG_INFINITY" || member == "NAN" || member == "EPSILON") -> return Val(kind.ty)
+        if !kind.integer && (member == "INFINITY" || member == "NEG_INFINITY" || member == "NAN" || member == "EPSILON") {
+            return Val(kind.ty)
+        }
     }
     None
 }
@@ -1418,19 +1510,21 @@ sema_expression_numeric_bound_type: fn(base: Expr, member: String) -> Type? {
 // needs an audited `#Unsafe` region, exactly like the `core.crypto.expert`
 // exposure functions.
 sema_expression_secret_exposure_allowed: fn(ty: Type, member: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
-    if member != "bytes" || context.unsafe_depth > 0 || !sema_call_reflection_secret_bearing(ty) -> return true
-    if program.registration_graph == .Val(graph) {
-    caller_index: sema_scope_caller_index(environment, graph) ?? return true
-    if sema_expression_secret_declared_by(graph, ty, caller_index) -> return true
-    shown: type_name(ty)
-    exposure: if {
-        shown.ends_with("SigningKey") -> "signing_key_bytes"
-        shown.ends_with("X25519SecretKey") -> "x25519_secret_bytes"
-        shown.ends_with("SharedSecret") -> "shared_secret_bytes"
-        else -> "secret_bytes"
+    if member != "bytes" || context.unsafe_depth > 0 || !sema_call_reflection_secret_bearing(ty) {
+        return true
     }
-    diagnostics.push(sema_error("E0510", span, "reading `{shown}.bytes` exposes secret key material", "secret-bearing values cannot be printed, interpolated, or read as raw bytes outside an audited expert gate", "keep the value inside `crypto` operations, or call `expert.{exposure}(value)` inside `#Unsafe(\"reason\") {{ … }}`"))
-    return false
+    if program.registration_graph == .Val(graph) {
+        caller_index: sema_scope_caller_index(environment, graph) ?? return true
+        if sema_expression_secret_declared_by(graph, ty, caller_index) -> return true
+        shown: type_name(ty)
+        exposure: if {
+            shown.ends_with("SigningKey") -> "signing_key_bytes"
+            shown.ends_with("X25519SecretKey") -> "x25519_secret_bytes"
+            shown.ends_with("SharedSecret") -> "shared_secret_bytes"
+            else -> "secret_bytes"
+        }
+        diagnostics.push(sema_error("E0510", span, "reading `{shown}.bytes` exposes secret key material", "secret-bearing values cannot be printed, interpolated, or read as raw bytes outside an audited expert gate", "keep the value inside `crypto` operations, or call `expert.{exposure}(value)` inside `#Unsafe(\"reason\") {{ … }}`"))
+        return false
     }
     true
 }
@@ -1442,7 +1536,9 @@ sema_expression_secret_declared_by: fn(graph: SemaRegistrationGraph, ty: Type, c
     leaf: sema_call_reflection_leaf_name(name)
     loop row in 0..<graph.modules[caller].nominals.len() {
         if graph.modules[caller].nominals[row].symbol.name != leaf -> next
-        if sema_call_reflection_secret_bearing(Type.Named{name: "{module_text(graph.module_table, graph.modules[caller].nominals[row].symbol.module_identity)}::{leaf}"}) -> return true
+        if sema_call_reflection_secret_bearing(Type.Named{name: "{module_text(graph.module_table, graph.modules[caller].nominals[row].symbol.module_identity)}::{leaf}"}) {
+            return true
+        }
     }
     false
 }

@@ -36,14 +36,18 @@ parse_rule: fn(source: String) -> Rule? {
     condition: if condition_words[1].trim() == {
         ">=" -> RulePredicate.AtLeast(threshold)
         "==" -> RulePredicate.Equals(threshold)
-        else -> { return None }
+        else -> {
+            return None
+        }
     }
 
     amount: Int.parse(action_words[1].trim()) ?? return None
     action: if action_words[0].trim() == {
         "add" -> Action.Add(amount)
         "set" -> Action.Set(amount)
-        else -> { return None }
+        else -> {
+            return None
+        }
     }
 
     Val(Rule{name: name, fact: fact, condition: condition, action: action})

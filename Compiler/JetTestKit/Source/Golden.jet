@@ -1,13 +1,14 @@
 use files: core.files
 
-
 // The golden tiers, one per optimize level, the testkit's one table of tier
 // names and their flags: o0 runs the entry (`jet run`), o1 builds it with
 // `-O1` and o2 with `--release`.
 kit_golden_tiers: fn() -> [KitTier] {
-    [KitTier{name: "o0", level: "O0", flags: [], direct: true, test_flags: ["-O0"]},
-     KitTier{name: "o1", level: "O1", flags: ["-O1"], direct: false, test_flags: ["-O1"]},
-     KitTier{name: "o2", level: "O2", flags: ["--release"], direct: false, test_flags: ["--release"]}]
+    [
+        KitTier{name: "o0", level: "O0", flags: [], direct: true, test_flags: ["-O0"]},
+        KitTier{name: "o1", level: "O1", flags: ["-O1"], direct: false, test_flags: ["-O1"]},
+        KitTier{name: "o2", level: "O2", flags: ["--release"], direct: false, test_flags: ["--release"]},
+    ]
 }
 
 // The tier named `name`; the first tier for any other name.
@@ -43,7 +44,9 @@ kit_golden_collect: fn(root: String, directory: String) -> [KitEntry] {
         shown: files.join(directory, child.name)
         if child.is_dir {
             if kit_golden_exists(files.join(child.path, "package.jet")) || kit_golden_exists(files.join(child.path, "workspace.jet")) || kit_golden_exists(files.join(child.path, "run.jet")) {
-                if kit_golden_exists(files.join(child.path, "run.jet")) -> entries.push(KitEntry{path: files.join(shown, "run.jet"), expected: shown, project: shown, suite: "golden", mode: ""})
+                if kit_golden_exists(files.join(child.path, "run.jet")) {
+                    entries.push(KitEntry{path: files.join(shown, "run.jet"), expected: shown, project: shown, suite: "golden", mode: ""})
+                }
                 next
             }
             nested: kit_golden_collect(root, shown)
@@ -60,7 +63,9 @@ kit_golden_collect: fn(root: String, directory: String) -> [KitEntry] {
 kit_golden_entry_stem: fn(name: String) -> String? {
     loop row in KIT_SOURCE_LANGUAGES {
         extension: ".{row.extension}"
-        if name.ends_with(extension) && name.count_bytes() > extension.count_bytes() -> return Val(kit_steps_byte_slice(name, 0, name.count_bytes() - extension.count_bytes()))
+        if name.ends_with(extension) && name.count_bytes() > extension.count_bytes() {
+            return Val(kit_steps_byte_slice(name, 0, name.count_bytes() - extension.count_bytes()))
+        }
     }
     None
 }
@@ -79,16 +84,22 @@ kit_golden_discover: fn(root: String, corpora: [String]) -> [KitEntry] {
 // diagnostic report is a front-end rejection, exit 1 whether a build or the
 // direct tier's `jet run` printed it.
 kit_golden_failure_exit: fn(expected: String, report: String) -> Int? {
-    if report.starts_with("Stop [") || report.starts_with("Error [E3003]:") -> return Val(KIT_EXIT_RUNTIME_PANIC)
+    if report.starts_with("Stop [") || report.starts_with("Error [E3003]:") {
+        return Val(KIT_EXIT_RUNTIME_PANIC)
+    }
     if report.starts_with("Error [jet.") -> return Val(1)
     if report.starts_with("Runtime fault [R0801]:") || report.starts_with("Runtime fault [R0802]:") {
         loop raw in report.split("\n") {
             line: raw.trim().copy()
-            if line.starts_with("exit:") && kit_steps_byte_slice(line, 5, line.count_bytes()).trim() != "{KIT_EXIT_RUNTIME_PANIC}" -> return None
+            if line.starts_with("exit:") && kit_steps_byte_slice(line, 5, line.count_bytes()).trim() != "{KIT_EXIT_RUNTIME_PANIC}" {
+                return None
+            }
         }
         return Val(KIT_EXIT_RUNTIME_PANIC)
     }
-    if report == "" -> return if expected.ends_with("tests/run/CoreIO/LogFatal") -> Val(1) else -> None
+    if report == "" {
+        return if expected.ends_with("tests/run/CoreIO/LogFatal") -> Val(1) else -> None
+    }
     exit_one: ["Examples/ErrorsAndEffects/Errors/PropagationJourney", "Examples/ErrorsAndEffects/Errors/ErrorContext", "Examples/ErrorsAndEffects/Errors/DefaultErrorConversion", "Examples/ErrorsAndEffects/Errors/DefaultErrEdge", "Examples/ErrorsAndEffects/Errors/FatalExit", "Examples/ErrorsAndEffects/Failures/MintedLeaveRun", "Examples/Data/DecodeErrorExit", "Examples/Crypto/CryptoErrorRun", "tests/run/FailureFoundation/PropagationJourneyDirect", "tests/run/FailureFoundation/PropagationJourneyOneHop", "tests/run/FailureFoundation/PropagationJourneyCore", "tests/run/FailureFoundation/PropagationJourneyDecode", "tests/run/FailureFoundation/OrErrJourney"]
     loop stem in exit_one {
         if expected.ends_with(stem) -> return Val(1)
@@ -102,7 +113,9 @@ kit_golden_failure_exit: fn(expected: String, report: String) -> Int? {
 // tier with no such file compares against the stem's shared set.
 kit_golden_tier_expected: fn(expected: String, tier: String) -> String {
     tiered: "{expected}.{tier}"
-    if kit_golden_exists("{tiered}.out") || kit_golden_exists("{tiered}.err.out") || kit_golden_exists("{tiered}.stderr.out") -> return tiered
+    if kit_golden_exists("{tiered}.out") || kit_golden_exists("{tiered}.err.out") || kit_golden_exists("{tiered}.stderr.out") {
+        return tiered
+    }
     expected.copy()
 }
 
@@ -118,19 +131,25 @@ kit_golden_stream_verdict: fn(id: String, stem: String, tier: String, result: Ki
     error: kit_exec_optional("{expected}.err.out")
     if error == .Val(report) {
         code: if front_end -> 1 else -> kit_golden_failure_exit(stem, report) ?? return kit_expect_verdict("FAIL", "failure report has no exact exit oracle")
-        if result.code != code -> return kit_expect_verdict("FAIL", "exit {result.code}; expected {code}: {result.stderr}")
+        if result.code != code {
+            return kit_expect_verdict("FAIL", "exit {result.code}; expected {code}: {result.stderr}")
+        }
         stdout: kit_exec_optional("{expected}.out") ?? ""
         output: kit_expect_exact(id, "{expected}.out", Val(stdout), result.stdout, bless, false)
         if output.status != "PASS" -> return output
         return kit_expect_exact(id, "{expected}.err.out", error, result.stderr, bless, false)
     }
-    if result.code != 0 -> return kit_expect_verdict("FAIL", "exit {result.code}; expected 0: {result.stderr}")
+    if result.code != 0 {
+        return kit_expect_verdict("FAIL", "exit {result.code}; expected 0: {result.stderr}")
+    }
     stdout := result.stdout
     if argv0 != "" -> stdout = kit_expect_argv0(stdout, argv0, source_name)
     verdict: kit_expect_exact(id, "{expected}.out", kit_exec_optional("{expected}.out"), stdout, bless, false)
     if verdict.status != "PASS" -> return verdict
     stderr: kit_exec_optional("{expected}.stderr.out")
-    if stderr != None -> return kit_expect_exact(id, "{expected}.stderr.out", stderr, result.stderr, bless, false)
+    if stderr != None {
+        return kit_expect_exact(id, "{expected}.stderr.out", stderr, result.stderr, bless, false)
+    }
     verdict
 }
 
@@ -166,7 +185,9 @@ kit_golden_build: fn(entry: KitEntry, tier: KitTier, plan: KitPlan, env: KitEnv,
         .Val(value) -> return KitOutcome{verdict: value, run: result}
         .None -> {}
     }
-    if result.stderr.contains("Warning [jet.BranchArmTable]") -> return KitOutcome{verdict: kit_expect_verdict("FAIL", "feature example emitted L0507"), run: result}
+    if result.stderr.contains("Warning [jet.BranchArmTable]") {
+        return KitOutcome{verdict: kit_expect_verdict("FAIL", "feature example emitted L0507"), run: result}
+    }
     if result.code != 0 {
         unsupported: result.stderr.contains("Error [jet.InvalidCommandInput]")
         verdict: kit_expect_verdict(if unsupported -> "UNSUPPORTED" else -> "FAIL", "front end/build exit {result.code}: {result.stderr}")
@@ -174,7 +195,6 @@ kit_golden_build: fn(entry: KitEntry, tier: KitTier, plan: KitPlan, env: KitEnv,
     }
     KitOutcome{verdict: kit_expect_verdict("PASS", ""), run: result}
 }
-
 
 kit_golden_default_step: fn(word: String) -> KitStep {
     KitStep{argv: [word], stdin: "", exit: "0", assertions: []}
@@ -216,7 +236,9 @@ kit_golden_test_outcome: fn(context: KitStepCtx, entry: KitEntry, tier: KitTier,
         .Val(value) -> return Val(KitOutcome{verdict: value, run: result})
         .None -> {}
     }
-    if result.code != code -> return Val(KitOutcome{verdict: kit_expect_verdict("FAIL", "jet test exit {result.code}; expected {code}: {result.stderr}"), run: result})
+    if result.code != code {
+        return Val(KitOutcome{verdict: kit_expect_verdict("FAIL", "jet test exit {result.code}; expected {code}: {result.stderr}"), run: result})
+    }
     Val(KitOutcome{verdict: kit_expect_exact(context.id, path, Val(golden), result.stdout, context.bless, false), run: result})
 }
 
@@ -239,7 +261,9 @@ kit_golden_stage: fn(project: String, entry: KitEntry, work: String) {
     siblings := [String]{}
     sources := [String]{}
     loop child in listed {
-        if child.is_dir || child.name == own || child.name == "package.jet" || child.name == "workspace.jet" -> next
+        if child.is_dir || child.name == own || child.name == "package.jet" || child.name == "workspace.jet" {
+            next
+        }
         stem: kit_golden_entry_stem(child.name) ?? next
         siblings.push(stem)
         sources.push(child.name.copy())
@@ -259,7 +283,9 @@ kit_golden_stage: fn(project: String, entry: KitEntry, work: String) {
         }
     }
     loop child in listed {
-        if !child.is_dir && !child.name.starts_with("{own_stem}.") && kit_golden_unnamed_sibling(child.name, siblings, named) -> next
+        if !child.is_dir && !child.name.starts_with("{own_stem}.") && kit_golden_unnamed_sibling(child.name, siblings, named) {
+            next
+        }
         kit_exec_copy_entry(child, work, true, false)
     }
 }
@@ -277,13 +303,19 @@ kit_golden_run_entry: fn(entry: KitEntry, tier: KitTier, env: KitEnv, scratch: S
     expected: files.join(env.root, entry.expected)
     plan := kit_steps_parse(kit_exec_optional("{expected}.case") ?? "")
     last := kit_exec_failed("case has not run")
-    if plan.error != "" -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", plan.error), run: last}
-    if plan.fixture != "" -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", "golden fixture is the staged project; fixture: is case-only"), run: last}
+    if plan.error != "" {
+        return KitOutcome{verdict: kit_expect_verdict("REFUSED", plan.error), run: last}
+    }
+    if plan.fixture != "" {
+        return KitOutcome{verdict: kit_expect_verdict("REFUSED", "golden fixture is the staged project; fixture: is case-only"), run: last}
+    }
     // A row that binds a fixed port runs its program in a network namespace
     // of its own, where the port is always free; a host that can't give it
     // one skips the row.
     if plan.host_port != 0 {
-        if kit_netns_required(env, scratch) == .Val(skipped) -> return KitOutcome{verdict: skipped, run: last}
+        if kit_netns_required(env, scratch) == .Val(skipped) {
+            return KitOutcome{verdict: skipped, run: last}
+        }
     }
     source: files.join(scratch, "source")
     work: files.join(source, entry.project)
@@ -311,11 +343,15 @@ kit_golden_step_invoke: fn(step: KitStep, index: Int, context: KitStepCtx, previ
     if index == 0 {
         if plan.compile_only {
             loop row in plan.steps {
-                if row.argv[0] != "build" -> return KitStepResult{state: state, verdict: kit_expect_verdict("REFUSED", "run: none cannot have runtime steps")}
+                if row.argv[0] != "build" {
+                    return KitStepResult{state: state, verdict: kit_expect_verdict("REFUSED", "run: none cannot have runtime steps")}
+                }
             }
         }
         can_create: context.bless.first_tier && (context.bless.all || kit_expect_named(context.bless.ids, context.id))
-        if !plan.compile_only && !golden.last_explicit && !can_create && !kit_golden_exists("{golden.expected}.out") && !kit_golden_exists("{golden.expected}.err.out") -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "missing expected stream: {golden.expected}")}
+        if !plan.compile_only && !golden.last_explicit && !can_create && !kit_golden_exists("{golden.expected}.out") && !kit_golden_exists("{golden.expected}.err.out") {
+            return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "missing expected stream: {golden.expected}")}
+        }
     }
     command: step.argv[0]
     // The direct tier's build is `jet check`, and its `jet run` runs the same
@@ -326,7 +362,9 @@ kit_golden_step_invoke: fn(step: KitStep, index: Int, context: KitStepCtx, previ
         state.built_once = true
     }
     if command == "build" || (command == "built" && !state.built_once) {
-        if command == "build" && step.argv.len() != 1 -> return KitStepResult{state: state, verdict: kit_expect_verdict("REFUSED", "build step takes no arguments")}
+        if command == "build" && step.argv.len() != 1 {
+            return KitStepResult{state: state, verdict: kit_expect_verdict("REFUSED", "build step takes no arguments")}
+        }
         compiled: kit_golden_build(golden.entry, golden.tier, plan, context.env, golden.source, context.work, context.scratch, step)
         state.last = compiled.run
         if compiled.verdict.status != "PASS" {
@@ -341,9 +379,13 @@ kit_golden_step_invoke: fn(step: KitStep, index: Int, context: KitStepCtx, previ
             return KitStepResult{state: state, verdict: kit_golden_stream_verdict(context.id, golden.expected, golden.tier.name, streams, context.bless, "", kit_golden_source_name(golden.entry), true)}
         }
         state.built = if golden.tier.direct -> context.env.jet else -> kit_steps_artifact(golden.entry.path, golden.source, plan.artifact)
-        if !files.exists(state.built) -> return KitStepResult{state: state, verdict: kit_expect_verdict("ERROR", "CLI build artifact missing: {state.built}")}
+        if !files.exists(state.built) {
+            return KitStepResult{state: state, verdict: kit_expect_verdict("ERROR", "CLI build artifact missing: {state.built}")}
+        }
         state.built_once = true
-        if command == "build" -> return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
+        if command == "build" {
+            return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
+        }
     }
     actual := step
     // The direct tier runs the staged entry by its full path from the case's
@@ -357,7 +399,9 @@ kit_golden_step_invoke: fn(step: KitStep, index: Int, context: KitStepCtx, previ
         actual.argv = argv
     }
     if plan.host_port != 0 && actual.isolate == "" -> actual.isolate = "netns"
-    if index == plan.steps.len() - 1 && actual.stdin == "" && kit_golden_exists("{golden.expected}.stdin") -> actual.stdin = "{golden.expected}.stdin"
+    if index == plan.steps.len() - 1 && actual.stdin == "" && kit_golden_exists("{golden.expected}.stdin") {
+        actual.stdin = "{golden.expected}.stdin"
+    }
     // `repo-cwd:` runs the program from the staged source root. The stage keeps
     // the repository layout, so a repo-relative path the program reads (its own
     // directory, say) resolves as it does from the checkout, and the checkout
@@ -372,7 +416,9 @@ kit_golden_step_invoke: fn(step: KitStep, index: Int, context: KitStepCtx, previ
 
 kit_golden_step_check: fn(step: KitStep, index: Int, context: KitStepCtx, state: KitStepState) -> KitVerdict {
     golden: context.golden ?? panic("golden step context required")
-    if state.last.stderr.contains("Warning [jet.BranchArmTable]") -> return kit_expect_verdict("FAIL", "feature example emitted L0507")
+    if state.last.stderr.contains("Warning [jet.BranchArmTable]") {
+        return kit_expect_verdict("FAIL", "feature example emitted L0507")
+    }
     checked := step
     if step.argv[0] != "build" && index == context.plan.steps.len() - 1 && !golden.last_explicit {
         normalized: kit_expect_named(context.plan.normalize, "argv0")
@@ -386,7 +432,9 @@ kit_golden_step_check: fn(step: KitStep, index: Int, context: KitStepCtx, state:
         // the one `.err.out` every tier shares.
         if streams.stderr.contains(" (names and lines: jet crash)\n") {
             named: kit_exec_invoke(context.env, [context.env.jet, "crash"], context.work, context.scratch, streams.stderr)
-            if named.code != 0 -> return kit_expect_verdict("FAIL", "jet crash exit {named.code}: {named.stderr}")
+            if named.code != 0 {
+                return kit_expect_verdict("FAIL", "jet crash exit {named.code}: {named.stderr}")
+            }
             streams.stderr = named.stdout
         }
         // The direct tier runs the staged entry by its absolute path; a report
@@ -418,7 +466,9 @@ kit_golden_mark_tier_splits: fn(results: &[KitCaseResult]) {
     }
 }
 
-kit_golden_discover_suite: fn(context: KitCtx) -> [KitEntry] { kit_golden_discover(context.root, context.options.golden_corpora) }
+kit_golden_discover_suite: fn(context: KitCtx) -> [KitEntry] {
+    kit_golden_discover(context.root, context.options.golden_corpora)
+}
 
 kit_golden_run_suite: fn(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
     source: kit_exec_optional(files.join(context.root, "{entry.expected}.case")) ?? ""

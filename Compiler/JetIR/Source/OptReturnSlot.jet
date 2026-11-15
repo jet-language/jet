@@ -30,7 +30,6 @@
 // stored with a value that has a Drop keeps its boxes too: the caller's
 // Drop of the box would drop that value. Library and runtime modules
 // (no program entry) keep every convention, their exports' ABI.
-
 use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_partition, compiler_threads_single, name_rows_set, name_rows_value]
 
 // The box size of each function whose Returns can use a return slot (-1:
@@ -162,7 +161,9 @@ ir_opt_slot_part: fn(slot: Shared<IROptSlotPart>, shared: Shared<IROptSlotView>)
         }
         return count
     }
-    loop row in 0..<count -> ir_opt_slot_rewrite(held.value.functions[row], reads.value.plan, reads.value.results, start + row, reads.value.calls)
+    loop row in 0..<count {
+        ir_opt_slot_rewrite(held.value.functions[row], reads.value.plan, reads.value.results, start + row, reads.value.calls)
+    }
     count
 }
 
@@ -202,7 +203,9 @@ ir_opt_slot_scan: fn(m: IRModule, f: IRFunction, calls: [Int], results: [Int], a
     loop at in 0..<f.op.len() {
         if f.op[at] != .Call -> next
         callee: f.a[at]
-        if callee < 0 || callee >= results.len() || results[callee] < 0 || m.types[results[callee]].kind != .Pointer -> next
+        if callee < 0 || callee >= results.len() || results[callee] < 0 || m.types[results[callee]].kind != .Pointer {
+            next
+        }
         result: f.dst[at]
         if result >= 0 && (facts.defs[result] != 1 || loose[result]) -> marks.push(callee)
     }
@@ -235,7 +238,9 @@ ir_opt_slot_mark: fn(m: IRModule, plan: &IROptSlotPlan, marks: [Int]) -> Int Nev
 
 // Function `f` (function `id`) rebuilt when it changes (ir_opt_slot_touches).
 ir_opt_slot_rewrite: fn(f: &IRFunction, plan: IROptSlotPlan, results: [Int], id: Int, calls: [Int]) Never! {
-    if f.asm != None || f.op.len() == 0 || !ir_opt_slot_touches(f, plan, id) -> return
+    if f.asm != None || f.op.len() == 0 || !ir_opt_slot_touches(f, plan, id) {
+        return
+    }
     out := ir_opt_slot_rebuild(f, plan, results, id, calls[2], calls[3])
     f = out.move()
 }
@@ -244,19 +249,27 @@ ir_opt_slot_rewrite: fn(f: &IRFunction, plan: IROptSlotPlan, results: [Int], id:
 // return slot), with the allocations (calls of name rows `alloc` or
 // `value`) it returns into `allocs`.
 ir_opt_slot_size: fn(m: IRModule, f: IRFunction, alloc: Int, value: Int, allocs: &[Int]) -> Int Never! {
-    if f.asm != None || f.op.len() == 0 || f.result < 0 || m.types[f.result].kind != .Pointer -> return -1
+    if f.asm != None || f.op.len() == 0 || f.result < 0 || m.types[f.result].kind != .Pointer {
+        return -1
+    }
     facts: ir_opt_facts(f)
     size := -1
     boxes := [Int]{}
     loop at in 0..<f.op.len() {
         if f.op[at] != .Return || f.a[at] < 0 -> next
         boxed: f.a[at]
-        if boxed < f.param_count || facts.defs[boxed] != 1 || f.slot_type[boxed] != f.result -> return -1
+        if boxed < f.param_count || facts.defs[boxed] != 1 || f.slot_type[boxed] != f.result {
+            return -1
+        }
         def: facts.def_at[boxed]
-        if def < 0 || f.op[def] != .CallRuntime || (f.a[def] != alloc && f.a[def] != value) || f.c[def] != 2 -> return -1
+        if def < 0 || f.op[def] != .CallRuntime || (f.a[def] != alloc && f.a[def] != value) || f.c[def] != 2 {
+            return -1
+        }
         bytes: ir_opt_const_at(f, facts, f.args[f.b[def]], def) ?? return -1
         align: ir_opt_const_at(f, facts, f.args[f.b[def] + 1], def) ?? return -1
-        if bytes < 8 || bytes > IR_FRAME_BOX_BYTES || align != 8 || (size >= 0 && bytes != size) -> return -1
+        if bytes < 8 || bytes > IR_FRAME_BOX_BYTES || align != 8 || (size >= 0 && bytes != size) {
+            return -1
+        }
         size = bytes
         if !boxes.contains(boxed) {
             boxes.push(boxed)
@@ -270,7 +283,9 @@ ir_opt_slot_size: fn(m: IRModule, f: IRFunction, alloc: Int, value: Int, allocs:
     loop _ in 0..<f.slot_type.len() -> shifts.push(-1)
     loop at in 0..<f.op.len() {
         field: f.dst[at]
-        if f.op[at] == .Offset && field >= 0 && facts.defs[field] == 1 && boxes.contains(f.a[at]) && f.b[at] >= 0 && f.b[at] < size -> shifts[field] = f.b[at]
+        if f.op[at] == .Offset && field >= 0 && facts.defs[field] == 1 && boxes.contains(f.a[at]) && f.b[at] >= 0 && f.b[at] < size {
+            shifts[field] = f.b[at]
+        }
     }
     reads := [Int]{}
     loop at in 0..<f.op.len() {
@@ -278,7 +293,9 @@ ir_opt_slot_size: fn(m: IRModule, f: IRFunction, alloc: Int, value: Int, allocs:
         loop (index, slot) in reads {
             if slot < 0 || slot >= shifts.len() -> next
             if boxes.contains(slot) {
-                if f.op[at] == .Return || (f.op[at] == .Offset && f.dst[at] >= 0 && shifts[f.dst[at]] >= 0) -> next
+                if f.op[at] == .Return || (f.op[at] == .Offset && f.dst[at] >= 0 && shifts[f.dst[at]] >= 0) {
+                    next
+                }
                 if !ir_opt_slot_written(m, f, at, index, slot, 0, size) -> return -1
             } else if shifts[slot] >= 0 && !ir_opt_slot_written(m, f, at, index, slot, shifts[slot], size) {
                 return -1
@@ -294,8 +311,12 @@ ir_opt_slot_size: fn(m: IRModule, f: IRFunction, alloc: Int, value: Int, allocs:
 // at least 0, or a CopyBytes from other storage.
 ir_opt_slot_written: fn(m: IRModule, f: IRFunction, at: Int, index: Int, slot: Int, shift: Int, size: Int) -> Bool Never! {
     if index != 0 || f.a[at] != slot -> return false
-    if f.op[at] == .Store -> return f.c[at] != slot && f.b[at] >= 0 && shift + f.b[at] + 8 <= size && m.types[f.slot_type[f.c[at]]].drop == ""
-    if f.op[at] == .CopyBytes -> return f.b[at] != slot && f.c[at] >= 0 && shift + f.c[at] <= size && m.types[f.slot_type[f.b[at]]].drop == ""
+    if f.op[at] == .Store {
+        return f.c[at] != slot && f.b[at] >= 0 && shift + f.b[at] + 8 <= size && m.types[f.slot_type[f.c[at]]].drop == ""
+    }
+    if f.op[at] == .CopyBytes {
+        return f.b[at] != slot && f.c[at] >= 0 && shift + f.c[at] <= size && m.types[f.slot_type[f.b[at]]].drop == ""
+    }
     false
 }
 
@@ -314,7 +335,9 @@ ir_opt_slot_loose: fn(f: IRFunction, facts: OptFacts, unique: Int, free: Int) ->
     }
     loop at in 0..<f.op.len() {
         field: f.dst[at]
-        if f.op[at] == .Offset && field >= 0 && facts.defs[field] == 1 && f.a[at] >= 0 && f.b[at] >= 0 -> fields[field] = f.a[at]
+        if f.op[at] == .Offset && field >= 0 && facts.defs[field] == 1 && f.a[at] >= 0 && f.b[at] >= 0 {
+            fields[field] = f.a[at]
+        }
     }
     reads := [Int]{}
     loop at in 0..<f.op.len() {
@@ -344,7 +367,9 @@ ir_opt_slot_read: fn(f: IRFunction, fields: [Int], at: Int, index: Int, slot: In
     if op == .Offset -> return index == 0 && f.dst[at] >= 0 && fields[f.dst[at]] == slot
     if op == .CallRuntime {
         if f.a[at] == unique -> return f.c[at] == 1
-        if f.a[at] == free -> return index == 0 && f.c[at] == 3 && f.args[f.b[at] + 1] != f.args[f.b[at]] && f.args[f.b[at] + 2] != f.args[f.b[at]]
+        if f.a[at] == free {
+            return index == 0 && f.c[at] == 3 && f.args[f.b[at] + 1] != f.args[f.b[at]] && f.args[f.b[at] + 2] != f.args[f.b[at]]
+        }
     }
     false
 }
@@ -353,7 +378,9 @@ ir_opt_slot_read: fn(f: IRFunction, fields: [Int], at: Int, index: Int, slot: In
 ir_opt_slot_touches: fn(f: IRFunction, plan: IROptSlotPlan, id: Int) -> Bool Never! {
     if plan.size[id] >= 0 -> return true
     loop at in 0..<f.op.len() {
-        if f.op[at] == .Call && f.a[at] >= 0 && f.a[at] < plan.size.len() && plan.size[f.a[at]] >= 0 -> return true
+        if f.op[at] == .Call && f.a[at] >= 0 && f.a[at] < plan.size.len() && plan.size[f.a[at]] >= 0 {
+            return true
+        }
     }
     false
 }
@@ -375,15 +402,21 @@ ir_opt_slot_rebuild: fn(f: IRFunction, plan: IROptSlotPlan, results: [Int], id: 
     v.inline_sites = f.inline_sites.copy()
     own: plan.size[id] >= 0
     map := [Int]{}
-    loop slot in 0..<f.param_count -> map.push(ir_slot(v, f.slot_type[slot], IRSlotKind.Param, f.slot_name[slot], f.slot_line[slot]))
+    loop slot in 0..<f.param_count {
+        map.push(ir_slot(v, f.slot_type[slot], IRSlotKind.Param, f.slot_name[slot], f.slot_line[slot]))
+    }
     out: if own -> ir_slot(v, f.result, IRSlotKind.Param, -1, 0) else -> -1
-    loop slot in f.param_count..<f.slot_type.len() -> map.push(ir_slot(v, f.slot_type[slot], f.slot_kind[slot], f.slot_name[slot], f.slot_line[slot]))
+    loop slot in f.param_count..<f.slot_type.len() {
+        map.push(ir_slot(v, f.slot_type[slot], f.slot_kind[slot], f.slot_name[slot], f.slot_line[slot]))
+    }
     loop slot in 0..<f.slot_type.len() -> v.slot_fixed[map[slot]] = f.slot_fixed[slot]
     // The results of the calls that now pass frame storage.
     framed := [Bool]{}
     loop _ in 0..<f.slot_type.len() -> framed.push(false)
     loop at in 0..<f.op.len() {
-        if f.op[at] == .Call && f.dst[at] >= 0 && f.a[at] >= 0 && f.a[at] < plan.size.len() && plan.size[f.a[at]] >= 0 -> framed[f.dst[at]] = true
+        if f.op[at] == .Call && f.dst[at] >= 0 && f.a[at] >= 0 && f.a[at] < plan.size.len() && plan.size[f.a[at]] >= 0 {
+            framed[f.dst[at]] = true
+        }
     }
     allocs: plan.allocs[id]
     loop k in 0..<f.op.len() {
@@ -429,7 +462,9 @@ ir_opt_slot_emit: fn(v: &IRFunction, f: IRFunction, k: Int, map: [Int]) Never! {
     b := f.b[k]
     c := f.c[k]
     form: ir_x64_read_form(op)
-    if (form == IR_X64_READS_A || form == IR_X64_READS_AB || form == IR_X64_READS_AC || form == IR_X64_READS_A_ARGS || form == IR_X64_READS_RESULT) && a >= 0 -> a = map[a]
+    if (form == IR_X64_READS_A || form == IR_X64_READS_AB || form == IR_X64_READS_AC || form == IR_X64_READS_A_ARGS || form == IR_X64_READS_RESULT) && a >= 0 {
+        a = map[a]
+    }
     if form == IR_X64_READS_AB && b >= 0 -> b = map[b]
     if form == IR_X64_READS_AC && c >= 0 -> c = map[c]
     if form == IR_X64_READS_ARGS || form == IR_X64_READS_A_ARGS {
@@ -597,9 +632,7 @@ ir_opt_slot_test_quad: fn(glue: String) -> IRModule Never! {
     _ := ir_emit(make, IROp.Const, align, 8, -1, -1, 2)
     payload: ir_slot(make, quad, IRSlotKind.Temp, -1, 0)
     _ := ir_emit(make, IROp.StackAddress, payload, 32, 8, -1, 2)
-    loop part in 0..<4 {
-        _ := ir_emit(make, IROp.Store, -1, payload, 8 * part, x, 2)
-    }
+    loop part in 0..<4 -> _ := ir_emit(make, IROp.Store, -1, payload, 8 * part, x, 2)
     box: ir_slot(make, boxed, IRSlotKind.Temp, -1, 0)
     sized: ir_args(make, [Int]{size, align})
     _ := ir_emit(make, IROp.CallRuntime, box, alloc, sized, 2, 3)
@@ -725,7 +758,9 @@ ir_opt_slot_test_quad: fn(glue: String) -> IRModule Never! {
         assert_eq(made, if leak -> 0 else -> 1)
         assert_eq(ir_opt_return_slots(eight, CompilerThreads{cap: Val(8), cores: 8, memory_available: None}), made)
         assert_eq(eight.functions.len(), one.functions.len())
-        loop id in 0..<one.functions.len() -> assert_eq(ir_function_text(eight, eight.functions[id]), ir_function_text(one, one.functions[id]))
+        loop id in 0..<one.functions.len() {
+            assert_eq(ir_function_text(eight, eight.functions[id]), ir_function_text(one, one.functions[id]))
+        }
         assert_eq(eight.functions[0].param_count, if leak -> 1 else -> 2)
         assert_eq(eight.types.len(), one.types.len())
         assert_eq(name_rows_value(eight.function_rows, "test:slot.jet::use3") ?? -1, 5)
@@ -742,6 +777,8 @@ ir_opt_slot_test_quad: fn(glue: String) -> IRModule Never! {
         shared: ir_optimize_module(eight, options, CompilerThreads{cap: Val(8), cores: 8, memory_available: None})
         assert_eq(shared.lint.len(), alone.lint.len())
         assert_eq(eight.functions.len(), one.functions.len())
-        loop id in 0..<one.functions.len() -> assert_eq(ir_function_text(eight, eight.functions[id]), ir_function_text(one, one.functions[id]))
+        loop id in 0..<one.functions.len() {
+            assert_eq(ir_function_text(eight, eight.functions[id]), ir_function_text(one, one.functions[id]))
+        }
     }
 }

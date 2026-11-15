@@ -5,7 +5,7 @@ Counter: struct {
 bump_local: fn() {
     maybe := Int?{Val(1)}
     if &maybe == {
-        .Val(n) -> n += 1
+        .Val(n) -> { n += 1 }
         .None -> {}
     }
     print(maybe ?? 0)
@@ -14,7 +14,7 @@ bump_local: fn() {
 bump_field: fn() {
     counter := Counter{value: Val(10)}
     if &counter.value == {
-        .Val(n) -> n += 5
+        .Val(n) -> { n += 5 }
         .None -> {}
     }
     print(counter.value ?? 0)
@@ -22,7 +22,7 @@ bump_field: fn() {
 
 bump_param: fn(slot: &Int?) {
     if &slot == {
-        .Val(n) -> n *= 2
+        .Val(n) -> { n *= 2 }
         .None -> {}
     }
 }

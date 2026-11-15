@@ -56,9 +56,7 @@ make_adder: fn(data: [Int], k: Int) -> fn(Int) -> Int { fn(n: Int) { n + k + dat
 
 each_checked: fn(values: [Int], handler: fn(Int) -> Int Reject!) -> Int {
     total := 0
-    loop value in values {
-        total += handler(value) ?? 1
-    }
+    loop value in values -> total += handler(value) ?? 1
     total
 }
 
@@ -78,10 +76,13 @@ by_write_var: fn(from: Int, to: Int) -> Int {
     total := 0
     loop i in from..<to {
         count := 0
-        apply(fn(x: Int) {
-            count += x + data[x % 3]
-            count
-        }, i)
+        apply(
+            fn(x: Int) {
+                count += x + data[x % 3]
+                count
+            },
+            i,
+        )
         total += count
     }
     total
@@ -211,9 +212,7 @@ tasks: fn(from: Int, to: Int) -> Int {
 guarded: fn(from: Int, to: Int) -> Int {
     data: [Int]{1, 2, 3}
     total := 0
-    loop i in from..<to {
-        guarded_round(data, i, total)
-    }
+    loop i in from..<to { guarded_round(data, i, total) }
     total
 }
 
@@ -225,9 +224,7 @@ guarded_round: fn(data: [Int], i: Int, total: &Int) {
 hooks: fn(from: Int, to: Int) -> Int {
     data: [Int]{1, 2, 3}
     total := 0
-    loop i in from..<to {
-        total += hooked(data, i) ?? 0
-    }
+    loop i in from..<to -> total += hooked(data, i) ?? 0
     total
 }
 
@@ -248,9 +245,7 @@ settle: fn(value: Int) Never! {
 fallible_hooks: fn(from: Int, to: Int) -> Int {
     data: [Int]{1, 2, 3}
     total := 0
-    loop i in from..<to {
-        total += fallible_hooked(data, i) ?? 0
-    }
+    loop i in from..<to -> total += fallible_hooked(data, i) ?? 0
     total
 }
 

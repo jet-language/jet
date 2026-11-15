@@ -21,7 +21,6 @@
 // it. Code that is not a listed branch (calls and tail jumps, whose rel32 a
 // relocation fills) is copied unchanged. A fused jmp's old offsets map to
 // the instruction after it.
-
 use jet_backend.[X64_FUNCTION_ALIGN, x64_nops, x64_patch_rel32]
 
 // The relaxed layout: each listed branch (by its rel32 field, in code
@@ -180,9 +179,7 @@ ir_x64_relax: fn(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64R
             reach: target - (out.len() + 1)
             out.push(U8{reach.bit_and(255)})
         } else {
-            if jump {
-                out.push(U8{0xe9})
-            } else {
+            if jump -> out.push(U8{0xe9}) else {
                 out.push(U8{0x0f})
                 out.push(code[start + 1])
             }
@@ -202,9 +199,7 @@ ir_x64_relax: fn(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64R
 ir_x64_relax_shrink: fn(r: &IRX64Relax) Never! {
     total := 0
     loop index in 0..<r.sites.len() {
-        if r.gone[index] {
-            total += r.lengths[index]
-        } else if r.short[index] {
+        if r.gone[index] -> total += r.lengths[index] else if r.short[index] {
             total += r.lengths[index] - 2
         }
         r.shrunk[index] = total
@@ -226,16 +221,14 @@ ir_x64_relax_fuse: fn(code: &[U8], r: &IRX64Relax, targets: &[Int]) Never! {
     loop index + 1 < r.sites.len() {
         jump: index + 1
         start: r.starts[jump]
-        loop seen < landed.len() && landed[seen] < start { seen += 1 }
+        loop seen < landed.len() && landed[seen] < start -> seen += 1
         if r.lengths[index] == 6 && r.lengths[jump] == 5 && r.starts[index] + 6 == start && targets[index] == start + 5 && !(seen < landed.len() && landed[seen] == start) && !r.heads.contains(start) {
             opcode: r.starts[index] + 1
             code[opcode] = U8{Int{code[opcode]}.bit_xor(1)}
             targets[index] = targets[jump]
             r.gone[jump] = true
             index += 2
-        } else {
-            index += 1
-        }
+        } else { index += 1 }
     }
 }
 
@@ -277,9 +270,7 @@ IRX64RelaxWalk: struct {
     heads: Int
 }
 
-ir_x64_relax_walk: fn() -> IRX64RelaxWalk Never! {
-    IRX64RelaxWalk{branches: 0, heads: 0}
-}
+ir_x64_relax_walk: fn() -> IRX64RelaxWalk Never! { IRX64RelaxWalk{branches: 0, heads: 0} }
 
 // ir_x64_relaxed_at of `at`, found from where `walk` stood, which moves to
 // `at`: an offset a little after the last one steps over the few branches
@@ -333,11 +324,7 @@ ir_x64_relax_branches_to: fn(r: IRX64Relax, at: Int) -> Int Never! {
     high := r.sites.len()
     loop low < high {
         middle: (low + high) /% 2
-        if r.starts[middle] + r.lengths[middle] <= at {
-            low = middle + 1
-        } else {
-            high = middle
-        }
+        if r.starts[middle] + r.lengths[middle] <= at -> low = middle + 1 else -> high = middle
     }
     low
 }
@@ -348,9 +335,7 @@ ir_x64_relax_heads_to: fn(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never!
     high := r.heads.len()
     loop low < high {
         middle: (low + high) /% 2
-        if r.heads[middle] < at || (inclusive && r.heads[middle] == at) {
-            low = middle + 1
-        } else {
+        if r.heads[middle] < at || (inclusive && r.heads[middle] == at) -> low = middle + 1 else {
             high = middle
         }
     }

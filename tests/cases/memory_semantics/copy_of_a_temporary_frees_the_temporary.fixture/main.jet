@@ -10,7 +10,9 @@ package: {
 use files: core.files
 
 LINES: 2000
+
 ROUNDS: 200
+
 GROWTH_LIMIT_KB: 8192
 
 status_kb: fn(field: String) -> Int {
@@ -35,9 +37,7 @@ trimmed: fn(text: String) -> Int {
 
 lowered: fn(text: String) -> Int {
     count := 0
-    loop raw in text.split("\n") {
-        count += raw.to_lower().copy().count_bytes()
-    }
+    loop raw in text.split("\n") -> count += raw.to_lower().copy().count_bytes()
     count
 }
 
@@ -46,7 +46,9 @@ measure: fn(name: String, text: String, scenario: fn(String) -> Int) {
     start: status_kb("VmRSS:")
     loop _ in 1..<ROUNDS -> total += scenario(text)
     grown: status_kb("VmRSS:") - start
-    if grown > GROWTH_LIMIT_KB -> panic("{name}: the resident set grew {grown} kB over {ROUNDS} rounds")
+    if grown > GROWTH_LIMIT_KB {
+        panic("{name}: the resident set grew {grown} kB over {ROUNDS} rounds")
+    }
     print("{name}: {total} bytes copied, the temporaries freed")
 }
 

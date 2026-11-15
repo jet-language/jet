@@ -22,8 +22,8 @@ run: fn() {
     net.unix_send(server, [U8]{1}, [sys.Fd]{}) ?? panic("go: {err}")
     print(net.unix_wait(server, 10000000000) ?? panic("wait: {err}"))
     if net.unix_receive(server, 16) == {
-        .Ok(message) -> print("accepted {message.bytes} with {message.fds.len()} descriptors")
-        .Err(.Protocol(detail)) -> print("Protocol: {detail.message}")
+        .Ok(message) -> { print("accepted {message.bytes} with {message.fds.len()} descriptors") }
+        .Err(.Protocol(detail)) -> { print("Protocol: {detail.message}") }
         .Err(other) -> print("failed otherwise: {other}")
     }
     print("descriptors left behind: {open_descriptors() - before}")

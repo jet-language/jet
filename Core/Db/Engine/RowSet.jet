@@ -18,7 +18,7 @@ RowSet: struct {
     entries: [Int]
     at: Int
     // The values inserted before the current batch (C's pForest).
-    forest: [Int: Bool]
+    forest: [Int:Bool]
     // ROWSET_SORTED: `entries` is strictly increasing.
     sorted: Bool
     // ROWSET_NEXT: draining has begun.
@@ -29,14 +29,14 @@ RowSet: struct {
 
 // sqlite3RowSetInit.
 rowset_new: fn() -> RowSet Never! {
-    RowSet{entries: [Int]{}, at: 0, forest: [Int: Bool]{}, sorted: true, reading: false, batch: 0}
+    RowSet{entries: [Int]{}, at: 0, forest: [Int:Bool]{}, sorted: true, reading: false, batch: 0}
 }
 
 // sqlite3RowSetClear: empty the set; it may be filled again.
 rowset_clear: fn(p: &RowSet) Never! {
     p.entries = [Int]{}
     p.at = 0
-    p.forest = [Int: Bool]{}
+    p.forest = [Int:Bool]{}
     p.sorted = true
     p.reading = false
 }

@@ -36,7 +36,6 @@
 // call's own layouts, and builds no body for it (ir_core_bound); its Core
 // cells are Core's (ir_core_cells_bind). The symbols are the runtime
 // image's, or jet_core.o's in a full link (JetCli Host.jet).
-
 use {
     jet_backend.[X64DataExport]
     jet_foundation.[CompilerThreads, DeclTable, FnBody, ModuleID, Span, SymbolTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_transfer_rows, foundation_byte_text, name_rows_get_text, name_rows_sorted, name_rows_value, sha256_bytes, sha256_hex_bytes]
@@ -47,7 +46,11 @@ use {
 // key of a data symbol's cell in IRModule.constant_rows; the symbol; and the
 // IR signature of a function symbol (ir_core_signature), IR_CORE_DATA for a
 // data symbol.
-IRCoreExport: struct { symbol: String, key: String, signature: String }
+IRCoreExport: struct {
+    symbol: String
+    key: String
+    signature: String
+}
 
 // Each row of the Core library's facts (ir_core_facts_text) is a Core
 // function's key and whether a program bound to the image may take the
@@ -59,10 +62,14 @@ IRCoreExport: struct { symbol: String, key: String, signature: String }
 // sealed: an export whose code, and the code of every function it reaches,
 // is the same whatever program calls it.
 IR_CORE_SEALED: "sealed"
+
 // A reason a Core function is not sealed, as its facts rows name it, and
 // whether the Core exports still keep the function (a program calls the
 // library's code for it, though it builds no Core body as sealed).
-IRCoreExclusion: struct { reason: String, exported: Bool }
+IRCoreExclusion: struct {
+    reason: String
+    exported: Bool
+}
 
 // The reasons a Core function is not sealed, each counted apart
 // (JetSema CoreDemand.jet sema_core_bound_counters).
@@ -90,7 +97,9 @@ IR_CORE_EXCLUSIONS: [IRCoreExclusion]{
 // The IR_CORE_EXCLUSIONS row of `reason`, or None.
 ir_core_exclusion: fn(reason: String) -> IRCoreExclusion? Never! {
     loop row in IR_CORE_EXCLUSIONS {
-        if row.reason == reason -> return Val(IRCoreExclusion{reason: row.reason, exported: row.exported})
+        if row.reason == reason {
+            return Val(IRCoreExclusion{reason: row.reason, exported: row.exported})
+        }
     }
     None
 }
@@ -114,9 +123,12 @@ IRCoreLibrary: struct {
 }
 
 IR_CORE_FUNCTION_PREFIX: "jet_core_fn_"
+
 IR_CORE_CELL_PREFIX: "jet_core_cell_"
+
 // The signature column of a data symbol's row.
 IR_CORE_DATA: "data"
+
 // The key prefixes (IRModule.constant_rows) of the writable cells a
 // function builds: module storage (BuildStatic.jet ir_storage_address), a
 // memoized function's store (BuildMemo.jet ir_memo_cell) and a Shared site
@@ -135,7 +147,9 @@ ir_core_cell_key: fn(key: String) -> Bool {
 ir_core_symbol: fn(key: String) -> String Never! { ir_core_symbol_in(IR_CORE_FUNCTION_PREFIX, key) }
 
 // The symbol of the Core cell keyed `key` in IRModule.constant_rows.
-ir_core_cell_symbol: fn(key: String) -> String Never! { ir_core_symbol_in(IR_CORE_CELL_PREFIX, key) }
+ir_core_cell_symbol: fn(key: String) -> String Never! {
+    ir_core_symbol_in(IR_CORE_CELL_PREFIX, key)
+}
 
 // `prefix`, then `text` made a C identifier (each byte outside [0-9A-Za-z]
 // an underscore), `_` and the first 8 hex digits of `text`'s SHA-256, which
@@ -164,7 +178,9 @@ ir_core_signature: fn(m: IRModule, id: Int) -> String Never! {
     "({words.join(",")})->{result}"
 }
 
-ir_core_layout: fn(layout: IRExportLayout) -> String Never! { "{layout.size}/{layout.align}/{layout.class}" }
+ir_core_layout: fn(layout: IRExportLayout) -> String Never! {
+    "{layout.size}/{layout.align}/{layout.class}"
+}
 
 // Builds every non-generic function outside the module `entry_module` (the
 // Core check's entry, JetCli CoreLibrary.jet: every other checked module
@@ -287,7 +303,9 @@ ir_core_library_from: fn(program: &&IRProgram, entry_module: ModuleID, lowered: 
     }
     rows.sort_by(fn(left: IRCoreExport, right: IRCoreExport) { left.symbol <=> right.symbol })
     loop at in 1..<rows.len() {
-        if rows[at].symbol == rows[at - 1].symbol -> errors.push("Core symbol {rows[at].symbol} names both {rows[at - 1].key} and {rows[at].key}")
+        if rows[at].symbol == rows[at - 1].symbol {
+            errors.push("Core symbol {rows[at].symbol} names both {rows[at - 1].key} and {rows[at].key}")
+        }
     }
     // A key on two rows is rooted once per row, with one reason: one line.
     facts.sort()
@@ -448,10 +466,15 @@ ir_core_function_values: fn(m: IRModule, callers: [[Int]]) -> [Bool] Never! {
 // The Core exports of the runtime image a program binds to (IRChecks.core):
 // the image's export list as the toolchain build wrote it
 // (ir_core_exports_text, JetCli Host.jet JET_CLI_CORE_EXPORTS_FILE).
-IRCoreImage: struct { exports: [U8] }
+IRCoreImage: struct {
+    exports: [U8]
+}
 
 // The key and signature columns of one export row.
-IRCoreImageRow: struct { key: String, signature: String }
+IRCoreImageRow: struct {
+    key: String
+    signature: String
+}
 
 // The row of `symbol` in `exports` (sorted by symbol), found by a binary
 // search over its lines in place; None when no row names it.
@@ -492,7 +515,9 @@ ir_core_image_row: fn(exports: [U8], symbol: String) -> IRCoreImageRow? Never! {
 ir_core_image_order: fn(exports: [U8], start: Int, end: Int, wanted: [U8]) -> Int Never! {
     at := 0
     loop start + at < end && at < wanted.len() {
-        if exports[start + at] != wanted[at] -> return if exports[start + at] < wanted[at] -> -1 else -> 1
+        if exports[start + at] != wanted[at] {
+            return if exports[start + at] < wanted[at] -> -1 else -> 1
+        }
         at += 1
     }
     if {
@@ -519,11 +544,15 @@ ir_core_image_fits: fn(p: IRProgram) -> Bool Never! {
 // (ir_core_call_signature). A function marked `#Inline(Always)` is never
 // bound: the program builds it, so its optimizer can keep the mark's promise.
 ir_core_bound: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args: [Type], slots: [Int], span: Span) -> String Never! {
-    if p.checks.core == None || type_args.len() > 0 || p.functions[row].is_inline_always || ir_bounds_mode(p, row) != .Fatal -> return ""
+    if p.checks.core == None || type_args.len() > 0 || p.functions[row].is_inline_always || ir_bounds_mode(p, row) != .Fatal {
+        return ""
+    }
     if p.checks.core == .Val(image) {
         symbol: ir_core_symbol(p.functions[row].key)
         found: ir_core_image_row(image.exports, symbol) ?? return ""
-        if found.key != p.functions[row].key || found.signature != ir_core_call_signature(m, p, b, row, slots, span) -> return ""
+        if found.key != p.functions[row].key || found.signature != ir_core_call_signature(m, p, b, row, slots, span) {
+            return ""
+        }
         return symbol
     }
     ""
@@ -539,7 +568,9 @@ ir_core_call_signature: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, 
     result := "void"
     if !ir_unit_type(returned) {
         result_row: ir_value_type(m, p, returned) ?? return ""
-        if m.types[result_row].kind != .Unit -> result = ir_core_layout(ir_export_layout(m.types[result_row]))
+        if m.types[result_row].kind != .Unit {
+            result = ir_core_layout(ir_export_layout(m.types[result_row]))
+        }
     }
     "({words.join(",")})->{result}"
 }
@@ -552,7 +583,9 @@ ir_core_cells_bind: fn(m: &IRModule, image: IRCoreImage) Never! {
         if cell.local < 0 || !ir_core_cell_key(cell.key) -> next
         symbol: ir_core_cell_symbol(cell.key)
         found: ir_core_image_row(image.exports, symbol) ?? next
-        if found.key == cell.key && found.signature == IR_CORE_DATA -> m.core_cells[cell.local] = symbol
+        if found.key == cell.key && found.signature == IR_CORE_DATA {
+            m.core_cells[cell.local] = symbol
+        }
     }
 }
 

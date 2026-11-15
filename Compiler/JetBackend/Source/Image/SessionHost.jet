@@ -4,13 +4,15 @@
 // batch's code into. The child runs in its own address space, so a stop, a
 // refused effect or a crash never reaches the compiler; seccomp refuses its
 // effects.
-
-use core.mem
-use jet_foundation.[NameTable, name_find, name_find_bytes, name_index, name_intern_bytes, name_table_sized]
+use {
+    core.mem
+    jet_foundation.[NameTable, name_find, name_find_bytes, name_index, name_intern_bytes, name_table_sized]
+}
 
 // The child's descriptors are kept above every descriptor the child is given
 // (0..4), so moving them into place never collides.
 X64_COMPTIME_FD_FLOOR: 100
+
 X64_COMPTIME_BUFFER: 65536
 
 X64ComptimeChild: struct {
@@ -103,7 +105,9 @@ x64_comptime_spawn: fn(image: X64Executable, stdout: Bool, budget: Int) -> X64Co
     }
     loop index in 0..<count -> child.entries.push(x64_comptime_word(table, 8 * index))
     if child.entries.len() == 0 || !x64_comptime_filter_child(child, stdout) {
-        if child.failure == "" -> child.failure = x64_comptime_end_text(child, "before it refused its effects")
+        if child.failure == "" {
+            child.failure = x64_comptime_end_text(child, "before it refused its effects")
+        }
         x64_comptime_close(child)
     }
     child
@@ -122,11 +126,15 @@ x64_comptime_filter_child: fn(child: &X64ComptimeChild, stdout: Bool) -> Bool {
             child.failure = "the comptime child's cookie can't be drawn ({-filled})"
             return false
         }
-        #Unsafe("getrandom wrote the scratch page's first word") { child.cookie = os_load_word(child.scratch) }
+        #Unsafe("getrandom wrote the scratch page's first word") {
+            child.cookie = os_load_word(child.scratch)
+        }
     }
     program: x64_comptime_filter(stdout, child.cookie)
     handler: child.entries[0]
-    if !x64_comptime_send(child, x64_comptime_frame(X64_COMPTIME_FILTER, [Int]{handler, program.len(), child.cookie}), program) -> return false
+    if !x64_comptime_send(child, x64_comptime_frame(X64_COMPTIME_FILTER, [Int]{handler, program.len(), child.cookie}), program) {
+        return false
+    }
     done: x64_comptime_receive(child) ?? return false
     loop index in 1..<4 {
         result: x64_comptime_word(done, 8 * index)
@@ -154,7 +162,8 @@ x64_comptime_end_text: fn(child: X64ComptimeChild, when: String) -> String Never
     "the comptime child ended {when} (wait status {child.status})"
 }
 
-#Unsafe("pipe2 writes two descriptors into the first word of the caller's scratch page") x64_comptime_pipe: fn(scratch: Int) -> [Int] {
+#Unsafe("pipe2 writes two descriptors into the first word of the caller's scratch page")
+x64_comptime_pipe: fn(scratch: Int) -> [Int] {
     result: os_syscall(293, scratch, 524288, 0, 0, 0, 0)
     if os_failed(result) -> return [Int]{}
     packed: os_load_word(scratch)
@@ -174,13 +183,16 @@ x64_comptime_end_text: fn(child: X64ComptimeChild, when: String) -> String Never
 }
 
 x64_comptime_close_fd: fn(fd: Int) {
-    if fd < 0 -> return
+    if fd < 0 {
+        return
+    }
     #Unsafe("closes our own descriptor") { _ := os_syscall(3, fd, 0, 0, 0, 0, 0) }
 }
 
 // Writes all of `bytes` to `fd` through the `size`-byte buffer at `buffer`;
 // 0 or a failed call's result.
-#Unsafe("the caller owns the `size` bytes at `buffer`, a multiple of 8") x64_comptime_write_all: fn(fd: Int, bytes: [U8], buffer: Int, size: Int) -> Int {
+#Unsafe("the caller owns the `size` bytes at `buffer`, a multiple of 8")
+x64_comptime_write_all: fn(fd: Int, bytes: [U8], buffer: Int, size: Int) -> Int {
     at := 0
     loop at < bytes.len() {
         count: if bytes.len() - at < size -> bytes.len() - at else -> size
@@ -250,14 +262,12 @@ x64_comptime_receive_bytes: fn(child: &X64ComptimeChild, count: Int) -> [U8]? {
         }
         events := [Int]{}
         #Unsafe("poll wrote the entries' returned events") {
-            loop index in 0..<3 -> events.push((os_load_word(poll + 8 * index) >> 48).bit_and(65535))
+            loop index in 0..<3 {
+                events.push((os_load_word(poll + 8 * index) >> 48).bit_and(65535))
+            }
         }
-        if events[1] != 0 {
-            _ := x64_comptime_drain(child, false)
-        }
-        if events[2] != 0 {
-            _ := x64_comptime_drain(child, true)
-        }
+        if events[1] != 0 -> _ := x64_comptime_drain(child, false)
+        if events[2] != 0 -> _ := x64_comptime_drain(child, true)
         if events[0] != 0 {
             want: if count - bytes.len() < X64_COMPTIME_BUFFER -> count - bytes.len() else -> X64_COMPTIME_BUFFER
             moved: os_read(child.reply, child.scratch + 4096, want)
@@ -277,7 +287,9 @@ x64_comptime_receive_bytes: fn(child: &X64ComptimeChild, count: Int) -> [U8]? {
 // Takes the output the child wrote before its last reply: drains its
 // standard output and error until neither holds more.
 x64_comptime_settle: fn(child: &X64ComptimeChild) {
-    if child.pid <= 0 -> return
+    if child.pid <= 0 {
+        return
+    }
     poll: child.scratch
     loop {
         #Unsafe("the poll set is our scratch page's first two entries") {
@@ -289,10 +301,14 @@ x64_comptime_settle: fn(child: &X64ComptimeChild) {
             ready = os_syscall(7, poll, 2, 0, 0, 0, 0)
         }
         if ready == -4 -> next
-        if ready <= 0 -> return
+        if ready <= 0 {
+            return
+        }
         events := [Int]{}
         #Unsafe("poll wrote the entries' returned events") {
-            loop index in 0..<2 -> events.push((os_load_word(poll + 8 * index) >> 48).bit_and(65535))
+            loop index in 0..<2 {
+                events.push((os_load_word(poll + 8 * index) >> 48).bit_and(65535))
+            }
         }
         if events[0] != 0 -> _ := x64_comptime_drain(child, false)
         if events[1] != 0 -> _ := x64_comptime_drain(child, true)
@@ -308,17 +324,11 @@ x64_comptime_drain: fn(child: &X64ComptimeChild, errors: Bool) -> Bool {
     if moved == -4 -> return true
     if moved <= 0 {
         x64_comptime_close_fd(fd)
-        if errors {
-            child.errors = -1
-        } else {
-            child.output = -1
-        }
+        if errors -> child.errors = -1 else -> child.output = -1
         return false
     }
     #Unsafe("os_read just wrote `moved` bytes past the scratch page's first page") {
-        if errors {
-            x64_comptime_take(child.scratch + 4096, moved, child.stderr)
-        } else {
+        if errors -> x64_comptime_take(child.scratch + 4096, moved, child.stderr) else {
             x64_comptime_take(child.scratch + 4096, moved, child.stdout)
         }
     }
@@ -327,12 +337,16 @@ x64_comptime_drain: fn(child: &X64ComptimeChild, errors: Bool) -> Bool {
 
 // Appends the `count` bytes at `address` (in our mapping) to `bytes` in one
 // move.
-#Unsafe("the caller's `count` bytes at `address` lie in our mapping") x64_comptime_take: fn(address: Int, count: Int, bytes: &[U8]) {
-    if !mem.list_append<U8>(bytes, mem.Ptr<U8>.from_addr(address), count) -> panic("the comptime child's {count} reply bytes don't fit in memory")
+#Unsafe("the caller's `count` bytes at `address` lie in our mapping")
+x64_comptime_take: fn(address: Int, count: Int, bytes: &[U8]) {
+    if !mem.list_append<U8>(bytes, mem.Ptr<U8>.from_addr(address), count) {
+        panic("the comptime child's {count} reply bytes don't fit in memory")
+    }
 }
 
 // Monotonic milliseconds.
-#Unsafe("clock_gettime writes two words at scratch + 64, past the poll set of the caller's scratch page") x64_comptime_clock: fn(scratch: Int) -> Int {
+#Unsafe("clock_gettime writes two words at scratch + 64, past the poll set of the caller's scratch page")
+x64_comptime_clock: fn(scratch: Int) -> Int {
     _ := os_syscall(228, 1, scratch + 64, 0, 0, 0, 0)
     os_load_word(scratch + 64) * 1000 + os_load_word(scratch + 72) /% 1000000
 }
@@ -340,13 +354,19 @@ x64_comptime_drain: fn(child: &X64ComptimeChild, errors: Bool) -> Bool {
 // Waits for the child (killing it first when `kill`), collecting what it
 // wrote on its way out; then its descriptors close.
 x64_comptime_reap: fn(child: &X64ComptimeChild, kill: Bool) {
-    if child.pid <= 0 -> return
+    if child.pid <= 0 {
+        return
+    }
     if kill {
         #Unsafe("kills our own child") { _ := os_syscall(62, child.pid, 9, 0, 0, 0, 0) }
     }
     // The output pipes end when the child does.
-    loop x64_comptime_drain(child, false) {}
-    loop x64_comptime_drain(child, true) {}
+    loop x64_comptime_drain(child, false) {
+
+    }
+    loop x64_comptime_drain(child, true) {
+
+    }
     result := 0
     loop {
         #Unsafe("wait4 writes the status word into our scratch page") {
@@ -433,11 +453,15 @@ x64_comptime_load: fn(child: &X64ComptimeChild, code: X64ComptimeCode) -> String
         low: segment.vaddr - segment.vaddr % OS_PAGE_SIZE
         end: os_page_round(segment.vaddr + segment.memory_size)
         mapped: x64_comptime_ask(child, X64_COMPTIME_MAP, [Int]{low, end - low}) ?? return x64_comptime_end_text(child, "while its code loaded")
-        if mapped != low -> return "the comptime child couldn't map {end - low} bytes at {low} ({mapped})"
+        if mapped != low {
+            return "the comptime child couldn't map {end - low} bytes at {low} ({mapped})"
+        }
         if segment.file_size > 0 {
             bytes := [U8]{}
             bytes.extend(code.bytes[segment.offset..<(segment.offset + segment.file_size)])
-            if !x64_comptime_send(child, x64_comptime_frame(X64_COMPTIME_WRITE, [Int]{segment.vaddr, segment.file_size}), bytes) -> return x64_comptime_end_text(child, "while its code loaded")
+            if !x64_comptime_send(child, x64_comptime_frame(X64_COMPTIME_WRITE, [Int]{segment.vaddr, segment.file_size}), bytes) {
+                return x64_comptime_end_text(child, "while its code loaded")
+            }
         }
         // PF_X, PF_W, PF_R to PROT_EXEC, PROT_WRITE, PROT_READ.
         protection := 0
@@ -445,7 +469,9 @@ x64_comptime_load: fn(child: &X64ComptimeChild, code: X64ComptimeCode) -> String
         if segment.flags.bit_and(2) != 0 -> protection += 2
         if segment.flags.bit_and(4) != 0 -> protection += 1
         protected: x64_comptime_ask(child, X64_COMPTIME_PROTECT, [Int]{low, end - low, protection}) ?? return x64_comptime_end_text(child, "while its code loaded")
-        if protected != 0 -> return "the comptime child couldn't protect its code at {low} ({protected})"
+        if protected != 0 {
+            return "the comptime child couldn't protect its code at {low} ({protected})"
+        }
     }
     ""
 }

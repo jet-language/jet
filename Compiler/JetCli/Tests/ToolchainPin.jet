@@ -10,11 +10,10 @@ JetCLIPinFixtureRoot: struct {
     path: String
 
     impl Close {
-        close: fn(&&self) -[FS]> {
-            cli_files.remove_all(self.path).drop("test project cleanup")
-        }
+        close: fn(&&self) -[FS]> { cli_files.remove_all(self.path).drop("test project cleanup") }
     }
 }
+
 #Test("update jet preserves exact human status and locked version") {
     root: cli_files.tmpdir("jet-cli-pin-") ?? panic("temporary pin project")
     owner: JetCLIPinFixtureRoot{path: root}

@@ -26,9 +26,13 @@ lsp_compute_folding_ranges: fn(src: String, lexed: Lexed) -> [LSPFoldingRange] N
     loop token in lexed.tokens {
         if token.kind == TOKEN_LBRACE -> open.push(token.span.start)
         if token.kind == TOKEN_RBRACE {
-            if open.pop() == .Val(start) -> lsp_push_fold(bytes, table, start, token.span.start, "region", folds)
+            if open.pop() == .Val(start) {
+                lsp_push_fold(bytes, table, start, token.span.start, "region", folds)
+            }
         }
-        if token.kind == TOKEN_BLOCK_COMMENT -> lsp_push_fold(bytes, table, token.span.start, token.span.end, "comment", folds)
+        if token.kind == TOKEN_BLOCK_COMMENT {
+            lsp_push_fold(bytes, table, token.span.start, token.span.end, "comment", folds)
+        }
     }
     lsp_line_group_folds(src, table.lines, COMMENT_PREFIX, "comment", folds)
     lsp_line_group_folds(src, table.lines, "use ", "imports", folds)
@@ -39,7 +43,9 @@ lsp_compute_folding_ranges: fn(src: String, lexed: Lexed) -> [LSPFoldingRange] N
 lsp_push_fold: fn(bytes: [U8], table: LineTable, start: Int, end: Int, kind: String, folds: &[LSPFoldingRange]) Never! {
     first: lsp_byte_offset_in_table(bytes, table, start)
     last: lsp_byte_offset_in_table(bytes, table, end)
-    if last.line > first.line -> folds.push(LSPFoldingRange{start_line: first.line, start_character: first.character, end_line: last.line, end_character: last.character, kind: kind})
+    if last.line > first.line {
+        folds.push(LSPFoldingRange{start_line: first.line, start_character: first.character, end_line: last.line, end_character: last.character, kind: kind})
+    }
 }
 
 // The byte offset of a line's first character that is not a space or tab.
@@ -69,13 +75,15 @@ lsp_line_group_folds: fn(src: String, lines: [Span], prefix: String, kind: Strin
         if run_start >= 0 && index - 1 > run_start {
             first: lines[run_start]
             last: lines[index - 1]
-            folds.push(LSPFoldingRange{
-                start_line: run_start,
-                start_character: lsp_utf16_length(bytes, first.start, lsp_indent_end(bytes, first)),
-                end_line: index - 1,
-                end_character: lsp_utf16_length(bytes, last.start, last.end),
-                kind: kind,
-            })
+            folds.push(
+                LSPFoldingRange{
+                    start_line: run_start,
+                    start_character: lsp_utf16_length(bytes, first.start, lsp_indent_end(bytes, first)),
+                    end_line: index - 1,
+                    end_character: lsp_utf16_length(bytes, last.start, last.end),
+                    kind: kind,
+                },
+            )
         }
         run_start = -1
     }

@@ -150,7 +150,9 @@ NATIVE_TEST_FRAME: "(Int) big = 4611686018431706648\n(String) name = 0x000000000
 native_test_toolchain_root: fn() -> String Never! {
     dir := native_test_files.cwd() ?? panic("cwd: {err}")
     loop {
-        if native_test_files.exists(native_test_files.join(dir, "Compiler/Prelude")) && native_test_files.exists(native_test_files.join(dir, "Core")) -> return dir
+        if native_test_files.exists(native_test_files.join(dir, "Compiler/Prelude")) && native_test_files.exists(native_test_files.join(dir, "Core")) {
+            return dir
+        }
         parent: native_test_files.dirname(dir)
         if parent == dir -> panic("the tests run outside a Jet checkout")
         dir = parent
@@ -177,7 +179,7 @@ NATIVE_TEST_PROGRAM: "double: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nr
     session := native_test_session(root)
     resolved := -1
     if session.break_at("prog.jet", 2) == {
-        .Ok(number) -> resolved = number ?? -1
+        .Ok(number) -> { resolved = number ?? -1 }
         .Err(failure) -> panic("break: {failure.detail}")
     }
     assert_eq(resolved, 1)

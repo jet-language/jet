@@ -14,8 +14,10 @@
 // small) with FB_LANE_MEM (default 8G), one at a time. A step that fails is
 // reported and the run goes on, as the script's does; an option without its
 // value ends the run with exit 1.
-use core.[files, process, regex, sys, term, time]
-use core.text.fmt
+use {
+    core.[files, process, regex, sys, term, time]
+    core.text.fmt
+}
 
 // What one run builds and times.
 Plan: struct {
@@ -44,13 +46,16 @@ run: fn() -> Never Err! {
     root: files.normalize("{here}/../../..")
     // What sourcing roots.sh leaves set: the environment with the machine's
     // env file over it, the scratch root, and the memory gate and lane cap.
-    roots: sys.env_text("""
+    roots: sys.env_text(
+        """
         JET_STATE_ROOT=${{JET_STATE_ROOT:-${{XDG_CACHE_HOME:-$HOME/.cache}}/jet-dev}}
         JET_SCRATCH_ROOT=${{JET_SCRATCH_ROOT:-$JET_STATE_ROOT}}
         FB_MEM_GATE_GB=${{FB_MEM_GATE_GB:-30}}
         FB_LANE_MEM=${{FB_LANE_MEM:-8G}}
-        """, sys.env_file("{sys.config_dir() ?? ""}/jet/env"))
-    options := [String: String]{"--jet": files.join(root, "target-rel4/release/jet"), "--runs": "7", "--cpu": "31", "--out": "{roots["JET_SCRATCH_ROOT"]}/function-boundary", "--levels": "O1,O2"}
+        """,
+        sys.env_file("{sys.config_dir() ?? ""}/jet/env"),
+    )
+    options := [String:String]{"--jet": files.join(root, "target-rel4/release/jet"), "--runs": "7", "--cpu": "31", "--out": "{roots["JET_SCRATCH_ROOT"]}/function-boundary", "--levels": "O1,O2"}
     cells := [String]{}
     at := 0
     loop at < args.len() {
@@ -66,7 +71,9 @@ run: fn() -> Never Err! {
         at += 1
     }
     manifest: files.read(files.join(here, "cells.tsv")).lines().map(fn(line) { line.split("\t").to_list() })
-    if cells.len() == 0 -> cells = manifest.map(fn(row) { row[0].copy() }).filter(fn(cell) { !regex.is_match(Regex{"^(?:#|cell$|$)"}, cell) })  // copy: the cell list owns its names
+    if cells.len() == 0 {
+        cells = manifest.map(fn(row) { row[0].copy() }).filter(fn(cell) { !regex.is_match(Regex{"^(?:#|cell$|$)"}, cell) })  // copy: the cell list owns its names
+    }
     plan: Plan{
         root: root,
         here: here,
@@ -87,7 +94,7 @@ run: fn() -> Never Err! {
         n: field(rows, 2)
         pair: field(rows, 1)
         expected: files.join(here, "{cell}/expected.out")
-        medians := [String: String]{}
+        medians := [String:String]{}
         loop program in ["c", "rust"].concat(plan.levels) {
             exe: if program.starts_with("O") -> "{plan.out}/bin/{cell}.jet-{program}" else -> "{plan.out}/bin/{cell}.{program}"
             shown: regex.replace_first(Regex{"O"}, program, "jet-O")
@@ -179,7 +186,9 @@ build: fn(plan: Plan, cell: String) Err! {
 measure: fn(plan: Plan, exe: String, n: String, expected: String) -> Timing? Err! {
     pinned: [String]{"taskset", "-c", plan.cpu, exe, n}
     got: process.cmd(pinned).run() ?? return Ok(None)
-    if regex.replace(Regex{"\n+$"}, got.output, "") != regex.replace(Regex{"\n+$"}, files.read(expected) ?? "", "") -> return Ok(None)
+    if regex.replace(Regex{"\n+$"}, got.output, "") != regex.replace(Regex{"\n+$"}, files.read(expected) ?? "", "") {
+        return Ok(None)
+    }
     samples := [Float]{}
     loop _ in 0..<plan.runs {
         start: time.instant()

@@ -55,7 +55,7 @@ parse: fn(text: String) -> MIME MIMEError! {
             semi = i
             break
         }
-        i = i + 1
+        i += 1
     }
     essence: slice(bytes, 0, semi)
     slash := -1
@@ -65,7 +65,7 @@ parse: fn(text: String) -> MIME MIMEError! {
             if slash >= 0 -> return Err(MIMEError.Syntax)
             slash = i
         }
-        i = i + 1
+        i += 1
     }
     if slash <= 0 -> return Err(MIMEError.Syntax)
     top: ascii_lower(trim_ascii(slice(essence.bytes(), 0, slash)))
@@ -91,7 +91,7 @@ parse: fn(text: String) -> MIME MIMEError! {
             }
             start = i + 1
         }
-        i = i + 1
+        i += 1
     }
     Ok(MIME{top: top, sub: sub, parameters: parameters})
 }
@@ -154,7 +154,7 @@ extension: fn(mime: String) -> String? Never! {
 trim_dot: fn(ext: String) -> String Never! {
     raw: ext.bytes()
     i := 0
-    loop i < raw.len() && raw[i] == (U8{46}) -> i = i + 1
+    loop i < raw.len() && raw[i] == (U8{46}) -> i += 1
     if i > 0 -> return slice(raw, i, raw.len())
     return ext.copy()
 }
@@ -174,12 +174,12 @@ trim_ascii: fn(text: String) -> String Never! {
     loop {
         if start >= end -> return ""
         n: Int{raw[start]}
-        if n == 32 || n == 9 || n == 10 || n == 13 -> start = start + 1 else -> break
+        if n == 32 || n == 9 || n == 10 || n == 13 -> start += 1 else -> break
     }
     loop {
         if end <= start -> return ""
         n: Int{raw[end - 1]}
-        if n == 32 || n == 9 || n == 10 || n == 13 -> end = end - 1 else -> break
+        if n == 32 || n == 9 || n == 10 || n == 13 -> end -= 1 else -> break
     }
     slice(raw, start, end)
 }
@@ -198,9 +198,7 @@ mime_token: fn(text: String) -> Bool Never! {
     if raw.len() == 0 -> return false
     loop b in raw {
         n: Int{b}
-        if (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) {
-            next
-        }
+        if (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) -> next
         if n == 33 || n == 35 || n == 36 || n == 38 || n == 45 || n == 94 || n == 95 || n == 46 || n == 43 {
             next
         }
@@ -222,7 +220,7 @@ slice: fn(raw: [U8], start: Int, end: Int) -> String Never! {
     loop {
         if i >= end -> return String.from_bytes(out) ?? ""
         out.push(raw[i])
-        i = i + 1
+        i += 1
     }
 }
 

@@ -6,13 +6,15 @@ use jet_foundation.[Diagnostic, diagnostic_from_registry]
 // Native C links (`c@…`) are link dependencies, never Jet packages, and are
 // skipped.
 pkg_to_manifest: fn(facts: PackageFacts, raw: String) -> Manifest ManifestError! {
-    dependencies := [String: DepSpec]{}
+    dependencies := [String:DepSpec]{}
     loop name in pkg_manifest_sorted(facts.deps.keys().to_list()) {
         is_clib: if facts.deps[name] == {
             .CLib(_) -> true
             .Version(_) | .Provider(_, _) | .Git(_, _) | .Foreign(_, _) -> false
         }
-        if !pkg_validate_dependency_name(name) && !is_clib -> return Err(pkg_bad_dep_error(name, "dependency names must be one safe path component without `/`, `\\`, or `:`"))
+        if !pkg_validate_dependency_name(name) && !is_clib {
+            return Err(pkg_bad_dep_error(name, "dependency names must be one safe path component without `/`, `\\`, or `:`"))
+        }
         if is_clib -> next
         spec: if facts.deps[name] == {
             .Foreign(language, reference) -> DepSpec.Foreign{language: language, reference: reference}
@@ -26,25 +28,27 @@ pkg_to_manifest: fn(facts: PackageFacts, raw: String) -> Manifest ManifestError!
         }
         dependencies[name] = spec
     }
-    Ok(Manifest{
-        package: PackageMeta{
-            name: facts.name,
-            version: facts.version ?? "",
-            edition: facts.edition,
-            jet_constraint: facts.jet,
-            description: facts.description,
-            license: facts.license,
-            repository: facts.repository,
-            layer: facts.layer,
-            allocator: facts.allocator,
+    Ok(
+        Manifest{
+            package: PackageMeta{
+                name: facts.name,
+                version: facts.version ?? "",
+                edition: facts.edition,
+                jet_constraint: facts.jet,
+                description: facts.description,
+                license: facts.license,
+                repository: facts.repository,
+                layer: facts.layer,
+                allocator: facts.allocator,
+            },
+            policy: facts.policy,
+            authority: facts.authority,
+            boundaries: facts.boundaries,
+            dependencies: dependencies,
+            dependencies_rust: [String:String]{},
+            raw: raw,
         },
-        policy: facts.policy,
-        authority: facts.authority,
-        boundaries: facts.boundaries,
-        dependencies: dependencies,
-        dependencies_rust: [String: String]{},
-        raw: raw,
-    })
+    )
 }
 
 // A bare path is a path dependency; `owner/repo/rev@github` is a pinned git
@@ -65,15 +69,20 @@ pkg_bad_dep_error: fn(name: String, why: String) -> ManifestError Never! {
 }
 
 pkg_bad_dep_shape: fn(name: String, why: String) -> Diagnostic Never! {
-    diagnostic_from_registry("E1215", None,
+    diagnostic_from_registry(
+        "E1215",
+        None,
         "dependency `{name}` has an invalid shape",
         why,
-        "see Docs/spec/syntax-decisions.md for the dependency ref forms")
+        "see Docs/spec/syntax-decisions.md for the dependency ref forms",
+    )
 }
 
 // The canonical `package.jet` template for `jet new`.
 pkg_new_template: fn(name: String, annotated: Bool) -> String Never! {
     head: "name: \"{name}\"\nversion: \"0.1.0\"\njet: \"{JET_VERSION}\"\ndescription: \"\"\nlicense: \"MIT OR Apache-2.0\"\nrepository: \"\"\nauthority: {{ allow: [IO, Mem.Alloc] }}\n\n"
-    if annotated -> return "{head}// Jet package dependencies:\n// deps: {{\n//     helpers:  ../helpers,\n//     parsekit: {{ git: \"https://github.com/acme/parsekit\", tag: \"v0.4.1\" }},\n// }}\n"
+    if annotated {
+        return "{head}// Jet package dependencies:\n// deps: {{\n//     helpers:  ../helpers,\n//     parsekit: {{ git: \"https://github.com/acme/parsekit\", tag: \"v0.4.1\" }},\n// }}\n"
+    }
     "{head}deps: {{}}\n"
 }

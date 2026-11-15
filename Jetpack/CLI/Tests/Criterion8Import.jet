@@ -40,7 +40,10 @@ cli_test_criterion8_executable: fn(path: String, text: String) -[FS]> {
     tools: files.join(base, "tools")
     marker: files.join(base, "nix-invoked")
     tmp: files.join(base, "tmp")
-    loop dir in ([String]{files.join(project, ".jet"), files.join(staging, "bin"), fixtures, tools, tmp}) -> files.create_dir_all(dir) ?? panic("create {dir}")
+    loop dir in
+        ([String]{files.join(project, ".jet"), files.join(staging, "bin"), fixtures, tools, tmp}) {
+        files.create_dir_all(dir) ?? panic("create {dir}")
+    }
     files.write(files.join(project, ".jet/lock"), CRITERION8_LOCK) ?? panic("write lock")
     cli_test_criterion8_executable(files.join(staging, "bin/greet"), "#!/bin/sh\nprintf '%s\\n' 'hello from imported jetpack'\n")
     store_seal_local_output(staging) ?? panic("seal staging: {err.message()}")

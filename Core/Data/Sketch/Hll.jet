@@ -28,14 +28,12 @@ HyperLogLog: struct {
     count: fn(self) -> Int Never! {
         empty := 0
         loop register in self.registers {
-            if register == (U8{0}) -> empty = empty + 1
+            if register == (U8{0}) -> empty += 1
         }
         width: Float{256.0}
         if empty > 0 -> return rounded_count(width * math.ln(width / Float{empty}))
         sum := Float{0.0}
-        loop register in self.registers {
-            sum = sum + math.from_bits((1023 - Int{register}) << 52)
-        }
+        loop register in self.registers -> sum += math.from_bits((1023 - Int{register}) << 52)
         alpha: Float{0.7213} / (Float{1.0} + Float{1.079} / width)
         rounded_count(alpha * width * width / sum)
     }

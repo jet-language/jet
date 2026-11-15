@@ -38,9 +38,7 @@ cli_cmd_browser: fn(verification: &StoreVerification, theme: Theme, parsed: CLIP
 }
 
 // Browser commands pin relative to the current directory.
-cli_browser_project_root: fn() -[FS, Env]> String Never! {
-    sys.current_dir() ?? "."
-}
+cli_browser_project_root: fn() -[FS, Env]> String Never! { sys.current_dir() ?? "." }
 
 // A browser flag from the parsed flags, else `name <value>` among the
 // positional arguments.
@@ -134,8 +132,12 @@ cli_browser_provision: fn(verification: &StoreVerification, cache: &WorkspaceDec
             return EXIT_USAGE
         }
         output: lease.original_output()
-        if binary == "" && env_browser_find_engine_binary(output, engine) == .Ok(found) -> binary = found
-        if driver_package != "" && driver == "" && env_browser_find_driver(output, driver_package) == .Ok(found) -> driver = found
+        if binary == "" && env_browser_find_engine_binary(output, engine) == .Ok(found) {
+            binary = found
+        }
+        if driver_package != "" && driver == "" && env_browser_find_driver(output, driver_package) == .Ok(found) {
+            driver = found
+        }
     }
     if binary == "" {
         theme.error("could not find the browser binary in the realized package", "`{spec.raw}` realized no executable {engine} under bin/.", "pick chromium, firefox, or webkit from a realizable source.")

@@ -82,7 +82,9 @@ sema_generic_modules_check: fn(graph: &SemaRegistrationGraph, inputs: [SemaRegis
     per_module: sema_generic_modules_collect(graph, inputs)
     module_index := 0
     loop diagnostics in per_module.move() {
-        loop diagnostic in diagnostics.move() -> graph.diagnostics.push(sema_diagnostic_with_source_location(diagnostic, graph.modules[module_index].source_segments))
+        loop diagnostic in diagnostics.move() {
+            graph.diagnostics.push(sema_diagnostic_with_source_location(diagnostic, graph.modules[module_index].source_segments))
+        }
         module_index += 1
     }
 }
@@ -154,7 +156,9 @@ sema_genmod_collect_templates: fn(written: [Item], check: &SemaGenericModuleChec
 }
 
 sema_genmod_check_module: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, items: [Item], templates_by_module: [[SemaGenericModuleTemplate]], check: &SemaGenericModuleCheck) {
-    if sema_genmod_report_cycles(items, check) -> return
+    if sema_genmod_report_cycles(items, check) {
+        return
+    }
     enums: sema_genmod_enums(items, [GenericModuleDef]{})
     values: sema_genmod_const_values(items, sema_genmod_setting_types(graph.build_facts.settings, enums), enums)
     templates := [SemaGenericModuleTemplate]{}
@@ -218,7 +222,9 @@ sema_genmod_find_alias: fn(aliases: [ModuleAliasDef], name: String) -> ModuleAli
 sema_genmod_push: fn(check: &SemaGenericModuleCheck, diagnostic: Diagnostic) {
     span: diagnostic.span ?? Span{start: 0, end: 0}
     key: "{diagnostic.code}|{span.start}|{span.end}|{diagnostic.what}"
-    if check.seen.get(key) != None -> return
+    if check.seen.get(key) != None {
+        return
+    }
     check.seen[key] = true
     check.diagnostics.push(diagnostic.copy())
 }
@@ -368,14 +374,18 @@ sema_genmod_value_type: fn(expression: Expr, values: [String:Type], enums: [Stri
             }
         }
         .Field(base, member, _, _) -> {
-            if sema_fact_build_rooted(base) -> return values.get(sema_fact_path_text(base, member) ?? return None)
+            if sema_fact_build_rooted(base) {
+                return values.get(sema_fact_path_text(base, member) ?? return None)
+            }
             if base == .Ident(enum_name, _, _) {
                 if enums.get(enum_name) != None -> return Val(Type.Named{name: enum_name})
             }
             None
         }
         .EnumLit(enum_name, _, _, args, _, _, _) -> {
-            if args.len() == 0 && enums.get(enum_name) != None -> return Val(Type.Named{name: enum_name})
+            if args.len() == 0 && enums.get(enum_name) != None {
+                return Val(Type.Named{name: enum_name})
+            }
             None
         }
         .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Unit(_, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
@@ -421,7 +431,7 @@ sema_genmod_resolve_args: fn(graph: SemaRegistrationGraph, alias: ModuleAliasDef
             .Type(name, bound) -> {
                 ty := Type.Int
                 if arg == {
-                    .Type(value, _) -> ty = value
+                    .Type(value, _) -> { ty = value }
                     .Value(expression, _) -> {
                         if expression == .Ident(type_ident, _, _) {
                             ty = Type.Named{name: type_ident}
@@ -444,9 +454,11 @@ sema_genmod_resolve_args: fn(graph: SemaRegistrationGraph, alias: ModuleAliasDef
                 expected: sema_genmod_type_text(ty)
                 expression := Expr?{None}
                 if arg == {
-                    .Value(value, _) -> expression = Val(value)
+                    .Value(value, _) -> { expression = Val(value) }
                     .Type(value, type_span) -> {
-                        if value == .Named(type_ident) -> expression = Val(Expr.Ident{name: type_ident, span: type_span, id: AST_NODE_GENERATED})
+                        if value == .Named(type_ident) {
+                            expression = Val(Expr.Ident{name: type_ident, span: type_span, id: AST_NODE_GENERATED})
+                        }
                     }
                 }
                 value_expression: expression ?? {
@@ -558,7 +570,9 @@ sema_genmod_check_aliases: fn(graph: SemaRegistrationGraph, aliases: [ModuleAlia
             invalid[alias.name] = true
             next
         }
-        if !sema_genmod_instantiate(graph, resolved, template, args, enums, check) -> invalid[alias.name] = true
+        if !sema_genmod_instantiate(graph, resolved, template, args, enums, check) {
+            invalid[alias.name] = true
+        }
     }
 }
 
@@ -567,7 +581,9 @@ sema_genmod_substitute_alias: fn(alias: ModuleAliasDef, names: [String], actuals
     args := [ModuleArg]{}
     loop arg in alias.args {
         if arg == {
-            .Type(ty, span) -> args.push(ModuleArg.Type{ty: sema_inference_substitute_type(ty, names, actuals), span: span})
+            .Type(ty, span) -> {
+                args.push(ModuleArg.Type{ty: sema_inference_substitute_type(ty, names, actuals), span: span})
+            }
             .Value(expression, span) -> args.push(ModuleArg.Value{expr: expression, span: span})
         }
     }
@@ -580,8 +596,12 @@ sema_genmod_substitute_template: fn(definition: GenericModuleDef, names: [String
     params := [GenericModuleParam]{}
     loop param in definition.params {
         if param == {
-            .Type(name, name_span, bound) -> params.push(GenericModuleParam.Type{name: name, name_span: name_span, bound: bound})
-            .Value(name, name_span, ty) -> params.push(GenericModuleParam.Value{name: name, name_span: name_span, ty: sema_inference_substitute_type(ty, names, actuals)})
+            .Type(name, name_span, bound) -> {
+                params.push(GenericModuleParam.Type{name: name, name_span: name_span, bound: bound})
+            }
+            .Value(name, name_span, ty) -> {
+                params.push(GenericModuleParam.Value{name: name, name_span: name_span, ty: sema_inference_substitute_type(ty, names, actuals)})
+            }
         }
     }
     updated.params = params
@@ -596,7 +616,7 @@ sema_genmod_instantiate: fn(graph: SemaRegistrationGraph, alias: ModuleAliasDef,
         names := [String]{}
         loop param in definition.params {
             if param == {
-                .Type(name, _, _) -> names.push(name.copy())
+                .Type(name, _, _) -> { names.push(name.copy()) }
                 .Value(name, _, _) -> names.push(name.copy())
             }
         }
@@ -625,12 +645,16 @@ sema_genmod_instantiate: fn(graph: SemaRegistrationGraph, alias: ModuleAliasDef,
     values = sema_genmod_const_values(definition.body, values, enums)
     loop item in definition.body {
         if item == .CodeModule(nested_module) {
-            if nested_module.body == .Val(body) -> sema_genmod_check_code_module(graph, body, type_names, type_actuals, values, check)
+            if nested_module.body == .Val(body) {
+                sema_genmod_check_code_module(graph, body, type_names, type_actuals, values, check)
+            }
         }
     }
     nested_defs := [GenericModuleDef]{}
     loop item in definition.body {
-        if item == .GenericModule(nested) -> nested_defs.push(sema_genmod_substitute_template(nested, type_names, type_actuals))
+        if item == .GenericModule(nested) {
+            nested_defs.push(sema_genmod_substitute_template(nested, type_names, type_actuals))
+        }
     }
     if nested_defs.len() == 0 -> return true
     // Nested templates close over the outer instance; their aliases resolve
@@ -643,7 +667,9 @@ sema_genmod_instantiate: fn(graph: SemaRegistrationGraph, alias: ModuleAliasDef,
     }
     nested_aliases := [ModuleAliasDef]{}
     loop item in definition.body {
-        if item == .ModuleAlias(nested_alias) -> nested_aliases.push(sema_genmod_substitute_alias(nested_alias, type_names, type_actuals))
+        if item == .ModuleAlias(nested_alias) {
+            nested_aliases.push(sema_genmod_substitute_alias(nested_alias, type_names, type_actuals))
+        }
     }
     loop nested_alias in sema_genmod_by_depth(nested_aliases) {
         resolved: sema_genmod_resolve_local(nested_alias, nested_aliases, check) ?? next
@@ -660,19 +686,27 @@ sema_genmod_instantiate: fn(graph: SemaRegistrationGraph, alias: ModuleAliasDef,
 sema_genmod_check_code_module: fn(graph: SemaRegistrationGraph, body: [Item], type_names: [String], type_actuals: [Type], inherited: [String:Type], check: &SemaGenericModuleCheck) {
     loop item in body {
         if item == .CodeModule(child) {
-            if child.body == .Val(child_body) -> sema_genmod_check_code_module(graph, child_body, type_names, type_actuals, inherited, check)
+            if child.body == .Val(child_body) {
+                sema_genmod_check_code_module(graph, child_body, type_names, type_actuals, inherited, check)
+            }
         }
     }
     nested_defs := [GenericModuleDef]{}
     aliases := [ModuleAliasDef]{}
     loop item in body {
         if item == {
-            .GenericModule(nested) -> nested_defs.push(sema_genmod_substitute_template(nested, type_names, type_actuals))
-            .ModuleAlias(alias) -> aliases.push(sema_genmod_substitute_alias(alias, type_names, type_actuals))
+            .GenericModule(nested) -> {
+                nested_defs.push(sema_genmod_substitute_template(nested, type_names, type_actuals))
+            }
+            .ModuleAlias(alias) -> {
+                aliases.push(sema_genmod_substitute_alias(alias, type_names, type_actuals))
+            }
             .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
-    if nested_defs.len() == 0 && aliases.len() == 0 -> return
+    if nested_defs.len() == 0 && aliases.len() == 0 {
+        return
+    }
     enums: sema_genmod_enums(body, nested_defs)
     values: sema_genmod_const_values(body, inherited, enums)
     templates := [SemaGenericModuleTemplate]{}
@@ -692,8 +726,10 @@ sema_genmod_report_cycles: fn(items: [Item], check: &SemaGenericModuleCheck) -> 
                 edge: SemaGenericModuleEdge{target: alias.target, span: alias.target_span}
                 existing: sema_genmod_node_index(nodes, alias.name)
                 if existing == {
-                    .Val(index) -> nodes[index].edges.push(edge)
-                    .None -> nodes.push(SemaGenericModuleNode{name: alias.name, edges: [SemaGenericModuleEdge]{edge}})
+                    .Val(index) -> { nodes[index].edges.push(edge) }
+                    .None -> {
+                        nodes.push(SemaGenericModuleNode{name: alias.name, edges: [SemaGenericModuleEdge]{edge}})
+                    }
                 }
             }
             .GenericModule(definition) -> {
@@ -701,7 +737,7 @@ sema_genmod_report_cycles: fn(items: [Item], check: &SemaGenericModuleCheck) -> 
                 sema_genmod_collect_alias_edges(definition.body, edges)
                 existing: sema_genmod_node_index(nodes, definition.name)
                 if existing == {
-                    .Val(index) -> nodes[index].edges = edges
+                    .Val(index) -> { nodes[index].edges = edges }
                     .None -> nodes.push(SemaGenericModuleNode{name: definition.name, edges: edges})
                 }
             }
@@ -745,7 +781,9 @@ sema_genmod_report_cycles: fn(items: [Item], check: &SemaGenericModuleCheck) -> 
 sema_genmod_collect_alias_edges: fn(items: [Item], edges: &[SemaGenericModuleEdge]) {
     loop item in items {
         if item == {
-            .ModuleAlias(alias) -> edges.push(SemaGenericModuleEdge{target: alias.target, span: alias.target_span})
+            .ModuleAlias(alias) -> {
+                edges.push(SemaGenericModuleEdge{target: alias.target, span: alias.target_span})
+            }
             .GenericModule(definition) -> sema_genmod_collect_alias_edges(definition.body, edges)
             .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
@@ -766,9 +804,7 @@ sema_genmod_visit: fn(node: String, nodes: [SemaGenericModuleNode], state: &[Str
         loop edge in nodes[node_index].edges {
             if sema_genmod_node_index(nodes, edge.target) == None -> next
             visited: state.get(edge.target) ?? 0
-            if visited == 0 {
-                sema_genmod_visit(edge.target, nodes, state, stack, reported, check)
-            } else if visited == 1 {
+            if visited == 0 -> sema_genmod_visit(edge.target, nodes, state, stack, reported, check) else if visited == 1 {
                 start := 0
                 loop (index, name) in stack {
                     if name == edge.target {
@@ -855,13 +891,17 @@ sema_generic_modules_bucket_add: fn(slots: &[ModuleID:Int], rows: &[[Int]], key:
 
 sema_generic_modules_index: fn(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge]) -> SemaGenericModuleIndex Never! {
     index := SemaGenericModuleIndex{edge_slots: [ModuleID:Int]{}, edge_rows: [[Int]]{}, template_slots: [ModuleID:Int]{}, template_rows: [[Int]]{}}
-    loop (row, edge) in edges -> sema_generic_modules_bucket_add(index.edge_slots, index.edge_rows, edge.source_module_identity, row)
+    loop (row, edge) in edges {
+        sema_generic_modules_bucket_add(index.edge_slots, index.edge_rows, edge.source_module_identity, row)
+    }
     loop (row, input) in inputs {
         has_template := false
         loop item in input.program.items {
             if item == .GenericModule(_) -> has_template = true
         }
-        if has_template -> sema_generic_modules_bucket_add(index.template_slots, index.template_rows, input.module_identity, row)
+        if has_template {
+            sema_generic_modules_bucket_add(index.template_slots, index.template_rows, input.module_identity, row)
+        }
     }
     index
 }
@@ -901,7 +941,9 @@ sema_genmod_definition_items: fn(items: [Item]) -> [Item] {
     kept := [Item]{}
     loop item in items {
         if item == {
-            .Func(_) | .Struct(_) | .Enum(_) | .Trait(_) | .Tag(_) | .Impl(_) | .ErrorConv(_) | .Test(_) | .Const(_) -> kept.push(item.copy())
+            .Func(_) | .Struct(_) | .Enum(_) | .Trait(_) | .Tag(_) | .Impl(_) | .ErrorConv(_) | .Test(_) | .Const(_) -> {
+                kept.push(item.copy())
+            }
             .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .EffectDecl(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
@@ -912,8 +954,12 @@ sema_genmod_definition_items: fn(items: [Item]) -> [Item] {
 // untouched (not copied). `module_text` is `module_identity`'s identity text,
 // which the instances' keys and applications spell.
 sema_generic_modules_expand: fn(program: &Program, module_identity: ModuleID, module_text: String, imported: [SemaGenericModuleSource], settings: [SemaBuildSetting]) {
-    if sema_generic_modules_rewritten_items(program, module_identity, module_text, imported, settings) == .Val(rewritten) -> program.items = rewritten
-    if !sema_genmod_has_expression_tests(program.items) -> return
+    if sema_generic_modules_rewritten_items(program, module_identity, module_text, imported, settings) == .Val(rewritten) {
+        program.items = rewritten
+    }
+    if !sema_genmod_has_expression_tests(program.items) {
+        return
+    }
     enums: sema_genmod_enums(program.items, [GenericModuleDef]{})
     sema_genmod_resolve_test_names(program.items, sema_genmod_setting_literals(settings, enums), enums)
 }
@@ -1016,7 +1062,9 @@ sema_genmod_expand_items: fn(items: [Item], nesting: SemaGenericModuleNesting, i
     if sema_genmod_report_cycles(items, silent) -> return None
     sources := [SemaGenericModuleSource]{}
     loop item in items {
-        if item == .GenericModule(definition) -> sources.push(SemaGenericModuleSource{local: definition.name, key: "{nesting.key_prefix}{definition.name}", definition: definition, source_items: [Item]{}, source_values: values})
+        if item == .GenericModule(definition) {
+            sources.push(SemaGenericModuleSource{local: definition.name, key: "{nesting.key_prefix}{definition.name}", definition: definition, source_items: [Item]{}, source_values: values})
+        }
     }
     loop source in imported -> sources.push(source.copy())
     invalid := [String:Bool]{}
@@ -1060,8 +1108,8 @@ sema_genmod_expand_items: fn(items: [Item], nesting: SemaGenericModuleNesting, i
         names := [String]{}
         loop declaration in expansion.declarations {
             if declaration == {
-                .Struct(definition) -> names.push(definition.name)
-                .Enum(definition) -> names.push(definition.name)
+                .Struct(definition) -> { names.push(definition.name) }
+                .Enum(definition) -> { names.push(definition.name) }
                 .Trait(definition) -> names.push(definition.name)
                 .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
@@ -1211,13 +1259,11 @@ sema_genmod_bind: fn(alias: ModuleAliasDef, source: SemaGenericModuleSource, val
             .Type(name, _, _) -> {
                 ty := Type.Int
                 if arg == {
-                    .Type(value, _) -> ty = value
+                    .Type(value, _) -> { ty = value }
                     .Value(expression, _) -> {
                         if expression == .Ident(type_ident, _, _) {
                             ty = Type.Named{name: type_ident}
-                        } else {
-                            return None
-                        }
+                        } else { return None }
                     }
                 }
                 binding.type_names.push(name.copy())
@@ -1228,9 +1274,11 @@ sema_genmod_bind: fn(alias: ModuleAliasDef, source: SemaGenericModuleSource, val
             .Value(name, _, ty) -> {
                 expression := Expr?{None}
                 if arg == {
-                    .Value(value, _) -> expression = Val(value)
+                    .Value(value, _) -> { expression = Val(value) }
                     .Type(value, type_span) -> {
-                        if value == .Named(type_ident) -> expression = Val(Expr.Ident{name: type_ident, span: type_span, id: AST_NODE_GENERATED})
+                        if value == .Named(type_ident) {
+                            expression = Val(Expr.Ident{name: type_ident, span: type_span, id: AST_NODE_GENERATED})
+                        }
                     }
                 }
                 written: expression ?? return None
@@ -1261,9 +1309,7 @@ sema_genmod_nominal_name: fn(item: Item) -> String {
 sema_genmod_value_name: fn(alias: String, name: String) -> String {
     bytes: alias.bytes()
     end := bytes.len()
-    loop end > 0 && (Int{bytes[end - 1]}) == 95 {
-        end -= 1
-    }
+    loop end > 0 && (Int{bytes[end - 1]}) == 95 -> end -= 1
     trimmed: String.from_bytes(bytes[0..<end]) ?? alias.copy()
     "{trimmed}_{sema_inline_trim_leading_underscores(name)}"
 }
@@ -1281,17 +1327,25 @@ sema_genmod_expand_alias: fn(alias: ModuleAliasDef, source: SemaGenericModuleSou
     rewrite := sema_inline_rewrite_empty()
     loop item in source.source_items {
         name: sema_genmod_nominal_name(item)
-        if name != "" -> rewrite.types[name] = Type.Named{name: sema_inline_type_name(alias.name, name)}
+        if name != "" {
+            rewrite.types[name] = Type.Named{name: sema_inline_type_name(alias.name, name)}
+        }
     }
     loop item in template.body {
         name: sema_genmod_nominal_name(item)
-        if name != "" -> rewrite.types[name] = Type.Named{name: sema_inline_type_name(alias.name, name)}
+        if name != "" {
+            rewrite.types[name] = Type.Named{name: sema_inline_type_name(alias.name, name)}
+        }
     }
     loop (index, name) in binding.type_names -> rewrite.types[name] = binding.type_actuals[index]
     loop item in template.body {
         if item == {
-            .CodeModule(nested) -> rewrite.types[nested.name] = Type.Named{name: sema_genmod_value_name(alias.name, nested.name)}
-            .ModuleAlias(nested) -> rewrite.types[nested.name] = Type.Named{name: sema_genmod_value_name(alias.name, nested.name)}
+            .CodeModule(nested) -> {
+                rewrite.types[nested.name] = Type.Named{name: sema_genmod_value_name(alias.name, nested.name)}
+            }
+            .ModuleAlias(nested) -> {
+                rewrite.types[nested.name] = Type.Named{name: sema_genmod_value_name(alias.name, nested.name)}
+            }
             .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
@@ -1301,11 +1355,15 @@ sema_genmod_expand_alias: fn(alias: ModuleAliasDef, source: SemaGenericModuleSou
     // so it passes as its Module record (ModuleMeta.jet).
     loop (index, name) in binding.type_names {
         if binding.type_actuals[index] == .Named(actual) {
-            if sema_genmod_names_module(actual) -> rewrite.values[name] = Expr.Ident{name: actual, span: Span{start: 0, end: 0}, id: AST_NODE_GENERATED}
+            if sema_genmod_names_module(actual) {
+                rewrite.values[name] = Expr.Ident{name: actual, span: Span{start: 0, end: 0}, id: AST_NODE_GENERATED}
+            }
         }
     }
     declarations := [Item]{}
-    loop item in source.source_items -> sema_genmod_push_declaration(rewrite, item, alias.name, declarations)
+    loop item in source.source_items {
+        sema_genmod_push_declaration(rewrite, item, alias.name, declarations)
+    }
     // Template constants specialize in declaration order; each folded value
     // is visible to later constants and to every member.
     loop item in template.body {
@@ -1339,7 +1397,9 @@ sema_genmod_expand_alias: fn(alias: ModuleAliasDef, source: SemaGenericModuleSou
         } else if item == .ModuleAlias(nested) {
             renamed := sema_genmod_rewrite_alias(rewrite, nested)
             renamed.name = sema_genmod_value_name(alias.name, nested.name)
-            if sema_genmod_body_declares_alias(template.body, nested.target) -> renamed.target = sema_genmod_value_name(alias.name, nested.target)
+            if sema_genmod_body_declares_alias(template.body, nested.target) {
+                renamed.target = sema_genmod_value_name(alias.name, nested.target)
+            }
             inner.push(Item.ModuleAlias{value: renamed})
         }
     }
@@ -1347,7 +1407,9 @@ sema_genmod_expand_alias: fn(alias: ModuleAliasDef, source: SemaGenericModuleSou
     if sema_genmod_expand_items(inner, inner_nesting, [SemaGenericModuleSource]{}, rewrite.values, enums) == .Val(nested_expanded) {
         loop item in template.body {
             if item == .ModuleAlias(nested) {
-                if nested_expanded.canonical.get(sema_genmod_value_name(alias.name, nested.name)) == .Val(target) -> rewrite.types[nested.name] = Type.Named{name: target}
+                if nested_expanded.canonical.get(sema_genmod_value_name(alias.name, nested.name)) == .Val(target) {
+                    rewrite.types[nested.name] = Type.Named{name: target}
+                }
             }
         }
         loop item in nested_expanded.items {
@@ -1357,23 +1419,33 @@ sema_genmod_expand_alias: fn(alias: ModuleAliasDef, source: SemaGenericModuleSou
     }
     loop item in template.body {
         if item == {
-            .Test(definition) -> declarations.push(Item.Test{value: sema_genmod_specialize_test(rewrite, definition, alias.name)})
+            .Test(definition) -> {
+                declarations.push(Item.Test{value: sema_genmod_specialize_test(rewrite, definition, alias.name)})
+            }
             .CodeModule(nested) -> {
                 mapped := nested
                 mapped.name = sema_genmod_value_name(alias.name, nested.name)
                 nested_path: SemaGenericModuleNesting{module_identity: nesting.module_identity, module_text: nesting.module_text, key_prefix: "{binding.key}#{nested.name}.", path: sema_genmod_application_name(nesting.path, mapped.name)}
-                if nested.body == .Val(nested_body) -> mapped.body = Val(sema_genmod_specialize_nested(rewrite, nested_body, nested.name, enums, nested_path))
+                if nested.body == .Val(nested_body) {
+                    mapped.body = Val(sema_genmod_specialize_nested(rewrite, nested_body, nested.name, enums, nested_path))
+                }
                 declarations.push(Item.CodeModule{value: mapped})
             }
-            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> sema_genmod_push_declaration(rewrite, item, alias.name, declarations)
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {
+                sema_genmod_push_declaration(rewrite, item, alias.name, declarations)
+            }
         }
     }
     body := [Item]{}
     loop item in source.source_items {
-        if item == .Func(function) -> body.push(Item.Func{value: sema_inline_rewrite_func(rewrite, function)})
+        if item == .Func(function) {
+            body.push(Item.Func{value: sema_inline_rewrite_func(rewrite, function)})
+        }
     }
     loop item in template.body {
-        if item == .Func(function) -> body.push(Item.Func{value: sema_inline_rewrite_func(rewrite, function)})
+        if item == .Func(function) {
+            body.push(Item.Func{value: sema_inline_rewrite_func(rewrite, function)})
+        }
     }
     argument_keys: loop key in binding.argument_keys -> sema_genmod_key_bytes(key)
     identity: ModuleInstanceIdentity{full_key: sema_genmod_key_bytes(binding.key), fingerprint: binding.key, definition_id: source.key, argument_keys: argument_keys, argument_values: binding.argument_keys, argument_provenance: [[String]]{}, template_span: template.span, applications: [ModuleInstanceApplication]{}}
@@ -1439,15 +1511,15 @@ sema_genmod_rewrite_body: fn(rewrite: &SemaInlineRewrite, body: [Item]) -> [Item
             mapped.push(Item.Const{value: updated})
         } else if item == .CodeModule(child) {
             updated := child
-            if child.body == .Val(child_body) -> updated.body = Val(sema_genmod_rewrite_body(rewrite, child_body))
+            if child.body == .Val(child_body) {
+                updated.body = Val(sema_genmod_rewrite_body(rewrite, child_body))
+            }
             mapped.push(Item.CodeModule{value: updated})
         } else if item == .GenericModule(definition) {
             mapped.push(Item.GenericModule{value: sema_genmod_rewrite_template(rewrite, definition)})
         } else if item == .ModuleAlias(definition) {
             mapped.push(Item.ModuleAlias{value: sema_genmod_rewrite_alias(rewrite, definition)})
-        } else {
-            mapped.push(sema_genmod_rewrite_item(rewrite, item))
-        }
+        } else { mapped.push(sema_genmod_rewrite_item(rewrite, item)) }
     }
     mapped
 }
@@ -1478,16 +1550,26 @@ sema_genmod_rewrite_arg: fn(rewrite: &SemaInlineRewrite, arg: ModuleArg) -> Modu
 // `specialize_error_conv`.
 sema_genmod_push_declaration: fn(rewrite: &SemaInlineRewrite, item: Item, alias: String, declarations: &[Item]) {
     if item == {
-        .Struct(definition) -> declarations.push(Item.Struct{value: sema_inline_rewrite_struct(rewrite, definition, alias)})
-        .Enum(definition) -> declarations.push(Item.Enum{value: sema_inline_rewrite_enum(rewrite, definition, alias)})
-        .Trait(definition) -> declarations.push(Item.Trait{value: sema_inline_rewrite_trait(rewrite, definition)})
+        .Struct(definition) -> {
+            declarations.push(Item.Struct{value: sema_inline_rewrite_struct(rewrite, definition, alias)})
+        }
+        .Enum(definition) -> {
+            declarations.push(Item.Enum{value: sema_inline_rewrite_enum(rewrite, definition, alias)})
+        }
+        .Trait(definition) -> {
+            declarations.push(Item.Trait{value: sema_inline_rewrite_trait(rewrite, definition)})
+        }
         .Tag(definition) -> {
             mapped := definition
             mapped.name = sema_inline_mapped_name(rewrite, definition.name)
             declarations.push(Item.Tag{value: mapped})
         }
-        .Impl(definition) -> declarations.push(Item.Impl{value: sema_inline_rewrite_impl(rewrite, definition)})
-        .ErrorConv(definition) -> declarations.push(Item.ErrorConv{value: sema_inline_rewrite_error_conv(rewrite, definition)})
+        .Impl(definition) -> {
+            declarations.push(Item.Impl{value: sema_inline_rewrite_impl(rewrite, definition)})
+        }
+        .ErrorConv(definition) -> {
+            declarations.push(Item.ErrorConv{value: sema_inline_rewrite_error_conv(rewrite, definition)})
+        }
         .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
 }
@@ -1502,9 +1584,15 @@ sema_genmod_specialize_nested: fn(rewrite: &SemaInlineRewrite, body: [Item], mod
     mapped := [Item]{}
     loop item in body {
         if item == {
-            .Func(function) -> mapped.push(Item.Func{value: sema_inline_rewrite_func(rewrite, function)})
-            .Struct(definition) -> mapped.push(Item.Struct{value: sema_inline_rewrite_struct(rewrite, definition, "")})
-            .Enum(definition) -> mapped.push(Item.Enum{value: sema_inline_rewrite_enum(rewrite, definition, "")})
+            .Func(function) -> {
+                mapped.push(Item.Func{value: sema_inline_rewrite_func(rewrite, function)})
+            }
+            .Struct(definition) -> {
+                mapped.push(Item.Struct{value: sema_inline_rewrite_struct(rewrite, definition, "")})
+            }
+            .Enum(definition) -> {
+                mapped.push(Item.Enum{value: sema_inline_rewrite_enum(rewrite, definition, "")})
+            }
             .Const(definition) -> {
                 updated := definition
                 updated.value = sema_inline_rewrite_expr(rewrite, definition.value)
@@ -1516,20 +1604,34 @@ sema_genmod_specialize_nested: fn(rewrite: &SemaInlineRewrite, body: [Item], mod
             .CodeModule(child) -> {
                 updated := child
                 child_nesting: SemaGenericModuleNesting{module_identity: nesting.module_identity, module_text: nesting.module_text, key_prefix: "{nesting.key_prefix}{child.name}.", path: sema_genmod_value_name(nesting.path, child.name)}
-                if child.body == .Val(child_body) -> updated.body = Val(sema_genmod_specialize_nested(rewrite, child_body, child.name, enums, child_nesting))
+                if child.body == .Val(child_body) {
+                    updated.body = Val(sema_genmod_specialize_nested(rewrite, child_body, child.name, enums, child_nesting))
+                }
                 mapped.push(Item.CodeModule{value: updated})
             }
-            .GenericModule(definition) -> mapped.push(Item.GenericModule{value: sema_genmod_rewrite_template(rewrite, definition)})
-            .ModuleAlias(definition) -> mapped.push(Item.ModuleAlias{value: sema_genmod_rewrite_alias(rewrite, definition)})
-            .Trait(definition) -> mapped.push(Item.Trait{value: sema_inline_rewrite_trait(rewrite, definition)})
+            .GenericModule(definition) -> {
+                mapped.push(Item.GenericModule{value: sema_genmod_rewrite_template(rewrite, definition)})
+            }
+            .ModuleAlias(definition) -> {
+                mapped.push(Item.ModuleAlias{value: sema_genmod_rewrite_alias(rewrite, definition)})
+            }
+            .Trait(definition) -> {
+                mapped.push(Item.Trait{value: sema_inline_rewrite_trait(rewrite, definition)})
+            }
             .Tag(definition) -> {
                 updated := definition
                 updated.name = sema_inline_mapped_name(rewrite, definition.name)
                 mapped.push(Item.Tag{value: updated})
             }
-            .Impl(definition) -> mapped.push(Item.Impl{value: sema_inline_rewrite_impl(rewrite, definition)})
-            .ErrorConv(definition) -> mapped.push(Item.ErrorConv{value: sema_inline_rewrite_error_conv(rewrite, definition)})
-            .Test(definition) -> mapped.push(Item.Test{value: sema_genmod_specialize_test(rewrite, definition, module_name)})
+            .Impl(definition) -> {
+                mapped.push(Item.Impl{value: sema_inline_rewrite_impl(rewrite, definition)})
+            }
+            .ErrorConv(definition) -> {
+                mapped.push(Item.ErrorConv{value: sema_inline_rewrite_error_conv(rewrite, definition)})
+            }
+            .Test(definition) -> {
+                mapped.push(Item.Test{value: sema_genmod_specialize_test(rewrite, definition, module_name)})
+            }
             .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .EffectDecl(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
@@ -1618,10 +1720,14 @@ sema_genmod_setting_literal: fn(setting: SemaBuildSetting, enums: [String:Bool])
         if raw != "true" && raw != "false" -> return None
         return Val(Expr.Bool{value: raw == "true", span: span, id: AST_NODE_GENERATED})
     }
-    if ty == "String" -> return Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: sema_fact_build_setting_unquote(raw)}}, span: span, id: AST_NODE_GENERATED})
+    if ty == "String" {
+        return Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: sema_fact_build_setting_unquote(raw)}}, span: span, id: AST_NODE_GENERATED})
+    }
     if ty == "Char" {
         text := raw
-        if raw.count_bytes() >= 2 && raw.starts_with("'") && raw.ends_with("'") -> text = sema_fact_build_setting_unquote(raw.slice(1, raw.len() - 1))
+        if raw.count_bytes() >= 2 && raw.starts_with("'") && raw.ends_with("'") {
+            text = sema_fact_build_setting_unquote(raw.slice(1, raw.len() - 1))
+        }
         count := 0
         loop _ in text.chars() -> count += 1
         if count != 1 -> return None
@@ -1680,19 +1786,37 @@ sema_genmod_fold: fn(expression: Expr, values: [String:Expr], enums: [String:Boo
             rhs: sema_genmod_fold(right, values, enums) ?? return None
             if lhs == .Int(left_number, _, _, _, _) {
                 if rhs == .Int(right_number, _, _, _, _) {
-                    if op == BinOp.Add -> return Val(Expr.Int{value: left_number + right_number, span: span, width: None, raw: None, id: AST_NODE_GENERATED})
-                    if op == BinOp.Sub -> return Val(Expr.Int{value: left_number - right_number, span: span, width: None, raw: None, id: AST_NODE_GENERATED})
-                    if op == BinOp.Mul -> return Val(Expr.Int{value: left_number * right_number, span: span, width: None, raw: None, id: AST_NODE_GENERATED})
-                    if op == BinOp.Lt -> return Val(Expr.Bool{value: left_number < right_number, span: span, id: AST_NODE_GENERATED})
-                    if op == BinOp.Le -> return Val(Expr.Bool{value: left_number <= right_number, span: span, id: AST_NODE_GENERATED})
-                    if op == BinOp.Gt -> return Val(Expr.Bool{value: left_number > right_number, span: span, id: AST_NODE_GENERATED})
-                    if op == BinOp.Ge -> return Val(Expr.Bool{value: left_number >= right_number, span: span, id: AST_NODE_GENERATED})
+                    if op == BinOp.Add {
+                        return Val(Expr.Int{value: left_number + right_number, span: span, width: None, raw: None, id: AST_NODE_GENERATED})
+                    }
+                    if op == BinOp.Sub {
+                        return Val(Expr.Int{value: left_number - right_number, span: span, width: None, raw: None, id: AST_NODE_GENERATED})
+                    }
+                    if op == BinOp.Mul {
+                        return Val(Expr.Int{value: left_number * right_number, span: span, width: None, raw: None, id: AST_NODE_GENERATED})
+                    }
+                    if op == BinOp.Lt {
+                        return Val(Expr.Bool{value: left_number < right_number, span: span, id: AST_NODE_GENERATED})
+                    }
+                    if op == BinOp.Le {
+                        return Val(Expr.Bool{value: left_number <= right_number, span: span, id: AST_NODE_GENERATED})
+                    }
+                    if op == BinOp.Gt {
+                        return Val(Expr.Bool{value: left_number > right_number, span: span, id: AST_NODE_GENERATED})
+                    }
+                    if op == BinOp.Ge {
+                        return Val(Expr.Bool{value: left_number >= right_number, span: span, id: AST_NODE_GENERATED})
+                    }
                 }
             }
             if lhs == .Bool(left_flag, _, _) {
                 if rhs == .Bool(right_flag, _, _) {
-                    if op == BinOp.And -> return Val(Expr.Bool{value: left_flag && right_flag, span: span, id: AST_NODE_GENERATED})
-                    if op == BinOp.Or -> return Val(Expr.Bool{value: left_flag || right_flag, span: span, id: AST_NODE_GENERATED})
+                    if op == BinOp.And {
+                        return Val(Expr.Bool{value: left_flag && right_flag, span: span, id: AST_NODE_GENERATED})
+                    }
+                    if op == BinOp.Or {
+                        return Val(Expr.Bool{value: left_flag || right_flag, span: span, id: AST_NODE_GENERATED})
+                    }
                 }
             }
             if op == BinOp.Eq || op == BinOp.Ne {
@@ -1708,16 +1832,22 @@ sema_genmod_fold: fn(expression: Expr, values: [String:Expr], enums: [String:Boo
             Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: "{left_text}{right_text}"}}, span: span, id: AST_NODE_GENERATED})
         }
         .Field(base, member, span, _) -> {
-            if sema_fact_build_rooted(base) -> return Val(sema_genmod_setting_at(values.get(sema_fact_path_text(base, member) ?? return None) ?? return None, span))
+            if sema_fact_build_rooted(base) {
+                return Val(sema_genmod_setting_at(values.get(sema_fact_path_text(base, member) ?? return None) ?? return None, span))
+            }
             if base == .Ident(enum_name, _, _) {
                 fieldless: enums.get(enum_name) ?? false
-                if fieldless -> return Val(Expr.EnumLit{type_name: enum_name, variant: member, variant_span: None, args: [EnumLitArg]{}, leading_dot: false, span: span, id: AST_NODE_GENERATED})
+                if fieldless {
+                    return Val(Expr.EnumLit{type_name: enum_name, variant: member, variant_span: None, args: [EnumLitArg]{}, leading_dot: false, span: span, id: AST_NODE_GENERATED})
+                }
             }
             None
         }
         .EnumLit(enum_name, variant, _, args, _, span, node) -> {
             fieldless: enums.get(enum_name) ?? false
-            if args.len() == 0 && fieldless -> return Val(Expr.EnumLit{type_name: enum_name, variant: variant, variant_span: None, args: [EnumLitArg]{}, leading_dot: false, span: span, id: node})
+            if args.len() == 0 && fieldless {
+                return Val(Expr.EnumLit{type_name: enum_name, variant: variant, variant_span: None, args: [EnumLitArg]{}, leading_dot: false, span: span, id: node})
+            }
             None
         }
         .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Float(_, _, _, _, _) | .Unit(_, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None

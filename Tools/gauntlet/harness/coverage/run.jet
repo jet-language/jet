@@ -36,9 +36,7 @@ Options: struct {
     require_empty: Bool
 }
 
-fail: fn(message: String) -> Never {
-    process.fail(1, "coverage: {message}")
-}
+fail: fn(message: String) -> Never { process.fail(1, "coverage: {message}") }
 
 parse_options: fn(args: [String]) -> Options {
     gauntlet := String?{None}
@@ -53,7 +51,9 @@ parse_options: fn(args: [String]) -> Options {
             at += 1
             next
         }
-        if arg != "--gauntlet" && arg != "--scriptbench" && arg != "--out" -> fail("unknown argument {arg}")
+        if arg != "--gauntlet" && arg != "--scriptbench" && arg != "--out" {
+            fail("unknown argument {arg}")
+        }
         value: args.get(at + 1) ?? ""
         if value == "" -> fail("{arg} needs a value")
         if arg == {
@@ -80,9 +80,13 @@ run: fn() {
     census: build_census(programs, report, cells)
     loop issue in issues -> print("corpus\t{issue}")
     loop root in census.roots {
-        loop loss in root.losses -> print("loss\t{root.owner}\t{loss.source}/{loss.program}\t{loss.peer}\t{loss.metric}\t{reading(loss.jet)}\t{reading(loss.peer_value)}\t{loss.ratio:Fixed(3)}")
+        loop loss in root.losses {
+            print("loss\t{root.owner}\t{loss.source}/{loss.program}\t{loss.peer}\t{loss.metric}\t{reading(loss.jet)}\t{reading(loss.peer_value)}\t{loss.ratio:Fixed(3)}")
+        }
     }
-    loop row in census.uncovered -> print("uncovered\t{row.source}/{row.program}\t{row.peer}\t{row.metric}\t{row.reason}")
+    loop row in census.uncovered {
+        print("uncovered\t{row.source}/{row.program}\t{row.peer}\t{row.metric}\t{row.reason}")
+    }
     print("coverage: {census.programs} programs ({census.sources.gauntlet} gauntlet, {census.sources.scriptbench} scriptbench), {census.measured} readings, {census.losses.len()} losses in {census.roots.len()} roots, {census.uncovered.len()} uncovered")
     failed: issues.len() > 0 || census.uncovered.len() > 0 || (options.require_empty && census.losses.len() > 0)
     if options.out == .Val(out) {

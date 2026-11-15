@@ -58,7 +58,7 @@ s6_pipeline_exchange: fn(addr: String, request: String) -> String {
     assert(body_forbidden.ends_with("Connection: close{crlf}{crlf}"), body_forbidden)
     // An `HTTP/` version other than 1.0 and 1.1 is 505; a version that is not
     // `HTTP/` at all makes the request line malformed, which is 400.
-    invalid_versions: [String: String]{"HTTP/2.0": "HTTP/1.1 505 HTTP Version Not Supported", "garbage": "HTTP/1.1 400 Bad Request"}
+    invalid_versions: [String:String]{"HTTP/2.0": "HTTP/1.1 505 HTTP Version Not Supported", "garbage": "HTTP/1.1 400 Bad Request"}
     loop (version, status) in invalid_versions {
         invalid: s6_pipeline_exchange(addr, "GET /two {version}{crlf}Host: local{crlf}{crlf}GET /two HTTP/1.1{crlf}Host: local{crlf}{crlf}")
         assert(invalid.starts_with(status), invalid)

@@ -55,9 +55,7 @@ VariantOS: enum {
         }
     }
 
-    from_platform_os: fn(os: String) -> VariantOS Never! {
-        VariantOS.parse(os) ?? VariantOS.Linux
-    }
+    from_platform_os: fn(os: String) -> VariantOS Never! { VariantOS.parse(os) ?? VariantOS.Linux }
 }
 
 VariantArch: enum {
@@ -273,7 +271,7 @@ PackageVariant: struct {
             linkage: VariantLinkage.Shared,
             abi: VariantABI.default_for(os),
             artifact: ArtifactKind.Library,
-            features: [String]{}
+            features: [String]{},
         }
     }
 
@@ -287,7 +285,7 @@ PackageVariant: struct {
             linkage: VariantLinkage.Shared,
             abi: VariantABI.default_for(os),
             artifact: ArtifactKind.Library,
-            features: [String]{}
+            features: [String]{},
         }
     }
 
@@ -343,7 +341,9 @@ PackageVariant: struct {
     }
 
     add_feature: fn(&self, feature: String) Never! {
-        if self.features.contains(feature) -> return
+        if self.features.contains(feature) {
+            return
+        }
         self.features.push(feature.copy())
         self.features.sort()
     }
@@ -355,16 +355,16 @@ PackageVariant: struct {
     }
 
     // Exact match: every closed axis equal and equal feature sets.
-    matches_exact: fn(self, need: PackageVariant) -> Bool Never! {
-        self == need
-    }
+    matches_exact: fn(self, need: PackageVariant) -> Bool Never! { self == need }
 
     // Compatible under the total order: the producer may carry more features
     // and may offer `ArtifactKind.Any` for any need; every other axis must
     // match exactly.
     matches_compatible: fn(self, need: PackageVariant) -> Bool Never! {
         if self.role != need.role || self.os != need.os || self.arch != need.arch -> return false
-        if self.libc != need.libc || self.linkage != need.linkage || self.abi != need.abi -> return false
+        if self.libc != need.libc || self.linkage != need.linkage || self.abi != need.abi {
+            return false
+        }
         if self.artifact != need.artifact && self.artifact != ArtifactKind.Any -> return false
         loop feature in need.features {
             if !self.features.contains(feature) -> return false
@@ -401,7 +401,9 @@ PackageVariant: struct {
                 if mapped[index].matches_compatible(self) -> pool.push(index)
             }
         }
-        if pool.len() == 0 -> return Err(VariantSelectError.NoMatch{need: self, candidate_count: candidates.len()})
+        if pool.len() == 0 {
+            return Err(VariantSelectError.NoMatch{need: self, candidate_count: candidates.len()})
+        }
         if pool.len() == 1 -> return Ok(candidates[pool[0]])
         labels := [String]{}
         loop index in pool -> labels.push(candidates[index].label)
@@ -432,10 +434,10 @@ PackageVariant: struct {
 VariantCandidate: struct {
     label: String
     variant: PackageVariant
-    provider_facts: [String: String]
+    provider_facts: [String:String]
 
     new: fn(label: String, variant: PackageVariant) -> VariantCandidate Never! {
-        VariantCandidate{label: label, variant: variant, provider_facts: [String: String]{}}
+        VariantCandidate{label: label, variant: variant, provider_facts: [String:String]{}}
     }
 
     with_provider_fact: fn(self, key: String, value: String) -> VariantCandidate Never! {
@@ -456,19 +458,19 @@ VariantCandidate: struct {
             value: if entry.value == "" || entry.value == "*" -> fact else -> entry.value
             axis: VariantAxis.parse_mapped(entry.axis) ?? next
             if axis == {
-                .Role -> variant.role = VariantRole.parse(value) ?? variant.role
+                .Role -> { variant.role = VariantRole.parse(value) ?? variant.role }
                 .OS -> {
                     if VariantOS.parse(value) == {
-                        .Val(os) -> variant = variant.with_os(os)
+                        .Val(os) -> { variant = variant.with_os(os) }
                         .None -> {}
                     }
                 }
-                .Arch -> variant.arch = VariantArch.parse(value) ?? variant.arch
-                .Libc -> variant.libc = VariantLibc.parse(value) ?? variant.libc
-                .Linkage -> variant.linkage = VariantLinkage.parse(value) ?? variant.linkage
-                .ABI -> variant.abi = VariantABI.parse(value) ?? variant.abi
-                .Artifact -> variant.artifact = ArtifactKind.parse(value) ?? variant.artifact
-                .Features -> variant.add_feature(value)
+                .Arch -> { variant.arch = VariantArch.parse(value) ?? variant.arch }
+                .Libc -> { variant.libc = VariantLibc.parse(value) ?? variant.libc }
+                .Linkage -> { variant.linkage = VariantLinkage.parse(value) ?? variant.linkage }
+                .ABI -> { variant.abi = VariantABI.parse(value) ?? variant.abi }
+                .Artifact -> { variant.artifact = ArtifactKind.parse(value) ?? variant.artifact }
+                .Features -> { variant.add_feature(value) }
                 .ProviderFacts -> {}
             }
         }

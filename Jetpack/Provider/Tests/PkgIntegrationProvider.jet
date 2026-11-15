@@ -207,11 +207,11 @@ provider_pkg_integration_report_error: fn(report: ProviderFactReport) -> Provide
 
 #Test("pkg integration binary_provider_requires_hash_and_platform") {
     if ProviderObject.binary("tool", "", "linux", "") == {
-        .Ok(_) -> panic("empty hash must fail")
+        .Ok(_) -> { panic("empty hash must fail") }
         .Err(_) -> {}
     }
     if ProviderObject.binary("tool", "sha256-aa", "", "") == {
-        .Ok(_) -> panic("empty platform must fail")
+        .Ok(_) -> { panic("empty platform must fail") }
         .Err(_) -> {}
     }
     object: ProviderObject.binary("tool", "sha256-aa", "linux", "") ?? panic("hash + platform ok")

@@ -74,8 +74,12 @@ diagnostic_explanation_render: fn(explanation: DiagnosticExplanation, color: Boo
         out = "{out}\n"
     }
     out = "{out}\n"
-    if explanation.why == .Val(why) -> out = "{out}{diagnostic_theme_bold(color, "Why Jet enforces it:")}\n  {why}\n\n"
-    if explanation.fix == .Val(fix) -> out = "{out}{diagnostic_theme_bold(color, "How to fix it:")}\n  {fix}\n\n"
+    if explanation.why == .Val(why) {
+        out = "{out}{diagnostic_theme_bold(color, "Why Jet enforces it:")}\n  {why}\n\n"
+    }
+    if explanation.fix == .Val(fix) {
+        out = "{out}{diagnostic_theme_bold(color, "How to fix it:")}\n  {fix}\n\n"
+    }
     if explanation.example == .Val(example) {
         out = "{out}{diagnostic_theme_bold(color, "Example:")}\n"
         loop line in diagnostic_text_lines(example) -> out = "{out}  {line}\n"
@@ -86,7 +90,11 @@ diagnostic_explanation_render: fn(explanation: DiagnosticExplanation, color: Boo
         if explanation.stage.len() > 0 -> out = "{out}Stage: {explanation.stage}\n\n"
         out = "{out}A longer explanation will land with the detailed typed row.\n\n"
     }
-    if explanation.stage == "syntax registry" -> return "{out}This explanation comes from Jet's syntax dictionary.\n"
-    if explanation.stage == "library" -> return "{out}This explanation comes from the type's `Diagnostic` impl.\n"
+    if explanation.stage == "syntax registry" {
+        return "{out}This explanation comes from Jet's syntax dictionary.\n"
+    }
+    if explanation.stage == "library" {
+        return "{out}This explanation comes from the type's `Diagnostic` impl.\n"
+    }
     "{out}This explanation comes from jet's diagnostics reference.\n"
 }

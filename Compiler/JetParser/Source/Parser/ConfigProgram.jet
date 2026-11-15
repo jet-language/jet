@@ -5,8 +5,20 @@
 // expression's source text is found on its lexed tokens.
 use {
     jet_foundation.[
-        CallArg, ComptimeEvalError, ComptimeNameSite, CtValue, Expr, Func, JET_CONFIG_VALUE_NAME, Span,
-        comptime_walk_identifiers, expr_span, jet_config_eval_error, jet_config_literal, name_index, name_intern,
+        CallArg,
+        ComptimeEvalError,
+        ComptimeNameSite,
+        CtValue,
+        Expr,
+        Func,
+        JET_CONFIG_VALUE_NAME,
+        Span,
+        comptime_walk_identifiers,
+        expr_span,
+        jet_config_eval_error,
+        jet_config_literal,
+        name_index,
+        name_intern,
         name_table_sized,
     ]
     jet_lexer.[TOKEN_LPAREN, TOKEN_RPAREN, Token, lex_config]
@@ -14,14 +26,18 @@ use {
 
 // The typed program for one config value. Each global the expression reads
 // becomes one ALL_CAPS module constant, and each read is respelled to it.
-jet_config_program: fn(expr: Expr, source: String, funcs: [String: Func], globals: [String: CtValue]) -> String ComptimeEvalError! {
+jet_config_program: fn(expr: Expr, source: String, funcs: [String:Func], globals: [String:CtValue]) -> String ComptimeEvalError! {
     bytes: source.bytes()
     span: jet_config_value_extent(expr, lex_config(bytes).tokens) ?? return Err(jet_config_eval_error(expr, "this config value has no source text to evaluate"))
-    if span.start < 0 || span.end > bytes.len() || span.start > span.end -> return Err(jet_config_eval_error(expr, "this config value has no source text to evaluate"))
+    if span.start < 0 || span.end > bytes.len() || span.start > span.end {
+        return Err(jet_config_eval_error(expr, "this config value has no source text to evaluate"))
+    }
     sites := [ComptimeNameSite]{}
     loop site in comptime_walk_identifiers(expr) {
         if globals.get(site.name) == None -> next
-        if site.span.start < span.start || site.span.end > span.end -> return Err(jet_config_eval_error(expr, "`{site.name}` is read outside this config value's source text"))
+        if site.span.start < span.start || site.span.end > span.end {
+            return Err(jet_config_eval_error(expr, "`{site.name}` is read outside this config value's source text"))
+        }
         index := sites.len()
         loop index > 0 && sites[index - 1].span.start > site.span.start -> index -= 1
         sites.insert(index, site)

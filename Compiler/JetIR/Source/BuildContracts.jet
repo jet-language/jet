@@ -3,12 +3,14 @@
 // a function with contracts has its body in a ContractScope whose `pre`
 // clauses run on entry and whose `post` clauses run at every return, with the
 // returned carrier (or its success payload) bound to `result`.
-
 use jet_foundation.[Span, Type, BodyContract, TContractResult, TPanicLoc, TPanicLocal, symbol_none]
 
 // An open contract scope: the result binding and the `post` clauses each
 // return checks.
-IRContractFrame: struct { result: TContractResult, post: [BodyContract] }
+IRContractFrame: struct {
+    result: TContractResult
+    post: [BodyContract]
+}
 
 // One checked clause: a proven or stripped clause emits nothing. A failed
 // clause is the E3005 stop (runtime ordinal 3) whose message is
@@ -18,8 +20,12 @@ IRContractFrame: struct { result: TContractResult, post: [BodyContract] }
 // a `#Post`. In a test image (IRProgram.contract_records) the clause first
 // reports whether it held, at its declared site.
 ir_contract: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, contract: BodyContract) Never! {
-    if contract.disposition != .Check -> return
-    if contract.file != b.f.source_file -> return ir_fail(b, contract.span, "contract source differs from its function source")
+    if contract.disposition != .Check {
+        return
+    }
+    if contract.file != b.f.source_file {
+        return ir_fail(b, contract.span, "contract source differs from its function source")
+    }
     source_line: ir_source_line_text(p, contract.file, contract.line) ?? return ir_fail(b, contract.span, "contract line {contract.line} is outside its source")
     column: ir_source_column(p, contract.file, contract.span.start) ?? return ir_fail(b, contract.span, "contract span falls outside its source")
     site: b.line
@@ -48,10 +54,14 @@ ir_contract: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, contract: BodyContrac
     before: ir_own_states(b, b.bindings.len())
     ir_open_if(b.f, failed, b.line)
     slot: ir_expr(m, p, b, contract.message)
-    if ir_failed(b) -> return
+    if ir_failed(b) {
+        return
+    }
     message_ty: ir_ty(p, b, contract.message)
     text: ir_render(m, p, b, message_ty, slot, IRRender.Display, contract.span)
-    if ir_failed(b) -> return
+    if ir_failed(b) {
+        return
+    }
     pointer_row: ir_pointer_row(m)
     builder: ir_runtime(m, b, "jet_rt_string_builder_new", [Int]{}, pointer_row)
     b.fresh[builder] = false
@@ -68,7 +78,9 @@ ir_contract: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, contract: BodyContrac
 
 ir_contract_scope: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, pre: [BodyContract], body: [Int], post: [BodyContract], result: TContractResult, span: Span) Never! {
     loop contract in pre {
-        if ir_failed(b) -> return
+        if ir_failed(b) {
+            return
+        }
         ir_contract(m, p, b, contract)
     }
     b.contracts.push(IRContractFrame{result: result, post: post})
@@ -82,7 +94,9 @@ ir_contract_scope: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, pre: [BodyContr
 // (-1: Unit): `result` is the carrier itself, or its Ok/Val payload, and a
 // failed carrier returns unchecked.
 ir_contract_return: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span: Span) Never! {
-    if b.contracts.len() == 0 -> return
+    if b.contracts.len() == 0 {
+        return
+    }
     frame: b.contracts[b.contracts.len() - 1]
     // A clause's own exits are not contract returns.
     open: b.contracts
@@ -99,9 +113,7 @@ ir_contract_return: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, spa
             ir_contract_posts(m, p, b, frame.post)
         }
         .ResultPayload | .OptionPayload -> {
-            if slot < 0 {
-                ir_fail(b, span, "contract return of a payload carrier without a value")
-            } else {
+            if slot < 0 -> ir_fail(b, span, "contract return of a payload carrier without a value") else {
                 result_mode: frame.result.mode == .ResultPayload
                 present: if result_mode -> ir_result_is_ok(m, b, slot) else -> ir_option_is_some(m, b, slot)
                 // The clauses run where the carrier holds a payload: a
@@ -131,7 +143,9 @@ ir_contract_return: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, spa
 
 ir_contract_posts: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, post: [BodyContract]) Never! {
     loop contract in post {
-        if ir_failed(b) -> return
+        if ir_failed(b) {
+            return
+        }
         ir_contract(m, p, b, contract)
     }
 }
@@ -139,7 +153,9 @@ ir_contract_posts: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, post: [BodyCont
 // `result`'s carrier variable names the returned `slot` (not owned: the
 // return hands it on).
 ir_contract_bind: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result: TContractResult, slot: Int, span: Span) Never! {
-    if slot < 0 -> return
+    if slot < 0 {
+        return
+    }
     local: result.carrier_local
     _: ir_binder_holds(m, p, b, local, slot, span)
     symbol: if local.symbol_id == .Val(id) -> id else -> symbol_none()
@@ -147,7 +163,9 @@ ir_contract_bind: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result: TContrac
 }
 
 ir_contract_bind_payload: fn(b: &IRBuilder, result: TContractResult, payload: Int) Never! {
-    if payload < 0 -> return
+    if payload < 0 {
+        return
+    }
     local: result.binding_local
     symbol: if local.symbol_id == .Val(id) -> id else -> symbol_none()
     b.bindings.push(IRBinding{name: local.name, slot: payload, owned: false, symbol: symbol})

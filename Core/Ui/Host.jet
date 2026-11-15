@@ -3,6 +3,7 @@ use {
     host_path: __core_files_path_components
     internal.[file_dialog, granted_path, provider_record]
 }
+
 // core.ui.host — typed host capability leaves for dialogs and metadata.
 //
 // Core owns every rule here: request validation, capability checks, the
@@ -118,6 +119,7 @@ UIShortcut: struct {
         UIShortcut{key: normalized, modifiers: UIShortcutModifiers{bits: 16}}
     }
 }
+
 UITextRange: struct {
     start: Int
     end: Int
@@ -168,12 +170,12 @@ UIShortcutDispatch: enum {
     Unhandled
 }
 
-
-
 capabilities: fn() -> UICapabilityFacts Never! {
     all: [UICapability]{.FileDialog, .Clipboard, .IME, .DragDrop, .Shortcuts, .Accessibility, .FontShaping}
     facts := [UICapabilityFact]{}
-    loop (code, capability) in all -> facts.push(UICapabilityFact{capability: capability, available: core.ui.host.__capability(code)})
+    loop (code, capability) in all {
+        facts.push(UICapabilityFact{capability: capability, available: core.ui.host.__capability(code)})
+    }
     UICapabilityFacts{facts: facts}
 }
 
@@ -231,33 +233,55 @@ priv internal: module {
     file_dialog: fn(request: UIFileDialogRequest, kind: UIFileDialogKind) -> UIFileDialogSelection UIHostError! {
         opening: kind == .Open
         name: if opening -> "open" else -> "save"
-        if request.kind != kind -> return Err(UIHostError.InvalidRequest("{name}_file takes {name} dialog requests only"))
+        if request.kind != kind {
+            return Err(UIHostError.InvalidRequest("{name}_file takes {name} dialog requests only"))
+        }
         access: if opening -> UIFSAccess.Read else -> UIFSAccess.Write
         needed: if opening -> U8{1} else -> U8{2}
         granted: request.grant.rights.bits.bit_and(needed) != U8{0}
         dialog: if opening -> "Open" else -> "Save"
         right: if opening -> "Read" else -> "Write"
-        if !granted -> return Err(UIHostError.ResourceDenied("dialog {dialog} requires {right} access"))
-        if !opening && request.allow_multiple -> return Err(UIHostError.InvalidRequest("save dialogs cannot select multiple files"))
-        if request.initial_directory == .Val(initial) {
-            if initial.grant_root != request.grant.root || initial.access != access -> return Err(UIHostError.ResourceDenied("initial directory is outside the dialog grant"))
+        if !granted {
+            return Err(UIHostError.ResourceDenied("dialog {dialog} requires {right} access"))
         }
-        if !core.ui.host.__capability(0) -> return Err(UIHostError.CapabilityUnavailable{capability: "FileDialog"})
+        if !opening && request.allow_multiple {
+            return Err(UIHostError.InvalidRequest("save dialogs cannot select multiple files"))
+        }
+        if request.initial_directory == .Val(initial) {
+            if initial.grant_root != request.grant.root || initial.access != access {
+                return Err(UIHostError.ResourceDenied("initial directory is outside the dialog grant"))
+            }
+        }
+        if !core.ui.host.__capability(0) {
+            return Err(UIHostError.CapabilityUnavailable{capability: "FileDialog"})
+        }
         wire := [String]{request.title.copy(), request.grant.root.copy(), if request.allow_multiple -> "1" else -> "0"}
         loop filter in request.filters {
             loop extension in filter.extensions -> wire.push(extension.copy())
         }
         token: core.ui.host.__dialog_request(if opening -> 0 else -> 1, provider_record(wire))
-        if token < 0 -> return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider refused the dialog request"})
+        if token < 0 {
+            return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider refused the dialog request"})
+        }
         answer: core.ui.host.__dialog_result(token) ?? return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider returned no dialog result"})
         items: provider_record_fields(answer) ?? return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider's dialog result is not a provider record"})
-        if items.len() == 0 -> return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider's dialog result has no status"})
+        if items.len() == 0 {
+            return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider's dialog result has no status"})
+        }
         if items[0] == "cancelled" -> return Err(UIHostError.Cancelled(.User))
-        if items[0] != "selected" -> return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider returned an unknown dialog status `{items[0]}`"})
-        if items.len() < 2 -> return Err(UIHostError.InvalidRequest("a completed file dialog must select at least one file"))
-        if !request.allow_multiple && items.len() > 2 -> return Err(UIHostError.InvalidRequest("a single-selection dialog returned multiple files"))
+        if items[0] != "selected" {
+            return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider returned an unknown dialog status `{items[0]}`"})
+        }
+        if items.len() < 2 {
+            return Err(UIHostError.InvalidRequest("a completed file dialog must select at least one file"))
+        }
+        if !request.allow_multiple && items.len() > 2 {
+            return Err(UIHostError.InvalidRequest("a single-selection dialog returned multiple files"))
+        }
         files := [UIGrantedPath]{}
-        loop index in 1..<items.len() -> files.push(granted_path(request.grant, items[index], access))
+        loop index in 1..<items.len() {
+            files.push(granted_path(request.grant, items[index], access))
+        }
         Ok(UIFileDialogSelection{files: files})
     }
 
@@ -267,18 +291,26 @@ priv internal: module {
         root: grant.root
         prefix: if root.ends_with("/") -> root.copy() else -> "{root}/"
         inside: scoped.root == root || scoped.root.starts_with(prefix) || (root == "." && !scoped.root.starts_with("/"))
-        if !inside -> return Err(UIHostError.ResourceDenied("file dialog selection `{path}` is outside its grant"))
+        if !inside {
+            return Err(UIHostError.ResourceDenied("file dialog selection `{path}` is outside its grant"))
+        }
         Ok(UIGrantedPath{path: scoped.root, grant_root: root.copy(), access: access})
     }
 }
 
 file_filter: fn(label: String, extensions: [String], mime_types: [String]) -> UIFileFilter UIHostError! {
-    if label.len() == 0 && extensions.len() == 0 && mime_types.len() == 0 -> return Err(UIHostError.InvalidRequest("file filter must name an extension, media type, or label"))
+    if label.len() == 0 && extensions.len() == 0 && mime_types.len() == 0 {
+        return Err(UIHostError.InvalidRequest("file filter must name an extension, media type, or label"))
+    }
     loop extension in extensions {
-        if extension.len() == 0 -> return Err(UIHostError.InvalidRequest("file filter extensions must not be empty"))
+        if extension.len() == 0 {
+            return Err(UIHostError.InvalidRequest("file filter extensions must not be empty"))
+        }
     }
     loop mime in mime_types {
-        if mime.len() == 0 -> return Err(UIHostError.InvalidRequest("file filter media types must not be empty"))
+        if mime.len() == 0 {
+            return Err(UIHostError.InvalidRequest("file filter media types must not be empty"))
+        }
     }
     Ok(UIFileFilter{label: label, extensions: extensions, mime_types: mime_types})
 }
@@ -290,7 +322,9 @@ file_filter_text: fn() -> UIFileFilter Never! {
 /// Normalize selected-platform lexical components without file I/O or symlink
 /// resolution. Empty rights are valid; crossing the lexical root is denied.
 fs_grant: fn(path: String, rights: UIFSRights) -> UIFSGrant UIHostError! {
-    if core.text.trim(path).len() == 0 -> return Err(UIHostError.InvalidRequest("filesystem grant path must not be empty"))
+    if core.text.trim(path).len() == 0 {
+        return Err(UIHostError.InvalidRequest("filesystem grant path must not be empty"))
+    }
     platform: if core.files.__path_windows() -> host_path.PathPlatform.Windows else -> host_path.PathPlatform.Unix
     input: host_path.from_text(path, platform)
     normalized := host_path.from_text("", platform)
@@ -307,7 +341,9 @@ fs_grant: fn(path: String, rights: UIFSRights) -> UIFSGrant UIHostError! {
             host_path.push(normalized, root)
             rooted = true
         } else if part.kind == .ParentDir {
-            if normal_depth == 0 -> return Err(UIHostError.ResourceDenied("path `{path}` escapes its lexical root"))
+            if normal_depth == 0 {
+                return Err(UIHostError.ResourceDenied("path `{path}` escapes its lexical root"))
+            }
             parent: host_path.parent_span(normalized) ?? panic("normalized grant parent")
             host_path.truncate(normalized.encoded, parent.end)
             normal_depth -= 1
@@ -316,25 +352,33 @@ fs_grant: fn(path: String, rights: UIFSRights) -> UIFSGrant UIHostError! {
             normal_depth += 1
         }
     }
-    if normalized.encoded.len() == 0 && rooted -> normalized.encoded.push(host_path.main_separator(platform))
+    if normalized.encoded.len() == 0 && rooted {
+        normalized.encoded.push(host_path.main_separator(platform))
+    }
     root: if normalized.encoded.len() == 0 -> "." else -> String.from_bytes(normalized.encoded) ?? panic("UTF-8 grant path")
     Ok(UIFSGrant{root: root, rights: rights})
 }
 
 fs_rights_read: fn() -> UIFSRights Never! { UIFSRights{bits: U8{1}} }
+
 fs_rights_write: fn() -> UIFSRights Never! { UIFSRights{bits: U8{2}} }
+
 fs_rights_read_write: fn() -> UIFSRights Never! { UIFSRights{bits: U8{3}} }
 
 shortcut: fn(key: String, modifiers: UIShortcutModifiers) -[IO]> UIShortcut UIHostError! {
     normalized: core.text.lower(core.text.trim(key))
-    if normalized.len() == 0 -> return Err(UIHostError.InvalidRequest("shortcut key must not be empty"))
+    if normalized.len() == 0 {
+        return Err(UIHostError.InvalidRequest("shortcut key must not be empty"))
+    }
     Ok(UIShortcut{key: normalized, modifiers: modifiers})
 }
 
 /// The existing two-string API always names the node; an empty description
 /// is absent. Whitespace remains data and initial accessibility states are empty.
 accessibility: fn(name: String, description: String) -[IO]> UIAccessibility UIHostError! {
-    if name.len() == 0 -> return Err(UIHostError.InvalidRequest("accessibility name and description must not be empty"))
+    if name.len() == 0 {
+        return Err(UIHostError.InvalidRequest("accessibility name and description must not be empty"))
+    }
     detail: if description.len() == 0 -> None else -> Val(description)
     Ok(UIAccessibility{name: Val(name), description: detail, states: [UIAccessibilityState]{}})
 }
@@ -345,16 +389,19 @@ accessibility: fn(name: String, description: String) -[IO]> UIAccessibility UIHo
     filter: file_filter(" ", [String]{"jet"}, [String]{"text/x-jet"}) ?? panic("valid filter rejected")
     assert(filter.label == " " && filter.extensions == [String]{"jet"})
     if file_filter("", [String]{}, [String]{}) == .Err(error) {
-        if error == .InvalidRequest(message) -> assert(message == "file filter must name an extension, media type, or label")
-        else -> panic("wrong file-filter error")
+        if error == .InvalidRequest(message) {
+            assert(message == "file filter must name an extension, media type, or label")
+        } else { panic("wrong file-filter error") }
     } else { panic("empty filter accepted") }
     if file_filter("Jet", [String]{""}, [String]{}) == .Err(error) {
-        if error == .InvalidRequest(message) -> assert(message == "file filter extensions must not be empty")
-        else -> panic("wrong extension error")
+        if error == .InvalidRequest(message) {
+            assert(message == "file filter extensions must not be empty")
+        } else { panic("wrong extension error") }
     } else { panic("empty extension accepted") }
     if file_filter("Jet", [String]{}, [String]{""}) == .Err(error) {
-        if error == .InvalidRequest(message) -> assert(message == "file filter media types must not be empty")
-        else -> panic("wrong media-type error")
+        if error == .InvalidRequest(message) {
+            assert(message == "file filter media types must not be empty")
+        } else { panic("wrong media-type error") }
     } else { panic("empty media type accepted") }
 }
 
@@ -382,7 +429,6 @@ accessibility: fn(name: String, description: String) -[IO]> UIAccessibility UIHo
     assert(grant.rights == both)
 }
 
-
 #Test("UI shortcut policy normalizes Unicode and preserves modifiers") {
     modifiers: UIShortcutModifiers{bits: 0}
     normalized: shortcut(" \tÄBC İ \n", modifiers) ?? panic("valid shortcut rejected")
@@ -400,8 +446,9 @@ accessibility: fn(name: String, description: String) -[IO]> UIAccessibility UIHo
     whitespace: shortcut("{padding}A{padding}", modifiers) ?? panic("Unicode whitespace rejected")
     assert(whitespace.key == "a")
     if shortcut(" \t\n", modifiers) == .Err(error) {
-        if error == .InvalidRequest(message) -> assert(message == "shortcut key must not be empty")
-        else -> panic("wrong shortcut error")
+        if error == .InvalidRequest(message) -> assert(message == "shortcut key must not be empty") else {
+            panic("wrong shortcut error")
+        }
     } else { panic("empty shortcut accepted") }
 }
 
@@ -412,12 +459,14 @@ accessibility: fn(name: String, description: String) -[IO]> UIAccessibility UIHo
     empty: fs_grant(".", rights) ?? panic("current-directory grant")
     assert(empty.root == ".")
     if fs_grant("../outside", rights) == .Err(error) {
-        if error == .ResourceDenied(message) -> assert(message == "path `../outside` escapes its lexical root")
-        else -> panic("wrong lexical grant denial")
+        if error == .ResourceDenied(message) {
+            assert(message == "path `../outside` escapes its lexical root")
+        } else { panic("wrong lexical grant denial") }
     } else { panic("escaping grant accepted") }
     if fs_grant(" \t\n", rights) == .Err(error) {
-        if error == .InvalidRequest(message) -> assert(message == "filesystem grant path must not be empty")
-        else -> panic("wrong empty grant error")
+        if error == .InvalidRequest(message) {
+            assert(message == "filesystem grant path must not be empty")
+        } else { panic("wrong empty grant error") }
     } else { panic("empty grant accepted") }
 }
 
@@ -428,7 +477,8 @@ accessibility: fn(name: String, description: String) -[IO]> UIAccessibility UIHo
     described: accessibility("button", " ") ?? panic("whitespace description")
     assert_eq(described.description, Val(" "))
     if accessibility("", "description") == .Err(error) {
-        if error == .InvalidRequest(message) -> assert(message == "accessibility name and description must not be empty")
-        else -> panic("wrong accessibility error")
+        if error == .InvalidRequest(message) {
+            assert(message == "accessibility name and description must not be empty")
+        } else { panic("wrong accessibility error") }
     } else { panic("empty name accepted") }
 }

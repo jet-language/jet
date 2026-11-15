@@ -115,7 +115,9 @@ sema_app_marker_arg_at: fn(marker: Marker, label: String, position: Int) -> Int?
 // The static String that argument `at` of `marker` gives; None when it
 // gives none.
 sema_app_marker_string: fn(marker: Marker, at: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> String? {
-    if marker.args[at] == .Expr(value) -> return sema_http_route_constant_string(value, environment, program, scopes)
+    if marker.args[at] == .Expr(value) {
+        return sema_http_route_constant_string(value, environment, program, scopes)
+    }
     None
 }
 
@@ -502,7 +504,9 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
                     }
                     // A webhook answers POST `{prefix}{path}` for its sender.
                     loop marker in method.markers {
-                        if !sema_app_marker_is(marker, SEMA_APP_WEBHOOK_MARKER, graph, method_module) -> next
+                        if !sema_app_marker_is(marker, SEMA_APP_WEBHOOK_MARKER, graph, method_module) {
+                            next
+                        }
                         hook: sema_app_mount_webhook(sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), value_name, graph.modules[nominal_row.module_index].nominals[nominal_row.row].symbol.name, definition.methods, method, method_module, marker, prefix, span, environment, program, scopes, state, tail_store, context, diagnostics)
                         if hook == .Val(value) {
                             body.push(TStmt.ExprStmt{value: value, span: span})
@@ -619,7 +623,9 @@ sema_app_signing_key_at: fn(methods: [Func], name: String, graph: SemaRegistrati
     loop (index, candidate) in methods {
         if candidate.name != name -> next
         loop marker in candidate.markers {
-            if sema_app_marker_is(marker, SEMA_APP_SIGNING_KEY_MARKER, graph, module_identity) -> return Val(index)
+            if sema_app_marker_is(marker, SEMA_APP_SIGNING_KEY_MARKER, graph, module_identity) {
+                return Val(index)
+            }
         }
     }
     None
@@ -660,7 +666,9 @@ sema_app_mount_webhook: fn(mux: TExpr, value_name: String, service: String, meth
     loop index in 1..<method.params.len() {
         name: method.params[index].name
         in_path: loop field in fields {
-            if field.name == name -> break true
+            if field.name == name {
+                break true
+            }
         } ?? false
         if in_path {
             path_params.push(index)
@@ -801,9 +809,7 @@ sema_app_endpoint_limit: fn(marker: Marker, environment: SemaScopeEnvironment, p
         }
         if per {
             window = Expr.Field{base: written, member: "ns", span: expr_span(written), id: AST_NODE_GENERATED}
-        } else {
-            calls = written
-        }
+        } else { calls = written }
     }
     args := [TCallArg]{}
     written: [Expr]{calls, window}

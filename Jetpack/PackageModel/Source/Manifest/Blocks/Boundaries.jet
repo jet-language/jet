@@ -41,8 +41,12 @@ pkg_parse_boundary_pattern: fn(field: String, raw: String) -> String PackagePars
 pkg_parse_boundaries: fn(body: String) -> [ImportBoundary] PackageParseError! {
     deny := String?{None}
     loop entry in pkg_key_value_entries(body) {
-        if entry.key != "deny" -> return Err(PackageParseError.Composition("unknown `boundaries` field `{entry.key}`"))
-        if deny != None -> return Err(PackageParseError.Composition("`boundaries.deny` is declared more than once"))
+        if entry.key != "deny" {
+            return Err(PackageParseError.Composition("unknown `boundaries` field `{entry.key}`"))
+        }
+        if deny != None {
+            return Err(PackageParseError.Composition("`boundaries.deny` is declared more than once"))
+        }
         deny = Val(entry.value)
     }
     value: deny ?? return Ok([ImportBoundary]{})
@@ -57,11 +61,15 @@ pkg_parse_boundaries: fn(body: String) -> [ImportBoundary] PackageParseError! {
         loop field in pkg_key_value_entries(record) {
             if field.key == {
                 "from" -> {
-                    if from != None -> return Err(PackageParseError.Composition("`boundaries.deny.from` is declared more than once"))
+                    if from != None {
+                        return Err(PackageParseError.Composition("`boundaries.deny.from` is declared more than once"))
+                    }
                     from = Val(pkg_parse_boundary_pattern("from", field.value))
                 }
                 "to" -> {
-                    if to != None -> return Err(PackageParseError.Composition("`boundaries.deny.to` is declared more than once"))
+                    if to != None {
+                        return Err(PackageParseError.Composition("`boundaries.deny.to` is declared more than once"))
+                    }
                     to = Val(pkg_parse_boundary_pattern("to", field.value))
                 }
                 else -> return Err(PackageParseError.Composition("unknown boundary edge field `{field.key}`"))

@@ -14,8 +14,11 @@ package: {
 use files: core.files
 
 COUNT: 6000000
+
 SIZE: COUNT * 8
+
 CHUNK: 1000
+
 CHUNKS: 6000
 
 Buffers: struct {
@@ -65,11 +68,7 @@ churn: fn(rounds: Int, by_assign: Bool) -> Int {
     loop round in 0..<rounds {
         loop k in 0..<8 -> xs.push("item {round} of a churned list, number {k}")
         total += xs.len()
-        if by_assign {
-            xs = [String]{}
-        } else {
-            xs.clear()
-        }
+        if by_assign -> xs = [String]{} else { xs.clear() }
     }
     if total != rounds * 8 -> panic("churn: {total} elements")
     status_kb("VmHWM:") - start
@@ -117,7 +116,9 @@ run: fn() {
     fill(out)
     grown: status_kb("VmHWM:") - start
     print(out.len())
-    if grown * 8192 > SIZE -> panic("list refill: peak grew {grown} kB, more than an eighth of a fill of {SIZE} bytes")
+    if grown * 8192 > SIZE {
+        panic("list refill: peak grew {grown} kB, more than an eighth of a fill of {SIZE} bytes")
+    }
     print("list refill: the buffer was reused")
     into := Buffers{text: "", items: [Int]{}}
     chunk: "t".repeat(CHUNK)
@@ -128,7 +129,9 @@ run: fn() {
     fill_fields(into, chunk)
     field_grown: status_kb("VmHWM:") - field_start
     print("{into.text.len()} {into.items.len()}")
-    if field_grown * 8192 > SIZE + COUNT -> panic("field refill: peak grew {field_grown} kB, more than an eighth of a fill of {SIZE + COUNT} bytes")
+    if field_grown * 8192 > SIZE + COUNT {
+        panic("field refill: peak grew {field_grown} kB, more than an eighth of a fill of {SIZE + COUNT} bytes")
+    }
     print("field refill: the buffers were reused")
     // 200000 rounds of 8 fresh Strings: kept elements would grow the
     // resident set by well over 50 MB.

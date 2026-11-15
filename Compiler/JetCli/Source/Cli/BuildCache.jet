@@ -29,7 +29,9 @@ JetCLIStoredBuild: enum {
 // or saved work that isn't reused, leaves the build uncached.
 jet_cli_build_stored: fn(file: String, name: String, color: Bool, options: BuildOptions, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot, verbose: Bool) -[Env, FS, Exec, Time, Rand]> JetCLIStoredBuild Never! {
     log := ""
-    if verbose -> log = "[build] runtime   -> packaged {jet_cli_runtime_key(jet_cli_runtime_dir()) ?? "missing"}\n"
+    if verbose {
+        log = "[build] runtime   -> packaged {jet_cli_runtime_key(jet_cli_runtime_dir()) ?? "missing"}\n"
+    }
     store := ArtifactStore?{None}
     key := ""
     if result.internal_problem == .None && result.complete {
@@ -65,7 +67,9 @@ jet_cli_build_stored: fn(file: String, name: String, color: Bool, options: Build
     build_dir: jet_cli_output_dir_path(snapshot, options)
     binary: "{build_dir}/{name}"
     if store == .Val(opened) {
-        if jet_cli_build_dir(build_dir, color) == .Val(refused) -> return JetCLIStoredBuild.Failed{output: refused}
+        if jet_cli_build_dir(build_dir, color) == .Val(refused) {
+            return JetCLIStoredBuild.Failed{output: refused}
+        }
         if jet_cli_build_restore(opened, key, binary, snapshot.roots[0].canonical_path) == {
             .Ok(restored) -> {
                 if restored == {
@@ -73,7 +77,9 @@ jet_cli_build_stored: fn(file: String, name: String, color: Bool, options: Build
                         if verbose -> log = "{log}[build] cache hit -> reused cached binary\n"
                         return JetCLIStoredBuild.Written{path: binary, log: log, reused: true}
                     }
-                    .Corrupt -> log = "{log}note: removed a corrupt cached binary of `{name}` from the store; rebuilding it\n"
+                    .Corrupt -> {
+                        log = "{log}note: removed a corrupt cached binary of `{name}` from the store; rebuilding it\n"
+                    }
                     .Missing -> {}
                 }
             }
@@ -111,7 +117,9 @@ jet_cli_build_restore: fn(store: ArtifactStore, key: String, binary: String, roo
         if found == {
             .Hit(artifact) -> {
                 bytes: cli_files.read_bytes(artifact.path) ?? return Ok(ArtifactRestore.Missing)
-                if side == "debug" -> debug = bytes else -> id = String.from_bytes(bytes) ?? return Ok(ArtifactRestore.Corrupt)
+                if side == "debug" -> debug = bytes else {
+                    id = String.from_bytes(bytes) ?? return Ok(ArtifactRestore.Corrupt)
+                }
             }
             .Corrupt -> return Ok(ArtifactRestore.Corrupt)
             .Missing -> return Ok(ArtifactRestore.Missing)
@@ -147,9 +155,15 @@ jet_cli_build_restore: fn(store: ArtifactStore, key: String, binary: String, roo
 jet_cli_build_store: fn(store: ArtifactStore?, key: String, path: String, executable: X64Executable, verbose: Bool) -[FS, Env, Exec, Time, Rand]> String Never! {
     opened: store ?? return ""
     id: if executable.build_id.len() > 0 -> sha256_hex_bytes(executable.build_id) else -> ""
-    if opened.publish_bytes(jet_cli_build_side_key(key, "build-id"), id.bytes(), executable: false, durable: false) == .Err(error) -> return jet_cli_build_store_off(verbose, error.message())
-    if opened.publish_bytes(jet_cli_build_side_key(key, "debug"), executable.debug_file, executable: false, durable: false) == .Err(error) -> return jet_cli_build_store_off(verbose, error.message())
-    if opened.publish_file(key, path, durable: false) == .Err(error) -> return jet_cli_build_store_off(verbose, error.message())
+    if opened.publish_bytes(jet_cli_build_side_key(key, "build-id"), id.bytes(), executable: false, durable: false) == .Err(error) {
+        return jet_cli_build_store_off(verbose, error.message())
+    }
+    if opened.publish_bytes(jet_cli_build_side_key(key, "debug"), executable.debug_file, executable: false, durable: false) == .Err(error) {
+        return jet_cli_build_store_off(verbose, error.message())
+    }
+    if opened.publish_file(key, path, durable: false) == .Err(error) {
+        return jet_cli_build_store_off(verbose, error.message())
+    }
     if verbose -> "[build] cache store -> saved binary\n" else -> ""
 }
 
@@ -175,7 +189,9 @@ jet_cli_build_cache_key: fn(file: String, name: String, options: BuildOptions, s
     parts.push(jet_cli_runtime_key(jet_cli_runtime_dir()) ?? return None)
     toolchain: if jet_cli_toolchain_root(file) == {
         .Found(root) -> root
-        .Missing(_, _) -> { return None }
+        .Missing(_, _) -> {
+            return None
+        }
     }
     core_rows: jet_cli_toolchain_core_rows(toolchain) ?? return None
     loop row in core_rows {
@@ -193,12 +209,16 @@ jet_cli_build_cache_key: fn(file: String, name: String, options: BuildOptions, s
             parts.push(sha256_hex(source.source))
         }
     }
-    loop dependency in snapshot.script_dependencies -> parts.push("{dependency.name}={dependency.content_hash}")
+    loop dependency in snapshot.script_dependencies {
+        parts.push("{dependency.name}={dependency.content_hash}")
+    }
     loop input in comptime_inputs {
         parts.push("comptime-input:{input.file}")
         parts.push(input.sha256)
     }
-    if snapshot.roots.len() > 0 -> parts.push("hot-text:{jet_cli_hot_text(snapshot.roots[0].canonical_path).join("\n")}")
+    if snapshot.roots.len() > 0 {
+        parts.push("hot-text:{jet_cli_hot_text(snapshot.roots[0].canonical_path).join("\n")}")
+    }
     framed: loop part in parts -> "{part.len()}:{part}"
     Val(sha256_hex(framed.join("\n")))
 }

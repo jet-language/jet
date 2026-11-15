@@ -17,11 +17,11 @@ command_settings_shown: fn(entries: [ManifestEntry]) -> [String] Never! {
 
 #Test("a commands key must be quoted and written once") {
     if PackageFacts.parse("name: \"shop\"\ncommands: {{ fmt.check: true }}\n", "package.jet") == {
-        .Ok(_) -> panic("an unquoted key was accepted")
+        .Ok(_) -> { panic("an unquoted key was accepted") }
         .Err(error) -> assert(error == .InvalidValue(_, _))
     }
     if PackageFacts.parse("name: \"shop\"\ncommands: {{ \"fmt.check\": true, \"fmt.check\": false }}\n", "package.jet") == {
-        .Ok(_) -> panic("a repeated key was accepted")
+        .Ok(_) -> { panic("a repeated key was accepted") }
         .Err(error) -> assert(error == .Composition(_))
     }
 }
@@ -39,11 +39,11 @@ command_settings_shown: fn(entries: [ManifestEntry]) -> [String] Never! {
     empty: pkg_parse_user_settings("// nothing yet\n") ?? panic("an empty file parses: {err}")
     assert_eq(empty.len(), 0)
     if pkg_parse_user_settings("name: \"shop\"\n") == {
-        .Ok(_) -> panic("a package field was accepted")
+        .Ok(_) -> { panic("a package field was accepted") }
         .Err(error) -> assert(error == .UnknownField(_))
     }
     if pkg_parse_user_settings("commands: {{ \"fmt.check\": true }}\ncommands: {{ \"fmt.check\": false }}\n") == {
-        .Ok(_) -> panic("a second commands block was accepted")
+        .Ok(_) -> { panic("a second commands block was accepted") }
         .Err(error) -> assert(error == .Composition(_))
     }
 }

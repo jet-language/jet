@@ -99,7 +99,9 @@ driver_lifecycle: fn(args: [String]) {
         reply: cdp.send("Browser.getVersion", "{{}}") ?? fail("Browser.getVersion failed: {err}")
         product: text(at(json.parse(reply) ?? Dyn.Null, "result.product"))
         if product == "" -> fail("Browser.getVersion named no product: {reply}")
-        if !d.session.privacy().isolated_profiles() -> fail("Chromium sessions do not have isolated profiles")
+        if !d.session.privacy().isolated_profiles() {
+            fail("Chromium sessions do not have isolated profiles")
+        }
     }
     loop d in drivers -> closed_for_good(d) ?? fail(err.message)
     print("PASS {count} isolated Chromium lifecycles")
@@ -122,8 +124,12 @@ answer_bidi: fn(d: Driver) Failure! {
 // and close again without error.
 closed_for_good: fn(d: Driver) Failure! {
     driver_close(d)
-    if d.session.protocol("bidi") == .Ok(_) -> return Err(fail_with("a closed {d.engine} session still offers BiDi"))
-    if !d.session.receipt().cleaned() -> return Err(fail_with("a closed {d.engine} session does not report its cleanup"))
+    if d.session.protocol("bidi") == .Ok(_) {
+        return Err(fail_with("a closed {d.engine} session still offers BiDi"))
+    }
+    if !d.session.receipt().cleaned() {
+        return Err(fail_with("a closed {d.engine} session does not report its cleanup"))
+    }
     driver_close(d)
     Ok()
 }
@@ -139,9 +145,13 @@ native_lifecycle: fn() {
     missing: process.cmd([String]{jet, "dev", "missing-canvas-lifecycle.jet", "--canvas"})
         .env("JET_CANVAS_BROWSER", missing_browser).env("TMPDIR", tmpdir)
         .timeout(15000ms).run() ?? fail("cannot run jet dev: {err}")
-    if missing.timed_out -> fail("jet dev did not exit for a missing source\n{missing.output}\n{missing.errors}")
+    if missing.timed_out {
+        fail("jet dev did not exit for a missing source\n{missing.output}\n{missing.errors}")
+    }
     if missing.success -> fail("source-not-found must exit with an error")
-    if !"{missing.output}\n{missing.errors}".contains("no file `missing-canvas-lifecycle.jet`") -> fail("source-not-found did not name the file\n{missing.output}\n{missing.errors}")
+    if !"{missing.output}\n{missing.errors}".contains("no file `missing-canvas-lifecycle.jet`") {
+        fail("source-not-found did not name the file\n{missing.output}\n{missing.errors}")
+    }
     if missing.output.contains("Canvas: http") -> fail("source-not-found must not start Canvas")
 
     // Ctrl-C must reach jet dev with its default disposition. A job started
@@ -225,29 +235,53 @@ serve_routes: fn(canvas_url: String) Failure! {
     origin: url_origin(canvas_url)
     token: url_param(canvas_url, "session")
     initial: wait_status(dev_url(canvas_url, "/__jet_dev_status"))
-    if text(at(initial, "state")) != "ready" -> return Err(fail_with("jet dev --canvas must be ready once its entry checks: {js(initial)}"))
+    if text(at(initial, "state")) != "ready" {
+        return Err(fail_with("jet dev --canvas must be ready once its entry checks: {js(initial)}"))
+    }
     page: canvas_get(canvas_url, "")
-    if page.status != 200 || !page.body.contains("<title>Jet Canvas</title>") -> return Err(fail_with("the Canvas URL must serve the Canvas page: HTTP {page.status}"))
+    if page.status != 200 || !page.body.contains("<title>Jet Canvas</title>") {
+        return Err(fail_with("the Canvas URL must serve the Canvas page: HTTP {page.status}"))
+    }
     session_reply: canvas_get(dev_url(canvas_url, "/__jet_canvas/session"), token)
-    if session_reply.status != 200 -> return Err(fail_with("the session route answered HTTP {session_reply.status}: {session_reply.body}"))
+    if session_reply.status != 200 {
+        return Err(fail_with("the session route answered HTTP {session_reply.status}: {session_reply.body}"))
+    }
     session_id: text(at(json.parse(session_reply.body) ?? Dyn.Null, "session.id"))
-    if !session_id.starts_with("jet-session-") -> return Err(fail_with("the session route must name the resident session: {session_reply.body}"))
+    if !session_id.starts_with("jet-session-") {
+        return Err(fail_with("the session route must name the resident session: {session_reply.body}"))
+    }
     graph_reply: canvas_get(dev_url(canvas_url, "/canvas/graph"), token)
-    if graph_reply.status != 200 -> return Err(fail_with("the graph route answered HTTP {graph_reply.status}: {graph_reply.body}"))
+    if graph_reply.status != 200 {
+        return Err(fail_with("the graph route answered HTTP {graph_reply.status}: {graph_reply.body}"))
+    }
     graph: json.parse(graph_reply.body) ?? Dyn.Null
-    if text(at(graph, "action")) != "canvas.graph" || !truthy(at(graph, "ok")) -> return Err(fail_with("the graph route must answer an ok canvas.graph report: {short_text(graph_reply.body, 400)}"))
-    if text(at(graph, "canvas.session.id")) != session_id -> return Err(fail_with("the graph report must carry the resident session {session_id}"))
+    if text(at(graph, "action")) != "canvas.graph" || !truthy(at(graph, "ok")) {
+        return Err(fail_with("the graph route must answer an ok canvas.graph report: {short_text(graph_reply.body, 400)}"))
+    }
+    if text(at(graph, "canvas.session.id")) != session_id {
+        return Err(fail_with("the graph report must carry the resident session {session_id}"))
+    }
     titles := [String]{}
     loop item in items(at(graph, "canvas.graphs")) -> titles.push(text(at(item, "title")))
-    if titles.join(",") != "helper,square,summarize,run" -> return Err(fail_with("the graph must project helper, square, summarize and run, not {titles.join(",")}"))
+    if titles.join(",") != "helper,square,summarize,run" {
+        return Err(fail_with("the graph must project helper, square, summarize and run, not {titles.join(",")}"))
+    }
     source_reply: canvas_get(dev_url(canvas_url, "/canvas/source"), token)
-    if source_reply.status != 200 || !source_reply.body.contains("summarize: fn(limit: Int) -> Int") -> return Err(fail_with("the source route must serve the entry's text: HTTP {source_reply.status}"))
+    if source_reply.status != 200 || !source_reply.body.contains("summarize: fn(limit: Int) -> Int") {
+        return Err(fail_with("the source route must serve the entry's text: HTTP {source_reply.status}"))
+    }
     bare: canvas_get("{origin}/canvas/graph", "")
-    if bare.status != 401 -> return Err(fail_with("a graph request without the session secret must be refused with 401, not {bare.status}"))
+    if bare.status != 401 {
+        return Err(fail_with("a graph request without the session secret must be refused with 401, not {bare.status}"))
+    }
     wrong: canvas_get("{origin}/canvas/graph", "0000000000000000000000000000000000000000000000000000000000000000")
-    if wrong.status != 401 -> return Err(fail_with("a graph request with a wrong session secret must be refused with 401, not {wrong.status}"))
+    if wrong.status != 401 {
+        return Err(fail_with("a graph request with a wrong session secret must be refused with 401, not {wrong.status}"))
+    }
     unknown: canvas_get(dev_url(canvas_url, "/canvas/not-a-route"), token)
-    if unknown.status != 401 -> return Err(fail_with("a Canvas path the host does not serve must be refused with 401, not {unknown.status}"))
+    if unknown.status != 401 {
+        return Err(fail_with("a Canvas path the host does not serve must be refused with 401, not {unknown.status}"))
+    }
     Ok()
 }
 
@@ -289,56 +323,96 @@ native_edit: fn() {
 edit_transactions: fn(canvas_url: String, entry: String, original: String) Failure! {
     token: url_param(canvas_url, "session")
     initial: wait_status(dev_url(canvas_url, "/__jet_dev_status"))
-    if text(at(initial, "state")) != "ready" -> return Err(fail_with("jet dev --canvas must be ready once its entry checks: {js(initial)}"))
+    if text(at(initial, "state")) != "ready" {
+        return Err(fail_with("jet dev --canvas must be ready once its entry checks: {js(initial)}"))
+    }
     project_reply: canvas_get(dev_url(canvas_url, "/canvas/project"), token)
-    if project_reply.status != 200 -> return Err(fail_with("the project route answered HTTP {project_reply.status}: {project_reply.body}"))
+    if project_reply.status != 200 {
+        return Err(fail_with("the project route answered HTTP {project_reply.status}: {project_reply.body}"))
+    }
     project: json.parse(project_reply.body) ?? Dyn.Null
-    if text(at(project, "action")) != "canvas.project" || !truthy(at(project, "ok")) || text(at(project, "canvas.protocol")) != "jet.canvas.project" -> return Err(fail_with("the project route must answer an ok canvas.project report: {short_text(project_reply.body, 400)}"))
-    if text(at(project, "canvas.mode")) != "single_file" || text(at(project, "canvas.entry")) != "main.jet" -> return Err(fail_with("a lone entry's project must be single_file with entry main.jet: {short_text(project_reply.body, 400)}"))
+    if text(at(project, "action")) != "canvas.project" || !truthy(at(project, "ok")) || text(at(project, "canvas.protocol")) != "jet.canvas.project" {
+        return Err(fail_with("the project route must answer an ok canvas.project report: {short_text(project_reply.body, 400)}"))
+    }
+    if text(at(project, "canvas.mode")) != "single_file" || text(at(project, "canvas.entry")) != "main.jet" {
+        return Err(fail_with("a lone entry's project must be single_file with entry main.jet: {short_text(project_reply.body, 400)}"))
+    }
     session_reply: canvas_get(dev_url(canvas_url, "/__jet_canvas/session"), token)
     start: text(at(json.parse(session_reply.body) ?? Dyn.Null, "session.source_revision"))
     listed := ""
     loop file in items(at(project, "canvas.files")) {
-        if text(at(file, "path")) == "main.jet" && text(at(file, "kind")) == "source" -> listed = text(at(file, "revision"))
+        if text(at(file, "path")) == "main.jet" && text(at(file, "kind")) == "source" {
+            listed = text(at(file, "revision"))
+        }
     }
-    if start == "" || listed != start -> return Err(fail_with("the project must list main.jet at the session's source revision `{start}`: {short_text(project_reply.body, 400)}"))
+    if start == "" || listed != start {
+        return Err(fail_with("the project must list main.jet at the session's source revision `{start}`: {short_text(project_reply.body, 400)}"))
+    }
     transaction: dev_url(canvas_url, "/canvas/transaction")
 
     noop: canvas_post(transaction, token, edit_request("noop", start, None))
-    if noop.status != 200 || text(at(noop.tree, "canvas.protocol")) != "jet.canvas.edit" || truthy(at(noop.tree, "canvas.changed")) -> return Err(fail_with("a noop at the current revision must apply unchanged: HTTP {noop.status} {short_text(noop.body, 400)}"))
+    if noop.status != 200 || text(at(noop.tree, "canvas.protocol")) != "jet.canvas.edit" || truthy(at(noop.tree, "canvas.changed")) {
+        return Err(fail_with("a noop at the current revision must apply unchanged: HTTP {noop.status} {short_text(noop.body, 400)}"))
+    }
 
     added: "{original.trim_end()}\n\nextra: fn() -> Int {{ 1 }}\n"
     stale: canvas_post(transaction, token, edit_request("replace_source", "stale-revision", Val(added)))
-    if stale.status != 409 || text(at(stale.tree, "canvas.kind")) != "conflict" || text(at(stale.tree, "canvas.current_revision")) != start -> return Err(fail_with("a replace_source at a stale revision must be refused as a conflict naming {start}: HTTP {stale.status} {short_text(stale.body, 400)}"))
-    if (files.read(entry) ?? "") != original -> return Err(fail_with("a refused stale transaction must leave the entry as written"))
+    if stale.status != 409 || text(at(stale.tree, "canvas.kind")) != "conflict" || text(at(stale.tree, "canvas.current_revision")) != start {
+        return Err(fail_with("a replace_source at a stale revision must be refused as a conflict naming {start}: HTTP {stale.status} {short_text(stale.body, 400)}"))
+    }
+    if (files.read(entry) ?? "") != original {
+        return Err(fail_with("a refused stale transaction must leave the entry as written"))
+    }
 
     replaced: canvas_post(transaction, token, edit_request("replace_source", start, Val(added)))
-    if replaced.status != 200 || !truthy(at(replaced.tree, "canvas.changed")) -> return Err(fail_with("a replace_source at the current revision must apply: HTTP {replaced.status} {short_text(replaced.body, 600)}"))
+    if replaced.status != 200 || !truthy(at(replaced.tree, "canvas.changed")) {
+        return Err(fail_with("a replace_source at the current revision must apply: HTTP {replaced.status} {short_text(replaced.body, 600)}"))
+    }
     written: files.read(entry) ?? ""
-    if written != text(at(replaced.tree, "canvas.source_text")) || !written.contains("extra: fn() -> Int") -> return Err(fail_with("the entry must hold the applied source_text, not:\n{short_text(written, 600)}"))
+    if written != text(at(replaced.tree, "canvas.source_text")) || !written.contains("extra: fn() -> Int") {
+        return Err(fail_with("the entry must hold the applied source_text, not:\n{short_text(written, 600)}"))
+    }
     after: text(at(replaced.tree, "canvas.revision"))
     graph_reply: canvas_get(dev_url(canvas_url, "/canvas/graph"), token)
     titles := [String]{}
-    loop item in items(at(json.parse(graph_reply.body) ?? Dyn.Null, "canvas.graphs")) -> titles.push(text(at(item, "title")))
-    if !titles.contains("extra") -> return Err(fail_with("the graph must be projected again with `extra` once the transaction applies, not {titles.join(",")}"))
+    loop item in items(at(json.parse(graph_reply.body) ?? Dyn.Null, "canvas.graphs")) {
+        titles.push(text(at(item, "title")))
+    }
+    if !titles.contains("extra") {
+        return Err(fail_with("the graph must be projected again with `extra` once the transaction applies, not {titles.join(",")}"))
+    }
 
     broken: canvas_post(transaction, token, edit_request("replace_source", after, Val("{written.trim_end()}\n\nbroken: fn() -> Int {{ \"text\" }}\n")))
-    if broken.status != 409 || text(at(broken.tree, "canvas.kind")) != "diagnostic" || items(at(broken.tree, "canvas.diagnostics")).len() == 0 -> return Err(fail_with("a candidate that does not check must be refused with its diagnostics: HTTP {broken.status} {short_text(broken.body, 600)}"))
-    if (files.read(entry) ?? "") != written -> return Err(fail_with("a refused candidate must leave the entry as written"))
+    if broken.status != 409 || text(at(broken.tree, "canvas.kind")) != "diagnostic" || items(at(broken.tree, "canvas.diagnostics")).len() == 0 {
+        return Err(fail_with("a candidate that does not check must be refused with its diagnostics: HTTP {broken.status} {short_text(broken.body, 600)}"))
+    }
+    if (files.read(entry) ?? "") != written {
+        return Err(fail_with("a refused candidate must leave the entry as written"))
+    }
 
     unknown: canvas_post(transaction, token, edit_request("not_a_canvas_op", after, None))
-    if unknown.status != 409 || text(at(unknown.tree, "canvas.kind")) != "unsupported" -> return Err(fail_with("an unknown operation must be refused as unsupported: HTTP {unknown.status} {short_text(unknown.body, 400)}"))
+    if unknown.status != 409 || text(at(unknown.tree, "canvas.kind")) != "unsupported" {
+        return Err(fail_with("an unknown operation must be refused as unsupported: HTTP {unknown.status} {short_text(unknown.body, 400)}"))
+    }
 
     history: at(unknown.tree, "canvas.session.history")
     receipts := [String]{}
-    loop receipt in items(at(history, "receipts")) -> receipts.push("{text(at(receipt, "kind"))}:{text(at(receipt, "status"))}")
+    loop receipt in items(at(history, "receipts")) {
+        receipts.push("{text(at(receipt, "kind"))}:{text(at(receipt, "status"))}")
+    }
     expected: "noop:accepted,replace_source:refused,replace_source:accepted,replace_source:refused,not_a_canvas_op:refused"
-    if int(at(history, "count")) != 5 || receipts.join(",") != expected -> return Err(fail_with("the session history must hold {expected}, not {receipts.join(",")}: {js(history)}"))
+    if int(at(history, "count")) != 5 || receipts.join(",") != expected {
+        return Err(fail_with("the session history must hold {expected}, not {receipts.join(",")}: {js(history)}"))
+    }
 
     read_transaction: canvas_get(transaction, token)
-    if read_transaction.status != 405 -> return Err(fail_with("a GET of the transaction route must be refused with 405, not {read_transaction.status}"))
+    if read_transaction.status != 405 {
+        return Err(fail_with("a GET of the transaction route must be refused with 405, not {read_transaction.status}"))
+    }
     project_transaction: canvas_post(dev_url(canvas_url, "/canvas/project/transaction"), token, edit_request("noop", after, None))
-    if project_transaction.status != 501 -> return Err(fail_with("project transactions are not served yet and must answer 501, not {project_transaction.status}"))
+    if project_transaction.status != 501 {
+        return Err(fail_with("project transactions are not served yet and must answer 501, not {project_transaction.status}"))
+    }
     Ok()
 }
 
@@ -384,11 +458,15 @@ canvas_get: fn(url: String, token: String) -> CanvasReply Failure! {
 // one Canvas session.
 reuse_sessions: fn(canvas_url: String, status: String) Failure! {
     initial: wait_status(status)
-    if text(at(initial, "state")) != "ready" -> return Err(fail_with("browser-launch failure must leave resident dev ready: {js(initial)}"))
+    if text(at(initial, "state")) != "ready" {
+        return Err(fail_with("browser-launch failure must leave resident dev ready: {js(initial)}"))
+    }
     first: visit_canvas(canvas_url)
     wait_status(status)
     second: visit_canvas(canvas_url)
-    if first != second -> return Err(fail_with("second Canvas request must reuse resident session: {first} then {second}"))
+    if first != second {
+        return Err(fail_with("second Canvas request must reuse resident session: {first} then {second}"))
+    }
     Ok()
 }
 
@@ -412,7 +490,9 @@ visit_canvas: fn(canvas_url: String) -> String Failure! {
     session := at(body, "session")
     if is_null(session) -> session = at(body, "canvas.session")
     id: text(at(session, "id"))
-    if id == "" -> return Err(fail_with("Canvas session response must identify the resident session: {js(body)}"))
+    if id == "" {
+        return Err(fail_with("Canvas session response must identify the resident session: {js(body)}"))
+    }
     Ok(id)
 }
 
@@ -442,7 +522,9 @@ url_param: fn(url: String, name: String) -> String {
 authorized_get: fn(url: String) -> Dyn Failure! {
     s: client.session_header(client.session_header(client.session(), "Authorization", "Bearer {url_param(url, "session")}"), "Origin", url_origin(url))
     response: client.session_get(s, url) ?? return Err(fail_with("{url} request failed: {err}"))
-    if response.status() < 200 || response.status() > 299 -> return Err(fail_with("{url} returned HTTP {response.status()}"))
+    if response.status() < 200 || response.status() > 299 {
+        return Err(fail_with("{url} returned HTTP {response.status()}"))
+    }
     body: response.text(1048576) ?? return Err(fail_with("{url} body is not text: {err}"))
     tree: json.parse(body) ?? return Err(fail_with("{url} body is not JSON: {err}"))
     Ok(tree)

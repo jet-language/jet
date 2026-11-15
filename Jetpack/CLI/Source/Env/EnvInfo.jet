@@ -21,7 +21,7 @@ cli_json_render: fn(value: Dyn) -> String Never! {
 }
 
 // A map's keys in the Rust `BTreeMap` order.
-cli_sorted_keys: fn(map: [String: String]) -> [String] Never! {
+cli_sorted_keys: fn(map: [String:String]) -> [String] Never! {
     keys := map.keys().to_list()
     keys.sort()
     keys
@@ -129,29 +129,33 @@ cli_env_info_service_json: fn(service: DevServicePlan) -> Dyn Never! {
         }
     }
     extra := [Dyn]{}
-    loop item in service.extra -> extra.push(Dyn.Object(["name": Dyn.Text(item.name), "value": Dyn.Text(item.value)]))
+    loop item in service.extra {
+        extra.push(Dyn.Object(["name": Dyn.Text(item.name), "value": Dyn.Text(item.value)]))
+    }
     readiness: service.ready != None || service.ready_probe != None || service.ports.len() > 0
-    Dyn.Object([
-        "name": Dyn.Text(service.name.copy()),
-        "enabled": Dyn.Bool(service.enable),
-        "ports": Dyn.Array(ports),
-        "readiness": Dyn.Bool(readiness),
-        "after": cli_json_texts(service.after),
-        "run": run,
-        "shutdown": shutdown,
-        "data_dir": cli_json_optional_text(service.data_dir),
-        "ready": cli_json_optional_text(service.ready),
-        "ready_probe": ready_probe,
-        "restart": restart,
-        "watch": cli_json_texts(service.watch),
-        "before_start": cli_json_texts(service.before_start),
-        "sockets": cli_json_texts(service.sockets),
-        "extra": Dyn.Array(extra),
-    ])
+    Dyn.Object(
+        [
+            "name": Dyn.Text(service.name.copy()),
+            "enabled": Dyn.Bool(service.enable),
+            "ports": Dyn.Array(ports),
+            "readiness": Dyn.Bool(readiness),
+            "after": cli_json_texts(service.after),
+            "run": run,
+            "shutdown": shutdown,
+            "data_dir": cli_json_optional_text(service.data_dir),
+            "ready": cli_json_optional_text(service.ready),
+            "ready_probe": ready_probe,
+            "restart": restart,
+            "watch": cli_json_texts(service.watch),
+            "before_start": cli_json_texts(service.before_start),
+            "sockets": cli_json_texts(service.sockets),
+            "extra": Dyn.Array(extra),
+        ],
+    )
 }
 
 // Record `source` for variable `name` once, keeping first-seen order.
-cli_add_variable_source: fn(sources: &[String: [String]], name: String, source: String) Never! {
+cli_add_variable_source: fn(sources: &[String:[String]], name: String, source: String) Never! {
     known := sources.get(name) ?? [String]{}
     if !known.contains(source) -> known.push(source.copy())
     sources[name] = known
@@ -164,7 +168,7 @@ cli_cmd_env_info: fn(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CL
             "E1335",
             "environment integration facts are not executable",
             err.message(),
-            "use the supported integration preset and keep its typed package, host, task, and grant facts intact"
+            "use the supported integration preset and keep its typed package, host, task, and grant facts intact",
         )
         return EXIT_USAGE
     }
@@ -202,19 +206,29 @@ cli_cmd_env_info: fn(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CL
         if hook.action == .Command(_) -> check_names.push(hook.name)
     }
     checks: cli_sorted_unique(check_names)
-    variable_sources := [String: [String]]{}
+    variable_sources := [String:[String]]{}
     if facts.selected_preset == .Val(selected) {
-        loop name in cli_sorted_keys(selected.variables) -> cli_add_variable_source(variable_sources, name, "preset")
+        loop name in cli_sorted_keys(selected.variables) {
+            cli_add_variable_source(variable_sources, name, "preset")
+        }
     }
-    loop name in cli_sorted_keys(facts.language_expansion.variables) -> cli_add_variable_source(variable_sources, name, "language")
+    loop name in cli_sorted_keys(facts.language_expansion.variables) {
+        cli_add_variable_source(variable_sources, name, "language")
+    }
     loop dotenv in lifecycle.dotenv {
-        loop name in dotenv.allow -> cli_add_variable_source(variable_sources, name, "dotenv:{dotenv.file}")
-        loop name in dotenv.secrets -> cli_add_variable_source(variable_sources, name, "dotenv-secret:{dotenv.file}")
+        loop name in dotenv.allow {
+            cli_add_variable_source(variable_sources, name, "dotenv:{dotenv.file}")
+        }
+        loop name in dotenv.secrets {
+            cli_add_variable_source(variable_sources, name, "dotenv-secret:{dotenv.file}")
+        }
     }
     loop name in lifecycle.unset -> cli_add_variable_source(variable_sources, name, "unset")
     // Environment reads are already typed by the evaluator; report the
     // shell-visible name (`HOME`, not `$HOME`).
-    loop read in facts.environment_reads -> cli_add_variable_source(variable_sources, read.name.removeprefix("$"), "environment")
+    loop read in facts.environment_reads {
+        cli_add_variable_source(variable_sources, read.name.removeprefix("$"), "environment")
+    }
     variable_names := variable_sources.keys().to_list()
     variable_names.sort()
     catalog: LanguagePackCatalog.builtin()
@@ -263,7 +277,9 @@ cli_cmd_env_info: fn(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CL
     theme.detail("{ENV_REPORT_CHECKS_KEY}: {cli_none_or_join(checks, ", ")}")
     theme.detail("{ENV_REPORT_JOBS_KEY}: {cli_none_or_join(jobs, ", ")}")
     variables := [String]{}
-    loop name in variable_names -> variables.push("{name} [{(variable_sources.get(name) ?? [String]{}).join(",")}]")
+    loop name in variable_names {
+        variables.push("{name} [{(variable_sources.get(name) ?? [String]{}).join(",")}]")
+    }
     theme.detail("variables: {cli_none_or_join(variables, ", ")}")
     managed := [String]{}
     loop file in facts.files -> managed.push(file.destination)
@@ -278,22 +294,28 @@ cli_cmd_env_info: fn(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CL
 }
 
 // The `env info --json` object, in the Rust key order.
-cli_env_info_json: fn(plan: RunPlan, preset: String, selected_presets: [String], applied_presets: [String], packages: [String], checks: [String], jobs: [String], variable_sources: [String: [String]], variable_names: [String], catalog: LanguagePackCatalog) -> String Never! {
+cli_env_info_json: fn(plan: RunPlan, preset: String, selected_presets: [String], applied_presets: [String], packages: [String], checks: [String], jobs: [String], variable_sources: [String:[String]], variable_names: [String], catalog: LanguagePackCatalog) -> String Never! {
     facts: plan.environment
     lifecycle: facts.lifecycle
     preset_names := [String]{}
     loop item in facts.presets -> preset_names.push(item.name)
     profiles := [Dyn]{}
     loop profile in facts.package_profiles {
-        collisions := [String: Dyn]{}
-        loop path in cli_sorted_keys(profile.collisions) -> collisions[path] = Dyn.Text(profile.collisions.get(path) ?? "")
-        profiles.push(Dyn.Object([
-            "name": Dyn.Text(profile.name),
-            "extends": cli_json_texts(profile.extends),
-            "packages": cli_json_texts(profile.packages),
-            "collisions": Dyn.Object(collisions),
-            "sources": cli_json_texts(profile.sources),
-        ]))
+        collisions := [String:Dyn]{}
+        loop path in cli_sorted_keys(profile.collisions) {
+            collisions[path] = Dyn.Text(profile.collisions.get(path) ?? "")
+        }
+        profiles.push(
+            Dyn.Object(
+                [
+                    "name": Dyn.Text(profile.name),
+                    "extends": cli_json_texts(profile.extends),
+                    "packages": cli_json_texts(profile.packages),
+                    "collisions": Dyn.Object(collisions),
+                    "sources": cli_json_texts(profile.sources),
+                ],
+            ),
+        )
     }
     catalog_packs := [Dyn]{}
     loop name in catalog.names() {
@@ -302,46 +324,58 @@ cli_env_info_json: fn(plan: RunPlan, preset: String, selected_presets: [String],
     }
     languages := [Dyn]{}
     loop language in facts.languages {
-        languages.push(Dyn.Object([
-            "name": Dyn.Text(language.name),
-            "enable": Dyn.Bool(language.enable),
-            "version": cli_json_optional_text(language.version),
-            "channel": cli_json_optional_text(language.channel),
-            "venv": Dyn.Bool(language.venv),
-            "extra": cli_json_texts(language.extra_packages),
-        ]))
+        languages.push(
+            Dyn.Object(
+                [
+                    "name": Dyn.Text(language.name),
+                    "enable": Dyn.Bool(language.enable),
+                    "version": cli_json_optional_text(language.version),
+                    "channel": cli_json_optional_text(language.channel),
+                    "venv": Dyn.Bool(language.venv),
+                    "extra": cli_json_texts(language.extra_packages),
+                ],
+            ),
+        )
     }
     packs := [Dyn]{}
     loop pack in facts.language_packs {
-        packs.push(Dyn.Object([
-            "name": Dyn.Text(pack.name),
-            "fingerprint": Dyn.Text(pack.fingerprint()),
-            "packages": cli_json_texts(pack.packages),
-            "venv_packages": cli_json_texts(pack.venv_packages),
-            "host": Dyn.Text(pack.host),
-            "platforms": cli_json_texts(pack.platforms),
-            "license": Dyn.Text(pack.license),
-            "required_tools": cli_json_texts(pack.required_tools),
-        ]))
+        packs.push(
+            Dyn.Object(
+                [
+                    "name": Dyn.Text(pack.name),
+                    "fingerprint": Dyn.Text(pack.fingerprint()),
+                    "packages": cli_json_texts(pack.packages),
+                    "venv_packages": cli_json_texts(pack.venv_packages),
+                    "host": Dyn.Text(pack.host),
+                    "platforms": cli_json_texts(pack.platforms),
+                    "license": Dyn.Text(pack.license),
+                    "required_tools": cli_json_texts(pack.required_tools),
+                ],
+            ),
+        )
     }
     projections := [Dyn]{}
     loop projection in facts.language_projections {
         selection: projection.selection
-        projections.push(Dyn.Object([
-            "name": Dyn.Text(selection.name),
-            "enable": Dyn.Bool(selection.enable),
-            "version": cli_json_optional_text(selection.version),
-            "channel": cli_json_optional_text(selection.channel),
-            "venv": Dyn.Bool(selection.venv),
-            "pack_fingerprint": Dyn.Text(projection.pack.fingerprint()),
-            "host": Dyn.Text(projection.host),
-            "platform": Dyn.Text(projection.platform),
-            "license": Dyn.Text(projection.license),
-            "missing_tools": cli_json_texts(projection.missing_tools),
-            "included": cli_json_texts(projection.included),
-            "omitted": cli_json_texts(projection.omitted),
-            "changed": cli_json_texts(projection.changed),
-        ]))
+        projections.push(
+            Dyn.Object(
+                [
+                    "name": Dyn.Text(selection.name),
+                    "enable": Dyn.Bool(selection.enable),
+                    "version": cli_json_optional_text(selection.version),
+                    "channel": cli_json_optional_text(selection.channel),
+                    "venv": Dyn.Bool(selection.venv),
+                    "pack_fingerprint": Dyn.Text(projection.pack.fingerprint()),
+                    "host": Dyn.Text(projection.host),
+                    "platform": Dyn.Text(projection.platform),
+                    "license": Dyn.Text(projection.license),
+                    "missing_tools": cli_json_texts(projection.missing_tools),
+                    "included": cli_json_texts(projection.included),
+                    "omitted": cli_json_texts(projection.omitted),
+                    "changed": cli_json_texts(projection.changed),
+                ],
+            ),
+        )
     }
     formatter: if lifecycle.formatter == {
         .Val(spec) -> Dyn.Text(spec.package)
@@ -363,22 +397,26 @@ cli_env_info_json: fn(plan: RunPlan, preset: String, selected_presets: [String],
     loop integration in facts.integrations {
         integration_files := [String]{}
         loop file in integration.files -> integration_files.push(file.destination)
-        integrations.push(Dyn.Object([
-            "kind": Dyn.Text(integration.kind.as_str()),
-            "name": Dyn.Text(integration.name),
-            "preset": Dyn.Text(integration.preset),
-            "option_keys": cli_json_texts(cli_sorted_keys(integration.options)),
-            "packages": cli_json_texts(integration.packages),
-            "files": cli_json_texts(integration_files),
-            "tasks": cli_json_texts(integration.tasks),
-            "providers": cli_json_texts(integration.providers),
-            "host_checks": cli_json_texts(integration.host_checks),
-            "secrets": cli_json_texts(integration.secrets),
-            "grants": cli_json_texts(integration.grants),
-            "losses": cli_json_texts(integration.losses),
-        ]))
+        integrations.push(
+            Dyn.Object(
+                [
+                    "kind": Dyn.Text(integration.kind.as_str()),
+                    "name": Dyn.Text(integration.name),
+                    "preset": Dyn.Text(integration.preset),
+                    "option_keys": cli_json_texts(cli_sorted_keys(integration.options)),
+                    "packages": cli_json_texts(integration.packages),
+                    "files": cli_json_texts(integration_files),
+                    "tasks": cli_json_texts(integration.tasks),
+                    "providers": cli_json_texts(integration.providers),
+                    "host_checks": cli_json_texts(integration.host_checks),
+                    "secrets": cli_json_texts(integration.secrets),
+                    "grants": cli_json_texts(integration.grants),
+                    "losses": cli_json_texts(integration.losses),
+                ],
+            ),
+        )
     }
-    report := [String: Dyn]{}
+    report := [String:Dyn]{}
     report["preset"] = Dyn.Text(preset.copy())
     report["selected_presets"] = cli_json_texts(selected_presets)
     report["applied_presets"] = cli_json_texts(applied_presets)
@@ -388,11 +426,13 @@ cli_env_info_json: fn(plan: RunPlan, preset: String, selected_presets: [String],
     report["active_environment"] = cli_json_optional_text(facts.active_environment)
     report["active_environment_provenance"] = cli_json_texts(facts.active_environment_provenance)
     report["sources"] = cli_json_texts(facts.source_files)
-    report["language_catalog"] = Dyn.Object([
-        "source": Dyn.Text("jet-env-model builtin"),
-        "fingerprint": Dyn.Text(catalog.fingerprint()),
-        "packs": Dyn.Array(catalog_packs),
-    ])
+    report["language_catalog"] = Dyn.Object(
+        [
+            "source": Dyn.Text("jet-env-model builtin"),
+            "fingerprint": Dyn.Text(catalog.fingerprint()),
+            "packs": Dyn.Array(catalog_packs),
+        ],
+    )
     report["languages"] = Dyn.Array(languages)
     report["language_packs"] = Dyn.Array(packs)
     report["language_projections"] = Dyn.Array(projections)

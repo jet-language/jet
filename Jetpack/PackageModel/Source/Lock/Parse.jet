@@ -6,7 +6,6 @@ use jet_foundation.[RuntimeLayer, jet_ring_parse_manifest_layer]
 
 // The lock section the reader is currently filling.
 LockParseSection: enum {
-    // Top-level keys before the first header.
     Preamble
     Root
     BuildStamp
@@ -20,10 +19,12 @@ LockParseSection: enum {
     WorkspaceOverlay
     WorkspaceOverlayPackage
     WorkspaceBuildGrant
+    Semantic
+
+    // Top-level keys before the first header.
     // A Trust SemanticLock block. Those sections live in the same unified
     // `.jet/lock`, their sole primary copy; this reader keeps them verbatim
     // in `LockFile.semantic_text` for the writer, and the Trust codec reads them.
-    Semantic
 
     // The section a header line opens, or None for an unknown header.
     from_header: fn(line: String) -> LockParseSection? Never! {
@@ -64,15 +65,21 @@ LockParseSection: enum {
 
 // Parse lock text into the canonical model.
 pkg_lock_parse: fn(raw: String) -> LockFile LockError! {
-    if raw.bytes().len() > PKG_MAX_LOCK_BYTES -> return Err(LockError.Invalid(pkg_lock_oversized_file_message()))
+    if raw.bytes().len() > PKG_MAX_LOCK_BYTES {
+        return Err(LockError.Invalid(pkg_lock_oversized_file_message()))
+    }
     parser := LockParser.new()
     lines: raw.split("\n").to_list()
     loop index in 0..<lines.len() {
         line_text := lines[index]
-        if line_text.ends_with(pkg_lock_carriage_return()) -> line_text = line_text.removesuffix(pkg_lock_carriage_return())
+        if line_text.ends_with(pkg_lock_carriage_return()) {
+            line_text = line_text.removesuffix(pkg_lock_carriage_return())
+        }
         // Corruption handling: stop before one malformed value can allocate
         // without a bound.
-        if line_text.bytes().len() > PKG_MAX_LOCK_VALUE_BYTES -> return Err(LockError.Invalid(pkg_lock_oversized_value_message(index + 1)))
+        if line_text.bytes().len() > PKG_MAX_LOCK_VALUE_BYTES {
+            return Err(LockError.Invalid(pkg_lock_oversized_value_message(index + 1)))
+        }
         parser.accept(line_text.trim(), index + 1)
         if parser.in_semantic -> parser.semantic_lines.push(line_text)
     }
@@ -99,10 +106,14 @@ pkg_lock_looks_like_workspace_lock: fn(raw: String) -> Bool Never! {
     loop line_text in raw.split("\n") {
         line: line_text.trim()
         if line == {
-            "[[workspace_member]]" | "[[workspace_overlay]]" | "[[workspace_overlay_package]]" | "[[workspace_build_grant]]" -> { return true }
+            "[[workspace_member]]" | "[[workspace_overlay]]" | "[[workspace_overlay_package]]" | "[[workspace_build_grant]]" -> {
+                return true
+            }
             else -> {}
         }
-        if line.starts_with("workspace_source_digest") || line.starts_with("workspace_policy_allow_unfree") || line.starts_with("workspace_policy_build_deny") -> return true
+        if line.starts_with("workspace_source_digest") || line.starts_with("workspace_policy_allow_unfree") || line.starts_with("workspace_policy_build_deny") {
+            return true
+        }
     }
     false
 }
@@ -181,13 +192,15 @@ LockParser: struct {
             overlay_package: PartialWorkspaceOverlayPackage{},
             build_grant: PartialWorkspaceBuildGrant{},
             in_semantic: false,
-            semantic_lines: [String]{}
+            semantic_lines: [String]{},
         }
     }
 
     // Consume one trimmed line.
     accept: fn(&self, line: String, number: Int) LockError! {
-        if line == "" || line.starts_with("#") -> return
+        if line == "" || line.starts_with("#") {
+            return
+        }
         if line.starts_with("[") {
             // Any section header closes the section being built.
             self.close_section()
@@ -230,16 +243,16 @@ LockParser: struct {
         }
         if self.section == {
             .Preamble | .BuildStamp | .Semantic -> {}
-            .Root -> self.assign_root(key, value)
-            .ComptimeInput -> self.comptime_input.assign(key, value)
-            .BuildContribution -> self.build_contribution.assign(key, value)
-            .WorkspaceMember -> self.workspace_member.assign(key, value)
-            .WorkspaceOverlay -> self.overlay.assign(key, value)
-            .WorkspaceOverlayPackage -> self.overlay_package.assign(key, value)
-            .WorkspaceBuildGrant -> self.build_grant.assign(key, value)
-            .Toolchain -> self.toolchain.assign(key, value)
-            .Browser -> self.browser.assign(key, value)
-            .SourceChannel -> self.source_channel.assign(key, value)
+            .Root -> { self.assign_root(key, value) }
+            .ComptimeInput -> { self.comptime_input.assign(key, value) }
+            .BuildContribution -> { self.build_contribution.assign(key, value) }
+            .WorkspaceMember -> { self.workspace_member.assign(key, value) }
+            .WorkspaceOverlay -> { self.overlay.assign(key, value) }
+            .WorkspaceOverlayPackage -> { self.overlay_package.assign(key, value) }
+            .WorkspaceBuildGrant -> { self.build_grant.assign(key, value) }
+            .Toolchain -> { self.toolchain.assign(key, value) }
+            .Browser -> { self.browser.assign(key, value) }
+            .SourceChannel -> { self.source_channel.assign(key, value) }
             .Package -> self.package.assign(key, value)
         }
     }
@@ -248,10 +261,14 @@ LockParser: struct {
         stamp := self.build_stamp ?? BuildStamp.default()
         if key == {
             "git" -> stamp.git = Val(pkg_lock_unescape(value))
-            "dirty" -> stamp.dirty = if value == {
-                "true" -> true
-                "false" -> false
-                else -> { return Err(LockError.Invalid("invalid build stamp dirty value: {value}")) }
+            "dirty" -> {
+                stamp.dirty = if value == {
+                    "true" -> true
+                    "false" -> false
+                    else -> {
+                        return Err(LockError.Invalid("invalid build stamp dirty value: {value}"))
+                    }
+                }
             }
             "toolchain" -> stamp.toolchain = pkg_lock_unescape(value)
             "at" -> stamp.at = pkg_lock_unescape(value)
@@ -266,7 +283,9 @@ LockParser: struct {
             "authority" -> {
                 parsed: if pkg_parse_authority_value(value) == {
                     .Ok(block) -> block
-                    .Err(error) -> { return Err(LockError.Invalid(error.message())) }
+                    .Err(error) -> {
+                        return Err(LockError.Invalid(error.message()))
+                    }
                 }
                 self.authority = Val(PackageAuthority{allow: parsed.allow, deny: parsed.deny, needs: parsed.needs, grants: parsed.grants, trust: parsed.trust, providers: parsed.providers})
             }
@@ -279,7 +298,7 @@ LockParser: struct {
         if self.section == {
             .ComptimeInput -> {
                 if self.comptime_input.finish() == {
-                    .Val(input) -> self.comptime_inputs.push(input)
+                    .Val(input) -> { self.comptime_inputs.push(input) }
                     .None -> {}
                 }
                 self.comptime_input = PartialComptimeInput{}
@@ -344,7 +363,7 @@ LockParser: struct {
             source_channels: self.source_channels,
             build_stamp: self.build_stamp,
             build_contributions: self.build_contributions,
-            semantic_text: pkg_lock_semantic_text(self.semantic_lines)
+            semantic_text: pkg_lock_semantic_text(self.semantic_lines),
         }
         pkg_lock_canonicalize(lock)
         Ok(lock)
@@ -410,7 +429,7 @@ PartialBuildContribution: struct {
             scope: pkg_lock_required_contribution_field("scope", self.scope),
             layer: pkg_lock_required_contribution_field("layer", self.layer),
             source: pkg_lock_required_contribution_field("source", self.source),
-            reason: self.reason ?? ""
+            reason: self.reason ?? "",
         }
     }
 }
@@ -445,7 +464,7 @@ PartialWorkspaceMember: struct {
             path: pkg_lock_required_member_field("path", self.path),
             source_digest: pkg_lock_required_member_field("source_digest", self.source_digest),
             canonical_path: pkg_lock_required_member_field("canonical_path", self.canonical_path),
-            package_digest: pkg_lock_required_member_field("package_digest", self.package_digest)
+            package_digest: pkg_lock_required_member_field("package_digest", self.package_digest),
         }
     }
 }
@@ -472,7 +491,9 @@ PartialWorkspaceOverlay: struct {
 
     finish: fn(self) -> PartialWorkspaceOverlay LockError! {
         name: pkg_lock_nonempty(self.name) ?? return Err(LockError.Invalid("workspace overlay is missing `name`"))
-        if self.channel != None && self.provider == None -> return Err(LockError.Invalid("workspace overlay `{name}` has `channel` without `provider`"))
+        if self.channel != None && self.provider == None {
+            return Err(LockError.Invalid("workspace overlay `{name}` has `channel` without `provider`"))
+        }
         Ok(PartialWorkspaceOverlay{name: Val(name), provider: self.provider, channel: self.channel})
     }
 }
@@ -496,16 +517,24 @@ PartialWorkspaceOverlayPackage: struct {
             "source" -> self.source = Val(pkg_lock_unescape(value))
             "version" -> self.version = Val(pkg_lock_unescape(value))
             "flags" -> self.flags = pkg_lock_parse_string_array(value)
-            "priority" -> self.priority = Val(pkg_overlay_parse_i32(value) ?? return Err(LockError.Invalid("invalid workspace overlay priority `{value}`")))
+            "priority" -> {
+                self.priority = Val(pkg_overlay_parse_i32(value) ?? return Err(LockError.Invalid("invalid workspace overlay priority `{value}`")))
+            }
             "field_priorities" -> self.field_priorities = pkg_lock_parse_string_array(value)
             "env" -> self.env = pkg_lock_parse_string_array(value)
             "patches" -> self.patches = pkg_lock_parse_string_array(value)
-            "allow_unfree" -> self.allow_unfree = if value == {
-                "true" -> true
-                "false" -> false
-                else -> { return Err(LockError.Invalid("invalid workspace overlay allow_unfree value `{value}`")) }
+            "allow_unfree" -> {
+                self.allow_unfree = if value == {
+                    "true" -> true
+                    "false" -> false
+                    else -> {
+                        return Err(LockError.Invalid("invalid workspace overlay allow_unfree value `{value}`"))
+                    }
+                }
             }
-            else -> { return Err(LockError.Invalid("unknown workspace overlay package field `{key}`")) }
+            else -> {
+                return Err(LockError.Invalid("unknown workspace overlay package field `{key}`"))
+            }
         }
     }
 
@@ -544,7 +573,9 @@ pkg_lock_build_workspace_overlay_policy: fn(overlays: [PartialWorkspaceOverlay],
     overlay_names := [String]{}
     loop overlay in overlays {
         name: overlay.name ?? return Err(LockError.Invalid("workspace overlay is missing `name`"))
-        if overlay_names.contains(name) -> return Err(LockError.Invalid("duplicate workspace overlay `{name}`"))
+        if overlay_names.contains(name) {
+            return Err(LockError.Invalid("duplicate workspace overlay `{name}`"))
+        }
         overlay_names.push(name.copy())
         provider: if overlay.provider == {
             .Val(provider_name) -> Val(ProviderOverride{provider: provider_name, channel: overlay.channel})
@@ -555,7 +586,9 @@ pkg_lock_build_workspace_overlay_policy: fn(overlays: [PartialWorkspaceOverlay],
     loop grant in grants {
         package: grant.package ?? return Err(LockError.Invalid("workspace build grant is missing `package`"))
         loop existing in policy.build_grants {
-            if existing.subject == package -> return Err(LockError.Invalid("duplicate workspace build grant `{package}`"))
+            if existing.subject == package {
+                return Err(LockError.Invalid("duplicate workspace build grant `{package}`"))
+            }
         }
         policy.build_grants.push(BuildGrant{subject: package, effects: grant.effects})
     }
@@ -564,17 +597,23 @@ pkg_lock_build_workspace_overlay_policy: fn(overlays: [PartialWorkspaceOverlay],
         overlay_name: package.overlay ?? return Err(LockError.Invalid("workspace overlay package is missing `overlay`"))
         package_name: package.package ?? return Err(LockError.Invalid("workspace overlay package is missing `package`"))
         package_key: "{overlay_name}/{package_name}"
-        if package_keys.contains(package_key) -> return Err(LockError.Invalid("duplicate workspace overlay package `{package_key}`"))
+        if package_keys.contains(package_key) {
+            return Err(LockError.Invalid("duplicate workspace overlay package `{package_key}`"))
+        }
         package_keys.push(package_key)
         target := -1
         loop index in 0..<policy.overlays.len() {
             if target < 0 && policy.overlays[index].name == overlay_name -> target = index
         }
-        if target < 0 -> return Err(LockError.Invalid("workspace overlay package names unknown overlay `{overlay_name}`"))
-        field_priorities := [String: Int]{}
+        if target < 0 {
+            return Err(LockError.Invalid("workspace overlay package names unknown overlay `{overlay_name}`"))
+        }
+        field_priorities := [String:Int]{}
         loop fact in package.field_priorities {
             split: fact.split_once("=") ?? return Err(LockError.Invalid("invalid workspace overlay field priority `{fact}`"))
-            if field_priorities.get(split.before) != None -> return Err(LockError.Invalid("duplicate workspace overlay field priority `{split.before}`"))
+            if field_priorities.get(split.before) != None {
+                return Err(LockError.Invalid("duplicate workspace overlay field priority `{split.before}`"))
+            }
             priority: pkg_overlay_parse_i32(split.after) ?? return Err(LockError.Invalid("invalid workspace overlay field priority `{fact}`"))
             field_priorities[split.before] = priority
         }
@@ -585,21 +624,25 @@ pkg_lock_build_workspace_overlay_policy: fn(overlays: [PartialWorkspaceOverlay],
         }
         env_keys := [String]{}
         loop fact in env {
-            if env_keys.contains(fact.key) -> return Err(LockError.Invalid("duplicate workspace overlay environment fact `{fact.key}`"))
+            if env_keys.contains(fact.key) {
+                return Err(LockError.Invalid("duplicate workspace overlay environment fact `{fact.key}`"))
+            }
             env_keys.push(fact.key)
         }
         overlay := policy.overlays[target]
-        overlay.packages.push(PackageOverride{
-            package: package_name,
-            source: package.source,
-            version: package.version,
-            flags: package.flags,
-            priority: package.priority ?? 0,
-            field_priorities: field_priorities,
-            env: env,
-            patches: package.patches,
-            allow_unfree: package.allow_unfree
-        })
+        overlay.packages.push(
+            PackageOverride{
+                package: package_name,
+                source: package.source,
+                version: package.version,
+                flags: package.flags,
+                priority: package.priority ?? 0,
+                field_priorities: field_priorities,
+                env: env,
+                patches: package.patches,
+                allow_unfree: package.allow_unfree,
+            },
+        )
         policy.overlays[target] = overlay
     }
     Ok(policy)
@@ -638,7 +681,9 @@ PartialPackage: struct {
             "locked" -> self.locked_raw = Val(value)
             "dependencies" -> self.dependencies = pkg_lock_parse_string_array(value)
             "layer" -> self.layer = jet_ring_parse_manifest_layer(pkg_lock_trim_quotes(value))
-            "inferred-layer" -> self.inferred_layer = jet_ring_parse_manifest_layer(pkg_lock_trim_quotes(value))
+            "inferred-layer" -> {
+                self.inferred_layer = jet_ring_parse_manifest_layer(pkg_lock_trim_quotes(value))
+            }
             "effects" -> self.effects = pkg_lock_parse_string_array(value)
             "effect-grants" -> self.effect_grants = pkg_lock_parse_string_array(value)
             "required-effects" -> self.required_effects = pkg_lock_parse_string_array(value)
@@ -705,27 +750,29 @@ PartialPackage: struct {
             .Val(raw) -> Val(pkg_lock_parse_locked(raw))
             .None -> None
         }
-        Ok(LockedPackage{
-            name: name,
-            version: version,
-            source: source,
-            nix_closure: nix_closure,
-            locked: locked,
-            fingerprint: self.fingerprint ?? "",
-            content_hash: self.content_hash,
-            dependencies: self.dependencies,
-            layer: self.layer,
-            inferred_layer: self.inferred_layer,
-            effects: self.effects,
-            effect_grants: self.effect_grants,
-            required_effects: self.required_effects,
-            granted_effects: self.granted_effects,
-            denied_effects: self.denied_effects,
-            effect_authority: self.effect_authority,
-            envelope: self.envelope,
-            receipt: self.receipt,
-            provenance: self.provenance
-        })
+        Ok(
+            LockedPackage{
+                name: name,
+                version: version,
+                source: source,
+                nix_closure: nix_closure,
+                locked: locked,
+                fingerprint: self.fingerprint ?? "",
+                content_hash: self.content_hash,
+                dependencies: self.dependencies,
+                layer: self.layer,
+                inferred_layer: self.inferred_layer,
+                effects: self.effects,
+                effect_grants: self.effect_grants,
+                required_effects: self.required_effects,
+                granted_effects: self.granted_effects,
+                denied_effects: self.denied_effects,
+                effect_authority: self.effect_authority,
+                envelope: self.envelope,
+                receipt: self.receipt,
+                provenance: self.provenance,
+            },
+        )
     }
 }
 
@@ -736,18 +783,26 @@ pkg_lock_validate_package_nix: fn(source: LockSource, nix_closure: NixClosureRec
     if source == {
         .Nix(_, output) -> {
             closure: nix_closure ?? return Err(LockError.Invalid("Nix package is missing its portable closure record"))
-            if closure.output != output -> return Err(LockError.Invalid("Nix source output disagrees with its closure record"))
+            if closure.output != output {
+                return Err(LockError.Invalid("Nix source output disagrees with its closure record"))
+            }
         }
         .Root | .Path(_) | .Git(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Registry(_, _, _, _, _, _, _, _) | .Foreign(_, _, _) -> {
-            if nix_closure != None -> return Err(LockError.Invalid("portable Nix closure record attached to a non-Nix package"))
+            if nix_closure != None {
+                return Err(LockError.Invalid("portable Nix closure record attached to a non-Nix package"))
+            }
         }
     }
     if envelope == {
-        .Val(realized) -> if nix_closure == {
-            .Val(closure) -> {
-                if realized.output_hash != closure.output || realized.platform != closure.system -> return Err(LockError.Invalid("Nix envelope identity disagrees with its closure record"))
+        .Val(realized) -> {
+            if nix_closure == {
+                .Val(closure) -> {
+                    if realized.output_hash != closure.output || realized.platform != closure.system {
+                        return Err(LockError.Invalid("Nix envelope identity disagrees with its closure record"))
+                    }
+                }
+                .None -> {}
             }
-            .None -> {}
         }
         .None -> {}
     }
@@ -782,7 +837,7 @@ PartialNixClosure: struct {
             references: self.references ?? return Err(pkg_lock_nix_closure_missing("references")),
             upstream_proof: self.upstream_proof ?? return Err(pkg_lock_nix_closure_missing("upstream-proof")),
             cache_key: self.cache_key ?? return Err(pkg_lock_nix_closure_missing("cache-key")),
-            project_cas_bundle: self.project_cas_bundle ?? return Err(pkg_lock_nix_closure_missing("project-cas-bundle"))
+            project_cas_bundle: self.project_cas_bundle ?? return Err(pkg_lock_nix_closure_missing("project-cas-bundle")),
         }
         record.validate()
         Ok(record)
@@ -829,9 +884,13 @@ PartialBrowser: struct {
             "version" -> self.version = Val(pkg_lock_unescape(value))
             "binary" -> self.binary = Val(pkg_lock_unescape(value))
             "protocol" -> self.protocol = Val(pkg_lock_unescape(value))
-            "size" -> self.size = Val(pkg_lock_parse_unsigned(pkg_lock_trim_quotes(value), 9223372036854775807) ?? return Err(LockError.Invalid("invalid browser size: {value}")))
+            "size" -> {
+                self.size = Val(pkg_lock_parse_unsigned(pkg_lock_trim_quotes(value), 9223372036854775807) ?? return Err(LockError.Invalid("invalid browser size: {value}")))
+            }
             "driver" -> self.driver = pkg_lock_unescape(value)
-            "driver-size" -> self.driver_size = pkg_lock_parse_unsigned(pkg_lock_trim_quotes(value), 9223372036854775807) ?? return Err(LockError.Invalid("invalid browser driver size: {value}"))
+            "driver-size" -> {
+                self.driver_size = pkg_lock_parse_unsigned(pkg_lock_trim_quotes(value), 9223372036854775807) ?? return Err(LockError.Invalid("invalid browser driver size: {value}"))
+            }
             else -> pkg_lock_assign_envelope(self.envelope, key, value)
         }
     }
@@ -845,7 +904,7 @@ PartialBrowser: struct {
             size: self.size ?? return Err(LockError.Invalid("missing browser size")),
             envelope: self.envelope,
             driver: self.driver,
-            driver_size: self.driver_size
+            driver_size: self.driver_size,
         }
     }
 }
@@ -899,40 +958,54 @@ pkg_lock_parse_source: fn(input: String) -> LockSource LockError! {
         .None -> {}
     }
     if pkg_lock_kv_field(inline, "nix") == {
-        .Val(reference) -> { return Ok(LockSource.Nix{reference: pkg_canonical_locked_ref(reference), output: pkg_lock_kv_field(inline, "output") ?? ""}) }
+        .Val(reference) -> {
+            return Ok(LockSource.Nix{reference: pkg_canonical_locked_ref(reference), output: pkg_lock_kv_field(inline, "output") ?? ""})
+        }
         .None -> {}
     }
     if pkg_lock_kv_field(inline, "cran") == {
-        .Val(reference) -> { return Ok(LockSource.Cran{
-            reference: pkg_canonical_locked_ref(reference),
-            output: pkg_lock_kv_field(inline, "output") ?? "",
-            source_hash: pkg_lock_kv_field(inline, "source-hash") ?? "",
-            repository: pkg_lock_kv_field(inline, "repository") ?? "",
-            authority: pkg_lock_kv_field(inline, "authority") ?? ""
-        }) }
+        .Val(reference) -> {
+            return Ok(
+                LockSource.Cran{
+                    reference: pkg_canonical_locked_ref(reference),
+                    output: pkg_lock_kv_field(inline, "output") ?? "",
+                    source_hash: pkg_lock_kv_field(inline, "source-hash") ?? "",
+                    repository: pkg_lock_kv_field(inline, "repository") ?? "",
+                    authority: pkg_lock_kv_field(inline, "authority") ?? "",
+                },
+            )
+        }
         .None -> {}
     }
     if pkg_lock_kv_field(inline, "luarocks") == {
-        .Val(reference) -> { return Ok(LockSource.LuaRocks{
-            reference: pkg_canonical_locked_ref(reference),
-            output: pkg_lock_kv_field(inline, "output") ?? "",
-            source_hash: pkg_lock_kv_field(inline, "source-hash") ?? "",
-            repository: pkg_lock_kv_field(inline, "repository") ?? "",
-            authority: pkg_lock_kv_field(inline, "authority") ?? ""
-        }) }
+        .Val(reference) -> {
+            return Ok(
+                LockSource.LuaRocks{
+                    reference: pkg_canonical_locked_ref(reference),
+                    output: pkg_lock_kv_field(inline, "output") ?? "",
+                    source_hash: pkg_lock_kv_field(inline, "source-hash") ?? "",
+                    repository: pkg_lock_kv_field(inline, "repository") ?? "",
+                    authority: pkg_lock_kv_field(inline, "authority") ?? "",
+                },
+            )
+        }
         .None -> {}
     }
     if pkg_lock_kv_field(inline, "registry") == {
-        .Val(registry) -> { return Ok(LockSource.Registry{
-            registry: registry,
-            reference: pkg_canonical_locked_ref(pkg_lock_kv_field(inline, "reference") ?? ""),
-            output: pkg_lock_kv_field(inline, "output") ?? "",
-            source_hash: pkg_lock_kv_field(inline, "source-hash") ?? "",
-            repository: pkg_lock_kv_field(inline, "repository") ?? "",
-            authority: pkg_lock_kv_field(inline, "authority") ?? "",
-            tier: pkg_lock_kv_field(inline, "tier") ?? "unknown",
-            gate_status: pkg_lock_kv_field(inline, "gate-status") ?? "unknown"
-        }) }
+        .Val(registry) -> {
+            return Ok(
+                LockSource.Registry{
+                    registry: registry,
+                    reference: pkg_canonical_locked_ref(pkg_lock_kv_field(inline, "reference") ?? ""),
+                    output: pkg_lock_kv_field(inline, "output") ?? "",
+                    source_hash: pkg_lock_kv_field(inline, "source-hash") ?? "",
+                    repository: pkg_lock_kv_field(inline, "repository") ?? "",
+                    authority: pkg_lock_kv_field(inline, "authority") ?? "",
+                    tier: pkg_lock_kv_field(inline, "tier") ?? "unknown",
+                    gate_status: pkg_lock_kv_field(inline, "gate-status") ?? "unknown",
+                },
+            )
+        }
         .None -> {}
     }
     if pkg_lock_kv_field(inline, "foreign") == {
@@ -982,9 +1055,7 @@ pkg_lock_inline_body: fn(input: String) -> String Never! {
 }
 
 // The one-scalar carriage return (U+000D) text.
-pkg_lock_carriage_return: fn() -> String Never! {
-    "\r"
-}
+pkg_lock_carriage_return: fn() -> String Never! { "\r" }
 
 // The value for `key = "…"` or `key = digits` in an inline table body. A
 // part that starts with `key` but has no `=` after it ends the search.
@@ -1024,7 +1095,9 @@ pkg_lock_kv_field: fn(inline: String, key: String) -> String? Never! {
 // (including empty strings); bare items drop whitespace.
 pkg_lock_parse_string_array: fn(input: String) -> [String] LockError! {
     value: input.trim()
-    if !(value.starts_with("[") && value.ends_with("]")) || value.bytes().len() < 2 -> return Err(LockError.Invalid("invalid string array: {value}"))
+    if !(value.starts_with("[") && value.ends_with("]")) || value.bytes().len() < 2 {
+        return Err(LockError.Invalid("invalid string array: {value}"))
+    }
     raw_all: value.bytes()
     inner: pkg_bytes_text(raw_all, 1, raw_all.len() - 1)
     if inner.trim() == "" -> return Ok([String]{})
@@ -1041,12 +1114,14 @@ pkg_lock_parse_string_array: fn(input: String) -> [String] LockError! {
         code: Int{byte}
         if {
             escaped -> {
-                current.push(if code == {
-                    110 -> U8{10}
-                    114 -> U8{13}
-                    116 -> U8{9}
-                    else -> byte
-                })
+                current.push(
+                    if code == {
+                        110 -> U8{10}
+                        114 -> U8{13}
+                        116 -> U8{9}
+                        else -> byte
+                    },
+                )
                 escaped = false
                 item_started = true
             }
@@ -1079,7 +1154,9 @@ pkg_lock_parse_string_array: fn(input: String) -> [String] LockError! {
         }
         index += 1
     }
-    if quoted || escaped || !item_started -> return Err(LockError.Invalid("invalid string array: {inner}"))
+    if quoted || escaped || !item_started {
+        return Err(LockError.Invalid("invalid string array: {inner}"))
+    }
     values.push(pkg_lock_array_item(current, item_quoted))
     Ok(values)
 }
@@ -1106,12 +1183,14 @@ pkg_lock_unescape: fn(input: String) -> String Never! {
         code: Int{byte}
         if {
             escaped -> {
-                out.push(if code == {
-                    110 -> U8{10}
-                    114 -> U8{13}
-                    116 -> U8{9}
-                    else -> byte
-                })
+                out.push(
+                    if code == {
+                        110 -> U8{10}
+                        114 -> U8{13}
+                        116 -> U8{9}
+                        else -> byte
+                    },
+                )
                 escaped = false
             }
             code == 92 -> escaped = true

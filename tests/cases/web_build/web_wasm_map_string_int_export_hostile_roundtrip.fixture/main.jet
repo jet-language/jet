@@ -7,7 +7,9 @@ echo_scores: fn(scores: [String:Int]) -> [String:Int] { scores.copy() }
 score: fn(scores: [String:Int], key: String) -> Int { scores[key] }
 
 #Export(wasm)
-verify_limits: fn(scores: [String:Int]) -> Int { scores["min"] + scores["max"] + (scores["above-safe"] - 9007199254740992) + (scores["below-safe"] + 9007199254740992) }
+verify_limits: fn(scores: [String:Int]) -> Int {
+    scores["min"] + scores["max"] + (scores["above-safe"] - 9007199254740992) + (scores["below-safe"] + 9007199254740992)
+}
 
 #Target(JS)
 run: fn() {
@@ -22,7 +24,7 @@ run: fn() {
         "min": Int.MIN,
         "max": Int.MAX,
         "above-safe": 9007199254740993,
-        "below-safe": -9007199254740993
+        "below-safe": -9007199254740993,
     }
     roundtrip: echo_scores(scores)
     print(score(roundtrip, ""))

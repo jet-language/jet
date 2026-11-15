@@ -2344,10 +2344,11 @@ ir_owned_member: fn(m: &IRModule, p: IRProgram, b: IRBuilder, receiver: Int, nam
 // (jet_ir_closure_drop) a null box.
 ir_zeroable: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
     kind: m.types[row].kind
-    if m.types[row].drop == "" || kind == .Int || kind == .String || m.types[row].drop == "jet_rt_int_drop" -> return true
+    if m.types[row].drop == "" || kind == .Int || kind == .String || m.types[row].drop == "jet_rt_int_drop" {
+        return true
+    }
     if kind == .Pointer {
-        return ir_box_row(m, row) || ir_trait_row(m, row) || ir_is_handle(m, row) || m.types[row].drop == "jet_rt_native_shared_drop"
-            || m.types[row].clone == ir_closure_share()
+        return ir_box_row(m, row) || ir_trait_row(m, row) || ir_is_handle(m, row) || m.types[row].drop == "jet_rt_native_shared_drop" || m.types[row].clone == ir_closure_share()
     }
     if kind != .Aggregate || ir_atomic_scalar(m.types[row].ty) != None -> return false
     if ir_counted_entry(m, p, row) != None -> return true
@@ -2821,7 +2822,9 @@ ir_route_can_stop: fn(symbol: String) -> Bool Never! {
         return false
     }
     // A word lane's atomic (Runtime Atomic.jet) only reads and writes its word.
-    if symbol.starts_with("jet_rt_atomic_") && !symbol.starts_with("jet_rt_atomic_int_") -> return false
+    if symbol.starts_with("jet_rt_atomic_") && !symbol.starts_with("jet_rt_atomic_int_") {
+        return false
+    }
     if symbol == {
         "jet_rt_alloc" | "jet_rt_alloc_try" | "jet_rt_alloc_8" | "jet_rt_alloc_value" | "jet_rt_alloc_value_grow" | "jet_rt_free" | "jet_rt_mem_move" | "jet_rt_mem_fill" | "jet_rt_mem_fill_bytes" | "memcmp" | "jet_int_owned_to_i64" | "jet_int_owned_from_i64" -> false
         "jet_rt_mem_region_reserve" | "jet_rt_mem_region_release" -> false

@@ -33,7 +33,9 @@ use {
 }
 
 STEPS: [String]{"check", "closure", "stage", "build", "eval"}
+
 USAGE: "usage: jet Tools/perf/comptime-items TRACE [--top N] [--json]"
+
 // A --top count: decimal digits, so no sign, fraction, exponent or base prefix.
 COUNT: Regex{"[0-9]+"}
 
@@ -176,19 +178,21 @@ closed_spans: fn(events: [Event]) -[Exec, IO]> [Span] {
         if at < 0 -> next
         begin: open[lane][at].copy()  // copy: the span outlives the dropped stack
         open[lane] = open[lane].slice(0, at)
-        spans.push(Span{
-            kind: begin.kind ?? process.fail(1, "comptime-items: a span has neither cat nor name")
-            label: begin.label
-            args: begin.args
-            wall: event.ts - begin.ts
-            cpu: event.args?.cpu_ns ?? 0
-        })
+        spans.push(
+            Span{
+                kind: begin.kind ?? process.fail(1, "comptime-items: a span has neither cat nor name"),
+                label: begin.label,
+                args: begin.args,
+                wall: event.ts - begin.ts,
+                cpu: event.args?.cpu_ns ?? 0,
+            },
+        )
     }
     spans
 }
 
 // Adds a share of a span to the row `key` of `table` (`at` its index).
-add: fn(table: &[Row], at: &[String: Int], key: String, step: Int, wall: Float, cpu: Float, count: Int) {
+add: fn(table: &[Row], at: &[String:Int], key: String, step: Int, wall: Float, cpu: Float, count: Int) {
     entry: at.get(key) ?? {
         at[key] = table.len()
         table.push(Row{key: key.copy()})
@@ -202,11 +206,11 @@ add: fn(table: &[Row], at: &[String: Int], key: String, step: Int, wall: Float, 
 
 summarize: fn(spans: [Span]) -> Summary {
     kinds := [Kind]{}
-    kind_at := [String: Int]{}
+    kind_at := [String:Int]{}
     by_file := [Row]{}
-    file_at := [String: Int]{}
+    file_at := [String:Int]{}
     by_item := [Row]{}
-    item_at := [String: Int]{}
+    item_at := [String:Int]{}
     loop span in spans {
         if !span.kind.starts_with("comptime.") -> next
         k: kind_at.get(span.kind) ?? {
@@ -269,24 +273,28 @@ run: fn() {
         print(json.stringify(report(summary), 2))
         return
     }
-    if summary.phase == .Val(span) -> print("comptime phase {seconds(Float.from_int(span.wall))} s wall, {cpu_seconds(Float.from_int(span.cpu))} s cpu")
+    if summary.phase == .Val(span) {
+        print("comptime phase {seconds(Float.from_int(span.wall))} s wall, {cpu_seconds(Float.from_int(span.cpu))} s cpu")
+    }
     print("\n{"count":PadLeft(6)} {"wall s":PadLeft(7)} {"cpu s":PadLeft(7)}  span")
-    loop kind in summary.kinds -> print("{"{kind.count}":PadLeft(6)} {seconds(Float.from_int(kind.wall)):PadLeft(7)} {cpu_seconds(Float.from_int(kind.cpu)):PadLeft(7)}  {kind.kind}")
+    loop kind in summary.kinds {
+        print("{"{kind.count}":PadLeft(6)} {seconds(Float.from_int(kind.wall)):PadLeft(7)} {cpu_seconds(Float.from_int(kind.cpu)):PadLeft(7)}  {kind.kind}")
+    }
     print_table("per file (count = items checked)", summary.files, options.top)
     print_table("per item", summary.items, options.top)
 }
 
 #Test("an ill-typed trace field is refused with its path and the type it needs") {
     if events_from("[{{\"cat\":\"comptime.check\",\"ph\":\"B\",\"tid\":1,\"ts\":\"1000\"}}]") == {
-        .Ok(_) -> panic("a text ts decoded")
+        .Ok(_) -> { panic("a text ts decoded") }
         .Err(errors) -> assert("{errors}".contains("`[0].ts`: expected Int, found text \"1000\""))
     }
     if events_from("[{{\"cat\":\"comptime.check\",\"ph\":\"E\",\"tid\":1,\"ts\":5,\"args\":{{\"cpu_ns\":\"12\"}}}}]") == {
-        .Ok(_) -> panic("a text cpu_ns decoded")
+        .Ok(_) -> { panic("a text cpu_ns decoded") }
         .Err(errors) -> assert("{errors}".contains("`[0].args.cpu_ns`: expected Int"))
     }
     if events_from("[{{\"cat\":\"comptime.check\",\"ph\":\"B\",\"tid\":1,\"ts\":0,\"args\":{{\"file\":{{\"x\":1}},\"item\":\"a\"}}}}]") == {
-        .Ok(_) -> panic("an object file decoded")
+        .Ok(_) -> { panic("an object file decoded") }
         .Err(errors) -> assert("{errors}".contains("`[0].args.file`"))
     }
 }
@@ -300,12 +308,12 @@ run: fn() {
     assert((parse_args(["t.trace", "--top", "2"]) ?? panic(err.message)).top == 2)
     loop given in ["0x2", "1.5", "-1", "1e1", ""] {
         if parse_args(["t.trace", "--top", given]) == {
-            .Ok(_) -> panic("--top {given} was accepted")
+            .Ok(_) -> { panic("--top {given} was accepted") }
             .Err(refusal) -> assert(refusal.message == "--top takes a decimal count")
         }
     }
     if parse_args(["t.trace", "--top"]) == {
-        .Ok(_) -> panic("a missing --top count was accepted")
+        .Ok(_) -> { panic("a missing --top count was accepted") }
         .Err(refusal) -> assert(refusal.message == "--top takes a decimal count")
     }
 }

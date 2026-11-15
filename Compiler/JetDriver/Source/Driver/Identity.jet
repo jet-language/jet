@@ -203,6 +203,7 @@ JetDriverCoreSource: struct {
     owned_members: [String]
     runtime: Bool
     text: Shared<JetDriverCoreText>
+
     source: fn(self) -> String Never! {
         permit: self.text.guard_edit()
         if permit.value.text == .Val(text) -> return text
@@ -244,7 +245,7 @@ jet_driver_core_text: fn(text: String) -> Shared<JetDriverCoreText> Never! {
     Shared{JetDriverCoreText{file: "", reader: None, text: Val(text)}}
 }
 
-jet_driver_core_text_file: fn(file: String, &&reader: JetDriverCoreSourceReader) -> Shared<JetDriverCoreText> Never! {
+jet_driver_core_text_file: fn(file: String, reader: &&JetDriverCoreSourceReader) -> Shared<JetDriverCoreText> Never! {
     Shared{JetDriverCoreText{file: file, reader: Val(reader), text: None}}
 }
 
@@ -532,44 +533,60 @@ JetDriverBuildHTTPInputs: trait {
 
 // The invocation owns each raw transport once. Adapter clones share that
 // same authority cell; they never duplicate or mint a raw host trait value.
-JetDriverBuildInputsStorage: struct { transport: JetDriverBuildInputs }
+JetDriverBuildInputsStorage: struct {
+    transport: JetDriverBuildInputs
+}
+
 JetDriverSharedBuildInputs: struct {
     storage: Shared<JetDriverBuildInputsStorage>
+
     resolve: fn(self, path: String) -[FS.Read]> JetDriverBuildPath JetDriverBuildInputError! {
         permit: self.storage.guard_read()
         permit.value.transport.resolve(path)
     }
+
     entries: fn(self, directory: String) -[FS.Read]> [JetDriverBuildEntry] JetDriverBuildInputError! {
         permit: self.storage.guard_read()
         permit.value.transport.entries(directory)
     }
+
     read: fn(self, path: String, limit: Int) -[FS.Read]> [U8] JetDriverBuildInputError! {
         permit: self.storage.guard_read()
         permit.value.transport.read(path, limit)
     }
+
     read_rooted: fn(self, root: String, relative: String, limit: Int) -[FS.Read]> [U8] JetDriverBuildInputError! {
         permit: self.storage.guard_read()
         permit.value.transport.read_rooted(root, relative, limit)
     }
 }
+
 jet_driver_shared_build_inputs: fn(transport: &&JetDriverBuildInputs) -> JetDriverSharedBuildInputs Never! {
     JetDriverSharedBuildInputs{storage: Shared{JetDriverBuildInputsStorage{transport: transport.move()}}}
 }
-JetDriverBuildHTTPInputsStorage: struct { transport: JetDriverBuildHTTPInputs }
+
+JetDriverBuildHTTPInputsStorage: struct {
+    transport: JetDriverBuildHTTPInputs
+}
+
 JetDriverSharedBuildHTTPInputs: struct {
     storage: Shared<JetDriverBuildHTTPInputsStorage>
+
     resolve: fn(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] JetDriverBuildHTTPError! {
         permit: self.storage.guard_read()
         permit.value.transport.resolve(host, port)
     }
+
     get: fn(self, url: String, addresses: [[U8]], port: Int, timeout_ms: Int, limit: Int) -[Net, Time.Wait]> JetDriverBuildHTTPResponse JetDriverBuildHTTPError! {
         permit: self.storage.guard_read()
         permit.value.transport.get(url, addresses, port, timeout_ms, limit)
     }
 }
+
 jet_driver_shared_build_http_inputs: fn(transport: &&JetDriverBuildHTTPInputs) -> JetDriverSharedBuildHTTPInputs Never! {
     JetDriverSharedBuildHTTPInputs{storage: Shared{JetDriverBuildHTTPInputsStorage{transport: transport.move()}}}
 }
+
 JetDriverBuildHTTPResponse: struct {
     status: Int
     headers: [[U8]]
@@ -1012,7 +1029,9 @@ jet_driver_display_path: fn(entry_root: String, path: String) -> String Never! {
     root_parts: jet_driver_path_segments(entry_root)
     path_parts: jet_driver_path_segments(path)
     common := 0
-    loop common < root_parts.len() && common < path_parts.len() && root_parts[common] == path_parts[common] -> common += 1
+    loop common < root_parts.len() && common < path_parts.len() && root_parts[common] == path_parts[common] {
+        common += 1
+    }
     parts := [String]{}
     loop _ in common..<root_parts.len() -> parts.push("..")
     loop index in common..<path_parts.len() -> parts.push(path_parts[index])
@@ -1037,14 +1056,12 @@ jet_driver_physical_path: fn(entry_root: String, display: String) -> String Neve
     // copy: the physical path is a new owned String. For an empty display it equals `entry_root`, a
     // read parameter that the caller keeps, so the result needs its own text.
     if display.len() == 0 -> return entry_root.copy()
-    if !display.starts_with("../") -> return if entry_root.ends_with("/") -> "{entry_root}{display}" else -> "{entry_root}/{display}"
+    if !display.starts_with("../") {
+        return if entry_root.ends_with("/") -> "{entry_root}{display}" else -> "{entry_root}/{display}"
+    }
     parts := jet_driver_path_segments(entry_root)
     loop segment in jet_driver_path_segments(display) {
-        if segment != ".." {
-            parts.push(segment)
-        } else if parts.len() > 0 {
-            _ := parts.pop()
-        }
+        if segment != ".." -> parts.push(segment) else if parts.len() > 0 -> _ := parts.pop()
     }
     joined: parts.join("/")
     "/{joined}"

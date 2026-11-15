@@ -17,18 +17,25 @@
 // the writer in, and the map then reports Copy. A file the lease cannot hold
 // is copied into the temp file at map time (Copy).
 compiler_mapped_root := I64{0}
+
 // The kinds a map reports through `MappedFile.kind()`.
 MAPPED_CLONE: I64{1}
+
 MAPPED_HELD: I64{2}
+
 MAPPED_COPY: I64{3}
+
 // The largest file a lease holds, 4 GiB: a break copies it within the
 // kernel's default 45 s lease-break-time at about 100 MB/s. A larger file is
 // copied at map time.
 MAPPED_LEASE_LIMIT: I64{4294967296}
+
 // SIGRTMAX: the runtime's lease-break signal. Core lets no program take a
 // real-time signal, so no handler of the program's is displaced.
 MAPPED_LEASE_SIGNAL: I64{64}
+
 MAPPED_LEASE_SLOTS: I64{64}
+
 // The lease slots: MAPPED_LEASE_SLOTS records of 64 bytes, allocated with the
 // lease-break handler's install and never freed, or 0 before it (and when the
 // kernel refused the handler). Slot64: state0 (0 free, 1 claimed, 2 held, 3
@@ -38,21 +45,26 @@ MAPPED_LEASE_SLOTS: I64{64}
 // Only atomic word operations touch a slot, since the handler may run on any
 // thread at any instruction.
 compiler_mapped_leases := I64{0}
+
 // 1 once the first lease looked for the handler, whether or not it went in.
 compiler_mapped_lease_tried := I64{0}
+
 // runtime-init: 4 when compiler_mapped_root
 #Export(c) jet_rt_compiler_mapped_init: fn() {
-    if (compiler_mapped_root != I64{0}) -> return
+    if (compiler_mapped_root != I64{0}) {
+        return
+    }
     root: jet_rt_alloc(I64{16}, I64{8})
     thread_zero(root, I64{16})
-    #Unsafe("runtime-init runs before any other thread exists") {
-        compiler_mapped_root = root
-    }
+    #Unsafe("runtime-init runs before any other thread exists") { compiler_mapped_root = root }
 }
+
 compiler_mapped_key: fn(path: I64) -> I64 {
     at := I64{0}
     loop at < rt_text_len(path) {
-        if (rt_text_byte(wrapping(rt_text_data(path) + at)) == I64{0}) -> return jet_rt_string_clone(path)
+        if (rt_text_byte(wrapping(rt_text_data(path) + at)) == I64{0}) {
+            return jet_rt_string_clone(path)
+        }
         at += I64{1}
     }
     // Failed canonicalize falls back to the ORIGINAL spelling (not absolute or
@@ -62,10 +74,11 @@ compiler_mapped_key: fn(path: I64) -> I64 {
     bytes: jet_process_path_canonicalize_raw(name, scratch, wrapping(scratch + I64{8}), wrapping(scratch + I64{16}))
     fd_c_path_drop(name, path)
     result: if (bytes == I64{0}) -> jet_rt_string_clone(path) else -> rt_text_lossy(bytes, rt_text_word(scratch))
-    if (bytes != I64{0}) -> jet_rt_free(bytes, rt_text_word(wrapping(scratch + I64{8})), I64{1})
+    if (bytes != I64{0}) { jet_rt_free(bytes, rt_text_word(wrapping(scratch + I64{8})), I64{1}) }
     jet_rt_free(scratch, I64{48}, I64{8})
     result
 }
+
 // Registry Node24: next0, owned key8, live count16. Only the root lock reads it.
 compiler_mapped_find: fn(key: I64) -> I64 {
     node := rt_text_word(wrapping(compiler_mapped_root + I64{8}))
@@ -75,6 +88,7 @@ compiler_mapped_find: fn(key: I64) -> I64 {
     }
     I64{0}
 }
+
 compiler_mapped_register: fn(key: I64) {
     root: compiler_mapped_root
     sync_mutex_lock(root)
@@ -89,6 +103,7 @@ compiler_mapped_register: fn(key: I64) {
     rt_text_store(wrapping(node + I64{16}), rt_text_word(wrapping(node + I64{16})) + I64{1})
     sync_mutex_unlock(root)
 }
+
 compiler_mapped_unregister: fn(key: I64) {
     root: compiler_mapped_root
     sync_mutex_lock(root)
@@ -108,6 +123,7 @@ compiler_mapped_unregister: fn(key: I64) {
     }
     sync_mutex_unlock(root)
 }
+
 #Export(c) jet_std_files_writer_refusal: fn(path: I64, some: I64) -> I64 {
     key: compiler_mapped_key(path)
     root: compiler_mapped_root
@@ -119,6 +135,7 @@ compiler_mapped_unregister: fn(key: I64) {
     _ := host_io_other_take(HOST_IO_OP_WRITE, jet_rt_string_clone(path), jet_rt_string_clone(rt_static_text("file is mapped read-only")), some)
     I64{1}
 }
+
 #Export(c) jet_std_files_map: fn(path: I64, output: I64, error: I64) -> I64 {
     if !compiler_fs_path(path, HOST_IO_OP_READ, error) -> return I64{0}
     scratch: jet_rt_alloc(I64{160}, I64{8})
@@ -156,9 +173,7 @@ compiler_mapped_unregister: fn(key: I64) {
                 pointer = compiler_mapped_mmap(number, length)
             } else {
                 spare: compiler_mapped_spare(path)
-                if (spare < I64{0}) {
-                    failure = spare
-                } else if compiler_mapped_clone(spare, number) {
+                if (spare < I64{0}) { failure = spare } else if compiler_mapped_clone(spare, number) {
                     kind = MAPPED_CLONE
                     pointer = compiler_mapped_mmap(spare, length)
                 } else {
@@ -173,15 +188,17 @@ compiler_mapped_unregister: fn(key: I64) {
                 }
                 // The mapping keeps a clone or copy alive; a held map keeps
                 // its spare for the break.
-                if (spare >= I64{0} && slot == I64{0}) -> compiler_mapped_close(spare)
+                if (spare >= I64{0} && slot == I64{0}) { compiler_mapped_close(spare) }
             }
-            if (failure == I64{0} && pointer < I64{0} && pointer >= I64{-4095}) -> failure = pointer
+            if (failure == I64{0} && pointer < I64{0} && pointer >= I64{-4095}) {
+                failure = pointer
+            }
         }
     }
     if (failure < I64{0}) {
         if locked -> jet_fd_lock_raw(file, I64{8}, errno)
         jet_fd_drop_raw(file)
-        if (key != I64{0}) -> jet_rt_string_drop(key)
+        if (key != I64{0}) { jet_rt_string_drop(key) }
         jet_rt_free(scratch, I64{160}, I64{8})
         return compiler_fs_errno(HOST_IO_OP_READ, path, -failure, error)
     }
@@ -199,18 +216,21 @@ compiler_mapped_unregister: fn(key: I64) {
     rt_text_store(output, map)
     I64{1}
 }
+
 #Export(c) jet_rt_handle_drop_jet_mapped_file: fn(map: I64) {
-    if (map == I64{0}) -> return
+    if (map == I64{0}) {
+        return
+    }
     // MappedFile is affine; borrowed byte views keep its checked owner alive.
     file: rt_text_word(wrapping(map + I64{8}))
     length: rt_text_word(wrapping(map + I64{40}))
     slot: rt_text_word(wrapping(map + I64{56}))
     held: slot != I64{0} && compiler_mapped_close_slot(slot)
-    if (length != I64{0}) -> compiler_mapped_munmap(rt_text_word(wrapping(map + I64{32})), length)
+    if (length != I64{0}) { compiler_mapped_munmap(rt_text_word(wrapping(map + I64{32})), length) }
     if held -> compiler_mapped_unlease(jet_fd_number_raw(file))
     if (slot != I64{0}) {
         spare: sync_load(wrapping(slot + I64{16}))
-        if (spare >= I64{0}) -> compiler_mapped_close(spare)
+        if (spare >= I64{0}) { compiler_mapped_close(spare) }
         sync_store(slot, I64{0})
     }
     scratch: jet_rt_alloc(I64{32}, I64{8})
@@ -222,14 +242,16 @@ compiler_mapped_unregister: fn(key: I64) {
     jet_rt_string_drop(rt_text_word(wrapping(map + I64{24})))
     jet_rt_free(map, I64{64}, I64{8})
 }
+
 // `kind()`'s native code: 1 Clone, 2 Held or 3 Copy. A held map whose lease
 // broke now maps its copy, so it reports Copy; an empty map has no bytes to
 // hold and reports Copy.
 #Export(c) jet_std_fs_map_kind: fn(map: I64) -> I64 {
     slot: rt_text_word(wrapping(map + I64{56}))
-    if (slot != I64{0} && sync_load(wrapping(slot + I64{40})) == I64{1}) -> return MAPPED_COPY
+    if (slot != I64{0} && sync_load(wrapping(slot + I64{40})) == I64{1}) { return MAPPED_COPY }
     rt_text_word(wrapping(map + I64{48}))
 }
+
 // mmap of `length` read-only private bytes of descriptor `fd` from its start:
 // the address, or the negative errno. The mapping's whole pages are live to
 // the memory sentry until compiler_mapped_munmap.
@@ -238,9 +260,12 @@ compiler_mapped_mmap: fn(fd: I64, length: I64) -> I64 {
     #Unsafe("the descriptor is this map's own; mmap creates exactly length read-only private bytes; the map owner alone unmaps them") {
         pointer = os_map_untracked_i64(I64{0}, length, I64{1}, I64{2}, fd, I64{0})
     }
-    if (pointer >= I64{0} || pointer < I64{-4095}) -> jet_rt_sentry_register_allocation(pointer, compiler_mapped_pages(length))
+    if (pointer >= I64{0} || pointer < I64{-4095}) {
+        jet_rt_sentry_register_allocation(pointer, compiler_mapped_pages(length))
+    }
     pointer
 }
+
 // Unmaps a compiler_mapped_mmap mapping: its pages leave the sentry's live
 // storage first.
 compiler_mapped_munmap: fn(pointer: I64, length: I64) {
@@ -249,15 +274,18 @@ compiler_mapped_munmap: fn(pointer: I64, length: I64) {
         _ := os_unmap_untracked_i64(pointer, length)
     }
 }
+
 // `length` rounded up to whole 4 KiB pages, as the system maps them.
 compiler_mapped_pages: fn(length: I64) -> I64 Never! {
     wrapping(length + I64{4095}).bit_and(I64{-4096})
 }
+
 compiler_mapped_close: fn(fd: I64) {
     #Unsafe("closes a temp-file descriptor this map alone owns") {
         _ := os_syscall_i64(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
 }
+
 // Releases the read lease on descriptor `fd` (fcntl F_SETLEASE F_UNLCK), so a
 // writer the kernel holds back goes on.
 compiler_mapped_unlease: fn(fd: I64) {
@@ -265,6 +293,7 @@ compiler_mapped_unlease: fn(fd: I64) {
         _ := os_syscall_i64(I64{72}, fd, I64{1024}, I64{2}, I64{0}, I64{0}, I64{0})
     }
 }
+
 // Whether `fd`'s file system cannot be written at all: squashfs
 // (0x73717368) or erofs (0xE0F5E1E2), by fstatfs's f_type. A read-only
 // mount of another file system does not count: a bind mount or a network
@@ -274,10 +303,11 @@ compiler_mapped_unwritable: fn(fd: I64, scratch: I64) -> Bool {
     #Unsafe("fstatfs writes one 120-byte statfs into the map's 160-byte scratch") {
         status = os_syscall_i64(I64{138}, fd, scratch, I64{0}, I64{0}, I64{0}, I64{0})
     }
-    if (status < I64{0}) -> return false
+    if (status < I64{0}) { return false }
     magic: rt_text_word(scratch).bit_and(I64{4294967295})
     magic == I64{1936814952} || magic == I64{3774210530}
 }
+
 // An unnamed temp file for `path`'s clone or copy, opened read-write: in the
 // file's own directory, where a clone shares its file system, else in the
 // temp directory. Its descriptor, or the negative errno of the last refusal.
@@ -287,21 +317,19 @@ compiler_mapped_spare: fn(path: I64) -> I64 {
     cut := I64{-1}
     at := I64{0}
     loop at < length {
-        if (rt_text_byte(wrapping(data + at)) == I64{47}) -> cut = at
+        if (rt_text_byte(wrapping(data + at)) == I64{47}) { cut = at }
         at += I64{1}
     }
     // The directory part: `.` for a bare name, `/` for an entry of the root.
     keep: if (cut <= I64{0}) -> I64{1} else -> cut
     directory: jet_rt_alloc(keep + I64{1}, I64{1})
-    if (cut < I64{0}) {
-        rt_text_put(directory, I64{46})
-    } else {
+    if (cut < I64{0}) { rt_text_put(directory, I64{46}) } else {
         rt_text_bytes_copy(directory, data, keep)
     }
     rt_text_put(wrapping(directory + keep), I64{0})
     fd := compiler_mapped_tmpfile(directory)
     jet_rt_free(directory, keep + I64{1}, I64{1})
-    if (fd >= I64{0}) -> return fd
+    if (fd >= I64{0}) { return fd }
     temp: jet_fs_temp_directory_raw()
     name: fd_c_path(temp)
     fd = compiler_mapped_tmpfile(name)
@@ -309,10 +337,12 @@ compiler_mapped_spare: fn(path: I64) -> I64 {
     jet_rt_string_drop(temp)
     fd
 }
+
 // openat(AT_FDCWD, directory, O_RDWR|O_TMPFILE|O_CLOEXEC, 0o600).
 compiler_mapped_tmpfile: fn(directory: I64) -> I64 {
     host_call4(I64{257}, I64{-100}, directory, I64{2}.bit_or(JETC_O_TMPFILE).bit_or(JETC_O_CLOEXEC), I64{384})
 }
+
 // Whether ioctl FICLONE made the empty `spare` share every block of `fd`'s
 // file: a snapshot no later write or truncation of the file reaches. A file
 // system that cannot clone, or a spare on another one, refuses.
@@ -321,6 +351,7 @@ compiler_mapped_clone: fn(spare: I64, fd: I64) -> Bool {
         return os_syscall_i64(I64{16}, spare, I64{1074041865}, fd, I64{0}, I64{0}, I64{0}) == I64{0}
     }
 }
+
 // Copies `length` bytes of `from` from its start into the empty `to`, then
 // sets `to`'s length to exactly `length`, so a file that shrank meanwhile
 // leaves zeros and never a short copy. `offset` is the word that carries the
@@ -337,14 +368,14 @@ compiler_mapped_copy: fn(from: I64, to: I64, length: I64, offset: I64) -> I64 {
         #Unsafe("copy_file_range and sendfile move bytes between two descriptors this map owns; the offset word is the caller's") {
             moved = if ranged -> os_syscall_i64(I64{326}, from, offset, to, I64{0}, chunk, I64{0}) else -> os_syscall_i64(I64{40}, to, from, offset, chunk, I64{0}, I64{0})
         }
-        if (moved == I64{-4}) -> next
+        if (moved == I64{-4}) { next }
         // copy_file_range refuses some pairs of file systems: sendfile copies.
         if (ranged && (moved == I64{-18} || moved == I64{-38} || moved == I64{-22} || moved == I64{-95})) {
             ranged = false
             next
         }
-        if (moved < I64{0}) -> return moved
-        if (moved == I64{0}) -> break
+        if (moved < I64{0}) { return moved }
+        if (moved == I64{0}) { break }
         done += moved
     }
     sized := I64{0}
@@ -353,22 +384,23 @@ compiler_mapped_copy: fn(from: I64, to: I64, length: I64, offset: I64) -> I64 {
     }
     sized
 }
+
 // Holds `fd`'s file with a read lease and maps it. The lease slot, with the
 // mapping at its pointer word, or 0 when the file takes no lease: larger than
 // MAPPED_LEASE_LIMIT, open for writing anywhere, not the caller's own, on a
 // file system without leases, or every slot is in use.
 compiler_mapped_hold: fn(fd: I64, spare: I64, length: I64) -> I64 {
-    if (length > MAPPED_LEASE_LIMIT) -> return I64{0}
+    if (length > MAPPED_LEASE_LIMIT) { return I64{0} }
     table: compiler_mapped_lease_table()
-    if (table == I64{0}) -> return I64{0}
+    if (table == I64{0}) { return I64{0} }
     slot := I64{0}
     index := I64{0}
     loop index < MAPPED_LEASE_SLOTS && (slot == I64{0}) {
         candidate: wrapping(table + index * I64{64})
-        if (sync_cas(candidate, I64{0}, I64{1}) == I64{0}) -> slot = candidate
+        if (sync_cas(candidate, I64{0}, I64{1}) == I64{0}) { slot = candidate }
         index += I64{1}
     }
-    if (slot == I64{0}) -> return I64{0}
+    if (slot == I64{0}) { return I64{0} }
     pointer: compiler_mapped_mmap(fd, length)
     if (pointer < I64{0} && pointer >= I64{-4095}) {
         sync_store(slot, I64{0})
@@ -395,6 +427,7 @@ compiler_mapped_hold: fn(fd: I64, spare: I64, length: I64) -> I64 {
     compiler_mapped_munmap(pointer, length)
     I64{0}
 }
+
 // The lease slots, with the lease-break handler installed by the first call.
 // 0 when the kernel refused the handler: maps then copy.
 compiler_mapped_lease_table: fn() -> I64 {
@@ -411,9 +444,9 @@ compiler_mapped_lease_table: fn() -> I64 {
         #Unsafe("rt_sigaction borrows the four-word action on the stack; the handler is this runtime's three-word C-ABI export and the restorer its rt_sigreturn rail") {
             status = os_syscall_stack4_i64(I64{13}, MAPPED_LEASE_SIGNAL, rt_mapped_lease_break_address(), I64{469762052}, rt_process_signal_restore_address(), I64{0}, I64{8})
         }
-        if (status < I64{0}) -> jet_rt_free(slots, size, I64{8})
+        if (status < I64{0}) { jet_rt_free(slots, size, I64{8}) }
         #Unsafe("written under the map registry mutex, before any lease can name a slot") {
-            if (status >= I64{0}) -> compiler_mapped_leases = slots
+            if (status >= I64{0}) { compiler_mapped_leases = slots }
             compiler_mapped_lease_tried = I64{1}
         }
     }
@@ -421,19 +454,24 @@ compiler_mapped_lease_table: fn() -> I64 {
     sync_mutex_unlock(root)
     table
 }
+
 // Takes `slot` from its map's drop: true when the lease is still held (the
 // caller releases it), false when a break already settled it. A break in
 // progress on another thread is waited for.
 compiler_mapped_close_slot: fn(slot: I64) -> Bool {
     loop {
         state: sync_load(slot)
-        if (state == I64{2} && sync_cas(slot, I64{2}, I64{4}) == I64{2}) -> return true
-        if (state == I64{5} && sync_cas(slot, I64{5}, I64{4}) == I64{5}) -> return false
-        if (state == I64{3}) -> _ := sync_futex_wait(slot, I64{3}, I64{-1})
+        if (state == I64{2} && sync_cas(slot, I64{2}, I64{4}) == I64{2}) { return true }
+        if (state == I64{5} && sync_cas(slot, I64{5}, I64{4}) == I64{5}) { return false }
+        if (state == I64{3}) { _ := sync_futex_wait(slot, I64{3}, I64{-1}) }
     }
 }
+
 // Checked FunctionAddress intrinsic in the canonical RuntimeLibrary table.
-rt_mapped_lease_break_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+rt_mapped_lease_break_address: fn() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
 // The lease-break signal (SA_SIGINFO): another process opens a held file for
 // writing or truncates it, and the kernel holds that process back until the
 // lease is released. The signal names the descriptor (siginfo si_fd at 24);
@@ -443,7 +481,7 @@ rt_mapped_lease_break_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I
 // lock.
 #Export(c) jet_rt_mapped_lease_break: fn(_signal: I64, info: I64, _context: I64) -> I64 {
     table: compiler_mapped_leases
-    if (table == I64{0} || info == I64{0}) -> return I64{0}
+    if (table == I64{0} || info == I64{0}) { return I64{0} }
     fd: rt_text_word(wrapping(info + I64{24})).bit_and(I64{4294967295})
     index := I64{0}
     loop index < MAPPED_LEASE_SLOTS {
@@ -457,6 +495,7 @@ rt_mapped_lease_break_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I
     }
     I64{0}
 }
+
 // The break's copy for one held slot, into its spare, else into a memfd (an
 // unnamed file in memory) when the spare's file system is full; then the
 // lease is released. The file's bytes are still the ones the views read:
@@ -482,18 +521,26 @@ compiler_mapped_settle: fn(slot: I64) {
         sync_store(wrapping(slot + I64{16}), I64{-1})
     }
 }
+
 // Copies the held file into `to` and maps the copy over the slot's mapping
 // (MAP_FIXED), whose length and address stay. Whether both steps succeeded.
 compiler_mapped_place: fn(fd: I64, to: I64, slot: I64) -> Bool {
     pointer: sync_load(wrapping(slot + I64{24}))
     length: sync_load(wrapping(slot + I64{32}))
-    if (compiler_mapped_copy(fd, to, length, wrapping(slot + I64{56})) != I64{0}) -> return false
+    if (compiler_mapped_copy(fd, to, length, wrapping(slot + I64{56})) != I64{0}) { return false }
     #Unsafe("MAP_FIXED replaces exactly the held map's own read-only private pages with the same length of its copy; borrowed views keep their addresses") {
         return os_map_untracked_i64(pointer, length, I64{1}, I64{18}, to, I64{0}) == pointer
     }
 }
-#Export(c) jet_std_fs_map_len: fn(map: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(wrapping(map + I64{40}))) }
-#Export(c) jet_std_fs_map_is_empty: fn(map: I64) -> Bool { rt_text_word(wrapping(map + I64{40})) == I64{0} }
+
+#Export(c) jet_std_fs_map_len: fn(map: I64) -> I64 {
+    jet_int_owned_from_i64(rt_text_word(wrapping(map + I64{40})))
+}
+
+#Export(c) jet_std_fs_map_is_empty: fn(map: I64) -> Bool {
+    rt_text_word(wrapping(map + I64{40})) == I64{0}
+}
+
 // posix_madvise over the whole mapping: madvise(pointer, length, advice).
 // Core passes MADV_NORMAL 0, RANDOM 1, SEQUENTIAL 2, WILLNEED 3, DONTNEED 4
 // or COLD 20. The bytes are read-only and private to a file (the file, its
@@ -503,26 +550,31 @@ compiler_mapped_place: fn(fd: I64, to: I64, slot: I64) -> Bool {
 // succeed.
 #Export(c) jet_std_fs_map_advise: fn(map: I64, advice: I64, error: I64) -> I64 {
     length: rt_text_word(wrapping(map + I64{40}))
-    if (length == I64{0}) -> return I64{1}
+    if (length == I64{0}) { return I64{1} }
     result: host_call(I64{28}, rt_text_word(wrapping(map + I64{32})), length, advice)
-    if (result == I64{-22} && advice == I64{20}) -> return I64{1}
-    if (result < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_READ, rt_text_word(wrapping(map + I64{16})), -result, error)
+    if (result == I64{-22} && advice == I64{20}) { return I64{1} }
+    if (result < I64{0}) {
+        return compiler_fs_errno(HOST_IO_OP_READ, rt_text_word(wrapping(map + I64{16})), -result, error)
+    }
     I64{1}
 }
+
 // Byte windows lend the read-only mapped bytes the Map64 owner holds: the
 // route writes (data, length) and IR builds the View<U8> header over them,
 // which owns nothing. Bounds are the exact Int carriers; a boxed Int lies
 // outside any mapping.
 compiler_mapped_bound: fn(value: I64) -> I64 {
-    if (int_inline(value) && value >= I64{0}) -> return value
+    if (int_inline(value) && value >= I64{0}) { return value }
     I64{-1}
 }
+
 compiler_mapped_text: fn(text: I64, value: I64) -> I64 {
     shown: jet_rt_int_to_string(value)
     joined: jet_rt_string_append(text, shown)
     jet_rt_string_drop(shown)
     joined
 }
+
 compiler_mapped_window_error: fn(map: I64, first: I64, separator: I64, second: I64, error: I64) -> I64 {
     cause := jet_rt_string_clone(rt_static_text("mapped window "))
     cause = compiler_mapped_text(cause, first)
@@ -533,34 +585,41 @@ compiler_mapped_window_error: fn(map: I64, first: I64, separator: I64, second: I
     cause = compiler_mapped_text(cause, length)
     compiler_fs_error(HOST_IO_KIND_OTHER, HOST_IO_OP_READ, rt_text_word(wrapping(map + I64{16})), I64{0}, cause, error)
 }
+
 compiler_mapped_lend: fn(map: I64, start: I64, end: I64, output: I64, length: I64) -> I64 {
     rt_text_store(output, wrapping(rt_text_word(wrapping(map + I64{32})) + start))
     rt_text_store(length, end - start)
     I64{1}
 }
+
 // `window(start, end)`: the half-open byte range start..<end.
 #Export(c) jet_std_fs_map_window_view: fn(map: I64, start: I64, end: I64, output: I64, length: I64, error: I64) -> I64 {
     first: compiler_mapped_bound(start)
     last: compiler_mapped_bound(end)
-    if (first < I64{0} || last < first || last > rt_text_word(wrapping(map + I64{40}))) -> return compiler_mapped_window_error(map, start, rt_static_text(".."), end, error)
+    if (first < I64{0} || last < first || last > rt_text_word(wrapping(map + I64{40}))) {
+        return compiler_mapped_window_error(map, start, rt_static_text(".."), end, error)
+    }
     compiler_mapped_lend(map, first, last, output, length)
 }
+
 // `window_len(offset, length)`: `count` bytes from `offset`.
 #Export(c) jet_std_fs_map_window_len_view: fn(map: I64, offset: I64, count: I64, output: I64, length: I64, error: I64) -> I64 {
     first: compiler_mapped_bound(offset)
     size: compiler_mapped_bound(count)
     total: rt_text_word(wrapping(map + I64{40}))
-    if (first < I64{0} || size < I64{0} || first > total || size > total - first) -> return compiler_mapped_window_error(map, offset, rt_static_text(" length "), count, error)
+    if (first < I64{0} || size < I64{0} || first > total || size > total - first) {
+        return compiler_mapped_window_error(map, offset, rt_static_text(" length "), count, error)
+    }
     compiler_mapped_lend(map, first, first + size, output, length)
 }
+
 // The index of the first LF at or after `at`, or `total`.
 compiler_mapped_newline: fn(base: I64, at: I64, total: I64) -> I64 {
     cursor := at
-    loop cursor < total && rt_text_byte(wrapping(base + cursor)) != (I64{10}) {
-        cursor += I64{1}
-    }
+    loop cursor < total && rt_text_byte(wrapping(base + cursor)) != (I64{10}) -> cursor += I64{1}
     cursor
 }
+
 // `lines()`: one 24-byte View<U8> header (length, 0, data) per line, the LF
 // and a CR before it excluded; a final unterminated line counts, an empty
 // trailing one does not. The List buffer is exactly count*24 bytes.
@@ -588,11 +647,18 @@ compiler_mapped_newline: fn(base: I64, at: I64, total: I64) -> I64 {
     rt_text_store(output, data)
     count
 }
-#Export(c) jet_rt_record_get_jet_mapped_file_path: fn(map: I64) -> I64 { jet_rt_string_clone(rt_text_word(wrapping(map + I64{16}))) }
+
+#Export(c) jet_rt_record_get_jet_mapped_file_path: fn(map: I64) -> I64 {
+    jet_rt_string_clone(rt_text_word(wrapping(map + I64{16})))
+}
+
 // The Map56 fields Core's MappedFile reads in place: the path it was opened
 // with, and its bytes as a (length, 0, data) header over the read-only
 // mapping. Both lend storage the map owns; a caller copies them out.
-#Export(c) jet_rt_handle_field_jet_mapped_file_stored_path: fn(map: I64, out: I64) { coll_copy(rt_text_word(wrapping(map + I64{16})), out, I64{24}) }
+#Export(c) jet_rt_handle_field_jet_mapped_file_stored_path: fn(map: I64, out: I64) {
+    coll_copy(rt_text_word(wrapping(map + I64{16})), out, I64{24})
+}
+
 #Export(c) jet_rt_handle_field_jet_mapped_file_bytes: fn(map: I64, out: I64) {
     rt_text_store(out, rt_text_word(wrapping(map + I64{40})))
     rt_text_store(wrapping(out + I64{8}), I64{0})

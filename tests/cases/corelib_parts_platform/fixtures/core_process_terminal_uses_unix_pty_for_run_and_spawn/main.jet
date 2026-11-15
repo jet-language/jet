@@ -1,4 +1,3 @@
-
 use process: core.process
 
 run: fn() -[Exec, IO, Time.Wait]> {
@@ -11,7 +10,7 @@ run: fn() -[Exec, IO, Time.Wait]> {
     child: process.cmd(["printf", "spawn-ok"]).terminal().spawn() ?? panic("terminal spawn failed")
     if child.terminal == {
         .Val(session) -> {
-            session.resize(TerminalSize{ cols: 100, rows: 30 }) ?? panic("resize failed")
+            session.resize(TerminalSize{cols: 100, rows: 30}) ?? panic("resize failed")
             print("spawn: session")
         }
         .None -> { print("spawn: no session") }
@@ -28,7 +27,9 @@ run: fn() -[Exec, IO, Time.Wait]> {
         .Err(e) -> {
             if e == {
                 .InvalidInput(_) -> { print("empty: invalid") }
-                .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> { print("empty: wrong error") }
+                .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
+                    print("empty: wrong error")
+                }
             }
         }
     }

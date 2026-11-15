@@ -61,12 +61,13 @@ jet_cli_inspect_b: fn(argv: [String], command: String, jet_argv: [String], args:
 // The inspect commands the host carries out because they run another process
 // or evaluate a config surface through the compiler's comptime stage.
 JetCLIInspectBPlan: enum {
-    // `dispatch`: run `engine` with `argv` on inherited stdio.
     Engine(engine: String, verb: String, argv: [String])
-    // `run_env` for the config surface `file` (its bytes are `source`;
-    // `base_dir` is the directory its values resolve against).
     Env(file: String, source: String, base_dir: String, color: Bool, json: Bool)
 }
+
+// `dispatch`: run `engine` with `argv` on inherited stdio.
+// `run_env` for the config surface `file` (its bytes are `source`;
+// `base_dir` is the directory its values resolve against).
 
 // Config-surface evaluation reaches the compiler driver, whose host adapter
 // makes dynamic calls with no effect bound, so this stays unannotated like the
@@ -127,9 +128,34 @@ jet_cli_inspect_b_error: fn(code: String, what: String, color: Bool, json: Bool,
 // Syntax `FIRST_PARTY_RESERVED` (S51): first-party short names reserved
 // before packages land.
 JET_CLI_FIRST_PARTY_RESERVED: [String]{
-    "core", "jet", "c", "rust", "py", "js", "swift", "go", "java", "cs", "tcl", "lua", "fortran",
-    "cobol", "ada", "pascal", "dart", "pwsh", "perl", "r", "octave", "com", "http", "regex", "csv",
-    "toml", "crypto", "archive",
+    "core",
+    "jet",
+    "c",
+    "rust",
+    "py",
+    "js",
+    "swift",
+    "go",
+    "java",
+    "cs",
+    "tcl",
+    "lua",
+    "fortran",
+    "cobol",
+    "ada",
+    "pascal",
+    "dart",
+    "pwsh",
+    "perl",
+    "r",
+    "octave",
+    "com",
+    "http",
+    "regex",
+    "csv",
+    "toml",
+    "crypto",
+    "archive",
 }
 
 // One reserved word or sigil.
@@ -185,22 +211,28 @@ jet_cli_reserved_text: fn() -> String Never! {
     out := "keywords (not valid identifiers):\n"
     loop word in LEXER_KEYWORD_SPELLINGS -> out = "{out}  {word}\n"
     out = "{out}\nteaching-reserved words (not valid identifiers):\n"
-    loop entry in JET_CLI_TEACHING_RESERVED -> out = "{out}  {jet_cli_inspect_pad(entry.spelling, 10)} {entry.note}\n"
+    loop entry in JET_CLI_TEACHING_RESERVED {
+        out = "{out}  {jet_cli_inspect_pad(entry.spelling, 10)} {entry.note}\n"
+    }
     out = "{out}\ncontextual keywords (valid identifiers outside their form):\n"
     loop word in JET_KEYWORD_NAMES {
         if jet_cli_contextual_keyword(word) -> out = "{out}  {word}\n"
     }
     out = "{out}\nsigils:\n"
-    loop entry in JET_CLI_RESERVED_SIGILS -> out = "{out}  {jet_cli_inspect_pad(entry.spelling, 10)} {entry.note}\n"
+    loop entry in JET_CLI_RESERVED_SIGILS {
+        out = "{out}  {jet_cli_inspect_pad(entry.spelling, 10)} {entry.note}\n"
+    }
     out
 }
 
 jet_cli_reserved_entries: fn(entries: [JetCLIReservedEntry]) -> JetCLIStatusValue Never! {
-    rows: loop entry in entries -> jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("spelling", jet_cli_status_text(entry.spelling)),
-        jet_cli_status_field("kind", jet_cli_status_text(entry.kind)),
-        jet_cli_status_field("note", jet_cli_status_text(entry.note)),
-    })
+    rows: loop entry in entries -> jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("spelling", jet_cli_status_text(entry.spelling)),
+            jet_cli_status_field("kind", jet_cli_status_text(entry.kind)),
+            jet_cli_status_field("note", jet_cli_status_text(entry.note)),
+        },
+    )
     jet_cli_status_array(rows)
 }
 
@@ -210,23 +242,33 @@ jet_cli_reserved: fn(json: Bool) -> JetCLIPlan Never! {
     loop word in JET_KEYWORD_NAMES {
         if jet_cli_contextual_keyword(word) -> contextual.push(jet_cli_status_text(word))
     }
-    payload: jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("keywords", jet_cli_status_texts(LEXER_KEYWORD_SPELLINGS)),
-        jet_cli_status_field("teaching_reserved", jet_cli_reserved_entries(JET_CLI_TEACHING_RESERVED)),
-        jet_cli_status_field("contextual", jet_cli_status_array(contextual)),
-        jet_cli_status_field("sigils", jet_cli_reserved_entries(JET_CLI_RESERVED_SIGILS)),
-    })
+    payload: jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("keywords", jet_cli_status_texts(LEXER_KEYWORD_SPELLINGS)),
+            jet_cli_status_field("teaching_reserved", jet_cli_reserved_entries(JET_CLI_TEACHING_RESERVED)),
+            jet_cli_status_field("contextual", jet_cli_status_array(contextual)),
+            jet_cli_status_field("sigils", jet_cli_reserved_entries(JET_CLI_RESERVED_SIGILS)),
+        },
+    )
     jet_cli_done("{jet_cli_status_render("inspect.reserved", true, [JetCLIStatusField]{jet_cli_status_field("reserved", payload)})}\n", "", JET_DRIVER_EXIT_OK)
 }
 
 #Test("inspect reserved prints the lexer's keyword table and a teaching row for every retired word") {
     assert_eq(JET_CLI_TEACHING_RESERVED.len(), LEXER_RETIRED_SPELLINGS.len())
-    loop index in 0..<LEXER_RETIRED_SPELLINGS.len() -> assert_eq(JET_CLI_TEACHING_RESERVED[index].spelling, LEXER_RETIRED_SPELLINGS[index])
+    loop index in 0..<LEXER_RETIRED_SPELLINGS.len() {
+        assert_eq(JET_CLI_TEACHING_RESERVED[index].spelling, LEXER_RETIRED_SPELLINGS[index])
+    }
     text: jet_cli_reserved_text()
-    loop word in LEXER_KEYWORD_SPELLINGS -> assert(text.contains("\n  {word}\n"), "keyword `{word}` is missing")
-    loop entry in JET_CLI_TEACHING_RESERVED -> assert(text.contains("\n  {jet_cli_inspect_pad(entry.spelling, 10)} {entry.note}\n"))
+    loop word in LEXER_KEYWORD_SPELLINGS {
+        assert(text.contains("\n  {word}\n"), "keyword `{word}` is missing")
+    }
+    loop entry in JET_CLI_TEACHING_RESERVED {
+        assert(text.contains("\n  {jet_cli_inspect_pad(entry.spelling, 10)} {entry.note}\n"))
+    }
     loop word in JET_KEYWORD_NAMES {
-        if jet_cli_contextual_keyword(word) -> assert(text.contains("\n  {word}\n"), "contextual keyword `{word}` is missing")
+        if jet_cli_contextual_keyword(word) {
+            assert(text.contains("\n  {word}\n"), "contextual keyword `{word}` is missing")
+        }
     }
     assert(JET_KEYWORD_NAMES.contains("defer") && jet_cli_contextual_keyword("defer") && !jet_cli_contextual_keyword("fn"))
 }
@@ -297,16 +339,16 @@ jet_cli_digest_marker_declaration: fn(rule: TAppliedRule) -> String Never! {
         scopes: loop scope in rule.policy_scopes -> ".{scope}"
         settings.push("scopes: [{scopes.join(", ")}]")
     }
-    if rule.companion_site == .Val(companion) -> settings.push("companion: [{companion.rule}, .{companion.site}]")
+    if rule.companion_site == .Val(companion) {
+        settings.push("companion: [{companion.rule}, .{companion.site}]")
+    }
     fields.push("impl Marker {{ {settings.join("; ")} }}")
     "{rule.name}: struct {{ {fields.join(", ")} }}"
 }
 
 jet_cli_digest_marker_text: fn(rules: [TAppliedRule]) -> String Never! {
     out := "name\tregistered declaration"
-    loop rule in rules {
-        out = "{out}\n{rule.name}\t{jet_cli_digest_marker_declaration(rule)}"
-    }
+    loop rule in rules -> out = "{out}\n{rule.name}\t{jet_cli_digest_marker_declaration(rule)}"
     out
 }
 
@@ -554,7 +596,9 @@ jet_cli_digest: fn(options: [String], color: Bool, json: Bool) -[FS, Env]> JetCL
     if !list_topics && topic == None -> return jet_cli_digest_emit(digest, json)
     slices: jet_cli_digest_slices(digest)
     if list_topics {
-        if topic != None -> return jet_cli_inspect_b_fail("E2104", "`--list-topics` cannot be combined with `--topic`", "use `jet inspect digest --list-topics` or `jet inspect digest --topic <name>`", color, json, JET_DRIVER_EXIT_USAGE)
+        if topic != None {
+            return jet_cli_inspect_b_fail("E2104", "`--list-topics` cannot be combined with `--topic`", "use `jet inspect digest --list-topics` or `jet inspect digest --topic <name>`", color, json, JET_DRIVER_EXIT_USAGE)
+        }
         names: loop slice in slices -> slice.topic
         if json {
             topics: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("topics", jet_cli_status_texts(names))})
@@ -586,8 +630,11 @@ jet_cli_digest: fn(options: [String], color: Bool, json: Bool) -[FS, Env]> JetCL
 
 // Syntax `JETPACK_BINARY_NAME`, `ENGINE_PROTOCOL_FLAG`, `ROOT_ENGINE_DISPATCH_PID_ENV`.
 JET_CLI_JETPACK_BINARY: "jetpack"
+
 JET_CLI_ENGINE_PROTOCOL_FLAG: "--engine-protocol"
+
 JET_CLI_ROOT_ENGINE_DISPATCH_PID_ENV: ENV_JET_INTERNAL_ROOT_DISPATCH_PID
+
 // Names the `jetpack` engine every engine verb runs, ahead of the lookup.
 // `jet test --jetpack=<path>` sets it for the corpora a run executes.
 JET_CLI_JETPACK_BIN_ENV: ENV_JETPACK_BIN
@@ -613,7 +660,9 @@ jet_cli_find_engine_binary_for: fn(name: String, jet: String) -[FS, Env]> String
         loop directory in path.split(":") -> dirs.push(if directory == "" -> "." else -> directory)
     }
     loop directory in dirs {
-        if jet_cli_engine_candidate(jet_cli_authority_path(directory, name)) == .Val(found) -> return Val(found)
+        if jet_cli_engine_candidate(jet_cli_authority_path(directory, name)) == .Val(found) {
+            return Val(found)
+        }
     }
     None
 }
@@ -677,9 +726,7 @@ jet_cli_query_engine_protocol: fn(bin: String) -[Exec, Time.Wait]> String? Never
 jet_cli_engine_dispatch: fn(engine: String, verb: String, argv: [String]) -[Env, FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
     bin: jet_cli_find_engine_binary(engine) ?? return jet_cli_missing_engine(engine, verb, if engine == JET_CLI_JETPACK_BINARY -> jet_cli_named_engine() else -> None)
     reply: jet_cli_query_engine_protocol(bin)
-    if reply != Val(JET_VERSION) {
-        return jet_cli_version_skew(engine, JET_VERSION, reply)
-    }
+    if reply != Val(JET_VERSION) -> return jet_cli_version_skew(engine, JET_VERSION, reply)
     command := [String]{bin}
     loop argument in argv -> command.push(argument.copy())
     spec: cli_process.cmd(command).env(JET_CLI_ROOT_ENGINE_DISPATCH_PID_ENV, "{cli_process.current_pid()}").stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
@@ -832,20 +879,22 @@ jet_cli_inspect_env_host: fn(file: String, source: String, base_dir: String, col
         }
     }
     if json {
-        reads: loop read in plan.environment_reads -> jet_cli_status_object([JetCLIStatusField]{
-            jet_cli_status_field("name", jet_cli_status_text(read.name)),
-            jet_cli_status_field("type", jet_cli_status_text(read.ty)),
-        })
-        payload: jet_cli_status_object([JetCLIStatusField]{
-            jet_cli_status_field("file", jet_cli_status_text(file)),
-            jet_cli_status_field("reads", jet_cli_status_array(reads)),
-        })
+        reads: loop read in plan.environment_reads -> jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field("name", jet_cli_status_text(read.name)),
+                jet_cli_status_field("type", jet_cli_status_text(read.ty)),
+            },
+        )
+        payload: jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field("file", jet_cli_status_text(file)),
+                jet_cli_status_field("reads", jet_cli_status_array(reads)),
+            },
+        )
         return jet_cli_inspect_env_output("{jet_cli_status_render("inspect.env", true, [JetCLIStatusField]{jet_cli_status_field("env", payload)})}\n", "", JET_DRIVER_EXIT_OK)
     }
     out := "environment\nfile: {file}\n"
-    if plan.environment_reads.len() == 0 {
-        out = "{out}reads: none\n"
-    } else {
+    if plan.environment_reads.len() == 0 -> out = "{out}reads: none\n" else {
         out = "{out}reads:\n"
         loop read in plan.environment_reads -> out = "{out}  {read.name}: {read.ty}\n"
     }
@@ -910,7 +959,9 @@ jet_cli_schema: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPl
         }
         else -> {}
     }
-    if args.len() > 0 -> return jet_cli_inspect_b_fail("E2101", "`jet inspect schema {verb}` isn't a schema command", fix, color, json, JET_DRIVER_EXIT_USER_ERROR)
+    if args.len() > 0 {
+        return jet_cli_inspect_b_fail("E2101", "`jet inspect schema {verb}` isn't a schema command", fix, color, json, JET_DRIVER_EXIT_USER_ERROR)
+    }
     jet_cli_inspect_b_fail("E2104", "`jet inspect schema` needs a verb", fix, color, json, JET_DRIVER_EXIT_USER_ERROR)
 }
 
@@ -935,11 +986,21 @@ jet_cli_codemod: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIP
 // Inside a project, the bare form checks its lockfile against the signed
 // advisory feed (AuditAdvisory.jet).
 jet_cli_audit: fn(args: [String], color: Bool, json: Bool) -[FS, Env, Time]> JetCLIPlan Never! {
-    if args.len() > 0 && args[0] == "memory" -> return jet_cli_audit_memory_at(jet_cli_selected_root_or_cwd(), jet_cli_tail(args, 1), color, json)
-    if args.len() > 0 && args[0] == "copies" -> return jet_cli_audit_entry_plan(JetCLIAuditSubject.Copies, jet_cli_tail(args, 1), color, json)
-    if args.len() > 0 && args[0] == "writes" -> return jet_cli_audit_entry_plan(JetCLIAuditSubject.Writes, jet_cli_tail(args, 1), color, json)
-    if args.len() > 0 && args[0] == "foreign" -> return jet_cli_audit_entry_plan(JetCLIAuditSubject.Foreign, jet_cli_tail(args, 1), color, json)
-    if args.len() > 0 && args[0].ends_with(".jet") -> return jet_cli_audit_entry_plan(JetCLIAuditSubject.Copies, args, color, json)
+    if args.len() > 0 && args[0] == "memory" {
+        return jet_cli_audit_memory_at(jet_cli_selected_root_or_cwd(), jet_cli_tail(args, 1), color, json)
+    }
+    if args.len() > 0 && args[0] == "copies" {
+        return jet_cli_audit_entry_plan(JetCLIAuditSubject.Copies, jet_cli_tail(args, 1), color, json)
+    }
+    if args.len() > 0 && args[0] == "writes" {
+        return jet_cli_audit_entry_plan(JetCLIAuditSubject.Writes, jet_cli_tail(args, 1), color, json)
+    }
+    if args.len() > 0 && args[0] == "foreign" {
+        return jet_cli_audit_entry_plan(JetCLIAuditSubject.Foreign, jet_cli_tail(args, 1), color, json)
+    }
+    if args.len() > 0 && args[0].ends_with(".jet") {
+        return jet_cli_audit_entry_plan(JetCLIAuditSubject.Copies, args, color, json)
+    }
     if jet_cli_require_inspect_root(cli_files.cwd() ?? ".", "error: no package.jet found — run `jet inspect audit` inside a project", color) == {
         .Root(root) -> return JetCLIPlan.Done{output: jet_cli_advisory_audit(root, args, color, json)}
         .Refused(plan) -> return plan
@@ -949,7 +1010,9 @@ jet_cli_audit: fn(args: [String], color: Bool, json: Bool) -[FS, Env, Time]> Jet
 // `jet inspect sbom [--cyclonedx]`: refused after `require_manifest_root`; the
 // SPDX/CycloneDX writer is not built yet.
 jet_cli_sbom: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
-    if jet_cli_require_inspect_root(cli_files.cwd() ?? ".", "error: no package.jet found — run `jet inspect sbom` inside a project", color) == .Refused(plan) -> return plan
+    if jet_cli_require_inspect_root(cli_files.cwd() ?? ".", "error: no package.jet found — run `jet inspect sbom` inside a project", color) == .Refused(plan) {
+        return plan
+    }
     jet_cli_not_ported("inspect sbom", color)
 }
 
@@ -964,7 +1027,9 @@ jet_cli_sbom: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan
 // `--policy`, `--accept`, `--update`, `--explain`) are not ported.
 jet_cli_bind: fn(args: [String], color: Bool) -[FS, Env, Time]> JetCLIPlan Never! {
     if args.len() > 0 && args[0] == "com" {
-        if cli_sys.name() != "windows" -> return jet_cli_report_done("", "E3260", "`com.*` needs a Windows host.", "COM type libraries, apartments, and IDispatch are Windows facilities.", "Run `jet inspect bind com` and build the COM module on a Windows host.", color, JET_DRIVER_EXIT_USER_ERROR)
+        if cli_sys.name() != "windows" {
+            return jet_cli_report_done("", "E3260", "`com.*` needs a Windows host.", "COM type libraries, apartments, and IDispatch are Windows facilities.", "Run `jet inspect bind com` and build the COM module on a Windows host.", color, JET_DRIVER_EXIT_USER_ERROR)
+        }
         return jet_cli_not_ported("inspect bind com", color)
     }
     if args.len() > 0 && (args[0] == "json" || args[0] == "csv" || args[0] == "sql" || args[0] == "xml" || args[0] == "proto") {
@@ -981,9 +1046,13 @@ jet_cli_bind: fn(args: [String], color: Bool) -[FS, Env, Time]> JetCLIPlan Never
         }
     }
     if jet_cli_bind_plan_args(args) -> return jet_cli_not_ported("inspect bind <name>", color)
-    if args.len() > 0 && jet_cli_foreign_binder(args[0]) == .Val(binder) -> return JetCLIPlan.ForeignBind{binder: binder, args: jet_cli_tail(args, 1), color: color}
+    if args.len() > 0 && jet_cli_foreign_binder(args[0]) == .Val(binder) {
+        return JetCLIPlan.ForeignBind{binder: binder, args: jet_cli_tail(args, 1), color: color}
+    }
     if args.len() > 0 && args[0].ends_with(".h") -> return jet_cli_c_header_bind(args, color)
-    if args.len() > 0 && !jet_cli_is_help_flag(args[0]) -> return jet_cli_not_ported("inspect bind <name>", color)
+    if args.len() > 0 && !jet_cli_is_help_flag(args[0]) {
+        return jet_cli_not_ported("inspect bind <name>", color)
+    }
     usage: "usage: {JET_CLI_BINARY} inspect bind <header.h> [--pkg <lib>] [--overlay <path>] [--link <lib>] [-o <out.jet>]\n       {JET_CLI_BINARY} inspect bind <json|csv|sql|xml|proto> <input> [--type <Type>] [-o <output>]\n\nGenerate a C binding cache from a header (S59). The output is\na `#Bindgen c.<lib>.__bindgen__: module` file, by default written\nto .jet/bindings/c/<lib>.jet. The compiler also runs this\nautomatically on a cache miss; `jet inspect bind` is the manual refresh.\n"
     jet_cli_done("", usage, if args.len() == 0 -> JET_DRIVER_EXIT_USAGE else -> JET_DRIVER_EXIT_OK)
 }
@@ -992,7 +1061,9 @@ jet_cli_bind: fn(args: [String], color: Bool) -[FS, Env, Time]> JetCLIPlan Never
 // commands.
 jet_cli_bind_plan_args: fn(args: [String]) -> Bool Never! {
     loop argument in args {
-        if argument == "--shape" || argument == "--freeze" || argument == "--policy" || argument == "--accept" || argument == "--update" || argument == "--explain" -> return true
+        if argument == "--shape" || argument == "--freeze" || argument == "--policy" || argument == "--accept" || argument == "--update" || argument == "--explain" {
+            return true
+        }
     }
     false
 }

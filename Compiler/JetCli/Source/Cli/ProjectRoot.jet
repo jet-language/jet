@@ -83,7 +83,9 @@ jet_cli_find_repository_root: fn(start: String) -[FS, Env]> String? Never! {
 jet_cli_find_package_root_checked: fn(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String? ManifestError! {
     roots: if pkg_find_package_roots_checked(cache, start, true) == {
         .Ok(found) -> found
-        .Err(error) -> { return Err(error) }
+        .Err(error) -> {
+            return Err(error)
+        }
     }
     if roots.inline != None -> return Ok(roots.inline)
     Ok(roots.manifest)

@@ -2,12 +2,28 @@
 // `touch`, `mkfifo`) stand in for the Rust tests' libc calls.
 use {
     jet_pkg_model.[
-        ENVELOPE_ARCHIVE_MAGIC, Envelope, EnvelopeWalkEvent, EnvelopeWalkHook, EnvelopeWalkStage,
-        pkg_envelope_cas_key, pkg_envelope_hex8, pkg_envelope_mode, pkg_host_platform,
-        pkg_is_excluded_xattr, pkg_list_xattr_names, pkg_output_hash_of, pkg_reject_casefold_collisions,
-        pkg_sha256_hex, pkg_try_output_hash_of, pkg_try_output_hash_of_in_hangar,
-        pkg_try_output_hash_of_with_policy, pkg_u32_be_bytes, pkg_u64_be_bytes,
-        pkg_validate_path_component, pkg_validate_path_component_with_mode, pkg_xattr_value,
+        ENVELOPE_ARCHIVE_MAGIC,
+        Envelope,
+        EnvelopeWalkEvent,
+        EnvelopeWalkHook,
+        EnvelopeWalkStage,
+        pkg_envelope_cas_key,
+        pkg_envelope_hex8,
+        pkg_envelope_mode,
+        pkg_host_platform,
+        pkg_is_excluded_xattr,
+        pkg_list_xattr_names,
+        pkg_output_hash_of,
+        pkg_reject_casefold_collisions,
+        pkg_sha256_hex,
+        pkg_try_output_hash_of,
+        pkg_try_output_hash_of_in_hangar,
+        pkg_try_output_hash_of_with_policy,
+        pkg_u32_be_bytes,
+        pkg_u64_be_bytes,
+        pkg_validate_path_component,
+        pkg_validate_path_component_with_mode,
+        pkg_xattr_value,
     ]
     files: core.files
     process: core.process
@@ -89,7 +105,9 @@ pkg_test_reference_xattrs: fn(path: String, out: &[U8], allow: Bool) Never! -[FS
         if !pkg_is_excluded_xattr(name) -> names.push(name)
     }
     names.sort()
-    if names.len() == 0 -> return
+    if names.len() == 0 {
+        return
+    }
     // Fixture xattrs require an explicit allowance.
     assert(allow)
     loop name in names {
@@ -168,7 +186,9 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
 }
 
 #Test("envelope canonical archive stream matches the materialized reference") {
-    if !sys.is_linux() && !sys.is_macos() -> return
+    if !sys.is_linux() && !sys.is_macos() {
+        return
+    }
     dir: pkg_test_envelope_scratch("stream-reference")
     nested: files.join(dir, "nested/deeper")
     files.create_dir_all(nested) ?? panic("mkdir nested")
@@ -196,7 +216,9 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
 }
 
 #Test("envelope canonical archive hashes a large sparse file incrementally") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     dir: pkg_test_envelope_scratch("large-sparse")
     path: files.join(dir, "payload")
     size: 64 * 1024 * 1024
@@ -233,7 +255,9 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
 }
 
 #Test("envelope canonical archive covers modes and hardlinks") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     dir: pkg_test_envelope_scratch("mode-hardlink")
     file: files.join(dir, "file")
     files.write(file, "same bytes") ?? panic("write")
@@ -252,7 +276,9 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
 }
 
 #Test("envelope canonical archive rejects hardlinks outside the output") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     dir: pkg_test_envelope_scratch("outside-hardlink")
     file: files.join(dir, "payload")
     outside: files.join(files.dirname(dir), "outside-hardlink-{process.current_pid()}")
@@ -265,7 +291,9 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
 }
 
 #Test("envelope canonical archive rejects a wrong shared cas key") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     hangar: pkg_test_envelope_scratch("wrong-cas-key-hangar")
     output: files.join(hangar, "objects/output")
     pool: files.join(hangar, "cas")
@@ -279,7 +307,9 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
 }
 
 #Test("envelope canonical archive accepts a pool backed inode with a foreign peer") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     hangar: pkg_test_envelope_scratch("pool-backed-hardlink")
     output: files.join(hangar, "objects/output")
     pool: files.join(hangar, "cas")
@@ -299,7 +329,9 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
 }
 
 #Test("envelope canonical archive rejects a foreign peer without a cas entry") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     hangar: pkg_test_envelope_scratch("foreign-hardlink-no-cas")
     output: files.join(hangar, "objects/output")
     files.create_dir_all(output) ?? panic("mkdir output")
@@ -314,7 +346,9 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
 }
 
 #Test("envelope canonical archive hashes a symlink root only in hangar mode") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     hangar: pkg_test_envelope_scratch("symlink-root")
     output: files.join(hangar, "objects/output")
     files.create_dir_all(files.dirname(output)) ?? panic("mkdir objects")
@@ -333,7 +367,9 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
 }
 
 #Test("envelope canonical archive validates relative symlinks lexically") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     hangar: pkg_test_envelope_scratch("lexical-symlinks")
     output: files.join(hangar, "objects/output")
     files.create_dir_all(files.join(output, "bin")) ?? panic("mkdir bin")
@@ -354,7 +390,9 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
 }
 
 #Test("envelope canonical archive rejects concurrent add remove and replace") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     dir: pkg_test_envelope_scratch("concurrent-directory")
     keep: files.join(dir, "keep")
     files.write(keep, "before") ?? panic("write keep")
@@ -364,7 +402,9 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
     hook := EnvelopeWalkHook{
         events: [EnvelopeWalkEvent]{},
         react: fn(path: String, stage: EnvelopeWalkStage) -[FS]> {
-            if files.exists(marker) || path != dir || stage != EnvelopeWalkStage.DirectorySnapshotted -> return
+            if files.exists(marker) || path != dir || stage != EnvelopeWalkStage.DirectorySnapshotted {
+                return
+            }
             files.write(marker, "") ?? panic("marker")
             transient: files.join(dir, "transient")
             files.write(transient, "added") ?? panic("add")
@@ -372,7 +412,7 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
             replacement: files.join(dir, "replacement")
             files.write(replacement, "after!") ?? panic("replacement")
             files.rename(replacement, keep) ?? panic("replace")
-        }
+        },
     }
     assert(pkg_test_envelope_hook_error(dir, hook).contains("changed while hashing"))
     files.remove(marker).drop("cleanup")
@@ -386,7 +426,9 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
 }
 
 #Test("envelope canonical archive rejects an unreadable output") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     dir: pkg_test_envelope_scratch("unreadable-output")
     files.write(files.join(dir, "payload"), "bytes") ?? panic("write")
     files.set_mode(dir, 0o000) ?? panic("chmod 000")
@@ -407,23 +449,29 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
 }
 
 #Test("envelope canonical archive rejects an output disappearing during hash") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     dir: pkg_test_envelope_scratch("disappearing-output")
     payload: files.join(dir, "payload")
     files.write(payload, "bytes") ?? panic("write")
     hook := EnvelopeWalkHook{
         events: [EnvelopeWalkEvent]{},
         react: fn(path: String, stage: EnvelopeWalkStage) -[FS]> {
-            if path != payload || stage != EnvelopeWalkStage.FileOpened || !files.exists(payload) -> return
+            if path != payload || stage != EnvelopeWalkStage.FileOpened || !files.exists(payload) {
+                return
+            }
             files.remove(payload) ?? panic("remove payload")
-        }
+        },
     }
     assert(pkg_test_envelope_hook_error(dir, hook).contains("changed while hashing"))
     files.remove_all(dir) ?? panic("cleanup")
 }
 
 #Test("envelope canonical archive rejects a same size replacement with a restored mtime") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     dir: pkg_test_envelope_scratch("restored-mtime")
     file: files.join(dir, "payload")
     stamp: files.join(dir, "stamp")
@@ -442,11 +490,13 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
     hook := EnvelopeWalkHook{
         events: [EnvelopeWalkEvent]{},
         react: fn(path: String, stage: EnvelopeWalkStage) -[FS]> {
-            if files.exists(marker) || path != file || stage != EnvelopeWalkStage.FileOpened -> return
+            if files.exists(marker) || path != file || stage != EnvelopeWalkStage.FileOpened {
+                return
+            }
             files.write(marker, "") ?? panic("marker")
             files.rename(replacement, file) ?? panic("rewrite")
             assert_eq((files.stat(file) ?? panic("stat")).modified.to_unix_ns() ?? panic("mtime"), expected_mtime)
-        }
+        },
     }
     assert(pkg_test_envelope_hook_error(dir, hook).contains("changed while hashing"))
     files.remove(marker).drop("cleanup")
@@ -455,7 +505,9 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
 }
 
 #Test("envelope canonical archive rejects a symlink escape and a special file") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     dir: pkg_test_envelope_scratch("hostile-nodes")
     outside: files.join(files.dirname(dir), "outside-cache-proof-{process.current_pid()}")
     files.write(outside, "outside") ?? panic("write outside")
@@ -480,7 +532,7 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
     assert(pkg_validate_path_component("foo ".bytes()) == .Err(_))
     assert(pkg_validate_path_component("ok-name".bytes()) == .Ok(_))
     if pkg_reject_casefold_collisions([[U8]]{"Foo".bytes(), "foo".bytes()}) == {
-        .Ok(_) -> panic("a case-fold collision must be refused")
+        .Ok(_) -> { panic("a case-fold collision must be refused") }
         .Err(error) -> assert_eq(error.code, "case-fold")
     }
     assert(pkg_reject_casefold_collisions([[U8]]{"Foo".bytes(), "Bar".bytes()}) == .Ok(_))
@@ -497,7 +549,9 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
 }
 
 #Test("envelope sparse and dense zero holes share a digest") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     dir: pkg_test_envelope_scratch("sparse-policy")
     sparse: files.join(dir, "sparse")
     dense: files.join(dir, "dense")
@@ -516,7 +570,9 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
 }
 
 #Test("envelope path law rejects casefold siblings during hash") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     dir: pkg_test_envelope_scratch("casefold-sibs")
     files.write(files.join(dir, "Foo"), "a") ?? panic("write Foo")
     files.write(files.join(dir, "foo"), "b") ?? panic("write foo")
@@ -526,7 +582,9 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
 }
 
 #Test("envelope canonical archive accepts casefold siblings only in nix mode") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     hangar: pkg_test_envelope_scratch("nix-casefold-sibs")
     files.write(files.join(hangar, "Foo"), "a") ?? panic("write Foo")
     files.write(files.join(hangar, "foo"), "b") ?? panic("write foo")
@@ -538,12 +596,14 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
 }
 
 #Test("envelope canonical archive accepts backslash components only in nix mode") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     hangar: pkg_test_envelope_scratch("nix-backslash-name")
     name: "dev-disk-by\\x2duuid-test.device"
     files.write(files.join(hangar, name), "device") ?? panic("write")
     if pkg_validate_path_component(name.bytes()) == {
-        .Ok(_) -> panic("a backslash is refused outside Nix admission")
+        .Ok(_) -> { panic("a backslash is refused outside Nix admission") }
         .Err(error) -> assert_eq(error.code, "backslash")
     }
     assert(pkg_validate_path_component_with_mode(name.bytes(), true) == .Ok(_))
@@ -556,7 +616,9 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
 }
 
 #Test("envelope canonical archive hashes a file root deterministically in hangar mode") {
-    if !sys.is_linux() && !sys.is_macos() -> return
+    if !sys.is_linux() && !sys.is_macos() {
+        return
+    }
     hangar: pkg_test_envelope_scratch("nix-file-root")
     file: files.join(hangar, "file-root")
     files.write(file, "file-root bytes") ?? panic("write")
@@ -568,7 +630,9 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
 }
 
 #Test("envelope semantic xattr name and value are canonical digest bytes") {
-    if !sys.is_linux() -> return
+    if !sys.is_linux() {
+        return
+    }
     dir: pkg_test_envelope_scratch("xattr-digest")
     file: files.join(dir, "payload")
     files.write(file, "bytes") ?? panic("write")

@@ -13,14 +13,10 @@ Args: struct {
 PAIRS: 1024
 
 // The next state of a 31-bit linear congruential generator.
-next: fn(state: Int) -> Int {
-    (state * 1103515245 + 12345).bit_and(2147483647)
-}
+next: fn(state: Int) -> Int { (state * 1103515245 + 12345).bit_and(2147483647) }
 
 // Byte `at` of every list: the same pattern on both sides.
-byte_at: fn(at: Int) -> U8 {
-    U8{(at * 7 + 3).bit_and(255)}
-}
+byte_at: fn(at: Int) -> U8 { U8{(at * 7 + 3).bit_and(255)} }
 
 run: fn(args: Args) {
     passes: if args.n > 0 -> args.n else -> 1
@@ -56,7 +52,7 @@ run: fn(args: Args) {
         flip: pass.bit_and(PAIRS - 1)
         rights[flip][0] = rights[flip][0].bit_xor(U8{1})
         loop i in 0..<PAIRS {
-            same: lefts[i] == rights[i] // the compare
+            same: lefts[i] == rights[i]  // the compare
             if same -> total += 1
         }
     }

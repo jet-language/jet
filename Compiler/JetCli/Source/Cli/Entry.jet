@@ -16,14 +16,14 @@
 use {
     cli_files: core.files
     jet_driver.[
-    JetDriverAuthorizedSourceFile,
-    JetDriverCompileResult,
-    JET_DRIVER_EXIT_USAGE,
-    JET_DRIVER_EXIT_USER_ERROR,
-    jet_driver_inline_package,
-    jet_driver_inline_package_body,
-    jet_driver_mask_inline_package,
-    jet_driver_parse_user_source,
+        JetDriverAuthorizedSourceFile,
+        JetDriverCompileResult,
+        JET_DRIVER_EXIT_USAGE,
+        JET_DRIVER_EXIT_USER_ERROR,
+        jet_driver_inline_package,
+        jet_driver_inline_package_body,
+        jet_driver_mask_inline_package,
+        jet_driver_parse_user_source,
     ]
     jet_foundation.[
         AppAuthorizedDirectory,
@@ -35,34 +35,34 @@ use {
         diagnostic_from_registry,
     ]
     jet_lexer.[
-    TOKEN_BLOCK_COMMENT,
-    TOKEN_COLON,
-    TOKEN_COMMA,
-    TOKEN_DOT,
-    TOKEN_EOF,
-    TOKEN_FALSE,
-    TOKEN_HASH,
-    TOKEN_IDENT,
-    TOKEN_KW_FN,
-    TOKEN_KW_MODULE,
-    TOKEN_KW_USE,
-    TOKEN_LBRACE,
-    TOKEN_LBRACKET,
-    TOKEN_LINE_COMMENT,
-    TOKEN_LPAREN,
-    TOKEN_RAW_STRING,
-    TOKEN_RBRACE,
-    TOKEN_RBRACKET,
-    TOKEN_RPAREN,
-    TOKEN_STRING,
-    TOKEN_TRUE,
-    TOKEN_UNIT_NUMBER,
-    Token,
-    TokenTables,
-    token_decoded,
-    token_suffix,
-    lex,
-    lex_config,
+        TOKEN_BLOCK_COMMENT,
+        TOKEN_COLON,
+        TOKEN_COMMA,
+        TOKEN_DOT,
+        TOKEN_EOF,
+        TOKEN_FALSE,
+        TOKEN_HASH,
+        TOKEN_IDENT,
+        TOKEN_KW_FN,
+        TOKEN_KW_MODULE,
+        TOKEN_KW_USE,
+        TOKEN_LBRACE,
+        TOKEN_LBRACKET,
+        TOKEN_LINE_COMMENT,
+        TOKEN_LPAREN,
+        TOKEN_RAW_STRING,
+        TOKEN_RBRACE,
+        TOKEN_RBRACKET,
+        TOKEN_RPAREN,
+        TOKEN_STRING,
+        TOKEN_TRUE,
+        TOKEN_UNIT_NUMBER,
+        Token,
+        TokenTables,
+        token_decoded,
+        token_suffix,
+        lex,
+        lex_config,
     ]
     jet_pkg_model.[WorkspaceDeclarationCache, pkg_manifest_parse]
 }
@@ -350,12 +350,12 @@ jet_cli_build_profiles: fn(tokens: [Token], tables: TokenTables, open: Int, clos
                 loop at < list_close {
                     if jet_cli_is_manifest_string(tokens[at].kind) {
                         items.push(token_decoded(tables, tokens[at]))
-                    } else if tokens[at].kind != TOKEN_COMMA {
-                        strings = false
-                    }
+                    } else if tokens[at].kind != TOKEN_COMMA { strings = false }
                     at += 1
                 }
-                if strings -> fields.push(JetCLIProfileField{name: token_decoded(tables, tokens[field]), value: build_option_list_value(items), list: true})
+                if strings {
+                    fields.push(JetCLIProfileField{name: token_decoded(tables, tokens[field]), value: build_option_list_value(items), list: true})
+                }
                 field = list_close + 1
                 next
             }
@@ -420,7 +420,9 @@ jet_cli_manifest_facts: fn(source: String, origin: String) -> JetCLIManifest Nev
                     facts.name = token_decoded(lexed.tables, tokens[value])
                 }
             }
-            "members" -> facts.members = jet_cli_member_refs(tokens, lexed.tables, value) ?? [JetCLIMemberRef]{}
+            "members" -> {
+                facts.members = jet_cli_member_refs(tokens, lexed.tables, value) ?? [JetCLIMemberRef]{}
+            }
             "outputs" -> {
                 if tokens[value].kind == TOKEN_DOT -> value += 1
                 if value < tokens.len() && tokens[value].kind == TOKEN_LBRACE {
@@ -482,7 +484,9 @@ jet_cli_root_manifest: fn(root: String) -[FS]> JetCLIManifest? Never! {
 // None for a loose file.
 jet_cli_file_manifest: fn(file: String, source: String) -[FS]> JetCLIManifest? Never! {
     block: jet_driver_inline_package(source)
-    if block.found -> return Val(jet_cli_manifest_facts(jet_driver_inline_package_body(source, block), file))
+    if block.found {
+        return Val(jet_cli_manifest_facts(jet_driver_inline_package_body(source, block), file))
+    }
     root: jet_cli_manifest_root(jet_cli_parent(file) ?? ".") ?? return None
     jet_cli_root_manifest(root)
 }
@@ -509,7 +513,9 @@ jet_cli_top_level_function_lines: fn(source: String, wanted: String) -> [Int] Ne
     lexed: lex(bytes)
     tokens: jet_cli_significant_tokens(lexed.tokens)
     starts := [Int]{}
-    loop index in jet_cli_top_level_function_heads(tokens, lexed.tables, wanted) -> starts.push(tokens[index].span.start)
+    loop index in jet_cli_top_level_function_heads(tokens, lexed.tables, wanted) {
+        starts.push(tokens[index].span.start)
+    }
     jet_cli_offset_lines(bytes, starts)
 }
 
@@ -524,8 +530,12 @@ jet_cli_build_entry_lines: fn(source: String) -> [Int] Never! {
     starts := [Int]{}
     loop index in jet_cli_top_level_function_heads(tokens, lexed.tables, "build") {
         open: index + 3
-        if open + 4 >= tokens.len() || tokens[open].kind != TOKEN_LPAREN || tokens[open + 1].kind != TOKEN_IDENT || tokens[open + 2].kind != TOKEN_COLON -> next
-        if tokens[open + 3].kind == TOKEN_IDENT && token_decoded(lexed.tables, tokens[open + 3]) == "Build" && tokens[open + 4].kind == TOKEN_RPAREN -> starts.push(tokens[index].span.start)
+        if open + 4 >= tokens.len() || tokens[open].kind != TOKEN_LPAREN || tokens[open + 1].kind != TOKEN_IDENT || tokens[open + 2].kind != TOKEN_COLON {
+            next
+        }
+        if tokens[open + 3].kind == TOKEN_IDENT && token_decoded(lexed.tables, tokens[open + 3]) == "Build" && tokens[open + 4].kind == TOKEN_RPAREN {
+            starts.push(tokens[index].span.start)
+        }
     }
     jet_cli_offset_lines(bytes, starts)
 }
@@ -541,7 +551,9 @@ jet_cli_top_level_function_heads: fn(tokens: [Token], tables: TokenTables, wante
         if kind == TOKEN_RBRACE -> depth -= 1
         if depth != 0 || kind != TOKEN_IDENT || index + 2 >= tokens.len() -> next
         if index > 0 && tokens[index - 1].kind == TOKEN_DOT -> next
-        if tokens[index + 1].kind == TOKEN_COLON && tokens[index + 2].kind == TOKEN_KW_FN && token_decoded(tables, tokens[index]) == wanted -> heads.push(index)
+        if tokens[index + 1].kind == TOKEN_COLON && tokens[index + 2].kind == TOKEN_KW_FN && token_decoded(tables, tokens[index]) == wanted {
+            heads.push(index)
+        }
     }
     heads
 }
@@ -902,8 +914,12 @@ jet_cli_declares_web_target: fn(source: String) -> Bool Never! {
         if kind == TOKEN_LBRACE -> depth += 1
         if kind == TOKEN_RBRACE -> depth -= 1
         if kind != TOKEN_HASH || depth != 0 || index + 4 >= tokens.len() -> next
-        if tokens[index + 1].kind != TOKEN_IDENT || token_decoded(lexed.tables, tokens[index + 1]) != "Target" || tokens[index + 2].kind != TOKEN_LPAREN -> next
-        if tokens[index + 3].kind == TOKEN_IDENT && token_decoded(lexed.tables, tokens[index + 3]) == "Web" && tokens[index + 4].kind == TOKEN_RPAREN -> return true
+        if tokens[index + 1].kind != TOKEN_IDENT || token_decoded(lexed.tables, tokens[index + 1]) != "Target" || tokens[index + 2].kind != TOKEN_LPAREN {
+            next
+        }
+        if tokens[index + 3].kind == TOKEN_IDENT && token_decoded(lexed.tables, tokens[index + 3]) == "Web" && tokens[index + 4].kind == TOKEN_RPAREN {
+            return true
+        }
     }
     false
 }
@@ -915,8 +931,12 @@ jet_cli_declares_web_app: fn(source: String) -> Bool Never! {
     tokens: jet_cli_significant_tokens(lexed.tokens)
     loop index in 0..<tokens.len() {
         if index + 3 >= tokens.len() -> break
-        if tokens[index].kind != TOKEN_IDENT || token_decoded(lexed.tables, tokens[index]) != "web" || tokens[index + 1].kind != TOKEN_DOT -> next
-        if tokens[index + 2].kind == TOKEN_IDENT && token_decoded(lexed.tables, tokens[index + 2]) == "app" && tokens[index + 3].kind == TOKEN_LPAREN -> return true
+        if tokens[index].kind != TOKEN_IDENT || token_decoded(lexed.tables, tokens[index]) != "web" || tokens[index + 1].kind != TOKEN_DOT {
+            next
+        }
+        if tokens[index + 2].kind == TOKEN_IDENT && token_decoded(lexed.tables, tokens[index + 2]) == "app" && tokens[index + 3].kind == TOKEN_LPAREN {
+            return true
+        }
     }
     false
 }
@@ -925,7 +945,9 @@ jet_cli_declares_workspace_members: fn(source: String) -> Bool Never! {
     if !jet_cli_declares_workspace_module(source) -> return false
     lexed: lex(source.bytes())
     loop token in jet_cli_significant_tokens(lexed.tokens) {
-        if token.kind == TOKEN_IDENT && token_decoded(lexed.tables, token) == "members" -> return true
+        if token.kind == TOKEN_IDENT && token_decoded(lexed.tables, token) == "members" {
+            return true
+        }
     }
     false
 }
@@ -1226,13 +1248,17 @@ jet_cli_resolve_bare_entry: fn(command: String, cwd: String, member_flag: String
         stocks: found.stocks
         if member_flag == .Val(want) {
             loop (index, member) in runnable {
-                if member.name == want -> return jet_cli_workspace_member_entry(jet_cli_entry_join(root, member.path), entries[index], stocks[index], command, color)
+                if member.name == want {
+                    return jet_cli_workspace_member_entry(jet_cli_entry_join(root, member.path), entries[index], stocks[index], command, color)
+                }
             }
             names := [String]{}
             loop member in members_plan -> names.push(member.name)
             return JetCLIEntryFound.Refused{plan: jet_cli_fail("E2104", "no workspace member named `{want}`", jet_cli_why("E2104"), "pick one of: {names.join(", ")}", color, JET_DRIVER_EXIT_USAGE)}
         }
-        if runnable.len() == 1 -> return jet_cli_workspace_member_entry(jet_cli_entry_join(root, runnable[0].path), entries[0], stocks[0], command, color)
+        if runnable.len() == 1 {
+            return jet_cli_workspace_member_entry(jet_cli_entry_join(root, runnable[0].path), entries[0], stocks[0], command, color)
+        }
         if runnable.len() >= 2 {
             names := [String]{}
             loop member in runnable -> names.push(member.name)
@@ -1416,7 +1442,9 @@ jet_cli_package_is_library_only: fn(entry: String, compiled: JetDriverCompileRes
         }
         return true
     }
-    if jet_cli_errors(compiled.diagnostics).len() == 0 -> return compiled.run_member_paths.len() == 0
+    if jet_cli_errors(compiled.diagnostics).len() == 0 {
+        return compiled.run_member_paths.len() == 0
+    }
     jet_cli_package_run_member(root) == .None
 }
 

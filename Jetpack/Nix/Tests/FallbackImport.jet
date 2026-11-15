@@ -2,7 +2,10 @@
 // Records are built in memory so the claims do not depend on `json.parse`.
 use {
     jetpack_nix.[
-        NixFallbackCanonical, NixFallbackProjection, nix_fallback_detect, nix_fallback_import_field,
+        NixFallbackCanonical,
+        NixFallbackProjection,
+        nix_fallback_detect,
+        nix_fallback_import_field,
         nix_fallback_import_record,
     ]
     jet_pkg_model.[pkg_sha256_hex]
@@ -22,31 +25,33 @@ nix_test_fallback_import_error: fn(record: Dyn) -> String {
     }
 }
 
-nix_test_empty_list: fn() -> Dyn {
-    Dyn.Array([Dyn]{})
-}
+nix_test_empty_list: fn() -> Dyn { Dyn.Array([Dyn]{}) }
 
 // The criterion-8 fallback record, in its document order.
 nix_test_criterion8_import: fn() -> Dyn {
-    Dyn.Object([
-        "closedGraph": Dyn.Object(["root": Dyn.Object(["dependencies": nix_test_empty_list()])]),
-        "selectedOutputs": Dyn.Object(["out": Dyn.Text("/staging/greet")]),
-        "dependencies": nix_test_empty_list(),
-        "sources": nix_test_empty_list(),
-        "hashes": Dyn.Object(["out": Dyn.Text("output-hash")]),
-        "losses": nix_test_empty_list(),
-        "proof": Dyn.Object(["source": Dyn.Text("criterion-8")]),
-        "recipe": Dyn.Object(["kind": Dyn.Text("compatibility")]),
-        "lock": Dyn.Object(["system": Dyn.Text("x86_64-linux")]),
-    ])
+    Dyn.Object(
+        [
+            "closedGraph": Dyn.Object(["root": Dyn.Object(["dependencies": nix_test_empty_list()])]),
+            "selectedOutputs": Dyn.Object(["out": Dyn.Text("/staging/greet")]),
+            "dependencies": nix_test_empty_list(),
+            "sources": nix_test_empty_list(),
+            "hashes": Dyn.Object(["out": Dyn.Text("output-hash")]),
+            "losses": nix_test_empty_list(),
+            "proof": Dyn.Object(["source": Dyn.Text("criterion-8")]),
+            "recipe": Dyn.Object(["kind": Dyn.Text("compatibility")]),
+            "lock": Dyn.Object(["system": Dyn.Text("x86_64-linux")]),
+        ],
+    )
 }
 
 nix_test_criterion8_record: fn() -> Dyn {
-    Dyn.Object([
-        "drvPath": Dyn.Text("/nix/store/0fixture00000000000000000000-greet.drv"),
-        "outputs": Dyn.Object(["out": Dyn.Text("/staging/greet")]),
-        "jetpackImport": nix_test_criterion8_import(),
-    ])
+    Dyn.Object(
+        [
+            "drvPath": Dyn.Text("/nix/store/0fixture00000000000000000000-greet.drv"),
+            "outputs": Dyn.Object(["out": Dyn.Text("/staging/greet")]),
+            "jetpackImport": nix_test_criterion8_import(),
+        ],
+    )
 }
 
 #Test("nix fallback projections select exactly one accepted field") {
@@ -119,10 +124,12 @@ nix_test_criterion8_record: fn() -> Dyn {
 
 #Test("nix fallback record import reads an unwrapped root and skips the plain build shape") {
     plain: Dyn.Object(["drvPath": Dyn.Text("/nix/store/x-greet.drv"), "outputs": Dyn.Object(["out": Dyn.Text("/nix/store/x-greet")])])
-    assert((if nix_fallback_import_record(plain) == {
-        .Ok(found) -> found
-        .Err(error) -> panic("plain build shape is not an error")
-    }) == None)
+    assert(
+        (if nix_fallback_import_record(plain) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("plain build shape is not an error")
+        }) == None,
+    )
     unwrapped: if nix_fallback_import_record(nix_test_criterion8_import()) == {
         .Ok(found) -> found
         .Err(error) -> panic("unwrapped record must import")
@@ -140,9 +147,11 @@ nix_test_criterion8_record: fn() -> Dyn {
     assert_eq(nix_test_fallback_import_error(marked_only), "fallback document has no closed derivation graph field")
     doubled: Dyn.Object(["jetpack": Dyn.Object(["closedGraph": nix_test_empty_list(), "graph": nix_test_empty_list()])])
     assert_eq(nix_test_fallback_import_error(doubled), "fallback document has more than one closed derivation graph field")
-    nonfinite: Dyn.Object([
-        "jetpackImport": nix_test_criterion8_import(),
-        "score": Dyn.Float(Float.NAN),
-    ])
+    nonfinite: Dyn.Object(
+        [
+            "jetpackImport": nix_test_criterion8_import(),
+            "score": Dyn.Float(Float.NAN),
+        ],
+    )
     assert_eq(nix_test_fallback_import_error(nonfinite), "fallback document contains a non-finite number")
 }

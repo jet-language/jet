@@ -4,7 +4,8 @@ use files: core.files
     root: cases_test_root("json-operators")
     source: "write: doc = \"{{\\\"a\\\":1,\\\"b\\\":true,\\\"items\\\":[1,true,null,\\\"x\\\"]}}\"\njson: file doc doc $ keys = [\"b\",\"a\",\"items\"]\njson: file doc doc $.items has 1\njson: file doc doc $.items has true\njson: file doc doc $.items has null\njson: file doc doc $.items has \"x\"\njson: file doc doc $.a in [1,2]\njson: file doc doc $.a >= 1\njson: file doc doc $.a < 2\njson: file doc doc $.missing != 0\njson: file doc doc $.a == $.items[0]\njson: file doc doc $.items[-1] = \"x\"\n"
     assert_eq(cases_test_advanced(root, "operators", source).verdict.status, "PASS")
-    loop predicate in ["$.items has false", "$.a in [2]", "$.missing != null", "$ keys = []", "$.a > 1", "$.a == $.b"] {
+    loop predicate in
+        ["$.items has false", "$.a in [2]", "$.missing != null", "$ keys = []", "$.a > 1", "$.a == $.b"] {
         failed: "write: doc = \"{{\\\"a\\\":1,\\\"b\\\":true,\\\"items\\\":[1]}}\"\njson: file doc doc {predicate}\n"
         assert_eq(cases_test_advanced(root, "failure", failed).verdict.status, "FAIL")
     }

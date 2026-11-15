@@ -2,9 +2,12 @@
 // Eighteen runtime I64 captures give the canonical box size 24 + 18*8 = 168;
 // the C driver observes its real allocator calls, not simulated drop counters.
 #Import(c) closure_ref_test_input: fn(index: I64) -> I64 = "jet_closure_ref_test_input"
+
 #Import(c) closure_ref_test_enter: fn() = "jet_closure_ref_test_enter"
 
-ClosureRefTestHolder: struct { call: fn() -> I64 }
+ClosureRefTestHolder: struct {
+    call: fn() -> I64
+}
 
 closure_ref_test_holder: fn() -> Shared<ClosureRefTestHolder> {
     a: closure_ref_test_input(I64{1})
@@ -45,24 +48,7 @@ closure_ref_test_worker: fn(holder: Shared<ClosureRefTestHolder>) -> I64 {
 closure_ref_test_all: fn(holder: Shared<ClosureRefTestHolder>) -> I64 {
     sum := I64{0}
     task.group workers {
-        results: task.all {
-            closure_ref_test_worker(holder), closure_ref_test_worker(holder),
-            closure_ref_test_worker(holder), closure_ref_test_worker(holder),
-            closure_ref_test_worker(holder), closure_ref_test_worker(holder),
-            closure_ref_test_worker(holder), closure_ref_test_worker(holder),
-            closure_ref_test_worker(holder), closure_ref_test_worker(holder),
-            closure_ref_test_worker(holder), closure_ref_test_worker(holder),
-            closure_ref_test_worker(holder), closure_ref_test_worker(holder),
-            closure_ref_test_worker(holder), closure_ref_test_worker(holder),
-            closure_ref_test_worker(holder), closure_ref_test_worker(holder),
-            closure_ref_test_worker(holder), closure_ref_test_worker(holder),
-            closure_ref_test_worker(holder), closure_ref_test_worker(holder),
-            closure_ref_test_worker(holder), closure_ref_test_worker(holder),
-            closure_ref_test_worker(holder), closure_ref_test_worker(holder),
-            closure_ref_test_worker(holder), closure_ref_test_worker(holder),
-            closure_ref_test_worker(holder), closure_ref_test_worker(holder),
-            closure_ref_test_worker(holder), closure_ref_test_worker(holder),
-        } ?? panic("closure workers failed")
+        results: task.all {closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder), closure_ref_test_worker(holder)} ?? panic("closure workers failed")
         loop result in results -> sum += result
     }
     sum

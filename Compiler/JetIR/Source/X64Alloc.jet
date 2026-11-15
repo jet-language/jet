@@ -51,44 +51,51 @@
 // `sub rsp` for the frame homes, StackAddress storage and the result storage
 // of calls that return an aggregate, rounded so rsp stays 16-byte aligned
 // at every call.
-
 use jet_foundation.[Type, compiler_threads_single, name_rows_set]
 
 // Callee-saved registers handed to General slots, in preference order.
 IR_X64_SLOT_REGISTERS: [Int]{3, 12, 13, 14, 15}
+
 // A leaf's: r8 and r9 first, then the callee-saved ones; rsi and rdi past
 // them (from row IR_X64_LEAF_WIDE on), which only the leaf's open slots
 // take, and those first (ir_x64_leaf_open).
 IR_X64_LEAF_REGISTERS: [Int]{8, 9, 3, 12, 13, 14, 15, 6, 7}
+
 IR_X64_LEAF_WIDE: 7
+
 // The scratch registers a leaf's slots move onto past its pool where no
 // template writes them (ir_x64_leaf_scratch), rdx first: the fewest write
 // it.
 IR_X64_LEAF_SCRATCH: [Int]{2, 1, 11, 10, 0}
+
 // Any other function's: the callee-saved ones, then r8 and r9 for a slot
 // whose range holds no instruction that may call (ir_x64_silent) but the
 // exact Int routes (ir_x64_int_calls).
 IR_X64_QUIET_REGISTERS: [Int]{3, 12, 13, 14, 15, 8, 9}
+
 // The xmm registers handed to Float slots, in preference order. From row
 // IR_X64_XMM_OPEN on, those a call's third to eighth Float arguments fill:
 // only for a Float slot other than a parameter (whose own arrives in one of
 // them) and whose range holds no call passing more than two Floats.
 IR_X64_XMM_REGISTERS: [Int]{8, 9, 10, 11, 12, 13, 14, 15, 2, 3, 4, 5, 6, 7}
+
 IR_X64_XMM_OPEN: 8
+
 IR_X64_LOOP_WEIGHT: 16
 
 // How a slot's value is held.
 IRX64Class: enum {
-    // Unit: nothing is stored.
     Empty
-    // A word in a general register or an 8-byte home (Bool, Int, fixed-width
-    // integers, Char, String, raw and owned pointers, and an aggregate's
-    // pointer to its bytes).
     General
-    // Float bits in an xmm register (a Float32 in its low half) or an 8-byte
-    // home (a Float32 zero-extended).
     Float
 }
+
+// Unit: nothing is stored.
+// A word in a general register or an 8-byte home (Bool, Int, fixed-width
+// integers, Char, String, raw and owned pointers, and an aggregate's
+// pointer to its bytes).
+// Float bits in an xmm register (a Float32 in its low half) or an 8-byte
+// home (a Float32 zero-extended).
 
 // The layout facts selection reads of a type row: scalars only, so a copy
 // never copies the checked type.
@@ -170,11 +177,17 @@ IRX64Allocation: struct {
 // `b`; the `c` call arguments from `b`; `a` and those arguments; `a` and
 // `c`; `a` when it is a slot (a Return's value).
 IR_X64_READS_NONE: 0
+
 IR_X64_READS_A: 1
+
 IR_X64_READS_AB: 2
+
 IR_X64_READS_ARGS: 3
+
 IR_X64_READS_A_ARGS: 4
+
 IR_X64_READS_AC: 5
+
 IR_X64_READS_RESULT: 6
 
 ir_x64_read_form: fn(op: IROp) -> Int Never! {
@@ -194,7 +207,9 @@ ir_x64_read_form: fn(op: IROp) -> Int Never! {
 ir_x64_reads_into: fn(f: IRFunction, at: Int, reads: &[Int]) Never! {
     reads.clear()
     form: ir_x64_read_form(f.op[at])
-    if form == IR_X64_READS_NONE -> return
+    if form == IR_X64_READS_NONE {
+        return
+    }
     a: f.a[at]
     if form != IR_X64_READS_ARGS && (form != IR_X64_READS_RESULT || a >= 0) -> reads.push(a)
     if form == IR_X64_READS_AB -> reads.push(f.b[at])
@@ -227,7 +242,9 @@ ir_x64_write: fn(f: IRFunction, at: Int) -> Int Never! {
 ir_x64_quiet: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], at: Int) -> Bool Never! {
     op: f.op[at]
     if op == .ConstText || op == .DataAddress || op == .FunctionAddress -> return true
-    if op == .CallRuntime -> return ir_x64_inline_unique(m, f, at) || ir_x64_inline_atomic(m, f, at) != ""
+    if op == .CallRuntime {
+        return ir_x64_inline_unique(m, f, at) || ir_x64_inline_atomic(m, f, at) != ""
+    }
     // The rest read slot `a`; any other instruction is no quiet value.
     reads_slot: if op == {
         .Copy | .Move | .Add | .Sub | .Mul | .Div | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not -> true
@@ -235,7 +252,9 @@ ir_x64_quiet: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], at: 
     }
     if !reads_slot || f.a[at] < 0 -> return false
     row: m.types[f.slot_type[f.a[at]]]
-    if op == .Copy || op == .Move -> return op == .Move || row.drop == "" || row.kind == .Aggregate || ir_clone_shares(row.clone)
+    if op == .Copy || op == .Move {
+        return op == .Move || row.drop == "" || row.kind == .Aggregate || ir_clone_shares(row.clone)
+    }
     kind: row.kind
     wrap: f.c[at] == IR_OVERFLOW_WRAP
     float: kind == .Float || kind == .Float32
@@ -276,7 +295,9 @@ ir_x64_inline_atomic: fn(m: IRModule, f: IRFunction, at: Int) -> String Never! {
         "jet_rt_atomic_i64_store" | "jet_rt_atomic_u64_store" -> "store"
         "jet_rt_atomic_i64_add" | "jet_rt_atomic_u64_add" -> "add"
         "jet_rt_atomic_i64_compare_exchange" | "jet_rt_atomic_u64_compare_exchange" -> "compare_exchange"
-        else -> return ""
+        else -> {
+            return ""
+        }
     }
     arity: if operation == "load" -> 1 else if operation == "compare_exchange" -> 3 else -> 2
     if f.c[at] != arity -> return ""
@@ -316,7 +337,9 @@ ir_x64_silent: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], at:
 // General arguments are at most four, so its loads into the argument
 // registers (X64Select.jet ir_x64_tail_jump) never write r8 or r9.
 ir_x64_tail_silent: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
-    if f.op[at] != .Call || at + 1 >= f.op.len() || f.op[at + 1] != .Return || f.b[at + 1] != IR_TAIL_JUMP -> return false
+    if f.op[at] != .Call || at + 1 >= f.op.len() || f.op[at + 1] != .Return || f.b[at + 1] != IR_TAIL_JUMP {
+        return false
+    }
     general := 0
     loop position in f.b[at]..<(f.b[at] + f.c[at]) {
         if ir_x64_slot_class(m, f, f.args[position]) == .General -> general += 1
@@ -380,12 +403,16 @@ ir_x64_covered_drop: fn(m: IRModule, f: IRFunction, consts: [Bool], at: Int) -> 
     op: f.op[owner]
     compare: op == .Eq || op == .Ne || op == .Lt || op == .Le || op == .Gt || op == .Ge
     if op != .Add && op != .Sub && op != .Mul && !compare -> return false
-    if f.a[owner] < 0 || m.types[f.slot_type[f.a[owner]]].kind != .Int || ir_overflow_wraps(f.c[owner]) -> return false
+    if f.a[owner] < 0 || m.types[f.slot_type[f.a[owner]]].kind != .Int || ir_overflow_wraps(f.c[owner]) {
+        return false
+    }
     if (op == .Eq || op == .Ne) && (consts[f.a[owner]] || consts[f.b[owner]]) -> return false
     drops := [Int]{}
     loop next in first..<(at + 1) {
         slot: f.a[next]
-        if (slot != f.a[owner] && slot != f.b[owner]) || slot == f.dst[owner] || (drops.len() == 1 && drops[0] == slot) -> return false
+        if (slot != f.a[owner] && slot != f.b[owner]) || slot == f.dst[owner] || (drops.len() == 1 && drops[0] == slot) {
+            return false
+        }
         row: m.types[f.slot_type[slot]]
         if row.kind != .Int || row.drop == "" -> return false
         drops.push(slot)
@@ -415,7 +442,9 @@ ir_x64_silent_slots: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int
 ir_x64_leaf_open: fn(f: IRFunction, masks: [Int], general: [Bool], starts: [Int], ends: [Int]) -> [Bool] Never! {
     // Per instruction, how many before it may write rsi or rdi.
     writers := [Int]{0}
-    loop at in 0..<f.op.len() -> writers.push(writers[at] + (if masks[at].bit_and(IR_X64_LEAF_OPEN_MASK) == 0 -> 0 else -> 1))
+    loop at in 0..<f.op.len() {
+        writers.push(writers[at] + (if masks[at].bit_and(IR_X64_LEAF_OPEN_MASK) == 0 -> 0 else -> 1))
+    }
     loop slot in 0..<starts.len() -> general[slot] && slot >= f.param_count && starts[slot] >= 0 && writers[ends[slot] + 1] == writers[starts[slot]]
 }
 
@@ -434,7 +463,9 @@ ir_x64_leaf_scratch: fn(f: IRFunction, masks: [Int], general: [Bool], starts: [I
     held := loop _ in 0..<span -> 0
     loop slot in 0..<count {
         if regs[slot] < 0 || starts[slot] > ends[slot] -> next
-        loop at in (starts[slot] + 1)..<(ends[slot] + 2) -> held[at] = held[at].bit_or(1 << regs[slot])
+        loop at in (starts[slot] + 1)..<(ends[slot] + 2) {
+            held[at] = held[at].bit_or(1 << regs[slot])
+        }
     }
     work := IR_X64_FILL_WORK * (span + count)
     groups := [Int]{}
@@ -454,18 +485,20 @@ ir_x64_leaf_scratch: fn(f: IRFunction, masks: [Int], general: [Bool], starts: [I
         }
         if !movable && reg >= 0 -> next
         batches := [[Int]]{}
-        if reg >= 0 {
-            batches.push(members.move())
-        } else {
+        if reg >= 0 -> batches.push(members.move()) else {
             loop member in members -> batches.push([Int]{member})
         }
         loop batch in batches {
             barred := 0
             loop slot in batch {
                 work -= ends[slot] - starts[slot] + 1
-                loop at in starts[slot]..<(ends[slot] + 1) -> barred = barred.bit_or(masks[at]).bit_or(held[at + 1])
+                loop at in starts[slot]..<(ends[slot] + 1) {
+                    barred = barred.bit_or(masks[at]).bit_or(held[at + 1])
+                }
             }
-            if work < 0 -> return
+            if work < 0 {
+                return
+            }
             target := -1
             loop candidate in IR_X64_LEAF_SCRATCH {
                 if target < 0 && barred.bit_and(1 << candidate) == 0 -> target = candidate
@@ -473,7 +506,9 @@ ir_x64_leaf_scratch: fn(f: IRFunction, masks: [Int], general: [Bool], starts: [I
             if target < 0 -> next
             loop slot in batch {
                 regs[slot] = target
-                loop at in (starts[slot] + 1)..<(ends[slot] + 2) -> held[at] = held[at].bit_or(1 << target)
+                loop at in (starts[slot] + 1)..<(ends[slot] + 2) {
+                    held[at] = held[at].bit_or(1 << target)
+                }
             }
         }
     }
@@ -482,22 +517,28 @@ ir_x64_leaf_scratch: fn(f: IRFunction, masks: [Int], general: [Bool], starts: [I
 // Register masks: bit r for general register r (X64_RAX 0 ... X64_R11 11).
 // rsi and rdi, the registers a leaf's open slots add (ir_x64_leaf_open).
 IR_X64_LEAF_OPEN_MASK: 0xc0
+
 // Every register C lets a call clobber: rax, rcx, rdx, rsi, rdi, r8-r11.
 IR_X64_CALL_SCRATCH: 0xfc7
+
 // A quiet value's (ir_x64_quiet): rax, rcx, r10 and r11; a Mul's rdx too.
 IR_X64_QUIET_SCRATCH: 0xc03
+
 // A memory access's (X64Select.jet ir_x64_memory): rax for the value, r10
 // for the address and r11 for a folded index.
 IR_X64_MEMORY_SCRATCH: 0xc01
+
 // A select's End (X64Select.jet ir_x64_pick): its test re-selected there,
 // rax, rcx and rdx, and r10, which holds the then arm's value; r11 with
 // the quiet values.
 IR_X64_PICK_SCRATCH: 0xc07
+
 // A tail call's (X64Select.jet ir_x64_tail_jump, ir_x64_tail_silent): rdx
 // and rcx, the third and fourth argument registers, and r10 and r11, where
 // it moves sources aside. A source in rdi or rsi moves aside before they
 // fill, and no value of the frame is read after the jump.
 IR_X64_TAIL_SCRATCH: 0xc06
+
 // A quiet `#FFI(asm)` template's (ir_x64_asm_silent): every caller-saved
 // register but r8 and r9.
 IR_X64_ASM_SCRATCH: 0xcc7
@@ -547,7 +588,9 @@ ir_x64_scratches: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int]) 
     masks := loop at in 0..<f.op.len() -> ir_x64_scratch(m, f, consts, values, at)
     loop at in 0..<f.op.len() {
         otherwise: f.b[at]
-        if f.op[at] != .If || otherwise <= at || f.c[at] <= otherwise || f.c[at] >= f.op.len() -> next
+        if f.op[at] != .If || otherwise <= at || f.c[at] <= otherwise || f.c[at] >= f.op.len() {
+            next
+        }
         armed := true
         k := at + 1
         loop armed && k < f.c[at] {
@@ -664,12 +707,14 @@ ir_x64_grow_range: fn(starts: &[Int], ends: &[Int], slot: Int, head: Int, tail: 
 // such a place (the deepest such arm's). `around` holds per instruction the
 // innermost Block, Loop or If around it.
 ir_x64_one_shot: fn(f: IRFunction, depths: [Int], around: [Int], bases: &[Int], head: Int, lo: Int, hi: Int) Never! {
-    if hi < lo -> return
-    last := hi
-    loop last >= lo && f.op[last] == .Nop {
-        last -= 1
+    if hi < lo {
+        return
     }
-    if last < lo || (f.op[last] != .Return && f.op[last] != .Unreachable && f.op[last] != .Br) -> return
+    last := hi
+    loop last >= lo && f.op[last] == .Nop -> last -= 1
+    if last < lo || (f.op[last] != .Return && f.op[last] != .Unreachable && f.op[last] != .Br) {
+        return
+    }
     // The most loops around a place the arm leaves to.
     outer := 0
     loop at in lo..<(hi + 1) {
@@ -682,7 +727,9 @@ ir_x64_one_shot: fn(f: IRFunction, depths: [Int], around: [Int], bases: &[Int], 
         }
         if place >= head {
             // A branch to the If's End goes on past it.
-            if place == head -> return
+            if place == head {
+                return
+            }
             next
         }
         // Past a Block's or an If's End the loops around it go on; a Loop
@@ -821,11 +868,13 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
         armed.push(outer > 0)
         if op == .Block || op == .Loop || op == .If {
             openers.push(at)
-            arms.push(if {
-                op == .Loop -> 0
-                op == .If -> outer + 1
-                else -> outer
-            })
+            arms.push(
+                if {
+                    op == .Loop -> 0
+                    op == .If -> outer + 1
+                    else -> outer
+                },
+            )
         }
     }
     bases := loop _ in 0..<f.op.len() -> 0
@@ -833,7 +882,9 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
         if f.op[at] != .If || f.c[at] <= at || f.c[at] >= f.op.len() -> next
         middle: if f.b[at] > at && f.b[at] < f.c[at] -> f.b[at] else -> f.c[at]
         ir_x64_one_shot(f, depths, around, bases, at, at + 1, middle - 1)
-        if middle < f.c[at] -> ir_x64_one_shot(f, depths, around, bases, at, middle + 1, f.c[at] - 1)
+        if middle < f.c[at] {
+            ir_x64_one_shot(f, depths, around, bases, at, middle + 1, f.c[at] - 1)
+        }
     }
     weight_at := loop at in 0..<f.op.len() -> ir_x64_level_weight(depths[at] - bases[at])
     heats := loop at in 0..<f.op.len() -> ir_x64_heat(depths[at] - bases[at], armed[at])
@@ -871,7 +922,9 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
                 peaks[slot] = heats[at]
                 peak_weights[slot] = 0
             }
-            if heats[at] == peaks[slot] -> peak_weights[slot] = peak_weights[slot] + ir_x64_level_weight(heats[at])
+            if heats[at] == peaks[slot] {
+                peak_weights[slot] = peak_weights[slot] + ir_x64_level_weight(heats[at])
+            }
         }
         written: ir_x64_write(f, at)
         if written >= 0 && written < count {
@@ -886,7 +939,9 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
                 peaks[written] = heats[at]
                 peak_weights[written] = 0
             }
-            if heats[at] == peaks[written] -> peak_weights[written] = peak_weights[written] + ir_x64_level_weight(heats[at])
+            if heats[at] == peaks[written] {
+                peak_weights[written] = peak_weights[written] + ir_x64_level_weight(heats[at])
+            }
             last_write[written] = at
         }
         left_reads.push(left)
@@ -919,7 +974,9 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
         derived = false
         loop slot in 0..<count {
             at: last_write[slot]
-            if roots[slot] >= 0 || at < 0 || slot < f.param_count || writes[slot] != 1 || classes[slot] != .General -> next
+            if roots[slot] >= 0 || at < 0 || slot < f.param_count || writes[slot] != 1 || classes[slot] != .General {
+                next
+            }
             op: f.op[at]
             if op != .Copy && op != .Move && op != .Offset -> next
             source: f.a[at]
@@ -955,20 +1012,18 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     open := [Int]{}
     nested := true
     loop at in 0..<f.op.len() {
-        loop open.len() > 0 && loop_ends[open[open.len() - 1]] < at {
-            _ := open.pop()
-        }
+        loop open.len() > 0 && loop_ends[open[open.len() - 1]] < at -> _ := open.pop()
         holder: if open.len() > 0 -> open[open.len() - 1] else -> -1
         inner.push(holder)
         if f.op[at] == .Loop {
             row: parents.len()
             heads.push(row)
             parents.push(holder)
-            if loop_ends[row] <= at || loop_ends[row] >= f.op.len() || (holder >= 0 && loop_ends[row] > loop_ends[holder]) -> nested = false
+            if loop_ends[row] <= at || loop_ends[row] >= f.op.len() || (holder >= 0 && loop_ends[row] > loop_ends[holder]) {
+                nested = false
+            }
             open.push(row)
-        } else {
-            heads.push(-1)
-        }
+        } else { heads.push(-1) }
     }
     // Grow every range that is live around a back edge to its whole loop,
     // until no range changes. Growing is monotone, so every order of trying
@@ -984,17 +1039,23 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
             if nested {
                 row := if starts[slot] >= 0 -> inner[starts[slot]] else -> -1
                 loop row >= 0 {
-                    if ir_x64_grow_range(starts, ends, slot, loop_starts[row], loop_ends[row], first_writes[slot]) -> changed = true
+                    if ir_x64_grow_range(starts, ends, slot, loop_starts[row], loop_ends[row], first_writes[slot]) {
+                        changed = true
+                    }
                     row = parents[row]
                 }
                 row = if heads[ends[slot]] >= 0 -> heads[ends[slot]] else -> inner[ends[slot]]
                 loop row >= 0 {
-                    if ir_x64_grow_range(starts, ends, slot, loop_starts[row], loop_ends[row], first_writes[slot]) -> changed = true
+                    if ir_x64_grow_range(starts, ends, slot, loop_starts[row], loop_ends[row], first_writes[slot]) {
+                        changed = true
+                    }
                     row = parents[row]
                 }
             } else {
                 loop row in 0..<loop_starts.len() {
-                    if ir_x64_grow_range(starts, ends, slot, loop_starts[row], loop_ends[row], first_writes[slot]) -> changed = true
+                    if ir_x64_grow_range(starts, ends, slot, loop_starts[row], loop_ends[row], first_writes[slot]) {
+                        changed = true
+                    }
                 }
             }
         }
@@ -1144,7 +1205,9 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
         stack.push(disp)
     }
     frames := [Int]{}
-    loop slot in 0..<count -> frames.push(if roots[slot] >= 0 -> stack[last_write[roots[slot]]] + shifts[slot] else -> 0)
+    loop slot in 0..<count {
+        frames.push(if roots[slot] >= 0 -> stack[last_write[roots[slot]]] + shifts[slot] else -> 0)
+    }
     total: ir_x64_align(depth, 16)
     frame_bytes: total - 8 * kept.len()
     IRX64Allocation{regs: regs.move(), xmms: xmms.move(), xmm_slots: xmm_slots.move(), routed: routed.move(), homes: homes.move(), consts: consts.move(), values: values.move(), frames: frames.move(), starts: starts.move(), ends: ends.move(), stack: stack.move(), saved: kept.move(), frame_bytes: frame_bytes, result_home: result_home, result_storage: result_storage}
@@ -1192,14 +1255,22 @@ ir_x64_aliases: fn(m: IRModule, f: IRFunction, starts: [Int], ends: [Int], last_
     loop slot in 0..<count {
         aliases.push(-1)
         at: last_write[slot]
-        if slot < f.param_count || at < 0 || writes[slot] != 1 || starts[slot] != at || ends[slot] - at > IR_X64_ALIAS_SPAN -> next
-        if (classes[slot] != .General && classes[slot] != .Float) || consts[slot] || addressed[slot] || m.types[f.slot_type[slot]].size != 8 -> next
+        if slot < f.param_count || at < 0 || writes[slot] != 1 || starts[slot] != at || ends[slot] - at > IR_X64_ALIAS_SPAN {
+            next
+        }
+        if (classes[slot] != .General && classes[slot] != .Float) || consts[slot] || addressed[slot] || m.types[f.slot_type[slot]].size != 8 {
+            next
+        }
         op: f.op[at]
         if op != .Move && op != .Copy -> next
         source: f.a[at]
-        if source < 0 || source >= count || source == slot || classes[source] != classes[slot] || consts[source] || addressed[source] -> next
+        if source < 0 || source >= count || source == slot || classes[source] != classes[slot] || consts[source] || addressed[source] {
+            next
+        }
         row: m.types[f.slot_type[source]]
-        if row.size != 8 || (op == .Copy && row.drop != "" && row.kind != .Aggregate && !ir_clone_shares(row.clone)) -> next
+        if row.size != 8 || (op == .Copy && row.drop != "" && row.kind != .Aggregate && !ir_clone_shares(row.clone)) {
+            next
+        }
         if starts[source] > at || ends[source] < ends[slot] -> next
         written := false
         loop k in (at + 1)..<(ends[slot] + 1) {
@@ -1230,14 +1301,22 @@ ir_x64_phis: fn(m: IRModule, f: IRFunction, starts: [Int], ends: [Int], last_wri
     loop slot in 0..<count {
         phis.push(-1)
         at: starts[slot]
-        if slot < f.param_count || at < 0 || writes[slot] != 2 || ir_x64_write(f, at) != slot || ends[slot] - at > IR_X64_ALIAS_SPAN -> next
-        if (classes[slot] != .General && classes[slot] != .Float) || consts[slot] || addressed[slot] || m.types[f.slot_type[slot]].size != 8 -> next
+        if slot < f.param_count || at < 0 || writes[slot] != 2 || ir_x64_write(f, at) != slot || ends[slot] - at > IR_X64_ALIAS_SPAN {
+            next
+        }
+        if (classes[slot] != .General && classes[slot] != .Float) || consts[slot] || addressed[slot] || m.types[f.slot_type[slot]].size != 8 {
+            next
+        }
         op: f.op[at]
         if op != .Move && op != .Copy -> next
         source: f.a[at]
-        if source < 0 || source >= count || source == slot || classes[source] != classes[slot] || consts[source] || addressed[source] -> next
+        if source < 0 || source >= count || source == slot || classes[source] != classes[slot] || consts[source] || addressed[source] {
+            next
+        }
         row: m.types[f.slot_type[source]]
-        if row.size != 8 || (op == .Copy && row.drop != "" && row.kind != .Aggregate && !ir_clone_shares(row.clone)) -> next
+        if row.size != 8 || (op == .Copy && row.drop != "" && row.kind != .Aggregate && !ir_clone_shares(row.clone)) {
+            next
+        }
         branch: around[at]
         if branch < 0 || f.op[branch] != .If -> next
         middle: f.b[branch]
@@ -1283,7 +1362,9 @@ ir_x64_result_storage: fn(m: IRModule, f: IRFunction, last_write: [Int], writes:
     }
     if found < f.param_count || f.slot_kind[found] != .Temp || writes[found] != 1 -> return -1
     at: last_write[found]
-    if at < 0 || f.op[at] != .StackAddress || ir_x64_storage_size(f, at) != m.types[f.result].size || f.b[at] > 8 -> return -1
+    if at < 0 || f.op[at] != .StackAddress || ir_x64_storage_size(f, at) != m.types[f.result].size || f.b[at] > 8 {
+        return -1
+    }
     found
 }
 
@@ -1383,7 +1464,9 @@ ir_x64_scan: fn(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], op
         riders = live.move()
         victim := 0
         loop row in 1..<rows {
-            if ir_x64_lighter(held[row], ends[owners[row]], held[victim], ends[owners[victim]]) -> victim = row
+            if ir_x64_lighter(held[row], ends[owners[row]], held[victim], ends[owners[victim]]) {
+                victim = row
+            }
         }
         loser: owners[victim]
         if ir_x64_lighter(held[victim], ends[loser], weights[slot], ends[slot]) {
@@ -1449,7 +1532,9 @@ ir_x64_fill_homes: fn(starts: [Int], ends: [Int], weights: [Int], eligible: [Boo
         lo: starts[slot] + 1
         hi: ends[slot] + 1
         work -= hi - lo + 1
-        if work < 0 -> return
+        if work < 0 {
+            return
+        }
         taken := 0
         loop at in lo..<(hi + 1) -> taken = taken.bit_or(held[at])
         rows: if open[slot] -> pool.len() else -> wide

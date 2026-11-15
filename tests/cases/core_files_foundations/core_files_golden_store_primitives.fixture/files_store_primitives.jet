@@ -6,7 +6,6 @@ package: {
 // Store-grade core.files primitives: exclusive create with a mode,
 // no-follow opens, file identity, held directories, refusing and swapping
 // renames, and extended attributes. Each failure prints its IOError kind.
-
 use files: core.files
 
 kind: fn(error: IOError) -> String {
@@ -29,14 +28,14 @@ run: fn() {
     out.write_line("payload")
     out.flush()
     if files.create(partial, if_exists: .Refuse) == {
-        .Ok(_) -> print("second create: replaced")
+        .Ok(_) -> { print("second create: replaced") }
         .Err(error) -> print("second create: {kind(error)}")
     }
 
     // D-CORE-FILEOPEN1: a final link is refused when asked.
     files.symlink("pkg.partial.1", files.join(root, "alias"))
     if files.open(files.join(root, "alias"), links: .Refuse) == {
-        .Ok(_) -> print("open through link: followed")
+        .Ok(_) -> { print("open through link: followed") }
         .Err(error) -> print("open through link: {kind(error)}")
     }
 
@@ -59,15 +58,15 @@ run: fn() {
     sealed.flush()
     stage.fsync()
     if store.create_directory("stage") == {
-        .Ok(_) -> print("create_directory twice: created")
+        .Ok(_) -> { print("create_directory twice: created") }
         .Err(error) -> print("create_directory twice: {kind(error)}")
     }
     if store.open("../escape") == {
-        .Ok(_) -> print("open ..: opened")
+        .Ok(_) -> { print("open ..: opened") }
         .Err(error) -> print("open ..: {kind(error)}")
     }
     if store.open("alias") == {
-        .Ok(_) -> print("held open of a link: opened")
+        .Ok(_) -> { print("held open of a link: opened") }
         .Err(error) -> print("held open of a link: {kind(error)}")
     }
     reader := store.open("stage/payload")
@@ -81,20 +80,20 @@ run: fn() {
     store.rename("stage", "pkg", if_exists: .Refuse)
     _other: store.create_directory("other")
     if store.rename("other", "pkg", if_exists: .Refuse) == {
-        .Ok(_) -> print("refusing rename: replaced")
+        .Ok(_) -> { print("refusing rename: replaced") }
         .Err(error) -> print("refusing rename: {kind(error)}")
     }
     if store.rename("missing", "pkg", if_exists: .Swap) == {
-        .Ok(_) -> print("swap with missing: swapped")
+        .Ok(_) -> { print("swap with missing: swapped") }
         .Err(error) -> print("swap with missing: {kind(error)}")
     }
     if store.rename("pkg", "other", if_exists: .Swap) == {
-        .Ok(_) -> print("swap: {store.entry_stat("other/payload").is_file}")
+        .Ok(_) -> { print("swap: {store.entry_stat("other/payload").is_file}") }
         .Err(error) -> print("swap: {kind(error) == "Unsupported"}")
     }
     store.fsync()
     if files.rename(partial, files.join(root, "twin"), if_exists: .Refuse) == {
-        .Ok(_) -> print("path rename refuse: replaced")
+        .Ok(_) -> { print("path rename refuse: replaced") }
         .Err(error) -> print("path rename refuse: {kind(error)}")
     }
     store.remove("alias")

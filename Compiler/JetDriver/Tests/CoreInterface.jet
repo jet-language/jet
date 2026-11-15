@@ -6,12 +6,27 @@ use {
     interface_sys: core.sys
     jet_cli.[jet_cli_driver_request]
     jet_driver.[
-        JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode,
-        JetDriverCompileRequest, JetDriverCoreInterfaceEntry, JetDriverCoreInterfaceReader, JetDriverCoreInterfaceUnit, JetDriverCoreSource,
-        JetDriverLoadResult, jet_driver_core_heads_bytes, jet_driver_core_heads_program, jet_driver_core_interface_bytes,
-        jet_driver_core_interface_entries, jet_driver_core_interface_text_hash, jet_driver_core_interface_unit, jet_driver_core_interface_unit_bytes,
-        jet_driver_core_interface_units, jet_driver_core_text,
-        jet_driver_load, jet_driver_runtime_interface_sources,
+        JetDriverAuthorizedSourceFile,
+        JetDriverAuthorizedSourceRoot,
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode,
+        JetDriverCompileRequest,
+        JetDriverCoreInterfaceEntry,
+        JetDriverCoreInterfaceReader,
+        JetDriverCoreInterfaceUnit,
+        JetDriverCoreSource,
+        JetDriverLoadResult,
+        jet_driver_core_heads_bytes,
+        jet_driver_core_heads_program,
+        jet_driver_core_interface_bytes,
+        jet_driver_core_interface_entries,
+        jet_driver_core_interface_text_hash,
+        jet_driver_core_interface_unit,
+        jet_driver_core_interface_unit_bytes,
+        jet_driver_core_interface_units,
+        jet_driver_core_text,
+        jet_driver_load,
+        jet_driver_runtime_interface_sources,
     ]
     jet_foundation.[CORE_SOURCE_OWNED_ROWS, CompilerTraceSink, Func, Item, Program, Span, compiler_threads_single]
 }
@@ -54,10 +69,14 @@ interface_test_round_trip: fn(units: [JetDriverCoreInterfaceUnit], texts: [Strin
             assert(jet_driver_core_heads_bytes(program) == read.heads)
         }
         loop body in read.bodies {
-            if body.start >= body.end || body.end > source.len() -> panic("{unit.path}: the body span {body.start}..{body.end} is not inside its {source.len()} bytes")
+            if body.start >= body.end || body.end > source.len() {
+                panic("{unit.path}: the body span {body.start}..{body.end} is not inside its {source.len()} bytes")
+            }
             // `{` and `}`.
             braced: source[body.start] == U8{123} && source[body.end - 1] == U8{125}
-            if !braced -> panic("{unit.path}: the body span {body.start}..{body.end} is not a braced body")
+            if !braced {
+                panic("{unit.path}: the body span {body.start}..{body.end} is not a braced body")
+            }
         }
     }
 }
@@ -153,35 +172,33 @@ InterfaceTestTrace: struct {
         end: fn(self, name: String, items: Int) Never! -[FS, Time]> {}
 
         progress: fn(self, name: String, done: Int, total: Int) Never! -[FS, Time]> {
-            if name.starts_with("counters.load.") || name == "counters.parse.core_tokens" || name == "counters.parse.core_heads_decoded" || name == "counters.parse.core_input_bytes" -> fs.append_all(self.path, "{name} = {done}\n") ?? panic("cannot write the trace: {err}")
+            if name.starts_with("counters.load.") || name == "counters.parse.core_tokens" || name == "counters.parse.core_heads_decoded" || name == "counters.parse.core_input_bytes" {
+                fs.append_all(self.path, "{name} = {done}\n") ?? panic("cannot write the trace: {err}")
+            }
         }
 
-        functions: fn(self) -[]> Bool Never! {
-            false
-        }
+        functions: fn(self) -[]> Bool Never! { false }
 
-        cpu_ns: fn(self) -[Time]> Int Never! {
-            0
-        }
+        cpu_ns: fn(self) -[Time]> Int Never! { 0 }
     }
 }
 
-interface_test_sink: fn(trace: &&InterfaceTestTrace) -> CompilerTraceSink Never! {
-    trace.move()
-}
+interface_test_sink: fn(trace: &&InterfaceTestTrace) -> CompilerTraceSink Never! { trace.move() }
 
 // The check request of the one user file `source` over Core `rows`,
 // reading the interface file `interface` when it has one, its counters
 // going to `path`.
 interface_test_request: fn(source: String, rows: [JetDriverCoreSource], interface: [U8], path: String) -> JetDriverCompileRequest {
     snapshot: JetDriverAuthorizedSourceSnapshot{
-        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{
-            canonical_path: "/interface-fixture",
-            identity: "interface-root",
-            allow_hardlinks: false,
-            files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/interface-fixture/main.jet", relative_path: "main.jet", identity: "interface-file", source: source}},
-            foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
-        }},
+        roots: [JetDriverAuthorizedSourceRoot]{
+            JetDriverAuthorizedSourceRoot{
+                canonical_path: "/interface-fixture",
+                identity: "interface-root",
+                allow_hardlinks: false,
+                files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/interface-fixture/main.jet", relative_path: "main.jet", identity: "interface-file", source: source}},
+                foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+            },
+        },
         entry_root_identity: "interface-root",
         entry_path: "/interface-fixture/main.jet",
     }
@@ -209,7 +226,9 @@ interface_test_load: fn(source: String, rows: [JetDriverCoreSource], interface: 
     counters := [String:Int]{}
     loop line in trace.split("\n") {
         parts: line.split(" = ").to_list()
-        if parts.len() == 2 -> counters[parts[0]] = (counters.get(parts[0]) ?? 0) + (Int.parse(parts[1]) ?? panic("the counter line `{line}` has no number"))
+        if parts.len() == 2 {
+            counters[parts[0]] = (counters.get(parts[0]) ?? 0) + (Int.parse(parts[1]) ?? panic("the counter line `{line}` has no number"))
+        }
     }
     fs.remove(path) ?? panic("cannot remove the trace: {err}")
     InterfaceTestLoad{load: load, counters: counters}
@@ -232,7 +251,9 @@ interface_test_body_ends: fn(items: [Item]) -> [Int:Bool] {
         if item == .Impl(value) -> methods.extend(value.methods)
         if item == .Trait(value) {
             loop method in value.methods {
-                if method.default_body == .Val(body) && body.len() > 0 -> ends[method.span.end] = true
+                if method.default_body == .Val(body) && body.len() > 0 {
+                    ends[method.span.end] = true
+                }
             }
         }
         loop method in methods {
@@ -247,7 +268,9 @@ interface_test_body_ends: fn(items: [Item]) -> [Int:Bool] {
 interface_test_stripped: fn(bodies: [Span], ends: [Int:Bool]) -> [Span] {
     stripped := [Span]{}
     loop body in bodies {
-        if ends.get(body.end) == None -> stripped.push(Span{start: body.start + 1, end: body.end - 1})
+        if ends.get(body.end) == None {
+            stripped.push(Span{start: body.start + 1, end: body.end - 1})
+        }
     }
     stripped
 }
@@ -268,23 +291,35 @@ interface_test_tables: fn(program: Program, stripped: [Span]) -> [String] {
         if !interface_test_inside(span.start, span.end, stripped) -> rows.push("block {span:Debug}")
     }
     loop arm in program.else_arms {
-        if !interface_test_inside(arm.table.start, arm.table.end, stripped) -> rows.push("else {arm:Debug}")
+        if !interface_test_inside(arm.table.start, arm.table.end, stripped) {
+            rows.push("else {arm:Debug}")
+        }
     }
     loop site in program.debug_sites {
-        if !interface_test_inside(site.name_start, site.close_end, stripped) -> rows.push("debug {site:Debug}")
+        if !interface_test_inside(site.name_start, site.close_end, stripped) {
+            rows.push("debug {site:Debug}")
+        }
     }
     loop fenced in program.fenced_statements {
-        if !interface_test_inside(fenced.span.start, fenced.span.end, stripped) -> rows.push("fenced {fenced:Debug}")
+        if !interface_test_inside(fenced.span.start, fenced.span.end, stripped) {
+            rows.push("fenced {fenced:Debug}")
+        }
     }
     loop policy in program.policy_declarations {
-        if !interface_test_inside(policy.span.start, policy.span.end, stripped) -> rows.push("policy {policy:Debug}")
+        if !interface_test_inside(policy.span.start, policy.span.end, stripped) {
+            rows.push("policy {policy:Debug}")
+        }
     }
     loop rule in program.applied_rules {
-        if rule.target == .Val(target) && interface_test_inside(target.start, target.end, stripped) -> next
+        if rule.target == .Val(target) && interface_test_inside(target.start, target.end, stripped) {
+            next
+        }
         rows.push("rule {rule:Debug}")
     }
     loop fact in program.rule_facts {
-        if fact.target == .Val(target) && interface_test_inside(target.start, target.end, stripped) -> next
+        if fact.target == .Val(target) && interface_test_inside(target.start, target.end, stripped) {
+            next
+        }
         rows.push("fact {fact:Debug}")
     }
     rows
@@ -300,7 +335,9 @@ interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult,
     if eager.complete != lazy.complete -> differ.push("complete {eager.complete} {lazy.complete}")
     eager_diagnostics: loop diagnostic in eager.diagnostics -> "{diagnostic.code} {diagnostic.what}"
     lazy_diagnostics: loop diagnostic in lazy.diagnostics -> "{diagnostic.code} {diagnostic.what}"
-    if eager_diagnostics != lazy_diagnostics -> differ.push("diagnostics {eager_diagnostics} {lazy_diagnostics}")
+    if eager_diagnostics != lazy_diagnostics {
+        differ.push("diagnostics {eager_diagnostics} {lazy_diagnostics}")
+    }
     if eager.modules.len() != lazy.modules.len() {
         differ.push("modules {eager.modules.len()} {lazy.modules.len()}")
         return differ
@@ -311,14 +348,22 @@ interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult,
         other: lazy.modules[index]
         name: module_row.module_name
         if name != other.module_name -> differ.push("module {index}: {name} {other.module_name}")
-        if "{module_row.program.imports:Debug}" != "{other.program.imports:Debug}" -> differ.push("{name}: imports")
-        if "{module_row.program.items:Debug}" != "{other.program.items:Debug}" -> differ.push("{name}: items")
+        if "{module_row.program.imports:Debug}" != "{other.program.imports:Debug}" {
+            differ.push("{name}: imports")
+        }
+        if "{module_row.program.items:Debug}" != "{other.program.items:Debug}" {
+            differ.push("{name}: items")
+        }
         stripped: interface_test_stripped(bodies.get(name) ?? [Span]{}, interface_test_body_ends(other.program.items))
         eager_tables: interface_test_tables(module_row.program, stripped)
         lazy_tables: interface_test_tables(other.program, stripped)
-        if eager_tables != lazy_tables -> differ.push("{name}: side tables {eager_tables} {lazy_tables}")
+        if eager_tables != lazy_tables {
+            differ.push("{name}: side tables {eager_tables} {lazy_tables}")
+        }
         loop spelled in other.program.used_import_names {
-            if !module_row.program.used_import_names.contains(spelled) -> differ.push("{name}: spells {spelled}")
+            if !module_row.program.used_import_names.contains(spelled) {
+                differ.push("{name}: spells {spelled}")
+            }
         }
     }
     differ
@@ -383,6 +428,7 @@ interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult,
     eager: interface_test_load(source, interface_test_fixture_rows(), [U8]{})
     assert_eq(interface_test_differ(eager.load, cut.load, units), [String]{})
 }
+
 // A unit whose first item's marker shares its line (`#SingleUse Token: …`),
 // then a function, a type with a method and a second function. The unit
 // holds a declaration either way, so the parse that reads its kept bodies

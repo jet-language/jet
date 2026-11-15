@@ -19,7 +19,9 @@ run: fn() {
     args: process.args()
     if args.len() > 0 {
         status: files.read_or(args[0], "").trim()
-        if status != "OK" -> process.fail(3, "batch {files.basename(args[0])} is {if status == "" -> "missing" else -> status}")
+        if status != "OK" {
+            process.fail(3, "batch {files.basename(args[0])} is {if status == "" -> "missing" else -> status}")
+        }
         return print("batch is OK")
     }
     root: files.mktemp("script-fallbacks")

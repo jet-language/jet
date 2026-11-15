@@ -29,17 +29,28 @@ use {
 }
 
 JET_CLI_RUST_ARTIFACT_SCHEMA: "jet-ffi-artifacts-v2"
+
 JET_CLI_RUST_PROVENANCE_SCHEMA: "jet-ffi-bridge-provenance-v1"
+
 JET_CLI_RUST_SANDBOX_POLICY: "filesystem=source-readonly,output-private-copy;process=private-pid,parent-death;network=declared-shared;environment=clear;devices=private-dev;privilege=no-new-privs+cap-drop-all;resources=tmpfs-64MiB"
-JetCLIRustForeignArtifact: struct { plan: JetDriverRustForeignPlan, target_dir: String, release: String }
+
+JetCLIRustForeignArtifact: struct {
+    plan: JetDriverRustForeignPlan
+    target_dir: String
+    release: String
+}
 
 // The helper's exact StaticLibrary, which joins the program's native link.
-jet_cli_rust_foreign_archive: fn(artifact: JetCLIRustForeignArtifact) -> String Never! { "{artifact.release}/lib{artifact.plan.crate_name}.a" }
+jet_cli_rust_foreign_archive: fn(artifact: JetCLIRustForeignArtifact) -> String Never! {
+    "{artifact.release}/lib{artifact.plan.crate_name}.a"
+}
+
 jet_cli_rust_foreign_diagnostic: fn(error: JetDriverRustForeignError) -> Diagnostic Never! {
     result := diagnostic_from_registry(error.code, None, error.what, error.why, error.fix)
     result.detail = error.detail
     result
 }
+
 jet_cli_rust_foreign_report: fn(error: JetDriverRustForeignError, color: Bool) -> String Never! {
     diagnostic_render_all("", "", [Diagnostic]{jet_cli_rust_foreign_diagnostic(error)}, color)
 }
@@ -47,16 +58,21 @@ jet_cli_rust_foreign_report: fn(error: JetDriverRustForeignError, color: Bool) -
 jet_cli_rust_foreign_io: fn(message: String) -> JetDriverRustForeignError Never! {
     JetDriverRustForeignError{code: "E0704", what: message, why: "building the foreign crate bridge failed", fix: "check disk permissions and try again"}
 }
+
 jet_cli_rust_foreign_sandbox_error: fn(detail: String) -> JetDriverRustForeignError Never! {
     JetDriverRustForeignError{code: "E1275", what: "build sandboxing is required but unavailable", why: detail, fix: "{NATIVE_SANDBOX_FIX}; Jet will not run Cargo unsandboxed"}
 }
+
 jet_cli_rust_foreign_digest: fn(bytes: [U8]) -> String Never! {
     sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))
 }
+
 jet_cli_rust_foreign_hex: fn(value: String) -> Bool Never! {
     if value.len() != 64 -> return false
     loop byte in value.bytes() {
-        if !((byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{97}) && byte <= (U8{102}))) -> return false
+        if !((byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{97}) && byte <= (U8{102}))) {
+            return false
+        }
     }
     true
 }
@@ -72,10 +88,12 @@ jet_cli_rust_foreign_read: fn(directory: cli_files.Directory, name: String) -[FS
     }
     Ok(bytes)
 }
+
 jet_cli_rust_foreign_text: fn(directory: cli_files.Directory, name: String) -[FS]> String JetDriverRustForeignError! {
     bytes: jet_cli_rust_foreign_read(directory, name)
     String.from_bytes(bytes) ?? return Err(jet_cli_rust_foreign_io("FFI input `{directory.path}/{name}` is not UTF-8"))
 }
+
 // A `durable` file's bytes are flushed before it is used. Private workspace
 // files are deleted with the workspace, so they are never flushed: an fsync
 // waits for every dirty page on the filesystem.
@@ -83,9 +101,12 @@ jet_cli_rust_foreign_write: fn(directory: cli_files.Directory, name: String, byt
     writer := directory.create(name, .Replace, Val(384)) ?? return Err(jet_cli_rust_foreign_io("couldn't stage FFI input `{name}`: {err}"))
     writer.write_bytes(bytes) ?? return Err(jet_cli_rust_foreign_io("couldn't write FFI input `{name}`: {err}"))
     writer.set_mode(mode) ?? return Err(jet_cli_rust_foreign_io("couldn't preserve FFI output permissions: {err}"))
-    if durable -> writer.fsync() ?? return Err(jet_cli_rust_foreign_io("couldn't flush FFI input `{name}`: {err}"))
+    if durable {
+        writer.fsync() ?? return Err(jet_cli_rust_foreign_io("couldn't flush FFI input `{name}`: {err}"))
+    }
     Ok()
 }
+
 // Publish one shared file by renaming a staged copy over `name`. Only a
 // `durable` file (the digest manifest, the marker that admits the helper) is
 // flushed, with its directory: an fsync waits for every dirty page on the
@@ -96,11 +117,16 @@ jet_cli_rust_foreign_publish: fn(directory: cli_files.Directory, name: String, b
     directory.remove(staged).drop("an absent previous temporary is expected")
     jet_cli_rust_foreign_write(directory, staged, bytes, durable, mode)
     directory.rename(staged, name) ?? return Err(jet_cli_rust_foreign_io("couldn't publish FFI artifact `{name}`: {err}"))
-    if durable -> directory.fsync() ?? return Err(jet_cli_rust_foreign_io("couldn't flush FFI artifact directory: {err}"))
+    if durable {
+        directory.fsync() ?? return Err(jet_cli_rust_foreign_io("couldn't flush FFI artifact directory: {err}"))
+    }
     Ok()
 }
 
-jet_cli_rust_foreign_home: fn() -[Env]> String Never! { cli_sys.get("HOME") ?? (cli_sys.get("USERPROFILE") ?? "/tmp") }
+jet_cli_rust_foreign_home: fn() -[Env]> String Never! {
+    cli_sys.get("HOME") ?? (cli_sys.get("USERPROFILE") ?? "/tmp")
+}
+
 jet_cli_rust_foreign_cache: fn() -[Env]> String Never! {
     // Even the empty override is used verbatim, as cache_dir.
     cli_sys.get(ENV_JET_FFI_CACHE_DIR) ?? "{jet_cli_rust_foreign_home()}/.cache/jet/ffi"
@@ -132,6 +158,7 @@ jet_cli_rust_foreign_has_std: fn(root: String) -[FS]> Bool Never! {
     }
     false
 }
+
 // The helper never switches the application's default GNU toolchain. A
 // fallback compiler is admitted only with an installed musl standard library.
 jet_cli_rust_foreign_require_std: fn() JetDriverRustForeignError! -[FS, Env]> {
@@ -187,8 +214,12 @@ jet_cli_rust_foreign_cargo_detail: fn(stderr: String, plan: JetDriverRustForeign
     kept := [String]{}
     loop line in stderr.lines() {
         text: line.trim()
-        if text == "" || text.starts_with("Updating crates.io") || text.starts_with("Locking ") || text.starts_with("Adding ") || text.contains("waiting for other jobs") -> next
-        if (text.starts_with("Compiling ") || text.starts_with("Checking ")) && !text.contains("jet_ffi_") -> next
+        if text == "" || text.starts_with("Updating crates.io") || text.starts_with("Locking ") || text.starts_with("Adding ") || text.contains("waiting for other jobs") {
+            next
+        }
+        if (text.starts_with("Compiling ") || text.starts_with("Checking ")) && !text.contains("jet_ffi_") {
+            next
+        }
         normalized := line.replace("{cache}/deps/{plan.shared_key}", "~/.cache/jet/ffi/deps/<hash>").replace("{cache}/{plan.key}", "~/.cache/jet/ffi/<hash>").replace(plan.crate_name, "jet_ffi_<hash>")
         loop marker in ([String]{"match std::panic::catch_unwind(", "match ffi_catch_unwind("}) {
             at: jet_cli_rust_foreign_find(normalized, marker)
@@ -198,6 +229,7 @@ jet_cli_rust_foreign_cargo_detail: fn(stderr: String, plan: JetDriverRustForeign
     }
     kept.join("\n")
 }
+
 jet_cli_rust_foreign_cargo_error: fn(plan: JetDriverRustForeignPlan, stderr: String, cache: String, signature: Bool) -> JetDriverRustForeignError Never! {
     detail: jet_cli_rust_foreign_cargo_detail(stderr, plan, cache)
     if signature && (stderr.contains("E0308") || stderr.contains("E0277") || stderr.contains("E0061") || stderr.contains("E0425") || stderr.contains("cannot find") || stderr.contains("mismatched types") || stderr.contains("arguments to this function")) {
@@ -210,41 +242,54 @@ jet_cli_rust_foreign_cargo_error: fn(plan: JetDriverRustForeignPlan, stderr: Str
 
 // Core JSON's strict duplicate-key/depth/16MiB bound is the metadata preflight.
 jet_cli_rust_foreign_json_field: fn(value: Dyn, name: String) -> Dyn? Never! {
-    if value == .Object(_) {} else { return None }
+    if value == .Object(_) {
+
+    } else { return None }
     path: "/{name.replace("~", "~0").replace("/", "~1")}"
     selected: pointer(value, path) ?? return None
     Val(selected)
 }
+
 jet_cli_rust_foreign_metadata: fn(text: String, crate_name: String) -> Bool JetDriverRustForeignError! {
     document: cli_rust_json.parse(text) ?? return Err(jet_cli_rust_foreign_io("Cargo returned invalid metadata JSON: {err}"))
     packages_value: jet_cli_rust_foreign_json_field(document, "packages") ?? return Err(jet_cli_rust_foreign_io("Cargo metadata has no packages"))
     packages: if packages_value == {
         .Array(values) -> values
-        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return Err(jet_cli_rust_foreign_io("Cargo metadata packages must be an array")) }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {
+            return Err(jet_cli_rust_foreign_io("Cargo metadata packages must be an array"))
+        }
     }
     present := false
     loop package in packages {
         name_value: jet_cli_rust_foreign_json_field(package, "name") ?? return Err(jet_cli_rust_foreign_io("Cargo metadata package has no name"))
         name: if name_value == {
             .Text(value) -> value
-            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> { return Err(jet_cli_rust_foreign_io("Cargo metadata package name must be a string")) }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {
+                return Err(jet_cli_rust_foreign_io("Cargo metadata package name must be a string"))
+            }
         }
         if name == crate_name -> next
         targets_value: jet_cli_rust_foreign_json_field(package, "targets") ?? return Err(jet_cli_rust_foreign_io("Cargo metadata package has no targets"))
         targets: if targets_value == {
             .Array(values) -> values
-            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return Err(jet_cli_rust_foreign_io("Cargo metadata targets must be an array")) }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {
+                return Err(jet_cli_rust_foreign_io("Cargo metadata targets must be an array"))
+            }
         }
         loop target in targets {
             kinds_value: jet_cli_rust_foreign_json_field(target, "kind") ?? return Err(jet_cli_rust_foreign_io("Cargo metadata target has no kind"))
             kinds: if kinds_value == {
                 .Array(values) -> values
-                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return Err(jet_cli_rust_foreign_io("Cargo metadata target kind must be an array")) }
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {
+                    return Err(jet_cli_rust_foreign_io("Cargo metadata target kind must be an array"))
+                }
             }
             loop kind in kinds {
                 if kind == .Text(value) {
                     if value == "custom-build" || value == "proc-macro" -> present = true
-                } else { return Err(jet_cli_rust_foreign_io("Cargo metadata target kind must be a string")) }
+                } else {
+                    return Err(jet_cli_rust_foreign_io("Cargo metadata target kind must be a string"))
+                }
             }
         }
     }
@@ -255,21 +300,31 @@ jet_cli_rust_foreign_metadata: fn(text: String, crate_name: String) -> Bool JetD
 // mounted; host HOME and the shared target directory are never writable mounts.
 jet_cli_rust_foreign_mount: fn(args: &[String], source: String, destination: String) JetDriverRustForeignError! -[FS]> {
     info: cli_files.stat(source) ?? return Err(jet_cli_rust_foreign_sandbox_error("sandbox mount `{source}` is unavailable: {err}"))
-    if info.is_symlink -> return Err(jet_cli_rust_foreign_sandbox_error("sandbox mount `{source}` is a symlink"))
-    if !info.is_dir && !info.is_file -> return Err(jet_cli_rust_foreign_sandbox_error("sandbox mount `{source}` is not a regular file or directory"))
+    if info.is_symlink {
+        return Err(jet_cli_rust_foreign_sandbox_error("sandbox mount `{source}` is a symlink"))
+    }
+    if !info.is_dir && !info.is_file {
+        return Err(jet_cli_rust_foreign_sandbox_error("sandbox mount `{source}` is not a regular file or directory"))
+    }
     loop argument in ([String]{"--ro-bind", source, destination}) -> args.push(argument)
     Ok()
 }
+
 // The host Cargo registry as a private overlay at `destination`. Cargo reads
 // the host's fetched crates; its writes (newly fetched crates, unpacked
 // sources) land in a layer in the sandbox's memory that ends with the
 // sandbox. The host registry is never written and never copied.
 jet_cli_rust_foreign_overlay: fn(args: &[String], registry: String, destination: String) JetDriverRustForeignError! -[FS]> {
     info: cli_files.stat(registry) ?? return Err(jet_cli_rust_foreign_sandbox_error("sandbox overlay `{registry}` is unavailable: {err}"))
-    if info.is_symlink || !info.is_dir -> return Err(jet_cli_rust_foreign_sandbox_error("sandbox overlay `{registry}` is not a real directory"))
-    loop argument in ([String]{"--overlay-src", registry, "--tmp-overlay", destination}) -> args.push(argument)
+    if info.is_symlink || !info.is_dir {
+        return Err(jet_cli_rust_foreign_sandbox_error("sandbox overlay `{registry}` is not a real directory"))
+    }
+    loop argument in ([String]{"--overlay-src", registry, "--tmp-overlay", destination}) {
+        args.push(argument)
+    }
     Ok()
 }
+
 jet_cli_rust_foreign_bwrap: fn(bwrap: String, source: String, output: String, registry: String, share_network: Bool, metadata: Bool) -[FS, Env]> [String] JetDriverRustForeignError! {
     args := [String]{bwrap, "--die-with-parent", "--new-session", "--unshare-all", "--unshare-user", "--disable-userns", "--assert-userns-disabled", "--cap-drop", "ALL", "--ro-bind-try", "/nix/store", "/nix/store", "--proc", "/proc", "--dev", "/dev", "--size", "67108864", "--tmpfs", "/tmp", "--dir", "/homeless-shelter", "--clearenv", "--setenv", "PATH", "/nix/store", "--setenv", "HOME", "/homeless-shelter"}
     loop directory in ([String]{"/usr", "/bin", "/lib", "/lib64"}) {
@@ -284,7 +339,8 @@ jet_cli_rust_foreign_bwrap: fn(bwrap: String, source: String, output: String, re
         resolved: cli_files.canonicalize(directory) ?? return Err(jet_cli_rust_foreign_sandbox_error("couldn't resolve immutable system directory `{directory}`: {err}"))
         jet_cli_rust_foreign_mount(args, resolved, directory)
     }
-    loop file in ([String]{"/etc/resolv.conf", "/etc/hosts", "/etc/nsswitch.conf", "/etc/passwd", "/etc/group"}) {
+    loop file in
+        ([String]{"/etc/resolv.conf", "/etc/hosts", "/etc/nsswitch.conf", "/etc/passwd", "/etc/group"}) {
         if !cli_files.exists(file) -> next
         resolved: cli_files.canonicalize(file) ?? return Err(jet_cli_rust_foreign_sandbox_error("couldn't resolve immutable system file `{file}`: {err}"))
         jet_cli_rust_foreign_mount(args, resolved, file)
@@ -300,23 +356,34 @@ jet_cli_rust_foreign_bwrap: fn(bwrap: String, source: String, output: String, re
     if source == "" {
         loop argument in ([String]{"--dir", "/work", "--chdir", "/work"}) -> args.push(argument)
     } else {
-        loop argument in ([String]{"--dir", "/work", "--ro-bind", source, "/work/source", "--bind", output, "/work/output", "--chdir", "/work/source", "--setenv", ENV_JET_BUILD_OUTPUT, "/work/output", "--setenv", "CARGO_HOME", "/work/output/cargo-home", "--setenv", "CARGO_TARGET_DIR", "/work/output", "--setenv", "HOME", "/work/output/home", "--setenv", "SOURCE_DATE_EPOCH", "0"}) -> args.push(argument)
+        loop argument in
+            ([String]{"--dir", "/work", "--ro-bind", source, "/work/source", "--bind", output, "/work/output", "--chdir", "/work/source", "--setenv", ENV_JET_BUILD_OUTPUT, "/work/output", "--setenv", "CARGO_HOME", "/work/output/cargo-home", "--setenv", "CARGO_TARGET_DIR", "/work/output", "--setenv", "HOME", "/work/output/home", "--setenv", "SOURCE_DATE_EPOCH", "0"}) {
+            args.push(argument)
+        }
         if registry != "" {
-            loop argument in ([String]{"--dir", "/work/output/cargo-home", "--dir", "/work/output/cargo-home/registry"}) -> args.push(argument)
+            loop argument in
+                ([String]{"--dir", "/work/output/cargo-home", "--dir", "/work/output/cargo-home/registry"}) {
+                args.push(argument)
+            }
             jet_cli_rust_foreign_overlay(args, registry, "/work/output/cargo-home/registry")
         }
         if cli_files.is_dir(rustup_home) {
-            loop argument in ([String]{"--setenv", "RUSTUP_HOME", rustup_home}) -> args.push(argument)
+            loop argument in ([String]{"--setenv", "RUSTUP_HOME", rustup_home}) {
+                args.push(argument)
+            }
         }
         rustc: jet_cli_rust_foreign_rustc()
         loop argument in ([String]{"--setenv", "RUSTC", rustc}) -> args.push(argument)
         if cli_sys.get(ENV_JET_RUST_MUSL_LINKER) == .Val(linker) {
-            loop name in ([String]{"CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER", "CC_x86_64_unknown_linux_musl"}) {
+            loop name in
+                ([String]{"CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER", "CC_x86_64_unknown_linux_musl"}) {
                 loop argument in ([String]{"--setenv", name, linker}) -> args.push(argument)
             }
         }
         if cli_sys.get(ENV_JET_RUST_MUSL_AR) == .Val(archiver) {
-            loop argument in ([String]{"--setenv", "AR_x86_64_unknown_linux_musl", archiver}) -> args.push(argument)
+            loop argument in ([String]{"--setenv", "AR_x86_64_unknown_linux_musl", archiver}) {
+                args.push(argument)
+            }
         }
         if cli_sys.get(ENV_JET_RUST_MUSL_TOOLCHAIN) == .Val(toolchain) {
             if !toolchain.starts_with("/nix/store/") && !toolchain.starts_with("/usr/") {
@@ -334,19 +401,26 @@ jet_cli_rust_foreign_bwrap: fn(bwrap: String, source: String, output: String, re
         // its isolated build forwards only the explicit Cargo worker bound.
         if metadata {
             if cli_sys.get("CARGO_NET_OFFLINE") == .Val(offline) {
-                loop argument in ([String]{"--setenv", "CARGO_NET_OFFLINE", offline}) -> args.push(argument)
+                loop argument in ([String]{"--setenv", "CARGO_NET_OFFLINE", offline}) {
+                    args.push(argument)
+                }
             }
         }
     }
     if share_network -> args.push("--share-net")
     Ok(args)
 }
+
 jet_cli_rust_foreign_sandbox: fn(registry: String) -[FS, Env, Exec, Time.Wait]> String JetDriverRustForeignError! {
     // The strong
     // sandbox is the Linux bubblewrap backend. `sys.name()` is the OS
     // ("linux"); `sys.family()` is the family ("unix"), which never matches.
-    if cli_sys.name() != "linux" -> return Err(jet_cli_rust_foreign_sandbox_error("the native user-Rust helper requires the Linux bubblewrap backend"))
-    if cli_sys.get(ENV_JETPACK_FAKE_SANDBOX) != None -> return Err(jet_cli_rust_foreign_sandbox_error("test sandbox override prevents the native Linux backend probe"))
+    if cli_sys.name() != "linux" {
+        return Err(jet_cli_rust_foreign_sandbox_error("the native user-Rust helper requires the Linux bubblewrap backend"))
+    }
+    if cli_sys.get(ENV_JETPACK_FAKE_SANDBOX) != None {
+        return Err(jet_cli_rust_foreign_sandbox_error("test sandbox override prevents the native Linux backend probe"))
+    }
     // The one Bubblewrap every sandboxed action resolves (PATH, else Jet's
     // pinned copy in the Hangar), probed there; the probe below adds the
     // registry overlay this helper needs.
@@ -362,9 +436,12 @@ jet_cli_rust_foreign_sandbox: fn(registry: String) -[FS, Env, Exec, Time.Wait]> 
     if registry != "" -> jet_cli_rust_foreign_overlay(probe, registry, "/work/registry")
     loop argument in ([String]{"--", shell, "-c", "exit 0"}) -> probe.push(argument)
     receipt: cli_process.cmd(probe).env_clear().timeout(30s).output_limit(67108864).run() ?? return Err(jet_cli_rust_foreign_sandbox_error("bubblewrap backend probe failed: {err}"))
-    if !receipt.success -> return Err(jet_cli_rust_foreign_sandbox_error("bubblewrap backend probe exited with {receipt.code}: {receipt.errors}"))
+    if !receipt.success {
+        return Err(jet_cli_rust_foreign_sandbox_error("bubblewrap backend probe exited with {receipt.code}: {receipt.errors}"))
+    }
     Ok(bwrap)
 }
+
 jet_cli_rust_foreign_run: fn(bwrap: String, cargo: String, source: String, output: String, registry: String, command: [String]) -[FS, Env, Exec, Time.Wait]> ProcessReceipt JetDriverRustForeignError! {
     args := jet_cli_rust_foreign_bwrap(bwrap, source, output, registry, true, command.len() > 0 && command[0] == "metadata")
     // PATH-selected wrappers are declared helper tools. Bind the exact Cargo
@@ -382,9 +459,13 @@ jet_cli_rust_foreign_run: fn(bwrap: String, cargo: String, source: String, outpu
 jet_cli_rust_foreign_output_rows: fn(directory: cli_files.Directory, counts: &[String:Int], links: &[String:Int]) JetDriverRustForeignError! -[FS]> {
     entries: directory.list() ?? return Err(jet_cli_rust_foreign_io("couldn't list private Cargo output: {err}"))
     loop entry in entries {
-        if !entry.name_is_unicode -> return Err(jet_cli_rust_foreign_sandbox_error("Cargo output contains a non-Unicode filename"))
+        if !entry.name_is_unicode {
+            return Err(jet_cli_rust_foreign_sandbox_error("Cargo output contains a non-Unicode filename"))
+        }
         info: directory.entry_stat(entry.name) ?? return Err(jet_cli_rust_foreign_io("couldn't stat private Cargo output: {err}"))
-        if info.is_symlink || (!info.is_dir && !info.is_file) -> return Err(jet_cli_rust_foreign_sandbox_error("Cargo output `{entry.path}` is not a private regular file or directory"))
+        if info.is_symlink || (!info.is_dir && !info.is_file) {
+            return Err(jet_cli_rust_foreign_sandbox_error("Cargo output `{entry.path}` is not a private regular file or directory"))
+        }
         if info.is_dir {
             child: directory.open_directory(entry.name) ?? return Err(jet_cli_rust_foreign_sandbox_error("Cargo output directory changed identity: {err}"))
             jet_cli_rust_foreign_output_rows(child, counts, links)
@@ -396,12 +477,15 @@ jet_cli_rust_foreign_output_rows: fn(directory: cli_files.Directory, counts: &[S
     }
     Ok()
 }
+
 jet_cli_rust_foreign_validate_output: fn(directory: cli_files.Directory) JetDriverRustForeignError! -[FS]> {
     counts := [String:Int]{}
     links := [String:Int]{}
     jet_cli_rust_foreign_output_rows(directory, counts, links)
     loop (key, count) in counts {
-        if (links.get(key) ?? 0) != count -> return Err(jet_cli_rust_foreign_sandbox_error("Cargo output contains a hardlink outside its private tree"))
+        if (links.get(key) ?? 0) != count {
+            return Err(jet_cli_rust_foreign_sandbox_error("Cargo output contains a hardlink outside its private tree"))
+        }
     }
     Ok()
 }
@@ -416,10 +500,16 @@ jet_cli_rust_foreign_validate_output: fn(directory: cli_files.Directory) JetDriv
 jet_cli_rust_foreign_copy_tree: fn(source: cli_files.Directory, destination: cli_files.Directory) JetDriverRustForeignError! -[FS, Env]> {
     entries: source.list() ?? return Err(jet_cli_rust_foreign_io("couldn't list private Cargo output: {err}"))
     loop entry in entries {
-        if jet_cli_rust_foreign_unpublished(entry.name) || jet_cli_rust_foreign_helper_product(entry.name) -> next
-        if !entry.name_is_unicode -> return Err(jet_cli_rust_foreign_sandbox_error("Cargo output contains a non-Unicode filename"))
+        if jet_cli_rust_foreign_unpublished(entry.name) || jet_cli_rust_foreign_helper_product(entry.name) {
+            next
+        }
+        if !entry.name_is_unicode {
+            return Err(jet_cli_rust_foreign_sandbox_error("Cargo output contains a non-Unicode filename"))
+        }
         info: source.entry_stat(entry.name) ?? return Err(jet_cli_rust_foreign_io("couldn't stat private Cargo output: {err}"))
-        if info.is_symlink || (!info.is_dir && !info.is_file) -> return Err(jet_cli_rust_foreign_sandbox_error("Cargo output `{entry.path}` is not a private regular file or directory"))
+        if info.is_symlink || (!info.is_dir && !info.is_file) {
+            return Err(jet_cli_rust_foreign_sandbox_error("Cargo output `{entry.path}` is not a private regular file or directory"))
+        }
         if info.is_dir {
             if !cli_files.exists("{destination.path}/{entry.name}") {
                 created: destination.create_directory(entry.name, Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create Cargo output directory: {err}"))
@@ -434,16 +524,21 @@ jet_cli_rust_foreign_copy_tree: fn(source: cli_files.Directory, destination: cli
     }
     Ok()
 }
+
 // Names in a Cargo output tree that are not the helper's shared products.
 jet_cli_rust_foreign_unpublished: fn(name: String) -> Bool Never! {
-    if name == ".jet-publication-lock" || name == "metadata-source" || name == "cargo-home" || name == "home" -> return true
+    if name == ".jet-publication-lock" || name == "metadata-source" || name == "cargo-home" || name == "home" {
+        return true
+    }
     name.starts_with("jet_ffi_") && (name.ends_with(".sha256") || name.ends_with(".provenance"))
 }
+
 // A helper crate's own Cargo products (`jet_ffi_<key>-<hash>`,
 // `libjet_ffi_<key>.a`, ...), as opposed to the dependencies helpers share.
 jet_cli_rust_foreign_helper_product: fn(name: String) -> Bool Never! {
     name.starts_with("jet_ffi_") || name.starts_with("libjet_ffi_")
 }
+
 // Publish validated private Cargo output into the shared target by rename.
 // The workspace lies on the cache's file system, so no byte is copied and
 // nothing is flushed here: a lost entry is rebuilt by Cargo, and only the
@@ -452,9 +547,13 @@ jet_cli_rust_foreign_move_tree: fn(source: cli_files.Directory, destination: cli
     entries: source.list() ?? return Err(jet_cli_rust_foreign_io("couldn't list private Cargo output: {err}"))
     loop entry in entries {
         if jet_cli_rust_foreign_unpublished(entry.name) -> next
-        if !entry.name_is_unicode -> return Err(jet_cli_rust_foreign_sandbox_error("Cargo output contains a non-Unicode filename"))
+        if !entry.name_is_unicode {
+            return Err(jet_cli_rust_foreign_sandbox_error("Cargo output contains a non-Unicode filename"))
+        }
         info: source.entry_stat(entry.name) ?? return Err(jet_cli_rust_foreign_io("couldn't stat private Cargo output: {err}"))
-        if info.is_symlink || (!info.is_dir && !info.is_file) -> return Err(jet_cli_rust_foreign_sandbox_error("Cargo output `{entry.path}` is not a private regular file or directory"))
+        if info.is_symlink || (!info.is_dir && !info.is_file) {
+            return Err(jet_cli_rust_foreign_sandbox_error("Cargo output `{entry.path}` is not a private regular file or directory"))
+        }
         from: "{source.path}/{entry.name}"
         to: "{destination.path}/{entry.name}"
         if info.is_dir && cli_files.exists(to) {
@@ -472,18 +571,34 @@ jet_cli_rust_foreign_move_tree: fn(source: cli_files.Directory, destination: cli
 
 jet_cli_rust_foreign_provenance: fn(plan: JetDriverRustForeignPlan, source: String, toolchain: String, link_closure: String, digest: String, compile_time: Bool) -> String JetDriverRustForeignError! {
     fields: [String]{
-        "schema={JET_CLI_RUST_PROVENANCE_SCHEMA}", "identity={plan.key}", "target={plan.target}", "crate={plan.crate_name}",
-        "source={source}/Cargo.toml", "source-digest={plan.key}", "capabilities=exec:cargo", "sandbox=linux-bwrap", "sandbox-policy={JET_CLI_RUST_SANDBOX_POLICY}",
-        "compile-time-code={if compile_time -> "present" else -> "none"}", "bridge-descriptor=jet-inline-ffi-v10-asm-early-clobber", "toolchain={jet_cli_rust_foreign_digest(toolchain.bytes())}",
-        "descriptor={JET_DRIVER_RUST_FOREIGN_DESCRIPTOR}", "native_helper_artifact_mode={JET_DRIVER_RUST_FOREIGN_ARTIFACT_MODE}", "shared-key={plan.shared_key}",
-        "manifest-digest={jet_cli_rust_foreign_digest(plan.manifest.bytes())}", "wrapper-digest={jet_cli_rust_foreign_digest(plan.source.bytes())}",
-        "record-source-digest={jet_cli_rust_foreign_digest(plan.record_source.bytes())}", "link-closure={jet_cli_rust_foreign_digest(link_closure.bytes())}", "artifact.lib{plan.crate_name}.a={digest}",
+        "schema={JET_CLI_RUST_PROVENANCE_SCHEMA}",
+        "identity={plan.key}",
+        "target={plan.target}",
+        "crate={plan.crate_name}",
+        "source={source}/Cargo.toml",
+        "source-digest={plan.key}",
+        "capabilities=exec:cargo",
+        "sandbox=linux-bwrap",
+        "sandbox-policy={JET_CLI_RUST_SANDBOX_POLICY}",
+        "compile-time-code={if compile_time -> "present" else -> "none"}",
+        "bridge-descriptor=jet-inline-ffi-v10-asm-early-clobber",
+        "toolchain={jet_cli_rust_foreign_digest(toolchain.bytes())}",
+        "descriptor={JET_DRIVER_RUST_FOREIGN_DESCRIPTOR}",
+        "native_helper_artifact_mode={JET_DRIVER_RUST_FOREIGN_ARTIFACT_MODE}",
+        "shared-key={plan.shared_key}",
+        "manifest-digest={jet_cli_rust_foreign_digest(plan.manifest.bytes())}",
+        "wrapper-digest={jet_cli_rust_foreign_digest(plan.source.bytes())}",
+        "record-source-digest={jet_cli_rust_foreign_digest(plan.record_source.bytes())}",
+        "link-closure={jet_cli_rust_foreign_digest(link_closure.bytes())}",
+        "artifact.lib{plan.crate_name}.a={digest}",
     }
     // ForeignBridge's scalar sidecar law: a field cannot inject another row.
     text := ""
     loop field in fields {
         loop byte in field.bytes() {
-            if byte == (U8{10}) || byte == (U8{13}) || byte == (U8{0}) -> return Err(jet_cli_rust_foreign_io("FFI provenance contains an unrepresentable scalar field"))
+            if byte == (U8{10}) || byte == (U8{13}) || byte == (U8{0}) {
+                return Err(jet_cli_rust_foreign_io("FFI provenance contains an unrepresentable scalar field"))
+            }
         }
         text = "{text}{field}\n"
     }
@@ -499,7 +614,9 @@ jet_cli_rust_foreign_verified: fn(plan: JetDriverRustForeignPlan, source: String
     if lines.len() != 2 || lines[0] != JET_CLI_RUST_ARTIFACT_SCHEMA -> return Ok(false)
     parts: lines[1].split(" ").to_list()
     name: "lib{plan.crate_name}.a"
-    if parts.len() != 2 || !jet_cli_rust_foreign_hex(parts[0]) || parts[1] != name -> return Ok(false)
+    if parts.len() != 2 || !jet_cli_rust_foreign_hex(parts[0]) || parts[1] != name {
+        return Ok(false)
+    }
     bytes: jet_cli_rust_foreign_read(directory, name) ?? return Ok(false)
     digest: jet_cli_rust_foreign_digest(bytes)
     if digest != parts[0] {
@@ -508,8 +625,12 @@ jet_cli_rust_foreign_verified: fn(plan: JetDriverRustForeignPlan, source: String
         return Err(JetDriverRustForeignError{code: "E2604", what: "Integrity check failed for `{package}` `{version}` — expected `sha256-{parts[0]}`, got `sha256-{digest}`.", why: "A fetched artifact's content hash differs from what the lockfile recorded. This means the artifact changed after it was locked — accidental or deliberate tampering. A `jet fetch` run reports this integrity failure.", fix: "Re-run `jet fetch` after cleaning stale Jetpack hangar entries (`jet clean`). If the problem persists, the upstream source may have been altered; audit the change before proceeding."})
     }
     inputs: cli_files.open_directory(source) ?? return Ok(false)
-    if (jet_cli_rust_foreign_text(inputs, "Cargo.toml") ?? return Ok(false)) != plan.manifest -> return Ok(false)
-    if (jet_cli_rust_foreign_text(inputs, "src/lib.rs") ?? return Ok(false)) != plan.source -> return Ok(false)
+    if (jet_cli_rust_foreign_text(inputs, "Cargo.toml") ?? return Ok(false)) != plan.manifest {
+        return Ok(false)
+    }
+    if (jet_cli_rust_foreign_text(inputs, "src/lib.rs") ?? return Ok(false)) != plan.source {
+        return Ok(false)
+    }
     provenance: jet_cli_rust_foreign_text(directory, "{plan.crate_name}.provenance") ?? return Ok(false)
     // Exact reconstruction checks duplicate/unknown/injected rows as well as
     // all canonical fields and the descriptor. Both metadata receipts are legal.
@@ -531,10 +652,13 @@ JetCLIRustForeignWorkspace: struct {
 
     impl Close {
         close: fn(&&self) -[FS]> {
-            if !self.retain -> cli_files.remove_all(self.path).drop("a leftover private FFI workspace only holds scratch output")
+            if !self.retain {
+                cli_files.remove_all(self.path).drop("a leftover private FFI workspace only holds scratch output")
+            }
         }
     }
 }
+
 jet_cli_rust_foreign_workspace: fn(source: String) -[FS, Env]> JetCLIRustForeignWorkspace JetDriverRustForeignError! {
     retain: cli_sys.get(ENV_JET_FFI_TRACE_WORKSPACE) == Val("1")
     folder: if retain -> ".trace-workspaces" else -> ".workspaces"
@@ -545,7 +669,9 @@ jet_cli_rust_foreign_workspace: fn(source: String) -[FS, Env]> JetCLIRustForeign
     workspaces: owner.open_directory(folder) ?? return Err(jet_cli_rust_foreign_io("couldn't hold FFI workspace folder: {err}"))
     entries: workspaces.list() ?? return Err(jet_cli_rust_foreign_io("couldn't list FFI workspaces: {err}"))
     if !retain {
-        loop entry in entries -> cli_files.remove_all("{workspaces.path}/{entry.name}").drop("a leftover private FFI workspace only holds scratch output")
+        loop entry in entries {
+            cli_files.remove_all("{workspaces.path}/{entry.name}").drop("a leftover private FFI workspace only holds scratch output")
+        }
     }
     // Exclusive creation refuses a substituted or colliding name rather than
     // reusing its inputs.
@@ -559,6 +685,7 @@ jet_cli_rust_foreign_cargo: fn() -[FS, Env]> String JetDriverRustForeignError! {
     cargo: cli_files.canonicalize(cargo_path) ?? return Err(jet_cli_rust_foreign_io("couldn't resolve Cargo executable: {err}"))
     Ok(cargo)
 }
+
 // A std-only helper has no [dependencies], so Cargo never reads a registry. A
 // helper with dependencies reads the host registry through a private overlay;
 // nothing is copied.
@@ -572,14 +699,20 @@ jet_cli_rust_foreign_registry: fn(plan: JetDriverRustForeignPlan) -[FS, Env]> St
 // Stage the helper's sources in the workspace and resolve its Cargo.lock.
 // Metadata writes Cargo.lock, not code: it runs on the private output's
 // source projection, never making host inputs writable.
-JetCLIRustForeignResolved: struct { compile_time: Bool, lock: [U8] }
+JetCLIRustForeignResolved: struct {
+    compile_time: Bool
+    lock: [U8]
+}
+
 jet_cli_rust_foreign_resolve: fn(plan: JetDriverRustForeignPlan, cache: String, bwrap: String, cargo: String, registry: String, private_source: cli_files.Directory, private_output: cli_files.Directory) -[FS, Env, Exec, Time.Wait]> JetCLIRustForeignResolved JetDriverRustForeignError! {
     private_cargo_home: private_output.create_directory("cargo-home", Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create private Cargo home: {err}"))
     private_home: private_output.create_directory("home", Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create private build home: {err}"))
     metadata_source: private_output.create_directory("metadata-source", Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create private metadata source: {err}"))
     jet_cli_rust_foreign_copy_tree(private_source, metadata_source)
     metadata: jet_cli_rust_foreign_run(bwrap, cargo, private_source.path, private_output.path, registry, [String]{"metadata", "--format-version", "1", "--manifest-path", "/work/output/metadata-source/Cargo.toml"})
-    if !metadata.success -> return Err(jet_cli_rust_foreign_cargo_error(plan, metadata.errors, cache, false))
+    if !metadata.success {
+        return Err(jet_cli_rust_foreign_cargo_error(plan, metadata.errors, cache, false))
+    }
     compile_time: jet_cli_rust_foreign_metadata(metadata.output, plan.crate_name) ?? return Err(jet_cli_rust_foreign_cargo_error(plan, err.what, cache, false))
     lock_bytes: jet_cli_rust_foreign_read(metadata_source, "Cargo.lock") ?? return Err(jet_cli_rust_foreign_cargo_error(plan, err.what, cache, false))
     jet_cli_rust_foreign_write(private_source, "Cargo.lock", lock_bytes, false)
@@ -601,7 +734,9 @@ jet_cli_rust_foreign_build: fn(plan: JetDriverRustForeignPlan, cache: String, so
     jet_cli_rust_foreign_snapshot(shared, private_output, target_dir)
     resolved: jet_cli_rust_foreign_resolve(plan, cache, bwrap, cargo, registry, private_source, private_output)
     built: jet_cli_rust_foreign_run(bwrap, cargo, private_source.path, private_output.path, registry, [String]{"build", "--release", "--target", plan.target, "--manifest-path", "/work/source/Cargo.toml"})
-    if !built.success -> return Err(jet_cli_rust_foreign_cargo_error(plan, built.errors, cache, true))
+    if !built.success {
+        return Err(jet_cli_rust_foreign_cargo_error(plan, built.errors, cache, true))
+    }
     private_release: cli_files.open_directory("{private_output.path}/{plan.target}/release") ?? return Err(jet_cli_rust_foreign_io("FFI build finished without its complete artifact set"))
     archive: "lib{plan.crate_name}.a"
     bytes: jet_cli_rust_foreign_read(private_release, archive) ?? return Err(jet_cli_rust_foreign_io("FFI build finished but `{archive}` is missing: {err.what}"))
@@ -620,7 +755,9 @@ jet_cli_rust_foreign_build: fn(plan: JetDriverRustForeignPlan, cache: String, so
     jet_cli_rust_foreign_publish(src, "lib.rs", plan.source.bytes(), false)
     provenance: jet_cli_rust_foreign_provenance(plan, source, toolchain, link_closure, digest, resolved.compile_time)
     jet_cli_rust_foreign_publish_sidecars(target_dir, release, plan.crate_name, archive, "{JET_CLI_RUST_ARTIFACT_SCHEMA}\n{digest} {archive}\n", provenance)
-    if !jet_cli_rust_foreign_verified(plan, source, release, toolchain, link_closure) -> return Err(jet_cli_rust_foreign_io("published FFI artifact failed digest/provenance verification"))
+    if !jet_cli_rust_foreign_verified(plan, source, release, toolchain, link_closure) {
+        return Err(jet_cli_rust_foreign_io("published FFI artifact failed digest/provenance verification"))
+    }
     Ok()
 }
 
@@ -634,11 +771,13 @@ jet_cli_rust_foreign_snapshot: fn(shared: cli_files.Directory, private_output: c
     jet_cli_rust_foreign_copy_tree(shared, private_output)
     Ok()
 }
+
 jet_cli_rust_foreign_publish_output: fn(private_output: cli_files.Directory, shared: cli_files.Directory, target_dir: String) JetDriverRustForeignError! -[FS, Env]> {
     publication: cli_files.lock("{target_dir}/.jet-publication-lock") ?? return Err(jet_cli_rust_foreign_io("couldn't lock shared Cargo output: {err}"))
     jet_cli_rust_foreign_move_tree(private_output, shared)
     Ok()
 }
+
 // The sidecars land in the shared release directory, so they are published
 // under the same lock: another key's snapshot never lists their staging
 // temporaries, which this writer renames away. The digest manifest is the
@@ -655,7 +794,16 @@ jet_cli_rust_foreign_publish_sidecars: fn(target_dir: String, release: String, c
 }
 
 // The plan, cache key folder and shared release directory of one helper.
-JetCLIRustForeignKey: struct { plan: JetDriverRustForeignPlan, toolchain: String, link_closure: String, cache: String, source: String, target_dir: String, release: String }
+JetCLIRustForeignKey: struct {
+    plan: JetDriverRustForeignPlan
+    toolchain: String
+    link_closure: String
+    cache: String
+    source: String
+    target_dir: String
+    release: String
+}
+
 jet_cli_rust_foreign_key: fn(facts: JetDriverRustForeignFacts, link: JetDriverForeignLinkFacts) -[FS, Env, Exec, Time.Wait]> JetCLIRustForeignKey JetDriverRustForeignError! {
     toolchain: jet_cli_rust_foreign_toolchain()
     link_closure: jet_cli_rust_foreign_link_identity(link)
@@ -670,14 +818,18 @@ jet_cli_rust_foreign_key: fn(facts: JetDriverRustForeignFacts, link: JetDriverFo
 jet_cli_rust_foreign_realize: fn(facts: JetDriverRustForeignFacts, link: JetDriverForeignLinkFacts) -[FS, Env, Exec, Time.Wait]> JetCLIRustForeignArtifact? JetDriverRustForeignError! {
     if facts.entries.len() == 0 -> return Ok(None)
     key: jet_cli_rust_foreign_key(facts, link)
-    if jet_cli_rust_foreign_verified(key.plan, key.source, key.release, key.toolchain, key.link_closure) -> return Ok(Val(JetCLIRustForeignArtifact{plan: key.plan, target_dir: key.target_dir, release: key.release}))
+    if jet_cli_rust_foreign_verified(key.plan, key.source, key.release, key.toolchain, key.link_closure) {
+        return Ok(Val(JetCLIRustForeignArtifact{plan: key.plan, target_dir: key.target_dir, release: key.release}))
+    }
     cargo: jet_cli_rust_foreign_cargo()
     jet_cli_rust_foreign_require_std()
     cli_files.create_dir_all(key.source) ?? return Err(jet_cli_rust_foreign_io("couldn't create the FFI cache folder: {err}"))
     // Native FileLock ownership releases on every error/return and process
     // death. No age-based stealing can admit two live writers to one key.
     key_lock: cli_files.lock(cli_files.join(key.cache, "{key.plan.key}.build-lock")) ?? return Err(jet_cli_rust_foreign_io("couldn't lock the FFI cache folder: {err}"))
-    if jet_cli_rust_foreign_verified(key.plan, key.source, key.release, key.toolchain, key.link_closure) -> return Ok(Val(JetCLIRustForeignArtifact{plan: key.plan, target_dir: key.target_dir, release: key.release}))
+    if jet_cli_rust_foreign_verified(key.plan, key.source, key.release, key.toolchain, key.link_closure) {
+        return Ok(Val(JetCLIRustForeignArtifact{plan: key.plan, target_dir: key.target_dir, release: key.release}))
+    }
     cli_files.create_dir_all(key.target_dir) ?? return Err(jet_cli_rust_foreign_io("couldn't create the FFI target folder: {err}"))
     jet_cli_rust_foreign_build(key.plan, key.cache, key.source, key.target_dir, key.release, key.toolchain, key.link_closure, cargo)
     Ok(Val(JetCLIRustForeignArtifact{plan: key.plan, target_dir: key.target_dir, release: key.release}))
@@ -690,7 +842,9 @@ jet_cli_rust_foreign_realize: fn(facts: JetDriverRustForeignFacts, link: JetDriv
 jet_cli_rust_foreign_check: fn(facts: JetDriverRustForeignFacts, link: JetDriverForeignLinkFacts) JetDriverRustForeignError! -[FS, Env, Exec, Time.Wait]> {
     if facts.entries.len() == 0 -> return Ok()
     key: jet_cli_rust_foreign_key(facts, link)
-    if jet_cli_rust_foreign_verified(key.plan, key.source, key.release, key.toolchain, key.link_closure) -> return Ok()
+    if jet_cli_rust_foreign_verified(key.plan, key.source, key.release, key.toolchain, key.link_closure) {
+        return Ok()
+    }
     cargo: jet_cli_rust_foreign_cargo()
     jet_cli_rust_foreign_require_std()
     registry: jet_cli_rust_foreign_registry(key.plan)
@@ -707,6 +861,8 @@ jet_cli_rust_foreign_check: fn(facts: JetDriverRustForeignFacts, link: JetDriver
     jet_cli_rust_foreign_write(private_src, "lib.rs", key.plan.source.bytes(), false)
     _: jet_cli_rust_foreign_resolve(key.plan, key.cache, bwrap, cargo, registry, private_source, private_output)
     checked: jet_cli_rust_foreign_run(bwrap, cargo, private_source.path, private_output.path, registry, [String]{"check", "--release", "--target", key.plan.target, "--manifest-path", "/work/source/Cargo.toml"})
-    if !checked.success -> return Err(jet_cli_rust_foreign_cargo_error(key.plan, checked.errors, key.cache, true))
+    if !checked.success {
+        return Err(jet_cli_rust_foreign_cargo_error(key.plan, checked.errors, key.cache, true))
+    }
     Ok()
 }

@@ -1,11 +1,25 @@
 // Producer statuses, callable policy display, identifier classes and the
 // typed compiler-fact reads.
 use jet_foundation.[
-    CallablePolicy, Dimension, Exactness,
-    FOUNDATION_FACT_READ_ROWS, FactRead, IdentifierClass, Measure, MetadataProducerStatus, Name,
-    UnitScaleProvenance, ViewProvenance, callable_policy_display, classify_identifier,
-    fact_read_detail_field, fact_read_kind, fact_read_members,
-    fact_read_public_read_type, fact_read_reflection_kind, fact_read_source_member,
+    CallablePolicy,
+    Dimension,
+    Exactness,
+    FOUNDATION_FACT_READ_ROWS,
+    FactRead,
+    IdentifierClass,
+    Measure,
+    MetadataProducerStatus,
+    Name,
+    UnitScaleProvenance,
+    ViewProvenance,
+    callable_policy_display,
+    classify_identifier,
+    fact_read_detail_field,
+    fact_read_kind,
+    fact_read_members,
+    fact_read_public_read_type,
+    fact_read_reflection_kind,
+    fact_read_source_member,
 ]
 
 #Test("metadata producer statuses remain three distinct obligations") {
@@ -56,10 +70,7 @@ tool_facts_projection_matches: fn(read: FactRead, member: String?, reflection: S
         if fact_read_kind(source) != expected_read -> return false
     }
     expected_public: if read == FactRead.Origin -> Val("OriginInfo?") else -> None
-    fact_read_source_member(read) == member &&
-        fact_read_reflection_kind(read) == reflection &&
-        fact_read_detail_field(read) == detail &&
-        fact_read_public_read_type(read) == expected_public
+    fact_read_source_member(read) == member && fact_read_reflection_kind(read) == reflection && fact_read_detail_field(read) == detail && fact_read_public_read_type(read) == expected_public
 }
 
 #Test("all dedicated typed fact read projections retain exact spellings") {
@@ -98,12 +109,16 @@ tool_facts_projection_matches: fn(read: FactRead, member: String?, reflection: S
     assert(fact_read_kind("$taint") == taint)
     assert(fact_read_kind("$duty") == duty)
     planes: [String]{"Flow", "Taint", "Duty"}
-    loop plane in planes -> assert(tool_facts_projection_matches((FactRead.RegisteredPlane{name: plane}), None, Val(plane), None))
+    loop plane in planes {
+        assert(tool_facts_projection_matches((FactRead.RegisteredPlane{name: plane}), None, Val(plane), None))
+    }
     assert(tool_facts_projection_matches(FactRead.RegisteredPlane{name: "Type.Interval"}, None, Val("Range"), None))
     assert(tool_facts_projection_matches(FactRead.RegisteredPlane{name: "Type.Exactness"}, None, Val("Exactness"), None))
     assert(tool_facts_projection_matches(FactRead.RegisteredPlane{name: "Exactness"}, None, Val("Exactness"), None))
     unknown: [String]{"", "unknown", "Build.Profile", "Type.Unknown", "flow"}
-    loop plane in unknown -> assert(tool_facts_projection_matches((FactRead.RegisteredPlane{name: plane}), None, None, None))
+    loop plane in unknown {
+        assert(tool_facts_projection_matches((FactRead.RegisteredPlane{name: plane}), None, None, None))
+    }
     spellings: [String]{"", "layout", "$unknown", "$Flow", "$$range", "#build.profile", "#build.package.name", "#build.target.os", "#build.stamp.git"}
     loop spelling in spellings -> assert(fact_read_kind(spelling) == None)
 }

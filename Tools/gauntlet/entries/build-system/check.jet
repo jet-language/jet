@@ -15,17 +15,13 @@ use {
 }
 
 // The member `key` of `tree`; null when it has none.
-at: fn(tree: Dyn, key: String) -> Dyn {
-    json.pointer(tree, "/{key}") ?? Dyn.Null
-}
+at: fn(tree: Dyn, key: String) -> Dyn { json.pointer(tree, "/{key}") ?? Dyn.Null }
 
 shown: fn(tree: Dyn) -> String {
     json.canonical(tree) ?? process.fail(1, "no canonical form: {err}")
 }
 
-present: fn(tree: Dyn) -> String {
-    if tree == .Null -> "none" else -> "present"
-}
+present: fn(tree: Dyn) -> String { if tree == .Null -> "none" else -> "present" }
 
 run: fn() {
     printed: files.read(process.args()[0]) ?? process.fail(1, "no program output: {err}")
@@ -43,7 +39,9 @@ run: fn() {
         return
     }
     receipt: json.parse(files.read("receipt.json") ?? process.fail(1, "receipt.json: {err}")) ?? process.fail(1, "receipt.json: {err}")
-    loop key in ["schema", "samples", "warmups", "passed"] -> print("receipt {key}: {shown(at(receipt, key))}")
+    loop key in ["schema", "samples", "warmups", "passed"] {
+        print("receipt {key}: {shown(at(receipt, key))}")
+    }
     print("receipt jet version: {shown(at(at(receipt, "jet"), "version"))}")
     print("receipt jet path: {if at(at(receipt, "jet"), "path") == .Text(path) && path.ends_with("/fake-jet") -> "the fake jet" else -> "other"}")
     print("receipt times: {present(at(receipt, "started_at"))} {present(at(receipt, "finished_at"))}")
@@ -51,6 +49,8 @@ run: fn() {
     print("receipt machine: {present(at(machine, "cpu_model"))} {present(at(machine, "threads"))} {present(at(machine, "memory_bytes"))} {present(at(machine, "kernel"))} {present(at(machine, "nix"))}")
     if at(receipt, "failures") == .Array(listed) -> print("receipt failures: {listed.len()}")
     if at(receipt, "cells") == .Array(cells) {
-        loop cell in cells -> print("receipt cell: {shown(at(cell, "id"))} {shown(at(cell, "target"))} {shown(at(cell, "status"))} {shown(at(cell, "verdict"))} jet {present(at(cell, "jet"))} nix {present(at(cell, "nix"))} ratio {present(at(cell, "ratio"))}")
+        loop cell in cells {
+            print("receipt cell: {shown(at(cell, "id"))} {shown(at(cell, "target"))} {shown(at(cell, "status"))} {shown(at(cell, "verdict"))} jet {present(at(cell, "jet"))} nix {present(at(cell, "nix"))} ratio {present(at(cell, "ratio"))}")
+        }
     }
 }

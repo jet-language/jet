@@ -10,12 +10,19 @@
 // `ArchiveError` displays it.
 
 C_MASK32: 4294967295
+
 C_MAX_OUTPUT: 67108864
+
 C_INFLATE_MALFORMED: 0
+
 C_INFLATE_OK: 1
+
 C_INFLATE_UNSUPPORTED: 2
+
 C_ZLIB_CHECKSUM: 3
+
 C_CRC_POLY: 3988292384
+
 C_ADLER_MOD: 65521
 
 C_LEN_BASE: [Int]{3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258}
@@ -34,9 +41,9 @@ crc32: fn(data: [U8]) -> Int Never! {
     loop b in data {
         crc = (((crc).bit_xor(u8_int(b)))).bit_and(C_MASK32)
         loop _ in 0..<8 {
-            if ((crc).bit_and(1)) != 0 -> crc = ((((crc >> 1)).bit_xor(C_CRC_POLY))).bit_and(C_MASK32) else {
-                crc = ((crc >> 1)).bit_and(C_MASK32)
-            }
+            if ((crc).bit_and(1)) != 0 {
+                crc = ((((crc >> 1)).bit_xor(C_CRC_POLY))).bit_and(C_MASK32)
+            } else { crc = ((crc >> 1)).bit_and(C_MASK32) }
         }
     }
     (((crc).bit_xor(C_MASK32))).bit_and(C_MASK32)
@@ -90,7 +97,7 @@ inflate_into: fn(data: [U8], out: &[U8]) -> Int Never! {
                 loop k < ln {
                     byte: r.take_u8()
                     out.push(byte)
-                    k = k + 1
+                    k += 1
                 }
             }
             btype == 1 -> {
@@ -113,7 +120,7 @@ inflate_into: fn(data: [U8], out: &[U8]) -> Int Never! {
     if r.bit != 0 {
         if r.i >= r.data.len() -> return C_INFLATE_MALFORMED
         if (u8_int(r.data[r.i]) >> r.bit) != 0 -> return C_INFLATE_MALFORMED
-        r.i = r.i + 1
+        r.i += 1
     }
     if r.i != r.data.len() -> return C_INFLATE_MALFORMED
     C_INFLATE_OK
@@ -124,7 +131,9 @@ decompress_into: fn(data: [U8], out: &[U8]) -> Int Never! {
     if data.len() < 6 -> return C_INFLATE_MALFORMED
     cmf: u8_int(data[0])
     flg: u8_int(data[1])
-    if ((cmf).bit_and(15)) != 8 || (cmf >> 4) > 7 || ((cmf << 8) + flg) % 31 != 0 -> return C_INFLATE_MALFORMED
+    if ((cmf).bit_and(15)) != 8 || (cmf >> 4) > 7 || ((cmf << 8) + flg) % 31 != 0 {
+        return C_INFLATE_MALFORMED
+    }
     if ((flg).bit_and(32)) != 0 -> return C_INFLATE_UNSUPPORTED
     status: inflate_into(slice_u8(data, 2, data.len() - 4), out)
     if status != C_INFLATE_OK -> return status
@@ -137,7 +146,7 @@ slice_u8: fn(data: [U8], start: Int, end: Int) -> [U8] Never! {
     i := start
     loop i < end {
         out.push(data[i])
-        i = i + 1
+        i += 1
     }
     out
 }
@@ -162,10 +171,10 @@ BitReader: struct {
             return 0
         }
         out: ((u8_int(self.data[self.i]) >> self.bit)).bit_and(1)
-        self.bit = self.bit + 1
+        self.bit += 1
         if self.bit == 8 {
             self.bit = 0
-            self.i = self.i + 1
+            self.i += 1
         }
         out
     }
@@ -175,7 +184,7 @@ BitReader: struct {
         k := 0
         loop k < n {
             v = (v).bit_or((self.read_bit() << k))
-            k = k + 1
+            k += 1
         }
         v
     }
@@ -183,7 +192,7 @@ BitReader: struct {
     align_byte: fn(&self) Never! {
         if self.bit != 0 {
             self.bit = 0
-            self.i = self.i + 1
+            self.i += 1
         }
     }
 
@@ -193,7 +202,7 @@ BitReader: struct {
             return (U8{0})
         }
         b: self.data[self.i]
-        self.i = self.i + 1
+        self.i += 1
         b
     }
 }
@@ -204,7 +213,7 @@ inflate_fixed: fn(r: &BitReader, out: &[U8]) -> Int Never! {
         n := 0
         loop n < 7 {
             code = ((code << 1)).bit_or((r.read_bit()))
-            n = n + 1
+            n += 1
         }
         if r.bad -> return C_INFLATE_MALFORMED
         extra := 0
@@ -240,7 +249,7 @@ inflate_fixed: fn(r: &BitReader, out: &[U8]) -> Int Never! {
                 k := 0
                 loop k < extra_n {
                     add = (add).bit_or((r.read_bit() << k))
-                    k = k + 1
+                    k += 1
                 }
                 if r.bad -> return C_INFLATE_MALFORMED
                 length: C_LEN_BASE[idx] + add
@@ -248,7 +257,7 @@ inflate_fixed: fn(r: &BitReader, out: &[U8]) -> Int Never! {
                 n2 := 0
                 loop n2 < 5 {
                     dcode = ((dcode << 1)).bit_or((r.read_bit()))
-                    n2 = n2 + 1
+                    n2 += 1
                 }
                 if r.bad || dcode < 0 || dcode >= C_DIST_BASE.len() -> return C_INFLATE_MALFORMED
                 dadd := 0
@@ -256,7 +265,7 @@ inflate_fixed: fn(r: &BitReader, out: &[U8]) -> Int Never! {
                 d_extra: C_DIST_EXTRA[dcode]
                 loop k2 < d_extra {
                     dadd = (dadd).bit_or((r.read_bit() << k2))
-                    k2 = k2 + 1
+                    k2 += 1
                 }
                 if r.bad -> return C_INFLATE_MALFORMED
                 dist: C_DIST_BASE[dcode] + dadd
@@ -276,7 +285,7 @@ huff_codes: fn(lengths: [Int]) -> [Int] Never! {
     loop i < lengths.len() {
         len: lengths[i]
         if len > 0 && len < 16 -> bl[len] = bl[len] + 1
-        i = i + 1
+        i += 1
     }
     next := [Int]{}
     loop _ in 0..<16 -> next.push(0)
@@ -285,13 +294,13 @@ huff_codes: fn(lengths: [Int]) -> [Int] Never! {
     loop bits < 16 {
         code = (code + bl[bits - 1]) << 1
         next[bits] = code
-        bits = bits + 1
+        bits += 1
     }
     codes := [Int]{}
     i = 0
     loop i < lengths.len() {
         codes.push(-1)
-        i = i + 1
+        i += 1
     }
     i = 0
     loop i < lengths.len() {
@@ -300,7 +309,7 @@ huff_codes: fn(lengths: [Int]) -> [Int] Never! {
             codes[i] = next[len]
             next[len] = next[len] + 1
         }
-        i = i + 1
+        i += 1
     }
     codes
 }
@@ -317,24 +326,20 @@ huff_tree_left: fn(lengths: [Int]) -> Int Never! {
     loop bits <= 15 {
         left = (left << 1) - counts[bits]
         if left < 0 -> return -1
-        bits = bits + 1
+        bits += 1
     }
     left
 }
 
-huff_lengths_valid: fn(lengths: [Int]) -> Bool Never! {
-    huff_tree_left(lengths) >= 0
-}
+huff_lengths_valid: fn(lengths: [Int]) -> Bool Never! { huff_tree_left(lengths) >= 0 }
 
-huff_lengths_complete: fn(lengths: [Int]) -> Bool Never! {
-    huff_tree_left(lengths) == 0
-}
+huff_lengths_complete: fn(lengths: [Int]) -> Bool Never! { huff_tree_left(lengths) == 0 }
 
 huff_sym: fn(lengths: [Int], codes: [Int], acc: Int, len: Int) -> Int Never! {
     i := 0
     loop i < lengths.len() {
         if lengths[i] == len && codes[i] == acc -> return i
-        i = i + 1
+        i += 1
     }
     -1
 }
@@ -355,7 +360,7 @@ inflate_dynamic: fn(r: &BitReader, out: &[U8]) -> Int Never! {
     i := 0
     loop i < hclen {
         cl_len[C_CL_ORDER[i]] = tmp.get_bits_lsb(3)
-        i = i + 1
+        i += 1
     }
     if tmp.bad || !huff_lengths_complete(cl_len) {
         r.i = tmp.i
@@ -374,7 +379,7 @@ inflate_dynamic: fn(r: &BitReader, out: &[U8]) -> Int Never! {
         loop len < 7 {
             bit: tmp.get_bits_lsb(1)
             acc = ((acc << 1)).bit_or(bit)
-            len = len + 1
+            len += 1
             sym = huff_sym(cl_len, cl_codes, acc, len)
             if sym >= 0 -> break
         }
@@ -416,20 +421,17 @@ inflate_dynamic: fn(r: &BitReader, out: &[U8]) -> Int Never! {
     i = 0
     loop i < hlit {
         lit_len.push(all_len[i])
-        i = i + 1
+        i += 1
     }
     loop i < need {
         dist_len.push(all_len[i])
-        i = i + 1
+        i += 1
     }
     has_dist := false
     loop len in dist_len {
         if len > 0 -> has_dist = true
     }
-    if !huff_lengths_valid(lit_len) ||
-        !huff_lengths_valid(dist_len) ||
-        lit_len[256] == 0 ||
-        !has_dist {
+    if !huff_lengths_valid(lit_len) || !huff_lengths_valid(dist_len) || lit_len[256] == 0 || !has_dist {
         r.i = tmp.i
         r.bit = tmp.bit
         r.bad = tmp.bad
@@ -444,7 +446,7 @@ inflate_dynamic: fn(r: &BitReader, out: &[U8]) -> Int Never! {
         loop len < 15 {
             bit: tmp.get_bits_lsb(1)
             acc = ((acc << 1)).bit_or(bit)
-            len = len + 1
+            len += 1
             sym = huff_sym(lit_len, lit_codes, acc, len)
             if sym >= 0 -> break
         }
@@ -486,7 +488,7 @@ inflate_dynamic: fn(r: &BitReader, out: &[U8]) -> Int Never! {
                 loop dlen < 15 {
                     bit: tmp.get_bits_lsb(1)
                     dacc = ((dacc << 1)).bit_or(bit)
-                    dlen = dlen + 1
+                    dlen += 1
                     dcode = huff_sym(dist_len, dist_codes, dacc, dlen)
                     if dcode >= 0 -> break
                 }

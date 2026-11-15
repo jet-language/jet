@@ -1,7 +1,9 @@
 // Unsafe obligations over the compiler's own sources.
-use jet_foundation.[AST_NODE_GENERATED, Expr, GateSet, PolicyDeclaration, PolicyKey, PolicyScope, PolicyValue, Span, Type]
-use jet_parser.[parse_source]
-use jet_sema.[SemaGateModule, SemaUnsafeOperation, UnsafeInspection, sema_unsafe_expr_operations, sema_unsafe_inspect, sema_unsafe_unit_map]
+use {
+    jet_foundation.[AST_NODE_GENERATED, Expr, GateSet, PolicyDeclaration, PolicyKey, PolicyScope, PolicyValue, Span, Type]
+    jet_parser.[parse_source]
+    jet_sema.[SemaGateModule, SemaUnsafeOperation, UnsafeInspection, sema_unsafe_expr_operations, sema_unsafe_inspect, sema_unsafe_unit_map]
+}
 
 unsafe_test_require: fn(ok: Bool, message: String) Never! {
     if !ok -> panic("UnsafeObligations: {message}")
@@ -45,7 +47,9 @@ run: fn() Never! {
     outside_kernel: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: raw.program, policy_path: Val("src/app.jet"), memory_kernel: Val([String]{"src/kernel"})}], GateSet{})
     // alloc_raw, offset and copy: each is refused.
     unsafe_test_require(outside_kernel.diagnostics.len() == 3, "each raw memory call outside the kernel is refused")
-    loop refused in outside_kernel.diagnostics -> unsafe_test_require(refused.diagnostic.code == "E3113", "raw memory refusal code")
+    loop refused in outside_kernel.diagnostics {
+        unsafe_test_require(refused.diagnostic.code == "E3113", "raw memory refusal code")
+    }
     unsafe_test_require(outside_kernel.gates[0].operations.len() == 0 && outside_kernel.gates[0].memory_operations.len() == 3, "raw memory calls carry no obligation")
     inside_kernel: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: raw.program, policy_path: Val("src/kernel/app.jet"), memory_kernel: Val([String]{"src/kernel"})}], GateSet{})
     unsafe_test_require(inside_kernel.diagnostics.len() == 0, "a kernel file holds raw memory calls")
@@ -75,7 +79,9 @@ run: fn() Never! {
     intrinsics: parse_source("run: fn() {{ #Unsafe(\"live\") {{ x := os_load_i64(p)\nos_store_u8(p, I64{{1}})\n_ := os_syscall_i64(I64{{9}}, I64{{0}})\n_ := os_syscall_i64(I64{{231}}, I64{{1}})\nos_copy_ascending_i64(p, q, n) }} }}".bytes())
     os_refused: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: intrinsics.program, policy_path: Val("src/app.jet"), memory_kernel: Val([String]{"src/kernel"})}], GateSet{})
     unsafe_test_require(os_refused.diagnostics.len() == 4, "each raw intrinsic outside the kernel is refused: {os_refused.diagnostics:Debug}")
-    loop refused in os_refused.diagnostics -> unsafe_test_require(refused.diagnostic.code == "E3113", "raw intrinsic refusal code")
+    loop refused in os_refused.diagnostics {
+        unsafe_test_require(refused.diagnostic.code == "E3113", "raw intrinsic refusal code")
+    }
     unsafe_test_require(os_refused.diagnostics[0].diagnostic.what.contains("`os_load_i64`") && os_refused.diagnostics[2].diagnostic.what.contains("`os_syscall_i64`"), "the intrinsic is named")
     os_kernel: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: intrinsics.program, policy_path: Val("src/kernel/app.jet"), memory_kernel: Val([String]{"src/kernel"})}], GateSet{})
     unsafe_test_require(os_kernel.diagnostics.len() == 0, "a kernel file holds raw intrinsics")
@@ -102,7 +108,9 @@ run: fn() Never! {
     unsafe_test_require(kernel.diagnostics.len() == 0, "kernel fixture parse: {kernel.diagnostics:Debug}")
     boundary: sema_unsafe_inspect([SemaGateModule{source: "cell.jet", program: kernel.program, policy_path: Val("src/kernel/cell.jet"), memory_kernel: Val([String]{"src/kernel"})}], GateSet{})
     unsafe_test_require(boundary.diagnostics.len() == 2, "one refusal per caller-chosen address: {boundary.diagnostics:Debug}")
-    loop refused in boundary.diagnostics -> unsafe_test_require(refused.diagnostic.code == "E3114", "kernel address refusal code")
+    loop refused in boundary.diagnostics {
+        unsafe_test_require(refused.diagnostic.code == "E3114", "kernel address refusal code")
+    }
     unsafe_test_require(boundary.diagnostics[0].diagnostic.what.contains("`peek`") && boundary.diagnostics[1].diagnostic.what.contains("`Cell.base`"), "the parameter and the public field are named")
     // The runtime's kernel answers the same rule: its address helpers are
     // `priv`, so a public one raises E3114 there too, in a package check and

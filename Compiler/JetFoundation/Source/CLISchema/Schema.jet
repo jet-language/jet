@@ -18,6 +18,7 @@ CLIValueKind: enum {
         }
     }
 }
+
 CLIDefault: enum {
     TypeDefault
     Recorded(value: String)
@@ -29,10 +30,12 @@ CLIDefault: enum {
         }
     }
 }
+
 CLIInputShape: enum {
     Flag
     Value(kind: CLIValueKind, optional: Bool, default: CLIDefault?)
 }
+
 CLIInputSchema: struct {
     field: String
     flag: String
@@ -49,12 +52,14 @@ CLIInputSchema: struct {
             .Flag -> false
         }
     }
+
     value_kind: fn(self) -> CLIValueKind Never! {
         if self.shape == {
             .Flag -> CLIValueKind.Bool
             .Value(kind, _, _) -> kind
         }
     }
+
     default_display: fn(self) -> String? Never! {
         if self.shape == {
             .Flag -> Val("false")
@@ -62,11 +67,13 @@ CLIInputSchema: struct {
         }
     }
 }
+
 CLISubcommandSchema: struct {
     name: String
     description: String?
     inputs: [CLIInputSchema]
 }
+
 JobArgumentSchema: struct {
     name: String
     label: String
@@ -80,6 +87,7 @@ JobArgumentSchema: struct {
         "{self.label}: {if self.variadic -> "..." else -> ""}{self.ty}"
     }
 }
+
 JobFact: struct {
     name: String
     scope: JobScope
@@ -103,13 +111,16 @@ JobFact: struct {
             .Internal -> "internal"
         }
     }
+
     metadata: fn(self) -> JobMetadata Never! {
         JobMetadata{scope: self.scope, after: self.after, packages: self.packages, cwd: self.cwd, inputs: self.inputs, outputs: self.outputs, skip: self.skip, cache: self.cache, parallel: Val(self.parallel), limits: self.limits}
     }
 }
 
 #Error
-CLIJobGraphError: struct { message: String }
+CLIJobGraphError: struct {
+    message: String
+}
 
 // The registry is an owned metadata projection, not evidence that a job was
 // checked or run. Driver callers must supply the actual successful entry
@@ -126,16 +137,18 @@ JobRegistry: struct {
         }
         JobRegistry{jobs: jobs.move()}
     }
+
     from_program: fn(program: Program) -> JobRegistry Never! {
         JobRegistry.from_items(program.items)
     }
+
     for_entry: fn(programs: [Program], entry: Int) -> JobRegistry Never! {
         if entry < 0 || entry >= programs.len() -> return JobRegistry{jobs: [JobFact]{}}
         JobRegistry.from_program(programs[entry])
     }
-    jobs: fn(self) -> View<JobFact> Never! from self {
-        self.jobs[0..<self.jobs.len()]
-    }
+
+    jobs: fn(self) -> View<JobFact> Never! from self { self.jobs[0..<self.jobs.len()] }
+
     visible_jobs: fn(self) -> [View<JobFact>] Never! from self {
         visible := [View<JobFact>]{}
         loop index in 0..<self.jobs.len() {
@@ -143,18 +156,23 @@ JobRegistry: struct {
         }
         visible.move()
     }
+
     find: fn(self, name: String) -> View<JobFact>? Never! from self {
         loop index in 0..<self.jobs.len() {
             if self.jobs[index].name == name -> return Val(self.jobs[index..<index + 1])
         }
         None
     }
+
     find_visible: fn(self, name: String) -> View<JobFact>? Never! from self {
         loop index in 0..<self.jobs.len() {
-            if self.jobs[index].name == name && self.jobs[index].scope != .Internal -> return Val(self.jobs[index..<index + 1])
+            if self.jobs[index].name == name && self.jobs[index].scope != .Internal {
+                return Val(self.jobs[index..<index + 1])
+            }
         }
         None
     }
+
     dependency_closure: fn(self, root: String) -> [View<JobFact>] CLIJobGraphError! from self {
         index: cli_schema_job_index(self.jobs)
         state := [Int]{}
@@ -169,6 +187,7 @@ JobRegistry: struct {
         }
         Ok(rows)
     }
+
     validate_graph: fn(self) CLIJobGraphError! {
         index: cli_schema_job_index(self.jobs)
         names := index.keys().to_list()
@@ -184,6 +203,7 @@ JobRegistry: struct {
         }
         Ok()
     }
+
     completion_words: fn(self) -> [String] Never! {
         words := [String]{}
         seen := [String:Bool]{}
@@ -196,16 +216,19 @@ JobRegistry: struct {
     }
 }
 
-CLIJobVisit: struct { row: Int, dependency: Int }
+CLIJobVisit: struct {
+    row: Int
+    dependency: Int
+}
 
 cli_schema_job_index: fn(jobs: [JobFact]) -> [String:Int] Never! {
     index := [String:Int]{}
     loop (row, job) in jobs {
-        if index.get(job.name) == None -> index[job.name] = row
-        else -> index[job.name] = -1
+        if index.get(job.name) == None -> index[job.name] = row else -> index[job.name] = -1
     }
     index.move()
 }
+
 cli_schema_job_enter: fn(jobs: [JobFact], index: [String:Int], name: String, state: &[Int], stack: &[CLIJobVisit]) CLIJobGraphError! {
     row: index.get(name) ?? return Err(CLIJobGraphError{message: "job graph references unknown job `{name}`"})
     if row < 0 -> return Err(CLIJobGraphError{message: "job `{name}` has an ambiguous declaration"})
@@ -220,11 +243,14 @@ cli_schema_job_enter: fn(jobs: [JobFact], index: [String:Int], name: String, sta
         cycle.push(name.copy())
         return Err(CLIJobGraphError{message: "job graph contains a cycle: {cycle.join(" -> ")}"})
     }
-    if jobs[row].parallel == 0 -> return Err(CLIJobGraphError{message: "job `{name}` declares a zero parallel bound"})
+    if jobs[row].parallel == 0 {
+        return Err(CLIJobGraphError{message: "job `{name}` declares a zero parallel bound"})
+    }
     state[row] = 1
     stack.push(CLIJobVisit{row: row, dependency: 0})
     Ok()
 }
+
 cli_schema_job_finish: fn(jobs: [JobFact], index: [String:Int], state: &[Int], stack: &[CLIJobVisit]) -> Int? CLIJobGraphError! {
     loop stack.len() > 0 {
         last: stack.len() - 1
@@ -244,6 +270,7 @@ cli_schema_job_finish: fn(jobs: [JobFact], index: [String:Int], state: &[Int], s
     }
     Ok(None)
 }
+
 cli_schema_job_argument: fn(param: Param) -> JobArgumentSchema Never! {
     optional: if param.ty == {
         .Option(_) -> true
@@ -261,15 +288,14 @@ cli_schema_job_argument: fn(param: Param) -> JobArgumentSchema Never! {
     if param.default == .Val(value) -> default = cli_schema_job_default(value)
     JobArgumentSchema{name: param.name, label: label, ty: type_name(param.ty), required: !param.variadic && !optional && !boolean && param.default == None, default: default, variadic: param.variadic, zone: param.zone}
 }
+
 cli_schema_job_default: fn(expression: Expr) -> String? Never! {
     if expression == {
         .Paren(inner, _, _) -> cli_schema_job_default(inner)
         .Int(value, _, _, _, _) -> Val("{value}")
-        .Float(value, _, is_f32, _, _) -> {
-            // The typed constructor performs the actual width conversion;
-            // widening a Float carrier tagged F32 would lose its display law.
-            if is_f32 -> Val("{F32{value}}") else -> Val("{value}")
-        }
+        .Float(value, _, is_f32, _, _) -> if is_f32 -> Val("{F32{value}}") else -> Val("{value}")
+        // The typed constructor performs the actual width conversion;
+        // widening a Float carrier tagged F32 would lose its display law.
         .Bool(value, _, _) -> Val(if value -> "true" else -> "false")
         .Str(parts, _, _) -> {
             if parts.len() == 1 {
@@ -280,6 +306,7 @@ cli_schema_job_default: fn(expression: Expr) -> String? Never! {
         .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
+
 cli_schema_job_doc: fn(function: Func) -> String? Never! {
     loop marker in function.markers {
         if marker.name != "Doc" -> next
@@ -295,6 +322,7 @@ cli_schema_job_doc: fn(function: Func) -> String? Never! {
     }
     None
 }
+
 // JetShow and Rust Display share the shortest round-trippable digits but use
 // different notation. This adapter only changes notation, never recomputes a
 // floating-point value, so metadata has no second numeric formatter.
@@ -327,6 +355,7 @@ cli_schema_job_float_display: fn(value: Float) -> String Never! {
     }
     "{sign}{digits.slice(0..<decimal)}.{digits.slice(decimal..<digits.len())}"
 }
+
 cli_schema_job_schedule: fn(function: Func) -> String? Never! {
     marker: function.every ?? return None
     if marker.arg == {
@@ -344,6 +373,7 @@ cli_schema_job_schedule: fn(function: Func) -> String? Never! {
         .Expression(_) -> None
     }
 }
+
 cli_schema_job_fact: fn(function: Func) -> JobFact Never! {
     metadata: function.job_metadata ?? ast_job_metadata()
     arguments := [JobArgumentSchema]{}
@@ -368,12 +398,17 @@ CLICommandSchema: struct {
         if self.version != None -> words.push("--version")
         words
     }
-    command_inputs: fn(self, command: CLISubcommandSchema) -> [CLIInputSchema] Never! { command.inputs }
+
+    command_inputs: fn(self, command: CLISubcommandSchema) -> [CLIInputSchema] Never! {
+        command.inputs
+    }
+
     command_completion_words: fn(self, command: CLISubcommandSchema) -> [String] Never! {
         words := [String]{"--help"}
         words.extend(cli_schema_input_words(command.inputs))
         words
     }
+
     job_completion_words: fn(self) -> [String] Never! {
         words := [String]{}
         loop job in self.jobs {
@@ -381,18 +416,21 @@ CLICommandSchema: struct {
         }
         words
     }
+
     job: fn(self, name: String) -> JobFact? Never! {
         loop job in self.jobs {
             if job.name == name && job.scope != JobScope.Internal -> return Val(job)
         }
         None
     }
+
     root_completion_words: fn(self) -> [String] Never! {
         words := [String]{"--help"}
         words.extend(self.standard_completion_words())
         words.extend(cli_schema_input_words(self.inputs))
         words
     }
+
     completion_words: fn(self) -> [String] Never! {
         words := self.root_completion_words()
         loop command in self.commands -> words.push(command.name)
@@ -400,6 +438,7 @@ CLICommandSchema: struct {
         words
     }
 }
+
 cli_schema_input_words: fn(inputs: [CLIInputSchema]) -> [String] Never! {
     positionals := [Int]{}
     loop index in 0..<inputs.len() {

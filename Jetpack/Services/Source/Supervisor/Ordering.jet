@@ -5,16 +5,19 @@
 
 // The caller hook that does nothing before a start.
 services_no_before_start: fn(plan: DevServicePlan) ServicesError! {
+
 }
 
 // Enabled service indexes in dependency-first order. Unknown names,
 // duplicate service names, and cycles fail before any process starts.
 services_dependency_order: fn(plans: [DevServicePlan]) -> [Int] ServicesError! {
-    indexes := [String: Int]{}
+    indexes := [String:Int]{}
     loop index in 0..<plans.len() {
         plan: plans[index]
         services_validate_service_name(plan.name)
-        if indexes.has_key(plan.name) -> return Err(ServicesError.new("service `{plan.name}` is declared more than once"))
+        if indexes.has_key(plan.name) {
+            return Err(ServicesError.new("service `{plan.name}` is declared more than once"))
+        }
         indexes[plan.name] = index
     }
     // 0 = unvisited, 1 = on the current path, 2 = finished.
@@ -22,17 +25,21 @@ services_dependency_order: fn(plans: [DevServicePlan]) -> [Int] ServicesError! {
     loop index in 0..<plans.len() -> states.push(0)
     stack := [String]{}
     order := [Int]{}
-    loop index in 0..<plans.len() -> services_visit_dependency(index, plans, indexes, states, stack, order)
+    loop index in 0..<plans.len() {
+        services_visit_dependency(index, plans, indexes, states, stack, order)
+    }
     Ok(order)
 }
 
-services_visit_dependency: fn(index: Int, plans: [DevServicePlan], indexes: [String: Int], states: &[Int], stack: &[String], order: &[Int]) ServicesError! {
+services_visit_dependency: fn(index: Int, plans: [DevServicePlan], indexes: [String:Int], states: &[Int], stack: &[String], order: &[Int]) ServicesError! {
     plan: plans[index]
     if !plan.enable {
         states[index] = 2
         return
     }
-    if states[index] == 2 -> return
+    if states[index] == 2 {
+        return
+    }
     if states[index] == 1 {
         start := 0
         loop position in 0..<stack.len() {
@@ -51,7 +58,9 @@ services_visit_dependency: fn(index: Int, plans: [DevServicePlan], indexes: [Str
     dependencies: services_dependency_names(plan)
     loop dependency in dependencies {
         dependency_index: indexes.get(dependency) ?? return Err(ServicesError.new("service `{plan.name}` depends on unknown service `{dependency}`"))
-        if !plans[dependency_index].enable -> return Err(ServicesError.new("service `{plan.name}` depends on disabled service `{dependency}`"))
+        if !plans[dependency_index].enable {
+            return Err(ServicesError.new("service `{plan.name}` depends on disabled service `{dependency}`"))
+        }
         services_visit_dependency(dependency_index, plans, indexes, states, stack, order)
     }
     stack.pop().drop("the visited name leaves the path")
@@ -89,8 +98,12 @@ services_up_ordered_with: fn(host: ServiceHost, project_dir: String, env: &Shell
         if !chosen.contains(index) -> next
         plan: plans[index]
         was_running: services_health_one(project_dir, env, plan).is_running()
-        if before_start(plan) == .Err(error) -> return Err(services_with_cleanup(error, services_down_ordered(host, project_dir, plans, started)))
-        if services_up_one(host, project_dir, env, plan) == .Err(error) -> return Err(services_with_cleanup(error, services_down_ordered(host, project_dir, plans, started)))
+        if before_start(plan) == .Err(error) {
+            return Err(services_with_cleanup(error, services_down_ordered(host, project_dir, plans, started)))
+        }
+        if services_up_one(host, project_dir, env, plan) == .Err(error) {
+            return Err(services_with_cleanup(error, services_down_ordered(host, project_dir, plans, started)))
+        }
         // A detached supervisor's `services_up_one` returns only after its
         // service ended and `services_finish_supervisor` recorded the outcome;
         // readiness, rollback and the ready phase belong to the parent `up`.
@@ -104,7 +117,9 @@ services_up_ordered_with: fn(host: ServiceHost, project_dir: String, env: &Shell
             // An exhausted supervisor already removed its PID and wrote
             // durable evidence; only a still-running failed service is cleaned.
             still_running: services_health_one(project_dir, env, plan).is_running()
-            if !was_running && supervisor_error == None && still_running -> cleanup_indexes.push(index)
+            if !was_running && supervisor_error == None && still_running {
+                cleanup_indexes.push(index)
+            }
             cleanup: if services_down_ordered(host, project_dir, plans, cleanup_indexes) == {
                 .Ok(_) -> ServicesError?{None}
                 .Err(failure) -> Val(failure)
@@ -119,7 +134,9 @@ services_up_ordered_with: fn(host: ServiceHost, project_dir: String, env: &Shell
                     }
                 }
             }
-            if cleanup == .Val(failure) -> return Err(ServicesError.new("{current_error}; cleanup failed: {failure.message}"))
+            if cleanup == .Val(failure) {
+                return Err(ServicesError.new("{current_error}; cleanup failed: {failure.message}"))
+            }
             return Err(ServicesError.new(current_error))
         }
         services_mark_lifecycle_ready(project_dir, plan)
@@ -130,7 +147,9 @@ services_up_ordered_with: fn(host: ServiceHost, project_dir: String, env: &Shell
 
 // `error`, with the cleanup failure appended when the rollback also failed.
 services_with_cleanup: fn(error: ServicesError, cleanup: ServicesError!) -> ServicesError Never! {
-    if cleanup == .Err(failure) -> return ServicesError.new("{error.message}; cleanup failed: {failure.message}")
+    if cleanup == .Err(failure) {
+        return ServicesError.new("{error.message}; cleanup failed: {failure.message}")
+    }
     error.copy()
 }
 
@@ -152,7 +171,9 @@ services_down_ordered: fn(host: ServiceHost, project_dir: String, plans: [DevSer
             break
         }
     }
-    if errors.len() == 0 -> return
+    if errors.len() == 0 {
+        return
+    }
     Err(ServicesError.new(errors.join("; ")))
 }
 
@@ -176,13 +197,17 @@ services_selected_dependency_order: fn(plans: [DevServicePlan], order: [Int], se
     unique := selected
     unique.sort()
     loop index in unique {
-        if index < 0 || index >= plans.len() -> return Err(ServicesError.new("service dependency order contains unknown index {index}"))
+        if index < 0 || index >= plans.len() {
+            return Err(ServicesError.new("service dependency order contains unknown index {index}"))
+        }
         plan: plans[index]
         if !plan.enable -> return Err(ServicesError.new("service `{plan.name}` is disabled"))
         dependencies: services_dependency_names(plan)
         loop dependency in dependencies {
             dependency_index: services_plan_index(plans, dependency) ?? return Err(ServicesError.new("service `{plan.name}` depends on unknown service `{dependency}`"))
-            if !unique.contains(dependency_index) -> return Err(ServicesError.new("service `{plan.name}` restart selection omits dependency `{dependency}`"))
+            if !unique.contains(dependency_index) {
+                return Err(ServicesError.new("service `{plan.name}` restart selection omits dependency `{dependency}`"))
+            }
         }
     }
     chosen := [Int]{}
@@ -216,10 +241,12 @@ services_watch_once_ordered_with: fn(host: ServiceHost, project_dir: String, env
     loop index in chosen {
         if plans[index].watch.len() > 0 -> watched.push(index)
     }
-    if watched.len() == 0 -> return Err(ServicesError.new("selected services have no watched files"))
+    if watched.len() == 0 {
+        return Err(ServicesError.new("selected services have no watched files"))
+    }
     changed := [Int]{}
-    state_paths := [Int: String]{}
-    currents := [Int: String]{}
+    state_paths := [Int:String]{}
+    currents := [Int:String]{}
     loop index in watched {
         plan: plans[index]
         services_validate_service_name(plan.name)
@@ -240,11 +267,15 @@ services_watch_once_ordered_with: fn(host: ServiceHost, project_dir: String, env
         currents[index] = current
     }
     if changed.len() == 0 {
-        loop index in watched -> services_write_atomic(state_paths[index], currents[index].bytes()) ?? return Err(ServicesError.new("{err}"))
+        loop index in watched {
+            services_write_atomic(state_paths[index], currents[index].bytes()) ?? return Err(ServicesError.new("{err}"))
+        }
         return Ok(changed)
     }
     services_restart_ordered_with(host, project_dir, env, plans, chosen, timeout, before_start)
-    loop index in changed -> services_write_atomic(state_paths[index], currents[index].bytes()) ?? return Err(ServicesError.new("{err}"))
+    loop index in changed {
+        services_write_atomic(state_paths[index], currents[index].bytes()) ?? return Err(ServicesError.new("{err}"))
+    }
     Ok(changed)
 }
 
@@ -304,7 +335,7 @@ services_lifecycle_tree: fn(project_dir: String, name: String) -[FS]> Dyn? Servi
     authority: services_authority_from_lifecycle(facts) ?? return Ok(None)
     after := [Dyn]{}
     loop dependency in facts.dependencies -> after.push(Dyn.Text(dependency))
-    document := [String: Dyn]{}
+    document := [String:Dyn]{}
     document["backend"] = Dyn.Text(authority.backend())
     document["generation"] = Dyn.Int(facts.generation)
     document["phase"] = Dyn.Text(facts.phase.as_str())

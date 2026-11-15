@@ -140,7 +140,9 @@ envmodel_test_member_paths: fn(plan: WorkspacePlan) -> [String] {
 }
 
 #Test("member symlink cannot escape workspace root") {
-    if sys.family() == "windows" -> return
+    if sys.family() == "windows" {
+        return
+    }
     tmp: envmodel_test_workspace_dir("member-symlink-escape")
     outside: envmodel_test_workspace_dir("member-symlink-target")
     envmodel_test_write_package(outside, "", "name: \"outside\"\n")
@@ -225,7 +227,9 @@ envmodel_test_member_paths: fn(plan: WorkspacePlan) -> [String] {
 }
 
 #Test("find does not skip unreadable member metadata") {
-    if sys.family() == "windows" -> return
+    if sys.family() == "windows" {
+        return
+    }
     tmp: envmodel_test_workspace_dir("workspace-find-bad-metadata")
     package: files.join(tmp, "packages/app")
     files.create_dir_all(package) ?? panic("package directory")
@@ -237,7 +241,9 @@ envmodel_test_member_paths: fn(plan: WorkspacePlan) -> [String] {
 
 #Test("workspace metadata must be regular and not symlinked") {
     cache := WorkspaceDeclarationCache.new()
-    if sys.family() == "windows" -> return
+    if sys.family() == "windows" {
+        return
+    }
     symlinked: envmodel_test_workspace_dir("workspace-source-symlink")
     target: files.join(symlinked, "workspace-source.txt")
     files.write(target, "workspace: module {{ members: [] }}\n") ?? panic("workspace source")

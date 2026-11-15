@@ -77,7 +77,9 @@ jet_cli_choice_kind_rank: fn(kind: String) -> Int Never! {
 // body repeats its choices.
 jet_cli_choice_seen: fn(out: [JetCLIChoice], choice: JetCLIChoice) -> Bool Never! {
     loop row in out {
-        if row.kind == choice.kind && row.file == choice.file && row.line == choice.line && row.function == choice.function && row.choice == choice.choice -> return true
+        if row.kind == choice.kind && row.file == choice.file && row.line == choice.line && row.function == choice.function && row.choice == choice.choice {
+            return true
+        }
     }
     false
 }
@@ -122,8 +124,12 @@ jet_cli_collection_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never!
         loop statement in function.tree.stmts {
             if statement == .Let(local, _, _, promotion, transferred, _) {
                 text := ""
-                if promotion == .Val(promoted) -> text = "`{local.name}` collected under the {promoted.scope} `#Policy(gc)`: {promoted.reason}"
-                if text == "" && transferred -> text = "`{local.name}` holds the collected value its call returns"
+                if promotion == .Val(promoted) {
+                    text = "`{local.name}` collected under the {promoted.scope} `#Policy(gc)`: {promoted.reason}"
+                }
+                if text == "" && transferred {
+                    text = "`{local.name}` holds the collected value its call returns"
+                }
                 if text == "" -> next
                 choice: jet_cli_function_choice("collection", function, text)
                 if !jet_cli_choice_seen(out, choice) -> out.push(choice)
@@ -161,7 +167,9 @@ jet_cli_copy_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! {
 // web partition (sema stamps `web_reason` only then).
 jet_cli_placement_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! {
     loop function in functions {
-        if function.synthetic || function.web_reason == "" || module_is_core(function.module_identity) -> next
+        if function.synthetic || function.web_reason == "" || module_is_core(function.module_identity) {
+            next
+        }
         bucket: function.web_bucket ?? next
         name: if bucket == {
             .JS -> "JS"
@@ -177,7 +185,9 @@ jet_cli_placement_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! 
 // line: each method a route marker makes an endpoint, with the marker.
 jet_cli_exposure_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! {
     loop function in functions {
-        if function.synthetic || function.endpoint == "" || module_is_core(function.module_identity) -> next
+        if function.synthetic || function.endpoint == "" || module_is_core(function.module_identity) {
+            next
+        }
         choice: jet_cli_function_choice("exposure", function, "endpoint under `{function.endpoint}`: the marker serves it; without it the method is no endpoint")
         if !jet_cli_choice_seen(out, choice) -> out.push(choice)
     }
@@ -231,16 +241,22 @@ jet_cli_choices_report: fn(choices: [JetCLIChoice], scope: String, file: String,
     }
     rows := [JetCLIStatusValue]{}
     loop choice in choices {
-        rows.push(jet_cli_status_object([
-            jet_cli_status_field("kind", jet_cli_status_text(choice.kind)),
-            jet_cli_status_field("file", jet_cli_status_text(choice.file)),
-            jet_cli_status_field("line", jet_cli_status_int(choice.line)),
-            jet_cli_status_field("function", jet_cli_status_text(choice.function)),
-            jet_cli_status_field("choice", jet_cli_status_text(choice.choice)),
-        ]))
+        rows.push(
+            jet_cli_status_object(
+                [
+                    jet_cli_status_field("kind", jet_cli_status_text(choice.kind)),
+                    jet_cli_status_field("file", jet_cli_status_text(choice.file)),
+                    jet_cli_status_field("line", jet_cli_status_int(choice.line)),
+                    jet_cli_status_field("function", jet_cli_status_text(choice.function)),
+                    jet_cli_status_field("choice", jet_cli_status_text(choice.choice)),
+                ],
+            ),
+        )
     }
     fields := [JetCLIStatusField]{
-        jet_cli_status_field("scope", jet_cli_status_text(scope)), jet_cli_status_field("source", jet_cli_status_text(file)), jet_cli_status_field("profile", jet_cli_status_text(profile)),
+        jet_cli_status_field("scope", jet_cli_status_text(scope)),
+        jet_cli_status_field("source", jet_cli_status_text(file)),
+        jet_cli_status_field("profile", jet_cli_status_text(profile)),
         jet_cli_status_field("kinds", jet_cli_status_texts(JET_CLI_CHOICE_KINDS)),
         jet_cli_status_field("choices", jet_cli_status_array(rows)),
     }
@@ -255,7 +271,7 @@ jet_cli_inspect_choices_host: fn(job: JetCLIInspectJob, source: String) -> JetDr
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     prepared: jet_cli_prepare_overlays(job.file, job.file, [JetCLIOverlay]{}, job.color, job.threads, JetDriverCompileMode.Program)
     if prepared == {
-        .Refused(refusal) -> output = refusal.move()
+        .Refused(refusal) -> { output = refusal.move() }
         .Prepared(value, _) -> {
             request := value.move()
             request.profile = job.profile
@@ -263,8 +279,12 @@ jet_cli_inspect_choices_host: fn(job: JetCLIInspectJob, source: String) -> JetDr
             compiler_threads: request.compiler_threads.copy()
             front := jet_cli_lowering_inputs(request, None)
             errors: jet_cli_errors(jet_driver_present_diagnostics(front.compile.diagnostics, sources, front.compile.generated_source_files))
-            if errors.len() > 0 -> jet_cli_inspect_finish(job, jet_cli_inspect_check_failed(job, source, errors))
-            if front.compile.internal_problem == .Val(problem) -> jet_cli_inspect_finish(job, jet_cli_ice(problem))
+            if errors.len() > 0 {
+                jet_cli_inspect_finish(job, jet_cli_inspect_check_failed(job, source, errors))
+            }
+            if front.compile.internal_problem == .Val(problem) {
+                jet_cli_inspect_finish(job, jet_cli_ice(problem))
+            }
             inputs := front.inputs.move() ?? jet_cli_inspect_finish(job, jet_cli_ice("the checked compile of `{job.file}` has no lowering inputs"))
             choices := jet_cli_storage_choices(inputs.functions)
             jet_cli_collection_choices(inputs.functions, choices)

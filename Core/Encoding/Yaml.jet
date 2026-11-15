@@ -3,6 +3,7 @@ use {
     base64: core.encoding.base64
     core.time.[ZonedDateTime]
     stream: __core_encoding_stream
+    json: core.encoding.json
 }
 
 syntax_error: fn(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError Never! {
@@ -23,7 +24,6 @@ priv unsupported_error: fn(reason: String) -> EncodingError Never! {
     error.kind = EncodingErrorKind.Unsupported
     error
 }
-use json: core.encoding.json
 
 // core.encoding.yaml — JSON-compatible YAML 1.2 plus simple block maps/lists.
 //
@@ -47,7 +47,6 @@ to_string: fn<T: Encode>(value: T) -> String Never! {
     text: render_yaml(value.encode(), 0).trim_end()
     if text == "" -> "{{}}" else -> text
 }
-
 
 parse_yaml: fn(text: String) -> Dyn EncodingError! {
     trimmed: trim_yaml(text)
@@ -77,7 +76,9 @@ parse_block: fn(text: String) -> Dyn EncodingError! {
         if b == (U8{13}) -> next
         buf.push(b)
     }
-    if buf.len() > 0 -> rows.push(String.from_bytes(buf) ?? return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "invalid UTF-8 in YAML input")))
+    if buf.len() > 0 {
+        rows.push(String.from_bytes(buf) ?? return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "invalid UTF-8 in YAML input")))
+    }
     if rows.len() == 0 -> return Ok(Dyn.Null)
     first := ""
     first_index := 0
@@ -121,9 +122,7 @@ is_map_entry: fn(text: String) -> Bool Never! {
         n: raw[i]
         if quote != 0 {
             if n == quote -> quote = 0
-        } else if n == 34 || n == 39 {
-            quote = n
-        } else if n == 58 {
+        } else if n == 34 || n == 39 { quote = n } else if n == 58 {
             if i + 1 == raw.len() || raw[i + 1] == (U8{32}) || raw[i + 1] == (U8{9}) -> return true
         }
     }
@@ -152,9 +151,7 @@ parse_block_scalar: fn(rows: [String], start: Int, parent_indent: Int, folded: B
     loop j in 0..<lines.len() {
         if j > 0 {
             previous: lines[j - 1]
-            if folded && previous.len() > 0 && lines[j].len() > 0 {
-                out = "{out} "
-            } else {
+            if folded && previous.len() > 0 && lines[j].len() > 0 -> out = "{out} " else {
                 out = "{out}\n"
             }
         }
@@ -185,12 +182,11 @@ strip_indent: fn(text: String, columns: Int) -> String Never! {
     String.from_bytes(raw[i..raw.len() - 1]) ?? ""
 }
 
-
 parse_map: fn(rows: [String], indent: Int) -> Dyn EncodingError! {
     // Keys keep arrival order; the temporary key set
     // rejects a repeated name and is freed with the map.
     entries := [(key: String, value: Dyn)]{}
-    seen := [String: Bool]{}
+    seen := [String:Bool]{}
     i := 0
     loop i < rows.len() {
         line: rows[i]
@@ -200,13 +196,21 @@ parse_map: fn(rows: [String], indent: Int) -> Dyn EncodingError! {
         }
         pad: leading_spaces(line)
         if pad < indent -> break
-        if pad > indent -> return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "unexpected indentation in YAML map"))
+        if pad > indent {
+            return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "unexpected indentation in YAML map"))
+        }
         body: lstrip(line)
         cut: split_once(body, 58)
-        if cut.before == body -> return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "YAML map entry needs ':'"))
+        if cut.before == body {
+            return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "YAML map entry needs ':'"))
+        }
         key: trim_yaml(cut.before)
-        if key.len() == 0 -> return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "YAML map key is empty"))
-        if seen.has_key(key) -> return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "duplicate YAML map key"))
+        if key.len() == 0 {
+            return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "YAML map key is empty"))
+        }
+        if seen.has_key(key) {
+            return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "duplicate YAML map key"))
+        }
         _: seen.add(key.copy(), true)
         rest: trim_yaml(strip_inline_comment(cut.after))
         i += 1
@@ -227,9 +231,7 @@ parse_map: fn(rows: [String], indent: Int) -> Dyn EncodingError! {
                 i += 1
             }
             entries.push((key: key, value: parse_block(join_lines(child_rows))))
-        } else {
-            entries.push((key: key, value: parse_scalar(rest)))
-        }
+        } else { entries.push((key: key, value: parse_scalar(rest))) }
     }
     Ok(stream.object_from_entries(entries))
 }
@@ -245,17 +247,22 @@ parse_list: fn(rows: [String], indent: Int) -> Dyn EncodingError! {
         }
         pad: leading_spaces(line)
         if pad < indent -> break
-        if pad > indent -> return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "unexpected indentation in YAML list"))
+        if pad > indent {
+            return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "unexpected indentation in YAML list"))
+        }
         body: lstrip(line)
         bytes: body.bytes()
-        if bytes.len() == 0 || bytes[0] != (U8{45}) -> return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "YAML list item needs '-'"))
+        if bytes.len() == 0 || bytes[0] != (U8{45}) {
+            return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "YAML list item needs '-'"))
+        }
         rest := ""
         if bytes.len() > 1 -> rest = trim_yaml(drop_prefix(body, 2))
         i += 1
         if rest == "|" || rest == ">" || rest == "!!binary |" || rest == "!!binary >" {
             block: parse_block_scalar(rows, i - 1, pad, rest == ">" || rest == "!!binary >")
-            if rest.starts_with("!!binary") -> items.push(parse_scalar("!!binary {block.value}"))
-            else -> items.push(Dyn.Text(block.value))
+            if rest.starts_with("!!binary") -> items.push(parse_scalar("!!binary {block.value}")) else {
+                items.push(Dyn.Text(block.value))
+            }
             i = block.next
         } else if rest.len() == 0 {
             child_rows := [String]{}
@@ -284,9 +291,7 @@ parse_list: fn(rows: [String], indent: Int) -> Dyn EncodingError! {
                 i += 1
             }
             items.push(parse_map(map_rows, 0))
-        } else {
-            items.push(parse_scalar(strip_inline_comment(rest)))
-        }
+        } else { items.push(parse_scalar(strip_inline_comment(rest))) }
     }
     Ok(Dyn.Array(items))
 }
@@ -377,9 +382,7 @@ is_json_number_token: fn(text: String) -> Bool Never! {
     i := 0
     if i < b.len() && b[i] == (U8{45}) -> i += 1
     if i >= b.len() -> return false
-    if b[i] == (U8{48}) {
-        i += 1
-    } else {
+    if b[i] == (U8{48}) -> i += 1 else {
         if b[i] < (U8{49}) || b[i] > (U8{57}) -> return false
         loop i < b.len() && b[i] >= (U8{48}) && b[i] <= (U8{57}) -> i += 1
     }
@@ -419,9 +422,7 @@ render_yaml_array: fn(items: [Dyn], indent: Int) -> String Never! {
     pad: spaces(indent)
     out := ""
     loop item in items {
-        if nonempty_collection(item) {
-            out = "{out}{pad}-\n{render_yaml(item, indent + 2)}"
-        } else {
+        if nonempty_collection(item) -> out = "{out}{pad}-\n{render_yaml(item, indent + 2)}" else {
             out = "{out}{pad}- {yaml_leaf(item)}\n"
         }
     }
@@ -439,17 +440,19 @@ render_yaml_object: fn(value: Dyn, indent: Int) -> String Never! {
             out = "{out}{pad}{key}:\n"
             if pair.value == {
                 .Array(items) -> out = "{out}{render_yaml_array(items, indent)}"
-                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> out = "{out}{render_yaml(pair.value, indent + 2)}"
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {
+                    out = "{out}{render_yaml(pair.value, indent + 2)}"
+                }
             }
-        } else {
-            out = "{out}{pad}{key}: {yaml_leaf(pair.value)}\n"
-        }
+        } else { out = "{out}{pad}{key}: {yaml_leaf(pair.value)}\n" }
     }
     out
 }
 
 yaml_key: fn(key: String) -> String Never! {
-    if key == "" || key.contains(":") || key.contains(" ") || key.contains("#") -> return "{key:Debug}"
+    if key == "" || key.contains(":") || key.contains(" ") || key.contains("#") {
+        return "{key:Debug}"
+    }
     key.copy()
 }
 
@@ -522,9 +525,7 @@ strip_inline_comment: fn(text: String) -> String Never! {
         n: raw[i]
         if quote != 0 {
             if n == quote -> quote = 0
-        } else if n == 34 || n == 39 {
-            quote = n
-        } else if n == 35 && (i == 0 || raw[i - 1] == 32 || raw[i - 1] == 9) {
+        } else if n == 34 || n == 39 { quote = n } else if n == 35 && (i == 0 || raw[i - 1] == 32 || raw[i - 1] == 9) {
             if i == 0 -> return ""
             return String.from_bytes(raw[0..i - 1]) ?? ""
         }
@@ -535,7 +536,9 @@ strip_inline_comment: fn(text: String) -> String Never! {
 
 yaml_scalar: fn(text: String) -> String Never! {
     needs := text == "" || text == "null" || text == "Null" || text == "NULL" || text == "~" || text == "true" || text == "True" || text == "TRUE" || text == "false" || text == "False" || text == "FALSE"
-    if text.starts_with(" ") || text.ends_with(" ") || text.contains(": ") || text.contains(" #") || text.contains("\n") || parses_as_number(text) -> needs = true
+    if text.starts_with(" ") || text.ends_with(" ") || text.contains(": ") || text.contains(" #") || text.contains("\n") || parses_as_number(text) {
+        needs = true
+    }
     raw: text.bytes()
     if raw.len() > 0 {
         loop b in "-?:[]{{}}#&*!|>'\"%@`".bytes() {
@@ -556,7 +559,9 @@ parses_as_number: fn(text: String) -> Bool Never! {
         }
         if n < 48 || n > 57 -> digits = false
     }
-    if digits && Int.parse(text) == .Ok(n) && n >= -9223372036854775808 && n <= 9223372036854775807 -> return true
+    if digits && Int.parse(text) == .Ok(n) && n >= -9223372036854775808 && n <= 9223372036854775807 {
+        return true
+    }
     Float.parse(text) == .Ok(_)
 }
 
@@ -635,20 +640,20 @@ spaces: fn(n: Int) -> String {
 unquote: fn(text: String) -> String Never! {
     raw: text.bytes()
     if raw.len() < 2 -> return text.copy()
-    if (raw[0] != (U8{34}) && raw[0] != (U8{39})) || raw[raw.len() - 1] != raw[0] -> return text.copy()
+    if (raw[0] != (U8{34}) && raw[0] != (U8{39})) || raw[raw.len() - 1] != raw[0] {
+        return text.copy()
+    }
     out := [U8]{}
     i := 1
     loop i < raw.len() - 1 {
         if raw[0] == (U8{34}) && raw[i] == (U8{92}) && i + 1 < raw.len() - 1 {
             i += 1
-            if raw[i] == (U8{110}) -> out.push(U8{10})
-            else if raw[i] == (U8{114}) -> out.push(U8{13})
-            else if raw[i] == (U8{116}) -> out.push(U8{9})
-            else if raw[i] == (U8{34}) || raw[i] == (U8{92}) -> out.push(raw[i])
-            else -> out.push(raw[i])
-        } else {
-            out.push(raw[i])
-        }
+            if raw[i] == (U8{110}) -> out.push(U8{10}) else if raw[i] == (U8{114}) {
+                out.push(U8{13})
+            } else if raw[i] == (U8{116}) { out.push(U8{9}) } else if raw[i] == (U8{34}) || raw[i] == (U8{92}) {
+                out.push(raw[i])
+            } else { out.push(raw[i]) }
+        } else { out.push(raw[i]) }
         i += 1
     }
     String.from_bytes(out) ?? text.copy()
@@ -666,14 +671,14 @@ unquote: fn(text: String) -> String Never! {
     tree: parse("---\n# a config\nflowlist: [1, 2, 3]\nempty: {{}}\n") ?? panic("YAML")
     assert_eq(json.to_string(tree) ?? panic("JSON"), "{{\"flowlist\":[1,2,3],\"empty\":{{}}}}")
     if parse("base: &b\n  host: local\nuse: *b\n") == {
-        .Ok(_) -> panic("an anchor must fail closed")
+        .Ok(_) -> { panic("an anchor must fail closed") }
         .Err(error) -> {
             assert(error.kind == EncodingErrorKind.Unsupported)
             assert_eq(error.reason, "YAML anchors and aliases (&name, *name) are not supported")
         }
     }
     if parse("items: [a, b]\n") == {
-        .Ok(_) -> panic("a non-JSON flow collection must fail closed")
+        .Ok(_) -> { panic("a non-JSON flow collection must fail closed") }
         .Err(error) -> assert_eq(error.reason, "YAML flow collections must be JSON")
     }
 }

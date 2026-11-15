@@ -13,15 +13,17 @@
 // lines on a pipe alike, while a pipe-to-pipe copy still writes stdout once
 // per buffer.
 terminal_input_root := I64{0}
+
 TERM_INPUT_CAPACITY: I64{65536}
+
 // runtime-init: 4 when terminal_input_root
 #Export(c) jet_rt_terminal_input_init: fn() {
-    if (terminal_input_root != I64{0}) -> return
+    if (terminal_input_root != I64{0}) {
+        return
+    }
     root: jet_rt_alloc(I64{32}, I64{8})
     thread_zero(root, I64{32})
-    #Unsafe("runtime-init runs before any other thread exists") {
-        terminal_input_root = root
-    }
+    #Unsafe("runtime-init runs before any other thread exists") { terminal_input_root = root }
 }
 
 // Caller holds the stdin lock: the number of buffered unread bytes.
@@ -48,11 +50,13 @@ rt_line_run: fn(start: I64, count: I64) -> I64 {
     words: count - count % I64{8}
     loop at < words {
         word: rt_text_word(wrapping(start + at)).bit_xor(I64{723401728380766730})
-        if (wrapping(word - I64{72340172838076673}).bit_and(word.bit_xor(I64{-1})).bit_and(I64{-9187201950435737472}) != I64{0}) -> break
+        if (wrapping(word - I64{72340172838076673}).bit_and(word.bit_xor(I64{-1})).bit_and(I64{-9187201950435737472}) != I64{0}) {
+            break
+        }
         at += I64{8}
     }
     loop at < count {
-        if (rt_text_byte(wrapping(start + at)) == I64{10}) -> return at + I64{1}
+        if (rt_text_byte(wrapping(start + at)) == I64{10}) { return at + I64{1} }
         at += I64{1}
     }
     count
@@ -74,9 +78,9 @@ term_input_fill: fn(retry: Bool, ebadf_eof: Bool) -> I64 {
     jet_rt_stdout_flush()
     loop {
         got: rt_prove_stdin_read(buffer, TERM_INPUT_CAPACITY)
-        if (got == I64{-4} && retry) -> next
-        if (got == I64{-9} && ebadf_eof) -> return I64{0}
-        if (got > I64{0}) -> rt_text_store(wrapping(root + I64{24}), got)
+        if (got == I64{-4} && retry) { next }
+        if (got == I64{-9} && ebadf_eof) { return I64{0} }
+        if (got > I64{0}) { rt_text_store(wrapping(root + I64{24}), got) }
         return got
     }
 }
@@ -101,7 +105,9 @@ term_input_take: fn(into: I64, capacity: I64) -> I64 {
 // plus an owned IO error. Tuple<String, Option<String>>: text, optional-error
 // tag and payload slots.
 #Export(c) jet_terminal8_read_all: fn(output: I64, error_tag: I64, error: I64) {
-    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        return
+    }
     value: jet_rt_string_builder_new()
     failure := I64{0}
     sync_mutex_lock(terminal_input_root)
@@ -112,7 +118,7 @@ term_input_take: fn(into: I64, capacity: I64) -> I64 {
             term_input_consume(buffered)
         }
         got: term_input_fill(true, false)
-        if (got == I64{0}) -> break
+        if (got == I64{0}) { break }
         if (got < I64{0}) {
             failure = host_errno_cause(-got)
             break
@@ -122,7 +128,7 @@ term_input_take: fn(into: I64, capacity: I64) -> I64 {
     invalid: text_bytes_utf8_error(rt_text_data(value), rt_text_len(value))
     if (invalid != I64{0}) {
         jet_rt_string_drop(invalid)
-        if (failure != I64{0}) -> jet_rt_string_drop(failure)
+        if (failure != I64{0}) { jet_rt_string_drop(failure) }
         failure = jet_rt_string_clone(rt_static_text("stream did not contain valid UTF-8"))
     }
     if (failure != I64{0}) {

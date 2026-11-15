@@ -2,8 +2,19 @@
 // discovery, and entry resolution.
 use {
     jet_pkg_model.[
-        AuthorityResolver, ComposeError, ConfigFacts, ManifestEntry, PackageFacts, PackageOutputKind,
-        PackageParseError, pkg_build_entry_source, pkg_extract_inline_package, pkg_format_source, pkg_package_marker_source, pkg_path_file_name, pkg_path_parent,
+        AuthorityResolver,
+        ComposeError,
+        ConfigFacts,
+        ManifestEntry,
+        PackageFacts,
+        PackageOutputKind,
+        PackageParseError,
+        pkg_build_entry_source,
+        pkg_extract_inline_package,
+        pkg_format_source,
+        pkg_package_marker_source,
+        pkg_path_file_name,
+        pkg_path_parent,
     ]
     files: core.files
 }
@@ -32,11 +43,11 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) Never! -[F
 #Test("parser and formatter refuse retired record heads") {
     retired: "name: \"demo\"\noutputs: .{{ app: .Executable.{{ entry: run }} }}"
     if PackageFacts.parse(retired, "package.jet") == {
-        .Err(error) -> assert(error == PackageParseError.RetiredRecordHead)
+        .Err(error) -> { assert(error == PackageParseError.RetiredRecordHead) }
         .Ok(_) -> panic("retired record heads are refused")
     }
     if pkg_format_source(retired, "package.jet") == {
-        .Err(error) -> assert_eq(error.message, PackageParseError.RetiredRecordHead.message())
+        .Err(error) -> { assert_eq(error.message, PackageParseError.RetiredRecordHead.message()) }
         .Ok(_) -> panic("the formatter refuses retired record heads")
     }
 }
@@ -84,7 +95,7 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) Never! -[F
 
 #Test("loadable library requires a boolean") {
     if PackageFacts.parse("name: \"skyhawk\"\noutputs: {{ mod: .Library{{ loadable: \"yes\" }} }}", "package.jet") == {
-        .Err(error) -> assert(error.message().contains("outputs.mod.loadable"))
+        .Err(error) -> { assert(error.message().contains("outputs.mod.loadable")) }
         .Ok(_) -> panic("a string loadable is refused")
     }
 }
@@ -102,7 +113,7 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) Never! -[F
 
 #Test("native library requires a boolean") {
     if PackageFacts.parse("name: \"flightlog\"\noutputs: {{ core: .Library{{ native: \"yes\" }} }}", "package.jet") == {
-        .Err(error) -> assert(error.message().contains("outputs.core.native"))
+        .Err(error) -> { assert(error.message().contains("outputs.core.native")) }
         .Ok(_) -> panic("a string native is refused")
     }
 }
@@ -120,7 +131,7 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) Never! -[F
     pkg_facts_test_write(dir, "first.jet", "first: Config{{ version: \"1\" }}\n")
     pkg_facts_test_write(dir, "second.jet", "second: Config{{ version: \"2\" }}\n")
     if facts.compose_configs(dir) == {
-        .Err(error) -> assert(error.message().contains("second.jet"))
+        .Err(error) -> { assert(error.message().contains("second.jet")) }
         .Ok(_) -> panic("a malformed later Config must abort composition")
     }
     assert_eq(facts.resolved_config_paths.len(), 0)
@@ -177,7 +188,9 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) Never! -[F
     assert(facts.field_provenance("version").contains(files.join(dir, "one.jet")))
     resolver: AuthorityResolver.open(dir) ?? panic("resolver")
     names := [String]{}
-    loop file in facts.source_files_checked(resolver) ?? panic("source files") -> names.push(pkg_path_file_name(file.path))
+    loop file in facts.source_files_checked(resolver) ?? panic("source files") {
+        names.push(pkg_path_file_name(file.path))
+    }
     assert(!names.contains("one.jet"))
     assert(names.contains("ordinary.jet"))
 }
@@ -188,14 +201,14 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) Never! -[F
     pkg_facts_test_write(dir, "one.jet", "dev: Config{{ version: \"same\" }}\n")
     pkg_facts_test_write(dir, "two.jet", "dev: Config{{ version: \"same\" }}\n")
     if PackageFacts.load(dir) == {
-        .Err(error) -> assert(error.message().contains("Config `dev` is ambiguous"))
+        .Err(error) -> { assert(error.message().contains("Config `dev` is ambiguous")) }
         .Ok(_) -> panic("an ambiguous named Config must fail")
     }
 }
 
 #Test("conflicting nested fields fail closed") {
     if PackageFacts.parse("name: \"demo\"\noutputs: {{ app: .Executable{{ entry: run, entry: other }} }}", "package.jet") == {
-        .Err(error) -> assert(error.message().contains("outputs.app.entry"))
+        .Err(error) -> { assert(error.message().contains("outputs.app.entry")) }
         .Ok(_) -> panic("a repeated nested field is refused")
     }
 }
@@ -205,7 +218,9 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) Never! -[F
     first: ConfigFacts.parse("Config{{ version: \"1\" }}", "configs/one.jet") ?? panic("first")
     second: ConfigFacts.parse("Config{{ version: \"2\" }}", "configs/two.jet") ?? panic("second")
     if facts.compose([ConfigFacts]{first, second}) == {
-        .Err(error) -> assert(error == ComposeError.Conflict{field: "version", left_origin: "configs/one.jet", right_origin: "configs/two.jet", left: "1", right: "2"})
+        .Err(error) -> {
+            assert(error == ComposeError.Conflict{field: "version", left_origin: "configs/one.jet", right_origin: "configs/two.jet", left: "1", right: "2"})
+        }
         .Ok(_) -> panic("expected scalar conflict")
     }
     assert(facts.version == None)
@@ -225,10 +240,13 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) Never! -[F
     dir: pkg_facts_test_dir("entry")
     pkg_facts_test_write(dir, "run.jet", "run: fn() {{ print(1) }}\n")
     facts: PackageFacts.parse("name: \"demo\"\noutputs: {{ app: .Executable{{ entry: run }} }}", "package.jet") ?? panic("parses")
-    assert_eq(if facts.entry_path(dir, facts.outputs["app"]) == {
-        .Ok(found) -> found
-        .Err(error) -> panic("entry")
-    }, Val(files.join(dir, "run.jet")))
+    assert_eq(
+        if facts.entry_path(dir, facts.outputs["app"]) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("entry")
+        },
+        Val(files.join(dir, "run.jet")),
+    )
 }
 
 #Test("canonical run entry precedes typed output") {
@@ -236,20 +254,26 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) Never! -[F
     pkg_facts_test_write(dir, "run.jet", "run: fn() {{ print(1) }}\n")
     pkg_facts_test_write(dir, "serve.jet", "serve: fn() {{ print(2) }}\n")
     facts: PackageFacts.parse("name: \"demo\"\noutputs: {{ app: .Executable{{ entry: serve }} }}", "package.jet") ?? panic("parses")
-    assert_eq(if facts.resolve_run_entry(dir) == {
-        .Ok(found) -> found
-        .Err(error) -> panic("run entry")
-    }, Val(files.join(dir, "run.jet")))
+    assert_eq(
+        if facts.resolve_run_entry(dir) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("run entry")
+        },
+        Val(files.join(dir, "run.jet")),
+    )
 }
 
 #Test("output entry override resolves one package function") {
     dir: pkg_facts_test_dir("output-entry-override")
     pkg_facts_test_write(dir, "launch.jet", "launch: fn() {{ print(1) }}\n")
     facts: PackageFacts.parse("name: \"demo\"\noutputs: {{ app: .Executable{{ entry: launch }} }}", "package.jet") ?? panic("parses")
-    assert_eq(if facts.resolve_run_entry(dir) == {
-        .Ok(found) -> found
-        .Err(error) -> panic("run entry")
-    }, Val(files.join(dir, "launch.jet")))
+    assert_eq(
+        if facts.resolve_run_entry(dir) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("run entry")
+        },
+        Val(files.join(dir, "launch.jet")),
+    )
 }
 
 #Test("output entry resolves a nested main module") {
@@ -258,10 +282,13 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) Never! -[F
     pkg_facts_test_write(dir, "src/cli/main.jet", "cli_run: fn() {{}}\nrun: fn() {{ cli_run() }}\n")
     facts: PackageFacts.parse("name: \"demo\"\noutputs: {{ app: .Executable{{ entry: app.cli_run }} }}", "package.jet") ?? panic("parses")
     expected: files.join(dir, "src/cli/main.jet")
-    assert_eq(if facts.entry_path(dir, facts.outputs["app"]) == {
-        .Ok(found) -> found
-        .Err(error) -> panic("entry")
-    }, Val(expected))
+    assert_eq(
+        if facts.entry_path(dir, facts.outputs["app"]) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("entry")
+        },
+        Val(expected),
+    )
     resolver: AuthorityResolver.open(dir) ?? panic("resolver")
     checked: (if facts.resolve_run_entry_checked(resolver) == {
         .Ok(found) -> found
@@ -278,10 +305,13 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) Never! -[F
     pkg_facts_test_write(dir, "bridge.jet", "use app: \"src/cli/main\"\n")
     pkg_facts_test_write(dir, "src/cli/main.jet", "cli_run: fn() {{}}\n")
     facts: PackageFacts.parse("name: \"demo\"\noutputs: {{ app: .Executable{{ entry: app.cli_run }} }}", "package.jet") ?? panic("parses")
-    assert_eq(if facts.entry_path(dir, facts.outputs["app"]) == {
-        .Ok(found) -> found
-        .Err(error) -> panic("entry")
-    }, Val(files.join(dir, "src/cli/main.jet")))
+    assert_eq(
+        if facts.entry_path(dir, facts.outputs["app"]) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("entry")
+        },
+        Val(files.join(dir, "src/cli/main.jet")),
+    )
 }
 
 // One rejected nested-entry fixture: the run entry has no unique source.
@@ -291,17 +321,21 @@ pkg_facts_assert_nested_entry_rejected: fn(label: String, entry_source: String, 
     loop fixture in extra -> pkg_facts_test_write(dir, fixture.key, fixture.value)
     facts: PackageFacts.parse("name: \"demo\"\noutputs: {{ app: .Executable{{ entry: app.cli_run }} }}", "package.jet") ?? panic("parses")
     if facts.resolve_run_entry(dir) == {
-        .Err(error) -> assert(error.message.contains("no unique source entry"))
+        .Err(error) -> { assert(error.message.contains("no unique source entry")) }
         .Ok(_) -> panic("an unresolvable nested entry must fail closed")
     }
 }
 
 #Test("nested output entries fail closed for missing ambiguous and escaping imports") {
     pkg_facts_assert_nested_entry_rejected("output-entry-nested-missing", "use app: \"src/cli/missing\"\n", [ManifestEntry]{})
-    pkg_facts_assert_nested_entry_rejected("output-entry-nested-ambiguous", "use app: \"src/cli/main\"\n", [ManifestEntry]{
-        ManifestEntry{key: "src/cli/main.jet", value: "cli_run: fn() {{}}\n"},
-        ManifestEntry{key: "src/cli/main/module.jet", value: "cli_run: fn() {{}}\n"},
-    })
+    pkg_facts_assert_nested_entry_rejected(
+        "output-entry-nested-ambiguous",
+        "use app: \"src/cli/main\"\n",
+        [ManifestEntry]{
+            ManifestEntry{key: "src/cli/main.jet", value: "cli_run: fn() {{}}\n"},
+            ManifestEntry{key: "src/cli/main/module.jet", value: "cli_run: fn() {{}}\n"},
+        },
+    )
     pkg_facts_assert_nested_entry_rejected("output-entry-nested-escaping", "use app: \"../../outside/main\"\n", [ManifestEntry]{})
 }
 
@@ -312,7 +346,7 @@ pkg_facts_assert_nested_entry_rejected: fn(label: String, entry_source: String, 
     run_path: files.join(dir, "run.jet")
     assert_eq((facts.select_output("run", Val("app"), None) ?? panic("select")).name, "app")
     if facts.resolve_run_entry(dir) == {
-        .Err(error) -> assert(error.message.contains("no unique source entry"))
+        .Err(error) -> { assert(error.message.contains("no unique source entry")) }
         .Ok(_) -> panic("main.jet is not the `run` entry")
     }
     assert(files.exists(files.join(dir, "main.jet")))
@@ -322,20 +356,29 @@ pkg_facts_assert_nested_entry_rejected: fn(label: String, entry_source: String, 
     pkg_facts_test_write(dir, "run.jet", "run: fn() {{ print(2) }}\n")
     pkg_facts_test_write(dir, "other.jet", "run: fn() {{ print(3) }}\n")
     assert_eq((facts.select_output("run", Val("app"), None) ?? panic("select")).name, "app")
-    assert_eq(if facts.resolve_run_entry(dir) == {
-        .Ok(found) -> found
-        .Err(error) -> panic("run entry")
-    }, Val(run_path))
-    assert_eq(if facts.entry_path(dir, output) == {
-        .Ok(found) -> found
-        .Err(error) -> panic("entry")
-    }, Val(run_path))
+    assert_eq(
+        if facts.resolve_run_entry(dir) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("run entry")
+        },
+        Val(run_path),
+    )
+    assert_eq(
+        if facts.entry_path(dir, output) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("entry")
+        },
+        Val(run_path),
+    )
 
     assert_eq((facts.select_output("run", None, None) ?? panic("select")).name, "app")
-    assert_eq(if facts.resolve_run_entry(dir) == {
-        .Ok(found) -> found
-        .Err(error) -> panic("run entry")
-    }, Val(run_path))
+    assert_eq(
+        if facts.resolve_run_entry(dir) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("run entry")
+        },
+        Val(run_path),
+    )
 }
 
 #Test("typed entry ambiguity reports package origin") {
@@ -390,12 +433,12 @@ pkg_facts_assert_nested_entry_rejected: fn(label: String, entry_source: String, 
     cases: [String]{"#(x)\nname: \"demo\"\n", "#Traced(level: 2\nname: \"demo\"\n", "name: \"demo\"\n#Traced\n"}
     loop source in cases {
         if PackageFacts.parse(source, "package.jet") == {
-            .Err(error) -> assert(error.message().contains("malformed Package field"))
+            .Err(error) -> { assert(error.message().contains("malformed Package field")) }
             .Ok(_) -> panic("refused: {source}")
         }
     }
     if pkg_extract_inline_package("package: {{ #Traced\nname: \"demo\" }}\nrun: fn() {{}}\n") == {
-        .Err(error) -> assert(error.message().contains("marker"))
+        .Err(error) -> { assert(error.message().contains("marker")) }
         .Ok(_) -> panic("a marker inside the inline Package braces is refused")
     }
 }

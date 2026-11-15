@@ -16,21 +16,15 @@ deep_sessions_refusal: fn(argv: [String]) -> String {
     if jet_cli_plan([String]{"repl"}) == .Repl(_, _, options, _) {
         assert(!options.deep_checks.all, "no flag selects no deep check")
         assert_eq(options.deep_checks.scopes.len(), 0)
-    } else {
-        panic("`jet repl` plans a session")
-    }
+    } else { panic("`jet repl` plans a session") }
     if jet_cli_plan([String]{"repl", "--deep-checks"}) == .Repl(_, _, options, _) {
         assert(options.deep_checks.all, "the bare flag selects every deep check")
         assert_eq(options.deep_checks.scopes.len(), 0)
-    } else {
-        panic("`jet repl --deep-checks` plans a session")
-    }
+    } else { panic("`jet repl --deep-checks` plans a session") }
     if jet_cli_plan([String]{"repl", "--deep-checks=tree", "--deep-checks=shop", "--deep-checks=tree"}) == .Repl(_, _, options, _) {
         assert(!options.deep_checks.all, "scopes alone select no other deep check")
         assert_eq(options.deep_checks.scopes, [String]{"tree", "shop"})
-    } else {
-        panic("`jet repl --deep-checks=tree` plans a session")
-    }
+    } else { panic("`jet repl --deep-checks=tree` plans a session") }
     assert_eq(deep_sessions_refusal([String]{"repl", "--deep-checks=tree.run"}), "E2119 exit {JET_DRIVER_EXIT_USAGE}")
 }
 

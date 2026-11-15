@@ -1,12 +1,16 @@
-
 use json: core.encoding.json
 
-Address: struct { text: String }
-Email: struct { addr: String, nested: Address, items: [Address] }
-
-pick: fn() -> Int {
-    return 0
+Address: struct {
+    text: String
 }
+
+Email: struct {
+    addr: String
+    nested: Address
+    items: [Address]
+}
+
+pick: fn() -> Int { return 0 }
 
 encoded: fn(e: Email, i: Int) -> String {
     shallow := Dyn.Text(e.addr.copy())
@@ -19,9 +23,7 @@ encoded: fn(e: Email, i: Int) -> String {
     return "{json.to_string(shallow)}|{json.to_string(nested)}|{json.to_string(indexed)}|{json.to_string(computed)}|{json.to_string(called)}|{json.to_string(parenthesized)}|{json.to_string(conditional)}"
 }
 
-slice_data: fn(xs: [Dyn]) -> Dyn {
-    return Dyn.Array(xs[0..1])
-}
+slice_data: fn(xs: [Dyn]) -> Dyn { return Dyn.Array(xs[0..1]) }
 
 run: fn() {
     e := Email{addr: "a@b.com", nested: Address{text: "inside"}, items: [Address{text: "zero"}, Address{text: "item"}]}

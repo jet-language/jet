@@ -41,9 +41,7 @@ computed_inputs_test_refused: fn(adapter: JetDriverComptimeInputs, builtin: Stri
     assert_eq(log.guard_read().value.records.len(), 0)
     if adapter.comptime_input("embed_file", "sub\\a.txt", Span{start: 0, end: 1}) == .Ok(value) {
         if value == .String(text) -> assert_eq(text, "a\n") else -> panic("embed_file gives text")
-    } else {
-        panic("a computed path inside the package reads")
-    }
+    } else { panic("a computed path inside the package reads") }
     assert_eq(log.guard_read().value.records[0].path, "sub/a.txt")
     cli_files.remove_all(made) ?? panic("test root cleanup")
 }
@@ -56,9 +54,7 @@ computed_inputs_test_refused: fn(adapter: JetDriverComptimeInputs, builtin: Stri
     adapter: computed_inputs_test_adapter("{root}/main.jet", log.copy())
     if adapter.comptime_input("find", "in/*.txt", Span{start: 0, end: 1}) == .Ok(value) {
         if value == .List(values) -> assert_eq(values.len(), 0) else -> panic("find gives a list")
-    } else {
-        panic("an empty find is a value")
-    }
+    } else { panic("an empty find is a value") }
     read: log.guard_read().value.records.copy()
     assert_eq(read.len(), 1)
     assert_eq(read[0].path, "in/*.txt")
@@ -74,9 +70,7 @@ computed_inputs_test_refused: fn(adapter: JetDriverComptimeInputs, builtin: Stri
     log.guard_edit().value.records = [JetDriverComptimeInputRecord]{}
     if adapter.comptime_input("find", "in/*.txt", Span{start: 0, end: 1}) == .Ok(value) {
         if value == .List(values) -> assert_eq(values.len(), 1) else -> panic("find gives a list")
-    } else {
-        panic("a find is a value")
-    }
+    } else { panic("a find is a value") }
     again: log.guard_read().value.records.copy()
     assert_eq(again.len(), 2)
     assert_eq(again[0].path, "in/added.txt")

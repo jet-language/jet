@@ -1,14 +1,16 @@
-
 use json: core.encoding.json
 
 #Codable
-Boxed: struct<T> { value: T }
+Boxed: struct<T> {
+    value: T
+}
 
 generic_encode: fn<T: Encode>(value: T) -> String { json.to_string(value) }
+
 generic_decode: fn<T: Decode>(wire: String) -> T [FieldError]! { json.decode<T>(wire) }
 
 run: fn() {
-    value: Boxed<Int>{ value: 7 }
+    value: Boxed<Int>{value: 7}
     derived_wire: json.to_string(value)
     generic_wire: generic_encode(value)
     derived_bytes: derived_wire.bytes()

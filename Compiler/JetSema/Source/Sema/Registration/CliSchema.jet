@@ -59,7 +59,9 @@ sema_cli_command_schema: fn(graph: SemaRegistrationGraph) -> CLICommandSchema {
 sema_cli_schema_struct: fn(graph: SemaRegistrationGraph, entry_items: [Item], type_name: String) -> StructDef? {
     if sema_cli_entry_struct(entry_items, type_name) == .Val(definition) -> return Val(definition)
     loop module_row in graph.modules {
-        if sema_cli_entry_struct(module_row.declarations, type_name) == .Val(definition) -> return Val(definition)
+        if sema_cli_entry_struct(module_row.declarations, type_name) == .Val(definition) {
+            return Val(definition)
+        }
     }
     None
 }
@@ -88,16 +90,18 @@ sema_cli_schema_fields: fn(definition: StructDef) -> [CLIInputSchema] {
                 CLIInputShape.Value{kind: sema_cli_schema_kind(field.ty), optional: false, default: None}
             }
         }
-        inputs.push(CLIInputSchema{
-            field: field.name.copy(),
-            flag: flag.copy(),
-            short: sema_registration_cli_arg_text(field.serde_markers, "short"),
-            env: sema_registration_cli_arg_text(field.serde_markers, "env"),
-            help: sema_cli_entry_doc(field.serde_markers) ?? "value for --{flag}",
-            metavar: if field.ty == .Bool -> None else -> Val(unicode.upper(flag.replace("-", "_"))),
-            shape: shape,
-            positional: at,
-        })
+        inputs.push(
+            CLIInputSchema{
+                field: field.name.copy(),
+                flag: flag.copy(),
+                short: sema_registration_cli_arg_text(field.serde_markers, "short"),
+                env: sema_registration_cli_arg_text(field.serde_markers, "env"),
+                help: sema_cli_entry_doc(field.serde_markers) ?? "value for --{flag}",
+                metavar: if field.ty == .Bool -> None else -> Val(unicode.upper(flag.replace("-", "_"))),
+                shape: shape,
+                positional: at,
+            },
+        )
     }
     inputs
 }
@@ -157,16 +161,18 @@ sema_cli_schema_params: fn(params: [Param], shared_type: String) -> [CLIInputSch
             }
             shape = CLIInputShape.Value{kind: sema_cli_schema_kind(param.ty), optional: false, default: default}
         }
-        inputs.push(CLIInputSchema{
-            field: param.name.copy(),
-            flag: flag.copy(),
-            short: None,
-            env: None,
-            help: "value for --{flag}",
-            metavar: if param.ty == .Bool -> None else -> Val(unicode.upper(flag.replace("-", "_"))),
-            shape: shape,
-            positional: at,
-        })
+        inputs.push(
+            CLIInputSchema{
+                field: param.name.copy(),
+                flag: flag.copy(),
+                short: None,
+                env: None,
+                help: "value for --{flag}",
+                metavar: if param.ty == .Bool -> None else -> Val(unicode.upper(flag.replace("-", "_"))),
+                shape: shape,
+                positional: at,
+            },
+        )
     }
     Val(inputs)
 }

@@ -50,7 +50,9 @@ jet_cli_status_from_tree: fn(tree: Dyn) -> JetCLIStatusValue JetCLIReadError! {
             JetCLIStatusValue.Float{text: foundation_float_display(value)}
         }
         .Number(lexeme) -> {
-            if foundation_json_integer(tree) == .Val(number) -> return Ok(jet_cli_status_int(number))
+            if foundation_json_integer(tree) == .Val(number) {
+                return Ok(jet_cli_status_int(number))
+            }
             float_spelled := false
             loop byte in lexeme.bytes() {
                 if byte == (U8{46}) || byte == (U8{101}) || byte == (U8{69}) -> float_spelled = true

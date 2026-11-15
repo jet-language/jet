@@ -7,13 +7,26 @@ use {
     files: core.files
     sys: core.sys
     jet_pkg_model.[
-        ForeignBindError, ForeignBindResult, ForeignLanguage,
-        pkg_binder_append_artifact_boundary, pkg_binder_canonicalize, pkg_binder_cc_ar_identity,
-        pkg_binder_fill_template, pkg_binder_host_is_unix, pkg_binder_identity_digest,
-        pkg_binder_is_ident, pkg_binder_lines, pkg_binder_remove_tree_quiet,
-        pkg_binder_require_lib_name, pkg_binder_resolved_tool_path, pkg_binder_write,
-        pkg_worker_build_archive, pkg_worker_invoke_wrapper, pkg_worker_prepare_build,
-        pkg_worker_render_supervisor_c_with_temp, pkg_worker_require_supported_host,
+        ForeignBindError,
+        ForeignBindResult,
+        ForeignLanguage,
+        pkg_binder_append_artifact_boundary,
+        pkg_binder_canonicalize,
+        pkg_binder_cc_ar_identity,
+        pkg_binder_fill_template,
+        pkg_binder_host_is_unix,
+        pkg_binder_identity_digest,
+        pkg_binder_is_ident,
+        pkg_binder_lines,
+        pkg_binder_remove_tree_quiet,
+        pkg_binder_require_lib_name,
+        pkg_binder_resolved_tool_path,
+        pkg_binder_write,
+        pkg_worker_build_archive,
+        pkg_worker_invoke_wrapper,
+        pkg_worker_prepare_build,
+        pkg_worker_render_supervisor_c_with_temp,
+        pkg_worker_require_supported_host,
         pkg_worker_run_tool,
     ]
 }
@@ -62,30 +75,46 @@ pkg_r_parse_function_names: fn(bytes: [U8]) -> [String] ForeignBindError! {
     text: String.from_bytes(bytes) ?? return Err(ForeignBindError.Source("R returned non-UTF-8 function metadata"))
     out := [String]{}
     loop line in pkg_binder_lines(text) {
-        if line.starts_with("E\tARG\t") -> return Err(ForeignBindError.Source("R function `{line.removeprefix("E\tARG\t")}` must take one required positional argument"))
-        if !line.starts_with("N\t") -> return Err(ForeignBindError.Source("R parser returned malformed function metadata"))
+        if line.starts_with("E\tARG\t") {
+            return Err(ForeignBindError.Source("R function `{line.removeprefix("E\tARG\t")}` must take one required positional argument"))
+        }
+        if !line.starts_with("N\t") {
+            return Err(ForeignBindError.Source("R parser returned malformed function metadata"))
+        }
         name: line.removeprefix("N\t")
-        if !pkg_binder_is_ident(name) -> return Err(ForeignBindError.Source("R function `{name}` cannot be projected as a Jet identifier"))
-        if pkg_r_reserved(name) -> return Err(ForeignBindError.Source("R function `{name}` uses a reserved generated binding name"))
-        loop existing in out {
-            if existing == name || existing == ("{name}_table") || existing == ("{name}_plot") -> return Err(ForeignBindError.Source("R function `{name}` collides with a generated binding name"))
+        if !pkg_binder_is_ident(name) {
+            return Err(ForeignBindError.Source("R function `{name}` cannot be projected as a Jet identifier"))
+        }
+        if pkg_r_reserved(name) {
+            return Err(ForeignBindError.Source("R function `{name}` uses a reserved generated binding name"))
         }
         loop existing in out {
-            if "{existing}_table" == name -> return Err(ForeignBindError.Source("R function `{name}` collides with a generated table binding"))
+            if existing == name || existing == ("{name}_table") || existing == ("{name}_plot") {
+                return Err(ForeignBindError.Source("R function `{name}` collides with a generated binding name"))
+            }
         }
         loop existing in out {
-            if "{existing}_plot" == name -> return Err(ForeignBindError.Source("R function `{name}` collides with a generated plot binding"))
+            if "{existing}_table" == name {
+                return Err(ForeignBindError.Source("R function `{name}` collides with a generated table binding"))
+            }
+        }
+        loop existing in out {
+            if "{existing}_plot" == name {
+                return Err(ForeignBindError.Source("R function `{name}` collides with a generated plot binding"))
+            }
         }
         out.push(name)
     }
-    if out.len() == 0 -> return Err(ForeignBindError.Source("no top-level named R functions were found"))
+    if out.len() == 0 {
+        return Err(ForeignBindError.Source("no top-level named R functions were found"))
+    }
     Ok(out)
 }
 
 pkg_r_render_worker: fn(functions: [String]) -> String Never! {
     allowed := [String]{}
     loop name in functions -> allowed.push("  {name} = TRUE")
-    pkg_binder_fill_template(PKG_R_WORKER, [String: String]{"allowed": allowed.join(",\n"), "svg_runtime": PKG_R_SVG_RUNTIME})
+    pkg_binder_fill_template(PKG_R_WORKER, [String:String]{"allowed": allowed.join(",\n"), "svg_runtime": PKG_R_SVG_RUNTIME})
 }
 
 pkg_r_render_jet: fn(lib: String, functions: [String]) -> String Never! {
@@ -108,15 +137,13 @@ pkg_r_render_jet: fn(lib: String, functions: [String]) -> String Never! {
 }
 
 // The generated surface for the binder registry's rendering probe.
-pkg_r_render_probe: fn() -> String Never! {
-    pkg_r_render_jet("registry", [String]{"transform"})
-}
+pkg_r_render_probe: fn() -> String Never! { pkg_r_render_jet("registry", [String]{"transform"}) }
 
 pkg_r_reserved: fn(value: String) -> Bool Never! {
     PKG_R_RESERVED.contains(value) || JET_KEYWORD_LIST.contains(value) || JET_TYPE_NAMES.contains(value)
 }
 
-PKG_R_JET_SESSION: #run { ```impl Session.Close {
+PKG_R_JET_SESSION: #run { `impl Session.Close {
     close: fn(&&self) { abi.close(self.value) }
 }
 
@@ -130,11 +157,11 @@ open: fn() -> Session RError! {
 
 cancel: fn(session: Session) { abi.cancel(session.value) }
 
-``` }
+` }
 
 // Parses the script without evaluating it and prints `N\t<name>` per
 // top-level one-argument function or `E\tARG\t<name>` for an unsupported one.
-PKG_R_DISCOVERER: #run { ```args <- commandArgs(trailingOnly = TRUE)
+PKG_R_DISCOVERER: #run { `args <- commandArgs(trailingOnly = TRUE)
 expressions <- parse(file = args[[1]], keep.source = FALSE)
 for (expression in expressions) {
   if (!is.call(expression) || !(as.character(expression[[1]]) %in% c("<-", "="))) next
@@ -145,12 +172,12 @@ for (expression in expressions) {
   if (!valid) { cat("E\tARG\t", name, "\n", sep = ""); quit(status = 0) }
   cat("N\t", name, "\n", sep = "")
 }
-``` }
+` }
 
 // Generated into each worker so plot output is checked where it crosses the
 // process boundary. This is a structural XML tokenizer/canonicalizer: regexes
 // are used only for scalar value checks after elements and attributes parse.
-PKG_R_SVG_RUNTIME: #run { ```
+PKG_R_SVG_RUNTIME: #run { `
 svg_error <- function() stop("invalid SVG plot")
 svg_name_char <- function(ch, first = FALSE) {
   if (length(ch) == 0 || is.na(ch)) return(FALSE)
@@ -353,11 +380,11 @@ plot_to_svg <- function(fn, input) {
   unlink(path)
   sanitize_svg(rawToChar(bytes))
 }
-``` }
+` }
 
 // The persistent worker. Holes: `allowed` (one `name = TRUE` row per
 // function) and `svg_runtime`.
-PKG_R_WORKER: #run { ```suppressPackageStartupMessages(library(jsonlite))
+PKG_R_WORKER: #run { `suppressPackageStartupMessages(library(jsonlite))
 input <- file("/dev/stdin", "rb")
 output <- file("/dev/stdout", "wb")
 script <- new.env(parent = baseenv())
@@ -436,4 +463,4 @@ repeat {
   writeBin(c(little(length(encoded), 4), little(response$id, 8), encoded), output)
   flush(output)
 }
-``` }
+` }

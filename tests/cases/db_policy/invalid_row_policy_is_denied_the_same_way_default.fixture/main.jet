@@ -1,31 +1,18 @@
-
 use db: core.db
 
 run: fn() {
     conn := db.open_memory()
     if db.policy("9tasks", "true") == {
-        .Ok(_) -> {
-            print("digit-table:accepted")
-        }
-        .Err(_) -> {
-            print("digit-table:rejected")
-        }
+        .Ok(_) -> { print("digit-table:accepted") }
+        .Err(_) -> { print("digit-table:rejected") }
     }
     if db.policy("two words", "true") == {
-        .Ok(_) -> {
-            print("spaced-table:accepted")
-        }
-        .Err(_) -> {
-            print("spaced-table:rejected")
-        }
+        .Ok(_) -> { print("spaced-table:accepted") }
+        .Err(_) -> { print("spaced-table:rejected") }
     }
     if db.policy("tasks", "owner != user") == {
-        .Ok(_) -> {
-            print("other-expr:accepted")
-        }
-        .Err(_) -> {
-            print("other-expr:rejected")
-        }
+        .Ok(_) -> { print("other-expr:accepted") }
+        .Err(_) -> { print("other-expr:rejected") }
     }
     padded: db.policy("  tasks  ", "owner == user") ?? panic("padded policy")
     scoped := conn.with_policy(padded, "alice")
@@ -33,7 +20,7 @@ run: fn() {
     owner: "bob"
     title: "one"
     _one: scoped.execute(
-        SQL{"INSERT INTO tasks (owner, title) VALUES ({owner}, {title})"}
+        SQL{"INSERT INTO tasks (owner, title) VALUES ({owner}, {title})"},
     ) ?? panic("insert")
     rows: scoped.query(SQL{"SELECT title FROM tasks"}) ?? panic("query")
     print("padded-rows:{rows.len()}")

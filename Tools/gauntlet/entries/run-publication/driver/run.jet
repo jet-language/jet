@@ -53,7 +53,9 @@ run: fn() {
     args: process.args()
     if {
         args.get(0) == Val("publication") && args.len() >= 2 -> print_publications(args[1], None)
-        args.get(0) == Val("manifest") && args.len() >= 2 -> print_publications(args[1], Val(canonical_manifest()))
+        args.get(0) == Val("manifest") && args.len() >= 2 -> {
+            print_publications(args[1], Val(canonical_manifest()))
+        }
         else -> process.fail(64, USAGE)
     }
 }

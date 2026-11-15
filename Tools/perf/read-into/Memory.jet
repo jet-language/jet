@@ -24,18 +24,29 @@ use {
 }
 
 TOOL: "/Tools/perf/read-into/Memory.jet"
+
 MANIFEST: "Tools/gauntlet/measurement-manifest.json"
+
 TIMER: "Tools/gauntlet/harness/timer.py"
+
 PAIR: "net_read_into_vs_read"
+
 COUNTED_RUNS: 3
+
 COUNTING: "    allocator: mem.Counting.over(mem.Heap, cap: 2.gb)"
+
 // The shared harness's paired trials and bootstrap
 // (Tools/gauntlet/harness/performance-surface.mjs).
 TRIALS: 100
+
 BOOTSTRAP_RESAMPLES: 10000
+
 BOOTSTRAP_SEED: 2977
+
 BOOTSTRAP_LOWER_RANK: 250
+
 BOOTSTRAP_UPPER_RANK: 9750
+
 // The counting policy's own facts, read by gdb at exit_group: the program's
 // image keeps no fact export, so the script finds the allocator root through
 // jet_rt_alloc_init's first instruction (`lea <root>(%rip)`) and reads the
@@ -50,15 +61,59 @@ word = lambda at: int.from_bytes(bytes(memory.read_memory(at, 8)), "little", sig
 root = word(int(found.group(1), 16))
 print("ALLOCATOR-FACTS mode=%d allocations=%d high_water=%d" % (word(root + 144), word(root + 160), word(root + 184)))
 `
-Row: struct { id: String, surface_source: String, plain_source: String, expected_output: String, memory_evidence_file: String? }
-Pairs: struct { pairs: [Row] }
-Manifest: struct { performance_surface_pairs: Pairs }
-Sample: struct { exit_code: Int, peak_rss_kb: Int }
-Counted: struct { allocations: Int, reads: Int, allocations_per_read: Float, peak_live_heap_bytes: Int }
-Interval: struct { lower: Float, upper: Float }
-Host: struct { platform: String, release: String, arch: String, cpu_model: String?, cpu_count: Int }
-CountedRuns: struct { surface: [Counted], plain: [Counted] }
-Verdicts: struct { allocations_per_read: String, peak_live_heap_bytes: String, peak_rss_kb: String }
+
+Row: struct {
+    id: String
+    surface_source: String
+    plain_source: String
+    expected_output: String
+    memory_evidence_file: String?
+}
+
+Pairs: struct {
+    pairs: [Row]
+}
+
+Manifest: struct {
+    performance_surface_pairs: Pairs
+}
+
+Sample: struct {
+    exit_code: Int
+    peak_rss_kb: Int
+}
+
+Counted: struct {
+    allocations: Int
+    reads: Int
+    allocations_per_read: Float
+    peak_live_heap_bytes: Int
+}
+
+Interval: struct {
+    lower: Float
+    upper: Float
+}
+
+Host: struct {
+    platform: String
+    release: String
+    arch: String
+    cpu_model: String?
+    cpu_count: Int
+}
+
+CountedRuns: struct {
+    surface: [Counted]
+    plain: [Counted]
+}
+
+Verdicts: struct {
+    allocations_per_read: String
+    peak_live_heap_bytes: String
+    peak_rss_kb: String
+}
+
 Evidence: struct {
     schema: String
     id: String
@@ -92,7 +147,9 @@ fail: fn(message: String) -[Exec, IO]> Never { process.fail(1, "memory: {message
 
 argument: fn(argv: [String], name: String, fallback: String) -> String {
     loop at in 0..<argv.len() {
-        if argv[at] == name -> return if at + 1 < argv.len() -> argv[at + 1].copy() else -> fallback.copy()
+        if argv[at] == name {
+            return if at + 1 < argv.len() -> argv[at + 1].copy() else -> fallback.copy()
+        }
     }
     fallback.copy()
 }
@@ -117,12 +174,16 @@ build: fn(jet: String, source: String, dir: String, allocator: String) -> String
     files.create_dir_all(dir) ?? fail("{dir}: {err}")
     package: regex.compile_with(`^package: \{\n`, regex.flags(false, true, false)) ?? fail("the package pattern: {err}")
     text: if allocator == "" -> source.copy() else -> package.replace_first(source, "package: {{\n{allocator}\n")
-    if allocator != "" && text == source -> fail("the pair source has no `package: {{` line to take the counting allocator")
+    if allocator != "" && text == source {
+        fail("the pair source has no `package: {{` line to take the counting allocator")
+    }
     files.write(files.join(dir, "main.jet"), text) ?? fail("{dir}/main.jet: {err}")
     out: files.join(dir, "out")
     built: run_program([String]{jet, "build", "-O2", "--quiet", "--output-dir={out}", "main.jet"}, dir)
     binary: files.join(out, "main")
-    if !built.success || !files.exists(binary) -> fail("build {dir} failed:\n{built.output}{built.errors}")
+    if !built.success || !files.exists(binary) {
+        fail("build {dir} failed:\n{built.output}{built.errors}")
+    }
     binary
 }
 
@@ -136,7 +197,7 @@ counted_run: fn(gdb: String, binary: String, scratch: String, label: String) -> 
     reads: regex.match(Regex{"reads=(\d+)"}, errors) ?? fail("no reads= line in stderr: {errors}")
     allocations: facts.group_int(1) ?? fail("the allocation count is out of Int range")
     count: reads.group_int(1) ?? fail("the read count is out of Int range")
-    Counted{allocations, reads: count, allocations_per_read: Float.from_int(allocations) / Float.from_int(count), peak_live_heap_bytes: facts.group_int(2) ?? fail("the high-water mark is out of Int range")}
+    Counted{allocations: allocations, reads: count, allocations_per_read: Float.from_int(allocations) / Float.from_int(count), peak_live_heap_bytes: facts.group_int(2) ?? fail("the high-water mark is out of Int range")}
 }
 
 peak_rss: fn(repo: String, binary: String, expected: String) -> Int {
@@ -199,8 +260,12 @@ measure: fn(repo: String, argv: [String]) -> Evidence {
     surface_counted: build(jet, row.surface_source, files.join(scratch, "surface-counted"), COUNTING)
     plain_counted: build(jet, row.plain_source, files.join(scratch, "plain-counted"), COUNTING)
     runs := CountedRuns{surface: [Counted]{}, plain: [Counted]{}}
-    loop index in 0..<COUNTED_RUNS -> runs.surface.push(counted_run(gdb, surface_counted, scratch, "surface-{index}"))
-    loop index in 0..<COUNTED_RUNS -> runs.plain.push(counted_run(gdb, plain_counted, scratch, "plain-{index}"))
+    loop index in 0..<COUNTED_RUNS {
+        runs.surface.push(counted_run(gdb, surface_counted, scratch, "surface-{index}"))
+    }
+    loop index in 0..<COUNTED_RUNS {
+        runs.plain.push(counted_run(gdb, plain_counted, scratch, "plain-{index}"))
+    }
     surface_rss := [Int]{}
     plain_rss := [Int]{}
     // Alternate which arm runs first, surface first on even trials.

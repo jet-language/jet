@@ -4,9 +4,7 @@ use {
     time: core.time
 }
 
-fail_async: fn(n: Int) Err! {
-    return Err("ASYNC_FAILURE_SECRET")
-}
+fail_async: fn(n: Int) Err! { return Err("ASYNC_FAILURE_SECRET") }
 
 run: fn() {
     print("READY")
@@ -15,7 +13,7 @@ run: fn() {
     ready_out := term.stdout()
     ready_out.flush() ?? panic("flush")
     drop_scope: event.scope()
-    dropped: event.async_result<Int, Err>(AsyncPolicy{ capacity: 1, overflow: .DropNewest }, .Collect) ?? panic("policy")
+    dropped: event.async_result<Int, Err>(AsyncPolicy{capacity: 1, overflow: .DropNewest}, .Collect) ?? panic("policy")
     { sender: started_tx, receiver: started_rx }: channel<Int>()
     { sender: release_tx, receiver: release_rx }: channel<Int>()
     dropped.on_priority(drop_scope, 23, fn(n: Int) {
@@ -34,12 +32,12 @@ run: fn() {
     newest.join() ?? panic("newest")
 
     fail_scope: event.scope()
-    failing: event.async_result<Int, Err>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    failing: event.async_result<Int, Err>(AsyncPolicy{capacity: 1, overflow: .Block}, .Collect) ?? panic("policy")
     failing.on(fail_scope, fn(n: Int) { fail_async(n) })
     failing.emit_async(4).join() ?? panic("failing")
 
     close_scope: event.scope()
-    closing: event.async_result<Int, Err>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    closing: event.async_result<Int, Err>(AsyncPolicy{capacity: 1, overflow: .Block}, .Collect) ?? panic("policy")
     { sender: close_started_tx, receiver: close_started_rx }: channel<Int>()
     { sender: close_release_tx, receiver: close_release_rx }: channel<Int>()
     closing.on(close_scope, fn(n: Int) {

@@ -83,7 +83,9 @@ JetCLIEffectsCapRow: struct {
 // `:<line>` suffix names a line; no site is the entry `jet run` would pick.
 jet_cli_explain_effects: fn(jet_argv: [String], args: [String], color: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
     fix: "run `{JET_CLI_EXPLAIN_EFFECTS_USAGE}`"
-    if args.len() > 3 -> return jet_cli_fail("E2104", "`jet explain effects` explains one site", jet_cli_why("E2104"), fix, color, JET_DRIVER_EXIT_USAGE)
+    if args.len() > 3 {
+        return jet_cli_fail("E2104", "`jet explain effects` explains one site", jet_cli_why("E2104"), fix, color, JET_DRIVER_EXIT_USAGE)
+    }
     caps: jet_cli_has(jet_argv, "--caps")
     target := ""
     if args.len() == 3 -> target = args[2]
@@ -91,7 +93,9 @@ jet_cli_explain_effects: fn(jet_argv: [String], args: [String], color: Bool, jso
     colon: jet_cli_effects_line_colon(target)
     if colon >= 0 {
         written_line: target.slice((colon + 1)..<target.len())
-        if caps -> return jet_cli_fail("E2104", "`--caps` lists the effect caps under a file or directory, not at one line", jet_cli_why("E2104"), "drop `:{written_line}`, or drop `--caps`", color, JET_DRIVER_EXIT_USAGE)
+        if caps {
+            return jet_cli_fail("E2104", "`--caps` lists the effect caps under a file or directory, not at one line", jet_cli_why("E2104"), "drop `:{written_line}`, or drop `--caps`", color, JET_DRIVER_EXIT_USAGE)
+        }
         site: jet_cli_explain_marker_site(target) ?? return jet_cli_fail("E2104", err.message, jet_cli_why("E2104"), "correct the named argument or input, then run the command again", color, JET_DRIVER_EXIT_USAGE)
         line = Int.parse(written_line) ?? 0
         target = site.file
@@ -124,7 +128,9 @@ jet_cli_explain_effects: fn(jet_argv: [String], args: [String], color: Bool, jso
     source: cli_files.read(file) ?? return jet_cli_report_done(notice, "E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "check the spelling, or run jet from the folder that contains it", color, JET_DRIVER_EXIT_USER_ERROR)
     if line > 0 {
         lines: jet_cli_effects_line_count(source)
-        if line > lines -> return jet_cli_fail("E2104", "line {line} is past the end of `{file}`, which has {lines} lines", jet_cli_why("E2104"), "name a line from 1 to {lines}", color, JET_DRIVER_EXIT_USAGE)
+        if line > lines {
+            return jet_cli_fail("E2104", "line {line} is past the end of `{file}`, which has {lines} lines", jet_cli_why("E2104"), "name a line from 1 to {lines}", color, JET_DRIVER_EXIT_USAGE)
+        }
     }
     // A named file inside a package is explained as the package's entry loads
     // it, so the caps written where its module is declared are in force. A
@@ -193,9 +199,7 @@ jet_cli_effects_line_offset: fn(source: String, line: Int) -> Int Never! {
         index += 1
     }
     if current < line -> return -1
-    loop index < bytes.len() && (bytes[index] == (U8{32}) || bytes[index] == (U8{9})) {
-        index += 1
-    }
+    loop index < bytes.len() && (bytes[index] == (U8{32}) || bytes[index] == (U8{9})) -> index += 1
     index
 }
 
@@ -243,30 +247,20 @@ jet_cli_effects_body_scopes: fn(statements: [Stmt], offset: Int, scopes: &[JetCL
                 jet_cli_effects_body_scopes(body, offset, scopes)
             }
             .ComptimeBlock(body, _, span) -> {
-                if jet_cli_effects_holds(span, offset) -> scopes.push(jet_cli_effects_scope_rung("comptime", "Mem only; other effects need `#Impure(\"reason\")`", span))
+                if jet_cli_effects_holds(span, offset) {
+                    scopes.push(jet_cli_effects_scope_rung("comptime", "Mem only; other effects need `#Impure(\"reason\")`", span))
+                }
                 jet_cli_effects_body_scopes(body, offset, scopes)
             }
             .Impure(reason, _, body, span) -> {
-                if jet_cli_effects_holds(span, offset) -> scopes.push(jet_cli_effects_scope_rung("comptime", "`#Impure(\"{reason ?? "…"}\")` lifts the Mem-only rule", span))
+                if jet_cli_effects_holds(span, offset) {
+                    scopes.push(jet_cli_effects_scope_rung("comptime", "`#Impure(\"{reason ?? "…"}\")` lifts the Mem-only rule", span))
+                }
                 jet_cli_effects_body_scopes(body, offset, scopes)
             }
-            .While(_, body, _, _, _)
-            | .For(_, _, _, _, body, _, _, _, _)
-            | .Loop(body, _, _, _)
-            | .CountedLoop(_, _, _, body, _, _, _)
-            | .Unsafe(_, _, body, _)
-            | .Reactive(body, _)
-            | .Shield(body, _) | .Defer(body, _)
-            | .Switched(_, body, _)
-            | .Region(_, _, body, _)
-            | .Policy(_, body, _)
-            | .TaskGroup(_, _, _, body, _)
-            | .Layout(_, _, body, _)
-            | .ContextBlock(_, body, _)
-            | .Live(body, _)
-            | .AssumeDet(_, _, body, _)
-            | .Transact(_, _, body, _, _)
-            | .ScopeMember(_, _, _, _, body, _, _, _) -> jet_cli_effects_body_scopes(body, offset, scopes)
+            .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .CountedLoop(_, _, _, body, _, _, _) | .Unsafe(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> {
+                jet_cli_effects_body_scopes(body, offset, scopes)
+            }
             .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
                 loop arm in arms -> jet_cli_effects_body_scopes(arm.body, offset, scopes)
                 if else_body == .Val(body) -> jet_cli_effects_body_scopes(body, offset, scopes)
@@ -324,9 +318,13 @@ jet_cli_effects_scopes_sorted: fn(scopes: [JetCLIEffectsScope]) -> [JetCLIEffect
 // module or a generic module instance lowered to a file-level copy keeps
 // them; `caps` adds the type and trait caps around it.
 jet_cli_effects_take: fn(found: &JetCLIEffectsSite, key: String, function: Func, caps: [ModuleCap], offset: Int) Never! {
-    if function.compiler_generated || !jet_cli_effects_holds(function.span, offset) -> return
+    if function.compiler_generated || !jet_cli_effects_holds(function.span, offset) {
+        return
+    }
     if found.function == .Val(current) {
-        if current.span.start >= function.span.start -> return
+        if current.span.start >= function.span.start {
+            return
+        }
     }
     found.key = key
     found.function = Val(function.copy())
@@ -344,26 +342,40 @@ jet_cli_effects_take: fn(found: &JetCLIEffectsSite, key: String, function: Func,
 jet_cli_effects_locate: fn(items: [Item], alias: String, namespace: String, offset: Int, caps: [ModuleCap], found: &JetCLIEffectsSite) Never! {
     loop item in items {
         if item == {
-            .Func(function) -> jet_cli_effects_take(found, "{alias}.{namespace}{function.name}", function, caps, offset)
+            .Func(function) -> {
+                jet_cli_effects_take(found, "{alias}.{namespace}{function.name}", function, caps, offset)
+            }
             .Impl(definition) -> {
                 typed := jet_cli_effects_with_cap(caps, jet_cli_effects_type_cap(items, definition.type_name), "type")
-                if definition.trait_name == .Val(trait_name) -> typed = jet_cli_effects_with_cap(typed, jet_cli_effects_trait_cap(items, trait_name), "trait")
-                loop method in definition.methods -> jet_cli_effects_take(found, "{alias}.{namespace}{definition.type_name}.{method.name}", method, typed, offset)
+                if definition.trait_name == .Val(trait_name) {
+                    typed = jet_cli_effects_with_cap(typed, jet_cli_effects_trait_cap(items, trait_name), "trait")
+                }
+                loop method in definition.methods {
+                    jet_cli_effects_take(found, "{alias}.{namespace}{definition.type_name}.{method.name}", method, typed, offset)
+                }
             }
             .Struct(definition) -> {
                 typed: jet_cli_effects_with_cap(caps, definition.cap, "type")
-                loop method in definition.methods -> jet_cli_effects_take(found, "{alias}.{namespace}{definition.name}.{method.name}", method, typed, offset)
+                loop method in definition.methods {
+                    jet_cli_effects_take(found, "{alias}.{namespace}{definition.name}.{method.name}", method, typed, offset)
+                }
                 loop block in definition.trait_impls {
                     traited: jet_cli_effects_with_cap(typed, jet_cli_effects_trait_cap(items, block.trait_name), "trait")
-                    loop method in block.methods -> jet_cli_effects_take(found, "{alias}.{namespace}{definition.name}.{method.name}", method, traited, offset)
+                    loop method in block.methods {
+                        jet_cli_effects_take(found, "{alias}.{namespace}{definition.name}.{method.name}", method, traited, offset)
+                    }
                 }
             }
             .Enum(definition) -> {
                 typed: jet_cli_effects_with_cap(caps, definition.cap, "type")
-                loop method in definition.methods -> jet_cli_effects_take(found, "{alias}.{namespace}{definition.name}.{method.name}", method, typed, offset)
+                loop method in definition.methods {
+                    jet_cli_effects_take(found, "{alias}.{namespace}{definition.name}.{method.name}", method, typed, offset)
+                }
                 loop block in definition.trait_impls {
                     traited: jet_cli_effects_with_cap(typed, jet_cli_effects_trait_cap(items, block.trait_name), "trait")
-                    loop method in block.methods -> jet_cli_effects_take(found, "{alias}.{namespace}{definition.name}.{method.name}", method, traited, offset)
+                    loop method in block.methods {
+                        jet_cli_effects_take(found, "{alias}.{namespace}{definition.name}.{method.name}", method, traited, offset)
+                    }
                 }
             }
             .CodeModule(nested) -> {
@@ -396,7 +408,9 @@ jet_cli_effects_locate: fn(items: [Item], alias: String, namespace: String, offs
 // is written.
 jet_cli_effects_with_cap: fn(caps: [ModuleCap], cap: ModuleCap?, scope: String) -> [ModuleCap] Never! {
     typed := caps.copy()
-    if cap == .Val(value) -> typed.push(ModuleCap{owner: value.owner.copy(), scope: scope, entries: value.entries.copy(), span: value.span})
+    if cap == .Val(value) {
+        typed.push(ModuleCap{owner: value.owner.copy(), scope: scope, entries: value.entries.copy(), span: value.span})
+    }
     typed
 }
 
@@ -434,7 +448,9 @@ jet_cli_effects_declares: fn(directory: String, name: String, target: String) ->
 // first: the cap where the file is declared, then the caps over the file
 // that declares it.
 jet_cli_effects_file_caps: fn(modules: [JetDriverDocModule], index: Int, depth: Int, rungs: &[JetCLIEffectsRung]) Never! {
-    if depth > modules.len() -> return
+    if depth > modules.len() {
+        return
+    }
     target: modules[index].physical_path
     loop (parent_index, parent) in modules {
         if parent_index == index -> next
@@ -442,7 +458,9 @@ jet_cli_effects_file_caps: fn(modules: [JetDriverDocModule], index: Int, depth: 
         loop item in parent.items {
             if item == .CodeModule(definition) && definition.body == None {
                 if !jet_cli_effects_declares(directory, definition.name, target) -> next
-                if definition.cap == .Val(cap) -> rungs.push(JetCLIEffectsRung{rung: "module", text: jet_cli_effects_cap_text(cap.entries), written: true, site: jet_cli_effects_site(parent, cap.span.start)})
+                if definition.cap == .Val(cap) {
+                    rungs.push(JetCLIEffectsRung{rung: "module", text: jet_cli_effects_cap_text(cap.entries), written: true, site: jet_cli_effects_site(parent, cap.span.start)})
+                }
                 jet_cli_effects_file_caps(modules, parent_index, depth + 1, rungs)
             }
         }
@@ -479,7 +497,9 @@ jet_cli_effects_package_rung: fn(policy: JetDriverAuthorityPolicy?) -[FS]> JetCL
 // source spells it.
 jet_cli_effects_reach_add: fn(reaches: &[JetCLIEffectsReach], name: String, chain: [String], site: String) Never! {
     loop reach in reaches {
-        if reach.name == name -> return
+        if reach.name == name {
+            return
+        }
     }
     shown: loop step in chain -> jet_cli_effects_source_key(step)
     // copy: the reach keeps its own name and site; the caller keeps theirs.
@@ -527,7 +547,9 @@ jet_cli_effects_function_reaches: fn(doc_module: JetDriverDocModule, key: String
         site := ""
         if semindex_witness(key, name, summaries, [String]{}, modules) == .Val(witness) {
             if witness.path.len() > 0 -> chain = witness.path
-            if witness.spans.len() > 0 && witness.spans[0].end > 0 -> site = jet_cli_effects_site(doc_module, witness.spans[0].start)
+            if witness.spans.len() > 0 && witness.spans[0].end > 0 {
+                site = jet_cli_effects_site(doc_module, witness.spans[0].start)
+            }
         }
         jet_cli_effects_reach_add(reaches, name, chain, site)
     }
@@ -544,16 +566,16 @@ jet_cli_effects_raw_summary: fn(summaries: [SemSummary], raw_key: String) -> Sem
 // call in `edges` (a checked function key at its call span) whatever that
 // callee reaches.
 jet_cli_effects_part_reaches: fn(doc_module: JetDriverDocModule, owner: String, direct: [EffectRowEntry], edges: [EffectRowEntry], summaries: [SemSummary], modules: [JetDriverDocModule], reaches: &[JetCLIEffectsReach]) {
-    loop entry in direct -> jet_cli_effects_reach_add(reaches, entry.name, [String]{owner}, jet_cli_effects_site(doc_module, entry.span.start))
+    loop entry in direct {
+        jet_cli_effects_reach_add(reaches, entry.name, [String]{owner}, jet_cli_effects_site(doc_module, entry.span.start))
+    }
     loop edge in edges {
         callee: jet_cli_effects_raw_summary(summaries, edge.name) ?? next
         loop name in callee.solved {
             chain := [String]{owner}
             if semindex_witness(callee.key, name, summaries, [String]{}, modules) == .Val(witness) && witness.path.len() > 0 {
                 loop part in witness.path -> chain.push(part.copy())
-            } else {
-                chain.push(callee.key.copy())
-            }
+            } else { chain.push(callee.key.copy()) }
             jet_cli_effects_reach_add(reaches, name, chain, jet_cli_effects_site(doc_module, edge.span.start))
         }
     }
@@ -567,14 +589,18 @@ jet_cli_effects_span_reaches: fn(doc_module: JetDriverDocModule, key: String, sp
     loop function in doc_module.functions {
         if function.key != summary.raw_key -> next
         loop entry in function.effects.direct_spans {
-            if entry.span.start >= span.start && entry.span.end <= span.end -> direct.push(EffectRowEntry{name: entry.name.copy(), span: entry.span})
+            if entry.span.start >= span.start && entry.span.end <= span.end {
+                direct.push(EffectRowEntry{name: entry.name.copy(), span: entry.span})
+            }
         }
     }
     edges := [EffectRowEntry]{}
     loop fact in doc_module.call_facts {
         if fact.caller_key != summary.raw_key -> next
         if fact.span.start < span.start || fact.span.end > span.end -> next
-        if fact.foreign_effect_root == .Val(root) -> direct.push(EffectRowEntry{name: root.copy(), span: fact.span})
+        if fact.foreign_effect_root == .Val(root) {
+            direct.push(EffectRowEntry{name: root.copy(), span: fact.span})
+        }
         storage: doc_module.name_ledger ?? next
         permit: storage.guard_read()
         target: jet_driver_doc_callee_key(permit.value.symbols, fact) ?? next
@@ -589,7 +615,9 @@ jet_cli_effects_call_span: fn(doc_module: JetDriverDocModule, callee: String, wi
     permit: storage.guard_read()
     loop fact in doc_module.call_facts {
         target: jet_driver_doc_callee_key(permit.value.symbols, fact) ?? next
-        if target == callee && fact.span.start >= within.start && fact.span.end <= within.end -> return Span{start: fact.span.start, end: fact.span.end}
+        if target == callee && fact.span.start >= within.start && fact.span.end <= within.end {
+            return Span{start: fact.span.start, end: fact.span.end}
+        }
     }
     Span{start: within.start, end: within.end}
 }
@@ -610,20 +638,24 @@ jet_cli_effects_reach_text: fn(reach: JetCLIEffectsReach) -> String Never! {
 }
 
 jet_cli_effects_rung_value: fn(rung: JetCLIEffectsRung) -> JetCLIStatusValue Never! {
-    jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("rung", jet_cli_status_text(rung.rung)),
-        jet_cli_status_field("written", jet_cli_status_bool(rung.written)),
-        jet_cli_status_field("text", jet_cli_status_text(rung.text)),
-        jet_cli_status_field("site", jet_cli_status_text(rung.site)),
-    })
+    jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("rung", jet_cli_status_text(rung.rung)),
+            jet_cli_status_field("written", jet_cli_status_bool(rung.written)),
+            jet_cli_status_field("text", jet_cli_status_text(rung.text)),
+            jet_cli_status_field("site", jet_cli_status_text(rung.site)),
+        },
+    )
 }
 
 jet_cli_effects_reach_value: fn(reach: JetCLIEffectsReach) -> JetCLIStatusValue Never! {
-    jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("effect", jet_cli_status_text(reach.name)),
-        jet_cli_status_field("chain", jet_cli_status_texts(reach.chain)),
-        jet_cli_status_field("site", jet_cli_status_text(reach.site)),
-    })
+    jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("effect", jet_cli_status_text(reach.name)),
+            jet_cli_status_field("chain", jet_cli_status_texts(reach.chain)),
+            jet_cli_status_field("site", jet_cli_status_text(reach.site)),
+        },
+    )
 }
 
 // The ladder at the job's site over one checked program.
@@ -635,7 +667,9 @@ jet_cli_explain_effects_report: fn(result: JetDriverCompileResult, job: JetCLIIn
     loop (index, doc_module) in modules {
         if selected < 0 && jet_cli_rights_selected(doc_module, target) -> selected = index
     }
-    if selected < 0 -> return jet_cli_replay_fail(job, "E2104", "`{target}` is not a module the program `{job.file}` loads", jet_cli_why("E2104"), "name a file the entry loads, or the entry itself", JET_DRIVER_EXIT_USAGE)
+    if selected < 0 {
+        return jet_cli_replay_fail(job, "E2104", "`{target}` is not a module the program `{job.file}` loads", jet_cli_why("E2104"), "name a file the entry loads, or the entry itself", JET_DRIVER_EXIT_USAGE)
+    }
     doc_module: modules[selected]
     alias: semindex_module_alias(doc_module)
     summaries: semindex_summaries(modules)
@@ -665,10 +699,14 @@ jet_cli_explain_effects_report: fn(result: JetDriverCompileResult, job: JetCLIIn
             ast_visit_body(function.body, fn(inner: Expr) { jet_cli_effects_note_expr(scopes, inner, offset) }, true)
         }
         ordered: jet_cli_effects_scopes_sorted(scopes)
-        loop scope in ordered -> rungs.push(JetCLIEffectsRung{rung: scope.rung, text: scope.text, written: true, site: jet_cli_effects_site(doc_module, scope.span.start)})
+        loop scope in ordered {
+            rungs.push(JetCLIEffectsRung{rung: scope.rung, text: scope.text, written: true, site: jet_cli_effects_site(doc_module, scope.span.start)})
+        }
         row: jet_cli_effects_row_text(function.declared_effects, function.is_pure)
         rungs.push(JetCLIEffectsRung{rung: "function", text: if row == "" -> "(none written)" else -> row, written: row != "", site: jet_cli_effects_site(doc_module, function.name_span.start)})
-        if function.is_comptime -> rungs.push(JetCLIEffectsRung{rung: "comptime", text: "Mem only; other effects need `#Impure(\"reason\")`", written: true, site: jet_cli_effects_site(doc_module, function.span.start)})
+        if function.is_comptime {
+            rungs.push(JetCLIEffectsRung{rung: "comptime", text: "Mem only; other effects need `#Impure(\"reason\")`", written: true, site: jet_cli_effects_site(doc_module, function.span.start)})
+        }
         if ordered.len() == 0 {
             jet_cli_effects_function_reaches(doc_module, found.key, summaries, modules, reaches)
         } else if ordered[0].lambda {
@@ -683,7 +721,9 @@ jet_cli_explain_effects_report: fn(result: JetDriverCompileResult, job: JetCLIIn
         // A line outside every function: what the module's functions reach.
         views := [JetCLICallableView]{}
         jet_cli_rights_collect(doc_module.items, alias, "", doc_module.path, views)
-        loop view in jet_cli_rights_sorted(views) -> jet_cli_effects_function_reaches(doc_module, view.key, summaries, modules, reaches)
+        loop view in jet_cli_rights_sorted(views) {
+            jet_cli_effects_function_reaches(doc_module, view.key, summaries, modules, reaches)
+        }
     }
     // The trait and type rungs come before the module rungs; the file-head
     // cap is a module rung, written at the head of the file.
@@ -694,14 +734,20 @@ jet_cli_explain_effects_report: fn(result: JetDriverCompileResult, job: JetCLIIn
         rung: JetCLIEffectsRung{rung: cap.scope, text: jet_cli_effects_cap_text(cap.entries), written: true, site: jet_cli_effects_site(doc_module, cap.span.start)}
         if cap.scope == "module" -> cap_rungs.push(rung) else -> type_rungs.push(rung)
     }
-    if doc_module.file_cap == .Val(head) -> cap_rungs.push(JetCLIEffectsRung{rung: "module", text: jet_cli_effects_cap_text(head.entries), written: true, site: jet_cli_effects_site(doc_module, head.span.start)})
+    if doc_module.file_cap == .Val(head) {
+        cap_rungs.push(JetCLIEffectsRung{rung: "module", text: jet_cli_effects_cap_text(head.entries), written: true, site: jet_cli_effects_site(doc_module, head.span.start)})
+    }
     jet_cli_effects_file_caps(modules, selected, 0, cap_rungs)
     type_written := false
     loop rung in type_rungs {
         if rung.rung == "type" -> type_written = true
     }
-    if !type_written -> type_rungs.push(JetCLIEffectsRung{rung: "type", text: "(none written)", written: false, site: ""})
-    if cap_rungs.len() == 0 -> cap_rungs.push(JetCLIEffectsRung{rung: "module", text: "(none written)", written: false, site: ""})
+    if !type_written {
+        type_rungs.push(JetCLIEffectsRung{rung: "type", text: "(none written)", written: false, site: ""})
+    }
+    if cap_rungs.len() == 0 {
+        cap_rungs.push(JetCLIEffectsRung{rung: "module", text: "(none written)", written: false, site: ""})
+    }
     loop rung in type_rungs -> rungs.push(rung)
     loop rung in cap_rungs -> rungs.push(rung)
     rungs.push(jet_cli_effects_package_rung(result.authority_policy))
@@ -733,7 +779,9 @@ jet_cli_effects_cap_row: fn(doc_module: JetDriverDocModule, cap: ModuleCap, kind
 // where the module is written and from each function it binds.
 jet_cli_effects_cap_add: fn(rows: &[JetCLIEffectsCapRow], row: &&JetCLIEffectsCapRow) Never! {
     loop listed in rows {
-        if listed.file == row.file && listed.line == row.line && listed.cap == row.cap && listed.kind == row.kind && listed.name == row.name -> return
+        if listed.file == row.file && listed.line == row.line && listed.cap == row.cap && listed.kind == row.kind && listed.name == row.name {
+            return
+        }
     }
     rows.push(row.move())
 }
@@ -743,40 +791,64 @@ jet_cli_effects_cap_add: fn(rows: &[JetCLIEffectsCapRow], row: &&JetCLIEffectsCa
 // lowered, so its cap is read from the functions it binds, under the
 // template's name.
 jet_cli_effects_function_caps: fn(doc_module: JetDriverDocModule, function: Func, rows: &[JetCLIEffectsCapRow]) Never! {
-    loop cap in function.module_caps -> jet_cli_effects_cap_add(rows, jet_cli_effects_cap_row(doc_module, cap, "module", cap.owner))
+    loop cap in function.module_caps {
+        jet_cli_effects_cap_add(rows, jet_cli_effects_cap_row(doc_module, cap, "module", cap.owner))
+    }
 }
 
 jet_cli_effects_collect_caps: fn(doc_module: JetDriverDocModule, items: [Item], rows: &[JetCLIEffectsCapRow]) Never! {
     loop item in items {
         if item == {
             .CodeModule(definition) -> {
-                if definition.cap == .Val(cap) -> jet_cli_effects_cap_add(rows, jet_cli_effects_cap_row(doc_module, cap, "module", definition.name))
-                if definition.body == .Val(body) -> jet_cli_effects_collect_caps(doc_module, body, rows)
+                if definition.cap == .Val(cap) {
+                    jet_cli_effects_cap_add(rows, jet_cli_effects_cap_row(doc_module, cap, "module", definition.name))
+                }
+                if definition.body == .Val(body) {
+                    jet_cli_effects_collect_caps(doc_module, body, rows)
+                }
             }
             .GenericModule(nested) -> {
-                if nested.cap == .Val(cap) -> jet_cli_effects_cap_add(rows, jet_cli_effects_cap_row(doc_module, cap, "module", nested.name))
+                if nested.cap == .Val(cap) {
+                    jet_cli_effects_cap_add(rows, jet_cli_effects_cap_row(doc_module, cap, "module", nested.name))
+                }
                 jet_cli_effects_collect_caps(doc_module, nested.body, rows)
             }
-            .Func(function) -> jet_cli_effects_function_caps(doc_module, function, rows)
+            .Func(function) -> { jet_cli_effects_function_caps(doc_module, function, rows) }
             .Impl(definition) -> {
-                loop method in definition.methods -> jet_cli_effects_function_caps(doc_module, method, rows)
+                loop method in definition.methods {
+                    jet_cli_effects_function_caps(doc_module, method, rows)
+                }
             }
             .Struct(definition) -> {
-                if definition.cap == .Val(cap) -> jet_cli_effects_cap_add(rows, jet_cli_effects_cap_row(doc_module, cap, "type", definition.name))
-                loop method in definition.methods -> jet_cli_effects_function_caps(doc_module, method, rows)
+                if definition.cap == .Val(cap) {
+                    jet_cli_effects_cap_add(rows, jet_cli_effects_cap_row(doc_module, cap, "type", definition.name))
+                }
+                loop method in definition.methods {
+                    jet_cli_effects_function_caps(doc_module, method, rows)
+                }
                 loop block in definition.trait_impls {
-                    loop method in block.methods -> jet_cli_effects_function_caps(doc_module, method, rows)
+                    loop method in block.methods {
+                        jet_cli_effects_function_caps(doc_module, method, rows)
+                    }
                 }
             }
             .Enum(definition) -> {
-                if definition.cap == .Val(cap) -> jet_cli_effects_cap_add(rows, jet_cli_effects_cap_row(doc_module, cap, "type", definition.name))
-                loop method in definition.methods -> jet_cli_effects_function_caps(doc_module, method, rows)
+                if definition.cap == .Val(cap) {
+                    jet_cli_effects_cap_add(rows, jet_cli_effects_cap_row(doc_module, cap, "type", definition.name))
+                }
+                loop method in definition.methods {
+                    jet_cli_effects_function_caps(doc_module, method, rows)
+                }
                 loop block in definition.trait_impls {
-                    loop method in block.methods -> jet_cli_effects_function_caps(doc_module, method, rows)
+                    loop method in block.methods {
+                        jet_cli_effects_function_caps(doc_module, method, rows)
+                    }
                 }
             }
             .Trait(definition) -> {
-                if definition.cap == .Val(cap) -> jet_cli_effects_cap_add(rows, jet_cli_effects_cap_row(doc_module, cap, "trait", definition.name))
+                if definition.cap == .Val(cap) {
+                    jet_cli_effects_cap_add(rows, jet_cli_effects_cap_row(doc_module, cap, "trait", definition.name))
+                }
             }
             .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
@@ -791,7 +863,9 @@ jet_cli_effects_caps_report: fn(modules: [JetDriverDocModule], scope: String, js
     loop doc_module in modules {
         path: cli_files.realpath(doc_module.physical_path) ?? doc_module.physical_path
         if path != scope && !path.starts_with("{scope}/") -> next
-        if doc_module.file_cap == .Val(head) -> rows.push(jet_cli_effects_cap_row(doc_module, head, "file", ""))
+        if doc_module.file_cap == .Val(head) {
+            rows.push(jet_cli_effects_cap_row(doc_module, head, "file", ""))
+        }
         jet_cli_effects_collect_caps(doc_module, doc_module.items, rows)
     }
     loop index in 1..<rows.len() {
@@ -807,20 +881,24 @@ jet_cli_effects_caps_report: fn(modules: [JetDriverDocModule], scope: String, js
         rows[position] = value
     }
     if json {
-        values: loop row in rows -> jet_cli_status_object([JetCLIStatusField]{
-            jet_cli_status_field("file", jet_cli_status_text(row.file)),
-            jet_cli_status_field("line", jet_cli_status_int(row.line)),
-            jet_cli_status_field("cap", jet_cli_status_text(row.cap)),
-            jet_cli_status_field("kind", jet_cli_status_text(row.kind)),
-            jet_cli_status_field("name", jet_cli_status_text(row.name)),
-        })
+        values: loop row in rows -> jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field("file", jet_cli_status_text(row.file)),
+                jet_cli_status_field("line", jet_cli_status_int(row.line)),
+                jet_cli_status_field("cap", jet_cli_status_text(row.cap)),
+                jet_cli_status_field("kind", jet_cli_status_text(row.kind)),
+                jet_cli_status_field("name", jet_cli_status_text(row.name)),
+            },
+        )
         fields: [JetCLIStatusField]{
             jet_cli_status_field("scope", jet_cli_status_text(scope)),
             jet_cli_status_field("caps", jet_cli_status_array(values)),
         }
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("explain.effects", true, fields)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
-    if rows.len() == 0 -> return JetDriverVerbOutput{stdout: "(none written)\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    if rows.len() == 0 {
+        return JetDriverVerbOutput{stdout: "(none written)\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
     lines: loop row in rows -> if row.name == "" -> "{row.file}:{row.line}  {row.cap}  {row.kind}" else -> "{row.file}:{row.line}  {row.cap}  {row.kind} {row.name}"
     JetDriverVerbOutput{stdout: "{lines.join("\n")}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }

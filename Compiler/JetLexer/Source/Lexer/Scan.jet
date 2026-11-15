@@ -10,34 +10,36 @@ use {
 
 // The comment spellings of the syntax registry, as the two bytes each one is,
 // fixed when the lexer is built.
-LINE_COMMENT_FIRST: #run Int{COMMENT_PREFIX.bytes()[0]}
+LINE_COMMENT_FIRST: #run { Int{COMMENT_PREFIX.bytes()[0]} }
 
-LINE_COMMENT_SECOND: #run Int{COMMENT_PREFIX.bytes()[1]}
+LINE_COMMENT_SECOND: #run { Int{COMMENT_PREFIX.bytes()[1]} }
 
-BLOCK_OPEN_FIRST: #run Int{BLOCK_COMMENT_OPEN.bytes()[0]}
+BLOCK_OPEN_FIRST: #run { Int{BLOCK_COMMENT_OPEN.bytes()[0]} }
 
-BLOCK_OPEN_SECOND: #run Int{BLOCK_COMMENT_OPEN.bytes()[1]}
+BLOCK_OPEN_SECOND: #run { Int{BLOCK_COMMENT_OPEN.bytes()[1]} }
 
-BLOCK_CLOSE_FIRST: #run Int{BLOCK_COMMENT_CLOSE.bytes()[0]}
+BLOCK_CLOSE_FIRST: #run { Int{BLOCK_COMMENT_CLOSE.bytes()[0]} }
 
-BLOCK_CLOSE_SECOND: #run Int{BLOCK_COMMENT_CLOSE.bytes()[1]}
+BLOCK_CLOSE_SECOND: #run { Int{BLOCK_COMMENT_CLOSE.bytes()[1]} }
 
 byte_at: fn(source: [U8], index: Int) -> Int Never! {
     if index < 0 || index >= source.len() -> return -1
     Int{source[index]}
 }
 
-is_continuation: fn(value: Int) -> Bool Never! {
-    value >= 128 && value <= 191
-}
+is_continuation: fn(value: Int) -> Bool Never! { value >= 128 && value <= 191 }
 
 utf8_width: fn(source: [U8], index: Int) -> Int Never! {
     first: byte_at(source, index)
     if first < 0 -> return 0
     if first < 128 -> return 1
     if first >= 194 && first <= 223 && is_continuation(byte_at(source, index + 1)) -> return 2
-    if first >= 224 && first <= 239 && is_continuation(byte_at(source, index + 1)) && is_continuation(byte_at(source, index + 2)) -> return 3
-    if first >= 240 && first <= 244 && is_continuation(byte_at(source, index + 1)) && is_continuation(byte_at(source, index + 2)) && is_continuation(byte_at(source, index + 3)) -> return 4
+    if first >= 224 && first <= 239 && is_continuation(byte_at(source, index + 1)) && is_continuation(byte_at(source, index + 2)) {
+        return 3
+    }
+    if first >= 240 && first <= 244 && is_continuation(byte_at(source, index + 1)) && is_continuation(byte_at(source, index + 2)) && is_continuation(byte_at(source, index + 3)) {
+        return 4
+    }
     1
 }
 
@@ -56,9 +58,7 @@ ascii_alpha: fn(value: Int) -> Bool Never! {
     (value >= 65 && value <= 90) || (value >= 97 && value <= 122)
 }
 
-ascii_digit: fn(value: Int) -> Bool Never! {
-    value >= 48 && value <= 57
-}
+ascii_digit: fn(value: Int) -> Bool Never! { value >= 48 && value <= 57 }
 
 // ASCII bytes take the byte tests alone: on an ASCII scalar the Unicode
 // predicates agree with them (alphabetic = A-Z a-z, numeric = 0-9, uppercase
@@ -158,21 +158,15 @@ scan_glued_paste_end: fn(source: [U8], end: Int) -> Int {
     i
 }
 
-scan_unit_suffix_end: fn(source: [U8], start: Int) -> Int {
-    scan_identifier_end(source, start)
-}
+scan_unit_suffix_end: fn(source: [U8], start: Int) -> Int { scan_identifier_end(source, start) }
 
 scan_digits: fn(source: [U8], start: Int) -> Int Never! {
     i := start
     loop i < source.len() {
         value: byte_at(source, i)
         if {
-            ascii_digit(value) || value == 95 -> {
-                i += 1
-            }
-            else -> {
-                return i
-            }
+            ascii_digit(value) || value == 95 -> { i += 1 }
+            else -> { return i }
         }
     }
     i
@@ -198,12 +192,8 @@ base_number_end: fn(source: [U8], start: Int) -> Int Never! {
     loop i < source.len() {
         value: byte_at(source, i)
         if {
-            value == 95 || base_digit(value, radix) -> {
-                i += 1
-            }
-            else -> {
-                return i
-            }
+            value == 95 || base_digit(value, radix) -> { i += 1 }
+            else -> { return i }
         }
     }
     i
@@ -299,18 +289,16 @@ scan_plain_string_end: fn(source: [U8], start: Int, raw_head: Bool) -> Int Never
         if {
             value == 92 -> {
                 if {
-                    !raw_head && byte_at(source, i + 1) == 117 -> i = scan_scalar_escape_end(source, i)
+                    !raw_head && byte_at(source, i + 1) == 117 -> {
+                        i = scan_scalar_escape_end(source, i)
+                    }
                     !raw_head || byte_at(source, i + 1) == 34 || byte_at(source, i + 1) == 92 -> {
                         if i + 1 < source.len() -> i += 2 else -> i += 1
                     }
-                    else -> {
-                        i += 1
-                    }
+                    else -> { i += 1 }
                 }
             }
-            else -> {
-                i += utf8_width(source, i)
-            }
+            else -> { i += utf8_width(source, i) }
         }
     }
     -(source.len() + 1)
@@ -383,13 +371,13 @@ scan_triple_string_end: fn(source: [U8], start: Int, raw_head: Bool) -> Int Neve
         if depth == 0 {
             if value == 92 {
                 if {
-                    !raw_head && byte_at(source, i + 1) == 117 -> i = scan_scalar_escape_end(source, i)
+                    !raw_head && byte_at(source, i + 1) == 117 -> {
+                        i = scan_scalar_escape_end(source, i)
+                    }
                     !raw_head || byte_at(source, i + 1) == 34 || byte_at(source, i + 1) == 92 -> {
                         if i + 1 < source.len() -> i += 2 else -> i += 1
                     }
-                    else -> {
-                        i += 1
-                    }
+                    else -> { i += 1 }
                 }
                 next
             }
@@ -402,7 +390,9 @@ scan_triple_string_end: fn(source: [U8], start: Int, raw_head: Bool) -> Int Neve
                 i += 1
                 next
             }
-            if value == 34 && byte_at(source, i + 1) == 34 && byte_at(source, i + 2) == 34 -> return i + 3
+            if value == 34 && byte_at(source, i + 1) == 34 && byte_at(source, i + 2) == 34 {
+                return i + 3
+            }
             i += utf8_width(source, i)
             next
         }
@@ -424,9 +414,7 @@ scan_triple_string_end: fn(source: [U8], start: Int, raw_head: Bool) -> Int Neve
                         comment_depth -= 1
                         i += 2
                     }
-                    else -> {
-                        i += utf8_width(source, i)
-                    }
+                    else -> { i += utf8_width(source, i) }
                 }
             }
             next
@@ -435,36 +423,24 @@ scan_triple_string_end: fn(source: [U8], start: Int, raw_head: Bool) -> Int Neve
             triple := byte_at(source, i + 1) == 34 && byte_at(source, i + 2) == 34
             nested: if triple -> scan_triple_string_end(source, i, false) else -> scan_plain_string_end(source, i, false)
             if {
-                nested >= 0 -> {
-                    i = nested
-                }
-                else -> {
-                    i = -nested - 1
-                }
+                nested >= 0 -> { i = nested }
+                else -> { i = -nested - 1 }
             }
             next
         }
         if value == 39 {
             nested: scan_char_end(source, i)
             if {
-                nested >= 0 -> {
-                    i = nested
-                }
-                else -> {
-                    i = source.len()
-                }
+                nested >= 0 -> { i = nested }
+                else -> { i = source.len() }
             }
             next
         }
         if value == 96 {
             nested: scan_raw_fence_end(source, i)
             if {
-                nested >= 0 -> {
-                    i = nested
-                }
-                else -> {
-                    i = source.len()
-                }
+                nested >= 0 -> { i = nested }
+                else -> { i = source.len() }
             }
             next
         }
@@ -486,7 +462,9 @@ scan_triple_string_end: fn(source: [U8], start: Int, raw_head: Bool) -> Int Neve
 scan_raw_foreign_string_end: fn(source: [U8], start: Int) -> Int Never! {
     i := start + 3
     loop i + 2 < source.len() {
-        if byte_at(source, i) == 34 && byte_at(source, i + 1) == 34 && byte_at(source, i + 2) == 34 -> return i + 3
+        if byte_at(source, i) == 34 && byte_at(source, i + 1) == 34 && byte_at(source, i + 2) == 34 {
+            return i + 3
+        }
         i += 1
     }
     -(source.len() + 1)
@@ -512,9 +490,7 @@ scan_char_end: fn(source: [U8], start: Int) -> Int Never! {
             i += 2
             if i > source.len() -> i = source.len()
         }
-        else -> {
-            i += utf8_width(source, i)
-        }
+        else -> { i += utf8_width(source, i) }
     }
     if byte_at(source, i) == 39 -> return i + 1
     loop i < source.len() && byte_at(source, i) != 39 -> i += utf8_width(source, i)
@@ -537,9 +513,7 @@ scan_block_comment_end: fn(source: [U8], start: Int) -> Int Never! {
                 depth -= 1
                 i += 2
             }
-            else -> {
-                i += utf8_width(source, i)
-            }
+            else -> { i += utf8_width(source, i) }
         }
     }
     if depth > 0 -> return -(i + 1)
@@ -717,7 +691,9 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
             // `meta.rewrite_body` replaces into its new body.
             if next1 == 123 && is_identifier_start(source, i + 2) {
                 paste_end := scan_identifier_end(source, i + 2)
-                if byte_at(source, paste_end) == 46 && byte_at(source, paste_end + 1) == 98 && byte_at(source, paste_end + 2) == 111 && byte_at(source, paste_end + 3) == 100 && byte_at(source, paste_end + 4) == 121 && byte_at(source, paste_end + 5) == 125 -> paste_end += 5
+                if byte_at(source, paste_end) == 46 && byte_at(source, paste_end + 1) == 98 && byte_at(source, paste_end + 2) == 111 && byte_at(source, paste_end + 3) == 100 && byte_at(source, paste_end + 4) == 121 && byte_at(source, paste_end + 5) == 125 {
+                    paste_end += 5
+                }
                 if byte_at(source, paste_end) == 125 {
                     glued: scan_glued_paste_end(source, paste_end + 1)
                     last_code = push_code(facts, K_IDENT, start, glued, false)
@@ -1062,9 +1038,7 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
                         }
                     }
                     if {
-                        end < 0 -> {
-                            i = -end - 1
-                        }
+                        end < 0 -> { i = -end - 1 }
                         else -> {
                             last_code = push_code(facts, K_STRING, start, end, false)
                             i = end
@@ -1075,9 +1049,7 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
                     modes: string_head_modes(source, facts, facts.len() /% 4)
                     end: scan_plain_string_end(source, start, modes.raw_head)
                     if {
-                        end < 0 -> {
-                            i = -end - 1
-                        }
+                        end < 0 -> { i = -end - 1 }
                         else -> {
                             last_code = push_code(facts, K_STRING, start, end, false)
                             i = end
@@ -1090,9 +1062,7 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
         if value == 96 {
             end: scan_raw_fence_end(source, start)
             if {
-                end < 0 -> {
-                    i = -end - 1
-                }
+                end < 0 -> { i = -end - 1 }
                 else -> {
                     last_code = push_code(facts, K_RAW_STRING, start, end, false)
                     i = end
@@ -1103,9 +1073,7 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
         if value == 39 {
             end: scan_char_end(source, start)
             if {
-                end < 0 -> {
-                    i = source.len()
-                }
+                end < 0 -> { i = source.len() }
                 else -> {
                     last_code = push_code(facts, K_CHAR, start, end, false)
                     i = end

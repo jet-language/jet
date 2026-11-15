@@ -61,9 +61,7 @@ x64_count_code: fn(stride: Int, exact: Bool) -> [U8] Never! {
         x64_mov_ri(code, X64_R10, 72340172838076673)
         x64_imul_rr(code, X64_R10, X64_R8)
         x64_movq_to_xmm(code, false, 7, X64_R10)
-    } else {
-        x64_movq_to_xmm(code, false, 7, X64_R8)
-    }
+    } else { x64_movq_to_xmm(code, false, 7, X64_R8) }
     // punpcklqdq xmm7, xmm7; pxor xmm2, xmm2; pxor xmm6, xmm6.
     x64_sse(code, 0x66, false, 0x6c, 7, 7)
     x64_sse(code, 0x66, false, 0xef, 2, 2)
@@ -74,7 +72,9 @@ x64_count_code: fn(stride: Int, exact: Bool) -> [U8] Never! {
     x64_test_rr(code, X64_R9, X64_R9)
     to_fold: x64_jcc_rel32(code, X64Cond.E)
     single: code.bytes.len()
-    if stride == 1 -> x64_load_u8(code, X64_RDX, X64_RDI, 0) else -> x64_load(code, X64_RDX, X64_RDI, 0)
+    if stride == 1 -> x64_load_u8(code, X64_RDX, X64_RDI, 0) else {
+        x64_load(code, X64_RDX, X64_RDI, 0)
+    }
     x64_alu_rr(code, X64Alu.Cmp, X64_RDX, X64_R8)
     x64_setcc(code, X64Cond.E, X64_R11)
     x64_movzx_r8(code, X64_R11, X64_R11)

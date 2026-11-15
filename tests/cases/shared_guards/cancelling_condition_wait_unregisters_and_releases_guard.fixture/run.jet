@@ -1,4 +1,3 @@
-
 mark_started: fn(started: Shared<Int>, began: Condition) {
     started_guard: started.guard_edit()
     started_guard.value = 1
@@ -9,7 +8,7 @@ wait_until_cancel: fn(
     handle: Shared<Int>,
     changed: Condition,
     started: Shared<Int>,
-    began: Condition
+    began: Condition,
 ) -> Int {
     mark_started(started, began)
     guard: handle.guard_edit()
@@ -29,10 +28,9 @@ run: fn() {
     started := Shared{0}
     began := Condition.new()
     task.group workers {
-        print((task.race {
-            wait_until_cancel(cell, changed, started, began),
-            finish_after_start(started, began)
-        }) ?? panic("race failed"))
+        print(
+            (task.race {wait_until_cancel(cell, changed, started, began), finish_after_start(started, began)}) ?? panic("race failed"),
+        )
     }
     reacquired: cell.guard_edit()
     reacquired.value += 1

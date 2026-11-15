@@ -36,7 +36,9 @@ jet_cli_fix_pin_failures: fn(file: String, before: String, color: Bool) -> JetCL
             if jet_cli_errors(result.diagnostics).len() > 0 {
                 return JetCLIFixPinned.Refused{output: jet_cli_report_output("", "E2105", "`{file}` does not check, so its failure contracts are not inferred", jet_cli_why("E2105"), "fix the file's errors first, then run `jet fix --pin-failures` again", color, JET_DRIVER_EXIT_USER_ERROR)}
             }
-            if result.internal_problem == .Val(problem) -> return JetCLIFixPinned.Refused{output: jet_cli_ice(problem)}
+            if result.internal_problem == .Val(problem) {
+                return JetCLIFixPinned.Refused{output: jet_cli_ice(problem)}
+            }
             facts: jet_cli_pin_facts(result.doc_modules, jet_cli_sem_normalize(file))
             JetCLIFixPinned.Pinned{applied: jet_cli_pin_apply(before, facts)}
         }
@@ -72,7 +74,7 @@ jet_cli_pin_apply: fn(before: String, facts: JetCLIPinFacts) -> JetCLIFixApply? 
     declared := [String:Bool]{}
     loop item in parsed.program.items {
         if item == {
-            .Struct(value) -> declared[value.name] = true
+            .Struct(value) -> { declared[value.name] = true }
             .Enum(value) -> declared[value.name] = true
             .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
@@ -82,17 +84,25 @@ jet_cli_pin_apply: fn(before: String, facts: JetCLIPinFacts) -> JetCLIFixApply? 
     tails := [TextEdit]{}
     loop item in parsed.program.items {
         if item == {
-            .Func(function) -> jet_cli_pin_function(function, function.name, function.span.end, tokens, facts, declared, edits, tails)
+            .Func(function) -> {
+                jet_cli_pin_function(function, function.name, function.span.end, tokens, facts, declared, edits, tails)
+            }
             .Struct(value) -> {
-                loop method in value.methods -> jet_cli_pin_function(method, "{value.name}.{method.name}", value.span.end, tokens, facts, declared, edits, tails)
+                loop method in value.methods {
+                    jet_cli_pin_function(method, "{value.name}.{method.name}", value.span.end, tokens, facts, declared, edits, tails)
+                }
             }
             .Enum(value) -> {
-                loop method in value.methods -> jet_cli_pin_function(method, "{value.name}.{method.name}", value.span.end, tokens, facts, declared, edits, tails)
+                loop method in value.methods {
+                    jet_cli_pin_function(method, "{value.name}.{method.name}", value.span.end, tokens, facts, declared, edits, tails)
+                }
             }
             .Impl(block) -> {
                 // A trait method's contract is the trait's.
                 if block.trait_name != None -> next
-                loop method in block.methods -> jet_cli_pin_function(method, "{block.type_name}.{method.name}", block.span.end, tokens, facts, declared, edits, tails)
+                loop method in block.methods {
+                    jet_cli_pin_function(method, "{block.type_name}.{method.name}", block.span.end, tokens, facts, declared, edits, tails)
+                }
             }
             .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
@@ -107,26 +117,34 @@ jet_cli_pin_apply: fn(before: String, facts: JetCLIPinFacts) -> JetCLIFixApply? 
 // Pin `function`, named `local` among the checked functions, whose
 // top-level declaration ends at `end`.
 jet_cli_pin_function: fn(function: Func, local: String, end: Int, tokens: [Token], facts: JetCLIPinFacts, declared: &[String:Bool], edits: &[TextEdit], tails: &[TextEdit]) {
-    if !sema_failure_inference_candidate(function) -> return
+    if !sema_failure_inference_candidate(function) {
+        return
+    }
     carrier: facts.carriers.get(local) ?? return
     // The checked carrier names each nominal by its `module::` key; the
     // contract and the minted enum's lookup read the name as written.
     error: if carrier == {
         .Infallible -> Type.Named{name: "Never"}
         .Result(_, failure) -> type_unqualified_nominals(failure)
-        .Optional(_) | .Diverges(_) -> return
+        .Optional(_) | .Diverges(_) -> {
+            return
+        }
     }
     contract: jet_cli_pin_contract_text(error)
     if function.return_type_span == {
-        .Val(written) -> edits.push(TextEdit{span: Span{start: written.end, end: written.end}, new_text: " {contract}"})
+        .Val(written) -> {
+            edits.push(TextEdit{span: Span{start: written.end, end: written.end}, new_text: " {contract}"})
+        }
         None -> {
             open: jet_cli_pin_body_open(tokens, function)
-            if open < 0 -> return
+            if open < 0 {
+                return
+            }
             edits.push(TextEdit{span: Span{start: open, end: open}, new_text: "{contract} "})
         }
     }
     if error == {
-        .Named(name) -> jet_cli_pin_mint(name, end, facts, declared, tails)
+        .Named(name) -> { jet_cli_pin_mint(name, end, facts, declared, tails) }
         .Union(members) -> {
             loop member in members {
                 if member == .Named(name) -> jet_cli_pin_mint(name, end, facts, declared, tails)
@@ -139,7 +157,9 @@ jet_cli_pin_function: fn(function: Func, local: String, end: Int, tokens: [Token
 // Write the enum the checker minted as `name` after the top-level
 // declaration ending at `end`, once, unless the file declares `name`.
 jet_cli_pin_mint: fn(name: String, end: Int, facts: JetCLIPinFacts, declared: &[String:Bool], tails: &[TextEdit]) {
-    if declared.has_key(name) -> return
+    if declared.has_key(name) {
+        return
+    }
     definition: facts.minted.get(name) ?? return
     text: "\n\n{jet_cli_pin_enum_text(definition)}"
     declared[definition.name] = true
@@ -182,7 +202,9 @@ jet_cli_pin_contract_text: fn(error: Type) -> String {
 // A minted enum as its declaration: `#Error`, then one case per line.
 jet_cli_pin_enum_text: fn(definition: EnumDef) -> String {
     text := "#Error\n{definition.name}: enum {{\n"
-    loop variant in definition.variants -> text = "{text}    {variant.name}{jet_cli_pin_payload_text(variant.payload)}\n"
+    loop variant in definition.variants {
+        text = "{text}    {variant.name}{jet_cli_pin_payload_text(variant.payload)}\n"
+    }
     "{text}}}"
 }
 

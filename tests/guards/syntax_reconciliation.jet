@@ -24,20 +24,25 @@ s2_syntax_paths: fn(root: String) -> [String] {
         loop candidate in skipped {
             if name == candidate -> omit = true
         }
-        if entry.is_dir && (omit || name.starts_with("target-") || name.starts_with("build-") || name.starts_with("result-")) -> next
+        if entry.is_dir && (omit || name.starts_with("target-") || name.starts_with("build-") || name.starts_with("result-")) {
+            next
+        }
         children: s2_syntax_paths(entry.path)
         loop child in children -> out.push(child)
     }
     out
 }
+
 s2_syntax_skip: fn(path: String) -> Bool {
     parts: path.split("/").to_list()
     name: parts[parts.len() - 1]
     path.contains("/target/") || name.starts_with("retired_") || name.contains("_retired_") || name.ends_with("_retired") || path.ends_with(".published.snapshot") || path.ends_with("Docs/spec/syntax-decisions.md")
 }
+
 s2_syntax_ident_byte: fn(ch: Int) -> Bool {
     ch == 95 || (ch >= 48 && ch <= 57) || (ch >= 65 && ch <= 90) || (ch >= 97 && ch <= 122)
 }
+
 // A needle counts only as its own token: never as the tail of a longer name
 // (`BTreeMap<`, `SyncMap<`), never as the head of one (`#context-menu`,
 // `LayoutHandles`), never as a marker's dotted key (`#test.`), and never as a
@@ -67,15 +72,7 @@ s2_syntax_forbidden: fn(line: String, needle: String) -> Bool {
 // and their generated copies, the guards' own needle lists, and the foreign
 // producers whose stable digest keys spell the source language's words.
 s2_syntax_data_file: fn(path: String) -> Bool {
-    path == "Compiler/Prelude/Diagnostics.jet" ||
-    path == "Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet" ||
-    (path.starts_with("tests/cases/selfhost_terminators/") && path.ends_with("/main.jet")) ||
-    path == "tests/guards/syntax_reconciliation.jet" ||
-    path == "tests/guards/arrow_surface/arrow_surface.jet" ||
-    path.starts_with("Jetpack/Integrations/Source/Foreign/") ||
-    path == "Compiler/JetDriver/Source/Driver/RustForeign.jet" ||
-    path == "Compiler/JetDriver/Source/Driver/RustForeignSource.jet" ||
-    path == "Compiler/JetDriver/Tests/RustForeign.jet"
+    path == "Compiler/Prelude/Diagnostics.jet" || path == "Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet" || (path.starts_with("tests/cases/selfhost_terminators/") && path.ends_with("/main.jet")) || path == "tests/guards/syntax_reconciliation.jet" || path == "tests/guards/arrow_surface/arrow_surface.jet" || path.starts_with("Jetpack/Integrations/Source/Foreign/") || path == "Compiler/JetDriver/Source/Driver/RustForeign.jet" || path == "Compiler/JetDriver/Source/Driver/RustForeignSource.jet" || path == "Compiler/JetDriver/Tests/RustForeign.jet"
 }
 
 // The broad roots scan source and text files; the curated roots scan all.
@@ -83,6 +80,7 @@ s2_syntax_scanned_text: fn(path: String) -> Bool {
     extensions: [String]{".jet", ".md", ".case", ".stderr", ".warn", ".out", ".txt", ".template", ".expected", ".stdout"}
     extensions.any(fn(extension) { path.ends_with(extension) })
 }
+
 s2_syntax_trim_start: fn(text: String) -> String {
     bytes: text.bytes()
     index := 0
@@ -93,6 +91,7 @@ s2_syntax_trim_start: fn(text: String) -> String {
     }
     policy_slice_bytes(text, index, bytes.len())
 }
+
 s2_syntax_old_binding: fn(line: String) -> Bool {
     words: [String]{"let", "val", "var", "set"}
     loop block in line.split("{{") {
@@ -155,20 +154,27 @@ s2_syntax_live_surface_has_no_retired_spellings: fn() {
     loop root in roots {
         loop path in s2_syntax_paths(root) {
             if path.ends_with(".rs") || s2_syntax_skip(path) || s2_syntax_data_file(path) -> next
-            if !s2_syntax_curated(path) && (!s2_syntax_scanned_text(path) || s6_ratchet_history(path)) -> next
+            if !s2_syntax_curated(path) && (!s2_syntax_scanned_text(path) || s6_ratchet_history(path)) {
+                next
+            }
             source: s2_syntax_files_api.read(path) ?? next
             subjects: s2_syntax_ui_subject_lines(path)
             loop (index, line) in source.lines() {
-                if subjects.contains(index + 1) || s2_syntax_ui_excerpt(path, line) || line.contains("_RETIRED") -> next
+                if subjects.contains(index + 1) || s2_syntax_ui_excerpt(path, line) || line.contains("_RETIRED") {
+                    next
+                }
                 loop needle in forbidden {
                     if needle == "pure fn" && !path.starts_with("Docs") -> next
-                    if s2_syntax_forbidden(line, needle) -> failures.push("{path}:{index + 1} contains retired {needle}")
+                    if s2_syntax_forbidden(line, needle) {
+                        failures.push("{path}:{index + 1} contains retired {needle}")
+                    }
                 }
             }
         }
     }
     assert(failures.is_empty(), "retired syntax found:\n{failures.join("\n")}")
 }
+
 #Test("live_surface_has_no_retired_spellings") {
     guards_enter_root()
     s2_syntax_live_surface_has_no_retired_spellings()
@@ -180,6 +186,7 @@ s2_syntax_pipe_family_has_no_stale_flow_reservation: fn() {
     assert(normalized.contains("D-SHAPE-PIPE1=C — Bars mean alternatives, not general flow"))
     assert(normalized.contains("value-position `|` is bitwise OR"))
 }
+
 #Test("pipe_family_has_no_stale_flow_reservation") {
     guards_enter_root()
     s2_syntax_pipe_family_has_no_stale_flow_reservation()
@@ -193,10 +200,13 @@ s2_syntax_active_maturity_docs_use_meta_field_only: fn() {
         source: s2_syntax_files_api.read(path) ?? panic("read maturity surface {path}")
         loop needle in required -> assert(source.contains(needle), "{path} does not teach {needle}")
         loop line in source.lines() {
-            loop needle in retired -> assert(!line.contains(needle) || line.contains("not grammar"), "{path} teaches standalone {needle}")
+            loop needle in retired {
+                assert(!line.contains(needle) || line.contains("not grammar"), "{path} teaches standalone {needle}")
+            }
         }
     }
 }
+
 #Test("active_maturity_docs_use_meta_field_only") {
     guards_enter_root()
     s2_syntax_active_maturity_docs_use_meta_field_only()
@@ -208,6 +218,7 @@ s2_syntax_proposal_marker_census_matches_syntax_registry: fn() {
     required: [String]{"`#` is the sole prefix for attributes, instructions, and properties.", "Prefix `@` is now the compile-time and fact-read mark; infix `@`", "A leading `@Rule` in marker position produces E0063 with the canonical `#Rule` fix."}
     loop needle in required -> assert(normalized.contains(needle), "marker census lost {needle}")
 }
+
 #Test("proposal_marker_census_matches_syntax_registry") {
     guards_enter_root()
     s2_syntax_proposal_marker_census_matches_syntax_registry()
@@ -223,14 +234,19 @@ s2_syntax_old_binding_migration_paths_stay_removed: fn() {
             source: s2_syntax_files_api.read(path) ?? next
             loop (index, line) in source.lines() {
                 loop code in codes {
-                    if line.contains(code) -> failures.push("{path}:{index + 1} contains retired binding diagnostic {code}")
+                    if line.contains(code) {
+                        failures.push("{path}:{index + 1} contains retired binding diagnostic {code}")
+                    }
                 }
-                if s2_syntax_old_binding(line) -> failures.push("{path}:{index + 1} contains retired binding spelling")
+                if s2_syntax_old_binding(line) {
+                    failures.push("{path}:{index + 1} contains retired binding spelling")
+                }
             }
         }
     }
     assert(failures.is_empty(), "retired binding paths found:\n{failures.join("\n")}")
 }
+
 #Test("old_binding_migration_paths_stay_removed") {
     guards_enter_root()
     s2_syntax_old_binding_migration_paths_stay_removed()
@@ -252,12 +268,16 @@ s2_syntax_foreign_word_facts_have_one_table: fn() {
             source: s2_syntax_files_api.read(path) ?? next
             loop (index, line) in source.lines() {
                 trimmed: s2_syntax_trim_start(line)
-                if trimmed.starts_with("FOREIGN_") && trimmed.contains(": \"") -> failures.push("{path}:{index + 1} defines a foreign-word fact outside the syntax registry")
+                if trimmed.starts_with("FOREIGN_") && trimmed.contains(": \"") {
+                    failures.push("{path}:{index + 1} defines a foreign-word fact outside the syntax registry")
+                }
                 quoted := 0
                 loop word in words {
                     if line.contains(word) -> quoted += 1
                 }
-                if quoted >= 3 -> failures.push("{path}:{index + 1} lists foreign words outside the syntax registry")
+                if quoted >= 3 {
+                    failures.push("{path}:{index + 1} lists foreign words outside the syntax registry")
+                }
             }
         }
     }
@@ -268,6 +288,7 @@ s2_syntax_foreign_word_facts_have_one_table: fn() {
         assert(layout.contains(fact), "MathLayout.jet lost the registry fact {fact}")
     }
 }
+
 #Test("foreign_word_facts_have_one_table") {
     guards_enter_root()
     s2_syntax_foreign_word_facts_have_one_table()
@@ -310,6 +331,7 @@ s2_syntax_ratified_unshipped_spellings_are_listed_and_triaged: fn() {
     disposition_5: "tracked by the imported decision ledger; card #1735"
     assert(disposition_5.contains("card #") && (disposition_5.contains("retired") || disposition_5.contains("deferred") || disposition_5.contains("tracked")))
 }
+
 #Test("ratified_unshipped_spellings_are_listed_and_triaged") {
     guards_enter_root()
     s2_syntax_ratified_unshipped_spellings_are_listed_and_triaged()
@@ -327,23 +349,24 @@ s2_syntax_syntax_status_matrix_covers_unbuilt_notes: fn() {
         start := index
         loop start > 0 {
             if lines[start - 1].trim().is_empty() -> break
-            start = start - 1
+            start -= 1
         }
         end := index + 1
         loop end < lines.len() {
             if lines[end].trim().is_empty() -> break
-            end = end + 1
+            end += 1
         }
         context := [String]{}
         at := start
         loop at < end {
             context.push(lines[at])
-            at = at + 1
+            at += 1
         }
         paragraph: context.join("\n")
         assert(paragraph.contains("card #") || paragraph.contains("cards #"), "unbuilt syntax note lacks live card gate {index + 1}: {line}")
     }
 }
+
 #Test("syntax_status_matrix_covers_unbuilt_notes") {
     guards_enter_root()
     s2_syntax_syntax_status_matrix_covers_unbuilt_notes()
@@ -354,8 +377,11 @@ s2_syntax_environment_reference_is_canonical_and_navigable: fn() {
     docs: s2_syntax_files_api.read("Docs/README.md") ?? panic("read docs index")
     assert(docs.contains("reference/environment.md"), "docs index must link canonical environment reference")
     required: [String]{"JET_PROP_SEED", "JET_TOOLCHAIN_ROOT", "JET_ENV_DISABLE", "JET_TEST_TOOLCHAIN_ROOT", "BEGIN GENERATED ENVIRONMENT VARIABLES: Internal", "## Naming convention"}
-    loop needle in required -> assert(reference.contains(needle), "environment reference missing {needle}")
+    loop needle in required {
+        assert(reference.contains(needle), "environment reference missing {needle}")
+    }
 }
+
 #Test("environment_reference_is_canonical_and_navigable") {
     guards_enter_root()
     s2_syntax_environment_reference_is_canonical_and_navigable()
@@ -370,6 +396,7 @@ s2_syntax_lexical_ledger_is_rendered_from_syntax: fn() {
     block: policy_slice_bytes(decisions, start, end)
     assert(block.contains("Generated by `Tools/agent/LexicalLedger.jet`"), "lexical ledger must identify renderer")
 }
+
 #Test("lexical_ledger_is_rendered_from_syntax") {
     guards_enter_root()
     s2_syntax_lexical_ledger_is_rendered_from_syntax()
@@ -379,8 +406,11 @@ s2_syntax_marker_plane_matrix_covers_current_marker_families: fn() {
     decisions: s2_syntax_files_api.read("Docs/spec/syntax-decisions.md") ?? panic("read syntax decisions")
     assert(decisions.contains("**D-SHAPE8=A — Effects inside the arrow** *(ratified 2026-07-14,") && decisions.contains("owner-amended by D-ARROW-CONTROL1 on 2026-07-26; card #543)*:"))
     anchors: [String]{"D-MARKER-FAMILY1", "D-MARKERMOVE1", "D-UNSAFE2", "D-TESTPAREN1", "D-BENCH1", "D-CAPBUNDLE1", "D-CTMARKER1"}
-    loop anchor in anchors -> assert(decisions.contains(anchor), "live syntax decisions lost {anchor}")
+    loop anchor in anchors {
+        assert(decisions.contains(anchor), "live syntax decisions lost {anchor}")
+    }
 }
+
 #Test("marker_plane_matrix_covers_current_marker_families") {
     guards_enter_root()
     s2_syntax_marker_plane_matrix_covers_current_marker_families()
@@ -394,6 +424,7 @@ s2_syntax_authority_vocabulary_has_one_live_name_and_retired_marker_tombstones: 
         loop word in retired -> assert(!source.contains(word), "{path} contains retired {word}")
     }
 }
+
 #Test("authority_vocabulary_has_one_live_name_and_retired_marker_tombstones") {
     guards_enter_root()
     s2_syntax_authority_vocabulary_has_one_live_name_and_retired_marker_tombstones()
@@ -404,6 +435,7 @@ s2_syntax_card_511_census_matches_current_law: fn() {
     laws: [String]{"D-MARKER-FAMILY1", "D-DET1", "D-REPLAY1", "D-MARK-META1"}
     loop law in laws -> assert(decisions.contains(law), "current syntax law omits {law}")
 }
+
 #Test("card_511_census_matches_current_law") {
     guards_enter_root()
     s2_syntax_card_511_census_matches_current_law()
@@ -415,6 +447,7 @@ s2_syntax_module_internal_is_discovery_not_access_control: fn() {
     assert(decisions.contains("underscore changes discovery, not access"))
     assert(!decisions.contains("| D-SHAPE-MODULEINTERNAL1 |"))
 }
+
 #Test("module_internal_is_discovery_not_access_control") {
     guards_enter_root()
     s2_syntax_module_internal_is_discovery_not_access_control()
@@ -427,17 +460,22 @@ s2_syntax_artifact_extensions_are_one_closed_kind_specific_family: fn() {
     loop root in roots {
         loop path in s2_syntax_paths(root) {
             // Dated evidence keeps its words as recorded (retirement_ratchet.jet).
-            if path.ends_with(".rs") || path.ends_with("tests/guards/syntax_reconciliation.jet") || guards_dated_evidence(path) -> next
+            if path.ends_with(".rs") || path.ends_with("tests/guards/syntax_reconciliation.jet") || guards_dated_evidence(path) {
+                next
+            }
             source: s2_syntax_files_api.read(path) ?? next
             loop (index, line) in source.lines() {
                 loop suffix in retired {
-                    if line.contains(suffix) && !line.contains("jet.jproof") -> failures.push("{path}:{index + 1} retains retired artifact suffix {suffix}")
+                    if line.contains(suffix) && !line.contains("jet.jproof") {
+                        failures.push("{path}:{index + 1} retains retired artifact suffix {suffix}")
+                    }
                 }
             }
         }
     }
     assert(failures.is_empty(), "retired artifact suffixes found:\n{failures.join("\n")}")
 }
+
 #Test("artifact_extensions_are_one_closed_kind_specific_family") {
     guards_enter_root()
     s2_syntax_artifact_extensions_are_one_closed_kind_specific_family()

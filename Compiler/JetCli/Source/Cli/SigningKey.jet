@@ -44,8 +44,12 @@ jet_cli_keygen_plan: fn(jet_argv: [String], color: Bool) -> JetCLIPlan Never! {
 jet_cli_key_plan: fn(jet_argv: [String], color: Bool, json: Bool) -> JetCLIPlan Never! {
     // words[0] is the command word `key`.
     words: jet_cli_signing_words(jet_argv)
-    if words.len() < 2 -> return jet_cli_inspect_b_error("E2104", "`jet registry key` needs a subcommand — try `jet registry key backup`.", color, json, JET_DRIVER_EXIT_USER_ERROR)
-    if words[1] != "backup" -> return jet_cli_inspect_b_error("E2101", "unknown `jet registry key` subcommand `{words[1]}` — did you mean `jet registry key backup`?", color, json, JET_DRIVER_EXIT_USER_ERROR)
+    if words.len() < 2 {
+        return jet_cli_inspect_b_error("E2104", "`jet registry key` needs a subcommand — try `jet registry key backup`.", color, json, JET_DRIVER_EXIT_USER_ERROR)
+    }
+    if words[1] != "backup" {
+        return jet_cli_inspect_b_error("E2101", "unknown `jet registry key` subcommand `{words[1]}` — did you mean `jet registry key backup`?", color, json, JET_DRIVER_EXIT_USER_ERROR)
+    }
     dest: if words.len() > 2 -> words[2] else -> JET_CLI_KEY_BACKUP_DEFAULT
     JetCLIPlan.KeyBackup{registry: jet_cli_signing_registry(jet_argv), dest: dest, color: color}
 }
@@ -65,8 +69,12 @@ jet_cli_keygen: fn(registry: String, force: Bool, color: Bool) -[FS, Env, Time, 
 // encrypted: it is the publisher's own copy to keep safe.
 jet_cli_key_backup: fn(registry: String, dest: String, color: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
     seed_path: publication_key_paths(registry).seed_path
-    if !key_files.is_file(seed_path) -> return jet_cli_signing_failure("no signing key for registry `{registry}` — run `jet registry keygen` first", color)
-    if key_files.copy(seed_path, dest) == .Err(error) -> return jet_cli_signing_failure("couldn't copy the signing key to {dest}: {error}", color)
+    if !key_files.is_file(seed_path) {
+        return jet_cli_signing_failure("no signing key for registry `{registry}` — run `jet registry keygen` first", color)
+    }
+    if key_files.copy(seed_path, dest) == .Err(error) {
+        return jet_cli_signing_failure("couldn't copy the signing key to {dest}: {error}", color)
+    }
     JetDriverVerbOutput{stdout: "backed up the `{registry}` signing key to {dest}\nwarning: store this file somewhere safe (e.g. a password manager). Anyone who has it can publish signed updates as you.\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 

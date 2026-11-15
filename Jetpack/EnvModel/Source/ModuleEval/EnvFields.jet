@@ -5,19 +5,52 @@
 // computed setting.
 use {
     jet_pkg_model.[
-        ContributionLayer, EntryContribution, FactContribution, FactValue, Pkg, SourceScope,
+        ContributionLayer,
+        EntryContribution,
+        FactContribution,
+        FactValue,
+        Pkg,
+        SourceScope,
     ]
     jet_foundation.[
-        CtEnumArg, CtKey, CtMapEntry, CtValue, Expr, NamedCtValue, NamedExpr, Namespace, Span,
-        ast_comptime_key_compare, ast_comptime_value_show, expr_span,
+        CtEnumArg,
+        CtKey,
+        CtMapEntry,
+        CtValue,
+        Expr,
+        NamedCtValue,
+        NamedExpr,
+        Namespace,
+        Span,
+        ast_comptime_key_compare,
+        ast_comptime_value_show,
+        expr_span,
         type_name,
     ]
     jetpack_foundation.[
-        ENV_FIELD_CHECKS, ENV_FIELD_DOTENV, ENV_FIELD_FILES, ENV_FIELD_FORMATTER,
-        ENV_FIELD_GIT_HOOKS_PATH, ENV_FIELD_LANGUAGES, ENV_FIELD_ON_ENTER, ENV_FIELD_PRESETS,
-        ENV_FIELD_PROMPT, ENV_FIELD_RELOAD, ENV_FIELD_SECRETS, ENV_FIELD_UNSET, PROMPT_FIELD_LABEL,
-        PROMPT_FIELD_PATH, PROMPT_FIELD_STRIP, PROMPT_PATH_FULL, PROMPT_PATH_SHORT, PROMPT_SETTING_PATH,
-        PROMPT_SETTING_STRIP, PROMPT_STRIP_OFF, PROMPT_STRIP_ON, SYSTEM_FIELD_PACKAGES, TYPE_ENV,
+        ENV_FIELD_CHECKS,
+        ENV_FIELD_DOTENV,
+        ENV_FIELD_FILES,
+        ENV_FIELD_FORMATTER,
+        ENV_FIELD_GIT_HOOKS_PATH,
+        ENV_FIELD_LANGUAGES,
+        ENV_FIELD_ON_ENTER,
+        ENV_FIELD_PRESETS,
+        ENV_FIELD_PROMPT,
+        ENV_FIELD_RELOAD,
+        ENV_FIELD_SECRETS,
+        ENV_FIELD_UNSET,
+        PROMPT_FIELD_LABEL,
+        PROMPT_FIELD_PATH,
+        PROMPT_FIELD_STRIP,
+        PROMPT_PATH_FULL,
+        PROMPT_PATH_SHORT,
+        PROMPT_SETTING_PATH,
+        PROMPT_SETTING_STRIP,
+        PROMPT_STRIP_OFF,
+        PROMPT_STRIP_ON,
+        SYSTEM_FIELD_PACKAGES,
+        TYPE_ENV,
         TYPE_PROMPT,
     ]
 }
@@ -36,17 +69,19 @@ EnvCapture: struct {
 // Files one `env.<name>` capture: its environment-scoped facts under `path`,
 // then its module entry. The capture's parts move into both rows.
 envmodel_file_env_capture: fn(capture: &&EnvCapture, path: String, reads: &&[EnvironmentRead], services: &&[DevServicePlan], contributions: &[EnvironmentContribution], entries: &[ModuleEntry]) Never! {
-    contributions.push(EnvironmentContribution{
-        name: path,
-        environment_reads: reads.move(),
-        dev_services: services.move(),
-        secrets: capture.secrets.move(),
-        adapters: capture.adapters.move(),
-        lifecycle: capture.lifecycle.move(),
-        presets: capture.presets.move(),
-        languages: capture.languages.move(),
-        files: capture.files.move(),
-    })
+    contributions.push(
+        EnvironmentContribution{
+            name: path,
+            environment_reads: reads.move(),
+            dev_services: services.move(),
+            secrets: capture.secrets.move(),
+            adapters: capture.adapters.move(),
+            lifecycle: capture.lifecycle.move(),
+            presets: capture.presets.move(),
+            languages: capture.languages.move(),
+            files: capture.files.move(),
+        },
+    )
     entries.push(ModuleEntry{key: ModuleEntryKey{namespace: Namespace.Env, path: path}, entry: capture.entry.move()})
 }
 
@@ -86,13 +121,19 @@ EnvFieldKind: enum {
 // U18: a bare `{ … }` elaborates to the namespace type; an explicit
 // `Env { … }` stays legal. A non-record value (or the wrong type name) is
 // E0966.
-envmodel_evaluate_env_contribution: fn(value: Expr, src: String, scope: ModuleEvalScope, globals: [String: CtValue], source: String) -> EnvCapture EnvModelEvalError! {
-    if envmodel_record_literal(value) == .Val(record) -> return Ok(envmodel_evaluate_env_contribution(record, src, scope, globals, source))
+envmodel_evaluate_env_contribution: fn(value: Expr, src: String, scope: ModuleEvalScope, globals: [String:CtValue], source: String) -> EnvCapture EnvModelEvalError! {
+    if envmodel_record_literal(value) == .Val(record) {
+        return Ok(envmodel_evaluate_env_contribution(record, src, scope, globals, source))
+    }
     if value == {
         .StructLit(type_name, _, _, _, fields, _, _, _) -> {
-            if type_name != "" && type_name != TYPE_ENV -> return Err(envmodel_wrong_namespace_type(TYPE_ENV, type_name, expr_span(value)))
+            if type_name != "" && type_name != TYPE_ENV {
+                return Err(envmodel_wrong_namespace_type(TYPE_ENV, type_name, expr_span(value)))
+            }
             named := [NamedExpr]{}
-            loop field in fields -> named.push(NamedExpr{name: field.name, name_span: field.name_span, value: field.value})
+            loop field in fields {
+                named.push(NamedExpr{name: field.name, name_span: field.name_span, value: field.value})
+            }
             Ok(envmodel_evaluate_env_fields(named, src, scope, globals, source))
         }
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> Err(envmodel_not_a_namespace_literal(TYPE_ENV, expr_span(value)))
@@ -102,9 +143,9 @@ envmodel_evaluate_env_contribution: fn(value: Expr, src: String, scope: ModuleEv
 // Module fields are a small pure dependency graph: a valid `port: base + 1,
 // base: 8000` must not depend on declaration order. Every sibling dependency
 // resolves first, then each field is lowered with the resolved values.
-envmodel_evaluate_env_fields: fn(fields: [NamedExpr], src: String, scope: ModuleEvalScope, globals: [String: CtValue], source: String) -> EnvCapture EnvModelEvalError! {
+envmodel_evaluate_env_fields: fn(fields: [NamedExpr], src: String, scope: ModuleEvalScope, globals: [String:CtValue], source: String) -> EnvCapture EnvModelEvalError! {
     capture := EnvCapture{
-        entry: EntryContribution{packages: [Pkg]{}, settings: [String: [FactContribution]]{}},
+        entry: EntryContribution{packages: [Pkg]{}, settings: [String:[FactContribution]]{}},
         secrets: [SecretSpec]{},
         adapters: [AdapterPlan]{},
         lifecycle: EnvironmentLifecycle{},
@@ -112,9 +153,11 @@ envmodel_evaluate_env_fields: fn(fields: [NamedExpr], src: String, scope: Module
         languages: [LanguageSpec]{},
         files: [ManagedFile]{},
     }
-    field_map := [String: NamedFieldExpr]{}
+    field_map := [String:NamedFieldExpr]{}
     loop field in fields {
-        if EnvFieldKind.classify(field.name).is_computed() -> field_map[field.name] = NamedFieldExpr{span: field.name_span, expr: field.value}
+        if EnvFieldKind.classify(field.name).is_computed() {
+            field_map[field.name] = NamedFieldExpr{span: field.name_span, expr: field.value}
+        }
     }
     loop field in fields {
         if EnvFieldKind.classify(field.name) == EnvFieldKind.Packages {
@@ -129,9 +172,13 @@ envmodel_evaluate_env_fields: fn(fields: [NamedExpr], src: String, scope: Module
         span: field.name_span
         if EnvFieldKind.classify(field.name) == {
             .Packages -> {}
-            .Prompt -> envmodel_capture_prompt_setting(capture.entry, field.value, scope, resolved, source)
+            .Prompt -> {
+                envmodel_capture_prompt_setting(capture.entry, field.value, scope, resolved, source)
+            }
             .Secrets -> {
-                loop spec in envmodel_parse_secret_specs(field.value, scope, globals) -> capture.secrets.push(spec)
+                loop spec in envmodel_parse_secret_specs(field.value, scope, globals) {
+                    capture.secrets.push(spec)
+                }
             }
             .Presets -> {
                 value: resolved.get(field.name) ?? next
@@ -164,27 +211,37 @@ envmodel_evaluate_env_fields: fn(fields: [NamedExpr], src: String, scope: Module
 // Lifecycle names are references, not comptime variable reads. Keep bare
 // identifiers as strings while still evaluating ordinary literals and the
 // explicit expert record's scalar fields.
-envmodel_evaluate_lifecycle_value: fn(expr: Expr, scope: ModuleEvalScope, globals: [String: CtValue]) -> CtValue EnvModelEvalError! {
-    if envmodel_record_literal(expr) == .Val(record) -> return Ok(envmodel_evaluate_lifecycle_value(record, scope, globals))
+envmodel_evaluate_lifecycle_value: fn(expr: Expr, scope: ModuleEvalScope, globals: [String:CtValue]) -> CtValue EnvModelEvalError! {
+    if envmodel_record_literal(expr) == .Val(record) {
+        return Ok(envmodel_evaluate_lifecycle_value(record, scope, globals))
+    }
     if expr == {
         .Ident(name, _, _) -> Ok(CtValue.Str{value: name})
         .Field(_, _, _, _) -> Ok(CtValue.Str{value: envmodel_expression_name(expr)})
         .ListLit(values, _, _) -> {
             items := [CtValue]{}
-            loop value in values -> items.push(envmodel_evaluate_lifecycle_value(value, scope, globals))
+            loop value in values {
+                items.push(envmodel_evaluate_lifecycle_value(value, scope, globals))
+            }
             Ok(CtValue.List{values: items})
         }
         .StructLit(type_name, _, _, _, fields, _, _, _) -> {
             lowered := [NamedCtValue]{}
-            loop field in fields -> lowered.push(NamedCtValue{name: field.name, value: envmodel_evaluate_lifecycle_value(field.value, scope, globals)})
+            loop field in fields {
+                lowered.push(NamedCtValue{name: field.name, value: envmodel_evaluate_lifecycle_value(field.value, scope, globals)})
+            }
             Ok(CtValue.Struct{type_name: type_name, fields: lowered})
         }
         .EnumLit(type_name, variant, _, args, _, _, _) -> {
             lowered := [CtEnumArg]{}
             loop arg in args {
                 if arg == {
-                    .Positional(value) -> { lowered.push(CtEnumArg{label: None, value: envmodel_evaluate_lifecycle_value(value, scope, globals)}) }
-                    .Named(label, value) -> { lowered.push(CtEnumArg{label: Val(label), value: envmodel_evaluate_lifecycle_value(value, scope, globals)}) }
+                    .Positional(value) -> {
+                        lowered.push(CtEnumArg{label: None, value: envmodel_evaluate_lifecycle_value(value, scope, globals)})
+                    }
+                    .Named(label, value) -> {
+                        lowered.push(CtEnumArg{label: Val(label), value: envmodel_evaluate_lifecycle_value(value, scope, globals)})
+                    }
                 }
             }
             Ok(CtValue.Enum{type_name: type_name, variant: variant, args: lowered})
@@ -196,7 +253,9 @@ envmodel_evaluate_lifecycle_value: fn(expr: Expr, scope: ModuleEvalScope, global
                 key: envmodel_scalar_ct_key(key_value) ?? return Err(envmodel_error("E1333", "lifecycle map keys must be deterministic scalar values", "lifecycle records are captured as stable plan facts", "use a string, integer, boolean, or character key", Val(expr_span(expr))))
                 // A repeated key keeps its last value (Rust `collect` into a map).
                 value: envmodel_evaluate_lifecycle_value(entry.value, scope, globals)
-                if !envmodel_ct_map_insert(lowered, key, value) -> envmodel_ct_map_replace(lowered, key, value)
+                if !envmodel_ct_map_insert(lowered, key, value) {
+                    envmodel_ct_map_replace(lowered, key, value)
+                }
             }
             Ok(CtValue.Map{entries: lowered})
         }
@@ -261,7 +320,7 @@ PromptField: enum {
 // `prompt: "label"` or a structured
 // `Prompt{ label:, path: .Short|.Full, strip: .On|.Off }`, each recorded as
 // one environment-layer setting.
-envmodel_capture_prompt_setting: fn(entry: &EntryContribution, value: Expr, scope: ModuleEvalScope, globals: [String: CtValue], source: String) EnvModelEvalError! {
+envmodel_capture_prompt_setting: fn(entry: &EntryContribution, value: Expr, scope: ModuleEvalScope, globals: [String:CtValue], source: String) EnvModelEvalError! {
     if envmodel_record_literal(value) == .Val(record) {
         envmodel_capture_prompt_setting(entry, record, scope, globals, source)
         return
@@ -277,18 +336,24 @@ envmodel_capture_prompt_setting: fn(entry: &EntryContribution, value: Expr, scop
                         .Label -> {
                             label: if evaluated == {
                                 .Str(text) -> text
-                                .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> { return Err(envmodel_prompt_bad_value(field.name, "a quoted label", span)) }
+                                .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {
+                                    return Err(envmodel_prompt_bad_value(field.name, "a quoted label", span))
+                                }
                             }
                             envmodel_record_setting(entry, ENV_FIELD_PROMPT, label, span, source)
                         }
                         .Path -> {
                             word: envmodel_prompt_word(evaluated) ?? return Err(envmodel_prompt_bad_value(field.name, ".Short or .Full", span))
-                            if word != PROMPT_PATH_SHORT && word != PROMPT_PATH_FULL -> return Err(envmodel_prompt_bad_value(field.name, ".Short or .Full", span))
+                            if word != PROMPT_PATH_SHORT && word != PROMPT_PATH_FULL {
+                                return Err(envmodel_prompt_bad_value(field.name, ".Short or .Full", span))
+                            }
                             envmodel_record_setting(entry, PROMPT_SETTING_PATH, word, span, source)
                         }
                         .Strip -> {
                             word: envmodel_prompt_word(evaluated) ?? return Err(envmodel_prompt_bad_value(field.name, ".On or .Off", span))
-                            if word != PROMPT_STRIP_ON && word != PROMPT_STRIP_OFF -> return Err(envmodel_prompt_bad_value(field.name, ".On or .Off", span))
+                            if word != PROMPT_STRIP_ON && word != PROMPT_STRIP_OFF {
+                                return Err(envmodel_prompt_bad_value(field.name, ".On or .Off", span))
+                            }
                             envmodel_record_setting(entry, PROMPT_SETTING_STRIP, word, span, source)
                         }
                     }
@@ -328,7 +393,9 @@ envmodel_lifecycle_merge: fn(target: &EnvironmentLifecycle, incoming: Environmen
         .Val(path) -> {
             if target.git_hooks_path == {
                 .Val(existing) -> {
-                    if existing != path -> return Err(envmodel_error("E1333", "git hook path is declared more than once with conflicting values in module `{module_name}`", "one environment cannot silently choose between different Git hook directories", "merge the git_hooks_path declarations so they agree, or keep one path owner", None))
+                    if existing != path {
+                        return Err(envmodel_error("E1333", "git hook path is declared more than once with conflicting values in module `{module_name}`", "one environment cannot silently choose between different Git hook directories", "merge the git_hooks_path declarations so they agree, or keep one path owner", None))
+                    }
                 }
                 .None -> target.git_hooks_path = Val(path)
             }
@@ -346,7 +413,9 @@ envmodel_lifecycle_merge: fn(target: &EnvironmentLifecycle, incoming: Environmen
         .Val(formatter) -> {
             if target.formatter == {
                 .Val(existing) -> {
-                    if existing != formatter -> return Err(envmodel_error("E1333", "formatter is declared more than once with conflicting packages in module `{module_name}`", "one environment cannot silently choose between different external formatters", "merge the formatter declarations so they agree, or keep one formatter owner", None))
+                    if existing != formatter {
+                        return Err(envmodel_error("E1333", "formatter is declared more than once with conflicting packages in module `{module_name}`", "one environment cannot silently choose between different external formatters", "merge the formatter declarations so they agree, or keep one formatter owner", None))
+                    }
                 }
                 // copy: `formatter` is a payload of read parameter `incoming`, which keeps the original; `target.formatter` owns this one
                 .None -> target.formatter = Val(formatter.copy())

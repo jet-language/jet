@@ -25,6 +25,7 @@ use {
 GAP_LIMIT: 2048
 
 EMPTY: "run: fn() {{\n}}\n"
+
 LOOP: "run: fn() {{\n    i := 0\n    loop i < 1000000 {{ i += 3 }}\n}}\n"
 
 fail: fn(message: String) -> Never {
@@ -52,7 +53,9 @@ image: fn(jet: String, dir: String, name: String, flags: [String]) -> (size: Int
     argv.push("--output-dir={out}")
     argv.push("{dir}/{name}.jet")
     built: process.cmd(argv).output_limit(16777216).run() ?? fail("{jet} could not start")
-    if !built.success -> fail("`{argv.join(" ")}` failed (exit {built.code}): {built.output}{built.errors}")
+    if !built.success {
+        fail("`{argv.join(" ")}` failed (exit {built.code}): {built.output}{built.errors}")
+    }
     path: "{out}/{name}"
     size: (fs.stat(path) ?? fail("no image at {path}")).size
     named: if fs.exists("{path}.debug") -> "{path}.debug" else -> path.copy()
@@ -63,7 +66,9 @@ image: fn(jet: String, dir: String, name: String, flags: [String]) -> (size: Int
 
 run: fn() {
     argv: process.args()
-    if argv.len() != 0 && (argv.len() != 2 || argv[0] != "--jet") -> fail("usage: IntFloor.jet [--jet PATH]")
+    if argv.len() != 0 && (argv.len() != 2 || argv[0] != "--jet") {
+        fail("usage: IntFloor.jet [--jet PATH]")
+    }
     jet: if argv.len() == 2 -> argv[1].copy() else -> process.which("jet") ?? ""
     if jet == "" -> fail("no jet on PATH; pass --jet PATH")
     dir: fs.mkdtemp("int-floor") ?? fail("no scratch directory")
@@ -78,8 +83,12 @@ run: fn() {
         gap: looped.size - empty.size
         print("{build}: empty {empty.size} bytes; intloop {looped.size} bytes, {gap} over the empty program (limit {GAP_LIMIT})")
         print("{build}: intloop links {looped.wide.len()} arbitrary-precision Int symbols{if looped.wide.len() > 0 -> ": {looped.wide.join(" ")}" else -> ""}")
-        if gap > GAP_LIMIT -> broken.push("the {build} intloop image is {gap} bytes over the empty program")
-        if looped.wide.len() > 0 -> broken.push("the {build} intloop image links the arbitrary-precision Int closure")
+        if gap > GAP_LIMIT {
+            broken.push("the {build} intloop image is {gap} bytes over the empty program")
+        }
+        if looped.wide.len() > 0 {
+            broken.push("the {build} intloop image links the arbitrary-precision Int closure")
+        }
         fs.remove_all("{dir}/out") ?? fail("can't clear {dir}/out")
     }
     fs.remove_all(dir).drop("the scratch directory is only cleanup")

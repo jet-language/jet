@@ -31,7 +31,9 @@ use {
 /// Certificate versions as the version field holds them
 /// (MBEDTLS_X509_CRT_VERSION_1 to _3).
 X509_CRT_VERSION_1: 0
+
 X509_CRT_VERSION_2: 1
+
 X509_CRT_VERSION_3: 2
 
 /// The longest serial number RFC 5280 section 4.1.2.2 allows, in bytes
@@ -44,8 +46,11 @@ X509_RFC5280_UTC_TIME_LEN: 15
 
 // The bytes of the string form of a name.
 X509_CREATE_EQUALS: U8{61}
+
 X509_CREATE_COMMA: U8{44}
+
 X509_CREATE_NUL: U8{0}
+
 X509_CREATE_ZULU: U8{90}
 
 // The bytes a backslash may escape in a value (RFC 4514 section 3):
@@ -54,6 +59,7 @@ X509_CREATE_ESCAPABLE: [U8]{32, 44, 61, 43, 60, 62, 35, 59, 34, 92}
 
 // The tags of the structures the writers build.
 X509_CREATE_SEQUENCE: 0x30
+
 X509_CREATE_SET: 0x31
 
 // The text of `text` up to its first NUL, where the C string ends.
@@ -137,14 +143,10 @@ x509_create_value_string: fn(s: [U8], from: Int, to: Int) -> [U8] x509.X509Error
                 if n == 0 -> return Err(.InvalidName(None))
                 out.push(U8{n})
                 c += 1
-            } else if c < to && X509_CREATE_ESCAPABLE.contains(s[c]) {
-                out.push(s[c])
-            } else {
+            } else if c < to && X509_CREATE_ESCAPABLE.contains(s[c]) { out.push(s[c]) } else {
                 return Err(.InvalidName(None))
             }
-        } else {
-            out.push(s[c])
-        }
+        } else { out.push(s[c]) }
         if out.len() == x509.X509_MAX_DN_NAME_SIZE -> return Err(.InvalidName(None))
         c += 1
     }
@@ -342,14 +344,10 @@ x509_write_set_san_common: fn(extensions: &[asn1.NamedData], sans: [X509SanEntry
     // each value, and two of each around each name of a directoryName.
     buf_len := 0
     loop san in sans {
-        if x509write_san_unstructured(san.kind) {
-            buf_len += san.name.len() + 5
-        } else if san.kind == x509.X509_SAN_DIRECTORY_NAME {
+        if x509write_san_unstructured(san.kind) -> buf_len += san.name.len() + 5 else if san.kind == x509.X509_SAN_DIRECTORY_NAME {
             loop entry in san.directory -> buf_len += 10 + entry.oid.len() + entry.val.len()
             buf_len += 5
-        } else {
-            return Err(.FeatureUnavailable(None))
-        }
+        } else { return Err(.FeatureUnavailable(None)) }
     }
     buf_len += 5
     buf := cipher.zero_bytes(buf_len)
@@ -408,9 +406,15 @@ X509WriteCert: struct {
 /// extensions (mbedtls_x509write_crt_init).
 x509write_crt_new: fn() -> X509WriteCert Never! {
     X509WriteCert{
-        version: X509_CRT_VERSION_3, serial: [U8]{}, subject_key: pk.pk_new(), issuer_key: pk.pk_new(),
-        subject: [asn1.NamedData]{}, issuer: [asn1.NamedData]{}, md_alg: None,
-        not_before: cipher.zero_bytes(X509_RFC5280_UTC_TIME_LEN), not_after: cipher.zero_bytes(X509_RFC5280_UTC_TIME_LEN),
+        version: X509_CRT_VERSION_3,
+        serial: [U8]{},
+        subject_key: pk.pk_new(),
+        issuer_key: pk.pk_new(),
+        subject: [asn1.NamedData]{},
+        issuer: [asn1.NamedData]{},
+        md_alg: None,
+        not_before: cipher.zero_bytes(X509_RFC5280_UTC_TIME_LEN),
+        not_after: cipher.zero_bytes(X509_RFC5280_UTC_TIME_LEN),
         extensions: [asn1.NamedData]{},
     }
 }
@@ -443,7 +447,9 @@ x509write_crt_set_serial_raw: fn(ctx: &X509WriteCert, serial: [U8]) x509.X509Err
 x509write_crt_set_validity: fn(ctx: &X509WriteCert, not_before: String, not_after: String) x509.X509Error! {
     before := x509_create_c_text(not_before)
     after := x509_create_c_text(not_after)
-    if before.len() != X509_RFC5280_UTC_TIME_LEN - 1 || after.len() != X509_RFC5280_UTC_TIME_LEN - 1 -> return Err(.BadInput)
+    if before.len() != X509_RFC5280_UTC_TIME_LEN - 1 || after.len() != X509_RFC5280_UTC_TIME_LEN - 1 {
+        return Err(.BadInput)
+    }
     before.push(X509_CREATE_ZULU)
     after.push(X509_CREATE_ZULU)
     ctx.not_before = before
@@ -534,7 +540,9 @@ X509WRITE_KU_ALLOWED: 0x80FF
 /// (mbedtls_x509write_crt_set_key_usage, RFC 5280 section 4.2.1.3);
 /// FeatureUnavailable for any other bit.
 x509write_crt_set_key_usage: fn(ctx: &X509WriteCert, key_usage: Int) x509.X509Error! {
-    if key_usage.bit_and(X509WRITE_KU_ALLOWED.bit_not()) != 0 -> return Err(.FeatureUnavailable(None))
+    if key_usage.bit_and(X509WRITE_KU_ALLOWED.bit_not()) != 0 {
+        return Err(.FeatureUnavailable(None))
+    }
     ku: [U8]{U8{key_usage.bit_and(0xFF)}, U8{(key_usage >> 8).bit_and(0xFF)}}
     buf := cipher.zero_bytes(5)
     p := 5

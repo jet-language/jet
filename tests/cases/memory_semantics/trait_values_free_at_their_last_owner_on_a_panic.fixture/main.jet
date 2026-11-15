@@ -24,18 +24,13 @@ Worker: struct {
     n: Int
 
     impl Sink {
-        finish: fn(&&self) -[]> Int {
-            self.n + 2
-        }
-        peek: fn(self) -[]> Int {
-            self.n + 1
-        }
+        finish: fn(&&self) -[]> Int { self.n + 2 }
+
+        peek: fn(self) -[]> Int { self.n + 1 }
     }
 }
 
-make: fn(s: Shared<Context>, n: Int) -> Sink {
-    Worker{context: s.copy(), n: n}
-}
+make: fn(s: Shared<Context>, n: Int) -> Sink { Worker{context: s.copy(), n: n} }
 
 stop_with: fn(s: Shared<Context>) {
     total := 0

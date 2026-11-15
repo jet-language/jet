@@ -2,30 +2,58 @@
 // root-first diagnostic ordering, import bindings, app entries, unit-family
 // distinct types and the protocol JSON parse.
 use jet_foundation.[
-    Diagnostic, EffectivePolicy, FoundationJSONError, GateSet, ImportDecl, ImportKind, ImportedItem,
-    Item, PolicyDeclaration, PolicyKey, PolicyScope, PolicySourceText, PolicyValue, Span, Type, app_entry_run_fn,
-    diagnostic_cause_matches, diagnostic_caused_by, diagnostic_from_registry,
-    diagnostic_order_root_first, diagnostic_source_text, foundation_json_parse, foundation_parse_protocol_json_with_limit,
-    import_alias, import_walk_bindings, lint_parse_package_source, lint_selection_code_error,
-    lint_strip_comments, member_import_local, policy_explain, policy_gate_parse,
-    policy_gate_set_is_empty, type_is_app, unit_family_type_name,
+    Diagnostic,
+    EffectivePolicy,
+    FoundationJSONError,
+    GateSet,
+    ImportDecl,
+    ImportKind,
+    ImportedItem,
+    Item,
+    PolicyDeclaration,
+    PolicyKey,
+    PolicyScope,
+    PolicySourceText,
+    PolicyValue,
+    Span,
+    Type,
+    app_entry_run_fn,
+    diagnostic_cause_matches,
+    diagnostic_caused_by,
+    diagnostic_from_registry,
+    diagnostic_order_root_first,
+    diagnostic_source_text,
+    foundation_json_parse,
+    foundation_parse_protocol_json_with_limit,
+    import_alias,
+    import_walk_bindings,
+    lint_parse_package_source,
+    lint_selection_code_error,
+    lint_strip_comments,
+    member_import_local,
+    policy_explain,
+    policy_gate_parse,
+    policy_gate_set_is_empty,
+    type_is_app,
+    unit_family_type_name,
 ]
-
 
 #Test("gate parse accepts only an audited gate with allow") {
     assert((policy_gate_parse("unsafe=allow") ?? panic("unsafe gate refused")) == PolicyKey.Unsafe)
     assert((policy_gate_parse(" impure = allow ") ?? panic("impure gate refused")) == PolicyKey.Impure)
     if policy_gate_parse("unsafe") == {
-        .Ok(_) -> panic("a gate without `=` was accepted")
+        .Ok(_) -> { panic("a gate without `=` was accepted") }
         .Err(error) -> assert_eq(error.message, "use `--gate name=allow`")
     }
     if policy_gate_parse("bogus=allow") == {
-        .Ok(_) -> panic("an unknown gate was accepted")
+        .Ok(_) -> { panic("an unknown gate was accepted") }
         .Err(error) -> assert_eq(error.message, "`bogus` is not an audited gate")
     }
     if policy_gate_parse("unsafe=deny") == {
-        .Ok(_) -> panic("a non-allow gate was accepted")
-        .Err(error) -> assert_eq(error.message, "`--gate unsafe=deny` must name an audited gate with `=allow`")
+        .Ok(_) -> { panic("a non-allow gate was accepted") }
+        .Err(error) -> {
+            assert_eq(error.message, "`--gate unsafe=deny` must name an audited gate with `=allow`")
+        }
     }
     assert(policy_gate_set_is_empty(GateSet{}))
     assert(!policy_gate_set_is_empty(GateSet{allowed: [PolicyKey]{PolicyKey.Unsafe}}))
@@ -48,11 +76,11 @@ use jet_foundation.[
     source: "name: \"demo\"\n// policy: {{ lints: {{ deny: [float_money] }} }}\npolicy: {{\n    lints: {{ deny: [\"same_enum_guard_table\"] }} // denied\n}}\n"
     assert_eq(lint_strip_comments("a // b\nc \"//kept\"\n"), "a \nc \"//kept\"\n")
     if lint_parse_package_source(source) == {
-        .Ok(denied) -> assert_eq(denied, Val([String]{"same_enum_guard_table"}))
+        .Ok(denied) -> { assert_eq(denied, Val([String]{"same_enum_guard_table"})) }
         .Err(error) -> panic("policy parse: {error.message()}")
     }
     if lint_parse_package_source("name: \"demo\"\n") == {
-        .Ok(denied) -> assert(denied == [String]?{None})
+        .Ok(denied) -> { assert(denied == [String]?{None}) }
         .Err(error) -> panic("no policy: {error.message()}")
     }
     assert(lint_selection_code_error("float_money", "`policy.lints.deny`", None) == None)
@@ -110,7 +138,7 @@ gates_lints_test_diagnostic: fn(code: String, start: Int) -> Diagnostic Never! {
 #Test("protocol JSON keeps the provider error text and the i64 domain") {
     _: foundation_json_parse("{{\"a\":[1,2]}}") ?? panic("valid JSON refused: {err.message}")
     if foundation_json_parse("[9223372036854775808]") == {
-        .Ok(_) -> panic("an integer outside i64 was accepted")
+        .Ok(_) -> { panic("an integer outside i64 was accepted") }
         .Err(error) -> assert_eq(error.message, "invalid number `9223372036854775808`")
     }
     assert(foundation_parse_protocol_json_with_limit("[1]", 2) == None)

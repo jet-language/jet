@@ -45,9 +45,16 @@ XMLLimits: struct {
     max_entity_replacement_bytes: Int
 
     safe: fn() -> XMLLimits Never! {
-        XMLLimits{max_depth: 256, max_nodes: 1000000, max_attributes_per_element: 1024,
-            max_name_bytes: 4096, max_text_bytes: 16777216, max_entity_declarations: 1024,
-            max_entity_depth: 32, max_entity_replacement_bytes: 8388608}
+        XMLLimits{
+            max_depth: 256,
+            max_nodes: 1000000,
+            max_attributes_per_element: 1024,
+            max_name_bytes: 4096,
+            max_text_bytes: 16777216,
+            max_entity_declarations: 1024,
+            max_entity_depth: 32,
+            max_entity_replacement_bytes: 8388608,
+        }
     }
 }
 
@@ -66,8 +73,17 @@ XMLParseOptions: struct {
     }
 }
 
-XMLEncoding: enum { UTF8 UTF8BOM UTF16LE UTF16BE }
-XMLLexicalPolicy: enum { PreserveValid Deterministic }
+XMLEncoding: enum {
+    UTF8
+    UTF8BOM
+    UTF16LE
+    UTF16BE
+}
+
+XMLLexicalPolicy: enum {
+    PreserveValid
+    Deterministic
+}
 
 XMLRenderOptions: struct {
     encoding: XMLEncoding
@@ -78,7 +94,10 @@ XMLRenderOptions: struct {
     }
 }
 
-XMLCanonicalMode: enum { Inclusive11 Exclusive10 }
+XMLCanonicalMode: enum {
+    Inclusive11
+    Exclusive10
+}
 
 XMLCanonical: struct {
     mode: XMLCanonicalMode
@@ -200,7 +219,9 @@ XMLReader: struct<R: Reader> {
                 read_bytes = min(read_bytes, max(maximum - self.total, 0) + 1)
             }
             bytes := [U8]{}
-            if !stream.reserve(self.allocation, bytes, read_bytes) -> return self.fail(heap_error(self.total))
+            if !stream.reserve(self.allocation, bytes, read_bytes) {
+                return self.fail(heap_error(self.total))
+            }
             capacity: mem.__list_capacity<U8>(bytes)
             count: self.input.read_into(bytes, read_bytes) ?? {
                 self.allocation.release(capacity)
@@ -223,8 +244,18 @@ XMLReader: struct<R: Reader> {
                 if self.limits.max_total_bytes == .Val(maximum) {
                     if self.total > maximum {
                         self.allocation.release(held)
-                        return self.fail(EncodingError{format: .XML, kind: .Limit, byte_offset: self.total,
-                            line: None, column: None, path: "", reason: "max_total_bytes {maximum} exceeded", cause: None})
+                        return self.fail(
+                            EncodingError{
+                                format: .XML,
+                                kind: .Limit,
+                                byte_offset: self.total,
+                                line: None,
+                                column: None,
+                                path: "",
+                                reason: "max_total_bytes {maximum} exceeded",
+                                cause: None,
+                            },
+                        )
                     }
                 }
                 window: bytes[0..<bytes.len()]
@@ -276,7 +307,9 @@ XMLWriter: struct<W: Writer> {
 
     write: fn(&self, event: Dyn) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error.copy())
-        if self.finished -> return self.fail(writer_error(.State, self.total, "write called after finish"))
+        if self.finished {
+            return self.fail(writer_error(.State, self.total, "write called after finish"))
+        }
         bytes: self.renderer.write(event) ?? {
             // The engine marks lifecycle-order faults with a `[state] ` reason prefix.
             error := stream_error(err)
@@ -314,8 +347,12 @@ XMLWriter: struct<W: Writer> {
 
     finish: fn(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error.copy())
-        if self.finished -> return
-        if !self.renderer.is_finished() -> return self.fail(writer_error(.State, self.total, "finish requires document_end"))
+        if self.finished {
+            return
+        }
+        if !self.renderer.is_finished() {
+            return self.fail(writer_error(.State, self.total, "finish requires document_end"))
+        }
         self.flush() ?? return Err(err)
         self.finished = true
     }
@@ -344,18 +381,42 @@ stream_error: fn(error: engine.XMLFault) -> EncodingError Never! {
         .Malformed -> if error.reason.contains("ended") || error.reason.contains("unterminated") || error.reason.contains("truncated") -> EncodingErrorKind.Truncated else -> EncodingErrorKind.Syntax
         .InvalidEncoding | .MismatchedTag | .InvalidName | .Namespace | .DuplicateAttribute | .Entity | .Shape -> EncodingErrorKind.Syntax
     }
-    EncodingError{format: .XML, kind: kind, byte_offset: error.offset, line: error.line,
-        column: error.column, path: error.path, reason: error.reason, cause: None}
+    EncodingError{
+        format: .XML,
+        kind: kind,
+        byte_offset: error.offset,
+        line: error.line,
+        column: error.column,
+        path: error.path,
+        reason: error.reason,
+        cause: None,
+    }
 }
 
 heap_error: fn(offset: Int) -> EncodingError Never! {
-    EncodingError{format: .XML, kind: .Limit, byte_offset: offset, line: None, column: None,
-        path: "$", reason: "XML event heap exceeded the bounded codec heap ceiling", cause: None}
+    EncodingError{
+        format: .XML,
+        kind: .Limit,
+        byte_offset: offset,
+        line: None,
+        column: None,
+        path: "$",
+        reason: "XML event heap exceeded the bounded codec heap ceiling",
+        cause: None,
+    }
 }
 
 io_error: fn(offset: Int, cause: EncodingCause) -> EncodingError Never! {
-    EncodingError{format: .XML, kind: .IO, byte_offset: offset, line: None, column: None,
-        path: "", reason: "file IO failed", cause: Val(cause)}
+    EncodingError{
+        format: .XML,
+        kind: .IO,
+        byte_offset: offset,
+        line: None,
+        column: None,
+        path: "",
+        reason: "file IO failed",
+        cause: Val(cause),
+    }
 }
 
 // A Dyn slot is a pointer to a box of its tag word and widest payload, a List
@@ -414,11 +475,11 @@ value_heap_cost: fn(value: Dyn) -> Int Never! {
     options := XMLParseOptions.safe()
     options.entities = XMLEntityPolicy.Reject
     if parse_with(source, options) == {
-        .Err(error) -> assert_eq(error.kind, XMLReason.Entity)
+        .Err(error) -> { assert_eq(error.kind, XMLReason.Entity) }
         .Ok(_) -> panic("rejected entity accepted")
     }
     if parse("<!DOCTYPE r [<!ENTITY a '&b;'><!ENTITY b '&a;'>]><r>&a;</r>") == {
-        .Err(error) -> assert_eq(error.kind, XMLReason.EntityCycle)
+        .Err(error) -> { assert_eq(error.kind, XMLReason.EntityCycle) }
         .Ok(_) -> panic("entity cycle accepted")
     }
     options.entities = XMLEntityPolicy.Resolve([String:String]{"e": "<x/>&y;"})

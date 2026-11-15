@@ -7,9 +7,24 @@ use {
     core.build.[BuildGraph, BuildGraphNode, BuildGraphInputDigest]
     jet_sema.[SemaGraphResult, SemaSourceOrigin]
     jet_build_session.[
-        BuildSessionDiagnostic, BuildSessionFinding, BuildSessionGeneratedModule, BuildSessionPlan, BuildSessionPolicy, build_plan_findings, build_plan_graph, build_plan_selection,
-        build_plan_selected_generated, build_session_abort, build_session_append_unique, build_session_refused,
-        build_session_compiler_node, build_session_finish, build_session_new, build_session_set_args, build_session_set_dependencies, build_session_set_identity,
+        BuildSessionDiagnostic,
+        BuildSessionFinding,
+        BuildSessionGeneratedModule,
+        BuildSessionPlan,
+        BuildSessionPolicy,
+        build_plan_findings,
+        build_plan_graph,
+        build_plan_selection,
+        build_plan_selected_generated,
+        build_session_abort,
+        build_session_append_unique,
+        build_session_refused,
+        build_session_compiler_node,
+        build_session_finish,
+        build_session_new,
+        build_session_set_args,
+        build_session_set_dependencies,
+        build_session_set_identity,
     ]
 }
 
@@ -34,7 +49,9 @@ jet_driver_build_check_nodes: fn(request: JetDriverCompileRequest, load: JetDriv
     loop checked_module in checked.modules {
         if checked_module.module_identity == effect_identity -> next
         unit_index: loop loaded in load.modules {
-            if loaded.module_identity == checked_module.module_identity -> break loaded.source_unit_index
+            if loaded.module_identity == checked_module.module_identity {
+                break loaded.source_unit_index
+            }
         } ?? -1
         if unit_index < 0 || unit_index >= load.source_units.len() -> return None
         unit: load.source_units[unit_index]
@@ -54,15 +71,23 @@ jet_driver_build_check_nodes: fn(request: JetDriverCompileRequest, load: JetDriv
             // Foreign adapter/Core/effect synthetic text is not a source node.
             generated_index: loop index in 0..<request.generated_modules.len() {
                 row: request.generated_modules[index]
-                if row.package_identity == unit.package_identity && row.relative_path == unit.relative_path && jet_driver_generated_module_path(row.package_identity, row.relative_path) == unit.path -> break index
+                if row.package_identity == unit.package_identity && row.relative_path == unit.relative_path && jet_driver_generated_module_path(row.package_identity, row.relative_path) == unit.path {
+                    break index
+                }
             } ?? -1
             if generated_index < 0 -> next
             generated: request.generated_modules[generated_index]
             digest = sha256_hex(generated.source)
-            if generated.authority != "" -> unit_inputs.push({name: "authority", digest: sha256_hex(generated.authority)})
-            if generated.consent != "" -> unit_inputs.push({name: "consent", digest: sha256_hex(generated.consent)})
+            if generated.authority != "" {
+                unit_inputs.push({name: "authority", digest: sha256_hex(generated.authority)})
+            }
+            if generated.consent != "" {
+                unit_inputs.push({name: "consent", digest: sha256_hex(generated.consent)})
+            }
             owner: loop package in load.packages {
-                if package.identity == generated.package_identity -> break package.root_index
+                if package.identity == generated.package_identity {
+                    break package.root_index
+                }
             } ?? return None
             if owner < 0 || owner >= request.authorized_sources.roots.len() -> return None
             subject = jet_driver_display_path(root, jet_driver_physical_path(request.authorized_sources.roots[owner].canonical_path, generated.relative_path)).replace("\\", "/")
@@ -86,7 +111,9 @@ jet_driver_build_check_node: fn(subject: &&String, digest: &&String, owned_input
 // The subject of the check node of the authorized source `unit`: its path
 // from the entry root `root`.
 jet_driver_build_source_subject: fn(request: JetDriverCompileRequest, root: String, unit: JetDriverSourceUnit) -> String? Never! {
-    if unit.root_index < 0 || unit.root_index >= request.authorized_sources.roots.len() -> return None
+    if unit.root_index < 0 || unit.root_index >= request.authorized_sources.roots.len() {
+        return None
+    }
     source_files: request.authorized_sources.roots[unit.root_index].files
     if unit.file_index < 0 || unit.file_index >= source_files.len() -> return None
     Val(jet_driver_display_path(root, source_files[unit.file_index].path).replace("\\", "/"))
@@ -102,7 +129,9 @@ jet_driver_build_load_checks: fn(request: JetDriverCompileRequest, load: JetDriv
     if root == "" -> return None
     checks := [BuildGraphNode]{}
     loop loaded in load.modules {
-        if loaded.source_unit_index < 0 || loaded.source_unit_index >= load.source_units.len() -> return None
+        if loaded.source_unit_index < 0 || loaded.source_unit_index >= load.source_units.len() {
+            return None
+        }
         unit: load.source_units[loaded.source_unit_index]
         if jet_driver_unit_is_core(unit) || unit.source_origin != SemaSourceOrigin.Snapshot -> next
         digest: sha256_hex(jet_driver_source_unit_text(request, unit) ?? return None)
@@ -197,6 +226,7 @@ JetDriverBuildQueryScope: struct {
     next_session_id: Int{1}
     policy: BuildSessionPolicy{BuildSessionPolicy{plugins_denied: None, plugin_grants: [String:[String]]{}}}
 }
+
 jet_driver_build_next_session_id: fn(scope: &JetDriverBuildQueryScope) -> Int? Never! {
     id: scope.next_session_id
     if id <= 0 || id == 9223372036854775807 -> return None
@@ -221,13 +251,16 @@ JetDriverBuildQueryResult: struct {
     // `jet build` fails on them, a run or a test doesn't.
     tidy: [Diagnostic]{[Diagnostic]{}}
 }
+
 JetDriverBuildQueryResponse: struct {
     request: JetDriverCompileRequest
     query: JetDriverBuildQueryResult
 }
+
 jet_driver_build_query_empty: fn(request: &&JetDriverCompileRequest, diagnostics: &&[Diagnostic], complete: Bool, problem: &&String?) -> JetDriverBuildQueryResponse Never! {
     {request: request.move(), query: JetDriverBuildQueryResult{plan: None, graph: None, generated: [], diagnostics: diagnostics.move(), complete: complete, internal_problem: problem.move()}}
 }
+
 // A build session report as a diagnostic. A project rule's report at a
 // program span names the source file the span indexes and points there, as a
 // checker's finding about its own source should.
@@ -236,6 +269,7 @@ jet_driver_build_rule_report: fn(error: BuildSessionDiagnostic) -> Diagnostic Ne
     if error.file == "" -> return report
     diagnostic_with_source_path(report, error.file, 0)
 }
+
 // A build that failed: the compile's `errors`, then the build's own reports
 // `ran`. After a failed staging check (`staged`) the build's reports come
 // first: what the build refused is why the staged check missed the modules
@@ -249,6 +283,7 @@ jet_driver_build_query_failed: fn(request: &&JetDriverCompileRequest, errors: &&
     }
     jet_driver_build_query_empty(request, reports, false, None)
 }
+
 // A build query that stopped before its plan: the compile's `errors` (after a
 // failed staging check, `staged`, the staged ones) and the build's own
 // reports `ran`. An internal `problem` is the answer whatever was staged: the
@@ -257,13 +292,16 @@ jet_driver_build_query_failed: fn(request: &&JetDriverCompileRequest, errors: &&
 // refusal first (`refused`), and a staged run that stopped at a trap restates
 // the staged reports, so they stand alone.
 jet_driver_build_query_stopped: fn(request: &&JetDriverCompileRequest, errors: &&[Diagnostic], ran: &&[Diagnostic], staged: Bool, refused: Bool, problem: &&String?) -> JetDriverBuildQueryResponse Never! {
-    if problem == None && staged && refused -> return jet_driver_build_query_failed(request, errors, ran, true)
+    if problem == None && staged && refused {
+        return jet_driver_build_query_failed(request, errors, ran, true)
+    }
     reports := errors.move()
     if problem != None || !staged {
         loop error in ran.move() -> reports.push(error)
     }
     jet_driver_build_query_empty(request, reports, false, problem)
 }
+
 jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope: &JetDriverBuildQueryScope) -> JetDriverBuildQueryResponse {
     request := owned_request.move()
     // The plan reads the entry package's modules (its `build: fn`) and
@@ -279,8 +317,12 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     load_checks: jet_driver_build_load_checks(request, plan_load)
     sources: jet_driver_source_query_loaded(plan_load, request)
     jet_driver_trace_step_end(request.trace_sink, "build.plan.load", sources.modules.len())
-    if !sources.complete -> return jet_driver_build_query_empty(request, sources.diagnostics.move(), false, None)
-    if sources.entry_module_index < 0 || sources.entry_module_index >= sources.modules.len() -> return jet_driver_build_query_empty(request, sources.diagnostics.move(), false, Val("loaded build query has no exact entry module"))
+    if !sources.complete {
+        return jet_driver_build_query_empty(request, sources.diagnostics.move(), false, None)
+    }
+    if sources.entry_module_index < 0 || sources.entry_module_index >= sources.modules.len() {
+        return jet_driver_build_query_empty(request, sources.diagnostics.move(), false, Val("loaded build query has no exact entry module"))
+    }
     package: sources.modules[sources.entry_module_index].package_identity
     selected := String?{None}
     selected_site := ""
@@ -358,9 +400,13 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     ran := [Diagnostic]{}
     if staged_failed {
         // The trapped compile's reports restate the staged ones.
-        if compiled.internal_problem != None || compiled.build_program == None || selection.inputs == None -> return jet_driver_build_query_stopped(request, errors, ran, true, false, compiled.internal_problem.move())
+        if compiled.internal_problem != None || compiled.build_program == None || selection.inputs == None {
+            return jet_driver_build_query_stopped(request, errors, ran, true, false, compiled.internal_problem.move())
+        }
     } else {
-        if !compiled.complete || compiled.internal_problem != None -> return jet_driver_build_query_empty(request, compiled.diagnostics.move(), false, compiled.internal_problem.move())
+        if !compiled.complete || compiled.internal_problem != None {
+            return jet_driver_build_query_empty(request, compiled.diagnostics.move(), false, compiled.internal_problem.move())
+        }
         errors = compiled.diagnostics.move()
     }
     program: compiled.build_program.move() ?? return jet_driver_build_query_empty(request, errors, false, Val("checked build invocation lost its ProgramInfo"))
@@ -395,7 +441,11 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     returned: evaluated.value
     if evaluated.internal_problem != None || !evaluated.complete || returned == None {
         build_session_abort(session)
-        problem: if evaluated.internal_problem == .Val(internal) -> { Val("the native run of the build entry failed internally: {internal.message}") } else -> { None }
+        problem: if evaluated.internal_problem == .Val(internal) -> {
+            Val("the native run of the build entry failed internally: {internal.message}")
+        } else -> {
+            None
+        }
         return jet_driver_build_query_stopped(request, errors, ran, staged_failed, build_session_refused(session), problem)
     }
     if returned == .Val(data) && jet_eval_build_failed_diagnostic(data, span) == .Val(diagnostic) {
@@ -426,7 +476,9 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     }
     tidy := [Diagnostic]{}
     jet_driver_build_findings(request.authorized_sources, build_plan_findings(plan), ran, tidy)
-    if jet_driver_has_errors(ran) -> return jet_driver_build_query_failed(request, errors, ran, staged_failed)
+    if jet_driver_has_errors(ran) {
+        return jet_driver_build_query_failed(request, errors, ran, staged_failed)
+    }
     // The build ran: the final checked compile below replaces the staged reports.
     if staged_failed -> errors = [Diagnostic]{}
     loop error in ran -> errors.push(error)
@@ -447,10 +499,18 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     entry: jet_driver_display_path(jet_driver_entry_root_path(request.authorized_sources), request.authorized_sources.entry_path)
     targets: build_plan_selection(plan)
     loop target in targets.executables {
-        if target.sources.contains(entry) { loop listed in target.sources -> build_session_append_unique(request.target_sources, listed) }
+        if target.sources.contains(entry) {
+            loop listed in target.sources {
+                build_session_append_unique(request.target_sources, listed)
+            }
+        }
     }
     loop target in targets.libraries {
-        if target.sources.contains(entry) { loop listed in target.sources -> build_session_append_unique(request.target_sources, listed) }
+        if target.sources.contains(entry) {
+            loop listed in target.sources {
+                build_session_append_unique(request.target_sources, listed)
+            }
+        }
     }
     // A build that generated no module and joins no target's sources to the
     // entry's bundle leaves the final check the sources the staging check
@@ -473,7 +533,9 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     checked: jet_driver_compile_selection(request, JetDriverCompileMode.Doc, None, None, false, true)
     jet_driver_trace_step_end(request.trace_sink, "build.plan.check", checked.diagnostics.len())
     request.doc_core_on_demand = demand_core
-    loop request.generated_modules.len() > original_generated_count -> _: request.generated_modules.pop()
+    loop request.generated_modules.len() > original_generated_count {
+        _: request.generated_modules.pop()
+    }
     request.target_sources = [String]{}
     if selected_outputs -> request.build_output_names = [String]{}
     loop error in checked.diagnostics -> errors.push(error)
@@ -512,6 +574,7 @@ jet_driver_build_check_rows: fn(owned: &&[BuildGraphNode]?) -> [BuildGraphNode]?
     }
     Val(checks.move())
 }
+
 // The findings `meta.report` raised, each reported at its call in its
 // file: an `.Error` finding joins `errors`, a `.Tidy` one `tidy`, and a
 // `.Report` one is for lint alone. A finding whose code is the compiler's
@@ -532,6 +595,7 @@ jet_driver_build_findings: fn(snapshot: JetDriverAuthorizedSourceSnapshot, findi
         if finding.tier == "Error" -> errors.push(located) else -> tidy.push(located)
     }
 }
+
 // The edit of a finding's `syntax.rewrite` fix: the callee as the call
 // writes it (the name or `module.name` path its span starts with) becomes
 // the replacement, and the call's arguments stay. None without a rewrite,
@@ -569,7 +633,9 @@ jet_driver_build_generated_notes: fn(diagnostics: &[Diagnostic], package: String
         if diagnostics[index].detail != None -> next
         note := String?{None}
         loop row in rows {
-            if diagnostics[index].source_path != Val(jet_driver_generated_module_path(row.package ?? package, row.path)) -> next
+            if diagnostics[index].source_path != Val(jet_driver_generated_module_path(row.package ?? package, row.path)) {
+                next
+            }
             maker: row.producer ?? ""
             note = if {
                 row.rewrites == .Val(function) -> Val(" Note: `meta.rewrite_body` in {maker} gave `{function}` this body{jet_driver_build_generated_handoffs(row)}")
@@ -581,6 +647,7 @@ jet_driver_build_generated_notes: fn(diagnostics: &[Diagnostic], package: String
         diagnostics[index].detail = note
     }
 }
+
 // The response row of one selected generated module. A `meta.rewrite_body`
 // row becomes its function, the declaration's own text up to its body with
 // the new body, which replaces the declaration in its package's own file
@@ -614,16 +681,12 @@ jet_driver_build_generated_row: fn(row: BuildSessionGeneratedModule, package: St
                 if text != "" -> text = "{text}\n"
                 text = "{text}{head}{{\n"
                 loop line in lines {
-                    if line.trim() == "" {
-                        text = "{text}\n"
-                    } else if line.trim() == paste {
+                    if line.trim() == "" -> text = "{text}\n" else if line.trim() == paste {
                         margin: line.removesuffix(paste)
                         loop original in jet_driver_function_body_lines(bytes, open, declared.span.end) {
                             text = if original == "" -> "{text}\n" else -> "{text}    {margin}{original}\n"
                         }
-                    } else {
-                        text = "{text}    {line}\n"
-                    }
+                    } else { text = "{text}    {line}\n" }
                 }
                 text = "{text}}}\n"
                 return Val(JetDriverGeneratedModule{package_identity: owner.copy(), name: row.name.copy(), relative_path: row.path.copy(), source: text, replaces: Val(JetDriverReplacedFunction{path: module_row.physical_path.copy(), start: declared.span.start, end: declared.span.end}), authority: (row.authority ?? "").copy(), consent: (row.consent ?? "").copy()})
@@ -632,6 +695,7 @@ jet_driver_build_generated_row: fn(row: BuildSessionGeneratedModule, package: St
     }
     None
 }
+
 // The lines of a function's original body, between its braces at `open` and
 // `end - 1`: without the blank lines around them, and dedented by their
 // common indentation.
@@ -651,7 +715,9 @@ jet_driver_function_body_lines: fn(bytes: [U8], open: Int, end: Int) -> [String]
     last := -1
     loop index in 0..<starts.len() {
         width := 0
-        loop starts[index] + width < stops[index] && (bytes[starts[index] + width] == 32 || bytes[starts[index] + width] == 9) -> width += 1
+        loop starts[index] + width < stops[index] && (bytes[starts[index] + width] == 32 || bytes[starts[index] + width] == 9) {
+            width += 1
+        }
         if starts[index] + width == stops[index] -> next
         if indent < 0 || width < indent -> indent = width
         if first < 0 -> first = index
@@ -668,6 +734,7 @@ jet_driver_function_body_lines: fn(bytes: [U8], open: Int, end: Int) -> [String]
     }
     lines
 }
+
 // The offset of the `{` that opens a function's braced body in `bytes`: the
 // first brace after its name (`after`) outside parentheses, brackets, string
 // literals and line comments, before the declaration's closing `}` at
@@ -695,6 +762,7 @@ jet_driver_function_body_open: fn(bytes: [U8], after: Int, end: Int) -> Int? Nev
     }
     None
 }
+
 // The package a build session spells its `.jet/generated/<package>/` and
 // contribution sources with: a manifest package's identity, or, for a build
 // file outside any manifest (a source-root package), the file's stem.
@@ -704,6 +772,7 @@ jet_driver_build_session_package: fn(package: String, entry_path: String) -> Str
     file_name: parts.pop() ?? entry_path
     file_name.removesuffix(".jet")
 }
+
 // Whether the entry package declares a `build: fn`, the build entry
 // jet_driver_query_build_plan evaluates, read from the loaded sources alone.
 // False when the sources don't load: the compile reports why.
@@ -712,7 +781,9 @@ jet_driver_entry_package_has_build: fn(request: JetDriverCompileRequest) -> Bool
     if !load.complete -> return false
     package := String?{None}
     loop loaded_module in load.modules {
-        if loaded_module.module_identity == load.entry_module_identity -> package = Val(loaded_module.package_identity.copy())
+        if loaded_module.module_identity == load.entry_module_identity {
+            package = Val(loaded_module.package_identity.copy())
+        }
     }
     entry_package: package ?? return false
     loop loaded_module in load.modules {
@@ -723,12 +794,16 @@ jet_driver_entry_package_has_build: fn(request: JetDriverCompileRequest) -> Bool
     }
     false
 }
+
 // Whether `item` is the build entry `build: fn(b: Build)`; any other `build: fn`
 // is ordinary code.
 jet_driver_item_is_build_entry: fn(item: Item) -> Bool Never! {
-    if item == .Func(function) && function.name == "build" && function.params.len() == 1 && function.params[0].ty == (Type.Named{name: "Build"}) -> return true
+    if item == .Func(function) && function.name == "build" && function.params.len() == 1 && function.params[0].ty == (Type.Named{name: "Build"}) {
+        return true
+    }
     false
 }
+
 // `path:line` of the byte offset `at` in `source`.
 jet_driver_build_entry_site: fn(path: String, source: String, at: Int) -> String Never! {
     line := 1
@@ -738,6 +813,7 @@ jet_driver_build_entry_site: fn(path: String, source: String, at: Int) -> String
     }
     "`{path}:{line}`"
 }
+
 jet_driver_query_build_nodes: fn(request: &&JetDriverCompileRequest, scope: &JetDriverBuildQueryScope) -> JetDriverBuildQueryResponse {
     // Nodes are the checked graph's exact compiler facts, never a projection
     // reconstructed from emitted source, action names or a receipt.

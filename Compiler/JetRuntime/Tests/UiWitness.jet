@@ -18,11 +18,17 @@ use {
 }
 
 GOLDENS: "Compiler/JetRuntime/Tests"
+
 SHARED_STOP: "DataPlotStops-getter-variant.stderr"
+
 USAGE: "usage: jet Compiler/JetRuntime/Tests/UiWitness.jet WITNESS OUT BINARY"
+
 PLAIN_RANGES: "CharDebugPlain.ranges"
+
 ORACLE_SHA256: "4df07a213d8bc130872d2b1358ef8cd04f9bba01a02db5edac23995e99427b72"
+
 WITNESSES: "choices, cursor, events, form-action-error, key, view-snapshots"
+
 OUTPUT_MISMATCH: "byte-exact output mismatch"
 
 Case: struct {
@@ -54,9 +60,13 @@ Outcome: struct {
     error: String
 }
 
-ownership: fn(golden: String) -> Case Never! { Case{name: "ownership", args: [String]{}, status: 0, golden: golden} }
+ownership: fn(golden: String) -> Case Never! {
+    Case{name: "ownership", args: [String]{}, status: 0, golden: golden}
+}
 
-stop: fn(mode: String, status: Int, golden: String) -> Case Never! { Case{name: mode, args: [String]{mode}, status: status, golden: golden} }
+stop: fn(mode: String, status: Int, golden: String) -> Case Never! {
+    Case{name: mode, args: [String]{mode}, status: status, golden: golden}
+}
 
 plain: fn(operand: String, golden: String, done: String) -> Witness Never! {
     Witness{operands: "OUT {operand}", oracle: false, cases: [Case]{ownership(golden)}, timeout: 30s, exit_gap: "", done: done}
@@ -65,19 +75,27 @@ plain: fn(operand: String, golden: String, done: String) -> Witness Never! {
 // Ownership, then the shared record-variant stop (exit 70) for every mode.
 variant_stops: fn(operand: String, golden: String, modes: [String], exit_gap: String, done: String) -> Witness Never! {
     cases := [Case]{ownership(golden)}
-    loop mode in modes {
-        cases.push(stop(mode, 70, SHARED_STOP))
-    }
+    loop mode in modes { cases.push(stop(mode, 70, SHARED_STOP)) }
     Witness{operands: "OUT {operand}", oracle: false, cases: cases, timeout: 30s, exit_gap: exit_gap, done: done}
 }
 
 // The witness a name selects; an unknown name has no cases.
 witness: fn(key: String) -> Witness Never! {
-    if key == "events" -> return plain("UI_EVENTS_WITNESS", "UiEventsWitness.stdout", "UI events: real-provider ownership byte-identical")
-    if key == "form-action-error" -> return plain("UI_ACTION_ERROR_WITNESS", "UiFormActionErrorWitness.stdout", "UI ActionError: real consumed producers and transitive ownership byte-identical")
-    if key == "cursor" -> return plain("UI_CURSOR_WITNESS", "UiCursorWitness.stdout", "UI canonical Cursor: real-provider ownership byte-identical")
-    if key == "view-snapshots" -> return plain("UI_VIEW_SNAPSHOTS_WITNESS", "UiViewSnapshotsWitness.stdout", "UI view snapshots: real-provider ownership byte-identical")
-    if key == "choices" -> return variant_stops("UI_CHOICES_WITNESS", "UiCarriersChoicesWitness.stdout", [String]{"aria-tag"}, " ", "UI choices: ownership and record-variant stop byte-identical")
+    if key == "events" {
+        return plain("UI_EVENTS_WITNESS", "UiEventsWitness.stdout", "UI events: real-provider ownership byte-identical")
+    }
+    if key == "form-action-error" {
+        return plain("UI_ACTION_ERROR_WITNESS", "UiFormActionErrorWitness.stdout", "UI ActionError: real consumed producers and transitive ownership byte-identical")
+    }
+    if key == "cursor" {
+        return plain("UI_CURSOR_WITNESS", "UiCursorWitness.stdout", "UI canonical Cursor: real-provider ownership byte-identical")
+    }
+    if key == "view-snapshots" {
+        return plain("UI_VIEW_SNAPSHOTS_WITNESS", "UiViewSnapshotsWitness.stdout", "UI view snapshots: real-provider ownership byte-identical")
+    }
+    if key == "choices" {
+        return variant_stops("UI_CHOICES_WITNESS", "UiCarriersChoicesWitness.stdout", [String]{"aria-tag"}, " ", "UI choices: ownership and record-variant stop byte-identical")
+    }
     if key == "key" {
         cases: [Case]{ownership("UiKeyWitness.stdout"), stop("key-tag", 70, SHARED_STOP)}
         return Witness{operands: "OUT UI_KEY_WITNESS", oracle: true, cases: cases, timeout: 300s, exit_gap: " ", done: "UI Key: exhaustive real-provider oracle and record-variant stop byte-identical"}
@@ -98,14 +116,10 @@ resolve: fn(cwd: String, path: String) -> String Never! {
         if part == ".." {
             if parts.len() > 0 {
                 kept := [String]{}
-                loop index in 0..<parts.len() - 1 {
-                    kept.push(parts[index].copy())
-                }
+                loop index in 0..<parts.len() - 1 { kept.push(parts[index].copy()) }
                 parts = kept
             }
-        } else if part != "" && part != "." {
-            parts.push(part.copy())
-        }
+        } else if part != "" && part != "." { parts.push(part.copy()) }
     }
     "/{parts.join("/")}"
 }
@@ -122,9 +136,9 @@ json_text: fn(text: String) -> String Never! {
     out := ""
     loop byte in text.bytes() {
         code: Int{byte}
-        if code == 34 -> out = "{out}\\\""
-        else if code == 92 -> out = "{out}\\\\"
-        else -> out = "{out}{String.from_bytes_lossy([U8]{byte})}"
+        if code == 34 -> out = "{out}\\\"" else if code == 92 -> out = "{out}\\\\" else {
+            out = "{out}{String.from_bytes_lossy([U8]{byte})}"
+        }
     }
     "\"{out}\""
 }
@@ -140,16 +154,20 @@ signal_name: fn(number: Int) -> String Never! {
 // spawn failures and timeouts as an error message.
 run_binary: fn(binary: String, args: [String], timeout: Duration) -[Exec, FS, IO, Time.Wait]> Outcome Never! {
     none := [U8]{}
-    if !files.exists(binary) -> return Outcome{stdout: none.copy(), stderr: none.copy(), status: 0, exited: false, signal: "", error: "spawnSync {binary} ENOENT"}
-    argv := [String]{binary.copy()}
-    loop arg in args {
-        argv.push(arg.copy())
+    if !files.exists(binary) {
+        return Outcome{stdout: none.copy(), stderr: none.copy(), status: 0, exited: false, signal: "", error: "spawnSync {binary} ENOENT"}
     }
+    argv := [String]{binary.copy()}
+    loop arg in args { argv.push(arg.copy()) }
     if process.cmd(argv).timeout(timeout).run() == {
         .Ok(receipt) -> {
             stdout: receipt.output.bytes()
-            if receipt.timed_out -> return Outcome{stdout: stdout, stderr: receipt.errors.bytes(), status: 0, exited: false, signal: "SIGTERM", error: "spawnSync {binary} ETIMEDOUT"}
-            if receipt.signal == .Val(number) -> return Outcome{stdout: stdout, stderr: receipt.errors.bytes(), status: 0, exited: false, signal: signal_name(number), error: ""}
+            if receipt.timed_out {
+                return Outcome{stdout: stdout, stderr: receipt.errors.bytes(), status: 0, exited: false, signal: "SIGTERM", error: "spawnSync {binary} ETIMEDOUT"}
+            }
+            if receipt.signal == .Val(number) {
+                return Outcome{stdout: stdout, stderr: receipt.errors.bytes(), status: 0, exited: false, signal: signal_name(number), error: ""}
+            }
             Outcome{stdout: stdout, stderr: receipt.errors.bytes(), status: receipt.code, exited: true, signal: "", error: ""}
         }
         .Err(error) -> {
@@ -194,12 +212,8 @@ lower_hex: fn(value: Int) -> String Never! {
 }
 
 utf8: fn(scalar: Int) -> [U8] Never! {
-    if scalar < 128 {
-        return [U8]{byte(scalar)}
-    }
-    if scalar < 2048 {
-        return [U8]{byte(192 + scalar /% 64), byte(128 + scalar % 64)}
-    }
+    if scalar < 128 -> return [U8]{byte(scalar)}
+    if scalar < 2048 -> return [U8]{byte(192 + scalar /% 64), byte(128 + scalar % 64)}
     if scalar < 65536 {
         return [U8]{byte(224 + scalar /% 4096), byte(128 + (scalar /% 64) % 64), byte(128 + scalar % 64)}
     }
@@ -241,9 +255,7 @@ char_goldens: fn(ranges: String) -> [U8] Never! {
     range := 0
     loop scalar in 0..<1114112 {
         if scalar >= 55296 && scalar <= 57343 -> next
-        loop range < starts.len() && ends[range] < scalar {
-            range += 1
-        }
+        loop range < starts.len() && ends[range] < scalar -> range += 1
         text: char_debug(scalar, range < starts.len() && starts[range] <= scalar)
         goldens.push(byte(scalar % 256))
         goldens.push(byte((scalar /% 256) % 256))
@@ -259,8 +271,12 @@ ui_witness: fn(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
     if args.len() == 0 -> return fail("{USAGE}\nWITNESS is one of: {WITNESSES}")
     key: args[0]
     spec: witness(key)
-    if spec.cases.len() == 0 -> return fail("unknown witness: {key}\nWITNESS is one of: {WITNESSES}")
-    if args.len() != 3 || args.contains("") -> return fail("usage: jet Compiler/JetRuntime/Tests/UiWitness.jet {key} {spec.operands}")
+    if spec.cases.len() == 0 {
+        return fail("unknown witness: {key}\nWITNESS is one of: {WITNESSES}")
+    }
+    if args.len() != 3 || args.contains("") {
+        return fail("usage: jet Compiler/JetRuntime/Tests/UiWitness.jet {key} {spec.operands}")
+    }
     cwd: files.cwd() ?? return fail("cannot read the working directory: {err}")
     out: resolve(cwd, args[1])
     binary: resolve(cwd, args[2])
@@ -272,21 +288,23 @@ ui_witness: fn(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
     if spec.oracle {
         ranges: files.read("{cwd}/{GOLDENS}/{PLAIN_RANGES}") ?? return fail("cannot read {GOLDENS}/{PLAIN_RANGES}: {err}")
         goldens: char_goldens(ranges)
-        if crypto.sha256(goldens.copy()).hex() != ORACLE_SHA256 -> return fail("char Debug goldens differ from the frozen bytes")
+        if crypto.sha256(goldens.copy()).hex() != ORACLE_SHA256 {
+            return fail("char Debug goldens differ from the frozen bytes")
+        }
         if !write_file(oracle, goldens) -> return 1
     }
     loop item in spec.cases {
         run_args := item.args.copy()
-        if spec.oracle && item.status == 0 {
-            run_args = [String]{oracle.copy()}
-        }
+        if spec.oracle && item.status == 0 -> run_args = [String]{oracle.copy()}
         outcome: run_binary(binary, run_args, spec.timeout)
         status: if outcome.exited -> "{outcome.status}" else -> "null"
         signal: if outcome.signal == "" -> "null" else -> json_text(outcome.signal)
         error: if outcome.error == "" -> "null" else -> json_text(outcome.error)
         if !write_file("{out}/{item.name}.stdout", outcome.stdout) -> return 1
         if !write_file("{out}/{item.name}.stderr", outcome.stderr) -> return 1
-        if !write_file("{out}/{item.name}.status.json", "{{\"status\":{status},\"signal\":{signal},\"error\":{error}}}\n".bytes()) -> return 1
+        if !write_file("{out}/{item.name}.status.json", "{{\"status\":{status},\"signal\":{signal},\"error\":{error}}}\n".bytes()) {
+            return 1
+        }
         if outcome.error != "" || outcome.signal != "" || !outcome.exited || outcome.status != item.status {
             shown_signal: if outcome.signal == "" -> "null" else -> outcome.signal
             return fail("{item.name}: expected exit{spec.exit_gap}{item.status}, got {status}/{shown_signal}/{outcome.error}")
@@ -294,11 +312,15 @@ ui_witness: fn(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
         golden_path: "{cwd}/{GOLDENS}/{item.golden}"
         expected := if files.read_bytes(golden_path) == {
             .Ok(value) -> value
-            .Err(_) -> { return fail("ENOENT: no such file or directory, open '{golden_path}'") }
+            .Err(_) -> {
+                return fail("ENOENT: no such file or directory, open '{golden_path}'")
+            }
         }
         want_stdout: if item.status == 0 -> expected.copy() else -> [U8]{}
         want_stderr: if item.status == 0 -> [U8]{} else -> expected.move()
-        if !same_bytes(outcome.stdout, want_stdout) || !same_bytes(outcome.stderr, want_stderr) -> return fail("{item.name}: {OUTPUT_MISMATCH}")
+        if !same_bytes(outcome.stdout, want_stdout) || !same_bytes(outcome.stderr, want_stderr) {
+            return fail("{item.name}: {OUTPUT_MISMATCH}")
+        }
     }
     print(spec.done)
     0

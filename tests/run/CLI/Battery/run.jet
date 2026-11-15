@@ -22,49 +22,38 @@ use {
 CLI: struct {
     #[Doc("directory for the CLI config file"), Arg(env: "CLI_CONFIG_DIR")] config_dir: String{"cli-config"}
 
-    #Doc("run every library part once with deterministic fixtures")
-    demo: fn(self) {
+    #Doc("run every library part once with deterministic fixtures") demo: fn(self) {
         run_all(self.config_dir)
     }
 
-    #Doc("write and read the config file")
-    config: fn(self) {
+    #Doc("write and read the config file") config: fn(self) {
         cli.write_config(self.config_dir, "always", "aligned")
         print(cli.read_config(self.config_dir).trim())
     }
 
-    #Doc("append one note to the config directory")
-    add: fn(self, title: String, body: String) {
+    #Doc("append one note to the config directory") add: fn(self, title: String, body: String) {
         print(cli.append_note(self.config_dir, title, body).trim())
     }
 
-    #Doc("search a recursive root with its .gitignore")
-    search: fn(self, pattern: String{"needle"}, root: String{"."}) {
+    #Doc("search a recursive root with its .gitignore") search: fn(self, pattern: String{"needle"}, root: String{"."}) {
         show_search(root, pattern)
     }
 
-    #Doc("launch, stream, pipe, close stdin, and inspect process receipts")
-    process: fn(self, pattern: String{"keep"}) {
+    #Doc("launch, stream, pipe, close stdin, and inspect process receipts") process: fn(self, pattern: String{"keep"}) {
         print(cli.process_demo(pattern))
     }
 
-    #Doc("exercise the child EOF path")
-    eof: fn(self) {
-        print(cli.process_demo("keep"))
-    }
+    #Doc("exercise the child EOF path") eof: fn(self) { print(cli.process_demo("keep")) }
 
-    #Doc("decode, filter, sort, and print typed CSV records")
-    records: fn(self, wanted: String{"keep"}) {
+    #Doc("decode, filter, sort, and print typed CSV records") records: fn(self, wanted: String{"keep"}) {
         show_records(wanted)
     }
 
-    #Doc("overlay one child environment and inspect a failed receipt")
-    env: fn(self) {
+    #Doc("overlay one child environment and inspect a failed receipt") env: fn(self) {
         print(cli.environment_demo())
     }
 
-    #Doc("show ten typed options and their defaults")
-    flags: fn(
+    #Doc("show ten typed options and their defaults") flags: fn(
         self,
         one: String{"1"},
         two: String{"2"},
@@ -75,13 +64,10 @@ CLI: struct {
         seven: String{"7"},
         eight: String{"8"},
         nine: String{"9"},
-        ten: String{"10"}
-    ) {
-        print("{one},{two},{three},{four},{five},{six},{seven},{eight},{nine},{ten}")
-    }
+        ten: String{"10"},
+    ) { print("{one},{two},{three},{four},{five},{six},{seven},{eight},{nine},{ten}") }
 
-    #Doc("exit with the exact requested status code")
-    exit: fn(self, code: Int{7}) {
+    #Doc("exit with the exact requested status code") exit: fn(self, code: Int{7}) {
         cli.exit_with(code)
     }
 }
@@ -122,9 +108,7 @@ run_all: fn(config_root: String) {
 }
 
 #[Job(.Dev, every: 1h), Doc("refresh the CLI battery fixture")]
-refresh: fn() {
-    print("job=refresh")
-}
+refresh: fn() { print("job=refresh") }
 
 // Gate notes: search's ignore-aware walk and process_demo's stdin.close are
 // real core API calls. An older binary must report that gate instead
@@ -140,6 +124,4 @@ refresh: fn() {
 //            mkdir -p bin && cp build/run bin/cli-battery
 //            ./bin/cli-battery flags
 
-run: fn(args: CLI) {
-    run_all(args.config_dir)
-}
+run: fn(args: CLI) { run_all(args.config_dir) }

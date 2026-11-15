@@ -21,7 +21,9 @@ CONFIG: ["compilers", "shapes", "bases", "ladders", "steps", "domainLadder", "me
 run: fn() {
     here: files.collapse(files.absolute(".") ?? process.fail(1, "{err}"))
     printed: files.read(process.args()[0]) ?? process.fail(1, "{err}")
-    loop line in printed.lines() -> print(line.replace(here, "<case>").replace("node Tools/perf/scaling/enqueue.mjs", "jet Tools/perf/scaling/enqueue"))
+    loop line in printed.lines() {
+        print(line.replace(here, "<case>").replace("node Tools/perf/scaling/enqueue.mjs", "jet Tools/perf/scaling/enqueue"))
+    }
     queue: files.join(process.env_get("JET_STATE_ROOT") ?? "", "proofq/queue")
     if files.is_dir(queue) {
         stamp: files.getmtime(process.env_get("JET_SCALING_QUEUE_STAMP") ?? "") ?? process.fail(1, "{err}")
@@ -37,7 +39,9 @@ run: fn() {
             }
         }
     }
-    if !files.is_file("work/queue-plan.json") -> return
+    if !files.is_file("work/queue-plan.json") {
+        return
+    }
     plan: json.parse(files.read("work/queue-plan.json") ?? process.fail(1, "{err}")) ?? process.fail(1, err.display_text())
     loop job in list(plan) {
         print("== job {show(field(job, "name"), here)} shared {show(field(job, "shared"), here)}")

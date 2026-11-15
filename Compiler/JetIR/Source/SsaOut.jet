@@ -59,9 +59,7 @@ ir_ssa_edge_moves: fn(m: IRModule, f: IRFunction, s: IRSsa, live: [Bool], homes:
 }
 
 // Edge `edge`'s position among its join's edges.
-ir_ssa_edge_index: fn(s: IRSsa, edge: Int) -> Int Never! {
-    s.edge_pos[edge]
-}
+ir_ssa_edge_index: fn(s: IRSsa, edge: Int) -> Int Never! { s.edge_pos[edge] }
 
 // The code being written back.
 IRSsaCode: struct {
@@ -152,7 +150,9 @@ ir_ssa_out: fn(m: IRModule, f: &IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutS
     if_false := [Int:Int]{}
     ordered := [Int]{}
     loop edge in 0..<s.edge_kind.len() {
-        if s.edge_kind[edge] == .IfFalse -> if_false[s.edge_at[edge]] = edge else -> ordered.push(edge)
+        if s.edge_kind[edge] == .IfFalse -> if_false[s.edge_at[edge]] = edge else {
+            ordered.push(edge)
+        }
     }
     item_inst := [Int]{}
     item_edge := [Int]{}
@@ -174,7 +174,9 @@ ir_ssa_out: fn(m: IRModule, f: &IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutS
         item_inst.push(at)
         item_edge.push(-1)
     }
-    if 4 * item_inst.len() + 4 >= IR_SSA_POSITION_LIMIT -> panic("ir_ssa_out: {f.key} has too many instructions")
+    if 4 * item_inst.len() + 4 >= IR_SSA_POSITION_LIMIT {
+        panic("ir_ssa_out: {f.key} has too many instructions")
+    }
     // Each block's first and last item. An If's false-edge moves belong to
     // none: they run in no block's straight line.
     blocks: s.preds.len()
@@ -187,9 +189,7 @@ ir_ssa_out: fn(m: IRModule, f: &IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutS
     loop k in 0..<item_inst.len() {
         at: item_inst[k]
         block := -1
-        if at >= 0 {
-            block = s.block[at]
-        } else if s.edge_kind[item_edge[k]] != .IfFalse {
+        if at >= 0 -> block = s.block[at] else if s.edge_kind[item_edge[k]] != .IfFalse {
             block = s.edge_block[item_edge[k]]
         }
         if block < 0 -> next
@@ -247,7 +247,9 @@ ir_ssa_out: fn(m: IRModule, f: &IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutS
             ir_ssa_use(s, use_head, use_next, use_block, use_pos, s.use_c[at], block, 4 * k)
             op: f.op[at]
             if op == .Call || op == .CallRuntime || op == .CallIndirect {
-                loop index in f.b[at]..<(f.b[at] + f.c[at]) -> ir_ssa_use(s, use_head, use_next, use_block, use_pos, s.use_args[index], block, 4 * k)
+                loop index in f.b[at]..<(f.b[at] + f.c[at]) {
+                    ir_ssa_use(s, use_head, use_next, use_block, use_pos, s.use_args[index], block, 4 * k)
+                }
             }
             next
         }
@@ -396,7 +398,9 @@ ir_ssa_out: fn(m: IRModule, f: &IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutS
         c: ir_ssa_home(s, homes, s.use_c[at], f.c[at])
         if op == .Call || op == .CallRuntime || op == .CallIndirect {
             b = code.args.len()
-            loop index in f.b[at]..<(f.b[at] + f.c[at]) -> code.args.push(ir_ssa_home(s, homes, s.use_args[index], f.args[index]))
+            loop index in f.b[at]..<(f.b[at] + f.c[at]) {
+                code.args.push(ir_ssa_home(s, homes, s.use_args[index], f.args[index]))
+            }
         }
         ir_ssa_put(code, op, dst, a, b, c, line)
     }
@@ -416,9 +420,13 @@ IR_SSA_POSITION_LIMIT: 1073741824
 
 // Records that value `used` (-1: no read) is read at `pos` in `block`.
 ir_ssa_use: fn(s: IRSsa, head: &[Int], next_use: &[Int], blocks: &[Int], positions: &[Int], used: Int, block: Int, pos: Int) Never! {
-    if used < 0 -> return
+    if used < 0 {
+        return
+    }
     value: ir_ssa_find(s, used)
-    if s.val_kind[value] == .Undef -> return
+    if s.val_kind[value] == .Undef {
+        return
+    }
     next_use.push(head[value])
     blocks.push(block)
     positions.push(pos)
@@ -442,7 +450,9 @@ ir_ssa_walk: fn(s: IRSsa, first: [Int], last: [Int], home: Int, start: Int, valu
         ranges.push(4 * first[block])
         ranges.push(pos)
     }
-    if entered[block] == value -> return
+    if entered[block] == value {
+        return
+    }
     work.clear()
     work.push(block)
     loop work.len() > 0 {
@@ -496,13 +506,7 @@ ir_ssa_overlap: fn(a: [Int], b: [Int]) -> Bool Never! {
     i := 0
     j := 0
     loop i < a.len() && j < b.len() {
-        if a[i + 1] < b[j] {
-            i += 2
-        } else if b[j + 1] < a[i] {
-            j += 2
-        } else {
-            return true
-        }
+        if a[i + 1] < b[j] -> i += 2 else if b[j + 1] < a[i] -> j += 2 else -> return true
     }
     false
 }

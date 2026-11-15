@@ -19,7 +19,9 @@ jet_cli_style_diagnostics: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> [D
         loop file in root.files {
             if !file.path.ends_with(".jet") -> next
             parsed: parse_source(file.source.bytes())
-            loop diagnostic in parser_impl_placement_lints(parsed.program, file.source.bytes(), parsed.diagnostics) -> found.push(diagnostic_with_source_path(diagnostic, file.path, 0))
+            loop diagnostic in parser_impl_placement_lints(parsed.program, file.source.bytes(), parsed.diagnostics) {
+                found.push(diagnostic_with_source_path(diagnostic, file.path, 0))
+            }
         }
     }
     found
@@ -35,7 +37,7 @@ jet_cli_style_diagnostics: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> [D
 // body on a line holding other text, or an inherent impl that opens its body
 // on the head line and closes it on a later one. `deferred` counts those.
 jet_cli_fix_style: fn(before: String) -> JetCLIFixApply Never! {
-    unchanged: JetCLIFixApply{source: before.copy(), applied: 0, deferred: 0} // copy: the caller keeps the input.
+    unchanged: JetCLIFixApply{source: before.copy(), applied: 0, deferred: 0}  // copy: the caller keeps the input.
     parsed: parse_source(before.bytes())
     if jet_cli_errors(parsed.diagnostics).len() > 0 -> return unchanged
     bytes: before.bytes()
@@ -44,7 +46,7 @@ jet_cli_fix_style: fn(before: String) -> JetCLIFixApply Never! {
     closes := [String:Int]{}
     loop item in parsed.program.items {
         if item == {
-            .Struct(value) -> closes[value.name] = jet_cli_style_close_line(bytes, value.span)
+            .Struct(value) -> { closes[value.name] = jet_cli_style_close_line(bytes, value.span) }
             .Enum(value) -> closes[value.name] = jet_cli_style_close_line(bytes, value.span)
             .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
@@ -65,14 +67,14 @@ jet_cli_fix_style: fn(before: String) -> JetCLIFixApply Never! {
             if lifted == .Val(block) {
                 edits.push(TextEdit{span: Span{start: block.start, end: block.end}, new_text: ""})
                 floor = block.end
-                if !order.contains(value.type_name) -> order.push(value.type_name.copy()) // copy: the order list keeps the name.
+                if !order.contains(value.type_name) -> order.push(value.type_name.copy())  // copy: the order list keeps the name.
                 moved[value.type_name] = "{moved.get(value.type_name) ?? ""}\n{block.text}"
-            } else {
-                deferred += 1
-            }
+            } else { deferred += 1 }
         }
     }
-    if edits.len() == 0 -> return JetCLIFixApply{source: before.copy(), applied: 0, deferred: deferred} // copy: nothing moved.
+    if edits.len() == 0 {
+        return JetCLIFixApply{source: before.copy(), applied: 0, deferred: deferred}  // copy: nothing moved.
+    }
     applied: edits.len()
     loop name in order {
         at: closes.get(name) ?? next
@@ -127,20 +129,18 @@ jet_cli_style_lift: fn(bytes: [U8], value: ImplDef, floor: Int) -> JetCLIStyleLi
         close: value.span.end - 1
         if open < 0 || open >= close -> return None
         if jet_cli_style_blank(bytes, open + 1, jet_cli_style_line_end(bytes, open) - 1) && jet_cli_style_line_start(bytes, close) > open {
-            if !jet_cli_style_blank(bytes, jet_cli_style_line_start(bytes, close), close) -> return None
+            if !jet_cli_style_blank(bytes, jet_cli_style_line_start(bytes, close), close) {
+                return None
+            }
             body = "{jet_cli_style_indent(leading)}{jet_cli_style_text(bytes, jet_cli_style_line_end(bytes, open), jet_cli_style_line_start(bytes, close))}"
         } else if jet_cli_style_line_start(bytes, close) == head {
             body = "{jet_cli_style_indent(leading)}    {jet_cli_style_text(bytes, open + 1, close).trim()}\n"
-        } else {
-            return None
-        }
+        } else { return None }
     } else if value.trait_span == .Val(trait_span) {
         // A trait impl: `impl T.Trait` is written `impl Trait` in the body.
         written: "{leading}{jet_cli_style_text(bytes, head, value.type_span.start)}{jet_cli_style_text(bytes, trait_span.start, after)}"
         body = jet_cli_style_indent(written)
-    } else {
-        return None
-    }
+    } else { return None }
     end := after
     // One blank line beside the impl goes with it: the one after, else the
     // one before.
@@ -189,7 +189,9 @@ jet_cli_style_find: fn(bytes: [U8], at: Int, byte: U8) -> Int Never! {
 // Whether `bytes[start..<end]` is only spaces, tabs and line ends.
 jet_cli_style_blank: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! {
     loop index in start..<end {
-        if bytes[index] != 32 && bytes[index] != 9 && bytes[index] != 10 && bytes[index] != 13 -> return false
+        if bytes[index] != 32 && bytes[index] != 9 && bytes[index] != 10 && bytes[index] != 13 {
+            return false
+        }
     }
     true
 }

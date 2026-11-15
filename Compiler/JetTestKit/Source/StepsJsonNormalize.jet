@@ -7,7 +7,9 @@ kit_steps_json_normalizer: fn(value: String) -> KitJSONNormalization? {
     if header.len() != 5 || header[0] != "json" || header[3] != ":" -> return None
     if header[1] != "stdout" && header[1] != "stderr" -> return None
     if kit_steps_json_path(header[2]) == None -> return None
-    if !kit_expect_named(["string", "number", "int", "bool", "null", "array", "object"], header[4]) -> return None
+    if !kit_expect_named(["string", "number", "int", "bool", "null", "array", "object"], header[4]) {
+        return None
+    }
     Val(KitJSONNormalization{stream: header[1], path: header[2], kind: header[4]})
 }
 
@@ -43,7 +45,9 @@ kit_steps_json_span_end: fn(bytes: [U8], start: Int) -> Int {
             next
         }
         if containers == 0 {
-            if byte == 32 || byte == 9 || byte == 10 || byte == 13 || byte == 44 || byte == 93 || byte == 125 -> return i
+            if byte == 32 || byte == 9 || byte == 10 || byte == 13 || byte == 44 || byte == 93 || byte == 125 {
+                return i
+            }
         } else {
             if byte == 34 -> quoted = true
             if byte == 91 || byte == 123 -> containers += 1
@@ -60,7 +64,9 @@ kit_steps_json_span_end: fn(bytes: [U8], start: Int) -> Int {
 kit_steps_json_collect_spans: fn(bytes: [U8], tree: Dyn, parts: [String], depth: Int, start: Int, kind: String, normalizer: Int, spans: &[KitJSONSpan]) -> String? {
     if depth == parts.len() {
         actual: kit_steps_json_type(tree)
-        if actual != kind && !(kind == "number" && actual == "int") -> return Val("JSON normalization type differs: expected {kind}, got {actual}")
+        if actual != kind && !(kind == "number" && actual == "int") {
+            return Val("JSON normalization type differs: expected {kind}, got {actual}")
+        }
         spans.push(KitJSONSpan{start: start, end: kit_steps_json_span_end(bytes, start), normalizer: normalizer})
         return None
     }
@@ -75,7 +81,9 @@ kit_steps_json_collect_spans: fn(bytes: [U8], tree: Dyn, parts: [String], depth:
                 key_tree: json.parse(key_text) ?? return Val("JSON normalization key parse failed")
                 key: if key_tree == {
                     .Text(name) -> name
-                    .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> { return Val("JSON normalization key is not text") }
+                    .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {
+                        return Val("JSON normalization key is not text")
+                    }
                 }
                 child: kit_steps_json_space(bytes, kit_steps_json_space(bytes, key_end) + 1)
                 if part == (".{key}") {
@@ -83,13 +91,17 @@ kit_steps_json_collect_spans: fn(bytes: [U8], tree: Dyn, parts: [String], depth:
                     return kit_steps_json_collect_spans(bytes, value, parts, depth + 1, child, kind, normalizer, spans)
                 }
                 position = kit_steps_json_space(bytes, kit_steps_json_span_end(bytes, child))
-                if position < bytes.len() && bytes[position] == (U8{44}) -> position = kit_steps_json_space(bytes, position + 1)
+                if position < bytes.len() && bytes[position] == (U8{44}) {
+                    position = kit_steps_json_space(bytes, position + 1)
+                }
             }
             return Val("JSON normalization member missing: {part}")
         }
         .Array(items) -> {
             wanted: if part == "*" -> -1 else -> Int.parse(part) ?? return Val("JSON normalization selected a non-object")
-            if items.len() == 0 || wanted >= items.len() -> return Val("JSON normalization array selection is empty or missing")
+            if items.len() == 0 || wanted >= items.len() {
+                return Val("JSON normalization array selection is empty or missing")
+            }
             position := kit_steps_json_space(bytes, start + 1)
             loop (index, item) in items {
                 if wanted == -1 || index == wanted {
@@ -119,7 +131,9 @@ kit_steps_json_normalize: fn(text: String, stream: String, rules: [KitJSONNormal
 // JSON Lines output (one document per line, as `jet test --measure --json`
 // prints) normalizes line by line, and every rule must hold on every line.
 kit_steps_json_normalize_lines: fn(text: String, stream: String, rules: [KitJSONNormalization], error: String) -> KitJSONResult {
-    if !text.contains("\n") -> return KitJSONResult{text: "", error: "JSON normalization parse: {error}"}
+    if !text.contains("\n") {
+        return KitJSONResult{text: "", error: "JSON normalization parse: {error}"}
+    }
     pieces := [String]{}
     loop line in text.split("\n") {
         if line.trim() == "" {

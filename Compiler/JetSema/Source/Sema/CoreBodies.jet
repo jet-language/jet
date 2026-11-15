@@ -204,7 +204,7 @@ sema_core_body_capture: fn(program: SemaProgramTables, owner_id: SymbolID, check
 // function the body pass checked before, against the graph as it has grown
 // since; the record is the last capture's, the check the library keeps.
 // Each table entry's offsets are written once the key and the record are.
-sema_core_bodies_bytes: fn(&&bodies: [SemaCoreBody], context: String) -> [U8] Never! {
+sema_core_bodies_bytes: fn(bodies: &&[SemaCoreBody], context: String) -> [U8] Never! {
     sorted := bodies.move()
     loop index in 0..<sorted.len() -> sorted[index].ordinal = index
     sorted.sort_by(fn(left: SemaCoreBody, right: SemaCoreBody) { if left.key == right.key -> left.ordinal <=> right.ordinal else -> left.key <=> right.key })
@@ -242,7 +242,9 @@ sema_core_bodies_bytes: fn(&&bodies: [SemaCoreBody], context: String) -> [U8] Ne
 // Writes the offset where `out` ends into the table slot at `at`.
 sema_core_bodies_put_offset: fn(out: &BodyCodecOut, at: Int) Never! {
     offset: out.bytes.len()
-    loop byte in 0..<SEMA_CORE_BODIES_OFFSET_BYTES -> out.bytes[at + byte] = U8{(offset >> (8 * byte)).bit_and(255)}
+    loop byte in 0..<SEMA_CORE_BODIES_OFFSET_BYTES {
+        out.bytes[at + byte] = U8{(offset >> (8 * byte)).bit_and(255)}
+    }
 }
 
 // Whether the capture at `index` of `sorted` (in key order, then capture
@@ -269,7 +271,7 @@ sema_core_bodies_head: fn(bytes: [U8]) -> SemaCoreBodiesHead? Never! {
 
 // The bodies file `bytes` as a compile reads it: its header alone
 // (sema_core_bodies_head). None when that doesn't read.
-sema_core_bodies_read: fn(&&bytes: [U8]) -> SemaCoreBodies? Never! {
+sema_core_bodies_read: fn(bytes: &&[U8]) -> SemaCoreBodies? Never! {
     head: sema_core_bodies_head(bytes) ?? return None
     Val(SemaCoreBodies{bytes: bytes.move(), head: head})
 }
@@ -284,26 +286,32 @@ sema_core_bodies_problem: fn(bytes: [U8]) -> String? Never! {
     expected := head.table + head.count * SEMA_CORE_BODIES_ENTRY_BYTES
     loop position in 0..<head.count {
         at: sema_core_bodies_key_at(bytes, head, position)
-        if at != expected -> return Val("the key of record {position} starts at byte {at}, not at byte {expected}, where the one before it ends")
+        if at != expected {
+            return Val("the key of record {position} starts at byte {at}, not at byte {expected}, where the one before it ends")
+        }
         input := sema_core_bodies_record(bytes, at)
         key: body_codec_get_string(bytes, input)
         if input.failed -> return Val("the key of record {position} is cut short or malformed")
-        if position > 0 && !(previous < key) -> return Val(if previous == key -> "the function `{key}` has two records" else -> "the record of `{key}` comes after that of `{previous}`")
+        if position > 0 && !(previous < key) {
+            return Val(if previous == key -> "the function `{key}` has two records" else -> "the record of `{key}` comes after that of `{previous}`")
+        }
         previous = key
         expected = input.at
     }
     loop position in 0..<head.count {
         at: sema_core_bodies_offset(bytes, head, position)
-        if at != expected -> return Val("record {position} starts at byte {at}, not at byte {expected}, where the one before it ends")
-        input := sema_core_bodies_record(bytes, at)
-        loop _ in 0..<3 {
-            _: sema_core_bodies_keys(bytes, input)
+        if at != expected {
+            return Val("record {position} starts at byte {at}, not at byte {expected}, where the one before it ends")
         }
+        input := sema_core_bodies_record(bytes, at)
+        loop _ in 0..<3 -> _: sema_core_bodies_keys(bytes, input)
         size: body_codec_get_count(bytes, input, 1)
         if input.failed -> return Val("record {position} is cut short or malformed")
         expected = input.at + size
     }
-    if expected != bytes.len() -> return Val("{bytes.len() - expected} bytes follow its last record")
+    if expected != bytes.len() {
+        return Val("{bytes.len() - expected} bytes follow its last record")
+    }
     None
 }
 
@@ -320,7 +328,9 @@ sema_core_bodies_offset: fn(bytes: [U8], head: SemaCoreBodiesHead, position: Int
 // The table offset at byte `at`.
 sema_core_bodies_word: fn(bytes: [U8], at: Int) -> Int Never! {
     offset := 0
-    loop byte in 0..<SEMA_CORE_BODIES_OFFSET_BYTES -> offset = offset.bit_or(Int{bytes[at + byte]} << (8 * byte))
+    loop byte in 0..<SEMA_CORE_BODIES_OFFSET_BYTES {
+        offset = offset.bit_or(Int{bytes[at + byte]} << (8 * byte))
+    }
     offset
 }
 
@@ -375,7 +385,9 @@ sema_core_bodies_key_order: fn(bytes: [U8], at: Int, wanted: [U8]) -> Int Never!
     }
     common: if size < wanted.len() -> size else -> wanted.len()
     loop index in 0..<common {
-        if bytes[start + index] != wanted[index] -> return Int{bytes[start + index]} - Int{wanted[index]}
+        if bytes[start + index] != wanted[index] {
+            return Int{bytes[start + index]} - Int{wanted[index]}
+        }
     }
     size - wanted.len()
 }
@@ -416,7 +428,9 @@ sema_core_body_load: fn(program: SemaProgramTables, access: SemaHostHookAccess, 
             permit: hooks.guard_edit()
             position: sema_core_bodies_position(permit.value.core_bodies, key) ?? return None
             packet: sema_core_body_read(permit.value.core_bodies, graph, position, permit.value.core_bodies_read, permit.value.core_bodies_reader) ?? return None
-            loop permit.value.core_bodies_loaded.len() <= position -> permit.value.core_bodies_loaded.push(false)
+            loop permit.value.core_bodies_loaded.len() <= position {
+                permit.value.core_bodies_loaded.push(false)
+            }
             permit.value.core_bodies_loaded[position] = true
             return Val(packet)
         }
@@ -449,14 +463,22 @@ sema_core_body_read: fn(bodies: SemaCoreBodies?, graph: SemaRegistrationGraph, p
         decl_keys: sema_core_bodies_keys(file.bytes, record)
         module_keys: sema_core_bodies_keys(file.bytes, record)
         size: body_codec_get_count(file.bytes, record, 1)
-        if record.failed -> panic("internal compiler error: record {position} of the Core bodies file does not read")
+        if record.failed {
+            panic("internal compiler error: record {position} of the Core bodies file does not read")
+        }
         read += record.at + size - start
         symbols := [SymbolID]{}
-        loop symbol_key in symbol_keys -> symbols.push(symbol_find(graph.symbols, symbol_key) ?? return None)
+        loop symbol_key in symbol_keys {
+            symbols.push(symbol_find(graph.symbols, symbol_key) ?? return None)
+        }
         decls := [DeclID]{}
-        loop decl_key in decl_keys -> decls.push(decl_table_find(graph.decls, graph.symbols, decl_key) ?? return None)
+        loop decl_key in decl_keys {
+            decls.push(decl_table_find(graph.decls, graph.symbols, decl_key) ?? return None)
+        }
         modules := [ModuleID]{}
-        loop module_key in module_keys -> modules.push(module_find(graph.module_table, module_key) ?? return None)
+        loop module_key in module_keys {
+            modules.push(module_find(graph.module_table, module_key) ?? return None)
+        }
         input.at = record.at
         input.end = record.at + size
         input.failed = false
@@ -464,7 +486,9 @@ sema_core_body_read: fn(bodies: SemaCoreBodies?, graph: SemaRegistrationGraph, p
         input.decls = decls.move()
         input.modules = modules.move()
         packet: body_codec_get_semaparallelbody(file.bytes, input)
-        if input.failed || input.at != input.end || packet.checked == None -> panic("internal compiler error: the packet of record {position} of the Core bodies file does not read")
+        if input.failed || input.at != input.end || packet.checked == None {
+            panic("internal compiler error: the packet of record {position} of the Core bodies file does not read")
+        }
         return Val(packet)
     }
     None

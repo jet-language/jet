@@ -1,4 +1,3 @@
-
 use {
     jetpack_foundation.[ENV_FILE, MAX_TREE_DEPTH, MAX_TREE_FILE_BYTES, SOURCE_ROOT_DIR, UNIFIED_LOCK_FILE]
     jet_env_model.[env_hook_definition_fingerprint, env_hook_definition_fingerprint_with_selections, env_hook_find_env_root]
@@ -12,9 +11,9 @@ env_hook_test_activation: fn() -> EnvHookActivation {
         composed_path: "/nix/store/pkg/bin:/usr/bin:/bin",
         refs: "ripgrep@nixpkgs jq@nixpkgs",
         root: "/home/dev/router",
-        vars: [String: String]{},
+        vars: [String:String]{},
         unset: [String]{},
-        plan_hash: "hash"
+        plan_hash: "hash",
     }
 }
 
@@ -137,7 +136,9 @@ env_hook_test_fingerprint: fn(root: String) -> String {
 }
 
 #Test("malformed env fingerprint does not follow recursive symlink") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     root: env_hook_test_root("jpk-envhook-symlink-")
     files.create_dir_all(files.join(root, "nested")) ?? panic("create nested")
     files.write(files.join(root, ENV_FILE), "not a valid env plan\n") ?? panic("write env.jet")

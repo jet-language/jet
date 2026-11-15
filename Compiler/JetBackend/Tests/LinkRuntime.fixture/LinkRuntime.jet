@@ -46,10 +46,12 @@ lr_status: fn(args: [String]) -> Int {
     read_started: time.instant()
     loop index in first + 1..<args.len() {
         names.push(args[index])
-        bufs.push(files.read_bytes(args[index]) ?? {
-            print("cannot read {args[index]}")
-            return 66
-        })
+        bufs.push(
+            files.read_bytes(args[index]) ?? {
+                print("cannot read {args[index]}")
+                return 66
+            },
+        )
     }
     read_ms: read_started.elapsed_millis()
     started: time.instant()
@@ -100,7 +102,9 @@ lr_image_compare: fn(pack_path: String, image_path: String) -> Int {
     p := link_context([[U8]]{pack.copy()}, LINK_RUN_BASE)
     link_load_inputs(p, [String]{pack_path})
     loop g in 0..<p.g_name.len() {
-        if p.g_kind[g] == LINK_G_FILE && p.g_alias[g] < 0 && p.g_section[g] >= 0 -> exports.push(p.g_name[g])
+        if p.g_kind[g] == LINK_G_FILE && p.g_alias[g] < 0 && p.g_section[g] >= 0 {
+            exports.push(p.g_name[g])
+        }
     }
     stub := link_synth()
     link_synth_function(stub, "main")
@@ -135,7 +139,9 @@ lr_image_compare: fn(pack_path: String, image_path: String) -> Int {
         loop k in 0..<view.phnum {
             h: view.phoff + LINK_PHDR_SIZE * k
             offset: link_s64(c.bufs, 1, h + 8)
-            if link_u32(c.bufs, 1, h) == 1 && at >= offset && at < offset + link_s64(c.bufs, 1, h + 32) -> loaded = true
+            if link_u32(c.bufs, 1, h) == 1 && at >= offset && at < offset + link_s64(c.bufs, 1, h + 32) {
+                loaded = true
+            }
         }
         if !loaded {
             gap_bytes += 1
@@ -151,7 +157,9 @@ lr_image_compare: fn(pack_path: String, image_path: String) -> Int {
             site_bytes += 1
             next
         }
-        if unexplained < 20 -> print("unexplained difference at offset {at} (address {view.base + at})")
+        if unexplained < 20 {
+            print("unexplained difference at offset {at} (address {view.base + at})")
+        }
         unexplained += 1
     }
     print("image {image_path}: {view.load_end} loaded bytes at base {view.base}, {view.sites.len().div_euclid(3)} `main` places; reference {reference.len()} bytes")

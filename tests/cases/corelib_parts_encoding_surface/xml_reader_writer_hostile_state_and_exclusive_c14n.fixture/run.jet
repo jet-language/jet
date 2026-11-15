@@ -1,4 +1,3 @@
-
 use {
     encoding: core.encoding
     xml: core.encoding.xml
@@ -38,10 +37,10 @@ run: fn() {
 
     // Exclusive C14N omits unused xmlns on ancestors; utilized prefixes move down.
     tree: xml.parse("<root xmlns:a='urn:a' xmlns:b='urn:b'><a:child b:x='1'/></root>") ?? panic("parse")
-    options := xml.XMLCanonical{ mode: .Exclusive10, comments: false, inclusive_prefixes: [] }
+    options := xml.XMLCanonical{mode: .Exclusive10, comments: false, inclusive_prefixes: []}
     print(xml.canonical(tree, options) ?? panic("canonical"))
 
     // InclusiveNamespaces PrefixList forces unused b onto the apex.
-    forced := xml.XMLCanonical{ mode: .Exclusive10, comments: false, inclusive_prefixes: ["b"] }
+    forced := xml.XMLCanonical{mode: .Exclusive10, comments: false, inclusive_prefixes: ["b"]}
     print(xml.canonical(tree, forced) ?? panic("forced"))
 }

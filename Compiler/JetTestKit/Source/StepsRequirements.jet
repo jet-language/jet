@@ -77,7 +77,9 @@ kit_steps_probes_all: fn(text: String, env: KitEnv, work: String, scratch: Strin
     start := 0
     loop token in tokens {
         if token.text == "+" && kit_steps_byte_slice(text, token.start, token.end) == "+" {
-            if !kit_steps_probe(kit_steps_byte_slice(text, start, token.start).trim().copy(), env, work, scratch) -> return false
+            if !kit_steps_probe(kit_steps_byte_slice(text, start, token.start).trim().copy(), env, work, scratch) {
+                return false
+            }
             start = token.end
         }
     }

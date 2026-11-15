@@ -7,10 +7,18 @@
 use {
     jet_pkg_model.[LockFile, LockSource, LockedPackage, pkg_lock_write]
     jetpack_publication.[
-        PublicationAdvisory, PublicationAdvisoryException, PublicationAdvisoryFeed,
-        PublicationAdvisoryRelease, PublicationSourceClass, publication_advisory_feed_digest,
-        publication_advisory_feed_text, publication_advisory_key_id, publication_index_parse_line,
-        publication_keygen, publication_parse_advisory_feed, publication_parse_semver,
+        PublicationAdvisory,
+        PublicationAdvisoryException,
+        PublicationAdvisoryFeed,
+        PublicationAdvisoryRelease,
+        PublicationSourceClass,
+        publication_advisory_feed_digest,
+        publication_advisory_feed_text,
+        publication_advisory_key_id,
+        publication_index_parse_line,
+        publication_keygen,
+        publication_parse_advisory_feed,
+        publication_parse_semver,
         publication_sign_advisory_feed,
     ]
     s6_hand_advisory_files: core.files
@@ -33,10 +41,16 @@ s6_hand_advisory_setup: fn(root: String) {
     generated: publication_keygen("advisory", false) ?? panic("real advisory keygen")
     public: generated.public_key_hex
     feed := PublicationAdvisoryFeed{
-        sequence: 1, issued_at: 100, expires_at: 10000, maturity_seconds: 86400,
+        sequence: 1,
+        issued_at: 100,
+        expires_at: 10000,
+        maturity_seconds: 86400,
         key_id: publication_advisory_key_id(public) ?? panic("advisory key id"),
-        public_key: public, signature: "", releases: [PublicationAdvisoryRelease]{},
-        advisories: [PublicationAdvisory]{}, exceptions: [PublicationAdvisoryException]{}
+        public_key: public,
+        signature: "",
+        releases: [PublicationAdvisoryRelease]{},
+        advisories: [PublicationAdvisory]{},
+        exceptions: [PublicationAdvisoryException]{},
     }
     feed.signature = publication_sign_advisory_feed(feed, generated.seed_path) ?? panic("sign clean feed")
     s6_hand_advisory_save(root, "clean", feed)
@@ -96,7 +110,7 @@ s6_hand_advisory_setup: fn(root: String) {
     assert_eq(tampered.signature, clean.signature)
     assert(publication_advisory_feed_digest(tampered) != accepted)
     if previous_keys == {
-        .Val(value) -> s6_hand_advisory_sys.set("JET_KEYS_DIR", value)
+        .Val(value) -> { s6_hand_advisory_sys.set("JET_KEYS_DIR", value) }
         .None -> { _: s6_hand_advisory_sys.unset("JET_KEYS_DIR") ?? panic("restore env") }
     }
     s6_hand_advisory_files.remove_all(root) ?? panic("remove scratch root")

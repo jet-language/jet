@@ -83,20 +83,20 @@ impl MetadataFacts {
     // Name, version, license, dependencies, scripts, and bins from a
     // package.json (Rust `normalize_npm`).
     from_npm: fn(package_json: String) -> MetadataFacts Never! {
-        object: provider_graph_json_root(package_json) ?? [String: Dyn]{}
+        object: provider_graph_json_root(package_json) ?? [String:Dyn]{}
         facts := MetadataFacts.empty(ProviderFamily.Npm, pkg_json_text(object.get("name") ?? Dyn.Null) ?? "")
         facts.version = pkg_json_text(object.get("version") ?? Dyn.Null) ?? ""
         facts.license = pkg_json_text(object.get("license") ?? Dyn.Null) ?? ""
         if pkg_json_object(object.get("dependencies") ?? Dyn.Null) == {
-            .Val(dependencies) -> facts.dependencies = dependencies.keys().to_list()
+            .Val(dependencies) -> { facts.dependencies = dependencies.keys().to_list() }
             .None -> {}
         }
         if pkg_json_object(object.get("scripts") ?? Dyn.Null) == {
-            .Val(scripts) -> facts.scripts = scripts.keys().to_list()
+            .Val(scripts) -> { facts.scripts = scripts.keys().to_list() }
             .None -> {}
         }
         if pkg_json_object(object.get("bin") ?? Dyn.Null) == {
-            .Val(bins) -> facts.bins = bins.keys().to_list()
+            .Val(bins) -> { facts.bins = bins.keys().to_list() }
             .None -> {}
         }
         facts.source_identity = "npm:{facts.name}@{facts.version}"
@@ -112,12 +112,24 @@ impl ProviderFactReport {
     // Nothing lost or conflicting, an exact identity, a resolved source, the
     // retained native document, and a valid shared carrier.
     validate: fn(self) ProviderGraphError! {
-        if self.conflicts.len() > 0 -> return Err(ProviderGraphError{message: "provider facts conflict: {self.conflicts.join("; ")}"})
-        if self.losses.len() > 0 -> return Err(ProviderGraphError{message: "provider facts are lossy: {self.losses.join("; ")}"})
-        if self.facts.name == "" -> return Err(ProviderGraphError{message: "provider facts need a package name"})
-        if self.facts.identity_selector().value == "" -> return Err(ProviderGraphError{message: "provider facts need an exact version, revision, or digest"})
-        if self.facts.source_identity == "" -> return Err(ProviderGraphError{message: "provider facts need a resolved source identity"})
-        if self.native_format == "" || self.native_document == "" -> return Err(ProviderGraphError{message: "provider facts need the native document and its format"})
+        if self.conflicts.len() > 0 {
+            return Err(ProviderGraphError{message: "provider facts conflict: {self.conflicts.join("; ")}"})
+        }
+        if self.losses.len() > 0 {
+            return Err(ProviderGraphError{message: "provider facts are lossy: {self.losses.join("; ")}"})
+        }
+        if self.facts.name == "" {
+            return Err(ProviderGraphError{message: "provider facts need a package name"})
+        }
+        if self.facts.identity_selector().value == "" {
+            return Err(ProviderGraphError{message: "provider facts need an exact version, revision, or digest"})
+        }
+        if self.facts.source_identity == "" {
+            return Err(ProviderGraphError{message: "provider facts need a resolved source identity"})
+        }
+        if self.native_format == "" || self.native_document == "" {
+            return Err(ProviderGraphError{message: "provider facts need the native document and its format"})
+        }
         if self.shared_facts().validate() == {
             .Ok(_) -> {}
             .Err(error) -> return Err(ProviderGraphError{message: error.message})
@@ -133,7 +145,9 @@ impl ProviderFactReport {
         shared.set_native_document(self.native_format, self.native_document)
         provider_add_metadata_facts(shared, self.facts)
         identity: self.facts.identity_selector()
-        if !shared.selector.is_exact() && identity.value != "" -> shared.set_resolved_selector("#{identity.key}={identity.value}", "provider.metadata")
+        if !shared.selector.is_exact() && identity.value != "" {
+            shared.set_resolved_selector("#{identity.key}={identity.value}", "provider.metadata")
+        }
         selector: shared.effective_selector()
         selector_identity: if {
             selector.version != "" -> Val(selector.version)
@@ -141,9 +155,15 @@ impl ProviderFactReport {
             selector.digest != "" -> Val(selector.digest)
             else -> None
         }
-        if selector_identity != Val(identity.value) -> shared.add_conflict("provider.selector.identity", identity.value, selector_identity ?? "<missing>", "provider.metadata")
-        loop index in 0..<self.losses.len() -> shared.add_loss("provider.loss.{index}", self.losses[index], "provider.native_document")
-        loop index in 0..<self.conflicts.len() -> shared.add_conflict("provider.conflict.{index}", "<provider-native-left-unavailable>", self.conflicts[index], "provider.native_document")
+        if selector_identity != Val(identity.value) {
+            shared.add_conflict("provider.selector.identity", identity.value, selector_identity ?? "<missing>", "provider.metadata")
+        }
+        loop index in 0..<self.losses.len() {
+            shared.add_loss("provider.loss.{index}", self.losses[index], "provider.native_document")
+        }
+        loop index in 0..<self.conflicts.len() {
+            shared.add_conflict("provider.conflict.{index}", "<provider-native-left-unavailable>", self.conflicts[index], "provider.native_document")
+        }
         shared
     }
 
@@ -155,9 +175,7 @@ impl ProviderFactReport {
         self.shared_facts_for(reference)
     }
 
-    export_json: fn(self) -> String Never! {
-        self.shared_facts().to_json()
-    }
+    export_json: fn(self) -> String Never! { self.shared_facts().to_json() }
 
     // A semantic-lock record carrying the shared carrier; a lossy report is
     // refused before it can enter the lock.
@@ -196,21 +214,31 @@ impl ProviderFactReport {
 // onto the shared carrier.
 provider_add_metadata_facts: fn(shared: &ProviderFacts, facts: MetadataFacts) Never! {
     scalars: [(key: String, value: String)]{
-        (key: "package.name", value: facts.name), (key: "package.version", value: facts.version),
-        (key: "package.source", value: facts.source_identity), (key: "package.integrity", value: facts.integrity_hash),
-        (key: "package.license", value: facts.license)
+        (key: "package.name", value: facts.name),
+        (key: "package.version", value: facts.version),
+        (key: "package.source", value: facts.source_identity),
+        (key: "package.integrity", value: facts.integrity_hash),
+        (key: "package.license", value: facts.license),
     }
     loop scalar in scalars {
-        if scalar.value != "" -> shared.add_fact(scalar.key, ProviderFactValue.Text(scalar.value), "provider.metadata")
+        if scalar.value != "" {
+            shared.add_fact(scalar.key, ProviderFactValue.Text(scalar.value), "provider.metadata")
+        }
     }
     lists: [(key: String, values: [String])]{
-        (key: "package.dependencies", values: facts.dependencies), (key: "package.dev_dependencies", values: facts.dev_dependencies),
-        (key: "package.build_dependencies", values: facts.build_dependencies), (key: "package.scripts", values: facts.scripts),
-        (key: "package.platforms", values: facts.platforms), (key: "package.bins", values: facts.bins),
-        (key: "package.trust_roots", values: facts.trust_roots), (key: "package.todos", values: facts.todos)
+        (key: "package.dependencies", values: facts.dependencies),
+        (key: "package.dev_dependencies", values: facts.dev_dependencies),
+        (key: "package.build_dependencies", values: facts.build_dependencies),
+        (key: "package.scripts", values: facts.scripts),
+        (key: "package.platforms", values: facts.platforms),
+        (key: "package.bins", values: facts.bins),
+        (key: "package.trust_roots", values: facts.trust_roots),
+        (key: "package.todos", values: facts.todos),
     }
     loop list in lists {
-        if list.values.len() > 0 -> shared.add_fact(list.key, provider_fact_text_list(list.values), "provider.metadata")
+        if list.values.len() > 0 {
+            shared.add_fact(list.key, provider_fact_text_list(list.values), "provider.metadata")
+        }
     }
     typed_keys := facts.typed.keys().to_list()
     typed_keys.sort()
@@ -222,7 +250,7 @@ provider_add_metadata_facts: fn(shared: &ProviderFacts, facts: MetadataFacts) Ne
     if facts.replacement_candidates.len() > 0 {
         candidates := [ProviderFactValue]{}
         loop candidate in facts.replacement_candidates {
-            fields := [String: ProviderFactValue]{}
+            fields := [String:ProviderFactValue]{}
             fields["foreign_identity"] = ProviderFactValue.Text(candidate.foreign_identity.ref_string())
             fields["native_identity"] = ProviderFactValue.Text(candidate.native_identity.ref_string())
             fields["license"] = ProviderFactValue.Text(candidate.license)

@@ -15,7 +15,9 @@ Check: struct {
 run: fn(check: Check) {
     printed: files.read(check.stdout) ?? process.fail(1, "{err}")
     if printed != "" -> print(printed.remove_suffix("\n"))
-    if !files.is_dir("build-work") -> return
+    if !files.is_dir("build-work") {
+        return
+    }
     print("== build-work")
     names := (files.list_dir("build-work") ?? process.fail(1, "{err}")).map(fn(entry) { entry.name })
     names.sort()

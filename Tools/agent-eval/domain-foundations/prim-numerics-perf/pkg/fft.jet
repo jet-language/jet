@@ -26,9 +26,7 @@ fft_radix2: fn(re0: &&[Float], im0: &&[Float], n: Int) -> FFTBuffers {
             if j >= bit {
                 j -= bit
                 bit /%= 2
-            } else {
-                break
-            }
+            } else { break }
         }
         j += bit
         if i < j {
@@ -87,11 +85,7 @@ make_impulse: fn(n: Int) -> FFTBuffers {
     re := [Float]{}
     im := [Float]{}
     loop i in 0..<n {
-        if i == 0 {
-            re.push(Float{1.0})
-        } else {
-            re.push(Float{0.0})
-        }
+        if i == 0 -> re.push(Float{1.0}) else -> re.push(Float{0.0})
         im.push(Float{0.0})
     }
     return FFTBuffers{re: re, im: im}
@@ -103,11 +97,7 @@ check_fft: fn(out: FFTBuffers, n: Int) -> Float {
     zero: Float{0.0}
     loop i in 0..<n {
         sum_re += out.re[i]
-        if out.im[i] < zero {
-            sum_abs_im -= out.im[i]
-        } else {
-            sum_abs_im += out.im[i]
-        }
+        if out.im[i] < zero -> sum_abs_im -= out.im[i] else -> sum_abs_im += out.im[i]
     }
     return sum_re + sum_abs_im
 }
@@ -120,7 +110,7 @@ bench: fn(n: Int) {
     duration: finished - started
     elapsed: duration.in(.Nanoseconds)
     checksum: check_fft(output, n)
-    print("fft_n:{n} ns:{elapsed} checksum:{checksum} first:{output.re[0]} last:{output.re[n - 1]} max_im_abs:{output.im[0]}") 
+    print("fft_n:{n} ns:{elapsed} checksum:{checksum} first:{output.re[0]} last:{output.re[n - 1]} max_im_abs:{output.im[0]}")
 }
 
 run: fn() {

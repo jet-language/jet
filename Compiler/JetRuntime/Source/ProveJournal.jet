@@ -24,14 +24,21 @@
 // Root48: lock0, mode8 (1 capture, 2 replay, 3 diverged), path16 (owned
 // journal or trace path), records24, length32, at40.
 PROVE_JOURNAL_HEAD: I64{17}
+
 PROVE_JOURNAL_RAND: I64{82}
+
 PROVE_JOURNAL_STDIN: I64{73}
+
 PROVE_JOURNAL_NET: I64{78}
+
 PROVE_JOURNAL_REQUEST: I64{81}
+
 prove_journal_root := I64{0}
 
 rt_prove_journal_open: fn() {
-    if (prove_journal_root != I64{0}) -> return
+    if (prove_journal_root != I64{0}) {
+        return
+    }
     capture_key: jet_rt_string_clone(env_name_jet_prove_capture_journal())
     capture: rt_env_get(capture_key)
     test_text_drop(capture_key)
@@ -42,7 +49,9 @@ rt_prove_journal_open: fn() {
     records_key: jet_rt_string_clone(env_name_jet_prove_replay_journal())
     records: rt_env_get(records_key)
     test_text_drop(records_key)
-    if (records == I64{0}) -> return
+    if (records == I64{0}) {
+        return
+    }
     trace_key: jet_rt_string_clone(env_name_jet_prove_replay_trace())
     trace: rt_env_get(trace_key)
     test_text_drop(trace_key)
@@ -73,11 +82,9 @@ rt_prove_journal_open: fn() {
                 } else if (mark != I64{67} || !rt_prove_journal_skip(root)) {
                     trap_store(wrapping(root + I64{8}), I64{3})
                     break
-                } else {
-                    seen += I64{1}
-                }
+                } else { seen += I64{1} }
             }
-            if (served != I64{0}) -> jet_rt_free(trap_word(out), served, I64{8})
+            if (served != I64{0}) { jet_rt_free(trap_word(out), served, I64{8}) }
         }
     }
     jet_rt_free(out, I64{16}, I64{8})
@@ -103,16 +110,14 @@ rt_prove_journal_publish: fn(root: I64) {
 // (jet_random_os_entropy): capture records each read, replay serves it.
 rt_prove_rand_fill: fn(out: I64, count: I64) -> I64 {
     root: prove_journal_root
-    if (root == I64{0}) -> return rt_crypto_entropy_fill(out, count)
+    if (root == I64{0}) { return rt_crypto_entropy_fill(out, count) }
     sync_mutex_lock(root)
     status := I64{1}
     if (trap_word(wrapping(root + I64{8})) == I64{1}) {
         status = rt_crypto_entropy_fill(out, count)
         if (status == I64{0}) {
             rt_prove_journal_record(root, PROVE_JOURNAL_RAND, count, count, out)
-        } else {
-            rt_prove_journal_record(root, PROVE_JOURNAL_RAND + I64{32}, count, I64{0}, out)
-        }
+        } else { rt_prove_journal_record(root, PROVE_JOURNAL_RAND + I64{32}, count, I64{0}, out) }
     } else {
         at: rt_prove_journal_take(root, PROVE_JOURNAL_RAND, count)
         if (at >= I64{0}) {
@@ -133,7 +138,7 @@ rt_prove_rand_fill: fn(out: I64, count: I64) -> I64 {
 // fails the read with EIO rather than reading the real stdin.
 rt_prove_stdin_read: fn(into: I64, capacity: I64) -> I64 {
     root: prove_journal_root
-    if (root == I64{0}) -> return rt_prove_stdin_os_read(into, capacity)
+    if (root == I64{0}) { return rt_prove_stdin_os_read(into, capacity) }
     sync_mutex_lock(root)
     got := I64{-5}
     if (trap_word(wrapping(root + I64{8})) == I64{1}) {
@@ -151,9 +156,7 @@ rt_prove_stdin_read: fn(into: I64, capacity: I64) -> I64 {
             if (rt_text_byte(wrapping(records + at)) == PROVE_JOURNAL_STDIN) {
                 test_copy_bytes(into, wrapping(records + at + PROVE_JOURNAL_HEAD), result)
                 got = result
-            } else {
-                got = I64{0} - result
-            }
+            } else { got = I64{0} - result }
         }
     }
     sync_mutex_unlock(root)
@@ -179,7 +182,9 @@ rt_prove_stdin_terminal_read: fn(into: I64, capacity: I64) -> I64 {
     owner := I64{0}
     own := I64{0}
     #Unsafe("cell lends 24 writable bytes to TIOCGPGRP and getpgrp takes none") {
-        if (os_syscall_i64(I64{16}, I64{0}, I64{21519}, cell, I64{0}, I64{0}, I64{0}) == I64{0}) -> owner = trap_word(cell).bit_and(I64{4294967295})
+        if (os_syscall_i64(I64{16}, I64{0}, I64{21519}, cell, I64{0}, I64{0}, I64{0}) == I64{0}) {
+            owner = trap_word(cell).bit_and(I64{4294967295})
+        }
         own = os_syscall_i64(I64{111}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     handoff: owner > I64{0} && own > I64{0} && owner != own
@@ -208,8 +213,8 @@ rt_prove_stdin_terminal_read: fn(into: I64, capacity: I64) -> I64 {
 // (diverged included).
 #Export(c) jet_prove_net_mode: fn() -> I64 {
     root: prove_journal_root
-    if (root == I64{0}) -> return I64{0}
-    if (trap_word(wrapping(root + I64{8})) == I64{1}) -> return I64{1}
+    if (root == I64{0}) { return I64{0} }
+    if (trap_word(wrapping(root + I64{8})) == I64{1}) { return I64{1} }
     I64{2}
 }
 
@@ -217,9 +222,13 @@ rt_prove_stdin_terminal_read: fn(into: I64, capacity: I64) -> I64 {
 // bytes for this call.
 #Export(c) jet_prove_net_record: fn(data: I64, length: I64) {
     root: prove_journal_root
-    if (root == I64{0} || length <= I64{0}) -> return
+    if (root == I64{0} || length <= I64{0}) {
+        return
+    }
     sync_mutex_lock(root)
-    if (trap_word(wrapping(root + I64{8})) == I64{1}) -> rt_prove_journal_record(root, PROVE_JOURNAL_NET, I64{0}, length, data)
+    if (trap_word(wrapping(root + I64{8})) == I64{1}) {
+        rt_prove_journal_record(root, PROVE_JOURNAL_NET, I64{0}, length, data)
+    }
     sync_mutex_unlock(root)
 }
 
@@ -229,7 +238,7 @@ rt_prove_stdin_terminal_read: fn(into: I64, capacity: I64) -> I64 {
 // (the `__host_prove_take` row's Option<[u8]>), 0 once the run diverged.
 #Export(c) jet_prove_net_take: fn(data: I64, length: I64, out: I64, out_length: I64) -> I64 {
     root: prove_journal_root
-    if (root == I64{0} || length < I64{0}) -> return I64{0}
+    if (root == I64{0} || length < I64{0}) { return I64{0} }
     sync_mutex_lock(root)
     served := I64{-1}
     if (trap_word(wrapping(root + I64{8})) == I64{2}) {
@@ -279,7 +288,7 @@ rt_prove_net_bytes_out: fn(source: I64, length: I64, out: I64, out_length: I64) 
 // asking for `request`: its offset, with `C` traced. Otherwise -1, with `D`
 // traced once, and every later read fails. The caller holds the lock.
 rt_prove_journal_take: fn(root: I64, kind: I64, request: I64) -> I64 {
-    if (trap_word(wrapping(root + I64{8})) != I64{2}) -> return I64{-1}
+    if (trap_word(wrapping(root + I64{8})) != I64{2}) { return I64{-1} }
     at: trap_word(wrapping(root + I64{40}))
     records: trap_word(wrapping(root + I64{24}))
     if rt_prove_journal_skip(root) {
@@ -298,10 +307,10 @@ rt_prove_journal_take: fn(root: I64, kind: I64, request: I64) -> I64 {
 rt_prove_journal_skip: fn(root: I64) -> Bool {
     at: trap_word(wrapping(root + I64{40}))
     length: trap_word(wrapping(root + I64{32}))
-    if (at + PROVE_JOURNAL_HEAD > length) -> return false
+    if (at + PROVE_JOURNAL_HEAD > length) { return false }
     records: trap_word(wrapping(root + I64{24}))
     payload: if (rt_text_byte(wrapping(records + at)) < I64{97}) -> rt_prove_le(wrapping(records + at + I64{9})) else -> I64{0}
-    if (payload < I64{0} || payload > length - at - PROVE_JOURNAL_HEAD) -> return false
+    if (payload < I64{0} || payload > length - at - PROVE_JOURNAL_HEAD) { return false }
     trap_store(wrapping(root + I64{40}), at + PROVE_JOURNAL_HEAD + payload)
     true
 }

@@ -41,7 +41,9 @@ click: fn(c: Ctx, x: Float, y: Float) Failure! {
 // Click a point with no settle pause (the driver's own click).
 raw_click: fn(c: Ctx, x: Float, y: Float) Failure! { driver_click(c.d, x, y, 0, 1, [String]{}) }
 
-click_mod: fn(c: Ctx, x: Float, y: Float, modifiers: [String]) Failure! { driver_click(c.d, x, y, 0, 1, modifiers) }
+click_mod: fn(c: Ctx, x: Float, y: Float, modifiers: [String]) Failure! {
+    driver_click(c.d, x, y, 0, 1, modifiers)
+}
 
 right_click: fn(c: Ctx, x: Float, y: Float) Failure! { driver_click(c.d, x, y, 2, 1, [String]{}) }
 
@@ -55,9 +57,13 @@ click_node: fn(c: Ctx, title: String) Failure! {
 
 drag: fn(c: Ctx, from: Point, to: Point) Failure! { driver_drag(c.d, from, to, 12, [String]{}) }
 
-drag_steps: fn(c: Ctx, from: Point, to: Point, steps: Int) Failure! { driver_drag(c.d, from, to, steps, [String]{}) }
+drag_steps: fn(c: Ctx, from: Point, to: Point, steps: Int) Failure! {
+    driver_drag(c.d, from, to, steps, [String]{})
+}
 
-drag_mod: fn(c: Ctx, from: Point, to: Point, steps: Int, modifiers: [String]) Failure! { driver_drag(c.d, from, to, steps, modifiers) }
+drag_mod: fn(c: Ctx, from: Point, to: Point, steps: Int, modifiers: [String]) Failure! {
+    driver_drag(c.d, from, to, steps, modifiers)
+}
 
 // One pointer step: "down" and "up" press and release the primary button at
 // the point, "move" moves there; buttons stay held between calls.
@@ -75,9 +81,13 @@ mouse_mod: fn(c: Ctx, kind: String, x: Float, y: Float, modifiers: [String]) Fai
     driver_pointer(c.d, actions, modifiers)
 }
 
-wheel: fn(c: Ctx, x: Float, y: Float, delta_y: Float) Failure! { driver_wheel(c.d, x, y, 0.0, delta_y) }
+wheel: fn(c: Ctx, x: Float, y: Float, delta_y: Float) Failure! {
+    driver_wheel(c.d, x, y, 0.0, delta_y)
+}
 
-wheel_xy: fn(c: Ctx, x: Float, y: Float, delta_x: Float, delta_y: Float) Failure! { driver_wheel(c.d, x, y, delta_x, delta_y) }
+wheel_xy: fn(c: Ctx, x: Float, y: Float, delta_x: Float, delta_y: Float) Failure! {
+    driver_wheel(c.d, x, y, delta_x, delta_y)
+}
 
 // Type `value` key by key, then let the page settle.
 type_text: fn(c: Ctx, value: String) Failure! {
@@ -95,9 +105,13 @@ shortcut: fn(c: Ctx, keys: [String]) Failure! { driver_keys(c.d, keys) }
 
 release_input: fn(c: Ctx) Failure! { driver_release(c.d) }
 
-set_viewport: fn(c: Ctx, width: Int, height: Int) Failure! { driver_set_viewport(c.d, width, height) }
+set_viewport: fn(c: Ctx, width: Int, height: Int) Failure! {
+    driver_set_viewport(c.d, width, height)
+}
 
-add_preload: fn(c: Ctx, function_declaration: String) -> String Failure! { driver_add_preload(c.d, function_declaration) }
+add_preload: fn(c: Ctx, function_declaration: String) -> String Failure! {
+    driver_add_preload(c.d, function_declaration)
+}
 
 remove_preload: fn(c: Ctx, id: String) Failure! { driver_remove_preload(c.d, id) }
 
@@ -110,7 +124,9 @@ screenshot: fn(c: Ctx, name: String) -> String Failure! {
 // --- waits ----------------------------------------------------------------------
 
 // Poll the page until `expression` is truthy, for 8 s.
-wait_js: fn(c: Ctx, expression: String, label: String) Failure! { wait_js_ms(c, expression, label, C_WAIT_MS) }
+wait_js: fn(c: Ctx, expression: String, label: String) Failure! {
+    wait_js_ms(c, expression, label, C_WAIT_MS)
+}
 
 wait_js_ms: fn(c: Ctx, expression: String, label: String, ms: Int) Failure! {
     w: deadline(ms)
@@ -136,9 +152,7 @@ url_encode: fn(value: String) -> String {
     loop byte in value.bytes() {
         ch: Int{byte}
         safe: (ch >= 48 && ch <= 57) || (ch >= 65 && ch <= 90) || (ch >= 97 && ch <= 122) || ch == 45 || ch == 46 || ch == 95 || ch == 126
-        if safe {
-            out = "{out}{String.from_bytes([U8]{byte}) ?? ""}"
-        } else {
+        if safe -> out = "{out}{String.from_bytes([U8]{byte}) ?? ""}" else {
             out = "{out}%{hex2(ch)}"
         }
     }
@@ -171,7 +185,9 @@ state: fn(c: Ctx) -> Dyn Failure! { eval(c, "window.__jetCanvasTest || null") }
 pin: fn(c: Ctx, node_title: String, pin_name: String) -> Point Failure! {
     title: q(node_title)
     name: q(pin_name)
-    found: eval(c, """
+    found: eval(
+        c,
+        """
         (() => {{
           const state = window.__jetCanvasTest || {{}};
           const title = {title}, name = {name};
@@ -185,14 +201,17 @@ pin: fn(c: Ctx, node_title: String, pin_name: String) -> Point Failure! {
           const r = document.getElementById("jet-canvas-view").getBoundingClientRect();
           return {{ x: r.left + pin.cx, y: r.top + pin.cy }};
         }})()
-        """)
+        """,
+    )
     point_or_error(found)
 }
 
 // The centre of the node titled (or containing) `node_title`.
 node: fn(c: Ctx, node_title: String) -> Point Failure! {
     title: q(node_title)
-    found: eval(c, """
+    found: eval(
+        c,
+        """
         (() => {{
           const state = window.__jetCanvasTest || {{}};
           const title = {title};
@@ -201,7 +220,8 @@ node: fn(c: Ctx, node_title: String) -> Point Failure! {
           const r = document.getElementById("jet-canvas-view").getBoundingClientRect();
           return {{ x: r.left + node.x + node.w / 2, y: r.top + node.y + node.h / 2 }};
         }})()
-        """)
+        """,
+    )
     point_or_error(found)
 }
 
@@ -251,7 +271,9 @@ open_core_catalog_palette: fn(c: Ctx, query: String) Failure! {
 }
 
 switch_graph: fn(c: Ctx, title: String) Failure! {
-    if !eval_bool(c, "window.__jetCanvasTest.switchGraphByTitle({q(title)})") -> return Err(fail_with("graph not found: {title}"))
+    if !eval_bool(c, "window.__jetCanvasTest.switchGraphByTitle({q(title)})") {
+        return Err(fail_with("graph not found: {title}"))
+    }
     wait_for_canvas(c)
 }
 
@@ -286,25 +308,34 @@ expect_source_contains: fn(c: Ctx, needle: String) Failure! {
 // Fetch `/canvas/<kind>` for the shown source; `reader` is `text` or `json`.
 fetch_shown: fn(c: Ctx, kind: String, reader: String) -> Dyn Failure! {
     base: q(session_url(c, "/canvas/{kind}"))
-    eval(c, """
+    eval(
+        c,
+        """
         (() => {{
           const base = {base};
           const sourceId = window.__jetCanvasTest?.doc?.source_id;
           const suffix = sourceId ? (base.includes("?") ? "&" : "?") + "source_id=" + encodeURIComponent(sourceId) : "";
           return fetch(base + suffix, {{ cache: "no-store" }}).then((r) => r.{reader}());
         }})()
-        """)
+        """,
+    )
 }
 
 source: fn(c: Ctx) -> String Failure! { Ok(text(fetch_shown(c, "source", "text"))) }
 
 graph: fn(c: Ctx) -> Dyn Failure! { fetch_shown(c, "graph", "json") }
 
-ui_doc: fn(c: Ctx) -> Dyn Failure! { eval(c, "window.__jetCanvasTest && window.__jetCanvasTest.doc") }
+ui_doc: fn(c: Ctx) -> Dyn Failure! {
+    eval(c, "window.__jetCanvasTest && window.__jetCanvasTest.doc")
+}
 
-problems: fn(c: Ctx) -> [Dyn] Failure! { Ok(items(eval(c, "(window.__jetCanvasTest && window.__jetCanvasTest.problems) || []"))) }
+problems: fn(c: Ctx) -> [Dyn] Failure! {
+    Ok(items(eval(c, "(window.__jetCanvasTest && window.__jetCanvasTest.problems) || []")))
+}
 
-diagnostics_by_node: fn(c: Ctx) -> Dyn Failure! { eval(c, "(window.__jetCanvasTest && window.__jetCanvasTest.diagnosticsByNode) || []") }
+diagnostics_by_node: fn(c: Ctx) -> Dyn Failure! {
+    eval(c, "(window.__jetCanvasTest && window.__jetCanvasTest.diagnosticsByNode) || []")
+}
 
 // Wait for a problem whose code is `code` (or whose rendering names it; any
 // problem when `code` is empty), and return it.
@@ -312,7 +343,9 @@ expect_problem: fn(c: Ctx, code: String) -> Dyn Failure! {
     w: deadline(C_WAIT_MS)
     loop alive(w) {
         loop problem in problems(c) {
-            if code == "" || text(at(problem, "code")) == code || text(at(problem, "rendered")).contains(code) -> return Ok(problem)
+            if code == "" || text(at(problem, "code")) == code || text(at(problem, "rendered")).contains(code) {
+                return Ok(problem)
+            }
         }
         pause()
     }
@@ -320,7 +353,9 @@ expect_problem: fn(c: Ctx, code: String) -> Dyn Failure! {
 }
 
 set_source_editor: fn(c: Ctx, value: String) Failure! {
-    if !eval_bool(c, "window.__jetCanvasTest.setSourceEditor({q(value)})") -> return Err(fail_with("source editor helper missing"))
+    if !eval_bool(c, "window.__jetCanvasTest.setSourceEditor({q(value)})") {
+        return Err(fail_with("source editor helper missing"))
+    }
     Ok()
 }
 
@@ -329,7 +364,9 @@ check_current_source: fn(c: Ctx) Failure! {
     Ok()
 }
 
-jump_problem: fn(c: Ctx, index: Int) -> Dyn Failure! { eval(c, "window.__jetCanvasTest.jumpProblem({index})") }
+jump_problem: fn(c: Ctx, index: Int) -> Dyn Failure! {
+    eval(c, "window.__jetCanvasTest.jumpProblem({index})")
+}
 
 // POST `body` (a JSON value) to `/canvas/query`; the JSON reply.
 query: fn(c: Ctx, body: Dyn) -> Dyn Failure! {
@@ -344,21 +381,26 @@ transaction: fn(c: Ctx, body: Dyn) -> Dyn Failure! { transaction_js(c, js(body))
 // The same with the request given as a JavaScript object expression.
 transaction_js: fn(c: Ctx, body: String) -> Dyn Failure! {
     url: q(session_url(c, "/canvas/transaction"))
-    eval(c, """
+    eval(
+        c,
+        """
         (() => {{
           const request = Object.assign({{}}, {body});
           const sourceId = window.__jetCanvasTest?.doc?.source_id;
           if (sourceId && !request.source_id) request.source_id = sourceId;
           return fetch({url}, {{ method: "POST", headers: {{ "content-type": "application/json" }}, body: JSON.stringify(request) }}).then((r) => r.json().then((json) => ({{ ok: r.ok, json }})));
         }})()
-        """)
+        """,
+    )
 }
 
 // Post a transaction through the page's own path; `{ok, json}`.
 ui_transaction: fn(c: Ctx, body: Dyn) -> Dyn Failure! { ui_transaction_js(c, js(body)) }
 
 ui_transaction_js: fn(c: Ctx, body: String) -> Dyn Failure! {
-    if !eval_bool(c, "window.__jetCanvasTest.postTransaction({body})") -> return Err(fail_with("UI transaction helper missing"))
+    if !eval_bool(c, "window.__jetCanvasTest.postTransaction({body})") {
+        return Err(fail_with("UI transaction helper missing"))
+    }
     wait_js(c, "window.__jetCanvasLastTxResult !== null && window.__jetCanvasLastTxResult !== undefined", "UI transaction result")
     eval(c, "(() => {{ const json = window.__jetCanvasLastTxResult; return {{ ok: !(json && json.ok === false), json }}; }})()")
 }
@@ -371,7 +413,9 @@ redo: fn(c: Ctx) -> String Failure! { history_step(c, "redo") }
 history_step: fn(c: Ctx, step: String) -> String Failure! {
     before: source(c)
     depth: if step == "undo" -> "undoDepth" else -> "redoDepth"
-    if num(at(state(c), depth)) < 1.0 -> return Err(fail_with("{step} helper missing or stack empty"))
+    if num(at(state(c), depth)) < 1.0 {
+        return Err(fail_with("{step} helper missing or stack empty"))
+    }
     started: eval_bool(c, "(() => {{ window.__jetCanvasHistoryPromise = window.__jetCanvasTest.{step}(); return typeof window.__jetCanvasHistoryPromise?.then === 'function'; }})()")
     if !started -> return Err(fail_with("{step} helper did not return asynchronous completion"))
     eval(c, "window.__jetCanvasHistoryPromise")
@@ -398,15 +442,22 @@ replace_source: fn(c: Ctx, value: String) -> Dyn Failure! {
 }
 
 nonblank_pixels: fn(c: Ctx) -> Int Failure! {
-    Ok(int(eval(c, """
-        (() => {{
-          const canvas = document.getElementById("jet-canvas-view");
-          const ctx = canvas.getContext("2d");
-          const w = Math.min(canvas.width, 160), h = Math.min(canvas.height, 120);
-          const data = ctx.getImageData(0, 0, w, h).data;
-          let count = 0;
-          for (let i = 0; i < data.length; i += 4) if (data[i] || data[i + 1] || data[i + 2]) count++;
-          return count;
-        }})()
-        """)))
+    Ok(
+        int(
+            eval(
+                c,
+                """
+                (() => {{
+                  const canvas = document.getElementById("jet-canvas-view");
+                  const ctx = canvas.getContext("2d");
+                  const w = Math.min(canvas.width, 160), h = Math.min(canvas.height, 120);
+                  const data = ctx.getImageData(0, 0, w, h).data;
+                  let count = 0;
+                  for (let i = 0; i < data.length; i += 4) if (data[i] || data[i + 1] || data[i + 2]) count++;
+                  return count;
+                }})()
+                """,
+            ),
+        ),
+    )
 }

@@ -73,22 +73,31 @@ rt_sha256_k: fn(round: I64) -> I64 {
         else -> I64{0xc67178f2}
     }
 }
+
 rt_sha256_rotate: fn(word: I64, shift: I64) -> I64 {
     ((word >> shift).bit_or((word << (I64{32} - shift)))).bit_and(I64{0xffffffff})
 }
+
 rt_sha256_byte: fn(left: I64, left_len: I64, right: I64, right_len: I64, third: I64, third_len: I64, fourth: I64, length: I64, at: I64, end: I64) -> I64 {
-    if (at < left_len) -> return rt_text_byte(wrapping(left + at))
-    if (at < left_len + right_len) -> return rt_text_byte(wrapping(wrapping(right + at) - left_len))
-    if (at < left_len + right_len + third_len) -> return rt_text_byte(wrapping(wrapping(wrapping(third + at) - left_len) - right_len))
-    if (at < length) -> return rt_text_byte(wrapping(wrapping(wrapping(wrapping(fourth + at) - left_len) - right_len) - third_len))
-    if (at == length) -> return I64{128}
+    if (at < left_len) { return rt_text_byte(wrapping(left + at)) }
+    if (at < left_len + right_len) {
+        return rt_text_byte(wrapping(wrapping(right + at) - left_len))
+    }
+    if (at < left_len + right_len + third_len) {
+        return rt_text_byte(wrapping(wrapping(wrapping(third + at) - left_len) - right_len))
+    }
+    if (at < length) {
+        return rt_text_byte(wrapping(wrapping(wrapping(wrapping(fourth + at) - left_len) - right_len) - third_len))
+    }
+    if (at == length) { return I64{128} }
     if (at >= end - I64{8}) {
         shift: (end - I64{1} - at) * I64{8}
-        if (shift == I64{0}) -> return (length.bit_and(I64{31})) << I64{3}
+        if (shift == I64{0}) { return (length.bit_and(I64{31})) << I64{3} }
         return (length >> (shift - I64{3})).bit_and(I64{255})
     }
     I64{0}
 }
+
 // Four borrowed spans support HMAC/HKDF without concatenating secret input.
 // Guard the sum incrementally before any overflow; digest disjoint from inputs.
 rt_sha2_32_parts4: fn(left: I64, left_len: I64, right: I64, right_len: I64, third: I64, third_len: I64, fourth: I64, fourth_len: I64, digest: I64, scratch: I64, short: Bool) {
@@ -132,11 +141,11 @@ rt_sha2_32_parts4: fn(left: I64, left_len: I64, right: I64, right_len: I64, thir
     loop off < end {
         t := I64{0}
         loop {
-            if (t >= I64{16}) -> break
+            if (t >= I64{16}) { break }
             word := I64{0}
             j := I64{0}
             loop {
-                if (j >= I64{4}) -> break
+                if (j >= I64{4}) { break }
                 word = (word << I64{8}).bit_or(rt_sha256_byte(left, left_len, right, right_len, third, third_len, fourth, length, off + t * I64{4} + j, end))
                 j += I64{1}
             }
@@ -144,7 +153,7 @@ rt_sha2_32_parts4: fn(left: I64, left_len: I64, right: I64, right_len: I64, thir
             t += I64{1}
         }
         loop {
-            if (t >= I64{64}) -> break
+            if (t >= I64{64}) { break }
             x: rt_text_word(wrapping(schedule + (t - I64{15}) * I64{8}))
             y: rt_text_word(wrapping(schedule + (t - I64{2}) * I64{8}))
             s0: rt_sha256_rotate(x, I64{7}).bit_xor(rt_sha256_rotate(x, I64{18})).bit_xor((x >> I64{3}))
@@ -162,7 +171,7 @@ rt_sha2_32_parts4: fn(left: I64, left_len: I64, right: I64, right_len: I64, thir
         h := rt_text_word(wrapping(scratch + I64{56}))
         t = I64{0}
         loop {
-            if (t >= I64{64}) -> break
+            if (t >= I64{64}) { break }
             s1: rt_sha256_rotate(e, I64{6}).bit_xor(rt_sha256_rotate(e, I64{11})).bit_xor(rt_sha256_rotate(e, I64{25}))
             ch: (e.bit_and(f)).bit_xor(((e.bit_xor(I64{0xffffffff})).bit_and(g)))
             temp1: h + s1 + ch + rt_sha256_k(t) + rt_text_word(wrapping(schedule + t * I64{8}))
@@ -191,7 +200,7 @@ rt_sha2_32_parts4: fn(left: I64, left_len: I64, right: I64, right_len: I64, thir
     at := I64{0}
     output_length: if short -> I64{28} else -> I64{32}
     loop {
-        if (at >= output_length) -> break
+        if (at >= output_length) { break }
         word: rt_text_word(wrapping(scratch + (at / I64{4}) * I64{8}))
         rt_text_put(wrapping(digest + at), (word >> (I64{24} - (at % I64{4}) * I64{8})).bit_and(I64{255}))
         at += I64{1}
@@ -200,21 +209,25 @@ rt_sha2_32_parts4: fn(left: I64, left_len: I64, right: I64, right_len: I64, thir
     // returning; the scratch owner is responsible for its eventual free.
     at = I64{0}
     loop {
-        if (at >= I64{576}) -> break
+        if (at >= I64{576}) { break }
         rt_text_store(wrapping(scratch + at), I64{0})
         at += I64{8}
     }
 }
+
 rt_sha256_parts4: fn(left: I64, left_len: I64, right: I64, right_len: I64, third: I64, third_len: I64, fourth: I64, fourth_len: I64, digest: I64, scratch: I64) {
     rt_sha2_32_parts4(left, left_len, right, right_len, third, third_len, fourth, fourth_len, digest, scratch, false)
 }
+
 // SHA-224 is the same compression function, with its FIPS180-4 IV and output28.
 rt_crypto_sha224: fn(input: I64, length: I64, output: I64, scratch: I64) {
     rt_sha2_32_parts4(input, length, I64{1}, I64{0}, I64{1}, I64{0}, I64{1}, I64{0}, output, scratch, true)
 }
+
 rt_sha256_parts: fn(left: I64, left_len: I64, right: I64, right_len: I64, digest: I64, scratch: I64) {
     rt_sha256_parts4(left, left_len, right, right_len, I64{1}, I64{0}, I64{1}, I64{0}, digest, scratch)
 }
+
 #Export(c) jet_rt_native_sha256: fn(bytes: I64, length: I64, digest: I64, scratch: I64) {
     rt_sha256_parts(bytes, length, I64{1}, I64{0}, digest, scratch)
 }
@@ -224,9 +237,12 @@ rt_sha256_parts: fn(left: I64, left_len: I64, right: I64, right_len: I64, digest
 // Set up only on a host whose cpuid reports SHA, SSSE3 and SSE4.1; the table
 // lives for the process.
 sha256_ni_table := I64{0}
+
 // runtime-init: 4 when sha256_ni_table
 #Export(c) jet_rt_sha256_ni_init: fn() {
-    if (sha256_ni_table != I64{0} || !sha256_ni_present()) -> return
+    if (sha256_ni_table != I64{0} || !sha256_ni_present()) {
+        return
+    }
     table: jet_rt_alloc(I64{272}, I64{8})
     rt_text_store(table, I64{0x0405060700010203})
     rt_text_store(wrapping(table + I64{8}), I64{0x0c0d0e0f08090a0b})
@@ -236,17 +252,15 @@ sha256_ni_table := I64{0}
         rt_text_store(wrapping(table + (I64{16} + round * I64{4})), rt_crypto_word64(rt_sha256_k(round + I64{1}), rt_sha256_k(round)))
         round += I64{2}
     }
-    #Unsafe("runtime-init runs before any other thread exists") {
-        sha256_ni_table = table
-    }
+    #Unsafe("runtime-init runs before any other thread exists") { sha256_ni_table = table }
 }
 
 // CPUID.7.0:EBX bit 29 (SHA) with CPUID.1:ECX bits 9 (SSSE3) and 19 (SSE4.1).
 sha256_ni_present: fn() -> Bool {
     #Unsafe("cpuid only reports processor identification") {
-        if (os_cpuid_eax_i64(I64{0}, I64{0}) < I64{7}) -> return false
-        if (os_cpuid_ecx_i64(I64{1}, I64{0}).bit_and(I64{524800}) != I64{524800}) -> return false
-        if (os_cpuid_ebx_i64(I64{7}, I64{0}).bit_and(I64{536870912}) != I64{0}) -> return true
+        if (os_cpuid_eax_i64(I64{0}, I64{0}) < I64{7}) { return false }
+        if (os_cpuid_ecx_i64(I64{1}, I64{0}).bit_and(I64{524800}) != I64{524800}) { return false }
+        if (os_cpuid_ebx_i64(I64{7}, I64{0}).bit_and(I64{536870912}) != I64{0}) { return true }
     }
     false
 }
@@ -258,10 +272,12 @@ sha256_ni_present: fn() -> Bool {
 // bounds; Core then runs its own rounds.
 #Export(c) jet_crypto_sha256_blocks: fn(header: I64, data: I64, length: I64, offset: I64, count: I64) -> Bool {
     table: sha256_ni_table
-    if (table == I64{0} || RT_HOST_U8_STRIDE != I64{1}) -> return false
+    if (table == I64{0} || RT_HOST_U8_STRIDE != I64{1}) { return false }
     start: jet_int_owned_to_i64(offset)
     blocks: jet_int_owned_to_i64(count)
-    if (rt_text_word(header) != I64{8} || start < I64{0} || blocks < I64{0} || start > length || blocks > (length - start) / I64{64}) -> return false
+    if (rt_text_word(header) != I64{8} || start < I64{0} || blocks < I64{0} || start > length || blocks > (length - start) / I64{64}) {
+        return false
+    }
     state: rt_text_word(wrapping(header + I64{16}))
     at := start
     end: start + blocks * I64{64}

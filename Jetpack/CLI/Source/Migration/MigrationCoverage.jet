@@ -21,15 +21,19 @@ CoveragePackage: struct {
         fields: [(key: String, value: Dyn)]{
             (key: "name", value: Dyn.Text(self.name.copy())),
             (key: "version", value: Dyn.Text(self.version.copy())),
-            (key: "reference", value: Dyn.Text(self.reference.copy()))
+            (key: "reference", value: Dyn.Text(self.reference.copy())),
         }
         Dyn.Object(fields)
     }
 
     // Name and reference must not be blank.
     validate: fn(self) CoverageError! {
-        if self.name.trim() == "" -> return Err(CoverageError.EmptyField{field: "name", package: self.name})
-        if self.reference.trim() == "" -> return Err(CoverageError.EmptyField{field: "reference", package: self.name})
+        if self.name.trim() == "" {
+            return Err(CoverageError.EmptyField{field: "name", package: self.name})
+        }
+        if self.reference.trim() == "" {
+            return Err(CoverageError.EmptyField{field: "reference", package: self.name})
+        }
     }
 }
 
@@ -96,13 +100,15 @@ CoverageReport: struct {
         total: native_recipes.len() + centrally_imported_recipes.len() + local_imports.len() + not_yet_imported.len()
         nativeized: native_recipes.len()
         percent: if total == 0 -> 0 else -> nativeized * 100 /% total
-        Ok(CoverageReport{
-            native_recipes: native_recipes,
-            centrally_imported_recipes: centrally_imported_recipes,
-            local_imports: local_imports,
-            not_yet_imported: not_yet_imported,
-            nativeization: NativeizationProgress{total: total, nativeized: nativeized, remaining: total - nativeized, percent: percent}
-        })
+        Ok(
+            CoverageReport{
+                native_recipes: native_recipes,
+                centrally_imported_recipes: centrally_imported_recipes,
+                local_imports: local_imports,
+                not_yet_imported: not_yet_imported,
+                nativeization: NativeizationProgress{total: total, nativeized: nativeized, remaining: total - nativeized, percent: percent},
+            },
+        )
     }
 
     // Compact human-readable projection of the report.
@@ -112,7 +118,7 @@ CoverageReport: struct {
             "centrally imported recipes: {self.centrally_imported_recipes.len()}",
             "local imports: {self.local_imports.len()}",
             "not-yet-imported packages: {self.not_yet_imported.len()}",
-            "nativeization: {self.nativeization.nativeized}/{self.nativeization.total} ({self.nativeization.percent}%)"
+            "nativeization: {self.nativeization.nativeized}/{self.nativeization.total} ({self.nativeization.percent}%)",
         }
         "{lines.join("\n")}\n"
     }
@@ -125,7 +131,7 @@ CoverageReport: struct {
             (key: "total", value: Dyn.Int(self.nativeization.total)),
             (key: "nativeized", value: Dyn.Int(self.nativeization.nativeized)),
             (key: "remaining", value: Dyn.Int(self.nativeization.remaining)),
-            (key: "percent", value: Dyn.Int(self.nativeization.percent))
+            (key: "percent", value: Dyn.Int(self.nativeization.percent)),
         }
         fields: [(key: String, value: Dyn)]{
             (key: "schema", value: Dyn.Text(CLI_COVERAGE_SCHEMA)),
@@ -133,7 +139,7 @@ CoverageReport: struct {
             (key: "centrally_imported_recipes", value: cli_coverage_packages_json(self.centrally_imported_recipes)),
             (key: "local_imports", value: cli_coverage_packages_json(self.local_imports)),
             (key: "not_yet_imported", value: cli_coverage_packages_json(self.not_yet_imported)),
-            (key: "nativeization", value: Dyn.Object(progress_fields))
+            (key: "nativeization", value: Dyn.Object(progress_fields)),
         }
         pkg_json_render(Dyn.Object(fields))
     }
@@ -182,7 +188,9 @@ cli_coverage_unique: fn(packages: [CoveragePackage], bucket: CoverageBucket?) ->
 cli_coverage_assign: fn(packages: [CoveragePackage], bucket: CoverageBucket, inventory: [CoveragePackage], assigned: &[(package: CoveragePackage, bucket: CoverageBucket)]) -> [CoveragePackage] CoverageError! {
     unique: cli_coverage_unique(packages, Val(bucket))
     loop package in unique {
-        if !inventory.contains(package) -> return Err(CoverageError.PackageOutsideInventory{bucket: bucket, package: package.name})
+        if !inventory.contains(package) {
+            return Err(CoverageError.PackageOutsideInventory{bucket: bucket, package: package.name})
+        }
         if cli_coverage_bucket_of(assigned, package) == {
             .Val(first) -> return Err(CoverageError.PackageInMultipleBuckets{package: package.name, first: first, second: bucket})
             .None -> {}

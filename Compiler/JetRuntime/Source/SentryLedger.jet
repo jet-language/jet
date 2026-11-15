@@ -4,16 +4,17 @@
 sentry_ledger_stat: fn(path: I64, scratch: I64) -> I64 {
     trap_syscall(I64{262}, I64{-100}, path, scratch, I64{256}, I64{0}, I64{0})
 }
+
 sentry_ledger_parent: fn(path: I64, scratch: I64) -> Bool {
     length: rt_text_len(path)
     data: rt_text_data(path)
     end := I64{-1}
     at := I64{0}
     loop at < length {
-        if (trap_byte(wrapping(data + at)) == I64{47}) -> end = at
+        if (trap_byte(wrapping(data + at)) == I64{47}) { end = at }
         at += I64{1}
     }
-    if (end < I64{0}) -> return true
+    if (end < I64{0}) { return true }
     parent_len: if (end == I64{0}) -> I64{1} else -> end
     parent: jet_rt_alloc(parent_len + I64{1}, I64{1})
     coll_copy(data, parent, parent_len)
@@ -21,7 +22,9 @@ sentry_ledger_parent: fn(path: I64, scratch: I64) -> Bool {
     status: sentry_ledger_stat(parent, scratch)
     valid := false
     if {
-        (status == I64{0}) -> valid = ((sync_load(wrapping(scratch + I64{24}))).bit_and(I64{61440})) == I64{16384}
+        (status == I64{0}) -> {
+            valid = ((sync_load(wrapping(scratch + I64{24}))).bit_and(I64{61440})) == I64{16384}
+        }
         (status == I64{-2}) -> {
             valid = true
             at = I64{1}
@@ -42,19 +45,24 @@ sentry_ledger_parent: fn(path: I64, scratch: I64) -> Bool {
             }
             if valid {
                 valid = sentry_ledger_stat(parent, scratch) == I64{0} && (sync_load(wrapping(scratch + I64{24})).bit_and(I64{61440})) == I64{16384}
-                if valid -> valid = trap_syscall(I64{90}, parent, I64{448}, I64{0}, I64{0}, I64{0}, I64{0}) == I64{0}
+                if valid {
+                    valid = trap_syscall(I64{90}, parent, I64{448}, I64{0}, I64{0}, I64{0}, I64{0}) == I64{0}
+                }
             }
         }
     }
     jet_rt_free(parent, parent_len + I64{1}, I64{1})
     valid
 }
+
 sentry_ledger_write: fn(path: I64, row: I64) {
     length: rt_text_len(path)
     data: rt_text_data(path)
     at := I64{0}
     loop at < length {
-        if (trap_byte(wrapping(data + at)) == I64{0}) -> return
+        if (trap_byte(wrapping(data + at)) == I64{0}) {
+            return
+        }
         at += I64{1}
     }
     name: jet_rt_alloc(length + I64{1}, I64{1})
@@ -66,7 +74,9 @@ sentry_ledger_write: fn(path: I64, row: I64) {
     if allowed {
         status: sentry_ledger_stat(name, scratch)
         if {
-            (status == I64{0}) -> allowed = ((sync_load(wrapping(scratch + I64{24}))).bit_and(I64{61440})) == I64{32768} && sync_load(wrapping(scratch + I64{48})) <= I64{4194304} - rt_text_len(row)
+            (status == I64{0}) -> {
+                allowed = ((sync_load(wrapping(scratch + I64{24}))).bit_and(I64{61440})) == I64{32768} && sync_load(wrapping(scratch + I64{48})) <= I64{4194304} - rt_text_len(row)
+            }
             (status != I64{-2}) -> allowed = false
         }
     }
@@ -77,8 +87,8 @@ sentry_ledger_write: fn(path: I64, row: I64) {
             count: rt_text_len(row)
             loop used < count {
                 written: trap_syscall(I64{1}, fd, rt_text_data(row) + used, count - used, I64{0}, I64{0}, I64{0})
-                if (written == I64{-4}) -> next
-                if (written <= I64{0}) -> break
+                if (written == I64{-4}) { next }
+                if (written <= I64{0}) { break }
                 used += written
             }
             _ := trap_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
@@ -88,6 +98,7 @@ sentry_ledger_write: fn(path: I64, row: I64) {
     jet_rt_free(scratch, I64{144}, I64{8})
     jet_rt_free(name, length + I64{1}, I64{1})
 }
+
 sentry_ledger: fn(fault: I64, gate: I64, detail: I64) {
     name: services_msg_ledger_key()
     path := rt_env_get(name)

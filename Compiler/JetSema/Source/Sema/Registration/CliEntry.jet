@@ -34,7 +34,9 @@ use {
 }
 
 SEMA_CLI_ENTRY_NAME: "__jet_cli_run"
+
 SEMA_CLI_DECODE_METHOD: "__jet_cli_decode"
+
 SEMA_CLI_ENTRY_IMPORTS: "use {{\n    __jet_cli_args: core.args\n    __jet_cli_process: core.process\n    __jet_cli_term: core.term\n}}\n"
 
 // One typed entry of the entry file that has no wrapper yet: `wrapper` calls
@@ -56,7 +58,9 @@ sema_cli_entry_output_wrapper: fn(address: String) -> String {
 sema_cli_entry_expand: fn(program: &Program) {
     targets: sema_cli_entry_pending(program.items)
     entries := sema_cli_entry_projections(program.items)
-    if targets.len() == 0 && entries.len() == 0 -> return
+    if targets.len() == 0 && entries.len() == 0 {
+        return
+    }
     // A qualified entry or an imported `T` waits for every module to load.
     later := false
     loop target in targets {
@@ -73,9 +77,13 @@ sema_cli_entry_expand: fn(program: &Program) {
         entry: sema_cli_entry_source(definition, program.items, type_name, target) ?? next
         entries.push(entry)
     }
-    if entries.len() == 0 && !later -> return
+    if entries.len() == 0 && !later {
+        return
+    }
     parsed: parse_generated_source("{SEMA_CLI_ENTRY_IMPORTS}\n{entries.join("\n")}".bytes())
-    if parsed.diagnostics.len() > 0 -> return
+    if parsed.diagnostics.len() > 0 {
+        return
+    }
     loop declaration in parsed.program.imports -> program.imports.push(declaration)
     loop item in parsed.program.items {
         // `T.__jet_cli_decode` and `T.merge` are the compiler's: their spans
@@ -110,9 +118,7 @@ sema_cli_entry_expand_imported: fn(program: &Program, imported: [Item]) {
             if ty == .Named(name) {
                 if name.contains(".") -> next
                 type_name = name.copy()
-            } else {
-                next
-            }
+            } else { next }
             qualifier = "{alias}."
         } else {
             ty: sema_cli_entry_param(program.items, target.function) ?? next
@@ -139,7 +145,9 @@ sema_cli_entry_expand_imported: fn(program: &Program, imported: [Item]) {
 // local one-parameter function or a `module.function`.
 sema_cli_entry_pending: fn(items: [Item]) -> [SemaCLIEntryTarget] {
     targets := [SemaCLIEntryTarget]{}
-    if sema_cli_entry_param(items, "run") != None -> targets.push(SemaCLIEntryTarget{wrapper: SEMA_CLI_ENTRY_NAME, function: "run", module_alias: None})
+    if sema_cli_entry_param(items, "run") != None {
+        targets.push(SemaCLIEntryTarget{wrapper: SEMA_CLI_ENTRY_NAME, function: "run", module_alias: None})
+    }
     loop item in items {
         if item == .Const(definition) {
             if definition.ty != (Val(Type.Named{name: "Output"})) -> next
@@ -150,9 +158,13 @@ sema_cli_entry_pending: fn(items: [Item]) -> [SemaCLIEntryTarget] {
                         if label != "entry" -> next
                         wrapper: sema_cli_entry_output_wrapper(definition.name)
                         if value == .Ident(name, _, _) {
-                            if sema_cli_entry_param(items, name) != None -> targets.push(SemaCLIEntryTarget{wrapper: wrapper, function: name.copy(), module_alias: None})
+                            if sema_cli_entry_param(items, name) != None {
+                                targets.push(SemaCLIEntryTarget{wrapper: wrapper, function: name.copy(), module_alias: None})
+                            }
                         } else if sema_output_path(value) == .Val(path) {
-                            if path.members.len() == 1 -> targets.push(SemaCLIEntryTarget{wrapper: wrapper, function: path.members[0].name.copy(), module_alias: Val(path.root.copy())})
+                            if path.members.len() == 1 {
+                                targets.push(SemaCLIEntryTarget{wrapper: wrapper, function: path.members[0].name.copy(), module_alias: Val(path.root.copy())})
+                            }
                         }
                     }
                 }
@@ -197,7 +209,9 @@ sema_cli_entry_declared: fn(items: [Item], name: String) -> Bool {
 sema_cli_entry_param: fn(items: [Item], name: String) -> Type? {
     loop item in items {
         if item == .Func(function) {
-            if function.name == name && function.params.len() == 1 -> return Val(function.params[0].ty.copy())
+            if function.name == name && function.params.len() == 1 {
+                return Val(function.params[0].ty.copy())
+            }
         }
     }
     None
@@ -326,7 +340,9 @@ sema_cli_entry_spec: fn(definition: StructDef, items: [Item], type_ref: String) 
     loop function in definition.methods {
         if sema_computed_field_getter_function(function) -> next
         has_self: loop param in function.params {
-            if param.name == "self" -> break true
+            if param.name == "self" {
+                break true
+            }
         } ?? false
         callee: if has_self -> "__args.{function.name}" else -> "{type_ref}.{function.name}"
         command: sema_cli_entry_command(unicode.lower(function.name), sema_cli_entry_doc(function.markers), function.params, "", callee) ?? return None
@@ -352,7 +368,9 @@ sema_cli_entry_spec_line: fn(help: String, root: [SemaCLIInput], commands: [Sema
     envs := [String]{}
     loop input in root {
         table = "{table}{sema_cli_entry_record(input)}"
-        if input.env.bytes().len() > 0 -> envs.push("__jet_cli_process.env_get({sema_cli_entry_text(input.env)})")
+        if input.env.bytes().len() > 0 {
+            envs.push("__jet_cli_process.env_get({sema_cli_entry_text(input.env)})")
+        }
     }
     loop command in commands {
         table = "{table}c{sema_cli_entry_field(command.name)}{sema_cli_entry_field(sema_cli_entry_command_help(command, root))}"
@@ -379,9 +397,7 @@ sema_cli_entry_record: fn(input: SemaCLIInput) -> String Never! {
 }
 
 // `text` as one table field: its byte length, `:`, the text.
-sema_cli_entry_field: fn(text: String) -> String Never! {
-    "{text.bytes().len()}:{text}"
-}
+sema_cli_entry_field: fn(text: String) -> String Never! { "{text.bytes().len()}:{text}" }
 
 // The `core.args` parse of the spec: the Float-checking one only when an
 // input is a Float, so other programs carry no Float parser.
@@ -447,7 +463,9 @@ sema_cli_entry_help: fn(description: String?, local: [SemaCLIInput], commands: [
         if input.kind == 3 -> note = "{note} [choices: {input.choices.join(", ")}]"
         s = "{s}  {sema_cli_entry_pad(sema_cli_entry_label(input), 24)} {note}\n"
     }
-    loop command in commands -> s = "{s}  {sema_cli_entry_pad(command.name, 24)} {command.description ?? ""}\n"
+    loop command in commands {
+        s = "{s}  {sema_cli_entry_pad(command.name, 24)} {command.description ?? ""}\n"
+    }
     s = "{s}  {sema_cli_entry_pad("--help", 24)} show this help\n"
     if show_version -> s = "{s}  {sema_cli_entry_pad("--version", 24)} show version\n"
     s
@@ -517,11 +535,11 @@ sema_cli_entry_direct: fn(lines: &[String], spec: SemaCLIEntrySpec, help_end: St
     loop (slot, input) in root {
         names.push(sema_cli_entry_text(input.name))
         if input.short.bytes().len() > 0 -> shorts = true
-        if input.flag {
-            lines.push("    __f{slot} := false")
-        } else {
+        if input.flag -> lines.push("    __f{slot} := false") else {
             lines.push("    __v{slot} := String?{{None}}")
-            if input.env.bytes().len() > 0 -> lines.push("    __e{slot}: __jet_cli_process.env_get({sema_cli_entry_text(input.env)})")
+            if input.env.bytes().len() > 0 {
+                lines.push("    __e{slot}: __jet_cli_process.env_get({sema_cli_entry_text(input.env)})")
+            }
         }
         if input.positional {
             positionals = true
@@ -669,9 +687,7 @@ sema_cli_entry_direct: fn(lines: &[String], spec: SemaCLIEntrySpec, help_end: St
         if fallback == .Val(value) {
             lines.push("    __v{slot} = {value}")
             if input.default == None -> lines.push("    if __v{slot} == None -> {missing}")
-        } else {
-            lines.push("    {missing}")
-        }
+        } else { lines.push("    {missing}") }
         lines.push("    }}")
     }
     sema_cli_entry_fail(lines, "{bare} < __pos.len()", sema_cli_entry_usage("__jet_cli_args.__cli_surplus(__pos, {bare})"), projection)
@@ -680,9 +696,13 @@ sema_cli_entry_direct: fn(lines: &[String], spec: SemaCLIEntrySpec, help_end: St
         fallback: sema_cli_entry_fallback(input, slot) ?? next
         lines.push("    if __v{slot} == None -> __v{slot} = {fallback}")
     }
-    if missable -> sema_cli_entry_fail(lines, "__missing.len() > 0 && !__asked", sema_cli_entry_usage("__jet_cli_args.__cli_missing(__missing)"), projection)
+    if missable {
+        sema_cli_entry_fail(lines, "__missing.len() > 0 && !__asked", sema_cli_entry_usage("__jet_cli_args.__cli_missing(__missing)"), projection)
+    }
     loop (slot, input) in root {
-        if input.required && !input.flag -> sema_cli_entry_fail(lines, "__v{slot} == None && !__asked", sema_cli_entry_usage(sema_cli_entry_text("missing required option `--{input.name}`")), projection)
+        if input.required && !input.flag {
+            sema_cli_entry_fail(lines, "__v{slot} == None && !__asked", sema_cli_entry_usage(sema_cli_entry_text("missing required option `--{input.name}`")), projection)
+        }
     }
     lines.push("    if __asked {{")
     lines.push("    print(__jet_cli_args.__cli_usage(__argv, __help))")
@@ -777,8 +797,12 @@ sema_cli_entry_usage: fn(message: String) -> String Never! {
 // (Args.jet cli_store_error); with `marks` it records that argv named it.
 sema_cli_entry_store: fn(lines: &[String], input: SemaCLIInput, slot: Int, value: String, projection: Bool, marks: Bool) {
     name: sema_cli_entry_text(input.name)
-    if input.kind == 1 -> sema_cli_entry_fail(lines, "!__jet_cli_args.__cli_is_int({value})", "__jet_cli_args.__cli_int_refusal({name}, {value})", projection)
-    if input.kind == 2 -> sema_cli_entry_fail(lines, "!__jet_cli_args.__cli_is_float({value})", "__jet_cli_args.__cli_float_refusal({name}, {value})", projection)
+    if input.kind == 1 {
+        sema_cli_entry_fail(lines, "!__jet_cli_args.__cli_is_int({value})", "__jet_cli_args.__cli_int_refusal({name}, {value})", projection)
+    }
+    if input.kind == 2 {
+        sema_cli_entry_fail(lines, "!__jet_cli_args.__cli_is_float({value})", "__jet_cli_args.__cli_float_refusal({name}, {value})", projection)
+    }
     if input.kind == 3 {
         outside: loop choice in input.choices -> "{value} != {sema_cli_entry_text(choice)}"
         sema_cli_entry_fail(lines, outside.join(" && "), "__jet_cli_args.__cli_choice_refusal({name}, {value}, {sema_cli_entry_text(input.choices.join(", "))})", projection)
@@ -859,7 +883,9 @@ sema_cli_entry_projections: fn(items: [Item]) -> [String] {
     loop item in items {
         if item == .Struct(definition) {
             cli: loop derive_item in definition.derives {
-                if derive_item.name == "CLI" -> break true
+                if derive_item.name == "CLI" {
+                    break true
+                }
             } ?? false
             if !cli || definition.type_params.len() > 0 -> next
             if sema_cli_entry_member_declared(items, definition, SEMA_CLI_DECODE_METHOD) -> next
@@ -945,11 +971,7 @@ sema_cli_entry_command: fn(command: String, description: String?, params: [Param
             inputs.push(sema_cli_entry_input(flag, "", help, false, param.ty, default, "", required, required))
             value = sema_cli_entry_value(param.ty, "__jet_cli_args.__cli_value(__parsed, {sema_cli_entry_text(flag)})") ?? return None
         }
-        if labeled {
-            arguments.push("{label}: {value}")
-        } else {
-            arguments.push(value)
-        }
+        if labeled -> arguments.push("{label}: {value}") else -> arguments.push(value)
     }
     arm: SemaCLIArm{patterns: [sema_cli_entry_text(command)], body: ["    {callee}({arguments.join(", ")})"]}
     Val((command: SemaCLICommand{name: command.copy(), description: description.copy(), inputs: inputs}, arm: arm))
@@ -957,7 +979,9 @@ sema_cli_entry_command: fn(command: String, description: String?, params: [Param
 
 // One spec input. A presence flag takes no value, default or variable.
 sema_cli_entry_input: fn(flag: String, short: String, help: String, is_flag: Bool, ty: Type, default: String?, env: String, required: Bool, positional: Bool) -> SemaCLIInput Never! {
-    if is_flag -> return SemaCLIInput{name: flag.copy(), short: short.copy(), help: help.copy(), meta: "", flag: true, kind: 4, choices: [String]{}, default: None, env: "", required: false, positional: false}
+    if is_flag {
+        return SemaCLIInput{name: flag.copy(), short: short.copy(), help: help.copy(), meta: "", flag: true, kind: 4, choices: [String]{}, default: None, env: "", required: false, positional: false}
+    }
     SemaCLIInput{name: flag.copy(), short: short.copy(), help: help.copy(), meta: unicode.upper(flag.replace("-", "_")), flag: false, kind: sema_cli_entry_kind(ty), choices: [String]{}, default: default.copy(), env: env.copy(), required: required, positional: positional}
 }
 
@@ -980,7 +1004,9 @@ sema_cli_entry_value: fn(ty: Type, source: String) -> String? {
         .Bool -> return Val("__jet_cli_args.__cli_bool_of({source})")
         .String -> return Val("__jet_cli_args.__cli_text_of({source})")
         .Named(type_name) -> {
-            if type_name == "Path" -> return Val("Path.from(__jet_cli_args.__cli_text_of({source}))")
+            if type_name == "Path" {
+                return Val("Path.from(__jet_cli_args.__cli_text_of({source}))")
+            }
         }
         .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
@@ -996,7 +1022,9 @@ sema_cli_entry_optional: fn(ty: Type, source: String) -> String? {
         .Bool -> return Val("__jet_cli_args.__cli_bool_opt_of({source})")
         .String -> return Val("__jet_cli_args.__cli_text_opt_of({source})")
         .Named(type_name) -> {
-            if type_name == "Path" -> return Val("if {source} != None -> Path?{{Val(Path.from(__jet_cli_args.__cli_text_of({source})))}} else -> Path?{{None}}")
+            if type_name == "Path" {
+                return Val("if {source} != None -> Path?{{Val(Path.from(__jet_cli_args.__cli_text_of({source})))}} else -> Path?{{None}}")
+            }
         }
         .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
@@ -1018,9 +1046,7 @@ sema_cli_entry_default: fn(expr: Expr) -> String? {
     None
 }
 
-sema_cli_entry_doc: fn(markers: [Marker]) -> String? {
-    sema_cli_entry_marker_text(markers, "Doc")
-}
+sema_cli_entry_doc: fn(markers: [Marker]) -> String? { sema_cli_entry_marker_text(markers, "Doc") }
 
 sema_cli_entry_marker_text: fn(markers: [Marker], name: String) -> String? {
     marker: sema_registration_cli_marker(markers, name) ?? return None

@@ -21,43 +21,45 @@ use {
 /// Why Base64 decoding failed (MBEDTLS_ERR_BASE64_*).
 #Error
 Base64Error: enum {
-    /// A byte that is no Base64 digit, a space inside a line, misplaced or
-    /// surplus `=` padding, or a digit count no encoding produces
-    /// (INVALID_CHARACTER, -0x002C).
     InvalidCharacter
 }
+
+/// A byte that is no Base64 digit, a space inside a line, misplaced or
+/// surplus `=` padding, or a digit count no encoding produces
+/// (INVALID_CHARACTER, -0x002C).
 
 /// Why reading a PEM block failed (MBEDTLS_ERR_PEM_*).
 #Error
 PEMError: enum {
-    /// The header or the footer is missing, out of order, or the header
-    /// line does not end (NO_HEADER_FOOTER_PRESENT, -0x1080).
     NoHeaderFooterPresent
-    /// The encapsulation headers or the body are malformed
-    /// (INVALID_DATA, -0x1100); with the Base64 error when the body is not
-    /// Base64.
     InvalidData(Base64Error?)
-    /// The DEK-Info IV is not hex of the cipher's IV size
-    /// (INVALID_ENC_IV, -0x1200).
     InvalidEncIV
-    /// The DEK-Info cipher is not one PEM supports
-    /// (UNKNOWN_ENC_ALG, -0x1280).
     UnknownEncAlg
-    /// The block is encrypted and no password was given
-    /// (PASSWORD_REQUIRED, -0x1300).
     PasswordRequired
-    /// The decrypted block's PKCS#7 padding is wrong: most likely a wrong
-    /// password (PASSWORD_MISMATCH, -0x1380).
     PasswordMismatch
-    /// The body decodes to nothing (BAD_INPUT_DATA, -0x1480).
     BadInputData
-    /// DES-CBC or DES-EDE3-CBC rejected the body
-    /// (MBEDTLS_ERR_DES_INVALID_INPUT_LENGTH when it is not whole blocks).
     DES(des.DESError)
-    /// AES-CBC rejected the body: it is not whole 16-byte blocks
-    /// (MBEDTLS_ERR_AES_INVALID_INPUT_LENGTH, -0x0022).
     AESInvalidInputLength
 }
+
+/// The header or the footer is missing, out of order, or the header
+/// line does not end (NO_HEADER_FOOTER_PRESENT, -0x1080).
+/// The encapsulation headers or the body are malformed
+/// (INVALID_DATA, -0x1100); with the Base64 error when the body is not
+/// Base64.
+/// The DEK-Info IV is not hex of the cipher's IV size
+/// (INVALID_ENC_IV, -0x1200).
+/// The DEK-Info cipher is not one PEM supports
+/// (UNKNOWN_ENC_ALG, -0x1280).
+/// The block is encrypted and no password was given
+/// (PASSWORD_REQUIRED, -0x1300).
+/// The decrypted block's PKCS#7 padding is wrong: most likely a wrong
+/// password (PASSWORD_MISMATCH, -0x1380).
+/// The body decodes to nothing (BAD_INPUT_DATA, -0x1480).
+/// DES-CBC or DES-EDE3-CBC rejected the body
+/// (MBEDTLS_ERR_DES_INVALID_INPUT_LENGTH when it is not whole blocks).
+/// AES-CBC rejected the body: it is not whole 16-byte blocks
+/// (MBEDTLS_ERR_AES_INVALID_INPUT_LENGTH, -0x0022).
 
 impl des.DESError -> PEMError { PEMError.DES(self) }
 
@@ -86,14 +88,16 @@ PEMCipher: enum {
 }
 
 SPACE: U8{32}
+
 CR: U8{13}
+
 LF: U8{10}
+
 EQUALS: U8{61}
 
 /// The Base64 digit of a 6-bit value (0..63), without a branch or a table
 /// lookup on it (mbedtls_ct_base64_enc_char).
-#Overflow(.Wrapping)
-base64_enc_char: fn(value: U8) -> U8 Never! {
+#Overflow(.Wrapping) base64_enc_char: fn(value: U8) -> U8 Never! {
     digit := ctime.uchar_in_range_if(U8{0}, U8{25}, value, U8{65} + value)
     digit = digit.bit_or(ctime.uchar_in_range_if(U8{26}, U8{51}, value, U8{97} + value - U8{26}))
     digit = digit.bit_or(ctime.uchar_in_range_if(U8{52}, U8{61}, value, U8{48} + value - U8{52}))
@@ -103,8 +107,7 @@ base64_enc_char: fn(value: U8) -> U8 Never! {
 
 // One plus the value of Base64 digit c, or zero when c is no digit; no
 // branch or table lookup on c.
-#Overflow(.Wrapping)
-dec_bits: fn(c: U8) -> U8 Never! {
+#Overflow(.Wrapping) dec_bits: fn(c: U8) -> U8 Never! {
     v := ctime.uchar_in_range_if(U8{65}, U8{90}, c, c - U8{65} + U8{1})
     v = v.bit_or(ctime.uchar_in_range_if(U8{97}, U8{122}, c, c - U8{97} + U8{27}))
     v = v.bit_or(ctime.uchar_in_range_if(U8{48}, U8{57}, c, c - U8{48} + U8{53}))
@@ -117,16 +120,19 @@ dec_bits: fn(c: U8) -> U8 Never! {
 base64_dec_value: fn(c: U8) -> Int Never! { Int{dec_bits(c)} - 1 }
 
 LAYOUT_SPACE: U8{1}
+
 LAYOUT_CR: U8{2}
+
 LAYOUT_LF: U8{3}
+
 LAYOUT_EQUALS: U8{4}
+
 LAYOUT_INVALID: U8{5}
 
 // What byte c of Base64 text is, with no branch or table lookup on c: a
 // digit, a space, a CR, an LF, an `=`, or invalid. The decoder branches on
 // the class, the text's layout; never on a digit's value.
-#Overflow(.Wrapping)
-layout_class: fn(c: U8) -> U8 Never! {
+#Overflow(.Wrapping) layout_class: fn(c: U8) -> U8 Never! {
     v := ctime.uchar_in_range_if(SPACE, SPACE, c, LAYOUT_SPACE)
     v = v.bit_or(ctime.uchar_in_range_if(CR, CR, c, LAYOUT_CR))
     v = v.bit_or(ctime.uchar_in_range_if(LF, LF, c, LAYOUT_LF))
@@ -155,7 +161,9 @@ base64_encode: fn(src: [U8]) -> [U8] Never! {
         c2: if two -> src[i + 1] else -> U8{0}
         out.push(base64_enc_char((c1 >> 2).bit_and(U8{0x3F})))
         out.push(base64_enc_char((c1.bit_and(U8{3}) << 4).bit_or(c2 >> 4)))
-        if two -> out.push(base64_enc_char((c2.bit_and(U8{15}) << 2).bit_and(U8{0x3F}))) else -> out.push(EQUALS)
+        if two -> out.push(base64_enc_char((c2.bit_and(U8{15}) << 2).bit_and(U8{0x3F}))) else {
+            out.push(EQUALS)
+        }
         out.push(EQUALS)
     }
     out
@@ -219,9 +227,7 @@ base64_decode: fn(src: [U8]) -> [U8] Base64Error! {
     if digits == 3 {
         out.push(wrapping(U8{x >> 10}))
         out.push(wrapping(U8{x >> 2}))
-    } else if digits == 2 {
-        out.push(wrapping(U8{x >> 4}))
-    }
+    } else if digits == 2 { out.push(wrapping(U8{x >> 4})) }
     Ok(out)
 }
 
@@ -311,7 +317,9 @@ get_iv: fn(data: [U8], at: Int, count: Int) -> [U8] PEMError! {
             c >= (U8{48}) && c <= (U8{57}) -> c - U8{48}
             c >= (U8{65}) && c <= (U8{70}) -> c - U8{55}
             c >= (U8{97}) && c <= (U8{102}) -> c - U8{87}
-            else -> return Err(.InvalidEncIV)
+            else -> {
+                return Err(.InvalidEncIV)
+            }
         }
         k: if i.bit_and(1) != 0 -> j else -> j << 4
         iv[i >> 1] = iv[i >> 1].bit_or(k)

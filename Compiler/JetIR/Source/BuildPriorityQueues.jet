@@ -14,7 +14,6 @@
 // not order after it, pop takes index 0, and canonical order is storage
 // order. The same helpers branch on the order word, so a queue's operations
 // never depend on which constructor made it.
-
 use jet_foundation.[Span, TBuiltinOp, Type, name_rows_set, name_rows_value, type_carrier_identity]
 
 // The element of a `PriorityQueue<T>`.
@@ -69,9 +68,7 @@ ir_heap_helper: fn(m: &IRModule, p: IRProgram, row: Int, elem_row: Int, name: St
         ir_priority_queue_pop_body(m, p, a, kind, heap, elem_row, option_row)
     } else if name == "priority_queue.key_sort" {
         ir_list_sort_body(m, p, a, kind, heap, elem_row, false, true)
-    } else {
-        ir_list_sort_body(m, p, a, kind, heap, elem_row, name == "list.sort_desc", false)
-    }
+    } else { ir_list_sort_body(m, p, a, kind, heap, elem_row, name == "list.sort_desc", false) }
     ir_resolve_deferred(m, p, a)
     m.functions[id] = a.f.move()
     id
@@ -219,7 +216,9 @@ ir_priority_queue_push_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, kind:
     ir_store_at(m, p, a, slot_at, 0, value)
     ir_emit(a.f, IROp.Store, -1, heap, 0, count, a.line)
     ir_emit(a.f, IROp.Return, -1, -1, -1, -1, a.line)
-    if kind == "" -> return
+    if kind == "" {
+        return
+    }
     ir_end(a.f, a.line)
     address: ir_element_address(m, a, data, length, stride)
     a.fresh[value] = true
@@ -276,7 +275,9 @@ ir_priority_queue_pop_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: 
     rest: ir_word_op(m, a, IROp.Mul, last, width)
     _: ir_runtime(m, a, "jet_rt_mem_move", [Int]{data, second, rest}, -1)
     ir_emit(a.f, IROp.Return, -1, result, -1, -1, a.line)
-    if kind == "" -> return
+    if kind == "" {
+        return
+    }
     ir_end(a.f, a.line)
     // With one element, the copied stale slot lies outside the live prefix.
     tail: ir_element_address(m, a, data, last, stride)
@@ -458,7 +459,9 @@ ir_list_sort: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, elem_row:
     }
     if !is_list -> return ir_fail_slot(b, span, "sort of {ir_type_name(list_ty)}")
     float: m.types[elem_row].kind == .Float
-    if !float && ir_map_key_kind(m, elem_row) == "" -> return ir_fail_slot(b, span, "List sort of {ir_type_name(m.types[elem_row].ty)} is not lowered at O0 yet")
+    if !float && ir_map_key_kind(m, elem_row) == "" {
+        return ir_fail_slot(b, span, "List sort of {ir_type_name(m.types[elem_row].ty)} is not lowered at O0 yet")
+    }
     helper: if descending -> "list.sort_desc" else -> "list.sort"
     _: ir_heap_call(m, p, b, list_row, elem_row, helper, [Int]{list}, -1)
     return -1
@@ -497,7 +500,9 @@ ir_heap_native_open: fn(m: &IRModule, b: &IRBuilder, heap: Int, elem_row: Int) -
 // in order, later duplicates dropped.
 ir_key_ordered: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, descending: Bool, from: Bool, subject: Int, operands: [Int], span: Span) -> Int Never! {
     header_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
-    if from && (operands.len() != 2 || operands[1] < 0) -> return ir_fail_slot(b, span, "from_by without a key")
+    if from && (operands.len() != 2 || operands[1] < 0) {
+        return ir_fail_slot(b, span, "from_by without a key")
+    }
     key: if from -> operands[1] else -> subject
     if ir_rank_type(ty) {
         shape: ir_set_shape(m, p, header_row) ?? return ir_fail_slot(b, span, "key-ordered construction of {ir_type_name(ty)}")
@@ -512,17 +517,13 @@ ir_key_ordered: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, descendi
     order: ir_key_order(m, p, b, key, elem_row, descending, span)
     if ir_failed(b) -> return -1
     header := -1
-    if !from {
-        header = ir_list_empty(m, b, header_row)
-    } else if ir_list_element(m, p, b, subject) != Val(elem_row) {
+    if !from -> header = ir_list_empty(m, b, header_row) else if ir_list_element(m, p, b, subject) != Val(elem_row) {
         return ir_fail_slot(b, span, "from_by source is not its element List")
     } else if b.fresh[subject] {
         header = ir_list_empty(m, b, header_row)
         ir_emit(b.f, IROp.CopyBytes, -1, header, subject, 24, b.line)
         b.fresh[subject] = false
-    } else {
-        header = ir_list_clone(m, p, b, subject, elem_row, header_row)
-    }
+    } else { header = ir_list_clone(m, p, b, subject, elem_row, header_row) }
     ir_emit(b.f, IROp.Store, -1, header, 24, order, b.line)
     if from {
         _: ir_heap_call(m, p, b, header_row, elem_row, "priority_queue.key_sort", [Int]{header}, -1)
@@ -539,7 +540,9 @@ ir_key_order: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, key: Int, elem_row: 
     ret: ir_closure_result(closure_ty) ?? return ir_fail_slot(b, span, "key function {ir_type_name(closure_ty)} without a result")
     key_ty: ir_never_carrier_success(ret) ?? ret
     key_row: ir_value_type(m, p, key_ty) ?? return ir_type_fail(b, span, key_ty)
-    if ir_heap_kind(m, key_row) == "" -> return ir_fail_slot(b, span, "key {ir_type_name(key_ty)} has no native order")
+    if ir_heap_kind(m, key_row) == "" {
+        return ir_fail_slot(b, span, "key {ir_type_name(key_ty)} has no native order")
+    }
     helper: ir_key_order_helper(m, p, closure_ty, elem_row, key_row, descending)
     elem_ty: m.types[elem_row].ty
     before_ty: Type.Fn{params: [Type]{elem_ty.copy(), elem_ty.copy()}, ret: Val(Type.Bool), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
@@ -610,16 +613,18 @@ ir_key_order_float: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, value: Int) ->
 ir_priority_queue_from: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, source: Int, span: Span) -> Int Never! {
     heap_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     elem_row: ir_priority_queue_row(m, p, heap_row) ?? return ir_fail_slot(b, span, "PriorityQueue construction of {ir_type_name(ty)}")
-    if ir_map_key_kind(m, elem_row) == "" -> return ir_fail_slot(b, span, "PriorityQueue element {ir_type_name(m.types[elem_row].ty)} has no native Ord")
-    if ir_list_element(m, p, b, source) != Val(elem_row) -> return ir_fail_slot(b, span, "PriorityQueue source is not its element List")
+    if ir_map_key_kind(m, elem_row) == "" {
+        return ir_fail_slot(b, span, "PriorityQueue element {ir_type_name(m.types[elem_row].ty)} has no native Ord")
+    }
+    if ir_list_element(m, p, b, source) != Val(elem_row) {
+        return ir_fail_slot(b, span, "PriorityQueue source is not its element List")
+    }
     heap := -1
     if b.fresh[source] {
         heap = ir_list_empty(m, b, heap_row)
         ir_emit(b.f, IROp.CopyBytes, -1, heap, source, 24, b.line)
         b.fresh[source] = false
-    } else {
-        heap = ir_list_clone(m, p, b, source, elem_row, heap_row)
-    }
+    } else { heap = ir_list_clone(m, p, b, source, elem_row, heap_row) }
     _: ir_heap_call(m, p, b, heap_row, elem_row, "priority_queue.heapify", [Int]{heap}, -1)
     heap
 }
@@ -627,10 +632,14 @@ ir_priority_queue_from: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, 
 // `PriorityQueue.new()` (the Prelude std::collections::BinaryHeap::new
 // route): an empty header.
 ir_priority_queue_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], result: Type, span: Span) -> Int Never! {
-    if inputs.len() != 0 -> return ir_fail_slot(b, span, "PriorityQueue.new with {inputs.len()} arguments")
+    if inputs.len() != 0 {
+        return ir_fail_slot(b, span, "PriorityQueue.new with {inputs.len()} arguments")
+    }
     heap_row: ir_value_type(m, p, result) ?? return ir_type_fail(b, span, result)
     elem_row: ir_priority_queue_row(m, p, heap_row) ?? return ir_fail_slot(b, span, "PriorityQueue construction of {ir_type_name(result)}")
-    if ir_map_key_kind(m, elem_row) == "" -> return ir_fail_slot(b, span, "PriorityQueue element {ir_type_name(m.types[elem_row].ty)} has no native Ord")
+    if ir_map_key_kind(m, elem_row) == "" {
+        return ir_fail_slot(b, span, "PriorityQueue element {ir_type_name(m.types[elem_row].ty)} has no native Ord")
+    }
     ir_list_empty(m, b, heap_row)
 }
 
@@ -638,7 +647,9 @@ ir_priority_queue_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [In
 // to_sorted_list, peek and pop.
 ir_priority_queue_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, operation: TBuiltinOp, subject: Int, operands: [Int], span: Span) -> Int Never! {
     if operation == .PriorityQueueFrom {
-        if operands.len() != 1 -> return ir_fail_slot(b, span, "PriorityQueue.from with {operands.len() - 1} arguments")
+        if operands.len() != 1 {
+            return ir_fail_slot(b, span, "PriorityQueue.from with {operands.len() - 1} arguments")
+        }
         return ir_priority_queue_from(m, p, b, ty, subject, span)
     }
     heap_row: b.f.slot_type[subject]
@@ -654,7 +665,9 @@ ir_priority_queue_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Typ
             return ir_bool_op(m, b, IROp.Eq, length, zero)
         }
         .Push -> {
-            if operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(b, span, "push without a value")
+            if operands.len() != 2 || operands[1] < 0 {
+                return ir_fail_slot(b, span, "push without a value")
+            }
             value: ir_adapt(m, p, b, operands[1], elem_row, span)
             if ir_failed(b) -> return -1
             offered: ir_own(m, p, b, value)
@@ -674,7 +687,9 @@ ir_priority_queue_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Typ
         }
         .PriorityQueueRemove(_, mode) -> {
             arity: if mode == .Dynamic -> 3 else -> 2
-            if operands.len() != arity || operands[1] < 0 || operands[arity - 1] < 0 -> return ir_fail_slot(b, span, "remove without an operand")
+            if operands.len() != arity || operands[1] < 0 || operands[arity - 1] < 0 {
+                return ir_fail_slot(b, span, "remove without an operand")
+            }
             selector: if mode == .Dynamic -> operands[2] else -> -1
             // Canonical removal slots are lowest-first, not physical heap
             // slots; an ascending sequence is itself a valid min-heap. A key

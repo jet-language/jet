@@ -57,10 +57,12 @@ NixEvalParser: struct {
     nodes: [NixEvalExpr]
 
     parse: fn(tokens: [NixEvalToken], base: Int) -> NixEvalSyntax NixEvalError! {
-        parser := NixEvalParser{tokens, position: 0, depth: 0, base, nodes: [NixEvalExpr]{}}
+        parser := NixEvalParser{tokens: tokens, position: 0, depth: 0, base: base, nodes: [NixEvalExpr]{}}
         root: parser.expression()
-        if parser.peek() != NixEvalToken.End -> return Err(NixEvalError.Syntax("trailing expression"))
-        Ok(NixEvalSyntax{nodes: parser.nodes, root})
+        if parser.peek() != NixEvalToken.End {
+            return Err(NixEvalError.Syntax("trailing expression"))
+        }
+        Ok(NixEvalSyntax{nodes: parser.nodes, root: root})
     }
 
     add: fn(&self, node: NixEvalExpr) -> Int Never! {
@@ -104,7 +106,7 @@ NixEvalParser: struct {
                 self.position += 1
                 if self.take_if_colon() {
                     body: self.expression()
-                    return Ok(Val(self.add(NixEvalExpr.Lambda{pattern: NixEvalPattern.Name(name), body})))
+                    return Ok(Val(self.add(NixEvalExpr.Lambda{pattern: NixEvalPattern.Name(name), body: body})))
                 }
             }
             .Str(_) | .Interpolated(_) | .Path(_) | .Integer(_) | .LeftBrace | .RightBrace | .LeftBracket | .RightBracket | .LeftParen | .RightParen | .Equal | .EqualEqual | .NotEqual | .Merge | .Colon | .Semicolon | .Dot | .Comma | .Question | .Ellipsis | .End -> {}
@@ -121,9 +123,9 @@ NixEvalParser: struct {
                         self.peek() == NixEvalToken.Question -> {
                             self.position += 1
                             default: self.equality()
-                            fields.push(NixEvalPatternField{name, default: Val(default)})
+                            fields.push(NixEvalPatternField{name: name, default: Val(default)})
                         }
-                        else -> fields.push(NixEvalPatternField{name, default: None})
+                        else -> fields.push(NixEvalPatternField{name: name, default: None})
                     }
                 }
                 .Str(_) | .Interpolated(_) | .Path(_) | .Integer(_) | .LeftBrace | .RightBrace | .LeftBracket | .RightBracket | .LeftParen | .RightParen | .Equal | .EqualEqual | .NotEqual | .Merge | .Colon | .Semicolon | .Dot | .Comma | .Question | .End -> {
@@ -132,7 +134,7 @@ NixEvalParser: struct {
                 }
             }
             if self.peek() == {
-                .Comma -> self.position += 1
+                .Comma -> { self.position += 1 }
                 .RightBrace -> {}
                 .Identifier(_) | .Str(_) | .Interpolated(_) | .Path(_) | .Integer(_) | .LeftBrace | .LeftBracket | .RightBracket | .LeftParen | .RightParen | .Equal | .EqualEqual | .NotEqual | .Merge | .Colon | .Semicolon | .Dot | .Question | .Ellipsis | .End -> {
                     self.position = saved
@@ -146,7 +148,7 @@ NixEvalParser: struct {
             return Ok(None)
         }
         body: self.expression()
-        Ok(Val(self.add(NixEvalExpr.Lambda{pattern: NixEvalPattern.Attrs(fields), body})))
+        Ok(Val(self.add(NixEvalExpr.Lambda{pattern: NixEvalPattern.Attrs(fields), body: body})))
     }
 
     equality: fn(&self) -> Int NixEvalError! {
@@ -162,7 +164,7 @@ NixEvalParser: struct {
             }
             self.position += 1
             right: self.merge()
-            expression = self.add(NixEvalExpr.Equal{left: expression, right, positive})
+            expression = self.add(NixEvalExpr.Equal{left: expression, right: right, positive: positive})
         }
     }
 
@@ -172,7 +174,7 @@ NixEvalParser: struct {
         loop self.peek() == NixEvalToken.Merge {
             self.position += 1
             right: self.application()
-            expression = self.add(NixEvalExpr.Merge{left: expression, right})
+            expression = self.add(NixEvalExpr.Merge{left: expression, right: right})
         }
         Ok(self.leave(expression))
     }
@@ -182,7 +184,7 @@ NixEvalParser: struct {
         expression := self.selection()
         loop self.starts_application() {
             argument: self.selection()
-            expression = self.add(NixEvalExpr.Apply{function: expression, argument})
+            expression = self.add(NixEvalExpr.Apply{function: expression, argument: argument})
         }
         Ok(self.leave(expression))
     }
@@ -194,7 +196,7 @@ NixEvalParser: struct {
             self.position += 1
             token: self.bump()
             if token == {
-                .Identifier(field) -> expression = self.add(NixEvalExpr.Select{value: expression, field})
+                .Identifier(field) -> expression = self.add(NixEvalExpr.Select{value: expression, field: field})
                 .Str(_) | .Interpolated(_) | .Path(_) | .Integer(_) | .LeftBrace | .RightBrace | .LeftBracket | .RightBracket | .LeftParen | .RightParen | .Equal | .EqualEqual | .NotEqual | .Merge | .Colon | .Semicolon | .Dot | .Comma | .Question | .Ellipsis | .End -> return Err(NixEvalError.Syntax("field selector requires an identifier"))
             }
         }
@@ -214,16 +216,14 @@ NixEvalParser: struct {
             .Interpolated(parts) -> self.string_context(parts)
             .Path(value) -> self.add(NixEvalExpr.Path(value))
             .Integer(value) -> self.add(NixEvalExpr.Integer(value))
-            .Identifier(name) -> {
-                if name == {
-                    "true" -> self.add(NixEvalExpr.Bool(true))
-                    "false" -> self.add(NixEvalExpr.Bool(false))
-                    "null" -> self.add(NixEvalExpr.Null)
-                    "let" -> self.let_expression()
-                    "with" -> self.with_expression()
-                    "if" -> self.if_expression()
-                    else -> self.add(NixEvalExpr.Identifier(name))
-                }
+            .Identifier(name) -> if name == {
+                "true" -> self.add(NixEvalExpr.Bool(true))
+                "false" -> self.add(NixEvalExpr.Bool(false))
+                "null" -> self.add(NixEvalExpr.Null)
+                "let" -> self.let_expression()
+                "with" -> self.with_expression()
+                "if" -> self.if_expression()
+                else -> self.add(NixEvalExpr.Identifier(name))
             }
             .LeftBrace -> self.attrset()
             .LeftBracket -> self.list()
@@ -242,7 +242,7 @@ NixEvalParser: struct {
         expressions := [NixEvalStringPart]{}
         loop part in parts {
             if part == {
-                .Literal(value) -> expressions.push(NixEvalStringPart.Literal(value))
+                .Literal(value) -> { expressions.push(NixEvalStringPart.Literal(value)) }
                 .Expression(source) -> {
                     tokens: NixEvalLexer.tokenize(source)
                     outer_tokens: self.tokens.copy()
@@ -250,7 +250,9 @@ NixEvalParser: struct {
                     self.tokens = tokens
                     self.position = 0
                     expression: self.expression()
-                    if self.peek() != NixEvalToken.End -> return Err(NixEvalError.Syntax("trailing expression"))
+                    if self.peek() != NixEvalToken.End {
+                        return Err(NixEvalError.Syntax("trailing expression"))
+                    }
                     self.tokens = outer_tokens
                     self.position = outer_position
                     expressions.push(NixEvalStringPart.Expression(expression))
@@ -267,7 +269,7 @@ NixEvalParser: struct {
             name: self.key_path()
             self.expect_equal()
             value: self.expression()
-            fields.push(NixEvalBinding{name, value})
+            fields.push(NixEvalBinding{name: name, value: value})
             if self.peek() == {
                 .Semicolon | .Comma -> self.position += 1
                 .RightBrace -> {}
@@ -303,23 +305,27 @@ NixEvalParser: struct {
             }
             self.expect_equal()
             value: self.expression()
-            bindings.push(NixEvalBinding{name, value})
-            if self.peek() != NixEvalToken.Semicolon -> return Err(NixEvalError.Syntax("let binding requires `;`"))
+            bindings.push(NixEvalBinding{name: name, value: value})
+            if self.peek() != NixEvalToken.Semicolon {
+                return Err(NixEvalError.Syntax("let binding requires `;`"))
+            }
             self.position += 1
         }
         self.position += 1
         body: self.expression()
-        node: self.add(NixEvalExpr.Let{bindings, body})
+        node: self.add(NixEvalExpr.Let{bindings: bindings, body: body})
         Ok(self.leave(node))
     }
 
     with_expression: fn(&self) -> Int NixEvalError! {
         self.enter()
         scope: self.expression()
-        if self.peek() != NixEvalToken.Semicolon -> return Err(NixEvalError.Syntax("with expression requires `;`"))
+        if self.peek() != NixEvalToken.Semicolon {
+            return Err(NixEvalError.Syntax("with expression requires `;`"))
+        }
         self.position += 1
         body: self.expression()
-        node: self.add(NixEvalExpr.With{scope, body})
+        node: self.add(NixEvalExpr.With{scope: scope, body: body})
         Ok(self.leave(node))
     }
 
@@ -332,7 +338,7 @@ NixEvalParser: struct {
         if !self.word("else") -> return Err(NixEvalError.Syntax("if expression requires `else`"))
         self.position += 1
         else_branch: self.expression()
-        node: self.add(NixEvalExpr.If{condition, then_branch, else_branch})
+        node: self.add(NixEvalExpr.If{condition: condition, then_branch: then_branch, else_branch: else_branch})
         Ok(self.leave(node))
     }
 

@@ -4,6 +4,7 @@ use {
     core.ui.[UIRect]
     internal.[font_error, raw16, raw32, directory, table, within, no_ranges, vertical_metrics, advance_units, pick_cmap, map_format4, map_format12, glyph_points, kerning_lookups, glyph_classes, kern_table, decode, shape, positions, wrap_paragraph, cached_mask, fingerprint, size_64, units_64, min_int, max_int, raster_glyph, mask_of, tiny_font, control_square, filled, survives]
 }
+
 // core.ui.font — TrueType faces for ui text, in pure Jet.
 //
 // A face reads a TrueType (glyf) font: its metrics (head, hhea, OS/2),
@@ -23,22 +24,32 @@ use {
 
 // Budgets that bound the work a hostile font can cause.
 COMPONENT_DEPTH_MAX: 8
+
 GLYPH_POINTS_MAX: 65535
+
 // A mask wider or taller than this many pixels, or holding more pixels than
 // MASK_PIXELS_MAX, draws nothing.
 MASK_SIDE_MAX: 4096
+
 MASK_PIXELS_MAX: 4194304
+
 // A glyph cache keeps about this many bytes of masks, each counted as its
 // coverage plus MASK_RECORD_BYTES.
 CACHE_BYTES_MAX: 4194304
+
 MASK_RECORD_BYTES: 64
+
 // The 16.16 scale that leaves font units as they are.
 UNSCALED: 65536
+
 // Rasterizer units per pixel: outlines are drawn in 1/256 pixels.
 SUBPIXEL: 256
+
 // GDEF glyph classes a lookup flag can skip.
 GLYPH_CLASS_BASE: 1
+
 GLYPH_CLASS_LIGATURE: 2
+
 GLYPH_CLASS_MARK: 3
 
 /// One point of a glyph outline in font units, y up. `on` is false for the
@@ -146,20 +157,16 @@ Face: struct {
     priv cmap_format: Int
     priv cmap_count: Int
     priv lookups: [PairLookup]
-    priv kern_pairs: [Int: Int]
+    priv kern_pairs: [Int:Int]
     priv classes: Ranges
     priv fingerprint: Int
 
     /// How many glyphs the face has. Glyph ids run from 0, the glyph drawn
     /// for a missing character.
-    glyph_count: fn(self) -> Int {
-        self.glyph_count
-    }
+    glyph_count: fn(self) -> Int { self.glyph_count }
 
     /// The font units in one em.
-    units_per_em: fn(self) -> Int {
-        self.units
-    }
+    units_per_em: fn(self) -> Int { self.units }
 
     /// The vertical metrics at `size_px` pixels per em.
     metrics: fn(self, size_px: Float) -> FaceMetrics {
@@ -208,13 +215,15 @@ Face: struct {
         glyphs := [PlacedGlyph]{}
         pen := 0
         loop k in 0..<shaped.ids.len() {
-            glyphs.push(PlacedGlyph{
-                id: shaped.ids[k],
-                cluster: shaped.clusters[k],
-                x: Float{pen + adjusted.x_offsets[k]} * scale,
-                y: Float{-adjusted.y_offsets[k]} * scale,
-                advance: Float{adjusted.advances[k]} * scale,
-            })
+            glyphs.push(
+                PlacedGlyph{
+                    id: shaped.ids[k],
+                    cluster: shaped.clusters[k],
+                    x: Float{pen + adjusted.x_offsets[k]} * scale,
+                    y: Float{-adjusted.y_offsets[k]} * scale,
+                    advance: Float{adjusted.advances[k]} * scale,
+                },
+            )
             pen += adjusted.advances[k]
         }
         TextRun{glyphs: glyphs, advance: Float{pen} * scale}
@@ -265,11 +274,19 @@ FontError: struct {
 /// Reads a TrueType font. A font this reader cannot use, or a damaged one,
 /// is a `FontError`.
 face: fn(bytes: [U8]) -> Face FontError! {
-    if bytes.len() < 12 -> return Err(font_error("a font needs at least 12 bytes, got {bytes.len()}"))
+    if bytes.len() < 12 {
+        return Err(font_error("a font needs at least 12 bytes, got {bytes.len()}"))
+    }
     version: raw32(bytes, 0)
-    if version == 1330926671 -> return Err(font_error("CFF (PostScript) outlines are not supported; use a TrueType (glyf) build"))
-    if version == 1953784678 -> return Err(font_error("font collections are not supported; pass one font"))
-    if version != 65536 && version != 1953658213 -> return Err(font_error("not a TrueType font (sfnt version {version})"))
+    if version == 1330926671 {
+        return Err(font_error("CFF (PostScript) outlines are not supported; use a TrueType (glyf) build"))
+    }
+    if version == 1953784678 {
+        return Err(font_error("font collections are not supported; pass one font"))
+    }
+    if version != 65536 && version != 1953658213 {
+        return Err(font_error("not a TrueType font (sfnt version {version})"))
+    }
     tables: directory(bytes)
     head: table(tables, "head") ?? return Err(font_error("the font has no head table"))
     maxp: table(tables, "maxp") ?? return Err(font_error("the font has no maxp table"))
@@ -282,25 +299,43 @@ face: fn(bytes: [U8]) -> Face FontError! {
     within(maxp, 6, "maxp")
     within(hhea, 36, "hhea")
     units: raw16(bytes, head.offset + 18)
-    if units < 16 || units > 16384 -> return Err(font_error("head: units per em {units} is outside 16..16384"))
+    if units < 16 || units > 16384 {
+        return Err(font_error("head: units per em {units} is outside 16..16384"))
+    }
     loca_format: raw16(bytes, head.offset + 50)
-    if loca_format > 1 -> return Err(font_error("head: index-to-loc format {loca_format} is neither 0 nor 1"))
+    if loca_format > 1 {
+        return Err(font_error("head: index-to-loc format {loca_format} is neither 0 nor 1"))
+    }
     glyph_count: raw16(bytes, maxp.offset + 4)
     if glyph_count == 0 -> return Err(font_error("maxp: the font has no glyphs"))
     hmetrics: raw16(bytes, hhea.offset + 34)
-    if hmetrics == 0 || hmetrics > glyph_count -> return Err(font_error("hhea: {hmetrics} horizontal metrics for {glyph_count} glyphs"))
+    if hmetrics == 0 || hmetrics > glyph_count {
+        return Err(font_error("hhea: {hmetrics} horizontal metrics for {glyph_count} glyphs"))
+    }
     within(hmtx, hmetrics * 4, "hmtx")
     loca_width: if loca_format == 1 -> 4 else -> 2
     within(loca, (glyph_count + 1) * loca_width, "loca")
     vertical: vertical_metrics(bytes, hhea, table(tables, "OS/2"))
     picked: pick_cmap(bytes, cmap)
     out := Face{
-        bytes: bytes.copy(), glyph_count: glyph_count, units: units,
-        ascent: vertical.ascent, descent: vertical.descent, line_gap: vertical.line_gap,
-        long_loca: loca_format == 1, loca: loca.offset, glyf: glyf.offset, glyf_length: glyf.length,
-        hmtx: hmtx.offset, hmetrics: hmetrics,
-        cmap: picked.offset, cmap_format: picked.format, cmap_count: picked.count,
-        lookups: [PairLookup]{}, kern_pairs: [Int: Int]{}, classes: no_ranges(),
+        bytes: bytes.copy(),
+        glyph_count: glyph_count,
+        units: units,
+        ascent: vertical.ascent,
+        descent: vertical.descent,
+        line_gap: vertical.line_gap,
+        long_loca: loca_format == 1,
+        loca: loca.offset,
+        glyf: glyf.offset,
+        glyf_length: glyf.length,
+        hmtx: hmtx.offset,
+        hmetrics: hmetrics,
+        cmap: picked.offset,
+        cmap_format: picked.format,
+        cmap_count: picked.count,
+        lookups: [PairLookup]{},
+        kern_pairs: [Int:Int]{},
+        classes: no_ranges(),
         fingerprint: fingerprint(bytes),
     }
     // Every outline is read once now, so later queries cannot fail.
@@ -310,7 +345,9 @@ face: fn(bytes: [U8]) -> Face FontError! {
         glyph_points(out, id, 0, UNSCALED, points, ends)
     }
     if table(tables, "GPOS") == .Val(gpos) -> out.lookups = kerning_lookups(bytes, gpos)
-    if out.lookups.len() == 0 && table(tables, "kern") == .Val(kern) -> out.kern_pairs = kern_table(bytes, kern)
+    if out.lookups.len() == 0 && table(tables, "kern") == .Val(kern) {
+        out.kern_pairs = kern_table(bytes, kern)
+    }
     mask := 0
     loop lookup in out.lookups -> mask = mask.bit_or(lookup.skip_mask)
     if mask != 0 && table(tables, "GDEF") == .Val(gdef) -> out.classes = glyph_classes(bytes, gdef)
@@ -329,9 +366,7 @@ bold: fn() -> Face {
 
 /// The license of the built-in faces: the SIL Open Font License 1.1, with
 /// their copyright notice. A program that ships them ships this text.
-license: fn() -> String {
-    data.FONT_LICENSE
-}
+license: fn() -> String { data.FONT_LICENSE }
 
 // ---- metrics -------------------------------------------------------------
 
@@ -400,8 +435,8 @@ GlyphMask: struct {
 /// most about its budget, and drops masks unused for longest first.
 GlyphCache: struct {
     priv faces: [Int]
-    priv recent: [Int: GlyphMask]
-    priv older: [Int: GlyphMask]
+    priv recent: [Int:GlyphMask]
+    priv older: [Int:GlyphMask]
     priv recent_bytes: Int
     priv budget: Int
 
@@ -414,15 +449,13 @@ GlyphCache: struct {
 }
 
 /// An empty glyph cache with a budget of CACHE_BYTES_MAX bytes.
-cache: fn() -> GlyphCache {
-    cache_within(CACHE_BYTES_MAX)
-}
+cache: fn() -> GlyphCache { cache_within(CACHE_BYTES_MAX) }
 
 /// An empty glyph cache that keeps about `budget` bytes of masks. A mask
 /// costs its coverage bytes plus MASK_RECORD_BYTES. The newest mask is always
 /// kept, so a tiny budget still answers every query, drawing more often.
 cache_within: fn(budget: Int) -> GlyphCache {
-    GlyphCache{faces: [Int]{}, recent: [Int: GlyphMask]{}, older: [Int: GlyphMask]{}, recent_bytes: 0, budget: budget}
+    GlyphCache{faces: [Int]{}, recent: [Int:GlyphMask]{}, older: [Int:GlyphMask]{}, recent_bytes: 0, budget: budget}
 }
 
 // Per-pixel accumulators, `width + 1` cells a row (the last catches what
@@ -450,8 +483,10 @@ Cells: struct {
 /// byte d becomes s + d * (255 - sa) / 255, with s = C * sa / 255 (alpha
 /// alike, its source 255) and every product rounded, (p + 127) / 255.
 /// Integers only, so every target paints the same bytes.
-blend: fn(&pixels: [U8], width: Int, height: Int, stride_bytes: Int, mask: GlyphMask, x: Int, y: Int, argb: Int, clip: UIRect) {
-    if width <= 0 || height <= 0 || stride_bytes < width * 4 || pixels.len() < width * 4 || mask.width <= 0 || mask.height <= 0 || mask.coverage.len() < mask.width * mask.height -> return
+blend: fn(pixels: &[U8], width: Int, height: Int, stride_bytes: Int, mask: GlyphMask, x: Int, y: Int, argb: Int, clip: UIRect) {
+    if width <= 0 || height <= 0 || stride_bytes < width * 4 || pixels.len() < width * 4 || mask.width <= 0 || mask.height <= 0 || mask.coverage.len() < mask.width * mask.height {
+        return
+    }
     rows: min_int(height, (pixels.len() - width * 4) /% stride_bytes + 1)
     x0: x + mask.left
     y0: y - mask.top
@@ -460,7 +495,9 @@ blend: fn(&pixels: [U8], width: Int, height: Int, stride_bytes: Int, mask: Glyph
     row_lo: max_int(max_int(y0, clip.y), 0)
     row_hi: min_int(min_int(y0 + mask.height, clip.y + clip.height), rows)
     opacity: (argb >> 24).bit_and(255)
-    if col_lo >= col_hi || row_lo >= row_hi || opacity == 0 -> return
+    if col_lo >= col_hi || row_lo >= row_hi || opacity == 0 {
+        return
+    }
     blue: argb.bit_and(255)
     green: (argb >> 8).bit_and(255)
     red: (argb >> 16).bit_and(255)
@@ -490,7 +527,7 @@ blend: fn(&pixels: [U8], width: Int, height: Int, stride_bytes: Int, mask: Glyph
 /// each glyph at its quarter-pixel position with masks from `cache`.
 /// Positions are integer 1/64 pixels. Returns the line's advance in whole
 /// pixels.
-draw_text: fn(&pixels: [U8], width: Int, height: Int, stride_bytes: Int, &cache: GlyphCache, face: Face, text: String, size_px: Float, x: Int, baseline_y: Int, argb: Int, clip: UIRect) -> Int {
+draw_text: fn(pixels: &[U8], width: Int, height: Int, stride_bytes: Int, cache: &GlyphCache, face: Face, text: String, size_px: Float, x: Int, baseline_y: Int, argb: Int, clip: UIRect) -> Int {
     size: size_64(size_px)
     if size == 0 -> return 0
     shaped: shape(face, text)
@@ -510,25 +547,19 @@ draw_text: fn(&pixels: [U8], width: Int, height: Int, stride_bytes: Int, &cache:
 // The table readers, shaper and rasterizer behind the public items above:
 // not part of the surface.
 priv internal: module {
-    font_error: fn(reason: String) -> FontError Never! {
-        FontError{reason: reason}
-    }
+    font_error: fn(reason: String) -> FontError Never! { FontError{reason: reason} }
 
-    raw16: fn(b: [U8], at: Int) -> Int Never! {
-        (Int{b[at]} << 8) + Int{b[at + 1]}
-    }
+    raw16: fn(b: [U8], at: Int) -> Int Never! { (Int{b[at]} << 8) + Int{b[at + 1]} }
 
-    raw32: fn(b: [U8], at: Int) -> Int Never! {
-        (raw16(b, at) << 16) + raw16(b, at + 2)
-    }
+    raw32: fn(b: [U8], at: Int) -> Int Never! { (raw16(b, at) << 16) + raw16(b, at + 2) }
 
-    signed16: fn(value: Int) -> Int Never! {
-        if value >= 32768 -> value - 65536 else -> value
-    }
+    signed16: fn(value: Int) -> Int Never! { if value >= 32768 -> value - 65536 else -> value }
 
     // `width` bytes at `at` lie inside the font, or a FontError naming `what`.
     need: fn(b: [U8], at: Int, width: Int, what: String) FontError! {
-        if at < 0 || at > b.len() - width -> return Err(font_error("{what}: offset {at} passes the end of the font ({b.len()} bytes)"))
+        if at < 0 || at > b.len() - width {
+            return Err(font_error("{what}: offset {at} passes the end of the font ({b.len()} bytes)"))
+        }
         Ok()
     }
 
@@ -549,33 +580,33 @@ priv internal: module {
     }
 
     // The table directory: each table's tag and span, checked against the font.
-    directory: fn(b: [U8]) -> [String: TableSpan] FontError! {
+    directory: fn(b: [U8]) -> [String:TableSpan] FontError! {
         count: u16(b, 4, "table directory")
         need(b, 12, count * 16, "table directory")
-        out := [String: TableSpan]{}
+        out := [String:TableSpan]{}
         loop i in 0..<count {
             at: 12 + i * 16
             name: tag_text(raw32(b, at))
             offset: raw32(b, at + 8)
             length: raw32(b, at + 12)
-            if offset > b.len() || length > b.len() - offset -> return Err(font_error("{name}: the table passes the end of the font ({offset} + {length} > {b.len()} bytes)"))
+            if offset > b.len() || length > b.len() - offset {
+                return Err(font_error("{name}: the table passes the end of the font ({offset} + {length} > {b.len()} bytes)"))
+            }
             if out.get(name) == None -> _: out.add(name, TableSpan{offset: offset, length: length})
         }
         Ok(out)
     }
 
-    table: fn(tables: [String: TableSpan], name: String) -> TableSpan? Never! {
-        tables.get(name)
-    }
+    table: fn(tables: [String:TableSpan], name: String) -> TableSpan? Never! { tables.get(name) }
 
     within: fn(span: TableSpan, length: Int, name: String) FontError! {
-        if span.length < length -> return Err(font_error("{name}: the table has {span.length} bytes, needs {length}"))
+        if span.length < length {
+            return Err(font_error("{name}: the table has {span.length} bytes, needs {length}"))
+        }
         Ok()
     }
 
-    no_ranges: fn() -> Ranges Never! {
-        Ranges{starts: [Int]{}, ends: [Int]{}, values: [Int]{}}
-    }
+    no_ranges: fn() -> Ranges Never! { Ranges{starts: [Int]{}, ends: [Int]{}, values: [Int]{}} }
 
     // The index of the range holding `glyph`, or -1.
     range_at: fn(ranges: Ranges, glyph: Int) -> Int {
@@ -583,11 +614,7 @@ priv internal: module {
         hi := ranges.starts.len()
         loop lo < hi {
             mid: (lo + hi) /% 2
-            if ranges.ends[mid] < glyph {
-                lo = mid + 1
-            } else {
-                hi = mid
-            }
+            if ranges.ends[mid] < glyph -> lo = mid + 1 else -> hi = mid
         }
         if lo < ranges.starts.len() && ranges.starts[lo] <= glyph -> lo else -> -1
     }
@@ -605,10 +632,12 @@ priv internal: module {
     }
 
     // Ranges must ascend without overlap, so a binary search finds each glyph.
-    push_range: fn(&ranges: Ranges, start: Int, end: Int, value: Int, what: String) FontError! {
+    push_range: fn(ranges: &Ranges, start: Int, end: Int, value: Int, what: String) FontError! {
         if end < start -> return Err(font_error("{what}: range {start}..{end} runs backwards"))
         last: ranges.ends.len() - 1
-        if last >= 0 && start <= ranges.ends[last] -> return Err(font_error("{what}: range {start}..{end} is out of order"))
+        if last >= 0 && start <= ranges.ends[last] {
+            return Err(font_error("{what}: range {start}..{end} is out of order"))
+        }
         ranges.starts.push(start)
         ranges.ends.push(end)
         ranges.values.push(value)
@@ -631,9 +660,7 @@ priv internal: module {
                 row: at + 4 + i * 6
                 push_range(out, raw16(b, row), raw16(b, row + 2), raw16(b, row + 4), "GPOS coverage")
             }
-        } else {
-            return Err(font_error("GPOS coverage: format {format} is neither 1 nor 2"))
-        }
+        } else { return Err(font_error("GPOS coverage: format {format} is neither 1 nor 2")) }
         Ok(out)
     }
 
@@ -655,9 +682,7 @@ priv internal: module {
                 row: at + 4 + i * 6
                 push_range(out, raw16(b, row), raw16(b, row + 2), raw16(b, row + 4), what)
             }
-        } else {
-            return Err(font_error("{what}: class format {format} is neither 1 nor 2"))
-        }
+        } else { return Err(font_error("{what}: class format {format} is neither 1 nor 2")) }
         Ok(out)
     }
 
@@ -702,7 +727,9 @@ priv internal: module {
             unicode: platform == 0 || (platform == 3 && (encoding == 1 || encoding == 10))
             if !unicode || (format != 4 && format != 12) -> next
             rank: (if format == 12 -> 4 else -> 0) + (if platform == 3 -> 2 else -> 1)
-            if rank > best.rank -> best = CmapPick{offset: offset, format: format, count: 0, rank: rank}
+            if rank > best.rank {
+                best = CmapPick{offset: offset, format: format, count: 0, rank: rank}
+            }
         }
         if best.offset < 0 -> return Err(font_error("cmap: no Unicode subtable in format 4 or 12"))
         if best.format == 12 {
@@ -713,7 +740,9 @@ priv internal: module {
                 row: best.offset + 16 + g * 12
                 first: raw32(b, row)
                 last: raw32(b, row + 4)
-                if last < first || first <= previous -> return Err(font_error("cmap format 12: group {g} ({first}..{last}) is out of order"))
+                if last < first || first <= previous {
+                    return Err(font_error("cmap format 12: group {g} ({first}..{last}) is out of order"))
+                }
                 previous = last
             }
             best.count = groups
@@ -725,7 +754,9 @@ priv internal: module {
             loop s in 0..<segments {
                 last: raw16(b, best.offset + 14 + s * 2)
                 first: raw16(b, best.offset + 16 + segments * 2 + s * 2)
-                if last < first || last <= previous -> return Err(font_error("cmap format 4: segment {s} ({first}..{last}) is out of order"))
+                if last < first || last <= previous {
+                    return Err(font_error("cmap format 4: segment {s} ({first}..{last}) is out of order"))
+                }
                 previous = last
             }
             best.count = segments
@@ -745,11 +776,7 @@ priv internal: module {
         hi := segments
         loop lo < hi {
             mid: (lo + hi) /% 2
-            if raw16(b, ends_at + mid * 2) < scalar {
-                lo = mid + 1
-            } else {
-                hi = mid
-            }
+            if raw16(b, ends_at + mid * 2) < scalar -> lo = mid + 1 else -> hi = mid
         }
         if lo >= segments || raw16(b, starts_at + lo * 2) > scalar -> return 0
         delta: raw16(b, deltas_at + lo * 2)
@@ -768,11 +795,7 @@ priv internal: module {
         hi := face.cmap_count
         loop lo < hi {
             mid: (lo + hi) /% 2
-            if raw32(b, face.cmap + 16 + mid * 12 + 4) < scalar {
-                lo = mid + 1
-            } else {
-                hi = mid
-            }
+            if raw32(b, face.cmap + 16 + mid * 12 + 4) < scalar -> lo = mid + 1 else -> hi = mid
         }
         if lo >= face.cmap_count -> return 0
         row: face.cmap + 16 + lo * 12
@@ -786,7 +809,9 @@ priv internal: module {
         b: face.bytes
         start: if face.long_loca -> raw32(b, face.loca + id * 4) else -> raw16(b, face.loca + id * 2) * 2
         end: if face.long_loca -> raw32(b, face.loca + id * 4 + 4) else -> raw16(b, face.loca + id * 2 + 2) * 2
-        if end < start || end > face.glyf_length -> return Err(font_error("loca: glyph {id} spans {start}..{end} of a {face.glyf_length}-byte glyf table"))
+        if end < start || end > face.glyf_length {
+            return Err(font_error("loca: glyph {id} spans {start}..{end} of a {face.glyf_length}-byte glyf table"))
+        }
         Ok(TableSpan{offset: face.glyf + start, length: end - start})
     }
 
@@ -806,29 +831,37 @@ priv internal: module {
     // `points`) to `ends`. `scale` is a 16.16 factor from font units (UNSCALED
     // for none), applied as FreeType applies it: to each point and to each
     // component offset, so a composite rounds as FreeType's does.
-    glyph_points: fn(face: Face, id: Int, depth: Int, scale: Int, &points: [OutlinePoint], &ends: [Int]) FontError! {
+    glyph_points: fn(face: Face, id: Int, depth: Int, scale: Int, points: &[OutlinePoint], ends: &[Int]) FontError! {
         span: glyph_span(face, id)
         if span.length == 0 -> return Ok()
-        if span.length < 10 -> return Err(font_error("glyf: glyph {id} has {span.length} bytes, less than its header"))
+        if span.length < 10 {
+            return Err(font_error("glyf: glyph {id} has {span.length} bytes, less than its header"))
+        }
         contours: signed16(raw16(face.bytes, span.offset))
         if contours >= 0 -> return simple_points(face, id, span, contours, scale, points, ends)
         composite_points(face, id, span, depth, scale, points, ends)
     }
 
-    simple_points: fn(face: Face, id: Int, span: TableSpan, contours: Int, scale: Int, &points: [OutlinePoint], &ends: [Int]) FontError! {
+    simple_points: fn(face: Face, id: Int, span: TableSpan, contours: Int, scale: Int, points: &[OutlinePoint], ends: &[Int]) FontError! {
         b: face.bytes
         limit: span.offset + span.length
         at := span.offset + 10
-        if at + contours * 2 + 2 > limit -> return Err(font_error("glyf: glyph {id}'s contour ends pass its end"))
+        if at + contours * 2 + 2 > limit {
+            return Err(font_error("glyf: glyph {id}'s contour ends pass its end"))
+        }
         base: points.len()
         last := Int{-1}
         loop c in 0..<contours {
             end: raw16(b, at + c * 2)
-            if end <= last -> return Err(font_error("glyf: glyph {id}'s contour {c} ends at point {end}, not after {last}"))
+            if end <= last {
+                return Err(font_error("glyf: glyph {id}'s contour {c} ends at point {end}, not after {last}"))
+            }
             last = end
         }
         count: last + 1
-        if base + count > GLYPH_POINTS_MAX -> return Err(font_error("glyf: glyph {id} has more than {GLYPH_POINTS_MAX} points"))
+        if base + count > GLYPH_POINTS_MAX {
+            return Err(font_error("glyf: glyph {id} has more than {GLYPH_POINTS_MAX} points"))
+        }
         at += contours * 2
         instructions: raw16(b, at)
         at += 2 + instructions
@@ -845,17 +878,23 @@ priv internal: module {
                 loop _ in 0..<repeat -> flags.push(flag)
             }
         }
-        if flags.len() > count -> return Err(font_error("glyf: glyph {id}'s flags repeat past its {count} points"))
+        if flags.len() > count {
+            return Err(font_error("glyf: glyph {id}'s flags repeat past its {count} points"))
+        }
         xs := [Int]{}
         x := 0
         loop flag in flags {
             if flag.bit_and(2) != 0 {
-                if at >= limit -> return Err(font_error("glyf: glyph {id}'s x coordinates pass its end"))
+                if at >= limit {
+                    return Err(font_error("glyf: glyph {id}'s x coordinates pass its end"))
+                }
                 step: Int{b[at]}
                 at += 1
                 x = if flag.bit_and(16) != 0 -> x + step else -> x - step
             } else if flag.bit_and(16) == 0 {
-                if at + 2 > limit -> return Err(font_error("glyf: glyph {id}'s x coordinates pass its end"))
+                if at + 2 > limit {
+                    return Err(font_error("glyf: glyph {id}'s x coordinates pass its end"))
+                }
                 x += signed16(raw16(b, at))
                 at += 2
             }
@@ -865,12 +904,16 @@ priv internal: module {
         loop p in 0..<count {
             flag: flags[p]
             if flag.bit_and(4) != 0 {
-                if at >= limit -> return Err(font_error("glyf: glyph {id}'s y coordinates pass its end"))
+                if at >= limit {
+                    return Err(font_error("glyf: glyph {id}'s y coordinates pass its end"))
+                }
                 step: Int{b[at]}
                 at += 1
                 y = if flag.bit_and(32) != 0 -> y + step else -> y - step
             } else if flag.bit_and(32) == 0 {
-                if at + 2 > limit -> return Err(font_error("glyf: glyph {id}'s y coordinates pass its end"))
+                if at + 2 > limit {
+                    return Err(font_error("glyf: glyph {id}'s y coordinates pass its end"))
+                }
                 y += signed16(raw16(b, at))
                 at += 2
             }
@@ -882,21 +925,29 @@ priv internal: module {
 
     // A composite glyph: each component's points, transformed and moved, in
     // order. Offsets are not scaled by the transform (the Microsoft reading).
-    composite_points: fn(face: Face, id: Int, span: TableSpan, depth: Int, scale: Int, &points: [OutlinePoint], &ends: [Int]) FontError! {
-        if depth >= COMPONENT_DEPTH_MAX -> return Err(font_error("glyf: glyph {id} nests components deeper than {COMPONENT_DEPTH_MAX}"))
+    composite_points: fn(face: Face, id: Int, span: TableSpan, depth: Int, scale: Int, points: &[OutlinePoint], ends: &[Int]) FontError! {
+        if depth >= COMPONENT_DEPTH_MAX {
+            return Err(font_error("glyf: glyph {id} nests components deeper than {COMPONENT_DEPTH_MAX}"))
+        }
         b: face.bytes
         limit: span.offset + span.length
         base: points.len()
         at := span.offset + 10
         loop {
-            if at + 4 > limit -> return Err(font_error("glyf: glyph {id}'s components pass its end"))
+            if at + 4 > limit {
+                return Err(font_error("glyf: glyph {id}'s components pass its end"))
+            }
             flags: raw16(b, at)
             child: raw16(b, at + 2)
             at += 4
-            if child >= face.glyph_count -> return Err(font_error("glyf: glyph {id} names component glyph {child} of {face.glyph_count}"))
+            if child >= face.glyph_count {
+                return Err(font_error("glyf: glyph {id} names component glyph {child} of {face.glyph_count}"))
+            }
             words: flags.bit_and(1) != 0
             xy: flags.bit_and(2) != 0
-            if at + (if words -> 4 else -> 2) > limit -> return Err(font_error("glyf: glyph {id}'s component arguments pass its end"))
+            if at + (if words -> 4 else -> 2) > limit {
+                return Err(font_error("glyf: glyph {id}'s component arguments pass its end"))
+            }
             arg1 := 0
             arg2 := 0
             if words {
@@ -921,8 +972,10 @@ priv internal: module {
             xy_term := 0
             yx := 0
             yy := 65536
-            scale_bytes: if flags.bit_and(8) != 0 -> 2 else -> if flags.bit_and(64) != 0 -> 4 else -> if flags.bit_and(128) != 0 -> 8 else -> 0
-            if at + scale_bytes > limit -> return Err(font_error("glyf: glyph {id}'s component transform passes its end"))
+            scale_bytes: if flags.bit_and(8) != 0 -> 2 else if flags.bit_and(64) != 0 -> 4 else if flags.bit_and(128) != 0 -> 8 else -> 0
+            if at + scale_bytes > limit {
+                return Err(font_error("glyf: glyph {id}'s component transform passes its end"))
+            }
             if scale_bytes == 2 {
                 xx = signed16(raw16(b, at)) * 4
                 yy = xx
@@ -939,7 +992,9 @@ priv internal: module {
             part := [OutlinePoint]{}
             part_ends := [Int]{}
             glyph_points(face, child, depth + 1, scale, part, part_ends)
-            if points.len() + part.len() > GLYPH_POINTS_MAX -> return Err(font_error("glyf: glyph {id} has more than {GLYPH_POINTS_MAX} points"))
+            if points.len() + part.len() > GLYPH_POINTS_MAX {
+                return Err(font_error("glyf: glyph {id} has more than {GLYPH_POINTS_MAX} points"))
+            }
             if scale_bytes != 0 {
                 loop k in 0..<part.len() {
                     p: part[k]
@@ -950,7 +1005,9 @@ priv internal: module {
             dy := scaled(arg2, scale)
             if !xy {
                 // Point matching: the parent's point arg1 meets the child's arg2.
-                if arg1 >= points.len() - base || arg2 >= part.len() -> return Err(font_error("glyf: glyph {id} matches points {arg1} and {arg2}, which it lacks"))
+                if arg1 >= points.len() - base || arg2 >= part.len() {
+                    return Err(font_error("glyf: glyph {id} matches points {arg1} and {arg2}, which it lacks"))
+                }
                 dx = points[base + arg1].x - part[arg2].x
                 dy = points[base + arg1].y - part[arg2].y
             }
@@ -987,8 +1044,12 @@ priv internal: module {
 
     adjust_of: fn(first: ValueRecord, second: ValueRecord) -> Adjust Never! {
         Adjust{
-            x_place1: first.x_place, y_place1: first.y_place, x_advance1: first.x_advance,
-            x_place2: second.x_place, y_place2: second.y_place, x_advance2: second.x_advance,
+            x_place1: first.x_place,
+            y_place1: first.y_place,
+            x_advance1: first.x_advance,
+            x_place2: second.x_place,
+            y_place2: second.y_place,
+            x_advance2: second.x_advance,
         }
     }
 
@@ -1007,7 +1068,9 @@ priv internal: module {
         loop i in 0..<script_count {
             row: scripts_at + 2 + i * 6
             name: tag_text(raw32(b, row))
-            if name == "latn" || (name == "DFLT" && script < 0) -> script = scripts_at + raw16(b, row + 4)
+            if name == "latn" || (name == "DFLT" && script < 0) {
+                script = scripts_at + raw16(b, row + 4)
+            }
         }
         if script < 0 -> return Ok([PairLookup]{})
         lang_offset: u16(b, script, "GPOS script")
@@ -1023,7 +1086,9 @@ priv internal: module {
         need(b, features_at + 2, all_features * 6, "GPOS features")
         chosen := [Int]{}
         loop index in indices {
-            if index >= all_features -> return Err(font_error("GPOS language: feature {index} of {all_features}"))
+            if index >= all_features {
+                return Err(font_error("GPOS language: feature {index} of {all_features}"))
+            }
             row: features_at + 2 + index * 6
             if tag_text(raw32(b, row)) != "kern" -> next
             feature: features_at + raw16(b, row + 4)
@@ -1043,7 +1108,9 @@ priv internal: module {
         need(b, lookups_at + 2, lookup_count * 2, "GPOS lookups")
         out := [PairLookup]{}
         loop index in chosen {
-            if index >= lookup_count -> return Err(font_error("GPOS feature kern: lookup {index} of {lookup_count}"))
+            if index >= lookup_count {
+                return Err(font_error("GPOS feature kern: lookup {index} of {lookup_count}"))
+            }
             lookup: lookups_at + raw16(b, lookups_at + 2 + index * 2)
             kind: u16(b, lookup, "GPOS lookup")
             flag: u16(b, lookup + 2, "GPOS lookup")
@@ -1060,7 +1127,9 @@ priv internal: module {
                 }
                 if sub_kind == 2 -> subtables.push(pair_subtable(b, sub))
             }
-            if subtables.len() > 0 -> out.push(PairLookup{skip_mask: flag.bit_and(14), subtables: subtables})
+            if subtables.len() > 0 {
+                out.push(PairLookup{skip_mask: flag.bit_and(14), subtables: subtables})
+            }
         }
         Ok(out)
     }
@@ -1073,8 +1142,15 @@ priv internal: module {
         size1: value_size(format1)
         size2: value_size(format2)
         out := PairSubtable{
-            format: format, coverage: coverage, set_starts: [Int]{}, seconds: [Int]{}, adjusts: [Adjust]{},
-            class1: no_ranges(), class2: no_ranges(), class2_count: 0, takes_second: format2 != 0,
+            format: format,
+            coverage: coverage,
+            set_starts: [Int]{},
+            seconds: [Int]{},
+            adjusts: [Adjust]{},
+            class1: no_ranges(),
+            class2: no_ranges(),
+            class2_count: 0,
+            takes_second: format2 != 0,
         }
         if format == 1 {
             sets: u16(b, at + 8, "GPOS pair")
@@ -1089,7 +1165,9 @@ priv internal: module {
                 loop p in 0..<count {
                     row: set + 2 + p * stride
                     second: raw16(b, row)
-                    if second <= previous -> return Err(font_error("GPOS pair set: second glyph {second} is out of order"))
+                    if second <= previous {
+                        return Err(font_error("GPOS pair set: second glyph {second} is out of order"))
+                    }
                     previous = second
                     out.seconds.push(second)
                     out.adjusts.push(adjust_of(value_record(b, row + 2, format1), value_record(b, row + 2 + size1, format2)))
@@ -1108,15 +1186,17 @@ priv internal: module {
                 out.adjusts.push(adjust_of(value_record(b, row, format1), value_record(b, row + size1, format2)))
             }
             loop value in out.class1.values {
-                if value >= count1 -> return Err(font_error("GPOS pair: first class {value} of {count1}"))
+                if value >= count1 {
+                    return Err(font_error("GPOS pair: first class {value} of {count1}"))
+                }
             }
             loop value in out.class2.values {
-                if value >= count2 -> return Err(font_error("GPOS pair: second class {value} of {count2}"))
+                if value >= count2 {
+                    return Err(font_error("GPOS pair: second class {value} of {count2}"))
+                }
             }
             out.class2_count = count2
-        } else {
-            return Err(font_error("GPOS pair: format {format} is neither 1 nor 2"))
-        }
+        } else { return Err(font_error("GPOS pair: format {format} is neither 1 nor 2")) }
         Ok(out)
     }
 
@@ -1134,11 +1214,7 @@ priv internal: module {
         hi := sub.set_starts[index + 1]
         loop lo < hi {
             mid: (lo + hi) /% 2
-            if sub.seconds[mid] < second {
-                lo = mid + 1
-            } else {
-                hi = mid
-            }
+            if sub.seconds[mid] < second -> lo = mid + 1 else -> hi = mid
         }
         if lo < sub.set_starts[index + 1] && sub.seconds[lo] == second -> Val(sub.adjusts[lo]) else -> None
     }
@@ -1152,8 +1228,8 @@ priv internal: module {
     }
 
     // The kern table's horizontal format 0 pairs, summed over its subtables.
-    kern_table: fn(b: [U8], kern: TableSpan) -> [Int: Int] FontError! {
-        out := [Int: Int]{}
+    kern_table: fn(b: [U8], kern: TableSpan) -> [Int:Int] FontError! {
+        out := [Int:Int]{}
         within(kern, 4, "kern")
         if raw16(b, kern.offset) != 0 -> return Ok(out)
         count: raw16(b, kern.offset + 2)
@@ -1184,9 +1260,9 @@ priv internal: module {
     // The scalar at byte `i` of UTF-8 `bytes` and the offset after it.
     decode: fn(bytes: [U8], i: Int) -> Decoded {
         first: Int{bytes[i]}
-        width: if first < 128 -> 1 else -> if first < 224 -> 2 else -> if first < 240 -> 3 else -> 4
+        width: if first < 128 -> 1 else if first < 224 -> 2 else if first < 240 -> 3 else -> 4
         if i + width > bytes.len() -> return Decoded{scalar: 65533, next: bytes.len()}
-        scalar := if width == 1 -> first else -> if width == 2 -> first.bit_and(31) else -> if width == 3 -> first.bit_and(15) else -> first.bit_and(7)
+        scalar := if width == 1 -> first else if width == 2 -> first.bit_and(31) else if width == 3 -> first.bit_and(15) else -> first.bit_and(7)
         loop k in 1..<width -> scalar = (scalar << 6) + (Int{bytes[i + k]}).bit_and(63)
         Decoded{scalar: scalar, next: i + width}
     }
@@ -1264,7 +1340,7 @@ priv internal: module {
     }
 
     // Greedy filling of one paragraph, bytes `start..<stop` without its "\n".
-    wrap_paragraph: fn(face: Face, bytes: [U8], start: Int, stop: Int, size_px: Float, max_width: Float, &lines: [TextLine]) {
+    wrap_paragraph: fn(face: Face, bytes: [U8], start: Int, stop: Int, size_px: Float, max_width: Float, lines: &[TextLine]) {
         line := start
         loop line < stop && is_space(Int{bytes[line]}) -> line += 1
         if line >= stop {
@@ -1317,7 +1393,7 @@ priv internal: module {
     // Glyph `id` at `size` 1/64 pixels per em, `quarter` quarter pixels right,
     // from `cache` or drawn into it. Four quarters is the unmoved mask one pixel
     // right.
-    cached_mask: fn(&cache: GlyphCache, face: Face, id: Int, size: Int, quarter: Int) -> GlyphMask {
+    cached_mask: fn(cache: &GlyphCache, face: Face, id: Int, size: Int, quarter: Int) -> GlyphMask {
         if quarter == 4 {
             moved := cached_mask(cache, face, id, size, 0)
             moved.left += 1
@@ -1338,7 +1414,7 @@ priv internal: module {
         cost: mask.coverage.len() + MASK_RECORD_BYTES
         if cache.recent_bytes + cost > cache.budget /% 2 {
             cache.older = cache.recent
-            cache.recent = [Int: GlyphMask]{}
+            cache.recent = [Int:GlyphMask]{}
             cache.recent_bytes = 0
         }
         _: cache.recent.add(key, mask.copy())
@@ -1371,9 +1447,7 @@ priv internal: module {
     abs_int: fn(a: Int) -> Int { if a < 0 -> -a else -> a }
 
     // `n / d` rounded down, for any sign of `d`.
-    along: fn(n: Int, d: Int) -> Int {
-        if d < 0 -> (-n) /% (-d) else -> n /% d
-    }
+    along: fn(n: Int, d: Int) -> Int { if d < 0 -> (-n) /% (-d) else -> n /% d }
 
     // Glyph `id` at `size` 1/64 pixels per em, moved `shift` 1/64 pixels right.
     // Points scale as FreeType's unhinted loader scales them (16.16 factor size
@@ -1396,7 +1470,9 @@ priv internal: module {
     // The mask of contours `points` (1/64 pixels, y up, contour k ending at
     // `ends[k]`) moved `shift` 1/64 pixels right.
     mask_of: fn(points: [OutlinePoint], ends: [Int], shift: Int) -> GlyphMask {
-        if points.len() == 0 -> return GlyphMask{width: 0, height: 0, left: 0, top: 0, coverage: [U8]{}}
+        if points.len() == 0 {
+            return GlyphMask{width: 0, height: 0, left: 0, top: 0, coverage: [U8]{}}
+        }
         xmin := points[0].x
         xmax := points[0].x
         ymin := points[0].y
@@ -1443,9 +1519,11 @@ priv internal: module {
     // (`ox`, `oy`). It starts at its first on-curve point, or between its last
     // and first points when all are control points; between two control points
     // lies an on-curve point at their midpoint, rounded down.
-    contour: fn(&cells: Cells, points: [OutlinePoint], first: Int, last: Int, ox: Int, oy: Int) {
+    contour: fn(cells: &Cells, points: [OutlinePoint], first: Int, last: Int, ox: Int, oy: Int) {
         n: last - first + 1
-        if n < 2 -> return
+        if n < 2 {
+            return
+        }
         start := -1
         loop k in 0..<n {
             if start < 0 && points[first + k].on -> start = k
@@ -1474,9 +1552,7 @@ priv internal: module {
             px: if closing -> sx else -> p.x - ox
             py: if closing -> sy else -> p.y - oy
             if closing || p.on {
-                if curved {
-                    conic(cells, x * 4, y * 4, cx * 4, cy * 4, px * 4, py * 4)
-                } else {
+                if curved -> conic(cells, x * 4, y * 4, cx * 4, cy * 4, px * 4, py * 4) else {
                     line(cells, x * 4, y * 4, px * 4, py * 4)
                 }
                 x = px
@@ -1499,7 +1575,7 @@ priv internal: module {
 
     // A quadratic curve as 2^k lines: k grows until each piece's bend is under a
     // quarter pixel, the points stepped by forward differences in 32.32.
-    conic: fn(&cells: Cells, x0: Int, y0: Int, x1: Int, y1: Int, x2: Int, y2: Int) {
+    conic: fn(cells: &Cells, x0: Int, y0: Int, x1: Int, y1: Int, x2: Int, y2: Int) {
         ax: x0 + x2 - 2 * x1
         ay: y0 + y2 - 2 * y1
         bend := max_int(abs_int(ax), abs_int(ay))
@@ -1538,8 +1614,10 @@ priv internal: module {
     }
 
     // A line in 1/SUBPIXEL pixels, split at each row it crosses.
-    line: fn(&cells: Cells, x0: Int, y0: Int, x1: Int, y1: Int) {
-        if y0 == y1 -> return
+    line: fn(cells: &Cells, x0: Int, y0: Int, x1: Int, y1: Int) {
+        if y0 == y1 {
+            return
+        }
         dx: x1 - x0
         dy: y1 - y0
         x := x0
@@ -1576,8 +1654,10 @@ priv internal: module {
     }
 
     // A piece of a line inside pixel row `row`, split at each column it crosses.
-    row_piece: fn(&cells: Cells, row: Int, x0: Int, y0: Int, x1: Int, y1: Int) {
-        if y0 == y1 -> return
+    row_piece: fn(cells: &Cells, row: Int, x0: Int, y0: Int, x1: Int, y1: Int) {
+        if y0 == y1 {
+            return
+        }
         first: min_int(x0, x1) /% SUBPIXEL
         if max_int(x0, x1) <= (first + 1) * SUBPIXEL {
             cell(cells, first, row, x0, y0, x1, y1)
@@ -1619,8 +1699,10 @@ priv internal: module {
     }
 
     // A piece of a line inside one pixel.
-    cell: fn(&cells: Cells, col: Int, row: Int, x0: Int, y0: Int, x1: Int, y1: Int) {
-        if y0 == y1 || row < 0 || row >= cells.height || col > cells.width -> return
+    cell: fn(cells: &Cells, col: Int, row: Int, x0: Int, y0: Int, x1: Int, y1: Int) {
+        if y0 == y1 || row < 0 || row >= cells.height || col > cells.width {
+            return
+        }
         at: max_int(col, 0)
         i: row * (cells.width + 1) + at
         d: y1 - y0
@@ -1700,15 +1782,17 @@ priv internal: module {
         out
     }
 
-    put: fn(&out: [U8], value: Int, width: Int) {
+    put: fn(out: &[U8], value: Int, width: Int) {
         loop k in 0..<width -> out.push(U8{(value >> ((width - 1 - k) * 8)).bit_and(255)})
     }
 
     // A square's corners, all control points: a TrueType circle.
     control_square: fn(lo: Int, hi: Int) -> [OutlinePoint] {
         [OutlinePoint]{
-            OutlinePoint{x: lo, y: lo, on: false}, OutlinePoint{x: lo, y: hi, on: false},
-            OutlinePoint{x: hi, y: hi, on: false}, OutlinePoint{x: hi, y: lo, on: false},
+            OutlinePoint{x: lo, y: lo, on: false},
+            OutlinePoint{x: lo, y: hi, on: false},
+            OutlinePoint{x: hi, y: hi, on: false},
+            OutlinePoint{x: hi, y: lo, on: false},
         }
     }
 
@@ -1739,8 +1823,10 @@ priv internal: module {
     // Loading `bytes` gives a face that answers every query, or a Font error.
     survives: fn(bytes: [U8]) {
         if face(bytes) == {
-            .Ok(loaded) -> exercise(loaded)
-            .Err(error) -> assert(error.reason != "", "a damaged font gave a FontError without a reason")
+            .Ok(loaded) -> { exercise(loaded) }
+            .Err(error) -> {
+                assert(error.reason != "", "a damaged font gave a FontError without a reason")
+            }
         }
     }
 }
@@ -1963,8 +2049,10 @@ priv internal: module {
         }
     }
     if face("OTTO and the rest".bytes()) == {
-        .Ok(_) -> panic("a CFF font loaded")
-        .Err(error) -> assert_eq(error.reason, "CFF (PostScript) outlines are not supported; use a TrueType (glyf) build")
+        .Ok(_) -> { panic("a CFF font loaded") }
+        .Err(error) -> {
+            assert_eq(error.reason, "CFF (PostScript) outlines are not supported; use a TrueType (glyf) build")
+        }
     }
 }
 

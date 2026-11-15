@@ -1,12 +1,17 @@
 // C supplies code addresses only. Assertions, callbacks and all concurrency
 // behavior run in the real Jet scheduler; no fake observer or stop rail.
 scheduler_test_require: fn(ok: Bool) {
-    if ok -> return
+    if ok {
+        return
+    }
     #Unsafe("an isolated failed scheduler witness exits with no further runtime cleanup") {
         _ := os_syscall_i64(I64{231}, I64{1}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
-    loop {}
+    loop {
+
+    }
 }
+
 scheduler_test_env: fn(log: I64, mode: I64, value: I64) -> I64 {
     env: jet_rt_alloc(I64{32}, I64{8})
     thread_zero(env, I64{32})
@@ -15,23 +20,28 @@ scheduler_test_env: fn(log: I64, mode: I64, value: I64) -> I64 {
     sync_store(env + I64{16}, value)
     env
 }
+
 #Export(c) jet_rt_scheduler_fixture_clone: fn(source: I64, target: I64) {
     sync_store(target, sync_load(source))
 }
+
 #Export(c) jet_rt_scheduler_fixture_release: fn(env: I64) {
     _ := sync_add(sync_load(env), I64{1})
     jet_rt_free(env, I64{32}, I64{8})
 }
+
 // An exit closure's word at +24 is the exit log: its body appends the id at
 // +32 to the order word at +0, its release counts at +8.
 #Export(c) jet_rt_scheduler_fixture_exit_body: fn(closure: I64) {
     order: sync_load(closure + I64{24})
     sync_store(order, sync_load(order) * I64{10} + sync_load(closure + I64{32}))
 }
+
 #Export(c) jet_rt_scheduler_fixture_exit_release: fn(closure: I64) {
     _ := sync_add(sync_load(closure + I64{24}) + I64{8}, I64{1})
     jet_rt_free(closure, I64{40}, I64{8})
 }
+
 #Export(c) jet_rt_scheduler_fixture_exit_worker: fn(arguments: I64) -> I64 {
     closure: jet_rt_alloc(I64{40}, I64{8})
     sync_store(closure, I64{1})
@@ -42,6 +52,7 @@ scheduler_test_env: fn(log: I64, mode: I64, value: I64) -> I64 {
     jet_rt_native_atexit(closure)
     I64{0}
 }
+
 #Export(c) jet_rt_scheduler_fixture_body: fn(env: I64, out: I64) -> I64 {
     mode: sync_load(env + I64{8})
     log: sync_load(env)
@@ -53,17 +64,17 @@ scheduler_test_env: fn(log: I64, mode: I64, value: I64) -> I64 {
             _ := scheduler_yield(kind, slot, I64{-1})
             sync_park_drop(slot)
             jet_rt_string_drop(kind)
-            if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+            if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
         }
         (mode == I64{2}) -> {
             message: scheduler_msg_cancelled()
             jet_rt_panic_message(sync_load(message), sync_load(message + I64{8}))
             jet_rt_string_drop(message)
-            if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+            if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
         }
         (mode == I64{3}) -> {
             jet_task_sleep_duration_ns_defaulted(I64{1000000})
-            if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+            if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
         }
     }
     sync_store(out, sync_load(env + I64{16}))
@@ -76,6 +87,7 @@ scheduler_test_spawn: fn(callbacks: I64, meta: I64, log: I64, mode: I64, value: 
     jet_rt_string_drop(label)
     child
 }
+
 #Export(c) jet_rt_scheduler_fixture_run: fn(callbacks: I64) -> I64 {
     meta: jet_rt_alloc(I64{72}, I64{8})
     thread_zero(meta, I64{72})

@@ -122,13 +122,9 @@ JetDriverForeignProvenance: struct {
     obligations: [SemaForeignBoundaryObligationInput]
 }
 
-jet_driver_foreign_span_zero: fn() -> Span Never! {
-    Span{start: 0, end: 0}
-}
+jet_driver_foreign_span_zero: fn() -> Span Never! { Span{start: 0, end: 0} }
 
-jet_driver_foreign_path: fn(path: String) -> String Never! {
-    path.replace("\\", "/")
-}
+jet_driver_foreign_path: fn(path: String) -> String Never! { path.replace("\\", "/") }
 
 jet_driver_foreign_cache_relative: fn(language: String, library: String) -> String Never! {
     ".jet/bindings/{language}/{library}.jet"
@@ -310,9 +306,13 @@ jet_driver_foreign_collect_imports: fn(imports: [ImportDecl], root_index: Int, m
                         binding_span: if item_index < declaration.item_spans.len() -> declaration.item_spans[item_index] else -> declaration.span
                         if {
                             item.alias != None -> {
-                                if item_index < declaration.local_spans.len() -> alias_span = declaration.local_spans[item_index]
+                                if item_index < declaration.local_spans.len() {
+                                    alias_span = declaration.local_spans[item_index]
+                                }
                             }
-                            item_index < declaration.item_spans.len() -> alias_span = declaration.item_spans[item_index]
+                            item_index < declaration.item_spans.len() -> {
+                                alias_span = declaration.item_spans[item_index]
+                            }
                             else -> {}
                         }
                         jet_driver_foreign_add_request(requests, language, library, root_index, module_index, scope, source_path, declaration, alias, alias_span, binding_span, "module", diagnostics)
@@ -398,7 +398,9 @@ jet_driver_foreign_collect_items: fn(items: [Item], root_index: Int, module_inde
                     overlays[surface_index].overlay_function_paths.push(source_path.copy())
                 }
                 overlays[surface_index].overlay_span = c_module.path_span
-                if overlays[surface_index].overlay_path == "" -> overlays[surface_index].overlay_path = source_path
+                if overlays[surface_index].overlay_path == "" {
+                    overlays[surface_index].overlay_path = source_path
+                }
                 declaration: ImportDecl{kind: ImportKind.Module{name: "c.{c_module.lib}", span: c_module.path_span}, alias: c_module.lib, alias_span: c_module.path_span, span: c_module.span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None}
                 jet_driver_foreign_add_request(requests, "c", c_module.lib, root_index, module_index, scope, source_path, declaration, c_module.lib, c_module.path_span, c_module.path_span, "item", diagnostics)
             }
@@ -442,7 +444,9 @@ jet_driver_foreign_find_file: fn(files: [JetDriverAuthorizedSourceFile], relativ
 // The cache records carry their display path (`jet_driver_display_path`) from
 // here on: the driver names them only in source identities and diagnostics.
 jet_driver_foreign_find_cache: fn(snapshot: JetDriverAuthorizedSourceSnapshot, root_index: Int, language: String, library: String) -> (cache: JetDriverAuthorizedSourceFile?, metadata: JetDriverAuthorizedSourceFile?, provenance: JetDriverAuthorizedSourceFile?) Never! {
-    if root_index < 0 || root_index >= snapshot.roots.len() -> return (cache: None, metadata: None, provenance: None)
+    if root_index < 0 || root_index >= snapshot.roots.len() {
+        return (cache: None, metadata: None, provenance: None)
+    }
     root: snapshot.roots[root_index]
     entry_root: jet_driver_entry_root_path(snapshot)
     cache_files: root.foreign_cache_files
@@ -492,9 +496,7 @@ jet_driver_foreign_surface: fn(snapshot: JetDriverAuthorizedSourceSnapshot, requ
                     module_library = located.module_library
                 }
             }
-        } else {
-            valid = false
-        }
+        } else { valid = false }
     }
     parsed_metadata := JetDriverForeignMetadata?{None}
     if metadata_file == .Val(metadata) && request.language == "c" {
@@ -506,7 +508,7 @@ jet_driver_foreign_surface: fn(snapshot: JetDriverAuthorizedSourceSnapshot, requ
         parsed_provenance = jet_driver_foreign_parse_provenance(provenance, request.library, diagnostics)
         if parsed_provenance == None -> valid = false
     }
-    overlay_functions := [ExternFn]{ }
+    overlay_functions := [ExternFn]{}
     overlay_function_paths := [String]{}
     overlay_span := jet_driver_foreign_span_zero()
     overlay_path := ""
@@ -550,7 +552,7 @@ jet_driver_foreign_hex_digit: fn(value: Int) -> Int Never! {
 
 jet_driver_foreign_unescape: fn(value: String) -> String? {
     bytes: value.bytes()
-    output := [U8]{ }
+    output := [U8]{}
     index := 0
     loop index < bytes.len() {
         if bytes[index] != (U8{37}) {
@@ -589,9 +591,9 @@ jet_driver_foreign_metadata_error: fn(path: String, reason: String, diagnostics:
 jet_driver_foreign_parse_metadata: fn(file: JetDriverAuthorizedSourceFile, library: String, diagnostics: &[Diagnostic]) -> JetDriverForeignMetadata? {
     schema := ""
     metadata_library := ""
-    direct := [String]{ }
-    transitive := [String]{ }
-    handles := [SemaForeignHandleInput]{ }
+    direct := [String]{}
+    transitive := [String]{}
+    handles := [SemaForeignHandleInput]{}
     valid := true
     loop line in file.source.split("\n") {
         if line == "" -> next
@@ -621,7 +623,7 @@ jet_driver_foreign_parse_metadata: fn(file: JetDriverAuthorizedSourceFile, libra
                     }
                     else -> {
                         if jet_driver_foreign_unescape(value) == {
-                            .Val(decoded) -> metadata_library = decoded
+                            .Val(decoded) -> { metadata_library = decoded }
                             .None -> {
                                 jet_driver_foreign_metadata_error(file.path, "contains an invalid percent escape", diagnostics)
                                 valid = false
@@ -704,7 +706,7 @@ jet_driver_foreign_parse_optional_list: fn(value: String) -> [String]? {
 }
 
 jet_driver_foreign_unique_strings: fn(values: [String]) -> [String] Never! {
-    result := [String]{ }
+    result := [String]{}
     loop value in values {
         present: loop existing in result {
             if existing == value {
@@ -739,7 +741,7 @@ jet_driver_foreign_parse_provenance: fn(file: JetDriverAuthorizedSourceFile, lib
     compiler_flags := [String]?{None}
     target := ""
     generator := ""
-    obligations := [SemaForeignBoundaryObligationInput]{ }
+    obligations := [SemaForeignBoundaryObligationInput]{}
     valid := true
     loop line in file.source.split("\n") {
         if line == "" -> next
@@ -753,7 +755,9 @@ jet_driver_foreign_parse_provenance: fn(file: JetDriverAuthorizedSourceFile, lib
         value: parts.value
         if name == {
             "schema" -> schema = value
-            "language" -> if language == "" -> language = value
+            "language" -> {
+                if language == "" -> language = value
+            }
             "library" | "linked-library" -> direct_links.push(value.copy())
             "boundary-schema" -> boundary_schema = value
             "boundary-descriptor" -> descriptor = value
@@ -765,9 +769,15 @@ jet_driver_foreign_parse_provenance: fn(file: JetDriverAuthorizedSourceFile, lib
             "boundary-source-authority" -> source_authority = value
             "boundary-artifact-coverage" -> artifact_coverage_digest = value
             "boundary-loaded-artifact" -> loaded_artifact = value
-            "boundary-transitive-dependencies" -> transitive_dependencies = jet_driver_foreign_parse_optional_list(value)
-            "boundary-reachable-callbacks" -> reachable_callbacks = jet_driver_foreign_parse_optional_list(value)
-            "boundary-compiler-flags" -> compiler_flags = jet_driver_foreign_parse_optional_list(value)
+            "boundary-transitive-dependencies" -> {
+                transitive_dependencies = jet_driver_foreign_parse_optional_list(value)
+            }
+            "boundary-reachable-callbacks" -> {
+                reachable_callbacks = jet_driver_foreign_parse_optional_list(value)
+            }
+            "boundary-compiler-flags" -> {
+                compiler_flags = jet_driver_foreign_parse_optional_list(value)
+            }
             "boundary-coverage-target" -> target = value
             "boundary-coverage-generator" -> generator = value
             "boundary-obligation" -> {
@@ -777,7 +787,7 @@ jet_driver_foreign_parse_provenance: fn(file: JetDriverAuthorizedSourceFile, lib
                     valid = false
                     next
                 }
-                assumptions := [String]{ }
+                assumptions := [String]{}
                 loop assumption in fields[4].split("|") {
                     if assumption != "" -> assumptions.push(assumption)
                 }
@@ -805,9 +815,13 @@ jet_driver_foreign_same_abi: fn(left: NamedSpan?, right: NamedSpan?) -> Bool Nev
 }
 
 jet_driver_foreign_same_signature: fn(left: ExternFn, right: ExternFn) -> Bool Never! {
-    if !jet_driver_foreign_same_abi(left.abi, right.abi) || left.return_type != right.return_type || left.params.len() != right.params.len() -> return false
+    if !jet_driver_foreign_same_abi(left.abi, right.abi) || left.return_type != right.return_type || left.params.len() != right.params.len() {
+        return false
+    }
     loop index in 0..<left.params.len() {
-        if left.params[index].convention != right.params[index].convention || left.params[index].ty != right.params[index].ty || left.params[index].variadic != right.params[index].variadic -> return false
+        if left.params[index].convention != right.params[index].convention || left.params[index].ty != right.params[index].ty || left.params[index].variadic != right.params[index].variadic {
+            return false
+        }
     }
     true
 }
@@ -817,7 +831,9 @@ jet_driver_foreign_parse_cache: fn(file: JetDriverAuthorizedSourceFile, diagnost
     // copy: `lexed` still feeds jet_driver_has_errors and parse_lexed below, so it keeps its
     // diagnostics. The caller's diagnostics list gets a copy of each, re-pathed to the authorized
     // file.
-    loop diagnostic in lexed.diagnostics -> diagnostics.push(diagnostic_with_source_path(diagnostic.copy(), file.path, jet_driver_foreign_diagnostic_offset(diagnostic)))
+    loop diagnostic in lexed.diagnostics {
+        diagnostics.push(diagnostic_with_source_path(diagnostic.copy(), file.path, jet_driver_foreign_diagnostic_offset(diagnostic)))
+    }
     if jet_driver_has_errors(lexed.diagnostics) -> return None
     parsed := parse_lexed(lexed)
     parse_failed: jet_driver_has_errors(parsed.diagnostics)
@@ -868,7 +884,9 @@ jet_driver_foreign_make_adapter_function: fn(handle: String, raw_function: Strin
     // copy: `lexed` still feeds jet_driver_has_errors and parse_lexed below, so it keeps its
     // diagnostics. The caller's diagnostics list gets a copy of each, re-pathed to the adapter
     // origin.
-    loop diagnostic in lexed.diagnostics -> diagnostics.push(diagnostic_with_source_path(diagnostic.copy(), origin_path, jet_driver_foreign_diagnostic_offset(diagnostic)))
+    loop diagnostic in lexed.diagnostics {
+        diagnostics.push(diagnostic_with_source_path(diagnostic.copy(), origin_path, jet_driver_foreign_diagnostic_offset(diagnostic)))
+    }
     if jet_driver_has_errors(lexed.diagnostics) -> return None
     parsed := parse_lexed(lexed)
     parse_failed: jet_driver_has_errors(parsed.diagnostics)
@@ -896,8 +914,8 @@ jet_driver_foreign_make_adapter_function: fn(handle: String, raw_function: Strin
 
 jet_driver_foreign_prepare_functions: fn(functions: [ExternFn], handles: [SemaForeignHandleInput], surface: JetDriverForeignSurface, diagnostics: &[Diagnostic]) -> (functions: [ExternFn], adapters: [SemaForeignCloseAdapterInput], adapter_functions: [Func]) Never! {
     prepared := functions
-    adapters := [SemaForeignCloseAdapterInput]{ }
-    adapter_functions := [Func]{ }
+    adapters := [SemaForeignCloseAdapterInput]{}
+    adapter_functions := [Func]{}
     loop handle in handles {
         if handle.close == "" -> next
         constructor_index := -1
@@ -935,7 +953,9 @@ jet_driver_foreign_package_for_root: fn(load: JetDriverLoadResult, root_index: I
 jet_driver_foreign_find_synthetic_module: fn(load: JetDriverLoadResult, module_library: String, root_index: Int) -> Int? {
     synthetic_name: "__c_{module_library}"
     loop (index, loaded_module) in load.modules {
-        if loaded_module.module_name == synthetic_name && loaded_module.source_unit_index >= 0 && loaded_module.source_unit_index < load.source_units.len() && load.source_units[loaded_module.source_unit_index].root_index == root_index -> return Val(index)
+        if loaded_module.module_name == synthetic_name && loaded_module.source_unit_index >= 0 && loaded_module.source_unit_index < load.source_units.len() && load.source_units[loaded_module.source_unit_index].root_index == root_index {
+            return Val(index)
+        }
     }
     None
 }
@@ -955,7 +975,9 @@ jet_driver_foreign_add_import_edge: fn(load: &JetDriverLoadResult, request: JetD
             .Val(existing) -> existing.scope == binding_value.scope && existing.alias == binding_value.alias
             .None -> false
         }
-        if edge.source_module_identity == load.modules[request.module_index].module_identity && edge.target_module_identity == target_identity && edge.declaration.span.start == declaration.span.start && edge.declaration.span.end == declaration.span.end && same_binding -> return
+        if edge.source_module_identity == load.modules[request.module_index].module_identity && edge.target_module_identity == target_identity && edge.declaration.span.start == declaration.span.start && edge.declaration.span.end == declaration.span.end && same_binding {
+            return
+        }
     }
     load.imports.push(SemaRegistrationImportEdge{source_module_identity: load.modules[request.module_index].module_identity, target_module_identity: target_identity, target_package_identity: target_package, foreign_binding: binding, declaration: declaration})
 }
@@ -988,7 +1010,9 @@ jet_driver_foreign_generated_source: fn(surface: JetDriverForeignSurface) -> Str
 // A Core module's provider (no authority root) is itself embedded Core text,
 // so its aggregate takes a `<corelib>/` origin and loads as a Core unit.
 jet_driver_foreign_aggregate_path: fn(surface: JetDriverForeignSurface) -> String Never! {
-    if surface.root_index < 0 -> return "{JET_DRIVER_CORE_SOURCE_ROOT}/foreign/{surface.language}.{surface.library}"
+    if surface.root_index < 0 {
+        return "{JET_DRIVER_CORE_SOURCE_ROOT}/foreign/{surface.language}.{surface.library}"
+    }
     "foreign:{surface.language}.{surface.library}#root{surface.root_index}#aggregate"
 }
 
@@ -1028,7 +1052,9 @@ jet_driver_foreign_collect_canonical_overlay_items: fn(items: [Item], overlay_ba
                 body: definition.body ?? [Item]{}
                 jet_driver_foreign_collect_canonical_overlay_items(body, overlay_bases, overlay_ends, library, functions)
             }
-            .GenericModule(definition) -> jet_driver_foreign_collect_canonical_overlay_items(definition.body, overlay_bases, overlay_ends, library, functions)
+            .GenericModule(definition) -> {
+                jet_driver_foreign_collect_canonical_overlay_items(definition.body, overlay_bases, overlay_ends, library, functions)
+            }
             .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
@@ -1054,10 +1080,14 @@ jet_driver_foreign_parse_shifted: fn(path: String, source: String, offset: Int, 
         diagnostics.push(diagnostic_with_source_path(shifted, path, offset))
     }
     if jet_driver_has_errors(lexed.diagnostics) -> return None
-    loop token_index in 0..<lexed.tokens.len() -> token_shift_spans(lexed.tokens[token_index], offset, lexed.tables.literals)
+    loop token_index in 0..<lexed.tokens.len() {
+        token_shift_spans(lexed.tokens[token_index], offset, lexed.tables.literals)
+    }
     parsed := parse_lexed(lexed)
     parse_failed: jet_driver_has_errors(parsed.diagnostics)
-    loop diagnostic in parsed.diagnostics.move() -> diagnostics.push(diagnostic_with_source_path(diagnostic, path, offset))
+    loop diagnostic in parsed.diagnostics.move() {
+        diagnostics.push(diagnostic_with_source_path(diagnostic, path, offset))
+    }
     if parse_failed -> return None
     Val(parsed.program.move())
 }
@@ -1218,7 +1248,9 @@ jet_driver_foreign_rewrite_module: fn(load: &JetDriverLoadResult, surface: JetDr
     loop item in program.items {
         if item == {
             .CModule(_) -> { next }
-            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> { synthetic_items.push(item) }
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {
+                synthetic_items.push(item)
+            }
         }
     }
     loop adapter in rewritten_adapters -> synthetic_items.push(Item.Func{value: adapter})
@@ -1227,7 +1259,9 @@ jet_driver_foreign_rewrite_module: fn(load: &JetDriverLoadResult, surface: JetDr
     rewritten := Program{imports: program.imports, items: synthetic_items, script_body: program.script_body, block_spans: program.block_spans, fenced_statements: program.fenced_statements, web_target_ceiling: program.web_target_ceiling, no_prelude: program.no_prelude, default_target: program.default_target, html_path: program.html_path, policy_declarations: program.policy_declarations, user_policy_declarations: program.user_policy_declarations, applied_rules: program.applied_rules, rule_facts: program.rule_facts}
     source_unit_index: load.source_units.len()
     root_identity: if core_provider -> JET_DRIVER_CORE_SOURCE_ROOT else -> jet_driver_foreign_root_identity(load, surface.root_index)
-    loop generated_file in canonical.generated_source_files -> jet_driver_add_source_file(load.generated_source_files, generated_file, diagnostics)
+    loop generated_file in canonical.generated_source_files {
+        jet_driver_add_source_file(load.generated_source_files, generated_file, diagnostics)
+    }
     load.source_units.push(JetDriverSourceUnit{root_index: surface.root_index, file_index: -1, root_identity: root_identity, package_identity: package, module_name: "__c_{surface.module_library}", path: aggregate_path, relative_path: aggregate_path, source_segments: canonical.source_segments, source_origin: SemaSourceOrigin.CompilerGenerated, in_namespace: false})
     synthetic := JetDriverLoadedModule{source_unit_index: source_unit_index, source_identity: source_identity, package_identity: package, module_identity: module_identity, module_name: "__c_{surface.module_library}", program: rewritten.move()}
     load.modules.push(synthetic)
@@ -1247,12 +1281,14 @@ jet_driver_foreign_remove_overlay_items: fn(load: &JetDriverLoadResult) Never! {
             }
         }
         if !has_overlay -> next
-        items := [Item]{ }
+        items := [Item]{}
         loop item_index in 0..<load.modules[index].program.items.len() {
             item: load.modules[index].program.items[item_index]
             if item == {
                 .CModule(_) -> {}
-                .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> items.push(item.copy())
+                .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {
+                    items.push(item.copy())
+                }
             }
         }
         load.modules[index].program.items = items.move()
@@ -1260,25 +1296,27 @@ jet_driver_foreign_remove_overlay_items: fn(load: &JetDriverLoadResult) Never! {
 }
 
 jet_driver_assemble_foreign_providers: fn(snapshot: JetDriverAuthorizedSourceSnapshot, load: &JetDriverLoadResult) -> [SemaForeignProviderInput] {
-    diagnostics := [Diagnostic]{ }
-    requests := [JetDriverForeignRequest]{ }
-    overlays := [JetDriverForeignSurface]{ }
+    diagnostics := [Diagnostic]{}
+    requests := [JetDriverForeignRequest]{}
+    overlays := [JetDriverForeignSurface]{}
     jet_driver_foreign_collect_requests(load, requests, overlays, diagnostics)
-    surfaces := [JetDriverForeignSurface]{ }
+    surfaces := [JetDriverForeignSurface]{}
     loop request in requests {
         found: loop surface in surfaces {
             if surface.language == request.language && surface.library == request.library && surface.root_index == request.root_index {
                 break true
             }
         } ?? false
-        if !found -> surfaces.push(jet_driver_foreign_surface(snapshot, request, overlays, diagnostics))
+        if !found {
+            surfaces.push(jet_driver_foreign_surface(snapshot, request, overlays, diagnostics))
+        }
     }
-    providers := [SemaForeignProviderInput]{ }
+    providers := [SemaForeignProviderInput]{}
     loop surface in surfaces {
         if !surface.valid -> next
-        handles := [SemaForeignHandleInput]{ }
+        handles := [SemaForeignHandleInput]{}
         direct_links := [String]{surface.library}
-        transitive_links := [String]{ }
+        transitive_links := [String]{}
         if surface.parsed_metadata == .Val(metadata) {
             handles = metadata.handles
             direct_links = metadata.direct_links
@@ -1292,12 +1330,14 @@ jet_driver_assemble_foreign_providers: fn(snapshot: JetDriverAuthorizedSourceSna
         }
         if surface.parsed_provenance == .Val(provenance) {
             direct_links = provenance.direct_links
-            if provenance.transitive_dependencies == .Val(transitive) -> transitive_links = transitive
+            if provenance.transitive_dependencies == .Val(transitive) {
+                transitive_links = transitive
+            }
         }
         if surface.language == "cpp" -> direct_links.push(surface.module_library)
         direct_links = jet_driver_foreign_unique_strings(direct_links)
         transitive_links = jet_driver_foreign_unique_strings(transitive_links)
-        generated_functions := [ExternFn]{ }
+        generated_functions := [ExternFn]{}
         cache_program: surface.cache_program ?? jet_driver_foreign_empty_program()
         if surface.cache_program != None {
             located: jet_driver_foreign_find_generated_module(cache_program, surface.language, surface.library)
@@ -1308,7 +1348,7 @@ jet_driver_assemble_foreign_providers: fn(snapshot: JetDriverAuthorizedSourceSna
                 generated_functions[index] = function
             }
         }
-        merged := [ExternFn]{ }
+        merged := [ExternFn]{}
         loop function in generated_functions -> merged.push(function)
         overrides := [SemaForeignOverlayOverrideInput]{}
         loop overlay_index in 0..<surface.overlay_functions.len() {
@@ -1322,7 +1362,9 @@ jet_driver_assemble_foreign_providers: fn(snapshot: JetDriverAuthorizedSourceSna
                             diagnostic: jet_driver_diagnostic("E3205", surface.overlay_functions[overlay_index].name_span, "overlay `{surface.overlay_functions[overlay_index].name}` disagrees with the generated binding", "user `#Import c.{surface.library}: module` may override bindgen symbols, but the signature must stay compatible when replacing", "match the generated signature, or rename your overlay function")
                             if {
                                 // The overlay's spans are relative to its own source file, as at its load (E3207/E3208).
-                                overlay_path != "" -> diagnostics.push(diagnostic_with_source_path(diagnostic, overlay_path, 0))
+                                overlay_path != "" -> {
+                                    diagnostics.push(diagnostic_with_source_path(diagnostic, overlay_path, 0))
+                                }
                                 else -> diagnostics.push(diagnostic)
                             }
                         }
@@ -1349,7 +1391,9 @@ jet_driver_assemble_foreign_providers: fn(snapshot: JetDriverAuthorizedSourceSna
         prepared_functions: prepared.functions
         merged = prepared_functions
         boundary := SemaForeignBoundaryInput?{None}
-        if surface.parsed_provenance == .Val(provenance) -> boundary = Val(jet_driver_foreign_boundary(provenance))
+        if surface.parsed_provenance == .Val(provenance) {
+            boundary = Val(jet_driver_foreign_boundary(provenance))
+        }
         if boundary == .Val(boundary_value) {
             loop index in 0..<merged.len() {
                 merged[index].effect_root = Val(boundary_value.effect_root)

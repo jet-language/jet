@@ -378,9 +378,15 @@ sema_checked_serde_attributes: fn(markers: [Marker], type_markers: [Marker]) -> 
         attributes.push(TSerdeAttribute{kind: TSerdeAttributeKind.RenameAll, value: sema_checked_rename_case_word(marker), span: marker.span})
     }
     codable: codable_marker(type_markers) ?? return attributes
-    if codable_denies_unknown(type_markers) -> attributes.push(TSerdeAttribute{kind: TSerdeAttributeKind.DenyUnknownFields, value: None, span: codable.span})
-    if codable_tag_field(type_markers) == .Val(key) -> attributes.push(TSerdeAttribute{kind: TSerdeAttributeKind.Tag, value: Val(key), span: codable.span})
-    if codable_untagged(type_markers) -> attributes.push(TSerdeAttribute{kind: TSerdeAttributeKind.Untagged, value: None, span: codable.span})
+    if codable_denies_unknown(type_markers) {
+        attributes.push(TSerdeAttribute{kind: TSerdeAttributeKind.DenyUnknownFields, value: None, span: codable.span})
+    }
+    if codable_tag_field(type_markers) == .Val(key) {
+        attributes.push(TSerdeAttribute{kind: TSerdeAttributeKind.Tag, value: Val(key), span: codable.span})
+    }
+    if codable_untagged(type_markers) {
+        attributes.push(TSerdeAttribute{kind: TSerdeAttributeKind.Untagged, value: None, span: codable.span})
+    }
     attributes
 }
 

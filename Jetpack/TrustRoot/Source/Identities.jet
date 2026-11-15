@@ -128,19 +128,19 @@ BoundIdentity: struct {
     proof: PublisherIdentity?
 
     registry: fn(name: String) -> BoundIdentity Never! {
-        BoundIdentity{kind: IdentityKind.Registry, name, proof: None}
+        BoundIdentity{kind: IdentityKind.Registry, name: name, proof: None}
     }
 
     publisher: fn(name: String, proof: PublisherIdentity) -> BoundIdentity Never! {
-        BoundIdentity{kind: IdentityKind.Publisher, name, proof: Val(proof)}
+        BoundIdentity{kind: IdentityKind.Publisher, name: name, proof: Val(proof)}
     }
 
     cache_builder: fn(name: String) -> BoundIdentity Never! {
-        BoundIdentity{kind: IdentityKind.CacheBuilder, name, proof: None}
+        BoundIdentity{kind: IdentityKind.CacheBuilder, name: name, proof: None}
     }
 
     remote_executor: fn(name: String) -> BoundIdentity Never! {
-        BoundIdentity{kind: IdentityKind.RemoteExecutor, name, proof: None}
+        BoundIdentity{kind: IdentityKind.RemoteExecutor, name: name, proof: None}
     }
 
     // Only publisher identities carry, and must carry, a hybrid proof.
@@ -151,20 +151,28 @@ BoundIdentity: struct {
             proof.validate()
             return
         }
-        if self.proof != None -> return Err(TrustRootError.IdentityKindMismatch{kind: self.kind, detail: "only publisher identities carry hybrid publisher proofs"})
+        if self.proof != None {
+            return Err(TrustRootError.IdentityKindMismatch{kind: self.kind, detail: "only publisher identities carry hybrid publisher proofs"})
+        }
     }
 }
 
 trust_root_require_nonempty: fn(field: String, value: String) TrustRootError! {
-    if value.trim() == "" -> return Err(TrustRootError.InvalidPublisher{detail: "{field} must be non-empty"})
+    if value.trim() == "" {
+        return Err(TrustRootError.InvalidPublisher{detail: "{field} must be non-empty"})
+    }
 }
 
 trust_root_require_sha256_hex: fn(field: String, value: String) TrustRootError! {
-    if !trust_root_is_hex64(value) -> return Err(TrustRootError.InvalidPublisher{detail: "{field} must be 64-char sha256 hex"})
+    if !trust_root_is_hex64(value) {
+        return Err(TrustRootError.InvalidPublisher{detail: "{field} must be 64-char sha256 hex"})
+    }
 }
 
 trust_root_require_ed25519_pub_hex: fn(field: String, value: String) TrustRootError! {
-    if !trust_root_is_hex64(value) -> return Err(TrustRootError.InvalidPublisher{detail: "{field} must be 32-byte ed25519 public key hex"})
+    if !trust_root_is_hex64(value) {
+        return Err(TrustRootError.InvalidPublisher{detail: "{field} must be 32-byte ed25519 public key hex"})
+    }
 }
 
 // Exactly 64 ASCII hex digits (either case).

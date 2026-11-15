@@ -12,6 +12,7 @@ package: {
 use files: core.files
 
 ROUNDS: 40000
+
 GROWTH_LIMIT_KB: 8192
 
 status_kb: fn(field: String) -> Int {
@@ -37,19 +38,13 @@ make_map: fn(n: Int) -> [String:Int] {
     map
 }
 
-make_set: fn(n: Int) -> Set<String> {
-    Set.from(make_names(n))
-}
+make_set: fn(n: Int) -> Set<String> { Set.from(make_names(n)) }
 
 // The Map's length, the body's tail value.
-map_len: fn() -> Int {
-    make_map(16).len()
-}
+map_len: fn() -> Int { make_map(16).len() }
 
 // An owned copy of one value.
-map_get: fn() -> Int {
-    make_map(16).get("key 3") ?? 0
-}
+map_get: fn() -> Int { make_map(16).get("key 3") ?? 0 }
 
 // A key test in an `if` condition, with a return under it.
 map_has_key: fn() -> Int {
@@ -71,14 +66,10 @@ map_keys_walked: fn() -> Int {
 }
 
 // The values, the body's tail value.
-map_values_tail: fn() -> Int {
-    make_map(16).values().to_list().len()
-}
+map_values_tail: fn() -> Int { make_map(16).values().to_list().len() }
 
 // The Set's length.
-set_len: fn() -> Int {
-    make_set(16).len()
-}
+set_len: fn() -> Int { make_set(16).len() }
 
 // A member test in an `if` condition, with a return under it.
 set_has: fn() -> Int {
@@ -98,7 +89,9 @@ measure: fn(name: String, scenario: fn() -> Int) {
     start: status_kb("VmRSS:")
     loop _ in 1..<ROUNDS -> total += scenario()
     grown: status_kb("VmRSS:") - start
-    if grown > GROWTH_LIMIT_KB -> panic("{name}: the resident set grew {grown} kB over {ROUNDS} rounds")
+    if grown > GROWTH_LIMIT_KB {
+        panic("{name}: the resident set grew {grown} kB over {ROUNDS} rounds")
+    }
     print("{name}: {total}, every result dropped")
 }
 

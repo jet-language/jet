@@ -15,7 +15,9 @@ JetCLIRecordIndex: struct {
 }
 
 jet_cli_record_index_new: fn(budget: U64{268435456}) -> JetCLIRecordIndex JetCLIReadError! {
-    if budget == 0 -> return Err(jet_cli_read_error("record budget byte limit must be greater than zero"))
+    if budget == 0 {
+        return Err(jet_cli_read_error("record budget byte limit must be greater than zero"))
+    }
     Ok(JetCLIRecordIndex{entries: [JetCLIRecordIndexEntry]{}, budget: budget})
 }
 
@@ -66,10 +68,14 @@ jet_cli_record_index_evict: fn(entries: &[JetCLIRecordIndexEntry], budget: U64) 
         total := U64{0}
         loop entry in entries {
             if !jet_cli_record_entry_is_disposable(entry) -> next
-            if entry.size > U64.MAX - total -> return Err(jet_cli_read_error("record budget byte count overflows"))
+            if entry.size > U64.MAX - total {
+                return Err(jet_cli_read_error("record budget byte count overflows"))
+            }
             total += entry.size
         }
-        if total <= budget -> return
+        if total <= budget {
+            return
+        }
         visited := [Bool]{}
         loop _ in 0..<entries.len() -> visited.push(false)
         selected := [Bool]{}
@@ -135,7 +141,9 @@ jet_cli_record_index_update: fn(index: &JetCLIRecordIndex, entry: JetCLIRecordIn
     row: jet_cli_record_entry_normalize(entry)
     loop existing in index.entries {
         if existing.kind != row.kind || existing.artifact_id != row.artifact_id -> next
-        if existing == row -> return
+        if existing == row {
+            return
+        }
         return Err(jet_cli_read_error("record `{row.kind}/{row.artifact_id}` conflicts with an existing identity"))
     }
     candidate := index.entries
@@ -166,7 +174,9 @@ jet_cli_record_index_replace: fn(index: &JetCLIRecordIndex, entry: JetCLIRecordI
         found = true
         break
     }
-    if !found -> return Err(jet_cli_read_error("record `{row.kind}/{row.artifact_id}` does not exist"))
+    if !found {
+        return Err(jet_cli_read_error("record `{row.kind}/{row.artifact_id}` does not exist"))
+    }
     jet_cli_record_index_evict(candidate, index.budget)
     jet_cli_record_snapshot_validate(candidate, index.budget)
     retained := false
@@ -186,7 +196,9 @@ jet_cli_record_index_to_bytes: fn(index: JetCLIRecordIndex) -> [U8] JetCLIReadEr
         line: jet_cli_record_index_to_jsonl(entry)
         loop byte in line.bytes() -> bytes.push(byte)
         bytes.push(U8{10})
-        if bytes.len() > 268435456 -> return Err(jet_cli_read_error("record index exceeds the 256 MiB limit"))
+        if bytes.len() > 268435456 {
+            return Err(jet_cli_read_error("record index exceeds the 256 MiB limit"))
+        }
     }
     Ok(bytes)
 }
@@ -215,7 +227,9 @@ jet_cli_record_index_load: fn(project_root: String, budget: U64{268435456}) -[FS
     if held.read("index.jsonl", 268435456) == {
         .Val(raw) -> jet_cli_record_index_decode(raw, budget)
         .None -> jet_cli_record_index_new(budget)
-        .Err(error) -> { return Err(error) }
+        .Err(error) -> {
+            return Err(error)
+        }
     }
 }
 
@@ -223,7 +237,9 @@ jet_cli_record_index_reload: fn(held: JetCLIRootedDirectory, fallback: JetCLIRec
     if held.read("index.jsonl", 268435456) == {
         .Val(raw) -> jet_cli_record_index_decode(raw, fallback.budget)
         .None -> Ok(fallback)
-        .Err(error) -> { return Err(error) }
+        .Err(error) -> {
+            return Err(error)
+        }
     }
 }
 
@@ -241,7 +257,9 @@ jet_cli_record_index_remove_disposable: fn(project_root: String, path: String) J
     if parts.len() == 0 -> return Err(jet_cli_read_error("disposable artifact has no file name"))
     name: parts.pop() ?? return Err(jet_cli_read_error("disposable artifact has no file name"))
     present: JetCLIRootedDirectory.present(project_root, parts) ?? return Err(err)
-    if !present -> return
+    if !present {
+        return
+    }
     held: JetCLIRootedDirectory.open_cache(project_root, parts, false) ?? return Err(err)
     _: held.remove(name) ?? return Err(err)
 }
@@ -252,7 +270,9 @@ jet_cli_record_index_store_held: fn(index: JetCLIRecordIndex, held: JetCLIRooted
     loop entry in previous {
         if !jet_cli_record_entry_is_disposable(entry) -> next
         retained: loop current in index.entries {
-            if current.path == entry.path -> break true
+            if current.path == entry.path {
+                break true
+            }
         } ?? false
         if !retained -> jet_cli_record_index_remove_disposable(project_root, entry.path)
     }
@@ -262,7 +282,9 @@ jet_cli_record_index_fresh_sequence: fn(index: JetCLIRecordIndex, entry: &&JetCL
     updated := entry.move()
     maximum := U64{0}
     loop existing in index.entries {
-        if existing.kind == updated.kind && existing.artifact_id == updated.artifact_id -> return Ok(updated)
+        if existing.kind == updated.kind && existing.artifact_id == updated.artifact_id {
+            return Ok(updated)
+        }
         if existing.recorded_sequence > maximum -> maximum = existing.recorded_sequence
     }
     if updated.recorded_sequence <= maximum {
@@ -279,7 +301,9 @@ jet_cli_record_index_publish_and_store: fn(index: &JetCLIRecordIndex, project_ro
     if supersede {
         retained := [JetCLIRecordIndexEntry]{}
         loop existing in candidate.entries {
-            if existing.kind != entry.kind || existing.artifact_id != entry.artifact_id -> retained.push(existing)
+            if existing.kind != entry.kind || existing.artifact_id != entry.artifact_id {
+                retained.push(existing)
+            }
         }
         candidate.entries = retained.move()
     }

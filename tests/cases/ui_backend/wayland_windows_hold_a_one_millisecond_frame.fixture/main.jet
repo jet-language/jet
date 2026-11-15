@@ -2,6 +2,7 @@ package: {
     name: "wayland_windows_hold_a_one_millisecond_frame"
     authority: { allow: [Env, IO, Net, Time] }
 }
+
 use {
     net: core.net
     sys: core.sys
@@ -21,11 +22,17 @@ use {
 // percentile: a thousand frames a second.
 
 WIDTH: 2560
+
 HEIGHT: 1440
+
 WARM_UP: 60
+
 MEASURED: 600
+
 LIMIT_NS: 1000000
+
 LANES: 12
+
 BARS: 64
 
 FakeBuffer: struct {
@@ -61,7 +68,7 @@ Fake: struct {
 
 GLOBALS: [String]{"wl_compositor", "wl_shm", "xdg_wm_base", "wl_subcompositor"}
 
-fake_put: fn(&out: [U8], value: Int) {
+fake_put: fn(out: &[U8], value: Int) {
     v: value.bit_and(4294967295)
     out.push(U8{v.bit_and(255)})
     out.push(U8{(v >> 8).bit_and(255)})
@@ -90,14 +97,16 @@ fake_u32: fn(bytes: [U8], at: Int) -> Int {
     Int{bytes[at]} + (Int{bytes[at + 1]} << 8) + (Int{bytes[at + 2]} << 16) + (Int{bytes[at + 3]} << 24)
 }
 
-fake_event: fn(&f: Fake, object: Int, opcode: Int, args: [U8]) {
+fake_event: fn(f: &Fake, object: Int, opcode: Int, args: [U8]) {
     fake_put(f.out, object)
     fake_put(f.out, ((args.len() + 8) << 16) + opcode)
     loop b in args -> f.out.push(b)
 }
 
-fake_flush: fn(&f: Fake) -[Net, Time]> {
-    if f.out.len() == 0 -> return
+fake_flush: fn(f: &Fake) -[Net, Time]> {
+    if f.out.len() == 0 {
+        return
+    }
     out: f.out.copy()
     f.out = [U8]{}
     net.unix_send(f.stream, out, [sys.Fd]{}) ?? {
@@ -113,7 +122,7 @@ fake_version: fn(interface: String) -> Int {
 }
 
 // A configure of the window's size, activated.
-fake_configure: fn(&f: Fake) {
+fake_configure: fn(f: &Fake) {
     f.serial += 1
     args := fake_words([Int]{WIDTH, HEIGHT, 4})
     fake_put(args, 4)
@@ -133,7 +142,7 @@ fake_pool: fn(f: Fake, object: Int) -> Int {
 // A content commit: the old buffer goes back, the frame callbacks are
 // done at once, and after the measured frames the window is asked to
 // close.
-fake_commit: fn(&f: Fake) {
+fake_commit: fn(f: &Fake) {
     f.commits += 1
     if f.attached != 0 {
         previous: f.current
@@ -150,7 +159,7 @@ fake_commit: fn(&f: Fake) {
     }
 }
 
-fake_request: fn(&f: Fake, object: Int, opcode: Int, body: [U8]) {
+fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) {
     if object == 1 && opcode == 1 {
         f.registry = fake_u32(body, 0)
         registry: f.registry
@@ -182,9 +191,7 @@ fake_request: fn(&f: Fake, object: Int, opcode: Int, body: [U8]) {
         return
     }
     if object == f.compositor {
-        if opcode == 0 && f.surface == 0 {
-            f.surface = fake_u32(body, 0)
-        } else if opcode == 0 && f.chrome == 0 {
+        if opcode == 0 && f.surface == 0 -> f.surface = fake_u32(body, 0) else if opcode == 0 && f.chrome == 0 {
             f.chrome = fake_u32(body, 0)
         }
         return
@@ -231,7 +238,7 @@ fake_request: fn(&f: Fake, object: Int, opcode: Int, body: [U8]) {
     }
 }
 
-fake_dispatch: fn(&f: Fake) {
+fake_dispatch: fn(f: &Fake) {
     at := 0
     loop f.inbox.len() - at >= 8 {
         object: fake_u32(f.inbox, at)
@@ -252,10 +259,29 @@ fake_dispatch: fn(&f: Fake) {
 fake_serve: fn(listener: net.UnixListener) -[Net, Time]> Fake {
     stream: net.unix_accept(listener) ?? panic("accept: {err}")
     f := Fake{
-        stream: stream, inbox: [U8]{}, out: [U8]{}, registry: 0, compositor: 0, shm: 0, wm_base: 0,
-        surface: 0, chrome: 0, xdg_surface: 0, toplevel: 0, pools: [Int]{}, buffers: [FakeBuffer]{},
-        attached: 0, current: 0, chrome_pending: 0, chrome_shown: 0, callbacks: [Int]{},
-        serial: 0, configured: false, commits: 0, closing: false, failures: [String]{},
+        stream: stream,
+        inbox: [U8]{},
+        out: [U8]{},
+        registry: 0,
+        compositor: 0,
+        shm: 0,
+        wm_base: 0,
+        surface: 0,
+        chrome: 0,
+        xdg_surface: 0,
+        toplevel: 0,
+        pools: [Int]{},
+        buffers: [FakeBuffer]{},
+        attached: 0,
+        current: 0,
+        chrome_pending: 0,
+        chrome_shown: 0,
+        callbacks: [Int]{},
+        serial: 0,
+        configured: false,
+        commits: 0,
+        closing: false,
+        failures: [String]{},
     }
     quiet := 0
     loop quiet < 40 {
@@ -263,9 +289,7 @@ fake_serve: fn(listener: net.UnixListener) -[Net, Time]> Fake {
             f.failures.push("wait failed: {err}")
             return f
         }
-        if !ready {
-            quiet += 1
-        } else {
+        if !ready -> quiet += 1 else {
             quiet = 0
             message: net.unix_receive(f.stream, 65536) ?? {
                 if !f.closing -> f.failures.push("receive failed: {err}")
@@ -284,11 +308,17 @@ fake_serve: fn(listener: net.UnixListener) -[Net, Time]> Fake {
 // ---- the window ----
 
 BACK: Color{r: 11, g: 11, b: 13, a: 255}
+
 PANEL: Color{r: 20, g: 20, b: 24, a: 255}
+
 GRID: Color{r: 34, g: 34, b: 40, a: 255}
+
 INK: Color{r: 236, g: 234, b: 230, a: 255}
+
 SOFT: Color{r: 150, g: 150, b: 160, a: 255}
+
 RED: Color{r: 232, g: 35, b: 42, a: 255}
+
 HEAD: Color{r: 255, g: 59, b: 65, a: 140}
 
 lane_y: fn(lane: Int) -> Int { 200 + lane * 64 }
@@ -323,7 +353,9 @@ animate: fn(frame: ui.Frame, n: Int) {
     }
     frame.draw_rectangle(64, 96, 360, 40, BACK)
     frame.draw_text("frame {n}", 64, 100, 24, INK)
-    if n %% 30 == 0 -> frame.draw_rectangle(440, 100, 2, 28, if (n /% 30) %% 2 == 0 -> RED else -> BACK)
+    if n %% 30 == 0 {
+        frame.draw_rectangle(440, 100, 2, 28, if (n /% 30) %% 2 == 0 -> RED else -> BACK)
+    }
     bar: n %% BARS
     height: 20 + (n * 37) %% 200
     x: 80 + bar * 38
@@ -353,7 +385,9 @@ client: fn() -[Env, IO, Net, Time]> {
     height := 0
     loop frame in window.frames() {
         started: time.start()
-        if last >= 0 && n > WARM_UP && intervals.len() < MEASURED -> intervals.push(started.start_ns - last)
+        if last >= 0 && n > WARM_UP && intervals.len() < MEASURED {
+            intervals.push(started.start_ns - last)
+        }
         last = started.start_ns
         closed := false
         loop event in frame.events() {
@@ -374,7 +408,9 @@ client: fn() -[Env, IO, Net, Time]> {
     print("{width}x{height}: {draws.len()} frames drawn and {intervals.len()} frame to frame times measured")
     print("draw p99 within 1 ms: {draw_p99 <= LIMIT_NS}")
     print("frame to frame p99 within 1 ms: {interval_p99 <= LIMIT_NS}")
-    if draw_p99 > LIMIT_NS || interval_p99 > LIMIT_NS -> print("  draw p99 {draw_p99 /% 1000} us, frame to frame p99 {interval_p99 /% 1000} us")
+    if draw_p99 > LIMIT_NS || interval_p99 > LIMIT_NS {
+        print("  draw p99 {draw_p99 /% 1000} us, frame to frame p99 {interval_p99 /% 1000} us")
+    }
 }
 
 run: fn() {

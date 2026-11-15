@@ -34,10 +34,15 @@ use jet_foundation.[
 
 // The flag letters of a seal line (above).
 SEMA_CORE_SEAL_STAND_IN: "S"
+
 SEMA_CORE_SEAL_PANIC: "P"
+
 SEMA_CORE_SEAL_WRITES: "W"
+
 SEMA_CORE_SEAL_INFALLIBLE: "I"
+
 SEMA_CORE_SEAL_GENERAL: "G"
+
 // The edge a body that may stop has (sema_effect_solve).
 SEMA_CORE_SEAL_PANIC_EDGE: "__jet_panic__"
 
@@ -101,7 +106,9 @@ sema_core_seal_failure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModu
         loop facts in module_result.failure_facts {
             if facts.direct -> next
             callable: sema_registration_callable_row(graph, facts.function_key) ?? next
-            if !sema_failure_row_in_module(graph, callable, source_index) || !sema_failure_row_candidate(graph, callable) -> next
+            if !sema_failure_row_in_module(graph, callable, source_index) || !sema_failure_row_candidate(graph, callable) {
+                next
+            }
             row: sema_core_seal_row(graph, facts.function_key) ?? next
             if seal.infallible.get(row) == None -> seal.keys.push(facts.function_key)
             seal.infallible[row] = true
@@ -115,7 +122,9 @@ sema_core_seal_failure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModu
         if module_index == entry_index -> next
         loop function_index in 0..<graph.modules[module_index].functions.len() {
             declaration: graph.modules[module_index].functions[function_index].declaration
-            if !sema_function_is_guest_import(declaration) || !sema_failure_inference_candidate(declaration) -> next
+            if !sema_function_is_guest_import(declaration) || !sema_failure_inference_candidate(declaration) {
+                next
+            }
             key: symbol_table_key(graph.symbols, graph.modules[module_index].functions[function_index].symbol.id)
             row: sema_core_seal_row(graph, key) ?? next
             if seal.infallible.get(row) != None -> next
@@ -186,8 +195,12 @@ sema_core_seal_unions: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModul
         module_index: sema_registration_module_index(graph, module_result.module_identity) ?? next
         loop facts in module_result.failure_facts {
             function_row: sema_failure_function_row(graph, module_index, facts.function_key)
-            if function_row < 0 || !sema_failure_inference_candidate(graph.modules[module_index].functions[function_row].declaration) -> next
-            if module_index == entry_index && graph.modules[module_index].functions[function_row].declaration.name == "run" -> next
+            if function_row < 0 || !sema_failure_inference_candidate(graph.modules[module_index].functions[function_row].declaration) {
+                next
+            }
+            if module_index == entry_index && graph.modules[module_index].functions[function_row].declaration.name == "run" {
+                next
+            }
             row: sema_core_seal_row(graph, facts.function_key) ?? next
             unclean: facts.union_members.len() > 0 || facts.union_cases.len() > 0
             seal.unclean[row] = (seal.unclean.get(row) ?? false) || unclean
@@ -266,6 +279,7 @@ SemaCoreSealLine: struct {
 
 // The newline that ends a seal line, and the tab that ends its key.
 SEMA_CORE_SEAL_NEWLINE: U8{10}
+
 SEMA_CORE_SEAL_TAB: U8{9}
 
 // The seal `lines` (sema_core_seal_lines) of a Core library whose machine
@@ -274,7 +288,7 @@ SEMA_CORE_SEAL_TAB: U8{9}
 // library's code, and a line left with no flag is left out. The Core
 // library writes its seal so (JetCli CoreLibrary.jet), and a program reads
 // it as written.
-sema_core_seal_bound: fn(&&lines: [String], sealed: [String]) -> [String] Never! {
+sema_core_seal_bound: fn(lines: &&[String], sealed: [String]) -> [String] Never! {
     bound := [String]{}
     at := 0
     loop line in lines.move() {

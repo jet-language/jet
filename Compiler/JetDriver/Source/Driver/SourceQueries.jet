@@ -15,6 +15,7 @@ JetDriverSourceQueryModule: struct {
     source: String
     program: Program
 }
+
 JetDriverSourceQueryResult: struct {
     modules: [JetDriverSourceQueryModule]
     diagnostics: [Diagnostic]
@@ -26,7 +27,7 @@ JetDriverSourceQueryResult: struct {
     names: NameLedger?{None}
     // The folder of each package the entry package's manifest lists, by
     // its name there.
-    dependency_roots: [String: String]{[String: String]{}}
+    dependency_roots: [String:String]{[String:String]{}}
 }
 
 jet_driver_source_query: fn(request: JetDriverCompileRequest) -> JetDriverSourceQueryResult {
@@ -44,7 +45,7 @@ jet_driver_load_with_names: fn(request: JetDriverCompileRequest) -> JetDriverLoa
 
 jet_driver_source_query_loaded: fn(load: JetDriverLoadResult, request: JetDriverCompileRequest) -> JetDriverSourceQueryResult {
     entry_package_version := String?{None}
-    dependency_roots := [String: String]{}
+    dependency_roots := [String:String]{}
     loop package in load.packages {
         if package.identity == load.package_identity {
             entry_package_version = package.version
@@ -69,16 +70,20 @@ jet_driver_source_query_loaded: fn(load: JetDriverLoadResult, request: JetDriver
             file: request.authorized_sources.roots[unit.root_index].files[unit.file_index]
             physical = file.path
             source = file.source
-        } else { source = jet_driver_source_text_at(load.source_files, source_positions, unit.path) }
-        modules.push(JetDriverSourceQueryModule{
-            module_identity: module_text(load.module_table, loaded.module_identity),
-            package_identity: loaded.package_identity,
-            path: unit.path,
-            module_name: unit.module_name,
-            physical_path: physical,
-            source: source,
-            program: loaded.program,
-        })
+        } else {
+            source = jet_driver_source_text_at(load.source_files, source_positions, unit.path)
+        }
+        modules.push(
+            JetDriverSourceQueryModule{
+                module_identity: module_text(load.module_table, loaded.module_identity),
+                package_identity: loaded.package_identity,
+                path: unit.path,
+                module_name: unit.module_name,
+                physical_path: physical,
+                source: source,
+                program: loaded.program,
+            },
+        )
     }
     entry_index := -1
     loop (index, module_row) in load.modules {
@@ -109,11 +114,13 @@ jet_driver_loaded_names: fn(loaded: &[JetDriverLoadedModule], units: [JetDriverS
         source: positions.get(edge.source_module_identity.id) ?? next
         target: positions.get(edge.target_module_identity.id) ?? next
         declaration: edge.declaration
-        visibility: if declaration.is_pub -> NameVisibility.Public else -> if declaration.is_package_pub -> NameVisibility.Package else -> NameVisibility.Private
+        visibility: if declaration.is_pub -> NameVisibility.Public else if declaration.is_package_pub -> NameVisibility.Package else -> NameVisibility.Private
         aliases.push(NameAlias{module_index: source, name: declaration.alias, target: modules[target].alias, target_module: Val(target), span: declaration.alias_span, visibility: visibility})
         structure.push(StructureFact{kind: StructureFactKind.ImportEdge, subject: "{modules[source].alias} -> {modules[target].alias}", source: units[loaded[source].source_unit_index].path, span: declaration.span, status: "resolved", detail: "resolved import edge", gate: None})
     }
     facts: sema_name_loaded_facts(modules, programs, aliases, structure)
-    loop index in 0..<loaded.len() -> compiler_transfer_rows<Item>(loaded[index].program.items, programs[index].items)
+    loop index in 0..<loaded.len() {
+        compiler_transfer_rows<Item>(loaded[index].program.items, programs[index].items)
+    }
     name_ledger_from_facts(facts)
 }

@@ -55,7 +55,9 @@ run: fn() {
                 next
             }
             // copy: the claimed digest outlives the parsed line's borrow
-            if field.key == "source_sha256" && field.value == .Text(digest) -> claimed = digest.copy()
+            if field.key == "source_sha256" && field.value == .Text(digest) {
+                claimed = digest.copy()
+            }
             print("{field.key}: {json.dumps(field.value) ?? "?"}")
         }
     }

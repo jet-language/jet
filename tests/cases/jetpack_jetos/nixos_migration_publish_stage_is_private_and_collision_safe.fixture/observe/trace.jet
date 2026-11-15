@@ -3,6 +3,7 @@ use {
     files: core.files
     parse: core.text.parse
 }
+
 run: fn() {
     trace: files.read("trace.log") ?? panic("read original syscall trace")
     lines: trace.lines()
@@ -17,14 +18,24 @@ run: fn() {
         line: lines[i]
         if !line.contains(marker) -> next
         if mkdir < 0 && line.contains("mkdir(") && line.contains("0700") -> mkdir = i
-        if first_input < 0 && (line.contains("/flake.nix") || line.contains("/configuration.nix") || line.contains("/input-facts.json")) -> first_input = i
-        if first_output < 0 && line.contains("/nixos/devhost-gnome/system.qcow2") -> first_output = i
-        if (line.contains("st_mode=S_IFDIR|") || line.contains("stx_mode=S_IFDIR|")) && !line.contains("S_IFDIR|0700") -> insecure = true
-        if line.contains("mkdir(") && line.contains("0700") && line.contains("EEXIST") -> collision = true
+        if first_input < 0 && (line.contains("/flake.nix") || line.contains("/configuration.nix") || line.contains("/input-facts.json")) {
+            first_input = i
+        }
+        if first_output < 0 && line.contains("/nixos/devhost-gnome/system.qcow2") {
+            first_output = i
+        }
+        if (line.contains("st_mode=S_IFDIR|") || line.contains("stx_mode=S_IFDIR|")) && !line.contains("S_IFDIR|0700") {
+            insecure = true
+        }
+        if line.contains("mkdir(") && line.contains("0700") && line.contains("EEXIST") {
+            collision = true
+        }
     }
     loop i in 0..<lines.len() {
         line: lines[i]
-        if line.contains(marker) && line.contains("AT_SYMLINK_NOFOLLOW") && (line.contains("S_IFDIR|0700") || line.contains("stx_mode=S_IFDIR|0700")) -> protected.push(i)
+        if line.contains(marker) && line.contains("AT_SYMLINK_NOFOLLOW") && (line.contains("S_IFDIR|0700") || line.contains("stx_mode=S_IFDIR|0700")) {
+            protected.push(i)
+        }
     }
     numbers := [String]{}
     loop index in protected -> numbers.push("{index}")

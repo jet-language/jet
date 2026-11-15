@@ -31,7 +31,6 @@
 // sharable). The build has no SQLITE_DEBUG, so sqlite3VdbeReleaseRegisters
 // and the explain breakpoints do nothing, and OP_Explain is coded only for
 // EXPLAIN QUERY PLAN.
-
 use {
     base: __core_db_base
     ast: __core_db_ast
@@ -48,84 +47,149 @@ use {
 // sqlite3.dbOptFlags bits (sqliteInt.h SQLITE_QueryFlattener ..
 // SQLITE_OnePass); SQLITE_WindowFunc is ast.OPT_WINDOW_FUNC.
 OPT_QUERY_FLATTENER: 1
+
 OPT_GROUP_BY_ORDER: 4
+
 OPT_FACTOR_OUT_CONST: 8
+
 OPT_DISTINCT_OPT: 16
+
 OPT_COVER_IDX_SCAN: 32
+
 OPT_ORDER_BY_IDX_JOIN: 64
+
 OPT_TRANSITIVE: 128
+
 OPT_OMIT_NOOP_JOIN: 256
+
 OPT_COUNT_OF_VIEW: 512
+
 OPT_CURSOR_HINTS: 1024
+
 OPT_STAT4: 2048
+
 OPT_PUSH_DOWN: 4096
+
 OPT_SIMPLIFY_JOIN: 8192
+
 OPT_SKIP_SCAN: 16384
+
 OPT_PROPAGATE_CONST: 32768
+
 OPT_MIN_MAX_OPT: 65536
+
 OPT_SEEK_SCAN: 131072
+
 OPT_OMIT_ORDER_BY: 262144
+
 OPT_BLOOM_FILTER: 524288
+
 OPT_BLOOM_PULLDOWN: 1048576
+
 OPT_BALANCED_MERGE: 2097152
+
 OPT_RELEASE_REG: 4194304
+
 OPT_FLTTN_UNION_ALL: 8388608
+
 OPT_INDEXED_EXPR: 16777216
+
 OPT_COROUTINES: 33554432
+
 OPT_NULL_UNUSED_COLS: 67108864
+
 OPT_ONE_PASS: 134217728
 
 // SelectDest.eDest (sqliteInt.h SRT_*).
 SRT_UNION: 1
+
 SRT_EXCEPT: 2
+
 SRT_EXISTS: 3
+
 SRT_DISCARD: 4
+
 SRT_DIST_FIFO: 5
+
 SRT_DIST_QUEUE: 6
+
 SRT_QUEUE: 7
+
 SRT_FIFO: 8
+
 SRT_OUTPUT: 9
+
 SRT_MEM: 10
+
 SRT_SET: 11
+
 SRT_EPHEM_TAB: 12
+
 SRT_COROUTINE: 13
+
 SRT_TABLE: 14
+
 SRT_UPFROM: 15
 
 // The flags of sqlite3ExprCodeExprList (sqliteInt.h SQLITE_ECEL_*) and the
 // jump flag of the comparison opcodes (SQLITE_JUMPIFNULL).
 ECEL_DUP: 1
+
 ECEL_FACTOR: 2
+
 ECEL_REF: 4
+
 ECEL_OMITREF: 8
+
 JUMPIFNULL: 16
 
 // OP_Halt's P5 for a constraint failure (vdbe.h P5_Constraint*).
 P5_CONSTRAINT_NOT_NULL: 1
+
 P5_CONSTRAINT_UNIQUE: 2
+
 P5_CONSTRAINT_CHECK: 3
+
 P5_CONSTRAINT_FK: 4
 
 // The sqlite3WhereBegin flags (sqliteInt.h WHERE_ORDERBY_NORMAL ..
 // WHERE_USE_LIMIT) and the WhereInfo.eDistinct answers.
 WHERE_ORDERBY_NORMAL: 0
+
 WHERE_ORDERBY_MIN: 1
+
 WHERE_ORDERBY_MAX: 2
+
 WHERE_ONEPASS_DESIRED: 4
+
 WHERE_ONEPASS_MULTIROW: 8
+
 WHERE_DUPLICATES_OK: 16
+
 WHERE_OR_SUBCLAUSE: 32
+
 WHERE_GROUPBY: 64
+
 WHERE_DISTINCTBY: 128
+
 WHERE_WANT_DISTINCT: 256
+
 WHERE_SORTBYGROUP: 512
+
 WHERE_AGG_DISTINCT: 1024
+
 WHERE_ORDERBY_LIMIT: 2048
+
 WHERE_RIGHT_JOIN: 4096
+
 WHERE_USE_LIMIT: 16384
+
 WHERE_DISTINCT_NOOP: 0
+
 WHERE_DISTINCT_UNIQUE: 1
+
 WHERE_DISTINCT_ORDERED: 2
+
 WHERE_DISTINCT_UNORDERED: 3
 
 // Parse.aTempReg: the temporary registers a Parse keeps for reuse.
@@ -242,18 +306,30 @@ Returning: struct {
 // struct RenameToken (alter.c): the parse-tree element `p` names, as the
 // kind of arena it lives in and its index there, and the token it came from.
 RENAME_EXPR: 0
+
 RENAME_ITEM_NAME: 1
+
 RENAME_SRC_NAME: 2
+
 RENAME_TABLE: 3
+
 RENAME_INDEX: 4
+
 RENAME_TRIGGER: 5
+
 RENAME_COLUMN: 6
+
 RENAME_ID_NAME: 7
+
 RENAME_FK_COL: 8
+
 RENAME_CTE: 9
+
 RENAME_TRIGGER_STEP: 10
+
 // &Expr.y.pTab of expression `p`: the table part of a qualified column.
 RENAME_EXPR_TAB: 11
+
 RenameToken: struct {
     kind: Int
     p: Int
@@ -408,72 +484,72 @@ WalkCb: trait {
 
 frame_new: fn() -> ParseFrame Never! {
     ParseFrame{
-        has_vdbe: false
-        v: conn.vdbe_new()
-        col_names_set: false
-        check_schema: false
-        is_multi_write: false
-        may_abort: false
-        ok_const_factor: false
-        prep_flags: 0
-        within_rj_subrtn: 0
-        n_range_reg: 0
-        i_range_reg: 0
-        n_tab: 0
-        n_mem: 0
-        i_self_tab: 0
-        const_expr: -1
-        idx_epr: -1
-        idx_part_epr: -1
-        write_mask: 0
-        cookie_mask: 0
-        reg_rowid: 0
-        reg_root: 0
-        n_max_arg: 0
-        ainc: -1
-        trigger_tab: -1
-        trigger_prg: -1
-        addr_cr_tab: 0
-        returning: -1
-        oldmask: 0
-        newmask: 0
-        n_query_loop: 0
-        e_trigger_op: 0
-        b_returning: false
-        e_orconf: 0
-        disable_triggers: false
-        temp_regs: [Int]{}
-        name_token: ast.SQLTok{z: -1, n: 0}
-        i_pk_sort_order: 0
-        vtab_lock: [Int]{}
-        n_height: 0
-        addr_explain: 0
-        new_table: -1
-        new_index: -1
-        new_trigger: -1
-        auth_context: None
-        s_arg: ast.SQLTok{z: -1, n: 0}
-        rename: -1
+        has_vdbe: false,
+        v: conn.vdbe_new(),
+        col_names_set: false,
+        check_schema: false,
+        is_multi_write: false,
+        may_abort: false,
+        ok_const_factor: false,
+        prep_flags: 0,
+        within_rj_subrtn: 0,
+        n_range_reg: 0,
+        i_range_reg: 0,
+        n_tab: 0,
+        n_mem: 0,
+        i_self_tab: 0,
+        const_expr: -1,
+        idx_epr: -1,
+        idx_part_epr: -1,
+        write_mask: 0,
+        cookie_mask: 0,
+        reg_rowid: 0,
+        reg_root: 0,
+        n_max_arg: 0,
+        ainc: -1,
+        trigger_tab: -1,
+        trigger_prg: -1,
+        addr_cr_tab: 0,
+        returning: -1,
+        oldmask: 0,
+        newmask: 0,
+        n_query_loop: 0,
+        e_trigger_op: 0,
+        b_returning: false,
+        e_orconf: 0,
+        disable_triggers: false,
+        temp_regs: [Int]{},
+        name_token: ast.SQLTok{z: -1, n: 0},
+        i_pk_sort_order: 0,
+        vtab_lock: [Int]{},
+        n_height: 0,
+        addr_explain: 0,
+        new_table: -1,
+        new_index: -1,
+        new_trigger: -1,
+        auth_context: None,
+        s_arg: ast.SQLTok{z: -1, n: 0},
+        rename: -1,
     }
 }
 
 // sqlite3ParseObjectInit: a Parse over `db`, which it now holds.
 parse_new: fn(db: &&conn.Conn, up: &&Gen) -> Parse Never! {
     Parse{
-        db: db
-        up: up
-        f: frame_new()
-        outer: [ParseFrame]{}
-        walks: [WalkState]{}
-        ncs: [NameContext]{}
-        aggs: [AggInfo]{}
-        idx_exprs: [IndexedExpr]{}
-        aincs: [AutoincInfo]{}
-        trigger_prgs: [TriggerPrg]{}
-        returnings: [Returning]{}
-        renames: [RenameToken]{}
-        wfuncs: [conn.FuncDef]{}
-        reprepare_vars: [base.Mem]{}
+        db: db,
+        up: up,
+        f: frame_new(),
+        outer: [ParseFrame]{},
+        walks: [WalkState]{},
+        ncs: [NameContext]{},
+        aggs: [AggInfo]{},
+        idx_exprs: [IndexedExpr]{},
+        aincs: [AutoincInfo]{},
+        trigger_prgs: [TriggerPrg]{},
+        returnings: [Returning]{},
+        renames: [RenameToken]{},
+        wfuncs: [conn.FuncDef]{},
+        reprepare_vars: [base.Mem]{},
     }
 }
 
@@ -499,9 +575,7 @@ is_toplevel: fn(p: Parse) -> Bool Never! { p.outer.len() == 0 }
 
 top_set_write_mask: fn(p: &Parse, i_db: Int) Never! {
     bit: 1 << i_db
-    if p.outer.len() > 0 {
-        p.outer[0].write_mask = p.outer[0].write_mask.bit_or(bit)
-    } else {
+    if p.outer.len() > 0 -> p.outer[0].write_mask = p.outer[0].write_mask.bit_or(bit) else {
         p.f.write_mask = p.f.write_mask.bit_or(bit)
     }
 }
@@ -512,20 +586,14 @@ top_cookie_mask: fn(p: Parse) -> Int Never! {
 }
 
 top_set_cookie_mask: fn(p: &Parse, mask: Int) Never! {
-    if p.outer.len() > 0 {
-        p.outer[0].cookie_mask = mask
-    } else {
-        p.f.cookie_mask = mask
-    }
+    if p.outer.len() > 0 -> p.outer[0].cookie_mask = mask else -> p.f.cookie_mask = mask
 }
 
 top_set_multi_write: fn(p: &Parse, on: Bool) Never! {
-    if !on -> return
-    if p.outer.len() > 0 {
-        p.outer[0].is_multi_write = true
-    } else {
-        p.f.is_multi_write = true
+    if !on {
+        return
     }
+    if p.outer.len() > 0 -> p.outer[0].is_multi_write = true else -> p.f.is_multi_write = true
 }
 
 top_ainc: fn(p: Parse) -> Int Never! {
@@ -534,11 +602,7 @@ top_ainc: fn(p: Parse) -> Int Never! {
 }
 
 top_set_ainc: fn(p: &Parse, x: Int) Never! {
-    if p.outer.len() > 0 {
-        p.outer[0].ainc = x
-    } else {
-        p.f.ainc = x
-    }
+    if p.outer.len() > 0 -> p.outer[0].ainc = x else -> p.f.ainc = x
 }
 
 // ++pToplevel->nMem.
@@ -557,19 +621,13 @@ top_trigger_prg: fn(p: Parse) -> Int Never! {
 }
 
 top_set_trigger_prg: fn(p: &Parse, x: Int) Never! {
-    if p.outer.len() > 0 {
-        p.outer[0].trigger_prg = x
-    } else {
-        p.f.trigger_prg = x
-    }
+    if p.outer.len() > 0 -> p.outer[0].trigger_prg = x else -> p.f.trigger_prg = x
 }
 
 top_raise_max_arg: fn(p: &Parse, n: Int) Never! {
     if p.outer.len() > 0 {
         if n > p.outer[0].n_max_arg -> p.outer[0].n_max_arg = n
-    } else if n > p.f.n_max_arg {
-        p.f.n_max_arg = n
-    }
+    } else if n > p.f.n_max_arg { p.f.n_max_arg = n }
 }
 
 top_vtab_lock: fn(p: Parse) -> [Int] Never! {
@@ -578,11 +636,7 @@ top_vtab_lock: fn(p: Parse) -> [Int] Never! {
 }
 
 top_add_vtab_lock: fn(p: &Parse, tab: Int) Never! {
-    if p.outer.len() > 0 {
-        p.outer[0].vtab_lock.push(tab)
-    } else {
-        p.f.vtab_lock.push(tab)
-    }
+    if p.outer.len() > 0 -> p.outer[0].vtab_lock.push(tab) else -> p.f.vtab_lock.push(tab)
 }
 
 // Begin coding a trigger sub-program (codeRowTrigger's sSubParse): the
@@ -625,7 +679,9 @@ opt_disabled: fn(p: Parse, mask: Int) -> Bool Never! { p.db.db_opt_flags.bit_and
 
 // sqlite3GetVdbe (select.c): make sure the Parse has its Vdbe.
 get_vdbe: fn(p: &Parse) Never! {
-    if p.f.has_vdbe -> return
+    if p.f.has_vdbe {
+        return
+    }
     if is_toplevel(p) && opt_enabled(p, OPT_FACTOR_OUT_CONST) -> p.f.ok_const_factor = true
     p.f.v = aux.vdbe_create(p.db)
     p.f.has_vdbe = true
@@ -635,22 +691,36 @@ op0: fn(p: &Parse, opcode: Int) -> Int Never! { aux.add_op0(p.db, p.f.v, opcode)
 
 op1: fn(p: &Parse, opcode: Int, p1: Int) -> Int Never! { aux.add_op1(p.db, p.f.v, opcode, p1) }
 
-op2: fn(p: &Parse, opcode: Int, p1: Int, p2: Int) -> Int Never! { aux.add_op2(p.db, p.f.v, opcode, p1, p2) }
+op2: fn(p: &Parse, opcode: Int, p1: Int, p2: Int) -> Int Never! {
+    aux.add_op2(p.db, p.f.v, opcode, p1, p2)
+}
 
-op3: fn(p: &Parse, opcode: Int, p1: Int, p2: Int, p3: Int) -> Int Never! { aux.add_op3(p.db, p.f.v, opcode, p1, p2, p3) }
+op3: fn(p: &Parse, opcode: Int, p1: Int, p2: Int, p3: Int) -> Int Never! {
+    aux.add_op3(p.db, p.f.v, opcode, p1, p2, p3)
+}
 
-op4: fn(p: &Parse, opcode: Int, p1: Int, p2: Int, p3: Int, p4: conn.P4) -> Int Never! { aux.add_op4(p.db, p.f.v, opcode, p1, p2, p3, p4) }
+op4: fn(p: &Parse, opcode: Int, p1: Int, p2: Int, p3: Int, p4: conn.P4) -> Int Never! {
+    aux.add_op4(p.db, p.f.v, opcode, p1, p2, p3, p4)
+}
 
-op4_int: fn(p: &Parse, opcode: Int, p1: Int, p2: Int, p3: Int, p4: Int) -> Int Never! { aux.add_op4_int(p.db, p.f.v, opcode, p1, p2, p3, p4) }
+op4_int: fn(p: &Parse, opcode: Int, p1: Int, p2: Int, p3: Int, p4: Int) -> Int Never! {
+    aux.add_op4_int(p.db, p.f.v, opcode, p1, p2, p3, p4)
+}
 
 // sqlite3VdbeAddOp4 with P4_DYNAMIC/P4_STATIC text.
-op4_text: fn(p: &Parse, opcode: Int, p1: Int, p2: Int, p3: Int, text: [U8]) -> Int Never! { aux.add_op4(p.db, p.f.v, opcode, p1, p2, p3, .Text(text)) }
+op4_text: fn(p: &Parse, opcode: Int, p1: Int, p2: Int, p3: Int, text: [U8]) -> Int Never! {
+    aux.add_op4(p.db, p.f.v, opcode, p1, p2, p3, .Text(text))
+}
 
 goto: fn(p: &Parse, dest: Int) -> Int Never! { aux.add_goto(p.db, p.f.v, dest) }
 
-v_op_list: fn(p: &Parse, list: [aux.VdbeOpList]) -> Int Never! { aux.add_op_list(p.db, p.f.v, list) }
+v_op_list: fn(p: &Parse, list: [aux.VdbeOpList]) -> Int Never! {
+    aux.add_op_list(p.db, p.f.v, list)
+}
 
-v_multi_load: fn(p: &Parse, dest: Int, vals: [base.Mem], result_row: Bool) Never! { aux.multi_load(p.db, p.f.v, dest, vals, result_row) }
+v_multi_load: fn(p: &Parse, dest: Int, vals: [base.Mem], result_row: Bool) Never! {
+    aux.multi_load(p.db, p.f.v, dest, vals, result_row)
+}
 
 v_make_label: fn(p: &Parse) -> Int Never! { aux.make_label(p.f.v) }
 
@@ -660,7 +730,9 @@ v_current_addr: fn(p: Parse) -> Int Never! { aux.current_addr(p.f.v) }
 
 v_jump_here: fn(p: &Parse, addr: Int) Never! { aux.jump_here(p.db, p.f.v, addr) }
 
-v_jump_here_or_pop_inst: fn(p: &Parse, addr: Int) Never! { aux.jump_here_or_pop_inst(p.db, p.f.v, addr) }
+v_jump_here_or_pop_inst: fn(p: &Parse, addr: Int) Never! {
+    aux.jump_here_or_pop_inst(p.db, p.f.v, addr)
+}
 
 // sqlite3VdbeEndCoroutine: the OP_EndCoroutine of the coroutine whose
 // return address is reg_yield; the coroutine's temporary registers are
@@ -682,11 +754,15 @@ v_change_p5: fn(p: &Parse, p5: Int) Never! { aux.change_p5(p.f.v, p5) }
 
 v_append_p4: fn(p: &Parse, p4: conn.P4) Never! { aux.append_p4(p.db, p.f.v, p4) }
 
-v_change_opcode: fn(p: &Parse, addr: Int, opcode: Int) Never! { aux.change_opcode(p.db, p.f.v, addr, opcode) }
+v_change_opcode: fn(p: &Parse, addr: Int, opcode: Int) Never! {
+    aux.change_opcode(p.db, p.f.v, addr, opcode)
+}
 
 v_change_to_noop: fn(p: &Parse, addr: Int) -> Bool Never! { aux.change_to_noop(p.db, p.f.v, addr) }
 
-v_delete_prior_opcode: fn(p: &Parse, opcode: Int) -> Bool Never! { aux.delete_prior_opcode(p.db, p.f.v, opcode) }
+v_delete_prior_opcode: fn(p: &Parse, opcode: Int) -> Bool Never! {
+    aux.delete_prior_opcode(p.db, p.f.v, opcode)
+}
 
 v_op_at: fn(p: Parse, addr: Int) -> conn.VdbeOp Never! { aux.op_at(p.db, p.f.v, addr) }
 
@@ -694,12 +770,16 @@ v_op_at: fn(p: Parse, addr: Int) -> conn.VdbeOp Never! { aux.op_at(p.db, p.f.v, 
 v_last_addr: fn(p: Parse) -> Int Never! { aux.current_addr(p.f.v) - 1 }
 
 // sqlite3VdbeLoadString.
-v_load_string: fn(p: &Parse, dest: Int, z: [U8]) -> Int Never! { aux.load_string(p.db, p.f.v, dest, z) }
+v_load_string: fn(p: &Parse, dest: Int, z: [U8]) -> Int Never! {
+    aux.load_string(p.db, p.f.v, dest, z)
+}
 
 // sqlite3VdbeSetNumCols / sqlite3VdbeSetColName.
 v_set_num_cols: fn(p: &Parse, n: Int) Never! { aux.set_num_cols(p.f.v, n) }
 
-v_set_col_name: fn(p: &Parse, idx: Int, var: Int, name: [U8]) Never! { _: aux.set_col_name(p.db, p.f.v, idx, var, name) }
+v_set_col_name: fn(p: &Parse, idx: Int, var: Int, name: [U8]) Never! {
+    _: aux.set_col_name(p.db, p.f.v, idx, var, name)
+}
 
 // sqlite3VdbeUsesBtree, sqlite3VdbeRunOnlyOnce, sqlite3VdbeCountChanges.
 v_uses_btree: fn(p: &Parse, i: Int) Never! { aux.uses_btree(p.f.v, i) }
@@ -828,7 +908,9 @@ open_temp_database: fn(p: &Parse, a: &ast.AST) -[DB]> Bool Never! {
 code_verify_schema: fn(p: &Parse, a: &ast.AST, i_db: Int) Never! -[DB]> {
     mask: top_cookie_mask(p)
     bit: 1 << i_db
-    if mask.bit_and(bit) != 0 -> return
+    if mask.bit_and(bit) != 0 {
+        return
+    }
     top_set_cookie_mask(p, mask.bit_or(bit))
     // sqlite3OpenTempDatabase(pToplevel): the toplevel's EXPLAIN is the
     // shared statement's.
@@ -857,11 +939,7 @@ multi_write: fn(p: &Parse) Never! { top_set_multi_write(p, true) }
 
 // sqlite3MayAbort.
 may_abort: fn(p: &Parse) Never! {
-    if p.outer.len() > 0 {
-        p.outer[0].may_abort = true
-    } else {
-        p.f.may_abort = true
-    }
+    if p.outer.len() > 0 -> p.outer[0].may_abort = true else -> p.f.may_abort = true
 }
 
 // sqlite3HaltConstraint.
@@ -878,9 +956,7 @@ unique_constraint: fn(p: &Parse, on_error: Int, idx: Int) Never! {
     ix: p.db.indexes[idx]
     tab: p.db.tables[ix.table]
     msg := [U8]{}
-    if ix.col_expr >= 0 {
-        msg = sql_mprintf(p, "index '%q'", [base.Mem]{pf.txt(ix.name)})
-    } else {
+    if ix.col_expr >= 0 -> msg = sql_mprintf(p, "index '%q'", [base.Mem]{pf.txt(ix.name)}) else {
         loop j in 0..<ix.n_key_col {
             if j > 0 -> aux.append_bytes(msg, ", ".bytes())
             aux.append_bytes(msg, tab.name)
@@ -901,9 +977,7 @@ rowid_constraint: fn(p: &Parse, on_error: Int, t: Int) Never! {
         msg.push(U8{46})
         aux.append_bytes(msg, tab.cols[tab.ipkey].name)
         rc = base.CONSTRAINT_PRIMARYKEY
-    } else {
-        aux.append_bytes(msg, ".rowid".bytes())
-    }
+    } else { aux.append_bytes(msg, ".rowid".bytes()) }
     halt_constraint(p, rc, on_error, Val(msg), P5_CONSTRAINT_UNIQUE)
 }
 
@@ -945,9 +1019,7 @@ auth_read_col: fn(p: &Parse, a: &ast.AST, tab: [U8], col: [U8], i_db: Int) -[DB]
         if p.db.dbs.len() > 2 || i_db != 0 -> z = "{ast.text(z_db)}.{z}"
         ast.error(a, "access to {z} is prohibited")
         a.ctx.rc = base.AUTH
-    } else if rc != conn.AUTH_IGNORE && rc != base.OK {
-        auth_bad_return_code(a)
-    }
+    } else if rc != conn.AUTH_IGNORE && rc != base.OK { auth_bad_return_code(a) }
     rc
 }
 
@@ -955,11 +1027,11 @@ auth_read_col: fn(p: &Parse, a: &ast.AST, tab: [U8], col: [U8], i_db: Int) -[DB]
 // tables of FROM list `src`; an ignored read becomes NULL.
 auth_read: fn(p: &Parse, a: &ast.AST, e: Int, schema: Int, src: Int) Never! -[DB]> {
     i_db: conn.schema_to_index(p.db, schema)
-    if i_db < 0 -> return
+    if i_db < 0 {
+        return
+    }
     t := -1
-    if a.exprs[e].op == tk.TK_TRIGGER {
-        t = p.f.trigger_tab
-    } else if src >= 0 {
+    if a.exprs[e].op == tk.TK_TRIGGER -> t = p.f.trigger_tab else if src >= 0 {
         loop si in a.srclists[src].items {
             if a.exprs[e].itable == a.items[si].cursor {
                 t = a.items[si].tab
@@ -967,7 +1039,9 @@ auth_read: fn(p: &Parse, a: &ast.AST, e: Int, schema: Int, src: Int) Never! -[DB
             }
         }
     }
-    if t < 0 -> return
+    if t < 0 {
+        return
+    }
     tab: p.db.tables[t]
     i_col: a.exprs[e].icolumn
     col: if i_col >= 0 -> tab.cols[i_col].name else if tab.ipkey >= 0 -> tab.cols[tab.ipkey].name else -> "ROWID".bytes()
@@ -1023,15 +1097,21 @@ pwalk_expr: fn(p: &Parse, a: &ast.AST, e0: Int) -[DB]> Int Never! {
         rc: cb.on_expr(p, a, e)
         if rc != 0 -> return rc.bit_and(ast.WRC_ABORT)
         if !ast.has(a, e, ast.EP_TOKEN_ONLY.bit_or(ast.EP_LEAF)) {
-            if a.exprs[e].left >= 0 && pwalk_expr(p, a, a.exprs[e].left) != 0 -> return ast.WRC_ABORT
+            if a.exprs[e].left >= 0 && pwalk_expr(p, a, a.exprs[e].left) != 0 {
+                return ast.WRC_ABORT
+            }
             if a.exprs[e].right >= 0 {
                 e = a.exprs[e].right
                 next
             } else if ast.has(a, e, ast.EP_X_IS_SELECT) {
                 if pwalk_select(p, a, a.exprs[e].x) != 0 -> return ast.WRC_ABORT
             } else {
-                if a.exprs[e].x >= 0 && pwalk_expr_list(p, a, a.exprs[e].x) != 0 -> return ast.WRC_ABORT
-                if ast.has(a, e, ast.EP_WIN_FUNC) && pwalk_window_list(p, a, a.exprs[e].y, true) != 0 -> return ast.WRC_ABORT
+                if a.exprs[e].x >= 0 && pwalk_expr_list(p, a, a.exprs[e].x) != 0 {
+                    return ast.WRC_ABORT
+                }
+                if ast.has(a, e, ast.EP_WIN_FUNC) && pwalk_window_list(p, a, a.exprs[e].y, true) != 0 {
+                    return ast.WRC_ABORT
+                }
             }
         }
         break
@@ -1073,7 +1153,9 @@ pwalk_select_expr: fn(p: &Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
     if pwalk_expr(p, a, a.selects[s].limit) != 0 -> return ast.WRC_ABORT
     if a.selects[s].win_defn >= 0 {
         cb: p.walks[walk_top(p)].cb
-        if cb.win_defn() || ast.in_rename(a) -> return pwalk_window_list(p, a, a.selects[s].win_defn, false)
+        if cb.win_defn() || ast.in_rename(a) {
+            return pwalk_window_list(p, a, a.selects[s].win_defn, false)
+        }
     }
     ast.WRC_CONTINUE
 }
@@ -1084,8 +1166,12 @@ pwalk_select_from: fn(p: &Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
     if src < 0 -> return ast.WRC_CONTINUE
     loop i in 0..<a.srclists[src].items.len() {
         si: a.srclists[src].items[i]
-        if a.items[si].select >= 0 && pwalk_select(p, a, a.items[si].select) != 0 -> return ast.WRC_ABORT
-        if a.items[si].is_tab_func && pwalk_expr_list(p, a, a.items[si].func_arg) != 0 -> return ast.WRC_ABORT
+        if a.items[si].select >= 0 && pwalk_select(p, a, a.items[si].select) != 0 {
+            return ast.WRC_ABORT
+        }
+        if a.items[si].is_tab_func && pwalk_expr_list(p, a, a.items[si].func_arg) != 0 {
+            return ast.WRC_ABORT
+        }
     }
     ast.WRC_CONTINUE
 }
@@ -1099,7 +1185,9 @@ pwalk_select: fn(p: &Parse, a: &ast.AST, s0: Int) -[DB]> Int Never! {
     loop s >= 0 {
         rc: cb.on_select(p, a, s)
         if rc != 0 -> return rc.bit_and(ast.WRC_ABORT)
-        if pwalk_select_expr(p, a, s) != 0 || pwalk_select_from(p, a, s) != 0 -> return ast.WRC_ABORT
+        if pwalk_select_expr(p, a, s) != 0 || pwalk_select_from(p, a, s) != 0 {
+            return ast.WRC_ABORT
+        }
         if cb.has_select2() -> cb.on_select2(p, a, s)
         s = a.selects[s].prior
     }
@@ -1121,17 +1209,38 @@ CodegenTestGen: struct {
 
     impl Gen {
         read_schema: fn(self, p: &Parse, a: &ast.AST) -[DB]> Int Never! { base.OK }
-        authorize: fn(self, p: &Parse, code: Int, arg1: [U8]?, arg2: [U8]?, arg3: [U8]?) -[DB]> Int Never! { if code == conn.AUTH_READ -> conn.AUTH_IGNORE else -> conn.AUTH_DENY }
+
+        authorize: fn(self, p: &Parse, code: Int, arg1: [U8]?, arg2: [U8]?, arg3: [U8]?) -[DB]> Int Never! {
+            if code == conn.AUTH_READ -> conn.AUTH_IGNORE else -> conn.AUTH_DENY
+        }
+
         nested_parse: fn(self, p: &Parse, a: &ast.AST, sql: [U8]) Never! -[DB]> {}
+
         select: fn(self, p: &Parse, a: &ast.AST, s: Int, dest: &SelectDest) -[DB]> Int Never! { 0 }
+
         select_prep: fn(self, p: &Parse, a: &ast.AST, s: Int, outer_nc: Int) Never! -[DB]> {}
+
         select_expand: fn(self, p: &Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
-        result_set_of_select: fn(self, p: &Parse, a: &ast.AST, s: Int, aff: Int) -[DB]> Int Never! { -1 }
+
+        result_set_of_select: fn(self, p: &Parse, a: &ast.AST, s: Int, aff: Int) -[DB]> Int Never! {
+            -1
+        }
+
         view_get_column_names: fn(self, p: &Parse, a: &ast.AST, t: Int) -[DB]> Int Never! { 0 }
+
         eponymous_table: fn(self, p: &Parse, a: &ast.AST, name: [U8]) -[DB]> Int Never! { -1 }
-        vtab_overload_function: fn(self, p: &Parse, a: &ast.AST, def: conn.FuncDef, n_arg: Int, e: Int) -[DB]> conn.FuncDef Never! { def.copy() }
-        vtab_best_index: fn(self, p: &Parse, a: &ast.AST, t: Int, info: &conn.IndexInfo) -[DB]> (rc: Int, err: [U8]?) Never! { (rc: base.ERROR, err: None) }
-        vtab_find_function: fn(self, p: &Parse, a: &ast.AST, t: Int, n_arg: Int, name: [U8]) -[DB]> Int Never! { 0 }
+
+        vtab_overload_function: fn(self, p: &Parse, a: &ast.AST, def: conn.FuncDef, n_arg: Int, e: Int) -[DB]> conn.FuncDef Never! {
+            def.copy()
+        }
+
+        vtab_best_index: fn(self, p: &Parse, a: &ast.AST, t: Int, info: &conn.IndexInfo) -[DB]> (rc: Int, err: [U8]?) Never! {
+            (rc: base.ERROR, err: None)
+        }
+
+        vtab_find_function: fn(self, p: &Parse, a: &ast.AST, t: Int, n_arg: Int, name: [U8]) -[DB]> Int Never! {
+            0
+        }
     }
 }
 

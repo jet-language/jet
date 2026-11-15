@@ -2,13 +2,18 @@
 // use byte offsets; no filesystem or source execution.
 
 // Rust `collect_foreign_body` result; named row avoids Rust-emit tuple JetShow #4357.
-JetCLIImportCollectedBody: struct { body: [JetCLIImportBodyLine], end: Int }
+JetCLIImportCollectedBody: struct {
+    body: [JetCLIImportBodyLine]
+    end: Int
+}
+
 // Rust `JavaScriptDocs` (1681-1686). Map ordering is immaterial: only keyed lookup.
 JetCLIImportJavaScriptDocs: struct {
     params: [String:String]
     result: String?
     error: String?
 }
+
 // Rust `foreign_binder_root` (1529-1536).
 jet_cli_import_foreign_binder_root: fn(language: String) -> String Never! {
     if language == {
@@ -17,9 +22,12 @@ jet_cli_import_foreign_binder_root: fn(language: String) -> String Never! {
         else -> language.copy()
     }
 }
+
 // Rust `collect_foreign_body` (1537-1569).
 jet_cli_import_collect_foreign_body: fn(lines: [String], open_line: Int) -> JetCLIImportCollectedBody JetCLIImportTextError! {
-    if open_line < 0 || open_line >= lines.len() -> return Err(jet_cli_import_text_error("function body is missing"))
+    if open_line < 0 || open_line >= lines.len() {
+        return Err(jet_cli_import_text_error("function body is missing"))
+    }
     open: jet_cli_import_find_unquoted(lines[open_line], "{{") ?? return Err(jet_cli_import_text_error("function body needs `{{`"))
     level := 0
     body := [JetCLIImportBodyLine]{}
@@ -29,13 +37,16 @@ jet_cli_import_collect_foreign_body: fn(lines: [String], open_line: Int) -> JetC
         before: level
         delta: jet_cli_import_brace_delta(fragment)
         content := jet_cli_import_strip_unquoted_braces(fragment).trim().copy()
-        if !content.is_empty() && (index != open_line || before > 0 || delta < 0) -> body.push(JetCLIImportBodyLine{line: index + 1, text: content.move()})
+        if !content.is_empty() && (index != open_line || before > 0 || delta < 0) {
+            body.push(JetCLIImportBodyLine{line: index + 1, text: content.move()})
+        }
         level += delta
         if index == open_line -> level += 1
         if level == 0 -> return Ok(JetCLIImportCollectedBody{body: body, end: index})
     }
     Err(jet_cli_import_text_error("function body has unmatched braces"))
 }
+
 // Rust `foreign_ignored_line` (1639-1650).
 jet_cli_import_foreign_ignored_line: fn(language: String, line: String) -> Bool Never! {
     if line == "{{" || line == "}}" || line == ");" || line == ")" -> return true
@@ -46,6 +57,7 @@ jet_cli_import_foreign_ignored_line: fn(language: String, line: String) -> Bool 
         else -> false
     }
 }
+
 // Rust `foreign_import_line` (1652-1660).
 jet_cli_import_foreign_import_line: fn(language: String, line: String) -> Bool Never! {
     if language == {
@@ -56,6 +68,7 @@ jet_cli_import_foreign_import_line: fn(language: String, line: String) -> Bool N
         else -> false
     }
 }
+
 // Rust `foreign_supported_import` (1662-1668).
 jet_cli_import_foreign_supported_import: fn(language: String, line: String) -> Bool Never! {
     if language == {
@@ -64,13 +77,17 @@ jet_cli_import_foreign_supported_import: fn(language: String, line: String) -> B
         else -> false
     }
 }
+
 // Rust `foreign_structural_line` (1670-1680).
 jet_cli_import_foreign_structural_line: fn(line: String) -> Bool Never! {
     trimmed: jet_cli_import_trim_edge_bytes(line, U8{123}, U8{125})
     structural: [String]{"package", "namespace", "class", "interface", "struct", "enum", "record"}
-    loop token in jet_cli_import_words(trimmed) { if structural.contains(token) -> return true }
+    loop token in jet_cli_import_words(trimmed) {
+        if structural.contains(token) -> return true
+    }
     line == "{{" || line == "}}"
 }
+
 jet_cli_import_trim_edge_bytes: fn(raw: String, first: U8, second: U8) -> String Never! {
     bytes: raw.bytes()
     start := 0
@@ -79,6 +96,7 @@ jet_cli_import_trim_edge_bytes: fn(raw: String, first: U8, second: U8) -> String
     loop end > start && (bytes[end - 1] == first || bytes[end - 1] == second) -> end -= 1
     jet_cli_import_byte_slice(bytes, start, end)
 }
+
 // Rust `javascript_doc_types` (1688-1740). Scan comment block forward after locating it.
 jet_cli_import_javascript_doc_types: fn(lines: [String], at: Int) -> JetCLIImportJavaScriptDocs Never! {
     cursor := at
@@ -97,7 +115,7 @@ jet_cli_import_javascript_doc_types: fn(lines: [String], at: Int) -> JetCLIImpor
             rest: jet_cli_import_byte_slice(line.bytes(), position + doc_tag.bytes().len(), line.bytes().len())
             if jet_cli_import_parse_javascript_param_doc(rest) == .Val(param) {
                 if jet_cli_import_map_javascript_doc_type(param.ty) == {
-                    .Ok(mapped) -> docs.params[param.name] = mapped
+                    .Ok(mapped) -> { docs.params[param.name] = mapped }
                     .Err(error) -> docs.error = Val(error.message.copy())
                 }
             } else { docs.error = Val("JavaScript parameter JSDoc needs `{{type}} name`") }
@@ -114,7 +132,7 @@ jet_cli_import_javascript_doc_types: fn(lines: [String], at: Int) -> JetCLIImpor
             end: close ?? panic("known close")
             ty: jet_cli_import_byte_slice(rest.bytes(), 1, end).trim().copy()
             if jet_cli_import_map_javascript_doc_type(ty) == {
-                .Ok(mapped) -> docs.result = Val(mapped)
+                .Ok(mapped) -> { docs.result = Val(mapped) }
                 .Err(error) -> docs.error = Val(error.message.copy())
             }
             break
@@ -122,6 +140,7 @@ jet_cli_import_javascript_doc_types: fn(lines: [String], at: Int) -> JetCLIImpor
     }
     docs
 }
+
 // Rust `parse_javascript_param_doc` (1742-1748).
 jet_cli_import_parse_javascript_param_doc: fn(raw: String) -> (ty: String, name: String)? Never! {
     text: raw.trim().copy()
@@ -134,6 +153,7 @@ jet_cli_import_parse_javascript_param_doc: fn(raw: String) -> (ty: String, name:
     if !jet_cli_import_identifier(name) -> return None
     Val((ty: ty, name: name))
 }
+
 // Rust `map_javascript_doc_type` (1750-1761).
 jet_cli_import_map_javascript_doc_type: fn(raw: String) -> String JetCLIImportTextError! {
     ty: raw.trim().copy()
@@ -146,6 +166,7 @@ jet_cli_import_map_javascript_doc_type: fn(raw: String) -> String JetCLIImportTe
         else -> Err(jet_cli_import_text_error("JavaScript JSDoc type `{ty}` has no proven Jet mapping"))
     }
 }
+
 // Rust `infer_javascript_types` (1763-1812). Mutate in declaration order, including before errors.
 jet_cli_import_infer_javascript_types: fn(function: &JetCLIImportFunction, docs: JetCLIImportJavaScriptDocs) JetCLIImportTextError! {
     if docs.error == .Val(error) -> return Err(jet_cli_import_text_error(error.copy()))
@@ -164,13 +185,14 @@ jet_cli_import_infer_javascript_types: fn(function: &JetCLIImportFunction, docs:
         }
         ty: function.params[index].ty
         if ty != "__js__" {
-            if ty == "()" -> return Err(jet_cli_import_text_error("JavaScript parameter `{name}` cannot have unit type"))
+            if ty == "()" {
+                return Err(jet_cli_import_text_error("JavaScript parameter `{name}` cannot have unit type"))
+            }
             known[name.copy()] = ty.copy()
         }
     }
     if function.result == "__js__" {
-        if docs.result == .Val(result) -> function.result = result.copy()
-        else {
+        if docs.result == .Val(result) -> function.result = result.copy() else {
             result := String?{None}
             loop statement in body.split(";") {
                 trimmed: statement.trim().copy()
@@ -183,11 +205,22 @@ jet_cli_import_infer_javascript_types: fn(function: &JetCLIImportFunction, docs:
             function.result = result ?? "()"
         }
     } else {
-        if docs.result == .Val(result) { if result != function.result -> return Err(jet_cli_import_text_error("JavaScript JSDoc return type conflicts with the declaration")) }
+        if docs.result == .Val(result) {
+            if result != function.result {
+                return Err(jet_cli_import_text_error("JavaScript JSDoc return type conflicts with the declaration"))
+            }
+        }
     }
-    loop param in function.params { if param.ty == "__js__" -> return Err(jet_cli_import_text_error("JavaScript value type is ambiguous")) }
-    if function.result == "__js__" -> return Err(jet_cli_import_text_error("JavaScript value type is ambiguous"))
+    loop param in function.params {
+        if param.ty == "__js__" {
+            return Err(jet_cli_import_text_error("JavaScript value type is ambiguous"))
+        }
+    }
+    if function.result == "__js__" {
+        return Err(jet_cli_import_text_error("JavaScript value type is ambiguous"))
+    }
 }
+
 // Rust `infer_javascript_parameter_type` (1814-1832).
 jet_cli_import_infer_javascript_parameter_type: fn(body: String, name: String) -> String? Never! {
     pieces: body.split("+").to_list()
@@ -196,18 +229,25 @@ jet_cli_import_infer_javascript_parameter_type: fn(body: String, name: String) -
     different_quotes := false
     loop piece in pieces {
         if jet_cli_import_contains_quote(piece) {
-            if quoted == .Val(first) { if piece != first -> different_quotes = true } else { quoted = Val(piece.copy()) }
+            if quoted == .Val(first) {
+                if piece != first -> different_quotes = true
+            } else { quoted = Val(piece.copy()) }
         }
     }
     loop piece in pieces {
         if jet_cli_import_contains_identifier(piece, name) {
-            if quoted == .Val(first) { if different_quotes || piece != first -> return Val("String") }
+            if quoted == .Val(first) {
+                if different_quotes || piece != first -> return Val("String")
+            }
         }
     }
     checks: [String]{"{name} === true", "true === {name}", "{name} === false", "false === {name}"}
-    loop check in checks { if body.contains(check) -> return Val("Bool") }
+    loop check in checks {
+        if body.contains(check) -> return Val("Bool")
+    }
     None
 }
+
 // Rust `contains_identifier` (1834-1837), ASCII tokens only.
 jet_cli_import_contains_identifier: fn(text: String, wanted: String) -> Bool Never! {
     bytes: text.bytes()
@@ -215,12 +255,15 @@ jet_cli_import_contains_identifier: fn(text: String, wanted: String) -> Bool Nev
     start := 0
     loop at in 0..<bytes.len() + 1 {
         if at == bytes.len() || (!jet_cli_import_alpha(bytes[at]) && !jet_cli_import_digit(bytes[at]) && bytes[at] != (U8{95})) {
-            if at - start == wanted_bytes.len() && jet_cli_import_byte_match(bytes, start, wanted_bytes) -> return true
+            if at - start == wanted_bytes.len() && jet_cli_import_byte_match(bytes, start, wanted_bytes) {
+                return true
+            }
             start = at + 1
         }
     }
     false
 }
+
 // Rust `infer_javascript_value_type` (1839-1913).
 jet_cli_import_infer_javascript_value_type: fn(raw: String, known: [String:String]) -> String? Never! {
     expression: (jet_cli_import_trim_suffix(raw.trim().copy(), ";").trim().copy()).replace("!==", "!=").replace("===", "==")
@@ -278,11 +321,16 @@ jet_cli_import_infer_javascript_value_type: fn(raw: String, known: [String:Strin
     if !saw_value -> return None
     if has_comparison || (has_boolean && !has_arithmetic) -> return Val("Bool")
     if has_string -> return Val("String")
-    if has_arithmetic || has_float || has_numeric -> return Val(if has_float -> "Float" else -> "Int")
+    if has_arithmetic || has_float || has_numeric {
+        return Val(if has_float -> "Float" else -> "Int")
+    }
     None
 }
+
 // Rust `contains_quote` (1915-1917).
-jet_cli_import_contains_quote: fn(value: String) -> Bool Never! { value.contains("\"") || value.contains("'") }
+jet_cli_import_contains_quote: fn(value: String) -> Bool Never! {
+    value.contains("\"") || value.contains("'")
+}
 
 // Rust `enterprise_unit_name` (1919-1960). Path text follows POSIX Path::file_stem.
 jet_cli_import_enterprise_unit_name: fn(language: String, raw: String, source: String) -> String? Never! {
@@ -296,25 +344,35 @@ jet_cli_import_enterprise_unit_name: fn(language: String, raw: String, source: S
         if file == ".." -> return None
         dot: jet_cli_import_find_bytes(file.bytes(), ".", true)
         stem := file.copy()
-        if dot == .Val(at) { if at > 0 -> stem = jet_cli_import_byte_slice(file.bytes(), 0, at) }
+        if dot == .Val(at) {
+            if at > 0 -> stem = jet_cli_import_byte_slice(file.bytes(), 0, at)
+        }
         if jet_cli_import_identifier(stem) -> return Val(stem)
         return None
     }
     keyword: if language == {
         "java" | "go" -> "package"
         "csharp" -> "namespace"
-        else -> { return None }
+        else -> {
+            return None
+        }
     }
     loop raw_line in raw.lines() {
         line: raw_line.trim_start().copy()
-        if line.starts_with("//") || line.starts_with("/*") || line.starts_with("*") || !line.starts_with(keyword) -> next
+        if line.starts_with("//") || line.starts_with("/*") || line.starts_with("*") || !line.starts_with(keyword) {
+            next
+        }
         rest: jet_cli_import_byte_slice(line.bytes(), keyword.bytes().len(), line.bytes().len())
         bytes: rest.bytes()
-        if bytes.is_empty() || !jet_cli_import_space_at(bytes, 0, jet_cli_import_utf8_width(bytes[0])) -> next
+        if bytes.is_empty() || !jet_cli_import_space_at(bytes, 0, jet_cli_import_utf8_width(bytes[0])) {
+            next
+        }
         tail: jet_cli_import_trim_suffix(jet_cli_import_trim_suffix(rest.trim().copy(), ";"), "{{").trim().copy()
         bytes_tail: tail.bytes()
         end := 0
-        loop end < bytes_tail.len() && (jet_cli_import_alpha(bytes_tail[end]) || jet_cli_import_digit(bytes_tail[end]) || bytes_tail[end] == (U8{95}) || bytes_tail[end] == (U8{46})) -> end += 1
+        loop end < bytes_tail.len() && (jet_cli_import_alpha(bytes_tail[end]) || jet_cli_import_digit(bytes_tail[end]) || bytes_tail[end] == (U8{95}) || bytes_tail[end] == (U8{46})) {
+            end += 1
+        }
         name := jet_cli_import_byte_slice(bytes_tail, 0, end)
         dot: jet_cli_import_find_bytes(name.bytes(), ".", true)
         last: if dot == .Val(at) -> jet_cli_import_byte_slice(name.bytes(), at + 1, name.bytes().len()) else -> name.move()
@@ -322,21 +380,34 @@ jet_cli_import_enterprise_unit_name: fn(language: String, raw: String, source: S
     }
     None
 }
+
 // Rust `header` (1961-1963).
-jet_cli_import_header: fn(language: String) -> String Never! { "// Generated by jet import {language}. Editable Jet source.\n" }
+jet_cli_import_header: fn(language: String) -> String Never! {
+    "// Generated by jet import {language}. Editable Jet source.\n"
+}
+
 // Rust `binder_header` (1964-1968).
-jet_cli_import_binder_header: fn(language: String) -> String Never! { "// Prepared by jet import {language}. Binder-only/manual migration; semantic source conversion is unavailable.\n" }
+jet_cli_import_binder_header: fn(language: String) -> String Never! {
+    "// Prepared by jet import {language}. Binder-only/manual migration; semantic source conversion is unavailable.\n"
+}
+
 jet_cli_import_ascii_lower: fn(raw: String) -> String Never! {
     bytes := [U8]{}
-    loop byte in raw.bytes() -> bytes.push(if byte >= (U8{65}) && byte <= (U8{90}) -> checked(U8{Int{byte} + 32}) ?? panic("ASCII lower") else -> byte)
+    loop byte in raw.bytes() {
+        bytes.push(if byte >= (U8{65}) && byte <= (U8{90}) -> checked(U8{Int{byte} + 32}) ?? panic("ASCII lower") else -> byte)
+    }
     String.from_bytes(bytes) ?? panic("ASCII lower UTF-8")
 }
+
 jet_cli_import_first_ascii_identifier_part: fn(raw: String) -> String Never! {
     bytes: raw.bytes()
     end := 0
-    loop end < bytes.len() && (jet_cli_import_alpha(bytes[end]) || jet_cli_import_digit(bytes[end]) || bytes[end] == (U8{95})) -> end += 1
+    loop end < bytes.len() && (jet_cli_import_alpha(bytes[end]) || jet_cli_import_digit(bytes[end]) || bytes[end] == (U8{95})) {
+        end += 1
+    }
     jet_cli_import_byte_slice(bytes, 0, end)
 }
+
 // Rust `pascal_library_name` (1970-1987).
 jet_cli_import_pascal_library_name: fn(raw: String) -> String? Never! {
     loop raw_line in raw.lines() {
@@ -350,6 +421,7 @@ jet_cli_import_pascal_library_name: fn(raw: String) -> String? Never! {
     }
     None
 }
+
 // Rust `ada_package_name` (1989-2010).
 jet_cli_import_ada_package_name: fn(raw: String) -> String? Never! {
     loop raw_line in raw.lines() {
@@ -365,17 +437,24 @@ jet_cli_import_ada_package_name: fn(raw: String) -> String? Never! {
     }
     None
 }
+
 // Rust `parse_header` (2011-2047); signature returned as shared Function with empty body.
 jet_cli_import_parse_header: fn(line: String) -> JetCLIImportFunction JetCLIImportTextError! {
-    if !line.starts_with("def ") || !line.ends_with(":") -> return Err(jet_cli_import_text_error("expected def name(args) -> Type:"))
+    if !line.starts_with("def ") || !line.ends_with(":") {
+        return Err(jet_cli_import_text_error("expected def name(args) -> Type:"))
+    }
     body: jet_cli_import_byte_slice(line.bytes(), 4, line.bytes().len() - 1)
     open: jet_cli_import_find_bytes(body.bytes(), "(", false) ?? return Err(jet_cli_import_text_error("function needs ("))
     close: jet_cli_import_find_bytes(body.bytes(), ")", true) ?? return Err(jet_cli_import_text_error("function needs )"))
     raw_name: jet_cli_import_byte_slice(body.bytes(), 0, open).trim().copy()
-    if close < open || !jet_cli_import_identifier(raw_name) -> return Err(jet_cli_import_text_error("function name is not a safe Jet identifier"))
+    if close < open || !jet_cli_import_identifier(raw_name) {
+        return Err(jet_cli_import_text_error("function name is not a safe Jet identifier"))
+    }
     name: jet_cli_import_canonical_identifier(raw_name)
     suffix: jet_cli_import_byte_slice(body.bytes(), close + 1, body.bytes().len()).trim().copy()
-    if !suffix.starts_with("->") -> return Err(jet_cli_import_text_error("function needs a return annotation"))
+    if !suffix.starts_with("->") {
+        return Err(jet_cli_import_text_error("function needs a return annotation"))
+    }
     result: jet_cli_import_map_type(jet_cli_import_byte_slice(suffix.bytes(), 2, suffix.bytes().len()).trim().copy())
     params := [(name: String, ty: String)]{}
     raw_params: jet_cli_import_byte_slice(body.bytes(), open + 1, close).trim().copy()
@@ -383,13 +462,16 @@ jet_cli_import_parse_header: fn(line: String) -> JetCLIImportFunction JetCLIImpo
         loop raw in jet_cli_import_split_commas(raw_params) {
             colon: jet_cli_import_find_bytes(raw.bytes(), ":", false) ?? return Err(jet_cli_import_text_error("parameter {raw} needs a type annotation"))
             param: jet_cli_import_byte_slice(raw.bytes(), 0, colon).trim().copy()
-            if !jet_cli_import_identifier(param) || param == "self" || param.contains("=") -> return Err(jet_cli_import_text_error("parameter {param} has no safe importer mapping"))
+            if !jet_cli_import_identifier(param) || param == "self" || param.contains("=") {
+                return Err(jet_cli_import_text_error("parameter {param} has no safe importer mapping"))
+            }
             ty: jet_cli_import_map_type(jet_cli_import_byte_slice(raw.bytes(), colon + 1, raw.bytes().len()).trim().copy())
             params.push((name: jet_cli_import_canonical_identifier(param), ty: ty))
         }
     }
     Ok(JetCLIImportFunction{name: name, params: params, result: result, body: []})
 }
+
 // Rust `map_type` (2049-2058).
 jet_cli_import_map_type: fn(ty: String) -> String JetCLIImportTextError! {
     if ty == {
@@ -401,9 +483,12 @@ jet_cli_import_map_type: fn(ty: String) -> String JetCLIImportTextError! {
         else -> Err(jet_cli_import_text_error("Python type {ty} has no proven Jet mapping"))
     }
 }
+
 // Rust `translate_body` (2079-2161).
 jet_cli_import_translate_body: fn(function: JetCLIImportFunction) -> [String] JetCLIImportBodyError! {
-    if function.body.is_empty() -> return Err(JetCLIImportBodyError{line: 1, message: "function body is empty"})
+    if function.body.is_empty() {
+        return Err(JetCLIImportBodyError{line: 1, message: "function body is empty"})
+    }
     base := jet_cli_import_indentation(function.body[0].text)
     loop row in function.body {
         width: jet_cli_import_indentation(row.text)
@@ -412,7 +497,9 @@ jet_cli_import_translate_body: fn(function: JetCLIImportFunction) -> [String] Je
     previous := function.body[0].line
     loop row in function.body {
         width: jet_cli_import_indentation(row.text)
-        if width > base -> return Err(JetCLIImportBodyError{line: previous, message: "nested control flow has no proven equivalent in this importer"})
+        if width > base {
+            return Err(JetCLIImportBodyError{line: previous, message: "nested control flow has no proven equivalent in this importer"})
+        }
         if width == base -> previous = row.line
     }
     // #4366: membership map avoids Set.add's missing Bool result in Rust emit.
@@ -442,7 +529,9 @@ jet_cli_import_translate_body: fn(function: JetCLIImportFunction) -> [String] Je
         }
         if jet_cli_import_assignment(line) == .Val(pair) {
             name: jet_cli_import_canonical_identifier(pair.left)
-            if !jet_cli_import_identifier(name) -> return Err(JetCLIImportBodyError{line: row.line, message: "assignment target is not a local name"})
+            if !jet_cli_import_identifier(name) {
+                return Err(JetCLIImportBodyError{line: row.line, message: "assignment target is not a local name"})
+            }
             value: jet_cli_import_parse_expression(pair.right) ?? return Err(JetCLIImportBodyError{line: row.line, message: err.message.copy()})
             materialized: jet_cli_import_materialize_borrowed_string(function, pair.right, value)
             operator: if bindings.has_key(name) -> "=" else -> ":="
@@ -454,20 +543,27 @@ jet_cli_import_translate_body: fn(function: JetCLIImportFunction) -> [String] Je
     }
     Ok(output)
 }
+
 // Rust `render_function` (2333-2356). One output buffer, no repeated whole-output copies.
 jet_cli_import_render_function: fn(marker: String, function: JetCLIImportFunction, body: [String]) -> String Never! {
     output := [U8]{}
-    loop byte in "{marker}{jet_cli_import_canonical_identifier(function.name)}: fn(".bytes() -> output.push(byte)
+    loop byte in "{marker}{jet_cli_import_canonical_identifier(function.name)}: fn(".bytes() {
+        output.push(byte)
+    }
     loop index in 0..<function.params.len() {
         if index > 0 {
             output.push(U8{44})
             output.push(U8{32})
         }
         param: function.params[index]
-        loop byte in "{jet_cli_import_canonical_identifier(param.name)}: {param.ty}".bytes() -> output.push(byte)
+        loop byte in "{jet_cli_import_canonical_identifier(param.name)}: {param.ty}".bytes() {
+            output.push(byte)
+        }
     }
     output.push(U8{41})
-    if function.result != "()" { loop byte in " -> {function.result}".bytes() -> output.push(byte) }
+    if function.result != "()" {
+        loop byte in " -> {function.result}".bytes() -> output.push(byte)
+    }
     loop byte in " {{\n".bytes() -> output.push(byte)
     loop line in body {
         loop _ in 0..<4 -> output.push(U8{32})
@@ -477,6 +573,7 @@ jet_cli_import_render_function: fn(marker: String, function: JetCLIImportFunctio
     loop byte in "}}\n".bytes() -> output.push(byte)
     String.from_bytes(output) ?? panic("rendered function UTF-8")
 }
+
 // Rust `shorten` (3466-3472), 48 Unicode scalars, never bytes.
 jet_cli_import_shorten: fn(value: String) -> String Never! {
     if value.len() <= 48 -> return value.copy()

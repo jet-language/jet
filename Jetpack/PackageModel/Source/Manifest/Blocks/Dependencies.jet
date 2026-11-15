@@ -4,17 +4,18 @@ use jetpack_foundation.[DEP_PROVIDER_C, REF_PROVIDER_AT]
 
 // Where a dependency resolves from.
 DepSource: enum {
-    // The selector from a `name#version` registry ref (or a quoted selector).
     Version(String)
-    // A bare path or `target@provider` source ref.
     Provider(provider: RefSource, target: String)
-    // An inline git dependency with exactly one selector.
     Git(url: String, selector: GitSelector)
-    // A native C-library link dependency: `c@system` or `c@"vendor/path"`.
     CLib(target: String)
-    // A package-backed foreign namespace dependency.
     Foreign(language: ForeignLanguage, reference: String)
 }
+
+// The selector from a `name#version` registry ref (or a quoted selector).
+// A bare path or `target@provider` source ref.
+// An inline git dependency with exactly one selector.
+// A native C-library link dependency: `c@system` or `c@"vendor/path"`.
+// A package-backed foreign namespace dependency.
 
 // Render one `DepSource` back to its display/audit string form.
 pkg_dep_display: fn(source: DepSource) -> String Never! {
@@ -88,14 +89,18 @@ pkg_ref_error_debug: fn(error: RefError) -> String Never! {
     }
 }
 
-pkg_parse_deps: fn(body: String) -> [String: DepSource] PackageParseError! {
-    deps := [String: DepSource]{}
+pkg_parse_deps: fn(body: String) -> [String:DepSource] PackageParseError! {
+    deps := [String:DepSource]{}
     loop entry in pkg_key_value_entries(body) {
         name: entry.key
-        if !pkg_validate_dependency_name(name) -> return Err(PackageParseError.Composition("dependency name `{name}` must be one safe path component"))
+        if !pkg_validate_dependency_name(name) {
+            return Err(PackageParseError.Composition("dependency name `{name}` must be one safe path component"))
+        }
         trimmed: entry.value.trim()
         source: pkg_parse_dep_value(name, trimmed)
-        if deps.has_key(name) -> return Err(PackageParseError.Composition("dependency `{name}` is declared more than once"))
+        if deps.has_key(name) {
+            return Err(PackageParseError.Composition("dependency `{name}` is declared more than once"))
+        }
         deps[name] = source
     }
     Ok(deps)
@@ -127,7 +132,9 @@ pkg_parse_dep_value: fn(name: String, trimmed: String) -> DepSource PackageParse
     }
     if unquoted.split_once("#") == {
         .Val(parts) -> {
-            if parts.before == name && parts.after != "" -> return Ok(DepSource.Version(parts.after))
+            if parts.before == name && parts.after != "" {
+                return Ok(DepSource.Version(parts.after))
+            }
             return Err(pkg_bad_dep_value(name, trimmed))
         }
         .None -> {}
@@ -158,9 +165,13 @@ pkg_parse_foreign_ref: fn(name: String, value: String) -> DepSource? PackagePars
     language: ForeignLanguage.from_root(parts.before.trim()) ?? return Ok(None)
     if language == ForeignLanguage.C -> return Ok(None)
     reference: parts.after.trim()
-    if !reference.starts_with("\"") || !reference.ends_with("\"") -> return Err(PackageParseError.Composition("foreign dependency `{name}` must quote its provider ref as `{language.root()}@\"ref\"`"))
+    if !reference.starts_with("\"") || !reference.ends_with("\"") {
+        return Err(PackageParseError.Composition("foreign dependency `{name}` must quote its provider ref as `{language.root()}@\"ref\"`"))
+    }
     unquoted: pkg_unquote(reference)
-    if unquoted.trim() == "" -> return Err(PackageParseError.Composition("foreign dependency `{name}` has an empty provider ref"))
+    if unquoted.trim() == "" {
+        return Err(PackageParseError.Composition("foreign dependency `{name}` has an empty provider ref"))
+    }
     Ok(Val(DepSource.Foreign{language: language, reference: unquoted}))
 }
 
@@ -172,7 +183,9 @@ pkg_parse_git_dep: fn(name: String, body: String) -> DepSource PackageParseError
     rev_value := String?{None}
     seen := [String]{}
     loop entry in pkg_key_value_entries(body) {
-        if seen.contains(entry.key) -> return Err(PackageParseError.Composition("git dependency `{name}.{entry.key}` is declared more than once"))
+        if seen.contains(entry.key) {
+            return Err(PackageParseError.Composition("git dependency `{name}.{entry.key}` is declared more than once"))
+        }
         seen.push(entry.key)
         value: pkg_unquote(entry.value)
         if entry.key == {
@@ -188,6 +201,8 @@ pkg_parse_git_dep: fn(name: String, body: String) -> DepSource PackageParseError
     if tag_value == .Val(value) -> selectors.push(GitSelector.Tag(value))
     if branch_value == .Val(value) -> selectors.push(GitSelector.Branch(value))
     if rev_value == .Val(value) -> selectors.push(GitSelector.Rev(value))
-    if selectors.len() != 1 -> return Err(PackageParseError.Composition("git dependency `{name}` must have exactly one of `tag`, `branch`, `rev`"))
+    if selectors.len() != 1 {
+        return Err(PackageParseError.Composition("git dependency `{name}` must have exactly one of `tag`, `branch`, `rev`"))
+    }
     Ok(DepSource.Git{url: found_url, selector: selectors[0]})
 }

@@ -2,6 +2,7 @@ package: {
     name: "wayland_windows_compose_text_through_the_input_method"
     authority: { allow: [Env, IO, Net, Time] }
 }
+
 use {
     net: core.net
     sys: core.sys
@@ -60,7 +61,7 @@ Fake: struct {
 
 GLOBALS: [String]{"wl_compositor", "wl_shm", "xdg_wm_base", "wl_seat", "zwp_text_input_manager_v3"}
 
-fake_put: fn(&out: [U8], value: Int) {
+fake_put: fn(out: &[U8], value: Int) {
     v: value.bit_and(4294967295)
     out.push(U8{v.bit_and(255)})
     out.push(U8{(v >> 8).bit_and(255)})
@@ -95,14 +96,16 @@ fake_string: fn(bytes: [U8], at: Int) -> String {
     String.from_bytes(bytes[(at + 4)..<(at + 3 + length)]) ?? ""
 }
 
-fake_event: fn(&f: Fake, object: Int, opcode: Int, args: [U8]) {
+fake_event: fn(f: &Fake, object: Int, opcode: Int, args: [U8]) {
     fake_put(f.out, object)
     fake_put(f.out, ((args.len() + 8) << 16) + opcode)
     loop b in args -> f.out.push(b)
 }
 
-fake_flush: fn(&f: Fake) -[Net, Time]> {
-    if f.out.len() == 0 -> return
+fake_flush: fn(f: &Fake) -[Net, Time]> {
+    if f.out.len() == 0 {
+        return
+    }
     out: f.out.copy()
     f.out = [U8]{}
     net.unix_send(f.stream, out, [sys.Fd]{}) ?? {
@@ -111,13 +114,13 @@ fake_flush: fn(&f: Fake) -[Net, Time]> {
     }
 }
 
-fake_fail: fn(&f: Fake, message: String) {
+fake_fail: fn(f: &Fake, message: String) {
     if f.failures.len() < 8 -> f.failures.push("phase {f.phase}: {message}")
 }
 
 // zwp_text_input_v3.preedit_string(text, cursor_begin, cursor_end); an
 // empty text goes as the null string.
-fake_preedit: fn(&f: Fake, text: String, begin: Int, end: Int) {
+fake_preedit: fn(f: &Fake, text: String, begin: Int, end: Int) {
     args := if text == "" -> fake_words([Int]{0}) else -> fake_text(text)
     loop b in fake_words([Int]{begin, end}) -> args.push(b)
     text_input: f.text_input
@@ -125,12 +128,12 @@ fake_preedit: fn(&f: Fake, text: String, begin: Int, end: Int) {
 }
 
 // zwp_text_input_v3.done, with the commits the input method has seen.
-fake_done: fn(&f: Fake) {
+fake_done: fn(f: &Fake) {
     text_input: f.text_input
     fake_event(f, text_input, 5, fake_words([Int]{f.text_commits}))
 }
 
-fake_commit: fn(&f: Fake) -[Env, Net, Time]> {
+fake_commit: fn(f: &Fake) -[Env, Net, Time]> {
     f.commits += 1
     if f.attached != 0 {
         previous: f.current
@@ -141,7 +144,9 @@ fake_commit: fn(&f: Fake) -[Env, Net, Time]> {
     callbacks: f.callbacks.copy()
     f.callbacks = [Int]{}
     loop id in callbacks -> fake_event(f, id, 0, fake_words([Int]{f.commits}))
-    if f.current == 0 || f.commits < f.due_commit -> return
+    if f.current == 0 || f.commits < f.due_commit {
+        return
+    }
     if f.phase == 0 {
         // The keyboard focus, and the input method's with it.
         f.serial += 1
@@ -179,12 +184,16 @@ fake_commit: fn(&f: Fake) -[Env, Net, Time]> {
 // The window's text input requests: enable 1, disable 2,
 // set_content_type 5, set_cursor_rectangle 6 and commit 7, which
 // applies them.
-fake_text_input: fn(&f: Fake, opcode: Int, body: [U8]) {
+fake_text_input: fn(f: &Fake, opcode: Int, body: [U8]) {
     if opcode == 1 -> f.enabled = true
     if opcode == 2 -> f.enabled = false
     if opcode == 5 -> f.content = "{fake_u32(body, 0)} {fake_u32(body, 4)}"
-    if opcode == 6 -> f.caret = "{fake_u32(body, 0)},{fake_u32(body, 4)} {fake_u32(body, 8)}x{fake_u32(body, 12)}"
-    if opcode != 7 -> return
+    if opcode == 6 {
+        f.caret = "{fake_u32(body, 0)},{fake_u32(body, 4)} {fake_u32(body, 8)}x{fake_u32(body, 12)}"
+    }
+    if opcode != 7 {
+        return
+    }
     f.text_commits += 1
     if f.phase == 1 {
         if !f.enabled -> fake_fail(f, "commit without enable")
@@ -205,7 +214,7 @@ fake_text_input: fn(&f: Fake, opcode: Int, body: [U8]) {
     fake_fail(f, "an unexpected text input commit")
 }
 
-fake_request: fn(&f: Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Time]> {
+fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Time]> {
     if object == 1 && opcode == 1 {
         f.registry = fake_u32(body, 0)
         registry: f.registry
@@ -227,7 +236,9 @@ fake_request: fn(&f: Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Tim
         interface: fake_string(body, 4)
         length: fake_u32(body, 4)
         id: fake_u32(body, 8 + ((length + 3) /% 4) * 4 + 4)
-        if name < 1 || name > GLOBALS.len() || GLOBALS[name - 1] != interface -> fake_fail(f, "bound global {name} as {interface}")
+        if name < 1 || name > GLOBALS.len() || GLOBALS[name - 1] != interface {
+            fake_fail(f, "bound global {name} as {interface}")
+        }
         if interface == "wl_compositor" -> f.compositor = id
         if interface == "wl_shm" {
             f.shm = id
@@ -269,7 +280,9 @@ fake_request: fn(&f: Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Tim
     if object == f.text_manager && opcode == 1 {
         // get_text_input(id, seat).
         f.text_input = fake_u32(body, 0)
-        if fake_u32(body, 4) != f.seat -> fake_fail(f, "a text input for object {fake_u32(body, 4)}, not the seat")
+        if fake_u32(body, 4) != f.seat {
+            fake_fail(f, "a text input for object {fake_u32(body, 4)}, not the seat")
+        }
         f.records.push("text input for the seat")
         return
     }
@@ -296,7 +309,7 @@ fake_request: fn(&f: Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Tim
     }
 }
 
-fake_dispatch: fn(&f: Fake) -[Env, Net, Time]> {
+fake_dispatch: fn(f: &Fake) -[Env, Net, Time]> {
     at := 0
     loop f.inbox.len() - at >= 8 {
         object: fake_u32(f.inbox, at)
@@ -319,11 +332,37 @@ fake_dispatch: fn(&f: Fake) -[Env, Net, Time]> {
 fake_serve: fn(listener: net.UnixListener) -[Env, Net, Time, IO]> Fake {
     stream: net.unix_accept(listener) ?? panic("accept: {err}")
     f := Fake{
-        stream: stream, inbox: [U8]{}, out: [U8]{}, registry: 0, compositor: 0, shm: 0, wm_base: 0,
-        seat: 0, keyboard: 0, text_manager: 0, text_input: 0, surface: 0, xdg_surface: 0, toplevel: 0,
-        fds: [sys.Fd]{}, pool_fds: [sys.Fd]{}, attached: 0, current: 0, callbacks: [Int]{}, serial: 0,
-        configured: false, enabled: false, content: "", caret: "", text_commits: 0,
-        phase: 0, commits: 0, due_commit: 0, closed: false, records: [String]{}, failures: [String]{},
+        stream: stream,
+        inbox: [U8]{},
+        out: [U8]{},
+        registry: 0,
+        compositor: 0,
+        shm: 0,
+        wm_base: 0,
+        seat: 0,
+        keyboard: 0,
+        text_manager: 0,
+        text_input: 0,
+        surface: 0,
+        xdg_surface: 0,
+        toplevel: 0,
+        fds: [sys.Fd]{},
+        pool_fds: [sys.Fd]{},
+        attached: 0,
+        current: 0,
+        callbacks: [Int]{},
+        serial: 0,
+        configured: false,
+        enabled: false,
+        content: "",
+        caret: "",
+        text_commits: 0,
+        phase: 0,
+        commits: 0,
+        due_commit: 0,
+        closed: false,
+        records: [String]{},
+        failures: [String]{},
     }
     idle := 0
     loop idle < 40 {

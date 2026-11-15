@@ -36,10 +36,11 @@ Stmt: enum {
     Yield(value: Expr, span: Span)
     ScopeMember(name: String, name_span: Span, args: [Expr], args_span: Span?, body: [Stmt], dsl: Bool, dot_span: Span, span: Span)
     DeferClose(close: Expr, span: Span)
-    // `defer statement` or `defer { … }`: the body runs when its block ends,
-    // on every exit, latest defer first.
     Defer(body: [Stmt], span: Span)
 }
+
+// `defer statement` or `defer { … }`: the body runs when its block ends,
+// on every exit, latest defer first.
 
 IfStmt: struct {
     cond: Expr
@@ -103,13 +104,14 @@ PolicyKey: enum {
     ExplicitUnits
     Copies
     Sentries
-    // `#Overflow(.Mode)`, at function, method or
-    // block scope only; the innermost declaration wins and never crosses a call.
     Arithmetic
     Writes
-    // `failures: .Explicit`: each call that can fail is written with `?`.
     Failures
 }
+
+// `#Overflow(.Mode)`, at function, method or
+// block scope only; the innermost declaration wins and never crosses a call.
+// `failures: .Explicit`: each call that can fail is written with `?`.
 
 PolicyValue: enum {
     Enabled
@@ -126,9 +128,10 @@ PolicyValue: enum {
     On
     Off
     Explicit
-    // The fixed-width arithmetic mode of `#Overflow(.Mode)`.
     Arithmetic(mode: ArithmeticMode)
 }
+
+// The fixed-width arithmetic mode of `#Overflow(.Mode)`.
 
 PolicyScope: enum {
     Organization
@@ -204,8 +207,8 @@ GCPromotionEdge: struct {
 
 Marker: struct {
     name: String
-    declaration_module: ModuleID? { None }
-    declaration_span: Span? { None }
+    declaration_module: ModuleID?{None}
+    declaration_span: Span?{None}
     negated: Bool
     name_span: Span
     args: [MarkerCallArg]

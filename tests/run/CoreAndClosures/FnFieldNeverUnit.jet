@@ -10,11 +10,9 @@ Stage: enum {
 
 Hook: struct {
     events: [String]
-    react: fn(String, Stage) Never! -[IO]>
+    react: fn(String, Stage) -[IO]> Never!
 
-    recording: fn() -> Hook Never! {
-        Hook{events: [String]{}, react: ignore}
-    }
+    recording: fn() -> Hook Never! { Hook{events: [String]{}, react: ignore} }
 
     observe: fn(&self, path: String, stage: Stage) Never! -[IO]> {
         self.events.push(path.copy())
@@ -26,7 +24,7 @@ ignore: fn(path: String, stage: Stage) Never! -[IO]> {}
 
 announce: fn(path: String, stage: Stage) Never! -[IO]> {
     if stage == {
-        .Node -> print("node {path}")
+        .Node -> { print("node {path}") }
         .Leaf -> print("leaf {path}")
     }
 }

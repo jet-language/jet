@@ -24,7 +24,6 @@
 //                       optimizer-only change or an unlowered construct in
 //                       each case and fails unless every one is found.
 //   --root DIR          the checkout to read (default .)
-
 use {
     files: core.files
     json: core.encoding.json
@@ -75,7 +74,9 @@ parse_args: fn(args: [String]) -> Options Err! {
                     arg == "--tier" -> options.tier = value.copy()
                     arg == "--commit" -> options.commit = value.copy()
                     arg == "--seed" -> options.seed = value.copy()
-                    arg == "--cases" -> options.cases = Int.parse(value) ?? return Err("--cases needs a number, not `{value}`")
+                    arg == "--cases" -> {
+                        options.cases = Int.parse(value) ?? return Err("--cases needs a number, not `{value}`")
+                    }
                     else -> options.source_out = value.copy()
                 }
             }
@@ -87,12 +88,20 @@ parse_args: fn(args: [String]) -> Options Err! {
     runs: options.command == "--regressions" || options.command == "--generate"
     if options.path == "" {
         if runs -> return Err("{options.command} needs a directory for the findings")
-        if options.command != "--write" && options.command != "--check" -> return Err("{options.command} needs a bundle path")
+        if options.command != "--write" && options.command != "--check" {
+            return Err("{options.command} needs a bundle path")
+        }
         options.path = files.join(options.root, MANIFEST_PATH)
     }
-    if (options.invert || options.commit != "") && !runs -> return Err("--invert and --commit go with --regressions or --generate")
-    if (options.seed != GENERATOR_SEED || options.cases != GENERATOR_CASES) && options.command != "--generate" -> return Err("--seed and --cases go with --generate")
-    if options.command == "--repro-replay" && (options.tier == "" || options.source_out == "") -> return Err("--repro-replay needs --tier and --source-out")
+    if (options.invert || options.commit != "") && !runs {
+        return Err("--invert and --commit go with --regressions or --generate")
+    }
+    if (options.seed != GENERATOR_SEED || options.cases != GENERATOR_CASES) && options.command != "--generate" {
+        return Err("--seed and --cases go with --generate")
+    }
+    if options.command == "--repro-replay" && (options.tier == "" || options.source_out == "") {
+        return Err("--repro-replay needs --tier and --source-out")
+    }
     Ok(options)
 }
 
@@ -108,7 +117,9 @@ generate: fn(root: String) -[FS]> (manifest: Manifest, text: String) Err! {
     inputs: load_inputs(root) ?? return Err(err)
     manifest: build_manifest(inputs) ?? return Err(err)
     problems: validate_manifest(manifest)
-    if problems.len() > 0 -> return Err("generated manifest breaks its contract:\n{problems.join("\n")}")
+    if problems.len() > 0 {
+        return Err("generated manifest breaks its contract:\n{problems.join("\n")}")
+    }
     text: render_manifest(manifest) ?? return Err(err)
     Ok((manifest: manifest, text: text))
 }
@@ -122,11 +133,15 @@ read_bundle: fn(path: String) -[FS]> Dyn Err! {
 // The commit a regression run records: --commit, else the checkout's HEAD.
 run_commit: fn(options: Options) -[Exec, Time.Wait]> String Err! {
     if options.commit != "" {
-        if !is_commit(options.commit) -> return Err("--commit needs a full 40-hex commit id, not `{options.commit}`")
+        if !is_commit(options.commit) {
+            return Err("--commit needs a full 40-hex commit id, not `{options.commit}`")
+        }
         return Ok(options.commit.copy())
     }
     head: process.cmd([String]{"git", "-C", options.root, "rev-parse", "HEAD"}).run() ?? return Err("git did not start: {err}")
-    if head.code != 0 -> return Err("{options.command} records the commit; outside a git checkout pass --commit SHA ({head.errors.trim()})")
+    if head.code != 0 {
+        return Err("{options.command} records the commit; outside a git checkout pass --commit SHA ({head.errors.trim()})")
+    }
     Ok(head.output.trim().copy())
 }
 
@@ -138,16 +153,18 @@ run_identity: fn(options: Options, jet: String, label: String) -[FS, Env, Exec, 
     commit: run_commit(options) ?? return Err(err)
     files.create_dir_all(options.path) ?? return Err("cannot create {options.path}: {err}")
     started: time.isoformat(time.now())
-    Ok(RunIdentity{
-        run_id: "{label}-{started}",
-        started: started.copy(),
-        finished: started.copy(),
-        commit: commit,
-        binary_sha256: binary_digest(jet) ?? return Err(err),
-        host: sys.platform(),
-        target: sys.platform(),
-        registry_snapshot_hash: snapshot.hash.copy(),
-    })
+    Ok(
+        RunIdentity{
+            run_id: "{label}-{started}",
+            started: started.copy(),
+            finished: started.copy(),
+            commit: commit,
+            binary_sha256: binary_digest(jet) ?? return Err(err),
+            host: sys.platform(),
+            target: sys.platform(),
+            registry_snapshot_hash: snapshot.hash.copy(),
+        },
+    )
 }
 
 write_bundle: fn(bundle: Dyn, path: String) -[FS]> Bool Err! {
@@ -240,7 +257,9 @@ hardening_main: fn(args: [String]) -[FS, IO, Env, Exec, Time, Time.Wait]> Bool E
     if options.command == "--write" {
         fresh: generate(options.root) ?? return Err(err)
         parent: options.path.rpartition("/").head
-        if parent != "" -> files.create_dir_all(parent) ?? return Err("cannot create {parent}: {err}")
+        if parent != "" {
+            files.create_dir_all(parent) ?? return Err("cannot create {parent}: {err}")
+        }
         files.write(options.path, fresh.text) ?? return Err("cannot write {options.path}: {err}")
         print("hardening manifest: wrote {options.path}: {summary(fresh.manifest)}")
         return Ok(true)

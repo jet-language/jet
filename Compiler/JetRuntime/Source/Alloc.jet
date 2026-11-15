@@ -87,6 +87,7 @@ alloc_root := I64{0}
 // checked heap's code words, before any allocation: a 0 limit means the
 // checked heap is installed.
 ALLOC_CLASS_LIMIT: I64{4096}
+
 alloc_class_limit := I64{4096}
 
 // The checked heap is linked only into a program built with
@@ -98,13 +99,18 @@ alloc_class_limit := I64{4096}
 // Image/RuntimePack.jet), so it holds no checked heap and a checked program
 // links the pack in full.
 alloc_check_take_code := I64{0}
+
 alloc_check_give_code := I64{0}
+
 alloc_check_sweep_code := I64{0}
+
 // 1 once jet_rt_alloc_check_init has installed the checked heap.
 alloc_check_linked := I64{0}
+
 // A C witness's take and give observers (jet_rt_alloc_check_observe), 0 for
 // none.
 alloc_check_take_observer := I64{0}
+
 alloc_check_give_observer := I64{0}
 
 // Layout::from_size_align(size.max(1), align): alignment must be a nonzero
@@ -146,7 +152,9 @@ alloc_class: fn(size: I64, align: I64, limit: I64) -> I64 Never! {
 // nibble's bits(l) <= 4, so the row is the high entry unless it is 0, and
 // then the low entry. It is alloc_class's choice, as a row.
 ALLOC_ROW_LOW: I64{0x4444444433332210}
+
 ALLOC_ROW_HIGH: I64{0x888888877776650}
+
 alloc_row: fn(needed: I64) -> I64 Never! {
     k: wrapping(needed - I64{1}) >> I64{5}
     high: (ALLOC_ROW_HIGH >> ((k >> I64{4}).bit_and(I64{15}) << I64{2})).bit_and(I64{15})
@@ -156,13 +164,13 @@ alloc_row: fn(needed: I64) -> I64 Never! {
 
 // Metadata bytes before a payload: [count][slab][block-start] for align >= 8,
 // [slab][block-start] below that.
-alloc_header: fn(align: I64) -> I64 Never! {
-    if (align >= I64{8}) -> I64{24} else -> I64{16}
-}
+alloc_header: fn(align: I64) -> I64 Never! { if (align >= I64{8}) -> I64{24} else -> I64{16} }
 
 // A fresh block's first owner: the count word of an align >= 8 payload.
 priv alloc_count_init: fn(pointer: I64, align: I64) {
-    if (align < I64{8} || pointer == I64{0}) -> return
+    if (align < I64{8} || pointer == I64{0}) {
+        return
+    }
     #Unsafe("pointer is a fresh payload whose align >= 8 block reserved the word 24 bytes before it") {
         os_store_i64(wrapping(pointer - I64{24}), I64{1})
     }
@@ -172,7 +180,9 @@ priv alloc_count_init: fn(pointer: I64, align: I64) {
 // RC_ZERO_MARK) is wiped before the allocator may hand its bytes out again.
 alloc_zero_marked: fn(pointer: I64, size: I64) {
     #Unsafe("pointer is an align >= 8 payload being freed with its allocated size; its block reserved the count word 24 bytes before it") {
-        if (os_load_i64(wrapping(pointer - I64{24})).bit_and(RC_ZERO_MARK) == I64{0}) -> return
+        if (os_load_i64(wrapping(pointer - I64{24})).bit_and(RC_ZERO_MARK) == I64{0}) {
+            return
+        }
     }
     rt_wipe_bytes(pointer, size)
 }
@@ -181,10 +191,14 @@ alloc_zero_marked: fn(pointer: I64, size: I64) {
 // words 8..64 of the arena row; their retained-empty cells follow 64 bytes on.
 alloc_head: fn(root: I64, slot: I64) -> I64 Never! {
     if (slot <= I64{256}) {
-        if (slot <= I64{64}) { return wrapping(root + (if (slot == I64{32}) -> I64{8} else -> I64{16})) }
+        if (slot <= I64{64}) {
+            return wrapping(root + (if (slot == I64{32}) -> I64{8} else -> I64{16}))
+        }
         return wrapping(root + (if (slot == I64{128}) -> I64{24} else -> I64{32}))
     }
-    if (slot <= I64{1024}) { return wrapping(root + (if (slot == I64{512}) -> I64{40} else -> I64{48})) }
+    if (slot <= I64{1024}) {
+        return wrapping(root + (if (slot == I64{512}) -> I64{40} else -> I64{48}))
+    }
     wrapping(root + (if (slot == I64{2048}) -> I64{56} else -> I64{64}))
 }
 
@@ -256,10 +270,15 @@ alloc_guard: fn(address: I64, bytes: I64) {
 // `#Context(allocator:)` carrier that last served a block from the region
 // (alloc_user_take), 0 before any did.
 ALLOC_PAGE_MAP: I64{232}
+
 ALLOC_PAGE_LOCK: I64{240}
+
 ALLOC_PAGE_UNIT: I64{65536}
+
 ALLOC_PAGE_ROOT_BYTES: I64{262144}
+
 ALLOC_PAGE_SPAN_BYTES: I64{524288}
+
 ALLOC_PAGE_LIMIT: I64{140737488355328}
 
 // `bytes` rounded up to whole page-map units.
@@ -269,12 +288,12 @@ alloc_page_bytes: fn(bytes: I64) -> I64 Never! {
 
 // The record of the registered region holding `address`, or 0: the heap.
 priv alloc_page_region: fn(address: I64) -> I64 {
-    if (address <= I64{0} || address >= ALLOC_PAGE_LIMIT) -> return I64{0}
+    if (address <= I64{0} || address >= ALLOC_PAGE_LIMIT) { return I64{0} }
     #Unsafe("the root and span tables are process-lifetime mappings, zero where nothing is registered, whose aligned words are read atomically on x86") {
         root: os_load_i64(wrapping(alloc_root + ALLOC_PAGE_MAP))
-        if (root == I64{0}) -> return I64{0}
+        if (root == I64{0}) { return I64{0} }
         span: os_load_i64(wrapping(root + wrapping((address >> I64{32}) * I64{8})))
-        if (span == I64{0}) -> return I64{0}
+        if (span == I64{0}) { return I64{0} }
         return os_load_i64(wrapping(span + wrapping((address >> I64{16}).bit_and(I64{65535}) * I64{8})))
     }
 }
@@ -305,7 +324,7 @@ priv alloc_page_spans: fn(base: I64, bytes: I64) -> Bool {
         root := os_load_i64(wrapping(alloc_root + ALLOC_PAGE_MAP))
         if (root == I64{0}) {
             root = alloc_map_try(ALLOC_PAGE_ROOT_BYTES)
-            if (root == I64{0}) -> return false
+            if (root == I64{0}) { return false }
             os_store_i64(wrapping(alloc_root + ALLOC_PAGE_MAP), root)
         }
         end: wrapping(base + bytes)
@@ -314,7 +333,7 @@ priv alloc_page_spans: fn(base: I64, bytes: I64) -> Bool {
             cell: wrapping(root + wrapping((at >> I64{32}) * I64{8}))
             if (os_load_i64(cell) == I64{0}) {
                 span: alloc_map_try(ALLOC_PAGE_SPAN_BYTES)
-                if (span == I64{0}) -> return false
+                if (span == I64{0}) { return false }
                 os_store_i64(cell, span)
             }
             at = wrapping((at >> I64{32}) + I64{1}) << I64{32}
@@ -376,17 +395,29 @@ priv alloc_page_write: fn(base: I64, bytes: I64, record: I64) {
 // (alloc_cache_lend, alloc_cache_reclaim), and thread exit puts its runs on
 // the shared stacks (alloc_window_rows_flush).
 ALLOC_WINDOW: I64{776}
+
 ALLOC_WINDOW_NEXT: I64{784}
+
 ALLOC_WINDOW_STACKS: I64{800}
+
 ALLOC_WINDOW_CLASSES: I64{13}
+
 ALLOC_WINDOW_UNITS: I64{262144}
+
 ALLOC_WINDOW_BYTES: I64{17179869184}
+
 ALLOC_WINDOW_LINK_UNITS: I64{128}
+
 ALLOC_WINDOW_RECORDS: I64{2097152}
+
 ALLOC_REGION_RECORD_BYTES: I64{24}
+
 ALLOC_WINDOW_INDEX: I64{1048575}
+
 ALLOC_WINDOW_TAG: I64{1048576}
+
 ALLOC_WINDOW_ROWS: I64{632}
+
 ALLOC_WINDOW_ROW_LIMIT: I64{8}
 
 // The window's base, mapped on the first call; 0 when the system refuses.
@@ -395,11 +426,11 @@ ALLOC_WINDOW_ROW_LIMIT: I64{8}
 alloc_window: fn() -> I64 {
     word: wrapping(alloc_root + ALLOC_WINDOW)
     kept: sync_load(word)
-    if (kept != I64{0}) -> return kept
+    if (kept != I64{0}) { return kept }
     bytes: wrapping(ALLOC_WINDOW_BYTES + ALLOC_PAGE_UNIT)
     #Unsafe("a fresh inaccessible NORESERVE mapping aliases nothing; its link and record units are remapped writable inside it and its span tables mapped before its base is published, and a caller that loses the publication unmaps only its own mapping") {
         mapping: os_map_untracked_i64(I64{0}, bytes, I64{0}, I64{16418}, I64{-1}, I64{0})
-        if (mapping < I64{0}) -> return I64{0}
+        if (mapping < I64{0}) { return I64{0} }
         base: alloc_align(mapping, ALLOC_PAGE_UNIT)
         links: os_map_untracked_i64(base, wrapping(ALLOC_WINDOW_LINK_UNITS * ALLOC_PAGE_UNIT), I64{3}, I64{16434}, I64{-1}, I64{0})
         lock: wrapping(alloc_root + ALLOC_PAGE_LOCK)
@@ -407,7 +438,7 @@ alloc_window: fn() -> I64 {
         spans: links == base && alloc_page_spans(base, ALLOC_WINDOW_BYTES)
         alloc_unlock(lock)
         won: if spans -> sync_cas(word, I64{0}, base) else -> I64{-1}
-        if (won == I64{0}) -> return base
+        if (won == I64{0}) { return base }
         _ := os_unmap_untracked_i64(mapping, bytes)
         return if (won == I64{-1}) -> I64{0} else -> won
     }
@@ -423,9 +454,7 @@ alloc_window_holds: fn(address: I64) -> Bool {
 // 2^c units >= bytes.
 alloc_window_class: fn(bytes: I64) -> I64 Never! {
     class := I64{0}
-    loop bytes > (ALLOC_PAGE_UNIT << class) {
-        class = wrapping(class + I64{1})
-    }
+    loop bytes > (ALLOC_PAGE_UNIT << class) -> class = wrapping(class + I64{1})
     class
 }
 
@@ -439,9 +468,9 @@ alloc_window_stack: fn(class: I64) -> I64 Never! {
 // system refuses a fresh run's pages.
 priv alloc_window_take: fn(bytes: I64) -> I64 {
     class: alloc_window_class(bytes)
-    if (class >= ALLOC_WINDOW_CLASSES) -> return I64{0}
+    if (class >= ALLOC_WINDOW_CLASSES) { return I64{0} }
     window: alloc_window()
-    if (window == I64{0}) -> return I64{0}
+    if (window == I64{0}) { return I64{0} }
     row: alloc_window_row(class)
     if (row != I64{0}) {
         #Unsafe("row is the running TCB's own run stack of this class, and the link word of a run on it is this thread's alone") {
@@ -466,12 +495,14 @@ priv alloc_window_take: fn(bytes: I64) -> I64 {
         }
         top = seen
     }
-    if (unit != I64{0}) -> return wrapping(window + wrapping(unit * ALLOC_PAGE_UNIT))
+    if (unit != I64{0}) { return wrapping(window + wrapping(unit * ALLOC_PAGE_UNIT)) }
     size: I64{1} << class
     next: wrapping(alloc_root + ALLOC_WINDOW_NEXT)
     at := sync_load(next)
     loop unit == (I64{0}) {
-        if (at > wrapping(wrapping(ALLOC_WINDOW_UNITS - ALLOC_WINDOW_LINK_UNITS) - size)) -> return I64{0}
+        if (at > wrapping(wrapping(ALLOC_WINDOW_UNITS - ALLOC_WINDOW_LINK_UNITS) - size)) {
+            return I64{0}
+        }
         claimed: sync_cas(next, at, wrapping(at + size))
         if {
             claimed == at -> unit = wrapping(ALLOC_WINDOW_LINK_UNITS + at)
@@ -481,7 +512,9 @@ priv alloc_window_take: fn(bytes: I64) -> I64 {
     address: wrapping(window + wrapping(unit * ALLOC_PAGE_UNIT))
     // A run the system will not map stays inaccessible and out of the stacks.
     #Unsafe("the fresh run is this caller's alone, inside the window and inaccessible; the fixed mapping replaces only its own units") {
-        if (os_map_untracked_i64(address, wrapping(size * ALLOC_PAGE_UNIT), I64{3}, I64{50}, I64{-1}, I64{0}) == address) -> return address
+        if (os_map_untracked_i64(address, wrapping(size * ALLOC_PAGE_UNIT), I64{3}, I64{50}, I64{-1}, I64{0}) == address) {
+            return address
+        }
     }
     I64{0}
 }
@@ -494,7 +527,9 @@ alloc_window_push: fn(window: I64, unit: I64, class: I64) {
     loop {
         sync_store(link, top.bit_and(ALLOC_WINDOW_INDEX))
         seen: sync_cas(stack, top, wrapping(wrapping(wrapping(top - top.bit_and(ALLOC_WINDOW_INDEX)) + ALLOC_WINDOW_TAG) + unit))
-        if (seen == top) -> return
+        if (seen == top) {
+            return
+        }
         top = seen
     }
 }
@@ -503,7 +538,7 @@ alloc_window_push: fn(window: I64, unit: I64, class: I64) {
 // without a TCB.
 alloc_window_row: fn(class: I64) -> I64 {
     base: thread_base()
-    if (base == I64{0}) -> return I64{0}
+    if (base == I64{0}) { return I64{0} }
     wrapping(base + wrapping(ALLOC_WINDOW_ROWS + wrapping(class * I64{8})))
 }
 
@@ -512,10 +547,10 @@ alloc_window_row: fn(class: I64) -> I64 {
 // ALLOC_WINDOW_ROW_LIMIT runs of that class.
 priv alloc_window_keep: fn(window: I64, unit: I64, class: I64) -> Bool {
     row: alloc_window_row(class)
-    if (row == I64{0}) -> return false
+    if (row == I64{0}) { return false }
     #Unsafe("row is the running TCB's own run stack of this class, and the ended run's link word is no other thread's") {
         kept: os_load_i64(row)
-        if (kept >= wrapping(ALLOC_WINDOW_ROW_LIMIT * ALLOC_WINDOW_TAG)) -> return false
+        if (kept >= wrapping(ALLOC_WINDOW_ROW_LIMIT * ALLOC_WINDOW_TAG)) { return false }
         os_store_i64(wrapping(window + wrapping(unit * I64{8})), kept.bit_and(ALLOC_WINDOW_INDEX))
         os_store_i64(row, wrapping(wrapping(wrapping(kept - kept.bit_and(ALLOC_WINDOW_INDEX)) + ALLOC_WINDOW_TAG) + unit))
     }
@@ -558,7 +593,9 @@ alloc_window_rows_flush: fn() {
     class := I64{0}
     loop class < ALLOC_WINDOW_CLASSES {
         row: alloc_window_row(class)
-        if (row == I64{0}) -> return
+        if (row == I64{0}) {
+            return
+        }
         kept: sync_load(row)
         if (kept != I64{0}) {
             alloc_window_shelve(kept, class)
@@ -593,7 +630,9 @@ alloc_reservation_unmap: fn(base: I64, bytes: I64) {
     }
     window: sync_load(wrapping(alloc_root + ALLOC_WINDOW))
     #Unsafe("the region has ended, so nothing reads or writes its pages; MADV_DONTNEED drops only its own units inside the window, which read as zero again") {
-        if (os_syscall_i64(I64{28}, base, bytes, I64{4}, I64{0}, I64{0}, I64{0}) != I64{0}) -> return
+        if (os_syscall_i64(I64{28}, base, bytes, I64{4}, I64{0}, I64{0}, I64{0}) != I64{0}) {
+            return
+        }
     }
     unit: wrapping(base - window) >> I64{16}
     class: alloc_window_class(bytes)
@@ -641,7 +680,9 @@ alloc_reservation_map: fn(bytes: I64, record_bytes: I64) -> I64 {
 // live region shares; any other reservation takes a heap block. 0 when the
 // heap refuses.
 alloc_reservation_record: fn(base: I64, record_bytes: I64) -> I64 {
-    if (record_bytes != ALLOC_REGION_RECORD_BYTES || !alloc_window_holds(base)) -> return alloc_try_validated(record_bytes, I64{8})
+    if (record_bytes != ALLOC_REGION_RECORD_BYTES || !alloc_window_holds(base)) {
+        return alloc_try_validated(record_bytes, I64{8})
+    }
     window: sync_load(wrapping(alloc_root + ALLOC_WINDOW))
     wrapping(wrapping(window + ALLOC_WINDOW_RECORDS) + wrapping((wrapping(base - window) >> I64{16}) * ALLOC_REGION_RECORD_BYTES))
 }
@@ -651,7 +692,9 @@ alloc_reservation_record: fn(base: I64, record_bytes: I64) -> I64 {
 // its run overwrites every word.
 alloc_reservation_record_free: fn(record: I64, record_bytes: I64) {
     window: sync_load(wrapping(alloc_root + ALLOC_WINDOW))
-    if (window != I64{0} && record >= wrapping(window + ALLOC_WINDOW_RECORDS) && record < wrapping(window + wrapping(ALLOC_WINDOW_LINK_UNITS * ALLOC_PAGE_UNIT))) -> return
+    if (window != I64{0} && record >= wrapping(window + ALLOC_WINDOW_RECORDS) && record < wrapping(window + wrapping(ALLOC_WINDOW_LINK_UNITS * ALLOC_PAGE_UNIT))) {
+        return
+    }
     alloc_free_validated(record, record_bytes, I64{8})
 }
 
@@ -659,7 +702,9 @@ alloc_reservation_record_free: fn(record: I64, record_bytes: I64) {
 // region from the page map, drops its record's carrier and unmaps the pages
 // that jet_rt_mem_region_reserve returned.
 #Export(c) jet_rt_mem_region_release: fn(address: I64, bytes: I64) {
-    if (address == I64{0} || bytes <= I64{0}) { return }
+    if (address == I64{0} || bytes <= I64{0}) {
+        return
+    }
     record: alloc_page_region(address)
     units: if (record != I64{0}) -> sync_load(wrapping(record + I64{8})) else -> alloc_page_bytes(bytes)
     if (record != I64{0}) {
@@ -709,9 +754,7 @@ alloc_reservation_record_free: fn(record: I64, record_bytes: I64) {
 
 // A checked build's entry calls this first (JetIR ir_checked_alloc_link):
 // the call is the link's reason to keep the checked heap. 1 once installed.
-#Export(c) jet_rt_alloc_check_link: fn() -> I64 {
-    alloc_check_linked
-}
+#Export(c) jet_rt_alloc_check_link: fn() -> I64 { alloc_check_linked }
 
 // Native-approved RuntimeLibrary FunctionAddress intrinsics (arity 2, 3, 1).
 rt_alloc_check_take_address: fn() -> I64 {
@@ -787,11 +830,15 @@ priv alloc_live_blocks: fn(width: I64) -> I64 {
 // Sync state is involved, so the lock works before any thread is attached.
 priv alloc_lock: fn(root: I64) {
     #Unsafe("root is an aligned lock word in the process-lifetime state mapping; CAS/xchg acquire all metadata it protects and the futex wait only reads that word") {
-        if (os_cas_i64(root, I64{0}, I64{1}) == I64{0}) -> return
+        if (os_cas_i64(root, I64{0}, I64{1}) == I64{0}) {
+            return
+        }
         spins := I64{0}
         loop spins < (I64{128}) {
             os_spin_pause()
-            if (os_load_i64(root) == I64{0} && os_cas_i64(root, I64{0}, I64{1}) == I64{0}) -> return
+            if (os_load_i64(root) == I64{0} && os_cas_i64(root, I64{0}, I64{1}) == I64{0}) {
+                return
+            }
             spins = wrapping(spins + I64{1})
         }
         loop os_swap_i64(root, I64{2}) != (I64{0}) {
@@ -884,7 +931,9 @@ priv alloc_link: fn(slab: I64, head: I64) {
 // stack 760 (a stacked slab's first word links the next), next region size
 // 768 (zero before the first region).
 ALLOC_SLAB_BYTES: I64{65536}
+
 ALLOC_REGION_FIRST: I64{1048576}
+
 ALLOC_REGION: I64{33554432}
 
 // A slab's 64 KiB: a stacked slab, else the next of the current region,
@@ -897,9 +946,7 @@ alloc_slab_map: fn() -> I64 {
     #Unsafe("the slab-region lock owns the cursor, end and free-slab stack words and every stacked slab's link word") {
         stack: wrapping(alloc_root + I64{760})
         slab = os_load_i64(stack)
-        if (slab != I64{0}) {
-            os_store_i64(stack, os_load_i64(slab))
-        } else {
+        if (slab != I64{0}) { os_store_i64(stack, os_load_i64(slab)) } else {
             cursor: wrapping(alloc_root + I64{744})
             end: wrapping(alloc_root + I64{752})
             if (os_load_i64(cursor) == os_load_i64(end)) {
@@ -1001,13 +1048,11 @@ priv alloc_slab_take: fn(root: I64, head: I64, slot: I64, row: I64, limit: I64) 
         taken := I64{0}
         loop taken < limit {
             block := free
-            if (block != I64{0}) {
-                free = os_load_i64(block)
-            } else {
-                if (carve == I64{0}) -> break
+            if (block != I64{0}) { free = os_load_i64(block) } else {
+                if (carve == I64{0}) { break }
                 block = carve
                 carve = wrapping(carve + slot)
-                if (wrapping(carve + slot) > end) -> carve = I64{0}
+                if (wrapping(carve + slot) > end) { carve = I64{0} }
             }
             os_store_i64(block, list)
             os_store_i64(wrapping(block + I64{8}), slab)
@@ -1046,11 +1091,15 @@ priv alloc_slab_return: fn(slab: I64, block: I64) {
         head: os_load_i64(wrapping(slab + I64{32}))
         total: wrapping(head + I64{128})
         os_store_i64(total, wrapping(os_load_i64(total) - I64{1}))
-        if (free == I64{0} && os_load_i64(wrapping(slab + I64{48})) == I64{0}) { alloc_link(slab, head) }
+        if (free == I64{0} && os_load_i64(wrapping(slab + I64{48})) == I64{0}) {
+            alloc_link(slab, head)
+        }
         if (live == I64{0}) {
             retained: wrapping(head + I64{64})
             count: os_load_i64(retained)
-            if (count < ALLOC_RETAINED_EMPTY_SLABS) { os_store_i64(retained, wrapping(count + I64{1})) } else {
+            if (count < ALLOC_RETAINED_EMPTY_SLABS) {
+                os_store_i64(retained, wrapping(count + I64{1}))
+            } else {
                 alloc_unlink(slab)
                 alloc_slab_retire(slab)
             }
@@ -1088,10 +1137,10 @@ priv alloc_small: fn(root: I64, size: I64, align: I64, slot: I64) -> I64 {
 // blocked (alloc_cache_sync).
 alloc_cache_row: fn(slot: I64) -> I64 {
     base: thread_base()
-    if (base == I64{0}) -> return I64{0}
+    if (base == I64{0}) { return I64{0} }
     row: wrapping(base + wrapping(I64{304} + wrapping(alloc_head(I64{0}, slot) * I64{2})))
     #Unsafe("row is this thread's private cache row") {
-        if (os_load_i64(wrapping(row + I64{8})) == ALLOC_CACHE_BLOCKED) -> return I64{0}
+        if (os_load_i64(wrapping(row + I64{8})) == ALLOC_CACHE_BLOCKED) { return I64{0} }
     }
     row
 }
@@ -1109,7 +1158,7 @@ alloc_cache_linked := I64{0}
 // (alloc_cache_sync).
 alloc_cache_refill: fn(row: I64, slot: I64) -> Bool {
     #Unsafe("row is this thread's private cache row; the flag is idempotent: every writer stores the same 1") {
-        if (os_load_i64(wrapping(row + I64{8})) == ALLOC_CACHE_BLOCKED) -> return false
+        if (os_load_i64(wrapping(row + I64{8})) == ALLOC_CACHE_BLOCKED) { return false }
         alloc_cache_linked = I64{1}
     }
     root: alloc_arena()
@@ -1206,10 +1255,14 @@ priv alloc_cache_set: fn(tcb: I64, head: I64, count: I64) {
 // and unblocking leaves the rows empty. Called where the record or its
 // allocator changes (Context.jet) and where a fiber switches in.
 priv alloc_cache_sync: fn(tcb: I64) {
-    if (tcb == I64{0} || tcb == thread_detached_base()) -> return
+    if (tcb == I64{0} || tcb == thread_detached_base()) {
+        return
+    }
     record: sync_load(wrapping(tcb + CONTEXT_TCB_SLOT))
     wanted: record != I64{0} && sync_load(wrapping(record + CONTEXT_ALLOCATOR)) != I64{0}
-    if (wanted == alloc_cache_blocked(tcb)) -> return
+    if (wanted == alloc_cache_blocked(tcb)) {
+        return
+    }
     if wanted {
         row := wrapping(tcb + I64{320})
         loop row < wrapping(tcb + I64{448}) {
@@ -1233,9 +1286,7 @@ priv alloc_cache_sync: fn(tcb: I64) {
 alloc_cache_lend: fn(tcb: I64, fiber_tcb: I64) {
     alloc_large_rows_move(tcb, fiber_tcb)
     alloc_window_rows_move(tcb, fiber_tcb)
-    if alloc_cache_blocked(tcb) {
-        alloc_cache_set(fiber_tcb, I64{0}, I64{0})
-    } else {
+    if alloc_cache_blocked(tcb) -> alloc_cache_set(fiber_tcb, I64{0}, I64{0}) else {
         alloc_cache_move(tcb, fiber_tcb)
     }
     alloc_cache_sync(fiber_tcb)
@@ -1249,7 +1300,9 @@ alloc_cache_lend: fn(tcb: I64, fiber_tcb: I64) {
 priv alloc_cache_reclaim: fn(fiber_tcb: I64, tcb: I64) {
     alloc_large_rows_move(fiber_tcb, tcb)
     alloc_window_rows_move(fiber_tcb, tcb)
-    if alloc_cache_blocked(fiber_tcb) -> return
+    if alloc_cache_blocked(fiber_tcb) {
+        return
+    }
     if !alloc_cache_blocked(tcb) {
         alloc_cache_move(fiber_tcb, tcb)
         return
@@ -1315,13 +1368,15 @@ ALLOC_LARGE_CACHE_BYTES: I64{67108864}
 // its carrier's rows while it runs (alloc_cache_lend, alloc_cache_reclaim),
 // and thread exit shelves them (alloc_large_rows_flush).
 ALLOC_LARGE_ROWS: I64{504}
+
 ALLOC_LARGE_ROW_COUNT: I64{8}
+
 ALLOC_LARGE_ROW_LIMIT: I64{1048576}
 
 // The calling thread's first kept-mapping row, or zero without a TCB.
 alloc_large_rows: fn() -> I64 {
     base: thread_base()
-    if (base == I64{0}) -> return I64{0}
+    if (base == I64{0}) { return I64{0} }
     wrapping(base + ALLOC_LARGE_ROWS)
 }
 
@@ -1330,7 +1385,7 @@ alloc_large_rows: fn() -> I64 {
 alloc_large_count: fn(bytes: I64) -> Bool {
     total: wrapping(alloc_root + I64{224})
     held: sync_add(total, bytes)
-    if (wrapping(held + bytes) <= ALLOC_LARGE_CACHE_BYTES) -> return true
+    if (wrapping(held + bytes) <= ALLOC_LARGE_CACHE_BYTES) { return true }
     _ := sync_add(total, wrapping(I64{0} - bytes))
     false
 }
@@ -1338,9 +1393,9 @@ alloc_large_count: fn(bytes: I64) -> Bool {
 // A mapping of exactly `bytes` the calling thread kept, out of its row and
 // the cached count, or zero.
 alloc_large_take: fn(bytes: I64) -> I64 {
-    if (bytes > ALLOC_LARGE_ROW_LIMIT) -> return I64{0}
+    if (bytes > ALLOC_LARGE_ROW_LIMIT) { return I64{0} }
     rows: alloc_large_rows()
-    if (rows == I64{0}) -> return I64{0}
+    if (rows == I64{0}) { return I64{0} }
     row := rows
     loop row < wrapping(rows + wrapping(ALLOC_LARGE_ROW_COUNT * I64{16})) {
         #Unsafe("row is one of the running TCB's kept-mapping rows, which only the thread running on it touches") {
@@ -1360,9 +1415,9 @@ alloc_large_take: fn(bytes: I64) -> I64 {
 // Keeps counted mapping `mapping` of `bytes` in a free row of the calling
 // thread; false when it has none or the mapping is past the row limit.
 alloc_large_keep: fn(mapping: I64, bytes: I64) -> Bool {
-    if (bytes > ALLOC_LARGE_ROW_LIMIT) -> return false
+    if (bytes > ALLOC_LARGE_ROW_LIMIT) { return false }
     rows: alloc_large_rows()
-    if (rows == I64{0}) -> return false
+    if (rows == I64{0}) { return false }
     row := rows
     loop row < wrapping(rows + wrapping(ALLOC_LARGE_ROW_COUNT * I64{16})) {
         #Unsafe("row is one of the running TCB's kept-mapping rows, which only the thread running on it touches") {
@@ -1418,7 +1473,9 @@ alloc_large_row_put: fn(row: I64, mapping: I64, bytes: I64) {
 // exit, before its TCB goes away. A thread without a TCB keeps none.
 alloc_large_rows_flush: fn() {
     rows: alloc_large_rows()
-    if (rows == I64{0}) -> return
+    if (rows == I64{0}) {
+        return
+    }
     row := rows
     loop row < wrapping(rows + wrapping(ALLOC_LARGE_ROW_COUNT * I64{16})) {
         bytes: sync_load(wrapping(row + I64{8}))
@@ -1436,17 +1493,19 @@ alloc_large_rows_flush: fn() {
 priv alloc_large_cached: fn(class: I64) -> I64 {
     bytes: wrapping(alloc_large_class_pages(class) * I64{4096})
     kept: alloc_large_take(bytes)
-    if (kept != I64{0}) -> return kept
+    if (kept != I64{0}) { return kept }
     lock: wrapping(alloc_root + I64{216})
     head: wrapping(alloc_root + wrapping(I64{256} + wrapping(class * I64{8})))
     alloc_lock(lock)
     mapping := I64{0}
     #Unsafe("the large-cache lock owns every class list and its link words") {
         mapping = os_load_i64(head)
-        if (mapping != I64{0}) -> os_store_i64(head, os_load_i64(mapping))
+        if (mapping != I64{0}) { os_store_i64(head, os_load_i64(mapping)) }
     }
     alloc_unlock(lock)
-    if (mapping != I64{0}) -> _ := sync_add(wrapping(alloc_root + I64{224}), wrapping(I64{0} - bytes))
+    if (mapping != I64{0}) {
+        _ := sync_add(wrapping(alloc_root + I64{224}), wrapping(I64{0} - bytes))
+    }
     mapping
 }
 
@@ -1456,7 +1515,9 @@ priv alloc_large_cached: fn(class: I64) -> I64 {
 alloc_large_free: fn(mapping: I64, bytes: I64) {
     class: alloc_large_class(bytes)
     if (class >= I64{0} && wrapping(alloc_large_class_pages(class) * I64{4096}) == bytes && alloc_large_count(bytes)) {
-        if alloc_large_keep(mapping, bytes) -> return
+        if alloc_large_keep(mapping, bytes) {
+            return
+        }
         alloc_large_shelve(mapping, class)
         return
     }
@@ -1495,15 +1556,21 @@ priv alloc_large: fn(size: I64, align: I64) -> I64 {
 // payload (their accounting sees allocations and frees only), or a refused
 // syscall.
 priv alloc_grow_large: fn(pointer: I64, size: I64, grown: I64) -> I64 {
-    if (alloc_class_limit == I64{0} || grown <= size || alloc_class(size, I64{1}, alloc_class_limit) != I64{0}) -> return I64{0}
+    if (alloc_class_limit == I64{0} || grown <= size || alloc_class(size, I64{1}, alloc_class_limit) != I64{0}) {
+        return I64{0}
+    }
     // A served block (the page map) grows from its allocator, never by mremap.
-    if (alloc_page_region(pointer) != I64{0}) -> return I64{0}
+    if (alloc_page_region(pointer) != I64{0}) { return I64{0} }
     #Unsafe("pointer is a live direct allocation of exactly `size` bytes at align 1 whose two header words name its mapping and the mapping's bytes; the mode and tracked-count words are aligned words read atomically on x86, as alloc_reserve and alloc_untrack read them; a refused mremap leaves the mapping as it was") {
-        if (os_load_i64(wrapping(alloc_root + I64{144})) != I64{0} || os_load_i64(wrapping(alloc_root + I64{200})) != I64{0}) { return I64{0} }
+        if (os_load_i64(wrapping(alloc_root + I64{144})) != I64{0} || os_load_i64(wrapping(alloc_root + I64{200})) != I64{0}) {
+            return I64{0}
+        }
         mapping: os_load_i64(wrapping(pointer - I64{16}))
         bytes: os_load_i64(wrapping(pointer - I64{8}))
         offset: wrapping(pointer - mapping)
-        if (grown > wrapping(wrapping(I64{9223372036854775807} - I64{4095}) - offset)) { return I64{0} }
+        if (grown > wrapping(wrapping(I64{9223372036854775807} - I64{4095}) - offset)) {
+            return I64{0}
+        }
         needed: alloc_align(wrapping(grown + offset), I64{4096})
         if (needed <= bytes) { return pointer }
         class: alloc_large_class(needed)
@@ -1525,7 +1592,7 @@ priv alloc_try_validated: fn(size: I64, align: I64) -> I64 {
     if (slot == I64{0}) {
         // A 0 limit is set only once the checked heap is installed
         // (alloc_check_start, from jet_rt_alloc_check_init).
-        if (alloc_class_limit == I64{0}) -> return coll_call2(alloc_check_take_code, size, align)
+        if (alloc_class_limit == I64{0}) { return coll_call2(alloc_check_take_code, size, align) }
         pointer: alloc_large(size, align)
         alloc_count_init(pointer, align)
         return pointer
@@ -1786,11 +1853,17 @@ alloc_try: fn(size: I64, align: I64) -> I64 {
 // of it growing then, and a value made once the reservation is full come
 // from the program heap, which outlives them all.
 ALLOC_USER_TAKE: I64{0}
+
 ALLOC_USER_GIVE: I64{1}
+
 ALLOC_USER_HEADER: I64{24}
+
 ALLOC_USER_CARRIER_BYTES: I64{56}
+
 ALLOC_ARENA_BYTES: I64{268435456}
+
 ALLOC_ARENA_RECORD_BYTES: I64{40}
+
 ALLOC_ARENA_OWNER: I64{-1}
 
 // A new carrier for `handler` (whose owner moves in) over `outer`, which it
@@ -1806,7 +1879,7 @@ alloc_user_carrier_new: fn(handler: I64, outer: I64, mark: I64) -> I64 {
     sync_store(wrapping(carrier + I64{32}), I64{0})
     sync_store(wrapping(carrier + I64{40}), I64{0})
     sync_store(wrapping(carrier + I64{48}), I64{0})
-    if (outer != I64{0}) -> jet_rt_native_closure_retain(outer)
+    if (outer != I64{0}) { jet_rt_native_closure_retain(outer) }
     carrier
 }
 
@@ -1816,15 +1889,17 @@ alloc_user_carrier_new: fn(handler: I64, outer: I64, mark: I64) -> I64 {
 alloc_user_drop: fn(carrier: I64) {
     at := carrier
     loop at != (I64{0}) {
-        if !jet_rt_native_closure_unref(at) -> return
+        if !jet_rt_native_closure_unref(at) {
+            return
+        }
         handler: sync_load(wrapping(at + I64{8}))
         outer: sync_load(wrapping(at + I64{16}))
         held: sync_load(wrapping(at + I64{48}))
         if (handler != I64{0} && jet_rt_native_closure_unref(handler)) {
             helper: sync_load(wrapping(handler + I64{16}))
-            if (helper != I64{0}) -> coll_call1_unit(helper, handler)
+            if (helper != I64{0}) { coll_call1_unit(helper, handler) }
         }
-        if (held != I64{0}) -> jet_rt_handle_drop_jet_arena(held)
+        if (held != I64{0}) { jet_rt_handle_drop_jet_arena(held) }
         alloc_free_validated(at, ALLOC_USER_CARRIER_BYTES, I64{8})
         at = outer
     }
@@ -1836,9 +1911,9 @@ alloc_user_drop: fn(carrier: I64) {
 // and the blocks then take the program heap.
 alloc_arena_record: fn(slot: I64) -> I64 {
     kept: sync_load(slot)
-    if (kept != I64{0}) -> return kept
+    if (kept != I64{0}) { return kept }
     record: alloc_reservation_map(ALLOC_ARENA_BYTES, ALLOC_ARENA_RECORD_BYTES)
-    if (record == I64{0}) -> return I64{0}
+    if (record == I64{0}) { return I64{0} }
     sync_store(wrapping(record + I64{16}), ALLOC_ARENA_OWNER)
     sync_store(wrapping(record + I64{24}), sync_load(record))
     sync_store(slot, record)
@@ -1850,7 +1925,9 @@ alloc_arena_record: fn(slot: I64) -> I64 {
 // detach). No block over it is open.
 alloc_arena_release: fn(slot: I64) {
     record: sync_load(slot)
-    if (record == I64{0}) -> return
+    if (record == I64{0}) {
+        return
+    }
     sync_store(slot, I64{0})
     base: sync_load(record)
     units: sync_load(wrapping(record + I64{8}))
@@ -1878,11 +1955,13 @@ alloc_arena_carrier_new: fn(record: I64, held: I64, outer: I64, mark: I64) -> I6
 // to the enclosing open block over the same arena (0: none).
 alloc_arena_rewind: fn(carrier: I64) {
     record: sync_load(wrapping(carrier + I64{32}))
-    if (record == I64{0}) -> return
+    if (record == I64{0}) {
+        return
+    }
     sync_store(wrapping(record + I64{24}), sync_load(wrapping(carrier + I64{40})))
     at := sync_load(wrapping(carrier + I64{16}))
     loop at != (I64{0}) {
-        if (sync_load(wrapping(at + I64{32})) == record) -> break
+        if (sync_load(wrapping(at + I64{32})) == record) { break }
         at = sync_load(wrapping(at + I64{16}))
     }
     sync_store(wrapping(record + I64{32}), at)
@@ -1895,10 +1974,14 @@ alloc_arena_rewind: fn(carrier: I64) {
 alloc_arena_take: fn(carrier: I64, size: I64, align: I64) -> I64 {
     record: sync_load(wrapping(carrier + I64{32}))
     requested: if (size == I64{0}) -> I64{1} else -> size
-    if (record == I64{0} || sync_load(wrapping(record + I64{32})) != carrier || requested > wrapping(I64{9223372036854775807} - ALLOC_USER_HEADER - I64{7})) -> return alloc_try_reserved(size, align)
+    if (record == I64{0} || sync_load(wrapping(record + I64{32})) != carrier || requested > wrapping(I64{9223372036854775807} - ALLOC_USER_HEADER - I64{7})) {
+        return alloc_try_reserved(size, align)
+    }
     cursor: sync_load(wrapping(record + I64{24}))
     bytes: wrapping(requested + ALLOC_USER_HEADER + I64{7}).bit_and(I64{-8})
-    if (bytes > wrapping(wrapping(sync_load(record) + sync_load(wrapping(record + I64{8}))) - cursor)) -> return alloc_try_reserved(size, align)
+    if (bytes > wrapping(wrapping(sync_load(record) + sync_load(wrapping(record + I64{8}))) - cursor)) {
+        return alloc_try_reserved(size, align)
+    }
     sync_store(wrapping(record + I64{24}), wrapping(cursor + bytes))
     sync_store(cursor, I64{1})
     sync_store(wrapping(cursor + I64{8}), I64{0})
@@ -1910,7 +1993,7 @@ alloc_arena_take: fn(carrier: I64, size: I64, align: I64) -> I64 {
 // record.
 alloc_user_slot: fn() -> I64 {
     base: thread_base()
-    if (base == I64{0} || base == thread_detached_base()) -> return I64{0}
+    if (base == I64{0} || base == thread_detached_base()) { return I64{0} }
     record: sync_load(wrapping(base + CONTEXT_TCB_SLOT))
     if (record == I64{0}) -> I64{0} else -> wrapping(record + CONTEXT_ALLOCATOR)
 }
@@ -1919,7 +2002,7 @@ alloc_user_slot: fn() -> I64 {
 // the align is above 8, checked mode is on, or the thread has no TCB or
 // record. Only the full allocation paths ask.
 alloc_user_current: fn(align: I64) -> I64 {
-    if (align > I64{8} || alloc_class_limit == I64{0}) -> return I64{0}
+    if (align > I64{8} || alloc_class_limit == I64{0}) { return I64{0} }
     slot: alloc_user_slot()
     if (slot == I64{0}) -> I64{0} else -> sync_load(slot)
 }
@@ -1930,12 +2013,14 @@ alloc_user_current: fn(align: I64) -> I64 {
 // entry lies at or below `address`.
 alloc_user_owner: fn(address: I64) -> I64 {
     record: alloc_page_region(address)
-    if (record == I64{0}) -> return I64{0}
+    if (record == I64{0}) { return I64{0} }
     owner: sync_load(wrapping(record + I64{16}))
-    if (owner != ALLOC_ARENA_OWNER) -> return owner
+    if (owner != ALLOC_ARENA_OWNER) { return owner }
     at := sync_load(wrapping(record + I64{32}))
     loop at != (I64{0}) {
-        if (sync_load(wrapping(at + I64{32})) == record && address >= sync_load(wrapping(at + I64{40}))) -> return at
+        if (sync_load(wrapping(at + I64{32})) == record && address >= sync_load(wrapping(at + I64{40}))) {
+            return at
+        }
         at = sync_load(wrapping(at + I64{16}))
     }
     I64{0}
@@ -1948,18 +2033,18 @@ alloc_user_owner: fn(address: I64) -> I64 {
 // which an older frame's data lives as long as.
 alloc_owner: fn(address: I64) -> I64 {
     served: alloc_user_owner(address)
-    if (served != I64{0}) -> return served
+    if (served != I64{0}) { return served }
     slot: alloc_user_slot()
-    if (slot == I64{0}) -> return I64{0}
+    if (slot == I64{0}) { return I64{0} }
     at := sync_load(slot)
-    if (at == I64{0}) -> return I64{0}
+    if (at == I64{0}) { return I64{0} }
     top := I64{0}
     #Unsafe("reads the stack pointer register only; nothing is dereferenced") {
         top = os_stack_address_i64()
     }
-    if (address < top) -> return I64{0}
+    if (address < top) { return I64{0} }
     loop at != (I64{0}) {
-        if (address < sync_load(wrapping(at + I64{24}))) -> return at
+        if (address < sync_load(wrapping(at + I64{24}))) { return at }
         at = sync_load(wrapping(at + I64{16}))
     }
     I64{0}
@@ -1969,11 +2054,11 @@ alloc_owner: fn(address: I64) -> I64 {
 // allocator (0: the heap): its block ends before target's, being one opened
 // inside it. The heap outlives every block.
 alloc_younger: fn(owner: I64, target: I64) -> Bool {
-    if (owner == I64{0} || owner == target) -> return false
-    if (target == I64{0}) -> return true
+    if (owner == I64{0} || owner == target) { return false }
+    if (target == I64{0}) { return true }
     at := sync_load(wrapping(owner + I64{16}))
     loop at != (I64{0}) {
-        if (at == target) -> return true
+        if (at == target) { return true }
         at = sync_load(wrapping(at + I64{16}))
     }
     false
@@ -1988,11 +2073,11 @@ alloc_younger: fn(owner: I64, target: I64) -> Bool {
 // restores the enclosing carrier; the one replaced keeps the record's
 // reference, so the blocks it served still go back to it.
 #Export(c) jet_rt_move_enter: fn(target: I64) -> I64 {
-    if (alloc_class_limit == I64{0}) -> return I64{-1}
+    if (alloc_class_limit == I64{0}) { return I64{-1} }
     slot: alloc_user_slot()
-    if (slot == I64{0}) -> return I64{-1}
+    if (slot == I64{0}) { return I64{-1} }
     current: sync_load(slot)
-    if (current == I64{0} || current == target) -> return I64{-1}
+    if (current == I64{0} || current == target) { return I64{-1} }
     sync_store(slot, target)
     alloc_cache_sync(thread_base())
     current
@@ -2001,17 +2086,21 @@ alloc_younger: fn(owner: I64, target: I64) -> Bool {
 // jet_rt_move_enter into the allocator owning the destination `address`
 // (alloc_owner).
 #Export(c) jet_rt_move_enter_at: fn(address: I64) -> I64 {
-    if (alloc_class_limit == I64{0}) -> return I64{-1}
+    if (alloc_class_limit == I64{0}) { return I64{-1} }
     slot: alloc_user_slot()
-    if (slot == I64{0} || sync_load(slot) == I64{0}) -> return I64{-1}
+    if (slot == I64{0} || sync_load(slot) == I64{0}) { return I64{-1} }
     jet_rt_move_enter(alloc_owner(address))
 }
 
 // Ends the move jet_rt_move_enter answered `saved` for (-1: none began).
 #Export(c) jet_rt_move_leave: fn(saved: I64) {
-    if (saved < I64{0}) -> return
+    if (saved < I64{0}) {
+        return
+    }
     slot: alloc_user_slot()
-    if (slot == I64{0}) -> return
+    if (slot == I64{0}) {
+        return
+    }
     sync_store(slot, saved)
     alloc_cache_sync(thread_base())
 }
@@ -2021,7 +2110,7 @@ alloc_younger: fn(owner: I64, target: I64) -> Bool {
 // served it.
 #Export(c) jet_rt_move_needed: fn(address: I64) -> Bool {
     slot: alloc_user_slot()
-    if (slot == I64{0}) -> return false
+    if (slot == I64{0}) { return false }
     alloc_younger(alloc_user_owner(address), sync_load(slot))
 }
 
@@ -2032,7 +2121,7 @@ alloc_younger: fn(owner: I64, target: I64) -> Bool {
 alloc_user_call: fn(carrier: I64, op: I64, x: I64, y: I64) -> I64 {
     slot: alloc_user_slot()
     saved: if (slot == I64{0}) -> I64{0} else -> sync_load(slot)
-    if (slot != I64{0}) -> sync_store(slot, sync_load(wrapping(carrier + I64{16})))
+    if (slot != I64{0}) { sync_store(slot, sync_load(wrapping(carrier + I64{16}))) }
     handler: sync_load(wrapping(carrier + I64{8}))
     first: jet_int_owned_from_i64(op)
     second: jet_int_owned_from_i64(x)
@@ -2041,8 +2130,8 @@ alloc_user_call: fn(carrier: I64, op: I64, x: I64, y: I64) -> I64 {
     jet_rt_int_drop(first)
     jet_rt_int_drop(second)
     jet_rt_int_drop(third)
-    if (slot != I64{0}) -> sync_store(slot, saved)
-    if (jet_rt_session_propagate() != I64{0}) -> return I64{0}
+    if (slot != I64{0}) { sync_store(slot, saved) }
+    if (jet_rt_session_propagate() != I64{0}) { return I64{0} }
     word: jet_int_owned_to_i64(answer)
     jet_rt_int_drop(answer)
     word
@@ -2060,14 +2149,16 @@ alloc_user_call: fn(carrier: I64, op: I64, x: I64, y: I64) -> I64 {
 // as the free that finds no region there expects. So does every value made
 // while a stop is already pending, when the handler would not run whole.
 alloc_user_take: fn(carrier: I64, size: I64, align: I64) -> I64 {
-    if (sync_load(wrapping(carrier + I64{8})) == I64{0}) -> return alloc_arena_take(carrier, size, align)
+    if (sync_load(wrapping(carrier + I64{8})) == I64{0}) {
+        return alloc_arena_take(carrier, size, align)
+    }
     requested: if (size == I64{0}) -> I64{1} else -> size
-    if (requested > wrapping(I64{9223372036854775807} - ALLOC_USER_HEADER)) -> return I64{0}
-    if (jet_rt_session_propagate() != I64{0}) -> return alloc_try_reserved(size, align)
+    if (requested > wrapping(I64{9223372036854775807} - ALLOC_USER_HEADER)) { return I64{0} }
+    if (jet_rt_session_propagate() != I64{0}) { return alloc_try_reserved(size, align) }
     bytes: wrapping(requested + ALLOC_USER_HEADER)
     block: alloc_user_call(carrier, ALLOC_USER_TAKE, bytes, I64{8})
-    if (jet_rt_session_propagate() != I64{0}) -> return alloc_try_reserved(size, align)
-    if (block == I64{0}) -> return I64{0}
+    if (jet_rt_session_propagate() != I64{0}) { return alloc_try_reserved(size, align) }
+    if (block == I64{0}) { return I64{0} }
     record: if (block.bit_and(I64{7}) != I64{0}) -> I64{0} else -> alloc_page_region(block)
     if (record == I64{0} || alloc_page_region(wrapping(block + wrapping(bytes - I64{1}))) != record) {
         _: alloc_user_call(carrier, ALLOC_USER_GIVE, bytes, block)
@@ -2084,7 +2175,9 @@ alloc_user_take: fn(carrier: I64, size: I64, align: I64) -> I64 {
 // go back to, holding a reference to it in place of the one it named.
 alloc_user_bind: fn(record: I64, carrier: I64) {
     bound: sync_load(wrapping(record + I64{16}))
-    if (bound == carrier) -> return
+    if (bound == carrier) {
+        return
+    }
     jet_rt_native_closure_retain(carrier)
     sync_store(wrapping(record + I64{16}), carrier)
     alloc_user_drop(bound)
@@ -2104,7 +2197,9 @@ alloc_user_need: fn(carrier: I64, size: I64, align: I64) -> I64 {
 // arena's takes its blocks back only as its blocks end.
 alloc_user_give: fn(pointer: I64, size: I64, record: I64) {
     carrier: sync_load(wrapping(record + I64{16}))
-    if (carrier == I64{0} || carrier == ALLOC_ARENA_OWNER) -> return
+    if (carrier == I64{0} || carrier == ALLOC_ARENA_OWNER) {
+        return
+    }
     block: sync_load(wrapping(pointer - I64{8}))
     requested: if (size == I64{0}) -> I64{1} else -> size
     _: alloc_user_call(carrier, ALLOC_USER_GIVE, wrapping(requested + ALLOC_USER_HEADER), block)
@@ -2115,7 +2210,7 @@ alloc_user_give: fn(pointer: I64, size: I64, record: I64) {
 // refused: a growth (alloc_grow_carrier names its allocator).
 alloc_grow_try: fn(old: I64, place: I64, size: I64, align: I64) -> I64 {
     carrier: alloc_grow_carrier(old, place, align)
-    if (carrier == I64{0}) -> return alloc_try(size, align)
+    if (carrier == I64{0}) { return alloc_try(size, align) }
     if !alloc_layout_valid(size, align) -> return I64{0}
     if jet_fault_should_fail_allocation() -> return I64{0}
     alloc_user_take(carrier, size, align)
@@ -2129,9 +2224,9 @@ alloc_grow_try: fn(old: I64, place: I64, size: I64, align: I64) -> I64 {
 // header the growing code's own block made (JetIR BuildRoutes.jet
 // ir_list_grow_place), which the current carrier serves.
 alloc_grow_carrier: fn(old: I64, place: I64, align: I64) -> I64 {
-    if (align > I64{8} || alloc_class_limit == I64{0}) -> return I64{0}
+    if (align > I64{8} || alloc_class_limit == I64{0}) { return I64{0} }
     served: if (old == I64{0}) -> I64{0} else -> alloc_user_owner(old)
-    if (served != I64{0}) -> return served
+    if (served != I64{0}) { return served }
     if (place == I64{0}) -> alloc_user_current(align) else -> alloc_owner(place)
 }
 
@@ -2273,7 +2368,9 @@ alloc_need: fn(size: I64, align: I64) -> I64 {
     }
     if (size >= I64{0} && size < alloc_class_limit && align > I64{0} && align <= I64{8} && align.bit_and(wrapping(align - I64{1})) == I64{0} && alloc_unmarked(pointer, align)) {
         // An ending process leaves its heap to the kernel (#5478, Main.jet).
-        if (main_process_ending != I64{0}) -> return
+        if (main_process_ending != I64{0}) {
+            return
+        }
         index: alloc_row(wrapping((if (size == I64{0}) -> I64{1} else -> size) + (if (align == I64{8}) -> I64{24} else -> wrapping(I64{15} + align))))
         if (index < I64{8}) {
             #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count and the page-map root are aligned words read atomically, as alloc_untrack and alloc_page_region read them; row is this thread's private cache row; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it") {
@@ -2300,7 +2397,7 @@ alloc_need: fn(size: I64, align: I64) -> I64 {
 // False for an align-8 payload whose count word carries the zero-at-free
 // mark, which only alloc_give's wipe may free (alloc_zero_marked).
 priv alloc_unmarked: fn(pointer: I64, align: I64) -> Bool {
-    if (align < I64{8}) -> return true
+    if (align < I64{8}) { return true }
     #Unsafe("pointer is an align-8 payload being freed; its block reserved the count word 24 bytes before it") {
         return os_load_i64(wrapping(pointer - I64{24})).bit_and(RC_ZERO_MARK) == I64{0}
     }
@@ -2309,13 +2406,15 @@ priv alloc_unmarked: fn(pointer: I64, align: I64) -> Bool {
 // jet_rt_free beyond its fast path, a call of its own so the fast path
 // stays a leaf.
 alloc_give: fn(pointer: I64, size: I64, align: I64) {
-    if (align >= I64{8}) -> alloc_zero_marked(pointer, size)
+    if (align >= I64{8}) { alloc_zero_marked(pointer, size) }
     if !alloc_layout_valid(size, align) {
         rt_trap_invalid_box_layout()
         return
     }
     // An ending process leaves its heap to the kernel (#5478, Main.jet).
-    if (main_process_ending != I64{0}) -> return
+    if (main_process_ending != I64{0}) {
+        return
+    }
     region: alloc_page_region(pointer)
     if (region != I64{0}) {
         alloc_user_give(pointer, size, region)
@@ -2366,7 +2465,9 @@ alloc_give: fn(pointer: I64, size: I64, align: I64) {
         if (size >= I64{0}) {
             if (size < alloc_class_limit) {
                 // An ending process leaves its heap to the kernel (#5478, Main.jet).
-                if (main_process_ending != I64{0}) -> return
+                if (main_process_ending != I64{0}) {
+                    return
+                }
                 index: alloc_row(wrapping(size + I64{24}))
                 if (index < I64{8}) {
                     offset: wrapping(I64{320} + (index << I64{4}))
@@ -2438,7 +2539,7 @@ alloc_value_need: fn(size: I64, align: I64) -> I64 {
         return I64{0}
     }
     carrier: alloc_user_current(align)
-    if (carrier != I64{0}) -> return alloc_user_need(carrier, size, align)
+    if (carrier != I64{0}) { return alloc_user_need(carrier, size, align) }
     // Allocation failure is terminal SIGABRT.
     pointer: alloc_try_reserved(size, align)
     if (pointer == I64{0}) { alloc_out_of_memory(if (size == I64{0}) -> I64{1} else -> size) }
@@ -2475,7 +2576,7 @@ alloc_value_need: fn(size: I64, align: I64) -> I64 {
 
 #Export(c) jet_rt_alloc_value_try: fn(size: I64, align: I64) -> I64 {
     carrier: alloc_user_current(align)
-    if (carrier == I64{0}) -> return alloc_try(size, align)
+    if (carrier == I64{0}) { return alloc_try(size, align) }
     if !alloc_layout_valid(size, align) -> return I64{0}
     if jet_fault_should_fail_allocation() -> return I64{0}
     alloc_user_take(carrier, size, align)
@@ -2516,7 +2617,9 @@ priv alloc_bytes: fn(size: I64) -> I64 {
 priv free_bytes: fn(pointer: I64, size: I64) {
     if (pointer != I64{0} && size >= I64{0} && size < alloc_class_limit) {
         // An ending process leaves its heap to the kernel (#5478, Main.jet).
-        if (main_process_ending != I64{0}) -> return
+        if (main_process_ending != I64{0}) {
+            return
+        }
         index: alloc_row(wrapping(size + I64{16}))
         if (index < I64{8}) {
             offset: wrapping(I64{320} + (index << I64{4}))
@@ -2632,10 +2735,15 @@ priv alloc_arena_give: fn(pointer: I64) {
 // State page words: quarantine lock 16, ring 24, pushes 32, parked count 40,
 // parked bytes 48, frame-pointer stub 56 (alloc_check_start).
 ALLOC_CHECK_LIVE: I64{2397417249457849674}
+
 ALLOC_CHECK_FREED: I64{2397398596314219850}
+
 ALLOC_CHECK_TAIL: I64{2399373246418142538}
+
 ALLOC_CHECK_POISON: I64{-2314885530818453537}
+
 ALLOC_CHECK_SLOTS: I64{4096}
+
 ALLOC_CHECK_BUDGET: I64{67108864}
 
 // The frame walk needs rbp, which no admitted asm leaf reads (and a new leaf
@@ -2691,7 +2799,9 @@ priv alloc_check_frames: fn(out: I64, count: I64) {
 #Export(c) priv jet_rt_alloc_check_take: fn(size: I64, align: I64) -> I64 {
     prefix: alloc_check_prefix(align)
     inner_align: if (align < I64{8}) -> I64{8} else -> align
-    if (size > wrapping(wrapping(I64{9223372036854775807} - prefix) - wrapping(inner_align + I64{8}))) { return I64{0} }
+    if (size > wrapping(wrapping(I64{9223372036854775807} - prefix) - wrapping(inner_align + I64{8}))) {
+        return I64{0}
+    }
     block: alloc_check_block_take(wrapping(wrapping(prefix + size) + I64{8}), inner_align)
     if (block == I64{0}) { return I64{0} }
     pointer: wrapping(block + prefix)
@@ -2710,12 +2820,14 @@ priv alloc_check_frames: fn(out: I64, count: I64) {
     }
     alloc_check_frames(wrapping(pointer - I64{120}), I64{10})
     observer: alloc_check_take_observer
-    if (observer != I64{0}) -> _ := coll_call3(observer, pointer, size, align)
+    if (observer != I64{0}) { _ := coll_call3(observer, pointer, size, align) }
     pointer
 }
 
 #Export(c) priv jet_rt_alloc_check_give: fn(pointer: I64, size: I64, align: I64) -> I64 {
-    if (pointer < I64{4096} || pointer.bit_and(I64{7}) != I64{0}) { alloc_check_fail(I64{2}, pointer, size, align, I64{0}) }
+    if (pointer < I64{4096} || pointer.bit_and(I64{7}) != I64{0}) {
+        alloc_check_fail(I64{2}, pointer, size, align, I64{0})
+    }
     lock: wrapping(alloc_root + I64{16})
     canary := I64{0}
     alloc_lock(lock)
@@ -2726,8 +2838,12 @@ priv alloc_check_frames: fn(out: I64, count: I64) {
         }
     }
     alloc_unlock(lock)
-    if (canary == pointer.bit_xor(ALLOC_CHECK_FREED)) { alloc_check_fail(I64{1}, pointer, size, align, I64{0}) }
-    if (canary != pointer.bit_xor(ALLOC_CHECK_LIVE)) { alloc_check_fail(I64{2}, pointer, size, align, I64{0}) }
+    if (canary == pointer.bit_xor(ALLOC_CHECK_FREED)) {
+        alloc_check_fail(I64{1}, pointer, size, align, I64{0})
+    }
+    if (canary != pointer.bit_xor(ALLOC_CHECK_LIVE)) {
+        alloc_check_fail(I64{2}, pointer, size, align, I64{0})
+    }
     #Unsafe("the live canary proves pointer is a checked payload whose header and tail this free now owns") {
         if (os_load_i64(wrapping(pointer - I64{32})) != size || os_load_i64(wrapping(pointer - I64{40})) != align) {
             alloc_check_fail(I64{3}, pointer, size, align, I64{0})
@@ -2737,7 +2853,7 @@ priv alloc_check_frames: fn(out: I64, count: I64) {
         }
     }
     observer: alloc_check_give_observer
-    if (observer != I64{0}) -> _ := coll_call3(observer, pointer, size, align)
+    if (observer != I64{0}) { _ := coll_call3(observer, pointer, size, align) }
     alloc_check_frames(wrapping(pointer - I64{200}), I64{10})
     alloc_check_fill(pointer, size)
     alloc_lock(lock)
@@ -2775,7 +2891,7 @@ priv alloc_check_frames: fn(out: I64, count: I64) {
 // thread with no allocator lock held; it may allocate and free (it sees
 // those too), so it must not recurse unboundedly.
 #Export(c) jet_rt_alloc_check_observe: fn(on_alloc: I64, on_free: I64) -> I64 {
-    if (alloc_class_limit != I64{0}) -> return I64{0}
+    if (alloc_class_limit != I64{0}) { return I64{0} }
     #Unsafe("aligned whole-word stores; each checked take or give loads its observer word once") {
         alloc_check_take_observer = on_alloc
         alloc_check_give_observer = on_free
@@ -2801,7 +2917,9 @@ priv alloc_check_fill: fn(pointer: I64, size: I64) {
 // after free. Returns the first changed byte's offset (-8: the canary), or -1.
 priv alloc_check_damage: fn(pointer: I64) -> I64 {
     #Unsafe("pointer is a parked checked payload owned by the quarantine; its header, payload and tail stay mapped until retired") {
-        if (os_load_i64(wrapping(pointer - I64{8})) != pointer.bit_xor(ALLOC_CHECK_FREED)) { return I64{-8} }
+        if (os_load_i64(wrapping(pointer - I64{8})) != pointer.bit_xor(ALLOC_CHECK_FREED)) {
+            return I64{-8}
+        }
         size: os_load_i64(wrapping(pointer - I64{32}))
         at := I64{0}
         loop wrapping(at + I64{8}) <= size && os_load_i64(wrapping(pointer + at)) == ALLOC_CHECK_POISON {
@@ -2811,7 +2929,9 @@ priv alloc_check_damage: fn(pointer: I64) -> I64 {
             if (os_load_u8(wrapping(pointer + at)) != I64{223}) { return at }
             at = wrapping(at + I64{1})
         }
-        if (os_load_i64(wrapping(pointer + size)) != pointer.bit_xor(ALLOC_CHECK_TAIL)) { return size }
+        if (os_load_i64(wrapping(pointer + size)) != pointer.bit_xor(ALLOC_CHECK_TAIL)) {
+            return size
+        }
     }
     I64{-1}
 }
@@ -2820,7 +2940,9 @@ priv alloc_check_damage: fn(pointer: I64) -> I64 {
 // released first so the report may flush stdout (which may allocate and free).
 priv alloc_check_inspect: fn(lock: I64, pointer: I64) {
     damage: alloc_check_damage(pointer)
-    if (damage == I64{-1}) -> return
+    if (damage == I64{-1}) {
+        return
+    }
     alloc_unlock(lock)
     if (damage == I64{-8}) { alloc_check_fail(I64{6}, pointer, I64{0}, I64{0}, damage) }
     #Unsafe("the freed canary proved the checked header") {
@@ -2838,7 +2960,9 @@ priv alloc_check_retire: fn(pointer: I64) {
         align = os_load_i64(wrapping(pointer - I64{40}))
     }
     bytes: wrapping(wrapping(alloc_check_prefix(align) + size) + I64{8})
-    if (alloc_class(bytes, if (align < I64{8}) -> I64{8} else -> align, ALLOC_CLASS_LIMIT) == I64{0}) { alloc_large_give(block) } else { alloc_arena_give(block) }
+    if (alloc_class(bytes, if (align < I64{8}) -> I64{8} else -> align, ALLOC_CLASS_LIMIT) == I64{0}) {
+        alloc_large_give(block)
+    } else { alloc_arena_give(block) }
 }
 
 // A checked payload's own heap block: an ordinary class block straight from
@@ -2852,7 +2976,9 @@ alloc_check_block_take: fn(bytes: I64, align: I64) -> I64 {
 // parked, so a write after one of the last frees is not missed.
 alloc_check_sweep: fn() {
     code: alloc_check_sweep_code
-    if (alloc_class_limit != I64{0} || code == I64{0}) -> return
+    if (alloc_class_limit != I64{0} || code == I64{0}) {
+        return
+    }
     _ := coll_call1(code, I64{0})
 }
 
@@ -2879,15 +3005,15 @@ alloc_check_write: fn(data: I64, length: I64) {
         loop at < length {
             written: os_syscall_i64(I64{1}, I64{2}, wrapping(data + at), wrapping(length - at), I64{0}, I64{0}, I64{0})
             if (written == I64{-4}) { next }
-            if (written <= I64{0}) { return }
+            if (written <= I64{0}) {
+                return
+            }
             at = wrapping(at + written)
         }
     }
 }
 
-alloc_check_say: fn(text: I64) {
-    alloc_check_write(rt_text_data(text), rt_text_len(text))
-}
+alloc_check_say: fn(text: I64) { alloc_check_write(rt_text_data(text), rt_text_len(text)) }
 
 alloc_check_hex: fn(value: I64) {
     alloc_write_word(I64{30768}, I64{2})
@@ -3011,7 +3137,9 @@ priv alloc_check_chain: fn(image: I64, bias: I64, words: I64, count: I64) {
         #Unsafe("words lends count readable chain words") {
             address = os_load_i64(wrapping(words + wrapping(index * I64{8})))
         }
-        if (address == I64{0}) { return }
+        if (address == I64{0}) {
+            return
+        }
         alloc_write_word(I64{538976288}, I64{4})
         alloc_check_hex(address)
         alloc_write_word(I64{32}, I64{1})

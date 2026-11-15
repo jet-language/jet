@@ -19,10 +19,10 @@ exit: 0
 stdout: = "tick 1\ntick 2\nok 3\nrejected -4\ntick 5\ndone\n"
 step: jet check wider_row.jet
 exit: 1
-stderr: ~ "Error [jet.CallbackEffectBoundExceeded]: This callback uses the effect `IO`, which the parameter doesn't allow\n  --> wider_row.jet:14:17" # the row travels with the value
+stderr: ~ "Error [jet.CallbackEffectBoundExceeded]: This callback uses the effect `IO`, which the parameter doesn't allow\n  --> wider_row.jet:11:25" # the row travels with the value
 step: jet check failure.jet
 exit: 1
-stderr: ~ "Error [jet.ValueTypeMismatch]: `accept_total` wants fn(Int) -[IO]> Never! for argument 1, but this is fn(Int) -[IO]> Rejected!\n  --> failure.jet:19:18" # the failure type travels with the value
+stderr: ~ "Error [jet.ValueTypeMismatch]: `accept_total` wants fn(Int) -[IO]> Never! for argument 1, but this is fn(Int) -[IO]> Rejected!\n  --> failure.jet:16:26" # the failure type travels with the value
 step: jet check borrow.jet
 exit: 1
-stderr: ~ "Error [jet.MarkedFunctionValue]: `bump` can't be used as a function value because its parameter `c` is `&`\n  --> borrow.jet:15:10" # the access mode is kept
+stderr: ~ "Error [jet.MarkedFunctionValue]: `bump` can't be used as a function value because its parameter `c` is `&`\n  --> borrow.jet:13:10" # the access mode is kept

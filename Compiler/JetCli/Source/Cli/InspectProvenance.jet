@@ -70,10 +70,11 @@ JetCLILockPartial: struct {
 
 JetCLILockLoad: enum {
     Loaded(packages: [JetCLILockPackage])
-    // No lock, an unreadable one, or one `parse` rejects.
     Missing
     Unported(shape: String)
 }
+
+// No lock, an unreadable one, or one `parse` rejects.
 
 JetCLILockStep: enum {
     Ok
@@ -103,7 +104,9 @@ jet_cli_lock_trim_quotes: fn(value: String) -> String Never! {
 
 jet_cli_lock_unescape: fn(raw: String) -> String Never! {
     text := raw.trim()
-    if text.len() >= 2 && text.starts_with("\"") && text.ends_with("\"") -> text = text.slice(1..<text.len() - 1)
+    if text.len() >= 2 && text.starts_with("\"") && text.ends_with("\"") {
+        text = text.slice(1..<text.len() - 1)
+    }
     out := [U8]{}
     escaped := false
     loop byte in text.bytes() {
@@ -116,11 +119,7 @@ jet_cli_lock_unescape: fn(raw: String) -> String Never! {
                 else -> out.push(byte)
             }
             escaped = false
-        } else if code == 92 {
-            escaped = true
-        } else {
-            out.push(byte)
-        }
+        } else if code == 92 { escaped = true } else { out.push(byte) }
     }
     if escaped -> out.push(U8{92})
     String.from_bytes(out) ?? ""
@@ -149,9 +148,7 @@ jet_cli_lock_string_array: fn(raw: String) -> [String]? Never! {
             }
             escaped = false
             item_started = true
-        } else if quoted && code == 92 {
-            escaped = true
-        } else if code == 34 {
+        } else if quoted && code == 92 { escaped = true } else if code == 34 {
             quoted = !quoted
             item_started = true
             item_quoted = true
@@ -184,11 +181,7 @@ jet_cli_lock_kv_field: fn(inline: String, key: String) -> String? Never! {
     bytes: inline.bytes()
     loop index in 0..<bytes.len() {
         code: Int{bytes[index]}
-        if escaped {
-            escaped = false
-        } else if quoted && code == 92 {
-            escaped = true
-        } else if code == 34 {
+        if escaped -> escaped = false else if quoted && code == 92 -> escaped = true else if code == 34 {
             quoted = !quoted
         } else if code == 44 && !quoted {
             parts.push(foundation_byte_text(bytes, start, index))
@@ -224,8 +217,12 @@ jet_cli_lock_inline: fn(raw: String) -> String Never! {
 // parse error Rust reports for a Nix package without one.
 jet_cli_lock_source: fn(raw: String) -> JetCLILockSource Never! {
     inline: jet_cli_lock_inline(raw)
-    if jet_cli_lock_kv_field(inline, "root") != None -> return JetCLILockSource.Parsed{root: true, source_hash: None}
-    if jet_cli_lock_kv_field(inline, "path") != None -> return JetCLILockSource.Parsed{root: false, source_hash: None}
+    if jet_cli_lock_kv_field(inline, "root") != None {
+        return JetCLILockSource.Parsed{root: true, source_hash: None}
+    }
+    if jet_cli_lock_kv_field(inline, "path") != None {
+        return JetCLILockSource.Parsed{root: false, source_hash: None}
+    }
     if jet_cli_lock_kv_field(inline, "nix") != None -> return JetCLILockSource.Missing
     registry_kinds: [String]{"cran", "luarocks", "registry"}
     loop registry_kind in registry_kinds {
@@ -233,8 +230,12 @@ jet_cli_lock_source: fn(raw: String) -> JetCLILockSource Never! {
             return JetCLILockSource.Parsed{root: false, source_hash: Val(jet_cli_lock_kv_field(inline, "source-hash") ?? "")}
         }
     }
-    if jet_cli_lock_kv_field(inline, "foreign") != None -> return JetCLILockSource.Unported{shape: "lock with a foreign source"}
-    if jet_cli_lock_kv_field(inline, "git") != None -> return JetCLILockSource.Parsed{root: false, source_hash: None}
+    if jet_cli_lock_kv_field(inline, "foreign") != None {
+        return JetCLILockSource.Unported{shape: "lock with a foreign source"}
+    }
+    if jet_cli_lock_kv_field(inline, "git") != None {
+        return JetCLILockSource.Parsed{root: false, source_hash: None}
+    }
     JetCLILockSource.Missing
 }
 
@@ -252,27 +253,31 @@ jet_cli_lock_finish: fn(partial: JetCLILockPartial, packages: &[JetCLILockPackag
         .Unported(shape) -> return JetCLILockStep.Unported{shape: shape}
     }
     tree_hash := String?{None}
-    if partial.locked_raw == .Val(locked) -> tree_hash = Val(jet_cli_lock_kv_field(jet_cli_lock_inline(locked), "tree-hash") ?? "")
+    if partial.locked_raw == .Val(locked) {
+        tree_hash = Val(jet_cli_lock_kv_field(jet_cli_lock_inline(locked), "tree-hash") ?? "")
+    }
     envelope_provenance := String?{None}
     if partial.envelope -> envelope_provenance = Val(partial.envelope_provenance)
-    packages.push(JetCLILockPackage{
-        name: name,
-        version: version,
-        root: root,
-        source_hash: source_hash,
-        content_hash: partial.content_hash,
-        tree_hash: tree_hash,
-        envelope_provenance: envelope_provenance,
-        effects: jet_cli_lock_canonical(partial.effects),
-        effect_grants: jet_cli_lock_canonical(partial.effect_grants),
-        required_effects: jet_cli_lock_canonical(partial.required_effects),
-        granted_effects: jet_cli_lock_canonical(partial.granted_effects),
-        denied_effects: jet_cli_lock_canonical(partial.denied_effects),
-        effect_authority: partial.effect_authority,
-        transparency: partial.transparency,
-        publisher: partial.publisher,
-        build: partial.build,
-    })
+    packages.push(
+        JetCLILockPackage{
+            name: name,
+            version: version,
+            root: root,
+            source_hash: source_hash,
+            content_hash: partial.content_hash,
+            tree_hash: tree_hash,
+            envelope_provenance: envelope_provenance,
+            effects: jet_cli_lock_canonical(partial.effects),
+            effect_grants: jet_cli_lock_canonical(partial.effect_grants),
+            required_effects: jet_cli_lock_canonical(partial.required_effects),
+            granted_effects: jet_cli_lock_canonical(partial.granted_effects),
+            denied_effects: jet_cli_lock_canonical(partial.denied_effects),
+            effect_authority: partial.effect_authority,
+            transparency: partial.transparency,
+            publisher: partial.publisher,
+            build: partial.build,
+        },
+    )
     JetCLILockStep.Ok
 }
 
@@ -329,7 +334,9 @@ jet_cli_lock_load: fn(root: String) -[FS]> JetCLILockLoad Never! {
             section = ""
             in_root = false
             in_build_stamp = false
-            if JET_CLI_LOCK_UNPORTED_SECTIONS.contains(line) -> return JetCLILockLoad.Unported{shape: "lock with a `{line}` record"}
+            if JET_CLI_LOCK_UNPORTED_SECTIONS.contains(line) {
+                return JetCLILockLoad.Unported{shape: "lock with a `{line}` record"}
+            }
             if line == {
                 "[[comptime_inputs]]" -> section = "comptime_inputs"
                 "[[package]]" -> {
@@ -362,7 +369,9 @@ jet_cli_lock_load: fn(root: String) -[FS]> JetCLILockLoad Never! {
         if in_build_stamp {
             if key == {
                 "git" | "toolchain" | "at" -> {}
-                "dirty" -> if value != "true" && value != "false" { return JetCLILockLoad.Missing }
+                "dirty" -> {
+                    if value != "true" && value != "false" -> return JetCLILockLoad.Missing
+                }
                 else -> return JetCLILockLoad.Missing
             }
             next
@@ -373,26 +382,46 @@ jet_cli_lock_load: fn(root: String) -[FS]> JetCLILockLoad Never! {
             }
         }
         if in_root {
-            if key == "dependencies" && jet_cli_lock_string_array(value) == None -> return JetCLILockLoad.Missing
-            if key == "authority" -> return JetCLILockLoad.Unported{shape: "lock with a root authority row"}
+            if key == "dependencies" && jet_cli_lock_string_array(value) == None {
+                return JetCLILockLoad.Missing
+            }
+            if key == "authority" {
+                return JetCLILockLoad.Unported{shape: "lock with a root authority row"}
+            }
             next
         }
         if section != "package" -> next
-        if key.starts_with("nix-") -> return JetCLILockLoad.Unported{shape: "lock with a Nix closure record"}
+        if key.starts_with("nix-") {
+            return JetCLILockLoad.Unported{shape: "lock with a Nix closure record"}
+        }
         if key == {
             "name" -> partial.name = Val(jet_cli_lock_unescape(value))
             "version" -> partial.version = Val(jet_cli_lock_unescape(value))
             "content-hash" -> partial.content_hash = Val(jet_cli_lock_unescape(value))
             "source" -> partial.source_raw = Val(value)
             "locked" -> partial.locked_raw = Val(value)
-            "dependencies" -> if jet_cli_lock_string_array(value) == None { return JetCLILockLoad.Missing }
-            "effects" -> partial.effects = jet_cli_lock_string_array(value) ?? return JetCLILockLoad.Missing
-            "effect-grants" -> partial.effect_grants = jet_cli_lock_string_array(value) ?? return JetCLILockLoad.Missing
-            "required-effects" -> partial.required_effects = jet_cli_lock_string_array(value) ?? return JetCLILockLoad.Missing
-            "granted-effects" -> partial.granted_effects = jet_cli_lock_string_array(value) ?? return JetCLILockLoad.Missing
-            "denied-effects" -> partial.denied_effects = jet_cli_lock_string_array(value) ?? return JetCLILockLoad.Missing
+            "dependencies" -> {
+                if jet_cli_lock_string_array(value) == None -> return JetCLILockLoad.Missing
+            }
+            "effects" -> {
+                partial.effects = jet_cli_lock_string_array(value) ?? return JetCLILockLoad.Missing
+            }
+            "effect-grants" -> {
+                partial.effect_grants = jet_cli_lock_string_array(value) ?? return JetCLILockLoad.Missing
+            }
+            "required-effects" -> {
+                partial.required_effects = jet_cli_lock_string_array(value) ?? return JetCLILockLoad.Missing
+            }
+            "granted-effects" -> {
+                partial.granted_effects = jet_cli_lock_string_array(value) ?? return JetCLILockLoad.Missing
+            }
+            "denied-effects" -> {
+                partial.denied_effects = jet_cli_lock_string_array(value) ?? return JetCLILockLoad.Missing
+            }
             "effect-authority" -> partial.effect_authority = Val(jet_cli_lock_unescape(value))
-            "output-hash" | "platform" | "signature" | "catalog-tier" | "catalog-trust" -> partial.envelope = true
+            "output-hash" | "platform" | "signature" | "catalog-tier" | "catalog-trust" -> {
+                partial.envelope = true
+            }
             "provenance" -> {
                 partial.envelope = true
                 partial.envelope_provenance = jet_cli_lock_unescape(value)
@@ -416,7 +445,9 @@ jet_cli_lock_load: fn(root: String) -[FS]> JetCLILockLoad Never! {
     kept := [JetCLILockPackage]{}
     loop (index, package) in packages {
         replaced: loop later in index + 1..<packages.len() {
-            if packages[later].name == package.name -> break true
+            if packages[later].name == package.name {
+                break true
+            }
         } ?? false
         if !replaced -> kept.push(package)
     }
@@ -514,22 +545,26 @@ jet_cli_provenance_field_value: fn(field: JetCLIProvenanceField, evidence: Bool)
 }
 
 jet_cli_provenance_json: fn(requirement: String, reports: [JetCLIProvenanceReport]) -> String Never! {
-    packages: loop report in reports -> jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("name", jet_cli_status_text(report.name)),
-        jet_cli_status_field("version", jet_cli_status_text(report.version)),
-        jet_cli_status_field("integrity", jet_cli_provenance_field_value(report.integrity, report.integrity.status == "enforced")),
-        jet_cli_status_field("transparency", jet_cli_provenance_field_value(report.transparency, false)),
-        jet_cli_status_field("publisher", jet_cli_provenance_field_value(report.publisher, false)),
-        jet_cli_status_field("build", jet_cli_provenance_field_value(report.build, false)),
-        jet_cli_status_field("required_effects", jet_cli_status_texts(report.required_effects)),
-        jet_cli_status_field("granted_effects", jet_cli_status_texts(report.granted_effects)),
-        jet_cli_status_field("denied_effects", jet_cli_status_texts(report.denied_effects)),
-        jet_cli_status_field("authority", jet_cli_status_text(report.authority)),
-    })
-    provenance: jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("require", jet_cli_status_text(requirement)),
-        jet_cli_status_field("packages", jet_cli_status_array(packages)),
-    })
+    packages: loop report in reports -> jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("name", jet_cli_status_text(report.name)),
+            jet_cli_status_field("version", jet_cli_status_text(report.version)),
+            jet_cli_status_field("integrity", jet_cli_provenance_field_value(report.integrity, report.integrity.status == "enforced")),
+            jet_cli_status_field("transparency", jet_cli_provenance_field_value(report.transparency, false)),
+            jet_cli_status_field("publisher", jet_cli_provenance_field_value(report.publisher, false)),
+            jet_cli_status_field("build", jet_cli_provenance_field_value(report.build, false)),
+            jet_cli_status_field("required_effects", jet_cli_status_texts(report.required_effects)),
+            jet_cli_status_field("granted_effects", jet_cli_status_texts(report.granted_effects)),
+            jet_cli_status_field("denied_effects", jet_cli_status_texts(report.denied_effects)),
+            jet_cli_status_field("authority", jet_cli_status_text(report.authority)),
+        },
+    )
+    provenance: jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("require", jet_cli_status_text(requirement)),
+            jet_cli_status_field("packages", jet_cli_status_array(packages)),
+        },
+    )
     "{jet_cli_status_render("inspect.provenance", true, [JetCLIStatusField]{jet_cli_status_field("provenance", provenance)})}\n"
 }
 
@@ -566,11 +601,15 @@ jet_cli_inspect_provenance: fn(args: [String], color: Bool, json: Bool, threads:
 // the entry, so the requirement is the checked entry root's
 // `authority.trust.require`; a project that does not check is refused.
 jet_cli_inspect_provenance_host: fn(job: JetCLIInspectJob) -> JetDriverVerbOutput {
-    if !cli_files.is_file(job.file) -> return jet_cli_not_ported_output("inspect provenance <unreadable project entry>", job.color)
+    if !cli_files.is_file(job.file) {
+        return jet_cli_not_ported_output("inspect provenance <unreadable project entry>", job.color)
+    }
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled: jet_cli_compile_file(job.file, job.color, job.threads, JetDriverCompileMode.Doc)
     if compiled == {
-        .Refused(_) -> output = jet_cli_not_ported_output("inspect provenance <project the Jet compiler refuses>", job.color)
+        .Refused(_) -> {
+            output = jet_cli_not_ported_output("inspect provenance <project the Jet compiler refuses>", job.color)
+        }
         .Compiled(result, snapshot) -> {
             diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             checked: jet_cli_errors(diagnostics).len() == 0 && result.internal_problem == None
@@ -605,10 +644,14 @@ jet_cli_inspect_provenance_report: fn(job: JetCLIInspectJob, requirement: String
         if reports.len() == 0 {
             what: "dependency `{target}` is not present in the lockfile"
             fix: "use `jet inspect provenance` to list locked dependencies"
-            if job.json -> return JetDriverVerbOutput{stdout: jet_cli_fail_json("E2104", what, jet_cli_why("E2104"), fix), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+            if job.json {
+                return JetDriverVerbOutput{stdout: jet_cli_fail_json("E2104", what, jet_cli_why("E2104"), fix), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+            }
             return jet_cli_report_output("", "E2104", what, jet_cli_why("E2104"), fix, job.color, JET_DRIVER_EXIT_USER_ERROR)
         }
     }
-    if job.json -> return JetDriverVerbOutput{stdout: jet_cli_provenance_json(requirement, reports), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    if job.json {
+        return JetDriverVerbOutput{stdout: jet_cli_provenance_json(requirement, reports), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
     JetDriverVerbOutput{stdout: jet_cli_provenance_text(requirement, reports), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }

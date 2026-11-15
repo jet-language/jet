@@ -44,19 +44,25 @@ build: fn(b: Build) {
     loop info in b.program.types() {
         records[info.identity.identity] = "TypeInfo, kind {info.kind}"
         if info.kind == "struct" {
-            loop field in info.fields -> records["{info.identity.identity}.{field.name}"] = "FieldInfo of {info.name}"
+            loop field in info.fields {
+                records["{info.identity.identity}.{field.name}"] = "FieldInfo of {info.name}"
+            }
         }
         loop method in info.methods -> records[method.identity] = "MethodInfo of {info.name}"
     }
     loop info in b.program.functions() {
         records[info.identity] = "FunctionInfo"
-        loop param in info.signature.params -> records["{info.identity}.{param.name}"] = "ParamInfo of {info.name}"
+        loop param in info.signature.params {
+            records["{info.identity}.{param.name}"] = "ParamInfo of {info.name}"
+        }
     }
     loop info in b.program.traits() {
         records[info.identity] = "TraitInfo in {info.scope}, {info.methods.len()} method"
         loop method in info.methods -> records[method.identity] = "MethodInfo of {info.name}"
     }
-    loop info in b.program.constants() -> records[info.identity] = "ConstantInfo in {info.scope}, value {info.value ?? "unknown"}"
+    loop info in b.program.constants() {
+        records[info.identity] = "ConstantInfo in {info.scope}, value {info.value ?? "unknown"}"
+    }
     rows := [String]{}
     loop definition in b.program.definitions() {
         if !shown.contains(definition.path) -> next
@@ -106,7 +112,7 @@ run: fn() {
     print("{point.label()} {helper(point.norm())} {Meters{4}}")
     shape: Shape.Circle{radius: 2}
     if shape == {
-        .Circle(radius) -> print("circle {radius}")
+        .Circle(radius) -> { print("circle {radius}") }
         .Square -> print("square")
     }
 }

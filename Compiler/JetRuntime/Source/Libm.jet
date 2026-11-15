@@ -13,17 +13,26 @@
 use libm_core: core.math
 
 LIBM_SIGN: I64{-9223372036854775807 - 1}
+
 LIBM_ABS: I64{9223372036854775807}
+
 LIBM_MANTISSA: I64{4503599627370495}
+
 LIBM_IMPLICIT: I64{4503599627370496}
+
 // 1/DBL_EPSILON, 0x1p52: adding then subtracting it rounds to an integer.
 LIBM_TOINT: Float{4503599627370496.0}
+
 LIBM_P63: Float{9223372036854775808.0}
+
 LIBM_P1023: Float{8.98846567431158e+307}
+
 // 0x1p-1022 * 0x1p53
 LIBM_PM969: Float{2.004168360008973e-292}
+
 // DBL_MIN, 0x1p-1022
 LIBM_DBL_MIN: Float{2.2250738585072014e-308}
+
 // A NaN's quiet bit, 0x8000000000000.
 LIBM_QUIET: I64{2251799813685248}
 
@@ -32,15 +41,15 @@ libm_ult: fn(a: I64, b: I64) -> Bool { a.bit_xor(LIBM_SIGN) < b.bit_xor(LIBM_SIG
 
 // uint64 x >> n, 0 <= n < 64.
 libm_shr: fn(x: I64, n: I64) -> I64 {
-    if (n == I64{0}) -> return x
+    if (n == I64{0}) { return x }
     (x >> n).bit_and(LIBM_ABS >> (n - I64{1}))
 }
 
 // uint64 x << n, 0 <= n < 64: bits shifted past bit 63 are dropped.
 libm_shl: fn(x: I64, n: I64) -> I64 {
-    if (n == I64{0}) -> return x
+    if (n == I64{0}) { return x }
     low: x.bit_and(LIBM_ABS >> n) << n
-    if (libm_shr(x, I64{63} - n).bit_and(I64{1}) == I64{0}) -> return low
+    if (libm_shr(x, I64{63} - n).bit_and(I64{1}) == I64{0}) { return low }
     low.bit_or(LIBM_SIGN)
 }
 
@@ -50,8 +59,8 @@ libm_nonzero: fn(word: I64) -> I64 { if (word == I64{0}) -> I64{0} else -> I64{1
 // C's __builtin_clzll for a nonzero word, 64 for zero: shifts and tests only,
 // with no exact-Int leading_zeros count and its runtime call.
 libm_clz64: fn(word: I64) -> I64 {
-    if (word < I64{0}) -> return I64{0}
-    if (word == I64{0}) -> return I64{64}
+    if (word < I64{0}) { return I64{0} }
+    if (word == I64{0}) { return I64{64} }
     v := word
     top := I64{0}
     if ((v >> I64{32}) != I64{0}) {
@@ -74,7 +83,7 @@ libm_clz64: fn(word: I64) -> I64 {
         top += I64{2}
         v = v >> I64{2}
     }
-    if ((v >> I64{1}) != I64{0}) -> top += I64{1}
+    if ((v >> I64{1}) != I64{0}) { top += I64{1} }
     I64{63} - top
 }
 
@@ -89,11 +98,11 @@ libm_sqrt: fn(x: Float) -> Float { libm_core.sqrt(x) }
 libm_floor: fn(x: Float) -> Float {
     ix: rt_f64_bits(x)
     e: libm_exponent(ix)
-    if (e >= I64{1075} || x == Float{0.0}) -> return x
+    if (e >= I64{1075} || x == Float{0.0}) { return x }
     // y = int(x) - x, where int(x) is an integer neighbor of x
     y: if (ix < I64{0}) -> x - LIBM_TOINT + LIBM_TOINT - x else -> x + LIBM_TOINT - LIBM_TOINT - x
-    if (e <= I64{1022}) -> return if (ix < I64{0}) -> Float{-1.0} else -> Float{0.0}
-    if (y > Float{0.0}) -> return x + y - Float{1.0}
+    if (e <= I64{1022}) { return if (ix < I64{0}) -> Float{-1.0} else -> Float{0.0} }
+    if (y > Float{0.0}) { return x + y - Float{1.0} }
     x + y
 }
 
@@ -101,10 +110,10 @@ libm_floor: fn(x: Float) -> Float {
 libm_ceil: fn(x: Float) -> Float {
     ix: rt_f64_bits(x)
     e: libm_exponent(ix)
-    if (e >= I64{1075} || x == Float{0.0}) -> return x
+    if (e >= I64{1075} || x == Float{0.0}) { return x }
     y: if (ix < I64{0}) -> x - LIBM_TOINT + LIBM_TOINT - x else -> x + LIBM_TOINT - LIBM_TOINT - x
-    if (e <= I64{1022}) -> return if (ix < I64{0}) -> Float{-0.0} else -> Float{1.0}
-    if (y < Float{0.0}) -> return x + y + Float{1.0}
+    if (e <= I64{1022}) { return if (ix < I64{0}) -> Float{-0.0} else -> Float{1.0} }
+    if (y < Float{0.0}) { return x + y + Float{1.0} }
     x + y
 }
 
@@ -112,10 +121,10 @@ libm_ceil: fn(x: Float) -> Float {
 libm_trunc: fn(x: Float) -> Float {
     ix: rt_f64_bits(x)
     e := libm_exponent(ix) - I64{1023} + I64{12}
-    if (e >= I64{64}) -> return x
-    if (e < I64{12}) -> e = I64{1}
+    if (e >= I64{64}) { return x }
+    if (e < I64{12}) { e = I64{1} }
     m: libm_shr(I64{-1}, e)
-    if (ix.bit_and(m) == I64{0}) -> return x
+    if (ix.bit_and(m) == I64{0}) { return x }
     rt_f64_from_bits(ix.bit_and(m.bit_xor(I64{-1})))
 }
 
@@ -123,18 +132,14 @@ libm_trunc: fn(x: Float) -> Float {
 libm_round: fn(x: Float) -> Float {
     ix: rt_f64_bits(x)
     e: libm_exponent(ix)
-    if (e >= I64{1075}) -> return x
+    if (e >= I64{1075}) { return x }
     a: if (ix < I64{0}) -> -x else -> x
-    if (e < I64{1022}) -> return Float{0.0} * x
+    if (e < I64{1022}) { return Float{0.0} * x }
     y := a + LIBM_TOINT - LIBM_TOINT - a
-    if (y > Float{0.5}) {
-        y = y + a - Float{1.0}
-    } else if (y <= Float{-0.5}) {
+    if (y > Float{0.5}) { y = y + a - Float{1.0} } else if (y <= Float{-0.5}) {
         y = y + a + Float{1.0}
-    } else {
-        y = y + a
-    }
-    if (ix < I64{0}) -> return -y
+    } else { y += a }
+    if (ix < I64{0}) { return -y }
     y
 }
 
@@ -154,10 +159,10 @@ libm_fmod: fn(x: Float, y: Float) -> Float {
     ex := libm_exponent(uxi)
     ey := libm_exponent(uyi)
     negative: uxi < I64{0}
-    if (x != x || y != y) -> return libm_nan_pair(x, y)
-    if (libm_shl(uyi, I64{1}) == I64{0} || ex == I64{2047}) -> return (x * y) / (x * y)
+    if (x != x || y != y) { return libm_nan_pair(x, y) }
+    if (libm_shl(uyi, I64{1}) == I64{0} || ex == I64{2047}) { return (x * y) / (x * y) }
     if (!libm_ult(libm_shl(uyi, I64{1}), libm_shl(uxi, I64{1}))) {
-        if (libm_shl(uxi, I64{1}) == libm_shl(uyi, I64{1})) -> return Float{0.0} * x
+        if (libm_shl(uxi, I64{1}) == libm_shl(uyi, I64{1})) { return Float{0.0} * x }
         return x
     }
     // normalize x and y
@@ -168,9 +173,7 @@ libm_fmod: fn(x: Float, y: Float) -> Float {
             i = libm_shl(i, I64{1})
         }
         uxi = libm_shl(uxi, I64{1} - ex)
-    } else {
-        uxi = uxi.bit_and(LIBM_MANTISSA).bit_or(LIBM_IMPLICIT)
-    }
+    } else { uxi = uxi.bit_and(LIBM_MANTISSA).bit_or(LIBM_IMPLICIT) }
     if (ey == I64{0}) {
         i := libm_shl(uyi, I64{12})
         loop i >= (I64{0}) {
@@ -178,14 +181,12 @@ libm_fmod: fn(x: Float, y: Float) -> Float {
             i = libm_shl(i, I64{1})
         }
         uyi = libm_shl(uyi, I64{1} - ey)
-    } else {
-        uyi = uyi.bit_and(LIBM_MANTISSA).bit_or(LIBM_IMPLICIT)
-    }
+    } else { uyi = uyi.bit_and(LIBM_MANTISSA).bit_or(LIBM_IMPLICIT) }
     // x mod y
     loop ex > ey {
         i: uxi - uyi
         if (i >= I64{0}) {
-            if (i == I64{0}) -> return Float{0.0} * x
+            if (i == I64{0}) { return Float{0.0} * x }
             uxi = i
         }
         uxi = uxi << I64{1}
@@ -193,7 +194,7 @@ libm_fmod: fn(x: Float, y: Float) -> Float {
     }
     i: uxi - uyi
     if (i >= I64{0}) {
-        if (i == I64{0}) -> return Float{0.0} * x
+        if (i == I64{0}) { return Float{0.0} * x }
         uxi = i
     }
     loop uxi < LIBM_IMPLICIT {
@@ -201,9 +202,7 @@ libm_fmod: fn(x: Float, y: Float) -> Float {
         ex -= I64{1}
     }
     // scale result
-    if (ex > I64{0}) {
-        uxi = (uxi - LIBM_IMPLICIT).bit_or(ex << I64{52})
-    } else {
+    if (ex > I64{0}) { uxi = (uxi - LIBM_IMPLICIT).bit_or(ex << I64{52}) } else {
         uxi = uxi >> (I64{1} - ex)
     }
     if negative -> uxi = uxi.bit_or(LIBM_SIGN)
@@ -215,22 +214,22 @@ libm_scalbn: fn(x: Float, exponent: I64) -> Float {
     y := x
     n := exponent
     if (n > I64{1023}) {
-        y = y * LIBM_P1023
+        y *= LIBM_P1023
         n -= I64{1023}
         if (n > I64{1023}) {
-            y = y * LIBM_P1023
+            y *= LIBM_P1023
             n -= I64{1023}
-            if (n > I64{1023}) -> n = I64{1023}
+            if (n > I64{1023}) { n = I64{1023} }
         }
     } else if (n < I64{-1022}) {
         // make sure final n < -53 to avoid double
         // rounding in the subnormal range
-        y = y * LIBM_PM969
+        y *= LIBM_PM969
         n += I64{969}
         if (n < I64{-1022}) {
-            y = y * LIBM_PM969
+            y *= LIBM_PM969
             n += I64{969}
-            if (n < I64{-1022}) -> n = I64{-1022}
+            if (n < I64{-1022}) { n = I64{-1022} }
         }
     }
     y * rt_f64_from_bits((I64{1023} + n) << I64{52})
@@ -250,7 +249,7 @@ libm_fma_exponent: fn(x: Float) -> I64 {
 // fma.c normalize(): the significand with its top 10 bits and last bit 0.
 libm_fma_significand: fn(x: Float) -> I64 {
     ix := rt_f64_bits(x)
-    if (libm_exponent(ix) == I64{0}) -> ix = rt_f64_bits(x * LIBM_P63)
+    if (libm_exponent(ix) == I64{0}) { ix = rt_f64_bits(x * LIBM_P63) }
     ix.bit_and(LIBM_MANTISSA).bit_or(LIBM_IMPLICIT) << I64{1}
 }
 
@@ -266,7 +265,7 @@ libm_fma: fn(x: Float, y: Float, z: Float) -> Float {
     if (xe >= zero_inf_nan || ye >= zero_inf_nan) {
         // x * y + z keeps x's NaN, else y's, else inf * 0's, else z's.
         product: if (x != x || y != y) -> libm_nan_pair(x, y) else -> x * y
-        if (product != product || z != z) -> return libm_nan_pair(product, z)
+        if (product != product || z != z) { return libm_nan_pair(product, z) }
         return product + z
     }
     if (ze >= zero_inf_nan) {
@@ -274,7 +273,7 @@ libm_fma: fn(x: Float, y: Float, z: Float) -> Float {
         // when it underflows to zero: fma(2^-1074, -0.5, +0) is -0 (IEEE 754
         // fusedMultiplyAdd, MPFR, FMA3). musl's x * y + z rounds that product
         // to -0 and then gives -0 + +0 = +0.
-        if (ze > zero_inf_nan) -> return x * y
+        if (ze > zero_inf_nan) { return x * y }
         return z
     }
     xm: libm_fma_significand(x)
@@ -316,13 +315,9 @@ libm_fma: fn(x: Float, y: Float, z: Float) -> Float {
         }
     } else {
         d = I64{0} - d
-        if (d == I64{0}) {
-            zlo = zm
-        } else if (d < I64{64}) {
+        if (d == I64{0}) { zlo = zm } else if (d < I64{64}) {
             zlo = libm_shr(zm, d).bit_or(libm_nonzero(libm_shl(zm, I64{64} - d)))
-        } else {
-            zlo = I64{1}
-        }
+        } else { zlo = I64{1} }
     }
 
     // add
@@ -356,9 +351,7 @@ libm_fma: fn(x: Float, y: Float, z: Float) -> Float {
     } else if (rlo != I64{0}) {
         d = libm_clz64(rlo)
         d -= I64{1}
-        if (d < I64{0}) {
-            rhi = libm_shr(rlo, I64{1}).bit_or(rlo.bit_and(I64{1}))
-        } else {
+        if (d < I64{0}) { rhi = libm_shr(rlo, I64{1}).bit_or(rlo.bit_and(I64{1})) } else {
             rhi = rlo << d
         }
     } else {

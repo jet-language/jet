@@ -4,7 +4,9 @@ s5_mapless_length: fn(bytes: [U8]) -> Int {
     trailer: "//# sourceMappingURL=app.js.map\n".bytes()
     if bytes.len() < trailer.len() -> return bytes.len()
     start: bytes.len() - trailer.len()
-    loop index in 0..<trailer.len() { if bytes[start + index] != trailer[index] -> return bytes.len() }
+    loop index in 0..<trailer.len() {
+        if bytes[start + index] != trailer[index] -> return bytes.len()
+    }
     start
 }
 

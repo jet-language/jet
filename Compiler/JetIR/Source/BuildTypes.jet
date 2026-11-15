@@ -1944,7 +1944,9 @@ ir_render_push: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot
         ir_render_list(m, p, b, builder, snapshot, element, mode, span)
         return
     }
-    if ir_set_element(ty) != None && !ir_rank_type(ty) -> return ir_render_set(m, p, b, builder, slot, mode, span)
+    if ir_set_element(ty) != None && !ir_rank_type(ty) {
+        return ir_render_set(m, p, b, builder, slot, mode, span)
+    }
     // Any other native carrier (Rank, Iter, Shared) renders through routes of
     // its own, never as the fields its declaration names.
     if ir_native_carrier(ty) -> return ir_fail(b, span, "display of {ir_type_name(ty)}")
@@ -3667,7 +3669,9 @@ ir_try_convert_routine: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, payload: I
     // A routine that moves its source owns the failure from here;
     // one that borrows it (a kept From hook's) leaves it to this site.
     if {
-        p.functions[row].params.len() == 1 && p.functions[row].params[0].convention == .Move -> b.fresh[payload] = false
+        p.functions[row].params.len() == 1 && p.functions[row].params[0].convention == .Move -> {
+            b.fresh[payload] = false
+        }
         else -> ir_release(m, b, payload)
     }
     if ir_untag(routine_return) == .Result(_, _) {
@@ -3991,7 +3995,9 @@ ir_enum_box_size: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type]) -> Int?
 // Core enum, a union's structural enum, the Dyn enum the runtime walks and a
 // declared C or aligned layout keep every box at the widest variant.
 ir_enum_variant_sized: fn(definition: TTypeDef) -> Bool Never! {
-    if definition.generic_params.len() > 0 || ir_dyn_declaration(definition) || module_is_core(definition.module_identity) -> return false
+    if definition.generic_params.len() > 0 || ir_dyn_declaration(definition) || module_is_core(definition.module_identity) {
+        return false
+    }
     if definition.key.starts_with("union:") -> return false
     definition.layout == None && definition.c_layout_tag == None && definition.enum_layout == None && definition.layout_alignment == None
 }

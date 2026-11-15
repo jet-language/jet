@@ -97,7 +97,6 @@ sema_call_type_is_function: fn(ty: Type) -> Bool Never! {
     }
 }
 
-
 sema_call_failure_carrier: fn(return_type: Type?) -> TFailureCarrier Never! {
     ty: return_type ?? return TFailureCarrier.Result{success: Type.Named{name: "Unit"}, error: Type.Named{name: "Err"}}
     if ty == {
@@ -192,12 +191,16 @@ sema_call_not_callable_value: fn(name: String, ty: Type, program: SemaProgramTab
         loop nominal_row in sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(base_name)) {
             loop function in graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods {
                 receiver: function.parameters.len() > 0 && function.parameters[0].symbol.name == "self"
-                if receiver && !function.declaration.compiler_generated && !methods.contains(function.symbol.name) -> methods.push(function.symbol.name.copy())
+                if receiver && !function.declaration.compiler_generated && !methods.contains(function.symbol.name) {
+                    methods.push(function.symbol.name.copy())
+                }
             }
         }
     }
     methods.sort()
-    if methods.len() == 0 -> return sema_error("E0803", span, "`{name}` is {described}, not a function", "parentheses call functions and lambdas only", "remove the parentheses after `{name}`, or bind a function or lambda to call")
+    if methods.len() == 0 {
+        return sema_error("E0803", span, "`{name}` is {described}, not a function", "parentheses call functions and lambdas only", "remove the parentheses after `{name}`, or bind a function or lambda to call")
+    }
     sema_error("E0803", span, "`{name}` is {described}, not a function", "parentheses call functions and lambdas only; `{shown}` has the methods {methods.join(", ")}", "call one of its methods, such as `{name}.{methods[0]}(…)`, or write a method that returns a lambda")
 }
 
@@ -283,7 +286,9 @@ sema_call_resolve_direct: fn(name: String, type_args: [Type], environment: SemaS
         ty: symbol.ty ?? {
             // A binding whose type was already lost to a reported error is
             // poisoned: calling it adds no second report.
-            if diagnostics.len() == 0 -> diagnostics.push(sema_call_not_callable(name, Type.Named{name: "Unknown"}, span))
+            if diagnostics.len() == 0 {
+                diagnostics.push(sema_call_not_callable(name, Type.Named{name: "Unknown"}, span))
+            }
             return None
         }
         // A distinct type is not a conversion function: its destination-owned
@@ -640,9 +645,7 @@ sema_call_trait_method_candidates: fn(graph: SemaRegistrationGraph, receiver_typ
             loop bound in current.bounds {
                 if sema_call_trait_row_for_symbol(graph, bound) == .Val(row) {
                     sema_call_trait_rows_push(graph, trait_rows, row)
-                } else {
-                    owned_bounds.push(bound.copy())
-                }
+                } else { owned_bounds.push(bound.copy()) }
             }
         }
     }
@@ -748,7 +751,9 @@ sema_call_implemented_trait_method_candidates: fn(graph: SemaRegistrationGraph, 
     candidates := [SemaCallMethodCandidate]{}
     loop graph_module_index in 0..<graph.modules.len() {
         loop implementation_index in 0..<graph.modules[graph_module_index].impls.len() {
-            if graph.modules[graph_module_index].impls[implementation_index].target_identity_key != nominal.identity_key -> next
+            if graph.modules[graph_module_index].impls[implementation_index].target_identity_key != nominal.identity_key {
+                next
+            }
             trait_symbol: graph.modules[graph_module_index].impls[implementation_index].trait_symbol ?? next
             written: loop function_index in 0..<graph.modules[graph_module_index].impls[implementation_index].methods.len() {
                 if graph.modules[graph_module_index].impls[implementation_index].methods[function_index].symbol.name == method {
@@ -779,7 +784,9 @@ sema_call_implemented_trait_method_candidates: fn(graph: SemaRegistrationGraph, 
 // or any method when the impl delegates.
 sema_call_unwritten_trait_method_candidates: fn(graph: SemaRegistrationGraph, trait_row: SemaRegistrationRowRef, delegated: Bool, receiver_type: Type, method: String, type_args: [Type], caller_module: ModuleID, caller_package: String, generic_params: [TGenericParam], span: Span, diagnostics: &[Diagnostic], candidates: &[SemaCallMethodCandidate]) Never! {
     trait_nominal: graph.modules[trait_row.module_index].nominals[trait_row.row]
-    if !sema_call_trait_visible(graph, trait_nominal, caller_module, caller_package) -> return
+    if !sema_call_trait_visible(graph, trait_nominal, caller_module, caller_package) {
+        return
+    }
     loop trait_method in trait_nominal.trait_methods {
         if trait_method.declaration.name != method -> next
         if !delegated && trait_method.declaration.default_body == .None -> next

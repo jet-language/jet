@@ -28,7 +28,7 @@ pick: fn(left: Blob, right: Blob, first: Bool) -> String {
 // parameter, and a fresh value (held by the holder) down an else chain.
 mixed: fn(rows: [Blob], k: Int) -> Int {
     local := [Blob]{Blob{data: [Int]{1, 2}, text: "p"}, Blob{data: [Int]{3}, text: "q"}}
-    row: if k == 0 -> local[0] else -> if k == 1 -> rows[0] else -> Blob{data: [Int]{7, 8, 9}, text: "fresh!"}
+    row: if k == 0 -> local[0] else if k == 1 -> rows[0] else -> Blob{data: [Int]{7, 8, 9}, text: "fresh!"}
     row.data.len() + row.text.len()
 }
 
@@ -88,7 +88,7 @@ arm_local: fn(k: Int) -> String {
 // A payload of each arm's own pattern over a local the scope leaves alone,
 // and a fresh value (held by the holder) in the else arm.
 payload_arm: fn(k: Int) -> Int {
-    shape := if k == 0 -> Shape.Boxed{blob: Blob{data: [Int]{1}, text: "boxed"}} else -> if k == 1 -> Shape.Pair{left: Blob{data: [Int]{1, 2}, text: "l"}, right: Blob{data: [Int]{3}, text: "r"}} else -> Shape.Empty
+    shape := if k == 0 -> Shape.Boxed{blob: Blob{data: [Int]{1}, text: "boxed"}} else if k == 1 -> Shape.Pair{left: Blob{data: [Int]{1, 2}, text: "l"}, right: Blob{data: [Int]{3}, text: "r"}} else -> Shape.Empty
     picked: if shape == {
         .Boxed(blob) -> blob
         .Pair(_, right) -> right

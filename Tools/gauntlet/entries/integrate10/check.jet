@@ -38,10 +38,14 @@ run: fn() {
             at: "{root}/{path}"
             if {
                 files.is_symlink(at) -> print("{path} -> {files.read_link(at).removeprefix(here)}")
-                path == "REPORT.md" || path.ends_with(".out") || path.ends_with(".apply") || path.ends_with(".files") -> print(path)
+                path == "REPORT.md" || path.ends_with(".out") || path.ends_with(".apply") || path.ends_with(".files") -> {
+                    print(path)
+                }
                 else -> print("{path}: {files.read(at).trim_end().replace("\n", " | ")}".trim_end())
             }
         }
-        loop line in (files.read("{root}/REPORT.md") ?? "").lines() -> print("| {if line.len() > 300 -> line.slice(0, 300) else -> line}".trim_end())
+        loop line in (files.read("{root}/REPORT.md") ?? "").lines() {
+            print("| {if line.len() > 300 -> line.slice(0, 300) else -> line}".trim_end())
+        }
     }
 }

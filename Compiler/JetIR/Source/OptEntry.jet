@@ -19,7 +19,6 @@
 // copies and moves of scalars and the runtime's Int clone, none of which
 // writes a parameter or can publish a stop. E is the edge as built: drops
 // and Returns, no branch, so its nesting one level deeper changes nothing.
-
 use jet_foundation.[Type, compiler_threads_single, name_rows_set, name_rows_value]
 
 // The most instructions a head (its test, If, arm and Return) may have.
@@ -39,9 +38,13 @@ ir_opt_entry: fn(m: IRModule, functions: &[IRFunction], recursive: [Bool], keys:
         }
         guards.push(row)
     }
-    if !any -> return
+    if !any {
+        return
+    }
     loop id in 0..<functions.len() {
-        out := ir_opt_entry_build(functions[id], guards, keys) ?? { next }
+        out := ir_opt_entry_build(functions[id], guards, keys) ?? {
+            next
+        }
         functions[id] = out.move()
     }
 }
@@ -59,7 +62,9 @@ ir_opt_entry_guard: fn(m: IRModule, g: IRFunction, clone: Int) -> IRFunction? Ne
         known[g.dst[at]] = true
         at += 1
     }
-    if at >= g.op.len() || g.op[at] != .If || g.b[at] >= 0 || !ir_opt_entry_known(known, g.a[at]) -> return None
+    if at >= g.op.len() || g.op[at] != .If || g.b[at] >= 0 || !ir_opt_entry_known(known, g.a[at]) {
+        return None
+    }
     branch: at
     at += 1
     loop at < g.op.len() && at < IR_OPT_ENTRY_LIMIT && ir_opt_entry_arm(g, clone, at) {
@@ -67,11 +72,15 @@ ir_opt_entry_guard: fn(m: IRModule, g: IRFunction, clone: Int) -> IRFunction? Ne
         known[g.dst[at]] = true
         at += 1
     }
-    if at >= IR_OPT_ENTRY_LIMIT || at + 1 >= g.op.len() || g.op[at] != .Return || g.op[at + 1] != .End || g.a[at + 1] != branch -> return None
+    if at >= IR_OPT_ENTRY_LIMIT || at + 1 >= g.op.len() || g.op[at] != .Return || g.op[at + 1] != .End || g.a[at + 1] != branch {
+        return None
+    }
     value: g.a[at]
     // A parameter is the caller's argument, which the caller drops: the head
     // may return one only when it owns nothing (not an Int).
-    if value >= 0 && (!ir_opt_entry_known(known, value) || !ir_opt_entry_scalar(m, g, value) || (value < g.param_count && m.types[g.slot_type[value]].kind == .Int)) -> return None
+    if value >= 0 && (!ir_opt_entry_known(known, value) || !ir_opt_entry_scalar(m, g, value) || (value < g.param_count && m.types[g.slot_type[value]].kind == .Int)) {
+        return None
+    }
     guard := ir_function_new(g.name, g.key, "", g.source_file, g.line)
     map := [Int]{}
     loop slot in 0..<g.slot_type.len() {
@@ -118,7 +127,9 @@ ir_opt_entry_scalar: fn(m: IRModule, g: IRFunction, slot: Int) -> Bool Never! {
 // parameter (the caller's argument, which the caller still drops).
 ir_opt_entry_reads: fn(m: IRModule, g: IRFunction, known: [Bool], at: Int) -> Bool Never! {
     written: g.dst[at]
-    if written < g.param_count || written >= g.slot_type.len() || !ir_opt_entry_scalar(m, g, written) -> return false
+    if written < g.param_count || written >= g.slot_type.len() || !ir_opt_entry_scalar(m, g, written) {
+        return false
+    }
     op: g.op[at]
     if op == .Const -> return true
     if op == .CallRuntime {
@@ -153,7 +164,9 @@ ir_opt_entry_build: fn(caller: IRFunction, guards: [[IRFunction]], keys: [String
     out.frame_bound = caller.frame_bound
     out.max_depth = caller.max_depth
     out.inline_sites = caller.inline_sites.copy()
-    loop slot in 0..<caller.slot_type.len() -> _ := ir_slot(out, caller.slot_type[slot], caller.slot_kind[slot], caller.slot_name[slot], caller.slot_line[slot])
+    loop slot in 0..<caller.slot_type.len() {
+        _ := ir_slot(out, caller.slot_type[slot], caller.slot_kind[slot], caller.slot_name[slot], caller.slot_line[slot])
+    }
     out.slot_fixed = caller.slot_fixed.copy()
     out.result = caller.result
     loop value in caller.args -> out.args.push(value)
@@ -189,7 +202,9 @@ ir_opt_entry_site: fn(caller: IRFunction, guards: [[IRFunction]], keys: [String]
     if (dst >= 0) != (returned >= 0) -> return -1
     if dst >= 0 && caller.slot_type[dst] != guards[callee][0].result -> return -1
     loop slot in 0..<params {
-        if caller.slot_type[caller.args[caller.b[at] + slot]] != guards[callee][0].slot_type[slot] -> return -1
+        if caller.slot_type[caller.args[caller.b[at] + slot]] != guards[callee][0].slot_type[slot] {
+            return -1
+        }
     }
     count: caller.op.len()
     last := at
@@ -203,7 +218,9 @@ ir_opt_entry_site: fn(caller: IRFunction, guards: [[IRFunction]], keys: [String]
         last = end
     }
     after := last + 1
-    loop after < count && (caller.op[after] == .Drop || caller.op[after] == .Move || caller.op[after] == .Copy) -> after += 1
+    loop after < count && (caller.op[after] == .Drop || caller.op[after] == .Move || caller.op[after] == .Copy) {
+        after += 1
+    }
     if after < count && caller.op[after] == .Return -> return -1
     last
 }
@@ -229,7 +246,9 @@ ir_opt_entry_splice: fn(f: &IRFunction, caller: IRFunction, guard: IRFunction, a
         k += 1
     }
     _ := ir_emit(f, IROp.Else, -1, -1, -1, -1, line)
-    loop held in at..<(last + 1) -> _ := ir_emit(f, caller.op[held], caller.dst[held], caller.a[held], caller.b[held], caller.c[held], caller.code_line[held])
+    loop held in at..<(last + 1) {
+        _ := ir_emit(f, caller.op[held], caller.dst[held], caller.a[held], caller.b[held], caller.c[held], caller.code_line[held])
+    }
     _ := ir_emit(f, IROp.End, -1, -1, -1, -1, line)
 }
 

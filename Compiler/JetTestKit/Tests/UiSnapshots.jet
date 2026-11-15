@@ -50,7 +50,8 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(1, short), short, ctx).status, "PASS")
     kit_exec_write(files.join(root, entry.expected), short)
     assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(1, canonical), canonical, ctx).status, "PASS")
-    loop changed in [short.replace("jet.OperatorTypeMismatch", "jet.ArgumentTypeMismatch"), short.replace("mismatch", "different"), short.replace(":2:4", ":2:5"), short.replace("Why: example.jet", "Why: tests/ui/example.jet"), short.replace("imported.jet", "elsewhere.jet")] {
+    loop changed in
+        [short.replace("jet.OperatorTypeMismatch", "jet.ArgumentTypeMismatch"), short.replace("mismatch", "different"), short.replace(":2:4", ":2:5"), short.replace("Why: example.jet", "Why: tests/ui/example.jet"), short.replace("imported.jet", "elsewhere.jet")] {
         assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(1, changed), changed, ctx).status, "FAIL")
     }
     files.remove_all(root) ?? panic("remove primary-source scratch: {err}")
@@ -132,7 +133,10 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
 
 #Test("UI discovery walks groups but stops at project entries and excludes fixed companions") {
     root: kit_ui_test_scratch("discover")
-    loop path in ["tests/ui/a.jet", "tests/ui/a.fixed.jet", "tests/ui/group/nested.jet", "tests/ui/group/project/run.jet", "tests/ui/group/project/helper.jet", "tests/ui/main/main.jet", "tests/ui/workspace/workspace.jet", "tests/ui/workspace/member/run.jet", "tests/ui_lint/group/lint.jet"] -> kit_exec_write(files.join(root, path), "run: fn() {{}}\n")
+    loop path in
+        ["tests/ui/a.jet", "tests/ui/a.fixed.jet", "tests/ui/group/nested.jet", "tests/ui/group/project/run.jet", "tests/ui/group/project/helper.jet", "tests/ui/main/main.jet", "tests/ui/workspace/workspace.jet", "tests/ui/workspace/member/run.jet", "tests/ui_lint/group/lint.jet"] {
+        kit_exec_write(files.join(root, path), "run: fn() {{}}\n")
+    }
     kit_exec_write(files.join(root, "tests/ui/group/support.jet"), "// @fixture_module\nhelper: fn() {{}}\n")
     kit_exec_write(files.join(root, "tests/ui/route.jet"), "// @fixture_module\npage: fn() {{}}\n")
     entries: kit_ui_discover(kit_ui_test_context(root, "scratch"))
@@ -155,12 +159,19 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     root: kit_ui_test_scratch("driver")
     hook: files.join(root, "hook.wasm")
     kit_exec_write(hook, "fixture hook")
-    loop path in ["tests/ui/bad.jet", "tests/ui/clean.jet", "tests/ui/clean.fixed.jet", "tests/ui/published.jet", "tests/ui/extension.jet", "tests/ui/project/run.jet", "tests/ui_lint/lint.jet"] -> kit_exec_write(files.join(root, path), "run: fn() {{}}\n")
+    loop path in
+        ["tests/ui/bad.jet", "tests/ui/clean.jet", "tests/ui/clean.fixed.jet", "tests/ui/published.jet", "tests/ui/extension.jet", "tests/ui/project/run.jet", "tests/ui_lint/lint.jet"] {
+        kit_exec_write(files.join(root, path), "run: fn() {{}}\n")
+    }
     kit_exec_write(files.join(root, "tests/ui/extension.jet"), "// @compiler_extension hook.wasm\nrun: fn() {{}}\n")
     kit_exec_write(files.join(root, "tests/ui/project/state/authored"), "state")
     kit_exec_write(files.join(root, "tests/ui/published.published.snapshot"), "type = Record\nfield = old\n")
-    loop path in ["tests/ui/bad.stderr", "tests/ui/project/stderr"] -> kit_exec_write(files.join(root, path), "Error [jet.OperatorTypeMismatch]: mismatch\n")
-    loop path in ["tests/ui/clean.stderr", "tests/ui/published.stderr", "tests/ui/extension.stderr"] -> kit_exec_write(files.join(root, path), "(no errors)\n")
+    loop path in ["tests/ui/bad.stderr", "tests/ui/project/stderr"] {
+        kit_exec_write(files.join(root, path), "Error [jet.OperatorTypeMismatch]: mismatch\n")
+    }
+    loop path in ["tests/ui/clean.stderr", "tests/ui/published.stderr", "tests/ui/extension.stderr"] {
+        kit_exec_write(files.join(root, path), "(no errors)\n")
+    }
     kit_exec_write(files.join(root, "tests/ui_lint/lint.warn"), "Warning [jet.SameEnumGuardTable]: lint\n")
     kit_ui_stage(root, root, true, kit_test_checkout_options(root).ui_corpora)
     entries: kit_ui_discover(kit_ui_test_context(root, "discovery"))
@@ -178,8 +189,13 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
 
 #Test("UI known-failing ledger rows own real snapshot failures and reject stale passes") {
     root: kit_ui_test_scratch("known-failing")
-    loop path in ["tests/ui/owned.jet", "tests/ui/stale.jet", "tests/ui/unowned.jet", "tests/ui/dir_owned/run.jet"] -> kit_exec_write(files.join(root, path), "run: fn() {{}}\n")
-    loop path in ["tests/ui/owned.stderr", "tests/ui/unowned.stderr", "tests/ui/dir_owned/stderr"] -> kit_exec_write(files.join(root, path), "Error [jet.UnknownName]: other\n")
+    loop path in
+        ["tests/ui/owned.jet", "tests/ui/stale.jet", "tests/ui/unowned.jet", "tests/ui/dir_owned/run.jet"] {
+        kit_exec_write(files.join(root, path), "run: fn() {{}}\n")
+    }
+    loop path in ["tests/ui/owned.stderr", "tests/ui/unowned.stderr", "tests/ui/dir_owned/stderr"] {
+        kit_exec_write(files.join(root, path), "Error [jet.UnknownName]: other\n")
+    }
     kit_exec_write(files.join(root, "tests/ui/stale.stderr"), "Error [jet.OperatorTypeMismatch]: mismatch\n")
     kit_exec_write(kit_test_ledger(root), "# repo-relative ID\tcard\treason\ntests/ui/owned\t#4868\towned ui mismatch\ntests/ui/stale\t#4869\tstale ui row\ntests/ui/dir_owned\t#4870\towned ui project\n")
     kit_ui_stage(root, root, true, kit_test_checkout_options(root).ui_corpora)
@@ -289,7 +305,8 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     assert_eq(files.read(files.join(source, "tests/ui/modules/helper.jet")) ?? panic("staged module"), helper)
     assert(files.exists(files.join(source, "tests/ui/routes/Index.jet")))
     assert(files.exists(files.join(source, "tests/ui/embedded.dat")))
-    loop path in ["tests/ui/other.jet", "tests/ui/other.stderr", "tests/ui/clean_import.stderr", "tests/ui/group", "tests/ui/project"] {
+    loop path in
+        ["tests/ui/other.jet", "tests/ui/other.stderr", "tests/ui/clean_import.stderr", "tests/ui/group", "tests/ui/project"] {
         assert(!files.exists(files.join(source, path)), "a loose entry's stage holds no other entry: {path}")
     }
     files.remove_all(root) ?? panic("remove imported UI scratch: {err}")

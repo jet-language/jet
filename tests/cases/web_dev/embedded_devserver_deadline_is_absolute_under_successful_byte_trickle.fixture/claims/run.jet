@@ -1,7 +1,8 @@
 // D-NET-IO-KIND1 revision2 corrected single-task deadline plan, not the superseded plan.
 s5_trickle_reset: fn(error: NetError) -> Bool {
-    if error == { .ConnectionReset(_) -> true else -> false }
+    if error == { .ConnectionReset(_) -> true, else -> false }
 }
+
 #Test("original successful byte trickle does not renew absolute request deadline") {
     port: s5_web_port()
     s5_web_wait_up(port, 30000)
@@ -14,20 +15,22 @@ s5_trickle_reset: fn(error: NetError) -> Bool {
     closed := false
     loop index in 0..<32 {
         net.tcp_write_all_bytes(client, "x".bytes()) ?? panic("every trickle write must succeed")
-        sent = sent + 1
+        sent += 1
         if client.read_bytes(8192, deadline: time.duration_ms(200)) == {
             .Ok(part) -> {
-                response_bytes = response_bytes + part.len()
+                response_bytes += part.len()
                 assert(part.is_empty(), "incomplete request received response bytes")
                 assert_eq(sent, 32, "connection closed before all successful trickle writes")
                 closed = true
             }
-            .Err(error) -> if error == {
-                .Timeout(_) -> {}
-                else -> {
-                    assert(s5_trickle_reset(error), "unexpected trickle read failure")
-                    assert_eq(sent, 32, "connection reset before all successful trickle writes")
-                    closed = true
+            .Err(error) -> {
+                if error == {
+                    .Timeout(_) -> {}
+                    else -> {
+                        assert(s5_trickle_reset(error), "unexpected trickle read failure")
+                        assert_eq(sent, 32, "connection reset before all successful trickle writes")
+                        closed = true
+                    }
                 }
             }
         }
@@ -37,7 +40,7 @@ s5_trickle_reset: fn(error: NetError) -> Bool {
         assert(remaining > 0, "trickle exhausted original twelve-second read timeout")
         if client.read_bytes(8192, deadline: time.duration_ns(remaining)) == {
             .Ok(part) -> {
-                response_bytes = response_bytes + part.len()
+                response_bytes += part.len()
                 closed = part.is_empty()
             }
             .Err(error) -> { closed = s5_trickle_reset(error) }

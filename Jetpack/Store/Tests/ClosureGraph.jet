@@ -10,7 +10,7 @@ store_test_closure_ingest: fn(verification: &StoreVerification, roots: HangarRoo
         reference: "path:{name}",
         cache_identity: store_test_identity(),
         references: references,
-        outputs: [String: String]{"out": source},
+        outputs: [String:String]{"out": source},
         signature: "",
         provenance: provenance,
         platform_artifact_kind: "",
@@ -20,19 +20,21 @@ store_test_closure_ingest: fn(verification: &StoreVerification, roots: HangarRoo
 
 // Physical bytes of `paths`, each filesystem identity counted once.
 store_test_independent_physical_bytes: fn(paths: [String]) -> Int Never! {
-    seen := [FileID: Bool]{}
+    seen := [FileID:Bool]{}
     total := 0
     loop path in paths -> total += store_test_physical_walk(path, seen)
     total
 }
 
-store_test_physical_walk: fn(path: String, seen: &[FileID: Bool]) -> Int Never! {
+store_test_physical_walk: fn(path: String, seen: &[FileID:Bool]) -> Int Never! {
     metadata: files.stat(path) ?? panic("stat")
     if seen.has_key(metadata.id) -> return 0
     seen[metadata.id] = true
     bytes := metadata.size_on_disk
     if metadata.is_dir {
-        loop child in files.list_dir(path) ?? panic("list") -> bytes += store_test_physical_walk(child.path, seen)
+        loop child in files.list_dir(path) ?? panic("list") {
+            bytes += store_test_physical_walk(child.path, seen)
+        }
     }
     bytes
 }
@@ -105,7 +107,9 @@ store_test_register_entry_locked: fn(verification: &StoreVerification, roots: Ha
     ingested: store_test_closure_ingest(verification, roots, "du-physical", [String]{}, "bytes", "registration-test")
     report: store_du(verification, roots) ?? panic("du")
     logical := 0
-    loop entry in files.list_dir(ingested.entry.out) ?? panic("list") -> logical += (files.stat(entry.path) ?? panic("stat")).size
+    loop entry in files.list_dir(ingested.entry.out) ?? panic("list") {
+        logical += (files.stat(entry.path) ?? panic("stat")).size
+    }
     assert((report.closure_physical_bytes ?? 0) > logical)
     store_test_drop_roots(roots)
 }
@@ -139,7 +143,7 @@ store_test_register_entry_locked: fn(verification: &StoreVerification, roots: Ha
 
     files.write(receipt, "corrupt receipt") ?? panic("corrupt")
     if store_list_checked(verification, roots) == {
-        .Ok(_) -> panic("a corrupt receipt must fail listing")
+        .Ok(_) -> { panic("a corrupt receipt must fail listing") }
         .Err(error) -> assert(error.message().contains("receipt"))
     }
     assert(files.is_dir(ingested.entry.out))
@@ -160,7 +164,7 @@ store_test_register_entry_locked: fn(verification: &StoreVerification, roots: Ha
     source: files.join(roots.root, "receipt-symlink-source")
     files.create_dir_all(source) ?? panic("source dir")
     files.write(files.join(source, "payload"), "bytes") ?? panic("payload")
-    request: IngestRequest{name: "receipt-symlink", version: "1", reference: "path:receipt-symlink", cache_identity: store_test_identity(), references: [String]{}, outputs: [String: String]{"out": source}, signature: "", provenance: "registration-test", platform_artifact_kind: ""}
+    request: IngestRequest{name: "receipt-symlink", version: "1", reference: "path:receipt-symlink", cache_identity: store_test_identity(), references: [String]{}, outputs: [String:String]{"out": source}, signature: "", provenance: "registration-test", platform_artifact_kind: ""}
     assert(store_ingest_tree(verification, roots, request) == .Err(_))
     assert_eq(files.read(files.join(outside, "keep")) ?? panic("read keep"), "live")
     store_test_drop_roots(roots)
@@ -186,7 +190,7 @@ store_test_register_entry_locked: fn(verification: &StoreVerification, roots: Ha
     files.write(files.join(out, "payload"), "stable bytes") ?? panic("payload")
     envelope: Envelope.for_output(out, "path:external", "test")
     if store_record_verified_mode(verification, roots, "external", "1", "path:external", out, "", "", envelope, store_test_identity(), true) == {
-        .Ok(_) -> panic("an external output must be refused")
+        .Ok(_) -> { panic("an external output must be refused") }
         .Err(error) -> assert(error.message().contains("outside Hangar"))
     }
     assert(files.exists(out))
@@ -313,7 +317,7 @@ store_test_assert_hashed_at_most_once: fn(verification: &StoreVerification, entr
 // Pop the pending digest before extending the worklist; cycles exclude the
 // root, shared members are visited once, and the result is sorted.
 #Test("store closure walk consumes pending members before following cycles") {
-    index: [String: [String]]{
+    index: [String:[String]]{
         "root": [String]{"z", "a", "z", "root"},
         "a": [String]{"shared", "root"},
         "z": [String]{"shared", "leaf"},
@@ -323,7 +327,7 @@ store_test_assert_hashed_at_most_once: fn(verification: &StoreVerification, entr
     assert_eq(store_closure_walk(index, "root"), [String]{"a", "leaf", "shared", "z"})
     assert_eq(store_closure_walk(index, "missing"), [String]{})
     assert_eq(store_closure_walk(index, "leaf"), [String]{})
-    assert_eq(store_closure_walk([String: [String]]{"self": [String]{"self"}}, "self"), [String]{})
+    assert_eq(store_closure_walk([String:[String]]{"self": [String]{"self"}}, "self"), [String]{})
     // A walk never consumes the caller's reference index.
     assert_eq(index["root"], [String]{"z", "a", "z", "root"})
 }
@@ -350,7 +354,7 @@ store_test_assert_hashed_at_most_once: fn(verification: &StoreVerification, entr
     entry.references = [String]{dependency_digest, dependency_digest, "unmapped-reference"}
     entry.producer_record = producer.encode()
     descriptor: store_descriptor_for_entry(verification, roots, entry) ?? panic("descriptor")
-    objects := [String: ClosureObject]{}
+    objects := [String:ClosureObject]{}
     loop object in descriptor.objects -> objects[object.digest] = object
     assert_eq(objects.len(), 5)
     assert_eq(objects[entry.envelope.output_hash].path, entry.out)
@@ -390,23 +394,29 @@ store_test_assert_hashed_at_most_once: fn(verification: &StoreVerification, entr
         producer.facts["dependency.object.{dependency_digest}"] = relative
         entry.producer_record = producer.encode()
         if store_descriptor_for_entry(verification, roots, entry) == {
-            .Ok(_) -> panic("invalid dependency path accepted")
-            .Err(error) -> assert_eq(error.message(), "closure record `{entry.id}` has invalid dependency object path `{relative}`")
+            .Ok(_) -> { panic("invalid dependency path accepted") }
+            .Err(error) -> {
+                assert_eq(error.message(), "closure record `{entry.id}` has invalid dependency object path `{relative}`")
+            }
         }
     }
     producer.facts["dependency.object.{dependency_digest}"] = "missing"
     entry.producer_record = producer.encode()
     if store_descriptor_for_entry(verification, roots, entry) == {
-        .Ok(_) -> panic("missing dependency object accepted")
-        .Err(error) -> assert(error.message().starts_with("reading dependency object `{files.join(entry.out, "missing")}`: "))
+        .Ok(_) -> { panic("missing dependency object accepted") }
+        .Err(error) -> {
+            assert(error.message().starts_with("reading dependency object `{files.join(entry.out, "missing")}`: "))
+        }
     }
     wrong_digest: "sha256-{store_sha256_hex("wrong dependency".bytes())}"
     entry.references = [String]{wrong_digest}
     producer.facts["dependency.object.{wrong_digest}"] = "payload"
     entry.producer_record = producer.encode()
     if store_descriptor_for_entry(verification, roots, entry) == {
-        .Ok(_) -> panic("dependency digest mismatch accepted")
-        .Err(error) -> assert_eq(error.message(), "dependency object `{dependency}` records `{wrong_digest}`, re-hash produced `{dependency_digest}`")
+        .Ok(_) -> { panic("dependency digest mismatch accepted") }
+        .Err(error) -> {
+            assert_eq(error.message(), "dependency object `{dependency}` records `{wrong_digest}`, re-hash produced `{dependency_digest}`")
+        }
     }
     store_test_drop_roots(roots)
 }

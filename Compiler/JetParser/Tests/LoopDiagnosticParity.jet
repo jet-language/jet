@@ -9,7 +9,9 @@ loop_diagnostic_expect: fn(source: String, code: String, wanted_span: String) ->
     if parsed.diagnostics.len() != 1 -> panic("loop parity emitted extra or missing diagnostics")
     diagnostic: parsed.diagnostics[0]
     span: diagnostic.span ?? panic("loop parity lost the diagnostic span")
-    if diagnostic.code != code || source.slice(span.start, span.end) != wanted_span -> panic("loop parity differs from the canonical code or span")
+    if diagnostic.code != code || source.slice(span.start, span.end) != wanted_span {
+        panic("loop parity differs from the canonical code or span")
+    }
     parsed
 }
 

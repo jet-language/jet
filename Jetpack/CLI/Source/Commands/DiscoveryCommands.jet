@@ -27,7 +27,9 @@ cli_cmd_search: fn(verification: &StoreVerification, theme: Theme, parsed: CLIPa
         if index.nearest(query) == .Val(nearest) -> print("nearest: {nearest}")
         return EXIT_USER_ERROR
     }
-    loop record in records -> print("{terminal_pad_end(record.display_ref(), 24)} {terminal_pad_end(cli_empty_dash(record.version), 10)} {record.platforms.join(", ")}")
+    loop record in records {
+        print("{terminal_pad_end(record.display_ref(), 24)} {terminal_pad_end(cli_empty_dash(record.version), 10)} {record.platforms.join(", ")}")
+    }
     EXIT_OK
 }
 
@@ -62,7 +64,9 @@ cli_cmd_info: fn(verification: &StoreVerification, theme: Theme, parsed: CLIPars
     print("  gate status: {record.gate_status}")
     if record.options.len() > 0 {
         print("  service options:")
-        loop option in record.options -> print("    {terminal_pad_end(option.name, 10)} default: {terminal_pad_end(cli_empty_dash(option.default), 24)} {option.docs}")
+        loop option in record.options {
+            print("    {terminal_pad_end(option.name, 10)} default: {terminal_pad_end(cli_empty_dash(option.default), 24)} {option.docs}")
+        }
     }
     EXIT_OK
 }
@@ -227,7 +231,9 @@ cli_read_logs_error: fn(theme: Theme, reason: String) -[IO, Time.Wait]> Int Neve
 cli_shell_on_failed_build: fn(theme: Theme, roots: HangarRoots, package: String) Never! -[IO, FS, Env, Exec, Time.Wait]> {
     // A missing or unreadable attempt record means there is no shell to open.
     attempt: recipe_debug_latest(roots.hangar_dir(), package) ?? return
-    if attempt.status != "failed" || attempt.scratch_dir == "" -> return
+    if attempt.status != "failed" || attempt.scratch_dir == "" {
+        return
+    }
     scratch: cli_verified_failed_scratch(roots, attempt, package) ?? {
         theme.detail("failed-build shell skipped: preserved scratch is not a real Hangar directory")
         return
@@ -243,7 +249,9 @@ cli_shell_on_failed_build: fn(theme: Theme, roots: HangarRoots, package: String)
 cli_verified_failed_scratch: fn(roots: HangarRoots, attempt: BuildAttempt, package: String) -[FS, Env]> String? Never! {
     id: attempt.id
     expected_prefix: "{recipe_debug_safe_name(package)}-"
-    if attempt.package != package || !id.starts_with(expected_prefix) || id == "" || id == "." || id == ".." || recipe_debug_safe_name(id) != id -> return None
+    if attempt.package != package || !id.starts_with(expected_prefix) || id == "" || id == "." || id == ".." || recipe_debug_safe_name(id) != id {
+        return None
+    }
     hangar: roots.hangar_dir()
     if !cli_is_real_directory(hangar) -> return None
     root: files.join(hangar, "failed-scratch")

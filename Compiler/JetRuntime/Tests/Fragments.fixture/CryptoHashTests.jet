@@ -6,7 +6,7 @@
         (kind == I64{384}) -> I64{704}
         else -> I64{0}
     }
-    if (size == I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+    if (size == I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
     owned: jet_rt_alloc(size + I64{16}, I64{8})
     scratch: owned + I64{8}
     rt_text_store(owned, I64{0x42})
@@ -21,14 +21,17 @@
         (kind == I64{224}) -> rt_crypto_sha224(input, length, output, scratch)
         else -> rt_crypto_sha384(input, length, output, scratch)
     }
-    if (rt_text_word(owned) != I64{0x42} || rt_text_word(scratch + size) != I64{0x24}) -> jet_rt_unreachable(I64{0}, I64{0})
+    if (rt_text_word(owned) != I64{0x42} || rt_text_word(scratch + size) != I64{0x24}) {
+        jet_rt_unreachable(I64{0}, I64{0})
+    }
     at = I64{0}
     loop at < size {
-        if (rt_text_byte(scratch + at) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+        if (rt_text_byte(scratch + at) != I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
         at += I64{1}
     }
     jet_rt_free(owned, size + I64{16}, I64{8})
 }
+
 #Export(c) jet_rt_equal_fixture: fn(a: I64, a_length: I64, b: I64, b_length: I64) -> I64 {
     return if rt_crypto_equal_spans(a, a_length, b, b_length) -> I64{1} else -> I64{0}
 }

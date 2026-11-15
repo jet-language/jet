@@ -7,7 +7,6 @@ package: {
 // default the link itself is described, `.Follow` describes its target (and
 // the target's hard-link count), `.Refuse` fails on a link. `files.is_file`
 // follows a final link, like `is_dir` and a shell's `test -f`.
-
 use files: core.files
 
 run: fn() {
@@ -26,7 +25,7 @@ run: fn() {
     plain: files.stat(target, links: .Refuse)
     print("refuse on a file: size={plain.size} links={plain.links}")
     if files.stat(link, links: .Refuse) == {
-        .Ok(_) -> print("refuse on a link: accepted")
+        .Ok(_) -> { print("refuse on a link: accepted") }
         .Err(error) -> print("refuse on a link: {error == .InvalidInput(_)}")
     }
     print("same file: {followed.id.inode == plain.id.inode}")

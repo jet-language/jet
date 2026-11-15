@@ -148,20 +148,32 @@ jet_cli_rights_add_func: fn(out: &[JetCLICallableView], alias: String, namespace
 jet_cli_rights_collect: fn(items: [Item], alias: String, namespace: String, source: String, out: &[JetCLICallableView]) {
     loop item in items {
         if item == {
-            .Func(function) -> jet_cli_rights_add_func(out, alias, namespace, source, None, function)
+            .Func(function) -> {
+                jet_cli_rights_add_func(out, alias, namespace, source, None, function)
+            }
             .Impl(definition) -> {
-                loop method in definition.methods -> jet_cli_rights_add_func(out, alias, namespace, source, Val(definition.type_name), method)
+                loop method in definition.methods {
+                    jet_cli_rights_add_func(out, alias, namespace, source, Val(definition.type_name), method)
+                }
             }
             .Struct(definition) -> {
-                loop method in definition.methods -> jet_cli_rights_add_func(out, alias, namespace, source, Val(definition.name), method)
+                loop method in definition.methods {
+                    jet_cli_rights_add_func(out, alias, namespace, source, Val(definition.name), method)
+                }
                 loop block in definition.trait_impls {
-                    loop method in block.methods -> jet_cli_rights_add_func(out, alias, namespace, source, Val(definition.name), method)
+                    loop method in block.methods {
+                        jet_cli_rights_add_func(out, alias, namespace, source, Val(definition.name), method)
+                    }
                 }
             }
             .Enum(definition) -> {
-                loop method in definition.methods -> jet_cli_rights_add_func(out, alias, namespace, source, Val(definition.name), method)
+                loop method in definition.methods {
+                    jet_cli_rights_add_func(out, alias, namespace, source, Val(definition.name), method)
+                }
                 loop block in definition.trait_impls {
-                    loop method in block.methods -> jet_cli_rights_add_func(out, alias, namespace, source, Val(definition.name), method)
+                    loop method in block.methods {
+                        jet_cli_rights_add_func(out, alias, namespace, source, Val(definition.name), method)
+                    }
                 }
             }
             .Trait(definition) -> {
@@ -175,9 +187,13 @@ jet_cli_rights_collect: fn(items: [Item], alias: String, namespace: String, sour
                 }
             }
             .CodeModule(nested) -> {
-                if nested.body == .Val(body) -> jet_cli_rights_collect(body, alias, "{namespace}{nested.name}__", source, out)
+                if nested.body == .Val(body) {
+                    jet_cli_rights_collect(body, alias, "{namespace}{nested.name}__", source, out)
+                }
             }
-            .GenericModule(nested) -> jet_cli_rights_collect(nested.body, alias, "{namespace}{nested.name}__", source, out)
+            .GenericModule(nested) -> {
+                jet_cli_rights_collect(nested.body, alias, "{namespace}{nested.name}__", source, out)
+            }
             .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
@@ -191,16 +207,18 @@ jet_cli_rights_declared: fn(view: JetCLICallableView) -> JetCLIRightsRow Never! 
     if view.is_pure -> reason = "pure declaration"
     if view.is_comptime -> reason = "comptime declaration"
     provenance: JetCLIRightsProvenance{source: view.key, reason: reason}
-    if view.is_comptime -> return jet_cli_rights_row("comptime", Val([String]{"Mem"}), [String]{}, provenance)
+    if view.is_comptime {
+        return jet_cli_rights_row("comptime", Val([String]{"Mem"}), [String]{}, provenance)
+    }
     if view.is_pure -> return jet_cli_rights_row("pure", Val([String]{}), [String]{}, provenance)
-    if view.is_replayable -> return jet_cli_rights_row("replayable", None, [String]{"Time", "Rand", "Net", "IO"}, provenance)
+    if view.is_replayable {
+        return jet_cli_rights_row("replayable", None, [String]{"Time", "Rand", "Net", "IO"}, provenance)
+    }
     if view.declared_effects == .Val(effects) {
         allow := [String]{}
         deny := [String]{}
         loop name in effects {
-            if name.starts_with("!") {
-                deny.push(name.slice(1..<name.len()))
-            } else {
+            if name.starts_with("!") -> deny.push(name.slice(1..<name.len())) else {
                 allow.push(name.copy())
             }
         }
@@ -228,9 +246,7 @@ jet_cli_rights_authority: fn(result: JetDriverCompileResult) -> JetCLIAuthority 
     authority
 }
 
-jet_cli_rights_text: fn(rights: [String]) -> String Never! {
-    rights.join(", ")
-}
+jet_cli_rights_text: fn(rights: [String]) -> String Never! { rights.join(", ") }
 
 jet_cli_rights_row_text: fn(row: JetCLIRightsRow) -> String Never! {
     allow: if row.allow == .Val(rights) -> jet_cli_rights_text(rights) else -> "unbounded"
@@ -238,37 +254,45 @@ jet_cli_rights_row_text: fn(row: JetCLIRightsRow) -> String Never! {
 }
 
 jet_cli_rights_provenance_value: fn(provenance: JetCLIRightsProvenance) -> JetCLIStatusValue Never! {
-    jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("source", jet_cli_status_text(provenance.source)),
-        jet_cli_status_field("reason", jet_cli_status_text(provenance.reason)),
-    })
+    jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("source", jet_cli_status_text(provenance.source)),
+            jet_cli_status_field("reason", jet_cli_status_text(provenance.reason)),
+        },
+    )
 }
 
 jet_cli_rights_row_value: fn(row: JetCLIRightsRow) -> JetCLIStatusValue Never! {
     allow: if row.allow == .Val(rights) -> jet_cli_status_texts(rights) else -> JetCLIStatusValue.Null
-    jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("kind", jet_cli_status_text(row.kind)),
-        jet_cli_status_field("allow", allow),
-        jet_cli_status_field("deny", jet_cli_status_texts(row.deny)),
-        jet_cli_status_field("provenance", jet_cli_rights_provenance_value(row.provenance)),
-    })
+    jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("kind", jet_cli_status_text(row.kind)),
+            jet_cli_status_field("allow", allow),
+            jet_cli_status_field("deny", jet_cli_status_texts(row.deny)),
+            jet_cli_status_field("provenance", jet_cli_rights_provenance_value(row.provenance)),
+        },
+    )
 }
 
 jet_cli_rights_frame_value: fn(frame: JetCLIScopeFrame) -> JetCLIStatusValue Never! {
-    jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("scope", jet_cli_status_text(frame.scope)),
-        jet_cli_status_field("name", jet_cli_status_text(frame.name)),
-        jet_cli_status_field("grants", jet_cli_status_texts(frame.grants)),
-        jet_cli_status_field("authority", jet_cli_rights_provenance_value(frame.provenance)),
-    })
+    jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("scope", jet_cli_status_text(frame.scope)),
+            jet_cli_status_field("name", jet_cli_status_text(frame.name)),
+            jet_cli_status_field("grants", jet_cli_status_texts(frame.grants)),
+            jet_cli_status_field("authority", jet_cli_rights_provenance_value(frame.provenance)),
+        },
+    )
 }
 
 jet_cli_rights_span_value: fn(source: String, start: Int, end: Int) -> JetCLIStatusValue Never! {
-    jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("source", jet_cli_status_text(source)),
-        jet_cli_status_field("start", jet_cli_status_int(start)),
-        jet_cli_status_field("end", jet_cli_status_int(end)),
-    })
+    jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("source", jet_cli_status_text(source)),
+            jet_cli_status_field("start", jet_cli_status_int(start)),
+            jet_cli_status_field("end", jet_cli_status_int(end)),
+        },
+    )
 }
 
 // Is `doc_module` the explicitly named `target` (by display or by real path)?
@@ -370,48 +394,64 @@ jet_cli_inspect_rights: fn(result: JetDriverCompileResult, project: Bool, target
             if summary == .Val(found) {
                 if found.solved.contains(denial.right) {
                     if semindex_witness(view.key, denial.right, summaries, [String]{}, modules) == .Val(witness) {
-                        loop span in witness.spans -> spans.push(jet_cli_rights_span_value(view.source, span.start, span.end))
+                        loop span in witness.spans {
+                            spans.push(jet_cli_rights_span_value(view.source, span.start, span.end))
+                        }
                     }
                 }
             }
             nearest: if denial.nearest == .Val(frame) -> jet_cli_rights_frame_value(frame) else -> JetCLIStatusValue.Null
-            chain: jet_cli_status_object([JetCLIStatusField]{
-                jet_cli_status_field("right", jet_cli_status_text(denial.right)),
-                jet_cli_status_field("call_chain", jet_cli_status_texts(denial.call_chain)),
-                jet_cli_status_field("scope_chain", jet_cli_status_array(loop frame in denial.scope_chain -> jet_cli_rights_frame_value(frame))),
-                jet_cli_status_field("nearest_granting_scope", nearest),
-            })
-            denial_values.push(jet_cli_status_object([JetCLIStatusField]{
-                jet_cli_status_field("right", jet_cli_status_text(denial.right)),
-                jet_cli_status_field("verdict", jet_cli_status_text(denial.verdict)),
-                jet_cli_status_field("chain", chain),
-                jet_cli_status_field("source_spans", jet_cli_status_array(spans)),
-            }))
+            chain: jet_cli_status_object(
+                [JetCLIStatusField]{
+                    jet_cli_status_field("right", jet_cli_status_text(denial.right)),
+                    jet_cli_status_field("call_chain", jet_cli_status_texts(denial.call_chain)),
+                    jet_cli_status_field("scope_chain", jet_cli_status_array(loop frame in denial.scope_chain -> jet_cli_rights_frame_value(frame))),
+                    jet_cli_status_field("nearest_granting_scope", nearest),
+                },
+            )
+            denial_values.push(
+                jet_cli_status_object(
+                    [JetCLIStatusField]{
+                        jet_cli_status_field("right", jet_cli_status_text(denial.right)),
+                        jet_cli_status_field("verdict", jet_cli_status_text(denial.verdict)),
+                        jet_cli_status_field("chain", chain),
+                        jet_cli_status_field("source_spans", jet_cli_status_array(spans)),
+                    },
+                ),
+            )
         }
-        effects: jet_cli_status_object([JetCLIStatusField]{
-            jet_cli_status_field("direct", jet_cli_status_texts(direct)),
-            jet_cli_status_field("callees", jet_cli_status_texts(callees)),
-            jet_cli_status_field("maximal", jet_cli_status_bool(maximal)),
-        })
-        values.push(jet_cli_status_object([JetCLIStatusField]{
-            jet_cli_status_field("callable", jet_cli_status_text(view.key)),
-            jet_cli_status_field("name", jet_cli_status_text(view.name)),
-            jet_cli_status_field("source_span", jet_cli_rights_span_value(view.source, view.span.start, view.span.end)),
-            jet_cli_status_field("declared_row", jet_cli_rights_row_value(declared)),
-            jet_cli_status_field("inferred_row", jet_cli_rights_row_value(inferred)),
-            jet_cli_status_field("inferred_effects", jet_cli_status_texts(inferred_effects)),
-            jet_cli_status_field("effects", effects),
-            jet_cli_status_field("verdict", jet_cli_status_text(verdict)),
-            jet_cli_status_field("denials", jet_cli_status_array(denial_values)),
-        }))
+        effects: jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field("direct", jet_cli_status_texts(direct)),
+                jet_cli_status_field("callees", jet_cli_status_texts(callees)),
+                jet_cli_status_field("maximal", jet_cli_status_bool(maximal)),
+            },
+        )
+        values.push(
+            jet_cli_status_object(
+                [JetCLIStatusField]{
+                    jet_cli_status_field("callable", jet_cli_status_text(view.key)),
+                    jet_cli_status_field("name", jet_cli_status_text(view.name)),
+                    jet_cli_status_field("source_span", jet_cli_rights_span_value(view.source, view.span.start, view.span.end)),
+                    jet_cli_status_field("declared_row", jet_cli_rights_row_value(declared)),
+                    jet_cli_status_field("inferred_row", jet_cli_rights_row_value(inferred)),
+                    jet_cli_status_field("inferred_effects", jet_cli_status_texts(inferred_effects)),
+                    jet_cli_status_field("effects", effects),
+                    jet_cli_status_field("verdict", jet_cli_status_text(verdict)),
+                    jet_cli_status_field("denials", jet_cli_status_array(denial_values)),
+                },
+            ),
+        )
     }
     if json {
-        authority: jet_cli_status_object([JetCLIStatusField]{
-            jet_cli_status_field("source", jet_cli_status_text(application.authority)),
-            jet_cli_status_field("required", jet_cli_status_texts(application.required)),
-            jet_cli_status_field("granted", jet_cli_status_texts(application.granted)),
-            jet_cli_status_field("denied", jet_cli_status_texts(application.denied)),
-        })
+        authority: jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field("source", jet_cli_status_text(application.authority)),
+                jet_cli_status_field("required", jet_cli_status_texts(application.required)),
+                jet_cli_status_field("granted", jet_cli_status_texts(application.granted)),
+                jet_cli_status_field("denied", jet_cli_status_texts(application.denied)),
+            },
+        )
         fields: [JetCLIStatusField]{
             jet_cli_status_field("scope", jet_cli_status_text(scope_name)),
             jet_cli_status_field("target", jet_cli_status_text(target)),

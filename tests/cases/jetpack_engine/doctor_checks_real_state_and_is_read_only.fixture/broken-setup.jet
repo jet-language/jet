@@ -4,6 +4,7 @@ use {
     process: core.process
     sys: core.sys
 }
+
 doctor_setup_writable: fn(path: String) {
     info: files.stat(path) ?? panic("metadata")
     if info.is_dir {
@@ -12,6 +13,7 @@ doctor_setup_writable: fn(path: String) {
     }
     if sys.is_unix() -> files.chmod(path, info.mode.bit_or(0o200)) ?? panic("writable")
 }
+
 run: fn() {
     args: process.args()
     meta: args[0]

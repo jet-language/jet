@@ -14,35 +14,53 @@ use {
 }
 
 SCRIPT_ROOT: "Tools/agent"
+
 SKIP_DIRECTORIES: [String]{".agent-worktrees", ".cache", ".claude", ".git", ".tmp", ".tower", "build", "node_modules", "result", "target"}
+
 PASSTHROUGH_SCRIPTS: [String]{"JetEnv.jet"}
+
 DOC_SUFFIXES: [String]{".md", ".mdx", ".txt"}
+
 RETIRED_MIRRORS: [String]{"Docs/spec/roadmap.md", "Docs/plans", "Docs/spec/reference/errors", "Docs/spec/diagnostic-rows.md", "Docs/spec/reference/core-surface-ledger.md", "Docs/spec/reference/core-backend-facts.md", "Docs/spec/reference/feature-claims.md"}
 
 LINE_BREAK: Regex{"\r?\n"}
+
 FLAG: Regex{"--[A-Za-z][A-Za-z0-9-]*"}
 
 // A script path under Tools/agent, and a bare script name passed a flag.
 AGENT_SCRIPT: Regex{"Tools/agent/([A-Za-z0-9][A-Za-z0-9_.-]*)"}
+
 BARE_SCRIPT: Regex{"(?:^|[\s\x60\x22\x27(])([A-Za-z0-9][A-Za-z0-9_.-]*\.(?:mjs|js|sh|py|rb|exs))\s+--"}
 
 // Script argv parsing: a line that names argv and compares it, a `const`
 // object literal, the three ways such an object meets argv, and its flag keys.
 LINE_COMMENT: Regex{"//[^\n]*"}
+
 NAMES_ARGV: Regex{"\b(?:arg|args|argv|flag|process\.argv)\b"}
+
 COMPARES_ARGV: Regex{"===|!==|==|!=|includes\s*\(|indexOf\s*\(|has\s*\(|contains\s*\("}
+
 CONST_OBJECT: Regex{"\bconst\s+(\w+)\s*=\s*(\{{[^{{}}]*\}})"}
+
 ARGV_IN_MAP: Regex{"(?:arg|args|argv|flag|process\.argv)\s+in\s+(\w+)"}
+
 OBJECT_AT_ARGV: Regex{"(\{{[^{{}}]*\}})\s*\[\s*(?:arg|args|argv|flag|process\.argv)\s*\]"}
+
 NAME_AT_ARGV: Regex{"\b(\w+)\s*\[\s*(?:arg|args|argv|flag|process\.argv)\s*\]"}
+
 FLAG_KEY: Regex{"[\x22\x27](--[A-Za-z][A-Za-z0-9-]*)[\x22\x27]\s*:"}
+
 SHELL_COMMENT: Regex{"(^|\s)#.*"}
+
 SHELL_PARSER_LINE: Regex{"\b(?:case|if|elif|while|until|getopts)\b|\[\[?|^\s*[-A-Za-z0-9|]+\)"}
 
 // Guidance documents: fences, headings, plan and status topics, checklists.
 FENCE: Regex{"^ {{0,3}}(\x60{{3,}}|~{{3,}})"}
+
 HEADING: Regex{"^ {{0,3}}#{{1,6}}\s+(.+?)(?:\s+#+)?\s*$"}
+
 OPERATIONAL_TOPIC: "^(?:(?:\\d+[.)]?\\s+)?(?:implementation plans?|plan of record|derived plan|roadmap|milestones?|status(?: map| report)?|(?:current|shipped|implementation|delivery) status|progress(?: report)?|staged implementation|known (?:drift|gaps)|next steps|remaining work))\\b"
+
 CHECKLIST: Regex{"^\s*[-*]\s+\[[ xX]\]"}
 
 #Error
@@ -131,9 +149,7 @@ visit_docs: fn(directory: String, found: &[String]) DocFlagsError! -[FS]> {
         if files.is_symlink(path) -> next
         if files.is_dir(path) {
             if !SKIP_DIRECTORIES.contains(name) -> visit_docs(path, found) ?? return Err(err)
-        } else if files.is_file(path) && is_doc(name) {
-            found.push(path)
-        }
+        } else if files.is_file(path) && is_doc(name) { found.push(path) }
     }
     Ok()
 }
@@ -167,9 +183,13 @@ logical_lines: fn(text: String) -> [LogicalLine] Never! {
 
 // Each flag after `script`, which ends at character `script_end` of the line.
 collect_flags: fn(doc: String, line: LogicalLine, script: String, script_end: Int, findings: &[Finding], seen: &[String:Bool]) Never! -[FS]> {
-    if PASSTHROUGH_SCRIPTS.contains(script) -> return
+    if PASSTHROUGH_SCRIPTS.contains(script) {
+        return
+    }
     script_path: "{SCRIPT_ROOT}/{script}"
-    if !files.is_file(script_path) -> return
+    if !files.is_file(script_path) {
+        return
+    }
     before: line.start_line + line.value.slice(0, script_end).count("\n")
     command: line.value.slice(script_end, line.value.len())
     loop flag in FLAG.matches(command) {
@@ -214,7 +234,9 @@ argv_source_flags: fn(source: String) -> [String] Never! {
         loop flag in FLAG.find_all(line) -> add_flag(flags, flag)
     }
     maps := [String:String]{}
-    loop object in CONST_OBJECT.matches(code) -> maps[object.groups[0].copy()] = object.groups[1].copy()
+    loop object in CONST_OBJECT.matches(code) {
+        maps[object.groups[0].copy()] = object.groups[1].copy()
+    }
     dispatch := [String]{}
     loop found in ARGV_IN_MAP.matches(code) -> dispatch.push(maps.get(found.groups[0]) ?? "")
     loop found in OBJECT_AT_ARGV.matches(code) -> dispatch.push(found.groups[0].copy())
@@ -239,8 +261,12 @@ shell_source_flags: fn(source: String) -> [String] Never! {
 
 source_flags: fn(script_path: String) -[FS]> [String] DocFlagsError! {
     source: read_text(script_path) ?? return Err(err)
-    if script_path.ends_with(".js") || script_path.ends_with(".mjs") || script_path.ends_with(".jet") -> return Ok(argv_source_flags(source))
-    if script_path.ends_with(".sh") || source.starts_with("#!/usr/bin/env bash") -> return Ok(shell_source_flags(source))
+    if script_path.ends_with(".js") || script_path.ends_with(".mjs") || script_path.ends_with(".jet") {
+        return Ok(argv_source_flags(source))
+    }
+    if script_path.ends_with(".sh") || source.starts_with("#!/usr/bin/env bash") {
+        return Ok(shell_source_flags(source))
+    }
     Ok([String]{})
 }
 
@@ -254,9 +280,7 @@ documentation_policy_errors: fn(path: String, text: String) -> [String] Never! {
         if FENCE.match(line) == {
             .Val(marker) -> {
                 run: marker.groups[0]
-                if fence == "" {
-                    fence = run.copy()
-                } else if run.slice(0, 1) == fence.slice(0, 1) && run.len() >= fence.len() && line.slice(marker.end, line.len()).trim() == "" {
+                if fence == "" -> fence = run.copy() else if run.slice(0, 1) == fence.slice(0, 1) && run.len() >= fence.len() && line.slice(marker.end, line.len()).trim() == "" {
                     fence = ""
                 }
                 next
@@ -266,11 +290,15 @@ documentation_policy_errors: fn(path: String, text: String) -> [String] Never! {
         if fence != "" -> next
         if HEADING.match(line) == {
             .Val(heading) -> {
-                if operational.is_match(heading.groups[0]) -> findings.push("{path}:{index + 1}: plans and development status belong in Tower")
+                if operational.is_match(heading.groups[0]) {
+                    findings.push("{path}:{index + 1}: plans and development status belong in Tower")
+                }
             }
             .None -> {}
         }
-        if CHECKLIST.is_match(line) -> findings.push("{path}:{index + 1}: work checklists belong on Tower cards")
+        if CHECKLIST.is_match(line) {
+            findings.push("{path}:{index + 1}: work checklists belong on Tower cards")
+        }
     }
     findings
 }
@@ -285,7 +313,9 @@ check_documentation_policy: fn() -[FS, IO]> Int DocFlagsError! {
         loop failure in documentation_policy_errors(path, text) -> failures.push(failure)
     }
     loop retired in RETIRED_MIRRORS {
-        if files.exists(retired) -> failures.push("{retired}: use Tower or generate the reference from code on demand")
+        if files.exists(retired) {
+            failures.push("{retired}: use Tower or generate the reference from code on demand")
+        }
     }
     if failures.len() > 0 {
         term.eprint(failures.join("\n"))
@@ -304,7 +334,9 @@ check_doc_flags: fn() -[FS, IO]> Int DocFlagsError! {
     accepted := [String:[String]]{}
     errors := [String]{}
     loop finding in findings {
-        if accepted.get(finding.script_path) == None -> accepted[finding.script_path.copy()] = source_flags(finding.script_path) ?? return Err(err)
+        if accepted.get(finding.script_path) == None {
+            accepted[finding.script_path.copy()] = source_flags(finding.script_path) ?? return Err(err)
+        }
         flags: accepted.get(finding.script_path) ?? [String]{}
         if flags.contains(finding.flag) -> next
         sorted := flags

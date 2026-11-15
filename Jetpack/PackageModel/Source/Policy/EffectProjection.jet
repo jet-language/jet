@@ -10,7 +10,9 @@ use {
 }
 
 EFFECT_AUTHORITY_PACKAGE: "package.jet authority"
+
 EFFECT_AUTHORITY_PACKAGE_GRANTS: "package.jet authority.grants"
+
 EFFECT_STATUS_ACTION: "build.effects"
 
 // One checked program's application-boundary view.
@@ -27,9 +29,9 @@ pkg_effect_names_or_none: fn(effects: [String]) -> String Never! {
 }
 
 // Every effect reachable from `entry` through statically known calls.
-pkg_entry_effects: fn(summaries: [String: PackageEffectSummary], entry: String) -> [String] Never! {
+pkg_entry_effects: fn(summaries: [String:PackageEffectSummary], entry: String) -> [String] Never! {
     effects := [String]{}
-    seen := [String: Bool]{}
+    seen := [String:Bool]{}
     pending := [String]{entry}
     loop pending.len() > 0 {
         key: pending.pop() ?? break
@@ -42,7 +44,7 @@ pkg_entry_effects: fn(summaries: [String: PackageEffectSummary], entry: String) 
     authority_holds(effects)
 }
 
-pkg_program_effects: fn(program: EffectBudgetProgram, summaries: [String: PackageEffectSummary], default_entry: String) -> [String] Never! {
+pkg_program_effects: fn(program: EffectBudgetProgram, summaries: [String:PackageEffectSummary], default_entry: String) -> [String] Never! {
     candidates: pkg_effect_entry_candidates(program, summaries, default_entry)
     if candidates.len() == 0 -> return [String]{}
     pkg_entry_effects(summaries, candidates[0])
@@ -63,11 +65,11 @@ pkg_render_effect_json: fn(effects: [String]) -> String ReportError! {
     StatusEnvelope.new(EFFECT_STATUS_ACTION, true).with_field("effects", pkg_effect_texts(effects)).json()
 }
 
-pkg_effect_summary_line_for_program: fn(program: EffectBudgetProgram, summaries: [String: PackageEffectSummary], default_entry: String) -> String Never! {
+pkg_effect_summary_line_for_program: fn(program: EffectBudgetProgram, summaries: [String:PackageEffectSummary], default_entry: String) -> String Never! {
     pkg_render_effect_line(pkg_program_effects(program, summaries, default_entry))
 }
 
-pkg_effect_summary_json_for_program: fn(program: EffectBudgetProgram, summaries: [String: PackageEffectSummary], default_entry: String) -> String ReportError! {
+pkg_effect_summary_json_for_program: fn(program: EffectBudgetProgram, summaries: [String:PackageEffectSummary], default_entry: String) -> String ReportError! {
     pkg_render_effect_json(pkg_program_effects(program, summaries, default_entry))
 }
 
@@ -79,12 +81,16 @@ pkg_render_effect_projection_line: fn(projection: EffectProjection) -> String Ne
 // The JSON object embedded in semantic-index, dossier, and Canvas documents,
 // so the four roles stay one shared projection.
 pkg_render_effect_projection_object: fn(projection: EffectProjection) -> String Never! {
-    pkg_json_render(Dyn.Object([
-        "required_effects": pkg_json_texts(projection.required_effects),
-        "granted_effects": pkg_json_texts(projection.granted_effects),
-        "denied_effects": pkg_json_texts(projection.denied_effects),
-        "authority": Dyn.Text(projection.authority.copy()),
-    ]))
+    pkg_json_render(
+        Dyn.Object(
+            [
+                "required_effects": pkg_json_texts(projection.required_effects),
+                "granted_effects": pkg_json_texts(projection.granted_effects),
+                "denied_effects": pkg_json_texts(projection.denied_effects),
+                "authority": Dyn.Text(projection.authority.copy()),
+            ],
+        ),
+    )
 }
 
 // Machine application-boundary summary. The legacy `effects` field stays for
@@ -103,10 +109,10 @@ pkg_render_effect_projection_json: fn(projection: EffectProjection) -> String Re
 // Human build status: effects reachable through statically known calls from
 // the selected entry. Open function values stay conservative in enforcement
 // but do not invent every ambient effect here.
-pkg_effect_summary_line_for_entry: fn(summaries: [String: PackageEffectSummary], entry: String) -> String Never! {
+pkg_effect_summary_line_for_entry: fn(summaries: [String:PackageEffectSummary], entry: String) -> String Never! {
     pkg_render_effect_line(pkg_entry_effects(summaries, entry))
 }
 
-pkg_effect_summary_json_for_entry: fn(summaries: [String: PackageEffectSummary], entry: String) -> String ReportError! {
+pkg_effect_summary_json_for_entry: fn(summaries: [String:PackageEffectSummary], entry: String) -> String ReportError! {
     pkg_render_effect_json(pkg_entry_effects(summaries, entry))
 }

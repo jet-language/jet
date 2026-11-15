@@ -4,10 +4,19 @@
 // a plain literal never reaches the compiler.
 use {
     jet_foundation.[
-        CtValue, Expr, Func, JET_CONFIG_VALUE_NAME, JetConfigOutcome, compiler_service_comptime_outcome,
-        compiler_service_comptime_request, compiler_service_comptime_request_from,
-        compiler_service_comptime_response, expr_span, foundation_parse_protocol_json,
-        jet_config_eval_diagnostic, jet_config_eval_placed,
+        CtValue,
+        Expr,
+        Func,
+        JET_CONFIG_VALUE_NAME,
+        JetConfigOutcome,
+        compiler_service_comptime_outcome,
+        compiler_service_comptime_request,
+        compiler_service_comptime_request_from,
+        compiler_service_comptime_response,
+        expr_span,
+        foundation_parse_protocol_json,
+        jet_config_eval_diagnostic,
+        jet_config_eval_placed,
     ]
     jet_parser.[jet_config_program, parse_source]
     jet_env_model.[comptime_evaluate, envmodel_find_jet_binary]
@@ -16,14 +25,14 @@ use {
 }
 
 // The first top-level constant of `source`, with the source's functions.
-envmodel_service_test_constant: fn(source: String) -> (expr: Expr, funcs: [String: Func]) {
+envmodel_service_test_constant: fn(source: String) -> (expr: Expr, funcs: [String:Func]) {
     parsed: parse_source(source.bytes())
     assert_eq(parsed.diagnostics.len(), 0)
-    funcs := [String: Func]{}
+    funcs := [String:Func]{}
     found := Expr?{None}
     loop item in parsed.program.items {
         if item == {
-            .Func(function) -> funcs[function.name] = function
+            .Func(function) -> { funcs[function.name] = function }
             .Const(constant) -> {
                 if found == None -> found = Val(constant.value)
             }
@@ -36,7 +45,7 @@ envmodel_service_test_constant: fn(source: String) -> (expr: Expr, funcs: [Strin
 #Test("compiler service comptime request carries the config value program") {
     source: "double: fn(x: Int) -> Int {{ x * 2 }}\nVALUE: double(PORT)\n"
     fixture: envmodel_service_test_constant(source)
-    globals := [String: CtValue]{}
+    globals := [String:CtValue]{}
     globals["PORT"] = CtValue.Int{value: 21}
     program: jet_config_program(fixture.expr, source, fixture.funcs, globals) ?? panic("the config value program builds")
     assert(program.contains("double: fn(x: Int) -> Int {{ x * 2 }}"), program)
@@ -54,14 +63,14 @@ envmodel_service_test_constant: fn(source: String) -> (expr: Expr, funcs: [Strin
 #Test("config value program carries a call operand through its closing paren") {
     source: "VALUE: 1 + missing()\n"
     fixture: envmodel_service_test_constant(source)
-    program: jet_config_program(fixture.expr, source, fixture.funcs, [String: CtValue]{}) ?? panic("the config value program builds: {err.diagnostic.what}")
+    program: jet_config_program(fixture.expr, source, fixture.funcs, [String:CtValue]{}) ?? panic("the config value program builds: {err.diagnostic.what}")
     assert_eq(program, "{JET_CONFIG_VALUE_NAME}: #run {{ 1 + missing() }}\n")
 }
 
 #Test("config value program closes a nested call past a string paren") {
     source: "g: fn(x: Int) -> Int {{ x }}\nf: fn(x: Int, label: String) -> Int {{ x }}\nVALUE: f(g(X), \")\")\n"
     fixture: envmodel_service_test_constant(source)
-    globals := [String: CtValue]{}
+    globals := [String:CtValue]{}
     globals["X"] = CtValue.Int{value: 1}
     program: jet_config_program(fixture.expr, source, fixture.funcs, globals) ?? panic("the config value program builds: {err.diagnostic.what}")
     assert(program.contains("JET_CONFIG_GLOBAL_0: 1"), program)
@@ -71,7 +80,7 @@ envmodel_service_test_constant: fn(source: String) -> (expr: Expr, funcs: [Strin
 #Test("config value program ends a call at its paren, not at a comment") {
     source: "double: fn(x: Int) -> Int {{ x * 2 }}\nVALUE: double(PORT /* ) */) // (twice)\n"
     fixture: envmodel_service_test_constant(source)
-    globals := [String: CtValue]{}
+    globals := [String:CtValue]{}
     globals["PORT"] = CtValue.Int{value: 21}
     program: jet_config_program(fixture.expr, source, fixture.funcs, globals) ?? panic("the config value program builds: {err.diagnostic.what}")
     assert(program.contains("{JET_CONFIG_VALUE_NAME}: #run {{ double(JET_CONFIG_GLOBAL_0 /* ) */) }}\n"), program)
@@ -100,7 +109,7 @@ envmodel_service_test_constant: fn(source: String) -> (expr: Expr, funcs: [Strin
     cases: [(source: String, expected: CtValue)]{(source: "VALUE: 42\n", expected: CtValue.Int{value: 42}), (source: "VALUE: \"text\"\n", expected: CtValue.Str{value: "text"}), (source: "VALUE: (true)\n", expected: CtValue.Bool{value: true})}
     loop row in cases {
         fixture: envmodel_service_test_constant(row.source)
-        value: comptime_evaluate(fixture.expr, row.source, fixture.funcs, "/nonexistent", [String: CtValue]{}) ?? panic("a literal is its own value: {err.diagnostic.what}")
+        value: comptime_evaluate(fixture.expr, row.source, fixture.funcs, "/nonexistent", [String:CtValue]{}) ?? panic("a literal is its own value: {err.diagnostic.what}")
         assert(value == row.expected)
     }
 }

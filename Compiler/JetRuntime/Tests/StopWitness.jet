@@ -18,6 +18,7 @@ use {
 }
 
 GOLDENS: "Compiler/JetRuntime/Tests"
+
 USAGE: "usage: jet Compiler/JetRuntime/Tests/StopWitness.jet WITNESS OUT BINARY"
 
 // What one run of the binary left: `exited` is false when no exit status exists
@@ -44,14 +45,10 @@ resolve: fn(cwd: String, path: String) -> String Never! {
         if part == ".." {
             if parts.len() > 0 {
                 kept := [String]{}
-                loop index in 0..<parts.len() - 1 {
-                    kept.push(parts[index].copy())
-                }
+                loop index in 0..<parts.len() - 1 { kept.push(parts[index].copy()) }
                 parts = kept
             }
-        } else if part != "" && part != "." {
-            parts.push(part.copy())
-        }
+        } else if part != "" && part != "." { parts.push(part.copy()) }
     }
     "/{parts.join("/")}"
 }
@@ -68,9 +65,9 @@ json_text: fn(text: String) -> String Never! {
     out := ""
     loop byte in text.bytes() {
         code: Int{byte}
-        if code == 34 -> out = "{out}\\\""
-        else if code == 92 -> out = "{out}\\\\"
-        else -> out = "{out}{String.from_bytes_lossy([U8]{byte})}"
+        if code == 34 -> out = "{out}\\\"" else if code == 92 -> out = "{out}\\\\" else {
+            out = "{out}{String.from_bytes_lossy([U8]{byte})}"
+        }
     }
     "\"{out}\""
 }
@@ -86,12 +83,18 @@ signal_name: fn(number: Int) -> String Never! {
 // spawn failures and timeouts as an error message.
 run_binary: fn(binary: String, mode: String) -[Exec, FS, IO, Time.Wait]> Outcome Never! {
     none := [U8]{}
-    if !files.exists(binary) -> return Outcome{stdout: none.copy(), stderr: none.copy(), status: 0, exited: false, signal: "", error: "spawnSync {binary} ENOENT"}
+    if !files.exists(binary) {
+        return Outcome{stdout: none.copy(), stderr: none.copy(), status: 0, exited: false, signal: "", error: "spawnSync {binary} ENOENT"}
+    }
     if process.cmd([String]{binary.copy(), mode.copy()}).timeout(30s).run() == {
         .Ok(receipt) -> {
             stdout: receipt.output.bytes()
-            if receipt.timed_out -> return Outcome{stdout: stdout, stderr: receipt.errors.bytes(), status: 0, exited: false, signal: "SIGTERM", error: "spawnSync {binary} ETIMEDOUT"}
-            if receipt.signal == .Val(number) -> return Outcome{stdout: stdout, stderr: receipt.errors.bytes(), status: 0, exited: false, signal: signal_name(number), error: ""}
+            if receipt.timed_out {
+                return Outcome{stdout: stdout, stderr: receipt.errors.bytes(), status: 0, exited: false, signal: "SIGTERM", error: "spawnSync {binary} ETIMEDOUT"}
+            }
+            if receipt.signal == .Val(number) {
+                return Outcome{stdout: stdout, stderr: receipt.errors.bytes(), status: 0, exited: false, signal: signal_name(number), error: ""}
+            }
             Outcome{stdout: stdout, stderr: receipt.errors.bytes(), status: receipt.code, exited: true, signal: "", error: ""}
         }
         .Err(error) -> {
@@ -121,7 +124,9 @@ record: fn(out: String, mode: String, outcome: Outcome) -[FS, IO]> Bool Never! {
     write_file("{out}/{mode}.status.json", "{{\"status\":{status},\"signal\":{signal},\"error\":{error}}}\n".bytes())
 }
 
-fatal: fn(outcome: Outcome) -> Bool Never! { outcome.error == "" && outcome.signal == "" && outcome.exited && outcome.status == 101 }
+fatal: fn(outcome: Outcome) -> Bool Never! {
+    outcome.error == "" && outcome.signal == "" && outcome.exited && outcome.status == 101
+}
 
 // "<status>/<signal>/<error>" as the exit messages show a run.
 shown: fn(outcome: Outcome) -> String Never! {
@@ -147,11 +152,15 @@ data_sequence: fn(cwd: String, out: String, binary: String) -[Exec, FS, IO, Time
             golden_path: "{cwd}/{GOLDENS}/{golden}"
             expected: if files.read_bytes(golden_path) == {
                 .Ok(value) -> value
-                .Err(_) -> { return fail("ENOENT: no such file or directory, open '{golden_path}'") }
+                .Err(_) -> {
+                    return fail("ENOENT: no such file or directory, open '{golden_path}'")
+                }
             }
             matched = same_bytes(outcome.stderr, expected)
         }
-        if !matched -> return fail("{mode}: expected exit 101, empty stdout and exact {golden}; got {shown(outcome)}")
+        if !matched {
+            return fail("{mode}: expected exit 101, empty stdout and exact {golden}; got {shown(outcome)}")
+        }
         rows.push("{mode}\tpass\texit=101\tstderr-byte-identical=true")
     }
     if !write_file("{out}/data-sequence-results.tsv", "{rows.join("\n")}\n".bytes()) -> return 1
@@ -168,9 +177,13 @@ scalar_reflect: fn(out: String, binary: String) -[Exec, FS, IO, Time.Wait]> Int 
         outcome: run_binary(binary, mode)
         if !record(out, mode, outcome) -> return 1
         if !fatal(outcome) -> return fail("{mode}: expected fatal exit 101, got {shown(outcome)}")
-        if !same_bytes(outcome.stdout, "flushed".bytes()) -> return fail("{mode}: pending runtime stdout was not flushed")
+        if !same_bytes(outcome.stdout, "flushed".bytes()) {
+            return fail("{mode}: pending runtime stdout was not flushed")
+        }
         golden: "index out of bounds: the len is 0 but the index is {indexes[index]}\n"
-        if !same_bytes(outcome.stderr, golden.bytes()) -> return fail("{mode}: stderr differs from exact foreign-panic body")
+        if !same_bytes(outcome.stderr, golden.bytes()) {
+            return fail("{mode}: stderr differs from exact foreign-panic body")
+        }
         rows.push("{mode}\tpass\texit=101\tstdout-flushed=true\tstderr-byte-identical=true")
     }
     if !write_file("{out}/scalar-reflect-stops.tsv", "{rows.join("\n")}\n".bytes()) -> return 1
@@ -182,8 +195,12 @@ stop_witness: fn(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
     if args.len() == 0 -> return fail("{USAGE}\nWITNESS is one of: data-sequence, scalar-reflect")
     key: args[0]
     operand: if key == "data-sequence" -> "DYN_WITNESS" else if key == "scalar-reflect" -> "SCALAR_REFLECT_WITNESS" else -> ""
-    if operand == "" -> return fail("unknown witness: {key}\nWITNESS is one of: data-sequence, scalar-reflect")
-    if args.len() != 3 || args.contains("") -> return fail("usage: jet Compiler/JetRuntime/Tests/StopWitness.jet {key} OUT {operand}")
+    if operand == "" {
+        return fail("unknown witness: {key}\nWITNESS is one of: data-sequence, scalar-reflect")
+    }
+    if args.len() != 3 || args.contains("") {
+        return fail("usage: jet Compiler/JetRuntime/Tests/StopWitness.jet {key} OUT {operand}")
+    }
     cwd: files.cwd() ?? return fail("cannot read the working directory: {err}")
     out: resolve(cwd, args[1])
     binary: resolve(cwd, args[2])

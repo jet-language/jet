@@ -1,4 +1,3 @@
-
 cli_test_cc_parse: fn(args: [String]) -> DriverOptions {
     cli_cc_parse_args("cc", args) ?? panic("driver arguments must parse")
 }
@@ -35,7 +34,7 @@ cli_test_cc_parse_error: fn(args: [String]) -> String {
     probes: [(argument: String, probe: DriverProbe)]{
         (argument: "-dumpmachine", probe: DriverProbe.DumpMachine),
         (argument: "-print-sysroot", probe: DriverProbe.PrintSysroot),
-        (argument: "-dumpversion", probe: DriverProbe.DumpVersion)
+        (argument: "-dumpversion", probe: DriverProbe.DumpVersion),
     }
     loop entry in probes {
         options: cli_test_cc_parse([String]{entry.argument})
@@ -57,7 +56,7 @@ cli_test_cc_parse_error: fn(args: [String]) -> String {
 // A pack-layout descriptor for `target`, built from the facts a pack target
 // entry records.
 cli_test_cc_pack_descriptor: fn(target: String) -> CcToolchainDescriptor {
-    facts: [String: String]{
+    facts: [String:String]{
         "cc.bundle.sha256": "sha256-bundle",
         "cc.compiler.root.sha256": "sha256-pack",
         "cc.sysroot": "sysroot",
@@ -71,9 +70,9 @@ cli_test_cc_pack_descriptor: fn(target: String) -> CcToolchainDescriptor {
         "cc.cxx": CC_PACK_CLANG,
         "cc.cxx.sha256": "clang",
         "cc.linker": CC_PACK_LLD,
-        "cc.linker.sha256": "lld"
+        "cc.linker.sha256": "lld",
     }
-    plan: ProviderPlanFacts.from_facts([String: String]{"action.kind": "cc-toolchain-provision", "action.recipe": CC_TOOLCHAIN_RECIPE_ID}) ?? panic("plan facts")
+    plan: ProviderPlanFacts.from_facts([String:String]{"action.kind": "cc-toolchain-provision", "action.recipe": CC_TOOLCHAIN_RECIPE_ID}) ?? panic("plan facts")
     producer: ProducerRecord{provider: CC_TOOLCHAIN_PRODUCER, immutable_source: "jet-release:pack", source_digest: "sha256-bundle", plan: plan, toolchain_facts: CC_TOOLCHAIN_RECIPE_ID, policy_facts: "", facts: facts}
     envelope: Envelope{output_hash: "sha256-bundle", platform: "", signature: "", provenance: ""}
     provider_cc_pack_descriptor("entry", "/hangar/entry", "/hangar/objects/sha256-pack", [String]{"sha256-pack"}, envelope, producer) ?? panic("pack descriptor")

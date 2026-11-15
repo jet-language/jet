@@ -32,19 +32,23 @@ FlakeGraph: struct {
     parse_with_lock: fn(source: String, text: String, lock_text: String?, validate: Bool) -> FlakeGraph TrustError! {
         fingerprint: pkg_sha256_hex(text.bytes())
         stripped: trust_nix_strip_comments(text)
-        by_name := [String: FlakeInput]{}
+        by_name := [String:FlakeInput]{}
         loop assignment in trust_nix_input_assignments(stripped) {
             name: trust_text_trim_byte(assignment.path, TRUST_DOT)
             if name == "" -> return Err(TrustError.EmptyInputName)
             entry := by_name.get(name) ?? FlakeInput{name: name.copy(), url: "", revision: "", follows: "", provenance: "{source}:inputs.{assignment.path}.{assignment.field}"}
             if assignment.field == {
                 "url" -> {
-                    if entry.url != "" && entry.url != assignment.value -> return Err(TrustError.ConflictingInput{input: name, field: assignment.field})
+                    if entry.url != "" && entry.url != assignment.value {
+                        return Err(TrustError.ConflictingInput{input: name, field: assignment.field})
+                    }
                     entry.url = assignment.value
                     entry.revision = trust_flake_revision(assignment.value)
                 }
                 "follows" -> {
-                    if entry.follows != "" && entry.follows != assignment.value -> return Err(TrustError.ConflictingInput{input: name, field: assignment.field})
+                    if entry.follows != "" && entry.follows != assignment.value {
+                        return Err(TrustError.ConflictingInput{input: name, field: assignment.field})
+                    }
                     entry.follows = assignment.value
                 }
                 else -> return Err(TrustError.InvalidAssignment(assignment.field))
@@ -66,17 +70,17 @@ FlakeGraph: struct {
         }
         if stripped.contains("perSystem") && composition == None -> unsupported.push("perSystem")
         graph := FlakeGraph{
-            source,
+            source: source,
             source_fingerprint: fingerprint,
-            inputs,
+            inputs: inputs,
             lock_nodes: [FlakeLockNode]{},
             registries: [FlakeRegistryEntry]{},
             outputs: trust_flake_output_set(outputs),
-            composition,
-            unsupported
+            composition: composition,
+            unsupported: unsupported,
         }
         if lock_text == {
-            .Val(lock) -> graph.apply_flake_lock(lock)
+            .Val(lock) -> { graph.apply_flake_lock(lock) }
             .None -> {}
         }
         graph.propagate_follows()
@@ -97,12 +101,12 @@ FlakeGraph: struct {
         graph: FlakeGraph{
             source: locked_source,
             source_fingerprint: trust_flake_lock_fingerprint(lock),
-            inputs,
-            lock_nodes,
-            registries,
-            outputs,
-            composition,
-            unsupported: trust_flake_lock_unsupported(lock)
+            inputs: inputs,
+            lock_nodes: lock_nodes,
+            registries: registries,
+            outputs: outputs,
+            composition: composition,
+            unsupported: trust_flake_lock_unsupported(lock),
         }
         trust_flake_check_semantic_root_inputs(graph)
         graph.validate()
@@ -127,18 +131,24 @@ FlakeGraph: struct {
         loop input_name in root_names {
             resolved: trust_flake_lock_node_name(Val(root_inputs[input_name]), nodes, "root")
             node_name: resolved ?? return Err(TrustError.IO("flake.lock root input `{input_name}` has no node reference"))
-            if !node_names.contains(node_name) -> return Err(TrustError.IO("flake.lock root input points to missing node `{node_name}`"))
+            if !node_names.contains(node_name) {
+                return Err(TrustError.IO("flake.lock root input points to missing node `{node_name}`"))
+            }
         }
         source_names := [String]{}
         loop input in self.inputs -> source_names.push(input.name)
         loop input_name in root_names {
-            if !source_names.contains(input_name) -> return Err(TrustError.IO("flake.lock root input `{input_name}` is not declared by flake.nix"))
+            if !source_names.contains(input_name) {
+                return Err(TrustError.IO("flake.lock root input `{input_name}` is not declared by flake.nix"))
+            }
         }
         registries := [FlakeRegistryEntry]{}
         loop node in self.lock_nodes {
             alias: trust_flake_indirect_alias(node.original)
             if alias == {
-                .Val(name) -> registries.push(FlakeRegistryEntry{alias: name, node: node.name, original: node.original, locked: node.locked})
+                .Val(name) -> {
+                    registries.push(FlakeRegistryEntry{alias: name, node: node.name, original: node.original, locked: node.locked})
+                }
                 .None -> {}
             }
         }
@@ -160,7 +170,9 @@ FlakeGraph: struct {
                     }
                 }
                 .None -> {
-                    if input.revision == "" && input.follows == "" -> return Err(TrustError.MissingRevision{input: input.name})
+                    if input.revision == "" && input.follows == "" {
+                        return Err(TrustError.MissingRevision{input: input.name})
+                    }
                 }
             }
         }
@@ -168,13 +180,13 @@ FlakeGraph: struct {
 
     // An input that follows another takes the revision its chain resolves to.
     propagate_follows: fn(&self) TrustError! {
-        facts := [String: FlakeInput]{}
+        facts := [String:FlakeInput]{}
         loop input in self.inputs -> facts[input.name] = input.copy()
         loop index in 0..<self.inputs.len() {
             follows: self.inputs[index].follows
             if follows == "" -> next
             if trust_flake_follow_revision(follows, facts, [String]{}) == {
-                .Val(revision) -> self.inputs[index].revision = revision
+                .Val(revision) -> { self.inputs[index].revision = revision }
                 .None -> {}
             }
         }
@@ -191,7 +203,9 @@ FlakeGraph: struct {
         }
         lock_names := [String]{}
         loop node in self.lock_nodes {
-            if lock_names.contains(node.name) -> return Err(TrustError.IO("flake.lock has duplicate node `{node.name}`"))
+            if lock_names.contains(node.name) {
+                return Err(TrustError.IO("flake.lock has duplicate node `{node.name}`"))
+            }
             lock_names.push(node.name)
         }
         node_values: trust_flake_lock_node_values(self.lock_nodes)
@@ -200,22 +214,32 @@ FlakeGraph: struct {
                 reference: trust_json_parse_or_io(edge.target, "flake.lock edge is invalid")
                 resolved: trust_flake_lock_node_name(Val(reference), node_values, node.name)
                 target: resolved ?? return Err(TrustError.IO("flake.lock node `{node.name}` input `{edge.name}` has an empty node reference"))
-                if !lock_names.contains(target) -> return Err(TrustError.IO("flake.lock node `{node.name}` input `{edge.name}` points to missing node `{target}`"))
+                if !lock_names.contains(target) {
+                    return Err(TrustError.IO("flake.lock node `{node.name}` input `{edge.name}` points to missing node `{target}`"))
+                }
             }
         }
         aliases := [String]{}
         loop entry in self.registries {
-            if aliases.contains(entry.alias) -> return Err(TrustError.IO("flake.lock has duplicate indirect registry aliases"))
+            if aliases.contains(entry.alias) {
+                return Err(TrustError.IO("flake.lock has duplicate indirect registry aliases"))
+            }
             aliases.push(entry.alias)
         }
         loop entry in self.registries {
-            if !lock_names.contains(entry.node) -> return Err(TrustError.IO("flake registry alias `{entry.alias}` points to missing node `{entry.node}`"))
+            if !lock_names.contains(entry.node) {
+                return Err(TrustError.IO("flake registry alias `{entry.alias}` points to missing node `{entry.node}`"))
+            }
         }
         loop input in self.inputs {
-            if input.url != "" && input.revision == "" -> return Err(TrustError.MissingRevision{input: input.name})
-            if input.follows != "" && !names.contains(input.follows) -> return Err(TrustError.MissingFollows{input: input.name, follows: input.follows})
+            if input.url != "" && input.revision == "" {
+                return Err(TrustError.MissingRevision{input: input.name})
+            }
+            if input.follows != "" && !names.contains(input.follows) {
+                return Err(TrustError.MissingFollows{input: input.name, follows: input.follows})
+            }
         }
-        edges := [String: String]{}
+        edges := [String:String]{}
         loop input in self.inputs {
             if input.follows != "" -> edges[input.name] = input.follows
         }
@@ -263,7 +287,7 @@ FlakeGraph: struct {
                 key: "flake-input:{input.name}",
                 exact: input.revision,
                 hash: trust_sha256_nul_joined([String]{input.url, input.follows, input.provenance}),
-                platform: ""
+                platform: "",
             }
             rationale := LockRationale.empty()
             rationale.source_ref = input.url
@@ -288,7 +312,7 @@ FlakeGraph: struct {
                 key: "flake-output:{output.name}",
                 exact: exact.copy(),
                 hash: trust_sha256_nul_joined([String]{exact.copy(), output.provenance}),
-                platform: output.system
+                platform: output.system,
             }
             rationale := LockRationale.empty()
             rationale.source_ref = self.source
@@ -319,7 +343,7 @@ FlakeGraph: struct {
         rationale.source_ref = self.source
         rationale.provider = provider
         rationale.reason = reason
-        SemanticRecord.new(LockIdentity{kind: LockRecordKind.FlakeEvaluator, key, hash: pkg_sha256_hex(exact.bytes()), exact, platform: ""}, rationale)
+        SemanticRecord.new(LockIdentity{kind: LockRecordKind.FlakeEvaluator, key: key, hash: pkg_sha256_hex(exact.bytes()), exact: exact, platform: ""}, rationale)
     }
 
     // The declarative flake-parts composition record.
@@ -329,13 +353,15 @@ FlakeGraph: struct {
         rationale.source_ref = self.source
         rationale.provider = "flake-parts"
         rationale.reason = "declarative flake-parts composition"
-        SemanticRecord.new(LockIdentity{kind: LockRecordKind.FlakeComposition, key: "flake-composition:{composition.framework}", hash: pkg_sha256_hex(exact.bytes()), exact, platform: ""}, rationale)
+        SemanticRecord.new(LockIdentity{kind: LockRecordKind.FlakeComposition, key: "flake-composition:{composition.framework}", hash: pkg_sha256_hex(exact.bytes()), exact: exact, platform: ""}, rationale)
     }
 
     // The `[[lock_input]]` entries: URL and follows spelling per input.
     lock_inputs: fn(self) -> [LockInput] Never! {
         inputs := [LockInput]{}
-        loop input in self.inputs -> inputs.push(LockInput{name: input.name, url: input.url, follows: input.follows})
+        loop input in self.inputs {
+            inputs.push(LockInput{name: input.name, url: input.url, follows: input.follows})
+        }
         inputs
     }
 
@@ -353,11 +379,11 @@ FlakeGraph: struct {
         }
         loop record in self.output_records() -> records.push(record)
         if self.composition == {
-            .Val(composition) -> records.push(self.composition_record(composition))
+            .Val(composition) -> { records.push(self.composition_record(composition)) }
             .None -> {}
         }
         loop record in self.unsupported_records() -> records.push(record)
-        SemanticLockFile{records, inputs: self.lock_inputs(), source_maps: [SourceMapEntry]{}}
+        SemanticLockFile{records: records, inputs: self.lock_inputs(), source_maps: [SourceMapEntry]{}}
     }
 
     // Stable lock text for callers that need a round-trip projection; the
@@ -371,23 +397,31 @@ FlakeGraph: struct {
         // These projected objects contain only Text leaves and text keys.
         inputs := [Dyn]{}
         loop input in self.inputs {
-            inputs.push(trust_json_object_tree([TrustJSONField]{
-                {key: "name", value: Dyn.Text(input.name.copy())},
-                {key: "url", value: Dyn.Text(input.url.copy())},
-                {key: "revision", value: Dyn.Text(input.revision.copy())},
-                {key: "follows", value: Dyn.Text(input.follows.copy())},
-                {key: "provenance", value: Dyn.Text(input.provenance.copy())}
-            }))
+            inputs.push(
+                trust_json_object_tree(
+                    [TrustJSONField]{
+                        {key: "name", value: Dyn.Text(input.name.copy())},
+                        {key: "url", value: Dyn.Text(input.url.copy())},
+                        {key: "revision", value: Dyn.Text(input.revision.copy())},
+                        {key: "follows", value: Dyn.Text(input.follows.copy())},
+                        {key: "provenance", value: Dyn.Text(input.provenance.copy())},
+                    },
+                ),
+            )
         }
         outputs := [Dyn]{}
         loop output in self.outputs {
-            outputs.push(trust_json_object_tree([TrustJSONField]{
-                {key: "name", value: Dyn.Text(output.name.copy())},
-                {key: "kind", value: Dyn.Text(output.kind.label())},
-                {key: "system", value: Dyn.Text(output.system.copy())},
-                {key: "attribute", value: Dyn.Text(output.attribute.copy())},
-                {key: "provenance", value: Dyn.Text(output.provenance.copy())}
-            }))
+            outputs.push(
+                trust_json_object_tree(
+                    [TrustJSONField]{
+                        {key: "name", value: Dyn.Text(output.name.copy())},
+                        {key: "kind", value: Dyn.Text(output.kind.label())},
+                        {key: "system", value: Dyn.Text(output.system.copy())},
+                        {key: "attribute", value: Dyn.Text(output.attribute.copy())},
+                        {key: "provenance", value: Dyn.Text(output.provenance.copy())},
+                    },
+                ),
+            )
         }
         lock_nodes := [Dyn]{}
         loop node in self.lock_nodes -> lock_nodes.push(trust_flake_lock_node_tree(node))
@@ -397,22 +431,30 @@ FlakeGraph: struct {
             .Val(declared) -> trust_flake_composition_tree(declared)
             .None -> Dyn.Null
         }
-        trust_json_canonical(Dyn.Object([
-            "source": Dyn.Text(self.source.copy()),
-            "inputs": Dyn.Array(inputs),
-            "lockNodes": Dyn.Array(lock_nodes),
-            "registries": Dyn.Array(registries),
-            "outputs": Dyn.Array(outputs),
-            "composition": composition,
-            "unsupported": trust_json_texts(self.unsupported),
-        ])) ?? panic("typed flake graph must be JSON-encodable")
+        trust_json_canonical(
+            Dyn.Object(
+                [
+                    "source": Dyn.Text(self.source.copy()),
+                    "inputs": Dyn.Array(inputs),
+                    "lockNodes": Dyn.Array(lock_nodes),
+                    "registries": Dyn.Array(registries),
+                    "outputs": Dyn.Array(outputs),
+                    "composition": composition,
+                    "unsupported": trust_json_texts(self.unsupported),
+                ],
+            ),
+        ) ?? panic("typed flake graph must be JSON-encodable")
     }
 
     // Load-time staleness: `self` is the graph read back from the semantic
     // lock and `declared` the projection of the current flake.nix.
     ensure_current: fn(self, declared: FlakeGraph) TrustError! {
-        if self.source_fingerprint == "" -> return Err(TrustError.StaleSemanticLock("it has no source fingerprint; refresh the lock"))
-        if self.source_fingerprint != declared.source_fingerprint -> return Err(TrustError.StaleSemanticLock("flake.nix changed since the lock was written"))
+        if self.source_fingerprint == "" {
+            return Err(TrustError.StaleSemanticLock("it has no source fingerprint; refresh the lock"))
+        }
+        if self.source_fingerprint != declared.source_fingerprint {
+            return Err(TrustError.StaleSemanticLock("flake.nix changed since the lock was written"))
+        }
         trust_flake_validate_lock_shape(declared, self)
     }
 
@@ -451,10 +493,12 @@ FlakeGraph: struct {
         lock_path: files.with_name(path, "flake.lock")
         lock_text := String?{None}
         if files.read(lock_path) == {
-            .Ok(content) -> lock_text = Val(content)
-            .Err(error) -> if error == {
-                .NotFound(_) -> {}
-                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(TrustError.IO("couldn't read `{lock_path}`: {error}"))
+            .Ok(content) -> { lock_text = Val(content) }
+            .Err(error) -> {
+                if error == {
+                    .NotFound(_) -> {}
+                    .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(TrustError.IO("couldn't read `{lock_path}`: {error}"))
+                }
             }
         }
         graph := FlakeGraph.parse_with_lock(path, text, lock_text, true)
@@ -472,7 +516,9 @@ FlakeGraph: struct {
         project_dir: trust_flake_project_dir(path)
         project_root: files.canonicalize(project_dir) ?? return Err(TrustError.IO("couldn't resolve flake-parts project root `{project_dir}`: {err}"))
         pending := [FlakeModuleVisit]{}
-        loop module_path in composition.modules -> pending.push(FlakeModuleVisit{module_path, base_dir: project_dir, root_module: true})
+        loop module_path in composition.modules {
+            pending.push(FlakeModuleVisit{module_path: module_path, base_dir: project_dir, root_module: true})
+        }
         visited := [String]{}
         module_sources := [String]{}
         imported := [FlakeOutput]{}
@@ -499,7 +545,9 @@ FlakeGraph: struct {
             trust_flake_module_outputs(module_text, source_name, composition, imported)
             parent: files.dirname(canonical)
             base: if parent == "" -> project_root else -> parent
-            loop imported_path in trust_flake_module_imports(module_text) -> pending.push(FlakeModuleVisit{module_path: imported_path, base_dir: base, root_module: false})
+            loop imported_path in trust_flake_module_imports(module_text) {
+                pending.push(FlakeModuleVisit{module_path: imported_path, base_dir: base, root_module: false})
+            }
         }
         self.attach_module_facts(module_sources, imported)
     }
@@ -537,7 +585,7 @@ trust_path_within: fn(path: String, root: String) -> Bool Never! {
 }
 
 // The revision `name`'s follows chain resolves to, if any.
-trust_flake_follow_revision: fn(name: String, facts: [String: FlakeInput], stack: [String]) -> String? TrustError! {
+trust_flake_follow_revision: fn(name: String, facts: [String:FlakeInput], stack: [String]) -> String? TrustError! {
     fact: facts.get(name) ?? return Ok(None)
     if fact.revision != "" -> return Ok(Val(fact.revision))
     if fact.follows == "" -> return Ok(None)
@@ -560,14 +608,18 @@ trust_flake_validate_lock_shape: fn(source: FlakeGraph, locked: FlakeGraph) Trus
         return Err(TrustError.StaleSemanticLock("flake output declarations differ from the lock"))
     }
     loop field in source.unsupported {
-        if !locked.unsupported.contains(field) -> return Err(TrustError.StaleSemanticLock("unsupported flake facts are missing from the lock"))
+        if !locked.unsupported.contains(field) {
+            return Err(TrustError.StaleSemanticLock("unsupported flake facts are missing from the lock"))
+        }
     }
 }
 
 // Name -> (url, follows), in name order; a later duplicate wins.
 trust_flake_input_shape: fn(inputs: [FlakeInput]) -> [LockInput] Never! {
-    by_name := [String: LockInput]{}
-    loop input in inputs -> by_name[input.name] = LockInput{name: input.name, url: input.url, follows: input.follows}
+    by_name := [String:LockInput]{}
+    loop input in inputs {
+        by_name[input.name] = LockInput{name: input.name, url: input.url, follows: input.follows}
+    }
     names := by_name.keys().to_list()
     names.sort()
     shape := [LockInput]{}
@@ -586,7 +638,9 @@ FlakeOutputShape: struct {
 // The set of (name, kind label, system, attribute) output facts, sorted.
 trust_flake_output_shape: fn(outputs: [FlakeOutput]) -> [FlakeOutputShape] Never! {
     facts := [FlakeOutputShape]{}
-    loop output in outputs -> facts.push(FlakeOutputShape{name: output.name, kind: output.kind.label(), system: output.system, attribute: output.attribute})
+    loop output in outputs {
+        facts.push(FlakeOutputShape{name: output.name, kind: output.kind.label(), system: output.system, attribute: output.attribute})
+    }
     facts.sort_by(fn(fact) { fact.attribute })
     facts.sort_by(fn(fact) { fact.system })
     facts.sort_by(fn(fact) { fact.kind })
@@ -618,7 +672,9 @@ trust_flake_module_outputs: fn(module_text: String, source_name: String, composi
     loop assignment in trust_nix_output_assignments(module_text) {
         systems := [String]{}
         if {
-            assignment.system == "" && composition.per_system && composition.systems.len() == 0 -> systems.push("")
+            assignment.system == "" && composition.per_system && composition.systems.len() == 0 -> {
+                systems.push("")
+            }
             assignment.system == "" && composition.per_system -> systems = composition.systems
             else -> systems.push(assignment.system)
         }
@@ -649,7 +705,9 @@ trust_flake_lock_has_facts: fn(lock: SemanticLockFile) -> Bool Never! {
         }
         if !flake_kind -> next
         key: record.identity.key
-        if key.starts_with("flake-input:") || key.starts_with("flake-output:") || key.starts_with("flake-composition:") || key.starts_with("flake-unsupported:") || key == "flake-source" -> return true
+        if key.starts_with("flake-input:") || key.starts_with("flake-output:") || key.starts_with("flake-composition:") || key.starts_with("flake-unsupported:") || key == "flake-source" {
+            return true
+        }
     }
     false
 }
@@ -658,12 +716,18 @@ trust_flake_lock_has_facts: fn(lock: SemanticLockFile) -> Bool Never! {
 // source ref, else the first adapter output's, else `supplied`.
 trust_flake_lock_source: fn(lock: SemanticLockFile, supplied: String) -> String Never! {
     loop record in lock.records {
-        if record.identity.kind != LockRecordKind.SourceRef || record.identity.key != "flake-source" -> next
-        if record.rationales.len() > 0 && record.rationales[0].source_ref != "" -> return record.rationales[0].source_ref
+        if record.identity.kind != LockRecordKind.SourceRef || record.identity.key != "flake-source" {
+            next
+        }
+        if record.rationales.len() > 0 && record.rationales[0].source_ref != "" {
+            return record.rationales[0].source_ref
+        }
     }
     loop record in lock.records {
         if record.identity.kind != LockRecordKind.AdapterOutput -> next
-        if record.rationales.len() > 0 && record.rationales[0].source_ref != "" -> return record.rationales[0].source_ref
+        if record.rationales.len() > 0 && record.rationales[0].source_ref != "" {
+            return record.rationales[0].source_ref
+        }
     }
     supplied.copy()
 }
@@ -671,14 +735,18 @@ trust_flake_lock_source: fn(lock: SemanticLockFile, supplied: String) -> String 
 // The flake.nix fingerprint the lock was cut from, or "".
 trust_flake_lock_fingerprint: fn(lock: SemanticLockFile) -> String Never! {
     loop record in lock.records {
-        if record.identity.kind == LockRecordKind.SourceRef && record.identity.key == "flake-source" -> return record.identity.exact
+        if record.identity.kind == LockRecordKind.SourceRef && record.identity.key == "flake-source" {
+            return record.identity.exact
+        }
     }
     ""
 }
 
 // A record's provenance: its first rationale's reason, else `source`.
 trust_flake_record_provenance: fn(record: SemanticRecord, source: String) -> String Never! {
-    if record.rationales.len() > 0 && record.rationales[0].reason != "" -> return record.rationales[0].reason
+    if record.rationales.len() > 0 && record.rationales[0].reason != "" {
+        return record.rationales[0].reason
+    }
     source.copy()
 }
 
@@ -693,8 +761,12 @@ trust_flake_lock_inputs: fn(lock: SemanticLockFile, source: String) -> [FlakeInp
         key: "flake-input:{input.name}"
         found := false
         loop record in lock.records {
-            if record.identity.kind != LockRecordKind.SourceRef || record.identity.key != key -> next
-            if record.identity.exact == "" -> return Err(TrustError.MissingRevision{input: input.name})
+            if record.identity.kind != LockRecordKind.SourceRef || record.identity.key != key {
+                next
+            }
+            if record.identity.exact == "" {
+                return Err(TrustError.MissingRevision{input: input.name})
+            }
             inputs.push(FlakeInput{name: input.name, url: input.url, revision: record.identity.exact, follows: input.follows, provenance: trust_flake_record_provenance(record, source)})
             found = true
             break
@@ -702,9 +774,13 @@ trust_flake_lock_inputs: fn(lock: SemanticLockFile, source: String) -> [FlakeInp
         if !found -> return Err(TrustError.MissingRevision{input: input.name})
     }
     loop record in lock.records {
-        if record.identity.kind != LockRecordKind.SourceRef || !record.identity.key.starts_with("flake-input:") -> next
+        if record.identity.kind != LockRecordKind.SourceRef || !record.identity.key.starts_with("flake-input:") {
+            next
+        }
         name: record.identity.key.removeprefix("flake-input:")
-        if !names.contains(name) -> return Err(TrustError.StaleSemanticLock("lock has source record for input `{name}` without a lock_input"))
+        if !names.contains(name) {
+            return Err(TrustError.StaleSemanticLock("lock has source record for input `{name}` without a lock_input"))
+        }
     }
     Ok(inputs)
 }
@@ -713,7 +789,9 @@ trust_flake_lock_inputs: fn(lock: SemanticLockFile, source: String) -> [FlakeInp
 trust_flake_lock_outputs: fn(lock: SemanticLockFile, source: String) -> [FlakeOutput] TrustError! {
     outputs := [FlakeOutput]{}
     loop record in lock.records {
-        if record.identity.kind != LockRecordKind.AdapterOutput || !record.identity.key.starts_with("flake-output:") -> next
+        if record.identity.kind != LockRecordKind.AdapterOutput || !record.identity.key.starts_with("flake-output:") {
+            next
+        }
         exact: record.identity.exact
         kind_text := exact.copy()
         system := ""
@@ -733,7 +811,7 @@ trust_flake_lock_outputs: fn(lock: SemanticLockFile, source: String) -> [FlakeOu
         }
         kind: FlakeOutputKind.from_label(kind_text) ?? return Err(TrustError.InvalidAssignment(exact.copy()))
         if attribute == "" -> return Err(TrustError.InvalidAssignment(exact))
-        outputs.push(FlakeOutput{name: record.identity.key.removeprefix("flake-output:"), kind, system, attribute, provenance: trust_flake_record_provenance(record, source)})
+        outputs.push(FlakeOutput{name: record.identity.key.removeprefix("flake-output:"), kind: kind, system: system, attribute: attribute, provenance: trust_flake_record_provenance(record, source)})
     }
     Ok(outputs)
 }
@@ -742,7 +820,9 @@ trust_flake_lock_outputs: fn(lock: SemanticLockFile, source: String) -> [FlakeOu
 trust_flake_lock_unsupported: fn(lock: SemanticLockFile) -> [String] Never! {
     fields := [String]{}
     loop record in lock.records {
-        if record.identity.kind != LockRecordKind.FlakeUnsupported || !record.identity.key.starts_with("flake-unsupported:") -> next
+        if record.identity.kind != LockRecordKind.FlakeUnsupported || !record.identity.key.starts_with("flake-unsupported:") {
+            next
+        }
         fields.push(record.identity.key.removeprefix("flake-unsupported:"))
     }
     pkg_overlay_sorted_unique(fields)
@@ -753,12 +833,18 @@ trust_flake_lock_nodes: fn(lock: SemanticLockFile) -> [FlakeLockNode] TrustError
     nodes := [FlakeLockNode]{}
     names := [String]{}
     loop record in lock.records {
-        if record.identity.kind != LockRecordKind.FlakeEvaluator || !record.identity.key.starts_with("flake-lock-node:") -> next
+        if record.identity.kind != LockRecordKind.FlakeEvaluator || !record.identity.key.starts_with("flake-lock-node:") {
+            next
+        }
         name: record.identity.key.removeprefix("flake-lock-node:")
-        if names.contains(name) -> return Err(TrustError.StaleSemanticLock("lock has duplicate node record `{name}`"))
+        if names.contains(name) {
+            return Err(TrustError.StaleSemanticLock("lock has duplicate node record `{name}`"))
+        }
         names.push(name.copy())
         node: trust_flake_parse_lock_node(record.identity.exact)
-        if node.name != name -> return Err(TrustError.StaleSemanticLock("lock node record `{name}` names `{node.name}`"))
+        if node.name != name {
+            return Err(TrustError.StaleSemanticLock("lock node record `{name}` names `{node.name}`"))
+        }
         nodes.push(node)
     }
     Ok(trust_flake_sorted_lock_nodes(nodes))
@@ -769,12 +855,18 @@ trust_flake_lock_registries: fn(lock: SemanticLockFile) -> [FlakeRegistryEntry] 
     entries := [FlakeRegistryEntry]{}
     aliases := [String]{}
     loop record in lock.records {
-        if record.identity.kind != LockRecordKind.FlakeEvaluator || !record.identity.key.starts_with("flake-registry:") -> next
+        if record.identity.kind != LockRecordKind.FlakeEvaluator || !record.identity.key.starts_with("flake-registry:") {
+            next
+        }
         alias: record.identity.key.removeprefix("flake-registry:")
-        if aliases.contains(alias) -> return Err(TrustError.StaleSemanticLock("lock has duplicate registry record `{alias}`"))
+        if aliases.contains(alias) {
+            return Err(TrustError.StaleSemanticLock("lock has duplicate registry record `{alias}`"))
+        }
         aliases.push(alias.copy())
         entry: trust_flake_parse_registry(record.identity.exact)
-        if entry.alias != alias -> return Err(TrustError.StaleSemanticLock("registry record `{alias}` names `{entry.alias}`"))
+        if entry.alias != alias {
+            return Err(TrustError.StaleSemanticLock("registry record `{alias}` names `{entry.alias}`"))
+        }
         entries.push(entry)
     }
     Ok(trust_flake_sorted_registries(entries))
@@ -783,7 +875,9 @@ trust_flake_lock_registries: fn(lock: SemanticLockFile) -> [FlakeRegistryEntry] 
 // The first flake-parts composition record, if any.
 trust_flake_lock_composition: fn(lock: SemanticLockFile) -> FlakeComposition? TrustError! {
     loop record in lock.records {
-        if record.identity.kind == LockRecordKind.FlakeComposition -> return Ok(Val(trust_flake_parse_composition(record.identity.exact)))
+        if record.identity.kind == LockRecordKind.FlakeComposition {
+            return Ok(Val(trust_flake_parse_composition(record.identity.exact)))
+        }
     }
     Ok(None)
 }

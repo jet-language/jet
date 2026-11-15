@@ -5,15 +5,31 @@ use jet_foundation.[ByteTextPart, expr_span, pattern_binding_names, type_name]
     assert(result.diagnostics.is_empty(), "{result.diagnostics:Debug}")
     program: result.program
     program.items[0] == .GenericModule(def) ?? panic("template")
-    assert(if def.params[0] == { .Type(name, _, bound) -> name == "lower" && bound == None
- .Value(_, _, _) -> false })
-    assert(if def.params[1] == { .Value(name, _, _) -> name == "UPPER"
- .Type(_, _, _) -> false })
+    assert(
+        if def.params[0] == {
+            .Type(name, _, bound) -> name == "lower" && bound == None
+            .Value(_, _, _) -> false
+        },
+    )
+    assert(
+        if def.params[1] == {
+            .Value(name, _, _) -> name == "UPPER"
+            .Type(_, _, _) -> false
+        },
+    )
     program.items[1] == .ModuleAlias(alias) ?? panic("alias")
-    assert(if alias.args[0] == { .Type(_, _) -> true
- .Value(_, _) -> false })
-    assert(if alias.args[1] == { .Value(_, _) -> true
- .Type(_, _) -> false })
+    assert(
+        if alias.args[0] == {
+            .Type(_, _) -> true
+            .Value(_, _) -> false
+        },
+    )
+    assert(
+        if alias.args[1] == {
+            .Value(_, _) -> true
+            .Type(_, _) -> false
+        },
+    )
 }
 
 #Test("generic_module_value_slots_parse_closed_identifier_led_expressions") {
@@ -22,8 +38,12 @@ use jet_foundation.[ByteTextPart, expr_span, pattern_binding_names, type_name]
     loop index in 1..<result.program.items.len() {
         item: result.program.items[index]
         item == .ModuleAlias(alias) ?? panic("alias")
-        assert(if alias.args[0] == { .Value(_, _) -> true
- .Type(_, _) -> false })
+        assert(
+            if alias.args[0] == {
+                .Value(_, _) -> true
+                .Type(_, _) -> false
+            },
+        )
     }
 }
 
@@ -41,14 +61,18 @@ use jet_foundation.[ByteTextPart, expr_span, pattern_binding_names, type_name]
     assert(result.diagnostics.is_empty(), "{result.diagnostics:Debug}")
     result.program.items[0] == .GenericModule(def) ?? panic("template")
     def.body[0] == .Struct(data) ?? panic("struct")
-    assert(if data.fields[0].ty == {
-        .FixedList(_, .Symbol(_, name)) -> name == "capacity"
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
-    })
-    assert(if def.body[1] == {
-        .CodeModule(child) -> child.name == "stats"
-        .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> false
-    })
+    assert(
+        if data.fields[0].ty == {
+            .FixedList(_, .Symbol(_, name)) -> name == "capacity"
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+        },
+    )
+    assert(
+        if def.body[1] == {
+            .CodeModule(child) -> child.name == "stats"
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> false
+        },
+    )
 }
 
 #Test("retired_shared_prefix_is_an_ordinary_parse_error") {
@@ -162,38 +186,68 @@ use jet_foundation.[ByteTextPart, expr_span, pattern_binding_names, type_name]
     assert(!ok_arms.is_empty())
     ok_arms[0].cond == .PatternTest(_, ok_pattern, _, _) ?? panic("success pattern")
     ok_name := false
-    loop name in pattern_binding_names(ok_pattern) { if name.name == "ok" -> ok_name = true }
+    loop name in pattern_binding_names(ok_pattern) {
+        if name.name == "ok" -> ok_name = true
+    }
     assert(ok_name)
-    assert(if ok_pattern == { .Ok(_, _, _, _) -> true
- .Variant(variant, _, _, _) -> variant == "Ok"
- .Present(_, _, _, _) | .Absent(_) | .Err(_, _, _, _) | .Range(_, _, _) | .Or(_, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> false })
+    assert(
+        if ok_pattern == {
+            .Ok(_, _, _, _) -> true
+            .Variant(variant, _, _, _) -> variant == "Ok"
+            .Present(_, _, _, _) | .Absent(_) | .Err(_, _, _, _) | .Range(_, _, _) | .Or(_, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> false
+        },
+    )
     function.body[1] == .Switch(_, err_arms, _, _) ?? panic("failure switch")
     assert(!err_arms.is_empty())
     err_arms[0].cond == .PatternTest(_, err_pattern, _, _) ?? panic("failure pattern")
     err_name := false
-    loop name in pattern_binding_names(err_pattern) { if name.name == "error" -> err_name = true }
+    loop name in pattern_binding_names(err_pattern) {
+        if name.name == "error" -> err_name = true
+    }
     assert(err_name)
-    assert(if err_pattern == { .Err(_, _, _, _) -> true
- .Variant(variant, _, _, _) -> variant == "Err"
- .Present(_, _, _, _) | .Absent(_) | .Ok(_, _, _, _) | .Range(_, _, _) | .Or(_, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> false })
+    assert(
+        if err_pattern == {
+            .Err(_, _, _, _) -> true
+            .Variant(variant, _, _, _) -> variant == "Err"
+            .Present(_, _, _, _) | .Absent(_) | .Ok(_, _, _, _) | .Range(_, _, _) | .Or(_, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> false
+        },
+    )
     function.body[2] == .Val(binding) ?? panic("fallback binding")
     binding.init == .OrFallback(value, fallback, _, _, _) ?? panic("value fallback")
-    assert(if value == { .Ident(name, _, _) -> name == "maybe"
- .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false })
+    assert(
+        if value == {
+            .Ident(name, _, _) -> name == "maybe"
+            .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
+        },
+    )
     fallback == .Value(fallback_value) ?? panic("value fallback")
-    assert(if fallback_value == { .Int(_, _, _, _, _) -> true
- .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false })
+    assert(
+        if fallback_value == {
+            .Int(_, _, _, _, _) -> true
+            .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
+        },
+    )
     function.body[3] == .Val(refutable) ?? panic("refutable binding")
     refutable.pattern == .Val(bind_pattern) ?? panic("refutable pattern")
     bind_pattern == .Refutable(pattern, return_fallback, _, _) ?? panic("refutable pattern")
-    assert(if return_fallback == { .Return(returned, _) -> returned == None
- .Value(_) | .Block(_, _, _) | .Panic(_, _) | .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> false })
+    assert(
+        if return_fallback == {
+            .Return(returned, _) -> returned == None
+            .Value(_) | .Block(_, _, _) | .Panic(_, _) | .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> false
+        },
+    )
     other_name := false
-    loop name in pattern_binding_names(pattern) { if name.name == "other" -> other_name = true }
+    loop name in pattern_binding_names(pattern) {
+        if name.name == "other" -> other_name = true
+    }
     assert(other_name)
-    assert(if pattern == { .Ok(_, _, _, _) -> true
- .Variant(variant, _, _, _) -> variant == "Ok"
- .Present(_, _, _, _) | .Absent(_) | .Err(_, _, _, _) | .Range(_, _, _) | .Or(_, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> false })
+    assert(
+        if pattern == {
+            .Ok(_, _, _, _) -> true
+            .Variant(variant, _, _, _) -> variant == "Ok"
+            .Present(_, _, _, _) | .Absent(_) | .Err(_, _, _, _) | .Range(_, _, _) | .Or(_, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> false
+        },
+    )
 }
 
 // #6281: the retired result-only `value ? ok -> … ! err -> …` spelling is
@@ -219,14 +273,18 @@ use jet_foundation.[ByteTextPart, expr_span, pattern_binding_names, type_name]
     found := false
     loop marker in function.markers {
         if marker.name == "Policy" {
-            assert(if marker.args[0] == {
-                .Expr(.Call(call, _)) -> call.name == "retry"
-                .Expr(_) | .EffectRow(_, _) -> false
-            })
-            assert(if marker.args[1] == {
-                .Expr(.Call(call, _)) -> call.name == "trace"
-                .Expr(_) | .EffectRow(_, _) -> false
-            })
+            assert(
+                if marker.args[0] == {
+                    .Expr(.Call(call, _)) -> call.name == "retry"
+                    .Expr(_) | .EffectRow(_, _) -> false
+                },
+            )
+            assert(
+                if marker.args[1] == {
+                    .Expr(.Call(call, _)) -> call.name == "trace"
+                    .Expr(_) | .EffectRow(_, _) -> false
+                },
+            )
             found = true
             break
         }
@@ -238,7 +296,11 @@ use jet_foundation.[ByteTextPart, expr_span, pattern_binding_names, type_name]
     loop source in ["#Policy(no_alloc)\nrun: fn() {{}}\n", "#Policy(zero_rc)\nrun: fn() {{}}\n"] {
         result: parser_test_result(source)
         found := false
-        loop diagnostic in result.diagnostics { if diagnostic.code == "E0355" && diagnostic.fix.contains("`!Mem.*` effect denials") -> found = true }
+        loop diagnostic in result.diagnostics {
+            if diagnostic.code == "E0355" && diagnostic.fix.contains("`!Mem.*` effect denials") {
+                found = true
+            }
+        }
         assert(found)
     }
 }
@@ -246,7 +308,11 @@ use jet_foundation.[ByteTextPart, expr_span, pattern_binding_names, type_name]
 #Test("a site-bound rule named as a policy points at its own site") {
     result: parser_test_result("#Policy(Unsafe)\nrun: fn() {{}}\n")
     found := false
-    loop diagnostic in result.diagnostics { if diagnostic.code == "E0355" && diagnostic.why.contains("policy scope cannot widen them") && diagnostic.fix.contains("`#Unsafe` at its sound site") -> found = true }
+    loop diagnostic in result.diagnostics {
+        if diagnostic.code == "E0355" && diagnostic.why.contains("policy scope cannot widen them") && diagnostic.fix.contains("`#Unsafe` at its sound site") {
+            found = true
+        }
+    }
     assert(found)
 }
 
@@ -254,13 +320,16 @@ use jet_foundation.[ByteTextPart, expr_span, pattern_binding_names, type_name]
     result: parser_test_result("#Policy(trace(\"one\"))\n#Policy(trace(\"two\"))\nrun: fn() {{}}\n")
     assert(!result.diagnostics.is_empty(), "duplicate policy marker")
     found := false
-    loop diagnostic in result.diagnostics { if diagnostic.code == "E0355" -> found = true }
+    loop diagnostic in result.diagnostics {
+        if diagnostic.code == "E0355" -> found = true
+    }
     assert(found)
 }
 
 #Test("comptime_braced_values_accept_implicit_eof_termination") {
     loop suffix in ["", "\n", " // trailing comment"] {
-        loop testcase in [
+        loop testcase in
+            [
             (source: "CORE_MODULE_EXPORTS: CoreModuleExportNames{{ name: \"core\" }}{suffix}", typed_array: false),
             (source: "CORE_MODULE_EXPORTS: [CoreModuleExportNames]{{ CoreModuleExportNames{{ name: \"core\" }} }}{suffix}", typed_array: true),
         ] {
@@ -273,16 +342,32 @@ use jet_foundation.[ByteTextPart, expr_span, pattern_binding_names, type_name]
             assert(def.span.end == expr_span(def.value).end, "{source:Debug}")
             if typed_array {
                 def.value == .TypedLit(head, body, _, _) ?? panic("typed array")
-                assert(if head == { .Val(.List(_)) -> true
- .Val(_) | .None -> false })
-                assert(if body == { .Elements(elements) -> elements.len() == 1
- .Fields(_) | .Entries(_) | .Value(_) | .ByteText(_) | .Empty -> false })
+                assert(
+                    if head == {
+                        .Val(.List(_)) -> true
+                        .Val(_) | .None -> false
+                    },
+                )
+                assert(
+                    if body == {
+                        .Elements(elements) -> elements.len() == 1
+                        .Fields(_) | .Entries(_) | .Value(_) | .ByteText(_) | .Empty -> false
+                    },
+                )
             } else {
                 def.value == .TypedLit(head, body, _, _) ?? panic("typed struct literal")
-                assert(if head == { .Val(.Named(name)) -> name == "CoreModuleExportNames"
- .Val(_) | .None -> false })
-                assert(if body == { .Fields(fields) -> fields.len() == 1
- .Elements(_) | .Entries(_) | .Value(_) | .ByteText(_) | .Empty -> false })
+                assert(
+                    if head == {
+                        .Val(.Named(name)) -> name == "CoreModuleExportNames"
+                        .Val(_) | .None -> false
+                    },
+                )
+                assert(
+                    if body == {
+                        .Fields(fields) -> fields.len() == 1
+                        .Elements(_) | .Entries(_) | .Value(_) | .ByteText(_) | .Empty -> false
+                    },
+                )
             }
         }
     }
@@ -305,10 +390,18 @@ use jet_foundation.[ByteTextPart, expr_span, pattern_binding_names, type_name]
     result: parser_test_result(source)
     assert(result.diagnostics.is_empty(), "newline separates comptime declarations: {result.diagnostics:Debug}")
     assert(result.program.items.len() == 2, "{source:Debug}")
-    assert(if result.program.items[0] == { .Const(def) -> def.name == "FIRST"
- .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> false })
-    assert(if result.program.items[1] == { .Const(def) -> def.name == "SECOND"
- .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> false })
+    assert(
+        if result.program.items[0] == {
+            .Const(def) -> def.name == "FIRST"
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> false
+        },
+    )
+    assert(
+        if result.program.items[1] == {
+            .Const(def) -> def.name == "SECOND"
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> false
+        },
+    )
 }
 
 #Test("comptime_eof_termination_still_rejects_incomplete_initializers") {
@@ -317,7 +410,9 @@ use jet_foundation.[ByteTextPart, expr_span, pattern_binding_names, type_name]
     assert(!result.diagnostics.is_empty(), "incomplete comptime initializer must fail")
     found := false
     loop diagnostic in result.diagnostics {
-        if diagnostic.code == "E0003" && diagnostic.span == .Val(span) && span.start == source.bytes().len() && span.end == source.bytes().len() -> found = true
+        if diagnostic.code == "E0003" && diagnostic.span == .Val(span) && span.start == source.bytes().len() && span.end == source.bytes().len() {
+            found = true
+        }
     }
     assert(found, "{result.diagnostics:Debug}")
 }
@@ -329,7 +424,9 @@ use jet_foundation.[ByteTextPart, expr_span, pattern_binding_names, type_name]
     assert(!result.diagnostics.is_empty(), "unseparated comptime declarations must fail")
     found := false
     loop diagnostic in result.diagnostics {
-        if diagnostic.code == "E0003" && diagnostic.span == .Val(span) && span.start == second_start -> found = true
+        if diagnostic.code == "E0003" && diagnostic.span == .Val(span) && span.start == second_start {
+            found = true
+        }
     }
     assert(found, "{result.diagnostics:Debug}")
 }
@@ -378,7 +475,9 @@ use jet_foundation.[ByteTextPart, expr_span, pattern_binding_names, type_name]
     assert(!result.diagnostics.is_empty(), "`in` must not be an identifier")
     found := false
     loop diagnostic in result.diagnostics {
-        if diagnostic.code == "E0003" && diagnostic.what.contains("reserved") && diagnostic.fix.contains("in") -> found = true
+        if diagnostic.code == "E0003" && diagnostic.what.contains("reserved") && diagnostic.fix.contains("in") {
+            found = true
+        }
     }
     assert(found, "{result.diagnostics:Debug}")
 }
@@ -421,7 +520,8 @@ parse_complete: fn(source: String) {
 }
 
 #Test("malformed_or_pattern_does_not_gain_a_terminator_boundary") {
-    loop source in [
+    loop source in
+        [
         "\nConn: enum {{\n    Active(Int)\n    Reconnecting(Int)\n    Closed\n}}\n\ntrailing_pipe: fn(c: Conn) -> String {{\n    if c == {{\n        .Closed -> render_closed()\n        .Active(id) | -> render_live(id)\n        else -> \"unknown\"\n    }}\n}}\n",
         "\nConn: enum {{\n    Active(Int)\n    Reconnecting(Int)\n    Closed\n}}\n\nsplit_guard: fn(c: Conn) -> String {{\n    if c == {{\n        .Closed -> render_closed()\n        .Active(id) | .Reconnecting(id)\n            && id > 0\n            -> render_live(id)\n        else -> \"unknown\"\n    }}\n}}\n",
     ] {

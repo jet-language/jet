@@ -3,14 +3,32 @@
 // compiler-extension host fails closed (CompilerExtensionHost.jet).
 use {
     jetpack_integrations.[
-        AnalyzeResponse, EXTENSION_ANALYZE_EXPORT, EXTENSION_APPLICATION_PLUGIN_WORLD,
-        EXTENSION_PACKAGE_NAME, EXTENSION_PROTOCOL_VERSION, EXTENSION_STAGE, EXTENSION_WORLD_NAME,
-        ExtensionAbility, ExtensionFinding, ExtensionProposedEdit, ExtensionProtocolError,
-        ExtensionResourceLimits, ExtensionSession, ExtensionSessionPhase, ExtensionTrustPolicy,
-        PluginMechanism, SpanFact, SymbolFact,
-        TypeFact, TypeFactShape, TypedSnapshot, pkg_extension_is_application_plugin_world,
-        pkg_extension_is_compiler_extension_world, pkg_extension_mechanism,
-        pkg_extension_negotiate_abilities, pkg_extension_wit_world,
+        AnalyzeResponse,
+        EXTENSION_ANALYZE_EXPORT,
+        EXTENSION_APPLICATION_PLUGIN_WORLD,
+        EXTENSION_PACKAGE_NAME,
+        EXTENSION_PROTOCOL_VERSION,
+        EXTENSION_STAGE,
+        EXTENSION_WORLD_NAME,
+        ExtensionAbility,
+        ExtensionFinding,
+        ExtensionProposedEdit,
+        ExtensionProtocolError,
+        ExtensionResourceLimits,
+        ExtensionSession,
+        ExtensionSessionPhase,
+        ExtensionTrustPolicy,
+        PluginMechanism,
+        SpanFact,
+        SymbolFact,
+        TypeFact,
+        TypeFactShape,
+        TypedSnapshot,
+        pkg_extension_is_application_plugin_world,
+        pkg_extension_is_compiler_extension_world,
+        pkg_extension_mechanism,
+        pkg_extension_negotiate_abilities,
+        pkg_extension_wit_world,
     ]
     jet_foundation.[HostImportFact]
     jet_pkg_model.[PKG_JSON_MAX_DEPTH, PKG_JSON_MAX_PROTOCOL_BYTES]
@@ -28,13 +46,11 @@ pkg_test_extension_response: fn(severity: String) -> AnalyzeResponse {
         protocol: EXTENSION_PROTOCOL_VERSION,
         findings: [ExtensionFinding]{ExtensionFinding{rule: "r", span_id: "sp1", message: "m", severity: severity}},
         proposed_edits: [ExtensionProposedEdit]{},
-        artifacts: [String]{}
+        artifacts: [String]{},
     }
 }
 
-pkg_test_extension_error: fn(result: ExtensionProtocolError) -> String {
-    result.message
-}
+pkg_test_extension_error: fn(result: ExtensionProtocolError) -> String { result.message }
 
 // `[` repeated past the protocol depth, then `0`, then the closers.
 pkg_test_extension_too_deep: fn() -> String {
@@ -50,7 +66,7 @@ pkg_test_extension_too_deep: fn() -> String {
 #Test("structured types and host imports round trip as one snapshot") {
     types: [TypeFact]{
         {id: "t-list", repr: "[Int]", shape: TypeFactShape.List{element_type_id: "t-int"}},
-        {id: "t-int", repr: "Int", shape: TypeFactShape.Scalar}
+        {id: "t-int", repr: "Int", shape: TypeFactShape.Scalar},
     }
     imports: [HostImportFact]{HostImportFact{id: "host-read", operation: "read_file", required_right: "FS.Read", parameter_type_ids: [String]{"t-list"}, result_type_id: Val("t-int")}}
     snapshot: TypedSnapshot.new_with_imports(ExtensionAbility.v1_defaults(), types, [SymbolFact]{}, [SpanFact]{}, imports) ?? panic("valid structured snapshot")
@@ -86,7 +102,7 @@ pkg_test_extension_too_deep: fn() -> String {
 
 #Test("ability negotiation rejects unknown versions and keeps the grant ordered") {
     if pkg_extension_negotiate_abilities(2, [ExtensionAbility]{ExtensionAbility.ReadTypes}) == {
-        .Ok(_) -> panic("protocol 2 must not negotiate")
+        .Ok(_) -> { panic("protocol 2 must not negotiate") }
         .Err(_) -> {}
     }
     granted: pkg_extension_negotiate_abilities(1, [ExtensionAbility]{ExtensionAbility.ReadTypes, ExtensionAbility.EmitFinding}) ?? panic("v1 abilities negotiate")
@@ -111,8 +127,10 @@ pkg_test_extension_too_deep: fn() -> String {
 #Test("typed snapshot decode rejects nested and oversized json before conversion") {
     nested: "{{\"abilities\":[],\"limits\":{{\"max_edits\":64,\"max_findings\":256,\"max_fuel\":10000000,\"max_memory_bytes\":16777216,\"max_response_bytes\":262144,\"max_table_elements\":10000,\"timeout_ms\":2000}},\"protocol\":1,\"spans\":[],\"stage\":\"typed\",\"symbols\":[],\"trust\":\"untrusted\",\"types\":{pkg_test_extension_too_deep()}}}"
     if TypedSnapshot.decode_bytes(nested.bytes()) == {
-        .Ok(_) -> panic("nested snapshot JSON must hit the depth cap")
-        .Err(error) -> assert_eq(pkg_test_extension_error(error), "JSON exceeds maximum nesting depth")
+        .Ok(_) -> { panic("nested snapshot JSON must hit the depth cap") }
+        .Err(error) -> {
+            assert_eq(pkg_test_extension_error(error), "JSON exceeds maximum nesting depth")
+        }
     }
     snapshot: pkg_test_extension_snapshot()
     valid: snapshot.encode_bytes() ?? panic("sample snapshot encodes")
@@ -120,30 +138,36 @@ pkg_test_extension_too_deep: fn() -> String {
     oversized := valid
     loop oversized.len() < PKG_JSON_MAX_PROTOCOL_BYTES + 1 -> oversized.push(U8{32})
     if TypedSnapshot.decode_bytes(oversized) == {
-        .Ok(_) -> panic("oversized snapshot JSON must hit the size cap")
-        .Err(error) -> assert_eq(pkg_test_extension_error(error), "JSON input exceeds the 1 MiB limit")
+        .Ok(_) -> { panic("oversized snapshot JSON must hit the size cap") }
+        .Err(error) -> {
+            assert_eq(pkg_test_extension_error(error), "JSON input exceeds the 1 MiB limit")
+        }
     }
 }
 
 #Test("analyze response decode rejects nested and oversized json before conversion") {
     nested: "{{\"artifacts\":[],\"findings\":{pkg_test_extension_too_deep()},\"protocol\":1,\"proposed_edits\":[]}}"
     if AnalyzeResponse.decode_bytes(nested.bytes()) == {
-        .Ok(_) -> panic("nested response JSON must hit the depth cap")
-        .Err(error) -> assert_eq(pkg_test_extension_error(error), "JSON exceeds maximum nesting depth")
+        .Ok(_) -> { panic("nested response JSON must hit the depth cap") }
+        .Err(error) -> {
+            assert_eq(pkg_test_extension_error(error), "JSON exceeds maximum nesting depth")
+        }
     }
     response: AnalyzeResponse{
         protocol: EXTENSION_PROTOCOL_VERSION,
         findings: [ExtensionFinding]{ExtensionFinding{rule: "no-x", span_id: "sp1", message: "prefer y", severity: "warning"}},
         proposed_edits: [ExtensionProposedEdit]{ExtensionProposedEdit{span_id: "sp1", replacement: "y", rationale: "rename"}},
-        artifacts: [String]{}
+        artifacts: [String]{},
     }
     valid: response.encode_bytes() ?? panic("sample response encodes")
     assert_eq(AnalyzeResponse.decode_bytes(valid) ?? panic("valid response decodes"), response)
     oversized := valid
     loop oversized.len() < PKG_JSON_MAX_PROTOCOL_BYTES + 1 -> oversized.push(U8{32})
     if AnalyzeResponse.decode_bytes(oversized) == {
-        .Ok(_) -> panic("oversized response JSON must hit the size cap")
-        .Err(error) -> assert_eq(pkg_test_extension_error(error), "JSON input exceeds the 1 MiB limit")
+        .Ok(_) -> { panic("oversized response JSON must hit the size cap") }
+        .Err(error) -> {
+            assert_eq(pkg_test_extension_error(error), "JSON input exceeds the 1 MiB limit")
+        }
     }
 }
 
@@ -153,7 +177,7 @@ pkg_test_extension_too_deep: fn() -> String {
         protocol: 1,
         findings: [ExtensionFinding]{ExtensionFinding{rule: "no-x", span_id: "sp1", message: "prefer y", severity: "warning"}},
         proposed_edits: [ExtensionProposedEdit]{ExtensionProposedEdit{span_id: "sp1", replacement: "y", rationale: "rename"}},
-        artifacts: [String]{}
+        artifacts: [String]{},
     }
     raw: response.encode_bytes() ?? panic("encode")
     response.validate(snapshot, raw.len()) ?? panic("in-span response validates")
@@ -166,12 +190,12 @@ pkg_test_extension_too_deep: fn() -> String {
     bad_span := pkg_test_extension_response("error")
     bad_span.findings[0].span_id = "missing"
     if bad_span.validate(snapshot, 8) == {
-        .Ok(_) -> panic("an unknown span must be rejected")
+        .Ok(_) -> { panic("an unknown span must be rejected") }
         .Err(_) -> {}
     }
     with_artifact: AnalyzeResponse{protocol: 1, findings: [ExtensionFinding]{}, proposed_edits: [ExtensionProposedEdit]{}, artifacts: [String]{"obj.o"}}
     if with_artifact.validate(snapshot, 8) == {
-        .Ok(_) -> panic("v1 responses carry no artifacts")
+        .Ok(_) -> { panic("v1 responses carry no artifacts") }
         .Err(_) -> {}
     }
     no_emit := pkg_test_extension_snapshot()
@@ -182,13 +206,13 @@ pkg_test_extension_too_deep: fn() -> String {
     no_emit.abilities = kept
     finding: pkg_test_extension_response("note")
     if finding.validate(no_emit, 8) == {
-        .Ok(_) -> panic("findings need emit_finding")
+        .Ok(_) -> { panic("findings need emit_finding") }
         .Err(_) -> {}
     }
     tiny := pkg_test_extension_snapshot()
     tiny.limits.max_response_bytes = 4
     if finding.validate(tiny, 99) == {
-        .Ok(_) -> panic("the response exceeds max_response_bytes")
+        .Ok(_) -> { panic("the response exceeds max_response_bytes") }
         .Err(_) -> {}
     }
 }
@@ -214,7 +238,7 @@ pkg_test_extension_too_deep: fn() -> String {
     assert(session.close(fn(handle) { handle == 7 }))
     assert_eq(session.phase(), ExtensionSessionPhase.Closed)
     if session.stage_response(snapshot, raw) == {
-        .Ok(_) -> panic("a closed session cannot stage")
+        .Ok(_) -> { panic("a closed session cannot stage") }
         .Err(_) -> {}
     }
 }
@@ -231,7 +255,7 @@ pkg_test_extension_too_deep: fn() -> String {
     assert(session.staged() == None)
     assert(session.is_committed())
     if session.stage_response(snapshot, raw) == {
-        .Ok(_) -> panic("restage after accept and rollback must refuse")
+        .Ok(_) -> { panic("restage after accept and rollback must refuse") }
         .Err(error) -> assert(error.message.contains("already committed"))
     }
 }
@@ -241,10 +265,12 @@ pkg_test_extension_too_deep: fn() -> String {
     session.on_loaded(42) ?? panic("load")
     assert(session.close(fn(handle) { handle == 42 }))
     assert_eq(session.phase(), ExtensionSessionPhase.Closed)
-    assert(!session.close(fn(_) {
-        assert(false, "the closer must not run without a handle")
-        false
-    }))
+    assert(
+        !session.close(fn(_) {
+            assert(false, "the closer must not run without a handle")
+            false
+        }),
+    )
 }
 
 #Test("trust and limits defaults are exact") {

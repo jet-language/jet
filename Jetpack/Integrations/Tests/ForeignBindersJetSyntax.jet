@@ -3,9 +3,15 @@
 // parse errors.
 use {
     jetpack_integrations.[
-        pkg_lua_render_probe, pkg_octave_render_probe, pkg_perl_parse_function_names,
-        pkg_perl_render_jet, pkg_php_render_probe, pkg_powershell_parse_function_names,
-        pkg_powershell_render_jet, pkg_r_render_probe, pkg_ruby_render_probe,
+        pkg_lua_render_probe,
+        pkg_octave_render_probe,
+        pkg_perl_parse_function_names,
+        pkg_perl_render_jet,
+        pkg_php_render_probe,
+        pkg_powershell_parse_function_names,
+        pkg_powershell_render_jet,
+        pkg_r_render_probe,
+        pkg_ruby_render_probe,
     ]
     jet_pkg_model.[pkg_com_parse_schema, pkg_com_render_jet]
     jet_lexer.[lex_generated]
@@ -16,9 +22,7 @@ use {
 pkg_test_binder_syntax_errors: fn(source: String) -> [String] Never! {
     errors := [String]{}
     lexed: lex_generated(source.bytes())
-    loop diagnostic in lexed.diagnostics {
-        errors.push("lex {diagnostic.code}: {diagnostic.what}")
-    }
+    loop diagnostic in lexed.diagnostics { errors.push("lex {diagnostic.code}: {diagnostic.what}") }
     if errors.len() != 0 -> return errors
     parsed: parse_lexed(lexed)
     loop diagnostic in parsed.diagnostics {
@@ -45,7 +49,9 @@ pkg_test_binder_syntax_errors: fn(source: String) -> [String] Never! {
     failures := [String]{}
     loop binder in rendered {
         errors: pkg_test_binder_syntax_errors(binder.source)
-        if errors.len() != 0 -> failures.push("{binder.name} binder output does not parse:\n{errors.join("\n")}\n{binder.source}")
+        if errors.len() != 0 {
+            failures.push("{binder.name} binder output does not parse:\n{errors.join("\n")}\n{binder.source}")
+        }
     }
     if failures.len() != 0 -> panic(failures.join("\n\n"))
 }

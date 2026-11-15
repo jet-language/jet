@@ -25,17 +25,26 @@ use {
 }
 
 JET_CLI_TEST_READS_ENV: ENV_JET_TEST_READS_PATH
+
 // The variables jet sets in each native test's process, which no test's
 // reads depend on.
 JET_CLI_TEST_NATIVE_ENV: [String]{ENV_JET_NATIVE_TEST_ID, ENV_JET_NATIVE_TEST_RECORDS_PATH, ENV_JET_NATIVE_TEST_REPORT_PATH}
+
 JET_CLI_TEST_REUSE_HEADER: "JET_TEST_RESULTS 1"
 
 // Where one `jet test` run keeps its results: `store` the record file,
 // `reads` the harness's read log.
-JetCLITestReuse: struct { store: String, reads: String }
+JetCLITestReuse: struct {
+    store: String
+    reads: String
+}
 
 // One recorded read: `kind` (F, S, E, A), `name`, and its fingerprint.
-JetCLITestRead: struct { kind: String, name: String, print: String }
+JetCLITestRead: struct {
+    kind: String
+    name: String
+    print: String
+}
 
 // The store of a run of the harness `binary` with the selection `settings`
 // under `root`'s `.jet/test-results`, or None when the harness can't be read.
@@ -56,7 +65,11 @@ jet_cli_test_reuse_at: fn(root: String, binary: String, settings: String, record
 }
 
 // How jet_cli_test_reuse_run came by its outcomes.
-JetCLITestReuseHow: enum { Plain Reused Logged }
+JetCLITestReuseHow: enum {
+    Plain
+    Reused
+    Logged
+}
 
 // `jet_cli_native_test_run` through the store: the stored outcomes when
 // `reuse` has them and its reads are unchanged, else a run whose reads are
@@ -120,10 +133,14 @@ jet_cli_test_reuse_lookup: fn(reuse: JetCLITestReuse) -> JetNativeTestOutcomes? 
 jet_cli_test_reuse_keep: fn(reuse: JetCLITestReuse, outcomes: JetNativeTestOutcomes, passed: Bool) Never! {
     log: test_reuse_files.read_bytes(reuse.reads) ?? return
     test_reuse_files.remove(reuse.reads).drop("the read log is one-shot")
-    if !passed -> return
+    if !passed {
+        return
+    }
     reads: jet_cli_test_reuse_reads(log) ?? return
     out := "{JET_CLI_TEST_REUSE_HEADER}\n{reads.len()}\n"
-    loop read in reads -> out = "{out}{jet_cli_test_reuse_put(read.kind)}{jet_cli_test_reuse_put(read.name)}{jet_cli_test_reuse_put(read.print)}"
+    loop read in reads {
+        out = "{out}{jet_cli_test_reuse_put(read.kind)}{jet_cli_test_reuse_put(read.name)}{jet_cli_test_reuse_put(read.print)}"
+    }
     out = "{out}{jet_cli_test_reuse_group(outcomes.wires)}{jet_cli_test_reuse_group(outcomes.outputs)}{jet_cli_test_reuse_group(outcomes.errors)}{outcomes.contracts.len()}\n"
     loop contract in outcomes.contracts {
         id: if contract.test_id == .Val(number) -> "{number}" else -> "-"
@@ -160,7 +177,9 @@ jet_cli_test_reuse_reads: fn(log: [U8]) -> [JetCLITestRead]? Never! {
 
 // A read's fingerprint now; None for a kind this store doesn't know.
 jet_cli_test_reuse_print: fn(kind: String, name: String) -> String? Never! {
-    if kind == "E" -> return Val(if test_reuse_sys.get(name) == .Val(value) -> "={value}" else -> "unset")
+    if kind == "E" {
+        return Val(if test_reuse_sys.get(name) == .Val(value) -> "={value}" else -> "unset")
+    }
     if kind == "A" {
         names := test_reuse_sys.vars() ?? return None
         names.sort()
@@ -172,12 +191,16 @@ jet_cli_test_reuse_print: fn(kind: String, name: String) -> String? Never! {
         return Val(pairs.join("\n"))
     }
     if kind != "F" && kind != "S" -> return None
-    if name.starts_with("/proc/") || name.starts_with("/sys/") || (name.starts_with("/dev/") && !name.starts_with("/dev/shm/")) -> return Val("host")
+    if name.starts_with("/proc/") || name.starts_with("/sys/") || (name.starts_with("/dev/") && !name.starts_with("/dev/shm/")) {
+        return Val("host")
+    }
     if test_reuse_files.is_dir(name) {
         if kind == "S" -> return Val("dir")
         entries: test_reuse_files.list_dir(name) ?? return Val("unreadable dir")
         listed := [String]{}
-        loop entry in entries -> listed.push(if entry.is_dir -> "{entry.name}/" else -> entry.name.copy())
+        loop entry in entries {
+            listed.push(if entry.is_dir -> "{entry.name}/" else -> entry.name.copy())
+        }
         listed.sort()
         return Val(listed.join("\n"))
     }
@@ -191,9 +214,7 @@ jet_cli_test_reuse_print: fn(kind: String, name: String) -> String? Never! {
     Val(test_reuse_crypto.sha256(bytes).hex())
 }
 
-jet_cli_test_reuse_put: fn(text: String) -> String Never! {
-    "{text.bytes().len()}\n{text}\n"
-}
+jet_cli_test_reuse_put: fn(text: String) -> String Never! { "{text.bytes().len()}\n{text}\n" }
 
 jet_cli_test_reuse_group: fn(texts: [String]) -> String Never! {
     out := "{texts.len()}\n"

@@ -10,6 +10,7 @@ Res: struct {
         close: fn(&&self) { print("close {self.name}") }
     }
 }
+
 keep: fn(r: &&Res) -> Int { r.name.len() }
 
 from_param: fn(env: Res?) -> Int {
@@ -36,7 +37,9 @@ from_payload_loop: fn(warm: [Res]?) -> Int {
     merged.len()
 }
 
-Holder: struct { items: [Res] }
+Holder: struct {
+    items: [Res]
+}
 
 from_projection_loop: fn() -> Int {
     value := Holder{items: [Res{name: "a"}]}
@@ -53,6 +56,4 @@ from_param_loop: fn(items: [Res]) -> Int {
     sink.len()
 }
 
-run: fn() {
-    print("unreached")
-}
+run: fn() { print("unreached") }

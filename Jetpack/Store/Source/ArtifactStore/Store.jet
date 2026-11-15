@@ -106,8 +106,8 @@ ArtifactStoredEntry: struct {
         }
         ArtifactEntryStatus{
             kind: self.key.kind(),
-            key,
-            namespace,
+            key: key,
+            namespace: namespace,
             size_bytes: self.size_bytes,
             last_use: self.last_use,
             pinned: self.pinned,
@@ -164,14 +164,10 @@ store_artifact_footprint_tally_text: fn(tally: ArtifactFootprintTally) -> String
 store_artifact_journal_checksum_before: fn(window: [U8], end: Int, whole: Bool) -> String? Never! {
     if end <= 0 || end > window.len() || (Int{window[end - 1]}) != 10 -> return None
     start := end - 1
-    loop start > 0 && (Int{window[start - 1]}) != 10 {
-        start -= 1
-    }
+    loop start > 0 && (Int{window[start - 1]}) != 10 -> start -= 1
     if start == 0 && !whole -> return None
     field := end - 1
-    loop field > start && (Int{window[field - 1]}) != 124 {
-        field -= 1
-    }
+    loop field > start && (Int{window[field - 1]}) != 124 -> field -= 1
     if field == start -> return None
     text: String.from_bytes(store_artifact_slice(window, field, end - 1)) ?? return None
     Val(text.trim())
@@ -191,7 +187,9 @@ store_artifact_journal_final_checksum: fn(journal_path: String, journal_bytes: I
 store_artifact_footprint_replay: fn(tally_path: String, journal_path: String, journal_bytes: Int) -[FS]> ArtifactFootprintTally? Never! {
     text: files.read(tally_path) ?? return None
     fields: text.trim().split("|").to_list()
-    if fields.len() != 5 || fields[0] != STORE_ARTIFACT_VERSION || fields[1] != "footprint" -> return None
+    if fields.len() != 5 || fields[0] != STORE_ARTIFACT_VERSION || fields[1] != "footprint" {
+        return None
+    }
     offset: store_artifact_parse_count(fields[2]) ?? return None
     total := store_artifact_parse_count(fields[3]) ?? return None
     if offset > journal_bytes -> return None
@@ -199,7 +197,7 @@ store_artifact_footprint_replay: fn(tally_path: String, journal_path: String, jo
     // journal is empty: a compaction rewrites the journal from its first byte.
     if offset == 0 {
         if fields[4] != "-" || journal_bytes > 0 -> return None
-        return Val(ArtifactFootprintTally{journal_bytes, entry_bytes: total, checksum: "-"})
+        return Val(ArtifactFootprintTally{journal_bytes: journal_bytes, entry_bytes: total, checksum: "-"})
     }
     // The window holds the line the tally ends at, then every line after it.
     before: if offset < STORE_ARTIFACT_JOURNAL_TAIL_WINDOW -> offset else -> STORE_ARTIFACT_JOURNAL_TAIL_WINDOW
@@ -213,13 +211,15 @@ store_artifact_footprint_replay: fn(tally_path: String, journal_path: String, jo
         if (Int{window[index]}) != 10 -> next
         record: store_artifact_parse_journal_line(store_artifact_slice(window, start, index)) ?? return None
         if record.operation == "put" -> total = store_artifact_saturating_add(total, record.length)
-        if record.operation == "remove" -> total = store_artifact_saturating_sub(total, record.length)
+        if record.operation == "remove" {
+            total = store_artifact_saturating_sub(total, record.length)
+        }
         start = index + 1
     }
     if start != window.len() -> return None
     checksum: if journal_bytes == offset -> Val(fields[4]) else -> store_artifact_journal_checksum_before(window, window.len(), offset == before)
     last: checksum ?? return None
-    Val(ArtifactFootprintTally{journal_bytes, entry_bytes: total, checksum: last})
+    Val(ArtifactFootprintTally{journal_bytes: journal_bytes, entry_bytes: total, checksum: last})
 }
 
 // Multiplication clamped at the largest Int (Rust `saturating_mul` on u64).
@@ -236,7 +236,9 @@ ArtifactStore: struct {
     priv owner_value: ArtifactProcessIdentity
 
     open: fn(config: ArtifactStoreConfig) -[FS, Env, Rand]> ArtifactStore ArtifactStoreError! {
-        if config.root() == "" -> return Err(ArtifactStoreError.Config("store root cannot be empty"))
+        if config.root() == "" {
+            return Err(ArtifactStoreError.Config("store root cannot be empty"))
+        }
         store: ArtifactStore{config_value: config, owner_value: ArtifactProcessIdentity.current()}
         store.ensure_layout()
         Ok(store)
@@ -352,7 +354,9 @@ ArtifactStore: struct {
         if self.read_build_pointer(pointer) == {
             .Val(existing) -> {
                 if existing != object {
-                    if self.build_record(key) != Val(record) -> return Err(ArtifactStoreError.Conflict{path: pointer})
+                    if self.build_record(key) != Val(record) {
+                        return Err(ArtifactStoreError.Conflict{path: pointer})
+                    }
                 }
             }
             .None -> {}
@@ -431,7 +435,7 @@ ArtifactStore: struct {
         defer close(lock)
         if store_artifact_read_file(path) == {
             .Missing -> {}
-            .Corrupt(reason) -> self.quarantine_locked(key, path, reason)
+            .Corrupt(reason) -> { self.quarantine_locked(key, path, reason) }
             .Bytes(existing) -> {
                 if store_artifact_decode_action(action, existing) == {
                     .Ok(value) -> {
@@ -465,14 +469,12 @@ ArtifactStore: struct {
                 self.quarantine_after_read(key, path, reason)
                 Ok(None)
             }
-            .Bytes(bytes) -> {
-                if store_artifact_decode_action(action, bytes) == {
-                    .Ok(record) -> Ok(Val(record))
-                    .Err(error) -> {
-                        if store_artifact_is_unsupported_version(bytes) -> return Ok(None)
-                        self.quarantine_after_read(key, path, error.reason)
-                        Ok(None)
-                    }
+            .Bytes(bytes) -> if store_artifact_decode_action(action, bytes) == {
+                .Ok(record) -> Ok(Val(record))
+                .Err(error) -> {
+                    if store_artifact_is_unsupported_version(bytes) -> return Ok(None)
+                    self.quarantine_after_read(key, path, error.reason)
+                    Ok(None)
                 }
             }
         }
@@ -481,7 +483,9 @@ ArtifactStore: struct {
     // Record one use of each stored action record under one lock and one
     // journal write. A failure only costs eviction order.
     touch_actions: fn(self, actions: [ActionHandle]) Never! -[FS, Env, Time, Rand]> {
-        if actions.len() == 0 -> return
+        if actions.len() == 0 {
+            return
+        }
         lock: self.acquire_lock() ?? return
         defer close(lock)
         entries := [ArtifactJournalAppend]{}
@@ -508,7 +512,9 @@ ArtifactStore: struct {
     }
 
     publish_action_batch: fn(self, records: [ArtifactActionPublication], durable: Bool) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
-        if records.len() == 0 -> return
+        if records.len() == 0 {
+            return
+        }
         self.ensure_layout()
         lock: self.acquire_lock() ?? return Err(err)
         defer close(lock)
@@ -519,11 +525,13 @@ ArtifactStore: struct {
             key: ArtifactEntryKey.Action(record.action.key())
             if store_artifact_read_file(path) == {
                 .Missing -> {}
-                .Corrupt(reason) -> self.quarantine_locked(key, path, reason)
+                .Corrupt(reason) -> { self.quarantine_locked(key, path, reason) }
                 .Bytes(existing) -> {
                     if store_artifact_decode_action(record.action, existing) == {
                         .Ok(value) -> {
-                            if value == record.bytes -> journal.push(ArtifactJournalAppend{operation: "touch", key: key, length: existing.len()})
+                            if value == record.bytes {
+                                journal.push(ArtifactJournalAppend{operation: "touch", key: key, length: existing.len()})
+                            }
                             next
                         }
                         .Err(error) -> self.quarantine_locked(key, path, error.reason)
@@ -534,11 +542,15 @@ ArtifactStore: struct {
         }
         if pending.len() > 0 {
             incoming := 0
-            loop write in pending -> incoming = store_artifact_saturating_add(incoming, write.encoded.len())
+            loop write in pending {
+                incoming = store_artifact_saturating_add(incoming, write.encoded.len())
+            }
             self.ensure_capacity_locked(incoming, pending[0].path)
         }
         loop write in pending {
-            if durable -> store_artifact_atomic_write(write.path, write.encoded) else -> store_artifact_replace_unsynced(write.path, write.encoded)
+            if durable -> store_artifact_atomic_write(write.path, write.encoded) else {
+                store_artifact_replace_unsynced(write.path, write.encoded)
+            }
             journal.push(ArtifactJournalAppend{operation: "put", key: write.key, length: write.encoded.len()})
         }
         self.append_journal_entries_locked(journal, durable)
@@ -599,7 +611,9 @@ ArtifactStore: struct {
         keys := [ArtifactEntryKey]{}
         loop target in targets -> keys.push(target.entry_key())
         text := self.owner_value.owner_line("lease")
-        loop key in store_artifact_unique_keys(keys) -> text = "{text}{key.kind_name()}|{key.wire_value()}\n"
+        loop key in store_artifact_unique_keys(keys) {
+            text = "{text}{key.kind_name()}|{key.wire_value()}\n"
+        }
         store_artifact_create_new(path, text.bytes())
         Ok(ArtifactLease{path_value: path, owner_value: self.owner_value})
     }
@@ -634,12 +648,14 @@ ArtifactStore: struct {
         defer close(lock)
         path: self.host_limit_path()
         if limit_bytes == {
-            .Val(limit) -> store_artifact_atomic_write(path, "{limit}\n".bytes())
+            .Val(limit) -> { store_artifact_atomic_write(path, "{limit}\n".bytes()) }
             .None -> {
                 if files.remove(path) == {
-                    .Ok(_) -> store_artifact_sync_dir(self.root())
+                    .Ok(_) -> { store_artifact_sync_dir(self.root()) }
                     .Err(error) -> {
-                        if store_artifact_io_missing(error) -> return
+                        if store_artifact_io_missing(error) {
+                            return
+                        }
                         return Err(ArtifactStoreError.IO(error))
                     }
                 }
@@ -688,7 +704,7 @@ ArtifactStore: struct {
         path: self.object_path(object)
         self.publish_data(ArtifactEntryKey.Blob(object.key()), path, bytes, durable)
         self.publish_action_entry(action, store_artifact_encode_record(object, executable), durable)
-        Ok(StoredArtifact{action, object, path, executable})
+        Ok(StoredArtifact{action: action, object: object, path: path, executable: executable})
     }
 
     // Verify and locate a named artifact without copying it.
@@ -704,14 +720,14 @@ ArtifactStore: struct {
                 self.quarantine_after_read(action_key, action_path, reason)
                 return Ok(ArtifactLookup.Corrupt)
             }
-            .Bytes(bytes) -> {
-                if store_artifact_decode_action(action, bytes) == {
-                    .Ok(decoded) -> decoded
-                    .Err(error) -> {
-                        if store_artifact_is_unsupported_version(bytes) -> return Ok(ArtifactLookup.Missing)
-                        self.quarantine_after_read(action_key, action_path, error.reason)
-                        return Ok(ArtifactLookup.Corrupt)
+            .Bytes(bytes) -> if store_artifact_decode_action(action, bytes) == {
+                .Ok(decoded) -> decoded
+                .Err(error) -> {
+                    if store_artifact_is_unsupported_version(bytes) {
+                        return Ok(ArtifactLookup.Missing)
                     }
+                    self.quarantine_after_read(action_key, action_path, error.reason)
+                    return Ok(ArtifactLookup.Corrupt)
                 }
             }
         }
@@ -743,7 +759,7 @@ ArtifactStore: struct {
                 }
                 self.touch_after_read(object_key, bytes.len())
                 self.touch_after_read(action_key, record.len())
-                Ok(ArtifactLookup.Hit(StoredArtifact{action, object, path: object_path, executable: decoded.executable}))
+                Ok(ArtifactLookup.Hit(StoredArtifact{action: action, object: object, path: object_path, executable: decoded.executable}))
             }
         }
     }
@@ -775,9 +791,11 @@ ArtifactStore: struct {
         defer close(lock)
         if store_artifact_read_file(path) == {
             .Missing -> {}
-            .Corrupt(reason) -> self.quarantine_locked(key, path, reason)
+            .Corrupt(reason) -> { self.quarantine_locked(key, path, reason) }
             .Bytes(existing) -> {
-                if existing == bytes -> return self.append_journal_locked("touch", key, existing.len(), durable: false)
+                if existing == bytes {
+                    return self.append_journal_locked("touch", key, existing.len(), durable: false)
+                }
                 self.quarantine_locked(key, path, "existing bytes do not match their key")
             }
         }
@@ -788,7 +806,7 @@ ArtifactStore: struct {
 
     // Scanned entries with their last use and whether a live lease pins them.
     // `pinned` is keyed by entry identity (the Rust BTreeSet lookup).
-    annotated_entries: fn(self, journal: ArtifactJournalState, pinned: [String: Bool]) -[FS]> [ArtifactStoredEntry] ArtifactStoreError! {
+    annotated_entries: fn(self, journal: ArtifactJournalState, pinned: [String:Bool]) -[FS]> [ArtifactStoredEntry] ArtifactStoreError! {
         entries := self.scan_entries()
         loop index in 0..<entries.len() {
             entries[index].last_use = journal.last_use_of(entries[index].key)
@@ -797,8 +815,8 @@ ArtifactStore: struct {
         Ok(entries)
     }
 
-    pinned_identities: fn(self, leases: [ArtifactLeaseRecord]) -> [String: Bool] Never! {
-        pinned := [String: Bool]{}
+    pinned_identities: fn(self, leases: [ArtifactLeaseRecord]) -> [String:Bool] Never! {
+        pinned := [String:Bool]{}
         loop lease in leases {
             loop target in lease.targets -> pinned[target.identity()] = true
         }
@@ -826,17 +844,19 @@ ArtifactStore: struct {
         }
         statuses := [ArtifactEntryStatus]{}
         loop entry in entries -> statuses.push(entry.status())
-        Ok(ArtifactStoreStatus{
-            root: self.root(),
-            footprint_bytes: footprint,
-            limit_bytes: self.limit_with_disk(total),
-            reserve_bytes: self.config_value.reserve_bytes(),
-            available_bytes: available,
-            live_leases: leases.len(),
-            host_limit_bytes: self.host_limit(),
-            entries: statuses,
-            tiers: [String]{"local"},
-        })
+        Ok(
+            ArtifactStoreStatus{
+                root: self.root(),
+                footprint_bytes: footprint,
+                limit_bytes: self.limit_with_disk(total),
+                reserve_bytes: self.config_value.reserve_bytes(),
+                available_bytes: available,
+                live_leases: leases.len(),
+                host_limit_bytes: self.host_limit(),
+                entries: statuses,
+                tiers: [String]{"local"},
+            },
+        )
     }
 
     // Remove unpinned entries, least recently used first (ties by key), until
@@ -848,7 +868,9 @@ ArtifactStore: struct {
         before: store_artifact_footprint(entries)
         pinned_bytes := 0
         loop entry in entries {
-            if entry.pinned -> pinned_bytes = store_artifact_saturating_add(pinned_bytes, entry.size_bytes)
+            if entry.pinned {
+                pinned_bytes = store_artifact_saturating_add(pinned_bytes, entry.size_bytes)
+            }
         }
         // Rust orders by (pinned, last_use, key) in one comparator; no reliance
         // on sort stability across two passes.
@@ -872,15 +894,19 @@ ArtifactStore: struct {
                 }
             }
         }
-        if removed.len() > 0 || journal.bytes > STORE_ARTIFACT_MAX_JOURNAL_BYTES -> self.compact_journal_locked()
-        Ok(ArtifactPruneReport{
-            target_bytes,
-            before_bytes: before,
-            after_bytes: after,
-            removed,
-            pinned_bytes,
-            blocked: after > target_bytes,
-        })
+        if removed.len() > 0 || journal.bytes > STORE_ARTIFACT_MAX_JOURNAL_BYTES {
+            self.compact_journal_locked()
+        }
+        Ok(
+            ArtifactPruneReport{
+                target_bytes: target_bytes,
+                before_bytes: before,
+                after_bytes: after,
+                removed: removed,
+                pinned_bytes: pinned_bytes,
+                blocked: after > target_bytes,
+            },
+        )
     }
 
     // Admit `incoming` bytes for `path`: within the limit after pruning, and
@@ -937,7 +963,7 @@ ArtifactStore: struct {
         }
         total: store_artifact_footprint(self.scan_entries())
         if store_artifact_journal_final_checksum(journal_path, journal_bytes) == .Val(checksum) {
-            store_artifact_replace_unsynced(tally_path, store_artifact_footprint_tally_text(ArtifactFootprintTally{journal_bytes, entry_bytes: total, checksum}).bytes()).drop("a lost tally only costs a later scan")
+            store_artifact_replace_unsynced(tally_path, store_artifact_footprint_tally_text(ArtifactFootprintTally{journal_bytes: journal_bytes, entry_bytes: total, checksum: checksum}).bytes()).drop("a lost tally only costs a later scan")
         }
         Ok(total)
     }
@@ -993,7 +1019,9 @@ ArtifactStore: struct {
     }
 
     quarantine_locked: fn(self, key: ArtifactEntryKey, path: String, reason: String) ArtifactStoreError! -[FS, Env, Rand]> {
-        if !files.lexists(path) -> return
+        if !files.lexists(path) {
+            return
+        }
         quarantine: files.join(self.root(), "quarantine")
         store_artifact_ensure_dir(quarantine, durable: false)
         destination: files.join(quarantine, "{key.kind_name()}-{key.storage_key()}-{store_artifact_unique_token()}")
@@ -1008,7 +1036,9 @@ ArtifactStore: struct {
                 self.append_journal_locked("remove", key, length, durable: true)
             }
             .Err(error) -> {
-                if store_artifact_io_missing(error) -> return
+                if store_artifact_io_missing(error) {
+                    return
+                }
                 return Err(ArtifactStoreError.IO(error))
             }
         }
@@ -1023,7 +1053,9 @@ ArtifactStore: struct {
     // a torn or corrupt tail compacts; full readers (status, prune, compaction)
     // verify every line.
     append_journal_entries_locked: fn(self, entries: [ArtifactJournalAppend], durable: Bool) ArtifactStoreError! -[FS, Env, Rand]> {
-        if entries.len() == 0 -> return
+        if entries.len() == 0 {
+            return
+        }
         journal_path: files.join(self.root(), "journal")
         last_sequence := store_artifact_journal_tail_sequence(journal_path)
         if last_sequence == None {
@@ -1044,7 +1076,7 @@ ArtifactStore: struct {
     compact_journal_locked: fn(self) ArtifactStoreError! -[FS, Env, Rand]> {
         journal_path: files.join(self.root(), "journal")
         journal: store_artifact_read_journal(journal_path)
-        entries := self.annotated_entries(journal, [String: Bool]{})
+        entries := self.annotated_entries(journal, [String:Bool]{})
         entries = loop fresh_item in entries -> fresh_item
         entries.sort_by(fn(left: ArtifactStoredEntry, right: ArtifactStoredEntry) { (left.last_use <=> right.last_use).then(store_artifact_entry_order(left, right)) })
         lines := [String]{}
@@ -1117,7 +1149,7 @@ ArtifactStore: struct {
                     writer := created
                     writer.write_bytes(owner_line.bytes())
                     close(writer)
-                    return Ok(ArtifactStoreLock{path, owner_line: owner_line.bytes()})
+                    return Ok(ArtifactStoreLock{path: path, owner_line: owner_line.bytes()})
                 }
                 .Err(error) -> {
                     // #3593: only AlreadyExists is lock contention, not any IO error.
@@ -1173,7 +1205,7 @@ store_artifact_scan_flat_namespace: fn(directory: String, kind: ArtifactEntryKin
             .Action -> ArtifactEntryKey.Action(name)
             .LTO -> ArtifactEntryKey.LTO{namespace: namespace ?? panic("an LTO scan always names its namespace"), key: name}
         }
-        output.push(ArtifactStoredEntry{key, path, size_bytes: metadata.size, last_use: 0, pinned: false})
+        output.push(ArtifactStoredEntry{key: key, path: path, size_bytes: metadata.size, last_use: 0, pinned: false})
     }
 }
 

@@ -8,7 +8,6 @@
 // bit casts, static texts, export addresses, the fault report's machine
 // code) are recognized by name and validated by signature here; ir_call
 // builds each call of one as its machine operation (ir_intrinsic_call).
-
 use {
     jet_backend.[LINK_FAULT_REPORT, X64DataExport]
     jet_foundation.[AccessConvention, CompilerThreads, DeclTable, Span, BodyCallArg, SymbolTable, TConstantDef, FnBody, TImplDef, TTypeDef, Type, foundation_json_quote, name_rows_get_text, name_rows_value]
@@ -17,17 +16,35 @@ use {
 
 // One `#Export(c)` row of the entry module: its checked function's key and
 // its C symbol.
-IRLibraryExportRow: struct { key: String, symbol: String }
+IRLibraryExportRow: struct {
+    key: String
+    symbol: String
+}
 
 // One global symbol of the library object: IR function `function`, its
 // constructor/destructor priority (-1: not a hook), and the data rows of
 // its hook's guards (none: an unconditional hook; ir_lifecycle_rows).
-IRLibraryExport: struct { function: Int, symbol: String, init_priority: Int, fini_priority: Int, guards: [Int] }
+IRLibraryExport: struct {
+    function: Int
+    symbol: String
+    init_priority: Int
+    fini_priority: Int
+    guards: [Int]
+}
 
 // The C ABI of an export: the layout of each parameter and of its result
 // (None: void), as the runtime ABI receipt records it.
-IRExportLayout: struct { size: Int, align: Int, class: String }
-IRExportABI: struct { symbol: String, parameters: [IRExportLayout], result: IRExportLayout? }
+IRExportLayout: struct {
+    size: Int
+    align: Int
+    class: String
+}
+
+IRExportABI: struct {
+    symbol: String
+    parameters: [IRExportLayout]
+    result: IRExportLayout?
+}
 
 // `errors` are the export, lifecycle and intrinsic problems (the module is
 // empty when there is any); `failures` the functions the builder could not
@@ -43,25 +60,11 @@ IRLibraryResult: struct {
 }
 
 IRRuntimeIntrinsic: enum {
-    // The IEEE bits of a Float as an I64, and back.
     FloatBits
     FloatFromBits
-    // The code address of the exported function `key`.
     FunctionAddress(key: String)
-    // The immortal String of a literal (the value a ConstText gives).
     StaticText
-    // A call of the fault report the linker writes (ir_fault_report_call).
     FaultReport
-    // Core's core.mem operations at their instance's one type argument
-    // (Build.jet IR_CORE_INTRINSICS): the List stride, a List's capacity,
-    // an exact List reserve, a List's bulk append from and copy out to a raw
-    // pointer, a volatile load or store, a streaming store,
-    // a raw pointer's step by elements or by bytes, a raw block copy or fill;
-    // a View over raw elements, at its element and owner type arguments;
-    // and, with no type argument, a raw heap allocation and its release, the
-    // memory sentry's account of a fresh and of a going OS mapping, a
-    // region's reserve and release of fresh pages, and `context.allocator`'s
-    // take, give and room of a block.
     TypeSize
     ListCapacity
     ListReserveExact
@@ -86,6 +89,21 @@ IRRuntimeIntrinsic: enum {
     ContextRoom
 }
 
+// The IEEE bits of a Float as an I64, and back.
+// The code address of the exported function `key`.
+// The immortal String of a literal (the value a ConstText gives).
+// A call of the fault report the linker writes (ir_fault_report_call).
+// Core's core.mem operations at their instance's one type argument
+// (Build.jet IR_CORE_INTRINSICS): the List stride, a List's capacity,
+// an exact List reserve, a List's bulk append from and copy out to a raw
+// pointer, a volatile load or store, a streaming store,
+// a raw pointer's step by elements or by bytes, a raw block copy or fill;
+// a View over raw elements, at its element and owner type arguments;
+// and, with no type argument, a raw heap allocation and its release, the
+// memory sentry's account of a fresh and of a going OS mapping, a
+// region's reserve and release of fresh pages, and `context.allocator`'s
+// take, give and room of a block.
+
 IRIntrinsicShape: enum {
     FloatBits
     FloatFromBits
@@ -94,9 +112,16 @@ IRIntrinsicShape: enum {
     FaultReport
 }
 
-IRIntrinsicSpec: struct { name: String, shape: IRIntrinsicShape }
+IRIntrinsicSpec: struct {
+    name: String
+    shape: IRIntrinsicShape
+}
 
-IRLifecycle: struct { init_priority: Int, fini_priority: Int, guards: [String] }
+IRLifecycle: struct {
+    init_priority: Int
+    fini_priority: Int
+    guards: [String]
+}
 
 // The one reviewed recognizer table; every address row uses the same
 // I64-only target validation.
@@ -217,16 +242,26 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
         export_rows.push(index)
         jobs.push(IRWaveJob{key: row.key, row: index, args: [Type]{}, lambda: -1, part: -1, local: -1})
     }
-    if exports.len() == 0 -> return ir_library_failed([String]{"the checked NativeLibrary artifact has no #Export(c) functions ({rows.len()} export rows: {unchecked} without a checked function, {outside} outside the C export law)"})
+    if exports.len() == 0 {
+        return ir_library_failed([String]{"the checked NativeLibrary artifact has no #Export(c) functions ({rows.len()} export rows: {unchecked} without a checked function, {outside} outside the C export law)"})
+    }
     // Every export problem is collected, so one run lists them all.
     problems := [String]{}
     export_symbols := [String:Bool]{}
     keys := [String:Bool]{}
     loop (index, row) in exports {
-        if export_symbols.get(row.symbol) != None -> problems.push("duplicate checked export symbol {row.symbol}") else -> export_symbols[row.symbol] = true
-        if keys.get(row.key) != None -> problems.push("duplicate checked export function {row.symbol}") else -> keys[row.key] = true
-        loop problem in ir_export_signature_problems(p.functions[export_rows[index]]) -> problems.push("export {row.symbol} {problem}")
-        if row.symbol == "jet_rt_alloc_init" && !ir_void_hook(p.functions[export_rows[index]]) -> problems.push("jet_rt_alloc_init must take no parameters and return nothing")
+        if export_symbols.get(row.symbol) != None {
+            problems.push("duplicate checked export symbol {row.symbol}")
+        } else { export_symbols[row.symbol] = true }
+        if keys.get(row.key) != None {
+            problems.push("duplicate checked export function {row.symbol}")
+        } else { keys[row.key] = true }
+        loop problem in ir_export_signature_problems(p.functions[export_rows[index]]) {
+            problems.push("export {row.symbol} {problem}")
+        }
+        if row.symbol == "jet_rt_alloc_init" && !ir_void_hook(p.functions[export_rows[index]]) {
+            problems.push("jet_rt_alloc_init must take no parameters and return nothing")
+        }
     }
     if problems.len() > 0 -> return ir_library_failed(problems)
     lifecycle := [String:IRLifecycle]{}
@@ -236,9 +271,13 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
     loop (index, row) in exports {
         hook: lifecycle.get(row.symbol) ?? next
         hooked += 1
-        if !ir_lifecycle_hook(p.functions[export_rows[index]], hook) -> return ir_library_failed([String]{"runtime lifecycle export {row.symbol} must return nothing and take no parameters, or, as an init hook, the init array's (argc, argv, envp) as three I64"})
+        if !ir_lifecycle_hook(p.functions[export_rows[index]], hook) {
+            return ir_library_failed([String]{"runtime lifecycle export {row.symbol} must return nothing and take no parameters, or, as an init hook, the init array's (argc, argv, envp) as three I64"})
+        }
     }
-    if hooked != lifecycle.len() -> return ir_library_failed([String]{"a runtime lifecycle row names no checked #Export(c) function"})
+    if hooked != lifecycle.len() {
+        return ir_library_failed([String]{"a runtime lifecycle row names no checked #Export(c) function"})
+    }
     intrinsics := p.intrinsics.move()
     bits := false
     from_bits := false
@@ -247,7 +286,9 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
         selected := false
         loop function in p.functions {
             if function.name != spec.name -> next
-            if selected -> return ir_library_failed([String]{"ambiguous checked runtime intrinsic {spec.name}"})
+            if selected {
+                return ir_library_failed([String]{"ambiguous checked runtime intrinsic {spec.name}"})
+            }
             selected = true
             if spec.shape == {
                 .StaticText -> {
@@ -257,12 +298,16 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
                     intrinsics[function.key] = IRRuntimeIntrinsic.StaticText
                 }
                 .FloatBits -> {
-                    if !ir_bitcast_signature(function, true) -> return ir_library_failed([String]{"runtime bitcast {spec.name} has an invalid checked scalar signature"})
+                    if !ir_bitcast_signature(function, true) {
+                        return ir_library_failed([String]{"runtime bitcast {spec.name} has an invalid checked scalar signature"})
+                    }
                     bits = true
                     intrinsics[function.key] = IRRuntimeIntrinsic.FloatBits
                 }
                 .FloatFromBits -> {
-                    if !ir_bitcast_signature(function, false) -> return ir_library_failed([String]{"runtime bitcast {spec.name} has an invalid checked scalar signature"})
+                    if !ir_bitcast_signature(function, false) {
+                        return ir_library_failed([String]{"runtime bitcast {spec.name} has an invalid checked scalar signature"})
+                    }
                     from_bits = true
                     intrinsics[function.key] = IRRuntimeIntrinsic.FloatFromBits
                 }
@@ -291,13 +336,17 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
             }
         }
     }
-    if bits != from_bits -> return ir_library_failed([String]{"runtime bitcast definitions must be present as one validated pair"})
+    if bits != from_bits {
+        return ir_library_failed([String]{"runtime bitcast definitions must be present as one validated pair"})
+    }
     p.intrinsics = intrinsics.move()
     p.asm_rails = rails
     kept: ir_build_waves_kept(p, jobs, false, threads)
     built: kept.result.move()
     m := built.program.move()
-    if built.failures.len() > 0 -> return IRLibraryResult{program: m, failures: built.failures.move(), errors: [String]{}, exports: [IRLibraryExport]{}, data: [X64DataExport]{}, abis: [IRExportABI]{}}
+    if built.failures.len() > 0 {
+        return IRLibraryResult{program: m, failures: built.failures.move(), errors: [String]{}, exports: [IRLibraryExport]{}, data: [X64DataExport]{}, abis: [IRExportABI]{}}
+    }
     p = kept.program.move()
     // Each export's function in the merged module.
     roots := [Int]{}
@@ -311,7 +360,9 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
     // jet_int_checked_fixed call itself). Every such export is reported.
     recursive := [String]{}
     loop (index, row) in exports {
-        if ir_calls_own_route(m, roots[index], row.symbol) -> recursive.push("runtime export {row.symbol} calls its own runtime route {row.symbol}: a construct in its body lowers to the routine it defines")
+        if ir_calls_own_route(m, roots[index], row.symbol) {
+            recursive.push("runtime export {row.symbol} calls its own runtime route {row.symbol}: a construct in its body lowers to the routine it defines")
+        }
     }
     if recursive.len() > 0 -> return ir_library_failed(recursive)
     globals := [IRLibraryExport]{}
@@ -326,12 +377,12 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
                 guard_problems.push("runtime lifecycle export {row.symbol}: guard `{name}` is no module storage the library reads")
             } else if !ir_names_data(m, roots[index], guard) {
                 guard_problems.push("runtime lifecycle export {row.symbol}: guard `{name}` is no state the hook sets up")
-            } else {
-                guards.push(guard)
-            }
+            } else { guards.push(guard) }
         }
         globals.push(IRLibraryExport{function: roots[index], symbol: row.symbol, init_priority: hook.init_priority, fini_priority: hook.fini_priority, guards: guards.move()})
-        if IR_HOST_PROVIDER.contains(row.symbol) -> m.functions[roots[index]].host_symbol = row.symbol.copy()
+        if IR_HOST_PROVIDER.contains(row.symbol) {
+            m.functions[roots[index]].host_symbol = row.symbol.copy()
+        }
         abis.push(ir_export_abi(m, roots[index], row.symbol))
     }
     if guard_problems.len() > 0 -> return ir_library_failed(guard_problems)
@@ -368,7 +419,9 @@ ir_export_abi: fn(m: IRModule, id: Int, symbol: String) -> IRExportABI Never! {
     f: m.functions[id]
     parameters: loop slot in 0..<f.param_count -> ir_export_layout(m.types[f.slot_type[slot]])
     result := IRExportLayout?{None}
-    if f.result >= 0 && m.types[f.result].kind != .Unit -> result = Val(ir_export_layout(m.types[f.result]))
+    if f.result >= 0 && m.types[f.result].kind != .Unit {
+        result = Val(ir_export_layout(m.types[f.result]))
+    }
     IRExportABI{symbol: symbol, parameters: parameters, result: result}
 }
 
@@ -454,7 +507,9 @@ ir_thread_exports: fn(m: IRModule, exports: [IRLibraryExport], receipt: [String]
         // storage runs it.
         added := false
         loop (index, row) in exports {
-            if guarded[index] || !reaches[row.function] || (row.init_priority < 0 && row.fini_priority < 0) -> next
+            if guarded[index] || !reaches[row.function] || (row.init_priority < 0 && row.fini_priority < 0) {
+                next
+            }
             if row.guards.len() == 0 -> return [String]{"*"}
             guarded[index] = true
             loop (at, data) in data_rows {
@@ -492,14 +547,22 @@ ir_lifecycle_rows: fn(lines: [String], lifecycle: &[String:IRLifecycle]) -> Stri
         loop field in text.split(" ").to_list() {
             if field != "" -> fields.push(field)
         }
-        if (fields.len() != 3 && fields.len() != 4) || (fields[1] != "init" && fields[1] != "fini") -> return "invalid runtime lifecycle row `{text}`"
+        if (fields.len() != 3 && fields.len() != 4) || (fields[1] != "init" && fields[1] != "fini") {
+            return "invalid runtime lifecycle row `{text}`"
+        }
         priority: Int.parse(fields[2]) ?? return "invalid runtime lifecycle priority in `{text}`"
-        if priority < 0 || priority > 65535 -> return "runtime lifecycle priority must be in 0..65535 in `{text}`"
-        if lifecycle.get(fields[0]) != None -> return "duplicate runtime lifecycle row `{fields[0]}`"
+        if priority < 0 || priority > 65535 {
+            return "runtime lifecycle priority must be in 0..65535 in `{text}`"
+        }
+        if lifecycle.get(fields[0]) != None {
+            return "duplicate runtime lifecycle row `{fields[0]}`"
+        }
         guards := [String]{}
         if fields.len() == 4 {
             loop name in fields[3].split(",").to_list() {
-                if name == "" || guards.contains(name) -> return "invalid runtime lifecycle guards in `{text}`"
+                if name == "" || guards.contains(name) {
+                    return "invalid runtime lifecycle guards in `{text}`"
+                }
                 guards.push(name)
             }
         }
@@ -554,7 +617,9 @@ ir_c_primitive: fn(ty: Type) -> String? Never! {
         .String -> return Val("Text")
         .Float32 -> return Val("F32")
         .IntN(signed, bits) -> {
-            if bits == 8 || bits == 16 || bits == 32 || bits == 64 -> return Val(if signed -> "I{bits}" else -> "U{bits}")
+            if bits == 8 || bits == 16 || bits == 32 || bits == 64 {
+                return Val(if signed -> "I{bits}" else -> "U{bits}")
+            }
         }
         .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
@@ -619,7 +684,9 @@ ir_c_export_law: fn(function: FnBody) -> Bool Never! {
 // list-index seam, jet_rt_panic_list_bounds), as the old writer passed it.
 ir_export_native_type: fn(ty: Type) -> String? Never! {
     primitive: ir_c_primitive(ty) ?? return Val("{ir_type_name(ty)} is not a C primitive")
-    if primitive == "Text" || primitive == "F32" -> return Val("{primitive} is not lowered by the native runtime object writer")
+    if primitive == "Text" || primitive == "F32" {
+        return Val("{primitive} is not lowered by the native runtime object writer")
+    }
     None
 }
 
@@ -631,8 +698,12 @@ ir_export_native_type: fn(ty: Type) -> String? Never! {
 // so a carrier here is a compiler defect.
 ir_export_signature_problems: fn(function: FnBody) -> [String] Never! {
     problems := [String]{}
-    if !ir_top_level(function) || function.generic_params.len() != 0 -> problems.push("is not a monomorphic top-level function")
-    if !ir_infallible(function) -> panic("checked C export `{function.name}` has a failure carrier; sema refuses it with E3203")
+    if !ir_top_level(function) || function.generic_params.len() != 0 {
+        problems.push("is not a monomorphic top-level function")
+    }
+    if !ir_infallible(function) {
+        panic("checked C export `{function.name}` has a failure carrier; sema refuses it with E3203")
+    }
     loop param in function.params {
         if param.convention == AccessConvention.Write {
             problems.push("parameter `{param.name}` is written; C exports take primitives by value")
@@ -658,7 +729,9 @@ ir_void_hook: fn(function: FnBody) -> Bool Never! {
 // keep), as three I64.
 ir_lifecycle_hook: fn(function: FnBody, hook: IRLifecycle) -> Bool Never! {
     if ir_void_hook(function) -> return true
-    if ir_c_export_result(function) != None || hook.fini_priority >= 0 || function.params.len() != 3 -> return false
+    if ir_c_export_result(function) != None || hook.fini_priority >= 0 || function.params.len() != 3 {
+        return false
+    }
     loop param in function.params {
         if (ir_c_primitive(param.ty) ?? "") != "I64" -> return false
     }
@@ -688,7 +761,9 @@ ir_float_type: fn(ty: Type?) -> Bool Never! {
 // rt_f64_bits reads a Float and returns I64 (`to_bits`); rt_f64_from_bits
 // the reverse.
 ir_bitcast_signature: fn(function: FnBody, to_bits: Bool) -> Bool Never! {
-    if !ir_intrinsic_signature(function, 1) || function.params[0].convention != AccessConvention.Read -> return false
+    if !ir_intrinsic_signature(function, 1) || function.params[0].convention != AccessConvention.Read {
+        return false
+    }
     input: function.params[0].ty
     if to_bits -> return ir_float_type(Val(input)) && ir_i64_type(ir_executable_return(function))
     ir_i64_type(Val(input)) && ir_float_type(ir_executable_return(function))
@@ -757,7 +832,9 @@ ir_intrinsic_nodes: fn(args: [BodyCallArg]) -> [Int] Never! {
 // argument and result registers. It never stops: the report is the last
 // thing a faulting process runs.
 ir_fault_report_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [BodyCallArg], word_row: Int, span: Span) -> Int Never! {
-    if args.len() != IR_X64_ARGUMENT_REGISTERS.len() -> return ir_fail_slot(b, span, "rt_fault_print reads six I64 values")
+    if args.len() != IR_X64_ARGUMENT_REGISTERS.len() {
+        return ir_fail_slot(b, span, "rt_fault_print reads six I64 values")
+    }
     values := [Int]{}
     loop arg in args {
         value: ir_value_as(m, p, b, arg.value, word_row, span)
@@ -774,7 +851,9 @@ ir_static_text_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [BodyCa
     if args.len() != 1 -> return ir_fail_slot(b, span, "rt_static_text is literal-only")
     parts: if ir_body_node(p, b, args[0].value).kind == {
         .StrLit(written) -> written
-        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> { return ir_fail_slot(b, span, "rt_static_text is literal-only") }
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {
+            return ir_fail_slot(b, span, "rt_static_text is literal-only")
+        }
     }
     literal := ""
     loop part in parts {
@@ -789,7 +868,9 @@ ir_static_text_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [BodyCa
 }
 
 ir_address_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, args: [BodyCallArg], word_row: Int, span: Span) -> Int Never! {
-    if args.len() != 0 -> return ir_fail_slot(b, span, "a runtime address intrinsic takes no arguments")
+    if args.len() != 0 {
+        return ir_fail_slot(b, span, "a runtime address intrinsic takes no arguments")
+    }
     target: ir_function_id(m, p, key, [Type]{}) ?? return ir_fail_slot(b, span, "runtime address target {key} is not among the checked functions")
     slot: ir_temp(m, b, word_row)
     ir_emit(b.f, IROp.FunctionAddress, slot, target, -1, -1, b.line)

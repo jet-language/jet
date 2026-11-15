@@ -22,9 +22,13 @@ use {
 
 // The pipeline packages whose `Source` holds compiler data.
 COMPILER_DATA_PACKAGES: [String]{"JetLexer", "JetParser", "JetFoundation", "JetSema", "JetIR", "JetBackend", "JetDriver", "JetEval", "JetWasm"}
+
 COMPILER_DATA_LEDGER: "tests/compiler_data.tsv"
+
 COMPILER_DATA_TEXT_KEYS: [String]{"[String:", "Set<String", "Tally<String", "NameRows"}
+
 COMPILER_DATA_SHARED: "Shared<"
+
 COMPILER_DATA_HEADER: "# The compiler-data ledger (Tools/agent/CompilerData.jet): each compiler-data\n# source file and the most text-keyed lookups, Shared cells and payload enums\n# it may hold. A file with no row holds none. Rows only go down.\n# path\ttext_keys\tshared\tpayload_enums"
 
 #Error
@@ -47,8 +51,11 @@ compiler_data_occurrences: fn(text: String, needle: String) -> Int {
 // counts the same however its source is laid out: one line or many, any
 // indentation, several variants to a line.
 COMPILER_DATA_WORD: 1
+
 COMPILER_DATA_PUNCT: 2
+
 COMPILER_DATA_OTHER: 3
+
 COMPILER_DATA_END: 0
 
 // One token: its kind and its bytes `start..<end`. Strings, character
@@ -124,7 +131,9 @@ compiler_data_string_end: fn(bytes: [U8], start: Int) -> Int {
             next
         }
         if triple {
-            if value == 34 && compiler_data_at(bytes, cursor + 1) == 34 && compiler_data_at(bytes, cursor + 2) == 34 -> return cursor + 3
+            if value == 34 && compiler_data_at(bytes, cursor + 1) == 34 && compiler_data_at(bytes, cursor + 2) == 34 {
+                return cursor + 3
+            }
             cursor += 1
             next
         }
@@ -184,18 +193,24 @@ compiler_data_token: fn(bytes: [U8], from: Int) -> CompilerDataToken {
                 } else if compiler_data_at(bytes, cursor) == 42 && compiler_data_at(bytes, cursor + 1) == 47 {
                     depth -= 1
                     cursor += 2
-                } else {
-                    cursor += 1
-                }
+                } else { cursor += 1 }
             }
             next
         }
-        if value == 34 -> return CompilerDataToken{kind: COMPILER_DATA_OTHER, start: cursor, end: compiler_data_string_end(bytes, cursor)}
-        if value == 96 -> return CompilerDataToken{kind: COMPILER_DATA_OTHER, start: cursor, end: compiler_data_raw_end(bytes, cursor)}
-        if value == 39 -> return CompilerDataToken{kind: COMPILER_DATA_OTHER, start: cursor, end: compiler_data_char_end(bytes, cursor)}
+        if value == 34 {
+            return CompilerDataToken{kind: COMPILER_DATA_OTHER, start: cursor, end: compiler_data_string_end(bytes, cursor)}
+        }
+        if value == 96 {
+            return CompilerDataToken{kind: COMPILER_DATA_OTHER, start: cursor, end: compiler_data_raw_end(bytes, cursor)}
+        }
+        if value == 39 {
+            return CompilerDataToken{kind: COMPILER_DATA_OTHER, start: cursor, end: compiler_data_char_end(bytes, cursor)}
+        }
         if compiler_data_word_byte(value) {
             end := cursor + 1
-            loop end < bytes.len() && compiler_data_word_byte(compiler_data_at(bytes, end)) -> end += 1
+            loop end < bytes.len() && compiler_data_word_byte(compiler_data_at(bytes, end)) {
+                end += 1
+            }
             return CompilerDataToken{kind: COMPILER_DATA_WORD, start: cursor, end: end}
         }
         return CompilerDataToken{kind: COMPILER_DATA_PUNCT, start: cursor, end: cursor + 1}
@@ -235,7 +250,9 @@ compiler_data_params_end: fn(bytes: [U8], open: CompilerDataToken) -> Int {
             depth -= 1
             if depth == 0 -> return cursor
         }
-        if compiler_data_is_punct(bytes, token, 123) || compiler_data_is_punct(bytes, token, 125) -> return -1
+        if compiler_data_is_punct(bytes, token, 123) || compiler_data_is_punct(bytes, token, 125) {
+            return -1
+        }
     }
 }
 
@@ -282,7 +299,9 @@ compiler_data_enum_body: fn(bytes: [U8], from: Int) -> (payload: Bool, end: Int)
                     member = false
                     next
                 }
-                if compiler_data_is_punct(bytes, after, 40) && after.start == token.end -> payload = true
+                if compiler_data_is_punct(bytes, after, 40) && after.start == token.end {
+                    payload = true
+                }
                 next
             }
             member = false
@@ -354,7 +373,7 @@ compiler_data_empty: fn(counts: CompilerDataCounts) -> Bool {
 }
 
 // Every `.jet` file under `path` with a nonzero count.
-compiler_data_scan: fn(path: String, found: &[String:CompilerDataCounts]) -[FS]> () CompilerDataError! {
+compiler_data_scan: fn(path: String, found: &[String:CompilerDataCounts]) CompilerDataError! -[FS]> {
     kind: files.stat(path) ?? return Err(CompilerDataError{message: "cannot stat {path}: {err}"})
     if kind.is_symlink -> return Ok()
     if kind.is_dir {
@@ -401,8 +420,12 @@ compiler_data_rows: fn(ledger: String, problems: &[String]) -> [String:CompilerD
 
 // One count's comparison with its row: a rise is in `rises`, a drop in `drops`.
 compiler_data_compare_one: fn(path: String, what: String, found: Int, row: Int, rises: &[String], drops: &[String]) {
-    if found > row -> rises.push("{path}: {found} {what}, over its row's {row}; key the data by an id (Docs/spec/compiler-data.md)")
-    if found < row -> drops.push("{path}: {found} {what}, under its row's {row}; lower the row with jet Tools/agent/CompilerData.jet --write")
+    if found > row {
+        rises.push("{path}: {found} {what}, over its row's {row}; key the data by an id (Docs/spec/compiler-data.md)")
+    }
+    if found < row {
+        drops.push("{path}: {found} {what}, under its row's {row}; lower the row with jet Tools/agent/CompilerData.jet --write")
+    }
 }
 
 CompilerDataDiff: struct {
@@ -422,7 +445,9 @@ compiler_data_diff: fn(found: [String:CompilerDataCounts], ledger: String) -> Co
         compiler_data_compare_one(path, "payload enums", counts.payload_enums, row.payload_enums, rises, drops)
     }
     loop (path, _) in rows {
-        if found.get(path) == None -> drops.push("{path}: holds none; delete its row with jet Tools/agent/CompilerData.jet --write")
+        if found.get(path) == None {
+            drops.push("{path}: holds none; delete its row with jet Tools/agent/CompilerData.jet --write")
+        }
     }
     rises.sort()
     drops.sort()
@@ -456,7 +481,9 @@ compiler_data_summary: fn(found: [String:CompilerDataCounts]) -> String {
 
 compiler_data_main: fn(args: [String]) -[FS, IO]> Int CompilerDataError! {
     mode: if args.len() == 0 -> "--check" else -> args[0]
-    if args.len() > 1 || (mode != "--check" && mode != "--write") -> return Err(CompilerDataError{message: "usage: jet Tools/agent/CompilerData.jet [--check|--write]"})
+    if args.len() > 1 || (mode != "--check" && mode != "--write") {
+        return Err(CompilerDataError{message: "usage: jet Tools/agent/CompilerData.jet [--check|--write]"})
+    }
     found := [String:CompilerDataCounts]{}
     loop package in COMPILER_DATA_PACKAGES {
         compiler_data_scan("Compiler/{package}/Source", found) ?? return Err(err)
@@ -517,14 +544,20 @@ run: fn() {
     found: [String:CompilerDataCounts]{"A.jet": CompilerDataCounts{text_keys: 3, shared: 0, payload_enums: 1}, "B.jet": CompilerDataCounts{text_keys: 1, shared: 1, payload_enums: 0}}
     ledger: "# header\nA.jet\t2\t0\t1\nB.jet\t1\t2\t0\nC.jet\t1\t0\t0\nD.jet\tx\t0\t0\nE.jet\t0\t0\t0\n"
     diff: compiler_data_diff(found, ledger)
-    assert_eq(diff.rises, [String]{
-        "A.jet: 3 text-keyed lookups, over its row's 2; key the data by an id (Docs/spec/compiler-data.md)",
-        "E.jet: an all-zero row is no row; delete it",
-        "malformed ledger row `D.jet\tx\t0\t0`: write the path and three counts, tab-separated",
-    })
-    assert_eq(diff.drops, [String]{
-        "B.jet: 1 Shared cells, under its row's 2; lower the row with jet Tools/agent/CompilerData.jet --write",
-        "C.jet: holds none; delete its row with jet Tools/agent/CompilerData.jet --write",
-    })
+    assert_eq(
+        diff.rises,
+        [String]{
+            "A.jet: 3 text-keyed lookups, over its row's 2; key the data by an id (Docs/spec/compiler-data.md)",
+            "E.jet: an all-zero row is no row; delete it",
+            "malformed ledger row `D.jet\tx\t0\t0`: write the path and three counts, tab-separated",
+        },
+    )
+    assert_eq(
+        diff.drops,
+        [String]{
+            "B.jet: 1 Shared cells, under its row's 2; lower the row with jet Tools/agent/CompilerData.jet --write",
+            "C.jet: holds none; delete its row with jet Tools/agent/CompilerData.jet --write",
+        },
+    )
     assert_eq(compiler_data_ledger(found), "{COMPILER_DATA_HEADER}\nA.jet\t3\t0\t1\nB.jet\t1\t1\t0\n")
 }

@@ -4,7 +4,7 @@
 #Test("store cache candidate preflight does not read closure graph") {
     verification := StoreVerification.new()
     roots: store_test_temp_roots()
-    ingested: store_test_ingest_fixture(verification, roots, "candidate-preflight", [String: String]{"out": "trusted"}, [String]{})
+    ingested: store_test_ingest_fixture(verification, roots, "candidate-preflight", [String:String]{"out": "trusted"}, [String]{})
     expectation: store_test_expectation(ingested.entry.out)
     closure_db: files.join(roots.hangar_dir(), "closure-db")
     files.remove_all(closure_db) ?? panic("remove closure db")
@@ -79,7 +79,7 @@
     producer_facts["nix.drv_path"] = drv
     producer_facts["nix.output.out"] = "/nix/store/projection-out"
     producer_facts["nix.output.dev"] = "/nix/store/projection-dev"
-    plan: ProviderPlanFacts.from_facts([String: String]{"nix.drv_path": drv, "nix.output.out": "/nix/store/projection-out", "nix.output.dev": "/nix/store/projection-dev"}) ?? panic("plan")
+    plan: ProviderPlanFacts.from_facts([String:String]{"nix.drv_path": drv, "nix.output.out": "/nix/store/projection-out", "nix.output.dev": "/nix/store/projection-dev"}) ?? panic("plan")
     producer: ProducerRecord.new("nix", drv, store_sha256_hex(drv.bytes()), plan, "nix-derivation:projection", "policy=test\nplatform=test", producer_facts) ?? panic("producer")
     entry: StoreEntry{
         id: "projection",
@@ -92,15 +92,17 @@
         envelope: Envelope.for_output(snapshot, "projection@nixpkgs", "nix"),
         cache_identity: CacheIdentity.empty(),
         references: [String]{},
-        named_outputs: [String: String]{"out": out_digest, "dev": dev_digest},
+        named_outputs: [String:String]{"out": out_digest, "dev": dev_digest},
         platform_artifact_kind: "",
         producer_record: producer.encode(),
         receipt: "",
         realized_at: 0,
         last_used_at: 0,
     }
-    projection := [String: String]{}
-    loop item in store_nix_store_projection_for_entry(verification, roots, entry, snapshot) ?? panic("projection") -> projection[item.logical] = item.source
+    projection := [String:String]{}
+    loop item in store_nix_store_projection_for_entry(verification, roots, entry, snapshot) ?? panic("projection") {
+        projection[item.logical] = item.source
+    }
     assert(projection.get("/nix/store/projection-out") == Val((snapshot)))
     assert(projection.get("/nix/store/projection-dev") == Val((dev_object)))
     loop item in projection -> assert(!store_path_starts_with(item.value, "/nix/store"))
@@ -115,7 +117,9 @@
     lease.validate() ?? panic("validate")
     if sys.is_linux() {
         // Each projected object is named by a descriptor the child holds.
-        loop pair in lease.nix_store_projection() -> assert(pair.source.render(LeaseBinding.empty()) == .Err(_))
+        loop pair in lease.nix_store_projection() {
+            assert(pair.source.render(LeaseBinding.empty()) == .Err(_))
+        }
     }
     lease.release()
     store_test_drop_roots(roots)
@@ -132,7 +136,7 @@
     producer_facts := provider_nix_build_facts_record()
     producer_facts["nix.drv_path"] = drv
     producer_facts["nix.output.out"] = out
-    plan: ProviderPlanFacts.from_facts([String: String]{"nix.drv_path": drv, "nix.output.out": out}) ?? panic("plan")
+    plan: ProviderPlanFacts.from_facts([String:String]{"nix.drv_path": drv, "nix.output.out": out}) ?? panic("plan")
     producer: ProducerRecord.new("nix", drv, store_sha256_hex(drv.bytes()), plan, "nix-derivation:fixture-greet", "policy=test\nplatform=test", producer_facts) ?? panic("producer")
     entry: StoreEntry{
         id: "fixture-greet",
@@ -145,7 +149,7 @@
         envelope: Envelope.for_output(out, "greet@jetpack", "nix"),
         cache_identity: CacheIdentity.empty(),
         references: [String]{},
-        named_outputs: [String: String]{},
+        named_outputs: [String:String]{},
         platform_artifact_kind: "",
         producer_record: producer.encode(),
         receipt: "",
@@ -179,7 +183,7 @@
 #Test("store proven digest mismatch still quarantines object") {
     verification := StoreVerification.new()
     roots: store_test_temp_roots()
-    ingested: store_test_ingest_fixture(verification, roots, "sealed", [String: String]{"out": "tampered"}, [String]{})
+    ingested: store_test_ingest_fixture(verification, roots, "sealed", [String:String]{"out": "tampered"}, [String]{})
     entry: ingested.entry
     out: entry.out
     payload: files.join(out, "payload")
@@ -193,15 +197,15 @@
         if name.starts_with("output-{entry.envelope.output_hash}-") -> quarantined = true
     }
     assert(quarantined)
-    _: store_test_ingest_fixture(verification, roots, "sealed", [String: String]{"out": "tampered"}, [String]{})
+    _: store_test_ingest_fixture(verification, roots, "sealed", [String:String]{"out": "tampered"}, [String]{})
     store_test_drop_roots(roots)
 }
 
 #Test("store identity only quarantine preserves shared cas object") {
     verification := StoreVerification.new()
     roots: store_test_temp_roots()
-    stale: store_test_ingest_fixture(verification, roots, "shared-stale", [String: String]{"out": "same"}, [String]{})
-    survivor: store_test_ingest_fixture(verification, roots, "shared-survivor", [String: String]{"out": "same"}, [String]{})
+    stale: store_test_ingest_fixture(verification, roots, "shared-stale", [String:String]{"out": "same"}, [String]{})
+    survivor: store_test_ingest_fixture(verification, roots, "shared-survivor", [String:String]{"out": "same"}, [String]{})
     assert_eq(stale.entry.out, survivor.entry.out)
     mismatch := store_test_expectation(stale.entry.out)
     mismatch.identity.source_fingerprint = "wrong-source"
@@ -221,8 +225,8 @@
 #Test("store unreadable shared cas object survives quarantine") {
     verification := StoreVerification.new()
     roots: store_test_temp_roots()
-    stale: store_test_ingest_fixture(verification, roots, "unreadable-stale", [String: String]{"out": "same"}, [String]{})
-    survivor: store_test_ingest_fixture(verification, roots, "unreadable-survivor", [String: String]{"out": "same"}, [String]{})
+    stale: store_test_ingest_fixture(verification, roots, "unreadable-stale", [String:String]{"out": "same"}, [String]{})
+    survivor: store_test_ingest_fixture(verification, roots, "unreadable-survivor", [String:String]{"out": "same"}, [String]{})
     assert_eq(stale.entry.out, survivor.entry.out)
     object: stale.entry.out
     payload: files.join(object, "payload")
@@ -295,14 +299,14 @@
 #Test("store quarantine failure restores permissions without tombstone") {
     verification := StoreVerification.new()
     roots: store_test_temp_roots()
-    ingested: store_test_ingest_fixture(verification, roots, "restore", [String: String]{"out": "same"}, [String]{})
+    ingested: store_test_ingest_fixture(verification, roots, "restore", [String:String]{"out": "same"}, [String]{})
     hangar: roots.hangar_dir()
     files.write(files.join(hangar, "quarantine"), "blocks directory creation") ?? panic("block quarantine")
     files.set_mode(hangar, 365) ?? panic("chmod 0555")
     mismatch := store_test_expectation(ingested.entry.out)
     mismatch.identity.source_fingerprint = "wrong-source"
     if store_quarantine_invalid_entry(verification, roots, ingested.entry, mismatch) == {
-        .Ok(_) -> panic("a blocked quarantine must fail")
+        .Ok(_) -> { panic("a blocked quarantine must fail") }
         .Err(error) -> assert(error == .InvalidData(_))
     }
     assert_eq(((files.stat(hangar) ?? panic("stat")).mode).bit_and(511), 365)
@@ -340,15 +344,21 @@ store_test_run_leased: fn(lease: &CacheLease, argv: [LeaseText], path: LeaseText
     planned := LeaseBinding.empty()
     lease.plan_binding(planned)
     rendered := [String]{}
-    loop arg in argv -> rendered.push(arg.render(planned) ?? panic("render leased argv: {err.message()}"))
+    loop arg in argv {
+        rendered.push(arg.render(planned) ?? panic("render leased argv: {err.message()}"))
+    }
     bound := LeaseBinding.empty()
     spec := lease.keep_open_for(process.cmd(rendered), bound) ?? panic("pass lease: {err.message()}")
-    if path == .Val(search) -> spec = spec.env("PATH", search.render(bound) ?? panic("render leased PATH: {err.message()}"))
+    if path == .Val(search) {
+        spec = spec.env("PATH", search.render(bound) ?? panic("render leased PATH: {err.message()}"))
+    }
     spec.run() ?? panic("run leased child: {err}")
 }
 
 #Test("store leased child path renders only for a child the lease is passed to") {
-    if !sys.is_linux() -> return
+    if !sys.is_linux() {
+        return
+    }
     verification := StoreVerification.new()
     roots: store_test_temp_roots()
     out: files.join(roots.root, "child-path-output")
@@ -359,7 +369,7 @@ store_test_run_leased: fn(lease: &CacheLease, argv: [LeaseText], path: LeaseText
     lease := store_snapshot_lease(verification, roots, entry) ?? panic("lease")
     payload: lease.child_path(files.join(out, "payload")) ?? panic("child path")
     if payload.render(LeaseBinding.empty()) == {
-        .Err(error) -> assert(error == .Unbound(_))
+        .Err(error) -> { assert(error == .Unbound(_)) }
         .Ok(_) -> panic("lease text rendered for a child that holds no lease")
     }
     files.write(files.join(out, "payload"), "mutated after leasing") ?? panic("mutate")
@@ -373,7 +383,7 @@ store_test_run_leased: fn(lease: &CacheLease, argv: [LeaseText], path: LeaseText
 #Test("store lease recovery waits for descendant then reclaims idle container") {
     verification := StoreVerification.new()
     roots: store_test_temp_roots()
-    ingested: store_test_ingest_fixture(verification, roots, "lease-tree", [String: String]{"out": "trusted"}, [String]{})
+    ingested: store_test_ingest_fixture(verification, roots, "lease-tree", [String:String]{"out": "trusted"}, [String]{})
     lease := store_test_verified_lease(verification, roots, ingested.entry)
     lease_root: files.dirname(lease.snapshot_root)
     // The lease is passed to a detached `sh` whose `sleep` holds the
@@ -387,7 +397,9 @@ store_test_run_leased: fn(lease: &CacheLease, argv: [LeaseText], path: LeaseText
     // once the descendant has exited and the lock is idle (bounded at 10 s).
     reclaimed: loop _ in 0..<100 {
         time.sleep(time.duration_ms(100))
-        if (store_recover_hangar(verification, roots) ?? panic("recover")) == 1 -> break true
+        if (store_recover_hangar(verification, roots) ?? panic("recover")) == 1 {
+            break true
+        }
     } ?? false
     assert(reclaimed)
     assert(!files.exists(lease_root))
@@ -436,11 +448,15 @@ store_test_verified_lease: fn(verification: &StoreVerification, roots: HangarRoo
     assert_eq(fresh.lease.nix_store_projection().len(), 0)
     assert(fresh.lease.child_path(files.join(out, "payload")) == .Ok(_))
     if fresh.lease.profile_install_receipt() == {
-        .Err(error) -> store_test_assert_other_read_error(error, "verified tool lease has no executables")
+        .Err(error) -> {
+            store_test_assert_other_read_error(error, "verified tool lease has no executables")
+        }
         .Ok(_) -> panic("empty lease acquired a profile receipt")
     }
     if fresh.lease.copy_profile_executable("missing", files.join(roots.root, "unused-profile-copy")) == {
-        .Err(error) -> store_test_assert_other_read_error(error, "verified receipt lost executable member")
+        .Err(error) -> {
+            store_test_assert_other_read_error(error, "verified receipt lost executable member")
+        }
         .Ok(_) -> panic("missing member produced a profile copy")
     }
     hit: if store_find_verified_by_reference(verification, roots, "typed@mine", store_test_expectation(out)) == {
@@ -464,7 +480,7 @@ store_test_verified_lease: fn(verification: &StoreVerification, roots: HangarRoo
         envelope: Envelope.empty(),
         cache_identity: store_test_identity(),
         references: [String]{},
-        named_outputs: [String: String]{},
+        named_outputs: [String:String]{},
         platform_artifact_kind: "",
         producer_record: "",
         receipt: "",
@@ -484,18 +500,22 @@ store_test_verified_lease: fn(verification: &StoreVerification, roots: HangarRoo
         .Consumable -> panic("missing output became consumable")
     }
     if missing.lease.child_path(missing_out) == {
-        .Err(error) -> if error == {
-            .Other(context) -> assert_eq(context.cause, Val(reason))
-            .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> panic("non-consumable lease changed its I/O error kind")
+        .Err(error) -> {
+            if error == {
+                .Other(context) -> assert_eq(context.cause, Val(reason))
+                .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
+                    panic("non-consumable lease changed its I/O error kind")
+                }
+            }
         }
         .Ok(_) -> panic("non-consumable lease handed a path to the consumer")
     }
     if missing.lease.profile_install_receipt() == {
-        .Err(error) -> store_test_assert_other_read_error(error, reason)
+        .Err(error) -> { store_test_assert_other_read_error(error, reason) }
         .Ok(_) -> panic("non-consumable lease acquired a profile receipt")
     }
     if missing.lease.copy_profile_executable("tool", files.join(roots.root, "unpublished-copy")) == {
-        .Err(error) -> store_test_assert_other_read_error(error, reason)
+        .Err(error) -> { store_test_assert_other_read_error(error, reason) }
         .Ok(_) -> panic("non-consumable lease produced a profile copy")
     }
     assert(!files.exists(files.join(roots.root, "unpublished-copy")))
@@ -507,7 +527,9 @@ store_test_verified_lease: fn(verification: &StoreVerification, roots: HangarRoo
 
 #Test("store leased fd view executes original after rename symlink swap") {
     verification := StoreVerification.new()
-    if !sys.is_linux() -> return
+    if !sys.is_linux() {
+        return
+    }
     roots: store_test_temp_roots()
     out: files.join(roots.root, "fd-view-output")
     tool: files.join(out, "bin/tool")
@@ -593,27 +615,33 @@ store_test_verified_lease: fn(verification: &StoreVerification, roots: HangarRoo
     assert_eq(proved.mode, copied.mode)
     if sys.is_unix() -> assert(((copied.mode).bit_and(0o111)) != 0)
     if lease.copy_profile_executable("z-tool", destination) == {
-        .Err(error) -> assert(error == .AlreadyExists(_))
+        .Err(error) -> { assert(error == .AlreadyExists(_)) }
         .Ok(_) -> panic("exclusive profile create overwrote a destination")
     }
     assert_eq(files.read(destination) ?? panic("read refused destination"), "abc")
     if lease.copy_profile_executable("not-a-member", files.join(roots.root, "unused-copy")) == {
-        .Err(error) -> store_test_assert_other_read_error(error, "verified receipt lost executable member")
+        .Err(error) -> {
+            store_test_assert_other_read_error(error, "verified receipt lost executable member")
+        }
         .Ok(_) -> panic("unrecorded member produced a profile copy")
     }
     if store_profile_file_proof(files.join(roots.root, "missing-profile")) == {
-        .Err(error) -> assert(error == .NotFound(_))
+        .Err(error) -> { assert(error == .NotFound(_)) }
         .Ok(_) -> panic("missing profile file acquired a proof")
     }
     if store_profile_file_proof(bin) == {
-        .Err(error) -> store_test_assert_other_read_error(error, "profile projection is not a no-follow file")
+        .Err(error) -> {
+            store_test_assert_other_read_error(error, "profile projection is not a no-follow file")
+        }
         .Ok(_) -> panic("directory acquired a profile proof")
     }
     if sys.is_unix() {
         link: files.join(roots.root, "profile-link")
         files.symlink(destination, link) ?? panic("fixture profile symlink")
         if store_profile_file_proof(link) == {
-            .Err(error) -> store_test_assert_other_read_error(error, "profile projection is not a no-follow file")
+            .Err(error) -> {
+                store_test_assert_other_read_error(error, "profile projection is not a no-follow file")
+            }
             .Ok(_) -> panic("symlink acquired a profile proof")
         }
     }
@@ -630,6 +658,8 @@ store_test_assert_other_read_error: fn(error: IOError, cause: String) {
             assert(context.os_code == None)
             assert_eq(context.cause, Val(cause))
         }
-        .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> panic("expected the Other read error \"{cause}\"")
+        .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
+            panic("expected the Other read error \"{cause}\"")
+        }
     }
 }

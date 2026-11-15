@@ -4,6 +4,7 @@
 // cache leases travel into each probe child.
 
 SERVICES_HEALTH_POLL_MS: 300
+
 SERVICES_NO_PROBE_STABILITY_MS: 300
 
 // A `services health` result for one service.
@@ -11,8 +12,9 @@ ServiceHealth: enum {
     Disabled
     NotRunning
     Healthy
-    // Enabled and running, but the readiness probe has not passed (yet).
     Unhealthy
+
+    // Enabled and running, but the readiness probe has not passed (yet).
 
     // Healthy or unhealthy: a verified service process is running.
     is_running: fn(self) -> Bool Never! {
@@ -148,9 +150,7 @@ services_wait_healthy: fn(project_dir: String, env: &ShellEnv, plan: DevServiceP
             since: stable_since ?? services_now_ms()
             stable_since = Val(since)
             if services_now_ms() - since >= SERVICES_NO_PROBE_STABILITY_MS -> return true
-        } else {
-            stable_since = None
-        }
+        } else { stable_since = None }
         if services_now_ms() >= deadline -> return false
         time.sleep(time.duration_ms(SERVICES_HEALTH_POLL_MS))
     }

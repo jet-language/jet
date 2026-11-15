@@ -23,9 +23,7 @@ canvas_html_test_scripts: fn(html: String) -> [CanvasHTMLTestScript] {
         after: opening.tail
         src := String?{None}
         attributes := ""
-        if after.starts_with(">") {
-            attributes = after.removeprefix(">")
-        } else {
+        if after.starts_with(">") -> attributes = after.removeprefix(">") else {
             spaced: after.trim_start()
             if spaced.len() == after.len() || !spaced.starts_with("src=\"") {
                 rest = after.copy()
@@ -41,7 +39,7 @@ canvas_html_test_scripts: fn(html: String) -> [CanvasHTMLTestScript] {
         }
         closing: attributes.partition("</script>")
         if closing.sep == "" -> break
-        scripts.push(CanvasHTMLTestScript{src, body: closing.head.copy()})
+        scripts.push(CanvasHTMLTestScript{src: src, body: closing.head.copy()})
         rest = closing.tail.copy()
     }
     scripts
@@ -69,16 +67,22 @@ canvas_html_test_evaluate: fn(node: String, scenario: String, index: Int, script
             loop item in items {
                 if item == {
                     .Array(pair) -> {
-                        if pair.len() != 2 -> panic("Canvas bootstrap {scenario}: a write is not a [name, value] pair")
+                        if pair.len() != 2 {
+                            panic("Canvas bootstrap {scenario}: a write is not a [name, value] pair")
+                        }
                         name: pair[0].text() ?? panic("Canvas bootstrap {scenario}: a global name is not text")
                         value: pair[1].text() ?? panic("Canvas bootstrap {scenario}: global {name} was set to a non-string")
                         writes.push((name: name, value: value))
                     }
-                    .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> panic("Canvas bootstrap {scenario}: a write is not a [name, value] pair")
+                    .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {
+                        panic("Canvas bootstrap {scenario}: a write is not a [name, value] pair")
+                    }
                 }
             }
         }
-        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> panic("Canvas bootstrap {scenario}: the engine output is not a list of writes")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {
+            panic("Canvas bootstrap {scenario}: the engine output is not a list of writes")
+        }
     }
     writes
 }
@@ -143,16 +147,21 @@ canvas_html_test_bootstrap: fn(scenario: String, html: String, base: String, src
 }
 
 #Test("canvas_html_query_bootstrap_evaluates_all_route_overrides") {
-    canvas_html_test_bootstrap("query", canvas_html_query(), "", "/?jet_panel_app=1&canvas_ui=blueprint23", [(name: String, value: String)]{
-        (name: "__JET_CANVAS_GRAPH__", value: "/?jet_panel_graph=1"),
-        (name: "__JET_CANVAS_TX__", value: "/canvas/transaction"),
-        (name: "__JET_CANVAS_QUERY__", value: "/canvas/query"),
-        (name: "__JET_CANVAS_SCM__", value: "/canvas/source-control"),
-        (name: "__JET_CANVAS_PROOF__", value: "/canvas/proof"),
-        (name: "__JET_CANVAS_COMMAND__", value: "/canvas/command")
-    })
+    canvas_html_test_bootstrap(
+        "query",
+        canvas_html_query(),
+        "",
+        "/?jet_panel_app=1&canvas_ui=blueprint23",
+        [(name: String, value: String)]{
+            (name: "__JET_CANVAS_GRAPH__", value: "/?jet_panel_graph=1"),
+            (name: "__JET_CANVAS_TX__", value: "/canvas/transaction"),
+            (name: "__JET_CANVAS_QUERY__", value: "/canvas/query"),
+            (name: "__JET_CANVAS_SCM__", value: "/canvas/source-control"),
+            (name: "__JET_CANVAS_PROOF__", value: "/canvas/proof"),
+            (name: "__JET_CANVAS_COMMAND__", value: "/canvas/command"),
+        },
+    )
 }
-
 // Integration prerequisite, not registered fake claims: Javascript.jet
 // independently syntax-checks all twelve JS assets (DEV-A2); canvas_scenarios
 // canvas-workbench-e2e/session-surface-matrix/devserver-real-client-survival and

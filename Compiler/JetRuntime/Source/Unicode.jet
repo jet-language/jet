@@ -64,9 +64,7 @@ unicode_table_find: fn(table: I64, count: I64, key_digits: I64, value_digits: I6
         loop low < high {
             middle: wrapping(low + high) >> I64{1}
             word: rt_text_word(wrapping(data + wrapping(middle * stride)))
-            if (code < word.bit_and(I64{4294967295})) {
-                high = middle
-            } else {
+            if (code < word.bit_and(I64{4294967295})) { high = middle } else {
                 if (code <= (word >> I64{32})) { return middle }
                 low = wrapping(middle + I64{1})
             }
@@ -76,10 +74,10 @@ unicode_table_find: fn(table: I64, count: I64, key_digits: I64, value_digits: I6
     loop low < high {
         middle: wrapping(low + high) >> I64{1}
         record: wrapping(data + wrapping(middle * stride))
-        if (key < unicode_table_field(record, key_digits)) {
-            high = middle
-        } else {
-            if (key <= unicode_table_field(wrapping(record + key_digits), key_digits)) { return middle }
+        if (key < unicode_table_field(record, key_digits)) { high = middle } else {
+            if (key <= unicode_table_field(wrapping(record + key_digits), key_digits)) {
+                return middle
+            }
             low = wrapping(middle + I64{1})
         }
     }
@@ -157,9 +155,7 @@ unicode_ascii_upper_bits: fn(word: I64) -> I64 {
     wrapping(word + I64{4557430888798830399}).bit_and(wrapping(word + I64{2676586395008836901}).bit_not()).bit_and(I64{-9187201950435737472})
 }
 
-unicode_ascii_upper: fn(byte: I64) -> Bool {
-    byte >= I64{65} && byte <= I64{90}
-}
+unicode_ascii_upper: fn(byte: I64) -> Bool { byte >= I64{65} && byte <= I64{90} }
 
 // The lowercase of an ASCII text: A-Z gain 32, every other byte stays (the
 // Unicode mapping of an ASCII scalar is exactly that). A text without A-Z is
@@ -170,19 +166,19 @@ unicode_ascii_lower: fn(value: I64, data: I64, length: I64) -> I64 {
     at := I64{0}
     loop at < words {
         word: rt_text_word(wrapping(data + at))
-        if (word.bit_and(I64{-9187201950435737472}) != I64{0}) -> return I64{-1}
-        if (unicode_ascii_upper_bits(word) != I64{0}) -> upper = true
+        if (word.bit_and(I64{-9187201950435737472}) != I64{0}) { return I64{-1} }
+        if (unicode_ascii_upper_bits(word) != I64{0}) { upper = true }
         at = wrapping(at + I64{8})
     }
     loop at < length {
         byte: rt_text_byte(wrapping(data + at))
-        if (byte >= I64{128}) -> return I64{-1}
+        if (byte >= I64{128}) { return I64{-1} }
         if unicode_ascii_upper(byte) -> upper = true
         at = wrapping(at + I64{1})
     }
     if !upper -> return jet_rt_string_clone(value)
     lowered: rt_text_with_length(length, length)
-    if (lowered == I64{0}) -> return I64{0}
+    if (lowered == I64{0}) { return I64{0} }
     target: rt_text_data(lowered)
     at = I64{0}
     loop at < words {
@@ -202,7 +198,7 @@ unicode_ascii_lower: fn(value: I64, data: I64, length: I64) -> I64 {
     length: rt_text_len(value)
     data: rt_text_data(value)
     ascii: unicode_ascii_lower(value, data, length)
-    if (ascii != I64{-1}) -> return ascii
+    if (ascii != I64{-1}) { return ascii }
     builder: rt_text_builder_with_capacity(length)
     unicode_lower_append(builder, data, I64{0}, length)
     jet_rt_string_builder_finish(builder)

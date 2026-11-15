@@ -20,15 +20,17 @@
     sync_store(wrapping(ring + RT_RING_SECOND), second)
     ring
 }
+
 realtime_ring_slot: fn(ring: I64, sequence: I64) -> I64 {
     sync_load(wrapping(ring + (if ((sequence.bit_and(I64{1})) == I64{0}) -> RT_RING_FIRST else -> RT_RING_SECOND)))
 }
+
 realtime_ring_publish: fn(ring: I64, data: I64, length: I64, zeroed: Bool) -> Bool {
     sequence: sync_load(wrapping(ring + RT_RING_WRITE))
     read_sequence: sync_load(wrapping(ring + RT_RING_READ))
     if !alloc_unsigned_less(wrapping(sequence - read_sequence), I64{2}) -> return false
     frames: sync_load(wrapping(ring + RT_RING_FRAMES))
-    if (!zeroed && frames != length) -> return false
+    if (!zeroed && frames != length) { return false }
     slot: realtime_ring_slot(ring, sequence)
     index := I64{0}
     loop index < frames {
@@ -38,16 +40,19 @@ realtime_ring_publish: fn(ring: I64, data: I64, length: I64, zeroed: Bool) -> Bo
     sync_store(wrapping(ring + RT_RING_WRITE), wrapping(sequence + I64{1}))
     true
 }
+
 #Export(c) jet_rt_native_realtime_ring_publish_zeroed: fn(ring: I64) -> Bool {
     realtime_ring_publish(ring, I64{0}, I64{0}, true)
 }
+
 #Export(c) jet_rt_native_realtime_ring_publish: fn(ring: I64, data: I64, length: I64) -> Bool {
     realtime_ring_publish(ring, data, length, false)
 }
+
 // Successful pop owns its new Float buffer; false leaves both out slots alone.
 #Export(c) jet_rt_native_realtime_ring_pop: fn(ring: I64, data_out: I64, length_out: I64) -> Bool {
     sequence: sync_load(wrapping(ring + RT_RING_READ))
-    if (sequence == sync_load(wrapping(ring + RT_RING_WRITE))) -> return false
+    if (sequence == sync_load(wrapping(ring + RT_RING_WRITE))) { return false }
     frames: sync_load(wrapping(ring + RT_RING_FRAMES))
     slot: realtime_ring_slot(ring, sequence)
     data: jet_rt_alloc(frames * I64{8}, I64{8})
@@ -61,8 +66,11 @@ realtime_ring_publish: fn(ring: I64, data: I64, length: I64, zeroed: Bool) -> Bo
     sync_store(length_out, frames)
     true
 }
+
 #Export(c) jet_rt_handle_drop_jet_realtime_sample_ring: fn(ring: I64) {
-    if (ring == I64{0}) -> return
+    if (ring == I64{0}) {
+        return
+    }
     bytes: sync_load(wrapping(ring + RT_RING_FRAMES)) * I64{8}
     jet_rt_free(sync_load(wrapping(ring + RT_RING_FIRST)), bytes, I64{8})
     jet_rt_free(sync_load(wrapping(ring + RT_RING_SECOND)), bytes, I64{8})

@@ -3,8 +3,13 @@
 // input sets and the environment are key-ordered like Nix's maps, so every
 // encoder walk goes through sorted keys.
 use jetpack_nix_eval.[
-    nixeval_key_ordered, nixeval_push_byte, nixeval_push_text, nixeval_scalar_width, nixeval_slice,
-    nixeval_sorted, nixeval_sorted_unique,
+    nixeval_key_ordered,
+    nixeval_push_byte,
+    nixeval_push_text,
+    nixeval_scalar_width,
+    nixeval_slice,
+    nixeval_sorted,
+    nixeval_sorted_unique,
 ]
 
 NixDerivationOutput: struct {
@@ -23,9 +28,7 @@ NixDerivationOutput: struct {
         self.path == "" && self.method_algo != "" && self.hash_hex == ""
     }
 
-    is_impure: fn(self) -> Bool Never! {
-        self.hash_hex == "impure"
-    }
+    is_impure: fn(self) -> Bool Never! { self.hash_hex == "impure" }
 }
 
 NixInputDrv: struct {
@@ -35,7 +38,7 @@ NixInputDrv: struct {
 }
 
 NixDerivation: struct {
-    outputs: [String: NixDerivationOutput]
+    outputs: [String:NixDerivationOutput]
     // Ordered by store path.
     input_drvs: [NixInputDrv]
     // Sorted and unique.
@@ -43,16 +46,18 @@ NixDerivation: struct {
     platform: String
     builder: String
     args: [String]
-    env: [String: String]
+    env: [String:String]
 
     // Parse a stable `Derive(...)` ATerm; `DrvWithVersion` (dynamic
     // derivations) is unsupported.
     parse: fn(aterm: String) -> NixDerivation NixError! {
-        if aterm.starts_with("DrvWithVersion(") -> return Err(NixError.DrvUnsupported("DrvWithVersion / dynamic-derivations (JP21 staged)"))
+        if aterm.starts_with("DrvWithVersion(") {
+            return Err(NixError.DrvUnsupported("DrvWithVersion / dynamic-derivations (JP21 staged)"))
+        }
         if !aterm.starts_with("Derive(") -> return Err(NixError.DrvParse("expected Derive("))
         cursor := NixATermCursor{bytes: aterm.bytes(), position: "Derive(".bytes().len()}
 
-        outputs := [String: NixDerivationOutput]{}
+        outputs := [String:NixDerivationOutput]{}
         if cursor.list_open() {
             loop {
                 cursor.consume("(")
@@ -64,7 +69,7 @@ NixDerivation: struct {
                 cursor.consume(",")
                 hash_hex: cursor.raw_string()
                 cursor.consume(")")
-                outputs[name] = NixDerivationOutput{name: name.copy(), path, method_algo, hash_hex}
+                outputs[name] = NixDerivationOutput{name: name.copy(), path: path, method_algo: method_algo, hash_hex: hash_hex}
                 if !cursor.list_next() -> break
             }
         }
@@ -76,8 +81,10 @@ NixDerivation: struct {
                 cursor.consume("(")
                 path: cursor.raw_string()
                 cursor.consume(",")
-                if (cursor.peek() ?? "") == "(" -> return Err(NixError.DrvUnsupported("dynamic derivation input childMap (xp-dyn-drv)"))
-                input_drvs.push(NixInputDrv{path, outputs: nixeval_sorted_unique(cursor.raw_strings())})
+                if (cursor.peek() ?? "") == "(" {
+                    return Err(NixError.DrvUnsupported("dynamic derivation input childMap (xp-dyn-drv)"))
+                }
+                input_drvs.push(NixInputDrv{path: path, outputs: nixeval_sorted_unique(cursor.raw_strings())})
                 cursor.consume(")")
                 if !cursor.list_next() -> break
             }
@@ -91,7 +98,7 @@ NixDerivation: struct {
         cursor.consume(",")
         args: cursor.escaped_strings()
         cursor.consume(",")
-        env := [String: String]{}
+        env := [String:String]{}
         if cursor.list_open() {
             loop {
                 cursor.consume("(")
@@ -107,12 +114,10 @@ NixDerivation: struct {
 
         // Store-path order matches Nix's map iteration for a byte-exact encode.
         input_drvs.sort_by(fn(input) { input.path })
-        Ok(NixDerivation{outputs, input_drvs, input_srcs, platform, builder, args, env: nixeval_key_ordered(env)})
+        Ok(NixDerivation{outputs: outputs, input_drvs: input_drvs, input_srcs: input_srcs, platform: platform, builder: builder, args: args, env: nixeval_key_ordered(env)})
     }
 
-    output_names: fn(self) -> [String] Never! {
-        nixeval_sorted(self.outputs.keys().to_list())
-    }
+    output_names: fn(self) -> [String] Never! { nixeval_sorted(self.outputs.keys().to_list()) }
 
     is_fixed: fn(self) -> Bool Never! {
         loop name in self.output_names() {
@@ -131,7 +136,7 @@ NixDerivation: struct {
     // The ATerm encoding. `mask_outputs` blanks output paths and output
     // environment values; `actual_inputs` replaces the input derivations by
     // modulo-hash hex keys (the `hashDerivationModulo` serialization).
-    unparse: fn(self, mask_outputs: Bool, actual_inputs: [String: [String]]?) -> String Never! {
+    unparse: fn(self, mask_outputs: Bool, actual_inputs: [String:[String]]?) -> String Never! {
         outputs := [String]{}
         loop name in self.output_names() {
             output: self.outputs[name]
@@ -141,10 +146,14 @@ NixDerivation: struct {
         inputs := [String]{}
         if actual_inputs == {
             .Val(hashes) -> {
-                loop hash_hex in nixeval_sorted(hashes.keys().to_list()) -> inputs.push(nix_aterm_input(hash_hex, hashes[hash_hex]))
+                loop hash_hex in nixeval_sorted(hashes.keys().to_list()) {
+                    inputs.push(nix_aterm_input(hash_hex, hashes[hash_hex]))
+                }
             }
             .None -> {
-                loop input in self.input_drvs -> inputs.push(nix_aterm_input(input.path, input.outputs))
+                loop input in self.input_drvs {
+                    inputs.push(nix_aterm_input(input.path, input.outputs))
+                }
             }
         }
         sources := [String]{}
@@ -161,9 +170,7 @@ NixDerivation: struct {
 }
 
 // Unquoted ATerm string: no escape processing (Nix `printUnquotedString`).
-nix_aterm_raw: fn(text: String) -> String Never! {
-    "\"{text}\""
-}
+nix_aterm_raw: fn(text: String) -> String Never! { "\"{text}\"" }
 
 // Escaped ATerm string (Nix `printString`): `\\`, `\"`, `\n`, `\r`, `\t`.
 nix_aterm_escaped: fn(text: String) -> String Never! {

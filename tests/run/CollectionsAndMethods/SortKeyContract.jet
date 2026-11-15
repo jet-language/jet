@@ -21,9 +21,7 @@ KeyError: struct {
     message: String
 }
 
-show: fn(jobs: [Job]) -> String {
-    jobs.map(fn(j: Job) { "{j.name}:{j.team}:{j.cost}" }).join(" ")
-}
+show: fn(jobs: [Job]) -> String { jobs.map(fn(j: Job) { "{j.name}:{j.team}:{j.cost}" }).join(" ") }
 
 traced_key: fn(n: Int) -> Int {
     print("  key({n})")
@@ -53,13 +51,9 @@ OwnedNamedKey: struct {
     }
 }
 
-tuple_key: fn(j: Job) -> (team: Int, cost: Int) KeyError! {
-    Ok((team: j.team, cost: j.cost))
-}
+tuple_key: fn(j: Job) -> (team: Int, cost: Int) KeyError! { Ok((team: j.team, cost: j.cost)) }
 
-named_key: fn(j: Job) -> NamedKey KeyError! {
-    Ok(NamedKey{team: j.team, label: j.name})
-}
+named_key: fn(j: Job) -> NamedKey KeyError! { Ok(NamedKey{team: j.team, label: j.name}) }
 
 named_key_failure: fn(j: Job, calls: &Int) -> OwnedNamedKey KeyError! {
     calls += 1

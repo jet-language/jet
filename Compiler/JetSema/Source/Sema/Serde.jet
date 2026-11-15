@@ -41,7 +41,9 @@ sema_serde_type_definition_in: fn(environment: SemaScopeEnvironment, program: Se
     leaf := sema_serde_named_leaf(name)
     loop definition in program.checked_types {
         // A checked key is the qualified `module::Name` spelling.
-        if definition.key == name || (definition.name == leaf && name == leaf) -> return Val(definition)
+        if definition.key == name || (definition.name == leaf && name == leaf) {
+            return Val(definition)
+        }
     }
     None
 }
@@ -122,7 +124,9 @@ sema_serde_lack_of: fn(environment: SemaScopeEnvironment, program: SemaProgramTa
 }
 
 sema_serde_implementation: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, definition: TTypeDef, direction: SemaSerdeDirection) -> Bool Never! {
-    if sema_serde_has_name(definition.derives, sema_serde_codec_name(direction)) || sema_serde_has_name(definition.derives, "Codable") -> return true
+    if sema_serde_has_name(definition.derives, sema_serde_codec_name(direction)) || sema_serde_has_name(definition.derives, "Codable") {
+        return true
+    }
     if program.registration_graph == .Val(graph) {
         wanted: sema_serde_codec_name(direction)
         loop module_row_index in 0..<graph.modules.len() {
@@ -130,14 +134,20 @@ sema_serde_implementation: fn(environment: SemaScopeEnvironment, program: SemaPr
                 trait_name: graph.modules[module_row_index].impls[implementation_index].trait_name ?? next
                 if sema_serde_named_leaf(trait_name) != wanted -> next
                 target_module := graph.modules[module_row_index].impls[implementation_index].target_module_identity
-                if module_is_none(target_module) -> target_module = graph.modules[module_row_index].impls[implementation_index].source_module_identity
-                if target_module == definition.module_identity && graph.modules[module_row_index].impls[implementation_index].target_type_name == definition.name -> return true
+                if module_is_none(target_module) {
+                    target_module = graph.modules[module_row_index].impls[implementation_index].source_module_identity
+                }
+                if target_module == definition.module_identity && graph.modules[module_row_index].impls[implementation_index].target_type_name == definition.name {
+                    return true
+                }
             }
         }
         // An `impl Decode { … }` block in the type's own body. Read in place.
         module_index: sema_registration_module_index(graph, definition.module_identity) ?? return false
         loop nominal_index in 0..<graph.modules[module_index].nominals.len() {
-            if graph.modules[module_index].nominals[nominal_index].symbol.name != definition.name -> next
+            if graph.modules[module_index].nominals[nominal_index].symbol.name != definition.name {
+                next
+            }
             if graph.modules[module_index].nominals[nominal_index].source == .SourceAST(item) {
                 loop block in sema_registration_item_trait_blocks(item) {
                     if sema_serde_named_leaf(block.trait_name) == wanted -> return true
@@ -227,13 +237,17 @@ sema_serde_apply_head: fn(environment: SemaScopeEnvironment, program: SemaProgra
     if definition.generic_params.len() == 0 -> return args.len() == 0
     if args.len() != definition.generic_params.len() -> return false
     loop (index, parameter) in definition.generic_params {
-        if sema_serde_definition_reaches_parameter(definition, parameter.name) && !sema_serde_type_is_admissible_in(environment, program, module_identity, args[index], direction) -> return false
+        if sema_serde_definition_reaches_parameter(definition, parameter.name) && !sema_serde_type_is_admissible_in(environment, program, module_identity, args[index], direction) {
+            return false
+        }
     }
     true
 }
 
 sema_serde_core_data_name: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID, name: String, direction: SemaSerdeDirection) -> Bool Never! {
-    if name != "Dyn" && name != "JSON" && name != "TOML" && name != "YAML" && name != "CSV" -> return false
+    if name != "Dyn" && name != "JSON" && name != "TOML" && name != "YAML" && name != "CSV" {
+        return false
+    }
     if direction == SemaSerdeDirection.Decode && name != "Dyn" -> return false
     definition: sema_serde_type_definition_in(environment, program, module_identity, name) ?? return true
     if program.registration_graph == .Val(graph) {
@@ -253,7 +267,9 @@ sema_serde_type_is_admissible: fn(environment: SemaScopeEnvironment, program: Se
 sema_serde_stored_is_admissible: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, direction: SemaSerdeDirection) -> Bool Never! {
     if ty == .Tagged(marker, inner) {
         if marker == .User(name) {
-            if name == "Secret" -> return sema_serde_type_is_admissible(environment, program, inner, direction)
+            if name == "Secret" {
+                return sema_serde_type_is_admissible(environment, program, inner, direction)
+            }
         }
     }
     sema_serde_type_is_admissible(environment, program, ty, direction)
@@ -275,17 +291,25 @@ sema_serde_type_is_admissible_in: fn(environment: SemaScopeEnvironment, program:
         .Map(key, _, value) -> key == Type.String && sema_serde_type_is_admissible_in(environment, program, module_identity, value, direction)
         .Union(members) -> {
             loop member in members {
-                if !sema_serde_type_is_admissible_in(environment, program, module_identity, member, direction) -> return false
+                if !sema_serde_type_is_admissible_in(environment, program, module_identity, member, direction) {
+                    return false
+                }
             }
             true
         }
         .Tagged(_, _) | .Case(_, _) -> false
         .Named(name) -> {
-            if name == "Decimal" || name == "Date" || name == "LocalDate" || name == "LocalTime" || name == "DateTime" || name == "Duration" -> return true
+            if name == "Decimal" || name == "Date" || name == "LocalDate" || name == "LocalTime" || name == "DateTime" || name == "Duration" {
+                return true
+            }
             // Rust `is_encodable`/`is_decodable`: Core's ZonedDateTime is the
             // `Dyn.DateTime` payload, a built-in codec with no source impl.
-            if sema_serde_named_leaf(name) == "ZonedDateTime" && (name == "ZonedDateTime" || core_identity_in_module(name, "core.time")) -> return true
-            if sema_serde_core_data_name(environment, program, module_identity, name, direction) -> return true
+            if sema_serde_named_leaf(name) == "ZonedDateTime" && (name == "ZonedDateTime" || core_identity_in_module(name, "core.time")) {
+                return true
+            }
+            if sema_serde_core_data_name(environment, program, module_identity, name, direction) {
+                return true
+            }
             if direction == SemaSerdeDirection.Decode && name == "Secret" -> return true
             if sema_serde_generic_bound(environment, program, name, direction) -> return true
             definition: sema_serde_type_definition_in(environment, program, module_identity, name) ?? return false

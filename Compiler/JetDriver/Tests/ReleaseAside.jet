@@ -7,8 +7,14 @@
 // fixture past that bound.
 use {
     jet_driver.[
-        JET_DRIVER_RELEASE_ASIDE_MIN_FUNCTIONS, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
-        JetDriverCompileMode, JetDriverCoreSource, JetDriverLoweringInputsResult, jet_driver_lowering_inputs,
+        JET_DRIVER_RELEASE_ASIDE_MIN_FUNCTIONS,
+        JetDriverAuthorizedSourceFile,
+        JetDriverAuthorizedSourceRoot,
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode,
+        JetDriverCoreSource,
+        JetDriverLoweringInputsResult,
+        jet_driver_lowering_inputs,
     ]
     jet_cli.[jet_cli_driver_request]
     jet_sema.[SchemaSnapshot]
@@ -18,13 +24,15 @@ release_aside_front: fn(aside: Bool, steps: Int) -> JetDriverLoweringInputsResul
     source := "Shape: enum {{\n    Circle(radius: Int)\n    Square(side: Int)\n}}\narea: fn(shape: Shape) -> Int {{\n    if shape == {{\n        .Circle(radius) -> radius * radius * 3\n        .Square(side) -> side * side\n    }}\n}}\nlabel: fn(shape: Shape) -> String {{ \"area {{area(shape)}}\" }}\nrun: fn() {{\n    print(label(.Circle(radius: 2)))\n    print(label(.Square(side: 3)))\n}}\n"
     loop step in 0..<steps -> source = "{source}step{step}: fn(x: Int) -> Int {{ x + {step} }}\n"
     snapshot: JetDriverAuthorizedSourceSnapshot{
-        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{
-            canonical_path: "/release-aside",
-            identity: "release-aside-root",
-            allow_hardlinks: false,
-            files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/release-aside/main.jet", relative_path: "main.jet", identity: "release-aside-file", source: source}},
-            foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
-        }},
+        roots: [JetDriverAuthorizedSourceRoot]{
+            JetDriverAuthorizedSourceRoot{
+                canonical_path: "/release-aside",
+                identity: "release-aside-root",
+                allow_hardlinks: false,
+                files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/release-aside/main.jet", relative_path: "main.jet", identity: "release-aside-file", source: source}},
+                foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+            },
+        },
         entry_root_identity: "release-aside-root",
         entry_path: "/release-aside/main.jet",
     }
@@ -40,10 +48,10 @@ release_aside_rows: fn(front: JetDriverLoweringInputsResult) -> [String] {
     loop diagnostic in front.compile.diagnostics -> rows.push("{diagnostic.code} {diagnostic.what}")
     if front.inputs == .Val(checked) {
         rows.push("entry {checked.entry_key:Debug} modules {checked.modules.len()} effects {front.compile.entry_effects:Debug}")
-        loop function in checked.functions -> rows.push("{function.key} {function.effects.solved:Debug} body {function.body.len()}")
-    } else {
-        rows.push("no lowering inputs")
-    }
+        loop function in checked.functions {
+            rows.push("{function.key} {function.effects.solved:Debug} body {function.body.len()}")
+        }
+    } else { rows.push("no lowering inputs") }
     rows
 }
 
@@ -55,7 +63,9 @@ release_aside_rows: fn(front: JetDriverLoweringInputsResult) -> [String] {
         loop _ in 0..<3 {
             assert_eq(release_aside_rows(release_aside_front(true, steps)), in_place)
         }
-        if in_place.len() <= 4 + steps || in_place[0] != "complete true internal None held false" -> panic("the fixture did not compile: {in_place:Debug}")
+        if in_place.len() <= 4 + steps || in_place[0] != "complete true internal None held false" {
+            panic("the fixture did not compile: {in_place:Debug}")
+        }
     }
 }
 
@@ -65,11 +75,11 @@ release_aside_rows: fn(front: JetDriverLoweringInputsResult) -> [String] {
 #Test("the lowering inputs hold no sema-only module facts") {
     front: release_aside_front(false, 0)
     if front.inputs == .Val(checked) {
-        if checked.modules.len() == 0 || checked.functions.len() == 0 -> panic("the fixture checked no modules")
+        if checked.modules.len() == 0 || checked.functions.len() == 0 {
+            panic("the fixture checked no modules")
+        }
         loop graph_module in checked.modules {
             assert_eq("{graph_module.module_name}: {graph_module.call_facts.len()} {graph_module.name_references.len()} {graph_module.copy_events.len()} {graph_module.comptime_requests.len()} {graph_module.failure_facts.len()}", "{graph_module.module_name}: 0 0 0 0 0")
         }
-    } else {
-        panic("the fixture did not compile")
-    }
+    } else { panic("the fixture did not compile") }
 }

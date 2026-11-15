@@ -1,21 +1,16 @@
-
 Box: struct<T> {
     state {
         Empty -> Full
         Full
     }
+
     value: T
 
-    new: fn(value: &&T) -[]> Box<T> {
-        return Box<T>{ value: value }
-    }
-    fill: fn(self: &&Box<T>) -[]> Box<T> {
-        return self
-    }
+    new: fn(value: &&T) -[]> Box<T> { return Box<T>{value: value} }
 
-    read: fn(self) -[]> T {
-        return self.value
-    }
+    fill: fn(self: &&Box<T>) -[]> Box<T> { return self }
+
+    read: fn(self) -[]> T { return self.value }
 }
 
 run: fn() {

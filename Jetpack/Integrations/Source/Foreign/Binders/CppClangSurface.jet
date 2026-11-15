@@ -7,11 +7,16 @@ use {
     files: core.files
     pkg_paths: core.files.path
     jet_pkg_model.[
-        ForeignBindError, pkg_binder_is_ident, pkg_binder_words,
-        pkg_json_array, pkg_json_bool, pkg_json_object, pkg_json_parse_protocol, pkg_json_text,
+        ForeignBindError,
+        pkg_binder_is_ident,
+        pkg_binder_words,
+        pkg_json_array,
+        pkg_json_bool,
+        pkg_json_object,
+        pkg_json_parse_protocol,
+        pkg_json_text,
     ]
 }
-
 
 CppScalar: enum {
     Int
@@ -156,9 +161,11 @@ pkg_cpp_walk_ast: fn(value: Dyn, header: String, inherited_main: Bool, namespace
 
 // A complete class: its one public constructor and public methods, with
 // access tracked through `AccessSpecDecl` rows.
-pkg_cpp_parse_class: fn(map: [String: Dyn], namespace: [String]) -> CppClass ForeignBindError! {
+pkg_cpp_parse_class: fn(map: [String:Dyn], namespace: [String]) -> CppClass ForeignBindError! {
     name: pkg_cpp_string(map, "name") ?? ""
-    if !pkg_binder_is_ident(name) -> return Err(ForeignBindError.Source("clang reported an unnamed C++ class"))
+    if !pkg_binder_is_ident(name) {
+        return Err(ForeignBindError.Source("clang reported an unnamed C++ class"))
+    }
     public := (pkg_cpp_string(map, "tagUsed") ?? "") == "struct"
     ctor := [CppParam]?{None}
     methods := [CppRoutine]{}
@@ -166,10 +173,14 @@ pkg_cpp_parse_class: fn(map: [String: Dyn], namespace: [String]) -> CppClass For
         child: pkg_json_object(raw_child) ?? next
         child_kind: pkg_cpp_string(child, "kind") ?? ""
         if {
-            child_kind == "AccessSpecDecl" -> public = (pkg_cpp_string(child, "access") ?? "") == "public"
+            child_kind == "AccessSpecDecl" -> {
+                public = (pkg_cpp_string(child, "access") ?? "") == "public"
+            }
             child_kind == "CXXConstructorDecl" && public && !pkg_cpp_bool_field(child, "isImplicit") -> {
-                if ctor != None -> return Err(ForeignBindError.Source("class `{name}` has multiple public constructors; select one in a smaller header"))
-                ctor = Val(pkg_cpp_parse_params(child, [String: String]{}))
+                if ctor != None {
+                    return Err(ForeignBindError.Source("class `{name}` has multiple public constructors; select one in a smaller header"))
+                }
+                ctor = Val(pkg_cpp_parse_params(child, [String:String]{}))
             }
             child_kind == "CXXMethodDecl" && public && !pkg_cpp_bool_field(child, "isImplicit") -> {
                 method: pkg_cpp_parse_routine(child, pkg_cpp_string(child, "name") ?? "")
@@ -182,17 +193,17 @@ pkg_cpp_parse_class: fn(map: [String: Dyn], namespace: [String]) -> CppClass For
     Ok(CppClass{name: name, cpp_name: pkg_cpp_qualified(namespace, name), ctor: constructor, methods: pkg_cpp_disambiguate(methods)})
 }
 
-pkg_cpp_parse_template: fn(map: [String: Dyn], namespace: [String]) -> CppFunctionTemplate ForeignBindError! {
+pkg_cpp_parse_template: fn(map: [String:Dyn], namespace: [String]) -> CppFunctionTemplate ForeignBindError! {
     name: pkg_cpp_string(map, "name") ?? ""
     type_params := [String]{}
-    function := [String: Dyn]?{None}
+    function := [String:Dyn]?{None}
     loop raw_child in pkg_cpp_children(map) {
         child: pkg_json_object(raw_child) ?? next
         child_kind: pkg_cpp_string(child, "kind") ?? ""
         if child_kind == {
             "TemplateTypeParmDecl" -> {
                 if pkg_cpp_string(child, "name") == {
-                    .Val(param) -> type_params.push(param)
+                    .Val(param) -> { type_params.push(param) }
                     .None -> {}
                 }
             }
@@ -211,7 +222,9 @@ pkg_cpp_instantiate_templates: fn(surface: CppSurface, requests: [CppTemplateIns
     out := surface
     names := [String]{}
     loop request in requests {
-        if names.contains(request.jet_name) -> return Err(ForeignBindError.Source("duplicate Jet template name `{request.jet_name}`"))
+        if names.contains(request.jet_name) {
+            return Err(ForeignBindError.Source("duplicate Jet template name `{request.jet_name}`"))
+        }
         names.push(request.jet_name)
         found := CppFunctionTemplate?{None}
         loop template in out.templates {
@@ -226,9 +239,13 @@ pkg_cpp_instantiate_templates: fn(surface: CppSurface, requests: [CppTemplateIns
             return Err(ForeignBindError.Source("clang found no function template `{request.qualified_name}` (selected templates: {known.join(", ")})"))
         }
         template: found ?? panic("the template was found above")
-        if template.type_params.len() != request.cpp_args.len() -> return Err(ForeignBindError.Source("template `{request.qualified_name}` needs {template.type_params.len()} type argument(s), not {request.cpp_args.len()}"))
-        substitutions := [String: String]{}
-        loop index in 0..<template.type_params.len() -> substitutions[template.type_params[index]] = request.cpp_args[index]
+        if template.type_params.len() != request.cpp_args.len() {
+            return Err(ForeignBindError.Source("template `{request.qualified_name}` needs {template.type_params.len()} type argument(s), not {request.cpp_args.len()}"))
+        }
+        substitutions := [String:String]{}
+        loop index in 0..<template.type_params.len() {
+            substitutions[template.type_params[index]] = request.cpp_args[index]
+        }
         params := [CppParam]{}
         loop param in template.params {
             kind: pkg_cpp_scalar_substituted(param.spelling, substitutions) ?? return Err(ForeignBindError.Source("template `{request.qualified_name}` parameter `{param.name}` has unsupported instantiated type `{param.spelling}`"))
@@ -242,15 +259,15 @@ pkg_cpp_instantiate_templates: fn(surface: CppSurface, requests: [CppTemplateIns
 }
 
 // A scalar routine; operators take their verb name, others their snake name.
-pkg_cpp_parse_routine: fn(map: [String: Dyn], cpp_name: String) -> CppRoutine ForeignBindError! {
+pkg_cpp_parse_routine: fn(map: [String:Dyn], cpp_name: String) -> CppRoutine ForeignBindError! {
     raw_name: pkg_cpp_string(map, "name") ?? ""
     result: pkg_cpp_scalar(pkg_cpp_return_type(map)) ?? return Err(ForeignBindError.Source("`{cpp_name}` has an unsupported return type"))
     jet_name: pkg_cpp_operator_name(raw_name) ?? pkg_cpp_snake(raw_name)
-    params: pkg_cpp_parse_params(map, [String: String]{})
+    params: pkg_cpp_parse_params(map, [String:String]{})
     Ok(CppRoutine{cpp_name: cpp_name, jet_name: jet_name, params: params, result: result})
 }
 
-pkg_cpp_parse_params: fn(map: [String: Dyn], substitutions: [String: String]) -> [CppParam] ForeignBindError! {
+pkg_cpp_parse_params: fn(map: [String:Dyn], substitutions: [String:String]) -> [CppParam] ForeignBindError! {
     out := [CppParam]{}
     loop param in pkg_cpp_raw_params(map) {
         kind: pkg_cpp_scalar_substituted(param.spelling, substitutions) ?? return Err(ForeignBindError.Source("parameter `{param.name}` has unsupported clang type `{param.spelling}`"))
@@ -260,7 +277,7 @@ pkg_cpp_parse_params: fn(map: [String: Dyn], substitutions: [String: String]) ->
 }
 
 // `ParmVarDecl` children: the declared name (or `argN`) and clang's type.
-pkg_cpp_raw_params: fn(map: [String: Dyn]) -> [(name: String, spelling: String)] ForeignBindError! {
+pkg_cpp_raw_params: fn(map: [String:Dyn]) -> [(name: String, spelling: String)] ForeignBindError! {
     out := [(name: String, spelling: String)]{}
     index := 0
     loop raw_child in pkg_cpp_children(map) {
@@ -276,20 +293,20 @@ pkg_cpp_raw_params: fn(map: [String: Dyn]) -> [(name: String, spelling: String)]
 }
 
 // The result spelling of a function type `R (params)`.
-pkg_cpp_return_type: fn(map: [String: Dyn]) -> String ForeignBindError! {
+pkg_cpp_return_type: fn(map: [String:Dyn]) -> String ForeignBindError! {
     spelling: pkg_cpp_qual_type(map)
     parts: spelling.split_once(" (") ?? return Err(ForeignBindError.Source("clang returned an invalid function type `{spelling}`"))
     Ok(parts.before.trim())
 }
 
-pkg_cpp_qual_type: fn(map: [String: Dyn]) -> String ForeignBindError! {
+pkg_cpp_qual_type: fn(map: [String:Dyn]) -> String ForeignBindError! {
     declared: map.get("type") ?? return Err(ForeignBindError.Source("clang omitted a declaration type"))
     inner: pkg_json_object(declared) ?? return Err(ForeignBindError.Source("clang omitted a declaration type"))
     spelling: pkg_cpp_string(inner, "qualType") ?? return Err(ForeignBindError.Source("clang omitted a declaration type"))
     Ok(spelling)
 }
 
-pkg_cpp_scalar_substituted: fn(raw: String, substitutions: [String: String]) -> CppScalar? Never! {
+pkg_cpp_scalar_substituted: fn(raw: String, substitutions: [String:String]) -> CppScalar? Never! {
     replaced: substitutions.get(raw.trim()) ?? raw
     pkg_cpp_scalar(replaced)
 }
@@ -317,22 +334,22 @@ pkg_cpp_qualified: fn(namespace: [String], name: String) -> String Never! {
     "{namespace.join("::")}::{name}"
 }
 
-pkg_cpp_string: fn(map: [String: Dyn], key: String) -> String? Never! {
+pkg_cpp_string: fn(map: [String:Dyn], key: String) -> String? Never! {
     value: map.get(key) ?? return None
     pkg_json_text(value)
 }
 
-pkg_cpp_bool_field: fn(map: [String: Dyn], key: String) -> Bool Never! {
+pkg_cpp_bool_field: fn(map: [String:Dyn], key: String) -> Bool Never! {
     value: map.get(key) ?? return false
     pkg_json_bool(value) ?? false
 }
 
-pkg_cpp_children: fn(map: [String: Dyn]) -> [Dyn] Never! {
+pkg_cpp_children: fn(map: [String:Dyn]) -> [Dyn] Never! {
     value: map.get("inner") ?? return [Dyn]{}
     pkg_json_array(value) ?? [Dyn]{}
 }
 
-pkg_cpp_location_file: fn(map: [String: Dyn]) -> String? Never! {
+pkg_cpp_location_file: fn(map: [String:Dyn]) -> String? Never! {
     location: map.get("loc") ?? return None
     fields: pkg_json_object(location) ?? return None
     pkg_cpp_string(fields, "file")
@@ -410,9 +427,7 @@ pkg_cpp_snake: fn(value: String) -> String Never! {
             if code >= 65 && code <= 90 {
                 if index > 0 -> out.push(U8{95})
                 out.push(checked(U8{code + 32}) ?? byte)
-            } else {
-                out.push(byte)
-            }
+            } else { out.push(byte) }
         }
         index += 1
     }

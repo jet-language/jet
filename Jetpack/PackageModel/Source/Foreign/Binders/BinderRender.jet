@@ -7,7 +7,6 @@ use {
     files: core.files
 }
 
-
 // A C string-literal body: quote, backslash, and the common control escapes;
 // other bytes outside printable ASCII become three-digit octal escapes.
 pkg_binder_c_escape: fn(value: String) -> String Never! {
@@ -33,7 +32,7 @@ pkg_binder_c_escape: fn(value: String) -> String Never! {
 
 // Fill `@@name@@` holes in a raw template. Values are inserted verbatim and
 // never rescanned, so a path that happens to spell a hole stays literal.
-pkg_binder_fill_template: fn(template: String, slots: [String: String]) -> String Never! {
+pkg_binder_fill_template: fn(template: String, slots: [String:String]) -> String Never! {
     parts: template.split("@@").to_list()
     out := [String]{}
     loop index in 0..<parts.len() {
@@ -71,9 +70,7 @@ pkg_binder_after_last: fn(line: String, separator: String) -> String Never! {
 
 // Whether the host has the POSIX process supervisor the worker bridges need
 // (Rust `cfg!(unix)`).
-pkg_binder_host_is_unix: fn() -[Env]> Bool {
-    sys.family() == "unix"
-}
+pkg_binder_host_is_unix: fn() -[Env]> Bool { sys.family() == "unix" }
 
 // The host operating system in the binder's shared-library vocabulary.
 BinderHostOS: enum {
@@ -169,7 +166,9 @@ pkg_binder_launder_last_detail: fn(bytes: [U8]) -> String Never! {
 // stderr detail. Returns the captured output on success.
 pkg_binder_run_reporting_detail: fn(argv: [String], tool: String, action: String) -[Exec, Time.Wait]> BinderToolOutput ForeignBindError! {
     output: pkg_binder_capture(argv, None, tool, action)
-    if !output.success -> return Err(ForeignBindError.ToolFailed{tool: tool, action: action, detail: pkg_binder_launder_last_detail(output.stderr)})
+    if !output.success {
+        return Err(ForeignBindError.ToolFailed{tool: tool, action: action, detail: pkg_binder_launder_last_detail(output.stderr)})
+    }
     Ok(output)
 }
 

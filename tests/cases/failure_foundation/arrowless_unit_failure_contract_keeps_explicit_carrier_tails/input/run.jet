@@ -1,4 +1,8 @@
-#Error MyError: enum { X }
+#Error
+MyError: enum {
+    X
+}
+
 f: fn(bad: Bool) MyError! {
     if bad -> return Err(MyError.X)
     Ok()
@@ -6,11 +10,11 @@ f: fn(bad: Bool) MyError! {
 
 run: fn() {
     if f(false) == {
-        .Ok(_) -> print("ok")
+        .Ok(_) -> { print("ok") }
         .Err(e) -> print(e)
     }
     if f(true) == {
-        .Ok(_) -> print("unexpected")
+        .Ok(_) -> { print("unexpected") }
         .Err(e) -> print(e)
     }
 }

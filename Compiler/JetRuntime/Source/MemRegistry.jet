@@ -10,25 +10,23 @@ mem_registry_root := I64{0}
 
 // runtime-init: 1 when mem_registry_root
 #Export(c) jet_rt_mem_registry_init: fn() {
-    if (mem_registry_root != I64{0}) -> return
+    if (mem_registry_root != I64{0}) {
+        return
+    }
     root: jet_rt_alloc(I64{56}, I64{8})
     at := I64{0}
     loop at < (I64{56}) {
         sync_store(wrapping(root + at), I64{0})
         at += I64{8}
     }
-    #Unsafe("runtime-init runs before any other thread exists") {
-        mem_registry_root = root
-    }
+    #Unsafe("runtime-init runs before any other thread exists") { mem_registry_root = root }
 }
 
 mem_registry_unsigned_less: fn(left: I64, right: I64) -> Bool Never! {
     (left.bit_xor(I64{-9223372036854775808})) < (right.bit_xor(I64{-9223372036854775808}))
 }
 
-#Export(c) jet_rt_mem_arena_open: fn() {
-    _ := sync_add(mem_registry_root, I64{1})
-}
+#Export(c) jet_rt_mem_arena_open: fn() { _ := sync_add(mem_registry_root, I64{1}) }
 
 #Export(c) jet_rt_mem_arena_alloc: fn(bytes: I64) {
     _ := sync_add(wrapping(mem_registry_root + I64{8}), I64{1})
@@ -59,9 +57,7 @@ mem_registry_unsigned_less: fn(left: I64, right: I64) -> Bool Never! {
     _ := sync_add(wrapping(mem_registry_root + I64{16}), wrapping(I64{0} - bytes))
 }
 
-#Export(c) jet_rt_mem_arena_close: fn() {
-    _ := sync_add(mem_registry_root, I64{-1})
-}
+#Export(c) jet_rt_mem_arena_close: fn() { _ := sync_add(mem_registry_root, I64{-1}) }
 
 // The caller owns 24 aligned writable bytes. No missing-producer fallback:
 // zero is an actual counter value; heap allocations never masquerade as arenas.

@@ -16,7 +16,7 @@ RecipeDiagnostic: struct {
     fix: String
 
     new: fn(code: String, what: String, why: String, fix: String) -> RecipeDiagnostic Never! {
-        RecipeDiagnostic{code, what, why, fix}
+        RecipeDiagnostic{code: code, what: what, why: why, fix: fix}
     }
 
     // E1236: a build fetch is unlocked or carries credentials in its URL.
@@ -26,7 +26,7 @@ RecipeDiagnostic: struct {
             "E1236",
             "a build fetch is not an allowed locked, credential-free input",
             "build hooks admit only content-hash-pinned fetches without URL userinfo or credential query fields; `{url}` is not an allowed build input.",
-            "add the source hash, remove URL credentials, or vendor the source with `jet registry vendor`."
+            "add the source hash, remove URL credentials, or vendor the source with `jet registry vendor`.",
         )
     }
 
@@ -35,7 +35,7 @@ RecipeDiagnostic: struct {
             "E1236",
             "a build step needs the network but the build is offline",
             "`--offline` forbids any network fetch; `{url}` is not in the local fetch cache.",
-            "run once online to populate the cache, or `jet registry vendor` the source and rebuild."
+            "run once online to populate the cache, or `jet registry vendor` the source and rebuild.",
         )
     }
 
@@ -44,7 +44,7 @@ RecipeDiagnostic: struct {
             "E1236",
             "a build step needs a remote source with no transport available",
             "`{url}` is a remote URL; the build seam holds no network ability by itself (zero-external-crate compiler).",
-            "provide a `file://` mirror, or `jet registry vendor` the source so the build is offline."
+            "provide a `file://` mirror, or `jet registry vendor` the source so the build is offline.",
         )
     }
 
@@ -53,7 +53,7 @@ RecipeDiagnostic: struct {
             "E1236",
             "a build fetch contains embedded credentials",
             "build-hook fetch URLs are action inputs and may be retained in cache metadata and logs; URL userinfo and credential query or fragment fields are therefore not allowed.",
-            "remove the credentials, use a public or vendored source, and keep authentication outside the build hook."
+            "remove the credentials, use a public or vendored source, and keep authentication outside the build hook.",
         )
     }
 
@@ -62,7 +62,7 @@ RecipeDiagnostic: struct {
             "E1236",
             "a locked build fetch failed",
             "fetching `{url}` failed: {reason}",
-            "check the URL and the locked hash, or vendor the source."
+            "check the URL and the locked hash, or vendor the source.",
         )
     }
 
@@ -71,7 +71,7 @@ RecipeDiagnostic: struct {
             "E1236",
             "a locked build fetch did not match its hash",
             "`{url}` was fetched but its sha256 was `{got}`, not the locked `{want}`.",
-            "the source changed upstream or was tampered with; update the locked hash deliberately."
+            "the source changed upstream or was tampered with; update the locked hash deliberately.",
         )
     }
 
@@ -80,7 +80,7 @@ RecipeDiagnostic: struct {
             "E1236",
             "a locked build fetch has an invalid sha256",
             "the fetch of `{url}` uses `{hash}`; a locked fetch needs exactly 64 hexadecimal SHA-256 characters.",
-            "replace it with the source's canonical SHA-256 hash, or vendor the source."
+            "replace it with the source's canonical SHA-256 hash, or vendor the source.",
         )
     }
 
@@ -90,7 +90,7 @@ RecipeDiagnostic: struct {
             "E1237",
             "a build step tried to write outside the output root: `{dest}`",
             "a build may only install files under its own package output root. Writing elsewhere would let a build mutate the machine or other packages.",
-            "install into a path under the output root (no `..`, no absolute paths)."
+            "install into a path under the output root (no `..`, no absolute paths).",
         )
     }
 
@@ -99,7 +99,7 @@ RecipeDiagnostic: struct {
             "E1237",
             "a build step tried to read an unsafe recipe source: `{source}`",
             "recipe inputs must be existing files or directories below the staged source root; absolute, parent, and escaping symlink paths are rejected",
-            "use a project-relative source path inside the staged tree"
+            "use a project-relative source path inside the staged tree",
         )
     }
 
@@ -114,7 +114,7 @@ RecipeDiagnostic: struct {
             "E1237",
             what,
             "the sandbox boundary rejected a source or output tree: {error.message()}",
-            "remove symlinks and special files from the recipe source and output, then retry."
+            "remove symlinks and special files from the recipe source and output, then retry.",
         )
     }
 
@@ -124,7 +124,7 @@ RecipeDiagnostic: struct {
             "E1238",
             "build tool `{tool}` is not a realized dependency",
             "build tools must be realized `Pkg` dependencies of the package, so the build is reproducible. A build never falls through to host `/usr/bin`.",
-            "add `{tool}` to the adapter's `deps: […]` list so Jetpack realizes it into the hangar."
+            "add `{tool}` to the adapter's `deps: […]` list so Jetpack realizes it into the hangar.",
         )
     }
 
@@ -133,7 +133,7 @@ RecipeDiagnostic: struct {
             "E1238",
             "build recipe or staged plan action is not a valid declared action graph",
             "{detail}; staged plans use only declared inputs, realized tools, effects, platform facts, and finite acyclic outputs",
-            "declare every authority fact, fix the graph, and retry the stage."
+            "declare every authority fact, fix the graph, and retry the stage.",
         )
     }
 
@@ -148,7 +148,7 @@ RecipeDiagnostic: struct {
             "E1238",
             "build tool `{tool}` exited with an error",
             detail,
-            "check the build recipe and the tool's arguments."
+            "check the build recipe and the tool's arguments.",
         )
     }
 
@@ -158,7 +158,7 @@ RecipeDiagnostic: struct {
             "E1238",
             what,
             error.message(),
-            "fix the build workspace permissions and retry the recipe."
+            "fix the build workspace permissions and retry the recipe.",
         )
     }
 
@@ -168,7 +168,7 @@ RecipeDiagnostic: struct {
             "E1275",
             "build sandboxing is required but unavailable",
             detail,
-            "provide a trusted substitute or approved remote builder, or enable the native sandbox, then retry."
+            "provide a trusted substitute or approved remote builder, or enable the native sandbox, then retry.",
         )
     }
 }
@@ -194,11 +194,9 @@ RecipeError: enum {
     // Rust `error.kind() == ErrorKind::NotFound` across both carriers.
     is_not_found: fn(self) -> Bool Never! {
         if self == {
-            .IO(inner) -> {
-                if inner == {
-                    .NotFound(_) -> true
-                    .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> false
-                }
+            .IO(inner) -> if inner == {
+                .NotFound(_) -> true
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> false
             }
             .NotFound(_) -> true
             .InvalidInput(_) | .InvalidData(_) | .PermissionDenied(_) | .AlreadyExists(_) | .Other(_) | .Update(_) -> false
@@ -208,11 +206,9 @@ RecipeError: enum {
     // Rust `error.kind() == ErrorKind::AlreadyExists` across both carriers.
     is_already_exists: fn(self) -> Bool Never! {
         if self == {
-            .IO(inner) -> {
-                if inner == {
-                    .AlreadyExists(_) -> true
-                    .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> false
-                }
+            .IO(inner) -> if inner == {
+                .AlreadyExists(_) -> true
+                .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> false
             }
             .AlreadyExists(_) -> true
             .InvalidInput(_) | .InvalidData(_) | .PermissionDenied(_) | .NotFound(_) | .Other(_) | .Update(_) -> false

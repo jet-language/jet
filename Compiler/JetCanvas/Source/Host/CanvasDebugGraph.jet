@@ -74,7 +74,9 @@ canvas_debug_records: fn(value: Dyn, id_key: String, records: &[CanvasDebugRecor
                 if member.key == id_key && member.value == .Text(text) -> id = Val(text)
                 if member.key == "source_span" -> span = canvas_debug_span(member.value)
             }
-            if id == .Val(found) && span == .Val(range) -> records.push(CanvasDebugRecord{id: found, span: range})
+            if id == .Val(found) && span == .Val(range) {
+                records.push(CanvasDebugRecord{id: found, span: range})
+            }
             loop member in members -> canvas_debug_records(member.value, id_key, records)
         }
         .Array(items) -> {

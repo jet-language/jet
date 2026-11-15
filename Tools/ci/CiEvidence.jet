@@ -72,7 +72,9 @@ run_text: fn(argv: [String], dir: String) -[Exec, Time.Wait]> String Never! {
 is_hex: fn(text: String) -> Bool Never! {
     loop byte in text.bytes() {
         code: Int{byte}
-        if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102) || (code >= 65 && code <= 70)) -> return false
+        if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102) || (code >= 65 && code <= 70)) {
+            return false
+        }
     }
     true
 }
@@ -163,7 +165,9 @@ gate: fn(root: String, dir: String, command: [String]) -[Env, Exec, FS, IO, Time
         }
     }
     if github && runner_os == "" -> problems.push("GitHub runner OS identity is missing")
-    if github && runner_arch == "" -> problems.push("GitHub runner architecture identity is missing")
+    if github && runner_arch == "" {
+        problems.push("GitHub runner architecture identity is missing")
+    }
     if runner_os == "" -> runner_os = if github -> "unknown" else -> system_name()
     if runner_arch == "" -> runner_arch = if github -> "unknown" else -> sys.arch()
 
@@ -175,21 +179,44 @@ gate: fn(root: String, dir: String, command: [String]) -[Env, Exec, FS, IO, Time
     signature_candidate: process.env_nonempty("JET_CI_SIGNATURE_CANDIDATE") ?? candidate
     release_candidate: process.env_nonempty("JET_CI_RELEASE_CANDIDATE") ?? candidate
     evidence: Evidence{
-        root: root.copy(), dir: dir.copy(), candidate: candidate.copy(), checkout: checkout.copy(),
-        runner_os: runner_os.copy(), runner_arch: runner_arch.copy(), artifact_name: artifact_name.copy(),
-        signature_candidate: signature_candidate.copy(), release_candidate: release_candidate.copy(), started_at: utc_stamp(),
-        source_hash: hash_file("{root}/flake.lock"), workflow_hash: hash_file("{root}/.github/workflows/ci.yml"),
-        toolchain_hash: hash_file(toolchain), command: command.copy(),
+        root: root.copy(),
+        dir: dir.copy(),
+        candidate: candidate.copy(),
+        checkout: checkout.copy(),
+        runner_os: runner_os.copy(),
+        runner_arch: runner_arch.copy(),
+        artifact_name: artifact_name.copy(),
+        signature_candidate: signature_candidate.copy(),
+        release_candidate: release_candidate.copy(),
+        started_at: utc_stamp(),
+        source_hash: hash_file("{root}/flake.lock"),
+        workflow_hash: hash_file("{root}/.github/workflows/ci.yml"),
+        toolchain_hash: hash_file(toolchain),
+        command: command.copy(),
     }
 
-    if candidate == "" || !is_hex(candidate) -> problems.push("missing or invalid candidate commit identity")
-    if candidate.len() != 40 -> problems.push("candidate commit identity must be a 40-character SHA-1")
+    if candidate == "" || !is_hex(candidate) {
+        problems.push("missing or invalid candidate commit identity")
+    }
+    if candidate.len() != 40 {
+        problems.push("candidate commit identity must be a 40-character SHA-1")
+    }
     github_sha: process.env_nonempty("GITHUB_SHA") ?? ""
-    if github_sha != "" && candidate != github_sha -> problems.push("candidate commit does not match GITHUB_SHA: {candidate} != {github_sha}")
-    if checkout != "" && candidate != checkout -> problems.push("candidate commit does not match checked-out revision: {candidate} != {checkout}")
-    if artifact_name != "not-published" && !artifact_name.ends_with("-{candidate}") -> problems.push("artifact name does not identify candidate: {artifact_name}")
-    if signature_candidate != candidate -> problems.push("signature candidate does not match candidate commit: {signature_candidate} != {candidate}")
-    if release_candidate != candidate -> problems.push("release metadata candidate does not match candidate commit: {release_candidate} != {candidate}")
+    if github_sha != "" && candidate != github_sha {
+        problems.push("candidate commit does not match GITHUB_SHA: {candidate} != {github_sha}")
+    }
+    if checkout != "" && candidate != checkout {
+        problems.push("candidate commit does not match checked-out revision: {candidate} != {checkout}")
+    }
+    if artifact_name != "not-published" && !artifact_name.ends_with("-{candidate}") {
+        problems.push("artifact name does not identify candidate: {artifact_name}")
+    }
+    if signature_candidate != candidate {
+        problems.push("signature candidate does not match candidate commit: {signature_candidate} != {candidate}")
+    }
+    if release_candidate != candidate {
+        problems.push("release metadata candidate does not match candidate commit: {release_candidate} != {candidate}")
+    }
     if evidence.source_hash == "unavailable" || evidence.workflow_hash == "unavailable" || evidence.toolchain_hash == "unavailable" {
         problems.push("candidate identity hash is unavailable")
     }
@@ -197,7 +224,9 @@ gate: fn(root: String, dir: String, command: [String]) -[Env, Exec, FS, IO, Time
     if problems.len() > 0 {
         files.write(stderr_file, "{problems[0]}\n") ?? ()
         term.eprint(problems[0])
-        if !finalize(evidence, "fail", "{FAILED_IDENTITY}") -> term.eprint("evidence finalization failed; refusing a green gate")
+        if !finalize(evidence, "fail", "{FAILED_IDENTITY}") {
+            term.eprint("evidence finalization failed; refusing a green gate")
+        }
         return FAILED_IDENTITY
     }
 
@@ -224,7 +253,9 @@ start_failed: fn(evidence: Evidence, reason: String) -[Env, FS, IO]> Int Never! 
     message: "{evidence.command[0]}: {reason}"
     files.write("{evidence.dir}/command.stderr", "{message}\n") ?? ()
     term.eprint(message)
-    if !finalize(evidence, "fail", "127") -> term.eprint("evidence finalization failed; refusing a green gate")
+    if !finalize(evidence, "fail", "127") {
+        term.eprint("evidence finalization failed; refusing a green gate")
+    }
     127
 }
 

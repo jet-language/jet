@@ -27,10 +27,15 @@
 // +8 owned captured stdout, +16 whole-test skip.
 
 PROPERTY_CASES: I64{200}
+
 PROPERTY_SHRINK_RUNS: I64{2000}
+
 PROPERTY_REJECT_FACTOR: I64{10}
+
 PROPERTY_CTX_BYTES: I64{96}
+
 PROPERTY_RUN_BYTES: I64{24}
+
 PROPERTY_SEED_LIMIT: I64{9223372036854775807}
 
 property_shr: fn(value: I64, shift: I64) -> I64 {
@@ -45,7 +50,9 @@ property_next: fn(ctx: I64) -> I64 {
     mixed.bit_xor(property_shr(mixed, I64{31}))
 }
 
-property_words_get: fn(list: I64, index: I64) -> I64 { trap_word(wrapping(trap_word(wrapping(list + I64{16})) + index * I64{8})) }
+property_words_get: fn(list: I64, index: I64) -> I64 {
+    trap_word(wrapping(trap_word(wrapping(list + I64{16})) + index * I64{8}))
+}
 
 property_words_push: fn(list: I64, value: I64) {
     count: trap_word(list)
@@ -57,7 +64,9 @@ property_words_push: fn(list: I64, value: I64) {
 // Frees the list's buffer and then its header block of `bytes`.
 property_words_free: fn(list: I64, bytes: I64) {
     capacity: trap_word(wrapping(list + I64{8}))
-    if (capacity != I64{0}) { jet_rt_free(trap_word(wrapping(list + I64{16})), capacity * I64{8}, I64{8}) }
+    if (capacity != I64{0}) {
+        jet_rt_free(trap_word(wrapping(list + I64{16})), capacity * I64{8}, I64{8})
+    }
     jet_rt_free(list, bytes, I64{8})
 }
 
@@ -72,7 +81,9 @@ property_words_copy_without: fn(target: I64, source: I64, at: I64, size: I64) {
     trap_store(target, I64{0})
     index := I64{0}
     loop index < trap_word(source) {
-        if (index < at || index >= at + size) { property_words_push(target, property_words_get(source, index)) }
+        if (index < at || index >= at + size) {
+            property_words_push(target, property_words_get(source, index))
+        }
         index += I64{1}
     }
 }
@@ -80,12 +91,12 @@ property_words_copy_without: fn(target: I64, source: I64, at: I64, size: I64) {
 // Whether `left` is a simpler choice sequence than `right`.
 property_simpler: fn(left: I64, right: I64) -> Bool {
     count: trap_word(left)
-    if (count != trap_word(right)) -> return count < trap_word(right)
+    if (count != trap_word(right)) { return count < trap_word(right) }
     index := I64{0}
     loop index < count {
         a: property_words_get(left, index)
         b: property_words_get(right, index)
-        if (a != b) -> return a < b
+        if (a != b) { return a < b }
         index += I64{1}
     }
     false
@@ -96,7 +107,9 @@ property_simpler: fn(left: I64, right: I64) -> Bool {
     value := I64{0}
     if (trap_word(wrapping(ctx + I64{64})) != I64{0}) {
         at: trap_word(wrapping(ctx + I64{40}))
-        if (at < trap_word(wrapping(ctx + I64{32}))) { value = trap_word(wrapping(trap_word(wrapping(ctx + I64{24})) + at * I64{8})) }
+        if (at < trap_word(wrapping(ctx + I64{32}))) {
+            value = trap_word(wrapping(trap_word(wrapping(ctx + I64{24})) + at * I64{8}))
+        }
         trap_store(wrapping(ctx + I64{40}), at + I64{1})
     } else if (bound > I64{1}) {
         value = property_next(ctx).bit_and(I64{9223372036854775807}) % bound
@@ -122,7 +135,9 @@ property_simpler: fn(left: I64, right: I64) -> Bool {
 
 // A Unicode scalar: a lowercase ASCII letter, or any scalar.
 #Export(c) jet_rt_test_property_char: fn(ctx: I64) -> I64 {
-    if (jet_rt_test_property_draw(ctx, I64{2}) == I64{0}) -> return I64{97} + jet_rt_test_property_draw(ctx, I64{26})
+    if (jet_rt_test_property_draw(ctx, I64{2}) == I64{0}) {
+        return I64{97} + jet_rt_test_property_draw(ctx, I64{26})
+    }
     scalar: jet_rt_test_property_draw(ctx, I64{1112064})
     if (scalar >= I64{55296}) -> scalar + I64{2048} else -> scalar
 }
@@ -155,9 +170,7 @@ property_simpler: fn(left: I64, right: I64) -> Bool {
 
 // The running case's inputs fail one of the property's `#Pre` clauses: the
 // case is rejected, and its body doesn't run.
-#Export(c) jet_rt_test_property_reject: fn(ctx: I64) {
-    trap_store(wrapping(ctx + I64{80}), I64{1})
-}
+#Export(c) jet_rt_test_property_reject: fn(ctx: I64) { trap_store(wrapping(ctx + I64{80}), I64{1}) }
 
 // One run of `invoke` over the context's current mode, as jet_rt_test_unit
 // runs a unit test: a stop is the case's failure, and a stop without a report
@@ -204,7 +217,7 @@ property_try: fn(ctx: I64, invoke: I64, run: I64, candidate: I64, best: I64) -> 
     property_case(ctx, invoke, run)
     failed: trap_word(run) != I64{0} && trap_word(wrapping(run + I64{16})) == I64{0}
     property_run_drop(run)
-    if (!failed || !property_simpler(ctx, best)) -> return false
+    if (!failed || !property_simpler(ctx, best)) { return false }
     property_words_copy_without(best, ctx, I64{0}, I64{0})
     true
 }
@@ -223,9 +236,7 @@ property_shrink: fn(ctx: I64, invoke: I64, run: I64, best: I64) {
             loop at + size <= trap_word(best) && runs < PROPERTY_SHRINK_RUNS {
                 property_words_copy_without(candidate, best, at, size)
                 runs += I64{1}
-                if property_try(ctx, invoke, run, candidate, best) {
-                    improved = true
-                } else {
+                if property_try(ctx, invoke, run, candidate, best) -> improved = true else {
                     at += I64{1}
                 }
             }
@@ -246,10 +257,14 @@ property_shrink: fn(ctx: I64, invoke: I64, run: I64, best: I64) {
                         property_words_copy_without(candidate, best, I64{0}, I64{0})
                         trap_store(wrapping(trap_word(wrapping(candidate + I64{16})) + index * I64{8}), middle)
                         runs += I64{1}
-                        if property_try(ctx, invoke, run, candidate, best) { high = middle } else { low = middle }
+                        if property_try(ctx, invoke, run, candidate, best) -> high = middle else {
+                            low = middle
+                        }
                     }
                 }
-                if (index < trap_word(best) && property_words_get(best, index) < current) { improved = true }
+                if (index < trap_word(best) && property_words_get(best, index) < current) {
+                    improved = true
+                }
             }
             index += I64{1}
         }
@@ -262,12 +277,14 @@ property_shrink: fn(ctx: I64, invoke: I64, run: I64, best: I64) {
 property_seed_parse: fn(text: I64, seed: I64) -> Bool {
     data: trap_word(text)
     length: trap_word(wrapping(text + I64{8}))
-    if (length == I64{0}) -> return false
+    if (length == I64{0}) { return false }
     value := I64{0}
     at := I64{0}
     loop at < length {
         digit: trap_byte(wrapping(data + at)) - I64{48}
-        if (digit < I64{0} || digit > I64{9} || value > (PROPERTY_SEED_LIMIT - digit) /% I64{10}) -> return false
+        if (digit < I64{0} || digit > I64{9} || value > (PROPERTY_SEED_LIMIT - digit) /% I64{10}) {
+            return false
+        }
         value = value * I64{10} + digit
         at += I64{1}
     }
@@ -285,7 +302,9 @@ property_seed: fn(ctx: I64) -> I64 {
         if parsed -> return I64{0}
         return jet_rt_string_clone(rt_static_text("JET_PROP_SEED must be an integer from 0 to 9223372036854775807"))
     }
-    if (rt_crypto_entropy_fill(wrapping(ctx + I64{48}), I64{8}) != I64{0}) -> return jet_rt_string_clone(rt_static_text("the property test could not read entropy for its seed; set JET_PROP_SEED"))
+    if (rt_crypto_entropy_fill(wrapping(ctx + I64{48}), I64{8}) != I64{0}) {
+        return jet_rt_string_clone(rt_static_text("the property test could not read entropy for its seed; set JET_PROP_SEED"))
+    }
     trap_store(wrapping(ctx + I64{48}), trap_word(wrapping(ctx + I64{48})).bit_and(PROPERTY_SEED_LIMIT))
     I64{0}
 }
@@ -296,10 +315,10 @@ property_seed: fn(ctx: I64) -> I64 {
 property_budget: fn(ctx: I64) -> I64 {
     trap_store(wrapping(ctx + I64{72}), PROPERTY_CASES)
     value: test_environment(jet_rt_string_clone(env_name_jet_fuzz_iterations()))
-    if (value == I64{0}) -> return I64{0}
+    if (value == I64{0}) { return I64{0} }
     parsed: property_seed_parse(value, wrapping(ctx + I64{72}))
     test_text_drop(value)
-    if (parsed && trap_word(wrapping(ctx + I64{72})) >= I64{1}) -> return I64{0}
+    if (parsed && trap_word(wrapping(ctx + I64{72})) >= I64{1}) { return I64{0} }
     jet_rt_string_clone(rt_static_text("JET_FUZZ_ITERATIONS must be a whole number from 1 to 9223372036854775807"))
 }
 
@@ -328,7 +347,9 @@ property_report: fn(ctx: I64, failed_case: I64, seed: I64, error: I64) -> I64 {
 // "; R rejected by `#Pre`" when the run rejected any generated case.
 property_report_rejected: fn(target: I64, ctx: I64) {
     rejected: trap_word(wrapping(ctx + I64{88}))
-    if (rejected == I64{0}) -> return
+    if (rejected == I64{0}) {
+        return
+    }
     jet_rt_string_builder_push(target, rt_static_text("; "))
     rt_text_push_number(target, rejected)
     jet_rt_string_builder_push(target, rt_static_text(" rejected by `#Pre`"))
@@ -409,7 +430,9 @@ property_rejected_verdict: fn(ctx: I64, ran: I64, seed: I64) -> I64 {
                 test_text_drop(stdout)
                 stdout = trap_word(wrapping(run + I64{8}))
                 minimized := trap_word(run)
-                if (minimized == I64{0}) { minimized = jet_rt_string_clone(rt_static_text("the minimized case passed when it ran again: the property is not deterministic")) }
+                if (minimized == I64{0}) {
+                    minimized = jet_rt_string_clone(rt_static_text("the minimized case passed when it ran again: the property is not deterministic"))
+                }
                 error = property_report(ctx, ran, seed, minimized)
                 break
             }

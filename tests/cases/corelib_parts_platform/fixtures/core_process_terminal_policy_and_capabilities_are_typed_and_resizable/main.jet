@@ -8,8 +8,8 @@ use process: core.process
 
 run: fn() -[Exec, IO, Time.Wait]> {
     policy: TerminalPolicy{
-        size: TerminalSize{ cols: 120, rows: 40 },
-        mode: .Raw
+        size: TerminalSize{cols: 120, rows: 40},
+        mode: .Raw,
     }
     plan: process.cmd(["echo", "hi"]).terminal(policy)
     facts: plan.abilities()
@@ -24,7 +24,7 @@ run: fn() -[Exec, IO, Time.Wait]> {
     child: process.cmd(["echo", "plain"]).stdout(.Capture).spawn() ?? panic("spawn failed")
     if child.terminal == {
         .Val(session) -> {
-            session.resize(TerminalSize{ cols: 80, rows: 24 }) ?? panic("resize failed")
+            session.resize(TerminalSize{cols: 80, rows: 24}) ?? panic("resize failed")
             print("plain child unexpectedly has terminal")
         }
         .None -> { print("plain child has no terminal") }

@@ -14,7 +14,9 @@ Marker: struct {
 // the check each iteration starts with can stop the loop.
 wait_open: fn(gate: Atomic<I64>, started: Atomic<I64>) -> Int {
     started.store(1)
-    loop gate.load() == 0 {}
+    loop gate.load() == 0 {
+
+    }
     0
 }
 
@@ -22,9 +24,15 @@ seven: fn() -> Int { 7 }
 
 failure_label: fn(error: TaskFailure) -> String {
     if error == {
-        .Cancelled -> { return "cancelled" }
-        .DeadlineBlown -> { return "deadline" }
-        .Panicked(_) -> { return "panicked" }
+        .Cancelled -> {
+            return "cancelled"
+        }
+        .DeadlineBlown -> {
+            return "deadline"
+        }
+        .Panicked(_) -> {
+            return "panicked"
+        }
     }
 }
 
@@ -54,7 +62,7 @@ run: fn() {
         // No pause: a plain cancel stops the spin, and its cleanup runs.
         waiter.cancel()
         if waiter.join() == {
-            .Ok(_) -> print("the waiter finished")
+            .Ok(_) -> { print("the waiter finished") }
             .Err(error) -> print("the waiter: {failure_label(error)}")
         }
 
@@ -65,7 +73,7 @@ run: fn() {
             wait_open(gate, timed_started)
         }
         if timed.join() == {
-            .Ok(_) -> print("the timed waiter finished")
+            .Ok(_) -> { print("the timed waiter finished") }
             .Err(error) -> print("the timed waiter: {failure_label(error)}")
         }
     }

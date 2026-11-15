@@ -185,9 +185,7 @@ body_flat_binary_chain: fn(value: TExpr, flat: &BodyFlat) -> Int Never! {
         if operand.kind == .Binary(_, _, _, lhs, _) {
             levels.push(operand)
             operand = lhs
-        } else {
-            break
-        }
+        } else { break }
     }
     child := body_flat_expr(operand, flat)
     index := levels.len() - 1
@@ -208,8 +206,12 @@ body_flat_arena_node: fn(value: TExpr, index: Int, flat: &BodyFlat) -> Int Never
         // A nested check never files a node of the check that encloses it,
         // whose rows this arena does not hold.
         row_index: index - flat.tree.node_base
-        if row_index < 0 -> panic("body_flat_arena_node: arena row {index} precedes this check's rows")
-        if flat.tree.nodes[row_index].id == value.id && flat.tree.types.types[flat.tree.expr_types[row_index].ty] == value.ty -> return index
+        if row_index < 0 {
+            panic("body_flat_arena_node: arena row {index} precedes this check's rows")
+        }
+        if flat.tree.nodes[row_index].id == value.id && flat.tree.types.types[flat.tree.expr_types[row_index].ty] == value.ty {
+            return index
+        }
         row: flat.tree.nodes[row_index]
         flat.tree.nodes.push(BodyNode{id: value.id, kind: row.kind, span: value.span})
         ty: type_table_intern(flat.tree.types, value.ty)
@@ -263,9 +265,7 @@ body_copy_binary_chain: fn(index: Int, flat: &BodyFlat) -> Int Never! {
         if row.kind == .Binary(_, _, _, lhs, _) {
             levels.push(operand)
             operand = lhs
-        } else {
-            break
-        }
+        } else { break }
     }
     child := body_copy_expr(operand, flat)
     at := levels.len() - 1
@@ -1096,7 +1096,9 @@ body_flat_opt_expr: fn(value: TExpr?, flat: &BodyFlat) -> Int? Never! {
 }
 
 body_flat_opt_unit_rounding: fn(value: TUnitRounding?, flat: &BodyFlat) -> BodyUnitRounding? Never! {
-    if value == .Val(inner) -> return Val(BodyUnitRounding{mode: inner.mode, digits: body_flat_expr(inner.digits, flat)})
+    if value == .Val(inner) {
+        return Val(BodyUnitRounding{mode: inner.mode, digits: body_flat_expr(inner.digits, flat)})
+    }
     None
 }
 
@@ -1904,7 +1906,9 @@ body_copy_opt_expr: fn(value: Int?, flat: &BodyFlat) -> Int? Never! {
 }
 
 body_copy_opt_unit_rounding: fn(value: BodyUnitRounding?, flat: &BodyFlat) -> BodyUnitRounding? Never! {
-    if value == .Val(inner) -> return Val(BodyUnitRounding{mode: inner.mode, digits: body_copy_expr(inner.digits, flat)})
+    if value == .Val(inner) {
+        return Val(BodyUnitRounding{mode: inner.mode, digits: body_copy_expr(inner.digits, flat)})
+    }
     None
 }
 

@@ -6,7 +6,9 @@ use {
 }
 
 jet_cli_receipt_lookup_bytes: fn(bytes: [U8]?, claim: JetDriverRunReceiptClaim, observed_inputs: [JetDriverRunReceiptInput], published_sections: [JetCLIReceiptSectionRecord]) -> JetDriverRunReceipt? JetCLIReadError! {
-    if !jet_driver_run_receipt_is_digest(claim.key) || claim.inputs != observed_inputs -> return Ok(None)
+    if !jet_driver_run_receipt_is_digest(claim.key) || claim.inputs != observed_inputs {
+        return Ok(None)
+    }
     raw: bytes ?? return Ok(None)
     receipt := jet_driver_run_receipt_decode(raw) ?? return Ok(None)
     if receipt.claim != claim -> return Ok(None)
@@ -93,7 +95,9 @@ jet_cli_receipt_prepare: fn(claim: JetDriverRunReceiptClaim, status: Int, stdout
 }
 
 jet_cli_receipt_observe_input: fn(input: JetDriverRunReceiptInput) -[FS, Time.Wait]> JetDriverRunReceiptInput JetCLIReadError! {
-    if !input.path.starts_with("/") -> return Err(jet_cli_read_error("receipt input path is not absolute: {input.path}"))
+    if !input.path.starts_with("/") {
+        return Err(jet_cli_read_error("receipt input path is not absolute: {input.path}"))
+    }
     parts := [String]{}
     loop part in input.path.split("/") {
         if part != "" && part != "." -> parts.push(part)
@@ -102,8 +106,12 @@ jet_cli_receipt_observe_input: fn(input: JetDriverRunReceiptInput) -[FS, Time.Wa
     held: JetCLIRootedDirectory.open("/", parts, false) ?? return Err(err)
     raw: if held.read(name, Int.MAX) == {
         .Val(bytes) -> bytes
-        .None -> { return Err(jet_cli_read_error("receipt input does not exist: {input.path}")) }
-        .Err(error) -> { return Err(error) }
+        .None -> {
+            return Err(jet_cli_read_error("receipt input does not exist: {input.path}"))
+        }
+        .Err(error) -> {
+            return Err(error)
+        }
     }
     Ok(JetDriverRunReceiptInput{path: input.path, digest: receipt_crypto.sha256(raw).hex()})
 }
@@ -117,7 +125,9 @@ jet_cli_receipt_inputs_current: fn(inputs: [JetDriverRunReceiptInput]) -[FS, Tim
 }
 
 jet_cli_receipt_read_section_records: fn(project_root: String, claim_key: String, parent_digest: String, staged: Bool{false}) -[FS, Time.Wait]> [JetCLIReceiptSectionRecord] JetCLIReadError! {
-    if !jet_driver_run_receipt_is_digest(claim_key) -> return Err(jet_cli_read_error("receipt section claim digest is malformed"))
+    if !jet_driver_run_receipt_is_digest(claim_key) {
+        return Err(jet_cli_read_error("receipt section claim digest is malformed"))
+    }
     parts: [String]{".jet", "receipts", if staged -> "staged" else -> "sections", claim_key}
     present: JetCLIRootedDirectory.present(project_root, parts) ?? return Err(err)
     if !present -> return Ok([JetCLIReceiptSectionRecord]{})
@@ -127,32 +137,52 @@ jet_cli_receipt_read_section_records: fn(project_root: String, claim_key: String
     loop entry in entries {
         if entry.name == "" || entry.name.starts_with(".") -> next
         shown: jet_cli_rooted_join(held.path, entry.name)
-        if !jet_driver_run_receipt_is_digest(entry.name) -> return Err(jet_cli_read_error("receipt section record has a non-digest name: {shown}"))
-        if !entry.is_file -> return Err(jet_cli_read_error("receipt section record is not a regular file: {shown}"))
+        if !jet_driver_run_receipt_is_digest(entry.name) {
+            return Err(jet_cli_read_error("receipt section record has a non-digest name: {shown}"))
+        }
+        if !entry.is_file {
+            return Err(jet_cli_read_error("receipt section record is not a regular file: {shown}"))
+        }
         raw: if held.read(entry.name, JET_CLI_RECEIPT_SECTION_RECORD_MAX) == {
             .Val(bytes) -> bytes
-            .None -> { return Err(jet_cli_read_error("receipt section record disappeared: {shown}")) }
-            .Err(error) -> { return Err(error) }
+            .None -> {
+                return Err(jet_cli_read_error("receipt section record disappeared: {shown}"))
+            }
+            .Err(error) -> {
+                return Err(error)
+            }
         }
         record: jet_cli_receipt_section_record_decode(raw)
-        if jet_cli_receipt_section_record_identity(record) != entry.name -> return Err(jet_cli_read_error("receipt section record identity does not match its path: {shown}"))
-        if record.claim_key != claim_key || record.parent_digest != parent_digest -> return Err(jet_cli_read_error("receipt section record belongs to a different receipt: {shown}"))
+        if jet_cli_receipt_section_record_identity(record) != entry.name {
+            return Err(jet_cli_read_error("receipt section record identity does not match its path: {shown}"))
+        }
+        if record.claim_key != claim_key || record.parent_digest != parent_digest {
+            return Err(jet_cli_read_error("receipt section record belongs to a different receipt: {shown}"))
+        }
         records.push(record)
-        if records.len() > 256 -> return Err(jet_cli_read_error("receipt has too many sections (maximum 256)"))
+        if records.len() > 256 {
+            return Err(jet_cli_read_error("receipt has too many sections (maximum 256)"))
+        }
     }
     Ok(records)
 }
 
 jet_cli_receipt_lookup: fn(project_root: String, claim: JetDriverRunReceiptClaim) -[FS, Time.Wait]> JetDriverRunReceipt? JetCLIReadError! {
-    if !jet_driver_run_receipt_is_digest(claim.key) || !jet_cli_receipt_inputs_current(claim.inputs) -> return Ok(None)
+    if !jet_driver_run_receipt_is_digest(claim.key) || !jet_cli_receipt_inputs_current(claim.inputs) {
+        return Ok(None)
+    }
     parts: [String]{".jet", "receipts", "objects"}
     present: JetCLIRootedDirectory.present(project_root, parts) ?? return Err(err)
     if !present -> return Ok(None)
     held: JetCLIRootedDirectory.open(project_root, parts, false) ?? return Err(err)
     raw: if held.read(claim.key, JET_DRIVER_RUN_RECEIPT_MAX_BYTES) == {
         .Val(bytes) -> bytes
-        .None -> { return Ok(None) }
-        .Err(error) -> { return Err(error) }
+        .None -> {
+            return Ok(None)
+        }
+        .Err(error) -> {
+            return Err(error)
+        }
     }
     receipt: jet_driver_run_receipt_decode(raw) ?? return Ok(None)
     if receipt.claim != claim -> return Ok(None)
@@ -163,7 +193,9 @@ jet_cli_receipt_lookup: fn(project_root: String, claim: JetDriverRunReceiptClaim
 // True is a new immutable object; false is an identical publication or a
 // stale input closure. A different object under the same key is never replaced.
 jet_cli_receipt_publish: fn(project_root: String, receipt: JetDriverRunReceipt) -[FS, Env, Time.Wait]> Bool JetCLIReadError! {
-    if !jet_driver_run_receipt_is_digest(receipt.claim.key) -> return Err(jet_cli_read_error("receipt claim key is not a lowercase SHA-256 digest"))
+    if !jet_driver_run_receipt_is_digest(receipt.claim.key) {
+        return Err(jet_cli_read_error("receipt claim key is not a lowercase SHA-256 digest"))
+    }
     bytes: jet_driver_run_receipt_encode(receipt)
     if !jet_cli_receipt_inputs_current(receipt.claim.inputs) -> return Ok(false)
     held: JetCLIRootedDirectory.open(project_root, [String]{".jet", "receipts", "objects"}, true) ?? return Err(err)

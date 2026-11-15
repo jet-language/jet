@@ -32,8 +32,11 @@ use {
 }
 
 INTERFACE: "Compiler/JetFoundation/Source/Registry/RuntimeInterface.jet"
+
 DISPATCHER: "Compiler/Prelude/Core.rows"
+
 USAGE: "usage: jet Tools/agent/RuntimeEffectRows.jet --check"
+
 OUTPUT_LIMIT: 268435456
 
 #Error
@@ -168,13 +171,15 @@ core_leaves: fn(core: Dyn) -> [CoreLeaf] Never! {
         loop record in records {
             module_name: optional_text(record.get("module")) ?? next
             member: optional_text(record.get("member")) ?? next
-            leaves.push(CoreLeaf{
-                module_name: module_name,
-                member: member,
-                effect_kind: optional_text(record.get("effect_kind")),
-                effect_leaf: optional_text(record.get("effect_leaf")),
-                symbol: optional_text(record.get("symbol")) ?? "",
-            })
+            leaves.push(
+                CoreLeaf{
+                    module_name: module_name,
+                    member: member,
+                    effect_kind: optional_text(record.get("effect_kind")),
+                    effect_leaf: optional_text(record.get("effect_leaf")),
+                    symbol: optional_text(record.get("symbol")) ?? "",
+                },
+            )
         }
     }
     leaves
@@ -198,7 +203,9 @@ leaf_effects: fn(leaf: CoreLeaf) -> [String] Never! {
     effects := [String]{}
     leaf_name: leaf.effect_leaf ?? ""
     if leaf.effect_kind == .Val(kind) {
-        if leaf_name == "" || (leaf_name != kind && !leaf_name.starts_with("{kind}.")) -> effects.push(kind.copy())
+        if leaf_name == "" || (leaf_name != kind && !leaf_name.starts_with("{kind}.")) {
+            effects.push(kind.copy())
+        }
     }
     if leaf_name != "" -> effects.push(leaf_name.copy())
     effects.sort()
@@ -240,13 +247,19 @@ differences: fn(members: [InterfaceMember], leaves: [CoreLeaf], dispatched: [Str
             }
         }
         leaf: matched ?? {
-            if has_row -> found.push("{where}: {core_module}.{leaf_name} has a dispatcher_row but no CoreCallRecord")
+            if has_row {
+                found.push("{where}: {core_module}.{leaf_name} has a dispatcher_row but no CoreCallRecord")
+            }
             next
         }
         joined += 1
-        if !has_row -> found.push("{where}: {core_module}.{leaf_name} has a CoreCallRecord but no dispatcher_row")
+        if !has_row {
+            found.push("{where}: {core_module}.{leaf_name} has a CoreCallRecord but no dispatcher_row")
+        }
         expected: leaf_effects(leaf)
-        if expected.join(",") != member.effects.join(",") -> found.push("{where}: declares {row_text(member.effects)}, but {core_module}.{leaf_name} ({leaf.symbol}) has {row_text(expected)}")
+        if expected.join(",") != member.effects.join(",") {
+            found.push("{where}: declares {row_text(member.effects)}, but {core_module}.{leaf_name} ({leaf.symbol}) has {row_text(expected)}")
+        }
     }
     Report{joined: joined, differences: found}
 }
@@ -275,11 +288,17 @@ split_differences: fn(members: [InterfaceMember], splits: [RowSplit]) -> [String
                 break
             }
         }
-        if rows.len() > 1 && !listed -> found.push("{symbol}: its members declare different rows ({bound.join(", ")}) and row_splits lists no rule for it")
-        if rows.len() < 2 && listed -> found.push("{symbol}: row_splits lists it, but its members declare one row ({bound.join(", ")})")
+        if rows.len() > 1 && !listed {
+            found.push("{symbol}: its members declare different rows ({bound.join(", ")}) and row_splits lists no rule for it")
+        }
+        if rows.len() < 2 && listed {
+            found.push("{symbol}: row_splits lists it, but its members declare one row ({bound.join(", ")})")
+        }
     }
     loop split in splits {
-        if !symbols.contains(split.symbol) -> found.push("{split.symbol}: row_splits lists it ({split.rule}), but no interface member binds it")
+        if !symbols.contains(split.symbol) {
+            found.push("{split.symbol}: row_splits lists it ({split.rule}), but no interface member binds it")
+        }
     }
     found
 }
@@ -300,7 +319,9 @@ core_structure: fn() -[Env, Exec, FS, IO, Time, Time.Wait]> Dyn RowsError! {
     ran: process.run_all([ProcessSpec]{spec}, 1) ?? return Err(RowsError{message: "{argv.join(" ")} could not start: {err}"})
     receipt: ran[0] ?? return Err(RowsError{message: "{argv.join(" ")} could not start: {err}"})
     // `--json` prints the refusal's report on stdout.
-    if receipt.code != 0 || receipt.signal != None || receipt.timed_out -> return Err(RowsError{message: "command failed: {argv.join(" ")}: {receipt.output.trim()}"})
+    if receipt.code != 0 || receipt.signal != None || receipt.timed_out {
+        return Err(RowsError{message: "command failed: {argv.join(" ")}: {receipt.output.trim()}"})
+    }
     answer: json.parse(receipt.output) ?? return Err(RowsError{message: "{argv.join(" ")} printed no JSON: {err}"})
     core: answer.get("core") ?? return Err(RowsError{message: "{argv.join(" ")} printed no `core` object"})
     Ok(core)
@@ -313,7 +334,9 @@ runtime_effect_rows_main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wai
     }
     members: interface_members(read_text(INTERFACE) ?? return Err(err))
     leaves: core_leaves(core_structure() ?? return Err(err))
-    if leaves.len() == 0 -> return Err(RowsError{message: "`jet inspect structure --core --json` printed no Core call records"})
+    if leaves.len() == 0 {
+        return Err(RowsError{message: "`jet inspect structure --core --json` printed no Core call records"})
+    }
     dispatched: dispatcher_keys(read_text(DISPATCHER) ?? return Err(err))
     if members.len() == 0 -> return Err(RowsError{message: "{INTERFACE} has no interface member"})
     report: differences(members, leaves, dispatched, leaf_aliases())

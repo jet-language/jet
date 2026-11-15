@@ -1,4 +1,5 @@
 package: { name: "field_lambda", authority: { allow: [FS, IO] } }
+
 use files: core.files
 
 Source: struct {
@@ -8,12 +9,14 @@ Source: struct {
 // The stored lambda's body is a match on a Result whose arms build the
 // lambda's own Result.
 make_source: fn() -> Source Never! {
-    Source{size: fn(path: String) {
-        if files.read(path) == {
-            .Ok(text) -> Ok(text.len())
-            .Err(error) -> Err(error)
-        }
-    }}
+    Source{
+        size: fn(path: String) {
+            if files.read(path) == {
+                .Ok(text) -> Ok(text.len())
+                .Err(error) -> Err(error)
+            }
+        },
+    }
 }
 
 run: fn() {

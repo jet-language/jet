@@ -9,7 +9,7 @@ run: fn() Err! {
     show(r) ?? return
     // One byte left: too short for a U16, so the runtime reports the miss.
     if r.take_pattern([U8]{"{a:U16le}"}) == {
-        .Ok(t) -> print("unexpected {t.a}")
+        .Ok(t) -> { print("unexpected {t.a}") }
         .Err(e) -> print("miss: {e}")
     }
     last: r.take_pattern([U8]{"{a:U8}"}) ?? return
@@ -17,7 +17,7 @@ run: fn() Err! {
     // A literal mismatch leaves the position where it was.
     again: Reader.over([U8]{65, 67, 68, 69, 70, 5, 6})
     if again.take_pattern([U8]{"ACDEG{a:U8}"}) == {
-        .Ok(t) -> print("unexpected {t.a}")
+        .Ok(t) -> { print("unexpected {t.a}") }
         .Err(e) -> print("miss: {e}")
     }
     hit: again.take_pattern([U8]{"ACDEF{a:U8}{b:U8}"}) ?? return

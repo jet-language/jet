@@ -8,27 +8,57 @@ use {
     base64: core.encoding.base64
     http_server: core.http.server
     jetpack_nix.[
-        NIX_INDEX_LOCAL_INDEX_ROOT, NIX_INDEX_MAX_DECODED_BYTES, NIX_INDEX_ROOT, NIX_INDEX_SCHEMA,
-        NIX_INDEX_TEST_KEY_ID, NixIndexChannelManifest, NixIndexClient, NixIndexClock, NixIndexCoverage,
-        NixIndexCoverageMiss, NixIndexDocument, NixIndexError, NixIndexKey, NixIndexManifestTarget,
-        NixIndexOracleCandidate, NixIndexOutputWire, NixIndexRecord, NixIndexRecordWire,
-        NixIndexSignature, NixIndexTransport, NixIndexTrustTier, nix_index_canonical_test_index,
-        nix_index_decode_index_records_for_producer, nix_index_manifest_signature_request,
-        nix_index_parse_oracle_for_producer, nix_index_producer_coverage_report,
-        nix_index_producer_generate, nix_index_producer_manifest_bytes,
-        nix_index_producer_signature_request, nix_index_signature_sidecar, nix_index_target_for,
-        nix_index_validate_store_path, nix_index_verify_index_signature,
-        nix_index_verify_manifest_signature, nix_index_zstd_decode_bounded,
+        NIX_INDEX_LOCAL_INDEX_ROOT,
+        NIX_INDEX_MAX_DECODED_BYTES,
+        NIX_INDEX_ROOT,
+        NIX_INDEX_SCHEMA,
+        NIX_INDEX_TEST_KEY_ID,
+        NixIndexChannelManifest,
+        NixIndexClient,
+        NixIndexClock,
+        NixIndexCoverage,
+        NixIndexCoverageMiss,
+        NixIndexDocument,
+        NixIndexError,
+        NixIndexKey,
+        NixIndexManifestTarget,
+        NixIndexOracleCandidate,
+        NixIndexOutputWire,
+        NixIndexRecord,
+        NixIndexRecordWire,
+        NixIndexSignature,
+        NixIndexTransport,
+        NixIndexTrustTier,
+        nix_index_canonical_test_index,
+        nix_index_decode_index_records_for_producer,
+        nix_index_manifest_signature_request,
+        nix_index_parse_oracle_for_producer,
+        nix_index_producer_coverage_report,
+        nix_index_producer_generate,
+        nix_index_producer_manifest_bytes,
+        nix_index_producer_signature_request,
+        nix_index_signature_sidecar,
+        nix_index_target_for,
+        nix_index_validate_store_path,
+        nix_index_verify_index_signature,
+        nix_index_verify_manifest_signature,
+        nix_index_zstd_decode_bounded,
     ]
     jet_pkg_model.[HangarRoots, pkg_json_object, pkg_sha256_hex]
 }
 
 NIX_TEST_INDEX_REVISION: "c8f90650c15282fa8656a041bfbbd2403997a9a7"
+
 NIX_TEST_RIPGREP_DRV: "/nix/store/har68bdn10m05zxkvn680q37bdq0bpdx-ripgrep-15.2.0.drv"
+
 NIX_TEST_RIPGREP_OUT: "/nix/store/axp6zlky4x2v3jwcbq24a2cz25hzlw9b-ripgrep-15.2.0"
+
 NIX_TEST_AUX_DRV: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a-1.drv"
+
 NIX_TEST_AUX_OUT: "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-a-1"
+
 NIX_TEST_LOOPBACK_ENDPOINT: "http://127.0.0.1:9999"
+
 NIX_TEST_FIXTURE_NOW: 1724000100
 
 nix_test_index_scratch: fn(label: String) -[FS]> String {
@@ -47,11 +77,11 @@ nix_test_sign: fn(seed: [U8], message: [U8]) -> [U8] {
 }
 
 nix_test_ripgrep_record: fn() -> NixIndexRecord {
-    NixIndexRecord{attrpath: [String]{"ripgrep"}, version: "15.2.0", drv_path: NIX_TEST_RIPGREP_DRV, outputs: [String: String]{"out": NIX_TEST_RIPGREP_OUT}}
+    NixIndexRecord{attrpath: [String]{"ripgrep"}, version: "15.2.0", drv_path: NIX_TEST_RIPGREP_DRV, outputs: [String:String]{"out": NIX_TEST_RIPGREP_OUT}}
 }
 
 nix_test_auxiliary_record: fn() -> NixIndexRecord {
-    NixIndexRecord{attrpath: [String]{"a", "nested"}, version: "1.0.0", drv_path: NIX_TEST_AUX_DRV, outputs: [String: String]{"out": NIX_TEST_AUX_OUT}}
+    NixIndexRecord{attrpath: [String]{"a", "nested"}, version: "1.0.0", drv_path: NIX_TEST_AUX_DRV, outputs: [String:String]{"out": NIX_TEST_AUX_OUT}}
 }
 
 nix_test_ripgrep_key: fn() -> NixIndexKey {
@@ -71,20 +101,24 @@ nix_test_document_for: fn(record: NixIndexRecordWire) -> NixIndexDocument {
 }
 
 // Rust `MapTransport`: fixed responses by URL.
-nix_test_map_transport: fn(values: [String: [U8]]) -> NixIndexTransport {
+nix_test_map_transport: fn(values: [String:[U8]]) -> NixIndexTransport {
     responses: values.copy()
-    NixIndexTransport{get_bounded: fn(url: String, max_bytes: Int) -[Net, Time.Wait]> {
-        value: responses.get(url) ?? return Err(NixIndexError.Transport("missing test URL {url}"))
-        if value.len() > max_bytes -> return Err(NixIndexError.Invalid("test response exceeded bound"))
-        Ok(value)
-    }}
+    NixIndexTransport{
+        get_bounded: fn(url: String, max_bytes: Int) -[Net, Time.Wait]> {
+            value: responses.get(url) ?? return Err(NixIndexError.Transport("missing test URL {url}"))
+            if value.len() > max_bytes {
+                return Err(NixIndexError.Invalid("test response exceeded bound"))
+            }
+            Ok(value)
+        },
+    }
 }
 
 // A signed ripgrep index, its manifest and both sidecars as served by
 // `endpoint`, signed by the seed-7 key under `test-key`.
 NixTestSignedFixture: struct {
     root: String
-    responses: [String: [U8]]
+    responses: [String:[U8]]
     public_key: [U8]
 }
 
@@ -96,17 +130,17 @@ nix_test_signed_fixture_at: fn(endpoint: String) -[FS]> NixTestSignedFixture {
     target: nix_index_target_for(NIX_TEST_INDEX_REVISION, "x86_64-linux", endpoint, built.compressed, built.decoded, sidecar, 1) ?? panic("test target")
     manifest: nix_index_producer_manifest_bytes("nixpkgs-unstable", 1, 1724000000, 1724000000 + 604800, [NixIndexManifestTarget]{target}) ?? panic("test manifest")
     manifest_sidecar: nix_index_signature_sidecar("test-key", nix_test_sign(seed, nix_index_manifest_signature_request(manifest)))
-    responses := [String: [U8]]{}
+    responses := [String:[U8]]{}
     responses["{endpoint}/v1/nixpkgs-unstable/manifest.json"] = manifest
     responses["{endpoint}/v1/nixpkgs-unstable/manifest.json.sig.json"] = manifest_sidecar
     responses[target.url] = built.compressed
     responses[target.signature_url] = sidecar
     signer: crypto.SigningKey.from_bytes(seed) ?? panic("test public key")
     public_key: signer.public_key().bytes
-    NixTestSignedFixture{root, responses, public_key}
+    NixTestSignedFixture{root: root, responses: responses, public_key: public_key}
 }
 
-nix_test_signed_client: fn(fixture: NixTestSignedFixture, endpoint: String, responses: [String: [U8]], clock: NixIndexClock, offline: Bool) -> NixIndexClient {
+nix_test_signed_client: fn(fixture: NixTestSignedFixture, endpoint: String, responses: [String:[U8]], clock: NixIndexClock, offline: Bool) -> NixIndexClient {
     NixIndexClient.with_transport(fixture.root, endpoint, "test-key", fixture.public_key, nix_test_map_transport(responses), clock, offline) ?? panic("test client")
 }
 
@@ -162,7 +196,7 @@ nix_test_document_rejected: fn(document: NixIndexDocument) -> Bool {
 }
 
 nix_test_generation_rejected: fn(client: NixIndexClient, generation: Int, issued: Int, bytes: String) -[FS]> Bool {
-    manifest: NixIndexChannelManifest{schema: NIX_INDEX_SCHEMA, channel: "nixpkgs-unstable", generation, issued_unix: issued, expires_unix: issued + 604800, targets: [NixIndexManifestTarget]{}}
+    manifest: NixIndexChannelManifest{schema: NIX_INDEX_SCHEMA, channel: "nixpkgs-unstable", generation: generation, issued_unix: issued, expires_unix: issued + 604800, targets: [NixIndexManifestTarget]{}}
     if client.check_generation("nixpkgs-unstable", manifest, bytes.bytes()) == {
         .Ok(_) -> false
         .Err(_) -> true
@@ -206,7 +240,7 @@ nix_test_generation_rejected: fn(client: NixIndexClient, generation: Int, issued
 
 #Test("nix index requires explicit endpoint and key") {
     root: nix_test_index_scratch("explicit-config")
-    roots: HangarRoots{root, dev_mode: true}
+    roots: HangarRoots{root: root, dev_mode: true}
     assert_eq(nix_test_invalid_detail(nix_test_roots_error(roots)), "signed nixpkgs index endpoint and public key must be configured explicitly")
     files.create_dir_all(files.join(root, "trust")) ?? panic("trust directory")
     files.write(files.join(root, "trust/nix-index-v1.ed25519.pub"), "fixture-index-signer-v1:{base64.encode(nix_test_seed(7))}\n") ?? panic("trust key")
@@ -220,7 +254,7 @@ nix_test_generation_rejected: fn(client: NixIndexClient, generation: Int, issued
     files.create_dir_all(files.join(root, "trust")) ?? panic("trust directory")
     files.write(files.join(root, "config/nix-index-v1.endpoint"), "http://127.0.0.1:9999\n") ?? panic("endpoint")
     files.write(files.join(root, "trust/nix-index-v1.ed25519.pub"), "{NIX_INDEX_TEST_KEY_ID}:{base64.encode(nix_test_seed(7))}\n") ?? panic("trust key")
-    error: nix_test_roots_error(HangarRoots{root, dev_mode: false})
+    error: nix_test_roots_error(HangarRoots{root: root, dev_mode: false})
     assert_eq(error.code(), 1348)
     assert_eq(nix_test_invalid_detail(error), "nix index trust root `jet-test-index-v1` is test-only and cannot be used for official signed indexes")
     files.remove_all(root) ?? panic("scratch cleanup")
@@ -236,7 +270,7 @@ nix_test_generation_rejected: fn(client: NixIndexClient, generation: Int, issued
     signer: crypto.SigningKey.from_bytes(nix_test_seed(7)) ?? panic("signing seed")
     public_key: signer.public_key().bytes
     files.write(files.join(root, "trust/nix-index-v1.ed25519.pub"), "fixture-index-signer-v1:{base64.encode(public_key)}\n") ?? panic("trust key")
-    client: NixIndexClient.from_roots_with_mode(HangarRoots{root, dev_mode: false}, false) ?? panic("configured client")
+    client: NixIndexClient.from_roots_with_mode(HangarRoots{root: root, dev_mode: false}, false) ?? panic("configured client")
     // A later rewrite must not change the held endpoint of this client.
     files.write(endpoint_path, "http://127.0.0.1:9\n") ?? panic("rewrite endpoint")
     assert_eq(client.configured_endpoint(), endpoint)
@@ -311,7 +345,7 @@ nix_test_generation_rejected: fn(client: NixIndexClient, generation: Int, issued
 #Test("nix index differential oracle rejects a different pinned revision") {
     oracle: "{{\"revision\":\"0000000000000000000000000000000000000000\",\"system\":\"x86_64-linux\",\"records\":[]}}"
     if nix_index_parse_oracle_for_producer(oracle.bytes(), "x86_64-linux", NIX_TEST_INDEX_REVISION) == {
-        .Ok(_) -> panic("a different pinned revision must be rejected")
+        .Ok(_) -> { panic("a different pinned revision must be rejected") }
         .Err(error) -> assert(error.message().contains("wrong pinned revision"))
     }
 }
@@ -328,7 +362,7 @@ nix_test_generation_rejected: fn(client: NixIndexClient, generation: Int, issued
     position: forged.len() - 2
     forged[position] = U8{(Int{forged[position]}).bit_xor(1)}
     if nix_index_verify_index_signature(public_key, "test-key", signature, forged) == {
-        .Ok(_) -> panic("mutated bytes must not verify")
+        .Ok(_) -> { panic("mutated bytes must not verify") }
         .Err(_) -> {}
     }
 }
@@ -348,7 +382,7 @@ nix_test_generation_rejected: fn(client: NixIndexClient, generation: Int, issued
 
 #Test("nix index rejects forged stale cross system duplicate and ambiguous input") {
     if NixIndexDocument.parse(`{"schema":1,"schema":1}`.bytes()) == {
-        .Ok(_) -> panic("duplicate keys must be rejected")
+        .Ok(_) -> { panic("duplicate keys must be rejected") }
         .Err(_) -> {}
     }
     ripgrep: NixIndexRecordWire.from_record(nix_test_ripgrep_record())
@@ -374,7 +408,7 @@ nix_test_generation_rejected: fn(client: NixIndexClient, generation: Int, issued
     no_primary: NixIndexRecordWire{attrpath: [String]{"ripgrep"}, version: "15.2.0", drv_path: NIX_TEST_RIPGREP_DRV, outputs: [NixIndexOutputWire]{NixIndexOutputWire{name: "dev", store_path: NIX_TEST_RIPGREP_OUT}}}
     assert(nix_test_document_rejected(nix_test_document_for(no_primary)))
     if nix_index_validate_store_path("/nix/store/not-a-store-path", false) == {
-        .Ok(_) -> panic("a malformed store path must be rejected")
+        .Ok(_) -> { panic("a malformed store path must be rejected") }
         .Err(_) -> {}
     }
 
@@ -399,7 +433,7 @@ nix_test_generation_rejected: fn(client: NixIndexClient, generation: Int, issued
     signer: crypto.SigningKey.from_bytes(seed) ?? panic("signing seed")
     public_key: signer.public_key()
     if nix_index_verify_manifest_signature(public_key, "test-key", drifted.canonical_bytes(), bytes) == {
-        .Ok(_) -> panic("a drifted signature schema must be rejected")
+        .Ok(_) -> { panic("a drifted signature schema must be rejected") }
         .Err(_) -> {}
     }
 }
@@ -429,7 +463,9 @@ nix_test_generation_rejected: fn(client: NixIndexClient, generation: Int, issued
     assert_eq(error.code(), 1276)
     if error == {
         .Offline(_) -> {}
-        .Invalid(_) | .NotIndexed(_, _, _, _, _) | .Transport(_) -> panic("an expired cached manifest is an offline refusal")
+        .Invalid(_) | .NotIndexed(_, _, _, _, _) | .Transport(_) -> {
+            panic("an expired cached manifest is an offline refusal")
+        }
     }
     files.remove_all(fixture.root) ?? panic("scratch cleanup")
 }

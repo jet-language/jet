@@ -24,12 +24,13 @@ ECDSA_MAX_LEN: 139
 /// Why reading or writing an encoded signature failed.
 #Error
 ECDSAError: enum {
-    /// The curve arithmetic or the verification failed.
     Ecp(ecp.EcpError)
-    /// The signature is not one DER SEQUENCE of two INTEGERs
-    /// (MBEDTLS_ERR_ECP_BAD_INPUT_DATA plus the ASN.1 error).
     BadEncoding(asn1.ASN1Error)
 }
+
+/// The curve arithmetic or the verification failed.
+/// The signature is not one DER SEQUENCE of two INTEGERs
+/// (MBEDTLS_ERR_ECP_BAD_INPUT_DATA plus the ASN.1 error).
 
 impl ecp.EcpError -> ECDSAError { ECDSAError.Ecp(self) }
 
@@ -68,7 +69,9 @@ derive_mpi: fn(grp: ecp.EcpGroup, hash: [U8]) -> bn.Mpi ecp.EcpError! {
 /// Whether a signature part (r or s) is not zero, read in constant time.
 /// The verdict is public: r and s are the signature's output, and a zero
 /// one only redraws the nonce (SEC1 4.1.3 steps 3 and 6).
-signature_part_nonzero: fn(x: bn.Mpi) -> Bool Never! { bn.core_check_zero_ct(x.p, x.p.len()) == U64{1} }
+signature_part_nonzero: fn(x: bn.Mpi) -> Bool Never! {
+    bn.core_check_zero_ct(x.p, x.p.len()) == U64{1}
+}
 
 /// Whether grp is set up for ECDSA.
 usable_group: fn(grp: ecp.EcpGroup) -> Bool Never! { ecdsa_can_do(grp.id) && grp.n.p.len() != 0 }

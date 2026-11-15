@@ -4,13 +4,18 @@ Build: struct {
         Running -> Finished
         Finished
     }
+
     name: String
 
     queue: fn(name: String) -> Build.Queued { Build{name: name.copy()} }
+
     start: fn(self: &&Build.Queued) -> Build.Running { self }
+
     finish: fn(self: &&Build.Running) -> Build.Finished { self }
+
     report: fn(self: Build.Finished) -> String { "finished:{self.name}" }
 }
+
 run: fn() {
     build := Build.queue("compile")
     build = build.start()

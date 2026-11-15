@@ -5,7 +5,21 @@ use {
     p2_base64: core.encoding.base64
     jet_foundation.[canonical_json_bytes, canonical_json_parse]
     jet_cli.[
-        JetCLIReceiptSectionRecord, JetCLIRecordIdentity, JetCLIRecordIndexEntry, jet_cli_receipt_diff_sections, jet_cli_receipt_field_diff_render, jet_cli_receipt_section_record_decode, jet_cli_receipt_section_record_encode, jet_cli_receipt_section_record_identity, jet_cli_record_entry_is_disposable, jet_cli_record_entry_normalize, jet_cli_record_index_new, jet_cli_record_index_parse_line, jet_cli_record_index_save_replay, jet_cli_record_index_to_jsonl, jet_cli_record_index_update,
+        JetCLIReceiptSectionRecord,
+        JetCLIRecordIdentity,
+        JetCLIRecordIndexEntry,
+        jet_cli_receipt_diff_sections,
+        jet_cli_receipt_field_diff_render,
+        jet_cli_receipt_section_record_decode,
+        jet_cli_receipt_section_record_encode,
+        jet_cli_receipt_section_record_identity,
+        jet_cli_record_entry_is_disposable,
+        jet_cli_record_entry_normalize,
+        jet_cli_record_index_new,
+        jet_cli_record_index_parse_line,
+        jet_cli_record_index_save_replay,
+        jet_cli_record_index_to_jsonl,
+        jet_cli_record_index_update,
     ]
 }
 
@@ -17,7 +31,7 @@ p2_canonical: fn() Never! {
     parsed: canonical_json_parse("{{}}\n".bytes()) ?? panic("canonical empty object")
     p2_require(canonical_json_bytes(parsed) == "{{}}\n".bytes(), "canonical bytes roundtrip")
     loop invalid in
-        ([String]{"{{}}", "{{}}\n\n", " {{}}\n", "{{\"a\":1,\"a\":2}}\n", "{{\"a\":01}}\n", "{{\"a\":1.0}}\n", "{{\"a\":\"\\ud800\"}}\n"}), {
+        ([String]{"{{}}", "{{}}\n\n", " {{}}\n", "{{\"a\":1,\"a\":2}}\n", "{{\"a\":01}}\n", "{{\"a\":1.0}}\n", "{{\"a\":\"\\ud800\"}}\n"}) {
         rejected: if canonical_json_parse(invalid.bytes()) == {
             .Ok(_) -> false
             .Err(_) -> true

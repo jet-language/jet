@@ -25,7 +25,9 @@ PublicationBreakingChange: struct {
 publication_api_snapshot_items: fn(snapshot: PackageCapabilitySnapshot) -> [PublicAPIItem] Never! {
     items := [PublicAPIItem]{}
     loop line in snapshot.signatures {
-        if pkg_api_snapshot_line_name(line) == .Val(row) -> items.push(PublicAPIItem{kind: row.kind, name: row.name, signature: line.copy()})
+        if pkg_api_snapshot_line_name(line) == .Val(row) {
+            items.push(PublicAPIItem{kind: row.kind, name: row.name, signature: line.copy()})
+        }
     }
     items
 }
@@ -39,7 +41,9 @@ publication_api_baseline: fn(entries: [PublicationIndexEntry], version: Publicat
     loop entry in entries {
         published: publication_parse_semver(entry.version) ?? next
         if publication_precedence(published, version) != Ordering.Less -> next
-        if best != None && publication_precedence(published, best_version) != Ordering.Greater -> next
+        if best != None && publication_precedence(published, best_version) != Ordering.Greater {
+            next
+        }
         best = Val(entry)
         best_version = published
     }
@@ -75,25 +79,33 @@ publication_diff_public_api: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> [
         if replacement >= 0 {
             matched[replacement] = true
             item: new[replacement]
-            if publication_api_effects_narrowed(old_item, item) || publication_api_cap_narrowed(old_item, item) -> next
-            changes.push(PublicationBreakingChange{
-                description: "public {old_item.kind} `{old_item.name}` changed signature\n   | was: {old_item.signature}\n   | now: {item.signature}",
-                item_name: old_item.name.copy(),
-            })
+            if publication_api_effects_narrowed(old_item, item) || publication_api_cap_narrowed(old_item, item) {
+                next
+            }
+            changes.push(
+                PublicationBreakingChange{
+                    description: "public {old_item.kind} `{old_item.name}` changed signature\n   | was: {old_item.signature}\n   | now: {item.signature}",
+                    item_name: old_item.name.copy(),
+                },
+            )
         } else {
-            changes.push(PublicationBreakingChange{
-                description: "public {old_item.kind} `{old_item.name}` was removed\n   | {old_item.signature}\n   | (removed)",
-                item_name: old_item.name.copy(),
-            })
+            changes.push(
+                PublicationBreakingChange{
+                    description: "public {old_item.kind} `{old_item.name}` was removed\n   | {old_item.signature}\n   | (removed)",
+                    item_name: old_item.name.copy(),
+                },
+            )
         }
     }
     loop index in 0..<new.len() {
         item: new[index]
         if matched[index] || !publication_api_addition_breaks(old, new, item) -> next
-        changes.push(PublicationBreakingChange{
-            description: "public {item.kind} `{item.name}` was added to an existing type\n   | (absent)\n   | {item.signature}",
-            item_name: item.name.copy(),
-        })
+        changes.push(
+            PublicationBreakingChange{
+                description: "public {item.kind} `{item.name}` was added to an existing type\n   | (absent)\n   | {item.signature}",
+                item_name: item.name.copy(),
+            },
+        )
     }
     changes
 }
@@ -101,7 +113,9 @@ publication_diff_public_api: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> [
 // The row of kind `kind` that `member` (`Owner.member`) belongs to.
 publication_api_owner: fn(items: [PublicAPIItem], kind: String, member: String) -> PublicAPIItem? Never! {
     loop item in items {
-        if item.kind == kind && member.starts_with("{item.name}.") && !member.removeprefix("{item.name}.").contains(".") -> return Val(item)
+        if item.kind == kind && member.starts_with("{item.name}.") && !member.removeprefix("{item.name}.").contains(".") {
+            return Val(item)
+        }
     }
     None
 }
@@ -114,7 +128,9 @@ publication_api_addition_breaks: fn(old: [PublicAPIItem], new: [PublicAPIItem], 
         "variant" -> publication_api_owner(old, "enum", item.name) != None
         "require" -> publication_api_owner(old, "trait", item.name) != None
         "field" -> {
-            if item.signature.ends_with(" = _") || publication_api_owner(old, "struct", item.name) == None -> return false
+            if item.signature.ends_with(" = _") || publication_api_owner(old, "struct", item.name) == None {
+                return false
+            }
             owner: publication_api_owner(new, "struct", item.name) ?? return true
             !owner.signature.ends_with("{{ .. }}")
         }
@@ -165,9 +181,7 @@ publication_api_cap: fn(signature: String) -> PublicationAPICap? Never! {
     cap := PublicationAPICap{allowed: [String]{}, denied: [String]{}}
     if inner == "" -> return Val(cap)
     loop name in inner.split(", ") {
-        if name.starts_with("!") {
-            cap.denied.push(name.removeprefix("!"))
-        } else if name != "Panic" && !name.starts_with("Panic.") {
+        if name.starts_with("!") -> cap.denied.push(name.removeprefix("!")) else if name != "Panic" && !name.starts_with("Panic.") {
             cap.allowed.push(name.copy())
         }
     }
@@ -203,10 +217,13 @@ publication_e2601: fn(version: String, bump_kind: PublicationBumpKind, change: P
     // Core find is a byte offset while slice is character-indexed, so take the
     // text prefix directly; mixing them corrupts non-ASCII text before the dot.
     major: if version.split_once(".") == .Val(parts) -> parts.before else -> version
-    diagnostic_from_registry("E2601", None,
+    diagnostic_from_registry(
+        "E2601",
+        None,
         "this release is tagged {version} but removes public API",
         "{version} is a {bump} bump, which promises no breaking changes. Callers pinned to ^{major}.0 would stop compiling.\n  {change.description}",
-        "bump to {next_major}.0.0, or restore `{change.item_name}` (a deprecated shim counts). Use `jet registry publish --force` to override with a warning banner.")
+        "bump to {next_major}.0.0, or restore `{change.item_name}` (a deprecated shim counts). Use `jet registry publish --force` to override with a warning banner.",
+    )
 }
 
 publication_e1218: fn(old_version: String, new_version: String, bump: PublicationBumpKind, change: PublicationBreakingChange, next_major: Int) -> Diagnostic Never! {
@@ -216,10 +233,13 @@ publication_e1218: fn(old_version: String, new_version: String, bump: Publicatio
         .Same -> "unchanged"
         .Major -> "major"
     }
-    diagnostic := diagnostic_from_registry("E1218", None,
+    diagnostic := diagnostic_from_registry(
+        "E1218",
+        None,
         "publishing {new_version} after {old_version} is a {label} bump but breaks the public API item `{change.item_name}`",
         "a {label} bump promises callers no breaking changes, but the public API changed since {old_version}",
-        "bump to {next_major}.0.0 (a major release), or restore `{change.item_name}` (a deprecated shim counts); `--force` publishes anyway with a warning banner.")
+        "bump to {next_major}.0.0 (a major release), or restore `{change.item_name}` (a deprecated shim counts); `--force` publishes anyway with a warning banner.",
+    )
     diagnostic.detail = Val("  {change.description}")
     diagnostic
 }

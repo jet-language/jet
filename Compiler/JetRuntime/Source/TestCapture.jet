@@ -15,12 +15,15 @@ test_stack_key := I64{0}
 rt_test_capture_abort_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
+
 rt_test_capture_print_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
 
 #Export(c) jet_rt_test_capture_init: fn() {
-    if (test_stack_key != I64{0}) -> return
+    if (test_stack_key != I64{0}) {
+        return
+    }
     sync_mutex_lock(thread_tls_registry)
     if (test_stack_key == I64{0}) {
         closure: jet_rt_alloc(I64{24}, I64{8})
@@ -83,12 +86,14 @@ test_capture_state_drop: fn(state: I64) {
 // leaves 2. A thread with no test state has nothing to mark.
 test_stop_assertion_mark: fn() {
     state: test_capture_state()
-    if (state != I64{0}) -> trap_store(wrapping(state + I64{136}), I64{1})
+    if (state != I64{0}) { trap_store(wrapping(state + I64{136}), I64{1}) }
 }
 
 test_stop_assertion_settle: fn(rendered: Bool) {
     state: test_capture_state()
-    if (state == I64{0}) -> return
+    if (state == I64{0}) {
+        return
+    }
     cell: wrapping(state + I64{136})
     trap_store(cell, if (rendered && trap_word(cell) == I64{1}) -> I64{2} else -> I64{0})
 }
@@ -96,7 +101,7 @@ test_stop_assertion_settle: fn(rendered: Bool) {
 // True when the last stop record was an assertion's report; clears the mark.
 test_stop_assertion_take: fn() -> Bool {
     state: test_capture_state()
-    if (state == I64{0}) -> return false
+    if (state == I64{0}) { return false }
     cell: wrapping(state + I64{136})
     marked: trap_word(cell) == I64{2}
     trap_store(cell, I64{0})
@@ -167,7 +172,5 @@ test_stop_assertion_take: fn() -> Bool {
 // The ordinary Rust tier retains the TEST_PRELUDE TLS print implementation.
 // Outside a unit (the package `test: fn` setup) there is no capture frame: print to stdout.
 #Export(c) jet_rt_test_print: fn(text: I64, flush: Bool) {
-    if !jet_rt_test_capture_print(text) {
-        _: host_stdio_text_failure(text, true, false, flush)
-    }
+    if !jet_rt_test_capture_print(text) -> _: host_stdio_text_failure(text, true, false, flush)
 }

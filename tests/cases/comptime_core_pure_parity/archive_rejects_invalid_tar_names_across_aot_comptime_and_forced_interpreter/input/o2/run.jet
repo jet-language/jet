@@ -1,4 +1,5 @@
 use archive: core.archive
+
 invalid_tar_name_view: fn(name: String) -> String {
     empty: [U8]{}
     valid: archive.tar_add(empty, "keep.txt", [1]) ?? [U8]{}
@@ -11,6 +12,7 @@ invalid_tar_name_view: fn(name: String) -> String {
     rejected: archive.tar_get(valid, name) ?? [U8]{}
     return "{refused}|{names_json}|{kept}|{rejected}"
 }
+
 EXPECTED: #run invalid_tar_name_view("")
 
 run: fn() {

@@ -2,8 +2,14 @@
 // is Foundation's CanonicalAuthority; a guest's declared `needs` only stop a
 // host from lending unrelated capability.
 use jet_foundation.[
-    AuthorityTightenError, AuthorityVerdict, CanonicalAuthority, HostImportFact,
-    authority_covers, authority_covers_any, authority_holds, authority_parse_right,
+    AuthorityTightenError,
+    AuthorityVerdict,
+    CanonicalAuthority,
+    HostImportFact,
+    authority_covers,
+    authority_covers_any,
+    authority_holds,
+    authority_parse_right,
 ]
 
 // Failure while projecting a host authority into a sandbox guest.
@@ -38,9 +44,7 @@ HostImportDecision: struct {
         HostImportDecision{import: import, verdict: pkg_authority_decide_import(authority, import)}
     }
 
-    is_allowed: fn(self) -> Bool Never! {
-        self.verdict == AuthorityVerdict.Allowed
-    }
+    is_allowed: fn(self) -> Bool Never! { self.verdict == AuthorityVerdict.Allowed }
 }
 
 // `Authority::decide_import`: one typed host import against an authority,
@@ -61,9 +65,7 @@ NoFollowRoot: struct {
         Ok(NoFollowRoot{right: canonical, resolver: resolver})
     }
 
-    root: fn(self) -> String Never! {
-        self.resolver.root.copy()
-    }
+    root: fn(self) -> String Never! { self.resolver.root.copy() }
 
     checked_file: fn(self, path: String) -[FS, Env]> CheckedFile SandboxAuthorityError! {
         if self.resolver.checked_file(path) == {
@@ -90,10 +92,14 @@ SandboxAuthority: struct {
         needs = authority_holds(needs)
         authority: host.tighten(requested) ?? return Err(SandboxAuthorityError.Widened(err))
         loop right in authority.holds {
-            if !authority_covers_any(needs, right) -> return Err(SandboxAuthorityError.UndeclaredRight(right))
+            if !authority_covers_any(needs, right) {
+                return Err(SandboxAuthorityError.UndeclaredRight(right))
+            }
         }
         loop root in roots {
-            if !authority.allows(root.right) -> return Err(SandboxAuthorityError.MissingRoot(root.right.copy()))
+            if !authority.allows(root.right) {
+                return Err(SandboxAuthorityError.MissingRoot(root.right.copy()))
+            }
         }
         Ok(SandboxAuthority{authority: authority, needs: needs, roots: roots})
     }

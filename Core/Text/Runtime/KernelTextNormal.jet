@@ -12,20 +12,30 @@ use {
 }
 
 C_SBASE: 44032
+
 C_LBASE: 4352
+
 C_VBASE: 4449
+
 C_TBASE: 4519
+
 C_LCOUNT: 19
+
 C_VCOUNT: 21
+
 C_TCOUNT: 28
+
 C_NCOUNT: 588
+
 C_SCOUNT: 11172
 
 hangul_compose: fn(a: Int, b: Int) -> Int? {
     lindex: a - C_LBASE
     if lindex >= 0 && lindex < C_LCOUNT {
         vindex: b - C_VBASE
-        if vindex >= 0 && vindex < C_VCOUNT -> return Val(C_SBASE + (lindex * C_VCOUNT + vindex) * C_TCOUNT)
+        if vindex >= 0 && vindex < C_VCOUNT {
+            return Val(C_SBASE + (lindex * C_VCOUNT + vindex) * C_TCOUNT)
+        }
     }
     sindex: a - C_SBASE
     if sindex >= 0 && sindex < C_SCOUNT && sindex % C_TCOUNT == 0 {
@@ -79,7 +89,7 @@ normalize: fn(text: String, compat: Bool, recompose: Bool) -> String Never! {
         if width == 4 -> cp = cp.bit_and(7)
         loop k in 1..<width -> cp = (cp << 6).bit_or((Int{bytes[at + k]}.bit_and(63)))
         decompose_cp(out, cp, compat, index, pool)
-        at = at + width
+        at += width
     }
     canon_order(out, ccc)
     if recompose {
@@ -127,9 +137,7 @@ decompose_cp: fn(out: &[Int], cp: Int, compat: Bool, index: View<U8>, pool: View
 }
 
 // Rust `ccc`: binary search the generated nonzero ranges.
-normal_ccc: fn(table: View<U8>, cp: Int) -> Int Never! {
-    normal_assets.range_tag(table, cp, 0)
-}
+normal_ccc: fn(table: View<U8>, cp: Int) -> Int Never! { normal_assets.range_tag(table, cp, 0) }
 
 // Rust `nfc` canonical ordering. Stable counting sort of each nonstarter run gives
 // linear time even for hostile descending CCC sequences. Sorted runs (the usual
@@ -140,7 +148,7 @@ canon_order: fn(cps: &[Int], ccc: View<U8>) Never! {
     at := 0
     loop at < cps.len() {
         if normal_ccc(ccc, cps[at]) == 0 {
-            at = at + 1
+            at += 1
             next
         }
         start: at
@@ -151,10 +159,12 @@ canon_order: fn(cps: &[Int], ccc: View<U8>) Never! {
             if class == 0 -> break
             if previous > class -> unordered = true
             previous = class
-            at = at + 1
+            at += 1
         }
         if !unordered -> next
-        if positions.len() == 0 -> loop _ in 0..<256 -> positions.push(0)
+        if positions.len() == 0 {
+            loop _ in 0..<256 -> positions.push(0)
+        }
         loop class in 1..<256 -> positions[class] = 0
         loop i in start..<at {
             class: normal_ccc(ccc, cps[i])
@@ -164,7 +174,7 @@ canon_order: fn(cps: &[Int], ccc: View<U8>) Never! {
         loop class in 1..<256 {
             count: positions[class].copy()
             positions[class] = offset
-            offset = offset + count
+            offset += count
         }
         loop scratch.len() < at - start -> scratch.push(0)
         loop i in start..<at {
@@ -193,7 +203,7 @@ compose: fn(cps: &[Int], ccc: View<U8>, pairs: View<U8>) -> String Never! {
         }
         if class == 0 -> starter = length
         cps[length] = cp
-        length = length + 1
+        length += 1
         last_class = class
     }
     encode_cps_prefix(cps, length)

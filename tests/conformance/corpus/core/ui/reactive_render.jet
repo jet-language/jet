@@ -7,10 +7,12 @@ use {
 run: fn() {
     backend: ui.null_backend()
     label: reactive.signal("one")
-    print(ui.reactive_render(fn() {
-        node: ui.text(label.get())
-        ui.mount(backend, node)
-    }))
+    print(
+        ui.reactive_render(fn() {
+            node: ui.text(label.get())
+            ui.mount(backend, node)
+        }),
+    )
     print(backend.render_count())
     label.set("two")
     print(backend.render_count())

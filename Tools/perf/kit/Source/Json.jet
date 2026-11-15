@@ -1,7 +1,5 @@
 // JSON.stringify(value, null, space) of a JSON value.
-use {
-    math: core.math
-}
+use math: core.math
 
 // JSON.stringify's string literal: `"`, `\` and the control characters
 // escaped, every other byte as is.
@@ -33,7 +31,9 @@ json_quote: fn(text: String) -> String Never! {
 // before every other key.
 array_index: fn(key: String) -> Int? Never! {
     bytes: key.bytes()
-    if bytes.len() == 0 || bytes.len() > 10 || (bytes.len() > 1 && Int{bytes[0]} == 48) -> return None
+    if bytes.len() == 0 || bytes.len() > 10 || (bytes.len() > 1 && Int{bytes[0]} == 48) {
+        return None
+    }
     value := 0
     loop byte in bytes {
         code: Int{byte}
@@ -56,13 +56,17 @@ ordered: fn(entries: [(key: String, value: Dyn)]) -> [(key: String, value: Dyn)]
             loop i in 0..<indexed.len() {
                 if indexed[i].index == index -> at = i
             }
-            if at >= 0 -> indexed[at] = (index: index, key: entry.key, value: entry.value) else -> indexed.push((index: index, key: entry.key, value: entry.value))
+            if at >= 0 -> indexed[at] = (index: index, key: entry.key, value: entry.value) else {
+                indexed.push((index: index, key: entry.key, value: entry.value))
+            }
             next
         }
         loop i in 0..<named.len() {
             if named[i].key == entry.key -> at = i
         }
-        if at >= 0 -> named[at] = (key: entry.key, value: entry.value) else -> named.push((key: entry.key, value: entry.value))
+        if at >= 0 -> named[at] = (key: entry.key, value: entry.value) else {
+            named.push((key: entry.key, value: entry.value))
+        }
     }
     indexed.sort_by(fn(row) { row.index })
     out := indexed.map(fn(row) { (key: row.key, value: row.value) })
@@ -72,7 +76,9 @@ ordered: fn(entries: [(key: String, value: Dyn)]) -> [(key: String, value: Dyn)]
 
 // JSON.stringify(value, null, space): NaN and the infinities are null, and
 // with a space each element and member sits on its own indented line.
-json_stringify: fn(value: Dyn, space: Int) -> String Never! { json_write(value, " ".repeat(space), "") }
+json_stringify: fn(value: Dyn, space: Int) -> String Never! {
+    json_write(value, " ".repeat(space), "")
+}
 
 json_write: fn(value: Dyn, step: String, indent: String) -> String Never! {
     inner: "{indent}{step}"

@@ -37,16 +37,16 @@ measure: fn(name: String, size: Int, scenario: fn(Int) -> Int) {
     start: status_kb("VmRSS:")
     print(scenario(size))
     grown: status_kb("VmHWM:") - start
-    if grown * 2048 > size * 3 -> panic("{name}: peak grew {grown} kB, more than 1.5 strings of {size} bytes")
+    if grown * 2048 > size * 3 {
+        panic("{name}: peak grew {grown} kB, more than 1.5 strings of {size} bytes")
+    }
     print("{name}: one string live at the peak")
 }
 
 // The String a loop assigns is freed before the next one is built.
 overwrite: fn(size: Int) -> Int {
     buf := "a".repeat(size)
-    loop _ in 0..<4 {
-        buf = "b".repeat(size)
-    }
+    loop _ in 0..<4 -> buf = "b".repeat(size)
     buf.len()
 }
 

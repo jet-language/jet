@@ -32,7 +32,6 @@
 // would run that Drop before the callee instead of after it,
 // so a call after which one is dropped stays a call (ir_tail_memory_only).
 // A panic unwinding a variant does not drop its owned parameters.
-
 use jet_foundation.[CompilerThreads, compiler_threads_failure_text, compiler_threads_partition, name_rows, name_rows_set, name_rows_value]
 
 // Return.b of the Return after a tail Call: the Call is the jump.
@@ -91,7 +90,9 @@ ir_tail_calls: fn(m: &IRModule, threads: CompilerThreads) Never! {
             loop f in m.functions -> ownable.push(ir_tail_ownable(m, f))
             loop f in m.functions -> plans.push(ir_tail_sites(m, f, 0, poll, trap, ownable))
         }
-        else -> ir_tail_threads_plan(m, compiler_threads_partition(weights, workers), poll, trap, ownable, plans)
+        else -> {
+            ir_tail_threads_plan(m, compiler_threads_partition(weights, workers), poll, trap, ownable, plans)
+        }
     }
     // Work items: item k < count is function k as built; each later one a
     // variant (function id k) of function sources[k] owning masks[k].
@@ -233,15 +234,15 @@ ir_tail_part: fn(m: IRModule, start: Int, end: Int, poll: Int, trap: Int, ownabl
             loop id in start..<end -> part.ownable.push(ir_tail_ownable(m, m.functions[id]))
         }
         else -> {
-            loop id in start..<end -> part.plans.push(ir_tail_sites(m, m.functions[id], 0, poll, trap, ownable))
+            loop id in start..<end {
+                part.plans.push(ir_tail_sites(m, m.functions[id], 0, poll, trap, ownable))
+            }
         }
     }
     part
 }
 
-ir_tail_none: fn() -> IRTailSite Never! {
-    IRTailSite{call: -1, mask: 0, poll: -1, drops: [Int]{}}
-}
+ir_tail_none: fn() -> IRTailSite Never! { IRTailSite{call: -1, mask: 0, poll: -1, drops: [Int]{}} }
 
 // The tail call the Return at `ret` ends, when it has the shape and its
 // arguments allow a jump (ir_tail_calls).
@@ -262,7 +263,9 @@ ir_tail_site: fn(m: IRModule, f: IRFunction, ret: Int, owned: Int, poll: Int, tr
     if at < 0 || f.op[at] != .Call -> return ir_tail_none()
     call: at
     callee: f.a[call]
-    if callee < 0 || callee >= m.functions.len() || callee == poll || callee == trap -> return ir_tail_none()
+    if callee < 0 || callee >= m.functions.len() || callee == poll || callee == trap {
+        return ir_tail_none()
+    }
     if m.functions[callee].asm != None || m.functions[callee].op.len() == 0 -> return ir_tail_none()
     if f.c[call] != m.functions[callee].param_count -> return ir_tail_none()
     // Forward: the result's Moves, the Drops (of values other than it).
@@ -317,11 +320,7 @@ ir_tail_site: fn(m: IRModule, f: IRFunction, ret: Int, owned: Int, poll: Int, tr
     loop position in start..<(start + f.c[call]) {
         slot: f.args[position]
         class: ir_x64_slot_class(m, f, slot)
-        if class == .Float {
-            floats += 1
-        } else if class != .Empty {
-            general += 1
-        }
+        if class == .Float -> floats += 1 else if class != .Empty -> general += 1
         own: ownable[callee].bit_and(bit) != 0 && !handed.contains(slot)
         param_owned: slot < f.param_count && ir_tail_has(owned, slot)
         if own && (dropped.contains(slot) || param_owned) {
@@ -362,9 +361,7 @@ ir_tail_bit: fn(index: Int) -> Int Never! {
 }
 
 // Whether `mask` has bit `index`.
-ir_tail_has: fn(mask: Int, index: Int) -> Bool Never! {
-    mask.bit_and(ir_tail_bit(index)) != 0
-}
+ir_tail_has: fn(mask: Int, index: Int) -> Bool Never! { mask.bit_and(ir_tail_bit(index)) != 0 }
 
 // Whether the If at `opener` (its End at `end`) is the stop poll after a
 // call: `call s <- poll`, `if s`, Drops (inside the runtime cleanup scope
@@ -372,11 +369,15 @@ ir_tail_has: fn(mask: Int, index: Int) -> Bool Never! {
 ir_tail_poll: fn(m: IRModule, f: IRFunction, opener: Int, end: Int, poll: Int, trap: Int) -> Bool Never! {
     if opener < 1 || f.op[opener] != .If || f.b[opener] >= 0 -> return false
     check: opener - 1
-    if f.op[check] != .Call || (f.a[check] != poll && f.a[check] != trap) || f.dst[check] != f.a[opener] -> return false
+    if f.op[check] != .Call || (f.a[check] != poll && f.a[check] != trap) || f.dst[check] != f.a[opener] {
+        return false
+    }
     if end - 1 <= opener || f.op[end - 1] != .Return || f.a[end - 1] >= 0 -> return false
     loop at in (opener + 1)..<(end - 1) {
         if f.op[at] == .Drop -> next
-        if f.op[at] == .CallRuntime && (m.names[f.a[at]] == "jet_rt_cleanup_enter" || m.names[f.a[at]] == "jet_rt_cleanup_leave") -> next
+        if f.op[at] == .CallRuntime && (m.names[f.a[at]] == "jet_rt_cleanup_enter" || m.names[f.a[at]] == "jet_rt_cleanup_leave") {
+            next
+        }
         return false
     }
     true
@@ -419,7 +420,9 @@ ir_tail_rewrite: fn(f: &IRFunction, plan: IRTailPlan, owned: Int) Never! {
     loop at < f.op.len() {
         line: f.code_line[at]
         if site < plan.calls.len() && at == plan.calls[site] {
-            loop k in plan.drop_start[site]..<plan.drop_start[site + 1] -> ir_opt_code_put(code, .Drop, -1, plan.drops[k], -1, -1, line)
+            loop k in plan.drop_start[site]..<plan.drop_start[site + 1] {
+                ir_opt_code_put(code, .Drop, -1, plan.drops[k], -1, -1, line)
+            }
             poll: plan.polls[site]
             if poll >= 0 {
                 // The stop edge as built, its Drops those of the values the
@@ -435,7 +438,9 @@ ir_tail_rewrite: fn(f: &IRFunction, plan: IRTailPlan, owned: Int) Never! {
                 loop inner in (poll + 2)..<stop {
                     if f.op[inner] == .Drop -> next
                     ir_opt_code_put(code, f.op[inner], f.dst[inner], f.a[inner], f.b[inner], f.c[inner], f.code_line[inner])
-                    if scoped && f.dst[inner] >= 0 -> ir_tail_put_handed(code, f, at, plan.masks[site], line)
+                    if scoped && f.dst[inner] >= 0 {
+                        ir_tail_put_handed(code, f, at, plan.masks[site], line)
+                    }
                 }
                 ir_opt_code_put(code, .Return, f.dst[stop], f.a[stop], f.b[stop], f.c[stop], f.code_line[stop])
                 ir_opt_code_put(code, .End, -1, -1, -1, -1, f.code_line[poll])
@@ -450,7 +455,9 @@ ir_tail_rewrite: fn(f: &IRFunction, plan: IRTailPlan, owned: Int) Never! {
         }
         if f.op[at] == .Return {
             loop slot in params {
-                if !ir_tail_returns(f, f.a[at], slot) -> ir_opt_code_put(code, .Drop, -1, slot, -1, -1, line)
+                if !ir_tail_returns(f, f.a[at], slot) {
+                    ir_opt_code_put(code, .Drop, -1, slot, -1, -1, line)
+                }
             }
         }
         ir_opt_code_put(code, f.op[at], f.dst[at], f.a[at], f.b[at], f.c[at], line)
@@ -473,7 +480,9 @@ ir_tail_rewrite: fn(f: &IRFunction, plan: IRTailPlan, owned: Int) Never! {
 // Drops of the arguments of the Call at `call` that `mask` hands over.
 ir_tail_put_handed: fn(code: &IROptCode, f: IRFunction, call: Int, mask: Int, line: Int) Never! {
     loop position in 0..<f.c[call] {
-        if ir_tail_has(mask, position) -> ir_opt_code_put(code, .Drop, -1, f.args[f.b[call] + position], -1, -1, line)
+        if ir_tail_has(mask, position) {
+            ir_opt_code_put(code, .Drop, -1, f.args[f.b[call] + position], -1, -1, line)
+        }
     }
 }
 

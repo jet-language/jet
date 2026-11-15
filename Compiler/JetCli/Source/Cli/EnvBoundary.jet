@@ -13,16 +13,27 @@ use {
     cli_sys: core.sys
     jet_driver.[JET_DRIVER_EXIT_USER_ERROR, JetDriverAuthorizedSourceFile]
     jet_env_model.[
-        env_file_declares_environment, env_hook_definition_fingerprint_with_selections,
-        env_hook_find_env_root, envmodel_evaluate_env_with_selections, envmodel_is_module_surface,
+        env_file_declares_environment,
+        env_hook_definition_fingerprint_with_selections,
+        env_hook_find_env_root,
+        envmodel_evaluate_env_with_selections,
+        envmodel_is_module_surface,
     ]
     jet_foundation.[ImportDecl, diagnostic_with_detail]
     jet_pkg_model.[
-        DepSource, ManifestEntry, RefSource, WorkspaceDeclarationCache,
-        pkg_manifest_diagnostic_from_row, pkg_package_facts_for_root,
+        DepSource,
+        ManifestEntry,
+        RefSource,
+        WorkspaceDeclarationCache,
+        pkg_manifest_diagnostic_from_row,
+        pkg_package_facts_for_root,
     ]
     jetpack_foundation.[
-        DEFAULT_ENTRY_FILE, ENV_FILE, ENV_HOOK_ACTIVE_DIR_VAR, ENV_HOOK_ACTIVE_HASH_VAR, FILE_EXT,
+        DEFAULT_ENTRY_FILE,
+        ENV_FILE,
+        ENV_HOOK_ACTIVE_DIR_VAR,
+        ENV_HOOK_ACTIVE_HASH_VAR,
+        FILE_EXT,
         JETPACK_ENV_MARKER,
     ]
 }
@@ -60,10 +71,14 @@ jet_cli_env_boundary_refusal: fn(typed: String, jet_argv: [String], color: Bool)
     import: jet_cli_project_package_import(start, root) ?? return None
     if jet_cli_environment_active(root, preset, environment) -> return None
     command: "jet {jet_argv.join(" ")}"
-    report: pkg_manifest_diagnostic_from_row("E1355", [ManifestEntry]{
-        ManifestEntry{key: "environment", value: declared},
-        ManifestEntry{key: "command", value: command},
-    }, None)
+    report: pkg_manifest_diagnostic_from_row(
+        "E1355",
+        [ManifestEntry]{
+            ManifestEntry{key: "environment", value: declared},
+            ManifestEntry{key: "command", value: command},
+        },
+        None,
+    )
     Val(JetCLIPlan.Refused{report: diagnostic_with_detail(report, " Import: `use {import}` is the package import that requires this environment."), color: color, exit_code: JET_DRIVER_EXIT_USER_ERROR, notice: ""})
 }
 
@@ -101,7 +116,9 @@ jet_cli_environment_active: fn(root: String, preset: String?, environment: Strin
     marker: cli_sys.get(JETPACK_ENV_MARKER) ?? return false
     if marker == "" || marker == "0" -> return false
     active_root: cli_sys.get(ENV_HOOK_ACTIVE_DIR_VAR) ?? return false
-    if (cli_files.realpath(active_root) ?? active_root) != (cli_files.realpath(root) ?? root) -> return false
+    if (cli_files.realpath(active_root) ?? active_root) != (cli_files.realpath(root) ?? root) {
+        return false
+    }
     active_hash: cli_sys.get(ENV_HOOK_ACTIVE_HASH_VAR) ?? return false
     if active_hash == "" -> return false
     expected: env_hook_definition_fingerprint_with_selections(root, preset, environment) ?? return false
@@ -143,9 +160,7 @@ jet_cli_project_package_import: fn(start: String, environment_root: String) -[FS
     pending := [String]{}
     if directory {
         loop file in sources -> pending.push(file.path)
-    } else {
-        pending.push(start.copy())
-    }
+    } else { pending.push(start.copy()) }
     visited := [String]{}
     loop pending.len() > 0 {
         file: pending.pop() ?? break
@@ -154,10 +169,14 @@ jet_cli_project_package_import: fn(start: String, environment_root: String) -[FS
         visited.push(identity.copy())
         program: jet_cli_parsed_program(cli_files.read(file) ?? next) ?? next
         loop import in program.imports {
-            if jet_cli_package_import_name(import, dependencies, allow_inline) == .Val(name) -> return Val(name)
+            if jet_cli_package_import_name(import, dependencies, allow_inline) == .Val(name) {
+                return Val(name)
+            }
         }
         loop import in program.imports {
-            if jet_cli_local_import_target(identity, import, canonical_root, sources) == .Val(target) -> pending.push(target)
+            if jet_cli_local_import_target(identity, import, canonical_root, sources) == .Val(target) {
+                pending.push(target)
+            }
         }
     }
     None
@@ -168,7 +187,9 @@ jet_cli_project_package_import: fn(start: String, environment_root: String) -[FS
 jet_cli_package_import_name: fn(import: ImportDecl, dependencies: [String], allow_inline: Bool) -> String? Never! {
     if import.kind == {
         .Module(name, _) -> {
-            if allow_inline && import.inline_version == .Val(version) -> return Val("{name}#{version.text}")
+            if allow_inline && import.inline_version == .Val(version) {
+                return Val("{name}#{version.text}")
+            }
             head: name.split(".").to_list()[0]
             if head == "core" || !dependencies.contains(head) -> return None
             Val(name)

@@ -5,16 +5,19 @@ use {
     expert: core.crypto.expert
     files: core.files
 }
+
 filled: fn(value: Int, count: Int) -> [U8] {
     out := [U8]{}
     loop _ in 0..<count -> out.push((U8{value}))
     out
 }
+
 cut: fn(bytes: [U8], start: Int, end: Int) -> [U8] {
     out := [U8]{}
     loop i in start..<end -> out.push(bytes[i])
     out
 }
+
 hex: fn(text: String) -> [U8] {
     raw: text.bytes()
     out := [U8]{}
@@ -27,14 +30,17 @@ hex: fn(text: String) -> [U8] {
     }
     out
 }
+
 little: fn(bytes: [U8], at: Int, width: Int) -> Int {
     out := 0
     loop i in 0..<width -> out = out.bit_or(Int{bytes[at + i]} << (8 * i))
     out
 }
+
 store_little: fn(bytes: &[U8], at: Int, width: Int, value: Int) {
     loop i in 0..<width -> bytes[at + i] = (U8{(value >> (8 * i)).bit_and(255)})
 }
+
 #Test("keygen_zeroizes_provider_copy_and_stack_seed") {
     signing: crypto.SigningKey.new_random() ?? panic("keygen")
     assert_eq(signing.public_key().bytes.len(), 32)

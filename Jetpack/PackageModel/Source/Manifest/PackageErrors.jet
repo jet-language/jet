@@ -13,30 +13,31 @@ PackageParseError: enum {
     RetiredRecordHead
     ConfigMembers
     Composition(String)
-    // A member Package may not introduce another member list.
     NestedMembers(root: String, member: String)
-    // A registered diagnostic code used as a lint selector.
     LintPolicyCode(code: String, name: String)
-    // An unknown or not-yet-shipped target.
     BadTarget(name: String, value: String, reserved: Bool)
-    // A target block carries an unknown field.
     BadTargetField(name: String, detail: String)
-    // U1/S52/E1209: a reserved top-level key was used non-empty.
     ReservedSection(String)
-    // A malformed `authority:`/`build.allow:` block.
     BadEffectsBlock(String)
-    // A retired authority field moved into `authority:`.
     RetiredAuthorityField(field: String, replacement: String)
-    // Malformed or widening package memory policy.
     BadMemoryPolicy(detail: String)
-    // A retired package policy field needs migration.
     RetiredPolicyField(field: String, replacement: String)
-    // Malformed or widening package guarantee policy.
     BadGuaranteePolicy(detail: String)
-    // Malformed SPDX/source package policy.
     BadPackagePolicy(detail: String)
-    // Malformed hosted whole-program allocator fact.
     BadAllocatorPolicy(detail: String)
+
+    // A member Package may not introduce another member list.
+    // A registered diagnostic code used as a lint selector.
+    // An unknown or not-yet-shipped target.
+    // A target block carries an unknown field.
+    // U1/S52/E1209: a reserved top-level key was used non-empty.
+    // A malformed `authority:`/`build.allow:` block.
+    // A retired authority field moved into `authority:`.
+    // Malformed or widening package memory policy.
+    // A retired package policy field needs migration.
+    // Malformed or widening package guarantee policy.
+    // Malformed SPDX/source package policy.
+    // Malformed hosted whole-program allocator fact.
 
     message: fn(self) -> String Never! {
         if self == {
@@ -72,8 +73,9 @@ ComposeError: enum {
     Conflict(field: String, left_origin: String, right_origin: String, left: String, right: String)
     UnknownDefault(intent: String, output: String)
     UnknownIntent(intent: String)
-    // `defaults.test` names neither a test profile nor an output.
     UnknownTestDefault(name: String, profiles: [String])
+
+    // `defaults.test` names neither a test profile nor an output.
 
     message: fn(self) -> String Never! {
         if self == {

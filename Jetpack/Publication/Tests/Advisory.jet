@@ -19,20 +19,44 @@ use {
     jet_foundation.[Diagnostic]
     jet_pkg_model.[LockFile, LockSource, LockedPackage, PackagePolicyException]
     jetpack_publication.[
-        PUBLICATION_ADVISORY_FEED_MAGIC, PUBLICATION_U64_MAX, PublicationAdvisory,
-        PublicationAdvisoryException, PublicationAdvisoryFeed, PublicationAdvisoryPolicy,
-        PublicationAdvisoryReceipt, PublicationAdvisoryTrustRoot, PublicationDiagnosticError,
-        PublicationSemVer, PublicationSeverity, PublicationSourceClass, publication_advisory_affects,
-        publication_advisory_feed_digest, publication_advisory_feed_payload, publication_advisory_feed_text,
-        publication_advisory_key_id, publication_advisory_saturating_add, publication_audit_lockfile,
+        PUBLICATION_ADVISORY_FEED_MAGIC,
+        PUBLICATION_U64_MAX,
+        PublicationAdvisory,
+        PublicationAdvisoryException,
+        PublicationAdvisoryFeed,
+        PublicationAdvisoryPolicy,
+        PublicationAdvisoryReceipt,
+        PublicationAdvisoryTrustRoot,
+        PublicationDiagnosticError,
+        PublicationSemVer,
+        PublicationSeverity,
+        PublicationSourceClass,
+        publication_advisory_affects,
+        publication_advisory_feed_digest,
+        publication_advisory_feed_payload,
+        publication_advisory_feed_text,
+        publication_advisory_key_id,
+        publication_advisory_saturating_add,
+        publication_audit_lockfile,
         publication_authorize_registry_candidate,
-        publication_authorize_registry_candidate_with_source_exception, publication_e2607,
-        publication_e2609, publication_parse_advisory_feed, publication_parse_advisory_trust,
-        publication_parse_semver, publication_parse_severity, publication_parse_source_class,
-        publication_sign_bytes, publication_verify_advisory_feed,
-        publication_audit_advisory_feed, publication_audit_advisory_feed_with_source_exceptions,
-        publication_e2604, publication_keygen, publication_load_advisory_policy,
-        publication_lock_maturity_diagnostics, publication_sign_advisory_feed, publication_source_class_label,
+        publication_authorize_registry_candidate_with_source_exception,
+        publication_e2607,
+        publication_e2609,
+        publication_parse_advisory_feed,
+        publication_parse_advisory_trust,
+        publication_parse_semver,
+        publication_parse_severity,
+        publication_parse_source_class,
+        publication_sign_bytes,
+        publication_verify_advisory_feed,
+        publication_audit_advisory_feed,
+        publication_audit_advisory_feed_with_source_exceptions,
+        publication_e2604,
+        publication_keygen,
+        publication_load_advisory_policy,
+        publication_lock_maturity_diagnostics,
+        publication_sign_advisory_feed,
+        publication_source_class_label,
     ]
     crypto: core.crypto
     hex: core.encoding.hex
@@ -44,6 +68,7 @@ use {
 publication_advisory_test_version: fn(raw: String) -> PublicationSemVer Never! {
     publication_parse_semver(raw) ?? panic("invalid advisory test version")
 }
+
 publication_advisory_test_feed: fn(records: String) -> PublicationAdvisoryFeed Never! {
     key: "00".repeat(32)
     id: publication_advisory_key_id(key) ?? panic("key id")
@@ -52,6 +77,7 @@ publication_advisory_test_feed: fn(records: String) -> PublicationAdvisoryFeed N
         .Err(error) -> panic(error.diagnostic.what)
     }
 }
+
 // Real Core Ed25519 deterministic fixture. No RNG/helper/mock provider.
 publication_advisory_test_signed_feed: fn(seed: [U8]) -> PublicationAdvisoryFeed PublicationDiagnosticError! {
     key: crypto.SigningKey.from_bytes(seed) ?? panic("32 byte seed fixture")
@@ -63,34 +89,40 @@ publication_advisory_test_signed_feed: fn(seed: [U8]) -> PublicationAdvisoryFeed
     feed.signature = publication_sign_bytes(seed, publication_advisory_crypto.sha256(publication_advisory_feed_payload(feed).bytes()).hex())
     Ok(feed)
 }
+
 publication_advisory_test_policy: fn(feed: PublicationAdvisoryFeed, now: Int) -> PublicationAdvisoryPolicy Never! {
     // Authorization takes an already-verified snapshot; this fixture tests that
     // function's policy rules, not feed verification or the signature trust seam.
     PublicationAdvisoryPolicy{feed: feed, trust: PublicationAdvisoryTrustRoot{public_key: feed.public_key}, receipt: PublicationAdvisoryReceipt{sequence: feed.sequence, digest: publication_advisory_feed_digest(feed), key_id: feed.key_id, issued_at: feed.issued_at, expires_at: feed.expires_at, maturity_seconds: 86400}, now: now}
 }
+
 publication_advisory_test_lock: fn(name: String, version: String, source: LockSource) -> LockFile Never! {
     lock := LockFile.empty()
     lock.packages.push(LockedPackage{name: name, version: version, source: source, fingerprint: "sha256-aabb"})
     lock
 }
+
 publication_advisory_test_parse_error: fn(text: String) -> Diagnostic Never! {
     if publication_parse_advisory_feed(text) == {
         .Ok(_) -> panic("expected malformed feed")
         .Err(error) -> return error.diagnostic
     }
 }
+
 publication_advisory_test_trust_error: fn(text: String) -> Diagnostic Never! {
     if publication_parse_advisory_trust(text) == {
         .Ok(_) -> panic("expected malformed trust")
         .Err(error) -> return error.diagnostic
     }
 }
+
 publication_advisory_test_verify_error: fn(feed: PublicationAdvisoryFeed, trust: PublicationAdvisoryTrustRoot, now: Int) -> Diagnostic Never! {
     if publication_verify_advisory_feed(feed, trust, now) == {
         .Ok(_) -> panic("expected rejected feed")
         .Err(error) -> return error.diagnostic
     }
 }
+
 publication_advisory_test_authorization_error: fn(policy: PublicationAdvisoryPolicy, package: String, version: String, exception: PackagePolicyException?) -> Diagnostic Never! {
     if publication_authorize_registry_candidate_with_source_exception(policy, package, version, exception) == {
         .Ok(_) -> panic("expected denied candidate")
@@ -107,12 +139,15 @@ publication_advisory_test_authorization_error: fn(policy: PublicationAdvisoryPol
     assert(!publication_advisory_affects(advisory, publication_advisory_test_version("1.0.5")))
     assert(!publication_advisory_affects(advisory, publication_advisory_test_version("2.0.0")))
 }
+
 #Test("publication advisory_parser_rejects_partial_ambiguous_and_invalid_records") {
     base: publication_advisory_feed_text(publication_advisory_test_feed(""))
-    loop record in ([String]{"missing|fields|only", "advisory|ADV||^1.0||title|critical", "release|pkg@1.0.0|100|third-party", "advisory|ADV|pkg|^1.0|not-a-version|title|critical", "advisory|ADV|pkg|^1.0||title|critical|extra"}) {
+    loop record in
+        ([String]{"missing|fields|only", "advisory|ADV||^1.0||title|critical", "release|pkg@1.0.0|100|third-party", "advisory|ADV|pkg|^1.0|not-a-version|title|critical", "advisory|ADV|pkg|^1.0||title|critical|extra"}) {
         assert_eq(publication_advisory_test_parse_error("{base}{record}\n").code, "E2607")
     }
 }
+
 #Test("publication signed_advisory_feed_parser_binds_exact_policy_targets") {
     fixture: publication_advisory_test_feed("release|mylib#1.0.3|100|third-party\nadvisory|ADV-1|mylib|^1.0|1.0.5|security fix|high\nexception|mylib#1.0.3|incident response|security-team|200000\n")
     feed: publication_parse_advisory_feed(publication_advisory_feed_text(fixture).replace("feed|1|", "feed|7|")) ?? panic("signed feed records should parse")
@@ -122,6 +157,7 @@ publication_advisory_test_authorization_error: fn(policy: PublicationAdvisoryPol
     assert(publication_advisory_feed_payload(feed).contains("mylib#1.0.3"))
     assert_eq(publication_advisory_test_parse_error(publication_advisory_feed_text(feed).replace("mylib#1.0.3", "mylib@1.0.3")).code, "E2607")
 }
+
 #Test("publication advisory_trust_and_policy_fail_closed") {
     assert_eq(publication_advisory_test_trust_error("public_key=00\npublic_key=11\n").code, "E2607")
     revoked: publication_parse_advisory_trust("public_key=00\nrevoked_key=00\n") ?? panic("trust")
@@ -133,6 +169,7 @@ publication_advisory_test_authorization_error: fn(policy: PublicationAdvisoryPol
     assert(diagnostic.fix.contains("policy.exceptions"))
     assert(diagnostic.fix.contains("mylib#1.0.3"))
 }
+
 // Main ruling: canonical registry + shared renderer owns sentence casing.
 // Rebless after tandem. No local casing override in Advisory.
 #Test("publication malformed_supply_metadata_diagnostic_is_pinned") {
@@ -142,24 +179,34 @@ publication_advisory_test_authorization_error: fn(policy: PublicationAdvisoryPol
     assert_eq(diagnostic.why, "Supply-chain metadata is security-sensitive, so Jet rejects ambiguous or partial records instead of silently skipping them.")
     assert_eq(diagnostic.fix, "Fix the malformed advisory feed record and retry; use the documented parser contract and UTF-8 text.")
 }
+
 #Test("publication advisory parser boundary and duplicate records") {
     base: publication_advisory_feed_text(publication_advisory_test_feed(""))
-    loop records in ([String]{"release|pkg#1.0.0|0|third-party\n", "release|pkg#1.0.0|101|third-party\n", "release|pkg#1.0.0|100|unknown\n", "release|pkg#1.0.0|100|workspace\nrelease|pkg#1.0.0|100|workspace\n", "advisory|A|pkg|^1||t|crit\n", "advisory|A|pkg|^1||t|low\nadvisory|A|pkg|^1||t|low\n", "exception|pkg#1.0.0|reason|reviewer|100\n", "exception|pkg#1.0.0|reason|reviewer|101\nexception|pkg#1.0.0|reason|reviewer|101\n", "exception|pkg#1.0.0||reviewer|101\n", "exception|pkg#1|reason|reviewer|101\n"}) {
+    loop records in
+        ([String]{"release|pkg#1.0.0|0|third-party\n", "release|pkg#1.0.0|101|third-party\n", "release|pkg#1.0.0|100|unknown\n", "release|pkg#1.0.0|100|workspace\nrelease|pkg#1.0.0|100|workspace\n", "advisory|A|pkg|^1||t|crit\n", "advisory|A|pkg|^1||t|low\nadvisory|A|pkg|^1||t|low\n", "exception|pkg#1.0.0|reason|reviewer|100\n", "exception|pkg#1.0.0|reason|reviewer|101\nexception|pkg#1.0.0|reason|reviewer|101\n", "exception|pkg#1.0.0||reviewer|101\n", "exception|pkg#1|reason|reviewer|101\n"}) {
         assert_eq(publication_advisory_test_parse_error("{base}{records}").code, "E2607")
     }
-    loop header in ([String]{"", "wrong", "jet-advisory-feed-v1", "jet-advisory-feed-v1\nfeed|1", base.replace("feed|1|100", "feed|0|100"), base.replace("|200000|", "|100|"), base.replace("feed|1|", "feed|18446744073709551616|")}) -> assert_eq(publication_advisory_test_parse_error(header).code, "E2607")
+    loop header in
+        ([String]{"", "wrong", "jet-advisory-feed-v1", "jet-advisory-feed-v1\nfeed|1", base.replace("feed|1|100", "feed|0|100"), base.replace("|200000|", "|100|"), base.replace("feed|1|", "feed|18446744073709551616|")}) {
+        assert_eq(publication_advisory_test_parse_error(header).code, "E2607")
+    }
     assert_eq(publication_advisory_test_parse_error(base.replace("sha256-", "sha257-")).code, "E2610")
     assert_eq(publication_advisory_key_id("not a public key"), None)
     assert_eq(publication_advisory_key_id("FF".repeat(32)), publication_advisory_key_id("ff".repeat(32)))
 }
+
 #Test("publication advisory trust strict fields sequence and digest") {
-    loop wire in ([String]{"unknown=1\npublic_key=00", "public_key=00\nmin_sequence=-1", "public_key=00\nmin_sequence=18446744073709551616", "public_key=00\nrevoked_key=", "public_key=00\nmin_sequence=1\nmin_sequence=2", "not key value"}) -> assert_eq(publication_advisory_test_trust_error(wire).code, "E2607")
+    loop wire in
+        ([String]{"unknown=1\npublic_key=00", "public_key=00\nmin_sequence=-1", "public_key=00\nmin_sequence=18446744073709551616", "public_key=00\nrevoked_key=", "public_key=00\nmin_sequence=1\nmin_sequence=2", "not key value"}) {
+        assert_eq(publication_advisory_test_trust_error(wire).code, "E2607")
+    }
     assert_eq(publication_advisory_test_trust_error("").code, "E2610")
     assert_eq(publication_advisory_test_trust_error("public_key=00\naccepted_digest=sha256-{"00".repeat(32)}").code, "E2610")
     trust: publication_parse_advisory_trust("# comment\npublic_key=00\nmin_sequence=+1\nrevoked_key=11\nrevoked_key=11\nrevoked_key=22") ?? panic("trust")
     assert_eq(trust.min_sequence, 1)
     assert_eq(trust.revoked_keys.len(), 2)
 }
+
 #Test("publication advisory canonical payload ordering and signature exclusion") {
     feed: publication_advisory_test_feed("release|z#1.0.0|100|workspace\nrelease|a#2.0.0|100|first-party\nrelease|a#1.0.0|100|third-party\nadvisory|Z|z|^1||last|low\nadvisory|A|a|^1||first|high\nexception|z#1.0.0|r|team|101\nexception|a#1.0.0|r|team|101\n")
     payload: publication_advisory_feed_payload(feed)
@@ -169,6 +216,7 @@ publication_advisory_test_authorization_error: fn(policy: PublicationAdvisoryPol
     assert(!payload.contains("|sig"))
     assert(publication_advisory_feed_text(feed).contains("|sig\nrelease|a#1.0.0"))
 }
+
 #Test("publication advisory authorization maturity exact exceptions and advisory precedence") {
     feed := publication_advisory_test_feed("release|freshlib#1.2.0|100|third-party\n")
     policy := publication_advisory_test_policy(feed, 200)
@@ -179,7 +227,10 @@ publication_advisory_test_authorization_error: fn(policy: PublicationAdvisoryPol
     assert_eq(publication_advisory_test_authorization_error(policy, "freshlib", "1.2.1", None).code, "E2610")
     exception := PackagePolicyException{id: "JSA-2026-0001", scope: "freshlib#1.2.0", reason: "urgent security fix", expires_at: 1000}
     publication_authorize_registry_candidate_with_source_exception(policy, "freshlib", "1.2.0", Val(exception)) ?? panic("active source exception")
-    loop invalid in ([PackagePolicyException]{PackagePolicyException{id: "", scope: exception.scope, reason: exception.reason, expires_at: 1000}, PackagePolicyException{id: exception.id, scope: "freshlib#1.2.1", reason: exception.reason, expires_at: 1000}, PackagePolicyException{id: exception.id, scope: exception.scope, reason: " ", expires_at: 1000}, PackagePolicyException{id: exception.id, scope: exception.scope, reason: exception.reason, expires_at: 200}}) -> assert_eq(publication_advisory_test_authorization_error(policy, "freshlib", "1.2.0", Val(invalid)).code, "E2610")
+    loop invalid in
+        ([PackagePolicyException]{PackagePolicyException{id: "", scope: exception.scope, reason: exception.reason, expires_at: 1000}, PackagePolicyException{id: exception.id, scope: "freshlib#1.2.1", reason: exception.reason, expires_at: 1000}, PackagePolicyException{id: exception.id, scope: exception.scope, reason: " ", expires_at: 1000}, PackagePolicyException{id: exception.id, scope: exception.scope, reason: exception.reason, expires_at: 200}}) {
+        assert_eq(publication_advisory_test_authorization_error(policy, "freshlib", "1.2.0", Val(invalid)).code, "E2610")
+    }
     policy.now = 86500
     publication_authorize_registry_candidate(policy, "freshlib", "1.2.0") ?? panic("mature boundary")
     policy.now = 86499
@@ -192,13 +243,15 @@ publication_advisory_test_authorization_error: fn(policy: PublicationAdvisoryPol
     assert_eq(publication_advisory_test_authorization_error(policy, "freshlib", "1.2.0", Val(exception)).code, "E2603")
     policy.feed.exceptions = [PublicationAdvisoryException]{}
     assert_eq(publication_advisory_test_authorization_error(policy, "freshlib", "1.2.0", None).code, "E2609")
-    loop source in ([PublicationSourceClass]{PublicationSourceClass.FirstParty, PublicationSourceClass.Workspace}) {
+    loop source in
+        ([PublicationSourceClass]{PublicationSourceClass.FirstParty, PublicationSourceClass.Workspace}) {
         policy.feed.advisories = [PublicationAdvisory]{}
         policy.feed.releases[0].source_class = source
         publication_authorize_registry_candidate(policy, "freshlib", "1.2.0") ?? panic("source class maturity exemption")
     }
     assert_eq(publication_advisory_saturating_add(PUBLICATION_U64_MAX - 10, 11), PUBLICATION_U64_MAX)
 }
+
 #Test("publication advisory severity and source class parser contracts") {
     assert_eq(publication_parse_severity(" CRIT "), PublicationSeverity.Critical)
     assert_eq(publication_parse_severity("unknown"), PublicationSeverity.Medium)
@@ -206,10 +259,11 @@ publication_advisory_test_authorization_error: fn(policy: PublicationAdvisoryPol
     assert_eq(publication_parse_source_class(" Third-party "), None)
     assert_eq(publication_parse_source_class(" workspace "), Val(PublicationSourceClass.Workspace))
 }
+
 #Test("publication audit_lockfile_rejects_invalid_locked_versions") {
     lock: publication_advisory_test_lock("mylib", "not-semver", .Root)
     if publication_audit_lockfile(lock, [PublicationAdvisory]{}) == {
-        .Ok(_) -> panic("invalid lock must fail closed")
+        .Ok(_) -> { panic("invalid lock must fail closed") }
         .Err(error) -> {
             assert_eq(error.diagnostic.code, "E2610")
             assert(error.diagnostic.what.contains("mylib"))
@@ -217,6 +271,7 @@ publication_advisory_test_authorization_error: fn(policy: PublicationAdvisoryPol
         }
     }
 }
+
 #Test("publication audit_e2603_on_vulnerable_dep") {
     lock: publication_advisory_test_lock("crypto-lib", "0.9.0", .Root)
     feed: publication_advisory_test_feed("advisory|JET-2026-SEC-001|crypto-lib|^0|0.9.5|Timing side-channel in AES-GCM|critical\n")
@@ -230,6 +285,7 @@ publication_advisory_test_authorization_error: fn(policy: PublicationAdvisoryPol
     assert(diagnostic.what.contains("[critical]"))
     assert_eq(matches[0].severity, PublicationSeverity.Critical)
 }
+
 #Test("publication audit_non_critical_is_advisory") {
     lock: publication_advisory_test_lock("util-lib", "1.0.0", .Root)
     feed: publication_advisory_test_feed("advisory|JET-2026-INFO-1|util-lib|^1|1.0.2|Minor info leak in debug logs|low\n")
@@ -238,6 +294,7 @@ publication_advisory_test_authorization_error: fn(policy: PublicationAdvisoryPol
     assert_eq(matches[0].severity, PublicationSeverity.Low)
     loop matched in matches -> assert(matched.severity != PublicationSeverity.Critical)
 }
+
 #Test("publication advisory lock maturity all sources and source summaries") {
     lock := publication_advisory_test_lock("root", "1.0.0", .Root)
     lock.packages.push(LockedPackage{name: "local", version: "1.0.0", source: .Path("local")})
@@ -257,6 +314,7 @@ publication_advisory_test_authorization_error: fn(policy: PublicationAdvisoryPol
     assert_eq(expired.maturity.len(), 1)
     assert_eq(expired.source_exceptions.len(), 0)
 }
+
 #Test("publication signed advisory receipt rollback revocation fork freshness and tamper") {
     seed: hex.decode("01".repeat(32)) ?? panic("seed")
     feed := publication_advisory_test_signed_feed(seed) ?? panic("sign")
@@ -296,6 +354,7 @@ publication_advisory_test_authorization_error: fn(policy: PublicationAdvisoryPol
     default_receipt: publication_verify_advisory_feed(feed, trust, 200) ?? panic("default")
     assert_eq(default_receipt.maturity_seconds, 86400)
 }
+
 #Test("publication signed advisory audit source and feed exceptions clear only maturity") {
     seed: hex.decode("01".repeat(32)) ?? panic("seed")
     feed := publication_advisory_test_signed_feed(seed) ?? panic("sign")
@@ -320,14 +379,18 @@ publication_advisory_test_authorization_error: fn(policy: PublicationAdvisoryPol
     assert_eq(risky.maturity.len(), 0)
     assert_eq(risky.matches[0].severity, PublicationSeverity.Critical)
 }
+
 #Test("publication advisory native key-only environment never grants trust") {
     home: sys.get("HOME") ?? panic("advisory fixtures require HOME")
     scratch: sys.get("JET_SCRATCH_ROOT") ?? (sys.get("JET_STATE_ROOT") ?? files.join(sys.get("XDG_CACHE_HOME") ?? files.join(home, ".cache"), "jet-dev"))
     root: files.join(scratch, "jet-advisory-native-{sys.pid()}")
     files.remove_all(root).drop("stale fixture may be absent")
     files.create_dir_all(files.join(root, ".jet")) ?? panic("mkdir")
-    previous := [String: String?]{}
-    loop name in ([String]{"JET_KEYS_DIR", "JET_ADVISORY_DB", "JET_ADVISORY_PUBLIC_KEY", "JET_ADVISORY_TRUST"}) -> previous[name] = sys.get(name)
+    previous := [String:String?]{}
+    loop name in
+        ([String]{"JET_KEYS_DIR", "JET_ADVISORY_DB", "JET_ADVISORY_PUBLIC_KEY", "JET_ADVISORY_TRUST"}) {
+        previous[name] = sys.get(name)
+    }
     sys.set("JET_KEYS_DIR", files.join(root, "keys"))
     generated: publication_keygen("advisory", false) ?? panic("native keygen #3597/#3593")
     feed := publication_advisory_test_feed("")
@@ -339,12 +402,12 @@ publication_advisory_test_authorization_error: fn(policy: PublicationAdvisoryPol
     sys.set("JET_ADVISORY_PUBLIC_KEY", feed.public_key)
     sys.set("JET_ADVISORY_TRUST", "environment path must not be trusted")
     if publication_load_advisory_policy(root) == {
-        .Ok(_) -> panic("key-only environment must not replace project trust")
+        .Ok(_) -> { panic("key-only environment must not replace project trust") }
         .Err(error) -> assert(error.diagnostic.what.contains("Advisory trust root"))
     }
     loop name in previous.keys() {
         if previous[name] == {
-            .Val(value) -> sys.set(name, value)
+            .Val(value) -> { sys.set(name, value) }
             .None -> { _: sys.unset(name) ?? panic("restore env") }
         }
     }
@@ -360,6 +423,7 @@ publication_advisory_test_authorization_error: fn(policy: PublicationAdvisoryPol
     assert_eq(matches[0].severity, PublicationSeverity.High)
     assert(matches[0].diagnostic.what.contains("base64"))
 }
+
 #Test("publication maturity_window_applies_to_foreign_rust_bridge_packages") {
     lock: publication_advisory_test_lock("base64", "0.22.1", .Foreign{language: .Rust, reference: "base64@0.22.1", output: "sha256-bridge"})
     feed: publication_advisory_test_feed("release|base64#0.22.1|100|third-party\n")
@@ -374,6 +438,7 @@ publication_advisory_test_authorization_error: fn(policy: PublicationAdvisoryPol
     assert_eq(missing.maturity.len(), 1)
     assert_eq(missing.maturity[0].code, "E2610")
 }
+
 #Test("publication audit_lockfile_emits_e2603") {
     lock: publication_advisory_test_lock("mylib", "1.0.3", .Root)
     feed: publication_advisory_test_feed("advisory|ADV-001|mylib|^1.0|1.0.5|XSS in template engine|medium\n")
@@ -382,6 +447,7 @@ publication_advisory_test_authorization_error: fn(policy: PublicationAdvisoryPol
     assert_eq(matches[0].diagnostic.code, "E2603")
     assert_eq(matches[0].severity, PublicationSeverity.Medium)
 }
+
 #Test("publication audit_severity_parsed_from_db") {
     lock: publication_advisory_test_lock("mylib", "1.0.3", .Root)
     feed: publication_advisory_test_feed("advisory|ADV-002|mylib|^1.0||Heap overflow|critical\n")
@@ -390,6 +456,7 @@ publication_advisory_test_authorization_error: fn(policy: PublicationAdvisoryPol
     assert_eq(matches.len(), 1)
     assert_eq(matches[0].severity, PublicationSeverity.Critical)
 }
+
 #Test("publication integrity_e2604_on_tampered_store") {
     diagnostic: publication_e2604("mylib", "1.0.0", "sha256-expected", "sha256-actual")
     assert_eq(diagnostic.code, "E2604")

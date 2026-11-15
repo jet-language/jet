@@ -19,7 +19,6 @@
 // configuration: SQLITE_SOUNDEX and the load_extension() function are in,
 // SQLITE_ENABLE_MATH_FUNCTIONS, SQLITE_ENABLE_OFFSET_SQL_FUNC and
 // SQLITE_CASE_SENSITIVE_LIKE are not.
-
 use {
     core: core
     base: __core_db_base
@@ -34,132 +33,237 @@ use {
 
 // The in-line functions' FuncDef.pUserData (sqliteInt.h INLINEFUNC_*).
 INLINEFUNC_COALESCE: 0
+
 INLINEFUNC_IMPLIES_NONNULL_ROW: 1
+
 INLINEFUNC_EXPR_IMPLIES_EXPR: 2
+
 INLINEFUNC_EXPR_COMPARE: 3
+
 INLINEFUNC_AFFINITY: 4
+
 INLINEFUNC_IIF: 5
+
 INLINEFUNC_SQLITE_OFFSET: 6
+
 INLINEFUNC_UNLIKELY: 99
 
 // LIKEFUNC's pUserData: the compareInfo of func.c (globInfo, likeInfoNorm,
 // likeInfoAlt).
 LIKE_INFO_GLOB: 0
+
 LIKE_INFO_NORM: 1
+
 LIKE_INFO_ALT: 2
 
 // The JSON functions' pUserData bits (json.c JSON_JSON .. JSON_BLOB).
 JSON_JSON: 1
+
 JSON_SQL: 2
+
 JSON_ABPATH: 3
+
 JSON_ISSET: 4
+
 JSON_BLOB: 8
 
 // The implementations of the built-in functions (FuncDef.impl_id under
 // FUNC_BUILTIN). One id names one C function family; the method a call
 // runs (xSFunc, xStep, xFinal, xValue, xInverse) is the host's argument.
 FI_NOOP: 0
+
 FI_SOUNDEX: 1
+
 FI_LOAD_EXTENSION: 2
+
 FI_COMPILEOPTION_USED: 3
+
 FI_COMPILEOPTION_GET: 4
+
 FI_TRIM: 5
+
 FI_MINMAX: 6
+
 FI_MINMAX_AGG: 7
+
 FI_TYPEOF: 8
+
 FI_SUBTYPE: 9
+
 FI_LENGTH: 10
+
 FI_OCTET_LENGTH: 11
+
 FI_INSTR: 12
+
 FI_PRINTF: 13
+
 FI_UNICODE: 14
+
 FI_CHAR: 15
+
 FI_ABS: 16
+
 FI_ROUND: 17
+
 FI_UPPER: 18
+
 FI_LOWER: 19
+
 FI_HEX: 20
+
 FI_UNHEX: 21
+
 FI_CONCAT: 22
+
 FI_CONCAT_WS: 23
+
 FI_RANDOM: 24
+
 FI_RANDOMBLOB: 25
+
 FI_NULLIF: 26
+
 FI_SQLITE_VERSION: 27
+
 FI_SQLITE_SOURCE_ID: 28
+
 FI_SQLITE_LOG: 29
+
 FI_QUOTE: 30
+
 FI_LAST_INSERT_ROWID: 31
+
 FI_CHANGES: 32
+
 FI_TOTAL_CHANGES: 33
+
 FI_REPLACE: 34
+
 FI_ZEROBLOB: 35
+
 FI_SUBSTR: 36
+
 FI_SUM: 37
+
 FI_TOTAL: 38
+
 FI_AVG: 39
+
 FI_COUNT: 40
+
 FI_GROUP_CONCAT: 41
+
 FI_LIKE: 42
+
 FI_SIGN: 43
+
 // sqlite3InvalidFunction: the stand-in sqlite3_overload_function installs.
 FI_INVALID: 44
+
 FI_JULIANDAY: 50
+
 FI_UNIXEPOCH: 51
+
 FI_DATE: 52
+
 FI_TIME: 53
+
 FI_DATETIME: 54
+
 FI_STRFTIME: 55
+
 FI_TIMEDIFF: 56
+
 FI_CURRENT_TIME: 57
+
 FI_CURRENT_TIMESTAMP: 58
+
 FI_CURRENT_DATE: 59
+
 FI_JSON_REMOVE: 70
+
 FI_JSON_ARRAY: 71
+
 FI_JSON_ARRAY_LENGTH: 72
+
 FI_JSON_ERROR_POSITION: 73
+
 FI_JSON_EXTRACT: 74
+
 FI_JSON_SET: 75
+
 FI_JSON_OBJECT: 76
+
 FI_JSON_PATCH: 77
+
 FI_JSON_QUOTE: 78
+
 FI_JSON_REPLACE: 79
+
 FI_JSON_TYPE: 80
+
 FI_JSON_VALID: 81
+
 FI_JSON_GROUP_ARRAY: 82
+
 FI_JSON_GROUP_OBJECT: 83
+
 FI_ROW_NUMBER: 90
+
 FI_DENSE_RANK: 91
+
 FI_RANK: 92
+
 FI_PERCENT_RANK: 93
+
 FI_CUME_DIST: 94
+
 FI_NTILE: 95
+
 FI_LAST_VALUE: 96
+
 FI_NTH_VALUE: 97
+
 FI_FIRST_VALUE: 98
+
 FI_LEAD: 99
+
 FI_LAG: 100
+
 FI_RENAME_COLUMN: 110
+
 FI_RENAME_TABLE: 111
+
 FI_RENAME_TEST: 112
+
 FI_DROP_COLUMN: 113
+
 FI_RENAME_QUOTEFIX: 114
+
 // analyze.c's statInitFuncdef, statPushFuncdef and statGetFuncdef, which
 // are coded directly rather than found by name.
 FI_STAT_INIT: 120
+
 FI_STAT_PUSH: 121
+
 FI_STAT_GET: 122
 
 // sqlite3LocateTable's flags (sqliteInt.h LOCATE_VIEW, LOCATE_NOERR).
 LOCATE_VIEW: 1
+
 LOCATE_NOERR: 2
 
 // The methods a FuncDef defines, for bf: xSFunc, xStep, xFinalize, xValue
 // and xInverse.
 M_SFUNC: 1
+
 M_STEP: 2
+
 M_FINAL: 4
+
 M_VALUE: 8
+
 M_INVERSE: 16
 
 // The score of a perfect match (callback.c FUNC_PERFECT_MATCH).
@@ -191,16 +295,16 @@ insert_builtin: fn(b: &BuiltinFuncs, def: &&conn.FuncDef) Never! {
 // One entry of the tables: `methods` is a set of M_* bits.
 bf: fn(b: &BuiltinFuncs, name: String, n_arg: Int, flags: Int, user_data: Int, impl_id: Int, methods: Int) Never! {
     def := conn.FuncDef{
-        n_arg: n_arg
-        flags: flags.bit_or(conn.FUNC_BUILTIN).bit_or(base.UTF8)
-        user_data: user_data
-        name: name.bytes()
-        impl_id: impl_id
-        has_sfunc: methods.bit_and(M_SFUNC) != 0
-        has_step: methods.bit_and(M_STEP) != 0
-        has_finalize: methods.bit_and(M_FINAL) != 0
-        has_value: methods.bit_and(M_VALUE) != 0
-        has_inverse: methods.bit_and(M_INVERSE) != 0
+        n_arg: n_arg,
+        flags: flags.bit_or(conn.FUNC_BUILTIN).bit_or(base.UTF8),
+        user_data: user_data,
+        name: name.bytes(),
+        impl_id: impl_id,
+        has_sfunc: methods.bit_and(M_SFUNC) != 0,
+        has_step: methods.bit_and(M_STEP) != 0,
+        has_finalize: methods.bit_and(M_FINAL) != 0,
+        has_value: methods.bit_and(M_VALUE) != 0,
+        has_inverse: methods.bit_and(M_INVERSE) != 0,
     }
     insert_builtin(b, def)
 }
@@ -407,11 +511,7 @@ match_quality: fn(p: conn.FuncDef, n_arg: Int, enc: Int) -> Int Never! {
     }
     score := if p.n_arg == n_arg -> 4 else -> 1
     p_enc: p.flags.bit_and(conn.FUNC_ENCMASK)
-    if enc == p_enc {
-        score += 2
-    } else if enc.bit_and(p_enc).bit_and(2) != 0 {
-        score += 1
-    }
+    if enc == p_enc -> score += 2 else if enc.bit_and(p_enc).bit_and(2) != 0 -> score += 1
     score
 }
 
@@ -541,7 +641,9 @@ set_text_encoding: fn(db: &conn.Conn, enc: Int) Never! {
 // LOCATE_NOERR.
 locate_table: fn(p: &cg.Parse, a: &ast.AST, flags: Int, name: [U8], db_name: [U8]?) -[DB]> Int Never! {
     g := p.up
-    if p.db.m_db_flags.bit_and(conn.DBFLAG_SCHEMA_KNOWN_OK) == 0 && g.read_schema(p, a) != base.OK -> return -1
+    if p.db.m_db_flags.bit_and(conn.DBFLAG_SCHEMA_KNOWN_OK) == 0 && g.read_schema(p, a) != base.OK {
+        return -1
+    }
     t := conn.find_table(p.db, name, db_name)
     if t < 0 {
         if p.f.prep_flags.bit_and(conn.PREPARE_NO_VTAB) == 0 && !p.db.init.busy {
@@ -555,9 +657,7 @@ locate_table: fn(p: &cg.Parse, a: &ast.AST, flags: Int, name: [U8], db_name: [U8
     }
     if t < 0 {
         msg: if flags.bit_and(LOCATE_VIEW) != 0 -> "no such view" else -> "no such table"
-        if db_name == .Val(z) {
-            ast.error(a, "{msg}: {ast.text(z)}.{ast.text(name)}")
-        } else {
+        if db_name == .Val(z) -> ast.error(a, "{msg}: {ast.text(z)}.{ast.text(name)}") else {
             ast.error(a, "{msg}: {ast.text(name)}")
         }
     }
@@ -591,7 +691,9 @@ conn_writable_schema: fn(db: conn.Conn) -> Bool Never! {
 }
 
 // VisibleRowid (sqliteInt.h): whether table t's rowid is reachable by name.
-visible_rowid: fn(db: conn.Conn, t: Int) -> Bool Never! { db.tables[t].tab_flags.bit_and(ast.TF_NO_VISIBLE_ROWID) == 0 }
+visible_rowid: fn(db: conn.Conn, t: Int) -> Bool Never! {
+    db.tables[t].tab_flags.bit_and(ast.TF_NO_VISIBLE_ROWID) == 0
+}
 
 // sqlite3ColumnSetExpr: make `e` the DEFAULT (or generated) expression of
 // column `col` of table t.
@@ -694,7 +796,9 @@ table_column_to_storage: fn(db: conn.Conn, t: Int, i_col: Int) -> Int Never! {
     loop i in 0..<i_col {
         if tab.cols[i].col_flags.bit_and(conn.COLFLAG_VIRTUAL) == 0 -> n += 1
     }
-    if tab.cols[i_col].col_flags.bit_and(conn.COLFLAG_VIRTUAL) != 0 -> return tab.n_nv_col + i_col - n
+    if tab.cols[i_col].col_flags.bit_and(conn.COLFLAG_VIRTUAL) != 0 {
+        return tab.n_nv_col + i_col - n
+    }
     n
 }
 
@@ -741,9 +845,7 @@ affinity_type: fn(z: [U8]) -> (aff: Int, sz_est: Int) Never! {
                 }
                 k += 1
             }
-        } else {
-            v = 16
-        }
+        } else { v = 16 }
     }
     v = v /% 4 + 1
     if v > 255 -> v = 255
@@ -802,9 +904,7 @@ key_info_of_index: fn(p: &cg.Parse, a: &ast.AST, ix: Int) -> record.KeyInfo? Nev
     cnt0: find_function(db, "count".bytes(), 0, base.UTF8)
     if cnt0 == .Val(d) {
         assert(d.impl_id == FI_COUNT && d.has_step && d.has_finalize && d.flags.bit_and(conn.FUNC_COUNT) != 0)
-    } else {
-        assert(false)
-    }
+    } else { assert(false) }
     assert(find_function(db, "no_such_function".bytes(), 1, base.UTF8) == None)
     slot: find_or_create_function(db, "MyFunc".bytes(), 2, base.UTF8)
     assert(db.funcs[slot].name == "myfunc".bytes())

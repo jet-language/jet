@@ -1,8 +1,10 @@
 package: { name: "http-router-dispatch" authority: { allow: [Net] } }
+
 use {
     http: core.http
     server: core.http.server
 }
+
 handle_root: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
     return Ok(server.response(200, "welcome"))
 }
@@ -10,6 +12,7 @@ handle_root: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
 handle_user: fn(id: String) -> HTTPResponse HTTPError! {
     return Ok(server.response(200, "user={id}"))
 }
+
 run: fn() {
     router: http.router()
     router.get("/", handle_root)

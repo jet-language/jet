@@ -7,6 +7,7 @@ use {
 }
 
 MODULUS: 1000003
+
 M: MODULUS
 
 // Writes the package into a new directory and returns its entry; the twin
@@ -32,7 +33,10 @@ manifest: fn(name: String) -> String {
 
 // How a draw maps the 32-bit stream onto a range: scaled as the float
 // `next / 2^32` (package.mjs), or by remainder (mixed.mjs).
-Draw: enum { Scaled Remainder }
+Draw: enum {
+    Scaled
+    Remainder
+}
 
 // mulberry32: the stream depends only on the seed. The state and every step
 // are 32-bit words, as JavaScript's `>>> 0` and `Math.imul` keep them.
@@ -76,7 +80,9 @@ is_code_line: fn(line: String) -> Bool {
 
 code_of: fn(list: [String]) -> Int { list.filter(fn(line) { is_code_line(line) }).len() }
 
-code_lines: fn(files: [String:String]) -> Int { files.keys().filter(fn(name) { !name.ends_with("package.jet") }).map(fn(name) { code_of(lines(files[name])) }).to_list().sum() }
+code_lines: fn(files: [String:String]) -> Int {
+    files.keys().filter(fn(name) { !name.ends_with("package.jet") }).map(fn(name) { code_of(lines(files[name])) }).to_list().sum()
+}
 
 // One digest over the whole package: each file's name and bytes, by name.
 source_digest: fn(files: [String:String]) -> String {
@@ -98,6 +104,7 @@ source_digest: fn(files: [String:String]) -> String {
 // function grows with N), written to `calls_<prefix>_<k>.jet` files of at
 // most FILE_GROUPS groups; `run` calls the roots.
 GROUP: 32
+
 FILE_GROUPS: 24
 
 consumer_tree: fn(files: &[String:String], entries: [String], prefix: String) -> [String] {
@@ -110,14 +117,18 @@ consumer_tree: fn(files: &[String:String], entries: [String], prefix: String) ->
         loop group in 0..<(level.len() + GROUP - 1) /% GROUP {
             name: "{prefix}_l{depth}_g{group}"
             body := [String]{"{name}: fn(seed: Int) -> Int {{", "    acc := seed % {M}"}
-            loop index in group * GROUP..<min(level.len(), (group + 1) * GROUP) -> body.push("    acc = (acc * 31 + {level[index]}(acc + {index - group * GROUP + 1})) % {M}")
+            loop index in group * GROUP..<min(level.len(), (group + 1) * GROUP) {
+                body.push("    acc = (acc * 31 + {level[index]}(acc + {index - group * GROUP + 1})) % {M}")
+            }
             body.extend(["    acc", "}}", ""])
             groups.push(body)
             next_level.push(name)
         }
         loop chunk in 0..<(groups.len() + FILE_GROUPS - 1) /% FILE_GROUPS {
             text := [String]{}
-            loop index in chunk * FILE_GROUPS..<min(groups.len(), (chunk + 1) * FILE_GROUPS) -> text.extend(groups[index])
+            loop index in chunk * FILE_GROUPS..<min(groups.len(), (chunk + 1) * FILE_GROUPS) {
+                text.extend(groups[index])
+            }
             files["calls/{prefix}_l{depth}_{chunk}.jet"] = text.join("\n")
         }
         level = next_level
@@ -130,7 +141,9 @@ consumer_tree: fn(files: &[String:String], entries: [String], prefix: String) ->
 // declarations the shape already placed in main.jet.
 finish: fn(name: String, files: &[String:String], roots: [String]) {
     body := [String]{"run: fn() {{", "    checksum := 0"}
-    loop (index, root) in roots -> body.push("    checksum = (checksum * 31 + {root}({index + 1})) % {M}")
+    loop (index, root) in roots {
+        body.push("    checksum = (checksum * 31 + {root}({index + 1})) % {M}")
+    }
     body.extend(["    print(\"{name} checksum {{checksum}}\")", "}}", ""])
     before: if files.get("main.jet") == .Val(text) -> "{text}\n" else -> ""
     files["main.jet"] = "{before}{body.join("\n")}"

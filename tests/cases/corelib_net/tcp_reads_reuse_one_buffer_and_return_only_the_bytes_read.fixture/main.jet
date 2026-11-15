@@ -1,4 +1,5 @@
 package: { name: "run", authority: { allow: [Net, Time.Wait, IO, Mem.Alloc] } }
+
 use net: core.net
 
 // Every read on a stream reuses the stream's one read buffer, and
@@ -14,7 +15,7 @@ pattern: fn(seed: Int, count: Int) -> [U8] {
 }
 
 // Exactly `want` bytes, read in reads of at most `limit`.
-drain: fn(&client: TCPStream, want: Int, limit: Int) -> [U8] {
+drain: fn(client: &TCPStream, want: Int, limit: Int) -> [U8] {
     got := [U8]{}
     loop got.len() < want {
         chunk: net.tcp_read_bytes(client, limit) ?? panic("read")

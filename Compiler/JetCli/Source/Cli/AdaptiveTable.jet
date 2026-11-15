@@ -6,6 +6,7 @@
 use jet_foundation.[foundation_append_read_bytes]
 
 JET_CLI_TABLE_MAX_COLUMNS: 64
+
 JET_CLI_TABLE_MAX_ROWS: 4096
 
 JetCLITableCell: enum {
@@ -15,6 +16,7 @@ JetCLITableCell: enum {
     Boolean(value: Bool)
     Empty
 }
+
 JetCLITableCellKind: enum {
     Text
     Integer
@@ -22,27 +24,35 @@ JetCLITableCellKind: enum {
     Boolean
     Empty
 }
+
 JetCLITableAlignment: enum {
     Left
     Right
     Center
 }
+
 JetCLITableColumn: struct {
     name: [U8]
     kind: JetCLITableCellKind
     alignment: JetCLITableAlignment
 }
-JetCLITableRow: struct { cells: [JetCLITableCell] }
+
+JetCLITableRow: struct {
+    cells: [JetCLITableCell]
+}
+
 JetCLIAdaptiveTable: struct {
     columns: [JetCLITableColumn]
     rows: [JetCLITableRow]
     truncated: Bool
 }
+
 JetCLIStructuredTable: struct {
     columns: [JetCLITableColumn]
     rows: [JetCLITableRow]
     truncated: Bool
 }
+
 // This contains no table copy or escaping borrowed carrier. Its caller keeps
 // the same table unchanged and supplies it READ to jet_cli_table_render.
 JetCLITableLayout: struct {
@@ -57,6 +67,7 @@ JetCLITableLayout: struct {
 jet_cli_table_cell_text: fn(value: &&[U8]) -> JetCLITableCell Never! {
     JetCLITableCell.Text{value: jet_cli_table_bound_text(value)}
 }
+
 jet_cli_table_cell_kind: fn(cell: JetCLITableCell) -> JetCLITableCellKind Never! {
     if cell == {
         .Text(_) -> .Text
@@ -66,15 +77,18 @@ jet_cli_table_cell_kind: fn(cell: JetCLITableCell) -> JetCLITableCellKind Never!
         .Empty -> .Empty
     }
 }
+
 jet_cli_table_column: fn(name: &&[U8], kind: JetCLITableCellKind) -> JetCLITableColumn Never! {
     alignment: if kind == .Integer || kind == .Unsigned -> JetCLITableAlignment.Right else -> JetCLITableAlignment.Left
     JetCLITableColumn{name: jet_cli_table_bound_text(name), kind: kind, alignment: alignment}
 }
+
 jet_cli_table_row: fn(input: &&[JetCLITableCell]) -> JetCLITableRow Never! {
     cells := input.move()
     loop cells.len() > JET_CLI_TABLE_MAX_COLUMNS -> _: cells.pop()
     JetCLITableRow{cells: cells.move()}
 }
+
 jet_cli_table_normalize_cell: fn(cell: &&JetCLITableCell) -> JetCLITableCell Never! {
     if cell.move() == {
         .Text(value) -> .Text{value: jet_cli_table_bound_text(value)}
@@ -84,6 +98,7 @@ jet_cli_table_normalize_cell: fn(cell: &&JetCLITableCell) -> JetCLITableCell Nev
         .Empty -> .Empty
     }
 }
+
 jet_cli_table: fn(input_columns: &&[JetCLITableColumn], input_rows: &&[JetCLITableRow]) -> JetCLIAdaptiveTable Never! {
     columns := input_columns.move()
     rows := input_rows.move()
@@ -127,6 +142,7 @@ jet_cli_table: fn(input_columns: &&[JetCLITableColumn], input_rows: &&[JetCLITab
     }
     JetCLIAdaptiveTable{columns: columns.move(), rows: normalized_rows.move(), truncated: truncated}
 }
+
 jet_cli_table_structured: fn(table: JetCLIAdaptiveTable) -> JetCLIStructuredTable Never! {
     // copy: `table.columns` stays with the caller (`table` is a read parameter: no move out of it,
     // E0201) and the field `columns` owns its own. `table.rows` stays with the caller (`table` is a
@@ -135,8 +151,11 @@ jet_cli_table_structured: fn(table: JetCLIAdaptiveTable) -> JetCLIStructuredTabl
 }
 
 JET_CLI_TABLE_TRUE_BYTES: [U8]{116, 114, 117, 101}
+
 JET_CLI_TABLE_FALSE_BYTES: [U8]{102, 97, 108, 115, 101}
+
 JET_CLI_TABLE_SEPARATOR_BYTES: [U8]{32, 124, 32}
+
 // Last octet of ┌┬┐├┼┤└┴┘─│, all with the same E2 94 prefix.
 JET_CLI_TABLE_MARK_BYTES: [U8]{140, 172, 144, 156, 188, 164, 148, 180, 152, 128, 130}
 
@@ -153,6 +172,7 @@ jet_cli_table_cell_width: fn(cell: JetCLITableCell) -> Int Never! {
         .Empty -> 0
     }
 }
+
 jet_cli_table_cell_lines: fn(cell: JetCLITableCell, width: Int) -> [[U8]] Never! {
     if cell == {
         .Text(value) -> jet_cli_table_wrap(value, width)
@@ -162,9 +182,10 @@ jet_cli_table_cell_lines: fn(cell: JetCLITableCell, width: Int) -> [[U8]] Never!
         .Empty -> [[U8]]{[U8]{}}
     }
 }
+
 jet_cli_table_append_cell: fn(out: &[U8], cell: JetCLITableCell) Never! {
     if cell == {
-        .Text(value) -> foundation_append_read_bytes(out, value, 0, value.len())
+        .Text(value) -> { foundation_append_read_bytes(out, value, 0, value.len()) }
         .Integer(value) -> {
             text: "{value}".bytes()
             foundation_append_read_bytes(out, text, 0, text.len())
@@ -180,17 +201,21 @@ jet_cli_table_append_cell: fn(out: &[U8], cell: JetCLITableCell) Never! {
         .Empty -> {}
     }
 }
+
 jet_cli_table_natural_widths: fn(table: JetCLIAdaptiveTable) -> [Int] Never! {
     widths := [Int]{}
     loop (index, column) in table.columns {
         width := jet_cli_table_text_width(column.name)
         loop row in table.rows {
-            if index < row.cells.len() -> width = jet_cli_table_max(width, jet_cli_table_cell_width(row.cells[index]))
+            if index < row.cells.len() {
+                width = jet_cli_table_max(width, jet_cli_table_cell_width(row.cells[index]))
+            }
         }
         widths.push(jet_cli_table_min(JET_CLI_TABLE_MAX_RENDER_WIDTH, jet_cli_table_max(1, width)))
     }
     widths
 }
+
 jet_cli_table_fit_widths: fn(natural: [Int], width: Int) -> [Int] Never! {
     widths := [Int]{}
     loop _ in natural -> widths.push(1)
@@ -212,6 +237,7 @@ jet_cli_table_fit_widths: fn(natural: [Int], width: Int) -> [Int] Never! {
     }
     widths
 }
+
 jet_cli_table_layout: fn(table: JetCLIAdaptiveTable, profile: JetCLIOutputProfile) -> JetCLITableLayout Never! {
     bounded := profile.width
     if bounded < (U64{1}) -> bounded = U64{1}
@@ -231,10 +257,9 @@ jet_cli_table_mark: fn(out: &[U8], mark: Int, unicode: Bool) Never! {
         out.push(U8{226})
         out.push(U8{148})
         out.push(JET_CLI_TABLE_MARK_BYTES[mark])
-    } else {
-        out.push(if mark == 9 -> U8{45} else if mark == 10 -> U8{124} else -> U8{43})
-    }
+    } else { out.push(if mark == 9 -> U8{45} else if mark == 10 -> U8{124} else -> U8{43}) }
 }
+
 jet_cli_table_border: fn(out: &[U8], widths: [Int], left: Int, joint: Int, right: Int, unicode: Bool, leading_newline: Bool) Never! {
     if leading_newline -> out.push(U8{10})
     jet_cli_table_mark(out, left, unicode)
@@ -244,6 +269,7 @@ jet_cli_table_border: fn(out: &[U8], widths: [Int], left: Int, joint: Int, right
     }
     jet_cli_table_mark(out, right, unicode)
 }
+
 jet_cli_table_grid_row: fn(out: &[U8], cells: [JetCLITableCell], columns: [JetCLITableColumn], widths: [Int], unicode: Bool, header: Bool) Never! {
     wrapped := [[[U8]]]{}
     height := 1
@@ -258,13 +284,15 @@ jet_cli_table_grid_row: fn(out: &[U8], cells: [JetCLITableCell], columns: [JetCL
         loop (index, width) in widths {
             if index != 0 -> jet_cli_table_mark(out, 10, unicode)
             out.push(U8{32})
-            if line < wrapped[index].len() -> jet_cli_table_append_pad(out, wrapped[index][line], width, columns[index].alignment)
-            else -> jet_cli_table_repeat(out, U8{32}, width)
+            if line < wrapped[index].len() {
+                jet_cli_table_append_pad(out, wrapped[index][line], width, columns[index].alignment)
+            } else { jet_cli_table_repeat(out, U8{32}, width) }
             out.push(U8{32})
         }
         jet_cli_table_mark(out, 10, unicode)
     }
 }
+
 jet_cli_table_grid: fn(table: JetCLIAdaptiveTable, layout: JetCLITableLayout) -> [U8] Never! {
     out := [U8]{}
     jet_cli_table_border(out, layout.widths, 0, 1, 2, layout.unicode, false)
@@ -272,10 +300,13 @@ jet_cli_table_grid: fn(table: JetCLIAdaptiveTable, layout: JetCLITableLayout) ->
         jet_cli_table_grid_row(out, [JetCLITableCell]{}, table.columns, layout.widths, layout.unicode, true)
         jet_cli_table_border(out, layout.widths, 3, 4, 5, layout.unicode, true)
     }
-    loop row in table.rows -> jet_cli_table_grid_row(out, row.cells, table.columns, layout.widths, layout.unicode, false)
+    loop row in table.rows {
+        jet_cli_table_grid_row(out, row.cells, table.columns, layout.widths, layout.unicode, false)
+    }
     jet_cli_table_border(out, layout.widths, 6, 7, 8, layout.unicode, true)
     out
 }
+
 jet_cli_table_heading: fn(table: JetCLIAdaptiveTable) -> [U8] Never! {
     heading := [U8]{}
     loop (index, column) in table.columns {
@@ -284,10 +315,12 @@ jet_cli_table_heading: fn(table: JetCLIAdaptiveTable) -> [U8] Never! {
     }
     jet_cli_table_bound_text(heading)
 }
+
 jet_cli_table_append_line: fn(out: &[U8], line: [U8], first: Bool) Never! {
     if !first -> out.push(U8{10})
     foundation_append_read_bytes(out, line, 0, line.len())
 }
+
 jet_cli_table_plain: fn(table: JetCLIAdaptiveTable, width: Int) -> [U8] Never! {
     out := [U8]{}
     first := true
@@ -301,7 +334,9 @@ jet_cli_table_plain: fn(table: JetCLIAdaptiveTable, width: Int) -> [U8] Never! {
     loop row in table.rows {
         value := [U8]{}
         loop (index, cell) in row.cells {
-            if index != 0 -> foundation_append_read_bytes(value, JET_CLI_TABLE_SEPARATOR_BYTES, 0, 3)
+            if index != 0 {
+                foundation_append_read_bytes(value, JET_CLI_TABLE_SEPARATOR_BYTES, 0, 3)
+            }
             jet_cli_table_append_cell(value, cell)
         }
         loop line in jet_cli_table_wrap(value, width) {
@@ -311,9 +346,12 @@ jet_cli_table_plain: fn(table: JetCLIAdaptiveTable, width: Int) -> [U8] Never! {
     }
     out
 }
+
 jet_cli_table_narrow: fn(table: JetCLIAdaptiveTable, width: Int) -> [U8] Never! {
     label_width := 0
-    loop column in table.columns -> label_width = jet_cli_table_max(label_width, jet_cli_table_text_width(column.name))
+    loop column in table.columns {
+        label_width = jet_cli_table_max(label_width, jet_cli_table_text_width(column.name))
+    }
     label_width = jet_cli_table_min(label_width, jet_cli_table_sub(width, 3))
     value_width: jet_cli_table_max(1, jet_cli_table_sub(width, label_width + 2))
     out := [U8]{}
@@ -332,7 +370,7 @@ jet_cli_table_narrow: fn(table: JetCLIAdaptiveTable, width: Int) -> [U8] Never! 
                         line.push(U8{58})
                         line.push(U8{32})
                     }
-                } else if label_width != 0 -> jet_cli_table_repeat(line, U8{32}, label_width + 2)
+                } else if label_width != 0 { jet_cli_table_repeat(line, U8{32}, label_width + 2) }
                 foundation_append_read_bytes(line, piece, 0, piece.len())
                 bounded: jet_cli_table_bound_text(line)
                 clipped: jet_cli_table_clip(bounded, width, true)
@@ -347,6 +385,7 @@ jet_cli_table_narrow: fn(table: JetCLIAdaptiveTable, width: Int) -> [U8] Never! 
     }
     out
 }
+
 jet_cli_table_render: fn(table: JetCLIAdaptiveTable, layout: JetCLITableLayout) -> [U8]? Never! {
     if !layout.human -> return None
     Val(if layout.plain -> jet_cli_table_plain(table, layout.width) else if layout.narrow -> jet_cli_table_narrow(table, layout.width) else -> jet_cli_table_grid(table, layout))

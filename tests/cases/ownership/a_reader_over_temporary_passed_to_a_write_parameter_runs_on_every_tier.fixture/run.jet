@@ -5,7 +5,7 @@ use term: core.term
 
 // Reads one byte of `source`, then `count - 1` more: ten per byte of the
 // first read plus one per byte of the second.
-head: fn(&source: term.Reader, count: Int) -> Int IOError! {
+head: fn(source: &term.Reader, count: Int) -> Int IOError! {
     first: source.read_bytes(1) ?? return Err(err)
     rest: source.read_bytes(count - 1) ?? return Err(err)
     Ok(first.len() * 10 + rest.len())
@@ -13,7 +13,5 @@ head: fn(&source: term.Reader, count: Int) -> Int IOError! {
 
 run: fn() {
     print(head(Reader.over([U8]{1, 2, 3, 4, 5}), 3) ?? panic("head"))
-    loop size in 2..<5 {
-        print(head(Reader.over([U8]{1, 2, 3, 4, 5}), size) ?? panic("head"))
-    }
+    loop size in 2..<5 { print(head(Reader.over([U8]{1, 2, 3, 4, 5}), size) ?? panic("head")) }
 }

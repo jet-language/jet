@@ -26,9 +26,7 @@ pkg_lint_policy_apply: fn(deny: [String], diagnostics: [Diagnostic]) -> [Diagnos
     loop diagnostic in diagnostics {
         if diagnostic.severity == DIAGNOSTIC_LINT && pkg_lint_policy_is_denied(deny, diagnostic.code) {
             out.push(pkg_lint_e1293(diagnostic))
-        } else {
-            out.push(diagnostic.copy())
-        }
+        } else { out.push(diagnostic.copy()) }
     }
     out
 }
@@ -44,7 +42,7 @@ pkg_lint_e1293: fn(original: Diagnostic) -> Diagnostic Never! {
         (key: "code", value: original.code),
         (key: "what_text", value: original.what),
         (key: "why_text", value: why),
-        (key: "fix_text", value: original.fix)
+        (key: "fix_text", value: original.fix),
     }
     denied := diagnostic_from_registry("E1293", original.span, pkg_lint_fill_row(row.what, holes), pkg_lint_fill_row(row.why, holes), pkg_lint_fill_row(row.fix, holes))
     // The lint's site stays its site.

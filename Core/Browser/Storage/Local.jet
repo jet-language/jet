@@ -15,28 +15,36 @@ init_local_storage: fn() -> Shared<LocalStorage> Never! {
 }
 
 get: fn(key: String) -[Browser]> String? Never! {
-    if storage.world_entries("core.browser.storage.local") == .Val(entries) -> return entries.get(key)
+    if storage.world_entries("core.browser.storage.local") == .Val(entries) {
+        return entries.get(key)
+    }
     state: core.mem.__process_shared(init_local_storage)
     guard: state.guard_read()
     guard.value.entries.get(key)
 }
 
 set: fn(key: String, value: String) Never! -[Browser]> {
-    if storage.world_set("core.browser.storage.local", key, value) -> return
+    if storage.world_set("core.browser.storage.local", key, value) {
+        return
+    }
     state: core.mem.__process_shared(init_local_storage)
     guard := state.guard_edit()
     _: guard.value.entries.add(key.copy(), value.copy())
 }
 
 remove: fn(key: String) Never! -[Browser]> {
-    if storage.world_remove("core.browser.storage.local", key) -> return
+    if storage.world_remove("core.browser.storage.local", key) {
+        return
+    }
     state: core.mem.__process_shared(init_local_storage)
     guard := state.guard_edit()
     _: guard.value.entries.remove(key)
 }
 
 clear: fn() Never! -[Browser]> {
-    if storage.world_clear("core.browser.storage.local") -> return
+    if storage.world_clear("core.browser.storage.local") {
+        return
+    }
     state: core.mem.__process_shared(init_local_storage)
     guard := state.guard_edit()
     guard.value.entries.clear()
@@ -57,7 +65,6 @@ test_helper_effects: fn() Never! -[Browser]> {
 #Test("local helper calls fit the shipped Browser effect row") {
     test_helper_effects()
 }
-
 
 #Test("local storage preserves miss, replacement, removal and empty keys") {
     key: "Core.browser.storage.local.contract"
@@ -85,8 +92,12 @@ test_helper_effects: fn() Never! -[Browser]> {
 }
 
 #Test("two tasks do not lose independent local storage writes") {
-    first: task { loop i in 0..<64 { set("Core.local.first.{i}", "{i}") } }
-    second: task { loop i in 0..<64 { set("Core.local.second.{i}", "{i}") } }
+    first: task {
+        loop i in 0..<64 { set("Core.local.first.{i}", "{i}") }
+    }
+    second: task {
+        loop i in 0..<64 { set("Core.local.second.{i}", "{i}") }
+    }
     first.join() ?? panic("first storage writer failed")
     second.join() ?? panic("second storage writer failed")
     loop i in 0..<64 {

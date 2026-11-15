@@ -61,7 +61,9 @@ run: fn(check: Check) {
     print("times: {times(sample)}")
     print("peak_rss_kb: {reading(sample, "/peak_rss_kb")}")
     if at(sample, "/steps") == .Array(steps) {
-        loop step in steps -> print("step: exit {json.dumps(at(step, "/exit_code")) ?? "?"}, {times(step)}")
+        loop step in steps {
+            print("step: exit {json.dumps(at(step, "/exit_code")) ?? "?"}, {times(step)}")
+        }
     }
     print("error: {if at(sample, "/error") == .Text(_) -> "reported" else -> "none"}")
 }

@@ -1,8 +1,11 @@
 // Every role module is discovered by declaration.
 use {
     jet_pkg_model.[
-        DiscoveryError, WorkspaceDeclarationCache, pkg_declares_workspace_members,
-        pkg_declares_workspace_module, pkg_discover_module_in,
+        DiscoveryError,
+        WorkspaceDeclarationCache,
+        pkg_declares_workspace_members,
+        pkg_declares_workspace_module,
+        pkg_discover_module_in,
     ]
     jetpack_foundation.[MAX_TREE_DEPTH, PACKAGE_FILE]
     files: core.files
@@ -24,7 +27,9 @@ use {
     files.write(files.join(dir, "c.jet"), "laptop: module {{ }}\n") ?? panic("write")
     names: [String]{"workspace", "dev", "laptop"}
     loop name in names {
-        if pkg_discover_module_in(dir, name) == .Err(_) -> panic("role module `{name}` must be discovered")
+        if pkg_discover_module_in(dir, name) == .Err(_) {
+            panic("role module `{name}` must be discovered")
+        }
     }
 }
 
@@ -40,7 +45,7 @@ use {
     dir: scratch.path
     files.write(files.join(dir, PACKAGE_FILE), "bogus: module {{ }}\nname: \"x\"\nversion: \"0.1.0\"\n") ?? panic("write")
     if pkg_discover_module_in(dir, "bogus") == {
-        .Err(error) -> assert(error == DiscoveryError.NotFound{name: "bogus"})
+        .Err(error) -> { assert(error == DiscoveryError.NotFound{name: "bogus"}) }
         .Ok(_) -> panic("the manifest must never be discovered as a module")
     }
 }

@@ -6,6 +6,7 @@
 // definition fingerprint still match.
 
 ENV_ENTRY_RECEIPT_HEADER: "jetpack-env-entry-v4"
+
 ENV_ENTRY_RECEIPT_NAME: "env-entry"
 
 EnvEntryReceipt: struct {
@@ -78,7 +79,9 @@ cli_write_env_entry_receipt: fn(project_dir: String, stamp: String, secret_ident
     loop package in packages {
         fields: [String]{package.reference, package.name, package.version, package.output_hash, package.metadata}
         loop field in fields {
-            if cli_has_line_separator(field) -> return Err(CLIError.InvalidData("environment entry package fields cannot contain line separators"))
+            if cli_has_line_separator(field) {
+                return Err(CLIError.InvalidData("environment entry package fields cannot contain line separators"))
+            }
         }
     }
     path: cli_env_entry_receipt_path(project_dir)
@@ -148,32 +151,40 @@ cli_environment_entry_definition_fingerprint_with_hook: fn(requested_preset: Str
 
 // Fresh cache expectations for every plan member, so a stale composite stamp
 // can still reuse each member that verifies on its own.
-cli_environment_member_expectations: fn(verification: &StoreVerification, roots: HangarRoots, project_dir: String, flags: CLIFlags, plan: RunPlan) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> [String: CacheExpectation] Never! {
+cli_environment_member_expectations: fn(verification: &StoreVerification, roots: HangarRoots, project_dir: String, flags: CLIFlags, plan: RunPlan) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> [String:CacheExpectation] Never! {
     context: cli_provider_ctx(roots, flags, cli_effective_fixtures(flags), Val(project_dir), None, Val(roots))
-    expectations := [String: CacheExpectation]{}
+    expectations := [String:CacheExpectation]{}
     loop spec in plan.refs {
-        if provider_cache_expectation(verification, spec, plan.table, context) == .Val(expectation) -> expectations[spec.raw] = expectation
+        if provider_cache_expectation(verification, spec, plan.table, context) == .Val(expectation) {
+            expectations[spec.raw] = expectation
+        }
     }
     loop adapter in plan.adapters {
-        if provider_adapter_cache_expectation(adapter, plan.table, context) == .Ok(expectation) -> expectations[RunPlan.adapter_reference(adapter)] = expectation
+        if provider_adapter_cache_expectation(adapter, plan.table, context) == .Ok(expectation) {
+            expectations[RunPlan.adapter_reference(adapter)] = expectation
+        }
     }
     expectations
 }
 
 // Whether `warm` realizes every plan ref and adapter (with multiplicity).
 cli_warm_realizations_complete: fn(plan: RunPlan, warm: [VerifiedRealization]?) -> Bool Never! {
-    available := [String: Int]{}
+    available := [String:Int]{}
     // `warm` is read where the caller holds it: a copy of its leases would
     // own, and close, their held handles.
     if warm == {
-        .Val(realized) -> loop entry in realized {
-            reference: entry.original_reference()
-            available[reference] = (available.get(reference) ?? 0) + 1
+        .Val(realized) -> {
+            loop entry in realized {
+                reference: entry.original_reference()
+                available[reference] = (available.get(reference) ?? 0) + 1
+            }
         }
         .None -> return false
     }
-    required := [String: Int]{}
-    loop reference in cli_env_entry_plan_references(plan) -> required[reference] = (required.get(reference) ?? 0) + 1
+    required := [String:Int]{}
+    loop reference in cli_env_entry_plan_references(plan) {
+        required[reference] = (required.get(reference) ?? 0) + 1
+    }
     loop item in required {
         if (available.get(item.key) ?? 0) < item.value -> return false
     }
@@ -210,9 +221,9 @@ cli_package_label: fn(name: String, version: String) -> String Never! {
 // The `what changed:` banner between two `(name, version)` sets: the first
 // update, addition, and removal, each with its count when more than one.
 cli_format_env_changes: fn(previous: [(name: String, version: String)], current: [(name: String, version: String)]) -> String? Never! {
-    before := [String: String]{}
+    before := [String:String]{}
     loop pair in previous -> before[pair.name] = pair.version
-    after := [String: String]{}
+    after := [String:String]{}
     loop pair in current -> after[pair.name] = pair.version
     names := [String]{}
     loop pair in previous {
@@ -229,10 +240,10 @@ cli_format_env_changes: fn(previous: [(name: String, version: String)], current:
         old: before.get(name)
         new: after.get(name)
         if old == .Val(old_version) && new == .Val(new_version) {
-            if old_version != new_version -> updated.push((name: name, old: old_version, new: new_version))
-        } else if new == .Val(version) {
-            added.push((name: name, version: version))
-        } else if old == .Val(version) {
+            if old_version != new_version {
+                updated.push((name: name, old: old_version, new: new_version))
+            }
+        } else if new == .Val(version) { added.push((name: name, version: version)) } else if old == .Val(version) {
             removed.push((name: name, version: version))
         }
     }
@@ -258,7 +269,9 @@ cli_format_env_changes: fn(previous: [(name: String, version: String)], current:
 // an exact one.
 cli_announce_env_ready: fn(theme: Theme, project_dir: String, roots: HangarRoots, warm_reused: Bool, elapsed: time.Duration, definition_fingerprint: String, secret_identity: String, stats: EnvReadyStats) CLIError! -[IO, FS, Env, Time, Time.Wait]> {
     theme.status(cli_format_env_ready(elapsed, stats.cache_hit_percent()))
-    if warm_reused -> return
+    if warm_reused {
+        return
+    }
     cli_record_env_entry_receipt(theme, project_dir, roots, definition_fingerprint, secret_identity, stats)
 }
 
@@ -274,8 +287,12 @@ cli_record_env_entry_receipt: fn(theme: Theme, project_dir: String, roots: Hanga
             version: if package.version == "" -> cli_version_from_out(package.name, package.output_hash) ?? "" else -> package.version
             previous_display.push((name: package.name, version: version))
         }
-        if cli_format_env_changes(previous_display, current) == .Val(changes) -> theme.status("what changed: {changes}")
-        if previous.stamp == stamp && previous.secret_identity == secret_identity && previous.packages == selections -> return
+        if cli_format_env_changes(previous_display, current) == .Val(changes) {
+            theme.status("what changed: {changes}")
+        }
+        if previous.stamp == stamp && previous.secret_identity == secret_identity && previous.packages == selections {
+            return
+        }
     }
     cli_write_env_entry_receipt(project_dir, stamp, secret_identity, selections)
 }

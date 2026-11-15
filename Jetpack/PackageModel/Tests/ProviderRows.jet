@@ -85,17 +85,49 @@ pkg_test_ref_source_ordinal: fn(source: RefSource) -> Int {
 }
 
 PKG_TEST_PROVIDER_KINDS: [ProviderKind]{
-    ProviderKind.Nix, ProviderKind.Core, ProviderKind.Cran, ProviderKind.LuaRocks, ProviderKind.RubyGems,
-    ProviderKind.Cpan, ProviderKind.Packagist, ProviderKind.JetRegistry, ProviderKind.Npm, ProviderKind.Cargo,
-    ProviderKind.PyPI, ProviderKind.SwiftPM, ProviderKind.Maven, ProviderKind.NuGet, ProviderKind.Conan,
-    ProviderKind.Vcpkg, ProviderKind.Homebrew, ProviderKind.Binary, ProviderKind.JetPackage, ProviderKind.Infer,
+    ProviderKind.Nix,
+    ProviderKind.Core,
+    ProviderKind.Cran,
+    ProviderKind.LuaRocks,
+    ProviderKind.RubyGems,
+    ProviderKind.Cpan,
+    ProviderKind.Packagist,
+    ProviderKind.JetRegistry,
+    ProviderKind.Npm,
+    ProviderKind.Cargo,
+    ProviderKind.PyPI,
+    ProviderKind.SwiftPM,
+    ProviderKind.Maven,
+    ProviderKind.NuGet,
+    ProviderKind.Conan,
+    ProviderKind.Vcpkg,
+    ProviderKind.Homebrew,
+    ProviderKind.Binary,
+    ProviderKind.JetPackage,
+    ProviderKind.Infer,
 }
 
 PKG_TEST_REF_SOURCES: [RefSource]{
-    RefSource.Jetpack, RefSource.Nixpkgs, RefSource.Github, RefSource.Path, RefSource.Cran,
-    RefSource.LuaRocks, RefSource.RubyGems, RefSource.Cpan, RefSource.Packagist, RefSource.JetRegistry,
-    RefSource.Npm, RefSource.Cargo, RefSource.PyPI, RefSource.SwiftPM, RefSource.Maven,
-    RefSource.NuGet, RefSource.Conan, RefSource.Vcpkg, RefSource.Homebrew, RefSource.Binary,
+    RefSource.Jetpack,
+    RefSource.Nixpkgs,
+    RefSource.Github,
+    RefSource.Path,
+    RefSource.Cran,
+    RefSource.LuaRocks,
+    RefSource.RubyGems,
+    RefSource.Cpan,
+    RefSource.Packagist,
+    RefSource.JetRegistry,
+    RefSource.Npm,
+    RefSource.Cargo,
+    RefSource.PyPI,
+    RefSource.SwiftPM,
+    RefSource.Maven,
+    RefSource.NuGet,
+    RefSource.Conan,
+    RefSource.Vcpkg,
+    RefSource.Homebrew,
+    RefSource.Binary,
     RefSource.Releases,
 }
 
@@ -229,8 +261,12 @@ pkg_test_kind_has_source: fn(kind: ProviderKind) -> Bool {
     loop source in PKG_TEST_REF_SOURCES {
         row: pkg_provider_row(source.label()) ?? panic("source `{source.label()}` has a row")
         if source == {
-            .Jetpack | .Nixpkgs | .Path | .Github -> assert(source.direct_kind() == None, "`{source.label()}` resolves through the source table or inference")
-            .Cran | .LuaRocks | .RubyGems | .Cpan | .Packagist | .JetRegistry | .Npm | .Cargo | .PyPI | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Releases | .Named(_) -> assert(source.direct_kind() == row.kind, "`{source.label()}` realizes through its row's kind")
+            .Jetpack | .Nixpkgs | .Path | .Github -> {
+                assert(source.direct_kind() == None, "`{source.label()}` resolves through the source table or inference")
+            }
+            .Cran | .LuaRocks | .RubyGems | .Cpan | .Packagist | .JetRegistry | .Npm | .Cargo | .PyPI | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Releases | .Named(_) -> {
+                assert(source.direct_kind() == row.kind, "`{source.label()}` realizes through its row's kind")
+            }
         }
     }
     assert((RefSource.Releases.direct_kind() ?? ProviderKind.Infer) == ProviderKind.JetPackage, "release artifacts realize natively")

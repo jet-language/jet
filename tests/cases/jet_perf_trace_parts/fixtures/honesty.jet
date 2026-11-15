@@ -149,12 +149,10 @@ s6_honest_capture: fn() {
         assert(s6_decimal_compare(last, first) >= 0)
         assert(s6_decimal_compare(last, wall) <= 0)
         parent: s6_required_u64(row, "parent")
-        if parent == "0" {
-            assert(span.contains("\"parent_task_id\":null"))
-        } else {
+        if parent == "0" -> assert(span.contains("\"parent_task_id\":null")) else {
             assert(s6_json_u64_after(span, "parent_task_id") == Val((parent)))
         }
-        span_count = span_count + 1
+        span_count += 1
     }
     assert(span_count == task_rows.len())
 }

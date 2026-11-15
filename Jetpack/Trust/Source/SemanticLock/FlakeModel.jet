@@ -113,7 +113,7 @@ FlakeOutput: struct {
     // `kind:system:attribute`, or the bare attribute of a system-less output.
     declared: fn(kind: FlakeOutputKind, system: String, attribute: String, provenance: String) -> FlakeOutput Never! {
         name: if system == "" -> attribute.copy() else -> "{kind.label()}:{system}:{attribute}"
-        FlakeOutput{name, kind, system, attribute, provenance}
+        FlakeOutput{name: name, kind: kind, system: system, attribute: attribute, provenance: provenance}
     }
 
     // The facts a lock must agree with; provenance is not part of them.
@@ -217,7 +217,9 @@ trust_flake_query_fields: fn(query: String) -> [FlakeQueryField]? Never! {
     if query == "" -> return Val(fields)
     loop field in trust_text_split(query, TRUST_AMPERSAND) {
         parts: trust_text_split_first(field, TRUST_EQUALS) ?? return None
-        if parts.before == "" || trust_flake_query_value(fields, parts.before) != None -> return None
+        if parts.before == "" || trust_flake_query_value(fields, parts.before) != None {
+            return None
+        }
         fields.push(FlakeQueryField{key: parts.before, value: parts.after})
     }
     fields.sort_by(fn(field) { field.key })
@@ -293,7 +295,7 @@ trust_flake_source_identity: fn(url: String) -> FlakeSourceIdentity? Never! {
         }
     }
     queried: pin.with_query(query) ?? return None
-    Val(FlakeSourceIdentity.Direct{kind: direct.before, owner: segments[0], repo: segments[1], pin: queried, query})
+    Val(FlakeSourceIdentity.Direct{kind: direct.before, owner: segments[0], repo: segments[1], pin: queried, query: query})
 }
 
 // `kind` and the path after a direct source prefix, or None for an
@@ -304,10 +306,12 @@ trust_flake_direct_source: fn(base: String) -> TrustTextSplit? Never! {
         {before: "gitlab", after: "gitlab:"},
         {before: "sourcehut", after: "sourcehut:"},
         {before: "github", after: "https://github.com/"},
-        {before: "gitlab", after: "https://gitlab.com/"}
+        {before: "gitlab", after: "https://gitlab.com/"},
     }
     loop prefix in prefixes {
-        if base.starts_with(prefix.after) -> return Val(TrustTextSplit{before: prefix.before, after: base.removeprefix(prefix.after)})
+        if base.starts_with(prefix.after) {
+            return Val(TrustTextSplit{before: prefix.before, after: base.removeprefix(prefix.after)})
+        }
     }
     None
 }
@@ -315,7 +319,9 @@ trust_flake_direct_source: fn(base: String) -> TrustTextSplit? Never! {
 // An indirect `[flake:]alias[/ref][/rev]` reference.
 trust_flake_indirect_identity: fn(base: String, query: [FlakeQueryField]) -> FlakeSourceIdentity? Never! {
     path: if base.starts_with("flake:") -> base.removeprefix("flake:") else -> base.copy()
-    if path == "" || path.starts_with(".") || path.starts_with("/") || path.contains(":") -> return None
+    if path == "" || path.starts_with(".") || path.starts_with("/") || path.contains(":") {
+        return None
+    }
     parts: trust_text_split(path, TRUST_SLASH)
     alias: parts[0]
     if alias == "" -> return None
@@ -341,5 +347,5 @@ trust_flake_indirect_identity: fn(base: String, query: [FlakeQueryField]) -> Fla
         else -> return None
     }
     queried: pin.with_query(query) ?? return None
-    Val(FlakeSourceIdentity.Indirect{alias, pin: queried, query})
+    Val(FlakeSourceIdentity.Indirect{alias: alias, pin: queried, query: query})
 }

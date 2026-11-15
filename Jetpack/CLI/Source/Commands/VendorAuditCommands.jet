@@ -48,9 +48,7 @@ cli_vendor_copy_dir: fn(src: String, dst: String) IOError! -[FS]> {
     files.create_dir_all(dst)
     loop item in files.list_dir(src) {
         to: files.join(dst, item.name)
-        if files.is_dir(item.path) {
-            cli_vendor_copy_dir(item.path, to)
-        } else {
+        if files.is_dir(item.path) -> cli_vendor_copy_dir(item.path, to) else {
             files.copy2(item.path, to)
             files.set_mode(to, files.stat(item.path).mode)
         }
@@ -68,7 +66,9 @@ cli_cmd_audit: fn(verification: &StoreVerification, theme: Theme) -[IO, FS, Env,
     }
     leases: snapshot.leases
     theme.detail("  Leases:      {leases.active} active, {leases.stale} stale")
-    if leases.stale > 0 -> theme.detail("  Lease Note:  stale executable leases await `jetpack hangar recover`")
+    if leases.stale > 0 {
+        theme.detail("  Lease Note:  stale executable leases await `jetpack hangar recover`")
+    }
     entries: snapshot.entries
     if entries.len() == 0 {
         theme.status("Audit: hangar is empty, nothing to read.")
@@ -118,7 +118,9 @@ cli_cmd_audit: fn(verification: &StoreVerification, theme: Theme) -[IO, FS, Env,
                 }
                 theme.detail("  Toolchain:       {producer.toolchain_facts}")
             }
-            .Err(error) -> theme.detail("  Provenance:   <invalid producer record: {error.message()}>")
+            .Err(error) -> {
+                theme.detail("  Provenance:   <invalid producer record: {error.message()}>")
+            }
         }
     }
     if unverified_catalog.len() > 0 {

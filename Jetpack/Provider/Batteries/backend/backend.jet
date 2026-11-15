@@ -1,6 +1,3 @@
-backend: module {
-}
-
 use {
     auth: core.auth
     crypto: core.crypto
@@ -13,6 +10,9 @@ use {
     web: core.web
     core.web.[OpenAPIError]
     time: core.time
+}
+
+backend: module {
 }
 
 #Codable
@@ -49,13 +49,13 @@ ErrorResponse: struct {
     message: String
     request_id: String
 }
+
 #Codable
 SessionPolicy: struct {
     session_header: String
     role_header: String
     cookie_name: String
 }
-
 
 #Codable
 MigrationReceipt: struct {
@@ -75,7 +75,6 @@ PoolReceipt: struct {
     drained: Bool
     after: String
 }
-
 
 #Codable
 QueueReceipt: struct {
@@ -113,6 +112,7 @@ LoadSummary: struct {
     p99: Int
     samples: [Int]
 }
+
 #Codable
 LoadAssertionReceipt: struct {
     users: Int
@@ -127,7 +127,6 @@ LoadAssertionReceipt: struct {
     passed: Bool
 }
 
-
 #Codable
 CoreGate: struct {
     name: String
@@ -135,6 +134,7 @@ CoreGate: struct {
     available: Bool
     reason: String
 }
+
 session_policy: fn() -> SessionPolicy {
     return SessionPolicy{
         session_header: "x-session",
@@ -142,6 +142,7 @@ session_policy: fn() -> SessionPolicy {
         cookie_name: "session",
     }
 }
+
 session_value: fn(req: HTTPRequest, policy: SessionPolicy) -> String {
     header_value: req.header(policy.session_header) ?? ""
     if header_value != "" -> return header_value
@@ -155,38 +156,44 @@ session_value: fn(req: HTTPRequest, policy: SessionPolicy) -> String {
     return ""
 }
 
-
 request_id: fn(raw: String) -> RequestID {
     if raw == "" -> return RequestID{value: "unassigned"}
     return RequestID{value: raw}
 }
 
-
 error_response: fn(req: HTTPRequest, status: Int, code: String, message: String) -> HTTPResponse HTTPError! {
     id: request_id(req.header("x-request-id") ?? "")
-    return Ok(http_server.json(status, ErrorResponse{
-        status: status,
-        code: code,
-        message: message,
-        request_id: id.value,
-    }))
+    return Ok(
+        http_server.json(
+            status,
+            ErrorResponse{
+                status: status,
+                code: code,
+                message: message,
+                request_id: id.value,
+            },
+        ),
+    )
 }
 
 health_response: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
     id: request_id(req.header("x-request-id") ?? "")
-    return Ok(http_server.json(200, HealthResponse{
-        status: "ok",
-        request_id: id.value,
-    }))
+    return Ok(
+        http_server.json(
+            200,
+            HealthResponse{
+                status: "ok",
+                request_id: id.value,
+            },
+        ),
+    )
 }
 
 order_response: fn(status: Int, body: OrderResponse) -> HTTPResponse HTTPError! {
     return Ok(http_server.json(status, body))
 }
 
-decode_order: fn(req: HTTPRequest) -> OrderRequest HTTPError! {
-    return req.json<OrderRequest>()
-}
+decode_order: fn(req: HTTPRequest) -> OrderRequest HTTPError! { return req.json<OrderRequest>() }
 
 role_allowed: fn(req: HTTPRequest, session_id: String, expected_role: String, now: Int) -[DB, Time]> Bool {
     policy: session_policy()
@@ -263,7 +270,6 @@ pool_fixture: fn(path: String) -> PoolReceipt {
     }
 }
 
-
 queue_state: fn(delivery: &&Delivery) -[Env, FS.Read, FS.Write, Time]> String {
     state: delivery.status() ?? return "unknown"
     if state == {
@@ -276,9 +282,7 @@ queue_state: fn(delivery: &&Delivery) -[Env, FS.Read, FS.Write, Time]> String {
     }
 }
 
-backend_worker: fn() {
-    log.info_fields("backend.worker", [log.counter("invocations", 1)])
-}
+backend_worker: fn() { log.info_fields("backend.worker", [log.counter("invocations", 1)]) }
 
 durable_queue: fn(state_path: String, payload: String, key: String) -> QueueReceipt {
     tree := service.tree("backend-battery")
@@ -309,12 +313,15 @@ configure_trace: fn(path: String, format: String, trace_id: String) -> TraceRece
     log.set_trace_id(trace_id)
     span: log.span("backend.request")
     log.enter(span)
-    log.info_fields("backend.started", [
-        log.field("trace_id", trace_id),
-        log.redact("authorization"),
-        log.counter("requests", 0),
-        log.counter("errors", 0),
-    ])
+    log.info_fields(
+        "backend.started",
+        [
+            log.field("trace_id", trace_id),
+            log.redact("authorization"),
+            log.counter("requests", 0),
+            log.counter("errors", 0),
+        ],
+    )
     log.close(span)
     log.flush()
     return TraceReceipt{
@@ -330,14 +337,17 @@ emit_trace: fn(trace_id: String, route_name: String, status: Int, requests: Int,
     log.set_trace_id(trace_id)
     span: log.span("backend.request")
     log.enter(span)
-    log.info_fields("backend.request", [
-        log.field("trace_id", trace_id),
-        log.field("route", route_name),
-        log.int("status", status),
-        log.redact("authorization"),
-        log.counter("requests", requests),
-        log.counter("errors", errors),
-    ])
+    log.info_fields(
+        "backend.request",
+        [
+            log.field("trace_id", trace_id),
+            log.field("route", route_name),
+            log.int("status", status),
+            log.redact("authorization"),
+            log.counter("requests", requests),
+            log.counter("errors", errors),
+        ],
+    )
     log.close(span)
     log.flush()
     return TraceReceipt{
@@ -366,10 +376,7 @@ core_gates: fn() -> [CoreGate] {
     ]
 }
 
-
-openapi_document: fn(router: HTTPRouter) -> String OpenAPIError! {
-    web.openapi(router)
-}
+openapi_document: fn(router: HTTPRouter) -> String OpenAPIError! { web.openapi(router) }
 
 load_one: fn(address: String) -> LoadSample {
     started: time.instant()
@@ -400,16 +407,18 @@ load_test: fn(address: String) -> LoadSummary {
     users := 1000
     worker_limit := 32
     (sender, receiver): channel<LoadSample>(capacity: users)
-    workers := [Task<()>]{ }
+    workers := [Task<()>]{}
     worker := 0
     loop worker < worker_limit {
         count := users /% worker_limit
         if worker < users % worker_limit -> count += 1
         tx: sender.copy()
         addr: address.copy()
-        workers.push(task {
-            load_worker(addr, count, tx)
-        })
+        workers.push(
+            task {
+                load_worker(addr, count, tx)
+            },
+        )
         worker += 1
     }
     loop workers.len() > 0 {
@@ -417,9 +426,9 @@ load_test: fn(address: String) -> LoadSummary {
         handle.join() ?? panic("load worker join")
     }
     sender.close()
-    raw := [LoadSample]{ }
+    raw := [LoadSample]{}
     loop sample in receiver -> raw.push(sample)
-    samples := [Int]{ }
+    samples := [Int]{}
     ok := 0
     errors := 0
     transport_errors := 0
@@ -441,17 +450,20 @@ load_test: fn(address: String) -> LoadSummary {
         samples: samples,
     }
 }
+
 load_receipt: fn(summary: LoadSummary) -> String {
-    return json.to_string(LoadAssertionReceipt{
-        users: summary.users,
-        completed: summary.completed,
-        ok: summary.ok,
-        errors: summary.errors,
-        transport_errors: summary.transport_errors,
-        p50: summary.p50,
-        p95: summary.p95,
-        p99: summary.p99,
-        samples: summary.samples.len(),
-        passed: summary.completed == summary.users && summary.errors == 0 && summary.transport_errors == 0,
-    })
+    return json.to_string(
+        LoadAssertionReceipt{
+            users: summary.users,
+            completed: summary.completed,
+            ok: summary.ok,
+            errors: summary.errors,
+            transport_errors: summary.transport_errors,
+            p50: summary.p50,
+            p95: summary.p95,
+            p99: summary.p99,
+            samples: summary.samples.len(),
+            passed: summary.completed == summary.users && summary.errors == 0 && summary.transport_errors == 0,
+        },
+    )
 }

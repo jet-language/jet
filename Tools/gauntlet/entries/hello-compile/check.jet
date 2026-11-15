@@ -20,13 +20,19 @@ Check: struct {
 
 run: fn(check: Check) {
     printed: files.read(check.stdout) ?? process.fail(1, "{err}")
-    loop line in printed.lines() -> show(json.parse(line) ?? process.fail(1, "{line}: {err.display_text()}"))
+    loop line in printed.lines() {
+        show(json.parse(line) ?? process.fail(1, "{line}: {err.display_text()}"))
+    }
     print("== results.json")
     written: files.read("bench/results.json") ?? ""
     results: if written == "" -> Dyn.Text("missing") else -> json.parse(written) ?? process.fail(1, err.display_text())
-    if results == .Array(rows) -> loop row in rows -> show(row) else -> print(json.stringify(results))
+    if results == .Array(rows) {
+        loop row in rows -> show(row)
+    } else { print(json.stringify(results)) }
     print("== files")
-    if !files.is_dir("bench") -> return
+    if !files.is_dir("bench") {
+        return
+    }
     paths := (files.walk_files("bench").list() ?? process.fail(1, "{err}")).map(fn(entry) { files.normalize(entry.path) })
     paths.sort()
     loop path in paths -> print(path)
@@ -37,8 +43,14 @@ show: fn(row: Dyn) {
     fields: if row == .Object(entries) -> entries.copy() else -> [(key: String, value: Dyn)]{(key: "row", value: row.copy())}  // copy: the row is only read
     loop entry in fields {
         if entry.value == {
-            .Object(build) -> loop field in build -> print("{entry.key}.{field.key}: {shown(field.key, field.value)}")
-            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> print("{entry.key}: {shown(entry.key, entry.value)}")
+            .Object(build) -> {
+                loop field in build {
+                    print("{entry.key}.{field.key}: {shown(field.key, field.value)}")
+                }
+            }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> {
+                print("{entry.key}: {shown(entry.key, entry.value)}")
+            }
         }
     }
     print("--")

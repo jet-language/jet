@@ -12,7 +12,9 @@ use {
 
 switch: fn(name: String) -[Env]> String Never! { process.env_get(name) ?? "" }
 
-arg: fn(args: [String], index: Int) -> String Never! { if index < args.len() -> args[index].copy() else -> "" }
+arg: fn(args: [String], index: Int) -> String Never! {
+    if index < args.len() -> args[index].copy() else -> ""
+}
 
 say: fn(text: String) -[IO]> {
     errors := term.stderr()
@@ -31,13 +33,17 @@ run: fn() {
             process.exit_unmapped(101)
         }
     }
-    if switch("JET_TESTKIT_WARNING") == "1" -> say("Warning [jet.BranchArmTable]: unjoined task at function boundary\n")
+    if switch("JET_TESTKIT_WARNING") == "1" {
+        say("Warning [jet.BranchArmTable]: unjoined task at function boundary\n")
+    }
     here: files.dirname(sys.executable())
     if arg(args, 0) == {
         "emit" -> print("main: fn() {{}}")
         "check" -> process.exit(0)
         "build" -> {
-            if switch("JET_TESTKIT_REJECT") == "1" -> fail("Error [jet.StrayCharacter]: rejected\n", 1)
+            if switch("JET_TESTKIT_REJECT") == "1" {
+                fail("Error [jet.StrayCharacter]: rejected\n", 1)
+            }
             source: arg(args, 1)
             // A bare file name's directory is the working one, as dirname(1) gives it.
             parent: files.dirname(source)

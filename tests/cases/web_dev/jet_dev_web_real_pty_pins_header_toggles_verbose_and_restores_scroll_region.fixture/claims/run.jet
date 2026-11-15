@@ -1,9 +1,16 @@
 use files: core.files
 
-S5PTYContext: struct { port: Int, token: String }
+S5PTYContext: struct {
+    port: Int
+    token: String
+}
+
 s5_pty_root: fn() -> String { sys.get("S5_ROOT") ?? panic("root") }
+
 s5_pty_text: fn() -> String { files.read(files.join(s5_pty_root(), "terminal.typescript")) ?? "" }
+
 s5_pty_marker: fn() -> String { String.from_bytes([U8]{27, 91, 51, 114}) ?? panic("ESC 3r") }
+
 s5_pty_count: fn(text: String) -> Int {
     bytes: text.bytes()
     marker: s5_pty_marker().bytes()
@@ -11,16 +18,17 @@ s5_pty_count: fn(text: String) -> Int {
     index := 0
     loop index + marker.len() <= bytes.len() {
         same := true
-        loop part in 0..<marker.len() { if bytes[index + part] != marker[part] -> same = false }
-        if same {
-            count = count + 1
-            index = index + marker.len()
-        } else {
-            index = index + 1
+        loop part in 0..<marker.len() {
+            if bytes[index + part] != marker[part] -> same = false
         }
+        if same {
+            count += 1
+            index += marker.len()
+        } else { index += 1 }
     }
     count
 }
+
 s5_pty_context: fn() -> S5PTYContext {
     started: time.start()
     transcript := ""
@@ -40,15 +48,18 @@ s5_pty_context: fn() -> S5PTYContext {
             end := 0
             loop end < bytes.len() {
                 byte: Int{bytes[end]}
-                if !((byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 70) || (byte >= 97 && byte <= 102)) -> break
-                end = end + 1
+                if !((byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 70) || (byte >= 97 && byte <= 102)) {
+                    break
+                }
+                end += 1
             }
             assert(end >= 32)
-            return S5PTYContext{port, token: String.from_bytes_lossy(s5_web_bytes(bytes, 0, end))}
+            return S5PTYContext{port: port, token: String.from_bytes_lossy(s5_web_bytes(bytes, 0, end))}
         }
     }
     panic("PTY startup did not include a Canvas URL")
 }
+
 s5_pty_status: fn(context: S5PTYContext, client: String, state: String, timeout_ms: Int) -> String {
     started: time.start()
     loop {
@@ -60,6 +71,7 @@ s5_pty_status: fn(context: S5PTYContext, client: String, state: String, timeout_
         time.sleep(time.duration_ms(100))
     }
 }
+
 s5_pty_state: fn(name: String) -> Int {
     text: files.read(files.join(s5_pty_root(), name)) ?? panic("PTY observation")
     Int.parse(text) ?? panic("PTY integer observation")
@@ -74,9 +86,7 @@ s5_pty_state: fn(name: String) -> Int {
         assert(ready.contains("\"clients\":1"))
     } else if phase == "request" {
         _: s5_web_get(s5_web_port(), "/app.js", None) ?? panic("request while verbose")
-    } else if phase == "error" {
-        _: s5_pty_status(context, "pty-tab", "error", 10000)
-    } else if phase == "collapsed" {
+    } else if phase == "error" { _: s5_pty_status(context, "pty-tab", "error", 10000) } else if phase == "collapsed" {
         // ORACLE-PORT web_dev.rs:1430: exact original text.matches(ESC3r).count().
         files.write(files.join(s5_pty_root(), "collapsed-count"), "{s5_pty_count(s5_pty_text())}") ?? panic("collapsed count")
     } else if phase == "before-eof" {

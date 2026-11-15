@@ -7,7 +7,9 @@ use jet_foundation.[diagnostic_from_registry, diagnostic_registry_rows, diagnost
 
 diagnostic_format_any_part_contains: fn(needle: String) -> Bool Never! {
     loop row in diagnostic_registry_rows() {
-        if row.meaning.contains(needle) || row.what.contains(needle) || row.why.contains(needle) || row.fix.contains(needle) -> return true
+        if row.meaning.contains(needle) || row.what.contains(needle) || row.why.contains(needle) || row.fix.contains(needle) {
+            return true
+        }
     }
     false
 }
@@ -25,9 +27,15 @@ diagnostic_format_any_part_contains: fn(needle: String) -> Bool Never! {
 #Test("every typed diagnostic line uses ratified sentence case") {
     violations := [String]{}
     loop row in diagnostic_registry_rows() {
-        if diagnostic_sentence_case_line(row.what) != row.what -> violations.push("{row.code} What: {row.what}")
-        if diagnostic_sentence_case_line(row.why) != row.why -> violations.push("{row.code} Why: {row.why}")
-        if diagnostic_sentence_case_line(row.fix) != row.fix -> violations.push("{row.code} Fix: {row.fix}")
+        if diagnostic_sentence_case_line(row.what) != row.what {
+            violations.push("{row.code} What: {row.what}")
+        }
+        if diagnostic_sentence_case_line(row.why) != row.why {
+            violations.push("{row.code} Why: {row.why}")
+        }
+        if diagnostic_sentence_case_line(row.fix) != row.fix {
+            violations.push("{row.code} Fix: {row.fix}")
+        }
     }
     assert_eq(violations.join("\n"), "")
 }

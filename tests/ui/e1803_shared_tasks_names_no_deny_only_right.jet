@@ -10,8 +10,12 @@ Counter: struct {
 
 run: fn() {
     count: Shared{Counter{hits: 0}}
-    t1: task { count.hits += 1 }
-    t2: task { count.hits += 1 }
+    t1: task {
+        count.hits += 1
+    }
+    t2: task {
+        count.hits += 1
+    }
     t1.join() ?? panic("t1")
     t2.join() ?? panic("t2")
     files.write("e1803-shared-must-not-exist.txt", "{count.hits}") ?? panic("write failed")

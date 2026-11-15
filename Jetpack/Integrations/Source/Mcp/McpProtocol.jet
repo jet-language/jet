@@ -8,30 +8,40 @@ use jet_pkg_model.[pkg_text_has_control]
 
 // Stable MCP revision selected by default.
 MCP_STABLE_REVISION: "2025-11-25"
+
 // Release-candidate revision; it needs explicit policy opt-in.
 MCP_PREVIEW_REVISION: "2026-07-28"
+
 // Default and hard maximum encoded MCP message size.
 MCP_DEFAULT_MAX_MESSAGE_BYTES: 1048576
+
 MCP_MAX_MESSAGE_BYTES: 16777216
+
 // Maximum JSON/schema nesting supported by the shared JSON parser
 // (`JSON::MAX_JSON_DEPTH`).
 MCP_MAX_SCHEMA_DEPTH: 64
+
 // Default and hard maximum capability entries in one initialize message.
 MCP_DEFAULT_MAX_CAPABILITY_ENTRIES: 64
+
 MCP_MAX_CAPABILITY_ENTRIES: 256
+
 // Maximum peer revision offers, and bytes per offer, accepted during
 // negotiation.
 MCP_MAX_PEER_VERSION_COUNT: 32
+
 MCP_MAX_REVISION_BYTES: 64
+
 // Maximum implementation identity field length.
 MCP_MAX_IMPLEMENTATION_FIELD_BYTES: 256
 
 // MCP protocol revisions known to this SDK.
 MCPRevision: enum {
-    // Session-oriented stable MCP revision.
     Stable20251125
-    // Stateless release-candidate MCP revision.
     Preview20260728
+
+    // Session-oriented stable MCP revision.
+    // Stateless release-candidate MCP revision.
 
     // The wire spelling.
     as_str: fn(self) -> String Never! {
@@ -87,12 +97,13 @@ MCPCodec: enum {
 
 // Local revision selection policy.
 MCPVersionPolicy: enum {
-    // Stable MCP only (the default).
     Stable
-    // One exact revision; selecting the preview revision is explicit.
     Exact(MCPRevision)
-    // Stable plus explicitly listed revisions.
     StableAnd([MCPRevision])
+
+    // Stable MCP only (the default).
+    // One exact revision; selecting the preview revision is explicit.
+    // Stable plus explicitly listed revisions.
 
     // Supported revisions in preference order, stable first.
     supported: fn(self) -> [MCPRevision] Never! {
@@ -166,9 +177,7 @@ MCPPolicy: struct {
         MCPPolicy{versions: MCPVersionPolicy.StableAnd(revisions), limits: MCPLimits.defaults()}
     }
 
-    supported_revisions: fn(self) -> [MCPRevision] Never! {
-        self.versions.supported()
-    }
+    supported_revisions: fn(self) -> [MCPRevision] Never! { self.versions.supported() }
 
     // Negotiate one revision against the other peer's wire offers,
     // preferring this policy's order (stable first).
@@ -181,24 +190,30 @@ MCPPolicy: struct {
             return Err(MCPNegotiationError.PeerVersionListTooLarge{actual: peer_versions.len(), maximum: MCP_MAX_PEER_VERSION_COUNT})
         }
         loop version in peer_versions {
-            if version.bytes().len() > MCP_MAX_REVISION_BYTES -> return Err(MCPNegotiationError.PeerVersionTooLong(MCP_MAX_REVISION_BYTES))
+            if version.bytes().len() > MCP_MAX_REVISION_BYTES {
+                return Err(MCPNegotiationError.PeerVersionTooLong(MCP_MAX_REVISION_BYTES))
+            }
         }
         peer_revisions := [MCPRevision]{}
         loop version in peer_versions {
             if MCPRevision.parse(version) == {
-                .Val(revision) -> peer_revisions.push(revision)
+                .Val(revision) -> { peer_revisions.push(revision) }
                 .None -> {}
             }
         }
         supported: self.supported_revisions()
         loop revision in supported {
-            if peer_revisions.contains(revision) -> return Ok(MCPNegotiatedProtocol{revision: revision, codec: revision.codec(), lifecycle: revision.lifecycle_profile()})
+            if peer_revisions.contains(revision) {
+                return Ok(MCPNegotiatedProtocol{revision: revision, codec: revision.codec(), lifecycle: revision.lifecycle_profile()})
+            }
         }
         peer_has_preview := false
         loop revision in peer_revisions {
             if revision.is_preview() -> peer_has_preview = true
         }
-        if peer_has_preview && !self.versions.admits_preview() -> return Err(MCPNegotiationError.PreviewRequiresOptIn)
+        if peer_has_preview && !self.versions.admits_preview() {
+            return Err(MCPNegotiationError.PreviewRequiresOptIn)
+        }
         if self.versions == {
             .Exact(requested) -> {
                 if requested.is_preview() && peer_revisions.contains(MCPRevision.Stable20251125) {
@@ -210,7 +225,7 @@ MCPPolicy: struct {
         redacted := [String]{}
         loop version in peer_versions {
             if MCPRevision.parse(version) == {
-                .Val(revision) -> redacted.push(revision.as_str())
+                .Val(revision) -> { redacted.push(revision.as_str()) }
                 .None -> redacted.push("<unknown>")
             }
         }
@@ -220,11 +235,12 @@ MCPPolicy: struct {
 
 // Lifecycle law selected by a negotiated revision.
 MCPLifecycleProfile: enum {
-    // `initialize` → `initialized` → `shutdown` → `exit`.
     Session
-    // No session handshake; each request is independently usable.
     Stateless
 }
+
+// `initialize` → `initialized` → `shutdown` → `exit`.
+// No session handshake; each request is independently usable.
 
 // Current peer lifecycle stage.
 MCPLifecycleState: enum {
@@ -372,16 +388,16 @@ MCPAuditFacts: struct {
     lifecycle: MCPLifecycleState
 
     // Stable, secret-free key/value fields.
-    as_map: fn(self) -> [String: String] Never! {
-        facts := [String: String]{}
+    as_map: fn(self) -> [String:String] Never! {
+        facts := [String:String]{}
         facts["mcp.role"] = self.role.name()
         facts["mcp.lifecycle"] = self.lifecycle.name()
         if self.negotiated_revision == {
-            .Val(revision) -> facts["mcp.protocol_version"] = revision.as_str()
+            .Val(revision) -> { facts["mcp.protocol_version"] = revision.as_str() }
             .None -> {}
         }
         if self.codec == {
-            .Val(codec) -> facts["mcp.codec"] = codec.revision().as_str()
+            .Val(codec) -> { facts["mcp.codec"] = codec.revision().as_str() }
             .None -> {}
         }
         facts
@@ -396,46 +412,32 @@ MCPPeer: struct {
     priv negotiated: MCPNegotiatedProtocol?
     priv lifecycle: MCPLifecycleState
 
-    client: fn(policy: MCPPolicy) -> MCPPeer Never! {
-        MCPPeer.new(MCPPeerRole.Client, policy)
-    }
+    client: fn(policy: MCPPolicy) -> MCPPeer Never! { MCPPeer.new(MCPPeerRole.Client, policy) }
 
-    server: fn(policy: MCPPolicy) -> MCPPeer Never! {
-        MCPPeer.new(MCPPeerRole.Server, policy)
-    }
+    server: fn(policy: MCPPolicy) -> MCPPeer Never! { MCPPeer.new(MCPPeerRole.Server, policy) }
 
     new: fn(role: MCPPeerRole, policy: MCPPolicy) -> MCPPeer Never! {
         MCPPeer{peer_role: role, policy: policy, negotiated: None, lifecycle: MCPLifecycleState.New}
     }
 
-    role: fn(self) -> MCPPeerRole Never! {
-        self.peer_role
-    }
+    role: fn(self) -> MCPPeerRole Never! { self.peer_role }
 
-    state: fn(self) -> MCPLifecycleState Never! {
-        self.lifecycle
-    }
+    state: fn(self) -> MCPLifecycleState Never! { self.lifecycle }
 
-    limits: fn(self) -> MCPLimits Never! {
-        self.policy.limits
-    }
+    limits: fn(self) -> MCPLimits Never! { self.policy.limits }
 
-    revision: fn(self) -> MCPRevision? Never! {
-        self.negotiated?.revision
-    }
+    revision: fn(self) -> MCPRevision? Never! { self.negotiated?.revision }
 
-    codec: fn(self) -> MCPCodec? Never! {
-        self.negotiated?.codec
-    }
+    codec: fn(self) -> MCPCodec? Never! { self.negotiated?.codec }
 
-    lifecycle_profile: fn(self) -> MCPLifecycleProfile? Never! {
-        self.negotiated?.lifecycle
-    }
+    lifecycle_profile: fn(self) -> MCPLifecycleProfile? Never! { self.negotiated?.lifecycle }
 
     // Negotiate once against the other peer's wire offers. A stateless
     // revision is ready at once; a session revision waits for initialize.
     negotiate: fn(&self, peer_versions: [String]) -> MCPNegotiatedProtocol MCPNegotiationError! {
-        if self.lifecycle != MCPLifecycleState.New -> return Err(MCPNegotiationError.AlreadyNegotiated)
+        if self.lifecycle != MCPLifecycleState.New {
+            return Err(MCPNegotiationError.AlreadyNegotiated)
+        }
         negotiated: self.policy.negotiate(peer_versions)
         self.lifecycle = if negotiated.lifecycle == MCPLifecycleProfile.Stateless -> MCPLifecycleState.Ready else -> MCPLifecycleState.Negotiated
         self.negotiated = Val(negotiated.copy())
@@ -445,8 +447,12 @@ MCPPeer: struct {
     // Process the stable-session `initialize` and produce the typed result.
     initialize: fn(&self, params: MCPInitializeParams, server_info: MCPImplementation, server_capabilities: MCPCapabilities) -> MCPInitializeResult MCPLifecycleError! {
         protocol: self.negotiated ?? return Err(MCPLifecycleError.NotNegotiated)
-        if protocol.lifecycle != MCPLifecycleProfile.Session -> return Err(MCPLifecycleError.StatelessRevision)
-        if self.lifecycle != MCPLifecycleState.Negotiated -> return Err(MCPLifecycleError.InvalidState{operation: "initialize", lifecycle: self.lifecycle})
+        if protocol.lifecycle != MCPLifecycleProfile.Session {
+            return Err(MCPLifecycleError.StatelessRevision)
+        }
+        if self.lifecycle != MCPLifecycleState.Negotiated {
+            return Err(MCPLifecycleError.InvalidState{operation: "initialize", lifecycle: self.lifecycle})
+        }
         if params.protocol_version != protocol.revision.as_str() {
             return Err(MCPLifecycleError.ProtocolVersionMismatch{expected: protocol.revision, received: pkg_mcp_redacted_revision(params.protocol_version)})
         }
@@ -466,7 +472,9 @@ MCPPeer: struct {
     // The stable `initialized` notification.
     initialized: fn(&self) MCPLifecycleError! {
         if self.negotiated == None -> return Err(MCPLifecycleError.NotNegotiated)
-        if self.lifecycle != MCPLifecycleState.Initializing -> return Err(MCPLifecycleError.InvalidState{operation: "initialized", lifecycle: self.lifecycle})
+        if self.lifecycle != MCPLifecycleState.Initializing {
+            return Err(MCPLifecycleError.InvalidState{operation: "initialized", lifecycle: self.lifecycle})
+        }
         self.lifecycle = MCPLifecycleState.Ready
     }
 
@@ -475,10 +483,14 @@ MCPPeer: struct {
         if self.lifecycle_profile() == {
             .None -> return Err(MCPLifecycleError.NotNegotiated)
             .Val(profile) -> {
-                if profile == MCPLifecycleProfile.Stateless -> return Err(MCPLifecycleError.StatelessRevision)
+                if profile == MCPLifecycleProfile.Stateless {
+                    return Err(MCPLifecycleError.StatelessRevision)
+                }
             }
         }
-        if self.lifecycle != MCPLifecycleState.Ready -> return Err(MCPLifecycleError.InvalidState{operation: "shutdown", lifecycle: self.lifecycle})
+        if self.lifecycle != MCPLifecycleState.Ready {
+            return Err(MCPLifecycleError.InvalidState{operation: "shutdown", lifecycle: self.lifecycle})
+        }
         self.lifecycle = MCPLifecycleState.ShuttingDown
     }
 
@@ -491,7 +503,9 @@ MCPPeer: struct {
                     .Session -> self.lifecycle == MCPLifecycleState.ShuttingDown
                     .Stateless -> self.lifecycle == MCPLifecycleState.Ready
                 }
-                if !closes -> return Err(MCPLifecycleError.InvalidState{operation: "exit", lifecycle: self.lifecycle})
+                if !closes {
+                    return Err(MCPLifecycleError.InvalidState{operation: "exit", lifecycle: self.lifecycle})
+                }
             }
         }
         self.lifecycle = MCPLifecycleState.Closed

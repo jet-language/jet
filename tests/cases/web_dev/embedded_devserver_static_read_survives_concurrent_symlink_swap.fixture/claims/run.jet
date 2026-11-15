@@ -12,7 +12,7 @@ use files: core.files
         total := 0
         loop worker in 0..<4 {
             count: files.read(files.join(root, "served-{worker}")) ?? panic("served report")
-            total = total + (Int.parse(count) ?? panic("served count"))
+            total += (Int.parse(count) ?? panic("served count"))
         }
         assert(total > 0)
     }

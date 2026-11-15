@@ -15,7 +15,9 @@ kit_steps_numeric: fn(text: String) -> Int? {
     if star > 0 {
         left: Int.parse(kit_steps_byte_slice(text, 0, star)) ?? return None
         right: kit_steps_numeric(kit_steps_byte_slice(text, star + 1, text.count_bytes())) ?? return None
-        if left < 0 || right < 0 || (right > 0 && left > 9223372036854775807 /% right) -> return None
+        if left < 0 || right < 0 || (right > 0 && left > 9223372036854775807 /% right) {
+            return None
+        }
         return Val(left * right)
     }
     number: Int.parse(text) ?? return None
@@ -43,9 +45,13 @@ kit_steps_batch_assertion: fn(stream: String, path: String, transform: String, o
     assertion := KitAssertion{stream: stream, path: path, mode: mode, value: "", transform: transform}
     partial: !kit_expect_named(["numeric-lines", "lines", "machine-output"], mode) || !(body.contains("[") && body.contains("="))
     if partial && !kit_steps_reason(original) -> return None
-    if mode == "is-i64" || mode == "is-u32" -> return if words.len() == 1 -> Val(assertion) else -> None
+    if mode == "is-i64" || mode == "is-u32" {
+        return if words.len() == 1 -> Val(assertion) else -> None
+    }
     if mode == "delta" {
-        if words.len() != 4 || words[2].text != "<=" || (Int.parse(words[3].text) ?? -1) < 0 -> return None
+        if words.len() != 4 || words[2].text != "<=" || (Int.parse(words[3].text) ?? -1) < 0 {
+            return None
+        }
         assertion.value = words[1].text
         assertion.extra = words[3].text
         return Val(assertion)
@@ -67,7 +73,9 @@ kit_steps_batch_assertion: fn(stream: String, path: String, transform: String, o
             assertion.value = kit_steps_byte_slice(body, words[2].start, body.count_bytes())
             if kit_steps_expression(assertion.value, "") == None -> return None
         } else {
-            if words.len() != 3 || !kit_expect_named(["~", "^=", "!~"], assertion.extra) -> return None
+            if words.len() != 3 || !kit_expect_named(["~", "^=", "!~"], assertion.extra) {
+                return None
+            }
             assertion.value = words[2].text
         }
         return Val(assertion)
@@ -78,7 +86,9 @@ kit_steps_batch_assertion: fn(stream: String, path: String, transform: String, o
             assertion.alternatives = [words[at].text]
             at += 1
         }
-        if words.len() != at + 4 || !kit_expect_named(["^=", "~", "="], words[at].text) || words[at + 2].text != "=" -> return None
+        if words.len() != at + 4 || !kit_expect_named(["^=", "~", "="], words[at].text) || words[at + 2].text != "=" {
+            return None
+        }
         assertion.extra = words[at].text
         assertion.value = words[at + 1].text
         assertion.alternatives.push(words[at + 3].text)
@@ -93,11 +103,15 @@ kit_steps_batch_assertion: fn(stream: String, path: String, transform: String, o
     if kit_expect_named(["has-line", "unique-after", "in-order-of", "$="], mode) {
         if words.len() != 2 -> return None
         assertion.value = words[1].text
-        if mode == "$=" && body.bytes()[words[1].start] != (U8{34}) && body.bytes()[words[1].start] != (U8{39}) -> assertion.extra = "file"
+        if mode == "$=" && body.bytes()[words[1].start] != (U8{34}) && body.bytes()[words[1].start] != (U8{39}) {
+            assertion.extra = "file"
+        }
         return Val(assertion)
     }
     if mode == "count" {
-        if words.len() != 4 || !kit_expect_named(["=", ">=", "<=", ">", "<"], words[2].text) || words[1].text == "" || !kit_steps_count_target_valid(words[3].text) -> return None
+        if words.len() != 4 || !kit_expect_named(["=", ">=", "<=", ">", "<"], words[2].text) || words[1].text == "" || !kit_steps_count_target_valid(words[3].text) {
+            return None
+        }
         assertion.value = words[1].text
         assertion.extra = words[3].text
         assertion.alternatives = [words[2].text]
@@ -107,7 +121,9 @@ kit_steps_batch_assertion: fn(stream: String, path: String, transform: String, o
     assertion.extra = words[1].text
     assertion.value = kit_steps_byte_slice(body, words[2].start, body.count_bytes()).trim().copy()
     if mode == "machine-output" {
-        if assertion.extra != "=" || !assertion.value.starts_with("[") || !assertion.value.ends_with("]") -> return None
+        if assertion.extra != "=" || !assertion.value.starts_with("[") || !assertion.value.ends_with("]") {
+            return None
+        }
         loop raw in kit_steps_byte_slice(assertion.value, 1, assertion.value.count_bytes() - 1).split(",") {
             name: raw.trim().copy()
             if !kit_expect_named(["status", "report", "browser-relay"], name) -> return None
@@ -116,7 +132,9 @@ kit_steps_batch_assertion: fn(stream: String, path: String, transform: String, o
         return Val(assertion)
     }
     if mode == "numeric-lines" || (mode == "lines" && assertion.value.starts_with("[")) {
-        if assertion.extra != "=" && !(mode == "numeric-lines" && assertion.extra == "==") -> return None
+        if assertion.extra != "=" && !(mode == "numeric-lines" && assertion.extra == "==") {
+            return None
+        }
         if assertion.extra == "=" {
             expected: json.parse(assertion.value) ?? return None
             if kit_steps_json_type(expected) != "array" -> return None
@@ -130,7 +148,9 @@ kit_steps_batch_assertion: fn(stream: String, path: String, transform: String, o
         assertion.value = words[2].text
         return Val(assertion)
     }
-    if words.len() != 3 || !kit_expect_named(["=", ">=", "<=", ">", "<"], assertion.extra) || !kit_steps_count_target_valid(words[2].text) -> return None
+    if words.len() != 3 || !kit_expect_named(["=", ">=", "<=", ">", "<"], assertion.extra) || !kit_steps_count_target_valid(words[2].text) {
+        return None
+    }
     assertion.value = words[2].text
     Val(assertion)
 }
@@ -159,7 +179,9 @@ kit_steps_i64: fn(text: String) -> Bool {
 
 kit_steps_float_lines: fn(text: String) -> [Float]? {
     result := [Float]{}
-    loop line in kit_steps_rust_lines(text) -> result.push(Float.parse(line.trim().copy()) ?? return None)
+    loop line in kit_steps_rust_lines(text) {
+        result.push(Float.parse(line.trim().copy()) ?? return None)
+    }
     Val(result)
 }
 
@@ -182,10 +204,11 @@ kit_steps_batch_test: fn(actual: String, assertion: KitAssertion, value: String,
         }
         return Val(verdict)
     }
-    if mode == "is-i64" -> matches = kit_steps_i64(actual)
-    else if mode == "is-u32" -> matches = kit_steps_i64(actual) && !actual.starts_with("-") && (Int.parse(actual) ?? -1) >= 0 && (Int.parse(actual) ?? -1) <= 4294967295
-    else if mode == "lines-array" -> matches = kit_steps_rust_lines(actual) == (kit_steps_string_array(value) ?? return Val(kit_expect_verdict("ERROR", "invalid expected line list")))
-    else if mode == "numeric-lines" {
+    if mode == "is-i64" -> matches = kit_steps_i64(actual) else if mode == "is-u32" {
+        matches = kit_steps_i64(actual) && !actual.starts_with("-") && (Int.parse(actual) ?? -1) >= 0 && (Int.parse(actual) ?? -1) <= 4294967295
+    } else if mode == "lines-array" {
+        matches = kit_steps_rust_lines(actual) == (kit_steps_string_array(value) ?? return Val(kit_expect_verdict("ERROR", "invalid expected line list")))
+    } else if mode == "numeric-lines" {
         left: kit_steps_float_lines(actual) ?? return Val(kit_expect_verdict("FAIL", "non-numeric line"))
         right := [Float]{}
         if extra == "==" {
@@ -241,10 +264,13 @@ kit_steps_batch_test: fn(actual: String, assertion: KitAssertion, value: String,
         loop line in kit_steps_rust_lines(actual) {
             matched := false
             if extra == "hex" {
-                if !kit_steps_hex_valid(line) -> return Val(kit_expect_verdict("FAIL", "line is not even-length hexadecimal"))
+                if !kit_steps_hex_valid(line) {
+                    return Val(kit_expect_verdict("FAIL", "line is not even-length hexadecimal"))
+                }
                 matched = true
-            } else if extra == "where" -> matched = kit_steps_expression(value, line) ?? return Val(kit_expect_verdict("ERROR", "invalid line expression"))
-            else -> matched = kit_steps_line_atom(line, extra, value)
+            } else if extra == "where" {
+                matched = kit_steps_expression(value, line) ?? return Val(kit_expect_verdict("ERROR", "invalid line expression"))
+            } else { matched = kit_steps_line_atom(line, extra, value) }
             if !matched -> matches = false
         }
     } else if mode == "unique-after" {
@@ -258,12 +284,16 @@ kit_steps_batch_test: fn(actual: String, assertion: KitAssertion, value: String,
         }
     } else if mode == "word" || mode == "has-line" || mode == "any-line" {
         expected := [String]{}
-        if mode == "any-line" -> expected = kit_steps_string_array(value) ?? return Val(kit_expect_verdict("ERROR", "invalid word prefix"))
+        if mode == "any-line" {
+            expected = kit_steps_string_array(value) ?? return Val(kit_expect_verdict("ERROR", "invalid word prefix"))
+        }
         loop line in kit_steps_rust_lines(actual) {
             if mode == "has-line" && line == value -> matches = true
             words: kit_steps_whitespace_words(line)
             if mode == "word" && kit_expect_named(words, value) -> matches = true
-            if mode == "any-line" && words.len() >= expected.len() && words.slice(0, expected.len()) == expected -> matches = true
+            if mode == "any-line" && words.len() >= expected.len() && words.slice(0, expected.len()) == expected {
+                matches = true
+            }
         }
     } else if mode == "in-order-of" {
         previous := -1

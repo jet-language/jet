@@ -125,7 +125,9 @@ ProfileView: struct {
     // without coupling the package model to the EnvModel area.
     from_parts: fn(name: String, extends: [String], packages: [String], collisions: [(key: String, value: String)], sources: [String]) -> ProfileView Never! {
         pairs := [KeyValueView]{}
-        loop collision in collisions -> pairs.push(KeyValueView{key: collision.key, value: collision.value})
+        loop collision in collisions {
+            pairs.push(KeyValueView{key: collision.key, value: collision.value})
+        }
         ProfileView{name: name, extends: extends, packages: packages, collisions: pairs, sources: sources}
     }
 }
@@ -157,7 +159,7 @@ pkg_manifest_view_from_facts: fn(facts: PackageFacts) -> ManifestView Never! {
         dependencies: pkg_dependency_views(facts.deps),
         packages: pkg_package_target_views(facts.packages),
         outputs: pkg_output_views(facts.outputs),
-        build_profiles: pkg_build_profile_views(facts.build_profiles)
+        build_profiles: pkg_build_profile_views(facts.build_profiles),
     }
 }
 
@@ -176,7 +178,7 @@ pkg_package_view_from_facts: fn(facts: PackageFacts) -> PackageView Never! {
         dependencies: pkg_dependency_views(facts.deps),
         packages: pkg_package_target_views(facts.packages),
         outputs: pkg_output_views(facts.outputs),
-        build_profiles: pkg_build_profile_views(facts.build_profiles)
+        build_profiles: pkg_build_profile_views(facts.build_profiles),
     }
 }
 
@@ -188,25 +190,27 @@ pkg_lock_view_from_lock: fn(lock: LockFile) -> LockView Never! {
             .Val(locked) -> Val(locked.rev)
             .None -> None
         }
-        packages.push(LockedPackageView{
-            name: package.name,
-            version: package.version,
-            source_kind: pkg_lock_source_kind(package.source),
-            source: pkg_lock_source_reference(package.source),
-            revision: revision,
-            fingerprint: package.fingerprint,
-            content_hash: package.content_hash,
-            dependencies: package.dependencies,
-            layer: pkg_view_layer(package.layer),
-            inferred_layer: pkg_view_layer(package.inferred_layer)
-        })
+        packages.push(
+            LockedPackageView{
+                name: package.name,
+                version: package.version,
+                source_kind: pkg_lock_source_kind(package.source),
+                source: pkg_lock_source_reference(package.source),
+                revision: revision,
+                fingerprint: package.fingerprint,
+                content_hash: package.content_hash,
+                dependencies: package.dependencies,
+                layer: pkg_view_layer(package.layer),
+                inferred_layer: pkg_view_layer(package.inferred_layer),
+            },
+        )
     }
     LockView{
         schema_version: PACKAGE_MODEL_SCHEMA_VERSION,
         file: UNIFIED_LOCK_FILE,
         version: lock.version,
         root_dependencies: lock.root_dependencies,
-        packages: packages
+        packages: packages,
     }
 }
 
@@ -221,11 +225,13 @@ pkg_view_redacted_repository: fn(repository: String?) -> String? Never! {
 }
 
 // Dependencies in name order (the Rust BTreeMap order).
-pkg_dependency_views: fn(dependencies: [String: DepSource]) -> [DependencyView] Never! {
+pkg_dependency_views: fn(dependencies: [String:DepSource]) -> [DependencyView] Never! {
     names := dependencies.keys().to_list()
     names.sort()
     out := [DependencyView]{}
-    loop name in names -> out.push(DependencyView{name: name, source: pkg_dep_display_redacted(dependencies[name])})
+    loop name in names {
+        out.push(DependencyView{name: name, source: pkg_dep_display_redacted(dependencies[name])})
+    }
     out
 }
 
@@ -251,7 +257,9 @@ pkg_package_target_views: fn(packages: [PackageEntry]) -> [PackageTargetView] Ne
 
 pkg_target_profile_views: fn(targets: PackageTargets) -> [TargetProfileView] Never! {
     out := [TargetProfileView]{}
-    loop selection in targets.iter() -> out.push(TargetProfileView{name: selection.name, profile: selection.profile.as_str()})
+    loop selection in targets.iter() {
+        out.push(TargetProfileView{name: selection.name, profile: selection.profile.as_str()})
+    }
     out
 }
 
@@ -270,7 +278,7 @@ pkg_output_kind_name: fn(kind: PackageOutputKind) -> String Never! {
 }
 
 // Outputs in output-name order (the Rust BTreeMap value order).
-pkg_output_views: fn(outputs: [String: OutputFact]) -> [OutputView] Never! {
+pkg_output_views: fn(outputs: [String:OutputFact]) -> [OutputView] Never! {
     names := outputs.keys().to_list()
     names.sort()
     out := [OutputView]{}
@@ -302,15 +310,17 @@ pkg_build_profile_views: fn(profiles: [BuildProfileDef]) -> [BuildProfileView] N
             .Val(level) -> level.as_str()
             .None -> pkg_build_stock_optimize()
         }
-        out.push(BuildProfileView{
-            name: profile.name,
-            optimize: optimize,
-            debug_info: profile.debug_info,
-            small: profile.small,
-            panic: pkg_build_panic_name(profile.panic),
-            game_development_stripping: profile.game_development_stripping,
-            game_cook_mode: profile.game_cook_mode
-        })
+        out.push(
+            BuildProfileView{
+                name: profile.name,
+                optimize: optimize,
+                debug_info: profile.debug_info,
+                small: profile.small,
+                panic: pkg_build_panic_name(profile.panic),
+                game_development_stripping: profile.game_development_stripping,
+                game_cook_mode: profile.game_cook_mode,
+            },
+        )
     }
     out
 }

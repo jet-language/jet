@@ -13,7 +13,9 @@ stm_key := I64{0}
 
 // runtime-init: 4 when stm_root,stm_key
 #Export(c) jet_rt_stm_init: fn() {
-    if stm_root != (I64{0}) -> return
+    if stm_root != (I64{0}) {
+        return
+    }
     root: jet_rt_alloc(I64{32}, I64{8})
     #Unsafe("runtime-init runs before any other thread exists") { stm_root = root }
     thread_zero(stm_root, I64{32})
@@ -48,8 +50,12 @@ stm_gate_leave: fn() {
 }
 
 stm_state_drop: fn(state: I64) {
-    if state == (I64{0}) -> return
-    if sync_add(wrapping(state + I64{40}), I64{-1}) != (I64{1}) -> return
+    if state == (I64{0}) {
+        return
+    }
+    if sync_add(wrapping(state + I64{40}), I64{-1}) != (I64{1}) {
+        return
+    }
     parent: sync_load(wrapping(state + I64{8}))
     jet_rt_free(state, I64{48}, I64{8})
     stm_state_drop(parent)
@@ -159,7 +165,9 @@ stm_clone: fn(source: I64, meta: I64) -> I64 {
                 shared_release(cell, false)
             }
         }
-        if staged == (I64{0}) -> return
+        if staged == (I64{0}) {
+            return
+        }
         sync_store(wrapping(part + I64{16}), staged)
     }
     sync_store(wrapping(part + I64{24}), I64{1})
@@ -191,7 +199,9 @@ stm_finish: fn(state: I64) {
 }
 
 #Export(c) jet_rt_native_stm_rollback: fn(state: I64) {
-    if state == (I64{0}) -> return
+    if state == (I64{0}) {
+        return
+    }
     if sync_swap(wrapping(state + I64{24}), I64{0}) != (I64{0}) {
         stm_pop(state)
         parts: sync_swap(wrapping(state + I64{16}), I64{0})
@@ -213,14 +223,20 @@ stm_merge: fn(parent: I64, first: I64) {
             sync_store(wrapping(child + I64{16}), I64{0})
             coll_slot_free(previous, sync_load(wrapping(target + I64{64})))
         }
-        if sync_load(wrapping(child + I64{24})) != (I64{0}) -> sync_store(wrapping(target + I64{24}), I64{1})
-        if sync_load(wrapping(child + I64{32})) != (I64{0}) -> sync_store(wrapping(target + I64{32}), I64{1})
+        if sync_load(wrapping(child + I64{24})) != (I64{0}) {
+            sync_store(wrapping(target + I64{24}), I64{1})
+        }
+        if sync_load(wrapping(child + I64{32})) != (I64{0}) {
+            sync_store(wrapping(target + I64{32}), I64{1})
+        }
         child = sync_load(child)
     }
 }
 
 #Export(c) jet_rt_native_stm_commit: fn(state: I64) {
-    if state == (I64{0}) -> return
+    if state == (I64{0}) {
+        return
+    }
     if sync_swap(wrapping(state + I64{24}), I64{0}) == (I64{0}) {
         stm_finish(state)
         return
@@ -325,7 +341,7 @@ TRANSACTION_HOOK_DEADLINE_MS: I64{5000}
     scheduler_control_leave(frame)
     scheduler_control_drop(control)
     jet_rt_free(frame, I64{56}, I64{8})
-    if (record != I64{0}) -> transaction_hook_failed(record)
+    if (record != I64{0}) { transaction_hook_failed(record) }
 }
 
 // A hook's failure is a secondary failure: appended to the report of the
@@ -336,7 +352,7 @@ transaction_hook_failed: fn(record: I64) {
     rendered: sync_load(wrapping(record + I64{48})) != I64{0}
     report := scheduler_stop_take_message(record)
     scheduler_stop_drop(record)
-    if (report == I64{0}) -> report = scheduler_text_empty()
+    if (report == I64{0}) { report = scheduler_text_empty() }
     if !rendered {
         line: scheduler_text_concat(report, rt_static_text("\n"))
         jet_rt_string_drop(report)
@@ -353,7 +369,9 @@ transaction_hook_failed: fn(record: I64) {
             joined := I64{0}
             if {
                 (old == I64{0}) -> joined = text
-                (sync_load(wrapping(primary + I64{48})) != I64{0}) -> joined = scheduler_text_concat(old, text)
+                (sync_load(wrapping(primary + I64{48})) != I64{0}) -> {
+                    joined = scheduler_text_concat(old, text)
+                }
                 else -> {
                     separated: scheduler_text_concat(old, rt_static_text("\n"))
                     joined = scheduler_text_concat(separated, text)

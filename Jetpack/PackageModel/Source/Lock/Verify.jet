@@ -4,7 +4,11 @@
 use {
     jetpack_foundation.[BINARY_NAME, JETPACK_BINARY_NAME, PACKAGE_FILE, UNIFIED_LOCK_FILE]
     jet_foundation.[
-        Diagnostic, RuntimeLayer, Span, diagnostic_from_registry, diagnostic_registry_row,
+        Diagnostic,
+        RuntimeLayer,
+        Span,
+        diagnostic_from_registry,
+        diagnostic_registry_row,
     ]
     files: core.files
 }
@@ -122,7 +126,9 @@ pkg_lock_validate_manifest_lock_completeness: fn(manifest: Manifest, lock: LockF
     loop dep_name in pkg_lock_manifest_dependency_names(manifest) {
         spec: manifest.dependencies[dep_name]
         package: lock.find_package(dep_name) ?? return Err(LockCompletenessError.dependency(dep_name, "package"))
-        if package.version.trim() == "" -> return Err(LockCompletenessError.dependency(dep_name, "version"))
+        if package.version.trim() == "" {
+            return Err(LockCompletenessError.dependency(dep_name, "version"))
+        }
         // A source-kind mismatch is stale manifest/lock state, not an
         // incomplete generated record; the stale-only verifier owns it.
         if pkg_lock_same_source_kind(spec, package.source) -> package.validate_completeness()
@@ -139,7 +145,9 @@ pkg_lock_verify_lock_matches_manifest: fn(lock: LockFile, manifest: Manifest, lo
     loop dep_name in pkg_lock_manifest_dependency_names(manifest) {
         // The stronger typed verifier owns a missing package record.
         package: lock.find_package(dep_name) ?? next
-        if !pkg_lock_same_source_kind(manifest.dependencies[dep_name], package.source) -> return Err(LockError.Reported(pkg_lock_e1202(lock_path)))
+        if !pkg_lock_same_source_kind(manifest.dependencies[dep_name], package.source) {
+            return Err(LockError.Reported(pkg_lock_e1202(lock_path)))
+        }
     }
 }
 
@@ -166,12 +174,16 @@ pkg_lock_e3512: fn(what: String, why: String, fix: String) -> Diagnostic Never! 
 pkg_lock_verify_locked_generated_inputs: fn(project_root: String, generated: [ComptimeInput]) LockError! -[FS]> {
     loaded: pkg_lock_load(project_root)
     if loaded == None {
-        if generated.len() == 0 -> return
+        if generated.len() == 0 {
+            return
+        }
         return Err(LockError.Reported(pkg_lock_e3512("locked generated input `{generated[0].path}` has no unified lock entry", "`--locked` requires every generated source hash to be recorded before materialization", "rerun without `--locked` to review and record the generated provenance")))
     }
     lock: loaded
     loop input in generated {
-        if !lock.comptime_inputs.contains(input) -> return Err(LockError.Reported(pkg_lock_e3512("locked generated input `{input.path}` drifted", "`--locked` requires generated input and output hashes to match the unified lock exactly", "rerun without `--locked` to review and record the new generated provenance")))
+        if !lock.comptime_inputs.contains(input) {
+            return Err(LockError.Reported(pkg_lock_e3512("locked generated input `{input.path}` drifted", "`--locked` requires generated input and output hashes to match the unified lock exactly", "rerun without `--locked` to review and record the new generated provenance")))
+        }
     }
 }
 
@@ -198,7 +210,9 @@ pkg_lock_record_generated_inputs_with_lock_state: fn(project_root: String, gener
         }
         expected: pkg_lock_dedup_comptime_inputs(pkg_lock_sorted_comptime_inputs(managed))
         actual: pkg_lock_dedup_comptime_inputs(pkg_lock_sorted_comptime_inputs(generated))
-        if expected == actual -> return
+        if expected == actual {
+            return
+        }
         path := "<unknown>"
         drifted := false
         loop input in actual {
@@ -220,12 +234,16 @@ pkg_lock_record_generated_inputs_with_lock_state: fn(project_root: String, gener
     if !lock_was_present {
         loaded: if pkg_manifest_load(project_root) == {
             .Ok(manifest) -> manifest
-            .Err(error) -> { return Err(LockError.Reported(error.diagnostic)) }
+            .Err(error) -> {
+                return Err(LockError.Reported(error.diagnostic))
+            }
         }
         if loaded == {
             .Val(manifest) -> {
                 loop dependency in pkg_lock_manifest_dependency_names(manifest) {
-                    if !lock.root_dependencies.contains(dependency) -> lock.root_dependencies.push(dependency)
+                    if !lock.root_dependencies.contains(dependency) {
+                        lock.root_dependencies.push(dependency)
+                    }
                 }
                 lock.root_dependencies.sort()
             }
@@ -260,13 +278,15 @@ pkg_lock_locked_build_contribution: fn(package: String, contribution: FactContri
         scope: contribution.scope.name(),
         layer: contribution.layer.name(),
         source: contribution.source,
-        reason: contribution.reason ?? ""
+        reason: contribution.reason ?? "",
     }
 }
 
 pkg_lock_locked_build_contribution_set: fn(package: String, contributions: [FactContribution]) -> [LockedBuildContribution] Never! {
     records := [LockedBuildContribution]{}
-    loop contribution in contributions -> records.push(pkg_lock_locked_build_contribution(package, contribution))
+    loop contribution in contributions {
+        records.push(pkg_lock_locked_build_contribution(package, contribution))
+    }
     pkg_lock_sorted_contributions(records)
 }
 
@@ -275,7 +295,9 @@ pkg_lock_verify_locked_build_contributions: fn(project_root: String, package: St
     actual: pkg_lock_locked_build_contribution_set(package, contributions)
     loaded: pkg_lock_load(project_root)
     if loaded == None {
-        if actual.len() == 0 -> return
+        if actual.len() == 0 {
+            return
+        }
         return Err(LockError.Reported(pkg_lock_e3512("locked build contributions for `{package}` are not recorded", "a locked build must replay every computed fact writer from `.jet/lock`", "rerun without `--locked` to record the computed contribution chain")))
     }
     lock: loaded
@@ -283,23 +305,31 @@ pkg_lock_verify_locked_build_contributions: fn(project_root: String, package: St
     loop contribution in lock.build_contributions {
         if contribution.package == package -> recorded.push(contribution)
     }
-    if pkg_lock_sorted_contributions(recorded) == actual -> return
+    if pkg_lock_sorted_contributions(recorded) == actual {
+        return
+    }
     return Err(LockError.Reported(pkg_lock_e3512("locked build contribution for `{package}` drifted", "the computed fact writer chain differs from the chain recorded in `.jet/lock`", "rerun without `--locked` to review and record the new contribution chain")))
 }
 
 // Replace one package's computed writer records in the
 // unified lock after the selected runtime bundle passed the front end.
 pkg_lock_record_build_contributions: fn(project_root: String, package: String, contributions: [FactContribution], locked: Bool, stamp: BuildStamp) LockError! -[FS, Env, Time]> {
-    if locked -> return pkg_lock_verify_locked_build_contributions(project_root, package, contributions)
+    if locked {
+        return pkg_lock_verify_locked_build_contributions(project_root, package, contributions)
+    }
     lock := pkg_lock_load_or_empty(project_root)
     // Explicit foreign-build selections are project-level activation state,
     // not computed package facts; a later native package build must not
     // erase the reviewed plan that ordinary `jet build` consumes.
     kept := [LockedBuildContribution]{}
     loop contribution in lock.build_contributions {
-        if contribution.package == "__jet_foreign_build__" || contribution.package != package -> kept.push(contribution)
+        if contribution.package == "__jet_foreign_build__" || contribution.package != package {
+            kept.push(contribution)
+        }
     }
-    loop record in pkg_lock_locked_build_contribution_set(package, contributions) -> kept.push(record)
+    loop record in pkg_lock_locked_build_contribution_set(package, contributions) {
+        kept.push(record)
+    }
     lock.build_contributions = pkg_lock_sorted_contributions(kept)
     if lock.build_stamp == None -> lock.build_stamp = Val(stamp)
     if pkg_lock_write_atomically(project_root, pkg_lock_write(lock).bytes()) == {
@@ -341,7 +371,7 @@ pkg_lock_e1201: fn(package_name: String, version_a: String, chain_a: [String], v
         None,
         "two versions of `{package_name}` are required",
         "a package graph can have only one version of each package — two different packages require `{package_name}` at conflicting versions",
-        "choose one version and update the conflicting dependencies:\n  {chain_a.join(" → ")} ({version_a})\n  {chain_b.join(" → ")} ({version_b})"
+        "choose one version and update the conflicting dependencies:\n  {chain_a.join(" → ")} ({version_a})\n  {chain_b.join(" → ")} ({version_b})",
     )
 }
 

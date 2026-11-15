@@ -10,8 +10,16 @@ use {
     perf_time: core.time
     jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE]
     jet_foundation.[
-        DEFAULT_EXCLUSIONS, ENV_JET_OBSERVE, ENV_JET_PERF_SAMPLES, SourceIdentity, TraceHardware, TraceToolchain, artifact_extension, trace_id,
-        trace_profile_unsupported, verify_jettrace,
+        DEFAULT_EXCLUSIONS,
+        ENV_JET_OBSERVE,
+        ENV_JET_PERF_SAMPLES,
+        SourceIdentity,
+        TraceHardware,
+        TraceToolchain,
+        artifact_extension,
+        trace_id,
+        trace_profile_unsupported,
+        verify_jettrace,
     ]
     jet_pkg_model.[JET_VERSION, WorkspaceDeclarationCache]
 }
@@ -21,7 +29,12 @@ JET_CLI_PERF_TRACE_LIMIT: 268435456
 
 // `SessionArgs`: the perf-only flags, and the base intent's argv after its
 // action name with those flags removed.
-JetCLIPerfSessionArgs: struct { out: String?, source: String?, allowlist: [String], child_args: [String] }
+JetCLIPerfSessionArgs: struct {
+    out: String?
+    source: String?
+    allowlist: [String]
+    child_args: [String]
+}
 
 // `parse_session_args`. Words after `--` belong to the program.
 jet_cli_perf_session_args: fn(args: [String]) -> JetCLIPerfSessionArgs JetCLIReadError! {
@@ -55,7 +68,9 @@ jet_cli_perf_session_args: fn(args: [String]) -> JetCLIPerfSessionArgs JetCLIRea
             next
         }
         if arg == "--capture" {
-            if index + 1 >= args.len() -> return Err(jet_cli_read_error("`--capture` needs a comma-separated allowlist"))
+            if index + 1 >= args.len() {
+                return Err(jet_cli_read_error("`--capture` needs a comma-separated allowlist"))
+            }
             parsed.allowlist = jet_cli_perf_capture_allowlist(args[index + 1])
             skip = true
             next
@@ -77,10 +92,14 @@ jet_cli_perf_capture_allowlist: fn(raw: String) -> [String] JetCLIReadError! {
     loop part in raw.split(",") {
         item: part.trim()
         if item == "" -> next
-        if !DEFAULT_EXCLUSIONS.contains(item) -> return Err(jet_cli_read_error("`--capture` item `{item}` is not a privacy field; allowed: {DEFAULT_EXCLUSIONS.join(", ")}"))
+        if !DEFAULT_EXCLUSIONS.contains(item) {
+            return Err(jet_cli_read_error("`--capture` item `{item}` is not a privacy field; allowed: {DEFAULT_EXCLUSIONS.join(", ")}"))
+        }
         if !items.contains(item) -> items.push(item)
     }
-    if items.len() == 0 -> return Err(jet_cli_read_error("`--capture` needs at least one privacy field"))
+    if items.len() == 0 {
+        return Err(jet_cli_read_error("`--capture` needs at least one privacy field"))
+    }
     items.sort()
     Ok(items)
 }
@@ -90,7 +109,9 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
     extension: artifact_extension()
     parsed := jet_cli_perf_session_args(args) ?? return jet_cli_perf_error(err.message, "run `jet perf {action} <file.jet> [--out <path{extension}>]`", color)
     exe: perf_sys.executable()
-    if exe == "" -> return jet_cli_perf_error("cannot resolve the jet executable", JET_CLI_PERF_FIX, color)
+    if exe == "" {
+        return jet_cli_perf_error("cannot resolve the jet executable", JET_CLI_PERF_FIX, color)
+    }
     // `jet run --observe` links the program's observation start and starts
     // the program's observation, and only the program's: jet itself runs
     // unobserved, so the program runs in jet's place, under the session's
@@ -116,7 +137,9 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
             samples = Val(path)
         }
     } else {
-        loop field in jet_cli_observe_env(parsed.source ?? "") -> spec = spec.env(field.name, field.value)
+        loop field in jet_cli_observe_env(parsed.source ?? "") {
+            spec = spec.env(field.name, field.value)
+        }
     }
     child := spec.spawn() ?? return jet_cli_perf_error("cannot start `jet {action}`: {err}", JET_CLI_PERF_FIX, color)
     pid: child.id()
@@ -129,7 +152,9 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
         if jet_cli_perf_process_stat(pid) == .Ok(stat) -> alive = Val(stat)
         exited: child.exited() ?? return jet_cli_perf_error("cannot wait for `jet {action}`: {err}", JET_CLI_PERF_FIX, color)
         if exited -> break
-        if parsed.source != None -> jet_cli_perf_session_observe(observed, pid, checked(U64{started.elapsed().ns}) ?? U64{0})
+        if parsed.source != None {
+            jet_cli_perf_session_observe(observed, pid, checked(U64{started.elapsed().ns}) ?? U64{0})
+        }
         perf_time.sleep(25ms)
     }
     receipt: child.wait() ?? return jet_cli_perf_error("cannot wait for `jet {action}`: {err}", JET_CLI_PERF_FIX, color)
@@ -142,7 +167,9 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
     published: observed.root.len() > 0 && observed.root[observed.root.len() - 1].live.runtime.exit
     if parsed.source != None && !published && alive == .Val(stat) {
         cpu: if receipt.user_cpu_ns == .Val(user) && receipt.system_cpu_ns == .Val(system) -> Val(user + system) else -> Int?{None}
-        if jet_cli_perf_live_read_reaped(pid, stat, cpu) == .Ok(live) -> jet_cli_perf_session_keep(observed.root, JetCLIPerfObservation{at_ns: wall, live: live})
+        if jet_cli_perf_live_read_reaped(pid, stat, cpu) == .Ok(live) {
+            jet_cli_perf_session_keep(observed.root, JetCLIPerfObservation{at_ns: wall, live: live})
+        }
     }
     // Under `jet run --observe` only the program publishes, so what the
     // root's pid publishes is the program, run in jet's place. A `jet test`
@@ -155,7 +182,9 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
     if parsed.source == .Val(source) {
         // A missing or unreadable source still gets a schema-valid skeleton.
         if perf_files.read(source) == .Ok(text) {
-            if jet_cli_perf_capture_source(source, text, observations, sampled, jet_cli_perf_session_target(), Val(wall)) == .Ok(captured) -> capture = captured
+            if jet_cli_perf_capture_source(source, text, observations, sampled, jet_cli_perf_session_target(), Val(wall)) == .Ok(captured) {
+                capture = captured
+            }
         }
     }
     capture.policy.allowlist = parsed.allowlist.move()
@@ -189,7 +218,9 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
             next
         }
         if arg == "--out" {
-            if index + 1 >= args.len() -> return jet_cli_perf_error("`--out` needs a path", JET_CLI_PERF_FIX, color)
+            if index + 1 >= args.len() {
+                return jet_cli_perf_error("`--out` needs a path", JET_CLI_PERF_FIX, color)
+            }
             // copy: the argument list keeps its word; the output path owns its own.
             out = Val(args[index + 1].copy())
             skip = true
@@ -200,7 +231,9 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
             next
         }
         if arg == "--source" {
-            if index + 1 >= args.len() -> return jet_cli_perf_error("`--source` needs a `.jet` path", JET_CLI_PERF_FIX, color)
+            if index + 1 >= args.len() {
+                return jet_cli_perf_error("`--source` needs a `.jet` path", JET_CLI_PERF_FIX, color)
+            }
             // copy: the argument list keeps its word; the source path owns its own.
             source = Val(args[index + 1].copy())
             skip = true
@@ -211,25 +244,35 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
             next
         }
         if arg == "--capture" {
-            if index + 1 >= args.len() -> return jet_cli_perf_error("`--capture` needs a comma-separated allowlist", JET_CLI_PERF_FIX, color)
+            if index + 1 >= args.len() {
+                return jet_cli_perf_error("`--capture` needs a comma-separated allowlist", JET_CLI_PERF_FIX, color)
+            }
             allowlist = jet_cli_perf_capture_allowlist(args[index + 1]) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
             skip = true
             next
         }
-        if arg.starts_with("-") -> return jet_cli_perf_error("unknown `jet perf attach` flag `{arg}`", JET_CLI_PERF_FIX, color)
-        if pid != None -> return jet_cli_perf_error("`jet perf attach` takes one process id", JET_CLI_PERF_FIX, color)
+        if arg.starts_with("-") {
+            return jet_cli_perf_error("unknown `jet perf attach` flag `{arg}`", JET_CLI_PERF_FIX, color)
+        }
+        if pid != None {
+            return jet_cli_perf_error("`jet perf attach` takes one process id", JET_CLI_PERF_FIX, color)
+        }
         value: Int.parse(arg) ?? return jet_cli_perf_error("`{arg}` isn't a process id", JET_CLI_PERF_FIX, color)
-        if value < 0 || value > 4294967295 -> return jet_cli_perf_error("`{arg}` isn't a process id", JET_CLI_PERF_FIX, color)
+        if value < 0 || value > 4294967295 {
+            return jet_cli_perf_error("`{arg}` isn't a process id", JET_CLI_PERF_FIX, color)
+        }
         pid = Val(value)
     }
     target_pid: pid ?? return jet_cli_perf_error("`jet perf attach` needs a process id", "run `jet perf attach <pid> --source <file.jet>`", color)
-    if !perf_files.is_dir("/proc/{target_pid}") -> return jet_cli_perf_error("process {target_pid} is not running or not visible to this user", "start the program with `jet run --observe`, then attach to that pid", color)
+    if !perf_files.is_dir("/proc/{target_pid}") {
+        return jet_cli_perf_error("process {target_pid} is not running or not visible to this user", "start the program with `jet run --observe`, then attach to that pid", color)
+    }
     target: jet_cli_perf_session_target()
     // Attach is a point capture: the trace session's origin is now.
     observations := [JetCLIPerfObservation]{}
     live_error := String?{None}
     if jet_cli_perf_live_read(target_pid) == {
-        .Ok(live) -> observations.push(JetCLIPerfObservation{at_ns: U64{0}, live: live})
+        .Ok(live) -> { observations.push(JetCLIPerfObservation{at_ns: U64{0}, live: live}) }
         .Err(failure) -> live_error = Val(failure.message)
     }
     capture := jet_cli_perf_capture_new(trace_profile_unsupported("source sampling requires a source capture"), [SourceIdentity]{})
@@ -244,11 +287,15 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
             loop identity in relayed.sources {
                 if identity.path == path -> matched = true
             }
-            if !matched -> return jet_cli_perf_error("`--source` does not match the devserver browser session", JET_CLI_PERF_FIX, color)
+            if !matched {
+                return jet_cli_perf_error("`--source` does not match the devserver browser session", JET_CLI_PERF_FIX, color)
+            }
         }
         capture = jet_cli_perf_capture_browser(relayed, observations, target) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
     } else if source == .Val(path) {
-        if live_error == .Val(message) -> return jet_cli_perf_error(message, "start the program with `jet run --observe`, then attach", color)
+        if live_error == .Val(message) {
+            return jet_cli_perf_error(message, "start the program with `jet run --observe`, then attach", color)
+        }
         text: perf_files.read(path) ?? return jet_cli_perf_error("cannot read source {path}: {jet_cli_io_error_text(err)}", JET_CLI_PERF_FIX, color)
         capture = jet_cli_perf_capture_source(path, text, observations, None, target, None) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
     } else if live_error == None {
@@ -300,14 +347,22 @@ jet_cli_perf_attach_browser: fn(pid: Int, activate: Bool) -[FS, Env, Time]> JetC
 // `jet run --observe` it publishes nothing itself, so what its pid publishes
 // is the program, run in jet's place; a program that ran in a child process
 // publishes under the child's pid.
-JetCLIPerfSessionObserved: struct { root: [JetCLIPerfObservation], program: [JetCLIPerfObservation], program_pid: Int? }
+JetCLIPerfSessionObserved: struct {
+    root: [JetCLIPerfObservation]
+    program: [JetCLIPerfObservation]
+    program_pid: Int?
+}
 
 // One poll of the process tree under `root` at `at` ns into the session
 // (`poll_observe_snapshot`).
 jet_cli_perf_session_observe: fn(observed: &JetCLIPerfSessionObserved, root: Int, at: U64) Never! -[FS.Read, Env, Time]> {
-    if jet_cli_perf_live_read(root) == .Ok(live) -> jet_cli_perf_session_keep(observed.root, JetCLIPerfObservation{at_ns: at, live: live})
+    if jet_cli_perf_live_read(root) == .Ok(live) {
+        jet_cli_perf_session_keep(observed.root, JetCLIPerfObservation{at_ns: at, live: live})
+    }
     if observed.program_pid == .Val(pid) {
-        if jet_cli_perf_live_read(pid) == .Ok(live) -> jet_cli_perf_session_keep(observed.program, JetCLIPerfObservation{at_ns: at, live: live})
+        if jet_cli_perf_live_read(pid) == .Ok(live) {
+            jet_cli_perf_session_keep(observed.program, JetCLIPerfObservation{at_ns: at, live: live})
+        }
         return
     }
     pending := jet_cli_perf_session_children(root)

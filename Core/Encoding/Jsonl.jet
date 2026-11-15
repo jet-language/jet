@@ -31,8 +31,11 @@ use {
 /// record's LF is written before the next record, by `flush`, or by `finish`.
 JSONLWriter: struct<W: Writer> {
     output: stream.JSONLinesPush<W>
+
     write: fn(&self, value: &&Dyn) EncodingError! -[IO]> { self.output.write(value) }
+
     flush: fn(&self) EncodingError! -[IO]> { self.output.flush() }
+
     finish: fn(&self) EncodingError! -[IO]> { self.output.finish() }
 }
 
@@ -211,7 +214,6 @@ is_blank: fn(text: String) -> Bool Never! {
     true
 }
 
-
 #Test("JSONL text cursor skips blank records and retains record order") {
     cr: "\r"
     cursor := records("\t{cr}\n{{\"z\":1,\"a\":2}}{cr}\n \n3")
@@ -227,7 +229,7 @@ is_blank: fn(text: String) -> Bool Never! {
 
 #Test("JSONL anchors a record-local parse error to the whole text") {
     if parse(" \n1\n[}}\n") == {
-        .Ok(_) -> panic("invalid record accepted")
+        .Ok(_) -> { panic("invalid record accepted") }
         .Err(error) -> {
             assert(error.format == .JSONL)
             assert_eq(error.line, Val(3))
@@ -258,7 +260,7 @@ is_blank: fn(text: String) -> Bool Never! {
 #Test("JSONL text errors preserve record locations without a dollar suffix") {
     bad: Dyn.Float(Float.NAN)
     if to_string([Dyn]{bad}) == {
-        .Ok(_) -> panic("first non-finite row accepted")
+        .Ok(_) -> { panic("first non-finite row accepted") }
         .Err(error) -> {
             assert(error.format == .JSONL)
             assert(error.kind == .Unsupported)
@@ -269,7 +271,7 @@ is_blank: fn(text: String) -> Bool Never! {
         }
     }
     if dumps([Dyn]{Dyn.Int(12), bad}) == {
-        .Ok(_) -> panic("second non-finite row accepted")
+        .Ok(_) -> { panic("second non-finite row accepted") }
         .Err(error) -> {
             assert_eq(error.path, "/1")
             assert_eq(error.byte_offset, 3)
@@ -277,7 +279,7 @@ is_blank: fn(text: String) -> Bool Never! {
         }
     }
     if append_line("\n12", bad) == {
-        .Ok(_) -> panic("non-finite appended row accepted")
+        .Ok(_) -> { panic("non-finite appended row accepted") }
         .Err(error) -> {
             assert_eq(error.path, "/1")
             assert_eq(error.byte_offset, 4)

@@ -11,7 +11,7 @@ provider_cpan_fetch: fn(authority: RegistryAuthority, scratch: String, name: Str
             if pkg_json_parse_protocol(raw) == {
                 .Parsed(value) -> {
                     if provider_script_json_field(value, "distribution") == {
-                        .Val(found) -> distribution = pkg_json_text(found) ?? name
+                        .Val(found) -> { distribution = pkg_json_text(found) ?? name }
                         .None -> {}
                     }
                 }
@@ -29,7 +29,9 @@ provider_cpan_fetch: fn(authority: RegistryAuthority, scratch: String, name: Str
 provider_cpan_parse_search: fn(repository: String, distribution: String, raw: String) -> [RegistryPackage] RegistryError! {
     value: if pkg_json_parse_protocol(raw) == {
         .Parsed(tree) -> tree
-        .Failed(reason) -> { return Err(RegistryError.Reason("invalid MetaCPAN JSON: {reason}")) }
+        .Failed(reason) -> {
+            return Err(RegistryError.Reason("invalid MetaCPAN JSON: {reason}"))
+        }
     }
     hits: provider_script_json_get(value, "hits") ?? return Err(RegistryError.Reason("invalid MetaCPAN release search: {err.message()}"))
     inner: provider_script_json_get(hits, "hits") ?? return Err(RegistryError.Reason("invalid MetaCPAN release search: {err.message()}"))
@@ -39,7 +41,9 @@ provider_cpan_parse_search: fn(repository: String, distribution: String, raw: St
         release: provider_script_json_get(hit, "_source") ?? return Err(RegistryError.Reason("invalid MetaCPAN release hit: {err.message()}"))
         out.push(provider_cpan_parse_release(repository, release))
     }
-    if out.len() == 0 -> return Err(RegistryError.Reason("MetaCPAN has no releases for distribution `{distribution}`"))
+    if out.len() == 0 {
+        return Err(RegistryError.Reason("MetaCPAN has no releases for distribution `{distribution}`"))
+    }
     Ok(out)
 }
 
@@ -63,7 +67,9 @@ provider_cpan_parse_release: fn(repository: String, value: Dyn) -> RegistryPacka
                 if relationship != "requires" || phase != "runtime" -> next
                 dependency_name: provider_script_json_string(item, "module")
                 if dependency_name == "perl" -> next
-                if !provider_script_registry(ProviderFamily.Cpan).valid_name(dependency_name) -> return Err(RegistryError.Reason("unsafe CPAN dependency `{dependency_name}`"))
+                if !provider_script_registry(ProviderFamily.Cpan).valid_name(dependency_name) {
+                    return Err(RegistryError.Reason("unsafe CPAN dependency `{dependency_name}`"))
+                }
                 minimum := "0"
                 if provider_script_json_field(item, "version") == {
                     .Val(written) -> {
@@ -77,14 +83,16 @@ provider_cpan_parse_release: fn(repository: String, value: Dyn) -> RegistryPacka
         }
         .None -> {}
     }
-    Ok(RegistryPackage{
-        name: package_name,
-        version,
-        url: provider_script_absolutize(repository, url),
-        integrity: RegistryIntegrity.SHA256(pkg_ascii_lower(checksum)),
-        dependencies,
-        psr4: [String: [String]]{},
-    })
+    Ok(
+        RegistryPackage{
+            name: package_name,
+            version: version,
+            url: provider_script_absolutize(repository, url),
+            integrity: RegistryIntegrity.SHA256(pkg_ascii_lower(checksum)),
+            dependencies: dependencies,
+            psr4: [String:[String]]{},
+        },
+    )
 }
 
 // A pure-Perl distribution: its `lib` tree copied into the output's `lib`,
@@ -97,6 +105,8 @@ provider_cpan_install: fn(artifact: RegistryArtifact, out: String, scratch: Stri
     root: provider_registry_archive_root(unpack)
     provider_script_reject_tree_features(provider_script_registry(ProviderFamily.Cpan), root, [String]{})
     library: files.join(root, "lib")
-    if !files.is_dir(library) -> return Err(RegistryError.Reason("CPAN distribution `{artifact.package.name}` has no pure-Perl lib directory"))
+    if !files.is_dir(library) {
+        return Err(RegistryError.Reason("CPAN distribution `{artifact.package.name}` has no pure-Perl lib directory"))
+    }
     provider_script_copy_tree(library, files.join(out, "lib"))
 }

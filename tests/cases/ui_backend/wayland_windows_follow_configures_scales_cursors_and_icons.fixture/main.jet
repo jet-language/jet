@@ -2,6 +2,7 @@ package: {
     name: "wayland_windows_follow_configures_scales_cursors_and_icons"
     authority: { allow: [Env, IO, Net, Time] }
 }
+
 use {
     net: core.net
     sys: core.sys
@@ -22,20 +23,21 @@ use {
 // surface as `UIError.Protocol`.
 
 FakeMode: enum {
-    // wp_fractional_scale_v1 + wp_viewporter.
     Fractional
-    // wl_surface.preferred_buffer_scale (wl_compositor v6).
     Preferred
-    // wl_output.scale of the entered outputs (wl_compositor v4).
     Outputs
-    // Interactive resizes from each of the eight edges at 180/120: bursts
-    // of configures in the resizing state, overlapping the window's frames.
     Resize
-    // A wl_display.error answers the registry.
     DisplayError
-    // A one-word xdg_toplevel.configure.
     ShortEvent
 }
+
+// wp_fractional_scale_v1 + wp_viewporter.
+// wl_surface.preferred_buffer_scale (wl_compositor v6).
+// wl_output.scale of the entered outputs (wl_compositor v4).
+// Interactive resizes from each of the eight edges at 180/120: bursts
+// of configures in the resizing state, overlapping the window's frames.
+// A wl_display.error answers the registry.
+// A one-word xdg_toplevel.configure.
 
 // One step: a configure of `width` x `height` logical units (0 x 0 leaves
 // the size to the window) when `configure`, at `scale120` / 120. A step
@@ -145,7 +147,7 @@ Fake: struct {
     failures: [String]
 }
 
-fake_put: fn(&out: [U8], value: Int) {
+fake_put: fn(out: &[U8], value: Int) {
     v: value.bit_and(4294967295)
     out.push(U8{v.bit_and(255)})
     out.push(U8{(v >> 8).bit_and(255)})
@@ -180,14 +182,16 @@ fake_string: fn(bytes: [U8], at: Int) -> String {
     String.from_bytes(bytes[(at + 4)..<(at + 3 + length)]) ?? ""
 }
 
-fake_event: fn(&f: Fake, object: Int, opcode: Int, args: [U8]) {
+fake_event: fn(f: &Fake, object: Int, opcode: Int, args: [U8]) {
     fake_put(f.out, object)
     fake_put(f.out, ((args.len() + 8) << 16) + opcode)
     loop b in args -> f.out.push(b)
 }
 
-fake_flush: fn(&f: Fake) -[Net, Time]> {
-    if f.out.len() == 0 -> return
+fake_flush: fn(f: &Fake) -[Net, Time]> {
+    if f.out.len() == 0 {
+        return
+    }
     net.unix_send(f.stream, f.out, [sys.Fd]{}) ?? {
         f.failures.push("send failed: {err}")
         return
@@ -195,7 +199,7 @@ fake_flush: fn(&f: Fake) -[Net, Time]> {
     f.out.clear()
 }
 
-fake_fail: fn(&f: Fake, message: String) {
+fake_fail: fn(f: &Fake, message: String) {
     if f.failures.len() < 8 -> f.failures.push("step {f.step}: {message}")
 }
 
@@ -206,8 +210,12 @@ fake_pixels: fn(logical: Int, scale120: Int) -> Int {
 }
 
 fake_globals: fn(mode: FakeMode) -> [String] {
-    if mode == .Fractional -> return [String]{"wl_compositor", "wl_shm", "xdg_wm_base", "wp_fractional_scale_manager_v1", "wp_viewporter", "wl_output", "wl_seat", "wp_cursor_shape_manager_v1", "xdg_toplevel_icon_manager_v1"}
-    if mode == .Resize -> return [String]{"wl_compositor", "wl_shm", "xdg_wm_base", "wp_fractional_scale_manager_v1", "wp_viewporter", "wl_output"}
+    if mode == .Fractional {
+        return [String]{"wl_compositor", "wl_shm", "xdg_wm_base", "wp_fractional_scale_manager_v1", "wp_viewporter", "wl_output", "wl_seat", "wp_cursor_shape_manager_v1", "xdg_toplevel_icon_manager_v1"}
+    }
+    if mode == .Resize {
+        return [String]{"wl_compositor", "wl_shm", "xdg_wm_base", "wp_fractional_scale_manager_v1", "wp_viewporter", "wl_output"}
+    }
     [String]{"wl_compositor", "wl_shm", "xdg_wm_base", "wl_output"}
 }
 
@@ -221,7 +229,7 @@ fake_version: fn(mode: FakeMode, interface: String) -> Int {
 }
 
 // Announces `scale120` the way the mode does.
-fake_announce: fn(&f: Fake, scale120: Int) {
+fake_announce: fn(f: &Fake, scale120: Int) {
     f.scale120 = scale120
     if fake_fractional(f.mode) && f.fractional != 0 {
         id: f.fractional
@@ -239,7 +247,7 @@ fake_announce: fn(&f: Fake, scale120: Int) {
 }
 
 // A configure of `width` x `height`, in the resizing state if `resizing`.
-fake_configure: fn(&f: Fake, width: Int, height: Int, resizing: Bool) {
+fake_configure: fn(f: &Fake, width: Int, height: Int, resizing: Bool) {
     f.serial += 1
     f.pending_ack = true
     serial: f.serial
@@ -251,16 +259,14 @@ fake_configure: fn(&f: Fake, width: Int, height: Int, resizing: Bool) {
     if resizing {
         fake_put(args, 4)
         fake_put(args, 3)
-    } else {
-        fake_put(args, 0)
-    }
+    } else { fake_put(args, 0) }
     fake_event(f, toplevel, 0, args)
     fake_event(f, xdg_surface, 0, fake_words([Int]{serial}))
 }
 
 // Starts step `f.step`: its scale, then its configure, or the first of the
 // interactive resize's configures: six sizes on the way, then the last.
-fake_begin: fn(&f: Fake) {
+fake_begin: fn(f: &Fake) {
     step: f.steps[f.step].copy()
     f.reached = false
     f.settled = 0
@@ -281,7 +287,7 @@ fake_begin: fn(&f: Fake) {
 }
 
 // Configures the next `count` sizes of the interactive resize.
-fake_drag: fn(&f: Fake, count: Int) {
+fake_drag: fn(f: &Fake, count: Int) {
     sent := 0
     loop sent < count && f.drag.len() > 0 {
         size: f.drag[0].copy()
@@ -300,7 +306,7 @@ fake_buffer: fn(f: Fake, id: Int) -> FakeBuffer? {
 }
 
 // The state applied at a commit: an ack takes the configure's size.
-fake_commit: fn(&f: Fake) {
+fake_commit: fn(f: &Fake) {
     f.commits += 1
     acked: f.acked
     f.acked = -1
@@ -329,9 +335,7 @@ fake_commit: fn(&f: Fake) {
         loop k in 0..<f.configures.len() {
             if f.configures[k].serial == acked -> index = k
         }
-        if index < 0 {
-            fake_fail(f, "acked serial {acked}, which no unacked configure carries")
-        } else {
+        if index < 0 -> fake_fail(f, "acked serial {acked}, which no unacked configure carries") else {
             configure: f.configures[index].copy()
             if configure.width > 0 -> f.logical_w = configure.width
             if configure.height > 0 -> f.logical_h = configure.height
@@ -351,9 +355,15 @@ fake_commit: fn(&f: Fake) {
     } else {
         mapped = buffer.width == f.logical_w * f.buffer_scale && buffer.height == f.logical_h * f.buffer_scale
     }
-    if acked >= 0 && !matches -> fake_fail(f, "ack {acked} committed with a {buffer.width}x{buffer.height} buffer, not {want_w}x{want_h}")
-    if f.reached && !matches -> fake_fail(f, "a {buffer.width}x{buffer.height} buffer after {want_w}x{want_h} was shown")
-    if matches && !mapped -> fake_fail(f, "buffer {buffer.width}x{buffer.height} maps to {f.destination_w}x{f.destination_h} (buffer scale {f.buffer_scale}), not {f.logical_w}x{f.logical_h}")
+    if acked >= 0 && !matches {
+        fake_fail(f, "ack {acked} committed with a {buffer.width}x{buffer.height} buffer, not {want_w}x{want_h}")
+    }
+    if f.reached && !matches {
+        fake_fail(f, "a {buffer.width}x{buffer.height} buffer after {want_w}x{want_h} was shown")
+    }
+    if matches && !mapped {
+        fake_fail(f, "buffer {buffer.width}x{buffer.height} maps to {f.destination_w}x{f.destination_h} (buffer scale {f.buffer_scale}), not {f.logical_w}x{f.logical_h}")
+    }
     // The scale never changes in a resize, so every commit after the first
     // ack shows the acked size: a buffer of a size not yet acked would move
     // a window resized by its top or left edge.
@@ -377,7 +387,9 @@ fake_commit: fn(&f: Fake) {
             f.step += 1
             fake_begin(f)
         } else if f.pointer == 0 || f.cursor_done || f.settled >= 60 {
-            if f.pointer != 0 && !f.cursor_done -> fake_fail(f, "the cursor was not set again at the second enter")
+            if f.pointer != 0 && !f.cursor_done {
+                fake_fail(f, "the cursor was not set again at the second enter")
+            }
             f.closing = true
             toplevel: f.toplevel
             fake_event(f, toplevel, 1, [U8]{})
@@ -386,7 +398,7 @@ fake_commit: fn(&f: Fake) {
 }
 
 // The pointer enters the surface at (10, 10) with a fresh serial.
-fake_enter: fn(&f: Fake) {
+fake_enter: fn(f: &Fake) {
     f.enters += 1
     f.enter_serial = 100 + f.enters
     pointer: f.pointer
@@ -397,18 +409,18 @@ fake_enter: fn(&f: Fake) {
 
 // A cursor request at `serial`: `shape` 0 hides it. After the first hide
 // the pointer leaves and enters again, and the window must set it again.
-fake_cursor: fn(&f: Fake, serial: Int, shape: Int) {
+fake_cursor: fn(f: &Fake, serial: Int, shape: Int) {
     shown: if shape == 0 -> "hidden" else -> "shape {shape}"
     f.report.push("cursor {shown} at enter {f.enters}")
-    if serial != f.enter_serial -> fake_fail(f, "cursor set at serial {serial}, the latest enter is {f.enter_serial}")
+    if serial != f.enter_serial {
+        fake_fail(f, "cursor set at serial {serial}, the latest enter is {f.enter_serial}")
+    }
     if shape == 0 && f.enters == 1 {
         pointer: f.pointer
         surface: f.surface
         fake_event(f, pointer, 1, fake_words([Int]{serial, surface}))
         fake_enter(f)
-    } else if shape == 0 && f.enters == 2 {
-        f.cursor_done = true
-    }
+    } else if shape == 0 && f.enters == 2 { f.cursor_done = true }
 }
 
 fake_pool: fn(f: Fake, object: Int) -> Int {
@@ -418,7 +430,7 @@ fake_pool: fn(f: Fake, object: Int) -> Int {
     -1
 }
 
-fake_request: fn(&f: Fake, object: Int, opcode: Int, body: [U8]) -[Env]> {
+fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) -[Env]> {
     if object == 1 && opcode == 1 {
         f.registry = fake_u32(body, 0)
         registry: f.registry
@@ -447,7 +459,9 @@ fake_request: fn(&f: Fake, object: Int, opcode: Int, body: [U8]) -[Env]> {
         interface: fake_string(body, 4)
         length: fake_u32(body, 4)
         id: fake_u32(body, 8 + ((length + 3) /% 4) * 4 + 4)
-        if name < 1 || name > f.globals.len() || f.globals[name - 1] != interface -> fake_fail(f, "bound global {name} as {interface}")
+        if name < 1 || name > f.globals.len() || f.globals[name - 1] != interface {
+            fake_fail(f, "bound global {name} as {interface}")
+        }
         if interface == "wl_compositor" -> f.compositor = id
         if interface == "wl_shm" {
             f.shm = id
@@ -486,7 +500,9 @@ fake_request: fn(&f: Fake, object: Int, opcode: Int, body: [U8]) -[Env]> {
     }
     pool: fake_pool(f, object)
     if pool >= 0 {
-        if opcode == 0 -> f.buffers.push(FakeBuffer{id: fake_u32(body, 0), pool: pool, offset: fake_u32(body, 4), width: fake_u32(body, 8), height: fake_u32(body, 12), format: fake_u32(body, 20)})
+        if opcode == 0 {
+            f.buffers.push(FakeBuffer{id: fake_u32(body, 0), pool: pool, offset: fake_u32(body, 4), width: fake_u32(body, 8), height: fake_u32(body, 12), format: fake_u32(body, 20)})
+        }
         return
     }
     if object == f.wm_base && opcode == 2 {
@@ -516,7 +532,9 @@ fake_request: fn(&f: Fake, object: Int, opcode: Int, body: [U8]) -[Env]> {
                 fake_fail(f, "an icon buffer that is no wl_buffer")
                 return
             }
-            if buffer.width != buffer.height || buffer.format != 0 -> fake_fail(f, "icon buffer {buffer.width}x{buffer.height} in format {buffer.format}, not square ARGB8888")
+            if buffer.width != buffer.height || buffer.format != 0 {
+                fake_fail(f, "icon buffer {buffer.width}x{buffer.height} in format {buffer.format}, not square ARGB8888")
+            }
             f.icon_sides.push(buffer.width)
             if buffer.pool >= f.fds.len() {
                 fake_fail(f, "icon pool {buffer.pool} came without its descriptor")
@@ -536,10 +554,10 @@ fake_request: fn(&f: Fake, object: Int, opcode: Int, body: [U8]) -[Env]> {
         return
     }
     if object == f.icon_manager && opcode == 2 {
-        if fake_u32(body, 0) != f.toplevel -> fake_fail(f, "an icon for object {fake_u32(body, 0)}, not the toplevel")
-        if fake_u32(body, 4) == 0 {
-            f.report.push("icon unset")
-        } else {
+        if fake_u32(body, 0) != f.toplevel {
+            fake_fail(f, "an icon for object {fake_u32(body, 0)}, not the toplevel")
+        }
+        if fake_u32(body, 4) == 0 -> f.report.push("icon unset") else {
             f.report.push("icon {f.icon_name} with sides {f.icon_sides}, first pixels {f.icon_first}")
         }
         return
@@ -563,7 +581,9 @@ fake_request: fn(&f: Fake, object: Int, opcode: Int, body: [U8]) -[Env]> {
     }
     if object == f.cursor_manager && opcode == 1 {
         f.cursor_device = fake_u32(body, 0)
-        if fake_u32(body, 4) != f.pointer -> fake_fail(f, "a cursor-shape device for object {fake_u32(body, 4)}, not the pointer {f.pointer}")
+        if fake_u32(body, 4) != f.pointer {
+            fake_fail(f, "a cursor-shape device for object {fake_u32(body, 4)}, not the pointer {f.pointer}")
+        }
         return
     }
     if object == f.cursor_device && opcode == 1 {
@@ -599,7 +619,7 @@ fake_request: fn(&f: Fake, object: Int, opcode: Int, body: [U8]) -[Env]> {
 }
 
 // Handles every complete request in the inbox.
-fake_dispatch: fn(&f: Fake) -[Env]> {
+fake_dispatch: fn(f: &Fake) -[Env]> {
     at := 0
     loop f.inbox.len() - at >= 8 {
         object: fake_u32(f.inbox, at)
@@ -622,16 +642,63 @@ fake_dispatch: fn(&f: Fake) -[Env]> {
 fake_serve: fn(listener: net.UnixListener, mode: FakeMode, steps: [FakeStep]) -[Env, Net, Time, IO]> Fake {
     stream: net.unix_accept(listener) ?? panic("accept: {err}")
     f := Fake{
-        stream: stream, mode: mode, inbox: [U8]{}, out: [U8]{}, globals: fake_globals(mode),
-        registry: 0, compositor: 0, shm: 0, wm_base: 0, fractional_manager: 0, viewporter: 0, output: 0,
-        surface: 0, xdg_surface: 0, toplevel: 0, fractional: 0, viewport: 0,
-        seat: 0, pointer: 0, cursor_manager: 0, cursor_device: 0, enters: 0, enter_serial: -1,
-        pools: [Int]{}, fds: [sys.Fd]{}, buffers: [FakeBuffer]{},
-        attached: 0, current: 0, acked: -1, callbacks: [Int]{}, destination_w: 0, destination_h: 0, buffer_scale: 1, entered: false,
-        steps: steps, step: 0, serial: 0, configures: [FakeConfigure]{}, drag: [FakeSize]{}, drag_configures: 0,
-        logical_w: 300, logical_h: 200, scale120: 120,
-        icon_manager: 0, icon: 0, icon_name: "", icon_sides: [Int]{}, icon_first: [String]{},
-        reached: false, pending_ack: false, acked_any: false, settled: 0, closing: false, cursor_done: false, commits: 0, report: [String]{}, failures: [String]{},
+        stream: stream,
+        mode: mode,
+        inbox: [U8]{},
+        out: [U8]{},
+        globals: fake_globals(mode),
+        registry: 0,
+        compositor: 0,
+        shm: 0,
+        wm_base: 0,
+        fractional_manager: 0,
+        viewporter: 0,
+        output: 0,
+        surface: 0,
+        xdg_surface: 0,
+        toplevel: 0,
+        fractional: 0,
+        viewport: 0,
+        seat: 0,
+        pointer: 0,
+        cursor_manager: 0,
+        cursor_device: 0,
+        enters: 0,
+        enter_serial: -1,
+        pools: [Int]{},
+        fds: [sys.Fd]{},
+        buffers: [FakeBuffer]{},
+        attached: 0,
+        current: 0,
+        acked: -1,
+        callbacks: [Int]{},
+        destination_w: 0,
+        destination_h: 0,
+        buffer_scale: 1,
+        entered: false,
+        steps: steps,
+        step: 0,
+        serial: 0,
+        configures: [FakeConfigure]{},
+        drag: [FakeSize]{},
+        drag_configures: 0,
+        logical_w: 300,
+        logical_h: 200,
+        scale120: 120,
+        icon_manager: 0,
+        icon: 0,
+        icon_name: "",
+        icon_sides: [Int]{},
+        icon_first: [String]{},
+        reached: false,
+        pending_ack: false,
+        acked_any: false,
+        settled: 0,
+        closing: false,
+        cursor_done: false,
+        commits: 0,
+        report: [String]{},
+        failures: [String]{},
     }
     idle := 0
     loop idle < 40 {

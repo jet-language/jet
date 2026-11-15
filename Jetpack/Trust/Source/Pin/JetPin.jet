@@ -11,7 +11,11 @@
 //   T4  verbs: report, move, init
 use {
     jet_pkg_model.[
-        LockEnvelope, LockedToolchain, pkg_bytes_text, pkg_lock_record_toolchain, pkg_sha256_hex,
+        LockEnvelope,
+        LockedToolchain,
+        pkg_bytes_text,
+        pkg_lock_record_toolchain,
+        pkg_sha256_hex,
     ]
     jet_foundation.[Diagnostic, diagnostic_from_registry]
     jetpack_foundation.[PACKAGE_FILE, TOOLCHAIN_EXEC_MARKER_ENV, UNIFIED_LOCK_FILE]
@@ -27,7 +31,9 @@ use {
 // Ranges, empty values, a bare major and an unstaged `0.4` are E1249.
 trust_pin_classify_channel: fn(raw: String) -> String TrustError! {
     channel: trust_pin_channel_text(raw)
-    if trust_pin_is_version_channel(channel) || trust_pin_is_named_channel(channel) -> return Ok(channel)
+    if trust_pin_is_version_channel(channel) || trust_pin_is_named_channel(channel) {
+        return Ok(channel)
+    }
     Err(TrustError.Pin(trust_pin_e1249(raw)))
 }
 
@@ -68,7 +74,9 @@ trust_pin_is_named_channel: fn(channel: String) -> Bool Never! {
     if first < 97 || first > 122 -> return false
     loop byte in raw {
         code: Int{byte}
-        if !((code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code == TRUST_DASH) -> return false
+        if !((code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code == TRUST_DASH) {
+            return false
+        }
     }
     true
 }
@@ -85,7 +93,9 @@ trust_pin_channel_of: fn(version: String) -> String Never! {
 // A version channel resolves offline (`a0.4` -> `a0.4.0`, `a0.4.2` -> itself).
 // A named channel needs a realizable object, so it is E1251 here.
 trust_pin_resolve_channel: fn(channel: String) -[Env]> String TrustError! {
-    if !trust_pin_is_version_channel(channel) -> return Err(TrustError.Pin(trust_pin_e1251(channel, channel, trust_pin_current_platform())))
+    if !trust_pin_is_version_channel(channel) {
+        return Err(TrustError.Pin(trust_pin_e1251(channel, channel, trust_pin_current_platform())))
+    }
     Ok(trust_pin_version_of_channel(channel))
 }
 
@@ -108,7 +118,7 @@ trust_pin_toolchain_record: fn(channel: String, version: String) -[Env]> LockedT
     envelope := LockEnvelope.empty()
     envelope.platform = trust_pin_current_platform()
     envelope.provenance = "jet-{version} via toolchain"
-    LockedToolchain{id: trust_pin_object_id(version), channel, version, envelope}
+    LockedToolchain{id: trust_pin_object_id(version), channel: channel, version: version, envelope: envelope}
 }
 
 // `<arch>-<os>` as Rust `std::env::consts` spells it.
@@ -124,14 +134,15 @@ trust_pin_current_platform: fn() -[Env]> String {
 // ── T3: realize + re-exec the pinned toolchain ──
 
 JetPinDecision: enum {
-    // No pin, an in-channel running `jet`, or already the exec'd child.
     RunNative
-    // Re-exec into the realized pinned toolchain, marking the child with
-    // `version` so it runs natively.
     ReExec(binary: String, channel: String, version: String)
-    // A blocking diagnostic (bad pin, unlocked channel offline, cache miss).
     Report(Diagnostic)
 }
+
+// No pin, an in-channel running `jet`, or already the exec'd child.
+// Re-exec into the realized pinned toolchain, marking the child with
+// `version` so it runs natively.
+// A blocking diagnostic (bad pin, unlocked channel offline, cache miss).
 
 // Native-first dispatch: a running `jet` in the pinned channel runs the
 // build directly with no fetch, lock write, or exec. The channel resolves
@@ -142,7 +153,9 @@ trust_pin_decide: fn(root: String, running_version: String, offline: Bool) -[FS,
     raw_pin: trust_pin_identity_preparse(manifest).jet ?? return JetPinDecision.RunNative
     if trust_pin_is_range_pin(raw_pin) -> return JetPinDecision.RunNative
     channel: trust_pin_channel_text(raw_pin)
-    if !trust_pin_is_version_channel(channel) && !trust_pin_is_named_channel(channel) -> return JetPinDecision.Report(trust_pin_e1249(raw_pin))
+    if !trust_pin_is_version_channel(channel) && !trust_pin_is_named_channel(channel) {
+        return JetPinDecision.Report(trust_pin_e1249(raw_pin))
+    }
     running_channel: trust_pin_channel_of(running_version)
     locked: trust_pin_locked_toolchain(root)
     satisfied: if locked == {
@@ -154,17 +167,21 @@ trust_pin_decide: fn(root: String, running_version: String, offline: Bool) -[FS,
         .Val(toolchain) -> toolchain.version
         .None -> {
             if offline -> return JetPinDecision.Report(trust_pin_e1250(channel))
-            if !trust_pin_is_version_channel(channel) -> return JetPinDecision.Report(trust_pin_e1251(channel, channel, trust_pin_current_platform()))
+            if !trust_pin_is_version_channel(channel) {
+                return JetPinDecision.Report(trust_pin_e1251(channel, channel, trust_pin_current_platform()))
+            }
             trust_pin_version_of_channel(channel)
         }
     }
-    if running_version == target_version || running_channel == trust_pin_channel_of(target_version) -> return JetPinDecision.RunNative
+    if running_version == target_version || running_channel == trust_pin_channel_of(target_version) {
+        return JetPinDecision.RunNative
+    }
     binary: trust_pin_realized_binary() ?? return JetPinDecision.Report(trust_pin_e1251(channel, target_version, trust_pin_current_platform()))
     // Record the pin now, so re-runs read the lock instead of re-resolving.
     if locked == None {
         pkg_lock_record_toolchain(root, trust_pin_toolchain_record(channel, target_version)) ?? return JetPinDecision.Report(trust_pin_lock_write_diagnostic("{err}"))
     }
-    JetPinDecision.ReExec{binary, channel, version: target_version}
+    JetPinDecision.ReExec{binary: binary, channel: channel, version: target_version}
 }
 
 // The honest one-liner printed before handing off to a pinned toolchain.

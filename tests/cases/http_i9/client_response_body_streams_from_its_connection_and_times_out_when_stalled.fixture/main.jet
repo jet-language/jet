@@ -66,11 +66,13 @@ run: fn() (Closed | HTTPError | NetError | TaskFailure)! {
     print("half: {seen.join("|")}")
     stalled: http_client.request("GET", "http://{addr}/stalled").read_timeout(300).send() ?? panic("stalled")
     if stalled.text() == {
-        .Ok(text) -> print("stalled: read {text}")
+        .Ok(text) -> { print("stalled: read {text}") }
         .Err(error) -> {
             if error == {
                 .Timeout(phase) -> print("stalled: Timeout during {phase}")
-                .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .InvalidFraming | .UnsupportedEncoding | .Cancelled | .BodyTooLarge(_) | .Resolve(_) | .Connect(_) | .TLS(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> print("stalled: {error}")
+                .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .InvalidFraming | .UnsupportedEncoding | .Cancelled | .BodyTooLarge(_) | .Resolve(_) | .Connect(_) | .TLS(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> {
+                    print("stalled: {error}")
+                }
             }
         }
     }

@@ -50,7 +50,9 @@ sema_script_helper_writes: fn(stage: &&SemaComptimeDeclarationStage, candidates:
         writes := [String]{}
         loop parameter in function.params {
             // copy: the checked body keeps its parameter's name; the answer holds its own
-            if names.contains(parameter.name) && sema_script_body_writes(function.tree, parameter.local, passed) -> writes.push(parameter.name.copy())
+            if names.contains(parameter.name) && sema_script_body_writes(function.tree, parameter.local, passed) {
+                writes.push(parameter.name.copy())
+            }
         }
         // copy: `candidates` keeps its key
         written[helper.copy()] = writes
@@ -65,7 +67,9 @@ sema_script_probe_open: fn(stage: &&SemaComptimeDeclarationStage) -> SemaScriptP
     graph := taken.move() ?? return None
     module_index: sema_registration_module_index(graph, graph.entry_module_identity) ?? return None
     types := [TTypeDef]{}
-    loop row in 0..<declarations.modules.len() -> compiler_transfer_rows<TTypeDef>(types, declarations.modules[row].declarations.type_defs)
+    loop row in 0..<declarations.modules.len() {
+        compiler_transfer_rows<TTypeDef>(types, declarations.modules[row].declarations.type_defs)
+    }
     environment := sema_check_pass_environment(graph, types, SemaComptimeBodyValues{})
     program := SemaProgramTables{
         registration_graph: environment.registration_graph.move(),
@@ -103,7 +107,9 @@ sema_script_probe_check: fn(probe: &SemaScriptProbe, name: String) -> FnBody? {
 // The row of the top-level function `name` among an entry file's items.
 sema_script_entry_function_item: fn(items: [Item], name: String) -> Int? Never! {
     loop (index, item) in items {
-        if item == .Func(function) && function.name == name && function.external_type == None -> return Val(index)
+        if item == .Func(function) && function.name == name && function.external_type == None {
+            return Val(index)
+        }
     }
     None
 }
@@ -112,7 +118,9 @@ sema_script_entry_function_item: fn(items: [Item], name: String) -> Int? Never! 
 sema_script_entry_bound_types: fn(function: FnBody, names: [String], found: &[String:SemaScriptVariable]) Never! {
     loop index in function.body {
         if body_stmt(function.tree, index) == .Let(local, _, _, _, _, _) {
-            if names.contains(local.name) -> found[local.name] = SemaScriptVariable{ty: local.ty, mutable: local.mutable}
+            if names.contains(local.name) {
+                found[local.name] = SemaScriptVariable{ty: local.ty, mutable: local.mutable}
+            }
         }
     }
 }
@@ -125,15 +133,25 @@ sema_script_body_writes: fn(tree: BodyTree, parameter: TLocal, passed: [Int]) ->
     loop statement in tree.stmts {
         if statement == .Assign(place, _, _, _, _) {
             if place == {
-                .Local(local) -> if sema_script_same_local(local, parameter) -> return true
-                .Expr(value) -> if sema_script_place_rooted_at(tree, value, parameter, passed) -> return true
+                .Local(local) -> {
+                    if sema_script_same_local(local, parameter) -> return true
+                }
+                .Expr(value) -> {
+                    if sema_script_place_rooted_at(tree, value, parameter, passed) -> return true
+                }
             }
         }
     }
     loop node in tree.nodes {
-        if node.kind == .Borrow(place, access) && access == AccessConvention.Write && sema_script_place_rooted_at(tree, place, parameter, passed) -> return true
-        if node.kind == .Index(base, _, _, access, _, _) && access == AccessConvention.Write && sema_script_place_rooted_at(tree, base, parameter, passed) -> return true
-        if node.kind == .BuiltinMethod(receiver, operation, _) && checked_builtin_mutates_receiver(operation) && sema_script_place_rooted_at(tree, receiver, parameter, passed) -> return true
+        if node.kind == .Borrow(place, access) && access == AccessConvention.Write && sema_script_place_rooted_at(tree, place, parameter, passed) {
+            return true
+        }
+        if node.kind == .Index(base, _, _, access, _, _) && access == AccessConvention.Write && sema_script_place_rooted_at(tree, base, parameter, passed) {
+            return true
+        }
+        if node.kind == .BuiltinMethod(receiver, operation, _) && checked_builtin_mutates_receiver(operation) && sema_script_place_rooted_at(tree, receiver, parameter, passed) {
+            return true
+        }
     }
     false
 }
@@ -149,7 +167,9 @@ sema_script_passed_on: fn(tree: BodyTree) -> [Int] Never! {
                 at := argument.value
                 if body_node(tree, at).kind == .Borrow(place, _) -> at = place
                 read: body_node(tree, at)
-                if read.kind == .Local(_) && read.span.start == node.span.start && read.span.end == node.span.end -> passed.push(at)
+                if read.kind == .Local(_) && read.span.start == node.span.start && read.span.end == node.span.end {
+                    passed.push(at)
+                }
             }
         }
     }
@@ -162,16 +182,12 @@ sema_script_place_rooted_at: fn(tree: BodyTree, id: Int, parameter: TLocal, pass
     at := id
     loop _ in 0..<tree.nodes.len() {
         node: body_node(tree, at)
-        if node.kind == .Local(local) -> return !passed.contains(at) && sema_script_same_local(local, parameter)
-        if node.kind == .Field(receiver, _) {
-            at = receiver
-        } else if node.kind == .Index(base, _, _, _, _, _) {
-            at = base
-        } else if node.kind == .Borrow(place, _) {
-            at = place
-        } else {
-            return false
+        if node.kind == .Local(local) {
+            return !passed.contains(at) && sema_script_same_local(local, parameter)
         }
+        if node.kind == .Field(receiver, _) -> at = receiver else if node.kind == .Index(base, _, _, _, _, _) {
+            at = base
+        } else if node.kind == .Borrow(place, _) { at = place } else { return false }
     }
     false
 }
@@ -201,7 +217,9 @@ sema_script_functions: fn(items: [Item]) -> [String] Never! {
     functions := [String]{}
     loop item in items {
         // copy: the function keeps its name; the row list holds one per function
-        if item == .Func(function) && sema_script_function(function) -> functions.push(function.name.copy())
+        if item == .Func(function) && sema_script_function(function) {
+            functions.push(function.name.copy())
+        }
     }
     functions
 }
@@ -218,14 +236,20 @@ sema_script_function_uses: fn(function: Func, locals: [String], functions: [Stri
 sema_script_note_use: fn(uses: &SemaScriptUses, locals: [String], functions: [String], function: Func, expression: Expr) Never! {
     if expression == .Ident(name, _, _) {
         // copy: the expression keeps its name; the list owns one per variable
-        if locals.contains(name) && !uses.variables.contains(name) && !sema_script_function_hides(function, name) -> uses.variables.push(name.copy())
+        if locals.contains(name) && !uses.variables.contains(name) && !sema_script_function_hides(function, name) {
+            uses.variables.push(name.copy())
+        }
         sema_script_note_function(uses, functions, function, name)
     }
-    if expression == .Call(call, _) -> sema_script_note_function(uses, functions, function, call.name)
+    if expression == .Call(call, _) {
+        sema_script_note_function(uses, functions, function, call.name)
+    }
 }
 
 sema_script_note_function: fn(uses: &SemaScriptUses, functions: [String], function: Func, name: String) Never! {
-    if sema_script_function_hides(function, name) -> return
+    if sema_script_function_hides(function, name) {
+        return
+    }
     loop (row, candidate) in functions {
         if candidate == name {
             if !uses.functions.contains(row) -> uses.functions.push(row)
@@ -250,7 +274,9 @@ sema_script_function_hides: fn(function: Func, name: String) -> Bool Never! {
 // default a call filled in for it, is a script variable's: such a parameter's
 // default names the parameter itself, at the function's name.
 sema_script_variable_default: fn(argument: Expr, parameter: SemaCallParam) -> Span? Never! {
-    if argument == .Ident(name, at, id) && id == AST_NODE_GENERATED && name == parameter.name -> return Val(at)
+    if argument == .Ident(name, at, id) && id == AST_NODE_GENERATED && name == parameter.name {
+        return Val(at)
+    }
     None
 }
 
@@ -363,7 +389,9 @@ sema_script_chain_text: fn(chain: [String]) -> String Never! {
 // the file's declarations.
 sema_script_lines_hold: fn(items: [Item], span: Span) -> Bool Never! {
     loop item in items {
-        if item == .Func(function) && function.name == "run" && function.external_type == None -> next
+        if item == .Func(function) && function.name == "run" && function.external_type == None {
+            next
+        }
         declared: sema_compiler_index_item_span(item)
         if declared.start <= span.start && span.end <= declared.end -> return false
     }
@@ -389,6 +417,8 @@ sema_script_alias_diagnostic: fn(helper: String, parameter: SemaCallParam, activ
     writes: parameter.convention == AccessConvention.Write
     through: if writes -> "change it through its extra `&` parameter `{variable}:`" else -> "read it through its extra parameter `{variable}:`"
     passes: if writes -> "`{helper}` changes the script's `{variable}`, so each call passes it as an extra `&` parameter" else -> "`{helper}` reads the script's `{variable}`, so each call passes it as an extra parameter"
-    if active_write -> return sema_error("E0204", span, "`{variable}` is being changed in this call, so `{helper}` can't also {through}", "{passes}, and while something is being changed through a write parameter, nobody else may be looking at it", "pass `{variable}` only once, or pass a copy of it")
+    if active_write {
+        return sema_error("E0204", span, "`{variable}` is being changed in this call, so `{helper}` can't also {through}", "{passes}, and while something is being changed through a write parameter, nobody else may be looking at it", "pass `{variable}` only once, or pass a copy of it")
+    }
     sema_error("E0204", span, "`{variable}` is already shared in this call, so `{helper}` can't also {through}", "{passes}, and while something is being looked at, nobody else may be changing it", "drop the extra use of `{variable}`, or pass a copy of it there")
 }

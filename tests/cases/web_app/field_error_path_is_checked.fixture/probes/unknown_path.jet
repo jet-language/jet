@@ -8,10 +8,16 @@ use {
 
 check: fn(draft: logic.TaskDraft) -> [FieldError] {
     errors := [FieldError]{}
-    if draft.assignee == None -> errors.push(app.field_error(at: "asignee", reason: "Pick someone."))
-    loop (index, step) in draft.steps {
-        if step.title == "" -> errors.push(app.field_error(at: "steps[{index}].name", reason: "Give the step a title."))
+    if draft.assignee == None {
+        errors.push(app.field_error(at: "asignee", reason: "Pick someone."))
     }
-    if draft.title == "" -> errors.push(app.field_error(at: "title[0]", reason: "Give the task a title."))
+    loop (index, step) in draft.steps {
+        if step.title == "" {
+            errors.push(app.field_error(at: "steps[{index}].name", reason: "Give the step a title."))
+        }
+    }
+    if draft.title == "" {
+        errors.push(app.field_error(at: "title[0]", reason: "Give the task a title."))
+    }
     errors
 }

@@ -1,12 +1,11 @@
 // `jet inspect live` transport: jet_foundation's secure snapshot read plus
 // the closed event-observation projection.
-use {
-    jet_foundation.[JetLiveSnapshot, jet_live_read, jet_live_snapshot_path]
-}
+use jet_foundation.[JetLiveSnapshot, jet_live_read, jet_live_snapshot_path]
 
 jet_cli_live_read: fn(pid: Int) -[FS, Env, Time]> JetLiveSnapshot JetCLIReadError! {
     jet_cli_live_read_at(pid, jet_live_snapshot_path(pid))
 }
+
 // Explicit path is the private transport boundary (also used by filesystem
 // witnesses); command callers always select the runtime's canonical path.
 jet_cli_live_read_at: fn(pid: Int, path: String) -[FS, Env, Time]> JetLiveSnapshot JetCLIReadError! {

@@ -10,13 +10,13 @@ hash: fn(data: [U8], seed: U32) -[]> U32 {
 
         loop _block in 0..<nblocks {
             k1 := reader.read_u32_le() ?? panic("Murmur block is truncated")
-            k1 = k1 * c1
+            k1 *= c1
             k1 = k1.rotate_left(15)
-            k1 = k1 * c2
+            k1 *= c2
             h1 = h1.bit_xor(k1)
             h1 = h1.rotate_left(13)
-            h1 = h1 * U32{5}
-            h1 = h1 + U32{0xe6546b64}
+            h1 *= U32{5}
+            h1 += U32{0xe6546b64}
         }
 
         tail: nblocks * 4
@@ -26,18 +26,18 @@ hash: fn(data: [U8], seed: U32) -[]> U32 {
         if tail_len >= 2 -> k1 = k1.bit_xor(U32{data[tail + 1]} << 8)
         if tail_len >= 1 -> k1 = k1.bit_xor(U32{data[tail]})
         if tail_len != 0 {
-            k1 = k1 * c1
+            k1 *= c1
             k1 = k1.rotate_left(15)
-            k1 = k1 * c2
+            k1 *= c2
             h1 = h1.bit_xor(k1)
         }
 
         length: checked(U32{data.len()}) ?? U32{0}
         h1 = h1.bit_xor(length)
         h1 = h1.bit_xor(h1 >> 16)
-        h1 = h1 * U32{0x85ebca6b}
+        h1 *= U32{0x85ebca6b}
         h1 = h1.bit_xor(h1 >> 13)
-        h1 = h1 * U32{0xc2b2ae35}
+        h1 *= U32{0xc2b2ae35}
         return h1.bit_xor(h1 >> 16)
     }
 }

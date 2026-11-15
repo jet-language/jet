@@ -1,10 +1,13 @@
-use web: core.web
-use server: core.http.server
+use {
+    web: core.web
+    server: core.http.server
+}
 
 // A mark's method meets the same check as `mux.custom`: POST has its own mark.
 Posts: struct {
-    #Server.Custom("POST", "/marked")
-    post: fn(self) -> HTTPResponse HTTPError! { Ok(server.response(200, "post")) }
+    #Server.Custom("POST", "/marked") post: fn(self) -> HTTPResponse HTTPError! {
+        Ok(server.response(200, "post"))
+    }
 }
 
 run: fn() {

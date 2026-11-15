@@ -1,12 +1,11 @@
 #Target(Web)
+
 use ui: core.ui
 
 #Target(JS)
 render_tree: fn(with_role: Bool) {
     tree := ui.node("plain", 80.0, 24.0)
-    if with_role {
-        tree = ui.node_role("Named", 80.0, 24.0, ui.aria_role_label())
-    }
+    if with_role -> tree = ui.node_role("Named", 80.0, 24.0, ui.aria_role_label())
     backend := ui.null_backend()
     size := backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
     backend.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))

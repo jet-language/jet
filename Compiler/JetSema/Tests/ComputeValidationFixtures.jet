@@ -3,19 +3,43 @@
 // pretend it checked a Core autodiff callback. Expected diagnostics are explicit.
 use {
     jet_sema.[
-        SemaBuildFacts, SemaComptimeFunctionResult, SemaComptimeItemValue, SemaComputeCallFact,
-        SemaComputeValidationWork, SemaForeignProviderInput, SemaGraphModuleResult,
-        SemaRegistrationForeignHandleFacts, SemaRegistrationHostHooks, SemaRegistrationImportEdge,
-        SemaRegistrationModuleInput, SemaRegistrationPackagePolicy, SemaSourceOrigin, SemaSourceSegment,
-        sema_check_context_init, sema_collect_comptime_declarations, sema_compute_note_panic,
-        sema_compute_record_autodiff_obligation, sema_compute_validate_autodiff_purity, sema_error,
-        sema_finalize_registration_graph, sema_function_compute_facts, sema_has_error_since,
+        SemaBuildFacts,
+        SemaComptimeFunctionResult,
+        SemaComptimeItemValue,
+        SemaComputeCallFact,
+        SemaComputeValidationWork,
+        SemaForeignProviderInput,
+        SemaGraphModuleResult,
+        SemaRegistrationForeignHandleFacts,
+        SemaRegistrationHostHooks,
+        SemaRegistrationImportEdge,
+        SemaRegistrationModuleInput,
+        SemaRegistrationPackagePolicy,
+        SemaSourceOrigin,
+        SemaSourceSegment,
+        sema_check_context_init,
+        sema_collect_comptime_declarations,
+        sema_compute_note_panic,
+        sema_compute_record_autodiff_obligation,
+        sema_compute_validate_autodiff_purity,
+        sema_error,
+        sema_finalize_registration_graph,
+        sema_function_compute_facts,
+        sema_has_error_since,
         sema_registration_prepare_graph,
     ]
     jet_parser.[parse_source]
     jet_driver.[jet_driver_canonical_effect_module]
     jet_foundation.[
-        Diagnostic, Span, SymbolKind, compiler_threads_single, effect_vocabulary_module, jet_target_machine_hosted, module_intern, module_table, symbol_key_text,
+        Diagnostic,
+        Span,
+        SymbolKind,
+        compiler_threads_single,
+        effect_vocabulary_module,
+        jet_target_machine_hosted,
+        module_intern,
+        module_table,
+        symbol_key_text,
     ]
 }
 
@@ -58,7 +82,9 @@ compute_fixture_modules: fn(label: String, source: String, failures: &[String]) 
     if !checked.complete {
         reasons := [String]{}
         loop module_row in checked.modules {
-            loop reason in module_row.incomplete_reasons -> reasons.push("{module_row.module_name}: {reason}")
+            loop reason in module_row.incomplete_reasons {
+                reasons.push("{module_row.module_name}: {reason}")
+            }
         }
         failures.push("{label}: real body/effect check failed; dependent validator cases BLOCKED {reasons:Debug} {checked.diagnostics:Debug}")
         return None
@@ -106,8 +132,12 @@ compute_fixture_compare: fn(label: String, modules: [SemaGraphModuleResult], exp
     before: "{modules:Debug}"
     work := SemaComputeValidationWork{counting: true}
     indexed: sema_compute_validate_autodiff_purity(modules, work)
-    if "{indexed:Debug}" != "{expected:Debug}" -> failures.push("{label}: exact ordered diagnostic/span/text differs: {indexed:Debug}, expected {expected:Debug}")
-    if "{modules:Debug}" != before -> failures.push("{label}: borrowed validation changed the original solved products")
+    if "{indexed:Debug}" != "{expected:Debug}" {
+        failures.push("{label}: exact ordered diagnostic/span/text differs: {indexed:Debug}, expected {expected:Debug}")
+    }
+    if "{modules:Debug}" != before {
+        failures.push("{label}: borrowed validation changed the original solved products")
+    }
     function_count := 0
     fact_count := 0
     loop module_row in modules {
@@ -115,7 +145,9 @@ compute_fixture_compare: fn(label: String, modules: [SemaGraphModuleResult], exp
         fact_count += module_row.compute_facts.len()
     }
     if expected_index {
-        if work.indexed_functions != function_count || work.indexed_facts != fact_count -> failures.push("{label}: actual index row visits are not one per original row")
+        if work.indexed_functions != function_count || work.indexed_facts != fact_count {
+            failures.push("{label}: actual index row visits are not one per original row")
+        }
     } else if work.indexed_functions != 0 || work.indexed_facts != 0 || work.function_queries != 0 || work.fact_queries != 0 {
         failures.push("{label}: zero actual obligations still indexed or queried functions")
     }
@@ -179,7 +211,9 @@ compute_fixture_size: fn(size: Int, failures: &[String]) {
     diagnostics: sema_compute_validate_autodiff_purity(modules, work)
     // One target lookup, plus one per function the reach walk visits: `f_0`
     // calls nothing, so the walk visits only the target itself.
-    if diagnostics.len() != 0 || work.indexed_functions != size || work.function_queries != 2 || work.fact_queries != 1 -> failures.push("{size}: actual indexed row/query work is not N/2/1 (indexed {work.indexed_functions}, function queries {work.function_queries}, fact queries {work.fact_queries})")
+    if diagnostics.len() != 0 || work.indexed_functions != size || work.function_queries != 2 || work.fact_queries != 1 {
+        failures.push("{size}: actual indexed row/query work is not N/2/1 (indexed {work.indexed_functions}, function queries {work.function_queries}, fact queries {work.fact_queries})")
+    }
     compute_fixture_compare("{size} indexed functions", modules, [Diagnostic]{}, true, failures)
 }
 
@@ -189,5 +223,7 @@ compute_fixture_size: fn(size: Int, failures: &[String]) {
     compute_fixture_size(64, failures)
     compute_fixture_size(128, failures)
     compute_fixture_size(256, failures)
-    if failures.len() > 0 -> panic("ComputeValidationFixtures collected {failures.len()} failures:\n{failures.join("\n")}")
+    if failures.len() > 0 {
+        panic("ComputeValidationFixtures collected {failures.len()} failures:\n{failures.join("\n")}")
+    }
 }

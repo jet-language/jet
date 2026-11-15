@@ -9,15 +9,20 @@ journey_digits: fn(number: I64) -> I64 {
     }
     count
 }
-journey_label_columns: fn(index: I64) -> I64 { if (index == I64{0}) -> I64{12} else -> journey_digits(index) + I64{1} }
+
+journey_label_columns: fn(index: I64) -> I64 {
+    if (index == I64{0}) -> I64{12} else -> journey_digits(index) + I64{1}
+}
+
 journey_fixed_columns: fn(hop: I64, index: I64, note: Bool) -> I64 {
     cols := I64{2} + journey_label_columns(index) + I64{1} + jet_char_len(rt_text_word(wrapping(hop + HOP_FUNCTION))) + I64{2} + I64{1} + journey_digits(rt_text_word(wrapping(hop + HOP_LINE))) + I64{1}
     count: rt_text_word(wrapping(hop + HOP_COUNT))
-    if (count > I64{1}) -> cols += I64{2} + journey_digits(count)
+    if (count > I64{1}) { cols += I64{2} + journey_digits(count) }
     text: rt_text_word(wrapping(hop + HOP_NOTE))
-    if (note && rt_text_len(text) != I64{0}) -> cols += I64{3} + jet_char_len(text)
+    if (note && rt_text_len(text) != I64{0}) { cols += I64{3} + jet_char_len(text) }
     cols
 }
+
 journey_label: fn(out: I64, index: I64) {
     if (index == I64{0}) {
         rt_text_push_word(out, I64{7503107365972566374}, I64{8})
@@ -27,11 +32,16 @@ journey_label: fn(out: I64, index: I64) {
         rt_text_push_scalar(out, I64{46})
     }
 }
-journey_color_start: fn(out: I64, color: Bool) { if color -> rt_text_push_word(out, I64{30741465637477147}, I64{7}) }
+
+journey_color_start: fn(out: I64, color: Bool) {
+    if color -> rt_text_push_word(out, I64{30741465637477147}, I64{7})
+}
+
 journey_color_end: fn(out: I64, color: Bool) {
     if color -> rt_text_push_word(out, I64{1831885595}, I64{4})
     rt_text_push_scalar(out, I64{10})
 }
+
 // Return offset into the original UTF8 path and whether to prefix an ellipsis.
 // Whole path segments shed first; basename is always the floor.
 journey_path_start: fn(file: I64, budget: I64) -> (offset: I64, ellipsis: Bool) {
@@ -47,11 +57,12 @@ journey_path_start: fn(file: I64, budget: I64) -> (offset: I64, ellipsis: Bool) 
         remaining -= I64{1}
         if (scalar == I64{47}) {
             start = at
-            if (remaining + I64{2} <= budget) -> return (offset: start, ellipsis: true)
+            if (remaining + I64{2} <= budget) { return (offset: start, ellipsis: true) }
         }
     }
     (offset: start, ellipsis: false)
 }
+
 journey_hop_line: fn(out: I64, hop: I64, index: I64, width: I64, budget: I64, color: Bool) {
     file: rt_text_word(wrapping(hop + HOP_FILE))
     start: if (width == I64{0}) -> (offset: I64{0}, ellipsis: false) else -> journey_path_start(file, budget)
@@ -79,7 +90,7 @@ journey_hop_line: fn(out: I64, hop: I64, index: I64, width: I64, budget: I64, co
     journey_label(out, index)
     rt_text_push_scalar(out, I64{32})
     err_append(out, rt_text_word(wrapping(hop + HOP_FUNCTION)))
-    rt_text_push_word(out, I64{10272}, I64{2}) // space + (
+    rt_text_push_word(out, I64{10272}, I64{2})  // space + (
     if start.ellipsis {
         rt_text_push_scalar(out, I64{8230})
         rt_text_push_scalar(out, I64{47})
@@ -111,12 +122,15 @@ journey_hop_line: fn(out: I64, hop: I64, index: I64, width: I64, budget: I64, co
     journey_color_end(out, color)
     journey_source_line(out, hop, width, color)
 }
+
 // #6014: the hop's trimmed source line under its header, indented six
 // columns; none outside checked sources. A width budget keeps it to one row.
 journey_source_line: fn(out: I64, hop: I64, width: I64, color: Bool) {
     source: rt_text_word(wrapping(hop + HOP_SOURCE))
     length: rt_text_len(source)
-    if (length == I64{0}) -> return
+    if (length == I64{0}) {
+        return
+    }
     journey_color_start(out, color)
     rt_text_push_word(out, I64{35322350018592}, I64{6})
     data: rt_text_data(source)
@@ -130,14 +144,13 @@ journey_source_line: fn(out: I64, hop: I64, width: I64, color: Bool) {
         }
         rt_text_append(out, data, at)
         rt_text_push_scalar(out, I64{8230})
-    } else {
-        rt_text_append(out, data, length)
-    }
+    } else { rt_text_append(out, data, length) }
     journey_color_end(out, color)
 }
+
 #Export(c) jet_journey_render_styled: fn(journey: I64, color: Bool, width: I64) -> I64 {
     out: jet_rt_string_builder_new()
-    if (journey == I64{0}) -> return out
+    if (journey == I64{0}) { return out }
     origin: rt_text_word(wrapping(journey + JOURNEY_ORIGIN))
     count: rt_text_word(wrapping(journey + JOURNEY_HOPS))
     data: rt_text_word(wrapping(wrapping(journey + JOURNEY_HOPS) + I64{16}))
@@ -152,17 +165,15 @@ journey_source_line: fn(out: I64, hop: I64, width: I64, color: Bool) {
         row += I64{1}
     }
     budget: if width > widest -> width - widest else -> I64{0}
-    if (origin != I64{0}) -> journey_hop_line(out, origin, I64{0}, width, budget, color)
+    if (origin != I64{0}) { journey_hop_line(out, origin, I64{0}, width, budget, color) }
     if (count != I64{0}) {
         journey_color_start(out, color)
         jet_rt_string_builder_push(out, rt_static_text(" Trail [E3002] ("))
         rt_text_push_number(out, total)
         jet_rt_string_builder_push(out, rt_static_text(" call"))
-        if (total != I64{1}) -> rt_text_push_scalar(out, I64{115})
+        if (total != I64{1}) { rt_text_push_scalar(out, I64{115}) }
         full_columns: I64{16} + journey_digits(total) + I64{5} + (if (total == I64{1}) -> I64{0} else -> I64{1}) + I64{29}
-        if (width != I64{0} && full_columns > width) {
-            rt_text_push_word(out, I64{14889}, I64{2})
-        } else {
+        if (width != I64{0} && full_columns > width) { rt_text_push_word(out, I64{14889}, I64{2}) } else {
             jet_rt_string_builder_push(out, rt_static_text(" passed it up, origin first):"))
         }
         journey_color_end(out, color)

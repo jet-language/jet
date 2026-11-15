@@ -40,7 +40,7 @@ control_loop: fn() -> ControlStats {
         sum_jitter += jitter
         if jitter > 0 -> missed += 1
         ticks += 1
-        next_due = next_due + 1ms
+        next_due += 1ms
     }
 
     return ControlStats{
@@ -57,12 +57,12 @@ run: fn() {
     // cancellation. The callback does bounded work only: one pass over its
     // fixed-size input, with no allocation, wait, or I/O.
     stream := rt.callback(
-    48000,
-    256,
-    fn(samples) {
-        total := Float{0.0}
-        loop sample in samples -> total += sample
-    },
+        48000,
+        256,
+        fn(samples) {
+            total := Float{0.0}
+            loop sample in samples -> total += sample
+        },
     )
     stream.next_deadline().drop("the stream is armed; this run does not schedule against its first deadline")
 

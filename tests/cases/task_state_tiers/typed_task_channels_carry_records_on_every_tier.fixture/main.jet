@@ -13,9 +13,7 @@ Order: struct {
     tags: [String]
 }
 
-show: fn(order: Order) -> String {
-    "{order.id} {order.item} [{order.tags.join(",")}]"
-}
+show: fn(order: Order) -> String { "{order.id} {order.item} [{order.tags.join(",")}]" }
 
 state: fn<T>(value: T?) -> String {
     if value == {
@@ -25,7 +23,7 @@ state: fn<T>(value: T?) -> String {
 }
 
 run: fn() {
-    { sender, receiver }: channel<Order>(2)
+    (sender, receiver): channel<Order>(2)
     sender.send(Order{id: 1, item: "tea", tags: [String]{"hot", "green"}})
     sender.send(Order{id: 2, item: "cake", tags: [String]{}})
     sender.close()

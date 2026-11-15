@@ -3,17 +3,16 @@
 // truncation or raw-word equality: numerical CAS holds an observed owner until
 // publication finishes.
 
-#Export(c) jet_rt_atomic_int_init: fn(place: I64, value: I64) {
-    atomic_word_init(place, value)
-}
+#Export(c) jet_rt_atomic_int_init: fn(place: I64, value: I64) { atomic_word_init(place, value) }
+
 #Export(c) jet_rt_atomic_int_load: fn(place: I64) -> I64 { jet_rt_int_clone_atomic(place) }
+
 #Export(c) jet_rt_atomic_int_store: fn(place: I64, value: I64) {
     previous: sync_swap(place, value)
     jet_rt_int_drop(previous)
 }
-#Export(c) jet_rt_atomic_int_drop: fn(place: I64) {
-    jet_rt_int_drop(sync_swap(place, I64{0}))
-}
+
+#Export(c) jet_rt_atomic_int_drop: fn(place: I64) { jet_rt_int_drop(sync_swap(place, I64{0})) }
 
 #Export(c) jet_rt_atomic_int_add: fn(place: I64, delta: I64) -> I64 {
     loop {
@@ -41,10 +40,10 @@
             return false
         }
         if atomic_word_cas(place, current, replacement) {
-            jet_rt_int_drop(current) // removed publication owner
-            jet_rt_int_drop(current) // numeric-equality/ABA guard owner
+            jet_rt_int_drop(current)  // removed publication owner
+            jet_rt_int_drop(current)  // numeric-equality/ABA guard owner
             jet_rt_int_drop(expected)
-            return true // replacement owner transfers into the cell
+            return true  // replacement owner transfers into the cell
         }
         jet_rt_int_drop(current)
     }

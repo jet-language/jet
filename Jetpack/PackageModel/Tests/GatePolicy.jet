@@ -3,7 +3,13 @@
 use {
     jet_pkg_model.[PackageGateError, pkg_check_invocation_flags, pkg_gate_refusal]
     jet_foundation.[
-        Diagnostic, PolicyDeclaration, PolicyKey, PolicyScope, PolicyValue, Span, policy_key_name,
+        Diagnostic,
+        PolicyDeclaration,
+        PolicyKey,
+        PolicyScope,
+        PolicyValue,
+        Span,
+        policy_key_name,
     ]
     jetpack_foundation.[CONFIG_DEFAULT_DIR, PACKAGE_FILE]
     files: core.files
@@ -27,7 +33,7 @@ pkg_gate_test_refusal: fn(error: PackageGateError, key: String, site: String, po
     declarations: [PolicyDeclaration]{
         {key: PolicyKey.ForcePin, value: PolicyValue.GateOnly, scope: PolicyScope.Package, span: Span{start: 0, end: 0}, target: None, source: "package.jet"},
         {key: PolicyKey.ForcePin, value: PolicyValue.Forbid, scope: PolicyScope.Organization, span: Span{start: 0, end: 0}, target: None, source: "org-policy.jet"},
-        {key: PolicyKey.ForcePin, value: PolicyValue.Forbid, scope: PolicyScope.Package, span: Span{start: 0, end: 0}, target: None, source: "package.jet"}
+        {key: PolicyKey.ForcePin, value: PolicyValue.Forbid, scope: PolicyScope.Package, span: Span{start: 0, end: 0}, target: None, source: "package.jet"},
     }
     refusal: pkg_gate_refusal(PolicyKey.ForcePin, "main.jet:4..9", None, declarations) ?? panic("outer refusal")
     pkg_gate_test_refusal(PackageGateError{diagnostics: [Diagnostic]{refusal}}, "force_pin", "main.jet:4..9", "org-policy.jet")
@@ -43,8 +49,10 @@ pkg_gate_test_refusal: fn(error: PackageGateError, key: String, site: String, po
         files.write(files.join(root, PACKAGE_FILE), manifest) ?? panic("gate policy")
         canonical: files.canonicalize(root) ?? panic("canonical policy root")
         if pkg_check_invocation_flags(root, [String]{args[index]}) == {
-            .Ok(_) -> panic("forbidden invocation succeeded")
-            .Err(error) -> pkg_gate_test_refusal(error, key, "command line ({args[index]})", files.join(canonical, PACKAGE_FILE))
+            .Ok(_) -> { panic("forbidden invocation succeeded") }
+            .Err(error) -> {
+                pkg_gate_test_refusal(error, key, "command line ({args[index]})", files.join(canonical, PACKAGE_FILE))
+            }
         }
         assert(!files.exists(files.join(root, CONFIG_DEFAULT_DIR)))
         assert_eq(files.read(files.join(root, PACKAGE_FILE)) ?? panic("policy preserved"), manifest)
@@ -66,7 +74,7 @@ pkg_gate_test_refusal: fn(error: PackageGateError, key: String, site: String, po
     root: pkg_gate_test_dir("double-denial")
     files.write(files.join(root, PACKAGE_FILE), "name: \"law\"\npolicy: {{ build_flag: .Forbid, dependency_grant: .Forbid }}\n") ?? panic("gate policy")
     if pkg_check_invocation_flags(root, [String]{"--allow=Net"}) == {
-        .Ok(_) -> panic("forbidden allowance succeeded")
+        .Ok(_) -> { panic("forbidden allowance succeeded") }
         .Err(error) -> {
             assert_eq(error.diagnostics.len(), 2)
             assert(error.diagnostics[0].what.contains("`build_flag`"))

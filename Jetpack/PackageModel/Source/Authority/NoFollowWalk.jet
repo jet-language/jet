@@ -7,9 +7,13 @@ use {
 
 // jet_foundation::SHA256 tree bounds shared by every authority walk.
 PKG_MAX_TREE_FILE_BYTES: 536870912
+
 PKG_MAX_TREE_TOTAL_BYTES: 4294967296
+
 PKG_MAX_TREE_FILES: 1000000
+
 PKG_MAX_TREE_NODES: 2000000
+
 PKG_MAX_TREE_DEPTH: 256
 
 // Directory names a source walk never descends into.
@@ -28,9 +32,7 @@ AuthorityWalkBudget: struct {
     priv files: Int
     priv bytes: Int
 
-    new: fn() -> AuthorityWalkBudget Never! {
-        AuthorityWalkBudget{entries: 0, files: 0, bytes: 0}
-    }
+    new: fn() -> AuthorityWalkBudget Never! { AuthorityWalkBudget{entries: 0, files: 0, bytes: 0} }
 
     note_entry: fn(&self, path: String) AuthorityError! {
         if self.entries >= PKG_MAX_TREE_FILES {

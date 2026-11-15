@@ -15,7 +15,6 @@
 // Timing.jet admits a stop whose tested value is public. The engine that
 // compiles the module chooses the machine instructions, so the code's
 // timing on a host is the engine's.
-
 use {
     jet_foundation.[Type]
     jet_ir.[IRFunction, IRModule, IROp, IRSlotKind, IR_OVERFLOW_WRAP, ir_emit, ir_function_new, ir_intern_name, ir_module_new, ir_slot, ir_timing_any, ir_timing_at, ir_timing_finding, ir_timing_fixed, ir_type_row, ir_x64_reads_into]
@@ -28,7 +27,9 @@ use {
 // local and global access, i32 and i64 constants, comparisons, add, sub,
 // mul, and, or, xor, shifts and rotates, wrap and the extensions.
 web_timing_row: fn(op: Int) -> Bool Never! {
-    if op == 0x01 || op == 0x02 || op == 0x05 || op == 0x0b || op == 0x0c || op == 0x0f || op == 0x10 || op == 0x1a -> return true
+    if op == 0x01 || op == 0x02 || op == 0x05 || op == 0x0b || op == 0x0c || op == 0x0f || op == 0x10 || op == 0x1a {
+        return true
+    }
     if op >= 0x20 && op <= 0x24 -> return true
     if op == 0x41 || op == 0x42 -> return true
     if op >= 0x45 && op <= 0x5a -> return true
@@ -64,7 +65,9 @@ web_timing_check: fn(st: &WebState, m: IRModule, f: IRFunction, body: WebBody, m
         operand: ir_timing_any(fixed, reads)
         operands.push(operand)
         callee: f.a[at]
-        if operand && f.op[at] == .Call && callee >= 0 && callee < m.functions.len() && m.functions[callee].asm != None -> st.errors.push(ir_timing_finding(f, at, "a fixed operand reaches an inline-asm template, whose bytes are not checked"))
+        if operand && f.op[at] == .Call && callee >= 0 && callee < m.functions.len() && m.functions[callee].asm != None {
+            st.errors.push(ir_timing_finding(f, at, "a fixed operand reaches an inline-asm template, whose bytes are not checked"))
+        }
     }
     ops: WasmOpTable.new()
     // copy: the reader owns the bytes it decodes; the body keeps its own.
@@ -100,7 +103,9 @@ web_timing_check: fn(st: &WebState, m: IRModule, f: IRFunction, body: WebBody, m
 // start, end and slot) whose deciding slot is public.
 web_timing_public_decision: fn(decided: [Int], fixed: [Bool], offset: Int) -> Bool Never! {
     loop index in 0..<(decided.len() /% 3) {
-        if offset >= decided[3 * index] && offset < decided[3 * index + 1] && !ir_timing_at(fixed, decided[3 * index + 2]) -> return true
+        if offset >= decided[3 * index] && offset < decided[3 * index + 1] && !ir_timing_at(fixed, decided[3 * index + 2]) {
+            return true
+        }
     }
     false
 }
@@ -132,9 +137,25 @@ web_timing_test_errors: fn(op: IROp, code: [U8], fixups: [Int], checks: [Int], s
     right: if secret_right -> key else -> data
     _ := ir_emit(f, op, mixed, left, right, IR_OVERFLOW_WRAP, 2)
     st := WebState{
-        app: true, stop_points: false, data_at: [Int]{}, table_base: 0, slots: [Int]{}, slot_rows: [Int]{},
-        types: [String]{}, type_rows: [String:Int]{}, refs: [WebRef]{}, ref_rows: [String:Int]{}, internal: [String:Int]{},
-        exports: [String:String]{}, hosts: [String:Bool]{}, sigs: [String]{}, poll: -1, trap: -1, turn: -1, armed: -1, errors: [String]{},
+        app: true,
+        stop_points: false,
+        data_at: [Int]{},
+        table_base: 0,
+        slots: [Int]{},
+        slot_rows: [Int]{},
+        types: [String]{},
+        type_rows: [String:Int]{},
+        refs: [WebRef]{},
+        ref_rows: [String:Int]{},
+        internal: [String:Int]{},
+        exports: [String:String]{},
+        hosts: [String:Bool]{},
+        sigs: [String]{},
+        poll: -1,
+        trap: -1,
+        turn: -1,
+        armed: -1,
+        errors: [String]{},
     }
     // The body's one byte of local declarations comes first.
     bytes := [U8]{0x00}

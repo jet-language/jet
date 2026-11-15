@@ -9,6 +9,7 @@ package: {
         auth: .Library{ entry: auth }
     }
 }
+
 use {
     core: core
     crypto: core.crypto
@@ -20,6 +21,7 @@ use {
     rt: jet.runtime.testing
     time: core.time
 }
+
 // core.auth — closed token verification, sessions, magic links and OAuth
 //
 // JWT verification is strict HS256 with exact NumericDate claims; PASETO is
@@ -186,7 +188,9 @@ verify_jwt: fn(token: String, /, *, key: [U8], audience: String, issuer: String?
     if alg != "HS256" -> return Err(AuthError.UnsupportedToken("unsupported JWT algorithm `{alg}`"))
     signature: b64url_decode(parts[2]) ?? return Err(AuthError.InvalidSignature)
     expected: crypto.hmac_sha256(key, "{parts[0]}.{parts[1]}".bytes())
-    if !crypto.constant_time_equal_bytes(expected, signature) -> return Err(AuthError.InvalidSignature)
+    if !crypto.constant_time_equal_bytes(expected, signature) {
+        return Err(AuthError.InvalidSignature)
+    }
     payload: b64url_decode(parts[1])
     token_claims(payload, audience, issuer, clock_skew.ns, time.unix_ns())
 }
@@ -200,12 +204,14 @@ verify_paseto: fn(token: String, /, *, key: [U8], audience: String, issuer: Stri
         return Err(AuthError.UnsupportedToken("only PASETO v4.public is supported"))
     }
     body: b64url_decode(parts[2])
-    if body.len() < 64 -> return Err(AuthError.MalformedToken("PASETO body is shorter than its signature"))
-    token_footer := [U8]{}
-    if parts.len() == 4 {
-        token_footer = b64url_decode(parts[3])
+    if body.len() < 64 {
+        return Err(AuthError.MalformedToken("PASETO body is shorter than its signature"))
     }
-    if !crypto.constant_time_equal_bytes(token_footer, footer) -> return Err(AuthError.InvalidSignature)
+    token_footer := [U8]{}
+    if parts.len() == 4 -> token_footer = b64url_decode(parts[3])
+    if !crypto.constant_time_equal_bytes(token_footer, footer) {
+        return Err(AuthError.InvalidSignature)
+    }
     split: body.len() - 64
     message: slice_u8(body, 0, split)
     signature: slice_u8(body, split, body.len())
@@ -231,7 +237,9 @@ token_claims: fn(payload: [U8], audience: String, issuer: String?, skew_ns: Int,
     issued_at: int_claim(fields, text, "iat")
     if issuer == {
         .Val(expected) -> {
-            if !same_text(actual_issuer, expected) -> return Err(AuthError.WrongIssuer{expected: expected, actual: actual_issuer})
+            if !same_text(actual_issuer, expected) {
+                return Err(AuthError.WrongIssuer{expected: expected, actual: actual_issuer})
+            }
         }
         .None -> {}
     }
@@ -295,7 +303,9 @@ int_claim: fn(fields: encoding.Dyn, text: String, name: String) -> Int? AuthErro
             lexeme: number_lexeme(text, name) ?? return Err(AuthError.MalformedToken("claim `{name}` must be an exact integer"))
             // A fraction or exponent is no integer at all; an integer lexeme
             // outside the signed 64-bit range (or `-0`) is an inexact one.
-            if lexeme.contains(".") || lexeme.contains("e") || lexeme.contains("E") -> return Err(AuthError.MalformedToken("claim `{name}` must be an integer"))
+            if lexeme.contains(".") || lexeme.contains("e") || lexeme.contains("E") {
+                return Err(AuthError.MalformedToken("claim `{name}` must be an integer"))
+            }
             number: json_i64(lexeme) ?? return Err(AuthError.MalformedToken("claim `{name}` must be an exact integer"))
             Val(number)
         }
@@ -309,7 +319,9 @@ audience_claim: fn(fields: encoding.Dyn, expected: String) -> String AuthError! 
     values := [String]{}
     if value == {
         .Array(items) -> {
-            if items.len() == 0 -> return Err(AuthError.MalformedToken("claim `aud` must contain at least one text"))
+            if items.len() == 0 {
+                return Err(AuthError.MalformedToken("claim `aud` must contain at least one text"))
+            }
             loop item in items {
                 text: item.text() ?? return Err(AuthError.MalformedToken("claim `aud` must contain only text"))
                 values.push(text)
@@ -337,7 +349,7 @@ number_lexeme: fn(text: String, name: String) -> String? {
     raw: text.bytes()
     pos := json_skip_ws(raw, 0)
     if pos >= raw.len() || raw[pos] != (U8{123}) -> return None
-    pos = pos + 1
+    pos += 1
     loop {
         pos = json_skip_ws(raw, pos)
         if pos >= raw.len() || raw[pos] == (U8{125}) -> return None
@@ -351,12 +363,10 @@ number_lexeme: fn(text: String, name: String) -> String? {
             end: json_scalar_end(raw, pos)
             if key.text == name -> return slice_bytes(raw, pos, end)
             pos = end
-        } else {
-            pos = json_skip_value(raw, pos) ?? return None
-        }
+        } else { pos = json_skip_value(raw, pos) ?? return None }
         pos = json_skip_ws(raw, pos)
         if pos >= raw.len() || raw[pos] != (U8{44}) -> return None
-        pos = pos + 1
+        pos += 1
     }
 }
 
@@ -396,13 +406,15 @@ b64url_decode: fn(text: String) -> [U8] AuthError! {
     bits := 0
     loop b in raw {
         acc = ((acc << 6).bit_or(b64url_value(b))).bit_and(16777215)
-        bits = bits + 6
+        bits += 6
         if bits >= 8 {
-            bits = bits - 8
+            bits -= 8
             out.push(wrapping(U8{acc >> bits}))
         }
     }
-    if bits != 0 && (acc.bit_and(((1 << bits) - 1))) != 0 -> return Err(AuthError.DecodeError("non-canonical base64 trailing bits"))
+    if bits != 0 && (acc.bit_and(((1 << bits) - 1))) != 0 {
+        return Err(AuthError.DecodeError("non-canonical base64 trailing bits"))
+    }
     Ok(out)
 }
 
@@ -440,7 +452,9 @@ priv store_load: fn() -[DB]> [U8] Never! {
 }
 
 priv store_replace: fn(expected: [U8], replacement: &&[U8]) -[DB]> Bool Never! {
-    if rt.world_store_replace("core.auth", expected, replacement) == .Val(replaced) -> return replaced
+    if rt.world_store_replace("core.auth", expected, replacement) == .Val(replaced) {
+        return replaced
+    }
     cell := AUTH_STORE.guard_edit()
     if cell.value.bytes != expected -> return false
     cell.value.bytes = replacement.move()
@@ -450,13 +464,17 @@ priv store_replace: fn(expected: [U8], replacement: &&[U8]) -[DB]> Bool Never! {
 /// Register an identity with an already-computed password hash.
 register_user: fn(user_id: String, password_hash: String) Err! -[DB]> {
     if !valid_identifier(user_id, 512) -> return Err("user id is invalid")
-    if password_hash.trim().len() == 0 || password_hash.len() > 4096 -> return Err("password hash is invalid")
+    if password_hash.trim().len() == 0 || password_hash.len() > 4096 {
+        return Err("password hash is invalid")
+    }
     delivery: delivery_capability(user_id)
     loop {
         seen: store_load()
         records := decode_store(seen) ?? return Err("auth store is unavailable")
         loop record in records {
-            if record.kind == 1 && record.a == user_id -> return Err("user `{user_id}` already registered")
+            if record.kind == 1 && record.a == user_id {
+                return Err("user `{user_id}` already registered")
+            }
         }
         records.push(AuthRecord{kind: 1, a: user_id, b: password_hash, c: delivery ?? "", n: if delivery == None -> 0 else -> 1})
         if store_replace(seen, encode_store(records)) -> return Ok()
@@ -471,7 +489,9 @@ password_login: fn(user_id: String, password_hash: String, now_ms: Int, ttl_ms: 
         records := decode_store(seen) ?? return Err("auth store is unavailable")
         ok := false
         loop record in records {
-            if record.kind == 1 && record.a == user_id && ct_text(record.b, password_hash) -> ok = true
+            if record.kind == 1 && record.a == user_id && ct_text(record.b, password_hash) {
+                ok = true
+            }
         }
         if !ok -> return Err("invalid credentials")
         records.push(session_record(session))
@@ -502,7 +522,9 @@ magic_link_issue: fn(user_id: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> Str
         records := decode_store(seen) ?? return Err("auth store is unavailable")
         registered := false
         loop record in records {
-            if record.kind == 1 && record.a == user_id && record.n == 1 && record.c == delivery -> registered = true
+            if record.kind == 1 && record.a == user_id && record.n == 1 && record.c == delivery {
+                registered = true
+            }
         }
         if !registered -> return Err("magic link requires a registered delivery identity")
         token: opaque_token("magic")
@@ -527,7 +549,9 @@ magic_link_consume: fn(token: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> Ses
         }
         if user_index < 0 -> return Err("magic link identity is no longer registered")
         user: records[user_index]
-        if user.n != 1 || user.c != entry.c -> return Err("magic link delivery identity is unavailable")
+        if user.n != 1 || user.c != entry.c {
+            return Err("magic link delivery identity is unavailable")
+        }
         session: new_session(entry.b, now_ms, ttl_ms)
         next := without_index(records, index)
         next.push(session_record(session))
@@ -548,19 +572,13 @@ oauth_begin: fn(provider: String) -[DB, Env, Time, Rand]> String Err! {
         // Drop expired states; at the cap the oldest live state gives way.
         live := 0
         loop record in records {
-            if record.kind == 4 && record.n > now_ms -> live = live + 1
+            if record.kind == 4 && record.n > now_ms -> live += 1
         }
         drop_oldest := live >= 256
         next := [AuthRecord]{}
         loop record in records {
-            if record.kind != 4 {
-                next.push(record)
-            } else if record.n > now_ms {
-                if drop_oldest {
-                    drop_oldest = false
-                } else {
-                    next.push(record)
-                }
+            if record.kind != 4 -> next.push(record) else if record.n > now_ms {
+                if drop_oldest -> drop_oldest = false else -> next.push(record)
             }
         }
         next.push(AuthRecord{kind: 4, a: state, b: provider, c: state, n: expires_at})
@@ -570,7 +588,9 @@ oauth_begin: fn(provider: String) -[DB, Env, Time, Rand]> String Err! {
 
 /// Finish an OAuth flow with the provider's HS256 assertion.
 oauth_finish: fn(state: String, assertion: String, now_ms: Int, ttl_ms: Int) -[DB, Env, Rand]> Session Err! {
-    if !valid_identifier(state, 256) || assertion.len() == 0 -> return Err("OAuth completion is invalid")
+    if !valid_identifier(state, 256) || assertion.len() == 0 {
+        return Err("OAuth completion is invalid")
+    }
     loop {
         seen: store_load()
         records: decode_store(seen) ?? return Err("auth store is unavailable")
@@ -651,7 +671,9 @@ checked_i64: fn(value: Int) -> Int? {
 
 find_live: fn(records: [AuthRecord], kind: Int, token: String, now_ms: Int) -> Int Never! {
     loop i in 0..<records.len() {
-        if records[i].kind == kind && ct_text(records[i].a, token) && now_ms < records[i].n -> return i
+        if records[i].kind == kind && ct_text(records[i].a, token) && now_ms < records[i].n {
+            return i
+        }
     }
     -1
 }
@@ -695,16 +717,16 @@ decode_store: fn(raw: [U8]) -> [AuthRecord]? {
     pos := 0
     loop pos < raw.len() {
         kind: Int{raw[pos]}
-        pos = pos + 1
+        pos += 1
         fields := [String]{}
         loop _ in 0..<4 {
             if pos + 4 > raw.len() -> return None
             n: Int{raw[pos]}.bit_or((Int{raw[pos + 1]} << 8)).bit_or((Int{raw[pos + 2]} << 16)).bit_or((Int{raw[pos + 3]} << 24))
-            pos = pos + 4
+            pos += 4
             if pos + n > raw.len() -> return None
             text: slice_bytes(raw, pos, pos + n) ?? return None
             fields.push(text)
-            pos = pos + n
+            pos += n
         }
         number: Int.parse(fields[3]) ?? return None
         out.push(AuthRecord{kind: kind, a: fields[0], b: fields[1], c: fields[2], n: number})
@@ -738,7 +760,7 @@ valid_session_id: fn(text: String) -> Bool Never! {
     loop i < raw.len() {
         n: Int{raw[i]}
         if !((n >= 48 && n <= 57) || (n >= 97 && n <= 102)) -> return false
-        i = i + 1
+        i += 1
     }
     true
 }
@@ -753,21 +775,25 @@ delivery_capability: fn(value: String) -> String? {
     ats := 0
     loop i in 0..<raw.len() {
         if raw[i] == (U8{64}) {
-            ats = ats + 1
+            ats += 1
             if at < 0 -> at = i
         }
     }
     if ats != 1 -> return None
     local: slice_bytes(raw, 0, at) ?? return None
     domain: slice_bytes(raw, at + 1, raw.len()) ?? return None
-    if local.len() == 0 || local.len() > 64 || starts(local, ".") || ends(local, ".") || index_of(local, "..") >= 0 -> return None
+    if local.len() == 0 || local.len() > 64 || starts(local, ".") || ends(local, ".") || index_of(local, "..") >= 0 {
+        return None
+    }
     loop b in local.bytes() {
         n: Int{b}
         if !(is_alnum(n) || contains_byte("!#$%&'*+-/=?^_`{{|}}~.".bytes(), b)) -> return None
     }
     if domain.len() == 0 || domain.len() > 253 -> return None
     loop label in split_dot(domain) {
-        if label.len() == 0 || label.len() > 63 || starts(label, "-") || ends(label, "-") -> return None
+        if label.len() == 0 || label.len() > 63 || starts(label, "-") || ends(label, "-") {
+            return None
+        }
         loop b in label.bytes() {
             n: Int{b}
             if !(is_alnum(n) || n == 45) -> return None
@@ -797,7 +823,9 @@ oauth_config: fn(provider: String) -[Env]> OAuthConfig {
     if secret.bytes().len() < 32 -> return Err("OAuth provider secret is too short")
     issuer: sys.get("JET_OAUTH_{suffix}_ISSUER") ?? provider
     audience: sys.get("JET_OAUTH_{suffix}_AUDIENCE") ?? provider
-    if !valid_identifier(issuer, 1024) || !valid_identifier(audience, 1024) -> return Err("OAuth provider metadata is invalid")
+    if !valid_identifier(issuer, 1024) || !valid_identifier(audience, 1024) {
+        return Err("OAuth provider metadata is invalid")
+    }
     Ok(OAuthConfig{secret: secret.bytes(), issuer: issuer, audience: audience})
 }
 
@@ -806,16 +834,22 @@ oauth_config: fn(provider: String) -[Env]> OAuthConfig {
 oauth_verify: fn(nonce: String, assertion: String, now_ms: Int, config: OAuthConfig) -> String {
     if assertion.bytes().len() > 65536 -> return Err("OAuth assertion is too large")
     parts: split_dot(assertion)
-    if parts.len() != 3 || parts[0].len() == 0 || parts[1].len() == 0 || parts[2].len() == 0 -> return Err("OAuth assertion is malformed")
+    if parts.len() != 3 || parts[0].len() == 0 || parts[1].len() == 0 || parts[2].len() == 0 {
+        return Err("OAuth assertion is malformed")
+    }
     header_bytes: oauth_b64(parts[0])
     header: String.from_bytes(header_bytes) ?? return Err("OAuth assertion header is not UTF-8")
     payload_bytes: oauth_b64(parts[1])
     payload: String.from_bytes(payload_bytes) ?? return Err("OAuth assertion payload is not UTF-8")
     signature: oauth_b64(parts[2])
     header_claims: oauth_claims(header)
-    if (header_claims.alg ?? "") != "HS256" -> return Err("OAuth assertion algorithm is not allowed")
+    if (header_claims.alg ?? "") != "HS256" {
+        return Err("OAuth assertion algorithm is not allowed")
+    }
     expected: crypto.hmac_sha256(config.secret, "{parts[0]}.{parts[1]}".bytes())
-    if !crypto.constant_time_equal_bytes(expected, signature) -> return Err("OAuth assertion signature is invalid")
+    if !crypto.constant_time_equal_bytes(expected, signature) {
+        return Err("OAuth assertion signature is invalid")
+    }
     claims: oauth_claims(payload)
     claim_nonce: claims.nonce ?? return Err("OAuth assertion nonce is invalid")
     if !ct_text(claim_nonce, nonce) -> return Err("OAuth assertion nonce is invalid")
@@ -839,7 +873,9 @@ oauth_verify: fn(nonce: String, assertion: String, now_ms: Int, config: OAuthCon
 
 oauth_b64: fn(text: String) -> [U8] {
     raw: text.bytes()
-    if raw.len() == 0 || raw.len() > 16384 || raw.len() %% 4 == 1 -> return Err("OAuth assertion encoding is invalid")
+    if raw.len() == 0 || raw.len() > 16384 || raw.len() %% 4 == 1 {
+        return Err("OAuth assertion encoding is invalid")
+    }
     acc := 0
     bits := 0
     out := [U8]{}
@@ -847,13 +883,15 @@ oauth_b64: fn(text: String) -> [U8] {
         v: b64url_value(b)
         if v < 0 -> return Err("OAuth assertion encoding is invalid")
         acc = ((acc << 6).bit_or(v)).bit_and(16777215)
-        bits = bits + 6
+        bits += 6
         if bits >= 8 {
-            bits = bits - 8
+            bits -= 8
             out.push(wrapping(U8{acc >> bits}))
         }
     }
-    if bits != 0 && (acc.bit_and(((1 << bits) - 1))) != 0 -> return Err("OAuth assertion encoding is non-canonical")
+    if bits != 0 && (acc.bit_and(((1 << bits) - 1))) != 0 {
+        return Err("OAuth assertion encoding is non-canonical")
+    }
     Ok(out)
 }
 
@@ -879,17 +917,21 @@ oauth_claims: fn(text: String) -> OAuthClaims {
     if raw.len() > 32768 -> return Err("OAuth assertion payload is too large")
     claims := OAuthClaims{alg: None, nonce: None, iss: None, aud: None, sub: None, exp: None, iat: None}
     pos := json_skip_ws(raw, 0)
-    if pos >= raw.len() || raw[pos] != (U8{123}) -> return Err("OAuth assertion payload is not an object")
-    pos = pos + 1
+    if pos >= raw.len() || raw[pos] != (U8{123}) {
+        return Err("OAuth assertion payload is not an object")
+    }
+    pos += 1
     loop {
         pos = json_skip_ws(raw, pos)
         if pos < raw.len() && raw[pos] == (U8{125}) {
-            pos = pos + 1
+            pos += 1
             break
         }
         key: json_string(raw, pos) ?? return Err("OAuth assertion claim name is invalid")
         pos = json_skip_ws(raw, key.next)
-        if pos >= raw.len() || raw[pos] != (U8{58}) -> return Err("OAuth assertion claim separator is invalid")
+        if pos >= raw.len() || raw[pos] != (U8{58}) {
+            return Err("OAuth assertion claim separator is invalid")
+        }
         pos = json_skip_ws(raw, pos + 1)
         name: key.text
         if name == "alg" || name == "nonce" || name == "iss" || name == "aud" || name == "sub" {
@@ -937,14 +979,10 @@ oauth_claims: fn(text: String) -> OAuthClaims {
             pos = json_skip_value(raw, pos) ?? return Err("OAuth assertion claim value is invalid")
         }
         pos = json_skip_ws(raw, pos)
-        if pos < raw.len() && raw[pos] == (U8{44}) {
-            pos = pos + 1
-        } else if pos < raw.len() && raw[pos] == (U8{125}) {
-            pos = pos + 1
+        if pos < raw.len() && raw[pos] == (U8{44}) -> pos += 1 else if pos < raw.len() && raw[pos] == (U8{125}) {
+            pos += 1
             break
-        } else {
-            return Err("OAuth assertion object is invalid")
-        }
+        } else { return Err("OAuth assertion object is invalid") }
     }
     pos = json_skip_ws(raw, pos)
     if pos != raw.len() -> return Err("OAuth assertion has trailing data")
@@ -958,7 +996,7 @@ json_ws: fn(b: U8) -> Bool Never! {
 
 json_skip_ws: fn(raw: [U8], start: Int) -> Int Never! {
     pos := start
-    loop pos < raw.len() && json_ws(raw[pos]) -> pos = pos + 1
+    loop pos < raw.len() && json_ws(raw[pos]) -> pos += 1
     pos
 }
 
@@ -968,7 +1006,7 @@ json_scalar_end: fn(raw: [U8], start: Int) -> Int Never! {
     loop pos < raw.len() {
         n: Int{raw[pos]}
         if json_ws(raw[pos]) || n == 44 || n == 125 || n == 93 -> return pos
-        pos = pos + 1
+        pos += 1
     }
     pos
 }
@@ -991,9 +1029,7 @@ json_hex4: fn(raw: [U8], start: Int) -> Int? {
 }
 
 push_scalar: fn(out: &[U8], cp: Int) Never! {
-    if cp < 128 {
-        out.push(wrapping(U8{cp}))
-    } else if cp < 2048 {
+    if cp < 128 -> out.push(wrapping(U8{cp})) else if cp < 2048 {
         out.push(wrapping(U8{(192).bit_or((cp >> 6))}))
         out.push(wrapping(U8{(128).bit_or((cp.bit_and(63)))}))
     } else if cp < 65536 {
@@ -1016,18 +1052,16 @@ json_string: fn(raw: [U8], start: Int) -> JSONText? {
     out := [U8]{}
     loop pos < raw.len() {
         n: Int{raw[pos]}
-        pos = pos + 1
+        pos += 1
         if n == 34 {
             text: String.from_bytes(out) ?? return None
             return Val(JSONText{text: text, next: pos})
         }
         if n < 32 -> return None
-        if n != 92 {
-            out.push(wrapping(U8{n}))
-        } else {
+        if n != 92 -> out.push(wrapping(U8{n})) else {
             if pos >= raw.len() -> return None
             e: Int{raw[pos]}
-            pos = pos + 1
+            pos += 1
             if {
                 e == 34 || e == 92 || e == 47 -> out.push(wrapping(U8{e}))
                 e == 98 -> out.push(U8{8})
@@ -1037,11 +1071,13 @@ json_string: fn(raw: [U8], start: Int) -> JSONText? {
                 e == 116 -> out.push(U8{9})
                 e == 117 -> {
                     high: json_hex4(raw, pos) ?? return None
-                    pos = pos + 4
+                    pos += 4
                     if high >= 55296 && high <= 56319 {
-                        if pos + 1 >= raw.len() || raw[pos] != (U8{92}) || raw[pos + 1] != (U8{117}) -> return None
+                        if pos + 1 >= raw.len() || raw[pos] != (U8{92}) || raw[pos + 1] != (U8{117}) {
+                            return None
+                        }
                         low: json_hex4(raw, pos + 2) ?? return None
-                        pos = pos + 6
+                        pos += 6
                         if low < 56320 || low > 57343 -> return None
                         push_scalar(out, 65536 + ((high - 55296) << 10) + (low - 56320))
                     } else {
@@ -1076,15 +1112,13 @@ json_skip_value: fn(raw: [U8], start: Int) -> Int? {
                 pos = value.next
             } else if n == 123 || n == 91 {
                 closers.push(if n == 123 -> 125 else -> 93)
-                pos = pos + 1
+                pos += 1
             } else if n == 125 || n == 93 {
                 if closers[closers.len() - 1] != n -> return None
                 _ := closers.pop()
-                pos = pos + 1
+                pos += 1
                 if closers.len() == 0 -> return Val(pos)
-            } else {
-                pos = pos + 1
-            }
+            } else { pos += 1 }
         }
         return None
     }
@@ -1168,7 +1202,7 @@ slice_u8: fn(bytes: [U8], start: Int, end: Int) -> [U8] Never! {
     i := start
     loop i < end && i < bytes.len() {
         out.push(bytes[i])
-        i = i + 1
+        i += 1
     }
     out
 }
@@ -1183,9 +1217,11 @@ b64url_for_test: fn(bytes: [U8]) -> String Never! {
         third: if i + 2 < bytes.len() -> (Int{bytes[i + 2]}) else -> 0
         out.push(alphabet[first >> 2])
         out.push(alphabet[((first.bit_and(3)) << 4).bit_or((second >> 4))])
-        if i + 1 < bytes.len() -> out.push(alphabet[((second.bit_and(15)) << 2).bit_or((third >> 6))])
+        if i + 1 < bytes.len() {
+            out.push(alphabet[((second.bit_and(15)) << 2).bit_or((third >> 6))])
+        }
         if i + 2 < bytes.len() -> out.push(alphabet[third.bit_and(63)])
-        i = i + 3
+        i += 3
     }
     String.from_bytes(out) ?? ""
 }

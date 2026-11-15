@@ -94,7 +94,9 @@ ir_print_style_source: fn(core: Bool, source_file: String, kind: TFuncKind, name
 // that sets a style prints through them, and any other prints as Show.
 ir_print_style_keys: fn(functions: [FnBody], keys: &[String]) Never! {
     loop function in functions {
-        if ir_print_style_source(module_is_core(function.module_identity), function.source_file, function.kind, function.name) -> ir_core_reach_add(keys, function.key)
+        if ir_print_style_source(module_is_core(function.module_identity), function.source_file, function.kind, function.name) {
+            ir_core_reach_add(keys, function.key)
+        }
     }
 }
 
@@ -107,7 +109,9 @@ ir_codec_decode_helpers: fn() -> [String] Never! {
 
 // Whether a function with these header fields is one of those helpers.
 ir_codec_decode_source: fn(core: Bool, source_file: String, kind: TFuncKind, name: String) -> Bool Never! {
-    if !core || !ir_core_source_path(source_file, "Core/Encoding/Encoding.jet") || !ir_core_reach_is_top_level(kind) -> return false
+    if !core || !ir_core_source_path(source_file, "Core/Encoding/Encoding.jet") || !ir_core_reach_is_top_level(kind) {
+        return false
+    }
     loop helper in ir_codec_decode_helpers() {
         if helper == name -> return true
     }
@@ -178,9 +182,13 @@ ir_precise_source_family_owner: fn(name: String) -> String? Never! {
 // That closed registry is rooted, not every `__` helper in the file.
 ir_precise_source_name: fn(name: String) -> Bool Never! {
     loop owner in ["Int", "Float", "F32", "I64"] {
-        if (ir_precise_source_helper(owner, "abs") ?? "") == name || (ir_precise_source_helper(owner, "pow") ?? "") == name -> return true
+        if (ir_precise_source_helper(owner, "abs") ?? "") == name || (ir_precise_source_helper(owner, "pow") ?? "") == name {
+            return true
+        }
     }
-    if name == ir_unit_conversion_helper(false) || name == ir_unit_conversion_helper(true) -> return true
+    if name == ir_unit_conversion_helper(false) || name == ir_unit_conversion_helper(true) {
+        return true
+    }
     ir_precise_source_family_owner(name) != None
 }
 
@@ -203,7 +211,9 @@ ir_precise_source_function: fn(core: Bool, source_file: String, name: String) ->
 // jet_driver_core_lowering_roots), since no checked body names it.
 ir_core_lowered_by_name: fn(core: Bool, source_file: String, name: String) -> Bool Never! {
     top: TFuncKind.TopLevel
-    if ir_string_format_source(core, source_file, top) || ir_codec_decode_source(core, source_file, top, name) || ir_args_source(core, source_file, top, name) || ir_print_style_source(core, source_file, top, name) || ir_precise_source_function(core, source_file, name) -> return true
+    if ir_string_format_source(core, source_file, top) || ir_codec_decode_source(core, source_file, top, name) || ir_args_source(core, source_file, top, name) || ir_print_style_source(core, source_file, top, name) || ir_precise_source_function(core, source_file, name) {
+        return true
+    }
     ir_core_process_source(core, source_file) && (name == ir_process_line_reader("ProcessStdoutStream") || name == ir_process_line_reader("ProcessStderrStream"))
 }
 
@@ -244,7 +254,9 @@ ir_decoding_reads: fn() -> [String] Never! {
 // Whether method `name` of Core nominal `owner` in module `module_identity`
 // is one of those reads.
 ir_core_decoding_read: fn(module_identity: String, owner: String, name: String) -> Bool Never! {
-    if owner != "__Decoding" || !core_identity_in_module(module_identity, "core.encoding") -> return false
+    if owner != "__Decoding" || !core_identity_in_module(module_identity, "core.encoding") {
+        return false
+    }
     loop read in ir_decoding_reads() {
         if read == name -> return true
     }
@@ -257,7 +269,7 @@ ir_core_reach_add: fn(keys: &[String], key: String) Never! {
 
 ir_core_reach_lambda_keys: fn(tree: BodyTree, value: BodyLambda, functions: [FnBody], keys: &[String]) Never! {
     if value.executable == {
-        .Block(body) -> ir_core_reach_stmt_keys(tree, body, functions, keys)
+        .Block(body) -> { ir_core_reach_stmt_keys(tree, body, functions, keys) }
         .Expr(_) -> {}
     }
 }
@@ -274,7 +286,9 @@ ir_line_reader_key: fn(functions: [FnBody], handle: Type) -> String Never! {
     stream: ir_process_line_reader(owner)
     loop function in functions {
         if stream != "" {
-            if function.name == stream && ir_core_process_source(module_is_core(function.module_identity), function.source_file) -> return function.key.copy()
+            if function.name == stream && ir_core_process_source(module_is_core(function.module_identity), function.source_file) {
+                return function.key.copy()
+            }
             next
         }
         if function.name != "read_line" || !module_is_core(function.module_identity) -> next
@@ -311,49 +325,61 @@ ir_encoding_reader_next_key: fn(functions: [FnBody], reader: Type) -> String Nev
 // (ir_encoding_reader_next_key) from the checked function inventory, and the
 // ordinary reachability walk retains their dependencies.
 ir_core_reach_one_stmt_keys: fn(tree: BodyTree, statement: Int, functions: [FnBody], keys: &[String]) Never! {
-        if tree.stmts[statement] == {
-            .ForIn(_, _, _, source, collection, _, method, _, _, _, body, _) -> {
-                if method == .Val(kind) && (kind == .LinesFile || kind == .LinesStdin || kind == .LinesProcessStream) -> ir_core_reach_add(keys, ir_line_reader_key(functions, body_type(tree, source)))
-                if method == .Val(kind) {
-                    if kind == .EncodingReader(_) -> ir_core_reach_add(keys, ir_encoding_reader_next_key(functions, body_type(tree, collection)))
+    if tree.stmts[statement] == {
+        .ForIn(_, _, _, source, collection, _, method, _, _, _, body, _) -> {
+            if method == .Val(kind) && (kind == .LinesFile || kind == .LinesStdin || kind == .LinesProcessStream) {
+                ir_core_reach_add(keys, ir_line_reader_key(functions, body_type(tree, source)))
+            }
+            if method == .Val(kind) {
+                if kind == .EncodingReader(_) {
+                    ir_core_reach_add(keys, ir_encoding_reader_next_key(functions, body_type(tree, collection)))
                 }
-                ir_core_reach_stmt_keys(tree, body, functions, keys)
             }
-            .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Loop(_, body, _) | .While(_, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) -> ir_core_reach_stmt_keys(tree, body, functions, keys)
-            .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) | .Unsafe(_, body) -> ir_core_reach_stmt_keys(tree, body, functions, keys)
-            .ContextBlock(guards, body, _) -> {
-                loop guard in guards {
-                    if guard.field == "print" -> ir_print_style_keys(functions, keys)
-                }
-                ir_core_reach_stmt_keys(tree, body, functions, keys)
-            }
-            .RefutableBind(_, _, body, _) -> ir_core_reach_stmt_keys(tree, body, functions, keys)
-            .If(_, then_body, else_body, _, _) -> {
-                ir_core_reach_stmt_keys(tree, then_body, functions, keys)
-                if else_body == .Val(body) -> ir_core_reach_stmt_keys(tree, body, functions, keys)
-            }
-            .CountedLoop(_, init, _, step, _, body, _) -> {
-                ir_core_reach_one_stmt_keys(tree, init, functions, keys)
-                if step == .Val(value) -> ir_core_reach_one_stmt_keys(tree, value, functions, keys)
-                ir_core_reach_stmt_keys(tree, body, functions, keys)
-            }
-            .Match(_, arms, _, _) -> loop arm in arms -> ir_core_reach_stmt_keys(tree, arm.body, functions, keys)
-            .EnumMatch(_, arms, else_body, _, _) -> {
-                loop arm in arms -> ir_core_reach_stmt_keys(tree, arm.body, functions, keys)
-                if else_body == .Val(body) -> ir_core_reach_stmt_keys(tree, body, functions, keys)
-            }
-            .MixedSwitch(_, _, arms, else_body, _) -> {
-                loop arm in arms -> ir_core_reach_stmt_keys(tree, arm.body, functions, keys)
-                if else_body == .Val(body) -> ir_core_reach_stmt_keys(tree, body, functions, keys)
-            }
-            .RangeSwitch(_, arms, body, _) -> {
-                loop arm in arms -> ir_core_reach_stmt_keys(tree, arm.body, functions, keys)
-                ir_core_reach_stmt_keys(tree, body, functions, keys)
-            }
-            .Reactive(value, _) -> ir_core_reach_lambda_keys(tree, value, functions, keys)
-            .GCEdit(_, _, _, _, _, edited, _) -> ir_core_reach_one_stmt_keys(tree, edited, functions, keys)
-            .Contract(_) | .Let(_, _, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) -> {}
+            ir_core_reach_stmt_keys(tree, body, functions, keys)
         }
+        .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Loop(_, body, _) | .While(_, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) -> {
+            ir_core_reach_stmt_keys(tree, body, functions, keys)
+        }
+        .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) | .Unsafe(_, body) -> {
+            ir_core_reach_stmt_keys(tree, body, functions, keys)
+        }
+        .ContextBlock(guards, body, _) -> {
+            loop guard in guards {
+                if guard.field == "print" -> ir_print_style_keys(functions, keys)
+            }
+            ir_core_reach_stmt_keys(tree, body, functions, keys)
+        }
+        .RefutableBind(_, _, body, _) -> { ir_core_reach_stmt_keys(tree, body, functions, keys) }
+        .If(_, then_body, else_body, _, _) -> {
+            ir_core_reach_stmt_keys(tree, then_body, functions, keys)
+            if else_body == .Val(body) -> ir_core_reach_stmt_keys(tree, body, functions, keys)
+        }
+        .CountedLoop(_, init, _, step, _, body, _) -> {
+            ir_core_reach_one_stmt_keys(tree, init, functions, keys)
+            if step == .Val(value) -> ir_core_reach_one_stmt_keys(tree, value, functions, keys)
+            ir_core_reach_stmt_keys(tree, body, functions, keys)
+        }
+        .Match(_, arms, _, _) -> {
+            loop arm in arms -> ir_core_reach_stmt_keys(tree, arm.body, functions, keys)
+        }
+        .EnumMatch(_, arms, else_body, _, _) -> {
+            loop arm in arms -> ir_core_reach_stmt_keys(tree, arm.body, functions, keys)
+            if else_body == .Val(body) -> ir_core_reach_stmt_keys(tree, body, functions, keys)
+        }
+        .MixedSwitch(_, _, arms, else_body, _) -> {
+            loop arm in arms -> ir_core_reach_stmt_keys(tree, arm.body, functions, keys)
+            if else_body == .Val(body) -> ir_core_reach_stmt_keys(tree, body, functions, keys)
+        }
+        .RangeSwitch(_, arms, body, _) -> {
+            loop arm in arms -> ir_core_reach_stmt_keys(tree, arm.body, functions, keys)
+            ir_core_reach_stmt_keys(tree, body, functions, keys)
+        }
+        .Reactive(value, _) -> { ir_core_reach_lambda_keys(tree, value, functions, keys) }
+        .GCEdit(_, _, _, _, _, edited, _) -> {
+            ir_core_reach_one_stmt_keys(tree, edited, functions, keys)
+        }
+        .Contract(_) | .Let(_, _, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) -> {}
+    }
 }
 
 ir_core_reach_stmt_keys: fn(tree: BodyTree, statements: [Int], functions: [FnBody], keys: &[String]) Never! {
@@ -369,40 +395,52 @@ ir_core_reach_expr_keys: fn(tree: BodyTree, expression: Int, functions: [FnBody]
             index: callee.row.index()
             if index < decl_rows.len() && decl_rows[index] >= 0 -> targets.push(decl_rows[index])
             loop argument in args {
-                loop item in argument.template_items -> ir_core_reach_add(keys, symbol_key(symbols, tree.symbols, item))
+                loop item in argument.template_items {
+                    ir_core_reach_add(keys, symbol_key(symbols, tree.symbols, item))
+                }
             }
         }
         .MethodCall(_, method, _, args) -> {
             ir_core_reach_add(keys, symbol_key(symbols, tree.symbols, method.symbol))
             loop argument in args {
-                loop item in argument.template_items -> ir_core_reach_add(keys, symbol_key(symbols, tree.symbols, item))
+                loop item in argument.template_items {
+                    ir_core_reach_add(keys, symbol_key(symbols, tree.symbols, item))
+                }
             }
         }
         .StaticCall(_, _, method, _, args) -> {
             ir_core_reach_add(keys, symbol_key(symbols, tree.symbols, method.symbol))
             loop argument in args {
-                loop item in argument.template_items -> ir_core_reach_add(keys, symbol_key(symbols, tree.symbols, item))
+                loop item in argument.template_items {
+                    ir_core_reach_add(keys, symbol_key(symbols, tree.symbols, item))
+                }
             }
         }
         .Index(_, _, _, _, checked_call, _) -> {
-            if checked_call == Val(symbol) -> ir_core_reach_add(keys, symbol_key(symbols, tree.symbols, symbol))
+            if checked_call == Val(symbol) {
+                ir_core_reach_add(keys, symbol_key(symbols, tree.symbols, symbol))
+            }
         }
         // assert_eq's authored `equal`/`compare` hook (ir_require_eq_hook).
         .RequireStop(kind, _, _) -> {
             if kind == .RequireEq(_, _, hook) {
-                if hook == .Val(method) -> ir_core_reach_add(keys, symbol_key(symbols, tree.symbols, method.symbol))
+                if hook == .Val(method) {
+                    ir_core_reach_add(keys, symbol_key(symbols, tree.symbols, method.symbol))
+                }
             }
         }
         .FnValue(kind) -> {
             if kind == .NamedFn(function, _) {
                 if function == .Val(id) {
                     index: id.row.index()
-                    if index < decl_rows.len() && decl_rows[index] >= 0 -> targets.push(decl_rows[index])
+                    if index < decl_rows.len() && decl_rows[index] >= 0 {
+                        targets.push(decl_rows[index])
+                    }
                 }
             }
         }
         // A function named as a value checks as a constant reference.
-        .ConstRef(symbol) -> ir_core_reach_add(keys, symbol_key(symbols, tree.symbols, symbol))
+        .ConstRef(symbol) -> { ir_core_reach_add(keys, symbol_key(symbols, tree.symbols, symbol)) }
         // Interpolation selectors call their source formatter by name with no
         // keyed call.
         .StrLit(parts) -> {
@@ -422,14 +460,22 @@ ir_core_reach_expr_keys: fn(tree: BodyTree, expression: Int, functions: [FnBody]
         // Core `read_line` (__InputLines).
         .HandleMethod(receiver, operation, _) -> {
             if operation == .DynDecode(_, _) {
-                loop name in ir_codec_decode_helpers() -> ir_core_reach_add(keys, ir_core_reach_source_key(source_keys, name) ?? "")
+                loop name in ir_codec_decode_helpers() {
+                    ir_core_reach_add(keys, ir_core_reach_source_key(source_keys, name) ?? "")
+                }
             }
-            if operation == .LinesIter -> ir_core_reach_add(keys, ir_line_reader_key(functions, body_type(tree, receiver)))
-            if ir_args_helper(operation) == .Val(helper) -> ir_core_reach_add(keys, ir_core_reach_source_key(source_keys, helper) ?? "")
+            if operation == .LinesIter {
+                ir_core_reach_add(keys, ir_line_reader_key(functions, body_type(tree, receiver)))
+            }
+            if ir_args_helper(operation) == .Val(helper) {
+                ir_core_reach_add(keys, ir_core_reach_source_key(source_keys, helper) ?? "")
+            }
         }
-        .DecodeUnder(_, _) -> ir_core_reach_add(keys, ir_core_reach_source_key(source_keys, "__decode_under") ?? "")
-        .InlineBlock(body) -> ir_core_reach_stmt_keys(tree, body, functions, keys)
-        .Lambda(value) -> ir_core_reach_lambda_keys(tree, value, functions, keys)
+        .DecodeUnder(_, _) -> {
+            ir_core_reach_add(keys, ir_core_reach_source_key(source_keys, "__decode_under") ?? "")
+        }
+        .InlineBlock(body) -> { ir_core_reach_stmt_keys(tree, body, functions, keys) }
+        .Lambda(value) -> { ir_core_reach_lambda_keys(tree, value, functions, keys) }
         .IfExpr(_, then_body, _, else_body, _) -> {
             ir_core_reach_stmt_keys(tree, then_body, functions, keys)
             ir_core_reach_stmt_keys(tree, else_body, functions, keys)
@@ -440,7 +486,7 @@ ir_core_reach_expr_keys: fn(tree: BodyTree, expression: Int, functions: [FnBody]
         }
         // A `?` calls its declared error conversion (`impl Source -> Target`)
         // by key, with no call node.
-        .Try(_, conversion, _) -> ir_named_conversion_key(conversion, keys)
+        .Try(_, conversion, _) -> { ir_named_conversion_key(conversion, keys) }
         .TryWithContext(_, _, conversion, _, _, _) -> ir_named_conversion_key(conversion, keys)
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .Uninit | .CtLit(_) | .TraitConst(_, _, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .BuiltinMethod(_, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
     }
@@ -458,7 +504,9 @@ ir_core_reach_function_keys: fn(function: FnBody, functions: [FnBody], symbols: 
     loop parameter in function.params {
         if parameter.default == Val(value) -> pending.push(value)
     }
-    loop statement in function.body -> ir_core_reach_statement_roots(function.tree, statement, pending)
+    loop statement in function.body {
+        ir_core_reach_statement_roots(function.tree, statement, pending)
+    }
     loop pending.len() > 0 {
         expression: pending.pop() ?? break
         ir_core_reach_expr_keys(function.tree, expression, functions, symbols, keys, source_keys, decl_rows, targets)
@@ -491,7 +539,9 @@ ir_precise_expr_helper: fn(expression: BodyNode) -> String? Never! {
             canonical: ir_canonical_core_record(record)
             if canonical.module_name != "core.math" -> return None
             if canonical.member == "fraction" -> return ir_precise_source_helper("Fraction", "new")
-            if canonical.member == "decimal" -> return ir_precise_source_helper("Decimal", "from_str")
+            if canonical.member == "decimal" {
+                return ir_precise_source_helper("Decimal", "from_str")
+            }
             None
         }
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> None
@@ -549,7 +599,7 @@ ir_named_function_tree: fn(tree: BodyTree, expression: Int, keys: &[String], dec
             key: decl_table_key(decls, symbols, callee)
             if key.starts_with("function:") && !keys.contains(key) -> keys.push(key)
         }
-        .Try(_, conversion, _) -> ir_named_conversion_key(conversion, keys)
+        .Try(_, conversion, _) -> { ir_named_conversion_key(conversion, keys) }
         .TryWithContext(_, _, conversion, _, _, _) -> ir_named_conversion_key(conversion, keys)
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
     }
@@ -559,7 +609,9 @@ ir_named_function_tree: fn(tree: BodyTree, expression: Int, keys: &[String], dec
 ir_named_conversion_key: fn(conversion: TTryConvert, keys: &[String]) Never! {
     key: if conversion == {
         .Typed(key, _, _) | .TypedIntoUnion(key, _, _, _, _) -> key
-        .NoConversion | .Never | .DefaultErr | .WidenUnion(_, _) | .RewidenUnion(_) -> return
+        .NoConversion | .Never | .DefaultErr | .WidenUnion(_, _) | .RewidenUnion(_) -> {
+            return
+        }
     }
     if !keys.contains(key) -> keys.push(key.copy())
 }
@@ -592,13 +644,25 @@ ir_comptime_codec_tree: fn(tree: BodyTree, expression: Int, targets: &[IRComptim
     node: body_node(tree, expression)
     if node.kind == {
         .HandleMethod(receiver, operation, _) -> {
-            if operation == .DynDecode(target, _) -> targets.push(IRComptimeCodecTarget{ty: target.copy(), encode: false, decode: true})
+            if operation == .DynDecode(target, _) {
+                targets.push(IRComptimeCodecTarget{ty: target.copy(), encode: false, decode: true})
+            }
             if operation == .SerdeEncode(_) {
-                if checked_expr_type_id(tree.expr_types, receiver) == .Val(type_id) -> targets.push(IRComptimeCodecTarget{ty: tree.types.types[type_id].copy(), encode: true, decode: false})
+                if checked_expr_type_id(tree.expr_types, receiver) == .Val(type_id) {
+                    targets.push(IRComptimeCodecTarget{ty: tree.types.types[type_id].copy(), encode: true, decode: false})
+                }
             }
         }
-        .Call(_, type_args, _) -> loop arg in type_args -> targets.push(IRComptimeCodecTarget{ty: arg.copy(), encode: true, decode: true})
-        .MethodCall(_, _, type_args, _) -> loop arg in type_args -> targets.push(IRComptimeCodecTarget{ty: arg.copy(), encode: true, decode: true})
+        .Call(_, type_args, _) -> {
+            loop arg in type_args {
+                targets.push(IRComptimeCodecTarget{ty: arg.copy(), encode: true, decode: true})
+            }
+        }
+        .MethodCall(_, _, type_args, _) -> {
+            loop arg in type_args {
+                targets.push(IRComptimeCodecTarget{ty: arg.copy(), encode: true, decode: true})
+            }
+        }
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
     }
     body_each_expr_child(tree, node, fn(child: Int) { ir_comptime_codec_tree(tree, child, targets) })
@@ -668,16 +732,22 @@ ir_precise_rendered_owners: fn(ty: Type, owners: &[String]) Never! {
     if ty == {
         .Named(name) -> {
             short: ir_short_name(name)
-            if short != "Decimal" && short != "Fraction" && short != "Complex" -> return
-            if name != short && !name.ends_with("core.math::{short}") && !name.ends_with("core.math.{short}") -> return
+            if short != "Decimal" && short != "Fraction" && short != "Complex" {
+                return
+            }
+            if name != short && !name.ends_with("core.math::{short}") && !name.ends_with("core.math.{short}") {
+                return
+            }
             if !owners.contains(short) -> owners.push(short)
         }
-        .Apply(_, args) -> loop arg in args -> ir_precise_rendered_owners(arg, owners)
-        .List(element) -> ir_precise_rendered_owners(element, owners)
-        .FixedList(element, _) -> ir_precise_rendered_owners(element, owners)
-        .Option(inner) -> ir_precise_rendered_owners(inner, owners)
+        .Apply(_, args) -> {
+            loop arg in args -> ir_precise_rendered_owners(arg, owners)
+        }
+        .List(element) -> { ir_precise_rendered_owners(element, owners) }
+        .FixedList(element, _) -> { ir_precise_rendered_owners(element, owners) }
+        .Option(inner) -> { ir_precise_rendered_owners(inner, owners) }
         .Shared(inner) -> ir_precise_rendered_owners(inner, owners)
-        .Tagged(_, inner) | .Case(_, inner) -> ir_precise_rendered_owners(inner, owners)
+        .Tagged(_, inner) | .Case(_, inner) -> { ir_precise_rendered_owners(inner, owners) }
         .Map(key, _, value) -> {
             ir_precise_rendered_owners(key, owners)
             ir_precise_rendered_owners(value, owners)
@@ -686,8 +756,12 @@ ir_precise_rendered_owners: fn(ty: Type, owners: &[String]) Never! {
             ir_precise_rendered_owners(ok, owners)
             ir_precise_rendered_owners(err, owners)
         }
-        .Tuple(fields) -> loop field in fields -> ir_precise_rendered_owners(field.ty, owners)
-        .Union(members) -> loop member in members -> ir_precise_rendered_owners(member, owners)
+        .Tuple(fields) -> {
+            loop field in fields -> ir_precise_rendered_owners(field.ty, owners)
+        }
+        .Union(members) -> {
+            loop member in members -> ir_precise_rendered_owners(member, owners)
+        }
         .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> {}
     }
 }
@@ -773,7 +847,9 @@ ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, symbols: &[Sy
             if decl_rows[id.row.index()] < 0 -> decl_rows[id.row.index()] = index
         }
         core: module_is_core(function.module_identity)
-        if ir_string_format_source(core, function.source_file, function.kind) || ir_codec_decode_source(core, function.source_file, function.kind, function.name) || ir_args_source(core, function.source_file, function.kind, function.name) -> ir_core_reach_source_set(source_keys, function.name, function.key)
+        if ir_string_format_source(core, function.source_file, function.kind) || ir_codec_decode_source(core, function.source_file, function.kind, function.name) || ir_args_source(core, function.source_file, function.kind, function.name) {
+            ir_core_reach_source_set(source_keys, function.name, function.key)
+        }
         rooted: !core_modules.has_key(function.module_identity.id) || ir_core_reach_has(rooted_keys, function.key) || (!ir_core_reach_is_top_level(function.kind) && !function.synthetic) || ir_core_reach_generated_codec(function) || ir_precise_source_target(function)
         reachable.push(rooted)
         if rooted {
@@ -865,9 +941,11 @@ IRReachPart: struct {
 
 // A wave's source bytes per admitted reachability thread.
 IR_REACH_MIN_BYTES_PER_THREAD: 65536
+
 // Parts per admitted reachability thread: a thread that drew light bodies
 // claims more while another reads a heavy one.
 IR_REACH_PARTS_PER_THREAD: 4
+
 // The calling thread reports `lower` progress every this many rows of a
 // wave; the trace throttles it further by time.
 IR_REACH_PROGRESS_STRIDE: 64
@@ -882,7 +960,9 @@ ir_core_reach_root_targets: fn(slot: Shared<IRReachShared>, rows: [Int], weights
     workers: compiler_threads_admit(threads, weights.len(), total, IR_REACH_MIN_BYTES_PER_THREAD, 0, 0)
     count := workers * IR_REACH_PARTS_PER_THREAD
     if count > weights.len() -> count = weights.len()
-    if workers <= 1 || count <= 1 -> return ir_core_reach_part_targets(slot, rows, 0, weights.len(), progress, trace_sink)
+    if workers <= 1 || count <= 1 {
+        return ir_core_reach_part_targets(slot, rows, 0, weights.len(), progress, trace_sink)
+    }
     bounds: compiler_threads_partition(weights, count)
     queue: Shared{IRPartQueue{next: 0}}
     parts := [[Int]]{}
@@ -938,7 +1018,9 @@ ir_core_reach_part_targets: fn(slot: Shared<IRReachShared>, rows: [Int], first: 
     targets := [Int]{}
     loop position in first..<last {
         if position %% IR_REACH_PROGRESS_STRIDE == 0 {
-            if trace_sink == .Val(sink) -> sink.progress("lower", progress.read + position, progress.total)
+            if trace_sink == .Val(sink) {
+                sink.progress("lower", progress.read + position, progress.total)
+            }
         }
         // Passed straight through: a local binding of the guarded rows would copy them.
         ir_core_reach_row_targets(inputs.value.functions[0], inputs.value.symbols[0], inputs.value.by_key[0], inputs.value.source_keys[0], inputs.value.decl_rows, rows[position], targets)

@@ -13,9 +13,11 @@ use {
     process: core.process
 }
 
-show: fn(label: String, result: Result<ProcessReceipt, IOError>) {
+show: fn(label: String, result: ProcessReceipt IOError!) {
     if result == {
-        .Ok(receipt) -> print(if receipt.timed_out -> "{label}: timed out" else -> "{label}: exit {receipt.code} out={receipt.output.trim()}")
+        .Ok(receipt) -> {
+            print(if receipt.timed_out -> "{label}: timed out" else -> "{label}: exit {receipt.code} out={receipt.output.trim()}")
+        }
         .Err(error) -> print("{label}: {kind(error)}")
     }
 }
@@ -65,7 +67,7 @@ run: fn() -[Exec, IO, FS, Env, Time.Wait]> {
     loop result in process.run_all(meet, 2) ?? panic("run_all failed") -> show("rendezvous", result)
 
     if process.run_all(ordered, 0) == {
-        .Ok(_) -> print("jobs 0: ran")
+        .Ok(_) -> { print("jobs 0: ran") }
         .Err(error) -> print("jobs 0: {kind(error)}")
     }
     files.remove_all(dir) ?? panic("cleanup")

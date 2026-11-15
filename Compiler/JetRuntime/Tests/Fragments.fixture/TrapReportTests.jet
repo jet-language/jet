@@ -12,7 +12,9 @@
     _ := coll_call1(callback, environment)
     code_out: save + I64{32}
     record: jet_rt_root_take_stop(control, code_out)
-    if (record == I64{0} || trap_word(record + I64{48}) != I64{1}) -> jet_rt_unreachable(I64{0}, I64{0})
+    if (record == I64{0} || trap_word(record + I64{48}) != I64{1}) {
+        jet_rt_unreachable(I64{0}, I64{0})
+    }
     code: trap_word(code_out)
     report: scheduler_stop_take_message(record)
     jet_rt_root_leave(control, save)

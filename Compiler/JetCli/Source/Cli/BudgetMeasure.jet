@@ -11,14 +11,34 @@ use {
     cli_time: core.time
     jet_driver.[JetDriverBudgetFacts, JetDriverBudgetSpec, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[
-        CanonicalJSON, CanonicalJSONField, Diagnostic, DIAGNOSTIC_ERROR, DIAGNOSTIC_LINT, PerfComparison, PerfDirection, PerfEnforcement, PerfEvidence, PerfLimitDirection,
-        PerfPercentile, PerfPolicyOutcome, PerfRational, Span, canonical_json_bytes, diagnostic_render,
-        perf_budget_context_key, perf_evaluate, perf_rational_integer, perf_rational_new, perf_rational_to_json,
-        perf_report_object_new, perf_stable_id, perf_trend, perf_verify_budget_report,
+        CanonicalJSON,
+        CanonicalJSONField,
+        Diagnostic,
+        DIAGNOSTIC_ERROR,
+        DIAGNOSTIC_LINT,
+        PerfComparison,
+        PerfDirection,
+        PerfEnforcement,
+        PerfEvidence,
+        PerfLimitDirection,
+        PerfPercentile,
+        PerfPolicyOutcome,
+        PerfRational,
+        Span,
+        canonical_json_bytes,
+        diagnostic_render,
+        perf_budget_context_key,
+        perf_evaluate,
+        perf_rational_integer,
+        perf_rational_new,
+        perf_rational_to_json,
+        perf_report_object_new,
+        perf_stable_id,
+        perf_trend,
+        perf_verify_budget_report,
     ]
     jet_sema.[BudgetAxis, BudgetQuantity, sema_budget_ascii_lower, sema_budget_provider_identity, sema_budget_provider_kind]
 }
-
 
 // One budget before its evaluation: its measurement fields but samples,
 // context key and decision, and the typed inputs of its evaluation.
@@ -80,8 +100,12 @@ jet_cli_budget_build: fn(root: String, ordered: [JetDriverBudgetSpec], facts: Je
     package: jet_cli_budget_package(root)
     prefix: jet_cli_entry_join(root, "")
     measured := [JetCLIBudgetMeasured]{}
-    loop (index, row) in ordered -> measured.push(jet_cli_budget_base(row, providers[index], package, prefix, profile))
-    loop (index, row) in ordered -> measured[index].samples = jet_cli_budget_samples(row.spec, facts, artifact, services)
+    loop (index, row) in ordered {
+        measured.push(jet_cli_budget_base(row, providers[index], package, prefix, profile))
+    }
+    loop (index, row) in ordered {
+        measured[index].samples = jet_cli_budget_samples(row.spec, facts, artifact, services)
+    }
     subject: jet_cli_budget_subject(root, sources, measured_start, jet_cli_rfc3339(cli_time.unix_ns()), profile, jet_cli_budget_artifact_json(artifact))
     subject_fields: jet_cli_budget_fields(subject)
     tool_fields: jet_cli_budget_fields(toolchain)
@@ -90,11 +114,15 @@ jet_cli_budget_build: fn(root: String, ordered: [JetDriverBudgetSpec], facts: Je
         measured[index].context_key = key
     }
     skeletons: loop row in measured -> jet_cli_budget_measurement(row, CanonicalJSON.Null)
-    evidence_id: perf_stable_id(perf_report_object_new([CanonicalJSONField]{
-        CanonicalJSONField{key: "measurements", value: CanonicalJSON.Array(skeletons)},
-        CanonicalJSONField{key: "subject", value: subject.copy()}, // copy: the report content keeps the subject too.
-        CanonicalJSONField{key: "toolchain", value: toolchain.copy()}, // copy: the report content keeps the toolchain too.
-    }))
+    evidence_id: perf_stable_id(
+        perf_report_object_new(
+            [CanonicalJSONField]{
+                CanonicalJSONField{key: "measurements", value: CanonicalJSON.Array(skeletons)},
+                CanonicalJSONField{key: "subject", value: subject.copy()},  // copy: the report content keeps the subject too.
+                CanonicalJSONField{key: "toolchain", value: toolchain.copy()},  // copy: the report content keeps the toolchain too.
+            },
+        ),
+    )
     measurements := [CanonicalJSON]{}
     results := [JetCLIBudgetResult]{}
     pass := 0
@@ -103,67 +131,80 @@ jet_cli_budget_build: fn(root: String, ordered: [JetDriverBudgetSpec], facts: Je
     loop row in measured {
         evaluation: perf_evaluate(evidence_id, row.context_key, [String]{}, row.samples, [PerfRational]{}, row.percentile, row.comparison, row.direction, row.enforcement, None) ?? return Err(jet_cli_budget_failure(err.message))
         if evaluation.outcome == {
-            .Pass -> pass += 1
-            .Warn -> warn += 1
+            .Pass -> { pass += 1 }
+            .Warn -> { warn += 1 }
             .Fail -> fail += 1
         }
         spec: row.located.spec
         reason: "measured estimator {evaluation.point.num} under {spec.comparison_fact.kind} policy"
         trend: jet_cli_budget_trend(row.direction)
-        decision: perf_report_object_new([CanonicalJSONField]{
-            CanonicalJSONField{key: "evidence", value: CanonicalJSON.String(jet_cli_budget_evidence_name(evaluation.evidence))},
-            CanonicalJSONField{key: "lower95", value: jet_cli_budget_bound_json(evaluation.lower95)},
-            CanonicalJSONField{key: "point", value: perf_rational_to_json(evaluation.point)},
-            CanonicalJSONField{key: "policy_outcome", value: CanonicalJSON.String(jet_cli_budget_outcome_name(evaluation.outcome))},
-            CanonicalJSONField{key: "reason", value: CanonicalJSON.String(reason.copy())}, // copy: the result row keeps the reason too.
-            CanonicalJSONField{key: "trend", value: trend.copy()}, // copy: the result row keeps the trend too.
-            CanonicalJSONField{key: "upper95", value: jet_cli_budget_bound_json(evaluation.upper95)},
-        })
+        decision: perf_report_object_new(
+            [CanonicalJSONField]{
+                CanonicalJSONField{key: "evidence", value: CanonicalJSON.String(jet_cli_budget_evidence_name(evaluation.evidence))},
+                CanonicalJSONField{key: "lower95", value: jet_cli_budget_bound_json(evaluation.lower95)},
+                CanonicalJSONField{key: "point", value: perf_rational_to_json(evaluation.point)},
+                CanonicalJSONField{key: "policy_outcome", value: CanonicalJSON.String(jet_cli_budget_outcome_name(evaluation.outcome))},
+                CanonicalJSONField{key: "reason", value: CanonicalJSON.String(reason.copy())},  // copy: the result row keeps the reason too.
+                CanonicalJSONField{key: "trend", value: trend.copy()},  // copy: the result row keeps the trend too.
+                CanonicalJSONField{key: "upper95", value: jet_cli_budget_bound_json(evaluation.upper95)},
+            },
+        )
         measurements.push(jet_cli_budget_measurement(row, decision))
-        results.push(JetCLIBudgetResult{
-            id: "{spec.role}:{spec.name}",
-            name: spec.name.copy(), // copy: the measured row keeps its spec.
-            source: row.source.copy(), // copy: the measured row keeps its source.
-            path: row.located.source_path.copy(), // copy: the measured row keeps its spec's location.
-            line: row.located.line,
-            column: row.located.column,
-            metric: row.metric.copy(), // copy: the measured row keeps its metric.
-            metric_label: spec.metric.copy(), // copy: the measured row keeps its spec.
-            unit: jet_cli_budget_metric_unit(spec.metric),
-            direction: row.direction,
-            comparison: row.comparison_json.copy(), // copy: the measured row keeps its comparison.
-            point: evaluation.point,
-            lower95: evaluation.lower95,
-            upper95: evaluation.upper95,
-            trend: trend,
-            outcome: evaluation.outcome,
-            evidence: evaluation.evidence,
-            enforcement: row.enforcement,
-            reason: reason,
-        })
+        results.push(
+            JetCLIBudgetResult{
+                id: "{spec.role}:{spec.name}",
+                name: spec.name.copy(),  // copy: the measured row keeps its spec.
+                source: row.source.copy(),  // copy: the measured row keeps its source.
+                path: row.located.source_path.copy(),  // copy: the measured row keeps its spec's location.
+                line: row.located.line,
+                column: row.located.column,
+                metric: row.metric.copy(),  // copy: the measured row keeps its metric.
+                metric_label: spec.metric.copy(),  // copy: the measured row keeps its spec.
+                unit: jet_cli_budget_metric_unit(spec.metric),
+                direction: row.direction,
+                comparison: row.comparison_json.copy(),  // copy: the measured row keeps its comparison.
+                point: evaluation.point,
+                lower95: evaluation.lower95,
+                upper95: evaluation.upper95,
+                trend: trend,
+                outcome: evaluation.outcome,
+                evidence: evaluation.evidence,
+                enforcement: row.enforcement,
+                reason: reason,
+            },
+        )
     }
     results.sort_by(fn(left: JetCLIBudgetResult, right: JetCLIBudgetResult) { if jet_cli_budget_result_rank(left) == jet_cli_budget_result_rank(right) -> left.id <=> right.id else -> jet_cli_budget_result_rank(left) <=> jet_cli_budget_result_rank(right) })
     outcome: if fail > 0 -> "fail" else if warn > 0 -> "warn" else -> "pass"
-    content: perf_report_object_new([CanonicalJSONField]{
-        CanonicalJSONField{key: "evidence_id", value: CanonicalJSON.String(evidence_id)},
-        CanonicalJSONField{key: "measurements", value: CanonicalJSON.Array(measurements)},
-        CanonicalJSONField{key: "privacy", value: jet_cli_budget_privacy()},
-        CanonicalJSONField{key: "subject", value: subject},
-        CanonicalJSONField{key: "summary", value: perf_report_object_new([CanonicalJSONField]{
-            CanonicalJSONField{key: "fail", value: CanonicalJSON.Integer("{fail}")},
-            CanonicalJSONField{key: "outcome", value: CanonicalJSON.String(outcome)},
-            CanonicalJSONField{key: "pass", value: CanonicalJSON.Integer("{pass}")},
-            CanonicalJSONField{key: "warn", value: CanonicalJSON.Integer("{warn}")},
-        })},
-        CanonicalJSONField{key: "toolchain", value: toolchain},
-    })
+    content: perf_report_object_new(
+        [CanonicalJSONField]{
+            CanonicalJSONField{key: "evidence_id", value: CanonicalJSON.String(evidence_id)},
+            CanonicalJSONField{key: "measurements", value: CanonicalJSON.Array(measurements)},
+            CanonicalJSONField{key: "privacy", value: jet_cli_budget_privacy()},
+            CanonicalJSONField{key: "subject", value: subject},
+            CanonicalJSONField{
+                key: "summary",
+                value: perf_report_object_new(
+                    [CanonicalJSONField]{
+                        CanonicalJSONField{key: "fail", value: CanonicalJSON.Integer("{fail}")},
+                        CanonicalJSONField{key: "outcome", value: CanonicalJSON.String(outcome)},
+                        CanonicalJSONField{key: "pass", value: CanonicalJSON.Integer("{pass}")},
+                        CanonicalJSONField{key: "warn", value: CanonicalJSON.Integer("{warn}")},
+                    },
+                ),
+            },
+            CanonicalJSONField{key: "toolchain", value: toolchain},
+        },
+    )
     report_id: perf_stable_id(content)
-    report: perf_report_object_new([CanonicalJSONField]{
-        CanonicalJSONField{key: "content", value: content},
-        CanonicalJSONField{key: "report_id", value: CanonicalJSON.String(report_id.copy())}, // copy: the built report keeps its id.
-        CanonicalJSONField{key: "schema", value: CanonicalJSON.String("jet.budget-report")},
-        CanonicalJSONField{key: "version", value: CanonicalJSON.Integer("1")},
-    })
+    report: perf_report_object_new(
+        [CanonicalJSONField]{
+            CanonicalJSONField{key: "content", value: content},
+            CanonicalJSONField{key: "report_id", value: CanonicalJSON.String(report_id.copy())},  // copy: the built report keeps its id.
+            CanonicalJSONField{key: "schema", value: CanonicalJSON.String("jet.budget-report")},
+            CanonicalJSONField{key: "version", value: CanonicalJSON.Integer("1")},
+        },
+    )
     bytes: canonical_json_bytes(report)
     _: perf_verify_budget_report(bytes) ?? return Err(jet_cli_budget_failure(err.message))
     Ok(JetCLIBudgetBuilt{report: report, bytes: bytes, report_id: report_id, results: results, fail: fail})
@@ -171,13 +212,13 @@ jet_cli_budget_build: fn(root: String, ordered: [JetDriverBudgetSpec], facts: Je
 
 // The fields of a canonical object; empty for any other value.
 jet_cli_budget_fields: fn(value: CanonicalJSON) -> [CanonicalJSONField] Never! {
-    if value == .Object(fields) -> return fields.copy() // copy: the caller keeps the object whole.
+    if value == .Object(fields) -> return fields.copy()  // copy: the caller keeps the object whole.
     [CanonicalJSONField]{}
 }
 
 // The package the manifest names, else `package`.
 jet_cli_budget_package: fn(root: String) -> String Never! {
-    if jet_cli_root_manifest(root) == .Val(manifest) -> return manifest.name.copy() // copy: the manifest is dropped here.
+    if jet_cli_root_manifest(root) == .Val(manifest) -> return manifest.name.copy()  // copy: the manifest is dropped here.
     "package"
 }
 
@@ -187,40 +228,55 @@ jet_cli_budget_base: fn(located: JetDriverBudgetSpec, provider: CanonicalJSON, p
     spec: located.spec
     metric_name: sema_budget_provider_kind(spec.metric)
     percentile_name: jet_cli_budget_percentile_name(spec.metric)
-    percentile_value: if percentile_name == .Val(name) -> CanonicalJSON.String(name.copy()) else -> CanonicalJSON.Null // copy: the name also picks the estimator.
+    percentile_value: if percentile_name == .Val(name) -> CanonicalJSON.String(name.copy()) else -> CanonicalJSON.Null  // copy: the name also picks the estimator.
     percentile: jet_cli_budget_percentile(percentile_name)
-    metric: perf_report_object_new([CanonicalJSONField]{
-        CanonicalJSONField{key: "name", value: CanonicalJSON.String(metric_name.copy())}, // copy: the metric name also picks the direction.
-        CanonicalJSONField{key: "percentile", value: percentile_value},
-    })
-    if spec.comparison_fact.kind != "Absolute" -> return Err(jet_cli_budget_failure("unknown budget comparison `{spec.comparison_fact.kind}`"))
+    metric: perf_report_object_new(
+        [CanonicalJSONField]{
+            CanonicalJSONField{key: "name", value: CanonicalJSON.String(metric_name.copy())},  // copy: the metric name also picks the direction.
+            CanonicalJSONField{key: "percentile", value: percentile_value},
+        },
+    )
+    if spec.comparison_fact.kind != "Absolute" {
+        return Err(jet_cli_budget_failure("unknown budget comparison `{spec.comparison_fact.kind}`"))
+    }
     limit: jet_cli_budget_quantity(spec.limit_fact.quantity)
     at_least: spec.limit_fact.kind == "AtLeast"
-    comparison_json: perf_report_object_new([CanonicalJSONField]{
-        CanonicalJSONField{key: "direction", value: CanonicalJSON.String(if at_least -> "at_least" else -> "at_most")},
-        CanonicalJSONField{key: "kind", value: CanonicalJSON.String("absolute")},
-        CanonicalJSONField{key: "limit", value: perf_rational_to_json(limit)},
-    })
+    comparison_json: perf_report_object_new(
+        [CanonicalJSONField]{
+            CanonicalJSONField{key: "direction", value: CanonicalJSON.String(if at_least -> "at_least" else -> "at_most")},
+            CanonicalJSONField{key: "kind", value: CanonicalJSON.String("absolute")},
+            CanonicalJSONField{key: "limit", value: perf_rational_to_json(limit)},
+        },
+    )
     direction: if metric_name == "Throughput" -> PerfDirection.HigherIsBetter else -> PerfDirection.LowerIsBetter
     enforcement_text: sema_budget_ascii_lower(spec.enforcement)
-    applies: perf_report_object_new([CanonicalJSONField]{
-        CanonicalJSONField{key: "profiles", value: CanonicalJSON.Array(jet_cli_budget_axis(spec.applicability.profiles, profile))},
-        CanonicalJSONField{key: "targets", value: CanonicalJSON.Array(jet_cli_budget_axis(spec.applicability.targets, "native"))},
-    })
-    budget_spec: perf_report_object_new([CanonicalJSONField]{
-        CanonicalJSONField{key: "applies", value: applies},
-        CanonicalJSONField{key: "comparison", value: comparison_json.copy()}, // copy: the measurement keeps the comparison too.
-        CanonicalJSONField{key: "enforcement", value: CanonicalJSON.String(enforcement_text.copy())}, // copy: the measurement keeps the enforcement too.
-        CanonicalJSONField{key: "metric", value: metric.copy()}, // copy: the measurement keeps the metric too.
-        CanonicalJSONField{key: "name", value: CanonicalJSON.String(spec.name.copy())}, // copy: the located spec stays whole.
-        CanonicalJSONField{key: "package_id", value: CanonicalJSON.String(package.copy())}, // copy: every budget names the package.
-        CanonicalJSONField{key: "perf_role", value: CanonicalJSON.String(spec.role.copy())}, // copy: the located spec stays whole.
-        CanonicalJSONField{key: "provider", value: perf_report_object_new([CanonicalJSONField]{
-            CanonicalJSONField{key: "identity", value: CanonicalJSON.String(sema_budget_provider_identity(spec.provider) ?? "")},
-            CanonicalJSONField{key: "kind", value: CanonicalJSON.String(sema_budget_provider_kind(spec.provider))},
-        })},
-        CanonicalJSONField{key: "scope", value: CanonicalJSON.String(spec.scope.copy())}, // copy: the located spec stays whole.
-    })
+    applies: perf_report_object_new(
+        [CanonicalJSONField]{
+            CanonicalJSONField{key: "profiles", value: CanonicalJSON.Array(jet_cli_budget_axis(spec.applicability.profiles, profile))},
+            CanonicalJSONField{key: "targets", value: CanonicalJSON.Array(jet_cli_budget_axis(spec.applicability.targets, "native"))},
+        },
+    )
+    budget_spec: perf_report_object_new(
+        [CanonicalJSONField]{
+            CanonicalJSONField{key: "applies", value: applies},
+            CanonicalJSONField{key: "comparison", value: comparison_json.copy()},  // copy: the measurement keeps the comparison too.
+            CanonicalJSONField{key: "enforcement", value: CanonicalJSON.String(enforcement_text.copy())},  // copy: the measurement keeps the enforcement too.
+            CanonicalJSONField{key: "metric", value: metric.copy()},  // copy: the measurement keeps the metric too.
+            CanonicalJSONField{key: "name", value: CanonicalJSON.String(spec.name.copy())},  // copy: the located spec stays whole.
+            CanonicalJSONField{key: "package_id", value: CanonicalJSON.String(package.copy())},  // copy: every budget names the package.
+            CanonicalJSONField{key: "perf_role", value: CanonicalJSON.String(spec.role.copy())},  // copy: the located spec stays whole.
+            CanonicalJSONField{
+                key: "provider",
+                value: perf_report_object_new(
+                    [CanonicalJSONField]{
+                        CanonicalJSONField{key: "identity", value: CanonicalJSON.String(sema_budget_provider_identity(spec.provider) ?? "")},
+                        CanonicalJSONField{key: "kind", value: CanonicalJSON.String(sema_budget_provider_kind(spec.provider))},
+                    },
+                ),
+            },
+            CanonicalJSONField{key: "scope", value: CanonicalJSON.String(spec.scope.copy())},  // copy: the located spec stays whole.
+        },
+    )
     hash: perf_stable_id(budget_spec)
     source: located.source_path.removeprefix(prefix).replace("\\", "/")
     fields: [CanonicalJSONField]{
@@ -228,11 +284,11 @@ jet_cli_budget_base: fn(located: JetDriverBudgetSpec, provider: CanonicalJSON, p
         CanonicalJSONField{key: "budget_id", value: CanonicalJSON.String("{spec.role}:{spec.name}")},
         CanonicalJSONField{key: "budget_spec", value: budget_spec},
         CanonicalJSONField{key: "budget_spec_sha256", value: CanonicalJSON.String(hash)},
-        CanonicalJSONField{key: "comparison", value: comparison_json.copy()}, // copy: the result row keeps the comparison too.
+        CanonicalJSONField{key: "comparison", value: comparison_json.copy()},  // copy: the result row keeps the comparison too.
         CanonicalJSONField{key: "direction", value: CanonicalJSON.String(jet_cli_budget_direction_name(direction))},
         CanonicalJSONField{key: "enforcement", value: CanonicalJSON.String(enforcement_text)},
         CanonicalJSONField{key: "history", value: CanonicalJSON.Null},
-        CanonicalJSONField{key: "metric", value: metric.copy()}, // copy: the result row keeps the metric too.
+        CanonicalJSONField{key: "metric", value: metric.copy()},  // copy: the result row keeps the metric too.
         CanonicalJSONField{key: "policy", value: CanonicalJSON.Null},
         CanonicalJSONField{key: "provider", value: provider},
         CanonicalJSONField{key: "source", value: CanonicalJSON.String("{source}:{located.line}")},
@@ -240,26 +296,28 @@ jet_cli_budget_base: fn(located: JetDriverBudgetSpec, provider: CanonicalJSON, p
         CanonicalJSONField{key: "target_class", value: CanonicalJSON.String("native")},
         CanonicalJSONField{key: "unit", value: CanonicalJSON.String(jet_cli_budget_metric_unit(spec.metric))},
     }
-    Ok(JetCLIBudgetMeasured{
-        located: located.copy(), // copy: the caller keeps its ordered specs.
-        source: source,
-        fields: fields,
-        metric: metric,
-        comparison_json: comparison_json,
-        context_key: "",
-        samples: [PerfRational]{},
-        percentile: percentile,
-        comparison: PerfComparison.Absolute{limit: limit, direction: if at_least -> PerfLimitDirection.AtLeast else -> PerfLimitDirection.AtMost},
-        direction: direction,
-        enforcement: if spec.enforcement == "Warn" -> PerfEnforcement.Warn else -> PerfEnforcement.Fail,
-    })
+    Ok(
+        JetCLIBudgetMeasured{
+            located: located.copy(),  // copy: the caller keeps its ordered specs.
+            source: source,
+            fields: fields,
+            metric: metric,
+            comparison_json: comparison_json,
+            context_key: "",
+            samples: [PerfRational]{},
+            percentile: percentile,
+            comparison: PerfComparison.Absolute{limit: limit, direction: if at_least -> PerfLimitDirection.AtLeast else -> PerfLimitDirection.AtMost},
+            direction: direction,
+            enforcement: if spec.enforcement == "Warn" -> PerfEnforcement.Warn else -> PerfEnforcement.Fail,
+        },
+    )
 }
 
 // One measurement object: the base fields, the samples, the context key and
 // `decision` (Null in the evidence skeleton).
 jet_cli_budget_measurement: fn(row: JetCLIBudgetMeasured, decision: CanonicalJSON) -> CanonicalJSON Never! {
-    fields := row.fields.copy() // copy: the skeleton and the measurement each take the base fields.
-    fields.push(CanonicalJSONField{key: "context_key", value: CanonicalJSON.String(row.context_key.copy())}) // copy: the evaluation reads the key after the skeleton.
+    fields := row.fields.copy()  // copy: the skeleton and the measurement each take the base fields.
+    fields.push(CanonicalJSONField{key: "context_key", value: CanonicalJSON.String(row.context_key.copy())})  // copy: the evaluation reads the key after the skeleton.
     fields.push(CanonicalJSONField{key: "decision", value: decision})
     fields.push(CanonicalJSONField{key: "samples", value: CanonicalJSON.Array(loop sample in row.samples -> perf_rational_to_json(sample))})
     perf_report_object_new(fields)
@@ -268,9 +326,9 @@ jet_cli_budget_measurement: fn(row: JetCLIBudgetMeasured, decision: CanonicalJSO
 // An applicability axis as the report records it: the names it admits.
 jet_cli_budget_axis: fn(axis: BudgetAxis, current: String) -> [CanonicalJSON] Never! {
     if axis == {
-        .Current -> [CanonicalJSON]{CanonicalJSON.String(current.copy())} // copy: the caller keeps the current name.
+        .Current -> [CanonicalJSON]{CanonicalJSON.String(current.copy())}  // copy: the caller keeps the current name.
         .All -> [CanonicalJSON]{CanonicalJSON.String("all")}
-        .Only(values) -> loop value in values -> CanonicalJSON.String(value.copy()) // copy: the spec keeps its selectors.
+        .Only(values) -> loop value in values -> CanonicalJSON.String(value.copy())  // copy: the spec keeps its selectors.
     }
 }
 
@@ -330,7 +388,9 @@ jet_cli_budget_compiler_fact: fn(metric: String, facts: JetDriverBudgetFacts) ->
         "EffectCount" -> Ok(facts.effect_count)
         "GeneratedUnsafe" -> Err(jet_cli_budget_failure("CompilerFacts metric `GeneratedUnsafe` has no exact checked front-end fact; refusing proxy measurement"))
         else -> {
-            if metric.starts_with("CompileTime") -> return Err(jet_cli_budget_failure("CompilerFacts metric `CompileTime` is unsupported; use the typed CompilerProbe provider"))
+            if metric.starts_with("CompileTime") {
+                return Err(jet_cli_budget_failure("CompilerFacts metric `CompileTime` is unsupported; use the typed CompilerProbe provider"))
+            }
             Err(jet_cli_budget_failure("CompilerFacts metric `{metric}` is not implemented"))
         }
     }
@@ -350,19 +410,21 @@ jet_cli_budget_provider: fn(provider: String) -> CanonicalJSON JetCLIBudgetFailu
     memory_kib: Int.parse(total.before(" ")) ?? return Err(jet_cli_budget_failure("memory total is malformed"))
     kernel: jet_cli_budget_read_trimmed("/proc/sys/kernel/osrelease", "kernel identity")
     power_governor: jet_cli_budget_read_trimmed("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor", "CPU power governor")
-    body: perf_report_object_new([CanonicalJSONField]{
-        CanonicalJSONField{key: "cpu_arch", value: CanonicalJSON.String(cpu_arch)},
-        CanonicalJSONField{key: "cpu_model", value: CanonicalJSON.String(cpu_model)},
-        CanonicalJSONField{key: "identity", value: CanonicalJSON.String(sema_budget_provider_identity(provider) ?? "")},
-        CanonicalJSONField{key: "isolation", value: CanonicalJSON.String(protocol.isolation)},
-        CanonicalJSONField{key: "kernel", value: CanonicalJSON.String(kernel)},
-        CanonicalJSONField{key: "kind", value: CanonicalJSON.String(kind)},
-        CanonicalJSONField{key: "logical_cpus", value: CanonicalJSON.Integer("{cli_sys.cpu_count()}")},
-        CanonicalJSONField{key: "memory_bytes", value: CanonicalJSON.Integer("{memory_kib * 1024}")},
-        CanonicalJSONField{key: "os", value: CanonicalJSON.String(cli_sys.name())},
-        CanonicalJSONField{key: "power_governor", value: CanonicalJSON.String(power_governor)},
-        CanonicalJSONField{key: "version", value: CanonicalJSON.String(protocol.version)},
-    })
+    body: perf_report_object_new(
+        [CanonicalJSONField]{
+            CanonicalJSONField{key: "cpu_arch", value: CanonicalJSON.String(cpu_arch)},
+            CanonicalJSONField{key: "cpu_model", value: CanonicalJSON.String(cpu_model)},
+            CanonicalJSONField{key: "identity", value: CanonicalJSON.String(sema_budget_provider_identity(provider) ?? "")},
+            CanonicalJSONField{key: "isolation", value: CanonicalJSON.String(protocol.isolation)},
+            CanonicalJSONField{key: "kernel", value: CanonicalJSON.String(kernel)},
+            CanonicalJSONField{key: "kind", value: CanonicalJSON.String(kind)},
+            CanonicalJSONField{key: "logical_cpus", value: CanonicalJSON.Integer("{cli_sys.cpu_count()}")},
+            CanonicalJSONField{key: "memory_bytes", value: CanonicalJSON.Integer("{memory_kib * 1024}")},
+            CanonicalJSONField{key: "os", value: CanonicalJSON.String(cli_sys.name())},
+            CanonicalJSONField{key: "power_governor", value: CanonicalJSON.String(power_governor)},
+            CanonicalJSONField{key: "version", value: CanonicalJSON.String(protocol.version)},
+        },
+    )
     fingerprint: perf_stable_id(body)
     fields := jet_cli_budget_fields(body)
     fields.push(CanonicalJSONField{key: "hardware_fingerprint", value: CanonicalJSON.String(fingerprint)})
@@ -396,12 +458,16 @@ jet_cli_budget_trend: fn(direction: PerfDirection) -> CanonicalJSON JetCLIBudget
         .Regressing -> "regressing"
         .Insufficient -> "insufficient"
     }
-    Ok(perf_report_object_new([CanonicalJSONField]{
-        CanonicalJSONField{key: "estimators", value: CanonicalJSON.Array(loop value in trend.estimators -> perf_rational_to_json(value))},
-        CanonicalJSONField{key: "label", value: CanonicalJSON.String(label)},
-        CanonicalJSONField{key: "report_ids", value: CanonicalJSON.Array(loop id in trend.report_ids -> CanonicalJSON.String(id.copy()))}, // copy: the trend keeps its ids.
-        CanonicalJSONField{key: "score", value: jet_cli_budget_bound_json(trend.score)},
-    }))
+    Ok(
+        perf_report_object_new(
+            [CanonicalJSONField]{
+                CanonicalJSONField{key: "estimators", value: CanonicalJSON.Array(loop value in trend.estimators -> perf_rational_to_json(value))},
+                CanonicalJSONField{key: "label", value: CanonicalJSON.String(label)},
+                CanonicalJSONField{key: "report_ids", value: CanonicalJSON.Array(loop id in trend.report_ids -> CanonicalJSON.String(id.copy()))},  // copy: the trend keeps its ids.
+                CanonicalJSONField{key: "score", value: jet_cli_budget_bound_json(trend.score)},
+            },
+        ),
+    )
 }
 
 jet_cli_budget_bound_json: fn(value: PerfRational?) -> CanonicalJSON Never! {
@@ -459,29 +525,36 @@ jet_cli_budget_diagnostic: fn(row: JetCLIBudgetResult) -> (code: String, message
 jet_cli_budget_result_json: fn(row: JetCLIBudgetResult) -> CanonicalJSON Never! {
     code: if row.outcome == PerfPolicyOutcome.Pass -> CanonicalJSON.Null else -> CanonicalJSON.String(jet_cli_budget_diagnostic(row).code)
     status: if row.evidence == PerfEvidence.Unavailable && row.outcome == PerfPolicyOutcome.Fail -> "unavailable" else -> jet_cli_budget_outcome_name(row.outcome)
-    perf_report_object_new([CanonicalJSONField]{
-        CanonicalJSONField{key: "baseline_report_ids", value: CanonicalJSON.Array([CanonicalJSON]{})},
-        CanonicalJSONField{key: "budget_id", value: CanonicalJSON.String(row.id.copy())}, // copy: the result row stays whole.
-        CanonicalJSONField{key: "comparison", value: row.comparison.copy()}, // copy: the result row stays whole.
-        CanonicalJSONField{key: "diagnostic_code", value: code},
-        CanonicalJSONField{key: "direction", value: CanonicalJSON.String(jet_cli_budget_direction_name(row.direction))},
-        CanonicalJSONField{key: "enforcement", value: CanonicalJSON.String(if row.enforcement == PerfEnforcement.Warn -> "warn" else -> "fail")},
-        CanonicalJSONField{key: "evidence", value: CanonicalJSON.String(jet_cli_budget_evidence_name(row.evidence))},
-        CanonicalJSONField{key: "lower95", value: jet_cli_budget_bound_json(row.lower95)},
-        CanonicalJSONField{key: "metric", value: row.metric.copy()}, // copy: the result row stays whole.
-        CanonicalJSONField{key: "point", value: perf_rational_to_json(row.point)},
-        CanonicalJSONField{key: "reason", value: CanonicalJSON.String(row.reason.copy())}, // copy: the result row stays whole.
-        CanonicalJSONField{key: "source", value: perf_report_object_new([CanonicalJSONField]{
-            CanonicalJSONField{key: "column", value: CanonicalJSON.Integer("{row.column}")},
-            CanonicalJSONField{key: "line", value: CanonicalJSON.Integer("{row.line}")},
-            CanonicalJSONField{key: "path", value: CanonicalJSON.String(row.source.copy())}, // copy: the result row stays whole.
-        })},
-        CanonicalJSONField{key: "stale", value: CanonicalJSON.Bool(false)},
-        CanonicalJSONField{key: "status", value: CanonicalJSON.String(status)},
-        CanonicalJSONField{key: "trend", value: row.trend.copy()}, // copy: the result row stays whole.
-        CanonicalJSONField{key: "unit", value: CanonicalJSON.String(row.unit.copy())}, // copy: the result row stays whole.
-        CanonicalJSONField{key: "upper95", value: jet_cli_budget_bound_json(row.upper95)},
-    })
+    perf_report_object_new(
+        [CanonicalJSONField]{
+            CanonicalJSONField{key: "baseline_report_ids", value: CanonicalJSON.Array([CanonicalJSON]{})},
+            CanonicalJSONField{key: "budget_id", value: CanonicalJSON.String(row.id.copy())},  // copy: the result row stays whole.
+            CanonicalJSONField{key: "comparison", value: row.comparison.copy()},  // copy: the result row stays whole.
+            CanonicalJSONField{key: "diagnostic_code", value: code},
+            CanonicalJSONField{key: "direction", value: CanonicalJSON.String(jet_cli_budget_direction_name(row.direction))},
+            CanonicalJSONField{key: "enforcement", value: CanonicalJSON.String(if row.enforcement == PerfEnforcement.Warn -> "warn" else -> "fail")},
+            CanonicalJSONField{key: "evidence", value: CanonicalJSON.String(jet_cli_budget_evidence_name(row.evidence))},
+            CanonicalJSONField{key: "lower95", value: jet_cli_budget_bound_json(row.lower95)},
+            CanonicalJSONField{key: "metric", value: row.metric.copy()},  // copy: the result row stays whole.
+            CanonicalJSONField{key: "point", value: perf_rational_to_json(row.point)},
+            CanonicalJSONField{key: "reason", value: CanonicalJSON.String(row.reason.copy())},  // copy: the result row stays whole.
+            CanonicalJSONField{
+                key: "source",
+                value: perf_report_object_new(
+                    [CanonicalJSONField]{
+                        CanonicalJSONField{key: "column", value: CanonicalJSON.Integer("{row.column}")},
+                        CanonicalJSONField{key: "line", value: CanonicalJSON.Integer("{row.line}")},
+                        CanonicalJSONField{key: "path", value: CanonicalJSON.String(row.source.copy())},  // copy: the result row stays whole.
+                    },
+                ),
+            },
+            CanonicalJSONField{key: "stale", value: CanonicalJSON.Bool(false)},
+            CanonicalJSONField{key: "status", value: CanonicalJSON.String(status)},
+            CanonicalJSONField{key: "trend", value: row.trend.copy()},  // copy: the result row stays whole.
+            CanonicalJSONField{key: "unit", value: CanonicalJSON.String(row.unit.copy())},  // copy: the result row stays whole.
+            CanonicalJSONField{key: "upper95", value: jet_cli_budget_bound_json(row.upper95)},
+        },
+    )
 }
 
 // `count` with the singular or plural noun.
@@ -492,7 +565,7 @@ jet_cli_budget_count: fn(count: Int, one: String, many: String) -> String Never!
 // The report of a result that did not pass: its Diagnostic (a Warn result's
 // a lint), drawn at its spec's line and column in the file it is written in.
 jet_cli_budget_report: fn(row: JetCLIBudgetResult, code: String, message: String, fix: String) -> String {
-    diagnostic := Diagnostic{severity: if row.outcome == PerfPolicyOutcome.Warn -> DIAGNOSTIC_LINT else -> DIAGNOSTIC_ERROR, code: code, what: message, why: row.reason.copy(), fix: fix} // copy: the result row keeps its reason.
+    diagnostic := Diagnostic{severity: if row.outcome == PerfPolicyOutcome.Warn -> DIAGNOSTIC_LINT else -> DIAGNOSTIC_ERROR, code: code, what: message, why: row.reason.copy(), fix: fix}  // copy: the result row keeps its reason.
     text: cli_files.read(row.path) ?? ""
     if text != "" {
         start: jet_cli_budget_offset(text, row.line, row.column)
@@ -515,7 +588,9 @@ jet_cli_budget_offset: fn(text: String, line: Int, column: Int) -> Int Never! {
     at_column := 1
     loop at_column < column && index < bytes.len() && bytes[index] != (U8{10}) {
         index += 1
-        loop index < bytes.len() && bytes[index] >= (U8{128}) && bytes[index] < (U8{192}) -> index += 1
+        loop index < bytes.len() && bytes[index] >= (U8{128}) && bytes[index] < (U8{192}) {
+            index += 1
+        }
         at_column += 1
     }
     index
@@ -539,7 +614,9 @@ jet_cli_budget_emit: fn(options: JetCLIBudgetOptions, built: JetCLIBudgetBuilt, 
             else -> passed += 1
         }
     }
-    if options.json -> return jet_cli_budget_json(options, built, report_path, JetCLIStatusValue.Null, false, exit_code)
+    if options.json {
+        return jet_cli_budget_json(options, built, report_path, JetCLIStatusValue.Null, false, exit_code)
+    }
     annotate: options.annotations == "github" || (options.annotations == "auto" && cli_sys.get("GITHUB_ACTIONS") == Val("true"))
     stderr := ""
     loop row in built.results {
@@ -567,7 +644,7 @@ jet_cli_budget_emit: fn(options: JetCLIBudgetOptions, built: JetCLIBudgetBuilt, 
         stderr = "{stderr}{mark} report {built.report_id} {report_path}{reuse}\n"
     }
     if !options.quiet {
-        short: String.from_bytes(built.report_id.bytes().slice(0, 12)) ?? built.report_id.copy() // copy: a fallback id when the bytes are not text.
+        short: String.from_bytes(built.report_id.bytes().slice(0, 12)) ?? built.report_id.copy()  // copy: a fallback id when the bytes are not text.
         warnings: if warn > 0 -> " · {jet_cli_budget_count(warn, "warning", "warnings")}" else -> ""
         passing: if passed > 0 -> "{jet_cli_budget_count(passed, "budget", "budgets")} passed · " else -> ""
         line := "budgets: {jet_cli_budget_count(passed, "budget", "budgets")} passed · report {short}"
@@ -596,16 +673,18 @@ jet_cli_budget_json: fn(options: JetCLIBudgetOptions, built: JetCLIBudgetBuilt, 
         }
     }
     failure_kind: if failed -> jet_cli_status_text("budget") else if unavailable -> jet_cli_status_text("evidence") else -> JetCLIStatusValue.Null
-    budget: jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("applied", jet_cli_status_bool(applied)),
-        jet_cli_status_field("diagnostics", jet_cli_status_array([JetCLIStatusValue]{})),
-        jet_cli_status_field("exit_code", jet_cli_status_int(exit_code)),
-        jet_cli_status_field("failure_kind", failure_kind),
-        jet_cli_status_field("plan", plan),
-        jet_cli_status_field("report", jet_cli_budget_status_value(built.report)),
-        jet_cli_status_field("report_path", jet_cli_status_text(report_path)),
-        jet_cli_status_field("results", jet_cli_status_array(loop row in built.results -> jet_cli_budget_status_value(jet_cli_budget_result_json(row)))),
-    })
+    budget: jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("applied", jet_cli_status_bool(applied)),
+            jet_cli_status_field("diagnostics", jet_cli_status_array([JetCLIStatusValue]{})),
+            jet_cli_status_field("exit_code", jet_cli_status_int(exit_code)),
+            jet_cli_status_field("failure_kind", failure_kind),
+            jet_cli_status_field("plan", plan),
+            jet_cli_status_field("report", jet_cli_budget_status_value(built.report)),
+            jet_cli_status_field("report_path", jet_cli_status_text(report_path)),
+            jet_cli_status_field("results", jet_cli_status_array(loop row in built.results -> jet_cli_budget_status_value(jet_cli_budget_result_json(row)))),
+        },
+    )
     JetDriverVerbOutput{stdout: "{jet_cli_status_render(options.command, exit_code == 0, [JetCLIStatusField]{jet_cli_status_field("budget", budget)})}\n", stderr: "", exit_code: exit_code}
 }
 

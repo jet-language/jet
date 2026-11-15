@@ -13,7 +13,6 @@
 // drops of Int and word slots move (no code of theirs can publish or mask
 // a stop), and only into an edge E that never comes back
 // (OptUnique.jet ir_opt_dead_end), so each path drops once.
-
 use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, name_rows_value]
 
 ir_opt_stops_after_calls: fn(f: &IRFunction, m: IRModule, keys: [String]) Never! {
@@ -36,7 +35,9 @@ ir_opt_stops_after_calls: fn(f: &IRFunction, m: IRModule, keys: [String]) Never!
         after[f.c[k + 1]] = site
         moved = true
     }
-    if !moved -> return
+    if !moved {
+        return
+    }
     code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
     at := 0
     loop at < count {
@@ -48,7 +49,9 @@ ir_opt_stops_after_calls: fn(f: &IRFunction, m: IRModule, keys: [String]) Never!
             next
         }
         // The poll, its If, then the drops at the start of the edge.
-        loop k in poll..<(poll + 2) -> ir_opt_code_put(code, f.op[k], f.dst[k], f.a[k], f.b[k], f.c[k], f.code_line[k])
+        loop k in poll..<(poll + 2) {
+            ir_opt_code_put(code, f.op[k], f.dst[k], f.a[k], f.b[k], f.c[k], f.code_line[k])
+        }
         ir_opt_stops_drops(code, f, at + 1, poll)
         at = poll + 2
     }
@@ -86,7 +89,9 @@ ir_opt_stops_any_poll: fn(f: IRFunction, poll: Int, turn: Int, at: Int) -> Bool 
 }
 
 ir_opt_stops_drops: fn(code: &IROptCode, f: IRFunction, start: Int, end: Int) Never! {
-    loop k in start..<end -> ir_opt_code_put(code, f.op[k], f.dst[k], f.a[k], f.b[k], f.c[k], f.code_line[k])
+    loop k in start..<end {
+        ir_opt_code_put(code, f.op[k], f.dst[k], f.a[k], f.b[k], f.c[k], f.code_line[k])
+    }
 }
 
 // Stop facts (O1, O2, over the module once every body is optimized). A
@@ -142,7 +147,9 @@ ir_opt_stop_facts: fn(m: IRModule, functions: &[IRFunction], threads: CompilerTh
     parts = ir_opt_stops_walks(m, keys, bodies, [Bool]{}, parts.move())
     reports: ir_opt_stops_reported(parts)
     parts = ir_opt_stops_walks(m, keys, bodies, reports, parts.move())
-    loop at in 0..<parts.len() -> functions.extend(compiler_take_rows<IRFunction>(parts[at].functions))
+    loop at in 0..<parts.len() {
+        functions.extend(compiler_take_rows<IRFunction>(parts[at].functions))
+    }
 }
 
 // Per function in order, whether it starts a stop and the bodies it calls
@@ -193,7 +200,9 @@ ir_opt_stops_reports: fn(scan: IROptStopsScan) -> [Bool] Never! {
         }
     }
     loop work.len() > 0 {
-        callee: work.pop() ?? { break }
+        callee: work.pop() ?? {
+            break
+        }
         loop caller in callers[callee] {
             if reports[caller] -> next
             reports[caller] = true
@@ -237,8 +246,12 @@ ir_opt_stops_part: fn(m: IRModule, keys: [String], bodies: [Bool], reports: [Boo
     scanning: reports.len() == 0
     loop row in 0..<walked.functions.len() {
         if {
-            scanning -> ir_opt_stops_scan(m, walked.functions[row], start + row, keys, bodies, walked.scan)
-            bodies[start + row] -> ir_opt_stops_unreported(walked.functions[row], keys, bodies, reports)
+            scanning -> {
+                ir_opt_stops_scan(m, walked.functions[row], start + row, keys, bodies, walked.scan)
+            }
+            bodies[start + row] -> {
+                ir_opt_stops_unreported(walked.functions[row], keys, bodies, reports)
+            }
             else -> {}
         }
     }
@@ -278,7 +291,9 @@ ir_opt_stops_starts: fn(m: IRModule, f: IRFunction, keys: [String], bodies: [Boo
         callee: f.a[at]
         if callee < 0 || callee >= keys.len() || keys[callee] == IR_STOP_TURN_KEY -> return true
         if keys[callee] != IR_STOP_POLL_KEY -> next
-        if !ir_opt_stops_poll(f, keys, at) || !ir_opt_stops_checks_body(f, bodies, at) -> return true
+        if !ir_opt_stops_poll(f, keys, at) || !ir_opt_stops_checks_body(f, bodies, at) {
+            return true
+        }
         if ir_opt_stops_tail(f, f.c[at + 1] + 1) -> return true
     }
     false
@@ -295,7 +310,9 @@ ir_opt_stops_checks_body: fn(f: IRFunction, bodies: [Bool], at: Int) -> Bool Nev
 // another call: the shape of a tail call (TailCalls.jet ir_tail_site).
 ir_opt_stops_tail: fn(f: IRFunction, start: Int) -> Bool Never! {
     at := start
-    loop at < f.op.len() && (f.op[at] == .Drop || f.op[at] == .Move || f.op[at] == .Copy || f.op[at] == .Nop) -> at += 1
+    loop at < f.op.len() && (f.op[at] == .Drop || f.op[at] == .Move || f.op[at] == .Copy || f.op[at] == .Nop) {
+        at += 1
+    }
     at < f.op.len() && (f.op[at] == .Return || f.op[at] == .Call)
 }
 
@@ -329,7 +346,9 @@ ir_opt_stops_kind: fn(m: IRModule, f: IRFunction, slot: Int) -> IRTypeKind Never
 ir_opt_stops_unreported: fn(f: &IRFunction, keys: [String], bodies: [Bool], reports: [Bool]) Never! {
     removed := false
     loop at in 1..<f.op.len() {
-        if !ir_opt_stops_poll(f, keys, at) || !ir_opt_stops_checks_body(f, bodies, at) || reports[f.a[at - 1]] -> next
+        if !ir_opt_stops_poll(f, keys, at) || !ir_opt_stops_checks_body(f, bodies, at) || reports[f.a[at - 1]] {
+            next
+        }
         loop k in at..<(f.c[at + 1] + 1) -> f.op[k] = IROp.Nop
         removed = true
     }
@@ -359,7 +378,9 @@ ir_opt_fold_polls: fn(f: &IRFunction, m: IRModule) Never! {
     turn: name_rows_value(m.name_rows, IR_STOP_TURN_KEY) ?? -1
     folded := false
     loop at in 0..<f.op.len() {
-        if !ir_opt_stops_any_poll(f, poll, turn, at) || ir_opt_polls_checks_call(f, poll, trap, turn, at) -> next
+        if !ir_opt_stops_any_poll(f, poll, turn, at) || ir_opt_polls_checks_call(f, poll, trap, turn, at) {
+            next
+        }
         end: f.c[at + 1]
         later: ir_opt_polls_reach(f, poll, trap, turn, end + 1)
         if later < 0 -> next
@@ -385,7 +406,9 @@ ir_opt_polls_checks_call: fn(f: IRFunction, poll: Int, trap: Int, turn: Int, at:
             k = f.a[k] - 1
             next
         }
-        if (op == .Call && (f.a[k] < 0 || (f.a[k] != poll && f.a[k] != trap && f.a[k] != turn))) || op == .CallRuntime || op == .CallIndirect -> return true
+        if (op == .Call && (f.a[k] < 0 || (f.a[k] != poll && f.a[k] != trap && f.a[k] != turn))) || op == .CallRuntime || op == .CallIndirect {
+            return true
+        }
         if op == .Block || op == .Loop || op == .If || op == .Else -> return false
         k -= 1
     }
@@ -398,7 +421,9 @@ ir_opt_polls_hands_on: fn(f: IRFunction, start: Int, end: Int) -> Bool Never! {
     loop k in start..<end {
         if k == 0 || f.op[k] != .If || f.b[k] >= 0 || ir_opt_dead_end(f, k) >= 0 -> next
         call: f.op[k - 1]
-        if (call != .Call && call != .CallRuntime && call != .CallIndirect) || f.a[k] != f.dst[k - 1] -> next
+        if (call != .Call && call != .CallRuntime && call != .CallIndirect) || f.a[k] != f.dst[k - 1] {
+            next
+        }
         loop j in (k + 1)..<f.c[k] {
             if f.op[j] == .Br || f.op[j] == .BrIf -> return true
         }
@@ -425,11 +450,11 @@ ir_opt_polls_reach: fn(f: IRFunction, poll: Int, trap: Int, turn: Int, start: In
             next
         }
         op: f.op[at]
-        if depth == 0 && at > past && ir_opt_stops_any_poll(f, poll, turn, at) && !ir_opt_polls_after_call(f, poll, trap, turn, at) -> return at
+        if depth == 0 && at > past && ir_opt_stops_any_poll(f, poll, turn, at) && !ir_opt_polls_after_call(f, poll, trap, turn, at) {
+            return at
+        }
         if op == .Loop || op == .Return || op == .Unreachable -> return -1
-        if op == .Block || op == .If {
-            depth += 1
-        } else if op == .Else {
+        if op == .Block || op == .If -> depth += 1 else if op == .Else {
             if depth == 0 -> at = f.a[at] - 1
         } else if op == .End {
             if depth == 0 && f.op[f.a[at]] == .Loop -> return -1
@@ -439,11 +464,7 @@ ir_opt_polls_reach: fn(f: IRFunction, poll: Int, trap: Int, turn: Int, start: In
             if level >= depth {
                 target: ir_opt_polls_br_end(f, at, level)
                 if target < 0 -> return -1
-                if op == .Br && depth == 0 {
-                    at = target
-                } else if target > past {
-                    past = target
-                }
+                if op == .Br && depth == 0 -> at = target else if target > past -> past = target
             }
         }
         at += 1
@@ -467,12 +488,8 @@ ir_opt_polls_br_end: fn(f: IRFunction, at: Int, level: Int) -> Int Never! {
     k := at + 1
     loop k < f.op.len() {
         op: f.op[k]
-        if op == .Block || op == .Loop || op == .If {
-            open += 1
-        } else if op == .End {
-            if open > 0 {
-                open -= 1
-            } else {
+        if op == .Block || op == .Loop || op == .If -> open += 1 else if op == .End {
+            if open > 0 -> open -= 1 else {
                 if left == 0 -> return if f.op[f.a[k]] == .Loop -> -1 else -> k
                 left -= 1
             }

@@ -15,11 +15,15 @@ use {
 }
 
 TEST_PROFILE_CTOR: "TestProfile"
+
 TEST_SUITE_CTOR: "TestSuite"
+
 // The built-in suite: every #Test of the package.
 TEST_SUITE_TESTS: "tests"
+
 // The file whose `test: fn` declares the package's code suites.
 TEST_CODE_SUITES_FILE: "test.jet"
+
 // The build profiles every package has without declaring them.
 TEST_STOCK_BUILD_PROFILES: [String]{"debug", "release", "ci", "hardened"}
 
@@ -71,7 +75,9 @@ pkg_parse_test_profiles: fn(body: String) -> [TestProfileDef] PackageParseError!
     profiles := [TestProfileDef]{}
     loop entry in pkg_key_value_entries(body) {
         repeated: entry.key.copy()
-        if profiles.any(fn(profile) { profile.name == repeated }) -> return Err(PackageParseError.Composition("test profile `{entry.key}` is declared more than once"))
+        if profiles.any(fn(profile) { profile.name == repeated }) {
+            return Err(PackageParseError.Composition("test profile `{entry.key}` is declared more than once"))
+        }
         profiles.push(pkg_parse_test_profile(entry.key, entry.value))
     }
     Ok(profiles)
@@ -83,25 +89,33 @@ pkg_parse_test_profile: fn(name: String, value: String) -> TestProfileDef Packag
     profile := TestProfileDef{name: name, suites: [String]{}}
     seen := [String]{}
     loop field in pkg_key_value_entries(pkg_test_record(value, TEST_PROFILE_CTOR, site)) {
-        if seen.contains(field.key) -> return Err(PackageParseError.Composition("{site} declares `{field.key}` more than once"))
+        if seen.contains(field.key) {
+            return Err(PackageParseError.Composition("{site} declares `{field.key}` more than once"))
+        }
         seen.push(field.key)
         if field.key == {
             "suites" -> profile.suites = pkg_test_names(field.value, "{site} field `suites`")
             "baseline" -> {
                 path: pkg_unquote(field.value)
-                if path == "" -> return Err(PackageParseError.Composition("{site} needs `baseline:` as a quoted ledger path"))
+                if path == "" {
+                    return Err(PackageParseError.Composition("{site} needs `baseline:` as a quoted ledger path"))
+                }
                 profile.baseline = Val(path)
             }
             else -> {
                 row: test_setting_row(field.key) ?? return Err(PackageParseError.Composition("{site} has an unknown field `{field.key}` (allowed: {pkg_test_profile_fields()})"))
-                if !row.ported -> return Err(PackageParseError.Composition("{site} field `{field.key}` is not ported to the Jet test runner yet"))
+                if !row.ported {
+                    return Err(PackageParseError.Composition("{site} field `{field.key}` is not ported to the Jet test runner yet"))
+                }
                 raw: if row.kind == TestSettingKind.Text || row.kind == TestSettingKind.Path -> pkg_unquote(field.value) else -> field.value.trim()
                 setting: test_setting_value(row, raw) ?? return Err(PackageParseError.Composition("{site} needs `{field.key}:` as {test_setting_hint(row)}"))
                 profile.settings.push(TestSetting{name: row.name.copy(), value: setting, source: source.copy()})
             }
         }
     }
-    if profile.suites.len() == 0 -> return Err(PackageParseError.Composition("{site} needs `suites: [ … ]` naming at least one suite"))
+    if profile.suites.len() == 0 {
+        return Err(PackageParseError.Composition("{site} needs `suites: [ … ]` naming at least one suite"))
+    }
     Ok(profile)
 }
 
@@ -117,13 +131,19 @@ pkg_test_profile_fields: fn() -> String Never! {
 // The bare names of a `[a, b]` list, each at most once; at least one.
 pkg_test_names: fn(value: String, site: String) -> [String] PackageParseError! {
     text: value.trim()
-    if !text.starts_with("[") || !text.ends_with("]") -> return Err(PackageParseError.Composition("{site} needs a list such as `[tests]`"))
+    if !text.starts_with("[") || !text.ends_with("]") {
+        return Err(PackageParseError.Composition("{site} needs a list such as `[tests]`"))
+    }
     names := [String]{}
     loop name in pkg_parse_list(text) {
-        if names.contains(name) -> return Err(PackageParseError.Composition("{site} lists `{name}` more than once"))
+        if names.contains(name) {
+            return Err(PackageParseError.Composition("{site} lists `{name}` more than once"))
+        }
         names.push(name)
     }
-    if names.len() == 0 -> return Err(PackageParseError.Composition("{site} needs a list such as `[tests]`"))
+    if names.len() == 0 {
+        return Err(PackageParseError.Composition("{site} needs a list such as `[tests]`"))
+    }
     Ok(names)
 }
 
@@ -132,15 +152,23 @@ pkg_parse_test_suites: fn(body: String) -> [TestSuiteDef] PackageParseError! {
     suites := [TestSuiteDef]{}
     loop entry in pkg_key_value_entries(body) {
         site: "test suite `{entry.key}`"
-        if entry.key == TEST_SUITE_TESTS -> return Err(PackageParseError.Composition("{site} is built in: it is every #Test of the package, so `suites:` can't declare it"))
+        if entry.key == TEST_SUITE_TESTS {
+            return Err(PackageParseError.Composition("{site} is built in: it is every #Test of the package, so `suites:` can't declare it"))
+        }
         repeated: entry.key.copy()
-        if suites.any(fn(suite) { suite.name == repeated }) -> return Err(PackageParseError.Composition("{site} is declared more than once"))
+        if suites.any(fn(suite) { suite.name == repeated }) {
+            return Err(PackageParseError.Composition("{site} is declared more than once"))
+        }
         found := TestSuiteDef?{None}
         loop field in pkg_key_value_entries(pkg_test_record(entry.value, TEST_SUITE_CTOR, site)) {
             kind: pkg_test_suite_kind(field.key) ?? return Err(PackageParseError.Composition("{site} has an unknown field `{field.key}` (allowed: golden_corpus, ui_corpus, cases_corpus)"))
-            if found != None -> return Err(PackageParseError.Composition("{site} declares more than one corpus; a suite is one golden_corpus, ui_corpus or cases_corpus"))
+            if found != None {
+                return Err(PackageParseError.Composition("{site} declares more than one corpus; a suite is one golden_corpus, ui_corpus or cases_corpus"))
+            }
             path: pkg_unquote(field.value)
-            if path == "" -> return Err(PackageParseError.Composition("{site} needs `{field.key}:` as a directory path"))
+            if path == "" {
+                return Err(PackageParseError.Composition("{site} needs `{field.key}:` as a directory path"))
+            }
             found = Val(TestSuiteDef{name: entry.key.copy(), kind: kind, corpus: path})
         }
         suites.push(found ?? return Err(PackageParseError.Composition("{site} needs `golden_corpus:`, `ui_corpus:` or `cases_corpus:` naming its directory")))
@@ -187,7 +215,9 @@ impl PackageFacts {
         loop code in code_suites -> known.push(code.copy())
         loop profile in self.test_profiles {
             loop suite in profile.suites {
-                if !known.contains(suite) -> return Val("test profile `{profile.name}` names unknown suite `{suite}` (known: {known.join(", ")})")
+                if !known.contains(suite) {
+                    return Val("test profile `{profile.name}` names unknown suite `{suite}` (known: {known.join(", ")})")
+                }
             }
         }
         None
@@ -221,7 +251,9 @@ pkg_test_code_suites: fn(source: String) -> [String] Never! {
         if index + 2 >= lexed.tokens.len() -> break
         method: lexed.tokens[index]
         literal: lexed.tokens[index + 2]
-        if method.kind != TOKEN_IDENT || lexed.tokens[index - 1].kind != TOKEN_DOT || lexed.tokens[index + 1].kind != TOKEN_LPAREN || literal.kind != TOKEN_STRING -> next
+        if method.kind != TOKEN_IDENT || lexed.tokens[index - 1].kind != TOKEN_DOT || lexed.tokens[index + 1].kind != TOKEN_LPAREN || literal.kind != TOKEN_STRING {
+            next
+        }
         if pkg_test_source_bytes(source, method.span.start, method.span.end) != "suite" -> next
         name: pkg_test_source_bytes(source, literal.span.start + 1, literal.span.end - 1)
         if name != "" && !names.contains(name) -> names.push(name)
@@ -238,16 +270,26 @@ pkg_test_sets_settings: fn(source: String) -> Bool Never! {
     params := [String]{}
     loop index in 0..<tokens.len() {
         if index + 2 >= tokens.len() -> break
-        if tokens[index].kind != TOKEN_IDENT || tokens[index + 1].kind != TOKEN_COLON || tokens[index + 2].kind != TOKEN_IDENT -> next
-        if pkg_test_source_bytes(source, tokens[index + 2].span.start, tokens[index + 2].span.end) != "Test" -> next
+        if tokens[index].kind != TOKEN_IDENT || tokens[index + 1].kind != TOKEN_COLON || tokens[index + 2].kind != TOKEN_IDENT {
+            next
+        }
+        if pkg_test_source_bytes(source, tokens[index + 2].span.start, tokens[index + 2].span.end) != "Test" {
+            next
+        }
         params.push(pkg_test_source_bytes(source, tokens[index].span.start, tokens[index].span.end))
     }
     if params.len() == 0 -> return false
     loop index in 0..<tokens.len() {
         if index + 3 >= tokens.len() -> break
-        if tokens[index].kind != TOKEN_IDENT || tokens[index + 1].kind != TOKEN_DOT || tokens[index + 2].kind != TOKEN_IDENT || tokens[index + 3].kind != TOKEN_LPAREN -> next
-        if !params.contains(pkg_test_source_bytes(source, tokens[index].span.start, tokens[index].span.end)) -> next
-        if test_setting_row(pkg_test_source_bytes(source, tokens[index + 2].span.start, tokens[index + 2].span.end)) != None -> return true
+        if tokens[index].kind != TOKEN_IDENT || tokens[index + 1].kind != TOKEN_DOT || tokens[index + 2].kind != TOKEN_IDENT || tokens[index + 3].kind != TOKEN_LPAREN {
+            next
+        }
+        if !params.contains(pkg_test_source_bytes(source, tokens[index].span.start, tokens[index].span.end)) {
+            next
+        }
+        if test_setting_row(pkg_test_source_bytes(source, tokens[index + 2].span.start, tokens[index + 2].span.end)) != None {
+            return true
+        }
     }
     false
 }

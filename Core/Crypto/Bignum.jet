@@ -24,13 +24,18 @@ use {
 }
 
 LIMB_BITS: 64
+
 LIMB_BYTES: 8
+
 /// MBEDTLS_MPI_MAX_LIMBS: the most limbs a number may grow to.
 MAX_LIMBS: 10000
+
 /// MBEDTLS_MPI_MAX_BITS: the widest exponent and modulus `exp_mod` takes.
 MAX_BITS: 8192
+
 /// MBEDTLS_MPI_WINDOW_SIZE: the widest exponentiation window.
 WINDOW_SIZE: 3
+
 /// MBEDTLS_MPI_RW_BUFFER_SIZE: the line buffer of `read_file_data` and
 /// `write_file_text`, room for a MAX_BITS decimal number and a short label.
 RW_BUFFER_SIZE: 2484
@@ -38,25 +43,26 @@ RW_BUFFER_SIZE: 2484
 /// Why a big-number operation failed (MBEDTLS_ERR_MPI_*).
 #Error
 MpiError: enum {
-    /// An argument outside the function's domain.
     BadInput
-    /// A digit outside the radix.
     InvalidCharacter
-    /// The output is too small for the value.
     BufferTooSmall
-    /// The result would be negative where only non-negative values exist.
     NegativeValue
     DivisionByZero
-    /// The value lacks the asked-for property: no inverse exists, it is not
-    /// prime, or no draw landed in range.
     NotAcceptable
-    /// The number would need more than MAX_LIMBS limbs.
     AllocFailed
-    /// The random source failed.
     Random
-    /// The file text holds no line to read (MBEDTLS_ERR_MPI_FILE_IO_ERROR).
     FileIO
 }
+
+/// An argument outside the function's domain.
+/// A digit outside the radix.
+/// The output is too small for the value.
+/// The result would be negative where only non-negative values exist.
+/// The value lacks the asked-for property: no inverse exists, it is not
+/// prime, or no draw landed in range.
+/// The number would need more than MAX_LIMBS limbs.
+/// The random source failed.
+/// The file text holds no line to read (MBEDTLS_ERR_MPI_FILE_IO_ERROR).
 
 /// The random source of the drawing functions (mbedtls's f_rng and p_rng).
 /// `fill` writes `out.len()` random bytes and reports whether it could.
@@ -68,27 +74,23 @@ RNG: trait {
 // Constant-time primitives. Each condition is the low bit of a U64.
 
 /// 1 when x is not zero.
-#Overflow(.Wrapping)
-ct_bool: fn(x: U64) -> U64 Never! { x.bit_or(U64{0} - x) >> 63 }
+#Overflow(.Wrapping) ct_bool: fn(x: U64) -> U64 Never! { x.bit_or(U64{0} - x) >> 63 }
 
 /// 1 when a < b: the borrow out of a - b (Hacker's Delight 2-13).
-#Overflow(.Wrapping)
-ct_lt: fn(a: U64, b: U64) -> U64 Never! {
+#Overflow(.Wrapping) ct_lt: fn(a: U64, b: U64) -> U64 Never! {
     na: a.bit_not()
     na.bit_and(b).bit_or(na.bit_or(b).bit_and(a - b)) >> 63
 }
 
 /// All ones when the condition bit is 1, else zero.
-#Overflow(.Wrapping)
-ct_mask: fn(bit: U64) -> U64 Never! { U64{0} - bit }
+#Overflow(.Wrapping) ct_mask: fn(bit: U64) -> U64 Never! { U64{0} - bit }
 
 /// a when mask is all ones, b when it is zero.
 ct_select: fn(mask: U64, a: U64, b: U64) -> U64 Never! { b.bit_xor(mask.bit_and(a.bit_xor(b))) }
 
 /// The 128-bit product of a and b as its high and low halves, from four
 /// 32-bit partial products.
-#Overflow(.Wrapping)
-mul_wide: fn(a: U64, b: U64) -> (hi: U64, lo: U64) Never! {
+#Overflow(.Wrapping) mul_wide: fn(a: U64, b: U64) -> (hi: U64, lo: U64) Never! {
     m: U64{0xffffffff}
     a0: a.bit_and(m)
     a1: a >> 32
@@ -155,9 +157,7 @@ core_bits_above: fn(a: [#Secret U64], pos: Int) -> U64 Never! {
     seen := U64{0}
     loop i in 0..<a.len() {
         low: i * LIMB_BITS
-        if low > pos {
-            seen = seen.bit_or(a[i])
-        } else if low + LIMB_BITS > pos + 1 {
+        if low > pos -> seen = seen.bit_or(a[i]) else if low + LIMB_BITS > pos + 1 {
             seen = seen.bit_or(a[i] >> (pos - low + 1))
         }
     }
@@ -189,7 +189,9 @@ get_byte: fn(a: [U64], i: Int) -> U8 Never! {
 core_read_le: fn(x: &[U64], x_limbs: Int, input: [U8]) MpiError! {
     if x_limbs < (input.len() + LIMB_BYTES - 1) /% LIMB_BYTES -> return Err(.BufferTooSmall)
     zero_limbs(x, x_limbs)
-    loop i in 0..<input.len() -> x[i /% LIMB_BYTES] = x[i /% LIMB_BYTES].bit_or(U64{input[i]} << ((i % LIMB_BYTES) * 8))
+    loop i in 0..<input.len() {
+        x[i /% LIMB_BYTES] = x[i /% LIMB_BYTES].bit_or(U64{input[i]} << ((i % LIMB_BYTES) * 8))
+    }
 }
 
 /// Big-endian `input` into the `x_limbs` limbs of x.
@@ -197,7 +199,9 @@ core_read_be: fn(x: &[U64], x_limbs: Int, input: [U8]) MpiError! {
     n: input.len()
     if x_limbs < (n + LIMB_BYTES - 1) /% LIMB_BYTES -> return Err(.BufferTooSmall)
     zero_limbs(x, x_limbs)
-    loop i in 0..<n -> x[i /% LIMB_BYTES] = x[i /% LIMB_BYTES].bit_or(U64{input[n - 1 - i]} << ((i % LIMB_BYTES) * 8))
+    loop i in 0..<n {
+        x[i /% LIMB_BYTES] = x[i /% LIMB_BYTES].bit_or(U64{input[n - 1 - i]} << ((i % LIMB_BYTES) * 8))
+    }
 }
 
 /// The number in a's first `a_limbs` limbs as `out_len` little-endian bytes.
@@ -215,7 +219,9 @@ core_write_be: fn(a: [U64], a_limbs: Int, out_len: Int) -> [U8] MpiError! {
     stored: a_limbs * LIMB_BYTES
     if !core_fits(a, a_limbs, out_len) -> return Err(.BufferTooSmall)
     out := cipher.zero_bytes(out_len)
-    loop i in 0..<(if stored < out_len -> stored else -> out_len) -> out[out_len - 1 - i] = get_byte(a, i)
+    loop i in 0..<(if stored < out_len -> stored else -> out_len) {
+        out[out_len - 1 - i] = get_byte(a, i)
+    }
     Ok(out)
 }
 
@@ -223,8 +229,7 @@ core_write_be: fn(a: [U64], a_limbs: Int, out_len: Int) -> [U8] MpiError! {
 /// read in constant time. Callers write a value below a modulus of that many
 /// bytes, so the verdict is fixed by construction; a larger value gets
 /// BufferTooSmall, as from mbedtls.
-#Scrub(Secret)
-core_fits: fn(a: [#Secret U64], a_limbs: Int, out_len: Int) -> Bool Never! {
+#Scrub(Secret) core_fits: fn(a: [#Secret U64], a_limbs: Int, out_len: Int) -> Bool Never! {
     stored: a_limbs * LIMB_BYTES
     if stored <= out_len -> return true
     extra := U8{0}
@@ -282,8 +287,7 @@ core_shift_l: fn(x: &[U64], limbs: Int, count: Int) Never! {
 }
 
 /// x = a + b over `limbs` limbs; the carry out.
-#Overflow(.Wrapping)
-core_add: fn(x: &[U64], a: [U64], b: [U64], limbs: Int) -> U64 Never! {
+#Overflow(.Wrapping) core_add: fn(x: &[U64], a: [U64], b: [U64], limbs: Int) -> U64 Never! {
     c := U64{0}
     loop i in 0..<limbs {
         t: c + a[i]
@@ -296,8 +300,7 @@ core_add: fn(x: &[U64], a: [U64], b: [U64], limbs: Int) -> U64 Never! {
 }
 
 /// x += a over `limbs` limbs when `cond` is 1, in constant time; the carry.
-#Overflow(.Wrapping)
-core_add_if: fn(x: &[U64], a: [U64], limbs: Int, cond: U64) -> U64 Never! {
+#Overflow(.Wrapping) core_add_if: fn(x: &[U64], a: [U64], limbs: Int, cond: U64) -> U64 Never! {
     mask: ct_mask(cond)
     c := U64{0}
     loop i in 0..<limbs {
@@ -312,8 +315,7 @@ core_add_if: fn(x: &[U64], a: [U64], limbs: Int, cond: U64) -> U64 Never! {
 }
 
 /// x = a - b over `limbs` limbs; the borrow out.
-#Overflow(.Wrapping)
-core_sub: fn(x: &[U64], a: [U64], b: [U64], limbs: Int) -> U64 Never! {
+#Overflow(.Wrapping) core_sub: fn(x: &[U64], a: [U64], b: [U64], limbs: Int) -> U64 Never! {
     c := U64{0}
     loop i in 0..<limbs {
         z: ct_lt(a[i], c)
@@ -325,8 +327,7 @@ core_sub: fn(x: &[U64], a: [U64], b: [U64], limbs: Int) -> U64 Never! {
 }
 
 /// x = a - c over `limbs` limbs for one limb c; the borrow out.
-#Overflow(.Wrapping)
-core_sub_int: fn(x: &[U64], a: [U64], c: U64, limbs: Int) -> U64 Never! {
+#Overflow(.Wrapping) core_sub_int: fn(x: &[U64], a: [U64], c: U64, limbs: Int) -> U64 Never! {
     borrow := c
     loop i in 0..<limbs {
         s: a[i]
@@ -339,8 +340,7 @@ core_sub_int: fn(x: &[U64], a: [U64], c: U64, limbs: Int) -> U64 Never! {
 
 /// d[off..<off + d_len] += s[0..<s_len] * b; the carry out. d_len must be at
 /// least s_len; a shorter d gives a wrong result, never a write past it.
-#Overflow(.Wrapping)
-core_mla: fn(d: &[U64], off: Int, d_len: Int, s: [U64], s_len: Int, b: U64) -> U64 Never! {
+#Overflow(.Wrapping) core_mla: fn(d: &[U64], off: Int, d_len: Int, s: [U64], s_len: Int, b: U64) -> U64 Never! {
     n: if d_len < s_len -> d_len else -> s_len
     c := U64{0}
     loop i in 0..<n {
@@ -367,8 +367,7 @@ core_mul: fn(x: &[U64], a: [U64], a_limbs: Int, b: [U64], b_limbs: Int) Never! {
 }
 
 /// -n^-1 mod 2^64 for odd n[0], by Newton iteration (Tom St Denis).
-#Overflow(.Wrapping)
-core_montmul_init: fn(n: [U64]) -> U64 Never! {
+#Overflow(.Wrapping) core_montmul_init: fn(n: [U64]) -> U64 Never! {
     x := n[0]
     x += (n[0] + U64{2}).bit_and(U64{4}) << 1
     loop _ in 0..<4 -> x *= U64{2} - n[0] * x
@@ -379,8 +378,7 @@ core_montmul_init: fn(n: [U64]) -> U64 Never! {
 /// an_limbs limbs, b has b_limbs <= an_limbs, and a * b < R * n. t is
 /// scratch of at least 2 * an_limbs + 1 limbs. The final subtraction always
 /// runs and its result is chosen by mask.
-#Overflow(.Wrapping)
-core_montmul: fn(x: &[U64], a: [U64], b: [U64], b_limbs: Int, n: [U64], an_limbs: Int, mm: U64, t: &[U64]) Never! {
+#Overflow(.Wrapping) core_montmul: fn(x: &[U64], a: [U64], b: [U64], b_limbs: Int, n: [U64], an_limbs: Int, mm: U64, t: &[U64]) Never! {
     zero_limbs(t, 2 * an_limbs + 1)
     loop i in 0..<an_limbs {
         u0: a[i]
@@ -454,15 +452,16 @@ core_random: fn<R: RNG>(x: &[U64], min: U64, n: [U64], limbs: Int, rng: &R) MpiE
             cipher.wipe_words(x)
             return Err(.NotAcceptable)
         }
-        if draw_in_range(x, min, n, limbs) -> return
+        if draw_in_range(x, min, n, limbs) {
+            return
+        }
     }
 }
 
 /// Whether a rejection-sampling draw is in [min, n), read in constant time.
 /// A rejected draw is thrown away and an accepted one says only that it is
 /// in range, so the verdict is public.
-#Scrub(Secret)
-draw_in_range: fn(x: [#Secret U64], min: U64, n: [U64], limbs: Int) -> Bool Never! {
+#Scrub(Secret) draw_in_range: fn(x: [#Secret U64], min: U64, n: [U64], limbs: Int) -> Bool Never! {
     core_uint_le_mpi(min, x, limbs).bit_and(core_lt_ct(x, n, limbs)) == U64{1}
 }
 
@@ -508,9 +507,7 @@ core_exp_mod: fn(x: &[U64], a: [U64], n: [U64], an_limbs: Int, e: [#Secret U64],
         if bit_index == 0 {
             limb_index -= 1
             bit_index = LIMB_BITS - 1
-        } else {
-            bit_index -= 1
-        }
+        } else { bit_index -= 1 }
         window_bits += 1
         window = (window << 1).bit_or((e[limb_index] >> bit_index).bit_and(U64{1}))
         last: bit_index == 0 && limb_index == 0
@@ -720,8 +717,7 @@ Mpi: struct {
 mpi: fn() -> Mpi Never! { Mpi{s: 1, p: [U64]{}} }
 
 /// |z| as a limb, the most negative Int64 included.
-#Overflow(.Wrapping)
-sint_abs: fn(z: Int) -> U64 Never! {
+#Overflow(.Wrapping) sint_abs: fn(z: Int) -> U64 Never! {
     if z >= 0 -> return U64{z}
     U64{-(z + 1)} + U64{1}
 }
@@ -736,7 +732,9 @@ from_int: fn(z: Int) -> Mpi Never! {
 /// Grow x to at least `limbs` limbs. The old storage is wiped.
 grow: fn(x: &Mpi, limbs: Int) MpiError! {
     if limbs > MAX_LIMBS -> return Err(.AllocFailed)
-    if x.p.len() >= limbs -> return
+    if x.p.len() >= limbs {
+        return
+    }
     p := cipher.words(limbs)
     copy_limbs(p, x.p, x.p.len())
     cipher.wipe_words(x.p)
@@ -800,9 +798,7 @@ set_mpi: fn(x: &Mpi, y: Mpi) MpiError! {
     i := used_limbs(y)
     if i == 0 -> i = 1
     x.s = y.s
-    if x.p.len() < i {
-        grow(x, i) ?? return Err(err)
-    } else {
+    if x.p.len() < i -> grow(x, i) ?? return Err(err) else {
         loop j in i..<x.p.len() -> x.p[j] = U64{0}
     }
     copy_limbs(x.p, y.p, i)
@@ -813,9 +809,7 @@ set_mpi: fn(x: &Mpi, y: Mpi) MpiError! {
 /// x is grown to y's length and zeroed above it.
 set_mpi_ct: fn(x: &Mpi, y: Mpi) MpiError! {
     x.s = y.s
-    if x.p.len() < y.p.len() {
-        grow(x, y.p.len()) ?? return Err(err)
-    } else {
+    if x.p.len() < y.p.len() -> grow(x, y.p.len()) ?? return Err(err) else {
         loop j in y.p.len()..<x.p.len() -> x.p[j] = U64{0}
     }
     copy_limbs(x.p, y.p, y.p.len())
@@ -856,7 +850,9 @@ set_bit: fn(x: &Mpi, pos: Int, val: Int) MpiError! {
     off: pos /% LIMB_BITS
     idx: pos % LIMB_BITS
     if x.p.len() * LIMB_BITS <= pos {
-        if val == 0 -> return
+        if val == 0 {
+            return
+        }
         grow(x, off + 1) ?? return Err(err)
     }
     x.p[off] = x.p[off].bit_and((U64{1} << idx).bit_not()).bit_or(U64{val} << idx)
@@ -1036,7 +1032,9 @@ write_binary: fn(x: Mpi, buflen: Int) -> [U8] MpiError! { core_write_be(x.p, x.p
 /// x <<= count, growing x as needed.
 shift_l: fn(x: &Mpi, count: Int) MpiError! {
     bits: bitlen(x) + count
-    if x.p.len() * LIMB_BITS < bits -> grow(x, (bits + LIMB_BITS - 1) /% LIMB_BITS) ?? return Err(err)
+    if x.p.len() * LIMB_BITS < bits {
+        grow(x, (bits + LIMB_BITS - 1) /% LIMB_BITS) ?? return Err(err)
+    }
     core_shift_l(x.p, x.p.len(), count)
 }
 
@@ -1121,8 +1119,7 @@ safe_cond_swap: fn(x: &Mpi, y: &Mpi, swap: Int) MpiError! {
 }
 
 /// |a| + |b| (HAC 14.7).
-#Overflow(.Wrapping)
-add_abs: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
+#Overflow(.Wrapping) add_abs: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
     x := copy_mpi(a)
     x.s = 1
     j := used_limbs(b)
@@ -1147,8 +1144,7 @@ add_abs: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
 
 /// |a| - |b| in a's limb count, or NegativeValue when |a| < |b|
 /// (HAC 14.9, 14.10).
-#Overflow(.Wrapping)
-sub_abs: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
+#Overflow(.Wrapping) sub_abs: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
     n: used_limbs(b)
     if n > a.p.len() -> return Err(.NegativeValue)
     x := zeros(a.p.len()) ?? return Err(err)
@@ -1208,8 +1204,7 @@ mul_mpi: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
 }
 
 /// a * b for one limb b, as a + a * (b - 1) through the multiply-add.
-#Overflow(.Wrapping)
-mul_int: fn(a: Mpi, b: U64) -> Mpi MpiError! {
+#Overflow(.Wrapping) mul_int: fn(a: Mpi, b: U64) -> Mpi MpiError! {
     n: used_limbs(a)
     if b == (U64{0}) || n == 0 -> return Ok(from_int(0))
     x := zeros(n + 1) ?? return Err(err)
@@ -1221,8 +1216,7 @@ mul_int: fn(a: Mpi, b: U64) -> Mpi MpiError! {
 
 /// (u1 * 2^64 + u0) / d, saturating at 2^64 - 1 when u1 >= d or d is 0
 /// (Knuth TAOCP vol. 2 section 4.3.1 algorithm D on 32-bit halves).
-#Overflow(.Wrapping)
-int_div_int: fn(high: U64, low: U64, divisor: U64) -> U64 Never! {
+#Overflow(.Wrapping) int_div_int: fn(high: U64, low: U64, divisor: U64) -> U64 Never! {
     if divisor == (U64{0}) || high >= divisor -> return U64{0}.bit_not()
     radix: U64{1} << 32
     half: radix - U64{1}
@@ -1268,9 +1262,7 @@ div_mpi: fn(a: Mpi, b: Mpi) -> (q: Mpi, r: Mpi) MpiError! {
         k = LIMB_BITS - 1 - k
         shift_l(x, k) ?? return Err(err)
         shift_l(y, k) ?? return Err(err)
-    } else {
-        k = 0
-    }
+    } else { k = 0 }
     n: x.p.len() - 1
     t: y.p.len() - 1
     shift_l(y, LIMB_BITS * (n - t)) ?? return Err(err)
@@ -1341,8 +1333,7 @@ mod_mpi: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
 }
 
 /// a mod b in [0, b) for an Int64 b > 0.
-#Overflow(.Wrapping)
-mod_int: fn(a: Mpi, b: Int) -> U64 MpiError! {
+#Overflow(.Wrapping) mod_int: fn(a: Mpi, b: Int) -> U64 MpiError! {
     if b == 0 -> return Err(.DivisionByZero)
     if b < 0 -> return Err(.NegativeValue)
     if b == 1 || a.p.len() == 0 -> return Ok(U64{0})
@@ -1370,9 +1361,7 @@ mont_r2: fn(rr: &Mpi, n: Mpi) MpiError! {
     if rr.p.len() == 0 {
         computed := core_get_mont_r2_ct(n) ?? return Err(err)
         swap(rr, computed)
-    } else {
-        grow(rr, n.p.len()) ?? return Err(err)
-    }
+    } else { grow(rr, n.p.len()) ?? return Err(err) }
 }
 
 /// a mod n for odd n > 1 and a >= 0 of any length, in n's limb count, with
@@ -1445,7 +1434,9 @@ exp_mod_modulus_ok: fn(n: Mpi) -> Bool Never! {
 /// count with the window that length fixes, so its bit length does not
 /// show either. A negative e is told by its sign alone.
 exp_mod: fn(a: Mpi, e: Mpi, n: Mpi, rr: &Mpi) -> Mpi MpiError! {
-    if !exp_mod_modulus_ok(n) || e.s < 0 || e.p.len() > MAX_BITS /% LIMB_BITS -> return Err(.BadInput)
+    if !exp_mod_modulus_ok(n) || e.s < 0 || e.p.len() > MAX_BITS /% LIMB_BITS {
+        return Err(.BadInput)
+    }
     if e.p.len() == 0 -> return Ok(from_int(1))
     limbs := n.p.len()
     if e.p.len() > limbs -> limbs = e.p.len()
@@ -1588,15 +1579,35 @@ inv_mod: fn(a: Mpi, n: Mpi) -> Mpi MpiError! {
 /// The odd primes up to SMALL_PRIMES_LIMIT (mbedtls's small_prime table,
 /// 3 to 997), multiplied, in 22 limbs.
 SMALL_PRIMES_LIMIT: 997
+
 small_primes_product: fn() -> Mpi Never! {
-    Mpi{s: 1, p: [U64]{
-        U64{0x95dfd0bb976a134b}, U64{0x7b9fa420a4102ca7}, U64{0x6561f5c0dfd6189d}, U64{0xbfd5a830fb7935fc},
-        U64{0xfb89bbfb2cba37db}, U64{0xe5e818991d8cc2ad}, U64{0x9d618a965dc9778d}, U64{0xe0570734f43e4139},
-        U64{0xa24667433a54f14a}, U64{0x4505fca231e50c83}, U64{0xe137857afc661df0}, U64{0x32bca20d6280e017},
-        U64{0x35e3b5006884ce6d}, U64{0xdfd8d592e40d1914}, U64{0xa8d9e83b387d1c20}, U64{0x6cf703b4e611acf6},
-        U64{0x6a2ff98f3af23d78}, U64{0x026de448a966727b}, U64{0x0ba9f7f2cb32c769}, U64{0xc7ea54bf9d7252d3},
-        U64{0x8121e1f0c58af3f5}, U64{0x00000005f078618e}
-    }}
+    Mpi{
+        s: 1,
+        p: [U64]{
+            U64{0x95dfd0bb976a134b},
+            U64{0x7b9fa420a4102ca7},
+            U64{0x6561f5c0dfd6189d},
+            U64{0xbfd5a830fb7935fc},
+            U64{0xfb89bbfb2cba37db},
+            U64{0xe5e818991d8cc2ad},
+            U64{0x9d618a965dc9778d},
+            U64{0xe0570734f43e4139},
+            U64{0xa24667433a54f14a},
+            U64{0x4505fca231e50c83},
+            U64{0xe137857afc661df0},
+            U64{0x32bca20d6280e017},
+            U64{0x35e3b5006884ce6d},
+            U64{0xdfd8d592e40d1914},
+            U64{0xa8d9e83b387d1c20},
+            U64{0x6cf703b4e611acf6},
+            U64{0x6a2ff98f3af23d78},
+            U64{0x026de448a966727b},
+            U64{0x0ba9f7f2cb32c769},
+            U64{0xc7ea54bf9d7252d3},
+            U64{0x8121e1f0c58af3f5},
+            U64{0x00000005f078618e},
+        },
+    }
 }
 
 /// Trial division for positive x: true when x is a small prime, false when
@@ -1661,9 +1672,13 @@ miller_rabin: fn<R: RNG>(x: Mpi, rounds: Int, rng: &R) MpiError! {
 is_prime_ext: fn<R: RNG>(x: Mpi, rounds: Int, rng: &R) MpiError! {
     xx: Mpi{s: 1, p: x.p.copy()}
     if cmp_int(xx, 0) == 0 || cmp_int(xx, 1) == 0 -> return Err(.NotAcceptable)
-    if cmp_int(xx, 2) == 0 -> return
+    if cmp_int(xx, 2) == 0 {
+        return
+    }
     certain: check_small_factors(xx) ?? return Err(err)
-    if certain -> return
+    if certain {
+        return
+    }
     miller_rabin(xx, rounds, rng)
 }
 
@@ -1707,9 +1722,7 @@ gen_prime: fn<R: RNG>(nbits: Int, rng: &R, dh: Bool{false}, low_err: Bool{false}
         if !dh {
             if is_prime_ext(x, rounds, rng) == .Err(e) {
                 if e != .NotAcceptable -> return Err(e)
-            } else {
-                return Ok(x)
-            }
+            } else { return Ok(x) }
         } else {
             // y and x = 2y + 1 both prime needs x = 2 mod 3; keep x = 3 mod 4.
             x.p[0] = x.p[0].bit_or(U64{2})
@@ -1727,9 +1740,7 @@ gen_prime: fn<R: RNG>(nbits: Int, rng: &R, dh: Bool{false}, low_err: Bool{false}
             loop {
                 if safe_prime_step(x, y, rounds, rng) == .Err(e) {
                     if e != .NotAcceptable -> return Err(e)
-                } else {
-                    return Ok(x)
-                }
+                } else { return Ok(x) }
                 // Keep y = (x - 1) / 2, y = 1 mod 2 and y = 2 mod 3.
                 next_x: add_int(x, 12) ?? return Err(err)
                 set_mpi(x, next_x) ?? return Err(err)
@@ -1878,9 +1889,7 @@ FailingDraws: struct {
     loop left in lefts {
         x := [U64]{U64{0x5A5A5A5A5A5A5A5A}}
         rng := FailingDraws{left: left}
-        if left == 1000 {
-            assert(core_random(x, U64{1}, n, 1, rng) == .Err(.NotAcceptable))
-        } else {
+        if left == 1000 -> assert(core_random(x, U64{1}, n, 1, rng) == .Err(.NotAcceptable)) else {
             assert(core_random(x, U64{1}, n, 1, rng) == .Err(.Random))
         }
         assert(x[0] == (U64{0}))

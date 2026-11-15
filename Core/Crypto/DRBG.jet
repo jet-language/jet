@@ -26,27 +26,35 @@ use {
 /// generator family (MBEDTLS_ERR_CTR_DRBG_* and MBEDTLS_ERR_HMAC_DRBG_*).
 #Error
 DrbgError: enum {
-    /// The entropy source failed or had too little to give.
     EntropySourceFailed
-    /// More output than one call may produce.
     RequestTooBig
-    /// Too much seed, personalization or additional input.
     InputTooBig
-    /// A seed file was empty or unreadable.
     FileIO
 }
+
+/// The entropy source failed or had too little to give.
+/// More output than one call may produce.
+/// Too much seed, personalization or additional input.
+/// A seed file was empty or unreadable.
 
 // ---------------------------------------------------------------------------
 // CTR_DRBG.
 
 CTR_BLOCKSIZE: 16
+
 CTR_KEYSIZE: 32
+
 CTR_SEEDLEN: 48
+
 /// The default entropy per (re)seed, as mbedtls with SHA-512 available.
 CTR_ENTROPY_LEN: 48
+
 CTR_RESEED_INTERVAL: 10000
+
 CTR_MAX_INPUT: 256
+
 CTR_MAX_REQUEST: 1024
+
 CTR_MAX_SEED_INPUT: 384
 
 /// The encryption schedule of a 32-byte AES key.
@@ -177,7 +185,9 @@ ctr_update_internal: fn(ctx: &CTRDrbg, data: [U8]) Never! {
 /// Mix `additional` into the state (mbedtls_ctr_drbg_update); empty input
 /// changes nothing.
 ctr_drbg_update: fn(ctx: &CTRDrbg, additional: [U8]) DrbgError! {
-    if additional.len() == 0 -> return
+    if additional.len() == 0 {
+        return
+    }
     seed := block_cipher_df(additional, additional.len())
     ctr_update_internal(ctx, seed)
     core.crypto.wipe(seed)
@@ -186,7 +196,9 @@ ctr_drbg_update: fn(ctx: &CTRDrbg, additional: [U8]) DrbgError! {
 ctr_reseed_internal: fn<E: RNG>(ctx: &CTRDrbg, entropy: &E, additional: [U8], nonce_len: Int) DrbgError! {
     if ctx.entropy_len > CTR_MAX_SEED_INPUT -> return Err(.InputTooBig)
     if nonce_len > CTR_MAX_SEED_INPUT - ctx.entropy_len -> return Err(.InputTooBig)
-    if additional.len() > CTR_MAX_SEED_INPUT - ctx.entropy_len - nonce_len -> return Err(.InputTooBig)
+    if additional.len() > CTR_MAX_SEED_INPUT - ctx.entropy_len - nonce_len {
+        return Err(.InputTooBig)
+    }
     seed := cipher.zero_bytes(ctx.entropy_len)
     if !entropy.fill(seed) {
         core.crypto.wipe(seed)
@@ -285,8 +297,11 @@ ctr_drbg_update_seed: fn<E: RNG>(ctx: &CTRDrbg, entropy: &E, file: [U8]) -> [U8]
 // HMAC_DRBG.
 
 HMAC_RESEED_INTERVAL: 10000
+
 HMAC_MAX_INPUT: 256
+
 HMAC_MAX_REQUEST: 1024
+
 HMAC_MAX_SEED_INPUT: 384
 
 /// An HMAC_DRBG instance (mbedtls_hmac_drbg_context). Set `entropy_len`,
@@ -374,7 +389,9 @@ hmac_drbg_seed_buf: fn(ctx: &HMACDrbg, data: [U8]) Never! {
 
 hmac_reseed_core: fn<E: RNG>(ctx: &HMACDrbg, entropy: &E, additional: [U8], use_nonce: Bool{false}) DrbgError! {
     total: if use_nonce -> ctx.entropy_len * 3 /% 2 else -> ctx.entropy_len
-    if additional.len() > HMAC_MAX_INPUT || total + additional.len() > HMAC_MAX_SEED_INPUT -> return Err(.InputTooBig)
+    if additional.len() > HMAC_MAX_INPUT || total + additional.len() > HMAC_MAX_SEED_INPUT {
+        return Err(.InputTooBig)
+    }
     seed := cipher.zero_bytes(ctx.entropy_len)
     if !entropy.fill(seed) {
         core.crypto.wipe(seed)

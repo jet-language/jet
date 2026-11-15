@@ -21,15 +21,11 @@ object_from_entries: fn(entries: &&[(key: String, value: Dyn)]) -> Dyn Never! {
 }
 
 typed_number: fn(text: &&String) -> Dyn Never! {
-    #Unsafe("the shared parser validated this exact numeric lexeme") {
-        return Dyn.Number(text)
-    }
+    #Unsafe("the shared parser validated this exact numeric lexeme") { return Dyn.Number(text) }
 }
 
 // Retains decoded JSON text until the target Decode contract is known.
-typed_string: fn(text: &&String) -> Dyn Never! {
-    Dyn.Text(text)
-}
+typed_string: fn(text: &&String) -> Dyn Never! { Dyn.Text(text) }
 
 // One codec's heap charge. Its owner holds it in place and lends it to
 // `reserve`, so a charge is two integer steps, not a lock.
@@ -72,7 +68,9 @@ reserve: fn<T>(allocation: &AllocationBudget, values: &[T], additional: Int) -> 
 __reserve_checked: fn<T>(allocation: &AllocationBudget, values: &[T], additional: Int) __ReserveFailure! {
     old: mem.__list_capacity<T>(values) * mem.__type_size<T>()
     requested: (values.len() + additional) * mem.__type_size<T>()
-    if additional == 0 || requested <= old -> return
+    if additional == 0 || requested <= old {
+        return
+    }
     growth: requested - old
     if !allocation.charge(growth) {
         // `values = [T]{}` would empty the list in place and keep its buffer;
@@ -107,11 +105,17 @@ FoldBudget: struct {
 
 validate_limits: fn(limits: EncodingLimits) EncodingError! {
     reason := ""
-    if limits.buffer_bytes < 4096 || limits.buffer_bytes > 16777216 -> reason = "buffer_bytes {limits.buffer_bytes} is outside 4096..16777216"
-    else if limits.max_depth < 1 || limits.max_depth > 4096 -> reason = "max_depth {limits.max_depth} is outside 1..4096"
-    else if limits.max_item_bytes < 1 || limits.max_item_bytes > 1073741824 -> reason = "max_item_bytes {limits.max_item_bytes} is outside 1..1073741824"
-    else if limits.max_expansion_depth < 0 || limits.max_expansion_depth > 256 -> reason = "max_expansion_depth {limits.max_expansion_depth} is outside 0..256"
-    else if limits.max_expansion_bytes < 0 || limits.max_expansion_bytes > 1073741824 -> reason = "max_expansion_bytes {limits.max_expansion_bytes} is outside 0..1073741824"
+    if limits.buffer_bytes < 4096 || limits.buffer_bytes > 16777216 {
+        reason = "buffer_bytes {limits.buffer_bytes} is outside 4096..16777216"
+    } else if limits.max_depth < 1 || limits.max_depth > 4096 {
+        reason = "max_depth {limits.max_depth} is outside 1..4096"
+    } else if limits.max_item_bytes < 1 || limits.max_item_bytes > 1073741824 {
+        reason = "max_item_bytes {limits.max_item_bytes} is outside 1..1073741824"
+    } else if limits.max_expansion_depth < 0 || limits.max_expansion_depth > 256 {
+        reason = "max_expansion_depth {limits.max_expansion_depth} is outside 0..256"
+    } else if limits.max_expansion_bytes < 0 || limits.max_expansion_bytes > 1073741824 {
+        reason = "max_expansion_bytes {limits.max_expansion_bytes} is outside 0..1073741824"
+    }
     if reason == "" && limits.max_total_bytes == .Val(total) {
         if total < 0 -> reason = "max_total_bytes {total} is outside 0..Int.max"
     }
@@ -317,7 +321,9 @@ JSONPull: struct<R: Reader> {
 
     fill: fn(&self) -[IO, Time.Wait]> U8? EncodingError! {
         if self.buffered == self.buffer.len() {
-            if mem.__list_capacity<U8>(self.buffer) == 0 && !reserve<U8>(self.allocation, self.buffer, self.limits.buffer_bytes) -> return Err(self.item_error("read buffer"))
+            if mem.__list_capacity<U8>(self.buffer) == 0 && !reserve<U8>(self.allocation, self.buffer, self.limits.buffer_bytes) {
+                return Err(self.item_error("read buffer"))
+            }
             self.buffer.clear()
             self.buffered = 0
             // A Reader may grow the buffer past its reserve (FileReader keeps
@@ -325,7 +331,9 @@ JSONPull: struct<R: Reader> {
             capacity: mem.__list_capacity<U8>(self.buffer)
             count: self.input.read_into(self.buffer, self.limits.buffer_bytes) ?? return Err(io_error(self.offset, self.line, self.column, io_cause(err)))
             grown: mem.__list_capacity<U8>(self.buffer) - capacity
-            if grown > 0 && !self.allocation.charge(grown) -> return Err(self.item_error("read buffer"))
+            if grown > 0 && !self.allocation.charge(grown) {
+                return Err(self.item_error("read buffer"))
+            }
             if count == 0 -> return Ok(None)
         }
         Ok(Val(self.buffer[self.buffered]))
@@ -354,10 +362,14 @@ JSONPull: struct<R: Reader> {
         loop {
             if self.buffered == self.buffer.len() {
                 next_byte: self.fill()
-                if next_byte == None -> return
+                if next_byte == None {
+                    return
+                }
             }
             byte: self.buffer[self.buffered]
-            if byte != (U8{32}) && byte != (U8{9}) && (self.record_mode || (byte != (U8{10}) && byte != (U8{13}))) -> return
+            if byte != (U8{32}) && byte != (U8{9}) && (self.record_mode || (byte != (U8{10}) && byte != (U8{13}))) {
+                return
+            }
             _: self.consume()
         }
     }
@@ -365,7 +377,9 @@ JSONPull: struct<R: Reader> {
     expect: fn(&self, want: U8, context: String) EncodingError! -[IO, Time.Wait]> {
         byte: self.consume()
         if byte == .Val(got) {
-            if got == want -> return
+            if got == want {
+                return
+            }
             column: if self.column > 0 -> self.column - 1 else -> 0
             return Err(stream_error(.Syntax, self.offset - 1, self.line, column, "expected {context} but found {debug_byte(got)}"))
         }
@@ -374,7 +388,9 @@ JSONPull: struct<R: Reader> {
 
     append: fn(&self, bytes: &[U8], byte: U8, item: String) EncodingError! {
         needed: bytes.len() + 1
-        if needed > self.limits.max_item_bytes -> return Err(self.error(.Limit, "max_item_bytes {self.limits.max_item_bytes} exceeded"))
+        if needed > self.limits.max_item_bytes {
+            return Err(self.error(.Limit, "max_item_bytes {self.limits.max_item_bytes} exceeded"))
+        }
         capacity: mem.__list_capacity<U8>(bytes)
         if needed > capacity {
             grown := if capacity < 1 -> 2 else -> capacity * 2
@@ -461,13 +477,17 @@ JSONPull: struct<R: Reader> {
             end += 1
         }
         count: end - start
-        if count == 0 -> return
+        if count == 0 {
+            return
+        }
         needed: bytes.len() + count
         capacity: mem.__list_capacity<U8>(bytes)
         if needed > capacity {
             grown := if capacity < 1 -> 2 else -> capacity * 2
             if grown < needed -> grown = needed
-            if !reserve<U8>(self.allocation, bytes, grown - bytes.len()) -> return Err(self.item_error("string"))
+            if !reserve<U8>(self.allocation, bytes, grown - bytes.len()) {
+                return Err(self.item_error("string"))
+            }
         }
         loop index in start..<end -> bytes.push(self.buffer[index])
         self.buffered = end
@@ -482,8 +502,12 @@ JSONPull: struct<R: Reader> {
             byte: self.consume()
             if byte == None -> return Err(self.error(.Truncated, "unterminated JSON string"))
             got: byte
-            if got == (U8{34}) -> return
-            if got <= (U8{31}) -> return Err(stream_error(.Syntax, self.offset - 1, self.line, self.column - 1, "unescaped control byte in JSON string"))
+            if got == (U8{34}) {
+                return
+            }
+            if got <= (U8{31}) {
+                return Err(stream_error(.Syntax, self.offset - 1, self.line, self.column - 1, "unescaped control byte in JSON string"))
+            }
             if got != (U8{92}) {
                 self.append(bytes, got, "string")
                 next
@@ -491,23 +515,26 @@ JSONPull: struct<R: Reader> {
             escaped: self.consume()
             if escaped == None -> return Err(self.error(.Truncated, "incomplete JSON escape"))
             esc: escaped
-            if esc == (U8{34}) || esc == (U8{92}) || esc == (U8{47}) -> self.append(bytes, esc, "string")
-            else if esc == (U8{98}) -> self.append(bytes, U8{8}, "string")
-            else if esc == (U8{102}) -> self.append(bytes, U8{12}, "string")
-            else if esc == (U8{110}) -> self.append(bytes, U8{10}, "string")
-            else if esc == (U8{114}) -> self.append(bytes, U8{13}, "string")
-            else if esc == (U8{116}) -> self.append(bytes, U8{9}, "string")
-            else if esc == (U8{117}) {
+            if esc == (U8{34}) || esc == (U8{92}) || esc == (U8{47}) {
+                self.append(bytes, esc, "string")
+            } else if esc == (U8{98}) { self.append(bytes, U8{8}, "string") } else if esc == (U8{102}) {
+                self.append(bytes, U8{12}, "string")
+            } else if esc == (U8{110}) { self.append(bytes, U8{10}, "string") } else if esc == (U8{114}) {
+                self.append(bytes, U8{13}, "string")
+            } else if esc == (U8{116}) { self.append(bytes, U8{9}, "string") } else if esc == (U8{117}) {
                 cp := self.hex4()
                 if cp >= 55296 && cp <= 56319 {
                     self.expect(U8{92}, "a low-surrogate escape")
                     self.expect(U8{117}, "a low-surrogate escape")
                     low: self.hex4()
-                    if low < 56320 || low > 57343 -> return Err(stream_error(.Syntax, self.offset - 4, self.line, self.column - 4, "high surrogate is not followed by a low surrogate"))
+                    if low < 56320 || low > 57343 {
+                        return Err(stream_error(.Syntax, self.offset - 4, self.line, self.column - 4, "high surrogate is not followed by a low surrogate"))
+                    }
                     cp = 65536 + ((cp - 55296) << 10) + low - 56320
-                } else if cp >= 56320 && cp <= 57343 -> return Err(stream_error(.Syntax, self.offset - 4, self.line, self.column - 4, "unpaired low surrogate"))
-                if cp < 128 -> self.append(bytes, U8{cp}, "string")
-                else if cp < 2048 {
+                } else if cp >= 56320 && cp <= 57343 {
+                    return Err(stream_error(.Syntax, self.offset - 4, self.line, self.column - 4, "unpaired low surrogate"))
+                }
+                if cp < 128 -> self.append(bytes, U8{cp}, "string") else if cp < 2048 {
                     self.append(bytes, U8{(192).bit_or(cp >> 6)}, "string")
                     self.append(bytes, U8{(128).bit_or(cp.bit_and(63))}, "string")
                 } else if cp < 65536 {
@@ -520,7 +547,9 @@ JSONPull: struct<R: Reader> {
                     self.append(bytes, U8{(128).bit_or((cp >> 6).bit_and(63))}, "string")
                     self.append(bytes, U8{(128).bit_or(cp.bit_and(63))}, "string")
                 }
-            } else { return Err(stream_error(.Syntax, self.offset - 1, self.line, self.column - 1, "unknown JSON escape")) }
+            } else {
+                return Err(stream_error(.Syntax, self.offset - 1, self.line, self.column - 1, "unknown JSON escape"))
+            }
         }
     }
 
@@ -547,7 +576,9 @@ JSONPull: struct<R: Reader> {
             if digits > 18 -> return None
         }
         count: at - start
-        if at == self.buffer.len() || digits == 0 || (leading == 0 && digits > 1) || count + 1 > self.limits.max_item_bytes -> return None
+        if at == self.buffer.len() || digits == 0 || (leading == 0 && digits > 1) || count + 1 > self.limits.max_item_bytes {
+            return None
+        }
         if self.limits.max_total_bytes == .Val(max) {
             if self.total + count > max -> return None
         }
@@ -593,7 +624,9 @@ JSONPull: struct<R: Reader> {
             return Err(stream_error(.Unsupported, start, self.line, self.column, "JSON number is outside the Dyn numeric range"))
         }
         self.allocation.release(capacity)
-        if !math.is_finite(value) -> return Err(stream_error(.Unsupported, start, self.line, self.column, "JSON number is outside the Dyn numeric range"))
+        if !math.is_finite(value) {
+            return Err(stream_error(.Unsupported, start, self.line, self.column, "JSON number is outside the Dyn numeric range"))
+        }
         Ok(DataEvent.Float(value))
     }
 
@@ -601,10 +634,14 @@ JSONPull: struct<R: Reader> {
         self.append(bytes, first, "number")
         loop {
             byte: self.fill()
-            if byte == None -> return
+            if byte == None {
+                return
+            }
             got: byte
             n: Int{got}
-            if !((n >= 48 && n <= 57) || n == 45 || n == 43 || n == 46 || n == 101 || n == 69) -> return
+            if !((n >= 48 && n <= 57) || n == 45 || n == 43 || n == 46 || n == 101 || n == 69) {
+                return
+            }
             self.append(bytes, got, "number")
             _: self.consume()
         }
@@ -620,7 +657,9 @@ JSONPull: struct<R: Reader> {
         if count >= mem.__list_capacity<ReadFrame>(self.frames) {
             capacity: mem.__list_capacity<ReadFrame>(self.frames)
             next_capacity: if capacity == 0 -> 1 else -> capacity * 2
-            if !reserve<ReadFrame>(self.allocation, self.frames, next_capacity - count) -> return Err(self.error(.Limit, "JSON reader frame allocation exceeded the bounded codec heap ceiling"))
+            if !reserve<ReadFrame>(self.allocation, self.frames, next_capacity - count) {
+                return Err(self.error(.Limit, "JSON reader frame allocation exceeded the bounded codec heap ceiling"))
+            }
         }
         self.frames.push(frame)
     }
@@ -631,14 +670,20 @@ JSONPull: struct<R: Reader> {
         if first == None -> return Err(self.error(.Truncated, "expected a JSON value"))
         byte: first
         if byte == (U8{110}) -> return self.literal([U8#4]{117, 108, 108, 0}, 3, DataEvent.Null)
-        if byte == (U8{116}) -> return self.literal([U8#4]{114, 117, 101, 0}, 3, DataEvent.Bool(true))
-        if byte == (U8{102}) -> return self.literal([U8#4]{97, 108, 115, 101}, 4, DataEvent.Bool(false))
+        if byte == (U8{116}) {
+            return self.literal([U8#4]{114, 117, 101, 0}, 3, DataEvent.Bool(true))
+        }
+        if byte == (U8{102}) {
+            return self.literal([U8#4]{97, 108, 115, 101}, 4, DataEvent.Bool(false))
+        }
         if byte == (U8{34}) {
             text: self.read_string()
             return Ok(DataEvent.Text(text))
         }
         if byte == (U8{91}) || byte == (U8{123}) {
-            if self.frames.len() >= self.limits.max_depth -> return Err(stream_error(.Limit, self.offset - 1, self.line, self.column - 1, "max_depth {self.limits.max_depth} exceeded"))
+            if self.frames.len() >= self.limits.max_depth {
+                return Err(stream_error(.Limit, self.offset - 1, self.line, self.column - 1, "max_depth {self.limits.max_depth} exceeded"))
+            }
             if byte == (U8{91}) {
                 self.push_frame(.ArrayValueOrEnd{first: true, index: U64{0}})
                 return Ok(DataEvent.ArrayStart)
@@ -648,7 +693,9 @@ JSONPull: struct<R: Reader> {
             return Ok(DataEvent.ObjectStart)
         }
         if byte == (U8{45}) || (byte >= (U8{48}) && byte <= (U8{57})) {
-            if !self.typed_numbers && self.small_int(byte) == .Val(value) -> return Ok(DataEvent.Int(value))
+            if !self.typed_numbers && self.small_int(byte) == .Val(value) {
+                return Ok(DataEvent.Int(value))
+            }
             return self.number(byte)
         }
         return Err(stream_error(.Syntax, self.offset - 1, self.line, self.column - 1, "unexpected byte {debug_byte(byte)} while reading a JSON value"))
@@ -673,8 +720,12 @@ JSONPull: struct<R: Reader> {
                 if self.record_mode {
                     if byte == (Val(U8{13})) {
                         _: self.consume()
-                        if self.fill() != (Val(U8{10})) -> return Err(stream_error(.Syntax, self.offset - 1, self.line, self.column - 1, "JSONL records use LF or CRLF; bare CR is not a record ending"))
-                    } else if byte != (Val(U8{10})) -> return Err(self.error(.Syntax, "trailing input after JSONL record value"))
+                        if self.fill() != (Val(U8{10})) {
+                            return Err(stream_error(.Syntax, self.offset - 1, self.line, self.column - 1, "JSONL records use LF or CRLF; bare CR is not a record ending"))
+                        }
+                    } else if byte != (Val(U8{10})) {
+                        return Err(self.error(.Syntax, "trailing input after JSONL record value"))
+                    }
                     _: self.consume()
                     self.root_started = false
                     return Ok(None)
@@ -686,12 +737,16 @@ JSONPull: struct<R: Reader> {
                 .ArrayValueOrEnd(first, index) -> {
                     byte: self.fill()
                     if byte == (Val(U8{93})) {
-                        if !first -> return Err(self.error(.Syntax, "expected a JSON value after `,`"))
+                        if !first {
+                            return Err(self.error(.Syntax, "expected a JSON value after `,`"))
+                        }
                         _: self.consume()
                         _: self.frames.pop()
                         return Ok(Val(DataEvent.ArrayEnd))
                     }
-                    if !first && byte == None -> return Err(self.error(.Truncated, "unterminated JSON array"))
+                    if !first && byte == None {
+                        return Err(self.error(.Truncated, "unterminated JSON array"))
+                    }
                     self.frames[count - 1] = .ArrayCommaOrEnd(index)
                     event: self.parse_value()
                     return Ok(Val(event))
@@ -706,27 +761,33 @@ JSONPull: struct<R: Reader> {
                         _: self.frames.pop()
                         return Ok(Val(DataEvent.ArrayEnd))
                     } else {
-                        if byte == None -> return Err(self.error(.Truncated, "unterminated JSON array"))
+                        if byte == None {
+                            return Err(self.error(.Truncated, "unterminated JSON array"))
+                        }
                         return Err(self.error(.Syntax, "expected `,` or `]` after array value"))
                     }
                 }
                 .ObjectKeyOrEnd(first) -> {
                     byte: self.fill()
                     if byte == (Val(U8{125})) {
-                        if !first -> return Err(self.error(.Syntax, "expected an object key after `,`"))
+                        if !first {
+                            return Err(self.error(.Syntax, "expected an object key after `,`"))
+                        }
                         _: self.consume()
                         _: self.frames.pop()
                         self.close_seen()
                         return Ok(Val(DataEvent.ObjectEnd))
                     }
-                    if !first && byte == None -> return Err(self.error(.Truncated, "unterminated JSON object"))
-                    if byte != (Val(U8{34})) -> return Err(self.error(.Syntax, "expected a quoted object key"))
+                    if !first && byte == None {
+                        return Err(self.error(.Truncated, "unterminated JSON object"))
+                    }
+                    if byte != (Val(U8{34})) {
+                        return Err(self.error(.Syntax, "expected a quoted object key"))
+                    }
                     _: self.consume()
                     key: self.read_string()
                     start: self.seen_starts[self.seen_starts.len() - 1]
-                    if self.allow_duplicates {
-                        self.drop_keys(start)
-                    } else {
+                    if self.allow_duplicates -> self.drop_keys(start) else {
                         loop index in start..<self.seen_keys.len() {
                             if self.seen_keys[index] == key {
                                 error := self.error(.Syntax, "duplicate object key `{key}`")
@@ -735,7 +796,9 @@ JSONPull: struct<R: Reader> {
                             }
                         }
                     }
-                    if !self.allocation.charge(key.count_bytes() + mem.__type_size<String>()) -> return Err(self.item_error("string"))
+                    if !self.allocation.charge(key.count_bytes() + mem.__type_size<String>()) {
+                        return Err(self.item_error("string"))
+                    }
                     self.seen_keys.push(key.copy())
                     self.frames[count - 1] = .ObjectColonValue
                     return Ok(Val(DataEvent.Key(key)))
@@ -757,7 +820,9 @@ JSONPull: struct<R: Reader> {
                         self.close_seen()
                         return Ok(Val(DataEvent.ObjectEnd))
                     } else {
-                        if byte == None -> return Err(self.error(.Truncated, "unterminated JSON object"))
+                        if byte == None {
+                            return Err(self.error(.Truncated, "unterminated JSON object"))
+                        }
                         return Err(self.error(.Syntax, "expected `,` or `}}` after object value"))
                     }
                 }
@@ -766,7 +831,9 @@ JSONPull: struct<R: Reader> {
     }
 
     fold_charge: fn(self, bytes: Int, heap: &FoldBudget) EncodingError! {
-        if heap.decoded + bytes > self.limits.max_item_bytes -> return Err(self.item_error("record"))
+        if heap.decoded + bytes > self.limits.max_item_bytes {
+            return Err(self.item_error("record"))
+        }
         heap.decoded += bytes
     }
 
@@ -780,7 +847,6 @@ JSONPull: struct<R: Reader> {
             return Ok(rt.bytes_into_text(bytes))
         }
     }
-
 
     fold: fn(&self, event: &&DataEvent, heap: &FoldBudget) -[IO, Time.Wait]> Dyn EncodingError! {
         #Unsafe("the private numeric event is projected only into the matching typed tree carrier") {
@@ -815,7 +881,9 @@ JSONPull: struct<R: Reader> {
                 values := [Dyn]{}
                 loop {
                     child: self.next()
-                    if child == None -> return Err(self.error(.Truncated, "unterminated JSON array"))
+                    if child == None {
+                        return Err(self.error(.Truncated, "unterminated JSON array"))
+                    }
                     item: child
                     if item == .ArrayEnd -> return Ok(Dyn.Array(values))
                     value: self.fold(item, heap)
@@ -828,16 +896,22 @@ JSONPull: struct<R: Reader> {
                 entries := [(key: String, value: Dyn)]{}
                 loop {
                     child: self.next()
-                    if child == None -> return Err(self.error(.Truncated, "unterminated JSON object"))
+                    if child == None {
+                        return Err(self.error(.Truncated, "unterminated JSON object"))
+                    }
                     item: child
                     if item == .ObjectEnd -> return Ok(object_from_entries(entries))
                     if item == .Key(key) {
                         loop entry in entries {
-                            if entry.key == key -> return Err(self.error(.Syntax, "duplicate object key `{key}`"))
+                            if entry.key == key {
+                                return Err(self.error(.Syntax, "duplicate object key `{key}`"))
+                            }
                         }
                         owned_key: self.fold_text(key, heap)
                         first: self.next()
-                        if first == None -> return Err(self.error(.Truncated, "object key has no value"))
+                        if first == None {
+                            return Err(self.error(.Truncated, "object key has no value"))
+                        }
                         value: self.fold(first, heap)
                         fold_reserve<(key: String, value: Dyn), R>(self, entries, heap)
                         entries.push((key: owned_key, value: value))
@@ -852,7 +926,9 @@ JSONPull: struct<R: Reader> {
 fold_reserve: fn<T, R: Reader>(parser: &JSONPull<R>, values: &[T], heap: &FoldBudget) EncodingError! {
     old: mem.__list_capacity<T>(values) * mem.__type_size<T>()
     additional: if values.len() == mem.__list_capacity<T>(values) -> if values.len() == 0 -> 1 else -> values.len() else -> 0
-    if additional == 0 -> return
+    if additional == 0 {
+        return
+    }
     if !reserve<T>(parser.allocation, values, additional) {
         heap.tracked -= old
         return Err(parser.item_error("record"))
@@ -869,8 +945,7 @@ valid_number: fn(bytes: [U8]) -> Bool Never! {
     i := 0
     if bytes.len() > 0 && bytes[0] == (U8{45}) -> i = 1
     if i >= bytes.len() -> return false
-    if bytes[i] == (U8{48}) -> i += 1
-    else if bytes[i] >= (U8{49}) && bytes[i] <= (U8{57}) {
+    if bytes[i] == (U8{48}) -> i += 1 else if bytes[i] >= (U8{49}) && bytes[i] <= (U8{57}) {
         i += 1
         loop i < bytes.len() && bytes[i] >= (U8{48}) && bytes[i] <= (U8{57}) -> i += 1
     } else { return false }
@@ -895,8 +970,7 @@ debug_byte: fn(byte: U8) -> String Never! {
     if n == 39 -> return "'\\''"
     if n == 34 -> return "'\"'"
     bytes := [U8]{}
-    if n < 128 -> bytes.push(byte)
-    else {
+    if n < 128 -> bytes.push(byte) else {
         bytes.push(U8{(192).bit_or((n >> 6))})
         bytes.push(U8{(128).bit_or((n.bit_and(63)))})
     }
@@ -905,13 +979,12 @@ debug_byte: fn(byte: U8) -> String Never! {
 }
 
 quote_path: fn(text: String) -> String Never! { text.debug() }
+
 // RFC 8785 admits an Int only when binary64 holds it exactly: its odd part
 // must fit in the 53-bit significand.
 int_is_binary64: fn(n: Int) -> Bool Never! {
     odd := n
-    loop odd != 0 && odd %% 2 == 0 {
-        odd = odd /% 2
-    }
+    loop odd != 0 && odd %% 2 == 0 -> odd = odd /% 2
     if odd < 0 -> odd = -odd
     odd <= 9007199254740992
 }
@@ -946,11 +1019,11 @@ jcs_number: fn(value: Float) -> String Never! {
     }
     if decimal < 0 -> decimal = digits.len()
     exponent := 0
-    if exponent_bytes.len() > 0 -> exponent = Int.parse(String.from_bytes(exponent_bytes) ?? "0") ?? 0
-    leading := 0
-    loop leading < digits.len() && digits[leading] == (U8{48}) {
-        leading += 1
+    if exponent_bytes.len() > 0 {
+        exponent = Int.parse(String.from_bytes(exponent_bytes) ?? "0") ?? 0
     }
+    leading := 0
+    loop leading < digits.len() && digits[leading] == (U8{48}) -> leading += 1
     significant := [U8]{}
     loop i in leading..<digits.len() -> significant.push(digits[i])
     loop significant.len() > 1 && significant[significant.len() - 1] == (U8{48}) {
@@ -1063,18 +1136,22 @@ jcs_distance: fn(text: String, significand: Int, power: Int) -> Int Never! {
         if seen_point -> fraction_digits += 1
     }
     exponent := 0
-    if exponent_bytes.len() > 0 -> exponent = Int.parse(String.from_bytes(exponent_bytes) ?? "0") ?? 0
+    if exponent_bytes.len() > 0 {
+        exponent = Int.parse(String.from_bytes(exponent_bytes) ?? "0") ?? 0
+    }
     decimal_power: exponent - fraction_digits
     left := digits
     right := significand
-    if power < 0 -> left = left * int_power(2, -power) else -> right = right * int_power(2, power)
-    if decimal_power < 0 -> right = right * int_power(10, -decimal_power) else -> left = left * int_power(10, decimal_power)
+    if power < 0 -> left *= int_power(2, -power) else -> right *= int_power(2, power)
+    if decimal_power < 0 -> right *= int_power(10, -decimal_power) else {
+        left *= int_power(10, decimal_power)
+    }
     if left >= right -> left - right else -> right - left
 }
 
 int_power: fn(base: Int, exponent: Int) -> Int Never! {
     out := 1
-    loop _ in 0..<exponent -> out = out * base
+    loop _ in 0..<exponent -> out *= base
     out
 }
 
@@ -1103,9 +1180,7 @@ utf16_units: fn(text: String) -> [Int] Never! {
         if cp >= 65536 {
             units.push(55296 + ((cp - 65536) >> 10))
             units.push(56320 + ((cp - 65536).bit_and(1023)))
-        } else {
-            units.push(cp)
-        }
+        } else { units.push(cp) }
         i += width
     }
     units
@@ -1140,7 +1215,9 @@ sort_by_units: fn(units: [[Int]]) -> [Int] Never! {
             right := middle
             loop left < middle || right < end {
                 take_left := right >= end
-                if !take_left && left < middle -> take_left = compare_units(units[order[left]], units[order[right]]) <= 0
+                if !take_left && left < middle {
+                    take_left = compare_units(units[order[left]], units[order[right]]) <= 0
+                }
                 if take_left {
                     merged.push(order[left])
                     left += 1
@@ -1152,7 +1229,7 @@ sort_by_units: fn(units: [[Int]]) -> [Int] Never! {
             start = end
         }
         order = merged
-        width = width * 2
+        width *= 2
     }
     order
 }
@@ -1219,7 +1296,9 @@ JSONPush: struct<W: Writer> {
 
     ensure_total: fn(self, additional: Int) EncodingError! {
         if self.limits.max_total_bytes == .Val(max) {
-            if self.total + additional > max -> return Err(self.error(.Limit, "max_total_bytes {max} exceeded"))
+            if self.total + additional > max {
+                return Err(self.error(.Limit, "max_total_bytes {max} exceeded"))
+            }
         }
     }
 
@@ -1262,7 +1341,9 @@ JSONPush: struct<W: Writer> {
             byte: Int{byte_at(text, i)}
             size += if byte == 34 || byte == 92 || byte == 10 || byte == 13 || byte == 9 || byte == 8 || byte == 12 -> 2 else if byte < 32 -> 6 else -> 1
         }
-        if size > self.limits.max_item_bytes -> return Err(self.error(.Limit, "max_item_bytes {self.limits.max_item_bytes} exceeded"))
+        if size > self.limits.max_item_bytes {
+            return Err(self.error(.Limit, "max_item_bytes {self.limits.max_item_bytes} exceeded"))
+        }
         Ok(size)
     }
 
@@ -1294,7 +1375,9 @@ JSONPush: struct<W: Writer> {
 
     value_prefix_len: fn(self) -> Int EncodingError! {
         if self.frames.len() == 0 {
-            if self.root_written -> return Err(self.state_error("JSON writer accepts exactly one root"))
+            if self.root_written {
+                return Err(self.state_error("JSON writer accepts exactly one root"))
+            }
             return Ok(0)
         }
         if self.frames[self.frames.len() - 1] == {
@@ -1306,7 +1389,9 @@ JSONPush: struct<W: Writer> {
 
     before_value: fn(&self) EncodingError! -[IO]> {
         if self.frames.len() == 0 {
-            if self.root_written -> return Err(self.state_error("JSON writer accepts exactly one root"))
+            if self.root_written {
+                return Err(self.state_error("JSON writer accepts exactly one root"))
+            }
             self.root_written = true
             return
         }
@@ -1342,12 +1427,12 @@ JSONPush: struct<W: Writer> {
         if self.finished -> return Err(self.state_error("write called after finish"))
         if event == {
             .Key(key) -> {
-                if self.frames.len() == 0 -> return Err(self.state_error("Key is only valid while an object expects a key"))
+                if self.frames.len() == 0 {
+                    return Err(self.state_error("Key is only valid while an object expects a key"))
+                }
                 at: self.frames.len() - 1
                 first := false
-                if self.frames[at] == .ObjectKey(is_first) {
-                    first = is_first
-                } else {
+                if self.frames[at] == .ObjectKey(is_first) -> first = is_first else {
                     return Err(self.state_error("Key is only valid while an object expects a key"))
                 }
                 inner: self.quoted_len(key)
@@ -1359,7 +1444,9 @@ JSONPush: struct<W: Writer> {
                 return
             }
             .ArrayEnd -> {
-                if self.frames.len() == 0 -> return Err(self.state_error("ArrayEnd does not match an open array"))
+                if self.frames.len() == 0 {
+                    return Err(self.state_error("ArrayEnd does not match an open array"))
+                }
                 if self.frames[self.frames.len() - 1] == {
                     .Array(_) -> {}
                     .ObjectKey(_) | .ObjectValue -> return Err(self.state_error("ArrayEnd does not match an open array"))
@@ -1369,8 +1456,12 @@ JSONPush: struct<W: Writer> {
                 return
             }
             .ObjectEnd -> {
-                if self.frames.len() == 0 -> return Err(self.state_error("ObjectEnd does not match an open object"))
-                if self.frames[self.frames.len() - 1] == .ObjectValue -> return Err(self.state_error("object key has no value"))
+                if self.frames.len() == 0 {
+                    return Err(self.state_error("ObjectEnd does not match an open object"))
+                }
+                if self.frames[self.frames.len() - 1] == .ObjectValue {
+                    return Err(self.state_error("object key has no value"))
+                }
                 if self.frames[self.frames.len() - 1] == {
                     .ObjectKey(_) -> {}
                     .Array(_) | .ObjectValue -> return Err(self.state_error("ObjectEnd does not match an open object"))
@@ -1391,13 +1482,17 @@ JSONPush: struct<W: Writer> {
                 size = payload.count_bytes()
             }
             .Float(value) -> {
-                if !math.is_finite(value) -> return Err(self.error(.Unsupported, "JSON cannot encode a non-finite Float"))
+                if !math.is_finite(value) {
+                    return Err(self.error(.Unsupported, "JSON cannot encode a non-finite Float"))
+                }
                 payload = wire_float(value)
                 size = payload.count_bytes()
             }
             .Text(value) -> size = self.quoted_len(value) + 2
             .ArrayStart | .ObjectStart -> {
-                if self.frames.len() >= self.limits.max_depth -> return Err(self.error(.Limit, "max_depth {self.limits.max_depth} exceeded"))
+                if self.frames.len() >= self.limits.max_depth {
+                    return Err(self.error(.Limit, "max_depth {self.limits.max_depth} exceeded"))
+                }
                 size = 1
             }
             .Number(_) | .Bytes(_) | .ArrayEnd | .Key(_) | .ObjectEnd -> return Err(self.error(.Unsupported, "internal JSON carriers cannot be written as DataEvent values"))
@@ -1405,12 +1500,13 @@ JSONPush: struct<W: Writer> {
         self.ensure_total(self.value_prefix_len() + size)
         self.before_value()
         if event == {
-            .Null -> self.write_literal([U8#5]{110, 117, 108, 108, 0}, 4)
+            .Null -> { self.write_literal([U8#5]{110, 117, 108, 108, 0}, 4) }
             .Bool(value) -> {
-                if value -> self.write_literal([U8#5]{116, 114, 117, 101, 0}, 4)
-                else -> self.write_literal([U8#5]{102, 97, 108, 115, 101}, 5)
+                if value -> self.write_literal([U8#5]{116, 114, 117, 101, 0}, 4) else {
+                    self.write_literal([U8#5]{102, 97, 108, 115, 101}, 5)
+                }
             }
-            .Text(value) -> self.write_quoted(value)
+            .Text(value) -> { self.write_quoted(value) }
             .ArrayStart -> {
                 self.write_byte(U8{91})
                 self.frames.push(.Array(true))
@@ -1419,14 +1515,18 @@ JSONPush: struct<W: Writer> {
                 self.write_byte(U8{123})
                 self.frames.push(.ObjectKey(true))
             }
-            .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .ArrayEnd | .Key(_) | .ObjectEnd -> self.write_text(payload)
+            .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .ArrayEnd | .Key(_) | .ObjectEnd -> {
+                self.write_text(payload)
+            }
         }
     }
 
     canonical_charge: fn(&self, at: Int, bytes: Int) EncodingError! {
         updated: self.canonical_retained + bytes
         ceiling: self.limits.max_item_bytes * 2 + self.limits.buffer_bytes + self.limits.max_depth * 128
-        if updated > ceiling -> return Err(self.error(.Limit, "canonical JSON workspace exceeded bounded max_item_bytes {self.limits.max_item_bytes}"))
+        if updated > ceiling {
+            return Err(self.error(.Limit, "canonical JSON workspace exceeded bounded max_item_bytes {self.limits.max_item_bytes}"))
+        }
         self.canonical_frames[at].retained += U64{bytes}
         self.canonical_retained = updated
     }
@@ -1443,11 +1543,15 @@ JSONPush: struct<W: Writer> {
     canonical_emit: fn(&self, bytes: View<U8>) EncodingError! -[IO]> {
         if self.canonical_sink() == .Val(at) {
             needed: self.canonical_frames[at].value.len() + bytes.len()
-            if needed > self.limits.max_item_bytes -> return Err(self.error(.Limit, "max_item_bytes {self.limits.max_item_bytes} exceeded by canonical object"))
+            if needed > self.limits.max_item_bytes {
+                return Err(self.error(.Limit, "max_item_bytes {self.limits.max_item_bytes} exceeded by canonical object"))
+            }
             capacity: mem.__list_capacity<U8>(self.canonical_frames[at].value)
             growth: if needed > capacity -> needed - capacity else -> 0
             self.canonical_charge(at, growth)
-            if growth > 0 && !mem.__list_reserve_exact<U8>(self.canonical_frames[at].value, growth) -> return Err(self.error(.Limit, "canonical JSON object allocation failed within configured bounds"))
+            if growth > 0 && !mem.__list_reserve_exact<U8>(self.canonical_frames[at].value, growth) {
+                return Err(self.error(.Limit, "canonical JSON object allocation failed within configured bounds"))
+            }
             loop byte in bytes -> self.canonical_frames[at].value.push(byte)
         } else { self.write_bytes(bytes) }
     }
@@ -1455,14 +1559,18 @@ JSONPush: struct<W: Writer> {
     canonical_quote: fn(self, text: String) -> [U8] EncodingError! {
         size: self.quoted_len(text) + 2
         out := [U8]{}
-        if !mem.__list_reserve_exact<U8>(out, size) -> return Err(self.error(.Limit, "canonical JSON string allocation failed within configured bounds"))
+        if !mem.__list_reserve_exact<U8>(out, size) {
+            return Err(self.error(.Limit, "canonical JSON string allocation failed within configured bounds"))
+        }
         self.quote_into(out, text)
         Ok(out)
     }
 
     canonical_before_value: fn(&self) EncodingError! -[IO]> {
         if self.canonical_frames.len() == 0 {
-            if self.root_written -> return Err(self.state_error("JSON writer accepts exactly one root"))
+            if self.root_written {
+                return Err(self.state_error("JSON writer accepts exactly one root"))
+            }
             self.root_written = true
             return
         }
@@ -1471,21 +1579,31 @@ JSONPush: struct<W: Writer> {
             if !self.canonical_frames[at].first -> self.canonical_byte(U8{44})
             self.canonical_frames[at].first = false
         } else {
-            if self.canonical_frames[at].key == None -> return Err(self.state_error("canonical JSON object expects Key before a value"))
-            if self.canonical_frames[at].value.len() != 0 -> return Err(self.state_error("canonical JSON object value is already active"))
+            if self.canonical_frames[at].key == None {
+                return Err(self.state_error("canonical JSON object expects Key before a value"))
+            }
+            if self.canonical_frames[at].value.len() != 0 {
+                return Err(self.state_error("canonical JSON object value is already active"))
+            }
         }
     }
 
     canonical_complete_value: fn(&self) EncodingError! {
-        if self.canonical_frames.len() == 0 -> return
+        if self.canonical_frames.len() == 0 {
+            return
+        }
         at: self.canonical_frames.len() - 1
-        if !self.canonical_frames[at].is_object || self.canonical_frames[at].key == None -> return
+        if !self.canonical_frames[at].is_object || self.canonical_frames[at].key == None {
+            return
+        }
         capacity: mem.__list_capacity<(key: String, value: [U8])>(self.canonical_frames[at].entries)
         length: self.canonical_frames[at].entries.len()
         growth: if length == capacity -> (if capacity < 1 -> 2 else -> capacity * 2) - capacity else -> 0
         bytes: growth * mem.__type_size<(key: String, value: [U8])>()
         self.canonical_charge(at, bytes)
-        if growth > 0 && !mem.__list_reserve_exact<(key: String, value: [U8])>(self.canonical_frames[at].entries, growth) -> return Err(self.error(.Limit, "canonical JSON entry allocation failed within configured bounds"))
+        if growth > 0 && !mem.__list_reserve_exact<(key: String, value: [U8])>(self.canonical_frames[at].entries, growth) {
+            return Err(self.error(.Limit, "canonical JSON entry allocation failed within configured bounds"))
+        }
         frame := self.canonical_frames.pop() ?? panic("canonical value requires an active object frame")
         key: frame.key.move() ?? ""
         value: frame.value.move()
@@ -1497,8 +1615,12 @@ JSONPush: struct<W: Writer> {
 
     canonical_render_object: fn(&self) -> [U8] EncodingError! {
         frame := self.canonical_frames.pop() ?? return Err(self.state_error("ObjectEnd does not match a complete canonical object"))
-        if !frame.is_object || frame.key != None -> return Err(self.state_error("ObjectEnd does not match a complete canonical object"))
-        if frame.value.len() != 0 -> return Err(self.state_error("canonical JSON object value was not completed"))
+        if !frame.is_object || frame.key != None {
+            return Err(self.state_error("ObjectEnd does not match a complete canonical object"))
+        }
+        if frame.value.len() != 0 {
+            return Err(self.state_error("canonical JSON object value was not completed"))
+        }
         frame.entries.sort_by(fn(left: (key: String, value: [U8]), right: (key: String, value: [U8])) {
             comparison: compare_text_units(left.key, right.key)
             if comparison < 0 -> .Less else if comparison > 0 -> .Greater else -> .Equal
@@ -1541,29 +1663,45 @@ JSONPush: struct<W: Writer> {
         if self.finished -> return Err(self.state_error("write called after finish"))
         if event == {
             .Key(key) -> {
-                if self.canonical_frames.len() == 0 -> return Err(self.state_error("Key is only valid while an object expects a key"))
+                if self.canonical_frames.len() == 0 {
+                    return Err(self.state_error("Key is only valid while an object expects a key"))
+                }
                 at: self.canonical_frames.len() - 1
-                if !self.canonical_frames[at].is_object -> return Err(self.state_error("Key is only valid while an object expects a key"))
-                if self.canonical_frames[at].key != None -> return Err(self.state_error("canonical JSON object key has no value"))
+                if !self.canonical_frames[at].is_object {
+                    return Err(self.state_error("Key is only valid while an object expects a key"))
+                }
+                if self.canonical_frames[at].key != None {
+                    return Err(self.state_error("canonical JSON object key has no value"))
+                }
                 loop entry in self.canonical_frames[at].entries {
-                    if entry.key == key -> return Err(self.error(.Syntax, "JCS requires unique object keys"))
+                    if entry.key == key {
+                        return Err(self.error(.Syntax, "JCS requires unique object keys"))
+                    }
                 }
                 self.canonical_charge(at, key.count_bytes())
                 self.canonical_frames[at].key = Val(key)
                 return
             }
             .ArrayEnd -> {
-                if self.canonical_frames.len() == 0 || self.canonical_frames[self.canonical_frames.len() - 1].is_object -> return Err(self.state_error("ArrayEnd does not match an open array"))
+                if self.canonical_frames.len() == 0 || self.canonical_frames[self.canonical_frames.len() - 1].is_object {
+                    return Err(self.state_error("ArrayEnd does not match an open array"))
+                }
                 self.canonical_byte(U8{93})
                 _: self.canonical_frames.pop()
                 self.canonical_complete_value()
                 return
             }
             .ObjectEnd -> {
-                if self.canonical_frames.len() == 0 -> return Err(self.state_error("ObjectEnd does not match an open object"))
+                if self.canonical_frames.len() == 0 {
+                    return Err(self.state_error("ObjectEnd does not match an open object"))
+                }
                 at: self.canonical_frames.len() - 1
-                if self.canonical_frames[at].is_object && self.canonical_frames[at].key != None -> return Err(self.state_error("object key has no value"))
-                if !self.canonical_frames[at].is_object -> return Err(self.state_error("ObjectEnd does not match an open object"))
+                if self.canonical_frames[at].is_object && self.canonical_frames[at].key != None {
+                    return Err(self.state_error("object key has no value"))
+                }
+                if !self.canonical_frames[at].is_object {
+                    return Err(self.state_error("ObjectEnd does not match an open object"))
+                }
                 object: self.canonical_render_object()
                 window: object[0..<object.len()]
                 self.canonical_emit(window)
@@ -1572,18 +1710,24 @@ JSONPush: struct<W: Writer> {
             }
             .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .ArrayStart | .ObjectStart -> {}
         }
-        if (event == .ArrayStart || event == .ObjectStart) && self.canonical_frames.len() >= self.limits.max_depth -> return Err(self.error(.Limit, "max_depth {self.limits.max_depth} exceeded"))
+        if (event == .ArrayStart || event == .ObjectStart) && self.canonical_frames.len() >= self.limits.max_depth {
+            return Err(self.error(.Limit, "max_depth {self.limits.max_depth} exceeded"))
+        }
         encoded := [U8]{}
         if event == {
             .Null -> encoded = [U8]{110, 117, 108, 108}
             .Bool(value) -> encoded = if value -> [U8]{116, 114, 117, 101} else -> [U8]{102, 97, 108, 115, 101}
             .Int(value) -> {
-                if !int_is_binary64(value) -> return Err(self.error(.Unsupported, "JCS requires Int exactly representable as IEEE 754 binary64; encode this integer as Text"))
+                if !int_is_binary64(value) {
+                    return Err(self.error(.Unsupported, "JCS requires Int exactly representable as IEEE 754 binary64; encode this integer as Text"))
+                }
                 number: jcs_number(Float{value})
                 encoded = number.bytes()
             }
             .Float(value) -> {
-                if !math.is_finite(value) -> return Err(self.error(.Unsupported, "JCS cannot encode a non-finite Float"))
+                if !math.is_finite(value) {
+                    return Err(self.error(.Unsupported, "JCS cannot encode a non-finite Float"))
+                }
                 number: jcs_number(value)
                 encoded = number.bytes()
             }
@@ -1619,7 +1763,9 @@ JSONPush: struct<W: Writer> {
 
     finish: fn(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
-        if self.finished -> return
+        if self.finished {
+            return
+        }
         open: if self.canonical -> self.canonical_frames.len() != 0 else -> self.frames.len() != 0
         if !self.root_written || open {
             error: self.state_error("finish requires one structurally complete JSON root")
@@ -1671,9 +1817,13 @@ next_text_unit: fn(text: String, at: Int) -> (unit: Int, position: Int, pending:
     first: Int{byte_at(text, at)}
     width: scalar_width(U8{first})
     codepoint := first
-    if width == 2 -> codepoint = ((first.bit_and(31)) << 6).bit_or((Int{byte_at(text, at + 1)}.bit_and(63)))
-    else if width == 3 -> codepoint = ((first.bit_and(15)) << 12).bit_or(((Int{byte_at(text, at + 1)}.bit_and(63)) << 6)).bit_or((Int{byte_at(text, at + 2)}.bit_and(63)))
-    else if width == 4 -> codepoint = ((first.bit_and(7)) << 18).bit_or(((Int{byte_at(text, at + 1)}.bit_and(63)) << 12)).bit_or(((Int{byte_at(text, at + 2)}.bit_and(63)) << 6)).bit_or((Int{byte_at(text, at + 3)}.bit_and(63)))
+    if width == 2 {
+        codepoint = ((first.bit_and(31)) << 6).bit_or((Int{byte_at(text, at + 1)}.bit_and(63)))
+    } else if width == 3 {
+        codepoint = ((first.bit_and(15)) << 12).bit_or(((Int{byte_at(text, at + 1)}.bit_and(63)) << 6)).bit_or((Int{byte_at(text, at + 2)}.bit_and(63)))
+    } else if width == 4 {
+        codepoint = ((first.bit_and(7)) << 18).bit_or(((Int{byte_at(text, at + 1)}.bit_and(63)) << 12)).bit_or(((Int{byte_at(text, at + 2)}.bit_and(63)) << 6)).bit_or((Int{byte_at(text, at + 3)}.bit_and(63)))
+    }
     if codepoint < 65536 -> return (unit: codepoint, position: at + width, pending: -1)
     (unit: 55296 + ((codepoint - 65536) >> 10), position: at + width, pending: 56320 + ((codepoint - 65536).bit_and(1023)))
 }
@@ -1691,15 +1841,13 @@ compare_text_units: fn(left: String, right: String) -> Int Never! {
         if right_end -> return 1
         lu := lp
         ru := rp
-        if lp >= 0 -> lp = -1
-        else {
+        if lp >= 0 -> lp = -1 else {
             decoded: next_text_unit(left, li)
             lu = decoded.unit
             li = decoded.position
             lp = decoded.pending
         }
-        if rp >= 0 -> rp = -1
-        else {
+        if rp >= 0 -> rp = -1 else {
             decoded: next_text_unit(right, ri)
             ru = decoded.unit
             ri = decoded.position
@@ -1722,7 +1870,9 @@ parse_int64: fn(text: String) -> Int? Never! {
         if byte < 48 || byte > 57 -> return None
         digit: U64{byte - 48}
         if magnitude > (U64{922337203685477580}) -> return None
-        if magnitude == (U64{922337203685477580}) && digit > (if negative -> U64{8} else -> U64{7}) -> return None
+        if magnitude == (U64{922337203685477580}) && digit > (if negative -> U64{8} else -> U64{7}) {
+            return None
+        }
         magnitude = magnitude * U64{10} + digit
         at += 1
     }
@@ -1805,7 +1955,9 @@ wire_float: fn(value: Float) -> String Never! {
         _: bytes.pop()
     }
     position: decimal + exponent
-    loop bytes.len() - start > 1 && bytes[bytes.len() - 1] == (U8{48}) && bytes.len() - start > position -> _: bytes.pop()
+    loop bytes.len() - start > 1 && bytes[bytes.len() - 1] == (U8{48}) && bytes.len() - start > position {
+        _: bytes.pop()
+    }
     digits: bytes.len() - start
     if position >= digits {
         loop _ in 0..<(position - digits) -> bytes.push(U8{48})
@@ -1867,7 +2019,9 @@ JSONLinesPull: struct<R: Reader> {
             }
             if byte == (Val(U8{13})) {
                 _: self.parser.consume()
-                if self.parser.fill() != (Val(U8{10})) -> return Err(self.parser.error(.Syntax, "JSONL records use LF or CRLF; bare CR is not a record ending"))
+                if self.parser.fill() != (Val(U8{10})) {
+                    return Err(self.parser.error(.Syntax, "JSONL records use LF or CRLF; bare CR is not a record ending"))
+                }
                 _: self.parser.consume()
                 next
             }
@@ -1888,7 +2042,9 @@ JSONLinesPull: struct<R: Reader> {
             }
         }
         self.parser.allocation.release(heap.tracked)
-        if end != None -> return Err(self.parser.error(.Syntax, "trailing input after JSONL record value"))
+        if end != None {
+            return Err(self.parser.error(.Syntax, "trailing input after JSONL record value"))
+        }
         self.record_index += 1
         Ok(Val(tree))
     }
@@ -1904,10 +2060,10 @@ jsonl_reader: fn<R: Reader>(input: &&R, limits: EncodingLimits, typed_numbers: B
 
 write_tree: fn<W: Writer>(writer: &JSONPush<W>, value: Dyn) EncodingError! -[IO]> {
     if value == {
-        .Null -> writer.write(DataEvent.Null)
-        .Bool(v) -> writer.write(DataEvent.Bool(v))
-        .Int(v) -> writer.write(DataEvent.Int(v))
-        .Float(v) -> writer.write(DataEvent.Float(v))
+        .Null -> { writer.write(DataEvent.Null) }
+        .Bool(v) -> { writer.write(DataEvent.Bool(v)) }
+        .Int(v) -> { writer.write(DataEvent.Int(v)) }
+        .Float(v) -> { writer.write(DataEvent.Float(v)) }
         .Number(text) -> {
             #Unsafe("retain a validated number lexeme in the private event carrier") {
                 writer.write(DataEvent.Number(text))
@@ -1919,8 +2075,8 @@ write_tree: fn<W: Writer>(writer: &JSONPush<W>, value: Dyn) EncodingError! -[IO]
             }
         }
         // As in JSON event projection: a temporal value is its RFC 3339 text.
-        .DateTime(_) -> writer.write(DataEvent.Text(value.to_text() ?? ""))
-        .Text(v) -> writer.write(DataEvent.Text(v))
+        .DateTime(_) -> { writer.write(DataEvent.Text(value.to_text() ?? "")) }
+        .Text(v) -> { writer.write(DataEvent.Text(v)) }
         .Array(values) -> {
             writer.write(DataEvent.ArrayStart)
             loop child in values -> write_tree(writer, child)
@@ -1952,8 +2108,8 @@ jsonl_tree_size: fn(value: Dyn, depth: Int, limits: EncodingLimits) -> Int Encod
     }
     size := 0
     if value == {
-        .Null | .Bool(_) -> size = 1
-        .Int(_) -> size = 8
+        .Null | .Bool(_) -> { size = 1 }
+        .Int(_) -> { size = 8 }
         .Float(number) -> {
             if !math.is_finite(number) {
                 out := stream_error(.Unsupported, 0, 1, 1, "JSON cannot encode a non-finite Float")
@@ -1962,7 +2118,7 @@ jsonl_tree_size: fn(value: Dyn, depth: Int, limits: EncodingLimits) -> Int Encod
             }
             size = 8
         }
-        .Text(text) -> size = text.count_bytes()
+        .Text(text) -> { size = text.count_bytes() }
         .Array(items) -> {
             size = 1
             loop index in 0..<items.len() {
@@ -2000,7 +2156,9 @@ jsonl_tree_size: fn(value: Dyn, depth: Int, limits: EncodingLimits) -> Int Encod
 }
 
 jsonl_wire_add: fn<W: Writer>(writer: JSONPush<W>, left: Int, right: Int) -> Int EncodingError! {
-    if left > 18446744073709551615 - right -> return Err(writer.error(.Limit, "JSONL record wire size overflow"))
+    if left > 18446744073709551615 - right {
+        return Err(writer.error(.Limit, "JSONL record wire size overflow"))
+    }
     Ok(left + right)
 }
 
@@ -2049,7 +2207,9 @@ JSONLinesPush: struct<W: Writer> {
     pending_lf: Bool
 
     close_line: fn(&self) EncodingError! -[IO]> {
-        if !self.pending_lf -> return
+        if !self.pending_lf {
+            return
+        }
         self.writer.ensure_total(1) ?? return self.fail(err)
         self.writer.write_byte(U8{10}) ?? return self.fail(err)
         self.pending_lf = false
@@ -2072,7 +2232,9 @@ JSONLinesPush: struct<W: Writer> {
         }
         self.writer.ensure_total(wire + 1) ?? return self.fail(err)
         write_tree(self.writer, value) ?? return self.fail(err)
-        if self.writer.frames.len() != 0 -> return self.fail(self.writer.state_error("JSONL record writer left an open container"))
+        if self.writer.frames.len() != 0 {
+            return self.fail(self.writer.state_error("JSONL record writer left an open container"))
+        }
         self.writer.root_written = false
         self.pending_lf = true
         self.record_index += 1
@@ -2095,7 +2257,9 @@ JSONLinesPush: struct<W: Writer> {
 
     finish: fn(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
-        if self.finished -> return
+        if self.finished {
+            return
+        }
         self.flush()
         self.finished = true
     }
@@ -2111,10 +2275,12 @@ jsonl_writer: fn<W: Writer>(output: &&W, limits: EncodingLimits) -> JSONLinesPus
 }
 
 #Test("borrowed Object entries preserve insertion order") {
-    tree: object_from_entries([(key: String, value: Dyn)]{
-        (key: "z", value: Dyn.Int(1)),
-        (key: "a", value: Dyn.Text("kept")),
-    })
+    tree: object_from_entries(
+        [(key: String, value: Dyn)]{
+            (key: "z", value: Dyn.Int(1)),
+            (key: "a", value: Dyn.Text("kept")),
+        },
+    )
     entries: object_entries(tree)
     assert_eq(entries.len(), 2)
     assert_eq(entries[0].key, "z")
@@ -2138,7 +2304,7 @@ jsonl_writer: fn<W: Writer>(output: &&W, limits: EncodingLimits) -> JSONLinesPus
     limits.max_total_bytes = Val(1000)
     limits.max_expansion_depth = 257
     if validate_limits(limits) == {
-        .Err(error) -> assert_eq(error.kind, EncodingErrorKind.Limit)
+        .Err(error) -> { assert_eq(error.kind, EncodingErrorKind.Limit) }
         .Ok(_) -> panic("invalid expansion limit accepted")
     }
 }

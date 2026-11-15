@@ -5,12 +5,29 @@
 // explanation (marker_explain_reports_typed_signature_and_retirement), run on the Jet-built CLI.
 use {
     jet_cli.[
-        JET_CLI_SYNTAX_ROWS, JetCLISyntaxKind, jet_cli_closest_command, jet_cli_command_index,
-        jet_cli_completions_bash, jet_cli_completions_fish, jet_cli_completions_powershell,
-        jet_cli_completions_zsh, jet_cli_group_usage, jet_cli_handler_index,
-        jet_cli_flag_commands, jet_cli_flag_spec, jet_cli_flag_takes, jet_cli_flags_for_command, jet_cli_form_ported,
-        jet_cli_is_canonical_top_level, jet_cli_is_known_flag, jet_cli_man_page, jet_cli_moved_command,
-        jet_cli_nested_command, jet_cli_rule_explanation, jet_cli_rule_named, jet_cli_syntax_lookup,
+        JET_CLI_SYNTAX_ROWS,
+        JetCLISyntaxKind,
+        jet_cli_closest_command,
+        jet_cli_command_index,
+        jet_cli_completions_bash,
+        jet_cli_completions_fish,
+        jet_cli_completions_powershell,
+        jet_cli_completions_zsh,
+        jet_cli_group_usage,
+        jet_cli_handler_index,
+        jet_cli_flag_commands,
+        jet_cli_flag_spec,
+        jet_cli_flag_takes,
+        jet_cli_flags_for_command,
+        jet_cli_form_ported,
+        jet_cli_is_canonical_top_level,
+        jet_cli_is_known_flag,
+        jet_cli_man_page,
+        jet_cli_moved_command,
+        jet_cli_nested_command,
+        jet_cli_rule_explanation,
+        jet_cli_rule_named,
+        jet_cli_syntax_lookup,
     ]
     jet_foundation.[JET_CLI_COMMANDS, JET_CLI_FLAGS, JET_CLI_HANDLERS, marker_source_read]
 }
@@ -93,9 +110,13 @@ cli_registry_completions: fn() Never! {
     loop script in scripts {
         loop command in JET_CLI_COMMANDS {
             if !jet_cli_form_ported(command.name) -> next
-            if jet_cli_is_canonical_top_level(command.name) -> cli_registry_require(script.contains(command.name), "completion missing command {command.name}")
+            if jet_cli_is_canonical_top_level(command.name) {
+                cli_registry_require(script.contains(command.name), "completion missing command {command.name}")
+            }
             loop action in command.actions {
-                if jet_cli_form_ported("{command.name} {action.name}") -> cli_registry_require(script.contains(action.name), "completion missing {command.name} {action.name}")
+                if jet_cli_form_ported("{command.name} {action.name}") {
+                    cli_registry_require(script.contains(action.name), "completion missing {command.name} {action.name}")
+                }
             }
         }
     }
@@ -106,7 +127,9 @@ cli_registry_flag_copy: fn() Never! {
     words: [String]{"milestone", "requirement", "epoch", "ratified"}
     loop flag in JET_CLI_FLAGS {
         lower: flag.help.to_lower()
-        loop word in words -> cli_registry_require(!lower.contains(word), "help for {flag.long} exposes planning term {word}")
+        loop word in words {
+            cli_registry_require(!lower.contains(word), "help for {flag.long} exposes planning term {word}")
+        }
     }
 }
 

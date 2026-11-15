@@ -124,7 +124,9 @@ update: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: Int, o
 // NameContext over src.
 update_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: Int, on_error: Int, nc: Int) Never! -[DB]> {
     t: dl.src_list_lookup(p, a, src)
-    if t < 0 -> return
+    if t < 0 {
+        return
+    }
     i_db: conn.schema_to_index(p.db, p.db.tables[t].schema)
 
     // With a FROM clause the SET expressions are resolved by the SELECT
@@ -132,8 +134,12 @@ update_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: I
     n_change_from: if ast.src_len(a, src) > 1 -> ast.list_len(a, changes) else -> 0
 
     g := p.up
-    if g.view_get_column_names(p, a, t) != 0 -> return
-    if dl.is_read_only(p, a, t) -> return
+    if g.view_get_column_names(p, a, t) != 0 {
+        return
+    }
+    if dl.is_read_only(p, a, t) {
+        return
+    }
 
     // Cursors for the table and all its indices, the index cursors right
     // after the table's, whether they are used or not.
@@ -177,7 +183,9 @@ update_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: I
         z_ename: a.lists[changes].items[i].ename ?? [U8]{}
         h_col: util.str_ihash(z_ename)
         ce: ast.list_expr(a, changes, i)
-        if n_change_from == 0 && rs.resolve_expr_names(p, a, nc, ce) != 0 -> return
+        if n_change_from == 0 && rs.resolve_expr_names(p, a, nc, ce) != 0 {
+            return
+        }
         j := 0
         found := false
         loop j < n_col {
@@ -187,9 +195,7 @@ update_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: I
                     chng_rowid = true
                     rowid_expr = ce
                     i_rowid_expr = i
-                } else if pk >= 0 && cf.bit_and(conn.COLFLAG_PRIMKEY) != 0 {
-                    chng_pk = true
-                } else if cf.bit_and(conn.COLFLAG_GENERATED) != 0 {
+                } else if pk >= 0 && cf.bit_and(conn.COLFLAG_PRIMKEY) != 0 { chng_pk = true } else if cf.bit_and(conn.COLFLAG_GENERATED) != 0 {
                     ast.error(a, "cannot UPDATE generated column \"{ast.text(p.db.tables[t].cols[j].name)}\"")
                     return
                 }
@@ -213,7 +219,9 @@ update_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: I
         }
         col_name: if j < 0 -> "ROWID".bytes() else -> p.db.tables[t].cols[j].name.copy()
         rc: cg.auth_check(p, a, conn.AUTH_UPDATE, Val(tab_name.copy()), Val(col_name), Val(db_name.copy()))
-        if rc == conn.AUTH_DENY -> return
+        if rc == conn.AUTH_DENY {
+            return
+        }
         if rc == conn.AUTH_IGNORE && j >= 0 -> a_xref[j] = -1
     }
     chng_key: chng_rowid || chng_pk
@@ -256,7 +264,9 @@ update_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: I
                     p.f.n_mem += 1
                     reg = p.f.n_mem
                     p.f.n_mem += p.db.indexes[ix].n_column
-                    if on_error == ast.OE_DEFAULT && p.db.indexes[ix].on_error == ast.OE_REPLACE -> b_replace = true
+                    if on_error == ast.OE_DEFAULT && p.db.indexes[ix].on_error == ast.OE_REPLACE {
+                        b_replace = true
+                    }
                     break
                 }
             }
@@ -296,7 +306,9 @@ update_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: I
     p.f.n_mem += n_col
 
     // Resolve the WHERE clause.
-    if n_change_from == 0 && rs.resolve_expr_names(p, a, nc, where_expr) != 0 -> return
+    if n_change_from == 0 && rs.resolve_expr_names(p, a, nc, where_expr) != 0 {
+        return
+    }
 
     label_break: cg.v_make_label(p)
     label_continue := label_break
@@ -376,7 +388,9 @@ update_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: I
             if e_one_pass == we.ONEPASS_MULTI {
                 // A multi-row one pass cannot scan an index it changes.
                 i_cur: ai_cur[1]
-                if i_cur >= 0 && i_cur != i_data_cur && to_open[i_cur - i_base_cur] -> e_one_pass = we.ONEPASS_OFF
+                if i_cur >= 0 && i_cur != i_data_cur && to_open[i_cur - i_base_cur] {
+                    e_one_pass = we.ONEPASS_OFF
+                }
             }
         }
         if has_rowid {
@@ -387,9 +401,7 @@ update_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: I
                 p.f.n_mem += 1
                 a_reg_idx[n_all_idx] = p.f.n_mem
                 _: cg.op3(p, opc.OP_INSERT, i_eph, reg_row_set, reg_old_rowid)
-            } else if addr_open != 0 {
-                _: cg.v_change_to_noop(p, addr_open)
-            }
+            } else if addr_open != 0 { _: cg.v_change_to_noop(p, addr_open) }
         } else {
             // The PRIMARY KEY of the row: as a record into the ephemeral
             // table, or kept in its registers for one pass.
@@ -424,7 +436,9 @@ update_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: I
     }
     addr_once := 0
     n_scan_idx: if ai_cur[1] >= 0 -> 1 else -> 0
-    if e_one_pass == we.ONEPASS_MULTI && n_idx - n_scan_idx > 0 -> addr_once = cg.op0(p, opc.OP_ONCE)
+    if e_one_pass == we.ONEPASS_MULTI && n_idx - n_scan_idx > 0 {
+        addr_once = cg.op0(p, opc.OP_ONCE)
+    }
     _: dl.open_table_and_indices(p, a, t, opc.OP_OPEN_WRITE, 0, i_base_cur, Val(to_open))
     if addr_once != 0 -> cg.v_jump_here_or_pop_inst(p, addr_once)
 
@@ -462,9 +476,7 @@ update_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: I
 
     // The new rowid, when it changes; else reg_new_rowid is reg_old_rowid.
     if chng_rowid {
-        if n_change_from == 0 {
-            ex.expr_code(p, a, rowid_expr, reg_new_rowid)
-        } else {
+        if n_change_from == 0 -> ex.expr_code(p, a, rowid_expr, reg_new_rowid) else {
             _: cg.op3(p, opc.OP_COLUMN, i_eph, i_rowid_expr, reg_new_rowid)
         }
         _: cg.op1(p, opc.OP_MUST_BE_INT, reg_new_rowid)
@@ -476,9 +488,7 @@ update_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: I
             k: cat.table_column_to_storage(p.db, t, i) + reg_old
             if p.db.tables[t].cols[i].col_flags.bit_and(conn.COLFLAG_PRIMKEY) != 0 {
                 ex.expr_code_get_column_of_table(p, a, t, i_data_cur, i, k)
-            } else {
-                _: cg.op2(p, opc.OP_NULL, 0, k)
-            }
+            } else { _: cg.op2(p, opc.OP_NULL, 0, k) }
         }
         if !chng_rowid && pk < 0 -> _: cg.op2(p, opc.OP_COPY, reg_old_rowid, reg_new_rowid)
     }
@@ -490,16 +500,12 @@ update_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: I
         reg: k
         k += 1
         cf: p.db.tables[t].cols[i].col_flags
-        if i == p.db.tables[t].ipkey {
-            _: cg.op2(p, opc.OP_NULL, 0, reg)
-        } else if cf.bit_and(conn.COLFLAG_GENERATED) != 0 {
+        if i == p.db.tables[t].ipkey -> _: cg.op2(p, opc.OP_NULL, 0, reg) else if cf.bit_and(conn.COLFLAG_GENERATED) != 0 {
             if cf.bit_and(conn.COLFLAG_VIRTUAL) != 0 -> k -= 1
         } else {
             j: a_xref[i]
             if j >= 0 {
-                if n_change_from > 0 {
-                    _: cg.op3(p, opc.OP_COLUMN, i_eph, n_pk + j, reg)
-                } else {
+                if n_change_from > 0 -> _: cg.op3(p, opc.OP_COLUMN, i_eph, n_pk + j, reg) else {
                     ve: ast.list_expr(a, changes, j)
                     ex.expr_code(p, a, ve, reg)
                 }
@@ -509,15 +515,15 @@ update_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: I
             }
         }
     }
-    if p.db.tables[t].tab_flags.bit_and(ast.TF_HAS_GENERATED) != 0 -> ins.compute_generated_columns(p, a, reg_new, t)
+    if p.db.tables[t].tab_flags.bit_and(ast.TF_HAS_GENERATED) != 0 {
+        ins.compute_generated_columns(p, a, reg_new, t)
+    }
 
     // Check the constraints. A REPLACE or a changed key may have moved
     // the data cursor: seek it again.
     b_replace = ins.generate_constraint_checks(p, a, t, a_reg_idx, i_data_cur, i_idx_cur, reg_new_rowid, reg_old_rowid, chng_key, on_error, label_continue, Val(a_xref))
     if b_replace || chng_key {
-        if pk >= 0 {
-            _: cg.op4_int(p, opc.OP_NOT_FOUND, i_data_cur, label_continue, reg_key, n_key)
-        } else {
+        if pk >= 0 -> _: cg.op4_int(p, opc.OP_NOT_FOUND, i_data_cur, label_continue, reg_key, n_key) else {
             _: cg.op3(p, opc.OP_NOT_EXISTS, i_data_cur, label_continue, reg_old_rowid)
         }
     }

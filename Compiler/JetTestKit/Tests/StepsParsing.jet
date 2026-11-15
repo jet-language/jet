@@ -68,7 +68,8 @@ kit_test_steps_env: fn() -> KitEnv {
 
 #Test("conditional capability refusals remain inside their inline and nested block guards") {
     env: kit_test_steps_env()
-    loop source in ["when os {sys.family()}: refused: selected-capability\n", "when os {sys.family()}\nwhen os-name {kit_steps_host_name()}\nrefused: selected-capability\nend when\nend when\n"] {
+    loop source in
+        ["when os {sys.family()}: refused: selected-capability\n", "when os {sys.family()}\nwhen os-name {kit_steps_host_name()}\nrefused: selected-capability\nend when\nend when\n"] {
         plan: kit_steps_parse_case(source)
         assert_eq(plan.error, "")
         assert_eq(plan.refused, "")
@@ -76,13 +77,17 @@ kit_test_steps_env: fn() -> KitEnv {
         assert_eq(result.verdict.status, "REFUSED")
         assert_eq(result.verdict.detail, "selected-capability")
     }
-    loop source in ["when os !{sys.family()}: refused: unselected-capability\n", "when os {sys.family()}\nwhen os-name !{kit_steps_host_name()}\nrefused: unselected-capability\nend when\nend when\n"] {
+    loop source in
+        ["when os !{sys.family()}: refused: unselected-capability\n", "when os {sys.family()}\nwhen os-name !{kit_steps_host_name()}\nrefused: unselected-capability\nend when\nend when\n"] {
         plan: kit_steps_parse_case(source)
         assert_eq(plan.error, "")
         result: kit_steps_execute(kit_steps_context(plan, "case", env, env.root, env.scratch, env.root, kit_test_steps_bless()), kit_steps_hooks())
         assert_eq(result.verdict.status, "PASS")
     }
-    loop source in ["refused:\n", "when os {sys.family()}: refused:\n", "when made-up host: refused: bad\n", "when os {sys.family()}\nrefused: bad\n"] -> assert(kit_steps_parse_case(source).error != "")
+    loop source in
+        ["refused:\n", "when os {sys.family()}: refused:\n", "when made-up host: refused: bad\n", "when os {sys.family()}\nrefused: bad\n"] {
+        assert(kit_steps_parse_case(source).error != "")
+    }
 }
 
 #Test("step stream assertions enforce exit and exact bytes") {
@@ -209,7 +214,8 @@ kit_test_steps_env: fn() -> KitEnv {
     pinned: kit_steps_parse_case("step prior: printf value\nstep current: printf value\nexit: 0\nexit: == prior\n")
     assert_eq(pinned.error, "")
     assert_eq(pinned.steps[1].exit, "0")
-    loop source in ["step current: printf value\nexit: == current\n", "step: printf value\nexit: == later\nstep later: printf value\n", "step: printf value\nexit: in [] # original predicate\n", "step: printf value\nexit: in [0, nope] # original predicate\n", "step: printf value\nexit: in [0, 1]\n"] {
+    loop source in
+        ["step current: printf value\nexit: == current\n", "step: printf value\nexit: == later\nstep later: printf value\n", "step: printf value\nexit: in [] # original predicate\n", "step: printf value\nexit: in [0, nope] # original predicate\n", "step: printf value\nexit: in [0, 1]\n"] {
         assert(kit_steps_parse_case(source).error != "")
     }
     assert(kit_steps_parse_case("write: {{tmp}}/subject_{{pid:app}} = \"bytes\"\n").error == "")
@@ -246,7 +252,8 @@ kit_test_steps_env: fn() -> KitEnv {
     default_status: kit_steps_parse_case("poll ready: printf ready until stdout: = \"ready\" timeout 1s every 1ms\n")
     assert_eq(default_status.error, "")
     assert_eq(default_status.steps[0].exit, "0")
-    loop source in ["poll ready: printf ready until exit: any timeout 1s every 1ms", "poll ready: printf ready until exit: nope timeout 1s every 1ms", "poll ready: printf ready until exit: 0 && stdout: ~ \"ready\" timeout 1s every 1ms", "poll ready: printf ready until exit: 0 && timeout 1s every 1ms"] {
+    loop source in
+        ["poll ready: printf ready until exit: any timeout 1s every 1ms", "poll ready: printf ready until exit: nope timeout 1s every 1ms", "poll ready: printf ready until exit: 0 && stdout: ~ \"ready\" timeout 1s every 1ms", "poll ready: printf ready until exit: 0 && timeout 1s every 1ms"] {
         assert(kit_steps_parse_case("{source}\n").error != "")
     }
 }

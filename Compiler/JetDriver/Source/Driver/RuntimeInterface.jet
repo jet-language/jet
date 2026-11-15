@@ -66,7 +66,9 @@ jet_driver_runtime_interface_declaration: fn(declaration: Func, member: String) 
 jet_driver_runtime_interface_signature: fn(declaration: Func, member: String) -> String Never! {
     params := [String]{}
     loop param in declaration.params {
-        if param.convention == AccessConvention.Move || param.default != None || param.variadic -> return ""
+        if param.convention == AccessConvention.Move || param.default != None || param.variadic {
+            return ""
+        }
         params.push("{param.name}: {access_sigil(param.convention)}{type_name(param.ty)}")
     }
     result: if declaration.return_type == .Val(ty) -> jet_driver_runtime_interface_result(ty) else -> ""
@@ -76,7 +78,9 @@ jet_driver_runtime_interface_signature: fn(declaration: Func, member: String) ->
         return if result == "" -> row else -> "{row} {result}"
     }
     if result == "" -> return "{member}: fn({params.join(", ")})"
-    if declaration.return_type == .Val(.Result(ok, _)) && ok == (Type.Named{name: "Unit"}) -> return "{member}: fn({params.join(", ")}) {result}"
+    if declaration.return_type == .Val(.Result(ok, _)) && ok == (Type.Named{name: "Unit"}) {
+        return "{member}: fn({params.join(", ")}) {result}"
+    }
     "{member}: fn({params.join(", ")}) -> {result}"
 }
 
@@ -136,7 +140,9 @@ jet_driver_runtime_interface_file: fn(rows: [RuntimeInterfaceRow]) -> String Nev
 jet_driver_runtime_interface_source: fn(module_name: String) -> String? Never! {
     lines := [String]{"// `{module_name}`: generated from {JET_DRIVER_RUNTIME_INTERFACE_PATH}."}
     loop row in RUNTIME_INTERFACE_ROWS {
-        if row.module_name == module_name -> lines.push("#Import(c) {row.declaration} = \"{row.symbol}\"")
+        if row.module_name == module_name {
+            lines.push("#Import(c) {row.declaration} = \"{row.symbol}\"")
+        }
     }
     if lines.len() == 1 -> return None
     lines.push("")

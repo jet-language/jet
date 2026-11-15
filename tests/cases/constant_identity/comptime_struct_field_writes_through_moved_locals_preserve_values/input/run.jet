@@ -1,4 +1,3 @@
-
 AccessConvention: enum {
     Read
     Write
@@ -27,17 +26,27 @@ write_nested: fn(row: &&Row) -> Row Never! {
     updated
 }
 
-SIMPLE_ROWS: [write(Row{
-    access: AccessConvention.Read,
-    coverage: Coverage{bits: 1, reserved: 7},
-    untouched: 9,
-})]
+SIMPLE_ROWS: [
+    write(
+        Row{
+            access: AccessConvention.Read,
+            coverage: Coverage{bits: 1, reserved: 7},
+            untouched: 9,
+        },
+    ),
+]
 
-ROWS: [write_nested(write(Row{
-    access: AccessConvention.Read,
-    coverage: Coverage{bits: 1, reserved: 7},
-    untouched: 9,
-}))]
+ROWS: [
+    write_nested(
+        write(
+            Row{
+                access: AccessConvention.Read,
+                coverage: Coverage{bits: 1, reserved: 7},
+                untouched: 9,
+            },
+        ),
+    ),
+]
 
 run: fn() {
     print(SIMPLE_ROWS[0].access == AccessConvention.Write)

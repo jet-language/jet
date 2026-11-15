@@ -60,9 +60,7 @@ kit_test_golden_env: fn(root: String) -> KitEnv {
     caller: files.canonicalize(sys.get("JET") ?? "") ?? ""
     if caller != "" && files.basename(caller) == "jet" {
         assert_eq(path, "{files.dirname(caller)}:{inherited}")
-    } else {
-        assert_eq(path, inherited)
-    }
+    } else { assert_eq(path, inherited) }
 }
 
 #Test("golden driver handles missing stream, compile-only, stdin, stderr and tier split") {
@@ -127,10 +125,14 @@ kit_test_golden_env: fn(root: String) -> KitEnv {
     context: KitCtx{options: options, env: kit_test_golden_env(root), root: root, scratch: files.join(root, "tiers"), bless: kit_test_golden_bless(), known: kit_known_load(options.ledger)}
     // o2 (`--release`) prints the release value; its own file pins it.
     kit_exec_write(files.join(root, "{entry.expected}.o2.out"), "wrong tier\n")
-    loop outcome in kit_golden_run_suite(entry, context) -> assert_eq(outcome.verdict.status, "PASS")
+    loop outcome in kit_golden_run_suite(entry, context) {
+        assert_eq(outcome.verdict.status, "PASS")
+    }
     // A rejected build fails until a `.err.out` expects the rejection.
     kit_exec_write(files.join(root, "{entry.expected}.case"), "env: JET_TESTKIT_REJECT=1\n")
-    loop outcome in kit_golden_run_suite(entry, context) -> assert_eq(outcome.verdict.status, "FAIL")
+    loop outcome in kit_golden_run_suite(entry, context) {
+        assert_eq(outcome.verdict.status, "FAIL")
+    }
     kit_exec_write(files.join(root, "{entry.expected}.o1.err.out"), "Error [jet.StrayCharacter]: rejected\n")
     rejected: kit_golden_run_suite(entry, context)
     assert_eq(rejected[0].verdict.status, "PASS")
@@ -155,7 +157,9 @@ kit_test_golden_env: fn(root: String) -> KitEnv {
     assert_eq(shared.map(fn(outcome) { outcome.verdict.status }), ["FAIL", "PASS", "FAIL"])
     kit_exec_write(files.join(root, "{entry.expected}.o0.test.out"), "at -O0: pass\n1 passed, 0 failed, 0 skipped\n")
     kit_exec_write(files.join(root, "{entry.expected}.o2.test.out"), "at --release: pass\n1 passed, 0 failed, 0 skipped\n")
-    loop outcome in kit_golden_run_suite(entry, context) -> assert_eq(outcome.verdict.status, "PASS")
+    loop outcome in kit_golden_run_suite(entry, context) {
+        assert_eq(outcome.verdict.status, "PASS")
+    }
     // A summary that counts a failure expects exit 1, so a passing run fails.
     kit_exec_write(files.join(root, "{entry.expected}.o0.test.out"), "at -O0: pass\n0 passed, 1 failed, 0 skipped\n")
     exit: kit_golden_run_suite(entry, context)[0].verdict
@@ -188,7 +192,8 @@ kit_test_golden_env: fn(root: String) -> KitEnv {
     kit_exec_write(files.join(root, "{entry.expected}.case"), "repo-cwd: the program reads its repository path\nenv: JET_TESTKIT_WHERE=1\n")
     kit_exec_write(files.join(root, "{entry.expected}.out"), "source root\n")
     assert_eq(kit_golden_run_entry(entry, tier, env, files.join(root, "source-root"), kit_test_golden_bless()).verdict.status, "PASS")
-    loop source in ["repo-cwd:\nstep: true\n", "repo-cwd: one\nrepo-cwd: two\nstep: true\n", "step: true\nrepo-cwd: late\n"] {
+    loop source in
+        ["repo-cwd:\nstep: true\n", "repo-cwd: one\nrepo-cwd: two\nstep: true\n", "step: true\nrepo-cwd: late\n"] {
         assert(kit_steps_parse_case(source).error.contains("repo-cwd needs one nonempty header reason"))
     }
     // A case has no staged source root, so it refuses the header.
@@ -223,8 +228,12 @@ kit_test_golden_env: fn(root: String) -> KitEnv {
     assert(kit_expect_named(ids, "tests/run/Ownership/case.jet"))
     // A flat C or C++ file is an entry, its streams under its stem.
     loop entry in entries {
-        if entry.path == "Examples/topic/Native.c" -> assert_eq(entry.expected, "Examples/topic/Native")
-        if entry.path == "Examples/topic/Templates.cpp" -> assert_eq(entry.expected, "Examples/topic/Templates")
+        if entry.path == "Examples/topic/Native.c" {
+            assert_eq(entry.expected, "Examples/topic/Native")
+        }
+        if entry.path == "Examples/topic/Templates.cpp" {
+            assert_eq(entry.expected, "Examples/topic/Templates")
+        }
     }
     assert(kit_expect_named(ids, "Examples/topic/Native.c"))
     assert(kit_expect_named(ids, "Examples/topic/Templates.cpp"))
@@ -252,7 +261,9 @@ kit_test_golden_env: fn(root: String) -> KitEnv {
     kit_exec_write(files.join(root, "{entry.expected}.out"), "hello\n")
     // o2 (`--release`) prints the release value; its own file pins it.
     kit_exec_write(files.join(root, "{entry.expected}.o2.out"), "wrong tier\n")
-    loop outcome in kit_golden_run_suite(entry, context) -> assert_eq(outcome.verdict.status, "UNEXPECTED-PASS")
+    loop outcome in kit_golden_run_suite(entry, context) {
+        assert_eq(outcome.verdict.status, "UNEXPECTED-PASS")
+    }
     kit_exec_write(files.join(root, "{entry.expected}.case"), "# KNOWN-FAILING #4868\n")
     loop outcome in kit_golden_run_suite(entry, context) {
         assert_eq(outcome.verdict.status, "UNEXPECTED-PASS")

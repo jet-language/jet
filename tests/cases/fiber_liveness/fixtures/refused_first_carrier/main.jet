@@ -6,22 +6,24 @@ package: {
     authority: { allow: [Env, Exec, FS, FS.Read, IO] }
 }
 
-use files: core.files
-use sys: core.sys
+use {
+    files: core.files
+    sys: core.sys
+}
 
 // Under a megabyte: no thread stack (at least 1 MiB and its guard page)
 // fits, while the heap still has its slabs.
 ROOM: 786432
 
-work: fn(i: Int) -> Int {
-    i % 5
-}
+work: fn(i: Int) -> Int { i % 5 }
 
 // A /proc status field's number ("VmSize:\t 123 kB").
 census: fn(prefix: String) -[FS]> Int {
     text: files.read("/proc/self/status") ?? panic("read status")
     loop line in text.lines() {
-        if line.starts_with(prefix) -> return Int.parse(line.remove_prefix(prefix).remove_suffix("kB").trim()) ?? -1
+        if line.starts_with(prefix) {
+            return Int.parse(line.remove_prefix(prefix).remove_suffix("kB").trim()) ?? -1
+        }
     }
     -1
 }

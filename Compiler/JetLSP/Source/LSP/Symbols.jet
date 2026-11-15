@@ -18,7 +18,9 @@ lsp_document_symbol_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> St
     module_path: view.module_path ?? return lsp_response(id, "[]")
     defs := [SemDef]{}
     loop definition in index.definitions {
-        if definition.def.module_path == module_path && lsp_symbol_kind(definition.def.kind) != None -> defs.push(definition.def)
+        if definition.def.module_path == module_path && lsp_symbol_kind(definition.def.kind) != None {
+            defs.push(definition.def)
+        }
     }
     defs.sort_by(fn(left: SemDef, right: SemDef) { left.def_span.start <=> right.def_span.start })
     rows := [String]{}
@@ -63,7 +65,9 @@ lsp_workspace_symbol_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> S
             location: lsp_location(checked, def.module_path, def.def_span) ?? next
             seen[key] = true
             rows.push(lsp_symbol_information_json(def, location, kind))
-            if rows.len() >= LSP_WORKSPACE_SYMBOL_LIMIT -> return lsp_response(id, "[{rows.join(",")}]")
+            if rows.len() >= LSP_WORKSPACE_SYMBOL_LIMIT {
+                return lsp_response(id, "[{rows.join(",")}]")
+            }
         }
     }
     lsp_response(id, "[{rows.join(",")}]")
@@ -72,7 +76,9 @@ lsp_workspace_symbol_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> S
 lsp_folding_range_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String Never! {
     doc: lsp_open_document(server, params) ?? return lsp_response(id, "null")
     rows := [String]{}
-    loop fold in lsp_compute_folding_ranges(doc.text, server.lex(doc)) -> rows.push(lsp_folding_range_json(fold))
+    loop fold in lsp_compute_folding_ranges(doc.text, server.lex(doc)) {
+        rows.push(lsp_folding_range_json(fold))
+    }
     lsp_response(id, "[{rows.join(",")}]")
 }
 
@@ -84,7 +90,9 @@ lsp_selection_spans: fn(view: LSPView, offset: Int) -> [Span] Never! {
     if view.checked.index == .Val(index) {
         if view.module_path == .Val(module_path) {
             loop node in index.nodes {
-                if node.module_path == module_path && lsp_span_holds(node.span, offset) -> spans.push(node.span)
+                if node.module_path == module_path && lsp_span_holds(node.span, offset) {
+                    spans.push(node.span)
+                }
             }
         }
     }
@@ -118,7 +126,9 @@ lsp_selection_range_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> St
     view: lsp_view(server, params) ?? return lsp_response(id, "null")
     positions: if (lsp_param(params, "positions") ?? return lsp_response(id, "null")) == {
         .Array(rows) -> rows
-        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return lsp_error_response(id, -32602, "positions is not an array") }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {
+            return lsp_error_response(id, -32602, "positions is not an array")
+        }
     }
     bytes: view.doc.text.bytes()
     table: lsp_line_table_bytes(bytes)
@@ -141,7 +151,9 @@ lsp_document_link_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> Stri
         span: if import.kind == {
             .File(_, path_span) -> path_span
             .Module(_, name_span) -> name_span
-            .Unqualified(_, _, _, _, _) -> { next }
+            .Unqualified(_, _, _, _, _) -> {
+                next
+            }
         }
         imported: semindex_symbol_imported_module(view.checked.modules, doc_module, [ImportDecl]{}, import.alias) ?? next
         location: lsp_location(view.checked, imported, Span{start: 0, end: 0}) ?? next

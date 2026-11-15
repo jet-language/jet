@@ -76,7 +76,9 @@ SemaQualifiedFound: struct {
 // With no keys yet, a module's scan finds its keys; with every module's
 // keys, its rewritten types.
 sema_registration_qualified_scan: fn(graph: SemaRegistrationGraph, module_index: Int, jobs: SemaQualifiedJobs?) -> SemaQualifiedFound Never! {
-    if jobs == .Val(keyed) -> return SemaQualifiedFound{keys: None, types: sema_registration_qualified_types(graph, module_index, keyed)}
+    if jobs == .Val(keyed) {
+        return SemaQualifiedFound{keys: None, types: sema_registration_qualified_types(graph, module_index, keyed)}
+    }
     SemaQualifiedFound{keys: Val(sema_registration_module_qualified_keys(graph, module_index)), types: [Type?]{}}
 }
 
@@ -101,16 +103,20 @@ sema_registration_qualified_take: fn(found: &&[SemaGraphScanFound?]) -> [SemaQua
 sema_registration_qualified_types: fn(graph: SemaRegistrationGraph, module_index: Int, jobs: SemaQualifiedJobs) -> [Type?] Never! {
     slots := [Type?]{}
     sema_registration_qualified_function_types(graph.modules[module_index].functions, jobs, module_index, slots)
-    loop nominal in graph.modules[module_index].nominals -> sema_registration_qualified_function_types(nominal.methods, jobs, module_index, slots)
-    loop implementation in graph.modules[module_index].impls -> sema_registration_qualified_function_types(implementation.methods, jobs, module_index, slots)
-    loop symbol in graph.modules[module_index].symbols -> slots.push(sema_registration_qualified_symbol_type(symbol, jobs, module_index))
+    loop nominal in graph.modules[module_index].nominals {
+        sema_registration_qualified_function_types(nominal.methods, jobs, module_index, slots)
+    }
+    loop implementation in graph.modules[module_index].impls {
+        sema_registration_qualified_function_types(implementation.methods, jobs, module_index, slots)
+    }
+    loop symbol in graph.modules[module_index].symbols {
+        slots.push(sema_registration_qualified_symbol_type(symbol, jobs, module_index))
+    }
     loop import in graph.modules[module_index].imports {
         loop binding in import.bindings {
             if sema_registration_module_index(graph, binding.symbol.module_identity) == .Val(source) {
                 slots.push(sema_registration_qualified_symbol_type(binding.symbol, jobs, source))
-            } else {
-                slots.push(None)
-            }
+            } else { slots.push(None) }
         }
     }
     slots
@@ -140,17 +146,27 @@ sema_registration_qualified_symbol_type: fn(symbol: Symbol, jobs: SemaQualifiedJ
 // rows keep their types is not copied either.
 sema_registration_qualified_apply: fn(graph: &SemaRegistrationGraph, module_index: Int, types: &&[Type?]) {
     slots := types.move()
-    if !sema_registration_qualified_rewrites(slots) -> return
+    if !sema_registration_qualified_rewrites(slots) {
+        return
+    }
     slots.reverse()
     sema_registration_qualified_apply_functions(graph.modules[module_index].functions, slots)
-    loop nominal in 0..<graph.modules[module_index].nominals.len() -> sema_registration_qualified_apply_functions(graph.modules[module_index].nominals[nominal].methods, slots)
-    loop implementation in 0..<graph.modules[module_index].impls.len() -> sema_registration_qualified_apply_functions(graph.modules[module_index].impls[implementation].methods, slots)
+    loop nominal in 0..<graph.modules[module_index].nominals.len() {
+        sema_registration_qualified_apply_functions(graph.modules[module_index].nominals[nominal].methods, slots)
+    }
+    loop implementation in 0..<graph.modules[module_index].impls.len() {
+        sema_registration_qualified_apply_functions(graph.modules[module_index].impls[implementation].methods, slots)
+    }
     loop position in 0..<graph.modules[module_index].symbols.len() {
-        if sema_registration_qualified_next(slots) == .Val(ty) -> graph.modules[module_index].symbols[position].ty = Val(ty)
+        if sema_registration_qualified_next(slots) == .Val(ty) {
+            graph.modules[module_index].symbols[position].ty = Val(ty)
+        }
     }
     loop import_index in 0..<graph.modules[module_index].imports.len() {
         loop binding in 0..<graph.modules[module_index].imports[import_index].bindings.len() {
-            if sema_registration_qualified_next(slots) == .Val(ty) -> graph.modules[module_index].imports[import_index].bindings[binding].symbol.ty = Val(ty)
+            if sema_registration_qualified_next(slots) == .Val(ty) {
+                graph.modules[module_index].imports[import_index].bindings[binding].symbol.ty = Val(ty)
+            }
         }
     }
 }
@@ -168,8 +184,12 @@ sema_registration_qualified_apply_functions: fn(functions: &[SemaRegistrationFun
         if sema_registration_qualified_next(slots) == .Val(ty) -> functions[row].signature = ty
         if sema_registration_qualified_next(slots) == .Val(ty) -> functions[row].symbol.ty = Val(ty)
         loop parameter in 0..<functions[row].parameters.len() {
-            if sema_registration_qualified_next(slots) == .Val(ty) -> functions[row].parameters[parameter].ty = ty
-            if sema_registration_qualified_next(slots) == .Val(ty) -> functions[row].parameters[parameter].symbol.ty = Val(ty)
+            if sema_registration_qualified_next(slots) == .Val(ty) {
+                functions[row].parameters[parameter].ty = ty
+            }
+            if sema_registration_qualified_next(slots) == .Val(ty) {
+                functions[row].parameters[parameter].symbol.ty = Val(ty)
+            }
         }
     }
 }
@@ -185,12 +205,16 @@ sema_registration_qualified_next: fn(slots: &[Type?]) -> Type? {
 // type: local names and Core types keep their spelling.
 sema_registration_module_qualified_keys: fn(graph: SemaRegistrationGraph, module_index: Int) -> [String:Type] Never! {
     names := [String]{}
-    loop function in graph.modules[module_index].functions -> sema_registration_function_qualified_names(function, names)
+    loop function in graph.modules[module_index].functions {
+        sema_registration_function_qualified_names(function, names)
+    }
     loop nominal in graph.modules[module_index].nominals {
         loop method in nominal.methods -> sema_registration_function_qualified_names(method, names)
     }
     loop implementation in graph.modules[module_index].impls {
-        loop method in implementation.methods -> sema_registration_function_qualified_names(method, names)
+        loop method in implementation.methods {
+            sema_registration_function_qualified_names(method, names)
+        }
     }
     loop symbol in graph.modules[module_index].symbols {
         if symbol.ty == .Val(ty) -> sema_registration_type_qualified_names(ty, names)
@@ -198,7 +222,9 @@ sema_registration_module_qualified_keys: fn(graph: SemaRegistrationGraph, module
     keys := [String:Type]{}
     identity: graph.modules[module_index].module_identity
     loop name in names {
-        if !name.contains(".") && !sema_registration_imported_user_type(graph, module_index, identity, name) -> next
+        if !name.contains(".") && !sema_registration_imported_user_type(graph, module_index, identity, name) {
+            next
+        }
         written: Type.Named{name: name}
         resolved: sema_type_resolve_declared(graph, written, identity)
         if !type_identity_equal(resolved, written) -> keys[name] = resolved
@@ -216,7 +242,9 @@ sema_registration_imported_user_type: fn(graph: SemaRegistrationGraph, module_in
 
 sema_registration_function_qualified_names: fn(function: SemaRegistrationFunction, names: &[String]) Never! {
     sema_registration_type_qualified_names(function.signature, names)
-    loop parameter in function.parameters -> sema_registration_type_qualified_names(parameter.ty, names)
+    loop parameter in function.parameters {
+        sema_registration_type_qualified_names(parameter.ty, names)
+    }
 }
 
 // `ty` with `keys`, or None when it writes no name they key.
@@ -279,7 +307,9 @@ sema_registration_canonical_heads: fn(ty: Type, keys: [String:Type]) -> Type Nev
 sema_registration_type_qualified_names: fn(ty: Type, names: &[String]) Never! {
     if ty == {
         .Named(name) -> sema_registration_push_qualified_name(name, names)
-        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .Case(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_registration_type_qualified_names(inner, names)
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .Case(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> {
+            sema_registration_type_qualified_names(inner, names)
+        }
         .Map(key, _, value) -> {
             sema_registration_type_qualified_names(key, names)
             sema_registration_type_qualified_names(value, names)
@@ -296,8 +326,12 @@ sema_registration_type_qualified_names: fn(ty: Type, names: &[String]) Never! {
             sema_registration_push_qualified_name(name, names)
             loop arg in args -> sema_registration_type_qualified_names(arg, names)
         }
-        .Tuple(fields) -> loop field in fields -> sema_registration_type_qualified_names(field.ty, names)
-        .Union(members) -> loop member in members -> sema_registration_type_qualified_names(member, names)
+        .Tuple(fields) -> {
+            loop field in fields -> sema_registration_type_qualified_names(field.ty, names)
+        }
+        .Union(members) -> {
+            loop member in members -> sema_registration_type_qualified_names(member, names)
+        }
         .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> {}
     }
 }
@@ -305,5 +339,7 @@ sema_registration_type_qualified_names: fn(ty: Type, names: &[String]) Never! {
 // An alias-qualified name, or a bare one an import may bind; a canonical key
 // holds `::` and is already resolved.
 sema_registration_push_qualified_name: fn(name: String, names: &[String]) Never! {
-    if name != "" && !name.contains("::") && !name.starts_with("type:") && !names.contains(name) -> names.push(name.copy())
+    if name != "" && !name.contains("::") && !name.starts_with("type:") && !names.contains(name) {
+        names.push(name.copy())
+    }
 }

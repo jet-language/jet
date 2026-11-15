@@ -27,12 +27,12 @@ inline_assembly_test_problem: fn(template: String, names: [String], returns: Boo
         loop line in rail {
             assert(inline_assembly_x64_unencoded(line).len() == 0)
             word: line.split(" ").to_list()[0]
-            if !INLINE_ASSEMBLY_X64_MNEMONICS.contains(word) && !words.contains(word) -> words.push(word)
+            if !INLINE_ASSEMBLY_X64_MNEMONICS.contains(word) && !words.contains(word) {
+                words.push(word)
+            }
         }
     }
-    loop mnemonic in INLINE_ASSEMBLY_X64_RAIL_MNEMONICS {
-        assert(words.contains(mnemonic))
-    }
+    loop mnemonic in INLINE_ASSEMBLY_X64_RAIL_MNEMONICS { assert(words.contains(mnemonic)) }
     loop word in words {
         assert(INLINE_ASSEMBLY_X64_RAIL_MNEMONICS.contains(word) || word.ends_with(":"))
     }

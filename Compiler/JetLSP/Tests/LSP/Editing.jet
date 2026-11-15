@@ -19,7 +19,9 @@ b */
 #Test("folds are brace blocks, block comments, and comment and use runs") {
     folds: lsp_compute_folding_ranges(LSP_TEST_FOLDS, lsp_lex_source(LSP_TEST_FOLDS))
     rows := [String]{}
-    loop fold in folds -> rows.push("{fold.kind} {fold.start_line}:{fold.start_character}-{fold.end_line}:{fold.end_character}")
+    loop fold in folds {
+        rows.push("{fold.kind} {fold.start_line}:{fold.start_character}-{fold.end_line}:{fold.end_character}")
+    }
     assert_eq(rows, [String]{"comment 0:0-1:6", "imports 2:0-3:12", "region 4:8-6:0", "comment 7:0-8:4"})
 }
 
@@ -81,26 +83,52 @@ b:   fn()   -> Int {
 
 lsp_test_typed: fn(src: String, line: Int, character: Int, trigger: String) -> [String] Never! {
     rows := [String]{}
-    loop edit in lsp_on_type_format_edits(src, lsp_lex_source(src), LSPPos{line: line, character: character}, trigger) -> rows.push("{edit.span.start}-{edit.span.end}:{edit.new_text}")
+    loop edit in lsp_on_type_format_edits(src, lsp_lex_source(src), LSPPos{line: line, character: character}, trigger) {
+        rows.push("{edit.span.start}-{edit.span.end}:{edit.new_text}")
+    }
     rows
 }
 
 #Test("a typed newline indents the new line one level into its block") {
     // `f: fn() {\n` is 10 bytes, so the new line starts at byte 10.
-    assert_eq(lsp_test_typed(`f: fn() {
+    assert_eq(
+        lsp_test_typed(
+            `f: fn() {
 
 }
-`, 1, 0, "\n"), [String]{"10-10:    "})
+`,
+            1,
+            0,
+            "\n",
+        ),
+        [String]{"10-10:    "},
+    )
     // Typed inside an empty block, the new line opens its body and the brace
     // moves below it at the block's indent (`f: fn() {\n    \n}\n`).
-    assert_eq(lsp_test_typed(`f: fn() {
+    assert_eq(
+        lsp_test_typed(
+            `f: fn() {
 }
-`, 1, 0, "\n"), [String]{"10-10:    ", "10-10:\n"})
+`,
+            1,
+            0,
+            "\n",
+        ),
+        [String]{"10-10:    ", "10-10:\n"},
+    )
     // The closing brace of a block with a body stays at the block's indent.
-    assert_eq(lsp_test_typed(`f: fn() {
+    assert_eq(
+        lsp_test_typed(
+            `f: fn() {
     x: 1
 }
-`, 2, 0, "\n"), [String]{})
+`,
+            2,
+            0,
+            "\n",
+        ),
+        [String]{},
+    )
     // Typed before the closing brace's line content, the brace moves to its
     // own line at the block's indent: `x: 1}` holds it at byte 14.
     assert_eq(lsp_test_typed("f: fn() {{\nx: 1}}\n", 1, 0, "\n"), [String]{"10-10:    ", "14-14:\n"})
@@ -108,27 +136,55 @@ lsp_test_typed: fn(src: String, line: Int, character: Int, trigger: String) -> [
 
 #Test("a typed closing brace aligns with its block's opening line") {
     // `    }` on line 2 starts at byte 19; its indent is bytes 19-23.
-    assert_eq(lsp_test_typed(`f: fn() {
+    assert_eq(
+        lsp_test_typed(
+            `f: fn() {
     x: 1
     }
-`, 2, 5, "}}"), [String]{"19-23:"})
-    assert_eq(lsp_test_typed(`f: fn() {
+`,
+            2,
+            5,
+            "}}",
+        ),
+        [String]{"19-23:"},
+    )
+    assert_eq(
+        lsp_test_typed(
+            `f: fn() {
     // }
 }
-`, 1, 8, "}}"), [String]{})
-    assert_eq(lsp_test_typed(`f: fn() {
+`,
+            1,
+            8,
+            "}}",
+        ),
+        [String]{},
+    )
+    assert_eq(
+        lsp_test_typed(
+            `f: fn() {
     x: 1
     }
-`, 2, 4, "}}"), [String]{})
+`,
+            2,
+            4,
+            "}}",
+        ),
+        [String]{},
+    )
 }
 
 #Test("onTypeFormatting answers the edits for the typed character") {
     server := lsp_test_server()
     uri: "file:///w/typed.jet"
-    lsp_test_open(server, uri, `f: fn() {
+    lsp_test_open(
+        server,
+        uri,
+        `f: fn() {
 
 }
-`)
+`,
+    )
     params: "{{{lsp_test_text_document(uri)},\"position\":{{\"line\":1,\"character\":0}},\"ch\":\"\\n\",\"options\":{{\"tabSize\":4,\"insertSpaces\":true}}}}"
     edits: lsp_test_rows(lsp_test_result(server, "textDocument/onTypeFormatting", params))
     assert_eq(edits.len(), 1)

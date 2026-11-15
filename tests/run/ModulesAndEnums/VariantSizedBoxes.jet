@@ -37,15 +37,13 @@ total: fn(n: Node) -> Int {
         .Pair(left, right) -> total(left) + total(right)
         .Wide(a, b, c, d, e, f, label, items) -> {
             sum := a + b + c + d + e + f + label.len()
-            loop item in items -> sum = sum + item
+            loop item in items -> sum += item
             sum
         }
     }
 }
 
-widen: fn(n: &Node, i: Int) {
-    n = make(5 * i + 4)
-}
+widen: fn(n: &Node, i: Int) { n = make(5 * i + 4) }
 
 swap_nodes: fn(a: &Node, b: &Node) {
     held: a.copy()
@@ -62,7 +60,7 @@ widen_left: fn(n: &Node) {
 
 bump: fn(n: &Node) {
     if &n == {
-        .Num(v) -> v = v + 100
+        .Num(v) -> v += 100
         .Leaf | .Name(_) | .Pair(_, _) | .Wide(_, _, _, _, _, _, _, _) -> {}
     }
 }
@@ -93,7 +91,7 @@ run: fn() {
     kept: nodes[3].copy()
     nodes[3] = make(4)
     sum := 0
-    loop node in nodes -> sum = sum + total(node)
+    loop node in nodes -> sum += total(node)
     print("{sum} {total(kept)}")
     print(paths())
 }

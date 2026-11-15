@@ -1,11 +1,10 @@
-
 Edit: trait {
     change: fn(&self)
 }
-call: fn(callback: fn()) { callback() }
-invoke: fn(editor: Edit) {
-    call(fn() { editor.change() })
-}
-run: fn() {}
 
+call: fn(callback: fn()) { callback() }
+
+invoke: fn(editor: Edit) { call(fn() { editor.change() }) }
+
+run: fn() {}
 // Known failing: JetSema does not check this ownership rule yet; this variant retains its original contract, not a skip.

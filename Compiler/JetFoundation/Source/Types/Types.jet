@@ -1,6 +1,5 @@
 // Canonical semantic type and declaration identities shared by every compiler
 // phase. Keep this separate from target layout and backend representations.
-
 use core.collections.[Rows, Row]
 
 Type: enum {
@@ -12,14 +11,7 @@ Type: enum {
     List(element: Type)
     Map(key: Type, key_span: Span?, value: Type)
     Shared(inner: Type)
-    // `T?`: the optional suffix binds to the type it follows, so `[Int?]` and
-    // `[Int]?` differ; a second mark (`T?` again, or `T??`) is E0309. A
-    // written `Option<T>` is the same type.
     Option(inner: Type)
-    // `T E!`: the error contract follows the success type (`Int ParseError!`,
-    // `Entry? (DBError | TimeoutError)!`). A type position holding only the
-    // contract, `E!` or `(A | B)!`, is `Result(Unit, E)`. A written
-    // `Result<T, E>` is the same type.
     Result(ok: Type, err: Type)
     Fn(params: [Type], ret: Type?, effect_bound: [EffectRowEntry]?, param_contract: [CallContractRow]?, call_metadata: FunctionCallMetadata?, return_view_provenance: ViewProvenanceMap?)
     Named(name: String)
@@ -32,13 +24,21 @@ Type: enum {
     Float32
     Tagged(marker: TagMarker, inner: Type)
     Union(members: [Type])
-    // `Name(T)` inside a union: the named case `Name` holding a `T`, written
-    // as inside an enum. Two named cases are one type when their names and
-    // payloads are; a named case is only ever a union's member.
     Case(name: String, payload: Type)
     Quantity(base: Type, dimension: Dimension)
     Measure(measure: Measure)
 }
+
+// `T?`: the optional suffix binds to the type it follows, so `[Int?]` and
+// `[Int]?` differ; a second mark (`T?` again, or `T??`) is E0309. A
+// written `Option<T>` is the same type.
+// `T E!`: the error contract follows the success type (`Int ParseError!`,
+// `Entry? (DBError | TimeoutError)!`). A type position holding only the
+// contract, `E!` or `(A | B)!`, is `Result(Unit, E)`. A written
+// `Result<T, E>` is the same type.
+// `Name(T)` inside a union: the named case `Name` holding a `T`, written
+// as inside an enum. Two named cases are one type when their names and
+// payloads are; a named case is only ever a union's member.
 
 // Shared primitive spelling authority for parsed types and Core call contracts.
 foundation_named_type: fn(name: String) -> Type Never! {
@@ -124,20 +124,18 @@ measure_kind: fn(measure: Measure) -> String Never! {
 measure_literal_value: fn(measure: Measure) -> Int? {
     if measure == {
         .Literal(_, value) -> Val(value)
-        .Combined(_, rule, left, right) -> {
-            if rule == {
-                .Add -> {
-                    l: measure_literal_value(left) ?? return None
-                    r: measure_literal_value(right) ?? return None
-                    Val(l + r)
-                }
-                .Mul -> {
-                    l: measure_literal_value(left) ?? return None
-                    r: measure_literal_value(right) ?? return None
-                    Val(l * r)
-                }
-                .Match -> None
+        .Combined(_, rule, left, right) -> if rule == {
+            .Add -> {
+                l: measure_literal_value(left) ?? return None
+                r: measure_literal_value(right) ?? return None
+                Val(l + r)
             }
+            .Mul -> {
+                l: measure_literal_value(left) ?? return None
+                r: measure_literal_value(right) ?? return None
+                Val(l * r)
+            }
+            .Match -> None
         }
         .SignedLiteral(_, _) | .Symbol(_, _) -> None
     }
@@ -147,20 +145,18 @@ measure_signed_value: fn(measure: Measure) -> Int? {
     if measure == {
         .SignedLiteral(_, value) -> Val(value)
         .Literal(_, value) -> Val(value)
-        .Combined(_, rule, left, right) -> {
-            if rule == {
-                .Add -> {
-                    l: measure_signed_value(left) ?? return None
-                    r: measure_signed_value(right) ?? return None
-                    Val(l + r)
-                }
-                .Mul -> {
-                    l: measure_signed_value(left) ?? return None
-                    r: measure_signed_value(right) ?? return None
-                    Val(l * r)
-                }
-                .Match -> None
+        .Combined(_, rule, left, right) -> if rule == {
+            .Add -> {
+                l: measure_signed_value(left) ?? return None
+                r: measure_signed_value(right) ?? return None
+                Val(l + r)
             }
+            .Mul -> {
+                l: measure_signed_value(left) ?? return None
+                r: measure_signed_value(right) ?? return None
+                Val(l * r)
+            }
+            .Match -> None
         }
         .Symbol(_, _) -> None
     }
@@ -230,13 +226,13 @@ dimension_combine: fn(left: Dimension, right: Dimension, subtract: Bool) -> Dime
         next: current + delta
         if next < -2147483648 || next > 2147483647 -> return None
         if found {
-            if next == 0 {
-                _ := axes.remove(index, .Slot)
-            } else {
+            if next == 0 -> _ := axes.remove(index, .Slot) else {
                 axes[index].exponent = Measure.SignedLiteral{kind: "dimension", value: next}
             }
         } else {
-            if next != 0 -> axes.push(DimensionAxis{name: axis.name, exponent: Measure.SignedLiteral{kind: "dimension", value: next}})
+            if next != 0 {
+                axes.push(DimensionAxis{name: axis.name, exponent: Measure.SignedLiteral{kind: "dimension", value: next}})
+            }
         }
     }
     axes = loop fresh_item in axes -> fresh_item
@@ -440,7 +436,9 @@ SymbolID: struct {
 }
 
 SYMBOL_LOCAL_BIT: U32{0x80000000}
+
 SYMBOL_LOCAL_BASE: 2147483648
+
 SYMBOL_LOCAL_BOUND: 2147483647
 
 // One id range: the key of id `base + n` is row `n` of `keys` (row 0, the
@@ -479,17 +477,11 @@ SymbolTable: struct {
     mask: Int{0}
 }
 
-symbol_none: fn() -> SymbolID Never! {
-    SymbolID{id: U32{0}}
-}
+symbol_none: fn() -> SymbolID Never! { SymbolID{id: U32{0}} }
 
-symbol_is_none: fn(id: SymbolID) -> Bool Never! {
-    id.id == U32{0}
-}
+symbol_is_none: fn(id: SymbolID) -> Bool Never! { id.id == U32{0} }
 
-symbol_is_local: fn(id: SymbolID) -> Bool Never! {
-    id.id.bit_and(SYMBOL_LOCAL_BIT) != U32{0}
-}
+symbol_is_local: fn(id: SymbolID) -> Bool Never! { id.id.bit_and(SYMBOL_LOCAL_BIT) != U32{0} }
 
 // The key text of a declaration: its kind, module identity, owner key and
 // name.
@@ -567,6 +559,7 @@ symbol_key_rows_intern: fn(rows: &SymbolKeyRows, key: String) -> Int Never! {
 // no module, like the owned traits. A subset view of the built-in type
 // catalog (JET_TYPE_NAMES), which SYMBOL_BUILTIN_TYPES_CHECKED holds it to.
 SYMBOL_BUILTIN_TYPES: [String]{"Task", "Receiver", "Sender"}
+
 SYMBOL_BUILTIN_TYPES_CHECKED: #run symbol_builtin_types_checked(SYMBOL_BUILTIN_TYPES, JET_TYPE_NAMES)
 
 // The number of names in `view` (SYMBOL_BUILTIN_TYPES), once each is one of
@@ -576,7 +569,9 @@ symbol_builtin_types_checked: fn(view: [String], vocabulary: [String]) -> Int {
     loop name in view {
         if !vocabulary.contains(name) -> strays.push(name.copy())
     }
-    if strays.len() > 0 -> panic("SYMBOL_BUILTIN_TYPES names {strays.join(", ")}, which the built-in type catalog JET_TYPE_NAMES does not hold")
+    if strays.len() > 0 {
+        panic("SYMBOL_BUILTIN_TYPES names {strays.join(", ")}, which the built-in type catalog JET_TYPE_NAMES does not hold")
+    }
     view.len()
 }
 
@@ -588,11 +583,17 @@ symbol_builtin_types_checked: fn(view: [String], vocabulary: [String]) -> Int {
 // symbol_builtin_method).
 symbol_builtin_keys: fn() -> SymbolKeys Never! {
     keys := symbol_keys(0, SYMBOL_LOCAL_BOUND)
-    loop index in 0..<OWNED_TRAITS.len() -> _ := symbol_keys_intern(keys, symbol_key_text(SymbolKind.Trait, "", "", OWNED_TRAITS[index].name))
-    loop name in SYMBOL_BUILTIN_TYPES -> _ := symbol_keys_intern(keys, symbol_key_text(SymbolKind.Type, "", "", name))
+    loop index in 0..<OWNED_TRAITS.len() {
+        _ := symbol_keys_intern(keys, symbol_key_text(SymbolKind.Trait, "", "", OWNED_TRAITS[index].name))
+    }
+    loop name in SYMBOL_BUILTIN_TYPES {
+        _ := symbol_keys_intern(keys, symbol_key_text(SymbolKind.Type, "", "", name))
+    }
     loop index in 0..<OWNED_TRAITS.len() {
         if OWNED_TRAITS[index].contract == .Methods(methods, _, _) {
-            loop declared in methods -> _ := symbol_keys_intern(keys, symbol_key_text(SymbolKind.Function, "", OWNED_TRAITS[index].name, declared.name))
+            loop declared in methods {
+                _ := symbol_keys_intern(keys, symbol_key_text(SymbolKind.Function, "", OWNED_TRAITS[index].name, declared.name))
+            }
         }
     }
     keys.bound = keys.keys.texts.len()
@@ -604,13 +605,17 @@ symbol_builtin_keys: fn() -> SymbolKeys Never! {
 symbol_builtin: fn(kind: SymbolKind, name: String) -> SymbolID? Never! {
     if kind == SymbolKind.Trait {
         loop index in 0..<OWNED_TRAITS.len() {
-            if OWNED_TRAITS[index].name == name -> return Val(SymbolID{id: checked(U32{1 + index}) ?? return None})
+            if OWNED_TRAITS[index].name == name {
+                return Val(SymbolID{id: checked(U32{1 + index}) ?? return None})
+            }
         }
         return None
     }
     if kind != SymbolKind.Type -> return None
     loop (index, builtin) in SYMBOL_BUILTIN_TYPES {
-        if builtin == name -> return Val(SymbolID{id: checked(U32{1 + OWNED_TRAITS.len() + index}) ?? return None})
+        if builtin == name {
+            return Val(SymbolID{id: checked(U32{1 + OWNED_TRAITS.len() + index}) ?? return None})
+        }
     }
     None
 }
@@ -622,7 +627,9 @@ symbol_builtin_method: fn(trait_name: String, method: String) -> SymbolID? Never
     loop index in 0..<OWNED_TRAITS.len() {
         if OWNED_TRAITS[index].contract == .Methods(methods, _, _) {
             loop declared in methods {
-                if OWNED_TRAITS[index].name == trait_name && declared.name == method -> return Val(SymbolID{id: checked(U32{row}) ?? return None})
+                if OWNED_TRAITS[index].name == trait_name && declared.name == method {
+                    return Val(SymbolID{id: checked(U32{row}) ?? return None})
+                }
                 row += 1
             }
         }
@@ -657,9 +664,7 @@ symbol_keys_text_at: fn(keys: SymbolKeys, id: SymbolID) -> String? Never! {
 
 // A table of the builtin range (symbol_builtin_keys) and one open range
 // after it.
-symbol_table: fn() -> SymbolTable Never! {
-    symbol_table_of([SymbolKeys]{symbol_builtin_keys()})
-}
+symbol_table: fn() -> SymbolTable Never! { symbol_table_of([SymbolKeys]{symbol_builtin_keys()}) }
 
 // A table whose one range, open, is `keys`: a registration module's while
 // a thread prepares it.
@@ -675,7 +680,9 @@ symbol_table_of: fn(ranges: &&[SymbolKeys]) -> SymbolTable Never! {
     owned.sort_by(fn(left: SymbolKeys, right: SymbolKeys) { left.base <=> right.base })
     end := 0
     loop range in owned {
-        if range.base < end -> panic("symbol range at {range.base} overlaps the range before it, which ends at {end}")
+        if range.base < end {
+            panic("symbol range at {range.base} overlaps the range before it, which ends at {end}")
+        }
         end = range.base + range.bound
     }
     count := 0
@@ -688,7 +695,9 @@ symbol_table_of: fn(ranges: &&[SymbolKeys]) -> SymbolTable Never! {
             hash: table.ranges[index].keys.hashes[row]
             slot := hash.bit_and(table.mask)
             loop table.slots[slot] != 0 {
-                if symbol_table_holds(table, table.slots[slot] - 1, hash, table.ranges[index].keys.texts[row]) -> panic("symbol key `{table.ranges[index].keys.texts[row]}` is held by two ranges")
+                if symbol_table_holds(table, table.slots[slot] - 1, hash, table.ranges[index].keys.texts[row]) {
+                    panic("symbol key `{table.ranges[index].keys.texts[row]}` is held by two ranges")
+                }
                 slot = (slot + 1).bit_and(table.mask)
             }
             table.slots[slot] = table.ranges[index].base + row + 1
@@ -721,7 +730,9 @@ symbol_find: fn(table: SymbolTable, key: String) -> SymbolID? Never! {
     slot := hash.bit_and(table.mask)
     loop table.slots[slot] != 0 {
         id: table.slots[slot] - 1
-        if symbol_table_holds(table, id, hash, key) -> return Val(SymbolID{id: checked(U32{id}) ?? return None})
+        if symbol_table_holds(table, id, hash, key) {
+            return Val(SymbolID{id: checked(U32{id}) ?? return None})
+        }
         slot = (slot + 1).bit_and(table.mask)
     }
     open: table.ranges.len() - 1
@@ -745,7 +756,9 @@ symbol_mint: fn(table: &SymbolTable, kind: SymbolKind, module_name: String, owne
 
 #Test("symbol keys intern once, grow past their slots, and resolve across closed and open ranges") {
     module_keys := SymbolKeys{base: 1000, bound: 100, keys: symbol_key_rows(2)}
-    loop index in 0..<40 -> assert_eq(Int{symbol_keys_intern(module_keys, "local:m:f:v{index}").id}, 1001 + index)
+    loop index in 0..<40 {
+        assert_eq(Int{symbol_keys_intern(module_keys, "local:m:f:v{index}").id}, 1001 + index)
+    }
     assert_eq(Int{symbol_keys_intern(module_keys, "local:m:f:v7").id}, 1008)
     assert_eq(module_keys.keys.texts.len(), 41)
     assert(symbol_keys_find(module_keys, "local:m:f:v40") == None)
@@ -870,9 +883,7 @@ decl_table_key: fn(table: DeclTable, symbols: SymbolTable, id: DeclID) -> String
     symbol_table_key(symbols, table.rows[id.row].symbol)
 }
 
-decl_id_index: fn(id: DeclID) -> Int Never! {
-    id.row.index()
-}
+decl_id_index: fn(id: DeclID) -> Int Never! { id.row.index() }
 
 symbol_kind_name: fn(kind: SymbolKind) -> String Never! {
     if kind == {
@@ -934,7 +945,9 @@ type_shape_hash_into: fn(hash: U64, ty: Type) -> U64 Never! {
         }
         .Tuple(fields) -> {
             mixed := type_hash_mix(hash, U64{15})
-            loop field in fields -> mixed = type_shape_hash_into(type_hash_mix(mixed, field.name.hash()), field.ty)
+            loop field in fields {
+                mixed = type_shape_hash_into(type_hash_mix(mixed, field.name.hash()), field.ty)
+            }
             mixed
         }
         .FixedList(elem, _) -> type_shape_hash_into(type_hash_mix(hash, U64{16}), elem)
@@ -1024,9 +1037,7 @@ type_carrier_identity: fn(ty: Type) -> String Never! {
             names := [String]{}
             loop param in params -> names.push(type_carrier_identity(param))
             signature := "fn({names.join(", ")})"
-            if ret == .Val(value) {
-                signature = "{signature} => {type_carrier_identity(value)}"
-            }
+            if ret == .Val(value) -> signature = "{signature} => {type_carrier_identity(value)}"
             signature
         }
         .Named(name) -> name
@@ -1085,11 +1096,9 @@ type_name: fn(ty: Type) -> String Never! {
             "{prefix}{bits}"
         }
         .InlineRange(base, lo, hi) -> "{type_name(base)}({lo}..{hi})"
-        .Tagged(marker, inner) -> {
-            if marker == {
-                .User(name) -> "#{name} {type_name(inner)}"
-                .Internal(_) -> type_name(inner)
-            }
+        .Tagged(marker, inner) -> if marker == {
+            .User(name) -> "#{name} {type_name(inner)}"
+            .Internal(_) -> type_name(inner)
         }
         .Quantity(base, dimension) -> "Quantity<{dimension_display_name(dimension)}, {type_name(base)}; {dimension_identity(dimension)}>"
         .Measure(value) -> measure_expression(value)
@@ -1101,19 +1110,17 @@ type_name: fn(ty: Type) -> String Never! {
         }
         .Case(name, payload) -> "{name}({type_name(payload)})"
         .Named(name) -> name
-        .Apply(name, args) -> {
-            if {
-                name == "Ptr" && args.len() == 1 -> "*{type_name(args[0])}"
-                else -> {
-                    dimensions_opt: compute_shape_dimensions(ty)
-                    if dimensions_opt == {
-                        .Val(values) -> {
-                            dimensions := [String]{}
-                            loop dimension in values -> dimensions.push("{dimension}")
-                            "{name}<{dimensions.join(", ")}>"
-                        }
-                        .None -> type_application_name(name, args)
+        .Apply(name, args) -> if {
+            name == "Ptr" && args.len() == 1 -> "*{type_name(args[0])}"
+            else -> {
+                dimensions_opt: compute_shape_dimensions(ty)
+                if dimensions_opt == {
+                    .Val(values) -> {
+                        dimensions := [String]{}
+                        loop dimension in values -> dimensions.push("{dimension}")
+                        "{name}<{dimensions.join(", ")}>"
                     }
+                    .None -> type_application_name(name, args)
                 }
             }
         }
@@ -1140,9 +1147,7 @@ type_name: fn(ty: Type) -> String Never! {
             if effect_bound == .Val(rows) {
                 effect_names: loop row in rows -> row.name
                 out = "{out} -[{effect_names.join(", ")}]>"
-            } else if shown_ret != None && !unit_fallible {
-                out = "{out} ->"
-            }
+            } else if shown_ret != None && !unit_fallible { out = "{out} ->" }
             if shown_ret == .Val(value) -> out = "{out} {type_name(value)}"
             out
         }
@@ -1182,7 +1187,9 @@ type_union_member_tag_name: fn(raw: String) -> String Never! {
     loop byte in raw.bytes() {
         value := Int{byte}
         if {
-            (value >= 48 && value <= 57) || (value >= 65 && value <= 90) || (value >= 97 && value <= 122) -> bytes.push(byte)
+            (value >= 48 && value <= 57) || (value >= 65 && value <= 90) || (value >= 97 && value <= 122) -> {
+                bytes.push(byte)
+            }
             value < 128 -> bytes.push(U8{95})
             value >= 192 -> bytes.push(U8{95})
             else -> {}
@@ -1234,9 +1241,13 @@ function_parameter_names: fn(params: [Type], param_contract: [CallContractRow]?)
             star_done = true
         }
         label: if i < contracts.len() -> contracts[i].label else -> ""
-        if label == "" { names.push(type_name(param)) } else { names.push("{label}: {type_name(param)}") }
+        if label == "" -> names.push(type_name(param)) else {
+            names.push("{label}: {type_name(param)}")
+        }
         next_zone: if i + 1 < contracts.len() -> contracts[i + 1].zone else -> ParamZone.Either
-        if zone == ParamZone.PositionalOnly && next_zone != ParamZone.PositionalOnly -> names.push("/")
+        if zone == ParamZone.PositionalOnly && next_zone != ParamZone.PositionalOnly {
+            names.push("/")
+        }
     }
     names.join(", ")
 }
@@ -1283,9 +1294,7 @@ type_identity: fn(ty: Type) -> TypeIdentity Never! {
     TypeIdentity{carrier: type_carrier_identity(ty), knowledge: type_identity_knowledge(ty)}
 }
 
-type_identity_key: fn(ty: Type) -> String Never! {
-    identity_key(type_identity(ty))
-}
+type_identity_key: fn(ty: Type) -> String Never! { identity_key(type_identity(ty)) }
 
 type_internal_tag_name: fn(internal_tag: InternalTag) -> String Never! {
     if internal_tag == {
@@ -1309,7 +1318,9 @@ type_identity_equal: fn(left: Type, right: Type) -> Bool Never! {
             if tag_is_identity_bearing(marker) {
                 if right == {
                     .Tagged(other_marker, other_inner) -> {
-                        if !tag_is_identity_bearing(other_marker) || marker != other_marker -> return false
+                        if !tag_is_identity_bearing(other_marker) || marker != other_marker {
+                            return false
+                        }
                         return type_identity_equal(inner, other_inner)
                     }
                     .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return false
@@ -1452,7 +1463,9 @@ string_array_identity_equal: fn(left: [String], right: [String]) -> Bool Never! 
 tuple_fields_identity_equal: fn(left: [TypeTupleField], right: [TypeTupleField]) -> Bool Never! {
     if left.len() != right.len() -> return false
     loop (i, field) in left {
-        if field.name != right[i].name || !type_identity_equal(field.ty, right[i].ty) -> return false
+        if field.name != right[i].name || !type_identity_equal(field.ty, right[i].ty) {
+            return false
+        }
     }
     true
 }
@@ -1460,7 +1473,9 @@ tuple_fields_identity_equal: fn(left: [TypeTupleField], right: [TypeTupleField])
 dimension_identity_equal: fn(left: Dimension, right: Dimension) -> Bool Never! {
     if left.axes.len() != right.axes.len() -> return false
     loop (i, axis) in left.axes {
-        if axis.name != right.axes[i].name || axis.exponent != right.axes[i].exponent -> return false
+        if axis.name != right.axes[i].name || axis.exponent != right.axes[i].exponent {
+            return false
+        }
     }
     true
 }
@@ -1486,7 +1501,9 @@ type_with_effective_fn_returns: fn(ty: Type) -> Type Never! {
         }
         .Tuple(fields) -> {
             normalized_fields := [TypeTupleField]{}
-            loop field in fields -> normalized_fields.push(TypeTupleField{name: field.name, ty: type_with_effective_fn_returns(field.ty)})
+            loop field in fields {
+                normalized_fields.push(TypeTupleField{name: field.name, ty: type_with_effective_fn_returns(field.ty)})
+            }
             Type.Tuple{fields: normalized_fields}
         }
         // copy: `length` is a payload of read parameter `ty`, which keeps the original; field `len` of the new Type.FixedList owns this one
@@ -1496,7 +1513,9 @@ type_with_effective_fn_returns: fn(ty: Type) -> Type Never! {
         .Tagged(marker, inner) -> if marker == (TagMarker.Internal{internal_tag: InternalTag.CppCallbackABI}) -> Type.Tagged{marker: marker.copy(), inner: inner.copy()} else -> Type.Tagged{marker: marker.copy(), inner: type_with_effective_fn_returns(inner)}
         .Union(members) -> {
             normalized_members := [Type]{}
-            loop member in members -> normalized_members.push(type_with_effective_fn_returns(member))
+            loop member in members {
+                normalized_members.push(type_with_effective_fn_returns(member))
+            }
             Type.Union{members: normalized_members}
         }
         .Case(name, payload) -> Type.Case{name: name, payload: type_with_effective_fn_returns(payload)}
@@ -1519,7 +1538,9 @@ type_with_effective_parameter_fn_return: fn(ty: Type) -> Type Never! {
     if ty == {
         .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
             normalized_params := [Type]{}
-            loop param in params -> normalized_params.push(type_with_effective_parameter_fn_return(param))
+            loop param in params {
+                normalized_params.push(type_with_effective_parameter_fn_return(param))
+            }
             normalized_ret := ret.map(fn(value) { effective_callable_return(value) })
             Type.Fn{params: normalized_params, ret: normalized_ret, effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
         }
@@ -1617,7 +1638,6 @@ is_compute_tensor_application: fn(name: String, args: [Type]) -> Bool Never! {
     true
 }
 
-
 is_measure_type: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Measure(_) -> true
@@ -1669,12 +1689,10 @@ knowledge_fact_key: fn(fact: KnowledgeFact) -> String Never! {
         .Interval(lo, hi) -> "interval:{lo}..{hi}"
         .Layout(bytes) -> "layout:{bytes}"
         .Measure(value) -> "measure:{measure_key(value)}"
-        .Exactness(value) -> {
-            if value == {
-                .Exact -> "exactness:exact"
-                .Approximate(precision) -> "exactness:approximate:{precision}"
-                .Measured -> "exactness:measured"
-            }
+        .Exactness(value) -> if value == {
+            .Exact -> "exactness:exact"
+            .Approximate(precision) -> "exactness:approximate:{precision}"
+            .Measured -> "exactness:measured"
         }
         .Dimension(value) -> "dimension:{dimension_identity(value)}"
         .Classification(name) -> "classification:{name}"
@@ -1704,9 +1722,15 @@ param_zone_name: fn(zone: ParamZone) -> String Never! {
 type_identity_knowledge: fn(ty: Type) -> KnowledgeVector Never! {
     entries := [KnowledgeEntry]{}
     if ty == {
-        .Int -> entries.push(KnowledgeEntry{path: [String]{}, plane: "Exactness", fact: KnowledgeFact.Exactness{value: Exactness.Exact}})
-        .Float -> entries.push(KnowledgeEntry{path: [String]{}, plane: "Exactness", fact: KnowledgeFact.Exactness{value: Exactness.Approximate{precision: 53}}})
-        .Float32 -> entries.push(KnowledgeEntry{path: [String]{}, plane: "Exactness", fact: KnowledgeFact.Exactness{value: Exactness.Approximate{precision: 24}}})
+        .Int -> {
+            entries.push(KnowledgeEntry{path: [String]{}, plane: "Exactness", fact: KnowledgeFact.Exactness{value: Exactness.Exact}})
+        }
+        .Float -> {
+            entries.push(KnowledgeEntry{path: [String]{}, plane: "Exactness", fact: KnowledgeFact.Exactness{value: Exactness.Approximate{precision: 53}}})
+        }
+        .Float32 -> {
+            entries.push(KnowledgeEntry{path: [String]{}, plane: "Exactness", fact: KnowledgeFact.Exactness{value: Exactness.Approximate{precision: 24}}})
+        }
         .IntN(signed, bits) -> {
             lower := 0
             upper := ((2).pow(bits)) - 1
@@ -1727,7 +1751,9 @@ type_identity_knowledge: fn(ty: Type) -> KnowledgeVector Never! {
             entries.push(KnowledgeEntry{path: [String]{}, plane: "Measure", fact: KnowledgeFact.Measure{value: len}})
         }
         // copy: `value` is a payload of read parameter `ty`, which keeps the original; field `value` of the new KnowledgeFact.Measure owns this one
-        .Measure(value) -> entries.push(KnowledgeEntry{path: [String]{}, plane: "Measure", fact: KnowledgeFact.Measure{value: value.copy()}})
+        .Measure(value) -> {
+            entries.push(KnowledgeEntry{path: [String]{}, plane: "Measure", fact: KnowledgeFact.Measure{value: value.copy()}})
+        }
         .Quantity(base, dimension) -> {
             entries = merge_type_knowledge(entries, type_identity_knowledge(base), [String]{"base"})
             entries.push(KnowledgeEntry{path: [String]{}, plane: "Dimension", fact: KnowledgeFact.Dimension{value: dimension}})
@@ -1736,16 +1762,24 @@ type_identity_knowledge: fn(ty: Type) -> KnowledgeVector Never! {
             loop (i, param) in params {
                 entries = merge_type_knowledge(entries, type_identity_knowledge(param), [String]{"param", "{i}"})
             }
-            if ret == .Val(ret_type) -> entries = merge_type_knowledge(entries, type_identity_knowledge(ret_type), [String]{"return"})
+            if ret == .Val(ret_type) {
+                entries = merge_type_knowledge(entries, type_identity_knowledge(ret_type), [String]{"return"})
+            }
             variadic: function_variadic_obligation(call_metadata)
             if param_contract != None || variadic != None {
                 obligations: FunctionObligations{effect_bound: None, param_contract: param_contract, variadic: variadic, return_view_provenance: None}
                 entries.push(KnowledgeEntry{path: [String]{}, plane: "Obligation", fact: KnowledgeFact.Obligation{value: obligations}})
             }
         }
-        .List(inner) -> entries = merge_type_knowledge(entries, type_identity_knowledge(inner), [String]{"element"})
-        .Shared(inner) -> entries = merge_type_knowledge(entries, type_identity_knowledge(inner), [String]{"inner"})
-        .Option(inner) -> entries = merge_type_knowledge(entries, type_identity_knowledge(inner), [String]{"some"})
+        .List(inner) -> {
+            entries = merge_type_knowledge(entries, type_identity_knowledge(inner), [String]{"element"})
+        }
+        .Shared(inner) -> {
+            entries = merge_type_knowledge(entries, type_identity_knowledge(inner), [String]{"inner"})
+        }
+        .Option(inner) -> {
+            entries = merge_type_knowledge(entries, type_identity_knowledge(inner), [String]{"some"})
+        }
         .Map(key, _, value) -> {
             entries = merge_type_knowledge(entries, type_identity_knowledge(key), [String]{"key"})
             entries = merge_type_knowledge(entries, type_identity_knowledge(value), [String]{"value"})
@@ -1764,7 +1798,9 @@ type_identity_knowledge: fn(ty: Type) -> KnowledgeVector Never! {
                 entries = merge_type_knowledge(entries, type_identity_knowledge(member), [String]{"member", "{i}"})
             }
         }
-        .Case(name, payload) -> entries = merge_type_knowledge(entries, type_identity_knowledge(payload), [String]{"case", name})
+        .Case(name, payload) -> {
+            entries = merge_type_knowledge(entries, type_identity_knowledge(payload), [String]{"case", name})
+        }
         .Tagged(marker, inner) -> {
             if {
                 tag_is_identity_bearing(marker) -> {
@@ -1798,7 +1834,9 @@ type_identity_knowledge: fn(ty: Type) -> KnowledgeVector Never! {
                     if is_compute_shape_type(name, args) {
                         loop (i, arg) in args {
                             if arg == {
-                                .Measure(value) -> entries.push(KnowledgeEntry{path: [String]{"shape", "{i}"}, plane: "Measure", fact: KnowledgeFact.Measure{value: value}})
+                                .Measure(value) -> {
+                                    entries.push(KnowledgeEntry{path: [String]{"shape", "{i}"}, plane: "Measure", fact: KnowledgeFact.Measure{value: value}})
+                                }
                                 .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) -> {}
                             }
                         }
@@ -1807,9 +1845,13 @@ type_identity_knowledge: fn(ty: Type) -> KnowledgeVector Never! {
             }
         }
         .Named(name) -> {
-            if name == "Decimal" || name == "Fraction" -> entries.push(KnowledgeEntry{path: [String]{}, plane: "Exactness", fact: KnowledgeFact.Exactness{value: Exactness.Exact}})
+            if name == "Decimal" || name == "Fraction" {
+                entries.push(KnowledgeEntry{path: [String]{}, plane: "Exactness", fact: KnowledgeFact.Exactness{value: Exactness.Exact}})
+            }
             lanes := type_simd_lane_arity(name)
-            if lanes != None -> entries.push(KnowledgeEntry{path: [String]{}, plane: "Measure", fact: KnowledgeFact.Measure{value: Measure.Literal{kind: "lane", value: lanes ?? 0}}})
+            if lanes != None {
+                entries.push(KnowledgeEntry{path: [String]{}, plane: "Measure", fact: KnowledgeFact.Measure{value: Measure.Literal{kind: "lane", value: lanes ?? 0}}})
+            }
         }
         .Bool | .String | .Char | .TraitObject(_) -> {}
     }

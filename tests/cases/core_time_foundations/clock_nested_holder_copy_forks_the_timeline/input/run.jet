@@ -16,7 +16,7 @@ Timer: struct {
 Shelf: struct {
     timers: [Timer]
     latest: Timer?
-    named: [String: Timer]
+    named: [String:Timer]
     outcome: time.Clock Fault!
 }
 
@@ -24,7 +24,7 @@ make_shelf: fn() -> Shelf {
     Shelf{
         timers: [Timer{label: "a", clock: time.Clock.new(0)}],
         latest: Val(Timer{label: "b", clock: time.Clock.new(1)}),
-        named: [String: Timer]{"c": Timer{label: "c", clock: time.Clock.new(2)}},
+        named: [String:Timer]{"c": Timer{label: "c", clock: time.Clock.new(2)}},
         outcome: Ok(time.Clock.new(3)),
     }
 }
@@ -33,9 +33,7 @@ latest_now: fn(shelf: Shelf) -> Int {
     if shelf.latest == .Val(timer) -> timer.clock.now() else -> -1
 }
 
-outcome_now: fn(shelf: Shelf) -> Int {
-    if shelf.outcome == .Ok(clock) -> clock.now() else -> -1
-}
+outcome_now: fn(shelf: Shelf) -> Int { if shelf.outcome == .Ok(clock) -> clock.now() else -> -1 }
 
 run: fn() {
     shelf: make_shelf()

@@ -34,7 +34,9 @@ lsp_hover_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
         if lsp_target_at(at.view, at.offset) == .Val(target) {
             if lsp_definition_at(index, target) == .Val(def) {
                 markdown = Val(lsp_hover_markdown(def.qualified_name, ""))
-                if lsp_symbol_for(at.view.checked.symbols, def) == .Val(symbol) -> markdown = Val(lsp_hover_markdown(symbol.signature, symbol.summary))
+                if lsp_symbol_for(at.view.checked.symbols, def) == .Val(symbol) {
+                    markdown = Val(lsp_hover_markdown(symbol.signature, symbol.summary))
+                }
             }
         }
     }
@@ -51,7 +53,9 @@ lsp_hover_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
     }
     text: markdown ?? return lsp_response(id, "null")
     range := ""
-    if lsp_ident_token_at(at.view.lexed, at.offset) == .Val(name) -> range = ",\"range\":{lsp_range_json(lsp_byte_span_to_range(at.view.doc.text, name.span))}"
+    if lsp_ident_token_at(at.view.lexed, at.offset) == .Val(name) {
+        range = ",\"range\":{lsp_range_json(lsp_byte_span_to_range(at.view.doc.text, name.span))}"
+    }
     lsp_response(id, "{{\"contents\":{{\"kind\":\"markdown\",\"value\":{foundation_json_quote(text)}}}{range}}}")
 }
 
@@ -61,7 +65,9 @@ lsp_choices_markdown: fn(at: LSPAt) -> String? Never! {
     module_path: at.view.module_path ?? return None
     lines := [String]{}
     loop choice in at.view.checked.choices {
-        if choice.module_path == module_path && choice.line == at.line + 1 -> lines.push("- {choice.kind}: {choice.choice}")
+        if choice.module_path == module_path && choice.line == at.line + 1 {
+            lines.push("- {choice.kind}: {choice.choice}")
+        }
     }
     if lines.len() == 0 -> return None
     Val("Automatic choices:\n{lines.join("\n")}")
@@ -77,7 +83,9 @@ lsp_producer_markdown: fn(producer: LSPProducer) -> String Never! {
     if producer.handoffs.len() > 0 -> text = "{text}, after {producer.handoffs.join(", then ")}"
     text = "{text}."
     if producer.authority == .Val(authority) -> text = "{text} Made under `{authority}`."
-    if producer.consent == .Val(consent) -> text = "{text} Allowed by the root's consent for `{consent}`."
+    if producer.consent == .Val(consent) {
+        text = "{text} Allowed by the root's consent for `{consent}`."
+    }
     "{text}\n\nIdentity: `{producer.identity}`"
 }
 
@@ -88,7 +96,9 @@ lsp_keyword_hover: fn(view: LSPView, offset: Int) -> String? Never! {
         if !lsp_span_holds(token.span, offset) || token.kind == TOKEN_IDENT -> next
         text: token_text(view.lexed.tables, token)
         loop symbol in view.checked.symbols {
-            if symbol.kind == SemSymbolKind.Keyword && symbol.name == text -> return Val(lsp_hover_markdown(symbol.signature, symbol.summary))
+            if symbol.kind == SemSymbolKind.Keyword && symbol.name == text {
+                return Val(lsp_hover_markdown(symbol.signature, symbol.summary))
+            }
         }
     }
     None
@@ -108,7 +118,9 @@ lsp_references_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String 
     declaration: lsp_bool_member(lsp_param(params, "context") ?? Dyn.Null, "includeDeclaration")
     rows := [String]{}
     loop occurrence in lsp_occurrences(index, target, declaration: declaration) {
-        if lsp_location(at.view.checked, occurrence.module_path, occurrence.span) == .Val(location) -> rows.push(lsp_location_json(location))
+        if lsp_location(at.view.checked, occurrence.module_path, occurrence.span) == .Val(location) {
+            rows.push(lsp_location_json(location))
+        }
     }
     lsp_response(id, "[{rows.join(",")}]")
 }
@@ -141,9 +153,13 @@ lsp_rename_target: fn(server: LSPServer, at: LSPAt) -> LSPRenameTarget LSPRPCErr
     target: lsp_target_at(at.view, at.offset) ?? return Err(LSPRPCError{code: -32803, message: "no declaration is under the cursor"})
     def: lsp_definition_at(index, target) ?? return Err(LSPRPCError{code: -32803, message: "only a declaration in Jet source can be renamed"})
     module_index: lsp_module_index(at.view.checked, def.module_path) ?? return Err(LSPRPCError{code: -32803, message: "`{def.name}` is declared outside the checked modules"})
-    if !lsp_path_is_open(server, at.view.checked.modules[module_index].physical_path) -> return Err(LSPRPCError{code: -32803, message: "open the file that declares `{def.name}` to rename it"})
+    if !lsp_path_is_open(server, at.view.checked.modules[module_index].physical_path) {
+        return Err(LSPRPCError{code: -32803, message: "open the file that declares `{def.name}` to rename it"})
+    }
     token: lsp_ident_token_at(at.view.lexed, at.offset) ?? return Err(LSPRPCError{code: -32803, message: "no name is under the cursor"})
-    if token_text(at.view.lexed.tables, token) != def.name -> return Err(LSPRPCError{code: -32803, message: "no name is under the cursor"})
+    if token_text(at.view.lexed.tables, token) != def.name {
+        return Err(LSPRPCError{code: -32803, message: "no name is under the cursor"})
+    }
     Ok(LSPRenameTarget{def: def, span: token.span})
 }
 
@@ -168,17 +184,23 @@ lsp_valid_identifier: fn(name: String) -> Bool Never! {
     lexed: lex(name.bytes())
     if lexed.diagnostics.len() != 0 || lexed.tokens.len() == 0 -> return false
     first: lexed.tokens[0]
-    if first.kind != TOKEN_IDENT || first.span.start != 0 || first.span.end != name.count_bytes() -> return false
+    if first.kind != TOKEN_IDENT || first.span.start != 0 || first.span.end != name.count_bytes() {
+        return false
+    }
     lexed.tokens.len() == 1 || lexed.tokens[1].span.start >= name.count_bytes()
 }
 
 lsp_rename_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
     at: lsp_at(server, params) ?? return lsp_response(id, "null")
     new_name: lsp_text_member(params ?? return lsp_response(id, "null"), "newName") ?? return lsp_error_response(id, -32602, "rename needs a string newName")
-    if !lsp_valid_identifier(new_name) -> return lsp_error_response(id, -32602, "`{new_name}` is not an identifier")
+    if !lsp_valid_identifier(new_name) {
+        return lsp_error_response(id, -32602, "`{new_name}` is not an identifier")
+    }
     target: if lsp_rename_target(server, at) == {
         .Ok(found) -> found
-        .Err(problem) -> { return lsp_error_response(id, problem.code, problem.message) }
+        .Err(problem) -> {
+            return lsp_error_response(id, problem.code, problem.message)
+        }
     }
     index: at.view.checked.index ?? return lsp_response(id, "null")
     by_uri := [String:[String]]{}
@@ -186,7 +208,9 @@ lsp_rename_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
     loop occurrence in lsp_occurrences(index, LSPTarget{module_path: target.def.module_path, span: target.def.def_span}, declaration: true) {
         location: lsp_location(at.view.checked, occurrence.module_path, occurrence.span) ?? next
         span: lsp_name_span(location.source, occurrence.span, target.def.name)
-        if span.end > location.source.count_bytes() || foundation_byte_text(location.source.bytes(), span.start, span.end) != target.def.name -> next
+        if span.end > location.source.count_bytes() || foundation_byte_text(location.source.bytes(), span.start, span.end) != target.def.name {
+            next
+        }
         if !by_uri.has_key(location.uri) {
             by_uri[location.uri] = [String]{}
             order.push(location.uri)
@@ -229,7 +253,9 @@ lsp_active_call: fn(lexed: Lexed, offset: Int) -> LSPActiveCall? Never! {
                 depth -= 1
                 next
             }
-            if kind != TOKEN_LPAREN || cursor == 0 || tokens[cursor - 1].kind != TOKEN_IDENT -> return None
+            if kind != TOKEN_LPAREN || cursor == 0 || tokens[cursor - 1].kind != TOKEN_IDENT {
+                return None
+            }
             if argument == 0 -> argument_start = cursor + 1
             label := String?{None}
             if argument_start + 1 < end && tokens[argument_start].kind == TOKEN_IDENT && tokens[argument_start + 1].kind == TOKEN_COLON {
@@ -253,7 +279,9 @@ lsp_signature_help_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> Str
     def: lsp_definition_at(index, target) ?? return lsp_response(id, "null")
     callable: if def.kind == {
         .Function(callable) -> callable
-        .Module | .Struct(_, _) | .Enum(_, _) | .Trait | .Tag | .Type(_) | .Const | .EnumVariant(_) | .Field(_, _) | .Local(_, _) | .Param(_) -> { return lsp_response(id, "null") }
+        .Module | .Struct(_, _) | .Enum(_, _) | .Trait | .Tag | .Type(_) | .Const | .EnumVariant(_) | .Field(_, _) | .Local(_, _) | .Param(_) -> {
+            return lsp_response(id, "null")
+        }
     }
     label := def.qualified_name
     documentation := ""

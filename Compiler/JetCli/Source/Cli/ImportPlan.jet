@@ -7,16 +7,40 @@ use {
     import_files: core.files
     import_sys: core.sys
     jet_foundation.[
-        EvidenceAttachment, EvidenceBuild, EvidenceKind, EvidenceOutcome, EvidenceProducerKind, EvidenceReport, EvidenceRevision,
-        EvidenceSource, DerivationDisposition, DerivationMethod, ast_comptime_bytes_compare, derivation_identity,
-        derivation_record, evidence_identity_for_record, evidence_merge_error_text, evidence_producer_name, evidence_record_new,
-        evidence_report_add_record_with_derivation, evidence_report_new,
+        EvidenceAttachment,
+        EvidenceBuild,
+        EvidenceKind,
+        EvidenceOutcome,
+        EvidenceProducerKind,
+        EvidenceReport,
+        EvidenceRevision,
+        EvidenceSource,
+        DerivationDisposition,
+        DerivationMethod,
+        ast_comptime_bytes_compare,
+        derivation_identity,
+        derivation_record,
+        evidence_identity_for_record,
+        evidence_merge_error_text,
+        evidence_producer_name,
+        evidence_record_new,
+        evidence_report_add_record_with_derivation,
+        evidence_report_new,
     ]
     jet_pkg_model.[JET_VERSION, ForeignArtifactCoverage, ForeignBoundaryContract, ForeignBoundaryIdentity, ForeignIdentityBuilder, ForeignLanguage, pkg_source_import_boundary]
 }
 
-JetCLIImportMode: enum { Create Update DryRun }
-JetCLIImportGenerated: struct { relative: String, contents: String }
+JetCLIImportMode: enum {
+    Create
+    Update
+    DryRun
+}
+
+JetCLIImportGenerated: struct {
+    relative: String
+    contents: String
+}
+
 // Rust `Plan`: the boundary and evidence are construction results, never optional.
 JetCLIImportPlan: struct {
     language: String
@@ -32,13 +56,27 @@ JetCLIImportPlan: struct {
     source_digest: String
     replacement_digest: String
 }
-JetCLIImportArguments: struct { language: String, source: String, mode: JetCLIImportMode }
-#Error
-JetCLIImportUsageError: struct { what: String, fix: String }
-#Error
-JetCLIImportPlanError: struct { message: String }
 
-jet_cli_import_plan_error: fn(message: String) -> JetCLIImportPlanError Never! { JetCLIImportPlanError{message: message} }
+JetCLIImportArguments: struct {
+    language: String
+    source: String
+    mode: JetCLIImportMode
+}
+
+#Error
+JetCLIImportUsageError: struct {
+    what: String
+    fix: String
+}
+
+#Error
+JetCLIImportPlanError: struct {
+    message: String
+}
+
+jet_cli_import_plan_error: fn(message: String) -> JetCLIImportPlanError Never! {
+    JetCLIImportPlanError{message: message}
+}
 
 // Rust `parse_args`: `raw` starts at the command word.
 jet_cli_import_parse_args: fn(raw: [String]) -> JetCLIImportArguments JetCLIImportUsageError! {
@@ -47,14 +85,20 @@ jet_cli_import_parse_args: fn(raw: [String]) -> JetCLIImportArguments JetCLIImpo
     loop index in 1..<raw.len() {
         arg: raw[index]
         if arg == "--dry-run" || arg == "--update" {
-            if mode != JetCLIImportMode.Create -> return Err(JetCLIImportUsageError{what: "--dry-run and --update cannot be combined", fix: "choose preview (--dry-run) or merge (--update)"})
+            if mode != JetCLIImportMode.Create {
+                return Err(JetCLIImportUsageError{what: "--dry-run and --update cannot be combined", fix: "choose preview (--dry-run) or merge (--update)"})
+            }
             mode = if arg == "--dry-run" -> JetCLIImportMode.DryRun else -> JetCLIImportMode.Update
             next
         }
-        if arg.starts_with("-") -> return Err(JetCLIImportUsageError{what: "'{arg}' is not an import flag", fix: "use jet import <lang> <dir> [--dry-run|--update]"})
+        if arg.starts_with("-") {
+            return Err(JetCLIImportUsageError{what: "'{arg}' is not an import flag", fix: "use jet import <lang> <dir> [--dry-run|--update]"})
+        }
         positionals.push(arg.copy())
     }
-    if positionals.len() != 2 -> return Err(JetCLIImportUsageError{what: "source import needs a language and directory", fix: "use jet import <lang> <dir> [--dry-run|--update]"})
+    if positionals.len() != 2 {
+        return Err(JetCLIImportUsageError{what: "source import needs a language and directory", fix: "use jet import <lang> <dir> [--dry-run|--update]"})
+    }
     Ok(JetCLIImportArguments{language: positionals[0].copy(), source: positionals[1].copy(), mode: mode})
 }
 
@@ -103,7 +147,9 @@ jet_cli_import_path_order: fn(left: String, right: String) -> Ordering Never! {
     b: jet_cli_import_components(right)
     loop index in 0..<a.len() {
         if index >= b.len() -> return Ordering.Greater
-        if a[index] != b[index] -> return ast_comptime_bytes_compare(a[index].bytes(), b[index].bytes()) <=> 0
+        if a[index] != b[index] {
+            return ast_comptime_bytes_compare(a[index].bytes(), b[index].bytes()) <=> 0
+        }
     }
     a.len() <=> b.len()
 }
@@ -113,7 +159,9 @@ jet_cli_import_path_order: fn(left: String, right: String) -> Ordering Never! {
 jet_cli_import_relative: fn(path: String, root: String) -> String JetCLIImportPlanError! {
     parts: jet_cli_import_components(path)
     base: jet_cli_import_components(root)
-    if import_files.is_absolute(path) != import_files.is_absolute(root) || parts.len() < base.len() -> return Err(jet_cli_import_plan_error("prefix not found"))
+    if import_files.is_absolute(path) != import_files.is_absolute(root) || parts.len() < base.len() {
+        return Err(jet_cli_import_plan_error("prefix not found"))
+    }
     loop index in 0..<base.len() {
         if parts[index] != base[index] -> return Err(jet_cli_import_plan_error("prefix not found"))
     }
@@ -184,7 +232,9 @@ jet_cli_import_generated_tree_identity: fn(generated: [JetCLIImportGenerated], s
 }
 
 // Rust `std::env::consts::{ARCH, OS}` as `boundary_for_import` joins them.
-jet_cli_import_target_identity: fn() -[Env]> String Never! { "{import_sys.arch()}-{import_sys.name()}" }
+jet_cli_import_target_identity: fn() -[Env]> String Never! {
+    "{import_sys.arch()}-{import_sys.name()}"
+}
 
 // Rust `boundary_for_import`: canonical descriptor, identity, and coverage.
 jet_cli_import_boundary: fn(language: String, source: String, target: String, source_digest: String, replacement_digest: String) -[Env]> ForeignBoundaryContract JetCLIImportPlanError! {
@@ -222,7 +272,9 @@ jet_cli_import_evidence: fn(boundary: ForeignBoundaryContract, source: String, t
         {name: "coverage", value: boundary.artifact_coverage.digest()},
         {name: "import-report", value: import_files.join(target, "import-report.json")},
     }
-    loop assumption in boundary.assumptions -> record.attachments.push(EvidenceAttachment{name: "assumption", value: assumption})
+    loop assumption in boundary.assumptions {
+        record.attachments.push(EvidenceAttachment{name: "assumption", value: assumption})
+    }
     derivation := derivation_record(record.identity.evidence_id, record.identity.claim_id, evidence_producer_name(record.producer), DerivationMethod.StaticDerivation, "foreign-source-import", [String]{boundary_digest, boundary.artifact_coverage.digest(), source_digest, replacement_digest}, derivation_identity)
     if omission_count != 0 -> derivation.disposition = DerivationDisposition.Unavailable
     report := evidence_report_new(report_id, EvidenceProducerKind.Compile, source_ref, build, revision)
@@ -247,7 +299,9 @@ jet_cli_import_extensions: fn(language: String) -> String Never! {
 jet_cli_import_build_plan: fn(source: String, target: String, language: String) -[FS.Read, Env]> JetCLIImportPlan JetCLIImportPlanError! {
     files := [String]{}
     jet_cli_import_collect_sources(source, source, language, files) ?? return Err(err)
-    if files.len() == 0 -> return Err(jet_cli_import_plan_error("no {jet_cli_import_extensions(language)} files found under {source}"))
+    if files.len() == 0 {
+        return Err(jet_cli_import_plan_error("no {jet_cli_import_extensions(language)} files found under {source}"))
+    }
     files.sort_by(fn(left: String, right: String) { jet_cli_import_path_order(left, right) })
     generated := [JetCLIImportGenerated]{}
     todos := [JetCLIImportTodo]{}

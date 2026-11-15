@@ -7,10 +7,17 @@ use {
     census_testing: core.testing
     core.encoding.[Dyn]
     jet_cli.[
-        JetCLICommandSetting, JetCLICommandSettingLayer,
-        jet_cli_command_settings_output, jet_cli_command_settings_words, jet_cli_flag_spec,
-        jet_cli_setting_command_flags, jet_cli_setting_command_path, jet_cli_setting_commands,
-        jet_cli_setting_flag_name, jet_cli_setting_keys, jet_cli_setting_typed,
+        JetCLICommandSetting,
+        JetCLICommandSettingLayer,
+        jet_cli_command_settings_output,
+        jet_cli_command_settings_words,
+        jet_cli_flag_spec,
+        jet_cli_setting_command_flags,
+        jet_cli_setting_command_path,
+        jet_cli_setting_commands,
+        jet_cli_setting_flag_name,
+        jet_cli_setting_keys,
+        jet_cli_setting_typed,
     ]
     jet_foundation.[Diagnostic, JET_CLI_COMMANDS, JET_CLI_FLAGS, JetCLIFlagValue, jet_cli_flag_typed_reason]
 }
@@ -20,12 +27,12 @@ command_setting_on: fn(key: String, on: Bool, line: Int) -> JetCLICommandSetting
 }
 
 command_setting_text: fn(key: String, text: String, line: Int) -> JetCLICommandSetting Never! {
-    JetCLICommandSetting{key: key, value: Dyn.Text(text.copy()), line: line} // copy: the caller keeps its text.
+    JetCLICommandSetting{key: key, value: Dyn.Text(text.copy()), line: line}  // copy: the caller keeps its text.
 }
 
 command_setting_items: fn(key: String, items: [String], line: Int) -> JetCLICommandSetting Never! {
     values := [Dyn]{}
-    loop item in items -> values.push(Dyn.Text(item.copy())) // copy: the caller keeps its items.
+    loop item in items -> values.push(Dyn.Text(item.copy()))  // copy: the caller keeps its items.
     JetCLICommandSetting{key: key, value: Dyn.Array(values), line: line}
 }
 
@@ -68,11 +75,14 @@ command_setting_refused: fn(word: String, layers: [JetCLICommandSettingLayer]) -
 
 #Test("a setting writes its flag the way the flag is typed") {
     on: [String]{}
-    layer: command_setting_layer("settings", [JetCLICommandSetting]{
-        command_setting_text("run.p", "server", 1),
-        command_setting_items("run.deny", [String]{"Net", "FS"}, 2),
-        command_setting_text("run.color", "never", 3),
-    })
+    layer: command_setting_layer(
+        "settings",
+        [JetCLICommandSetting]{
+            command_setting_text("run.p", "server", 1),
+            command_setting_items("run.deny", [String]{"Net", "FS"}, 2),
+            command_setting_text("run.color", "never", 3),
+        },
+    )
     assert_eq(command_setting_words("run", on, [JetCLICommandSettingLayer]{layer}), [String]{"-p", "server", "--deny=Net", "--deny=FS", "--color=never"})
     assert_eq(command_setting_words("fmt", on, [JetCLICommandSettingLayer]{command_setting_layer("settings", [JetCLICommandSetting]{command_setting_on("fmt.check", true, 1)})}), [String]{"--check"})
     assert_eq(command_setting_words("fmt", on, [JetCLICommandSettingLayer]{command_setting_layer("settings", [JetCLICommandSetting]{command_setting_on("fmt.check", false, 1)})}), [String]{})
@@ -83,14 +93,20 @@ command_setting_refused: fn(word: String, layers: [JetCLICommandSettingLayer]) -
 }
 
 #Test("a later layer and a typed flag win, and a list is replaced, never merged") {
-    user: command_setting_layer("user", [JetCLICommandSetting]{
-        command_setting_text("run.color", "never", 1),
-        command_setting_items("run.deny", [String]{"Net"}, 2),
-    })
-    package: command_setting_layer("package", [JetCLICommandSetting]{
-        command_setting_text("run.color", "always", 7),
-        command_setting_items("run.deny", [String]{"FS"}, 8),
-    })
+    user: command_setting_layer(
+        "user",
+        [JetCLICommandSetting]{
+            command_setting_text("run.color", "never", 1),
+            command_setting_items("run.deny", [String]{"Net"}, 2),
+        },
+    )
+    package: command_setting_layer(
+        "package",
+        [JetCLICommandSetting]{
+            command_setting_text("run.color", "always", 7),
+            command_setting_items("run.deny", [String]{"FS"}, 8),
+        },
+    )
     assert_eq(command_setting_words("run", [String]{}, [JetCLICommandSettingLayer]{user, package}), [String]{"--color=always", "--deny=FS"})
     assert_eq(command_setting_words("run", [String]{"--color=auto", "--deny=Exec"}, [JetCLICommandSettingLayer]{user, package}), [String]{})
     // A word after `--` is the program's, not a flag.
@@ -101,18 +117,24 @@ command_setting_refused: fn(word: String, layers: [JetCLICommandSettingLayer]) -
 }
 
 #Test("every problem of every layer is reported at once, and a refused layer adds nothing") {
-    user: command_setting_layer("user", [JetCLICommandSetting]{
-        command_setting_on("fmt.chek", true, 1),
-        command_setting_items("run.allow", [String]{"Net"}, 2),
-        JetCLICommandSetting{key: "run.color", value: Dyn.Int(3), line: 3},
-        JetCLICommandSetting{key: "run.deny", value: Dyn.Array([Dyn]{Dyn.Text("Net"), Dyn.Bool(true)}), line: 4},
-    })
-    package: command_setting_layer("package", [JetCLICommandSetting]{
-        command_setting_text("fmt.check", "yes", 3),
-        command_setting_on("test.update_snapshots", true, 4),
-        command_setting_text("run.e", "print(1)", 5),
-        command_setting_text("run.color", "always", 6),
-    })
+    user: command_setting_layer(
+        "user",
+        [JetCLICommandSetting]{
+            command_setting_on("fmt.chek", true, 1),
+            command_setting_items("run.allow", [String]{"Net"}, 2),
+            JetCLICommandSetting{key: "run.color", value: Dyn.Int(3), line: 3},
+            JetCLICommandSetting{key: "run.deny", value: Dyn.Array([Dyn]{Dyn.Text("Net"), Dyn.Bool(true)}), line: 4},
+        },
+    )
+    package: command_setting_layer(
+        "package",
+        [JetCLICommandSetting]{
+            command_setting_text("fmt.check", "yes", 3),
+            command_setting_on("test.update_snapshots", true, 4),
+            command_setting_text("run.e", "print(1)", 5),
+            command_setting_text("run.color", "always", 6),
+        },
+    )
     reports: command_setting_refused("run", [JetCLICommandSettingLayer]{user, package})
     assert_eq(reports[0].fix, "Write `fmt.check`, or remove `fmt.chek`.")
     assert_eq(reports[1].why, "A settings file applies a flag to every run, but `--allow` is typed each time: permissions are given on the command line each run.")
@@ -121,7 +143,7 @@ command_setting_refused: fn(word: String, layers: [JetCLICommandSettingLayer]) -
     assert_eq(reports[4].what, "`fmt.check` in `package` line 3 is a string, but `--check` takes true or false.")
     assert_eq(reports[6].why, "A settings file applies a flag to every run, but `-e` is typed each time: it names what one run works on.")
     codes := [String]{}
-    loop report in reports -> codes.push(report.code.copy()) // copy: the report keeps its code.
+    loop report in reports -> codes.push(report.code.copy())  // copy: the report keeps its code.
     assert_eq(codes, [String]{"E2104", "E2117", "E2104", "E2104", "E2104", "E2117", "E2117"})
 }
 
@@ -176,7 +198,9 @@ command_setting_names_flag: fn(key: String, names: [String]) -> Bool Never! {
             next
         }
         if spec.help.contains("{spec.long}=") -> assert(spec.value != JetCLIFlagValue.Switch)
-        if spec.typed != "" && jet_cli_flag_typed_reason(spec.typed) == None -> panic("`{spec.long}` names no typed reason `{spec.typed}`")
+        if spec.typed != "" && jet_cli_flag_typed_reason(spec.typed) == None {
+            panic("`{spec.long}` names no typed reason `{spec.typed}`")
+        }
     }
 }
 
@@ -200,7 +224,9 @@ command_settings_census: fn() -> String Never! {
 
 #Test("the settings census lists every command family and every flag with its setting or why it has none") {
     families := [String]{}
-    loop command in jet_cli_setting_commands() -> families.push(command.path.copy()) // copy: the census keeps its row.
-    loop command in JET_CLI_COMMANDS -> assert(families.contains(jet_cli_setting_command_path(command.name)), "the census leaves out the `{command.name}` family")
+    loop command in jet_cli_setting_commands() -> families.push(command.path.copy())  // copy: the census keeps its row.
+    loop command in JET_CLI_COMMANDS {
+        assert(families.contains(jet_cli_setting_command_path(command.name)), "the census leaves out the `{command.name}` family")
+    }
     assert(census_testing.golden("tests/cli/command_settings_census.tsv", command_settings_census()))
 }

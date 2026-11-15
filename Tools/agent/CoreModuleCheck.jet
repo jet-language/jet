@@ -26,9 +26,13 @@ use {
 }
 
 TOOL: "/Tools/agent/CoreModuleCheck.jet"
+
 RATCHET: "Tools/agent/core-module-check-ratchet.json"
+
 MAX_JOBS: 8
+
 CHECK_TIMEOUT_MS: 300000
+
 // The ratchet row of `jet check Core`: every body of every public Core
 // module and private part.
 EVERY_BODY: "jet check Core"
@@ -36,8 +40,14 @@ EVERY_BODY: "jet check Core"
 #Error
 CheckError: struct {
     message: String
-    impl Display { display: fn(self) -> String { self.message.copy() } }
-    impl Debug { debug: fn(self) -> String { self.message.copy() } }
+
+    impl Display {
+        display: fn(self) -> String { self.message.copy() }
+    }
+
+    impl Debug {
+        debug: fn(self) -> String { self.message.copy() }
+    }
 }
 
 problem: fn(message: String) -> CheckError Never! { CheckError{message: message} }
@@ -77,7 +87,9 @@ repo_root: fn() -[Env, FS]> String CheckError! {
 
 option: fn(args: [String], name: String) -> String? Never! {
     loop at in 0..<args.len() {
-        if args[at] == name -> return if at + 1 < args.len() -> Val(args[at + 1].copy()) else -> None
+        if args[at] == name {
+            return if at + 1 < args.len() -> Val(args[at + 1].copy()) else -> None
+        }
     }
     None
 }
@@ -88,7 +100,9 @@ core_modules: fn(structure: String) -> [String] CheckError! {
     answer: json.parse(structure) ?? return Err(problem("`jet inspect structure --core --json` printed no JSON: {err}"))
     core: answer.get("core") ?? return Err(problem("`jet inspect structure --core --json` printed no `core` object"))
     listed: core.get("modules") ?? return Err(problem("`jet inspect structure --core --json` printed no Core modules"))
-    rows: if listed == .Array(entries) -> entries.copy() else -> return Err(problem("`jet inspect structure --core --json` printed no Core module list"))
+    rows: if listed == .Array(entries) -> entries.copy() else -> {
+        return Err(problem("`jet inspect structure --core --json` printed no Core module list"))
+    }
     modules := [String]{}
     loop entry in rows {
         named: entry.get("module") ?? next
@@ -233,10 +247,12 @@ sweep: fn(jet: String, root: String, modules: [String], every: Bool, jobs: Int, 
     ran: process.run_all(specs, jobs) ?? return Err(problem("the probes cannot run: {err}"))
     results := [Summary]{}
     loop at in 0..<names.len() {
-        results.push(if ran[at] == {
-            .Ok(receipt) -> check_summary(names[at], "{receipt.output}{receipt.errors}", if receipt.signal != None || receipt.timed_out -> 128 else -> receipt.code)
-            .Err(failure) -> check_summary(names[at], "spawn failed: {failure}", 127)
-        })
+        results.push(
+            if ran[at] == {
+                .Ok(receipt) -> check_summary(names[at], "{receipt.output}{receipt.errors}", if receipt.signal != None || receipt.timed_out -> 128 else -> receipt.code)
+                .Err(failure) -> check_summary(names[at], "spawn failed: {failure}", 127)
+            },
+        )
     }
     results
 }
@@ -250,15 +266,21 @@ check_spec: fn(jet: String, root: String, target: String, scratch: String) -> Pr
 main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int CheckError! {
     write: args.contains("--write")
     jet: process.env_nonempty("JET") ?? ""
-    if jet == "" || !files.exists(jet) -> return Err(problem("JET must name the admitted native jet compiler"))
+    if jet == "" || !files.exists(jet) {
+        return Err(problem("JET must name the admitted native jet compiler"))
+    }
     jobs_text: option(args, "--jobs") ?? "4"
     jobs: Int.parse(jobs_text) ?? 0
-    if jobs < 1 || jobs > MAX_JOBS || "{jobs}" != jobs_text -> return Err(problem("--jobs takes 1..{MAX_JOBS}"))
+    if jobs < 1 || jobs > MAX_JOBS || "{jobs}" != jobs_text {
+        return Err(problem("--jobs takes 1..{MAX_JOBS}"))
+    }
     root: repo_root() ?? return Err(err)
     // Asked from Compiler/, a package: a jet built before `--core` stopped
     // resolving the inspect target refuses it where no package.jet is found.
     asked: process.cmd([String]{jet, "inspect", "structure", "--core", "--json"}).cwd("{root}/Compiler").env("NO_COLOR", "1").output_limit(4194304).run() ?? return Err(problem("`{jet} inspect structure --core --json` could not start: {err}"))
-    if asked.code != 0 || asked.signal != None -> return Err(problem("`{jet} inspect structure --core --json` failed: {process.combined_output(asked).trim()}"))
+    if asked.code != 0 || asked.signal != None {
+        return Err(problem("`{jet} inspect structure --core --json` failed: {process.combined_output(asked).trim()}"))
+    }
     known: core_modules(asked.output) ?? return Err(err)
     modules: if option(args, "--only") == .Val(only) -> only.split(",").to_list().filter(fn(name) { name != "" }) else -> known.copy()
     unknown: modules.filter(fn(name) { !known.contains(name) })
@@ -323,17 +345,22 @@ main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int CheckError! 
     assert_eq(check_summary("core.x", "thread panicked\n", 134).errors, 1)
 }
 
-summary_row: fn(name: String, errors: Int, first: String) -> Summary Never! { Summary{name: name, errors: errors, first: first} }
+summary_row: fn(name: String, errors: Int, first: String) -> Summary Never! {
+    Summary{name: name, errors: errors, first: first}
+}
 
 ceiling_row: fn(name: String, errors: Int) -> Ceiling Never! { Ceiling{name: name, errors: errors} }
 
 #Test("the ratchet fails on new or worse modules and on stale ceilings") {
     results: [Summary]{summary_row("core.a", 0, ""), summary_row("core.b", 3, "Error [E1] b"), summary_row("core.c", 2, "Error [E2] c"), summary_row("core.d", 1, "Error [E3] d")}
     ceilings: [Ceiling]{ceiling_row("core.b", 3), ceiling_row("core.c", 1), ceiling_row("core.d", 4)}
-    assert_eq(ratchet_problems(ceilings, results), [String]{
-        "core.c: 2 errors (ceiling 1); Error [E2] c",
-        "core.d: 1 errors, below its ceiling 4; lower it with --write",
-    })
+    assert_eq(
+        ratchet_problems(ceilings, results),
+        [String]{
+            "core.c: 2 errors (ceiling 1); Error [E2] c",
+            "core.d: 1 errors, below its ceiling 4; lower it with --write",
+        },
+    )
     assert_eq(ratchet_problems([Ceiling]{ceiling_row("core.b", 3)}, [Summary]{summary_row("core.b", 3, "")}).len(), 0)
     assert_eq(ratchet_problems([Ceiling]{}, [Summary]{summary_row("core.a", 1, "Error [E9] a")}), [String]{"core.a: 1 errors (ceiling 0); Error [E9] a"})
 }

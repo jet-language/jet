@@ -24,7 +24,9 @@ sema_inference_binding_type: fn(name: String, bindings: [SemaInferenceBinding], 
             value: binding.ty
             if value == .Named(next) {
                 already: loop seen_name in next_seen {
-                    if seen_name == next -> break true
+                    if seen_name == next {
+                        break true
+                    }
                 } ?? false
                 if !already && next != name {
                     nested: sema_inference_binding_type(next, bindings, next_seen)
@@ -47,12 +49,16 @@ sema_inference_substitute_type_inner: fn(ty: Type, bindings: [SemaInferenceBindi
         .Named(name) -> {
             if !chain {
                 // copy: the substituted type is a new owned Type; the binding and `ty` keep theirs.
-                if sema_inference_binding_at(bindings, name) == .Val(binding) -> return binding.ty.copy()
+                if sema_inference_binding_at(bindings, name) == .Val(binding) {
+                    return binding.ty.copy()
+                }
                 // copy: an unbound name is `ty` itself, a read parameter that stays in the signature.
                 return ty.copy()
             }
             expanding: loop seen_name in seen {
-                if seen_name == name -> break true
+                if seen_name == name {
+                    break true
+                }
             } ?? false
             // copy: the substituted type is a new owned Type. During recursive expansion it equals
             // `ty`, the caller's type (a read parameter), which stays in the signature.
@@ -107,7 +113,9 @@ sema_inference_substitute_type_inner: fn(ty: Type, bindings: [SemaInferenceBindi
 sema_inference_substitute_length: fn(length: Measure, bindings: [SemaInferenceBinding], seen: [String], chain: Bool) -> Measure Never! {
     if length == .Symbol(kind, name) {
         bound: sema_inference_substitute_type_inner(Type.Named{name: name.copy()}, bindings, seen, chain)
-        if bound == .Measure(number) && number == .Literal(_, value) -> return Measure.Literal{kind: kind.copy(), value: value}
+        if bound == .Measure(number) && number == .Literal(_, value) {
+            return Measure.Literal{kind: kind.copy(), value: value}
+        }
     }
     // copy: `length` is a payload of the caller's read type, which keeps the original.
     length.copy()
@@ -149,7 +157,9 @@ sema_inference_type_changes: fn(ty: Type, bindings: [SemaInferenceBinding], chai
             loop index in 0..<params.len() {
                 if sema_inference_type_changes(params[index], bindings, chain) -> return true
             }
-            if ret == .Val(declared) -> return sema_inference_type_changes(declared, bindings, chain)
+            if ret == .Val(declared) {
+                return sema_inference_type_changes(declared, bindings, chain)
+            }
             return false
         }
         .Apply(_, args) -> {
@@ -165,7 +175,9 @@ sema_inference_type_changes: fn(ty: Type, bindings: [SemaInferenceBinding], chai
             return false
         }
         .FixedList(element, length) -> {
-            if length == .Symbol(_, name) && sema_inference_type_changes(Type.Named{name: name.copy()}, bindings, chain) -> return true
+            if length == .Symbol(_, name) && sema_inference_type_changes(Type.Named{name: name.copy()}, bindings, chain) {
+                return true
+            }
             return sema_inference_type_changes(element, bindings, chain)
         }
         .InlineRange(base, _, _) -> return sema_inference_type_changes(base, bindings, chain)

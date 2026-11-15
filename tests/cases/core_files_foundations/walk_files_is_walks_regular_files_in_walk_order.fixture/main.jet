@@ -53,7 +53,15 @@ run: fn() IOError! {
 
     // A missing root is the same error in both.
     missing: "{root}/missing"
-    walk_error: if fs.walk(missing).list() == { .Ok(_) -> "none", .Err(.NotFound(_)) -> "NotFound", .Err(_) -> "other" }
-    files_error: if fs.walk_files(missing).list() == { .Ok(_) -> "none", .Err(.NotFound(_)) -> "NotFound", .Err(_) -> "other" }
+    walk_error: if fs.walk(missing).list() == {
+        .Ok(_) -> "none"
+        .Err(.NotFound(_)) -> "NotFound"
+        .Err(_) -> "other"
+    }
+    files_error: if fs.walk_files(missing).list() == {
+        .Ok(_) -> "none"
+        .Err(.NotFound(_)) -> "NotFound"
+        .Err(_) -> "other"
+    }
     print("missing root: walk {walk_error} walk_files {files_error}")
 }

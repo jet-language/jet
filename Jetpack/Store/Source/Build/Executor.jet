@@ -5,14 +5,21 @@
 // unsandboxed fallback. The actions of one batch run at once, each in its
 // own child; every member still runs and the batch reports its first error
 // in action order.
-
 use {
     jet_foundation.[DiagnosticBuildError, DiagnosticErrorDetails, DiagnosticErrorField, foundation_json_quote]
     jet_pkg_model.[pkg_json_text]
     jetpack_foundation.[
-        BuildEffect, NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS, NativeSandboxCommand, NativeSandboxError, NativeSandboxMount,
-        foundation_find_folder, foundation_library_folders, foundation_native_sandbox_command, foundation_native_sandbox_finish,
-        foundation_run_native_sandboxed_with_timeout_and_mounts, foundation_sandbox_program_argument,
+        BuildEffect,
+        NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS,
+        NativeSandboxCommand,
+        NativeSandboxError,
+        NativeSandboxMount,
+        foundation_find_folder,
+        foundation_library_folders,
+        foundation_native_sandbox_command,
+        foundation_native_sandbox_finish,
+        foundation_run_native_sandboxed_with_timeout_and_mounts,
+        foundation_sandbox_program_argument,
     ]
     jetpack_artifact_store.[StampTable]
     files: core.files
@@ -40,28 +47,29 @@ BuildExecutionResult: struct {
 #Error
 BuildExecutionError: enum {
     MissingGrant(action: String, capability: BuildEffect)
-    // No native sandbox can run the action here; `reason` says why.
     SandboxUnavailable(reason: String)
     IO(action: String, detail: String)
+    TimedOut(action: String, limit_ms: Int)
+    OverCPU(action: String, limit_ms: Int, cores: Int, used_ms: Int)
+    ProbeFailed(probe: String, detail: String)
+    FolderNotFound(probe: String, file: String, searched: [String])
+    Reported(report: DiagnosticBuildError)
+    InvalidGraph(HermeticBuildError)
+    HandEdited(action: String, path: String)
+
+    // No native sandbox can run the action here; `reason` says why.
     // The action ran past its wall-clock limit, in milliseconds, and was
     // killed. Where the host can read a process tree's CPU time, that limit
     // is only the hang guard (BUILD_WALL_GUARD times the step's limit).
-    TimedOut(action: String, limit_ms: Int)
     // The action's process tree used more CPU time than its limit allows,
     // `limit_ms` on each of the host's `cores`, and was killed; `used_ms` is
     // the CPU time it had used.
-    OverCPU(action: String, limit_ms: Int, cores: Int, used_ms: Int)
-    ProbeFailed(probe: String, detail: String)
     // The find_folder probe `probe` found no folder holding a `file` that
     // fits; `searched` is each folder it looked in, with why it passed it.
-    FolderNotFound(probe: String, file: String, searched: [String])
     // The one structured action-failure route, retained whether the action
     // ran now or its failure was restored from the cache.
-    Reported(report: DiagnosticBuildError)
-    InvalidGraph(HermeticBuildError)
     // The action's kept output `path` holds bytes no build wrote, so the
     // action published none of its outputs.
-    HandEdited(action: String, path: String)
 
     report: fn(self) -> DiagnosticBuildError? Never! {
         if self == {
@@ -70,9 +78,7 @@ BuildExecutionError: enum {
         }
     }
 
-    is_reported_action_failure: fn(self) -> Bool Never! {
-        self.report() != None
-    }
+    is_reported_action_failure: fn(self) -> Bool Never! { self.report() != None }
 }
 
 // Rust `action_failure_report`: E3505 with the `BuildActionFailure` details.
@@ -117,7 +123,9 @@ build_execute_build_plan: fn(plan: HermeticBuildPlan, project_root: String, arti
     loop action in plan.actions {
         if !selected_actions.contains(action.id) -> next
         loop cap in action.caps {
-            if !grants.contains(cap) -> return Err(BuildExecutionError.MissingGrant{action: action.name, capability: cap})
+            if !grants.contains(cap) {
+                return Err(BuildExecutionError.MissingGrant{action: action.name, capability: cap})
+            }
         }
     }
     selected_probes: plan.selected_probe_ids() ?? return Err(BuildExecutionError.InvalidGraph(err))
@@ -134,7 +142,7 @@ build_execute_build_plan: fn(plan: HermeticBuildPlan, project_root: String, arti
             completed := [BuildActionOutcomeRow]{}
             loop index in 0..<batch.len() {
                 if results[index] == {
-                    .Ok(outcome) -> completed.push(BuildActionOutcomeRow{action: HermeticActionHandle{id: batch[index], context: plan.context}, outcome})
+                    .Ok(outcome) -> completed.push(BuildActionOutcomeRow{action: HermeticActionHandle{id: batch[index], context: plan.context}, outcome: outcome})
                     .Err(error) -> return Err(error)
                 }
             }
@@ -143,7 +151,7 @@ build_execute_build_plan: fn(plan: HermeticBuildPlan, project_root: String, arti
         }
     }
     report: plan.execution_report(outcomes) ?? return Err(BuildExecutionError.InvalidGraph(err))
-    Ok(BuildExecutionResult{report, probes})
+    Ok(BuildExecutionResult{report: report, probes: probes})
 }
 
 // Rust `execution_batches`: deterministic resource-pool packing. CPU and
@@ -151,12 +159,14 @@ build_execute_build_plan: fn(plan: HermeticBuildPlan, project_root: String, arti
 // serialize by name.
 build_execution_batches: fn(plan: HermeticBuildPlan, actions: [Int]) -> [[Int]] Never! {
     batches := [[Int]]{}
-    limits := [String: Int]{}
+    limits := [String:Int]{}
     loop spec in plan.resource_pools() -> limits[spec.pool.as_str()] = spec.slots
-    held := [[String: Int]]{}
+    held := [[String:Int]]{}
     loop action_id in actions {
         pools := [String]{}
-        loop pool in build_action_pools(plan.actions[action_id]) -> build_insert_sorted_text(pools, pool.as_str())
+        loop pool in build_action_pools(plan.actions[action_id]) {
+            build_insert_sorted_text(pools, pool.as_str())
+        }
         slot := -1
         loop index in 0..<held.len() {
             used: held[index]
@@ -172,7 +182,7 @@ build_execution_batches: fn(plan: HermeticBuildPlan, actions: [Int]) -> [[Int]] 
         }
         if slot < 0 {
             batches.push([Int]{})
-            held.push([String: Int]{})
+            held.push([String:Int]{})
             slot = batches.len() - 1
         }
         counts := held[slot]
@@ -191,9 +201,9 @@ build_io_action: fn(action: HermeticBuildAction, error: BuildIOError) -> BuildEx
 
 build_native_sandbox_error: fn(action: HermeticBuildAction, error: NativeSandboxError) -> BuildExecutionError Never! {
     if error == {
-        .Unsupported(reason) -> BuildExecutionError.SandboxUnavailable{reason}
-        .IO(detail) -> BuildExecutionError.IO{action: action.name, detail}
-        .TimedOut(limit_ms) -> BuildExecutionError.TimedOut{action: action.name, limit_ms}
+        .Unsupported(reason) -> BuildExecutionError.SandboxUnavailable{reason: reason}
+        .IO(detail) -> BuildExecutionError.IO{action: action.name, detail: detail}
+        .TimedOut(limit_ms) -> BuildExecutionError.TimedOut{action: action.name, limit_ms: limit_ms}
     }
 }
 
@@ -206,10 +216,12 @@ build_rebuild_status_reason: fn(status: ActionCacheStatus) -> CacheMissReason Ne
 
 // The environment an action child receives: only its declared variables,
 // filtered to the allowlist when one is declared. Nothing ambient enters.
-build_action_environment: fn(action: HermeticBuildAction) -> [String: String] Never! {
-    env := [String: String]{}
+build_action_environment: fn(action: HermeticBuildAction) -> [String:String] Never! {
+    env := [String:String]{}
     loop name in action.env.keys() {
-        if action.env_allowlist.len() == 0 || action.env_allowlist.contains(name) -> env[name] = action.env[name]
+        if action.env_allowlist.len() == 0 || action.env_allowlist.contains(name) {
+            env[name] = action.env[name]
+        }
     }
     env
 }
@@ -257,10 +269,11 @@ BuildActionWatch: struct {
 }
 
 BuildActionStart: enum {
-    // A cached record restored the action's outputs.
     Restored
     Ready(run: BuildActionRun)
 }
+
+// A cached record restored the action's outputs.
 
 // Where a step's made tool runs from: the read-only mount of its folder in
 // the work tree, which itself is mounted only at the child's working folder.
@@ -292,19 +305,21 @@ BUILD_STEP_TRACE_FOLDER: ".jet-trace"
 // key: a trace changes no output), and every trace file a process of it wrote
 // there is moved to `traces` as `<action id>-<file>` once it exits, whether it
 // succeeded or not.
-build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: String, artifact_store: BuildArtifactStoreHandle?, grants: [BuildEffect], probe_facts: [BuildProbeFact], jobs: Int, traces: String?) -[FS, Env, Exec, Time, Time.Wait, Rand]> [Result<ActionOutcome, BuildExecutionError>] Never! {
-    results := [Result<ActionOutcome, BuildExecutionError>]{}
+build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: String, artifact_store: BuildArtifactStoreHandle?, grants: [BuildEffect], probe_facts: [BuildProbeFact], jobs: Int, traces: String?) -[FS, Env, Exec, Time, Time.Wait, Rand]> [ActionOutcome BuildExecutionError!] Never! {
+    results := [ActionOutcome BuildExecutionError!]{}
     runs := [BuildActionRun]{}
     slots := [Int]{}
     stamps := StampTable.load(project_root)
     loop action_id in ids {
         if build_start_action(plan, plan.actions[action_id], project_root, artifact_store, grants, probe_facts, stamps, traces) == {
-            .Ok(start) -> if start == {
-                .Restored -> results.push(Ok(ActionOutcome.RestoredFromCache))
-                .Ready(run) -> {
-                    slots.push(results.len())
-                    results.push(Ok(ActionOutcome.RestoredFromCache))
-                    runs.push(run)
+            .Ok(start) -> {
+                if start == {
+                    .Restored -> { results.push(Ok(ActionOutcome.RestoredFromCache)) }
+                    .Ready(run) -> {
+                        slots.push(results.len())
+                        results.push(Ok(ActionOutcome.RestoredFromCache))
+                        runs.push(run)
+                    }
                 }
             }
             .Err(error) -> results.push(Err(error))
@@ -317,9 +332,11 @@ build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: Str
         slot: slots[index]
         if traces == .Val(folder) -> build_keep_step_traces(runs[index], folder)
         if outcomes[index] == {
-            .Ok(receipt) -> if build_finish_action(runs[index], receipt, project_root) == {
-                .Ok(outcome) -> results[slot] = Ok(outcome)
-                .Err(error) -> results[slot] = Err(error)
+            .Ok(receipt) -> {
+                if build_finish_action(runs[index], receipt, project_root) == {
+                    .Ok(outcome) -> { results[slot] = Ok(outcome) }
+                    .Err(error) -> results[slot] = Err(error)
+                }
             }
             .Err(error) -> results[slot] = Err(error)
         }
@@ -348,23 +365,31 @@ build_keep_step_traces: fn(run: BuildActionRun, traces: String) Never! -[FS]> {
 // it. The command's wall-clock timeout is only the hang guard. With no CPU
 // limit on any run (a host whose process tree's CPU time cannot be read),
 // run_all runs them under their wall-clock limits.
-build_run_actions: fn(runs: [BuildActionRun], jobs: Int) -[FS, Env, Exec, Time, Time.Wait]> [Result<ProcessReceipt, BuildExecutionError>] Never! {
-    results := [Result<ProcessReceipt, BuildExecutionError>]{}
+build_run_actions: fn(runs: [BuildActionRun], jobs: Int) -[FS, Env, Exec, Time, Time.Wait]> [ProcessReceipt BuildExecutionError!] Never! {
+    results := [ProcessReceipt BuildExecutionError!]{}
     if !runs.any(fn(run) { run.cpu_limit_ms > 0 }) {
         specs: loop run in runs -> run.command.spec
         if process.run_all(specs, jobs) == {
-            .Ok(receipts) -> loop index in 0..<runs.len() {
-                if receipts[index] == {
-                    .Ok(receipt) -> results.push(Ok(receipt))
-                    .Err(error) -> results.push(Err(build_abandon_action(runs[index], NativeSandboxError.IO("{error}"))))
+            .Ok(receipts) -> {
+                loop index in 0..<runs.len() {
+                    if receipts[index] == {
+                        .Ok(receipt) -> { results.push(Ok(receipt)) }
+                        .Err(error) -> {
+                            results.push(Err(build_abandon_action(runs[index], NativeSandboxError.IO("{error}"))))
+                        }
+                    }
                 }
             }
-            .Err(error) -> loop index in 0..<runs.len() -> results.push(Err(build_abandon_action(runs[index], NativeSandboxError.IO("{error}"))))
+            .Err(error) -> {
+                loop index in 0..<runs.len() {
+                    results.push(Err(build_abandon_action(runs[index], NativeSandboxError.IO("{error}"))))
+                }
+            }
         }
         return results
     }
     cores: sys.cpu_count()
-    finished := [Result<ProcessReceipt, BuildExecutionError>?]{}
+    finished := [(ProcessReceipt BuildExecutionError!)?]{}
     loop _ in 0..<runs.len() -> finished.push(None)
     children := [ProcessChild]{}
     watches := [BuildActionWatch]{}
@@ -380,7 +405,9 @@ build_run_actions: fn(runs: [BuildActionRun], jobs: Int) -[FS, Env, Exec, Time, 
                     watches.push(BuildActionWatch{run: started, due_ns: clock.elapsed().ns, limit_ns: runs[started].cpu_limit_ms * 1000000 * cores, used_ns: 0, stopped: false, live: true})
                     running += 1
                 }
-                .Err(error) -> finished[started] = Val(Err(build_abandon_action(runs[started], NativeSandboxError.IO("{error}"))))
+                .Err(error) -> {
+                    finished[started] = Val(Err(build_abandon_action(runs[started], NativeSandboxError.IO("{error}"))))
+                }
             }
             started += 1
         }
@@ -399,14 +426,18 @@ build_run_actions: fn(runs: [BuildActionRun], jobs: Int) -[FS, Env, Exec, Time, 
             watches[at].due_ns = now + BUILD_CPU_SAMPLE_NS
             used: sys.tree_cpu_time(children[at].id()) ?? next
             watches[at].used_ns = used.ns
-            if used.ns > watches[at].limit_ns && children[at].kill() == .Ok(_) -> watches[at].stopped = true
+            if used.ns > watches[at].limit_ns && children[at].kill() == .Ok(_) {
+                watches[at].stopped = true
+            }
         }
         if running > 0 {
             time.sleep(time.duration_ms(pause))
             if pause < 10 -> pause = if pause * 2 > 10 -> 10 else -> pause * 2
         }
     }
-    loop outcome in finished -> results.push(outcome ?? panic("every staged action ends with a receipt or an error"))
+    loop outcome in finished {
+        results.push(outcome ?? panic("every staged action ends with a receipt or an error"))
+    }
     results
 }
 
@@ -421,7 +452,7 @@ build_wait_action: fn(run: BuildActionRun, child: ProcessChild, watch: BuildActi
     waited: (receipt.user_cpu_ns ?? 0) + (receipt.system_cpu_ns ?? 0)
     used: if watch.used_ns > waited -> watch.used_ns else -> waited
     // copy: the error names the action the run still owns.
-    Err(BuildExecutionError.OverCPU{action: run.action.name.copy(), limit_ms: run.cpu_limit_ms, cores, used_ms: used /% 1000000})
+    Err(BuildExecutionError.OverCPU{action: run.action.name.copy(), limit_ms: run.cpu_limit_ms, cores: cores, used_ms: used /% 1000000})
 }
 
 // Snapshot the action's inputs and the files of the folders it reads whole
@@ -434,11 +465,15 @@ build_wait_action: fn(run: BuildActionRun, child: ProcessChild, watch: BuildActi
 // and `JET_TRACE_FILE`.
 build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, project_root: String, artifact_store: BuildArtifactStoreHandle?, grants: [BuildEffect], probe_facts: [BuildProbeFact], stamps: &StampTable, traces: String?) -[FS, Env, Exec, Time, Time.Wait, Rand]> BuildActionStart BuildExecutionError! {
     loop cap in declared.caps {
-        if !grants.contains(cap) -> return Err(BuildExecutionError.MissingGrant{action: declared.name, capability: cap})
+        if !grants.contains(cap) {
+            return Err(BuildExecutionError.MissingGrant{action: declared.name, capability: cap})
+        }
     }
     action: build_found_folders(plan, declared, probe_facts) ?? return Err(err)
     handle: HermeticActionHandle{id: action.id, context: plan.context}
-    if plan.action(handle) == None -> return Err(BuildExecutionError.InvalidGraph(HermeticBuildError.UnknownAction(handle.id)))
+    if plan.action(handle) == None {
+        return Err(BuildExecutionError.InvalidGraph(HermeticBuildError.UnknownAction(handle.id)))
+    }
     inputs: build_snapshot_declared_inputs(project_root, action) ?? return Err(build_io_action(action, err))
     snapshots := loop input in inputs -> input.snapshot
     snapshots.extend(build_snapshot_folders(stamps, project_root, action) ?? return Err(build_io_action(action, err)))
@@ -469,11 +504,13 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
             .Val(record) -> {
                 if record.failure_report == .Val(report) {
                     build_record_cache_event(action.name, key, ActionCacheStatus.Hit(.LocalActionRecordMatched), "terminal", Val(record.outcome))
-                    return Err(BuildExecutionError.Reported{report})
+                    return Err(BuildExecutionError.Reported{report: report})
                 }
                 if build_restore_action_outputs(store, project_root, action, record) == {
                     .Ok(edited) -> {
-                        if edited == .Val(path) -> return Err(BuildExecutionError.HandEdited{action: action.name, path})
+                        if edited == .Val(path) {
+                            return Err(BuildExecutionError.HandEdited{action: action.name, path: path})
+                        }
                         build_record_cache_event(action.name, key, ActionCacheStatus.Hit(.LocalActionRecordMatched), "restore", Val(ActionOutcome.RestoredFromCache))
                         return Ok(BuildActionStart.Restored)
                     }
@@ -493,7 +530,9 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
     build_ensure_real_directory(files.dirname(sandbox)) ?? return Err(build_io_action(action, err))
     if files.stat(sandbox) == {
         .Ok(info) -> {
-            if info.is_symlink || !info.is_dir -> return Err(build_io_action(action, BuildIOError.new(.PermissionDenied, "action sandbox is not a real directory")))
+            if info.is_symlink || !info.is_dir {
+                return Err(build_io_action(action, BuildIOError.new(.PermissionDenied, "action sandbox is not a real directory")))
+            }
             files.remove_all(sandbox) ?? return Err(build_io_action(action, BuildIOError.from(err)))
         }
         .Err(_) -> {}
@@ -502,14 +541,20 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
     loop input in inputs {
         to: build_resolve_under(sandbox, input.snapshot.path) ?? return Err(build_io_action(action, err))
         parent: files.dirname(to)
-        if parent != "" -> files.create_dir_all(parent) ?? return Err(build_io_action(action, BuildIOError.from(err)))
+        if parent != "" {
+            files.create_dir_all(parent) ?? return Err(build_io_action(action, BuildIOError.from(err)))
+        }
         files.write_bytes(to, input.bytes) ?? return Err(build_io_action(action, BuildIOError.from(err)))
-        if input.snapshot.executable -> files.set_mode(to, 493) ?? return Err(build_io_action(action, BuildIOError.from(err)))
+        if input.snapshot.executable {
+            files.set_mode(to, 493) ?? return Err(build_io_action(action, BuildIOError.from(err)))
+        }
     }
     loop output in action.outputs {
         path: build_resolve_under(sandbox, output) ?? return Err(build_io_action(action, err))
         parent: files.dirname(path)
-        if parent != "" -> files.create_dir_all(parent) ?? return Err(build_io_action(action, BuildIOError.from(err)))
+        if parent != "" {
+            files.create_dir_all(parent) ?? return Err(build_io_action(action, BuildIOError.from(err)))
+        }
     }
 
     runtime_args := build_runtime_toolchain_arguments(plan, action.toolchain, action.argv.slice(1, action.argv.len()))
@@ -523,17 +568,22 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
     }
     mounts := [NativeSandboxMount]{}
     if plan.toolchain(action.toolchain) == .Val(toolchain) {
-        loop mount in toolchain.mounts -> mounts.push(NativeSandboxMount{source: mount.source, destination: mount.destination})
+        loop mount in toolchain.mounts {
+            mounts.push(NativeSandboxMount{source: mount.source, destination: mount.destination})
+        }
     }
     loop folder in action.folders {
         source: build_folder_source(project_root, folder) ?? return Err(build_io_action(action, err))
-        if sys.is_linux() -> mounts.push(NativeSandboxMount{source, destination: build_folder_mount(folder.path)})
-        else {
+        if sys.is_linux() {
+            mounts.push(NativeSandboxMount{source: source, destination: build_folder_mount(folder.path)})
+        } else {
             // Seatbelt has no mount namespace: the work tree links the
             // folder's host path, which the profile lets the child read.
             link: build_resolve_under(sandbox, folder.path) ?? return Err(build_io_action(action, err))
             parent: files.dirname(link)
-            if parent != "" -> files.create_dir_all(parent) ?? return Err(build_io_action(action, BuildIOError.from(err)))
+            if parent != "" {
+                files.create_dir_all(parent) ?? return Err(build_io_action(action, BuildIOError.from(err)))
+            }
             real: files.realpath(source) ?? return Err(build_io_action(action, BuildIOError.from(err)))
             files.symlink(real, link) ?? return Err(build_io_action(action, BuildIOError.from(err)))
             mounts.push(NativeSandboxMount{source: real, destination: real.copy()})
@@ -559,7 +609,7 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
         files.remove_all(sandbox).drop("the action sandbox is removed best-effort; the sandbox error is reported")
         return Err(build_native_sandbox_error(action, err))
     }
-    Ok(BuildActionStart.Ready{run: BuildActionRun{action, key, sandbox, rebuild_status, command, reuse, cpu_limit_ms}})
+    Ok(BuildActionStart.Ready{run: BuildActionRun{action: action, key: key, sandbox: sandbox, rebuild_status: rebuild_status, command: command, reuse: reuse, cpu_limit_ms: cpu_limit_ms}})
 }
 
 // The digest the action's key holds for its tool at `executable`: a made
@@ -587,7 +637,9 @@ build_found_folders: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, pr
         }
         name: plan.probes[probe.id].name
         chosen: loop fact in probe_facts {
-            if fact.name == name && fact.success -> break fact.detail.copy()
+            if fact.name == name && fact.success {
+                break fact.detail.copy()
+            }
         } ?? return Err(BuildExecutionError.IO{action: action.name, detail: "the folder `{folder.path}` is the one the probe `{name}` finds, and that probe did not run"})
         folders.push(ActionFolder{path: folder.path.copy(), source: Val(chosen), found: folder.found})
     }
@@ -603,7 +655,9 @@ build_found_programs: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, p
     loop program in action.programs {
         name: plan.probes[program.probe.id].name
         found: loop fact in probe_facts {
-            if fact.name == name && fact.success -> break fact.detail.copy()
+            if fact.name == name && fact.success {
+                break fact.detail.copy()
+            }
         } ?? return Err(BuildExecutionError.IO{action: action.name, detail: "argument {program.at} is the program the probe `{name}` finds, and that probe found none"})
         programs.push(files.canonicalize(found) ?? return Err(build_io_action(action, BuildIOError.from(err))))
     }
@@ -629,19 +683,21 @@ build_finish_action: fn(run: BuildActionRun, receipt: ProcessReceipt, project_ro
         files.remove_all(sandbox).drop("the action sandbox is removed best-effort; the action failure is reported")
         report: build_action_failure_report(action.name, code, ran.receipt.errors.trim())
         if run.reuse == .Val(store) {
-            record: ActionResultRecord{key, outcome: ActionOutcome.Failed{exit_code: code}, outputs: [ActionOutputRecord]{}, failure_report: Val(report), status: ActionCacheStatus.Miss(build_rebuild_status_reason(run.rebuild_status))}
+            record: ActionResultRecord{key: key, outcome: ActionOutcome.Failed{exit_code: code}, outputs: [ActionOutputRecord]{}, failure_report: Val(report), status: ActionCacheStatus.Miss(build_rebuild_status_reason(run.rebuild_status))}
             build_write_action_record(store, key, record) ?? return Err(build_io_action(action, err))
             build_record_cache_event(action.name, key, run.rebuild_status, "terminal", Val(ActionOutcome.Failed{exit_code: code}))
         }
-        return Err(BuildExecutionError.Reported{report})
+        return Err(BuildExecutionError.Reported{report: report})
     }
     edited: if build_publish_sandbox_outputs(sandbox, project_root, action) == {
         .Ok(value) -> value
-        .Err(error) -> { return Err(build_io_action(action, error)) }
+        .Err(error) -> {
+            return Err(build_io_action(action, error))
+        }
     }
     if edited == .Val(path) {
         files.remove_all(sandbox).drop("the action sandbox is removed best-effort; the hand edit is reported")
-        return Err(BuildExecutionError.HandEdited{action: action.name, path})
+        return Err(BuildExecutionError.HandEdited{action: action.name, path: path})
     }
     outcome: ActionOutcome.Succeeded{exit_code: code}
     if run.reuse == .Val(store) {
@@ -696,8 +752,12 @@ build_publish_sandbox_outputs: fn(sandbox: String, project_root: String, action:
         to: build_resolve_under(project_root, action.outputs[index])
         build_prepare_output_destination(project_root, to)
         if contents[index] == {
-            .Val(bytes) -> build_atomic_restore_file(project_root, to, bytes, executable: runnable[index])
-            .None -> build_move_output(sandbox, build_resolve_under(sandbox, action.outputs[index]), project_root, to)
+            .Val(bytes) -> {
+                build_atomic_restore_file(project_root, to, bytes, executable: runnable[index])
+            }
+            .None -> {
+                build_move_output(sandbox, build_resolve_under(sandbox, action.outputs[index]), project_root, to)
+            }
         }
     }
     Ok(None)
@@ -716,7 +776,7 @@ build_execute_probes: fn(plan: HermeticBuildPlan, selected: [Int]) -[FS, Env, Ex
             }
             .FindFolder(file) -> {
                 search: foundation_find_folder(file, foundation_library_folders())
-                found: search.found ?? return Err(BuildExecutionError.FolderNotFound{probe: probe.name, file, searched: loop miss in search.misses -> "{miss.folder}: {miss.reason}"})
+                found: search.found ?? return Err(BuildExecutionError.FolderNotFound{probe: probe.name, file: file, searched: loop miss in search.misses -> "{miss.folder}: {miss.reason}"})
                 (success: true, detail: found.folder)
             }
             .PkgConfig(package, min_version) -> {
@@ -737,7 +797,9 @@ build_execute_probes: fn(plan: HermeticBuildPlan, selected: [Int]) -[FS, Env, Ex
             }
         }
         facts.push(BuildProbeFact{name: probe.name, success: result.success, detail: result.detail, reproducibility: probe.reproducibility, toolchain: probe.toolchain, toolchain_provenance: build_toolchain_provenance_digest(plan, probe.toolchain)})
-        if !result.success -> return Err(BuildExecutionError.ProbeFailed{probe: probe.name, detail: result.detail})
+        if !result.success {
+            return Err(BuildExecutionError.ProbeFailed{probe: probe.name, detail: result.detail})
+        }
     }
     Ok(facts)
 }
@@ -779,18 +841,20 @@ build_run_probe_sandboxed: fn(executable: String, args: [String], source: (path:
             return Err(BuildExecutionError.IO{action: "build probe input", detail: "{error}"})
         }
     }
-    if foundation_run_native_sandboxed_with_timeout_and_mounts(executable, args, root, None, [String: String]{}, false, [NativeSandboxMount]{}, Val(timeout)) == {
+    if foundation_run_native_sandboxed_with_timeout_and_mounts(executable, args, root, None, [String:String]{}, false, [NativeSandboxMount]{}, Val(timeout)) == {
         .Ok(output) -> {
             files.remove_all(root).drop("the probe root is removed best-effort after the run")
             Ok(output.receipt)
         }
         .Err(error) -> {
             files.remove_all(root).drop("the probe root is removed best-effort after the run")
-            Err(if error == {
-                .Unsupported(reason) -> BuildExecutionError.SandboxUnavailable{reason}
-                .IO(detail) -> BuildExecutionError.IO{action: "build probe sandbox", detail}
-                .TimedOut(_) -> BuildExecutionError.IO{action: "build probe sandbox", detail: error.message()}
-            })
+            Err(
+                if error == {
+                    .Unsupported(reason) -> BuildExecutionError.SandboxUnavailable{reason: reason}
+                    .IO(detail) -> BuildExecutionError.IO{action: "build probe sandbox", detail: detail}
+                    .TimedOut(_) -> BuildExecutionError.IO{action: "build probe sandbox", detail: error.message()}
+                },
+            )
         }
     }
 }
@@ -857,17 +921,23 @@ build_find_program_path: fn(program: String) -[FS, Env]> String? Never! {
 // an explicit path or PATH.
 build_resolve_program_path: fn(plan: HermeticBuildPlan, toolchain_handle: ToolchainHandle, program: String) -[FS, Env]> String? Never! {
     toolchain: plan.toolchain(toolchain_handle) ?? return None
-    if toolchain.tools.get(program) == .Val(declared) -> return build_canonical_tool_path(toolchain, declared)
+    if toolchain.tools.get(program) == .Val(declared) {
+        return build_canonical_tool_path(toolchain, declared)
+    }
     basename: files.basename(program)
     if basename != "" {
-        if toolchain.tools.get(basename) == .Val(declared) -> return build_canonical_tool_path(toolchain, declared)
+        if toolchain.tools.get(basename) == .Val(declared) {
+            return build_canonical_tool_path(toolchain, declared)
+        }
     }
     if toolchain.resolution == ToolchainResolution.DeclaredOnly -> return None
     if build_path_component_count(program) > 1 {
         if build_canonical_executable_path(program) == .Val(path) -> return Val(path)
     }
     if toolchain.role == ToolchainRole.Host -> return build_find_program_path(program)
-    if build_target_matches_running_host(toolchain.target_triple) -> return build_find_program_path(program)
+    if build_target_matches_running_host(toolchain.target_triple) {
+        return build_find_program_path(program)
+    }
     None
 }
 
@@ -932,10 +1002,10 @@ build_runtime_toolchain_arguments: fn(plan: HermeticBuildPlan, handle: Toolchain
     loop argument in args -> build_runtime_toolchain_argument(toolchain, argument)
 }
 
-build_runtime_toolchain_environment: fn(plan: HermeticBuildPlan, handle: ToolchainHandle, env: [String: String]) -[Env]> [String: String] Never! {
+build_runtime_toolchain_environment: fn(plan: HermeticBuildPlan, handle: ToolchainHandle, env: [String:String]) -[Env]> [String:String] Never! {
     if sys.is_linux() -> return env.copy()
     toolchain: plan.toolchain(handle) ?? return env
-    out := [String: String]{}
+    out := [String:String]{}
     loop key in env.keys() -> out[key] = build_runtime_toolchain_argument(toolchain, env[key])
     out
 }
@@ -945,7 +1015,9 @@ build_runtime_toolchain_argument: fn(toolchain: HermeticBuildToolchain, argument
     prefixes: [String]{"--sysroot=", "-isysroot=", "-I", "-L", "-include", "-isystem", "-iquote", "-idirafter", "-imacros"}
     loop prefix in prefixes {
         if !argument.starts_with(prefix) -> next
-        if build_runtime_mount_path(toolchain, argument.removeprefix(prefix)) == .Val(path) -> return "{prefix}{path}"
+        if build_runtime_mount_path(toolchain, argument.removeprefix(prefix)) == .Val(path) {
+            return "{prefix}{path}"
+        }
     }
     argument.copy()
 }
@@ -953,7 +1025,9 @@ build_runtime_toolchain_argument: fn(toolchain: HermeticBuildToolchain, argument
 build_runtime_mount_path: fn(toolchain: HermeticBuildToolchain, value: String) -> String? Never! {
     loop mount in toolchain.mounts {
         destination := mount.destination
-        loop destination.ends_with("/") || destination.ends_with("\\") -> destination = destination.slice(0, destination.len() - 1)
+        loop destination.ends_with("/") || destination.ends_with("\\") {
+            destination = destination.slice(0, destination.len() - 1)
+        }
         if value == destination -> return Val(mount.source)
         if !value.starts_with(destination) -> next
         suffix: value.removeprefix(destination)

@@ -32,8 +32,11 @@ use {
 }
 
 TARGET: "Compiler/JetSema/Source/Sema/PreludeRows.jet"
+
 SHAPES_ROOT: "Compiler/JetFoundation/Source"
+
 WRITE_COMMAND: "jet Compiler/Toolchain/PreludeRows/Main.jet --write"
+
 // A literal whose constructors nest deep checks slowly, so a constructor
 // nesting this deep is a constant of its own that its parent names.
 NODE_HEIGHT: 12
@@ -111,7 +114,9 @@ read_shapes: fn(out: &RowsOut) PreludeRowsError! -[FS]> {
         text: files.read(path) ?? return Err(rows_fail("cannot read {path}: {err}"))
         parsed := parse_source(text.bytes())
         loop diagnostic in parsed.diagnostics {
-            if diagnostic.severity == DIAGNOSTIC_ERROR -> return Err(rows_fail("{path} does not parse: {diagnostic.what}"))
+            if diagnostic.severity == DIAGNOSTIC_ERROR {
+                return Err(rows_fail("{path} does not parse: {diagnostic.what}"))
+            }
         }
         loop item in parsed.program.items.move() -> add_item(out, item.move())
     }
@@ -141,9 +146,13 @@ add_enum: fn(out: &RowsOut, def: &&EnumDef) Never! {
     loop variant in def.variants.move() {
         row := RowVariant{name: variant.name.move(), unit: false, single: None, fields: [RowField]{}}
         if variant.payload.move() == {
-            .Unit -> row.unit = true
-            .Single(ty, _) -> row.single = Val(ty.move())
-            .Named(fields) -> loop field in fields.move() -> row.fields.push(RowField{name: field.name.move(), ty: field.ty.move(), defaulted: false})
+            .Unit -> { row.unit = true }
+            .Single(ty, _) -> { row.single = Val(ty.move()) }
+            .Named(fields) -> {
+                loop field in fields.move() {
+                    row.fields.push(RowField{name: field.name.move(), ty: field.ty.move(), defaulted: false})
+                }
+            }
         }
         variants.push(row.move())
     }
@@ -205,15 +214,15 @@ literal: fn(out: &RowsOut, ty: Type, value: Dyn, top: Bool, at: String, prefix: 
             }
         } else if value == .Bytes(bytes) {
             loop byte in bytes -> parts.push("U8{{{byte}}}")
-        } else {
-            return Err(mismatch(at, "a list"))
-        }
+        } else { return Err(mismatch(at, "a list")) }
         out.height = height + 1
         return Ok("{type_text(out, ty, at) ?? return Err(err)}{{{joined(parts, top)}}}")
     }
     if ty == .Int -> return if value == .Int(n) -> Ok("{n}") else -> Err(mismatch(at, "an Int"))
     if ty == .Bool -> return if value == .Bool(b) -> Ok("{b}") else -> Err(mismatch(at, "a Bool"))
-    if ty == .String -> return if value == .Text(text) -> Ok("\"{jfmt_escape_str_lit(text)}\"") else -> Err(mismatch(at, "a String"))
+    if ty == .String {
+        return if value == .Text(text) -> Ok("\"{jfmt_escape_str_lit(text)}\"") else -> Err(mismatch(at, "a String"))
+    }
     if ty == .Float {
         if value == .Float(number) {
             text: "{number}"
@@ -221,7 +230,9 @@ literal: fn(out: &RowsOut, ty: Type, value: Dyn, top: Bool, at: String, prefix: 
         }
         return Err(mismatch(at, "a Float"))
     }
-    if ty == .IntN(signed, bits) -> return if value == .Int(n) -> Ok("{if signed -> "I" else -> "U"}{bits}{{{n}}}") else -> Err(mismatch(at, "an integer"))
+    if ty == .IntN(signed, bits) {
+        return if value == .Int(n) -> Ok("{if signed -> "I" else -> "U"}{bits}{{{n}}}") else -> Err(mismatch(at, "an integer"))
+    }
     if ty == .Named(name) -> return named_literal(out, name, value, top, at, prefix)
     Err(rows_fail("{at}: its declared type has no literal spelling here"))
 }
@@ -237,7 +248,9 @@ named_literal: fn(out: &RowsOut, name: String, value: Dyn, top: Bool, at: String
         return Err(mismatch(at, "an integer"))
     }
     position: out.index.get(name) ?? return Err(rows_fail("{at}: no struct or enum {name} under {SHAPES_ROOT}"))
-    if out.shapes[position].twice -> return Err(rows_fail("{at}: {name} is declared more than once under {SHAPES_ROOT}"))
+    if out.shapes[position].twice {
+        return Err(rows_fail("{at}: {name} is declared more than once under {SHAPES_ROOT}"))
+    }
     out.shapes[position].used = true
     shape: out.shapes[position]
     if !shape.is_enum {
@@ -299,7 +312,9 @@ fields_literal: fn(out: &RowsOut, name: String, fields: [RowField], value: Dyn, 
                 if out.height > height -> height = out.height
             }
             if found || field.defaulted -> next
-            if !is_optional(field.ty) -> return Err(rows_fail("{at}: the encoding leaves out {name}.{field.name}, which has no default"))
+            if !is_optional(field.ty) {
+                return Err(rows_fail("{at}: the encoding leaves out {name}.{field.name}, which has no default"))
+            }
             parts.push("{field.name}: None")
         }
         out.height = height
@@ -365,7 +380,9 @@ render_rows: fn() -[FS]> String PreludeRowsError! {
 
 prelude_rows_main: fn(args: [String]) -[FS]> String PreludeRowsError! {
     mode: if args.len() == 0 -> "--check" else -> args[0]
-    if args.len() > 1 || (mode != "--check" && mode != "--write") -> return Err(rows_fail("usage: jet Compiler/Toolchain/PreludeRows/Main.jet [--check|--write]"))
+    if args.len() > 1 || (mode != "--check" && mode != "--write") {
+        return Err(rows_fail("usage: jet Compiler/Toolchain/PreludeRows/Main.jet [--check|--write]"))
+    }
     generated: render_rows() ?? return Err(err)
     current: if files.exists(TARGET) -> files.read(TARGET) ?? return Err(rows_fail("cannot read {TARGET}: {err}")) else -> ""
     if current == generated -> return Ok("prelude rows match: {TARGET}")

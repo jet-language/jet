@@ -17,9 +17,7 @@ names_in: fn(env: Env) -> Int {
     0
 }
 
-has_graph: fn(env: Env) -> Bool {
-    env.graph != None
-}
+has_graph: fn(env: Env) -> Bool { env.graph != None }
 
 first_name: fn(env: Env) -> String {
     graph: env.graph ?? return "none"
@@ -61,9 +59,7 @@ renamed: fn(env: Env) -> Graph {
     updated
 }
 
-consume: fn(graph: &&Graph) -> Int {
-    graph.names.len()
-}
+consume: fn(graph: &&Graph) -> Int { graph.names.len() }
 
 consumed: fn(env: Env) -> Int {
     graph: env.graph ?? return 0
@@ -72,9 +68,7 @@ consumed: fn(env: Env) -> Int {
     consume(graph.copy())
 }
 
-count_names: fn(names: [String]) -> Int {
-    names.len()
-}
+count_names: fn(names: [String]) -> Int { names.len() }
 
 // Slicing a read parameter's list reads the list in place; only the slice
 // is a new list.
@@ -89,9 +83,7 @@ Holder: struct {
 }
 
 // An owned parameter's last use moves it into the struct; no copy is left.
-hold: fn(graph: &&Graph, note: &&String) -> Holder {
-    Holder{graph: graph, note: note}
-}
+hold: fn(graph: &&Graph, note: &&String) -> Holder { Holder{graph: graph, note: note} }
 
 run: fn() {
     env := Env{graph: Val(Graph{names: [String]{"ab", "c", "ab"}}), plain: Graph{names: [String]{"p"}}}

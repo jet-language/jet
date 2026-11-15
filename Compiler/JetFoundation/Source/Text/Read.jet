@@ -1,8 +1,6 @@
 // Shared diagnostics decoder over scalar octets. Storage access stays in
 // the existing READ caller; these functions create no carrier or borrow.
-diagnostic_is_continuation: fn(value: Int) -> Bool Never! {
-    value >= 128 && value <= 191
-}
+diagnostic_is_continuation: fn(value: Int) -> Bool Never! { value >= 128 && value <= 191 }
 
 foundation_utf8_lead_width: fn(first: Int) -> Int Never! {
     if {
@@ -50,15 +48,11 @@ foundation_byte_text: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
 // to a Core private leaf. The caller keeps the source alive and unchanged.
 // A String.bytes() argument still copies before entering these helpers.
 
-foundation_read_bytes_len: fn(source: [U8]) -> Int Never! {
-    source.len()
-}
+foundation_read_bytes_len: fn(source: [U8]) -> Int Never! { source.len() }
 
 // The caller supplies a valid byte index. Ordinary array indexing retains
 // the existing checked bounds contract; no sentinel or clamping is added.
-foundation_read_bytes_at: fn(source: [U8], index: Int) -> Int Never! {
-    Int{source[index]}
-}
+foundation_read_bytes_at: fn(source: [U8], index: Int) -> Int Never! { Int{source[index]} }
 
 // The caller supplies a scalar boundary below the extent of valid UTF-8.
 // End-of-input is checked by the caller, not represented by a new scalar.

@@ -71,7 +71,9 @@ store_try_entry_output_hash_with_options: fn(verification: &StoreVerification, r
     verified: if store_verified_output_hash_with_options(verification, entry.out, hangar_root, entry.platform_artifact_kind != "", force_full, !force_full) == {
         .Ok(value) -> value
         .Err(error) -> {
-            if error.is_not_found() -> return Err(StoreError.Other("output `{entry.out}` does not exist"))
+            if error.is_not_found() {
+                return Err(StoreError.Other("output `{entry.out}` does not exist"))
+            }
             return Err(StoreError.Other(error.message()))
         }
     }
@@ -89,7 +91,7 @@ store_verified_output_hash: fn(verification: &StoreVerification, path: String, h
     }
     store_note_verified_digest_miss(verification, path)
     digest: store_hash_output_content(path, hangar_root, allow_semantic_xattrs)
-    store_verified_digest_put(verification, key, VerifiedDigestMemo{path, stamp, digest})
+    store_verified_digest_put(verification, key, VerifiedDigestMemo{path: path, stamp: stamp, digest: digest})
     Ok(digest)
 }
 
@@ -108,7 +110,9 @@ store_full_verified_output_hash: fn(verification: &StoreVerification, path: Stri
 
 // Doctor's read-only form of the seal decision: never mutates the Hangar.
 store_read_only_output_hash: fn(verification: &StoreVerification, path: String, hangar_root: String?, allow_semantic_xattrs: Bool) -[FS, Env]> String StoreError! {
-    if hangar_root == .Val(root) && store_check_seal(verification, path, root) == .Val(digest) -> return Ok(digest)
+    if hangar_root == .Val(root) && store_check_seal(verification, path, root) == .Val(digest) {
+        return Ok(digest)
+    }
     store_hash_output_content(path, hangar_root, allow_semantic_xattrs)
 }
 
@@ -123,7 +127,7 @@ store_verified_output_hash_persistent_with_status: fn(verification: &StoreVerifi
 
 store_verified_output_hash_with_options: fn(verification: &StoreVerification, path: String, hangar_root: String?, allow_semantic_xattrs: Bool, force_full: Bool, write_seal: Bool) -[FS, Env]> VerifiedOutputHash StoreError! {
     if !force_full && hangar_root == .Val(root) && store_check_seal(verification, path, root) == .Val(digest) {
-        return Ok(VerifiedOutputHash{digest, status: VerificationStatus{reused: true, resealed: false, reseal_needed: false}})
+        return Ok(VerifiedOutputHash{digest: digest, status: VerificationStatus{reused: true, resealed: false, reseal_needed: false}})
     }
     store_note_verified_digest_miss(verification, path)
     digest: store_hash_output_content(path, hangar_root, allow_semantic_xattrs)
@@ -136,11 +140,13 @@ store_verified_output_hash_with_options: fn(verification: &StoreVerification, pa
         store_write_seal(verification, path, root, digest)
         resealed = true
     }
-    Ok(VerifiedOutputHash{digest, status: VerificationStatus{reused: false, resealed, reseal_needed: reseal_needed && !resealed}})
+    Ok(VerifiedOutputHash{digest: digest, status: VerificationStatus{reused: false, resealed: resealed, reseal_needed: reseal_needed && !resealed}})
 }
 
 store_hash_output_content: fn(path: String, hangar_root: String?, allow_semantic_xattrs: Bool) -[FS, Env]> String StoreError! {
-    if hangar_root == .Val(root) -> return Ok(pkg_try_output_hash_of_in_hangar(path, root, allow_semantic_xattrs))
+    if hangar_root == .Val(root) {
+        return Ok(pkg_try_output_hash_of_in_hangar(path, root, allow_semantic_xattrs))
+    }
     hook := EnvelopeWalkHook.recording()
     Ok(pkg_try_output_hash_of_with_policy(path, allow_semantic_xattrs, hook))
 }
@@ -156,14 +162,14 @@ store_verified_file_hash: fn(verification: &StoreVerification, path: String) -[F
     }
     store_note_verified_digest_miss(verification, path)
     digest: "sha256-{crypto.sha256(files.read_bytes(path)).hex()}"
-    store_verified_digest_put(verification, key, VerifiedDigestMemo{path, stamp, digest})
+    store_verified_digest_put(verification, key, VerifiedDigestMemo{path: path, stamp: stamp, digest: digest})
     Ok(digest)
 }
 
 store_refresh_verified_digest: fn(verification: &StoreVerification, path: String, hangar_root: String, allow_semantic_xattrs: Bool, digest: String) StoreError! -[FS, Env]> {
     stamp: store_object_stamp(files.stat(path))
     key: store_output_digest_key(path, store_normalize_memo_root(Val(hangar_root)), allow_semantic_xattrs)
-    store_verified_digest_put(verification, key, VerifiedDigestMemo{path, stamp, digest})
+    store_verified_digest_put(verification, key, VerifiedDigestMemo{path: path, stamp: stamp, digest: digest})
 }
 
 store_invalidate_verified_digest: fn(verification: &StoreVerification, path: String) Never! {
@@ -194,7 +200,7 @@ store_verified_digest_put: fn(verification: &StoreVerification, key: String, mem
 store_remember_output_digest: fn(verification: &StoreVerification, path: String, hangar_root: String?, allow_semantic_xattrs: Bool, digest: String) StoreError! -[FS, Env]> {
     stamp: store_object_stamp(files.stat(path))
     key: store_output_digest_key(path, store_normalize_memo_root(hangar_root), allow_semantic_xattrs)
-    store_verified_digest_put(verification, key, VerifiedDigestMemo{path, stamp, digest})
+    store_verified_digest_put(verification, key, VerifiedDigestMemo{path: path, stamp: stamp, digest: digest})
 }
 
 // Carry a tree digest across a rename this process made: the renamed root
@@ -208,7 +214,7 @@ store_carry_verified_digest: fn(verification: &StoreVerification, source: String
     loop key in keys {
         memo: store_verified_digest_get(verification, key)
         if memo == .Val(cached) && cached.stamp == stamp {
-            store_verified_digest_put(verification, store_output_digest_key(destination, root, allow_semantic_xattrs), VerifiedDigestMemo{path: destination, stamp, digest: cached.digest})
+            store_verified_digest_put(verification, store_output_digest_key(destination, root, allow_semantic_xattrs), VerifiedDigestMemo{path: destination, stamp: stamp, digest: cached.digest})
             return
         }
     }
@@ -223,7 +229,7 @@ store_content_digest_key: fn(stamp: DigestStamp) -> String Never! {
 // Remember the content SHA-256 hex a producer took from a file's bytes.
 store_remember_content_digest: fn(verification: &StoreVerification, path: String, digest_hex: String) StoreError! -[FS]> {
     stamp: store_object_stamp(files.stat(path))
-    store_verified_digest_put(verification, store_content_digest_key(stamp), VerifiedDigestMemo{path, stamp, digest: digest_hex})
+    store_verified_digest_put(verification, store_content_digest_key(stamp), VerifiedDigestMemo{path: path, stamp: stamp, digest: digest_hex})
 }
 
 // The content SHA-256 hex of each file. Remembered digests are reused; the
@@ -322,7 +328,9 @@ store_hash_tree_and_files: fn(root: String, paths: [String], sizes: [Int]) -[FS,
         result: handle.join() ?? StoreHashLaneResult{tree: "", digests: [String]{}, failure: "a hashing worker stopped"}
         if result.failure != "" && failure == "" -> failure = result.failure.copy()
         if lanes[lane_index].root != "" -> tree = result.tree.copy()
-        loop slot in 0..<result.digests.len() -> digests[lanes[lane_index].slots[slot]] = result.digests[slot].copy()
+        loop slot in 0..<result.digests.len() {
+            digests[lanes[lane_index].slots[slot]] = result.digests[slot].copy()
+        }
         lane_index += 1
     }
     if failure != "" -> return Err(StoreError.Other(failure))
@@ -367,7 +375,9 @@ MovePathPermissions: struct {
     default: fn() -> MovePathPermissions Never! { MovePathPermissions{original: [MovedPathMode]{}} }
 
     make_writable: fn(&self, path: String, root: String) StoreError! -[FS]> {
-        if !store_path_starts_with(path, root) -> return Err(StoreError.Other("quarantine path escapes Hangar root"))
+        if !store_path_starts_with(path, root) {
+            return Err(StoreError.Other("quarantine path escapes Hangar root"))
+        }
         current := path.copy()
         loop {
             info: files.stat(current)
@@ -381,7 +391,9 @@ MovePathPermissions: struct {
                     self.original.push(MovedPathMode{path: current, mode: info.mode})
                 }
             }
-            if current == root -> return
+            if current == root {
+                return
+            }
             parent: files.dirname(current)
             if parent == current || parent == "" -> break
             current = parent
@@ -440,13 +452,17 @@ store_quarantine_invalid_entry: fn(verification: &StoreVerification, roots: Hang
     if found.envelope.output_hash != entry.envelope.output_hash || store_entry_action_key(found) != store_entry_action_key(entry) {
         return
     }
-    if found.id != store_expected_entry_id(found) -> return Err(StoreError.Other("invalid cache record identity"))
+    if found.id != store_expected_entry_id(found) {
+        return Err(StoreError.Other("invalid cache record identity"))
+    }
     // A proven-mismatch check must re-hash real bytes: the process-local
     // stamp memo and a sealed digest may both trust content this entry is
     // explicitly suspected of drifting from.
     store_invalidate_verified_digest(verification, found.out)
     proof: store_verify_cache_entry_with_graph(verification, roots, found, found.reference, expectation, Val(graph))
-    if proof.trusted() -> return
+    if proof.trusted() {
+        return
+    }
     // Remove output bytes only on PROVEN drift: the forced real hash bypasses
     // the memo and the seal and disagrees with the recorded digest. An
     // unprovable read is not proof of drift; the record is quarantined either way.
@@ -469,7 +485,9 @@ store_quarantine_invalid_entry: fn(verification: &StoreVerification, roots: Hang
         ()
     }
     if move_failure == .Val(error) {
-        if restore_failure == .Val(restore) -> return Err(StoreError.Other("{error.message()}; restoring Hangar permissions failed: {restore.message()}"))
+        if restore_failure == .Val(restore) {
+            return Err(StoreError.Other("{error.message()}; restoring Hangar permissions failed: {restore.message()}"))
+        }
         return Err(error)
     }
     if restore_failure == .Val(restore) -> return Err(restore)
@@ -537,7 +555,7 @@ IngestRequest: struct {
     reference: String
     cache_identity: CacheIdentity
     references: [String]
-    outputs: [String: String]
+    outputs: [String:String]
     signature: String
     provenance: String
     // Explicit platform artifact kind. Empty rejects semantic xattrs;
@@ -623,16 +641,22 @@ store_ensure_real_directory: fn(path: String, label: String) StoreError! -[FS]> 
             if !store_io_is_not_found(error) -> return Err(StoreError.IO(error))
             files.create_dir_all(path)
             created: files.stat(path)
-            if created.is_symlink || !created.is_dir -> return Err(StoreError.InvalidData("{label} is not a real directory; repair the path before writing"))
+            if created.is_symlink || !created.is_dir {
+                return Err(StoreError.InvalidData("{label} is not a real directory; repair the path before writing"))
+            }
             return
         }
     }
-    if info.is_symlink || !info.is_dir -> return Err(StoreError.InvalidData("{label} is not a real directory; repair the path before writing"))
+    if info.is_symlink || !info.is_dir {
+        return Err(StoreError.InvalidData("{label} is not a real directory; repair the path before writing"))
+    }
 }
 
 store_require_real_directory: fn(path: String, label: String) StoreError! -[FS]> {
     info: files.stat(path)
-    if info.is_symlink || !info.is_dir -> return Err(StoreError.InvalidData("{label} is not a real directory; repair the path before reading"))
+    if info.is_symlink || !info.is_dir {
+        return Err(StoreError.InvalidData("{label} is not a real directory; repair the path before reading"))
+    }
 }
 
 // Atomic staged ingest: no-follow copy, path-law and canonical digest,
@@ -650,11 +674,15 @@ store_ingest_tree_observed: fn(verification: &StoreVerification, roots: HangarRo
 }
 
 store_ingest_tree_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, request: IngestRequest, after_child_copy: (fn(String) -[FS]>)?) -[FS, Env, Time]> IngestedObject IngestError! {
-    if !request.outputs.has_key("out") -> return Err(IngestError.Invalid("ingest requires a named output `out`"))
+    if !request.outputs.has_key("out") {
+        return Err(IngestError.Invalid("ingest requires a named output `out`"))
+    }
     output_names := request.outputs.keys().to_list()
     output_names.sort()
     loop name in output_names {
-        if !store_valid_output_name(name) -> return Err(IngestError.Invalid("named output `{name}` must be one path component"))
+        if !store_valid_output_name(name) {
+            return Err(IngestError.Invalid("named output `{name}` must be one path component"))
+        }
     }
     hangar: roots.hangar_dir()
     store_ensure_real_directory(hangar, "Hangar root") ?? return Err(store_ingest_store_error(err))
@@ -681,7 +709,9 @@ store_ingest_tree_unlocked: fn(verification: &StoreVerification, roots: HangarRo
 // A quota-rejected stage is removed (keeping it would defeat the ceiling
 // that rejected it); any other failed stage is kept in the quarantine.
 store_ingest_scrub_failed_stage: fn(hangar: String, stage: String, stamp: String, error: IngestError) Never! -[FS]> {
-    if !files.lexists(stage) -> return
+    if !files.lexists(stage) {
+        return
+    }
     quota_rejected: if error == {
         .IO(message) -> message.starts_with("Hangar quota admission failed:")
         .PathLaw(_) | .Mutated(_) | .Invalid(_) -> false
@@ -704,8 +734,8 @@ store_ingest_scrub_failed_stage: fn(hangar: String, stage: String, stamp: String
 
 store_ingest_stage_and_commit: fn(verification: &StoreVerification, roots: HangarRoots, request: IngestRequest, output_names: [String], stage: String, after_child_copy: (fn(String) -[FS]>)?) -[FS, Env, Time]> IngestedObject IngestError! {
     hangar: roots.hangar_dir()
-    named_digests := [String: String]{}
-    staged_outs := [String: String]{}
+    named_digests := [String:String]{}
+    staged_outs := [String:String]{}
     loop name in output_names {
         source: request.outputs[name]
         destination: files.join(files.join(stage, "outputs"), name)
@@ -737,7 +767,7 @@ store_ingest_stage_and_commit: fn(verification: &StoreVerification, roots: Hanga
     id: store_entry_id(request.name, request.version, request.reference, final_object)
     record_dir: files.join(hangar, id)
     now: store_now_secs()
-    facts := [String: String]{}
+    facts := [String:String]{}
     loop name in output_names -> facts["output.{name}"] = named_digests[name]
     canonical: store_canonical_producer("hangar-ingest", "cas:{primary}", primary, request.cache_identity, facts) ?? return Err(store_ingest_store_error(err))
     producer := ProducerRecord.decode(canonical) ?? return Err(store_ingest_store_error(err))
@@ -776,11 +806,13 @@ store_ingest_stage_and_commit: fn(verification: &StoreVerification, roots: Hanga
         .Ok(_) -> {}
         .Err(error) -> {
             message: error.message()
-            if message.starts_with("Hangar store limit exceeded") -> return Err(IngestError.IO("Hangar quota admission failed: {message}"))
+            if message.starts_with("Hangar store limit exceeded") {
+                return Err(IngestError.IO("Hangar quota admission failed: {message}"))
+            }
             return Err(store_ingest_store_error(error))
         }
     }
-    Ok(IngestedObject{entry: entries[0], deduplicated})
+    Ok(IngestedObject{entry: entries[0], deduplicated: deduplicated})
 }
 
 // Classify an output-hash failure of a staged tree (Rust matches the text).
@@ -796,7 +828,9 @@ store_source_metadata: fn(path: String) -[FS]> files.Stat IngestError! {
     info: if files.stat(path) == {
         .Ok(found) -> found
         .Err(error) -> {
-            if store_io_is_not_found(error) -> return Err(IngestError.IO("output `{path}` does not exist"))
+            if store_io_is_not_found(error) {
+                return Err(IngestError.IO("output `{path}` does not exist"))
+            }
             return Err(IngestError.IO("cannot inspect output `{path}`: {error}"))
         }
     }
@@ -811,9 +845,13 @@ store_read_output_directory: fn(path: String) -[FS]> [files.DirEntry] IngestErro
 store_reject_semantic_xattrs_tree: fn(path: String) IngestError! -[FS]> {
     info: store_source_metadata(path)
     pkg_check_xattrs(path, false) ?? return Err(IngestError.Invalid(err.message()))
-    if info.is_symlink -> return
+    if info.is_symlink {
+        return
+    }
     if info.is_dir {
-        loop entry in store_read_output_directory(path) -> store_reject_semantic_xattrs_tree(entry.path)
+        loop entry in store_read_output_directory(path) {
+            store_reject_semantic_xattrs_tree(entry.path)
+        }
     }
 }
 
@@ -822,9 +860,13 @@ store_reject_semantic_xattrs_tree: fn(path: String) IngestError! -[FS]> {
 store_copy_semantic_xattrs_tree: fn(source: String, destination: String) IngestError! -[FS]> {
     info: store_source_metadata(source)
     store_copy_semantic_xattrs_node(source, destination)
-    if info.is_symlink -> return
+    if info.is_symlink {
+        return
+    }
     if info.is_dir {
-        loop entry in files.list_dir(source) -> store_copy_semantic_xattrs_tree(entry.path, files.join(destination, entry.name))
+        loop entry in files.list_dir(source) {
+            store_copy_semantic_xattrs_tree(entry.path, files.join(destination, entry.name))
+        }
     }
 }
 
@@ -834,7 +876,9 @@ store_copy_semantic_xattrs_node: fn(source: String, destination: String) IngestE
         if pkg_is_excluded_xattr(name) -> next
         value: if files.extended_attribute(source, name) == {
             .Ok(stored) -> stored ?? return Err(IngestError.IO("lgetxattr `{name}` on `{source}`: attribute is missing"))
-            .Err(error) -> { return Err(IngestError.IO("lgetxattr `{name}` on `{source}`: {error}")) }
+            .Err(error) -> {
+                return Err(IngestError.IO("lgetxattr `{name}` on `{source}`: {error}"))
+            }
         }
         files.set_extended_attribute(destination, name, value) ?? return Err(IngestError.IO("lsetxattr `{name}` on `{destination}`: {err}"))
     }
@@ -888,11 +932,15 @@ store_copy_nofollow_tree_observed: fn(source: String, destination: String, after
     after: if files.stat(source) == {
         .Ok(found) -> found
         .Err(error) -> {
-            if store_io_is_not_found(error) -> return Err(IngestError.Mutated("`{source}` disappeared during ingest"))
+            if store_io_is_not_found(error) {
+                return Err(IngestError.Mutated("`{source}` disappeared during ingest"))
+            }
             return Err(IngestError.IO("cannot re-inspect output `{source}`: {error}"))
         }
     }
-    if before != store_stable_meta_identity(after) -> return Err(IngestError.Mutated("`{source}` changed during ingest"))
+    if before != store_stable_meta_identity(after) {
+        return Err(IngestError.Mutated("`{source}` changed during ingest"))
+    }
 }
 
 // Copy each child in name order, then require the directory's entry
@@ -906,7 +954,9 @@ store_copy_nofollow_directory: fn(source: String, destination: String, after_chi
         if after_child_copy == .Val(hook) -> hook(child_source)
     }
     after_children: store_directory_snapshot(source) ?? return Err(IngestError.Mutated("`{source}` directory entries changed during ingest: {err.what()}"))
-    if children != after_children -> return Err(IngestError.Mutated("`{source}` directory entries changed during ingest"))
+    if children != after_children {
+        return Err(IngestError.Mutated("`{source}` directory entries changed during ingest"))
+    }
 }
 
 // Copy one regular file through a handle opened without following links,

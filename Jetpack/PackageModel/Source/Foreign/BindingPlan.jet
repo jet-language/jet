@@ -118,7 +118,7 @@ PointerCountFact: struct {
             unit: unit,
             meaning: meaning,
             native_width_bits: native_width_bits,
-            retention: retention
+            retention: retention,
         }
     }
 
@@ -168,7 +168,7 @@ BindingOperation: struct {
             failure_mapping: "preserve",
             copies: "none",
             placement: "caller",
-            cleanup: "none"
+            cleanup: "none",
         }
     }
 
@@ -179,12 +179,7 @@ BindingOperation: struct {
     }
 
     requires_protocol_evidence: fn(self) -> Bool Never! {
-        self.nullable_return
-            || self.borrowed_view
-            || self.status_out
-            || self.partial_success
-            || self.fallible_close
-            || self.callback_transport != "none"
+        self.nullable_return || self.borrowed_view || self.status_out || self.partial_success || self.fallible_close || self.callback_transport != "none"
     }
 }
 
@@ -216,10 +211,12 @@ BindingInputs: struct {
         fields: [(name: String, value: String)]{
             (name: "target", value: self.target),
             (name: "generator", value: self.generator),
-            (name: "artifact", value: self.artifact)
+            (name: "artifact", value: self.artifact),
         }
         loop field in fields {
-            if field.value.trim() == "" -> return Err(BindingPlanError.InvalidInput("binding input `{field.name}` is empty"))
+            if field.value.trim() == "" {
+                return Err(BindingPlanError.InvalidInput("binding input `{field.name}` is empty"))
+            }
         }
     }
 
@@ -266,9 +263,11 @@ BindingPlan: struct {
             .Ok(_) -> {}
         }
         inputs.validate()
-        if operation.name.trim() == "" -> return Err(BindingPlanError.InvalidInput("binding operation needs a name"))
+        if operation.name.trim() == "" {
+            return Err(BindingPlanError.InvalidInput("binding operation needs a name"))
+        }
         if operation.pointer_count == {
-            .Val(pointer_count) -> pointer_count.validate_names()
+            .Val(pointer_count) -> { pointer_count.validate_names() }
             .None -> {}
         }
 
@@ -290,32 +289,46 @@ BindingPlan: struct {
                 .Native -> contract.has_complete_artifact_coverage() && pkg_plan_obligation_known(contract, obligation)
                 .Automatic -> contract.permits_guarantee(obligation)
             }
-            if !admitted -> return Err(BindingPlanError.Refused(BindingRefusal.missing(operation.name, obligation)))
+            if !admitted {
+                return Err(BindingPlanError.Refused(BindingRefusal.missing(operation.name, obligation)))
+            }
         }
         if operation.pointer_count == {
             .Val(pointer_count) -> {
                 width: pointer_count.native_width_bits
                 if width == 0 || width > 64 || width % 8 != 0 {
-                    return Err(BindingPlanError.Refused(BindingRefusal{
-                        operation: operation.name,
-                        obligation: "width",
-                        message: "The native count width is not checked. Record the target ABI width before adapting this pointer/count pair."
-                    }))
+                    return Err(
+                        BindingPlanError.Refused(
+                            BindingRefusal{
+                                operation: operation.name,
+                                obligation: "width",
+                                message: "The native count width is not checked. Record the target ABI width before adapting this pointer/count pair.",
+                            },
+                        ),
+                    )
                 }
                 if shape == BindingShape.Automatic {
                     if !pointer_count.unit.known() || pointer_count.meaning == CountMeaning.Unknown {
-                        return Err(BindingPlanError.Refused(BindingRefusal{
-                            operation: operation.name,
-                            obligation: "count-unit",
-                            message: "The pointer/count unit or meaning is unknown. Record bytes-versus-elements and full-extent-versus-prefix evidence, or select `--shape native`."
-                        }))
+                        return Err(
+                            BindingPlanError.Refused(
+                                BindingRefusal{
+                                    operation: operation.name,
+                                    obligation: "count-unit",
+                                    message: "The pointer/count unit or meaning is unknown. Record bytes-versus-elements and full-extent-versus-prefix evidence, or select `--shape native`.",
+                                },
+                            ),
+                        )
                     }
                     if pointer_count.retention != PointerRetention.BorrowedForCall {
-                        return Err(BindingPlanError.Refused(BindingRefusal{
-                            operation: operation.name,
-                            obligation: "lifetime",
-                            message: "The foreign implementation may retain the pointer. Supply a checked borrowed-for-call contract or select `--shape native`; no copy or retry is inserted."
-                        }))
+                        return Err(
+                            BindingPlanError.Refused(
+                                BindingRefusal{
+                                    operation: operation.name,
+                                    obligation: "lifetime",
+                                    message: "The foreign implementation may retain the pointer. Supply a checked borrowed-for-call contract or select `--shape native`; no copy or retry is inserted.",
+                                },
+                            ),
+                        )
                     }
                 }
             }
@@ -328,22 +341,24 @@ BindingPlan: struct {
             copies: operation.copies,
             placement: operation.placement,
             effects: operation.effects,
-            cleanup: operation.cleanup
+            cleanup: operation.cleanup,
         }
         boundary_digest: contract.digest()
         input_digest: inputs.digest()
         digest: pkg_plan_digest(operation, contract.library, shape, boundary_digest, input_digest, checked_obligations, semantics)
-        Ok(BindingPlan{
-            operation: operation,
-            library: contract.library,
-            shape: shape,
-            boundary_digest: boundary_digest,
-            input_digest: input_digest,
-            artifact: inputs.artifact,
-            checked_obligations: checked_obligations,
-            semantics: semantics,
-            digest: digest
-        })
+        Ok(
+            BindingPlan{
+                operation: operation,
+                library: contract.library,
+                shape: shape,
+                boundary_digest: boundary_digest,
+                input_digest: input_digest,
+                artifact: inputs.artifact,
+                checked_obligations: checked_obligations,
+                semantics: semantics,
+                digest: digest,
+            },
+        )
     }
 
     candidate_digest: fn(self) -> String Never! { self.digest }
@@ -356,19 +371,27 @@ BindingPlan: struct {
         pointer_count: self.operation.pointer_count ?? return Err(BindingPlanError.InvalidInput("checked count requested for an operation without pointer/count evidence"))
         count: requested ?? view_len
         if count < 0 || count > view_len {
-            return Err(BindingPlanError.Refused(BindingRefusal{
-                operation: self.operation.name,
-                obligation: "extent",
-                message: "The requested count exceeds the view extent; shorten the count or pass the complete view."
-            }))
+            return Err(
+                BindingPlanError.Refused(
+                    BindingRefusal{
+                        operation: self.operation.name,
+                        obligation: "extent",
+                        message: "The requested count exceeds the view extent; shorten the count or pass the complete view.",
+                    },
+                ),
+            )
         }
         // A width of 63 or 64 bits holds every non-negative Int.
         if pointer_count.native_width_bits < 63 && count > (1 << pointer_count.native_width_bits) - 1 {
-            return Err(BindingPlanError.Refused(BindingRefusal{
-                operation: self.operation.name,
-                obligation: "width",
-                message: "The requested count does not fit the pinned native width; no narrowing conversion is performed."
-            }))
+            return Err(
+                BindingPlanError.Refused(
+                    BindingRefusal{
+                        operation: self.operation.name,
+                        obligation: "width",
+                        message: "The requested count does not fit the pinned native width; no narrowing conversion is performed.",
+                    },
+                ),
+            )
         }
         Ok(count)
     }
@@ -378,7 +401,7 @@ BindingPlan: struct {
         lines := [String]{
             "// jet-ffi-plan={self.digest}\n// jet-ffi-shape={self.shape.as_str()}\n",
             "// jet-ffi-boundary={self.boundary_digest} input={self.input_digest}\n",
-            "// ownership={self.semantics.ownership} failure={self.semantics.failure_mapping} copies={self.semantics.copies} placement={self.semantics.placement} effects={self.semantics.effects} cleanup={self.semantics.cleanup}\n"
+            "// ownership={self.semantics.ownership} failure={self.semantics.failure_mapping} copies={self.semantics.copies} placement={self.semantics.placement} effects={self.semantics.effects} cleanup={self.semantics.cleanup}\n",
         }
         if self.operation.callback_transport != "none" {
             lines.push("// jet-ffi-callback-transport={self.operation.callback_transport}\n// jet-ffi-callback-identity={self.operation.name}\n// jet-ffi-callback-plan={self.digest}\n")
@@ -392,10 +415,14 @@ BindingPlan: struct {
                         lines.push("#Import c.{self.library}: module {{\n    __jet_ffi_native_{name}: fn({pointer}: &[U8], {pointer_count.count_parameter}: U64) {self.operation.result_type} = \"{name}\"\n}}\n\n")
                         lines.push("{name}: fn({pointer}: &[U8]) -> {self.operation.result_type} {{\n    return __jet_ffi_native_{name}({pointer}, {pointer}.len())\n}}\n")
                     }
-                    .None -> lines.push("// automatic facade preserves native signature: {self.operation.native_signature}\n")
+                    .None -> {
+                        lines.push("// automatic facade preserves native signature: {self.operation.native_signature}\n")
+                    }
                 }
             }
-            .Native -> lines.push("// native facade preserves arity: {self.operation.native_signature}\n")
+            .Native -> {
+                lines.push("// native facade preserves arity: {self.operation.native_signature}\n")
+            }
         }
         lines.join("")
     }
@@ -420,12 +447,14 @@ BindingPlan: struct {
             "artifact: {self.artifact}\n",
             "input digest: {self.input_digest}\n",
             "boundary evidence: {self.boundary_digest}\n",
-            "candidate digest: {self.digest}\n"
+            "candidate digest: {self.digest}\n",
         }.join("")
     }
 
     frozen_drift: fn(self, recorded_digest: String) BindingPlanError! {
-        if self.digest == recorded_digest -> return
+        if self.digest == recorded_digest {
+            return
+        }
         return Err(BindingPlanError.FrozenDrift{recorded: recorded_digest, candidate: self.digest})
     }
 }
@@ -441,7 +470,7 @@ BindingRefusal: struct {
         BindingRefusal{
             operation: operation,
             obligation: obligation,
-            message: "Canonical foreign evidence for `{obligation}` is missing or not guarantee-level. Record the exact artifact evidence, then retry; no guessed adaptation is emitted."
+            message: "Canonical foreign evidence for `{obligation}` is missing or not guarantee-level. Record the exact artifact evidence, then retry; no guessed adaptation is emitted.",
         }
     }
 

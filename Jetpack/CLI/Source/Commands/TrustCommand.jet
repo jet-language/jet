@@ -71,9 +71,7 @@ cli_trust_grant: fn(theme: Theme, parsed: CLIParsed, store: String) -[IO, FS, En
         return EXIT_USAGE
     }
     added: trust_add_grant(store, cli_current_dir(), grant) ?? return trust_report_gate_failure(theme, err)
-    if added {
-        theme.status("trusted {grant.authority} `{grant.subject}` ({grant.scope})")
-    } else {
+    if added -> theme.status("trusted {grant.authority} `{grant.subject}` ({grant.scope})") else {
         theme.status("already trusted {grant.authority} `{grant.subject}` ({grant.scope})")
     }
     EXIT_OK
@@ -103,9 +101,15 @@ cli_trust_explain: fn(theme: Theme, parsed: CLIParsed, store: String) -[IO, FS, 
     loop record in matches {
         cli_print_trust_record(theme, record)
         if record == {
-            .Grant(grant) -> theme.detail("exact authority: {grant.authority} subject `{grant.subject}`; revoke with `jet trust revoke {grant.key()}`")
-            .Hash(hash) -> theme.detail("exact env/build hash grant; revoke with `jet trust revoke hash:{hash}`")
-            .Pattern(pattern) -> theme.detail("path pattern grant; revoke with `jet trust revoke pattern:{pattern}`")
+            .Grant(grant) -> {
+                theme.detail("exact authority: {grant.authority} subject `{grant.subject}`; revoke with `jet trust revoke {grant.key()}`")
+            }
+            .Hash(hash) -> {
+                theme.detail("exact env/build hash grant; revoke with `jet trust revoke hash:{hash}`")
+            }
+            .Pattern(pattern) -> {
+                theme.detail("path pattern grant; revoke with `jet trust revoke pattern:{pattern}`")
+            }
             .Raw(line) -> theme.detail("legacy/raw grant; revoke with `jet trust revoke {line}`")
         }
     }
@@ -114,9 +118,11 @@ cli_trust_explain: fn(theme: Theme, parsed: CLIParsed, store: String) -[IO, FS, 
 
 cli_print_trust_record: fn(theme: Theme, record: TrustRecord) Never! -[IO, Time.Wait]> {
     if record == {
-        .Hash(hash) -> theme.detail("hash     {hash}")
-        .Pattern(pattern) -> theme.detail("pattern  {pattern}")
-        .Grant(grant) -> theme.detail("{terminal_pad_end(grant.authority, 7)} {grant.subject}  scope:{grant.scope}")
+        .Hash(hash) -> { theme.detail("hash     {hash}") }
+        .Pattern(pattern) -> { theme.detail("pattern  {pattern}") }
+        .Grant(grant) -> {
+            theme.detail("{terminal_pad_end(grant.authority, 7)} {grant.subject}  scope:{grant.scope}")
+        }
         .Raw(line) -> theme.detail("raw      {line}")
     }
 }

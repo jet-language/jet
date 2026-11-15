@@ -19,14 +19,20 @@ Resource: struct {
 
 failure_label: fn(error: TaskFailure) -> String {
     if error == {
-        .Cancelled -> { return "cancelled" }
-        .DeadlineBlown -> { return "deadline" }
-        .Panicked(_) -> { return "panicked" }
+        .Cancelled -> {
+            return "cancelled"
+        }
+        .DeadlineBlown -> {
+            return "deadline"
+        }
+        .Panicked(_) -> {
+            return "panicked"
+        }
     }
 }
 
 scoped: fn(entered: Sender<Int>, resume: Receiver<Int>) {
-    resource := Resource{name: "worker", entered, resume}
+    resource := Resource{name: "worker", entered: entered, resume: resume}
     defer close(resource)
     print("body")
 }
@@ -43,7 +49,7 @@ run: fn() {
     worker.cancel()
     resume_sender.send(1)
     if worker.join() == {
-        .Err(error) -> print("worker: {failure_label(error)}")
+        .Err(error) -> { print("worker: {failure_label(error)}") }
         .Ok(_) -> print("worker: finished")
     }
 }

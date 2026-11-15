@@ -109,11 +109,15 @@ collection_sort_order: fn<T, E>(values: View<T>, compare: fn(T, T) -> Ordering E
                 verdict: compare(values[left_position], values[right_position])
                 take_right: if descending -> verdict == Ordering.Less else -> verdict == Ordering.Greater
                 if take_right {
-                    if order_active -> spare[target] = right_position else -> order[target] = right_position
+                    if order_active -> spare[target] = right_position else {
+                        order[target] = right_position
+                    }
                     right += 1
                 } else {
                     // Equal keys always select the original left run.
-                    if order_active -> spare[target] = left_position else -> order[target] = left_position
+                    if order_active -> spare[target] = left_position else {
+                        order[target] = left_position
+                    }
                     left += 1
                 }
                 target += 1
@@ -143,12 +147,16 @@ collection_sort_order: fn<T, E>(values: View<T>, compare: fn(T, T) -> Ordering E
 // No indexed payload read, owning copy, or default T is needed.
 collection_sort_apply_order: fn<T>(rows: &[T], order: [Int]) Never! {
     count: rows.len()
-    if count < 2 -> return
+    if count < 2 {
+        return
+    }
     changed := false
     loop index in 0..<count {
         if order[index] != index -> changed = true
     }
-    if !changed -> return
+    if !changed {
+        return
+    }
     destinations := [Int]{}
     slots := [T?]{}
     loop index in 0..<count {
@@ -169,17 +177,15 @@ collection_sort_apply_order: fn<T>(rows: &[T], order: [Int]) Never! {
 }
 
 // The declared borrowed return checks the range as a View, not an owning List.
-collection_sort_view: fn<T>(values: [T]) -> View<T> Never! from values {
-    values[0..<values.len()]
-}
+collection_sort_view: fn<T>(values: [T]) -> View<T> Never! from values { values[0..<values.len()] }
 
-collection_sort_by_compare: fn<T, E>(rows: &[T], &&compare: fn(T, T) -> Ordering E!) E! {
+collection_sort_by_compare: fn<T, E>(rows: &[T], compare: &&fn(T, T) -> Ordering E!) E! {
     window: collection_sort_view<T>(rows)
     order := collection_sort_order<T, E>(window, compare, false)
     collection_sort_apply_order<T>(rows, order)
 }
 
-collection_sort_by_key: fn<T, K: Comparable, E>(rows: &[T], &&key: fn(T) -> K E!, descending: Bool) E! {
+collection_sort_by_key: fn<T, K: Comparable, E>(rows: &[T], key: &&fn(T) -> K E!, descending: Bool) E! {
     keys := [K]{}
     loop index in 0..<rows.len() {
         value := key(rows[index])
@@ -212,7 +218,7 @@ counter_from: fn(keys: [String]) -> Counter Never! {
                 out_counts[i] = out_counts[i] + 1
                 break
             }
-            i = i + 1
+            i += 1
         }
         if i == out_keys.len() {
             out_keys.push(key.copy())
@@ -229,10 +235,10 @@ add: fn(c: Counter, key: String, n: Int) -> Counter Never! {
     i := 0
     loop i < entries {
         if c.keys[i] == key {
-            target_count = target_count + c.counts[i]
+            target_count += c.counts[i]
             if first_target < 0 -> first_target = i
         }
-        i = i + 1
+        i += 1
     }
     keys := [String]{}
     counts := [Int]{}
@@ -247,7 +253,7 @@ add: fn(c: Counter, key: String, n: Int) -> Counter Never! {
             keys.push(c.keys[i].copy())
             counts.push(c.counts[i])
         }
-        i = i + 1
+        i += 1
     }
     if first_target < 0 && n != 0 {
         keys.push(key.copy())
@@ -267,10 +273,10 @@ get: fn(c: Counter, key: String) -> Int Never! {
     entries := counter_entries(c)
     loop i < entries {
         if c.keys[i] == key {
-            acc = acc + c.counts[i]
+            acc += c.counts[i]
             found = true
         }
-        i = i + 1
+        i += 1
     }
     if found -> return acc
     0
@@ -286,8 +292,8 @@ total: fn(c: Counter) -> Int Never! {
     entries := counter_entries(c)
     i := 0
     loop i < entries {
-        acc = acc + c.counts[i]
-        i = i + 1
+        acc += c.counts[i]
+        i += 1
     }
     acc
 }
@@ -298,7 +304,7 @@ names: fn(c: Counter) -> [String] Never! {
     i := 0
     loop i < entries {
         out.push(c.keys[i].copy())
-        i = i + 1
+        i += 1
     }
     out
 }
@@ -311,9 +317,9 @@ elements: fn(c: Counter) -> [String] Never! {
         n := c.counts[i]
         loop n > 0 {
             out.push(c.keys[i].copy())
-            n = n - 1
+            n -= 1
         }
-        i = i + 1
+        i += 1
     }
     out
 }
@@ -336,13 +342,13 @@ most_common: fn(c: Counter, k: Int) -> Counter Never! {
             if !used[i] {
                 if best < 0 || c.counts[i] > c.counts[best] -> best = i
             }
-            i = i + 1
+            i += 1
         }
         if best < 0 -> break
         used[best] = true
         keys.push(c.keys[best].copy())
         counts.push(c.counts[best])
-        pick = pick + 1
+        pick += 1
     }
     Counter{keys: keys, counts: counts}
 }
@@ -352,7 +358,7 @@ remove_counter_at: fn(keys: &[String], counts: &[Int], index: Int) {
     loop i + 1 < keys.len() {
         keys[i] = keys[i + 1]
         counts[i] = counts[i + 1]
-        i = i + 1
+        i += 1
     }
     _: keys.pop()
     _: counts.pop()
@@ -363,14 +369,10 @@ apply_counter_delta: fn(keys: &[String], counts: &[Int], key: String, delta: Int
     loop i < keys.len() {
         if keys[i] == key {
             next := counts[i] + delta
-            if next == 0 {
-                remove_counter_at(keys, counts, i)
-            } else {
-                counts[i] = next
-            }
+            if next == 0 -> remove_counter_at(keys, counts, i) else -> counts[i] = next
             return
         }
-        i = i + 1
+        i += 1
     }
     if delta != 0 {
         keys.push(key.copy())
@@ -386,7 +388,7 @@ counter_copy: fn(c: Counter) -> Counter {
     loop i < entries {
         keys.push(c.keys[i].copy())
         counts.push(c.counts[i])
-        i = i + 1
+        i += 1
     }
     Counter{keys: keys, counts: counts}
 }
@@ -399,7 +401,7 @@ subtract: fn(a: Counter, b: Counter) -> Counter Never! {
     entries := counter_entries(b)
     loop i < entries {
         apply_counter_delta(keys, counts, b.keys[i], -b.counts[i])
-        i = i + 1
+        i += 1
     }
     Counter{keys: keys, counts: counts}
 }
@@ -412,7 +414,7 @@ merge_add: fn(a: Counter, b: Counter) -> Counter Never! {
     entries := counter_entries(b)
     loop i < entries {
         apply_counter_delta(keys, counts, b.keys[i], b.counts[i])
-        i = i + 1
+        i += 1
     }
     Counter{keys: keys, counts: counts}
 }
@@ -423,12 +425,16 @@ sift_down: fn(xs: &[Int], start: Int, end: Int) {
     i := start
     loop {
         left := i * 2 + 1
-        if left >= end -> return
+        if left >= end {
+            return
+        }
         smallest := i
         if xs[left] < xs[smallest] -> smallest = left
         right := left + 1
         if right < end && xs[right] < xs[smallest] -> smallest = right
-        if smallest == i -> return
+        if smallest == i {
+            return
+        }
         current := xs[i]
         child := xs[smallest]
         xs[i] = child
@@ -441,7 +447,9 @@ sift_up: fn(xs: &[Int], start: Int) {
     i := start
     loop i > 0 {
         parent := (i - 1) /% 2
-        if xs[i] >= xs[parent] -> return
+        if xs[i] >= xs[parent] {
+            return
+        }
         current := xs[i]
         ancestor := xs[parent]
         xs[i] = ancestor
@@ -458,7 +466,7 @@ heapify: fn(xs: [Int]) -> [Int] Never! {
         loop {
             sift_down(out, i, n)
             if i == 0 -> break
-            i = i - 1
+            i -= 1
         }
     }
     out
@@ -480,7 +488,7 @@ heappop: fn(xs: [Int]) -> (heap: [Int], value: Int?) Never! {
     i := 1
     loop i < xs.len() - 1 {
         rest.push(xs[i])
-        i = i + 1
+        i += 1
     }
     rest_len := rest.len()
     sift_down(rest, 0, rest_len)
@@ -494,7 +502,7 @@ heappushpop: fn(xs: [Int], value: Int) -> (heap: [Int], value: Int) Never! {
     i := 1
     loop i < xs.len() {
         rest.push(xs[i])
-        i = i + 1
+        i += 1
     }
     rest_len := rest.len()
     sift_down(rest, 0, rest_len)
@@ -508,7 +516,7 @@ heapreplace: fn(xs: [Int], value: Int) -> (heap: [Int], value: Int?) Never! {
     i := 1
     loop i < xs.len() {
         rest.push(xs[i])
-        i = i + 1
+        i += 1
     }
     rest_len := rest.len()
     sift_down(rest, 0, rest_len)
@@ -519,12 +527,16 @@ max_sift_down: fn(xs: &[Int], start: Int, end: Int) {
     i := start
     loop {
         left := i * 2 + 1
-        if left >= end -> return
+        if left >= end {
+            return
+        }
         largest := i
         if xs[left] > xs[largest] -> largest = left
         right := left + 1
         if right < end && xs[right] > xs[largest] -> largest = right
-        if largest == i -> return
+        if largest == i {
+            return
+        }
         current := xs[i]
         child := xs[largest]
         xs[i] = child
@@ -537,7 +549,9 @@ max_sift_up: fn(xs: &[Int], start: Int) {
     i := start
     loop i > 0 {
         parent := (i - 1) /% 2
-        if xs[i] <= xs[parent] -> return
+        if xs[i] <= xs[parent] {
+            return
+        }
         current := xs[i]
         ancestor := xs[parent]
         xs[i] = ancestor
@@ -571,7 +585,7 @@ max_heappop: fn(xs: [Int]) -> (heap: [Int], value: Int?) {
     i := 1
     loop i < xs.len() - 1 {
         rest.push(xs[i])
-        i = i + 1
+        i += 1
     }
     rest_len := rest.len()
     max_sift_down(rest, 0, rest_len)
@@ -582,9 +596,7 @@ nsmallest: fn(n: Int, xs: [Int]) -> [Int] Never! {
     if n <= 0 -> return [Int]{}
     h := [Int]{}
     loop x in xs {
-        if h.len() < n {
-            h = max_heappush(h, x)
-        } else if h.len() > 0 && x < h[0] {
+        if h.len() < n -> h = max_heappush(h, x) else if h.len() > 0 && x < h[0] {
             h = max_heapreplace(h, x)
         }
     }
@@ -601,8 +613,8 @@ nsmallest: fn(n: Int, xs: [Int]) -> [Int] Never! {
         tmp := out[i]
         out[i] = out[j]
         out[j] = tmp
-        i = i + 1
-        j = j - 1
+        i += 1
+        j -= 1
     }
     out
 }
@@ -611,9 +623,7 @@ nlargest: fn(n: Int, xs: [Int]) -> [Int] Never! {
     if n <= 0 -> return [Int]{}
     h := [Int]{}
     loop x in xs {
-        if h.len() < n {
-            h = heappush(h, x)
-        } else if h.len() > 0 && x > h[0] {
+        if h.len() < n -> h = heappush(h, x) else if h.len() > 0 && x > h[0] {
             pair: heapreplace(h, x)
             h = pair.heap
         }
@@ -631,8 +641,8 @@ nlargest: fn(n: Int, xs: [Int]) -> [Int] Never! {
         tmp := out[i]
         out[i] = out[j]
         out[j] = tmp
-        i = i + 1
-        j = j - 1
+        i += 1
+        j -= 1
     }
     out
 }
@@ -644,19 +654,19 @@ merge_sorted: fn(left: [Int], right: [Int]) -> [Int] Never! {
     loop i < left.len() && j < right.len() {
         if left[i] <= right[j] {
             out.push(left[i])
-            i = i + 1
+            i += 1
         } else {
             out.push(right[j])
-            j = j + 1
+            j += 1
         }
     }
     loop i < left.len() {
         out.push(left[i])
-        i = i + 1
+        i += 1
     }
     loop j < right.len() {
         out.push(right[j])
-        j = j + 1
+        j += 1
     }
     out
 }
@@ -666,11 +676,7 @@ bisect_left: fn(xs: [Int], value: Int) -> Int Never! {
     hi := xs.len()
     loop lo < hi {
         mid := lo + (hi - lo) /% 2
-        if xs[mid] < value {
-            lo = mid + 1
-        } else {
-            hi = mid
-        }
+        if xs[mid] < value -> lo = mid + 1 else -> hi = mid
     }
     lo
 }
@@ -680,11 +686,7 @@ bisect_right: fn(xs: [Int], value: Int) -> Int Never! {
     hi := xs.len()
     loop lo < hi {
         mid := lo + (hi - lo) /% 2
-        if xs[mid] <= value {
-            lo = mid + 1
-        } else {
-            hi = mid
-        }
+        if xs[mid] <= value -> lo = mid + 1 else -> hi = mid
     }
     lo
 }
@@ -695,12 +697,12 @@ insort_left: fn(xs: [Int], value: Int) -> [Int] Never! {
     k := 0
     loop k < i {
         out.push(xs[k])
-        k = k + 1
+        k += 1
     }
     out.push(value)
     loop k < xs.len() {
         out.push(xs[k])
-        k = k + 1
+        k += 1
     }
     out
 }
@@ -711,12 +713,12 @@ insort_right: fn(xs: [Int], value: Int) -> [Int] Never! {
     k := 0
     loop k < i {
         out.push(xs[k])
-        k = k + 1
+        k += 1
     }
     out.push(value)
     loop k < xs.len() {
         out.push(xs[k])
-        k = k + 1
+        k += 1
     }
     out
 }
@@ -759,7 +761,7 @@ string_index: fn(xs: [String], key: String) -> Int {
     i := 0
     loop i < xs.len() {
         if xs[i] == key -> return i
-        i = i + 1
+        i += 1
     }
     -1
 }
@@ -775,7 +777,7 @@ layer_from: fn(keys: [String], values: [String]) -> Layer {
             out_keys.push(keys[i].copy())
             out_values.push(values[i].copy())
         }
-        i = i + 1
+        i += 1
     }
     Layer{keys: out_keys, values: out_values}
 }
@@ -787,7 +789,7 @@ map_get: fn(m: OrderedMap, key: String) -> String? Never! {
     entries := map_entries(m)
     loop i < entries {
         if m.keys[i] == key -> return Val(m.values[i].copy())
-        i = i + 1
+        i += 1
     }
     None
 }
@@ -809,7 +811,7 @@ map_set: fn(m: OrderedMap, key: String, value: String) -> OrderedMap Never! {
             keys.push(m.keys[i].copy())
             values.push(m.values[i].copy())
         }
-        i = i + 1
+        i += 1
     }
     if !found {
         keys.push(key.copy())
@@ -828,7 +830,7 @@ map_remove: fn(m: OrderedMap, key: String) -> OrderedMap Never! {
             keys.push(m.keys[i].copy())
             values.push(m.values[i].copy())
         }
-        i = i + 1
+        i += 1
     }
     OrderedMap{keys: keys, values: values}
 }
@@ -839,7 +841,7 @@ map_keys: fn(m: OrderedMap) -> [String] Never! {
     entries := map_entries(m)
     loop i < entries {
         out.push(m.keys[i].copy())
-        i = i + 1
+        i += 1
     }
     out
 }
@@ -850,7 +852,7 @@ map_values: fn(m: OrderedMap) -> [String] Never! {
     entries := map_entries(m)
     loop i < entries {
         out.push(m.values[i].copy())
-        i = i + 1
+        i += 1
     }
     out
 }
@@ -874,7 +876,7 @@ chain_get: fn(c: Chain, key: String) -> String? Never! {
         if layer.values.len() < entries -> entries = layer.values.len()
         loop i < entries {
             if layer.keys[i] == key -> return Val(layer.values[i].copy())
-            i = i + 1
+            i += 1
         }
     }
     None

@@ -19,39 +19,59 @@ layout_marker_struct: fn(source: String) -> StructDef {
 
 layout_marker_refusal: fn(source: String, code: String, spelled: String) {
     parsed: parse_source(source.bytes())
-    if parsed.diagnostics.len() != 1 -> panic("a refused layout form reported {parsed.diagnostics.len()} diagnostics")
+    if parsed.diagnostics.len() != 1 {
+        panic("a refused layout form reported {parsed.diagnostics.len()} diagnostics")
+    }
     diagnostic: parsed.diagnostics[0]
-    if diagnostic.code != code -> panic("a refused layout form reported {diagnostic.code}, not {code}")
+    if diagnostic.code != code {
+        panic("a refused layout form reported {diagnostic.code}, not {code}")
+    }
     span: diagnostic.span ?? panic("a layout refusal has no span")
-    if source.slice(span.start, span.end) != spelled -> panic("a layout refusal points at `{source.slice(span.start, span.end)}`, not `{spelled}`")
+    if source.slice(span.start, span.end) != spelled {
+        panic("a layout refusal points at `{source.slice(span.start, span.end)}`, not `{spelled}`")
+    }
 }
 
 #Test("layout_marker") {
     plain: layout_marker_struct("#Layout(c)\nP: struct {{ x: Int }}")
-    if plain.layout != Val(StructLayout.C) || plain.layout_span == None -> panic("`#Layout(c)` lost its C layout fact")
+    if plain.layout != Val(StructLayout.C) || plain.layout_span == None {
+        panic("`#Layout(c)` lost its C layout fact")
+    }
     aligned: layout_marker_struct("#Layout(c, align(64))\nP: struct {{ x: Int }}")
-    if aligned.layout != Val(StructLayout.CAligned{alignment: 64, target: false}) -> panic("`#Layout(c, align(64))` lost its alignment")
+    if aligned.layout != Val(StructLayout.CAligned{alignment: 64, target: false}) {
+        panic("`#Layout(c, align(64))` lost its alignment")
+    }
     target: layout_marker_struct("#Layout(c, align(target, 2097152))\nP: struct {{ x: Int }}")
-    if target.layout != Val(StructLayout.CAligned{alignment: 2097152, target: true}) -> panic("`align(target, N)` lost its target mode")
+    if target.layout != Val(StructLayout.CAligned{alignment: 2097152, target: true}) {
+        panic("`align(target, N)` lost its target mode")
+    }
     line: layout_marker_struct("#Layout(c, align(#build.cpu.cache_line))\nP: struct {{ x: Int }}")
-    if line.layout != Val(StructLayout.CAligned{alignment: 64, target: false}) -> panic("`align(#build.cpu.cache_line)` is not the generic 64-byte line")
+    if line.layout != Val(StructLayout.CAligned{alignment: 64, target: false}) {
+        panic("`align(#build.cpu.cache_line)` is not the generic 64-byte line")
+    }
     grouped_line: layout_marker_struct("#[Layout(c, align(#build.cpu.cache_line)), Codable]\nP: struct {{ x: Int }}")
-    if grouped_line.layout != Val(StructLayout.CAligned{alignment: 64, target: false}) -> panic("a grouped `align(#build.cpu.cache_line)` lost its alignment")
+    if grouped_line.layout != Val(StructLayout.CAligned{alignment: 64, target: false}) {
+        panic("a grouped `align(#build.cpu.cache_line)` lost its alignment")
+    }
     columnar: layout_marker_struct("#Layout(columnar)\nP: struct {{ x: Int }}")
-    if columnar.layout != Val(StructLayout.Columnar) -> panic("`#Layout(columnar)` lost its columnar fact")
+    if columnar.layout != Val(StructLayout.Columnar) {
+        panic("`#Layout(columnar)` lost its columnar fact")
+    }
     grouped: layout_marker_struct("#[Layout(c), Codable]\nP: struct {{ x: Int }}")
-    if grouped.layout != Val(StructLayout.C) || grouped.layout_span == None -> panic("a grouped `#Layout(c)` lost its C layout fact")
+    if grouped.layout != Val(StructLayout.C) || grouped.layout_span == None {
+        panic("a grouped `#Layout(c)` lost its C layout fact")
+    }
     default: layout_marker_struct("P: struct {{ x: Int }}")
-    if default.layout != None || default.layout_span != None -> panic("an unmarked struct gained a layout fact")
+    if default.layout != None || default.layout_span != None {
+        panic("an unmarked struct gained a layout fact")
+    }
     tagged: parse_source("#Layout(c, I32)\nE: enum {{ A }}".bytes())
     if tagged.diagnostics.len() != 0 -> panic("an enum C tag width was refused")
     backed: parse_source("#Layout(U8)\nE: enum {{\n    A = 1\n    B\n}}".bytes())
     if backed.diagnostics.len() != 0 -> panic("an enum integer backing was refused")
     if backed.program.items[0] == .Enum(definition) {
         if definition.type_markers.len() != 1 -> panic("an enum integer backing lost its marker")
-    } else {
-        panic("the backed enum was not parsed")
-    }
+    } else { panic("the backed enum was not parsed") }
     layout_marker_refusal("#Layout(U8)\nP: struct {{ x: Int }}", "E1105", "U8")
     layout_marker_refusal("#[Layout(U8), Codable]\nP: struct {{ x: Int }}", "E1105", "Layout(U8)")
     layout_marker_refusal("#Layout(packed)\nP: struct {{ x: Int }}", "E1105", "packed")

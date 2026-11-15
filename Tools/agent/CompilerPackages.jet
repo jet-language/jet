@@ -69,11 +69,16 @@ use {
 }
 
 ENTRY_PACKAGE: "Compiler/JetCli"
+
 // The workspace files `jet build Compiler` reads beside the packages.
 WORKSPACE_FILES: [String]{"Compiler/package.jet", "Compiler/build.jet"}
+
 SKIPPED_NAMES: [String]{"target", "build", "node_modules", "bin"}
+
 PROJECT_MARKERS: [String]{"package.jet", "pkg.jet", "workspace.jet", ".jet/lock"}
+
 RESERVED_SOURCE_NAMES: [String]{"package.jet", "pkg.jet", "env.jet", "config.jet", "workspace.jet"}
+
 SOURCE_DOMAIN: "jet.compiler-source.v2"
 
 #Error
@@ -119,7 +124,9 @@ command: fn(root: String, name: String, args: [String]) PackagesError! -[Env, Ex
     out := term.stdout()
     if name == {
         "packages" -> {
-            loop found in compiler_packages(root, one_entry(args)) -> print("{found.name}\t{found.directory}")
+            loop found in compiler_packages(root, one_entry(args)) {
+                print("{found.name}\t{found.directory}")
+            }
         }
         "sources" -> {
             loop package in compiler_sources(root, compiler_packages(root, one_entry(args))) {
@@ -132,7 +139,9 @@ command: fn(root: String, name: String, args: [String]) PackagesError! -[Env, Ex
         }
         "inputs" -> {
             no_arguments(args)
-            loop path in compiler_inputs(root, compiler_input_roots(compiler_packages(root, ENTRY_PACKAGE))) -> print(path)
+            loop path in compiler_inputs(root, compiler_input_roots(compiler_packages(root, ENTRY_PACKAGE))) {
+                print(path)
+            }
         }
         "select" -> {
             roots: compiler_input_roots(compiler_packages(root, ENTRY_PACKAGE))
@@ -147,9 +156,13 @@ command: fn(root: String, name: String, args: [String]) PackagesError! -[Env, Ex
         "unblock" -> {
             texts := [String]{}
             if {
-                args.len() == 1 && args[0] == "-" -> texts = framed_texts(term.read_all_input() ?? return Err(PackagesError{message: "stdin: {err}"}))
+                args.len() == 1 && args[0] == "-" -> {
+                    texts = framed_texts(term.read_all_input() ?? return Err(PackagesError{message: "stdin: {err}"}))
+                }
                 else -> {
-                    loop path in args -> texts.push(files.read(files.join(root, path)) ?? return Err(PackagesError{message: "`{path}` cannot be read: {err}"}))
+                    loop path in args {
+                        texts.push(files.read(files.join(root, path)) ?? return Err(PackagesError{message: "`{path}` cannot be read: {err}"}))
+                    }
                 }
             }
             loop text in texts {
@@ -158,9 +171,13 @@ command: fn(root: String, name: String, args: [String]) PackagesError! -[Env, Ex
                 out.write_bytes(bytes) ?? return Err(PackagesError{message: "stdout: {err}"})
             }
         }
-        "unit" -> out.write(compiler_fixture_unit(root, entries(args))) ?? return Err(PackagesError{message: "stdout: {err}"})
+        "unit" -> {
+            out.write(compiler_fixture_unit(root, entries(args))) ?? return Err(PackagesError{message: "stdout: {err}"})
+        }
         "unit-inputs" -> {
-            loop input in compiler_fixture_inputs(root, entries(args)) -> print("{input.path}\t{input.text}")
+            loop input in compiler_fixture_inputs(root, entries(args)) {
+                print("{input.path}\t{input.text}")
+            }
         }
         else -> usage()
     }
@@ -170,7 +187,9 @@ command: fn(root: String, name: String, args: [String]) PackagesError! -[Env, Ex
 // The texts of `input`, each followed by a NUL byte.
 framed_texts: fn(input: String) -> [String] PackagesError! {
     nul: String.from_bytes([U8]{U8{0}}) ?? ""
-    if input != "" && !input.ends_with(nul) -> return Err(PackagesError{message: "stdin: the last text is not followed by a NUL byte"})
+    if input != "" && !input.ends_with(nul) {
+        return Err(PackagesError{message: "stdin: the last text is not followed by a NUL byte"})
+    }
     texts := input.split(nul).to_list()
     _ := texts.pop()
     texts
@@ -335,11 +354,15 @@ visit_package: fn(repo: String, directory: String, packages: &[Package], visitin
     loop known in packages {
         if known.name == name -> return Ok()
     }
-    if visiting.contains(name) -> return Err(PackagesError{message: "package dependency cycle through {name}"})
-    visiting.push(name.copy()) // copy: the package row below keeps the name too
+    if visiting.contains(name) {
+        return Err(PackagesError{message: "package dependency cycle through {name}"})
+    }
+    visiting.push(name.copy())  // copy: the package row below keeps the name too
     loop path in manifest_deps(manifest) {
         target: normalize_join(directory, path)
-        if target == "" -> return Err(PackagesError{message: "{directory}/package.jet names a dependency outside the repository: {path}"})
+        if target == "" {
+            return Err(PackagesError{message: "{directory}/package.jet names a dependency outside the repository: {path}"})
+        }
         visit_package(repo, target, packages, visiting)
     }
     packages.push(Package{name: name, directory: directory})
@@ -356,7 +379,9 @@ compiler_sources: fn(repo: String, packages: [Package]) -[FS]> [Sources] Package
             base: path.rpartition("/").tail
             if !base.ends_with(".jet") || RESERVED_SOURCE_NAMES.contains(base) -> next
             bytes: files.read_bytes(files.join(repo, path)) ?? return Err(PackagesError{message: "`{path}` cannot be read: {err}"})
-            if bytes.len() >= 3 && bytes[0] == (U8{35}) && bytes[1] == (U8{33}) && bytes[2] == (U8{47}) -> next
+            if bytes.len() >= 3 && bytes[0] == (U8{35}) && bytes[1] == (U8{33}) && bytes[2] == (U8{47}) {
+                next
+            }
             members.push(path)
         }
         out.push(Sources{name: package.name, directory: package.directory, files: members})
@@ -378,7 +403,7 @@ compiler_inputs: fn(repo: String, roots: [String]) -[FS]> [String] PackagesError
         whole: files.join(repo, path)
         if !files.exists(whole) -> next
         if files.is_file(whole) {
-            found.push(path.copy()) // copy: `roots` keeps its rows
+            found.push(path.copy())  // copy: `roots` keeps its rows
             next
         }
         found.extend(package_tree(repo, path))
@@ -501,9 +526,9 @@ compiler_fixture_unit: fn(repo: String, entries: [String]) -[FS]> String Package
 // real build, so a top-level name two files declare cannot share this one:
 // every such name is refused at once, with its files.
 fixture_unit: fn(units: [UnitFile], names: [String]) -> String PackagesError! {
-    seen_imports := [String: Bool]{}
-    seen_members := [String: Bool]{}
-    owner_at := [String: Int]{}
+    seen_imports := [String:Bool]{}
+    seen_members := [String:Bool]{}
+    owner_at := [String:Int]{}
     owner_names := [String]{}
     owner_paths := [[String]]{}
     out := [U8]{}
@@ -516,11 +541,11 @@ fixture_unit: fn(units: [UnitFile], names: [String]) -> String PackagesError! {
             if name == "" -> next
             slot: owner_at.get(name) ?? -1
             if {
-                slot >= 0 -> owner_paths[slot].push(unit.path.copy()) // copy: every name of the file records it
+                slot >= 0 -> owner_paths[slot].push(unit.path.copy())  // copy: every name of the file records it
                 else -> {
                     owner_at[name] = owner_names.len()
                     owner_names.push(name)
-                    owner_paths.push([String]{unit.path.copy()}) // copy: every name of the file records it
+                    owner_paths.push([String]{unit.path.copy()})  // copy: every name of the file records it
                 }
             }
         }
@@ -529,9 +554,13 @@ fixture_unit: fn(units: [UnitFile], names: [String]) -> String PackagesError! {
     }
     clashes := [String]{}
     loop at in 0..<owner_names.len() {
-        if owner_paths[at].len() > 1 -> clashes.push("{owner_names[at]}: {owner_paths[at].join(", ")}")
+        if owner_paths[at].len() > 1 {
+            clashes.push("{owner_names[at]}: {owner_paths[at].join(", ")}")
+        }
     }
-    if clashes.len() > 0 -> return Err(PackagesError{message: "fixture unit: {clashes.len()} top-level name(s) declared in more than one file:\n{clashes.join("\n")}"})
+    if clashes.len() > 0 {
+        return Err(PackagesError{message: "fixture unit: {clashes.len()} top-level name(s) declared in more than one file:\n{clashes.join("\n")}"})
+    }
     String.from_bytes(out) ?? ""
 }
 
@@ -548,7 +577,9 @@ declared_name: fn(line: String) -> String Never! {
 // The identifier at `at` of `raw` when `: ` follows it, else "".
 ident_colon: fn(raw: [U8], at: Int) -> String Never! {
     end: ident_end(raw, at)
-    if end == at || end + 1 >= raw.len() || raw[end] != (U8{58}) || raw[end + 1] != (U8{32}) -> return ""
+    if end == at || end + 1 >= raw.len() || raw[end] != (U8{58}) || raw[end + 1] != (U8{32}) {
+        return ""
+    }
     text_of(raw, at, end)
 }
 
@@ -664,7 +695,9 @@ CoreGroup: struct {
 core_group: fn(raw: [U8], at: Int) -> CoreGroup? Never! {
     if !starts_at(raw, at, "use core") -> return None
     cursor := at + 8
-    loop cursor + 1 < raw.len() && raw[cursor] == (U8{46}) && is_ident_start(raw[cursor + 1]) -> cursor = ident_end(raw, cursor + 1)
+    loop cursor + 1 < raw.len() && raw[cursor] == (U8{46}) && is_ident_start(raw[cursor + 1]) {
+        cursor = ident_end(raw, cursor + 1)
+    }
     if !starts_at(raw, cursor, ".[") -> return None
     close: find_byte(raw, cursor + 2, U8{93})
     if close < 0 -> return None
@@ -673,7 +706,7 @@ core_group: fn(raw: [U8], at: Int) -> CoreGroup? Never! {
 
 // A repeated member of a grouped Core import is blanked, keeping every
 // surviving token at its offset; forms this does not recognize stay as written.
-blank_repeated_members: fn(text: String, seen: &[String: Bool]) -> String Never! {
+blank_repeated_members: fn(text: String, seen: &[String:Bool]) -> String Never! {
     raw: text.bytes()
     out := [U8]{}
     at := 0
@@ -693,7 +726,7 @@ blank_repeated_members: fn(text: String, seen: &[String: Bool]) -> String Never!
     String.from_bytes(out) ?? ""
 }
 
-member_imports: fn(whole: String, path: String, members: String, seen: &[String: Bool]) -> String Never! {
+member_imports: fn(whole: String, path: String, members: String, seen: &[String:Bool]) -> String Never! {
     parts: members.split(",").to_list()
     bindings := [String]{}
     loop part in parts {
@@ -702,7 +735,7 @@ member_imports: fn(whole: String, path: String, members: String, seen: &[String:
             bindings.push("")
             next
         }
-        if ident_end(name.bytes(), 0) != name.bytes().len() -> return whole.copy() // copy: an unrecognized form stays as written
+        if ident_end(name.bytes(), 0) != name.bytes().len() -> return whole.copy()  // copy: an unrecognized form stays as written
         bindings.push(name)
     }
     removed := false
@@ -721,7 +754,7 @@ member_imports: fn(whole: String, path: String, members: String, seen: &[String:
         seen[key] = true
         kept.push(true)
     }
-    if !removed -> return whole.copy() // copy: nothing repeated, the import stays as written
+    if !removed -> return whole.copy()  // copy: nothing repeated, the import stays as written
     last := -1
     loop index in 0..<kept.len() {
         if kept[index] -> last = index
@@ -756,7 +789,7 @@ is_core_use: fn(line: String) -> Bool Never! {
 }
 
 // A Core import line repeated from an earlier file (or line) is blanked.
-blank_repeated_imports: fn(text: String, seen: &[String: Bool]) -> String Never! {
+blank_repeated_imports: fn(text: String, seen: &[String:Bool]) -> String Never! {
     lines := [String]{}
     loop line in text.split("\n") {
         if is_core_import_line(line) {
@@ -777,7 +810,7 @@ compiler_fixture_inputs: fn(repo: String, entries: [String]) -[Env, FS]> [UnitFi
     root: normalize_join(".", files.absolute(repo) ?? repo)
     packages: entry_packages(repo, entries)
     inputs := [UnitFile]{}
-    at := [String: Int]{}
+    at := [String:Int]{}
     clashes := [String]{}
     loop path in fixture_files(repo, packages) {
         text: files.read(files.join(repo, path)) ?? return Err(PackagesError{message: "`{path}` cannot be read: {err}"})
@@ -791,11 +824,15 @@ compiler_fixture_inputs: fn(repo: String, entries: [String]) -[Env, FS]> [UnitFi
                 next
             }
             known: inputs[slot].text
-            if known != target -> clashes.push("{literal}: {known.removeprefix("{root}/")}, {target.removeprefix("{root}/")}")
+            if known != target {
+                clashes.push("{literal}: {known.removeprefix("{root}/")}, {target.removeprefix("{root}/")}")
+            }
             inputs[slot] = UnitFile{path: literal, text: target}
         }
     }
-    if clashes.len() > 0 -> return Err(PackagesError{message: "fixture unit: {clashes.len()} comptime input name(s) resolve to more than one file:\n{clashes.join("\n")}"})
+    if clashes.len() > 0 {
+        return Err(PackagesError{message: "fixture unit: {clashes.len()} comptime input name(s) resolve to more than one file:\n{clashes.join("\n")}"})
+    }
     inputs
 }
 
@@ -814,7 +851,9 @@ embed_literals: fn(text: String) -> [String] Never! {
             next
         }
         end := open
-        loop end < raw.len() && raw[end] != (U8{34}) && raw[end] != (U8{92}) && raw[end] != (U8{123}) && raw[end] != (U8{125}) -> end += 1
+        loop end < raw.len() && raw[end] != (U8{34}) && raw[end] != (U8{92}) && raw[end] != (U8{123}) && raw[end] != (U8{125}) {
+            end += 1
+        }
         if end > open && starts_at(raw, end, "\")") {
             out.push(text_of(raw, open, end))
             at = end + 2
@@ -827,7 +866,9 @@ embed_literals: fn(text: String) -> [String] Never! {
 
 // --- use blocks ---------------------------------------------------------------
 
-is_space: fn(b: U8) -> Bool Never! { b == (U8{32}) || b == (U8{9}) || b == (U8{10}) || b == (U8{13}) || b == (U8{11}) || b == (U8{12}) }
+is_space: fn(b: U8) -> Bool Never! {
+    b == (U8{32}) || b == (U8{9}) || b == (U8{10}) || b == (U8{13}) || b == (U8{11}) || b == (U8{12})
+}
 
 // A `use { … }` block (#6542) rewritten as one `use` line per row, keeping
 // every line and byte offset: `use {` and its `}` turn to spaces and each
@@ -906,7 +947,9 @@ unblock_uses: fn(text: String) -> String Never! {
         UnitFile{path: "Compiler/JetCli/Source/Cli.jet", text: "rows: fn() {{}}\npub Shape: struct {{}}\ncli: fn() {{}}\n"},
     }
     if fixture_unit(units, [String]{"jet_foundation", "jet_cli"}) == {
-        .Err(error) -> assert_eq(error.message, "fixture unit: 2 top-level name(s) declared in more than one file:\nrows: Compiler/JetFoundation/Source/Found.jet, Compiler/JetCli/Source/Cli.jet\nShape: Compiler/JetFoundation/Source/Found.jet, Compiler/JetCli/Source/Cli.jet")
+        .Err(error) -> {
+            assert_eq(error.message, "fixture unit: 2 top-level name(s) declared in more than one file:\nrows: Compiler/JetFoundation/Source/Found.jet, Compiler/JetCli/Source/Cli.jet\nShape: Compiler/JetFoundation/Source/Found.jet, Compiler/JetCli/Source/Cli.jet")
+        }
         .Ok(_) -> assert(false)
     }
 }
@@ -925,13 +968,20 @@ unblock_uses: fn(text: String) -> String Never! {
 #Test("the source identity hashes every compiler input and skips nested projects") {
     repo: files.mkdtemp("packages-identity") ?? panic("a temporary directory cannot be made: {err}")
     fixture: [String]{
-        "Compiler/package.jet", "workspace\n",
-        "Compiler/JetCli/package.jet", "name: \"jet_cli\"\ndeps: {{\n    jet_lexer: ../JetLexer,\n    remote: \"1.2\",\n}}\n",
-        "Compiler/JetCli/Source/Cli/Registry.jet", "JET_CLI_BINARY: \"jet\"\n",
-        "Compiler/JetLexer/package.jet", "name: \"jet_lexer\"\n",
-        "Compiler/JetLexer/Fixture/package.jet", "name: \"fixture\"\n",
-        "Core/Text.jet", "text: 1\n",
-        "Jetpack/PackageModel/Source/Manifest/Manifest.jet", "JET_VERSION: \"a0.0.43\"\n",
+        "Compiler/package.jet",
+        "workspace\n",
+        "Compiler/JetCli/package.jet",
+        "name: \"jet_cli\"\ndeps: {{\n    jet_lexer: ../JetLexer,\n    remote: \"1.2\",\n}}\n",
+        "Compiler/JetCli/Source/Cli/Registry.jet",
+        "JET_CLI_BINARY: \"jet\"\n",
+        "Compiler/JetLexer/package.jet",
+        "name: \"jet_lexer\"\n",
+        "Compiler/JetLexer/Fixture/package.jet",
+        "name: \"fixture\"\n",
+        "Core/Text.jet",
+        "text: 1\n",
+        "Jetpack/PackageModel/Source/Manifest/Manifest.jet",
+        "JET_VERSION: \"a0.0.43\"\n",
     }
     loop at in 0..<(fixture.len() /% 2) {
         path: files.join(repo, fixture[2 * at])

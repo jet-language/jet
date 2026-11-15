@@ -22,6 +22,7 @@ use {
 }
 
 POLICY: "Compiler/JetCli/Source/Cli/native-c-policy.tsv"
+
 SELF: "Tools/packaging/NativeCCompiler.jet"
 
 Rules: struct {
@@ -38,11 +39,15 @@ read_rules: fn(path: String) -> Rules {
     loop index in 0..<lines.len() {
         if lines[index] == "" || lines[index].starts_with("#") -> next
         fields: lines[index].split("\t").to_list()
-        if fields.len() != 2 || fields[1] == "" -> process.fail(1, "native-c-policy.tsv:{index + 1}: expected \"kind<TAB>value\"")
+        if fields.len() != 2 || fields[1] == "" {
+            process.fail(1, "native-c-policy.tsv:{index + 1}: expected \"kind<TAB>value\"")
+        }
         if fields[0] == {
             "flag" -> flags.push(fields[1])
             "hardening-remove" -> removed.push(fields[1])
-            else -> process.fail(1, "native-c-policy.tsv:{index + 1}: unknown policy kind `{fields[0]}`")
+            else -> {
+                process.fail(1, "native-c-policy.tsv:{index + 1}: unknown policy kind `{fields[0]}`")
+            }
         }
     }
     Rules{flags: flags, hardening_removed: removed}
@@ -57,12 +62,16 @@ child_hardening: fn(enabled: String, removed: [String]) -> String {
 }
 
 run: fn() {
-    if process.env_get_or("JET_NATIVE_C_WRAPPER_ACTIVE", "") == "1" -> process.fail(2, "native-c-compiler: CC resolves back to this wrapper; set CC to a real C compiler")
+    if process.env_get_or("JET_NATIVE_C_WRAPPER_ACTIVE", "") == "1" {
+        process.fail(2, "native-c-compiler: CC resolves back to this wrapper; set CC to a real C compiler")
+    }
     rules: read_rules("{sys.executable().removesuffix(SELF)}{POLICY}")
     compiler: process.env_get_or("CC", "cc")
     spec := process.cmd([compiler.copy()]).args_extend(process.args()).args_extend(rules.flags)
         .env("JET_NATIVE_C_WRAPPER_ACTIVE", "1").stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
-    if process.env_get("NIX_HARDENING_ENABLE") == .Val(enabled) -> spec = spec.env("NIX_HARDENING_ENABLE", child_hardening(enabled, rules.hardening_removed))
+    if process.env_get("NIX_HARDENING_ENABLE") == .Val(enabled) {
+        spec = spec.env("NIX_HARDENING_ENABLE", child_hardening(enabled, rules.hardening_removed))
+    }
     receipt: spec.run() ?? process.fail(1, "cannot start the C compiler `{compiler}`: {err}")
     if receipt.signal == .Val(signal) {
         #Unsafe("re-raise the compiler's terminating signal on this process, as the parent shell expects") {
@@ -74,7 +83,9 @@ run: fn() {
 }
 
 // A command that must exit 0; its stdout.
-test_command: fn(argv: [String]) -> String { process.check_output(process.cmd(argv).output_limit(134217728)) ?? panic("{argv.join(" ")}: {err}") }
+test_command: fn(argv: [String]) -> String {
+    process.check_output(process.cmd(argv).output_limit(134217728)) ?? panic("{argv.join(" ")}: {err}")
+}
 
 #Test("native C policy keeps other hardening and never changes the parent environment") {
     rules: read_rules("{files.cwd() ?? panic("cannot read the working directory")}/{POLICY}")
@@ -99,8 +110,12 @@ test_command: fn(argv: [String]) -> String { process.check_output(process.cmd(ar
             // The node driver and its test hold the policy itself.
             if !entry.name.ends_with(".mjs") || entry.name.starts_with("native-c-compiler.") -> next
             source: files.read("{root}/{directory}/{entry.name}") ?? panic("cannot read {directory}/{entry.name}")
-            if re.is_match(fallback, source) -> problems.push("{directory}/{entry.name}: use the shared native C driver")
-            if re.is_match(direct, source) -> problems.push("{directory}/{entry.name}: hard-coded C compiler bypasses the shared policy")
+            if re.is_match(fallback, source) {
+                problems.push("{directory}/{entry.name}: use the shared native C driver")
+            }
+            if re.is_match(direct, source) {
+                problems.push("{directory}/{entry.name}: hard-coded C compiler bypasses the shared policy")
+            }
         }
     }
     assert_eq(problems, [String]{})
@@ -110,17 +125,23 @@ test_command: fn(argv: [String]) -> String { process.check_output(process.cmd(ar
     root: files.cwd() ?? panic("cannot read the working directory")
     folders: process.env_get_or("LIBRARY_PATH", "").split(":").to_list()
     musl: loop folder in folders if folder != "" && files.is_file("{folder}/libc.a") && files.is_file("{folder}/crt1.o") -> folder.copy()
-    if musl.len() == 0 -> panic("LIBRARY_PATH must name the static musl `libc.a` folder a C program with Jet links")
+    if musl.len() == 0 {
+        panic("LIBRARY_PATH must name the static musl `libc.a` folder a C program with Jet links")
+    }
     archives := [String]{"{musl[0]}/libc.a"}
     scratch: process.env_get_or("JET_TEST_SCRATCH_DIR", sys.temp_dir())
     files.create_dir_all(scratch) ?? panic("cannot create {scratch}")
     out: test_command(["mktemp", "-d", "{scratch}/native-c-platform-census-XXXXXX"]).trim()
-    loop name in ["libgcc.a", "libgcc_eh.a"] -> archives.push(test_command(["{root}/{SELF}", "-print-file-name={name}"]).trim())
+    loop name in ["libgcc.a", "libgcc_eh.a"] {
+        archives.push(test_command(["{root}/{SELF}", "-print-file-name={name}"]).trim())
+    }
     platform := [String]{}
     loop path in archives {
         loop line in test_command(["nm", "--defined-only", "--extern-only", "--format=posix", path.copy()]).split("\n").to_list() {
             fields: re.split(Regex{"\s+"}, line)
-            if fields.len() >= 2 && fields[0] != "" && re.full_match(Regex{"[A-Za-z]"}, fields[1]) -> platform.push(fields[0])
+            if fields.len() >= 2 && fields[0] != "" && re.full_match(Regex{"[A-Za-z]"}, fields[1]) {
+                platform.push(fields[0])
+            }
         }
     }
     // The #Export(c) names of the runtime sources (Compiler/JetRuntime/sources.list).
@@ -132,7 +153,9 @@ test_command: fn(argv: [String]) -> String { process.check_output(process.cmd(ar
         if path == "" || path.starts_with("#") -> next
         source: files.read("{root}/{path}") ?? panic("cannot read {path}")
         loop found in re.matches(export, source) {
-            if provider.contains(found.groups[0]) -> panic("duplicate runtime #Export(c) {found.groups[0]}")
+            if provider.contains(found.groups[0]) {
+                panic("duplicate runtime #Export(c) {found.groups[0]}")
+            }
             provider.push(found.groups[0])
         }
     }
@@ -141,16 +164,23 @@ test_command: fn(argv: [String]) -> String { process.check_output(process.cmd(ar
     stride_match: re.match(Regex{"RT_HOST_U8_STRIDE\s*:\s*comptime\s*\{{\s*I64\{{(1|8)\}}\s*\}}"}, collections) ?? panic("the TCP fixture must use the canonical U8 carrier epoch")
     stride: stride_match.groups[0]
     problems := [String]{}
-    loop name in ["ProcessRoutesWitness", "ProcessExecutionWitness", "TerminalProcessWitness", "ProcessSpecWitness", "TCPRoutesWitness"] {
+    loop name in
+        ["ProcessRoutesWitness", "ProcessExecutionWitness", "TerminalProcessWitness", "ProcessSpecWitness", "TCPRoutesWitness"] {
         object: "{out}/{name}.o"
         argv := [String]{"{root}/{SELF}", "-std=c11", "-O1", "-fno-stack-protector", "-fno-PIE", "-fno-builtin", "-Wall", "-Wextra", "-Werror"}
         if name == "TCPRoutesWitness" -> argv.push("-DJET_TCP_U8_STRIDE={stride}")
-        loop tail in ["-c", "{root}/Compiler/JetRuntime/Tests/{name}.c", "-o", object.copy()] -> argv.push(tail)
+        loop tail in ["-c", "{root}/Compiler/JetRuntime/Tests/{name}.c", "-o", object.copy()] {
+            argv.push(tail)
+        }
         _: test_command(argv)
         imports: loop line in test_command(["nm", "-u", "--format=posix", object.copy()]).split("\n").to_list() if line != "" -> re.split(Regex{"\s+"}, line)[0]
         loop symbol in imports {
-            if re.is_match(Regex{"_chk(?:_|$)"}, symbol) || re.is_match(Regex{"^__.*_2$"}, symbol) -> problems.push("{name}: forbidden import {symbol}")
-            if !platform.contains(symbol) && !provider.contains(symbol) -> problems.push("{name}: missing import {symbol}")
+            if re.is_match(Regex{"_chk(?:_|$)"}, symbol) || re.is_match(Regex{"^__.*_2$"}, symbol) {
+                problems.push("{name}: forbidden import {symbol}")
+            }
+            if !platform.contains(symbol) && !provider.contains(symbol) {
+                problems.push("{name}: missing import {symbol}")
+            }
         }
     }
     files.rmtree(out) ?? panic("cannot remove {out}")

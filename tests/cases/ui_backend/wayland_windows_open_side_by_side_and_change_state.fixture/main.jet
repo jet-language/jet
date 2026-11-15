@@ -2,6 +2,7 @@ package: {
     name: "wayland_windows_open_side_by_side_and_change_state"
     authority: { allow: [Env, IO, Net, Time] }
 }
+
 use {
     net: core.net
     sys: core.sys
@@ -44,7 +45,7 @@ Fake: struct {
 
 GLOBALS: [String]{"wl_compositor", "wl_shm", "xdg_wm_base"}
 
-fake_put: fn(&out: [U8], value: Int) {
+fake_put: fn(out: &[U8], value: Int) {
     v: value.bit_and(4294967295)
     out.push(U8{v.bit_and(255)})
     out.push(U8{(v >> 8).bit_and(255)})
@@ -79,14 +80,16 @@ fake_string: fn(bytes: [U8], at: Int) -> String {
     String.from_bytes(bytes[(at + 4)..<(at + 3 + length)]) ?? ""
 }
 
-fake_event: fn(&f: Fake, object: Int, opcode: Int, args: [U8]) {
+fake_event: fn(f: &Fake, object: Int, opcode: Int, args: [U8]) {
     fake_put(f.out, object)
     fake_put(f.out, ((args.len() + 8) << 16) + opcode)
     loop b in args -> f.out.push(b)
 }
 
-fake_flush: fn(&f: Fake) -[Net, Time]> {
-    if f.out.len() == 0 -> return
+fake_flush: fn(f: &Fake) -[Net, Time]> {
+    if f.out.len() == 0 {
+        return
+    }
     out: f.out.copy()
     f.out = [U8]{}
     net.unix_send(f.stream, out, [sys.Fd]{}) ?? {
@@ -95,13 +98,13 @@ fake_flush: fn(&f: Fake) -[Net, Time]> {
     }
 }
 
-fake_fail: fn(&f: Fake, message: String) {
+fake_fail: fn(f: &Fake, message: String) {
     if f.failures.len() < 8 -> f.failures.push(message.copy())
 }
 
 // xdg_toplevel.configure at `width` x `height` logical units with
 // `states`, then xdg_surface.configure.
-fake_configure: fn(&f: Fake, width: Int, height: Int, states: [Int]) {
+fake_configure: fn(f: &Fake, width: Int, height: Int, states: [Int]) {
     f.serial += 1
     args := fake_words([Int]{width, height, states.len() * 4})
     loop state in states -> fake_put(args, state)
@@ -111,13 +114,13 @@ fake_configure: fn(&f: Fake, width: Int, height: Int, states: [Int]) {
     fake_event(f, xdg_surface, 0, fake_words([Int]{f.serial}))
 }
 
-fake_close: fn(&f: Fake) {
+fake_close: fn(f: &Fake) {
     toplevel: f.toplevel
     f.closed = true
     fake_event(f, toplevel, 1, [U8]{})
 }
 
-fake_commit: fn(&f: Fake) {
+fake_commit: fn(f: &Fake) {
     f.commits += 1
     if f.attached != 0 {
         previous: f.current
@@ -139,12 +142,14 @@ fake_commit: fn(&f: Fake) {
 // set_minimized 13. This compositor maximizes to 400x300, makes
 // fullscreen at 640x480 and leaves fullscreen at 200x100, and closes a
 // window that asks to be minimized.
-fake_toplevel: fn(&f: Fake, opcode: Int, body: [U8]) {
+fake_toplevel: fn(f: &Fake, opcode: Int, body: [U8]) {
     if opcode == 2 {
         f.title = fake_string(body, 0)
         return
     }
-    if opcode < 9 -> return
+    if opcode < 9 {
+        return
+    }
     if f.title != "states" -> fake_fail(f, "{f.title}: state request {opcode}")
     if opcode == 9 {
         f.records.push("states: maximize")
@@ -165,7 +170,7 @@ fake_toplevel: fn(&f: Fake, opcode: Int, body: [U8]) {
     }
 }
 
-fake_request: fn(&f: Fake, object: Int, opcode: Int, body: [U8]) {
+fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) {
     if object == 1 && opcode == 1 {
         f.registry = fake_u32(body, 0)
         registry: f.registry
@@ -187,7 +192,9 @@ fake_request: fn(&f: Fake, object: Int, opcode: Int, body: [U8]) {
         interface: fake_string(body, 4)
         length: fake_u32(body, 4)
         id: fake_u32(body, 8 + ((length + 3) /% 4) * 4 + 4)
-        if name < 1 || name > GLOBALS.len() || GLOBALS[name - 1] != interface -> fake_fail(f, "bound global {name} as {interface}")
+        if name < 1 || name > GLOBALS.len() || GLOBALS[name - 1] != interface {
+            fake_fail(f, "bound global {name} as {interface}")
+        }
         if interface == "wl_compositor" -> f.compositor = id
         if interface == "wl_shm" {
             f.shm = id
@@ -235,7 +242,7 @@ fake_request: fn(&f: Fake, object: Int, opcode: Int, body: [U8]) {
     }
 }
 
-fake_dispatch: fn(&f: Fake) {
+fake_dispatch: fn(f: &Fake) {
     at := 0
     loop f.inbox.len() - at >= 8 {
         object: fake_u32(f.inbox, at)
@@ -257,10 +264,28 @@ fake_dispatch: fn(&f: Fake) {
 // Serves one window until it disconnects.
 fake_serve: fn(stream: &&net.UnixStream) -[Net, Time]> Fake {
     f := Fake{
-        stream: stream, inbox: [U8]{}, out: [U8]{}, registry: 0, compositor: 0, shm: 0, wm_base: 0,
-        surface: 0, xdg_surface: 0, toplevel: 0, title: "", fds: [sys.Fd]{}, pool_fds: [sys.Fd]{},
-        attached: 0, current: 0, callbacks: [Int]{}, serial: 0, configured: false, commits: 0,
-        closed: false, records: [String]{}, failures: [String]{},
+        stream: stream,
+        inbox: [U8]{},
+        out: [U8]{},
+        registry: 0,
+        compositor: 0,
+        shm: 0,
+        wm_base: 0,
+        surface: 0,
+        xdg_surface: 0,
+        toplevel: 0,
+        title: "",
+        fds: [sys.Fd]{},
+        pool_fds: [sys.Fd]{},
+        attached: 0,
+        current: 0,
+        callbacks: [Int]{},
+        serial: 0,
+        configured: false,
+        commits: 0,
+        closed: false,
+        records: [String]{},
+        failures: [String]{},
     }
     idle := 0
     loop idle < 40 {
@@ -325,13 +350,9 @@ states_window: fn() -[Env, Net, Time]> [String] {
             if event == .Close -> closed = true
             if event == .Resize(width, height) {
                 log.push("states: {width}x{height} {state_line(window)}")
-                if window.fullscreen() {
-                    window.set_fullscreen(false)
-                } else if window.maximized() {
+                if window.fullscreen() -> window.set_fullscreen(false) else if window.maximized() {
                     window.set_fullscreen(true)
-                } else {
-                    window.minimize()
-                }
+                } else { window.minimize() }
             }
         }
         if closed -> break

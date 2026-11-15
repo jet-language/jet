@@ -3,8 +3,15 @@
 use {
     jetpack_trust.[LockRecordKind, SemanticLockFile, trust_parse_semantic_lock, trust_write_semantic_lock]
     jet_pkg_model.[
-        ARCH_X64, ArtifactKind, PackageVariant, PlatformKey, VariantArch, VariantLibc, VariantLinkage,
-        VariantOS, VariantRole,
+        ARCH_X64,
+        ArtifactKind,
+        PackageVariant,
+        PlatformKey,
+        VariantArch,
+        VariantLibc,
+        VariantLinkage,
+        VariantOS,
+        VariantRole,
     ]
 }
 
@@ -25,9 +32,7 @@ use {
     assert(text.contains("kind = \"variant\""))
     parsed: trust_parse_semantic_lock(text)
     assert_eq(parsed.records.len(), 2)
-    loop record in parsed.records {
-        assert(record.identity.kind == LockRecordKind.Variant)
-    }
+    loop record in parsed.records { assert(record.identity.kind == LockRecordKind.Variant) }
 }
 
 #Test("native cross toolchain building remote and emulator domains") {

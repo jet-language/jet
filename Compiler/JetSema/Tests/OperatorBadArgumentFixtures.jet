@@ -10,7 +10,7 @@ use {
     file: "Compiler/JetSema/Tests/fixtures/OperatorBadArgument.fixture/OperatorBadArgument.jet"
     checked: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program)
     if checked == {
-        .Refused(refusal) -> panic("{file}: refused before checking: {refusal.stderr}")
+        .Refused(refusal) -> { panic("{file}: refused before checking: {refusal.stderr}") }
         .Compiled(result, snapshot) -> {
             if result.internal_problem != None -> panic("{file}: internal compiler failure")
             codes := [String]{}

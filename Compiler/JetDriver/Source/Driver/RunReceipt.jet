@@ -97,7 +97,9 @@ jet_driver_run_receipt_section_name_validate: fn(name: String) JetDriverRunRecei
 
 jet_driver_run_receipt_section_validate: fn(section: JetDriverRunReceiptSection) JetDriverRunReceiptError! {
     jet_driver_run_receipt_section_name_validate(section.name)
-    if section.type_name == "" -> return Err(jet_driver_run_receipt_error("receipt section type name is empty"))
+    if section.type_name == "" {
+        return Err(jet_driver_run_receipt_error("receipt section type name is empty"))
+    }
     if section.type_name.bytes().len() > 256 {
         return Err(jet_driver_run_receipt_error("receipt section type name is too long (maximum 256 bytes)"))
     }
@@ -117,12 +119,16 @@ jet_driver_run_receipt_section_validate: fn(section: JetDriverRunReceiptSection)
         return Err(jet_driver_run_receipt_error("receipt section `{section.name}` payload digest does not match its bytes"))
     }
     value: canonical_json_parse(section.bytes) ?? return Err(jet_driver_run_receipt_error("receipt section `{section.name}` has an invalid schema: canonical JSON is invalid: {err.message}"))
-    if value == .Object(_) -> return
+    if value == .Object(_) {
+        return
+    }
     Err(jet_driver_run_receipt_error("receipt section `{section.name}` has an invalid schema: typed section value must be a canonical JSON object"))
 }
 
 jet_driver_run_receipt_normalized_sections: fn(sections: [JetDriverRunReceiptSection]) -> [JetDriverRunReceiptSection] JetDriverRunReceiptError! {
-    if sections.len() > 256 -> return Err(jet_driver_run_receipt_error("receipt has too many sections (maximum 256)"))
+    if sections.len() > 256 {
+        return Err(jet_driver_run_receipt_error("receipt has too many sections (maximum 256)"))
+    }
     total := 0
     normalized := sections
     loop section in normalized {
@@ -172,7 +178,9 @@ jet_driver_run_receipt_link_order: fn(left: JetDriverRecordLink, right: JetDrive
 }
 
 jet_driver_run_receipt_normalized_links: fn(links: [JetDriverRecordLink], label: String) -> [JetDriverRecordLink] JetDriverRunReceiptError! {
-    if links.len() > 100000 -> return Err(jet_driver_run_receipt_error("receipt has too many {label} links (maximum 100000)"))
+    if links.len() > 100000 {
+        return Err(jet_driver_run_receipt_error("receipt has too many {label} links (maximum 100000)"))
+    }
     normalized := links
     loop link in normalized {
         jet_driver_record_link_validate(link) ?? return Err(jet_driver_run_receipt_error("receipt {label} link is invalid: {err.message}"))
@@ -212,7 +220,9 @@ JetDriverRunReceiptCursor: struct {
 }
 
 jet_driver_run_receipt_take: fn(cursor: &JetDriverRunReceiptCursor) -> [U8] JetDriverRunReceiptError! {
-    if cursor.at > cursor.bytes.len() - 8 -> return Err(jet_driver_run_receipt_error("{cursor.prefix} frame length is truncated"))
+    if cursor.at > cursor.bytes.len() - 8 {
+        return Err(jet_driver_run_receipt_error("{cursor.prefix} frame length is truncated"))
+    }
     length := 0
     loop _ in 0..<8 {
         byte: Int{cursor.bytes[cursor.at]}
@@ -222,7 +232,9 @@ jet_driver_run_receipt_take: fn(cursor: &JetDriverRunReceiptCursor) -> [U8] JetD
         length = length * 256 + byte
         cursor.at += 1
     }
-    if length > cursor.bytes.len() - cursor.at -> return Err(jet_driver_run_receipt_error("{cursor.prefix} frame is truncated"))
+    if length > cursor.bytes.len() - cursor.at {
+        return Err(jet_driver_run_receipt_error("{cursor.prefix} frame is truncated"))
+    }
     bytes: cursor.bytes.slice(cursor.at, cursor.at + length)
     cursor.at += length
     Ok(bytes)
@@ -234,11 +246,15 @@ jet_driver_run_receipt_take_text: fn(cursor: &JetDriverRunReceiptCursor, label: 
 }
 
 jet_driver_run_receipt_number: fn(bytes: [U8], width: Int, label: String, maximum: Int, too_large: String) -> Int JetDriverRunReceiptError! {
-    if bytes.len() != width -> return Err(jet_driver_run_receipt_error("receipt {label} is malformed"))
+    if bytes.len() != width {
+        return Err(jet_driver_run_receipt_error("receipt {label} is malformed"))
+    }
     value := 0
     loop byte in bytes {
         digit: Int{byte}
-        if value > (maximum - digit) /% 256 || digit > maximum -> return Err(jet_driver_run_receipt_error(too_large))
+        if value > (maximum - digit) /% 256 || digit > maximum {
+            return Err(jet_driver_run_receipt_error(too_large))
+        }
         value = value * 256 + digit
     }
     Ok(value)
@@ -259,7 +275,9 @@ jet_driver_run_receipt_decode_links: fn(cursor: &JetDriverRunReceiptCursor, labe
 }
 
 jet_driver_run_receipt_decode: fn(bytes: [U8]) -> JetDriverRunReceipt JetDriverRunReceiptError! {
-    if bytes.len() > JET_DRIVER_RUN_RECEIPT_MAX_BYTES -> return Err(jet_driver_run_receipt_error("receipt is too large"))
+    if bytes.len() > JET_DRIVER_RUN_RECEIPT_MAX_BYTES {
+        return Err(jet_driver_run_receipt_error("receipt is too large"))
+    }
     magic: jet_driver_run_receipt_section_marker(JET_DRIVER_RUN_RECEIPT_MAGIC)
     if bytes.len() < magic.len() || bytes.slice(0, magic.len()) != magic {
         return Err(jet_driver_run_receipt_error("receipt magic is invalid"))
@@ -275,7 +293,9 @@ jet_driver_run_receipt_decode: fn(bytes: [U8]) -> JetDriverRunReceipt JetDriverR
     loop _ in 0..<count {
         path: jet_driver_run_receipt_take_text(cursor, "input path")
         digest: jet_driver_run_receipt_take_text(cursor, "input digest")
-        if !jet_driver_run_receipt_is_digest(digest) -> return Err(jet_driver_run_receipt_error("receipt input digest is malformed"))
+        if !jet_driver_run_receipt_is_digest(digest) {
+            return Err(jet_driver_run_receipt_error("receipt input digest is malformed"))
+        }
         inputs.push(JetDriverRunReceiptInput{path: path, digest: digest})
     }
     stdout: jet_driver_run_receipt_take(cursor)
@@ -298,10 +318,14 @@ jet_driver_run_receipt_decode: fn(bytes: [U8]) -> JetDriverRunReceipt JetDriverR
     }
     if extension == jet_driver_run_receipt_section_marker(JET_DRIVER_RUN_RECEIPT_LINK_MAGIC) {
         version: jet_driver_run_receipt_take(cursor)
-        if version.len() != 8 -> return Err(jet_driver_run_receipt_error("receipt links version is malformed"))
+        if version.len() != 8 {
+            return Err(jet_driver_run_receipt_error("receipt links version is malformed"))
+        }
         version_number := U64{0}
         loop byte in version -> version_number = (version_number << 8).bit_or(U64{byte})
-        if version_number != 1 -> return Err(jet_driver_run_receipt_error("unsupported receipt links version {version_number}"))
+        if version_number != 1 {
+            return Err(jet_driver_run_receipt_error("unsupported receipt links version {version_number}"))
+        }
         consumed = jet_driver_run_receipt_decode_links(cursor, "consumed")
         produced = jet_driver_run_receipt_decode_links(cursor, "produced")
         extension = jet_driver_run_receipt_take(cursor)

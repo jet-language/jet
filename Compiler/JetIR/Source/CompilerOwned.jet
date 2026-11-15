@@ -199,7 +199,9 @@ ir_compiler_owned_core_fields: fn() -> [String:[TypeTupleField]] Never! {
         {name: "AllocError", fields: [String]{"requested_bytes", "allocator"}},
         {name: "DataSummary", fields: [String]{"count", "sum", "mean", "min", "max", "median", "variance", "stddev"}},
     }
-    loop name in IR_COMPILER_OWNED_GEOMETRY_POINTS -> records.push(IRCompilerOwnedRecord{name: name.copy(), fields: [String]{"x", "y"}})
+    loop name in IR_COMPILER_OWNED_GEOMETRY_POINTS {
+        records.push(IRCompilerOwnedRecord{name: name.copy(), fields: [String]{"x", "y"}})
+    }
     loop record in IR_COMPILER_OWNED_CORE_RECORDS -> records.push(record.copy())
     owners := [String]{}
     fields := [[String]]{}
@@ -221,7 +223,9 @@ ir_compiler_owned_core_fields: fn() -> [String:[TypeTupleField]] Never! {
         // A written marker argument's value: the compiler answers
         // `info.marker(T)` from it, so compile-time code carries it as a host
         // word (ir_comptime_struct); elsewhere the word is 0.
-        if owner == "MarkerArgInfo" -> row.push(TypeTupleField{name: "value", ty: Type.Named{name: IR_MARKER_ARG_VALUE}})
+        if owner == "MarkerArgInfo" {
+            row.push(TypeTupleField{name: "value", ty: Type.Named{name: IR_MARKER_ARG_VALUE}})
+        }
         out[owner] = row
     }
     out
@@ -239,8 +243,12 @@ ir_compiler_owned_record_fields: fn(name: String, core: [String:[TypeTupleField]
     if name == IR_RANGE_RECORD -> return Val(ir_range_record_fields())
     t: Type.Named{name: "T"}
     bytes: Type.List{element: Type.IntN{signed: false, bits: 8}}
-    if name == "DataJoin" -> return Val([TypeTupleField]{TypeTupleField{name: "left", ty: Type.Named{name: "L"}}, TypeTupleField{name: "right", ty: Type.Named{name: "R"}}})
-    if name == "Group" -> return Val([TypeTupleField]{TypeTupleField{name: "key", ty: Type.Named{name: "K"}}, TypeTupleField{name: "value", ty: Type.Named{name: "V"}}})
+    if name == "DataJoin" {
+        return Val([TypeTupleField]{TypeTupleField{name: "left", ty: Type.Named{name: "L"}}, TypeTupleField{name: "right", ty: Type.Named{name: "R"}}})
+    }
+    if name == "Group" {
+        return Val([TypeTupleField]{TypeTupleField{name: "key", ty: Type.Named{name: "K"}}, TypeTupleField{name: "value", ty: Type.Named{name: "V"}}})
+    }
     if name == "DataSnapshot" {
         return Val([TypeTupleField]{
             {name: "value", ty: t},
@@ -251,7 +259,9 @@ ir_compiler_owned_record_fields: fn(name: String, core: [String:[TypeTupleField]
             {name: "content", ty: bytes},
         })
     }
-    if name == "Point2" || name == "Delta2" -> return Val([TypeTupleField]{TypeTupleField{name: "x", ty: t}, TypeTupleField{name: "y", ty: t}})
+    if name == "Point2" || name == "Delta2" {
+        return Val([TypeTupleField]{TypeTupleField{name: "x", ty: t}, TypeTupleField{name: "y", ty: t}})
+    }
     if name == "Ray2" {
         space: Type.Named{name: "To"}
         return Val([TypeTupleField]{
@@ -266,7 +276,9 @@ ir_compiler_owned_record_fields: fn(name: String, core: [String:[TypeTupleField]
         loop field in names -> fields.push(TypeTupleField{name: field, ty: scalar})
         return Val(fields)
     }
-    if name == "KeyRef" || name == "MutationPlan" || name == "VaultWrite" -> return Val([TypeTupleField]{})
+    if name == "KeyRef" || name == "MutationPlan" || name == "VaultWrite" {
+        return Val([TypeTupleField]{})
+    }
     if name == "Rotation" {
         key: Type.Apply{name: "KeyRef", args: [Type]{t}}
         return Val([TypeTupleField]{TypeTupleField{name: "previous", ty: key}, TypeTupleField{name: "current", ty: key}})
@@ -293,8 +305,16 @@ ir_compiler_owned_record_fields: fn(name: String, core: [String:[TypeTupleField]
 // The non-generic geometry carriers (Rust COMPILER_OWNED_GEOMETRY_RECORDS
 // rows without type parameters); their `x`/`y` types are Core record rows.
 IR_COMPILER_OWNED_GEOMETRY_POINTS: #run { [String]{
-    "ScreenPoint", "WorldPoint", "ViewPoint", "CameraPoint", "DevicePoint",
-    "ScreenDelta", "WorldDelta", "ViewDelta", "CameraDelta", "DeviceDelta",
+    "ScreenPoint",
+    "WorldPoint",
+    "ViewPoint",
+    "CameraPoint",
+    "DevicePoint",
+    "ScreenDelta",
+    "WorldDelta",
+    "ViewDelta",
+    "CameraDelta",
+    "DeviceDelta",
 } }
 
 // Each field is the type's scalar.
@@ -310,10 +330,32 @@ IR_COMPILER_OWNED_MATH_RECORDS: #run { [IRCompilerOwnedRecord]{
 // and the Core records (generic Core carriers, geometry, keyed vault,
 // data summaries, `AllocError`, `VJPRun`), in program order.
 IR_COMPILER_OWNED_CARRIER_RECORDS: #run { [String]{
-    "DataJoin", "Group", "DataSnapshot",
-    "Point2", "Delta2", "ScreenPoint", "WorldPoint", "ViewPoint", "CameraPoint", "DevicePoint",
-    "ScreenDelta", "WorldDelta", "ViewDelta", "CameraDelta", "DeviceDelta", "Ray2", "Transform", "Transform2",
-    "KeyRef", "MutationPlan", "VaultWrite", "Rotation", "DataPivotCell", "AllocError", "DataSummary", "VJPRun",
+    "DataJoin",
+    "Group",
+    "DataSnapshot",
+    "Point2",
+    "Delta2",
+    "ScreenPoint",
+    "WorldPoint",
+    "ViewPoint",
+    "CameraPoint",
+    "DevicePoint",
+    "ScreenDelta",
+    "WorldDelta",
+    "ViewDelta",
+    "CameraDelta",
+    "DeviceDelta",
+    "Ray2",
+    "Transform",
+    "Transform2",
+    "KeyRef",
+    "MutationPlan",
+    "VaultWrite",
+    "Rotation",
+    "DataPivotCell",
+    "AllocError",
+    "DataSummary",
+    "VJPRun",
 } }
 
 // The type parameters of a compiler-owned row (Rust compiler_owned_type_defs
@@ -325,7 +367,9 @@ ir_compiler_owned_generic_params: fn(name: String) -> [String] Never! {
     if name == "Point2" || name == "Delta2" -> return [String]{"T", "Space"}
     if name == "Ray2" || name == "Transform2" -> return [String]{"T", "From", "To"}
     if name == "Transform" -> return [String]{"From", "To"}
-    if name == "DataSnapshot" || name == "KeyRef" || name == "MutationPlan" || name == "VaultWrite" || name == "Rotation" || name == "VJPRun" -> return [String]{"T"}
+    if name == "DataSnapshot" || name == "KeyRef" || name == "MutationPlan" || name == "VaultWrite" || name == "Rotation" || name == "VJPRun" {
+        return [String]{"T"}
+    }
     if name == "DispatchFailure" -> return [String]{"E"}
     [String]{}
 }
@@ -441,17 +485,27 @@ ir_compiler_owned_enum_payload: fn(name: String, variant: String) -> IRCompilerO
         if variant == "Bool" -> return ir_compiler_owned_single(Type.Bool)
         if variant == "Int" -> return ir_compiler_owned_single(Type.Int)
         if variant == "Float" -> return ir_compiler_owned_single(Type.Float)
-        if variant == "Number" || variant == "Text" || variant == "Key" -> return ir_compiler_owned_single(Type.String)
-        if variant == "Bytes" -> return ir_compiler_owned_single(Type.List{element: Type.IntN{signed: false, bits: 8}})
+        if variant == "Number" || variant == "Text" || variant == "Key" {
+            return ir_compiler_owned_single(Type.String)
+        }
+        if variant == "Bytes" {
+            return ir_compiler_owned_single(Type.List{element: Type.IntN{signed: false, bits: 8}})
+        }
         return IRCompilerOwnedPayload.Unit
     }
     if name == "WsError" {
-        if variant == "MessageTooLarge" -> return ir_compiler_owned_named([TypeTupleField]{TypeTupleField{name: "limit", ty: Type.Int}})
-        if variant == "IO" -> return ir_compiler_owned_named([TypeTupleField]{TypeTupleField{name: "operation", ty: Type.String}})
+        if variant == "MessageTooLarge" {
+            return ir_compiler_owned_named([TypeTupleField]{TypeTupleField{name: "limit", ty: Type.Int}})
+        }
+        if variant == "IO" {
+            return ir_compiler_owned_named([TypeTupleField]{TypeTupleField{name: "operation", ty: Type.String}})
+        }
         return IRCompilerOwnedPayload.Unit
     }
     if name == "IOError" {
-        if variant == "ResourceLimit" -> return ir_compiler_owned_single(Type.Named{name: "ProcessResourceLimit"})
+        if variant == "ResourceLimit" {
+            return ir_compiler_owned_single(Type.Named{name: "ProcessResourceLimit"})
+        }
         return ir_compiler_owned_single(Type.Named{name: "IOContext"})
     }
     if name == "Key" {
@@ -460,7 +514,9 @@ ir_compiler_owned_enum_payload: fn(name: String, variant: String) -> IRCompilerO
         return IRCompilerOwnedPayload.Unit
     }
     if name == "PluginError" {
-        if variant == "Budget" -> return ir_compiler_owned_named([TypeTupleField]{TypeTupleField{name: "limit", ty: Type.Named{name: "PluginLimit"}}, TypeTupleField{name: "fault", ty: Type.Named{name: "PluginFault"}}})
+        if variant == "Budget" {
+            return ir_compiler_owned_named([TypeTupleField]{TypeTupleField{name: "limit", ty: Type.Named{name: "PluginLimit"}}, TypeTupleField{name: "fault", ty: Type.Named{name: "PluginFault"}}})
+        }
         return ir_compiler_owned_single(Type.Named{name: "PluginFault"})
     }
     // The canonical twelve DataEvent payloads are the generated Core payload
@@ -475,11 +531,15 @@ ir_compiler_owned_enum_payload: fn(name: String, variant: String) -> IRCompilerO
         if variant == "Int" -> return ir_compiler_owned_single(Type.Int)
         if variant == "Float" -> return ir_compiler_owned_single(Type.Float)
         if variant == "Bytes" -> return ir_compiler_owned_single(bytes)
-        if variant == "DateTime" -> return ir_compiler_owned_single(Type.Named{name: "ZonedDateTime"})
+        if variant == "DateTime" {
+            return ir_compiler_owned_single(Type.Named{name: "ZonedDateTime"})
+        }
         tree: Type.Named{name: "Dyn"}
         if variant == "Number" || variant == "Text" -> return ir_compiler_owned_single(Type.String)
         if variant == "Array" -> return ir_compiler_owned_single(Type.List{element: tree})
-        if variant == "Object" -> return ir_compiler_owned_single(Type.List{element: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: Type.String}, TypeTupleField{name: "value", ty: tree}}}})
+        if variant == "Object" {
+            return ir_compiler_owned_single(Type.List{element: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: Type.String}, TypeTupleField{name: "value", ty: tree}}}})
+        }
         return IRCompilerOwnedPayload.Unit
     }
     if name == "NetDNSError" -> return ir_compiler_owned_single(Type.String)

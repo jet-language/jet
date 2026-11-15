@@ -8,7 +8,6 @@
 // Registers and cursors are relative to the running program: register p
 // is Vdbe.mem index v.mem_base + p, cursor p is Vdbe.csr index
 // v.csr_base + p.
-
 use {
     base: __core_db_base
     __core_db_base.[MEM_NULL, MEM_INT, MEM_BLOB, MEM_ZERO, MEM_SUBTYPE]
@@ -193,9 +192,7 @@ op_sql_exec: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> I
 op_parse_schema: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
     msg := [U8]?{None}
     rc := base.OK
-    if run.p4_text(v, r.pc) == .Val(where) {
-        rc = h.parse_schema(db, r.p1, where, msg)
-    } else {
+    if run.p4_text(v, r.pc) == .Val(where) -> rc = h.parse_schema(db, r.p1, where, msg) else {
         conn.schema_clear(db, db.dbs[r.p1].schema)
         db.m_db_flags = clear_bits(db.m_db_flags, conn.DBFLAG_SCHEMA_KNOWN_OK)
         rc = h.init_one(db, r.p1, r.p5, msg)
@@ -222,13 +219,9 @@ op_load_analysis: fn<H: Host>(h: &H, db: &conn.Conn, r: &Run) -[DB]> Int Never! 
 // from the schema of database P1.
 op_drop_object: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
     name: run.p4_text(v, r.pc) ?? [U8]{}
-    if r.op == opc.OP_DROP_TABLE {
-        conn.unlink_and_delete_table(db, r.p1, name)
-    } else if r.op == opc.OP_DROP_INDEX {
+    if r.op == opc.OP_DROP_TABLE -> conn.unlink_and_delete_table(db, r.p1, name) else if r.op == opc.OP_DROP_INDEX {
         conn.unlink_and_delete_index(db, r.p1, name)
-    } else {
-        conn.unlink_and_delete_trigger(db, r.p1, name)
-    }
+    } else { conn.unlink_and_delete_trigger(db, r.p1, name) }
     GO_NEXT
 }
 
@@ -270,9 +263,7 @@ rowset_of: fn(v: &conn.Vdbe, i: Int) -> Int Never! {
     if is_rowset(v, i) -> return v.mem[i].i
     run.release_dyn(v, i)
     k := 0
-    if v.rowset_free.pop() == .Val(s) {
-        k = s
-    } else {
+    if v.rowset_free.pop() == .Val(s) -> k = s else {
         v.rowsets.push(rowset.rowset_new())
         k = v.rowsets.len() - 1
     }
@@ -368,13 +359,9 @@ op_param: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 // connection, immediate ones on the statement; with SQLITE_DeferFKs all of
 // them are deferred to the commit.
 op_fk_counter: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
-    if db.flags.bit_and(conn.SQLITE_DEFER_FKS) != 0 {
-        db.n_deferred_imm_cons += r.p2
-    } else if r.p1 != 0 {
+    if db.flags.bit_and(conn.SQLITE_DEFER_FKS) != 0 -> db.n_deferred_imm_cons += r.p2 else if r.p1 != 0 {
         db.n_deferred_cons += r.p2
-    } else {
-        v.n_fk_constraint += r.p2
-    }
+    } else { v.n_fk_constraint += r.p2 }
     GO_NEXT
 }
 
@@ -581,7 +568,9 @@ op_journal_mode: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
     e_new := r.p3
     if e_new == pager.JOURNALMODE_QUERY -> e_new = e_old
     if !pager.pager_ok_to_change_journal_mode(db.btrees[bt].pager) -> e_new = e_old
-    if e_new == pager.JOURNALMODE_WAL && (pager.pager_filename(db.btrees[bt].pager) == "" || !pager.pager_wal_supported(db.btrees[bt].pager)) -> e_new = e_old
+    if e_new == pager.JOURNALMODE_WAL && (pager.pager_filename(db.btrees[bt].pager) == "" || !pager.pager_wal_supported(db.btrees[bt].pager)) {
+        e_new = e_old
+    }
     rc := base.OK
     if e_new != e_old && (e_old == pager.JOURNALMODE_WAL || e_new == pager.JOURNALMODE_WAL) {
         if !db.auto_commit || db.n_vdbe_read > 1 {
@@ -595,7 +584,9 @@ op_journal_mode: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
         } else if e_old == pager.JOURNALMODE_MEMORY {
             _: pager.pager_set_journal_mode(db.btrees[bt].pager, pager.JOURNALMODE_OFF)
         }
-        if rc == base.OK -> rc = btree.btree_set_version(db.btrees[bt], if e_new == pager.JOURNALMODE_WAL -> 2 else -> 1)
+        if rc == base.OK {
+            rc = btree.btree_set_version(db.btrees[bt], if e_new == pager.JOURNALMODE_WAL -> 2 else -> 1)
+        }
     }
     if rc != base.OK -> e_new = e_old
     e_new = pager.pager_set_journal_mode(db.btrees[bt].pager, e_new)
@@ -631,11 +622,7 @@ op_incr_vacuum: fn(db: &conn.Conn, r: &Run) -[DB]> Int Never! {
 // OP_Expire: expire every statement (P1 = 0) or this one, at once (P2 = 0)
 // or once it stops running (P2 = 1).
 op_expire: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
-    if r.p1 == 0 {
-        conn.expire_prepared_statements(db, r.p2)
-    } else {
-        set_expired(db, v, r.p2 + 1)
-    }
+    if r.p1 == 0 -> conn.expire_prepared_statements(db, r.p2) else -> set_expired(db, v, r.p2 + 1)
     GO_NEXT
 }
 
@@ -643,9 +630,7 @@ op_expire: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
 // through another cursor must not move it) or unpin it.
 op_cursor_lock: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
     ci: v.csr_base + r.p1
-    if r.op == opc.OP_CURSOR_LOCK {
-        btree.btree_cursor_pin(db.btrees[v.csr[ci].bt], v.csr[ci].btc)
-    } else {
+    if r.op == opc.OP_CURSOR_LOCK -> btree.btree_cursor_pin(db.btrees[v.csr[ci].bt], v.csr[ci].btc) else {
         btree.btree_cursor_unpin(db.btrees[v.csr[ci].bt], v.csr[ci].btc)
     }
     GO_NEXT
@@ -776,9 +761,7 @@ op_vcolumn: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> In
         mem.set_null(v.mem[dest])
         v.mem[dest].flags = MEM_NULL.bit_or(MEM_ZERO)
         v.mem[dest].i = 0
-    } else {
-        mem.set_type_flag(v.mem[dest], MEM_NULL)
-    }
+    } else { mem.set_type_flag(v.mem[dest], MEM_NULL) }
     vt: v.csr[ci].vtab
     rc := h.vtab_column(db, v, v.csr[ci].vtab_cursor, r.p2)
     aux.vtab_import_errmsg<H>(h, db, v, vt)
@@ -836,14 +819,10 @@ op_vupdate: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> In
     aux.vtab_import_errmsg<H>(h, db, v, vt)
     if rc == base.OK && r.p1 != 0 -> db.last_rowid = rowid
     if rc.bit_and(255) == base.CONSTRAINT && db.vtables[vt].b_constraint {
-        if r.p5 == ast.OE_IGNORE {
-            rc = base.OK
-        } else {
+        if r.p5 == ast.OE_IGNORE -> rc = base.OK else {
             v.error_action = if r.p5 == ast.OE_REPLACE -> ast.OE_ABORT else -> r.p5
         }
-    } else {
-        v.n_change += 1
-    }
+    } else { v.n_change += 1 }
     if rc != base.OK -> return vc.fail(r, rc)
     GO_NEXT
 }
@@ -885,9 +864,7 @@ op_subtype: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     }
     o: v.mem_base + r.p2
     if r.op == opc.OP_GET_SUBTYPE {
-        if v.mem[i].flags.bit_and(MEM_SUBTYPE) != 0 {
-            run.reg_int(v, o, v.mem[i].subtype)
-        } else {
+        if v.mem[i].flags.bit_and(MEM_SUBTYPE) != 0 -> run.reg_int(v, o, v.mem[i].subtype) else {
             run.reg_null(v, o)
         }
         return GO_NEXT

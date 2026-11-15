@@ -9,12 +9,15 @@ use {
     base32: core.encoding.base32
     radix64.[l64a_digit]
 }
+
 #Error
 Base64Error: struct {
     reason: String
+
     impl Display {
         display: fn(self) -> String { self.reason }
     }
+
     impl Debug {
         debug: fn(&&self) -> String { self.reason }
     }
@@ -23,7 +26,6 @@ Base64Error: struct {
 }
 
 rewrap: fn(reason: String) -> Base64Error Never! { Base64Error{reason: reason} }
-
 
 u8_int: fn(b: U8) -> Int Never! { Int{b} }
 
@@ -35,46 +37,57 @@ encode_url: fn(data: [U8]) -> String Never! {
     encode_alphabet(data, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_", false)
 }
 
-decode: fn(text: String) -> [U8] Base64Error! {
-    decode_strict(text, false, false, false)
-}
+decode: fn(text: String) -> [U8] Base64Error! { decode_strict(text, false, false, false) }
 
-decode_url: fn(text: String) -> [U8] Base64Error! {
-    decode_strict(text, true, false, false)
-}
+decode_url: fn(text: String) -> [U8] Base64Error! { decode_strict(text, true, false, false) }
 
 b64encode: fn(data: [U8]) -> String Never! { encode(data) }
+
 standard_b64encode: fn(data: [U8]) -> String Never! { encode(data) }
+
 urlsafe_b64encode: fn(data: [U8]) -> String Never! { encode_url(data) }
+
 b64decode: fn(text: String) -> [U8] Base64Error! { decode(text) }
+
 standard_b64decode: fn(text: String) -> [U8] Base64Error! { decode(text) }
+
 urlsafe_b64decode: fn(text: String) -> [U8] Base64Error! { decode_url(text) }
 
 b16encode: fn(data: [U8]) -> String Never! { hex.encode_upper(data) }
+
 b16decode: fn(text: String) -> [U8] Base64Error! { decode_hex(text) }
+
 b32encode: fn(data: [U8]) -> String Never! { base32.encode(data) }
+
 b32decode: fn(text: String) -> [U8] Base64Error! { decode_base32(text) }
+
 b32hexencode: fn(data: [U8]) -> String Never! { base32.b32hexencode(data) }
+
 b32hexdecode: fn(text: String) -> [U8] Base64Error! { decode_base32hex(text) }
 
 /// Adobe Ascii85 without optional `<~` framing.
 a85encode: fn(data: [U8]) -> String Never! { ascii85_encode(data) }
+
 a85decode: fn(text: String) -> [U8] Base64Error! { ascii85_decode(text) }
 
 /// RFC 1924 Base85.
 b85encode: fn(data: [U8]) -> String Base64Error! { base85_encode(data, C_B85_ALPHABET, false) }
+
 b85decode: fn(text: String) -> [U8] Base64Error! { base85_decode(text, C_B85_ALPHABET, false) }
 
 /// ZeroMQ Z85. Z85 intentionally requires complete 4-byte/5-character
 /// quanta; silently padding a key would change its value.
 z85encode: fn(data: [U8]) -> String Base64Error! { base85_encode(data, C_Z85_ALPHABET, true) }
+
 z85decode: fn(text: String) -> [U8] Base64Error! { base85_decode(text, C_Z85_ALPHABET, true) }
 
 /// POSIX radix-64 text of a 32-bit value, as C `l64a`: up to six characters
 /// from `./0-9A-Za-z`, least significant digit first; 0 is empty text. A value
 /// outside 0 through 4294967295 is an error, where C keeps the low 32 bits.
 l64a: fn(value: Int) -> String Base64Error! {
-    if value < 0 || value > 4294967295 -> return Err(rewrap("l64a needs a value from 0 through 4294967295, got {value}"))
+    if value < 0 || value > 4294967295 {
+        return Err(rewrap("l64a needs a value from 0 through 4294967295, got {value}"))
+    }
     digits: C_L64A_ALPHABET.bytes()
     out := [U8]{}
     rest := value
@@ -111,12 +124,12 @@ encodebytes: fn(data: [U8]) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-decodebytes: fn(text: String) -> [U8] Base64Error! {
-    decode_strict(text, false, true, false)
-}
+decodebytes: fn(text: String) -> [U8] Base64Error! { decode_strict(text, false, true, false) }
 
 b2a_base64: fn(data: [U8]) -> String Never! { "{encode(data)}\n" }
+
 a2b_base64: fn(text: String) -> [U8] Base64Error! { decodebytes(text) }
+
 decode_hex: fn(text: String) -> [U8] Base64Error! {
     if hex.decode(text) == {
         .Ok(value) -> return Ok(value)
@@ -157,12 +170,12 @@ unpad: fn(text: String) -> String Never! {
     String.from_bytes(raw[0..<end]) ?? ""
 }
 
-is_base64: fn(text: String) -> Bool Never! {
-    decode(text) == .Ok(_)
-}
+is_base64: fn(text: String) -> Bool Never! { decode(text) == .Ok(_) }
 
 C_B85_ALPHABET: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{{|}}~"
+
 C_Z85_ALPHABET: "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?&<>()[]{{}}@%$#"
+
 C_L64A_ALPHABET: "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
 // The radix-64 digit of one a64l character: not part of the base64 surface.
@@ -189,9 +202,7 @@ ascii85_encode: fn(data: [U8]) -> String {
         c: if width > 2 -> u8_int(data[i + 2]) else -> 0
         d: if width > 3 -> u8_int(data[i + 3]) else -> 0
         n: ((((a << 24)).bit_or((b << 16))).bit_or((c << 8))).bit_or(d)
-        if width == 4 && n == 0 {
-            out.push(U8{122})
-        } else {
+        if width == 4 && n == 0 -> out.push(U8{122}) else {
             digits := [U8]{}
             v := n
             loop _ in 0..<5 {
@@ -216,7 +227,9 @@ ascii85_decode: fn(text: String) -> [U8] Base64Error! {
     loop b in raw {
         n: u8_int(b)
         if n == 122 {
-            if group.len() != 0 -> return Err(rewrap("invalid Ascii85 `z` shorthand inside a quantum"))
+            if group.len() != 0 {
+                return Err(rewrap("invalid Ascii85 `z` shorthand inside a quantum"))
+            }
             out.push(U8{0})
             out.push(U8{0})
             out.push(U8{0})
@@ -228,7 +241,9 @@ ascii85_decode: fn(text: String) -> [U8] Base64Error! {
         if group.len() == 5 {
             value := 0
             loop d in group -> value = value * 85 + d
-            if value > 4294967295 -> return Err(rewrap("invalid Ascii85 quantum; encoded value exceeds four bytes"))
+            if value > 4294967295 {
+                return Err(rewrap("invalid Ascii85 quantum; encoded value exceeds four bytes"))
+            }
             out.push(wrapping(U8{value >> 24}))
             out.push(wrapping(U8{value >> 16}))
             out.push(wrapping(U8{value >> 8}))
@@ -236,20 +251,26 @@ ascii85_decode: fn(text: String) -> [U8] Base64Error! {
             group = [Int]{}
         }
     }
-    if group.len() == 1 -> return Err(rewrap("invalid Ascii85 length; a final quantum needs at least two characters"))
+    if group.len() == 1 {
+        return Err(rewrap("invalid Ascii85 length; a final quantum needs at least two characters"))
+    }
     if group.len() > 1 {
         original: group.len()
         loop group.len() < 5 -> group.push(84)
         value := 0
         loop d in group -> value = value * 85 + d
-        if value > 4294967295 -> return Err(rewrap("invalid Ascii85 quantum; encoded value exceeds four bytes"))
+        if value > 4294967295 {
+            return Err(rewrap("invalid Ascii85 quantum; encoded value exceeds four bytes"))
+        }
         loop j in 0..<(original - 1) -> out.push(wrapping(U8{value >> (24 - j * 8)}))
     }
     Ok(out)
 }
 
 base85_encode: fn(data: [U8], alphabet: String, require_full: Bool) -> String Base64Error! {
-    if require_full && data.len() %% 4 != 0 -> return Err(rewrap("Z85 encoding requires a byte length divisible by four"))
+    if require_full && data.len() %% 4 != 0 {
+        return Err(rewrap("Z85 encoding requires a byte length divisible by four"))
+    }
     ab: alphabet.bytes()
     out := [U8]{}
     i := 0
@@ -279,8 +300,12 @@ base85_encode: fn(data: [U8], alphabet: String, require_full: Bool) -> String Ba
 
 base85_decode: fn(text: String, alphabet: String, require_full: Bool) -> [U8] Base64Error! {
     raw: text.bytes()
-    if require_full && raw.len() %% 5 != 0 -> return Err(rewrap("Z85 decoding requires a character length divisible by five"))
-    if !require_full && raw.len() %% 5 == 1 -> return Err(rewrap("invalid Base85 length; a final quantum needs at least two characters"))
+    if require_full && raw.len() %% 5 != 0 {
+        return Err(rewrap("Z85 decoding requires a character length divisible by five"))
+    }
+    if !require_full && raw.len() %% 5 == 1 {
+        return Err(rewrap("invalid Base85 length; a final quantum needs at least two characters"))
+    }
     ab: alphabet.bytes()
     table := [Int]{}
     loop _ in 0..<256 -> table.push(-1)
@@ -301,7 +326,9 @@ base85_decode: fn(text: String, alphabet: String, require_full: Bool) -> [U8] Ba
         loop digits.len() < 5 -> digits.push(84)
         value := 0
         loop d in digits -> value = value * 85 + d
-        if value > 4294967295 -> return Err(rewrap("invalid Base85 quantum; encoded value exceeds four bytes"))
+        if value > 4294967295 {
+            return Err(rewrap("invalid Base85 quantum; encoded value exceeds four bytes"))
+        }
         count := 4
         if original < 5 -> count = original - 1
         loop j in 0..<count -> out.push(wrapping(U8{value >> (24 - j * 8)}))
@@ -426,15 +453,23 @@ decode_strict: fn(text: String, url: Bool, whitespace: Bool, relaxed: Bool) -> [
     eof: if pad_start >= 0 -> pad_start else -> last + 1
     missing_allowed: if url -> !relaxed else -> relaxed
     remainder: (count + padding) %% 4
-    if remainder == 1 -> return Err(decode_error(url, eof, "encoded length cannot represent whole bytes"))
-    if !missing_allowed && remainder != 0 -> return Err(decode_error(url, eof, "expected {4 - remainder} padding characters"))
+    if remainder == 1 {
+        return Err(decode_error(url, eof, "encoded length cannot represent whole bytes"))
+    }
+    if !missing_allowed && remainder != 0 {
+        return Err(decode_error(url, eof, "expected {4 - remainder} padding characters"))
+    }
     tail: count %% 4
     if padding > 0 {
         if tail == 0 -> return Err(decode_error(url, pad_start, "unexpected padding"))
         expected: if tail == 2 -> 2 else if tail == 3 -> 1 else -> 0
-        if expected == 0 -> return Err(decode_error(url, pad_start, "expected 0 padding characters"))
+        if expected == 0 {
+            return Err(decode_error(url, pad_start, "expected 0 padding characters"))
+        }
         if padding > expected -> return Err(decode_error(url, pad_start, "unexpected padding"))
-        if padding < expected -> return Err(decode_error(url, pad_start, "expected {expected} padding characters"))
+        if padding < expected {
+            return Err(decode_error(url, pad_start, "expected {expected} padding characters"))
+        }
     } else if !missing_allowed && tail != 0 {
         return Err(decode_error(url, eof, "expected {4 - tail} padding characters"))
     }

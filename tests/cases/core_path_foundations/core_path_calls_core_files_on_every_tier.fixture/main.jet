@@ -3,8 +3,10 @@ package: {
     authority: { allow: [FS, IO] }
 }
 
-use files: core.files
-use path: core.files.path
+use {
+    files: core.files
+    path: core.files.path
+}
 
 // Every core.files.path call below hands its text to a core.files function
 // whose parameter is `String | Path`.
@@ -25,11 +27,11 @@ run: fn() {
     print("read_text low: {path.read_text(path.join(nested, "low.txt")) ?? panic("read low")}")
     print("read_bytes top: {(path.read_bytes(path.join(root, "top.txt")) ?? panic("read bytes")).len()}")
     if path.read_text(path.join(root, "gone.txt")) == {
-        .Ok(text) -> print("read_text gone: Ok {text}")
+        .Ok(text) -> { print("read_text gone: Ok {text}") }
         .Err(_) -> print("read_text gone: Err")
     }
     if path.walk(path.join(root, "gone")) == {
-        .Ok(rows) -> print("walk gone: Ok {rows.len()}")
+        .Ok(rows) -> { print("walk gone: Ok {rows.len()}") }
         .Err(_) -> print("walk gone: Err")
     }
     path.unlink(path.join(root, "top.txt")) ?? panic("unlink")

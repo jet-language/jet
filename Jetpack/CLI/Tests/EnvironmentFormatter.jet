@@ -20,7 +20,7 @@ FormatterTree: struct {
             project: files.join(base, "project"),
             root: files.join(base, "root"),
             repo: files.join(base, "formatter-repo"),
-            scratch: files.join(base, "scratch")
+            scratch: files.join(base, "scratch"),
         }
         files.create_dir_all(tree.project) ?? panic("create project")
         files.create_dir_all(tree.root) ?? panic("create root")
@@ -28,9 +28,7 @@ FormatterTree: struct {
         tree
     }
 
-    remove: fn(self) -[FS]> {
-        files.remove_all(self.base).drop("scratch cleanup is best-effort")
-    }
+    remove: fn(self) -[FS]> { files.remove_all(self.base).drop("scratch cleanup is best-effort") }
 }
 
 // Stage a local-source `nixfmt` package and a project whose env declares it

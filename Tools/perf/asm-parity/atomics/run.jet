@@ -27,9 +27,7 @@ run: fn(args: Args) {
             seen: counter.load()
             next: wrapping(seen + 1)
             won: counter.compare_exchange(seen, next)
-            if won {
-                total = wrapping(total + 1)
-            }
+            if won -> total = wrapping(total + 1)
         }
         counter.store(0)
     }

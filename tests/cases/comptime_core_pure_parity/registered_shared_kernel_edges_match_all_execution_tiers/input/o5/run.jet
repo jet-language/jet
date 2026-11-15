@@ -4,6 +4,7 @@ use {
     cms: core.data.sketch.cms
     reservoir: core.data.sketch.reservoir
 }
+
 sketch_edges: fn() -> String {
     cardinality := hll.new()
     empty_count: cardinality.count()
@@ -21,6 +22,7 @@ sketch_edges: fn() -> String {
     sample.add("second")
     return "{empty_count}|{cardinality.count()}|{empty_quantile}|{distribution.quantile(0.0)}|{distribution.quantile(1.0)}|{missing}|{frequencies.count("seen")}|{sample.sample().len()}"
 }
+
 EXPECTED: #run sketch_edges()
 
 run: fn() {

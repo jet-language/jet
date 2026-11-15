@@ -18,8 +18,8 @@ HermeticBuildPlan: struct {
     // for this plan. Jet plans carry no fact contributions, plugins or
     // generated modules, and no legacy wrapper. Toolchain, signing and probe
     // rows are the digest of their canonical key bytes.
-    provider_plan_facts: fn(self) -> [String: String] Never! {
-        facts := [String: String]{}
+    provider_plan_facts: fn(self) -> [String:String] Never! {
+        facts := [String:String]{}
         facts["plan.recipe_fingerprint"] = build_complete_recipe_fingerprint(self)
         facts["plan.default"] = if self.default == {
             .Val(target) -> "{target.id}"
@@ -64,10 +64,12 @@ HermeticBuildPlan: struct {
             facts["{prefix}.helpers"] = build_fact_map(action.helper_versions)
             pools := [String]{}
             loop pool in action.resource_pools {
-                pools.push(if pool == {
-                    .Custom(name) -> "custom:{name}"
-                    .CPU | .Memory | .Linker | .Console | .GPU -> pool.as_str()
-                })
+                pools.push(
+                    if pool == {
+                        .Custom(name) -> "custom:{name}"
+                        .CPU | .Memory | .Linker | .Console | .GPU -> pool.as_str()
+                    },
+                )
             }
             facts["{prefix}.pools"] = pools.join(nul)
             facts["{prefix}.variant"] = action.variant_identity ?? ""
@@ -136,8 +138,12 @@ HermeticBuildPlan: struct {
     selected_action_ids: fn(self) -> [Int] HermeticBuildError! {
         selected := [Int]{}
         if self.default == {
-            .Val(default) -> build_collect_target_actions(self, default.id, [Int]{}, selected)
-            .None -> loop target in self.targets -> build_collect_target_actions(self, target.id, [Int]{}, selected)
+            .Val(default) -> { build_collect_target_actions(self, default.id, [Int]{}, selected) }
+            .None -> {
+                loop target in self.targets {
+                    build_collect_target_actions(self, target.id, [Int]{}, selected)
+                }
+            }
         }
         prereqs: self.action_prereqs()
         pending := selected
@@ -165,8 +171,10 @@ HermeticBuildPlan: struct {
         }
         selected_targets := [Int]{}
         if self.default == {
-            .Val(default) -> build_visit_target_closure(self, default.id, selected_targets)
-            .None -> loop target in self.targets -> selected_targets.push(target.id)
+            .Val(default) -> { build_visit_target_closure(self, default.id, selected_targets) }
+            .None -> {
+                loop target in self.targets -> selected_targets.push(target.id)
+            }
         }
         loop target in self.targets {
             if !selected_targets.contains(target.id) -> next
@@ -209,9 +217,11 @@ HermeticBuildPlan: struct {
         }
         events := [BuildExecutionEvent]{}
         loop stage in stages {
-            loop action in stage.actions -> events.push(BuildExecutionEvent.Ready{action, stage: stage.index})
+            loop action in stage.actions {
+                events.push(BuildExecutionEvent.Ready{action: action, stage: stage.index})
+            }
         }
-        Ok(BuildExecutionModel{pools: self.resource_pools(), nodes, stages, events, console_order, metrics: build_execution_metrics(selected_actions, stages)})
+        Ok(BuildExecutionModel{pools: self.resource_pools(), nodes: nodes, stages: stages, events: events, console_order: console_order, metrics: build_execution_metrics(selected_actions, stages)})
     }
 
     // Replay the supplied outcomes over the canonical stages: a failed
@@ -220,9 +230,11 @@ HermeticBuildPlan: struct {
         selected: self.selected_action_ids()
         prereqs: self.action_prereqs_for(selected)
         stages: build_execution_stages(self, prereqs)
-        supplied := [Int: ActionOutcome]{}
+        supplied := [Int:ActionOutcome]{}
         loop row in outcomes {
-            if row.action.context != self.context || row.action.id >= self.actions.len() -> return Err(HermeticBuildError.UnknownAction(row.action.id))
+            if row.action.context != self.context || row.action.id >= self.actions.len() {
+                return Err(HermeticBuildError.UnknownAction(row.action.id))
+            }
             supplied[row.action.id] = row.outcome
         }
         failed := [Int]{}
@@ -242,7 +254,7 @@ HermeticBuildPlan: struct {
                 if failed_prereq == .Val(prereq) {
                     failed.push(action)
                     metrics.cancelled_actions += 1
-                    events.push(BuildExecutionEvent.Cancelled{action, failed_prereq: prereq})
+                    events.push(BuildExecutionEvent.Cancelled{action: action, failed_prereq: prereq})
                     next
                 }
                 if supplied.get(action) == {
@@ -252,24 +264,24 @@ HermeticBuildPlan: struct {
                                 failed.push(action)
                                 metrics.failed_actions += 1
                             }
-                            .RestoredFromCache -> metrics.cache_restored_actions += 1
+                            .RestoredFromCache -> { metrics.cache_restored_actions += 1 }
                             .Succeeded(_) -> {}
                         }
-                        events.push(BuildExecutionEvent.Finished{action, outcome})
+                        events.push(BuildExecutionEvent.Finished{action: action, outcome: outcome})
                     }
                     .None -> {
                         metrics.pending_actions += 1
-                        events.push(BuildExecutionEvent.Pending{action})
+                        events.push(BuildExecutionEvent.Pending{action: action})
                     }
                 }
             }
         }
-        Ok(BuildExecutionReport{events, metrics})
+        Ok(BuildExecutionReport{events: events, metrics: metrics})
     }
 
     // The first target that lists each action owns it.
-    action_targets: fn(self) -> [Int: Int] Never! {
-        out := [Int: Int]{}
+    action_targets: fn(self) -> [Int:Int] Never! {
+        out := [Int:Int]{}
         loop target in self.targets {
             loop action in target.actions {
                 if out.get(action.id) == None -> out[action.id] = target.id
@@ -281,8 +293,8 @@ HermeticBuildPlan: struct {
     // Every action's prerequisites: the actions of its target's dependency
     // closure, plus the owner of every declared input it consumes. Ascending
     // and unique per action.
-    action_prereqs: fn(self) -> [Int: [Int]] HermeticBuildError! {
-        out := [Int: [Int]]{}
+    action_prereqs: fn(self) -> [Int:[Int]] HermeticBuildError! {
+        out := [Int:[Int]]{}
         loop action in self.actions -> out[action.id] = [Int]{}
         loop target in self.targets {
             deps := [Int]{}
@@ -293,7 +305,7 @@ HermeticBuildPlan: struct {
                 out[action.id] = current
             }
         }
-        owners := [String: Int]{}
+        owners := [String:Int]{}
         loop action in self.actions {
             loop output in action.outputs -> owners[output] = action.id
         }
@@ -309,9 +321,9 @@ HermeticBuildPlan: struct {
         Ok(out)
     }
 
-    action_prereqs_for: fn(self, selected: [Int]) -> [Int: [Int]] HermeticBuildError! {
+    action_prereqs_for: fn(self, selected: [Int]) -> [Int:[Int]] HermeticBuildError! {
         all: self.action_prereqs()
-        out := [Int: [Int]]{}
+        out := [Int:[Int]]{}
         loop action in selected {
             kept := [Int]{}
             deps: all.get(action) ?? [Int]{}
@@ -379,7 +391,9 @@ BuildExecutionReport: struct {
 }
 
 build_insert_sorted_int: fn(values: &[Int], value: Int) Never! {
-    if values.contains(value) -> return
+    if values.contains(value) {
+        return
+    }
     values.push(value)
     values.sort()
 }
@@ -413,7 +427,9 @@ build_collect_target_actions: fn(plan: HermeticBuildPlan, target: Int, visiting:
 }
 
 build_visit_target_closure: fn(plan: HermeticBuildPlan, target: Int, out: &[Int]) Never! {
-    if out.contains(target) -> return
+    if out.contains(target) {
+        return
+    }
     out.push(target)
     node: plan.targets.get(target) ?? return
     loop dep in node.deps -> build_visit_target_closure(plan, dep.id, out)
@@ -447,12 +463,12 @@ build_action_name: fn(plan: HermeticBuildPlan, action: Int) -> String Never! {
 
 // Rust `execution_stages`: Kahn layers in ascending id order; a stalled sort
 // reports the cycle left behind.
-build_execution_stages: fn(plan: HermeticBuildPlan, prereqs: [Int: [Int]]) -> [BuildExecutionStage] HermeticBuildError! {
+build_execution_stages: fn(plan: HermeticBuildPlan, prereqs: [Int:[Int]]) -> [BuildExecutionStage] HermeticBuildError! {
     keys := prereqs.keys().to_list()
     keys.sort()
     remaining := keys
-    indegree := [Int: Int]{}
-    dependents := [Int: [Int]]{}
+    indegree := [Int:Int]{}
+    dependents := [Int:[Int]]{}
     loop action in keys {
         dependencies: prereqs.get(action) ?? [Int]{}
         indegree[action] = dependencies.len()
@@ -493,7 +509,7 @@ build_execution_stages: fn(plan: HermeticBuildPlan, prereqs: [Int: [Int]]) -> [B
 
 // Rust `action_cycle_error` over `stalled_cycle`: walk the residual graph in
 // ascending order, prerequisites sorted, until a node repeats on the stack.
-build_action_cycle_error: fn(plan: HermeticBuildPlan, remaining: [Int], prereqs: [Int: [Int]]) -> HermeticBuildError Never! {
+build_action_cycle_error: fn(plan: HermeticBuildPlan, remaining: [Int], prereqs: [Int:[Int]]) -> HermeticBuildError Never! {
     settled := [Int]{}
     loop node in remaining {
         stack := [Int]{}
@@ -506,7 +522,7 @@ build_action_cycle_error: fn(plan: HermeticBuildPlan, remaining: [Int], prereqs:
     HermeticBuildError.ActionDependencyCycle(DependencyCycle{nodes: names})
 }
 
-build_walk_stalled: fn(node: Int, remaining: [Int], prereqs: [Int: [Int]], stack: &[Int], settled: &[Int]) -> [Int]? Never! {
+build_walk_stalled: fn(node: Int, remaining: [Int], prereqs: [Int:[Int]], stack: &[Int], settled: &[Int]) -> [Int]? Never! {
     if settled.contains(node) -> return None
     loop index in 0..<stack.len() {
         if stack[index] == node {
@@ -521,7 +537,9 @@ build_walk_stalled: fn(node: Int, remaining: [Int], prereqs: [Int: [Int]], stack
     dependencies.sort()
     loop prerequisite in dependencies {
         if !remaining.contains(prerequisite) -> next
-        if build_walk_stalled(prerequisite, remaining, prereqs, stack, settled) == .Val(cycle) -> return Val(cycle)
+        if build_walk_stalled(prerequisite, remaining, prereqs, stack, settled) == .Val(cycle) {
+            return Val(cycle)
+        }
     }
     _ := stack.pop()
     settled.push(node)
@@ -539,8 +557,14 @@ build_execution_metrics: fn(actions: [HermeticBuildAction], stages: [BuildExecut
         if action.reusable() -> reusable += 1 else -> ambient += 1
     }
     BuildExecutionMetrics{
-        actions_total: actions.len(), parallel_stages: stages.len(), max_parallel_actions: widest,
-        reusable_actions: reusable, ambient_actions: ambient, failed_actions: 0, cancelled_actions: 0,
-        cache_restored_actions: 0, pending_actions: 0,
+        actions_total: actions.len(),
+        parallel_stages: stages.len(),
+        max_parallel_actions: widest,
+        reusable_actions: reusable,
+        ambient_actions: ambient,
+        failed_actions: 0,
+        cancelled_actions: 0,
+        cache_restored_actions: 0,
+        pending_actions: 0,
     }
 }

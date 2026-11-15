@@ -25,26 +25,22 @@ check: fn(n: Int) Rejected! -[IO]> {
     print("ok {n}")
 }
 
-accept: fn(handler: fn(Int) Never! -[Time.Wait, IO]>, n: Int) Never! -[Time.Wait, IO]> {
+accept: fn(handler: fn(Int) -[Time.Wait, IO]> Never!, n: Int) Never! -[Time.Wait, IO]> {
     handler(n)
 }
 
-accept_wait: fn(handler: fn(Int) Never! -[Time.Wait]>, n: Int) Never! -[Time.Wait]> {
-    handler(n)
-}
+accept_wait: fn(handler: fn(Int) -[Time.Wait]> Never!, n: Int) Never! -[Time.Wait]> { handler(n) }
 
-accept_checked: fn(handler: fn(Int) Rejected! -[IO]>, n: Int) Rejected! -[IO]> {
-    handler(n)
-}
+accept_checked: fn(handler: fn(Int) -[IO]> Rejected!, n: Int) Rejected! -[IO]> { handler(n) }
 
 run: fn() {
     accept(tick, 1)
     accept_wait(wait, 1)
-    handlers: [fn(Int) Never! -[Time.Wait, IO]>]{tick}
+    handlers: [fn(Int) -[Time.Wait, IO]> Never!]{tick}
     loop h in handlers -> accept(h, 2)
     accept_checked(check, 3) ?? print("unexpected")
     if accept_checked(check, -4) == {
-        .Ok(_) -> print("unexpected")
+        .Ok(_) -> { print("unexpected") }
         .Err(e) -> print(e.message())
     }
     handler: tick

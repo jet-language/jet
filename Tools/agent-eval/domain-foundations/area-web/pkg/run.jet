@@ -95,6 +95,7 @@ login: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
     with_cookie: response.header("set-cookie", cookie)
     return Ok(with_cookie)
 }
+
 protected: fn(session_id: String, req: HTTPRequest) -> HTTPResponse HTTPError! {
     cookie: req.header("cookie") ?? return Ok(server.response(401, "login required"))
     if cookie == "" -> return Ok(server.response(401, "login required"))

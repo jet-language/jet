@@ -10,9 +10,12 @@ crypto_entropy_key := I64{0}
 rt_crypto_entropy_drop_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
+
 // runtime-init: 3 when crypto_entropy_key
 #Export(c) jet_rt_crypto_entropy_init: fn() {
-    if (crypto_entropy_key != I64{0}) -> return
+    if (crypto_entropy_key != I64{0}) {
+        return
+    }
     closure: jet_rt_alloc(I64{24}, I64{8})
     rt_text_store(closure, I64{1})
     rt_text_store(wrapping(closure + I64{8}), rt_crypto_entropy_drop_address())
@@ -21,29 +24,39 @@ rt_crypto_entropy_drop_address: fn() -> I64 {
         crypto_entropy_key = jet_rt_tls_key_new(closure)
     }
 }
+
 #Export(c) jet_rt_crypto_entropy_drop: fn(_closure: I64, state: I64) -> I64 {
     rt_crypto_wipe(state, I64{16})
     jet_rt_free(state, I64{16}, I64{8})
     return I64{0}
 }
+
 rt_crypto_entropy_clear: fn() {
-    if (crypto_entropy_key == I64{0}) -> return
+    if (crypto_entropy_key == I64{0}) {
+        return
+    }
     state: jet_rt_tls_get(crypto_entropy_key)
-    if (state == I64{0}) -> return
+    if (state == I64{0}) {
+        return
+    }
     jet_rt_tls_set(crypto_entropy_key, I64{0})
     _ := jet_rt_crypto_entropy_drop(I64{0}, state)
 }
+
 // Internal test/fault adapter installation, not a Core API. The callback ABI is
 // (context, suffix, remaining)->I64: >0 Filled(n), -4 Interrupted, else Failed.
 // A callback of zero resets to the real provider. No second Rand hook exists.
 rt_crypto_entropy_set: fn(callback: I64, context: I64) {
     rt_crypto_entropy_clear()
-    if (callback == I64{0}) -> return
+    if (callback == I64{0}) {
+        return
+    }
     state: jet_rt_alloc(I64{16}, I64{8})
     rt_text_store(state, callback)
     rt_text_store(wrapping(state + I64{8}), context)
     jet_rt_tls_set(crypto_entropy_key, state)
 }
+
 rt_crypto_entropy_step: fn(out: I64, count: I64) -> I64 {
     if (crypto_entropy_key != I64{0}) {
         state: jet_rt_tls_get(crypto_entropy_key)
@@ -57,17 +70,16 @@ rt_crypto_entropy_step: fn(out: I64, count: I64) -> I64 {
         return os_syscall_i64(I64{318}, out, count, I64{0}, I64{0}, I64{0}, I64{0})
     }
 }
+
 rt_crypto_entropy_fill: fn(out: I64, count: I64) -> I64 {
     // Bounds belong to Core too; this raw ABI rejects invalid spans before
     // dereference. An invalid count has no valid borrowed span to wipe.
-    if (count < I64{0} || count > I64{1048576}) -> return I64{1}
-    if (count == I64{0}) -> return I64{0}
+    if (count < I64{0} || count > I64{1048576}) { return I64{1} }
+    if (count == I64{0}) { return I64{0} }
     filled := I64{0}
     loop filled < count {
         n: rt_crypto_entropy_step(out + filled, count - filled)
-        if (n > I64{0} && n <= count - filled) {
-            filled += n
-        } else if (n == I64{-4}) {
+        if (n > I64{0} && n <= count - filled) { filled += n } else if (n == I64{-4}) {
             rt_crypto_wipe(wrapping(out + filled), count - filled)
         } else {
             rt_crypto_wipe(out, count)
@@ -93,14 +105,18 @@ rt_crypto_entropy_fill: fn(out: I64, count: I64) -> I64 {
         rt_wipe_bytes(data, rt_secret_buffer_bytes(capacity))
         return
     }
-    if (capacity == I64{0} && length == I64{0}) -> return
+    if (capacity == I64{0} && length == I64{0}) {
+        return
+    }
     fresh_capacity: if (capacity == I64{0}) -> length else -> capacity
     bytes: rt_secret_buffer_bytes(fresh_capacity)
     fresh: jet_rt_alloc(bytes, I64{8})
     rt_wipe_bytes(fresh, bytes)
     if (capacity != I64{0}) {
         jet_rt_block_mark_zero(data)
-        if (jet_rt_block_release(data)) -> jet_rt_free(data, rt_secret_buffer_bytes(capacity), I64{8})
+        if (jet_rt_block_release(data)) {
+            jet_rt_free(data, rt_secret_buffer_bytes(capacity), I64{8})
+        }
     }
     trap_store(wrapping(header + I64{8}), fresh_capacity)
     trap_store(wrapping(header + I64{16}), fresh)
@@ -110,8 +126,8 @@ rt_crypto_entropy_fill: fn(out: I64, count: I64) -> I64 {
 // None leaves both out slots untouched. No list header crosses this boundary.
 #Export(c) jet_random_os_entropy: fn(count: I64, some: I64, some_len: I64) -> I64 {
     jet_rt_world_reject_uncontrolled(I64{3})
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
-    if (count < I64{0} || count > I64{1048576}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
+    if (count < I64{0} || count > I64{1048576}) { return I64{0} }
     if (count == I64{0}) {
         rt_text_store(some, I64{0})
         rt_text_store(some_len, I64{0})

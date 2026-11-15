@@ -33,9 +33,7 @@ Account: struct {
     }
 }
 
-addresses: fn(values: [Email]) -> String {
-    values.map(fn(value) { "{value.address}" }).join(" ")
-}
+addresses: fn(values: [Email]) -> String { values.map(fn(value) { "{value.address}" }).join(" ") }
 
 run: fn() {
     first: Email{address: "Ann@Example.com"}
@@ -43,7 +41,7 @@ run: fn() {
     other: Email{address: "bob@example.com"}
     print("equal: {first == second} {first != other} {first < other} {other > second}")
 
-    owners := [Email: String]{}
+    owners := [Email:String]{}
     owners[first.copy()] = "first"
     owners[second.copy()] = "second"
     owners[other.copy()] = "other"
@@ -57,14 +55,14 @@ run: fn() {
     print("intersection: {addresses(right.intersection(left).to_list())}")
     print("difference: {addresses(left.difference(right).to_list())}")
 
-    sizes := [OSPath: Int]{}
+    sizes := [OSPath:Int]{}
     sizes[OSPath{shown: "/usr/lib", parts: ["usr", "lib"]}] = 2
     sizes[OSPath{shown: "/usr", parts: ["usr"]}] = 1
     sizes[OSPath{shown: "/etc", parts: ["etc"]}] = 3
     sizes[OSPath{shown: "/usr//lib", parts: ["usr", "lib"]}] = 4
     sizes.each(fn(path: OSPath, size: Int) { print("path: {path.shown} {size}") })
 
-    accounts := [Account: Int]{}
+    accounts := [Account:Int]{}
     accounts[Account{owner: first.copy(), note: "a"}] = 1
     accounts[Account{owner: second.copy(), note: "b"}] = 2
     print("account: {accounts.len()} {accounts.get(Account{owner: other.copy(), note: "c"}) ?? 0}")

@@ -13,19 +13,23 @@ s5f_member: fn(value: Dyn, name: String) -> Dyn {
     }
     panic("expected JSON object for {name}")
 }
+
 s5f_array: fn(value: Dyn) -> [Dyn] {
     if value == .Array(values) -> return values
     panic("expected JSON array")
 }
+
 s5f_text: fn(value: Dyn) -> String {
     if value == .Text(text) -> return text
     panic("expected JSON text")
 }
+
 s5f_index: fn(path: String) -> Dyn {
     raw: files.read(path) ?? panic("read captured CLI document {path}")
     document: json.parse(raw) ?? panic("parse captured CLI document {path}")
     s5f_member(document, "semindex")
 }
+
 s5f_original_effect_assertions: fn() {
     index: s5f_index("effects.json")
     report_found := false
@@ -46,4 +50,6 @@ s5f_original_effect_assertions: fn() {
     assert(effects_found, "original report effect_of absent")
 }
 
-#Test("original report lookup, call edges, direct OR inferred effects") { s5f_original_effect_assertions() }
+#Test("original report lookup, call edges, direct OR inferred effects") {
+    s5f_original_effect_assertions()
+}

@@ -3,9 +3,15 @@ use {
     jet_foundation.[diagnostic_render]
     jet_pkg_model.[PublicationRegistryConfig, publication_redact_registry_url]
     jetpack_publication.[
-        PublicationIndexEntry, publication_core_reviewed, publication_ensure_index_clone,
-        publication_keygen, publication_read_entries, publication_sign, publication_verify_index_entry,
-        publication_e1235, publication_write_index_entry,
+        PublicationIndexEntry,
+        publication_core_reviewed,
+        publication_ensure_index_clone,
+        publication_keygen,
+        publication_read_entries,
+        publication_sign,
+        publication_verify_index_entry,
+        publication_e1235,
+        publication_write_index_entry,
     ]
     files: core.files
     process: core.process
@@ -18,15 +24,18 @@ publication_pkg_integration_registry_root: fn(label: String) -[FS, Env]> String 
     files.create_dir_all(root) ?? panic("mkdir fixture")
     root
 }
+
 publication_pkg_integration_registry_restore: fn(name: String, previous: String?) -[Env]> {
     if previous == {
-        .Val(value) -> sys.set(name, value)
+        .Val(value) -> { sys.set(name, value) }
         .None -> { _: sys.unset(name) ?? panic("restore environment") }
     }
 }
+
 publication_pkg_integration_entry: fn(name: String, version: String, hash: String, key: String, signature: String) -> PublicationIndexEntry Never! {
     PublicationIndexEntry{name: name, version: version, content_hash: hash, fingerprint: "sha256-fp", yanked: false, tier: .Core, gate_status: publication_core_reviewed(), public_key: key, signature: signature}
 }
+
 #Test("pkg integration registry_transport_rejects_and_redacts_embedded_credentials") {
     registry: PublicationRegistryConfig.private("scratch", "https://user:super-secret@example.invalid/registry.git", false)
     assert_eq(publication_redact_registry_url(registry.url), "https://example.invalid/registry.git")
@@ -50,12 +59,15 @@ publication_pkg_integration_entry: fn(name: String, version: String, hash: Strin
     }
     file: PublicationRegistryConfig.private("scratch", "file:///tmp/registry.git?access_token=super-secret", false)
     if publication_ensure_index_clone(file) == {
-        .Err(error) -> assert(!diagnostic_render(error.diagnostic, "package.jet", "", false).contains("super-secret"))
+        .Err(error) -> {
+            assert(!diagnostic_render(error.diagnostic, "package.jet", "", false).contains("super-secret"))
+        }
         .Ok(_) -> panic("credential-bearing file URL accepted")
     }
     detail: publication_e1235("https://example.invalid/registry.git", "git helper failed after receiving password super-secret")
     assert(!diagnostic_render(detail, "package.jet", "", false).contains("super-secret"))
 }
+
 #Test("pkg integration takeover_requires_review_and_resigning") {
     root: publication_pkg_integration_registry_root("takeover")
     previous: sys.get("JET_KEYS_DIR")
@@ -73,7 +85,7 @@ publication_pkg_integration_entry: fn(name: String, version: String, hash: Strin
     files.create_dir_all(repo) ?? panic("registry")
     publication_write_index_entry(repo, v1) ?? panic("write first")
     if publication_write_index_entry(repo, v2) == {
-        .Err(error) -> assert("{error}".contains("no approved registry review"))
+        .Err(error) -> { assert("{error}".contains("no approved registry review")) }
         .Ok(_) -> panic("missing review must refuse takeover")
     }
     review: files.join(repo, "reviews/textkit/2.0.0.review")
@@ -81,7 +93,7 @@ publication_pkg_integration_entry: fn(name: String, version: String, hash: Strin
     files.write(review, "jet-registry-core-review-v1\npackage=textkit\nversion=2.0.0\nreviewer=registry-owner\ndecision=approved\n") ?? panic("review")
     if publication_write_index_entry(repo, wrong) == {
         // Diagnostic rows are sentence-cased, so the `what` starts with a capital.
-        .Err(error) -> assert("{error}".contains("Signature verification failed"))
+        .Err(error) -> { assert("{error}".contains("Signature verification failed")) }
         .Ok(_) -> panic("old signer must refuse takeover")
     }
     publication_write_index_entry(repo, v2) ?? panic("reviewed takeover")
@@ -96,6 +108,7 @@ publication_pkg_integration_git: fn(args: [String], cwd: String) -[Env, Exec, Ti
     receipt: process.cmd(args).cwd(cwd).stdout(.Capture).stderr(.Capture).run() ?? panic("git fixture command")
     assert(receipt.success)
 }
+
 // Original bare_registry/seed_core_review fixture bytes.
 #Test("pkg integration registry_refresh_failure_preserves_previous_cache") {
     root: publication_pkg_integration_registry_root("registry_stale_cache")
@@ -121,11 +134,13 @@ publication_pkg_integration_git: fn(args: [String], cwd: String) -[Env, Exec, Ti
     before: files.read_bytes(files.join(repo, "reviews/stale-kit/1.0.0.review")) ?? panic("previous cache")
     files.remove_all(bare) ?? panic("remove remote")
     if publication_ensure_index_clone(registry) == {
-        .Err(error) -> assert_eq(error.diagnostic.code, "E1235")
+        .Err(error) -> { assert_eq(error.diagnostic.code, "E1235") }
         .Ok(_) -> panic("failed refresh must not replace cache")
     }
     assert_eq(files.read_bytes(files.join(repo, "reviews/stale-kit/1.0.0.review")) ?? panic("retained cache"), before)
-    loop name in files.listdir(files.dirname(repo)) ?? panic("cache parent") -> assert(!name.contains(".partial-") && !name.contains(".backup-"))
+    loop name in files.listdir(files.dirname(repo)) ?? panic("cache parent") {
+        assert(!name.contains(".partial-") && !name.contains(".backup-"))
+    }
     publication_pkg_integration_registry_restore("JET_REGISTRY_CACHE_DIR", previous)
     files.remove_all(root) ?? panic("cleanup")
 }

@@ -3,8 +3,10 @@
 // here directly, because the skip itself would mark this claim skipped.
 #Test("a host tool that is not on PATH gives the skip reason that names it") {
     if kit_find_tool("jet-testkit-absent-host-tool") == {
-        .Found(path) -> panic("`jet-testkit-absent-host-tool` is on PATH at {path}")
-        .Missing(reason) -> assert_eq(reason, "host tool `jet-testkit-absent-host-tool` is not on PATH")
+        .Found(path) -> { panic("`jet-testkit-absent-host-tool` is on PATH at {path}") }
+        .Missing(reason) -> {
+            assert_eq(reason, "host tool `jet-testkit-absent-host-tool` is not on PATH")
+        }
     }
 }
 

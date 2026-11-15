@@ -12,24 +12,30 @@
 // Environment/DefinitionFingerprint.jet). Realization and trust gating stay
 // with the CLI env verbs, which reuse the same composition as `jet env` (I8:
 // one env engine).
-
 use {
     jetpack_foundation.[
-        ENV_EXPORT_VERB, ENV_HOOK_ACTIVE_DIR_VAR, ENV_HOOK_ACTIVE_HASH_VAR, ENV_HOOK_OLD_PATH_VAR, JETPACK_ENV_MARKER, JETPACK_REF_VAR,
+        ENV_EXPORT_VERB,
+        ENV_HOOK_ACTIVE_DIR_VAR,
+        ENV_HOOK_ACTIVE_HASH_VAR,
+        ENV_HOOK_OLD_PATH_VAR,
+        JETPACK_ENV_MARKER,
+        JETPACK_REF_VAR,
     ]
     jet_env_model.[env_hook_has_parent_component, env_hook_path_within, envmodel_sorted_keys, envmodel_valid_env_name]
     files: core.files
 }
 
 ENV_HOOK_GIT_CONFIG_COUNT: "GIT_CONFIG_COUNT"
+
 ENV_HOOK_GIT_CONFIG_KEY_0: "GIT_CONFIG_KEY_0"
+
 ENV_HOOK_GIT_CONFIG_VALUE_0: "GIT_CONFIG_VALUE_0"
 
 // Resolve the ratified `git_hooks_path` fact to the directory native Git
 // uses. The model rejects lexical escapes; this runtime check also rejects a
 // symlinked directory that leaves the project and requires the target to
 // exist before entry can claim the hook path is active.
-env_hook_git_hooks_environment: fn(root: String, relative: String) -[FS, Env]> [String: String] EnvironmentError! {
+env_hook_git_hooks_environment: fn(root: String, relative: String) -[FS, Env]> [String:String] EnvironmentError! {
     if relative.trim() == "" || files.is_absolute(relative) || env_hook_has_parent_component(relative) {
         return Err(EnvironmentError.Activation("git hook path `{relative}` must be a non-empty project-relative path without `..`"))
     }
@@ -41,11 +47,13 @@ env_hook_git_hooks_environment: fn(root: String, relative: String) -[FS, Env]> [
     if !env_hook_path_within(hooks, project) {
         return Err(EnvironmentError.Activation("git hook path `{relative}` resolves outside the project"))
     }
-    Ok([String: String]{
-        ENV_HOOK_GIT_CONFIG_COUNT: "1",
-        ENV_HOOK_GIT_CONFIG_KEY_0: "core.hooksPath",
-        ENV_HOOK_GIT_CONFIG_VALUE_0: hooks
-    })
+    Ok(
+        [String:String]{
+            ENV_HOOK_GIT_CONFIG_COUNT: "1",
+            ENV_HOOK_GIT_CONFIG_KEY_0: "core.hooksPath",
+            ENV_HOOK_GIT_CONFIG_VALUE_0: hooks,
+        },
+    )
 }
 
 // The opt-in shell hook the user installs once. Re-sourcing never
@@ -64,7 +72,7 @@ env_hook_render_hook: fn(kind: ShellKind) -> String Never! {
             "case \";${{PROMPT_COMMAND:-}};\" in",
             "  *\";__jet_env_hook;\"*) ;;",
             "  *) PROMPT_COMMAND=\"__jet_env_hook${{PROMPT_COMMAND:+;$PROMPT_COMMAND}}\" ;;",
-            "esac"
+            "esac",
         }
         .Zsh -> [String]{
             "__jet_env_hook() {{",
@@ -73,13 +81,13 @@ env_hook_render_hook: fn(kind: ShellKind) -> String Never! {
             "  [[ -n \"$__jet_out\" ]] && eval \"$__jet_out\"",
             "}}",
             "autoload -Uz add-zsh-hook",
-            "add-zsh-hook precmd __jet_env_hook"
+            "add-zsh-hook precmd __jet_env_hook",
         }
         .Fish -> [String]{
             "function __jet_env_hook --on-event fish_prompt --on-variable PWD",
             "  set -l __jet_out (command jet env {export} fish | string collect)",
             "  test -n \"$__jet_out\"; and eval \"$__jet_out\"",
-            "end"
+            "end",
         }
     }
     "{lines.join("\n")}\n{kind.help_prefill_widgets()}"
@@ -96,7 +104,7 @@ EnvHookActivation: struct {
     refs: String
     // The absolute `env.jet` root directory this activation is anchored to.
     root: String
-    vars: [String: String]
+    vars: [String:String]
     unset: [String]
     plan_hash: String
 
@@ -114,7 +122,7 @@ EnvHookActivation: struct {
                 "export {JETPACK_ENV_MARKER}=1",
                 "export {JETPACK_REF_VAR}={env_hook_sh_quote(self.refs)}",
                 "export {ENV_HOOK_ACTIVE_DIR_VAR}={env_hook_sh_quote(self.root)}",
-                "export {ENV_HOOK_ACTIVE_HASH_VAR}={env_hook_sh_quote(self.plan_hash)}"
+                "export {ENV_HOOK_ACTIVE_HASH_VAR}={env_hook_sh_quote(self.plan_hash)}",
             }
             .Fish -> [String]{
                 "set -gx {ENV_HOOK_OLD_PATH_VAR} {env_hook_fish_quote(self.base_path)}",
@@ -122,7 +130,7 @@ EnvHookActivation: struct {
                 "set -gx {JETPACK_ENV_MARKER} 1",
                 "set -gx {JETPACK_REF_VAR} {env_hook_fish_quote(self.refs)}",
                 "set -gx {ENV_HOOK_ACTIVE_DIR_VAR} {env_hook_fish_quote(self.root)}",
-                "set -gx {ENV_HOOK_ACTIVE_HASH_VAR} {env_hook_fish_quote(self.plan_hash)}"
+                "set -gx {ENV_HOOK_ACTIVE_HASH_VAR} {env_hook_fish_quote(self.plan_hash)}",
             }
         }
         Ok("{lines.join("\n")}\n{vars}{unset}")
@@ -153,7 +161,7 @@ env_hook_render_unload: fn(kind: ShellKind, base_path: String) -> String Never! 
         ENV_HOOK_GIT_CONFIG_COUNT,
         ENV_HOOK_GIT_CONFIG_KEY_0,
         ENV_HOOK_GIT_CONFIG_VALUE_0,
-        ENV_HOOK_OLD_PATH_VAR
+        ENV_HOOK_OLD_PATH_VAR,
     }
     path_line: if kind == {
         .Bash | .Zsh -> "export PATH={env_hook_sh_quote(base_path)}\n"
@@ -162,7 +170,7 @@ env_hook_render_unload: fn(kind: ShellKind, base_path: String) -> String Never! 
     "{path_line}{env_hook_render_unset(kind, names)}"
 }
 
-env_hook_render_vars: fn(kind: ShellKind, vars: [String: String]) -> String Never! {
+env_hook_render_vars: fn(kind: ShellKind, vars: [String:String]) -> String Never! {
     out := [String]{}
     loop name in envmodel_sorted_keys(vars) {
         line: if kind == {
@@ -188,9 +196,7 @@ env_hook_render_unset: fn(kind: ShellKind, names: [String]) -> String Never! {
 
 // POSIX single quote (bash/zsh): wrap in quotes, closing, escaping, and
 // reopening for any embedded single quote.
-env_hook_sh_quote: fn(text: String) -> String Never! {
-    "'{text.replace("'", "'\\''")}'"
-}
+env_hook_sh_quote: fn(text: String) -> String Never! { "'{text.replace("'", "'\\''")}'" }
 
 // fish single quote: inside quotes fish treats only `\` and `'` specially.
 env_hook_fish_quote: fn(text: String) -> String Never! {

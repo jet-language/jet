@@ -13,9 +13,12 @@ PROVIDER_NIX_RECIPE_ID: "nix-compat-v1"
 
 // The shared provider-facts carrier kept in every producer record.
 PROVIDER_SHARED_FACTS: "provider-facts"
+
 PROVIDER_SHARED_FACTS_DIGEST: "provider-facts-digest"
+
 // The native document a Nix producer retained verbatim.
 PROVIDER_NIX_NATIVE_FORMAT: "nix.native.format"
+
 PROVIDER_NIX_NATIVE_DOCUMENT: "nix.native.document"
 
 // What a provider needs to acquire and realize a ref beyond the ref and its
@@ -62,7 +65,7 @@ Realized: struct {
     // This rule reporting (T4): how this realization was satisfied.
     source_state: SourceState
     // Provider output names mapped to exact immutable paths.
-    named_outputs: [String: String]
+    named_outputs: [String:String]
     // CAS closure edges discovered by the provider.
     references: [String]
     // Canonical replay/source/toolchain/policy facts.
@@ -72,14 +75,15 @@ Realized: struct {
 // How a dependency was realized, for the `jet build` per-package report
 // (`Built | Substituted | Cached`).
 SourceState: enum {
-    // Compiled from source by a first-party provider this run.
     Built
-    // Downloaded from a verified native release artifact.
     Downloaded
-    // Reused an already-realized, content-addressed object.
     Cached
-    // Realized through the Nix compatibility provider.
     Substituted
+
+    // Compiled from source by a first-party provider this run.
+    // Downloaded from a verified native release artifact.
+    // Reused an already-realized, content-addressed object.
+    // Realized through the Nix compatibility provider.
 
     label: fn(self) -> String Never! {
         if self == {
@@ -95,44 +99,45 @@ SourceState: enum {
 // one friendly diagnostic (`report`).
 #Error
 ProviderError: enum {
-    // A compatibility provider failed; carries a trimmed reason.
     BuildFailed(String)
-    // The provider output did not have the expected shape.
     BadOutput(String)
-    // Provider output could not pass the byte-level ingest boundary.
     Ingest(String)
-    // Offline/fixture mode but no fixture file for this ref.
     FixtureMissing(String)
-    // The selected provider cannot realize this ref yet.
     Unsupported(String)
-    // E1256: a bounded foreign projection could not translate the source.
     ForeignProjection(String)
-    // The first-party `core` builder could not realize the package.
     CoreBuild(String)
-    // Native CRAN metadata, integrity, dependency, or installation failure.
     Cran(String)
-    // Native LuaRocks metadata, integrity, dependency, or installation failure.
     LuaRocks(String)
-    // Native RubyGems/CPAN/Packagist metadata, integrity, or install failure.
     Registry(title: String, reason: String)
-    // E1232 sparse subtree checkout and full clone both failed.
     MonorepoFetch(String)
-    // E1233 an in-repo dependency is not a workspace member.
     MemberOutsideWorkspace(String)
-    // E1270: an adapter source or recipe cannot be realized.
     Adapter(String)
-    // E1273: a recipe-backed package failed at a logged build step.
     BuildDebug(String)
-    // E1275: a local executable action has no enforceable native sandbox.
     SandboxUnavailable(String)
-    // E1271: a source channel cannot be resolved or is unlocked.
     Channel(String)
-    // E1276: `--offline` forbids a network fetch or metadata refresh.
     Offline(String)
-    // E1348/E1349/E1276: signed nixpkgs index resolution failed.
     NixIndex(NixIndexError)
-    // E1350: standard Nix binary-cache closure admission failed.
     NixCache(String)
+
+    // A compatibility provider failed; carries a trimmed reason.
+    // The provider output did not have the expected shape.
+    // Provider output could not pass the byte-level ingest boundary.
+    // Offline/fixture mode but no fixture file for this ref.
+    // The selected provider cannot realize this ref yet.
+    // E1256: a bounded foreign projection could not translate the source.
+    // The first-party `core` builder could not realize the package.
+    // Native CRAN metadata, integrity, dependency, or installation failure.
+    // Native LuaRocks metadata, integrity, dependency, or installation failure.
+    // Native RubyGems/CPAN/Packagist metadata, integrity, or install failure.
+    // E1232 sparse subtree checkout and full clone both failed.
+    // E1233 an in-repo dependency is not a workspace member.
+    // E1270: an adapter source or recipe cannot be realized.
+    // E1273: a recipe-backed package failed at a logged build step.
+    // E1275: a local executable action has no enforceable native sandbox.
+    // E1271: a source channel cannot be resolved or is unlocked.
+    // E1276: `--offline` forbids a network fetch or metadata refresh.
+    // E1348/E1349/E1276: signed nixpkgs index resolution failed.
+    // E1350: standard Nix binary-cache closure admission failed.
 
     // The registered diagnostic code, for the errors that carry one.
     code: fn(self) -> String? Never! {
@@ -169,25 +174,63 @@ ProviderError: enum {
     // below the CLI can report without reaching up).
     report: fn(self, theme: Theme) Never! -[IO, Time.Wait]> {
         if self == {
-            .BuildFailed(reason) -> theme.error("the provider failed to build that package", reason, "check the package name, e.g. `fastfetch@jetpack`.")
-            .BadOutput(reason) -> theme.error("couldn't understand the provider's output", reason, "this is likely a Jetpack bug — please report it.")
-            .Ingest(reason) -> theme.error_coded("E1315", "hangar ingest aborted", reason, "re-run ingest against a stable output, or quarantine and rebuild it from a trusted source.")
-            .FixtureMissing(path) -> theme.error("no offline fixture for that ref", "expected a fixture at {path}", "provide a pinned compatibility fixture or verified Hangar output; an exact-lock local Nix fallback is available only outside offline mode and with its policy enabled.")
-            .Unsupported(reason) -> theme.error("that source can't be realized yet", reason, "provide a pinned compatibility output or use a supported native source.")
-            .ForeignProjection(reason) -> theme.error_coded("E1256", "couldn't project the foreign package or environment", reason, "provide the pinned provider artifact and generated `.jet/bindings/<language>/<library>.jet`, use supported literal devShell fields, or declare the environment in `env.*`.")
-            .CoreBuild(reason) -> theme.error("couldn't build that Jet package", reason, "check the package name and that its source repo has an env.jet.")
-            .Cran(reason) -> theme.error("couldn't realize that CRAN package", reason, "check the exact CRAN package ref and the configured CRAN authority.")
-            .LuaRocks(reason) -> theme.error("could not realize the LuaRocks package", reason, "use an exact `<name>@luarocks#version=<version>` ref and verify the repository metadata and source hash")
-            .Registry(title, reason) -> theme.error("could not realize the {title} package", reason, "use an exact `…@ruby`, `…@perl`, or `…@php` ref and verify registry metadata and source hashes.")
-            .MonorepoFetch(reason) -> theme.error_coded("E1232", "couldn't fetch that monorepo source", reason, "check the source URL and revision, and that the network/provider is reachable.")
-            .MemberOutsideWorkspace(reason) -> theme.error_coded("E1233", "an in-repo dependency is outside the workspace", reason, "add the dependency to the source repo's `workspace.jet` `members:`, or depend on it as an external `package@source` ref.")
-            .Adapter(reason) -> theme.error_coded("E1270", "adapter package could not be realized", reason, "check the `Pkg.adapt(...)` source and recipe.")
-            .BuildDebug(reason) -> theme.error_coded("E1273", "package build failed at a logged step", reason, "run `jet logs <pkg>` for full output, or rerun with `--shell-on-fail`.")
-            .SandboxUnavailable(reason) -> theme.error_coded("E1275", "build sandboxing is required but unavailable", reason, "provide a trusted substitute or approved remote builder, or enable the native sandbox, then retry.")
-            .Channel(reason) -> theme.error_coded("E1271", "source channel could not be resolved", reason, "run `jetpack update` with network or fixture metadata, then commit `{UNIFIED_LOCK_FILE}`.")
-            .NixIndex(error) -> theme.error_coded(provider_nix_index_code(error), "signed nixpkgs index could not resolve that package", error.message(), "refresh the signed index, use a covered locked nixpkgs attr, or drop `--offline` when a refresh is required.")
-            .NixCache(reason) -> theme.error_coded("E1350", "native Nix cache closure could not be admitted", reason, "repair the signed cache response or restore network access, then retry the realization.")
-            .Offline(reason) -> theme.error_coded("E1276", "--offline forbids network access", reason, "drop `--offline` for this command, or realize/fetch the needed object before going offline.")
+            .BuildFailed(reason) -> {
+                theme.error("the provider failed to build that package", reason, "check the package name, e.g. `fastfetch@jetpack`.")
+            }
+            .BadOutput(reason) -> {
+                theme.error("couldn't understand the provider's output", reason, "this is likely a Jetpack bug — please report it.")
+            }
+            .Ingest(reason) -> {
+                theme.error_coded("E1315", "hangar ingest aborted", reason, "re-run ingest against a stable output, or quarantine and rebuild it from a trusted source.")
+            }
+            .FixtureMissing(path) -> {
+                theme.error("no offline fixture for that ref", "expected a fixture at {path}", "provide a pinned compatibility fixture or verified Hangar output; an exact-lock local Nix fallback is available only outside offline mode and with its policy enabled.")
+            }
+            .Unsupported(reason) -> {
+                theme.error("that source can't be realized yet", reason, "provide a pinned compatibility output or use a supported native source.")
+            }
+            .ForeignProjection(reason) -> {
+                theme.error_coded("E1256", "couldn't project the foreign package or environment", reason, "provide the pinned provider artifact and generated `.jet/bindings/<language>/<library>.jet`, use supported literal devShell fields, or declare the environment in `env.*`.")
+            }
+            .CoreBuild(reason) -> {
+                theme.error("couldn't build that Jet package", reason, "check the package name and that its source repo has an env.jet.")
+            }
+            .Cran(reason) -> {
+                theme.error("couldn't realize that CRAN package", reason, "check the exact CRAN package ref and the configured CRAN authority.")
+            }
+            .LuaRocks(reason) -> {
+                theme.error("could not realize the LuaRocks package", reason, "use an exact `<name>@luarocks#version=<version>` ref and verify the repository metadata and source hash")
+            }
+            .Registry(title, reason) -> {
+                theme.error("could not realize the {title} package", reason, "use an exact `…@ruby`, `…@perl`, or `…@php` ref and verify registry metadata and source hashes.")
+            }
+            .MonorepoFetch(reason) -> {
+                theme.error_coded("E1232", "couldn't fetch that monorepo source", reason, "check the source URL and revision, and that the network/provider is reachable.")
+            }
+            .MemberOutsideWorkspace(reason) -> {
+                theme.error_coded("E1233", "an in-repo dependency is outside the workspace", reason, "add the dependency to the source repo's `workspace.jet` `members:`, or depend on it as an external `package@source` ref.")
+            }
+            .Adapter(reason) -> {
+                theme.error_coded("E1270", "adapter package could not be realized", reason, "check the `Pkg.adapt(...)` source and recipe.")
+            }
+            .BuildDebug(reason) -> {
+                theme.error_coded("E1273", "package build failed at a logged step", reason, "run `jet logs <pkg>` for full output, or rerun with `--shell-on-fail`.")
+            }
+            .SandboxUnavailable(reason) -> {
+                theme.error_coded("E1275", "build sandboxing is required but unavailable", reason, "provide a trusted substitute or approved remote builder, or enable the native sandbox, then retry.")
+            }
+            .Channel(reason) -> {
+                theme.error_coded("E1271", "source channel could not be resolved", reason, "run `jetpack update` with network or fixture metadata, then commit `{UNIFIED_LOCK_FILE}`.")
+            }
+            .NixIndex(error) -> {
+                theme.error_coded(provider_nix_index_code(error), "signed nixpkgs index could not resolve that package", error.message(), "refresh the signed index, use a covered locked nixpkgs attr, or drop `--offline` when a refresh is required.")
+            }
+            .NixCache(reason) -> {
+                theme.error_coded("E1350", "native Nix cache closure could not be admitted", reason, "repair the signed cache response or restore network access, then retry the realization.")
+            }
+            .Offline(reason) -> {
+                theme.error_coded("E1276", "--offline forbids network access", reason, "drop `--offline` for this command, or realize/fetch the needed object before going offline.")
+            }
         }
     }
 }
@@ -246,8 +289,8 @@ DownloadPlan: struct {
 
     add_item: fn(&self, item: PlanItem) Never! {
         if item.state == {
-            .New -> self.new = math.saturating_add(self.new, 1)
-            .Cached -> self.cached = math.saturating_add(self.cached, 1)
+            .New -> { self.new = math.saturating_add(self.new, 1) }
+            .Cached -> { self.cached = math.saturating_add(self.cached, 1) }
             .Repaired -> self.repaired = math.saturating_add(self.repaired, 1)
         }
         self.download_bytes = provider_plan_sum(self.download_bytes, item.download_bytes)
@@ -268,7 +311,7 @@ DownloadPlan: struct {
                 .Cached -> PlanState.Cached
                 .Repaired -> PlanState.Repaired
             }
-            self.add_item(PlanItem{package: item.package, state, download_bytes: Val(item.download_bytes), disk_bytes: Val(item.disk_bytes)})
+            self.add_item(PlanItem{package: item.package, state: state, download_bytes: Val(item.download_bytes), disk_bytes: Val(item.disk_bytes)})
         }
     }
 }

@@ -6,7 +6,7 @@
 // Realize an adapter plan whose cache expectation was already approved. The
 // source and build identity are rederived and must equal the approved
 // expectation before any executable step runs.
-provider_realize_adapter: fn(plan: AdapterPlan, ctx: ProviderCtx, expected: CacheExpectation, tools: [String: String], table: SourceTable) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
+provider_realize_adapter: fn(plan: AdapterPlan, ctx: ProviderCtx, expected: CacheExpectation, tools: [String:String], table: SourceTable) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
     source_ref: ProviderRef.classify(plan.source) ?? return Err(ProviderError.Adapter("adapter source `{plan.source}` is not a provider ref"))
     staged: provider_stage_adapter_source(source_ref, ctx)
     recipe: provider_adapter_recipe_to_build(plan.recipe)
@@ -17,22 +17,28 @@ provider_realize_adapter: fn(plan: AdapterPlan, ctx: ProviderCtx, expected: Cach
     identity_source: if private_untrusted -> source_fingerprint else -> source_hash
     build_identity: provider_adapter_action_identity(plan, recipe, identity_source, pkg_host_platform(), table)
     identity: provider_adapter_cache_identity(source_fingerprint, build_identity, ctx)
-    if identity != expected.identity -> return Err(ProviderError.Adapter("adapter source or build identity changed after approval"))
+    if identity != expected.identity {
+        return Err(ProviderError.Adapter("adapter source or build identity changed after approval"))
+    }
     fingerprint: pkg_sha256_hex(provider_adapter_id_input(plan, source_hash, build_identity).bytes())
     out_dir: files.join(ctx.store_dir, "{plan.name}-adapter-{provider_prefix(fingerprint, 12)}")
-    if files.exists(out_dir) -> return Err(ProviderError.Adapter("unverified existing output {out_dir}; run `jet clean` before rebuilding"))
+    if files.exists(out_dir) {
+        return Err(ProviderError.Adapter("unverified existing output {out_dir}; run `jet clean` before rebuilding"))
+    }
     reference: "adapt:{plan.name}:{plan.source}"
     build_ctx: RecipeBuildContext{
         source_dir: staged,
         output_root: out_dir,
-        tools,
+        tools: tools,
         fetch_cache: files.join(ctx.store_dir, "fetch-cache"),
         offline: ctx.offline,
     }
     attempt := BuildAttempt.new(plan.name, reference, "adapter", recipe_hash, source_hash)
     run_report: if recipe_run_logged(recipe, build_ctx, None, attempt) == {
         .Ok(report) -> report
-        .Err(diagnostic) -> { return Err(provider_adapter_failure(plan, ctx, staged, out_dir, attempt, diagnostic)) }
+        .Err(diagnostic) -> {
+            return Err(provider_adapter_failure(plan, ctx, staged, out_dir, attempt, diagnostic))
+        }
     }
     attempt.persist(ctx.store_dir).drop("a build log is diagnostic evidence, not an input to the realization")
     store_seal_local_output(out_dir) ?? return Err(ProviderError.Adapter("could not seal adapter output: {err.message()}"))
@@ -54,7 +60,7 @@ provider_realize_adapter: fn(plan: AdapterPlan, ctx: ProviderCtx, expected: Cach
     plan_facts["adapter.build.sandbox_policy"] = sandbox_policy
     if private_untrusted -> plan_facts["adapter.build.trust"] = "private-untrusted"
     provider_plan_facts: ProviderPlanFacts.from_facts(plan_facts) ?? return Err(ProviderError.Adapter(err.message()))
-    producer_facts := [String: String]{
+    producer_facts := [String:String]{
         "adapter.source": plan.source,
         "build.identity": build_identity,
         "build.capabilities": declared_capabilities,
@@ -69,16 +75,16 @@ provider_realize_adapter: fn(plan: AdapterPlan, ctx: ProviderCtx, expected: Cach
     realized := Realized{
         name: plan.name,
         version: "",
-        reference,
+        reference: reference,
         out: out_dir,
-        bin,
+        bin: bin,
         rlib: "",
-        envelope,
+        envelope: envelope,
         cache_identity: identity,
         source_state: SourceState.Built,
-        named_outputs: [String: String]{"out": out_dir},
+        named_outputs: [String:String]{"out": out_dir},
         references: [String]{},
-        producer,
+        producer: producer,
     }
     provider_refresh_provider_facts(realized.producer, realized.reference)
     Ok(realized)
@@ -89,16 +95,18 @@ provider_realize_adapter: fn(plan: AdapterPlan, ctx: ProviderCtx, expected: Cach
 // for a sandbox refusal or E1273 for a failed step.
 provider_adapter_failure: fn(plan: AdapterPlan, ctx: ProviderCtx, staged: String, out_dir: String, attempt: &BuildAttempt, diagnostic: RecipeDiagnostic) -[FS, Env, Rand]> ProviderError Never! {
     if attempt.steps.len() == 0 {
-        attempt.push_step(StepLog{
-            index: 0,
-            total: 0,
-            name: "recipe validation",
-            command: diagnostic.what,
-            cwd: staged,
-            status: "failed",
-            stdout: "",
-            stderr: "{diagnostic.code}: {diagnostic.why}\n",
-        })
+        attempt.push_step(
+            StepLog{
+                index: 0,
+                total: 0,
+                name: "recipe validation",
+                command: diagnostic.what,
+                cwd: staged,
+                status: "failed",
+                stdout: "",
+                stderr: "{diagnostic.code}: {diagnostic.why}\n",
+            },
+        )
     }
     attempt.mark_failed()
     scratch_error: if attempt.preserve_scratch(ctx.store_dir, staged, out_dir) == {
@@ -135,7 +143,9 @@ provider_stage_adapter_source: fn(source: ProviderRef, ctx: ProviderCtx) -[FS, E
         .Path -> {
             target: pkg_split_channel_ref(source.target).base
             path: if files.is_abs(target) -> target else -> files.join(files.cwd() ?? "", target)
-            if !files.is_dir(path) -> return Err(ProviderError.Adapter("adapter source `{path}` is not a directory"))
+            if !files.is_dir(path) {
+                return Err(ProviderError.Adapter("adapter source `{path}` is not a directory"))
+            }
             Ok(path)
         }
         .Github -> {

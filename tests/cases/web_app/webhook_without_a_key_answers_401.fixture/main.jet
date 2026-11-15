@@ -18,14 +18,12 @@ Event: struct {
 Hooks: struct {
     secret: String
 
-    #App.Webhook(path: "/hooks/github/:project", signature: app.Signature.GitHub, key: "signing_key")
-    on_event: fn(self, project: String, event: Event) -> String {
+    #App.Webhook(path: "/hooks/github/:project", signature: app.Signature.GitHub, key: "signing_key") on_event: fn(self, project: String, event: Event) -> String {
         "{project}: {event.action}"
     }
 
     // Only the `jet` project has a key.
-    #App.SigningKey
-    signing_key: fn(self, project: String) -> String? {
+    #App.SigningKey signing_key: fn(self, project: String) -> String? {
         if project != "jet" -> return None
         Val(self.secret.copy())
     }

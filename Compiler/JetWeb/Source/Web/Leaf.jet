@@ -6,7 +6,6 @@
 // (WEB_SCRATCH). The machine's single thread makes every atomic a plain
 // read-modify-write. Calls through a code address are `call_indirect`
 // through the module table.
-
 use {
     jet_foundation.[Type]
     jet_ir.[IRFunction, IRModule, IRSlotKind, ir_function_new, ir_intern_name, ir_module_new, ir_slot, ir_stop_routine, ir_type_row]
@@ -449,9 +448,25 @@ web_poll_quiet_unless: fn(e: &WebEmitter, word: Int) Never! {
     right: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "right"), 1)
     e := web_emitter(m, f)
     st := WebState{
-        app: false, stop_points: false, data_at: [Int]{}, table_base: 0, slots: [Int]{}, slot_rows: [Int]{},
-        types: [String]{}, type_rows: [String:Int]{}, refs: [WebRef]{}, ref_rows: [String:Int]{}, internal: [String:Int]{},
-        exports: [String:String]{}, hosts: [String:Bool]{}, sigs: [String]{}, poll: -1, trap: -1, turn: -1, armed: -1, errors: [String]{},
+        app: false,
+        stop_points: false,
+        data_at: [Int]{},
+        table_base: 0,
+        slots: [Int]{},
+        slot_rows: [Int]{},
+        types: [String]{},
+        type_rows: [String:Int]{},
+        refs: [WebRef]{},
+        ref_rows: [String:Int]{},
+        internal: [String:Int]{},
+        exports: [String:String]{},
+        hosts: [String:Bool]{},
+        sigs: [String]{},
+        poll: -1,
+        trap: -1,
+        turn: -1,
+        armed: -1,
+        errors: [String]{},
     }
     assert(web_leaf(e, st, f.name, [Int]{e.locals[left], e.locals[right]}, true))
     a: U8{e.locals[left]}

@@ -6,12 +6,12 @@
 // symbol are E1341.
 time: module {
     #Import(c) zone_env: fn(name: String) -[Env]> String? = "jet_time_raw_zone_env"
+
     #Import(c) wall_sample: fn() -[Time]> (epoch_seconds: Int, fraction_ns: Int, pre_epoch: Bool) = "jet_time_raw_wall_sample"
+
     #Import(c) zone_file_bytes: fn(path: String) -[FS.Read]> [U8]? = "jet_time_raw_zone_file_bytes"
 }
 
 #Import(c) top_zone_env: fn(name: String) -[Env]> String? = "jet_time_raw_zone_env"
 
-run: fn() -[Env, IO]> {
-    print(time.zone_env("TZ") ?? "none")
-}
+run: fn() -[Env, IO]> { print(time.zone_env("TZ") ?? "none") }

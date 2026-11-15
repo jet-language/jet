@@ -6,17 +6,11 @@ use {
 }
 
 Hooks: struct {
-    #App.Webhook(path: "/hooks/:project", signature: app.Signature.Stripe, key: "webhook_secret")
-    on_event: fn(self, project: String, event: String) -> Int {
+    #App.Webhook(path: "/hooks/:project", signature: app.Signature.Stripe, key: "webhook_secret") on_event: fn(self, project: String, event: String) -> Int {
         project.len() + event.len()
     }
 
-    #App.SigningKey
-    webhook_secret: fn(self, project: String) -> String? {
-        Val(project.copy())
-    }
+    #App.SigningKey webhook_secret: fn(self, project: String) -> String? { Val(project.copy()) }
 }
 
-run: fn() {
-    _: web.app().mount(Hooks{})
-}
+run: fn() { _: web.app().mount(Hooks{}) }

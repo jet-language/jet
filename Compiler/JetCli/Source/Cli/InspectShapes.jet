@@ -3,10 +3,10 @@
 // Schema.jet `shape_fact_from_struct` from origin/port/compiler.
 use {
     jet_driver.[
-    JetDriverVerbOutput,
-    JetDriverDocModule,
-    JET_DRIVER_EXIT_OK,
-    JET_DRIVER_EXIT_USER_ERROR,
+        JetDriverVerbOutput,
+        JetDriverDocModule,
+        JET_DRIVER_EXIT_OK,
+        JET_DRIVER_EXIT_USER_ERROR,
     ]
     jet_foundation.[
         CtValue,
@@ -333,20 +333,20 @@ jet_cli_shape_names_value: fn(names: JetCLIShapeNames) -> JetCLIStatusValue Neve
         if slots[index] == .None -> ignored.push(labels[index])
     }
     jet_cli_status_object(
-    [JetCLIStatusField]{
-        jet_cli_status_field("text", jet_cli_status_text(names.text)),
-        jet_cli_status_field("json", jet_cli_status_optional_text(names.json)),
-        jet_cli_status_field("cbor", jet_cli_status_optional_text(names.cbor)),
-        jet_cli_status_field("csv", jet_cli_status_optional_text(names.csv)),
-        jet_cli_status_field("toml", jet_cli_status_optional_text(names.toml)),
-        jet_cli_status_field("yaml", jet_cli_status_optional_text(names.yaml)),
-        jet_cli_status_field("xml", jet_cli_status_optional_text(names.xml)),
-        jet_cli_status_field("args", jet_cli_status_text(names.args)),
-        jet_cli_status_field("env", jet_cli_status_text(names.env)),
-        jet_cli_status_field("db", jet_cli_status_optional_text(names.db)),
-        jet_cli_status_field("layout", jet_cli_status_optional_text(names.layout)),
-        jet_cli_status_field("ignored", jet_cli_status_texts(ignored)),
-    },
+        [JetCLIStatusField]{
+            jet_cli_status_field("text", jet_cli_status_text(names.text)),
+            jet_cli_status_field("json", jet_cli_status_optional_text(names.json)),
+            jet_cli_status_field("cbor", jet_cli_status_optional_text(names.cbor)),
+            jet_cli_status_field("csv", jet_cli_status_optional_text(names.csv)),
+            jet_cli_status_field("toml", jet_cli_status_optional_text(names.toml)),
+            jet_cli_status_field("yaml", jet_cli_status_optional_text(names.yaml)),
+            jet_cli_status_field("xml", jet_cli_status_optional_text(names.xml)),
+            jet_cli_status_field("args", jet_cli_status_text(names.args)),
+            jet_cli_status_field("env", jet_cli_status_text(names.env)),
+            jet_cli_status_field("db", jet_cli_status_optional_text(names.db)),
+            jet_cli_status_field("layout", jet_cli_status_optional_text(names.layout)),
+            jet_cli_status_field("ignored", jet_cli_status_texts(ignored)),
+        },
     )
 }
 
@@ -357,91 +357,91 @@ jet_cli_shape_projection_value: fn(fact: JetCLIShapeFact, projection: String) ->
         if field.skip -> next
         short: if projection == "args" -> field.short else -> String?{None}
         rows.push(
-        jet_cli_status_object(
-        [JetCLIStatusField]{
-            jet_cli_status_field("source_name", jet_cli_status_text(field.name)),
-            jet_cli_status_field("name", jet_cli_status_text(jet_cli_shape_name_for(field.names, projection))),
-            jet_cli_status_field("decode_name", jet_cli_status_text(jet_cli_shape_name_for(field.names, "json"))),
-            jet_cli_status_field("type", jet_cli_status_text(jet_cli_shape_type_label(field.ty))),
-            jet_cli_status_field("order", jet_cli_status_int(field.order)),
-            jet_cli_status_field("encoding", jet_cli_status_text(field.encoding)),
-            jet_cli_status_field("default", field.default ?? JetCLIStatusValue.Null),
-            jet_cli_status_field("short", jet_cli_status_optional_text(short)),
-            jet_cli_status_field("doc", JetCLIStatusValue.Null),
-        },
-        ),
+            jet_cli_status_object(
+                [JetCLIStatusField]{
+                    jet_cli_status_field("source_name", jet_cli_status_text(field.name)),
+                    jet_cli_status_field("name", jet_cli_status_text(jet_cli_shape_name_for(field.names, projection))),
+                    jet_cli_status_field("decode_name", jet_cli_status_text(jet_cli_shape_name_for(field.names, "json"))),
+                    jet_cli_status_field("type", jet_cli_status_text(jet_cli_shape_type_label(field.ty))),
+                    jet_cli_status_field("order", jet_cli_status_int(field.order)),
+                    jet_cli_status_field("encoding", jet_cli_status_text(field.encoding)),
+                    jet_cli_status_field("default", field.default ?? JetCLIStatusValue.Null),
+                    jet_cli_status_field("short", jet_cli_status_optional_text(short)),
+                    jet_cli_status_field("doc", JetCLIStatusValue.Null),
+                },
+            ),
         )
     }
     jet_cli_status_object(
-    [JetCLIStatusField]{
-        jet_cli_status_field("kind", jet_cli_status_text(projection)),
-        jet_cli_status_field("status", jet_cli_status_text("supported")),
-        jet_cli_status_field("fields", jet_cli_status_array(rows)),
-    },
+        [JetCLIStatusField]{
+            jet_cli_status_field("kind", jet_cli_status_text(projection)),
+            jet_cli_status_field("status", jet_cli_status_text("supported")),
+            jet_cli_status_field("fields", jet_cli_status_array(rows)),
+        },
     )
 }
 
 jet_cli_shape_fact_value: fn(fact: JetCLIShapeFact) -> JetCLIStatusValue Never! {
     fields: loop field in fact.fields -> jet_cli_status_object(
-    [JetCLIStatusField]{
-        jet_cli_status_field("source_name", jet_cli_status_text(field.name)),
-        jet_cli_status_field("type", jet_cli_status_text(jet_cli_shape_type_label(field.ty))),
-        jet_cli_status_field("order", jet_cli_status_int(field.order)),
-        jet_cli_status_field("encoding", jet_cli_status_text(field.encoding)),
-        jet_cli_status_field("skipped", jet_cli_status_bool(field.skip)),
-        jet_cli_status_field("default", field.default ?? JetCLIStatusValue.Null),
-        jet_cli_status_field("names", jet_cli_shape_names_value(field.names)),
-        jet_cli_status_field("short", jet_cli_status_optional_text(field.short)),
-        jet_cli_status_field("doc", JetCLIStatusValue.Null),
-    },
+        [JetCLIStatusField]{
+            jet_cli_status_field("source_name", jet_cli_status_text(field.name)),
+            jet_cli_status_field("type", jet_cli_status_text(jet_cli_shape_type_label(field.ty))),
+            jet_cli_status_field("order", jet_cli_status_int(field.order)),
+            jet_cli_status_field("encoding", jet_cli_status_text(field.encoding)),
+            jet_cli_status_field("skipped", jet_cli_status_bool(field.skip)),
+            jet_cli_status_field("default", field.default ?? JetCLIStatusValue.Null),
+            jet_cli_status_field("names", jet_cli_shape_names_value(field.names)),
+            jet_cli_status_field("short", jet_cli_status_optional_text(field.short)),
+            jet_cli_status_field("doc", JetCLIStatusValue.Null),
+        },
     )
     projections: loop projection in JET_CLI_SHAPE_PROJECTIONS -> jet_cli_shape_projection_value(fact, projection)
     alignment: if fact.alignment == .Val(value) -> jet_cli_status_int(value) else -> JetCLIStatusValue.Null
     jet_cli_status_object(
-    [JetCLIStatusField]{
-        jet_cli_status_field(
-        "identity",
-        jet_cli_status_object(
         [JetCLIStatusField]{
-            jet_cli_status_field("source", jet_cli_status_text(fact.source)),
-            jet_cli_status_field("type", jet_cli_status_text(fact.type_name)),
-            jet_cli_status_field("key", jet_cli_status_text("{fact.source}.{fact.type_name}")),
+            jet_cli_status_field(
+                "identity",
+                jet_cli_status_object(
+                    [JetCLIStatusField]{
+                        jet_cli_status_field("source", jet_cli_status_text(fact.source)),
+                        jet_cli_status_field("type", jet_cli_status_text(fact.type_name)),
+                        jet_cli_status_field("key", jet_cli_status_text("{fact.source}.{fact.type_name}")),
+                    },
+                ),
+            ),
+            jet_cli_status_field(
+                "dimensions",
+                jet_cli_status_object(
+                    [JetCLIStatusField]{
+                        jet_cli_status_field("status", jet_cli_status_text("known")),
+                        jet_cli_status_field("rank", jet_cli_status_int(1)),
+                        jet_cli_status_field("width", jet_cli_status_int(fact.fields.len())),
+                    },
+                ),
+            ),
+            jet_cli_status_field("encoding", jet_cli_status_text("Object")),
+            jet_cli_status_field(
+                "layout",
+                jet_cli_status_object(
+                    [JetCLIStatusField]{
+                        jet_cli_status_field("kind", jet_cli_status_text(fact.layout)),
+                        jet_cli_status_field("alignment", alignment),
+                    },
+                ),
+            ),
+            jet_cli_status_field(
+                "provenance",
+                jet_cli_status_object(
+                    [JetCLIStatusField]{
+                        jet_cli_status_field("origin", jet_cli_status_text("declared")),
+                        jet_cli_status_field("span", JetCLIStatusValue.Null),
+                        jet_cli_status_field("declaration", jet_cli_status_text(fact.type_name)),
+                    },
+                ),
+            ),
+            jet_cli_status_field("fields", jet_cli_status_array(fields)),
+            jet_cli_status_field("projections", jet_cli_status_array(projections)),
         },
-        ),
-        ),
-        jet_cli_status_field(
-        "dimensions",
-        jet_cli_status_object(
-        [JetCLIStatusField]{
-            jet_cli_status_field("status", jet_cli_status_text("known")),
-            jet_cli_status_field("rank", jet_cli_status_int(1)),
-            jet_cli_status_field("width", jet_cli_status_int(fact.fields.len())),
-        },
-        ),
-        ),
-        jet_cli_status_field("encoding", jet_cli_status_text("Object")),
-        jet_cli_status_field(
-        "layout",
-        jet_cli_status_object(
-        [JetCLIStatusField]{
-            jet_cli_status_field("kind", jet_cli_status_text(fact.layout)),
-            jet_cli_status_field("alignment", alignment),
-        },
-        ),
-        ),
-        jet_cli_status_field(
-        "provenance",
-        jet_cli_status_object(
-        [JetCLIStatusField]{
-            jet_cli_status_field("origin", jet_cli_status_text("declared")),
-            jet_cli_status_field("span", JetCLIStatusValue.Null),
-            jet_cli_status_field("declaration", jet_cli_status_text(fact.type_name)),
-        },
-        ),
-        ),
-        jet_cli_status_field("fields", jet_cli_status_array(fields)),
-        jet_cli_status_field("projections", jet_cli_status_array(projections)),
-    },
     )
 }
 

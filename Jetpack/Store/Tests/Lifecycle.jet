@@ -30,7 +30,9 @@ store_lifecycle_test_install_closure: fn(roots: HangarRoots, targets: [String]) 
     journal: files.join(files.join(roots.hangar_dir(), "closure-db"), "journal")
     files.create_dir_all(journal) ?? panic("closure journal")
     lines := [String]{"jet-closure-journal-v1\nkind\tdelta\n"}
-    loop target in targets -> lines.push("object\t{store_lifecycle_hex(target)}\t{store_lifecycle_hex("/fixture/{target}")}\t1\n")
+    loop target in targets {
+        lines.push("object\t{store_lifecycle_hex(target)}\t{store_lifecycle_hex("/fixture/{target}")}\t1\n")
+    }
     body: lines.join("")
     checksum: pkg_sha256_hex(body.bytes())
     files.write(files.join(journal, "{store_lifecycle_pad20(1)}-{pkg_bytes_text(checksum.bytes(), 0, 16)}.txn"), "{body}checksum\t{checksum}\n") ?? panic("closure transaction")
@@ -40,7 +42,7 @@ store_lifecycle_test_fixture: fn() -> LifecycleTestFixture Never! {
     roots: store_test_temp_roots()
     known: [String]{store_lifecycle_test_digest("a"), store_lifecycle_test_digest("b"), store_lifecycle_test_digest("c")}
     store_lifecycle_test_install_closure(roots, known)
-    LifecycleTestFixture{roots, known}
+    LifecycleTestFixture{roots: roots, known: known}
 }
 
 // Rust test helper `validated_transaction_paths`.
@@ -55,9 +57,7 @@ store_lifecycle_test_transaction_paths: fn(roots: HangarRoots) -> [String] Never
 // Prepare under the Hangar lock with fault injection.
 store_lifecycle_test_prepare_controlled: fn(roots: HangarRoots, known: [String], identity: RootIdentity, target: String, at: Int, control: LifecycleWriteControl, recover_first: Bool) StoreError! {
     hangar_lock: env_runtime_lock(roots.root, "hangar")
-    if recover_first {
-        _: store_lifecycle_recover_unlocked(roots)
-    }
+    if recover_first -> _: store_lifecycle_recover_unlocked(roots)
     store_lifecycle_prepare_unlocked_controlled(roots, identity, [String]{target}, store_lifecycle_test_at(at), known, control)
 }
 
@@ -65,7 +65,9 @@ store_lifecycle_test_prepare_controlled: fn(roots: HangarRoots, known: [String],
 store_lifecycle_test_persist_controlled: fn(roots: HangarRoots, known: [String], entry: LifecycleJournalEntry, control: LifecycleWriteControl) StoreError! {
     hangar_lock: env_runtime_lock(roots.root, "hangar")
     state := store_lifecycle_load_state(roots, known)
-    if store_lifecycle_entry_already_applied(state, entry) -> return
+    if store_lifecycle_entry_already_applied(state, entry) {
+        return
+    }
     store_lifecycle_apply_entry(state, entry)
     store_lifecycle_persist_entry(roots, entry, state, control)
 }
@@ -138,7 +140,7 @@ store_lifecycle_test_hex64: fn(index: Int) -> String Never! {
     a: store_lifecycle_test_digest("a")
     store_lifecycle_test_commit_root(verification, roots, store_lifecycle_test_identity("root", 1, "w1"), a, 1, 2)
     if store_lifecycle_test_prepare_controlled(roots, fixture.known, store_lifecycle_test_identity("root", 2, "w2"), store_lifecycle_test_digest("b"), 3, LifecycleWriteControl.fail_at(LifecycleWritePhase.AfterWrite, 28), false) == {
-        .Ok(_) -> panic("an injected ENOSPC must fail the prepare")
+        .Ok(_) -> { panic("an injected ENOSPC must fail the prepare") }
         .Err(error) -> assert_eq(store_lifecycle_test_os_code(error), Val(28))
     }
     assert_eq(store_lifecycle_recover(verification, roots) ?? panic("recover"), 1)
@@ -218,7 +220,7 @@ store_lifecycle_test_hex64: fn(index: Int) -> String Never! {
     checksum: pkg_sha256_hex(body.bytes())
     files.write(files.join(journal, "{store_lifecycle_pad20(1)}-{pkg_bytes_text(checksum.bytes(), 0, 16)}.txn"), "{body}checksum\t{checksum}\n") ?? panic("transaction")
     if store_lifecycle_recover(verification, roots) == {
-        .Ok(_) -> panic("an invalid transition must fail recovery")
+        .Ok(_) -> { panic("an invalid transition must fail recovery") }
         .Err(error) -> assert(error == .InvalidData(_))
     }
     store_test_drop_roots(roots)
@@ -241,12 +243,12 @@ store_lifecycle_test_hex64: fn(index: Int) -> String Never! {
     bad_checksum[0] = U8{88}
     files.write_bytes(path, bad_checksum) ?? panic("corrupt")
     if store_lifecycle_snapshot(verification, roots) == {
-        .Ok(_) -> panic("a bad checksum must fail closed")
+        .Ok(_) -> { panic("a bad checksum must fail closed") }
         .Err(error) -> assert(error == .InvalidData(_))
     }
     files.write_bytes(path, original[0..<original.len() /% 2]) ?? panic("truncate")
     if store_lifecycle_snapshot(verification, roots) == {
-        .Ok(_) -> panic("a truncated transaction must fail closed")
+        .Ok(_) -> { panic("a truncated transaction must fail closed") }
         .Err(error) -> {
             assert(error == .InvalidData(_))
             assert(error.message() != "")
@@ -257,7 +259,7 @@ store_lifecycle_test_hex64: fn(index: Int) -> String Never! {
         journal: files.dirname(path)
         files.symlink(path, files.join(journal, "hostile.txn")) ?? panic("hostile link")
         if store_lifecycle_snapshot(verification, roots) == {
-            .Ok(_) -> panic("an unknown member must fail closed")
+            .Ok(_) -> { panic("an unknown member must fail closed") }
             .Err(error) -> assert(error == .InvalidData(_))
         }
     }
@@ -281,7 +283,9 @@ store_lifecycle_test_hex64: fn(index: Int) -> String Never! {
     fixture: store_lifecycle_test_fixture()
     roots: fixture.roots
     oversized := [String]{}
-    loop _ in 0..<(STORE_LIFECYCLE_MAX_TARGETS_PER_ROOT + 1) -> oversized.push(store_lifecycle_test_digest("a"))
+    loop _ in 0..<(STORE_LIFECYCLE_MAX_TARGETS_PER_ROOT + 1) {
+        oversized.push(store_lifecycle_test_digest("a"))
+    }
     assert(store_lifecycle_test_message(store_lifecycle_prepare(verification, roots, store_lifecycle_test_identity("bounded", 1, "w1"), oversized, store_lifecycle_test_at(1))).contains("target-count bound"))
 
     journal: files.join(files.join(roots.hangar_dir(), STORE_LIFECYCLE_DB_DIR), STORE_LIFECYCLE_JOURNAL_DIR)
@@ -344,17 +348,17 @@ store_lifecycle_test_hex64: fn(index: Int) -> String Never! {
     loop index in 0..<8 -> targets.push("sha256-{store_lifecycle_test_hex64(index)}")
     producer: "producer-{store_test_repeat("p", 503)}"
     witness: "witness-{store_test_repeat("w", 504)}"
-    state := [String: LifecycleRoot]{}
+    state := [String:LifecycleRoot]{}
     loop index in 0..<STORE_LIFECYCLE_MAX_ROOTS {
         number := "{index}"
         loop number.bytes().len() < 4 -> number = "0{number}"
         prefix: "root-{number}-"
         identity: RootIdentity.new(RootKind.Manual, RootID.new("{prefix}{store_test_repeat("i", 512 - prefix.bytes().len())}") ?? panic("id"), ProducerID.new(producer) ?? panic("producer"), Incarnation.new(1) ?? panic("incarnation"), RootWitness.new(witness) ?? panic("witness"))
-        state[identity.id.as_str()] = LifecycleRoot{identity, targets, protected_targets: targets, phase: RootPhase.Committed, prepared_at: store_lifecycle_test_at(1), committed_at: Val(store_lifecycle_test_at(2)), tombstoned_at: None, metadata: RootMetadata.empty(), revision: 1, legacy: false}
+        state[identity.id.as_str()] = LifecycleRoot{identity: identity, targets: targets, protected_targets: targets, phase: RootPhase.Committed, prepared_at: store_lifecycle_test_at(1), committed_at: Val(store_lifecycle_test_at(2)), tombstoned_at: None, metadata: RootMetadata.empty(), revision: 1, legacy: false}
     }
     store_lifecycle_validate_state_bounds(state) ?? panic("bounds")
     if store_lifecycle_validate_snapshot_wire(state) == {
-        .Ok(_) -> panic("an oversized state must be refused")
+        .Ok(_) -> { panic("an oversized state must be refused") }
         .Err(error) -> assert(error.message().contains("cannot fit"))
     }
 }

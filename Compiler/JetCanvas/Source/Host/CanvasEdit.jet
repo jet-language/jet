@@ -9,7 +9,9 @@ use {
 }
 
 CANVAS_EDIT_SCHEMA_VERSION: 1
+
 CANVAS_PROJECT_SCHEMA_VERSION: 1
+
 // The receipts a session keeps; the oldest goes first.
 CANVAS_HOST_MAX_RECEIPTS: 128
 
@@ -53,12 +55,13 @@ CanvasEdit: struct {
 }
 
 CanvasEditStep: enum {
-    // Refused and answered; the receipt is kept.
     Answered
-    // `candidate` is the text the dev loop checks before it replaces
-    // `edit.before`; for `noop` the two texts are the same.
     Admitted(edit: CanvasEdit, candidate: String)
 }
+
+// Refused and answered; the receipt is kept.
+// `candidate` is the text the dev loop checks before it replaces
+// `edit.before`; for `noop` the two texts are the same.
 
 // One projected source-truth file of the project document: its path from the
 // project root, its source revision, and its kind ("package", "workspace",
@@ -82,21 +85,35 @@ canvas_host_edit_admit: fn(state: Shared<CanvasHostState>, taken: CanvasHostEdit
     entry: canvas_host_entry_path(state)
     before: read_source_without_symlinks(entry) ?? return canvas_host_edit_refused(state, reply, op, revision, client, canvas_edit_error("io", err.message))
     current: source_revision(before)
-    if canvas_edit_text(request, "revision") == None -> return canvas_host_edit_refused(state, reply, op, revision, client, canvas_edit_error("bad_request", "missing `revision`"))
-    if revision != current -> return canvas_host_edit_refused(state, reply, op, revision, client, canvas_edit_conflict("source changed since this Canvas graph was drawn", current))
-    schema: foundation_json_integer(canvas_edit_field(request, "schema_version") ?? Dyn.Null) ?? 0
-    if schema != CANVAS_EDIT_SCHEMA_VERSION -> return canvas_host_edit_refused(state, reply, op, revision, client, canvas_edit_error("schema", "Canvas edit schema_version must be 1"))
-    if canvas_edit_text(request, "source_id") == .Val(wanted) {
-        if wanted != canvas_host_entry_source(state) -> return canvas_host_edit_refused(state, reply, op, revision, client, canvas_edit_error("not_found", "Canvas source_id must name a projected Jet source file"))
+    if canvas_edit_text(request, "revision") == None {
+        return canvas_host_edit_refused(state, reply, op, revision, client, canvas_edit_error("bad_request", "missing `revision`"))
     }
-    if op == "" -> return canvas_host_edit_refused(state, reply, op, revision, client, canvas_edit_error("bad_request", "missing `op`"))
+    if revision != current {
+        return canvas_host_edit_refused(state, reply, op, revision, client, canvas_edit_conflict("source changed since this Canvas graph was drawn", current))
+    }
+    schema: foundation_json_integer(canvas_edit_field(request, "schema_version") ?? Dyn.Null) ?? 0
+    if schema != CANVAS_EDIT_SCHEMA_VERSION {
+        return canvas_host_edit_refused(state, reply, op, revision, client, canvas_edit_error("schema", "Canvas edit schema_version must be 1"))
+    }
+    if canvas_edit_text(request, "source_id") == .Val(wanted) {
+        if wanted != canvas_host_entry_source(state) {
+            return canvas_host_edit_refused(state, reply, op, revision, client, canvas_edit_error("not_found", "Canvas source_id must name a projected Jet source file"))
+        }
+    }
+    if op == "" {
+        return canvas_host_edit_refused(state, reply, op, revision, client, canvas_edit_error("bad_request", "missing `op`"))
+    }
     if op == "noop" {
-        same: before.copy() // copy: a noop checks the text it keeps
+        same: before.copy()  // copy: a noop checks the text it keeps
         return CanvasEditStep.Admitted{edit: CanvasEdit{op: op, revision: revision, client: client, before: before, format: false, reply: reply}, candidate: same}
     }
-    if op != "replace_source" -> return canvas_host_edit_refused(state, reply, op, revision, client, canvas_edit_error("unsupported", "Canvas edit operation `{op}` is not one this jet applies; it applies `noop` and `replace_source`"))
+    if op != "replace_source" {
+        return canvas_host_edit_refused(state, reply, op, revision, client, canvas_edit_error("unsupported", "Canvas edit operation `{op}` is not one this jet applies; it applies `noop` and `replace_source`"))
+    }
     if canvas_edit_text(request, "source_edit") == .Val(kind) {
-        if kind == "exec_convergence" -> return canvas_host_edit_refused(state, reply, op, revision, client, canvas_edit_error("unsupported", "Canvas `replace_source` with `source_edit:\"exec_convergence\"` is not built in this jet yet"))
+        if kind == "exec_convergence" {
+            return canvas_host_edit_refused(state, reply, op, revision, client, canvas_edit_error("unsupported", "Canvas `replace_source` with `source_edit:\"exec_convergence\"` is not built in this jet yet"))
+        }
     }
     source: canvas_edit_text(request, "source") ?? return canvas_host_edit_refused(state, reply, op, revision, client, canvas_edit_error("bad_request", "missing `source`"))
     // An undo restores the exact text it saved; every other replacement is
@@ -145,13 +162,13 @@ canvas_host_edit_accept: fn(state: Shared<CanvasHostState>, edit: CanvasEdit, ca
     changed: candidate != edit.before
     revision: source_revision(candidate)
     payload: "{{\"protocol\":\"jet.canvas.edit\",\"schema_version\":{CANVAS_EDIT_SCHEMA_VERSION},\"changed\":{json_bool(changed)},\"revision\":{json_str(revision)},\"source_text\":{json_str(candidate)}}}"
-    canvas_host_note_receipt(state, CanvasHostReceipt{kind: edit.op.copy(), status: "accepted", before: edit.revision.copy(), after: revision, client: edit.client.copy()}) // copy: the receipt keeps its own words
+    canvas_host_note_receipt(state, CanvasHostReceipt{kind: edit.op.copy(), status: "accepted", before: edit.revision.copy(), after: revision, client: edit.client.copy()})  // copy: the receipt keeps its own words
     edit.reply.send(CanvasHostReply{status: 200, body: canvas_machine_output("canvas.edit", true, payload)})
 }
 
 canvas_host_edit_refused: fn(state: Shared<CanvasHostState>, reply: Sender<CanvasHostReply>, op: String, revision: String, client: String, payload: String) -> CanvasEditStep {
     after: canvas_host_disk_revision(canvas_host_entry_path(state))
-    canvas_host_note_receipt(state, CanvasHostReceipt{kind: op.copy(), status: "refused", before: revision.copy(), after: after, client: client.copy()}) // copy: the receipt keeps its own words
+    canvas_host_note_receipt(state, CanvasHostReceipt{kind: op.copy(), status: "refused", before: revision.copy(), after: after, client: client.copy()})  // copy: the receipt keeps its own words
     reply.send(CanvasHostReply{status: 409, body: canvas_machine_output("canvas.edit", false, payload)})
     CanvasEditStep.Answered
 }
@@ -160,12 +177,14 @@ canvas_host_note_receipt: fn(state: Shared<CanvasHostState>, receipt: &&CanvasHo
     permit := state.guard_edit()
     permit.value.receipts.push(receipt)
     count: permit.value.receipts.len()
-    if count > CANVAS_HOST_MAX_RECEIPTS -> permit.value.receipts = permit.value.receipts[count - CANVAS_HOST_MAX_RECEIPTS..<count]
+    if count > CANVAS_HOST_MAX_RECEIPTS {
+        permit.value.receipts = permit.value.receipts[count - CANVAS_HOST_MAX_RECEIPTS..<count]
+    }
 }
 
 canvas_host_entry_path: fn(state: Shared<CanvasHostState>) -> String {
     permit: state.guard_read()
-    permit.value.entry.copy() // copy: the answer outlives the read
+    permit.value.entry.copy()  // copy: the answer outlives the read
 }
 
 // The entry's revision on disk now; "missing" when it cannot be read.
@@ -186,7 +205,7 @@ canvas_edit_conflict: fn(message: String, current_revision: String) -> String Ne
 canvas_edit_field: fn(request: Dyn, key: String) -> Dyn? Never! {
     if request == .Object(fields) {
         loop field in fields {
-            if field.key == key -> return Val(field.value.copy()) // copy: the member outlives the request
+            if field.key == key -> return Val(field.value.copy())  // copy: the member outlives the request
         }
     }
     None
@@ -245,7 +264,7 @@ canvas_host_project: fn(state: Shared<CanvasHostState>) -> HTTPResponse {
         starting: canvas_machine_output("canvas.project", false, "{{\"protocol\":\"jet.canvas.project\",\"schema_version\":{CANVAS_PROJECT_SCHEMA_VERSION},\"ok\":false,\"kind\":\"starting\",\"message\":{json_str("Canvas has not read the project of `{permit.value.entry}` yet")}}}")
         return canvas_host_response(409, CANVAS_HOST_JSON, starting)
     }
-    canvas_host_response(200, CANVAS_HOST_JSON, permit.value.project.copy()) // copy: the session keeps the document it serves
+    canvas_host_response(200, CANVAS_HOST_JSON, permit.value.project.copy())  // copy: the session keeps the document it serves
 }
 
 // Hand a transaction (or, on the `/debug` route, a debug request) to the dev

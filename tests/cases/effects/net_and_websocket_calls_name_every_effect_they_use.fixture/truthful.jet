@@ -8,7 +8,11 @@ use {
 }
 
 host: fn() -[Env, FS.Read]> String { net.gethostname() }
+
 addr: fn() -[Net, Time.Wait]> SocketAddr NetError! { net.socket_addr("localhost", 80) }
+
 dial: fn() -[Net, Time.Wait]> WsConn WsError! { ws.connect("ws://127.0.0.1:1/") }
+
 take_over: fn(req: HTTPRequest) -[Net, Time.Wait]> WsConn WsError! { ws.upgrade(req) }
+
 run: fn() {}

@@ -1,8 +1,9 @@
-
-Snapshot: struct { value: Int }
+Snapshot: struct {
+    value: Int
+}
 
 run: fn() {
-    source := Snapshot{ value: 41 }
+    source := Snapshot{value: 41}
     frozen: freeze(source)
     twice: freeze(freeze(source))
     task.group snapshots {
@@ -12,7 +13,7 @@ run: fn() {
         print(second.join() ?? 0)
     }
 
-    owned := Snapshot{ value: 7 }
+    owned := Snapshot{value: 7}
     task.group moved {
         child: task &&owned { owned.value }
         print(child.join() ?? 0)

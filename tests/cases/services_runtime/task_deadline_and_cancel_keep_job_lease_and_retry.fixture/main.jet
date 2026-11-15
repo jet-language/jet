@@ -12,8 +12,10 @@ package: {
     authority: { allow: [DB, Env, FS, IO, Mem.Alloc, Rand, Time, Time.Wait] }
 }
 
-use jobs: core.jobs
-use time: core.time
+use {
+    jobs: core.jobs
+    time: core.time
+}
 
 #Job(.Dev) process: fn(payload: String) { print("job:{payload}") }
 
@@ -24,9 +26,15 @@ work: fn() -> Int Never! {
 
 label: fn(error: TaskFailure) -> String {
     if error == {
-        .Panicked(reason) -> { return "panicked: {reason}" }
-        .DeadlineBlown -> { return "deadline" }
-        .Cancelled -> { return "cancelled" }
+        .Panicked(reason) -> {
+            return "panicked: {reason}"
+        }
+        .DeadlineBlown -> {
+            return "deadline"
+        }
+        .Cancelled -> {
+            return "cancelled"
+        }
     }
 }
 
@@ -61,14 +69,14 @@ run: fn() {
     second: (queue.claim("w2", 1) ?? panic("claim"))[0]
     print("retried claim: attempt {second.receipt.attempts}")
     if queue.fail(first, failure) == {
-        .Ok(_) -> print("the first claim's lease: still honoured")
+        .Ok(_) -> { print("the first claim's lease: still honoured") }
         .Err(_) -> print("the first claim's lease: refused")
     }
 
     cancelled: task work()
     cancelled.cancel()
     if cancelled.join() == {
-        .Ok(_) -> print("worker 2: finished")
+        .Ok(_) -> { print("worker 2: finished") }
         .Err(error) -> print("worker 2: {label(error)}")
     }
     queue.recover_expired() ?? panic("recover")

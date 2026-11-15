@@ -54,7 +54,7 @@ nix_test_request_refused: fn(identity: NixFallbackIdentity, input: String, syste
     assert(provenance.contains("\"lock_sha256\""))
     with_unknown: provenance.replace(",\"lock_sha256\"", ",\"unexpected\":\"value\",\"lock_sha256\"")
     if NixFallbackIdentity.from_provenance(with_unknown) == {
-        .Ok(_) -> panic("an unknown provenance field must be rejected")
+        .Ok(_) -> { panic("an unknown provenance field must be rejected") }
         .Err(_) -> {}
     }
     files.remove_all(root) ?? panic("scratch cleanup")
@@ -79,7 +79,7 @@ nix_test_request_refused: fn(identity: NixFallbackIdentity, input: String, syste
     nix_test_write_project(root, "nixpkgs#nixos-unstable")
     executable: files.join(root, "missing-nix")
     if NixFallbackIdentity.project_lock_sha256(root, "nixpkgs") == {
-        .Ok(_) -> panic("an unpinned lock input must be rejected")
+        .Ok(_) -> { panic("an unpinned lock input must be rejected") }
         .Err(error) -> assert(error.message().contains("ambient or unpinned"))
     }
     assert(!files.exists(executable))
@@ -87,7 +87,9 @@ nix_test_request_refused: fn(identity: NixFallbackIdentity, input: String, syste
 }
 
 #Test("nix project binding reads version from the bound executable") {
-    if sys.family() == "windows" -> return
+    if sys.family() == "windows" {
+        return
+    }
     root: nix_test_fallback_root("bound")
     nix_test_write_project(root, "{NIX_LOCKED_NIXPKGS_PREFIX}{NIX_TEST_FALLBACK_REVISION}")
     executable: files.join(root, "nix")

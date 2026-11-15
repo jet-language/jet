@@ -25,6 +25,7 @@ use {
 }
 
 JET_CLI_DOCTEST_OPEN: "\tjet-doctest\t"
+
 JET_CLI_DOCTEST_CLOSE: "\tjet-doctest-end\t\n"
 
 // One tested file with doctests: its path, its path as claims and
@@ -61,7 +62,9 @@ jet_cli_doctest_file: fn(path: String, shown: String, source: String) -> JetCLID
 jet_cli_doctest_item: fn(lines: [String], fence_line: Int) -> String Never! {
     at := fence_line
     loop at < lines.len() && lines[at].trim().starts_with(DOC_COMMENT_PREFIX) -> at += 1
-    loop at < lines.len() && lines[at].trim().starts_with("#") && !lines[at].trim().contains(" ") -> at += 1
+    loop at < lines.len() && lines[at].trim().starts_with("#") && !lines[at].trim().contains(" ") {
+        at += 1
+    }
     if at >= lines.len() -> return ""
     inner: jet_cli_doctest_declared(lines[at])
     if inner == "" || !(lines[at].starts_with(" ") || lines[at].starts_with("\t")) -> return inner
@@ -101,7 +104,9 @@ jet_cli_doctest_overlay: fn(snapshot: &JetDriverAuthorizedSourceSnapshot, packag
     }
     loop doctests in found {
         loop index in 0..<snapshot.roots[0].files.len() {
-            if snapshot.roots[0].files[index].path == doctests.path -> snapshot.roots[0].files[index].source = jet_cli_doctest_source(doctests)
+            if snapshot.roots[0].files[index].path == doctests.path {
+                snapshot.roots[0].files[index].source = jet_cli_doctest_source(doctests)
+            }
         }
     }
     found

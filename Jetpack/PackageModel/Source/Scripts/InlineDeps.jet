@@ -19,7 +19,10 @@
 use {
     jet_foundation.[Diagnostic, ENV_JET_INLINE_DEPS_FIXTURES, ImportDecl, Program, Span, diagnostic_from_registry]
     jetpack_foundation.[
-        FOUNDATION_U64_SHIFTS, TreeHashError, foundation_sha256_file_hex, foundation_try_tree_hash,
+        FOUNDATION_U64_SHIFTS,
+        TreeHashError,
+        foundation_sha256_file_hex,
+        foundation_try_tree_hash,
     ]
     files: core.files
     sys: core.sys
@@ -45,7 +48,9 @@ pkg_inline_deps_collect_from_imports: fn(imports: [ImportDecl]) -> [InlineDep] N
     loop decl in imports {
         version: decl.inline_version ?? next
         if decl.kind == {
-            .Module(name, _) -> out.push(InlineDep{name: name, selector: version.text, span: version.span})
+            .Module(name, _) -> {
+                out.push(InlineDep{name: name, selector: version.text, span: version.span})
+            }
             .File(_, _) | .Unqualified(_, _, _, _, _) -> {}
         }
     }
@@ -142,16 +147,17 @@ InlineDepResolved: struct {
 // Why an inline dependency did not resolve (E1253's reason half).
 #Error
 InlineDepUnresolved: enum {
-    // The import name would escape the local dependency root.
     InvalidName
-    // The selector is not the supported dotted numeric form.
     InvalidSelector
-    // No local source has ever heard of the package.
     UnknownPackage
-    // The package is known locally, but no version satisfies the selector.
     NoMatch
-    // A matching source exists, but its contents cannot be hashed safely.
     InvalidTree(TreeHashError)
+
+    // The import name would escape the local dependency root.
+    // The selector is not the supported dotted numeric form.
+    // No local source has ever heard of the package.
+    // The package is known locally, but no version satisfies the selector.
+    // A matching source exists, but its contents cannot be hashed safely.
 
     message: fn(self) -> String Never! {
         if self == {
@@ -171,10 +177,12 @@ InlineDepUnresolved: enum {
 // matching version, no later root is consulted.
 pkg_inline_deps_resolve: fn(dep: InlineDep, script_dir: String, batteries: String?) -[FS, Env]> InlineDepResolved InlineDepUnresolved! {
     if !pkg_inline_deps_valid_package_name(dep.name) -> return Err(InlineDepUnresolved.InvalidName)
-    if pkg_inline_deps_numeric_version(dep.selector) == None -> return Err(InlineDepUnresolved.InvalidSelector)
+    if pkg_inline_deps_numeric_version(dep.selector) == None {
+        return Err(InlineDepUnresolved.InvalidSelector)
+    }
     roots := [String]{files.join(files.join(script_dir, ".jet"), "inline-deps")}
     if sys.get(PKG_INLINE_DEPS_FIXTURES_ENV) == {
-        .Val(fixtures) -> roots.push(fixtures)
+        .Val(fixtures) -> { roots.push(fixtures) }
         .None -> {}
     }
     loop root in roots {
@@ -184,15 +192,21 @@ pkg_inline_deps_resolve: fn(dep: InlineDep, script_dir: String, batteries: Strin
         // a hostile-tree failure stays typed for the caller.
         content_hash: if foundation_try_tree_hash(chosen.dir) == {
             .Ok(hash) -> hash
-            .Err(error) -> { return Err(InlineDepUnresolved.InvalidTree(error)) }
+            .Err(error) -> {
+                return Err(InlineDepUnresolved.InvalidTree(error))
+            }
         }
         return Ok(InlineDepResolved{name: dep.name, selector: dep.selector, resolved_version: chosen.version, dir: chosen.dir, content_hash: content_hash})
     }
     battery: pkg_inline_deps_battery(batteries ?? return Err(InlineDepUnresolved.UnknownPackage), dep.name) ?? return Err(InlineDepUnresolved.UnknownPackage)
-    if !pkg_inline_deps_version_matches(dep.selector, battery.version) -> return Err(InlineDepUnresolved.NoMatch)
+    if !pkg_inline_deps_version_matches(dep.selector, battery.version) {
+        return Err(InlineDepUnresolved.NoMatch)
+    }
     content_hash: if foundation_try_tree_hash(battery.dir) == {
         .Ok(hash) -> hash
-        .Err(error) -> { return Err(InlineDepUnresolved.InvalidTree(error)) }
+        .Err(error) -> {
+            return Err(InlineDepUnresolved.InvalidTree(error))
+        }
     }
     Ok(InlineDepResolved{name: dep.name, selector: dep.selector, resolved_version: battery.version, dir: battery.dir, content_hash: content_hash})
 }
@@ -215,33 +229,49 @@ pkg_inline_deps_list_versions: fn(root: String, name: String) -[FS]> [(version: 
     root_stat: if files.stat(root) == {
         .Ok(stat) -> stat
         .Err(error) -> if error == {
-            .NotFound(_) -> { return Ok(None) }
-            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> { return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: root, detail: "{error}"})) }
+            .NotFound(_) -> {
+                return Ok(None)
+            }
+            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
+                return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: root, detail: "{error}"}))
+            }
         }
     }
-    if root_stat.is_symlink -> return Err(InlineDepUnresolved.InvalidTree(TreeHashError.Symlink(root)))
+    if root_stat.is_symlink {
+        return Err(InlineDepUnresolved.InvalidTree(TreeHashError.Symlink(root)))
+    }
     if !root_stat.is_dir -> return Ok(None)
 
     package_dir: files.join(root, name)
     package_stat: if files.stat(package_dir) == {
         .Ok(stat) -> stat
         .Err(error) -> if error == {
-            .NotFound(_) -> { return Ok(None) }
-            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> { return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: package_dir, detail: "{error}"})) }
+            .NotFound(_) -> {
+                return Ok(None)
+            }
+            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
+                return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: package_dir, detail: "{error}"}))
+            }
         }
     }
-    if package_stat.is_symlink -> return Err(InlineDepUnresolved.InvalidTree(TreeHashError.Symlink(package_dir)))
+    if package_stat.is_symlink {
+        return Err(InlineDepUnresolved.InvalidTree(TreeHashError.Symlink(package_dir)))
+    }
     if !package_stat.is_dir -> return Ok(None)
 
     entries: if files.list_dir(package_dir) == {
         .Ok(listed) -> listed
-        .Err(error) -> { return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: package_dir, detail: "{error}"})) }
+        .Err(error) -> {
+            return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: package_dir, detail: "{error}"}))
+        }
     }
     out := [(version: String, dir: String)]{}
     loop entry in entries {
         stat: if files.stat(entry.path) == {
             .Ok(found) -> found
-            .Err(error) -> { return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: entry.path, detail: "{error}"})) }
+            .Err(error) -> {
+                return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: entry.path, detail: "{error}"}))
+            }
         }
         if stat.is_dir || stat.is_symlink -> out.push((version: entry.name, dir: entry.path))
     }
@@ -302,7 +332,9 @@ pkg_inline_deps_numeric_version: fn(value: String) -> [U64]? Never! {
         loop byte in digits.bytes() {
             if byte < (U8{48}) || byte > (U8{57}) -> return None
             digit: U64{byte - U8{48}}
-            if number > (U64{1844674407370955161}) || (number == (U64{1844674407370955161}) && digit > (U64{5})) -> return None
+            if number > (U64{1844674407370955161}) || (number == (U64{1844674407370955161}) && digit > (U64{5})) {
+                return None
+            }
             number = number * U64{10} + digit
         }
         out.push(number)

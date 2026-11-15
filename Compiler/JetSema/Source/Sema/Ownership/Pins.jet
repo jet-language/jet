@@ -16,9 +16,7 @@ use jet_foundation.[
 // passed plain is that window.
 sema_pin_write_window: fn(argument: CallArg) -> Bool Never! {
     if argument.convention == AccessConvention.Write -> return true
-    if argument.expr == .Place(_, access, _, _) {
-        return access == PlaceAccess.Write
-    }
+    if argument.expr == .Place(_, access, _, _) -> return access == PlaceAccess.Write
     argument.convention == AccessConvention.Read && sema_receiver_mark_place_root(argument.expr) != None
 }
 
@@ -30,16 +28,16 @@ sema_pin_check_call: fn(args: [CallArg], diagnostics: &[Diagnostic]) -> Bool {
     false
 }
 
-sema_pin_type: fn(ty: Type) -> Bool Never! {
-    sema_pin_target(ty) != None
-}
+sema_pin_type: fn(ty: Type) -> Bool Never! { sema_pin_target(ty) != None }
 
 // The pinned type `T` of a `Pin<T>`, spelled bare (`mem.pin`'s result) or as
 // the Core nominal `<corelib>/core.mem::Pin` (a written annotation); None for
 // any other type.
 sema_pin_target: fn(ty: Type) -> Type? Never! {
     if sema_expr_unwrap_tag(ty) == .Apply(name, args) {
-        if (name == "Pin" || name == "<corelib>/core.mem::Pin") && args.len() == 1 -> return Val(args[0].copy())
+        if (name == "Pin" || name == "<corelib>/core.mem::Pin") && args.len() == 1 {
+            return Val(args[0].copy())
+        }
     }
     None
 }

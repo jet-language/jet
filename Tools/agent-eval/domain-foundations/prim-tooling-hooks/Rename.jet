@@ -55,9 +55,7 @@ occurrences: fn(bytes: [U8], needle: String) -> Int Never! {
         if matched {
             count += 1
             at += pattern.len()
-        } else {
-            at += 1
-        }
+        } else { at += 1 }
     }
     count
 }
@@ -74,7 +72,9 @@ rename_probe: fn() -[Env, Exec, FS, Time.Wait]> String Err! {
     out := [U8]{}
     at := 0
     loop span in spans {
-        if span.start < at || span.end > raw.len() || span.end < span.start -> return Err("token span {span.start}..{span.end} is outside the source")
+        if span.start < at || span.end > raw.len() || span.end < span.start {
+            return Err("token span {span.start}..{span.end} is outside the source")
+        }
         loop byte in raw[at..<span.start] -> out.push(byte)
         loop byte in "new_name".bytes() -> out.push(byte)
         at = span.end
@@ -83,7 +83,9 @@ rename_probe: fn() -[Env, Exec, FS, Time.Wait]> String Err! {
     out_path: "{root}/{PROBE}/pkg/renamed.jet"
     files.write_bytes(out_path, out) ?? return Err("cannot write {out_path}: {err}")
     if occurrences(out, "new_name") != 2 -> return Err("rename count")
-    if occurrences(out, "old_name text") == 0 || occurrences(out, "\"old_name literal\"") == 0 -> return Err("trivia changed")
+    if occurrences(out, "old_name text") == 0 || occurrences(out, "\"old_name literal\"") == 0 {
+        return Err("trivia changed")
+    }
     Ok("renamed identifiers={spans.len()}; preserved comment/literal=true; output={out_path}")
 }
 

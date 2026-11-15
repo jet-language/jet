@@ -65,7 +65,9 @@ lsp_target_retained_elsewhere: fn(state: LSPDiagnosticState, root: String, targe
 
 lsp_checked_module_paths: fn(checked: LSPChecked) -> [String] Never! {
     paths := [String]{}
-    loop module_ref in checked.modules -> paths.push(if module_ref.physical_path != "" -> module_ref.physical_path else -> module_ref.path)
+    loop module_ref in checked.modules {
+        paths.push(if module_ref.physical_path != "" -> module_ref.physical_path else -> module_ref.path)
+    }
     paths
 }
 
@@ -96,7 +98,9 @@ lsp_diagnostic_groups: fn(state: LSPDiagnosticState, uri: String, checked: LSPCh
         loop (target, _) in previous {
             if groups.has_key(target) -> next
             still_checked: lsp_reads_any(read, [String]{lsp_uri_to_path(target)})
-            if still_checked || !lsp_target_retained_elsewhere(state, uri, target) -> groups[target] = [Int]{}
+            if still_checked || !lsp_target_retained_elsewhere(state, uri, target) {
+                groups[target] = [Int]{}
+            }
         }
     }
     groups
@@ -104,7 +108,9 @@ lsp_diagnostic_groups: fn(state: LSPDiagnosticState, uri: String, checked: LSPCh
 
 lsp_publish_diagnostics: fn(uri: String, src: String, version: Int?, diagnostics: [Diagnostic], indices: [Int]) -> String Never! {
     items := [String]{}
-    loop index in indices -> items.push(lsp_diagnostic_json(diagnostics[index], src, uri, diagnostics))
+    loop index in indices {
+        items.push(lsp_diagnostic_json(diagnostics[index], src, uri, diagnostics))
+    }
     version_json: if version == .Val(value) -> ",\"version\":{value}" else -> ""
     "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{{\"uri\":{foundation_json_quote(uri)}{version_json},\"diagnostics\":[{items.join(",")}]}}}}"
 }
@@ -148,7 +154,9 @@ lsp_related_information_json: fn(diagnostic: Diagnostic, uri: String, src: Strin
             if !diagnostic_cause_matches(identity, cause) -> next
             span: cause.span ?? next
             if cause.origin == {
-                .Val(origin) -> related.push(lsp_related_location_json(lsp_path_to_uri(origin.path), origin.source, span, cause.what))
+                .Val(origin) -> {
+                    related.push(lsp_related_location_json(lsp_path_to_uri(origin.path), origin.source, span, cause.what))
+                }
                 .None -> related.push(lsp_related_location_json(uri, src, span, cause.what))
             }
             break
@@ -168,7 +176,9 @@ lsp_retain_document_diagnostics: fn(diagnostics: [Diagnostic], path: String, tex
     retained := [Diagnostic]{}
     loop diagnostic in diagnostics {
         keep := true
-        if diagnostic.origin == .Val(origin) -> keep = lsp_source_paths_equal(origin.path, path) && origin.source == text
+        if diagnostic.origin == .Val(origin) {
+            keep = lsp_source_paths_equal(origin.path, path) && origin.source == text
+        }
         if keep -> retained.push(diagnostic.copy())
     }
     retained
@@ -209,7 +219,9 @@ lsp_document_group_json: fn(state: LSPDiagnosticState, target: String, diagnosti
             return lsp_publish_diagnostics(target, origin.source, version, diagnostics, indices)
         }
     }
-    if state.docs.get(target) == .Val(open) -> return lsp_publish_diagnostics(target, open.text, Val(open.version), diagnostics, indices)
+    if state.docs.get(target) == .Val(open) {
+        return lsp_publish_diagnostics(target, open.text, Val(open.version), diagnostics, indices)
+    }
     lsp_publish_diagnostics(target, "", None, diagnostics, indices)
 }
 

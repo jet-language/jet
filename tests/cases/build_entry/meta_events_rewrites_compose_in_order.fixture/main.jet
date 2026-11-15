@@ -13,8 +13,7 @@ Timed: struct {
 #[Traced, Timed]
 load: fn() -> Int { 1 }
 
-#Traced
-plain: fn() -> Int { 2 }
+#Traced plain: fn() -> Int { 2 }
 
 // Prints "enter" before each traced function's body.
 trace_install: fn(meta: Compiler) {
@@ -22,10 +21,13 @@ trace_install: fn(meta: Compiler) {
         watch: .Functions{marked: Traced{}},
         fn(event) {
             if event == .Checked(.Function(f)) {
-                meta.rewrite_body(f, #code {
-                    print("enter")
-                    #{f.body}
-                })
+                meta.rewrite_body(
+                    f,
+                    #code {
+                        print("enter")
+                        #{f.body}
+                    },
+                )
             }
         },
     )
@@ -37,10 +39,13 @@ timer_install: fn(meta: Compiler) {
         watch: .Functions{marked: Timed{}},
         fn(event) {
             if event == .Checked(.Function(f)) {
-                meta.rewrite_body(f, #code {
-                    print("time start")
-                    #{f.body}
-                })
+                meta.rewrite_body(
+                    f,
+                    #code {
+                        print("time start")
+                        #{f.body}
+                    },
+                )
             }
         },
     )

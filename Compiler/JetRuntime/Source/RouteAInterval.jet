@@ -6,9 +6,17 @@
 // receiver handle is the native channel state (Channel.jet State160).
 
 // Checked FunctionAddress intrinsics in the canonical RuntimeLibrary table.
-rt_interval_worker_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
-rt_after_worker_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
-rt_timer_int_drop_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+rt_interval_worker_address: fn() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
+rt_after_worker_address: fn() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
+rt_timer_int_drop_address: fn() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
 
 // Drops one queued Int when the channel is released with values unreceived
 // (an address target returns a word; the drop has none to give).
@@ -39,7 +47,9 @@ timer_send: fn(channel: I64, slot: I64, meta: I64) -> Bool {
         sync_mutex_unlock(channel)
         return false
     }
-    if (sync_load(wrapping(channel + I64{56})) == I64{0}) -> sync_store(wrapping(channel + I64{56}), coll_meta_copy(meta))
+    if (sync_load(wrapping(channel + I64{56})) == I64{0}) {
+        sync_store(wrapping(channel + I64{56}), coll_meta_copy(meta))
+    }
     length: sync_load(wrapping(channel + I64{16}))
     channel_grow(channel, length + sync_load(wrapping(channel + I64{80})) + I64{1})
     target: wrapping(sync_load(wrapping(channel + I64{32})) + ((sync_load(wrapping(channel + I64{40})) + length) % sync_load(wrapping(channel + I64{24}))) * coll_size(meta))
@@ -66,7 +76,7 @@ timer_start: fn(kind: I64, delay: I64, value: I64, meta: I64, worker: I64) -> I6
     sync_store(wrapping(job + I64{16}), if (world == I64{0}) -> I64{0} else -> jet_rt_world_clone(world))
     sync_store(wrapping(job + I64{24}), value)
     sync_store(wrapping(job + I64{32}), meta)
-    if (world != I64{0}) -> world_task_spawned(world)
+    if (world != I64{0}) { world_task_spawned(world) }
     handle: thread_spawn(worker, job)
     if (handle < I64{0}) {
         scheduler_start_failed()
@@ -78,7 +88,7 @@ timer_start: fn(kind: I64, delay: I64, value: I64, meta: I64, worker: I64) -> I6
 
 timer_worker_enter: fn(job: I64, save: I64) {
     world: sync_load(wrapping(job + I64{16}))
-    if (world != I64{0}) -> world_scope_enter(world, save, true)
+    if (world != I64{0}) { world_scope_enter(world, save, true) }
 }
 
 timer_worker_leave: fn(job: I64, save: I64) {
@@ -123,9 +133,7 @@ timer_worker_leave: fn(job: I64, save: I64) {
     jet_scheduler_sleep_ms(sync_load(wrapping(job + I64{8})))
     value: sync_load(wrapping(job + I64{24}))
     meta: sync_load(wrapping(job + I64{32}))
-    if timer_send(sync_load(job), value, meta) {
-        jet_rt_free_8(value, coll_size(meta))
-    } else {
+    if timer_send(sync_load(job), value, meta) -> jet_rt_free_8(value, coll_size(meta)) else {
         coll_slot_free(value, meta)
     }
     coll_meta_drop(meta)
@@ -135,7 +143,7 @@ timer_worker_leave: fn(job: I64, save: I64) {
 
 #Export(c) interval: fn(ms: I64) -> I64 {
     native: jet_int_owned_to_i64(ms)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     delay: if (native < I64{1}) -> I64{1} else -> native
     timer_start(I64{2}, delay, I64{0}, I64{0}, rt_interval_worker_address())
 }

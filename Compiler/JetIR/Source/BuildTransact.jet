@@ -10,7 +10,6 @@
 // leaving the block (ir_tx_unwind) and a stop (a panic, a cancellation,
 // process.exit, os.stop: Build.jet ir_stop_return) restore the snapshots,
 // latest first, then drop the Stm and the handle before the exit's own drops.
-
 use jet_foundation.[Span, SymbolID, BodyCallArg, BodyContextGuard, CONTEXT_ON_STOP_KEY, NodeKind, BodyLambda, TLocal, TMethodRef, BodyPlace, TTransactionSnapshot, TTryConvert, Type, checked_generated_local, name_rows_set, name_rows_value, stable_id, StmtKind]
 
 // An open transaction: its handle and Stm slots (-1: none), its snapshots
@@ -57,7 +56,14 @@ IRTxFrame: struct {
 // A saved value: `local` gets `saved` (of type `saved_ty`) back on an early
 // exit, through `restore` of its Rollback implementation `rollback` when it
 // has one, else as a copy.
-IRTxSnapshot: struct { local: TLocal, ty: Type, saved: TLocal, saved_ty: Type, rollback: Type?, restore: TMethodRef? }
+IRTxSnapshot: struct {
+    local: TLocal
+    ty: Type
+    saved: TLocal
+    saved_ty: Type
+    rollback: Type?
+    restore: TMethodRef?
+}
 
 ir_transaction_row: fn(m: &IRModule) -> Int Never! {
     symbol: "jet_ir_transaction_drop"
@@ -128,9 +134,7 @@ ir_transaction_walk: fn(m: &IRModule, a: &IRBuilder, head: Int, run: Bool, guard
         ir_transaction_hook_call(m, a, node, boxed)
         a.stopping = stopping
         _: ir_runtime(m, a, "jet_rt_transaction_hook_leave", [Int]{frame}, -1)
-    } else if run {
-        ir_transaction_hook_call(m, a, node, boxed)
-    }
+    } else if run { ir_transaction_hook_call(m, a, node, boxed) }
     following: ir_load_word(m, a, node, 8)
     ir_closure_unref(m, a, boxed)
     size: ir_word_const(m, a, 24)
@@ -213,7 +217,9 @@ ir_transact: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, handle: TLocal?, snap
     b.transactions.push(IRTxFrame{handle: handle_slot, stm: stm_slot, snapshots: saved, loops: b.loops.len(), shield: false, deadline: -1})
     ir_stmts(m, p, b, body)
     _: b.transactions.pop()
-    if ir_failed(b) -> return
+    if ir_failed(b) {
+        return
+    }
     if handle_slot >= 0 {
         one: ir_word_const(m, b, 1)
         ir_emit(b.f, IROp.Store, -1, handle_slot, 0, one, b.line)
@@ -235,7 +241,9 @@ ir_shield: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int]) Never! {
     b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: b.loops.len(), shield: true, deadline: -1})
     ir_scope_open(b)
     ir_stmts(m, p, b, body)
-    if ir_failed(b) -> return
+    if ir_failed(b) {
+        return
+    }
     ir_scope_close(m, b)
     _: b.transactions.pop()
     _: ir_runtime(m, b, "jet_rt_session_shield_leave", [Int]{}, -1)
@@ -282,7 +290,9 @@ ir_live: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int]) Never! {
     b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: b.loops.len(), shield: false, deadline: -1, terminal: true})
     ir_scope_open(b)
     ir_stmts(m, p, b, body)
-    if ir_failed(b) -> return
+    if ir_failed(b) {
+        return
+    }
     ir_scope_close(m, b)
     _: b.transactions.pop()
     _: ir_runtime(m, b, "jet_term_mode_leave", [Int]{}, -1)
@@ -324,16 +334,22 @@ ir_context_block: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, guards: [BodyCon
             next
         }
         value: ir_expr(m, p, b, guard.value)
-        if ir_failed(b) -> return
+        if ir_failed(b) {
+            return
+        }
         if guard.key != "" {
             span: ir_body_node(p, b, guard.value).span
             held: if value < 0 || b.fresh[value] -> value else -> ir_copy_value(m, p, b, value, span)
-            if ir_failed(b) -> return
+            if ir_failed(b) {
+                return
+            }
             keys.push(guard.key)
             values.push(held)
             next
         }
-        if value < 0 -> return
+        if value < 0 {
+            return
+        }
         if guard.field == "allocator" && handler < 0 && arena < 0 && ir_context_arena(ir_untag(ir_ty(p, b, guard.value))) {
             arena = value
             arena_owned = b.fresh[value]
@@ -342,7 +358,9 @@ ir_context_block: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, guards: [BodyCon
         if guard.field == "allocator" && handler < 0 && arena < 0 && !ir_context_builtin(ir_untag(ir_ty(p, b, guard.value))) {
             span: ir_body_node(p, b, guard.value).span
             handler = if b.fresh[value] -> value else -> ir_copy_value(m, p, b, value, span)
-            if ir_failed(b) -> return
+            if ir_failed(b) {
+                return
+            }
             next
         }
         if (guard.field != "deadline_after_ns" && guard.field != "deadline_at_ns") || save >= 0 {
@@ -358,9 +376,7 @@ ir_context_block: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, guards: [BodyCon
         push: if guard.field == "deadline_at_ns" -> "jet_ctx_push_deadline_at_ns" else -> "jet_ctx_push_deadline_after_ns"
         _: ir_runtime(m, b, push, [Int]{nanos, save}, -1)
     }
-    loop index in 0..<keys.len() {
-        ir_context_push_value(m, p, b, keys[index], values[index])
-    }
+    loop index in 0..<keys.len() { ir_context_push_value(m, p, b, keys[index], values[index]) }
     carrier := -1
     young_slots: b.young_slots
     young_ops: b.young_ops
@@ -384,14 +400,20 @@ ir_context_block: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, guards: [BodyCon
         b.young_ops = b.f.op.len()
     }
     framed: save >= 0 || keys.len() > 0 || carrier >= 0
-    if framed -> b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: b.loops.len(), shield: false, deadline: save, values: keys.len(), allocator: carrier, bindings: b.bindings.len()})
+    if framed {
+        b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: b.loops.len(), shield: false, deadline: save, values: keys.len(), allocator: carrier, bindings: b.bindings.len()})
+    }
     ir_scope_open(b)
     ir_stmts(m, p, b, body)
     b.young_slots = young_slots
     b.young_ops = young_ops
-    if ir_failed(b) -> return
+    if ir_failed(b) {
+        return
+    }
     ir_scope_close(m, b)
-    if !framed -> return
+    if !framed {
+        return
+    }
     frame: b.transactions.pop() ?? return
     ir_tx_leave_scopes(m, b, frame)
 }
@@ -454,9 +476,7 @@ ir_context_push_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String
     ir_emit(b.f, IROp.Store, -1, node, 32, zero, b.line)
     ir_store_at(m, p, b, node, 40, value)
     if value >= 0 -> b.fresh[value] = false
-    if key == CONTEXT_ON_STOP_KEY {
-        _: ir_runtime(m, b, "jet_ctx_on_stop_arm", [Int]{}, -1)
-    }
+    if key == CONTEXT_ON_STOP_KEY -> _: ir_runtime(m, b, "jet_ctx_on_stop_arm", [Int]{}, -1)
     _: ir_runtime(m, b, "jet_ctx_value_push", [Int]{node}, -1)
 }
 
@@ -628,7 +648,9 @@ ir_tx_restore: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, snapshot: IRTxSnaps
 // then drops its Stm and its handle (the handle's drop runs the rollback
 // hooks), which are cleared so the exit's binding drops find null.
 ir_tx_unwind: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, loops: Int, span: Span) Never! {
-    if b.transactions.len() == 0 -> return
+    if b.transactions.len() == 0 {
+        return
+    }
     // A restore's own exits must not unwind again.
     open: b.transactions
     b.transactions = [IRTxFrame]{}
@@ -665,12 +687,8 @@ ir_tx_leave_scopes: fn(m: &IRModule, b: &IRBuilder, frame: IRTxFrame) Never! {
     if frame.allocator >= 0 {
         _: ir_runtime(m, b, "jet_ctx_pop_allocator", [Int]{frame.allocator}, -1)
     }
-    if frame.shield {
-        _: ir_runtime(m, b, "jet_rt_session_shield_leave", [Int]{}, -1)
-    }
-    if frame.deadline >= 0 {
-        _: ir_runtime(m, b, "jet_ctx_pop_deadline", [Int]{frame.deadline}, -1)
-    }
+    if frame.shield -> _: ir_runtime(m, b, "jet_rt_session_shield_leave", [Int]{}, -1)
+    if frame.deadline >= 0 -> _: ir_runtime(m, b, "jet_ctx_pop_deadline", [Int]{frame.deadline}, -1)
     if frame.values > 0 {
         count: ir_word_const(m, b, frame.values)
         _: ir_runtime(m, b, "jet_ctx_value_pop", [Int]{count}, -1)
@@ -681,9 +699,7 @@ ir_tx_leave_scopes: fn(m: &IRModule, b: &IRBuilder, frame: IRTxFrame) Never! {
     if frame.sentry_frame >= 0 {
         _: ir_runtime(m, b, "jet_rt_sentry_frame_leave", [Int]{frame.sentry_frame}, -1)
     }
-    if frame.terminal {
-        _: ir_runtime(m, b, "jet_term_mode_leave", [Int]{}, -1)
-    }
+    if frame.terminal -> _: ir_runtime(m, b, "jet_term_mode_leave", [Int]{}, -1)
     if frame.effect_scope >= 0 {
         _: ir_runtime(m, b, "jet_rt_effect_scope_leave", [Int]{frame.effect_scope}, -1)
     }
@@ -699,7 +715,9 @@ ir_tx_leave_scopes: fn(m: &IRModule, b: &IRBuilder, frame: IRTxFrame) Never! {
 // file and host reached against the frames in force (JetRuntime
 // Authority.jet "Effect-scope frames").
 ir_effect_scope_frame: fn(m: &IRModule, b: &IRBuilder, descriptor: String) Never! {
-    if descriptor == "" -> return
+    if descriptor == "" {
+        return
+    }
     loop frame in descriptor.split("\n\n") -> _ := ir_effect_scope_enter(m, b, frame, 0)
 }
 
@@ -711,7 +729,9 @@ ir_effect_scope_region: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int
     if b.row >= 0 {
         regions: p.functions[b.row].effect_scope_regions
         loop index in 0..<regions.len() {
-            if regions[index].span.start == span.start && regions[index].span.end == span.end -> found = index
+            if regions[index].span.start == span.start && regions[index].span.end == span.end {
+                found = index
+            }
         }
     }
     if found < 0 {
@@ -720,7 +740,9 @@ ir_effect_scope_region: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int
     }
     previous: ir_effect_scope_enter(m, b, p.functions[b.row].effect_scope_regions[found].descriptor, b.loops.len())
     ir_stmts(m, p, b, body)
-    if ir_failed(b) -> return
+    if ir_failed(b) {
+        return
+    }
     _: b.transactions.pop()
     _: ir_runtime(m, b, "jet_rt_effect_scope_leave", [Int]{previous}, -1)
 }
@@ -742,7 +764,9 @@ ir_effect_scope_enter: fn(m: &IRModule, b: &IRBuilder, descriptor: String, loops
 ir_tx_frames_hold_state: fn(frames: [IRTxFrame], base: Int) -> Bool Never! {
     loop index in base..<frames.len() {
         frame: frames[index]
-        if frame.handle >= 0 || frame.stm >= 0 || frame.snapshots.len() > 0 || frame.shield -> return true
+        if frame.handle >= 0 || frame.stm >= 0 || frame.snapshots.len() > 0 || frame.shield {
+            return true
+        }
     }
     false
 }
@@ -765,9 +789,13 @@ ir_tx_leave_sentries: fn(m: &IRModule, b: &IRBuilder, base: Int) Never! {
 // the open `#Context(allocator: a)` blocks' allocators (BuildMove.jet).
 ir_return_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span: Span) Never! {
     ir_contract_return(m, p, b, slot, span)
-    if ir_failed(b) -> return
+    if ir_failed(b) {
+        return
+    }
     ir_memo_file(m, p, b, slot, span)
-    if ir_failed(b) -> return
+    if ir_failed(b) {
+        return
+    }
     kept := slot
     if b.transactions.len() > 0 && slot >= 0 && !b.fresh[slot] && ir_kind_of(m, b, slot) != .Aggregate {
         if ir_box_row(m, b.f.slot_type[slot]) {
@@ -787,7 +815,9 @@ ir_return_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span: S
 // A `break`/`next` to the loop whose exit Block is `exit`: the transactions
 // opened inside that loop unwind.
 ir_tx_unwind_loop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, exit: Int, span: Span) Never! {
-    if b.transactions.len() == 0 -> return
+    if b.transactions.len() == 0 {
+        return
+    }
     depth := -1
     loop (index, frame) in b.loops {
         if frame.exit == exit -> depth = index + 1

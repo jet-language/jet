@@ -3,8 +3,11 @@
 // without canonical store identities fail closed.
 
 NIXEVAL_MAX_DERIVATION_ARGS: 256
+
 NIXEVAL_MAX_DERIVATION_ENV: 256
+
 NIXEVAL_MAX_DERIVATION_INPUTS: 256
+
 NIXEVAL_MAX_DERIVATION_OUTPUTS: 64
 
 nixeval_derivation_reserved_fields: fn() -> [String] Never! {
@@ -60,14 +63,14 @@ impl NixEvaluator {
 
     derivation_from_value: fn(&self, value: NixEvalValue, strict: Bool) -> NixEvalValue NixEvalError! {
         fields: value.attr_fields() ?? return Err(NixEvalError.TypeMismatch{expected: "derivation attribute set", actual: value.type_name()})
-        if !strict -> return Ok(NixEvalValue.Derivation{fields, request: None})
+        if !strict -> return Ok(NixEvalValue.Derivation{fields: fields, request: None})
         request: self.derivation_from_fields(fields)
-        Ok(NixEvalValue.Derivation{fields, request: Val(request)})
+        Ok(NixEvalValue.Derivation{fields: fields, request: Val(request)})
     }
 
     // Attribute selection on a derivation value. A strict derivation answers
     // from its evaluated request; a lazy one forces only the selected field.
-    derivation_field: fn(&self, fields: [String: Int], request: NixEvalDerivation?, field: String) -> Int? NixEvalError! {
+    derivation_field: fn(&self, fields: [String:Int], request: NixEvalDerivation?, field: String) -> Int? NixEvalError! {
         if field == "drvPath" || field == "outPath" || field == "out" {
             return Err(NixEvalError.Unsupported("derivation store paths are assigned by Jetpack's private materializer"))
         }
@@ -83,7 +86,7 @@ impl NixEvaluator {
 
     // Any other derivation field: a strict derivation answers from its
     // environment, a lazy one from its unforced fields.
-    derivation_env_field: fn(&self, fields: [String: Int], request: NixEvalDerivation?, field: String) -> Int? Never! {
+    derivation_env_field: fn(&self, fields: [String:Int], request: NixEvalDerivation?, field: String) -> Int? Never! {
         if request == {
             .Val(evaluated) -> {
                 text: evaluated.env.get(field) ?? return None
@@ -95,7 +98,7 @@ impl NixEvaluator {
 
     // `name`, `system`, `builder` or `args`: from the evaluated request of a
     // strict derivation, else forced from the lazy fields.
-    derivation_attribute: fn(&self, fields: [String: Int], request: NixEvalDerivation?, field: String) -> NixEvalValue NixEvalError! {
+    derivation_attribute: fn(&self, fields: [String:Int], request: NixEvalDerivation?, field: String) -> NixEvalValue NixEvalError! {
         if request == {
             .Val(evaluated) -> Ok(self.request_field(evaluated, field))
             .None -> {
@@ -113,33 +116,35 @@ impl NixEvaluator {
             "system" -> NixEvalValue.Str(request.system)
             "args" -> {
                 items := [Int]{}
-                loop argument in request.args -> items.push(self.value_thunk(NixEvalValue.Str(argument)))
+                loop argument in request.args {
+                    items.push(self.value_thunk(NixEvalValue.Str(argument)))
+                }
                 NixEvalValue.List(items)
             }
             else -> NixEvalValue.Str(request.builder)
         }
     }
 
-    field_value: fn(&self, fields: [String: Int], name: String) -> NixEvalValue? NixEvalError! {
+    field_value: fn(&self, fields: [String:Int], name: String) -> NixEvalValue? NixEvalError! {
         binding: self.attr_field(fields, name) ?? return Ok(None)
         value: self.force(binding)
         Ok(Val(value))
     }
 
-    required_string_field: fn(&self, fields: [String: Int], name: String) -> String NixEvalError! {
+    required_string_field: fn(&self, fields: [String:Int], name: String) -> String NixEvalError! {
         found: self.field_value(fields, name)
         value: found ?? return Err(NixEvalError.Missing(name))
         nixeval_derivation_string(value)
     }
 
-    optional_string_field: fn(&self, fields: [String: Int], name: String) -> String? NixEvalError! {
+    optional_string_field: fn(&self, fields: [String:Int], name: String) -> String? NixEvalError! {
         found: self.field_value(fields, name)
         value: found ?? return Ok(None)
         text: nixeval_derivation_string(value)
         Ok(Val(text))
     }
 
-    derivation_from_fields: fn(&self, fields: [String: Int]) -> NixEvalDerivation NixEvalError! {
+    derivation_from_fields: fn(&self, fields: [String:Int]) -> NixEvalDerivation NixEvalError! {
         name: self.required_string_field(fields, "name")
         nixeval_validate_derivation_name(name)
         system: self.required_string_field(fields, "system")
@@ -151,7 +156,9 @@ impl NixEvaluator {
             .Val(value) -> {
                 if value == {
                     .List(values) -> {
-                        if values.len() > NIXEVAL_MAX_DERIVATION_ARGS -> return Err(NixEvalError.ResourceLimit("derivation has more than {NIXEVAL_MAX_DERIVATION_ARGS} arguments"))
+                        if values.len() > NIXEVAL_MAX_DERIVATION_ARGS {
+                            return Err(NixEvalError.ResourceLimit("derivation has more than {NIXEVAL_MAX_DERIVATION_ARGS} arguments"))
+                        }
                         loop item in values {
                             forced: self.force(item)
                             text: forced.stringify()
@@ -189,7 +196,9 @@ impl NixEvaluator {
         seen := [String]{}
         loop output_name in output_names {
             nixeval_validate_derivation_output_name(output_name)
-            if nixeval_contains_text(seen, output_name) -> return Err(NixEvalError.Invalid("derivation declares duplicate output `{output_name}`"))
+            if nixeval_contains_text(seen, output_name) {
+                return Err(NixEvalError.Invalid("derivation declares duplicate output `{output_name}`"))
+            }
             seen.push(output_name)
         }
 
@@ -221,10 +230,12 @@ impl NixEvaluator {
 
         ignore_value: self.field_value(fields, "__ignoreNulls")
         ignore_nulls: (ignore_value ?? NixEvalValue.Null) == NixEvalValue.Bool(true)
-        env := [String: String]{}
+        env := [String:String]{}
         reserved: nixeval_derivation_reserved_fields()
         loop field in nixeval_sorted(fields.keys().to_list()) {
-            if nixeval_contains_text(reserved, field) || nixeval_contains_text(output_names, field) -> next
+            if nixeval_contains_text(reserved, field) || nixeval_contains_text(output_names, field) {
+                next
+            }
             value: self.force(fields[field])
             if value == NixEvalValue.Null {
                 if ignore_nulls -> next
@@ -233,7 +244,9 @@ impl NixEvaluator {
             text: value.stringify()
             nixeval_record_derivation_contexts(text.contexts, input_sources)
             env[field] = text.value
-            if env.len() > NIXEVAL_MAX_DERIVATION_ENV -> return Err(NixEvalError.ResourceLimit("derivation has more than {NIXEVAL_MAX_DERIVATION_ENV} environment fields"))
+            if env.len() > NIXEVAL_MAX_DERIVATION_ENV {
+                return Err(NixEvalError.ResourceLimit("derivation has more than {NIXEVAL_MAX_DERIVATION_ENV} environment fields"))
+            }
         }
         env["builder"] = builder.copy()
         env["name"] = name.copy()
@@ -250,8 +263,10 @@ impl NixEvaluator {
             return Err(NixEvalError.ResourceLimit("derivation has more than {NIXEVAL_MAX_DERIVATION_INPUTS} source inputs"))
         }
         outputs := [NixEvalDerivationOutput]{}
-        loop output_name in output_names -> outputs.push(NixEvalDerivationOutput{name: output_name, method_algo: method_algo.copy(), hash_hex: hash_hex.copy()})
-        Ok(NixEvalDerivation{name, system, builder, args, env: nixeval_key_ordered(env), input_sources: nixeval_sorted_unique(input_sources), outputs})
+        loop output_name in output_names {
+            outputs.push(NixEvalDerivationOutput{name: output_name, method_algo: method_algo.copy(), hash_hex: hash_hex.copy()})
+        }
+        Ok(NixEvalDerivation{name: name, system: system, builder: builder, args: args, env: nixeval_key_ordered(env), input_sources: nixeval_sorted_unique(input_sources), outputs: outputs})
     }
 }
 
@@ -265,10 +280,14 @@ nixeval_derivation_string: fn(value: NixEvalValue) -> String NixEvalError! {
 
 nixeval_record_derivation_contexts: fn(contexts: [String], inputs: &[String]) NixEvalError! {
     loop context in contexts {
-        if !nixeval_has_prefix(context, "path:") -> return Err(NixEvalError.Unsupported("derivation inputs must have canonical store-path context"))
+        if !nixeval_has_prefix(context, "path:") {
+            return Err(NixEvalError.Unsupported("derivation inputs must have canonical store-path context"))
+        }
         bytes: context.bytes()
         path: nixeval_slice(bytes, 5, bytes.len())
-        if !nixeval_is_store_path(path) -> return Err(NixEvalError.Unsupported("project-relative paths do not have canonical derivation identities"))
+        if !nixeval_is_store_path(path) {
+            return Err(NixEvalError.Unsupported("project-relative paths do not have canonical derivation identities"))
+        }
         inputs.push(path)
     }
 }
@@ -281,7 +300,9 @@ nixeval_validate_derivation_name: fn(name: String) NixEvalError! {
 
 nixeval_validate_derivation_output_name: fn(name: String) NixEvalError! {
     reserved: name == "" || name.bytes().len() > NIXEVAL_MAX_PACKAGE_NAME_BYTES || name == "." || name == ".." || nixeval_contains_byte(name, 47) || nixeval_contains_byte(name, 61)
-    if reserved || nixeval_has_ascii_control(name) -> return Err(NixEvalError.Invalid("invalid derivation output name `{name}`"))
+    if reserved || nixeval_has_ascii_control(name) {
+        return Err(NixEvalError.Invalid("invalid derivation output name `{name}`"))
+    }
 }
 
 nixeval_has_ascii_control: fn(text: String) -> Bool Never! {

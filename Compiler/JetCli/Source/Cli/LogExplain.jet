@@ -38,7 +38,9 @@ jet_cli_explain_log: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> Jet
         entries := cli_files.walk(home, None).list() ?? [cli_files.WalkEntry]{}
         entries.sort_by(fn(left: cli_files.WalkEntry, right: cli_files.WalkEntry) { left.relative <=> right.relative })
         loop entry in entries {
-            if entry.is_dir || !entry.relative.ends_with(".jet") || entry.relative.starts_with(".jet/") -> next
+            if entry.is_dir || !entry.relative.ends_with(".jet") || entry.relative.starts_with(".jet/") {
+                next
+            }
             source: cli_files.read(entry.path) ?? next
             loop (index, line) in source.split("\n").to_list() {
                 code: line.trim()
@@ -49,7 +51,9 @@ jet_cli_explain_log: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> Jet
     }
     environment: (cli_sys.get(ENV_JET_LOG) ?? "").trim()
     if environment != "" {
-        if log_filter_bad_pair(environment) == .Val(pair) -> return jet_cli_fail("E2104", "{ENV_JET_LOG}: `{pair}` is not a log filter pair", jet_cli_why("E2104"), LOG_FILTER_FIX, color, JET_DRIVER_EXIT_USER_ERROR)
+        if log_filter_bad_pair(environment) == .Val(pair) {
+            return jet_cli_fail("E2104", "{ENV_JET_LOG}: `{pair}` is not a log filter pair", jet_cli_why("E2104"), LOG_FILTER_FIX, color, JET_DRIVER_EXIT_USER_ERROR)
+        }
         ladder.push(JetCLILogSource{rung: ENV_JET_LOG, filter: environment, site: "environment"})
     }
     // The start filter: every source a program reads before its first line.
@@ -67,7 +71,9 @@ jet_cli_explain_log: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> Jet
     loop source in ladder -> lines.push("  {source.rung}: {source.filter} ({source.site})")
     lines.push("  --log: given to `jet run` or `jet dev`, above every other source")
     lines.push("start filter: {start}")
-    if environment != "" -> lines.push("a code call for a path JET_LOG or --log sets keeps their level and logs one note")
+    if environment != "" {
+        lines.push("a code call for a path JET_LOG or --log sets keeps their level and logs one note")
+    }
     jet_cli_done("{lines.join("\n")}\n", "", JET_DRIVER_EXIT_OK)
 }
 

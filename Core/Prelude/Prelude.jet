@@ -8,6 +8,7 @@ package: {
         prelude: .Library{ entry: prelude }
     }
 }
+
 use core: core
 
 // `keep` is the compiler's identity/use-site barrier. The other helpers,
@@ -99,8 +100,11 @@ SourceLocation: struct {
     function: String
     module: String{""}
 
-    impl Display { display: fn(self) -> String { "{self.file}:{self.line}:{self.column}" } }
+    impl Display {
+        display: fn(self) -> String { "{self.file}:{self.line}:{self.column}" }
+    }
 }
+
 // A type as a value. Where a `Type` is expected a type name is one
 // (`counts[Position] = 2`, `if t == { Position -> … }`); `Type{Rock}` names
 // one explicitly, and `type_of(p)` is the static type of a name or field
@@ -112,8 +116,11 @@ SourceLocation: struct {
 Type: struct {
     priv path: String
 
-    impl Display { display: fn(self) -> String { "{self.path}" } }
+    impl Display {
+        display: fn(self) -> String { "{self.path}" }
+    }
 }
+
 // A send the channel refused: its receiving end is gone, or the sending task
 // was cancelled while it waited. `value` is the payload, handed back unsent,
 // so `tx.send(job) ?? retry(err.value)` keeps the job. A program never has to
@@ -123,6 +130,7 @@ Type: struct {
 SendError: struct<T> {
     value: T
 }
+
 // The phase of the compiled copy an expression runs in: `#phase` is
 // `.Preparation` in preparation and compile-time code and in a function's
 // compile-time copy, `.Build` in the copy a package's `fn build` runs, and
@@ -331,9 +339,10 @@ Site: enum {
     Test
     Operation
     Text
-    // A match arm, after its body (`1 -> { a() } #Through`).
     Arm
 }
+
+// A match arm, after its body (`1 -> { a() } #Through`).
 
 // How an inner marker setting meets the one it inherits: it applies only
 // where written, replaces the outer one, merges with it, or may only tighten it.
@@ -352,6 +361,7 @@ MarkerScope: enum {
     Function
     Block
 }
+
 // Compiler-supplied #Receipt facts are not a user-constructible handle.
 // This private source target retains the typed payload and all three checked
 // metadata arguments; the raw store operation uses the existing encoder.

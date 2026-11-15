@@ -32,11 +32,17 @@ load_twice_removed: fn<T: Decode>(prefix: String) -[FS, Env, Exec]> T [FieldErro
 
 run: fn() {
     if load<Settings>("APP_") == {
-        .Ok(settings) -> print("settings: port {settings.port} stripe decoded: {settings.stripe == 7}")
-        .Err(errors) -> { loop error in errors -> print("settings: {error.reason}") }
+        .Ok(settings) -> {
+            print("settings: port {settings.port} stripe decoded: {settings.stripe == 7}")
+        }
+        .Err(errors) -> {
+            loop error in errors -> print("settings: {error.reason}")
+        }
     }
     if load_twice_removed<Mail>("APP_") == {
-        .Ok(mail) -> print("mail: relay {mail.relay}")
-        .Err(errors) -> { loop error in errors -> print("mail: {error.reason}") }
+        .Ok(mail) -> { print("mail: relay {mail.relay}") }
+        .Err(errors) -> {
+            loop error in errors -> print("mail: {error.reason}")
+        }
     }
 }

@@ -489,7 +489,9 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             // A place-borrowing `place ?? leave` lends its payload
             // (ir_or_fallback): the value is the payload where the place
             // holds it, not fresh, and binds below as any place does.
-            if local.place_borrow && !ir_masking(b) && ir_body_node(p, b, init).kind == .OrFallback(operand, _, _) -> b.or_lend = operand
+            if local.place_borrow && !ir_masking(b) && ir_body_node(p, b, init).kind == .OrFallback(operand, _, _) {
+                b.or_lend = operand
+            }
             value: ir_expr(m, p, b, init)
             b.or_lend = -1
             if ir_failed(b) {
@@ -2806,7 +2808,9 @@ ir_raw_address_of: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, place
             return ir_fail_slot(b, span, "raw address of a scalar local outside a frame cell")
         }
         if !ir_failed(b) && address >= 0 {
-            if ir_sentry_register_elements(m, p, b, value, span) -> return ir_raw_address_result(m, b, row, address)
+            if ir_sentry_register_elements(m, p, b, value, span) {
+                return ir_raw_address_result(m, b, row, address)
+            }
             if ir_failed(b) -> return -1
             place_ty: ir_ty(p, b, value)
             place_row: ir_value_type(m, p, place_ty) ?? return ir_type_fail(b, span, place_ty)
@@ -2834,13 +2838,9 @@ ir_sentry_register_elements: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place
     if !p.sentries -> return false
     node := place
     loop {
-        if ir_body_node(p, b, node).kind == .Borrow(inner, _) {
+        if ir_body_node(p, b, node).kind == .Borrow(inner, _) -> node = inner else if ir_body_node(p, b, node).kind == .Move(inner) {
             node = inner
-        } else if ir_body_node(p, b, node).kind == .Move(inner) {
-            node = inner
-        } else {
-            break
-        }
+        } else { break }
     }
     base := -1
     if ir_body_node(p, b, node).kind == .Index(list_place, _, kind, _, _, _) {
@@ -2849,7 +2849,9 @@ ir_sentry_register_elements: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place
     if base < 0 -> return false
     backs := [IRWriteBack]{}
     list: ir_place_address(m, p, b, base, backs, span)
-    if ir_failed(b) || list < 0 || backs.len() > 0 || ir_kind_of(m, b, list) != .Aggregate -> return false
+    if ir_failed(b) || list < 0 || backs.len() > 0 || ir_kind_of(m, b, list) != .Aggregate {
+        return false
+    }
     row: ir_list_item(m, p, b, list) ?? return false
     data: ir_list_data(m, b, list)
     length: ir_list_length(m, b, list)
@@ -3113,7 +3115,9 @@ ir_handle_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
     if ir_reactive_method(m, p, b, ty, receiver, operation, args, span) == .Val(result) {
         return result
     }
-    if operation == .SerdeEncode(stored) -> return ir_serde_encode(m, p, b, ty, receiver, stored, span)
+    if operation == .SerdeEncode(stored) {
+        return ir_serde_encode(m, p, b, ty, receiver, stored, span)
+    }
     if operation == .CursorTakePattern(text_parts, canonical) {
         return ir_take_pattern(m, p, b, ty, receiver, false, text_parts, [BinMatchPart]{}, canonical, span)
     }
@@ -4414,7 +4418,9 @@ ir_call_row_emit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_a
     // there by its symbol, and not built (ir_core_bound).
     bound: ir_core_bound(m, p, b, row, type_args, slots, span)
     callee := -1
-    if bound == "" -> callee = ir_function_row_id(m, p, row, type_args) ?? return ir_fail_slot(b, span, "call of {p.functions[row].key}")
+    if bound == "" {
+        callee = ir_function_row_id(m, p, row, type_args) ?? return ir_fail_slot(b, span, "call of {p.functions[row].key}")
+    }
     dst := -1
     declared: if p.functions[row].ret == .Val(written) -> Val(ir_callee_fact(p, b, row, type_args, written, span)) else -> Type?{None}
     if ir_failed(b) -> return -1
@@ -4433,7 +4439,9 @@ ir_call_row_emit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_a
     if bracketed -> _: ir_host_method_words(m, p, b, Type.Bool, "Impure.enter", [Int]{}, span)
     start: ir_args(b.f, slots)
     if {
-        bound != "" -> ir_emit(b.f, IROp.CallRuntime, dst, ir_intern_name(m, bound), start, slots.len(), b.line)
+        bound != "" -> {
+            ir_emit(b.f, IROp.CallRuntime, dst, ir_intern_name(m, bound), start, slots.len(), b.line)
+        }
         else -> ir_emit(b.f, IROp.Call, dst, callee, start, slots.len(), b.line)
     }
     if bracketed -> _: ir_host_method_words(m, p, b, Type.Bool, "Impure.leave", [Int]{}, span)
@@ -7014,7 +7022,9 @@ ir_or_fallback: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: I
     subject: ir_expr_split(m, p, b, value)
     split: b.split.pop()
     if ir_failed(b) -> return -1
-    if split == .Val(routed) -> return ir_or_split(m, p, b, ty, value_ty, routed, fallback, ambient, span)
+    if split == .Val(routed) {
+        return ir_or_split(m, p, b, ty, value_ty, routed, fallback, ambient, span)
+    }
     if subject < 0 -> return subject
     // `held.move() ?? fallback`: the carrier moves into the `??`, which hands its
     // payload on; the variable no longer closes it.
@@ -7158,7 +7168,9 @@ ir_or_fallback: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: I
 // boxes the Err, which is dropped before the fallback runs unless the
 // fallback reads it under the ambient binding.
 ir_or_split: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, carrier: Type, split: IRRouteSplit, fallback: BodyOrFallback, ambient: TLocal?, span: Span) -> Int Never! {
-    error_ty: if ir_untag(carrier) == .Result(_, err_ty) -> err_ty else -> { return ir_fail_slot(b, span, "`??` on {ir_type_name(carrier)}") }
+    error_ty: if ir_untag(carrier) == .Result(_, err_ty) -> err_ty else -> {
+        return ir_fail_slot(b, span, "`??` on {ir_type_name(carrier)}")
+    }
     result := -1
     if !ir_unit_type(ty) && !ir_never_type(ty) {
         row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
@@ -8459,9 +8471,13 @@ ir_lambda_owned_window: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, window: In
 // other cell's variable stops owning it.
 ir_lambda_take_cell: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, binding: IRBinding, captured: Int) Never! {
     b.fresh[captured] = true
-    if ir_zeroable(m, p, binding.indirect) -> return ir_zero_drops(m, p, b, binding.slot, 0, binding.indirect)
+    if ir_zeroable(m, p, binding.indirect) {
+        return ir_zero_drops(m, p, b, binding.slot, 0, binding.indirect)
+    }
     index := b.bindings.len() - 1
-    loop index >= 0 && (b.bindings[index].name != name || b.bindings[index].slot != binding.slot) -> index -= 1
+    loop index >= 0 && (b.bindings[index].name != name || b.bindings[index].slot != binding.slot) {
+        index -= 1
+    }
     if index >= 0 -> ir_set_own_state(b, index, IROwnState{owned: false})
 }
 

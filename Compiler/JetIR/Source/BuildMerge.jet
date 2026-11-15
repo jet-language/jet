@@ -26,11 +26,13 @@
 // steps through those short lists instead of every function's instructions;
 // a row's second use in a function finds its number already given, so the
 // numbering is the same.
-
 use jet_foundation.[compiler_take_rows, compiler_threads_failure_text, compiler_transfer_rows, name_rows_set, name_rows_sorted, name_rows_value]
 
 // A function the walk starts from: function `local` of part `part`.
-IRMergeRoot: struct { part: Int, local: Int }
+IRMergeRoot: struct {
+    part: Int
+    local: Int
+}
 
 // One part's rows under the merged numbering (-1: not reached).
 IRMergeSide: struct {
@@ -56,8 +58,11 @@ IRMergePrep: struct {
 }
 
 IR_MERGE_USE_TYPE: 0
+
 IR_MERGE_USE_NAME: 1
+
 IR_MERGE_USE_DATA: 2
+
 IR_MERGE_USE_FUNCTION: 3
 
 // The merge's side work (grouping the type, name and data keys; dropping the
@@ -142,9 +147,7 @@ ir_merge_serial: fn(built: &&IRModule) -> IRModule Never! {
 ir_merge: fn(built: &&[IRModule], prepared: &&[IRMergePrep], roots: [IRMergeRoot], entry: Int) -> IRModule Never! {
     parts := built.move()
     g := ir_merge_new(parts, prepared, roots)
-    loop root in roots {
-        _: ir_merge_function(g, parts, root.part, root.local)
-    }
+    loop root in roots -> _: ir_merge_function(g, parts, root.part, root.local)
     cursor := 0
     loop cursor < g.function_part.len() {
         part: g.function_part[cursor]
@@ -197,7 +200,9 @@ ir_merge: fn(built: &&[IRModule], prepared: &&[IRMergePrep], roots: [IRMergeRoot
             members := lists.pop() ?? panic("a nonempty member list failed to pop")
             row: wanted.get(list) ?? next
             loop index in 0..<members.len() {
-                if members[index].ty >= 0 -> members[index].ty = g.sides[part].type_new[members[index].ty]
+                if members[index].ty >= 0 {
+                    members[index].ty = g.sides[part].type_new[members[index].ty]
+                }
             }
             out.debug_members[row] = members.move()
         }
@@ -233,7 +238,9 @@ ir_merge: fn(built: &&[IRModule], prepared: &&[IRMergePrep], roots: [IRMergeRoot
         loop (index, identity) in table.texts {
             key: table.rows[index]
             if given.get(key) == .Val(other) {
-                if other != identity -> panic("trait payload keys of {other} and {identity} collide")
+                if other != identity {
+                    panic("trait payload keys of {other} and {identity} collide")
+                }
                 next
             }
             given[key] = identity.copy()
@@ -285,9 +292,11 @@ ir_merge_key_rows: fn(out: &IRModule, g: IRMerge) Never! {
     // only when two hashes meet.
     hashed := [U64:Int]{}
     loop (id, f) in out.functions {
-        if (f.symbol_hash == U64{0}) -> next
+        if (f.symbol_hash == U64{0}) { next }
         if hashed.get(f.symbol_hash) == .Val(other) {
-            if out.functions[other].key != f.key -> panic("internal error: the symbol hash of {out.functions[other].key} and {f.key} is the same")
+            if out.functions[other].key != f.key {
+                panic("internal error: the symbol hash of {out.functions[other].key} and {f.key} is the same")
+            }
             next
         }
         hashed[f.symbol_hash] = id
@@ -361,7 +370,9 @@ ir_merge_new: fn(parts: [IRModule], prepared: &&[IRMergePrep], roots: [IRMergeRo
         data_counts.push(m.data.len())
     }
     preps := prepared.move()
-    if preps.len() != parts.len() -> panic("the merge has {preps.len()} part preparations for {parts.len()} parts")
+    if preps.len() != parts.len() {
+        panic("the merge has {preps.len()} part preparations for {parts.len()} parts")
+    }
     functions := [[(key: String, local: Int)]]{}
     types := [[(key: String, local: Int)]]{}
     names := [[(key: String, local: Int)]]{}
@@ -455,10 +466,16 @@ ir_merge_uses: fn(f: IRFunction, local: Int, seen: &IRMergeSeen, uses: &[Int]) N
     ir_merge_use(seen.types, IR_MERGE_USE_TYPE, f.result, local, uses)
     loop at in 0..<f.op.len() {
         if f.op[at] == {
-            .ConstText | .DataAddress -> ir_merge_use(seen.data, IR_MERGE_USE_DATA, f.a[at], local, uses)
-            .ConstBigInt | .CallRuntime -> ir_merge_use(seen.names, IR_MERGE_USE_NAME, f.a[at], local, uses)
+            .ConstText | .DataAddress -> {
+                ir_merge_use(seen.data, IR_MERGE_USE_DATA, f.a[at], local, uses)
+            }
+            .ConstBigInt | .CallRuntime -> {
+                ir_merge_use(seen.names, IR_MERGE_USE_NAME, f.a[at], local, uses)
+            }
             .Close -> ir_merge_use(seen.names, IR_MERGE_USE_NAME, f.b[at], local, uses)
-            .Call | .FunctionAddress -> ir_merge_use(seen.functions, IR_MERGE_USE_FUNCTION, f.a[at], local, uses)
+            .Call | .FunctionAddress -> {
+                ir_merge_use(seen.functions, IR_MERGE_USE_FUNCTION, f.a[at], local, uses)
+            }
             .Nop | .Const | .Copy | .Move | .Drop | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .CallIndirect | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> {}
         }
     }
@@ -467,7 +484,9 @@ ir_merge_uses: fn(f: IRFunction, local: Int, seen: &IRMergeSeen, uses: &[Int]) N
 // Puts row `row` (none when negative) of kind `kind` on `uses` unless
 // function `local` used it already.
 ir_merge_use: fn(seen: &[Int], kind: Int, row: Int, local: Int, uses: &[Int]) Never! {
-    if row < 0 || seen[row] == local -> return
+    if row < 0 || seen[row] == local {
+        return
+    }
     seen[row] = local
     uses.push(kind)
     uses.push(row)
@@ -514,7 +533,9 @@ ir_merge_group: fn(runs: [[(key: String, local: Int)]], groups: &[[Int]], keys: 
         least := -1
         loop part in 0..<runs.len() {
             if heads[part] >= runs[part].len() -> next
-            if least < 0 || runs[part][heads[part]].key < runs[least][heads[least]].key -> least = part
+            if least < 0 || runs[part][heads[part]].key < runs[least][heads[least]].key {
+                least = part
+            }
         }
         if least < 0 -> break
         group: keys.len()
@@ -522,7 +543,9 @@ ir_merge_group: fn(runs: [[(key: String, local: Int)]], groups: &[[Int]], keys: 
         loop part in least..<runs.len() {
             loop heads[part] < runs[part].len() && runs[part][heads[part]].key == keys[group] {
                 local: runs[part][heads[part]].local
-                if groups[part][local] >= 0 -> panic("build part {part} row {local} has two sharing keys")
+                if groups[part][local] >= 0 {
+                    panic("build part {part} row {local} has two sharing keys")
+                }
                 groups[part][local] = group
                 heads[part] = heads[part] + 1
             }
@@ -565,7 +588,9 @@ ir_merge_type: fn(g: &IRMerge, parts: [IRModule], part: Int, row: Int) -> Int Ne
     group: g.type_group[part][row]
     id: g.type_ids[group]
     if id >= 0 {
-        if !ir_merge_same_type(parts[g.type_part[id]].types[g.type_local[id]], parts[part].types[row]) -> panic("type {g.type_keys[group]} differs between build parts")
+        if !ir_merge_same_type(parts[g.type_part[id]].types[g.type_local[id]], parts[part].types[row]) {
+            panic("type {g.type_keys[group]} differs between build parts")
+        }
         g.sides[part].type_new[row] = id
         return id
     }
@@ -620,9 +645,7 @@ ir_merge_data: fn(g: &IRMerge, parts: [IRModule], part: Int, row: Int) -> Int Ne
     if group >= 0 -> g.data_ids[group] = id
     g.sides[part].data_new[row] = id
     if parts[part].data_relocs.get(row) == .Val(words) {
-        loop word in words {
-            _: ir_merge_data(g, parts, part, word.target)
-        }
+        loop word in words -> _: ir_merge_data(g, parts, part, word.target)
     }
     id
 }
@@ -667,13 +690,19 @@ ir_merge_rewrite: fn(side: IRMergeSide, f: &IRFunction) Never! {
     loop at in 0..<f.op.len() {
         a: f.a[at]
         if f.op[at] == {
-            .ConstText | .DataAddress -> { if a >= 0 -> f.a[at] = side.data_new[a] }
-            .ConstBigInt | .CallRuntime -> { if a >= 0 -> f.a[at] = side.name_new[a] }
+            .ConstText | .DataAddress -> {
+                if a >= 0 -> f.a[at] = side.data_new[a]
+            }
+            .ConstBigInt | .CallRuntime -> {
+                if a >= 0 -> f.a[at] = side.name_new[a]
+            }
             .Close -> {
                 name: f.b[at]
                 if name >= 0 -> f.b[at] = side.name_new[name]
             }
-            .Call | .FunctionAddress -> { if a >= 0 -> f.a[at] = side.function_new[a] }
+            .Call | .FunctionAddress -> {
+                if a >= 0 -> f.a[at] = side.function_new[a]
+            }
             .Nop | .Const | .Copy | .Move | .Drop | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .CallIndirect | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> {}
         }
     }

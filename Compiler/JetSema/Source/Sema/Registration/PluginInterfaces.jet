@@ -1,34 +1,32 @@
 // Plugin interfaces are immutable semantic facts. The driver reads each
 // literal artifact's Component (jet_driver_plugin_facts); callers pass its
 // complete typed exports here.
-use {
-    jet_foundation.[
-        AccessConvention,
-        BinOp,
-        ComponentExportFact,
-        Dimension,
-        Expr,
-        InternalTag,
-        Item,
-        Type,
-        TypeParam,
-        UnitRatio,
-        UnitScaleProvenance,
-        ViewProvenance,
-        ViewProvenanceMap,
-        ViewSource,
-        ViewSourcePath,
-        ViewSourceProjection,
-        access_sigil,
-        dimension_base,
-        dimension_divide,
-        dimension_identity,
-        dimension_multiply,
-        measure_expression,
-        sha256_hex_bytes,
-        type_name,
-    ]
-}
+use jet_foundation.[
+    AccessConvention,
+    BinOp,
+    ComponentExportFact,
+    Dimension,
+    Expr,
+    InternalTag,
+    Item,
+    Type,
+    TypeParam,
+    UnitRatio,
+    UnitScaleProvenance,
+    ViewProvenance,
+    ViewProvenanceMap,
+    ViewSource,
+    ViewSourcePath,
+    ViewSourceProjection,
+    access_sigil,
+    dimension_base,
+    dimension_divide,
+    dimension_identity,
+    dimension_multiply,
+    measure_expression,
+    sha256_hex_bytes,
+    type_name,
+]
 
 // `unsupported` is the first Component type the export uses that has no Jet
 // spelling ("" when every type has one); a call to it reports that type.
@@ -163,24 +161,19 @@ sema_plugin_identity: fn(artifact: String, digest: String) -> String Never! {
             width == 1 && ((first >= 48 && first <= 57) || (first >= 65 && first <= 90) || (first >= 97 && first <= 122) || first == 95) -> {
                 output = "{output}{String.from_bytes([bytes[index]]) ?? "_"}"
             }
-            else -> {
-                output = "{output}_"
-            }
+            else -> { output = "{output}_" }
         }
         index += width
     }
     "PluginInterface__{output}__{digest}"
 }
+
 sema_plugin_unit_ratio: fn(value: UnitRatio) -> String Never! {
-    if value.denominator == 1 {
-        return "{value.numerator}"
-    }
+    if value.denominator == 1 -> return "{value.numerator}"
     return "{value.numerator}/{value.denominator}"
 }
 
-sema_plugin_sha256: fn(text: String) -> String Never! {
-    sha256_hex_bytes(text.bytes())
-}
+sema_plugin_sha256: fn(text: String) -> String Never! { sha256_hex_bytes(text.bytes()) }
 
 sema_plugin_interface_by_artifact: fn(facts: SemaPluginInterfaceFacts, artifact: String) -> SemaPluginInterface? {
     found: loop alias in facts.artifacts {
@@ -189,18 +182,14 @@ sema_plugin_interface_by_artifact: fn(facts: SemaPluginInterfaceFacts, artifact:
         }
     } ?? return None
     loop interface in facts.interfaces {
-        if interface.identity == found {
-            return Val(interface)
-        }
+        if interface.identity == found -> return Val(interface)
     }
     None
 }
 
 sema_plugin_interface_by_identity: fn(facts: SemaPluginInterfaceFacts, identity: String) -> SemaPluginInterface? {
     loop interface in facts.interfaces {
-        if interface.identity == identity {
-            return Val(interface)
-        }
+        if interface.identity == identity -> return Val(interface)
     }
     None
 }
@@ -224,7 +213,9 @@ sema_plugin_interface_facts: fn(components: [SemaPluginComponent]) -> SemaPlugin
     loop component in components {
         stem: sema_plugin_normalize_artifact(component.artifact) ?? next
         exports := [SemaPluginInterfaceExport]{}
-        loop fact in component.exports -> sema_plugin_put_export(exports, sema_plugin_component_export(fact))
+        loop fact in component.exports {
+            sema_plugin_put_export(exports, sema_plugin_component_export(fact))
+        }
         sema_plugin_sort_exports(exports)
         signatures: (loop export in exports -> export.signature).join("\n")
         digest: sema_plugin_sha256(signatures)

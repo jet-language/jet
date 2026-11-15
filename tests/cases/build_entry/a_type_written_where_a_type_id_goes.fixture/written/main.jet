@@ -16,10 +16,12 @@ build: fn(b: Build) {
         CompilerField{name: "count", type: I64},
         CompilerField{name: "tags", type: [String]},
         CompilerField{name: "spot", type: Spot},
-        CompilerField{name: "again", type: TypeId{Spot}},
+        CompilerField{name: "again", type: TypeId{Spot: Spot}},
     }
     reflected: Carrier.reflect().fields[0].type.copy()
-    if fields[2].type.identity != reflected.identity || fields[3].type.identity != reflected.identity -> panic("a written type is not the reflected one")
+    if fields[2].type.identity != reflected.identity || fields[3].type.identity != reflected.identity {
+        panic("a written type is not the reflected one")
+    }
     meta.add_struct("Shape", fields, scope: "shape")
     b.default(app)
 }

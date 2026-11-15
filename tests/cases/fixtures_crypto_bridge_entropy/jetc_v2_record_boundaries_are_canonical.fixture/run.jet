@@ -8,12 +8,17 @@ use {
 // tests/fixtures/crypto_bridge_entropy.rs:862-912. Known failing.
 // Rust private jetc_v2_plain_len/record_shape_valid predicates ported verbatim
 // in arithmetic form below, including final-record lower/upper/cap bounds.
-Record: struct { length: Int, flags: Int }
+Record: struct {
+    length: Int
+    flags: Int
+}
+
 little: fn(bytes: [U8], start: Int, count: Int) -> Int {
     value := 0
     loop i in 0..<count -> value = value.bit_or(Int{bytes[start + i]} << (8 * i))
     value
 }
+
 plain_length: fn(body: Int) -> Int? {
     record_length: 1048576 + 21
     full: body /% record_length
@@ -23,6 +28,7 @@ plain_length: fn(body: Int) -> Int? {
     if length > 1099511627776 -> return None
     Val(length)
 }
+
 #Test("jetc_v2_record_boundaries_are_canonical") {
     recipient: crypto.X25519SecretKey.new_random() ?? panic("recipient")
     public: recipient.public_key()
@@ -49,8 +55,7 @@ plain_length: fn(body: Int) -> Int? {
         }
         assert_eq(at, encoded.len())
         expected := [Record]{}
-        if size < 1048576 -> expected.push(Record{length: size, flags: 1})
-        else {
+        if size < 1048576 -> expected.push(Record{length: size, flags: 1}) else {
             expected.push(Record{length: 1048576, flags: 0})
             expected.push(Record{length: size - 1048576, flags: 1})
         }

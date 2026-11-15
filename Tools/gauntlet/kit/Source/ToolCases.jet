@@ -13,11 +13,14 @@ use {
 
 // The sides of a case, in the order they run.
 TOOL_SIDES: ["original", "jet"]
+
 // How long a run may take, in milliseconds, when $JET_GAUNTLET_TIMEOUT_MS
 // names no positive whole number.
 TOOL_TIMEOUT_MS: 300000
+
 // How much of a failed run's stderr its reason keeps.
 TOOL_REASON_LIMIT: 300
+
 // How many bytes of each side a mismatch shows.
 TOOL_MISMATCH_SHOWN: 80
 
@@ -58,7 +61,9 @@ run_tool_entry: fn(repo_dir: String, dir: String, entry: Dyn, jet_bin: String, w
         path: text_or_empty(tool, field)
         if {
             path == "" -> issues.push("tool.{field} is not a path")
-            !files.exists(path_joined(root, path)) -> issues.push("tool.{field} `{path}` does not exist")
+            !files.exists(path_joined(root, path)) -> {
+                issues.push("tool.{field} `{path}` does not exist")
+            }
             else -> {}
         }
     }
@@ -148,13 +153,17 @@ run_side: fn(env_runner: String, case: ToolCase, command: [String], dir: String,
         if copied.code != 0 -> return Err("the fixtures cannot be copied: {copied.errors.trim()}")
     }
     run: run_tool_command(env_runner, cwd, command.concat(case.args), case.env, timeout_ms)
-    if run.code != case.exit -> return Ok("exit {run.code}, not {case.exit}: {limited(run.stderr.trim(), TOOL_REASON_LIMIT)}")
+    if run.code != case.exit {
+        return Ok("exit {run.code}, not {case.exit}: {limited(run.stderr.trim(), TOOL_REASON_LIMIT)}")
+    }
     if case.check == "" -> return Ok(byte_mismatch(case.expected, run.stdout.bytes()))
     printed: "{cwd}.stdout"
     files.write(printed, run.stdout) ?? return Err("{err}")
     checked: run_tool_command(env_runner, cwd, [jet_bin.copy(), path_joined(dir, case.check), printed.copy()], case.env, timeout_ms)
     files.remove(printed).drop("the printed output is scratch")
-    if checked.code != 0 -> return Ok("its check `{case.check}` fails (exit {checked.code}): {limited(checked.stderr.trim(), TOOL_REASON_LIMIT)}")
+    if checked.code != 0 {
+        return Ok("its check `{case.check}` fails (exit {checked.code}): {limited(checked.stderr.trim(), TOOL_REASON_LIMIT)}")
+    }
     Ok(byte_mismatch(case.expected, checked.stdout.bytes()))
 }
 
@@ -165,7 +174,9 @@ run_tool_command: fn(env_runner: String, cwd: String, command: [String], env: [E
     spec := process.cmd([env_runner].concat(command)).cwd(cwd).timeout(time.duration_ms(timeout_ms))
     loop setting in env -> spec = spec.env(setting.name, setting.value)
     receipt: spec.run() ?? return ToolRun{code: 127, stdout: "", stderr: "{err}"}
-    if receipt.timed_out -> return ToolRun{code: 124, stdout: receipt.output, stderr: "timeout after {seconds_text(timeout_ms)}s"}
+    if receipt.timed_out {
+        return ToolRun{code: 124, stdout: receipt.output, stderr: "timeout after {seconds_text(timeout_ms)}s"}
+    }
     ToolRun{code: if receipt.signal == None -> receipt.code else -> 128, stdout: receipt.output, stderr: receipt.errors}
 }
 

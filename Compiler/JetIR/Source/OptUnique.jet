@@ -43,9 +43,7 @@ ir_opt_hoist_unique: fn(m: IRModule, f: &IRFunction, keys: [String], notes: &[St
         dst: f.dst[at]
         if dst < f.param_count || dst >= count || facts.defs[dst] != 1 -> next
         op: f.op[at]
-        if op == .StackAddress {
-            root[dst] = dst
-        } else if (op == .Move || (op == .Offset && f.b[at] >= 0)) && f.a[at] >= 0 && root[f.a[at]] >= 0 {
+        if op == .StackAddress -> root[dst] = dst else if (op == .Move || (op == .Offset && f.b[at] >= 0)) && f.a[at] >= 0 && root[f.a[at]] >= 0 {
             root[dst] = root[f.a[at]]
             disp[dst] = disp[f.a[at]] + (if op == .Offset -> f.b[at] else -> 0)
         }
@@ -165,7 +163,9 @@ ir_opt_unique_list: fn(key: String) -> String Never! {
     bytes: key.bytes()
     open: U8{91}
     loop at in 0..<bytes.len() {
-        if bytes[at] == open -> return String.from_bytes(bytes.slice(at, bytes.len() - 1)) ?? key.copy()
+        if bytes[at] == open {
+            return String.from_bytes(bytes.slice(at, bytes.len() - 1)) ?? key.copy()
+        }
     }
     key.copy()
 }
@@ -193,7 +193,9 @@ ir_opt_header_ready: fn(f: IRFunction, facts: OptFacts, root: [Int], disp: [Int]
     if base < f.param_count -> return true
     loop at in 0..<opener {
         op: f.op[at]
-        if (op != .Store && op != .CopyBytes) || f.a[at] < 0 || f.a[at] >= count || root[f.a[at]] != base -> next
+        if (op != .Store && op != .CopyBytes) || f.a[at] < 0 || f.a[at] >= count || root[f.a[at]] != base {
+            next
+        }
         start: disp[f.a[at]]
         stores: op == .Store && start + f.b[at] == low + 16
         copies: op == .CopyBytes && start <= low && start + f.c[at] >= low + 24
@@ -214,7 +216,9 @@ ir_opt_reshares: fn(m: IRModule, f: IRFunction, facts: OptFacts, keys: [String],
     buffer := [Int]{}
     reads := [Int]{}
     loop k in (opener + 1)..<end {
-        if f.op[k] == .Load && f.a[k] >= 0 && root[f.a[k]] == base && disp[f.a[k]] + f.b[k] == low + 16 && f.dst[k] >= 0 -> buffer.push(f.dst[k])
+        if f.op[k] == .Load && f.a[k] >= 0 && root[f.a[k]] == base && disp[f.a[k]] + f.b[k] == low + 16 && f.dst[k] >= 0 {
+            buffer.push(f.dst[k])
+        }
     }
     at := opener + 1
     loop at < end {
@@ -228,20 +232,30 @@ ir_opt_reshares: fn(m: IRModule, f: IRFunction, facts: OptFacts, keys: [String],
         loop slot in reads {
             if slot < 0 || slot >= count -> next
             if root[slot] == base {
-                if !ir_opt_header_kept(m, f, facts, keys, root, disp, header, at, slot) -> return "the Loop hands on the list by its {ir_op_name(op)}"
+                if !ir_opt_header_kept(m, f, facts, keys, root, disp, header, at, slot) {
+                    return "the Loop hands on the list by its {ir_op_name(op)}"
+                }
                 next
             }
             if buffer.contains(slot) {
                 if ir_opt_buffer_reader(m, f, at) -> next
-                if op == .CallRuntime -> return "the Loop hands the buffer to a runtime route that may keep it"
-                if op == .Call || op == .CallIndirect || op == .Move || op == .Copy -> return "the Loop hands the buffer on by its {ir_op_name(op)}"
-                if (op == .Store || op == .StreamStore) && f.c[at] == slot -> return "the Loop stores the buffer"
+                if op == .CallRuntime {
+                    return "the Loop hands the buffer to a runtime route that may keep it"
+                }
+                if op == .Call || op == .CallIndirect || op == .Move || op == .Copy {
+                    return "the Loop hands the buffer on by its {ir_op_name(op)}"
+                }
+                if (op == .Store || op == .StreamStore) && f.c[at] == slot {
+                    return "the Loop stores the buffer"
+                }
             }
         }
         // An Offset of the base only names an address in it (its reads
         // follow these rules).
         written: ir_x64_write(f, at)
-        if written >= 0 && written < count && root[written] == base && op != .Offset -> return "the Loop rebinds the list"
+        if written >= 0 && written < count && root[written] == base && op != .Offset {
+            return "the Loop rebinds the list"
+        }
         at += 1
     }
     ""
@@ -404,7 +418,9 @@ ir_opt_unique_to_callers: fn(m: &IRModule, functions: &[IRFunction], keys: &[Str
         ir_opt_unique_judged(parts, view)
         parts = ir_opt_unique_walks(m, keys, view, parts.move(), 4)
     }
-    loop at in 0..<parts.len() -> functions.extend(compiler_take_rows<IRFunction>(parts[at].functions))
+    loop at in 0..<parts.len() {
+        functions.extend(compiler_take_rows<IRFunction>(parts[at].functions))
+    }
     hoisted
 }
 
@@ -483,7 +499,9 @@ ir_opt_unique_scan: fn(part: &IROptUniquePart, keys: [String], view: IROptUnique
         unique := false
         loop at in 0..<f.op.len() {
             callee: f.a[at]
-            if f.op[at] == .FunctionAddress && callee >= 0 && callee < total -> part.addressed.push(callee)
+            if f.op[at] == .FunctionAddress && callee >= 0 && callee < total {
+                part.addressed.push(callee)
+            }
             if !unique && ir_opt_unique_param(f, keys, at) >= 0 -> unique = true
         }
         part.unique.push(unique)
@@ -726,7 +744,9 @@ ir_opt_unique_field_test: fn(spoil: Int) -> String Never! {
     loop at in 0..<f.op.len() {
         if f.op[at] != .Loop -> next
         assert(f.op[at - 2] == .Offset && f.dst[at - 2] == field && f.op[at - 1] == .Call && f.args[f.b[at - 1]] == field)
-        loop k in (at + 1)..<f.a[at] -> assert(f.op[k] != .Offset && !(f.op[k] == .Call && f.a[k] == 1))
+        loop k in (at + 1)..<f.a[at] {
+            assert(f.op[k] != .Offset && !(f.op[k] == .Call && f.a[k] == 1))
+        }
     }
     notes[0].copy()
 }

@@ -44,20 +44,20 @@ use {
         original: files.read_bytes("source-1.jetc") ?? panic("original")
         files.write_bytes("existing.jetc", "keep".bytes()) ?? panic("existing")
         if sealed.migrate_v1(key, Path.from("source-1.jetc"), recipients, Path.from("existing.jetc")) == {
-            .Ok(_) -> panic("migration overwrote an existing destination")
+            .Ok(_) -> { panic("migration overwrote an existing destination") }
             .Err(error) -> assert_eq(error, crypto.FileCryptoError.DestinationExists)
         }
         assert_eq(files.read_bytes("existing.jetc") ?? panic("existing"), "keep".bytes())
         assert_eq(files.read_bytes("source-1.jetc") ?? panic("source"), original)
         if sealed.migrate_v1(key, Path.from("source-1.jetc"), recipients, Path.from("source-1.jetc")) == {
-            .Ok(_) -> panic("migration overwrote its source")
+            .Ok(_) -> { panic("migration overwrote its source") }
             .Err(error) -> assert_eq(error, crypto.FileCryptoError.DestinationExists)
         }
         assert_eq(files.read_bytes("source-1.jetc") ?? panic("source"), original)
         wrong := [U8]{}
         loop _ in 0..<32 -> wrong.push(U8{9})
         if sealed.migrate_v1(wrong, Path.from("source-1.jetc"), recipients, Path.from("wrong-key.jetc")) == {
-            .Ok(_) -> panic("migration opened with the wrong key")
+            .Ok(_) -> { panic("migration opened with the wrong key") }
             .Err(error) -> assert_eq(error, crypto.FileCryptoError.OpenFailed)
         }
         assert(!files.exists("wrong-key.jetc"))
@@ -67,7 +67,7 @@ use {
         loop b in "bad".bytes() -> hostile.push(b)
         files.write_bytes("hostile.jetc", hostile) ?? panic("hostile")
         if sealed.migrate_v1(key, Path.from("hostile.jetc"), recipients, Path.from("absent.jetc")) == {
-            .Ok(_) -> panic("migration accepted a hostile envelope")
+            .Ok(_) -> { panic("migration accepted a hostile envelope") }
             .Err(error) -> assert_eq(error, crypto.FileCryptoError.OpenFailed)
         }
         assert(!files.exists("absent.jetc"))

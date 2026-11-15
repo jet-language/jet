@@ -82,28 +82,36 @@ foundation_core_argument_menus: fn(effect_roots: [String], builtin_tags: [String
     loop name in declaration.type_exports {
         if name != "IntType" {
             kind := CoreLeafKind.Plain
-            if core_module_enum_variants(module_name, name) == .Val(enum_variants) -> kind = CoreLeafKind.Enum{variants: enum_variants}
+            if core_module_enum_variants(module_name, name) == .Val(enum_variants) {
+                kind = CoreLeafKind.Enum{variants: enum_variants}
+            }
             variants: foundation_core_menu_variants(name, kind, effect_roots, builtin_tags) ?? return None
-            menus.push(TAppliedRuleArgumentMenu{
-                name: name,
-                variants: variants,
-                first_variant_segment: name == "Effect" || name == "Target",
-            })
+            menus.push(
+                TAppliedRuleArgumentMenu{
+                    name: name,
+                    variants: variants,
+                    first_variant_segment: name == "Effect" || name == "Target",
+                },
+            )
         }
     }
     maturity: core_module_enum_variants("core.meta", "Maturity") ?? return None
-    menus.push(TAppliedRuleArgumentMenu{
-        name: "Maturity",
-        variants: maturity,
-        first_variant_segment: false,
-    })
+    menus.push(
+        TAppliedRuleArgumentMenu{
+            name: "Maturity",
+            variants: maturity,
+            first_variant_segment: false,
+        },
+    )
     int_type_variants := [String]{}
     loop kind in foundation_fixed_integers() -> int_type_variants.push(kind.name)
-    menus.push(TAppliedRuleArgumentMenu{
-        name: "IntType",
-        variants: int_type_variants,
-        first_variant_segment: false,
-    })
+    menus.push(
+        TAppliedRuleArgumentMenu{
+            name: "IntType",
+            variants: int_type_variants,
+            first_variant_segment: false,
+        },
+    )
     Val(menus)
 }
 

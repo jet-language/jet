@@ -56,9 +56,7 @@ project_stmt: fn(g: &GraphBuilder, index: SemIndex, src: String, stmt: Stmt, ord
                 g.local_types[name] = ty
             }
         }
-        .Expr(e) -> {
-            _: project_expr_node(g, index, src, e, ordinal, x, y, ExprPlacement.Exec)
-        }
+        .Expr(e) -> { _: project_expr_node(g, index, src, e, ordinal, x, y, ExprPlacement.Exec) }
         .DeferClose(close, span) -> {
             node_id: "{g.graph_id}:stmt:{ordinal}:defer_close"
             add_node(g, node_id, "defer_close", "defer close", span, x, y, [String]{"cleanup"}, [String]{"source_jump"})
@@ -146,7 +144,9 @@ project_stmt: fn(g: &GraphBuilder, index: SemIndex, src: String, stmt: Stmt, ord
             }
             project_stmt_block(g, index, src, body, ordinal * 100 + 40, x + 230, y + 70)
         }
-        .Switch(subject, arms, else_body, span) | .ComptimeSwitch(subject, arms, else_body, span) -> project_switch(g, index, src, SwitchStmt{subject: subject, arms: arms, else_body: else_body, span: span}, ordinal, x, y)
+        .Switch(subject, arms, else_body, span) | .ComptimeSwitch(subject, arms, else_body, span) -> {
+            project_switch(g, index, src, SwitchStmt{subject: subject, arms: arms, else_body: else_body, span: span}, ordinal, x, y)
+        }
         .Break(span) | .Continue(span) | .BreakLabel(_, span) | .ContinueLabel(_, span) -> {
             node_id: "{g.graph_id}:stmt:{ordinal}:flow"
             add_node(g, node_id, "flow", snippet(src, span), span, x, y, [String]{"control"}, [String]{"source_jump"})
@@ -214,7 +214,9 @@ project_stmt: fn(g: &GraphBuilder, index: SemIndex, src: String, stmt: Stmt, ord
             add_node(g, node_id, "branch", "#if", span, x, y, [String]{"comptime"}, [String]{"edit_inline_expr", "source_jump"})
             add_inline(g, node_id, ordinal, "cond", src, expr_span(cond))
             project_stmt_block(g, index, src, then_body, ordinal * 100 + 170, x + 230, y + 70)
-            if else_body == .Val(body) -> project_stmt_block(g, index, src, body, ordinal * 100 + 180, x + 460, y + 70)
+            if else_body == .Val(body) {
+                project_stmt_block(g, index, src, body, ordinal * 100 + 180, x + 460, y + 70)
+            }
         }
         .ComptimeBlock(body, _, span) -> {
             add_region(g, ordinal, "comptime", "comptime", span)
@@ -234,7 +236,9 @@ project_stmt: fn(g: &GraphBuilder, index: SemIndex, src: String, stmt: Stmt, ord
         .ScopeMember(name, _, args, _, body, _, _, span) -> {
             node_id: "{g.graph_id}:stmt:{ordinal}:scope_member:{name}"
             add_node(g, node_id, "function_exec", ".{name}", span, x, y, [String]{"scope"}, [String]{"source_jump"})
-            loop (i, arg) in args -> add_inline(g, node_id, ordinal, "arg{i + 1}", src, expr_span(arg))
+            loop (i, arg) in args {
+                add_inline(g, node_id, ordinal, "arg{i + 1}", src, expr_span(arg))
+            }
             project_stmt_block(g, index, src, body, ordinal * 100 + 210, x + 230, y + 70)
         }
     }
@@ -266,23 +270,25 @@ project_switch: fn(g: &GraphBuilder, index: SemIndex, src: String, switch: Switc
         affordances := [String]{"edit_inline_expr", "source_jump"}
         if pattern_test -> affordances.push("add_pattern_arm")
         add_node(g, node_id, "branch", if pattern_test -> "if ==" else -> "if", switch.span, x, y, [String]{"control"}, affordances)
-        if pattern_subject_type(g, index, arm.cond) == .Val(pattern_type) -> set_pattern_node_type(g, node_id, pattern_type)
+        if pattern_subject_type(g, index, arm.cond) == .Val(pattern_type) {
+            set_pattern_node_type(g, node_id, pattern_type)
+        }
         cond: add_pin(g, node_id, "cond", "input", "Bool", "", false)
         if pattern_test {
             _: add_arm_pin(g, node_id, "arm1", pattern_pin_label(src, arm.cond), pattern_arm_edit_span(src, arm.cond))
         }
         connect_expr_to_input(g, index, src, arm.cond, ordinal, "cond", node_id, cond, x - 220, y)
         project_stmt_block(g, index, src, arm.body, ordinal * 100 + 10, x + 230, y + 70)
-        if switch.else_body == .Val(body) -> project_classic_switch_else(g, index, src, body, ordinal, x + 460, y + 70)
+        if switch.else_body == .Val(body) {
+            project_classic_switch_else(g, index, src, body, ordinal, x + 460, y + 70)
+        }
         return
     }
     node_id: "{g.graph_id}:stmt:{ordinal}:dispatch"
     add_node(g, node_id, "dispatch", if subjectless -> "if guards" else -> "if ==", switch.span, x, y, [String]{"control"}, [String]{"add_pattern_arm", "edit_inline_expr", "source_jump"})
     pattern_type := String?{None}
     if {
-        !subjectless -> {
-            pattern_type = Val(expr_type(g, index, switch.subject))
-        }
+        !subjectless -> { pattern_type = Val(expr_type(g, index, switch.subject)) }
         switch.arms.len() > 0 -> {
             pattern_type = pattern_subject_type(g, index, switch.arms[0].cond)
         }
@@ -298,7 +304,9 @@ project_switch: fn(g: &GraphBuilder, index: SemIndex, src: String, switch: Switc
         add_inline(g, node_id, ordinal, "arm{i + 1}", src, expr_span(arm.cond))
         project_stmt_block(g, index, src, arm.body, ordinal * 100 + 50 + i * 20, x + 230 + i * 180, y + 100)
     }
-    if switch.else_body == .Val(body) -> project_stmt_block(g, index, src, body, ordinal * 100 + 90, x + 460, y + 230)
+    if switch.else_body == .Val(body) {
+        project_stmt_block(g, index, src, body, ordinal * 100 + 90, x + 460, y + 230)
+    }
 }
 
 // An `else if` chain: a lone classic `if` in the else body projects as the
@@ -408,7 +416,9 @@ dispatch_arm_pattern_fragment: fn(src: String, expr: Expr) -> PatternFragment {
 }
 
 pattern_arm_edit_span: fn(src: String, expr: Expr) -> Span {
-    if expr == .PatternTest(_, pattern, _, _) -> return span_through_closing_parens(src, pattern_span(pattern))
+    if expr == .PatternTest(_, pattern, _, _) {
+        return span_through_closing_parens(src, pattern_span(pattern))
+    }
     expr_span(expr)
 }
 

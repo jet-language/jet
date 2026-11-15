@@ -25,7 +25,9 @@ use {
 
 // MBEDTLS_VERSION_MAJOR, _MINOR, _PATCH (build_info.h).
 SSL_SER_VERSION_MAJOR: 3
+
 SSL_SER_VERSION_MINOR: 6
+
 SSL_SER_VERSION_PATCH: 7
 
 // SSL_SERIALIZED_SESSION_CONFIG_BITFLAG under the default configuration:
@@ -48,8 +50,11 @@ SSL_SER_RANDBYTES_LEN: 64
 /// (ssl_serialized_session_header).
 ssl_serialized_session_header: fn() -> [U8] Never! {
     [U8]{
-        ssldefs.ssl_byte(SSL_SER_VERSION_MAJOR), ssldefs.ssl_byte(SSL_SER_VERSION_MINOR), ssldefs.ssl_byte(SSL_SER_VERSION_PATCH),
-        ssldefs.ssl_byte(SSL_SERIALIZED_SESSION_CONFIG_BITFLAG >> 8), ssldefs.ssl_byte(SSL_SERIALIZED_SESSION_CONFIG_BITFLAG)
+        ssldefs.ssl_byte(SSL_SER_VERSION_MAJOR),
+        ssldefs.ssl_byte(SSL_SER_VERSION_MINOR),
+        ssldefs.ssl_byte(SSL_SER_VERSION_PATCH),
+        ssldefs.ssl_byte(SSL_SERIALIZED_SESSION_CONFIG_BITFLAG >> 8),
+        ssldefs.ssl_byte(SSL_SERIALIZED_SESSION_CONFIG_BITFLAG),
     }
 }
 
@@ -83,17 +88,13 @@ ssl_ser_get_time: fn(buf: [U8], off: Int) -> Int Never! {
 
 // MBEDTLS_PUT_UINT64_BE of a U64 counter.
 ssl_ser_push_u64: fn(out: &[U8], v: U64) Never! {
-    loop i in 0..<8 {
-        out.push(ssldefs.ssl_byte(Int{(v >> (56 - 8 * i)).bit_and(U64{0xFF})}))
-    }
+    loop i in 0..<8 { out.push(ssldefs.ssl_byte(Int{(v >> (56 - 8 * i)).bit_and(U64{0xFF})})) }
 }
 
 // MBEDTLS_GET_UINT64_BE into a U64 counter.
 ssl_ser_get_u64: fn(buf: [U8], off: Int) -> U64 Never! {
     v := U64{0}
-    loop i in 0..<8 {
-        v = (v << 8).bit_or(U64{Int{buf[off + i]}})
-    }
+    loop i in 0..<8 -> v = (v << 8).bit_or(U64{Int{buf[off + i]}})
     v
 }
 
@@ -123,13 +124,15 @@ ssl_tls12_session_save: fn(session: ssldefs.SSLSession, out: &[U8]) Never! {
     // C keeps the end-entity certificate alone (peer_cert->raw).
     cert_len := 0
     if session.peer_cert == {
-        .Val(chain) -> { if chain.len() > 0 -> cert_len = chain[0].raw.len() }
+        .Val(chain) -> {
+            if chain.len() > 0 -> cert_len = chain[0].raw.len()
+        }
         None -> {}
     }
     ssldefs.ssl_push_u24(out, cert_len)
     if cert_len > 0 {
         if session.peer_cert == {
-            .Val(chain) -> ssldefs.ssl_push_all(out, chain[0].raw)
+            .Val(chain) -> { ssldefs.ssl_push_all(out, chain[0].raw) }
             None -> {}
         }
     }
@@ -143,7 +146,9 @@ ssl_tls12_session_save: fn(session: ssldefs.SSLSession, out: &[U8]) Never! {
         }
         ssldefs.ssl_push_u32(out, session.ticket_lifetime)
     }
-    if session.endpoint == ssldefs.SSL_IS_SERVER -> ssldefs.ssl_push_u64(out, session.ticket_creation_time)
+    if session.endpoint == ssldefs.SSL_IS_SERVER {
+        ssldefs.ssl_push_u64(out, session.ticket_creation_time)
+    }
     out.push(ssldefs.ssl_byte(session.mfl_code))
     out.push(ssldefs.ssl_byte(session.encrypt_then_mac))
 }
@@ -219,12 +224,16 @@ ssl_tls12_session_load: fn(session: &ssldefs.SSLSession, buf: [U8], start: Int, 
 /// time, or the client's host name, ticket reception time, lifetime and
 /// ticket. A resumption key over 48 bytes is BAD_INPUT_DATA.
 ssl_tls13_session_save: fn(session: ssldefs.SSLSession, out: &[U8]) ssldefs.SSLError! {
-    if session.resumption_key.len() > ssldefs.SSL_TLS1_3_TICKET_RESUMPTION_KEY_LEN -> return Err(.BadInputData)
+    if session.resumption_key.len() > ssldefs.SSL_TLS1_3_TICKET_RESUMPTION_KEY_LEN {
+        return Err(.BadInputData)
+    }
     ssldefs.ssl_push_u32(out, session.ticket_age_add)
     out.push(ssldefs.ssl_byte(session.ticket_flags))
     out.push(ssldefs.ssl_byte(session.resumption_key.len()))
     ssldefs.ssl_push_all(out, session.resumption_key)
-    if session.endpoint == ssldefs.SSL_IS_SERVER -> ssldefs.ssl_push_u64(out, session.ticket_creation_time)
+    if session.endpoint == ssldefs.SSL_IS_SERVER {
+        ssldefs.ssl_push_u64(out, session.ticket_creation_time)
+    }
     if session.endpoint == ssldefs.SSL_IS_CLIENT {
         // The host name with C's terminating NUL, or nothing.
         if session.hostname == {
@@ -260,7 +269,9 @@ ssl_tls13_session_load: fn(session: &ssldefs.SSLSession, buf: [U8], start: Int, 
     resumption_key_len: ssldefs.ssl_u8(buf, p + 5)
     p += 6
     if end - p < resumption_key_len -> return Err(.BadInputData)
-    if resumption_key_len > ssldefs.SSL_TLS1_3_TICKET_RESUMPTION_KEY_LEN -> return Err(.BadInputData)
+    if resumption_key_len > ssldefs.SSL_TLS1_3_TICKET_RESUMPTION_KEY_LEN {
+        return Err(.BadInputData)
+    }
     ssldefs.ssl_wipe(session.resumption_key)
     session.resumption_key = ssldefs.ssl_bytes_of(buf, p, resumption_key_len)
     p += resumption_key_len
@@ -279,9 +290,7 @@ ssl_tls13_session_load: fn(session: &ssldefs.SSLSession, buf: [U8], start: Int, 
             if buf[p + hostname_len - 1] != (U8{0}) -> return Err(.BadInputData)
             // C's strlen: the name ends at its first NUL.
             n := 0
-            loop buf[p + n] != (U8{0}) {
-                n += 1
-            }
+            loop buf[p + n] != (U8{0}) -> n += 1
             hostname: String.from_bytes(ssldefs.ssl_bytes_of(buf, p, n)) ?? return Err(.BadInputData)
             ssltls.ssl_session_set_hostname(session, Val(hostname)) ?? return Err(err)
             p += hostname_len
@@ -352,8 +361,12 @@ ssl_session_load_int: fn(session: &ssldefs.SSLSession, omit_header: Bool, buf: [
     session.endpoint = ssldefs.ssl_u8(buf, p + 1)
     session.ciphersuite = ssldefs.ssl_get_u16(buf, p + 2)
     p += 4
-    if session.tls_version == ssldefs.SSL_VERSION_TLS1_2 -> return ssl_tls12_session_load(session, buf, p, end - p)
-    if session.tls_version == ssldefs.SSL_VERSION_TLS1_3 -> return ssl_tls13_session_load(session, buf, p, end - p)
+    if session.tls_version == ssldefs.SSL_VERSION_TLS1_2 {
+        return ssl_tls12_session_load(session, buf, p, end - p)
+    }
+    if session.tls_version == ssldefs.SSL_VERSION_TLS1_3 {
+        return ssl_tls13_session_load(session, buf, p, end - p)
+    }
     Err(.BadInputData)
 }
 
@@ -397,7 +410,9 @@ ssl_context_save: fn(ssl: &ssldefs.SSLContext) -> [U8] ssldefs.SSLError! {
     if ssl.conf.transport != ssldefs.SSL_TRANSPORT_DATAGRAM -> return Err(.BadInputData)
     if ssl.tls_version != ssldefs.SSL_VERSION_TLS1_2 -> return Err(.BadInputData)
     if !ssltls.ssl_transform_uses_aead(ssl.tpool[ssl.transform]) -> return Err(.BadInputData)
-    if ssl.conf.disable_renegotiation != ssldefs.SSL_RENEGOTIATION_DISABLED -> return Err(.BadInputData)
+    if ssl.conf.disable_renegotiation != ssldefs.SSL_RENEGOTIATION_DISABLED {
+        return Err(.BadInputData)
+    }
     out := ssl_serialized_context_header()
     session := ssl_session_save_int(ssl.spool[ssl.session], true) ?? return Err(err)
     ssldefs.ssl_push_u32(out, session.len())
@@ -447,9 +462,13 @@ ssl_ser_load_alpn: fn(ssl: &ssldefs.SSLContext, buf: [U8], p: Int, len: Int) Nev
 /// BAD_INPUT_DATA, as is an ALPN protocol the configuration lacks.
 ssl_context_load_int: fn(ssl: &ssldefs.SSLContext, buf: [U8]) ssldefs.SSLError! {
     if ssl.state != ssldefs.SSL_HELLO_REQUEST || ssl.session >= 0 -> return Err(.BadInputData)
-    if ssl.conf.disable_renegotiation != ssldefs.SSL_RENEGOTIATION_DISABLED -> return Err(.BadInputData)
+    if ssl.conf.disable_renegotiation != ssldefs.SSL_RENEGOTIATION_DISABLED {
+        return Err(.BadInputData)
+    }
     if ssl.conf.transport != ssldefs.SSL_TRANSPORT_DATAGRAM -> return Err(.BadInputData)
-    if ssl.conf.max_tls_version < ssldefs.SSL_VERSION_TLS1_2 || ssl.conf.min_tls_version > ssldefs.SSL_VERSION_TLS1_2 -> return Err(.BadInputData)
+    if ssl.conf.max_tls_version < ssldefs.SSL_VERSION_TLS1_2 || ssl.conf.min_tls_version > ssldefs.SSL_VERSION_TLS1_2 {
+        return Err(.BadInputData)
+    }
     // C uses the session and transform the set-up or reset allocated; a
     // context without them is not one.
     if ssl.session_negotiate < 0 || ssl.transform_negotiate < 0 -> return Err(.BadInputData)

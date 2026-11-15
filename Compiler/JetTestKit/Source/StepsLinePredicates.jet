@@ -38,15 +38,21 @@ kit_steps_expression_atom: fn(words: [String], start: Int, line: String) -> KitL
     }
     if op == "(" {
         inner: kit_steps_expression_or(words, start + 1, line)
-        if !inner.valid || inner.next >= words.len() || words[inner.next] != ")" -> return KitLinePredicate{valid: false, value: false, next: inner.next}
+        if !inner.valid || inner.next >= words.len() || words[inner.next] != ")" {
+            return KitLinePredicate{valid: false, value: false, next: inner.next}
+        }
         return KitLinePredicate{valid: true, value: inner.value, next: inner.next + 1}
     }
     if op == "chars" {
-        if start + 2 >= words.len() || !kit_expect_named(["=", "!=", "<", "<=", ">", ">="], words[start + 1]) -> return KitLinePredicate{valid: false, value: false, next: start}
+        if start + 2 >= words.len() || !kit_expect_named(["=", "!=", "<", "<=", ">", ">="], words[start + 1]) {
+            return KitLinePredicate{valid: false, value: false, next: start}
+        }
         number: Int.parse(words[start + 2]) ?? return KitLinePredicate{valid: false, value: false, next: start}
         return KitLinePredicate{valid: number >= 0, value: kit_steps_compare(kit_steps_scalar_count(line), words[start + 1], number), next: start + 3}
     }
-    if start + 1 >= words.len() || !kit_expect_named(["~", "!~", "^=", "$=", "=", "!=", "!^="], op) -> return KitLinePredicate{valid: false, value: false, next: start}
+    if start + 1 >= words.len() || !kit_expect_named(["~", "!~", "^=", "$=", "=", "!=", "!^="], op) {
+        return KitLinePredicate{valid: false, value: false, next: start}
+    }
     KitLinePredicate{valid: true, value: kit_steps_line_atom(line, op, words[start + 1]), next: start + 2}
 }
 

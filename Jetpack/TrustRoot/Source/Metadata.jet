@@ -12,7 +12,6 @@ use {
     json: core.encoding.json
 }
 
-
 MetadataRole: enum {
     Root
     Targets
@@ -39,14 +38,20 @@ RoleKeys: struct {
     threshold: Int
 
     new: fn(key_ids: [String], threshold: Int) -> RoleKeys TrustRootError! {
-        if threshold == 0 -> return Err(TrustRootError.InvalidThreshold{detail: "threshold must be >= 1"})
-        if threshold > key_ids.len() -> return Err(TrustRootError.InvalidThreshold{detail: "threshold {threshold} exceeds key count {key_ids.len()}"})
+        if threshold == 0 {
+            return Err(TrustRootError.InvalidThreshold{detail: "threshold must be >= 1"})
+        }
+        if threshold > key_ids.len() {
+            return Err(TrustRootError.InvalidThreshold{detail: "threshold {threshold} exceeds key count {key_ids.len()}"})
+        }
         seen := [String]{}
         loop id in key_ids {
-            if seen.contains(id) -> return Err(TrustRootError.InvalidThreshold{detail: "duplicate key id `{id}` in role"})
+            if seen.contains(id) {
+                return Err(TrustRootError.InvalidThreshold{detail: "duplicate key id `{id}` in role"})
+            }
             seen.push(id.copy())
         }
-        Ok(RoleKeys{key_ids, threshold})
+        Ok(RoleKeys{key_ids: key_ids, threshold: threshold})
     }
 }
 
@@ -71,38 +76,36 @@ TUFRootMetadata: struct {
     version: Int
     expires_unix: Int
     consistent_snapshot: Bool
-    roles: [String: RoleKeys]
+    roles: [String:RoleKeys]
     delegations: [Delegation]
-    public_key_ids: [String: String]
+    public_key_ids: [String:String]
 
-    role: fn(self, role: MetadataRole) -> RoleKeys? Never! {
-        self.roles.get(role.label())
-    }
+    role: fn(self, role: MetadataRole) -> RoleKeys? Never! { self.roles.get(role.label()) }
 }
 
 TargetMeta: struct {
     length: Int
-    hashes: [String: String]
-    custom: [String: String]
+    hashes: [String:String]
+    custom: [String:String]
 }
 
 TargetsMetadata: struct {
     version: Int
     expires_unix: Int
-    targets: [String: TargetMeta]
+    targets: [String:TargetMeta]
 }
 
 SnapshotMetaEntry: struct {
     version: Int
     length: Int
-    hashes: [String: String]
+    hashes: [String:String]
 }
 
 SnapshotMetadata: struct {
     version: Int
     expires_unix: Int
     // role name -> version, length, and hashes of that role's signed bytes.
-    meta: [String: SnapshotMetaEntry]
+    meta: [String:SnapshotMetaEntry]
 }
 
 TimestampMetadata: struct {
@@ -129,19 +132,13 @@ TrustRootPolicy: struct {
 
 // Offline keyring for role signing and verification (never a helper).
 Keyring: struct {
-    priv keys: [String: TrustKey]
+    priv keys: [String:TrustKey]
 
-    empty: fn() -> Keyring Never! {
-        Keyring{keys: [String: TrustKey]{}}
-    }
+    empty: fn() -> Keyring Never! { Keyring{keys: [String:TrustKey]{}} }
 
-    insert: fn(&self, key: TrustKey) Never! {
-        self.keys[key.key_id] = key
-    }
+    insert: fn(&self, key: TrustKey) Never! { self.keys[key.key_id] = key }
 
-    get: fn(self, key_id: String) -> TrustKey? Never! {
-        self.keys.get(key_id)
-    }
+    get: fn(self, key_id: String) -> TrustKey? Never! { self.keys.get(key_id) }
 
     verify: fn(self, key_id: String, message: [U8], signature: TrustSignature) TrustRootError! {
         key: self.keys.get(key_id) ?? return Err(TrustRootError.UnknownKey{key_id: key_id})
@@ -182,16 +179,24 @@ RootBootstrap: struct {
                 }
             }
         }
-        if metadata.is_symlink || !metadata.is_file -> return Err(TrustRootError.IO{detail: "trusted-root bootstrap is not a regular file"})
-        if metadata.size > TRUST_BOOTSTRAP_MAX_BYTES -> return Err(TrustRootError.IO{detail: "trusted-root bootstrap is too large"})
+        if metadata.is_symlink || !metadata.is_file {
+            return Err(TrustRootError.IO{detail: "trusted-root bootstrap is not a regular file"})
+        }
+        if metadata.size > TRUST_BOOTSTRAP_MAX_BYTES {
+            return Err(TrustRootError.IO{detail: "trusted-root bootstrap is too large"})
+        }
         digest := String?{None}
         version := Int?{None}
         consistent := Bool?{None}
         loop line in trust_root_lines(files.read(path)) {
             if {
                 line.starts_with("digest=") -> digest = Val(line.removeprefix("digest="))
-                line.starts_with("version=") -> version = trust_parse_u64(line.removeprefix("version="))
-                line.starts_with("consistent_snapshot=") -> consistent = Val(line.removeprefix("consistent_snapshot=") == "true")
+                line.starts_with("version=") -> {
+                    version = trust_parse_u64(line.removeprefix("version="))
+                }
+                line.starts_with("consistent_snapshot=") -> {
+                    consistent = Val(line.removeprefix("consistent_snapshot=") == "true")
+                }
                 else -> {}
             }
         }
@@ -199,7 +204,7 @@ RootBootstrap: struct {
         if !trust_root_is_hex64(pin_digest) -> return Err(TrustRootError.BootstrapMissing)
         root_version: version ?? return Err(TrustRootError.BootstrapMissing)
         consistent_snapshot: consistent ?? return Err(TrustRootError.BootstrapMissing)
-        Ok(RootBootstrap{pin_digest, root_version, consistent_snapshot})
+        Ok(RootBootstrap{pin_digest: pin_digest, root_version: root_version, consistent_snapshot: consistent_snapshot})
     }
 }
 
@@ -214,17 +219,23 @@ PublicTrustKey: struct {
     // One `key-id:base64-public-key` line; the key decodes to 32 bytes.
     from_nix_line: fn(role: String, value: String) -> PublicTrustKey TrustRootError! {
         known: [String]{"index", "cache", "toolchain"}
-        if !known.contains(role) -> return Err(TrustRootError.InvalidKey{detail: "unknown public trust role `{role}`"})
+        if !known.contains(role) {
+            return Err(TrustRootError.InvalidKey{detail: "unknown public trust role `{role}`"})
+        }
         parts: value.trim().split_once(":") ?? return Err(TrustRootError.InvalidKey{detail: "public trust key must be key-id:base64-public-key"})
         key_id: parts.before
         encoded: parts.after
         if key_id == "" || encoded == "" || trust_has_control(key_id) || trust_has_control(encoded) || trust_has_inner_space(encoded) {
             return Err(TrustRootError.InvalidKey{detail: "public trust key has invalid key id or encoding"})
         }
-        if trust_is_test_public_key_id(key_id) -> return Err(TrustRootError.InvalidKey{detail: "test public trust key `{key_id}` cannot be published"})
+        if trust_is_test_public_key_id(key_id) {
+            return Err(TrustRootError.InvalidKey{detail: "test public trust key `{key_id}` cannot be published"})
+        }
         decoded: base64.decode(encoded) ?? return Err(TrustRootError.InvalidKey{detail: "public trust key is not padded base64"})
-        if decoded.len() != 32 -> return Err(TrustRootError.InvalidKey{detail: "public trust key must decode to 32 bytes"})
-        Ok(PublicTrustKey{role, key_id, algorithm: "ed25519", public_key: encoded})
+        if decoded.len() != 32 {
+            return Err(TrustRootError.InvalidKey{detail: "public trust key must decode to 32 bytes"})
+        }
+        Ok(PublicTrustKey{role: role, key_id: key_id, algorithm: "ed25519", public_key: encoded})
     }
 
     path_for_publication: fn(self) -> String Never! {
@@ -255,11 +266,15 @@ trust_is_test_public_key_id: fn(key_id: String) -> Bool Never! {
 // are built with `Dyn.object()` so the wire keeps the declared field order;
 // a `[String: Dyn]` map would iterate its keys sorted.
 trust_public_trust_manifest: fn(domain: String, bootstrap: RootBootstrap?, keys: [PublicTrustKey]) -> String TrustRootError! {
-    if domain == "" || trust_has_control(domain) || trust_has_inner_space(domain) -> return Err(TrustRootError.InvalidKey{detail: "public trust manifest domain is empty or contains whitespace"})
+    if domain == "" || trust_has_control(domain) || trust_has_inner_space(domain) {
+        return Err(TrustRootError.InvalidKey{detail: "public trust manifest domain is empty or contains whitespace"})
+    }
     sorted := keys
     sorted.sort_by(fn(key) { key.role })
     loop index in 1..<sorted.len() {
-        if sorted[index - 1].role == sorted[index].role -> return Err(TrustRootError.InvalidKey{detail: "public trust role `{sorted[index].role}` is duplicated"})
+        if sorted[index - 1].role == sorted[index].role {
+            return Err(TrustRootError.InvalidKey{detail: "public trust role `{sorted[index].role}` is duplicated"})
+        }
     }
     status: if sorted.len() == 0 -> "awaiting-key-ceremony" else -> "prepared"
     root: if bootstrap == {

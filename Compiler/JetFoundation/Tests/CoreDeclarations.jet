@@ -7,18 +7,44 @@
 use {
     core_declarations_files: core.files
     jet_foundation.[
-        CORE_CALL_EXTENSIONS, CORE_CALLS, CORE_DECLARATIONS, CORE_DECLARATIONS_CORE_PATH,
-        CORE_DECLARATIONS_ENCODING_PATH, CORE_DECLARATIONS_PARTS_PATH, CORE_DECLARATIONS_RUNTIME_FILES,
-        CORE_DECLARATIONS_SYNTAX_FILES, CoreCapabilityKind, CoreDeclPublic, CoreDeclarationDispatcher,
-        CoreDeclarationError, CoreDeclarationFile, CoreDeclarationType, CoreDeclarations,
-        EFFECT_VOCABULARY_ROWS, EffectVocabularyRow, core_call_key, core_declarations_module,
-        core_declarations_read, core_declarations_source_problems, core_decl_call_record,
-        core_decl_constructor_offsets, core_decl_directory, core_decl_dispatcher,
-        core_decl_effect_roots_problem, core_decl_embedded_names,
-        core_decl_list_body, core_decl_problem, core_decl_public_problem,
-        core_decl_register_public, core_decl_resolve_items, core_decl_rust_string_text,
-        core_decl_snake_segment, core_decl_source_lines, core_decl_source_locals,
-        core_decl_syntax_constants, core_decl_wrapper_unit,
+        CORE_CALL_EXTENSIONS,
+        CORE_CALLS,
+        CORE_DECLARATIONS,
+        CORE_DECLARATIONS_CORE_PATH,
+        CORE_DECLARATIONS_ENCODING_PATH,
+        CORE_DECLARATIONS_PARTS_PATH,
+        CORE_DECLARATIONS_RUNTIME_FILES,
+        CORE_DECLARATIONS_SYNTAX_FILES,
+        CoreCapabilityKind,
+        CoreDeclPublic,
+        CoreDeclarationDispatcher,
+        CoreDeclarationError,
+        CoreDeclarationFile,
+        CoreDeclarationType,
+        CoreDeclarations,
+        EFFECT_VOCABULARY_ROWS,
+        EffectVocabularyRow,
+        core_call_key,
+        core_declarations_module,
+        core_declarations_read,
+        core_declarations_source_problems,
+        core_decl_call_record,
+        core_decl_constructor_offsets,
+        core_decl_directory,
+        core_decl_dispatcher,
+        core_decl_effect_roots_problem,
+        core_decl_embedded_names,
+        core_decl_list_body,
+        core_decl_problem,
+        core_decl_public_problem,
+        core_decl_register_public,
+        core_decl_resolve_items,
+        core_decl_rust_string_text,
+        core_decl_snake_segment,
+        core_decl_source_lines,
+        core_decl_source_locals,
+        core_decl_syntax_constants,
+        core_decl_wrapper_unit,
     ]
 }
 
@@ -51,7 +77,9 @@ core_declarations_sources: fn(declared: CoreDeclarations) -[FS]> [CoreDeclaratio
     loop part in declared.parts {
         if !paths.contains(part.path) -> paths.push(part.path.copy())
     }
-    if !paths.contains(CORE_DECLARATIONS_ENCODING_PATH) -> paths.push(CORE_DECLARATIONS_ENCODING_PATH)
+    if !paths.contains(CORE_DECLARATIONS_ENCODING_PATH) {
+        paths.push(CORE_DECLARATIONS_ENCODING_PATH)
+    }
     loop path in paths -> CoreDeclarationFile{path: path.copy(), text: core_declarations_files.read(path) ?? panic("{path} did not read")}
 }
 
@@ -65,14 +93,14 @@ core_declarations_type_in: fn(declared: CoreDeclarations, module_name: String, n
 
 // The error text evaluating one constructor chain reports, or "".
 core_declarations_call_error: fn(expression: String) -> String Never! {
-    if core_decl_call_record(expression, "fixture", [String: String]{}) == {
+    if core_decl_call_record(expression, "fixture", [String:String]{}) == {
         .Ok(_) -> ""
         .Err(error) -> error.message
     }
 }
 
 // The error text one `dispatcher_row <kind> <module> <member>` reports, or "".
-core_declarations_row_error: fn(kind: String, written_module: String, member: String, expression: String, constants: [String: String]) -> String Never! {
+core_declarations_row_error: fn(kind: String, written_module: String, member: String, expression: String, constants: [String:String]) -> String Never! {
     if core_decl_dispatcher([String]{kind, written_module, member}, expression, 7, constants) == {
         .Ok(_) -> ""
         .Err(error) -> error.message
@@ -87,7 +115,7 @@ core_declarations_wrapper: fn(text: String, member: String) -> String Never! {
 
 // One dispatcher of a fixture `declared`, built from `expression`.
 core_declarations_stray: fn(kind: String, module_name: String, member: String, expression: String, line: Int) -> CoreDeclarationDispatcher Never! {
-    evaluated: core_decl_call_record(expression, "fixture", [String: String]{}) ?? panic("the fixture row was refused: {err.message}")
+    evaluated: core_decl_call_record(expression, "fixture", [String:String]{}) ?? panic("the fixture row was refused: {err.message}")
     CoreDeclarationDispatcher{kind: kind, module_name: module_name, member: member, line: line, constructor: evaluated.constructor, record: evaluated.record}
 }
 
@@ -168,22 +196,26 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
 }
 
 #Test("dispatcher row expressions evaluate to their CoreCallRecord facts") {
-    none: [String: String]{}
+    none: [String:String]{}
     shortcut: (core_decl_call_record("CoreCallRecord::source_owned(\"core.ui.host\", \"shortcut\", &[false, false]).with_ui_capabilities(&[\"UI.Shortcuts\"])", "source-owned constructor fixture", none) ?? panic("the source-owned constructor was refused: {err.message}")).record
     assert(shortcut.module_name == "core.ui.host" && shortcut.member == "shortcut" && shortcut.receiver_types.len() == 0)
     assert(shortcut.signature.arity == 2 && shortcut.signature.max_arity == 2 && shortcut.signature.borrow_mask == [Bool]{false, false})
     assert(shortcut.capability.kind == CoreCapabilityKind.Pure && shortcut.effect_kind == None && shortcut.source_target == None)
     assert(shortcut.coverage.bits == 1 && !shortcut.aot_direct && !shortcut.native_int_result)
     assert_eq(shortcut.ui_capabilities, [String]{"UI.Shortcuts"})
-    assert(if shortcut.symbol == {
-        .SourceOwned -> true
-        .Prelude(_) -> false
-    })
+    assert(
+        if shortcut.symbol == {
+            .SourceOwned -> true
+            .Prelude(_) -> false
+        },
+    )
     connect: (core_decl_call_record("CoreCallRecord::new(\"core.net\", \"unix_connect\", \"jet_net_unix_connect\", true, &[true]).with_max_arity(2).with_source_owned().with_source_target(\"__unix_connect_entry\")", "source-owned builder fixture", none) ?? panic("the source-owned builder was refused: {err.message}")).record
-    assert(if connect.symbol == {
-        .SourceOwned -> true
-        .Prelude(_) -> false
-    })
+    assert(
+        if connect.symbol == {
+            .SourceOwned -> true
+            .Prelude(_) -> false
+        },
+    )
     assert_eq(connect.source_target ?? "", "__unix_connect_entry")
     assert(connect.signature.arity == 1 && connect.signature.max_arity == 2 && connect.coverage.bits == 1 && !connect.aot_direct)
     assert((connect.effect_kind ?? "") == "Net" && (connect.effect_leaf ?? "") == "Time.Wait")
@@ -212,7 +244,9 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
         (kind: "receiver", module_name: "-", member: "METHOD_RECEIPT_ATTACH", expression: "CoreCallRecord::receiver_with_symbol(&[INTERNAL_RECEIPT_HANDLE], METHOD_RECEIPT_ATTACH, \"jet_receipt_attach\", true, &[])"),
         (kind: "receiver", module_name: "-", member: "collect", expression: "CoreCallRecord::receiver_with_symbol(&[\"Query\"], \"collect\", \"\", true, &[true]).with_source_owned().with_source_target(\"core.data.__query_collect\")"),
     }
-    loop row in accepted -> assert_eq(core_declarations_row_error(row.kind, row.module_name, row.member, row.expression, constants), "")
+    loop row in accepted {
+        assert_eq(core_declarations_row_error(row.kind, row.module_name, row.member, row.expression, constants), "")
+    }
     targeted: (core_decl_call_record("CoreCallRecord::source_owned(\"core.fake\", \"call\", &[false]).with_source_target(\"__checked_call\")", "target fixture", constants) ?? panic("the targeted row was refused: {err.message}")).record
     assert(targeted.module_name == "core.fake" && targeted.member == "call" && (targeted.source_target ?? "") == "__checked_call")
     ordinary: (core_decl_call_record("CoreCallRecord::source_owned(\"core.fake\", \"call\", &[false])", "ordinary fixture", constants) ?? panic("the ordinary row was refused: {err.message}")).record
@@ -220,7 +254,7 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
 }
 
 #Test("public dispatcher rows must name a ledger module once") {
-    none: [String: String]{}
+    none: [String:String]{}
     expression: "CoreCallRecord::new(\"core.nowhere\", \"probe\", \"jet_nowhere_probe\", true, &[true])"
     declared := CORE_DECLARATIONS.copy()
     declared.dispatchers = [CoreDeclarationDispatcher]{core_declarations_stray("plain", "core.nowhere", "probe", expression, 9001)}
@@ -247,7 +281,7 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
 }
 
 #Test("list bodies, owned wrappers and source names read as the build reads them") {
-    constants: [String: String]{"TYPE_PTR": "Ptr", "MEM_COPY": "copy"}
+    constants: [String:String]{"TYPE_PTR": "Ptr", "MEM_COPY": "copy"}
     body: core_decl_list_body("X: 1\nTIERS: [Row]{{\n    (name: TYPE_PTR, note: \"a {{ brace\"),\n    (name: Syntax::MEM_COPY),\n    (name: \"zero\"),\n}}\n", "TIERS: ", "fixture") ?? panic("the list body was refused: {err.message}")
     assert_eq(core_decl_resolve_items(body, constants), [String]{"Ptr", "a {{ brace", "copy", "zero"})
     assert(core_decl_list_body("TIERS: [Row]{{\n", "TIERS: ", "fixture") == .Err(_))

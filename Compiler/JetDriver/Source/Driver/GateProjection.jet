@@ -53,7 +53,9 @@ JetDriverGateQueryResult: struct {
 jet_driver_gate_query: fn(request: JetDriverCompileRequest) -> JetDriverGateQueryResult {
     load: jet_driver_load_with_names(request)
     source: jet_driver_source_query_loaded(load, request)
-    if !source.complete -> return JetDriverGateQueryResult{source: source, ledger: GateLedger{}, diagnostics: source.diagnostics, complete: false}
+    if !source.complete {
+        return JetDriverGateQueryResult{source: source, ledger: GateLedger{}, diagnostics: source.diagnostics, complete: false}
+    }
     modules := [SemaGateModule]{}
     programs := [Program]{}
     entry_index := -1
@@ -67,7 +69,9 @@ jet_driver_gate_query: fn(request: JetDriverCompileRequest) -> JetDriverGateQuer
     }
     names: source.names ?? panic("completed load lost its canonical name facts")
     ledger := sema_gate_ledger_collect(modules, names, request.gate_set, request.external_gate_entries, sema_gate_checked_text_names(programs))
-    loop diagnostic in sema_gate_policy_diagnostics(ledger, modules, entry_index) -> ledger.diagnostic_rows.push(diagnostic)
+    loop diagnostic in sema_gate_policy_diagnostics(ledger, modules, entry_index) {
+        ledger.diagnostic_rows.push(diagnostic)
+    }
     diagnostics := source.diagnostics
     loop entry in ledger.diagnostic_rows {
         path := entry.source
@@ -143,10 +147,18 @@ jet_driver_unsafe_check: fn(request: JetDriverCompileRequest, load: &JetDriverLo
         modules.push(row)
         owners.push(index)
     }
-    if modules.len() == 0 -> return
+    if modules.len() == 0 {
+        return
+    }
     inspection: sema_unsafe_inspect(modules, request.gate_set)
     refusals: sema_gate_source_policy_diagnostics(modules)
-    loop position in 0..<owners.len() -> compiler_transfer_rows<Item>(load.modules[owners[position]].program.items, modules[position].program.items)
-    loop entry in inspection.diagnostics -> load.diagnostics.push(diagnostic_with_source_path(entry.diagnostic, unit_paths.get(entry.source) ?? entry.source, 0))
-    loop entry in refusals -> load.diagnostics.push(diagnostic_with_source_path(entry.diagnostic, unit_paths.get(entry.source) ?? entry.source, 0))
+    loop position in 0..<owners.len() {
+        compiler_transfer_rows<Item>(load.modules[owners[position]].program.items, modules[position].program.items)
+    }
+    loop entry in inspection.diagnostics {
+        load.diagnostics.push(diagnostic_with_source_path(entry.diagnostic, unit_paths.get(entry.source) ?? entry.source, 0))
+    }
+    loop entry in refusals {
+        load.diagnostics.push(diagnostic_with_source_path(entry.diagnostic, unit_paths.get(entry.source) ?? entry.source, 0))
+    }
 }

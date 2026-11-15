@@ -19,9 +19,7 @@ use {
         if index == 10 {
             new.push("L10")
             expected = "{expected}@@ -11,1 +{new.len()},1 @@\n-l10\n+L10\n"
-        } else {
-            new.push("l{index}")
-        }
+        } else { new.push("l{index}") }
         if index % 3 == 2 {
             new.push("")
             expected = "{expected}@@ -{index + 1},0 +{new.len()},1 @@\n+\n"
@@ -34,7 +32,8 @@ use {
 }
 
 #Test("formatter_edits_refuse_non_utf8_boundaries") {
-    loop bounds in [(start: 1, finish: 2), (start: 0, finish: 1), (start: 0, finish: 4), (start: 2, finish: 1)] {
+    loop bounds in
+        [(start: 1, finish: 2), (start: 0, finish: 1), (start: 0, finish: 4), (start: 2, finish: 1)] {
         edits: [TextEdit]{TextEdit{span: Span{start: bounds.start, end: bounds.finish}, new_text: "a"}}
         assert(jfmt_apply_source_edits("éx", edits) == None)
     }
@@ -49,12 +48,14 @@ use {
 }
 
 #Test("lambda_interface_round_trips_parameters_and_pure_effect_row") {
-    formatted: parser_test_stable(`LambdaError: enum { Invalid }
+    formatted: parser_test_stable(
+        `LambdaError: enum { Invalid }
 
 run: fn() {
     increment: fn(n: Int) -[]> { return n + 1 }
 }
-`)
+`,
+    )
     assert(formatted.contains("(n: Int) -[]>"))
     assert(!formatted.contains("(n: Int) Int"))
 }

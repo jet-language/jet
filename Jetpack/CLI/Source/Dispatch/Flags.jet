@@ -157,9 +157,7 @@ cli_flag_argument: fn(args: [String], index: Int) -> String? Never! {
 }
 
 // Verb-agnostic parse.
-cli_parse_args: fn(args: [String]) -> CLIParsed Never! {
-    cli_parse_args_for("", args)
-}
+cli_parse_args: fn(args: [String]) -> CLIParsed Never! { cli_parse_args_for("", args) }
 
 // Verb-aware parse: `update` and `lock` own their scope flags.
 cli_parse_args_for: fn(verb: String, args: [String]) -> CLIParsed Never! {
@@ -177,7 +175,9 @@ cli_parse_args_for: fn(verb: String, args: [String]) -> CLIParsed Never! {
         }
         if {
             arg == "--no-color" -> flags.color = ColorChoice.Never
-            arg.starts_with("--color=") -> flags.color = ColorChoice.parse(cli_trim_start_matches(arg, "--color="))
+            arg.starts_with("--color=") -> {
+                flags.color = ColorChoice.parse(cli_trim_start_matches(arg, "--color="))
+            }
             arg == "--offline" -> flags.offline = true
             arg == "--online" -> flags.online = true
             arg == CLI_FLAG_YES_SHORT || arg == CLI_FLAG_YES_LONG -> flags.assume_yes = true
@@ -187,7 +187,9 @@ cli_parse_args_for: fn(verb: String, args: [String]) -> CLIParsed Never! {
                 index += 1
                 flags.lock_against = Val(cli_flag_argument(args, index) ?? "")
             }
-            lock_verb && arg.starts_with(lock_against_prefix) -> flags.lock_against = Val(cli_trim_start_matches(arg, lock_against_prefix))
+            lock_verb && arg.starts_with(lock_against_prefix) -> {
+                flags.lock_against = Val(cli_trim_start_matches(arg, lock_against_prefix))
+            }
             arg == TRUST_BYPASS_FLAG -> flags.trust = true
             arg == ENV_FLAG_FLAKE -> flags.flake = true
             arg == ENV_FLAG_PURE -> flags.pure = true
@@ -206,7 +208,9 @@ cli_parse_args_for: fn(verb: String, args: [String]) -> CLIParsed Never! {
             arg == "--read-only" -> flags.read_only = true
             arg == SECRETS_FLAG_FORCE -> flags.force = true
             arg == "--adapt" -> flags.adapt = true
-            (verb == TRANSITION_SPLIT_VERB || verb == TRANSITION_FOLD_VERB) && arg == TRANSITION_FLAG_CHECK -> flags.transition_check = true
+            (verb == TRANSITION_SPLIT_VERB || verb == TRANSITION_FOLD_VERB) && arg == TRANSITION_FLAG_CHECK -> {
+                flags.transition_check = true
+            }
             arg == "--json" -> flags.json = true
             arg == BUILD_FLAG_SHELL_ON_FAIL -> flags.shell_on_fail = true
             arg == TRUST_FLAG_SCOPE -> {
@@ -214,9 +218,7 @@ cli_parse_args_for: fn(verb: String, args: [String]) -> CLIParsed Never! {
                 if scope != "" && !scope.starts_with("-") {
                     index += 1
                     flags.trust_scope = Val(scope)
-                } else {
-                    flags.trust_scope = Val("")
-                }
+                } else { flags.trust_scope = Val("") }
             }
             arg == IMAGE_FLAG_PUSH -> {
                 index += 1
@@ -259,11 +261,15 @@ cli_parse_args_for: fn(verb: String, args: [String]) -> CLIParsed Never! {
             }
             arg == BROWSER_FLAG_PROTOCOL -> {
                 index += 1
-                if cli_flag_argument(args, index) == .Val(protocol) -> flags.browser_protocol = Val(protocol)
+                if cli_flag_argument(args, index) == .Val(protocol) {
+                    flags.browser_protocol = Val(protocol)
+                }
             }
             arg == BROWSER_FLAG_DRIVER -> {
                 index += 1
-                if cli_flag_argument(args, index) == .Val(driver) -> flags.browser_driver = Val(driver)
+                if cli_flag_argument(args, index) == .Val(driver) {
+                    flags.browser_driver = Val(driver)
+                }
             }
             arg == "--to" -> {
                 index += 1
@@ -284,17 +290,23 @@ cli_parse_args_for: fn(verb: String, args: [String]) -> CLIParsed Never! {
                 index += 1
                 if cli_flag_argument(args, index) == .Val(role) -> flags.cache_role = Val(role)
             }
-            arg.starts_with("--role=") -> flags.cache_role = Val(cli_trim_start_matches(arg, "--role="))
+            arg.starts_with("--role=") -> {
+                flags.cache_role = Val(cli_trim_start_matches(arg, "--role="))
+            }
             arg == "--credential" -> {
                 index += 1
-                if cli_flag_argument(args, index) == .Val(provider) -> flags.cache_credential = Val(provider)
+                if cli_flag_argument(args, index) == .Val(provider) {
+                    flags.cache_credential = Val(provider)
+                }
             }
-            arg.starts_with("--credential=") -> flags.cache_credential = Val(cli_trim_start_matches(arg, "--credential="))
+            arg.starts_with("--credential=") -> {
+                flags.cache_credential = Val(cli_trim_start_matches(arg, "--credential="))
+            }
             else -> positional.push(arg.copy())
         }
         index += 1
     }
-    CLIParsed{flags, positional, command}
+    CLIParsed{flags: flags, positional: positional, command: command}
 }
 
 // The arguments before the first `--`; invocation checks never read the
@@ -311,8 +323,10 @@ cli_before_argument_separator: fn(args: [String]) -> [String] Never! {
 // The flags every verb takes: color, machine output, the network policy,
 // captured fixtures, and the confirmation bypass.
 CLI_COMMON_FLAGS: #run { [String]{"--color=<when>", "--no-color", "--json", "--offline", "--fixtures <dir>", CLI_FLAG_YES_SHORT, CLI_FLAG_YES_LONG} }
+
 // The flags of every verb that realizes packages.
 CLI_REALIZE_FLAGS: #run { [String]{TRUST_BYPASS_FLAG, "--local-nix-catalog <dir>", BUILD_FLAG_SHELL_ON_FAIL} }
+
 // The environment selectors.
 CLI_SCOPE_FLAGS: #run { [String]{"{ENV_FLAG_ENV} <name>", "{ENV_FLAG_PRESET} <name>"} }
 
@@ -373,9 +387,7 @@ cli_unknown_flag: fn(verb: String, args: [String]) -> String? Never! {
         matched := false
         loop spelling in legal {
             head: cli_flag_spelling_head(spelling)
-            if head.ends_with("=") {
-                matched = arg.starts_with(head)
-            } else {
+            if head.ends_with("=") -> matched = arg.starts_with(head) else {
                 matched = arg == head
                 takes_value = matched && spelling.contains(" <") && !spelling.ends_with("...")
             }

@@ -29,7 +29,9 @@ run: fn() {
     loop name in rust_symbols {
         if !link_pack_rust_symbol(name) -> panic("Rust runtime dependency was not rejected: {name}")
     }
-    if link_pack_rust_symbol("jet_rt_alloc") || link_pack_rust_symbol("_Rpack_private_helper") -> panic("ordinary fixture/runtime name mistaken for Rust")
+    if link_pack_rust_symbol("jet_rt_alloc") || link_pack_rust_symbol("_Rpack_private_helper") {
+        panic("ordinary fixture/runtime name mistaken for Rust")
+    }
     object: files.read_bytes("runtime.o") ?? panic("read runtime object")
     archive: files.read_bytes("runtime.a") ?? panic("read runtime archive")
     consumer: files.read_bytes("consumer.o") ?? panic("read consumer object")
@@ -40,9 +42,7 @@ run: fn() {
     link_load_inputs(c, [String]{"hybrid.pack.o"})
     if c.errors.len() != 0 -> panic("pack is not a valid object: {c.errors}")
     public_names: [String]{"jet_rt_fixture_export", "jet_rt_fixture_unreferenced", "jet_rt_fixture_protected", "jet_archive_fixture"}
-    loop name in public_names {
-        pack_roots_defined(c, name, 1)
-    }
+    loop name in public_names { pack_roots_defined(c, name, 1) }
     pack_roots_defined(c, "jet_rt_fixture_weak", 2)
     // GNU as calls the section directly, so no relocation names the helper;
     // it keeps its local FUNC name all the same (link_pack_name_kept), for
@@ -50,9 +50,7 @@ run: fn() {
     // result, not merely its label.
     pack_roots_defined(c, "pack_private_helper", 0)
     private_names: [String]{"pack_named_local_helper", "jet_pack_hidden_helper", "_Rpack_private_helper"}
-    loop name in private_names {
-        pack_roots_defined(c, name, 0)
-    }
+    loop name in private_names { pack_roots_defined(c, name, 0) }
     dead_names: [String]{"pack_dead_private", "jet_pack_dead_hidden"}
     loop name in dead_names {
         if pack_roots_symbol(c, name) >= 0 -> panic("pack retained dead private symbol {name}")
@@ -67,18 +65,26 @@ run: fn() {
     files.set_mode("consumer", 0o755) ?? panic("make consumer executable")
     archive_object: files.read_bytes("archive.o") ?? panic("read standalone platform object")
     object_only: x64_link_runtime_pack([String]{"runtime.o", "archive.o"}, [[U8]]{object, archive_object}, [String]{})
-    if object_only.errors.len() != 0 -> panic("object-only runtime pack required an archive: {object_only.errors}")
+    if object_only.errors.len() != 0 {
+        panic("object-only runtime pack required an archive: {object_only.errors}")
+    }
     o := link_context([[U8]]{object_only.bytes}, LINK_BASE)
     link_load_inputs(o, [String]{"object.pack.o"})
     if o.errors.len() != 0 -> panic("object-only pack is not a valid object")
     loop name in public_names -> pack_roots_defined(o, name, 1)
     archive_only: x64_link_runtime_pack([String]{"runtime.a"}, [[U8]]{archive}, [String]{})
-    if archive_only.errors.len() == 0 || archive_only.bytes.len() != 0 -> panic("pack accepted an archive without a Jet runtime object")
+    if archive_only.errors.len() == 0 || archive_only.bytes.len() != 0 {
+        panic("pack accepted an archive without a Jet runtime object")
+    }
     broken: x64_link_runtime_pack([String]{"runtime.o", "missing.o", "runtime.a"}, [[U8]]{object, missing, archive}, [String]{})
     found_missing := false
     loop error in broken.errors {
-        if error.contains("undefined symbol `jet_rt_fixture_absent_provider`") -> found_missing = true
+        if error.contains("undefined symbol `jet_rt_fixture_absent_provider`") {
+            found_missing = true
+        }
     }
-    if !found_missing || broken.bytes.len() != 0 -> panic("pack accepted a member without its provider")
+    if !found_missing || broken.bytes.len() != 0 {
+        panic("pack accepted a member without its provider")
+    }
     print("runtime pack object roots: pass")
 }

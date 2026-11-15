@@ -5,14 +5,13 @@ Res: struct {
         close: fn(&&self) { print("close {self.name}") }
     }
 }
-Holder: struct { res: Res }
+
+Holder: struct {
+    res: Res
+}
 
 grab: fn(res: &&Res) { print("took {res.name}") }
 
-release: fn(holder: Holder) {
-    grab(holder.res.move())
-}
+release: fn(holder: Holder) { grab(holder.res.move()) }
 
-run: fn() {
-    release(Holder{res: Res{name: "c"}})
-}
+run: fn() { release(Holder{res: Res{name: "c"}}) }

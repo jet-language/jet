@@ -15,11 +15,11 @@ JetCLIProjectPart: struct {
 
 jet_cli_project_part_value: fn(name: String, path: String, state: String) -> JetCLIStatusValue Never! {
     jet_cli_status_object(
-    [JetCLIStatusField]{
-        jet_cli_status_field("name", jet_cli_status_text(name)),
-        jet_cli_status_field("path", jet_cli_status_text(path)),
-        jet_cli_status_field("state", jet_cli_status_text(state)),
-    },
+        [JetCLIStatusField]{
+            jet_cli_status_field("name", jet_cli_status_text(name)),
+            jet_cli_status_field("path", jet_cli_status_text(path)),
+            jet_cli_status_field("state", jet_cli_status_text(state)),
+        },
     )
 }
 
@@ -55,7 +55,9 @@ jet_cli_project_parts: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> J
                 .Unqualified(module_alias, _, items, _, _) -> {
                     if module_alias == "project" {
                         loop item in items {
-                            if !explicit.contains(item.original) -> explicit.push(item.original.copy())
+                            if !explicit.contains(item.original) {
+                                explicit.push(item.original.copy())
+                            }
                         }
                     }
                 }
@@ -101,12 +103,12 @@ jet_cli_project_parts: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> J
         }
         if paths.len() > 1 {
             conflict_values.push(
-            jet_cli_status_object(
-            [JetCLIStatusField]{
-                jet_cli_status_field("name", jet_cli_status_text("project.{name}")),
-                jet_cli_status_field("paths", jet_cli_status_texts(paths)),
-            },
-            ),
+                jet_cli_status_object(
+                    [JetCLIStatusField]{
+                        jet_cli_status_field("name", jet_cli_status_text("project.{name}")),
+                        jet_cli_status_field("paths", jet_cli_status_texts(paths)),
+                    },
+                ),
             )
             diagnostics.push(diagnostic_from_registry("E0606", None, "project module `project.{name}` is declared more than once", "a project module name must resolve to one declaration", "keep one `{name}: module` declaration; found {paths.join(", ")}"))
         }

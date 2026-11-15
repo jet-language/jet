@@ -84,7 +84,9 @@ effect_vocabulary_module_source: fn(source: String, decls: [EffectDecl]) -> Effe
 effect_vocabulary_rows: fn(machine_source: String, core_source: String, meta_source: String) -> [EffectVocabularyRow] {
     machine: effect_vocabulary_source_rows(machine_source, EFFECT_VOCABULARY_MACHINE_PATH, None)
     rows := machine.copy()
-    loop row in effect_vocabulary_source_rows(core_source, "Core/Effects/Effects.jet", Val(machine)) -> rows.push(row.copy())
+    loop row in effect_vocabulary_source_rows(core_source, "Core/Effects/Effects.jet", Val(machine)) {
+        rows.push(row.copy())
+    }
     loop row in effect_vocabulary_source_rows(meta_source, "Core/Compiler/Meta.jet", Val(machine)) {
         loop seen in rows {
             if seen.name == row.name -> panic("Core/Compiler/Meta.jet: duplicate effect {row.name}")
@@ -118,7 +120,9 @@ effect_vocabulary_enum_cases: fn(text: String, type_name: String) -> [String]? {
             next
         }
         if !line.starts_with(head) -> next
-        if line.ends_with("}}") && line != head -> return Val(effect_vocabulary_words(line.removeprefix(head).removesuffix("}}")))
+        if line.ends_with("}}") && line != head {
+            return Val(effect_vocabulary_words(line.removeprefix(head).removesuffix("}}")))
+        }
         if line != head -> return None
         inside = true
     }
@@ -199,16 +203,22 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
                     listed = true
                     next
                 }
-                if !listed -> panic("{place}: expected the `#FX` or `#FX(…)` line above a Core effect")
+                if !listed {
+                    panic("{place}: expected the `#FX` or `#FX(…)` line above a Core effect")
+                }
             }
-            if fields.len() != 3 || !fields[0].ends_with(":") || (fields[1] != "struct" && fields[1] != "enum") || fields[2] != "{{" -> panic("{place}: expected `Name: struct {{` or `Name: enum {{`")
+            if fields.len() != 3 || !fields[0].ends_with(":") || (fields[1] != "struct" && fields[1] != "enum") || fields[2] != "{{" {
+                panic("{place}: expected `Name: struct {{` or `Name: enum {{`")
+            }
             name: fields[0].removesuffix(":")
             loop seen in rows {
                 if seen.name == name -> panic("{place}: duplicate effect {name}")
             }
             if machine == .Val(known) {
                 loop seen in known {
-                    if seen.name == name -> panic("{place}: `{name}` is already a machine effect of {EFFECT_VOCABULARY_MACHINE_PATH}")
+                    if seen.name == name {
+                        panic("{place}: `{name}` is already a machine effect of {EFFECT_VOCABULARY_MACHINE_PATH}")
+                    }
                 }
             }
             type_name = name
@@ -225,7 +235,9 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
                 in_impl = false
                 next
             }
-            if body != None || !line.starts_with(impl_head) || !line.ends_with(" }}") -> panic("{place}: expected one `irreversible: fn(self) -> Bool {{ … }}` line in `impl Effect`")
+            if body != None || !line.starts_with(impl_head) || !line.ends_with(" }}") {
+                panic("{place}: expected one `irreversible: fn(self) -> Bool {{ … }}` line in `impl Effect`")
+            }
             body = Val(line.removeprefix(impl_head).removesuffix(" }}").trim())
             next
         }
@@ -237,7 +249,9 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
         }
         if line == "}}" {
             if !impl_seen -> panic("{place}: `{type_name}` has no `impl Effect` block")
-            if family && cases.len() == 0 -> panic("{place}: the effect family `{type_name}` has no cases")
+            if family && cases.len() == 0 {
+                panic("{place}: the effect family `{type_name}` has no cases")
+            }
             case_rows := [EffectVocabularyRow]{}
             any := false
             loop member in cases {
@@ -260,7 +274,9 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
             listed = false
             next
         }
-        if !family || fields.len() != 1 || impl_seen -> panic("{place}: expected an effect family case name, `impl Effect` or `}}`")
+        if !family || fields.len() != 1 || impl_seen {
+            panic("{place}: expected an effect family case name, `impl Effect` or `}}`")
+        }
         if cases.contains(line) -> panic("{place}: duplicate effect {type_name}.{line}")
         case_spans.push(Span{start: start, end: start + line.bytes().len()})
         cases.push(line)
@@ -280,7 +296,9 @@ effect_vocabulary_kernel: fn(line: String, machine: [EffectVocabularyRow], place
         loop row in machine {
             if row.name == entry -> known = true
         }
-        if !known -> panic("{place}: `{entry}` is no machine effect of {EFFECT_VOCABULARY_MACHINE_PATH}")
+        if !known {
+            panic("{place}: `{entry}` is no machine effect of {EFFECT_VOCABULARY_MACHINE_PATH}")
+        }
         if kernel.contains(entry) -> panic("{place}: `{entry}` is listed twice")
         kernel.push(entry)
     }

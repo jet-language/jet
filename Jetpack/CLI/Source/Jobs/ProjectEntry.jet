@@ -19,7 +19,7 @@ cli_find_project_entry: fn(project_dir: String) -[IO, FS, Env, Exec, Time.Wait]>
     resolver: AuthorityResolver.open(project_dir) ?? cli_report_entry_authority_error(err.diagnostic())
     package := CheckedPackage?{None}
     if resolver.checked_package(".") == {
-        .Ok(found) -> package = Val(found)
+        .Ok(found) -> { package = Val(found) }
         .Err(error) -> {
             if !error.is_missing() -> cli_report_entry_authority_error(error.diagnostic())
         }
@@ -36,7 +36,9 @@ cli_find_project_entry: fn(project_dir: String) -[IO, FS, Env, Exec, Time.Wait]>
         }
     }
     if cli_checked_project_entry(resolver, DEFAULT_ENTRY_FILE) == .Val(entry) -> return entry
-    if cli_checked_project_entry(resolver, files.join("src", DEFAULT_ENTRY_FILE)) == .Val(entry) -> return entry
+    if cli_checked_project_entry(resolver, files.join("src", DEFAULT_ENTRY_FILE)) == .Val(entry) {
+        return entry
+    }
     if package == .Val(checked) {
         named: "{checked.facts.name}.{FILE_EXT}"
         if cli_checked_project_entry(resolver, named) == .Val(entry) -> return entry
@@ -48,7 +50,9 @@ cli_find_project_entry: fn(project_dir: String) -[IO, FS, Env, Exec, Time.Wait]>
 cli_checked_project_entry: fn(resolver: AuthorityResolver, relative: String) -[IO, FS, Env, Exec, Time.Wait]> String? Never! {
     if resolver.checked_file(relative) == {
         .Ok(file) -> {
-            if resolver.revalidate_file(file) == .Err(error) -> cli_report_entry_authority_error(error.diagnostic())
+            if resolver.revalidate_file(file) == .Err(error) {
+                cli_report_entry_authority_error(error.diagnostic())
+            }
             Val(file.path)
         }
         .Err(error) -> {
@@ -93,7 +97,9 @@ cli_checked_project_job_registry: fn(file: String) -[FS, Env, Exec, Time.Wait]> 
     response: envmodel_compiler_service(JET_COMPILER_SERVICE_CHECK_ENTRY, compiler_service_check_request(file.copy(), source.copy())) ?? return Err(cli_job_registry_unchecked(file, err.detail))
     diagnostics: compiler_service_check_diagnostics(response) ?? return Err(cli_job_registry_unchecked(file, "the compiler's answer is not a list of diagnostics"))
     loop diagnostic in diagnostics {
-        if diagnostic.severity == DIAGNOSTIC_ERROR -> return Err(JobRegistryCheckError{diagnostics: diagnostics})
+        if diagnostic.severity == DIAGNOSTIC_ERROR {
+            return Err(JobRegistryCheckError{diagnostics: diagnostics})
+        }
     }
     Ok(JobRegistry.from_program(parse_source(source.bytes()).program))
 }

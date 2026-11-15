@@ -14,7 +14,7 @@ card_cite_comment: fn(bytes: [U8]) -> Bool {
         if start >= bytes.len() -> return false
         code: Int{bytes[start]}
         if code != 32 && code != 9 -> break
-        start = start + 1
+        start += 1
     }
     first: Int{bytes[start]}
     after: if start + 1 < bytes.len() -> Int{bytes[start + 1]} else -> 32
@@ -27,12 +27,14 @@ card_cite_at: fn(bytes: [U8], start: Int) -> Bool {
     if (Int{bytes[start]}) != 35 -> return false
     if start > 0 {
         before: Int{bytes[start - 1]}
-        if before != 32 && before != 9 && before != 40 && before != 47 && before != 44 -> return false
+        if before != 32 && before != 9 && before != 40 && before != 47 && before != 44 {
+            return false
+        }
     }
     end := start + 1
     loop {
         if end >= bytes.len() || !s3_decision_is_digit(bytes[end]) -> break
-        end = end + 1
+        end += 1
     }
     digits: end - start - 1
     digits >= 3 && digits <= 5
@@ -52,16 +54,22 @@ card_cite_in_line: fn(line: String) -> Bool {
 // links (fixtures hold link cycles), hidden entries, installed node modules,
 // build output and TSV files are skipped.
 card_cite_lines: fn(path: String, out: &[String]) {
-    if card_cite_files.is_symlink(path) -> return
+    if card_cite_files.is_symlink(path) {
+        return
+    }
     if card_cite_files.is_dir(path) {
         loop child in (card_cite_files.list_dir(path) ?? panic("list {path}: {err}")) {
-            if child.name.starts_with(".") || child.name == "node_modules" || child.name == "target" || child.name.ends_with(".tsv") -> next
+            if child.name.starts_with(".") || child.name == "node_modules" || child.name == "target" || child.name.ends_with(".tsv") {
+                next
+            }
             card_cite_lines(child.path, out)
         }
         return
     }
     text: card_cite_files.read(path) ?? return
-    if !text.contains("#") -> return
+    if !text.contains("#") {
+        return
+    }
     loop (index, line) in text.lines() {
         if card_cite_in_line(line) -> out.push("{path}:{index + 1}")
     }

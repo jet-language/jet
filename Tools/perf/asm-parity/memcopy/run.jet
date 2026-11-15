@@ -3,9 +3,7 @@
 // copy between two blocks and a move inside a third, where the two ranges
 // overlap in either direction. `n` passes over them; the sum is the last
 // byte each copy wrote plus the first byte each move wrote.
-use {
-    mem: core.mem
-}
+use mem: core.mem
 
 #CLI
 Args: struct {
@@ -24,20 +22,23 @@ Op: struct {
 }
 
 OPS: 4096
+
 // The largest size, and the room past it for the offsets. One page-aligned
 // block holds the source at 0, the target at TARGET_AT and the moved bytes
 // at MOVED_AT, so the reference lays its bytes out the same way: a copy's
 // two ends sit about half a page apart, never on one 4 KiB alias.
 LARGEST: 16384
+
 COPY_ROOM: 64
+
 MOVE_ROOM: 256
+
 TARGET_AT: 18432
+
 MOVED_AT: 36864
 
 // The next state of a 31-bit linear congruential generator.
-next: fn(state: Int) -> Int {
-    (state * 1103515245 + 12345).bit_and(2147483647)
-}
+next: fn(state: Int) -> Int { (state * 1103515245 + 12345).bit_and(2147483647) }
 
 // The operations: per operation one draw picks the size (its low three bits
 // a size class of up to 8, 16, 32, 64, 128, 512, 2048 or 16384 bytes) and a
@@ -51,7 +52,7 @@ operations: fn() -> [Op] {
         bits: if class < 5 -> class + 3 else if class == 5 -> 9 else if class == 6 -> 11 else -> 14
         size: 1 + (state >> 3).bit_and((1 << bits) - 1)
         state = next(state)
-        ops.push(Op{size, from: state.bit_and(63), to: (state >> 6).bit_and(63), move_from: (state >> 12).bit_and(255), move_to: (state >> 20).bit_and(255)})
+        ops.push(Op{size: size, from: state.bit_and(63), to: (state >> 6).bit_and(63), move_from: (state >> 12).bit_and(255), move_to: (state >> 20).bit_and(255)})
     }
     ops
 }
@@ -65,9 +66,13 @@ run: fn(args: Args) {
         source: block.byte_offset(0)
         target: block.byte_offset(TARGET_AT)
         moved: block.byte_offset(MOVED_AT)
-        loop i in 0..<(LARGEST + COPY_ROOM) -> mem.volatile_write<U8>(source.byte_offset(i), U8{(i * 7 + 3).bit_and(255)})
+        loop i in 0..<(LARGEST + COPY_ROOM) {
+            mem.volatile_write<U8>(source.byte_offset(i), U8{(i * 7 + 3).bit_and(255)})
+        }
         mem.fill<U8>(target, U8{0}, LARGEST + COPY_ROOM)
-        loop i in 0..<(LARGEST + MOVE_ROOM) -> mem.volatile_write<U8>(moved.byte_offset(i), U8{i.bit_and(255)})
+        loop i in 0..<(LARGEST + MOVE_ROOM) {
+            mem.volatile_write<U8>(moved.byte_offset(i), U8{i.bit_and(255)})
+        }
         loop _ in 0..<passes {
             loop op in ops {
                 // A use is the line of its call alone: the pointers are the

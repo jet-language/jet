@@ -44,7 +44,9 @@ CORRUPT_SEQUENCE: 523
 table_affinity_str: fn(db: conn.Conn, t: Int) -> [U8] Never! {
     z := [U8]{}
     loop i in 0..<db.tables[t].cols.len() {
-        if db.tables[t].cols[i].col_flags.bit_and(conn.COLFLAG_VIRTUAL) == 0 -> z.push(U8{db.tables[t].cols[i].affinity})
+        if db.tables[t].cols[i].col_flags.bit_and(conn.COLFLAG_VIRTUAL) == 0 {
+            z.push(U8{db.tables[t].cols[i].affinity})
+        }
     }
     loop z.len() > 0 && (Int{z[z.len() - 1]}) <= base.AFF_BLOB -> _: z.pop()
     z
@@ -59,7 +61,9 @@ table_affinity: fn(p: &cg.Parse, t: Int, i_reg: Int) Never! {
         if i_reg == 0 {
             cg.v_append_p4(p, conn.P4.Table(t))
             last: cg.v_last_addr(p)
-            if last < 0 -> return
+            if last < 0 {
+                return
+            }
             prev: cg.v_op_at(p, last)
             cg.v_change_opcode(p, last, opc.OP_TYPE_CHECK)
             _: cg.op3(p, opc.OP_MAKE_RECORD, prev.p1, prev.p2, prev.p3)
@@ -71,17 +75,13 @@ table_affinity: fn(p: &cg.Parse, t: Int, i_reg: Int) Never! {
         return
     }
     z := [U8]{}
-    if p.db.tables[t].col_aff == .Val(c) {
-        z = c.copy()
-    } else {
+    if p.db.tables[t].col_aff == .Val(c) -> z = c.copy() else {
         z = table_affinity_str(p.db, t)
         p.db.tables[t].col_aff = Val(z.copy())
     }
     n: z.len()
     if n > 0 {
-        if i_reg != 0 {
-            _: cg.op4(p, opc.OP_AFFINITY, i_reg, n, 0, conn.P4.Text(z))
-        } else {
+        if i_reg != 0 -> _: cg.op4(p, opc.OP_AFFINITY, i_reg, n, 0, conn.P4.Text(z)) else {
             cg.v_change_p4(p, -1, conn.P4.Text(z))
         }
     }
@@ -119,10 +119,15 @@ ColumnFlagWalker: struct {
             }
             ast.WRC_CONTINUE
         }
+
         walk_has_select_cb: fn(&self) -> Bool Never! { false }
+
         walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
+
         walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+
         walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+
         walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
     }
 }
@@ -152,10 +157,8 @@ compute_generated_columns: fn(p: &cg.Parse, a: &ast.AST, i_reg_store: Int, t: In
                     }
                     p.f.v.ops[last].p4 = conn.P4.Text(z)
                 }
-            } else if op == opc.OP_TYPE_CHECK {
-                // A STRICT table's generated columns are not checked.
-                p.f.v.ops[last].p3 = 1
-            }
+            } else if op == opc.OP_TYPE_CHECK { p.f.v.ops[last].p3 = 1 }
+            // A STRICT table's generated columns are not checked.
         }
     }
 
@@ -164,7 +167,9 @@ compute_generated_columns: fn(p: &cg.Parse, a: &ast.AST, i_reg_store: Int, t: In
     n_col: p.db.tables[t].cols.len()
     loop i in 0..<n_col {
         cf: p.db.tables[t].cols[i].col_flags
-        if cf.bit_and(conn.COLFLAG_GENERATED) != 0 -> p.db.tables[t].cols[i].col_flags = cf.bit_or(conn.COLFLAG_NOTAVAIL)
+        if cf.bit_and(conn.COLFLAG_GENERATED) != 0 {
+            p.db.tables[t].cols[i].col_flags = cf.bit_or(conn.COLFLAG_NOTAVAIL)
+        }
     }
     w := ColumnFlagWalker{col_flags: [Int]{}, e_code: 0}
     p.f.i_self_tab = -i_reg_store
@@ -193,7 +198,9 @@ compute_generated_columns: fn(p: &cg.Parse, a: &ast.AST, i_reg_store: Int, t: In
         }
         if redo < 0 || !progress -> break
     }
-    if redo >= 0 -> ast.error(a, "generated column loop on \"{ast.text(p.db.tables[t].cols[redo].name)}\"")
+    if redo >= 0 {
+        ast.error(a, "generated column loop on \"{ast.text(p.db.tables[t].cols[redo].name)}\"")
+    }
     p.f.i_self_tab = 0
 }
 
@@ -203,7 +210,9 @@ compute_generated_columns: fn(p: &cg.Parse, a: &ast.AST, i_reg_store: Int, t: In
 // Four registers: the table name, the largest rowid (the one returned),
 // its sqlite_sequence rowid and its value there.
 autoinc_begin: fn(p: &cg.Parse, a: &ast.AST, i_db: Int, t: Int) -> Int Never! {
-    if p.db.tables[t].tab_flags.bit_and(ast.TF_AUTOINCREMENT) == 0 || p.db.m_db_flags.bit_and(conn.DBFLAG_VACUUM) != 0 -> return 0
+    if p.db.tables[t].tab_flags.bit_and(ast.TF_AUTOINCREMENT) == 0 || p.db.m_db_flags.bit_and(conn.DBFLAG_VACUUM) != 0 {
+        return 0
+    }
     seq: p.db.schemas[p.db.dbs[i_db].schema].seq_tab
     if seq < 0 || !ex.has_rowid(p.db, seq) || ex.is_virtual(p.db, seq) || p.db.tables[seq].cols.len() != 2 {
         a.ctx.nerr += 1
@@ -239,20 +248,23 @@ autoincrement_begin: fn(p: &cg.Parse, a: &ast.AST) Never! {
         ex.open_table(p, a, 0, info.i_db, seq, opc.OP_OPEN_READ)
         name: p.db.tables[info.tab].name.copy()
         _: cg.v_load_string(p, mem_id - 1, name)
-        first: cg.v_op_list(p, [aux.VdbeOpList]{
-            dl.op_list_item(opc.OP_NULL, 0, mem_id, mem_id + 2),
-            dl.op_list_item(opc.OP_REWIND, 0, 10, 0),
-            dl.op_list_item(opc.OP_COLUMN, 0, 0, mem_id),
-            dl.op_list_item(opc.OP_NE, mem_id - 1, 9, mem_id),
-            dl.op_list_item(opc.OP_ROWID, 0, mem_id + 1, 0),
-            dl.op_list_item(opc.OP_COLUMN, 0, 1, mem_id),
-            dl.op_list_item(opc.OP_ADD_IMM, mem_id, 0, 0),
-            dl.op_list_item(opc.OP_COPY, mem_id, mem_id + 2, 0),
-            dl.op_list_item(opc.OP_GOTO, 0, 11, 0),
-            dl.op_list_item(opc.OP_NEXT, 0, 2, 0),
-            dl.op_list_item(opc.OP_INTEGER, 0, mem_id, 0),
-            dl.op_list_item(opc.OP_CLOSE, 0, 0, 0)
-        })
+        first: cg.v_op_list(
+            p,
+            [aux.VdbeOpList]{
+                dl.op_list_item(opc.OP_NULL, 0, mem_id, mem_id + 2),
+                dl.op_list_item(opc.OP_REWIND, 0, 10, 0),
+                dl.op_list_item(opc.OP_COLUMN, 0, 0, mem_id),
+                dl.op_list_item(opc.OP_NE, mem_id - 1, 9, mem_id),
+                dl.op_list_item(opc.OP_ROWID, 0, mem_id + 1, 0),
+                dl.op_list_item(opc.OP_COLUMN, 0, 1, mem_id),
+                dl.op_list_item(opc.OP_ADD_IMM, mem_id, 0, 0),
+                dl.op_list_item(opc.OP_COPY, mem_id, mem_id + 2, 0),
+                dl.op_list_item(opc.OP_GOTO, 0, 11, 0),
+                dl.op_list_item(opc.OP_NEXT, 0, 2, 0),
+                dl.op_list_item(opc.OP_INTEGER, 0, mem_id, 0),
+                dl.op_list_item(opc.OP_CLOSE, 0, 0, 0),
+            },
+        )
         if first < 0 -> break
         p.f.v.ops[first + 3].p5 = cg.JUMPIFNULL
         if p.f.n_tab == 0 -> p.f.n_tab = 1
@@ -272,16 +284,19 @@ CheckConstraintWalker: struct {
                 c: a.exprs[e].icolumn
                 if c >= 0 {
                     if self.ai_col[c] >= 0 -> self.e_code = self.e_code.bit_or(1)
-                } else {
-                    self.e_code = self.e_code.bit_or(2)
-                }
+                } else { self.e_code = self.e_code.bit_or(2) }
             }
             ast.WRC_CONTINUE
         }
+
         walk_has_select_cb: fn(&self) -> Bool Never! { false }
+
         walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
+
         walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+
         walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+
         walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
     }
 }
@@ -337,16 +352,12 @@ generate_constraint_checks: fn(p: &cg.Parse, a: &ast.AST, t: Int, a_reg_idx: [In
                     next
                 }
                 if has_ai_chng && chng[i] < 0 && !is_generated -> next
-                if override_error != ast.OE_DEFAULT {
-                    on_error = override_error
-                } else if on_error == ast.OE_DEFAULT {
+                if override_error != ast.OE_DEFAULT -> on_error = override_error else if on_error == ast.OE_DEFAULT {
                     on_error = ast.OE_ABORT
                 }
                 if on_error == ast.OE_REPLACE {
                     if b2nd_pass || p.db.tables[t].cols[i].i_dflt == 0 -> on_error = ast.OE_ABORT
-                } else if b2nd_pass && !is_generated {
-                    next
-                }
+                } else if b2nd_pass && !is_generated { next }
                 i_reg: cat.table_column_to_storage(p.db, t, i) + reg_new_data + 1
                 if on_error == ast.OE_REPLACE {
                     addr1: cg.op1(p, opc.OP_NOT_NULL, i_reg)
@@ -362,9 +373,7 @@ generate_constraint_checks: fn(p: &cg.Parse, a: &ast.AST, t: Int, a_reg_idx: [In
                     _: cg.op3(p, opc.OP_HALT_IF_NULL, base.CONSTRAINT_NOTNULL, on_error, i_reg)
                     cg.v_append_p4(p, conn.P4.Text(msg))
                     cg.v_change_p5(p, cg.P5_CONSTRAINT_NOT_NULL)
-                } else {
-                    _: cg.op2(p, opc.OP_IS_NULL, i_reg, ignore_dest)
-                }
+                } else { _: cg.op2(p, opc.OP_IS_NULL, i_reg, ignore_dest) }
             }
             if n_generated == 0 && n_seen_replace == 0 -> break
             if b2nd_pass -> break
@@ -392,9 +401,7 @@ generate_constraint_checks: fn(p: &cg.Parse, a: &ast.AST, t: Int, a_reg_idx: [In
             e_copy: ast.expr_dup(a, e, 0)
             if !p.db.malloc_failed -> ex.expr_if_true(p, a, e_copy, all_ok, cg.JUMPIFNULL)
             ast.expr_delete(a, e_copy)
-            if on_error == ast.OE_IGNORE {
-                _: cg.goto(p, ignore_dest)
-            } else {
+            if on_error == ast.OE_IGNORE -> _: cg.goto(p, ignore_dest) else {
                 z_name: a.lists[chk].items[i].ename
                 if on_error == ast.OE_REPLACE -> on_error = ast.OE_ABORT
                 cg.halt_constraint(p, base.CONSTRAINT_CHECK, on_error, z_name, cg.P5_CONSTRAINT_CHECK)
@@ -411,9 +418,7 @@ generate_constraint_checks: fn(p: &cg.Parse, a: &ast.AST, t: Int, a_reg_idx: [In
     if pk_chng && pk < 0 {
         addr_rowid_ok: cg.v_make_label(p)
         on_error := p.db.tables[t].key_conf
-        if override_error != ast.OE_DEFAULT {
-            on_error = override_error
-        } else if on_error == ast.OE_DEFAULT {
+        if override_error != ast.OE_DEFAULT -> on_error = override_error else if on_error == ast.OE_DEFAULT {
             on_error = ast.OE_ABORT
         }
         if on_error == ast.OE_REPLACE && on_error != override_error && p.db.tables[t].index >= 0 {
@@ -432,10 +437,10 @@ generate_constraint_checks: fn(p: &cg.Parse, a: &ast.AST, t: Int, a_reg_idx: [In
                 dl.generate_row_index_delete(p, a, t, i_data_cur, i_idx_cur, None, -1)
             }
             seen_replace = true
-        } else if on_error == ast.OE_IGNORE {
-            _: cg.goto(p, ignore_dest)
-        } else {
-            if on_error != ast.OE_ROLLBACK && on_error != ast.OE_ABORT && on_error != ast.OE_FAIL -> on_error = ast.OE_ABORT
+        } else if on_error == ast.OE_IGNORE { _: cg.goto(p, ignore_dest) } else {
+            if on_error != ast.OE_ROLLBACK && on_error != ast.OE_ABORT && on_error != ast.OE_FAIL {
+                on_error = ast.OE_ABORT
+            }
             cg.rowid_constraint(p, on_error, t)
         }
         cg.v_resolve_label(p, addr_rowid_ok)
@@ -502,9 +507,7 @@ generate_constraint_checks: fn(p: &cg.Parse, a: &ast.AST, t: Int, a_reg_idx: [In
             cg.v_resolve_label(p, addr_unique_ok)
             next
         }
-        if override_error != ast.OE_DEFAULT {
-            on_error = override_error
-        } else if on_error == ast.OE_DEFAULT {
+        if override_error != ast.OE_DEFAULT -> on_error = override_error else if on_error == ast.OE_DEFAULT {
             on_error = ast.OE_ABORT
         }
 
@@ -560,9 +563,7 @@ generate_constraint_checks: fn(p: &cg.Parse, a: &ast.AST, t: Int, a_reg_idx: [In
         // What a duplicate does.
         if on_error == ast.OE_ROLLBACK || on_error == ast.OE_ABORT || on_error == ast.OE_FAIL {
             cg.unique_constraint(p, on_error, cur)
-        } else if on_error == ast.OE_IGNORE {
-            _: cg.goto(p, ignore_dest)
-        } else {
+        } else if on_error == ast.OE_IGNORE { _: cg.goto(p, ignore_dest) } else {
             e_mode: if cur == pk -> we.ONEPASS_SINGLE else -> we.ONEPASS_OFF
             dl.generate_row_delete(p, a, t, i_data_cur, i_idx_cur, reg_r, n_pk_field, false, e_mode, i_this_cur)
             seen_replace = true
@@ -615,7 +616,9 @@ complete_insertion: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_data_cur: Int, i_idx
         _: cg.op4_int(p, opc.OP_IDX_INSERT, i_idx_cur + k, a_reg_idx[k], a_reg_idx[k] + 1, n)
         cg.v_change_p5(p, pik)
     }
-    if !has_rowid -> return
+    if !has_rowid {
+        return
+    }
     pik := 0
     if a.ctx.nested == 0 {
         pik = conn.OPFLAG_NCHANGE.bit_or(if update_flags != 0 -> update_flags else -> conn.OPFLAG_LASTROWID)
@@ -655,14 +658,22 @@ insert: fn(p: &cg.Parse, a: &ast.AST, src: Int, select0: Int, column: Int, on_er
 // The body of sqlite3Insert up to its insert_cleanup label.
 insert_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, select: Int, list: Int, column: Int, on_error: Int, upsert: Int) Never! -[DB]> {
     t: dl.src_list_lookup(p, a, src)
-    if t < 0 -> return
+    if t < 0 {
+        return
+    }
     si: ast.src_item(a, src, 0)
     i_db: conn.schema_to_index(p.db, p.db.tables[t].schema)
-    if cg.auth_check(p, a, conn.AUTH_INSERT, Val(p.db.tables[t].name.copy()), None, Val(p.db.dbs[i_db].name.copy())) != 0 -> return
+    if cg.auth_check(p, a, conn.AUTH_INSERT, Val(p.db.tables[t].name.copy()), None, Val(p.db.dbs[i_db].name.copy())) != 0 {
+        return
+    }
     without_rowid: !ex.has_rowid(p.db, t)
     g := p.up
-    if g.view_get_column_names(p, a, t) != 0 -> return
-    if dl.is_read_only(p, a, t) -> return
+    if g.view_get_column_names(p, a, t) != 0 {
+        return
+    }
+    if dl.is_read_only(p, a, t) {
+        return
+    }
 
     cg.get_vdbe(p)
     if a.ctx.nested == 0 -> cg.v_count_changes(p)
@@ -736,7 +747,9 @@ insert_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, select: Int, list: Int, col
         dest.n_sdst = n_col
         rc: sel.select(p, a, select, dest)
         reg_from_select = dest.i_sdst
-        if rc != 0 || cg.n_err(a) != 0 -> return
+        if rc != 0 || cg.n_err(a) != 0 {
+            return
+        }
         cg.v_end_coroutine(p, reg_yield)
         cg.v_jump_here(p, addr_top - 1)
         n_column = ast.list_len(a, a.selects[select].elist)
@@ -765,7 +778,9 @@ insert_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, select: Int, list: Int, col
             nc: rs.nc_push(p, rs.nc_new(-1, 0))
             rc: rs.resolve_expr_list_names(p, a, nc, list)
             rs.nc_release(p, mark)
-            if rc != 0 -> return
+            if rc != 0 {
+                return
+            }
         }
     }
 
@@ -776,14 +791,18 @@ insert_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, select: Int, list: Int, col
         if ipk_column >= 0 && tflags.bit_and(ast.TF_HAS_GENERATED) != 0 {
             i := ipk_column - 1
             loop i >= 0 {
-                if p.db.tables[t].cols[i].col_flags.bit_and(conn.COLFLAG_GENERATED) != 0 -> ipk_column -= 1
+                if p.db.tables[t].cols[i].col_flags.bit_and(conn.COLFLAG_GENERATED) != 0 {
+                    ipk_column -= 1
+                }
                 i -= 1
             }
         }
         n_hidden := 0
         if tflags.bit_and(ast.TF_HAS_GENERATED.bit_or(ast.TF_HAS_HIDDEN)) != 0 {
             loop i in 0..<n_col {
-                if p.db.tables[t].cols[i].col_flags.bit_and(conn.COLFLAG_NOINSERT) != 0 -> n_hidden += 1
+                if p.db.tables[t].cols[i].col_flags.bit_and(conn.COLFLAG_NOINSERT) != 0 {
+                    n_hidden += 1
+                }
             }
         }
         if n_column != n_col - n_hidden {
@@ -858,9 +877,7 @@ insert_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, select: Int, list: Int, col
                 // A VIRTUAL column has no slot in the record.
                 i_reg_store -= 1
                 next
-            } else if col_flags.bit_and(conn.COLFLAG_STORED) != 0 {
-                next
-            } else if column < 0 {
+            } else if col_flags.bit_and(conn.COLFLAG_STORED) != 0 { next } else if column < 0 {
                 // A hidden column not named gets its default.
                 dflt: cat.column_expr(p.db, a, t, i)
                 ex.expr_code_factorable(p, a, dflt, store)
@@ -883,12 +900,8 @@ insert_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, select: Int, list: Int, col
             dflt: cat.column_expr(p.db, a, t, i)
             ex.expr_code_factorable(p, a, dflt, store)
             next
-        } else {
-            k = i - n_hidden
-        }
-        if use_temp_table {
-            _: cg.op3(p, opc.OP_COLUMN, src_tab, k, store)
-        } else if select >= 0 {
+        } else { k = i - n_hidden }
+        if use_temp_table -> _: cg.op3(p, opc.OP_COLUMN, src_tab, k, store) else if select >= 0 {
             if reg_from_select != reg_data -> _: cg.op2(p, opc.OP_SCOPY, reg_from_select + k, store)
         } else {
             x: ast.list_expr(a, list, k)
@@ -905,16 +918,12 @@ insert_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, select: Int, list: Int, col
     end_of_loop: cg.v_make_label(p)
     append_flag := false
     if ipk_column >= 0 {
-        if use_temp_table {
-            _: cg.op3(p, opc.OP_COLUMN, src_tab, ipk_column, reg_rowid)
-        } else if select < 0 {
+        if use_temp_table -> _: cg.op3(p, opc.OP_COLUMN, src_tab, ipk_column, reg_rowid) else if select < 0 {
             ipk: ast.list_expr(a, list, ipk_column)
             if a.exprs[ipk].op == tk.TK_NULL {
                 _: cg.op3(p, opc.OP_NEW_ROWID, i_data_cur, reg_rowid, reg_autoinc)
                 append_flag = true
-            } else {
-                ex.expr_code(p, a, ipk, reg_rowid)
-            }
+            } else { ex.expr_code(p, a, ipk, reg_rowid) }
         }
         if !append_flag {
             addr1: cg.op1(p, opc.OP_NOT_NULL, reg_rowid)
@@ -922,9 +931,7 @@ insert_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, select: Int, list: Int, col
             cg.v_jump_here(p, addr1)
             _: cg.op1(p, opc.OP_MUST_BE_INT, reg_rowid)
         }
-    } else if without_rowid {
-        _: cg.op2(p, opc.OP_NULL, 0, reg_rowid)
-    } else {
+    } else if without_rowid { _: cg.op2(p, opc.OP_NULL, 0, reg_rowid) } else {
         _: cg.op3(p, opc.OP_NEW_ROWID, i_data_cur, reg_rowid, reg_autoinc)
         append_flag = true
     }
@@ -932,7 +939,9 @@ insert_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, select: Int, list: Int, col
     if reg_autoinc > 0 -> _: cg.op2(p, opc.OP_MEM_MAX, reg_autoinc, reg_rowid)
 
     // The generated columns, which may use the rowid.
-    if tflags.bit_and(ast.TF_HAS_GENERATED) != 0 -> compute_generated_columns(p, a, reg_rowid + 1, t)
+    if tflags.bit_and(ast.TF_HAS_GENERATED) != 0 {
+        compute_generated_columns(p, a, reg_rowid + 1, t)
+    }
 
     // Check the constraints and write the row.
     is_replace: generate_constraint_checks(p, a, t, a_reg_idx, i_data_cur, i_idx_cur, reg_ins, 0, ipk_column >= 0, on_error, end_of_loop, None)

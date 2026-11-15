@@ -13,11 +13,13 @@ organization_denial_errors: fn(file: String) -> [String] {
     errors := [String]{}
     checked: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program)
     if checked == {
-        .Refused(refusal) -> errors.push(refusal.stderr)
+        .Refused(refusal) -> { errors.push(refusal.stderr) }
         .Compiled(result, snapshot) -> {
             if result.internal_problem != None -> panic("{file}: internal compiler failure")
             loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
-                if diagnostic.severity == DIAGNOSTIC_ERROR && diagnostic.code == "E0749" -> errors.push(diagnostic.what)
+                if diagnostic.severity == DIAGNOSTIC_ERROR && diagnostic.code == "E0749" {
+                    errors.push(diagnostic.what)
+                }
             }
         }
     }

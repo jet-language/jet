@@ -4,10 +4,19 @@
 // doesn't record them.
 use {
     jet_driver.[
-        JET_DRIVER_CORE_SOURCE_ROOT, JetDriverAuthorizedSourceSnapshot, JetDriverBuildInputError,
-        JetDriverCompileRequest, JetDriverComptimeInputLog, JetDriverComptimeInputRecord,
-        JetDriverCoreSource, JetDriverCoreSourceReader, JetDriverCoreText, JetDriverHostFacts,
-        jet_driver_comptime_inputs_for, jet_driver_core_text, jet_driver_core_text_file,
+        JET_DRIVER_CORE_SOURCE_ROOT,
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverBuildInputError,
+        JetDriverCompileRequest,
+        JetDriverComptimeInputLog,
+        JetDriverComptimeInputRecord,
+        JetDriverCoreSource,
+        JetDriverCoreSourceReader,
+        JetDriverCoreText,
+        JetDriverHostFacts,
+        jet_driver_comptime_inputs_for,
+        jet_driver_core_text,
+        jet_driver_core_text_file,
     ]
     jet_eval.[jet_eval_default_config]
     jet_foundation.[EffectModuleSource, Span, TComptimeValue, compiler_threads_single]
@@ -19,11 +28,12 @@ CoreInputsTestReader: struct {
     bytes: [U8]
 
     impl JetDriverCoreSourceReader {
-        read: fn(self, file: String) -[FS.Read]> String? {
-            None
-        }
+        read: fn(self, file: String) -[FS.Read]> String? { None }
+
         read_bytes: fn(self, file: String) -[FS.Read]> [U8] JetDriverBuildInputError! {
-            if file != self.file -> return Err(JetDriverBuildInputError{message: "No such file or directory (os error 2)"})
+            if file != self.file {
+                return Err(JetDriverBuildInputError{message: "No such file or directory (os error 2)"})
+            }
             Ok(self.bytes.copy())
         }
     }
@@ -37,7 +47,13 @@ core_inputs_test_row: fn(path: String, text: Shared<JetDriverCoreText>) -> JetDr
 core_inputs_test_request: fn(rows: [JetDriverCoreSource], log: Shared<JetDriverComptimeInputLog>) -> JetDriverCompileRequest {
     request := JetDriverCompileRequest{
         authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [], entry_root_identity: "core-inputs", entry_path: "/project/main.jet"},
-        canonical_effects: EffectModuleSource{source: "", line_starts: [], decls: []}, core_sources: rows, host_facts: JetDriverHostFacts{target_triple: None, active_os: None, compiler_identity: None}, eval_config: jet_eval_default_config(), record_store: None, trace_sink: None, compiler_threads: compiler_threads_single(),
+        canonical_effects: EffectModuleSource{source: "", line_starts: [], decls: []},
+        core_sources: rows,
+        host_facts: JetDriverHostFacts{target_triple: None, active_os: None, compiler_identity: None},
+        eval_config: jet_eval_default_config(),
+        record_store: None,
+        trace_sink: None,
+        compiler_threads: compiler_threads_single(),
     }
     request.comptime_input_log = Val(log)
     request
@@ -55,22 +71,36 @@ core_inputs_test_request: fn(rows: [JetDriverCoreSource], log: Shared<JetDriverC
     span: Span{start: 0, end: 1}
     adapter: jet_driver_comptime_inputs_for(request, "{JET_DRIVER_CORE_SOURCE_ROOT}/Core/Text/Assets/Fixture.jet") ?? panic("a Core row read from a toolchain tree has a comptime input host")
     if adapter.comptime_input("embed_bytes", "Fixture.bin", span) == {
-        .Ok(value) -> if value == .Bytes(bytes) -> assert_eq(bytes, asset) else -> panic("Core embed_bytes gives bytes")
-        .Err(problem) -> panic("Core embed_bytes: {problem.diagnostic.what}: {problem.diagnostic.why}")
+        .Ok(value) -> {
+            if value == .Bytes(bytes) -> assert_eq(bytes, asset) else {
+                panic("Core embed_bytes gives bytes")
+            }
+        }
+        .Err(problem) -> {
+            panic("Core embed_bytes: {problem.diagnostic.what}: {problem.diagnostic.why}")
+        }
     }
     if adapter.comptime_input("embed_file", "Fixture.bin", span) == {
-        .Ok(_) -> panic("embed_file of bytes that aren't UTF-8 is refused")
-        .Err(problem) -> assert(problem.diagnostic.code == "E0955" && problem.diagnostic.what == "`embed_file` can't read `Fixture.bin` as text")
+        .Ok(_) -> { panic("embed_file of bytes that aren't UTF-8 is refused") }
+        .Err(problem) -> {
+            assert(problem.diagnostic.code == "E0955" && problem.diagnostic.what == "`embed_file` can't read `Fixture.bin` as text")
+        }
     }
     if adapter.comptime_input("embed_bytes", "Other.bin", span) == {
-        .Ok(_) -> panic("a missing Core asset is refused")
-        .Err(problem) -> assert(problem.diagnostic.code == "E0955" && problem.diagnostic.why == "No such file or directory (os error 2) (looked next to the file doing the embedding)")
+        .Ok(_) -> { panic("a missing Core asset is refused") }
+        .Err(problem) -> {
+            assert(problem.diagnostic.code == "E0955" && problem.diagnostic.why == "No such file or directory (os error 2) (looked next to the file doing the embedding)")
+        }
     }
     if adapter.comptime_input("find", "*.bin", span) == {
-        .Ok(_) -> panic("Core names each asset; `find` is refused")
+        .Ok(_) -> { panic("Core names each asset; `find` is refused") }
         .Err(problem) -> assert(problem.diagnostic.code == "E0955")
     }
     assert(log.guard_read().value.records.len() == 0, "Core reads stay out of the program's comptime input lock")
-    if jet_driver_comptime_inputs_for(request, "{JET_DRIVER_CORE_SOURCE_ROOT}/Core/Embedded.jet") == .Val(_) -> panic("a Core row with embedded text has no tree to read beside it")
-    if jet_driver_comptime_inputs_for(request, "/project/main.jet") == .Val(_) -> panic("a program file still needs the build-input transport")
+    if jet_driver_comptime_inputs_for(request, "{JET_DRIVER_CORE_SOURCE_ROOT}/Core/Embedded.jet") == .Val(_) {
+        panic("a Core row with embedded text has no tree to read beside it")
+    }
+    if jet_driver_comptime_inputs_for(request, "/project/main.jet") == .Val(_) {
+        panic("a program file still needs the build-input transport")
+    }
 }

@@ -20,7 +20,7 @@ table_value: fn(v: Int) -> Int {
 
 table_statement: fn(v: Int) {
     if fetch(v) == {
-        .Ok(got) -> print("ok {got}")
+        .Ok(got) -> { print("ok {got}") }
         .Err(why) -> print("err {why}")
     }
 }
@@ -56,7 +56,9 @@ carrier: fn(even: Bool) -> String {
 // A callee that declares its failure keeps `.Ok` and `.Err` for its carrier,
 // even when its success enum declares those cases itself.
 #Error
-Refusal: struct { message: String }
+Refusal: struct {
+    message: String
+}
 
 parse: fn(v: Int) -> Reply Refusal! {
     if v < 0 -> return Err(Refusal{message: "negative"})
@@ -65,7 +67,9 @@ parse: fn(v: Int) -> Reply Refusal! {
 
 refusal: fn(v: Int) -> String {
     if parse(v) == {
-        .Ok(_) -> { panic("expected {v} to be refused") }
+        .Ok(_) -> {
+            panic("expected {v} to be refused")
+        }
         .Err(error) -> error.message
     }
 }

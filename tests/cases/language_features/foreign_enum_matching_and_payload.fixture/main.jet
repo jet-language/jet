@@ -1,20 +1,26 @@
 use "note"
+
 Query: enum {
     Tag(String)
     Kind(NoteType)
 }
+
 classify: fn(raw: String) -> Query {
-    if raw == "user" {
-        return Query.Kind(NoteType.User)
-    }
+    if raw == "user" -> return Query.Kind(NoteType.User)
     return Query.Tag(raw.copy())
 }
+
 describe: fn(n: Note, q: &&Query) -> String {
     if q == {
-        .Tag(t) -> { return "tag:{t}" }
-        .Kind(k) -> { return "kind:{note.kind_str(n)}" }
+        .Tag(t) -> {
+            return "tag:{t}"
+        }
+        .Kind(k) -> {
+            return "kind:{note.kind_str(n)}"
+        }
     }
 }
+
 run: fn() {
     n: note.make_note("x", NoteType.User)
     q: classify("user")

@@ -24,10 +24,15 @@ use {
 }
 
 CORE_PRELUDE_PATH: "Compiler/Prelude/Core.rows"
+
 BUILTIN_METHODS_PATH: "Compiler/JetFoundation/Source/Registry/BuiltinMethods.jet"
+
 BUILTIN_STATICS_PATH: "Compiler/JetFoundation/Source/Registry/BuiltinStatics.jet"
+
 COLLECTIONS_PATH: "Compiler/JetFoundation/Source/Collections.jet"
+
 SHARED_OWNER_PATH: "Compiler/JetSema/Source/Sema/Calls/SharedOwner.jet"
+
 USAGE: "usage: jet Tools/agent/LibcCensus.jet [--check]"
 
 #Error
@@ -35,9 +40,7 @@ CensusError: struct {
     message: String
 }
 
-census_fail: fn(message: String) -> CensusError Never! {
-    CensusError{message: message}
-}
+census_fail: fn(message: String) -> CensusError Never! { CensusError{message: message} }
 
 // Covered: the Jet names do the family's job. Partial: they do part of it; the
 // note says what is missing. Language: the language itself does the job, with
@@ -78,7 +81,9 @@ Family: struct {
 }
 
 C23: "C23"
+
 POSIX: "POSIX"
+
 // Every not-needed note cites this ruling (#6696 c2): Jet's text is UTF-8 and
 // locale-independent, message catalogs are a library's concern, the obsolete
 // or insecure interfaces stay out, and a family whose C shape clashes with a
@@ -426,7 +431,9 @@ core_structure: fn() -[Env, Exec, Time.Wait]> Dyn CensusError! {
     // Asked from Compiler/, a package: a jet built before `--core` stopped
     // resolving the inspect target refuses it where no package.jet is found.
     asked: process.cmd([String]{jet, "inspect", "structure", "--core", "--json"}).cwd("Compiler").env("NO_COLOR", "1").output_limit(16777216).run() ?? return Err(census_fail("`{jet} inspect structure --core --json` could not start: {err}"))
-    if asked.code != 0 || asked.signal != None -> return Err(census_fail("`{jet} inspect structure --core --json` failed: {process.combined_output(asked).trim()}"))
+    if asked.code != 0 || asked.signal != None {
+        return Err(census_fail("`{jet} inspect structure --core --json` failed: {process.combined_output(asked).trim()}"))
+    }
     answer: json.parse(asked.output) ?? return Err(census_fail("`{jet} inspect structure --core --json` printed no JSON: {err}"))
     core: answer.get("core") ?? return Err(census_fail("`{jet} inspect structure --core --json` printed no `core` object"))
     Ok(core)
@@ -447,8 +454,8 @@ json_text: fn(value: Dyn, key: String) -> String Never! {
 }
 
 // Core.rows's exported members, keyed by module.
-core_exports: fn(core: Dyn) -> [String: [String]] CensusError! {
-    out := [String: [String]]{}
+core_exports: fn(core: Dyn) -> [String:[String]] CensusError! {
+    out := [String:[String]]{}
     loop entry in json_items(core, "modules") {
         members := [String]{}
         loop member in json_items(entry, "members") {
@@ -462,11 +469,13 @@ core_exports: fn(core: Dyn) -> [String: [String]] CensusError! {
 
 // The first source file of each Core module, keyed by module; runtime units
 // are no module's source.
-core_sources: fn(core: Dyn) -> [String: String] Never! {
-    out := [String: String]{}
+core_sources: fn(core: Dyn) -> [String:String] Never! {
+    out := [String:String]{}
     loop source in json_items(core, "sources") {
         module_name: json_text(source, "module")
-        if (source.get("runtime") ?? Dyn.Null) == .Bool(true) || out.get(module_name) != None -> next
+        if (source.get("runtime") ?? Dyn.Null) == .Bool(true) || out.get(module_name) != None {
+            next
+        }
         out[module_name] = json_text(source, "path")
     }
     out
@@ -495,7 +504,7 @@ declares_method: fn(source: String, type_name: String, method: String) -> Bool N
 
 // The receiver families of the built-in tables that a `<Type>.<method>` claim
 // may name.
-METHOD_RECEIVERS: [String: [String]]{
+METHOD_RECEIVERS: [String:[String]]{
     "String": [String]{"String"},
     "Bytes": [String]{"Bytes"},
     "Scalar": [String]{"Scalar"},
@@ -511,26 +520,34 @@ builtin_resolves: fn(owner: String, method: String, methods: String, statics: St
     if owner == "Shared" -> return shared.contains("method == \"{method}\"")
     receivers: METHOD_RECEIVERS.get(owner) ?? [String]{}
     loop receiver in receivers {
-        if methods.contains("receiver: BuiltinMethodReceiver.{receiver}, name: \"{method}\"") -> return true
+        if methods.contains("receiver: BuiltinMethodReceiver.{receiver}, name: \"{method}\"") {
+            return true
+        }
     }
     if statics.contains("owner: \"{owner}\", method: \"{method}\"") -> return true
     collections.contains("receivers: CollectionReceivers.{owner}, name: \"{method}\"")
 }
 
 // Every claimed Jet name that does not resolve.
-unresolved: fn(exports: [String: [String]], sources: [String: String]) -[FS]> [String] CensusError! {
+unresolved: fn(exports: [String:[String]], sources: [String:String]) -[FS]> [String] CensusError! {
     methods: files.read(BUILTIN_METHODS_PATH) ?? return Err(census_fail("cannot read {BUILTIN_METHODS_PATH}: {err}"))
     statics: files.read(BUILTIN_STATICS_PATH) ?? return Err(census_fail("cannot read {BUILTIN_STATICS_PATH}: {err}"))
     collections: files.read(COLLECTIONS_PATH) ?? return Err(census_fail("cannot read {COLLECTIONS_PATH}: {err}"))
     shared: files.read(SHARED_OWNER_PATH) ?? return Err(census_fail("cannot read {SHARED_OWNER_PATH}: {err}"))
     problems := [String]{}
     loop family in FAMILIES {
-        if family.coverage == .NotNeeded && !family.note.contains(OWNER_RULING) -> problems.push("{family.names}: a not-needed family's note does not cite the {OWNER_RULING}")
+        if family.coverage == .NotNeeded && !family.note.contains(OWNER_RULING) {
+            problems.push("{family.names}: a not-needed family's note does not cite the {OWNER_RULING}")
+        }
         if family.jet == "" {
-            if family.coverage == .Covered || family.coverage == .Partial -> problems.push("{family.names}: a {coverage_label(family.coverage)} family names no Jet API")
+            if family.coverage == .Covered || family.coverage == .Partial {
+                problems.push("{family.names}: a {coverage_label(family.coverage)} family names no Jet API")
+            }
             next
         }
-        if family.coverage == .Gap || family.coverage == .NotNeeded -> problems.push("{family.names}: a {coverage_label(family.coverage)} family names Jet API {family.jet}")
+        if family.coverage == .Gap || family.coverage == .NotNeeded {
+            problems.push("{family.names}: a {coverage_label(family.coverage)} family names Jet API {family.jet}")
+        }
         loop claim in family.jet.split(" ") {
             if claim == "F32" || claim == "Float" -> next
             if claim.starts_with("core.") {
@@ -540,7 +557,9 @@ unresolved: fn(exports: [String: [String]], sources: [String: String]) -[FS]> [S
                 member: claim.slice(dot + 1, claim.len())
                 if exports.has_key(owner) {
                     members: exports.get(owner) ?? [String]{}
-                    if !members.contains(member) -> problems.push("{family.names}: {claim} is not exported by {CORE_PRELUDE_PATH}")
+                    if !members.contains(member) {
+                        problems.push("{family.names}: {claim} is not exported by {CORE_PRELUDE_PATH}")
+                    }
                     next
                 }
                 type_dot: owner.rfind(".")
@@ -556,7 +575,9 @@ unresolved: fn(exports: [String: [String]], sources: [String: String]) -[FS]> [S
                     next
                 }
                 source: files.read(path) ?? return Err(census_fail("cannot read {path}: {err}"))
-                if !declares_method(source, type_name, member) -> problems.push("{family.names}: {claim}: {path} declares no method {member} of {type_name}")
+                if !declares_method(source, type_name, member) {
+                    problems.push("{family.names}: {claim}: {path} declares no method {member} of {type_name}")
+                }
                 next
             }
             dot: claim.find(".")
@@ -564,10 +585,12 @@ unresolved: fn(exports: [String: [String]], sources: [String: String]) -[FS]> [S
                 problems.push("{family.names}: {claim} is neither core.<module>.<member> nor <Type>.<method>")
                 next
             }
-            if !builtin_resolves(claim.slice(0, dot), claim.slice(dot + 1, claim.len()), methods, statics, collections, shared) -> problems.push("{family.names}: {claim} is not a built-in method, static or collection operation, or a Shared method")
+            if !builtin_resolves(claim.slice(0, dot), claim.slice(dot + 1, claim.len()), methods, statics, collections, shared) {
+                problems.push("{family.names}: {claim} is not a built-in method, static or collection operation, or a Shared method")
+            }
         }
     }
-    seen := [String: String]{}
+    seen := [String:String]{}
     loop family in FAMILIES {
         loop name in family_names(family) {
             if seen.has_key(name) -> problems.push("{name} is listed twice")
@@ -658,8 +681,12 @@ report: fn() -> String Never! {
         loop family in FAMILIES {
             if family.area != area -> next
             if family.coverage == {
-                .Gap -> rows.push(if family.note == "" -> "- GAP: {c_names(family)} (`{family.header}`)" else -> "- GAP: {c_names(family)} (`{family.header}`): {family.note}")
-                .Partial -> rows.push("- partial: {c_names(family)} (`{family.header}`): {family.note}")
+                .Gap -> {
+                    rows.push(if family.note == "" -> "- GAP: {c_names(family)} (`{family.header}`)" else -> "- GAP: {c_names(family)} (`{family.header}`): {family.note}")
+                }
+                .Partial -> {
+                    rows.push("- partial: {c_names(family)} (`{family.header}`): {family.note}")
+                }
                 .Covered | .Language | .NotNeeded -> {}
             }
         }
@@ -691,7 +718,9 @@ census_main: fn(args: [String]) -[Env, Exec, FS, Time.Wait]> String CensusError!
     core: core_structure() ?? return Err(err)
     exports: core_exports(core) ?? return Err(err)
     problems: unresolved(exports, core_sources(core)) ?? return Err(err)
-    if problems.len() > 0 -> return Err(census_fail("libc census: {problems.len()} row problem(s)\n{problems.join("\n")}"))
+    if problems.len() > 0 {
+        return Err(census_fail("libc census: {problems.len()} row problem(s)\n{problems.join("\n")}"))
+    }
     if check_only -> return Ok("libc census: every Jet API of {FAMILIES.len()} families resolves")
     Ok(report())
 }

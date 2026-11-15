@@ -17,7 +17,9 @@ build: fn(b: Build) {
     meta: b.compiler(app)
     loop field in Carrier.reflect().fields {
         found: meta.find_type(field.type.name) ?? panic("`{field.type.name}` names no type")
-        if found.identity != field.type.identity || found.name != field.type.name -> panic("`{field.type.name}` found {found.identity}")
+        if found.identity != field.type.identity || found.name != field.type.name {
+            panic("`{field.type.name}` found {found.identity}")
+        }
     }
     if meta.find_type("Nowhere") != None -> panic("`Nowhere` names a type")
     if meta.find_type("I64\n    extra: I64") != None -> panic("two fields read as one type")

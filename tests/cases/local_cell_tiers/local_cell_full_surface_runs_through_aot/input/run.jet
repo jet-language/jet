@@ -1,15 +1,14 @@
-
 Pair: struct {
-    left: Int,
-    right: Int,
+    left: Int
+    right: Int
 }
 
 ValueCache: struct {
-    value: Cell<String?>,
+    value: Cell<String?>
 }
 
 LineCache: struct {
-    value: Cell<[Int]?>,
+    value: Cell<[Int]?>
 }
 
 mapped_read: fn(cell: Cell<Pair>) {
@@ -20,7 +19,7 @@ mapped_read: fn(cell: Cell<Pair>) {
 split_read: fn(cell: Cell<Pair>) {
     { first: left, second: right }: cell.guard_read().split(
         fn(pair) { pair.left },
-        fn(pair) { pair.right }
+        fn(pair) { pair.right },
     )
     print(left.get() + right.get())
 }
@@ -33,7 +32,7 @@ mapped_edit: fn(cell: Cell<Pair>) {
 split_edit: fn(cell: Cell<Pair>) {
     { first: left, second: right }: cell.guard_edit().split(
         fn(pair) { pair.left },
-        fn(pair) { pair.right }
+        fn(pair) { pair.right },
     )
     left.set(10)
     right.set(11)
@@ -41,11 +40,11 @@ split_edit: fn(cell: Cell<Pair>) {
 
 make_edit_guards: fn(cell: Cell<Pair>) -> (
     first: CellEditGuard<Int>,
-    second: CellEditGuard<Int>
+    second: CellEditGuard<Int>,
 ) {
     return cell.guard_edit().split(
         fn(pair) { pair.left },
-        fn(pair) { pair.right }
+        fn(pair) { pair.right },
     )
 }
 
@@ -62,13 +61,13 @@ edit_then_return: fn(cell: Cell<Int>) {
 }
 
 run: fn() {
-    cell: Cell.new(Pair{ left: 1, right: 2 })
+    cell: Cell.new(Pair{left: 1, right: 2})
     print(cell.read(fn(pair) { pair.left + pair.right }))
     cell.edit(fn(pair) { pair.left += 3 })
     print(cell.get().left)
-    old: cell.replace(Pair{ left: 5, right: 6 })
+    old: cell.replace(Pair{left: 5, right: 6})
     print(old.left)
-    cell.set(Pair{ left: 7, right: 8 })
+    cell.set(Pair{left: 7, right: 8})
     mapped_read(cell)
     split_read(cell)
     mapped_edit(cell)
@@ -78,11 +77,11 @@ run: fn() {
     edit_returned_split(cell)
     print(cell.get().left + cell.get().right)
 
-    cache: ValueCache{ value: Cell.new(None) }
+    cache: ValueCache{value: Cell.new(None)}
     print(cache.value.get_or_set(fn() { "built" }))
     print(cache.value.get_or_set(fn() { "unused" }))
 
-    lines: LineCache{ value: Cell.new(None) }
+    lines: LineCache{value: Cell.new(None)}
     print(lines.value.get_or_set(fn() { [0, 8, 15] }).len())
     print(lines.value.get_or_set(fn() { [99] }).len())
 

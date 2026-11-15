@@ -412,12 +412,12 @@ status_label: fn(state: EditorState) -> String {
 settings_view: fn(theme: String, open: Bool) -> UINode {
     if open {
         return ui.box(
-        [
-            ui.text("SETTINGS"),
-            ui.text("Theme: {theme}"),
-            ui.text("Recovery: enabled"),
-            ui.text("Accessibility: named controls"),
-        ],
+            [
+                ui.text("SETTINGS"),
+                ui.text("Theme: {theme}"),
+                ui.text("Recovery: enabled"),
+                ui.text("Accessibility: named controls"),
+            ],
         )
     }
     ui.text("SETTINGS (closed)")
@@ -427,33 +427,33 @@ sidebar_view: fn(selected: Int) -> UINode {
     meeting: if selected == 0 -> "* Meeting" else -> "  Meeting"
     ideas: if selected == 1 -> "* Ideas" else -> "  Ideas"
     ui.box(
-    [
-        ui.text("NOTES"),
-        ui.node_role(meeting, 24.0, 1.0, ui.aria_role_button()),
-        ui.node_role(ideas, 24.0, 1.0, ui.aria_role_button()),
-    ],
+        [
+            ui.text("NOTES"),
+            ui.node_role(meeting, 24.0, 1.0, ui.aria_role_button()),
+            ui.node_role(ideas, 24.0, 1.0, ui.aria_role_button()),
+        ],
     )
 }
 
 command_bar: fn() -> UINode {
     ui.box(
-    [
-        ui.node_shortcut(ui.button("Save"), UIShortcut.cmd("s")),
-        ui.node_shortcut(ui.button("Undo"), UIShortcut.cmd("z")),
-        ui.node_shortcut(ui.button("Redo"), UIShortcut.cmd("r")),
-        ui.node_shortcut(ui.button("Toggle theme"), UIShortcut.cmd("t")),
-        ui.node_shortcut(ui.button("Settings"), UIShortcut.cmd(",")),
-    ],
+        [
+            ui.node_shortcut(ui.button("Save"), UIShortcut.cmd("s")),
+            ui.node_shortcut(ui.button("Undo"), UIShortcut.cmd("z")),
+            ui.node_shortcut(ui.button("Redo"), UIShortcut.cmd("r")),
+            ui.node_shortcut(ui.button("Toggle theme"), UIShortcut.cmd("t")),
+            ui.node_shortcut(ui.button("Settings"), UIShortcut.cmd(",")),
+        ],
     )
 }
 
 menu_view: fn() -> UINode {
     ui.box(
-    [
-        ui.text("FILE"),
-        ui.text("Open   Save   Quit"),
-        ui.text("Tray fallback: host window lifecycle"),
-    ],
+        [
+            ui.text("FILE"),
+            ui.text("Open   Save   Quit"),
+            ui.text("Tray fallback: host window lifecycle"),
+        ],
     )
 }
 
@@ -463,17 +463,17 @@ editor_view: fn(body: String, selected: Int, theme: String, settings_open: Bool)
     background: if theme == "dark" -> Color{r: 21, g: 24, b: 29, a: 255} else -> Color{r: 248, g: 244, b: 234, a: 255}
     input: ui.text_input(body, .Native)
     ui.box(
-    [
-        ui.node_color("JET NOTES — {theme} mode", 80.0, 1.0, background),
-        sidebar_view(selected),
-        ui.node_role("EDITOR — selected {selected}", 80.0, 1.0, ui.aria_role_label()),
-        input,
-        menu_view(),
-        command_bar(),
-        settings_view(theme, settings_open),
-        ui.text("Ctrl+S Save   Ctrl+Z Undo   Ctrl+Shift+Z Redo"),
-        ui.text("Focus order: Save → Editor → Toggle theme"),
-    ],
+        [
+            ui.node_color("JET NOTES — {theme} mode", 80.0, 1.0, background),
+            sidebar_view(selected),
+            ui.node_role("EDITOR — selected {selected}", 80.0, 1.0, ui.aria_role_label()),
+            input,
+            menu_view(),
+            command_bar(),
+            settings_view(theme, settings_open),
+            ui.text("Ctrl+S Save   Ctrl+Z Undo   Ctrl+Shift+Z Redo"),
+            ui.text("Focus order: Save → Editor → Toggle theme"),
+        ],
     )
 }
 

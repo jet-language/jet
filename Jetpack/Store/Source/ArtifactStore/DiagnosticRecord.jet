@@ -12,15 +12,46 @@
 // `source_start`) is presentation state and decodes as absent.
 use {
     jet_foundation.[
-        DIAGNOSTIC_ERROR, DIAGNOSTIC_LINT, Diagnostic, DiagnosticBuildError, DiagnosticCause,
-        DiagnosticCryptoMisuseReason, DiagnosticErrorContextFrame, DiagnosticErrorConversion,
-        DiagnosticErrorDetails, DiagnosticErrorField, DiagnosticErrorJourneyFrame, DiagnosticErrorSpan,
-        DiagnosticFixApplicability, DiagnosticFixSafety, DiagnosticLabel, DiagnosticMoment,
-        DiagnosticNoFixReason, DiagnosticNoFixReasonKind, DiagnosticOrigin, DiagnosticStructured,
-        JetErrorContextFrame, JetErrorConversion, JetErrorDetails, JetErrorField, JetErrorJourneyFrame,
-        JetErrorReport, JetErrorSpan, RecordField, RecordValue, Span, TextEdit, sha256_hex,
-        record_value_as_list, record_value_as_optional_str, record_value_as_str, record_value_as_usize,
-        record_value_field, record_value_is_null, record_value_list_of_str, record_value_optional_str,
+        DIAGNOSTIC_ERROR,
+        DIAGNOSTIC_LINT,
+        Diagnostic,
+        DiagnosticBuildError,
+        DiagnosticCause,
+        DiagnosticCryptoMisuseReason,
+        DiagnosticErrorContextFrame,
+        DiagnosticErrorConversion,
+        DiagnosticErrorDetails,
+        DiagnosticErrorField,
+        DiagnosticErrorJourneyFrame,
+        DiagnosticErrorSpan,
+        DiagnosticFixApplicability,
+        DiagnosticFixSafety,
+        DiagnosticLabel,
+        DiagnosticMoment,
+        DiagnosticNoFixReason,
+        DiagnosticNoFixReasonKind,
+        DiagnosticOrigin,
+        DiagnosticStructured,
+        JetErrorContextFrame,
+        JetErrorConversion,
+        JetErrorDetails,
+        JetErrorField,
+        JetErrorJourneyFrame,
+        JetErrorReport,
+        JetErrorSpan,
+        RecordField,
+        RecordValue,
+        Span,
+        TextEdit,
+        sha256_hex,
+        record_value_as_list,
+        record_value_as_optional_str,
+        record_value_as_str,
+        record_value_as_usize,
+        record_value_field,
+        record_value_is_null,
+        record_value_list_of_str,
+        record_value_optional_str,
         record_value_str_list,
     ]
     store_text: core.text
@@ -53,12 +84,16 @@ store_encode_diagnostics: fn(diagnostics: [Diagnostic], closure_revisions: [Stri
     origins := [RecordValue]{}
     loop origin in table {
         source: if closure_revisions.contains(origin.revision) -> RecordValue.Null else -> RecordValue.Str{value: origin.source}
-        origins.push(RecordValue.Map{fields: [RecordField]{
-            {name: "display", value: RecordValue.Str{value: origin.display}},
-            {name: "path", value: RecordValue.Str{value: origin.path}},
-            {name: "revision", value: RecordValue.Str{value: origin.revision}},
-            {name: "source", value: source},
-        }})
+        origins.push(
+            RecordValue.Map{
+                fields: [RecordField]{
+                    {name: "display", value: RecordValue.Str{value: origin.display}},
+                    {name: "path", value: RecordValue.Str{value: origin.path}},
+                    {name: "revision", value: RecordValue.Str{value: origin.revision}},
+                    {name: "source", value: source},
+                },
+            },
+        )
     }
     Ok(StoreDiagnosticSections{origins: origins, diagnostics: encoded})
 }
@@ -77,7 +112,9 @@ store_decode_diagnostics: fn(origins: [RecordValue], diagnostics: [RecordValue],
             .None -> source_for_revision(revision) ?? return Err(store_diagnostic_error("diagnostic origin `{path}` is not in the closure"))
         }
         decoded: DiagnosticOrigin{display: display, path: path, source: source, revision: sha256_hex(source)}
-        if decoded.revision != revision -> return Err(store_diagnostic_error("diagnostic origin `{decoded.path}` revision mismatch"))
+        if decoded.revision != revision {
+            return Err(store_diagnostic_error("diagnostic origin `{decoded.path}` revision mismatch"))
+        }
         table.push(decoded)
     }
     out := [Diagnostic]{}
@@ -157,7 +194,8 @@ store_diagnostic_safety_name: fn(safety: DiagnosticFixSafety) -> String Never! {
 }
 
 store_diagnostic_parse_safety: fn(value: String) -> DiagnosticFixSafety StoreDiagnosticRecordError! {
-    loop safety in ([DiagnosticFixSafety]{.Formatting, .BehaviorPreserving, .APIChanging, .TargetChanging, .NeedsReview}) {
+    loop safety in
+        ([DiagnosticFixSafety]{.Formatting, .BehaviorPreserving, .APIChanging, .TargetChanging, .NeedsReview}) {
         if store_diagnostic_safety_name(safety) == value -> return Ok(safety)
     }
     Err(store_diagnostic_error("unknown fix safety `{value}`"))
@@ -176,16 +214,31 @@ store_diagnostic_parse_no_fix: fn(kind: String, next: String) -> DiagnosticNoFix
         "behavior" -> DiagnosticNoFixReasonKind.Behavior
         "design" -> DiagnosticNoFixReasonKind.Design
         "ambiguous" -> DiagnosticNoFixReasonKind.Ambiguous
-        else -> { return Err(store_diagnostic_error("unknown no-fix reason kind `{kind}`")) }
+        else -> {
+            return Err(store_diagnostic_error("unknown no-fix reason kind `{kind}`"))
+        }
     }
-    if next.trim() == "" -> return Err(store_diagnostic_error("no-fix reason next action must not be empty"))
-    if store_text.has_control(next) -> return Err(store_diagnostic_error("no-fix reason next action must not contain control characters"))
+    if next.trim() == "" {
+        return Err(store_diagnostic_error("no-fix reason next action must not be empty"))
+    }
+    if store_text.has_control(next) {
+        return Err(store_diagnostic_error("no-fix reason next action must not contain control characters"))
+    }
     Ok(DiagnosticNoFixReason{kind: parsed, next: next})
 }
 
 STORE_DIAGNOSTIC_CRYPTO_REASONS: #run { [DiagnosticCryptoMisuseReason]{
-    .InvalidLength, .NonceLength, .OutputLength, .SaltLength, .MemoryCost, .IterationCount,
-    .LaneCount, .MemoryTimeCost, .RawNonce, .RawAlgorithm, .DeterministicEntropy,
+    .InvalidLength,
+    .NonceLength,
+    .OutputLength,
+    .SaltLength,
+    .MemoryCost,
+    .IterationCount,
+    .LaneCount,
+    .MemoryTimeCost,
+    .RawNonce,
+    .RawAlgorithm,
+    .DeterministicEntropy,
 } }
 
 store_diagnostic_crypto_name: fn(reason: DiagnosticCryptoMisuseReason) -> String Never! {
@@ -212,10 +265,12 @@ store_diagnostic_parse_crypto: fn(value: String) -> DiagnosticCryptoMisuseReason
 }
 
 store_diagnostic_edit: fn(edit: TextEdit) -> RecordValue Never! {
-    RecordValue.Map{fields: [RecordField]{
-        {name: "span", value: store_diagnostic_span(edit.span)},
-        {name: "text", value: RecordValue.Str{value: edit.new_text}},
-    }}
+    RecordValue.Map{
+        fields: [RecordField]{
+            {name: "span", value: store_diagnostic_span(edit.span)},
+            {name: "text", value: RecordValue.Str{value: edit.new_text}},
+        },
+    }
 }
 
 // The canonical `jet.err/v1` report of a structured build error. The Jet
@@ -225,14 +280,22 @@ store_diagnostic_build_report: fn(report: DiagnosticBuildError) -> JetErrorRepor
     causes := [JetErrorReport]{}
     loop cause in report.causes -> causes.push(store_diagnostic_build_report(cause))
     frames := [JetErrorContextFrame]{}
-    loop frame in report.context_frames -> frames.push(JetErrorContextFrame{text: frame.text, file: frame.file, line: frame.line})
+    loop frame in report.context_frames {
+        frames.push(JetErrorContextFrame{text: frame.text, file: frame.file, line: frame.line})
+    }
     journey := [JetErrorJourneyFrame]{}
-    loop frame in report.source_journey -> journey.push(JetErrorJourneyFrame{fn_name: frame.fn_name, file: frame.file, line: frame.line, column: 0, note: frame.note, hops: frame.hops})
+    loop frame in report.source_journey {
+        journey.push(JetErrorJourneyFrame{fn_name: frame.fn_name, file: frame.file, line: frame.line, column: 0, note: frame.note, hops: frame.hops})
+    }
     conversions := [JetErrorConversion]{}
-    loop conversion in report.conversion_history -> conversions.push(JetErrorConversion{source: conversion.source, target: conversion.target})
+    loop conversion in report.conversion_history {
+        conversions.push(JetErrorConversion{source: conversion.source, target: conversion.target})
+    }
     details: if report.details == .Val(value) -> {
         fields := [JetErrorField]{}
-        loop field in value.fields -> fields.push(JetErrorField{name: field.name, value: field.value})
+        loop field in value.fields {
+            fields.push(JetErrorField{name: field.name, value: field.value})
+        }
         span: if value.source_span == .Val(found) -> Val(JetErrorSpan{start: found.start, end: found.end}) else -> None
         Val(JetErrorDetails{variant: value.variant, fields: fields, source_span: span})
     } else -> None
@@ -243,14 +306,22 @@ store_diagnostic_build_error: fn(report: JetErrorReport) -> DiagnosticBuildError
     causes := [DiagnosticBuildError]{}
     loop cause in report.causes -> causes.push(store_diagnostic_build_error(cause))
     frames := [DiagnosticErrorContextFrame]{}
-    loop frame in report.context_frames -> frames.push(DiagnosticErrorContextFrame{text: frame.text, file: frame.file, line: frame.line})
+    loop frame in report.context_frames {
+        frames.push(DiagnosticErrorContextFrame{text: frame.text, file: frame.file, line: frame.line})
+    }
     journey := [DiagnosticErrorJourneyFrame]{}
-    loop frame in report.source_journey -> journey.push(DiagnosticErrorJourneyFrame{fn_name: frame.fn_name, file: frame.file, line: frame.line, note: frame.note, hops: frame.hops})
+    loop frame in report.source_journey {
+        journey.push(DiagnosticErrorJourneyFrame{fn_name: frame.fn_name, file: frame.file, line: frame.line, note: frame.note, hops: frame.hops})
+    }
     conversions := [DiagnosticErrorConversion]{}
-    loop conversion in report.conversion_history -> conversions.push(DiagnosticErrorConversion{source: conversion.source, target: conversion.target})
+    loop conversion in report.conversion_history {
+        conversions.push(DiagnosticErrorConversion{source: conversion.source, target: conversion.target})
+    }
     details: if report.details == .Val(value) -> {
         fields := [DiagnosticErrorField]{}
-        loop field in value.fields -> fields.push(DiagnosticErrorField{name: field.name, value: field.value})
+        loop field in value.fields {
+            fields.push(DiagnosticErrorField{name: field.name, value: field.value})
+        }
         span: if value.source_span == .Val(found) -> Val(DiagnosticErrorSpan{start: found.start, end: found.end}) else -> None
         Val(DiagnosticErrorDetails{variant: value.variant, fields: fields, source_span: span})
     } else -> None
@@ -262,30 +333,38 @@ store_diagnostic_structured: fn(structured: DiagnosticStructured) -> RecordValue
         .SuggestedEdits(edits) -> {
             encoded := [RecordValue]{}
             loop edit in edits -> encoded.push(store_diagnostic_edit(edit))
-            RecordValue.Map{fields: [RecordField]{
-                {name: "kind", value: RecordValue.Str{value: "suggested_edits"}},
-                {name: "edits", value: RecordValue.List{values: encoded}},
-            }}
+            RecordValue.Map{
+                fields: [RecordField]{
+                    {name: "kind", value: RecordValue.Str{value: "suggested_edits"}},
+                    {name: "edits", value: RecordValue.List{values: encoded}},
+                },
+            }
         }
         .CryptoMisuse(reason, operation, expected, actual) -> {
             // The integer is kept as text, as Rust keeps its `i128`.
             actual_value: if actual == .Val(number) -> RecordValue.Str{value: "{number}"} else -> RecordValue.Null
-            RecordValue.Map{fields: [RecordField]{
-                {name: "kind", value: RecordValue.Str{value: "crypto_misuse"}},
-                {name: "reason", value: RecordValue.Str{value: store_diagnostic_crypto_name(reason)}},
-                {name: "operation", value: RecordValue.Str{value: operation}},
-                {name: "expected", value: record_value_optional_str(expected)},
-                {name: "actual", value: actual_value},
-            }}
+            RecordValue.Map{
+                fields: [RecordField]{
+                    {name: "kind", value: RecordValue.Str{value: "crypto_misuse"}},
+                    {name: "reason", value: RecordValue.Str{value: store_diagnostic_crypto_name(reason)}},
+                    {name: "operation", value: RecordValue.Str{value: operation}},
+                    {name: "expected", value: record_value_optional_str(expected)},
+                    {name: "actual", value: actual_value},
+                },
+            }
         }
-        .BuildError(report) -> RecordValue.Map{fields: [RecordField]{
-            {name: "kind", value: RecordValue.Str{value: "build_error"}},
-            {name: "report", value: RecordValue.Str{value: store_diagnostic_build_report(report).to_json()}},
-        }}
-        .RuntimeHostFault(stdout) -> RecordValue.Map{fields: [RecordField]{
-            {name: "kind", value: RecordValue.Str{value: "runtime_host_fault"}},
-            {name: "stdout", value: RecordValue.Str{value: stdout}},
-        }}
+        .BuildError(report) -> RecordValue.Map{
+            fields: [RecordField]{
+                {name: "kind", value: RecordValue.Str{value: "build_error"}},
+                {name: "report", value: RecordValue.Str{value: store_diagnostic_build_report(report).to_json()}},
+            },
+        }
+        .RuntimeHostFault(stdout) -> RecordValue.Map{
+            fields: [RecordField]{
+                {name: "kind", value: RecordValue.Str{value: "runtime_host_fault"}},
+                {name: "stdout", value: RecordValue.Str{value: stdout}},
+            },
+        }
     }
 }
 
@@ -296,43 +375,53 @@ store_diagnostic_encode: fn(diagnostic: Diagnostic, origins: &[DiagnosticOrigin]
     }
     causes := [RecordValue]{}
     loop cause in diagnostic.cause {
-        causes.push(RecordValue.Map{fields: [RecordField]{
-            {name: "code", value: RecordValue.Str{value: cause.code}},
-            {name: "span", value: store_diagnostic_optional_span(cause.span)},
-            {name: "origin", value: store_diagnostic_origin_index(cause.origin, origins)},
-        }})
+        causes.push(
+            RecordValue.Map{
+                fields: [RecordField]{
+                    {name: "code", value: RecordValue.Str{value: cause.code}},
+                    {name: "span", value: store_diagnostic_optional_span(cause.span)},
+                    {name: "origin", value: store_diagnostic_origin_index(cause.origin, origins)},
+                },
+            },
+        )
     }
-    no_fix: if diagnostic.no_fix_reason == .Val(reason) -> RecordValue.Map{fields: [RecordField]{
-        {name: "kind", value: RecordValue.Str{value: store_diagnostic_no_fix_kind_name(reason.kind)}},
-        {name: "next", value: RecordValue.Str{value: reason.next}},
-    }} else -> RecordValue.Null
+    no_fix: if diagnostic.no_fix_reason == .Val(reason) -> RecordValue.Map{
+        fields: [RecordField]{
+            {name: "kind", value: RecordValue.Str{value: store_diagnostic_no_fix_kind_name(reason.kind)}},
+            {name: "next", value: RecordValue.Str{value: reason.next}},
+        },
+    } else -> RecordValue.Null
     edit: if diagnostic.edit == .Val(value) -> store_diagnostic_edit(value) else -> RecordValue.Null
     applicability: if diagnostic.applicability == .Val(value) -> RecordValue.Str{value: store_diagnostic_applicability_name(value)} else -> RecordValue.Null
     safety: if diagnostic.safety == .Val(value) -> RecordValue.Str{value: store_diagnostic_safety_name(value)} else -> RecordValue.Null
     structured: if diagnostic.structured == .Val(value) -> store_diagnostic_structured(value) else -> RecordValue.Null
     origin: store_diagnostic_origin_index(diagnostic.origin, origins)
-    Ok(RecordValue.Map{fields: [RecordField]{
-        {name: "moment", value: RecordValue.Str{value: store_diagnostic_moment_name(diagnostic.moment)}},
-        {name: "severity", value: RecordValue.Str{value: store_diagnostic_severity_name(diagnostic.severity)}},
-        {name: "code", value: RecordValue.Str{value: diagnostic.code}},
-        {name: "what", value: RecordValue.Str{value: diagnostic.what}},
-        {name: "why", value: RecordValue.Str{value: diagnostic.why}},
-        {name: "fix", value: RecordValue.Str{value: diagnostic.fix}},
-        {name: "span", value: store_diagnostic_optional_span(diagnostic.span)},
-        {name: "origin", value: origin},
-        {name: "labels", value: RecordValue.List{values: labels}},
-        {name: "cause", value: RecordValue.List{values: causes}},
-        {name: "edit", value: edit},
-        {name: "applicability", value: applicability},
-        {name: "safety", value: safety},
-        {name: "no_fix", value: no_fix},
-        {name: "detail", value: record_value_optional_str(diagnostic.detail)},
-        {name: "structured", value: structured},
-        {name: "denial_kind", value: record_value_optional_str(diagnostic.denial_kind)},
-        {name: "call_chain", value: record_value_list_of_str(diagnostic.call_chain)},
-        {name: "scope_chain", value: record_value_list_of_str(diagnostic.scope_chain)},
-        {name: "nearest_granting_scope", value: record_value_optional_str(diagnostic.nearest_granting_scope)},
-    }})
+    Ok(
+        RecordValue.Map{
+            fields: [RecordField]{
+                {name: "moment", value: RecordValue.Str{value: store_diagnostic_moment_name(diagnostic.moment)}},
+                {name: "severity", value: RecordValue.Str{value: store_diagnostic_severity_name(diagnostic.severity)}},
+                {name: "code", value: RecordValue.Str{value: diagnostic.code}},
+                {name: "what", value: RecordValue.Str{value: diagnostic.what}},
+                {name: "why", value: RecordValue.Str{value: diagnostic.why}},
+                {name: "fix", value: RecordValue.Str{value: diagnostic.fix}},
+                {name: "span", value: store_diagnostic_optional_span(diagnostic.span)},
+                {name: "origin", value: origin},
+                {name: "labels", value: RecordValue.List{values: labels}},
+                {name: "cause", value: RecordValue.List{values: causes}},
+                {name: "edit", value: edit},
+                {name: "applicability", value: applicability},
+                {name: "safety", value: safety},
+                {name: "no_fix", value: no_fix},
+                {name: "detail", value: record_value_optional_str(diagnostic.detail)},
+                {name: "structured", value: structured},
+                {name: "denial_kind", value: record_value_optional_str(diagnostic.denial_kind)},
+                {name: "call_chain", value: record_value_list_of_str(diagnostic.call_chain)},
+                {name: "scope_chain", value: record_value_list_of_str(diagnostic.scope_chain)},
+                {name: "nearest_granting_scope", value: record_value_optional_str(diagnostic.nearest_granting_scope)},
+            },
+        },
+    )
 }
 
 store_diagnostic_field: fn(value: RecordValue, name: String) -> RecordValue StoreDiagnosticRecordError! {
@@ -369,7 +458,9 @@ store_diagnostic_strings: fn(value: RecordValue, name: String) -> [String] Store
 store_diagnostic_decode_span: fn(value: RecordValue) -> Span StoreDiagnosticRecordError! {
     decoded: record_value_as_list(value)
     pair: decoded.value ?? return Err(store_diagnostic_error(decoded.problem ?? "diagnostic span must be a [start, end] pair"))
-    if pair.len() != 2 -> return Err(store_diagnostic_error("diagnostic span must be a [start, end] pair"))
+    if pair.len() != 2 {
+        return Err(store_diagnostic_error("diagnostic span must be a [start, end] pair"))
+    }
     Ok(Span{start: store_diagnostic_offset(pair[0]), end: store_diagnostic_offset(pair[1])})
 }
 
@@ -381,7 +472,9 @@ store_diagnostic_decode_optional_span: fn(value: RecordValue) -> Span? StoreDiag
 store_diagnostic_decode_origin: fn(value: RecordValue, origins: [DiagnosticOrigin]) -> DiagnosticOrigin? StoreDiagnosticRecordError! {
     if record_value_is_null(value) -> return Ok(None)
     index: store_diagnostic_offset(value)
-    if index >= origins.len() -> return Err(store_diagnostic_error("diagnostic origin index is out of range"))
+    if index >= origins.len() {
+        return Err(store_diagnostic_error("diagnostic origin index is out of range"))
+    }
     Ok(Val(origins[index]))
 }
 
@@ -394,7 +487,9 @@ store_diagnostic_decode_structured: fn(value: RecordValue) -> DiagnosticStructur
     if kind == {
         "suggested_edits" -> {
             edits := [TextEdit]{}
-            loop edit in store_diagnostic_list(value, "edits") -> edits.push(store_diagnostic_decode_edit(edit))
+            loop edit in store_diagnostic_list(value, "edits") {
+                edits.push(store_diagnostic_decode_edit(edit))
+            }
             Ok(DiagnosticStructured.SuggestedEdits{edits: edits})
         }
         "crypto_misuse" -> {
@@ -402,12 +497,14 @@ store_diagnostic_decode_structured: fn(value: RecordValue) -> DiagnosticStructur
             if store_diagnostic_optional_text(value, "actual") == .Val(text) {
                 actual = Val(Int.parse(text) ?? return Err(store_diagnostic_error("invalid crypto misuse value `{text}`")))
             }
-            Ok(DiagnosticStructured.CryptoMisuse{
-                reason: store_diagnostic_parse_crypto(store_diagnostic_text(value, "reason")),
-                operation: store_diagnostic_text(value, "operation"),
-                expected: store_diagnostic_optional_text(value, "expected"),
-                actual: actual,
-            })
+            Ok(
+                DiagnosticStructured.CryptoMisuse{
+                    reason: store_diagnostic_parse_crypto(store_diagnostic_text(value, "reason")),
+                    operation: store_diagnostic_text(value, "operation"),
+                    expected: store_diagnostic_optional_text(value, "expected"),
+                    actual: actual,
+                },
+            )
         }
         "build_error" -> {
             report: JetErrorReport.from_json(store_diagnostic_text(value, "report")) ?? return Err(store_diagnostic_error(err.message))
@@ -423,20 +520,26 @@ store_diagnostic_decode: fn(value: RecordValue, origins: [DiagnosticOrigin]) -> 
     loop label in store_diagnostic_list(value, "labels") {
         decoded: record_value_as_list(label)
         parts: decoded.value ?? return Err(store_diagnostic_error(decoded.problem ?? "diagnostic label must be [start, end, message]"))
-        if parts.len() != 3 -> return Err(store_diagnostic_error("diagnostic label must be [start, end, message]"))
+        if parts.len() != 3 {
+            return Err(store_diagnostic_error("diagnostic label must be [start, end, message]"))
+        }
         message: record_value_as_str(parts[2])
-        labels.push(DiagnosticLabel{
-            span: Span{start: store_diagnostic_offset(parts[0]), end: store_diagnostic_offset(parts[1])},
-            message: message.value ?? return Err(store_diagnostic_error(message.problem ?? "diagnostic label message is not a string")),
-        })
+        labels.push(
+            DiagnosticLabel{
+                span: Span{start: store_diagnostic_offset(parts[0]), end: store_diagnostic_offset(parts[1])},
+                message: message.value ?? return Err(store_diagnostic_error(message.problem ?? "diagnostic label message is not a string")),
+            },
+        )
     }
     causes := [DiagnosticCause]{}
     loop cause in store_diagnostic_list(value, "cause") {
-        causes.push(DiagnosticCause{
-            code: store_diagnostic_text(cause, "code"),
-            span: store_diagnostic_decode_optional_span(store_diagnostic_field(cause, "span")),
-            origin: store_diagnostic_decode_origin(store_diagnostic_field(cause, "origin"), origins),
-        })
+        causes.push(
+            DiagnosticCause{
+                code: store_diagnostic_text(cause, "code"),
+                span: store_diagnostic_decode_optional_span(store_diagnostic_field(cause, "span")),
+                origin: store_diagnostic_decode_origin(store_diagnostic_field(cause, "origin"), origins),
+            },
+        )
     }
     edit_value: store_diagnostic_field(value, "edit")
     edit: if record_value_is_null(edit_value) -> None else -> Val(store_diagnostic_decode_edit(edit_value))
@@ -446,26 +549,28 @@ store_diagnostic_decode: fn(value: RecordValue, origins: [DiagnosticOrigin]) -> 
     structured: if record_value_is_null(structured_value) -> None else -> Val(store_diagnostic_decode_structured(structured_value))
     applicability: if store_diagnostic_optional_text(value, "applicability") == .Val(text) -> Val(store_diagnostic_parse_applicability(text)) else -> None
     safety: if store_diagnostic_optional_text(value, "safety") == .Val(text) -> Val(store_diagnostic_parse_safety(text)) else -> None
-    Ok(Diagnostic{
-        moment: store_diagnostic_parse_moment(store_diagnostic_text(value, "moment")),
-        severity: store_diagnostic_parse_severity(store_diagnostic_text(value, "severity")),
-        code: store_diagnostic_text(value, "code"),
-        what: store_diagnostic_text(value, "what"),
-        why: store_diagnostic_text(value, "why"),
-        fix: store_diagnostic_text(value, "fix"),
-        span: store_diagnostic_decode_optional_span(store_diagnostic_field(value, "span")),
-        origin: store_diagnostic_decode_origin(store_diagnostic_field(value, "origin"), origins),
-        labels: labels,
-        cause: causes,
-        edit: edit,
-        applicability: applicability,
-        safety: safety,
-        no_fix_reason: no_fix,
-        detail: store_diagnostic_optional_text(value, "detail"),
-        structured: structured,
-        denial_kind: store_diagnostic_optional_text(value, "denial_kind"),
-        call_chain: store_diagnostic_strings(value, "call_chain"),
-        scope_chain: store_diagnostic_strings(value, "scope_chain"),
-        nearest_granting_scope: store_diagnostic_optional_text(value, "nearest_granting_scope"),
-    })
+    Ok(
+        Diagnostic{
+            moment: store_diagnostic_parse_moment(store_diagnostic_text(value, "moment")),
+            severity: store_diagnostic_parse_severity(store_diagnostic_text(value, "severity")),
+            code: store_diagnostic_text(value, "code"),
+            what: store_diagnostic_text(value, "what"),
+            why: store_diagnostic_text(value, "why"),
+            fix: store_diagnostic_text(value, "fix"),
+            span: store_diagnostic_decode_optional_span(store_diagnostic_field(value, "span")),
+            origin: store_diagnostic_decode_origin(store_diagnostic_field(value, "origin"), origins),
+            labels: labels,
+            cause: causes,
+            edit: edit,
+            applicability: applicability,
+            safety: safety,
+            no_fix_reason: no_fix,
+            detail: store_diagnostic_optional_text(value, "detail"),
+            structured: structured,
+            denial_kind: store_diagnostic_optional_text(value, "denial_kind"),
+            call_chain: store_diagnostic_strings(value, "call_chain"),
+            scope_chain: store_diagnostic_strings(value, "scope_chain"),
+            nearest_granting_scope: store_diagnostic_optional_text(value, "nearest_granting_scope"),
+        },
+    )
 }

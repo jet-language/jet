@@ -1,4 +1,3 @@
-
 use json: core.encoding.json
 
 Usd: distinct Int
@@ -9,13 +8,13 @@ Row: struct {
 }
 
 run: fn() {
-    row: Row{ value: Usd.from_int(7) }
+    row: Row{value: Usd.from_int(7)}
     wire: json.to_string(row)
     print(wire)
     decoded: json.decode<Row>(wire) ?? panic("row")
     decoded_value: decoded.value
     if decoded_value == {
-        .Usd(value) -> print(value.raw())
+        .Usd(value) -> { print(value.raw()) }
         .String(value) -> print(value)
     }
 }

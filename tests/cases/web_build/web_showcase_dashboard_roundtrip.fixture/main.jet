@@ -6,11 +6,14 @@ package: {
     authority: { allow: [Browser, IO, Mem.Alloc] }
 }
 
+#[Target(Web), HTML(Path{"ui_showcase.html"})]
+
 use {
     ui: core.ui
     reactive: core.reactive
     core.color.[Color]
 }
+
 // Native and browser entry points compose the same canonical UiNode tree.
 // Browser-side wiring hands typed `core.color` values straight to
 // `ui.node_color`, whose paint pipeline writes them as CSS hex colors: this is
@@ -51,15 +54,10 @@ use {
 // The native entry point paints the canonical tree through the null backend.
 // Browser-only reactive entry points are exercised by the fake-DOM harness and
 // by ui_showcase.html.
-#[Target(Web), HTML(Path{"ui_showcase.html"})]
 
-stat_line: fn(label: String, value: String) -> UINode {
-    return ui.text("{label}: {value}")
-}
+stat_line: fn(label: String, value: String) -> UINode { return ui.text("{label}: {value}") }
 
-dashboard_view: fn(cards: [UINode]) -> UINode {
-    return ui.box(cards)
-}
+dashboard_view: fn(cards: [UINode]) -> UINode { return ui.box(cards) }
 
 StatCard: struct {
     label: String
@@ -98,12 +96,8 @@ paint_stat_card: fn(card: StatCard) {
 
 #Target(JS)
 tween: fn(from: Float, to: Float, elapsed_ms: Int, duration_ms: Int) -> Float Never! {
-    if elapsed_ms <= 0 {
-        return from
-    }
-    if elapsed_ms >= duration_ms {
-        return to
-    }
+    if elapsed_ms <= 0 -> return from
+    if elapsed_ms >= duration_ms -> return to
     t := Float.from_int(elapsed_ms) / Float.from_int(duration_ms)
     eased := t * t * (Float.from_int(3) - Float.from_int(2) * t)
     return from + (to - from) * eased

@@ -13,9 +13,13 @@ use {
 // that tool.
 sema_units_catalog_read: fn() -> [UnitFamilyDef] {
     parsed: parse_generated_source(SEMA_PRELUDE_UNITS_SOURCE.bytes())
-    if parsed.diagnostics.len() > 0 -> panic("Prelude/Units.jet does not parse: {parsed.diagnostics[0].what}")
+    if parsed.diagnostics.len() > 0 {
+        panic("Prelude/Units.jet does not parse: {parsed.diagnostics[0].what}")
+    }
     families := [UnitFamilyDef]{}
-    loop item in parsed.program.items { if item == .UnitFamily(family) -> families.push(family) }
+    loop item in parsed.program.items {
+        if item == .UnitFamily(family) -> families.push(family)
+    }
     sema_units_resolve_standard(families)
     families
 }
@@ -27,11 +31,13 @@ sema_units_local_names: fn(items: [Item], occupied: &[String:Bool], local_famili
         if item == {
             .UnitFamily(family) -> {
                 local_families[family.family] = true
-                loop named in sema_registration_unit_family_type_names(family) -> occupied[named.name] = true
+                loop named in sema_registration_unit_family_type_names(family) {
+                    occupied[named.name] = true
+                }
             }
-            .Distinct(definition) -> occupied[definition.name] = true
-            .Struct(definition) -> occupied[definition.name] = true
-            .Enum(definition) -> occupied[definition.name] = true
+            .Distinct(definition) -> { occupied[definition.name] = true }
+            .Struct(definition) -> { occupied[definition.name] = true }
+            .Enum(definition) -> { occupied[definition.name] = true }
             .TypeAlias(definition) -> occupied[definition.name] = true
             .Func(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
@@ -80,7 +86,9 @@ sema_units_mentioned: fn(catalog: [UnitFamilyDef], names: SemaUnitsCatalogNames,
     loop (index, family) in catalog {
         if sema_units_identifier(mentions, family.family) -> return true
         loop (member_index, member) in family.members {
-            if sema_units_member(mentions, member.name, names.type_names[index][member_index]) -> return true
+            if sema_units_member(mentions, member.name, names.type_names[index][member_index]) {
+                return true
+            }
         }
     }
     false
@@ -164,7 +172,9 @@ sema_units_scan_take: fn(shared_state: Shared<SemaUnitsScanShared>, inputs: &[Se
 // Runs scanning threads `from..<workers`, one task each, and moves every row
 // a thread returned into its input's slot of `rows`.
 sema_units_scanners: fn(shared_state: Shared<SemaUnitsScanShared>, queue: Shared<SemaUnitsScanQueue>, from: Int, workers: Int, rows: &[SemaUnitSourceMentions]) {
-    if from >= workers -> return
+    if from >= workers {
+        return
+    }
     task.group sema_units_scan_threads {
         head: task sema_units_scan_claimed(shared_state, queue)
         sema_units_scanners(shared_state, queue, from + 1, workers, rows)
@@ -200,7 +210,9 @@ sema_units_scan_claim: fn(queue: Shared<SemaUnitsScanQueue>) -> Int {
 
 // `mentions` is the input's sema_units_scan_mentions row.
 sema_units_inject: fn(input: &SemaRegistrationModuleInput, catalog: [UnitFamilyDef], names: SemaUnitsCatalogNames, mentions: SemaUnitSourceMentions) Never! {
-    if input.program.no_prelude -> return
+    if input.program.no_prelude {
+        return
+    }
     occupied := [String:Bool]{}
     local_families := [String:Bool]{}
     sema_units_local_names(input.program.items, occupied, local_families)
@@ -241,7 +253,9 @@ sema_units_inject: fn(input: &SemaRegistrationModuleInput, catalog: [UnitFamilyD
         }
     }
     loop (family_index, standard) in catalog {
-        if local_families.get(standard.family) != None || selected.get(standard.family) == None -> next
+        if local_families.get(standard.family) != None || selected.get(standard.family) == None {
+            next
+        }
         family := standard
         members := [UnitFamilyMember]{}
         // The type name of each kept member, by its index in `members`.
@@ -263,7 +277,9 @@ sema_units_inject: fn(input: &SemaRegistrationModuleInput, catalog: [UnitFamilyD
             }
         }
         family_anchor: anchor ?? sema_units_identifier_span(mentions, family.family) ?? Span{start: 0, end: 0}
-        loop index in 0..<family.members.len() -> family.members[index].name_span = sema_units_member_span(mentions, family.members[index].name, member_types[index]) ?? family_anchor
+        loop index in 0..<family.members.len() {
+            family.members[index].name_span = sema_units_member_span(mentions, family.members[index].name, member_types[index]) ?? family_anchor
+        }
         input.program.items.push(Item.UnitFamily{value: family})
     }
 }

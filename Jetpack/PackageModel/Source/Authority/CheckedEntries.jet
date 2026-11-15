@@ -13,9 +13,13 @@ use {
 }
 
 AUTHORITY_KIND_FILE: "regular file"
+
 AUTHORITY_KIND_DIRECTORY: "directory"
+
 AUTHORITY_KIND_SPECIAL: "special file"
+
 AUTHORITY_KIND_SYMLINK: "symlink"
+
 AUTHORITY_HARDLINK_DETAIL: "authority file must have exactly one hard link"
 
 // The kind proven by a checked open.
@@ -99,10 +103,7 @@ CheckedPackage: struct {
 // Failure from the shared authority resolver.
 #Error
 AuthorityError: enum {
-    // `cause` is the native open/stat failure text, or why a probe found nothing.
     Missing(path: String, cause: String)
-    // `package.jet` parsed as text but violates the manifest vocabulary; kept
-    // typed so the registered manifest diagnostics reach the user.
     ManifestParse(path: String, error: PackageParseError)
     IO(path: String, operation: String, detail: String)
     Symlink(String)
@@ -112,10 +113,14 @@ AuthorityError: enum {
     WorkspaceNoModule
     NestedMembers(root: String, member: String)
     Invalid(path: String, detail: String)
-    // The read bytes are not UTF-8; `detail` locates the first bad sequence.
     NotText(path: String, detail: String)
     Changed(String)
     Unsupported(String)
+
+    // `cause` is the native open/stat failure text, or why a probe found nothing.
+    // `package.jet` parsed as text but violates the manifest vocabulary; kept
+    // typed so the registered manifest diagnostics reach the user.
+    // The read bytes are not UTF-8; `detail` locates the first bad sequence.
 
     is_missing: fn(self) -> Bool Never! {
         if self == {
@@ -147,47 +152,67 @@ AuthorityError: enum {
         if self == {
             .WorkspaceAmbiguous(paths) -> pkg_e1239_ambiguous_workspace(paths)
             .WorkspaceNoModule -> pkg_e0995_no_workspace_module()
-            .NestedMembers(root, member) -> pkg_authority_error_diagnostic("E1323",
+            .NestedMembers(root, member) -> pkg_authority_error_diagnostic(
+                "E1323",
                 "member Package `{member}` declares `members`",
                 "Package membership has depth cap one: `{root}` owns the member list, but `{member}` declares another one",
-                "remove `members:` from `{member}` and lift its references into `{root}`")
+                "remove `members:` from `{member}` and lift its references into `{root}`",
+            )
             .ManifestParse(path, error) -> pkg_manifest_parse_diagnostic(path, error)
-            .Missing(path, _) -> pkg_authority_error_diagnostic("E1334",
+            .Missing(path, _) -> pkg_authority_error_diagnostic(
+                "E1334",
                 "authority file `{path}` is missing",
                 "authority metadata must exist before it can be used",
-                "restore the required metadata and try again")
-            .Symlink(path) -> pkg_authority_error_diagnostic("E1334",
+                "restore the required metadata and try again",
+            )
+            .Symlink(path) -> pkg_authority_error_diagnostic(
+                "E1334",
                 "authority path `{path}` is a symlink",
                 "authority metadata is opened without following links",
-                "replace the symlink with the expected regular file or directory")
-            .WrongKind(path, expected, actual) -> pkg_authority_error_diagnostic("E1334",
+                "replace the symlink with the expected regular file or directory",
+            )
+            .WrongKind(path, expected, actual) -> pkg_authority_error_diagnostic(
+                "E1334",
                 "authority path `{path}` is not a {expected}",
                 "the opened object is a {actual}, not the required {expected}",
-                "replace `{path}` with a {expected}")
-            .Escapes(path) -> pkg_authority_error_diagnostic("E1322",
+                "replace `{path}` with a {expected}",
+            )
+            .Escapes(path) -> pkg_authority_error_diagnostic(
+                "E1322",
                 "authority path `{path}` escapes its root",
                 "authority identity is physical and cannot cross the checked root",
-                "use a relative path below the authority root")
-            .Invalid(path, detail) -> pkg_authority_error_diagnostic("E1334",
+                "use a relative path below the authority root",
+            )
+            .Invalid(path, detail) -> pkg_authority_error_diagnostic(
+                "E1334",
                 "authority metadata `{path}` is invalid",
                 detail,
-                "fix the metadata fields and try again")
-            .NotText(path, detail) -> pkg_authority_error_diagnostic("E1334",
+                "fix the metadata fields and try again",
+            )
+            .NotText(path, detail) -> pkg_authority_error_diagnostic(
+                "E1334",
                 "authority metadata `{path}` is invalid",
                 "authority file is not valid UTF-8: {detail}",
-                "fix the metadata fields and try again")
-            .Changed(path) -> pkg_authority_error_diagnostic("E1334",
+                "fix the metadata fields and try again",
+            )
+            .Changed(path) -> pkg_authority_error_diagnostic(
+                "E1334",
                 "authority object `{path}` changed during resolution",
                 "the opened authority snapshot no longer matches the object at its path",
-                "restore the authority input and retry the operation")
-            .IO(path, operation, detail) -> pkg_authority_error_diagnostic("E1334",
+                "restore the authority input and retry the operation",
+            )
+            .IO(path, operation, detail) -> pkg_authority_error_diagnostic(
+                "E1334",
                 "couldn't {operation} authority `{path}`",
                 detail,
-                "restore access to the authority metadata and try again")
-            .Unsupported(detail) -> pkg_authority_error_diagnostic("E1334",
+                "restore access to the authority metadata and try again",
+            )
+            .Unsupported(detail) -> pkg_authority_error_diagnostic(
+                "E1334",
                 "authority resolution is unavailable on this platform",
                 detail,
-                "use a platform with descriptor-relative no-follow filesystem access")
+                "use a platform with descriptor-relative no-follow filesystem access",
+            )
         }
     }
 
@@ -198,10 +223,12 @@ AuthorityError: enum {
             .WorkspaceNoModule -> pkg_e0995_no_workspace_module()
             .Symlink(_) -> self.diagnostic()
             .Unsupported(_) -> self.diagnostic()
-            .Missing(_, _) | .IO(_, _, _) | .WrongKind(_, _, _) | .Escapes(_) | .NestedMembers(_, _) | .Invalid(_, _) | .NotText(_, _) | .Changed(_) -> pkg_authority_error_diagnostic("E1239",
+            .Missing(_, _) | .IO(_, _, _) | .WrongKind(_, _, _) | .Escapes(_) | .NestedMembers(_, _) | .Invalid(_, _) | .NotText(_, _) | .Changed(_) -> pkg_authority_error_diagnostic(
+                "E1239",
                 "couldn't inspect workspace sources",
                 self.message(),
-                "restore the workspace metadata and try again")
+                "restore the workspace metadata and try again",
+            )
         }
     }
 }
@@ -256,17 +283,16 @@ pkg_authority_entry_kind_name: fn(info: files.Stat) -> String Never! {
 
 // `require_single_link_file`.
 pkg_authority_require_single_link: fn(path: String, info: files.Stat) AuthorityError! {
-    if info.links == 1 -> return
+    if info.links == 1 {
+        return
+    }
     return Err(AuthorityError.Invalid{path: path, detail: AUTHORITY_HARDLINK_DETAIL})
 }
 
 // The OS error number behind a provider failure, when known.
 pkg_io_os_code: fn(error: IOError) -> Int? Never! {
     if error == {
-        .InvalidInput(context) | .NotFound(context) | .PermissionDenied(context) |
-        .TimedOut(context) | .Cancelled(context) | .Closed(context) |
-        .Protocol(context) | .Other(context) | .AlreadyExists(context) |
-        .Unsupported(context) -> context.os_code
+        .InvalidInput(context) | .NotFound(context) | .PermissionDenied(context) | .TimedOut(context) | .Cancelled(context) | .Closed(context) | .Protocol(context) | .Other(context) | .AlreadyExists(context) | .Unsupported(context) -> context.os_code
         .ResourceLimit(_) -> None
     }
 }
@@ -275,10 +301,7 @@ pkg_io_os_code: fn(error: IOError) -> Int? Never! {
 // 2)`), without the public IOError display prefix.
 pkg_io_cause: fn(error: IOError) -> String Never! {
     if error == {
-        .InvalidInput(context) | .NotFound(context) | .PermissionDenied(context) |
-        .TimedOut(context) | .Cancelled(context) | .Closed(context) |
-        .Protocol(context) | .Other(context) | .AlreadyExists(context) |
-        .Unsupported(context) -> context.cause ?? "{error}"
+        .InvalidInput(context) | .NotFound(context) | .PermissionDenied(context) | .TimedOut(context) | .Cancelled(context) | .Closed(context) | .Protocol(context) | .Other(context) | .AlreadyExists(context) | .Unsupported(context) -> context.cause ?? "{error}"
         .ResourceLimit(_) -> "{error}"
     }
 }
@@ -306,7 +329,9 @@ pkg_io_is_not_found: fn(error: IOError) -> Bool Never! {
 
 // `map_io`: the typed authority failure of one open.
 pkg_authority_map_io: fn(path: String, error: IOError, directory: Bool) -[Env]> AuthorityError Never! {
-    if pkg_io_is_not_found(error) -> return AuthorityError.Missing{path: path, cause: pkg_io_cause(error)}
+    if pkg_io_is_not_found(error) {
+        return AuthorityError.Missing{path: path, cause: pkg_io_cause(error)}
+    }
     if pkg_io_is_symlink_error(error) -> return AuthorityError.Symlink(path)
     if directory && pkg_io_is_not_a_directory(error) {
         return AuthorityError.WrongKind{path: path, expected: AUTHORITY_KIND_DIRECTORY, actual: AUTHORITY_KIND_FILE}
@@ -335,7 +360,9 @@ pkg_authority_extension: fn(name: String) -> String? Never! {
     raw: name.bytes()
     index := raw.len() - 1
     loop index > 0 {
-        if (Int{raw[index]}) == 46 -> return Val(String.from_bytes(raw[index + 1..<raw.len()]) ?? "")
+        if (Int{raw[index]}) == 46 {
+            return Val(String.from_bytes(raw[index + 1..<raw.len()]) ?? "")
+        }
         index -= 1
     }
     None

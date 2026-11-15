@@ -1,15 +1,17 @@
 // Compiler-private process receipt fact: bounded status history survives the
 // child owner, but is populated only by a successful wait.
 compiler_host_root := I64{0}
+
 // runtime-init: 4 when compiler_host_root
 #Export(c) jet_rt_compiler_host_init: fn() {
-    if (compiler_host_root != I64{0}) -> return
+    if (compiler_host_root != I64{0}) {
+        return
+    }
     root: jet_rt_alloc(I64{1048}, I64{8})
     thread_zero(root, I64{1048})
-    #Unsafe("runtime-init runs before any other thread exists") {
-        compiler_host_root = root
-    }
+    #Unsafe("runtime-init runs before any other thread exists") { compiler_host_root = root }
 }
+
 compiler_process_record_exit_status: fn(pid: I64, status: I64) {
     root: compiler_host_root
     sync_mutex_lock(root)
@@ -19,9 +21,10 @@ compiler_process_record_exit_status: fn(pid: I64, status: I64) {
     rt_text_store(wrapping(slot + I64{8}), status)
     rt_text_store(wrapping(root + I64{8}), (next_slot + I64{1}) % I64{64})
     count: rt_text_word(wrapping(root + I64{16}))
-    if (count < I64{64}) -> rt_text_store(wrapping(root + I64{16}), count + I64{1})
+    if (count < I64{64}) { rt_text_store(wrapping(root + I64{16}), count + I64{1}) }
     sync_mutex_unlock(root)
 }
+
 compiler_process_signal_name: fn(signal: I64) -> I64 {
     if {
         (signal == I64{1}) -> rt_static_text("SIGHUP")
@@ -58,6 +61,7 @@ compiler_process_signal_name: fn(signal: I64) -> I64 {
         else -> I64{0}
     }
 }
+
 compiler_process_status_text: fn(status: I64) -> I64 {
     text: jet_rt_string_builder_new()
     low: status.bit_and(I64{127})
@@ -77,13 +81,16 @@ compiler_process_status_text: fn(status: I64) -> I64 {
             jet_rt_string_builder_push(text, name)
             rt_text_push_word(text, I64{41}, I64{1})
         }
-        if (!stopped && (status.bit_and(I64{128})) != I64{0}) -> jet_rt_string_builder_push(text, rt_static_text(" (core dumped)"))
+        if (!stopped && (status.bit_and(I64{128})) != I64{0}) {
+            jet_rt_string_builder_push(text, rt_static_text(" (core dumped)"))
+        }
     }
     jet_rt_string_builder_finish(text)
 }
+
 #Export(c) jet_process_exit_status_raw: fn(pid: I64, some: I64) -> I64 {
     native: host_native_int(pid)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     root: compiler_host_root
     sync_mutex_lock(root)
     count: rt_text_word(wrapping(root + I64{16}))
@@ -105,10 +112,13 @@ compiler_process_status_text: fn(status: I64) -> I64 {
     rt_text_store(some, compiler_process_status_text(status))
     I64{1}
 }
+
 // These match std::env::consts for this pack's Linux x86-64 OS seed; they are
 // the build target identity, not uname's machine/release or the compiler target.
 #Export(c) jet_std_os_name: fn() -> I64 { jet_rt_string_clone(rt_static_text("linux")) }
+
 #Export(c) jet_std_os_arch: fn() -> I64 { jet_rt_string_clone(rt_static_text("x86_64")) }
+
 // std::env::consts::FAMILY of the Linux build target.
 #Export(c) jet_std_os_family: fn() -> I64 { jet_rt_string_clone(rt_static_text("unix")) }
 
@@ -124,19 +134,19 @@ compiler_process_status_text: fn(status: I64) -> I64 {
 // No libc: the fault report reads it on the alternate signal stack.
 host_getauxval: fn(kind: I64) -> I64 {
     envp: host_envp
-    if (envp == I64{0}) -> return host_getauxval_kernel(kind)
+    if (envp == I64{0}) { return host_getauxval_kernel(kind) }
     // Startup lends the start stack: the null-terminated envp array, then the
     // auxiliary vector's [type, value] pairs up to AT_NULL.
     at := envp
     loop {
-        if (rt_text_word(at) == I64{0}) -> break
+        if (rt_text_word(at) == I64{0}) { break }
         at = wrapping(at + I64{8})
     }
     at = wrapping(at + I64{8})
     loop {
         entry: rt_text_word(at)
-        if (entry == I64{0}) -> return I64{0}
-        if (entry == kind) -> return rt_text_word(wrapping(at + I64{8}))
+        if (entry == I64{0}) { return I64{0} }
+        if (entry == kind) { return rt_text_word(wrapping(at + I64{8})) }
         at = wrapping(at + I64{16})
     }
 }
@@ -146,7 +156,7 @@ host_getauxval: fn(kind: I64) -> I64 {
 // allocating is not allowed, and only this function reads it.
 host_getauxval_kernel: fn(kind: I64) -> I64 {
     page: alloc_map_try(I64{4096})
-    if (page == I64{0}) -> return I64{0}
+    if (page == I64{0}) { return I64{0} }
     found := I64{0}
     // "/proc/self/auxv\0", little-endian, at the start of the fresh private page.
     rt_text_store(page, I64{7310238724270485551})
@@ -160,7 +170,7 @@ host_getauxval_kernel: fn(kind: I64) -> I64 {
             // The pair at `at` (from 16) is whole when at + 16 <= 16 + length.
             loop at <= length {
                 entry: rt_text_word(wrapping(page + at))
-                if (entry == I64{0}) -> break
+                if (entry == I64{0}) { break }
                 if (entry == kind) {
                     found = rt_text_word(wrapping(page + wrapping(at + I64{8})))
                     break
@@ -174,6 +184,7 @@ host_getauxval_kernel: fn(kind: I64) -> I64 {
 }
 
 HOST_AT_EXECUTABLE: I64{1246057473}
+
 HOST_AT_IMAGE: I64{1246057474}
 
 // jet_sys_executable_raw: std::env::current_exe on Linux reads the
@@ -212,6 +223,7 @@ HOST_AT_IMAGE: I64{1246057474}
 // ELF.jet ELF64_JET_PART_NOTE), and its owner "Jet\0" as a little-endian
 // word.
 HOST_NOTE_JET_PART: I64{1246056449}
+
 HOST_NOTE_JET_OWNER: I64{7628106}
 
 // The bytes before a part's own bytes in its note's descriptor: the part's
@@ -234,7 +246,7 @@ host_image_part: fn(name: I64) -> I64 {
     length: rt_text_len(name)
     data: rt_text_data(name)
     label: host_image_part_label(name)
-    if (table == I64{0} || length == I64{0}) -> return I64{0}
+    if (table == I64{0} || length == I64{0}) { return I64{0} }
     mask: I64{4294967295}
     index := I64{0}
     // AT_PHDR lends the program header table the kernel mapped, AT_PHNUM rows
@@ -243,21 +255,23 @@ host_image_part: fn(name: I64) -> I64 {
     loop index < count {
         row: wrapping(table + index * I64{56})
         index = wrapping(index + I64{1})
-        if (rt_text_word(row).bit_and(mask) != I64{4}) -> next
+        if (rt_text_word(row).bit_and(mask) != I64{4}) { next }
         note: rt_text_word(wrapping(row + I64{16}))
         size: rt_text_word(wrapping(row + I64{32}))
-        if (size < wrapping(I64{16} + label)) -> next
+        if (size < wrapping(I64{16} + label)) { next }
         head: rt_text_word(note)
         kind: rt_text_word(wrapping(note + I64{8}))
         descriptor: (head >> I64{32}).bit_and(mask)
-        if (head.bit_and(mask) != I64{4} || kind.bit_and(mask) != HOST_NOTE_JET_PART || (kind >> I64{32}).bit_and(mask) != HOST_NOTE_JET_OWNER) -> next
-        if (descriptor < label || wrapping(I64{16} + descriptor) > size) -> next
-        if (rt_text_byte(wrapping(note + wrapping(I64{16} + length))) != I64{0}) -> next
+        if (head.bit_and(mask) != I64{4} || kind.bit_and(mask) != HOST_NOTE_JET_PART || (kind >> I64{32}).bit_and(mask) != HOST_NOTE_JET_OWNER) {
+            next
+        }
+        if (descriptor < label || wrapping(I64{16} + descriptor) > size) { next }
+        if (rt_text_byte(wrapping(note + wrapping(I64{16} + length))) != I64{0}) { next }
         at := I64{0}
         loop at < length && rt_text_byte(wrapping(note + wrapping(I64{16} + at))) == rt_text_byte(wrapping(data + at)) {
             at = wrapping(at + I64{1})
         }
-        if (at == length) -> return note
+        if (at == length) { return note }
     }
     I64{0}
 }
@@ -273,7 +287,7 @@ host_image_part_length: fn(note: I64, name: I64) -> I64 {
 // added to this executable (host_image_part), None when it has none.
 #Export(c) jet_sys_image_part_size_raw: fn(name: I64, some: I64) -> I64 {
     note: host_image_part(name)
-    if (note == I64{0}) -> return I64{0}
+    if (note == I64{0}) { return I64{0} }
     rt_text_store(some, jet_int_owned_from_i64(host_image_part_length(note, name)))
     I64{1}
 }
@@ -287,17 +301,17 @@ host_image_part_length: fn(note: I64, name: I64) -> I64 {
 #Export(c) jet_sys_image_part_raw: fn(name: I64, offset: I64, limit: I64, data_out: I64, length_out: I64) -> I64 {
     start: jet_int_owned_to_i64(offset)
     wanted: jet_int_owned_to_i64(limit)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     note: host_image_part(name)
-    if (note == I64{0}) -> return I64{0}
+    if (note == I64{0}) { return I64{0} }
     size: host_image_part_length(note, name)
     begin := start
-    if (begin < I64{0}) -> begin = I64{0}
-    if (begin > size) -> begin = size
+    if (begin < I64{0}) { begin = I64{0} }
+    if (begin > size) { begin = size }
     taken := I64{0}
     if (wanted > I64{0}) {
         taken = wrapping(size - begin)
-        if (wanted < taken) -> taken = wanted
+        if (wanted < taken) { taken = wanted }
     }
     bytes: wrapping(note + wrapping(I64{16} + wrapping(host_image_part_label(name) + begin)))
     rt_text_store(data_out, bytes)
@@ -322,9 +336,7 @@ host_image_part_length: fn(note: I64, name: I64) -> I64 {
                 return I64{1}
             }
             failure = I64{2}
-        } else {
-            failure = -result
-        }
+        } else { failure = -result }
         jet_rt_free(bytes, capacity, I64{8})
         if (failure != I64{34}) {
             text: jet_rt_string_builder_new()

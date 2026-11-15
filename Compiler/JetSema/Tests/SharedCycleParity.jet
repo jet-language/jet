@@ -5,10 +5,20 @@
 use {
     jet_parser.[parse_source]
     jet_sema.[
-        SemaBuildFacts, SemaComptimeFunctionResult, SemaComptimeItemValue, SemaForeignProviderInput,
-        SemaRegistrationForeignHandleFacts, SemaRegistrationHostHooks, SemaRegistrationImportEdge,
-        SemaRegistrationModuleInput, SemaRegistrationPackagePolicy, SemaSourceOrigin, SemaSourceSegment,
-        sema_collect_comptime_declarations, sema_finalize_registration_graph, sema_registration_prepare_graph,
+        SemaBuildFacts,
+        SemaComptimeFunctionResult,
+        SemaComptimeItemValue,
+        SemaForeignProviderInput,
+        SemaRegistrationForeignHandleFacts,
+        SemaRegistrationHostHooks,
+        SemaRegistrationImportEdge,
+        SemaRegistrationModuleInput,
+        SemaRegistrationPackagePolicy,
+        SemaSourceOrigin,
+        SemaSourceSegment,
+        sema_collect_comptime_declarations,
+        sema_finalize_registration_graph,
+        sema_registration_prepare_graph,
     ]
     jet_driver.[jet_driver_canonical_effect_module]
     jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, Span, compiler_threads_single, effect_vocabulary_module, jet_target_machine_hosted, module_intern, module_table]
@@ -71,11 +81,15 @@ shared_cycle_expect: fn(failures: &[String], source: String, places: [String]) {
     found.sort()
     wanted := places.copy()
     wanted.sort()
-    if found != wanted -> failures.push("writes differ: found [{found.join(", ")}], wanted [{wanted.join(", ")}] in {source}")
+    if found != wanted {
+        failures.push("writes differ: found [{found.join(", ")}], wanted [{wanted.join(", ")}] in {source}")
+    }
 }
 
 SHARED_CYCLE_NODE: "Node: struct {{\nvalue: Int\nnext: Shared<Node>?\n}}\n"
+
 SHARED_CYCLE_PERSON: "Person: struct {{\nname: String\nparent: Shared.Weak<Person>?\nkids: [Shared<Person>]\n}}\n"
+
 SHARED_CYCLE_FEED: "Feed: struct {{\nname: String\nlisteners: [fn() -> Int]\npeers: [Shared<Feed>]\n}}\n"
 
 #Test("shared_cycle_parity") {
@@ -108,5 +122,7 @@ SHARED_CYCLE_FEED: "Feed: struct {{\nname: String\nlisteners: [fn() -> Int]\npee
     // runs do not.
     shared_cycle_expect(failures, "{SHARED_CYCLE_FEED}named: fn() -> Int {{\n1\n}}\nrun: fn() {{\nfeed: Shared{{Feed{{name: \"f\", listeners: [], peers: []}}}}\nback: feed.downgrade()\nlistener: fn() -> Int {{ if back.upgrade() == .Val(f) -> f.name.len() else -> 0 }}\nfeed.listeners.push(listener)\nfeed.listeners.push(named)\n}}", [String]{})
     shared_cycle_expect(failures, "{SHARED_CYCLE_FEED}order: fn(feed: Shared<Feed>, other: Shared<Feed>) {{\nfeed.peers.sort_by(fn(peer) {{ peer.strong_count() + other.strong_count() }})\n}}", [String]{})
-    if failures.len() > 0 -> panic("SharedCycleParity collected {failures.len()} failures:\n{failures.join("\n")}")
+    if failures.len() > 0 {
+        panic("SharedCycleParity collected {failures.len()} failures:\n{failures.join("\n")}")
+    }
 }

@@ -7,7 +7,6 @@ package: {
 // by move. A kept item keeps its one reader; a skipped item and the items an
 // early return leaves behind close theirs exactly once. A second close of
 // the same reader used to hang in jet_fd_drop_raw.
-
 use {
     files: core.files
     core.files.[FileReader]
@@ -48,6 +47,8 @@ run: fn() {
     files.write(b, "bravo\n")
     files.write(c, "charlie\n")
     kept := open_all([String]{a, b, c}) ?? panic("open")
-    loop index in 0..<kept.len() -> print("{files.basename(kept[index].name)} {(kept[index].reader.read_bytes(64) ?? [U8]{}).len()}")
+    loop index in 0..<kept.len() {
+        print("{files.basename(kept[index].name)} {(kept[index].reader.read_bytes(64) ?? [U8]{}).len()}")
+    }
     print("first taken {first_taken([String]{c, a}) ?? -1}")
 }

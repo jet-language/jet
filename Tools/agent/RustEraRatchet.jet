@@ -20,16 +20,23 @@ use {
 }
 
 DATA_ROOTS: [String]{"tests", "Tools/ci"}
+
 DATA_SUFFIXES: [String]{".tsv", ".txt"}
+
 CITATION_ROOTS: [String]{"Compiler", "Core", "Jetpack"}
+
 SOURCE_SUFFIXES: [String]{".jet", ".c", ".h"}
 
 // git grep -i -E prefilter (POSIX ERE): a line naming `<word>.rs`, line
 // numbers glued on (`Layout.rs61-85`) included, or naming a Rust code body.
 CITATION_GREP: "[A-Za-z0-9_]\\.rs([^A-Za-z_]|$)"
+
 PHRASE_GREP: "rust (code|crate|prelude|checker)"
+
 UPSTREAM_LIBRARY: Regex{"library/(?:std|core|alloc)/"}
+
 CITATION: Regex{"\w\.rs(?:[^A-Za-z_]|$)"}
+
 // Matched against the lowercased comment.
 PHRASE: Regex{"\brust (?:code\b|crates?\b|prelude|checker)"}
 
@@ -43,7 +50,9 @@ RatchetError: struct {
 git_lines: fn(argv: [String], allow_empty: Bool) -[Exec, IO, Time.Wait]> [String] RatchetError! {
     receipt: process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? return Err(RatchetError{message: "cannot run {argv.join(" ")}: {err}"})
     if allow_empty && receipt.code == 1 && receipt.errors == "" -> return Ok([String]{})
-    if receipt.code != 0 -> return Err(RatchetError{message: "{argv.join(" ")} failed ({receipt.code}): {receipt.errors}"})
+    if receipt.code != 0 {
+        return Err(RatchetError{message: "{argv.join(" ")} failed ({receipt.code}): {receipt.errors}"})
+    }
     lines := [String]{}
     loop line in receipt.output.split("\n") {
         if line != "" -> lines.push(line.copy())
@@ -156,8 +165,12 @@ rust_era_main: fn() -[Exec, IO, Time.Wait]> Int RatchetError! {
         print("rust-era-ratchet: ok (every harness table has a reader; no comment in Compiler, Core or Jetpack cites deleted Rust code)")
         return Ok(0)
     }
-    loop table in unread -> term.eprint("{table}: no tracked source reads this table; delete it or add its reader")
-    loop row in stale -> term.eprint("{row}: cites deleted Rust code; name the live Jet owner or drop it")
+    loop table in unread {
+        term.eprint("{table}: no tracked source reads this table; delete it or add its reader")
+    }
+    loop row in stale {
+        term.eprint("{row}: cites deleted Rust code; name the live Jet owner or drop it")
+    }
     term.eprint("rust-era-ratchet: {unread.len()} unread table(s), {stale.len()} stale citation(s)")
     Ok(1)
 }

@@ -57,19 +57,27 @@ use {
 // plans a profile of its own. Every child also finds the jet under test in
 // JET (JET_CLI_TEST_SUITE_JET_ENV).
 JET_CLI_TEST_PROFILE_ENV: ENV_JET_TEST_PROFILE
+
 // A row's state when its test passed, and when it failed.
 JET_CLI_TEST_ROW_PASSED: "passed"
+
 JET_CLI_TEST_ROW_FAILED: "failed"
+
 // Set in a code suite's child to the suite it runs, and to the file its
 // TestRows appends `id<TAB>state<TAB>detail` lines to (core.testing
 // `__suite_run`). Under a `filter`, the filter its TestRows selects row ids
 // by. The suite's code finds the package root it belongs to in
 // JET_TEST_SUITE_ROOT, and the jet under test in JET.
 JET_CLI_TEST_SUITE_ENV: ENV_JET_TEST_SUITE
+
 JET_CLI_TEST_SUITE_ROWS_ENV: ENV_JET_TEST_SUITE_ROWS
+
 JET_CLI_TEST_SUITE_ROOT_ENV: ENV_JET_TEST_SUITE_ROOT
+
 JET_CLI_TEST_SUITE_FILTER_ENV: ENV_JET_TEST_SUITE_FILTER
+
 JET_CLI_TEST_SUITE_JET_ENV: "JET"
+
 // Set in a code suite's child to the profile's `memory` setting, in bytes, when
 // one is set: the budget the suite sizes its own runs from (Compiler/test.jet
 // pool_runs and fuzz_jobs), as the corpus pool sizes its entries.
@@ -160,22 +168,26 @@ jet_cli_test_profile_plan: fn(jet_argv: [String], positionals: [String], show_de
     }
     code: jet_cli_test_code_layer(root) ?? return Val(jet_cli_test_code_refusal(err.message, color))
     settings: test_settings_layered(test_settings_layered(profile.settings, code), flags)
-    if jet_cli_test_settings_refusal(settings, corpus, color) == .Val(refusal) -> return Val(refusal)
+    if jet_cli_test_settings_refusal(settings, corpus, color) == .Val(refusal) {
+        return Val(refusal)
+    }
     if test_settings_on(settings, "diagnostic_coverage") && !ui {
         return Val(jet_cli_fail("E2104", "`diagnostic_coverage` ({jet_cli_test_setting_source(settings, "diagnostic_coverage")}) checks the ui suite, and profile `{chosen}` runs none", jet_cli_why("E2104"), "drop `--diagnostic-coverage`, or run a test profile whose suites include a ui corpus", color, JET_DRIVER_EXIT_USAGE))
     }
     words := jet_cli_test_child_words(jet_argv)
     // A child's streams are captured, so a colored run asks for color.
-    if color && !words.any(fn(argument) { argument == "--color" || argument.starts_with("--color=") }) -> words.push("--color=always")
+    if color && !words.any(fn(argument) { argument == "--color" || argument.starts_with("--color=") }) {
+        words.push("--color=always")
+    }
     runs := [JetCLITestProfileRun]{}
     tests: profile.suites.contains(TEST_SUITE_TESTS)
     levels: test_settings_levels(settings)
     if tests && levels.len() == 0 {
-        runs.push(JetCLITestProfileRun{label: TEST_SUITE_TESTS, rows_file: "{TEST_SUITE_TESTS}.rows", args: words.copy()}) // copy: the level runs start from the same words.
+        runs.push(JetCLITestProfileRun{label: TEST_SUITE_TESTS, rows_file: "{TEST_SUITE_TESTS}.rows", args: words.copy()})  // copy: the level runs start from the same words.
     }
     loop level in levels {
         if !tests -> break
-        args := words.copy() // copy: each level run starts from the same words.
+        args := words.copy()  // copy: each level run starts from the same words.
         args.push(build_option_level_flag(level))
         runs.push(JetCLITestProfileRun{label: "{TEST_SUITE_TESTS} at optimize {level}", rows_file: "{TEST_SUITE_TESTS}-{level}.rows", args: args.move()})
     }
@@ -206,16 +218,20 @@ jet_cli_test_profile: fn(profile: String, root: String, settings: [TestSetting],
     // prove nothing.
     if !test_settings_on(settings, "list") && test_settings_get(settings, "filter") == .Val(filter) && results.len() == 0 {
         output.stderr = "{output.stderr}jet test: profile `{profile}`: {kit_exec_nothing_selected(filter)}\n"
-        if JET_DRIVER_EXIT_USER_ERROR > output.exit_code -> output.exit_code = JET_DRIVER_EXIT_USER_ERROR
+        if JET_DRIVER_EXIT_USER_ERROR > output.exit_code {
+            output.exit_code = JET_DRIVER_EXIT_USER_ERROR
+        }
     }
     if !test_settings_on(settings, "list") && test_settings_get(settings, "results") == .Val(path) {
         suites := [String]{}
         loop result in results {
-            if !suites.contains(result.suite) -> suites.push(result.suite.copy()) // copy: the rows keep their suite names.
+            if !suites.contains(result.suite) -> suites.push(result.suite.copy())  // copy: the rows keep their suite names.
         }
         if jet_cli_test_results_write(path, results, suites, test_settings_get(settings, "compiler") ?? cli_sys.executable()) == .Val(problem) {
             output.stderr = "{output.stderr}jet test: profile `{profile}`: {problem}\n"
-            if JET_DRIVER_EXIT_USER_ERROR > output.exit_code -> output.exit_code = JET_DRIVER_EXIT_USER_ERROR
+            if JET_DRIVER_EXIT_USER_ERROR > output.exit_code {
+                output.exit_code = JET_DRIVER_EXIT_USER_ERROR
+            }
         }
     }
     output
@@ -224,12 +240,12 @@ jet_cli_test_profile: fn(profile: String, root: String, settings: [TestSetting],
 // The rows the profile's `baseline` ledger accepts as failing
 // (kit_known_load), for its code-suite rows; none when it names no ledger.
 // The plan has already refused a `baseline` that isn't a file.
-jet_cli_test_profile_known: fn(profile: String, root: String) -> [String: String] {
+jet_cli_test_profile_known: fn(profile: String, root: String) -> [String:String] {
     manifest: jet_cli_rooted_join(root, JET_CLI_PACKAGE_FILE)
-    source: cli_files.read(manifest) ?? return [String: String]{}
-    facts: PackageFacts.parse_uncomposed(source, manifest) ?? return [String: String]{}
-    chosen: facts.test_profile(profile) ?? return [String: String]{}
-    ledger: chosen.baseline ?? return [String: String]{}
+    source: cli_files.read(manifest) ?? return [String:String]{}
+    facts: PackageFacts.parse_uncomposed(source, manifest) ?? return [String:String]{}
+    chosen: facts.test_profile(profile) ?? return [String:String]{}
+    ledger: chosen.baseline ?? return [String:String]{}
     kit_known_load(jet_cli_rooted_join(root, ledger))
 }
 
@@ -286,7 +302,9 @@ jet_cli_test_profile_corpus: fn(profile: String, root: String, settings: [TestSe
     // with the jet under test in the running jet's place.
     options.jetpack = test_settings_get(settings, "jetpack") ?? jet_cli_find_engine_binary_for(JET_CLI_JETPACK_BINARY, options.jet) ?? ""
     options.filter = test_settings_get(settings, "filter") ?? ""
-    if test_settings_get(settings, "cases") == .Val(list) -> options.cases = cli_files.realpath(list) ?? list
+    if test_settings_get(settings, "cases") == .Val(list) {
+        options.cases = cli_files.realpath(list) ?? list
+    }
     options.jobs = test_settings_number(settings, "jobs")
     options.memory = test_settings_number(settings, "memory")
     options.opt_in = test_settings_on(settings, "opt_in")
@@ -297,30 +315,38 @@ jet_cli_test_profile_corpus: fn(profile: String, root: String, settings: [TestSe
     options.sharded = options.shard_count > 1
     options.list = test_settings_on(settings, "list")
     options.coverage = test_settings_on(settings, "diagnostic_coverage")
-    if test_settings_time_limit_ms(settings) == .Val(limit) -> options.timeout = (limit + 999) /% 1000
+    if test_settings_time_limit_ms(settings) == .Val(limit) {
+        options.timeout = (limit + 999) /% 1000
+    }
     // `optimize` picks the golden tiers, each the testkit tier of that level
     // (none o0, basic o1, full o2); unset runs them all.
     levels: test_settings_levels(settings)
-    if levels.len() > 0 -> options.tiers = (loop level in levels -> kit_golden_tier_of_level(level) ?? level)
+    if levels.len() > 0 {
+        options.tiers = (loop level in levels -> kit_golden_tier_of_level(level) ?? level)
+    }
     if chosen.baseline == .Val(ledger) {
         options.ledger = cli_files.realpath(jet_cli_rooted_join(package, ledger)) ?? return JetDriverVerbOutput{stdout: "", stderr: "{site}: couldn't resolve the baseline `{ledger}`: {jet_cli_io_error_text(err)}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
     if update {
         options.bless.all = true
         options.bless.reason = "jet test -u --profile {profile}"
-        if test_settings_get(settings, "allow_shrink") == .Val(rows) -> options.bless.allow_shrink = (loop row in rows.split(",").to_list() -> row.trim().copy())
+        if test_settings_get(settings, "allow_shrink") == .Val(rows) {
+            options.bless.allow_shrink = (loop row in rows.split(",").to_list() -> row.trim().copy())
+        }
     }
     refusal: kit_expect_bless_error(options.bless, options.sharded)
-    if refusal != "" -> return JetDriverVerbOutput{stdout: "", stderr: "{site}: {refusal}\n", exit_code: JET_DRIVER_EXIT_USAGE}
+    if refusal != "" {
+        return JetDriverVerbOutput{stdout: "", stderr: "{site}: {refusal}\n", exit_code: JET_DRIVER_EXIT_USAGE}
+    }
     // JET_CI_EVIDENCE_DIR receives each suite's case verdicts as <suite>.json.
     reports: if cli_sys.get(ENV_JET_CI_EVIDENCE_DIR) == .Val(evidence) -> Val(jet_cli_test_corpus_reports(evidence, selected)) else -> None
     execution: kit_execute_suites(options, ancestor, selected, reports)
-    loop result in execution.results -> results.push(result.copy()) // copy: the execution keeps its rows.
+    loop result in execution.results -> results.push(result.copy())  // copy: the execution keeps its rows.
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: execution.code}
 }
 
-jet_cli_test_corpus_reports: fn(evidence: String, suites: [String]) -> [String: String] {
-    reports := [String: String]{}
+jet_cli_test_corpus_reports: fn(evidence: String, suites: [String]) -> [String:String] {
+    reports := [String:String]{}
     loop suite in suites -> reports[suite] = jet_cli_rooted_join(evidence, "{suite}.json")
     reports
 }
@@ -349,7 +375,7 @@ jet_cli_test_common_dir: fn(a: String, b: String) -> String Never! {
 // filtered run holds part of the rows, so it never records a baseline and
 // compares only the rows it holds. The summary goes to stderr after every
 // run's own output.
-jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSetting], runs: [JetCLITestProfileRun], update: Bool, quiet: Bool, known: [String: String], results: &[KitCaseResult]) -> JetDriverVerbOutput {
+jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSetting], runs: [JetCLITestProfileRun], update: Bool, quiet: Bool, known: [String:String], results: &[KitCaseResult]) -> JetDriverVerbOutput {
     scratch: cli_files.temp_dir("jet-test-profile") ?? return JetDriverVerbOutput{stdout: "", stderr: "jet test: profile `{profile}`: couldn't create a scratch directory: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
     executable: test_settings_get(settings, "compiler") ?? cli_sys.executable()
     inherited: test_settings_lines(jet_cli_test_child_settings(settings))
@@ -406,7 +432,7 @@ jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSett
             text: cli_files.read(jet_cli_rooted_join(scratch.path, "{index}.rows")) ?? ""
             stopped: if child.code == JET_DRIVER_EXIT_OK -> String?{None} else -> Val(jet_cli_test_stop_reason(child.errors, child.code))
             code: jet_cli_test_code_rows(text, stopped, known)
-            rows = code.rows.copy() // copy: the failure lines stay with `code`.
+            rows = code.rows.copy()  // copy: the failure lines stay with `code`.
             status = if code.failures.len() > 0 -> JET_DRIVER_EXIT_USER_ERROR else -> JET_DRIVER_EXIT_OK
             if !quiet {
                 loop verdict in code.verdicts {
@@ -416,7 +442,9 @@ jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSett
                         "KNOWN-FAILING" -> "known-failing"
                         else -> ""
                     }
-                    if label != "" -> summary = "{summary}{site}: {label} {verdict.id}: {verdict.detail}\n"
+                    if label != "" {
+                        summary = "{summary}{site}: {label} {verdict.id}: {verdict.detail}\n"
+                    }
                 }
             }
             loop verdict in code.verdicts {
@@ -425,7 +453,9 @@ jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSett
             }
         } else {
             // An exit that isn't a test verdict (an internal error) stands.
-            if child.code != JET_DRIVER_EXIT_OK && child.code != JET_DRIVER_EXIT_USER_ERROR && child.code > exit_code -> exit_code = child.code
+            if child.code != JET_DRIVER_EXIT_OK && child.code != JET_DRIVER_EXIT_USER_ERROR && child.code > exit_code {
+                exit_code = child.code
+            }
             report_path: jet_cli_rooted_join(scratch.path, "{index}.bin")
             if !cli_files.exists(report_path) {
                 // The child stopped before its tests ran; its own stderr says why.
@@ -439,7 +469,9 @@ jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSett
                 next
             }
             rows = jet_cli_test_profile_rows(report.records)
-            loop result in jet_cli_test_record_results(report.records, TEST_SUITE_TESTS, run.label) -> results.push(result)
+            loop result in jet_cli_test_record_results(report.records, TEST_SUITE_TESTS, run.label) {
+                results.push(result)
+            }
         }
         // The run's own verdict stands with or without a baseline.
         if status > exit_code -> exit_code = status
@@ -447,7 +479,9 @@ jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSett
         stored: jet_cli_rooted_join(baselines, run.rows_file)
         if update || !cli_files.exists(stored) {
             if partial != "" {
-                if !quiet -> summary = "{summary}{site}: {rows.len()} rows, not recorded: {partial} never writes the baseline `{shown}`\n"
+                if !quiet {
+                    summary = "{summary}{site}: {rows.len()} rows, not recorded: {partial} never writes the baseline `{shown}`\n"
+                }
                 next
             }
             cli_files.create_dir_all(baselines) ?? {
@@ -460,7 +494,9 @@ jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSett
                 summary = "{summary}{site}: couldn't write `{shown}`: {err}\n"
                 next
             }
-            if !quiet -> summary = "{summary}{site}: {rows.len()} rows recorded as the baseline `{shown}`\n"
+            if !quiet {
+                summary = "{summary}{site}: {rows.len()} rows recorded as the baseline `{shown}`\n"
+            }
             next
         }
         text: cli_files.read(stored) ?? {
@@ -475,7 +511,9 @@ jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSett
             baseline = baseline.filter(fn(before) { present.contains(jet_cli_test_row_name(before)) })
         }
         diff: jet_cli_test_rows_compare(baseline, rows)
-        if diff.lost.len() > 0 && JET_DRIVER_EXIT_USER_ERROR > exit_code -> exit_code = JET_DRIVER_EXIT_USER_ERROR
+        if diff.lost.len() > 0 && JET_DRIVER_EXIT_USER_ERROR > exit_code {
+            exit_code = JET_DRIVER_EXIT_USER_ERROR
+        }
         summary = "{summary}{jet_cli_test_rows_report(site, shown, rows.len(), diff, quiet)}"
     }
     JetDriverVerbOutput{stdout: "", stderr: summary, exit_code: exit_code}
@@ -527,7 +565,7 @@ jet_cli_test_stop_reason: fn(errors: String, code: Int) -> String Never! {
 // finished adds the failing row `stopped`. A row the `accepted` ledger
 // (kit_known_load) holds is accepted as failing: it is KNOWN-FAILING when it
 // fails and fails the run as UNEXPECTED-PASS when it passes, as a corpus row is.
-jet_cli_test_code_rows: fn(text: String, stopped: String?, accepted: [String: String]) -> JetCLITestCodeRows Never! {
+jet_cli_test_code_rows: fn(text: String, stopped: String?, accepted: [String:String]) -> JetCLITestCodeRows Never! {
     ids := [String]{}
     states := [String]{}
     details := [String]{}
@@ -593,7 +631,7 @@ jet_cli_test_code_suite_summary: fn() -[FS, Env]> String Never! {
 // `suite `<name>`: N rows, P passed, F failed` for TestRows lines `text`; the
 // child knows no ledger, so its counts are the rows' own.
 jet_cli_test_code_rows_summary: fn(suite: String, text: String) -> String Never! {
-    code: jet_cli_test_code_rows(text, None, [String: String]{})
+    code: jet_cli_test_code_rows(text, None, [String:String]{})
     passed: code.rows.filter(fn(row) { jet_cli_test_row_state(row) == JET_CLI_TEST_ROW_PASSED }).len()
     plural: if code.rows.len() == 1 -> "" else -> "s"
     "suite `{suite}`: {code.rows.len()} row{plural}, {passed} passed, {code.failures.len()} failed\n"
@@ -621,9 +659,7 @@ jet_cli_test_rows_parse: fn(text: String) -> [String] Never! {
     rows
 }
 
-jet_cli_test_row_name: fn(row: String) -> String Never! {
-    row.split("\t").to_list()[0]
-}
+jet_cli_test_row_name: fn(row: String) -> String Never! { row.split("\t").to_list()[0] }
 
 jet_cli_test_row_state: fn(row: String) -> String Never! {
     parts: row.split("\t").to_list()
@@ -648,16 +684,14 @@ jet_cli_test_rows_compare: fn(baseline: [String], rows: [String]) -> JetCLITestR
         }
         if now == was -> next
         line: "{name}: was {was}, now {now}"
-        if was == JET_CLI_TEST_ROW_PASSED {
-            diff.lost.push(line)
-        } else {
-            diff.changed.push(line)
-        }
+        if was == JET_CLI_TEST_ROW_PASSED -> diff.lost.push(line) else -> diff.changed.push(line)
     }
     loop row in rows {
         name: jet_cli_test_row_name(row)
         wanted: name.copy()
-        if !baseline.any(fn(before) { jet_cli_test_row_name(before) == wanted }) -> diff.added.push("{name}: {jet_cli_test_row_state(row)}")
+        if !baseline.any(fn(before) { jet_cli_test_row_name(before) == wanted }) {
+            diff.added.push("{name}: {jet_cli_test_row_state(row)}")
+        }
     }
     diff
 }
@@ -702,10 +736,10 @@ jet_cli_test_rows_report: fn(site: String, shown: String, count: Int, diff: JetC
 }
 
 #Test("code suite rows sort, a repeated id fails, and a stopped suite adds a failing row") {
-    code: jet_cli_test_code_rows("size b\tfailed\tgrew 9%\nsize a\tpassed\t\nodd\tskipped\tno data\nsize a\tpassed\t\n", Val("panic: out of disk"), [String: String]{})
+    code: jet_cli_test_code_rows("size b\tfailed\tgrew 9%\nsize a\tpassed\t\nodd\tskipped\tno data\nsize a\tpassed\t\n", Val("panic: out of disk"), [String:String]{})
     assert_eq(code.rows, [String]{"odd\tskipped", "size a\tfailed", "size b\tfailed", "stopped\tfailed"})
     assert_eq(code.failures, [String]{"size b: grew 9%", "size a: duplicate row id", "stopped: panic: out of disk"})
-    assert_eq(jet_cli_test_code_rows("", None, [String: String]{}).rows.len(), 0)
+    assert_eq(jet_cli_test_code_rows("", None, [String:String]{}).rows.len(), 0)
     assert_eq(jet_cli_test_code_rows_summary("perf", "size a\tpassed\t\nsize b\tfailed\tgrew 9%\nodd\tskipped\tno data\n"), "suite `perf`: 3 rows, 1 passed, 1 failed\n")
     assert_eq(jet_cli_test_code_rows_summary("perf", ""), "suite `perf`: 0 rows, 0 passed, 0 failed\n")
     assert_eq(jet_cli_test_stop_reason("building\npanic: no disk\n", 101), "panic: no disk")
@@ -713,7 +747,7 @@ jet_cli_test_rows_report: fn(site: String, shown: String, count: Int, diff: JetC
 }
 
 #Test("a code suite row the ledger holds is known-failing, and fails the run once it passes") {
-    known: [String: String]{"slow": "#1 over budget", "fixed": "#2 was broken"}
+    known: [String:String]{"slow": "#1 over budget", "fixed": "#2 was broken"}
     code: jet_cli_test_code_rows("slow\tfailed\t6.0x\nfixed\tpassed\t\nnew\tfailed\tboom\n", None, known)
     assert_eq(code.rows, [String]{"fixed\tpassed", "new\tfailed", "slow\tfailed"})
     assert_eq(code.failures, [String]{"fixed: #2 was broken: remove stale known-failing annotation", "new: boom"})

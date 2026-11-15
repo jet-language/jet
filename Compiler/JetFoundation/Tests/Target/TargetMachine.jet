@@ -1,20 +1,56 @@
 use {
     jet_foundation.[
-        ByteSize, Diagnostic, MMIOAccess, MemoryRegion, ProviderContract, ProviderLimits,
-        RuntimeLayer, SVDProvenance, SizeBudgetReport, TargetCapability,
-        TargetDMAChannelFact, TargetInterruptFact, TargetMachine, TargetMachineError,
-        TargetRegisterBlockFact, TargetRegisterFact, TargetUnsafeGate, jet_target_abi_c, jet_target_active_os_name,
-        jet_target_allocator_json, jet_target_capabilities_for_core_usage, jet_target_capability_name,
-        jet_target_environment_identity, jet_target_hardware_empty, jet_target_hardware_validate,
-        jet_target_layout_cache_identity, jet_target_machine_bare_metal, jet_target_machine_board_sensor_v1,
-        jet_target_machine_diagnostics, jet_target_machine_error_debug, jet_target_machine_error_diagnostic,
-        jet_target_machine_denied_effects, jet_target_machine_errors_debug, jet_target_machine_hosted,
-        jet_target_machine_provides_capability, jet_target_machine_supports_execution_tier,
-        jet_target_machine_use_default, jet_target_machine_use_from_core_apis, jet_target_machine_validate,
-        jet_target_machine_wasm_browser, jet_target_machine_wasm_no_os, jet_target_machine_wasm_wasi,
-        jet_target_max_runtime_layer, jet_target_memory_region_new, jet_target_no_whitespace,
-        jet_target_provider_identity, jet_target_provider_valid, jet_target_validate_allocator,
-        jet_target_validate_linker, jet_target_validate_memory_regions, jet_target_validate_mmio,
+        ByteSize,
+        Diagnostic,
+        MMIOAccess,
+        MemoryRegion,
+        ProviderContract,
+        ProviderLimits,
+        RuntimeLayer,
+        SVDProvenance,
+        SizeBudgetReport,
+        TargetCapability,
+        TargetDMAChannelFact,
+        TargetInterruptFact,
+        TargetMachine,
+        TargetMachineError,
+        TargetRegisterBlockFact,
+        TargetRegisterFact,
+        TargetUnsafeGate,
+        jet_target_abi_c,
+        jet_target_active_os_name,
+        jet_target_allocator_json,
+        jet_target_capabilities_for_core_usage,
+        jet_target_capability_name,
+        jet_target_environment_identity,
+        jet_target_hardware_empty,
+        jet_target_hardware_validate,
+        jet_target_layout_cache_identity,
+        jet_target_machine_bare_metal,
+        jet_target_machine_board_sensor_v1,
+        jet_target_machine_diagnostics,
+        jet_target_machine_error_debug,
+        jet_target_machine_error_diagnostic,
+        jet_target_machine_denied_effects,
+        jet_target_machine_errors_debug,
+        jet_target_machine_hosted,
+        jet_target_machine_provides_capability,
+        jet_target_machine_supports_execution_tier,
+        jet_target_machine_use_default,
+        jet_target_machine_use_from_core_apis,
+        jet_target_machine_validate,
+        jet_target_machine_wasm_browser,
+        jet_target_machine_wasm_no_os,
+        jet_target_machine_wasm_wasi,
+        jet_target_max_runtime_layer,
+        jet_target_memory_region_new,
+        jet_target_no_whitespace,
+        jet_target_provider_identity,
+        jet_target_provider_valid,
+        jet_target_validate_allocator,
+        jet_target_validate_linker,
+        jet_target_validate_memory_regions,
+        jet_target_validate_mmio,
         jet_target_validate_ram_budget,
     ]
     jet_driver.[JET_DRIVER_TARGET_MACHINE_NAMES, jet_driver_target_machine_by_name]
@@ -40,10 +76,17 @@ target_test_valid_machine: fn() -> TargetMachine Never! {
     machine.startup = .Generated{provider: target_test_provider("test.startup", "sha256:test-startup")}
     machine
 }
+
 target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! {
-    ProviderContract{provider: name, sha256: hash, provenance: "provider:{name}",
-        abi: jet_target_abi_c(), limits: ProviderLimits{max_request_bytes: None, max_response_bytes: None, max_calls: None}}
+    ProviderContract{
+        provider: name,
+        sha256: hash,
+        provenance: "provider:{name}",
+        abi: jet_target_abi_c(),
+        limits: ProviderLimits{max_request_bytes: None, max_response_bytes: None, max_calls: None},
+    }
 }
+
 #Test("target_capability_facts_validate_provider_contracts") {
     machine := target_test_valid_machine()
     assert(jet_target_machine_provides_capability(machine, .MMIO))
@@ -56,6 +99,7 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
     machine.mmio = .Provider{provider: target_test_provider("", "not-a-digest")}
     assert(jet_target_machine_validate(machine, jet_target_machine_use_default()).contains(.InvalidProviderContract{capability: "Target.MMIO", provider: "", sha256: "not-a-digest"}))
 }
+
 #Test("hosted_default_keeps_full_runtime") {
     machine: jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.0.1")
     usage := jet_target_machine_use_default()
@@ -64,17 +108,20 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
     assert_eq(jet_target_max_runtime_layer(machine), RuntimeLayer.Std)
     assert(jet_target_machine_validate(machine, usage).is_empty())
 }
+
 #Test("hosted_counting_allocator_is_typed_and_auditable") {
     machine := jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.0.1")
     machine.allocator = .Counting{cap: Val(ByteSize{bytes: 2147483648})}
     assert(jet_target_machine_validate(machine, jet_target_machine_use_default()).is_empty())
     assert_eq(jet_target_allocator_json(machine.allocator), "{{\"kind\":\"counting\",\"wraps\":\"system\",\"cap_bytes\":2147483648}}")
 }
+
 #Test("no_os_machine_rejects_hosted_counting_wrapper") {
     machine := target_test_valid_machine()
     machine.allocator = .Counting{cap: None}
     assert(jet_target_machine_validate(machine, jet_target_machine_use_default()).contains(.HostedAllocatorRequiresOS))
 }
+
 #Test("valid_no_os_machine_passes") {
     usage := jet_target_machine_use_default()
     usage.stack_bytes = 4096
@@ -84,14 +131,32 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
     usage.mmio = [MMIOAccess]{MMIOAccess{address: 0x40020000, size: ByteSize{bytes: 4}, unsafe_gate: Val(TargetUnsafeGate{reason: "GPIO register write"})}}
     assert(jet_target_machine_validate(target_test_valid_machine(), usage).is_empty())
 }
+
 #Test("validation_reports_missing_required_no_os_facts_in_rust_push_order") {
     errors: jet_target_machine_validate(jet_target_machine_bare_metal("", "", "0.0.1"), jet_target_machine_use_default())
-    assert_eq(errors, [TargetMachineError]{.MissingTargetTriple, .MissingAllocatorPolicy, .MissingPanicPolicy,
-        .MissingMemoryKind{kind: .Flash}, .MissingMemoryKind{kind: .Ram}, .MissingTargetCapability{capability: "Target.MMIO"},
-        .MissingTargetCapability{capability: "Time.Wall"}, .MissingTargetCapability{capability: "Time.Monotonic"}, .MissingTargetCapability{capability: "Time.ZoneData"},
-        .MissingTargetCapability{capability: "Time.Sleep"}, .MissingTargetCapability{capability: "Rand.Entropy"}, .MissingTargetCapability{capability: "Target.Scheduler"},
-        .MissingTargetCapability{capability: "Target.Startup"}, .MissingTargetCapability{capability: "IO.Read"}, .MissingTargetCapability{capability: "IO.Write"}, .MissingTargetCapability{capability: "Panic.Report"}})
+    assert_eq(
+        errors,
+        [TargetMachineError]{
+            .MissingTargetTriple,
+            .MissingAllocatorPolicy,
+            .MissingPanicPolicy,
+            .MissingMemoryKind{kind: .Flash},
+            .MissingMemoryKind{kind: .Ram},
+            .MissingTargetCapability{capability: "Target.MMIO"},
+            .MissingTargetCapability{capability: "Time.Wall"},
+            .MissingTargetCapability{capability: "Time.Monotonic"},
+            .MissingTargetCapability{capability: "Time.ZoneData"},
+            .MissingTargetCapability{capability: "Time.Sleep"},
+            .MissingTargetCapability{capability: "Rand.Entropy"},
+            .MissingTargetCapability{capability: "Target.Scheduler"},
+            .MissingTargetCapability{capability: "Target.Startup"},
+            .MissingTargetCapability{capability: "IO.Read"},
+            .MissingTargetCapability{capability: "IO.Write"},
+            .MissingTargetCapability{capability: "Panic.Report"},
+        },
+    )
 }
+
 #Test("validation_reports_ram_heap_core_and_mmio_errors") {
     machine := target_test_valid_machine()
     machine.allocator = .NoAllocator
@@ -108,6 +173,7 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
     assert(errors.contains(.MMIOOutsideRegion{address: 0x50000000, size_bytes: 4}))
     assert(errors.contains(.MMIOMissingUnsafeGate{address: 0x50000000}))
 }
+
 #Test("memory_linker_allocator_bounds_and_order") {
     machine := target_test_valid_machine()
     machine.memory = [MemoryRegion]{
@@ -136,6 +202,7 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
     jet_target_validate_allocator(machine, errors)
     assert_eq(errors, [TargetMachineError]{.AllocatorRegionNotRam{region: "overflow"}})
 }
+
 #Test("provider_startup_limits_and_unique_capability_failures") {
     machine := target_test_valid_machine()
     machine.startup_entry = " "
@@ -156,6 +223,7 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
     provider.abi.calling_convention = "C\t"
     assert(!jet_target_provider_valid(provider))
 }
+
 #Test("ram_saturates_mmio_half_open_range_and_gate_order") {
     machine := target_test_valid_machine()
     usage := jet_target_machine_use_default()
@@ -167,6 +235,7 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
     jet_target_validate_mmio(machine, usage, errors)
     assert_eq(errors, [TargetMachineError]{.RamOverflow{used_bytes: 18446744073709551615, ram_bytes: 131072}, .MMIOEmptyUnsafeReason{address: 0x40020400}, .MMIOOutsideRegion{address: 18446744073709551615, size_bytes: 1}, .MMIOMissingUnsafeGate{address: 18446744073709551615}})
 }
+
 #Test("from_core_apis_sorts_dedups_and_derives_capabilities") {
     usage: jet_target_machine_use_from_core_apis([String]{"core.time::sleep", "core.term", "core.mem::Atomic", "core.time::sleep", "core.crypto.uuid"})
     assert_eq(usage.core_apis, [String]{"core.crypto.uuid", "core.mem::Atomic", "core.term", "core.time::sleep"})
@@ -177,6 +246,7 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
     assert_eq(jet_target_capabilities_for_core_usage("core.time::zone"), [TargetCapability]{.TimeZoneData})
     assert_eq(jet_target_capabilities_for_core_usage("core.time::now"), [TargetCapability]{.TimeWall})
 }
+
 #Test("named_wasm_profiles_have_distinct_provider_identities") {
     browser: jet_target_machine_wasm_browser("0.0.1")
     wasi: jet_target_machine_wasm_wasi("0.0.1")
@@ -191,6 +261,7 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
     assert(jet_target_provider_identity(browser) != jet_target_provider_identity(no_os))
     assert(jet_target_provider_identity(wasi) != jet_target_provider_identity(no_os))
 }
+
 // The rows Core's `core.target` machines derive from their facts: a web
 // build's host starts no processes and makes no C foreign calls; a native
 // host and a WASI runtime lack nothing.
@@ -199,6 +270,7 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
     assert(jet_target_machine_denied_effects(jet_target_machine_wasm_wasi("0.0.1")).is_empty())
     assert(jet_target_machine_denied_effects(jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.0.1")).is_empty())
 }
+
 // Rust-computed oracle: CLI-37/identity_oracle.py extracts unmodified Rust
 // TargetMachine::provider_identity, board constructors, facts; rustc
 // CARGO_PKG_VERSION=0.0.1. No Jet values fed to the oracle. The layout
@@ -313,18 +385,33 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
         {name: "", channel: 1, transfer_width: .U8, ownership: .Transfer, max_transfer_bytes: None},
     }
     errors: jet_target_hardware_validate(hardware, [MemoryRegion]{})
-    assert_eq(errors, [TargetMachineError]{
-        .InvalidHardwareSVD{source: "", sha256: "invalid"}, .HardwareFactEmptyName{kind: "register block"},
-        .RegisterBlockAddressOverflow{name: ""}, .HardwareFactEmptyName{kind: "register in ``"},
-        .RegisterAddressOverflow{block: "", register: ""}, .HardwareFactEmptyName{kind: "register in ``"},
-        .DuplicateRegister{block: "", register: ""}, .RegisterOutsideBlock{block: "", register: ""},
-        .HardwareFactEmptyName{kind: "register block"}, .DuplicateRegisterBlock{name: ""}, .RegisterBlockEmpty{name: ""},
-        .RegisterBlockOutsideRegion{name: "", address: 0, size_bytes: 0},
-        .HardwareFactEmptyName{kind: "interrupt"}, .InvalidInterruptEffect{interrupt: "", effect_name: "bogus"},
-        .HardwareFactEmptyName{kind: "interrupt"}, .DuplicateInterrupt{name: ""}, .DuplicateInterruptVector{vector: 1},
-        .HardwareFactEmptyName{kind: "DMA channel"}, .DMATransferSizeZero{channel: ""},
-        .HardwareFactEmptyName{kind: "DMA channel"}, .DuplicateDMAChannel{name: ""}, .DuplicateDMAChannelNumber{channel: 1},
-    })
+    assert_eq(
+        errors,
+        [TargetMachineError]{
+            .InvalidHardwareSVD{source: "", sha256: "invalid"},
+            .HardwareFactEmptyName{kind: "register block"},
+            .RegisterBlockAddressOverflow{name: ""},
+            .HardwareFactEmptyName{kind: "register in ``"},
+            .RegisterAddressOverflow{block: "", register: ""},
+            .HardwareFactEmptyName{kind: "register in ``"},
+            .DuplicateRegister{block: "", register: ""},
+            .RegisterOutsideBlock{block: "", register: ""},
+            .HardwareFactEmptyName{kind: "register block"},
+            .DuplicateRegisterBlock{name: ""},
+            .RegisterBlockEmpty{name: ""},
+            .RegisterBlockOutsideRegion{name: "", address: 0, size_bytes: 0},
+            .HardwareFactEmptyName{kind: "interrupt"},
+            .InvalidInterruptEffect{interrupt: "", effect_name: "bogus"},
+            .HardwareFactEmptyName{kind: "interrupt"},
+            .DuplicateInterrupt{name: ""},
+            .DuplicateInterruptVector{vector: 1},
+            .HardwareFactEmptyName{kind: "DMA channel"},
+            .DMATransferSizeZero{channel: ""},
+            .HardwareFactEmptyName{kind: "DMA channel"},
+            .DuplicateDMAChannel{name: ""},
+            .DuplicateDMAChannelNumber{channel: 1},
+        },
+    )
 }
 
 #Test("hosted_boundary_policies_and_panic_sink_preserve_unique_order") {
@@ -339,25 +426,37 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
     machine.startup = .HostedDefault
     machine.byte_sink = .HostedDefault
     errors: jet_target_machine_validate(machine, jet_target_machine_use_default())
-    assert_eq(errors, [TargetMachineError]{
-        .HostedCapabilityRequiresOS{capability: "Target.MMIO"}, .HostedCapabilityRequiresOS{capability: "Time.Wall"},
-        .HostedCapabilityRequiresOS{capability: "Time.Monotonic"}, .HostedCapabilityRequiresOS{capability: "Time.ZoneData"},
-        .HostedCapabilityRequiresOS{capability: "Time.Sleep"}, .HostedCapabilityRequiresOS{capability: "Rand.Entropy"},
-        .HostedCapabilityRequiresOS{capability: "Target.Scheduler"}, .HostedCapabilityRequiresOS{capability: "Target.Startup"},
-        .HostedCapabilityRequiresOS{capability: "IO.Read"}, .HostedCapabilityRequiresOS{capability: "IO.Write"}, .HostedCapabilityRequiresOS{capability: "Panic.Report"},
-    })
+    assert_eq(
+        errors,
+        [TargetMachineError]{
+            .HostedCapabilityRequiresOS{capability: "Target.MMIO"},
+            .HostedCapabilityRequiresOS{capability: "Time.Wall"},
+            .HostedCapabilityRequiresOS{capability: "Time.Monotonic"},
+            .HostedCapabilityRequiresOS{capability: "Time.ZoneData"},
+            .HostedCapabilityRequiresOS{capability: "Time.Sleep"},
+            .HostedCapabilityRequiresOS{capability: "Rand.Entropy"},
+            .HostedCapabilityRequiresOS{capability: "Target.Scheduler"},
+            .HostedCapabilityRequiresOS{capability: "Target.Startup"},
+            .HostedCapabilityRequiresOS{capability: "IO.Read"},
+            .HostedCapabilityRequiresOS{capability: "IO.Write"},
+            .HostedCapabilityRequiresOS{capability: "Panic.Report"},
+        },
+    )
     machine = jet_target_machine_wasm_no_os("0.0.1")
     invalid: target_test_provider("", "invalid")
     machine.panic = .Report{provider: invalid}
     machine.byte_sink = .Provider{read: Val(invalid), write: Val(invalid), report: None}
     usage := jet_target_machine_use_default()
     usage.required_capabilities = [TargetCapability]{.PanicReport, .PanicReport}
-    assert_eq(jet_target_machine_validate(machine, usage), [TargetMachineError]{
-        .InvalidProviderContract{capability: "Panic.Report", provider: "", sha256: "invalid"},
-        .InvalidProviderContract{capability: "IO.Read", provider: "", sha256: "invalid"},
-        .InvalidProviderContract{capability: "IO.Write", provider: "", sha256: "invalid"},
-        .MissingTargetCapability{capability: "Panic.Report"},
-    })
+    assert_eq(
+        jet_target_machine_validate(machine, usage),
+        [TargetMachineError]{
+            .InvalidProviderContract{capability: "Panic.Report", provider: "", sha256: "invalid"},
+            .InvalidProviderContract{capability: "IO.Read", provider: "", sha256: "invalid"},
+            .InvalidProviderContract{capability: "IO.Write", provider: "", sha256: "invalid"},
+            .MissingTargetCapability{capability: "Panic.Report"},
+        },
+    )
 }
 
 #Test("whitespace_and_split_once_match_rust_unicode_boundaries") {
@@ -387,10 +486,13 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
     hardware.interrupts = [TargetInterruptFact]{
         {name: "IRQ", vector: 1, forbidden_effects: [String]{"z-invalid", "a-invalid", "z-invalid"}, bounded: true},
     }
-    assert_eq(jet_target_hardware_validate(hardware, [MemoryRegion]{}), [TargetMachineError]{
-        .InvalidInterruptEffect{interrupt: "IRQ", effect_name: "a-invalid"},
-        .InvalidInterruptEffect{interrupt: "IRQ", effect_name: "z-invalid"},
-    })
+    assert_eq(
+        jet_target_hardware_validate(hardware, [MemoryRegion]{}),
+        [TargetMachineError]{
+            .InvalidInterruptEffect{interrupt: "IRQ", effect_name: "a-invalid"},
+            .InvalidInterruptEffect{interrupt: "IRQ", effect_name: "z-invalid"},
+        },
+    )
 }
 
 // Main/Pip CLI-37 ruling: sum RAM facts exactly; Rust's u64 accumulator
@@ -426,9 +528,11 @@ target_test_sensor_machine: fn() -> TargetMachine Never! {
     machine.panic = .Abort
     machine
 }
+
 target_test_named_provider: fn(name: String) -> ProviderContract Never! {
     target_test_provider("tests.target.{name}", "sha256:tests-target-{name}")
 }
+
 // The sensor machine with `provider` behind `capability`.
 target_test_set_provider: fn(capability: TargetCapability, provider: ProviderContract) -> TargetMachine Never! {
     machine := target_test_sensor_machine()
@@ -436,22 +540,31 @@ target_test_set_provider: fn(capability: TargetCapability, provider: ProviderCon
     write: target_test_named_provider("io-write")
     report: target_test_named_provider("panic-report")
     if capability == {
-        .MMIO -> machine.mmio = .Provider{provider: provider}
-        .TimeWall -> machine.wall_clock = .Provider{provider: provider}
-        .TimeMonotonic -> machine.monotonic_clock = .Provider{provider: provider}
-        .TimeZoneData -> machine.zone_data = .Provider{provider: provider}
-        .TimeSleep -> machine.sleep = .Provider{provider: provider}
-        .Entropy -> machine.entropy = .Provider{provider: provider}
-        .Scheduler -> machine.scheduler = .Cooperative{provider: provider}
-        .IORead -> machine.byte_sink = .Provider{read: Val(provider), write: Val(write), report: Val(report)}
-        .IOWrite -> machine.byte_sink = .Provider{read: Val(read), write: Val(provider), report: Val(report)}
-        .PanicReport -> machine.byte_sink = .Provider{read: Val(read), write: Val(write), report: Val(provider)}
-        .Allocator -> machine.allocator = .Provider{provider: provider}
+        .MMIO -> { machine.mmio = .Provider{provider: provider} }
+        .TimeWall -> { machine.wall_clock = .Provider{provider: provider} }
+        .TimeMonotonic -> { machine.monotonic_clock = .Provider{provider: provider} }
+        .TimeZoneData -> { machine.zone_data = .Provider{provider: provider} }
+        .TimeSleep -> { machine.sleep = .Provider{provider: provider} }
+        .Entropy -> { machine.entropy = .Provider{provider: provider} }
+        .Scheduler -> { machine.scheduler = .Cooperative{provider: provider} }
+        .IORead -> {
+            machine.byte_sink = .Provider{read: Val(provider), write: Val(write), report: Val(report)}
+        }
+        .IOWrite -> {
+            machine.byte_sink = .Provider{read: Val(read), write: Val(provider), report: Val(report)}
+        }
+        .PanicReport -> {
+            machine.byte_sink = .Provider{read: Val(read), write: Val(write), report: Val(provider)}
+        }
+        .Allocator -> { machine.allocator = .Provider{provider: provider} }
         .Startup -> machine.startup = .Generated{provider: provider}
-        .Atomic64 | .Hardware | .Memory | .Panic -> panic("no provider fact case for {jet_target_capability_name(capability)}")
+        .Atomic64 | .Hardware | .Memory | .Panic -> {
+            panic("no provider fact case for {jet_target_capability_name(capability)}")
+        }
     }
     machine
 }
+
 // The sensor machine with no provider behind `capability`.
 target_test_clear_provider: fn(capability: TargetCapability) -> TargetMachine Never! {
     machine := target_test_sensor_machine()
@@ -459,34 +572,41 @@ target_test_clear_provider: fn(capability: TargetCapability) -> TargetMachine Ne
     write: Val(target_test_named_provider("io-write"))
     report: Val(target_test_named_provider("panic-report"))
     if capability == {
-        .MMIO -> machine.mmio = .NoMMIO
-        .TimeWall -> machine.wall_clock = .NoClock
-        .TimeMonotonic -> machine.monotonic_clock = .NoClock
-        .TimeZoneData -> machine.zone_data = .NoClock
-        .TimeSleep -> machine.sleep = .NoClock
-        .Entropy -> machine.entropy = .NoEntropy
-        .Scheduler -> machine.scheduler = .NoScheduler
-        .IORead -> machine.byte_sink = .Provider{read: None, write: write, report: report}
-        .IOWrite -> machine.byte_sink = .Provider{read: read, write: None, report: report}
-        .PanicReport -> machine.byte_sink = .Provider{read: read, write: write, report: None}
-        .Allocator -> machine.allocator = .NoAllocator
+        .MMIO -> { machine.mmio = .NoMMIO }
+        .TimeWall -> { machine.wall_clock = .NoClock }
+        .TimeMonotonic -> { machine.monotonic_clock = .NoClock }
+        .TimeZoneData -> { machine.zone_data = .NoClock }
+        .TimeSleep -> { machine.sleep = .NoClock }
+        .Entropy -> { machine.entropy = .NoEntropy }
+        .Scheduler -> { machine.scheduler = .NoScheduler }
+        .IORead -> { machine.byte_sink = .Provider{read: None, write: write, report: report} }
+        .IOWrite -> { machine.byte_sink = .Provider{read: read, write: None, report: report} }
+        .PanicReport -> { machine.byte_sink = .Provider{read: read, write: write, report: None} }
+        .Allocator -> { machine.allocator = .NoAllocator }
         .Startup -> machine.startup = .Unspecified
-        .Atomic64 | .Hardware | .Memory | .Panic -> panic("no provider fact case for {jet_target_capability_name(capability)}")
+        .Atomic64 | .Hardware | .Memory | .Panic -> {
+            panic("no provider fact case for {jet_target_capability_name(capability)}")
+        }
     }
     machine
 }
+
 target_test_has_code: fn(diagnostics: [Diagnostic], code: String) -> Bool Never! {
     loop diagnostic in diagnostics {
         if diagnostic.code == code -> return true
     }
     false
 }
+
 target_test_has_invalid_provider: fn(errors: [TargetMachineError], capability: TargetCapability) -> Bool Never! {
     loop error in errors {
-        if error == .InvalidProviderContract(found, _, _) && found == jet_target_capability_name(capability) -> return true
+        if error == .InvalidProviderContract(found, _, _) && found == jet_target_capability_name(capability) {
+            return true
+        }
     }
     false
 }
+
 target_test_assert_row: fn(diagnostics: [Diagnostic], code: String, what: String, why: String, fix: String) Never! {
     loop diagnostic in diagnostics {
         if diagnostic.code == code {
@@ -501,34 +621,49 @@ target_test_assert_row: fn(diagnostics: [Diagnostic], code: String, what: String
 
 #Test("target_machine_rows_are_registered_and_stable") {
     machine := jet_target_machine_wasm_no_os("0.0.1")
-    target_test_assert_row(jet_target_machine_diagnostics(machine, jet_target_machine_use_from_core_apis([String]{"core.files"})), "E3310",
+    target_test_assert_row(
+        jet_target_machine_diagnostics(machine, jet_target_machine_use_from_core_apis([String]{"core.files"})),
+        "E3310",
         "Prelude part `core.files` needs the `hosted` runtime layer, but target `wasm.no-os` provides `core`.",
         "The complete semantic Prelude closure includes `core.files`; a target cannot emit a higher layer or substitute a second Prelude.",
-        "Select a typed target with `hosted` support, or remove `core.files` from the reachable closure.")
+        "Select a typed target with `hosted` support, or remove `core.files` from the reachable closure.",
+    )
     wall := jet_target_machine_use_default()
     wall.required_capabilities = [TargetCapability]{.TimeWall}
-    target_test_assert_row(jet_target_machine_diagnostics(machine, wall), "E3311",
+    target_test_assert_row(
+        jet_target_machine_diagnostics(machine, wall),
+        "E3311",
         "Target `wasm.no-os` lacks the required `Time.Wall` capability.",
         "The selected target profile must state each machine service separately; a target triple cannot imply a UART, clock, entropy source, scheduler, allocator, startup provider, or MMIO device.",
-        "Select a typed target profile with a `Time.Wall` provider, or remove the reachable operation.")
+        "Select a typed target profile with a `Time.Wall` provider, or remove the reachable operation.",
+    )
     invalid_provider := jet_target_machine_wasm_no_os("0.0.1")
     invalid_provider.monotonic_clock = .Provider{provider: target_test_provider("", "not-a-digest")}
     monotonic := jet_target_machine_use_default()
     monotonic.required_capabilities = [TargetCapability]{.TimeMonotonic}
-    target_test_assert_row(jet_target_machine_diagnostics(invalid_provider, monotonic), "E3312",
+    target_test_assert_row(
+        jet_target_machine_diagnostics(invalid_provider, monotonic),
+        "E3312",
         "Provider `` for `Time.Monotonic` on target `wasm.no-os` has invalid digest `not-a-digest`.",
         "Every selected provider needs a stable identity and sha256 provenance so artifacts cannot reuse changed target behavior.",
-        "Declare a nonempty provider identity and a `sha256:` digest for `Time.Monotonic`.")
+        "Declare a nonempty provider identity and a `sha256:` digest for `Time.Monotonic`.",
+    )
     mmio := jet_target_machine_use_default()
     mmio.mmio = [MMIOAccess]{MMIOAccess{address: 0x10, size: ByteSize{bytes: 4}, unsafe_gate: Val(TargetUnsafeGate{reason: "probe"})}}
-    target_test_assert_row(jet_target_machine_diagnostics(machine, mmio), "E3313",
+    target_test_assert_row(
+        jet_target_machine_diagnostics(machine, mmio),
+        "E3313",
         "Target `wasm.no-os` has an MMIO fact failure: address 0x10 (4 bytes) is outside a declared MMIO region.",
         "MMIO addresses must lie inside a declared MMIO region and every access must carry a nonempty `#Unsafe` reason.",
-        "Declare a matching MMIO provider and region, then place the access inside `#Unsafe(\"reason\")`.")
-    target_test_assert_row(jet_target_machine_diagnostics(jet_target_machine_bare_metal("broken", "", "0.0.1"), jet_target_machine_use_default()), "E3314",
+        "Declare a matching MMIO provider and region, then place the access inside `#Unsafe(\"reason\")`.",
+    )
+    target_test_assert_row(
+        jet_target_machine_diagnostics(jet_target_machine_bare_metal("broken", "", "0.0.1"), jet_target_machine_use_default()),
+        "E3314",
         "Target `broken` has an invalid `target triple` fact: the selected target triple is empty.",
         "Target memory, linker, allocator, panic, startup, and execution facts are explicit inputs to sema and cannot be recovered safely from a triple.",
-        "Select a complete typed target profile and correct the `target triple` declaration.")
+        "Select a complete typed target profile and correct the `target triple` declaration.",
+    )
 }
 
 #Test("target_provider_fact_matrix_covers_present_missing_and_malformed") {

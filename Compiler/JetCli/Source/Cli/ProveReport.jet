@@ -11,14 +11,46 @@ use {
     jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, jet_driver_is_a11y_lint, jet_driver_present_diagnostics, JetDriverRecordLink, JetDriverRunReceiptInput, jet_driver_run_receipt_frame]
     jet_foundation.[ENV_JET_PROP_SEED, EXIT_RUNTIME_PANIC, JET_BUILD_DEFAULT_PROFILE]
     jet_foundation.[
-        CanonicalJSONParser, ContractClause, DerivationDisposition, DerivationMethod, Diagnostic, DiagnosticMoment, Func, Item, Span,
-        EvidenceExpectation, EvidenceKind, EvidenceOutcome, EvidenceRecord,
-        EVIDENCE_BUILD_REVISION_ENV, EVIDENCE_PROFILE_ENV, EVIDENCE_REPORT_ENV, EVIDENCE_REPORT_ID_ENV,
-        EVIDENCE_REVISION_ENV, EVIDENCE_SOURCE_REVISION_ENV, EVIDENCE_TARGET_ENV, EVIDENCE_TOOLCHAIN_ENV,
-        DIAGNOSTIC_ERROR, canonical_json_bytes, canonical_json_value, derivation_identity, derivation_record,
-        derivation_record_json, diagnostic_column_at, diagnostic_from_registry, diagnostic_line_at,
-        diagnostic_more_line, diagnostic_registry_row, diagnostic_render_all, diagnostic_stop_line, evidence_outcome_is_incomplete,
-        evidence_outcome_test_state, evidence_report_encode, evidence_report_read, expr_span, foundation_json_quote,
+        CanonicalJSONParser,
+        ContractClause,
+        DerivationDisposition,
+        DerivationMethod,
+        Diagnostic,
+        DiagnosticMoment,
+        Func,
+        Item,
+        Span,
+        EvidenceExpectation,
+        EvidenceKind,
+        EvidenceOutcome,
+        EvidenceRecord,
+        EVIDENCE_BUILD_REVISION_ENV,
+        EVIDENCE_PROFILE_ENV,
+        EVIDENCE_REPORT_ENV,
+        EVIDENCE_REPORT_ID_ENV,
+        EVIDENCE_REVISION_ENV,
+        EVIDENCE_SOURCE_REVISION_ENV,
+        EVIDENCE_TARGET_ENV,
+        EVIDENCE_TOOLCHAIN_ENV,
+        DIAGNOSTIC_ERROR,
+        canonical_json_bytes,
+        canonical_json_value,
+        derivation_identity,
+        derivation_record,
+        derivation_record_json,
+        diagnostic_column_at,
+        diagnostic_from_registry,
+        diagnostic_line_at,
+        diagnostic_more_line,
+        diagnostic_registry_row,
+        diagnostic_render_all,
+        diagnostic_stop_line,
+        evidence_outcome_is_incomplete,
+        evidence_outcome_test_state,
+        evidence_report_encode,
+        evidence_report_read,
+        expr_span,
+        foundation_json_quote,
     ]
     jet_parser.[parse_source]
     jet_pkg_model.[JET_VERSION, ClaimsGrade, WorkspaceDeclarationCache]
@@ -203,7 +235,9 @@ jet_cli_prove_run: fn(target: JetCLIProveTarget, lenses: [String], capture: JetC
     members: jet_cli_prove_members(target) ?? return jet_cli_prove_refused(err, color, json)
     groups: jet_cli_prove_groups(members, color, json) ?? return err.output
     identity: jet_cli_prove_identity(target, members, groups) ?? return jet_cli_prove_refused(err, color, json)
-    if jet_cli_prove_artifact_folders_safe(identity.authority_root, jet_cli_prove_artifact_parts(identity)) == .Err(refusal) -> return jet_cli_prove_refused(refusal, color, json)
+    if jet_cli_prove_artifact_folders_safe(identity.authority_root, jet_cli_prove_artifact_parts(identity)) == .Err(refusal) {
+        return jet_cli_prove_refused(refusal, color, json)
+    }
     front: jet_cli_prove_front(identity, members, groups, cwd)
     proved := 0
     failed := 0
@@ -256,7 +290,9 @@ jet_cli_prove_run: fn(target: JetCLIProveTarget, lenses: [String], capture: JetC
     }
     solver_failed: jet_cli_solver_count(solver, "disproved") > 0
     exit_code := if failed > 0 || test_failed > 0 || budget_failed || solver_failed -> JET_DRIVER_EXIT_USER_ERROR else -> JET_DRIVER_EXIT_OK
-    if jet_cli_prove_exit_rank(tests.exit_code) > jet_cli_prove_exit_rank(exit_code) -> exit_code = tests.exit_code
+    if jet_cli_prove_exit_rank(tests.exit_code) > jet_cli_prove_exit_rank(exit_code) {
+        exit_code = tests.exit_code
+    }
     grade: jet_cli_prove_grade(proved, failed, tests.items, tests.contracts, solver)
     floor: jet_cli_prove_floor(groups)
     // A run that already failed gets no E2942: its failures name their fixes.
@@ -269,7 +305,9 @@ jet_cli_prove_run: fn(target: JetCLIProveTarget, lenses: [String], capture: JetC
     replay_note := ""
     if session == .Val(run) {
         if exit_code != JET_CLI_EXIT_ICE && run.replayed == .Val(artifact) {
-            if jet_cli_replay_journal_divergence(journal, artifact) == .Val(refusal) -> return jet_cli_prove_refused(refusal, color, json)
+            if jet_cli_replay_journal_divergence(journal, artifact) == .Val(refusal) {
+                return jet_cli_prove_refused(refusal, color, json)
+            }
             if exit_code != artifact.status {
                 return jet_cli_prove_refused(jet_cli_replay_diverged("the replayed run exited {exit_code}, but the captured run exited {artifact.status}"), color, json)
             }
@@ -289,13 +327,17 @@ jet_cli_prove_run: fn(target: JetCLIProveTarget, lenses: [String], capture: JetC
     if json {
         reports := jet_cli_prove_status_reports(members, front, tests.items, tests.contracts, solver)
         if below == .Val(diagnostic) {
-            loop entry in jet_cli_reports_json(jet_cli_report_base(target.root), target.root, "", [Diagnostic]{diagnostic}) -> reports.push(entry)
+            loop entry in jet_cli_reports_json(jet_cli_report_base(target.root), target.root, "", [Diagnostic]{diagnostic}) {
+                reports.push(entry)
+            }
         }
         status: jet_cli_status_render_with_reports("prove", exit_code == JET_DRIVER_EXIT_OK, reports, [JetCLIStatusField]{jet_cli_status_field("proof", JetCLIStatusValue.Float{text: report})})
         return JetDriverVerbOutput{stdout: "{status}\n", stderr: "", exit_code: exit_code}
     }
     human: jet_cli_prove_human(members, front, tests, budgets, solver, lenses, proved, failed, jet_cli_prove_claims_text(grade, floor), replay_note, jet_cli_prove_result(exit_code, tests.items, tests.contracts, budgets, solver), color, exit_code)
-    if below == .Val(diagnostic) -> return JetDriverVerbOutput{stdout: human.stdout, stderr: "{human.stderr}{diagnostic_render_all("", "", [Diagnostic]{diagnostic}, color)}", exit_code: human.exit_code}
+    if below == .Val(diagnostic) {
+        return JetDriverVerbOutput{stdout: human.stdout, stderr: "{human.stderr}{diagnostic_render_all("", "", [Diagnostic]{diagnostic}, color)}", exit_code: human.exit_code}
+    }
     human
 }
 
@@ -359,7 +401,9 @@ jet_cli_prove_groups: fn(members: [JetCLIProveMember], color: Bool, json: Bool) 
             .Compiled(result, snapshot) -> {
                 diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
                 if jet_cli_errors(diagnostics).len() == 0 {
-                    if result.internal_problem == .Val(problem) -> return Err(JetCLIProveStop{output: jet_cli_ice(problem)})
+                    if result.internal_problem == .Val(problem) {
+                        return Err(JetCLIProveStop{output: jet_cli_ice(problem)})
+                    }
                 }
                 files := [String]{}
                 loop root in snapshot.roots {
@@ -371,7 +415,9 @@ jet_cli_prove_groups: fn(members: [JetCLIProveMember], color: Bool, json: Bool) 
                     if owned[other] -> next
                     if other != index && !files.contains(candidate.absolute) -> next
                     owned[other] = true
-                    if jet_cli_prove_collect_tests(candidate, parse_source(candidate.source.bytes()).program.items, sites) -> has_tests = true
+                    if jet_cli_prove_collect_tests(candidate, parse_source(candidate.source.bytes()).program.items, sites) {
+                        has_tests = true
+                    }
                 }
                 floor := ClaimsGrade?{None}
                 if jet_cli_test_claims_floor(snapshot.roots[0]) == {
@@ -392,7 +438,9 @@ jet_cli_prove_collect_tests: fn(member: JetCLIProveMember, items: [Item], sites:
         if item == {
             .Test(declared) -> {
                 found = true
-                if declared.name == .Val(name) -> sites.push(JetCLIProveTestSite{name: name, path: member.path.copy(), line: diagnostic_line_at(member.source, declared.span.start)})
+                if declared.name == .Val(name) {
+                    sites.push(JetCLIProveTestSite{name: name, path: member.path.copy(), line: diagnostic_line_at(member.source, declared.span.start)})
+                }
             }
             .CodeModule(nested) -> {
                 if nested.body == .Val(body) {
@@ -409,7 +457,9 @@ jet_cli_prove_collect_tests: fn(member: JetCLIProveMember, items: [Item], sites:
 // a front-end compile authorized, and the project authority files.
 jet_cli_prove_identity: fn(target: JetCLIProveTarget, members: [JetCLIProveMember], groups: [JetCLIProveGroup]) -[FS, Env, Time.Wait]> JetCLIProveIdentity JetCLIProveRefusal! {
     inputs := [JetDriverRunReceiptInput]{}
-    loop member in members -> inputs.push(JetDriverRunReceiptInput{path: member.absolute, digest: member.sha256})
+    loop member in members {
+        inputs.push(JetDriverRunReceiptInput{path: member.absolute, digest: member.sha256})
+    }
     loop group in groups {
         loop file in group.files {
             observed: jet_cli_receipt_observe_input(JetDriverRunReceiptInput{path: file, digest: ""}) ?? return Err(jet_cli_prove_target_refusal("couldn't read proof input `{file}`: {err.message}"))
@@ -423,47 +473,63 @@ jet_cli_prove_identity: fn(target: JetCLIProveTarget, members: [JetCLIProveMembe
     builds := [JetCLIProveField]{}
     loop input in canonical.members {
         name: jet_cli_file_name(input.path)
-        if input.path.ends_with(".jet") -> sources.push(jet_cli_prove_field(input.path, input.digest))
-        if input.path == ".jet/lock" || input.path.ends_with("/.jet/lock") || name == "jet.lock" || name == "jet.lock.json" -> locks.push(jet_cli_prove_field(input.path, input.digest))
-        if name == "package.jet" || name == "build.jet" -> builds.push(jet_cli_prove_field(input.path, input.digest))
+        if input.path.ends_with(".jet") {
+            sources.push(jet_cli_prove_field(input.path, input.digest))
+        }
+        if input.path == ".jet/lock" || input.path.ends_with("/.jet/lock") || name == "jet.lock" || name == "jet.lock.json" {
+            locks.push(jet_cli_prove_field(input.path, input.digest))
+        }
+        if name == "package.jet" || name == "build.jet" {
+            builds.push(jet_cli_prove_field(input.path, input.digest))
+        }
     }
     source_digest: jet_cli_prove_digest("jet-proof-source-v2", sources)
     lock_digest: jet_cli_prove_digest_or_none("jet-proof-lock-v2", locks)
     build_inputs: jet_cli_prove_digest_or_none("jet-proof-build-inputs-v2", builds)
     // Rust `proof_build_digest` hashed rustc and Cargo build ids; the Jet
     // compiler's own identity stands in for them.
-    build_digest: jet_cli_prove_digest("jet-proof-build-v3", [JetCLIProveField]{
-        jet_cli_prove_field("compiler", jet_cli_compiler_identity() ?? "unversioned"),
-        jet_cli_prove_field("jet_version", JET_VERSION),
-        jet_cli_prove_field("target", jet_cli_prove_triple()),
-        jet_cli_prove_field("profile", JET_BUILD_DEFAULT_PROFILE),
-        jet_cli_prove_field("build_inputs", build_inputs),
-        jet_cli_prove_field("lock", lock_digest),
-    })
-    core_abi: jet_cli_prove_digest("jet-proof-core-abi-v2", [JetCLIProveField]{
-        jet_cli_prove_field("emission", "unavailable"),
-        jet_cli_prove_field("source", source_digest),
-    })
+    build_digest: jet_cli_prove_digest(
+        "jet-proof-build-v3",
+        [JetCLIProveField]{
+            jet_cli_prove_field("compiler", jet_cli_compiler_identity() ?? "unversioned"),
+            jet_cli_prove_field("jet_version", JET_VERSION),
+            jet_cli_prove_field("target", jet_cli_prove_triple()),
+            jet_cli_prove_field("profile", JET_BUILD_DEFAULT_PROFILE),
+            jet_cli_prove_field("build_inputs", build_inputs),
+            jet_cli_prove_field("lock", lock_digest),
+        },
+    )
+    core_abi: jet_cli_prove_digest(
+        "jet-proof-core-abi-v2",
+        [JetCLIProveField]{
+            jet_cli_prove_field("emission", "unavailable"),
+            jet_cli_prove_field("source", source_digest),
+        },
+    )
     // `unavailable_mir_identity`: no checked MIR program identity is exposed.
     mir_fields := [JetCLIProveField]{jet_cli_prove_field("source", source_digest), jet_cli_prove_field("core_abi", core_abi)}
     // The member's spelling (`./a.jet` or `a.jet`) doesn't change the identity.
-    loop member in members -> mir_fields.push(jet_cli_prove_field(member.path.removeprefix("./"), member.sha256))
+    loop member in members {
+        mir_fields.push(jet_cli_prove_field(member.path.removeprefix("./"), member.sha256))
+    }
     mir_fields.push(jet_cli_prove_field("mir", "unavailable"))
     mir_hash: jet_cli_prove_digest("jet-proof-mir-unavailable-v1", mir_fields)
-    Ok(JetCLIProveIdentity{
-        kind: target.kind,
-        root: target.root,
-        authority_root: canonical.authority_root,
-        input_sha256: canonical.input_sha256,
-        members: canonical.members,
-        source_digest: source_digest,
-        lock_digest: lock_digest,
-        build_digest: build_digest,
-        core_abi: core_abi,
-        profile: JET_BUILD_DEFAULT_PROFILE,
-        mir_hash: mir_hash.copy(),
-        mir_json: jet_cli_prove_mir_json(mir_hash, members),
-    })
+    Ok(
+        JetCLIProveIdentity{
+            kind: target.kind,
+            root: target.root,
+            authority_root: canonical.authority_root,
+            input_sha256: canonical.input_sha256,
+            members: canonical.members,
+            source_digest: source_digest,
+            lock_digest: lock_digest,
+            build_digest: build_digest,
+            core_abi: core_abi,
+            profile: JET_BUILD_DEFAULT_PROFILE,
+            mir_hash: mir_hash.copy(),
+            mir_json: jet_cli_prove_mir_json(mir_hash, members),
+        },
+    )
 }
 
 jet_cli_prove_field: fn(label: String, value: String) -> JetCLIProveField Never! {
@@ -483,7 +549,9 @@ jet_cli_prove_digest: fn(schema: String, fields: [JetCLIProveField]) -> String N
 }
 
 jet_cli_prove_digest_or_none: fn(schema: String, fields: [JetCLIProveField]) -> String Never! {
-    if fields.len() == 0 -> return jet_cli_prove_digest(schema, [JetCLIProveField]{jet_cli_prove_field("none", "<none>")})
+    if fields.len() == 0 {
+        return jet_cli_prove_digest(schema, [JetCLIProveField]{jet_cli_prove_field("none", "<none>")})
+    }
     jet_cli_prove_digest(schema, fields)
 }
 
@@ -511,7 +579,10 @@ jet_cli_prove_mir_json: fn(digest: String, members: [JetCLIProveMember]) -> Stri
 // claim hash.
 jet_cli_prove_evidence_id: fn(identity: JetCLIProveIdentity, kind: String, origin: String, span: String, claim: String) -> String Never! {
     out := [U8]{}
-    loop field in ([String]{identity.input_sha256, kind, origin, span, prove_crypto.sha256(claim.bytes()).hex()}) -> jet_driver_run_receipt_frame(out, field.bytes())
+    loop field in
+        ([String]{identity.input_sha256, kind, origin, span, prove_crypto.sha256(claim.bytes()).hex()}) {
+        jet_driver_run_receipt_frame(out, field.bytes())
+    }
     prove_crypto.sha256(out).hex()
 }
 
@@ -534,13 +605,19 @@ jet_cli_prove_front: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMemb
             origin_path: if diagnostic.origin == .Val(origin) -> origin.path.copy() else -> ""
             span_key: if diagnostic.span == .Val(span) -> "{span.start}:{span.end}" else -> "-"
             framed := [U8]{}
-            loop part in ([String]{diagnostic.code, origin_path, span_key, diagnostic.what}) -> jet_driver_run_receipt_frame(framed, part.bytes())
+            loop part in ([String]{diagnostic.code, origin_path, span_key, diagnostic.what}) {
+                jet_driver_run_receipt_frame(framed, part.bytes())
+            }
             key: prove_crypto.sha256(framed).hex()
             if seen.contains(key) -> next
             seen.push(key)
-            if diagnostic.severity != DIAGNOSTIC_ERROR && jet_driver_is_a11y_lint(diagnostic.code) -> next
+            if diagnostic.severity != DIAGNOSTIC_ERROR && jet_driver_is_a11y_lint(diagnostic.code) {
+                next
+            }
             item: jet_cli_prove_error_item(identity, members, group.entry, diagnostic, cwd)
-            if diagnostic.severity == DIAGNOSTIC_ERROR -> errors.push(item) else -> warnings.push(item)
+            if diagnostic.severity == DIAGNOSTIC_ERROR -> errors.push(item) else {
+                warnings.push(item)
+            }
         }
     }
     items := [JetCLIProveFrontItem]{}
@@ -606,31 +683,53 @@ jet_cli_prove_error_item: fn(identity: JetCLIProveIdentity, members: [JetCLIProv
 jet_cli_prove_facts: fn(identity: JetCLIProveIdentity, member: JetCLIProveMember, items: &[JetCLIProveFrontItem], contracts: &[JetCLIProveContract]) Never! {
     before: items.len()
     parsed: parse_source(member.source.bytes())
-    if jet_cli_errors(parsed.diagnostics).len() == 0 -> jet_cli_prove_item_facts(identity, member, parsed.program.items, items, contracts)
-    if items.len() > before -> return
-    items.push(JetCLIProveFrontItem{
-        id: jet_cli_prove_evidence_id(identity, "front_end", member.path, "1:1-1:1", "program checked"),
-        path: member.path.copy(),
-        facet: "all",
-        line: 1,
-        column: 1,
-        diagnostic: None,
-        owner: -1,
-    })
+    if jet_cli_errors(parsed.diagnostics).len() == 0 {
+        jet_cli_prove_item_facts(identity, member, parsed.program.items, items, contracts)
+    }
+    if items.len() > before {
+        return
+    }
+    items.push(
+        JetCLIProveFrontItem{
+            id: jet_cli_prove_evidence_id(identity, "front_end", member.path, "1:1-1:1", "program checked"),
+            path: member.path.copy(),
+            facet: "all",
+            line: 1,
+            column: 1,
+            diagnostic: None,
+            owner: -1,
+        },
+    )
 }
 
 jet_cli_prove_item_facts: fn(identity: JetCLIProveIdentity, member: JetCLIProveMember, declared: [Item], items: &[JetCLIProveFrontItem], contracts: &[JetCLIProveContract]) Never! {
     loop item in declared {
         if item == {
-            .Func(func) -> jet_cli_prove_func_facts(identity, member, func, items, contracts)
-            .Impl(block) -> { loop func in block.methods -> jet_cli_prove_func_facts(identity, member, func, items, contracts) }
-            .Struct(definition) -> { loop func in definition.methods -> jet_cli_prove_func_facts(identity, member, func, items, contracts) }
-            .Enum(definition) -> { loop func in definition.methods -> jet_cli_prove_func_facts(identity, member, func, items, contracts) }
+            .Func(func) -> { jet_cli_prove_func_facts(identity, member, func, items, contracts) }
+            .Impl(block) -> {
+                loop func in block.methods {
+                    jet_cli_prove_func_facts(identity, member, func, items, contracts)
+                }
+            }
+            .Struct(definition) -> {
+                loop func in definition.methods {
+                    jet_cli_prove_func_facts(identity, member, func, items, contracts)
+                }
+            }
+            .Enum(definition) -> {
+                loop func in definition.methods {
+                    jet_cli_prove_func_facts(identity, member, func, items, contracts)
+                }
+            }
             .Distinct(definition) -> {
-                if definition.range == .Val(range) -> jet_cli_prove_fact(identity, member, "refinements", "refinement", range.span, "{definition.name} range [{range.lo}, {range.hi}]", items)
+                if definition.range == .Val(range) {
+                    jet_cli_prove_fact(identity, member, "refinements", "refinement", range.span, "{definition.name} range [{range.lo}, {range.hi}]", items)
+                }
             }
             .CodeModule(nested) -> {
-                if nested.body == .Val(body) -> jet_cli_prove_item_facts(identity, member, body, items, contracts)
+                if nested.body == .Val(body) {
+                    jet_cli_prove_item_facts(identity, member, body, items, contracts)
+                }
             }
             .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
@@ -643,39 +742,53 @@ jet_cli_prove_func_facts: fn(identity: JetCLIProveIdentity, member: JetCLIProveM
         names: loop entry in effects -> entry.name.copy()
         jet_cli_prove_fact(identity, member, "effects", "effect", span, "{func.name} effect bound [{names.join(",")}]", items)
     }
-    if func.effect_via == .Val(via) -> jet_cli_prove_fact(identity, member, "effects", "effect", via.span, "{func.name} effects via {via.name}", items)
-    if func.scrub_tag == .Val(scrubbed) -> jet_cli_prove_fact(identity, member, "taint", "taint", func.span, "{func.name} scrubs {scrubbed}", items)
-    if func.is_replayable -> jet_cli_prove_fact(identity, member, "replay", "replayability", func.replayable_span ?? func.span, "{func.name} is replayable", items)
-    loop clause in func.pre -> jet_cli_prove_contract(identity, member, func.name, "Pre", clause, contracts)
-    loop clause in func.post -> jet_cli_prove_contract(identity, member, func.name, "Post", clause, contracts)
+    if func.effect_via == .Val(via) {
+        jet_cli_prove_fact(identity, member, "effects", "effect", via.span, "{func.name} effects via {via.name}", items)
+    }
+    if func.scrub_tag == .Val(scrubbed) {
+        jet_cli_prove_fact(identity, member, "taint", "taint", func.span, "{func.name} scrubs {scrubbed}", items)
+    }
+    if func.is_replayable {
+        jet_cli_prove_fact(identity, member, "replay", "replayability", func.replayable_span ?? func.span, "{func.name} is replayable", items)
+    }
+    loop clause in func.pre {
+        jet_cli_prove_contract(identity, member, func.name, "Pre", clause, contracts)
+    }
+    loop clause in func.post {
+        jet_cli_prove_contract(identity, member, func.name, "Post", clause, contracts)
+    }
 }
 
 // A declared clause, placed where its condition starts: the site the
 // runtime names when it checks the clause (JetSema Contracts.jet).
 jet_cli_prove_contract: fn(identity: JetCLIProveIdentity, member: JetCLIProveMember, function: String, marker: String, clause: ContractClause, contracts: &[JetCLIProveContract]) Never! {
     span: expr_span(clause.cond)
-    contracts.push(JetCLIProveContract{
-        id: jet_cli_prove_evidence_id(identity, "contract", member.path, jet_cli_prove_span_text(member.source, span), "{function} #{marker}"),
-        marker: marker,
-        path: member.path.copy(),
-        line: diagnostic_line_at(member.source, span.start),
-        column: diagnostic_column_at(member.source, span.start),
-        state: -1,
-        evidence: "",
-        message: "",
-    })
+    contracts.push(
+        JetCLIProveContract{
+            id: jet_cli_prove_evidence_id(identity, "contract", member.path, jet_cli_prove_span_text(member.source, span), "{function} #{marker}"),
+            marker: marker,
+            path: member.path.copy(),
+            line: diagnostic_line_at(member.source, span.start),
+            column: diagnostic_column_at(member.source, span.start),
+            state: -1,
+            evidence: "",
+            message: "",
+        },
+    )
 }
 
 jet_cli_prove_fact: fn(identity: JetCLIProveIdentity, member: JetCLIProveMember, facet: String, kind: String, span: Span, claim: String, items: &[JetCLIProveFrontItem]) Never! {
-    items.push(JetCLIProveFrontItem{
-        id: jet_cli_prove_evidence_id(identity, kind, member.path, jet_cli_prove_span_text(member.source, span), claim),
-        path: member.path.copy(),
-        facet: facet,
-        line: diagnostic_line_at(member.source, span.start),
-        column: diagnostic_column_at(member.source, span.start),
-        diagnostic: None,
-        owner: -1,
-    })
+    items.push(
+        JetCLIProveFrontItem{
+            id: jet_cli_prove_evidence_id(identity, kind, member.path, jet_cli_prove_span_text(member.source, span), claim),
+            path: member.path.copy(),
+            facet: facet,
+            line: diagnostic_line_at(member.source, span.start),
+            column: diagnostic_column_at(member.source, span.start),
+            diagnostic: None,
+            owner: -1,
+        },
+    )
 }
 
 // --- test producer -------------------------------------------------------------
@@ -732,8 +845,12 @@ jet_cli_prove_tests: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMemb
         if time_ms == .Val(ms) -> spec = spec.env(JET_CLI_REPLAY_TIME_ENV, "{ms}")
         // A capture hands the terminal to the tests, so a stdin read gets
         // what the user types and the journal records it.
-        if journal.capture != "" -> spec = spec.env(JET_CLI_REPLAY_CAPTURE_ENV, journal.capture).stdin(.Inherit)
-        if journal.records != "" -> spec = spec.env(JET_CLI_REPLAY_RECORDS_ENV, journal.records).env(JET_CLI_REPLAY_TRACE_ENV, journal.trace)
+        if journal.capture != "" {
+            spec = spec.env(JET_CLI_REPLAY_CAPTURE_ENV, journal.capture).stdin(.Inherit)
+        }
+        if journal.records != "" {
+            spec = spec.env(JET_CLI_REPLAY_RECORDS_ENV, journal.records).env(JET_CLI_REPLAY_TRACE_ENV, journal.trace)
+        }
         receipt: spec.run() ?? {
             items.push(unavailable.move())
             next
@@ -743,7 +860,9 @@ jet_cli_prove_tests: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMemb
             next
         }
         child_exit: if receipt.signal != None -> JET_CLI_EXIT_ICE else -> jet_cli_prove_child_exit(receipt.code)
-        if jet_cli_prove_exit_rank(child_exit) > jet_cli_prove_exit_rank(exit_code) -> exit_code = child_exit
+        if jet_cli_prove_exit_rank(child_exit) > jet_cli_prove_exit_rank(exit_code) {
+            exit_code = child_exit
+        }
         if !cli_files.exists(report_path) {
             // No report: the child stopped before its tests ran (a build
             // error, exit 1) or failed inside Jet. Its own stderr says why.
@@ -757,14 +876,18 @@ jet_cli_prove_tests: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMemb
         jet_cli_evidence_persist_at(identity.authority_root, report, bytes, artifact, report.revision.source, true) ?? return Err(jet_cli_prove_evidence_refusal("couldn't record the test evidence of `{entry.path}`: {err.message}"))
         consumed.push(JetDriverRecordLink{kind: "evidence", artifact_id: artifact})
         stopped: jet_cli_prove_test_items(identity, members, entry, group.sites, report.records, cwd, seed, items, observed)
-        if stopped && jet_cli_prove_exit_rank(JET_CLI_EXIT_RUNTIME_STOP) > jet_cli_prove_exit_rank(exit_code) -> exit_code = JET_CLI_EXIT_RUNTIME_STOP
+        if stopped && jet_cli_prove_exit_rank(JET_CLI_EXIT_RUNTIME_STOP) > jet_cli_prove_exit_rank(exit_code) {
+            exit_code = JET_CLI_EXIT_RUNTIME_STOP
+        }
     }
     Ok(JetCLIProveTests{items: items, contracts: jet_cli_prove_contracts_settle(declared, observed), consumed: consumed, exit_code: exit_code, errors: errors})
 }
 
 // A child's exit class: a code `jet test` never ends with is Jet's defect.
 jet_cli_prove_child_exit: fn(code: Int) -> Int Never! {
-    if code == JET_DRIVER_EXIT_OK || code == JET_DRIVER_EXIT_USER_ERROR || code == JET_CLI_EXIT_RUNTIME_STOP || code == JET_CLI_EXIT_ICE -> return code
+    if code == JET_DRIVER_EXIT_OK || code == JET_DRIVER_EXIT_USER_ERROR || code == JET_CLI_EXIT_RUNTIME_STOP || code == JET_CLI_EXIT_ICE {
+        return code
+    }
     JET_CLI_EXIT_ICE
 }
 
@@ -832,15 +955,17 @@ jet_cli_prove_test_items: fn(identity: JetCLIProveIdentity, members: [JetCLIProv
         caught: jet_cli_prove_attachment(record, "caught_by") != ""
         expected: record.expectation == EvidenceExpectation.ExpectedFailure
         if record.outcome == EvidenceOutcome.Failed && !caught && !expected -> stopped = true
-        stops.push(JetCLIProveStopRecord{
-            code: record.identity.claim_id.copy(),
-            message: record.detail.copy(),
-            path: jet_cli_prove_record_path(record.source.path, members, entry, cwd),
-            line: Int{record.source.line},
-            caught: caught,
-            expected: expected,
-            used: false,
-        })
+        stops.push(
+            JetCLIProveStopRecord{
+                code: record.identity.claim_id.copy(),
+                message: record.detail.copy(),
+                path: jet_cli_prove_record_path(record.source.path, members, entry, cwd),
+                line: Int{record.source.line},
+                caught: caught,
+                expected: expected,
+                used: false,
+            },
+        )
     }
     // A serial run ties each clause failure to the test it happened in
     // (TestOutcome.jet `test`, `last`). A test's final failure is the clause
@@ -870,10 +995,14 @@ jet_cli_prove_test_items: fn(identity: JetCLIProveIdentity, members: [JetCLIProv
             seen.message = prefix.copy()
             if test == "" -> seen.expected = false
             loop other in records {
-                if test == "" || other.kind == EvidenceKind.Runtime || other.kind == EvidenceKind.Contract || other.identity.claim_id != test -> next
+                if test == "" || other.kind == EvidenceKind.Runtime || other.kind == EvidenceKind.Contract || other.identity.claim_id != test {
+                    next
+                }
                 if !last || !other.detail.starts_with(prefix) -> next
                 seen.message = other.detail.copy()
-                if other.outcome != EvidenceOutcome.Failed || other.expectation == EvidenceExpectation.ExpectedFailure -> next
+                if other.outcome != EvidenceOutcome.Failed || other.expectation == EvidenceExpectation.ExpectedFailure {
+                    next
+                }
                 seen.expected = false
                 if !contract_tests.contains(test) -> contract_tests.push(test.copy())
             }
@@ -899,7 +1028,9 @@ jet_cli_prove_test_items: fn(identity: JetCLIProveIdentity, members: [JetCLIProv
         }
         // A failure without a stop (a doctest's E2901) keeps its record's code.
         code := "E3001"
-        if record.diagnostics.len() > 0 && diagnostic_registry_row(record.diagnostics[0].code) != None -> code = record.diagnostics[0].code.copy()
+        if record.diagnostics.len() > 0 && diagnostic_registry_row(record.diagnostics[0].code) != None {
+            code = record.diagnostics[0].code.copy()
+        }
         message := record.detail.copy()
         contract_stop := false
         if state == 1 {
@@ -908,7 +1039,9 @@ jet_cli_prove_test_items: fn(identity: JetCLIProveIdentity, members: [JetCLIProv
                 stops[index].used = true
                 path = stops[index].path.copy()
                 line = stops[index].line
-                if diagnostic_registry_row(stops[index].code) != None -> code = stops[index].code.copy()
+                if diagnostic_registry_row(stops[index].code) != None {
+                    code = stops[index].code.copy()
+                }
                 contract_stop = stops[index].code == "E3005" && !stops[index].caught && !stops[index].expected && contract_tests.contains(record.identity.claim_id)
                 break
             }
@@ -935,32 +1068,36 @@ jet_cli_prove_test_items: fn(identity: JetCLIProveIdentity, members: [JetCLIProv
                 minimized: jet_cli_prove_attachment(record, "minimized_inputs"),
             })
         }
-        items.push(JetCLIProveTestItem{
-            id: jet_cli_prove_evidence_id(identity, "unit", entry.path, "0:0-0:0", "{kind}:{record.identity.claim_id}:{record.detail}"),
-            kind: kind,
-            state: state,
-            name: record.identity.claim_id.copy(),
-            message: message,
-            code: code,
-            path: path,
-            line: line,
-            property: property,
-        })
+        items.push(
+            JetCLIProveTestItem{
+                id: jet_cli_prove_evidence_id(identity, "unit", entry.path, "0:0-0:0", "{kind}:{record.identity.claim_id}:{record.detail}"),
+                kind: kind,
+                state: state,
+                name: record.identity.claim_id.copy(),
+                message: message,
+                code: code,
+                path: path,
+                line: line,
+                property: property,
+            },
+        )
     }
     // A stop no failed test claimed is still a failed execution.
     loop stop in stops {
         if stop.used -> next
         code: if diagnostic_registry_row(stop.code) != None -> stop.code.copy() else -> "E3001"
-        items.push(JetCLIProveTestItem{
-            id: jet_cli_prove_evidence_id(identity, "unit", entry.path, "0:0-0:0", "2:{stop.code}:{stop.message}"),
-            kind: 2,
-            state: 1,
-            name: stop.code.copy(),
-            message: stop.message.copy(),
-            code: code,
-            path: stop.path.copy(),
-            line: stop.line,
-        })
+        items.push(
+            JetCLIProveTestItem{
+                id: jet_cli_prove_evidence_id(identity, "unit", entry.path, "0:0-0:0", "2:{stop.code}:{stop.message}"),
+                kind: 2,
+                state: 1,
+                name: stop.code.copy(),
+                message: stop.message.copy(),
+                code: code,
+                path: stop.path.copy(),
+                line: stop.line,
+            },
+        )
     }
     stopped
 }
@@ -981,7 +1118,9 @@ jet_cli_prove_contracts_settle: fn(declared: [JetCLIProveContract], observed: [J
                 seen.expected -> 2
                 else -> 1
             }
-            if jet_cli_prove_contract_rank(state) <= jet_cli_prove_contract_rank(contracts[index].state) -> next
+            if jet_cli_prove_contract_rank(state) <= jet_cli_prove_contract_rank(contracts[index].state) {
+                next
+            }
             contracts[index].state = state
             contracts[index].evidence = seen.evidence.copy()
             contracts[index].message = seen.message.copy()
@@ -1002,10 +1141,14 @@ jet_cli_prove_contract_rank: fn(state: Int) -> Int Never! {
 
 jet_cli_prove_contract_observes: fn(declared: [JetCLIProveContract], index: Int, seen: JetCLIProveObserved) -> Bool Never! {
     contract: declared[index]
-    if seen.marker != contract.marker || seen.line != contract.line || !jet_cli_prove_paths_match(seen.path, contract.path) -> return false
+    if seen.marker != contract.marker || seen.line != contract.line || !jet_cli_prove_paths_match(seen.path, contract.path) {
+        return false
+    }
     if seen.column == contract.column -> return true
     loop (other, peer) in declared {
-        if other != index && peer.marker == contract.marker && peer.line == contract.line && peer.path == contract.path -> return false
+        if other != index && peer.marker == contract.marker && peer.line == contract.line && peer.path == contract.path {
+            return false
+        }
     }
     true
 }
@@ -1045,7 +1188,9 @@ jet_cli_prove_grade: fn(proved: Int, failed: Int, tests: [JetCLIProveTestItem], 
         if contract.state == 1 -> return ClaimsGrade.Unchecked
     }
     if failed > 0 || jet_cli_solver_count(solver, "disproved") > 0 -> return ClaimsGrade.Unchecked
-    if solver.len() > 0 && jet_cli_solver_count(solver, "proved") == solver.len() -> return ClaimsGrade.Proved
+    if solver.len() > 0 && jet_cli_solver_count(solver, "proved") == solver.len() {
+        return ClaimsGrade.Proved
+    }
     if generated > 0 -> return ClaimsGrade.Generated(generated)
     if examples > 0 -> return ClaimsGrade.Examples(examples)
     if proved > 0 -> return ClaimsGrade.Checked
@@ -1239,20 +1384,26 @@ jet_cli_prove_report: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMem
     deterministic := JetCLIProveBudgetCount{}
     statistical := JetCLIProveBudgetCount{}
     loop fact in budgets.facts {
-        if fact.statistical -> jet_cli_prove_budget_count(statistical, fact) else -> jet_cli_prove_budget_count(deterministic, fact)
+        if fact.statistical -> jet_cli_prove_budget_count(statistical, fact) else {
+            jet_cli_prove_budget_count(deterministic, fact)
+        }
     }
     deterministic.selected += budgets.rejected.len()
     deterministic.unavailable += budgets.rejected.len()
     contract_declared: contracts.len()
     contract_unreached: contract_declared - contract_passed - contract_failed
     loop item in front.warnings {
-        if item.diagnostic == .Val(diagnostic) -> diagnostics.push(jet_cli_prove_diagnostic_json(item, diagnostic, members))
+        if item.diagnostic == .Val(diagnostic) {
+            diagnostics.push(jet_cli_prove_diagnostic_json(item, diagnostic, members))
+        }
     }
     evidence := [String]{}
     derivations := [String]{}
     loop row in rows {
         record := derivation_record(row.id, "{row.kind}:{row.id}", row.producer, jet_cli_prove_method(row.producer), "checked-proof-row", [String]{row.id}, derivation_identity(identity.source_digest, identity.build_digest, identity.mir_hash, identity.input_sha256))
-        if ([String]{"unavailable", "not_observed", "unknown"}).contains(row.outcome) || ([String]{"unavailable", "not_run", "unchecked"}).contains(row.state) -> record.disposition = DerivationDisposition.Unavailable
+        if ([String]{"unavailable", "not_observed", "unknown"}).contains(row.outcome) || ([String]{"unavailable", "not_run", "unchecked"}).contains(row.state) {
+            record.disposition = DerivationDisposition.Unavailable
+        }
         evidence.push("{row.body},\"derivation\":{{\"id\":{foundation_json_quote(record.id)}}}}}")
         derivations.push(derivation_record_json(record))
     }
@@ -1291,7 +1442,9 @@ jet_cli_prove_report: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMem
 jet_cli_prove_canonical: fn(text: String) -> String JetCLIReadError! {
     parser := CanonicalJSONParser{bytes: text.bytes(), at: 0}
     value: canonical_json_value(parser) ?? return Err(jet_cli_read_error("ProofReport is not valid JSON: {err.message}"))
-    if parser.at != parser.bytes.len() -> return Err(jet_cli_read_error("ProofReport has trailing bytes"))
+    if parser.at != parser.bytes.len() {
+        return Err(jet_cli_read_error("ProofReport has trailing bytes"))
+    }
     bytes: canonical_json_bytes(value)
     String.from_bytes(bytes.slice(0, bytes.len() - 1)) ?? return Err(jet_cli_read_error("ProofReport is not UTF-8"))
 }
@@ -1358,7 +1511,9 @@ jet_cli_prove_contract_json: fn(contract: JetCLIProveContract) -[FS]> String Nev
     width: jet_cli_prove_width(line_text)
     shown: if line_text == .Val(text) -> foundation_json_quote(text) else -> "null"
     notes := "[]"
-    if diagnostic_registry_row(item.code) == .Val(row) -> notes = "[{foundation_json_quote("Why: {row.why}")},{foundation_json_quote("Fix: {row.fix}")}]"
+    if diagnostic_registry_row(item.code) == .Val(row) {
+        notes = "[{foundation_json_quote("Why: {row.why}")},{foundation_json_quote("Fix: {row.fix}")}]"
+    }
     "{{\"caret\":{{\"startColumn\":1,\"width\":{width}}},\"code\":\"E3005\",\"context\":[],\"frames\":[],\"message\":{foundation_json_quote(item.message)},\"notes\":{notes},\"origin\":{{\"producer\":\"jet-runtime\",\"stage\":\"runtime\"}},\"safeLocals\":[],\"severity\":\"error\",\"span\":{{\"endColumn\":{width + 1},\"endLine\":{item.line},\"path\":{foundation_json_quote(item.path)},\"sourceLine\":{shown},\"startColumn\":1,\"startLine\":{item.line}}},\"type\":\"runtime\"}}"
 }
 
@@ -1395,7 +1550,9 @@ jet_cli_prove_status_reports: fn(members: [JetCLIProveMember], front: JetCLIProv
         if item.diagnostic == .Val(diagnostic) {
             file: item.path.copy()
             source: jet_cli_prove_item_source(item, diagnostic, members)
-            loop report in jet_cli_reports_json(jet_cli_report_base(file), file, source, [Diagnostic]{diagnostic}) -> reports.push(report)
+            loop report in jet_cli_reports_json(jet_cli_report_base(file), file, source, [Diagnostic]{diagnostic}) {
+                reports.push(report)
+            }
         }
     }
     stops := [JetCLIProveTestItem]{}
@@ -1417,7 +1574,9 @@ jet_cli_prove_status_reports: fn(members: [JetCLIProveMember], front: JetCLIProv
     }
     loop row in solver {
         if jet_cli_solver_diagnostic(row) == .Val(diagnostic) {
-            loop report in jet_cli_reports_json(jet_cli_report_base(row.path), row.path, "", [Diagnostic]{diagnostic}) -> reports.push(report)
+            loop report in jet_cli_reports_json(jet_cli_report_base(row.path), row.path, "", [Diagnostic]{diagnostic}) {
+                reports.push(report)
+            }
         }
     }
     reports
@@ -1449,7 +1608,9 @@ jet_cli_prove_line_span: fn(source: String, line: Int) -> Span? Never! {
 jet_cli_prove_human: fn(members: [JetCLIProveMember], front: JetCLIProveFront, tests: JetCLIProveTests, budgets: JetCLIBudgetProjection, solver: [JetCLISolverRow], lenses: [String], proved: Int, failed: Int, claims: String, replay: String, result: String, color: Bool, exit_code: Int) -[FS]> JetDriverVerbOutput Never! {
     stdout := if lenses.len() > 0 -> "LENSES   {jet_cli_prove_lens_names(lenses).join(", ")}\n" else -> ""
     stdout = "{stdout}CLAIMS   grade: {claims}\n"
-    if failed > 0 || jet_cli_prove_lens_checked(lenses) -> stdout = "{stdout}CHECKED  front end: {proved} proved, {failed} failed\n"
+    if failed > 0 || jet_cli_prove_lens_checked(lenses) {
+        stdout = "{stdout}CHECKED  front end: {proved} proved, {failed} failed\n"
+    }
     stderr := ""
     loop group in ([[JetCLIProveFrontItem]]{front.items, front.warnings}) {
         loop item in group {
@@ -1466,8 +1627,12 @@ jet_cli_prove_human: fn(members: [JetCLIProveMember], front: JetCLIProveFront, t
         failed_tests: jet_cli_prove_count(tests.items, [Int]{0, 2}, 1, 1)
         skipped: jet_cli_prove_count(tests.items, [Int]{0, 2}, 2, 9)
         stdout = "{stdout}TESTS    unit: {passed} passed, {failed_tests} failed, {skipped} skipped\n"
-        if jet_cli_prove_count(tests.items, [Int]{4}, 0, 9) > 0 -> stdout = "{stdout}         doctest: {jet_cli_prove_count(tests.items, [Int]{4}, 0, 0)} passed, {jet_cli_prove_count(tests.items, [Int]{4}, 1, 1)} failed, {jet_cli_prove_count(tests.items, [Int]{4}, 2, 9)} skipped\n"
-        if jet_cli_prove_count(tests.items, [Int]{3}, 0, 9) > 0 -> stdout = "{stdout}         property: {jet_cli_prove_count(tests.items, [Int]{3}, 0, 0)} passed, {jet_cli_prove_count(tests.items, [Int]{3}, 1, 1)} failed, {jet_cli_prove_count(tests.items, [Int]{3}, 2, 9)} skipped\n"
+        if jet_cli_prove_count(tests.items, [Int]{4}, 0, 9) > 0 {
+            stdout = "{stdout}         doctest: {jet_cli_prove_count(tests.items, [Int]{4}, 0, 0)} passed, {jet_cli_prove_count(tests.items, [Int]{4}, 1, 1)} failed, {jet_cli_prove_count(tests.items, [Int]{4}, 2, 9)} skipped\n"
+        }
+        if jet_cli_prove_count(tests.items, [Int]{3}, 0, 9) > 0 {
+            stdout = "{stdout}         property: {jet_cli_prove_count(tests.items, [Int]{3}, 0, 0)} passed, {jet_cli_prove_count(tests.items, [Int]{3}, 1, 1)} failed, {jet_cli_prove_count(tests.items, [Int]{3}, 2, 9)} skipped\n"
+        }
         loop item in tests.items {
             if item.state == 1 -> stdout = "{stdout}{item.name}: FAIL\n"
         }
@@ -1476,7 +1641,9 @@ jet_cli_prove_human: fn(members: [JetCLIProveMember], front: JetCLIProveFront, t
         if item.state == 1 -> stderr = "{stderr}{jet_cli_prove_stop_text(item)}"
     }
     loop contract in tests.contracts {
-        if contract.state == 1 -> stderr = "{stderr}{jet_cli_prove_stop_text(jet_cli_prove_contract_stop(contract))}"
+        if contract.state == 1 {
+            stderr = "{stderr}{jet_cli_prove_stop_text(jet_cli_prove_contract_stop(contract))}"
+        }
     }
     // The verified reports' decisions, each budget that wasn't met or whose
     // evidence was unavailable, and each report that couldn't be used.
@@ -1490,7 +1657,9 @@ jet_cli_prove_human: fn(members: [JetCLIProveMember], front: JetCLIProveFront, t
         warned: budgets.facts.len() - met - failed_budgets
         stdout = "{stdout}BUDGETS  {met} met, {failed_budgets} failed, {warned} warned, {budgets.rejected.len()} unavailable · verified canonical reports\n"
         loop fact in budgets.facts {
-            if fact.outcome != "pass" || fact.evidence == "unavailable" -> stdout = "{stdout}  budget {fact.budget_id}: {fact.outcome} ({fact.evidence})\n"
+            if fact.outcome != "pass" || fact.evidence == "unavailable" {
+                stdout = "{stdout}  budget {fact.budget_id}: {fact.outcome} ({fact.evidence})\n"
+            }
         }
         loop reason in budgets.rejected -> stdout = "{stdout}  unavailable: {reason}\n"
     }
@@ -1499,7 +1668,9 @@ jet_cli_prove_human: fn(members: [JetCLIProveMember], front: JetCLIProveFront, t
     if lenses.contains("solver") {
         stdout = "{stdout}{jet_cli_solver_human(solver)}"
         loop row in solver {
-            if jet_cli_solver_diagnostic(row) == .Val(diagnostic) -> stderr = "{stderr}{diagnostic_render_all("", "", [Diagnostic]{diagnostic}, color)}"
+            if jet_cli_solver_diagnostic(row) == .Val(diagnostic) {
+                stderr = "{stderr}{diagnostic_render_all("", "", [Diagnostic]{diagnostic}, color)}"
+            }
         }
     }
     stdout = "{stdout}{replay}RESULT   {result}\n"
@@ -1531,13 +1702,19 @@ jet_cli_prove_outside: fn(lenses: [String], tests: JetCLIProveTests, budgets: Je
     }
     if !jet_cli_prove_lens_shows(lenses, "contracts") {
         loop contract in tests.contracts {
-            if contract.state == 1 -> rows = "{rows}  contract {contract.marker} at {contract.path}:{contract.line}: {contract.message.replace("\n", " ").replace("\r", " ")}\n"
-            if contract.state == -1 -> rows = "{rows}  contract {contract.marker} at {contract.path}:{contract.line}: not observed\n"
+            if contract.state == 1 {
+                rows = "{rows}  contract {contract.marker} at {contract.path}:{contract.line}: {contract.message.replace("\n", " ").replace("\r", " ")}\n"
+            }
+            if contract.state == -1 {
+                rows = "{rows}  contract {contract.marker} at {contract.path}:{contract.line}: not observed\n"
+            }
         }
     }
     if !jet_cli_prove_lens_shows(lenses, "budgets") {
         loop fact in budgets.facts {
-            if fact.outcome != "pass" || fact.evidence == "unavailable" -> rows = "{rows}  budget {fact.budget_id}: {fact.outcome} ({fact.evidence})\n"
+            if fact.outcome != "pass" || fact.evidence == "unavailable" {
+                rows = "{rows}  budget {fact.budget_id}: {fact.outcome} ({fact.evidence})\n"
+            }
         }
         loop reason in budgets.rejected -> rows = "{rows}  budget unavailable: {reason}\n"
     }
@@ -1601,11 +1778,15 @@ jet_cli_prove_write: fn(identity: JetCLIProveIdentity, report: String, consumed:
             if !same -> return Err(jet_cli_prove_corrupt(identity.root, relative))
         }
         .Err(error) -> {
-            if !jet_cli_rooted_missing(error) -> return Err(jet_cli_prove_artifact_refusal("couldn't inspect `{relative}`: {jet_cli_io_error_text(error)}"))
+            if !jet_cli_rooted_missing(error) {
+                return Err(jet_cli_prove_artifact_refusal("couldn't inspect `{relative}`: {jet_cli_io_error_text(error)}"))
+            }
             // Identical bytes another run published first are this artifact;
             // a refusal with the file present is a different artifact there.
             if held.publish_immutable(file, bytes, Val(0o600), JET_CLI_PROVE_ARTIFACT_LIMIT) == .Err(failure) {
-                if held.handle.entry_stat(file) == .Ok(_) -> return Err(jet_cli_prove_corrupt(identity.root, relative))
+                if held.handle.entry_stat(file) == .Ok(_) {
+                    return Err(jet_cli_prove_corrupt(identity.root, relative))
+                }
                 return Err(jet_cli_prove_artifact_refusal(failure.message))
             }
         }
@@ -1631,7 +1812,9 @@ jet_cli_prove_artifact_folders_safe: fn(root: String, parts: [String]) JetCLIPro
         walked = jet_cli_rooted_join(walked, part)
         shown = if shown == "" -> part.copy() else -> "{shown}/{part}"
         info: cli_files.stat(walked) ?? {
-            if jet_cli_rooted_missing(err) -> return
+            if jet_cli_rooted_missing(err) {
+                return
+            }
             return Err(jet_cli_prove_artifact_refusal("couldn't inspect `{shown}`: {jet_cli_io_error_text(err)}"))
         }
         if info.is_symlink || !info.is_dir -> return Err(jet_cli_prove_unsafe(shown))

@@ -52,15 +52,17 @@ TrustRootExportRequest: struct {
         loop i < args.len() {
             option: TrustRootExportOption.parse(args[i]) ?? return Err(CLIToolError.new("unknown option `{args[i]}`\n\n{cli_trust_root_usage()}"))
             value: args.get(i + 1) ?? return Err(CLIToolError.new("{option.flag()} needs a path\n\n{cli_trust_root_usage()}"))
-            if value.starts_with("-") -> return Err(CLIToolError.new("{option.flag()} needs a path\n\n{cli_trust_root_usage()}"))
+            if value.starts_with("-") {
+                return Err(CLIToolError.new("{option.flag()} needs a path\n\n{cli_trust_root_usage()}"))
+            }
             if option == {
-                .Output -> request.output = Val(value)
-                .Bootstrap -> request.bootstrap = Val(value)
-                .IndexKey -> request.index_key = Val(value)
-                .CacheKey -> request.cache_key = Val(value)
+                .Output -> { request.output = Val(value) }
+                .Bootstrap -> { request.bootstrap = Val(value) }
+                .IndexKey -> { request.index_key = Val(value) }
+                .CacheKey -> { request.cache_key = Val(value) }
                 .ToolchainKey -> request.toolchain_key = Val(value)
             }
-            i = i + 2
+            i += 2
         }
         Ok(request)
     }
@@ -117,8 +119,12 @@ cli_trust_root_usage: fn() -> String Never! {
 // The trimmed text of one regular, bounded, UTF-8 public-key file.
 cli_trust_root_read_public_key: fn(path: String) -[FS]> String CLIToolError! {
     metadata: files.stat(path) ?? return Err(CLIToolError.new("{err}"))
-    if metadata.is_symlink || !metadata.is_file -> return Err(CLIToolError.new("public trust key is not a regular file"))
-    if metadata.size > TRUST_ROOT_MAX_PUBLIC_KEY_BYTES -> return Err(CLIToolError.new("public trust key is too large"))
+    if metadata.is_symlink || !metadata.is_file {
+        return Err(CLIToolError.new("public trust key is not a regular file"))
+    }
+    if metadata.size > TRUST_ROOT_MAX_PUBLIC_KEY_BYTES {
+        return Err(CLIToolError.new("public trust key is too large"))
+    }
     bytes: files.read_bytes(path) ?? return Err(CLIToolError.new("{err}"))
     value: String.from_bytes(bytes) ?? return Err(CLIToolError.new("public trust key is not UTF-8"))
     Ok(value.trim())
@@ -133,13 +139,19 @@ cli_trust_root_write_immutable: fn(path: String, body: [U8]) CLIToolError! -[FS]
     }
     if files.stat(path) == {
         .Ok(metadata) -> {
-            if metadata.is_symlink || !metadata.is_file -> return Err(CLIToolError.new("publication path is not a regular file: {path}"))
+            if metadata.is_symlink || !metadata.is_file {
+                return Err(CLIToolError.new("publication path is not a regular file: {path}"))
+            }
             existing: files.read_bytes(path) ?? return Err(CLIToolError.new("read {path}: {err}"))
-            if existing == body -> return
+            if existing == body {
+                return
+            }
             return Err(CLIToolError.new("immutable publication file changed: {path}"))
         }
         .Err(error) -> {
-            if !store_io_is_not_found(error) -> return Err(CLIToolError.new("inspect {path}: {error}"))
+            if !store_io_is_not_found(error) {
+                return Err(CLIToolError.new("inspect {path}: {error}"))
+            }
             writer := files.create(path, if_exists: .Refuse) ?? return Err(CLIToolError.new("create {path}: {err}"))
             writer.write_bytes(body) ?? return Err(CLIToolError.new("write {path}: {err}"))
             writer.fsync() ?? return Err(CLIToolError.new("write {path}: {err}"))

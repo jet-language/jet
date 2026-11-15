@@ -74,7 +74,9 @@ sema_generic_crossing_add: fn(crossings: &[SemaGenericCrossing], crossing: &&Sem
 // A crossing site in a generic body: `ty` crosses `crossing`, and the site
 // either gives the value away (`moved`) or captures it (`captured`).
 sema_generic_crossing_note: fn(ty: Type, crossing: SemaSendCrossing, moved: Bool, captured: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext) {
-    if context.generic_params.len() == 0 -> return
+    if context.generic_params.len() == 0 {
+        return
+    }
     loop reach in sema_ownership_crossing_generic_reach(ty, crossing, environment, program, context) {
         _ := sema_generic_crossing_add(context.generic_crossings, SemaGenericCrossing{param: reach.param.copy(), crossing: crossing, whole: reach.whole, moved: moved, captured: captured})
     }
@@ -101,14 +103,18 @@ sema_generic_call_note: fn(callee: String, name: String, substitutions: [SemaInf
         cloneable: sema_copy_classify(binding.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false).cloneable
         arguments.push(SemaGenericCallArgument{param: binding.name.copy(), ty: binding.ty.copy(), given: given, kept: kept, strict: strict, cloneable: cloneable, reaches: reaches})
     }
-    if arguments.len() == 0 -> return
+    if arguments.len() == 0 {
+        return
+    }
     context.generic_calls.push(SemaGenericCall{callee: callee, name: name, span: span, arguments: arguments})
 }
 
 // What `argument` meets at `crossing` in its callee.
 sema_generic_crossing_problem: fn(crossing: SemaGenericCrossing, argument: SemaGenericCallArgument) -> SemaSendabilityProblem? {
     if sema_ownership_crossing_strict_callable(crossing.crossing) -> return argument.strict
-    if !crossing.whole || crossing.moved || (crossing.captured && !argument.cloneable) -> return argument.given
+    if !crossing.whole || crossing.moved || (crossing.captured && !argument.cloneable) {
+        return argument.given
+    }
     argument.kept
 }
 
@@ -156,7 +162,9 @@ sema_generic_crossings_validate: fn(modules: [SemaGraphModuleResult]) -> [SemaGe
             if facts.generic_calls.len() > 0 -> has_calls = true
             if facts.generic_crossings.len() == 0 -> next
             id: sema_generic_crossings_slot(keys, crossings, facts.function_key)
-            loop crossing in facts.generic_crossings -> _ := sema_generic_crossing_add(crossings[id], crossing.copy())
+            loop crossing in facts.generic_crossings {
+                _ := sema_generic_crossing_add(crossings[id], crossing.copy())
+            }
         }
     }
     if !has_calls || crossings.len() == 1 -> return reports
@@ -178,7 +186,9 @@ sema_generic_crossings_validate: fn(modules: [SemaGraphModuleResult]) -> [SemaGe
                             loop reach in argument.reaches {
                                 inherited := SemaGenericCrossing{param: reach.param.copy(), crossing: crossing.crossing, whole: crossing.whole && reach.whole, moved: crossing.moved, captured: crossing.captured}
                                 caller: sema_generic_crossings_slot(keys, crossings, facts.function_key)
-                                if sema_generic_crossing_add(crossings[caller], inherited.move()) -> changed = true
+                                if sema_generic_crossing_add(crossings[caller], inherited.move()) {
+                                    changed = true
+                                }
                             }
                         }
                     }

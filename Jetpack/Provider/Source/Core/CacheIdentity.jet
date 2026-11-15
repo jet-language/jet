@@ -5,7 +5,7 @@
 
 // One producer record for a provider realization; the policy facts bind the
 // cache identity's policy fingerprint and platform.
-provider_producer_record: fn(provider: String, immutable_source: String, source_digest: String, plan_facts: [String: String], toolchain_facts: String, identity: CacheIdentity, facts: [String: String]) -> ProducerRecord ProviderError! {
+provider_producer_record: fn(provider: String, immutable_source: String, source_digest: String, plan_facts: [String:String], toolchain_facts: String, identity: CacheIdentity, facts: [String:String]) -> ProducerRecord ProviderError! {
     plan: ProviderPlanFacts.from_facts(plan_facts) ?? return Err(ProviderError.CoreBuild(err.message()))
     record: ProducerRecord.new(provider, immutable_source, source_digest, plan, toolchain_facts, "policy={identity.policy_fingerprint}\nplatform={identity.platform}", facts) ?? return Err(ProviderError.CoreBuild(err.message()))
     Ok(record)
@@ -39,7 +39,9 @@ provider_refresh_provider_facts: fn(producer: &ProducerRecord, reference: String
         (key: "provider.toolchain_facts", value: producer.toolchain_facts),
         (key: "provider.policy_facts", value: producer.policy_facts),
     }
-    loop extra in extras -> shared.add_fact(extra.key, ProviderFactValue.Text(extra.value), "jet-producer-record-v1")
+    loop extra in extras {
+        shared.add_fact(extra.key, ProviderFactValue.Text(extra.value), "jet-producer-record-v1")
+    }
     shared.validate() ?? return Err(ProviderError.BadOutput(err.message))
     producer.facts[PROVIDER_SHARED_FACTS] = shared.to_json()
     producer.facts[PROVIDER_SHARED_FACTS_DIGEST] = shared.digest()
@@ -123,11 +125,13 @@ provider_adapter_cache_expectation: fn(plan: AdapterPlan, table: SourceTable, ct
     }
     build_identity: provider_adapter_action_identity(plan, recipe, identity_source, pkg_host_platform(), table)
     fingerprint: pkg_sha256_hex(provider_adapter_id_input(plan, source_hash, build_identity).bytes())
-    Ok(CacheExpectation{
-        identity: provider_adapter_cache_identity(source_fingerprint, build_identity, ctx),
-        owned_output: Val(files.join(ctx.store_dir, "{plan.name}-adapter-{provider_prefix(fingerprint, 12)}")),
-        allow_unsigned_local: true,
-    })
+    Ok(
+        CacheExpectation{
+            identity: provider_adapter_cache_identity(source_fingerprint, build_identity, ctx),
+            owned_output: Val(files.join(ctx.store_dir, "{plan.name}-adapter-{provider_prefix(fingerprint, 12)}")),
+            allow_unsigned_local: true,
+        },
+    )
 }
 
 // The U20 adapter output identity input.
@@ -222,8 +226,8 @@ provider_fixtures_from_env: fn(explicit: String?) -[Env]> String? Never! {
 }
 
 // `map` without the listed keys.
-provider_without_keys: fn(map: [String: String], keys: [String]) -> [String: String] Never! {
-    kept := [String: String]{}
+provider_without_keys: fn(map: [String:String], keys: [String]) -> [String:String] Never! {
+    kept := [String:String]{}
     loop entry in map {
         if !keys.contains(entry.key) -> kept[entry.key] = entry.value
     }
@@ -231,7 +235,7 @@ provider_without_keys: fn(map: [String: String], keys: [String]) -> [String: Str
 }
 
 // Map keys in byte order (a `BTreeMap` walk).
-provider_sorted_keys: fn(map: [String: String]) -> [String] Never! {
+provider_sorted_keys: fn(map: [String:String]) -> [String] Never! {
     keys := map.keys().to_list()
     keys.sort()
     keys

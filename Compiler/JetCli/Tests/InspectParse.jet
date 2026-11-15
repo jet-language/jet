@@ -20,8 +20,10 @@ inspect_parse_target: fn(argv: [String], options: [String], name: String) Never!
 
 inspect_parse_error: fn(argv: [String], expected: String) Never! {
     if jet_cli_inspect_parse(argv) == {
-        .Parsed(_) -> panic("expected `{expected}`")
-        .Failed(message) -> inspect_parse_require(message == expected, "wanted `{expected}`, got `{message}`")
+        .Parsed(_) -> { panic("expected `{expected}`") }
+        .Failed(message) -> {
+            inspect_parse_require(message == expected, "wanted `{expected}`, got `{message}`")
+        }
     }
 }
 

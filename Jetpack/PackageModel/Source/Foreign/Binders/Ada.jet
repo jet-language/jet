@@ -5,8 +5,8 @@
 // runtime before the first call.
 use files: core.files
 
-
 ADA_BIND_SCHEMA: "jet-ada-bind-v1"
+
 ADA_TOOL_ACTION: "rejected the Ada binding source"
 
 AdaBindResult: struct {
@@ -72,8 +72,12 @@ AdaRoutine: struct {
 // Parse the spec, compile it with its body through gnatmake/gnatbind, build
 // the C bridge archive, and render the Jet binding with provenance.
 pkg_ada_bind: fn(spec_path: String, spec: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> AdaBindResult ForeignBindError! {
-    if !pkg_binder_is_ident(lib) -> return Err(ForeignBindError.Source("`{lib}` is not a valid Jet library name"))
-    if files.suffix(spec_path) != ".ads" -> return Err(ForeignBindError.Source("the Ada binder requires a `.ads` package spec"))
+    if !pkg_binder_is_ident(lib) {
+        return Err(ForeignBindError.Source("`{lib}` is not a valid Jet library name"))
+    }
+    if files.suffix(spec_path) != ".ads" {
+        return Err(ForeignBindError.Source("the Ada binder requires a `.ads` package spec"))
+    }
     body_path: files.with_suffix(spec_path, ".adb")
     body := ""
     if files.read(body_path) == {
@@ -83,7 +87,9 @@ pkg_ada_bind: fn(spec_path: String, spec: String, lib: String, cache: String) -[
     routines: pkg_ada_parse(spec)
     pkg_binder_create_dir_all(cache, "could not create Ada binding cache")
     stem: files.stem(spec_path)
-    if !pkg_binder_is_ident(stem) -> return Err(ForeignBindError.Source("the Ada package filename is not bindable"))
+    if !pkg_binder_is_ident(stem) {
+        return Err(ForeignBindError.Source("the Ada package filename is not bindable"))
+    }
     build: files.join(cache, ".ada-build-{lib}")
     pkg_binder_remove_tree_quiet(build)
     pkg_binder_create_dir_all(build, "could not create Ada build directory")
@@ -112,7 +118,9 @@ pkg_ada_bind: fn(spec_path: String, spec: String, lib: String, cache: String) -[
         bound.push(routine.name)
         loop param in routine.params {
             if param.constraint == {
-                .Val(range) -> constraints.push("{routine.name}.{param.name}={range.low}..{range.high}")
+                .Val(range) -> {
+                    constraints.push("{routine.name}.{param.name}={range.low}..{range.high}")
+                }
                 .None -> {}
             }
         }
@@ -127,14 +135,12 @@ pkg_ada_bind: fn(spec_path: String, spec: String, lib: String, cache: String) -[
 // dropped and statements split at top-level `;`.
 pkg_ada_parse: fn(source: String) -> [AdaRoutine] ForeignBindError! {
     stripped := [String]{}
-    loop line in pkg_binder_lines(source) {
-        stripped.push(line.split_once("--")?.before ?? line)
-    }
+    loop line in pkg_binder_lines(source) { stripped.push(line.split_once("--")?.before ?? line) }
     text: stripped.join(" ")
-    subtypes := [String: AdaType]{}
+    subtypes := [String:AdaType]{}
     routines := [AdaRoutine]{}
-    names := [String: String]{}
-    symbols := [String: String]{}
+    names := [String:String]{}
+    symbols := [String:String]{}
     loop raw in pkg_ada_statements(text) {
         statement: pkg_binder_words(raw).join(" ")
         if statement == "" -> next
@@ -153,37 +159,53 @@ pkg_ada_parse: fn(source: String) -> [AdaRoutine] ForeignBindError! {
         }
         function_at: pkg_binder_find(lower, "function ", 0)
         if function_at < 0 {
-            if lower.contains("export") -> return Err(ForeignBindError.Source("exported Ada procedures are unsupported; export scalar functions instead"))
+            if lower.contains("export") {
+                return Err(ForeignBindError.Source("exported Ada procedures are unsupported; export scalar functions instead"))
+            }
             next
         }
         if !lower.contains("export") -> next
-        if !pkg_ada_convention_is_c(lower) -> return Err(ForeignBindError.Source("exported Ada functions must use `Convention => C`"))
+        if !pkg_ada_convention_is_c(lower) {
+            return Err(ForeignBindError.Source("exported Ada functions must use `Convention => C`"))
+        }
         header: pkg_binder_tail(statement, function_at + 9)
         open: pkg_binder_find(header, "(", 0)
         if open < 0 -> return Err(ForeignBindError.Source("malformed exported Ada function"))
         name: pkg_ascii_lower(pkg_binder_slice(header, 0, open).trim())
-        if !pkg_binder_is_ident(name) -> return Err(ForeignBindError.Source("`{name}` is not a bindable Ada function name"))
+        if !pkg_binder_is_ident(name) {
+            return Err(ForeignBindError.Source("`{name}` is not a bindable Ada function name"))
+        }
         close: pkg_ada_matching_close(header, open)
-        if close < 0 -> return Err(ForeignBindError.Source("function `{name}` has no closed parameter list"))
+        if close < 0 {
+            return Err(ForeignBindError.Source("function `{name}` has no closed parameter list"))
+        }
         after: pkg_binder_tail(header, close + 1)
         return_at: pkg_binder_find(pkg_ascii_lower(after), "return ", 0)
-        if return_at < 0 -> return Err(ForeignBindError.Source("function `{name}` has no return type"))
+        if return_at < 0 {
+            return Err(ForeignBindError.Source("function `{name}` has no return type"))
+        }
         result_words: pkg_binder_words(pkg_binder_tail(after, return_at + 7))
         result_name: pkg_binder_trim_matches(if result_words.len() > 0 -> result_words[0] else -> "", ",")
         result: pkg_ada_resolve_type(result_name, subtypes) ?? return Err(ForeignBindError.Source("function `{name}` has unsupported return type `{result_name}`"))
         symbol: pkg_ada_quoted_after(after, "external_name =>") ?? return Err(ForeignBindError.Source("function `{name}` must declare `External_Name => \"...\"`"))
-        if !pkg_binder_is_ident(symbol) -> return Err(ForeignBindError.Source("`{symbol}` is not a bindable C symbol"))
+        if !pkg_binder_is_ident(symbol) {
+            return Err(ForeignBindError.Source("`{symbol}` is not a bindable C symbol"))
+        }
         params := [AdaParam]{}
         loop group in pkg_binder_slice(header, open + 1, close).split(";") {
             declared: group.split_once(":") ?? return Err(ForeignBindError.Source("function `{name}` has a malformed parameter"))
             trimmed_kind: declared.after.trim()
             lower_kind: pkg_ascii_lower(trimmed_kind)
-            if lower_kind.starts_with("out ") || lower_kind.starts_with("in out ") -> return Err(ForeignBindError.Source("function `{name}` uses unsupported output parameters"))
+            if lower_kind.starts_with("out ") || lower_kind.starts_with("in out ") {
+                return Err(ForeignBindError.Source("function `{name}` uses unsupported output parameters"))
+            }
             kind: if lower_kind.starts_with("in ") -> pkg_binder_tail(trimmed_kind, 3) else -> trimmed_kind
             resolved: pkg_ada_resolve_type(kind, subtypes) ?? return Err(ForeignBindError.Source("function `{name}` has unsupported parameter type `{kind}`"))
             loop raw_param in declared.before.split(",") {
                 param: pkg_ascii_lower(raw_param.trim())
-                if !pkg_binder_is_ident(param) -> return Err(ForeignBindError.Source("function `{name}` has invalid parameter `{param}`"))
+                if !pkg_binder_is_ident(param) {
+                    return Err(ForeignBindError.Source("function `{name}` has invalid parameter `{param}`"))
+                }
                 params.push(AdaParam{name: param, scalar: resolved.scalar, constraint: resolved.constraint})
             }
         }
@@ -197,7 +219,9 @@ pkg_ada_parse: fn(source: String) -> [AdaRoutine] ForeignBindError! {
         }
         routines.push(AdaRoutine{name: name, symbol: symbol, params: params, result: result.scalar})
     }
-    if routines.len() == 0 -> return Err(ForeignBindError.Source("no supported exported Ada functions were found"))
+    if routines.len() == 0 {
+        return Err(ForeignBindError.Source("no supported exported Ada functions were found"))
+    }
     Ok(routines)
 }
 
@@ -214,7 +238,7 @@ pkg_ada_convention_is_c: fn(lower: String) -> Bool Never! {
 }
 
 // A subtype range from the spec, else a bare GNAT scalar.
-pkg_ada_resolve_type: fn(name: String, subtypes: [String: AdaType]) -> AdaType? Never! {
+pkg_ada_resolve_type: fn(name: String, subtypes: [String:AdaType]) -> AdaType? Never! {
     lower: pkg_ascii_lower(name.trim())
     if subtypes.get(lower) == {
         .Val(found) -> return Val(found)
@@ -258,7 +282,9 @@ pkg_ada_params_jet: fn(params: [AdaParam]) -> String Never! {
 // bound always carries a fraction or exponent.
 pkg_ada_jet_number: fn(value: String, scalar: AdaScalar) -> String Never! {
     out := value.replace("_", "")
-    if scalar == AdaScalar.Float && !out.contains(".") && !out.contains("e") && !out.contains("E") -> out = "{out}.0"
+    if scalar == AdaScalar.Float && !out.contains(".") && !out.contains("e") && !out.contains("E") {
+        out = "{out}.0"
+    }
     out
 }
 
@@ -288,14 +314,18 @@ pkg_ada_gnat_runtime_dir: fn() -[FS, Env, Exec, Time.Wait]> String ForeignBindEr
     runtime_name: BinderHostOS.current().shared_library("gnat", "libgnat.so")
     loop line in pkg_binder_lines(String.from_bytes_lossy(output)) {
         candidate: pkg_binder_trim_end_matches(line.trim(), "/")
-        if candidate.ends_with("/adalib") && files.is_abs(candidate) && files.is_file(files.join(candidate, runtime_name)) -> return Ok(candidate)
+        if candidate.ends_with("/adalib") && files.is_abs(candidate) && files.is_file(files.join(candidate, runtime_name)) {
+            return Ok(candidate)
+        }
     }
     Err(ForeignBindError.Source("the provisioned GNAT runtime library directory was not found"))
 }
 
 pkg_ada_run: fn(argv: [String], cwd: String?, tool: String) ForeignBindError! -[Exec, Time.Wait]> {
     output: pkg_ada_capture(argv, cwd, tool)
-    if (Int{output[0]}) == 0 -> return
+    if (Int{output[0]}) == 0 {
+        return
+    }
     return Err(ForeignBindError.ToolFailed{tool: tool, action: ADA_TOOL_ACTION, detail: pkg_ada_launder(output[1..<output.len()])})
 }
 
@@ -327,7 +357,7 @@ pkg_ada_quoted_after: fn(text: String, needle: String) -> String? Never! {
     if at < 0 -> return None
     tail: pkg_binder_tail(text, at + needle.bytes().len()).trim_start()
     if tail == "" -> return None
-    quote: if tail.starts_with("\"") -> "\"" else -> if tail.starts_with("'") -> "'" else -> ""
+    quote: if tail.starts_with("\"") -> "\"" else if tail.starts_with("'") -> "'" else -> ""
     if quote == "" -> return None
     body: tail.removeprefix(quote)
     Val(body.split_once(quote)?.before ?? body)

@@ -166,10 +166,12 @@ ParsedItemModifiers: struct {
     // The markers came from at least one `#[…]` list (Rust's grouped marker path).
     grouped_markers: Bool{false}
 }
+
 ParsedFunction: struct {
     value: Func
     has_body: Bool
 }
+
 ParsedUserPolicy: struct {
     value: UserPolicyDecl
     valid: Bool
@@ -305,7 +307,9 @@ parser_parse_item_or_import: fn(state: &JetParserState) -> ParsedItemOrImport {
                 lone_missing_body: state.diagnostics.len() == saved_diagnostics + 1 && state.diagnostics[saved_diagnostics].code == "E0081"
                 parser_rewind(state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
                 value: parser_parse_function_type_alias(state, modifiers)
-                if lone_missing_body || state.diagnostics.len() == saved_diagnostics -> return ParsedItemOrImport{item: Val(Item.TypeAlias{value: value}), handled: true}
+                if lone_missing_body || state.diagnostics.len() == saved_diagnostics {
+                    return ParsedItemOrImport{item: Val(Item.TypeAlias{value: value}), handled: true}
+                }
                 parser_rewind(state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
                 function: parser_parse_function(state, modifiers, true)
                 return ParsedItemOrImport{item: Val(Item.Func{value: function.value}), handled: true}
@@ -315,7 +319,9 @@ parser_parse_item_or_import: fn(state: &JetParserState) -> ParsedItemOrImport {
         token.kind == TOKEN_KW_STRUCT -> {
             value: parser_parse_struct(state, modifiers)
             // A fact plane's struct declares the plane alone.
-            if value.fact == .Val(declaration) -> return ParsedItemOrImport{item: Val(Item.FactDecl{value: declaration}), handled: true}
+            if value.fact == .Val(declaration) {
+                return ParsedItemOrImport{item: Val(Item.FactDecl{value: declaration}), handled: true}
+            }
             return ParsedItemOrImport{item: Val(Item.Struct{value: value}), handled: true, companions: parser_type_companions(value.marker, value.effect_impl)}
         }
         token.kind == TOKEN_KW_ENUM -> {
@@ -340,6 +346,7 @@ parser_parse_item_or_import: fn(state: &JetParserState) -> ParsedItemOrImport {
     }
     ParsedItemOrImport{item: None, handled: false}
 }
+
 parser_report_top_level_state_decl: fn(state: &JetParserState, declaration: StateDecl) {
     state_names := ""
     index := 0
@@ -356,6 +363,7 @@ parser_report_top_level_state_decl: fn(state: &JetParserState, declaration: Stat
 parser_report_ineligible_state_section: fn(state: &JetParserState, section: StateDecl, owner: String) {
     parser_add_error_code(state, "E0158", section.span, "`state {{ … }}` is not valid inside a {owner}", "state sections attach only to named struct and enum bodies; traits, aliases, impls, modules, and anonymous shapes have no state-set owner", "Move `state {{ … }}` into a named struct or enum body")
 }
+
 parser_report_repeated_state_section: fn(state: &JetParserState, section: StateDecl, type_name: String) {
     parser_add_error_code(state, "E0168", section.span, "`{type_name}` may declare only one `state {{ … }}` section", "A type's states and moves form one list", "Merge the states and moves into one `state {{ … }}` section")
 }
@@ -386,16 +394,16 @@ parser_parse_item_modifiers: fn(state: &JetParserState, item_visibility: Bool) -
                     parser_bump(state)
                     is_pub = false
                     is_package_pub = true
-                    if parser_current_kind(state) == TOKEN_RPAREN {
-                        parser_bump(state)
-                    } else {
+                    if parser_current_kind(state) == TOKEN_RPAREN -> parser_bump(state) else {
                         close_span: parser_current(state).span
                         parser_add_error(state, close_span, "expected `)` to close `pub(package)`", "write `pub(package)` with no extra content inside the parentheses", "use `pub(package)` to restrict access to sibling packages in the same payload")
                     }
                 } else {
                     found: parser_describe_token(state, qualifier)
                     parser_add_error(state, qualifier.span, "expected `package` inside `pub(…)`, found {found}", "a re-export is `pub use` (public to all) or `pub(package) use` (sibling packages in the same payload)", "write `pub use` or `pub(package) use`")
-                    loop parser_current_kind(state) != TOKEN_RPAREN && parser_current_kind(state) != TOKEN_EOF -> parser_bump(state)
+                    loop parser_current_kind(state) != TOKEN_RPAREN && parser_current_kind(state) != TOKEN_EOF {
+                        parser_bump(state)
+                    }
                     if parser_current_kind(state) == TOKEN_RPAREN -> parser_bump(state)
                 }
             }
@@ -410,10 +418,16 @@ parser_parse_item_modifiers: fn(state: &JetParserState, item_visibility: Bool) -
                 open: parser_bump(state).span
                 qualifier: parser_current(state)
                 package = qualifier.kind == TOKEN_IDENT && parser_value(state, qualifier) == "package" && parser_kind_at(state, 1) == TOKEN_RPAREN
-                loop parser_current_kind(state) != TOKEN_RPAREN && parser_current_kind(state) != TOKEN_EOF -> parser_bump(state)
-                if parser_current_kind(state) == TOKEN_RPAREN -> marker_span = parser_cover(word.span, parser_bump(state).span)
+                loop parser_current_kind(state) != TOKEN_RPAREN && parser_current_kind(state) != TOKEN_EOF {
+                    parser_bump(state)
+                }
+                if parser_current_kind(state) == TOKEN_RPAREN {
+                    marker_span = parser_cover(word.span, parser_bump(state).span)
+                }
                 written: Span{start: open.start, end: marker_span.end}
-                if !package -> parser_add_error_code_edit(state, "E0414", written, "unknown `priv(…)` qualifier: only `priv(package)` exists", "`priv(package) module` is the only qualified module privacy", "delete the qualifier, or write `priv(package)`", TextEdit{span: written, new_text: ""})
+                if !package {
+                    parser_add_error_code_edit(state, "E0414", written, "unknown `priv(…)` qualifier: only `priv(package)` exists", "`priv(package) module` is the only qualified module privacy", "delete the qualifier, or write `priv(package)`", TextEdit{span: written, new_text: ""})
+                }
             }
             // `priv` hides any declaration. At a file's top
             // level it already keeps the declaration inside the package, so
@@ -438,9 +452,7 @@ parser_parse_item_modifiers: fn(state: &JetParserState, item_visibility: Bool) -
                 sequence.end = group.span.end
                 marker_chunks += 1
                 bracket_chunks += 1
-                loop marker in group.markers {
-                    markers.push(marker)
-                }
+                loop marker in group.markers { markers.push(marker) }
                 next
             }
             marker: parser_parse_marker(state)
@@ -456,7 +468,9 @@ parser_parse_item_modifiers: fn(state: &JetParserState, item_visibility: Bool) -
         break
     }
     noun: parser_marker_sequence_noun(state, item_visibility)
-    if noun != "" -> parser_report_adjacent_markers(state, markers, marker_chunks, bracket_chunks, sequence, noun)
+    if noun != "" {
+        parser_report_adjacent_markers(state, markers, marker_chunks, bracket_chunks, sequence, noun)
+    }
     ParsedItemModifiers{is_pub: is_pub, is_package_pub: is_package_pub, is_comptime: is_comptime, markers: markers, start_span: start, reexport: reexport, grouped_markers: bracket_chunks > 0}
 }
 
@@ -470,7 +484,9 @@ parser_marker_sequence_noun: fn(state: &JetParserState, item_visibility: Bool) -
     }
     if kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM -> return "type"
     if kind == TOKEN_KW_IMPL -> return "impl"
-    if !item_visibility && kind == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON -> return "field"
+    if !item_visibility && kind == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON {
+        return "field"
+    }
     ""
 }
 
@@ -502,7 +518,9 @@ parser_parse_marker: fn(state: &JetParserState) -> Marker {
         marker_name: parser_value(state, name)
         args = parser_parse_marker_args(state, marker_name)
         if state.position > 0 -> end = parser_lookahead(state, -1).span
-        if args.args.len() == 0 -> parser_check_empty_marker_parens(state, marker_name, Span{start: open.start, end: end.end})
+        if args.args.len() == 0 {
+            parser_check_empty_marker_parens(state, marker_name, Span{start: open.start, end: end.end})
+        }
     }
     Marker{name: parser_value(state, name), negated: negated, name_span: name.span, args: args.args, arg_labels: args.labels, span: parser_cover(hash.span, end), ct: None, required: args.required}
 }
@@ -512,10 +530,13 @@ parser_parse_marker: fn(state: &JetParserState) -> Marker {
 // at `(`…`)` with the delete edit, and parsing goes on so `jet fmt` can apply
 // it.
 parser_check_empty_marker_parens: fn(state: &JetParserState, name: String, parens: Span) {
-    if !marker_registered_accepts_arguments(name) || parser_aborting(state) -> return
+    if !marker_registered_accepts_arguments(name) || parser_aborting(state) {
+        return
+    }
     diagnostic: diagnostic_from_registry("E0999", Val(parens), "`#{name}()` has empty parentheses", "a marker writes parentheses exactly when it passes arguments", "write `#{name}`")
     state.diagnostics.push(diagnostic_with_structured_edit(diagnostic, TextEdit{span: parens, new_text: ""}))
 }
+
 parser_marker_first_expr: fn(marker: Marker) -> Expr? {
     if marker.args.len() == 0 -> return None
     if marker.args[0] == {
@@ -532,7 +553,9 @@ parser_marker_first_expr: fn(marker: Marker) -> Expr? {
 parser_parse_import: fn(state: &JetParserState, is_pub: Bool, comptime_head: Span?) -> [ImportDecl] {
     keyword: parser_bump(state)
     comptime_span := Span?{None}
-    if comptime_head == .Val(head) -> comptime_span = Val(Span{start: head.start, end: keyword.span.start})
+    if comptime_head == .Val(head) {
+        comptime_span = Val(Span{start: head.start, end: keyword.span.start})
+    }
     imports := [ImportDecl]{}
     if parser_current_kind(state) != TOKEN_LBRACE {
         import := parser_parse_import_row(state, comptime_head ?? keyword.span)
@@ -706,7 +729,9 @@ parser_parse_type_params: fn(state: &JetParserState) -> [TypeParam] {
     if parser_current_kind(state) != TOKEN_LT -> return params
     parser_bump(state)
     if {
-        parser_type_close_here(state) -> parser_add_error_here(state, "a generic parameter list cannot be empty", "type parameters are declared by name", "write at least one type parameter or remove `< >`")
+        parser_type_close_here(state) -> {
+            parser_add_error_here(state, "a generic parameter list cannot be empty", "type parameters are declared by name", "write at least one type parameter or remove `< >`")
+        }
         else -> {
             loop {
                 name: parser_expect_name(state, "in a generic parameter list")
@@ -719,7 +744,9 @@ parser_parse_type_params: fn(state: &JetParserState) -> [TypeParam] {
                 }
                 // `N: Int` is a number parameter: only the core Int makes one.
                 prep := PrepParam?{None}
-                if bounds.len() == 1 && bounds[0] == "Int" -> prep = Val(PrepParam{prep_span: name.span, value_type: "Int", value_type_span: bound_head.span})
+                if bounds.len() == 1 && bounds[0] == "Int" {
+                    prep = Val(PrepParam{prep_span: name.span, value_type: "Int", value_type_span: bound_head.span})
+                }
                 params.push(TypeParam{name: parser_value(state, name), name_span: name.span, bounds: if prep == None -> bounds else -> [String]{}, prep: prep})
                 if parser_type_close_here(state) -> break
                 if parser_current_kind(state) != TOKEN_COMMA {
@@ -731,7 +758,9 @@ parser_parse_type_params: fn(state: &JetParserState) -> [TypeParam] {
             }
         }
     }
-    if parser_type_close_here(state) -> parser_take_type_close(state) else -> parser_expect(state, TOKEN_GT, "`>` after generic parameters")
+    if parser_type_close_here(state) -> parser_take_type_close(state) else {
+        parser_expect(state, TOKEN_GT, "`>` after generic parameters")
+    }
     params
 }
 
@@ -750,9 +779,15 @@ parser_parse_param_list: fn(state: &JetParserState) -> [Param] {
                 parser_current_kind(state) == TOKEN_SLASH -> {
                     span: parser_bump(state).span
                     if {
-                        slash != None -> parser_add_error_code(state, "E0763", span, "`/` appears twice in this parameter list", "each parameter list has at most one positional-only `/` and one label-only `*`", "remove the extra `/`")
-                        star != None -> parser_add_error_code(state, "E0763", span, "`/` comes after `*` in this parameter list", "the zones read left to right: positional-only, then either, then label-only", "move `/` before `*`")
-                        params.len() == 0 -> parser_add_error_code(state, "E0763", span, "`/` marks an empty parameter zone", "a positional-only zone needs at least one parameter before the `/`", "write the positional-only parameters before `/`, or remove the `/`")
+                        slash != None -> {
+                            parser_add_error_code(state, "E0763", span, "`/` appears twice in this parameter list", "each parameter list has at most one positional-only `/` and one label-only `*`", "remove the extra `/`")
+                        }
+                        star != None -> {
+                            parser_add_error_code(state, "E0763", span, "`/` comes after `*` in this parameter list", "the zones read left to right: positional-only, then either, then label-only", "move `/` before `*`")
+                        }
+                        params.len() == 0 -> {
+                            parser_add_error_code(state, "E0763", span, "`/` marks an empty parameter zone", "a positional-only zone needs at least one parameter before the `/`", "write the positional-only parameters before `/`, or remove the `/`")
+                        }
                         else -> {
                             slash = Val(span)
                             index := 0
@@ -791,7 +826,9 @@ parser_parse_param_list: fn(state: &JetParserState) -> [Param] {
         loop param in params {
             if param.zone == ParamZone.LabelOnly -> label_only = true
         }
-        if !label_only -> parser_add_error_code(state, "E0763", star_span, "`*` marks an empty parameter zone", "a label-only zone needs at least one parameter after the `*`", "write the label-only parameters after `*`, or remove the `*`")
+        if !label_only {
+            parser_add_error_code(state, "E0763", star_span, "`*` marks an empty parameter zone", "a label-only zone needs at least one parameter after the `*`", "write the label-only parameters after `*`, or remove the `*`")
+        }
     }
     parser_validate_variadic_params(state, params)
     parser_validate_param_labels(state, params)
@@ -889,7 +926,9 @@ parser_parse_param: fn(state: &JetParserState, zone: ParamZone) -> Param {
                     } else {
                         bad: parser_current(state).span
                         parser_add_error_code(state, "E0961", bad, "`.[ ]` lists member names, not calls or expressions", "member spread names fields or package names that hang off the prefix", "write bare names like `default.[cargo, ripgrep]`")
-                        loop parser_current_kind(state) != TOKEN_COMMA && parser_current_kind(state) != TOKEN_RBRACKET && parser_current_kind(state) != TOKEN_EOF -> parser_bump(state)
+                        loop parser_current_kind(state) != TOKEN_COMMA && parser_current_kind(state) != TOKEN_RBRACKET && parser_current_kind(state) != TOKEN_EOF {
+                            parser_bump(state)
+                        }
                     }
                     if parser_current_kind(state) != TOKEN_COMMA -> break
                     parser_bump(state)
@@ -913,13 +952,10 @@ parser_parse_param: fn(state: &JetParserState, zone: ParamZone) -> Param {
     variadic := false
     variadic_bounds := [String]?{None}
     if {
-        name.kind == TOKEN_SELF && parser_current_kind(state) != TOKEN_COLON -> {
-            // Sema supplies the receiver type from its owning declaration.
-        }
+        name.kind == TOKEN_SELF && parser_current_kind(state) != TOKEN_COLON -> {}
+        // Sema supplies the receiver type from its owning declaration.
         else -> {
-            if parser_current_kind(state) == TOKEN_COLON {
-                parser_bump(state)
-            } else {
+            if parser_current_kind(state) == TOKEN_COLON -> parser_bump(state) else {
                 param_name: parser_text(state, name)
                 parser_add_error(state, name.span, "expected `:` after the parameter `{param_name}`", "every parameter except `self` needs a type after its name", "write `{param_name}: Type`")
             }
@@ -986,9 +1022,7 @@ parser_parse_param: fn(state: &JetParserState, zone: ParamZone) -> Param {
             } else if source.kind == TOKEN_IDENT {
                 parser_bump(state)
                 sources.push(parser_value(state, source))
-            } else {
-                break
-            }
+            } else { break }
             // A projection names a field of the source; the requirement keys
             // on the owner name only.
             loop parser_current_kind(state) == TOKEN_DOT {
@@ -1001,7 +1035,9 @@ parser_parse_param: fn(state: &JetParserState, zone: ParamZone) -> Param {
         if sources.len() > 0 -> declared_from = Val(sources)
     }
     default := Expr?{None}
-    if parser_current_kind(state) == TOKEN_LBRACE -> default = Val(parser_parse_declared_default(state, ty, ty_span, "`}}` after the parameter default").expr)
+    if parser_current_kind(state) == TOKEN_LBRACE {
+        default = Val(parser_parse_declared_default(state, ty, ty_span, "`}}` after the parameter default").expr)
+    }
     if variadic && default != None {
         param_name: parser_value(state, name)
         parser_add_error_code(state, "E1310", name.span, "variadic parameter `{param_name}` can't have a default value", "a `...` rest parameter collects trailing arguments — it can't also be optional", "remove the `{{…}}` default from the variadic parameter")
@@ -1043,16 +1079,12 @@ parser_parse_function: fn(state: &JetParserState, modifiers: ParsedItemModifiers
         parser_expect(state, TOKEN_RPAREN, "`)` after a multi-head variant")
         bindings := [PatSlot]{}
         loop param in params {
-            if param.name == "_" {
-                bindings.push(PatSlot.Wildcard)
-            } else {
+            if param.name == "_" -> bindings.push(PatSlot.Wildcard) else {
                 bindings.push(PatSlot.Bind{name: param.name, span: param.name_span})
             }
         }
         head_pattern = Val(Pattern.Variant{variant: parser_value(state, variant), bindings: bindings, leading_dot: false, span: Span{start: variant.span.start, end: pattern_end}})
-    } else {
-        params = parser_parse_param_list(state)
-    }
+    } else { params = parser_parse_param_list(state) }
     // `x.copy()` and `x.move()` are the compiler's own
     // copy and take, so a method may not take either name (E0436). A module
     // function keeps it (`files.move(from, to)`).
@@ -1088,10 +1120,14 @@ parser_parse_function: fn(state: &JetParserState, modifiers: ParsedItemModifiers
         }
     }
     guest_import: loop applied in modifiers.markers {
-        if parser_marker_is_c_guest_import(state, applied) -> break true
+        if parser_marker_is_c_guest_import(state, applied) {
+            break true
+        }
     } ?? false
     is_ffi: loop applied in modifiers.markers {
-        if parser_marker_is_hook(state, applied, MarkerHook.FFI) -> break true
+        if parser_marker_is_hook(state, applied, MarkerHook.FFI) {
+            break true
+        }
     } ?? false
     // (card #4512): a named function has one arrow, before its
     // result, and a braced body. A body `->` after the result, or an
@@ -1112,7 +1148,9 @@ parser_parse_function: fn(state: &JetParserState, modifiers: ParsedItemModifiers
     }
     retired_body := Stmt?{None}
     value_body := false
-    if arrow_marker && parser_current_kind(state) == TOKEN_LBRACE -> parser_report_arrow_function_body(state, marker_span)
+    if arrow_marker && parser_current_kind(state) == TOKEN_LBRACE {
+        parser_report_arrow_function_body(state, marker_span)
+    }
     if body_marker && parser_current_kind(state) != TOKEN_LBRACE {
         value_body = true
         if parser_function_body_missing(state) {
@@ -1306,7 +1344,9 @@ parser_func_effect_starts_here: fn(state: &JetParserState) -> Bool Never! {
 parser_parse_opt_func_effects: fn(state: &JetParserState) -> ParsedFuncEffects {
     first: parser_current_kind(state)
     second: parser_kind_at(state, 1)
-    if first != TOKEN_MINUS || second != TOKEN_LBRACKET -> return ParsedFuncEffects{effects: None, via: None}
+    if first != TOKEN_MINUS || second != TOKEN_LBRACKET {
+        return ParsedFuncEffects{effects: None, via: None}
+    }
     parser_bump(state)
     parser_expect(state, TOKEN_LBRACKET, "`[` to start an effect row")
     close: TOKEN_RBRACKET
@@ -1481,16 +1521,10 @@ parser_parse_callable_result: fn(state: &JetParserState) -> ParsedCallableResult
                 result = Val(parser_parse_type(state, 0))
             } else {
                 result = parser_parse_unit_fallible_return(state)
-                if parser_has_type(result) {
-                    plain_arrow = true
-                } else {
-                    state.position = before
-                }
+                if parser_has_type(result) -> plain_arrow = true else -> state.position = before
             }
         }
-        else -> {
-            result = parser_parse_unit_fallible_return(state)
-        }
+        else -> { result = parser_parse_unit_fallible_return(state) }
     }
     return_type := Type?{None}
     return_type_span := Span?{None}
@@ -1557,7 +1591,9 @@ parser_parse_inline_foreign_body: fn(state: &JetParserState, markers: [Marker]) 
     parser_skip_semicolons(state)
     source: parser_current(state)
     plain: source.kind == TOKEN_RAW_STRING || (source.kind == TOKEN_STRING && parser_interpolations(state, source) == 0)
-    if source.kind == TOKEN_STRING || source.kind == TOKEN_RAW_STRING -> _ := parser_take_text(state, false)
+    if source.kind == TOKEN_STRING || source.kind == TOKEN_RAW_STRING {
+        _ := parser_take_text(state, false)
+    }
     if !plain {
         error_span: if source.kind == TOKEN_STRING -> source.span else -> ffi.span
         parser_add_fatal_code(state, "E0064", error_span, "a `#FFI({lang})` function body must be one string of {lang} source", "the inline foreign tier carries the foreign source as a single `\"\"\"…\"\"\"` string; the Jet signature above is the checked contract", "write the body as `{{ \"\"\"<{lang} source>\"\"\" }}` — one string literal, no other statements or interpolation")
@@ -1607,11 +1643,7 @@ parser_parse_declared_view_sources: fn(state: &JetParserState, owners: [String])
     sources := [ViewSourcePath]{}
     loop {
         parsed: parser_parse_declared_view_source(state, owners)
-        if parsed == .Val(path) {
-            sources.push(path)
-        } else {
-            break
-        }
+        if parsed == .Val(path) -> sources.push(path) else { break }
         if parser_current_kind(state) != TOKEN_PIPE -> break
         parser_bump(state)
     }
@@ -1677,7 +1709,9 @@ parser_view_owner_names: fn(params: [Param]) -> [String] Never! {
 // declaration or closes the enclosing scope (`#Todo` is a value body).
 parser_function_body_missing: fn(state: &JetParserState) -> Bool Never! {
     kind: parser_current_kind(state)
-    if kind == TOKEN_HASH -> return !(parser_kind_at(state, 1) == TOKEN_IDENT && parser_value_at(state, 1) == "Todo")
+    if kind == TOKEN_HASH {
+        return !(parser_kind_at(state, 1) == TOKEN_IDENT && parser_value_at(state, 1) == "Todo")
+    }
     kind == TOKEN_KW_FN || kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_MODULE || kind == TOKEN_KW_IMPL || kind == TOKEN_KW_TRAIT || kind == TOKEN_KW_USE || kind == TOKEN_KW_EXTERN || kind == TOKEN_EOF || kind == TOKEN_RBRACE || kind == TOKEN_SEMI
 }
 
@@ -1701,11 +1735,15 @@ parser_apply_function_markers: fn(state: &JetParserState, func: &Func, markers: 
     policy := [PolicyDeclaration]{}
     callable_policy_seen := false
     guest_import: loop applied in markers {
-        if parser_marker_is_c_guest_import(state, applied) -> break true
+        if parser_marker_is_c_guest_import(state, applied) {
+            break true
+        }
     } ?? false
     foreign: guest_import || func.inline_foreign != None
     loop marker in markers {
-        if parser_overflow_declaration(marker, PolicyScope.Function, None) == .Val(overflow) -> policy.push(overflow)
+        if parser_overflow_declaration(marker, PolicyScope.Function, None) == .Val(overflow) {
+            policy.push(overflow)
+        }
         hook: parser_marker_hook(state, marker) ?? next
         if hook == {
             .Unsafe -> {
@@ -1736,13 +1774,17 @@ parser_apply_function_markers: fn(state: &JetParserState, func: &Func, markers: 
             // `#Export(c)` is the native Library export sema reads.
             .Export -> {
                 if marker.args.len() == 1 && marker.args[0] == .Expr(written) {
-                    if written == .Ident(name, _, _) && name == "wasm" -> func.web_marker = Val(WebPartitionMarker.WasmExport)
+                    if written == .Ident(name, _, _) && name == "wasm" {
+                        func.web_marker = Val(WebPartitionMarker.WasmExport)
+                    }
                 }
             }
             // `#Scrub(Tag)` names the one fact tag removed.
             .Scrub -> {
                 if parser_marker_bindings(marker, [String]{"tag"}) == .Val(values) {
-                    if values[0] == .Val(written) && written == .Ident(name, _, _) -> func.scrub_tag = Val(name)
+                    if values[0] == .Val(written) && written == .Ident(name, _, _) {
+                        func.scrub_tag = Val(name)
+                    }
                 }
             }
             // Bare `#Inline` is a hint; `#Inline(Always)`
@@ -1752,13 +1794,17 @@ parser_apply_function_markers: fn(state: &JetParserState, func: &Func, markers: 
             .Inline -> {
                 func.inline_span = Val(marker.span)
                 mode := Expr?{None}
-                if parser_marker_bindings(marker, [String]{"mode"}) == .Val(values) -> mode = values[0]
+                if parser_marker_bindings(marker, [String]{"mode"}) == .Val(values) {
+                    mode = values[0]
+                }
                 if mode == {
                     .Val(value) -> {
                         variant: parser_marker_enum_variant(value)
                         if {
                             variant == "Always" -> func.is_inline_always = true
-                            variant == "Hint" || variant == "Never" -> parser_marker_shape_error(state, marker)
+                            variant == "Hint" || variant == "Never" -> {
+                                parser_marker_shape_error(state, marker)
+                            }
                             else -> {}
                         }
                     }
@@ -1768,8 +1814,8 @@ parser_apply_function_markers: fn(state: &JetParserState, func: &Func, markers: 
             // (Rust `apply_callable_markers`): `#Pre(cond, msg)` and
             // `#Post(cond, msg)` become the function's contract clauses; both
             // arguments are required.
-            .Pre -> parser_project_contract_marker(state, func, marker, true)
-            .Post -> parser_project_contract_marker(state, func, marker, false)
+            .Pre -> { parser_project_contract_marker(state, func, marker, true) }
+            .Post -> { parser_project_contract_marker(state, func, marker, false) }
             // A callable chain (`#Policy(retry(3))`) stays a marker; the scoped
             // form declares function-scoped policies targeting the function.
             .Policy -> {
@@ -1885,7 +1931,9 @@ parser_state_marker_paths: fn(marker: Marker) -> [String]? {
         if state_name == "_" -> return None
         return Val([String]{state_name})
     }
-    if marker.args.len() != 2 || parser_marker_label(marker, 0) != "" || parser_marker_label(marker, 1) != STATE_ARROW_LABEL -> return None
+    if marker.args.len() != 2 || parser_marker_label(marker, 0) != "" || parser_marker_label(marker, 1) != STATE_ARROW_LABEL {
+        return None
+    }
     from: parser_marker_ident_path(parser_marker_expression(marker, 0) ?? return None) ?? return None
     to: parser_marker_ident_path(parser_marker_expression(marker, 1) ?? return None) ?? return None
     if to == "_" -> return None
@@ -1929,11 +1977,7 @@ parser_function_web_partition: fn(state: &JetParserState, marker: Marker) -> Web
 
 parser_project_contract_marker: fn(state: &JetParserState, func: &Func, marker: Marker, pre: Bool) {
     clause: parser_contract_clause(state, marker) ?? return
-    if pre {
-        func.pre.push(clause)
-    } else {
-        func.post.push(clause)
-    }
+    if pre -> func.pre.push(clause) else -> func.post.push(clause)
 }
 
 // The clause of `#Pre(cond, msg)` or `#Post(cond, msg)`; both arguments are
@@ -1980,10 +2024,12 @@ parser_parse_struct: fn(state: &JetParserState, modifiers: ParsedItemModifiers) 
             type_name: parser_value(state, name)
             section := parser_parse_state_section(state, type_name, name.span)
             if value.state == {
-                .None -> value.state = Val(section)
+                .None -> { value.state = Val(section) }
                 .Val(_) -> parser_report_repeated_state_section(state, section, type_name)
             }
-            if parser_current_kind(state) == TOKEN_COMMA || parser_current_kind(state) == TOKEN_SEMI -> parser_bump(state)
+            if parser_current_kind(state) == TOKEN_COMMA || parser_current_kind(state) == TOKEN_SEMI {
+                parser_bump(state)
+            }
             next
         }
         if parser_take_prep_fn(state) -> member_modifiers.is_comptime = true
@@ -1995,7 +2041,9 @@ parser_parse_struct: fn(state: &JetParserState, modifiers: ParsedItemModifiers) 
             parser_bump(state)
             target: parser_parse_expression(state, 1, 0)
             value.cli_bindings.push(CLICommandBinding{name: parser_value(state, command_name), name_span: command_name.span, markers: member_modifiers.markers, target: target.expr})
-            if parser_current_kind(state) == TOKEN_COMMA || parser_current_kind(state) == TOKEN_SEMI -> parser_bump(state)
+            if parser_current_kind(state) == TOKEN_COMMA || parser_current_kind(state) == TOKEN_SEMI {
+                parser_bump(state)
+            }
             next
         }
         // (Rust `at_validate_block` / `validate_block`):
@@ -2015,13 +2063,19 @@ parser_parse_struct: fn(state: &JetParserState, modifiers: ParsedItemModifiers) 
             }
             TOKEN_KW_IMPL -> {
                 if {
-                    parser_value_at(state, 1) == "Marker" && parser_kind_at(state, 2) == TOKEN_LBRACE -> parser_parse_marker_impl(state, value)
-                    parser_value_at(state, 1) == "Fact" && parser_kind_at(state, 2) == TOKEN_LBRACE -> parser_parse_fact_impl(state, value)
+                    parser_value_at(state, 1) == "Marker" && parser_kind_at(state, 2) == TOKEN_LBRACE -> {
+                        parser_parse_marker_impl(state, value)
+                    }
+                    parser_value_at(state, 1) == "Fact" && parser_kind_at(state, 2) == TOKEN_LBRACE -> {
+                        parser_parse_fact_impl(state, value)
+                    }
                     parser_value_at(state, 1) == "Effect" && parser_kind_at(state, 2) == TOKEN_LBRACE -> {
                         parsed: parser_parse_effect_impl(state, value.name, value.effect_impl != None)
                         if parsed != None -> value.effect_impl = parsed
                     }
-                    else -> value.trait_impls.push(parser_parse_trait_impl_block(state, member_modifiers.markers))
+                    else -> {
+                        value.trait_impls.push(parser_parse_trait_impl_block(state, member_modifiers.markers))
+                    }
                 }
             }
             else -> {
@@ -2047,17 +2101,23 @@ parser_parse_struct: fn(state: &JetParserState, modifiers: ParsedItemModifiers) 
                         parsed_value: parser_parse_expression(state, 1, 0)
                         default = Val(parsed_value.expr)
                     }
-                    parser_current_kind(state) == TOKEN_LBRACE -> default = Val(parser_parse_declared_default(state, field_type.ty, field_type.span, "`}}` after a struct field default").expr)
+                    parser_current_kind(state) == TOKEN_LBRACE -> {
+                        default = Val(parser_parse_declared_default(state, field_type.ty, field_type.span, "`}}` after a struct field default").expr)
+                    }
                 }
                 redact := false
                 marker_index := 0
                 loop marker_index < field_markers.len() {
-                    if parser_marker_is_hook(state, field_markers[marker_index], MarkerHook.Redact) -> redact = true
+                    if parser_marker_is_hook(state, field_markers[marker_index], MarkerHook.Redact) {
+                        redact = true
+                    }
                     marker_index += 1
                 }
                 value.fields.push(Field{is_pub: field_pub, is_package_pub: field_package_pub, name: parser_value(state, field_name), name_span: field_name.span, ty: field_type.ty, ty_span: field_type.span, serde_markers: field_markers, redact: redact, computed: computed.move(), default: default.move(), default_ct: None})
                 separator_kind := parser_current_kind(state)
-                if separator_kind == TOKEN_COMMA || separator_kind == TOKEN_SEMI -> parser_bump(state)
+                if separator_kind == TOKEN_COMMA || separator_kind == TOKEN_SEMI {
+                    parser_bump(state)
+                }
             }
         }
         // A member's own separator is optional (a field may end at `}`), so
@@ -2124,7 +2184,7 @@ parser_parse_enum: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
         if parser_state_section_ahead(state) {
             section := parser_parse_state_section(state, value.name, value.name_span)
             if value.state == {
-                .None -> value.state = Val(section)
+                .None -> { value.state = Val(section) }
                 .Val(_) -> parser_report_repeated_state_section(state, section, value.name)
             }
             next
@@ -2140,7 +2200,9 @@ parser_parse_enum: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
                 parsed: parser_parse_effect_impl(state, value.name, value.effect_impl != None)
                 if parsed != None -> value.effect_impl = parsed
             }
-            kind == TOKEN_KW_IMPL -> value.trait_impls.push(parser_parse_trait_impl_block(state, markers))
+            kind == TOKEN_KW_IMPL -> {
+                value.trait_impls.push(parser_parse_trait_impl_block(state, markers))
+            }
             else -> parser_parse_variant_entry(state, "", value, markers, inside)
         }
         // Cases are separated as struct fields are: a `,` or a line break.
@@ -2202,7 +2264,9 @@ parser_parse_variant_markers: fn(state: &JetParserState) -> [Marker] {
 // only (E0331).
 parser_parse_variant_entry: fn(state: &JetParserState, prefix: String, value: &EnumDef, markers: [Marker], inside: &[Marker]) {
     name: parser_expect_name(state, "for a variant name")
-    if parser_aborting(state) -> return
+    if parser_aborting(state) {
+        return
+    }
     path: if prefix.len() == 0 -> parser_value(state, name) else -> "{prefix}.{parser_value(state, name)}"
     payload := VariantPayload.Unit
     if parser_current_kind(state) == TOKEN_LPAREN {
@@ -2211,9 +2275,7 @@ parser_parse_variant_entry: fn(state: &JetParserState, prefix: String, value: &E
         close: parser_expect(state, TOKEN_RPAREN, "`)` after a variant's payload")
         if parser_current_kind(state) == TOKEN_LBRACE {
             parser_add_error_code(state, "E0331", parser_cover(open.span, close.span), "group `{path}` can't carry a payload", "a variant group only names its subtree — data lives on the leaf variants", "move the payload onto the leaf variants inside the `{{ }}`, or remove the `(...)`")
-        } else {
-            payload = parsed
-        }
+        } else { payload = parsed }
     }
     discriminant := Int?{None}
     discriminant_expr := Expr?{None}
@@ -2247,7 +2309,9 @@ parser_parse_variant_entry: fn(state: &JetParserState, prefix: String, value: &E
         if separator_kind == TOKEN_COMMA || separator_kind == TOKEN_SEMI -> parser_bump(state)
     }
     parser_expect(state, TOKEN_RBRACE, "`}}` to close the variant group")
-    if parser_aborting(state) -> return
+    if parser_aborting(state) {
+        return
+    }
     if value.variants.len() == leaves_before {
         parser_add_error_code(state, "E0003", name.span, "group `{path}` has no variants", "an empty group can never match anything — every group needs at least one leaf variant", "add a variant inside the `{{ }}`, or remove the group")
     }
@@ -2302,7 +2366,9 @@ parser_parse_trait_impl_block: fn(state: &JetParserState, above: [Marker]) -> Tr
     operator_marker := parser_operator_marker(state, above)
     loop parser_current_kind(state) == TOKEN_HASH {
         marker: parser_parse_marker(state)
-        if parser_marker_is_hook(state, marker, MarkerHook.Commutative) -> operator_marker = Val(OperatorMarker.Commutative)
+        if parser_marker_is_hook(state, marker, MarkerHook.Commutative) {
+            operator_marker = Val(OperatorMarker.Commutative)
+        }
     }
     using: parser_current(state)
     if using.kind == TOKEN_IDENT && parser_value(state, using) == "using" {
@@ -2348,7 +2414,9 @@ parser_parse_trait_impl_block: fn(state: &JetParserState, above: [Marker]) -> Tr
     }
     close: parser_expect(state, TOKEN_RBRACE, "`}}` to close the trait impl body")
     markers: parser_merge_inbody_markers(state, above, inside, start.span.start, close.span.start, "impl `{trait_text}`")
-    if parser_operator_marker(state, markers) != None -> operator_marker = parser_operator_marker(state, markers)
+    if parser_operator_marker(state, markers) != None {
+        operator_marker = parser_operator_marker(state, markers)
+    }
     TraitImplBlock{trait_name: trait_text, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: methods, compiler_generated: false, assoc_type_impls: assoc_types, constants: constants, delegation_field: None, markers: markers, os_target: parser_impl_os_target(state, markers), span: Val(parser_cover(start.span, close.span))}
 }
 
@@ -2356,7 +2424,9 @@ parser_parse_trait_impl_block: fn(state: &JetParserState, above: [Marker]) -> Tr
 // `#Commutative` written after the trait does.
 parser_operator_marker: fn(state: &JetParserState, markers: [Marker]) -> OperatorMarker? Never! {
     loop marker in markers {
-        if !marker.negated && parser_marker_is_hook(state, marker, MarkerHook.Commutative) -> return Val(OperatorMarker.Commutative)
+        if !marker.negated && parser_marker_is_hook(state, marker, MarkerHook.Commutative) {
+            return Val(OperatorMarker.Commutative)
+        }
     }
     None
 }
@@ -2408,12 +2478,12 @@ parser_parse_const: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -
     } else if parser_prep_operand_ahead(state, 0) {
         prepared = true
         parsed_value = parser_parse_prep_operand(state)
-    } else {
-        parsed_value = parser_parse_expression(state, 1, 0)
-    }
+    } else { parsed_value = parser_parse_expression(state, 1, 0) }
     terminator := parser_current(state)
     terminator_span := terminator.span
-    if terminator.kind == TOKEN_RBRACE || terminator.kind == TOKEN_EOF -> terminator_span = parsed_value.span
+    if terminator.kind == TOKEN_RBRACE || terminator.kind == TOKEN_EOF {
+        terminator_span = parsed_value.span
+    }
     if terminator.kind != TOKEN_SEMI && terminator.kind != TOKEN_RBRACE && terminator.kind != TOKEN_EOF && parser_text_prefix_token(state, terminator) == None {
         terminator_text: parser_text(state, terminator)
         parser_add_error(state, terminator.span, "something unexpected appeared after this line, found `{terminator_text}`", "each line ends where the line break is (no `;` needed)", "put the next line of code on a new line")
@@ -2428,7 +2498,9 @@ parser_parse_const: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -
             attrs.push(ConstAttr.ForceStatic)
             rust_kind = RustConstKind.Static
         }
-        if parser_marker_is_hook(state, marker, MarkerHook.Inline) -> attrs.push(ConstAttr.ForceInline)
+        if parser_marker_is_hook(state, marker, MarkerHook.Inline) {
+            attrs.push(ConstAttr.ForceInline)
+        }
         marker_index += 1
     }
     result := ast_const(binding_name, name_token.span, parser_cover(modifiers.start_span, terminator_span), parsed_value.expr)
@@ -2733,9 +2805,7 @@ parser_parse_trait_bounds: fn(state: &JetParserState, list_context: String, clos
         bound_name: parser_parse_bound_path(state, single_context)
         if bound_name == "Quantity" && parser_current_kind(state) == TOKEN_LT {
             bounds.push(parser_parse_quantity_bound(state))
-        } else {
-            bounds.push(bound_name)
-        }
+        } else { bounds.push(bound_name) }
         if parser_current_kind(state) != TOKEN_PIPE -> break
         parser_bump(state)
     }
@@ -2765,8 +2835,12 @@ parser_parse_quantity_bound: fn(state: &JetParserState) -> String {
     parser_expect(state, TOKEN_DOT, "`.` before the quantity kind")
     kind_token: parser_expect_name(state, "for the quantity kind")
     kind: parser_value(state, kind_token)
-    if kind != "Linear" && kind != "Point" && kind != "Delta" -> parser_add_error(state, kind_token.span, "`.{kind}` is not a quantity kind", "Quantity bounds distinguish linear values, affine points, and affine deltas", "Use `.Linear`, `.Point`, or `.Delta`")
-    if parser_type_close_here(state) -> parser_take_type_close(state) else -> parser_expect(state, TOKEN_GT, "`>` after the quantity kind")
+    if kind != "Linear" && kind != "Point" && kind != "Delta" {
+        parser_add_error(state, kind_token.span, "`.{kind}` is not a quantity kind", "Quantity bounds distinguish linear values, affine points, and affine deltas", "Use `.Linear`, `.Point`, or `.Delta`")
+    }
+    if parser_type_close_here(state) -> parser_take_type_close(state) else {
+        parser_expect(state, TOKEN_GT, "`>` after the quantity kind")
+    }
     "Quantity<{parser_value(state, dimension)}, .{kind}>"
 }
 
@@ -2830,13 +2904,15 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
         open: parser_current(state).span
         params: parser_parse_type_params(state)
         bounded: loop param in params {
-            if param.bounds.len() > 0 -> break true
+            if param.bounds.len() > 0 {
+                break true
+            }
         } ?? false
-        if bounded {
-            type_params = params
-        } else {
+        if bounded -> type_params = params else {
             written := parser_value(state, parts[0])
-            loop index in 1..<parts.len() -> written = "{written}.{parser_value(state, parts[index])}"
+            loop index in 1..<parts.len() {
+                written = "{written}.{parser_value(state, parts[index])}"
+            }
             params_span: Span{start: open.start, end: parser_prev_token_end(state)}
             parser_add_error_code_edit(state, "E0003", params_span, "`impl {written}` takes no type parameters", "an impl of a generic type names the type bare; its methods already see the type's parameters", "write `impl {written} {{`", TextEdit{span: params_span, new_text: ""})
         }
@@ -2871,7 +2947,9 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
     trait_span := Span?{None}
     if has_trait {
         trait_text := parser_value(state, parts[owner_count])
-        loop index in (owner_count + 1)..<count -> trait_text = "{trait_text}.{parser_value(state, parts[index])}"
+        loop index in (owner_count + 1)..<count {
+            trait_text = "{trait_text}.{parser_value(state, parts[index])}"
+        }
         trait_name = Val(trait_text)
         trait_span = Val(parser_cover(parts[owner_count].span, parts[count - 1].span))
     }
@@ -2900,7 +2978,9 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
     operator_marker := parser_operator_marker(state, modifiers.markers)
     loop parser_current_kind(state) == TOKEN_HASH && !parser_aborting(state) {
         marker: parser_parse_marker(state)
-        if parser_marker_is_hook(state, marker, MarkerHook.Commutative) -> operator_marker = Val(OperatorMarker.Commutative)
+        if parser_marker_is_hook(state, marker, MarkerHook.Commutative) {
+            operator_marker = Val(OperatorMarker.Commutative)
+        }
     }
     // S62: `impl Type.Trait using field_name` delegates the trait to a field.
     using: parser_current(state)
@@ -2949,7 +3029,9 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
     written := type_name.copy()
     if trait_name == .Val(text) -> written = "{written}.{text}"
     markers: parser_merge_inbody_markers(state, modifiers.markers, inside, start.span.start, close.span.start, "impl `{written}`")
-    if parser_operator_marker(state, markers) != None -> operator_marker = parser_operator_marker(state, markers)
+    if parser_operator_marker(state, markers) != None {
+        operator_marker = parser_operator_marker(state, markers)
+    }
     Item.Impl{value: ImplDef{span: parser_cover(start.span, close.span), type_name: type_name, type_span: type_span, trait_name: trait_name, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: methods, delegation_field: None, assoc_type_impls: assoc_types, constants: constants, is_generated_serde: false, os_target: parser_impl_os_target(state, markers), markers: markers, type_params: type_params}}
 }
 
@@ -2957,10 +3039,14 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
 // among its markers, spelled as sema reads it (`linux`, `macos`, `windows`).
 parser_impl_os_target: fn(state: &JetParserState, markers: [Marker]) -> String? {
     loop marker in markers {
-        if !parser_marker_is_hook(state, marker, MarkerHook.Target) || marker.args.len() != 1 -> next
+        if !parser_marker_is_hook(state, marker, MarkerHook.Target) || marker.args.len() != 1 {
+            next
+        }
         if marker.args[0] == .Expr(value) {
             if parser_marker_target_path(value) == .Val(path) {
-                if path.starts_with("OS.") && target_os_named(path.slice(3, path.len())) == .Val(os) -> return Val(target_os_key(os))
+                if path.starts_with("OS.") && target_os_named(path.slice(3, path.len())) == .Val(os) {
+                    return Val(target_os_key(os))
+                }
             }
         }
     }
@@ -2991,4 +3077,3 @@ parser_parse_tag_decl: fn(state: &JetParserState, modifiers: ParsedItemModifiers
     }
     TagDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, deny: deny, from: from, span: parser_cover(start.span, end)}
 }
-

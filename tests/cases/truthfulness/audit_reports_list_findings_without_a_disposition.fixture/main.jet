@@ -31,9 +31,7 @@ disp_cells: fn(raw: String) -> [String] {
     cells
 }
 
-disp_is_digit: fn(byte: U8) -> Bool {
-    byte >= (U8{48}) && byte <= (U8{57})
-}
+disp_is_digit: fn(byte: U8) -> Bool { byte >= (U8{48}) && byte <= (U8{57}) }
 
 disp_is_upper_or_digit: fn(byte: U8) -> Bool {
     disp_is_digit(byte) || (byte >= (U8{65}) && byte <= (U8{90}))
@@ -117,7 +115,7 @@ disp_card_num: fn(card: Dyn) -> Int {
     }
 }
 
-disp_ingest: fn(board: Dyn, cards: &[Int: Bool], decisions: &[String: String]) {
+disp_ingest: fn(board: Dyn, cards: &[Int:Bool], decisions: &[String:String]) {
     if board.field("cards") == .Ok(field) {
         if field == .Array(entries) {
             loop card in entries -> cards[disp_card_num(card)] = true
@@ -137,15 +135,15 @@ disp_ingest: fn(board: Dyn, cards: &[Int: Bool], decisions: &[String: String]) {
 }
 
 DispBoard: struct {
-    cards: [Int: Bool]
-    decisions: [String: String]
+    cards: [Int:Bool]
+    decisions: [String:String]
 }
 
 // Live cards and decisions first, then the retired ones in history.json and
 // its card shards.
 disp_tower: fn(root: String) -> DispBoard {
-    cards := [Int: Bool]{}
-    decisions := [String: String]{}
+    cards := [Int:Bool]{}
+    decisions := [String:String]{}
     live_cards: disp_tower_json(root, [String]{"card", "list", "--json"})
     if live_cards == .Array(entries) {
         loop card in entries -> cards[disp_card_num(card)] = true
@@ -206,7 +204,9 @@ disp_report: fn(relative: String, text: String, board: DispBoard, problems: &[St
     header := [String]{}
     loop cell in disp_cells(lines[0]) -> header.push(disp_parse.lower(cell))
     expected: [String]{"finding", "disposition", "target or reason"}
-    if header != expected -> problems.push("{relative}: disposition header must be | finding | disposition | target or reason |")
+    if header != expected {
+        problems.push("{relative}: disposition header must be | finding | disposition | target or reason |")
+    }
     rows := 0
     ids := [String]{}
     loop index in 1..<lines.len() {
@@ -239,13 +239,19 @@ disp_report: fn(relative: String, text: String, board: DispBoard, problems: &[St
         }
         if kind == "card" {
             found: disp_card_refs(target)
-            if found.is_empty() -> problems.push("{relative}: {finding} card disposition names no Tower card")
+            if found.is_empty() {
+                problems.push("{relative}: {finding} card disposition names no Tower card")
+            }
             loop num in found {
-                if !board.cards.has_key(num) -> problems.push("{relative}: {finding} names missing Tower card #{num}")
+                if !board.cards.has_key(num) {
+                    problems.push("{relative}: {finding} names missing Tower card #{num}")
+                }
             }
         } else if kind == "decision" {
             found: disp_decision_refs(target)
-            if found.is_empty() -> problems.push("{relative}: {finding} decision disposition names no decision")
+            if found.is_empty() {
+                problems.push("{relative}: {finding} decision disposition names no decision")
+            }
             loop id in found {
                 if !board.decisions.has_key(id) {
                     problems.push("{relative}: {finding} names missing Tower decision {id}")
@@ -272,7 +278,9 @@ run: fn() {
     names.sort()
     reports := [String]{}
     loop name in names {
-        if name.ends_with(".md") && name != "README.md" && disp_files.is_file(disp_files.join(audits, name)) -> reports.push(name)
+        if name.ends_with(".md") && name != "README.md" && disp_files.is_file(disp_files.join(audits, name)) {
+            reports.push(name)
+        }
     }
     problems := [String]{}
     tabled := 0

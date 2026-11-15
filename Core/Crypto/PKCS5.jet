@@ -27,27 +27,28 @@ use {
 /// The scheme is the one the caller called.
 #Error
 PBEError: enum {
-    /// An argument out of range: an iteration count or key length outside
-    /// 0..2^32 - 1 (PKCS5 BAD_INPUT_DATA, -0x2f80); a password over 128
-    /// bytes, or a derivation over 128 bytes or from a password or salt
-    /// over 64 bytes (PKCS12 BAD_INPUT_DATA, -0x1F80).
     BadInput
-    /// The PBES2-params (PKCS5 INVALID_FORMAT, -0x2f00) or the
-    /// pkcs-12PbeParams (PKCS12 PBE_INVALID_FORMAT, -0x1E80) are malformed,
-    /// with the ASN.1 failure added to the code; None when a PBES2 IV is not
-    /// an OCTET STRING of the cipher's IV length.
     InvalidFormat(asn1.ASN1Error?)
-    /// A PBES2 key derivation, PRF or cipher outside the tables
-    /// (PKCS5 FEATURE_UNAVAILABLE, -0x2e80). PKCS #12 takes its cipher and
-    /// digest typed, so it never refuses this way.
     FeatureUnavailable
-    /// Decryption failed: a wrong password (PKCS5 PASSWORD_MISMATCH,
-    /// -0x2e00; PKCS12 PASSWORD_MISMATCH, -0x1E00).
     PasswordMismatch
-    /// The cipher layer refused the key, the padding mode or the data
-    /// (MBEDTLS_ERR_CIPHER_*).
     Cipher(layer.CipherLayerError)
 }
+
+/// An argument out of range: an iteration count or key length outside
+/// 0..2^32 - 1 (PKCS5 BAD_INPUT_DATA, -0x2f80); a password over 128
+/// bytes, or a derivation over 128 bytes or from a password or salt
+/// over 64 bytes (PKCS12 BAD_INPUT_DATA, -0x1F80).
+/// The PBES2-params (PKCS5 INVALID_FORMAT, -0x2f00) or the
+/// pkcs-12PbeParams (PKCS12 PBE_INVALID_FORMAT, -0x1E80) are malformed,
+/// with the ASN.1 failure added to the code; None when a PBES2 IV is not
+/// an OCTET STRING of the cipher's IV length.
+/// A PBES2 key derivation, PRF or cipher outside the tables
+/// (PKCS5 FEATURE_UNAVAILABLE, -0x2e80). PKCS #12 takes its cipher and
+/// digest typed, so it never refuses this way.
+/// Decryption failed: a wrong password (PKCS5 PASSWORD_MISMATCH,
+/// -0x2e00; PKCS12 PASSWORD_MISMATCH, -0x1E00).
+/// The cipher layer refused the key, the padding mode or the data
+/// (MBEDTLS_ERR_CIPHER_*).
 
 impl layer.CipherLayerError -> PBEError { PBEError.Cipher(self) }
 
@@ -63,10 +64,18 @@ PBKDF2Params: struct {
 /// other OID.
 pbes2_cipher: fn(data: [U8], buf: asn1.ASN1Buf) -> layer.CipherInfo? Never! {
     if oids.is(oids.OID_DES_CBC, data, buf) -> return layer.cipher_info_from_string("DES-CBC")
-    if oids.is(oids.OID_DES_EDE3_CBC, data, buf) -> return layer.cipher_info_from_string("DES-EDE3-CBC")
-    if oids.is(oids.OID_AES_128_CBC, data, buf) -> return layer.cipher_info_from_string("AES-128-CBC")
-    if oids.is(oids.OID_AES_192_CBC, data, buf) -> return layer.cipher_info_from_string("AES-192-CBC")
-    if oids.is(oids.OID_AES_256_CBC, data, buf) -> return layer.cipher_info_from_string("AES-256-CBC")
+    if oids.is(oids.OID_DES_EDE3_CBC, data, buf) {
+        return layer.cipher_info_from_string("DES-EDE3-CBC")
+    }
+    if oids.is(oids.OID_AES_128_CBC, data, buf) {
+        return layer.cipher_info_from_string("AES-128-CBC")
+    }
+    if oids.is(oids.OID_AES_192_CBC, data, buf) {
+        return layer.cipher_info_from_string("AES-192-CBC")
+    }
+    if oids.is(oids.OID_AES_256_CBC, data, buf) {
+        return layer.cipher_info_from_string("AES-256-CBC")
+    }
     None
 }
 
@@ -75,7 +84,9 @@ pbes2_cipher: fn(data: [U8], buf: asn1.ASN1Buf) -> layer.CipherInfo? Never! {
 /// ignored, as PBES2 takes the cipher's key length; the PRF defaults to
 /// HMAC-SHA-1.
 parse_pbkdf2_params: fn(data: [U8], params: asn1.ASN1Buf) -> PBKDF2Params PBEError! {
-    if params.tag_id != asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE) -> return Err(.InvalidFormat(Val(.UnexpectedTag)))
+    if params.tag_id != asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE) {
+        return Err(.InvalidFormat(Val(.UnexpectedTag)))
+    }
     p := params.p
     end: params.p + params.len
     salt_len: asn1.get_tag(data, p, end, asn1.ASN1_OCTET_STRING) ?? return Err(.InvalidFormat(Val(err)))
@@ -100,7 +111,9 @@ parse_pbkdf2_params: fn(data: [U8], params: asn1.ASN1Buf) -> PBKDF2Params PBEErr
 /// The C function takes 32-bit unsigned counts; BadInput for any other.
 /// An iteration count of 0 runs one, as the C loop does.
 pbkdf2_hmac: fn(md: hashes.Md, password: [U8], salt: [U8], iterations: Int, key_len: Int) -> [U8] PBEError! {
-    if iterations < 0 || iterations > 0xFFFFFFFF || key_len < 0 || key_len > 0xFFFFFFFF -> return Err(.BadInput)
+    if iterations < 0 || iterations > 0xFFFFFFFF || key_len < 0 || key_len > 0xFFFFFFFF {
+        return Err(.BadInput)
+    }
     rounds := iterations
     if rounds == 0 -> rounds = 1
     Ok(hashes.pbkdf2(md, password, salt, rounds, key_len))
@@ -110,7 +123,9 @@ pbkdf2_hmac: fn(md: hashes.Md, password: [U8], salt: [U8], iterations: Int, key_
 /// `password` with the PBES2-params `params` in `data`. A cipher failure,
 /// bad padding on decryption above all, is PasswordMismatch.
 pbes2: fn(data: [U8], params: asn1.ASN1Buf, operation: layer.CipherOperation, password: [U8], input: [U8]) -> [U8] PBEError! {
-    if params.tag_id != asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE) -> return Err(.InvalidFormat(Val(.UnexpectedTag)))
+    if params.tag_id != asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE) {
+        return Err(.InvalidFormat(Val(.UnexpectedTag)))
+    }
     p := params.p
     end: params.p + params.len
     kdf: asn1.get_alg(data, p, end) ?? return Err(.InvalidFormat(Val(err)))
@@ -119,12 +134,14 @@ pbes2: fn(data: [U8], params: asn1.ASN1Buf, operation: layer.CipherOperation, pa
     kdf_params: parse_pbkdf2_params(data, kdf.params)
     enc: asn1.get_alg(data, p, end) ?? return Err(.InvalidFormat(Val(err)))
     info: pbes2_cipher(data, enc.alg) ?? return Err(.FeatureUnavailable)
-    if enc.params.tag_id != asn1.ASN1_OCTET_STRING || enc.params.len != info.iv_size -> return Err(.InvalidFormat(None))
+    if enc.params.tag_id != asn1.ASN1_OCTET_STRING || enc.params.len != info.iv_size {
+        return Err(.InvalidFormat(None))
+    }
     iv: cipher.bytes_of(data, enc.params.p, enc.params.len)
     key := pbkdf2_hmac(kdf_params.md, password, kdf_params.salt, kdf_params.iterations, info.key_bits /% 8)
     ctx := layer.cipher_setup(info)
     if layer.cipher_setkey(ctx, key, operation) == {
-        .Ok(_) -> core.crypto.wipe(key)
+        .Ok(_) -> { core.crypto.wipe(key) }
         .Err(e) -> {
             core.crypto.wipe(key)
             return Err(.Cipher(e))
@@ -157,10 +174,57 @@ pbes2: fn(data: [U8], params: asn1.ASN1Buf, operation: layer.CipherOperation, pa
     // SEQUENCE { des-ede3-cbc, IV 8 bytes } }, as test_suite_pkcs5's
     // "PBES2 Decrypt (OK)" without its outer tag.
     der: [U8]{
-        0x30, 0x1B, 0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x05, 0x0C, 0x30, 0x0E, 0x04,
-        0x08, 0x2E, 0xD7, 0xF2, 0x4A, 0x1D, 0x51, 0x6D, 0xD7, 0x02, 0x02, 0x08, 0x00, 0x30, 0x14, 0x06,
-        0x08, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x03, 0x07, 0x04, 0x08, 0x8A, 0x4F, 0xCC, 0x9D, 0xCC,
-        0x39, 0x49, 0x10,
+        0x30,
+        0x1B,
+        0x06,
+        0x09,
+        0x2A,
+        0x86,
+        0x48,
+        0x86,
+        0xF7,
+        0x0D,
+        0x01,
+        0x05,
+        0x0C,
+        0x30,
+        0x0E,
+        0x04,
+        0x08,
+        0x2E,
+        0xD7,
+        0xF2,
+        0x4A,
+        0x1D,
+        0x51,
+        0x6D,
+        0xD7,
+        0x02,
+        0x02,
+        0x08,
+        0x00,
+        0x30,
+        0x14,
+        0x06,
+        0x08,
+        0x2A,
+        0x86,
+        0x48,
+        0x86,
+        0xF7,
+        0x0D,
+        0x03,
+        0x07,
+        0x04,
+        0x08,
+        0x8A,
+        0x4F,
+        0xCC,
+        0x9D,
+        0xCC,
+        0x39,
+        0x49,
+        0x10,
     }
     params: asn1.ASN1Buf{tag_id: asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE), p: 0, len: der.len()}
     message: "seven or eight bytes".bytes()

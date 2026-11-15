@@ -16,8 +16,12 @@ kit_no_nix_helper: fn(name: String) -> String? {
 }
 
 kit_no_nix_required: fn() -> KitVerdict? {
-    if sys.name() != "linux" -> return Val(kit_expect_verdict("SKIP-HOST", "isolate: no-nix requires Linux"))
-    if kit_no_nix_helper("unshare") == None -> return Val(kit_expect_verdict("SKIP-HOST", "isolate: no-nix requires unshare"))
+    if sys.name() != "linux" {
+        return Val(kit_expect_verdict("SKIP-HOST", "isolate: no-nix requires Linux"))
+    }
+    if kit_no_nix_helper("unshare") == None {
+        return Val(kit_expect_verdict("SKIP-HOST", "isolate: no-nix requires unshare"))
+    }
     None
 }
 
@@ -128,7 +132,9 @@ kit_no_nix_launcher: fn(env: KitEnv, bootstrap: String) -> String Err! {
     build.cpu_limit = Val(600s)
     build.timeout = 6000s
     result: kit_exec_invoke(build, [env.jet, "build", files.join(directory, "no_nix.jet"), "--output-dir={output}"], directory, bootstrap, "")
-    if kit_exec_process_failure(result) == .Val(failure) -> return Err("no-nix launcher build: {failure.status} {failure.detail}")
+    if kit_exec_process_failure(result) == .Val(failure) {
+        return Err("no-nix launcher build: {failure.status} {failure.detail}")
+    }
     if result.code != 0 || !files.is_file(launcher) {
         return Err("no-nix launcher build failed (exit {result.code}): {kit_exec_first_line(result.stderr)}")
     }
@@ -145,7 +151,9 @@ kit_no_nix_argv: fn(env: KitEnv, argv: [String], scratch: String, network: Strin
     bootstrap: files.join(scratch, "no-nix-bootstrap")
     files.create_dir_all(bootstrap) ?? return Err("no-nix bootstrap mkdir: {err}")
     marker: files.join(bootstrap, "entered")
-    if files.exists(marker) -> files.remove(marker) ?? return Err("no-nix reset child marker: {err}")
+    if files.exists(marker) {
+        files.remove(marker) ?? return Err("no-nix reset child marker: {err}")
+    }
     // This directory belongs to a single sequential kit case. Mounts are only
     // in the child namespace; bootstrap files are removed with case scratch.
     images := [String]{}
@@ -180,7 +188,9 @@ kit_no_nix_argv: fn(env: KitEnv, argv: [String], scratch: String, network: Strin
 }
 
 kit_no_nix_failure: fn(step: KitStep, run: KitRun) -> KitVerdict? {
-    if step.isolate == "no-nix" && run.stderr.contains("JET_TESTKIT_NO_NIX_SETUP_FAILED") -> return Val(kit_expect_verdict("ERROR", "no-nix namespace setup: {run.stderr}"))
+    if step.isolate == "no-nix" && run.stderr.contains("JET_TESTKIT_NO_NIX_SETUP_FAILED") {
+        return Val(kit_expect_verdict("ERROR", "no-nix namespace setup: {run.stderr}"))
+    }
     None
 }
 
@@ -219,6 +229,8 @@ kit_netns_required: fn(env: KitEnv, scratch: String) -> KitVerdict? {
     _ := kit_netns_helpers() ?? return Val(kit_expect_verdict("SKIP-HOST", "host-port: {err}"))
     argv: kit_netns_argv(env, [String]{}, scratch) ?? return Val(kit_expect_verdict("ERROR", "host-port: {err}"))
     probe: process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? return Val(kit_expect_verdict("SKIP-HOST", "host-port: private network namespace probe: {err}"))
-    if probe.code != 0 -> return Val(kit_expect_verdict("SKIP-HOST", "host-port: this host refuses a private network namespace: {probe.errors.trim()}"))
+    if probe.code != 0 {
+        return Val(kit_expect_verdict("SKIP-HOST", "host-port: this host refuses a private network namespace: {probe.errors.trim()}"))
+    }
     None
 }

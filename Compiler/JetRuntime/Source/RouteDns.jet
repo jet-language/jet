@@ -29,7 +29,10 @@ dns_cause: fn(prefix: I64, code: I64) -> I64 {
     text
 }
 
-dns_cancelled: fn(name: I64, error: I64) -> I64 { dns_fail(error, dns_named(rt_static_text("network operation cancelled during DNS lookup for `"), name, rt_static_text("`"))) }
+dns_cancelled: fn(name: I64, error: I64) -> I64 {
+    dns_fail(error, dns_named(rt_static_text("network operation cancelled during DNS lookup for `"), name, rt_static_text("`")))
+}
+
 // A lookup's typed timeout, which delivers the deadline in force when that
 // deadline ended it (scheduler_deadline_reported).
 dns_timed_out: fn(name: I64, error: I64) -> I64 {
@@ -40,17 +43,17 @@ dns_timed_out: fn(name: I64, error: I64) -> I64 {
 // jet_net_dns_remaining: the remaining nanoseconds, or 0 with the cancelled
 // or timed-out message.
 dns_remaining: fn(deadline: I64, name: I64, error: I64) -> I64 {
-    if (scheduler_task_cancelled() && !scheduler_shielded()) -> return dns_cancelled(name, error)
+    if (scheduler_task_cancelled() && !scheduler_shielded()) { return dns_cancelled(name, error) }
     remaining: deadline - sync_now_ns()
-    if (remaining <= I64{0}) -> return dns_timed_out(name, error)
+    if (remaining <= I64{0}) { return dns_timed_out(name, error) }
     remaining
 }
 
 // jet_net_dns_io_slice: min(remaining, 10 ms) in poll milliseconds (>= 1).
 dns_slice_ms: fn(deadline: I64, name: I64, error: I64) -> I64 {
     remaining: dns_remaining(deadline, name, error)
-    if (remaining == I64{0}) -> return I64{0}
-    if (remaining >= I64{10000000}) -> return I64{10}
+    if (remaining == I64{0}) { return I64{0} }
+    if (remaining >= I64{10000000}) { return I64{10} }
     (remaining + I64{999999}) /% I64{1000000}
 }
 
@@ -58,18 +61,22 @@ dns_slice_ms: fn(deadline: I64, name: I64, error: I64) -> I64 {
 // overflow. Returns the deadline or 0 with the message.
 dns_deadline_after: fn(milliseconds: I64, error: I64) -> I64 {
     now: sync_now_ns()
-    if (milliseconds > (I64{9223372036854775807} - now) /% I64{1000000}) -> return dns_fail(error, jet_rt_string_clone(rt_static_text("network timeout exceeds platform range")))
+    if (milliseconds > (I64{9223372036854775807} - now) /% I64{1000000}) {
+        return dns_fail(error, jet_rt_string_clone(rt_static_text("network timeout exceeds platform range")))
+    }
     now + milliseconds * I64{1000000}
 }
 
 // jet_net_timeout(ms) bounded by the ambient task deadline (query/system).
 dns_lookup_deadline: fn(milliseconds: I64, name: I64, error: I64) -> I64 {
-    if (milliseconds < I64{0}) -> return dns_fail(error, jet_rt_string_clone(rt_static_text("network timeout must be non-negative")))
+    if (milliseconds < I64{0}) {
+        return dns_fail(error, jet_rt_string_clone(rt_static_text("network timeout must be non-negative")))
+    }
     timeout := milliseconds
     if jet_ctx_deadline_present() {
         remaining: jet_deadline_remaining_ms()
-        if (remaining <= I64{0}) -> return dns_timed_out(name, error)
-        if (remaining < timeout) -> timeout = remaining
+        if (remaining <= I64{0}) { return dns_timed_out(name, error) }
+        if (remaining < timeout) { timeout = remaining }
     }
     dns_deadline_after(timeout, error)
 }
@@ -90,19 +97,21 @@ dns_poll: fn(state: I64, events: I64, milliseconds: I64) -> I64 {
 
 dns_trim_dots_length: fn(name: I64) -> I64 {
     length := rt_text_len(name)
-    loop length > (I64{0}) && rt_text_byte(wrapping(wrapping(rt_text_data(name) + length) - I64{1})) == (I64{46}) -> length -= I64{1}
+    loop length > (I64{0}) && rt_text_byte(wrapping(wrapping(rt_text_data(name) + length) - I64{1})) == (I64{46}) {
+        length -= I64{1}
+    }
     length
 }
 
 // ASCII case-insensitive equality of two byte spans.
 dns_caseless_equal: fn(left: I64, left_length: I64, right: I64, right_length: I64) -> Bool {
-    if (left_length != right_length) -> return false
+    if (left_length != right_length) { return false }
     at := I64{0}
     loop at < left_length {
         a := rt_text_byte(wrapping(left + at))
         b := rt_text_byte(wrapping(right + at))
-        if (a >= I64{65} && a <= I64{90}) -> a += I64{32}
-        if (b >= I64{65} && b <= I64{90}) -> b += I64{32}
+        if (a >= I64{65} && a <= I64{90}) { a += I64{32} }
+        if (b >= I64{65} && b <= I64{90}) { b += I64{32} }
         if a != b -> return false
         at += I64{1}
     }
@@ -128,7 +137,7 @@ dns_encode_name: fn(out: I64, name: I64, error: I64) -> Bool {
             ascii := true
             scan := start
             loop scan < at {
-                if (rt_text_byte(wrapping(data + scan)) >= I64{128}) -> ascii = false
+                if (rt_text_byte(wrapping(data + scan)) >= I64{128}) { ascii = false }
                 scan += I64{1}
             }
             if (label == I64{0} || label > I64{63} || !ascii) {
@@ -240,7 +249,7 @@ dns_read_name: fn(packet: I64, position: I64, error: I64) -> I64 {
             failure = dns_protocol(error, rt_static_text("DNS label is not valid UTF-8")) + I64{1}
             break
         }
-        if (count > I64{0}) -> rt_text_append(labels, rt_text_data(rt_static_text(".")), I64{1})
+        if (count > I64{0}) { rt_text_append(labels, rt_text_data(rt_static_text(".")), I64{1}) }
         rt_text_append(labels, rt_text_data(packet) + p, length)
         count += I64{1}
         p = end
@@ -251,7 +260,7 @@ dns_read_name: fn(packet: I64, position: I64, error: I64) -> I64 {
         jet_rt_string_drop(labels)
         return I64{0}
     }
-    if (count == I64{0}) -> rt_text_append(labels, rt_text_data(rt_static_text(".")), I64{1})
+    if (count == I64{0}) { rt_text_append(labels, rt_text_data(rt_static_text(".")), I64{1}) }
     labels
 }
 
@@ -261,7 +270,7 @@ dns_records_drop: fn(records: I64, count: I64) {
         jet_rt_string_drop(trap_word(wrapping(records + at * DNS_RECORD_BYTES)))
         at += I64{1}
     }
-    if (count != I64{0}) -> jet_rt_free(records, count * DNS_RECORD_BYTES, I64{8})
+    if (count != I64{0}) { jet_rt_free(records, count * DNS_RECORD_BYTES, I64{8}) }
 }
 
 // jet_net_dns_parse_response: 1 with records/count, -1 when TC is set (no
@@ -270,20 +279,32 @@ dns_parse_response: fn(packet: I64, txid: I64, name: I64, qtype: I64, records_ou
     trap_store(records_out, I64{0})
     trap_store(count_out, I64{0})
     size: rt_text_len(packet)
-    if (size < I64{12}) -> return dns_protocol(error, rt_static_text("truncated DNS header"))
-    if (dns_u16(packet, I64{0}, rt_static_text("transaction ID"), error) != txid) -> return dns_protocol(error, rt_static_text("DNS transaction ID mismatch"))
+    if (size < I64{12}) { return dns_protocol(error, rt_static_text("truncated DNS header")) }
+    if (dns_u16(packet, I64{0}, rt_static_text("transaction ID"), error) != txid) {
+        return dns_protocol(error, rt_static_text("DNS transaction ID mismatch"))
+    }
     flags: dns_u16(packet, I64{2}, rt_static_text("flags"), error)
-    if (flags.bit_and(I64{32768}) == I64{0}) -> return dns_protocol(error, rt_static_text("DNS packet is not a response"))
-    if (flags.bit_and(I64{30720}) != I64{0}) -> return dns_protocol(error, rt_static_text("unsupported DNS opcode"))
-    if (flags.bit_and(I64{64}) != I64{0}) -> return dns_protocol(error, rt_static_text("reserved DNS header bit is set"))
+    if (flags.bit_and(I64{32768}) == I64{0}) {
+        return dns_protocol(error, rt_static_text("DNS packet is not a response"))
+    }
+    if (flags.bit_and(I64{30720}) != I64{0}) {
+        return dns_protocol(error, rt_static_text("unsupported DNS opcode"))
+    }
+    if (flags.bit_and(I64{64}) != I64{0}) {
+        return dns_protocol(error, rt_static_text("reserved DNS header bit is set"))
+    }
     rcode: flags.bit_and(I64{15})
-    if (rcode == I64{3}) -> return dns_fail(error, dns_named(rt_static_text("DNS name not found: `"), name, rt_static_text("`")))
+    if (rcode == I64{3}) {
+        return dns_fail(error, dns_named(rt_static_text("DNS name not found: `"), name, rt_static_text("`")))
+    }
     if (rcode != I64{0}) {
         text: dns_named(rt_static_text("DNS server failure for `"), name, rt_static_text("`: RCODE "))
         rt_text_push_number(text, rcode)
         return dns_fail(error, text)
     }
-    if (dns_u16(packet, I64{4}, rt_static_text("question count"), error) != I64{1}) -> return dns_protocol(error, rt_static_text("DNS response must echo one question"))
+    if (dns_u16(packet, I64{4}, rt_static_text("question count"), error) != I64{1}) {
+        return dns_protocol(error, rt_static_text("DNS response must echo one question"))
+    }
     total: dns_u16(packet, I64{6}, rt_static_text("answer count"), error) + dns_u16(packet, I64{8}, rt_static_text("authority count"), error) + dns_u16(packet, I64{10}, rt_static_text("additional count"), error)
     position: jet_rt_alloc(I64{8}, I64{8})
     trap_store(position, I64{12})
@@ -366,7 +387,7 @@ dns_parse_response: fn(packet: I64, txid: I64, name: I64, qtype: I64, records_ou
             jet_rt_string_drop(trap_word(wrapping(records + at * DNS_RECORD_BYTES)))
             at += I64{1}
         }
-        if (total != I64{0}) -> jet_rt_free(records, total * DNS_RECORD_BYTES, I64{8})
+        if (total != I64{0}) { jet_rt_free(records, total * DNS_RECORD_BYTES, I64{8}) }
         return I64{0}
     }
     // The buffer keeps total rows; parsed == total here.
@@ -389,14 +410,16 @@ dns_parse_socket: fn(text: I64) -> I64 {
             break
         }
     }
-    if (split == size || split + I64{1} == size || split - (I64{0}) > I64{5} + I64{39} + I64{2}) -> return I64{0}
+    if (split == size || split + I64{1} == size || split - (I64{0}) > I64{5} + I64{39} + I64{2}) {
+        return I64{0}
+    }
     port := I64{0}
     at = split + I64{1}
     loop at < size {
         byte: rt_text_byte(wrapping(data + at))
-        if (byte < I64{48} || byte > I64{57}) -> return I64{0}
+        if (byte < I64{48} || byte > I64{57}) { return I64{0} }
         port = port * I64{10} + byte - I64{48}
-        if (port > I64{65535}) -> return I64{0}
+        if (port > I64{65535}) { return I64{0} }
         at += I64{1}
     }
     bracketed: split >= I64{2} && rt_text_byte(data) == I64{91} && rt_text_byte(wrapping(wrapping(data + split) - I64{1})) == I64{93}
@@ -421,7 +444,7 @@ dns_parse_socket: fn(text: I64) -> I64 {
 // response. Returns the packet text or 0 with the message.
 dns_tcp_exchange: fn(server: I64, request: I64, deadline: I64, name: I64, error: I64) -> I64 {
     remaining: dns_remaining(deadline, name, error)
-    if (remaining == I64{0}) -> return I64{0}
+    if (remaining == I64{0}) { return I64{0} }
     scratch: jet_rt_alloc(I64{32}, I64{8})
     thread_zero(scratch, I64{32})
     shown: net_route_socket_text(server)
@@ -437,9 +460,9 @@ dns_tcp_exchange: fn(server: I64, request: I64, deadline: I64, name: I64, error:
         connected := false
         loop {
             left: deadline - sync_now_ns()
-            if (left <= I64{0}) -> break
+            if (left <= I64{0}) { break }
             ready: dns_poll(state, I64{4}, (left + I64{999999}) /% I64{1000000})
-            if (ready == I64{-4}) -> next
+            if (ready == I64{-4}) { next }
             if (ready < I64{0}) {
                 failure = dns_cause(dns_named(rt_static_text("DNS TCP connect to `"), shown, rt_static_text("` failed: ")), -ready)
                 break
@@ -483,13 +506,13 @@ dns_tcp_exchange: fn(server: I64, request: I64, deadline: I64, name: I64, error:
     result := I64{0}
     loop written < rt_text_len(framed) {
         slice: dns_slice_ms(deadline, name, error)
-        if (slice == I64{0}) -> break
+        if (slice == I64{0}) { break }
         ready: dns_poll(state, I64{4}, slice)
         if (ready <= I64{0} && ready != I64{-4} && ready != I64{0}) {
             _ := dns_fail(error, dns_cause(rt_static_text("DNS TCP query send failed: "), -ready))
             break
         }
-        if (ready <= I64{0}) -> next
+        if (ready <= I64{0}) { next }
         sent: jet_socket_write_raw(state, wrapping(rt_text_data(framed) + written), rt_text_len(framed) - written, scratch)
         if (sent == I64{0}) {
             _ := dns_protocol(error, rt_static_text("DNS TCP connection closed while sending query"))
@@ -497,7 +520,7 @@ dns_tcp_exchange: fn(server: I64, request: I64, deadline: I64, name: I64, error:
         }
         if (sent < I64{0}) {
             code: net_word(scratch, I64{8})
-            if (code == I64{11} || code == I64{4} || code == I64{110}) -> next
+            if (code == I64{11} || code == I64{4} || code == I64{110}) { next }
             _ := dns_fail(error, dns_cause(rt_static_text("DNS TCP query send failed: "), code))
             break
         }
@@ -518,13 +541,13 @@ dns_tcp_fill: fn(state: I64, target: I64, length: I64, deadline: I64, name: I64,
     have := I64{0}
     loop have < length {
         slice: dns_slice_ms(deadline, name, error)
-        if (slice == I64{0}) -> return false
+        if (slice == I64{0}) { return false }
         ready: dns_poll(state, I64{1}, slice)
         if (ready < I64{0} && ready != I64{-4}) {
             _ := dns_fail(error, dns_cause(failed, -ready))
             return false
         }
-        if (ready <= I64{0}) -> next
+        if (ready <= I64{0}) { next }
         got: jet_socket_read_raw(state, wrapping(target + have), length - have, scratch)
         if (got == I64{0}) {
             _ := dns_protocol(error, closed)
@@ -532,7 +555,7 @@ dns_tcp_fill: fn(state: I64, target: I64, length: I64, deadline: I64, name: I64,
         }
         if (got < I64{0}) {
             code: net_word(scratch, I64{8})
-            if (code == I64{11} || code == I64{4} || code == I64{110}) -> next
+            if (code == I64{11} || code == I64{4} || code == I64{110}) { next }
             _ := dns_fail(error, dns_cause(failed, code))
             return false
         }
@@ -542,9 +565,13 @@ dns_tcp_fill: fn(state: I64, target: I64, length: I64, deadline: I64, name: I64,
 }
 
 dns_tcp_read: fn(state: I64, deadline: I64, name: I64, prefix: I64, scratch: I64, error: I64) -> I64 {
-    if !dns_tcp_fill(state, prefix, I64{2}, deadline, name, scratch, rt_static_text("DNS TCP connection closed before response length"), rt_static_text("DNS TCP response length failed: "), error) -> return I64{0}
+    if !dns_tcp_fill(state, prefix, I64{2}, deadline, name, scratch, rt_static_text("DNS TCP connection closed before response length"), rt_static_text("DNS TCP response length failed: "), error) {
+        return I64{0}
+    }
     length: (rt_text_byte(prefix) << I64{8}).bit_or(rt_text_byte(wrapping(prefix + I64{1})))
-    if (length < I64{12}) -> return dns_protocol(error, rt_static_text("invalid DNS TCP response length"))
+    if (length < I64{12}) {
+        return dns_protocol(error, rt_static_text("invalid DNS TCP response length"))
+    }
     buffer: jet_rt_alloc(length, I64{8})
     if !dns_tcp_fill(state, buffer, length, deadline, name, scratch, rt_static_text("DNS TCP response is truncated"), rt_static_text("DNS TCP response truncated: "), error) {
         jet_rt_free(buffer, length, I64{8})
@@ -559,12 +586,14 @@ dns_tcp_read: fn(state: I64, deadline: I64, name: I64, prefix: I64, scratch: I64
 // Returns 1 with the packet text and its records, or 0 with the message.
 dns_query: fn(server: I64, name: I64, qtype: I64, milliseconds: I64, packet_out: I64, records_out: I64, count_out: I64, error: I64) -> I64 {
     jet_rt_world_reject_uncontrolled(I64{1})
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     deadline: dns_lookup_deadline(milliseconds, name, error)
-    if (deadline == I64{0}) -> return I64{0}
-    if (dns_remaining(deadline, name, error) == I64{0}) -> return I64{0}
+    if (deadline == I64{0}) { return I64{0} }
+    if (dns_remaining(deadline, name, error) == I64{0}) { return I64{0} }
     address: dns_parse_socket(server)
-    if (address == I64{0}) -> return dns_fail(error, dns_named(rt_static_text("invalid DNS server `"), server, rt_static_text("`: invalid socket address syntax")))
+    if (address == I64{0}) {
+        return dns_fail(error, dns_named(rt_static_text("invalid DNS server `"), server, rt_static_text("`: invalid socket address syntax")))
+    }
     scratch: jet_rt_alloc(I64{32}, I64{8})
     thread_zero(scratch, I64{32})
     bind: jet_rt_alloc(I64{56}, I64{8})
@@ -627,20 +656,20 @@ dns_query: fn(server: I64, name: I64, qtype: I64, milliseconds: I64, packet_out:
         buffer: jet_rt_alloc(I64{65536}, I64{8})
         loop {
             slice: dns_slice_ms(deadline, name, error)
-            if (slice == I64{0}) -> break
+            if (slice == I64{0}) { break }
             ready: dns_poll(state, I64{1}, slice)
             if (ready < I64{0} && ready != I64{-4}) {
                 _ := dns_fail(error, dns_cause(dns_named(rt_static_text("dns query for `"), name, rt_static_text("` failed: ")), -ready))
                 break
             }
-            if (ready <= I64{0}) -> next
+            if (ready <= I64{0}) { next }
             got: jet_socket_read_raw(state, buffer, I64{65535}, scratch)
             if (got >= I64{0}) {
                 packet = rt_text_copy(buffer, got)
                 break
             }
             code: net_word(scratch, I64{8})
-            if (code == I64{11} || code == I64{4} || code == I64{110}) -> next
+            if (code == I64{11} || code == I64{4} || code == I64{110}) { next }
             _ := dns_fail(error, dns_cause(dns_named(rt_static_text("dns query for `"), name, rt_static_text("` failed: ")), code))
             break
         }
@@ -668,7 +697,7 @@ dns_query: fn(server: I64, name: I64, qtype: I64, milliseconds: I64, packet_out:
     jet_rt_string_drop(request)
     jet_rt_free(address, I64{56}, I64{8})
     jet_rt_free(scratch, I64{32}, I64{8})
-    if (status != I64{1}) -> return I64{0}
+    if (status != I64{1}) { return I64{0} }
     trap_store(packet_out, packet)
     I64{1}
 }
@@ -680,7 +709,7 @@ dns_record_name: fn(packet: I64, record: I64, error: I64) -> I64 {
     name: dns_read_name(packet, position, error)
     end: trap_word(position)
     jet_rt_free(position, I64{8}, I64{8})
-    if (name == I64{0}) -> return I64{0}
+    if (name == I64{0}) { return I64{0} }
     if (end != trap_word(wrapping(record + I64{24})) + trap_word(wrapping(record + I64{32}))) {
         jet_rt_string_drop(name)
         return dns_protocol(error, rt_static_text("DNS name record length mismatch"))
@@ -704,7 +733,9 @@ dns_matching: fn(packet: I64, records: I64, count: I64, name: I64, qtype: I64, i
         at := I64{0}
         loop at < visits {
             prior: trap_word(wrapping(visited + at * I64{8}))
-            if dns_caseless_equal(rt_text_data(prior), rt_text_len(prior), rt_text_data(current), rt_text_len(current)) -> seen = true
+            if dns_caseless_equal(rt_text_data(prior), rt_text_len(prior), rt_text_data(current), rt_text_len(current)) {
+                seen = true
+            }
             at += I64{1}
         }
         if seen {
@@ -718,7 +749,9 @@ dns_matching: fn(packet: I64, records: I64, count: I64, name: I64, qtype: I64, i
         loop at < count {
             row: records + at * DNS_RECORD_BYTES
             owner: trap_word(row)
-            if (trap_word(wrapping(row + I64{16})) == I64{1} && trap_word(wrapping(row + I64{8})) == qtype && dns_caseless_equal(rt_text_data(owner), rt_text_len(owner), rt_text_data(current), rt_text_len(current))) -> found += I64{1}
+            if (trap_word(wrapping(row + I64{16})) == I64{1} && trap_word(wrapping(row + I64{8})) == qtype && dns_caseless_equal(rt_text_data(owner), rt_text_len(owner), rt_text_data(current), rt_text_len(current))) {
+                found += I64{1}
+            }
             at += I64{1}
         }
         if (found > I64{0}) {
@@ -744,7 +777,9 @@ dns_matching: fn(packet: I64, records: I64, count: I64, name: I64, qtype: I64, i
         loop at < count {
             row: records + at * DNS_RECORD_BYTES
             owner: trap_word(row)
-            if (alias < I64{0} && trap_word(wrapping(row + I64{16})) == I64{1} && trap_word(wrapping(row + I64{8})) == I64{5} && dns_caseless_equal(rt_text_data(owner), rt_text_len(owner), rt_text_data(current), rt_text_len(current))) -> alias = at
+            if (alias < I64{0} && trap_word(wrapping(row + I64{16})) == I64{1} && trap_word(wrapping(row + I64{8})) == I64{5} && dns_caseless_equal(rt_text_data(owner), rt_text_len(owner), rt_text_data(current), rt_text_len(current))) {
+                alias = at
+            }
             at += I64{1}
         }
         if (alias < I64{0}) {
@@ -752,13 +787,15 @@ dns_matching: fn(packet: I64, records: I64, count: I64, name: I64, qtype: I64, i
             break
         }
         target: dns_record_name(packet, wrapping(records + alias * DNS_RECORD_BYTES), error)
-        if (target == I64{0}) -> break
+        if (target == I64{0}) { break }
         jet_rt_string_drop(current)
         current = rt_text_copy(rt_text_data(target), dns_trim_dots_length(target))
         jet_rt_string_drop(target)
         hops += I64{1}
     }
-    if (hops == I64{16} && !result) -> _ := dns_protocol(error, rt_static_text("DNS CNAME chain exceeds 16 records"))
+    if (hops == I64{16} && !result) {
+        _ := dns_protocol(error, rt_static_text("DNS CNAME chain exceeds 16 records"))
+    }
     loop visits > (I64{0}) {
         visits -= I64{1}
         jet_rt_string_drop(trap_word(wrapping(visited + visits * I64{8})))
@@ -770,7 +807,14 @@ dns_matching: fn(packet: I64, records: I64, count: I64, name: I64, qtype: I64, i
 
 // Answer rows of one `*_at` lookup: found with the packet, records and
 // matching indices (caller frees), or not found with the message.
-DNSAnswer: struct { found: Bool, packet: I64, records: I64, count: I64, indices: I64, matches: I64 }
+DNSAnswer: struct {
+    found: Bool
+    packet: I64
+    records: I64
+    count: I64
+    indices: I64
+    matches: I64
+}
 
 dns_answer: fn(server: I64, name: I64, qtype: I64, milliseconds: I64, error: I64) -> DNSAnswer {
     missing: DNSAnswer{found: false, packet: I64{0}, records: I64{0}, count: I64{0}, indices: I64{0}, matches: I64{0}}
@@ -792,12 +836,14 @@ dns_answer: fn(server: I64, name: I64, qtype: I64, milliseconds: I64, error: I64
 }
 
 dns_answer_drop: fn(answer: DNSAnswer) {
-    if (answer.matches != I64{0}) -> jet_rt_free(answer.indices, answer.matches * I64{8}, I64{8})
+    if (answer.matches != I64{0}) { jet_rt_free(answer.indices, answer.matches * I64{8}, I64{8}) }
     dns_records_drop(answer.records, answer.count)
     jet_rt_string_drop(answer.packet)
 }
 
-dns_row: fn(answer: DNSAnswer, at: I64) -> I64 { answer.records + trap_word(wrapping(answer.indices + at * I64{8})) * DNS_RECORD_BYTES }
+dns_row: fn(answer: DNSAnswer, at: I64) -> I64 {
+    answer.records + trap_word(wrapping(answer.indices + at * I64{8})) * DNS_RECORD_BYTES
+}
 
 // The Result<List, Text> carrier: ok writes (data, length), error writes the
 // message into the shared payload slot.
@@ -812,7 +858,7 @@ dns_milliseconds: fn(word: I64) -> I64 { jet_int_owned_to_i64(word) }
 // A/AAAA rdata of `width` bytes as JetIpAddr handles (family 4 or 6).
 dns_ip_lookup: fn(server: I64, name: I64, milliseconds: I64, qtype: I64, width: I64, data_out: I64, length_out: I64, error: I64) -> I64 {
     native: dns_milliseconds(milliseconds)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     answer: dns_answer(server, name, qtype, native, error)
     if !answer.found -> return I64{0}
     handles: if (answer.matches == I64{0}) -> I64{0} else -> jet_rt_alloc(answer.matches * I64{8}, I64{8})
@@ -824,7 +870,7 @@ dns_ip_lookup: fn(server: I64, name: I64, milliseconds: I64, qtype: I64, width: 
                 at -= I64{1}
                 jet_rt_handle_drop_jet_ip_addr(trap_word(wrapping(handles + at * I64{8})))
             }
-            if (handles != I64{0}) -> jet_rt_free(handles, answer.matches * I64{8}, I64{8})
+            if (handles != I64{0}) { jet_rt_free(handles, answer.matches * I64{8}, I64{8}) }
             dns_answer_drop(answer)
             return if (width == I64{4}) -> dns_protocol(error, rt_static_text("DNS A record is not 4 bytes")) else -> dns_protocol(error, rt_static_text("DNS AAAA record is not 16 bytes"))
         }
@@ -843,6 +889,7 @@ dns_ip_lookup: fn(server: I64, name: I64, milliseconds: I64, qtype: I64, width: 
 #Export(c) jet_net_dns_a_at_lookup: fn(server: I64, name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 {
     dns_ip_lookup(server, name, milliseconds, I64{1}, I64{4}, data_out, length_out, error)
 }
+
 #Export(c) jet_net_dns_aaaa_at_lookup: fn(server: I64, name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 {
     dns_ip_lookup(server, name, milliseconds, I64{28}, I64{16}, data_out, length_out, error)
 }
@@ -876,9 +923,7 @@ dns_txt_at: fn(server: I64, name: I64, milliseconds: I64, data_out: I64, length_
             rt_text_append(text, start + p, part)
             p += part
         }
-        if failed {
-            jet_rt_string_drop(text)
-        } else {
+        if failed -> jet_rt_string_drop(text) else {
             trap_store(wrapping(texts + built * I64{8}), text)
             built += I64{1}
         }
@@ -890,7 +935,7 @@ dns_txt_at: fn(server: I64, name: I64, milliseconds: I64, data_out: I64, length_
             built -= I64{1}
             jet_rt_string_drop(trap_word(wrapping(texts + built * I64{8})))
         }
-        if (texts != I64{0}) -> jet_rt_free(texts, count * I64{8}, I64{8})
+        if (texts != I64{0}) { jet_rt_free(texts, count * I64{8}, I64{8}) }
         return I64{0}
     }
     dns_ok_list(data_out, length_out, texts, count)
@@ -898,7 +943,7 @@ dns_txt_at: fn(server: I64, name: I64, milliseconds: I64, data_out: I64, length_
 
 #Export(c) jet_net_dns_txt_at_lookup: fn(server: I64, name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 {
     native: dns_milliseconds(milliseconds)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     dns_txt_at(server, name, native, data_out, length_out, error)
 }
 
@@ -910,7 +955,7 @@ dns_ptr_at: fn(server: I64, name: I64, milliseconds: I64, data_out: I64, length_
     built := I64{0}
     loop built < answer.matches {
         target: dns_record_name(answer.packet, dns_row(answer, built), error)
-        if (target == I64{0}) -> break
+        if (target == I64{0}) { break }
         trap_store(wrapping(texts + built * I64{8}), target)
         built += I64{1}
     }
@@ -921,7 +966,7 @@ dns_ptr_at: fn(server: I64, name: I64, milliseconds: I64, data_out: I64, length_
             built -= I64{1}
             jet_rt_string_drop(trap_word(wrapping(texts + built * I64{8})))
         }
-        if (texts != I64{0}) -> jet_rt_free(texts, count * I64{8}, I64{8})
+        if (texts != I64{0}) { jet_rt_free(texts, count * I64{8}, I64{8}) }
         return I64{0}
     }
     dns_ok_list(data_out, length_out, texts, count)
@@ -936,19 +981,39 @@ dns_srv_new: fn(priority: I64, weight: I64, port: I64, target: I64) -> I64 {
     trap_store(wrapping(value + I64{24}), target)
     value
 }
+
 #Export(c) jet_rt_record_new_jet_dns_srv: fn(priority: I64, weight: I64, port: I64, target: I64) -> I64 {
     dns_srv_new(jet_int_owned_to_i64(priority), jet_int_owned_to_i64(weight), jet_int_owned_to_i64(port), jet_rt_string_clone(target))
 }
-#Export(c) jet_rt_record_get_jet_dns_srv_priority: fn(value: I64) -> I64 { jet_int_owned_from_i64(trap_word(value)) }
-#Export(c) jet_rt_record_get_jet_dns_srv_weight: fn(value: I64) -> I64 { jet_int_owned_from_i64(trap_word(wrapping(value + I64{8}))) }
-#Export(c) jet_rt_record_get_jet_dns_srv_port: fn(value: I64) -> I64 { jet_int_owned_from_i64(trap_word(wrapping(value + I64{16}))) }
-#Export(c) jet_rt_record_get_jet_dns_srv_target: fn(value: I64) -> I64 { jet_rt_string_clone(trap_word(wrapping(value + I64{24}))) }
-#Export(c) jet_rt_handle_clone_jet_dns_srv: fn(value: I64) -> I64 { dns_srv_new(trap_word(value), trap_word(wrapping(value + I64{8})), trap_word(wrapping(value + I64{16})), jet_rt_string_clone(trap_word(wrapping(value + I64{24})))) }
+
+#Export(c) jet_rt_record_get_jet_dns_srv_priority: fn(value: I64) -> I64 {
+    jet_int_owned_from_i64(trap_word(value))
+}
+
+#Export(c) jet_rt_record_get_jet_dns_srv_weight: fn(value: I64) -> I64 {
+    jet_int_owned_from_i64(trap_word(wrapping(value + I64{8})))
+}
+
+#Export(c) jet_rt_record_get_jet_dns_srv_port: fn(value: I64) -> I64 {
+    jet_int_owned_from_i64(trap_word(wrapping(value + I64{16})))
+}
+
+#Export(c) jet_rt_record_get_jet_dns_srv_target: fn(value: I64) -> I64 {
+    jet_rt_string_clone(trap_word(wrapping(value + I64{24})))
+}
+
+#Export(c) jet_rt_handle_clone_jet_dns_srv: fn(value: I64) -> I64 {
+    dns_srv_new(trap_word(value), trap_word(wrapping(value + I64{8})), trap_word(wrapping(value + I64{16})), jet_rt_string_clone(trap_word(wrapping(value + I64{24}))))
+}
+
 #Export(c) jet_rt_handle_drop_jet_dns_srv: fn(value: I64) {
-    if (value == I64{0}) -> return
+    if (value == I64{0}) {
+        return
+    }
     jet_rt_string_drop(trap_word(wrapping(value + I64{24})))
     jet_rt_free(value, I64{32}, I64{8})
 }
+
 // "DNSSRV(priority=, weight=, port=, target=)".
 #Export(c) jet_rt_handle_show_jet_dns_srv: fn(value: I64) -> I64 {
     text: jet_rt_string_builder_new()
@@ -984,7 +1049,7 @@ dns_srv_at: fn(server: I64, name: I64, milliseconds: I64, data_out: I64, length_
         port: (dns_u8(answer.packet, start + I64{4}) << I64{8}).bit_or(dns_u8(answer.packet, start + I64{5}))
         trap_store(position, start + I64{6})
         target: dns_read_name(answer.packet, position, error)
-        if (target == I64{0}) -> break
+        if (target == I64{0}) { break }
         if (trap_word(position) != start + length) {
             jet_rt_string_drop(target)
             _ := dns_protocol(error, rt_static_text("DNS SRV record length mismatch"))
@@ -1001,7 +1066,7 @@ dns_srv_at: fn(server: I64, name: I64, milliseconds: I64, data_out: I64, length_
             built -= I64{1}
             jet_rt_handle_drop_jet_dns_srv(trap_word(wrapping(handles + built * I64{8})))
         }
-        if (handles != I64{0}) -> jet_rt_free(handles, count * I64{8}, I64{8})
+        if (handles != I64{0}) { jet_rt_free(handles, count * I64{8}, I64{8}) }
         return I64{0}
     }
     dns_ok_list(data_out, length_out, handles, count)
@@ -1009,7 +1074,7 @@ dns_srv_at: fn(server: I64, name: I64, milliseconds: I64, data_out: I64, length_
 
 #Export(c) jet_net_dns_srv_at_lookup: fn(server: I64, name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 {
     native: dns_milliseconds(milliseconds)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     dns_srv_at(server, name, native, data_out, length_out, error)
 }
 
@@ -1025,7 +1090,7 @@ dns_system_servers: fn(servers_out: I64) -> I64 {
     text: trap_word(scratch)
     jet_rt_free(scratch, I64{8}, I64{8})
     if (status != I64{1}) {
-        if (status < I64{0}) -> jet_rt_string_drop(text)
+        if (status < I64{0}) { jet_rt_string_drop(text) }
         return I64{0}
     }
     data: rt_text_data(text)
@@ -1038,7 +1103,9 @@ dns_system_servers: fn(servers_out: I64) -> I64 {
         end := start
         loop end < size && rt_text_byte(wrapping(data + end)) != (I64{10}) -> end += I64{1}
         line_end := start
-        loop line_end < end && rt_text_byte(wrapping(data + line_end)) != (I64{35}) -> line_end += I64{1}
+        loop line_end < end && rt_text_byte(wrapping(data + line_end)) != (I64{35}) {
+            line_end += I64{1}
+        }
         // Up to two whitespace-separated fields.
         fields := I64{0}
         first_start := I64{0}
@@ -1047,10 +1114,14 @@ dns_system_servers: fn(servers_out: I64) -> I64 {
         second_end := I64{0}
         at := start
         loop at < line_end && fields < (I64{2}) {
-            loop at < line_end && dns_space_width(wrapping(data + at)) > (I64{0}) -> at += dns_space_width(wrapping(data + at))
-            if (at == line_end) -> break
+            loop at < line_end && dns_space_width(wrapping(data + at)) > (I64{0}) {
+                at += dns_space_width(wrapping(data + at))
+            }
+            if (at == line_end) { break }
             field: at
-            loop at < line_end && dns_space_width(wrapping(data + at)) == (I64{0}) -> at += rt_text_width(wrapping(data + at))
+            loop at < line_end && dns_space_width(wrapping(data + at)) == (I64{0}) {
+                at += rt_text_width(wrapping(data + at))
+            }
             if (fields == I64{0}) {
                 first_start = field
                 first_end = at
@@ -1063,8 +1134,12 @@ dns_system_servers: fn(servers_out: I64) -> I64 {
         if (fields == I64{2} && first_end - first_start == I64{10} && rt_text_equal_bytes(wrapping(data + first_start), rt_text_data(rt_static_text("nameserver")), I64{10})) {
             host_start := second_start
             host_end := second_end
-            loop host_start < host_end && (rt_text_byte(wrapping(data + host_start)) == I64{91} || rt_text_byte(wrapping(data + host_start)) == I64{93}) -> host_start += I64{1}
-            loop host_end > host_start && (rt_text_byte(wrapping(wrapping(data + host_end) - I64{1})) == I64{91} || rt_text_byte(wrapping(wrapping(data + host_end) - I64{1})) == I64{93}) -> host_end -= I64{1}
+            loop host_start < host_end && (rt_text_byte(wrapping(data + host_start)) == I64{91} || rt_text_byte(wrapping(data + host_start)) == I64{93}) {
+                host_start += I64{1}
+            }
+            loop host_end > host_start && (rt_text_byte(wrapping(wrapping(data + host_end) - I64{1})) == I64{91} || rt_text_byte(wrapping(wrapping(data + host_end) - I64{1})) == I64{93}) {
+                host_end -= I64{1}
+            }
             host: rt_text_copy(wrapping(data + host_start), host_end - host_start)
             shown: dns_server_text(host)
             jet_rt_string_drop(host)
@@ -1074,7 +1149,7 @@ dns_system_servers: fn(servers_out: I64) -> I64 {
                     coll_copy(servers, grown, capacity * I64{8})
                     jet_rt_free(servers, capacity * I64{8}, I64{8})
                     servers = grown
-                    capacity = capacity * I64{2}
+                    capacity *= I64{2}
                 }
                 trap_store(wrapping(servers + count * I64{8}), shown)
                 count += I64{1}
@@ -1125,9 +1200,7 @@ dns_server_text: fn(host: I64) -> I64 {
     address: jet_rt_alloc(I64{56}, I64{8})
     thread_zero(address, I64{56})
     family := I64{0}
-    if (net_i32(net_route_inet_pton(I64{2}, name, address + I64{8})) == I64{1}) {
-        family = I64{4}
-    } else if (net_i32(net_route_inet_pton(I64{10}, name, address + I64{8})) == I64{1}) {
+    if (net_i32(net_route_inet_pton(I64{2}, name, address + I64{8})) == I64{1}) { family = I64{4} } else if (net_i32(net_route_inet_pton(I64{10}, name, address + I64{8})) == I64{1}) {
         family = I64{6}
     }
     fd_c_path_drop(name, host)
@@ -1155,19 +1228,25 @@ dns_servers_drop: fn(servers: I64, count: I64, capacity: I64) {
 // otherwise the last server's error. `kind` 0 TXT, 1 PTR, 2 SRV.
 dns_system_lookup_kind: fn(name: I64, milliseconds: I64, kind: I64, data_out: I64, length_out: I64, error: I64) -> I64 {
     native: dns_milliseconds(milliseconds)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
-    if (native < I64{0}) -> return dns_fail(error, jet_rt_string_clone(rt_static_text("network timeout must be non-negative")))
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
+    if (native < I64{0}) {
+        return dns_fail(error, jet_rt_string_clone(rt_static_text("network timeout must be non-negative")))
+    }
     deadline: dns_deadline_after(native, error)
-    if (deadline == I64{0}) -> return I64{0}
+    if (deadline == I64{0}) { return I64{0} }
     list: jet_rt_alloc(I64{16}, I64{8})
     count: dns_system_servers(list)
     if (jet_scheduler_native_propagate() != I64{0}) {
-        if (trap_word(list) != I64{0}) -> dns_servers_drop(trap_word(list), count, trap_word(wrapping(list + I64{8})))
+        if (trap_word(list) != I64{0}) {
+            dns_servers_drop(trap_word(list), count, trap_word(wrapping(list + I64{8})))
+        }
         jet_rt_free(list, I64{16}, I64{8})
         return I64{0}
     }
     if (count == I64{0}) {
-        if (trap_word(list) != I64{0}) -> jet_rt_free(trap_word(list), trap_word(wrapping(list + I64{8})) * I64{8}, I64{8})
+        if (trap_word(list) != I64{0}) {
+            jet_rt_free(trap_word(list), trap_word(wrapping(list + I64{8})) * I64{8}, I64{8})
+        }
         jet_rt_free(list, I64{16}, I64{8})
         message: if (kind == I64{0}) -> rt_static_text("host DNS configuration has no resolver for TXT lookup") else if (kind == I64{1}) -> rt_static_text("host DNS configuration has no resolver for PTR lookup") else -> rt_static_text("host DNS configuration has no resolver for SRV lookup")
         return dns_fail(error, jet_rt_string_clone(message))
@@ -1205,24 +1284,34 @@ dns_system_lookup_kind: fn(name: I64, milliseconds: I64, kind: I64, data_out: I6
     dns_fail(error, last)
 }
 
-#Export(c) jet_net_dns_txt_lookup: fn(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 { dns_system_lookup_kind(name, milliseconds, I64{0}, data_out, length_out, error) }
-#Export(c) jet_net_dns_ptr_lookup: fn(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 { dns_system_lookup_kind(name, milliseconds, I64{1}, data_out, length_out, error) }
-#Export(c) jet_net_dns_srv_lookup: fn(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 { dns_system_lookup_kind(name, milliseconds, I64{2}, data_out, length_out, error) }
+#Export(c) jet_net_dns_txt_lookup: fn(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 {
+    dns_system_lookup_kind(name, milliseconds, I64{0}, data_out, length_out, error)
+}
+
+#Export(c) jet_net_dns_ptr_lookup: fn(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 {
+    dns_system_lookup_kind(name, milliseconds, I64{1}, data_out, length_out, error)
+}
+
+#Export(c) jet_net_dns_srv_lookup: fn(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 {
+    dns_system_lookup_kind(name, milliseconds, I64{2}, data_out, length_out, error)
+}
 
 // jet_net_dns_system_lookup: the platform resolver (HostNetLookup.jet) for
 // (name, 0) on this task, its waits shielded and bounded by this lookup's
 // deadline. An IP literal resolves to itself.
 dns_system_addresses: fn(name: I64, milliseconds: I64, rows_out: I64, count_out: I64, error: I64) -> I64 {
     jet_rt_world_reject_uncontrolled(I64{1})
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     deadline: dns_lookup_deadline(milliseconds, name, error)
-    if (deadline == I64{0}) -> return I64{0}
-    if (!testing_has_nul(name) && rt_text_find(name, rt_static_text("%"), I64{0}, false) < I64{0} && net_route_numeric(name, I64{0}, rows_out, count_out)) -> return I64{1}
+    if (deadline == I64{0}) { return I64{0} }
+    if (!testing_has_nul(name) && rt_text_find(name, rt_static_text("%"), I64{0}, false) < I64{0} && net_route_numeric(name, I64{0}, rows_out, count_out)) {
+        return I64{1}
+    }
     length: rt_text_len(name)
     if testing_has_nul(name) {
         return dns_fail(error, dns_named(rt_static_text("DNS lookup for `"), name, rt_static_text("` failed: string contained an unexpected NUL byte")))
     }
-    if (dns_remaining(deadline, name, error) == I64{0}) -> return I64{0}
+    if (dns_remaining(deadline, name, error) == I64{0}) { return I64{0} }
     host: jet_rt_alloc(length + I64{1}, I64{1})
     rt_text_bytes_copy(host, rt_text_data(name), length)
     rt_text_put(wrapping(host + length), I64{0})
@@ -1232,13 +1321,13 @@ dns_system_addresses: fn(name: I64, milliseconds: I64, rows_out: I64, count_out:
     jet_rt_free(errno, I64{8}, I64{8})
     jet_rt_free(host, length + I64{1}, I64{1})
     if (status == I64{1}) {
-        if (dns_remaining(deadline, name, error) != I64{0}) -> return I64{1}
+        if (dns_remaining(deadline, name, error) != I64{0}) { return I64{1} }
         jet_rt_free(net_word(rows_out, I64{0}), net_word(count_out, I64{0}) * I64{56}, I64{8})
         return I64{0}
     }
-    if (status == LK_STOP) -> return I64{0}
-    if (status == LK_CANCEL) -> return dns_cancelled(name, error)
-    if (status == LK_TIMEOUT) -> return dns_timed_out(name, error)
+    if (status == LK_STOP) { return I64{0} }
+    if (status == LK_CANCEL) { return dns_cancelled(name, error) }
+    if (status == LK_TIMEOUT) { return dns_timed_out(name, error) }
     failure: net_gai_error(status, code)
     _ := dns_fail(error, dns_named(rt_static_text("DNS lookup for `"), name, rt_static_text("` failed: ")))
     jet_rt_string_builder_push(trap_word(error), net_word(failure, I64{24}))
@@ -1250,7 +1339,7 @@ dns_system_addresses: fn(name: I64, milliseconds: I64, rows_out: I64, count_out:
 // duplicates removed.
 dns_system_ip: fn(name: I64, milliseconds: I64, family: I64, data_out: I64, length_out: I64, error: I64) -> I64 {
     native: dns_milliseconds(milliseconds)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     scratch: jet_rt_alloc(I64{16}, I64{8})
     thread_zero(scratch, I64{16})
     if (dns_system_addresses(name, native, scratch, wrapping(scratch + I64{8}), error) == I64{0}) {
@@ -1297,7 +1386,7 @@ dns_system_ip: fn(name: I64, milliseconds: I64, family: I64, data_out: I64, leng
         }
         at += I64{1}
     }
-    if (count != I64{0}) -> jet_rt_free(rows, count * I64{56}, I64{8})
+    if (count != I64{0}) { jet_rt_free(rows, count * I64{56}, I64{8}) }
     if (kept == I64{0} && handles != I64{0}) {
         jet_rt_free(handles, count * I64{8}, I64{8})
         handles = I64{0}
@@ -1311,8 +1400,13 @@ dns_system_ip: fn(name: I64, milliseconds: I64, family: I64, data_out: I64, leng
     dns_ok_list(data_out, length_out, handles, kept)
 }
 
-#Export(c) jet_net_dns_a_lookup: fn(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 { dns_system_ip(name, milliseconds, I64{4}, data_out, length_out, error) }
-#Export(c) jet_net_dns_aaaa_lookup: fn(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 { dns_system_ip(name, milliseconds, I64{6}, data_out, length_out, error) }
+#Export(c) jet_net_dns_a_lookup: fn(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 {
+    dns_system_ip(name, milliseconds, I64{4}, data_out, length_out, error)
+}
+
+#Export(c) jet_net_dns_aaaa_lookup: fn(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 {
+    dns_system_ip(name, milliseconds, I64{6}, data_out, length_out, error)
+}
 
 // jet_net_dns_result: a lookup's String failure as the canonical NetError,
 // classified by the message as the reference does.
@@ -1320,7 +1414,9 @@ dns_text_starts_with: fn(text: I64, prefix: I64) -> Bool {
     rt_text_len(text) >= rt_text_len(prefix) && rt_text_equal_bytes(rt_text_data(text), rt_text_data(prefix), rt_text_len(prefix))
 }
 
-dns_text_contains: fn(text: I64, needle: I64) -> Bool { rt_text_find(text, needle, I64{0}, false) >= I64{0} }
+dns_text_contains: fn(text: I64, needle: I64) -> Bool {
+    rt_text_find(text, needle, I64{0}, false) >= I64{0}
+}
 
 // detail("dns", None, Some(name), message, None); takes `message`.
 dns_net_detail_take: fn(name: I64, message: I64) -> I64 {
@@ -1337,8 +1433,8 @@ dns_net_detail_take: fn(name: I64, message: I64) -> I64 {
 // `status` is a *_lookup result whose failure text is in `error`; a scheduler
 // stop wrote none and stays a propagated stop.
 dns_net_result: fn(status: I64, name: I64, error: I64) -> I64 {
-    if (status == I64{1}) -> return I64{1}
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (status == I64{1}) { return I64{1} }
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     message: trap_word(error)
     if dns_text_starts_with(message, rt_static_text("DNS name not found")) {
         jet_rt_string_drop(message)
@@ -1364,12 +1460,31 @@ dns_net_result: fn(status: I64, name: I64, error: I64) -> I64 {
 }
 
 // The NetError forms of the system TXT/PTR/SRV lookups.
-#Export(c) jet_net_dns_txt: fn(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 { dns_net_result(jet_net_dns_txt_lookup(name, milliseconds, data_out, length_out, error), name, error) }
-#Export(c) jet_net_dns_ptr: fn(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 { dns_net_result(jet_net_dns_ptr_lookup(name, milliseconds, data_out, length_out, error), name, error) }
-#Export(c) jet_net_dns_srv: fn(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 { dns_net_result(jet_net_dns_srv_lookup(name, milliseconds, data_out, length_out, error), name, error) }
+#Export(c) jet_net_dns_txt: fn(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 {
+    dns_net_result(jet_net_dns_txt_lookup(name, milliseconds, data_out, length_out, error), name, error)
+}
+
+#Export(c) jet_net_dns_ptr: fn(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 {
+    dns_net_result(jet_net_dns_ptr_lookup(name, milliseconds, data_out, length_out, error), name, error)
+}
+
+#Export(c) jet_net_dns_srv: fn(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 {
+    dns_net_result(jet_net_dns_srv_lookup(name, milliseconds, data_out, length_out, error), name, error)
+}
 
 // SRV field reads.
-#Export(c) jet_net_dns_srv_priority: fn(value: I64) -> I64 { jet_int_owned_from_i64(trap_word(value)) }
-#Export(c) jet_net_dns_srv_weight: fn(value: I64) -> I64 { jet_int_owned_from_i64(trap_word(wrapping(value + I64{8}))) }
-#Export(c) jet_net_dns_srv_port: fn(value: I64) -> I64 { jet_int_owned_from_i64(trap_word(wrapping(value + I64{16}))) }
-#Export(c) jet_net_dns_srv_target: fn(value: I64) -> I64 { jet_rt_string_clone(trap_word(wrapping(value + I64{24}))) }
+#Export(c) jet_net_dns_srv_priority: fn(value: I64) -> I64 {
+    jet_int_owned_from_i64(trap_word(value))
+}
+
+#Export(c) jet_net_dns_srv_weight: fn(value: I64) -> I64 {
+    jet_int_owned_from_i64(trap_word(wrapping(value + I64{8})))
+}
+
+#Export(c) jet_net_dns_srv_port: fn(value: I64) -> I64 {
+    jet_int_owned_from_i64(trap_word(wrapping(value + I64{16})))
+}
+
+#Export(c) jet_net_dns_srv_target: fn(value: I64) -> I64 {
+    jet_rt_string_clone(trap_word(wrapping(value + I64{24})))
+}

@@ -14,6 +14,7 @@ rt_poly_init: fn(key: I64, state: I64) {
     rt_text_store(wrapping(state + I64{32}), (t3 >> I64{8}).bit_and(I64{0xfffff}))
     rt_text_bytes_copy(wrapping(state + I64{80}), wrapping(key + I64{16}), I64{16})
 }
+
 // Public length 1..16. padded=true means pad to16 before appending the 1 bit.
 rt_poly_block: fn(input: I64, length: I64, padded: Bool, state: I64) {
     block: wrapping(state + I64{96})
@@ -34,16 +35,16 @@ rt_poly_block: fn(input: I64, length: I64, padded: Bool, state: I64) {
     products: wrapping(state + I64{120})
     i := I64{0}
     loop {
-        if (i >= I64{5}) -> break
+        if (i >= I64{5}) { break }
         rt_text_store(wrapping(products + i * I64{8}), I64{0})
         i += I64{1}
     }
     i = I64{0}
     loop {
-        if (i >= I64{5}) -> break
+        if (i >= I64{5}) { break }
         j := I64{0}
         loop {
-            if (j >= I64{5}) -> break
+            if (j >= I64{5}) { break }
             sum: i + j
             factor: if (sum >= I64{5}) -> I64{5} else -> I64{1}
             at: wrapping(products + (sum % I64{5}) * I64{8})
@@ -55,7 +56,7 @@ rt_poly_block: fn(input: I64, length: I64, padded: Bool, state: I64) {
     carry := I64{0}
     i = I64{0}
     loop {
-        if (i >= I64{5}) -> break
+        if (i >= I64{5}) { break }
         value: rt_text_word(wrapping(products + i * I64{8})) + carry
         rt_text_store(wrapping(h + i * I64{8}), value.bit_and(I64{0x3ffffff}))
         carry = value >> I64{26}
@@ -65,21 +66,23 @@ rt_poly_block: fn(input: I64, length: I64, padded: Bool, state: I64) {
     rt_text_store(h, first.bit_and(I64{0x3ffffff}))
     rt_text_store(wrapping(h + I64{8}), rt_text_word(wrapping(h + I64{8})) + (first >> I64{26}))
 }
+
 rt_poly_update: fn(input: I64, length: I64, padded: Bool, state: I64) {
     at := I64{0}
     loop at < length {
         count := I64{16}
-        if (length - at < count) -> count = length - at
+        if (length - at < count) { count = length - at }
         rt_poly_block(wrapping(input + at), count, padded, state)
         at += count
     }
 }
+
 rt_poly_finish: fn(state: I64, output: I64) {
     h: wrapping(state + I64{40})
     carry := I64{0}
     i := I64{1}
     loop {
-        if (i >= I64{5}) -> break
+        if (i >= I64{5}) { break }
         value: rt_text_word(wrapping(h + i * I64{8})) + carry
         rt_text_store(wrapping(h + i * I64{8}), value.bit_and(I64{0x3ffffff}))
         carry = value >> I64{26}
@@ -92,7 +95,7 @@ rt_poly_finish: fn(state: I64, output: I64) {
     carry = I64{5}
     i = I64{0}
     loop {
-        if (i >= I64{5}) -> break
+        if (i >= I64{5}) { break }
         value: rt_text_word(wrapping(h + i * I64{8})) + carry
         rt_text_store(wrapping(g + i * I64{8}), value.bit_and(I64{0x3ffffff}))
         carry = value >> I64{26}
@@ -102,7 +105,7 @@ rt_poly_finish: fn(state: I64, output: I64) {
     mask: I64{0} - carry
     i = I64{0}
     loop {
-        if (i >= I64{5}) -> break
+        if (i >= I64{5}) { break }
         rt_text_store(wrapping(h + i * I64{8}), (rt_text_word(wrapping(g + i * I64{8})).bit_and(mask)).bit_or((rt_text_word(wrapping(h + i * I64{8})).bit_and((mask.bit_xor(I64{-1}))))))
         i += I64{1}
     }
@@ -124,12 +127,14 @@ rt_poly_finish: fn(state: I64, output: I64) {
     rt_crypto_put32(wrapping(output + I64{8}), v2)
     rt_crypto_put32(wrapping(output + I64{12}), v3)
 }
+
 rt_crypto_poly1305: fn(key: I64, input: I64, length: I64, output: I64, scratch: I64) {
     rt_poly_init(key, scratch)
     rt_poly_update(input, length, false, scratch)
     rt_poly_finish(scratch, output)
     rt_crypto_wipe(scratch, I64{160})
 }
+
 rt_crypto_equal: fn(a: I64, b: I64, length: I64) -> Bool {
     diff := I64{0}
     i := I64{0}
@@ -139,6 +144,7 @@ rt_crypto_equal: fn(a: I64, b: I64, length: I64) -> Bool {
     }
     diff == I64{0}
 }
+
 // Public lengths may differ; byte values never select a branch or early exit.
 // The same fixed-span engine authenticates AEAD tags, age MACs and Core bytes.
 rt_crypto_equal_spans: fn(a: I64, a_length: I64, b: I64, b_length: I64) -> Bool {
@@ -146,6 +152,6 @@ rt_crypto_equal_spans: fn(a: I64, a_length: I64, b: I64, b_length: I64) -> Bool 
         jet_rt_unreachable(I64{0}, I64{0})
         return false
     }
-    if (a_length != b_length) -> return false
+    if (a_length != b_length) { return false }
     return rt_crypto_equal(a, b, a_length)
 }

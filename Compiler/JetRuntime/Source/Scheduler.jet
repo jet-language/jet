@@ -15,10 +15,15 @@
 
 // #4890: role facts belong to the real current control, never Rust TLS.
 SCHEDULER_SCOPE_ROOT: I64{1}
+
 SCHEDULER_SCOPE_TASK: I64{2}
+
 SCHEDULER_SCOPE_CLEANUP: I64{4}
+
 SCHEDULER_SCOPE_INHERITED_STOP: I64{8}
+
 SCHEDULER_SCOPE_TASK_CLEANUP_ORIGIN: I64{16}
+
 SCHEDULER_SCOPE_MASK_KIND: I64{1792}
 
 // Nonzero while any task's stop poll may have something to deliver that no
@@ -61,12 +66,14 @@ scheduler_checks_arm_turns: fn() {
 // monitor word orders the cleared word before the held flag's read, so an
 // arm racing the clear has either been seen here or stores its 1 after it.
 scheduler_checks_settle: fn(root: I64) {
-    if (scheduler_checks_held != I64{0} || scheduler_checks_armed == I64{0}) -> return
+    if (scheduler_checks_held != I64{0} || scheduler_checks_armed == I64{0}) {
+        return
+    }
     #Unsafe("the monitor is the only thread that clears the flag; an arm it races restores it") {
         scheduler_checks_armed = I64{0}
     }
     _ := sync_add(wrapping(root + I64{216}), I64{0})
-    if (scheduler_checks_held != I64{0}) -> scheduler_checks_arm()
+    if (scheduler_checks_held != I64{0}) { scheduler_checks_arm() }
 }
 
 // A control's attention word (+24): what its stop polls take beyond a
@@ -74,7 +81,9 @@ scheduler_checks_settle: fn(root: I64) {
 // there; a cancel and a passed deadline are delivered there, so a busy loop
 // stops at its next turn.
 SCHEDULER_ATTEND_PAUSE: I64{1}
+
 SCHEDULER_ATTEND_CANCEL: I64{2}
+
 SCHEDULER_ATTEND_DEADLINE: I64{4}
 
 // A fiber's turn word, in its TCB: the monitor sets it once the fiber has run
@@ -89,12 +98,16 @@ SCHEDULER_TCB_TURN: I64{448}
 // it again. The word is cleared first, so one request yields once.
 scheduler_turn_give: fn() {
     base: thread_base()
-    if (base == I64{0}) -> return
+    if (base == I64{0}) {
+        return
+    }
     turn: wrapping(base + SCHEDULER_TCB_TURN)
-    if (sync_load(turn) == I64{0}) -> return
+    if (sync_load(turn) == I64{0}) {
+        return
+    }
     sync_store(turn, I64{0})
     fiber: sync_load(wrapping(base + I64{56}))
-    if (fiber != I64{0}) -> fiber_yield(fiber)
+    if (fiber != I64{0}) { fiber_yield(fiber) }
 }
 
 // Raises (on) or clears the attention bits of a control. Raising arms the
@@ -103,13 +116,17 @@ scheduler_turn_give: fn() {
 scheduler_attention_set: fn(control: I64, bits: I64, on: Bool) {
     address: wrapping(control + I64{24})
     if on {
-        if (sync_load(address).bit_and(bits) == bits) -> return
+        if (sync_load(address).bit_and(bits) == bits) {
+            return
+        }
         scheduler_checks_arm()
     }
     loop {
         old: sync_load(address)
         new: if on -> old.bit_or(bits) else -> old.bit_and(bits.bit_xor(I64{-1}))
-        if (old == new) || (sync_cas(address, old, new) == old) -> return
+        if (old == new) || (sync_cas(address, old, new) == old) {
+            return
+        }
     }
 }
 
@@ -117,7 +134,7 @@ scheduler_attention_set: fn(control: I64, bits: I64, on: Bool) {
 // read the clock from now on, so a busy loop stops once the deadline passes.
 scheduler_deadline_attend: fn() {
     control: scheduler_control_current()
-    if (control != I64{0}) -> scheduler_attention_set(control, SCHEDULER_ATTEND_DEADLINE, true)
+    if (control != I64{0}) { scheduler_attention_set(control, SCHEDULER_ATTEND_DEADLINE, true) }
 }
 
 // A wait that returns its typed timeout (`DeadlineBlown`) has delivered the
@@ -128,7 +145,9 @@ scheduler_deadline_attend: fn() {
 // shorter limit delivers nothing.
 scheduler_deadline_reported: fn() {
     control: scheduler_control_current()
-    if (control == I64{0}) || !jet_ctx_deadline_present() || (jet_deadline_remaining_ms() > I64{10}) -> return
+    if (control == I64{0}) || !jet_ctx_deadline_present() || (jet_deadline_remaining_ms() > I64{10}) {
+        return
+    }
     scheduler_attention_set(control, SCHEDULER_ATTEND_DEADLINE, false)
 }
 
@@ -136,8 +155,8 @@ scheduler_deadline_reported: fn() {
 scheduler_text_new: fn(length: I64) -> I64 {
     capacity: (length + I64{7}).bit_and(I64{-8})
     text: rt_text_with_length(length, capacity)
-    if (text == I64{0}) -> return I64{0}
-    if (capacity != I64{0}) -> coll_zero(sync_load(text), capacity)
+    if (text == I64{0}) { return I64{0} }
+    if (capacity != I64{0}) { coll_zero(sync_load(text), capacity) }
     text
 }
 
@@ -151,7 +170,7 @@ scheduler_text_concat: fn(left: I64, right: I64) -> I64 {
         return I64{0}
     }
     result: scheduler_text_new(a + b)
-    if (result == I64{0} && jet_rt_session_propagate() != I64{0}) -> return I64{0}
+    if (result == I64{0} && jet_rt_session_propagate() != I64{0}) { return I64{0} }
     coll_copy(sync_load(left), sync_load(result), a)
     coll_copy(sync_load(right), wrapping(sync_load(result) + a), b)
     result
@@ -166,7 +185,9 @@ scheduler_words_push: fn(header: I64, word: I64) {
 
 scheduler_words_drop: fn(header: I64) {
     capacity: sync_load(wrapping(header + I64{8}))
-    if (capacity != I64{0}) -> jet_rt_free(sync_load(wrapping(header + I64{16})), capacity * I64{8}, I64{8})
+    if (capacity != I64{0}) {
+        jet_rt_free(sync_load(wrapping(header + I64{16})), capacity * I64{8}, I64{8})
+    }
     jet_rt_free(header, I64{24}, I64{8})
 }
 
@@ -203,19 +224,13 @@ scheduler_control_new: fn() -> I64 {
         if !scheduler_stop_fatal() -> scheduler_root_capture_begin()
     } else if (op == TRAP_ROOT_EXIT) {
         text: scheduler_root_capture_take(scheduler_control_current())
-        if (text == I64{0}) -> return I64{0}
+        if (text == I64{0}) { return I64{0} }
         _ := scheduler_root_publish_owned(text, a)
-    } else if (op == TRAP_ROOT_DROP) {
-        jet_rt_string_drop(scheduler_root_capture_take(a))
-    } else if (op == TRAP_ROOT_WRITE) {
+    } else if (op == TRAP_ROOT_DROP) { jet_rt_string_drop(scheduler_root_capture_take(a)) } else if (op == TRAP_ROOT_WRITE) {
         rt_text_append(a, b, c)
-    } else if (op == TRAP_ROOT_WRITE_WORD) {
-        rt_text_append_raw_word(a, b, c)
-    } else if (op == TRAP_ROOT_SITE_BEGIN) {
+    } else if (op == TRAP_ROOT_WRITE_WORD) { rt_text_append_raw_word(a, b, c) } else if (op == TRAP_ROOT_SITE_BEGIN) {
         return trap_task_site_open()
-    } else if (op == TRAP_ROOT_SITE_END) {
-        trap_task_site_publish(a, b)
-    } else {
+    } else if (op == TRAP_ROOT_SITE_END) { trap_task_site_publish(a, b) } else {
         trap_joined_site_write(a, b)
     }
     I64{1}
@@ -227,11 +242,13 @@ rt_trap_root_address: fn() -> I64 {
 }
 
 scheduler_control_retain: fn(control: I64) {
-    if (control != I64{0}) -> _ := sync_add(control, I64{1})
+    if (control != I64{0}) { _ := sync_add(control, I64{1}) }
 }
 
 scheduler_stop_drop: fn(record: I64) {
-    if (record == I64{0}) -> return
+    if (record == I64{0}) {
+        return
+    }
     jet_rt_string_drop(sync_load(wrapping(record + I64{40})))
     jet_rt_string_drop(sync_load(wrapping(record + I64{56})))
     jet_rt_free(record, I64{64}, I64{8})
@@ -242,14 +259,20 @@ scheduler_stop_take_message: fn(record: I64) -> I64 {
 }
 
 scheduler_control_drop: fn(control: I64) {
-    if (control == I64{0}) -> return
-    if (sync_add(control, I64{-1}) != I64{1}) -> return
+    if (control == I64{0}) {
+        return
+    }
+    if (sync_add(control, I64{-1}) != I64{1}) {
+        return
+    }
     scheduler_stop_drop(sync_load(wrapping(control + I64{40})))
     jet_rt_string_drop(scheduler_root_capture_take(control))
     sync_park_drop(sync_load(wrapping(control + I64{64})))
     // Scoped waiter/callback guards retain the control and unregister first;
     // an open group retains its opener until it closes.
-    if (sync_load(wrapping(control + I64{80})) != I64{0} || sync_load(wrapping(control + I64{88})) != I64{0} || sync_load(wrapping(control + I64{128})) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+    if (sync_load(wrapping(control + I64{80})) != I64{0} || sync_load(wrapping(control + I64{88})) != I64{0} || sync_load(wrapping(control + I64{128})) != I64{0}) {
+        jet_rt_unreachable(I64{0}, I64{0})
+    }
     jet_rt_string_drop(sync_load(wrapping(control + I64{136})))
     jet_rt_string_drop(sync_load(wrapping(control + I64{144})))
     jet_rt_string_drop(sync_load(wrapping(control + I64{152})))
@@ -275,13 +298,13 @@ scheduler_joined_store: fn(control: I64, reason: I64, site: I64) {
 // The joined failure's site, taken, when `message` (of `length` bytes) is
 // that failure's reason; 0 otherwise, and the joined pair stays.
 scheduler_joined_site_take: fn(control: I64, message: I64, length: I64) -> I64 {
-    if (control == I64{0}) -> return I64{0}
+    if (control == I64{0}) { return I64{0} }
     reason: sync_load(wrapping(control + I64{136}))
-    if (reason == I64{0} || rt_text_len(reason) != length) -> return I64{0}
+    if (reason == I64{0} || rt_text_len(reason) != length) { return I64{0} }
     data: rt_text_data(reason)
     at := I64{0}
     loop at < length {
-        if (trap_byte(wrapping(data + at)) != trap_byte(wrapping(message + at))) -> return I64{0}
+        if (trap_byte(wrapping(data + at)) != trap_byte(wrapping(message + at))) { return I64{0} }
         at += I64{1}
     }
     jet_rt_string_drop(sync_swap(wrapping(control + I64{136}), I64{0}))
@@ -299,18 +322,21 @@ scheduler_report_base: fn() -> I64 {
     #Unsafe("the cold OS leaf borrows its initialized stack word; a successful nonzero base is this attached thread's live Jet TCB or the detached zero word") {
         base = os_tls_base_probe_i64()
     }
-    if (base < I64{0}) -> trap_gs_failure()
+    if (base < I64{0}) { trap_gs_failure() }
     if (base == thread_detached_base()) -> I64{0} else -> base
 }
+
 scheduler_report_control_current: fn() -> I64 {
     base: scheduler_report_base()
-    if (base == I64{0}) -> return I64{0}
+    if (base == I64{0}) { return I64{0} }
     sync_load(wrapping(base + I64{16}))
 }
+
 scheduler_report_domain: fn() -> I64 {
-    if (scheduler_report_base() == I64{0}) -> return I64{0}
+    if (scheduler_report_base() == I64{0}) { return I64{0} }
     jet_rt_stop_domain()
 }
+
 scheduler_control_status: fn(control: I64) -> I64 {
     if (control == I64{0}) -> I64{0} else -> sync_load(wrapping(control + I64{32}))
 }
@@ -342,17 +368,17 @@ scheduler_control_leave: fn(save: I64) {
 #Export(c) jet_rt_root_begin: fn(save: I64) -> I64 {
     parent: scheduler_control_current()
     parent_flags: scheduler_scope_flags(parent)
-    inherited: (parent_flags.bit_and(SCHEDULER_SCOPE_INHERITED_STOP)) != I64{0} ||
-        ((parent_flags.bit_and(SCHEDULER_SCOPE_CLEANUP)) != I64{0} && scheduler_scope_delivered_kind(parent_flags) != I64{0})
+    inherited: (parent_flags.bit_and(SCHEDULER_SCOPE_INHERITED_STOP)) != I64{0} || ((parent_flags.bit_and(SCHEDULER_SCOPE_CLEANUP)) != I64{0} && scheduler_scope_delivered_kind(parent_flags) != I64{0})
     control: scheduler_control_new()
     sync_store(wrapping(control + I64{104}), SCHEDULER_SCOPE_ROOT.bit_or((if inherited -> SCHEDULER_SCOPE_INHERITED_STOP else -> I64{0})))
     // jet_scheduler_with_root_control: an entry with no current control runs
     // under the process root task control.
-    if (parent == I64{0}) -> scheduler_process_root_install(control)
+    if (parent == I64{0}) { scheduler_process_root_install(control) }
     scheduler_control_enter(control, save)
     sync_store(wrapping(thread_base() + I64{64}), I64{0})
     control
 }
+
 #Export(c) jet_rt_root_leave: fn(control: I64, save: I64) {
     scheduler_control_leave(save)
     scheduler_process_root_release(control)
@@ -369,9 +395,7 @@ scheduler_process_root_install: fn(control: I64) {
     scheduler_control_retain(control)
     sync_thread_lock(scheduler_root)
     previous: scheduler_process_root
-    #Unsafe("written under the scheduler root mutex") {
-        scheduler_process_root = control
-    }
+    #Unsafe("written under the scheduler root mutex") { scheduler_process_root = control }
     sync_thread_unlock(scheduler_root)
     scheduler_control_drop(previous)
 }
@@ -380,9 +404,7 @@ scheduler_process_root_release: fn(control: I64) {
     sync_thread_lock(scheduler_root)
     owned: scheduler_process_root == control
     if owned {
-        #Unsafe("written under the scheduler root mutex") {
-            scheduler_process_root = I64{0}
-        }
+        #Unsafe("written under the scheduler root mutex") { scheduler_process_root = I64{0} }
     }
     sync_thread_unlock(scheduler_root)
     if owned -> scheduler_control_drop(control)
@@ -396,9 +418,7 @@ scheduler_root_task_control: fn() -> I64 {
     if (previous == I64{0} || sync_load(wrapping(previous + I64{16})) != I64{0}) {
         fresh: scheduler_control_new()
         sync_store(wrapping(fresh + I64{104}), SCHEDULER_SCOPE_ROOT)
-        #Unsafe("written under the scheduler root mutex") {
-            scheduler_process_root = fresh
-        }
+        #Unsafe("written under the scheduler root mutex") { scheduler_process_root = fresh }
         replaced = previous
     }
     control: scheduler_process_root
@@ -408,7 +428,9 @@ scheduler_root_task_control: fn() -> I64 {
     control
 }
 
-scheduler_control_is_root: fn(control: I64) -> Bool { (scheduler_scope_flags(control).bit_and(SCHEDULER_SCOPE_ROOT)) != I64{0} }
+scheduler_control_is_root: fn(control: I64) -> Bool {
+    (scheduler_scope_flags(control).bit_and(SCHEDULER_SCOPE_ROOT)) != I64{0}
+}
 
 // jet_task_deliver_cancel: only a task unwinds a delivered cancellation. A
 // cancelled root has no catch frame: its wait points observe the flag and
@@ -423,18 +445,24 @@ scheduler_root_cancel_observed: fn() -> Bool {
 scheduler_root_capture_pointer: fn(control: I64) -> I64 {
     if (control == I64{0}) -> I64{0} else -> sync_load(wrapping(control + I64{120})).bit_and(I64{-2})
 }
+
 scheduler_root_capture_begin: fn() {
     control: scheduler_control_current()
-    if (scheduler_root_capture_pointer(control) != I64{0}) -> scheduler_abort_double_panic()
+    if (scheduler_root_capture_pointer(control) != I64{0}) { scheduler_abort_double_panic() }
     text: scheduler_text_empty()
     sync_store(wrapping(control + I64{120}), text.bit_or((sync_load(wrapping(control + I64{120})).bit_and(I64{1}))))
 }
+
 scheduler_root_capture_take: fn(control: I64) -> I64 {
     word: sync_load(wrapping(control + I64{120}))
     sync_store(wrapping(control + I64{120}), word.bit_and(I64{1}))
     word.bit_and(I64{-2})
 }
-scheduler_root_code_known: fn(control: I64) -> Bool { (sync_load(wrapping(control + I64{120})).bit_and(I64{1})) != I64{0} }
+
+scheduler_root_code_known: fn(control: I64) -> Bool {
+    (sync_load(wrapping(control + I64{120})).bit_and(I64{1})) != I64{0}
+}
+
 scheduler_root_set_code: fn(control: I64, code: I64) {
     sync_store(wrapping(control + I64{112}), code)
     sync_store(wrapping(control + I64{120}), sync_load(wrapping(control + I64{120})).bit_or(I64{1}))
@@ -452,10 +480,13 @@ scheduler_panic_publish_record: fn(record: I64) -> Bool {
             sync_store(wrapping(record + I64{40}), rendered)
             sync_store(wrapping(record + I64{48}), I64{1})
         }
-        if !scheduler_root_code_known(control) -> scheduler_root_set_code(control, EXIT_RUNTIME_PANIC)
+        if !scheduler_root_code_known(control) {
+            scheduler_root_set_code(control, EXIT_RUNTIME_PANIC)
+        }
     }
     scheduler_native_publish(record)
 }
+
 scheduler_root_publish_owned: fn(text: I64, code: I64) -> Bool {
     if (jet_rt_stop_domain() != I64{1}) {
         jet_rt_string_drop(text)
@@ -463,7 +494,7 @@ scheduler_root_publish_owned: fn(text: I64, code: I64) -> Bool {
     }
     if scheduler_stop_fatal() {
         jet_rt_stdout_flush()
-        if (text != I64{0}) -> trap_write_handle(text)
+        if (text != I64{0}) { trap_write_handle(text) }
         jet_rt_string_drop(text)
         trap_exit(code)
         return false
@@ -473,33 +504,43 @@ scheduler_root_publish_owned: fn(text: I64, code: I64) -> Bool {
     scheduler_root_set_code(scheduler_control_current(), code)
     scheduler_panic_publish_record(record)
 }
+
 #Export(c) jet_rt_root_publish_rendered: fn(message: I64, length: I64, requested_code: I64) -> Bool {
-    if (jet_rt_stop_domain() != I64{1}) -> return false
+    if (jet_rt_stop_domain() != I64{1}) { return false }
     text := I64{0}
     if (length != I64{0}) {
         text = scheduler_text_new(length)
-        if (text == I64{0} && jet_rt_session_propagate() != I64{0}) -> return false
+        if (text == I64{0} && jet_rt_session_propagate() != I64{0}) { return false }
         coll_copy(message, sync_load(text), length)
     }
     scheduler_root_publish_owned(text, requested_code)
 }
+
 #Export(c) jet_rt_root_take_stop: fn(control: I64, code_out: I64) -> I64 {
     record: scheduler_control_take_stop(control)
-    if (record == I64{0}) -> return I64{0}
+    if (record == I64{0}) { return I64{0} }
     kind: sync_load(record)
-    if (kind == I64{1} || kind < I64{1} || kind > I64{5}) -> jet_rt_unreachable(I64{0}, I64{0})
+    if (kind == I64{1} || kind < I64{1} || kind > I64{5}) { jet_rt_unreachable(I64{0}, I64{0}) }
     code := EXIT_RUNTIME_PANIC
     if {
         (kind == I64{3} || kind == I64{4}) -> {
             status: if (kind == I64{3}) -> I64{2} else -> I64{3}
-            if (sync_load(wrapping(record + I64{8})) != status) -> jet_rt_unreachable(I64{0}, I64{0})
-            _ := comptime_stop_frame_write(status, sync_load(wrapping(record + I64{16})),
-                sync_load(wrapping(record + I64{24})), sync_load(wrapping(record + I64{32})))
+            if (sync_load(wrapping(record + I64{8})) != status) {
+                jet_rt_unreachable(I64{0}, I64{0})
+            }
+            _ := comptime_stop_frame_write(
+                status,
+                sync_load(wrapping(record + I64{16})),
+                sync_load(wrapping(record + I64{24})),
+                sync_load(wrapping(record + I64{32})),
+            )
             jet_rt_string_drop(scheduler_stop_take_message(record))
             code = I64{80} + status
         }
         (kind == I64{5}) -> {
-            if (sync_load(wrapping(record + I64{48})) != I64{1} || !scheduler_root_code_known(control)) -> jet_rt_unreachable(I64{0}, I64{0})
+            if (sync_load(wrapping(record + I64{48})) != I64{1} || !scheduler_root_code_known(control)) {
+                jet_rt_unreachable(I64{0}, I64{0})
+            }
             code = sync_load(wrapping(control + I64{112}))
         }
         // Deadline already owns the complete registered E3003 report.
@@ -518,7 +559,10 @@ scheduler_control_take_stop: fn(control: I64) -> I64 {
     sync_mutex_unlock(wrapping(control + I64{72}))
     record
 }
-scheduler_control_discard_stop: fn(control: I64) { scheduler_stop_drop(scheduler_control_take_stop(control)) }
+
+scheduler_control_discard_stop: fn(control: I64) {
+    scheduler_stop_drop(scheduler_control_take_stop(control))
+}
 
 // Every stop record settles the test harness's assertion mark (TestCapture.jet
 // test_stop_assertion_settle): only a rendered report (kind 5) keeps it.
@@ -547,19 +591,20 @@ scheduler_control_publish: fn(control: I64, record: I64) -> Bool {
     }
     // jet_rt_main ends an entry stopped at the process root through this
     // hook, which only a stop published there needs.
-    if (control == main_root_control && main_stopped_code == I64{0}) -> main_stopped_install(rt_main_stopped_address())
+    if (control == main_root_control && main_stopped_code == I64{0}) {
+        main_stopped_install(rt_main_stopped_address())
+    }
     sync_mutex_lock(wrapping(control + I64{72}))
     old: sync_load(wrapping(control + I64{32}))
     // A task panic replaces an undelivered cancellation/deadline/budget.
     // rt_task_panic_publish has already rejected a delivered double panic.
-    accepted: old == I64{0} || (old == I64{1} && kind == I64{2}) ||
-        (kind == I64{5} && old >= I64{1} && old <= I64{4})
+    accepted: old == I64{0} || (old == I64{1} && kind == I64{2}) || (kind == I64{5} && old >= I64{1} && old <= I64{4})
     previous := I64{0}
     if accepted {
         previous = sync_load(wrapping(control + I64{40}))
         sync_store(wrapping(control + I64{40}), record)
         sync_store(wrapping(control + I64{32}), kind)
-        if (control != scheduler_control_current()) -> scheduler_checks_arm()
+        if (control != scheduler_control_current()) { scheduler_checks_arm() }
     }
     sync_mutex_unlock(wrapping(control + I64{72}))
     if accepted -> scheduler_stop_drop(previous) else -> scheduler_stop_drop(record)
@@ -569,32 +614,42 @@ scheduler_control_publish: fn(control: I64, record: I64) -> Bool {
     accepted
 }
 
-scheduler_native_publish: fn(record: I64) -> Bool { scheduler_control_publish(scheduler_control_current(), record) }
+scheduler_native_publish: fn(record: I64) -> Bool {
+    scheduler_control_publish(scheduler_control_current(), record)
+}
+
 scheduler_shielded: fn() -> Bool { sync_load(wrapping(thread_base() + I64{24})) > I64{0} }
 
 scheduler_scope_flags: fn(control: I64) -> I64 {
     if (control == I64{0}) -> I64{0} else -> sync_load(wrapping(control + I64{104}))
 }
-scheduler_scope_delivered_kind: fn(flags: I64) -> I64 { (flags.bit_and(SCHEDULER_SCOPE_MASK_KIND)) >> I64{8} }
+
+scheduler_scope_delivered_kind: fn(flags: I64) -> I64 {
+    (flags.bit_and(SCHEDULER_SCOPE_MASK_KIND)) >> I64{8}
+}
 
 // Origin16 is dynamic: only an actual native Task frame can mint it.
 // The saved scalar is owned; zero is a valid token and must also be restored.
 #Export(c) jet_rt_session_cleanup_enter: fn(delivered_at_entry: I64) -> I64 {
     control: scheduler_control_current()
-    if (control == I64{0}) -> return I64{0}
+    if (control == I64{0}) { return I64{0} }
     saved: scheduler_scope_flags(control)
     flags := (saved.bit_and(I64{-1793})).bit_or(SCHEDULER_SCOPE_CLEANUP)
-    if (sync_load(wrapping(thread_base() + I64{64})) != I64{0}) -> flags = flags.bit_or(SCHEDULER_SCOPE_TASK_CLEANUP_ORIGIN)
+    if (sync_load(wrapping(thread_base() + I64{64})) != I64{0}) {
+        flags = flags.bit_or(SCHEDULER_SCOPE_TASK_CLEANUP_ORIGIN)
+    }
     if (delivered_at_entry >= I64{1} && delivered_at_entry <= I64{5} && scheduler_control_status(control) == delivered_at_entry) {
         flags = flags.bit_or(delivered_at_entry << I64{8})
     }
     sync_store(wrapping(control + I64{104}), flags)
     saved
 }
+
 #Export(c) jet_rt_session_cleanup_leave: fn(saved_flags: I64) {
     control: scheduler_control_current()
-    if (control != I64{0}) -> sync_store(wrapping(control + I64{104}), saved_flags)
+    if (control != I64{0}) { sync_store(wrapping(control + I64{104}), saved_flags) }
 }
+
 // Compiler cleanup frames (Codegen/Builder.jet jet_codegen_emit_cleanup_frame,
 // lowered by Routes.jet lower_native_control_call) are one runtime cleanup
 // scope plus Shield, the idiom of every runtime-owned close: a stop pending at
@@ -607,27 +662,28 @@ scheduler_scope_delivered_kind: fn(flags: I64) -> I64 { (flags.bit_and(SCHEDULER
     jet_scheduler_shield_enter()
     saved
 }
+
 #Export(c) jet_rt_cleanup_leave: fn(saved: I64) {
     jet_scheduler_shield_leave()
     jet_rt_session_cleanup_leave(saved)
 }
+
 #Export(c) jet_rt_stop_domain: fn() -> I64 {
     control: scheduler_control_current()
-    if (control == I64{0}) -> return I64{0}
+    if (control == I64{0}) { return I64{0} }
     flags: scheduler_scope_flags(control)
     body: sync_load(wrapping(thread_base() + I64{64})) != I64{0}
-    if ((flags.bit_and(SCHEDULER_SCOPE_ROOT)) != I64{0} && !body) -> return I64{1}
-    if body || ((flags.bit_and(SCHEDULER_SCOPE_TASK)) != I64{0} &&
-        (flags.bit_and(SCHEDULER_SCOPE_CLEANUP)) != I64{0} &&
-        (flags.bit_and(SCHEDULER_SCOPE_TASK_CLEANUP_ORIGIN)) != I64{0}) -> return I64{2}
+    if ((flags.bit_and(SCHEDULER_SCOPE_ROOT)) != I64{0} && !body) { return I64{1} }
+    if body || ((flags.bit_and(SCHEDULER_SCOPE_TASK)) != I64{0} && (flags.bit_and(SCHEDULER_SCOPE_CLEANUP)) != I64{0} && (flags.bit_and(SCHEDULER_SCOPE_TASK_CLEANUP_ORIGIN)) != I64{0}) {
+        return I64{2}
+    }
     I64{0}
 }
 
 scheduler_cleanup_mask: fn(status: I64) -> I64 {
     flags: scheduler_scope_flags(scheduler_control_current())
     delivered: scheduler_scope_delivered_kind(flags)
-    if ((flags.bit_and(SCHEDULER_SCOPE_CLEANUP)) != I64{0} && delivered >= I64{1} &&
-        delivered <= I64{5} && status == delivered) -> I64{0} else -> status
+    if ((flags.bit_and(SCHEDULER_SCOPE_CLEANUP)) != I64{0} && delivered >= I64{1} && delivered <= I64{5} && status == delivered) -> I64{0} else -> status
 }
 
 // Shield defers cancellation/deadline/interrupt-class stops, never a panic
@@ -636,15 +692,19 @@ scheduler_delivered_status_unmasked: fn() -> I64 {
     status: scheduler_control_status(scheduler_control_current())
     if scheduler_shielded() && !(status >= I64{3} && status <= I64{5}) -> I64{0} else -> status
 }
+
 scheduler_delivered_status: fn() -> I64 {
     scheduler_cleanup_mask(scheduler_delivered_status_unmasked())
 }
 
-#Export(c) jet_scheduler_native_status: fn() -> I64 { scheduler_control_status(scheduler_control_current()) }
+#Export(c) jet_scheduler_native_status: fn() -> I64 {
+    scheduler_control_status(scheduler_control_current())
+}
+
 #Export(c) jet_scheduler_native_poll: fn() -> I64 {
     if scheduler_shielded() -> return scheduler_delivered_status()
     control: scheduler_control_current()
-    if (control == I64{0}) -> return I64{0}
+    if (control == I64{0}) { return I64{0} }
     if (sync_swap(wrapping(control + I64{48}), I64{0}) != I64{0}) {
         _ := scheduler_control_publish(control, scheduler_stop_new(I64{1}, scheduler_text_empty()))
     }
@@ -652,22 +712,27 @@ scheduler_delivered_status: fn() -> I64 {
     scheduler_check_loop_deadline(control)
     scheduler_cleanup_mask(scheduler_control_status(control))
 }
+
 #Export(c) jet_scheduler_native_propagate: fn() -> I64 {
     control: scheduler_control_current()
-    if (control != I64{0}) -> scheduler_check_loops(control)
+    if (control != I64{0}) { scheduler_check_loops(control) }
     scheduler_delivered_status()
 }
+
 #Export(c) jet_rt_session_status: fn() -> I64 { jet_scheduler_native_status() }
+
 #Export(c) jet_rt_session_poll: fn() -> I64 { jet_scheduler_native_poll() }
+
 // The stop poll's routine (JetIR X64Select.jet ir_x64_stop_poll), which
 // runtime code calls at its own stop points too: a turn the monitor asked
 // for is given there before the stop is propagated.
 #Export(c) jet_rt_session_propagate: fn() -> I64 {
     scheduler_turn_give()
     control: scheduler_control_current()
-    if (control != I64{0}) -> scheduler_check_loops(control)
+    if (control != I64{0}) { scheduler_check_loops(control) }
     scheduler_delivered_status()
 }
+
 // The turn poll's routine (JetIR IR.jet IR_STOP_TURN_KEY): at a loop's
 // turn or a recursive body's entry a passed deadline is delivered too.
 #Export(c) jet_rt_session_turn: fn() -> I64 {
@@ -681,36 +746,46 @@ scheduler_delivered_status: fn() -> I64 {
 }
 
 #Export(c) jet_scheduler_shield_enter: fn() {
-    if (scheduler_control_current() != I64{0}) -> sync_store(wrapping(thread_base() + I64{24}), sync_load(wrapping(thread_base() + I64{24})) + I64{1})
+    if (scheduler_control_current() != I64{0}) {
+        sync_store(wrapping(thread_base() + I64{24}), sync_load(wrapping(thread_base() + I64{24})) + I64{1})
+    }
 }
+
 #Export(c) jet_scheduler_shield_leave: fn() {
-    if (scheduler_control_current() == I64{0}) -> return
+    if (scheduler_control_current() == I64{0}) {
+        return
+    }
     address: wrapping(thread_base() + I64{24})
     depth: sync_load(address)
     sync_store(address, if (depth > I64{0}) -> depth - I64{1} else -> I64{0})
-    if (sync_load(address) != I64{0}) -> return
+    if (sync_load(address) != I64{0}) {
+        return
+    }
     if {
         (jet_ctx_deadline_present() && jet_deadline_remaining_ms() <= I64{0}) -> {
             kind: scheduler_msg_shield()
             scheduler_deliver_deadline(kind)
             jet_rt_string_drop(kind)
         }
-        scheduler_task_cancelled() -> {
-            scheduler_deliver_cancel()
-        }
+        scheduler_task_cancelled() -> { scheduler_deliver_cancel() }
     }
 }
+
 // Leaves the runtime's own shield around a finished task body's cleanup.
 // The body has no wait point or check left, so a cancel or blown deadline
 // that arrived meanwhile has nothing to unwind and does not turn the
 // completed value into a failure.
 scheduler_shield_leave_finished: fn() {
-    if (scheduler_control_current() == I64{0}) -> return
+    if (scheduler_control_current() == I64{0}) {
+        return
+    }
     address: wrapping(thread_base() + I64{24})
     depth: sync_load(address)
     sync_store(address, if (depth > I64{0}) -> depth - I64{1} else -> I64{0})
 }
+
 #Export(c) jet_rt_session_shield_enter: fn() { jet_scheduler_shield_enter() }
+
 #Export(c) jet_rt_session_shield_leave: fn() { jet_scheduler_shield_leave() }
 
 // jet_rt_task_panic_publish's code word: 0 until the first body enters.
@@ -724,29 +799,38 @@ scheduler_body_enter: fn() -> I64 {
     }
     sync_swap(wrapping(thread_base() + I64{64}), I64{1})
 }
+
 scheduler_body_leave: fn(saved: I64) { sync_store(wrapping(thread_base() + I64{64}), saved) }
+
 // Lower.jet lower_poll_call_enter/leave bracket a checked operation whose
 // immediate terminator is a Propagate poll: inside a body (bit 1) the call
 // arms bit 2 for its duration; leave restores the caller's word exactly.
 #Export(c) jet_rt_poll_call_enter: fn() -> I64 {
     cell: wrapping(thread_base() + I64{64})
     saved: sync_load(cell)
-    if (saved.bit_and(I64{1}) != I64{0}) -> sync_store(cell, saved.bit_or(I64{2}))
+    if (saved.bit_and(I64{1}) != I64{0}) { sync_store(cell, saved.bit_or(I64{2})) }
     saved
 }
-#Export(c) jet_rt_poll_call_leave: fn(saved: I64) { sync_store(wrapping(thread_base() + I64{64}), saved) }
+
+#Export(c) jet_rt_poll_call_leave: fn(saved: I64) {
+    sync_store(wrapping(thread_base() + I64{64}), saved)
+}
+
 scheduler_task_cancelled: fn() -> Bool {
     control: scheduler_control_current()
     control != I64{0} && sync_load(wrapping(control + I64{16})) != I64{0}
 }
+
 scheduler_deliver_cancel: fn() {
-    if scheduler_root_cancel_observed() -> return
+    if scheduler_root_cancel_observed() {
+        return
+    }
     _ := scheduler_native_publish(scheduler_stop_new(I64{1}, scheduler_text_empty()))
 }
 
 // Nodes32B: next0, slot/code8, env16, id24. Guards retain the control.
 scheduler_cancel_waiter_register: fn(control: I64, slot: I64) -> I64 {
-    if (control == I64{0}) -> return I64{0}
+    if (control == I64{0}) { return I64{0} }
     node: jet_rt_alloc(I64{32}, I64{8})
     thread_zero(node, I64{32})
     sync_store(wrapping(node + I64{8}), slot)
@@ -754,7 +838,7 @@ scheduler_cancel_waiter_register: fn(control: I64, slot: I64) -> I64 {
     sync_mutex_lock(wrapping(control + I64{72}))
     sync_store(node, sync_load(wrapping(control + I64{80})))
     sync_store(wrapping(control + I64{80}), node)
-    if (sync_load(wrapping(control + I64{16})) != I64{0}) -> sync_park_wake(slot)
+    if (sync_load(wrapping(control + I64{16})) != I64{0}) { sync_park_wake(slot) }
     sync_mutex_unlock(wrapping(control + I64{72}))
     node
 }
@@ -772,7 +856,9 @@ scheduler_node_unlink: fn(head: I64, node: I64) {
 }
 
 scheduler_cancel_waiter_remove: fn(control: I64, node: I64) {
-    if (node == I64{0}) -> return
+    if (node == I64{0}) {
+        return
+    }
     sync_mutex_lock(wrapping(control + I64{72}))
     scheduler_node_unlink(control + I64{80}, node)
     sync_mutex_unlock(wrapping(control + I64{72}))
@@ -834,7 +920,7 @@ scheduler_control_inline: fn(control: I64, target: I64) {
     cancelled: sync_load(wrapping(control + I64{16})) != I64{0}
     sync_mutex_unlock(wrapping(control + I64{72}))
     scheduler_control_drop(previous)
-    if (cancelled && target != I64{0}) -> scheduler_control_cancel(target)
+    if (cancelled && target != I64{0}) { scheduler_control_cancel(target) }
 }
 
 // A cancel the task has consumed into its own result (an AsyncEvent entry's
@@ -844,13 +930,16 @@ scheduler_control_cancel_consume: fn(control: I64) {
 }
 
 #Export(c) jet_rt_scheduler_control_cancel: fn(control: I64) { scheduler_control_cancel(control) }
+
 #Export(c) jet_rt_scheduler_control_retain: fn(control: I64) { scheduler_control_retain(control) }
+
 #Export(c) jet_rt_scheduler_control_drop: fn(control: I64) { scheduler_control_drop(control) }
 
 scheduler_control_interrupt: fn(control: I64) {
     sync_store(wrapping(control + I64{48}), I64{1})
     scheduler_control_cancel(control)
 }
+
 scheduler_control_pause: fn(control: I64, mode: I64) {
     // The park is installed before the bit is raised, so a poll that sees
     // the bit finds it (scheduler_check_loops).
@@ -863,6 +952,7 @@ scheduler_control_pause: fn(control: I64, mode: I64) {
     sync_store(wrapping(control + I64{8}), I64{1})
     jet_rt_observe_task_control(sync_load(wrapping(control + I64{56})), I64{3}, I64{-1})
 }
+
 scheduler_control_resume: fn(control: I64) {
     sync_store(wrapping(control + I64{8}), I64{0})
     jet_rt_observe_task_control(sync_load(wrapping(control + I64{56})), I64{1}, I64{-1})
@@ -891,7 +981,7 @@ scheduler_park_while_paused: fn(control: I64) -> Bool {
 
 scheduler_wait_while_paused: fn() -> I64 {
     control: scheduler_control_current()
-    if (control == I64{0}) -> return I64{0}
+    if (control == I64{0}) { return I64{0} }
     if !scheduler_park_while_paused(control) -> return jet_scheduler_native_status()
     jet_scheduler_native_propagate()
 }
@@ -923,15 +1013,19 @@ rt_scheduler_pause_park_address: fn() -> I64 {
 // poll that clears a raised bit sees the flag.
 scheduler_check_loops: fn(control: I64) {
     attention: sync_load(wrapping(control + I64{24}))
-    if (attention == I64{0}) || scheduler_shielded() -> return
+    if (attention == I64{0}) || scheduler_shielded() {
+        return
+    }
     if (attention.bit_and(SCHEDULER_ATTEND_PAUSE) != I64{0}) {
         // The bit is raised only after a strong pause installed the park.
         park: scheduler_pause_park_rail_code
-        if (park != I64{0} && coll_call1(park, control) == I64{0}) -> return
+        if (park != I64{0} && coll_call1(park, control) == I64{0}) {
+            return
+        }
     }
     if (sync_load(wrapping(control + I64{24})).bit_and(SCHEDULER_ATTEND_CANCEL) != I64{0}) {
         scheduler_attention_set(control, SCHEDULER_ATTEND_CANCEL, false)
-        if (sync_load(wrapping(control + I64{16})) != I64{0}) -> scheduler_deliver_cancel()
+        if (sync_load(wrapping(control + I64{16})) != I64{0}) { scheduler_deliver_cancel() }
     }
 }
 
@@ -947,8 +1041,12 @@ scheduler_check_loops: fn(control: I64) {
 // value.
 scheduler_check_loop_deadline: fn(control: I64) {
     attention: sync_load(wrapping(control + I64{24}))
-    if (attention.bit_and(SCHEDULER_ATTEND_DEADLINE) == I64{0}) || scheduler_shielded() || (scheduler_control_status(control) != I64{0}) -> return
-    if jet_ctx_deadline_present() && jet_deadline_remaining_ms() <= (I64{0}) -> scheduler_deliver_deadline(rt_static_text("a loop"))
+    if (attention.bit_and(SCHEDULER_ATTEND_DEADLINE) == I64{0}) || scheduler_shielded() || (scheduler_control_status(control) != I64{0}) {
+        return
+    }
+    if jet_ctx_deadline_present() && jet_deadline_remaining_ms() <= (I64{0}) {
+        scheduler_deliver_deadline(rt_static_text("a loop"))
+    }
 }
 
 scheduler_wait_point_cancel_check: fn() -> I64 {
@@ -973,10 +1071,10 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
     // A cancelled root wait point returns its fallback without parking.
     if scheduler_root_cancel_observed() -> return I64{0}
     world: world_current()
-    if (world != I64{0} && scheduler_control_current() != I64{0}) -> world_begin_wait(world, slot)
+    if (world != I64{0} && scheduler_control_current() != I64{0}) { world_begin_wait(world, slot) }
     control: scheduler_control_current()
     shielded: scheduler_shielded()
-    if (control != I64{0}) -> scheduler_observe_update(I64{2}, wait_kind)
+    if (control != I64{0}) { scheduler_observe_update(I64{2}, wait_kind) }
     if (control != I64{0}) {
         if !shielded && scheduler_task_cancelled() {
             scheduler_deliver_cancel()
@@ -987,13 +1085,13 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
             scheduler_deliver_cancel()
             return jet_scheduler_native_status()
         }
-        if (jet_scheduler_native_propagate() != I64{0}) -> return jet_scheduler_native_status()
+        if (jet_scheduler_native_propagate() != I64{0}) { return jet_scheduler_native_status() }
     }
     waiter: if !shielded -> scheduler_cancel_waiter_register(control, slot) else -> I64{0}
     wait := timeout_ns
     virtual_wait: (sync_load(wrapping(thread_base() + I64{112})).bit_and(I64{2})) != I64{0}
     if virtual_wait {
-        if (wait != I64{0}) -> wait = I64{-1}
+        if (wait != I64{0}) { wait = I64{-1} }
     }
     if deadline && !virtual_wait && !shielded && jet_ctx_deadline_present() {
         remaining: jet_deadline_remaining_ms()
@@ -1003,7 +1101,7 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
             return jet_scheduler_native_status()
         }
         cap: deadline_ms_to_ns(remaining)
-        if (wait < I64{0} || wait > cap) -> wait = cap
+        if (wait < I64{0} || wait > cap) { wait = cap }
     }
     sync_store(wrapping(thread_base() + I64{72}), slot)
     sync_park(slot, wait)
@@ -1018,8 +1116,8 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
         return jet_scheduler_native_status()
     }
     _ := scheduler_wait_while_paused()
-    if (world != I64{0}) -> world_finish_park(world, slot)
-    if (control != I64{0}) -> scheduler_observe_update(I64{1}, I64{0})
+    if (world != I64{0}) { world_finish_park(world, slot) }
+    if (control != I64{0}) { scheduler_observe_update(I64{1}, I64{0}) }
     jet_scheduler_native_propagate()
 }
 
@@ -1070,14 +1168,20 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
 // finds no idle carrier; monitor is its thread handle (0: not started, -1:
 // starting, -2: its start was refused, and the pool goes on without it).
 scheduler_root := I64{0}
+
 SCHEDULER_ROOT_BYTES: I64{256}
+
 SCHEDULER_CARRIER_BYTES: I64{72}
+
 SCHEDULER_MONITOR_TICK_NS: I64{10000000}
+
 SCHEDULER_STAT_BYTES: I64{512}
 
 // runtime-init: 3 when scheduler_root
 #Export(c) jet_rt_scheduler_init: fn() {
-    if (scheduler_root != I64{0}) -> return
+    if (scheduler_root != I64{0}) {
+        return
+    }
     root: jet_rt_alloc(SCHEDULER_ROOT_BYTES, I64{8})
     #Unsafe("runtime-init runs before any other thread exists") { scheduler_root = root }
     thread_zero(scheduler_root, SCHEDULER_ROOT_BYTES)
@@ -1089,16 +1193,18 @@ SCHEDULER_STAT_BYTES: I64{512}
 // observe the same FIFO, live count and counters either way.
 scheduler_root_required: fn() -> I64 {
     root: scheduler_root
-    if (root == I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+    if (root == I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
     root
 }
 
 rt_scheduler_worker_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
+
 rt_scheduler_timer_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
+
 rt_scheduler_monitor_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
@@ -1106,21 +1212,21 @@ rt_scheduler_monitor_address: fn() -> I64 {
 // usize::from_str accepts '+' and the full u64 range. Counts above i64::MAX
 // are returned as their bit pattern, not treated as an invalid override.
 scheduler_parse_threads: fn(text: I64, out: I64) -> Bool {
-    if (text == I64{0}) -> return false
+    if (text == I64{0}) { return false }
     length: sync_load(wrapping(text + I64{8}))
-    if (length == I64{0}) -> return false
+    if (length == I64{0}) { return false }
     data: sync_load(text)
     at := I64{0}
-    if (trap_byte(data) == I64{43}) -> at = I64{1}
+    if (trap_byte(data) == I64{43}) { at = I64{1} }
     if at == length -> return false
     number := I64{0}
     loop at < length {
         byte: trap_byte(wrapping(data + at))
-        if (byte < I64{48} || byte > I64{57}) -> return false
+        if (byte < I64{48} || byte > I64{57}) { return false }
         digit: byte - I64{48}
         // (u64::MAX / 10) fits signed; any larger accumulator overflows next.
-        if (number < I64{0} || number > I64{1844674407370955161}) -> return false
-        if (number == I64{1844674407370955161} && digit > I64{5}) -> return false
+        if (number < I64{0} || number > I64{1844674407370955161}) { return false }
+        if (number == I64{1844674407370955161} && digit > I64{5}) { return false }
         number = wrapping(wrapping(number * I64{10}) + digit)
         at += I64{1}
     }
@@ -1144,8 +1250,8 @@ scheduler_worker_count: fn() -> I64 {
 // available_parallelism (HostParallelism.jet).
 scheduler_available_parallelism: fn(fallback: I64) -> I64 {
     count: cpu_available_parallelism(I64{0}, I64{0})
-    if (jet_rt_session_propagate() != I64{0}) -> return I64{0}
-    if (count > I64{0}) -> return count
+    if (jet_rt_session_propagate() != I64{0}) { return I64{0} }
+    if (count > I64{0}) { return count }
     fallback
 }
 
@@ -1163,7 +1269,7 @@ scheduler_carrier_list: fn(root: I64) -> I64 {
 // Joins every carrier of a list taken out from under the root lock, then
 // frees the records and the list. Returns the number of joined threads.
 scheduler_carrier_list_join: fn(list: I64) -> I64 {
-    if (list == I64{0}) -> return I64{0}
+    if (list == I64{0}) { return I64{0} }
     length: sync_load(list)
     data: sync_load(wrapping(list + I64{16}))
     at := I64{0}
@@ -1195,10 +1301,12 @@ scheduler_start_worker: fn(root: I64) {
         started: wrapping(sync_load(wrapping(root + I64{152})) - I64{1})
         sync_store(wrapping(root + I64{152}), started)
         pool: sync_load(wrapping(root + I64{112}))
-        if (started > I64{0} && (pool < I64{0} || started < pool)) -> _ := sync_swap(wrapping(root + I64{112}), started)
+        if (started > I64{0} && (pool < I64{0} || started < pool)) {
+            _ := sync_swap(wrapping(root + I64{112}), started)
+        }
         sync_thread_unlock(root)
         jet_rt_free(record, SCHEDULER_CARRIER_BYTES, I64{8})
-        if (started == I64{0}) -> scheduler_first_worker_refused(-handle)
+        if (started == I64{0}) { scheduler_first_worker_refused(-handle) }
         return
     }
     sync_store(wrapping(record + I64{8}), handle)
@@ -1211,7 +1319,7 @@ scheduler_start_worker: fn(root: I64) {
 scheduler_get: fn() -> I64 {
     root: scheduler_root
     // .init_array owns the root; first use owns only pool initialization.
-    if (root == I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+    if (root == I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
     if {
         (sync_cas(wrapping(root + I64{112}), I64{0}, I64{-1}) == I64{0}) -> {
             count: scheduler_worker_count()
@@ -1220,7 +1328,9 @@ scheduler_get: fn() -> I64 {
             sync_wake(root + I64{112}, I64{2147483647})
         }
         else -> {
-            loop sync_load(wrapping(root + (I64{112}))) == (I64{-1}) -> _ := sync_wait(root + I64{112}, I64{-1}, I64{-1})
+            loop sync_load(wrapping(root + (I64{112}))) == (I64{-1}) {
+                _ := sync_wait(root + I64{112}, I64{-1}, I64{-1})
+            }
         }
     }
     root
@@ -1235,7 +1345,9 @@ scheduler_submit: fn(task: I64) {
     sync_store(wrapping(task + I64{88}), I64{0})
     sync_thread_lock(root)
     tail: sync_load(wrapping(root + I64{16}))
-    if (tail == I64{0}) -> sync_store(wrapping(root + I64{8}), task) else -> sync_store(wrapping(tail + I64{88}), task)
+    if (tail == I64{0}) { sync_store(wrapping(root + I64{8}), task) } else {
+        sync_store(wrapping(tail + I64{88}), task)
+    }
     sync_store(wrapping(root + I64{16}), task)
     jet_rt_observe_pool(I64{-1}, I64{1})
     start := false
@@ -1245,14 +1357,12 @@ scheduler_submit: fn(task: I64) {
         if scheduler_carrier_room(root) {
             sync_store(wrapping(root + I64{152}), wrapping(sync_load(wrapping(root + I64{152})) + I64{1}))
             start = true
-        } else {
-            monitor = scheduler_monitor_arm(root)
-        }
+        } else { monitor = scheduler_monitor_arm(root) }
     }
     sync_thread_unlock(root)
     if woke -> scheduler_kick_idle(root)
     if start -> scheduler_start_worker(root)
-    if (monitor != I64{0}) -> scheduler_monitor_kick(root, monitor)
+    if (monitor != I64{0}) { scheduler_monitor_kick(root, monitor) }
 }
 
 // Whether one more carrier may start: fewer than the pool size run, or, while
@@ -1262,7 +1372,7 @@ scheduler_submit: fn(task: I64) {
 scheduler_carrier_room: fn(root: I64) -> Bool {
     started: sync_load(wrapping(root + I64{152}))
     pool: sync_load(wrapping(root + I64{112}))
-    if (pool < I64{0}) -> return started != pool
+    if (pool < I64{0}) { return started != pool }
     started < wrapping(pool + sync_load(wrapping(root + I64{208})))
 }
 
@@ -1272,9 +1382,11 @@ scheduler_carrier_room: fn(root: I64) -> Bool {
 // (scheduler_carrier_idle). The root lock is held.
 scheduler_carrier_excess: fn(root: I64) -> Bool {
     pool: sync_load(wrapping(root + I64{112}))
-    if (pool <= I64{0}) -> return false
+    if (pool <= I64{0}) { return false }
     timers: sync_load(wrapping(root + I64{136}))
-    if (timers != I64{0} && sync_load(wrapping(root + I64{32})) == I64{0} && sync_load(wrapping(timers + I64{16})) >= I64{0}) -> return false
+    if (timers != I64{0} && sync_load(wrapping(root + I64{32})) == I64{0} && sync_load(wrapping(timers + I64{16})) >= I64{0}) {
+        return false
+    }
     sync_load(wrapping(root + I64{152})) > wrapping(pool + sync_load(wrapping(root + I64{208})))
 }
 
@@ -1284,9 +1396,9 @@ scheduler_carrier_excess: fn(root: I64) -> Bool {
 // held.
 scheduler_monitor_arm: fn(root: I64) -> I64 {
     monitor: sync_load(wrapping(root + I64{224}))
-    if (monitor < I64{0} || sync_load(wrapping(root + I64{216})) != I64{0}) -> return I64{0}
+    if (monitor < I64{0} || sync_load(wrapping(root + I64{216})) != I64{0}) { return I64{0} }
     sync_store(wrapping(root + I64{216}), I64{1})
-    if (monitor != I64{0}) -> return I64{1}
+    if (monitor != I64{0}) { return I64{1} }
     sync_store(wrapping(root + I64{224}), I64{-1})
     I64{2}
 }
@@ -1302,9 +1414,7 @@ scheduler_monitor_kick: fn(root: I64, how: I64) {
         // Refused: the pool goes on as it would without the monitor.
         sync_store(wrapping(root + I64{224}), I64{-2})
         sync_store(wrapping(root + I64{216}), I64{0})
-    } else {
-        sync_store(wrapping(root + I64{224}), handle)
-    }
+    } else { sync_store(wrapping(root + I64{224}), handle) }
     sync_thread_unlock(root)
 }
 
@@ -1312,8 +1422,8 @@ scheduler_monitor_kick: fn(root: I64, how: I64) {
 // unclaimed, or carriers past the pool size run. The root lock is held.
 scheduler_monitor_needed: fn(root: I64) -> Bool {
     pool: sync_load(wrapping(root + I64{112}))
-    if (pool <= I64{0}) -> return false
-    if (sync_load(wrapping(root + I64{152})) > pool) -> return true
+    if (pool <= I64{0}) { return false }
+    if (sync_load(wrapping(root + I64{152})) > pool) { return true }
     scheduler_work_waits(root)
 }
 
@@ -1332,7 +1442,9 @@ scheduler_thread_cpu_ns: fn(tid: I64) -> I64 {
     scratch := I64{0}
     #Unsafe("clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes") {
         scratch = wrapping(os_tls_base_i64() + I64{232})
-        if (os_syscall_i64(I64{228}, clock, scratch, I64{0}, I64{0}, I64{0}, I64{0}) != I64{0}) -> return I64{-1}
+        if (os_syscall_i64(I64{228}, clock, scratch, I64{0}, I64{0}, I64{0}, I64{0}) != I64{0}) {
+            return I64{-1}
+        }
     }
     wrapping(rt_text_word(scratch) * I64{1000000000} + rt_text_word(wrapping(scratch + I64{8})))
 }
@@ -1348,7 +1460,7 @@ scheduler_task_file: fn(tid: I64, name: I64, buffer: I64) -> I64 {
     scale := I64{10}
     loop tid >= scale {
         digits += I64{1}
-        scale = scale * I64{10}
+        scale *= I64{10}
     }
     value := tid
     place := digits
@@ -1366,7 +1478,7 @@ scheduler_task_file: fn(tid: I64, name: I64, buffer: I64) -> I64 {
     #Unsafe("openat, read and close name and fill only the monitor's own scratch; the descriptor is closed before return") {
         // openat(AT_FDCWD, path, O_RDONLY | O_CLOEXEC).
         descriptor: os_syscall_i64(I64{257}, I64{-100}, buffer, I64{524288}, I64{0}, I64{0}, I64{0})
-        if (descriptor < I64{0}) -> return descriptor
+        if (descriptor < I64{0}) { return descriptor }
         got = os_syscall_i64(I64{0}, descriptor, buffer, SCHEDULER_STAT_BYTES, I64{0}, I64{0}, I64{0})
         _ := os_syscall_i64(I64{3}, descriptor, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
@@ -1391,10 +1503,10 @@ scheduler_thread_blocked: fn(tid: I64, buffer: I64) -> Bool {
     // any byte, the fields after it only numbers.
     paren := wrapping(got - I64{1})
     loop paren >= (I64{0}) && rt_text_byte(wrapping(buffer + paren)) != (I64{41}) -> paren -= I64{1}
-    if (paren < I64{0} || wrapping(paren + I64{2}) >= got) -> return false
-    if (rt_text_byte(wrapping(buffer + paren + I64{2})) != I64{83}) -> return false
+    if (paren < I64{0} || wrapping(paren + I64{2}) >= got) { return false }
+    if (rt_text_byte(wrapping(buffer + paren + I64{2})) != I64{83}) { return false }
     wchan: scheduler_task_file(tid, rt_static_text("wchan"), buffer)
-    if (wchan <= I64{0} || (wchan == I64{1} && rt_text_byte(buffer) == I64{48})) -> return false
+    if (wchan <= I64{0} || (wchan == I64{1} && rt_text_byte(buffer) == I64{48})) { return false }
     // The futex waits are named __futex_wait, futex_wait_queue and the like:
     // "futex" anywhere in the name.
     futex: rt_static_text("futex")
@@ -1402,8 +1514,10 @@ scheduler_thread_blocked: fn(tid: I64, buffer: I64) -> Bool {
     start := I64{0}
     loop wrapping(start + length) <= wchan {
         at := I64{0}
-        loop at < length && rt_text_byte(wrapping(buffer + start + at)) == rt_text_byte(wrapping(rt_text_data(futex) + at)) -> at += I64{1}
-        if (at == length) -> return false
+        loop at < length && rt_text_byte(wrapping(buffer + start + at)) == rt_text_byte(wrapping(rt_text_data(futex) + at)) {
+            at += I64{1}
+        }
+        if (at == length) { return false }
         start += I64{1}
     }
     true
@@ -1421,7 +1535,7 @@ scheduler_thread_blocked: fn(tid: I64, buffer: I64) -> Bool {
 // clears fiber64 before it takes the lock to unmap it (Fiber.jet fiber_run).
 scheduler_monitor_scan: fn(root: I64, buffer: I64, turns: Bool) -> I64 {
     list: sync_load(wrapping(root + I64{128}))
-    if (list == I64{0}) -> return I64{0}
+    if (list == I64{0}) { return I64{0} }
     length: sync_load(list)
     data: sync_load(wrapping(list + I64{16}))
     blocked := I64{0}
@@ -1435,7 +1549,9 @@ scheduler_monitor_scan: fn(root: I64, buffer: I64, turns: Bool) -> I64 {
             cpu = scheduler_thread_cpu_ns(tid)
             seen: sync_load(wrapping(record + I64{56}))
             same: runs == sync_load(wrapping(record + I64{48}))
-            if (same && cpu >= I64{0} && seen >= I64{0} && wrapping(cpu - seen) < SCHEDULER_MONITOR_TICK_NS / I64{2} && scheduler_thread_blocked(tid, buffer)) -> blocked += I64{1}
+            if (same && cpu >= I64{0} && seen >= I64{0} && wrapping(cpu - seen) < SCHEDULER_MONITOR_TICK_NS / I64{2} && scheduler_thread_blocked(tid, buffer)) {
+                blocked += I64{1}
+            }
             fiber: sync_load(wrapping(record + I64{64}))
             if (turns && same && fiber != I64{0}) {
                 scheduler_checks_arm_turns()
@@ -1456,7 +1572,7 @@ scheduler_monitor_starts: fn(root: I64) -> I64 {
     pool: sync_load(wrapping(root + I64{112}))
     started: sync_load(wrapping(root + I64{152}))
     room: wrapping(pool + sync_load(wrapping(root + I64{208})) - started)
-    if (pool <= I64{0} || room <= I64{0}) -> return I64{0}
+    if (pool <= I64{0} || room <= I64{0}) { return I64{0} }
     spare: sync_load(wrapping(root + I64{120})) - sync_load(wrapping(root + I64{160}))
     limit: room + (if (spare > I64{0}) -> spare else -> I64{0})
     queued := I64{0}
@@ -1471,7 +1587,7 @@ scheduler_monitor_starts: fn(root: I64) -> I64 {
         fiber = sync_load(wrapping(fiber + I64{48}))
     }
     starts: queued - (if (spare > I64{0}) -> spare else -> I64{0})
-    if (starts <= I64{0}) -> return I64{0}
+    if (starts <= I64{0}) { return I64{0} }
     sync_store(wrapping(root + I64{152}), wrapping(started + starts))
     starts
 }
@@ -1510,7 +1626,7 @@ scheduler_monitor_starts: fn(root: I64) -> I64 {
             loop wakes < excess && scheduler_wake_idle(root) -> wakes += I64{1}
         }
         sync_thread_unlock(root)
-        if (wakes > I64{0}) -> sync_futex_wake(wrapping(root + I64{24}), wakes)
+        if (wakes > I64{0}) { sync_futex_wake(wrapping(root + I64{24}), wakes) }
         at := I64{0}
         loop at < starts {
             scheduler_start_worker(root)
@@ -1525,7 +1641,9 @@ scheduler_monitor_starts: fn(root: I64) -> I64 {
 // is held; the caller sends the futex wake (scheduler_kick_idle) after it
 // unlocks, so the woken carrier does not wake into the held lock.
 scheduler_wake_idle: fn(root: I64) -> Bool {
-    if (sync_load(wrapping(root + I64{120})) <= sync_load(wrapping(root + I64{160}))) -> return false
+    if (sync_load(wrapping(root + I64{120})) <= sync_load(wrapping(root + I64{160}))) {
+        return false
+    }
     sync_store(wrapping(root + I64{160}), sync_load(wrapping(root + I64{160})) + I64{1})
     _ := sync_add(wrapping(root + I64{24}), I64{1})
     true
@@ -1553,10 +1671,10 @@ scheduler_watch_kick: fn(root: I64, deadline_ns: I64) {
 // The FIFO's first task; the root lock is held.
 scheduler_pop: fn(root: I64) -> I64 {
     task: sync_load(wrapping(root + I64{8}))
-    if (task == I64{0}) -> return I64{0}
+    if (task == I64{0}) { return I64{0} }
     next_task: sync_load(wrapping(task + I64{88}))
     sync_store(wrapping(root + I64{8}), next_task)
-    if (next_task == I64{0}) -> sync_store(wrapping(root + I64{16}), I64{0})
+    if (next_task == I64{0}) { sync_store(wrapping(root + I64{16}), I64{0}) }
     sync_store(wrapping(root + I64{40}), sync_load(wrapping(root + I64{40})) + I64{1})
     task
 }
@@ -1581,8 +1699,12 @@ scheduler_carrier_idle: fn(root: I64) {
     _ := sync_futex_wait(wrapping(root + I64{24}), before, deadline)
     sync_thread_lock(root)
     sync_store(wrapping(root + I64{120}), sync_load(wrapping(root + I64{120})) - I64{1})
-    if (sync_load(wrapping(root + I64{160})) > I64{0}) -> sync_store(wrapping(root + I64{160}), sync_load(wrapping(root + I64{160})) - I64{1})
-    if (deadline >= I64{0} && sync_load(wrapping(root + I64{32})) == deadline) -> sync_store(wrapping(root + I64{32}), I64{0})
+    if (sync_load(wrapping(root + I64{160})) > I64{0}) {
+        sync_store(wrapping(root + I64{160}), sync_load(wrapping(root + I64{160})) - I64{1})
+    }
+    if (deadline >= I64{0} && sync_load(wrapping(root + I64{32})) == deadline) {
+        sync_store(wrapping(root + I64{32}), I64{0})
+    }
 }
 
 // A carrier: the pool thread that runs task fibers (Fiber.jet fiber_run)
@@ -1611,7 +1733,7 @@ scheduler_carrier_idle: fn(root: I64) {
         }
         task := if (yielded != I64{0}) -> scheduler_pop(root) else -> I64{0}
         fiber := if (task == I64{0}) -> fiber_ready_pop(root) else -> I64{0}
-        if (task == I64{0} && fiber == I64{0}) -> task = scheduler_pop(root)
+        if (task == I64{0} && fiber == I64{0}) { task = scheduler_pop(root) }
         if (fiber == I64{0} && task == I64{0}) {
             if scheduler_carrier_excess(root) {
                 scheduler_carrier_retire(root, record)
@@ -1662,9 +1784,7 @@ scheduler_carrier_retire: fn(root: I64, record: I64) {
             sync_store(wrapping(data + at * I64{8}), sync_load(wrapping(data + last * I64{8})))
             sync_store(list, last)
             at = length
-        } else {
-            at += I64{1}
-        }
+        } else { at += I64{1} }
     }
     sync_store(wrapping(root + I64{152}), wrapping(sync_load(wrapping(root + I64{152})) - I64{1}))
     handle: sync_load(wrapping(record + I64{8}))
@@ -1677,7 +1797,7 @@ scheduler_carrier_retire: fn(root: I64, record: I64) {
 // marked PARALLEL_JOB in the first word, where a task state keeps its
 // positive reference count.
 scheduler_run_job: fn(job: I64) {
-    if (sync_load(job) == PARALLEL_JOB) -> parallel_job_run(job) else -> task_run(job)
+    if (sync_load(job) == PARALLEL_JOB) { parallel_job_run(job) } else { task_run(job) }
 }
 
 // The stack size a job's fiber takes (Fiber.jet fiber_stack_class): a
@@ -1742,7 +1862,9 @@ scheduler_idle: fn() -> Bool {
 
 #Export(c) jet_scheduler_drain_after_exit: fn() {
     loop {
-        if scheduler_idle() && jet_rt_observe_io_quiescent() -> return
+        if scheduler_idle() && jet_rt_observe_io_quiescent() {
+            return
+        }
         fiber_spin_yield()
     }
 }
@@ -1754,7 +1876,7 @@ scheduler_idle: fn() -> Bool {
 scheduler_timer_root: fn() -> I64 {
     root: scheduler_root_required()
     value: sync_load(wrapping(root + I64{104}))
-    if (value != I64{0}) -> return value
+    if (value != I64{0}) { return value }
     candidate: jet_rt_alloc(I64{48}, I64{8})
     thread_zero(candidate, I64{48})
     previous: sync_cas(wrapping(root + I64{104}), I64{0}, candidate)
@@ -1763,14 +1885,16 @@ scheduler_timer_root: fn() -> I64 {
         return previous
     }
     handle: thread_spawn(rt_scheduler_timer_address(), candidate)
-    if (handle < I64{0}) -> scheduler_start_failed()
+    if (handle < I64{0}) { scheduler_start_failed() }
     // Joinable: jet_rt_scheduler_shutdown joins it.
     sync_store(wrapping(candidate + I64{40}), handle)
     candidate
 }
 
 scheduler_timer_node_drop: fn(node: I64) {
-    if (sync_add(wrapping(node + I64{32}), I64{-1}) == I64{1}) -> jet_rt_free(node, I64{40}, I64{8})
+    if (sync_add(wrapping(node + I64{32}), I64{-1}) == I64{1}) {
+        jet_rt_free(node, I64{40}, I64{8})
+    }
 }
 
 scheduler_timer_schedule: fn(deadline_ns: I64, slot: I64) -> I64 {
@@ -1823,7 +1947,7 @@ scheduler_timer_cancel: fn(node: I64) {
                     scheduler_timer_node_drop(node)
                 }
                 else -> {
-                    if (earliest < I64{0} || deadline < earliest) -> earliest = deadline
+                    if (earliest < I64{0} || deadline < earliest) { earliest = deadline }
                     link = node
                 }
             }
@@ -1837,7 +1961,7 @@ scheduler_timer_cancel: fn(node: I64) {
 // thread count, or -1 (nothing stopped) while a timer is pending.
 scheduler_timer_shutdown: fn(root: I64) -> I64 {
     wheel: sync_load(wrapping(root + I64{104}))
-    if (wheel == I64{0}) -> return I64{0}
+    if (wheel == I64{0}) { return I64{0} }
     sync_mutex_lock(wheel)
     if (sync_load(wrapping(wheel + I64{16})) != I64{0}) {
         sync_mutex_unlock(wheel)
@@ -1868,8 +1992,10 @@ scheduler_timer_shutdown: fn(root: I64) -> I64 {
 // stay for it.
 #Export(c) jet_rt_scheduler_shutdown: fn() -> I64 {
     root: scheduler_root
-    if (root == I64{0}) -> return I64{0}
-    loop sync_load(wrapping(root + (I64{112}))) == (I64{-1}) -> _ := sync_wait(root + I64{112}, I64{-1}, I64{-1})
+    if (root == I64{0}) { return I64{0} }
+    loop sync_load(wrapping(root + (I64{112}))) == (I64{-1}) {
+        _ := sync_wait(root + I64{112}, I64{-1}, I64{-1})
+    }
     sync_thread_lock(root)
     if (sync_load(wrapping(root + I64{8})) != I64{0} || sync_load(wrapping(root + I64{40})) != I64{0}) {
         sync_thread_unlock(root)
@@ -1915,7 +2041,7 @@ scheduler_timer_shutdown: fn(root: I64) -> I64 {
 }
 
 scheduler_park_duration: fn(wait_kind: I64, duration_ns: I64) -> I64 {
-    if (duration_ns <= I64{0}) -> return jet_scheduler_native_propagate()
+    if (duration_ns <= I64{0}) { return jet_scheduler_native_propagate() }
     world: world_current()
     if (world != I64{0}) {
         if ((sync_load(wrapping(thread_base() + I64{112})).bit_and(I64{1})) == I64{0}) {
@@ -1925,7 +2051,7 @@ scheduler_park_duration: fn(wait_kind: I64, duration_ns: I64) -> I64 {
         virtual_slot: sync_park_new()
         world_park(world, duration_ns, virtual_slot)
         status := jet_scheduler_native_propagate()
-        if (status == I64{0}) -> status = scheduler_yield(wait_kind, virtual_slot, I64{-1})
+        if (status == I64{0}) { status = scheduler_yield(wait_kind, virtual_slot, I64{-1}) }
         sync_park_drop(virtual_slot)
         return status
     }
@@ -1941,6 +2067,7 @@ scheduler_park_duration: fn(wait_kind: I64, duration_ns: I64) -> I64 {
     _ := scheduler_park_duration(kind, deadline_ms_to_ns(millis))
     jet_rt_string_drop(kind)
 }
+
 #Export(c) jet_task_sleep_ms_defaulted: fn(millis: I64) {
     kind: scheduler_msg_sleep()
     if (scheduler_deadline_check(kind) == I64{0}) {
@@ -1949,6 +2076,7 @@ scheduler_park_duration: fn(wait_kind: I64, duration_ns: I64) -> I64 {
     }
     jet_rt_string_drop(kind)
 }
+
 #Export(c) jet_task_sleep_duration_ns_defaulted: fn(nanos: I64) {
     kind: scheduler_msg_sleep()
     if (scheduler_deadline_check(kind) == I64{0}) {
@@ -1957,6 +2085,7 @@ scheduler_park_duration: fn(wait_kind: I64, duration_ns: I64) -> I64 {
     }
     jet_rt_string_drop(kind)
 }
+
 #Export(c) jet_task_yield: fn() {
     kind: scheduler_msg_yield()
     slot: sync_park_new()
@@ -1977,6 +2106,7 @@ scheduler_owner_deadline_queue: fn() -> I64 {
     }
     queue
 }
+
 #Export(c) jet_scheduler_owner_deadline_register: fn(deadline_ns: I64) -> I64 {
     queue: scheduler_owner_deadline_queue()
     id: sync_load(wrapping(queue + I64{8}))
@@ -1990,6 +2120,7 @@ scheduler_owner_deadline_queue: fn() -> I64 {
     sync_store(link, node)
     id
 }
+
 #Export(c) jet_scheduler_owner_deadline_cancel: fn(id: I64) {
     queue: scheduler_owner_deadline_queue()
     link := queue
@@ -2003,16 +2134,19 @@ scheduler_owner_deadline_queue: fn() -> I64 {
         link = node
     }
 }
+
 #Export(c) jet_scheduler_owner_deadline_pop_due: fn(now_ns: I64) -> I64 {
     queue: scheduler_owner_deadline_queue()
     earliest := I64{0}
     link := queue
     loop sync_load(link) != (I64{0}) {
         node: sync_load(link)
-        if sync_load(wrapping(node + I64{8})) <= now_ns && (earliest == I64{0} || sync_load(wrapping(node + I64{8})) < sync_load(wrapping(sync_load(earliest) + I64{8}))) -> earliest = link
+        if sync_load(wrapping(node + I64{8})) <= now_ns && (earliest == I64{0} || sync_load(wrapping(node + I64{8})) < sync_load(wrapping(sync_load(earliest) + I64{8}))) {
+            earliest = link
+        }
         link = node
     }
-    if (earliest == I64{0}) -> return I64{0}
+    if (earliest == I64{0}) { return I64{0} }
     node: sync_load(earliest)
     id: sync_load(wrapping(node + I64{16}))
     sync_store(earliest, sync_load(node))
@@ -2025,7 +2159,9 @@ scheduler_fatal: fn(message: I64) {
     bytes: sync_load(message)
     length: sync_load(wrapping(message + I64{8}))
     trap_stop(I64{1}, bytes, length, I64{0}, I64{0})
-    if !rt_task_panic_publish(bytes, length, I64{0}) -> trap_simple_report(I64{0}, I64{0}, I64{0}, I64{0}, bytes, length)
+    if !rt_task_panic_publish(bytes, length, I64{0}) {
+        trap_simple_report(I64{0}, I64{0}, I64{0}, I64{0}, bytes, length)
+    }
     jet_rt_string_drop(message)
 }
 
@@ -2063,7 +2199,7 @@ scheduler_first_worker_refused: fn(errno: I64) {
 
 // A soft rlimit as scheduler_first_worker_refused names it.
 scheduler_limit_write: fn(soft: I64) {
-    if (soft < I64{0}) -> trap_write_static(rt_static_text("unlimited")) else -> trap_number(soft)
+    if (soft < I64{0}) { trap_write_static(rt_static_text("unlimited")) } else { trap_number(soft) }
 }
 
 // The one stop that reaches a root capture already being written: a stop
@@ -2078,19 +2214,21 @@ scheduler_abort_double_panic: fn() {
     alloc_write_word(I64{44836417121}, I64{5})
     alloc_abort()
 }
+
 // A stop that arrives while another unwinds is process-fatal: a panic during
 // cleanup with a stop pending, or in a body whose inherited stop unwinds
 // (Docs/spec/core-library-native-contract.md). It is never published: its
 // report goes straight to fd 2 and the process exits 70, so no further
 // cleanup runs.
 scheduler_stop_fatal: fn() -> Bool {
-    if (jet_rt_stop_domain() == I64{0}) -> return false
+    if (jet_rt_stop_domain() == I64{0}) { return false }
     flags: scheduler_scope_flags(scheduler_control_current())
-    if ((flags.bit_and(SCHEDULER_SCOPE_INHERITED_STOP)) != I64{0} ||
-        ((flags.bit_and(SCHEDULER_SCOPE_CLEANUP)) != I64{0} && scheduler_scope_delivered_kind(flags) != I64{0}) ||
-        scheduler_delivered_status_unmasked() != I64{0}) -> return true
+    if ((flags.bit_and(SCHEDULER_SCOPE_INHERITED_STOP)) != I64{0} || ((flags.bit_and(SCHEDULER_SCOPE_CLEANUP)) != I64{0} && scheduler_scope_delivered_kind(flags) != I64{0}) || scheduler_delivered_status_unmasked() != I64{0}) {
+        return true
+    }
     false
 }
+
 // A process-fatal stop handed over as its message: `form` 1 is a rendered
 // report, written as it is; 0 is a raw panic reason, rendered as the root
 // renders one. Either way the process exits 70.
@@ -2106,6 +2244,7 @@ scheduler_fatal_stop: fn(message: I64, length: I64, form: I64) {
     trap_msg_prelude_end()
     trap_footer(I64{0})
 }
+
 // `code` is the registered stop row the root report would carry (0 E3001, 1 E3010, 2 E3011;
 // trap_header's numbering). jet_runtime_stop records the raw stop on
 // every active expectation frame before it unwinds, so the native catch probe sees the same
@@ -2114,23 +2253,24 @@ rt_task_panic_publish: fn(message: I64, length: I64, code: I64) -> Bool {
     test_scope_record_coded_stop(code, message, length)
     rt_task_panic_publish_recorded(message, length)
 }
+
 // The publication rail once the caller has recorded its own stop code
 // (Trap.jet jet_rt_coded_stop). Stop domain 2 exists only inside a task,
 // parallel or realtime body, whose first entry installs the rail
 // (scheduler_body_enter): a program that runs none links no publication.
 rt_task_panic_publish_recorded: fn(message: I64, length: I64) -> Bool {
     code: task_panic_code
-    if (code == I64{0}) -> return false
+    if (code == I64{0}) { return false }
     coll_call2(code, message, length) != I64{0}
 }
 
 // rt_task_panic_publish_recorded's rail as a code word's target: 1 when
 // the stop is published to the task, 0 when the caller reports it.
 #Export(c) jet_rt_task_panic_publish: fn(message: I64, length: I64) -> I64 {
-    if (jet_rt_stop_domain() != I64{2}) -> return I64{0}
+    if (jet_rt_stop_domain() != I64{2}) { return I64{0} }
     if scheduler_stop_fatal() -> return I64{0}
     text: scheduler_text_new(length)
-    if (text == I64{0} && jet_rt_session_propagate() != I64{0}) -> return I64{1}
+    if (text == I64{0} && jet_rt_session_propagate() != I64{0}) { return I64{1} }
     coll_copy(message, sync_load(text), length)
     rt_task_panic_publish_owned(text, I64{0})
     I64{1}
@@ -2146,7 +2286,9 @@ rt_task_panic_publish_address: fn() -> I64 {
 rt_task_panic_publish_owned: fn(message: I64, form: I64) {
     record: scheduler_stop_new(I64{5}, message)
     control: scheduler_control_current()
-    if (control != I64{0}) -> sync_store(wrapping(record + I64{56}), sync_swap(wrapping(control + I64{152}), I64{0}))
+    if (control != I64{0}) {
+        sync_store(wrapping(record + I64{56}), sync_swap(wrapping(control + I64{152}), I64{0}))
+    }
     sync_store(wrapping(record + I64{48}), form)
     _ := scheduler_panic_publish_record(record)
 }
@@ -2155,7 +2297,7 @@ scheduler_thread_detach: fn() {
     base: thread_base()
     frames: sync_load(wrapping(base + I64{80}))
     if (frames != I64{0}) {
-        if (sync_load(frames) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+        if (sync_load(frames) != I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
         scheduler_words_drop(frames)
         sync_store(wrapping(base + I64{80}), I64{0})
     }
@@ -2175,32 +2317,51 @@ scheduler_thread_detach: fn() {
 // Host/session and interim comptime entry points. Controls and records are
 // opaque owned pointers; enter borrows a control and a caller-owned 32B slot.
 #Export(c) jet_rt_control_new: fn() -> I64 { scheduler_control_new() }
-#Export(c) jet_rt_control_enter: fn(control: I64, save: I64) { scheduler_control_enter(control, save) }
+
+#Export(c) jet_rt_control_enter: fn(control: I64, save: I64) {
+    scheduler_control_enter(control, save)
+}
+
 #Export(c) jet_rt_control_leave: fn(save: I64) { scheduler_control_leave(save) }
+
 #Export(c) jet_rt_control_interrupt: fn(control: I64) { scheduler_control_interrupt(control) }
+
 #Export(c) jet_rt_control_status: fn(control: I64) -> I64 { scheduler_control_status(control) }
-#Export(c) jet_rt_control_take_stop: fn(control: I64) -> I64 { scheduler_control_take_stop(control) }
+
+#Export(c) jet_rt_control_take_stop: fn(control: I64) -> I64 {
+    scheduler_control_take_stop(control)
+}
+
 #Export(c) jet_rt_control_discard_stop: fn(control: I64) { scheduler_control_discard_stop(control) }
+
 #Export(c) jet_rt_stop_kind: fn(record: I64) -> I64 { sync_load(record) }
+
 #Export(c) jet_rt_stop_jct_status: fn(record: I64) -> I64 { sync_load(wrapping(record + I64{8})) }
+
 #Export(c) jet_rt_stop_owner: fn(record: I64) -> I64 { sync_load(wrapping(record + I64{16})) }
+
 #Export(c) jet_rt_stop_start: fn(record: I64) -> I64 { sync_load(wrapping(record + I64{24})) }
+
 #Export(c) jet_rt_stop_end: fn(record: I64) -> I64 { sync_load(wrapping(record + I64{32})) }
+
 #Export(c) jet_rt_stop_form: fn(record: I64) -> I64 { sync_load(wrapping(record + I64{48})) }
+
 #Export(c) jet_rt_stop_take_message: fn(record: I64) -> I64 { scheduler_stop_take_message(record) }
+
 #Export(c) jet_rt_stop_drop: fn(record: I64) { scheduler_stop_drop(record) }
+
 // A stop's publication to the current control. A process-fatal panic is
 // reported and ends the process here instead (scheduler_stop_fatal).
 #Export(c) jet_rt_control_publish_stop: fn(kind: I64, jct_status: I64, owner: I64, start: I64, end: I64, message: I64, length: I64, form: I64) -> Bool {
     if (kind == I64{5}) {
-        if (jet_rt_stop_domain() == I64{0}) -> return false
+        if (jet_rt_stop_domain() == I64{0}) { return false }
         if scheduler_stop_fatal() {
             scheduler_fatal_stop(message, length, form)
             return false
         }
     }
     text: scheduler_text_new(length)
-    if (text == I64{0} && jet_rt_session_propagate() != I64{0}) -> return false
+    if (text == I64{0} && jet_rt_session_propagate() != I64{0}) { return false }
     coll_copy(message, sync_load(text), length)
     record: scheduler_stop_new(kind, text)
     sync_store(wrapping(record + I64{8}), jct_status)
@@ -2210,4 +2371,3 @@ scheduler_thread_detach: fn() {
     sync_store(wrapping(record + I64{48}), form)
     if (kind == I64{5}) -> scheduler_panic_publish_record(record) else -> scheduler_native_publish(record)
 }
-

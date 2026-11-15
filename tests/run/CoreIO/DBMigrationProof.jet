@@ -35,7 +35,7 @@ run: fn() {
     v1: db.migrate(scope, "v1", [SQL{"CREATE TABLE item (id INTEGER PRIMARY KEY, name TEXT NOT NULL)"}]) ?? -1
     print("migrate v1 steps: {v1}")
     if db.migrate(scope, "v2", [SQL{"CREATE TABLE audit (id INTEGER PRIMARY KEY)"}, SQL{"ALTER TABLE missing_table ADD COLUMN x INTEGER"}]) == {
-        .Ok(steps) -> print("migrate v2: applied {steps}")
+        .Ok(steps) -> { print("migrate v2: applied {steps}") }
         .Err(_) -> print("migrate v2: failed")
     }
     // A scope may not read the migration ledger ("migration metadata is
@@ -53,7 +53,7 @@ run: fn() {
     print("commit steps: {committed}")
     print("rows after commit: {count(scope, SQL{"SELECT COUNT(*) AS n FROM item"})}")
     if db.transaction(scope, "bad batch", [SQL{"INSERT INTO item (id, name) VALUES (3, 'three')"}, SQL{"INSERT INTO item (id, name) VALUES (1, 'duplicate')"}]) == {
-        .Ok(steps) -> print("bad batch: committed {steps}")
+        .Ok(steps) -> { print("bad batch: committed {steps}") }
         .Err(_) -> print("bad batch: rolled back")
     }
     print("rows after failed batch: {count(scope, SQL{"SELECT COUNT(*) AS n FROM item"})}")
@@ -62,7 +62,7 @@ run: fn() {
     other: db.open(path)
     other_scope: other.with_policy(policy, "owner")
     if other_scope.execute(SQL{"INSERT INTO item (id, name) VALUES (4, 'four')"}) == {
-        .Ok(_) -> print("second connection write: ok")
+        .Ok(_) -> { print("second connection write: ok") }
         .Err(_) -> print("second connection write: blocked")
     }
     print("rows seen by first connection: {count(scope, SQL{"SELECT COUNT(*) AS n FROM item"})}")
@@ -83,7 +83,7 @@ run: fn() {
 
     _closed: scope.close()
     if scope.query(SQL{"SELECT id FROM item"}) == {
-        .Ok(_) -> print("query after close: accepted")
+        .Ok(_) -> { print("query after close: accepted") }
         .Err(_) -> print("query after close: rejected")
     }
     fs.remove(path)

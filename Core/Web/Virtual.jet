@@ -6,8 +6,8 @@
 C_MAX_VISIBLE: 4096
 
 C_MAX_MEASURE: 4096
-C_MAX_VIRTUAL_EXTENT: 9223372036854775807
 
+C_MAX_VIRTUAL_EXTENT: 9223372036854775807
 
 WebVirtualWindow: struct {
     total_count: Int
@@ -21,12 +21,17 @@ WebVirtualWindow: struct {
     measured_count: Int
 
     visible_count: fn(self) -> Int Never! { sat_sub(self.end, self.start) }
+
     is_empty: fn(self) -> Bool Never! { self.start >= self.end }
+
     contains: fn(self, index: Int) -> Bool Never! { index >= self.start && index < self.end }
+
     range: fn(self) -> (start: Int, end: Int) Never! { (start: self.start, end: self.end) }
+
     within_frame_budget: fn(self, maximum: Int) -> Bool Never! {
         self.visible_count() <= if maximum < 0 -> 0 else -> maximum
     }
+
     with_measurement: fn(self, index: Int, size: Int) -> WebVirtualWindow Never! {
         if index < 0 || index >= self.total_count || size <= 0 -> return self.copy()
         count: sat_add(self.measured_count, 1)
@@ -37,6 +42,7 @@ WebVirtualWindow: struct {
         updated.measured_count = if count < 0 -> 0 else -> count
         updated
     }
+
     facts_json: fn(self) -> String Never! {
         "{{\"total_count\":{self.total_count},\"scroll_offset\":{self.scroll_offset},\"viewport_size\":{self.viewport_size},\"estimated_item_size\":{self.estimated_item_size},\"overscan\":{self.overscan},\"start\":{self.start},\"end\":{self.end},\"total_size\":{self.total_size},\"measured_count\":{self.measured_count}}}"
     }
@@ -116,7 +122,7 @@ window_measured: fn(total_count: Int, scroll_offset: Int, viewport_size: Int, fa
     loop s in measurements {
         if s > 0 && count < C_MAX_MEASURE {
             sum = bounded_add(sum, bounded_nonnegative(s))
-            count = count + 1
+            count += 1
         }
     }
     est := fallback_item_size
@@ -139,7 +145,6 @@ window_measured: fn(total_count: Int, scroll_offset: Int, viewport_size: Int, fa
     }
     out
 }
-
 
 slice: fn<T>(rows: [T], w: WebVirtualWindow) -> [T] Never! {
     start := w.start
@@ -193,7 +198,9 @@ plan_indices: fn(p: WebVirtualPlan) -> [Int] Never! {
 plan_viewport: fn(p: WebVirtualPlan) -> WebVirtualPlanViewport Never! { {plan: p} }
 
 plan_measure: fn(p: WebVirtualPlan, index: Int, size: Int) -> WebVirtualPlan Never! {
-    if index < 0 || index >= p.total_count || size <= 0 || size > C_MAX_VIRTUAL_EXTENT -> return p.copy()
+    if index < 0 || index >= p.total_count || size <= 0 || size > C_MAX_VIRTUAL_EXTENT {
+        return p.copy()
+    }
     if p.measured_count >= C_MAX_MEASURE -> return p.copy()
     count := p.measured_count + 1
     total := bounded_add(bounded_mul(p.estimated_item_size, p.measured_count), size)
@@ -238,6 +245,7 @@ max0: fn(n: Int) -> Int {
     if n < 0 -> return 0
     n
 }
+
 bounded_nonnegative: fn(n: Int) -> Int {
     if n < 0 -> return 0
     if n > C_MAX_VIRTUAL_EXTENT -> return C_MAX_VIRTUAL_EXTENT

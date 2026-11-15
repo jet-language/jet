@@ -72,13 +72,17 @@ ci_findings: fn(found: [String:Int]) -> [String] Never! {
     loop path in found.keys() {
         count: found[path]
         if allowed.get(path) == .Val(expected) {
-            if count != expected -> findings.push("{path}: {count} C declarations, the list allows {expected}; update its CI_ALLOWED row")
+            if count != expected {
+                findings.push("{path}: {count} C declarations, the list allows {expected}; update its CI_ALLOWED row")
+            }
         } else {
             findings.push("{path}: {count} C declarations, and no CI_ALLOWED row; use Core APIs instead of C")
         }
     }
     loop row in CI_ALLOWED {
-        if found.get(row.path) == None -> findings.push("{row.path}: no C declarations left; delete its CI_ALLOWED row")
+        if found.get(row.path) == None {
+            findings.push("{row.path}: no C declarations left; delete its CI_ALLOWED row")
+        }
     }
     findings.sort()
     findings

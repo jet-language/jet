@@ -1,16 +1,11 @@
-
 Holder: struct {
     value: Int
 
-    bump: fn(self, by: Int) -> Int {
-        return add(self.value + by)
-    }
+    bump: fn(self, by: Int) -> Int { return add(self.value + by) }
 }
 
 source: fn(value: Int) -> Int {
-    if value == 0 {
-        return Err("source failed")
-    }
+    if value == 0 -> return Err("source failed")
     return value
 }
 
@@ -18,18 +13,12 @@ add: fn(value: Int) -> Int { value + 1 }
 
 is_zero: fn(value: Int) -> Bool { value == 0 }
 
-argument: fn(value: Int) -> Int {
-    return add(source(value))
-}
+argument: fn(value: Int) -> Int { return add(source(value)) }
 
-nested: fn(value: Int) -> Int {
-    return source(value) + 1
-}
+nested: fn(value: Int) -> Int { return source(value) + 1 }
 
 branch: fn(value: Int) -> Int {
-    if is_zero(value) {
-        source(value)
-    }
+    if is_zero(value) -> source(value)
     return value
 }
 
@@ -43,7 +32,7 @@ closure: fn(value: Int) -> Int {
 }
 
 method: fn(value: Int) -> Int {
-    holder: Holder{ value: source(value) }
+    holder: Holder{value: source(value)}
     return add(holder.bump(1))
 }
 

@@ -7,17 +7,38 @@
 // hidden Rust bridge, and the C import stage read this one table.
 use {
     jetpack_foundation.[
-        ADA_MODULE_ROOT, ASM_MODULE_ROOT, BINDINGS_ROOT_SUBDIR, COBOL_MODULE_ROOT, COM_MODULE_ROOT, CPP_MODULE_ROOT,
-        CS_MODULE_ROOT, C_MODULE_ROOT, DART_MODULE_ROOT, FORTRAN_MODULE_ROOT, GO_MODULE_ROOT,
-        JAVA_MODULE_ROOT, JS_MODULE_ROOT, KW_RUST, LUA_MODULE_ROOT, OCTAVE_MODULE_ROOT,
-        PASCAL_MODULE_ROOT, PERL_MODULE_ROOT, PHP_MODULE_ROOT, PWSH_MODULE_ROOT, PY_MODULE_ROOT,
-        RUBY_MODULE_ROOT, R_MODULE_ROOT, SWIFT_MODULE_ROOT, TCL_MODULE_ROOT,
+        ADA_MODULE_ROOT,
+        ASM_MODULE_ROOT,
+        BINDINGS_ROOT_SUBDIR,
+        COBOL_MODULE_ROOT,
+        COM_MODULE_ROOT,
+        CPP_MODULE_ROOT,
+        CS_MODULE_ROOT,
+        C_MODULE_ROOT,
+        DART_MODULE_ROOT,
+        FORTRAN_MODULE_ROOT,
+        GO_MODULE_ROOT,
+        JAVA_MODULE_ROOT,
+        JS_MODULE_ROOT,
+        KW_RUST,
+        LUA_MODULE_ROOT,
+        OCTAVE_MODULE_ROOT,
+        PASCAL_MODULE_ROOT,
+        PERL_MODULE_ROOT,
+        PHP_MODULE_ROOT,
+        PWSH_MODULE_ROOT,
+        PY_MODULE_ROOT,
+        RUBY_MODULE_ROOT,
+        R_MODULE_ROOT,
+        SWIFT_MODULE_ROOT,
+        TCL_MODULE_ROOT,
     ]
     jet_foundation.[Namespace]
     jetpack_trust_root.[CacheProvenance]
 }
 
 FOREIGN_DESCRIPTOR_SCHEMA: "jet-ffi-descriptor-v1"
+
 FOREIGN_ABI_CONTRACT_VERSION: 1
 
 // The registered foreign languages are ForeignLanguage's cases, written from
@@ -62,9 +83,7 @@ impl ForeignLanguage {
         None
     }
 
-    bindings_subdir: fn(self) -> String Never! {
-        "{BINDINGS_ROOT_SUBDIR}/{self.root()}"
-    }
+    bindings_subdir: fn(self) -> String Never! { "{BINDINGS_ROOT_SUBDIR}/{self.root()}" }
 
     // Prefix used by generated bridge symbols. It lives beside the descriptor
     // table so the loader cannot grow a second language map.
@@ -445,7 +464,7 @@ ForeignABIContract: struct {
             floating: ForeignScalar.Float,
             boolean: ForeignScalar.Bool,
             character: ForeignScalar.Char,
-            string: ForeignScalar.String
+            string: ForeignScalar.String,
         }
     }
 
@@ -508,9 +527,7 @@ ForeignABIContract: struct {
     }
 
     // Field-for-field equality; the stamp names every field.
-    same_as: fn(self, other: ForeignABIContract) -> Bool Never! {
-        self.stamp() == other.stamp()
-    }
+    same_as: fn(self, other: ForeignABIContract) -> Bool Never! { self.stamp() == other.stamp() }
 }
 
 BinderCapability: enum {
@@ -588,9 +605,7 @@ BinderDescriptor: struct {
     cache_extension: String
     type_stub_file: ForeignStubFile
 
-    abi_contract: fn(self) -> ForeignABIContract Never! {
-        self.contract
-    }
+    abi_contract: fn(self) -> ForeignABIContract Never! { self.contract }
 
     capabilities_debug: fn(self) -> String Never! {
         names := [String]{}
@@ -610,7 +625,7 @@ BinderDescriptor: struct {
             contract: self.contract,
             effect_root: self.effect_root,
             provider: self.provider,
-            capabilities: self.capabilities
+            capabilities: self.capabilities,
         }
     }
 }
@@ -637,9 +652,7 @@ pkg_binder_adapter_capabilities: fn() -> [BinderCapability] Never! {
     [BinderCapability]{BinderCapability.TypedStub, BinderCapability.SafeWrapper, BinderCapability.OwnershipConversion, BinderCapability.LayoutValidation, BinderCapability.ErrorConversion, BinderCapability.CacheProvenance, BinderCapability.PackageProvider, BinderCapability.UnsafeRawEscape}
 }
 
-pkg_binder_planned_capabilities: fn() -> [BinderCapability] Never! {
-    pkg_binder_c_capabilities()
-}
+pkg_binder_planned_capabilities: fn() -> [BinderCapability] Never! { pkg_binder_c_capabilities() }
 
 pkg_binder_row: fn(language: ForeignLanguage, runtime: BinderRuntime, stub_kind: BindingStubKind, status: BinderStatus, contract: ForeignABIContract, capabilities: [BinderCapability], effect_root: String, provider: ForeignProvider, type_stub_file: ForeignStubFile) -> BinderDescriptor Never! {
     BinderDescriptor{
@@ -653,7 +666,7 @@ pkg_binder_row: fn(language: ForeignLanguage, runtime: BinderRuntime, stub_kind:
         effect_root: effect_root,
         provider: provider,
         cache_extension: "jet",
-        type_stub_file: type_stub_file
+        type_stub_file: type_stub_file,
     }
 }
 
@@ -687,7 +700,7 @@ pkg_foreign_binders: fn() -> [BinderDescriptor] Never! {
         pkg_binder_row(ForeignLanguage.Php, BinderRuntime.SupervisedPhpPool, BindingStubKind.PhpScript, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.Php", ForeignProvider.System, no_stub),
         pkg_binder_row(ForeignLanguage.R, BinderRuntime.SupervisedR, BindingStubKind.RScript, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.R", ForeignProvider.System, no_stub),
         pkg_binder_row(ForeignLanguage.Octave, BinderRuntime.SupervisedOctave, BindingStubKind.OctaveScript, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.Octave", ForeignProvider.System, no_stub),
-        pkg_binder_row(ForeignLanguage.Com, BinderRuntime.WindowsComAutomation, BindingStubKind.ComTypeLibrary, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.Com", ForeignProvider.System, no_stub)
+        pkg_binder_row(ForeignLanguage.Com, BinderRuntime.WindowsComAutomation, BindingStubKind.ComTypeLibrary, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.Com", ForeignProvider.System, no_stub),
     }
 }
 
@@ -740,9 +753,7 @@ FFIEvidenceBasis: enum {
         }
     }
 
-    is_unknown: fn(self) -> Bool Never! {
-        self == FFIEvidenceBasis.Unknown
-    }
+    is_unknown: fn(self) -> Bool Never! { self == FFIEvidenceBasis.Unknown }
 }
 
 // The close-symbol provenance and concurrency spellings of a generated C
@@ -919,23 +930,35 @@ FFIBoundaryFacts: struct {
     validate: fn(self) ForeignBridgeError! {
         required: [String]{self.schema, self.digest, self.language, self.library, self.effect_root, self.effects, self.source_authority, self.artifact_coverage_digest, self.loaded_artifact, self.target, self.generator}
         loop value in required {
-            if value.trim() == "" -> return Err(ForeignBridgeError{message: "foreign boundary carrier is incomplete"})
+            if value.trim() == "" {
+                return Err(ForeignBridgeError{message: "foreign boundary carrier is incomplete"})
+            }
         }
-        if !self.effects.split(";").to_list().contains(self.effect_root) -> return Err(ForeignBridgeError{message: "foreign boundary carrier narrowed its effect root"})
+        if !self.effects.split(";").to_list().contains(self.effect_root) {
+            return Err(ForeignBridgeError{message: "foreign boundary carrier narrowed its effect root"})
+        }
         coverage_complete: self.transitive_dependencies != None && self.reachable_callbacks != None && self.compiler_flags != None
         if !coverage_complete {
             loop obligation in self.obligations {
-                if !obligation.basis.is_unknown() -> return Err(ForeignBridgeError{message: "foreign boundary carrier has incomplete artifact coverage"})
+                if !obligation.basis.is_unknown() {
+                    return Err(ForeignBridgeError{message: "foreign boundary carrier has incomplete artifact coverage"})
+                }
             }
         }
         names := [String]{}
         loop obligation in self.obligations {
-            if obligation.name.trim() == "" || obligation.checker.trim() == "" || obligation.assumptions.len() == 0 || obligation.coverage_digest != self.artifact_coverage_digest -> return Err(ForeignBridgeError{message: "foreign boundary carrier has invalid `{obligation.name}` obligation"})
-            if names.contains(obligation.name) -> return Err(ForeignBridgeError{message: "foreign boundary carrier repeats `{obligation.name}` obligation"})
+            if obligation.name.trim() == "" || obligation.checker.trim() == "" || obligation.assumptions.len() == 0 || obligation.coverage_digest != self.artifact_coverage_digest {
+                return Err(ForeignBridgeError{message: "foreign boundary carrier has invalid `{obligation.name}` obligation"})
+            }
+            if names.contains(obligation.name) {
+                return Err(ForeignBridgeError{message: "foreign boundary carrier repeats `{obligation.name}` obligation"})
+            }
             names.push(obligation.name)
         }
         loop obligation in FOREIGN_BOUNDARY_OBLIGATIONS {
-            if !names.contains(obligation) -> return Err(ForeignBridgeError{message: "foreign boundary carrier omits `{obligation}` obligation"})
+            if !names.contains(obligation) {
+                return Err(ForeignBridgeError{message: "foreign boundary carrier omits `{obligation}` obligation"})
+            }
         }
     }
 }
@@ -965,14 +988,14 @@ CFFI: struct {
 
     target_for_scope: fn(self, importing_idx: Int, scope: String?, alias: String) -> Int? Never! {
         loop link in self.import_links {
-            if link.importing_idx == importing_idx && link.scope == scope && link.alias == alias -> return Val(link.target_idx)
+            if link.importing_idx == importing_idx && link.scope == scope && link.alias == alias {
+                return Val(link.target_idx)
+            }
         }
         None
     }
 
-    links_c: fn(self) -> Bool Never! {
-        self.libs.len() > 0
-    }
+    links_c: fn(self) -> Bool Never! { self.libs.len() > 0 }
 
     handle_fact: fn(self, lib: String, jet_name: String) -> FFIHandleFact? Never! {
         loop fact in self.handle_facts {

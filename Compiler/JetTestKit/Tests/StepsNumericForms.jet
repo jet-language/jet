@@ -17,14 +17,22 @@ use files: core.files
 #Test("f64 captured comparisons use IEEE equality ordering and parse failures") {
     root: cases_test_root("numeric-f64-comparison")
     rows: [
-        ["1.5", "2", "<", "PASS"], ["2", "2", "<=", "PASS"],
-        ["2", "1.5", ">", "PASS"], ["2", "2", ">=", "PASS"],
-        ["-0.0", "0.0", "==", "PASS"], ["1", "2", "!=", "PASS"],
-        ["1", "2", ">", "FAIL"], ["2", "1", "<", "FAIL"],
-        ["1", "2", "==", "FAIL"], ["2", "2", "!=", "FAIL"],
-        ["NaN", "NaN", "==", "FAIL"], ["NaN", "NaN", "!=", "PASS"],
-        ["NaN", "1", "<", "FAIL"], ["NaN", "1", ">=", "FAIL"],
-        ["word", "1", "==", "FAIL"], ["1", "word", "==", "FAIL"]
+        ["1.5", "2", "<", "PASS"],
+        ["2", "2", "<=", "PASS"],
+        ["2", "1.5", ">", "PASS"],
+        ["2", "2", ">=", "PASS"],
+        ["-0.0", "0.0", "==", "PASS"],
+        ["1", "2", "!=", "PASS"],
+        ["1", "2", ">", "FAIL"],
+        ["2", "1", "<", "FAIL"],
+        ["1", "2", "==", "FAIL"],
+        ["2", "2", "!=", "FAIL"],
+        ["NaN", "NaN", "==", "FAIL"],
+        ["NaN", "NaN", "!=", "PASS"],
+        ["NaN", "1", "<", "FAIL"],
+        ["NaN", "1", ">=", "FAIL"],
+        ["word", "1", "==", "FAIL"],
+        ["1", "word", "==", "FAIL"],
     ]
     loop (index, row) in rows {
         source: "step: printf '%s' '{row[0]}'\ncapture: a = text stdout\nstep: printf '%s' '{row[1]}'\ncapture: b = text stdout\ncap:a: f64 {row[2]} {{cap:b}} # original predicate\n"
@@ -40,7 +48,8 @@ use files: core.files
     good: "{prefix}cap:size: = \"3\"\ncap:size: delta {{cap:exact}} <= 0 # original predicate\nfile: data size = {{cap:size}}\n"
     assert_eq(cases_test_advanced(root, "bytes", good).verdict.status, "PASS")
     assert_eq(cases_test_advanced(root, "different", "{prefix}cap:size: = \"2\"\n").verdict.status, "FAIL")
-    loop row in [["-3", "2", "5", "PASS"], ["2", "-3", "4", "FAIL"], ["-4", "-2", "2", "PASS"], ["word", "2", "1", "FAIL"], ["1", "word", "1", "FAIL"]] {
+    loop row in
+        [["-3", "2", "5", "PASS"], ["2", "-3", "4", "FAIL"], ["-4", "-2", "2", "PASS"], ["word", "2", "1", "FAIL"], ["1", "word", "1", "FAIL"]] {
         source: "step: printf '%s' '{row[0]}'\ncapture: a = text stdout\nstep: printf '%s' '{row[1]}'\ncapture: b = text stdout\ncap:a: delta {{cap:b}} <= {row[2]} # original predicate\n"
         assert_eq(cases_test_advanced(root, "delta", source).verdict.status, row[3])
     }
@@ -56,7 +65,8 @@ use files: core.files
     assert_eq(cases_test_advanced(root, "strict", "{prefix}elapsed: median [a,b,c] < 1 * median [a,b,c]\n").verdict.status, "FAIL")
     assert_eq(cases_test_advanced(root, "zero-factor", "{prefix}elapsed: median [a,b,c] <= 0 * median [a,b,c]\n").verdict.status, "FAIL")
     assert_eq(cases_test_advanced(root, "saturating", "{prefix}elapsed: median [a,b,c] <= 9223372036854775807 * median [a,b,c]\n").verdict.status, "PASS")
-    loop predicate in ["median [a,b] > 0ns", "median [a,b,missing] > 0ns", "median [a,b,c] <= -1 * median [a,b,c]", "median [a,b,c] > 1ns"] {
+    loop predicate in
+        ["median [a,b] > 0ns", "median [a,b,missing] > 0ns", "median [a,b,c] <= -1 * median [a,b,c]", "median [a,b,c] > 1ns"] {
         assert_eq(cases_test_advanced(root, "invalid", "{prefix}elapsed: {predicate}\n").verdict.status, "REFUSED")
     }
     files.remove_all(root) ?? panic("remove median scratch")

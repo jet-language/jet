@@ -7,12 +7,17 @@
 // builds one action in two fresh private roots and requires agreement.
 
 STORE_REPRO_REPORT_DIR: "unreproducible"
+
 STORE_REPRO_REPORT_STATUS: "unreproducible"
+
 STORE_REPRO_REPORT_SCHEMA: "jet-reproducibility-report-v1"
+
 STORE_REPRO_CERTIFICATION_STAGE_DIR: "reproducibility-staging"
+
 STORE_REPRO_INDEPENDENT_PREFIX: "independent-agreeing-v1:"
 
 STORE_REPRO_REPORT_SEQUENCE: Shared{ProcessSequence{next: 0}}
+
 STORE_REPRO_CERTIFICATION_SEQUENCE: Shared{ProcessSequence{next: 0}}
 
 store_recover_certification_staging_unlocked: fn(roots: HangarRoots) -[FS, Env]> Int StoreError! {
@@ -24,11 +29,15 @@ store_recover_certification_staging_unlocked: fn(roots: HangarRoots) -[FS, Env]>
             return Err(StoreError.IO(error))
         }
     }
-    if info.is_symlink || !info.is_dir -> return Err(store_repro_invalid("reproducibility staging is not a real directory"))
+    if info.is_symlink || !info.is_dir {
+        return Err(store_repro_invalid("reproducibility staging is not a real directory"))
+    }
     swept := 0
     loop entry in files.list_dir(parent) {
         child: files.stat(entry.path)
-        if child.is_symlink || !child.is_dir -> return Err(store_repro_invalid("reproducibility staging contains a non-directory"))
+        if child.is_symlink || !child.is_dir {
+            return Err(store_repro_invalid("reproducibility staging contains a non-directory"))
+        }
         store_make_tree_writable_for_removal(entry.path)
         files.remove_all(entry.path)
         swept += 1
@@ -65,12 +74,14 @@ RootWorkspace: struct {
             return Err(failure)
         }
         store_repro_copy_nix_cache_configuration(independent, roots)
-        Ok(RootWorkspace{path, roots: independent})
+        Ok(RootWorkspace{path: path, roots: independent})
     }
 
     // Remove the private root (Rust `Drop`).
     remove: fn(self) Never! -[FS]> {
-        if !files.lexists(self.path) -> return
+        if !files.lexists(self.path) {
+            return
+        }
         store_make_tree_writable_for_removal(self.path).drop("workspace removal is best-effort")
         files.remove_all(self.path).drop("workspace removal is best-effort")
     }
@@ -148,7 +159,9 @@ store_build_for_cache: fn(verification: &StoreVerification, roots: HangarRoots, 
         left: if store_realize_uncached(verification, left_workspace.roots, store_repro_workspace_ctx(ctx, left_workspace.roots.hangar_dir()), request) == {
             .Ok(value) -> value
             .Err(error) -> {
-                if final_attempt -> recipe_promote_failed_attempt(left_workspace.roots.hangar_dir(), roots.hangar_dir(), store_repro_request_package(request)).drop("failed-attempt evidence is best-effort")
+                if final_attempt {
+                    recipe_promote_failed_attempt(left_workspace.roots.hangar_dir(), roots.hangar_dir(), store_repro_request_package(request)).drop("failed-attempt evidence is best-effort")
+                }
                 left_workspace.remove()
                 if !final_attempt -> next
                 return Err(error)
@@ -171,7 +184,9 @@ store_build_for_cache: fn(verification: &StoreVerification, roots: HangarRoots, 
         right: if store_realize_uncached(verification, right_workspace.roots, store_repro_workspace_ctx(ctx, right_workspace.roots.hangar_dir()), request) == {
             .Ok(value) -> value
             .Err(error) -> {
-                if final_attempt -> recipe_promote_failed_attempt(right_workspace.roots.hangar_dir(), roots.hangar_dir(), store_repro_request_package(request)).drop("failed-attempt evidence is best-effort")
+                if final_attempt {
+                    recipe_promote_failed_attempt(right_workspace.roots.hangar_dir(), roots.hangar_dir(), store_repro_request_package(request)).drop("failed-attempt evidence is best-effort")
+                }
                 left_workspace.remove()
                 right_workspace.remove()
                 if !final_attempt -> next
@@ -220,7 +235,7 @@ store_repro_compare_independent: fn(verification: &StoreVerification, left_works
     left_action: store_entry_action_key(left_entry)
     right_action: store_entry_action_key(right_entry)
     difference: if left_action != right_action -> Val(FirstDifference{path: ".", kind: .ActionIdentity, left: left_action, right: right_action}) else -> store_repro_compare_entries(verification, left_workspace.roots, left_entry, right_workspace.roots, right_entry)
-    Ok(IndependentComparison{left_entry, right_entry, left_action, right_action, difference})
+    Ok(IndependentComparison{left_entry: left_entry, right_entry: right_entry, left_action: left_action, right_action: right_action, difference: difference})
 }
 
 // Persist the durable evidence for a final disagreement and return the
@@ -249,7 +264,9 @@ store_repro_request_package: fn(request: RealizeRequest) -> String Never! {
 
 store_repro_check_cancelled: fn(options: IndependentRootOptions) RealizeError! -[FS]> {
     cancelled: options.cancelled ?? return
-    if cancelled() -> return Err(RealizeError.Store(StoreError.Interrupted("independent reproducibility certification cancelled")))
+    if cancelled() {
+        return Err(RealizeError.Store(StoreError.Interrupted("independent reproducibility certification cancelled")))
+    }
 }
 
 store_repro_independent_attestation: fn(action_key: String, output_hash: String) -> String Never! {
@@ -260,7 +277,9 @@ store_repro_independent_attestation: fn(action_key: String, output_hash: String)
 // Check one independent build's output and identity, and build the Hangar
 // entry it would register as.
 store_repro_entry_from_realized: fn(verification: &StoreVerification, roots: HangarRoots, realized: Realized) -[FS, Env]> StoreEntry StoreError! {
-    if realized.source_state != SourceState.Built -> return Err(store_repro_invalid("independent root result was not built from source"))
+    if realized.source_state != SourceState.Built {
+        return Err(store_repro_invalid("independent root result was not built from source"))
+    }
     hangar: roots.hangar_dir()
     canonical_hangar: files.canonicalize(hangar) ?? hangar
     canonical_out: files.canonicalize(realized.out) ?? return Err(store_repro_invalid("independent root output is unavailable: {err}"))
@@ -294,7 +313,7 @@ store_repro_entry_from_realized: fn(verification: &StoreVerification, roots: Han
         envelope: realized.envelope,
         cache_identity: identity,
         references: realized.references,
-        named_outputs: [String: String]{},
+        named_outputs: [String:String]{},
         platform_artifact_kind: "",
         producer_record: producer.encode(),
         receipt: "",
@@ -305,7 +324,7 @@ store_repro_entry_from_realized: fn(verification: &StoreVerification, roots: Han
     if actual != realized.envelope.output_hash {
         return Err(store_repro_invalid("independent root output re-hashed as `{actual}`, expected `{realized.envelope.output_hash}`"))
     }
-    named_outputs := [String: String]{}
+    named_outputs := [String:String]{}
     names := realized.named_outputs.keys().to_list()
     names.sort()
     loop name in names {
@@ -320,31 +339,35 @@ store_repro_entry_from_realized: fn(verification: &StoreVerification, roots: Han
         named_outputs[name] = if name == "out" -> realized.envelope.output_hash else -> pkg_try_output_hash_of_in_hangar(path, canonical_hangar, false)
     }
     id: if producer.provider == "nix" -> store_content_addressed_entry_id(realized.name, realized.version, realized.reference, realized.envelope.output_hash) else -> store_entry_id(realized.name, realized.version, realized.reference, realized.out)
-    Ok(StoreEntry{
-        id: id,
-        name: realized.name,
-        version: realized.version,
-        reference: realized.reference,
-        out: realized.out,
-        bin: realized.bin,
-        rlib: realized.rlib,
-        envelope: realized.envelope,
-        cache_identity: identity,
-        references: realized.references,
-        named_outputs: named_outputs,
-        platform_artifact_kind: "",
-        producer_record: producer.encode(),
-        receipt: "",
-        realized_at: 0,
-        last_used_at: 0,
-    })
+    Ok(
+        StoreEntry{
+            id: id,
+            name: realized.name,
+            version: realized.version,
+            reference: realized.reference,
+            out: realized.out,
+            bin: realized.bin,
+            rlib: realized.rlib,
+            envelope: realized.envelope,
+            cache_identity: identity,
+            references: realized.references,
+            named_outputs: named_outputs,
+            platform_artifact_kind: "",
+            producer_record: producer.encode(),
+            receipt: "",
+            realized_at: 0,
+            last_used_at: 0,
+        },
+    )
 }
 
 // Certify one closure batch against one snapshot of the existing projection.
 // Batch registration must not re-read every existing record per candidate.
 store_certify_registrations_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, entries: [StoreEntry]) StoreError! -[FS, Env]> {
     existing: store_list_unlocked(roots)
-    loop entry in entries -> store_repro_certify_registration(verification, roots, entry, entries, None, existing)
+    loop entry in entries {
+        store_repro_certify_registration(verification, roots, entry, entries, None, existing)
+    }
 }
 
 store_certify_registration_unlocked_with_fresh_agreement: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, additional: [StoreEntry], action_key: String) StoreError! -[FS, Env]> {
@@ -359,9 +382,11 @@ store_repro_certify_registration: fn(verification: &StoreVerification, roots: Ha
     if store_reproducibility_blocked(roots, action_key) && !fresh_agreement {
         return Err(store_repro_unreproducible_error(action_key, "this action already has durable unreproducible evidence"))
     }
-    candidates := [String: StoreEntry]{}
+    candidates := [String:StoreEntry]{}
     loop candidate in existing.concat(additional) {
-        if candidate.id != entry.id && store_entry_action_key(candidate) == action_key -> candidates[candidate.id] = candidate
+        if candidate.id != entry.id && store_entry_action_key(candidate) == action_key {
+            candidates[candidate.id] = candidate
+        }
     }
     ids := candidates.keys().to_list()
     ids.sort()
@@ -403,7 +428,9 @@ store_repro_compare_registration_entries: fn(verification: &StoreVerification, l
         (kind: .PlatformArtifactKind, left: left.platform_artifact_kind, right: right.platform_artifact_kind),
     }
     loop check in checks {
-        if check.left != check.right -> return Ok(Val(FirstDifference{path: ".", kind: check.kind, left: check.left, right: check.right}))
+        if check.left != check.right {
+            return Ok(Val(FirstDifference{path: ".", kind: check.kind, left: check.left, right: check.right}))
+        }
     }
     left_outputs: store_repro_nix_action_outputs(left, left_producer)
     right_outputs: store_repro_nix_action_outputs(right, right_producer)
@@ -443,8 +470,8 @@ NixActionOutput: struct {
 }
 
 // `nix.output.<name>` producer facts paired with their recorded digests.
-store_repro_nix_action_outputs: fn(entry: StoreEntry, producer: ProducerRecord) -> [String: NixActionOutput] Never! {
-    outputs := [String: NixActionOutput]{}
+store_repro_nix_action_outputs: fn(entry: StoreEntry, producer: ProducerRecord) -> [String:NixActionOutput] Never! {
+    outputs := [String:NixActionOutput]{}
     loop fact in producer.facts {
         if !fact.key.starts_with("nix.output.") -> next
         name: fact.key.removeprefix("nix.output.")
@@ -455,7 +482,7 @@ store_repro_nix_action_outputs: fn(entry: StoreEntry, producer: ProducerRecord) 
                 entry.envelope.output_hash
             }
         }
-        outputs[name] = NixActionOutput{digest, path: fact.value}
+        outputs[name] = NixActionOutput{digest: digest, path: fact.value}
     }
     outputs
 }
@@ -471,7 +498,9 @@ store_reproducibility_blocked: fn(roots: HangarRoots, action_key: String) -[FS]>
             return Err(StoreError.IO(error))
         }
     }
-    if info.is_symlink || !info.is_file -> return Err(store_repro_invalid("reproducibility evidence is not a regular file"))
+    if info.is_symlink || !info.is_file {
+        return Err(store_repro_invalid("reproducibility evidence is not a regular file"))
+    }
     Ok(true)
 }
 
@@ -488,56 +517,68 @@ store_repro_remove_report: fn(roots: HangarRoots, action_key: String) StoreError
     info: if files.stat(path) == {
         .Ok(found) -> found
         .Err(error) -> {
-            if store_io_is_not_found(error) -> return
+            if store_io_is_not_found(error) {
+                return
+            }
             return Err(StoreError.IO(error))
         }
     }
-    if info.is_symlink || !info.is_file -> return Err(store_repro_invalid("reproducibility evidence is not a regular file"))
+    if info.is_symlink || !info.is_file {
+        return Err(store_repro_invalid("reproducibility evidence is not a regular file"))
+    }
     files.remove(path)
     store_sync_store_directory(directory)
 }
 
 store_repro_report_json: fn(action_key: String, left_action_key: String, right_action_key: String, left: StoreEntry, right: StoreEntry, left_producer: ProducerRecord, right_producer: ProducerRecord, difference: FirstDifference) -> String Never! {
-    report: Dyn.Object([String: Dyn]{
-        "action_key": Dyn.Text(action_key.copy()),
-        "first_difference": Dyn.Object([String: Dyn]{
-            "kind": Dyn.Text(difference.kind.label()),
-            "left": Dyn.Text(difference.left.copy()),
-            "path": Dyn.Text(difference.path.copy()),
-            "right": Dyn.Text(difference.right.copy()),
-        }),
-        "left": store_repro_side_json(left, left_producer, left_action_key),
-        "producer_action": Dyn.Object([String: Dyn]{
-            "left_action_key": Dyn.Text(left_action_key.copy()),
-            "left_provider": Dyn.Text(left_producer.provider.copy()),
-            "left_source_digest": Dyn.Text(left_producer.source_digest.copy()),
-            "left_source": Dyn.Text(left_producer.immutable_source.copy()),
-            "right_action_key": Dyn.Text(right_action_key.copy()),
-            "right_provider": Dyn.Text(right_producer.provider.copy()),
-            "right_source_digest": Dyn.Text(right_producer.source_digest.copy()),
-            "right_source": Dyn.Text(right_producer.immutable_source.copy()),
-        }),
-        "right": store_repro_side_json(right, right_producer, right_action_key),
-        "schema": Dyn.Text(STORE_REPRO_REPORT_SCHEMA),
-        "status": Dyn.Text(STORE_REPRO_REPORT_STATUS),
-    })
+    report: Dyn.Object(
+        [String:Dyn]{
+            "action_key": Dyn.Text(action_key.copy()),
+            "first_difference": Dyn.Object(
+                [String:Dyn]{
+                    "kind": Dyn.Text(difference.kind.label()),
+                    "left": Dyn.Text(difference.left.copy()),
+                    "path": Dyn.Text(difference.path.copy()),
+                    "right": Dyn.Text(difference.right.copy()),
+                },
+            ),
+            "left": store_repro_side_json(left, left_producer, left_action_key),
+            "producer_action": Dyn.Object(
+                [String:Dyn]{
+                    "left_action_key": Dyn.Text(left_action_key.copy()),
+                    "left_provider": Dyn.Text(left_producer.provider.copy()),
+                    "left_source_digest": Dyn.Text(left_producer.source_digest.copy()),
+                    "left_source": Dyn.Text(left_producer.immutable_source.copy()),
+                    "right_action_key": Dyn.Text(right_action_key.copy()),
+                    "right_provider": Dyn.Text(right_producer.provider.copy()),
+                    "right_source_digest": Dyn.Text(right_producer.source_digest.copy()),
+                    "right_source": Dyn.Text(right_producer.immutable_source.copy()),
+                },
+            ),
+            "right": store_repro_side_json(right, right_producer, right_action_key),
+            "schema": Dyn.Text(STORE_REPRO_REPORT_SCHEMA),
+            "status": Dyn.Text(STORE_REPRO_REPORT_STATUS),
+        },
+    )
     "{json.canonical(report) ?? panic("value is not canonical JSON")}\n"
 }
 
 store_repro_side_json: fn(entry: StoreEntry, producer: ProducerRecord, action_key: String) -> Dyn Never! {
-    Dyn.Object([String: Dyn]{
-        "action_key": Dyn.Text(action_key.copy()),
-        "capabilities": Dyn.Text(producer.facts.get("build.capabilities") ?? ""),
-        "entry": Dyn.Text(store_repro_report_entry_id(entry, action_key)),
-        "output_hash": Dyn.Text(entry.envelope.output_hash.copy()),
-        "platform": Dyn.Text(entry.envelope.platform.copy()),
-        "producer_facts": store_repro_text_object(producer.facts),
-        "provenance": Dyn.Text(entry.envelope.provenance.copy()),
-        "replay_facts": store_repro_text_object(producer.plan.facts()),
-        "source_fingerprint": Dyn.Text(entry.cache_identity.source_fingerprint.copy()),
-        "recipe_fingerprint": Dyn.Text(entry.cache_identity.recipe_fingerprint.copy()),
-        "policy_fingerprint": Dyn.Text(entry.cache_identity.policy_fingerprint.copy()),
-    })
+    Dyn.Object(
+        [String:Dyn]{
+            "action_key": Dyn.Text(action_key.copy()),
+            "capabilities": Dyn.Text(producer.facts.get("build.capabilities") ?? ""),
+            "entry": Dyn.Text(store_repro_report_entry_id(entry, action_key)),
+            "output_hash": Dyn.Text(entry.envelope.output_hash.copy()),
+            "platform": Dyn.Text(entry.envelope.platform.copy()),
+            "producer_facts": store_repro_text_object(producer.facts),
+            "provenance": Dyn.Text(entry.envelope.provenance.copy()),
+            "replay_facts": store_repro_text_object(producer.plan.facts()),
+            "source_fingerprint": Dyn.Text(entry.cache_identity.source_fingerprint.copy()),
+            "recipe_fingerprint": Dyn.Text(entry.cache_identity.recipe_fingerprint.copy()),
+            "policy_fingerprint": Dyn.Text(entry.cache_identity.policy_fingerprint.copy()),
+        },
+    )
 }
 
 store_repro_report_entry_id: fn(entry: StoreEntry, action_key: String) -> String Never! {
@@ -553,7 +594,9 @@ store_repro_persist_report: fn(roots: HangarRoots, action_key: String, report: S
     destination: store_repro_report_path(directory, action_key)
     if files.lexists(destination) {
         info: files.stat(destination)
-        if info.is_symlink || !info.is_file -> return Err(store_repro_invalid("reproducibility evidence path is not a regular file"))
+        if info.is_symlink || !info.is_file {
+            return Err(store_repro_invalid("reproducibility evidence path is not a regular file"))
+        }
         return Err(store_repro_unreproducible_error(action_key, "this action already has durable unreproducible evidence"))
     }
     sequence: process_sequence_take(STORE_REPRO_REPORT_SEQUENCE)
@@ -586,7 +629,9 @@ store_repro_report_directory: fn(roots: HangarRoots, create: Bool) -[FS]> String
             return Err(StoreError.IO(error))
         }
     }
-    if root_info.is_symlink || !root_info.is_dir -> return Err(store_repro_invalid("Jetpack root is not a real directory"))
+    if root_info.is_symlink || !root_info.is_dir {
+        return Err(store_repro_invalid("Jetpack root is not a real directory"))
+    }
     private_dir: files.join(root, "private")
     store_repro_ensure_directory(private_dir, create)
     if !store_repro_private_present(private_dir, create) -> return Ok(None)
@@ -606,7 +651,9 @@ store_repro_ensure_directory: fn(path: String, create: Bool) StoreError! -[FS]> 
             return
         }
     }
-    if info.is_symlink || !info.is_dir -> return Err(store_repro_invalid("reproducibility evidence directory is not real"))
+    if info.is_symlink || !info.is_dir {
+        return Err(store_repro_invalid("reproducibility evidence directory is not real"))
+    }
 }
 
 store_repro_private_present: fn(path: String, create: Bool) -[FS]> Bool StoreError! {
@@ -617,7 +664,9 @@ store_repro_private_present: fn(path: String, create: Bool) -[FS]> Bool StoreErr
             return Err(StoreError.IO(error))
         }
     }
-    if info.is_symlink || !info.is_dir -> return Err(store_repro_invalid("reproducibility evidence directory is not real"))
+    if info.is_symlink || !info.is_dir {
+        return Err(store_repro_invalid("reproducibility evidence directory is not real"))
+    }
     Ok(true)
 }
 
@@ -657,7 +706,9 @@ store_repro_decode_producer: fn(entry: StoreEntry) -> ProducerRecord StoreError!
 
 // Rust `(output_hash, id) <= (output_hash, id)` tuple order.
 store_repro_sorts_first: fn(left: StoreEntry, right: StoreEntry) -> Bool Never! {
-    if left.envelope.output_hash != right.envelope.output_hash -> return left.envelope.output_hash < right.envelope.output_hash
+    if left.envelope.output_hash != right.envelope.output_hash {
+        return left.envelope.output_hash < right.envelope.output_hash
+    }
     left.id <= right.id
 }
 

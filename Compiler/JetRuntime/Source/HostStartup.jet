@@ -80,7 +80,7 @@ host_environment_split: fn(bytes: I64) -> I64 {
 // runs no user code meanwhile. 0 once restarted; -1, changing nothing, when
 // no main registered the startup stack. Runtime test: HostRestartTests.jet.
 #Export(c) jet_rt_host_restart: fn(argc: I64, argv: I64, envp: I64) -> I64 {
-    if (host_argc == I64{-1} || host_envp_lives != I64{1}) -> return I64{-1}
+    if (host_argc == I64{-1} || host_envp_lives != I64{1}) { return I64{-1} }
     host_arguments_register(argc, argv, envp, true, true)
     I64{0}
 }
@@ -141,9 +141,7 @@ host_arguments_register: fn(argc: I64, argv: I64, envp: I64, main: Bool, restart
     rt_text_store(pending, I64{0})
     rt_text_store(wrapping(pending + I64{8}), raw_count)
     rt_text_bytes_copy(wrapping(pending + I64{16}), envp, raw_count * I64{8})
-    #Unsafe("registration is single-threaded and precedes user code") {
-        host_env_pending = pending
-    }
+    #Unsafe("registration is single-threaded and precedes user code") { host_env_pending = pending }
     I64{0}
 }
 
@@ -162,7 +160,7 @@ host_environment_index: fn(envp: I64, raw_count: I64) {
         entry: rt_text_word(wrapping(envp + index * I64{8}))
         split: host_environment_split(entry)
         if (split >= I64{0}) {
-            if (rows == I64{0}) -> rows = jet_rt_alloc(raw_count * I64{24}, I64{8})
+            if (rows == I64{0}) { rows = jet_rt_alloc(raw_count * I64{24}, I64{8}) }
             length: host_startup_byte_length(entry)
             total_bytes = total_bytes + length + I64{1}
             row: wrapping(rows + valid * I64{24})
@@ -205,7 +203,9 @@ host_arguments_require: fn() {
 host_environment_require: fn() {
     host_arguments_require()
     pending: host_env_pending
-    if (pending == I64{0} || sync_load(pending) == I64{2}) -> return
+    if (pending == I64{0} || sync_load(pending) == I64{2}) {
+        return
+    }
     if sync_once_enter(pending) {
         host_environment_index(wrapping(pending + I64{16}), rt_text_word(wrapping(pending + I64{8})))
         sync_once_complete(pending)
@@ -317,7 +317,9 @@ host_startup_list: fn(bytes: I64, length: I64, output: I64) {
     // the job name's static bytes.
     at := I64{0}
     loop at < length {
-        if (rt_text_byte(wrapping(bytes + at)) != rt_text_byte(wrapping(data + at))) { return I64{0} }
+        if (rt_text_byte(wrapping(bytes + at)) != rt_text_byte(wrapping(data + at))) {
+            return I64{0}
+        }
         at = wrapping(at + I64{1})
     }
     I64{1}
@@ -330,7 +332,9 @@ host_startup_list: fn(bytes: I64, length: I64, output: I64) {
 // return and the entry runs.
 #Export(c) jet_rt_entry_job_unknown: fn(prefix: I64, prefix_length: I64, suffix: I64, suffix_length: I64) {
     host_arguments_require()
-    if (host_argc < I64{2}) { return }
+    if (host_argc < I64{2}) {
+        return
+    }
     bytes: host_argument_bytes(I64{1})
     length: host_startup_byte_length(bytes)
     first := I64{0}
@@ -338,7 +342,9 @@ host_startup_list: fn(bytes: I64, length: I64, output: I64) {
         // argv[1] is an immutable startup string of `length` bytes.
         first = rt_text_byte(bytes)
     }
-    if (first == I64{45}) { return }
+    if (first == I64{45}) {
+        return
+    }
     text: rt_text_copy(prefix, prefix_length)
     rt_text_append(text, bytes, length)
     rt_text_append(text, suffix, suffix_length)
@@ -425,14 +431,14 @@ host_environment_value_bytes: fn(key_data: I64, key_length: I64) -> I64 {
 // (ProductionReceipt.jet) links neither the environment capture nor the
 // allocator.
 host_startup_environment_value: fn(key: I64) -> I64 {
-    if (host_envp_lives == I64{0}) -> return I64{0}
+    if (host_envp_lives == I64{0}) { return I64{0} }
     value: host_envp_value(host_envp, rt_text_data(key), rt_text_len(key))
-    if (value == I64{0}) -> return I64{0}
+    if (value == I64{0}) { return I64{0} }
     length: host_startup_byte_length(value)
     at := I64{0}
     loop at < length {
         width: rt_text_valid_width(wrapping(value + at), wrapping(length - at), I64{1})
-        if (width < I64{0}) -> return I64{0}
+        if (width < I64{0}) { return I64{0} }
         at = wrapping(at + width)
     }
     value
@@ -444,10 +450,10 @@ host_startup_environment_value: fn(key: I64) -> I64 {
 // no row. A row is compared only when its first byte matches, and the compare
 // stops at the row's NUL, so it never reads past a row.
 host_envp_value: fn(envp: I64, key_data: I64, key_length: I64) -> I64 {
-    if (envp == I64{0} || key_length == I64{0}) -> return I64{0}
+    if (envp == I64{0} || key_length == I64{0}) { return I64{0} }
     at := I64{1}
     loop at < key_length {
-        if (rt_text_byte(wrapping(key_data + at)) == I64{61}) -> return I64{0}
+        if (rt_text_byte(wrapping(key_data + at)) == I64{61}) { return I64{0} }
         at = wrapping(at + I64{1})
     }
     first: rt_text_byte(key_data)
@@ -455,11 +461,15 @@ host_envp_value: fn(envp: I64, key_data: I64, key_length: I64) -> I64 {
     // `envp` is a live null-terminated pointer array of NUL-terminated rows.
     loop {
         entry: rt_text_word(cursor)
-        if (entry == I64{0}) -> return I64{0}
+        if (entry == I64{0}) { return I64{0} }
         if (rt_text_byte(entry) == first) {
             at = I64{1}
-            loop at < key_length && rt_text_byte(wrapping(entry + at)) == rt_text_byte(wrapping(key_data + at)) -> at = wrapping(at + I64{1})
-            if (at == key_length && rt_text_byte(wrapping(entry + key_length)) == I64{61}) -> return wrapping(entry + key_length + I64{1})
+            loop at < key_length && rt_text_byte(wrapping(entry + at)) == rt_text_byte(wrapping(key_data + at)) {
+                at = wrapping(at + I64{1})
+            }
+            if (at == key_length && rt_text_byte(wrapping(entry + key_length)) == I64{61}) {
+                return wrapping(entry + key_length + I64{1})
+            }
         }
         cursor = wrapping(cursor + I64{8})
     }
@@ -468,12 +478,12 @@ host_envp_value: fn(envp: I64, key_data: I64, key_length: I64) -> I64 {
 // std::env::var parity for internal runtime flags: invalid UTF-8 is absent.
 rt_env_get: fn(key: I64) -> I64 {
     value: host_environment_value(key)
-    if (value == I64{0}) -> return I64{0}
+    if (value == I64{0}) { return I64{0} }
     length: host_startup_byte_length(value)
     at := I64{0}
     loop at < length {
         width: rt_text_valid_width(wrapping(value + at), wrapping(length - at), I64{1})
-        if (width < I64{0}) -> return I64{0}
+        if (width < I64{0}) { return I64{0} }
         at = wrapping(at + width)
     }
     rt_text_copy(value, length)

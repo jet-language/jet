@@ -340,7 +340,9 @@ sema_loop_value_push_frame: fn(context: &SemaCheckContext, label: String?, entry
 }
 
 sema_loop_value_pop_frame: fn(context: &SemaCheckContext) Never! {
-    if context.loop_value_frames.len() == 0 -> return
+    if context.loop_value_frames.len() == 0 {
+        return
+    }
     frame: context.loop_value_frames.pop() ?? return
     if context.loop_break_flows.len() > 0 -> _ := context.loop_break_flows.pop()
     if frame.kind == SemaLoopValueKind.Result -> context.last_loop_result_type = frame.ty
@@ -360,17 +362,23 @@ sema_loop_value_resolve_frame: fn(context: SemaCheckContext, label: String?) -> 
 }
 
 sema_loop_value_record_break: fn(context: &SemaCheckContext, frame_index: Int, state: SemaOwnershipState) Never! {
-    if frame_index < 0 || frame_index >= context.loop_break_flows.len() -> return
+    if frame_index < 0 || frame_index >= context.loop_break_flows.len() {
+        return
+    }
     context.loop_break_flows[frame_index].paths.push(sema_ownership_state_snapshot(state))
 }
 
 sema_loop_value_set_result_type: fn(context: &SemaCheckContext, frame_index: Int, ty: Type) Never! {
-    if frame_index < 0 || frame_index >= context.loop_value_frames.len() -> return
+    if frame_index < 0 || frame_index >= context.loop_value_frames.len() {
+        return
+    }
     context.loop_value_frames[frame_index].ty = Val(ty)
 }
 
 sema_loop_value_break_flows: fn(context: SemaCheckContext, frame_index: Int) -> [SemaOwnershipState] Never! {
-    if frame_index < 0 || frame_index >= context.loop_break_flows.len() -> return [SemaOwnershipState]{}
+    if frame_index < 0 || frame_index >= context.loop_break_flows.len() {
+        return [SemaOwnershipState]{}
+    }
     context.loop_break_flows[frame_index].paths
 }
 
@@ -389,7 +397,9 @@ sema_loop_value_collecting_type: fn(context: SemaCheckContext) -> Type? {
 }
 
 sema_loop_value_set_collecting_type: fn(context: &SemaCheckContext, ty: Type) Never! {
-    if context.collect_item_types.len() == 0 -> return
+    if context.collect_item_types.len() == 0 {
+        return
+    }
     context.collect_item_types[context.collect_item_types.len() - 1] = Val(ty)
 }
 
@@ -603,7 +613,9 @@ SemaScopeEnvironment: struct {
 // graph in the program tables; the scope environment holds it only between
 // passes.
 sema_scope_environment_no_os: fn(environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    if module_is_core(environment.module_identity) || environment.package_identity == JET_CANONICAL_EFFECT_PACKAGE_IDENTITY -> return false
+    if module_is_core(environment.module_identity) || environment.package_identity == JET_CANONICAL_EFFECT_PACKAGE_IDENTITY {
+        return false
+    }
     if program.registration_graph == .Val(graph) -> return graph.target_machine.no_os
     if environment.registration_graph == .Val(graph) -> return graph.target_machine.no_os
     false
@@ -658,7 +670,7 @@ SemaScopeProbeSource: enum {
     Import(import_index: Int, binding: Int)
     Namespace(module_index: Int, position: Int)
 }
- 
+
 // The caller's written `T E!` return (its span and success type `T`) and the
 // end of its declaration, where E2404 offers a conversion `impl`.
 SemaFailureRepair: struct {
@@ -929,8 +941,6 @@ SemaNumberRetype: struct {
     use_span: Span
 }
 
- 
-
 SemaScopeModulePolicy: struct {
     unit_explicit_units: Bool
     copies_explicit: Bool
@@ -1023,9 +1033,7 @@ SemaScopeLookupCounters: struct {
     counters: Shared<SemaLookupCounters>
 
     impl Debug {
-        debug: fn(self) -> String {
-            "SemaScopeLookupCounters"
-        }
+        debug: fn(self) -> String { "SemaScopeLookupCounters" }
     }
 }
 
@@ -1123,7 +1131,9 @@ sema_program_symbol_key: fn(program: SemaProgramTables, id: SymbolID) -> String 
 // than lowered to a guessed callee.
 sema_call_callee_decl: fn(program: SemaProgramTables, symbol: SymbolID, span: Span, diagnostics: &[Diagnostic]) -> DeclID? Never! {
     if program.registration_graph == .Val(graph) {
-        if !symbol_is_local(symbol) && sema_registration_callable_id(graph, symbol) == .Val(id) -> return Val(id)
+        if !symbol_is_local(symbol) && sema_registration_callable_id(graph, symbol) == .Val(id) {
+            return Val(id)
+        }
     }
     key: if symbol_is_local(symbol) -> "" else -> sema_program_symbol_key(program, symbol)
     diagnostics.push(sema_error("E0003", span, "the call target `{key}` is not a registered callable", "every direct call names the DeclID its callable registered", "report this compiler bug with the source that triggers it"))
@@ -1133,7 +1143,9 @@ sema_call_callee_decl: fn(program: SemaProgramTables, symbol: SymbolID, span: Sp
 // The key text of the registered declaration `id` (diagnostics, call facts,
 // effect node keys). A DeclID is only minted from a graph's table.
 sema_program_decl_key: fn(program: SemaProgramTables, id: DeclID) -> String Never! {
-    if program.registration_graph == .Val(graph) -> return decl_table_key(graph.decls, graph.symbols, id)
+    if program.registration_graph == .Val(graph) {
+        return decl_table_key(graph.decls, graph.symbols, id)
+    }
     panic("a DeclID outlived its registration graph")
 }
 
@@ -1185,7 +1197,9 @@ sema_scope_environment_init: fn(module_identity: ModuleID, package_identity: Str
 // The identity text of the environment's module: its graph's spelling, or the
 // module name a graphless snapshot check names its module by.
 sema_scope_environment_module_text: fn(environment: SemaScopeEnvironment, program: SemaProgramTables) -> String Never! {
-    if program.registration_graph == .Val(graph) -> return module_text(graph.module_table, environment.module_identity)
+    if program.registration_graph == .Val(graph) {
+        return module_text(graph.module_table, environment.module_identity)
+    }
     environment.module_name
 }
 
@@ -1193,7 +1207,9 @@ sema_scope_environment_module_text: fn(environment: SemaScopeEnvironment, progra
 // spell it (sema_scope_environment_module_text); "" for another module of a
 // graphless check, which has none.
 sema_scope_module_text: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID) -> String Never! {
-    if program.registration_graph == .Val(graph) -> return module_text(graph.module_table, module_identity)
+    if program.registration_graph == .Val(graph) {
+        return module_text(graph.module_table, module_identity)
+    }
     if module_identity == environment.module_identity -> return environment.module_name
     ""
 }
@@ -1308,7 +1324,9 @@ sema_scope_caller_row: fn(environment: SemaScopeEnvironment, graph: SemaRegistra
 // sema_scope_caller_row as an option: None when no row registers the module.
 sema_scope_caller_index: fn(environment: SemaScopeEnvironment, graph: SemaRegistrationGraph) -> Int? Never! {
     row: environment.module_row
-    if row >= 0 && row < graph.modules.len() && graph.modules[row].module_identity == environment.module_identity -> return Val(row)
+    if row >= 0 && row < graph.modules.len() && graph.modules[row].module_identity == environment.module_identity {
+        return Val(row)
+    }
     sema_registration_module_index(graph, environment.module_identity)
 }
 
@@ -1316,7 +1334,9 @@ sema_scope_environment_boxed_edge: fn(environment: SemaScopeEnvironment, program
     if program.registration_graph == .Val(graph) {
         row: sema_type_graph_nominal_row(graph, owner) ?? return false
         module_identity: graph.modules[row.module_index].module_identity
-        if sema_scope_checked_type_row(environment, program, module_identity, graph.modules[row.module_index].nominals[row.row].symbol.name) == .Val(checked_row) -> return sema_checked_type_has_boxed_edge(program.checked_types[checked_row], edge)
+        if sema_scope_checked_type_row(environment, program, module_identity, graph.modules[row.module_index].nominals[row.row].symbol.name) == .Val(checked_row) {
+            return sema_checked_type_has_boxed_edge(program.checked_types[checked_row], edge)
+        }
         // Matched in place: a pattern on the indexed path copies the whole item.
         nominal: graph.modules[row.module_index].nominals[row.row]
         if nominal.source == .SourceAST(definition) {
@@ -1405,7 +1425,6 @@ sema_check_context_init: fn() -> SemaCheckContext Never! {
         arrow_loop_body: false,
     }
 }
- 
 
 sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Never! {
     snapshot := SemaCheckContext{
@@ -1670,14 +1689,24 @@ sema_scope_commit: fn(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
 sema_check_context_rollback: fn(context: &SemaCheckContext, mark: &&SemaCheckContextMark) Never! {
     loop context.call_facts.len() > mark.call_facts -> _ := context.call_facts.pop()
     loop context.module_writes.len() > mark.module_writes -> _ := context.module_writes.pop()
-    loop context.call_return_views.len() > mark.call_return_views -> _ := context.call_return_views.pop()
-    loop context.local_view_provenance.len() > mark.local_view_provenance -> _ := context.local_view_provenance.pop()
+    loop context.call_return_views.len() > mark.call_return_views {
+        _ := context.call_return_views.pop()
+    }
+    loop context.local_view_provenance.len() > mark.local_view_provenance {
+        _ := context.local_view_provenance.pop()
+    }
     loop context.name_references.len() > mark.name_references -> _ := context.name_references.pop()
-    loop context.comptime_requests.len() > mark.comptime_requests -> _ := context.comptime_requests.pop()
+    loop context.comptime_requests.len() > mark.comptime_requests {
+        _ := context.comptime_requests.pop()
+    }
     sema_comptime_body_sources_truncate(context, mark.comptime_body_sources)
     loop context.compute_calls.len() > mark.compute_calls -> _ := context.compute_calls.pop()
-    loop context.autodiff_obligations.len() > mark.autodiff_obligations -> _ := context.autodiff_obligations.pop()
-    loop context.generic_crossings.len() > mark.generic_crossings -> _ := context.generic_crossings.pop()
+    loop context.autodiff_obligations.len() > mark.autodiff_obligations {
+        _ := context.autodiff_obligations.pop()
+    }
+    loop context.generic_crossings.len() > mark.generic_crossings {
+        _ := context.generic_crossings.pop()
+    }
     loop context.generic_calls.len() > mark.generic_calls -> _ := context.generic_calls.pop()
     loop context.copy_events.len() > mark.copy_events -> _ := context.copy_events.pop()
     loop context.origin_facts.len() > mark.origin_facts -> _ := context.origin_facts.pop()
@@ -1688,12 +1717,22 @@ sema_check_context_rollback: fn(context: &SemaCheckContext, mark: &&SemaCheckCon
         if dropped == .Val(id) -> _ := context.filed_expr_id_set.remove(id)
     }
     context.next_expr_id = mark.next_expr_id
-    loop context.noelse_chain_starts.len() > mark.noelse_chain_starts -> _ := context.noelse_chain_starts.pop()
+    loop context.noelse_chain_starts.len() > mark.noelse_chain_starts {
+        _ := context.noelse_chain_starts.pop()
+    }
     loop context.failure_edges.len() > mark.failure_edges -> _ := context.failure_edges.pop()
-    loop context.failure_union_members.len() > mark.failure_union_members -> _ := context.failure_union_members.pop()
-    loop context.failure_union_cases.len() > mark.failure_union_cases -> _ := context.failure_union_cases.pop()
-    loop context.failure_union_edges.len() > mark.failure_union_edges -> _ := context.failure_union_edges.pop()
-    loop context.incomplete_reasons.len() > mark.incomplete_reasons -> _ := context.incomplete_reasons.pop()
+    loop context.failure_union_members.len() > mark.failure_union_members {
+        _ := context.failure_union_members.pop()
+    }
+    loop context.failure_union_cases.len() > mark.failure_union_cases {
+        _ := context.failure_union_cases.pop()
+    }
+    loop context.failure_union_edges.len() > mark.failure_union_edges {
+        _ := context.failure_union_edges.pop()
+    }
+    loop context.incomplete_reasons.len() > mark.incomplete_reasons {
+        _ := context.incomplete_reasons.pop()
+    }
     saved := mark.saved.move()
     context.comptime_body_values = saved.comptime_body_values.move()
     context.exact_int_reachable = saved.exact_int_reachable
@@ -1764,7 +1803,9 @@ sema_check_unsupported: fn(context: &SemaCheckContext, reason: String) Never! {
 // desugared copy checked again), so no two nodes of the flat body share an
 // id. A value a nested check filed (a grouping, a delegated form) keeps its id.
 sema_check_record_expr_id: fn(expr: Expr, value: &TExpr, context: &SemaCheckContext) Never! {
-    if value.id != AST_NODE_GENERATED -> return
+    if value.id != AST_NODE_GENERATED {
+        return
+    }
     id := expr_node_id(expr)
     if id == AST_NODE_GENERATED || context.fresh_expr_ids || context.filed_expr_id_set.get(id) != None {
         id = context.next_expr_id
@@ -1802,7 +1843,9 @@ sema_check_context_return_expr_ids: fn(copied: SemaCheckContext, target: &SemaCh
 // while its checked statements stay in the tree and keep their ids.
 sema_check_context_rollback_keep_expr_ids: fn(context: &SemaCheckContext, mark: &&SemaCheckContextMark) Never! {
     kept := [Int]{}
-    loop index in mark.filed_expr_ids..<context.filed_expr_ids.len() -> kept.push(context.filed_expr_ids[index])
+    loop index in mark.filed_expr_ids..<context.filed_expr_ids.len() {
+        kept.push(context.filed_expr_ids[index])
+    }
     next_expr_id: context.next_expr_id
     sema_check_context_rollback(context, mark.move())
     loop id in kept {
@@ -1922,7 +1965,9 @@ sema_scope_rollback: fn(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
     }
     loop table.bindings.len() > mark.bindings {
         last: table.bindings.len() - 1
-        if sema_scope_name_slot(table, table.bindings[last].symbol.name) == .Val(slot) -> _ := table.name_positions[slot].pop()
+        if sema_scope_name_slot(table, table.bindings[last].symbol.name) == .Val(slot) {
+            _ := table.name_positions[slot].pop()
+        }
         _ := table.bindings.pop()
     }
     loop table.frames.len() > mark.frames -> _ := table.frames.pop()
@@ -1953,7 +1998,9 @@ sema_scope_rollback: fn(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
 // Call before editing `table.bindings[index]` in place, so an open rollback
 // point can restore the old row.
 sema_scope_note_binding_edit: fn(table: &SemaScopeTable, index: Int) Never! {
-    if table.open_marks == 0 -> return
+    if table.open_marks == 0 {
+        return
+    }
     // copy: the undo log keeps the binding's old row, and the caller edits the live row in
     // table.bindings right after. A rollback needs both rows.
     previous: table.bindings[index].copy()
@@ -2032,29 +2079,39 @@ sema_scope_enter: fn(table: &SemaScopeTable, state: &SemaOwnershipState, owner: 
 }
 
 sema_scope_leave: fn(table: &SemaScopeTable, state: &SemaOwnershipState) Never! {
-    if table.current <= 0 -> return
+    if table.current <= 0 {
+        return
+    }
     leaving := table.current
     index := table.hardware_transfers.len()
     loop index > 0 {
         index -= 1
-        if table.hardware_transfers[index].buffer_frame == leaving -> _ := table.hardware_transfers.remove(index, .Slot)
+        if table.hardware_transfers[index].buffer_frame == leaving {
+            _ := table.hardware_transfers.remove(index, .Slot)
+        }
     }
     index = table.hardware_definite_transfers.len()
     loop index > 0 {
         index -= 1
-        if table.hardware_definite_transfers[index].scope_frame == leaving || table.hardware_definite_transfers[index].buffer_frame == leaving -> _ := table.hardware_definite_transfers.remove(index, .Slot)
+        if table.hardware_definite_transfers[index].scope_frame == leaving || table.hardware_definite_transfers[index].buffer_frame == leaving {
+            _ := table.hardware_definite_transfers.remove(index, .Slot)
+        }
     }
     index = table.hardware_pending_transfers.len()
     loop index > 0 {
         index -= 1
-        if table.hardware_pending_transfers[index].buffer_frame == leaving -> _ := table.hardware_pending_transfers.remove(index, .Slot)
+        if table.hardware_pending_transfers[index].buffer_frame == leaving {
+            _ := table.hardware_pending_transfers.remove(index, .Slot)
+        }
     }
     sema_ownership_leave_scope(state)
     table.current = table.frames[leaving].parent
 }
+
 sema_scope_hardware_fact_equal: fn(left: SemaHardwareDMATransferFact, right: SemaHardwareDMATransferFact) -> Bool Never! {
     left.transfer_key == right.transfer_key && left.buffer_key == right.buffer_key && left.profile_id == right.profile_id && left.channel == right.channel && left.buffer_name == right.buffer_name && type_identity_equal(left.buffer_type, right.buffer_type)
 }
+
 sema_scope_hardware_intersection: fn(left: [SemaHardwareDMATransferFact], right: [SemaHardwareDMATransferFact]) -> [SemaHardwareDMATransferFact] Never! {
     result := [SemaHardwareDMATransferFact]{}
     loop candidate in left {
@@ -2067,6 +2124,7 @@ sema_scope_hardware_intersection: fn(left: [SemaHardwareDMATransferFact], right:
     }
     result
 }
+
 sema_scope_hardware_union: fn(left: [SemaHardwareDMATransferFact], right: [SemaHardwareDMATransferFact]) -> [SemaHardwareDMATransferFact] Never! {
     result := sema_scope_hardware_transfers_snapshot(left)
     loop candidate in right {
@@ -2078,6 +2136,7 @@ sema_scope_hardware_union: fn(left: [SemaHardwareDMATransferFact], right: [SemaH
     }
     result
 }
+
 sema_scope_hardware_join: fn(before: SemaScopeHardwareFacts, then_path: SemaScopeHardwareFacts, else_path: SemaScopeHardwareFacts, has_else: Bool) -> SemaScopeHardwareFacts Never! {
     transfers := sema_scope_hardware_union(before.transfers, then_path.transfers)
     definite := sema_scope_hardware_intersection(before.definite, then_path.definite)
@@ -2118,11 +2177,15 @@ sema_scope_add_module_symbol: fn(table: &SemaScopeTable, symbol: Symbol, key: St
 sema_scope_bind_definition_site: fn(table: &SemaScopeTable, graph: SemaRegistrationGraph, func: Func) Never! {
     module_index: sema_registration_module_index_text(graph, func.definition_module) ?? return
     loop symbol in graph.modules[module_index].symbols {
-        if !func.site_names.contains(symbol.name) -> sema_scope_push_binding(table, SemaScopeBinding{frame: 0, symbol: symbol, key: symbol_table_key(graph.symbols, symbol.id), mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
+        if !func.site_names.contains(symbol.name) {
+            sema_scope_push_binding(table, SemaScopeBinding{frame: 0, symbol: symbol, key: symbol_table_key(graph.symbols, symbol.id), mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
+        }
     }
     loop import in graph.modules[module_index].imports {
         loop binding in import.bindings {
-            if !func.site_names.contains(binding.symbol.name) -> sema_scope_push_binding(table, SemaScopeBinding{frame: 0, symbol: binding.symbol, key: symbol_table_key(graph.symbols, binding.symbol.id), mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
+            if !func.site_names.contains(binding.symbol.name) {
+                sema_scope_push_binding(table, SemaScopeBinding{frame: 0, symbol: binding.symbol, key: symbol_table_key(graph.symbols, binding.symbol.id), mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
+            }
         }
     }
 }
@@ -2131,7 +2194,9 @@ sema_scope_add_compiler_builtin: fn(table: &SemaScopeTable, graph: SemaRegistrat
     builtin: sema_registration_compiler_builtin_row(graph, "Err") ?? return true
     nominal: graph.modules[builtin.module_index].nominals[builtin.row]
     loop binding in table.bindings {
-        if binding.frame == 0 && binding.compiler_builtin && binding.symbol.id == nominal.symbol.id -> return true
+        if binding.frame == 0 && binding.compiler_builtin && binding.symbol.id == nominal.symbol.id {
+            return true
+        }
     }
     sema_scope_push_binding(table, SemaScopeBinding{frame: 0, symbol: nominal.symbol, key: symbol_table_key(graph.symbols, nominal.symbol.id), mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: true})
     true
@@ -2221,7 +2286,9 @@ sema_scope_module_policy: fn(table: &SemaScopeTable, graph: SemaRegistrationGrap
     if sema_registration_module_index(graph, module_identity) == .Val(module_index) {
         package_identity: graph.modules[module_index].package_identity
         loop declaration_index in 0..<graph.modules[module_index].program.policy_declarations.len() {
-            if graph.modules[module_index].program.policy_declarations[declaration_index].key != PolicyKey.ExplicitUnits || graph.modules[module_index].program.policy_declarations[declaration_index].scope != PolicyScope.Function -> next
+            if graph.modules[module_index].program.policy_declarations[declaration_index].key != PolicyKey.ExplicitUnits || graph.modules[module_index].program.policy_declarations[declaration_index].scope != PolicyScope.Function {
+                next
+            }
             target: graph.modules[module_index].program.policy_declarations[declaration_index].target ?? next
             slot := policy.function_unit_starts.get(target.start) ?? -1
             if slot < 0 {
@@ -2234,7 +2301,9 @@ sema_scope_module_policy: fn(table: &SemaScopeTable, graph: SemaRegistrationGrap
         loop declaration_index in 0..<graph.modules.len() {
             if graph.modules[declaration_index].package_identity != package_identity -> next
             loop declaration in graph.modules[declaration_index].program.policy_declarations {
-                if declaration.scope != PolicyScope.Package && !(declaration.scope == PolicyScope.Module && graph.modules[declaration_index].module_identity == module_identity) -> next
+                if declaration.scope != PolicyScope.Package && !(declaration.scope == PolicyScope.Module && graph.modules[declaration_index].module_identity == module_identity) {
+                    next
+                }
                 if declaration.key == PolicyKey.ExplicitUnits -> policy.unit_explicit_units = true
                 if sema_string_view_copies_declaration(declaration) -> policy.copies_explicit = true
                 if sema_call_marks_writes_declaration(declaration) -> policy.writes_explicit = true
@@ -2260,7 +2329,9 @@ sema_scope_apply_unit_policy_for_function: fn(table: &SemaScopeTable, graph: Sem
     position: sema_scope_module_policy(table, graph, module_identity)
     table.unit_explicit_units = table.policy_rows[position].unit_explicit_units
     if table.policy_rows[position].function_unit_starts.get(function_span.start) == .Val(slot) {
-        if table.policy_rows[position].function_unit_ends[slot].get(function_span.end) ?? false -> table.unit_explicit_units = true
+        if table.policy_rows[position].function_unit_ends[slot].get(function_span.end) ?? false {
+            table.unit_explicit_units = true
+        }
     }
 }
 
@@ -2363,7 +2434,9 @@ sema_scope_resolve_index: fn(table: SemaScopeTable, name: String) -> Int? {
         loop cursor >= 0 {
             compares += 1
             index: table.name_positions[slot][cursor]
-            if table.bindings[index].frame == frame -> return sema_scope_counted(table, compares, Val(index))
+            if table.bindings[index].frame == frame {
+                return sema_scope_counted(table, compares, Val(index))
+            }
             cursor -= 1
         }
         frame = table.frames[frame].parent
@@ -2381,15 +2454,17 @@ sema_scope_near_visible_names: fn(table: SemaScopeTable, name: String) -> [Strin
     frame := table.current
     loop frame >= 0 {
         loop index in 0..<table.bindings.len() {
-            if table.bindings[index].frame != frame || table.bindings[index].compiler_builtin -> next
+            if table.bindings[index].frame != frame || table.bindings[index].compiler_builtin {
+                next
+            }
             candidate: table.bindings[index].symbol.name
-            if candidate == name || candidate.starts_with("__") || candidate.starts_with("@") || found.contains(candidate) -> next
+            if candidate == name || candidate.starts_with("__") || candidate.starts_with("@") || found.contains(candidate) {
+                next
+            }
             distance: sema_taint_edit_distance(name, candidate)
             if distance > limit -> next
             at := found.len()
-            loop at > 0 && distances[at - 1] > distance {
-                at -= 1
-            }
+            loop at > 0 && distances[at - 1] > distance -> at -= 1
             if at == 3 -> next
             // copy: the name outlives the scope table it is read from.
             found.insert(at, candidate.copy())
@@ -2422,7 +2497,9 @@ sema_scope_resolve_index_at: fn(table: SemaScopeTable, name: String, use_span: S
             index: table.name_positions[slot][cursor]
             // Read the row through its place: binding it copied the whole row
             // (its Symbol's Strings) for every candidate.
-            if table.bindings[index].frame == frame && (module_frame || table.position_free || table.bindings[index].symbol.span.start <= use_span.start) -> return sema_scope_counted(table, compares, Val(index))
+            if table.bindings[index].frame == frame && (module_frame || table.position_free || table.bindings[index].symbol.span.start <= use_span.start) {
+                return sema_scope_counted(table, compares, Val(index))
+            }
             cursor -= 1
         }
         frame = table.frames[frame].parent
@@ -2464,21 +2541,23 @@ sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
             if ty == .Fn(_, _, _, _, _, _) -> function_type = true
         }
         if function_type {
-            bindings.push(SemaScopeBinding{
-                frame: binding.frame,
-                // Every light row shares the one empty function type.
-                symbol: Symbol{id: binding.symbol.id, kind: binding.symbol.kind, name: binding.symbol.name, module_identity: binding.symbol.module_identity, owner: binding.symbol.owner, span: binding.symbol.span, ty: Val(light_type), visibility: binding.symbol.visibility},
-                key: binding.key,
-                mutable: binding.mutable,
-                access: binding.access,
-                integer_bounds: binding.integer_bounds,
-                string_view: binding.string_view,
-                compiler_builtin: binding.compiler_builtin,
-                prepared: binding.prepared,
-                pending_prepared: binding.pending_prepared,
-                origin: binding.origin,
-                place_alias: binding.place_alias,
-            })
+            bindings.push(
+                SemaScopeBinding{
+                    frame: binding.frame,
+                    // Every light row shares the one empty function type.
+                    symbol: Symbol{id: binding.symbol.id, kind: binding.symbol.kind, name: binding.symbol.name, module_identity: binding.symbol.module_identity, owner: binding.symbol.owner, span: binding.symbol.span, ty: Val(light_type), visibility: binding.symbol.visibility},
+                    key: binding.key,
+                    mutable: binding.mutable,
+                    access: binding.access,
+                    integer_bounds: binding.integer_bounds,
+                    string_view: binding.string_view,
+                    compiler_builtin: binding.compiler_builtin,
+                    prepared: binding.prepared,
+                    pending_prepared: binding.pending_prepared,
+                    origin: binding.origin,
+                    place_alias: binding.place_alias,
+                },
+            )
         } else {
             // copy: sema_scope_light_copy returns an independent scope table (a snapshot for a
             // deferred check), while `source` keeps its bindings and keeps changing.
@@ -2558,7 +2637,9 @@ sema_scope_binding_row: fn(environment: SemaScopeEnvironment, table: SemaScopeTa
     // copy: the returned row may get its checked type filled in, while `table` is the caller's
     // scope table (a read parameter) and keeps its light row.
     row := table.bindings[index].copy()
-    if sema_scope_binding_is_light(table, index) -> row.symbol.ty = sema_scope_binding_type(environment, table, index)
+    if sema_scope_binding_is_light(table, index) {
+        row.symbol.ty = sema_scope_binding_type(environment, table, index)
+    }
     row
 }
 
@@ -2579,8 +2660,12 @@ sema_scope_record_module_write: fn(place: Expr, span: Span, environment: SemaSco
         context.module_writes.push(TEffectSpan{name: name, span: span})
         return
     }
-    if scopes.bindings[index].own_cell -> return
-    if kind == SymbolKind.Parameter && scopes.bindings[index].access == AccessConvention.Write -> return
+    if scopes.bindings[index].own_cell {
+        return
+    }
+    if kind == SymbolKind.Parameter && scopes.bindings[index].access == AccessConvention.Write {
+        return
+    }
     context.module_writes.push(TEffectSpan{name: name, span: span, held: true})
 }
 
@@ -2591,7 +2676,9 @@ sema_scope_record_lent_write: fn(place: Expr, span: Span, environment: SemaScope
     name: sema_scope_place_root(place) ?? return
     index: sema_scope_resolve_index(scopes, name) ?? return
     kind: sema_scope_binding_symbol(environment, scopes, index).kind
-    if kind == SymbolKind.Parameter || kind == SymbolKind.Local -> return
+    if kind == SymbolKind.Parameter || kind == SymbolKind.Local {
+        return
+    }
     context.module_writes.push(TEffectSpan{name: name, span: span})
 }
 
@@ -2600,7 +2687,9 @@ sema_scope_record_lent_write: fn(place: Expr, span: Span, environment: SemaScope
 sema_scope_own_cell_init: fn(init: Expr) -> Bool Never! {
     if sema_shared_cycle_cell_init(init) -> return true
     if init == .MethodCall(receiver, method, _, _, _, args, _) {
-        if receiver == .Ident(name, _, _) -> return name == "Cell" && method == "new" && args.len() == 1
+        if receiver == .Ident(name, _, _) {
+            return name == "Cell" && method == "new" && args.len() == 1
+        }
     }
     false
 }
@@ -2767,12 +2856,18 @@ sema_scope_declaration_site: fn(environment: SemaScopeEnvironment, program: Sema
             }
         }
         if graph.nominal_symbol_rows.get(id.id) == .Val(nominal) {
-            if function_module < 0 || nominal.module_index < function_module -> return Val(SemaScopeDeclarationSite.Nominal{module_index: nominal.module_index, row: nominal.row})
+            if function_module < 0 || nominal.module_index < function_module {
+                return Val(SemaScopeDeclarationSite.Nominal{module_index: nominal.module_index, row: nominal.row})
+            }
         }
-        if function_module >= 0 -> return Val(SemaScopeDeclarationSite.Function{module_index: function_module, row: function_row})
+        if function_module >= 0 {
+            return Val(SemaScopeDeclarationSite.Function{module_index: function_module, row: function_row})
+        }
     }
     loop index in 0..<environment.declarations.len() {
-        if environment.declarations[index].symbol_id == id -> return Val(SemaScopeDeclarationSite.Local{index: index})
+        if environment.declarations[index].symbol_id == id {
+            return Val(SemaScopeDeclarationSite.Local{index: index})
+        }
     }
     None
 }
@@ -2781,8 +2876,12 @@ sema_scope_resolve_declaration: fn(environment: SemaScopeEnvironment, program: S
     site: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) -> return Val(environment.declarations[index].item)
     if program.registration_graph == .Val(graph) {
-        if site == .Function(module_index, row) -> return Val(Item.Func{value: graph.modules[module_index].functions[row].declaration})
-        if site == .Nominal(module_index, row) -> return sema_registration_nominal_source_item(graph.modules[module_index].nominals[row].source)
+        if site == .Function(module_index, row) {
+            return Val(Item.Func{value: graph.modules[module_index].functions[row].declaration})
+        }
+        if site == .Nominal(module_index, row) {
+            return sema_registration_nominal_source_item(graph.modules[module_index].nominals[row].source)
+        }
     }
     None
 }
@@ -2808,10 +2907,14 @@ sema_scope_item_kind: fn(item: Item) -> SemaScopeDeclarationKind Never! {
 
 sema_scope_declaration_kind: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> SemaScopeDeclarationKind? {
     site: sema_scope_declaration_site(environment, program, id) ?? return None
-    if site == .Local(index) -> return Val(sema_scope_item_kind(environment.declarations[index].item))
+    if site == .Local(index) {
+        return Val(sema_scope_item_kind(environment.declarations[index].item))
+    }
     if site == .Function(_, _) -> return Val(SemaScopeDeclarationKind.Func)
     if site == .Nominal(module_index, row) {
-        if program.registration_graph == .Val(graph) -> return sema_scope_nominal_kind(graph, module_index, row)
+        if program.registration_graph == .Val(graph) {
+            return sema_scope_nominal_kind(graph, module_index, row)
+        }
     }
     None
 }
@@ -2819,7 +2922,9 @@ sema_scope_declaration_kind: fn(environment: SemaScopeEnvironment, program: Sema
 // The nominal rows below are read through the graph as a read parameter:
 // binding a row copied the whole declaration, methods included.
 sema_scope_nominal_kind: fn(graph: SemaRegistrationGraph, module_index: Int, row: Int) -> SemaScopeDeclarationKind? {
-    if graph.modules[module_index].nominals[row].source == .SourceAST(item) -> return Val(sema_scope_item_kind(item))
+    if graph.modules[module_index].nominals[row].source == .SourceAST(item) {
+        return Val(sema_scope_item_kind(item))
+    }
     None
 }
 
@@ -2838,7 +2943,9 @@ SemaScopeStructShape: struct {
 
 sema_scope_item_struct: fn(item: Item) -> SemaScopeStructShape? {
     // copy: the shape is the caller's own; the declaration stays in the program.
-    if item == .Struct(definition) -> return Val(SemaScopeStructShape{type_params: definition.type_params.copy(), fields: definition.fields.copy(), inline_module: definition.inline_module})
+    if item == .Struct(definition) {
+        return Val(SemaScopeStructShape{type_params: definition.type_params.copy(), fields: definition.fields.copy(), inline_module: definition.inline_module})
+    }
     None
 }
 
@@ -2847,7 +2954,9 @@ sema_scope_declaration_struct: fn(environment: SemaScopeEnvironment, program: Se
     site: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) -> return sema_scope_item_struct(environment.declarations[index].item)
     if site == .Nominal(module_index, row) {
-        if program.registration_graph == .Val(graph) -> return sema_scope_nominal_struct(graph, module_index, row)
+        if program.registration_graph == .Val(graph) {
+            return sema_scope_nominal_struct(graph, module_index, row)
+        }
     }
     None
 }
@@ -2855,7 +2964,9 @@ sema_scope_declaration_struct: fn(environment: SemaScopeEnvironment, program: Se
 // The nominal row is read through the graph as a read parameter: binding the
 // row copied the whole declaration, methods included, on every field read.
 sema_scope_nominal_struct: fn(graph: SemaRegistrationGraph, module_index: Int, row: Int) -> SemaScopeStructShape? {
-    if graph.modules[module_index].nominals[row].source == .SourceAST(item) -> return sema_scope_item_struct(item)
+    if graph.modules[module_index].nominals[row].source == .SourceAST(item) {
+        return sema_scope_item_struct(item)
+    }
     None
 }
 
@@ -2864,10 +2975,14 @@ sema_scope_nominal_struct: fn(graph: SemaRegistrationGraph, module_index: Int, r
 // a struct.
 sema_scope_declaration_struct_states: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> [String]? {
     site: sema_scope_declaration_site(environment, program, id) ?? return None
-    if site == .Local(index) -> return sema_scope_item_struct_states(environment.declarations[index].item)
+    if site == .Local(index) {
+        return sema_scope_item_struct_states(environment.declarations[index].item)
+    }
     if site == .Nominal(module_index, row) {
         if program.registration_graph == .Val(graph) {
-            if graph.modules[module_index].nominals[row].source == .SourceAST(item) -> return sema_scope_item_struct_states(item)
+            if graph.modules[module_index].nominals[row].source == .SourceAST(item) {
+                return sema_scope_item_struct_states(item)
+            }
         }
     }
     None
@@ -2891,7 +3006,9 @@ SemaScopeEnumShape: struct {
 }
 
 sema_scope_item_enum: fn(item: Item) -> SemaScopeEnumShape? {
-    if item == .Enum(definition) -> return Val(SemaScopeEnumShape{type_params: definition.type_params, variants: definition.variants, groups: definition.groups})
+    if item == .Enum(definition) {
+        return Val(SemaScopeEnumShape{type_params: definition.type_params, variants: definition.variants, groups: definition.groups})
+    }
     None
 }
 
@@ -2900,13 +3017,17 @@ sema_scope_declaration_enum: fn(environment: SemaScopeEnvironment, program: Sema
     site: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) -> return sema_scope_item_enum(environment.declarations[index].item)
     if site == .Nominal(module_index, row) {
-        if program.registration_graph == .Val(graph) -> return sema_scope_nominal_enum(graph, module_index, row)
+        if program.registration_graph == .Val(graph) {
+            return sema_scope_nominal_enum(graph, module_index, row)
+        }
     }
     None
 }
 
 sema_scope_nominal_enum: fn(graph: SemaRegistrationGraph, module_index: Int, row: Int) -> SemaScopeEnumShape? {
-    if graph.modules[module_index].nominals[row].source == .SourceAST(item) -> return sema_scope_item_enum(item)
+    if graph.modules[module_index].nominals[row].source == .SourceAST(item) {
+        return sema_scope_item_enum(item)
+    }
     None
 }
 
@@ -2922,15 +3043,21 @@ sema_scope_item_enum_declares: fn(item: Item, variant: String) -> Bool Never! {
 // sema_scope_resolve_declaration(environment, id) is an enum declaring `variant`.
 sema_scope_declaration_enum_declares: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID, variant: String) -> Bool {
     site: sema_scope_declaration_site(environment, program, id) ?? return false
-    if site == .Local(index) -> return sema_scope_item_enum_declares(environment.declarations[index].item, variant)
+    if site == .Local(index) {
+        return sema_scope_item_enum_declares(environment.declarations[index].item, variant)
+    }
     if site == .Nominal(module_index, row) {
-        if program.registration_graph == .Val(graph) -> return sema_scope_nominal_enum_declares(graph, module_index, row, variant)
+        if program.registration_graph == .Val(graph) {
+            return sema_scope_nominal_enum_declares(graph, module_index, row, variant)
+        }
     }
     false
 }
 
 sema_scope_nominal_enum_declares: fn(graph: SemaRegistrationGraph, module_index: Int, row: Int, variant: String) -> Bool Never! {
-    if graph.modules[module_index].nominals[row].source == .SourceAST(item) -> return sema_scope_item_enum_declares(item, variant)
+    if graph.modules[module_index].nominals[row].source == .SourceAST(item) {
+        return sema_scope_item_enum_declares(item, variant)
+    }
     false
 }
 
@@ -2944,15 +3071,21 @@ sema_scope_item_distinct: fn(item: Item) -> DistinctDef? {
 // distinct type; a distinct declaration has no methods to leave behind.
 sema_scope_declaration_distinct: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> DistinctDef? {
     site: sema_scope_declaration_site(environment, program, id) ?? return None
-    if site == .Local(index) -> return sema_scope_item_distinct(environment.declarations[index].item)
+    if site == .Local(index) {
+        return sema_scope_item_distinct(environment.declarations[index].item)
+    }
     if site == .Nominal(module_index, row) {
-        if program.registration_graph == .Val(graph) -> return sema_scope_nominal_distinct(graph, module_index, row)
+        if program.registration_graph == .Val(graph) {
+            return sema_scope_nominal_distinct(graph, module_index, row)
+        }
     }
     None
 }
 
 sema_scope_nominal_distinct: fn(graph: SemaRegistrationGraph, module_index: Int, row: Int) -> DistinctDef? {
-    if graph.modules[module_index].nominals[row].source == .SourceAST(item) -> return sema_scope_item_distinct(item)
+    if graph.modules[module_index].nominals[row].source == .SourceAST(item) {
+        return sema_scope_item_distinct(item)
+    }
     None
 }
 
@@ -2965,16 +3098,24 @@ sema_scope_item_function_type_params: fn(item: Item) -> [TypeParam] Never! {
 // a function, else none; the function's body is never copied.
 sema_scope_declaration_function_type_params: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> [TypeParam] {
     site: sema_scope_declaration_site(environment, program, id) ?? return [TypeParam]{}
-    if site == .Local(index) -> return sema_scope_item_function_type_params(environment.declarations[index].item)
+    if site == .Local(index) {
+        return sema_scope_item_function_type_params(environment.declarations[index].item)
+    }
     if program.registration_graph == .Val(graph) {
-        if site == .Function(module_index, row) -> return graph.modules[module_index].functions[row].declaration.type_params
-        if site == .Nominal(module_index, row) -> return sema_scope_nominal_function_type_params(graph, module_index, row)
+        if site == .Function(module_index, row) {
+            return graph.modules[module_index].functions[row].declaration.type_params
+        }
+        if site == .Nominal(module_index, row) {
+            return sema_scope_nominal_function_type_params(graph, module_index, row)
+        }
     }
     [TypeParam]{}
 }
 
 sema_scope_nominal_function_type_params: fn(graph: SemaRegistrationGraph, module_index: Int, row: Int) -> [TypeParam] Never! {
-    if graph.modules[module_index].nominals[row].source == .SourceAST(item) -> return sema_scope_item_function_type_params(item)
+    if graph.modules[module_index].nominals[row].source == .SourceAST(item) {
+        return sema_scope_item_function_type_params(item)
+    }
     [TypeParam]{}
 }
 
@@ -2988,7 +3129,9 @@ sema_scope_declaration_function_params: fn(environment: SemaScopeEnvironment, pr
         return None
     }
     if program.registration_graph == .Val(graph) {
-        if site == .Function(module_index, row) -> return Val(graph.modules[module_index].functions[row].declaration.params.copy())
+        if site == .Function(module_index, row) {
+            return Val(graph.modules[module_index].functions[row].declaration.params.copy())
+        }
     }
     None
 }

@@ -5,11 +5,36 @@
 use {
     fs: core.files
     jet_driver.[
-        JET_DRIVER_MEMBER_ROUTES, JET_DRIVER_ROUTED_MODULES, JET_DRIVER_SOURCE_ROUTES, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
-        JetDriverCompileMode, JetDriverCompileRequest, JetDriverCoreSource, JetDriverLoadResult, JetDriverLoadedModule, JetDriverParseJob, JetDriverScopedImport,
-        jet_driver_blank_bytes, jet_driver_core_route, jet_driver_core_routes, jet_driver_core_text, jet_driver_has_errors, jet_driver_load, jet_driver_parse_one,
-        jet_driver_reach, jet_driver_reach_admit, jet_driver_reach_defer, jet_driver_reach_drain, jet_driver_reach_global, jet_driver_reach_item_name,
-        jet_driver_reach_parse_source, jet_driver_reach_strip, jet_driver_reach_wants, jet_driver_reach_word,
+        JET_DRIVER_MEMBER_ROUTES,
+        JET_DRIVER_ROUTED_MODULES,
+        JET_DRIVER_SOURCE_ROUTES,
+        JetDriverAuthorizedSourceFile,
+        JetDriverAuthorizedSourceRoot,
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode,
+        JetDriverCompileRequest,
+        JetDriverCoreSource,
+        JetDriverLoadResult,
+        JetDriverLoadedModule,
+        JetDriverParseJob,
+        JetDriverScopedImport,
+        jet_driver_blank_bytes,
+        jet_driver_core_route,
+        jet_driver_core_routes,
+        jet_driver_core_text,
+        jet_driver_has_errors,
+        jet_driver_load,
+        jet_driver_parse_one,
+        jet_driver_reach,
+        jet_driver_reach_admit,
+        jet_driver_reach_defer,
+        jet_driver_reach_drain,
+        jet_driver_reach_global,
+        jet_driver_reach_item_name,
+        jet_driver_reach_parse_source,
+        jet_driver_reach_strip,
+        jet_driver_reach_wants,
+        jet_driver_reach_word,
         jet_driver_scoped_imports,
     ]
     jet_cli.[jet_cli_driver_request]
@@ -19,13 +44,15 @@ use {
 // A check request for the one user file `source`, with no Core sources yet.
 reach_test_request: fn(source: String) -> JetDriverCompileRequest {
     snapshot: JetDriverAuthorizedSourceSnapshot{
-        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{
-            canonical_path: "/reach-fixture",
-            identity: "reach-root",
-            allow_hardlinks: false,
-            files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/reach-fixture/main.jet", relative_path: "main.jet", identity: "reach-file", source: source}},
-            foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
-        }},
+        roots: [JetDriverAuthorizedSourceRoot]{
+            JetDriverAuthorizedSourceRoot{
+                canonical_path: "/reach-fixture",
+                identity: "reach-root",
+                allow_hardlinks: false,
+                files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/reach-fixture/main.jet", relative_path: "main.jet", identity: "reach-file", source: source}},
+                foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+            },
+        },
         entry_root_identity: "reach-root",
         entry_path: "/reach-fixture/main.jet",
     }
@@ -213,9 +240,7 @@ reach_test_sources: fn(dir: String, out: &[String]) {
     loop entry in entries {
         if entry.is_dir && entry.name == ".jet" -> next
         path: "{dir}/{entry.name}"
-        if entry.is_dir {
-            reach_test_sources(path, out)
-        } else if entry.name.ends_with(".jet") {
+        if entry.is_dir -> reach_test_sources(path, out) else if entry.name.ends_with(".jet") {
             out.push(path)
         }
     }
@@ -247,7 +272,9 @@ reach_test_read: fn(path: String) -> String {
                 if !line.contains("\"{module_name}\"") -> next
                 parts: line.split("\"").to_list()
                 loop index in 1..<parts.len() {
-                    if index % 2 == 0 || parts[index] != module_name || index + 2 >= parts.len() -> next
+                    if index % 2 == 0 || parts[index] != module_name || index + 2 >= parts.len() {
+                        next
+                    }
                     between: parts[index + 1].replace(" ", "")
                     if between != "," && between != ",name:" && between != ",member:" -> next
                     route: parts[index + 2]
@@ -339,9 +366,7 @@ reach_test_strip: fn(reached: String) -> JetDriverLoadedModule {
     loop item in parsed.parsed.program.items {
         if item == .Func(value) {
             assert(value.body.len() == 0 && value.return_type == None, "{value.name} is a stub")
-        } else {
-            panic("a held unit keeps only stubs here")
-        }
+        } else { panic("a held unit keeps only stubs here") }
     }
     load: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.scaled()) }}\n", "core.math", [String]{}, text)
     assert_eq(reach_test_functions(load, "core.math"), [String]{"scaled"})
@@ -349,7 +374,9 @@ reach_test_strip: fn(reached: String) -> JetDriverLoadedModule {
     loop module_row in load.modules {
         if module_row.module_name != "core.math" -> next
         loop item in module_row.program.items {
-            if item == .Func(value) -> assert(value.body.len() == 1 && value.return_type != None, "{value.name} parsed whole")
+            if item == .Func(value) {
+                assert(value.body.len() == 1 && value.return_type != None, "{value.name} parsed whole")
+            }
         }
     }
 }
@@ -363,14 +390,18 @@ reach_test_strip: fn(reached: String) -> JetDriverLoadedModule {
     loop declaration in words.held -> held.push(declaration.name)
     assert_eq(held, [String]{"plain", "helper", "unused"})
     loop item in parsed.parsed.program.items {
-        if item == .Func(value) -> assert(value.is_pub == (value.name == "plain"), "{value.name}'s visibility")
+        if item == .Func(value) {
+            assert(value.is_pub == (value.name == "plain"), "{value.name}'s visibility")
+        }
     }
     load: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.plain()) }}\n", "core.math", [String]{}, text)
     assert_eq(reach_test_functions(load, "core.math"), [String]{"plain", "helper"})
     loop module_row in load.modules {
         if module_row.module_name != "core.math" -> next
         loop item in module_row.program.items {
-            if item == .Func(value) && value.name == "helper" -> assert(!value.is_pub && value.body.len() == 1, "helper parsed whole and private")
+            if item == .Func(value) && value.name == "helper" {
+                assert(!value.is_pub && value.body.len() == 1, "helper parsed whole and private")
+            }
         }
     }
 }
@@ -517,7 +548,9 @@ reach_test_spelled_methods: fn(methods: [Func], literals: [String:Bool], found: 
     loop method in methods {
         if method.name.starts_with("__") || literals.get(method.name) == None -> next
         if !found.contains(method.name) -> found.push(method.name)
-        if !JET_DRIVER_MEMBER_ROUTES.contains(method.name) && !missing.contains(method.name) -> missing.push(method.name)
+        if !JET_DRIVER_MEMBER_ROUTES.contains(method.name) && !missing.contains(method.name) {
+            missing.push(method.name)
+        }
     }
 }
 
@@ -546,8 +579,12 @@ reach_test_spelled_methods: fn(methods: [Func], literals: [String:Bool], found: 
             text: reach_test_read(row.path)
             parsed: jet_driver_parse_one(JetDriverParseJob.Core{text: text, module_name: module_name, owned_members: [String]{}, runtime: false, tested: false}, compiler_threads_single())
             loop item in parsed.parsed.program.items {
-                if item == .Struct(value) -> reach_test_spelled_methods(value.methods, literals, found, missing)
-                if item == .Enum(value) -> reach_test_spelled_methods(value.methods, literals, found, missing)
+                if item == .Struct(value) {
+                    reach_test_spelled_methods(value.methods, literals, found, missing)
+                }
+                if item == .Enum(value) {
+                    reach_test_spelled_methods(value.methods, literals, found, missing)
+                }
             }
         }
     }
@@ -571,7 +608,9 @@ reach_test_spelled_pairs: fn(files: [String]) -> [String] {
             if !line.contains("\"core.") -> next
             parts: line.split("\"").to_list()
             loop index in 1..<parts.len() {
-                if index % 2 == 0 || !parts[index].starts_with("core.") || index + 2 >= parts.len() -> next
+                if index % 2 == 0 || !parts[index].starts_with("core.") || index + 2 >= parts.len() {
+                    next
+                }
                 between: parts[index + 1].replace(" ", "")
                 if between != "," && between != ",name:" && between != ",member:" -> next
                 pair: "{parts[index]}.{parts[index + 2]}"
@@ -612,12 +651,12 @@ reach_test_registry_member: fn(module_name: String, name: String) -> Bool {
         loop item in parsed.parsed.program.items {
             if item == .Func(value) {
                 pair: "{prefix}{value.name}"
-                if value.name.starts_with("__") || !pairs.contains(pair) || reach_test_registry_member(row.module_name, value.name) -> next
+                if value.name.starts_with("__") || !pairs.contains(pair) || reach_test_registry_member(row.module_name, value.name) {
+                    next
+                }
                 if JET_DRIVER_SOURCE_ROUTES.contains(pair) {
                     if !found.contains(pair) -> found.push(pair)
-                } else if !missing.contains(pair) {
-                    missing.push(pair)
-                }
+                } else if !missing.contains(pair) { missing.push(pair) }
             }
         }
     }
@@ -676,7 +715,9 @@ reach_test_registry_member: fn(module_name: String, name: String) -> Bool {
             name: if index < words.held.len() -> words.held[index].name else -> "?"
             if parsed.get(name) != Val("{item:Debug}") -> differ.push("{row.path}: {name}")
         }
-        if alone.program.items.len() != words.held.len() -> differ.push("{row.path}: {words.held.len()} held, {alone.program.items.len()} parsed")
+        if alone.program.items.len() != words.held.len() {
+            differ.push("{row.path}: {words.held.len()} held, {alone.program.items.len()} parsed")
+        }
     }
     assert_eq(differ, [String]{})
 }

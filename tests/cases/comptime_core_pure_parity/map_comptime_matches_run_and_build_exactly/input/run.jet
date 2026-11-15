@@ -1,12 +1,14 @@
 add_map: fn(values: &[String:Int], key: String, value: Int) -> Int {
     return values.add(key.copy(), value) ?? -1
 }
+
 counted_map: fn(hits: &Int) -> [String:Int] {
     hits += 1
     return ["a": 1]
 }
+
 map_view: fn() -> String {
-    values := [String:Int]{ "b": 2, "a": 1 }
+    values := [String:Int]{"b": 2, "a": 1}
     empty_before: values.is_empty()
     fresh_c: values.add("c", 3) ?? -1
     displaced_b: add_map(values, "b", 20)
@@ -27,6 +29,7 @@ map_view: fn() -> String {
     values.clear()
     return "{empty_before}|{fresh_c}|{displaced_b}|{added_d}|{duplicate_a}|{seen}|{keys}|{entries}|{got_a}|{has_a}|{has_z}|{removed_c}|{length}|{values.is_empty()}|{values.len()}"
 }
+
 EXPECTED: #run map_view()
 
 run: fn() {

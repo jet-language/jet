@@ -2,8 +2,12 @@
 use {
     jetpack_foundation.[UNIFIED_LOCK_FILE]
     jet_pkg_model.[
-        BuildStamp, ComptimeInput, pkg_lock_build_stamp, pkg_lock_parse,
-        pkg_lock_record_generated_inputs, pkg_lock_write,
+        BuildStamp,
+        ComptimeInput,
+        pkg_lock_build_stamp,
+        pkg_lock_parse,
+        pkg_lock_record_generated_inputs,
+        pkg_lock_write,
     ]
     files: core.files
 }
@@ -22,6 +26,7 @@ use {
     assert_eq(stamp.toolchain, "1.0.0")
     files.remove_all(root).drop("cleanup")
 }
+
 #Test("lock_stamp_is_captured_once_and_replayed_without_a_clock") {
     root: files.tmpdir("s4-stamp-replay-") ?? panic("scratch")
     generated: [ComptimeInput]{ComptimeInput{path: ".jet/generated/main.jet", hash: "sha256-fixed"}}
@@ -37,10 +42,14 @@ use {
     files.create_dir_all(files.join(hostile, ".jet")) ?? panic("managed dir")
     files.write(files.join(hostile, UNIFIED_LOCK_FILE), "version = 1\n") ?? panic("seed missing")
     if pkg_lock_build_stamp(hostile, true) == {
-        .Ok(_) -> panic("missing stamp must fail locked")
-        .Err(error) -> if error == {
-            .Invalid(detail) -> assert(detail.contains("[build.stamp]"))
-            .UnsupportedVersion(_) | .IO(_) | .Incomplete(_) | .Reported(_) -> panic("missing stamp error lost detail")
+        .Ok(_) -> { panic("missing stamp must fail locked") }
+        .Err(error) -> {
+            if error == {
+                .Invalid(detail) -> assert(detail.contains("[build.stamp]"))
+                .UnsupportedVersion(_) | .IO(_) | .Incomplete(_) | .Reported(_) -> {
+                    panic("missing stamp error lost detail")
+                }
+            }
         }
     }
     files.remove_all(root).drop("cleanup")

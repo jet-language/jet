@@ -1,4 +1,3 @@
-
 use {
     jet_pkg_model.[pkg_sha256_hex]
     files: core.files
@@ -51,7 +50,9 @@ env_files_test_action: fn(plan: FilePlan, destination: String) -> FileActionKind
 }
 
 #Test("sensitive temp is restricted before first write") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     root: env_files_test_project("jet-env-files-temp-mode-")
     temp: files.join(root, "secret.tmp")
     declaration := env_files_test_declaration("private", true)
@@ -63,7 +64,9 @@ env_files_test_action: fn(plan: FilePlan, destination: String) -> FileActionKind
 }
 
 #Test("sensitive explicit permissions are restricted in object and copy") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     root: env_files_test_project("jet-env-files-sensitive-permissions-")
     file := env_files_test_declaration("private", true)
     file.mode = FileMode.Copy
@@ -78,7 +81,9 @@ env_files_test_action: fn(plan: FilePlan, destination: String) -> FileActionKind
 }
 
 #Test("sensitive copy repairs external permission relaxation") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     root: env_files_test_project("jet-env-files-copy-mode-")
     file := env_files_test_declaration("private", true)
     file.mode = FileMode.Copy
@@ -95,7 +100,9 @@ env_files_test_action: fn(plan: FilePlan, destination: String) -> FileActionKind
 }
 
 #Test("content equal sensitive objects have separate restricted identity") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     root: env_files_test_project("jet-env-files-")
     declarations: [ManagedFile]{env_files_test_declaration("public", false), env_files_test_declaration("private", true)}
     first: env_files_test_plan(root, declarations)
@@ -116,7 +123,9 @@ env_files_test_action: fn(plan: FilePlan, destination: String) -> FileActionKind
 }
 
 #Test("object store symlink is rejected before read or chmod") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     root: env_files_test_project("jet-env-files-object-symlink-")
     outside_dir: env_files_test_project("jet-env-files-object-target-")
     outside: files.join(outside_dir, "target")
@@ -131,7 +140,7 @@ env_files_test_action: fn(plan: FilePlan, destination: String) -> FileActionKind
 
     plan: env_files_test_plan(root, [ManagedFile]{file})
     if plan.apply() == {
-        .Ok(_) -> panic("a symlinked object must be refused")
+        .Ok(_) -> { panic("a symlinked object must be refused") }
         .Err(error) -> {
             message: error.message()
             assert(message.contains("object") && message.contains("symlink"), message)
@@ -143,10 +152,12 @@ env_files_test_action: fn(plan: FilePlan, destination: String) -> FileActionKind
 }
 
 #Test("sensitive managed files fail closed before resolution") {
-    if sys.is_unix() -> return
+    if sys.is_unix() {
+        return
+    }
     root: env_files_test_project("jet-env-files-sensitive-platform-")
     if env_files_plan(root, [ManagedFile]{env_files_test_declaration("private", true)}) == {
-        .Ok(_) -> panic("sensitive files must be refused without private pre-write permissions")
+        .Ok(_) -> { panic("sensitive files must be refused without private pre-write permissions") }
         .Err(error) -> {
             message: error.message()
             assert(message.contains("private pre-write permissions are unavailable"), "unexpected error: {message}")

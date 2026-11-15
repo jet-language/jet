@@ -1,7 +1,20 @@
 // Pure ReceiptStore/RecordIndex contracts; assemble with Compiler and run.
 use {
     jet_cli.[
-        JetCLIReceiptSectionRecord, JetCLIRecordIdentity, JetCLIRecordIndexEntry, jet_cli_receipt_lookup_bytes, jet_cli_receipt_merge_sections, jet_cli_receipt_prepare, jet_cli_record_index_find, jet_cli_record_index_fresh_sequence, jet_cli_record_index_from_bytes, jet_cli_record_index_new, jet_cli_record_index_next_sequence, jet_cli_record_index_query, jet_cli_record_index_to_bytes, jet_cli_record_index_update,
+        JetCLIReceiptSectionRecord,
+        JetCLIRecordIdentity,
+        JetCLIRecordIndexEntry,
+        jet_cli_receipt_lookup_bytes,
+        jet_cli_receipt_merge_sections,
+        jet_cli_receipt_prepare,
+        jet_cli_record_index_find,
+        jet_cli_record_index_fresh_sequence,
+        jet_cli_record_index_from_bytes,
+        jet_cli_record_index_new,
+        jet_cli_record_index_next_sequence,
+        jet_cli_record_index_query,
+        jet_cli_record_index_to_bytes,
+        jet_cli_record_index_update,
     ]
     jet_driver.[JetDriverRecordLink, JetDriverRunReceiptClaim, JetDriverRunReceiptInput, JetDriverRunReceiptSection, jet_driver_run_receipt_encode, jet_driver_run_receipt_section_new]
 }
@@ -21,7 +34,9 @@ record_receipt_memory_require: fn(ok: Bool, name: String) Never! {
     stale: if jet_cli_receipt_lookup_bytes(Val(bytes), claim, [JetDriverRunReceiptInput]{JetDriverRunReceiptInput{path: "changed", digest: digest}}, [JetCLIReceiptSectionRecord]{}) == {
         .Val(_) -> false
         .None -> true
-        .Err(error) -> { panic(error.message) }
+        .Err(error) -> {
+            panic(error.message)
+        }
     }
     record_receipt_memory_require(stale, "changed input misses without a read failure")
     index := jet_cli_record_index_new() ?? panic("index")

@@ -65,7 +65,9 @@ DistinctCtx: struct {
 }
 
 // A NULL pDistinct.
-no_distinct: fn() -> DistinctCtx Never! { DistinctCtx{is_tnct: 0, e_tnct_type: cg.WHERE_DISTINCT_NOOP, tab_tnct: 0, addr_tnct: 0} }
+no_distinct: fn() -> DistinctCtx Never! {
+    DistinctCtx{is_tnct: 0, e_tnct_type: cg.WHERE_DISTINCT_NOOP, tab_tnct: 0, addr_tnct: 0}
+}
 
 // struct SortCtx (see the file header).
 SortCtx: struct {
@@ -89,7 +91,9 @@ no_sort: fn() -> SortCtx Never! {
 }
 
 // IsHiddenColumn.
-is_hidden_column: fn(col: conn.Column) -> Bool Never! { col.col_flags.bit_and(conn.COLFLAG_HIDDEN) != 0 }
+is_hidden_column: fn(col: conn.Column) -> Bool Never! {
+    col.col_flags.bit_and(conn.COLFLAG_HIDDEN) != 0
+}
 
 // findRightmost: the right-most SELECT of the compound s belongs to.
 find_rightmost: fn(a: ast.AST, s0: Int) -> Int Never! {
@@ -127,7 +131,9 @@ unset_join_expr: fn(a: &ast.AST, e0: Int, i_table: Int, nullable: Bool) Never! {
             ast.clear_flags(a, e, ast.EP_OUTER_ON.bit_or(ast.EP_INNER_ON))
             if i_table >= 0 -> ast.set_flags(a, e, ast.EP_INNER_ON)
         }
-        if a.exprs[e].op == tk.TK_COLUMN && a.exprs[e].itable == i_table && !nullable -> ast.clear_flags(a, e, ast.EP_CAN_BE_NULL)
+        if a.exprs[e].op == tk.TK_COLUMN && a.exprs[e].itable == i_table && !nullable {
+            ast.clear_flags(a, e, ast.EP_CAN_BE_NULL)
+        }
         if a.exprs[e].op == tk.TK_FUNCTION {
             l: a.exprs[e].x
             loop i in 0..<ast.list_len(a, l) {
@@ -193,7 +199,9 @@ process_join: fn(p: &cg.Parse, a: &ast.AST, s: Int) -> Int Never! {
                 z: a.idlists[list].items[j].name ?? [U8]{}
                 i_right_col: cat.column_index(p.db, right_tab, z)
                 found := (tab: -1, col: -1)
-                if i_right_col >= 0 -> found = table_and_column_index(p.db, a, src, 0, i, z, synth, true)
+                if i_right_col >= 0 {
+                    found = table_and_column_index(p.db, a, src, 0, i, z, synth, true)
+                }
                 if found.tab < 0 {
                     ast.error(a, "cannot join using column {ast.text(z)} - column not present in both tables")
                     return 1
@@ -281,9 +289,7 @@ push_onto_sorter: fn(p: &cg.Parse, a: &ast.AST, sort: &SortCtx, s: Int, reg_data
     n_ob_sat: sort.n_ob_sat
     i_skip := 0
     reg_base := 0
-    if n_prefix_reg != 0 {
-        reg_base = reg_data - n_prefix_reg
-    } else {
+    if n_prefix_reg != 0 -> reg_base = reg_data - n_prefix_reg else {
         reg_base = p.f.n_mem + 1
         p.f.n_mem += n_base
     }
@@ -292,21 +298,23 @@ push_onto_sorter: fn(p: &cg.Parse, a: &ast.AST, sort: &SortCtx, s: Int, reg_data
     ref: if reg_orig_data != 0 -> cg.ECEL_REF else -> 0
     _: ex.expr_code_expr_list(p, a, ob, reg_base, reg_orig_data, cg.ECEL_DUP.bit_or(ref))
     if b_seq != 0 -> _: cg.op2(p, opc.OP_SEQUENCE, sort.i_ecursor, reg_base + n_expr)
-    if n_prefix_reg == 0 && n_data > 0 -> ex.expr_code_move(p, reg_data, reg_base + n_expr + b_seq, n_data)
+    if n_prefix_reg == 0 && n_data > 0 {
+        ex.expr_code_move(p, reg_data, reg_base + n_expr + b_seq, n_data)
+    }
     if n_ob_sat > 0 {
         reg_record = make_sorter_record(p, a, sort, s, reg_base, n_base)
         reg_prev_key: p.f.n_mem + 1
         p.f.n_mem += n_ob_sat
         n_key: n_expr - n_ob_sat + b_seq
         addr_first := 0
-        if b_seq != 0 {
-            addr_first = cg.op1(p, opc.OP_IF_NOT, reg_base + n_expr)
-        } else {
+        if b_seq != 0 -> addr_first = cg.op1(p, opc.OP_IF_NOT, reg_base + n_expr) else {
             addr_first = cg.op1(p, opc.OP_SEQUENCE_TEST, sort.i_ecursor)
         }
         _: cg.op3(p, opc.OP_COMPARE, reg_prev_key, reg_base, n_ob_sat)
         o: cg.v_op_at(p, sort.addr_sort_index)
-        if p.db.malloc_failed -> return
+        if p.db.malloc_failed {
+            return
+        }
         cg.v_change_p2(p, sort.addr_sort_index, n_key + n_data)
         if o.p4 == .KeyInfo(ki0) {
             // The OP_Compare takes the sorter's KeyInfo with its key sort
@@ -366,9 +374,7 @@ code_distinct: fn(p: &cg.Parse, a: &ast.AST, e_tnct_type: Int, i_tab: Int, addr_
         loop i in 0..<n_result_col {
             e: ast.list_expr(a, elist, i)
             coll: ex.expr_coll_seq(p, a, e)
-            if i < n_result_col - 1 {
-                _: cg.op3(p, opc.OP_NE, reg_elem + i, i_jump, reg_prev + i)
-            } else {
+            if i < n_result_col - 1 -> _: cg.op3(p, opc.OP_NE, reg_elem + i, i_jump, reg_prev + i) else {
                 _: cg.op3(p, opc.OP_EQ, reg_elem + i, addr_repeat, reg_prev + i)
             }
             cg.v_append_p4(p, ex.coll_p4(coll))
@@ -391,9 +397,13 @@ code_distinct: fn(p: &cg.Parse, a: &ast.AST, e_tnct_type: Int, i_tab: Int, addr_
 // i_open_eph_addr goes when the strategy needs no table, becoming the
 // OP_Null that clears the previous row (i_val) for the ordered one.
 fix_distinct_open_eph: fn(p: &cg.Parse, a: ast.AST, e_tnct_type: Int, i_val: Int, i_open_eph_addr: Int) Never! {
-    if cg.n_err(a) != 0 || (e_tnct_type != cg.WHERE_DISTINCT_UNIQUE && e_tnct_type != cg.WHERE_DISTINCT_ORDERED) -> return
+    if cg.n_err(a) != 0 || (e_tnct_type != cg.WHERE_DISTINCT_UNIQUE && e_tnct_type != cg.WHERE_DISTINCT_ORDERED) {
+        return
+    }
     _: cg.v_change_to_noop(p, i_open_eph_addr)
-    if i_open_eph_addr + 1 < cg.v_current_addr(p) && cg.v_op_at(p, i_open_eph_addr + 1).opcode == opc.OP_EXPLAIN -> _: cg.v_change_to_noop(p, i_open_eph_addr + 1)
+    if i_open_eph_addr + 1 < cg.v_current_addr(p) && cg.v_op_at(p, i_open_eph_addr + 1).opcode == opc.OP_EXPLAIN {
+        _: cg.v_change_to_noop(p, i_open_eph_addr + 1)
+    }
     if e_tnct_type == cg.WHERE_DISTINCT_ORDERED {
         cg.v_change_opcode(p, i_open_eph_addr, opc.OP_NULL)
         cg.v_change_p1(p, i_open_eph_addr, 1)
@@ -421,11 +431,9 @@ select_inner_loop: fn(p: &cg.Parse, a: &ast.AST, s: Int, src_tab: Int, sort: &So
         }
         dest.i_sdst = p.f.n_mem + 1
         p.f.n_mem += n_result_col
-    } else if dest.i_sdst + n_result_col > p.f.n_mem {
-        // An INSERT whose SELECT has too many columns: the error comes
-        // later, and the registers keep other errors away meanwhile.
-        p.f.n_mem += n_result_col
-    }
+    } else if dest.i_sdst + n_result_col > p.f.n_mem { p.f.n_mem += n_result_col }
+    // An INSERT whose SELECT has too many columns: the error comes
+    // later, and the registers keep other errors away meanwhile.
     dest.n_sdst = n_result_col
     reg_result: dest.i_sdst
     reg_orig := reg_result
@@ -454,9 +462,7 @@ select_inner_loop: fn(p: &cg.Parse, a: &ast.AST, s: Int, src_tab: Int, sort: &So
             sort.deferred_reg = reg_result
             sort.deferred_flags = ecel_flags
             reg_orig = 0
-        } else {
-            inner_loop_load_row(p, a, s, reg_result, ecel_flags)
-        }
+        } else { inner_loop_load_row(p, a, s, reg_result, ecel_flags) }
     }
     if has_distinct != 0 {
         i_tab: code_distinct(p, a, distinct.e_tnct_type, distinct.tab_tnct, i_continue, elist, reg_result)
@@ -479,9 +485,7 @@ select_inner_loop: fn(p: &cg.Parse, a: &ast.AST, s: Int, src_tab: Int, sort: &So
             _: cg.op4_int(p, opc.OP_FOUND, i_parm + 1, addr, r1, 0)
             _: cg.op4_int(p, opc.OP_IDX_INSERT, i_parm + 1, r1, reg_result, n_result_col)
         }
-        if has_sort {
-            push_onto_sorter(p, a, sort, s, r1 + n_prefix_reg, reg_orig, 1, n_prefix_reg)
-        } else {
+        if has_sort -> push_onto_sorter(p, a, sort, s, r1 + n_prefix_reg, reg_orig, 1, n_prefix_reg) else {
             r2: cg.get_temp_reg(p)
             _: cg.op2(p, opc.OP_NEW_ROWID, i_parm, r2)
             _: cg.op3(p, opc.OP_INSERT, i_parm, r1, r2)
@@ -500,9 +504,7 @@ select_inner_loop: fn(p: &cg.Parse, a: &ast.AST, s: Int, src_tab: Int, sort: &So
             _: cg.op2(p, opc.OP_IS_NULL, reg_result, i_break)
             k: if i2 < 0 -> 1 else -> 0
             _: cg.op3(p, opc.OP_MAKE_RECORD, reg_result + k, n_result_col - k, r1)
-            if i2 < 0 {
-                _: cg.op3(p, opc.OP_INSERT, i_parm, r1, reg_result)
-            } else {
+            if i2 < 0 -> _: cg.op3(p, opc.OP_INSERT, i_parm, r1, reg_result) else {
                 _: cg.op4_int(p, opc.OP_IDX_INSERT, i_parm, r1, reg_result, i2)
             }
         }
@@ -517,16 +519,14 @@ select_inner_loop: fn(p: &cg.Parse, a: &ast.AST, s: Int, src_tab: Int, sort: &So
             _: cg.op4_int(p, opc.OP_IDX_INSERT, i_parm, r1, reg_result, n_result_col)
             cg.release_temp_reg(p, r1)
         }
-    } else if e_dest == cg.SRT_EXISTS {
-        _: cg.op2(p, opc.OP_INTEGER, 1, i_parm)
-    } else if e_dest == cg.SRT_MEM {
-        if has_sort -> push_onto_sorter(p, a, sort, s, reg_result, reg_orig, n_result_col, n_prefix_reg)
+    } else if e_dest == cg.SRT_EXISTS { _: cg.op2(p, opc.OP_INTEGER, 1, i_parm) } else if e_dest == cg.SRT_MEM {
+        if has_sort {
+            push_onto_sorter(p, a, sort, s, reg_result, reg_orig, n_result_col, n_prefix_reg)
+        }
     } else if e_dest == cg.SRT_COROUTINE || e_dest == cg.SRT_OUTPUT {
         if has_sort {
             push_onto_sorter(p, a, sort, s, reg_result, reg_orig, n_result_col, n_prefix_reg)
-        } else if e_dest == cg.SRT_COROUTINE {
-            _: cg.op1(p, opc.OP_YIELD, dest.i_sd_parm)
-        } else {
+        } else if e_dest == cg.SRT_COROUTINE { _: cg.op1(p, opc.OP_YIELD, dest.i_sd_parm) } else {
             _: cg.op2(p, opc.OP_RESULT_ROW, reg_result, n_result_col)
         }
     } else if e_dest == cg.SRT_DIST_QUEUE || e_dest == cg.SRT_QUEUE {
@@ -538,13 +538,17 @@ select_inner_loop: fn(p: &cg.Parse, a: &ast.AST, s: Int, src_tab: Int, sort: &So
         r2: cg.get_temp_range(p, n_key + 2)
         r3: r2 + n_key + 1
         addr_test := 0
-        if e_dest == cg.SRT_DIST_QUEUE -> addr_test = cg.op4_int(p, opc.OP_FOUND, i_parm + 1, 0, reg_result, n_result_col)
+        if e_dest == cg.SRT_DIST_QUEUE {
+            addr_test = cg.op4_int(p, opc.OP_FOUND, i_parm + 1, 0, reg_result, n_result_col)
+        }
         _: cg.op3(p, opc.OP_MAKE_RECORD, reg_result, n_result_col, r3)
         if e_dest == cg.SRT_DIST_QUEUE {
             _: cg.op2(p, opc.OP_IDX_INSERT, i_parm + 1, r3)
             cg.v_change_p5(p, conn.OPFLAG_USESEEKRESULT)
         }
-        loop i in 0..<n_key -> _: cg.op2(p, opc.OP_SCOPY, reg_result + a.lists[so].items[i].order_by_col - 1, r2 + i)
+        loop i in 0..<n_key {
+            _: cg.op2(p, opc.OP_SCOPY, reg_result + a.lists[so].items[i].order_by_col - 1, r2 + i)
+        }
         _: cg.op2(p, opc.OP_SEQUENCE, i_parm, r2 + n_key)
         _: cg.op3(p, opc.OP_MAKE_RECORD, r2, n_key + 2, r1)
         _: cg.op4_int(p, opc.OP_IDX_INSERT, i_parm, r1, r2, n_key + 2)
@@ -553,7 +557,9 @@ select_inner_loop: fn(p: &cg.Parse, a: &ast.AST, s: Int, src_tab: Int, sort: &So
         cg.release_temp_range(p, r2, n_key + 2)
     }
     // SRT_Discard (a SELECT in a trigger body) keeps nothing.
-    if !has_sort && a.selects[s].ilimit != 0 -> _: cg.op2(p, opc.OP_DECR_JUMP_ZERO, a.selects[s].ilimit, i_break)
+    if !has_sort && a.selects[s].ilimit != 0 {
+        _: cg.op2(p, opc.OP_DECR_JUMP_ZERO, a.selects[s].ilimit, i_break)
+    }
 }
 
 // generateSortTail: the loop that reads the sorter `sort` filled and sends
@@ -578,16 +584,16 @@ generate_sort_tail: fn(p: &cg.Parse, a: &ast.AST, s: Int, sort: &SortCtx, n_colu
     reg_row := 0
     reg_rowid := 0
     if e_dest == cg.SRT_OUTPUT || e_dest == cg.SRT_COROUTINE || e_dest == cg.SRT_MEM {
-        if e_dest == cg.SRT_MEM && a.selects[s].ioffset != 0 -> _: cg.op2(p, opc.OP_NULL, 0, dest.i_sdst)
+        if e_dest == cg.SRT_MEM && a.selects[s].ioffset != 0 {
+            _: cg.op2(p, opc.OP_NULL, 0, dest.i_sdst)
+        }
         reg_row = dest.i_sdst
     } else {
         reg_rowid = cg.get_temp_reg(p)
         if e_dest == cg.SRT_EPHEM_TAB || e_dest == cg.SRT_TABLE {
             reg_row = cg.get_temp_reg(p)
             n_column = 0
-        } else {
-            reg_row = cg.get_temp_range(p, n_column)
-        }
+        } else { reg_row = cg.get_temp_range(p, n_column) }
     }
     n_key: ast.list_len(a, ob) - sort.n_ob_sat
     use_sorter: sort.sort_flags.bit_and(SORTFLAG_USE_SORTER) != 0
@@ -619,9 +625,7 @@ generate_sort_tail: fn(p: &cg.Parse, a: &ast.AST, s: Int, sort: &SortCtx, n_colu
     loop i >= 0 {
         obc: a.lists[elist].items[i].order_by_col
         i_read := 0
-        if obc != 0 {
-            i_read = obc - 1
-        } else {
+        if obc != 0 -> i_read = obc - 1 else {
             i_read = i_col
             i_col -= 1
         }
@@ -638,34 +642,27 @@ generate_sort_tail: fn(p: &cg.Parse, a: &ast.AST, s: Int, sort: &SortCtx, n_colu
         _: cg.op4_text(p, opc.OP_MAKE_RECORD, reg_row, n_column, reg_rowid, aff)
         _: cg.op4_int(p, opc.OP_IDX_INSERT, i_parm, reg_rowid, reg_row, n_column)
     } else if e_dest == cg.SRT_MEM {
-        // The LIMIT ends the loop.
-    } else if e_dest == cg.SRT_UPFROM {
+
+    } else if // The LIMIT ends the loop.
+    e_dest == cg.SRT_UPFROM {
         i2: dest.i_sd_parm2
         r1: cg.get_temp_reg(p)
         k: if i2 < 0 -> 1 else -> 0
         _: cg.op3(p, opc.OP_MAKE_RECORD, reg_row + k, n_column - k, r1)
-        if i2 < 0 {
-            _: cg.op3(p, opc.OP_INSERT, i_parm, r1, reg_row)
-        } else {
+        if i2 < 0 -> _: cg.op3(p, opc.OP_INSERT, i_parm, r1, reg_row) else {
             _: cg.op4_int(p, opc.OP_IDX_INSERT, i_parm, r1, reg_row, i2)
         }
-    } else if e_dest == cg.SRT_OUTPUT {
-        _: cg.op2(p, opc.OP_RESULT_ROW, dest.i_sdst, n_column)
-    } else {
+    } else if e_dest == cg.SRT_OUTPUT { _: cg.op2(p, opc.OP_RESULT_ROW, dest.i_sdst, n_column) } else {
         _: cg.op1(p, opc.OP_YIELD, dest.i_sd_parm)
     }
     if reg_rowid != 0 {
-        if e_dest == cg.SRT_SET {
-            cg.release_temp_range(p, reg_row, n_column)
-        } else {
+        if e_dest == cg.SRT_SET -> cg.release_temp_range(p, reg_row, n_column) else {
             cg.release_temp_reg(p, reg_row)
         }
         cg.release_temp_reg(p, reg_rowid)
     }
     cg.v_resolve_label(p, addr_continue)
-    if use_sorter {
-        _: cg.op2(p, opc.OP_SORTER_NEXT, i_tab, addr)
-    } else {
+    if use_sorter -> _: cg.op2(p, opc.OP_SORTER_NEXT, i_tab, addr) else {
         _: cg.op2(p, opc.OP_NEXT, i_tab, addr)
     }
     if sort.reg_return != 0 -> _: cg.op1(p, opc.OP_RETURN, sort.reg_return)
@@ -704,9 +701,7 @@ column_type_impl: fn(p: cg.Parse, a: ast.AST, srcs: [Int], e: Int) -> ColumnOrig
                 si: ast.src_item(a, src, j)
                 t = a.items[si].tab
                 sub = a.items[si].select
-            } else {
-                k += 1
-            }
+            } else { k += 1 }
         }
         // "SELECT (SELECT t1.col) FROM t1" asks of t1.col in the inner
         // query, whose type is never used.
@@ -764,7 +759,9 @@ generate_column_types: fn(p: &cg.Parse, a: &ast.AST, src: Int, elist: Int) Never
 // sqlite3GenerateColumnNames: the names of the result columns of SELECT
 // s0 (its compound's left-most SELECT), once per statement.
 generate_column_names: fn(p: &cg.Parse, a: &ast.AST, s0: Int) Never! {
-    if p.f.col_names_set -> return
+    if p.f.col_names_set {
+        return
+    }
     s := s0
     loop a.selects[s].prior >= 0 -> s = a.selects[s].prior
     src: a.selects[s].src
@@ -790,9 +787,7 @@ generate_column_names: fn(p: &cg.Parse, a: &ast.AST, s0: Int) Never! {
                 z.push(U8{46})
                 loop b in z_col -> z.push(b)
                 cg.v_set_col_name(p, i, conn.COLNAME_NAME, z)
-            } else {
-                cg.v_set_col_name(p, i, conn.COLNAME_NAME, z_col)
-            }
+            } else { cg.v_set_col_name(p, i, conn.COLNAME_NAME, z_col) }
         } else {
             z: item.ename ?? "column{i + 1}".bytes()
             cg.v_set_col_name(p, i, conn.COLNAME_NAME, z)
@@ -829,9 +824,7 @@ columns_from_expr_list: fn(p: &cg.Parse, a: &ast.AST, elist: Int) -[DB]> [conn.C
                 ic := a.exprs[ce].icolumn
                 if ic < 0 -> ic = p.db.tables[t].ipkey
                 z_name = if ic >= 0 -> Val(p.db.tables[t].cols[ic].name.copy()) else -> Val("rowid".bytes())
-            } else if a.exprs[ce].op == tk.TK_ID {
-                z_name = a.exprs[ce].token
-            }
+            } else if a.exprs[ce].op == tk.TK_ID { z_name = a.exprs[ce].token }
             // Otherwise the span of the expression names it.
         }
         name := "column{i + 1}".bytes()
@@ -843,7 +836,9 @@ columns_from_expr_list: fn(p: &cg.Parse, a: &ast.AST, elist: Int) -[DB]> [conn.C
         loop {
             hit: conn.hash_find(ht, name)
             if hit < 0 -> break
-            if a.lists[elist].items[hit].using_term -> col_flags = col_flags.bit_or(conn.COLFLAG_NOEXPAND)
+            if a.lists[elist].items[hit].using_term {
+                col_flags = col_flags.bit_or(conn.COLFLAG_NOEXPAND)
+            }
             n_name := name.len()
             if n_name > 0 {
                 j := n_name - 1
@@ -880,7 +875,9 @@ std_type_for_affinity: fn(aff: Int) -> [U8]? Never! {
 // by default) of the columns of table t, a subquery, view or CTE, from
 // the SELECT s0 that computes it.
 subquery_column_types: fn(p: &cg.Parse, a: &ast.AST, t: Int, s0: Int, aff: Int) Never! {
-    if p.db.malloc_failed || ast.in_rename(a) -> return
+    if p.db.malloc_failed || ast.in_rename(a) {
+        return
+    }
     s := s0
     loop a.selects[s].prior >= 0 -> s = a.selects[s].prior
     elist: a.selects[s].elist
@@ -898,9 +895,7 @@ subquery_column_types: fn(p: &cg.Parse, a: &ast.AST, t: Int, s0: Int, aff: Int) 
                 m = m.bit_or(ex.expr_data_type(p.db, a, e2))
                 s2 = a.selects[s2].next_sel
             }
-            if caff == base.AFF_TEXT && m.bit_and(1) != 0 {
-                caff = base.AFF_BLOB
-            } else if caff >= base.AFF_NUMERIC && m.bit_and(2) != 0 {
+            if caff == base.AFF_TEXT && m.bit_and(1) != 0 -> caff = base.AFF_BLOB else if caff >= base.AFF_NUMERIC && m.bit_and(2) != 0 {
                 caff = base.AFF_BLOB
             }
             if caff >= base.AFF_NUMERIC && a.exprs[e].op == tk.TK_CAST -> caff = base.AFF_FLEXNUM
@@ -908,9 +903,7 @@ subquery_column_types: fn(p: &cg.Parse, a: &ast.AST, t: Int, s0: Int, aff: Int) 
         p.db.tables[t].cols[i].affinity = caff
         z_type := column_type_impl(p, a, srcs, e).typ
         if z_type == None || caff != cat.affinity_type(z_type ?? [U8]{}).aff {
-            if caff == base.AFF_NUMERIC || caff == base.AFF_FLEXNUM {
-                z_type = Val("NUM".bytes())
-            } else {
+            if caff == base.AFF_NUMERIC || caff == base.AFF_FLEXNUM -> z_type = Val("NUM".bytes()) else {
                 z_type = std_type_for_affinity(caff)
             }
         }
@@ -960,9 +953,13 @@ result_set_of_select: fn(p: &cg.Parse, a: &ast.AST, s0: Int, aff: Int) -[DB]> In
 // counter (iOffset) with LIMIT+OFFSET after it, of SELECT s, once; a LIMIT
 // of 0 jumps to i_break.
 compute_limit_registers: fn(p: &cg.Parse, a: &ast.AST, s: Int, i_break: Int) Never! -[DB]> {
-    if a.selects[s].ilimit != 0 -> return
+    if a.selects[s].ilimit != 0 {
+        return
+    }
     lim: a.selects[s].limit
-    if lim < 0 -> return
+    if lim < 0 {
+        return
+    }
     p.f.n_mem += 1
     i_limit: p.f.n_mem
     a.selects[s].ilimit = i_limit
@@ -970,9 +967,7 @@ compute_limit_registers: fn(p: &cg.Parse, a: &ast.AST, s: Int, i_break: Int) Nev
     left: a.exprs[lim].left
     if ast.expr_is_integer(a, left) == .Val(n) {
         _: cg.op2(p, opc.OP_INTEGER, n, i_limit)
-        if n == 0 {
-            _: cg.goto(p, i_break)
-        } else if n >= 0 && a.selects[s].nselect_row > util.log_est(n) {
+        if n == 0 -> _: cg.goto(p, i_break) else if n >= 0 && a.selects[s].nselect_row > util.log_est(n) {
             a.selects[s].nselect_row = util.log_est(n)
             a.selects[s].sel_flags = a.selects[s].sel_flags.bit_or(ast.SF_FIXED_LIMIT)
         }
@@ -1017,9 +1012,7 @@ multi_select_order_by_key_info: fn(p: &cg.Parse, a: &ast.AST, s: Int, n_extra: I
     loop i in 0..<n_ob {
         term: a.lists[ob].items[i].expr
         coll := -1
-        if ast.has(a, term, ast.EP_COLLATE) {
-            coll = ex.expr_coll_seq(p, a, term)
-        } else {
+        if ast.has(a, term, ast.EP_COLLATE) -> coll = ex.expr_coll_seq(p, a, term) else {
             coll = multi_select_coll_seq(p, a, s, a.lists[ob].items[i].order_by_col - 1)
             if coll < 0 -> coll = record.COLL_BINARY
             nm: conn.coll_name(p.db, coll)
@@ -1041,7 +1034,9 @@ generate_with_recursive_query: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.S
         ast.error(a, "cannot use window functions in recursive queries")
         return
     }
-    if cg.auth_check(p, a, conn.AUTH_RECURSIVE, None, None, None) != 0 -> return
+    if cg.auth_check(p, a, conn.AUTH_RECURSIVE, None, None, None) != 0 {
+        return
+    }
     addr_break: cg.v_make_label(p)
     a.selects[s].nselect_row = 320
     compute_limit_registers(p, a, s, addr_break)
@@ -1070,9 +1065,7 @@ generate_with_recursive_query: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.S
         e_dest = if ob >= 0 -> cg.SRT_DIST_QUEUE else -> cg.SRT_DIST_FIFO
         i_distinct = p.f.n_tab
         p.f.n_tab += 1
-    } else {
-        e_dest = if ob >= 0 -> cg.SRT_QUEUE else -> cg.SRT_FIFO
-    }
+    } else { e_dest = if ob >= 0 -> cg.SRT_QUEUE else -> cg.SRT_FIFO }
     dest_queue := ex.select_dest_init(e_dest, i_queue)
     p.f.n_mem += 1
     reg_current: p.f.n_mem
@@ -1081,9 +1074,7 @@ generate_with_recursive_query: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.S
         ki: multi_select_order_by_key_info(p, a, s, 1)
         _: cg.op4(p, opc.OP_OPEN_EPHEMERAL, i_queue, ast.list_len(a, ob) + 2, 0, conn.P4.KeyInfo(ki))
         dest_queue.order_by = ob
-    } else {
-        _: cg.op2(p, opc.OP_OPEN_EPHEMERAL, i_queue, n_col)
-    }
+    } else { _: cg.op2(p, opc.OP_OPEN_EPHEMERAL, i_queue, n_col) }
     if i_distinct != 0 {
         a.selects[s].addr_open_ephm0 = cg.op2(p, opc.OP_OPEN_EPHEMERAL, i_distinct, 0)
         a.selects[s].sel_flags = a.selects[s].sel_flags.bit_or(ast.SF_USES_EPHEMERAL)
@@ -1113,9 +1104,7 @@ generate_with_recursive_query: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.S
         if rc == 0 {
             addr_top: cg.op2(p, opc.OP_REWIND, i_queue, addr_break)
             _: cg.op1(p, opc.OP_NULL_ROW, i_current)
-            if ob >= 0 {
-                _: cg.op3(p, opc.OP_COLUMN, i_queue, ast.list_len(a, ob) + 1, reg_current)
-            } else {
+            if ob >= 0 -> _: cg.op3(p, opc.OP_COLUMN, i_queue, ast.list_len(a, ob) + 1, reg_current) else {
                 _: cg.op2(p, opc.OP_ROW_DATA, i_queue, reg_current)
             }
             _: cg.op1(p, opc.OP_DELETE, i_queue)
@@ -1188,7 +1177,9 @@ multi_select_all: fn(p: &cg.Parse, a: &ast.AST, s: Int, d: &cg.SelectDest, end: 
     addr := 0
     if a.selects[s].ilimit != 0 {
         addr = cg.op1(p, opc.OP_IF_NOT, a.selects[s].ilimit)
-        if a.selects[s].ioffset != 0 -> _: cg.op3(p, opc.OP_OFFSET_LIMIT, a.selects[s].ilimit, a.selects[s].ioffset + 1, a.selects[s].ioffset)
+        if a.selects[s].ioffset != 0 {
+            _: cg.op3(p, opc.OP_OFFSET_LIMIT, a.selects[s].ilimit, a.selects[s].ioffset + 1, a.selects[s].ioffset)
+        }
     }
     _: cg.explain(p, a, true, "UNION ALL")
     rc = select(p, a, s, d)
@@ -1197,7 +1188,9 @@ multi_select_all: fn(p: &cg.Parse, a: &ast.AST, s: Int, d: &cg.SelectDest, end: 
     lim: a.selects[s].limit
     if lim >= 0 {
         if ast.expr_is_integer(a, a.exprs[lim].left) == .Val(n_limit) {
-            if n_limit > 0 && a.selects[s].nselect_row > util.log_est(n_limit) -> a.selects[s].nselect_row = util.log_est(n_limit)
+            if n_limit > 0 && a.selects[s].nselect_row > util.log_est(n_limit) {
+                a.selects[s].nselect_row = util.log_est(n_limit)
+            }
         }
     }
     if addr != 0 -> cg.v_jump_here(p, addr)
@@ -1210,9 +1203,7 @@ multi_select_union: fn(p: &cg.Parse, a: &ast.AST, s: Int, d: &cg.SelectDest, end
     prior: a.selects[s].prior
     prior_op: cg.SRT_UNION
     union_tab := 0
-    if d.e_dest == prior_op {
-        union_tab = d.i_sd_parm
-    } else {
+    if d.e_dest == prior_op -> union_tab = d.i_sd_parm else {
         union_tab = p.f.n_tab
         p.f.n_tab += 1
         a.selects[s].addr_open_ephm0 = cg.op2(p, opc.OP_OPEN_EPHEMERAL, union_tab, 0)
@@ -1234,7 +1225,9 @@ multi_select_union: fn(p: &cg.Parse, a: &ast.AST, s: Int, d: &cg.SelectDest, end
     rc = select(p, a, s, uniondest)
     a.selects[s].prior = prior
     a.selects[s].order_by = -1
-    if a.selects[s].op == tk.TK_UNION -> a.selects[s].nselect_row = util.log_est_add(a.selects[s].nselect_row, a.selects[prior].nselect_row)
+    if a.selects[s].op == tk.TK_UNION {
+        a.selects[s].nselect_row = util.log_est_add(a.selects[s].nselect_row, a.selects[prior].nselect_row)
+    }
     ast.expr_delete(a, a.selects[s].limit)
     a.selects[s].limit = limit
     a.selects[s].ilimit = 0
@@ -1279,7 +1272,9 @@ multi_select_intersect: fn(p: &cg.Parse, a: &ast.AST, s: Int, d: &cg.SelectDest,
     _: cg.explain(p, a, true, "{ast.select_op_name(a.selects[s].op)} USING TEMP B-TREE")
     rc = select(p, a, s, intersectdest)
     a.selects[s].prior = prior
-    if a.selects[s].nselect_row > a.selects[prior].nselect_row -> a.selects[s].nselect_row = a.selects[prior].nselect_row
+    if a.selects[s].nselect_row > a.selects[prior].nselect_row {
+        a.selects[s].nselect_row = a.selects[prior].nselect_row
+    }
     ast.expr_delete(a, a.selects[s].limit)
     a.selects[s].limit = limit
     if rc != 0 -> return rc
@@ -1315,30 +1310,20 @@ multi_select: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]>
     end := false
     if a.selects[s].sel_flags.bit_and(ast.SF_MULTI_VALUE) != 0 {
         rc = multi_select_values(p, a, s, d)
-        if rc >= 0 {
-            end = true
-        } else {
-            rc = base.OK
-        }
+        if rc >= 0 -> end = true else -> rc = base.OK
     }
     if !end {
         if a.selects[s].sel_flags.bit_and(ast.SF_RECURSIVE) != 0 && has_anchor(a, s) {
             generate_with_recursive_query(p, a, s, d)
-        } else if a.selects[s].order_by >= 0 {
-            return multi_select_order_by(p, a, s, dest)
-        } else {
+        } else if a.selects[s].order_by >= 0 { return multi_select_order_by(p, a, s, dest) } else {
             if a.selects[prior].prior < 0 {
                 _: cg.explain(p, a, true, "COMPOUND QUERY")
                 _: cg.explain(p, a, true, "LEFT-MOST SUBQUERY")
             }
             op: a.selects[s].op
-            if op == tk.TK_ALL {
-                rc = multi_select_all(p, a, s, d, end)
-            } else if op == tk.TK_EXCEPT || op == tk.TK_UNION {
+            if op == tk.TK_ALL -> rc = multi_select_all(p, a, s, d, end) else if op == tk.TK_EXCEPT || op == tk.TK_UNION {
                 rc = multi_select_union(p, a, s, d, end)
-            } else {
-                rc = multi_select_intersect(p, a, s, d, end)
-            }
+            } else { rc = multi_select_intersect(p, a, s, d, end) }
             if !end && a.selects[s].next_sel < 0 -> cg.explain_pop(p)
         }
     }
@@ -1418,9 +1403,7 @@ generate_output_subroutine: fn(p: &cg.Parse, a: &ast.AST, s: Int, inp: cg.Select
         }
         ex.expr_code_move(p, inp.i_sdst, dest.i_sdst, inp.n_sdst)
         _: cg.op1(p, opc.OP_YIELD, dest.i_sd_parm)
-    } else {
-        _: cg.op2(p, opc.OP_RESULT_ROW, inp.i_sdst, inp.n_sdst)
-    }
+    } else { _: cg.op2(p, opc.OP_RESULT_ROW, inp.i_sdst, inp.n_sdst) }
     if a.selects[s].ilimit != 0 -> _: cg.op2(p, opc.OP_DECR_JUMP_ZERO, a.selects[s].ilimit, i_break)
     cg.v_resolve_label(p, i_continue)
     _: cg.op1(p, opc.OP_RETURN, reg_return)
@@ -1541,7 +1524,9 @@ multi_select_order_by: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDes
     cg.v_end_coroutine(p, reg_addr_b)
     addr_out_a: generate_output_subroutine(p, a, s, dest_a, dest, reg_out_a, reg_prev, key_dup, label_end)
     addr_out_b := 0
-    if op == tk.TK_ALL || op == tk.TK_UNION -> addr_out_b = generate_output_subroutine(p, a, s, dest_b, dest, reg_out_b, reg_prev, key_dup, label_end)
+    if op == tk.TK_ALL || op == tk.TK_UNION {
+        addr_out_b = generate_output_subroutine(p, a, s, dest_b, dest, reg_out_b, reg_prev, key_dup, label_end)
+    }
     // EofA: only B's rows remain.
     addr_eof_a := 0
     addr_eof_a_no_b := 0
@@ -1558,7 +1543,9 @@ multi_select_order_by: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDes
     addr_eof_b := 0
     if op == tk.TK_INTERSECT {
         addr_eof_b = addr_eof_a
-        if a.selects[s].nselect_row > a.selects[prior].nselect_row -> a.selects[s].nselect_row = a.selects[prior].nselect_row
+        if a.selects[s].nselect_row > a.selects[prior].nselect_row {
+            a.selects[s].nselect_row = a.selects[prior].nselect_row
+        }
     } else {
         addr_eof_b = cg.op2(p, opc.OP_GOSUB, reg_out_a, addr_out_a)
         _: cg.op2(p, opc.OP_YIELD, reg_addr_a, label_end)
@@ -1570,9 +1557,7 @@ multi_select_order_by: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDes
     _: cg.goto(p, label_cmpr)
     // A == B.
     addr_aeq_b := 0
-    if op == tk.TK_ALL {
-        addr_aeq_b = addr_alt_b
-    } else if op == tk.TK_INTERSECT {
+    if op == tk.TK_ALL -> addr_aeq_b = addr_alt_b else if op == tk.TK_INTERSECT {
         addr_aeq_b = addr_alt_b
         addr_alt_b += 1
     } else {
@@ -1641,7 +1626,9 @@ subst_expr: fn(p: &cg.Parse, a: &ast.AST, sc: SubstContext, e: Int) -> Int Never
         nw: ast.expr_dup(a, from, 0)
         if p.db.malloc_failed -> return e
         if sc.is_outer_join -> ast.set_flags(a, nw, ast.EP_CAN_BE_NULL)
-        if ast.has(a, e, both_on) -> we.set_join_expr(a, nw, a.exprs[e].w, a.exprs[e].flags.bit_and(both_on))
+        if ast.has(a, e, both_on) {
+            we.set_join_expr(a, nw, a.exprs[e].w, a.exprs[e].flags.bit_and(both_on))
+        }
         ast.expr_delete(a, e)
         if a.exprs[nw].op == tk.TK_TRUEFALSE {
             a.exprs[nw].ivalue = if ast.expr_truth_value(a, nw) -> 1 else -> 0
@@ -1660,15 +1647,15 @@ subst_expr: fn(p: &cg.Parse, a: &ast.AST, sc: SubstContext, e: Int) -> Int Never
         ast.clear_flags(a, out, ast.EP_COLLATE)
         return out
     }
-    if a.exprs[e].op == tk.TK_IF_NULL_ROW && a.exprs[e].itable == sc.i_table -> a.exprs[e].itable = sc.i_new_table
+    if a.exprs[e].op == tk.TK_IF_NULL_ROW && a.exprs[e].itable == sc.i_table {
+        a.exprs[e].itable = sc.i_new_table
+    }
     l: subst_expr(p, a, sc, a.exprs[e].left)
     a.exprs[e].left = l
     r: subst_expr(p, a, sc, a.exprs[e].right)
     a.exprs[e].right = r
     x: a.exprs[e].x
-    if ast.has(a, e, ast.EP_X_IS_SELECT) {
-        subst_select(p, a, sc, x, true)
-    } else {
+    if ast.has(a, e, ast.EP_X_IS_SELECT) -> subst_select(p, a, sc, x, true) else {
         subst_expr_list(p, a, sc, x)
     }
     if ast.has(a, e, ast.EP_WIN_FUNC) {
@@ -1721,20 +1708,29 @@ ColUsedWalker: struct {
 
     impl SQLWalker {
         walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
-            if a.exprs[e].op == tk.TK_COLUMN && a.exprs[e].itable == self.cursor && a.exprs[e].icolumn >= 0 -> self.hits.push(e)
+            if a.exprs[e].op == tk.TK_COLUMN && a.exprs[e].itable == self.cursor && a.exprs[e].icolumn >= 0 {
+                self.hits.push(e)
+            }
             ast.WRC_CONTINUE
         }
+
         walk_has_select_cb: fn(&self) -> Bool Never! { true }
+
         walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
+
         walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+
         walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+
         walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
     }
 }
 
 // recomputeColumnsUsed: FROM item si's colUsed from what SELECT s uses.
 recompute_columns_used: fn(p: &cg.Parse, a: &ast.AST, s: Int, si: Int) Never! {
-    if a.items[si].tab < 0 -> return
+    if a.items[si].tab < 0 {
+        return
+    }
     w := ColUsedWalker{cursor: a.items[si].cursor, hits: [Int]{}}
     _: ast.walk_select<ColUsedWalker>(w, a, s)
     m := 0
@@ -1771,14 +1767,23 @@ RenumberWalker: struct {
     impl SQLWalker {
         walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
             op: a.exprs[e].op
-            if op == tk.TK_COLUMN || op == tk.TK_IF_NULL_ROW -> a.exprs[e].itable = renumber_mapping(self.csr_map, a.exprs[e].itable)
-            if ast.has(a, e, ast.EP_OUTER_ON) -> a.exprs[e].w = renumber_mapping(self.csr_map, a.exprs[e].w)
+            if op == tk.TK_COLUMN || op == tk.TK_IF_NULL_ROW {
+                a.exprs[e].itable = renumber_mapping(self.csr_map, a.exprs[e].itable)
+            }
+            if ast.has(a, e, ast.EP_OUTER_ON) {
+                a.exprs[e].w = renumber_mapping(self.csr_map, a.exprs[e].w)
+            }
             ast.WRC_CONTINUE
         }
+
         walk_has_select_cb: fn(&self) -> Bool Never! { true }
+
         walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
+
         walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+
         walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+
         walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
     }
 }
@@ -1852,7 +1857,9 @@ flatten_subquery: fn(p: &cg.Parse, a: &ast.AST, s: Int, i_from: Int, is_agg: Boo
     jt: a.items[sub_item].jointype
     sub_first: ast.src_item(a, sub_src, 0)
     if jt.bit_and(ast.JT_OUTER.bit_or(ast.JT_LTORJ)) != 0 {
-        if ast.src_len(a, sub_src) > 1 || ex.is_virtual(p.db, a.items[sub_first].tab) || s_distinct || jt.bit_and(ast.JT_RIGHT) != 0 -> return false
+        if ast.src_len(a, sub_src) > 1 || ex.is_virtual(p.db, a.items[sub_first].tab) || s_distinct || jt.bit_and(ast.JT_RIGHT) != 0 {
+            return false
+        }
         is_outer_join = true
     }
     if i_from > 0 && a.items[sub_first].jointype.bit_and(ast.JT_LTORJ) != 0 -> return false
@@ -1863,8 +1870,12 @@ flatten_subquery: fn(p: &cg.Parse, a: &ast.AST, s: Int, i_from: Int, is_agg: Boo
         s1 := sub
         loop s1 >= 0 {
             f1: a.selects[s1].sel_flags
-            if f1.bit_and(ast.SF_DISTINCT.bit_or(ast.SF_AGGREGATE)) != 0 || (a.selects[s1].prior >= 0 && a.selects[s1].op != tk.TK_ALL) || ast.src_len(a, a.selects[s1].src) < 1 || a.selects[s1].win >= 0 -> return false
-            if i_from > 0 && a.items[ast.src_item(a, a.selects[s1].src, 0)].jointype.bit_and(ast.JT_LTORJ) != 0 -> return false
+            if f1.bit_and(ast.SF_DISTINCT.bit_or(ast.SF_AGGREGATE)) != 0 || (a.selects[s1].prior >= 0 && a.selects[s1].op != tk.TK_ALL) || ast.src_len(a, a.selects[s1].src) < 1 || a.selects[s1].win >= 0 {
+                return false
+            }
+            if i_from > 0 && a.items[ast.src_item(a, a.selects[s1].src, 0)].jointype.bit_and(ast.JT_LTORJ) != 0 {
+                return false
+            }
             s1 = a.selects[s1].prior
         }
         ob: a.selects[s].order_by
@@ -1962,7 +1973,9 @@ flatten_subquery: fn(p: &cg.Parse, a: &ast.AST, s: Int, i_from: Int, is_agg: Boo
         }
         wh_sub: a.selects[sc].where_expr
         a.selects[sc].where_expr = -1
-        if is_outer_join && wh_sub >= 0 -> we.set_join_expr(a, wh_sub, i_new_parent, ast.EP_OUTER_ON)
+        if is_outer_join && wh_sub >= 0 {
+            we.set_join_expr(a, wh_sub, i_new_parent, ast.EP_OUTER_ON)
+        }
         if wh_sub >= 0 {
             pw: a.selects[parent].where_expr
             nw := wh_sub
@@ -2001,14 +2014,22 @@ flatten_subquery: fn(p: &cg.Parse, a: &ast.AST, s: Int, i_from: Int, is_agg: Boo
 // the pairs unless the column is fixed or present, the value has an
 // affinity, or the comparison is not BINARY.
 const_insert: fn(p: &cg.Parse, a: &ast.AST, t: Int, col: Int, val: Int, e: Int) Never! {
-    if ast.has(a, col, ast.EP_FIXED_COL) -> return
-    if ex.expr_affinity(p.db, a, val) != 0 -> return
-    if !ex.is_binary(ex.expr_compare_coll_seq(p, a, e)) -> return
+    if ast.has(a, col, ast.EP_FIXED_COL) {
+        return
+    }
+    if ex.expr_affinity(p.db, a, val) != 0 {
+        return
+    }
+    if !ex.is_binary(ex.expr_compare_coll_seq(p, a, e)) {
+        return
+    }
     n: p.walks[t].ints.len()
     i := 0
     loop i < n {
         e2: p.walks[t].ints[i]
-        if a.exprs[e2].itable == a.exprs[col].itable && a.exprs[e2].icolumn == a.exprs[col].icolumn -> return
+        if a.exprs[e2].itable == a.exprs[col].itable && a.exprs[e2].icolumn == a.exprs[col].icolumn {
+            return
+        }
         i += 2
     }
     if ex.expr_affinity(p.db, a, col) == base.AFF_BLOB -> p.walks[t].e_code = 1
@@ -2018,15 +2039,21 @@ const_insert: fn(p: &cg.Parse, a: &ast.AST, t: Int, col: Int, val: Int, e: Int) 
 
 // findConstInWhere: the AND-connected COLUMN=CONSTANT terms of e.
 find_const_in_where: fn(p: &cg.Parse, a: &ast.AST, t: Int, e: Int) Never! {
-    if e < 0 -> return
-    if ast.has(a, e, p.walks[t].u) -> return
+    if e < 0 {
+        return
+    }
+    if ast.has(a, e, p.walks[t].u) {
+        return
+    }
     op: a.exprs[e].op
     if op == tk.TK_AND {
         find_const_in_where(p, a, t, a.exprs[e].right)
         find_const_in_where(p, a, t, a.exprs[e].left)
         return
     }
-    if op != tk.TK_EQ -> return
+    if op != tk.TK_EQ {
+        return
+    }
     r: a.exprs[e].right
     l: a.exprs[e].left
     if a.exprs[r].op == tk.TK_COLUMN && ast.expr_is_constant(a, l) -> const_insert(p, a, t, r, l, e)
@@ -2079,10 +2106,17 @@ PropagateConstWalker: struct {
             }
             propagate_constant_rewrite_one(p, a, t, e, p.walks[t].e_code != 0)
         }
+
         has_select: fn(self) -[]> Bool Never! { true }
-        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
+
+        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+            ast.WRC_CONTINUE
+        }
+
         has_select2: fn(self) -[]> Bool Never! { false }
+
         on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+
         win_defn: fn(self) -[]> Bool Never! { false }
     }
 }
@@ -2097,7 +2131,9 @@ propagate_constants: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
         t: cg.walk_top(p)
         src: a.selects[s].src
         exclude := ast.EP_OUTER_ON
-        if ast.src_len(a, src) > 0 && a.items[ast.src_item(a, src, 0)].jointype.bit_and(ast.JT_LTORJ) != 0 -> exclude = ast.EP_INNER_ON.bit_or(ast.EP_OUTER_ON)
+        if ast.src_len(a, src) > 0 && a.items[ast.src_item(a, src, 0)].jointype.bit_and(ast.JT_LTORJ) != 0 {
+            exclude = ast.EP_INNER_ON.bit_or(ast.EP_OUTER_ON)
+        }
         p.walks[t].u = exclude
         p.walks[t].u2 = 0
         wh: a.selects[s].where_expr
@@ -2234,19 +2270,21 @@ disable_unused_subquery_result_columns: fn(p: &cg.Parse, a: &ast.AST, si: Int) -
 // min() or max() of one argument.
 min_max_query: fn(p: &cg.Parse, a: &ast.AST, e: Int) -> (ret: Int, ob: Int) Never! {
     elist: a.exprs[e].x
-    if elist < 0 || ast.list_len(a, elist) != 1 || ast.has(a, e, ast.EP_WIN_FUNC) || cg.opt_disabled(p, cg.OPT_MIN_MAX_OPT) -> return (ret: cg.WHERE_ORDERBY_NORMAL, ob: -1)
+    if elist < 0 || ast.list_len(a, elist) != 1 || ast.has(a, e, ast.EP_WIN_FUNC) || cg.opt_disabled(p, cg.OPT_MIN_MAX_OPT) {
+        return (ret: cg.WHERE_ORDERBY_NORMAL, ob: -1)
+    }
     z: a.exprs[e].token ?? [U8]{}
     ret := cg.WHERE_ORDERBY_NORMAL
     sort_flags := 0
     if util.str_icmp(z, "min".bytes()) == 0 {
         ret = cg.WHERE_ORDERBY_MIN
-        if rs.expr_can_be_null(p.db, a, ast.list_expr(a, elist, 0)) -> sort_flags = base.KEYINFO_ORDER_BIGNULL
+        if rs.expr_can_be_null(p.db, a, ast.list_expr(a, elist, 0)) {
+            sort_flags = base.KEYINFO_ORDER_BIGNULL
+        }
     } else if util.str_icmp(z, "max".bytes()) == 0 {
         ret = cg.WHERE_ORDERBY_MAX
         sort_flags = base.KEYINFO_ORDER_DESC
-    } else {
-        return (ret: ret, ob: -1)
-    }
+    } else { return (ret: ret, ob: -1) }
     ob: ast.expr_list_dup(a, elist, 0)
     if ob >= 0 -> a.lists[ob].items[0].sort_flags = sort_flags
     (ret: ret, ob: ob)
@@ -2256,7 +2294,9 @@ min_max_query: fn(p: &cg.Parse, a: &ast.AST, e: Int) -> (ret: Int, ob: Int) Neve
 // AggInfo ai), or -1.
 is_simple_count: fn(p: cg.Parse, a: ast.AST, s: Int, ai: Int) -> Int Never! {
     src: a.selects[s].src
-    if a.selects[s].where_expr >= 0 || ast.list_len(a, a.selects[s].elist) != 1 || ast.src_len(a, src) != 1 || a.items[ast.src_item(a, src, 0)].select >= 0 || p.aggs[ai].funcs.len() != 1 || a.selects[s].having >= 0 -> return -1
+    if a.selects[s].where_expr >= 0 || ast.list_len(a, a.selects[s].elist) != 1 || ast.src_len(a, src) != 1 || a.items[ast.src_item(a, src, 0)].select >= 0 || p.aggs[ai].funcs.len() != 1 || a.selects[s].having >= 0 {
+        return -1
+    }
     t: a.items[ast.src_item(a, src, 0)].tab
     if p.db.tables[t].tab_type != conn.TABTYP_NORM -> return -1
     e: ast.list_expr(a, a.selects[s].elist, 0)
@@ -2294,10 +2334,17 @@ ConvertCompoundWalker: struct {
 
     impl SQLWalker {
         walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! { ast.WRC_CONTINUE }
+
         walk_has_select_cb: fn(&self) -> Bool Never! { true }
-        walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { convert_compound_select_to_subquery(a, s) }
+
+        walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! {
+            convert_compound_select_to_subquery(a, s)
+        }
+
         walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+
         walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+
         walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
     }
 }
@@ -2307,7 +2354,9 @@ convert_compound_select_to_subquery: fn(a: &ast.AST, s: Int) -> Int Never! {
     ob: a.selects[s].order_by
     if ob < 0 -> return ast.WRC_CONTINUE
     x := s
-    loop x >= 0 && (a.selects[x].op == tk.TK_ALL || a.selects[x].op == tk.TK_SELECT) -> x = a.selects[x].prior
+    loop x >= 0 && (a.selects[x].op == tk.TK_ALL || a.selects[x].op == tk.TK_SELECT) {
+        x = a.selects[x].prior
+    }
     if x < 0 -> return ast.WRC_CONTINUE
     // Already matched to the result columns: the window rewrite's second
     // pass needs no conversion.
@@ -2464,9 +2513,7 @@ resolve_from_term_to_cte: fn(p: &cg.Parse, a: &ast.AST, si: Int) -[DB]> Int Neve
     if may_recursive {
         if a.selects[sel].sel_flags.bit_and(ast.SF_RECURSIVE) != 0 {
             a.ctes[cte].cte_err = Val("multiple recursive references: ")
-        } else {
-            a.ctes[cte].cte_err = Val("recursive reference in a subquery: ")
-        }
+        } else { a.ctes[cte].cte_err = Val("recursive reference in a subquery: ") }
         _: cg.pwalk_select(p, a, sel)
     }
     a.ctes[cte].cte_err = None
@@ -2572,12 +2619,16 @@ select_expander: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
                     g := p.up
                     if g.view_get_column_names(p, a, tb) != 0 -> return ast.WRC_ABORT
                     if p.db.tables[tb].tab_type == conn.TABTYP_VIEW {
-                        if p.db.flags.bit_and(conn.SQLITE_ENABLE_VIEW) == 0 && p.db.tables[tb].schema != p.db.dbs[1].schema -> ast.error(a, "access to view \"{ast.text(p.db.tables[tb].name)}\" prohibited")
+                        if p.db.flags.bit_and(conn.SQLITE_ENABLE_VIEW) == 0 && p.db.tables[tb].schema != p.db.dbs[1].schema {
+                            ast.error(a, "access to view \"{ast.text(p.db.tables[tb].name)}\" prohibited")
+                        }
                         vs: ast.select_dup(a, p.db.tables[tb].select, 0)
                         a.items[si].select = vs
                     } else if a.items[si].from_ddl && p.db.tables[tb].vtab >= 0 {
                         trusted: if p.db.flags.bit_and(conn.SQLITE_TRUSTED_SCHEMA) != 0 -> 1 else -> 0
-                        if p.db.vtables[p.db.tables[tb].vtab].e_vtab_risk > trusted -> ast.error(a, "unsafe use of virtual table \"{ast.text(p.db.tables[tb].name)}\"")
+                        if p.db.vtables[p.db.tables[tb].vtab].e_vtab_risk > trusted {
+                            ast.error(a, "unsafe use of virtual table \"{ast.text(p.db.tables[tb].name)}\"")
+                        }
                     }
                     // C's nCol of -1 while the view's SELECT is walked.
                     p.db.tables[tb].cols_pending = true
@@ -2629,9 +2680,7 @@ select_expander: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
             if a.exprs[e].op == tk.TK_DOT {
                 z_tname = a.exprs[a.exprs[e].left].token.copy()
                 err_ofst = a.exprs[right].w
-            } else {
-                err_ofst = a.exprs[e].w
-            }
+            } else { err_ofst = a.exprs[e].w }
             loop i in 0..<n_src {
                 si: ast.src_item(a, tab_list, i)
                 tb: a.items[si].tab
@@ -2639,9 +2688,7 @@ select_expander: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
                 if p.db.malloc_failed -> break
                 nested_from := -1
                 z_schema_name := [U8]?{None}
-                if a.items[si].is_nested_from {
-                    nested_from = a.selects[a.items[si].select].elist
-                } else {
+                if a.items[si].is_nested_from -> nested_from = a.selects[a.items[si].select].elist else {
                     if z_tname != None && util.str_icmp(z_tname ?? [U8]{}, z_tab_name) != 0 -> next
                     i_db: conn.schema_to_index(p.db, p.db.tables[tb].schema)
                     z_schema_name = Val(if i_db >= 0 -> p.db.dbs[i_db].name.copy() else -> "*".bytes())
@@ -2669,18 +2716,22 @@ select_expander: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
                     z_name := [U8]{}
                     if j == n_col {
                         ra: ex.rowid_alias(p.db, tb)
-                        if ra == .Val(r) {
-                            z_name = r.copy()
-                        } else {
-                            next
-                        }
+                        if ra == .Val(r) -> z_name = r.copy() else -> next
                     } else {
                         col: p.db.tables[tb].cols[j]
                         z_name = col.name.copy()
-                        if nested_from >= 0 && a.lists[nested_from].items[j].eename == ast.ENAME_ROWID -> next
-                        if z_tname != None && nested_from >= 0 && rs.match_ename(a.lists[nested_from].items[j], None, z_tname, None, false) == 0 -> next
-                        if a.selects[s].sel_flags.bit_and(ast.SF_INCLUDE_HIDDEN) == 0 && is_hidden_column(col) -> next
-                        if col.col_flags.bit_and(conn.COLFLAG_NOEXPAND) != 0 && z_tname == None && !nested -> next
+                        if nested_from >= 0 && a.lists[nested_from].items[j].eename == ast.ENAME_ROWID {
+                            next
+                        }
+                        if z_tname != None && nested_from >= 0 && rs.match_ename(a.lists[nested_from].items[j], None, z_tname, None, false) == 0 {
+                            next
+                        }
+                        if a.selects[s].sel_flags.bit_and(ast.SF_INCLUDE_HIDDEN) == 0 && is_hidden_column(col) {
+                            next
+                        }
+                        if col.col_flags.bit_and(conn.COLFLAG_NOEXPAND) != 0 && z_tname == None && !nested {
+                            next
+                        }
                     }
                     table_seen = true
                     if i > 0 && z_tname == None && !nested && a.items[si].is_using && ast.id_list_index(a, a.items[si].u3, z_name) >= 0 {
@@ -2692,7 +2743,9 @@ select_expander: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
                     if (n_src > 1 && (a.items[si].jointype.bit_and(ast.JT_LTORJ) == 0 || nested || !in_any_using_clause(a, z_name, tab_list, i, n_src - i - 1))) || ast.in_rename(a) {
                         l: ast.expr_alloc(a, tk.TK_ID, Val(z_tab_name), false)
                         pe = ast.pexpr(a, tk.TK_DOT, l, r)
-                        if ast.in_rename(a) && a.exprs[e].left >= 0 -> cg.rename_token_remap(p, cg.RENAME_EXPR, l, cg.RENAME_EXPR, a.exprs[e].left)
+                        if ast.in_rename(a) && a.exprs[e].left >= 0 {
+                            cg.rename_token_remap(p, cg.RENAME_EXPR, l, cg.RENAME_EXPR, a.exprs[e].left)
+                        }
                         if z_schema_name == .Val(zs) {
                             l2: ast.expr_alloc(a, tk.TK_ID, Val(zs), false)
                             pe = ast.pexpr(a, tk.TK_DOT, l2, pe)
@@ -2711,7 +2764,9 @@ select_expander: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
                         in_using: a.items[si].is_using && ast.id_list_index(a, a.items[si].u3, z_name) >= 0
                         in_next_using: using >= 0 && ast.id_list_index(a, using, z_name) >= 0
                         no_expand_col: j < n_col && p.db.tables[tb].cols[j].col_flags.bit_and(conn.COLFLAG_NOEXPAND) != 0
-                        if in_using || in_next_using || no_expand_col -> a.lists[nw].items[last].no_expand = true
+                        if in_using || in_next_using || no_expand_col {
+                            a.lists[nw].items[last].no_expand = true
+                        }
                     } else if long_names {
                         a.lists[nw].items[last].ename = Val(join_bytes([[U8]]{z_tab_name, z_name}, U8{46}))
                         a.lists[nw].items[last].eename = ast.ENAME_NAME
@@ -2722,9 +2777,7 @@ select_expander: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
                 }
             }
             if !table_seen {
-                if z_tname == .Val(zt) {
-                    ast.error(a, "no such table: {ast.text(zt)}")
-                } else {
+                if z_tname == .Val(zt) -> ast.error(a, "no such table: {ast.text(zt)}") else {
                     ast.error(a, "no tables specified")
                 }
             }
@@ -2738,7 +2791,9 @@ select_expander: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
             ast.error(a, "too many columns in result set")
             return ast.WRC_ABORT
         }
-        if elist_flags.bit_and(ast.EP_HAS_FUNC.bit_or(ast.EP_SUBQUERY)) != 0 -> a.selects[s].sel_flags = a.selects[s].sel_flags.bit_or(ast.SF_COMPLEX_RESULT)
+        if elist_flags.bit_and(ast.EP_HAS_FUNC.bit_or(ast.EP_SUBQUERY)) != 0 {
+            a.selects[s].sel_flags = a.selects[s].sel_flags.bit_or(ast.SF_COMPLEX_RESULT)
+        }
     }
     ast.WRC_CONTINUE
 }
@@ -2749,10 +2804,19 @@ ExpanderWalker: struct {
 
     impl WalkCb {
         on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
+
         has_select: fn(self) -[]> Bool Never! { true }
-        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { select_expander(p, a, s) }
+
+        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+            select_expander(p, a, s)
+        }
+
         has_select2: fn(self) -[]> Bool Never! { true }
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> { select_pop_with(a, s) }
+
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {
+            select_pop_with(a, s)
+        }
+
         win_defn: fn(self) -[]> Bool Never! { true }
     }
 }
@@ -2776,10 +2840,19 @@ TypeInfoWalker: struct {
 
     impl WalkCb {
         on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
+
         has_select: fn(self) -[]> Bool Never! { true }
-        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
+
+        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+            ast.WRC_CONTINUE
+        }
+
         has_select2: fn(self) -[]> Bool Never! { true }
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> { select_add_subquery_type_info(p, a, s) }
+
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {
+            select_add_subquery_type_info(p, a, s)
+        }
+
         win_defn: fn(self) -[]> Bool Never! { false }
     }
 }
@@ -2787,7 +2860,9 @@ TypeInfoWalker: struct {
 // selectAddSubqueryTypeInfo: the column types of the FROM subqueries'
 // tables of s, once name resolution is done.
 select_add_subquery_type_info: fn(p: &cg.Parse, a: &ast.AST, s: Int) Never! {
-    if a.selects[s].sel_flags.bit_and(ast.SF_HAS_TYPE_INFO) != 0 -> return
+    if a.selects[s].sel_flags.bit_and(ast.SF_HAS_TYPE_INFO) != 0 {
+        return
+    }
     a.selects[s].sel_flags = a.selects[s].sel_flags.bit_or(ast.SF_HAS_TYPE_INFO)
     src: a.selects[s].src
     loop i in 0..<ast.src_len(a, src) {
@@ -2803,12 +2878,20 @@ select_add_subquery_type_info: fn(p: &cg.Parse, a: &ast.AST, s: Int) Never! {
 // sqlite3SelectPrep: SELECT s expanded, its names resolved (in outer_nc,
 // -1 for none) and its subqueries' column types set.
 select_prep: fn(p: &cg.Parse, a: &ast.AST, s: Int, outer_nc: Int) Never! -[DB]> {
-    if p.db.malloc_failed -> return
-    if a.selects[s].sel_flags.bit_and(ast.SF_HAS_TYPE_INFO) != 0 -> return
+    if p.db.malloc_failed {
+        return
+    }
+    if a.selects[s].sel_flags.bit_and(ast.SF_HAS_TYPE_INFO) != 0 {
+        return
+    }
     select_expand(p, a, s)
-    if cg.n_err(a) != 0 -> return
+    if cg.n_err(a) != 0 {
+        return
+    }
     rs.resolve_select_names(p, a, s, outer_nc)
-    if cg.n_err(a) != 0 -> return
+    if cg.n_err(a) != 0 {
+        return
+    }
     w := TypeInfoWalker{unused: 0}
     cg.walk_push(p, w, 0)
     _: cg.pwalk_select(p, a, s)
@@ -2827,7 +2910,9 @@ analyze_agg_func_args: fn(p: &cg.Parse, a: &ast.AST, ai: Int, nc: Int) Never! -[
         ex.expr_analyze_agg_list(p, a, nc, a.exprs[e].x)
         l: a.exprs[e].left
         if l >= 0 -> ex.expr_analyze_agg_list(p, a, nc, a.exprs[l].x)
-        if ast.has(a, e, ast.EP_WIN_FUNC) -> ex.expr_analyze_aggregates(p, a, nc, a.windows[a.exprs[e].y].filter)
+        if ast.has(a, e, ast.EP_WIN_FUNC) {
+            ex.expr_analyze_aggregates(p, a, nc, a.windows[a.exprs[e].y].filter)
+        }
     }
     p.ncs[nc].nc_flags = util.clear_bits(p.ncs[nc].nc_flags, ast.NC_IN_AGG_FUNC)
 }
@@ -2859,7 +2944,9 @@ IdxEprRefWalker: struct {
             ai: a.exprs[e].agg_info
             if ai < 0 -> return ast.WRC_CONTINUE
             op: a.exprs[e].op
-            if op == tk.TK_AGG_COLUMN || op == tk.TK_AGG_FUNCTION || op == tk.TK_IF_NULL_ROW -> return ast.WRC_CONTINUE
+            if op == tk.TK_AGG_COLUMN || op == tk.TK_AGG_FUNCTION || op == tk.TK_IF_NULL_ROW {
+                return ast.WRC_CONTINUE
+            }
             iagg: a.exprs[e].iagg
             if iagg >= p.aggs[ai].cols.len() -> return ast.WRC_CONTINUE
             col: p.aggs[ai].cols[iagg]
@@ -2869,10 +2956,17 @@ IdxEprRefWalker: struct {
             ast.clear_flags(a, e, ast.EP_SKIP.bit_or(ast.EP_COLLATE).bit_or(ast.EP_UNLIKELY))
             ast.WRC_PRUNE
         }
+
         has_select: fn(self) -[]> Bool Never! { false }
-        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
+
+        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+            ast.WRC_CONTINUE
+        }
+
         has_select2: fn(self) -[]> Bool Never! { false }
+
         on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+
         win_defn: fn(self) -[]> Bool Never! { false }
     }
 }
@@ -2899,8 +2993,12 @@ assign_aggregate_registers: fn(p: &cg.Parse, ai: Int) Never! {
 // DISTINCT and ORDER BY tables of the aggregates opened.
 reset_accumulator: fn(p: &cg.Parse, a: &ast.AST, ai: Int) Never! -[DB]> {
     n_reg: p.aggs[ai].funcs.len() + p.aggs[ai].cols.len()
-    if n_reg == 0 -> return
-    if cg.n_err(a) != 0 -> return
+    if n_reg == 0 {
+        return
+    }
+    if cg.n_err(a) != 0 {
+        return
+    }
     first: p.aggs[ai].i_first_reg
     _: cg.op3(p, opc.OP_NULL, 0, first, first + n_reg - 1)
     loop i in 0..<p.aggs[ai].funcs.len() {
@@ -2930,7 +3028,9 @@ reset_accumulator: fn(p: &cg.Parse, a: &ast.AST, ai: Int) Never! -[DB]> {
             ki := wn.key_info_from_expr_list(p, a, ob_list, 0, n_extra)
             if !f.b_ob_unique && cg.n_err(a) == 0 -> ki.n_key_field += 1
             _: cg.op4(p, opc.OP_OPEN_EPHEMERAL, f.i_ob_tab, ast.list_len(a, ob_list) + n_extra, 0, conn.P4.KeyInfo(ki))
-            if a.ctx.explain == 2 -> _: cg.explain(p, a, false, "USE TEMP B-TREE FOR {ast.text(f.func.name)}(ORDER BY)")
+            if a.ctx.explain == 2 {
+                _: cg.explain(p, a, false, "USE TEMP B-TREE FOR {ast.text(f.func.name)}(ORDER BY)")
+            }
         }
     }
 }
@@ -2983,7 +3083,9 @@ finalize_agg_functions: fn(p: &cg.Parse, a: &ast.AST, ai: Int) Never! -[DB]> {
 // current row; with reg_acc (and no min() or max()) the accumulator
 // columns load only while reg_acc holds 0.
 update_accumulator: fn(p: &cg.Parse, a: &ast.AST, reg_acc: Int, ai: Int, e_distinct_type: Int) Never! -[DB]> {
-    if cg.n_err(a) != 0 -> return
+    if cg.n_err(a) != 0 {
+        return
+    }
     reg_hit := 0
     addr_hit_test := 0
     p.aggs[ai].direct_mode = true
@@ -3089,7 +3191,9 @@ update_accumulator: fn(p: &cg.Parse, a: &ast.AST, reg_acc: Int, ai: Int, e_disti
 // explainSimpleCount: the plan line of "SELECT count(*) FROM t" (through
 // index ix, or -1).
 explain_simple_count: fn(p: &cg.Parse, a: ast.AST, t: Int, ix: Int) Never! {
-    if a.ctx.explain != 2 -> return
+    if a.ctx.explain != 2 {
+        return
+    }
     cover: ix >= 0 && (ex.has_rowid(p.db, t) || p.db.indexes[ix].idx_type != ast.IDXTYPE_PRIMARYKEY)
     tail: if cover -> " USING COVERING INDEX {ast.text(p.db.indexes[ix].name)}" else -> ""
     tname: ast.text(p.db.tables[t].name)
@@ -3120,10 +3224,17 @@ HavingToWhereWalker: struct {
             }
             ast.WRC_PRUNE
         }
+
         has_select: fn(self) -[]> Bool Never! { false }
-        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
+
+        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+            ast.WRC_CONTINUE
+        }
+
         has_select2: fn(self) -[]> Bool Never! { false }
+
         on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+
         win_defn: fn(self) -[]> Bool Never! { false }
     }
 }
@@ -3164,7 +3275,9 @@ count_of_view_optimization: fn(p: &cg.Parse, a: &ast.AST, s: Int) -> Bool Never!
     if a.selects[s].sel_flags.bit_and(ast.SF_AGGREGATE) == 0 -> return false
     elist: a.selects[s].elist
     if ast.list_len(a, elist) != 1 -> return false
-    if a.selects[s].where_expr >= 0 || a.selects[s].having >= 0 || a.selects[s].group_by >= 0 || a.selects[s].order_by >= 0 -> return false
+    if a.selects[s].where_expr >= 0 || a.selects[s].having >= 0 || a.selects[s].group_by >= 0 || a.selects[s].order_by >= 0 {
+        return false
+    }
     count: ast.list_expr(a, elist, 0)
     if a.exprs[count].op != tk.TK_AGG_FUNCTION -> return false
     if util.str_icmp_opt(a.exprs[count].token, Val("count".bytes())) != 0 -> return false
@@ -3200,11 +3313,7 @@ count_of_view_optimization: fn(p: &cg.Parse, a: &ast.AST, s: Int) -> Bool Never!
         a.selects[sub].elist = el
         term: ast.pexpr(a, tk.TK_SELECT, -1, -1)
         ast.pexpr_add_select(a, term, sub)
-        if e < 0 {
-            e = term
-        } else {
-            e = ast.pexpr(a, tk.TK_PLUS, term, e)
-        }
+        if e < 0 -> e = term else -> e = ast.pexpr(a, tk.TK_PLUS, term, e)
         sub = prior
     }
     a.lists[elist].items[0].expr = e
@@ -3218,9 +3327,13 @@ same_src_alias: fn(a: ast.AST, si0: Int, src: Int) -> Bool Never! {
     loop i in 0..<ast.src_len(a, src) {
         si1: ast.src_item(a, src, i)
         if si1 == si0 -> next
-        if a.items[si0].tab == a.items[si1].tab && util.str_icmp_opt(a.items[si0].alias, a.items[si1].alias) == 0 -> return true
+        if a.items[si0].tab == a.items[si1].tab && util.str_icmp_opt(a.items[si0].alias, a.items[si1].alias) == 0 {
+            return true
+        }
         s1: a.items[si1].select
-        if s1 >= 0 && a.selects[s1].sel_flags.bit_and(ast.SF_NESTED_FROM) != 0 && same_src_alias(a, si0, a.selects[s1].src) -> return true
+        if s1 >= 0 && a.selects[s1].sel_flags.bit_and(ast.SF_NESTED_FROM) != 0 && same_src_alias(a, si0, a.selects[s1].src) {
+            return true
+        }
     }
     false
 }
@@ -3271,22 +3384,20 @@ simplify_join: fn(a: &ast.AST, s: Int, i: Int) Never! {
     si: ast.src_item(a, tab_list, i)
     jt: a.items[si].jointype
     if jt.bit_and(ast.JT_LEFT) != 0 {
-        if jt.bit_and(ast.JT_RIGHT) != 0 {
-            a.items[si].jointype = util.clear_bits(jt, ast.JT_LEFT)
-        } else {
+        if jt.bit_and(ast.JT_RIGHT) != 0 -> a.items[si].jointype = util.clear_bits(jt, ast.JT_LEFT) else {
             a.items[si].jointype = util.clear_bits(jt, ast.JT_LEFT.bit_or(ast.JT_OUTER))
             unset_join_expr(a, w, a.items[si].cursor, false)
         }
     }
-    if jt.bit_and(ast.JT_LTORJ) == 0 -> return
+    if jt.bit_and(ast.JT_LTORJ) == 0 {
+        return
+    }
     n: ast.src_len(a, tab_list)
     loop j in (i + 1)..<n {
         sj: ast.src_item(a, tab_list, j)
         jj: a.items[sj].jointype
         if jj.bit_and(ast.JT_RIGHT) == 0 -> next
-        if jj.bit_and(ast.JT_LEFT) != 0 {
-            a.items[sj].jointype = util.clear_bits(jj, ast.JT_RIGHT)
-        } else {
+        if jj.bit_and(ast.JT_LEFT) != 0 -> a.items[sj].jointype = util.clear_bits(jj, ast.JT_RIGHT) else {
             a.items[sj].jointype = util.clear_bits(jj, ast.JT_RIGHT.bit_or(ast.JT_OUTER))
             unset_join_expr(a, w, a.items[sj].cursor, true)
         }
@@ -3331,7 +3442,9 @@ simplify_from_term: fn(p: &cg.Parse, a: &ast.AST, s: Int, i: Int, is_agg: Bool, 
         a.selects[sub].order_by = -1
     }
     if a.selects[sub].order_by >= 0 && i == 0 && sel_flags.bit_and(ast.SF_COMPLEX_RESULT) != 0 {
-        if n_src == 1 || a.items[ast.src_item(a, tab_list, 1)].jointype.bit_and(ast.JT_OUTER.bit_or(ast.JT_CROSS)) != 0 -> return i + 1
+        if n_src == 1 || a.items[ast.src_item(a, tab_list, 1)].jointype.bit_and(ast.JT_OUTER.bit_or(ast.JT_CROSS)) != 0 {
+            return i + 1
+        }
     }
     nxt := i + 1
     if flatten_subquery(p, a, s, i, is_agg) {
@@ -3370,13 +3483,17 @@ code_from_subquery: fn(p: &cg.Parse, a: &ast.AST, s: Int, i: Int, si: Int, sub: 
     if a.items[si].is_cte && a.cte_uses[a.items[si].u2].addr_m9e > 0 {
         cu: a.cte_uses[a.items[si].u2].copy()
         _: cg.op2(p, opc.OP_GOSUB, cu.reg_rtn, cu.addr_m9e)
-        if a.items[si].cursor != cu.icur -> _: cg.op2(p, opc.OP_OPEN_DUP, a.items[si].cursor, cu.icur)
+        if a.items[si].cursor != cu.icur {
+            _: cg.op2(p, opc.OP_OPEN_DUP, a.items[si].cursor, cu.icur)
+        }
         a.selects[sub].nselect_row = cu.nrow_est
         return
     }
     prior: is_self_join_view(p.db, a, tab_list, si, 0, i)
     if prior >= 0 {
-        if a.items[prior].addr_fill_sub != 0 -> _: cg.op2(p, opc.OP_GOSUB, a.items[prior].reg_return, a.items[prior].addr_fill_sub)
+        if a.items[prior].addr_fill_sub != 0 {
+            _: cg.op2(p, opc.OP_GOSUB, a.items[prior].reg_return, a.items[prior].addr_fill_sub)
+        }
         _: cg.op2(p, opc.OP_OPEN_DUP, a.items[si].cursor, a.items[prior].cursor)
         a.selects[sub].nselect_row = a.selects[a.items[prior].select].nselect_row
         return
@@ -3426,8 +3543,12 @@ code_from_subqueries: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Bool Never! {
             cu: a.cte_uses[a.items[si].u2]
             push_ok = cu.m10d != ast.M10D_YES && cu.nuse < 2
         }
-        if cg.opt_enabled(p, cg.OPT_PUSH_DOWN) && push_ok -> _: push_down_where_terms(p, a, sub, a.selects[s].where_expr, tab_list, i)
-        if cg.opt_enabled(p, cg.OPT_NULL_UNUSED_COLS) -> _: disable_unused_subquery_result_columns(p, a, si)
+        if cg.opt_enabled(p, cg.OPT_PUSH_DOWN) && push_ok {
+            _: push_down_where_terms(p, a, sub, a.selects[s].where_expr, tab_list, i)
+        }
+        if cg.opt_enabled(p, cg.OPT_NULL_UNUSED_COLS) {
+            _: disable_unused_subquery_result_columns(p, a, si)
+        }
         saved_auth: p.f.auth_context
         p.f.auth_context = a.items[si].name
         code_from_subquery(p, a, s, i, si, sub)
@@ -3533,11 +3654,11 @@ select_group_by: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest, sor
             _: cg.v_change_to_noop(p, sort.addr_sort_index)
         }
         addr_top_of_loop: cg.v_current_addr(p)
-        if group_by_sort -> _: cg.op3(p, opc.OP_SORTER_DATA, p.aggs[ai].sorting_idx, sort_out, sort_ptab)
+        if group_by_sort {
+            _: cg.op3(p, opc.OP_SORTER_DATA, p.aggs[ai].sorting_idx, sort_out, sort_ptab)
+        }
         loop j in 0..<n_gb {
-            if group_by_sort {
-                _: cg.op3(p, opc.OP_COLUMN, sort_ptab, j, i_bmem + j)
-            } else {
+            if group_by_sort -> _: cg.op3(p, opc.OP_COLUMN, sort_ptab, j, i_bmem + j) else {
                 p.aggs[ai].direct_mode = true
                 ge: ast.list_expr(a, group_by, j)
                 ex.expr_code(p, a, ge, i_bmem + j)
@@ -3603,7 +3724,9 @@ select_agg_no_group_by: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDe
             ix := p.db.tables[t].index
             loop ix >= 0 {
                 sz: p.db.indexes[ix].sz_idx_row
-                if !p.db.indexes[ix].b_unordered && sz < sz_tab_row && p.db.indexes[ix].part_idx_where < 0 && (best < 0 || sz < p.db.indexes[best].sz_idx_row) -> best = ix
+                if !p.db.indexes[ix].b_unordered && sz < sz_tab_row && p.db.indexes[ix].part_idx_where < 0 && (best < 0 || sz < p.db.indexes[best].sz_idx_row) {
+                    best = ix
+                }
                 ix = p.db.indexes[ix].next
             }
         }
@@ -3611,9 +3734,7 @@ select_agg_no_group_by: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDe
             kio: cat.key_info_of_index(p, a, best)
             _: cg.op4_int(p, opc.OP_OPEN_READ, i_csr, p.db.indexes[best].tnum, i_db, 1)
             if kio == .Val(k) -> cg.v_change_p4(p, -1, conn.P4.KeyInfo(k))
-        } else {
-            _: cg.op4_int(p, opc.OP_OPEN_READ, i_csr, p.db.tables[t].tnum, i_db, 1)
-        }
+        } else { _: cg.op4_int(p, opc.OP_OPEN_READ, i_csr, p.db.tables[t].tnum, i_db, 1) }
         assign_aggregate_registers(p, ai)
         _: cg.op2(p, opc.OP_COUNT, i_csr, p.aggs[ai].i_first_reg + p.aggs[ai].cols.len())
         _: cg.op1(p, opc.OP_CLOSE, i_csr)
@@ -3627,7 +3748,9 @@ select_agg_no_group_by: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDe
             i := 0
             loop i < n_func {
                 fe: p.aggs[ai].funcs[i].f_expr
-                if !ast.has(a, fe, ast.EP_WIN_FUNC) && p.aggs[ai].funcs[i].func.flags.bit_and(conn.FUNC_NEEDCOLL) != 0 -> break
+                if !ast.has(a, fe, ast.EP_WIN_FUNC) && p.aggs[ai].funcs[i].func.flags.bit_and(conn.FUNC_NEEDCOLL) != 0 {
+                    break
+                }
                 i += 1
             }
             if i == n_func {
@@ -3654,9 +3777,7 @@ select_agg_no_group_by: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDe
             if min_max_flag != 0 -> wh.where_min_max_opt_early_out(p, wi)
             wh.where_end(p, a, wi)
             finalize_agg_functions(p, a, ai)
-        } else {
-            return true
-        }
+        } else { return true }
     }
     sort.order_by = -1
     ex.expr_if_false(p, a, a.selects[s].having, addr_end, cg.JUMPIFNULL)
@@ -3680,12 +3801,12 @@ select_aggregate: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest, so
         if a.selects[s].nselect_row > 66 -> a.selects[s].nselect_row = 66
         ob: sort.order_by
         if ob >= 0 && n_gb == ast.list_len(a, ob) {
-            loop ii in 0..<n_gb -> a.lists[group_by].items[ii].sort_flags = a.lists[ob].items[ii].sort_flags.bit_and(base.KEYINFO_ORDER_DESC)
+            loop ii in 0..<n_gb {
+                a.lists[group_by].items[ii].sort_flags = a.lists[ob].items[ii].sort_flags.bit_and(base.KEYINFO_ORDER_DESC)
+            }
             if ast.expr_list_compare(a, group_by, ob, -1) == 0 -> order_by_grp = true
         }
-    } else {
-        a.selects[s].nselect_row = 0
-    }
+    } else { a.selects[s].nselect_row = 0 }
     addr_end: cg.v_make_label(p)
     p.aggs.push(cg.AggInfo{direct_mode: false, use_sorting_idx: false, n_sorting_column: ast.list_len(a, group_by), sorting_idx: 0, sorting_idx_ptab: 0, i_first_reg: 0, group_by: group_by, cols: [cg.AggCol]{}, n_accumulator: 0, funcs: [cg.AggFunc]{}, sel_id: a.selects[s].sel_id})
     ai: p.aggs.len() - 1
@@ -3714,9 +3835,13 @@ select_aggregate: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest, so
     analyze_agg_func_args(p, a, ai, nc)
     if p.db.malloc_failed -> return true
     if group_by >= 0 {
-        if select_group_by(p, a, s, dest, sort, distinct, ai, nc, order_by_grp, addr_end, where_e) -> return true
+        if select_group_by(p, a, s, dest, sort, distinct, ai, nc, order_by_grp, addr_end, where_e) {
+            return true
+        }
     } else {
-        if select_agg_no_group_by(p, a, s, dest, sort, ai, min_max_flag, min_max_ob, where_e, addr_end) -> return true
+        if select_agg_no_group_by(p, a, s, dest, sort, ai, min_max_flag, min_max_ob, where_e, addr_end) {
+            return true
+        }
     }
     cg.v_resolve_label(p, addr_end)
     false
@@ -3742,7 +3867,9 @@ select_body: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> 
     sort.order_by = a.selects[s].order_by
     if a.selects[s].prior < 0 {
         i := 0
-        loop i >= 0 && i < ast.src_len(a, a.selects[s].src) -> i = simplify_from_term(p, a, s, i, is_agg, dest.e_dest, sort)
+        loop i >= 0 && i < ast.src_len(a, a.selects[s].src) {
+            i = simplify_from_term(p, a, s, i, is_agg, dest.e_dest, sort)
+        }
         if i < 0 -> return (rc: 1, pop: true)
     }
     if a.selects[s].prior >= 0 {
@@ -3750,7 +3877,9 @@ select_body: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> 
         return (rc: rc, pop: a.selects[s].next_sel < 0)
     }
     w0: a.selects[s].where_expr
-    if w0 >= 0 && a.exprs[w0].op == tk.TK_AND && cg.opt_enabled(p, cg.OPT_PROPAGATE_CONST) -> _: propagate_constants(p, a, s)
+    if w0 >= 0 && a.exprs[w0].op == tk.TK_AND && cg.opt_enabled(p, cg.OPT_PROPAGATE_CONST) {
+        _: propagate_constants(p, a, s)
+    }
     if cg.opt_enabled(p, cg.OPT_QUERY_FLATTENER.bit_or(cg.OPT_COUNT_OF_VIEW)) && count_of_view_optimization(p, a, s) {
         if p.db.malloc_failed -> return (rc: 1, pop: true)
     }
@@ -3771,9 +3900,7 @@ select_body: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> 
         sort.i_ecursor = p.f.n_tab
         p.f.n_tab += 1
         sort.addr_sort_index = cg.op4(p, opc.OP_OPEN_EPHEMERAL, sort.i_ecursor, ast.list_len(a, sort.order_by) + 1 + n_elist, 0, conn.P4.KeyInfo(ki))
-    } else {
-        sort.addr_sort_index = -1
-    }
+    } else { sort.addr_sort_index = -1 }
     if dest.e_dest == cg.SRT_EPHEM_TAB {
         _: cg.op2(p, opc.OP_OPEN_EPHEMERAL, dest.i_sd_parm, n_elist)
         if a.selects[s].sel_flags.bit_and(ast.SF_NESTED_FROM) != 0 {
@@ -3784,7 +3911,9 @@ select_body: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> 
                 ii -= 1
             }
             loop k in 0..<ast.list_len(a, elist) {
-                if !a.lists[elist].items[k].used -> a.exprs[a.lists[elist].items[k].expr].op = tk.TK_NULL
+                if !a.lists[elist].items[k].used {
+                    a.exprs[a.lists[elist].items[k].expr].op = tk.TK_NULL
+                }
             }
         }
     }
@@ -3802,9 +3931,7 @@ select_body: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> 
         distinct.addr_tnct = cg.op4(p, opc.OP_OPEN_EPHEMERAL, distinct.tab_tnct, 0, 0, conn.P4.KeyInfo(ki))
         cg.v_change_p5(p, btree.BTREE_UNORDERED)
         distinct.e_tnct_type = cg.WHERE_DISTINCT_UNORDERED
-    } else {
-        distinct.e_tnct_type = cg.WHERE_DISTINCT_NOOP
-    }
+    } else { distinct.e_tnct_type = cg.WHERE_DISTINCT_NOOP }
     if !is_agg && a.selects[s].group_by < 0 {
         wctrl: (if distinct.is_tnct != 0 -> cg.WHERE_WANT_DISTINCT else -> 0).bit_or(a.selects[s].sel_flags.bit_and(ast.SF_FIXED_LIMIT))
         win: a.selects[s].win
@@ -3821,7 +3948,9 @@ select_body: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> 
                 sort.label_ob_lopt = wh.where_order_by_limit_opt_label(wi)
                 if sort.n_ob_sat == ast.list_len(a, sort.order_by) -> sort.order_by = -1
             }
-            if sort.addr_sort_index >= 0 && sort.order_by < 0 -> _: cg.v_change_to_noop(p, sort.addr_sort_index)
+            if sort.addr_sort_index >= 0 && sort.order_by < 0 {
+                _: cg.v_change_to_noop(p, sort.addr_sort_index)
+            }
             if win >= 0 {
                 addr_gosub: cg.v_make_label(p)
                 i_cont: cg.v_make_label(p)
@@ -3842,13 +3971,13 @@ select_body: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> 
                 select_inner_loop(p, a, s, -1, sort, distinct, dest, i_cont, i_break)
                 wh.where_end(p, a, wi)
             }
-        } else {
-            return (rc: 1, pop: true)
-        }
+        } else { return (rc: 1, pop: true) }
     } else {
         if select_aggregate(p, a, s, dest, sort, distinct) -> return (rc: 1, pop: true)
     }
-    if distinct.e_tnct_type == cg.WHERE_DISTINCT_UNORDERED -> _: cg.explain(p, a, false, "USE TEMP B-TREE FOR DISTINCT")
+    if distinct.e_tnct_type == cg.WHERE_DISTINCT_UNORDERED {
+        _: cg.explain(p, a, false, "USE TEMP B-TREE FOR DISTINCT")
+    }
     if sort.order_by >= 0 {
         n_col: ast.list_len(a, a.selects[s].elist)
         generate_sort_tail(p, a, s, sort, n_col, dest)

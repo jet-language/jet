@@ -7,13 +7,17 @@
 pkg_data_bind_sql: fn(input: String, root_name: String?) -> SchemaBuilder DataBindError! {
     cleaned: pkg_data_strip_sql_comments(input)
     statements: pkg_data_split_sql_statements(cleaned)
-    if statements.len() == 0 -> return Err(DataBindError{message: "SQL input has no CREATE TABLE declaration"})
+    if statements.len() == 0 {
+        return Err(DataBindError{message: "SQL input has no CREATE TABLE declaration"})
+    }
     tables := [SQLTable]{}
     table_names := [String]{}
     loop statement in statements {
         table: pkg_data_parse_sql_table(statement)
         key: pkg_ascii_lower(table.name)
-        if table_names.contains(key) -> return Err(DataBindError{message: "SQL has duplicate table {table.name}"})
+        if table_names.contains(key) {
+            return Err(DataBindError{message: "SQL has duplicate table {table.name}"})
+        }
         table_names.push(key)
         tables.push(table)
     }
@@ -72,8 +76,12 @@ pkg_data_strip_sql_comments: fn(input: String) -> String DataBindError! {
             ch == "/" && pkg_data_at(chars, index + 1) == "*" -> {
                 index += 2
                 start: index
-                loop index + 1 < chars.len() && !(chars[index] == "*" && chars[index + 1] == "/") -> index += 1
-                if index + 1 >= chars.len() -> return Err(DataBindError{message: "SQL has an unterminated block comment"})
+                loop index + 1 < chars.len() && !(chars[index] == "*" && chars[index + 1] == "/") {
+                    index += 1
+                }
+                if index + 1 >= chars.len() {
+                    return Err(DataBindError{message: "SQL has an unterminated block comment"})
+                }
                 width: if index - start > 1 -> index - start else -> 1
                 loop _ in 0..<width -> out.push(" ")
                 index += 2
@@ -119,7 +127,9 @@ pkg_data_split_sql_statements: fn(input: String) -> [String] DataBindError! {
                 "(" -> depth += 1
                 ")" -> {
                     depth -= 1
-                    if depth < 0 -> return Err(DataBindError{message: "SQL has an unmatched close parenthesis"})
+                    if depth < 0 {
+                        return Err(DataBindError{message: "SQL has an unmatched close parenthesis"})
+                    }
                 }
                 ";" -> {
                     if depth == 0 {
@@ -146,6 +156,7 @@ pkg_data_split_sql_statements: fn(input: String) -> [String] DataBindError! {
 }
 
 SQL_SYMBOLS: "(),.<>*%+=|&!~^:[]"
+
 SQL_PRIMARY_KEY_MODIFIERS: [String]{"ASC", "DESC", "AUTOINCREMENT", "AUTO_INCREMENT"}
 
 // Punctuation, quoted values (delimiters removed, doubled delimiters kept
@@ -181,7 +192,9 @@ pkg_data_sql_tokens: fn(statement: String) -> [String] DataBindError! {
                         index += 1
                     }
                 }
-                if !closed -> return Err(DataBindError{message: "SQL has an unterminated quoted token"})
+                if !closed {
+                    return Err(DataBindError{message: "SQL has an unterminated quoted token"})
+                }
                 tokens.push(value.join(""))
             }
             pkg_data_is_ascii_digit(ch) -> {
@@ -194,17 +207,23 @@ pkg_data_sql_tokens: fn(statement: String) -> [String] DataBindError! {
                 }
                 if pkg_data_at(chars, index) == "e" || pkg_data_at(chars, index) == "E" {
                     index += 1
-                    if pkg_data_at(chars, index) == "+" || pkg_data_at(chars, index) == "-" -> index += 1
+                    if pkg_data_at(chars, index) == "+" || pkg_data_at(chars, index) == "-" {
+                        index += 1
+                    }
                     digits: index
                     loop index < chars.len() && pkg_data_is_ascii_digit(chars[index]) -> index += 1
-                    if digits == index -> return Err(DataBindError{message: "SQL numeric exponent has no digits"})
+                    if digits == index {
+                        return Err(DataBindError{message: "SQL numeric exponent has no digits"})
+                    }
                 }
                 tokens.push(pkg_data_slice(chars, start, index))
             }
             pkg_data_is_ascii_alphanumeric(ch) || ch == "_" || ch == "$" -> {
                 start: index
                 index += 1
-                loop index < chars.len() && (pkg_data_is_ascii_alphanumeric(chars[index]) || chars[index] == "_" || chars[index] == "$") -> index += 1
+                loop index < chars.len() && (pkg_data_is_ascii_alphanumeric(chars[index]) || chars[index] == "_" || chars[index] == "$") {
+                    index += 1
+                }
                 tokens.push(pkg_data_slice(chars, start, index))
             }
             ch == "+" || ch == "-" -> {
@@ -249,7 +268,9 @@ SQLCursor: struct {
 
     take_name: fn(&self, what: String) -> String DataBindError! {
         token: self.peek() ?? return Err(DataBindError{message: "SQL {what} is missing"})
-        if !pkg_data_sql_is_name(token) -> return Err(DataBindError{message: "SQL {what} is invalid"})
+        if !pkg_data_sql_is_name(token) {
+            return Err(DataBindError{message: "SQL {what} is invalid"})
+        }
         self.index += 1
         Ok(token)
     }
@@ -267,18 +288,24 @@ SQLCursor: struct {
 
     // An optional `(n)` or `(p, s)` type modifier.
     parenthesized_digits: fn(&self, what: String, two: Bool) DataBindError! {
-        if !self.at("(") -> return
+        if !self.at("(") {
+            return
+        }
         self.index += 1
         first: if what.contains("time precision") || what.contains("timestamp precision") -> self.take_digits(what) else -> self.take_positive_digits(what)
         second := -1
         if self.at(",") {
-            if !two -> return Err(DataBindError{message: "SQL {what} has an unsupported second modifier"})
+            if !two {
+                return Err(DataBindError{message: "SQL {what} has an unsupported second modifier"})
+            }
             self.index += 1
             second = self.take_digits(what)
         }
         if !self.at(")") -> return Err(DataBindError{message: "SQL {what} modifier is not closed"})
         self.index += 1
-        if second > first -> return Err(DataBindError{message: "SQL {what} scale exceeds its precision"})
+        if second > first {
+            return Err(DataBindError{message: "SQL {what} scale exceeds its precision"})
+        }
     }
 
     // At most one SIGNED/UNSIGNED and one ZEROFILL, in any order.
@@ -288,12 +315,16 @@ SQLCursor: struct {
         loop {
             if {
                 self.at_word("SIGNED") || self.at_word("UNSIGNED") -> {
-                    if signedness -> return Err(DataBindError{message: "SQL numeric type repeats its signedness modifier"})
+                    if signedness {
+                        return Err(DataBindError{message: "SQL numeric type repeats its signedness modifier"})
+                    }
                     signedness = true
                     self.index += 1
                 }
                 self.at_word("ZEROFILL") -> {
-                    if zerofill -> return Err(DataBindError{message: "SQL numeric type repeats ZEROFILL"})
+                    if zerofill {
+                        return Err(DataBindError{message: "SQL numeric type repeats ZEROFILL"})
+                    }
                     zerofill = true
                     self.index += 1
                 }
@@ -304,11 +335,17 @@ SQLCursor: struct {
 
     // `WITH TIME ZONE` / `WITHOUT TIME ZONE` after a time type.
     time_zone_modifier: fn(&self) DataBindError! {
-        if !(self.at_word("WITH") || self.at_word("WITHOUT")) -> return
+        if !(self.at_word("WITH") || self.at_word("WITHOUT")) {
+            return
+        }
         self.index += 1
-        if !self.at_word("TIME") -> return Err(DataBindError{message: "SQL time zone modifier needs TIME ZONE"})
+        if !self.at_word("TIME") {
+            return Err(DataBindError{message: "SQL time zone modifier needs TIME ZONE"})
+        }
         self.index += 1
-        if !self.at_word("ZONE") -> return Err(DataBindError{message: "SQL time zone modifier needs TIME ZONE"})
+        if !self.at_word("ZONE") {
+            return Err(DataBindError{message: "SQL time zone modifier needs TIME ZONE"})
+        }
         self.index += 1
     }
 
@@ -341,9 +378,13 @@ SQLCursor: struct {
             "TEXT" | "TINYTEXT" | "MEDIUMTEXT" | "LONGTEXT" | "VARCHAR" | "NVARCHAR" | "CHAR" | "CHARACTER" | "CLOB" -> {
                 if first == "CHARACTER" && self.at_word("VARYING") -> self.index += 1
                 if first == {
-                    "VARCHAR" | "NVARCHAR" | "CHAR" | "CHARACTER" -> self.parenthesized_digits("character width", false)
+                    "VARCHAR" | "NVARCHAR" | "CHAR" | "CHARACTER" -> {
+                        self.parenthesized_digits("character width", false)
+                    }
                     else -> {
-                        if self.at("(") -> return Err(DataBindError{message: "SQL type {first} does not accept a width modifier"})
+                        if self.at("(") {
+                            return Err(DataBindError{message: "SQL type {first} does not accept a width modifier"})
+                        }
                     }
                 }
                 Ok("String")
@@ -363,7 +404,9 @@ SQLCursor: struct {
                 if first == {
                     "BINARY" | "VARBINARY" -> self.parenthesized_digits("binary width", false)
                     else -> {
-                        if self.at("(") -> return Err(DataBindError{message: "SQL type {first} does not accept a width modifier"})
+                        if self.at("(") {
+                            return Err(DataBindError{message: "SQL type {first} does not accept a width modifier"})
+                        }
                     }
                 }
                 Ok("[U8]")
@@ -374,7 +417,9 @@ SQLCursor: struct {
 
     // A non-empty parenthesized token run with balanced parentheses.
     balanced_expression: fn(&self, what: String) DataBindError! {
-        if !self.at("(") -> return Err(DataBindError{message: "SQL {what} needs an open parenthesis"})
+        if !self.at("(") {
+            return Err(DataBindError{message: "SQL {what} needs an open parenthesis"})
+        }
         self.index += 1
         start: self.index
         depth := 1
@@ -384,7 +429,9 @@ SQLCursor: struct {
                 ")" -> {
                     depth -= 1
                     if depth == 0 {
-                        if self.index == start -> return Err(DataBindError{message: "SQL {what} is empty"})
+                        if self.index == start {
+                            return Err(DataBindError{message: "SQL {what} is empty"})
+                        }
                         self.index += 1
                         return
                     }
@@ -398,7 +445,9 @@ SQLCursor: struct {
 
     // A parenthesized, comma-separated name list.
     name_list: fn(&self, what: String) -> [String] DataBindError! {
-        if !self.at("(") -> return Err(DataBindError{message: "SQL {what} needs an open parenthesis"})
+        if !self.at("(") {
+            return Err(DataBindError{message: "SQL {what} needs an open parenthesis"})
+        }
         self.index += 1
         names := [String]{}
         loop {
@@ -421,9 +470,7 @@ SQLCursor: struct {
             self.index += 1
             _: self.take_name("referenced table segment")
         }
-        if self.at("(") {
-            _: self.name_list("referenced column")
-        }
+        if self.at("(") -> _: self.name_list("referenced column")
         loop {
             token: self.peek() ?? break
             if pkg_data_ascii_upper(token) == {
@@ -442,7 +489,9 @@ SQLCursor: struct {
                     if pkg_data_ascii_upper(action) == {
                         "NO" -> {
                             following: self.take_name("foreign-key action")
-                            if !pkg_data_eq_ignore_case(following, "ACTION") -> return Err(DataBindError{message: "SQL foreign-key action `NO` needs ACTION"})
+                            if !pkg_data_eq_ignore_case(following, "ACTION") {
+                                return Err(DataBindError{message: "SQL foreign-key action `NO` needs ACTION"})
+                            }
                         }
                         "SET" -> {
                             following: self.take_name("foreign-key action")
@@ -481,9 +530,7 @@ SQLCursor: struct {
         if self.at("+") || self.at("-") {
             self.index += 1
             _: self.take_name("DEFAULT numeric value")
-        } else {
-            _: self.take_name("DEFAULT value")
-        }
+        } else { _: self.take_name("DEFAULT value") }
         if self.at(".") {
             self.index += 1
             _: self.take_digits("DEFAULT numeric value")
@@ -495,9 +542,7 @@ SQLCursor: struct {
         }
         if self.at("(") {
             self.index += 1
-            if self.at(")") {
-                self.index += 1
-            } else {
+            if self.at(")") -> self.index += 1 else {
                 self.index -= 1
                 self.balanced_expression("DEFAULT function arguments")
             }
@@ -515,14 +560,18 @@ SQLCursor: struct {
         if pkg_data_ascii_upper(token) == {
             "NOT" -> {
                 self.index += 1
-                if !self.at_word("NULL") -> return Err(DataBindError{message: "SQL NOT constraint needs NULL"})
+                if !self.at_word("NULL") {
+                    return Err(DataBindError{message: "SQL NOT constraint needs NULL"})
+                }
                 self.index += 1
                 required = true
             }
             "NULL" -> self.index += 1
             "PRIMARY" -> {
                 self.index += 1
-                if !self.at_word("KEY") -> return Err(DataBindError{message: "SQL PRIMARY constraint needs KEY"})
+                if !self.at_word("KEY") {
+                    return Err(DataBindError{message: "SQL PRIMARY constraint needs KEY"})
+                }
                 self.index += 1
                 required = true
                 loop modifier in SQL_PRIMARY_KEY_MODIFIERS {
@@ -534,7 +583,9 @@ SQLCursor: struct {
                 if self.at_word("KEY") || self.at_word("INDEX") -> self.index += 1
                 if self.peek() == {
                     .Val(name) -> {
-                        if pkg_data_sql_is_name(name) && !pkg_data_sql_unique_stop_word(name) -> self.index += 1
+                        if pkg_data_sql_is_name(name) && !pkg_data_sql_unique_stop_word(name) {
+                            self.index += 1
+                        }
                     }
                     .None -> {}
                 }
@@ -567,21 +618,27 @@ SQLCursor: struct {
             "GENERATED" -> {
                 self.index += 1
                 if self.at_word("ALWAYS") -> self.index += 1
-                if !self.at_word("AS") -> return Err(DataBindError{message: "SQL GENERATED constraint needs AS"})
+                if !self.at_word("AS") {
+                    return Err(DataBindError{message: "SQL GENERATED constraint needs AS"})
+                }
                 self.index += 1
                 if self.at_word("IDENTITY") {
                     self.index += 1
                     if self.at("(") -> self.balanced_expression("IDENTITY options")
                 } else {
                     self.balanced_expression("GENERATED expression")
-                    if !(self.at_word("VIRTUAL") || self.at_word("STORED")) -> return Err(DataBindError{message: "SQL GENERATED constraint needs VIRTUAL or STORED"})
+                    if !(self.at_word("VIRTUAL") || self.at_word("STORED")) {
+                        return Err(DataBindError{message: "SQL GENERATED constraint needs VIRTUAL or STORED"})
+                    }
                     self.index += 1
                 }
             }
             "AUTO_INCREMENT" | "AUTOINCREMENT" -> self.index += 1
             "ON" -> {
                 self.index += 1
-                if !self.at_word("UPDATE") -> return Err(DataBindError{message: "SQL ON constraint needs UPDATE"})
+                if !self.at_word("UPDATE") {
+                    return Err(DataBindError{message: "SQL ON constraint needs UPDATE"})
+                }
                 self.index += 1
                 self.default_value()
             }
@@ -616,12 +673,18 @@ pkg_data_sql_table_constraint: fn(segment: [String], primary_seen: Bool) -> (req
     primary := primary_seen
     if pkg_data_ascii_upper(token) == {
         "PRIMARY" -> {
-            if primary_seen -> return Err(DataBindError{message: "SQL table has more than one PRIMARY KEY constraint"})
+            if primary_seen {
+                return Err(DataBindError{message: "SQL table has more than one PRIMARY KEY constraint"})
+            }
             primary = true
             cursor.index += 1
-            if !cursor.at_word("KEY") -> return Err(DataBindError{message: "SQL table PRIMARY constraint needs KEY"})
+            if !cursor.at_word("KEY") {
+                return Err(DataBindError{message: "SQL table PRIMARY constraint needs KEY"})
+            }
             cursor.index += 1
-            loop column in cursor.name_list("PRIMARY KEY column") -> required.push(pkg_ascii_lower(column))
+            loop column in cursor.name_list("PRIMARY KEY column") {
+                required.push(pkg_ascii_lower(column))
+            }
         }
         "UNIQUE" -> {
             cursor.index += 1
@@ -638,10 +701,14 @@ pkg_data_sql_table_constraint: fn(segment: [String], primary_seen: Bool) -> (req
         }
         "FOREIGN" -> {
             cursor.index += 1
-            if !cursor.at_word("KEY") -> return Err(DataBindError{message: "SQL FOREIGN constraint needs KEY"})
+            if !cursor.at_word("KEY") {
+                return Err(DataBindError{message: "SQL FOREIGN constraint needs KEY"})
+            }
             cursor.index += 1
             _: cursor.name_list("FOREIGN KEY column")
-            if !cursor.at_word("REFERENCES") -> return Err(DataBindError{message: "SQL FOREIGN constraint needs REFERENCES"})
+            if !cursor.at_word("REFERENCES") {
+                return Err(DataBindError{message: "SQL FOREIGN constraint needs REFERENCES"})
+            }
             cursor.index += 1
             cursor.reference()
         }
@@ -651,7 +718,9 @@ pkg_data_sql_table_constraint: fn(segment: [String], primary_seen: Bool) -> (req
         }
         else -> return Err(DataBindError{message: "SQL table constraint {token} is unsupported"})
     }
-    if cursor.index != segment.len() -> return Err(DataBindError{message: "SQL table constraint has trailing tokens"})
+    if cursor.index != segment.len() {
+        return Err(DataBindError{message: "SQL table constraint has trailing tokens"})
+    }
     // Written in the tuple's canonical member order: the O0 seed zips a
     // literal's members by position after sorting its type's.
     Ok((primary: primary, required: required))
@@ -661,15 +730,21 @@ pkg_data_sql_table_constraint: fn(segment: [String], primary_seen: Bool) -> (req
 pkg_data_parse_sql_table: fn(statement: String) -> SQLTable DataBindError! {
     tokens: pkg_data_sql_tokens(statement)
     cursor := SQLCursor{tokens: tokens, index: 0}
-    if !cursor.at_word("CREATE") -> return Err(DataBindError{message: "SQL input contains a non-CREATE TABLE statement"})
+    if !cursor.at_word("CREATE") {
+        return Err(DataBindError{message: "SQL input contains a non-CREATE TABLE statement"})
+    }
     cursor.index += 1
     if cursor.at_word("TEMP") || cursor.at_word("TEMPORARY") -> cursor.index += 1
-    if !cursor.at_word("TABLE") -> return Err(DataBindError{message: "SQL statement is not CREATE TABLE"})
+    if !cursor.at_word("TABLE") {
+        return Err(DataBindError{message: "SQL statement is not CREATE TABLE"})
+    }
     cursor.index += 1
     if cursor.at_word("IF") {
         after_not: SQLCursor{tokens: tokens, index: cursor.index + 1}
         after_exists: SQLCursor{tokens: tokens, index: cursor.index + 2}
-        if !after_not.at_word("NOT") || !after_exists.at_word("EXISTS") -> return Err(DataBindError{message: "SQL has incomplete IF NOT EXISTS"})
+        if !after_not.at_word("NOT") || !after_exists.at_word("EXISTS") {
+            return Err(DataBindError{message: "SQL has incomplete IF NOT EXISTS"})
+        }
         cursor.index += 3
     }
     first_name: cursor.take_name("table name")
@@ -678,7 +753,9 @@ pkg_data_parse_sql_table: fn(statement: String) -> SQLTable DataBindError! {
         cursor.index += 1
         table_name = cursor.take_name("qualified table name")
     }
-    if !cursor.at("(") -> return Err(DataBindError{message: "SQL table declaration needs an open parenthesis"})
+    if !cursor.at("(") {
+        return Err(DataBindError{message: "SQL table declaration needs an open parenthesis"})
+    }
     open: cursor.index
     depth := 0
     close := -1
@@ -692,14 +769,20 @@ pkg_data_parse_sql_table: fn(statement: String) -> SQLTable DataBindError! {
                     close = index
                     break
                 }
-                if depth < 0 -> return Err(DataBindError{message: "SQL table has an unmatched close parenthesis"})
+                if depth < 0 {
+                    return Err(DataBindError{message: "SQL table has an unmatched close parenthesis"})
+                }
             }
             else -> {}
         }
         index += 1
     }
-    if close < 0 -> return Err(DataBindError{message: "SQL table declaration is missing a close parenthesis"})
-    if close + 1 < tokens.len() -> return Err(DataBindError{message: "SQL has tokens after the table declaration"})
+    if close < 0 {
+        return Err(DataBindError{message: "SQL table declaration is missing a close parenthesis"})
+    }
+    if close + 1 < tokens.len() {
+        return Err(DataBindError{message: "SQL has tokens after the table declaration"})
+    }
 
     segments := [[String]]{}
     start := open + 1
@@ -710,7 +793,9 @@ pkg_data_parse_sql_table: fn(statement: String) -> SQLTable DataBindError! {
             ")" -> depth -= 1
             "," -> {
                 if depth == 0 {
-                    if position == start -> return Err(DataBindError{message: "SQL table has an empty declaration"})
+                    if position == start {
+                        return Err(DataBindError{message: "SQL table has an empty declaration"})
+                    }
                     segments.push(tokens[start..<position])
                     start = position + 1
                 }
@@ -738,11 +823,17 @@ pkg_data_parse_sql_table: fn(statement: String) -> SQLTable DataBindError! {
             }
             else -> {}
         }
-        if segment.len() < 2 -> return Err(DataBindError{message: "SQL column needs a name and type"})
+        if segment.len() < 2 {
+            return Err(DataBindError{message: "SQL column needs a name and type"})
+        }
         column: segment[0].copy()
-        if !pkg_data_sql_is_name(column) -> return Err(DataBindError{message: "SQL column name is invalid"})
+        if !pkg_data_sql_is_name(column) {
+            return Err(DataBindError{message: "SQL column name is invalid"})
+        }
         key: pkg_ascii_lower(column)
-        if names.contains(key) -> return Err(DataBindError{message: "SQL has duplicate column {column}"})
+        if names.contains(key) {
+            return Err(DataBindError{message: "SQL has duplicate column {column}"})
+        }
         names.push(key)
         column_cursor := SQLCursor{tokens: segment, index: 1}
         ty: column_cursor.column_type(column)
@@ -752,9 +843,13 @@ pkg_data_parse_sql_table: fn(statement: String) -> SQLTable DataBindError! {
         }
         fields.push(FieldSeed{wire_name: column, ty: pkg_data_bound_scalar(ty), optional: !required, note: None})
     }
-    if fields.len() == 0 -> return Err(DataBindError{message: "SQL table {table_name} has no columns"})
+    if fields.len() == 0 {
+        return Err(DataBindError{message: "SQL table {table_name} has no columns"})
+    }
     loop column in required_columns {
-        if !names.contains(column) -> return Err(DataBindError{message: "SQL PRIMARY KEY names an unknown column"})
+        if !names.contains(column) {
+            return Err(DataBindError{message: "SQL PRIMARY KEY names an unknown column"})
+        }
     }
     out := [FieldSeed]{}
     loop field in fields {

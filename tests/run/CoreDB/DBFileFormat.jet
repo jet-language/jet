@@ -21,6 +21,7 @@ use {
 }
 
 BASE: "DBFileFormatBase.sqlite"
+
 AFTER: "DBFileFormatAfter.sqlite"
 
 WRITES: [SQL]{
@@ -33,7 +34,9 @@ WRITES: [SQL]{
 // engine shows what the file holds.
 summary: fn(scope: db.DBScope, label: String) {
     totals: scope.query(SQL{"SELECT count(*) AS n, sum(id) AS total FROM item"}) ?? panic("{label} totals: {err.message()}")
-    loop row in totals -> print("{label}: {db.row_int(row, "n") ?? panic("n")} rows, id sum {db.row_int(row, "total") ?? panic("total")}")
+    loop row in totals {
+        print("{label}: {db.row_int(row, "n") ?? panic("n")} rows, id sum {db.row_int(row, "total") ?? panic("total")}")
+    }
     rows: scope.query(SQL{"SELECT id, name, ratio, length(body) AS size FROM item WHERE id IN (1, 7, 99, 401, 1000) ORDER BY id"}) ?? panic("{label} rows: {err.message()}")
     loop row in rows {
         id: db.row_int(row, "id") ?? panic("id")

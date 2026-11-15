@@ -1,26 +1,33 @@
-use {
-    math: core.math
-}
+use math: core.math
 
-#Numeric Meters: distinct Float
-#Numeric Count: distinct Int
+#Numeric
+Meters: distinct Float
+
+#Numeric
+Count: distinct Int
 
 Money: struct {
     cents: Int
+
     impl Add {
         add: fn(self, rhs: Money) -> Money { Money{cents: self.cents + rhs.cents} }
     }
+
     impl Sub {
         sub: fn(self, rhs: Money) -> Money { Money{cents: self.cents - rhs.cents} }
     }
+
     impl Mul {
         mul: fn(self, rhs: Money) -> Money { Money{cents: self.cents * rhs.cents} }
     }
+
     impl Comparable {
         compare: fn(self, rhs: Money) -> Ordering { self.cents <=> rhs.cents }
     }
+
     impl Numeric {
         zero: fn() -> Money { Money{cents: 0} }
+
         one: fn() -> Money { Money{cents: 1} }
     }
 }
@@ -31,7 +38,7 @@ double: fn<T: Numeric>(x: T) -> T { x + x }
 
 total: fn<T: Numeric>(xs: [T]) -> T {
     sum := xs[0] - xs[0]
-    loop x in xs -> sum = sum + x
+    loop x in xs -> sum += x
     sum
 }
 

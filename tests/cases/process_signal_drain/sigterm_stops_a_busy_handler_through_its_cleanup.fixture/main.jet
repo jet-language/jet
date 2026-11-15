@@ -49,9 +49,9 @@ run: fn() {
         ready_out := term.stdout()
         ready_out.flush() ?? process.fail(1, "flush: {err}")
         if busy.join() == {
-            .Ok(_) -> print("busy handler: finished")
-            .Err(.Cancelled) -> print("busy handler: cancelled")
-            .Err(.DeadlineBlown) -> print("busy handler: deadline")
+            .Ok(_) -> { print("busy handler: finished") }
+            .Err(.Cancelled) -> { print("busy handler: cancelled") }
+            .Err(.DeadlineBlown) -> { print("busy handler: deadline") }
             .Err(.Panicked(reason)) -> print("busy handler: panicked {reason}")
         }
     }

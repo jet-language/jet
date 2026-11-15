@@ -28,17 +28,11 @@ from_items: fn<T>(items: &&[T]) -> DataStream<T> Never! {
     DataStream<T>{items: items, index: 0, cancelled: false, __source: None}
 }
 
-next: fn<T>(stream: &DataStream<T>) -> T? DataError! {
-    core.data.__stream_pull<T>(stream)
-}
+next: fn<T>(stream: &DataStream<T>) -> T? DataError! { core.data.__stream_pull<T>(stream) }
 
-collect: fn<T>(stream: &DataStream<T>) -> [T] DataError! {
-    core.data.__stream_collect<T>(stream)
-}
+collect: fn<T>(stream: &DataStream<T>) -> [T] DataError! { core.data.__stream_collect<T>(stream) }
 
-cancel: fn<T>(stream: &DataStream<T>) Never! {
-    stream.cancelled = true
-}
+cancel: fn<T>(stream: &DataStream<T>) Never! { stream.cancelled = true }
 
 skip: fn<T>(stream: &DataStream<T>, count: Int) Never! {
     remaining := count
@@ -46,7 +40,7 @@ skip: fn<T>(stream: &DataStream<T>, count: Int) Never! {
         if core.data.__stream_pull<T>(stream) == {
             .Ok(item) -> {
                 if item == {
-                    .Val(_) -> remaining = remaining - 1
+                    .Val(_) -> remaining -= 1
                     .None -> return
                 }
             }
@@ -56,14 +50,16 @@ skip: fn<T>(stream: &DataStream<T>, count: Int) Never! {
 }
 
 take_n: fn<T>(stream: &DataStream<T>, count: Int) -> [T] DataError! {
-    if stream.cancelled -> return Err(stream_error(DataErrorKind.State, "stream was cancelled", "data.stream"))
+    if stream.cancelled {
+        return Err(stream_error(DataErrorKind.State, "stream was cancelled", "data.stream"))
+    }
     out := [T]{}
     remaining := count
     loop remaining > 0 {
         item: core.data.__stream_pull<T>(stream)
         row: item ?? return Ok(out)
         out.push(row)
-        remaining = remaining - 1
+        remaining -= 1
     }
     Ok(out)
 }

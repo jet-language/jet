@@ -1,6 +1,7 @@
 Producer: trait {
     produce: fn(self) -> Int Never!
 }
+
 CanonicalProducer: struct {
     values: [Int]
 
@@ -8,18 +9,22 @@ CanonicalProducer: struct {
         produce: fn(self) -> Int Never! { self.values[0] }
     }
 }
-Preparation: enum { Prepared(producer: CanonicalProducer) }
-Host: struct { parent: Int }
 
-admit: fn(parent: &Int, producer: Producer) -> Int Never! {
-    parent + producer.produce()
+Preparation: enum {
+    Prepared(producer: CanonicalProducer)
 }
+
+Host: struct {
+    parent: Int
+}
+
+admit: fn(parent: &Int, producer: Producer) -> Int Never! { parent + producer.produce() }
+
 attach: fn(host: &Host, prepared: Preparation) -> Int Never! {
-    if prepared == .Prepared(producer) {
-        return admit(host.parent, producer)
-    }
+    if prepared == .Prepared(producer) -> return admit(host.parent, producer)
     0
 }
+
 run: fn() {
     host := Host{parent: 10}
     prepared: Preparation.Prepared{producer: CanonicalProducer{values: [Int]{7}}}

@@ -4,8 +4,7 @@ Traced: struct {
     }
 }
 
-#Traced
-greet: fn() -> Int { 1 }
+#Traced greet: fn() -> Int { 1 }
 
 // The handler's code writes `#Unsafe`: the build refuses it.
 install: fn(meta: Compiler) {
@@ -13,12 +12,13 @@ install: fn(meta: Compiler) {
         watch: .Functions{marked: Traced{}},
         fn(event) {
             if event == .Checked(.Function(f)) {
-                meta.rewrite_body(f, #code {
-                    #Unsafe("generated") {
-                        print("entered")
-                    }
-                    #{f.body}
-                })
+                meta.rewrite_body(
+                    f,
+                    #code {
+                        #Unsafe("generated") { print("entered") }
+                        #{f.body}
+                    },
+                )
             }
         },
     )

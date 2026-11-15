@@ -45,7 +45,9 @@ SemaContextKey: struct {
 }
 
 // Whether `#Context` sets the field `name` itself.
-sema_context_field_settable: fn(name: String) -> Bool Never! { SEMA_CONTEXT_SET_FIELDS.contains(name) }
+sema_context_field_settable: fn(name: String) -> Bool Never! {
+    SEMA_CONTEXT_SET_FIELDS.contains(name)
+}
 
 // The context fields a Core module carries (sema_context_field_module). The
 // loader loads that module wherever the field is spelled (Loader.jet
@@ -147,7 +149,9 @@ sema_context_key_declared: fn(declaration: ConstDef) -> Bool Never! {
 // (sema_context_field_module), and holds one fixed default, so it is
 // neither mutable nor `#Persist` (E0761).
 sema_context_key_check_declaration: fn(declaration: ConstDef, module_name: String, diagnostics: &[Diagnostic]) Never! {
-    if !sema_context_key_declared(declaration) -> return
+    if !sema_context_key_declared(declaration) {
+        return
+    }
     name: declaration.name
     if SEMA_CONTEXT_RESERVED_NAMES.contains(name) && sema_context_field_module(name) != (Val(module_name)) {
         diagnostics.push(sema_error("E0761", declaration.name_span, "`{name}` is a context field, so it can't be a context key", "`context.{name}` already names the context's own field", "rename the key, e.g. `#ContextKey my_{name}: …`"))
@@ -161,7 +165,9 @@ sema_context_key_check_declaration: fn(declaration: ConstDef, module_name: Strin
 sema_context_key_resolve: fn(name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaContextKey? {
     index: sema_scope_resolve_index(scopes, name) ?? return None
     symbol: sema_scope_binding_symbol(environment, scopes, index)
-    if symbol.kind != SymbolKind.Constant || !sema_context_key_symbol(program, symbol) -> return None
+    if symbol.kind != SymbolKind.Constant || !sema_context_key_symbol(program, symbol) {
+        return None
+    }
     ty: sema_scope_binding_type(environment, scopes, index) ?? return None
     Val(SemaContextKey{key: sema_scope_resolve_key(scopes, name) ?? return None, ty: ty})
 }
@@ -172,7 +178,9 @@ sema_context_key_symbol: fn(program: SemaProgramTables, symbol: Symbol) -> Bool 
     if program.registration_graph == .Val(graph) {
         module_index: sema_registration_module_index(graph, symbol.module_identity) ?? return false
         loop constant in graph.modules[module_index].constants {
-            if constant.symbol.id == symbol.id -> return sema_context_key_declared(constant.declaration)
+            if constant.symbol.id == symbol.id {
+                return sema_context_key_declared(constant.declaration)
+            }
         }
     }
     false
@@ -226,7 +234,9 @@ sema_context_get: fn(receiver: Expr, method: String, method_span: Span, args: [C
         root = name
         root_span = name_span
     }
-    if root == "" || !sema_context_root(root, root_span, environment, program, scopes, context) -> return unhandled
+    if root == "" || !sema_context_root(root, root_span, environment, program, scopes, context) {
+        return unhandled
+    }
     failed: SemaDirectSpecialCheck{handled: true, value: None}
     span: Span{start: expr_span(receiver).start, end: method_span.end}
     if method != "get" {
@@ -245,7 +255,9 @@ sema_context_get: fn(receiver: Expr, method: String, method_span: Span, args: [C
         return failed
     }
     default: sema_check_expression(args[0].expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
-    if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "context.get", span, [EffectRowEntry]{}, diagnostics) -> return failed
+    if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "context.get", span, [EffectRowEntry]{}, diagnostics) {
+        return failed
+    }
     equatable: sema_type_equatable(environment, program, found.ty)
     read: sema_tree_node(found.ty, TExprKind.HostCall{call: THostCall.ContextGet{key: found.key, default: default, equatable: equatable}}, span)
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(read, expected, environment, program, diagnostics)}

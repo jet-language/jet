@@ -16,7 +16,9 @@ handle_user: fn(id: String) -> HTTPResponse HTTPError! {
     return Ok(server.response(200, "user={id}"))
 }
 
-handle_create: fn(req: HTTPRequest) -> HTTPResponse HTTPError! { Ok(server.response(201, "created")) }
+handle_create: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
+    Ok(server.response(201, "created"))
+}
 
 run: fn() {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
@@ -26,9 +28,7 @@ run: fn() {
     mux.get("/users/:id", fn(id: String) { handle_user(id) })
     mux.post("/users", fn(req: HTTPRequest) { handle_create(req) })
     t: task {
-        loop i in [0, 1, 2, 3] {
-            mux.serve_once(listener) ?? panic("serve failed")
-        }
+        loop i in [0, 1, 2, 3] { mux.serve_once(listener) ?? panic("serve failed") }
     }
     r1: http.get("http://{addr}/") ?? panic("GET / failed")
     print(r1.body().text(8388608) ?? panic("body failed"))

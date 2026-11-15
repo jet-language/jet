@@ -21,15 +21,12 @@ s5_changed: fn(port: Int, baseline: String, timeout_ms: Int) -> String {
 
 s5_root: fn() -> String { sys.get("S5_ROOT") ?? panic("root") }
 
-
 s5_try_symlink: fn(target: String, path: String) -> Bool {
     files.symlink(target, path) ?? return false
     true
 }
 
-s5_remove_directory_link: fn(path: String) {
-    files.remove_dir(path) ?? return files.remove(path)
-}
+s5_remove_directory_link: fn(path: String) { files.remove_dir(path) ?? return files.remove(path) }
 
 #Test("original Windows hardlinks reparses renamed directories and publish recovery") {
     port: s5_web_port()

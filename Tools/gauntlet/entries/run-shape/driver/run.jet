@@ -32,9 +32,7 @@ repo_root: fn() -> String {
 }
 
 // The JSON file `name`.
-input: fn(name: String) -> Dyn {
-    read_json(name) ?? process.fail(1, "{name} is not a JSON file")
-}
+input: fn(name: String) -> Dyn { read_json(name) ?? process.fail(1, "{name} is not a JSON file") }
 
 print_shapes: fn(matrix: Dyn, dir: String) {
     issues := [String]{}
@@ -49,9 +47,13 @@ run: fn() {
     if {
         command == "entries" && args.len() >= 2 -> {
             catalog: load_entries(args[1], None)
-            loop item in catalog.loaded -> print("loaded\t{item.directory_name}\t{json.stringify(value_at(item.entry, "name") ?? Dyn.Null)}\t{item.name_declared}")
+            loop item in catalog.loaded {
+                print("loaded\t{item.directory_name}\t{json.stringify(value_at(item.entry, "name") ?? Dyn.Null)}\t{item.name_declared}")
+            }
             loop item in catalog.tools -> print("tool\t{item.directory_name}")
-            loop item in catalog.skipped -> print("skipped\t{item.name}\t{item.reason.split(": ").collect()[0]}")
+            loop item in catalog.skipped {
+                print("skipped\t{item.name}\t{item.reason.split(": ").collect()[0]}")
+            }
         }
         command == "shapes" && args.len() >= 3 -> print_shapes(input(args[1]), args[2])
         command == "corpus" -> {

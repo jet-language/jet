@@ -53,12 +53,15 @@ iter_hook: fn(node: I64, state: I64, pull: I64, release: I64) {
 rt_iter_channel_pull_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
+
 rt_iter_channel_release_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
+
 rt_iter_progress_pull_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
+
 rt_iter_progress_release_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
@@ -94,7 +97,9 @@ iter_equal: fn(meta: I64, a: I64, b: I64) -> Bool {
     coll_call2(trap_word(wrapping(meta + I64{32})), a, b) != I64{0}
 }
 
-iter_order: fn(meta: I64, a: I64, b: I64) -> I64 { coll_call2(trap_word(wrapping(meta + I64{40})), a, b) }
+iter_order: fn(meta: I64, a: I64, b: I64) -> I64 {
+    coll_call2(trap_word(wrapping(meta + I64{40})), a, b)
+}
 
 iter_drain: fn(source: I64, header: I64) {
     coll_zero(header, I64{24})
@@ -116,7 +121,9 @@ iter_save: fn(node: I64, slot: I64, meta: I64) {
     held: coll_slot_new(meta)
     coll_slot_clone(slot, held, meta)
     trap_store(wrapping(node + I64{96}), held)
-    if (trap_word(wrapping(node + I64{104})) == I64{0}) { trap_store(wrapping(node + I64{104}), coll_meta_copy(meta)) }
+    if (trap_word(wrapping(node + I64{104})) == I64{0}) {
+        trap_store(wrapping(node + I64{104}), coll_meta_copy(meta))
+    }
 }
 
 iter_pull_kernel: fn(node: I64, output: I64) -> Bool {
@@ -125,7 +132,9 @@ iter_pull_kernel: fn(node: I64, output: I64) -> Bool {
     // Sources, hooked kinds and list cursors read nothing else of the node
     // here, so they dispatch before the other node words are loaded.
     if (kind == I64{29}) { return iter_source_pull(node, output) }
-    if iter_hooked(kind) { return coll_call2(trap_word(wrapping(node + I64{56})), node, output) != I64{0} }
+    if iter_hooked(kind) {
+        return coll_call2(trap_word(wrapping(node + I64{56})), node, output) != I64{0}
+    }
     if (kind == I64{0}) {
         header: trap_word(wrapping(node + I64{112}))
         index: trap_word(wrapping(node + I64{40}))
@@ -383,7 +392,7 @@ iter_pull_nested: fn(node: I64, output: I64) -> Bool {
 // Whether the List header at `source` may give its elements away: its owned
 // buffer has no other owner, or it holds nothing (an empty frozen header).
 iter_list_sole: fn(source: I64) -> Bool {
-    if (trap_word(wrapping(source + I64{8})) == I64{0}) -> return trap_word(source) == I64{0}
+    if (trap_word(wrapping(source + I64{8})) == I64{0}) { return trap_word(source) == I64{0} }
     jet_rt_block_unique(trap_word(wrapping(source + I64{16})))
 }
 
@@ -1277,7 +1286,9 @@ iter_try_callback: fn(source: I64, env: I64, invoke: I64, release: I64, carrier:
     cursor
 }
 
-#Export(c) jet_rt_native_iter_cursor_test: fn(cursor: I64) -> I64 { trap_word(wrapping(cursor + I64{24})) }
+#Export(c) jet_rt_native_iter_cursor_test: fn(cursor: I64) -> I64 {
+    trap_word(wrapping(cursor + I64{24}))
+}
 
 #Export(c) jet_rt_native_iter_cursor_value: fn(cursor: I64, target: I64, by_value: I64) {
     if (trap_word(wrapping(cursor + I64{24})) == I64{0}) {

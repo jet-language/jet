@@ -12,7 +12,6 @@ use {
     sys: core.sys
 }
 
-
 // Security / quarantine xattr prefixes excluded from hangar identity.
 ENVELOPE_EXCLUDED_XATTR_PREFIXES: #run { [String]{
     "security.",
@@ -20,7 +19,7 @@ ENVELOPE_EXCLUDED_XATTR_PREFIXES: #run { [String]{
     "system.nfs4_acl",
     "com.apple.quarantine",
     "com.apple.macl",
-    "com.apple.provenance"
+    "com.apple.provenance",
 } }
 
 // True when `name` is a security/quarantine xattr Hangar strips from identity.
@@ -58,7 +57,9 @@ pkg_check_xattrs: fn(path: String, allow_semantic_xattrs: Bool) EnvelopeError! -
     loop name in pkg_list_xattr_names(path) {
         if !pkg_is_excluded_xattr(name) -> names.push(name)
     }
-    if names.len() == 0 || allow_semantic_xattrs -> return
+    if names.len() == 0 || allow_semantic_xattrs {
+        return
+    }
     return Err(pkg_semantic_xattr_rejection(path, names))
 }
 
@@ -66,7 +67,9 @@ pkg_check_xattrs: fn(path: String, allow_semantic_xattrs: Bool) EnvelopeError! -
 // `X`, then the length-prefixed name and value, in name order.
 pkg_encode_semantic_xattrs: fn(path: String, envelope_archive: &EnvelopeArchive, allow_semantic_xattrs: Bool) EnvelopeError! -[FS]> {
     names: pkg_semantic_xattr_names(path)
-    if names.len() == 0 -> return
+    if names.len() == 0 {
+        return
+    }
     if !allow_semantic_xattrs -> return Err(pkg_semantic_xattr_rejection(path, names))
     loop name in names {
         value: pkg_xattr_value(path, name)

@@ -6,11 +6,36 @@
 // lower of imports. A lowered import becomes a stub function (`source` -1)
 // that calls the host (PluginHost.jet jet_plugin_host_import).
 use jet_wasm.[
-    WasmComponent, WasmConstExpr, WasmCoreItem, WasmError, WasmFuncType, WasmLimits, WasmTableType,
-    WASM_CT_NONE, WASM_CT_PRIMITIVE, WASM_CT_RECORD, WASM_CT_TUPLE, WASM_EXTERN_FUNC, WASM_EXTERN_MEMORY, WASM_EXTERN_TABLE,
-    WASM_F32, WASM_F64, WASM_I32, WASM_I64, WASM_OP_GLOBAL_GET, WASM_OP_REF_FUNC, WASM_OP_REF_NULL,
-    WASM_ORIGIN_ALIAS, WASM_ORIGIN_IMPORT, WASM_ORIGIN_LIFT, WASM_ORIGIN_LOWER, WASM_PRIM_BOOL, WASM_PRIM_STRING,
-    WASM_SEGMENT_ACTIVE, WASM_SORT_FUNC, wasm_validate_module,
+    WasmComponent,
+    WasmConstExpr,
+    WasmCoreItem,
+    WasmError,
+    WasmFuncType,
+    WasmLimits,
+    WasmTableType,
+    WASM_CT_NONE,
+    WASM_CT_PRIMITIVE,
+    WASM_CT_RECORD,
+    WASM_CT_TUPLE,
+    WASM_EXTERN_FUNC,
+    WASM_EXTERN_MEMORY,
+    WASM_EXTERN_TABLE,
+    WASM_F32,
+    WASM_F64,
+    WASM_I32,
+    WASM_I64,
+    WASM_OP_GLOBAL_GET,
+    WASM_OP_REF_FUNC,
+    WASM_OP_REF_NULL,
+    WASM_ORIGIN_ALIAS,
+    WASM_ORIGIN_IMPORT,
+    WASM_ORIGIN_LIFT,
+    WASM_ORIGIN_LOWER,
+    WASM_PRIM_BOOL,
+    WASM_PRIM_STRING,
+    WASM_SEGMENT_ACTIVE,
+    WASM_SORT_FUNC,
+    wasm_validate_module,
 ]
 
 // The descriptor's value codes (PluginHost.jet): a primitive's code (0 bool
@@ -18,12 +43,19 @@ use jet_wasm.[
 // record of scalars other than char (its fields' codes in the export's
 // `fields`), -1 for no result.
 PLUG_VALUE_U64: 8
+
 PLUG_VALUE_F32: 9
+
 PLUG_VALUE_F64: 10
+
 PLUG_VALUE_CHAR: 11
+
 PLUG_VALUE_STRING: 12
+
 PLUG_VALUE_UNSUPPORTED: 13
+
 PLUG_VALUE_TUPLE: 14
+
 PLUG_VALUE_NONE: -1
 
 // One function of the flat instance: a defined function of an instantiated
@@ -120,23 +152,34 @@ PlugFlat: struct {
     lowered: [Int:Int]
 }
 
-plug_fail: fn(message: String) -> WasmError Never! {
-    WasmError.new(message, -1)
-}
+plug_fail: fn(message: String) -> WasmError Never! { WasmError.new(message, -1) }
 
 // The flat instance of `c`.
 plug_flatten: fn(c: WasmComponent) -> PlugFlat WasmError! {
     flat := PlugFlat{
-        c: c, funcs: [PlugFunc]{}, instances: [PlugInstance]{}, memories: [WasmLimits]{}, tables: [WasmTableType]{},
-        globals: [PlugGlobal]{}, datas: [PlugData]{}, elems: [PlugElem]{}, starts: [Int]{}, exports: [PlugExport]{},
-        imports: [PlugImport]{}, lowered: [Int:Int]{},
+        c: c,
+        funcs: [PlugFunc]{},
+        instances: [PlugInstance]{},
+        memories: [WasmLimits]{},
+        tables: [WasmTableType]{},
+        globals: [PlugGlobal]{},
+        datas: [PlugData]{},
+        elems: [PlugElem]{},
+        starts: [Int]{},
+        exports: [PlugExport]{},
+        imports: [PlugImport]{},
+        lowered: [Int:Int]{},
     }
     loop index in 0..<flat.c.core_instances.len() -> plug_instantiate(flat, index)
     loop row in 0..<flat.imports.len() {
         memory_item: flat.imports[row].memory_item
-        if memory_item >= 0 -> flat.imports[row].memory = plug_core_item(flat, WASM_EXTERN_MEMORY, memory_item, None)
+        if memory_item >= 0 {
+            flat.imports[row].memory = plug_core_item(flat, WASM_EXTERN_MEMORY, memory_item, None)
+        }
         realloc_item: flat.imports[row].realloc_item
-        if realloc_item >= 0 -> flat.imports[row].realloc = plug_core_item(flat, WASM_EXTERN_FUNC, realloc_item, None)
+        if realloc_item >= 0 {
+            flat.imports[row].realloc = plug_core_item(flat, WASM_EXTERN_FUNC, realloc_item, None)
+        }
     }
     loop index in 0..<flat.c.exports.len() {
         if flat.c.exports[index].sort != WASM_SORT_FUNC -> next
@@ -150,12 +193,21 @@ plug_flatten: fn(c: WasmComponent) -> PlugFlat WasmError! {
 plug_instantiate: fn(flat: &PlugFlat, index: Int) WasmError! {
     ci: flat.c.core_instances[index]
     inst := PlugInstance{
-        source: ci.source, funcs: [Int]{}, tables: [Int]{}, memories: [Int]{}, globals: [Int]{},
-        data_base: flat.datas.len(), elem_base: flat.elems.len(),
-        names: ci.export_names, sorts: ci.export_sorts, targets: ci.export_indexes,
+        source: ci.source,
+        funcs: [Int]{},
+        tables: [Int]{},
+        memories: [Int]{},
+        globals: [Int]{},
+        data_base: flat.datas.len(),
+        elem_base: flat.elems.len(),
+        names: ci.export_names,
+        sorts: ci.export_sorts,
+        targets: ci.export_indexes,
     }
     if ci.source >= 0 {
-        if ci.source >= flat.c.modules.len() -> return Err(plug_fail("core instance {index} instantiates unknown module {ci.source}"))
+        if ci.source >= flat.c.modules.len() {
+            return Err(plug_fail("core instance {index} instantiates unknown module {ci.source}"))
+        }
         wm: flat.c.modules[ci.source]
         wasm_validate_module(wm)
         loop entry in wm.imports {
@@ -163,7 +215,9 @@ plug_instantiate: fn(flat: &PlugFlat, index: Int) WasmError! {
             loop (k, name) in ci.arg_names {
                 if name == entry.module_name -> arg = ci.arg_instances[k]
             }
-            if arg < 0 -> return Err(plug_fail("module instantiation is missing the `{entry.module_name}` argument"))
+            if arg < 0 {
+                return Err(plug_fail("module instantiation is missing the `{entry.module_name}` argument"))
+            }
             expected: if entry.kind == WASM_EXTERN_FUNC -> Val(wm.types[entry.type_index]) else -> None
             target: plug_instance_export(flat, arg, entry.name, entry.kind, expected)
             if entry.kind == {
@@ -180,7 +234,9 @@ plug_instantiate: fn(flat: &PlugFlat, index: Int) WasmError! {
             name := wm.function_name(function)
             if name == "" {
                 loop entry in wm.exports {
-                    if name == "" && entry.kind == WASM_EXTERN_FUNC && entry.index == function -> name = entry.name
+                    if name == "" && entry.kind == WASM_EXTERN_FUNC && entry.index == function {
+                        name = entry.name
+                    }
                 }
             }
             inst.funcs.push(flat.funcs.len())
@@ -233,7 +289,9 @@ plug_const_value: fn(flat: PlugFlat, inst: PlugInstance, expr: WasmConstExpr) ->
 // instance `instance`, as a flat index. `expected` is the type a function
 // import expects (a lowered function's stub takes it).
 plug_instance_export: fn(flat: &PlugFlat, instance: Int, name: String, kind: Int, expected: WasmFuncType?) -> Int WasmError! {
-    if instance < 0 || instance >= flat.instances.len() -> return Err(plug_fail("unknown core instance {instance}"))
+    if instance < 0 || instance >= flat.instances.len() {
+        return Err(plug_fail("unknown core instance {instance}"))
+    }
     source: flat.instances[instance].source
     if source < 0 {
         found := -1
@@ -289,17 +347,26 @@ plug_lower: fn(flat: &PlugFlat, index: Int, item: WasmCoreItem, expected: WasmFu
     if flat.lowered.get(index) == .Val(known) -> return Ok(known)
     ty: expected ?? return Err(plug_fail("a lowered function is used outside a function import"))
     // The canonical ABI lowers a host function to one core result at most.
-    if ty.results.len() > 1 -> return Err(plug_fail("a lowered function import has more than one core result"))
+    if ty.results.len() > 1 {
+        return Err(plug_fail("a lowered function import has more than one core result"))
+    }
     target: item.target
     func: flat.c.func_type(target) ?? return Err(plug_fail("lowered function {target} has no function type"))
     params := [Int]{}
     loop param in func.types -> params.push(plug_value_code(flat.c, param))
     result: if func.ok == WASM_CT_NONE -> PLUG_VALUE_NONE else -> plug_value_code(flat.c, func.ok)
     row: flat.imports.len()
-    flat.imports.push(PlugImport{
-        name: plug_import_name(flat.c, target), params: params, result: result,
-        memory_item: item.options.memory, realloc_item: item.options.realloc, memory: -1, realloc: -1,
-    })
+    flat.imports.push(
+        PlugImport{
+            name: plug_import_name(flat.c, target),
+            params: params,
+            result: result,
+            memory_item: item.options.memory,
+            realloc_item: item.options.realloc,
+            memory: -1,
+            realloc: -1,
+        },
+    )
     fid: flat.funcs.len()
     flat.funcs.push(PlugFunc{source: -1, instance: -1, index: -1, ty: ty, name: "", module_name: "", import: row})
     flat.lowered[index] = fid
@@ -311,10 +378,14 @@ plug_lower: fn(flat: &PlugFlat, index: Int, item: WasmCoreItem, expected: WasmFu
 plug_import_name: fn(c: WasmComponent, target: Int) -> String Never! {
     if target < 0 || target >= c.funcs.len() -> return ""
     item: c.funcs[target]
-    if item.origin == WASM_ORIGIN_IMPORT && item.target >= 0 && item.target < c.imports.len() -> return c.imports[item.target].name
+    if item.origin == WASM_ORIGIN_IMPORT && item.target >= 0 && item.target < c.imports.len() {
+        return c.imports[item.target].name
+    }
     if item.origin == WASM_ORIGIN_ALIAS && item.instance >= 0 && item.instance < c.instances.len() {
         instance: c.instances[item.instance]
-        if instance.origin == WASM_ORIGIN_IMPORT && instance.target >= 0 && instance.target < c.imports.len() -> return "{c.imports[instance.target].name}/{item.name}"
+        if instance.origin == WASM_ORIGIN_IMPORT && instance.target >= 0 && instance.target < c.imports.len() {
+            return "{c.imports[instance.target].name}/{item.name}"
+        }
     }
     item.name
 }
@@ -354,9 +425,15 @@ plug_lift: fn(flat: &PlugFlat, name: String, index: Int) WasmError! {
                 export.fields = plug_tuple_fields(flat.c, func.ok)
                 if export.fields.len() > 0 -> export.result = PLUG_VALUE_TUPLE
             }
-            if item.options.memory >= 0 -> export.memory = plug_core_item(flat, WASM_EXTERN_MEMORY, item.options.memory, None)
-            if item.options.realloc >= 0 -> export.realloc = plug_core_item(flat, WASM_EXTERN_FUNC, item.options.realloc, None)
-            if item.options.post_return >= 0 -> export.post = plug_core_item(flat, WASM_EXTERN_FUNC, item.options.post_return, None)
+            if item.options.memory >= 0 {
+                export.memory = plug_core_item(flat, WASM_EXTERN_MEMORY, item.options.memory, None)
+            }
+            if item.options.realloc >= 0 {
+                export.realloc = plug_core_item(flat, WASM_EXTERN_FUNC, item.options.realloc, None)
+            }
+            if item.options.post_return >= 0 {
+                export.post = plug_core_item(flat, WASM_EXTERN_FUNC, item.options.post_return, None)
+            }
             export.unsupported = !plug_lift_fits(export, flat.funcs[fid].ty)
         }
     }

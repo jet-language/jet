@@ -42,9 +42,7 @@ store_test_is_already_exists: fn(error: StoreError) -> Bool Never! {
 #Test("pinned directory enumeration stops at the requested limit") {
     roots: store_test_temp_roots()
     directory: PinnedLifecycleDirectory.open_or_create(roots.root) ?? panic("open pinned directory")
-    loop index in 0..<8 {
-        _: directory.create_new("{index}.txn") ?? panic("create member")
-    }
+    loop index in 0..<8 -> _: directory.create_new("{index}.txn") ?? panic("create member")
     names: directory.names(3) ?? panic("names")
     assert_eq(names.len(), 3)
     store_test_drop_roots(roots)
@@ -60,7 +58,7 @@ store_test_is_already_exists: fn(error: StoreError) -> Bool Never! {
     destination.write_bytes("destination".bytes()) ?? panic("write destination")
     destination.fsync() ?? panic("sync destination")
     if directory.rename_open(source, "source.partial", "destination.txn", false) == {
-        .Ok(_) -> panic("no-replace publication must refuse an existing destination")
+        .Ok(_) -> { panic("no-replace publication must refuse an existing destination") }
         .Err(error) -> assert(store_test_is_already_exists(error))
     }
     assert_eq(store_test_read_pinned_member(directory, "destination.txn"), "destination")
@@ -69,7 +67,9 @@ store_test_is_already_exists: fn(error: StoreError) -> Bool Never! {
 }
 
 #Test("pinned directory never follows a component symlink") {
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     roots: store_test_temp_roots()
     outside: store_test_temp_roots()
     files.symlink(outside.root, files.join(roots.root, "lifecycle-db")) ?? panic("symlink component")
@@ -94,11 +94,15 @@ store_test_is_already_exists: fn(error: StoreError) -> Bool Never! {
     assert_eq(directory.path(), original)
     escaped: "{files.join(roots.root, "held")}/../outside"
     if PinnedLifecycleDirectory.open_or_create(escaped) == {
-        .Ok(_) -> panic("a traversal component must be refused")
+        .Ok(_) -> { panic("a traversal component must be refused") }
         .Err(error) -> {
             if error == {
-                .InvalidInput(message) -> assert_eq(message, "pinned directory path contains traversal")
-                .IO(_) | .NotFound(_) | .InvalidData(_) | .AlreadyExists(_) | .PermissionDenied(_) | .Unsupported(_) | .Interrupted(_) | .LifecycleConflict(_, _) | .Other(_) -> panic("traversal must be InvalidInput")
+                .InvalidInput(message) -> {
+                    assert_eq(message, "pinned directory path contains traversal")
+                }
+                .IO(_) | .NotFound(_) | .InvalidData(_) | .AlreadyExists(_) | .PermissionDenied(_) | .Unsupported(_) | .Interrupted(_) | .LifecycleConflict(_, _) | .Other(_) -> {
+                    panic("traversal must be InvalidInput")
+                }
             }
         }
     }

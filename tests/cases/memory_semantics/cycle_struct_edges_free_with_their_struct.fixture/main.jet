@@ -123,9 +123,7 @@ ty_size: fn(ty: Ty) -> Int {
         .Named(name) -> name.len()
         .Tuple(fields) -> {
             n := 1
-            loop field in fields {
-                n += ty_size(field.ty) + field.name.len()
-            }
+            loop field in fields -> n += ty_size(field.ty) + field.name.len()
             n
         }
     }
@@ -141,13 +139,9 @@ in_list: fn(from: Int, to: Int) -> Int {
     total
 }
 
-depth: fn(node: Node) -> Int {
-    if node.next == .Val(inner) -> 1 + depth(inner) else -> 1
-}
+depth: fn(node: Node) -> Int { if node.next == .Val(inner) -> 1 + depth(inner) else -> 1 }
 
-cut: fn(node: &Node) {
-    node.next = None
-}
+cut: fn(node: &Node) { node.next = None }
 
 via_option: fn(from: Int, to: Int) -> Int {
     total := 0
@@ -165,9 +159,7 @@ via_option: fn(from: Int, to: Int) -> Int {
 
 count: fn(tree: Tree) -> Int {
     n := tree.name.len()
-    loop (_, kid) in tree.kids {
-        n += count(kid)
-    }
+    loop (_, kid) in tree.kids -> n += count(kid)
     n
 }
 
@@ -260,9 +252,15 @@ write_through: fn(from: Int, to: Int) -> Int {
         bump(z.inner)
         w := z.copy()
         w.inner.back.push(Outer{name: "b", inner: Inner{n: 2, tag: "u", back: []}})
-        if x.inner.n != 1 || y.inner.n != 5 || z.inner.n != 15 || w.inner.n != 15 -> panic("a write through a copy's edge showed in another copy")
-        if x.inner.tag != "t{i}" || y.inner.tag != "t{i}" || z.inner.tag != "bumped" -> panic("a tag write showed in another copy")
-        if z.inner.back.len() != 0 || w.inner.back.len() != 1 -> panic("a list write showed in another copy")
+        if x.inner.n != 1 || y.inner.n != 5 || z.inner.n != 15 || w.inner.n != 15 {
+            panic("a write through a copy's edge showed in another copy")
+        }
+        if x.inner.tag != "t{i}" || y.inner.tag != "t{i}" || z.inner.tag != "bumped" {
+            panic("a tag write showed in another copy")
+        }
+        if z.inner.back.len() != 0 || w.inner.back.len() != 1 {
+            panic("a list write showed in another copy")
+        }
         total += x.inner.n + y.inner.n + z.inner.n + w.inner.n + w.inner.back[0].inner.n
     }
     total
@@ -276,7 +274,9 @@ from_constant: fn(from: Int, to: Int) -> Int {
         bump(y.inner)
         z := Outer{name: "d", inner: BLANK}
         z.inner.n = 7
-        if x.inner.n != 3 || x.inner.tag != "blank" || BLANK.n != 3 || BLANK.tag != "blank" -> panic("a write through an edge built from a constant showed in the constant")
+        if x.inner.n != 3 || x.inner.tag != "blank" || BLANK.n != 3 || BLANK.tag != "blank" {
+            panic("a write through an edge built from a constant showed in the constant")
+        }
         total += x.inner.n + y.inner.n + z.inner.n + x.name.len()
     }
     total

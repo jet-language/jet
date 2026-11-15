@@ -5,11 +5,12 @@
 // and a Constraint its constraint shell; every producer borrows its inputs and
 // returns an owned shell, except a strength, which consumes the constraint and
 // hands back the same shell.
-
 use jet_foundation.[Span, BodyHandleOp, TBinaryOp, TLocal, Type]
 
 ir_layout_value_type: fn(ty: Type) -> Bool Never! {
-    if ir_untag(ty) == .Named(name) -> return name == "HVar" || name == "VVar" || name == "LengthVar"
+    if ir_untag(ty) == .Named(name) {
+        return name == "HVar" || name == "VVar" || name == "LengthVar"
+    }
     false
 }
 
@@ -120,12 +121,8 @@ ir_layout_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
         call_args.push(value)
     }
     result := -1
-    if method == "suggest" {
-        _: ir_runtime(m, b, export, call_args, -1)
-    } else {
-        if method == "conflict" {
-            result = ir_layout_conflict(m, p, b, ty, call_args, span)
-        } else {
+    if method == "suggest" -> _: ir_runtime(m, b, export, call_args, -1) else {
+        if method == "conflict" -> result = ir_layout_conflict(m, p, b, ty, call_args, span) else {
             row: ir_value_type(m, p, ty) ?? return Val(ir_type_fail(b, span, ty))
             result = ir_runtime(m, b, export, call_args, row)
             b.fresh[result] = m.types[row].drop != ""
@@ -157,9 +154,7 @@ ir_layout_strength: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rece
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     constraint := ir_expr(m, p, b, receiver)
     if ir_failed(b) || constraint < 0 -> return -1
-    if b.fresh[constraint] {
-        b.fresh[constraint] = false
-    } else {
+    if b.fresh[constraint] -> b.fresh[constraint] = false else {
         constraint = ir_runtime(m, b, "jet_rt_handle_clone_constraint", [Int]{constraint}, row)
     }
     level: ir_word_const(m, b, strength)

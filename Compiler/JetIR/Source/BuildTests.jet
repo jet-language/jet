@@ -32,7 +32,6 @@
 //   `#Pre`/`#Post` clause's first hold and every failure append
 //   `JET_NATIVE_CONTRACT <held> <length>\n<site>\n` to that file as they
 //   happen (JetRuntime TestContracts.jet).
-
 use {
     jet_foundation.[BodyScopeMemberKind, DeclTable, ENV_JET_NATIVE_TEST_ID, ENV_JET_NATIVE_TEST_RECORDS_PATH, ENV_JET_NATIVE_TEST_REPORT_PATH, Span, SymbolTable, TConstantDef, FnBody, TEST_SETTINGS_PLAN_ENV, TImplDef, TPanicLoc, TPanicLocal, TTypeDef, Type, measure_literal_value, name_rows_set, symbol_none]
     jet_sema.[SemaCheckedForeignFunction]
@@ -44,10 +43,20 @@ use {
 // test changes the process's environment or working directory, so the
 // unfiltered batch never runs it: it runs only when `JET_NATIVE_TEST_ID`
 // selects it, alone in its own process.
-IRTestCase: struct { id: Int, key: String, name: String, expected_failure: Bool, faults: [String]{[]}, isolated: Bool{false} }
+IRTestCase: struct {
+    id: Int
+    key: String
+    name: String
+    expected_failure: Bool
+    faults: [String]{[]}
+    isolated: Bool{false}
+}
 
 // A selected Check Output: its name and its checked zero-argument function.
-IROutputCheck: struct { name: String, key: String }
+IROutputCheck: struct {
+    name: String
+    key: String
+}
 
 // The harness `jet test` runs: `tests` in run order, then (unfiltered) each
 // of `checks`. `serial` streams each test's record before spawning the next;
@@ -55,7 +64,13 @@ IROutputCheck: struct { name: String, key: String }
 // (`--show-default`) never calls the package's `test: fn`. `coverage` (`jet
 // test --coverage`) names the functions whose entry records its line, by
 // checked key (IRProgram.coverage).
-IRTestHarness: struct { tests: [IRTestCase], checks: [IROutputCheck], serial: Bool, stock: Bool{false}, coverage: [String:Int]{[String:Int]{}} }
+IRTestHarness: struct {
+    tests: [IRTestCase]
+    checks: [IROutputCheck]
+    serial: Bool
+    stock: Bool{false}
+    coverage: [String:Int]{[String:Int]{}}
+}
 
 // Builds `harness` and every function it reaches, keeping `checks`
 // (ir_bounds_mode).
@@ -72,7 +87,9 @@ ir_build_tests: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTab
     bodies := [Int]{}
     loop test in harness.tests {
         id: ir_function_id(m, p, test.key, [Type]{}) ?? -1
-        if id < 0 -> failures.push(IRBuildFailure{key: test.key, name: test.name, message: "the test function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}})
+        if id < 0 {
+            failures.push(IRBuildFailure{key: test.key, name: test.name, message: "the test function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}})
+        }
         // A stop in the body names the test as its source
         // does, not by its checked key (`<module>::test::<name>@<span>`).
         if id >= 0 -> m.functions[id].name = "test \"{test.name}\""
@@ -81,7 +98,9 @@ ir_build_tests: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTab
     check_ids := [Int]{}
     loop check in harness.checks {
         id: ir_function_id(m, p, check.key, [Type]{}) ?? -1
-        if id < 0 -> failures.push(IRBuildFailure{key: check.key, name: check.name, message: "the output check function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}})
+        if id < 0 {
+            failures.push(IRBuildFailure{key: check.key, name: check.name, message: "the output check function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}})
+        }
         check_ids.push(id)
     }
     if failures.len() > 0 -> return IRBuildResult{program: m, failures: failures}
@@ -118,7 +137,9 @@ ir_test_override: fn(m: &IRModule, p: IRProgram) -> Int Never! {
 // there is none; `jet test` announces the override it runs.
 ir_test_override_key: fn(functions: [FnBody]) -> String Never! {
     loop function in functions {
-        if function.name != "test" || function.params.len() != 1 || function.generic_params.len() > 0 || function.module_name.starts_with("core") -> next
+        if function.name != "test" || function.params.len() != 1 || function.generic_params.len() > 0 || function.module_name.starts_with("core") {
+            next
+        }
         top_level: if function.kind == {
             .TopLevel -> true
             .Method(_, _) | .TraitMethod(_, _, _, _, _) -> false
@@ -232,9 +253,7 @@ ir_test_invoke: fn(m: &IRModule, p: IRProgram, body: Int, failures: &[IRBuildFai
     null: ir_temp(m, b, pointer_row)
     ir_emit(b.f, IROp.Const, null, 0, -1, -1, b.line)
     result := -1
-    if m.functions[body].param_count > 0 {
-        result = ir_test_property_call(m, p, b, body, env, span)
-    } else {
+    if m.functions[body].param_count > 0 -> result = ir_test_property_call(m, p, b, body, env, span) else {
         row: m.functions[body].result
         if row >= 0 && m.types[row].kind != .Unit -> result = ir_temp(m, b, row)
         operands: ir_args(b.f, no_args)
@@ -275,7 +294,9 @@ ir_test_invoke: fn(m: &IRModule, p: IRProgram, body: Int, failures: &[IRBuildFai
                     ir_end(b.f, b.line)
                 }
             }
-            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> ir_fail(b, span, "native unit test body does not return Unit or its checked failure carrier")
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
+                ir_fail(b, span, "native unit test body does not return Unit or its checked failure carrier")
+            }
         }
         ir_test_drop(m, b, result)
     }
@@ -334,7 +355,9 @@ ir_test_property_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: Int, 
 // and its parameters bound to the values.
 ir_test_property_reject: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, ctx: Int, values: [Int]) Never! {
     pre: p.functions[row].pre
-    if pre.len() == 0 -> return
+    if pre.len() == 0 {
+        return
+    }
     outer_row: b.row
     outer_bounds: b.bounds
     b.row = row
@@ -390,7 +413,9 @@ ir_test_generate: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ctx: Int, ty: Ty
         return ir_bool_op(m, b, IROp.Ne, drawn, zero)
     }
     if untagged == .Char -> return ir_runtime(m, b, "jet_rt_test_property_char", [Int]{ctx}, row)
-    if untagged == .String -> return ir_runtime(m, b, "jet_rt_test_property_string", [Int]{ctx}, row)
+    if untagged == .String {
+        return ir_runtime(m, b, "jet_rt_test_property_string", [Int]{ctx}, row)
+    }
     if untagged == .Float -> return ir_runtime(m, b, "jet_rt_test_property_float", [Int]{ctx}, row)
     if untagged == .Float32 {
         float_row: ir_type_row(m, Type.Float) ?? return ir_type_fail(b, span, Type.Float)
@@ -622,10 +647,14 @@ ir_test_check: fn(m: &IRModule, p: IRProgram, check: IROutputCheck, function: In
 // The harness entry `main` (see the head of this file).
 ir_test_main: fn(m: &IRModule, p: IRProgram, harness: IRTestHarness, bodies: [Int], check_ids: [Int], override: Int, failures: &[IRBuildFailure]) -> Int Never! {
     units := [Int]{}
-    loop (index, test) in harness.tests -> units.push(ir_test_unit(m, p, test, bodies[index], failures))
+    loop (index, test) in harness.tests {
+        units.push(ir_test_unit(m, p, test, bodies[index], failures))
+    }
     release_id: ir_test_release(m, p, failures)
     check_helpers := [Int]{}
-    loop (index, check) in harness.checks -> check_helpers.push(ir_test_check(m, p, check, check_ids[index], failures))
+    loop (index, check) in harness.checks {
+        check_helpers.push(ir_test_check(m, p, check, check_ids[index], failures))
+    }
     id: ir_test_function(m, "main", -1, "main")
     b := ir_builder_new(m.functions[id].copy())
     pointer_row: ir_pointer_row(m)
@@ -680,9 +709,7 @@ ir_test_main: fn(m: &IRModule, p: IRProgram, harness: IRTestHarness, bodies: [In
         code: ir_temp(m, b, pointer_row)
         ir_emit(b.f, IROp.FunctionAddress, code, units[index], -1, -1, b.line)
         handle: ir_runtime(m, b, "jet_rt_test_spawn", [Int]{null, code, release}, pointer_row)
-        if harness.serial {
-            ir_test_stream(m, b, handle, test.id, records_path)
-        } else {
+        if harness.serial -> ir_test_stream(m, b, handle, test.id, records_path) else {
             ir_emit(b.f, IROp.Store, -1, tasks, index * 8, handle, b.line)
         }
         ir_end(b.f, b.line)
@@ -738,7 +765,7 @@ ir_scope_member: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int, k
                 ir_stmt(m, p, b, inner)
             }
         }
-        .Measure -> ir_measure_scope(m, p, b, body)
+        .Measure -> { ir_measure_scope(m, p, b, body) }
         .Skip -> {
             whole: b.row >= 0 && p.functions[b.row].body.len() > 0 && p.functions[b.row].body[0] == statement
             bool_row: ir_type_row(m, Type.Bool) ?? 0
@@ -750,7 +777,9 @@ ir_scope_member: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int, k
             word_row: ir_word_row(m)
             int_row: ir_type_row(m, Type.Int) ?? 0
             value: ir_expr(m, p, b, duration)
-            if ir_failed(b) || value < 0 -> return
+            if ir_failed(b) || value < 0 {
+                return
+            }
             ns: ir_runtime(m, b, "jet_rt_record_get_duration_ns", [Int]{value}, int_row)
             limit: ir_runtime(m, b, "jet_int_owned_to_i64", [Int]{ns}, word_row)
             ir_release(m, b, ns)
@@ -758,7 +787,9 @@ ir_scope_member: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int, k
             scope: ir_out_slot(m, b, 1)
             _: ir_runtime(m, b, "jet_rt_test_timeout_enter", [Int]{scope, limit}, -1)
             ir_stmts(m, p, b, body)
-            if ir_failed(b) -> return
+            if ir_failed(b) {
+                return
+            }
             timer: ir_out_slot(m, b, 2)
             bool_row: ir_type_row(m, Type.Bool) ?? 0
             timed: ir_runtime(m, b, "jet_rt_test_timeout_leave", [Int]{scope, timer}, bool_row)
@@ -782,7 +813,9 @@ ir_scope_member: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int, k
             ir_stmts(m, p, b, body)
             _: b.catches.pop()
             ir_end(b.f, b.line)
-            if ir_failed(b) -> return
+            if ir_failed(b) {
+                return
+            }
             _: ir_runtime(m, b, "jet_rt_test_catch_boundary", [Int]{scope}, -1)
             stopped: ir_runtime(m, b, "jet_rt_test_expect_fail_leave_scope", [Int]{scope}, word_row)
             zero: ir_word_const(m, b, 0)

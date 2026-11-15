@@ -7,7 +7,9 @@
 use jet_foundation.[DerivationIdentity, derivation_identity]
 
 FOREIGN_BRIDGE_IDENTITY_SCHEMA: "jet-ffi-bridge-identity-v1"
+
 FOREIGN_BRIDGE_PROVENANCE_SCHEMA: "jet-ffi-bridge-provenance-v1"
+
 FOREIGN_BOUNDARY_SCHEMA: "jet-ffi-boundary-v1"
 
 // The obligation names every foreign descriptor must expose.
@@ -46,9 +48,7 @@ ForeignIdentityBuilder: struct {
     }
 
     // Finish the record as a lowercase SHA-256 digest.
-    finish: fn(self) -> String Never! {
-        pkg_sha256_hex(self.bytes)
-    }
+    finish: fn(self) -> String Never! { pkg_sha256_hex(self.bytes) }
 }
 
 pkg_bridge_push_u64_le: fn(bytes: &[U8], value: Int) Never! {
@@ -56,9 +56,7 @@ pkg_bridge_push_u64_le: fn(bytes: &[U8], value: Int) Never! {
 }
 
 // `[1]` / `[0]`: the one-byte boolean identity field.
-pkg_bridge_flag: fn(value: Bool) -> [U8] Never! {
-    if value -> [U8]{U8{1}} else -> [U8]{U8{0}}
-}
+pkg_bridge_flag: fn(value: Bool) -> [U8] Never! { if value -> [U8]{U8{1}} else -> [U8]{U8{0}} }
 
 // One source/build/run/target identity for a foreign boundary. The source,
 // checked overlay, generator, implementation, toolchain, and target are named
@@ -87,9 +85,7 @@ ForeignBoundaryIdentity: struct {
         derivation_identity("source={self.source};overlay={self.overlay}", "generator={self.generator};toolchain={self.toolchain}", self.implementation, self.target)
     }
 
-    differs_from: fn(self, other: ForeignBoundaryIdentity) -> Bool Never! {
-        self != other
-    }
+    differs_from: fn(self, other: ForeignBoundaryIdentity) -> Bool Never! { self != other }
 
     // Stable digest used by receipts and generated source comments.
     digest: fn(self) -> String Never! {
@@ -175,11 +171,21 @@ ForeignObligationEvidence: struct {
     }
 
     validate: fn(self, coverage: ForeignArtifactCoverage) ForeignBridgeError! {
-        if self.obligation.trim() == "" -> return Err(pkg_bridge_error("foreign obligation evidence needs an obligation name"))
-        if self.checker.trim() == "" -> return Err(pkg_bridge_error("foreign obligation `{self.obligation}` needs an evidence checker"))
-        if self.assumptions.len() == 0 -> return Err(pkg_bridge_error("foreign obligation `{self.obligation}` needs explicit assumptions"))
-        if self.coverage_digest != coverage.digest() -> return Err(pkg_bridge_error("foreign obligation `{self.obligation}` is attached to stale artifact coverage"))
-        if self.basis != FFIEvidenceBasis.Unknown && !coverage.is_complete() -> return Err(pkg_bridge_error("foreign obligation `{self.obligation}` cannot claim {self.basis.as_str()} without complete artifact coverage"))
+        if self.obligation.trim() == "" {
+            return Err(pkg_bridge_error("foreign obligation evidence needs an obligation name"))
+        }
+        if self.checker.trim() == "" {
+            return Err(pkg_bridge_error("foreign obligation `{self.obligation}` needs an evidence checker"))
+        }
+        if self.assumptions.len() == 0 {
+            return Err(pkg_bridge_error("foreign obligation `{self.obligation}` needs explicit assumptions"))
+        }
+        if self.coverage_digest != coverage.digest() {
+            return Err(pkg_bridge_error("foreign obligation `{self.obligation}` is attached to stale artifact coverage"))
+        }
+        if self.basis != FFIEvidenceBasis.Unknown && !coverage.is_complete() {
+            return Err(pkg_bridge_error("foreign obligation `{self.obligation}` cannot claim {self.basis.as_str()} without complete artifact coverage"))
+        }
     }
 }
 

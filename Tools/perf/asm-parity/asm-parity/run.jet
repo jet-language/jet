@@ -85,49 +85,59 @@ use {
 }
 
 SIZE_GATE: Float{2.0}
+
 CYCLES_GATE: Float{1.1}
+
 // A median of fewer runs lets one quiet stretch of the machine decide a row.
 MIN_RUNS: 21
+
 ELF_BASE: 0x400000
+
 // The ELF header and its two program headers.
 ELF_HEAD: 176
+
 OUTPUT_LIMIT: 67108864
+
 // The options that take a value, and those of them that name a path.
 VALUED: [String]{"--jet", "--out", "--runs", "--cpu", "--modes", "--cells", "--perf", "--candidate", "--older", "--best", "--gains"}
+
 PATHS: [String]{"--jet", "--out", "--candidate", "--older", "--gains"}
+
 COLUMNS: [String]{"cell", "variant", "args", "bytes", "size_x", "size_gate", "cycles", "instructions", "cycles_x", "instructions_x", "cycles_gate", "output"}
+
 // The Linux signal names by number, as a stopped binary's row names them.
 SIGNALS: [String]{"", "SIGHUP", "SIGINT", "SIGQUIT", "SIGILL", "SIGTRAP", "SIGABRT", "SIGBUS", "SIGFPE", "SIGKILL", "SIGUSR1", "SIGSEGV", "SIGUSR2", "SIGPIPE", "SIGALRM", "SIGTERM", "SIGSTKFLT", "SIGCHLD", "SIGCONT", "SIGSTOP", "SIGTSTP", "SIGTTIN", "SIGTTOU", "SIGURG", "SIGXCPU", "SIGXFSZ", "SIGVTALRM", "SIGPROF", "SIGWINCH", "SIGIO", "SIGPWR", "SIGSYS"}
+
 // One run of a binary through the launcher (launch.S), its stdout dropped:
 // wall nanoseconds from fork to reap, the child's ru_maxrss in KiB and its
 // exit code (negative: the signal), the original's own script.
 TIMED: """
-    import os, struct, sys, time
-    launcher, argv = sys.argv[1], sys.argv[1:]
-    r, w = os.pipe()
-    start = time.perf_counter_ns()
-    pid = os.fork()
-    if pid == 0:
-        try:
-            null = os.open(os.devnull, os.O_WRONLY)
-            os.dup2(null, 1)
-            os.dup2(w, 3)
-            os.set_inheritable(3, True)
-            os.execv(launcher, argv)
-        finally:
-            os._exit(127)
-    os.waitpid(pid, 0)
-    ns = time.perf_counter_ns() - start
-    os.close(w)
-    data = b''
-    while len(data) < 152:
-        more = os.read(r, 152 - len(data))
-        if not more:
-            sys.exit('launcher wrote no wait status')
-        data += more
-    status, maxrss = struct.unpack_from('<i', data, 0)[0], struct.unpack_from('<q', data, 40)[0]
-    print(ns, maxrss, os.waitstatus_to_exitcode(status))
-    """
+import os, struct, sys, time
+launcher, argv = sys.argv[1], sys.argv[1:]
+r, w = os.pipe()
+start = time.perf_counter_ns()
+pid = os.fork()
+if pid == 0:
+    try:
+        null = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(null, 1)
+        os.dup2(w, 3)
+        os.set_inheritable(3, True)
+        os.execv(launcher, argv)
+    finally:
+        os._exit(127)
+os.waitpid(pid, 0)
+ns = time.perf_counter_ns() - start
+os.close(w)
+data = b''
+while len(data) < 152:
+    more = os.read(r, 152 - len(data))
+    if not more:
+        sys.exit('launcher wrote no wait status')
+    data += more
+status, maxrss = struct.unpack_from('<i', data, 0)[0], struct.unpack_from('<q', data, 40)[0]
+print(ns, maxrss, os.waitstatus_to_exitcode(status))
+"""
 
 Options: struct {
     here: String
@@ -311,15 +321,15 @@ impl Err.From(binary.BinaryError) {
 }
 
 // `text` as an Int, else the error `what`.
-integer: fn(text: String, what: String) -> Int Err! {
-    Int.parse(text) ?? return Err(what)
-}
+integer: fn(text: String, what: String) -> Int Err! { Int.parse(text) ?? return Err(what) }
 
 // `path` against `base`, as node's path.resolve(base, path) reads it.
-resolve_in: fn(base: String, path: String) -> String Never! { files.normalize(files.join(base, path)) }
+resolve_in: fn(base: String, path: String) -> String Never! {
+    files.normalize(files.join(base, path))
+}
 
 options: fn(argv: [String], here: String) -[Env, FS]> Options Err! {
-    given := [String: String]{"--out": files.resolve(".asm-parity"), "--runs": "{MIN_RUNS}", "--cpu": "8", "--modes": "default,release", "--perf": "perf", "--best": "5"}
+    given := [String:String]{"--out": files.resolve(".asm-parity"), "--runs": "{MIN_RUNS}", "--cpu": "8", "--modes": "default,release", "--perf": "perf", "--best": "5"}
     gate := false
     index := 0
     loop index < argv.len() {
@@ -341,28 +351,34 @@ options: fn(argv: [String], here: String) -[Env, FS]> Options Err! {
     unknown: modes.filter(fn(mode) { !["default", "release"].contains(mode) })
     if unknown.len() > 0 -> return Err("unknown mode {unknown[0]}")
     candidate: given.get("--candidate")
-    if candidate == None && (given.has_key("--older") || given.has_key("--gains")) -> return Err("--older and --gains need --candidate")
+    if candidate == None && (given.has_key("--older") || given.has_key("--gains")) {
+        return Err("--older and --gains need --candidate")
+    }
     best: integer(given["--best"], "--best must be a positive integer")
     if best < 1 -> return Err("--best must be a positive integer")
-    Ok(Options{
-        here: here
-        jet: jet
-        out: given["--out"]
-        runs: runs
-        cpu: given["--cpu"]
-        modes: modes
-        cells: given.get("--cells").map(fn(names) { names.split(",").to_list() })
-        perf: given["--perf"]
-        gate: gate
-        candidate: candidate
-        older: given.get("--older")
-        best: best
-        gains: given.get("--gains")
-    })
+    Ok(
+        Options{
+            here: here,
+            jet: jet,
+            out: given["--out"],
+            runs: runs,
+            cpu: given["--cpu"],
+            modes: modes,
+            cells: given.get("--cells").map(fn(names) { names.split(",").to_list() }),
+            perf: given["--perf"],
+            gate: gate,
+            candidate: candidate,
+            older: given.get("--older"),
+            best: best,
+            gains: given.get("--gains"),
+        },
+    )
 }
 
 // A `service` cell is measured by the gauntlet's service replay, never here.
-selected: fn(o: Options, cell: Bench) -> Bool Never! { !cell.service && (o.cells.map(fn(names) { names.contains(cell.name) }) ?? true) }
+selected: fn(o: Options, cell: Bench) -> Bool Never! {
+    !cell.service && (o.cells.map(fn(names) { names.contains(cell.name) }) ?? true)
+}
 
 // `argv` run in `cwd` to its end; a failure to start, or a nonzero status,
 // is an error.
@@ -404,7 +420,7 @@ build_jet: fn(o: Options, jet: String, cell: Bench, mode: String, dir: String, l
 }
 
 // `from` copied into `to`, every entry whose path holds `/.jet` left out.
-copy_tree: fn(from: String, to: String) -[FS]> () Err! {
+copy_tree: fn(from: String, to: String) Err! -[FS]> {
     files.create_dir_all(to)
     loop entry in files.list_dir(from) {
         source: files.join(from, entry.name)
@@ -420,7 +436,7 @@ copy_tree: fn(from: String, to: String) -[FS]> () Err! {
 
 // The steps' working directory emptied, and the input written when it is
 // missing or must be fresh.
-prepare: fn(o: Options, s: Setup) -[Exec, FS, Time.Wait]> () Err! {
+prepare: fn(o: Options, s: Setup) Err! -[Exec, FS, Time.Wait]> {
     if s.steps {
         files.remove_all(s.cwd).drop("the first run has no directory to empty")
         files.create_dir_all(s.cwd)
@@ -441,7 +457,9 @@ output: fn(o: Options, exe: String, s: Setup) -[Exec, FS, Time.Wait]> Output Err
     loop args in s.plan {
         receipt: process.cmd([exe].concat(args)).cwd(s.cwd).output_limit(OUTPUT_LIMIT).run()
         stdout = "{stdout}{receipt.output}"
-        if !receipt.success -> return Ok(Output{stdout: stdout, ok: false, status: receipt.code, signal: receipt.signal})
+        if !receipt.success {
+            return Ok(Output{stdout: stdout, ok: false, status: receipt.code, signal: receipt.signal})
+        }
     }
     Ok(Output{stdout: stdout, ok: true, status: 0, signal: None})
 }
@@ -455,7 +473,9 @@ outputs: fn(o: Options, variants: [Variant], s: Setup) -[Exec, FS, Time.Wait]> [
 // "same" when the run printed `expect` and exited 0, else what it did.
 output_text: fn(out: Output, expect: String?) -> String Never! {
     if out.ok && expect == Val(out.stdout) -> return "same"
-    if out.signal == .Val(number) -> return "DIFF (status null {SIGNALS.get(number) ?? "SIG{number}"})"
+    if out.signal == .Val(number) {
+        return "DIFF (status null {SIGNALS.get(number) ?? "SIG{number}"})"
+    }
     "DIFF (status {out.status})"
 }
 
@@ -466,7 +486,7 @@ sample: fn(o: Options, exe: String, s: Setup) -[Exec, FS, Time.Wait]> Counts Err
     loop args in s.plan {
         receipt: process.cmd(["taskset", "-c", o.cpu, o.perf, "stat", "-x,", "-e", "cycles:u,instructions:u", exe].concat(args)).cwd(s.cwd).output_limit(OUTPUT_LIMIT).run()
         // perf stat -x, writes one `count,unit,event,...` line per event.
-        counted := [String: String]{}
+        counted := [String:String]{}
         loop line in receipt.errors.lines() {
             fields: line.split(",").to_list()
             if fields.len() > 2 -> counted[fields[2]] = fields[0]
@@ -477,7 +497,7 @@ sample: fn(o: Options, exe: String, s: Setup) -[Exec, FS, Time.Wait]> Counts Err
     Ok(total)
 }
 
-perf_count: fn(counted: [String: String], event: String, errors: String) -> Int Err! {
+perf_count: fn(counted: [String:String], event: String, errors: String) -> Int Err! {
     text: counted.get(event) ?? return Err("perf stat gave no {event} count:\n{errors}")
     integer(text, "perf stat counted {event} as {text}")
 }
@@ -496,10 +516,10 @@ pace: fn(counts: [Counts]) -> Pace Never! {
     cycles := counts.map(fn(count) { Float.from_int(count.cycles) })
     cycles.sort()
     Pace{
-        cycles: stats.median(cycles) ?? 0.0
-        instructions: stats.median(counts.map(fn(count) { Float.from_int(count.instructions) })) ?? 0.0
-        cycles_min: cycles[0]
-        cycles_max: cycles[cycles.len() - 1]
+        cycles: stats.median(cycles) ?? 0.0,
+        instructions: stats.median(counts.map(fn(count) { Float.from_int(count.instructions) })) ?? 0.0,
+        cycles_min: cycles[0],
+        cycles_max: cycles[cycles.len() - 1],
     }
 }
 
@@ -516,7 +536,9 @@ accepts: fn(port: Int, ms: Int) -[Net, Time, Time.Wait]> Bool Never! {
 // A cell's server, running once its port accepts; None for a cell without one.
 start_server: fn(o: Options, cell: Bench) -[Exec, Net, Time, Time.Wait]> ProcessChild? Err! {
     server: cell.server ?? return Ok(None)
-    if accepts(server.port, 0) -> return Err("{cell.name}: port {server.port} is already served; stop that server first")
+    if accepts(server.port, 0) {
+        return Err("{cell.name}: port {server.port} is already served; stop that server first")
+    }
     child: process.cmd(["node", resolve_in(o.here, server.script), "{server.port}", "{server.delay_ms}"]).stdout(.Stream).stderr(.Stream).spawn()
     if !accepts(server.port, 10000) {
         child.kill().drop("the server may have exited already")
@@ -544,10 +566,14 @@ scriptbench_issues: fn(all: [Bench], here: String) -[FS]> [String] Err! {
                 issues.push("{cell.name}: scriptbench names unknown workload {id}")
                 next
             }
-            if workload.servers.len() == 0 && cell.server != None -> issues.push("{cell.name}: has a server but workload {id} uses none")
+            if workload.servers.len() == 0 && cell.server != None {
+                issues.push("{cell.name}: has a server but workload {id} uses none")
+            }
             loop served in workload.servers {
                 same: cell.server.map(fn(own) { own.port == served.port && own.delay_ms == served.delay_ms }) == Val(true)
-                if !same -> issues.push("{cell.name}: workload {id} is served on port {served.port} with a {served.delay_ms} ms delay; the cell's server differs")
+                if !same {
+                    issues.push("{cell.name}: workload {id} is served on port {served.port} with a {served.delay_ms} ms delay; the cell's server differs")
+                }
             }
         }
     }
@@ -557,15 +583,17 @@ scriptbench_issues: fn(all: [Bench], here: String) -[FS]> [String] Err! {
 setup: fn(o: Options, cell: Bench) -[FS]> Setup Err! {
     dir: files.join(o.out, cell.name)
     files.create_dir_all(dir)
-    Ok(Setup{
-        dir: dir
-        // A cell with `steps` runs them in `work`, empty at the start of each run.
-        cwd: if cell.steps == None -> dir else -> files.join(dir, "work")
-        plan: cell.steps ?? [cell.args]
-        steps: cell.steps != None
-        fixture: cell.fixture
-        expect: if cell.expect_file == .Val(file) -> Val(files.read(resolve_in(o.here, file))) else -> cell.expect
-    })
+    Ok(
+        Setup{
+            dir: dir,
+            // A cell with `steps` runs them in `work`, empty at the start of each run.
+            cwd: if cell.steps == None -> dir else -> files.join(dir, "work"),
+            plan: cell.steps ?? [cell.args],
+            steps: cell.steps != None,
+            fixture: cell.fixture,
+            expect: if cell.expect_file == .Val(file) -> Val(files.read(resolve_in(o.here, file))) else -> cell.expect,
+        },
+    )
 }
 
 // The run plan as a row shows it: each step's arguments, steps split by ` ; `.
@@ -592,7 +620,9 @@ parity: fn(o: Options, all: [Bench]) -[Exec, FS, IO, Net, Time, Time.Wait]> Int 
     loop cell in all.filter(fn(cell) { selected(o, cell) }) {
         s: setup(o, cell)
         variants := [Variant]{Variant{label: "asm", exe: assemble(o.here, files.join_all([o.here, cell.name, "ref.S"]), s.dir, "ref")}}
-        loop mode in o.modes -> variants.push(Variant{label: "jet-{mode}", exe: build_jet(o, o.jet, cell, mode, s.dir, "jet")})
+        loop mode in o.modes {
+            variants.push(Variant{label: "jet-{mode}", exe: build_jet(o, o.jet, cell, mode, s.dir, "jet")})
+        }
         server: start_server(o, cell)
         _stop: scope.guard(fn() { stop_server(server) })
         outs: outputs(o, variants, s)
@@ -603,22 +633,24 @@ parity: fn(o: Options, all: [Bench]) -[Exec, FS, IO, Net, Time, Time.Wait]> Int 
             bytes: files.stat(variant.exe).size
             size_x: Float.from_int(bytes) / ref_bytes
             cycles_x: speeds[k].cycles / speeds[0].cycles
-            rows.push(Row{
-                cell: cell.name
-                variant: variant.label
-                args: args_text(s)
-                bytes: bytes
-                cycles: speeds[k].cycles
-                instructions: speeds[k].instructions
-                cycles_min: speeds[k].cycles_min
-                cycles_max: speeds[k].cycles_max
-                output: output_text(outs[k], s.expect)
-                size_x: size_x
-                cycles_x: cycles_x
-                instructions_x: speeds[k].instructions / speeds[0].instructions
-                size_gate: gate(size_x, SIZE_GATE)
-                cycles_gate: gate(cycles_x, CYCLES_GATE)
-            })
+            rows.push(
+                Row{
+                    cell: cell.name,
+                    variant: variant.label,
+                    args: args_text(s),
+                    bytes: bytes,
+                    cycles: speeds[k].cycles,
+                    instructions: speeds[k].instructions,
+                    cycles_min: speeds[k].cycles_min,
+                    cycles_max: speeds[k].cycles_max,
+                    output: output_text(outs[k], s.expect),
+                    size_x: size_x,
+                    cycles_x: cycles_x,
+                    instructions_x: speeds[k].instructions / speeds[0].instructions,
+                    size_gate: gate(size_x, SIZE_GATE),
+                    cycles_gate: gate(cycles_x, CYCLES_GATE),
+                },
+            )
         }
     }
     table: [COLUMNS.join("\t")].concat(rows.map(fn(row) { row_cells(row).join("\t") })).join("\n")
@@ -676,7 +708,9 @@ pct: fn(to: Int, from: Int) -> String Never! {
 
 ms: fn(ns: Int) -> String Never! { fmt.decimal(Float.from_int(ns) / 1000000.0, 1) }
 
-has: fn(row: GainRow, label: String) -> Bool Never! { row.variants.any(fn(variant) { variant.label == label }) }
+has: fn(row: GainRow, label: String) -> Bool Never! {
+    row.variants.any(fn(variant) { variant.label == label })
+}
 
 // The gains of the row's variant `label`, all zero for a variant it lacks.
 gains_of: fn(row: GainRow, label: String) -> Measured Never! {
@@ -689,8 +723,12 @@ gain_row: fn(o: Options, mode: String, cell: Bench, compilers: [Compiler], launc
     s: setup(o, cell)
     variants := [Variant]{}
     reference: files.join_all([o.here, cell.name, "ref.S"])
-    if files.exists(reference) -> variants.push(Variant{label: "ceiling", exe: assemble(o.here, reference, s.dir, "ref")})
-    loop compiler in compilers -> variants.push(Variant{label: compiler.label, exe: build_jet(o, compiler.path, cell, mode, s.dir, compiler.label)})
+    if files.exists(reference) {
+        variants.push(Variant{label: "ceiling", exe: assemble(o.here, reference, s.dir, "ref")})
+    }
+    loop compiler in compilers {
+        variants.push(Variant{label: compiler.label, exe: build_jet(o, compiler.path, cell, mode, s.dir, compiler.label)})
+    }
     // The control is the base binary (the compilers end with base, then
     // candidate) measured again as its own variant: its change against base
     // is the run's noise floor.
@@ -711,7 +749,9 @@ gain_row: fn(o: Options, mode: String, cell: Bench, compilers: [Compiler], launc
     wrong := [String]{}
     measured := [(label: String, gains: Measured)]{}
     loop (k, variant) in variants {
-        if output_text(outs[k], s.expect) != "same" || runs[k].any(fn(run) { run.code != 0 }) -> wrong.push(variant.label)
+        if output_text(outs[k], s.expect) != "same" || runs[k].any(fn(run) { run.code != 0 }) {
+            wrong.push(variant.label)
+        }
         least: runs[k].fold(runs[k][0].ns, fn(best, run) { min(best, run.ns) })
         most: runs[k].fold(0, fn(peak, run) { max(peak, run.rss) })
         measured.push((label: variant.label, gains: Measured{ns: least, rss: most, bytes: stripped(variant.exe), runs: runs[k]}))
@@ -722,7 +762,9 @@ gain_row: fn(o: Options, mode: String, cell: Bench, compilers: [Compiler], launc
 // A gains row: its cell's fields, then each variant's gains under its label.
 gain_json: fn(row: GainRow) -> Dyn Never! {
     fields := [(key: String, value: Dyn)]{(key: "mode", value: row.mode.encode()), (key: "cell", value: row.cell.encode()), (key: "args", value: row.args.encode()), (key: "wrong", value: row.wrong.encode())}
-    loop variant in row.variants -> fields.push((key: variant.label.copy(), value: variant.gains.encode()))  // copy: the report owns its keys
+    loop variant in row.variants {
+        fields.push((key: variant.label.copy(), value: variant.gains.encode()))  // copy: the report owns its keys
+    }
     Dyn.Object(fields)
 }
 
@@ -813,7 +855,9 @@ gains: fn(o: Options, all: [Bench], candidate: String) -[Exec, FS, IO, Net, Time
         }
     }
     named := [(key: String, value: Dyn)]{}
-    loop compiler in compilers -> named.push((key: compiler.label.copy(), value: compiler.path.encode()))  // copy: the report owns its keys
+    loop compiler in compilers {
+        named.push((key: compiler.label.copy(), value: compiler.path.encode()))  // copy: the report owns its keys
+    }
     report: Gains{
         best_of: o.best,
         interleaved: true,

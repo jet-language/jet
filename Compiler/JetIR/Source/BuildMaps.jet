@@ -20,7 +20,6 @@
 // merged into a temporary buffer (map.order); a read never writes the Map. A
 // frozen buffer (capacity 0: static, empty) has no trailer: its entries are
 // all in order, found by binary search, as every Map of other keys is.
-
 use jet_foundation.[Span, Type, TBinaryOp, BodyMapEntry, BodyOrFallback, StmtKind, TypeTupleField, TPanicLoc, TPanicLocal, body_each_expr_child, body_each_stmt_child, name_rows_set, name_rows_value, symbol_none, type_carrier_identity]
 
 // The entry tuple `(key: K, value: V)` of a Map type, None for any other.
@@ -36,7 +35,9 @@ ir_map_entry_type: fn(ty: Type) -> Type? Never! {
 // buffer pointer, so a struct being laid out may hold a Map of itself).
 ir_map_row: fn(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) -> Int? Never! {
     if ir_untag(ty) == .Map(key, _, value) {
-        if !ir_pointee_lays_out(m, p, key, laying) || !ir_pointee_lays_out(m, p, value, laying) -> return None
+        if !ir_pointee_lays_out(m, p, key, laying) || !ir_pointee_lays_out(m, p, value, laying) {
+            return None
+        }
         if ir_unit_type(ir_untag(value)) -> return None
         key_row: ir_value_type_in(m, p, key, laying) ?? return None
         if ir_map_key_kind(m, key_row) == "" -> return None
@@ -49,11 +50,21 @@ ir_map_row: fn(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) -> Int? N
 // One Map type's entry layout and key order ("int": exact Int, "string":
 // byte order, "word"/"uword": a signed/unsigned word's integer order,
 // "order": a tuple, List or Option of ordered members, the Rust derived Ord).
-IRMapShape: struct { entry: Int, entry_ty: Type, key: IRMember, value: IRMember, value_ty: Type, stride: Int, kind: String }
+IRMapShape: struct {
+    entry: Int
+    entry_ty: Type
+    key: IRMember
+    value: IRMember
+    value_ty: Type
+    stride: Int
+    kind: String
+}
 
 ir_map_shape: fn(m: &IRModule, p: IRProgram, map_row: Int) -> IRMapShape? Never! {
     entry_ty: ir_map_entry_type(m.types[map_row].ty) ?? return None
-    fields: if entry_ty == .Tuple(fields) -> fields else -> { return None }
+    fields: if entry_ty == .Tuple(fields) -> fields else -> {
+        return None
+    }
     entry: ir_value_type(m, p, entry_ty) ?? return None
     members: ir_tuple_members(m, p, fields) ?? return None
     if members.len() != 2 -> return None
@@ -92,7 +103,10 @@ ir_ordered_type: fn(ty: Type) -> Bool Never! {
 }
 
 // `left < right` and `left == right` for two keys.
-IRMapOrder: struct { less: Int, same: Int }
+IRMapOrder: struct {
+    less: Int
+    same: Int
+}
 
 ir_map_order: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, kind: String, left: Int, right: Int) -> IRMapOrder Never! {
     if kind == "string" || kind == "order" {
@@ -138,9 +152,7 @@ ir_map_helper: fn(m: &IRModule, p: IRProgram, map_row: Int, name: String) -> Int
     name_rows_set(m.function_rows, key, id)
     a := ir_builder_new(m.functions[id].copy())
     map: ir_new_slot(a, map_row, IRSlotKind.Param, ir_intern_name(m, "map"))
-    if name == "map.order" {
-        ir_map_order_body(m, p, a, shape, map_row, map)
-    } else if name == "map.settle" {
+    if name == "map.order" -> ir_map_order_body(m, p, a, shape, map_row, map) else if name == "map.settle" {
         ir_map_settle_body(m, p, a, map_row, map)
     } else if name == "map.merge" {
         target: ir_new_slot(a, ir_word_row(m), IRSlotKind.Param, ir_intern_name(m, "target"))
@@ -151,9 +163,7 @@ ir_map_helper: fn(m: &IRModule, p: IRProgram, map_row: Int, name: String) -> Int
     } else {
         probe_key: ir_new_slot(a, shape.key.ty, IRSlotKind.Param, ir_intern_name(m, "key"))
         if name == "map.find" {
-            if ir_map_hashed(shape) {
-                ir_map_probe_body(m, p, a, shape, map, probe_key)
-            } else {
+            if ir_map_hashed(shape) -> ir_map_probe_body(m, p, a, shape, map, probe_key) else {
                 ir_map_find_body(m, p, a, shape, map, probe_key)
             }
         } else if name == "map.set" || name == "map.insert" {
@@ -716,9 +726,7 @@ ir_map_rebuild_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapS
     bytes: ir_map_block_bytes(m, a, shape, capacity, mask)
     fresh: ir_runtime(m, a, "jet_rt_alloc", [Int]{bytes, eight}, word_row)
     sorted := length
-    if merge {
-        _: ir_map_call(m, p, a, map_row, "map.merge", [Int]{map, fresh}, -1)
-    } else {
+    if merge -> _: ir_map_call(m, p, a, map_row, "map.merge", [Int]{map, fresh}, -1) else {
         sorted = ir_map_sorted(m, a, shape, map)
         width: ir_word_const(m, a, shape.stride)
         moved: ir_word_op(m, a, IROp.Mul, length, width)
@@ -913,9 +921,7 @@ ir_map_take_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShap
     if !removes {
         stored: ir_load_at(m, a, entry, shape.value.offset, shape.value.ty)
         copied: ir_copy_value(m, p, a, stored, Span{start: 0, end: 0})
-        if word_option {
-            ir_emit(a.f, IROp.Move, boxed, copied, -1, -1, a.line)
-        } else {
+        if word_option -> ir_emit(a.f, IROp.Move, boxed, copied, -1, -1, a.line) else {
             ir_store_at(m, p, a, boxed, 0, copied)
         }
         ir_emit(a.f, IROp.Return, -1, boxed, -1, -1, a.line)
@@ -1182,7 +1188,9 @@ ir_map_place_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, i
     base_ty: ir_ty(p, b, base)
     map: ir_place_address(m, p, b, base, backs, span)
     if ir_failed(b) -> return -1
-    if map < 0 || ir_kind_of(m, b, map) != .Aggregate -> return ir_fail_slot(b, span, "write of a map entry of {ir_type_name(base_ty)}")
+    if map < 0 || ir_kind_of(m, b, map) != .Aggregate {
+        return ir_fail_slot(b, span, "write of a map entry of {ir_type_name(base_ty)}")
+    }
     ir_make_unique(m, p, b, map)
     row: b.f.slot_type[map]
     shape: ir_map_shape(m, p, row) ?? return ir_fail_slot(b, span, "write of a map entry of {ir_type_name(base_ty)}")
@@ -1204,19 +1212,29 @@ ir_map_index_assign: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, in
     base_ty: ir_ty(p, b, base)
     written_row: ir_value_type(m, p, base_ty) ?? return ir_fail(b, span, "map index write of {ir_type_name(base_ty)}")
     written: ir_map_shape(m, p, written_row) ?? return ir_fail(b, span, "map index write of {ir_type_name(base_ty)}")
-    if op == None && ir_map_update_fuses(m, p, b, written, base, index, value) -> return ir_map_update(m, p, b, base, index, value, span)
+    if op == None && ir_map_update_fuses(m, p, b, written, base, index, value) {
+        return ir_map_update(m, p, b, base, index, value, span)
+    }
     right: ir_value_as(m, p, b, value, written.value.ty, span)
-    if ir_failed(b) -> return
+    if ir_failed(b) {
+        return
+    }
     map: ir_write_base(m, p, b, base, span)
-    if ir_failed(b) || map < 0 -> return
+    if ir_failed(b) || map < 0 {
+        return
+    }
     ir_make_unique(m, p, b, map)
     row: b.f.slot_type[map]
     shape: ir_map_shape(m, p, row) ?? return ir_fail(b, span, "map index write of {ir_type_name(base_ty)}")
     key: ir_value_as(m, p, b, index, shape.key.ty, span)
-    if ir_failed(b) || key < 0 || right < 0 -> return
+    if ir_failed(b) || key < 0 || right < 0 {
+        return
+    }
     binary: op ?? {
         ir_map_close_replaced(m, p, b, row, shape, map, key, span)
-        if ir_failed(b) -> return
+        if ir_failed(b) {
+            return
+        }
         return ir_map_set(m, p, b, row, map, key, right)
     }
     address: ir_map_value_address(m, p, b, row, map, key)
@@ -1227,7 +1245,9 @@ ir_map_index_assign: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, in
     value_type: ir_ty(p, b, value)
     result: ir_binary(m, p, b, binary, ir_assign_overflow(binary), site, value_ty, current, right, value_type, span)
     ir_release(m, b, right)
-    if ir_failed(b) -> return
+    if ir_failed(b) {
+        return
+    }
     if m.types[shape.value.ty].drop != "" -> ir_emit(b.f, IROp.Drop, -1, current, -1, -1, b.line)
     ir_store_at(m, p, b, address, 0, result)
 }
@@ -1236,7 +1256,9 @@ ir_map_index_assign: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, in
 // as a field write closes it; map.set then drops it.
 ir_map_close_replaced: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, shape: IRMapShape, map: Int, key: Int, span: Span) Never! {
     glue: ir_close_glue(m, p, b, shape.value.ty, false, span)
-    if glue < 0 -> return
+    if glue < 0 {
+        return
+    }
     word: ir_word_row(m)
     found: ir_map_call(m, p, b, row, "map.find", [Int]{map, key}, word)
     none: ir_word_const(m, b, 0)
@@ -1258,7 +1280,9 @@ ir_map_update_fuses: fn(m: IRModule, p: IRProgram, b: IRBuilder, shape: IRMapSha
         .Local(_) -> {}
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> return false
     }
-    if !ir_map_update_word(m, shape.key.ty) || !ir_map_update_word(m, shape.value.ty) -> return false
+    if !ir_map_update_word(m, shape.key.ty) || !ir_map_update_word(m, shape.value.ty) {
+        return false
+    }
     ir_map_update_reads(p, b, index) >= 0 && ir_map_update_reads(p, b, value) > 0
 }
 
@@ -1275,7 +1299,9 @@ ir_map_update_reads: fn(p: IRProgram, b: IRBuilder, id: Int) -> Int Never! {
     reads: if node.kind == {
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) -> 0
         .Binary(_, _, _, lhs, rhs) -> {
-            if !ir_map_update_primitive(ir_ty(p, b, lhs)) || !ir_map_update_primitive(ir_ty(p, b, rhs)) -> return -1
+            if !ir_map_update_primitive(ir_ty(p, b, lhs)) || !ir_map_update_primitive(ir_ty(p, b, rhs)) {
+                return -1
+            }
             ir_map_update_both(ir_map_update_reads(p, b, lhs), ir_map_update_reads(p, b, rhs))
         }
         .Unary(_, operand) -> if ir_map_update_primitive(ir_ty(p, b, operand)) -> ir_map_update_reads(p, b, operand) else -> -1
@@ -1311,21 +1337,29 @@ ir_map_update_primitive: fn(ty: Type) -> Bool Never! {
 ir_map_update: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, index: Int, value: Int, span: Span) Never! {
     base_ty: ir_ty(p, b, base)
     map: ir_write_base(m, p, b, base, span)
-    if ir_failed(b) || map < 0 -> return
+    if ir_failed(b) || map < 0 {
+        return
+    }
     ir_make_unique(m, p, b, map)
     row: b.f.slot_type[map]
     shape: ir_map_shape(m, p, row) ?? return ir_fail(b, span, "map index write of {ir_type_name(base_ty)}")
     key: ir_value_as(m, p, b, index, shape.key.ty, span)
-    if ir_failed(b) || key < 0 -> return
+    if ir_failed(b) || key < 0 {
+        return
+    }
     word_row: ir_word_row(m)
     found: ir_map_call(m, p, b, row, "map.find", [Int]{map, key}, word_row)
     b.probe = Val(IRMapProbe{map: map, key: key, found: found})
     right: ir_value_as(m, p, b, value, shape.value.ty, span)
     b.probe = None
-    if ir_failed(b) || right < 0 -> return
+    if ir_failed(b) || right < 0 {
+        return
+    }
     owned: ir_own(m, p, b, right)
     glue: ir_close_glue(m, p, b, shape.value.ty, false, span)
-    if ir_failed(b) -> return
+    if ir_failed(b) {
+        return
+    }
     none: ir_word_const(m, b, 0)
     present: ir_bool_op(m, b, IROp.Ge, found, none)
     ir_open_if(b.f, present, b.line)
@@ -1375,7 +1409,12 @@ ir_map_found_option: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapS
 // The parts of a group update (ir_map_take_fuses): the map's variable, the
 // group's variable and the variable the key reads (ir_map_take_name), and
 // the key node of the `get`.
-IRMapTake: struct { map: String, group: String, key_root: String, key: Int }
+IRMapTake: struct {
+    map: String
+    group: String
+    key_root: String
+    key: Int
+}
 
 // The index in `body` of the store of the group update statement `at`
 // starts (-1: none). A group update is `group := map.get(key) ?? fallback`,
@@ -1403,7 +1442,9 @@ ir_map_take_fuses: fn(p: IRProgram, b: IRBuilder, body: [Int], at: Int) -> Int N
         if statement == .Assign(place, op, value, _, _) {
             if op == None && ir_map_take_store(p, b, update, place, value) {
                 if !ir_map_take_stmts_ok(p, b, update, body, at + 1, index, true) -> return -1
-                if !ir_map_take_stmts_ok(p, b, update, body, index + 1, body.len(), false) -> return -1
+                if !ir_map_take_stmts_ok(p, b, update, body, index + 1, body.len(), false) {
+                    return -1
+                }
                 return index
             }
         }
@@ -1417,7 +1458,9 @@ ir_map_take_fuses: fn(p: IRProgram, b: IRBuilder, body: [Int], at: Int) -> Int N
 // that no closure of the body names and `key` a variable or a field of one.
 ir_map_take_let: fn(p: IRProgram, b: IRBuilder, statement: Int) -> IRMapTake? Never! {
     if ir_body_stmt(p, b, statement) == .Let(local, _, init, _, _, _) {
-        if local.generated || local.deref || local.place_borrow || local.address_lifetime != None || local.persist_key != None -> return None
+        if local.generated || local.deref || local.place_borrow || local.address_lifetime != None || local.persist_key != None {
+            return None
+        }
         if b.cells.contains(local.name) || b.transactions.len() > 0 -> return None
         if ir_body_node(p, b, init).kind == .OrFallback(value, _, _) {
             if ir_body_node(p, b, value).kind == .BuiltinMethod(receiver, operation, args) {
@@ -1441,7 +1484,9 @@ ir_map_take_owned: fn(p: IRProgram, b: IRBuilder, receiver: Int) -> String? Neve
     binding: ir_lookup_local(b, local) ?? return None
     slot: binding.slot
     if binding.indirect >= 0 || binding.write || !binding.owned -> return None
-    if b.f.slot_kind[slot] != .Local || !ir_owned_binding(b, slot) || ir_lent(b, slot) -> return None
+    if b.f.slot_kind[slot] != .Local || !ir_owned_binding(b, slot) || ir_lent(b, slot) {
+        return None
+    }
     name: ir_map_take_name(local)
     if ir_map_take_captured(p, b, name) -> return None
     Val(name)
@@ -1452,14 +1497,20 @@ ir_map_take_captured: fn(p: IRProgram, b: IRBuilder, name: String) -> Bool Never
     found := false
     if b.row >= 0 {
         loop node in p.functions[b.row].tree.nodes {
-            if node.kind == .Lambda(_) -> body_each_expr_child(p.functions[b.row].tree, node, fn(child: Int) { ir_map_take_note(p, b, child, name, found) })
+            if node.kind == .Lambda(_) {
+                body_each_expr_child(p.functions[b.row].tree, node, fn(child: Int) { ir_map_take_note(p, b, child, name, found) })
+            }
         }
         loop node in b.made.nodes {
-            if node.kind == .Lambda(_) -> body_each_expr_child(p.functions[b.row].tree, node, fn(child: Int) { ir_map_take_note(p, b, child, name, found) })
+            if node.kind == .Lambda(_) {
+                body_each_expr_child(p.functions[b.row].tree, node, fn(child: Int) { ir_map_take_note(p, b, child, name, found) })
+            }
         }
     } else {
         loop node in b.made.nodes {
-            if node.kind == .Lambda(_) -> body_each_expr_child(b.made, node, fn(child: Int) { ir_map_take_note(p, b, child, name, found) })
+            if node.kind == .Lambda(_) {
+                body_each_expr_child(b.made, node, fn(child: Int) { ir_map_take_note(p, b, child, name, found) })
+            }
         }
     }
     found
@@ -1467,7 +1518,9 @@ ir_map_take_captured: fn(p: IRProgram, b: IRBuilder, name: String) -> Bool Never
 
 // Sets `found` when node `id` or a node inside it reads the variable `name`.
 ir_map_take_note: fn(p: IRProgram, b: IRBuilder, id: Int, name: String, found: &Bool) Never! {
-    if found -> return
+    if found {
+        return
+    }
     node: ir_body_node(p, b, id)
     if node.kind == .Local(local) {
         if ir_map_take_name(local) == name {
@@ -1579,7 +1632,9 @@ ir_map_take_nested: fn(kind: StmtKind) -> [Int]? Never! {
 // key's variable or a move of the group; after the store, a read of the
 // group.
 ir_map_take_node_ok: fn(p: IRProgram, b: IRBuilder, update: IRMapTake, id: Int, between: Bool, bad: &Bool) Never! {
-    if bad -> return
+    if bad {
+        return
+    }
     node: ir_body_node(p, b, id)
     if !between {
         if node.kind == .Local(local) {
@@ -1588,23 +1643,29 @@ ir_map_take_node_ok: fn(p: IRProgram, b: IRBuilder, update: IRMapTake, id: Int, 
     } else {
         if node.kind == {
             .Local(local) -> bad = ir_map_take_name(local) == update.map
-            .InlineBlock(_) | .RawOf(_) | .RawAddressOf(_) -> bad = true
+            .InlineBlock(_) | .RawOf(_) | .RawAddressOf(_) -> { bad = true }
             .OrFallback(_, fallback, _) -> {
                 if fallback == {
                     .Break | .Continue | .BreakLabel(_) | .ContinueLabel(_) -> bad = true
                     .Value(_) | .Return(_) | .Panic(_, _) -> {}
                 }
             }
-            .IfExpr(_, then_body, _, else_body, _) -> bad = then_body.len() > 0 || else_body.len() > 0
+            .IfExpr(_, then_body, _, else_body, _) -> {
+                bad = then_body.len() > 0 || else_body.len() > 0
+            }
             .Move(value) -> {
                 root: ir_map_take_root(p, b, value) ?? ""
                 bad = root == update.group || root == update.key_root
             }
-            .Borrow(place, access) -> bad = access != .Read && (ir_map_take_root(p, b, place) ?? "") == update.key_root
+            .Borrow(place, access) -> {
+                bad = access != .Read && (ir_map_take_root(p, b, place) ?? "") == update.key_root
+            }
             .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
         }
     }
-    if bad -> return
+    if bad {
+        return
+    }
     if b.row >= 0 {
         body_each_expr_child(p.functions[b.row].tree, node, fn(child: Int) { ir_map_take_node_ok(p, b, update, child, between, bad) })
     } else {
@@ -1638,11 +1699,15 @@ ir_map_take_same: fn(p: IRProgram, b: IRBuilder, left: Int, right: Int) -> Bool 
     other: ir_body_node(p, b, right)
     if ir_body_node(p, b, left).kind == {
         .Local(local) -> {
-            if other.kind == .Local(again) -> return ir_map_take_name(local) == ir_map_take_name(again)
+            if other.kind == .Local(again) {
+                return ir_map_take_name(local) == ir_map_take_name(again)
+            }
             return false
         }
         .Field(receiver, field) -> {
-            if other.kind == .Field(again, same) -> return field.name == same.name && ir_map_take_same(p, b, receiver, again)
+            if other.kind == .Field(again, same) {
+                return field.name == same.name && ir_map_take_same(p, b, receiver, again)
+            }
             return false
         }
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> return false
@@ -1694,12 +1759,16 @@ ir_map_take: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, init: 
     if receiver < 0 -> return ir_fail(b, span, "map group update")
     base_ty: ir_ty(p, b, receiver)
     map: ir_write_base(m, p, b, receiver, span)
-    if ir_failed(b) || map < 0 -> return
+    if ir_failed(b) || map < 0 {
+        return
+    }
     ir_make_unique(m, p, b, map)
     row: b.f.slot_type[map]
     shape: ir_map_shape(m, p, row) ?? return ir_fail(b, span, "map group update of {ir_type_name(base_ty)}")
     key: ir_value_as(m, p, b, index, shape.key.ty, span)
-    if ir_failed(b) || key < 0 -> return
+    if ir_failed(b) || key < 0 {
+        return
+    }
     value_row: shape.value.ty
     word_row: ir_word_row(m)
     found: ir_map_call(m, p, b, row, "map.find", [Int]{map, key}, word_row)
@@ -1716,14 +1785,18 @@ ir_map_take: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, init: 
     if fallback == .Value(_) {
         seed: ir_temp(m, b, value_row)
         ir_fallback_route(m, p, b, fallback, seed, span)
-        if ir_failed(b) -> return
+        if ir_failed(b) {
+            return
+        }
         b.fresh[seed] = ir_has_drop(m, b, seed)
         ir_map_set(m, p, b, row, map, key, seed)
         point: ir_map_added_index(m, b, shape, map, found)
         ir_emit(b.f, IROp.Copy, at, point, -1, -1, b.line)
     } else {
         ir_fallback_route(m, p, b, fallback, -1, span)
-        if ir_failed(b) -> return
+        if ir_failed(b) {
+            return
+        }
     }
     ir_end(b.f, b.line)
     fallback_leaves: ir_fallback_leaves(p, b, fallback)
@@ -1803,7 +1876,9 @@ ir_map_ordered: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, map: Int) -> Int N
 
 // Drops the ordered header `header` of the Map at `map` (ir_map_ordered).
 ir_map_ordered_end: fn(m: &IRModule, b: &IRBuilder, map: Int, header: Int) Never! {
-    if header == map || !ir_owned_binding(b, header) -> return
+    if header == map || !ir_owned_binding(b, header) {
+        return
+    }
     ir_emit(b.f, IROp.Drop, -1, header, -1, -1, b.line)
     ir_disown(b, header)
 }
@@ -1815,14 +1890,16 @@ ir_map_ordered_end: fn(m: &IRModule, b: &IRBuilder, map: Int, header: Int) Never
 ir_map_settle_for: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, collection: Int, map: Int) Never! {
     row: b.f.slot_type[map]
     shape: ir_keyed_shape(m, p, row) ?? return
-    if !ir_map_hashed(shape) -> return
+    if !ir_map_hashed(shape) {
+        return
+    }
     if ir_body_node(p, b, collection).kind == .Local(local) {
         binding: ir_lookup_local(b, local) ?? return
-        if binding.slot != map || binding.indirect >= 0 -> return
-        owner: local.mutable && binding.owned && binding.live < 0
-        if owner || binding.write {
-            _: ir_map_call(m, p, b, row, "map.settle", [Int]{map}, -1)
+        if binding.slot != map || binding.indirect >= 0 {
+            return
         }
+        owner: local.mutable && binding.owned && binding.live < 0
+        if owner || binding.write -> _: ir_map_call(m, p, b, row, "map.settle", [Int]{map}, -1)
     }
 }
 
@@ -1861,9 +1938,7 @@ ir_map_walk_take: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, map: Int, span: 
     b.fresh[holder] = false
     b.bindings.push(IRBinding{name: "", slot: holder, owned: true})
     ir_make_unique(m, p, b, holder)
-    if ir_map_hashed(shape) {
-        _: ir_map_call(m, p, b, row, "map.settle", [Int]{holder}, -1)
-    }
+    if ir_map_hashed(shape) -> _: ir_map_call(m, p, b, row, "map.settle", [Int]{holder}, -1)
     ir_map_reverse_entries(m, b, shape, holder)
     glue: ir_map_rest_glue(m, p, b, row, shape, span)
     if glue >= 0 {
@@ -2038,17 +2113,23 @@ ir_map_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: 
         return Val(ir_bool_op(m, b, IROp.Eq, length, zero))
     }
     if symbol == "jet_map_keys" || symbol == "jet_map_values" {
-        if operands.len() != 1 -> return Val(ir_fail_slot(b, span, "Map {symbol} with {operands.len() - 1} arguments"))
+        if operands.len() != 1 {
+            return Val(ir_fail_slot(b, span, "Map {symbol} with {operands.len() - 1} arguments"))
+        }
         return Val(ir_map_view(m, p, b, ty, shape, subject, symbol == "jet_map_keys", span))
     }
     if symbol == "jet_map_top_n" {
-        if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(b, span, "Map top_n without a count"))
+        if operands.len() != 2 || operands[1] < 0 {
+            return Val(ir_fail_slot(b, span, "Map top_n without a count"))
+        }
         return Val(ir_map_top_n(m, p, b, ty, shape, subject, operands[1], span))
     }
     // `clear()`: each entry drops and the map is left empty; its buffer stays
     // for later inserts, as the priority queue's `clear` does.
     if symbol == "std::collections::HashMap::clear" {
-        if operands.len() != 1 -> return Val(ir_fail_slot(b, span, "Map clear with {operands.len() - 1} arguments"))
+        if operands.len() != 1 {
+            return Val(ir_fail_slot(b, span, "Map clear with {operands.len() - 1} arguments"))
+        }
         if m.types[shape.entry].drop != "" {
             walk: ir_walk_open(m, b, subject, shape.entry)
             ir_emit(b.f, IROp.Drop, -1, walk.item, -1, -1, b.line)
@@ -2063,7 +2144,9 @@ ir_map_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: 
     // receiver with each entry of `other` set as a copy: the right side wins
     // (each key once, so the walk's order is never seen).
     if symbol == "jet_map_equal" || symbol == "jet_map_merge" {
-        if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(b, span, "Map {symbol} with {operands.len() - 1} arguments"))
+        if operands.len() != 2 || operands[1] < 0 {
+            return Val(ir_fail_slot(b, span, "Map {symbol} with {operands.len() - 1} arguments"))
+        }
         other: ir_adapt(m, p, b, operands[1], row, span)
         if ir_failed(b) -> return Val(-1)
         if symbol == "jet_map_equal" {
@@ -2100,11 +2183,15 @@ ir_map_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: 
         return Val(-1)
     }
     if symbol == "jet_map_first_key" || symbol == "jet_map_min_value_kernel" || symbol == "jet_map_max_value_kernel" {
-        if operands.len() != 1 -> return Val(ir_fail_slot(b, span, "Map {symbol} with {operands.len() - 1} arguments"))
+        if operands.len() != 1 {
+            return Val(ir_fail_slot(b, span, "Map {symbol} with {operands.len() - 1} arguments"))
+        }
         return Val(ir_map_pick(m, p, b, ty, shape, subject, symbol, span))
     }
     if symbol == "jet_map_merge_with" {
-        if operands.len() != 3 || operands[1] < 0 || operands[2] < 0 -> return Val(ir_fail_slot(b, span, "Map merge_with with {operands.len() - 1} arguments"))
+        if operands.len() != 3 || operands[1] < 0 || operands[2] < 0 {
+            return Val(ir_fail_slot(b, span, "Map merge_with with {operands.len() - 1} arguments"))
+        }
         other: ir_adapt(m, p, b, operands[1], row, span)
         if ir_failed(b) -> return Val(-1)
         return Val(ir_map_merge_with(m, p, b, shape, row, subject, other, operands[2], span))
@@ -2112,10 +2199,14 @@ ir_map_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: 
     // `to_list()` / `items()`: the `(key, value)` entries in key order, as
     // copies.
     if symbol == "jet_map_to_list" {
-        if operands.len() != 1 -> return Val(ir_fail_slot(b, span, "Map to_list with {operands.len() - 1} arguments"))
+        if operands.len() != 1 {
+            return Val(ir_fail_slot(b, span, "Map to_list with {operands.len() - 1} arguments"))
+        }
         result_row: ir_value_type(m, p, ty) ?? return Val(ir_type_fail(b, span, ty))
         result: ir_list_empty(m, b, result_row)
-        if ir_list_element(m, p, b, result) != Val(shape.entry) -> return Val(ir_fail_slot(b, span, "Map to_list entries as {ir_type_name(ty)}"))
+        if ir_list_element(m, p, b, result) != Val(shape.entry) {
+            return Val(ir_fail_slot(b, span, "Map to_list entries as {ir_type_name(ty)}"))
+        }
         ordered: ir_map_ordered(m, p, b, subject)
         walk: ir_walk_open(m, b, ordered, shape.entry)
         ir_list_push(m, p, b, result, shape.entry, walk.item)
@@ -2126,7 +2217,9 @@ ir_map_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: 
     // `intersection(other)`: a new Map of copies of the receiver's entries
     // whose key `other` holds too.
     if symbol == "jet_map_intersection" {
-        if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(b, span, "Map intersection without an operand"))
+        if operands.len() != 2 || operands[1] < 0 {
+            return Val(ir_fail_slot(b, span, "Map intersection without an operand"))
+        }
         other: ir_adapt(m, p, b, operands[1], row, span)
         if ir_failed(b) -> return Val(-1)
         target: ir_list_empty(m, b, row)
@@ -2146,7 +2239,9 @@ ir_map_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: 
     }
     // `contains_value(v)`: whether an entry's value equals `v`.
     if symbol == "jet_map_contains_value" {
-        if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(b, span, "Map contains_value without a value"))
+        if operands.len() != 2 || operands[1] < 0 {
+            return Val(ir_fail_slot(b, span, "Map contains_value without a value"))
+        }
         needle: ir_adapt(m, p, b, operands[1], shape.value.ty, span)
         if ir_failed(b) -> return Val(-1)
         bool_row: ir_type_row(m, Type.Bool) ?? 0
@@ -2167,7 +2262,9 @@ ir_map_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: 
     // `pop_first()`: the least key's entry leaves the map, its value the
     // result; None when the map is empty.
     if symbol == "jet_map_pop_first" {
-        if operands.len() != 1 -> return Val(ir_fail_slot(b, span, "Map pop_first with {operands.len() - 1} arguments"))
+        if operands.len() != 1 {
+            return Val(ir_fail_slot(b, span, "Map pop_first with {operands.len() - 1} arguments"))
+        }
         option_row: ir_value_type(m, p, Type.Option{inner: shape.value_ty}) ?? return Val(ir_fail_slot(b, span, "map builtin {symbol} result"))
         result: ir_fresh_temp(m, b, option_row)
         ir_option_none(m, b, result)
@@ -2201,10 +2298,14 @@ ir_map_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: 
     }
     // `slice(keys)`: a new Map of copies of the entries under the listed keys.
     if symbol == "jet_map_slice_keys_kernel" {
-        if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(b, span, "Map slice without keys"))
+        if operands.len() != 2 || operands[1] < 0 {
+            return Val(ir_fail_slot(b, span, "Map slice without keys"))
+        }
         keys: operands[1]
         keys_name: ir_type_name(m.types[b.f.slot_type[keys]].ty)
-        if ir_list_element(m, p, b, keys) != Val(shape.key.ty) -> return Val(ir_fail_slot(b, span, "Map slice keys of {keys_name}"))
+        if ir_list_element(m, p, b, keys) != Val(shape.key.ty) {
+            return Val(ir_fail_slot(b, span, "Map slice keys of {keys_name}"))
+        }
         target: ir_list_empty(m, b, row)
         word_row: ir_word_row(m)
         walk: ir_walk_open(m, b, keys, shape.key.ty)
@@ -2231,7 +2332,9 @@ ir_map_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: 
     if ir_failed(b) -> return Val(-1)
     option_row: ir_value_type(m, p, Type.Option{inner: shape.value_ty}) ?? return Val(ir_fail_slot(b, span, "map builtin {symbol} result"))
     if symbol == "jet_map_insert" {
-        if operands.len() != 3 || operands[2] < 0 -> return Val(ir_fail_slot(b, span, "map insert without a value"))
+        if operands.len() != 3 || operands[2] < 0 {
+            return Val(ir_fail_slot(b, span, "map insert without a value"))
+        }
         value: ir_adapt(m, p, b, operands[2], shape.value.ty, span)
         owned_key: ir_own(m, p, b, key)
         owned_value: ir_own(m, p, b, value)
@@ -2250,7 +2353,6 @@ ir_map_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: 
         }
         err_ty: if ir_untag(ty) == .Result(_, err) -> err else -> {
             return Val(ir_fail_slot(b, span, "try_insert without its checked Result"))
-
         }
         result_row: ir_value_type(m, p, ty) ?? return Val(ir_type_fail(b, span, ty))
         value: ir_adapt(m, p, b, operands[2], shape.value.ty, span)
@@ -2290,7 +2392,9 @@ ir_map_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: 
     // missing; the copies made for the insert are dropped when the key is
     // there.
     if symbol == "jet_map_add_new" {
-        if operands.len() != 3 || operands[2] < 0 -> return Val(ir_fail_slot(b, span, "map add_new without a value"))
+        if operands.len() != 3 || operands[2] < 0 {
+            return Val(ir_fail_slot(b, span, "map add_new without a value"))
+        }
         value: ir_adapt(m, p, b, operands[2], shape.value.ty, span)
         if ir_failed(b) -> return Val(-1)
         owned_key: ir_own(m, p, b, key)
@@ -2363,7 +2467,9 @@ ir_map_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: 
 ir_map_view: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMapShape, map: Int, keys: Bool, span: Span) -> Int Never! {
     member: if keys -> shape.key else -> shape.value
     item_ty: m.types[member.ty].ty
-    if m.types[member.ty].kind == .Unit -> return ir_fail_slot(b, span, "Map view of {ir_type_name(item_ty)}")
+    if m.types[member.ty].kind == .Unit {
+        return ir_fail_slot(b, span, "Map view of {ir_type_name(item_ty)}")
+    }
     result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     list_row: ir_value_type(m, p, Type.List{element: item_ty}) ?? return ir_fail_slot(b, span, "type [{ir_type_name(item_ty)}]")
     items: ir_list_empty(m, b, list_row)
@@ -2385,7 +2491,9 @@ ir_map_pick: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMa
     keyed: symbol == "jet_map_first_key"
     member: if keyed -> shape.key else -> shape.value
     kind: ir_map_key_kind(m, member.ty)
-    if !keyed && kind == "" -> return ir_fail_slot(b, span, "Map {symbol} of {ir_type_name(shape.value_ty)} values")
+    if !keyed && kind == "" {
+        return ir_fail_slot(b, span, "Map {symbol} of {ir_type_name(shape.value_ty)} values")
+    }
     result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     pointer_row: ir_pointer_row(m)
     result: ir_fresh_temp(m, b, result_row)
@@ -2470,10 +2578,14 @@ ir_map_merge_with: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapSha
 // O(keep) extra words.
 ir_map_top_n: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMapShape, map: Int, count: Int, span: Span) -> Int Never! {
     value_kind: ir_map_key_kind(m, shape.value.ty)
-    if value_kind == "" || shape.stride %% 8 != 0 -> return ir_fail_slot(b, span, "Map top_n over {ir_type_name(shape.value_ty)} values is not lowered at O0 yet")
+    if value_kind == "" || shape.stride %% 8 != 0 {
+        return ir_fail_slot(b, span, "Map top_n over {ir_type_name(shape.value_ty)} values is not lowered at O0 yet")
+    }
     result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     result: ir_list_empty(m, b, result_row)
-    if ir_list_element(m, p, b, result) != Val(shape.entry) -> return ir_fail_slot(b, span, "Map top_n entries as {ir_type_name(ty)}")
+    if ir_list_element(m, p, b, result) != Val(shape.entry) {
+        return ir_fail_slot(b, span, "Map top_n entries as {ir_type_name(ty)}")
+    }
     limit: ir_native_index(m, b, count, span)
     if ir_failed(b) -> return -1
     word_row: ir_word_row(m)
@@ -2652,10 +2764,14 @@ ir_map_top_sink: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapShape
 ir_map_from_keys: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, keys: Int, fallback: Int, result: Type, span: Span) -> Int Never! {
     row: ir_value_type(m, p, result) ?? return ir_type_fail(b, span, result)
     shape: ir_map_shape(m, p, row) ?? return ir_fail_slot(b, span, "Map.from_keys into {ir_type_name(result)} is not lowered at O0 yet")
-    if m.types[shape.value.ty].kind == .Unit -> return ir_fail_slot(b, span, "Map.from_keys with a {ir_type_name(shape.value_ty)} default is not lowered at O0 yet")
+    if m.types[shape.value.ty].kind == .Unit {
+        return ir_fail_slot(b, span, "Map.from_keys with a {ir_type_name(shape.value_ty)} default is not lowered at O0 yet")
+    }
     keys_ty: m.types[b.f.slot_type[keys]].ty
     key_element: ir_list_element(m, p, b, keys)
-    if key_element != Val(shape.key.ty) -> return ir_fail_slot(b, span, "Map.from_keys over {ir_type_name(keys_ty)}")
+    if key_element != Val(shape.key.ty) {
+        return ir_fail_slot(b, span, "Map.from_keys over {ir_type_name(keys_ty)}")
+    }
     value: ir_adapt(m, p, b, fallback, shape.value.ty, span)
     if ir_failed(b) -> return -1
     // Every entry takes a copy: the default itself stays the caller's.

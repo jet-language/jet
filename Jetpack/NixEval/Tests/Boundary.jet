@@ -1,20 +1,37 @@
 // Oracle manifest, pinned inventory and internal stage claims.
-use jetpack_nix_eval.[
-    NIXEVAL_NIXPKGS_LAST_MODIFIED, NIXEVAL_NIXPKGS_NAR_HASH, NIXEVAL_NIXPKGS_REVISION,
-    NIXEVAL_NIX_SOURCE_COMMIT, NIXEVAL_NIX_TAG_OBJECT, NIXEVAL_NIX_VERSION, NIXEVAL_ORACLE_JSON,
-    NixEvalError, NixEvalInternalHarness, NixEvalInternalStage, NixEvalInventoryStatus,
-    NixEvalOracleIdentity, NixEvalOracleManifest, nixeval_budget, nixeval_find, nixeval_is_blank,
-    nixeval_pinned_inventory, nixeval_required_systems,
-    nixeval_slice,
-]
-use nixeval_test_core_json: core.encoding.json
+use {
+    jetpack_nix_eval.[
+        NIXEVAL_NIXPKGS_LAST_MODIFIED,
+        NIXEVAL_NIXPKGS_NAR_HASH,
+        NIXEVAL_NIXPKGS_REVISION,
+        NIXEVAL_NIX_SOURCE_COMMIT,
+        NIXEVAL_NIX_TAG_OBJECT,
+        NIXEVAL_NIX_VERSION,
+        NIXEVAL_ORACLE_JSON,
+        NixEvalError,
+        NixEvalInternalHarness,
+        NixEvalInternalStage,
+        NixEvalInventoryStatus,
+        NixEvalOracleIdentity,
+        NixEvalOracleManifest,
+        nixeval_budget,
+        nixeval_find,
+        nixeval_is_blank,
+        nixeval_pinned_inventory,
+        nixeval_required_systems,
+        nixeval_slice,
+    ]
+    nixeval_test_core_json: core.encoding.json
+}
 
 NIXEVAL_TEST_ZERO_SRI: "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
 NIXEVAL_TEST_X86_64_LINUX_BUILD: "sha256-CM7sAhHMOi6XW7Ly1Z3ASuPzMWyz828sLRpLyt7r47Y="
+
 NIXEVAL_TEST_X86_64_LINUX_EXECUTABLE: "sha256-VdvAPujI/c6bKKSPQK+Q1dtICYEqzljvR19Ld+Ht3sQ="
 
 // tests/fixtures/nix-compat/pinned-inventory.json
-NIXEVAL_TEST_PINNED_INVENTORY_JSON: #run { ``{
+NIXEVAL_TEST_PINNED_INVENTORY_JSON: #run { `{
   "schema": 1,
   "nix_version": "2.34.8",
   "nixpkgs_revision": "b5aa0fbd538984f6e3d201be0005b4463d8b09f8",
@@ -40,7 +57,7 @@ NIXEVAL_TEST_PINNED_INVENTORY_JSON: #run { ``{
     {"surface": "ifd", "status": "skipped", "class": "skipped", "reason": "import-from-derivation requires a separate authority grant"}
   ]
 }
-`` }
+` }
 
 // Replace the first occurrence of `needle` (Rust `replacen(needle, with, 1)`).
 nixeval_replace_first: fn(text: String, needle: String, replacement: String) -> String Never! {
@@ -112,9 +129,7 @@ nixeval_test_manifest_reason: fn(error: NixEvalError) -> String {
 #Test("nixeval partial stage authority is minted inside seam tests") {
     harness: NixEvalInternalHarness{}
     stages: [NixEvalInternalStage]{.Syntax, .Values, .Evaluation, .Authority, .Derivation, .Flakes}
-    loop stage in stages {
-        assert_eq(harness.authorize(stage).stage, stage)
-    }
+    loop stage in stages { assert_eq(harness.authorize(stage).stage, stage) }
 }
 
 #Test("nixeval embedded pin is exact and missing build identity blocks") {
@@ -183,7 +198,7 @@ nixeval_test_manifest_reason: fn(error: NixEvalError) -> String {
     }
     loop malformed in malformed_values {
         if NixEvalOracleIdentity.new("x86_64-linux", malformed, NIXEVAL_TEST_ZERO_SRI) == {
-            .Ok(_) -> panic("malformed SRI must be rejected")
+            .Ok(_) -> { panic("malformed SRI must be rejected") }
             .Err(error) -> assert_eq(error, NixEvalError.MalformedSRI("build_nar_hash"))
         }
         changed: nixeval_replace_first(NIXEVAL_ORACLE_JSON, "\"build_nar_hash\": \"sha256-CM7sAhHMOi6XW7Ly1Z3ASuPzMWyz828sLRpLyt7r47Y=\"", "\"build_nar_hash\": \"{malformed}\"")
@@ -218,10 +233,12 @@ nixeval_test_manifest_reason: fn(error: NixEvalError) -> String {
     loop index in 0..<inventory.len() {
         entry: inventory[index]
         if entry.status == {
-            .Covered -> covered += 1
+            .Covered -> { covered += 1 }
             .Skipped -> skipped += 1
         }
-        if entry.surface == "devshells" && entry.status == NixEvalInventoryStatus.Covered -> devshells_covered = true
+        if entry.surface == "devshells" && entry.status == NixEvalInventoryStatus.Covered {
+            devshells_covered = true
+        }
         fields: nixeval_test_object(document, entries[index])
         assert_eq(nixeval_test_text(document, fields, "surface"), entry.surface)
         assert_eq(nixeval_test_text(document, fields, "status"), entry.status.label())

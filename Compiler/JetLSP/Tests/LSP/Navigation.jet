@@ -40,7 +40,9 @@ lsp_test_ranges: fn(rows: [Dyn]) -> [String] Never! {
     server := lsp_test_main_server()
     rows: lsp_test_rows(lsp_test_result(server, "textDocument/documentHighlight", lsp_test_at(LSP_TEST_MAIN_URI, 5, 4)))
     kinds := [String]{}
-    loop row in rows -> kinds.push("{lsp_test_range(lsp_test_field(row, "range"))}={lsp_test_int(row, "kind")}")
+    loop row in rows {
+        kinds.push("{lsp_test_range(lsp_test_field(row, "range"))}={lsp_test_int(row, "kind")}")
+    }
     kinds.sort()
     assert_eq(kinds, [String]{"0:0-0:3=3", "5:11-5:14=2", "5:4-5:7=2"})
 }
@@ -74,7 +76,9 @@ lsp_test_ranges: fn(rows: [Dyn]) -> [String] Never! {
     signature: lsp_test_rows(lsp_test_field(help, "signatures"))[0]
     assert(lsp_test_text(signature, "label").contains("add"), "the signature names `add`")
     parameters := [String]{}
-    loop parameter in lsp_test_rows(lsp_test_field(signature, "parameters")) -> parameters.push(lsp_test_text(parameter, "label"))
+    loop parameter in lsp_test_rows(lsp_test_field(signature, "parameters")) {
+        parameters.push(lsp_test_text(parameter, "label"))
+    }
     assert_eq(parameters, [String]{"left: Int", "right: Int"})
     // Inside the inner call's parentheses its first parameter is active.
     inner: lsp_test_result(server, "textDocument/signatureHelp", lsp_test_at(LSP_TEST_MAIN_URI, 5, 15))

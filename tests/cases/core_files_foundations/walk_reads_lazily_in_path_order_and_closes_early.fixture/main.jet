@@ -36,7 +36,8 @@ build: fn(root: String) -[FS]> {
     loop directory in ["a/b", "a.b", "deep/1/2/3/4", "empty", "locked/inner", "wide"] {
         files.create_dir_all(files.join(root, directory)) ?? panic("mkdir {directory}")
     }
-    loop file in ["a/x", "a/b/y", "a.b/f", "a-b", "ab", "B", "top", "deep/1/2/3/4/leaf", "locked/inner/hidden"] {
+    loop file in
+        ["a/x", "a/b/y", "a.b/f", "a-b", "ab", "B", "top", "deep/1/2/3/4/leaf", "locked/inner/hidden"] {
         files.write(files.join(root, file), file) ?? panic("write {file}")
     }
     // Names around each subtree key: `-` and `.` sort before `/`.
@@ -112,7 +113,7 @@ run: fn() {
 
     // `.list()` collects every entry or stops at the first error.
     if files.walk(root).list() == {
-        .Ok(_) -> print("list: every entry")
+        .Ok(_) -> { print("list: every entry") }
         .Err(_) -> print("list: the first error")
     }
     files.set_mode(locked, 0o755) ?? panic("unlock")

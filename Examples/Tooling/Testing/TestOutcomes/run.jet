@@ -11,6 +11,7 @@ Push: enum {
 }
 
 same: fn(value: Dyn) -> Dyn { value.copy() }
+
 off_by_one: fn(value: Dyn) -> Dyn {
     if value == .Int(number) -> return Dyn.Int(number + 1)
     value.copy()
@@ -41,13 +42,13 @@ run: fn() {
     stream := random.rng(7)
     drifting_model: fn(commands: [Push]) -> Dyn { Dyn.Int(stream.int(0, 1000000)) }
     if testing.histories<Push>(seed: 1, cases: 3, model: drifting_model, actual: total, observe: observe) == {
-        .Ok(comparison) -> show("drifting model", comparison)
+        .Ok(comparison) -> { show("drifting model", comparison) }
         .Err(error) -> print("drifting model: {error.message}")
     }
     other := random.rng(7)
     drifting_candidate: fn(commands: [Push]) -> Dyn { Dyn.Int(other.int(0, 1000000)) }
     if testing.histories<Push>(seed: 1, cases: 3, model: total, actual: drifting_candidate, observe: observe) == {
-        .Ok(comparison) -> show("drifting candidate", comparison)
+        .Ok(comparison) -> { show("drifting candidate", comparison) }
         .Err(error) -> print("drifting candidate: {error.message}")
     }
 }

@@ -8,12 +8,18 @@ use jet_foundation.[BodyUnitRounding, Dimension, Span, Type, measure_signed_valu
 // "numerator/denominator" ratio). The identity conversion is the value
 // itself. A fallible conversion is checked exactly (ir_unit_convert_checked).
 ir_unit_convert: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, argument: Int, scale: String, offset: String, rounding: BodyUnitRounding?, fallible: Bool, span: Span) -> Int Never! {
-    if fallible -> return ir_unit_convert_checked(m, p, b, ty, argument, scale, offset, rounding, span)
-    if rounding != None -> return ir_fail_slot(b, span, "infallible rounded unit conversion to {ir_type_name(ty)}")
+    if fallible {
+        return ir_unit_convert_checked(m, p, b, ty, argument, scale, offset, rounding, span)
+    }
+    if rounding != None {
+        return ir_fail_slot(b, span, "infallible rounded unit conversion to {ir_type_name(ty)}")
+    }
     value: ir_expr(m, p, b, argument)
     if ir_failed(b) -> return -1
     if scale == "1/1" && offset == "0/1" -> return value
-    if ir_kind_of(m, b, value) != .Float -> return ir_fail_slot(b, span, "unit conversion to {ir_type_name(ty)}")
+    if ir_kind_of(m, b, value) != .Float {
+        return ir_fail_slot(b, span, "unit conversion to {ir_type_name(ty)}")
+    }
     parts: scale.split("/").to_list()
     if parts.len() != 2 -> return ir_fail_slot(b, span, "unit scale {scale}")
     scaled := value
@@ -142,7 +148,9 @@ ir_unit_member_label: fn(p: IRProgram, name: String) -> String? Never! {
                 minted: unit_family_type_name(member)
                 if !type_name.starts_with(minted) -> next
                 rest: type_name.len() - minted.len()
-                if rest == 0 || (rest == 5 && (type_name.ends_with("Point") || type_name.ends_with("Delta"))) -> return Val(member)
+                if rest == 0 || (rest == 5 && (type_name.ends_with("Point") || type_name.ends_with("Delta"))) {
+                    return Val(member)
+                }
             }
         }
     }

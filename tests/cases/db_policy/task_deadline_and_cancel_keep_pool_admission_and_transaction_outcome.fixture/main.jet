@@ -10,14 +10,22 @@ package: {
     authority: { allow: [DB, DB.Read, DB.Write, IO, Mem.Alloc, Time, Time.Wait] }
 }
 
-use db: core.db
-use time: core.time
+use {
+    db: core.db
+    time: core.time
+}
 
 label: fn(error: TaskFailure) -> String {
     if error == {
-        .Panicked(reason) -> { return "panicked: {reason}" }
-        .DeadlineBlown -> { return "deadline" }
-        .Cancelled -> { return "cancelled" }
+        .Panicked(reason) -> {
+            return "panicked: {reason}"
+        }
+        .DeadlineBlown -> {
+            return "deadline"
+        }
+        .Cancelled -> {
+            return "cancelled"
+        }
     }
 }
 
@@ -70,7 +78,7 @@ run: fn() {
     waiter: waiter_under_deadline(pool, s1)
     _: r1.receive() ?? panic("no start")
     if waiter.join() == {
-        .Ok(outcome) -> print("waiter under a 40ms task deadline: {outcome}")
+        .Ok(outcome) -> { print("waiter under a 40ms task deadline: {outcome}") }
         .Err(error) -> print("waiter under a 40ms task deadline: {label(error)}")
     }
     print("pool timeouts after it: {pool.receipt().timeouts}")
@@ -92,7 +100,7 @@ run: fn() {
     _: r3.receive() ?? panic("no writer")
     writer.cancel()
     if writer.join() == {
-        .Ok(outcome) -> print("writer: {outcome}")
+        .Ok(outcome) -> { print("writer: {outcome}") }
         .Err(error) -> print("writer: {label(error)}")
     }
     print("rows after the cancelled writer: {count(scope)}")

@@ -8,15 +8,15 @@ Reject: enum {
 
 each: fn(values: [Int], handler: fn(Int) -> Int Reject!) -> Int {
     total := 0
-    loop value in values {
-        total += handler(value) ?? 1
-    }
+    loop value in values -> total += handler(value) ?? 1
     total
 }
 
 run: fn() {
-    print(each([2, 3, 4], fn(value: Int) {
-        if value % 2 == 1 { return Err(Reject.Odd) }
-        return Ok(value * 10)
-    }))
+    print(
+        each([2, 3, 4], fn(value: Int) {
+            if value % 2 == 1 -> return Err(Reject.Odd)
+            return Ok(value * 10)
+        }),
+    )
 }

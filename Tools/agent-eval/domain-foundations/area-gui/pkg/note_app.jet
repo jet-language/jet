@@ -48,18 +48,20 @@ run: fn() {
             ui.button("Toggle theme", on_click: fn() { print("button: Toggle theme") }),
             ui.node_color("SETTINGS ({settings.get()})", 72.0, 1.0, Color{r: 243, g: 240, b: 232, a: 255}),
             ui.text("Shortcuts: Ctrl+S · Ctrl+Z · Ctrl+Shift+Z · Ctrl+,"),
-            ui.text("Accessible labels: Save, Undo, Redo, Toggle theme, Editor")
+            ui.text("Accessible labels: Save, Undo, Redo, Toggle theme, Editor"),
         }
         ui.mount(render_backend, ui.box(rows))
     })
 
     print("loaded bytes: {loaded_len}")
     print("focus before mount: {backend.focused_label()}")
-    backend.set_focus_group([
-        ui.node_role("Save", 10.0, 1.0, ui.aria_role_button()),
-        ui.node_role("Editor", 40.0, 3.0, ui.aria_role_text_input()),
-        ui.node_role("Toggle theme", 16.0, 1.0, ui.aria_role_button())
-    ])
+    backend.set_focus_group(
+        [
+            ui.node_role("Save", 10.0, 1.0, ui.aria_role_button()),
+            ui.node_role("Editor", 40.0, 3.0, ui.aria_role_text_input()),
+            ui.node_role("Toggle theme", 16.0, 1.0, ui.aria_role_button()),
+        ],
+    )
     print("focus initial: {backend.focused_label()}")
     _tab_result: backend.on_event(ui.key_event("Tab"))
     print("tab result: handled")

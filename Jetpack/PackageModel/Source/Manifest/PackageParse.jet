@@ -3,13 +3,30 @@
 use {
     jet_foundation.[ModuleLayer, Span, jet_ring_parse_manifest_layer, log_filter_bad_pair]
     jet_lexer.[
-        Lexed, TOKEN_BLOCK_COMMENT, TOKEN_DOT, TOKEN_EOF, TOKEN_LBRACE, TOKEN_LINE_COMMENT, Token, lex,
+        Lexed,
+        TOKEN_BLOCK_COMMENT,
+        TOKEN_DOT,
+        TOKEN_EOF,
+        TOKEN_LBRACE,
+        TOKEN_LINE_COMMENT,
+        Token,
+        lex,
     ]
     jetpack_foundation.[
-        BUILD_ENTRY_FN, MANIFEST_BLOCK_AUTHORITY, MANIFEST_BLOCK_BOUNDARIES, MANIFEST_BLOCK_BUILD,
-        MANIFEST_BLOCK_DEPS, MANIFEST_BLOCK_MEMBERS, MANIFEST_BLOCK_OUTPUTS, MANIFEST_BLOCK_SETTINGS,
-        MANIFEST_FIELD_NAME, MANIFEST_FIELD_VERSION, OUTPUT_FIELD_BINDINGS, OUTPUT_FIELD_LOADABLE,
-        OUTPUT_FIELD_NATIVE, SYSTEM_FIELD_TARGET,
+        BUILD_ENTRY_FN,
+        MANIFEST_BLOCK_AUTHORITY,
+        MANIFEST_BLOCK_BOUNDARIES,
+        MANIFEST_BLOCK_BUILD,
+        MANIFEST_BLOCK_DEPS,
+        MANIFEST_BLOCK_MEMBERS,
+        MANIFEST_BLOCK_OUTPUTS,
+        MANIFEST_BLOCK_SETTINGS,
+        MANIFEST_FIELD_NAME,
+        MANIFEST_FIELD_VERSION,
+        OUTPUT_FIELD_BINDINGS,
+        OUTPUT_FIELD_LOADABLE,
+        OUTPUT_FIELD_NATIVE,
+        SYSTEM_FIELD_TARGET,
     ]
 }
 
@@ -19,7 +36,9 @@ impl PackageFacts {
     parse: fn(text: String, origin: String) -> PackageFacts PackageParseError! {
         facts: PackageFacts.parse_uncomposed(text, origin)
         facts.validate_guarantees()
-        if facts.validate_defaults() == .Err(error) -> return Err(PackageParseError.Composition(error.message()))
+        if facts.validate_defaults() == .Err(error) {
+            return Err(PackageParseError.Composition(error.message()))
+        }
         Ok(facts)
     }
 
@@ -64,7 +83,9 @@ impl ConfigFacts {
                 body = wrapper.value
             }
             .None -> {
-                if stripped.trim_start().starts_with("Config") -> body = pkg_record_body(stripped.trim(), "Config")
+                if stripped.trim_start().starts_with("Config") {
+                    body = pkg_record_body(stripped.trim(), "Config")
+                }
             }
         }
         facts: pkg_parse_common(body, origin, true)
@@ -83,7 +104,9 @@ pkg_retired_record_head_spans: fn(text: String) -> [Span] Never! {
     tokens: lexed.tokens
     spans := [Span]{}
     loop index in 1..<tokens.len() {
-        if tokens[index - 1].kind == TOKEN_DOT && tokens[index].kind == TOKEN_LBRACE -> spans.push(tokens[index - 1].span)
+        if tokens[index - 1].kind == TOKEN_DOT && tokens[index].kind == TOKEN_LBRACE {
+            spans.push(tokens[index - 1].span)
+        }
     }
     spans
 }
@@ -95,7 +118,9 @@ pkg_manifest_lexed: fn(text: String) -> Lexed? Never! {
     if lexed.diagnostics.len() > 0 -> return None
     tokens := [Token]{}
     loop token in lexed.tokens {
-        if token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT || token.kind == TOKEN_EOF -> next
+        if token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT || token.kind == TOKEN_EOF {
+            next
+        }
         tokens.push(token)
     }
     lexed.tokens = tokens.move()
@@ -108,7 +133,9 @@ pkg_manifest_lexed: fn(text: String) -> Lexed? Never! {
 pkg_parse_common: fn(text: String, origin: String, config: Bool) -> PackageFacts PackageParseError! {
     markers: if config -> [PackageMarker]{} else -> pkg_package_markers(text)
     record: pkg_package_markers_masked(text, markers)
-    if pkg_retired_record_head_spans(record).len() > 0 -> return Err(PackageParseError.RetiredRecordHead)
+    if pkg_retired_record_head_spans(record).len() > 0 {
+        return Err(PackageParseError.RetiredRecordHead)
+    }
     facts := PackageFacts.default()
     facts.origin = origin
     facts.markers = markers
@@ -118,7 +145,9 @@ pkg_parse_common: fn(text: String, origin: String, config: Bool) -> PackageFacts
     loop entry in pkg_top_level_entries(pkg_strip_comments(record)) {
         if !config {
             if pkg_config_wrapper(entry) == .Val(wrapper) {
-                if inline_names.contains(wrapper.key) -> return Err(PackageParseError.Composition("inline Config `{wrapper.key}` is declared more than once"))
+                if inline_names.contains(wrapper.key) {
+                    return Err(PackageParseError.Composition("inline Config `{wrapper.key}` is declared more than once"))
+                }
                 inline_names.push(wrapper.key)
                 contribution: ConfigFacts.parse(entry, "{facts.origin}::{wrapper.key}")
                 inline.push(InlineConfigDecl{name: wrapper.key, facts: contribution})
@@ -132,13 +161,17 @@ pkg_parse_common: fn(text: String, origin: String, config: Bool) -> PackageFacts
         field: found.key
         value: found.value
         if seen.contains(field) {
-            if field == MANIFEST_BLOCK_AUTHORITY -> return Err(PackageParseError.BadEffectsBlock("malformed `authority:` block: declared more than once"))
+            if field == MANIFEST_BLOCK_AUTHORITY {
+                return Err(PackageParseError.BadEffectsBlock("malformed `authority:` block: declared more than once"))
+            }
             return Err(PackageParseError.Composition("`{field}` is declared more than once"))
         }
         seen.push(field.copy())
         if value.starts_with("Output.") {
             output: pkg_parse_output_value(field, value.removeprefix("Output.").trim())
-            if facts.outputs.has_key(field) -> return Err(PackageParseError.Composition("output `{field}` is declared more than once"))
+            if facts.outputs.has_key(field) {
+                return Err(PackageParseError.Composition("output `{field}` is declared more than once"))
+            }
             facts.outputs[field] = output
             pkg_record_output_provenance(facts.provenance, "outputs.{field}", facts.origin, output)
             next
@@ -148,7 +181,9 @@ pkg_parse_common: fn(text: String, origin: String, config: Bool) -> PackageFacts
         pkg_record_declared_provenance(facts, field, declared_origin)
     }
     loop declared in inline {
-        if pkg_merge_config(facts, declared.facts) == .Err(error) -> return Err(PackageParseError.Composition(error.message()))
+        if pkg_merge_config(facts, declared.facts) == .Err(error) {
+            return Err(PackageParseError.Composition(error.message()))
+        }
         facts.inline_configs[declared.name] = declared.facts
     }
     if !config -> facts.validate_test_profiles()
@@ -164,7 +199,9 @@ InlineConfigDecl: struct {
 impl PackageFacts {
     // Apply one top-level `field: value` of a Package (or Config) carrier.
     apply_field: fn(&self, field: String, value: String, config: Bool) PackageParseError! {
-        if config && pkg_package_only_field(field) -> return Err(PackageParseError.UnknownField(field))
+        if config && pkg_package_only_field(field) {
+            return Err(PackageParseError.UnknownField(field))
+        }
         if field == {
             MANIFEST_FIELD_NAME -> self.name = pkg_scalar(value)
             MANIFEST_FIELD_VERSION -> self.version = Val(pkg_scalar(value))
@@ -179,7 +216,9 @@ impl PackageFacts {
             "allocator" -> self.allocator = pkg_parse_program_allocator(value)
             "log" -> {
                 raw: pkg_scalar(value)
-                if log_filter_bad_pair(raw) == .Val(pair) -> return Err(PackageParseError.InvalidValue{field: "log", value: pair})
+                if log_filter_bad_pair(raw) == .Val(pair) {
+                    return Err(PackageParseError.InvalidValue{field: "log", value: pair})
+                }
                 self.log = Val(raw.trim())
             }
             "runtime" -> {
@@ -206,7 +245,9 @@ impl PackageFacts {
                 loop name in pkg_manifest_sorted(parsed.keys().to_list()) {
                     if self.outputs.get(name) == {
                         .Val(existing) -> {
-                            if existing != parsed[name] -> return Err(PackageParseError.Composition("output `{name}` is declared with conflicting values: {pkg_debug_output(existing)} and {pkg_debug_output(parsed[name])}"))
+                            if existing != parsed[name] {
+                                return Err(PackageParseError.Composition("output `{name}` is declared with conflicting values: {pkg_debug_output(existing)} and {pkg_debug_output(parsed[name])}"))
+                            }
                         }
                         .None -> self.outputs[name] = parsed[name]
                     }
@@ -221,7 +262,9 @@ impl PackageFacts {
             "configs" -> self.configs = pkg_parse_list(value)
             // U1/S52/E1209: reserved for a future feature; legal only empty.
             "dev_deps" | "patch" | "workspace" -> {
-                if pkg_record_entries(value, field).len() > 0 -> return Err(PackageParseError.ReservedSection(field))
+                if pkg_record_entries(value, field).len() > 0 {
+                    return Err(PackageParseError.ReservedSection(field))
+                }
             }
             else -> return Err(PackageParseError.UnknownField(field))
         }
@@ -242,38 +285,44 @@ impl PackageFacts {
 // field (`members` has its own refusal).
 pkg_package_only_field: fn(field: String) -> Bool PackageParseError! {
     if field == MANIFEST_BLOCK_MEMBERS -> return Err(PackageParseError.ConfigMembers)
-    Ok(if field == {
-        "jet" | "edition" | "description" | "license" | "repository" | "targets" | "allocator" | "log" | "runtime" | "packages" | "dev" | "grants" | "authority" | "policy" | "configs" -> true
-        MANIFEST_BLOCK_BOUNDARIES | MANIFEST_BLOCK_BUILD | MANIFEST_BLOCK_SETTINGS | "commands" | "layers" | "test" | "suites" -> true
-        else -> false
-    })
+    Ok(
+        if field == {
+            "jet" | "edition" | "description" | "license" | "repository" | "targets" | "allocator" | "log" | "runtime" | "packages" | "dev" | "grants" | "authority" | "policy" | "configs" -> true
+            MANIFEST_BLOCK_BOUNDARIES | MANIFEST_BLOCK_BUILD | MANIFEST_BLOCK_SETTINGS | "commands" | "layers" | "test" | "suites" -> true
+            else -> false
+        },
+    )
 }
 
 // The full `policy: { … }` fact from one body.
 pkg_parse_package_policy: fn(body: String) -> PackagePolicy PackageParseError! {
     guarantees: pkg_parse_guarantee_policy(body)
     surface: pkg_parse_package_policy_surface(body)
-    Ok(PackagePolicy{
-        declarations: pkg_parse_policy(body, true),
-        lints_deny: pkg_parse_lints_policy(body),
-        unsafe_paths: surface.unsafe_paths,
-        memory_kernel: surface.memory_kernel,
-        expert: surface.expert,
-        deps: surface.deps,
-        claims_min: surface.claims_min,
-        contain: guarantees.contain,
-        harden: guarantees.harden,
-        licenses: surface.licenses,
-        source_maps: surface.source_maps,
-        exceptions: surface.exceptions,
-    })
+    Ok(
+        PackagePolicy{
+            declarations: pkg_parse_policy(body, true),
+            lints_deny: pkg_parse_lints_policy(body),
+            unsafe_paths: surface.unsafe_paths,
+            memory_kernel: surface.memory_kernel,
+            expert: surface.expert,
+            deps: surface.deps,
+            claims_min: surface.claims_min,
+            contain: guarantees.contain,
+            harden: guarantees.harden,
+            licenses: surface.licenses,
+            source_maps: surface.source_maps,
+            exceptions: surface.exceptions,
+        },
+    )
 }
 
-pkg_parse_outputs: fn(value: String) -> [String: OutputFact] PackageParseError! {
-    outputs := [String: OutputFact]{}
+pkg_parse_outputs: fn(value: String) -> [String:OutputFact] PackageParseError! {
+    outputs := [String:OutputFact]{}
     loop entry in pkg_record_entries(value, "outputs") {
         output: pkg_parse_output_value(entry.key, entry.value)
-        if outputs.has_key(entry.key) -> return Err(PackageParseError.Composition("output `{entry.key}` is declared more than once"))
+        if outputs.has_key(entry.key) {
+            return Err(PackageParseError.Composition("output `{entry.key}` is declared more than once"))
+        }
         outputs[entry.key] = output
     }
     Ok(outputs)
@@ -284,22 +333,30 @@ pkg_parse_output_value: fn(key: String, raw: String) -> OutputFact PackageParseE
     kind_text: pkg_binder_trim_end_matches(pkg_trim_start_matches(head.trim(), "."), ".")
     kind: PackageOutputKind.parse(kind_text)
     raw_fields: pkg_named_entries_checked(pkg_record_body(raw, "output"), "outputs.{key}")
-    payload_fields := [String: OutputPayload]{}
+    payload_fields := [String:OutputPayload]{}
     loop field in raw_fields -> payload_fields[field.key] = pkg_parse_output_payload(field.value)
-    fields := [String: String]{}
+    fields := [String:String]{}
     loop field in raw_fields {
         name: field.key
         value: field.value
-        if !pkg_output_field_allowed(kind, name) -> return Err(PackageParseError.UnknownField("outputs.{key}.{name}"))
-        if name == "entry" && (value.trim().starts_with("\"") || !pkg_is_identifier(pkg_scalar(value))) -> return Err(PackageParseError.InvalidValue{field: "outputs.{key}.entry", value: value})
+        if !pkg_output_field_allowed(kind, name) {
+            return Err(PackageParseError.UnknownField("outputs.{key}.{name}"))
+        }
+        if name == "entry" && (value.trim().starts_with("\"") || !pkg_is_identifier(pkg_scalar(value))) {
+            return Err(PackageParseError.InvalidValue{field: "outputs.{key}.entry", value: value})
+        }
         if name == OUTPUT_FIELD_LOADABLE || name == OUTPUT_FIELD_NATIVE {
             is_bool: if payload_fields[name] == {
                 .Bool(_) -> true
                 .Null | .Number(_) | .String(_) | .Array(_) | .Object(_) -> false
             }
-            if !is_bool -> return Err(PackageParseError.InvalidValue{field: "outputs.{key}.{name}", value: value})
+            if !is_bool {
+                return Err(PackageParseError.InvalidValue{field: "outputs.{key}.{name}", value: value})
+            }
         }
-        if name == OUTPUT_FIELD_BINDINGS && !pkg_payload_is_string_array(payload_fields[name]) -> return Err(PackageParseError.InvalidValue{field: "outputs.{key}.{name}", value: value})
+        if name == OUTPUT_FIELD_BINDINGS && !pkg_payload_is_string_array(payload_fields[name]) {
+            return Err(PackageParseError.InvalidValue{field: "outputs.{key}.{name}", value: value})
+        }
         fields[name] = pkg_scalar(value)
     }
     Ok(OutputFact{kind: kind, name: fields.get("name") ?? key, entry: fields.get("entry"), fields: fields, payload: OutputPayload.Object(payload_fields)})
@@ -326,18 +383,26 @@ pkg_parse_output_payload: fn(input: String) -> OutputPayload PackageParseError! 
     if value == "" || value == "null" -> return Ok(OutputPayload.Null)
     if value == "true" -> return Ok(OutputPayload.Bool(true))
     if value == "false" -> return Ok(OutputPayload.Bool(false))
-    if value.starts_with("\"") && value.ends_with("\"") -> return Ok(OutputPayload.String(pkg_scalar(value)))
+    if value.starts_with("\"") && value.ends_with("\"") {
+        return Ok(OutputPayload.String(pkg_scalar(value)))
+    }
     if value.starts_with("[") && value.ends_with("]") {
         items := [OutputPayload]{}
-        loop item in pkg_top_level_entries(pkg_binder_slice(value, 1, value.bytes().len() - 1)) -> items.push(pkg_parse_output_payload(item))
+        loop item in pkg_top_level_entries(pkg_binder_slice(value, 1, value.bytes().len() - 1)) {
+            items.push(pkg_parse_output_payload(item))
+        }
         return Ok(OutputPayload.Array(items))
     }
     if value.starts_with("{{") {
-        object := [String: OutputPayload]{}
-        loop entry in pkg_named_entries_checked(pkg_record_body(value, "output payload"), "output payload") -> object[pkg_binder_trim_matches(entry.key, "\"")] = pkg_parse_output_payload(entry.value)
+        object := [String:OutputPayload]{}
+        loop entry in pkg_named_entries_checked(pkg_record_body(value, "output payload"), "output payload") {
+            object[pkg_binder_trim_matches(entry.key, "\"")] = pkg_parse_output_payload(entry.value)
+        }
         return Ok(OutputPayload.Object(object))
     }
-    if pkg_parse_i64(value) != None || pkg_is_float_literal(value) -> return Ok(OutputPayload.Number(value))
+    if pkg_parse_i64(value) != None || pkg_is_float_literal(value) {
+        return Ok(OutputPayload.Number(value))
+    }
     Ok(OutputPayload.String(pkg_scalar(value)))
 }
 
@@ -375,11 +440,11 @@ pkg_is_float_literal: fn(value: String) -> Bool Never! {
     index == raw.len()
 }
 
-pkg_parse_environments: fn(value: String) -> [String: EnvironmentFact] PackageParseError! {
-    environments := [String: EnvironmentFact]{}
+pkg_parse_environments: fn(value: String) -> [String:EnvironmentFact] PackageParseError! {
+    environments := [String:EnvironmentFact]{}
     loop entry in pkg_record_entries(value, "environments") {
         key: entry.key
-        fields := [String: String]{}
+        fields := [String:String]{}
         loop field in pkg_named_entries_checked(pkg_record_body(entry.value, "environment"), "environments.{key}") {
             if field.key == {
                 "name" | "tools" | "services" | "secrets" -> fields[field.key] = field.value
@@ -396,25 +461,29 @@ pkg_parse_environments: fn(value: String) -> [String: EnvironmentFact] PackagePa
         }
         services: if fields.get("services") == {
             .Val(raw) -> pkg_parse_services(raw)
-            .None -> [String: ServiceFact]{}
+            .None -> [String:ServiceFact]{}
         }
         secrets: if fields.get("secrets") == {
             .Val(raw) -> pkg_parse_string_map("secrets", raw)
-            .None -> [String: String]{}
+            .None -> [String:String]{}
         }
-        if environments.has_key(key) -> return Err(PackageParseError.Composition("environment `{key}` is declared more than once"))
+        if environments.has_key(key) {
+            return Err(PackageParseError.Composition("environment `{key}` is declared more than once"))
+        }
         environments[key] = EnvironmentFact{name: name, tools: tools, services: services, secrets: secrets, fields: fields}
     }
     Ok(environments)
 }
 
-pkg_parse_services: fn(value: String) -> [String: ServiceFact] PackageParseError! {
-    services := [String: ServiceFact]{}
+pkg_parse_services: fn(value: String) -> [String:ServiceFact] PackageParseError! {
+    services := [String:ServiceFact]{}
     loop entry in pkg_record_entries(value, "services") {
         key: entry.key
-        fields := [String: String]{}
+        fields := [String:String]{}
         loop field in pkg_named_entries_checked(pkg_record_body(entry.value, "service"), "services.{key}") {
-            if !pkg_service_field_allowed(field.key) -> return Err(PackageParseError.UnknownField("services.{key}.{field.key}"))
+            if !pkg_service_field_allowed(field.key) {
+                return Err(PackageParseError.UnknownField("services.{key}.{field.key}"))
+            }
             fields[field.key] = field.value
         }
         enable := false
@@ -435,7 +504,9 @@ pkg_parse_services: fn(value: String) -> [String: ServiceFact] PackageParseError
             .Val(raw) -> Val(pkg_scalar(raw))
             .None -> None
         }
-        if services.has_key(key) -> return Err(PackageParseError.Composition("service `{key}` is declared more than once"))
+        if services.has_key(key) {
+            return Err(PackageParseError.Composition("service `{key}` is declared more than once"))
+        }
         services[key] = ServiceFact{enable: enable, ports: ports, ready: ready, fields: fields}
     }
     Ok(services)
@@ -447,7 +518,9 @@ pkg_parse_members: fn(input: String) -> [MemberRef] PackageParseError! {
         inner: pkg_binder_trim_end_matches(pkg_trim_start_matches(value, "find("), ")")
         return Ok([MemberRef]{MemberRef.Find(pkg_scalar(inner))})
     }
-    if !value.starts_with("[") -> return Err(PackageParseError.InvalidValue{field: "members", value: value})
+    if !value.starts_with("[") {
+        return Err(PackageParseError.InvalidValue{field: "members", value: value})
+    }
     members := [MemberRef]{}
     loop path in pkg_parse_list(value) -> members.push(MemberRef.Path(path))
     Ok(members)
@@ -468,21 +541,25 @@ pkg_output_field_allowed: fn(kind: PackageOutputKind, field: String) -> Bool Nev
 
 PKG_SERVICE_FIELDS: [String]{"enable", "from", "ports", "ready", "run", "restart", "watch", "after", "before_start", "sockets", "shutdown", "depends_on", "health", "limits", "logs"}
 
-pkg_service_field_allowed: fn(field: String) -> Bool Never! {
-    PKG_SERVICE_FIELDS.contains(field)
-}
+pkg_service_field_allowed: fn(field: String) -> Bool Never! { PKG_SERVICE_FIELDS.contains(field) }
 
 // `settings: { tls: Bool = true }` — a name, a Tier-0 type, and a default.
-pkg_parse_settings: fn(value: String) -> [String: SettingDecl] PackageParseError! {
-    out := [String: SettingDecl]{}
+pkg_parse_settings: fn(value: String) -> [String:SettingDecl] PackageParseError! {
+    out := [String:SettingDecl]{}
     loop entry in pkg_record_entries(value, "settings") {
         key: pkg_binder_trim_matches(entry.key, "\"")
         parts: entry.value.split_once("=") ?? return Err(PackageParseError.InvalidValue{field: "settings.{key}", value: entry.value})
         ty: parts.before.trim()
         default: pkg_scalar(parts.after)
-        if ty == "" -> return Err(PackageParseError.InvalidValue{field: "settings.{key}", value: ty})
-        if !pkg_is_ascii_identifier(key) -> return Err(PackageParseError.InvalidValue{field: "settings.{key}", value: entry.value})
-        if out.has_key(key) -> return Err(PackageParseError.Composition("`settings.{key}` is declared more than once"))
+        if ty == "" {
+            return Err(PackageParseError.InvalidValue{field: "settings.{key}", value: ty})
+        }
+        if !pkg_is_ascii_identifier(key) {
+            return Err(PackageParseError.InvalidValue{field: "settings.{key}", value: entry.value})
+        }
+        if out.has_key(key) {
+            return Err(PackageParseError.Composition("`settings.{key}` is declared more than once"))
+        }
         out[key] = SettingDecl{ty: ty, default: default}
     }
     Ok(out)
@@ -495,10 +572,14 @@ pkg_parse_command_settings: fn(value: String) -> [ManifestEntry] PackageParseErr
     out := [ManifestEntry]{}
     loop entry in pkg_record_entries(value, "commands") {
         quoted: entry.key.len() >= 2 && entry.key.starts_with("\"") && entry.key.ends_with("\"")
-        if !quoted -> return Err(PackageParseError.InvalidValue{field: "commands", value: entry.key})
+        if !quoted {
+            return Err(PackageParseError.InvalidValue{field: "commands", value: entry.key})
+        }
         key: pkg_scalar(entry.key)
-        if key == "" || entry.value == "" -> return Err(PackageParseError.InvalidValue{field: "commands.{key}", value: entry.value})
-        out.push(ManifestEntry{key: key, value: entry.value.copy()}) // copy: the entry list is dropped here.
+        if key == "" || entry.value == "" {
+            return Err(PackageParseError.InvalidValue{field: "commands.{key}", value: entry.value})
+        }
+        out.push(ManifestEntry{key: key, value: entry.value.copy()})  // copy: the entry list is dropped here.
     }
     Ok(out)
 }
@@ -512,8 +593,12 @@ pkg_parse_layers: fn(value: String) -> [ModuleLayer] PackageParseError! {
     loop entry in pkg_record_entries(value, "layers") {
         modules: pkg_parse_string_list(entry.value) ?? return Err(PackageParseError.InvalidValue{field: "layers.{entry.key}", value: entry.value})
         loop module_name in modules {
-            if module_name == "" -> return Err(PackageParseError.InvalidValue{field: "layers.{entry.key}", value: entry.value})
-            if listed.contains(module_name) -> return Err(PackageParseError.Composition("module `{module_name}` is listed in more than one layer"))
+            if module_name == "" {
+                return Err(PackageParseError.InvalidValue{field: "layers.{entry.key}", value: entry.value})
+            }
+            if listed.contains(module_name) {
+                return Err(PackageParseError.Composition("module `{module_name}` is listed in more than one layer"))
+            }
             listed.push(module_name.copy())
         }
         layers.push(ModuleLayer{name: entry.key.copy(), modules: modules})
@@ -530,7 +615,9 @@ pkg_parse_user_settings: fn(text: String) -> [ManifestEntry] PackageParseError! 
     loop entry in pkg_top_level_entries(pkg_strip_comments(text)) {
         found: pkg_split_field(entry) ?? return Err(PackageParseError.MalformedField(entry))
         if found.key != "commands" -> return Err(PackageParseError.UnknownField(found.key))
-        if seen -> return Err(PackageParseError.Composition("`commands` is declared more than once"))
+        if seen {
+            return Err(PackageParseError.Composition("`commands` is declared more than once"))
+        }
         seen = true
         out = pkg_parse_command_settings(found.value)
     }
@@ -546,20 +633,24 @@ pkg_package_command_settings: fn(text: String) -> [ManifestEntry] PackageParseEr
     loop entry in pkg_top_level_entries(pkg_strip_comments(text)) {
         found: pkg_split_field(entry) ?? next
         if found.key != "commands" -> next
-        if seen -> return Err(PackageParseError.Composition("`commands` is declared more than once"))
+        if seen {
+            return Err(PackageParseError.Composition("`commands` is declared more than once"))
+        }
         seen = true
         out = pkg_parse_command_settings(found.value)
     }
     Ok(out)
 }
 
-pkg_parse_string_map: fn(field: String, value: String) -> [String: String] PackageParseError! {
-    map := [String: String]{}
+pkg_parse_string_map: fn(field: String, value: String) -> [String:String] PackageParseError! {
+    map := [String:String]{}
     loop entry in pkg_record_entries(value, field) {
         key: pkg_binder_trim_matches(entry.key, "\"")
         text: pkg_scalar(entry.value)
         if map.get(key) == .Val(existing) {
-            if existing != text -> return Err(PackageParseError.Composition("`{field}.{key}` is declared with conflicting values"))
+            if existing != text {
+                return Err(PackageParseError.Composition("`{field}.{key}` is declared with conflicting values"))
+            }
         }
         map[key] = text
     }

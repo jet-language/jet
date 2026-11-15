@@ -9,13 +9,38 @@ use {
     cli_files: core.files
     core.encoding.[Dyn]
     jet_driver.[
-        JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileResult, JetDriverDocModule, JetDriverStage,
-        JetDriverVerbOutput, jet_driver_doc_callee_key, jet_driver_present_diagnostics,
-        JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR,
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode,
+        JetDriverCompileResult,
+        JetDriverDocModule,
+        JetDriverStage,
+        JetDriverVerbOutput,
+        jet_driver_doc_callee_key,
+        jet_driver_present_diagnostics,
+        JET_DRIVER_EXIT_OK,
+        JET_DRIVER_EXIT_USAGE,
+        JET_DRIVER_EXIT_USER_ERROR,
     ]
     jet_foundation.[
-        BodyNode, BodyTree, Diagnostic, DiagnosticCause, DiagnosticMoment, DiagnosticOrigin, FnBody, GateLedger, Span, body_node, body_type,
-        diagnostic_line_at, gate_kind_name, gate_ledger_sort, diagnostic_from_registry, diagnostic_render_all, sha256_hex, TFailureCarrier, DIAGNOSTIC_ERROR,
+        BodyNode,
+        BodyTree,
+        Diagnostic,
+        DiagnosticCause,
+        DiagnosticMoment,
+        DiagnosticOrigin,
+        FnBody,
+        GateLedger,
+        Span,
+        body_node,
+        body_type,
+        diagnostic_line_at,
+        gate_kind_name,
+        gate_ledger_sort,
+        diagnostic_from_registry,
+        diagnostic_render_all,
+        sha256_hex,
+        TFailureCarrier,
+        DIAGNOSTIC_ERROR,
     ]
     jet_semindex.[SemDefinitionFact, SemEffect, SemIndex, semindex_doc_text, semindex_function_key, semindex_module_alias, semindex_outside_edge]
 }
@@ -185,9 +210,13 @@ jet_cli_review: fn(argv: [String], json: Bool, color: Bool) -> JetDriverVerbOutp
         return jet_cli_review_error("E2104", "`jet review` needs a base and a reviewed Jet file", "run `jet review base.jet head.jet --base-receipt base.jetproof --receipt head.jetproof`", color, json)
     }
     base_receipt: jet_cli_review_option(argv, [String]{"--base-receipt"})
-    if base_receipt.problem == .Val(problem) -> return jet_cli_review_error("E2104", problem, "provide a path after the receipt flag", color, json)
+    if base_receipt.problem == .Val(problem) {
+        return jet_cli_review_error("E2104", problem, "provide a path after the receipt flag", color, json)
+    }
     head_receipt: jet_cli_review_option(argv, [String]{"--receipt", "--head-receipt", "--after-receipt"})
-    if head_receipt.problem == .Val(problem) -> return jet_cli_review_error("E2104", problem, "provide a path after the receipt flag", color, json)
+    if head_receipt.problem == .Val(problem) {
+        return jet_cli_review_error("E2104", problem, "provide a path after the receipt flag", color, json)
+    }
     base: jet_cli_review_load(paths[0])
     if base == {
         .Failed(message) -> return jet_cli_review_input_error(paths[0], message, color, json)
@@ -201,7 +230,9 @@ jet_cli_review: fn(argv: [String], json: Bool, color: Bool) -> JetDriverVerbOutp
         .Loaded(_) -> {}
     }
     if base == .Loaded(before) {
-        if head == .Loaded(after) -> return jet_cli_review_compare(before, after, base_receipt.value, head_receipt.value, json, color)
+        if head == .Loaded(after) {
+            return jet_cli_review_compare(before, after, base_receipt.value, head_receipt.value, json, color)
+        }
     }
     jet_cli_ice("`jet review` lost a checked side")
 }
@@ -212,10 +243,14 @@ jet_cli_review_compare: fn(base: JetCLIReviewSide, head: JetCLIReviewSide, base_
     paths: [String]{base.path.copy(), head.path.copy()}
     recorded := [JetCLISemOp]{}
     loop operation in base.semantic_ops {
-        if jet_cli_sem_op_transition(operation, paths, base.source_hash, head.source_hash) -> recorded.push(operation.copy())
+        if jet_cli_sem_op_transition(operation, paths, base.source_hash, head.source_hash) {
+            recorded.push(operation.copy())
+        }
     }
     loop operation in head.semantic_ops {
-        if jet_cli_sem_op_transition(operation, paths, base.source_hash, head.source_hash) -> recorded.push(operation.copy())
+        if jet_cli_sem_op_transition(operation, paths, base.source_hash, head.source_hash) {
+            recorded.push(operation.copy())
+        }
     }
     meaning: jet_cli_review_meaning(base.index, head.index, recorded)
     failures: jet_cli_failure_changes(base.failures, head.failures)
@@ -253,9 +288,13 @@ jet_cli_review_positional: fn(argv: [String]) -> [String] Never! {
 jet_cli_review_option: fn(argv: [String], names: [String]) -> JetCLIReviewOption Never! {
     loop (index, word) in argv {
         loop name in names {
-            if word.starts_with("{name}=") -> return JetCLIReviewOption{value: Val(word.removeprefix("{name}=")), problem: None}
+            if word.starts_with("{name}=") {
+                return JetCLIReviewOption{value: Val(word.removeprefix("{name}=")), problem: None}
+            }
             if word == name {
-                if index + 1 < argv.len() && !argv[index + 1].starts_with("-") -> return JetCLIReviewOption{value: Val(argv[index + 1].copy()), problem: None}
+                if index + 1 < argv.len() && !argv[index + 1].starts_with("-") {
+                    return JetCLIReviewOption{value: Val(argv[index + 1].copy()), problem: None}
+                }
                 return JetCLIReviewOption{value: None, problem: Val("`{name}` needs a receipt path")}
             }
         }
@@ -298,10 +337,16 @@ jet_cli_review_side: fn(path: String, result: JetDriverCompileResult) -> JetCLIR
         lines: loop diagnostic in errors -> "{diagnostic.code}: {diagnostic.what}"
         return JetCLIReviewLoaded.Failed{message: lines.join("\n")}
     }
-    if result.internal_problem == .Val(problem) -> return JetCLIReviewLoaded.Refused{output: jet_cli_ice(problem)}
-    if !result.complete -> return JetCLIReviewLoaded.Refused{output: jet_cli_ice("the Jet compiler stopped before finishing `{path}`")}
+    if result.internal_problem == .Val(problem) {
+        return JetCLIReviewLoaded.Refused{output: jet_cli_ice(problem)}
+    }
+    if !result.complete {
+        return JetCLIReviewLoaded.Refused{output: jet_cli_ice("the Jet compiler stopped before finishing `{path}`")}
+    }
     inputs := [JetCLIReviewInput]{}
-    loop doc_module in result.doc_modules -> inputs.push(JetCLIReviewInput{path: doc_module.physical_path.copy(), digest: sha256_hex(doc_module.source)})
+    loop doc_module in result.doc_modules {
+        inputs.push(JetCLIReviewInput{path: doc_module.physical_path.copy(), digest: sha256_hex(doc_module.source)})
+    }
     inputs.sort_by(fn(left: JetCLIReviewInput, right: JetCLIReviewInput) { left.path <=> right.path })
     unique := [JetCLIReviewInput]{}
     loop input in inputs {
@@ -332,16 +377,18 @@ jet_cli_review_side: fn(path: String, result: JetDriverCompileResult) -> JetCLIR
     index: jet_cli_checked_semindex(result)
     closure: if unique.len() == 0 -> "unknown" else if unique.len() == 1 -> "entry_only" else -> "complete"
     authority: jet_cli_review_authority(ledger, index)
-    JetCLIReviewLoaded.Loaded{side: JetCLIReviewSide{
-        path: path.copy(),
-        inputs: unique,
-        closure: closure,
-        index: index,
-        failures: jet_cli_failure_functions(result.doc_modules, entry),
-        authority: authority,
-        source_hash: hash.copy(),
-        semantic_ops: jet_cli_sem_ops_for_file(path, hash),
-    }}
+    JetCLIReviewLoaded.Loaded{
+        side: JetCLIReviewSide{
+            path: path.copy(),
+            inputs: unique,
+            closure: closure,
+            index: index,
+            failures: jet_cli_failure_functions(result.doc_modules, entry),
+            authority: authority,
+            source_hash: hash.copy(),
+            semantic_ops: jet_cli_sem_ops_for_file(path, hash),
+        },
+    }
 }
 
 // ---- meaning (review_semantic_ops*) ----
@@ -411,7 +458,9 @@ jet_cli_review_unmatched_alignment: fn(fact: SemDefinitionFact, before: [String:
         key: jet_cli_review_fact_key(fact, stage)
         old_count: before.get(key) ?? 0
         new_count: after.get(key) ?? 0
-        if old_count > 0 && new_count > 0 && (old_count != 1 || new_count != 1) -> return "ambiguous"
+        if old_count > 0 && new_count > 0 && (old_count != 1 || new_count != 1) {
+            return "ambiguous"
+        }
     }
     if before_side -> "unmatched_before" else -> "unmatched_after"
 }
@@ -459,7 +508,9 @@ jet_cli_review_checked_ops: fn(before: SemIndex, after: SemIndex) -> [JetCLIRevi
     matched_before := [Int:Bool]{}
     matched_after := [Int:Bool]{}
     pairs := [JetCLIReviewPair]{}
-    loop stage in 0..<3 -> jet_cli_review_pair(old_defs, new_defs, matched_before, matched_after, stage, pairs)
+    loop stage in 0..<3 {
+        jet_cli_review_pair(old_defs, new_defs, matched_before, matched_after, stage, pairs)
+    }
     operations := [JetCLIReviewOp]{}
     loop pair in pairs {
         old: old_defs[pair.before_index]
@@ -498,19 +549,27 @@ jet_cli_review_effect_ops: fn(operations: &[JetCLIReviewOp], before: [SemEffect]
     new_by_function := [String:Int]{}
     functions := [String]{}
     loop (index, fact) in before {
-        if !old_by_function.has_key(fact.function) && !new_by_function.has_key(fact.function) -> functions.push(fact.function.copy())
+        if !old_by_function.has_key(fact.function) && !new_by_function.has_key(fact.function) {
+            functions.push(fact.function.copy())
+        }
         old_by_function[fact.function.copy()] = index
     }
     loop (index, fact) in after {
-        if !old_by_function.has_key(fact.function) && !new_by_function.has_key(fact.function) -> functions.push(fact.function.copy())
+        if !old_by_function.has_key(fact.function) && !new_by_function.has_key(fact.function) {
+            functions.push(fact.function.copy())
+        }
         new_by_function[fact.function.copy()] = index
     }
     functions.sort()
     loop function in functions {
         old_shape := String?{None}
         new_shape := String?{None}
-        if old_by_function.get(function) == .Val(index) -> old_shape = Val(jet_cli_review_effect_shape(before[index]))
-        if new_by_function.get(function) == .Val(index) -> new_shape = Val(jet_cli_review_effect_shape(after[index]))
+        if old_by_function.get(function) == .Val(index) {
+            old_shape = Val(jet_cli_review_effect_shape(before[index]))
+        }
+        if new_by_function.get(function) == .Val(index) {
+            new_shape = Val(jet_cli_review_effect_shape(after[index]))
+        }
         if old_shape == new_shape -> next
         operations.push(JetCLIReviewOp{kind: "effect_changed", stable_id: "effect:{function}", identity: function.copy(), before: old_shape.move(), after: new_shape.move(), before_identity: Val(function.copy()), after_identity: Val(function.copy()), alignment: "matched", source_operation: None})
     }
@@ -590,9 +649,7 @@ jet_cli_review_candidates: fn(facts: [SemDefinitionFact], receipt: JetCLISemOp, 
             if identity == "" {
                 if anchor.stable_id != "" && anchor.stable_id != fact.stable_id -> next
                 if anchor.module_path != "" && anchor.module_path != fact.module_path -> next
-            } else if !jet_cli_review_identity_matches(fact, identity) {
-                next
-            }
+            } else if !jet_cli_review_identity_matches(fact, identity) { next }
         }
         if requested == .Val(name) {
             if !jet_cli_review_identity_matches(fact, name) -> next
@@ -639,16 +696,12 @@ jet_cli_review_meaning: fn(before: SemIndex, after: SemIndex, receipts: [JetCLIS
                 id: receipt.targets[0].stable_id
                 refused = id != "" && id != old_defs[old_index].stable_id && id != new_defs[new_index].stable_id
             }
-            if refused {
-                alignment = "unmatched_before"
-            } else {
+            if refused -> alignment = "unmatched_before" else {
                 removed_ids[old_defs[old_index].stable_id.copy()] = true
                 removed_ids[new_defs[new_index].stable_id.copy()] = true
                 alignment = "recorded"
             }
-        } else if old_candidates.len() > 1 || new_candidates.len() > 1 {
-            alignment = "ambiguous"
-        } else if old_candidates.len() == 0 {
+        } else if old_candidates.len() > 1 || new_candidates.len() > 1 { alignment = "ambiguous" } else if old_candidates.len() == 0 {
             alignment = "unmatched_before"
         }
         stable_id := if {
@@ -687,7 +740,9 @@ jet_cli_review_meaning: fn(before: SemIndex, after: SemIndex, receipts: [JetCLIS
     }
     filtered := [JetCLIReviewOp]{}
     loop operation in operations {
-        if (operation.kind == "added" || operation.kind == "removed") && removed_ids.has_key(operation.stable_id) -> next
+        if (operation.kind == "added" || operation.kind == "removed") && removed_ids.has_key(operation.stable_id) {
+            next
+        }
         filtered.push(operation.copy())
     }
     jet_cli_review_sort(filtered, true)
@@ -731,11 +786,15 @@ jet_cli_review_authority: fn(ledger: GateLedger, index: SemIndex) -> [JetCLIRevi
         loop clause in entry.detail.split("; ") {
             if clause.split_once(": ") == .Val(pair) {
                 if pair.before == "granted effects" {
-                    loop name in jet_cli_review_effect_list(pair.after) -> facts[slot].granted.push(name)
+                    loop name in jet_cli_review_effect_list(pair.after) {
+                        facts[slot].granted.push(name)
+                    }
                     next
                 }
                 if pair.before == "denied effects" {
-                    loop name in jet_cli_review_effect_list(pair.after) -> facts[slot].denied.push(name)
+                    loop name in jet_cli_review_effect_list(pair.after) {
+                        facts[slot].denied.push(name)
+                    }
                     next
                 }
                 if pair.before == "authority" {
@@ -777,7 +836,9 @@ jet_cli_review_subset: fn(small: [String], large: [String]) -> Bool Never! {
 // the presence rule.
 jet_cli_review_classify: fn(old: JetCLIReviewFact, new: JetCLIReviewFact, has_old: Bool, has_new: Bool) -> String? Never! {
     if has_old && has_new {
-        if old.granted == new.granted && old.denied == new.denied && old.terms == new.terms -> return None
+        if old.granted == new.granted && old.denied == new.denied && old.terms == new.terms {
+            return None
+        }
         if old.terms != new.terms -> return Val("changed")
     }
     widens: !jet_cli_review_subset(new.granted, old.granted) || !jet_cli_review_subset(old.denied, new.denied)
@@ -811,12 +872,14 @@ jet_cli_review_authority_diff: fn(before: [JetCLIReviewFact], after: [JetCLIRevi
         old: if old_index == .Val(at) -> before[at].copy() else -> empty.copy()
         new: if new_index == .Val(at) -> after[at].copy() else -> empty.copy()
         status := jet_cli_review_classify(old, new, old_index != None, new_index != None) ?? next
-        changes.push(JetCLIReviewAuthorityChange{
-            status: status.move(),
-            key: key.copy(),
-            before: if old_index == None -> None else -> Val(old.display.join(" | ")),
-            after: if new_index == None -> None else -> Val(new.display.join(" | ")),
-        })
+        changes.push(
+            JetCLIReviewAuthorityChange{
+                status: status.move(),
+                key: key.copy(),
+                before: if old_index == None -> None else -> Val(old.display.join(" | ")),
+                after: if new_index == None -> None else -> Val(new.display.join(" | ")),
+            },
+        )
     }
     changes
 }
@@ -877,13 +940,17 @@ jet_cli_review_parse_identity: fn(object: Dyn) -> JetCLIReviewIdentity JetCLIRea
     empty: JetCLIReviewIdentity{source: "", build: "", run: "", target: ""}
     value: jet_cli_sem_json_field(object, "identity") ?? return Ok(empty)
     if value == .Null -> return Ok(empty)
-    if !jet_cli_review_is_object(value) -> return Err(jet_cli_read_error("derivation identity is invalid: expected an object"))
-    Ok(JetCLIReviewIdentity{
-        source: jet_cli_review_text_field(value, "source") ?? "",
-        build: jet_cli_review_text_field(value, "build") ?? "",
-        run: jet_cli_review_text_field(value, "run") ?? "",
-        target: jet_cli_review_text_field(value, "target") ?? "",
-    })
+    if !jet_cli_review_is_object(value) {
+        return Err(jet_cli_read_error("derivation identity is invalid: expected an object"))
+    }
+    Ok(
+        JetCLIReviewIdentity{
+            source: jet_cli_review_text_field(value, "source") ?? "",
+            build: jet_cli_review_text_field(value, "build") ?? "",
+            run: jet_cli_review_text_field(value, "run") ?? "",
+            target: jet_cli_review_text_field(value, "target") ?? "",
+        },
+    )
 }
 
 // `parse_derivation_claim`.
@@ -893,25 +960,31 @@ jet_cli_review_parse_derivation: fn(object: Dyn) -> JetCLIReviewDerivation JetCL
     counterexample := String?{None}
     if jet_cli_sem_json_field(object, "observation") == .Val(observation) {
         if observation != .Null {
-            if !jet_cli_review_is_object(observation) -> return Err(jet_cli_read_error("derivation observation is invalid: expected an object"))
+            if !jet_cli_review_is_object(observation) {
+                return Err(jet_cli_read_error("derivation observation is invalid: expected an object"))
+            }
             event = jet_cli_review_text_field(observation, "event")
-            if event == None -> counterexample = jet_cli_review_text_field(observation, "counterexample")
+            if event == None {
+                counterexample = jet_cli_review_text_field(observation, "counterexample")
+            }
         }
     }
-    Ok(JetCLIReviewDerivation{
-        id: id.move(),
-        subject: jet_cli_review_text_field(object, "subject") ?? "",
-        claim: jet_cli_review_text_field(object, "claim") ?? "",
-        producer: jet_cli_review_text_field(object, "producer") ?? "",
-        method: jet_cli_review_text_field(object, "method") ?? "unknown",
-        rule: jet_cli_review_text_field(object, "rule") ?? "",
-        premises: jet_cli_review_strings(object, "premises"),
-        identity: jet_cli_review_parse_identity(object),
-        assumptions: jet_cli_review_strings(object, "assumptions"),
-        disposition: jet_cli_review_text_field(object, "disposition") ?? "unknown",
-        event: event.move(),
-        counterexample: counterexample.move(),
-    })
+    Ok(
+        JetCLIReviewDerivation{
+            id: id.move(),
+            subject: jet_cli_review_text_field(object, "subject") ?? "",
+            claim: jet_cli_review_text_field(object, "claim") ?? "",
+            producer: jet_cli_review_text_field(object, "producer") ?? "",
+            method: jet_cli_review_text_field(object, "method") ?? "unknown",
+            rule: jet_cli_review_text_field(object, "rule") ?? "",
+            premises: jet_cli_review_strings(object, "premises"),
+            identity: jet_cli_review_parse_identity(object),
+            assumptions: jet_cli_review_strings(object, "assumptions"),
+            disposition: jet_cli_review_text_field(object, "disposition") ?? "unknown",
+            event: event.move(),
+            counterexample: counterexample.move(),
+        },
+    )
 }
 
 // `derivation_for_evidence`: the receipt's derivation by id, else the inline
@@ -919,7 +992,9 @@ jet_cli_review_parse_derivation: fn(object: Dyn) -> JetCLIReviewDerivation JetCL
 jet_cli_review_evidence_derivation: fn(object: Dyn, table: [JetCLIReviewDerivation]) -> JetCLIReviewDerivation? JetCLIReadError! {
     value: jet_cli_sem_json_field(object, "derivation") ?? return Ok(None)
     if value == .Null -> return Ok(None)
-    if !jet_cli_review_is_object(value) -> return Err(jet_cli_read_error("evidence has invalid derivation: expected an object"))
+    if !jet_cli_review_is_object(value) {
+        return Err(jet_cli_read_error("evidence has invalid derivation: expected an object"))
+    }
     id: jet_cli_review_text_field(value, "id") ?? return Err(jet_cli_read_error("evidence derivation has no id"))
     loop derivation in table {
         if derivation.id == id -> return Ok(Val(derivation.copy()))
@@ -962,7 +1037,9 @@ jet_cli_review_observation: fn(object: Dyn, derivation: JetCLIReviewDerivation?,
     loop assumption in held.assumptions -> premises.push(assumption.copy())
     fields: [String]{"premises", "numerical", "scheduling", "schedule"}
     loop field in fields {
-        if jet_cli_sem_json_field(object, field) == .Val(value) -> premises.push(jet_cli_review_canonical(value))
+        if jet_cli_sem_json_field(object, field) == .Val(value) {
+            premises.push(jet_cli_review_canonical(value))
+        }
     }
     premises.sort()
     event := held.event.copy()
@@ -1007,7 +1084,9 @@ jet_cli_review_claim_key: fn(object: Dyn) -> String Never! {
         }
     }
     if jet_cli_sem_json_field(object, "source") == .Val(source) {
-        if jet_cli_sem_json_field(source, "path") == .Val(path) -> parts.push("source.path={jet_cli_review_canonical(path)}")
+        if jet_cli_sem_json_field(source, "path") == .Val(path) {
+            parts.push("source.path={jet_cli_review_canonical(path)}")
+        }
     }
     if parts.len() == 0 {
         if jet_cli_review_text_field(object, "id") == .Val(id) -> return "id:{id}"
@@ -1045,10 +1124,14 @@ jet_cli_review_read_receipt: fn(path: String?) -> JetCLIReviewReceipt JetCLIRead
     if jet_cli_sem_json_field(report, "derivations") == .Val(values) {
         items: jet_cli_review_array(values) ?? return Err(jet_cli_read_error("receipt `{file}` has invalid derivations: expected an array"))
         loop item in items {
-            if !jet_cli_review_is_object(item) -> return Err(jet_cli_read_error("receipt `{file}` has invalid derivation: expected an object"))
+            if !jet_cli_review_is_object(item) {
+                return Err(jet_cli_read_error("receipt `{file}` has invalid derivation: expected an object"))
+            }
             derivation: jet_cli_review_parse_derivation(item) ?? return Err(jet_cli_read_error("receipt `{file}` has invalid derivation: {err.message}"))
             loop existing in derivations {
-                if existing.id == derivation.id -> return Err(jet_cli_read_error("receipt `{file}` has duplicate derivation ids"))
+                if existing.id == derivation.id {
+                    return Err(jet_cli_read_error("receipt `{file}` has duplicate derivation ids"))
+                }
             }
             derivations.push(derivation.copy())
         }
@@ -1058,30 +1141,38 @@ jet_cli_review_read_receipt: fn(path: String?) -> JetCLIReviewReceipt JetCLIRead
     claims := [JetCLIReviewClaim]{}
     seen := [String:Bool]{}
     loop (order, item) in items {
-        if !jet_cli_review_is_object(item) -> return Err(jet_cli_read_error("receipt `{file}` has invalid evidence item: expected an object"))
+        if !jet_cli_review_is_object(item) {
+            return Err(jet_cli_read_error("receipt `{file}` has invalid evidence item: expected an object"))
+        }
         key := jet_cli_review_claim_key(item)
-        if seen.has_key(key) -> return Err(jet_cli_read_error("receipt `{file}` has duplicate evidence claim `{key}`"))
+        if seen.has_key(key) {
+            return Err(jet_cli_read_error("receipt `{file}` has duplicate evidence claim `{key}`"))
+        }
         seen[key.copy()] = true
         outcome := jet_cli_review_text_field(item, "outcome") ?? jet_cli_review_text_field(item, "result") ?? "unknown"
         state := jet_cli_review_text_field(item, "state") ?? ""
         if jet_cli_review_text_field(item, "state") == None {
             state = "unknown"
             if jet_cli_sem_json_field(item, "completeness") == .Val(completeness) {
-                if jet_cli_review_text_field(completeness, "state") == .Val(found) -> state = found.copy()
+                if jet_cli_review_text_field(completeness, "state") == .Val(found) {
+                    state = found.copy()
+                }
             }
         }
         label := jet_cli_review_text_field(item, "claimId") ?? jet_cli_review_text_field(item, "claim") ?? jet_cli_review_text_field(item, "id") ?? jet_cli_review_text_field(item, "property") ?? key.copy()
         derivation: jet_cli_review_evidence_derivation(item, derivations)
-        claims.push(JetCLIReviewClaim{
-            key: key.move(),
-            label: label.move(),
-            outcome: outcome.copy(),
-            state: state.copy(),
-            proven: jet_cli_review_proven(derivation),
-            derivation: derivation.copy(),
-            observation: jet_cli_review_observation(item, derivation, outcome, state, order),
-            order: order,
-        })
+        claims.push(
+            JetCLIReviewClaim{
+                key: key.move(),
+                label: label.move(),
+                outcome: outcome.copy(),
+                state: state.copy(),
+                proven: jet_cli_review_proven(derivation),
+                derivation: derivation.copy(),
+                observation: jet_cli_review_observation(item, derivation, outcome, state, order),
+                order: order,
+            },
+        )
     }
     claims.sort_by(fn(left: JetCLIReviewClaim, right: JetCLIReviewClaim) { left.key <=> right.key })
     Ok(JetCLIReviewReceipt{recorded: true, claims: claims, claim_key: claim_key.move(), proof: Val(proof)})
@@ -1102,12 +1193,8 @@ jet_cli_review_mismatches: fn(before: JetCLIReviewObservation, after: JetCLIRevi
     mismatches := [String]{}
     if before.contract == "" || after.contract == "" {
         mismatches.push("observation contract is missing")
-    } else if before.contract != after.contract {
-        mismatches.push("observation contract differs")
-    }
-    if before.inputs == "" || after.inputs == "" {
-        mismatches.push("declared inputs are missing")
-    } else if before.inputs != after.inputs {
+    } else if before.contract != after.contract { mismatches.push("observation contract differs") }
+    if before.inputs == "" || after.inputs == "" -> mismatches.push("declared inputs are missing") else if before.inputs != after.inputs {
         mismatches.push("declared inputs differ")
     }
     if before.environment == "" || after.environment == "" {
@@ -1179,7 +1266,9 @@ jet_cli_review_compare_observations: fn(key: String, before: JetCLIReviewClaim, 
     old: before.observation ?? return Val(jet_cli_review_comparison("unknown", key, "base observation is missing", before, after, subject, meaning))
     new: after.observation ?? return Val(jet_cli_review_comparison("unknown", key, "reviewed observation is missing", before, after, subject, meaning))
     mismatches: jet_cli_review_mismatches(old, new)
-    if mismatches.len() > 0 -> return Val(jet_cli_review_comparison("unknown", key, mismatches.join("; "), before, after, subject, meaning))
+    if mismatches.len() > 0 {
+        return Val(jet_cli_review_comparison("unknown", key, mismatches.join("; "), before, after, subject, meaning))
+    }
     if old.result == "" || new.result == "" || old.result.ends_with(":unknown") || new.result.ends_with(":unknown") {
         return Val(jet_cli_review_comparison("unknown", key, "comparable event result is missing", before, after, subject, meaning))
     }
@@ -1193,7 +1282,9 @@ jet_cli_review_compare_observations: fn(key: String, before: JetCLIReviewClaim, 
     if after.derivation == .Val(derivation) {
         if derivation.method == "sampled_agreement" -> sampled = true
     }
-    if sampled -> return Val(jet_cli_review_comparison("sampled_agreement", key, "equal sampled traces do not establish universal equivalence", before, after, subject, meaning))
+    if sampled {
+        return Val(jet_cli_review_comparison("sampled_agreement", key, "equal sampled traces do not establish universal equivalence", before, after, subject, meaning))
+    }
     if !before.proven || !after.proven {
         old_disposition: if before.derivation == .Val(derivation) -> derivation.disposition.copy() else -> "missing"
         new_disposition: if after.derivation == .Val(derivation) -> derivation.disposition.copy() else -> "missing"
@@ -1242,9 +1333,7 @@ jet_cli_review_receipt_diff: fn(before: JetCLIReviewReceipt, after: JetCLIReview
         status := String?{None}
         if old == .Val(previous) {
             if new == .Val(current) {
-                if previous.proven && !current.proven {
-                    status = Val("lost")
-                } else if !previous.proven && current.proven {
+                if previous.proven && !current.proven -> status = Val("lost") else if !previous.proven && current.proven {
                     status = Val("gained")
                 } else if previous.outcome != current.outcome || previous.state != current.state || jet_cli_review_derivation_id(previous) != jet_cli_review_derivation_id(current) {
                     status = Val("changed")
@@ -1263,18 +1352,12 @@ jet_cli_review_receipt_diff: fn(before: JetCLIReviewReceipt, after: JetCLIReview
                         else -> diff.unknown.push(comparison.copy())
                     }
                 }
-            } else if previous.proven {
-                status = Val("lost")
-            }
+            } else if previous.proven { status = Val("lost") }
         } else if new == .Val(current) {
             if current.proven -> status = Val("gained")
         }
         if status == .Val(word) {
-            if word == "gained" {
-                diff.gained += 1
-            } else if word == "lost" {
-                diff.lost += 1
-            } else {
+            if word == "gained" -> diff.gained += 1 else if word == "lost" -> diff.lost += 1 else {
                 diff.changed += 1
             }
             change := JetCLIReviewChange{status: word.copy(), key: key.copy(), before: old.copy(), after: new.copy()}
@@ -1361,7 +1444,9 @@ jet_cli_failure_functions: fn(modules: [JetDriverDocModule], entry: String) -> [
     loop doc_module in modules {
         aliases[doc_module.module_identity] = if jet_cli_sem_normalize(doc_module.physical_path) == entry -> "" else -> semindex_module_alias(doc_module)
         loop function in doc_module.functions {
-            if !jet_cli_failure_carrier_fails(function.failure_carrier) -> infallible[function.key] = true
+            if !jet_cli_failure_carrier_fails(function.failure_carrier) {
+                infallible[function.key] = true
+            }
         }
     }
     functions := [JetCLIFailureFunction]{}
@@ -1397,7 +1482,9 @@ jet_cli_failure_points: fn(doc_module: JetDriverDocModule, function: FnBody, ali
         call: jet_cli_failure_site_call(tree, node) ?? next
         span: body_node(tree, call).span
         inside: loop lambda in lambdas {
-            if span.start >= lambda.start && span.end <= lambda.end -> break true
+            if span.start >= lambda.start && span.end <= lambda.end {
+                break true
+            }
         } ?? false
         if inside -> next
         callee: jet_cli_failure_callee(doc_module, function.key, span, aliases, infallible) ?? next
@@ -1429,7 +1516,9 @@ jet_cli_failure_site_call: fn(tree: BodyTree, node: BodyNode) -> Int? Never! {
 jet_cli_failure_callee: fn(doc_module: JetDriverDocModule, caller: String, span: Span, aliases: [String:String], infallible: [String:Bool]) -> String? Never! {
     best := -1
     loop (index, fact) in doc_module.call_facts {
-        if fact.caller_key != caller || fact.span.start < span.start || fact.span.end > span.end -> next
+        if fact.caller_key != caller || fact.span.start < span.start || fact.span.end > span.end {
+            next
+        }
         if best >= 0 {
             held: doc_module.call_facts[best].span
             if fact.span.end - fact.span.start <= held.end - held.start -> next
@@ -1462,7 +1551,9 @@ jet_cli_failure_changes: fn(before: [JetCLIFailureFunction], after: [JetCLIFailu
     loop row in after {
         old_index: old_rows.get(row.function) ?? -1
         if old_index < 0 {
-            if row.can_fail -> changes.push(JetCLIFailureChange{function: row.function, before: None, after: Val(true), points: jet_cli_failure_point_changes([JetCLIFailurePoint]{}, row.points)})
+            if row.can_fail {
+                changes.push(JetCLIFailureChange{function: row.function, before: None, after: Val(true), points: jet_cli_failure_point_changes([JetCLIFailurePoint]{}, row.points)})
+            }
             next
         }
         old: before[old_index]
@@ -1495,7 +1586,9 @@ jet_cli_failure_point_changes: fn(before: [JetCLIFailurePoint], after: [JetCLIFa
         changes.push(JetCLIFailurePointChange{status: status, callee: point.callee, site: point.site})
     }
     loop (index, old) in before {
-        if !paired[index] -> changes.push(JetCLIFailurePointChange{status: "gone", callee: old.callee, site: old.site})
+        if !paired[index] {
+            changes.push(JetCLIFailurePointChange{status: "gone", callee: old.callee, site: old.site})
+        }
     }
     changes
 }
@@ -1537,23 +1630,34 @@ jet_cli_failure_lines: fn(changes: [JetCLIFailureChange], indent: String) -> [St
             else -> "failure points changed"
         }
         lines.push("{indent}{heading}: {change.function}")
-        loop point in change.points -> lines.push("{indent}  {point.status} failure point: {point.callee} at {point.site}")
+        loop point in change.points {
+            lines.push("{indent}  {point.status} failure point: {point.callee} at {point.site}")
+        }
     }
     lines
 }
 
 jet_cli_failure_value: fn(changes: [JetCLIFailureChange]) -> JetCLIStatusValue Never! {
-    rows: loop change in changes -> jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("function", jet_cli_status_text(change.function)),
-        jet_cli_status_field("status", jet_cli_status_text(jet_cli_failure_kind(change))),
-        jet_cli_status_field("before_can_fail", if change.before == .Val(was) -> jet_cli_status_bool(was) else -> JetCLIStatusValue.Null),
-        jet_cli_status_field("after_can_fail", if change.after == .Val(now) -> jet_cli_status_bool(now) else -> JetCLIStatusValue.Null),
-        jet_cli_status_field("points", jet_cli_status_array(loop point in change.points -> jet_cli_status_object([JetCLIStatusField]{
-            jet_cli_status_field("status", jet_cli_status_text(point.status)),
-            jet_cli_status_field("callee", jet_cli_status_text(point.callee)),
-            jet_cli_status_field("site", jet_cli_status_text(point.site)),
-        }))),
-    })
+    rows: loop change in changes -> jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("function", jet_cli_status_text(change.function)),
+            jet_cli_status_field("status", jet_cli_status_text(jet_cli_failure_kind(change))),
+            jet_cli_status_field("before_can_fail", if change.before == .Val(was) -> jet_cli_status_bool(was) else -> JetCLIStatusValue.Null),
+            jet_cli_status_field("after_can_fail", if change.after == .Val(now) -> jet_cli_status_bool(now) else -> JetCLIStatusValue.Null),
+            jet_cli_status_field(
+                "points",
+                jet_cli_status_array(
+                    loop point in change.points -> jet_cli_status_object(
+                        [JetCLIStatusField]{
+                            jet_cli_status_field("status", jet_cli_status_text(point.status)),
+                            jet_cli_status_field("callee", jet_cli_status_text(point.callee)),
+                            jet_cli_status_field("site", jet_cli_status_text(point.site)),
+                        },
+                    ),
+                ),
+            ),
+        },
+    )
     jet_cli_status_array(rows)
 }
 
@@ -1571,23 +1675,17 @@ jet_cli_review_comparison_text: fn(comparison: JetCLIReviewComparison) -> String
 // `render_text`.
 jet_cli_review_text: fn(meaning: [JetCLIReviewOp], failures: [JetCLIFailureChange], authority: [JetCLIReviewAuthorityChange], receipts: JetCLIReviewDiff, verdict: String) -> String Never! {
     lines := [String]{}
-    if meaning.len() == 0 {
-        lines.push("meaning    no semantic changes")
-    } else {
+    if meaning.len() == 0 -> lines.push("meaning    no semantic changes") else {
         lines.push("meaning    {meaning.len()} semantic change(s)")
         loop operation in meaning {
             lines.push("  {operation.kind}: {operation.identity} [{operation.stable_id}] alignment={operation.alignment} before_identity={operation.before_identity ?? "none"} after_identity={operation.after_identity ?? "none"} source_operation={operation.source_operation ?? "none"}")
         }
     }
-    if failures.len() == 0 {
-        lines.push("failures   no failure changes")
-    } else {
+    if failures.len() == 0 -> lines.push("failures   no failure changes") else {
         lines.push("failures   {failures.len()} function(s) fail differently · {jet_cli_failure_newly(failures)} newly can fail")
         loop line in jet_cli_failure_lines(failures, "  ") -> lines.push(line)
     }
-    if authority.len() == 0 {
-        lines.push("authority  no authority changes")
-    } else {
+    if authority.len() == 0 -> lines.push("authority  no authority changes") else {
         lines.push("authority  {authority.len()} authority change(s)")
         loop change in authority -> lines.push("  {change.status}: {change.key}")
     }
@@ -1597,10 +1695,18 @@ jet_cli_review_text: fn(meaning: [JetCLIReviewOp], failures: [JetCLIFailureChang
     loop change in receipts.changes -> lines.push("  {change.status}: {change.key}")
     first: if receipts.first_difference == None -> "false" else -> "true"
     lines.push("proof      preserved={receipts.preserved.len()} changed_contracts={receipts.changed_contracts.len()} first_difference={first} sampled_agreements={receipts.sampled_agreements.len()} unknown={receipts.unknown.len()} unproved={receipts.unproved.len()}")
-    if receipts.first_difference == .Val(comparison) -> lines.push("  {jet_cli_review_comparison_text(comparison)}")
-    loop comparison in receipts.sampled_agreements -> lines.push("  {jet_cli_review_comparison_text(comparison)}")
-    loop comparison in receipts.unknown -> lines.push("  {jet_cli_review_comparison_text(comparison)}")
-    loop comparison in receipts.unproved -> lines.push("  {jet_cli_review_comparison_text(comparison)}")
+    if receipts.first_difference == .Val(comparison) {
+        lines.push("  {jet_cli_review_comparison_text(comparison)}")
+    }
+    loop comparison in receipts.sampled_agreements {
+        lines.push("  {jet_cli_review_comparison_text(comparison)}")
+    }
+    loop comparison in receipts.unknown {
+        lines.push("  {jet_cli_review_comparison_text(comparison)}")
+    }
+    loop comparison in receipts.unproved {
+        lines.push("  {jet_cli_review_comparison_text(comparison)}")
+    }
     loop change in receipts.preserved -> lines.push("  {change.status}: {change.key}")
     loop change in receipts.changed_contracts -> lines.push("  {change.status}: {change.key}")
     lines.push("verdict    {verdict}")
@@ -1608,83 +1714,97 @@ jet_cli_review_text: fn(meaning: [JetCLIReviewOp], failures: [JetCLIFailureChang
 }
 
 jet_cli_review_identity_value: fn(identity: JetCLIReviewIdentity) -> JetCLIStatusValue Never! {
-    jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("source", jet_cli_status_text(identity.source)),
-        jet_cli_status_field("build", jet_cli_status_text(identity.build)),
-        jet_cli_status_field("run", jet_cli_status_text(identity.run)),
-        jet_cli_status_field("target", jet_cli_status_text(identity.target)),
-    })
+    jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("source", jet_cli_status_text(identity.source)),
+            jet_cli_status_field("build", jet_cli_status_text(identity.build)),
+            jet_cli_status_field("run", jet_cli_status_text(identity.run)),
+            jet_cli_status_field("target", jet_cli_status_text(identity.target)),
+        },
+    )
 }
 
 jet_cli_review_derivation_value: fn(derivation: JetCLIReviewDerivation?) -> JetCLIStatusValue Never! {
     held: derivation ?? return JetCLIStatusValue.Null
-    observation: if held.event == None && held.counterexample == None -> JetCLIStatusValue.Null else -> jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("event", jet_cli_status_optional_text(held.event)),
-        jet_cli_status_field("counterexample", jet_cli_status_optional_text(held.counterexample)),
-    })
-    jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("id", jet_cli_status_text(held.id)),
-        jet_cli_status_field("subject", jet_cli_status_text(held.subject)),
-        jet_cli_status_field("claim", jet_cli_status_text(held.claim)),
-        jet_cli_status_field("producer", jet_cli_status_text(held.producer)),
-        jet_cli_status_field("method", jet_cli_status_text(held.method)),
-        jet_cli_status_field("rule", jet_cli_status_text(held.rule)),
-        jet_cli_status_field("premises", jet_cli_status_texts(held.premises)),
-        jet_cli_status_field("identity", jet_cli_review_identity_value(held.identity)),
-        jet_cli_status_field("assumptions", jet_cli_status_texts(held.assumptions)),
-        jet_cli_status_field("disposition", jet_cli_status_text(held.disposition)),
-        jet_cli_status_field("observation", observation),
-    })
+    observation: if held.event == None && held.counterexample == None -> JetCLIStatusValue.Null else -> jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("event", jet_cli_status_optional_text(held.event)),
+            jet_cli_status_field("counterexample", jet_cli_status_optional_text(held.counterexample)),
+        },
+    )
+    jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("id", jet_cli_status_text(held.id)),
+            jet_cli_status_field("subject", jet_cli_status_text(held.subject)),
+            jet_cli_status_field("claim", jet_cli_status_text(held.claim)),
+            jet_cli_status_field("producer", jet_cli_status_text(held.producer)),
+            jet_cli_status_field("method", jet_cli_status_text(held.method)),
+            jet_cli_status_field("rule", jet_cli_status_text(held.rule)),
+            jet_cli_status_field("premises", jet_cli_status_texts(held.premises)),
+            jet_cli_status_field("identity", jet_cli_review_identity_value(held.identity)),
+            jet_cli_status_field("assumptions", jet_cli_status_texts(held.assumptions)),
+            jet_cli_status_field("disposition", jet_cli_status_text(held.disposition)),
+            jet_cli_status_field("observation", observation),
+        },
+    )
 }
 
 jet_cli_review_observation_value: fn(observation: JetCLIReviewObservation?) -> JetCLIStatusValue Never! {
     held: observation ?? return JetCLIStatusValue.Null
     identity: if held.identity == .Val(value) -> jet_cli_review_identity_value(value) else -> JetCLIStatusValue.Null
-    jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("contract", jet_cli_status_text(held.contract)),
-        jet_cli_status_field("inputs", jet_cli_status_text(held.inputs)),
-        jet_cli_status_field("environment", jet_cli_status_text(held.environment)),
-        jet_cli_status_field("premises", jet_cli_status_text(held.premises)),
-        jet_cli_status_field("event", jet_cli_status_optional_text(held.event)),
-        jet_cli_status_field("result", jet_cli_status_text(held.result)),
-        jet_cli_status_field("source", jet_cli_status_text(held.source)),
-        jet_cli_status_field("identity", identity),
-        jet_cli_status_field("order", jet_cli_status_int(held.order)),
-    })
+    jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("contract", jet_cli_status_text(held.contract)),
+            jet_cli_status_field("inputs", jet_cli_status_text(held.inputs)),
+            jet_cli_status_field("environment", jet_cli_status_text(held.environment)),
+            jet_cli_status_field("premises", jet_cli_status_text(held.premises)),
+            jet_cli_status_field("event", jet_cli_status_optional_text(held.event)),
+            jet_cli_status_field("result", jet_cli_status_text(held.result)),
+            jet_cli_status_field("source", jet_cli_status_text(held.source)),
+            jet_cli_status_field("identity", identity),
+            jet_cli_status_field("order", jet_cli_status_int(held.order)),
+        },
+    )
 }
 
 jet_cli_review_claim_value: fn(claim: JetCLIReviewClaim?) -> JetCLIStatusValue Never! {
     held: claim ?? return JetCLIStatusValue.Null
-    jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("label", jet_cli_status_text(held.label)),
-        jet_cli_status_field("outcome", jet_cli_status_text(held.outcome)),
-        jet_cli_status_field("state", jet_cli_status_text(held.state)),
-        jet_cli_status_field("proven", jet_cli_status_bool(held.proven)),
-        jet_cli_status_field("derivation", jet_cli_review_derivation_value(held.derivation)),
-        jet_cli_status_field("observation", jet_cli_review_observation_value(held.observation)),
-    })
+    jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("label", jet_cli_status_text(held.label)),
+            jet_cli_status_field("outcome", jet_cli_status_text(held.outcome)),
+            jet_cli_status_field("state", jet_cli_status_text(held.state)),
+            jet_cli_status_field("proven", jet_cli_status_bool(held.proven)),
+            jet_cli_status_field("derivation", jet_cli_review_derivation_value(held.derivation)),
+            jet_cli_status_field("observation", jet_cli_review_observation_value(held.observation)),
+        },
+    )
 }
 
 jet_cli_review_change_values: fn(changes: [JetCLIReviewChange]) -> JetCLIStatusValue Never! {
-    values: loop change in changes -> jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("status", jet_cli_status_text(change.status)),
-        jet_cli_status_field("key", jet_cli_status_text(change.key)),
-        jet_cli_status_field("before", jet_cli_review_claim_value(change.before)),
-        jet_cli_status_field("after", jet_cli_review_claim_value(change.after)),
-    })
+    values: loop change in changes -> jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("status", jet_cli_status_text(change.status)),
+            jet_cli_status_field("key", jet_cli_status_text(change.key)),
+            jet_cli_status_field("before", jet_cli_review_claim_value(change.before)),
+            jet_cli_status_field("after", jet_cli_review_claim_value(change.after)),
+        },
+    )
     jet_cli_status_array(values)
 }
 
 jet_cli_review_comparison_value: fn(comparison: JetCLIReviewComparison) -> JetCLIStatusValue Never! {
-    jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("status", jet_cli_status_text(comparison.status)),
-        jet_cli_status_field("key", jet_cli_status_text(comparison.key)),
-        jet_cli_status_field("reason", jet_cli_status_text(comparison.reason)),
-        jet_cli_status_field("before", jet_cli_review_observation_value(comparison.before)),
-        jet_cli_status_field("after", jet_cli_review_observation_value(comparison.after)),
-        jet_cli_status_field("subject", jet_cli_status_optional_text(comparison.subject)),
-        jet_cli_status_field("source_operation", jet_cli_status_optional_text(comparison.source_operation)),
-    })
+    jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("status", jet_cli_status_text(comparison.status)),
+            jet_cli_status_field("key", jet_cli_status_text(comparison.key)),
+            jet_cli_status_field("reason", jet_cli_status_text(comparison.reason)),
+            jet_cli_status_field("before", jet_cli_review_observation_value(comparison.before)),
+            jet_cli_status_field("after", jet_cli_review_observation_value(comparison.after)),
+            jet_cli_status_field("subject", jet_cli_status_optional_text(comparison.subject)),
+            jet_cli_status_field("source_operation", jet_cli_status_optional_text(comparison.source_operation)),
+        },
+    )
 }
 
 jet_cli_review_comparison_values: fn(comparisons: [JetCLIReviewComparison]) -> JetCLIStatusValue Never! {
@@ -1694,72 +1814,91 @@ jet_cli_review_comparison_values: fn(comparisons: [JetCLIReviewComparison]) -> J
 
 // `snapshot_value`: the closure is unknown without inputs or a receipt.
 jet_cli_review_snapshot_value: fn(side: JetCLIReviewSide, receipt: JetCLIReviewReceipt) -> JetCLIStatusValue Never! {
-    inputs: loop input in side.inputs -> jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("path", jet_cli_status_text(input.path)),
-        jet_cli_status_field("digest", jet_cli_status_text(input.digest)),
-    })
-    proof: if receipt.proof == .Val(held) -> jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("path", jet_cli_status_text(held.path)),
-        jet_cli_status_field("digest", jet_cli_status_text(held.digest)),
-    }) else -> JetCLIStatusValue.Null
+    inputs: loop input in side.inputs -> jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("path", jet_cli_status_text(input.path)),
+            jet_cli_status_field("digest", jet_cli_status_text(input.digest)),
+        },
+    )
+    proof: if receipt.proof == .Val(held) -> jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("path", jet_cli_status_text(held.path)),
+            jet_cli_status_field("digest", jet_cli_status_text(held.digest)),
+        },
+    ) else -> JetCLIStatusValue.Null
     closure: if side.inputs.len() == 0 || receipt.proof == None -> "unknown" else -> side.closure.copy()
-    jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("entry", jet_cli_status_text(side.path)),
-        jet_cli_status_field("inputs", jet_cli_status_array(inputs)),
-        jet_cli_status_field("claim_key", jet_cli_status_optional_text(receipt.claim_key)),
-        jet_cli_status_field("closure", jet_cli_status_text(closure)),
-        jet_cli_status_field("proof_receipt", proof),
-    })
+    jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("entry", jet_cli_status_text(side.path)),
+            jet_cli_status_field("inputs", jet_cli_status_array(inputs)),
+            jet_cli_status_field("claim_key", jet_cli_status_optional_text(receipt.claim_key)),
+            jet_cli_status_field("closure", jet_cli_status_text(closure)),
+            jet_cli_status_field("proof_receipt", proof),
+        },
+    )
 }
 
 // `render_json`: the `review` field of a `jet.status/v1` envelope.
 jet_cli_review_json: fn(base: JetCLIReviewSide, head: JetCLIReviewSide, base_receipt: JetCLIReviewReceipt, head_receipt: JetCLIReviewReceipt, meaning: [JetCLIReviewOp], failures: [JetCLIFailureChange], authority: [JetCLIReviewAuthorityChange], receipts: JetCLIReviewDiff, verdict: String) -> String Never! {
-    operations: loop operation in meaning -> jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("kind", jet_cli_status_text(operation.kind)),
-        jet_cli_status_field("stable_id", jet_cli_status_text(operation.stable_id)),
-        jet_cli_status_field("identity", jet_cli_status_text(operation.identity)),
-        jet_cli_status_field("before", jet_cli_status_optional_text(operation.before)),
-        jet_cli_status_field("after", jet_cli_status_optional_text(operation.after)),
-        jet_cli_status_field("before_identity", jet_cli_status_optional_text(operation.before_identity)),
-        jet_cli_status_field("after_identity", jet_cli_status_optional_text(operation.after_identity)),
-        jet_cli_status_field("alignment", jet_cli_status_text(operation.alignment)),
-        jet_cli_status_field("source_operation", jet_cli_status_optional_text(operation.source_operation)),
-    })
-    changes: loop change in authority -> jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("status", jet_cli_status_text(change.status)),
-        jet_cli_status_field("key", jet_cli_status_text(change.key)),
-        jet_cli_status_field("before", jet_cli_status_optional_text(change.before)),
-        jet_cli_status_field("after", jet_cli_status_optional_text(change.after)),
-    })
+    operations: loop operation in meaning -> jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("kind", jet_cli_status_text(operation.kind)),
+            jet_cli_status_field("stable_id", jet_cli_status_text(operation.stable_id)),
+            jet_cli_status_field("identity", jet_cli_status_text(operation.identity)),
+            jet_cli_status_field("before", jet_cli_status_optional_text(operation.before)),
+            jet_cli_status_field("after", jet_cli_status_optional_text(operation.after)),
+            jet_cli_status_field("before_identity", jet_cli_status_optional_text(operation.before_identity)),
+            jet_cli_status_field("after_identity", jet_cli_status_optional_text(operation.after_identity)),
+            jet_cli_status_field("alignment", jet_cli_status_text(operation.alignment)),
+            jet_cli_status_field("source_operation", jet_cli_status_optional_text(operation.source_operation)),
+        },
+    )
+    changes: loop change in authority -> jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("status", jet_cli_status_text(change.status)),
+            jet_cli_status_field("key", jet_cli_status_text(change.key)),
+            jet_cli_status_field("before", jet_cli_status_optional_text(change.before)),
+            jet_cli_status_field("after", jet_cli_status_optional_text(change.after)),
+        },
+    )
     first: if receipts.first_difference == .Val(comparison) -> jet_cli_review_comparison_value(comparison) else -> JetCLIStatusValue.Null
-    proof: jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("base_recorded", jet_cli_status_bool(receipts.base_recorded)),
-        jet_cli_status_field("head_recorded", jet_cli_status_bool(receipts.head_recorded)),
-        jet_cli_status_field("gained", jet_cli_status_int(receipts.gained)),
-        jet_cli_status_field("lost", jet_cli_status_int(receipts.lost)),
-        jet_cli_status_field("changed", jet_cli_status_int(receipts.changed)),
-        jet_cli_status_field("retained", jet_cli_status_int(receipts.retained)),
-        jet_cli_status_field("changes", jet_cli_review_change_values(receipts.changes)),
-        jet_cli_status_field("preserved", jet_cli_review_change_values(receipts.preserved)),
-        jet_cli_status_field("changed_contracts", jet_cli_review_change_values(receipts.changed_contracts)),
-        jet_cli_status_field("first_difference", first),
-        jet_cli_status_field("sampled_agreements", jet_cli_review_comparison_values(receipts.sampled_agreements)),
-        jet_cli_status_field("unknown", jet_cli_review_comparison_values(receipts.unknown)),
-        jet_cli_status_field("unproved", jet_cli_review_comparison_values(receipts.unproved)),
-    })
-    review: jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("schema", jet_cli_status_text("jet.review/v2")),
-        jet_cli_status_field("kind", jet_cli_status_text("review")),
-        jet_cli_status_field("snapshots", jet_cli_status_object([JetCLIStatusField]{
-            jet_cli_status_field("base", jet_cli_review_snapshot_value(base, base_receipt)),
-            jet_cli_status_field("head", jet_cli_review_snapshot_value(head, head_receipt)),
-        })),
-        jet_cli_status_field("meaning", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("semantic_ops", jet_cli_status_array(operations))})),
-        jet_cli_status_field("failures", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("functions", jet_cli_failure_value(failures))})),
-        jet_cli_status_field("authority", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("changes", jet_cli_status_array(changes))})),
-        jet_cli_status_field("receipts", proof),
-        jet_cli_status_field("verdict", jet_cli_status_text(verdict)),
-    })
+    proof: jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("base_recorded", jet_cli_status_bool(receipts.base_recorded)),
+            jet_cli_status_field("head_recorded", jet_cli_status_bool(receipts.head_recorded)),
+            jet_cli_status_field("gained", jet_cli_status_int(receipts.gained)),
+            jet_cli_status_field("lost", jet_cli_status_int(receipts.lost)),
+            jet_cli_status_field("changed", jet_cli_status_int(receipts.changed)),
+            jet_cli_status_field("retained", jet_cli_status_int(receipts.retained)),
+            jet_cli_status_field("changes", jet_cli_review_change_values(receipts.changes)),
+            jet_cli_status_field("preserved", jet_cli_review_change_values(receipts.preserved)),
+            jet_cli_status_field("changed_contracts", jet_cli_review_change_values(receipts.changed_contracts)),
+            jet_cli_status_field("first_difference", first),
+            jet_cli_status_field("sampled_agreements", jet_cli_review_comparison_values(receipts.sampled_agreements)),
+            jet_cli_status_field("unknown", jet_cli_review_comparison_values(receipts.unknown)),
+            jet_cli_status_field("unproved", jet_cli_review_comparison_values(receipts.unproved)),
+        },
+    )
+    review: jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("schema", jet_cli_status_text("jet.review/v2")),
+            jet_cli_status_field("kind", jet_cli_status_text("review")),
+            jet_cli_status_field(
+                "snapshots",
+                jet_cli_status_object(
+                    [JetCLIStatusField]{
+                        jet_cli_status_field("base", jet_cli_review_snapshot_value(base, base_receipt)),
+                        jet_cli_status_field("head", jet_cli_review_snapshot_value(head, head_receipt)),
+                    },
+                ),
+            ),
+            jet_cli_status_field("meaning", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("semantic_ops", jet_cli_status_array(operations))})),
+            jet_cli_status_field("failures", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("functions", jet_cli_failure_value(failures))})),
+            jet_cli_status_field("authority", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("changes", jet_cli_status_array(changes))})),
+            jet_cli_status_field("receipts", proof),
+            jet_cli_status_field("verdict", jet_cli_status_text(verdict)),
+        },
+    )
     jet_cli_status_render("review", true, [JetCLIStatusField]{jet_cli_status_field("review", review)})
 }
 
@@ -1844,25 +1983,33 @@ jet_cli_review_diagnostic_load: fn(path: String) -> JetCLIReviewDiagnosticLoaded
         .Compiled(result, snapshot) -> {
             diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             if jet_cli_errors(diagnostics).len() == 0 {
-                if result.internal_problem == .Val(problem) -> return JetCLIReviewDiagnosticLoaded.Refused{output: jet_cli_ice(problem)}
+                if result.internal_problem == .Val(problem) {
+                    return JetCLIReviewDiagnosticLoaded.Refused{output: jet_cli_ice(problem)}
+                }
             }
             complete := true
-            if result.failed_stage == .Val(stage) -> complete = stage != JetDriverStage.Collect && stage != JetDriverStage.Parse && stage != JetDriverStage.Load
+            if result.failed_stage == .Val(stage) {
+                complete = stage != JetDriverStage.Collect && stage != JetDriverStage.Parse && stage != JetDriverStage.Load
+            }
             scope_root: jet_cli_inspect_package_root(jet_cli_parent(path) ?? ".")
             revisions := [String:String]{}
             if complete {
-                loop doc_module in result.doc_modules -> revisions[jet_cli_review_scope_key(doc_module.physical_path, scope_root)] = sha256_hex(doc_module.source)
+                loop doc_module in result.doc_modules {
+                    revisions[jet_cli_review_scope_key(doc_module.physical_path, scope_root)] = sha256_hex(doc_module.source)
+                }
             }
-            return JetCLIReviewDiagnosticLoaded.Loaded{side: JetCLIReviewDiagnosticSide{
-                path: path.copy(),
-                source_hash: source_hash.move(),
-                scope_root: scope_root.copy(),
-                entry_scope: jet_cli_review_scope_key(path, scope_root),
-                revisions: revisions.move(),
-                diagnostics: diagnostics.copy(),
-                valid: complete && jet_cli_errors(diagnostics).len() == 0,
-                complete: complete,
-            }}
+            return JetCLIReviewDiagnosticLoaded.Loaded{
+                side: JetCLIReviewDiagnosticSide{
+                    path: path.copy(),
+                    source_hash: source_hash.move(),
+                    scope_root: scope_root.copy(),
+                    entry_scope: jet_cli_review_scope_key(path, scope_root),
+                    revisions: revisions.move(),
+                    diagnostics: diagnostics.copy(),
+                    valid: complete && jet_cli_errors(diagnostics).len() == 0,
+                    complete: complete,
+                },
+            }
         }
     }
 }
@@ -1934,7 +2081,9 @@ jet_cli_review_unmatched: fn(at: Int, occurrence: JetCLIReviewOccurrence, side_c
     }
     base: if status == "resolved" -> Val(at) else -> None
     head: if status == "new" -> Val(at) else -> None
-    if reason != "" -> return JetCLIReviewRelation{status: "unknown", reason: reason.copy(), base: base, head: head}
+    if reason != "" {
+        return JetCLIReviewRelation{status: "unknown", reason: reason.copy(), base: base, head: head}
+    }
     present := if status == "new" -> "diagnostic is present only on the reviewed side" else -> "diagnostic is present only on the baseline side"
     JetCLIReviewRelation{status: status.copy(), reason: present.move(), base: base, head: head}
 }
@@ -1979,13 +2128,17 @@ jet_cli_review_diagnostic_compare: fn(base: JetCLIReviewDiagnosticSide, head: Je
             loop at in old {
                 base_seen[at] = true
                 relation: jet_cli_review_unmatched(at, base_occurrences[at], base.complete, head.complete, head_occurrences, jet_cli_review_input_changed(base_occurrences[at], base, head), "resolved")
-                if relation.status == "resolved" -> diff.resolved.push(relation.copy()) else -> diff.unknown.push(relation.copy())
+                if relation.status == "resolved" -> diff.resolved.push(relation.copy()) else {
+                    diff.unknown.push(relation.copy())
+                }
             }
         } else {
             loop at in new {
                 head_seen[at] = true
                 relation := jet_cli_review_unmatched(at, head_occurrences[at], head.complete, base.complete, base_occurrences, jet_cli_review_input_changed(head_occurrences[at], head, base), "new")
-                if relation.status == "new" -> diff.new.push(relation.move()) else -> diff.unknown.push(relation.move())
+                if relation.status == "new" -> diff.new.push(relation.move()) else {
+                    diff.unknown.push(relation.move())
+                }
             }
         }
     }
@@ -2066,10 +2219,18 @@ jet_cli_review_diagnostic_text: fn(base: JetCLIReviewDiagnosticSide, head: JetCL
     lines := [String]{}
     lines.push(jet_cli_review_side_text("base", base))
     lines.push(jet_cli_review_side_text("head", head))
-    loop relation in diff.new -> lines.push(jet_cli_review_relation_text("new", relation, base_occurrences, head_occurrences))
-    loop relation in diff.existing -> lines.push(jet_cli_review_relation_text("existing", relation, base_occurrences, head_occurrences))
-    loop relation in diff.resolved -> lines.push(jet_cli_review_relation_text("resolved", relation, base_occurrences, head_occurrences))
-    loop relation in diff.unknown -> lines.push(jet_cli_review_relation_text("unknown", relation, base_occurrences, head_occurrences))
+    loop relation in diff.new {
+        lines.push(jet_cli_review_relation_text("new", relation, base_occurrences, head_occurrences))
+    }
+    loop relation in diff.existing {
+        lines.push(jet_cli_review_relation_text("existing", relation, base_occurrences, head_occurrences))
+    }
+    loop relation in diff.resolved {
+        lines.push(jet_cli_review_relation_text("resolved", relation, base_occurrences, head_occurrences))
+    }
+    loop relation in diff.unknown {
+        lines.push(jet_cli_review_relation_text("unknown", relation, base_occurrences, head_occurrences))
+    }
     "{lines.join("\n")}\n"
 }
 

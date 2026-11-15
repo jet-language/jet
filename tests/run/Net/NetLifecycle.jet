@@ -22,13 +22,17 @@ run: fn() {
     print("udp original-len:{net.udp_packet_original_len(packet)} truncated:{net.udp_packet_truncated(packet)}")
     print("udp source-port-matches:{net.socket_port(net.udp_packet_addr(packet)) == net.socket_port(sender_addr)}")
     if net.udp_recv_from(receiver, 0) == {
-        .Ok(_) -> print("udp zero-limit:accepted")
-        .Err(error) -> print("udp zero-limit:{net.error_operation(error)}:{net.error_message(error)}")
+        .Ok(_) -> { print("udp zero-limit:accepted") }
+        .Err(error) -> {
+            print("udp zero-limit:{net.error_operation(error)}:{net.error_message(error)}")
+        }
     }
     #Deadline(50ms) {
         if net.udp_recv_from(receiver, 16) == {
-            .Ok(_) -> print("udp deadline:received")
-            .Err(error) -> print("udp deadline:{net.error_operation(error)}:{net.error_name(error) ?? "none"}")
+            .Ok(_) -> { print("udp deadline:received") }
+            .Err(error) -> {
+                print("udp deadline:{net.error_operation(error)}:{net.error_name(error) ?? "none"}")
+            }
         }
     }
 
@@ -49,15 +53,19 @@ run: fn() {
 
     // Deadline: nothing more will arrive on the client, so readiness times out.
     if net.tcp_ready(client, NetReadyInterest.Read, 50) == {
-        .Ok(ready) -> print("tcp ready deadline:readable={net.ready_readable(ready)}")
-        .Err(error) -> print("tcp ready deadline:{net.error_operation(error)}:{net.error_name(error) ?? "none"}")
+        .Ok(ready) -> { print("tcp ready deadline:readable={net.ready_readable(ready)}") }
+        .Err(error) -> {
+            print("tcp ready deadline:{net.error_operation(error)}:{net.error_name(error) ?? "none"}")
+        }
     }
 
     // Close, then misuse.
     client.close() ?? panic("client close")
     if client.write("late") == {
-        .Ok(_) -> print("tcp write after close:accepted")
-        .Err(error) -> print("tcp write after close:{net.error_operation(error)}:{net.error_message(error)}")
+        .Ok(_) -> { print("tcp write after close:accepted") }
+        .Err(error) -> {
+            print("tcp write after close:{net.error_operation(error)}:{net.error_message(error)}")
+        }
     }
     server.close() ?? panic("server close")
 }

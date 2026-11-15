@@ -1,7 +1,11 @@
 // PENDING-SEAM(package-tests); historical manifest syntax stays unchanged.
 use {
     jet_pkg_model.[
-        AuthorityError, LockFile, LockedPackage, Manifest, pkg_lock_verify_all_manifest_deps_locked,
+        AuthorityError,
+        LockFile,
+        LockedPackage,
+        Manifest,
+        pkg_lock_verify_all_manifest_deps_locked,
     ]
     files: core.files
     process: core.process
@@ -15,6 +19,7 @@ use {
     assert(diagnostic.why.contains("Descriptor-relative no-follow"))
     assert(diagnostic.fix.contains("Use a platform"))
 }
+
 #Test("pkg integration e1217_missing_locked_revision") {
     root: files.join(sys.temp_dir(), "jet-pkg-integration-e1217-{process.current_pid()}")
     if files.exists(root) -> files.remove_all(root) ?? panic("clear fixture")

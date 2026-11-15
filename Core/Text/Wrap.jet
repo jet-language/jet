@@ -8,7 +8,9 @@ package: {
         wrap: .Library{ entry: wrap }
     }
 }
+
 use unicode: core.text
+
 // core.text.wrap — paragraph filling, indent, and HTML escaping.
 //
 // Python `textwrap` plus display-column-safe width, indentation, and escaping.
@@ -24,7 +26,7 @@ fill: fn(text: String, width: Int) -> String Never! {
     i := 0
     loop i < lines.len() {
         if i == 0 -> s = lines[0] else -> s = "{s}\n{lines[i]}"
-        i = i + 1
+        i += 1
     }
     s
 }
@@ -42,7 +44,7 @@ indent: fn(text: String, prefix: String) -> String Never! {
     loop i < lines.len() {
         piece: "{prefix}{lines[i]}"
         if i == 0 -> s = piece else -> s = "{s}\n{piece}"
-        i = i + 1
+        i += 1
     }
     s
 }
@@ -64,7 +66,7 @@ dedent: fn(text: String) -> String Never! {
             line = slice_b(line.bytes(), margin, line.bytes().len())
         }
         if i == 0 -> s = line else -> s = "{s}\n{line}"
-        i = i + 1
+        i += 1
     }
     s
 }
@@ -82,15 +84,13 @@ expand_tabs: fn(text: String, tabsize: Int) -> String Never! {
             i := 0
             loop i < n {
                 out = "{out} "
-                i = i + 1
+                i += 1
             }
-            col = col + n
+            col += n
         } else {
             out = "{out}{cluster}"
-            if cluster == "\n" || cluster == cr || cluster == crlf {
-                col = 0
-            } else {
-                col = col + unicode.display_width(cluster)
+            if cluster == "\n" || cluster == cr || cluster == crlf -> col = 0 else {
+                col += unicode.display_width(cluster)
             }
         }
     }
@@ -100,12 +100,11 @@ expand_tabs: fn(text: String, tabsize: Int) -> String Never! {
 html_escape: fn(text: String, quote: Bool) -> String Never! {
     out := ""
     loop scalar in unicode.scalars(text) {
-        if scalar == "&" -> out = "{out}&amp;"
-        else if scalar == "<" -> out = "{out}&lt;"
-        else if scalar == ">" -> out = "{out}&gt;"
-        else if quote && scalar == "\"" -> out = "{out}&quot;"
-        else if quote && scalar == "'" -> out = "{out}&#x27;"
-        else -> out = "{out}{scalar}"
+        if scalar == "&" -> out = "{out}&amp;" else if scalar == "<" -> out = "{out}&lt;" else if scalar == ">" {
+            out = "{out}&gt;"
+        } else if quote && scalar == "\"" { out = "{out}&quot;" } else if quote && scalar == "'" {
+            out = "{out}&#x27;"
+        } else { out = "{out}{scalar}" }
     }
     out
 }
@@ -129,9 +128,7 @@ split_ws: fn(text: String) -> [String] Never! {
                 out.push(current)
                 current = ""
             }
-        } else {
-            current = "{current}{scalar}"
-        }
+        } else { current = "{current}{scalar}" }
     }
     if current.bytes().len() > 0 -> out.push(current)
     out
@@ -165,11 +162,11 @@ split_lines: fn(text: String) -> [String] {
     loop i < raw.len() {
         if raw[i] == (U8{10}) {
             end := i
-            if end > start && raw[end - 1] == (U8{13}) -> end = end - 1
+            if end > start && raw[end - 1] == (U8{13}) -> end -= 1
             out.push(slice_b(raw, start, end))
             start = i + 1
         }
-        i = i + 1
+        i += 1
     }
     out.push(slice_b(raw, start, raw.len()))
     out
@@ -186,7 +183,7 @@ is_blank: fn(text: String) -> Bool {
 leading_spaces: fn(text: String) -> Int {
     n := 0
     loop b in text.bytes() {
-        if b == (U8{32}) || b == (U8{9}) -> n = n + 1 else -> return n
+        if b == (U8{32}) || b == (U8{9}) -> n += 1 else -> return n
     }
     n
 }
@@ -197,7 +194,7 @@ slice_b: fn(raw: [U8], start: Int, end: Int) -> String {
     loop {
         if i >= end || i < 0 || i >= raw.len() -> return String.from_bytes(out) ?? ""
         out.push(raw[i])
-        i = i + 1
+        i += 1
     }
 }
 
@@ -324,10 +321,8 @@ wrap_with: fn(text: String, spec: Wrapper) -> [String] Never! {
                 last_indent := spec.initial_indent
                 if i > 0 -> last_indent = spec.subsequent_indent
                 keep.push(line_with_placeholder(out[i], last_indent, spec.width, spec.placeholder))
-            } else {
-                keep.push(out[i])
-            }
-            i = i + 1
+            } else { keep.push(out[i]) }
+            i += 1
         }
         return keep
     }
@@ -344,7 +339,7 @@ indent_with: fn(text: String, prefix: String, predicate_nonblank: Bool) -> Strin
         line := lines[i]
         if !predicate_nonblank || !is_blank(line) -> line = "{prefix}{line}"
         if i == 0 -> s = line else -> s = "{s}\n{line}"
-        i = i + 1
+        i += 1
     }
     s
 }
@@ -356,7 +351,7 @@ wrap_paragraphs: fn(text: String, width: Int) -> String Never! {
     loop i < paras.len() {
         filled: fill(paras[i], width)
         if i == 0 -> s = filled else -> s = "{s}\n\n{filled}"
-        i = i + 1
+        i += 1
     }
     s
 }
@@ -396,13 +391,13 @@ break_word: fn(word: String, width: Int, break_on_hyphens: Bool) -> [String] Nev
                 break
             }
             if i == start && current_width + unit_width > width {
-                i = i + 1
+                i += 1
                 overflowed = true
                 break
             }
-            current_width = current_width + unit_width
+            current_width += unit_width
             if unit == "-" -> last_hyphen = i + 1
-            i = i + 1
+            i += 1
         }
         if i <= start -> i = start + 1
         end := i
@@ -421,7 +416,7 @@ join_units: fn(units: [String], start: Int, end: Int) -> String {
     i := start
     loop i < end {
         out = "{out}{units[i]}"
-        i = i + 1
+        i += 1
     }
     out
 }
@@ -431,7 +426,7 @@ join_chunks: fn(chunks: [String], start: Int) -> String {
     i := start
     loop i < chunks.len() {
         out = "{out}{chunks[i]}"
-        i = i + 1
+        i += 1
     }
     out
 }
@@ -457,13 +452,11 @@ word_prefix: fn(text: String, width: Int) -> String Never! {
     loop i < words.len() {
         candidate := words[i]
         if current.bytes().len() > 0 -> candidate = "{current} {words[i]}"
-        if unicode.display_width(candidate) <= width {
-            current = candidate
-        } else {
+        if unicode.display_width(candidate) <= width -> current = candidate else {
             if current.bytes().len() == 0 -> return take_width(words[i], width)
             return current
         }
-        i = i + 1
+        i += 1
     }
     current
 }
@@ -479,8 +472,8 @@ take_width: fn(text: String, width: Int) -> String Never! {
         cluster_width: unicode.display_width(cluster)
         if current_width + cluster_width > width -> return out
         out = "{out}{cluster}"
-        current_width = current_width + cluster_width
-        i = i + 1
+        current_width += cluster_width
+        i += 1
     }
     out
 }
@@ -490,7 +483,9 @@ line_with_placeholder: fn(line: String, line_indent: String, width: Int, placeho
     if capacity <= 0 -> return line_indent.copy()
     indent_bytes := line_indent.bytes().len()
     content := line
-    if line.bytes().len() >= indent_bytes -> content = slice_b(line.bytes(), indent_bytes, line.bytes().len())
+    if line.bytes().len() >= indent_bytes {
+        content = slice_b(line.bytes(), indent_bytes, line.bytes().len())
+    }
     "{line_indent}{shorten_text(content, capacity, placeholder, true)}"
 }
 
@@ -499,7 +494,7 @@ join_lines: fn(lines: [String]) -> String {
     i := 0
     loop i < lines.len() {
         if i == 0 -> s = lines[0] else -> s = "{s}\n{lines[i]}"
-        i = i + 1
+        i += 1
     }
     s
 }

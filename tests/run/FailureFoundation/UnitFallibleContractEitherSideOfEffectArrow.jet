@@ -2,14 +2,16 @@
 // effect arrow: `before` writes `MakeError! -[IO]>`, `after` writes
 // `-[IO]> MakeError!`, and both are the same signature.
 #Error
-MakeError: enum { Failed }
+MakeError: enum {
+    Failed
+}
 
 before: fn(n: Int) MakeError! -[IO]> {
     if n < 0 -> return Err(MakeError.Failed)
     print("before {n}")
 }
 
-after: fn(n: Int) -[IO]> MakeError! {
+after: fn(n: Int) MakeError! -[IO]> {
     if n < 0 -> return Err(MakeError.Failed)
     print("after {n}")
 }

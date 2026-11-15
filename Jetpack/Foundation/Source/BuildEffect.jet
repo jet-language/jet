@@ -6,9 +6,7 @@
 // root the toolchain tree's effect sources declare (JetFoundation
 // EFFECT_VOCABULARY_ROOTS) and that `parse` and `name` give it back, and a
 // stray stops the build (E3010) naming it.
-use {
-    jet_foundation.[EFFECT_VOCABULARY_ROOTS, effect_vocabulary_enum_cases, effect_vocabulary_strays]
-}
+use jet_foundation.[EFFECT_VOCABULARY_ROOTS, effect_vocabulary_enum_cases, effect_vocabulary_strays]
 
 BUILD_EFFECT_COUNT: #run build_effect_count(embed_file("BuildEffect.jet"), EFFECT_VOCABULARY_ROOTS)
 
@@ -135,12 +133,18 @@ build_effect_count: fn(text: String, roots: [String]) -> Int {
 build_effect_problem: fn(text: String, roots: [String]) -> String {
     cases: effect_vocabulary_enum_cases(text, "BuildEffect") ?? return "BuildEffect.jet declares no `BuildEffect: enum {{ … }}`"
     strays: effect_vocabulary_strays(cases, roots)
-    if strays.len() > 0 -> return "BuildEffect.jet: BuildEffect names effects the effect sources (Compiler/Prelude/Effects.jet, Core/Effects/Effects.jet, Core/Compiler/Meta.jet) do not declare: [{strays.join(", ")}]"
+    if strays.len() > 0 {
+        return "BuildEffect.jet: BuildEffect names effects the effect sources (Compiler/Prelude/Effects.jet, Core/Effects/Effects.jet, Core/Compiler/Meta.jet) do not declare: [{strays.join(", ")}]"
+    }
     unread := [String]{}
     loop case_name in cases {
-        if (BuildEffect.parse(case_name)?.name() ?? "") != case_name -> unread.push(case_name.copy())
+        if (BuildEffect.parse(case_name)?.name() ?? "") != case_name {
+            unread.push(case_name.copy())
+        }
     }
-    if unread.len() > 0 -> return "BuildEffect.jet: BuildEffect.parse and name do not give back [{unread.join(", ")}]"
+    if unread.len() > 0 {
+        return "BuildEffect.jet: BuildEffect.parse and name do not give back [{unread.join(", ")}]"
+    }
     ""
 }
 

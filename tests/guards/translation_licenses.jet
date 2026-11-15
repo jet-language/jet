@@ -8,24 +8,61 @@
 use tl_files: core.files
 
 TL_SPDX: "// SPDX-License-Identifier: Apache-2.0"
+
 TL_ORIGIN: "// Translated from Mbed TLS 3.6.7 ("
+
 TL_COPYRIGHT: "); Copyright The Mbed TLS Contributors; see LICENSE-mbedtls and NOTICE-mbedtls beside this file."
+
 // The first line of the upstream LICENSE file.
 TL_LICENSE_HEAD: "Mbed TLS files are provided under a dual [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html)"
 
 TL_TRANSLATED: [String]{
-    "Core/Crypto/ASN1.jet", "Core/Crypto/Aead.jet", "Core/Crypto/Bignum.jet", "Core/Crypto/Block.jet",
-    "Core/Crypto/Cipher.jet", "Core/Crypto/CipherLayer.jet", "Core/Crypto/ConstTime.jet", "Core/Crypto/DES.jet",
-    "Core/Crypto/DHM.jet", "Core/Crypto/DRBG.jet", "Core/Crypto/ECDH.jet", "Core/Crypto/ECDSA.jet",
-    "Core/Crypto/ECJPAKE.jet", "Core/Crypto/ECP.jet", "Core/Crypto/ECPCurves.jet", "Core/Crypto/LMS.jet",
-    "Core/Crypto/MD.jet", "Core/Crypto/OID.jet", "Core/Crypto/PEM.jet", "Core/Crypto/PK.jet",
-    "Core/Crypto/PKCS12.jet", "Core/Crypto/PKCS5.jet", "Core/Crypto/PKCS7.jet", "Core/Crypto/PKParse.jet",
-    "Core/Crypto/PKWrite.jet", "Core/Crypto/RSA.jet", "Core/Crypto/X509.jet", "Core/Crypto/X509CRL.jet",
-    "Core/Crypto/X509CRT.jet", "Core/Crypto/X509CSR.jet", "Core/Crypto/X509Write.jet",
-    "Core/Net/SSL/Cache.jet", "Core/Net/SSL/Ciphersuites.jet", "Core/Net/SSL/Client.jet", "Core/Net/SSL/Client12.jet",
-    "Core/Net/SSL/Client13.jet", "Core/Net/SSL/Cookie.jet", "Core/Net/SSL/Defs.jet", "Core/Net/SSL/Gen13.jet",
-    "Core/Net/SSL/Keys13.jet", "Core/Net/SSL/Msg.jet", "Core/Net/SSL/Ser.jet", "Core/Net/SSL/Server12.jet",
-    "Core/Net/SSL/Server13.jet", "Core/Net/SSL/TLS.jet", "Core/Net/SSL/Ticket.jet",
+    "Core/Crypto/ASN1.jet",
+    "Core/Crypto/Aead.jet",
+    "Core/Crypto/Bignum.jet",
+    "Core/Crypto/Block.jet",
+    "Core/Crypto/Cipher.jet",
+    "Core/Crypto/CipherLayer.jet",
+    "Core/Crypto/ConstTime.jet",
+    "Core/Crypto/DES.jet",
+    "Core/Crypto/DHM.jet",
+    "Core/Crypto/DRBG.jet",
+    "Core/Crypto/ECDH.jet",
+    "Core/Crypto/ECDSA.jet",
+    "Core/Crypto/ECJPAKE.jet",
+    "Core/Crypto/ECP.jet",
+    "Core/Crypto/ECPCurves.jet",
+    "Core/Crypto/LMS.jet",
+    "Core/Crypto/MD.jet",
+    "Core/Crypto/OID.jet",
+    "Core/Crypto/PEM.jet",
+    "Core/Crypto/PK.jet",
+    "Core/Crypto/PKCS12.jet",
+    "Core/Crypto/PKCS5.jet",
+    "Core/Crypto/PKCS7.jet",
+    "Core/Crypto/PKParse.jet",
+    "Core/Crypto/PKWrite.jet",
+    "Core/Crypto/RSA.jet",
+    "Core/Crypto/X509.jet",
+    "Core/Crypto/X509CRL.jet",
+    "Core/Crypto/X509CRT.jet",
+    "Core/Crypto/X509CSR.jet",
+    "Core/Crypto/X509Write.jet",
+    "Core/Net/SSL/Cache.jet",
+    "Core/Net/SSL/Ciphersuites.jet",
+    "Core/Net/SSL/Client.jet",
+    "Core/Net/SSL/Client12.jet",
+    "Core/Net/SSL/Client13.jet",
+    "Core/Net/SSL/Cookie.jet",
+    "Core/Net/SSL/Defs.jet",
+    "Core/Net/SSL/Gen13.jet",
+    "Core/Net/SSL/Keys13.jet",
+    "Core/Net/SSL/Msg.jet",
+    "Core/Net/SSL/Ser.jet",
+    "Core/Net/SSL/Server12.jet",
+    "Core/Net/SSL/Server13.jet",
+    "Core/Net/SSL/TLS.jet",
+    "Core/Net/SSL/Ticket.jet",
 }
 
 // Folders the walk does not enter: build output.
@@ -65,13 +102,25 @@ tl_folder_findings: fn(folder: String) -> [String] {
     findings := [String]{}
     license_path: "{folder}/LICENSE-mbedtls"
     if tl_files.read(license_path) == {
-        .Ok(text) -> { if !text.starts_with(TL_LICENSE_HEAD) -> findings.push("{license_path}: not the upstream Mbed TLS LICENSE") }
-        .Err(_) -> { findings.push("{license_path}: missing; the translations beside it need the upstream LICENSE") }
+        .Ok(text) -> {
+            if !text.starts_with(TL_LICENSE_HEAD) {
+                findings.push("{license_path}: not the upstream Mbed TLS LICENSE")
+            }
+        }
+        .Err(_) -> {
+            findings.push("{license_path}: missing; the translations beside it need the upstream LICENSE")
+        }
     }
     notice_path: "{folder}/NOTICE-mbedtls"
     if tl_files.read(notice_path) == {
-        .Ok(text) -> { if !text.contains("Mbed TLS 3.6.7") -> findings.push("{notice_path}: does not name Mbed TLS 3.6.7") }
-        .Err(_) -> { findings.push("{notice_path}: missing; the translations beside it need the NOTICE") }
+        .Ok(text) -> {
+            if !text.contains("Mbed TLS 3.6.7") {
+                findings.push("{notice_path}: does not name Mbed TLS 3.6.7")
+            }
+        }
+        .Err(_) -> {
+            findings.push("{notice_path}: missing; the translations beside it need the NOTICE")
+        }
     }
     findings
 }
@@ -113,7 +162,9 @@ tl_walk: fn(path: String, out: &[String]) {
     }
     folders := [String:Bool]{}
     loop path in TL_TRANSLATED {
-        if found.get(path) == None -> findings.push("{path}: no such file; delete its TL_TRANSLATED row")
+        if found.get(path) == None {
+            findings.push("{path}: no such file; delete its TL_TRANSLATED row")
+        }
         folders[tl_folder(path)] = true
     }
     loop folder in folders.keys() {

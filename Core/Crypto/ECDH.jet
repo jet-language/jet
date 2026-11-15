@@ -36,8 +36,13 @@ ECDHContext: struct {
 /// A context with no group (mbedtls_ecdh_init).
 ecdh_new: fn() -> ECDHContext Never! {
     ECDHContext{
-        grp_id: ecp.GroupID.Unknown, point_format: ecp.PointFormat.Uncompressed, grp: ecp.empty_group(),
-        d: bn.mpi(), q: ecp.point_new(), qp: ecp.point_new(), z: bn.mpi(),
+        grp_id: ecp.GroupID.Unknown,
+        point_format: ecp.PointFormat.Uncompressed,
+        grp: ecp.empty_group(),
+        d: bn.mpi(),
+        q: ecp.point_new(),
+        qp: ecp.point_new(),
+        z: bn.mpi(),
     }
 }
 
@@ -108,7 +113,7 @@ ecdh_get_params: fn(ctx: &ECDHContext, key: ecp.Keypair, side: ECDHSide) ecp.Ecp
         ctx.grp_id != key.grp.id -> return Err(.BadInput)
     }
     if side == {
-        .Theirs -> ctx.qp = ecp.point_copy(key.q)
+        .Theirs -> { ctx.qp = ecp.point_copy(key.q) }
         .Ours -> {
             ctx.q = ecp.point_copy(key.q)
             ctx.d = bn.copy_mpi_ct(key.d)

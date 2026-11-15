@@ -1,31 +1,37 @@
 // The connected development receipt record
 // ported once from jet_codegen::development_receipt. Hosts own the durable
 // filesystem transaction; this home owns the record bytes.
-
-use {
-    jet_foundation.[
-        ENV_JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST,
-        ENV_JET_DEVELOPMENT_RECEIPT_DIRECTORY,
-        ENV_JET_DEVELOPMENT_RECEIPT_ENTRY,
-        ENV_JET_DEVELOPMENT_RECEIPT_INPUT_COUNT,
-        ENV_JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST,
-        ENV_JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST,
-        ENV_JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST,
-        ENV_JET_DEVELOPMENT_RECEIPT_TARGET,
-        ENV_JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST,
-    ]
-}
+use jet_foundation.[
+    ENV_JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST,
+    ENV_JET_DEVELOPMENT_RECEIPT_DIRECTORY,
+    ENV_JET_DEVELOPMENT_RECEIPT_ENTRY,
+    ENV_JET_DEVELOPMENT_RECEIPT_INPUT_COUNT,
+    ENV_JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST,
+    ENV_JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST,
+    ENV_JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST,
+    ENV_JET_DEVELOPMENT_RECEIPT_TARGET,
+    ENV_JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST,
+]
 
 JET_DEVELOPMENT_RECEIPT_HEADER: "jet-development-receipt-v1"
+
 // One production-receipt environment protocol.
 JET_DEVELOPMENT_RECEIPT_DIRECTORY_ENV: ENV_JET_DEVELOPMENT_RECEIPT_DIRECTORY
+
 JET_DEVELOPMENT_RECEIPT_ENTRY_ENV: ENV_JET_DEVELOPMENT_RECEIPT_ENTRY
+
 JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST_ENV: ENV_JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST
+
 JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST_ENV: ENV_JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST
+
 JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST_ENV: ENV_JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST
+
 JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_ENV: ENV_JET_DEVELOPMENT_RECEIPT_INPUT_COUNT
+
 JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST_ENV: ENV_JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST
+
 JET_DEVELOPMENT_RECEIPT_TARGET_ENV: ENV_JET_DEVELOPMENT_RECEIPT_TARGET
+
 JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST_ENV: ENV_JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST
 
 JetDevelopmentReceiptInput: struct {
@@ -56,9 +62,13 @@ JetDevelopmentReceipt: struct {
         out := "{JET_DEVELOPMENT_RECEIPT_HEADER}\n"
         out = "{out}{jet_receipt_line("act", "", self.act)}"
         out = "{out}{jet_receipt_line("closure", "", self.locked_closure)}"
-        loop input in jet_receipt_sorted_pairs(self.inputs) -> out = "{out}{jet_receipt_line("input", input.name, input.digest)}"
+        loop input in jet_receipt_sorted_pairs(self.inputs) {
+            out = "{out}{jet_receipt_line("input", input.name, input.digest)}"
+        }
         out = "{out}{jet_receipt_line("action", "planned", self.planned_action)}"
-        loop output in jet_receipt_sorted_pairs(self.outputs) -> out = "{out}{jet_receipt_line("output", output.name, output.digest)}"
+        loop output in jet_receipt_sorted_pairs(self.outputs) {
+            out = "{out}{jet_receipt_line("output", output.name, output.digest)}"
+        }
         out = "{out}{jet_receipt_line("activation-proof", "", self.activation_proof)}"
         out = "{out}{jet_receipt_line("parent-generation", "", self.parent_generation)}"
         out = "{out}{jet_receipt_line("witness", "", self.witness)}"

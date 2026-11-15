@@ -8,6 +8,7 @@ package: {
         db: .Library{ entry: db }
     }
 }
+
 use {
     core: core
     // core.db is plain Core source over the Jet SQLite engine: the private
@@ -44,16 +45,20 @@ DBValue: enum {
     Bool(Bool)
     Blob([U8])
 
-    impl Display { display: fn(self) -> String { render_value(self) } }
+    impl Display {
+        display: fn(self) -> String { render_value(self) }
+    }
 
     is_null: fn(self) -> Bool Never! {
         if self == .Null -> return true
         false
     }
+
     int: fn(self) -> Int Err! {
         if self == .Int(number) -> return Ok(number)
         Err("expected an int, got {render_value(self)}")
     }
+
     float: fn(self) -> Float Err! {
         if self == {
             .Float(number) -> Ok(number)
@@ -61,10 +66,12 @@ DBValue: enum {
             .Null | .Text(_) | .Bool(_) | .Blob(_) -> Err("expected a float, got {render_value(self)}")
         }
     }
+
     text: fn(self) -> String Err! {
         if self == .Text(text) -> return Ok(text.copy())
         Err("expected text, got {render_value(self)}")
     }
+
     bool: fn(self) -> Bool Err! {
         if self == {
             .Bool(value) -> Ok(value)
@@ -76,6 +83,7 @@ DBValue: enum {
             .Null | .Float(_) | .Text(_) | .Blob(_) -> Err("expected a bool, got {render_value(self)}")
         }
     }
+
     blob: fn(self) -> [U8] Err! {
         if self == .Blob(bytes) -> return Ok(bytes.copy())
         Err("expected a blob, got {render_value(self)}")
@@ -107,10 +115,15 @@ DBPoolReceipt: struct {
     replacements: Int
     replacement_failures: Int
 
-    impl Display { display: fn(self) -> String { pool_receipt_text(self) } }
+    impl Display {
+        display: fn(self) -> String { pool_receipt_text(self) }
+    }
 
-    impl Debug { debug: fn(&&self) -> String { pool_receipt_text(self) } }
+    impl Debug {
+        debug: fn(&&self) -> String { pool_receipt_text(self) }
+    }
 }
+
 pool_receipt_text: fn(receipt: DBPoolReceipt) -> String Never! {
     lifecycle: if receipt.lifecycle == {
         .Open -> "open"
@@ -123,9 +136,19 @@ pool_receipt_text: fn(receipt: DBPoolReceipt) -> String Never! {
 
 #Test("pool receipt text keeps every counter and lifecycle spelling") {
     receipt := DBPoolReceipt{
-        lifecycle: .Open, max: 2, available: 1, leased: 0, opening: 1,
-        ready: true, acquires: 3, releases: 4, timeouts: 5, open_failures: 6,
-        unhealthy: 7, replacements: 8, replacement_failures: 9,
+        lifecycle: .Open,
+        max: 2,
+        available: 1,
+        leased: 0,
+        opening: 1,
+        ready: true,
+        acquires: 3,
+        releases: 4,
+        timeouts: 5,
+        open_failures: 6,
+        unhealthy: 7,
+        replacements: 8,
+        replacement_failures: 9,
     }
     assert_eq(pool_receipt_text(receipt), "db.pool lifecycle=open max=2 available=1 leased=0 opening=1 ready=1 acquires=3 releases=4 timeouts=5 open_failures=6 unhealthy=7 replacements=8 replacement_failures=9")
     receipt.lifecycle = .Draining
@@ -153,18 +176,23 @@ DBError: enum {
         }
     }
 
-    impl Display { display: fn(self) -> String { self.message() } }
+    impl Display {
+        display: fn(self) -> String { self.message() }
+    }
 
-    impl Debug { debug: fn(&&self) -> String { self.message() } }
+    impl Debug {
+        debug: fn(&&self) -> String { self.message() }
+    }
 }
 
 impl DBError -> Err { Err(self.message()) }
-row_value: fn(row: [String: DBValue], column: String) -> DBValue DBError! {
+
+row_value: fn(row: [String:DBValue], column: String) -> DBValue DBError! {
     value: row.get(column) ?? return Err(db_error("missing column `{column}`"))
     Ok(value)
 }
 
-row_int: fn(row: [String: DBValue], column: String) -> Int DBError! {
+row_int: fn(row: [String:DBValue], column: String) -> Int DBError! {
     value: row_value(row, column)
     if value == {
         .Int(number) -> Ok(number)
@@ -172,7 +200,7 @@ row_int: fn(row: [String: DBValue], column: String) -> Int DBError! {
     }
 }
 
-row_float: fn(row: [String: DBValue], column: String) -> Float DBError! {
+row_float: fn(row: [String:DBValue], column: String) -> Float DBError! {
     value: row_value(row, column)
     if value == {
         .Float(number) -> Ok(number)
@@ -181,7 +209,7 @@ row_float: fn(row: [String: DBValue], column: String) -> Float DBError! {
     }
 }
 
-row_text: fn(row: [String: DBValue], column: String) -> String DBError! {
+row_text: fn(row: [String:DBValue], column: String) -> String DBError! {
     value: row_value(row, column)
     if value == {
         .Text(text) -> Ok(text)
@@ -189,7 +217,7 @@ row_text: fn(row: [String: DBValue], column: String) -> String DBError! {
     }
 }
 
-row_bool: fn(row: [String: DBValue], column: String) -> Bool DBError! {
+row_bool: fn(row: [String:DBValue], column: String) -> Bool DBError! {
     value: row_value(row, column)
     if value == {
         .Bool(boolean) -> Ok(boolean)
@@ -269,6 +297,7 @@ __float_text: fn(value: Float) -> String Never! {
 }
 
 priv db_error: fn(message: String) -> DBError Never! { DBError.Failed(message.copy()) }
+
 priv db_closed: fn() -> DBError Never! { db_error("database connection is closed") }
 
 // Checked SQL: the template text with `?` placeholders plus its bound values.
@@ -280,10 +309,14 @@ SQL: struct {
     values: [DBValue]
 
     raw: fn(text: String) -> SQL Never! { SQL{text: text.copy(), values: [DBValue]{}} }
+
     template: fn(self) -> String Never! { self.text.copy() }
+
     params: fn(self) -> [DBValue] Never! { self.values.copy() }
 
-    impl Display { display: fn(self) -> String { self.text.copy() } }
+    impl Display {
+        display: fn(self) -> String { self.text.copy() }
+    }
 
     impl CheckedText {
         Error: Never
@@ -308,12 +341,16 @@ SQL: struct {
         build: fn(parts: [String], holes: [DBValue]) -[]> SQL { __sql_literal(parts, holes) }
     }
 }
+
 __sql_literal: fn(literals: [String], values: [DBValue]) -> SQL Never! {
-    if literals.len() != values.len() + 1 -> panic("typed SQL literal pieces do not match its holes")
+    if literals.len() != values.len() + 1 {
+        panic("typed SQL literal pieces do not match its holes")
+    }
     text := literals[0].copy()
     loop index in 0..<values.len() -> text = "{text}?{literals[index + 1]}"
     SQL{text: text, values: values.copy()}
 }
+
 priv sql_raw: fn(text: String) -> SQL Never! { SQL{text: text.copy(), values: [DBValue]{}} }
 
 // Row policies: a table plus either `true` (allow all) or `owner == user`.
@@ -323,8 +360,13 @@ RowPolicy: struct {
     owner: Bool
 }
 
-priv policy_expression: fn(policy: RowPolicy) -> String Never! { if policy.owner -> "owner == user" else -> "true" }
-priv policy_predicate: fn(policy: RowPolicy) -> String Never! { if policy.owner -> "owner = ?" else -> "true" }
+priv policy_expression: fn(policy: RowPolicy) -> String Never! {
+    if policy.owner -> "owner == user" else -> "true"
+}
+
+priv policy_predicate: fn(policy: RowPolicy) -> String Never! {
+    if policy.owner -> "owner = ?" else -> "true"
+}
 
 policy: fn(table: String, expression: String) -[DB]> RowPolicy DBError! {
     name: table.trim()
@@ -334,13 +376,17 @@ policy: fn(table: String, expression: String) -[DB]> RowPolicy DBError! {
     if name_raw.len() == 0 || expr_raw.len() == 0 || name_raw.len() > 1048576 || expr_raw.len() > 1048576 || sql_has_control(name_raw, false) || sql_has_control(expr_raw, false) {
         return Err(db_error("row policy needs a table and expression"))
     }
-    if !sql_identifier(name_raw) -> return Err(db_error("row policy table must be a simple identifier"))
+    if !sql_identifier(name_raw) {
+        return Err(db_error("row policy table must be a simple identifier"))
+    }
     if expr == "true" -> return Ok(RowPolicy{table: name.copy(), owner: false})
     if expr == "owner == user" -> return Ok(RowPolicy{table: name.copy(), owner: true})
     Err(db_error("unsupported row policy expression `{expr}`; supported forms are `true` and `owner == user`"))
 }
 
-policy_show: fn(policy: RowPolicy) -> String Never! { "RowPolicy(table={policy.table}, expr={policy_expression(policy)})" }
+policy_show: fn(policy: RowPolicy) -> String Never! {
+    "RowPolicy(table={policy.table}, expr={policy_expression(policy)})"
+}
 
 policy_allows: fn(policy: RowPolicy, *, user: String, owner: String) -> Bool Never! {
     if !policy.owner -> return true
@@ -354,8 +400,12 @@ policy_audit: fn(scope: DBScope) -[DB]> String Never! {
 priv sql_identifier: fn(raw: [U8]) -> Bool Never! {
     if raw.len() == 0 -> return false
     first: Int{raw[0]}
-    if !((first >= 65 && first <= 90) || (first >= 97 && first <= 122) || first == 95) -> return false
-    loop byte in raw { if !sql_word_byte(Int{byte}) -> return false }
+    if !((first >= 65 && first <= 90) || (first >= 97 && first <= 122) || first == 95) {
+        return false
+    }
+    loop byte in raw {
+        if !sql_word_byte(Int{byte}) -> return false
+    }
     true
 }
 
@@ -369,38 +419,52 @@ priv SQLToken: struct {
     word: String
 }
 
-priv sql_word_byte: fn(byte: Int) -> Bool Never! { (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95 }
+priv sql_word_byte: fn(byte: Int) -> Bool Never! {
+    (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95
+}
+
 priv sql_space: fn(byte: Int) -> Bool Never! { byte == 32 || (byte >= 9 && byte <= 13) }
+
 priv sql_lower: fn(byte: U8) -> U8 Never! {
     value: Int{byte}
     if value >= 65 && value <= 90 -> return U8{value + 32}
     byte
 }
+
 priv sql_lower_text: fn(text: String) -> String Never! {
     out := [U8]{}
     loop byte in text.bytes() -> out.push(sql_lower(byte))
     String.from_bytes(out) ?? ""
 }
+
 priv bytes_text: fn(raw: [U8], start: Int, end: Int) -> String Never! {
     out := [U8]{}
     loop at in start..<end -> out.push(raw[at])
     String.from_bytes(out) ?? ""
 }
+
 priv sql_trimmed: fn(raw: [U8], start: Int, end: Int) -> String Never! {
     first := start
     last := end
-    loop first < last && sql_space(Int{raw[first]}) { first += 1 }
-    loop last > first && sql_space(Int{raw[last - 1]}) { last -= 1 }
+    loop first < last && sql_space(Int{raw[first]}) -> first += 1
+    loop last > first && sql_space(Int{raw[last - 1]}) -> last -= 1
     bytes_text(raw, first, last)
 }
+
 priv sql_blank: fn(raw: [U8], start: Int, end: Int) -> Bool Never! {
-    loop at in start..<end { if !sql_space(Int{raw[at]}) -> return false }
+    loop at in start..<end {
+        if !sql_space(Int{raw[at]}) -> return false
+    }
     true
 }
+
 priv sql_find: fn(raw: [U8], from: Int, byte: Int) -> Int Never! {
-    loop at in from..<raw.len() { if (Int{raw[at]}) == byte -> return at }
+    loop at in from..<raw.len() {
+        if (Int{raw[at]}) == byte -> return at
+    }
     -1
 }
+
 // Control characters by Rust `char::is_control` on UTF-8 bytes: C0, DEL and
 // C1 (C2 80-9F). `allow_whitespace` admits the whitespace controls.
 priv sql_has_control: fn(raw: [U8], allow_whitespace: Bool) -> Bool Never! {
@@ -416,36 +480,30 @@ priv sql_has_control: fn(raw: [U8], allow_whitespace: Bool) -> Bool Never! {
     }
     false
 }
+
 priv sql_skip_quoted: fn(raw: [U8], open: Int, quote: Int, limit: Int) -> Int Never! {
     at := open + 1
     loop at < limit {
         if {
             (Int{raw[at]}) == quote -> {
                 if {
-                    at + 1 < limit && (Int{raw[at + 1]}) == quote -> {
-                        at += 2
-                    }
-                    else -> {
-                        return at + 1
-                    }
+                    at + 1 < limit && (Int{raw[at + 1]}) == quote -> { at += 2 }
+                    else -> { return at + 1 }
                 }
             }
-            else -> {
-                at += 1
-            }
+            else -> { at += 1 }
         }
     }
     at
 }
+
 priv sql_tokens: fn(raw: [U8]) -> [SQLToken] Never! {
     tokens := [SQLToken]{}
     at := 0
     loop at < raw.len() {
         byte: Int{raw[at]}
         if {
-            byte == 39 -> {
-                at = sql_skip_quoted(raw, at, 39, raw.len())
-            }
+            byte == 39 -> { at = sql_skip_quoted(raw, at, 39, raw.len()) }
             sql_word_byte(byte) -> {
                 start: at
                 word := [U8]{}
@@ -455,25 +513,24 @@ priv sql_tokens: fn(raw: [U8]) -> [SQLToken] Never! {
                 }
                 tokens.push(SQLToken{start: start, end: at, word: String.from_bytes(word) ?? ""})
             }
-            else -> {
-                at += 1
-            }
+            else -> { at += 1 }
         }
     }
     tokens
 }
+
 priv sql_has_comment: fn(raw: [U8]) -> Bool Never! {
     at := 0
     loop at < raw.len() {
         byte: Int{raw[at]}
         if {
-            byte == 39 -> {
-                at = sql_skip_quoted(raw, at, 39, raw.len())
-            }
+            byte == 39 -> { at = sql_skip_quoted(raw, at, 39, raw.len()) }
             else -> {
                 if at + 1 < raw.len() {
                     next: Int{raw[at + 1]}
-                    if (byte == 45 && next == 45) || (byte == 47 && next == 42) || (byte == 42 && next == 47) -> return true
+                    if (byte == 45 && next == 45) || (byte == 47 && next == 42) || (byte == 42 && next == 47) {
+                        return true
+                    }
                 }
                 at += 1
             }
@@ -481,23 +538,34 @@ priv sql_has_comment: fn(raw: [U8]) -> Bool Never! {
     }
     false
 }
+
 priv sql_word_index: fn(tokens: [SQLToken], word: String) -> Int Never! {
-    loop index in 0..<tokens.len() { if tokens[index].word == word -> return index }
+    loop index in 0..<tokens.len() {
+        if tokens[index].word == word -> return index
+    }
     -1
 }
+
 priv sql_count: fn(tokens: [SQLToken], word: String) -> Int Never! {
     count := 0
-    loop token in tokens { if token.word == word -> count += 1 }
+    loop token in tokens {
+        if token.word == word -> count += 1
+    }
     count
 }
+
 priv sql_clause_word: fn(word: String, with_where: Bool) -> Bool Never! {
     (with_where && word == "where") || word == "order" || word == "group" || word == "limit" || word == "offset" || word == "returning"
 }
+
 // First ORDER/GROUP/LIMIT/OFFSET/RETURNING token starting after `after`.
 priv sql_clause_start: fn(tokens: [SQLToken], after: Int) -> Int Never! {
-    loop token in tokens { if token.start > after && sql_clause_word(token.word, false) -> return token.start }
+    loop token in tokens {
+        if token.start > after && sql_clause_word(token.word, false) -> return token.start
+    }
     -1
 }
+
 priv sql_target_index: fn(tokens: [SQLToken], kind: String) -> Int Never! {
     keyword: if {
         kind == "select" || kind == "delete" -> "from"
@@ -508,6 +576,7 @@ priv sql_target_index: fn(tokens: [SQLToken], kind: String) -> Int Never! {
     if found < 0 || found + 1 >= tokens.len() -> return -1
     found + 1
 }
+
 priv sql_simple_target: fn(raw: [U8], tokens: [SQLToken], kind: String) -> Bool Never! {
     selects: if kind == "select" -> 1 else -> 0
     froms: if kind == "select" || kind == "delete" -> 1 else -> 0
@@ -536,9 +605,12 @@ priv sql_simple_target: fn(raw: [U8], tokens: [SQLToken], kind: String) -> Bool 
         }
         return false
     }
-    if kind == "insert" -> return sql_count(tokens, "values") == 1 && sql_count(tokens, "select") == 0
+    if kind == "insert" {
+        return sql_count(tokens, "values") == 1 && sql_count(tokens, "select") == 0
+    }
     false
 }
+
 priv sql_split_trimmed: fn(raw: [U8], start: Int, end: Int) -> [String] Never! {
     parts := [String]{}
     from := start
@@ -577,13 +649,16 @@ priv sql_insert_shape: fn(raw: [U8], tokens: [SQLToken]) -> SQLInsertShape? Neve
     loop index in 0..<columns.len() {
         column: columns[index].bytes()
         if column.len() == 0 -> return None
-        loop byte in column { if !sql_word_byte(Int{byte}) -> return None }
+        loop byte in column {
+            if !sql_word_byte(Int{byte}) -> return None
+        }
         if cells[index] != "?" -> return None
         if owner < 0 && sql_lower_text(columns[index]) == "owner" -> owner = index
     }
     if owner < 0 -> return None
     Val(SQLInsertShape{columns: columns.len(), owner: owner})
 }
+
 priv sql_update_mutates_owner: fn(tokens: [SQLToken]) -> Bool Never! {
     set: sql_word_index(tokens, "set")
     if set < 0 -> return false
@@ -594,6 +669,7 @@ priv sql_update_mutates_owner: fn(tokens: [SQLToken]) -> Bool Never! {
     }
     false
 }
+
 // Bound placeholders before `end`, skipping quoted text and [bracketed] names.
 priv sql_placeholders: fn(raw: [U8], end: Int) -> Int Never! {
     count := 0
@@ -601,12 +677,10 @@ priv sql_placeholders: fn(raw: [U8], end: Int) -> Int Never! {
     loop at < end {
         byte: Int{raw[at]}
         if {
-            byte == 39 || byte == 34 || byte == 96 -> {
-                at = sql_skip_quoted(raw, at, byte, end)
-            }
+            byte == 39 || byte == 34 || byte == 96 -> { at = sql_skip_quoted(raw, at, byte, end) }
             byte == 91 -> {
                 at += 1
-                loop at < end && (Int{raw[at]}) != 93 { at += 1 }
+                loop at < end && (Int{raw[at]}) != 93 -> at += 1
                 if at < end -> at += 1
             }
             else -> {
@@ -617,14 +691,13 @@ priv sql_placeholders: fn(raw: [U8], end: Int) -> Int Never! {
     }
     count
 }
+
 priv sql_is_migration_metadata: fn(raw: [U8]) -> Bool Never! {
     out := [U8]{}
     pending := false
     loop byte in raw {
         if {
-            sql_space(Int{byte}) -> {
-                pending = out.len() > 0
-            }
+            sql_space(Int{byte}) -> { pending = out.len() > 0 }
             else -> {
                 if pending {
                     out.push(U8{32})
@@ -635,8 +708,12 @@ priv sql_is_migration_metadata: fn(raw: [U8]) -> Bool Never! {
         }
     }
     text: String.from_bytes(out) ?? ""
-    if text.starts_with("create table if not exists __jet_migrations") || text.starts_with("create table __jet_migrations") -> return true
-    if text.starts_with("pragma table_info(__jet_migrations") || text.starts_with("insert into __jet_migrations") -> return true
+    if text.starts_with("create table if not exists __jet_migrations") || text.starts_with("create table __jet_migrations") {
+        return true
+    }
+    if text.starts_with("pragma table_info(__jet_migrations") || text.starts_with("insert into __jet_migrations") {
+        return true
+    }
     text.starts_with("select ") && text.contains(" from __jet_migrations")
 }
 
@@ -671,27 +748,37 @@ priv policy_apply: fn(sql: SQL, policy: RowPolicy, user: String, allow_schema: B
     // names the policy's table anywhere (a join, a subquery, a column read),
     // which would read its rows past the policy.
     if target < 0 || tokens[target].word != table {
-        if sql_word_index(tokens, table) >= 0 -> return Err(db_error("policy-scoped SQL that reads `{policy.table}` must target it as its one simple table"))
+        if sql_word_index(tokens, table) >= 0 {
+            return Err(db_error("policy-scoped SQL that reads `{policy.table}` must target it as its one simple table"))
+        }
         // copy: the caller keeps its SQL value; the scope runs this one.
         return Ok(sql.copy())
     }
-    if !sql_simple_target(raw, tokens, kind) -> return Err(db_error("policy-scoped SQL must name one simple target table without joins or subqueries"))
+    if !sql_simple_target(raw, tokens, kind) {
+        return Err(db_error("policy-scoped SQL must name one simple target table without joins or subqueries"))
+    }
     if !policy.owner -> return Ok(sql.copy())
     if kind == "insert" {
         shape: sql_insert_shape(raw, tokens) ?? return Err(db_error("owner policy requires INSERT columns and `?` values with an owner column"))
-        if shape.columns != sql.values.len() -> return Err(db_error("owner policy INSERT bind count does not match its columns"))
+        if shape.columns != sql.values.len() {
+            return Err(db_error("owner policy INSERT bind count does not match its columns"))
+        }
         values := sql.values.copy()
         values[shape.owner] = DBValue.Text(user.copy())
         return Ok(SQL{text: sql.text.copy(), values: values})
     }
-    if kind == "update" && sql_update_mutates_owner(tokens) -> return Err(db_error("owner policy does not allow changing the owner column"))
+    if kind == "update" && sql_update_mutates_owner(tokens) {
+        return Err(db_error("owner policy does not allow changing the owner column"))
+    }
     where_index: sql_word_index(tokens, "where")
     insertion := -1
     if where_index >= 0 -> insertion = sql_clause_start(tokens, tokens[where_index].end)
     if insertion < 0 -> insertion = sql_clause_start(tokens, 0)
     if insertion < 0 -> insertion = raw.len()
     user_index: sql_placeholders(raw, insertion)
-    if user_index > sql.values.len() -> return Err(db_error("policy-scoped SQL bind count does not match its placeholders"))
+    if user_index > sql.values.len() {
+        return Err(db_error("policy-scoped SQL bind count does not match its placeholders"))
+    }
     values := [DBValue]{}
     loop index in 0..<sql.values.len() {
         if index == user_index -> values.push(DBValue.Text(user.copy()))
@@ -699,15 +786,17 @@ priv policy_apply: fn(sql: SQL, policy: RowPolicy, user: String, allow_schema: B
     }
     if user_index == sql.values.len() -> values.push(DBValue.Text(user.copy()))
     tail_start := insertion
-    loop tail_start < raw.len() && sql_space(Int{raw[tail_start]}) { tail_start += 1 }
+    loop tail_start < raw.len() && sql_space(Int{raw[tail_start]}) -> tail_start += 1
     suffix: if tail_start >= raw.len() -> "" else -> " {bytes_text(raw, tail_start, raw.len())}"
     if where_index >= 0 {
         condition: sql_trimmed(raw, tokens[where_index].end, insertion)
-        if condition.len() == 0 -> return Err(db_error("policy-scoped SQL has an empty WHERE clause"))
+        if condition.len() == 0 {
+            return Err(db_error("policy-scoped SQL has an empty WHERE clause"))
+        }
         return Ok(SQL{text: "{bytes_text(raw, 0, tokens[where_index].start)}WHERE ({condition}) AND owner = ?{suffix}", values: values})
     }
     head_end := insertion
-    loop head_end > 0 && sql_space(Int{raw[head_end - 1]}) { head_end -= 1 }
+    loop head_end > 0 && sql_space(Int{raw[head_end - 1]}) -> head_end -= 1
     Ok(SQL{text: "{bytes_text(raw, 0, head_end)} WHERE owner = ?{suffix}", values: values})
 }
 
@@ -733,9 +822,7 @@ priv DBState: struct {
     priv wrote: fn(&self, table: String) Never! {
         if self.open != 0 {
             if !self.written.contains(table) -> self.written.push(table.copy())
-        } else {
-            app.__live_invalidate_all(live_source(table))
-        }
+        } else { app.__live_invalidate_all(live_source(table)) }
     }
 }
 
@@ -745,10 +832,13 @@ Store: struct {
     with_policy: fn(self, policy: RowPolicy, user: String) -[DB]> DBScope Never! {
         DBScope{state: self.state.copy(), policy: RowPolicy{table: policy.table.copy(), owner: policy.owner}, user: user.copy()}
     }
+
     // Opens a transaction; the `DBTransaction` it returns has to be committed
     // or rolled back.
     begin: fn(self) -[DB]> DBTransaction DBError! { db_begin(self.state, false) }
+
     close: fn(self) -[DB]> Bool Never! { db_shutdown(self.state) }
+
     // The typed table `name`: rows of type `T`, each found by the key that
     // the pure function `key` computes from it. It has no row policy until
     // `guard` gives it one.
@@ -765,6 +855,7 @@ Store: struct {
         }
     }
 }
+
 DBScope: struct {
     state: Shared<DBState>
     policy: RowPolicy
@@ -774,28 +865,36 @@ DBScope: struct {
     // it; each re-run applies this scope's policy again, and a write to the
     // table it reads (or a rollback of one) re-runs it on the next read. The
     // user, the policy-applied SQL and its values identify the binding.
-    live: fn(self, sql: SQL) -[DB.Read]> Live<[[String: DBValue]], DBError> DBError! {
+    live: fn(self, sql: SQL) -[DB.Read]> Live<[[String:DBValue]], DBError> DBError! {
         scoped: policy_apply(sql, self.policy, self.user, false) ?? return Err(err)
         tokens: sql_tokens(scoped.text.bytes())
-        if tokens.len() == 0 || tokens[0].word != "select" -> return Err(db_error("a live query must be one SELECT"))
+        if tokens.len() == 0 || tokens[0].word != "select" {
+            return Err(db_error("a live query must be one SELECT"))
+        }
         key := [String]{app.__live_arg<String>(self.user), app.__live_arg<String>(scoped.text)}
         loop value in scoped.values -> key.push(app.__live_arg<DBValue>(value))
         scope: self.copy()
         query: sql.copy()
-        Ok(app.__live_bind<[[String: DBValue]], DBError>(live_source(sql_table(scoped) ?? ""), key, fn() { scope_query(scope, query, false) }))
+        Ok(app.__live_bind<[[String:DBValue]], DBError>(live_source(sql_table(scoped) ?? ""), key, fn() { scope_query(scope, query, false) }))
     }
+
     close: fn(self) -[DB]> Bool Never! { db_shutdown(self.state) }
 
     // A policy scope is the typed-SQL driver a generic `<T: Driver>` takes.
     impl Driver {
-        query: fn(self, sql: SQL) -[DB.Read]> [[String: DBValue]] DBError! { scope_query(self, sql, false) }
-        query_one: fn(self, sql: SQL) -[DB.Read]> [String: DBValue]? DBError! {
+        query: fn(self, sql: SQL) -[DB.Read]> [[String:DBValue]] DBError! {
+            scope_query(self, sql, false)
+        }
+
+        query_one: fn(self, sql: SQL) -[DB.Read]> [String:DBValue]? DBError! {
             rows := scope_query(self, sql, false) ?? return Err(err)
             if rows.len() == 0 -> return Ok(None)
             first: rows.remove(0, .Slot) ?? panic("database first row disappeared")
             Ok(Val(first))
         }
+
         execute: fn(self, sql: SQL) -[DB.Write]> Int DBError! { scope_execute(self, sql, false) }
+
         begin: fn(self) -[DB]> DBTransaction DBError! { db_begin(self.state, false) }
     }
 }
@@ -806,17 +905,19 @@ DBScope: struct {
 // that fails is rolled back, and its error says so; the caller can't ignore it.
 // One dropped while still open, by a cancelled task or a stop unwinding past
 // it, is rolled back: it writes nothing, and the connection can begin again.
-#SingleUse
-DBTransaction: struct {
+#SingleUse DBTransaction: struct {
     priv state: Shared<DBState>
     priv number: Int
 
     commit: fn(&&self) DBError! -[DB]> { db_commit(self.state) }
+
     rollback: fn(&&self) DBError! -[DB]> { db_rollback(self.state) }
 
     impl Close {
         close: fn(&&self) {
-            if !db_open_is(self.state, self.number) -> return
+            if !db_open_is(self.state, self.number) {
+                return
+            }
             db_rollback(self.state).drop("an unwind ended the transaction; no caller is left to report a failed rollback to")
         }
     }
@@ -827,6 +928,7 @@ DBTransaction: struct {
 // The column a typed table keeps each encoded row in, and the one key column
 // of a table whose key is not a record.
 TABLE_ROW_COLUMN: "jet_row"
+
 TABLE_KEY_COLUMN: "key"
 
 // The operation a table's row policy judges.
@@ -876,6 +978,7 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
     guard: fn(self, policy: &&fn(T, Op, Who, Store) -[DB.Read]> Bool DBError!) -> Table<K, T> Never! {
         Table<K, T>{state: self.state.copy(), name: self.name.copy(), key_of: self.key_of, policy: Val(policy.move())}
     }
+
     // The row whose key is `key`, or None, also when the policy refuses to
     // let the caller read it.
     get: fn(self, key: K) -[DB.Read]> T? DBError! {
@@ -890,12 +993,14 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
         }
         Ok(None)
     }
+
     // Adds `row`, whose key no row may hold yet (else `Exists`).
     add: fn(self, row: T) -[DB.Read, DB.Write]> T DBError! {
         allowed: table_allows<K, T>(self, row.copy(), Op.Insert) ?? return Err(err)
         if !allowed -> return Err(DBError.Denied)
         table_write<K, T>(self, row, false)
     }
+
     // Adds `row`, or replaces the row that holds its key.
     put: fn(self, row: T) -[DB.Read, DB.Write]> T DBError! {
         if self.policy == .Val(_) {
@@ -904,7 +1009,9 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
             if table_stored<K, T>(self, cells) == {
                 .Val(stored) -> {
                     allowed = table_allows<K, T>(self, stored, Op.Update) ?? return Err(err)
-                    if allowed -> allowed = table_allows<K, T>(self, row.copy(), Op.Update) ?? return Err(err)
+                    if allowed {
+                        allowed = table_allows<K, T>(self, row.copy(), Op.Update) ?? return Err(err)
+                    }
                 }
                 .None -> allowed = table_allows<K, T>(self, row.copy(), Op.Insert) ?? return Err(err)
                 .Err(failure) -> return Err(failure)
@@ -913,6 +1020,7 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
         }
         table_write<K, T>(self, row, true)
     }
+
     // Removes the row whose key is `key`, if there is one.
     delete: fn(self, key: K) DBError! -[DB.Read, DB.Write]> {
         cells: table_cells(self.name, key.encode()) ?? return Err(err)
@@ -933,6 +1041,7 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
         if changed > 0 -> guard.value.wrote(self.name)
         Ok()
     }
+
     // Every row the caller may read, in key order, as a data query. The
     // policy judges the rows in key order too.
     query: fn(self) -[DB.Read]> Query<T> DBError! {
@@ -955,7 +1064,7 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
 // The stored rows `filter` (a WHERE clause, empty for every row) selects,
 // read without the row policy. The connection is held only for the read, so
 // a policy that reads through the same store can run after it.
-priv table_rows: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, filter: String, values: [DBValue]) -[DB.Read]> [[String: DBValue]] DBError! {
+priv table_rows: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, filter: String, values: [DBValue]) -[DB.Read]> [[String:DBValue]] DBError! {
     if !sql_identifier(table.name.bytes()) -> return Err(table_name_error(table.name))
     guard := table.state.guard_edit()
     if driver_closed(guard.value.driver) -> return Err(db_closed())
@@ -1027,7 +1136,9 @@ priv table_cells: fn(name: String, key: Dyn) -> [(column: String, value: DBValue
         return Ok(cells)
     }
     loop entry in stream.object_entries(key) {
-        if !sql_identifier(entry.key.bytes()) || entry.key == TABLE_ROW_COLUMN -> return Err(db_error("table `{name}` cannot have the key column `{entry.key}`"))
+        if !sql_identifier(entry.key.bytes()) || entry.key == TABLE_ROW_COLUMN {
+            return Err(db_error("table `{name}` cannot have the key column `{entry.key}`"))
+        }
         cells.push((column: entry.key.copy(), value: table_value(entry.value)))
     }
     if cells.len() == 0 -> return Err(db_error("table `{name}` has a key with no fields"))
@@ -1060,7 +1171,9 @@ priv table_values: fn(cells: [(column: String, value: DBValue)]) -> [DBValue] Ne
     values
 }
 
-priv table_name_error: fn(name: String) -> DBError Never! { db_error("`{name}` is not a table name: use letters, digits and `_`") }
+priv table_name_error: fn(name: String) -> DBError Never! {
+    db_error("`{name}` is not a table name: use letters, digits and `_`")
+}
 
 priv table_exists: fn(driver: &__Driver, name: String) -> Bool Never! {
     found: __driver_query(driver, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", [DBValue]{.Text(name.copy())}) ?? return false
@@ -1071,13 +1184,13 @@ priv table_exists: fn(driver: &__Driver, name: String) -> Bool Never! {
 // Made while a live binding's source runs, it joins that binding's read set
 // first (app.live_reads), even before the table exists, so the write that
 // creates it re-runs the binding.
-priv table_read: fn(driver: &__Driver, name: String, sql: String, values: [DBValue]) -> [[String: DBValue]] DBError! {
+priv table_read: fn(driver: &__Driver, name: String, sql: String, values: [DBValue]) -> [[String:DBValue]] DBError! {
     if app.live_reads.running() -> app.live_reads.record(live_source(name))
-    if !table_exists(driver, name) -> return Ok([[String: DBValue]]{})
+    if !table_exists(driver, name) -> return Ok([[String:DBValue]]{})
     __driver_query(driver, sql, values)
 }
 
-priv table_decode: fn<T: Decode>(stored: [String: DBValue]) -> T DBError! {
+priv table_decode: fn<T: Decode>(stored: [String:DBValue]) -> T DBError! {
     text: row_text(stored, TABLE_ROW_COLUMN) ?? return Err(err)
     tree: json.parse(text) ?? return Err(db_error("a stored row is not JSON: {err}"))
     if tree.decode<T>() == {
@@ -1090,24 +1203,32 @@ priv db_open: fn(path: String, failure: String) -> Store Never! {
     driver := __driver_open(path) ?? panic(failure)
     Store{state: Shared{DBState{driver: driver.move(), path: path.copy(), written: [String]{}}}}
 }
+
 open: fn(path: String) -[DB]> Store Never! { db_open(path, "database open failed") }
+
 open_memory: fn() -[DB]> Store Never! { db_open(":memory:", "in-memory database open failed") }
 
 priv db_begin: fn(state: Shared<DBState>, immediate: Bool) -> DBTransaction DBError! {
     guard := state.guard_edit()
-    if driver_closed(guard.value.driver) -> return Err(db_error("could not begin a transaction: the database is closed"))
+    if driver_closed(guard.value.driver) {
+        return Err(db_error("could not begin a transaction: the database is closed"))
+    }
     began: if immediate -> __driver_begin_immediate(guard.value.driver) else -> __driver_begin(guard.value.driver)
-    if !began -> return Err(db_error("could not begin a transaction: one is already open, or the database is busy"))
+    if !began {
+        return Err(db_error("could not begin a transaction: one is already open, or the database is busy"))
+    }
     guard.value.written = [String]{}
-    guard.value.began = guard.value.began + 1
+    guard.value.began += 1
     guard.value.open = guard.value.began
     Ok(DBTransaction{state: state.copy(), number: guard.value.open})
 }
+
 // Whether transaction `number` is the one still open on `state`.
 priv db_open_is: fn(state: Shared<DBState>, number: Int) -> Bool Never! {
     guard: state.guard_read()
     guard.value.open == number
 }
+
 // A commit that fails leaves the engine's transaction open, so it is rolled
 // back before the failure is reported: the transaction ends either way.
 // Either way every live binding over a table it wrote re-runs on its next
@@ -1116,28 +1237,32 @@ priv db_open_is: fn(state: Shared<DBState>, number: Int) -> Bool Never! {
 priv db_commit: fn(state: Shared<DBState>) DBError! {
     guard := state.guard_edit()
     guard.value.open = 0
-    if driver_closed(guard.value.driver) -> return Err(db_error("could not commit: the database is closed"))
-    committed: __driver_commit(guard.value.driver)
-    if !committed {
-        _: __driver_rollback(guard.value.driver)
+    if driver_closed(guard.value.driver) {
+        return Err(db_error("could not commit: the database is closed"))
     }
+    committed: __driver_commit(guard.value.driver)
+    if !committed -> _: __driver_rollback(guard.value.driver)
     loop table in guard.value.written -> app.__live_invalidate_all(live_source(table))
     guard.value.written = [String]{}
     if !committed -> return Err(db_error("could not commit, so the transaction was rolled back"))
     Ok()
 }
+
 // A rollback undoes the writes since the last begin, so every live binding
 // over a table they touched re-runs on its next read.
 priv db_rollback: fn(state: Shared<DBState>) DBError! {
     guard := state.guard_edit()
     guard.value.open = 0
-    if driver_closed(guard.value.driver) -> return Err(db_error("could not roll back: the database is closed"))
+    if driver_closed(guard.value.driver) {
+        return Err(db_error("could not roll back: the database is closed"))
+    }
     rolled: __driver_rollback(guard.value.driver)
     loop table in guard.value.written -> app.__live_invalidate_all(live_source(table))
     guard.value.written = [String]{}
     if !rolled -> return Err(db_error("could not roll back the transaction"))
     Ok()
 }
+
 priv db_shutdown: fn(state: Shared<DBState>) -> Bool Never! {
     guard := state.guard_edit()
     __driver_shutdown(guard.value.driver)
@@ -1150,15 +1275,19 @@ priv scope_execute: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> Int DBEr
     guard := scope.state.guard_edit()
     if driver_closed(guard.value.driver) -> return Err(db_closed())
     changed: __driver_execute(guard.value.driver, scoped.text, scoped.values) ?? return Err(err)
-    if sql_table(scoped) == .Val(table) && (changed > 0 || sql_schema(scoped)) -> guard.value.wrote(table)
+    if sql_table(scoped) == .Val(table) && (changed > 0 || sql_schema(scoped)) {
+        guard.value.wrote(table)
+    }
     Ok(changed)
 }
 
 // A read made while a live binding's source runs joins that binding's read
 // set first (app.live_reads), so a write to its table re-runs the binding.
-priv scope_query: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> [[String: DBValue]] DBError! {
+priv scope_query: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> [[String:DBValue]] DBError! {
     scoped: policy_apply(sql, scope.policy, scope.user, allow_schema) ?? return Err(err)
-    if app.live_reads.running() && sql_table(scoped) == .Val(table) -> app.live_reads.record(live_source(table))
+    if app.live_reads.running() && sql_table(scoped) == .Val(table) {
+        app.live_reads.record(live_source(table))
+    }
     guard := scope.state.guard_edit()
     if driver_closed(guard.value.driver) -> return Err(db_closed())
     __driver_query(guard.value.driver, scoped.text, scoped.values)
@@ -1181,7 +1310,9 @@ priv sql_table: fn(sql: SQL) -> String? Never! {
         at := sql_word_index(tokens, "table")
         if at < 0 -> return None
         at += 1
-        loop at < tokens.len() && (tokens[at].word == "if" || tokens[at].word == "not" || tokens[at].word == "exists") { at += 1 }
+        loop at < tokens.len() && (tokens[at].word == "if" || tokens[at].word == "not" || tokens[at].word == "exists") {
+            at += 1
+        }
         if at >= tokens.len() -> return None
         return Val(tokens[at].word.copy())
     }
@@ -1211,6 +1342,7 @@ transaction: fn(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> In
     tx.commit() ?? return Err(db_error("could not commit transaction"))
     Ok(done)
 }
+
 priv transaction_steps: fn(scope: DBScope, steps: [SQL]) -> Int DBError! {
     done := 0
     loop sql in steps {
@@ -1223,6 +1355,7 @@ priv transaction_steps: fn(scope: DBScope, steps: [SQL]) -> Int DBError! {
 priv ledger_schema: fn() -> String Never! {
     "CREATE TABLE IF NOT EXISTS __jet_migrations (sequence INTEGER PRIMARY KEY AUTOINCREMENT, transition_key TEXT NOT NULL UNIQUE, migration_key TEXT NOT NULL, target TEXT NOT NULL, target_identity TEXT NOT NULL, database_identity TEXT NOT NULL, source_identity TEXT NOT NULL, schema_identity TEXT NOT NULL, tool_identity TEXT NOT NULL, operation TEXT NOT NULL, status TEXT NOT NULL, from_version INTEGER NOT NULL, to_version INTEGER NOT NULL, step_count INTEGER NOT NULL, step_ids TEXT NOT NULL, checksum TEXT NOT NULL, lock_mode TEXT NOT NULL, risk TEXT NOT NULL, started_unix_ms INTEGER NOT NULL, finished_unix_ms INTEGER NOT NULL, error TEXT)"
 }
+
 priv ledger_columns: fn() -> [String] Never! {
     [String]{"sequence", "transition_key", "migration_key", "target", "target_identity", "database_identity", "source_identity", "schema_identity", "tool_identity", "operation", "status", "from_version", "to_version", "step_count", "step_ids", "checksum", "lock_mode", "risk", "started_unix_ms", "finished_unix_ms", "error"}
 }
@@ -1244,16 +1377,18 @@ priv LedgerRow: struct {
     checksum: String
 }
 
-priv ledger_value: fn(row: [String: DBValue], key: String) -> DBValue DBError! {
+priv ledger_value: fn(row: [String:DBValue], key: String) -> DBValue DBError! {
     value: row.get(key) ?? return Err(db_error("migration ledger row has no `{key}` field"))
     Ok(value)
 }
-priv ledger_text: fn(row: [String: DBValue], key: String) -> String DBError! {
+
+priv ledger_text: fn(row: [String:DBValue], key: String) -> String DBError! {
     value: ledger_value(row, key) ?? return Err(err)
     if value == .Text(text) -> return Ok(text.copy())
     Err(db_error("expected text, got {render_value(value)}"))
 }
-priv ledger_count: fn(row: [String: DBValue], key: String) -> Int DBError! {
+
+priv ledger_count: fn(row: [String:DBValue], key: String) -> Int DBError! {
     value: ledger_value(row, key) ?? return Err(err)
     if value == .Int(number) {
         if number < 0 -> return Err(db_error("migration ledger `{key}` is negative"))
@@ -1261,7 +1396,8 @@ priv ledger_count: fn(row: [String: DBValue], key: String) -> Int DBError! {
     }
     Err(db_error("expected an int, got {render_value(value)}"))
 }
-priv ledger_row: fn(row: [String: DBValue]) -> LedgerRow DBError! {
+
+priv ledger_row: fn(row: [String:DBValue]) -> LedgerRow DBError! {
     transition_key: ledger_text(row, "transition_key") ?? return Err(err)
     migration_key: ledger_text(row, "migration_key") ?? return Err(err)
     operation: ledger_text(row, "operation") ?? return Err(err)
@@ -1272,7 +1408,9 @@ priv ledger_row: fn(row: [String: DBValue]) -> LedgerRow DBError! {
     _started: ledger_count(row, "started_unix_ms") ?? return Err(err)
     _finished: ledger_count(row, "finished_unix_ms") ?? return Err(err)
     lock: ledger_text(row, "lock_mode") ?? return Err(err)
-    if lock != "shared" && lock != "exclusive" -> return Err(db_error("unknown migration lock mode `{lock}`"))
+    if lock != "shared" && lock != "exclusive" {
+        return Err(db_error("unknown migration lock mode `{lock}`"))
+    }
     target: ledger_text(row, "target") ?? return Err(err)
     target_identity: ledger_text(row, "target_identity") ?? return Err(err)
     source_identity: ledger_text(row, "source_identity") ?? return Err(err)
@@ -1289,39 +1427,70 @@ priv ledger_row: fn(row: [String: DBValue]) -> LedgerRow DBError! {
         .Text(_) -> {}
         .Int(_) | .Float(_) | .Bool(_) | .Blob(_) -> return Err(db_error("expected text, got {render_value(error_value)}"))
     }
-    Ok(LedgerRow{
-        transition_key: transition_key, migration_key: migration_key, target: target,
-        target_identity: target_identity, database_identity: database_identity,
-        source_identity: source_identity, schema_identity: schema_identity,
-        operation: operation, status: status, from_version: from_version,
-        to_version: to_version, step_count: step_count, step_ids: step_ids, checksum: checksum,
-    })
+    Ok(
+        LedgerRow{
+            transition_key: transition_key,
+            migration_key: migration_key,
+            target: target,
+            target_identity: target_identity,
+            database_identity: database_identity,
+            source_identity: source_identity,
+            schema_identity: schema_identity,
+            operation: operation,
+            status: status,
+            from_version: from_version,
+            to_version: to_version,
+            step_count: step_count,
+            step_ids: step_ids,
+            checksum: checksum,
+        },
+    )
 }
 
 // The first reason a `direct` ledger row disagrees with canonical state.
 priv ledger_drift: fn(row: LedgerRow, current: Int) -> String? Never! {
     key: row.transition_key
-    if row.target_identity != "direct" -> return Val("migration transition `{key}` has a foreign target identity")
-    if row.database_identity != "runtime" -> return Val("migration transition `{key}` has a foreign database identity")
-    if row.source_identity != "jet.db.runtime" -> return Val("migration transition `{key}` was created from a different migration catalog")
-    if row.schema_identity != "jet.db.migration/v2" -> return Val("migration transition `{key}` has a mismatched schema identity")
-    if row.step_count != row.step_ids -> return Val("migration transition `{key}` has an invalid step count")
-    if row.status != "applied" -> return Val("migration transition `{key}` has unresolved status `{row.status}`")
+    if row.target_identity != "direct" {
+        return Val("migration transition `{key}` has a foreign target identity")
+    }
+    if row.database_identity != "runtime" {
+        return Val("migration transition `{key}` has a foreign database identity")
+    }
+    if row.source_identity != "jet.db.runtime" {
+        return Val("migration transition `{key}` was created from a different migration catalog")
+    }
+    if row.schema_identity != "jet.db.migration/v2" {
+        return Val("migration transition `{key}` has a mismatched schema identity")
+    }
+    if row.step_count != row.step_ids {
+        return Val("migration transition `{key}` has an invalid step count")
+    }
+    if row.status != "applied" {
+        return Val("migration transition `{key}` has unresolved status `{row.status}`")
+    }
     if row.operation == "apply" || row.operation == "rollback" {
-        if row.from_version != current -> return Val("migration transition `{key}` starts at {row.from_version}, but canonical state is at {current}")
+        if row.from_version != current {
+            return Val("migration transition `{key}` starts at {row.from_version}, but canonical state is at {current}")
+        }
         return None
     }
-    if row.operation != "direct" -> return Val("migration transition `{key}` has unknown operation `{row.operation}`")
+    if row.operation != "direct" {
+        return Val("migration transition `{key}` has unknown operation `{row.operation}`")
+    }
     None
 }
 
 // Direct runtime migrations: target `direct`, one exclusive transaction.
 priv migration_validate: fn(name: String, steps: [SQL]) -> DBError? Never! {
     key: name.bytes()
-    if key.len() == 0 || sql_has_control(key, false) -> return Val(db_error("migration migration key is empty or contains control characters"))
+    if key.len() == 0 || sql_has_control(key, false) {
+        return Val(db_error("migration migration key is empty or contains control characters"))
+    }
     loop sql in steps {
         text: sql.text.bytes()
-        if sql_blank(text, 0, text.len()) || sql_has_control(text, false) -> return Val(db_error("migration step contains empty or invalid SQL metadata"))
+        if sql_blank(text, 0, text.len()) || sql_has_control(text, false) {
+            return Val(db_error("migration step contains empty or invalid SQL metadata"))
+        }
     }
     None
 }
@@ -1332,10 +1501,14 @@ priv migration_apply: fn(scope: DBScope, name: String, steps: [SQL]) -> Int DBEr
     _: scope_execute(scope, sql_raw(ledger_schema()), true) ?? return Err(err)
     columns: scope_query(scope, sql_raw("PRAGMA table_info(__jet_migrations)"), true) ?? return Err(err)
     canonical: ledger_columns()
-    if columns.len() != canonical.len() -> return Err(db_error("migration ledger uses a non-canonical schema"))
+    if columns.len() != canonical.len() {
+        return Err(db_error("migration ledger uses a non-canonical schema"))
+    }
     loop index in 0..<columns.len() {
         column: row_text(columns[index], "name") ?? ""
-        if column != canonical[index] -> return Err(db_error("migration ledger uses a non-canonical schema"))
+        if column != canonical[index] {
+            return Err(db_error("migration ledger uses a non-canonical schema"))
+        }
     }
     stored: scope_query(scope, sql_raw("SELECT transition_key, migration_key, target, target_identity, database_identity, source_identity, schema_identity, tool_identity, operation, status, from_version, to_version, step_count, step_ids, checksum, lock_mode, risk, started_unix_ms, finished_unix_ms, error FROM __jet_migrations ORDER BY sequence"), true) ?? return Err(err)
     rows := [LedgerRow]{}
@@ -1351,16 +1524,16 @@ priv migration_apply: fn(scope: DBScope, name: String, steps: [SQL]) -> Int DBEr
         if row.target == "direct" {
             if row.migration_key == name -> latest = index
             if {
-                ledger_drift(row, current) == .Val(message) -> {
-                    drift.push(message.copy())
-                }
+                ledger_drift(row, current) == .Val(message) -> { drift.push(message.copy()) }
                 row.operation == "apply" || row.operation == "rollback" -> {
                     current = row.to_version
                 }
             }
         }
     }
-    if drift.len() > 0 -> return Err(db_error("migration target `direct` has unreconciled state: {drift.join("; ")}"))
+    if drift.len() > 0 {
+        return Err(db_error("migration target `direct` has unreconciled state: {drift.join("; ")}"))
+    }
     checksum: migration_checksum(name, steps)
     predecessor := ""
     if latest >= 0 {
@@ -1372,18 +1545,32 @@ priv migration_apply: fn(scope: DBScope, name: String, steps: [SQL]) -> Int DBEr
         predecessor = previous.transition_key.copy()
     }
     transition: migration_transition_key(name, checksum, predecessor)
-    loop sql in steps {
-        _: scope_execute(scope, sql, true) ?? return Err(err)
-    }
+    loop sql in steps -> _: scope_execute(scope, sql, true) ?? return Err(err)
     step_ids := [String]{}
     loop index in 0..<steps.len() -> step_ids.push(migration_step_id(index + 1, steps[index]))
     // Direct migrations run under the DB authority alone; without a granted
     // wall clock the ledger records 0 for both timestamps.
     values: [DBValue]{
-        .Text(transition), .Text(name.copy()), .Text("direct"), .Text("direct"), .Text("runtime"),
-        .Text("jet.db.runtime"), .Text("jet.db.migration/v2"), .Text("jet-runtime"), .Text("direct"),
-        .Text("applied"), .Int(0), .Int(0), .Int(steps.len()), .Text(step_ids.join("\n")),
-        .Text(checksum.copy()), .Text("exclusive"), .Text("runtime migration"), .Int(0), .Int(0), .Null,
+        .Text(transition),
+        .Text(name.copy()),
+        .Text("direct"),
+        .Text("direct"),
+        .Text("runtime"),
+        .Text("jet.db.runtime"),
+        .Text("jet.db.migration/v2"),
+        .Text("jet-runtime"),
+        .Text("direct"),
+        .Text("applied"),
+        .Int(0),
+        .Int(0),
+        .Int(steps.len()),
+        .Text(step_ids.join("\n")),
+        .Text(checksum.copy()),
+        .Text("exclusive"),
+        .Text("runtime migration"),
+        .Int(0),
+        .Int(0),
+        .Null,
     }
     insert: SQL{text: "INSERT INTO __jet_migrations (transition_key, migration_key, target, target_identity, database_identity, source_identity, schema_identity, tool_identity, operation, status, from_version, to_version, step_count, step_ids, checksum, lock_mode, risk, started_unix_ms, finished_unix_ms, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", values: values}
     _: scope_execute(scope, insert, true) ?? return Err(err)
@@ -1403,7 +1590,11 @@ migrate: fn(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DB
 
 // FNV-1a 64 identities, byte-compatible with the existing migration ledgers.
 priv fnv_offset: fn() -> U64 Never! { U64{14695981039346656037} }
-priv fnv_byte: fn(hash: U64, byte: Int) -> U64 Never! { wrapping((hash.bit_xor(U64{byte})) * U64{1099511628211}) }
+
+priv fnv_byte: fn(hash: U64, byte: Int) -> U64 Never! {
+    wrapping((hash.bit_xor(U64{byte})) * U64{1099511628211})
+}
+
 priv hash_field: fn(hash: U64, value: String) -> U64 Never! {
     bytes: value.bytes()
     out := hash
@@ -1415,12 +1606,14 @@ priv hash_field: fn(hash: U64, value: String) -> U64 Never! {
     loop byte in bytes -> out = fnv_byte(out, Int{byte})
     fnv_byte(out, 255)
 }
+
 priv float_bits_text: fn(value: Float) -> String Never! {
     bits: math.to_bits(value)
     if bits >= 0 -> return "{bits}"
     unsigned: wrapping(U64{bits + 9223372036854775807 + 1} + U64{9223372036854775808})
     "{unsigned}"
 }
+
 priv hash_value: fn(hash: U64, value: DBValue) -> U64 Never! {
     if value == {
         .Null -> hash_field(hash, "N")
@@ -1435,12 +1628,14 @@ priv hash_value: fn(hash: U64, value: DBValue) -> U64 Never! {
         }
     }
 }
+
 priv hash_sql: fn(hash: U64, sql: SQL) -> U64 Never! {
     out := hash_field(hash, sql.text)
     out = hash_field(out, "{sql.values.len()}")
     loop value in sql.values -> out = hash_value(out, value)
     out
 }
+
 priv hex16: fn(hash: U64) -> String Never! {
     digits: "0123456789abcdef".bytes()
     out := [U8]{}
@@ -1450,12 +1645,11 @@ priv hex16: fn(hash: U64) -> String Never! {
     }
     String.from_bytes(out) ?? ""
 }
+
 priv migration_checksum: fn(name: String, steps: [SQL]) -> String Never! {
     hash := fnv_offset()
     fields: [String]{"jet.db.migration/v2", "direct", name.copy(), "direct", "direct", "runtime", "jet.db.runtime", "jet.db.migration/v2", "jet-runtime", "0", "0", "exclusive", "runtime migration", "{steps.len()}"}
-    loop field in fields {
-        hash = hash_field(hash, field)
-    }
+    loop field in fields -> hash = hash_field(hash, field)
     loop index in 0..<steps.len() {
         hash = hash_field(hash, "{index + 1}")
         hash = hash_field(hash, "exclusive")
@@ -1465,6 +1659,7 @@ priv migration_checksum: fn(name: String, steps: [SQL]) -> String Never! {
     }
     "migration-v2:{hex16(hash)}"
 }
+
 priv migration_step_id: fn(ordinal: Int, sql: SQL) -> String Never! {
     hash := hash_field(fnv_offset(), "{ordinal}")
     hash = hash_field(hash, "exclusive")
@@ -1472,12 +1667,11 @@ priv migration_step_id: fn(ordinal: Int, sql: SQL) -> String Never! {
     hash = hash_sql(hash, sql)
     "step:{hex16(hash)}"
 }
+
 priv migration_transition_key: fn(name: String, checksum: String, predecessor: String) -> String Never! {
     hash := fnv_offset()
     fields: [String]{"transition", "direct", name.copy(), "direct", checksum.copy(), predecessor.copy()}
-    loop field in fields {
-        hash = hash_field(hash, field)
-    }
+    loop field in fields -> hash = hash_field(hash, field)
     "transition:{hex16(hash)}"
 }
 
@@ -1521,6 +1715,7 @@ DBPool: struct {
             if !claim.retry -> time.sleep(1ms)
         }
     }
+
     ready: fn(self) -[DB, Time.Wait]> Bool DBError! {
         state: pool_ready_state(self.state)
         if state == 0 -> return Ok(false)
@@ -1529,16 +1724,20 @@ DBPool: struct {
         lease.close() ?? return Err(err)
         Ok(true)
     }
+
     drain: fn(self, *, deadline: Duration{30000ms}) -[DB, Time.Wait]> DBPoolReceipt DBError! {
         deadline_ns: pool_deadline(deadline)
         loop {
             if pool_drain_step(self.state, deadline_ns) == {
-                .Ok(step) -> { if step == .Val(receipt) -> return Ok(receipt) }
+                .Ok(step) -> {
+                    if step == .Val(receipt) -> return Ok(receipt)
+                }
                 .Err(failure) -> return Err(failure)
             }
             time.sleep(1ms)
         }
     }
+
     receipt: fn(self) -[DB]> DBPoolReceipt Never! {
         guard: self.state.guard_read()
         pool_receipt(guard.value)
@@ -1559,6 +1758,7 @@ priv LeaseState: struct {
         }
     }
 }
+
 // A queued acquire's place in line. Closing it leaves the queue, so an acquire
 // that ends early (its task cancelled at the wait) never blocks later waiters.
 priv PoolWaiter: struct {
@@ -1567,12 +1767,15 @@ priv PoolWaiter: struct {
 
     impl Close {
         close: fn(&&self) {
-            if self.ticket < 0 -> return
+            if self.ticket < 0 {
+                return
+            }
             guard := self.pool.guard_edit()
             pool_remove_waiter(guard.value, self.ticket)
         }
     }
 }
+
 DBLease: struct {
     state: Shared<LeaseState>
 
@@ -1584,14 +1787,19 @@ DBLease: struct {
         Ok()
     }
 
-    impl Display { display: fn(self) -> String { "db.lease" } }
+    impl Display {
+        display: fn(self) -> String { "db.lease" }
+    }
 }
+
 priv pool_deadline: fn(deadline: Duration) -> Int Never! {
     now: rt.clock_mono_ns()
     if deadline.ns > 9223372036854775807 - now -> return 9223372036854775807
     now + deadline.ns
 }
+
 priv pool_expired: fn(deadline_ns: Int) -> Bool Never! { rt.clock_mono_ns() >= deadline_ns }
+
 priv pool_state_error: fn(lifecycle: __PoolLifecycle) -> DBError Never! {
     if lifecycle == {
         .Open -> db_error("database pool is unavailable")
@@ -1599,18 +1807,31 @@ priv pool_state_error: fn(lifecycle: __PoolLifecycle) -> DBError Never! {
         .Drained -> db_error("database pool is drained")
     }
 }
+
 priv pool_receipt: fn(state: PoolState) -> DBPoolReceipt Never! {
     DBPoolReceipt{
-        lifecycle: state.lifecycle, max: state.max, available: state.available.len(), leased: state.leased,
-        opening: state.opening, ready: state.lifecycle == .Open && state.available.len() + state.leased > 0,
-        acquires: state.acquires, releases: state.releases, timeouts: state.timeouts,
-        open_failures: state.open_failures, unhealthy: state.unhealthy, replacements: state.replacements,
+        lifecycle: state.lifecycle,
+        max: state.max,
+        available: state.available.len(),
+        leased: state.leased,
+        opening: state.opening,
+        ready: state.lifecycle == .Open && state.available.len() + state.leased > 0,
+        acquires: state.acquires,
+        releases: state.releases,
+        timeouts: state.timeouts,
+        open_failures: state.open_failures,
+        unhealthy: state.unhealthy,
+        replacements: state.replacements,
         replacement_failures: state.replacement_failures,
     }
 }
+
 priv pool_mark_drained: fn(state: &PoolState) Never! {
-    if state.lifecycle == .Draining && state.available.len() == 0 && state.leased == 0 && state.opening == 0 -> state.lifecycle = .Drained
+    if state.lifecycle == .Draining && state.available.len() == 0 && state.leased == 0 && state.opening == 0 {
+        state.lifecycle = .Drained
+    }
 }
+
 priv pool_remove_waiter: fn(state: &PoolState, ticket: Int) Never! {
     loop index in 0..<state.waiters.len() {
         if state.waiters[index] == ticket {
@@ -1619,8 +1840,11 @@ priv pool_remove_waiter: fn(state: &PoolState, ticket: Int) Never! {
         }
     }
 }
+
 priv pool_replace_one: fn(state: &PoolState) Never! {
-    if state.lifecycle != .Open || state.available.len() + state.leased + state.opening >= state.max -> return
+    if state.lifecycle != .Open || state.available.len() + state.leased + state.opening >= state.max {
+        return
+    }
     driver := __driver_open(state.url) ?? {
         state.replacement_failures += 1
         return
@@ -1634,6 +1858,7 @@ priv pool_replace_one: fn(state: &PoolState) Never! {
     state.available.push(driver)
     state.replacements += 1
 }
+
 priv pool_release: fn(pool: Shared<PoolState>, driver: &&__Driver) Never! {
     held := driver.move()
     fit: __driver_reset(held)
@@ -1700,9 +1925,7 @@ priv pool_claim: fn(pool: Shared<PoolState>, ticket: Int, deadline_ns: Int) -> P
                     guard.value.timeouts += 1
                     claim.failure = Val(db_error("database pool acquisition deadline exceeded"))
                 }
-                else -> {
-                    claim.failure = Val(db_error("database pool backend open failed"))
-                }
+                else -> { claim.failure = Val(db_error("database pool backend open failed")) }
             }
             return claim
         }
@@ -1760,11 +1983,27 @@ priv pool_ready_state: fn(pool: Shared<PoolState>) -> Int Never! {
 
 pool: fn(url: String, *, max: Int) -[DB]> DBPool DBError! {
     if max <= 0 -> return Err(db_error("database pool max must be greater than zero"))
-    Ok(DBPool{state: Shared{PoolState{
-        url: url.copy(), lifecycle: .Open, max: max, available: [__Driver]{}, leased: 0, opening: 0,
-        waiters: [Int]{}, next_ticket: 0, acquires: 0, releases: 0, timeouts: 0, open_failures: 0,
-        unhealthy: 0, replacements: 0, replacement_failures: 0,
-    }}})
+    Ok(
+        DBPool{
+            state: Shared{PoolState{
+                url: url.copy(),
+                lifecycle: .Open,
+                max: max,
+                available: [__Driver]{},
+                leased: 0,
+                opening: 0,
+                waiters: [Int]{},
+                next_ticket: 0,
+                acquires: 0,
+                releases: 0,
+                timeouts: 0,
+                open_failures: 0,
+                unhealthy: 0,
+                replacements: 0,
+                replacement_failures: 0,
+            }},
+        },
+    )
 }
 
 // ---- typed rows ----------------------------------------------------------
@@ -1787,7 +2026,7 @@ priv dyn_value: fn(value: DBValue) -> Dyn Never! {
 // Typed `decode<T>(row)`: sema supplies `names`, the column name and decode
 // key of each of T's fields whose column differs from its key; every other
 // column decodes under its own name.
-decode: fn<T: Decode>(row: [String: DBValue], names: [(db_name: String, key: String)]) -> T [FieldError]! {
+decode: fn<T: Decode>(row: [String:DBValue], names: [(db_name: String, key: String)]) -> T [FieldError]! {
     entries := [(key: String, value: Dyn)]{}
     loop (column, value) in row {
         key := column.copy()
@@ -1808,7 +2047,10 @@ decode: fn<T: Decode>(row: [String: DBValue], names: [(db_name: String, key: Str
 
 // One cached prepared statement: its engine statement slot (-1 when SQLite
 // prepared no statement, as for empty SQL) and the trimmed SQL it caches.
-CachedStatement: struct { stmt: Int, sql: String }
+CachedStatement: struct {
+    stmt: Int
+    sql: String
+}
 
 // rusqlite 0.31.0: cache16,
 // READWRITE|CREATE|URI|NOMUTEX, extended codes and a 5000ms busy timeout.
@@ -1821,21 +2063,29 @@ __Driver: struct {
 
     impl Close {
         close: fn(&&self) {
-            if !self.live -> return
+            if !self.live {
+                return
+            }
             held := __Driver{database: self.database.move(), cache: self.cache.move(), live: true}
             _: __driver_shutdown(held)
         }
     }
 }
+
 priv driver_closed: fn(driver: __Driver) -> Bool Never! { !driver.live }
 
 error: fn(driver: __Driver) -> DBError Never! { DBError.Failed(prep.errmsg(driver.database)) }
 
 // Backend open reports None; public open preserves E3001, while the queue maps
 // None to its existing Unavailable error. Failed opens close their connection.
-priv nul_text: fn() -> String Never! { String.from_bytes([U8]{0}) ?? panic("NUL is one ASCII byte") }
+priv nul_text: fn() -> String Never! {
+    String.from_bytes([U8]{0}) ?? panic("NUL is one ASCII byte")
+}
+
 __has_nul: fn(text: String) -> Bool Never! {
-    loop byte in text.bytes() { if byte == (U8{0}) -> return true }
+    loop byte in text.bytes() {
+        if byte == (U8{0}) -> return true
+    }
     false
 }
 
@@ -1855,6 +2105,7 @@ __driver_open: fn(path: String) -> __Driver? Never! {
     }
     Val(__Driver{database: database.move(), cache: [CachedStatement]{}, live: true})
 }
+
 // Finalize every cached statement, oldest first.
 priv driver_finalize_cache: fn(driver: &__Driver) Never! {
     loop driver.cache.len() > 0 {
@@ -1862,6 +2113,7 @@ priv driver_finalize_cache: fn(driver: &__Driver) Never! {
         _: prep.finalize_stmt(driver.database, statement.stmt)
     }
 }
+
 // Shut a shared connection down in place: later operations see it closed and
 // the driver's own Close then does nothing.
 __driver_shutdown: fn(driver: &__Driver) -> Bool Never! {
@@ -1871,11 +2123,21 @@ __driver_shutdown: fn(driver: &__Driver) -> Bool Never! {
     driver.live = false
     true
 }
-control: fn(driver: &__Driver, sql: String) -> Bool Never! { prep.exec_sql(driver.database, sql.bytes()) == base.OK }
+
+control: fn(driver: &__Driver, sql: String) -> Bool Never! {
+    prep.exec_sql(driver.database, sql.bytes()) == base.OK
+}
+
 __driver_begin: fn(driver: &__Driver) -> Bool Never! { control(driver, "BEGIN") }
-__driver_begin_immediate: fn(driver: &__Driver) -> Bool Never! { control(driver, "BEGIN IMMEDIATE") }
+
+__driver_begin_immediate: fn(driver: &__Driver) -> Bool Never! {
+    control(driver, "BEGIN IMMEDIATE")
+}
+
 __driver_commit: fn(driver: &__Driver) -> Bool Never! { control(driver, "COMMIT") }
+
 __driver_rollback: fn(driver: &__Driver) -> Bool Never! { control(driver, "ROLLBACK") }
+
 __driver_reset: fn(driver: &__Driver) -> Bool Never! {
     if prep.get_autocommit(driver.database) -> return true
     __driver_rollback(driver)
@@ -1898,7 +2160,9 @@ prepare: fn(driver: &__Driver, sql: String) -> CachedStatement DBError! {
         }
     }
     text: key.bytes()
-    if text.len() >= 2147483647 -> return Err(db_error("Error code 18: String or BLOB exceeds size limit"))
+    if text.len() >= 2147483647 {
+        return Err(db_error("Error code 18: String or BLOB exceeds size limit"))
+    }
     prepared: prep.prepare_v3(driver.database, text, 1)
     if prepared.rc != base.OK {
         failure := error(driver)
@@ -1915,8 +2179,11 @@ prepare: fn(driver: &__Driver, sql: String) -> CachedStatement DBError! {
     }
     Ok(CachedStatement{stmt: prepared.stmt, sql: key})
 }
+
 release: fn(driver: &__Driver, statement: &&CachedStatement) Never! {
-    if statement.stmt < 0 -> return
+    if statement.stmt < 0 {
+        return
+    }
     // Reset this statement and clear its bindings before it returns to the cache.
     _: prep.reset_stmt(driver.database, statement.stmt)
     api.clear_bindings(driver.database, statement.stmt)
@@ -1926,40 +2193,54 @@ release: fn(driver: &__Driver, statement: &&CachedStatement) Never! {
     }
     driver.cache.push(statement)
 }
+
 // sqlite3_step(NULL) is SQLITE_MISUSE; empty SQL prepares no statement.
 step_statement: fn(driver: &__Driver, statement: Int) -> Int Never! {
     if statement < 0 -> return base.MISUSE
     prep.step(driver.database, statement)
 }
+
 bind: fn(driver: &__Driver, statement: Int, params: [DBValue]) -> DBError? Never! {
     needed: if statement < 0 -> 0 else -> api.bind_parameter_count(driver.database, statement)
-    if params.len() != needed -> return Val(db_error("Wrong number of parameters passed to query. Got {params.len()}, needed {needed}"))
+    if params.len() != needed {
+        return Val(db_error("Wrong number of parameters passed to query. Got {params.len()}, needed {needed}"))
+    }
     loop at in 0..<params.len() {
         index: at + 1
         status := base.OK
         if params[at] == {
-            .Null -> status = api.bind_null(driver.database, statement, index)
-            .Int(number) -> status = api.bind_int64(driver.database, statement, index, number)
-            .Float(number) -> status = api.bind_double(driver.database, statement, index, number)
-            .Bool(value) -> status = api.bind_int64(driver.database, statement, index, if value -> 1 else -> 0)
+            .Null -> { status = api.bind_null(driver.database, statement, index) }
+            .Int(number) -> { status = api.bind_int64(driver.database, statement, index, number) }
+            .Float(number) -> {
+                status = api.bind_double(driver.database, statement, index, number)
+            }
+            .Bool(value) -> {
+                status = api.bind_int64(driver.database, statement, index, if value -> 1 else -> 0)
+            }
             .Text(text) -> {
                 bytes: text.bytes()
                 length: bytes.len()
-                if length >= 2147483647 -> return Val(db_error("Error code 18: String or BLOB exceeds size limit"))
+                if length >= 2147483647 {
+                    return Val(db_error("Error code 18: String or BLOB exceeds size limit"))
+                }
                 // Empty TEXT binds empty text, never NULL.
                 status = api.bind_text(driver.database, statement, index, Val(bytes), length)
             }
             .Blob(bytes) -> {
                 length: bytes.len()
-                if length >= 2147483647 -> return Val(db_error("Error code 18: String or BLOB exceeds size limit"))
-                if length == 0 -> status = api.bind_zeroblob(driver.database, statement, index, 0)
-                else -> status = api.bind_blob(driver.database, statement, index, Val(bytes), length)
+                if length >= 2147483647 {
+                    return Val(db_error("Error code 18: String or BLOB exceeds size limit"))
+                }
+                if length == 0 -> status = api.bind_zeroblob(driver.database, statement, index, 0) else {
+                    status = api.bind_blob(driver.database, statement, index, Val(bytes), length)
+                }
             }
         }
         if status != base.OK -> return Val(error(driver))
     }
     None
 }
+
 __driver_execute: fn(driver: &__Driver, sql: String, params: [DBValue]) -> Int DBError! {
     statement: prepare(driver, sql) ?? return Err(err)
     if bind(driver, statement.stmt, params) == .Val(failure) {
@@ -1974,16 +2255,20 @@ __driver_execute: fn(driver: &__Driver, sql: String, params: [DBValue]) -> Int D
     reset_status: if statement.stmt < 0 -> base.OK else -> prep.reset_stmt(driver.database, statement.stmt)
     if {
         status == base.DONE -> {
-            if reset_status == base.OK -> count = prep.changes(driver.database)
-            else -> failure = Val(error(driver))
+            if reset_status == base.OK -> count = prep.changes(driver.database) else {
+                failure = Val(error(driver))
+            }
         }
-        status == base.ROW -> failure = Val(db_error("Execute returned results - did you mean to call query?"))
+        status == base.ROW -> {
+            failure = Val(db_error("Execute returned results - did you mean to call query?"))
+        }
         else -> failure = Val(error(driver))
     }
     release(driver, statement)
     if failure == .Val(found_failure) -> return Err(found_failure)
     Ok(count)
 }
+
 // Preserve the old wire decoder's externally observable size/count limits
 // without constructing a second serialized copy of the complete result.
 decimal_width: fn(number: Int) -> Int Never! {
@@ -1998,7 +2283,9 @@ decimal_width: fn(number: Int) -> Int Never! {
     }
     width
 }
+
 tagged_width: fn(payload: Int) -> Int Never! { payload + decimal_width(payload) + 2 }
+
 cell_wire_width: fn(value: DBValue) -> Int Never! {
     payload: if value == {
         .Null -> 0
@@ -2011,13 +2298,13 @@ cell_wire_width: fn(value: DBValue) -> Int Never! {
     tagged_width(payload)
 }
 
-__driver_query: fn(driver: &__Driver, sql: String, params: [DBValue]) -> [[String: DBValue]] DBError! {
+__driver_query: fn(driver: &__Driver, sql: String, params: [DBValue]) -> [[String:DBValue]] DBError! {
     statement: prepare(driver, sql) ?? return Err(err)
     if bind(driver, statement.stmt, params) == .Val(failure) {
         release(driver, statement)
         return Err(failure)
     }
-    rows := [[String: DBValue]]{}
+    rows := [[String:DBValue]]{}
     failure := DBError?{None}
     duplicate := false
     wire_rows := 0
@@ -2038,19 +2325,25 @@ __driver_query: fn(driver: &__Driver, sql: String, params: [DBValue]) -> [[Strin
             failure = Val(error(driver))
             break
         }
-        row := [String: DBValue]{}
+        row := [String:DBValue]{}
         loop at in 0..<count {
             value := DBValue.Null
             kind: api.column_type(driver.database, statement.stmt, at)
             if {
-                kind == base.SQL_INTEGER -> value = DBValue.Int(api.column_int64(driver.database, statement.stmt, at))
-                kind == base.SQL_FLOAT -> value = DBValue.Float(api.column_double(driver.database, statement.stmt, at))
+                kind == base.SQL_INTEGER -> {
+                    value = DBValue.Int(api.column_int64(driver.database, statement.stmt, at))
+                }
+                kind == base.SQL_FLOAT -> {
+                    value = DBValue.Float(api.column_double(driver.database, statement.stmt, at))
+                }
                 kind == base.SQL_TEXT -> {
                     text: api.column_text(driver.database, statement.stmt, at) ?? [U8]{}
                     // The Rust original maps invalid UTF-8 to "".
                     value = DBValue.Text(String.from_bytes(text) ?? "")
                 }
-                kind == base.SQL_BLOB -> value = DBValue.Blob(api.column_blob(driver.database, statement.stmt, at))
+                kind == base.SQL_BLOB -> {
+                    value = DBValue.Blob(api.column_blob(driver.database, statement.stmt, at))
+                }
                 else -> {}
             }
             wire_rows += cell_wire_width(value)
@@ -2063,18 +2356,22 @@ __driver_query: fn(driver: &__Driver, sql: String, params: [DBValue]) -> [[Strin
     }
     release(driver, statement)
     if failure == .Val(found_failure) -> return Err(found_failure)
-    if wire_rows + decimal_width(rows.len()) + 3 > 67108864 -> return Err(db_error("database result exceeds the wire-size limit"))
+    if wire_rows + decimal_width(rows.len()) + 3 > 67108864 {
+        return Err(db_error("database result exceeds the wire-size limit"))
+    }
     if rows.len() > 1000000 -> return Err(db_error("database row count exceeds the wire limit"))
     if column_overflow -> return Err(db_error("database column count exceeds the wire limit"))
     if duplicate -> return Err(db_error("database row contains a duplicate column"))
     Ok(rows)
 }
-__driver_query_one: fn(driver: &__Driver, sql: String, params: [DBValue]) -> [String: DBValue]? DBError! {
+
+__driver_query_one: fn(driver: &__Driver, sql: String, params: [DBValue]) -> [String:DBValue]? DBError! {
     rows := __driver_query(driver, sql, params) ?? return Err(err)
     if rows.len() == 0 -> return Ok(None)
     first: rows.remove(0, .Slot) ?? panic("SQLite first row disappeared")
     Ok(Val(first))
 }
+
 __driver_health: fn(driver: &__Driver) -> Bool Never! {
     if __driver_query_one(driver, "SELECT 1", [DBValue]{}) == {
         .Ok(found) -> found != None
@@ -2082,39 +2379,37 @@ __driver_health: fn(driver: &__Driver) -> Bool Never! {
     }
 }
 
-
 #Test("typed SQL rows preserve conversion and missing-column errors") {
-    row: [String: DBValue]{"number": DBValue.Int(42), "text": DBValue.Text("jet"), "zero": DBValue.Int(0), "one": DBValue.Int(1)}
+    row: [String:DBValue]{"number": DBValue.Int(42), "text": DBValue.Text("jet"), "zero": DBValue.Int(0), "one": DBValue.Int(1)}
     assert_eq(row_int(row, "number") ?? -1, 42)
     assert_eq(row_float(row, "number") ?? -1.0, 42.0)
     assert_eq(row_text(row, "text") ?? "", "jet")
     assert_eq(row_bool(row, "zero") ?? true, false)
     assert_eq(row_bool(row, "one") ?? false, true)
     if row_value(row, "absent") == {
-        .Ok(_) -> assert(false)
+        .Ok(_) -> { assert(false) }
         .Err(error) -> assert_eq(error.message(), "missing column `absent`")
     }
     if row_int(row, "text") == {
-        .Ok(_) -> assert(false)
+        .Ok(_) -> { assert(false) }
         .Err(error) -> assert_eq(error.message(), "expected an int, got jet")
     }
-    floating: [String: DBValue]{"value": DBValue.Float(1.0)}
+    floating: [String:DBValue]{"value": DBValue.Float(1.0)}
     if row_int(floating, "value") == {
-        .Ok(_) -> assert(false)
+        .Ok(_) -> { assert(false) }
         .Err(error) -> assert_eq(error.message(), "expected an int, got 1")
     }
-    large: [String: DBValue]{"value": DBValue.Float(1e21)}
+    large: [String:DBValue]{"value": DBValue.Float(1e21)}
     if row_int(large, "value") == {
-        .Ok(_) -> assert(false)
+        .Ok(_) -> { assert(false) }
         .Err(error) -> assert_eq(error.message(), "expected an int, got 1000000000000000000000")
     }
-    blob: [String: DBValue]{"value": DBValue.Blob([U8]{1, 2})}
+    blob: [String:DBValue]{"value": DBValue.Blob([U8]{1, 2})}
     if row_text(blob, "value") == {
-        .Ok(_) -> assert(false)
+        .Ok(_) -> { assert(false) }
         .Err(error) -> assert_eq(error.message(), "expected text, got [1, 2]")
     }
 }
-
 
 #Test("SQLite driver preserves typed bindings, storage affinities and transaction behavior") {
     driver := __driver_open(":memory:") ?? panic("SQLite memory open failed")
@@ -2144,7 +2439,7 @@ __driver_health: fn(driver: &__Driver) -> Bool Never! {
     invalid_utf8: __driver_query(driver, "SELECT CAST(X'ff' AS TEXT) AS value", [DBValue]{}) ?? panic("SQLite text selection failed")
     assert_eq(row_text(invalid_utf8[0], "value") ?? "invalid", "")
     if __driver_query_one(driver, "SELECT value FROM values_store WHERE value = 0", [DBValue]{}) == {
-        .Val(_) -> assert(false)
+        .Val(_) -> { assert(false) }
         .None -> {}
         .Err(_) -> assert(false)
     }
@@ -2168,12 +2463,12 @@ __driver_health: fn(driver: &__Driver) -> Bool Never! {
     schema: __driver_query(driver, "SELECT sql FROM sqlite_master WHERE name = 'jobs_due'", [DBValue]{}) ?? panic("SQLite schema read failed")
     assert_eq(row_text(schema[0], "sql") ?? "", "CREATE INDEX jobs_due ON jobs (queue, state, due, sequence)")
     if __driver_execute(driver, "CREATE UNIQUE INDEX jobs_queue ON jobs (queue)", [DBValue]{}) == {
-        .Ok(_) -> assert(false)
+        .Ok(_) -> { assert(false) }
         .Err(error) -> assert(error.message().contains("UNIQUE constraint failed: jobs.queue"))
     }
     _: __driver_execute(driver, "CREATE UNIQUE INDEX jobs_sequence ON jobs (sequence)", [DBValue]{}) ?? panic("SQLite unique index failed")
     if __driver_execute(driver, "INSERT INTO jobs VALUES ('q0', 'ready', 5, 3)", [DBValue]{}) == {
-        .Ok(_) -> assert(false)
+        .Ok(_) -> { assert(false) }
         .Err(error) -> assert(error.message().contains("UNIQUE constraint failed: jobs.sequence"))
     }
     assert(__driver_shutdown(driver))
@@ -2194,19 +2489,23 @@ priv driver_cache_parity_probe: fn() Never! {
     assert(__driver_begin(driver))
     assert(__driver_rollback(driver))
     if __driver_execute(driver, "SELECT ? AS value", [DBValue]{.Int(1)}) == {
-        .Ok(_) -> assert(false)
-        .Err(failure) -> assert_eq(failure.message(), "Execute returned results - did you mean to call query?")
+        .Ok(_) -> { assert(false) }
+        .Err(failure) -> {
+            assert_eq(failure.message(), "Execute returned results - did you mean to call query?")
+        }
     }
     if __driver_query(driver, "SELECT ?", [DBValue]{}) == {
-        .Ok(_) -> assert(false)
-        .Err(failure) -> assert_eq(failure.message(), "Wrong number of parameters passed to query. Got 0, needed 1")
+        .Ok(_) -> { assert(false) }
+        .Err(failure) -> {
+            assert_eq(failure.message(), "Wrong number of parameters passed to query. Got 0, needed 1")
+        }
     }
     if __driver_query(driver, "SELECT 1 AS same, 2 AS same", [DBValue]{}) == {
-        .Ok(_) -> assert(false)
+        .Ok(_) -> { assert(false) }
         .Err(failure) -> assert_eq(failure.message(), "database row contains a duplicate column")
     }
     if __driver_query(driver, "SELEC invalid", [DBValue]{}) == {
-        .Ok(_) -> assert(false)
+        .Ok(_) -> { assert(false) }
         .Err(failure) -> assert(failure.message().contains(" in SELEC invalid at offset 0"))
     }
 }
@@ -2274,7 +2573,9 @@ priv driver_cache_parity_probe: fn() Never! {
         (sql: "SELECT * FROM __jet_migrations", message: "migration metadata is managed only by db.migrate"),
     }
     loop entry in rejected {
-        if policy_apply(sql_raw(entry.sql), owned, "alice", false) == .Err(failure) -> assert_eq(failure.message(), entry.message) else -> panic("accepted `{entry.sql}`")
+        if policy_apply(sql_raw(entry.sql), owned, "alice", false) == .Err(failure) {
+            assert_eq(failure.message(), entry.message)
+        } else { panic("accepted `{entry.sql}`") }
     }
     assert_eq(policy_show(owned), "RowPolicy(table=tasks, expr=owner == user)")
     assert(policy_allows(owned, user: "alice", owner: "alice"))

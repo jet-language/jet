@@ -14,7 +14,7 @@ run: fn() {
     outside: memory.load(4096) ?? -2
     wide := "stored"
     if memory.store(16, 9223372036854775808) == {
-        .Err(_) -> wide = "refused"
+        .Err(_) -> { wide = "refused" }
         .Ok(_) -> {}
     }
     memory.store(16, -9223372036854775807 - 1) ?? panic("store the least word: {err}")

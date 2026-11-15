@@ -14,20 +14,25 @@ compiler_url_find: fn(value: I64, start: I64, end: I64, byte: I64) -> I64 {
     }
     end
 }
+
 compiler_url_lower: fn(value: I64, start: I64, end: I64) -> I64 {
     out: rt_text_slice(value, start, end)
     at := I64{0}
     loop at < rt_text_len(out) {
         byte: rt_text_byte(wrapping(rt_text_data(out) + at))
-        if (byte >= I64{65} && byte <= I64{90}) -> rt_text_put(wrapping(rt_text_data(out) + at), byte + I64{32})
+        if (byte >= I64{65} && byte <= I64{90}) {
+            rt_text_put(wrapping(rt_text_data(out) + at), byte + I64{32})
+        }
         at += I64{1}
     }
     out
 }
+
 compiler_url_error: fn(err: I64, text: I64) -> I64 {
     rt_text_store(err, jet_rt_string_clone(text))
     I64{0}
 }
+
 compiler_url_error_part: fn(err: I64, prefix: I64, value: I64, start: I64, end: I64, suffix: I64) -> I64 {
     out: jet_rt_string_builder_new()
     jet_rt_string_builder_push(out, prefix)
@@ -36,12 +41,14 @@ compiler_url_error_part: fn(err: I64, prefix: I64, value: I64, start: I64, end: 
     rt_text_store(err, out)
     I64{0}
 }
+
 compiler_url_hex: fn(byte: I64) -> I64 {
-    if (byte >= I64{48} && byte <= I64{57}) -> return byte - I64{48}
-    if (byte >= I64{65} && byte <= I64{70}) -> return byte - I64{55}
-    if (byte >= I64{97} && byte <= I64{102}) -> return byte - I64{87}
+    if (byte >= I64{48} && byte <= I64{57}) { return byte - I64{48} }
+    if (byte >= I64{65} && byte <= I64{70}) { return byte - I64{55} }
+    if (byte >= I64{97} && byte <= I64{102}) { return byte - I64{87} }
     I64{-1}
 }
+
 compiler_url_decode: fn(value: I64, start: I64, end: I64, err: I64) -> I64 {
     out: jet_rt_string_builder_new()
     at := start
@@ -75,6 +82,7 @@ compiler_url_decode: fn(value: I64, start: I64, end: I64, err: I64) -> I64 {
     }
     out
 }
+
 compiler_url_encode: fn(out: I64, value: I64, path: Bool) {
     at := I64{0}
     loop at < rt_text_len(value) {
@@ -93,6 +101,7 @@ compiler_url_encode: fn(out: I64, value: I64, path: Bool) {
         at += I64{1}
     }
 }
+
 compiler_url_query: fn(value: I64, start: I64, end: I64, err: I64) -> I64 {
     out: jet_rt_string_builder_new()
     if start == end -> return out
@@ -123,6 +132,7 @@ compiler_url_query: fn(value: I64, start: I64, end: I64, err: I64) -> I64 {
     }
     out
 }
+
 compiler_url_puny_adapt: fn(delta: I64, points: I64, first: Bool) -> I64 {
     d := if first -> delta /% I64{700} else -> delta /% I64{2}
     d += d /% points
@@ -133,9 +143,11 @@ compiler_url_puny_adapt: fn(delta: I64, points: I64, first: Bool) -> I64 {
     }
     k + (I64{36} * d) /% (d + I64{38})
 }
+
 compiler_url_puny_digit: fn(out: I64, digit: I64) {
     rt_text_push_scalar(out, if (digit < I64{26}) -> I64{97} + digit else -> I64{48} + digit - I64{26})
 }
+
 compiler_url_puny: fn(out: I64, value: I64, start: I64, end: I64, err: I64) -> Bool {
     at := start
     basic := I64{0}
@@ -150,7 +162,7 @@ compiler_url_puny: fn(out: I64, value: I64, start: I64, end: I64, err: I64) -> B
         at += rt_text_width(wrapping(rt_text_data(value) + at))
     }
     handled := basic
-    if (basic > I64{0} && handled < points) -> rt_text_push_scalar(out, I64{45})
+    if (basic > I64{0} && handled < points) { rt_text_push_scalar(out, I64{45}) }
     n := I64{128}
     delta := I64{0}
     bias := I64{72}
@@ -164,7 +176,7 @@ compiler_url_puny: fn(out: I64, value: I64, start: I64, end: I64, err: I64) -> B
         }
         // Rust checked_add of saturating_mul in the u32 domain.
         extra := (m - n) * (handled + I64{1})
-        if (extra > I64{4294967295}) -> extra = I64{4294967295}
+        if (extra > I64{4294967295}) { extra = I64{4294967295} }
         if (delta > I64{4294967295} - extra) {
             _ := compiler_url_error(err, rt_static_text("punycode overflow"))
             return false
@@ -210,10 +222,13 @@ compiler_url_puny: fn(out: I64, value: I64, start: I64, end: I64, err: I64) -> B
     }
     true
 }
+
 compiler_url_host: fn(value: I64, start: I64, end: I64, err: I64) -> I64 {
     lower: compiler_url_lower(value, start, end)
     stop := rt_text_len(lower)
-    loop stop > (I64{0}) && rt_text_byte(wrapping(wrapping(rt_text_data(lower) + stop) - I64{1})) == (I64{46}) -> stop -= I64{1}
+    loop stop > (I64{0}) && rt_text_byte(wrapping(wrapping(rt_text_data(lower) + stop) - I64{1})) == (I64{46}) {
+        stop -= I64{1}
+    }
     out: jet_rt_string_builder_new()
     at := I64{0}
     loop {
@@ -226,10 +241,10 @@ compiler_url_host: fn(value: I64, start: I64, end: I64, err: I64) -> I64 {
         ascii := true
         i := at
         loop i < next {
-            if (rt_text_byte(wrapping(rt_text_data(lower) + i)) >= I64{128}) -> ascii = false
+            if (rt_text_byte(wrapping(rt_text_data(lower) + i)) >= I64{128}) { ascii = false }
             i += I64{1}
         }
-        if (at != I64{0}) -> rt_text_push_scalar(out, I64{46})
+        if (at != I64{0}) { rt_text_push_scalar(out, I64{46}) }
         if {
             ascii -> rt_text_append(out, rt_text_data(lower) + at, next - at)
             else -> {
@@ -247,6 +262,7 @@ compiler_url_host: fn(value: I64, start: I64, end: I64, err: I64) -> I64 {
     jet_rt_string_drop(lower)
     out
 }
+
 compiler_url_port: fn(value: I64, start: I64, end: I64, output: I64, err: I64) -> Bool {
     at := start
     negative := false
@@ -287,11 +303,12 @@ compiler_url_port: fn(value: I64, start: I64, end: I64, output: I64, err: I64) -
     rt_text_store(output, -n)
     true
 }
+
 // Consumes the decoded owner. The write cursor never overtakes the read
 // cursor, so compaction and popped segments need no copied strings or stack.
 compiler_url_dot_path: fn(path: I64) -> I64 {
     len: rt_text_len(path)
-    if (len == I64{0} || compiler_url_find(path, I64{0}, len, I64{46}) == len) -> return path
+    if (len == I64{0} || compiler_url_find(path, I64{0}, len, I64{46}) == len) { return path }
     data: rt_text_data(path)
     absolute: rt_text_byte(data) == I64{47}
     trailing: rt_text_byte(wrapping(wrapping(data + len) - I64{1})) == I64{47}
@@ -307,7 +324,7 @@ compiler_url_dot_path: fn(path: I64) -> I64 {
             parent -> {
                 loop used > base {
                     used -= I64{1}
-                    if (rt_text_byte(wrapping(data + used)) == I64{47}) -> break
+                    if (rt_text_byte(wrapping(data + used)) == I64{47}) { break }
                 }
             }
             (size > I64{0} && !dot) -> {
@@ -329,6 +346,7 @@ compiler_url_dot_path: fn(path: I64) -> I64 {
     rt_text_store(wrapping(path + I64{8}), used)
     path
 }
+
 compiler_url_new: fn() -> I64 {
     value: jet_rt_alloc(I64{80}, I64{8})
     offset := I64{0}
@@ -338,13 +356,19 @@ compiler_url_new: fn() -> I64 {
     }
     value
 }
+
 compiler_url_replace: fn(value: I64, offset: I64, text: I64) {
     jet_rt_string_drop(rt_text_word(wrapping(value + offset)))
     rt_text_store(wrapping(value + offset), text)
 }
+
 compiler_url_default: fn(scheme: I64) -> I64 {
-    if jet_rt_string_eq(scheme, rt_static_text("http")) || jet_rt_string_eq(scheme, rt_static_text("ws")) -> return I64{80}
-    if jet_rt_string_eq(scheme, rt_static_text("https")) || jet_rt_string_eq(scheme, rt_static_text("wss")) -> return I64{443}
+    if jet_rt_string_eq(scheme, rt_static_text("http")) || jet_rt_string_eq(scheme, rt_static_text("ws")) {
+        return I64{80}
+    }
+    if jet_rt_string_eq(scheme, rt_static_text("https")) || jet_rt_string_eq(scheme, rt_static_text("wss")) {
+        return I64{443}
+    }
     if jet_rt_string_eq(scheme, rt_static_text("ftp")) -> return I64{21}
     if jet_rt_string_eq(scheme, rt_static_text("ssh")) -> return I64{22}
     if jet_rt_string_eq(scheme, rt_static_text("smtp")) -> return I64{25}
@@ -352,6 +376,7 @@ compiler_url_default: fn(scheme: I64) -> I64 {
     if jet_rt_string_eq(scheme, rt_static_text("imap")) -> return I64{143}
     I64{-1}
 }
+
 compiler_url_render: fn(value: I64, user: Bool, pass: Bool, fragment: Bool) -> I64 {
     out: jet_rt_string_builder_new()
     scheme: rt_text_word(value)
@@ -375,7 +400,9 @@ compiler_url_render: fn(value: I64, user: Bool, pass: Bool, fragment: Bool) -> I
         }
     }
     path: rt_text_word(wrapping(value + I64{48}))
-    if (jet_rt_string_eq(scheme, rt_static_text("data")) && rt_text_len(host) == I64{0}) { jet_rt_string_builder_push(out, path) } else { compiler_url_encode(out, path, true) }
+    if (jet_rt_string_eq(scheme, rt_static_text("data")) && rt_text_len(host) == I64{0}) {
+        jet_rt_string_builder_push(out, path)
+    } else { compiler_url_encode(out, path, true) }
     query: rt_text_word(wrapping(value + I64{56}))
     if (rt_text_len(query) > I64{0}) {
         rt_text_push_scalar(out, I64{63})
@@ -387,6 +414,7 @@ compiler_url_render: fn(value: I64, user: Bool, pass: Bool, fragment: Bool) -> I
     }
     out
 }
+
 compiler_url_parse_body: fn(input: I64, value: I64, err: I64) -> Bool {
     len: rt_text_len(input)
     colon: compiler_url_find(input, I64{0}, len, I64{58})
@@ -399,7 +427,9 @@ compiler_url_parse_body: fn(input: I64, value: I64, err: I64) -> Bool {
     loop at < colon {
         byte: rt_text_byte(wrapping(rt_text_data(input) + at))
         alpha: (byte >= I64{65} && byte <= I64{90}) || (byte >= I64{97} && byte <= I64{122})
-        if (!alpha && (at == I64{0} || !((byte >= I64{48} && byte <= I64{57}) || byte == I64{43} || byte == I64{45} || byte == I64{46}))) -> valid = false
+        if (!alpha && (at == I64{0} || !((byte >= I64{48} && byte <= I64{57}) || byte == I64{43} || byte == I64{45} || byte == I64{46}))) {
+            valid = false
+        }
         at += I64{1}
     }
     if !valid {
@@ -415,14 +445,14 @@ compiler_url_parse_body: fn(input: I64, value: I64, err: I64) -> Bool {
     fragment: hash < end
     if fragment {
         text: compiler_url_decode(input, hash + I64{1}, end, err)
-        if (text == I64{0}) -> return false
+        if (text == I64{0}) { return false }
         compiler_url_replace(value, I64{64}, text)
         end = hash
     }
     question: compiler_url_find(input, start, end, I64{63})
     if question < end {
         text: compiler_url_query(input, question + I64{1}, end, err)
-        if (text == I64{0}) -> return false
+        if (text == I64{0}) { return false }
         compiler_url_replace(value, I64{56}, text)
         end = question
     }
@@ -437,7 +467,9 @@ compiler_url_parse_body: fn(input: I64, value: I64, err: I64) -> Bool {
         host_start := auth_start
         at = auth_start
         loop at < auth_end {
-            if (rt_text_byte(wrapping(rt_text_data(input) + at)) == I64{64}) -> host_start = at + I64{1}
+            if (rt_text_byte(wrapping(rt_text_data(input) + at)) == I64{64}) {
+                host_start = at + I64{1}
+            }
             at += I64{1}
         }
         if host_start != auth_start {
@@ -445,12 +477,12 @@ compiler_url_parse_body: fn(input: I64, value: I64, err: I64) -> Bool {
             ui_end: host_start - I64{1}
             split: compiler_url_find(input, auth_start, ui_end, I64{58})
             text: compiler_url_decode(input, auth_start, split, err)
-            if (text == I64{0}) -> return false
+            if (text == I64{0}) { return false }
             compiler_url_replace(value, I64{8}, text)
             if split < ui_end {
                 pass = true
                 password: compiler_url_decode(input, split + I64{1}, ui_end, err)
-                if (password == I64{0}) -> return false
+                if (password == I64{0}) { return false }
                 compiler_url_replace(value, I64{16}, password)
             }
         }
@@ -474,7 +506,9 @@ compiler_url_parse_body: fn(input: I64, value: I64, err: I64) -> Bool {
                     return false
                 }
                 port_start = host_end + I64{1}
-                if (!compiler_url_port(input, port_start, auth_end, wrapping(value + I64{32}), err)) -> return false
+                if (!compiler_url_port(input, port_start, auth_end, wrapping(value + I64{32}), err)) {
+                    return false
+                }
                 rt_text_store(wrapping(value + I64{40}), I64{1})
             }
             // parse's normalize re-runs host_to_ascii even on bracketed hosts.
@@ -482,20 +516,22 @@ compiler_url_parse_body: fn(input: I64, value: I64, err: I64) -> Bool {
             split := auth_end
             at = host_start
             loop at < auth_end {
-                if (rt_text_byte(wrapping(rt_text_data(input) + at)) == I64{58}) -> split = at
+                if (rt_text_byte(wrapping(rt_text_data(input) + at)) == I64{58}) { split = at }
                 at += I64{1}
             }
             digits := split + I64{1} < auth_end
             at = split + I64{1}
             loop at < auth_end {
                 byte: rt_text_byte(wrapping(rt_text_data(input) + at))
-                if (byte < I64{48} || byte > I64{57}) -> digits = false
+                if (byte < I64{48} || byte > I64{57}) { digits = false }
                 at += I64{1}
             }
             if digits {
                 host_end = split
                 port_start = split + I64{1}
-                if (!compiler_url_port(input, port_start, auth_end, wrapping(value + I64{32}), err)) -> return false
+                if (!compiler_url_port(input, port_start, auth_end, wrapping(value + I64{32}), err)) {
+                    return false
+                }
                 rt_text_store(wrapping(value + I64{40}), I64{1})
             }
         }
@@ -510,7 +546,7 @@ compiler_url_parse_body: fn(input: I64, value: I64, err: I64) -> Bool {
             }
             jet_rt_free(ignored, I64{8}, I64{8})
         }
-        if (host == I64{0}) -> return false
+        if (host == I64{0}) { return false }
         compiler_url_replace(value, I64{24}, host)
     } else if jet_rt_string_eq(scheme, rt_static_text("http")) || jet_rt_string_eq(scheme, rt_static_text("https")) {
         suffix: rt_static_text(" URL needs `//host`")
@@ -519,7 +555,7 @@ compiler_url_parse_body: fn(input: I64, value: I64, err: I64) -> Bool {
     }
     data: jet_rt_string_eq(scheme, rt_static_text("data"))
     path: if authority && path_start == end -> jet_rt_string_clone(rt_static_text("/")) else if data && !authority -> rt_text_slice(input, path_start, end) else -> compiler_url_decode(input, path_start, end, err)
-    if (path == I64{0}) -> return false
+    if (path == I64{0}) { return false }
     if {
         data -> compiler_url_replace(value, I64{48}, path)
         else -> {
@@ -530,12 +566,15 @@ compiler_url_parse_body: fn(input: I64, value: I64, err: I64) -> Bool {
     // Materialize only genuinely absent Text fields after all fallible work.
     offset := I64{0}
     loop offset < (I64{72}) {
-        if (offset != I64{32} && offset != I64{40} && rt_text_word(wrapping(value + offset)) == I64{0}) -> rt_text_store(wrapping(value + offset), jet_rt_string_builder_new())
+        if (offset != I64{32} && offset != I64{40} && rt_text_word(wrapping(value + offset)) == I64{0}) {
+            rt_text_store(wrapping(value + offset), jet_rt_string_builder_new())
+        }
         offset += I64{8}
     }
     compiler_url_replace(value, I64{72}, compiler_url_render(value, user, pass, fragment))
     true
 }
+
 // Rust str::trim uses Unicode White_Space. A trimmed input is its own owned
 // text: under shared text storage a clone of it must not alias a borrow.
 compiler_url_trim_view: fn(value: I64) -> I64 {
@@ -549,13 +588,16 @@ compiler_url_trim_view: fn(value: I64) -> I64 {
     }
     loop end > start {
         at := end - I64{1}
-        loop at > start && (rt_text_byte(wrapping(data + at)).bit_and(I64{192})) == (I64{128}) -> at -= I64{1}
+        loop at > start && (rt_text_byte(wrapping(data + at)).bit_and(I64{192})) == (I64{128}) {
+            at -= I64{1}
+        }
         if !unicode_is_white_space(rt_text_decode(wrapping(data + at))) -> break
         end = at
     }
-    if (start == I64{0} && end == len) -> return value
+    if (start == I64{0} && end == len) { return value }
     rt_text_copy(wrapping(data + start), end - start)
 }
+
 #Export(c) jet_url_parse: fn(a0: I64, ok: I64, err: I64) -> I64 {
     input: compiler_url_trim_view(a0)
     value: compiler_url_new()
@@ -568,15 +610,21 @@ compiler_url_trim_view: fn(value: I64) -> I64 {
     rt_text_store(ok, value)
     I64{1}
 }
+
 #Export(c) jet_rt_handle_drop_jet_url: fn(value: I64) {
-    if (value == I64{0}) -> return
+    if (value == I64{0}) {
+        return
+    }
     offset := I64{0}
     loop offset < (I64{80}) {
-        if (offset != I64{32} && offset != I64{40}) -> jet_rt_string_drop(rt_text_word(wrapping(value + offset)))
+        if (offset != I64{32} && offset != I64{40}) {
+            jet_rt_string_drop(rt_text_word(wrapping(value + offset)))
+        }
         offset += I64{8}
     }
     jet_rt_free(value, I64{80}, I64{8})
 }
+
 #Export(c) jet_rt_handle_clone_jet_url: fn(value: I64) -> I64 {
     out: jet_rt_alloc(I64{80}, I64{8})
     offset := I64{0}
@@ -587,29 +635,72 @@ compiler_url_trim_view: fn(value: I64) -> I64 {
     }
     out
 }
+
 #Export(c) jet_rt_handle_eq_jet_url: fn(a: I64, b: I64) -> Bool {
     offset := I64{0}
     loop offset < (I64{80}) {
         left: rt_text_word(wrapping(a + offset))
         right: rt_text_word(wrapping(b + offset))
-        if (offset == I64{32} || offset == I64{40}) { if left != right -> return false } else { if !jet_rt_string_eq(left, right) -> return false }
+        if (offset == I64{32} || offset == I64{40}) {
+            if left != right -> return false
+        } else {
+            if !jet_rt_string_eq(left, right) -> return false
+        }
         offset += I64{8}
     }
     true
 }
-#Export(c) jet_rt_handle_show_jet_url: fn(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(wrapping(value + I64{72}))) }
-#Export(c) jet_rt_handle_display_jet_url: fn(value: I64) -> I64 { jet_rt_handle_show_jet_url(value) }
+
+#Export(c) jet_rt_handle_show_jet_url: fn(value: I64) -> I64 {
+    jet_rt_string_clone(rt_text_word(wrapping(value + I64{72})))
+}
+
+#Export(c) jet_rt_handle_display_jet_url: fn(value: I64) -> I64 {
+    jet_rt_handle_show_jet_url(value)
+}
+
 #Export(c) jet_rt_handle_debug_jet_url: fn(value: I64) -> I64 { jet_rt_handle_show_jet_url(value) }
-#Export(c) jet_rt_record_get_jet_url_scheme: fn(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value)) }
-#Export(c) jet_rt_record_get_jet_url_user_text: fn(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(wrapping(value + I64{8}))) }
-#Export(c) jet_rt_record_get_jet_url_password_text: fn(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(wrapping(value + I64{16}))) }
-#Export(c) jet_rt_record_get_jet_url_host: fn(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(wrapping(value + I64{24}))) }
-#Export(c) jet_rt_record_get_jet_url_port: fn(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(wrapping(value + I64{32}))) }
-#Export(c) jet_rt_record_get_jet_url_port_explicit: fn(value: I64) -> Bool { rt_text_word(wrapping(value + I64{40})) != I64{0} }
-#Export(c) jet_rt_record_get_jet_url_path: fn(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(wrapping(value + I64{48}))) }
-#Export(c) jet_rt_record_get_jet_url_query: fn(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(wrapping(value + I64{56}))) }
-#Export(c) jet_rt_record_get_jet_url_fragment: fn(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(wrapping(value + I64{64}))) }
-#Export(c) jet_rt_record_get_jet_url_raw: fn(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(wrapping(value + I64{72}))) }
+
+#Export(c) jet_rt_record_get_jet_url_scheme: fn(value: I64) -> I64 {
+    jet_rt_string_clone(rt_text_word(value))
+}
+
+#Export(c) jet_rt_record_get_jet_url_user_text: fn(value: I64) -> I64 {
+    jet_rt_string_clone(rt_text_word(wrapping(value + I64{8})))
+}
+
+#Export(c) jet_rt_record_get_jet_url_password_text: fn(value: I64) -> I64 {
+    jet_rt_string_clone(rt_text_word(wrapping(value + I64{16})))
+}
+
+#Export(c) jet_rt_record_get_jet_url_host: fn(value: I64) -> I64 {
+    jet_rt_string_clone(rt_text_word(wrapping(value + I64{24})))
+}
+
+#Export(c) jet_rt_record_get_jet_url_port: fn(value: I64) -> I64 {
+    jet_int_owned_from_i64(rt_text_word(wrapping(value + I64{32})))
+}
+
+#Export(c) jet_rt_record_get_jet_url_port_explicit: fn(value: I64) -> Bool {
+    rt_text_word(wrapping(value + I64{40})) != I64{0}
+}
+
+#Export(c) jet_rt_record_get_jet_url_path: fn(value: I64) -> I64 {
+    jet_rt_string_clone(rt_text_word(wrapping(value + I64{48})))
+}
+
+#Export(c) jet_rt_record_get_jet_url_query: fn(value: I64) -> I64 {
+    jet_rt_string_clone(rt_text_word(wrapping(value + I64{56})))
+}
+
+#Export(c) jet_rt_record_get_jet_url_fragment: fn(value: I64) -> I64 {
+    jet_rt_string_clone(rt_text_word(wrapping(value + I64{64})))
+}
+
+#Export(c) jet_rt_record_get_jet_url_raw: fn(value: I64) -> I64 {
+    jet_rt_string_clone(rt_text_word(wrapping(value + I64{72})))
+}
+
 #Export(c) jet_rt_record_new_jet_url: fn(m0: I64, m1: I64, m2: I64, m3: I64, m4: I64, m5: Bool, m6: I64, m7: I64, m8: I64, m9: I64) -> I64 {
     value: jet_rt_alloc(I64{80}, I64{8})
     rt_text_store(value, jet_rt_string_clone(m0))

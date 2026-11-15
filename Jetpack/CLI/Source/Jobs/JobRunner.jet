@@ -12,7 +12,9 @@ cli_run_project_job: fn(verification: &StoreVerification, cache: &WorkspaceDecla
 
 cli_run_project_job_with_mode: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, job: String, clean: Bool, silent: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     registry: cli_checked_project_job_registry(entry) ?? {
-        loop diagnostic in err.diagnostics -> theme.error_coded(diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)
+        loop diagnostic in err.diagnostics {
+            theme.error_coded(diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)
+        }
         return EXIT_USAGE
     }
     metadata := if registry.find(job) == {
@@ -22,7 +24,7 @@ cli_run_project_job_with_mode: fn(verification: &StoreVerification, cache: &Work
                 "E1294",
                 "no job named `{job}`",
                 "lifecycle job names must refer to a checked top-level #Job function.",
-                "declare the job with #Job, or remove it from the environment lifecycle."
+                "declare the job with #Job, or remove it from the environment lifecycle.",
             )
             declared := [String]{}
             loop fact in registry.jobs() -> declared.push(fact.name)
@@ -64,7 +66,9 @@ cli_run_project_job_leaf: fn(verification: &StoreVerification, cache: &Workspace
     // metadata, composed through the same RunPlan path as `jet env`.
     has_env: files.is_file(EnvFile.path_in(project_dir))
     plan := RunPlan.empty(cli_current_dir(), cli_builtin_table())
-    if has_env -> plan = cli_load_project_plan_with_selections(cache, theme, parsed.flags.preset, parsed.flags.environment) ?? return cli_exit_for(theme, err)
+    if has_env {
+        plan = cli_load_project_plan_with_selections(cache, theme, parsed.flags.preset, parsed.flags.environment) ?? return cli_exit_for(theme, err)
+    }
     cli_apply_locked_channels(theme, project_dir, plan.table, parsed.flags) ?? return cli_exit_for(theme, err)
     loop raw in metadata.packages {
         spec: RefSpec.classify_in(raw, plan.table) ?? {
@@ -77,10 +81,14 @@ cli_run_project_job_leaf: fn(verification: &StoreVerification, cache: &Workspace
         }
         if !known -> plan.refs.push(spec)
     }
-    if trust_gate_with_environment(theme, trust_store_path(), project_dir, plan.refs, plan.table, plan.secrets, plan.environment, parsed.flags.trust) == .Val(code) -> return code
+    if trust_gate_with_environment(theme, trust_store_path(), project_dir, plan.refs, plan.table, plan.secrets, plan.environment, parsed.flags.trust) == .Val(code) {
+        return code
+    }
     cli_validate_declared_secrets(theme, project_dir, plan.secrets, plan.environment.active_environment) ?? return cli_exit_for(theme, err)
     env := cli_empty_job_env()
-    if has_env || plan.refs.len() > 0 -> env = cli_compose_env(verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    if has_env || plan.refs.len() > 0 {
+        env = cli_compose_env(verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    }
     loop limit in metadata.limits -> env.vars[cli_task_limit_env_name(limit.key)] = limit.value
     task_args := cli_tail(parsed.positional, 1)
     if parsed.command == .Val(command) {
@@ -102,7 +110,7 @@ cli_run_project_job_leaf: fn(verification: &StoreVerification, cache: &Workspace
                 "E1330",
                 "job `{job}` enables caching without outputs",
                 "a cached job needs at least one declared output so a later run can prove that the result still exists.",
-                "add `outputs: [\"path\"]`, or use `cache: .Uncached`."
+                "add `outputs: [\"path\"]`, or use `cache: .Uncached`.",
             )
             return EXIT_USAGE
         }
@@ -155,7 +163,9 @@ cli_run_project_job_leaf: fn(verification: &StoreVerification, cache: &Workspace
         }
     }
     if code != 0 {
-        if access_trace == .Val(trace_path) -> files.remove(trace_path).drop("a failed run leaves no trace to prove")
+        if access_trace == .Val(trace_path) {
+            files.remove(trace_path).drop("a failed run leaves no trace to prove")
+        }
         return code
     }
     if cache_key == .Val(key) {
@@ -163,7 +173,7 @@ cli_run_project_job_leaf: fn(verification: &StoreVerification, cache: &Workspace
             accesses := [String]{}
             failure := String?{None}
             if cli_task_undeclared_accesses(project_dir, job_cwd, entry, metadata, trace_path) == {
-                .Ok(found) -> accesses = found
+                .Ok(found) -> { accesses = found }
                 .Err(error) -> failure = Val(error.message())
             }
             files.remove(trace_path).drop("the trace is consumed by the access proof")
@@ -181,7 +191,7 @@ cli_run_project_job_leaf: fn(verification: &StoreVerification, cache: &Workspace
                 "E1330",
                 "job `{job}` did not produce its declared outputs",
                 "a successful cached job must leave every declared output in place before its result can be recorded",
-                "write each declared output, or remove it from `outputs` and keep the job uncached"
+                "write each declared output, or remove it from `outputs` and keep the job uncached",
             )
             return EXIT_USER_ERROR
         }
@@ -208,7 +218,9 @@ cli_resolve_job_compiler: fn(env: &ShellEnv) -[FS, Env, Rand]> JobCompiler CLIEr
     loop index in 0..<env.cache_leases.len() {
         if env.cache_leases[index].executable_digest_for_command(requested) == {
             .Ok(found) -> {
-                if found == .Val(digest) -> return Ok(JobCompiler{program: requested, build: digest})
+                if found == .Val(digest) {
+                    return Ok(JobCompiler{program: requested, build: digest})
+                }
             }
             .Err(error) -> return Err(CLIError.Other("{error}"))
         }
@@ -244,7 +256,7 @@ cli_resolve_executable_path_in: fn(program: String, search: String) -[FS, Env]> 
 cli_empty_job_env: fn() -> ShellEnv Never! {
     ShellEnv{
         bin_dirs: [String]{},
-        vars: [String: String]{},
+        vars: [String:String]{},
         unset_vars: [String]{},
         refs: [String]{},
         label: JETPACK_PROMPT_LABEL,
@@ -309,7 +321,9 @@ cli_job_path: fn(project_dir: String, raw: String?, field: String, allow_missing
     root: files.canonicalize(project_dir) ?? return Err(CLIError.Other("couldn't resolve project root: {err}"))
     candidate: files.join(project_dir, relative)
     exists: files.exists(candidate)
-    if !allow_missing && !exists -> return Err(CLIError.Other("job {field} `{relative}` does not exist"))
+    if !allow_missing && !exists {
+        return Err(CLIError.Other("job {field} `{relative}` does not exist"))
+    }
     resolved := ""
     if exists {
         resolved = files.canonicalize(candidate) ?? return Err(CLIError.Other("couldn't resolve job {field} `{relative}`: {err}"))
@@ -319,6 +333,8 @@ cli_job_path: fn(project_dir: String, raw: String?, field: String, allow_missing
         parent: files.canonicalize(files.dirname(candidate)) ?? return Err(CLIError.Other("couldn't resolve job {field} parent: {err}"))
         resolved = files.join(parent, name)
     }
-    if !cli_path_starts_with(resolved, root) -> return Err(CLIError.Other("job {field} `{relative}` escapes the project"))
+    if !cli_path_starts_with(resolved, root) {
+        return Err(CLIError.Other("job {field} `{relative}` escapes the project"))
+    }
     Ok(resolved)
 }

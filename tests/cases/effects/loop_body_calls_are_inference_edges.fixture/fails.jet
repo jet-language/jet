@@ -8,7 +8,9 @@ parse_guest: fn(name: String) -> Bool {
 
 has_guest: fn(names: [String]) -> Bool {
     found: loop name in names {
-        if parse_guest(name) -> break true
+        if parse_guest(name) {
+            break true
+        }
     } ?? false
     found
 }
@@ -21,6 +23,4 @@ count_guests: fn(names: [String]) -> Int Never! {
     hits
 }
 
-run: fn() Never! {
-    print("{count_guests([String]{"ann", "guest1"})}")
-}
+run: fn() Never! { print("{count_guests([String]{"ann", "guest1"})}") }

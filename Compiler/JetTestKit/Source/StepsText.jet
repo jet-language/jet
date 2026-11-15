@@ -51,20 +51,17 @@ kit_steps_surround_punctuation: fn(text: String, commas: Bool) -> String {
         code: Int{byte}
         if quote != 0 {
             output.push(byte)
-            if escaped -> escaped = false
-            else if code == 92 -> escaped = true
-            else if code == quote -> quote = 0
+            if escaped -> escaped = false else if code == 92 -> escaped = true else if code == quote {
+                quote = 0
+            }
         } else if code == 34 || code == 39 {
             quote = code
             output.push(byte)
-        } else if commas && code == 44 -> output.push(U8{32})
-        else if !commas && (code == 40 || code == 41) {
+        } else if commas && code == 44 { output.push(U8{32}) } else if !commas && (code == 40 || code == 41) {
             output.push(U8{32})
             output.push(byte)
             output.push(U8{32})
-        } else {
-            output.push(byte)
-        }
+        } else { output.push(byte) }
     }
     String.from_bytes(output) ?? panic("punctuation scan changed UTF-8")
 }

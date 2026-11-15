@@ -13,11 +13,44 @@ PolicySourceRow: struct {
     owner: String
     reason: String
 }
-PolicyScopeRow: struct { rule: String, selector: String, reason: String }
-PolicyProducerRow: struct { selector: String, artifact: String, protocol: String, owner: String, reason: String }
-PolicyArtifactRow: struct { selector: String, producer: String, kind: String, reason: String }
-PolicyFindingRow: struct { id: String, rule: String, owner: String, proof: String }
-PolicyExceptionRow: struct { rule: String, selector: String, site: String, expected: String, protocol: String, reason: String }
+
+PolicyScopeRow: struct {
+    rule: String
+    selector: String
+    reason: String
+}
+
+PolicyProducerRow: struct {
+    selector: String
+    artifact: String
+    protocol: String
+    owner: String
+    reason: String
+}
+
+PolicyArtifactRow: struct {
+    selector: String
+    producer: String
+    kind: String
+    reason: String
+}
+
+PolicyFindingRow: struct {
+    id: String
+    rule: String
+    owner: String
+    proof: String
+}
+
+PolicyExceptionRow: struct {
+    rule: String
+    selector: String
+    site: String
+    expected: String
+    protocol: String
+    reason: String
+}
+
 PolicyManifest: struct {
     sources: [PolicySourceRow]
     scopes: [PolicyScopeRow]
@@ -26,13 +59,28 @@ PolicyManifest: struct {
     findings: [PolicyFindingRow]
     exceptions: [PolicyExceptionRow]
 }
-PolicyRuleSpec: struct { name: String, why: String, replacement: String }
-PolicyOccurrence: struct { file: String, rule: String, site: String }
+
+PolicyRuleSpec: struct {
+    name: String
+    why: String
+    replacement: String
+}
+
+PolicyOccurrence: struct {
+    file: String
+    rule: String
+    site: String
+}
+
 #Error
-PolicyError: struct { message: String }
+PolicyError: struct {
+    message: String
+}
 
 // Compiler/token offsets and the Rust adapter's slices are UTF-8 byte offsets.
-policy_slice_bytes: fn(text: String, start: Int, end: Int) -> String { policy_slice_raw(text.bytes(), start, end) }
+policy_slice_bytes: fn(text: String, start: Int, end: Int) -> String {
+    policy_slice_raw(text.bytes(), start, end)
+}
 
 // The same slice of an already indexed text: a scan over one text indexes it
 // once instead of copying it per slice.
@@ -93,42 +141,66 @@ policy_rule_registry: fn() -> [PolicyRuleSpec] {
 
 policy_violation: fn(file: String, rule: String, site: String) -> String {
     loop spec in policy_rule_registry() {
-        if spec.name == rule -> return "file={file}; rule={rule}; site={site}; why={spec.why}; replacement={spec.replacement}"
+        if spec.name == rule {
+            return "file={file}; rule={rule}; site={site}; why={spec.why}; replacement={spec.replacement}"
+        }
     }
     panic("unregistered corpus rule: {rule}")
 }
+
 policy_relative_path: fn(path: String) -> String? {
-    if path.is_empty() || path.starts_with("/") -> return Val("manifest path is not a normalized relative path ({path})")
+    if path.is_empty() || path.starts_with("/") {
+        return Val("manifest path is not a normalized relative path ({path})")
+    }
     loop part in path.split("/") {
-        if part == ".." || part.is_empty() -> return Val("manifest path is not a normalized relative path ({path})")
+        if part == ".." || part.is_empty() {
+            return Val("manifest path is not a normalized relative path ({path})")
+        }
     }
     None
 }
+
 policy_selector_path: fn(selector: String) -> String {
-    if selector.starts_with("root:") || selector.starts_with("file:") -> return policy_slice_bytes(selector, 5, selector.bytes().len())
+    if selector.starts_with("root:") || selector.starts_with("file:") {
+        return policy_slice_bytes(selector, 5, selector.bytes().len())
+    }
     selector.copy()
 }
+
 policy_selector_error: fn(value: String) -> String? {
-    if !value.starts_with("root:") && !value.starts_with("file:") -> return Val("selector must start with root: or file: ({value})")
+    if !value.starts_with("root:") && !value.starts_with("file:") {
+        return Val("selector must start with root: or file: ({value})")
+    }
     policy_relative_path(policy_selector_path(value))
 }
+
 policy_producer_error: fn(value: String) -> String? {
-    if !value.starts_with("producer:") -> return Val("producer selector must start with producer: ({value})")
+    if !value.starts_with("producer:") {
+        return Val("producer selector must start with producer: ({value})")
+    }
     parts: policy_slice_bytes(value, 9, value.bytes().len()).split("#").to_list()
     if parts.len() < 2 -> return Val("producer selector must name a symbol ({value})")
     if policy_relative_path(parts[0]) == .Val(error) -> return Val(error.copy())
-    if parts.len() != 2 || parts[1].is_empty() -> return Val("producer selector must name one non-empty symbol ({value})")
+    if parts.len() != 2 || parts[1].is_empty() {
+        return Val("producer selector must name one non-empty symbol ({value})")
+    }
     None
 }
+
 policy_artifact_error: fn(value: String) -> String? {
-    if value.starts_with("path:") -> return policy_relative_path(policy_slice_bytes(value, 5, value.bytes().len()))
+    if value.starts_with("path:") {
+        return policy_relative_path(policy_slice_bytes(value, 5, value.bytes().len()))
+    }
     if value.starts_with("family:") {
         family: policy_slice_bytes(value, 7, value.bytes().len())
-        if family.is_empty() || family.contains("/") -> return Val("artifact family is not a stable identifier ({value})")
+        if family.is_empty() || family.contains("/") {
+            return Val("artifact family is not a stable identifier ({value})")
+        }
         return None
     }
     Val("artifact selector must start with path: or family: ({value})")
 }
+
 // Preserve Rust usize's full x64 domain, including + and leading zeroes.
 // Counts are canonical decimal strings so Jet Int cannot truncate u64::MAX.
 policy_unsigned: fn(raw: String) -> String? {
@@ -145,13 +217,17 @@ policy_unsigned: fn(raw: String) -> String? {
     if value.len() > 20 || (value.len() == 20 && value > "18446744073709551615") -> return None
     Val(value)
 }
+
 policy_decimal_less: fn(left: String, right: String) -> Bool {
     left.len() < right.len() || (left.len() == right.len() && left < right)
 }
+
 policy_site_error: fn(value: String) -> String? {
     parts: value.split("@").to_list()
     if parts.len() < 2 -> return Val("semantic site must carry a span ({value})")
-    if parts.len() != 2 || parts[0].is_empty() -> return Val("semantic site kind is empty or malformed ({value})")
+    if parts.len() != 2 || parts[0].is_empty() {
+        return Val("semantic site kind is empty or malformed ({value})")
+    }
     span: parts[1].split("..").to_list()
     if span.len() < 2 -> return Val("semantic site span must use start..end ({value})")
     start: policy_unsigned(span[0]) ?? return Val("bad site start ({value})")
@@ -160,9 +236,11 @@ policy_site_error: fn(value: String) -> String? {
     if policy_decimal_less(end, start) -> return Val("site end precedes start ({value})")
     None
 }
+
 policy_role_valid: fn(role: String) -> Bool {
     role == "canonical-teaching" || role == "expert-lesson" || role == "negative-diagnostic" || role == "raw-protocol" || role == "fixture-harness-boundary" || role == "generated-output" || role == "non-teaching-test-data"
 }
+
 policy_parse_manifest: fn(text: String) -> PolicyManifest PolicyError! {
     manifest := PolicyManifest{sources: [PolicySourceRow]{}, scopes: [PolicyScopeRow]{}, producers: [PolicyProducerRow]{}, artifacts: [PolicyArtifactRow]{}, findings: [PolicyFindingRow]{}, exceptions: [PolicyExceptionRow]{}}
     section := ""
@@ -177,86 +255,139 @@ policy_parse_manifest: fn(text: String) -> PolicyManifest PolicyError! {
         if line.is_empty() || line.starts_with("#") -> next
         if line.starts_with("[") && line.ends_with("]") {
             section = policy_slice_bytes(line, 1, line.bytes().len() - 1)
-            if section != "source" && section != "scope" && section != "producer" && section != "artifact" && section != "finding" && section != "exception" -> return Err(PolicyError{message: "manifest line {number}: unknown section [{section}]"})
+            if section != "source" && section != "scope" && section != "producer" && section != "artifact" && section != "finding" && section != "exception" {
+                return Err(PolicyError{message: "manifest line {number}: unknown section [{section}]"})
+            }
             next
         }
         fields: line.split("\t").to_list()
         expected: if section == "source" -> 8 else if section == "scope" -> 4 else if section == "producer" -> 6 else if section == "artifact" || section == "finding" -> 5 else if section == "exception" -> 7 else -> 0
-        if fields.len() != expected || expected == 0 -> return Err(PolicyError{message: "manifest line {number}: wrong field count or row outside a section"})
+        if fields.len() != expected || expected == 0 {
+            return Err(PolicyError{message: "manifest line {number}: wrong field count or row outside a section"})
+        }
         labels: if section == "source" -> [String]{"", "", "", "source profile", "source decision", "source proof", "source owner", "source reason"} else if section == "scope" -> [String]{"", "scope rule", "", "scope reason"} else if section == "producer" -> [String]{"", "", "", "producer protocol", "producer owner", "producer reason"} else if section == "artifact" -> [String]{"", "", "", "artifact kind", "artifact reason"} else if section == "finding" -> [String]{"", "finding id", "finding rule", "finding owner", "finding proof"} else -> [String]{"", "exception rule", "", "", "", "exception protocol", "exception reason"}
         // Validate in field order, matching the Rust row constructors.
         loop index in 1..<fields.len() {
             error := String?{None}
-            if (section == "source" && index == 1) || (section == "scope" && index == 2) || (section == "exception" && index == 2) -> error = policy_selector_error(fields[index])
-            if (section == "producer" && index == 1) || (section == "artifact" && index == 2) -> error = policy_producer_error(fields[index])
-            if (section == "producer" && index == 2) || (section == "artifact" && index == 1) -> error = policy_artifact_error(fields[index])
-            if section == "source" && index == 2 && !policy_role_valid(fields[2]) -> error = Val("unknown corpus source role `{fields[2]}`")
+            if (section == "source" && index == 1) || (section == "scope" && index == 2) || (section == "exception" && index == 2) {
+                error = policy_selector_error(fields[index])
+            }
+            if (section == "producer" && index == 1) || (section == "artifact" && index == 2) {
+                error = policy_producer_error(fields[index])
+            }
+            if (section == "producer" && index == 2) || (section == "artifact" && index == 1) {
+                error = policy_artifact_error(fields[index])
+            }
+            if section == "source" && index == 2 && !policy_role_valid(fields[2]) {
+                error = Val("unknown corpus source role `{fields[2]}`")
+            }
             if section == "exception" && index == 3 -> error = policy_site_error(fields[3])
-            if section == "exception" && index == 4 && policy_unsigned(fields[4]) == None -> error = Val("exception occurrence is not a positive integer")
-            if !labels[index].is_empty() && fields[index].is_empty() -> error = Val("{labels[index]} is empty")
-            if error == .Val(message) -> return Err(PolicyError{message: "manifest line {number}: {message}"})
+            if section == "exception" && index == 4 && policy_unsigned(fields[4]) == None {
+                error = Val("exception occurrence is not a positive integer")
+            }
+            if !labels[index].is_empty() && fields[index].is_empty() {
+                error = Val("{labels[index]} is empty")
+            }
+            if error == .Val(message) {
+                return Err(PolicyError{message: "manifest line {number}: {message}"})
+            }
         }
-        if section == "source" -> manifest.sources.push(PolicySourceRow{selector: fields[1], role: fields[2], profile: fields[3], decision: fields[4], proof: fields[5], owner: fields[6], reason: fields[7]})
-        if section == "scope" -> manifest.scopes.push(PolicyScopeRow{rule: fields[1], selector: fields[2], reason: fields[3]})
-        if section == "producer" -> manifest.producers.push(PolicyProducerRow{selector: fields[1], artifact: fields[2], protocol: fields[3], owner: fields[4], reason: fields[5]})
-        if section == "artifact" -> manifest.artifacts.push(PolicyArtifactRow{selector: fields[1], producer: fields[2], kind: fields[3], reason: fields[4]})
-        if section == "finding" -> manifest.findings.push(PolicyFindingRow{id: fields[1], rule: fields[2], owner: fields[3], proof: fields[4]})
-        if section == "exception" -> manifest.exceptions.push(PolicyExceptionRow{rule: fields[1], selector: fields[2], site: fields[3], expected: policy_unsigned(fields[4]) ?? panic("validated occurrence"), protocol: fields[5], reason: fields[6]})
-        if fields[0] != "1" -> return Err(PolicyError{message: "manifest line {number}: unsupported manifest version"})
+        if section == "source" {
+            manifest.sources.push(PolicySourceRow{selector: fields[1], role: fields[2], profile: fields[3], decision: fields[4], proof: fields[5], owner: fields[6], reason: fields[7]})
+        }
+        if section == "scope" {
+            manifest.scopes.push(PolicyScopeRow{rule: fields[1], selector: fields[2], reason: fields[3]})
+        }
+        if section == "producer" {
+            manifest.producers.push(PolicyProducerRow{selector: fields[1], artifact: fields[2], protocol: fields[3], owner: fields[4], reason: fields[5]})
+        }
+        if section == "artifact" {
+            manifest.artifacts.push(PolicyArtifactRow{selector: fields[1], producer: fields[2], kind: fields[3], reason: fields[4]})
+        }
+        if section == "finding" {
+            manifest.findings.push(PolicyFindingRow{id: fields[1], rule: fields[2], owner: fields[3], proof: fields[4]})
+        }
+        if section == "exception" {
+            manifest.exceptions.push(PolicyExceptionRow{rule: fields[1], selector: fields[2], site: fields[3], expected: policy_unsigned(fields[4]) ?? panic("validated occurrence"), protocol: fields[5], reason: fields[6]})
+        }
+        if fields[0] != "1" {
+            return Err(PolicyError{message: "manifest line {number}: unsupported manifest version"})
+        }
     }
     Ok(manifest)
 }
+
 policy_selector_matches: fn(selector: String, path: String) -> Bool {
     if selector.starts_with("file:") -> return policy_selector_path(selector) == path
     if !selector.starts_with("root:") -> return false
     root: policy_selector_path(selector)
     path == root || path.starts_with("{root}/")
 }
+
 policy_specificity: fn(selector: String) -> Int {
     if selector.starts_with("file:") -> return 100000 + selector.len() - 5
     if selector.starts_with("root:") -> return selector.len() - 5
     0
 }
+
 policy_source_row: fn(manifest: PolicyManifest, path: String) -> PolicySourceRow? {
     found := PolicySourceRow?{None}
     best := -1
     loop row in manifest.sources {
         rank: policy_specificity(row.selector)
-        if policy_selector_matches(row.selector, path) && rank >= best { found = Val(row)
+        if policy_selector_matches(row.selector, path) && rank >= best {
+            found = Val(row)
             best = rank
         }
     }
     found
 }
+
 policy_protocol_error: fn(protocol: String) -> String? {
     if protocol == "ordinary-envelope" || protocol == "no-response-protocol" -> return None
-    if !protocol.starts_with("override:") -> return Val("generated protocol must be ordinary-envelope, no-response-protocol, or an override ({protocol})")
+    if !protocol.starts_with("override:") {
+        return Val("generated protocol must be ordinary-envelope, no-response-protocol, or an override ({protocol})")
+    }
     parts: policy_slice_bytes(protocol, 9, protocol.bytes().len()).split(":").to_list()
-    if parts.len() < 2 -> return Val("generated protocol override must name identity and proof ({protocol})")
-    if parts[0].is_empty() || parts[0] == "ordinary-envelope" || parts.len() != 2 || parts[1] != "differs-from-ordinary-envelope" -> return Val("generated protocol override must prove a distinct protocol identity ({protocol})")
+    if parts.len() < 2 {
+        return Val("generated protocol override must name identity and proof ({protocol})")
+    }
+    if parts[0].is_empty() || parts[0] == "ordinary-envelope" || parts.len() != 2 || parts[1] != "differs-from-ordinary-envelope" {
+        return Val("generated protocol override must prove a distinct protocol identity ({protocol})")
+    }
     None
 }
+
 policy_exception_protocol_error: fn(protocol: String) -> String? {
-    if protocol == "fixture" || protocol == "expert-lesson" || protocol == "negative-diagnostic" || protocol == "canonical-teaching" || protocol == "raw-protocol" || protocol == "fixture-harness-boundary" -> return None
+    if protocol == "fixture" || protocol == "expert-lesson" || protocol == "negative-diagnostic" || protocol == "canonical-teaching" || protocol == "raw-protocol" || protocol == "fixture-harness-boundary" {
+        return None
+    }
     if protocol.starts_with("override:") -> return policy_protocol_error(protocol)
     Val("exception protocol must name its source boundary or a generated override ({protocol})")
 }
+
 policy_domain_guard: fn(rule: String) -> Bool {
     rule == "product-parser-regression" || rule == "compiler-loop-fact" || rule == "build-root-fact" || rule == "fixture-role-classification" || rule == "fixture-cli-role" || rule == "bindgen-one-decoder"
 }
+
 policy_registered: fn(rule: String) -> Bool {
-    loop spec in policy_rule_registry() { if spec.name == rule -> return true }
+    loop spec in policy_rule_registry() {
+        if spec.name == rule -> return true
+    }
     false
 }
+
 policy_duplicate_errors: fn(values: [String], kind: String) -> [String] {
     seen := [String]{}
     errors := [String]{}
     loop value in values {
-        if seen.contains(value) -> errors.push("duplicate {kind} selector {value}")
-        else -> seen.push(value.copy())
+        if seen.contains(value) -> errors.push("duplicate {kind} selector {value}") else {
+            seen.push(value.copy())
+        }
     }
     errors
 }
+
 policy_role_debug: fn(role: String) -> String {
     if role == "canonical-teaching" -> return "CanonicalTeaching"
     if role == "expert-lesson" -> return "ExpertLesson"
@@ -266,6 +397,7 @@ policy_role_debug: fn(role: String) -> String {
     if role == "generated-output" -> return "GeneratedOutput"
     "NonTeachingTestData"
 }
+
 policy_validate_manifest: fn(manifest: PolicyManifest) -> [String] {
     errors := [String]{}
     names := [String]{}
@@ -274,8 +406,9 @@ policy_validate_manifest: fn(manifest: PolicyManifest) -> [String] {
     scopes := [String]{}
     loop scope in manifest.scopes {
         key: "{scope.rule}\t{scope.selector}"
-        if scopes.contains(key) -> errors.push("duplicate scope {scope.rule} {scope.selector}")
-        else -> scopes.push(key)
+        if scopes.contains(key) -> errors.push("duplicate scope {scope.rule} {scope.selector}") else {
+            scopes.push(key)
+        }
     }
     names = [String]{}
     loop row in manifest.producers -> names.push(row.selector)
@@ -287,17 +420,31 @@ policy_validate_manifest: fn(manifest: PolicyManifest) -> [String] {
     loop row in manifest.findings -> names.push(row.id)
     loop error in policy_duplicate_errors(names, "finding") -> errors.push(error)
     loop finding in manifest.findings {
-        if !policy_registered(finding.rule) -> errors.push("finding {finding.id} names unknown rule {finding.rule}")
-        if finding.owner.is_empty() || finding.proof.is_empty() -> errors.push("finding {finding.id} has no owner or executable proof")
+        if !policy_registered(finding.rule) {
+            errors.push("finding {finding.id} names unknown rule {finding.rule}")
+        }
+        if finding.owner.is_empty() || finding.proof.is_empty() {
+            errors.push("finding {finding.id} has no owner or executable proof")
+        }
         guarded := policy_domain_guard(finding.rule)
-        loop scope in manifest.scopes { if scope.rule == finding.rule -> guarded = true }
-        if !guarded -> errors.push("finding {finding.id} rule {finding.rule} has no executable corpus or domain guard")
+        loop scope in manifest.scopes {
+            if scope.rule == finding.rule -> guarded = true
+        }
+        if !guarded {
+            errors.push("finding {finding.id} rule {finding.rule} has no executable corpus or domain guard")
+        }
     }
-    if manifest.findings.len() != 38 -> errors.push("manifest must retain all 38 audited findings, found {manifest.findings.len()}")
+    if manifest.findings.len() != 38 {
+        errors.push("manifest must retain all 38 audited findings, found {manifest.findings.len()}")
+    }
     loop scope in manifest.scopes {
         if !policy_registered(scope.rule) -> errors.push("scope names unknown rule {scope.rule}")
-        if policy_source_row(manifest, policy_selector_path(scope.selector)) == None -> errors.push("scope {scope.rule} names an unclassified source selector {scope.selector}")
-        if scope.reason.is_empty() -> errors.push("scope {scope.rule} {scope.selector} has no reason")
+        if policy_source_row(manifest, policy_selector_path(scope.selector)) == None {
+            errors.push("scope {scope.rule} names an unclassified source selector {scope.selector}")
+        }
+        if scope.reason.is_empty() {
+            errors.push("scope {scope.rule} {scope.selector} has no reason")
+        }
     }
     loop producer in manifest.producers {
         if policy_protocol_error(producer.protocol) == .Val(error) {
@@ -307,24 +454,36 @@ policy_validate_manifest: fn(manifest: PolicyManifest) -> [String] {
         }
         has_artifact := false
         loop artifact in manifest.artifacts {
-            if artifact.selector == producer.artifact && artifact.producer == producer.selector -> has_artifact = true
+            if artifact.selector == producer.artifact && artifact.producer == producer.selector {
+                has_artifact = true
+            }
         }
         if !has_artifact -> errors.push("producer {producer.selector} family has no artifact row")
     }
     loop artifact in manifest.artifacts {
         declared := false
-        loop producer in manifest.producers { if producer.selector == artifact.producer -> declared = true }
-        if !declared -> errors.push("artifact {artifact.selector} names unknown producer {artifact.producer}")
+        loop producer in manifest.producers {
+            if producer.selector == artifact.producer -> declared = true
+        }
+        if !declared {
+            errors.push("artifact {artifact.selector} names unknown producer {artifact.producer}")
+        }
     }
     exceptions := [String]{}
     loop exception in manifest.exceptions {
-        if !policy_registered(exception.rule) -> errors.push("exception names unknown rule {exception.rule}")
+        if !policy_registered(exception.rule) {
+            errors.push("exception names unknown rule {exception.rule}")
+        }
         key: "{exception.rule}\t{exception.selector}\t{exception.site}"
-        if exceptions.contains(key) -> errors.push("duplicate occurrence exception {exception.rule} {exception.selector} {exception.site}")
-        else -> exceptions.push(key)
-        if exception.expected == "0" -> errors.push("exception {exception.rule} {exception.site} has zero expected occurrences")
-        if !exception.selector.starts_with("file:") -> errors.push("exception {exception.rule} {exception.site} is not occurrence-scoped to one file")
-        else {
+        if exceptions.contains(key) {
+            errors.push("duplicate occurrence exception {exception.rule} {exception.selector} {exception.site}")
+        } else { exceptions.push(key) }
+        if exception.expected == "0" {
+            errors.push("exception {exception.rule} {exception.site} has zero expected occurrences")
+        }
+        if !exception.selector.starts_with("file:") {
+            errors.push("exception {exception.rule} {exception.site} is not occurrence-scoped to one file")
+        } else {
             source: policy_source_row(manifest, policy_selector_path(exception.selector))
             if source == .Val(row) {
                 if !exception.site.starts_with("allow:") && row.role != "expert-lesson" && row.role != "negative-diagnostic" {
@@ -335,8 +494,11 @@ policy_validate_manifest: fn(manifest: PolicyManifest) -> [String] {
                 errors.push("exception {exception.rule} names an unclassified source {exception.selector}")
             }
         }
-        if exception.protocol.is_empty() || exception.reason.is_empty() -> errors.push("exception {exception.rule} {exception.site} has no protocol or reason")
-        else if policy_exception_protocol_error(exception.protocol) == .Val(error) -> errors.push("exception {exception.rule} {exception.site}: {error}")
+        if exception.protocol.is_empty() || exception.reason.is_empty() {
+            errors.push("exception {exception.rule} {exception.site} has no protocol or reason")
+        } else if policy_exception_protocol_error(exception.protocol) == .Val(error) {
+            errors.push("exception {exception.rule} {exception.site}: {error}")
+        }
     }
     errors
 }
@@ -346,6 +508,7 @@ policy_join: fn(root: String, path: String) -> String {
     if root.ends_with("/") -> return "{root}{path}"
     "{root}/{path}"
 }
+
 policy_validate_manifest_paths: fn(manifest: PolicyManifest, root: String) -> [String] {
     errors := [String]{}
     loop source in manifest.sources {
@@ -355,33 +518,48 @@ policy_validate_manifest_paths: fn(manifest: PolicyManifest, root: String) -> [S
     }
     loop producer in manifest.producers {
         path: policy_slice_bytes(producer.selector, 9, producer.selector.bytes().len()).split("#").to_list()[0].copy()
-        if !policy_files.is_file(policy_join(root, path)) -> errors.push("manifest producer source does not exist: {producer.selector}")
+        if !policy_files.is_file(policy_join(root, path)) {
+            errors.push("manifest producer source does not exist: {producer.selector}")
+        }
     }
     loop exception in manifest.exceptions {
-        if exception.selector.starts_with("file:") && !policy_files.is_file(policy_join(root, policy_selector_path(exception.selector))) -> errors.push("manifest exception source does not exist: {exception.selector}")
+        if exception.selector.starts_with("file:") && !policy_files.is_file(policy_join(root, policy_selector_path(exception.selector))) {
+            errors.push("manifest exception source does not exist: {exception.selector}")
+        }
     }
     errors
 }
+
 policy_inventory_error: fn(message: String, file: String, site_kind: String) -> String {
     violation: policy_violation(file, "corpus-inventory", "{site_kind}@0..0")
     "{message}: {file}; {violation}"
 }
+
 policy_audit_inventory: fn(manifest: PolicyManifest, files: [String], producers: [String]) -> [String] {
     errors := [String]{}
     loop file in files {
-        if policy_source_row(manifest, file) == None -> errors.push(policy_inventory_error("unclassified eligible source", file, "inventory:source"))
+        if policy_source_row(manifest, file) == None {
+            errors.push(policy_inventory_error("unclassified eligible source", file, "inventory:source"))
+        }
     }
     loop producer in producers {
         declared := false
-        loop row in manifest.producers { if row.selector == producer -> declared = true }
-        if !declared -> errors.push(policy_inventory_error("unclassified generated-source producer", producer, "inventory:producer"))
+        loop row in manifest.producers {
+            if row.selector == producer -> declared = true
+        }
+        if !declared {
+            errors.push(policy_inventory_error("unclassified generated-source producer", producer, "inventory:producer"))
+        }
     }
     errors
 }
+
 policy_validate_occurrences: fn(manifest: PolicyManifest, selector: String, candidates: [PolicyOccurrence]) -> String? {
     keys := [String]{}
     loop candidate in candidates {
-        if candidate.file != selector -> return Val("candidate file {candidate.file} does not match {selector}")
+        if candidate.file != selector {
+            return Val("candidate file {candidate.file} does not match {selector}")
+        }
         key: "{candidate.rule}\t{candidate.site}"
         if !keys.contains(key) -> keys.push(key)
     }
@@ -391,7 +569,9 @@ policy_validate_occurrences: fn(manifest: PolicyManifest, selector: String, cand
         rule: parts[0]
         site: parts[1]
         count := 0
-        loop candidate in candidates { if candidate.rule == rule && candidate.site == site -> count += 1 }
+        loop candidate in candidates {
+            if candidate.rule == rule && candidate.site == site -> count += 1
+        }
         matches := 0
         expected := "0"
         loop exception in manifest.exceptions {
@@ -400,24 +580,37 @@ policy_validate_occurrences: fn(manifest: PolicyManifest, selector: String, cand
                 expected = exception.expected
             }
         }
-        if matches != 1 -> return Val("file={selector}; rule={rule}; site={site}; why=occurrence has no unique exception; replacement=add one exact exception")
-        if ("{count}") != expected -> return Val("file={selector}; rule={rule}; site={site}; why=expected {expected} occurrence(s), found {count}; replacement=remove the additional occurrence or add a distinct reviewed site")
+        if matches != 1 {
+            return Val("file={selector}; rule={rule}; site={site}; why=occurrence has no unique exception; replacement=add one exact exception")
+        }
+        if ("{count}") != expected {
+            return Val("file={selector}; rule={rule}; site={site}; why=expected {expected} occurrence(s), found {count}; replacement=remove the additional occurrence or add a distinct reviewed site")
+        }
     }
     loop exception in manifest.exceptions {
         if exception.selector != "file:{selector}" -> next
         count := 0
-        loop candidate in candidates { if candidate.rule == exception.rule && candidate.site == exception.site -> count += 1 }
-        if ("{count}") != exception.expected -> return Val("file={selector}; rule={exception.rule}; site={exception.site}; why=expected {exception.expected} occurrence(s), found {count}; replacement=remove the additional occurrence or update the exact reviewed site")
+        loop candidate in candidates {
+            if candidate.rule == exception.rule && candidate.site == exception.site -> count += 1
+        }
+        if ("{count}") != exception.expected {
+            return Val("file={selector}; rule={exception.rule}; site={exception.site}; why=expected {exception.expected} occurrence(s), found {count}; replacement=remove the additional occurrence or update the exact reviewed site")
+        }
     }
     None
 }
+
 policy_apply_exceptions: fn(manifest: PolicyManifest, path: String, candidates: [PolicyOccurrence]) -> [PolicyOccurrence] PolicyError! {
     errors := [String]{}
     loop exception in manifest.exceptions {
         if exception.selector != "file:{path}" -> next
         actual := 0
-        loop candidate in candidates { if candidate.rule == exception.rule && candidate.site == exception.site -> actual += 1 }
-        if ("{actual}") != exception.expected -> errors.push("file={path}; rule={exception.rule}; site={exception.site}; why=expected {exception.expected} occurrence(s), found {actual}; replacement=remove the additional occurrence or update the exact reviewed site")
+        loop candidate in candidates {
+            if candidate.rule == exception.rule && candidate.site == exception.site -> actual += 1
+        }
+        if ("{actual}") != exception.expected {
+            errors.push("file={path}; rule={exception.rule}; site={exception.site}; why=expected {exception.expected} occurrence(s), found {actual}; replacement=remove the additional occurrence or update the exact reviewed site")
+        }
     }
     // A stale exception usually means the site moved: name every unexcepted
     // occurrence of the file with it, so one run shows each current site.
@@ -425,14 +618,18 @@ policy_apply_exceptions: fn(manifest: PolicyManifest, path: String, candidates: 
         loop candidate in candidates {
             excepted := false
             loop exception in manifest.exceptions {
-                if exception.rule == candidate.rule && exception.selector == ("file:{path}") && exception.site == candidate.site -> excepted = true
+                if exception.rule == candidate.rule && exception.selector == ("file:{path}") && exception.site == candidate.site {
+                    excepted = true
+                }
             }
-            if !excepted -> errors.push("file={path}; rule={candidate.rule}; site={candidate.site}; why=occurrence has no unique exception; replacement=add one exact exception")
+            if !excepted {
+                errors.push("file={path}; rule={candidate.rule}; site={candidate.site}; why=occurrence has no unique exception; replacement=add one exact exception")
+            }
         }
         return Err(PolicyError{message: errors.join("\n")})
     }
     remaining := [PolicyOccurrence]{}
-    consumed := [String: Int]{}
+    consumed := [String:Int]{}
     loop candidate in candidates {
         key: "{candidate.rule}\t{candidate.site}"
         expected := String?{None}
@@ -446,12 +643,11 @@ policy_apply_exceptions: fn(manifest: PolicyManifest, path: String, candidates: 
             seen: (consumed.get(key) ?? 0) + 1
             consumed[key] = seen
             if policy_decimal_less(limit, "{seen}") -> remaining.push(candidate.copy())
-        } else {
-            remaining.push(candidate.copy())
-        }
+        } else { remaining.push(candidate.copy()) }
     }
     Ok(remaining)
 }
+
 policy_manifest: fn() -> PolicyManifest {
     text: policy_files.read("tests/corpus_policy.tsv") ?? panic("read corpus manifest")
     manifest: policy_parse_manifest(text) ?? panic("checked-in corpus manifest is valid")
@@ -460,12 +656,14 @@ policy_manifest: fn() -> PolicyManifest {
     assert_eq(errors, [String]{})
     manifest
 }
+
 policy_manifest_failure: fn(text: String) -> String {
     if policy_parse_manifest(text) == {
         .Err(error) -> return error.message.copy()
         .Ok(_) -> panic("invalid manifest unexpectedly accepted")
     }
 }
+
 policy_exception_failure: fn(manifest: PolicyManifest, path: String, candidates: [PolicyOccurrence]) -> String {
     if policy_apply_exceptions(manifest, path, candidates) == {
         .Err(error) -> return error.message.copy()
@@ -483,7 +681,9 @@ policy_test_checked_findings_and_provenance: fn() {
     assert_eq(manifest.findings.len(), 38)
     assert_eq(manifest.producers.len(), 26)
     has_lua := false
-    loop artifact in manifest.artifacts { if artifact.selector == "family:lua-binding" -> has_lua = true }
+    loop artifact in manifest.artifacts {
+        if artifact.selector == "family:lua-binding" -> has_lua = true
+    }
     assert(has_lua, "Lua artifact family is inventoried")
     has_renderer := false
     loop producer in manifest.producers {
@@ -494,30 +694,38 @@ policy_test_checked_findings_and_provenance: fn() {
     }
     assert(has_renderer, "Lua renderer is inventoried")
 }
+
 #Test("checked_manifest_has_all_audited_findings_and_provenance") {
     guards_enter_root()
     policy_test_checked_findings_and_provenance()
 }
+
 policy_test_uncovered_scope: fn() {
     manifest := policy_manifest()
     manifest.scopes.push(PolicyScopeRow{rule: "entry-explicit", selector: "file:unclassified/entry.jet", reason: "synthetic uncovered scope"})
     assert(policy_validate_manifest(manifest).join("\n").contains("unclassified source selector"), "uncovered scope must fail")
 }
+
 #Test("manifest_rejects_a_scope_without_source_coverage") {
     guards_enter_root()
     policy_test_uncovered_scope()
 }
+
 policy_test_unguarded_finding: fn() {
     manifest := policy_manifest()
     kept := [PolicyScopeRow]{}
-    loop scope in manifest.scopes { if scope.rule != "entry-explicit" -> kept.push(scope) }
+    loop scope in manifest.scopes {
+        if scope.rule != "entry-explicit" -> kept.push(scope)
+    }
     manifest.scopes = kept
     assert(policy_validate_manifest(manifest).join("\n").contains("entry-explicit has no executable corpus or domain guard"), "orphan finding must fail")
 }
+
 #Test("manifest_rejects_a_finding_without_an_executable_guard") {
     guards_enter_root()
     policy_test_unguarded_finding()
 }
+
 policy_test_invalid_manifest_rows: fn() {
     assert_eq(policy_manifest_failure("[unknown]\n"), "manifest line 1: unknown section [unknown]")
     assert_eq(policy_manifest_failure("[scope]\n1\tentry-explicit\tfile:../escape.jet\twhy"), "manifest line 2: manifest path is not a normalized relative path (../escape.jet)")
@@ -525,10 +733,12 @@ policy_test_invalid_manifest_rows: fn() {
     assert_eq(policy_manifest_failure("[scope]\n2\tentry-explicit\tfile:ok.jet\twhy"), "manifest line 2: unsupported manifest version")
     assert_eq(policy_manifest_failure("[scope]\n1\tentry-explicit\tfile:ok.jet"), "manifest line 2: wrong field count or row outside a section")
 }
+
 #Test("corpus manifest parser planted invalid rows") {
     guards_enter_root()
     policy_test_invalid_manifest_rows()
 }
+
 policy_test_duplicate_and_provenance_violations: fn() {
     manifest := policy_manifest()
     manifest.sources.push(manifest.sources[0])
@@ -537,10 +747,12 @@ policy_test_duplicate_and_provenance_violations: fn() {
     assert(errors.contains("duplicate source selector {manifest.sources[0].selector}"), "duplicate source must fail")
     assert(errors.contains("artifact family:planted names unknown producer producer:new.rs#render"), "missing provenance must fail")
 }
+
 #Test("corpus manifest validation planted duplicate and provenance violations") {
     guards_enter_root()
     policy_test_duplicate_and_provenance_violations()
 }
+
 policy_test_exception_source_roles: fn() {
     manifest: policy_manifest()
     loop exception in manifest.exceptions {
@@ -549,16 +761,19 @@ policy_test_exception_source_roles: fn() {
         assert(source.role == "expert-lesson" || source.role == "negative-diagnostic", "exception requires expert or negative source")
     }
 }
+
 #Test("exceptions_are_limited_to_expert_or_negative_sources") {
     guards_enter_root()
     policy_test_exception_source_roles()
 }
+
 policy_test_canonical_source_exception: fn() {
     manifest := policy_manifest()
     manifest.exceptions.push(PolicyExceptionRow{rule: "entry-explicit", selector: "file:Examples/Basics/Hello.jet", site: "stmt:top-level@0..0", expected: "1", protocol: "fixture", reason: "planted"})
     error: "exception entry-explicit file:Examples/Basics/Hello.jet requires an expert-lesson or negative-diagnostic source, found CanonicalTeaching"
     assert(policy_validate_manifest(manifest).contains(error), "canonical source cannot absorb a violation")
 }
+
 #Test("corpus manifest planted canonical-source exception") {
     guards_enter_root()
     policy_test_canonical_source_exception()
@@ -576,10 +791,12 @@ policy_test_unclassified_inventory_entries: fn() {
     assert(producer_error.contains("unclassified generated-source producer"), "a synthetic producer without provenance must fail")
     assert_eq(policy_audit_inventory(manifest, [String]{"Examples/Basics/Hello.jet"}, [String]{"producer:Jetpack/Integrations/Source/Foreign/Binders/Lua.jet#pkg_lua_render_jet"}), [String]{})
 }
+
 #Test("inventory_rejects_new_source_or_producer_without_a_row") {
     guards_enter_root()
     policy_test_unclassified_inventory_entries()
 }
+
 policy_test_occurrence_scoped_exceptions: fn() {
     manifest: policy_manifest()
     selector: "tests/ui/args_spec_bad_parse_arity.jet"
@@ -591,10 +808,12 @@ policy_test_occurrence_scoped_exceptions: fn() {
     applied: policy_apply_exceptions(manifest, selector, [PolicyOccurrence]{candidate}) ?? panic("recorded occurrence is accepted")
     assert_eq(applied, [PolicyOccurrence]{})
 }
+
 #Test("exception_matching_is_occurrence_scoped") {
     guards_enter_root()
     policy_test_occurrence_scoped_exceptions()
 }
+
 policy_test_missing_and_shifted_exception_sites: fn() {
     manifest: policy_manifest()
     selector: "tests/ui/args_spec_bad_parse_arity.jet"
@@ -603,37 +822,47 @@ policy_test_missing_and_shifted_exception_sites: fn() {
     assert_eq(policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{}), Val("file=tests/ui/args_spec_bad_parse_arity.jet; rule=raw-cli-fixed-shape; site=call:process.args@0..0; why=expected 1 occurrence(s), found 0; replacement=remove the additional occurrence or update the exact reviewed site"))
     assert_eq(policy_exception_failure(manifest, selector, [PolicyOccurrence]{}), "file=tests/ui/args_spec_bad_parse_arity.jet; rule=raw-cli-fixed-shape; site=call:process.args@0..0; why=expected 1 occurrence(s), found 0; replacement=remove the additional occurrence or update the exact reviewed site")
 }
+
 #Test("corpus occurrence exceptions reject missing and shifted sites") {
     guards_enter_root()
     policy_test_missing_and_shifted_exception_sites()
 }
 
-PolicyInventoryEntry: struct { path: String, role: String, producer: String? }
-PolicyProvenanceEntry: struct { producer: String, artifact: String, protocol: String }
+PolicyInventoryEntry: struct {
+    path: String
+    role: String
+    producer: String?
+}
+
+PolicyProvenanceEntry: struct {
+    producer: String
+    artifact: String
+    protocol: String
+}
+
 PolicyInventory: struct {
     files: [PolicyInventoryEntry]
     producers: [String]
     artifacts: [String]
     provenance: [PolicyProvenanceEntry]
 }
-PolicyDiscovery: struct { paths: [String], config_candidates: [String] }
+
+PolicyDiscovery: struct {
+    paths: [String]
+    config_candidates: [String]
+}
 
 policy_skip_directory: fn(name: String) -> Bool {
-    name == ".git" || name == ".claude" || name == ".opencode" || name == ".tmp" ||
-    name == ".jet" || name == ".tower" || name == ".cache" || name == ".agent-worktrees" ||
-    name == "plugins" || name == "node_modules" || name == "target" || name == "build" ||
-    name == "cache" || name == "dist" || name == "result" ||
-    name.starts_with("target-") || name.starts_with("build-") || name.starts_with("result-")
+    name == ".git" || name == ".claude" || name == ".opencode" || name == ".tmp" || name == ".jet" || name == ".tower" || name == ".cache" || name == ".agent-worktrees" || name == "plugins" || name == "node_modules" || name == "target" || name == "build" || name == "cache" || name == "dist" || name == "result" || name.starts_with("target-") || name.starts_with("build-") || name.starts_with("result-")
 }
+
 policy_discover_manifest_files: fn(manifest: PolicyManifest, root: String) -> PolicyDiscovery PolicyError! {
     paths := [String]{}
     candidates := [String]{}
     pending := [String]{}
     loop source in manifest.sources {
         relative: policy_selector_path(source.selector)
-        if source.selector.starts_with("root:") {
-            pending.push(relative)
-        } else if source.selector.starts_with("file:") && policy_files.is_file(policy_join(root, relative)) {
+        if source.selector.starts_with("root:") -> pending.push(relative) else if source.selector.starts_with("file:") && policy_files.is_file(policy_join(root, relative)) {
             paths.push(relative)
         }
     }
@@ -666,19 +895,22 @@ policy_discover_manifest_files: fn(manifest: PolicyManifest, root: String) -> Po
                 // A directory beside a `package.jet` is a config candidate; the
                 // caller that owns the package parser decides whether the package
                 // declares it under `configs:` (Rust `is_declared_package_config_dir`).
-                if policy_files.is_file(policy_join(root, "{relative}/package.jet")) && !candidates.contains(child) -> candidates.push(child.copy())
+                if policy_files.is_file(policy_join(root, "{relative}/package.jet")) && !candidates.contains(child) {
+                    candidates.push(child.copy())
+                }
                 if !policy_skip_directory(entry.name) -> pending.push(child)
-            } else if kind.is_file && child.ends_with(".jet") {
-                paths.push(child)
-            }
+            } else if kind.is_file && child.ends_with(".jet") { paths.push(child) }
         }
     }
     paths.sort()
     unique := [String]{}
-    loop path in paths { if unique.len() == 0 || unique[unique.len() - 1] != path -> unique.push(path) }
+    loop path in paths {
+        if unique.len() == 0 || unique[unique.len() - 1] != path -> unique.push(path)
+    }
     candidates.sort()
     Ok(PolicyDiscovery{paths: unique, config_candidates: candidates})
 }
+
 // `declared_configs` are the discovery candidates their sibling `package.jet`
 // declares under `configs:`; their files are package configuration, not corpus.
 policy_inventory: fn(manifest: PolicyManifest, root: String, discovery: PolicyDiscovery, declared_configs: [String]) -> PolicyInventory PolicyError! {
@@ -686,7 +918,9 @@ policy_inventory: fn(manifest: PolicyManifest, root: String, discovery: PolicyDi
     entries := [PolicyInventoryEntry]{}
     loop path in discovery.paths {
         excluded := false
-        loop config in declared_configs { if path.starts_with("{config}/") -> excluded = true }
+        loop config in declared_configs {
+            if path.starts_with("{config}/") -> excluded = true
+        }
         if excluded -> next
         source := PolicySourceRow?{None}
         source = policy_source_row(manifest, path)
@@ -702,13 +936,17 @@ policy_inventory: fn(manifest: PolicyManifest, root: String, discovery: PolicyDi
                 break
             }
         }
-        if row.role == "generated-output" && producer == None -> errors.push(policy_inventory_error("generated source has no producer artifact provenance", path, "inventory:provenance"))
+        if row.role == "generated-output" && producer == None {
+            errors.push(policy_inventory_error("generated source has no producer artifact provenance", path, "inventory:provenance"))
+        }
         entries.push(PolicyInventoryEntry{path: path, role: row.role, producer: producer})
     }
     loop artifact in manifest.artifacts {
         if !artifact.selector.starts_with("path:") -> next
         path: policy_slice_bytes(artifact.selector, 5, artifact.selector.bytes().len())
-        if !policy_files.is_file(policy_join(root, path)) -> errors.push("manifest artifact is missing: {path}")
+        if !policy_files.is_file(policy_join(root, path)) {
+            errors.push("manifest artifact is missing: {path}")
+        }
     }
     loop artifact in manifest.artifacts {
         if !artifact.selector.starts_with("path:") -> next
@@ -716,7 +954,11 @@ policy_inventory: fn(manifest: PolicyManifest, root: String, discovery: PolicyDi
         if !path.ends_with(".jet") -> next
         source: policy_source_row(manifest, path)
         if source == {
-            .Val(row) -> { if row.role != "generated-output" -> errors.push("generated artifact {path} is classified as {policy_role_debug(row.role)}, not generated-output") }
+            .Val(row) -> {
+                if row.role != "generated-output" {
+                    errors.push("generated artifact {path} is classified as {policy_role_debug(row.role)}, not generated-output")
+                }
+            }
             .None -> errors.push("generated artifact has no source classification: {path}")
         }
     }
@@ -736,6 +978,7 @@ policy_inventory: fn(manifest: PolicyManifest, root: String, discovery: PolicyDi
     if errors.len() > 0 -> return Err(PolicyError{message: errors.join("\n")})
     Ok(PolicyInventory{files: entries, producers: producers, artifacts: artifacts, provenance: provenance})
 }
+
 policy_test_usize_domain: fn() {
     assert_eq(policy_unsigned("+0001"), Val("1"))
     assert_eq(policy_unsigned("18446744073709551615"), Val("18446744073709551615"))
@@ -746,6 +989,7 @@ policy_test_usize_domain: fn() {
     assert_eq(policy_site_error("fn:run@+0001..18446744073709551615"), None)
     assert_eq(policy_site_error("fn:run@18446744073709551615..1"), Val("site end precedes start (fn:run@18446744073709551615..1)"))
 }
+
 #Test("corpus manifest usize parsing retains the full x64 domain") {
     guards_enter_root()
     policy_test_usize_domain()
@@ -761,10 +1005,12 @@ policy_test_unicode_manifest_fields: fn() {
     assert_eq(policy_manifest_failure("[未知]\n"), "manifest line 1: unknown section [未知]")
     assert_eq(policy_slice_bytes("é", 0, 0), "")
 }
+
 #Test("corpus manifest byte spans retain Unicode fields") {
     guards_enter_root()
     policy_test_unicode_manifest_fields()
 }
+
 // Rust str::split_whitespace uses Unicode White_Space, not just ASCII space.
 // Scan byte spans directly; only the returned words allocate.
 policy_space_width: fn(bytes: [U8], index: Int) -> Int {
@@ -776,11 +1022,14 @@ policy_space_width: fn(bytes: [U8], index: Int) -> Int {
     if index + 2 >= bytes.len() -> return 0
     third: Int{bytes[index + 2]}
     if first == 225 && second == 154 && third == 128 -> return 3
-    if first == 226 && second == 128 && ((third >= 128 && third <= 138) || third == 168 || third == 169 || third == 175) -> return 3
+    if first == 226 && second == 128 && ((third >= 128 && third <= 138) || third == 168 || third == 169 || third == 175) {
+        return 3
+    }
     if first == 226 && second == 129 && third == 159 -> return 3
     if first == 227 && second == 128 && third == 128 -> return 3
     0
 }
+
 policy_split_whitespace: fn(text: String) -> [String] {
     bytes: text.bytes()
     words := [String]{}
@@ -815,6 +1064,7 @@ policy_test_unicode_word_splitting: fn() {
     assert_eq(policy_split_whitespace(" \t{carriage_return}\n"), [String]{})
     assert_eq(policy_split_whitespace("例{emspace}子"), [String]{"例", "子"})
 }
+
 #Test("corpus shared word splitting matches Unicode White_Space") {
     guards_enter_root()
     policy_test_unicode_word_splitting()

@@ -10,6 +10,7 @@
     changed: pkg_capability_snapshot_parse("api_version = 3\npackage = b\npublished_version = 99\nz: fn(v: Value)\na: fn() Int\n") ?? panic("changed")
     assert(pkg_lock_compute_fingerprint("tree", [String]{}, pkg_capability_snapshot_text([PackageCapabilitySnapshot]{first})) != pkg_lock_compute_fingerprint("tree", [String]{}, pkg_capability_snapshot_text([PackageCapabilitySnapshot]{changed})))
 }
+
 #Test("fetch selected update closure excludes unrelated packages and terminates on repeated graph edges") {
     lock := LockFile.empty()
     lock.packages = [LockedPackage]{LockedPackage{name: "root", version: "1", source: .Root, dependencies: [String]{"a", "unrelated"}}, LockedPackage{name: "a", version: "1", source: .Path("a"), dependencies: [String]{"b"}}, LockedPackage{name: "b", version: "1", source: .Path("b"), dependencies: [String]{"a"}}, LockedPackage{name: "unrelated", version: "1", source: .Path("unrelated")}}
@@ -21,11 +22,11 @@
 }
 
 #Test("fetch cached version retains the canonical conflict diagnostic") {
-    resolver := PackageFetchResolver{root: "", previous: None, options: PackageFetchOptions{}, policy: PackagePolicy.default(), nodes: [String: PackageFetchNode]{}, versions: [String: PackageFetchVersion]{}, visiting: [String]{}, registry_plan: [String: PublicationIndexEntry]{}, update_scope: [String]{}, foreign: [String: ForeignRealization]{}, advisory_loaded: false, advisory: None}
+    resolver := PackageFetchResolver{root: "", previous: None, options: PackageFetchOptions{}, policy: PackagePolicy.default(), nodes: [String:PackageFetchNode]{}, versions: [String:PackageFetchVersion]{}, visiting: [String]{}, registry_plan: [String:PublicationIndexEntry]{}, update_scope: [String]{}, foreign: [String:ForeignRealization]{}, advisory_loaded: false, advisory: None}
     pkg_fetch_record_version(resolver, "shared", "1.0.0", [String]{"root", "first"}) ?? panic("first version")
     pkg_fetch_record_version(resolver, "shared", "1.0.0", [String]{"root", "second"}) ?? panic("same version")
     if pkg_fetch_record_version(resolver, "shared", "2.0.0", [String]{"root", "third"}) == {
-        .Ok(_) -> panic("conflicting cached version must fail")
+        .Ok(_) -> { panic("conflicting cached version must fail") }
         .Err(error) -> {
             assert_eq(error.diagnostic.code, "E1201")
             assert_eq(error.diagnostic.what, "Two versions of `shared` are required")
@@ -42,6 +43,7 @@
     assert(pkg_fetch_git_has_control("main{paragraph}forged"))
     assert(!pkg_fetch_git_has_control("main-é"))
 }
+
 #Test("fetch all-answer public destination policy rejects mixed and malformed DNS results") {
     assert(publication_addresses_public([[U8]]{[U8]{8, 8, 8, 8}}))
     assert(!publication_addresses_public([[U8]]{}))
@@ -51,6 +53,7 @@
     assert_eq(publication_address_text([U8]{8, 8, 8, 8}), "8.8.8.8")
     assert_eq(publication_registry_ip([U8]{32, 1, 72, 96, 72, 96, 0, 0, 0, 0, 0, 0, 0, 0, 136, 136}), "[2001:4860:4860:0000:0000:0000:0000:8888]")
 }
+
 #Test("fetch git revisions refuse options controls and unsafe cache components") {
     assert(pkg_fetch_git_revision("main", false) == .Ok(_))
     assert(pkg_fetch_git_revision("--upload-pack=touch pwned", false) == .Err(_))
@@ -58,6 +61,7 @@
     assert(pkg_fetch_git_revision("refs/tags/v1", false) == .Ok(_))
     assert(pkg_fetch_git_revision("refs/tags/v1", true) == .Err(_))
 }
+
 #Test("fetch registry identity includes every visible auxiliary file and excludes managed state") {
     root: files.tmpdir("jet-fetch-registry-hash-") ?? panic("fixture")
     files.write(files.join(root, "package.jet"), "package: {{ name: \"hash\", version: \"1.0.0\" }}\n") ?? panic("manifest")
@@ -86,7 +90,7 @@
     verification := StoreVerification.new()
     roots: HangarRoots{root: ".", dev_mode: false}
     context: ProviderCtx{fixtures: None, store_dir: ".", offline: true, project_dir: None, nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
-    resolver := PackageFetchResolver{root: ".", previous: None, options: PackageFetchOptions{}, policy: PackagePolicy.default(), nodes: [String: PackageFetchNode]{}, versions: [String: PackageFetchVersion]{}, visiting: [String]{}, registry_plan: [String: PublicationIndexEntry]{}, update_scope: [String]{}, foreign: [String: ForeignRealization]{}, advisory_loaded: false, advisory: None}
+    resolver := PackageFetchResolver{root: ".", previous: None, options: PackageFetchOptions{}, policy: PackagePolicy.default(), nodes: [String:PackageFetchNode]{}, versions: [String:PackageFetchVersion]{}, visiting: [String]{}, registry_plan: [String:PublicationIndexEntry]{}, update_scope: [String]{}, foreign: [String:ForeignRealization]{}, advisory_loaded: false, advisory: None}
     actual: PackageFetchNode{package: LockedPackage{name: "actual", version: "1.0.0", source: .Path(".")}, directory: "."}
     resolver.nodes["alias"] = actual
     pkg_fetch_record_version(resolver, "actual", "1.0.0", [String]{"root", "actual"}) ?? panic("first authored version")
@@ -96,7 +100,7 @@
     assert_eq(resolver.versions["actual"].chain, [String]{"root", "actual"})
     resolver.versions["alias"] = PackageFetchVersion{version: "2.0.0", chain: [String]{"root", "previous-alias"}}
     if pkg_fetch_resolve(verification, roots, context, resolver, "alias", .Path{path: "."}, ".", [String]{"root", "alias"}) == {
-        .Ok(_) -> panic("cached conflicting alias must fail")
+        .Ok(_) -> { panic("cached conflicting alias must fail") }
         .Err(error) -> {
             assert_eq(error.diagnostic.code, "E1201")
             assert_eq(error.diagnostic.what, "Two versions of `alias` are required")

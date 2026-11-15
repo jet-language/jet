@@ -3,6 +3,7 @@
 // Unix provider FileHandles.rs jet_fs_stat_row uses meta.blocks().saturating_mul(512).
 // Only runtime measurement, never an expected snapshot; assertions remain in the .case.
 use files: core.files
+
 s1_criterion_measured_bytes: fn(path: String, seen: &[files.FileID]) -> Int {
     metadata: files.stat(path) ?? panic("metadata {path}")
     loop id in seen {
@@ -17,6 +18,7 @@ s1_criterion_measured_bytes: fn(path: String, seen: &[files.FileID]) -> Int {
     }
     total
 }
+
 run: fn() {
     payload := ""
     loop entry in files.list_dir("agent-0/hangar/objects") ?? panic("objects") {
@@ -30,7 +32,9 @@ run: fn() {
     single_bytes: s1_criterion_measured_bytes("shared-cas", single_seen) + s1_criterion_measured_bytes("agent-0/hangar", single_seen)
     multi_seen := [files.FileID]{}
     multi_bytes := s1_criterion_measured_bytes("shared-cas", multi_seen)
-    loop index in 0..<30 -> multi_bytes += s1_criterion_measured_bytes("agent-{index}/hangar", multi_seen)
+    loop index in 0..<30 {
+        multi_bytes += s1_criterion_measured_bytes("agent-{index}/hangar", multi_seen)
+    }
     // Rust u64::saturating_mul(4), not a narrowed Int/i64 bound.
     max_u64: 18446744073709551615
     bound: if single_bytes > max_u64 /% 4 -> max_u64 else -> single_bytes * 4

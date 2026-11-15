@@ -12,17 +12,20 @@ ProviderAdapter: enum {
     LuaRocks
     ScriptRegistry(ScriptRegistryKind)
     Native
-    // A direct external root with no native realization path yet.
     Unsupported(String)
+
+    // A direct external root with no native realization path yet.
 
     // Validate that the current provider authority still matches a recorded
     // cache binding.
     validate_cache_authority: fn(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) ProviderError! -[FS, Env, Net, Time.Wait]> {
         if self == {
-            .Nix -> NixProvider{}.validate_cache_authority(spec, table, ctx)
-            .Cran -> CranProvider{}.validate_cache_authority(spec, table, ctx)
-            .LuaRocks -> LuaRocksProvider{}.validate_cache_authority(spec, table, ctx)
-            .ScriptRegistry(kind) -> ScriptRegistryProvider{kind}.validate_cache_authority(spec, table, ctx)
+            .Nix -> { NixProvider{}.validate_cache_authority(spec, table, ctx) }
+            .Cran -> { CranProvider{}.validate_cache_authority(spec, table, ctx) }
+            .LuaRocks -> { LuaRocksProvider{}.validate_cache_authority(spec, table, ctx) }
+            .ScriptRegistry(kind) -> {
+                ScriptRegistryProvider{kind: kind}.validate_cache_authority(spec, table, ctx)
+            }
             .Core | .Native | .Unsupported(_) -> {}
         }
     }
@@ -35,7 +38,7 @@ ProviderAdapter: enum {
             .Core -> CoreProvider{}.cache_expectation(verification, spec, table, ctx)
             .Cran -> CranProvider{}.cache_expectation(verification, spec, table, ctx)
             .LuaRocks -> LuaRocksProvider{}.cache_expectation(verification, spec, table, ctx)
-            .ScriptRegistry(kind) -> ScriptRegistryProvider{kind}.cache_expectation(verification, spec, table, ctx)
+            .ScriptRegistry(kind) -> ScriptRegistryProvider{kind: kind}.cache_expectation(verification, spec, table, ctx)
             .Native -> NativeReleaseProvider{}.cache_expectation(verification, spec, table, ctx)
             .Unsupported(_) -> None
         }
@@ -57,7 +60,7 @@ ProviderAdapter: enum {
             .Core -> CoreProvider{}.plan_downloads(verification, specs, table, ctx)
             .Cran -> CranProvider{}.plan_downloads(verification, specs, table, ctx)
             .LuaRocks -> LuaRocksProvider{}.plan_downloads(verification, specs, table, ctx)
-            .ScriptRegistry(kind) -> ScriptRegistryProvider{kind}.plan_downloads(verification, specs, table, ctx)
+            .ScriptRegistry(kind) -> ScriptRegistryProvider{kind: kind}.plan_downloads(verification, specs, table, ctx)
             .Native -> NativeReleaseProvider{}.plan_downloads(verification, specs, table, ctx)
             .Unsupported(_) -> Ok(DownloadPlan.empty())
         }
@@ -86,7 +89,7 @@ ProviderAdapter: enum {
             .Core -> CoreProvider{}.realize(verification, spec, table, ctx)
             .Cran -> CranProvider{}.realize(verification, spec, table, ctx)
             .LuaRocks -> LuaRocksProvider{}.realize(verification, spec, table, ctx)
-            .ScriptRegistry(kind) -> ScriptRegistryProvider{kind}.realize(verification, spec, table, ctx)
+            .ScriptRegistry(kind) -> ScriptRegistryProvider{kind: kind}.realize(verification, spec, table, ctx)
             .Native -> NativeReleaseProvider{}.realize(verification, spec, table, ctx)
             .Unsupported(label) -> Err(ProviderError.Unsupported("provider `{label}` has no realization path for `{spec.raw}`; import and lock its native facts first"))
         }
@@ -114,7 +117,9 @@ provider_for_ref: fn(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, 
 
 // Check the provider authority recorded for a project cache binding.
 provider_validate_cache_authority: fn(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) ProviderError! -[FS, Env, Exec, Net, Time.Wait, Rand]> {
-    if ctx.project_dir == None -> return
+    if ctx.project_dir == None {
+        return
+    }
     provider_for_ref(spec, table, ctx).validate_cache_authority(spec, table, ctx)
 }
 
@@ -142,7 +147,9 @@ provider_resolve_kind: fn(spec: RefSpec, table: SourceTable, offline: Bool, cach
     if provider_cc_toolchain_is_reference(spec) -> return ProviderKind.JetPackage
     name: if spec.source == {
         .Named(name) -> name
-        .Jetpack | .Nixpkgs | .Github | .Path | .Cran | .LuaRocks | .RubyGems | .Cpan | .Packagist | .JetRegistry | .Npm | .Cargo | .PyPI | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Releases -> { return ProviderKind.Nix }
+        .Jetpack | .Nixpkgs | .Github | .Path | .Cran | .LuaRocks | .RubyGems | .Cpan | .Packagist | .JetRegistry | .Npm | .Cargo | .PyPI | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Releases -> {
+            return ProviderKind.Nix
+        }
     }
     kind: table.provider(name)
     if kind != ProviderKind.Infer -> return kind
@@ -166,7 +173,9 @@ provider_uses_nix_provider_for_project: fn(spec: RefSpec, table: SourceTable, of
 
 provider_resolve_kind_in_context: fn(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Time.Wait, Rand]> ProviderKind Never! {
     if provider_cc_toolchain_is_reference(spec) -> return ProviderKind.JetPackage
-    if provider_has_locked_nix_index_key(spec, table, ctx.project_dir, provider_host_nix_system()) -> return ProviderKind.Nix
+    if provider_has_locked_nix_index_key(spec, table, ctx.project_dir, provider_host_nix_system()) {
+        return ProviderKind.Nix
+    }
     provider_resolve_kind(spec, table, ctx.offline, ctx.store_dir)
 }
 
@@ -186,9 +195,7 @@ provider_plan_downloads: fn(verification: &StoreVerification, specs: [RefSpec], 
         if position < 0 {
             kinds.push(kind)
             grouped.push([RefSpec]{spec})
-        } else {
-            grouped[position].push(spec.copy())
-        }
+        } else { grouped[position].push(spec.copy()) }
     }
     plan := DownloadPlan.empty()
     loop index in 0..<kinds.len() {
@@ -202,8 +209,12 @@ provider_plan_downloads: fn(verification: &StoreVerification, specs: [RefSpec], 
 // by the signed index. Computed before dispatch, so a genuine v1 hole gets one
 // package-focused diagnostic without probing Nix.
 provider_needs_nix_bridge: fn(spec: RefSpec, table: SourceTable, offline: Bool, cache_dir: String, project_dir: String?) -[FS, Env, Exec, Time.Wait, Rand]> NixBridgeNeed? Never! {
-    if !provider_uses_nix_provider_for_project(spec, table, offline, cache_dir, project_dir) -> return None
-    if provider_has_locked_nix_index_key(spec, table, project_dir, provider_host_nix_system()) -> return None
+    if !provider_uses_nix_provider_for_project(spec, table, offline, cache_dir, project_dir) {
+        return None
+    }
+    if provider_has_locked_nix_index_key(spec, table, project_dir, provider_host_nix_system()) {
+        return None
+    }
     Val(NixBridgeNeed{reference: spec.raw, package: spec.short_name()})
 }
 
@@ -271,7 +282,9 @@ provider_infer_remote_kind: fn(upstream: String, offline: Bool, cache_dir: Strin
 provider_is_ascii_hex: fn(value: String) -> Bool Never! {
     loop byte in value.bytes() {
         code: Int{byte}
-        if !((code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)) -> return false
+        if !((code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)) {
+            return false
+        }
     }
     true
 }

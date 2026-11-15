@@ -33,7 +33,9 @@ use {
 }
 
 JET_CLI_APPLICATION_DEFAULT: "application default"
+
 JET_CLI_PACKAGE_DEFAULT: "package.jet default"
+
 JET_CLI_INLINE_PACKAGE_DEFAULT: "inline Package default"
 
 // One application's authority: the sema fact (`required`) and the policy
@@ -67,11 +69,13 @@ JetCLIInvocationAuthority: struct {
 // A file whose first line is a `#!/...` launch line (`#!/usr/bin/env jet`)
 // is a script: a standalone program wherever it lives. A byte-zero
 // `#!Marker` refusal is not a launch line.
-jet_cli_is_script: fn(source: String) -> Bool Never! {
-    source.starts_with("#!/")
-}
+jet_cli_is_script: fn(source: String) -> Bool Never! { source.starts_with("#!/") }
 
-JetCLIVerdict: enum { Allowed Denied Missing }
+JetCLIVerdict: enum {
+    Allowed
+    Denied
+    Missing
+}
 
 // A sorted set of the values (Rust `BTreeSet<String>`).
 jet_cli_sorted_set: fn(values: [String]) -> [String] Never! {
@@ -177,7 +181,9 @@ jet_cli_policy_authority: fn(required: [String], authority_policy: JetDriverAuth
 // can read only those paths (jet_cli_merged_read_scope).
 jet_cli_with_invocation: fn(authority: &JetCLIAuthority, invocation: JetCLIInvocationAuthority?) Never! {
     rows: invocation ?? return
-    if !rows.all && rows.allow.len() == 0 && rows.deny.len() == 0 -> return
+    if !rows.all && rows.allow.len() == 0 && rows.deny.len() == 0 {
+        return
+    }
     // copy: the policy rows stay in `authority` until the merged rows replace them.
     granted := authority.granted.copy()
     if rows.all {
@@ -225,7 +231,9 @@ jet_cli_merged_read_scope: fn(authority: JetCLIAuthority, rows: JetCLIInvocation
     if jet_cli_covers_any(allowed, "FS.Read") -> return [String]{}
     // The policy holds `FS.Read` with no path of its own only when its row
     // grants every read.
-    if authority.read_scope.len() == 0 && jet_cli_covers_any(authority.granted, "FS.Read") -> return [String]{}
+    if authority.read_scope.len() == 0 && jet_cli_covers_any(authority.granted, "FS.Read") {
+        return [String]{}
+    }
     // copy: the merged scope is the authority's new row.
     paths := authority.read_scope.copy()
     loop path in effect_scope_read_paths(allowed) {
@@ -250,7 +258,9 @@ jet_cli_run_read_scope: fn(authority: JetCLIAuthority, invocation: JetCLIInvocat
 jet_cli_unacknowledged: fn(authority: JetCLIAuthority) -> [String] Never! {
     missing := [String]{}
     loop right in authority.required {
-        if !authority_is_deny_only(right) && jet_cli_answer(authority, right) == JetCLIVerdict.Missing -> missing.push(right.copy())
+        if !authority_is_deny_only(right) && jet_cli_answer(authority, right) == JetCLIVerdict.Missing {
+            missing.push(right.copy())
+        }
     }
     jet_cli_named_once(missing)
 }
@@ -326,7 +336,9 @@ jet_cli_effect_open_ended: fn(right: String) -> Bool Never! {
 // Plain words for what a program does with `right`.
 jet_cli_effect_action: fn(right: String) -> String Never! {
     if authority_root(right) == "FFI" -> return "calls native code, which can do anything"
-    if jet_cli_effect_open_ended(right) -> return "starts other programs, which this list does not limit"
+    if jet_cli_effect_open_ended(right) {
+        return "starts other programs, which this list does not limit"
+    }
     authority_effect_action(right)
 }
 
@@ -339,7 +351,9 @@ jet_cli_effect_words: fn(rights: [String]) -> String Never! {
     loop right in rights {
         action: jet_cli_effect_action(right)
         if {
-            jet_cli_effect_open_ended(right) -> { if !open.contains(action) -> open.push(action) }
+            jet_cli_effect_open_ended(right) -> {
+                if !open.contains(action) -> open.push(action)
+            }
             !listed.contains(action) -> listed.push(action)
         }
     }
@@ -373,7 +387,9 @@ jet_cli_policy_why: fn(authority: JetCLIAuthority) -> String Never! {
 
 jet_cli_policy_fix: fn(authority: JetCLIAuthority) -> String Never! {
     denied: jet_cli_denied_required(authority)
-    if jet_cli_denied_by_invocation(authority, denied) -> return "drop `--deny={jet_cli_invocation_denials(authority, denied).join(",")}` from the command to allow it"
+    if jet_cli_denied_by_invocation(authority, denied) {
+        return "drop `--deny={jet_cli_invocation_denials(authority, denied).join(",")}` from the command to allow it"
+    }
     "remove the right from the `deny` row of {jet_cli_policy_owner(authority)}, or stop reaching it"
 }
 

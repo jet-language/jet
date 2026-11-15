@@ -56,9 +56,13 @@ run: fn() {
     conn := db.open_memory()
     policy: db.policy("items", "true") ?? panic("policy")
     scoped := conn.with_policy(policy, "owner")
-    _created: db.migrate(scoped, "items-v1", [
-        SQL{"CREATE TABLE items (name TEXT)"}
-    ]) ?? panic("create")
+    _created: db.migrate(
+        scoped,
+        "items-v1",
+        [
+            SQL{"CREATE TABLE items (name TEXT)"},
+        ],
+    ) ?? panic("create")
     _inserted: scoped.execute(SQL{"INSERT INTO items (name) VALUES ('one')"}) ?? panic("insert")
     row: scoped.query_one(SQL{"SELECT name FROM items"}) ?? panic("query")
     value: db.row_value(row, "name") ?? panic("row value")

@@ -1,12 +1,30 @@
-MetadataField: struct { name: String }
+MetadataField: struct {
+    name: String
+}
+
 MetadataPayload: enum {
     Unit
     Named(fields: [MetadataField])
 }
-MetadataVariant: struct { name: String, payload: MetadataPayload }
-MetadataDefinitionKind: enum { Enum(variants: [MetadataVariant]) }
-MetadataDefinition: struct { key: String, kind: MetadataDefinitionKind }
-MetadataEmitter: struct { definitions: [MetadataDefinition], rendered: Int }
+
+MetadataVariant: struct {
+    name: String
+    payload: MetadataPayload
+}
+
+MetadataDefinitionKind: enum {
+    Enum(variants: [MetadataVariant])
+}
+
+MetadataDefinition: struct {
+    key: String
+    kind: MetadataDefinitionKind
+}
+
+MetadataEmitter: struct {
+    definitions: [MetadataDefinition]
+    rendered: Int
+}
 
 metadata_field_name: fn(emitter: &MetadataEmitter, name: String) -> String Never! {
     emitter.rendered += 1
@@ -28,14 +46,20 @@ render_metadata: fn(emitter: &MetadataEmitter) -> [String] Never! {
 
 run: fn() Never! {
     emitter := MetadataEmitter{
-        definitions: [MetadataDefinition]{MetadataDefinition{
-            key: "Choice",
-            kind: MetadataDefinitionKind.Enum{variants: [MetadataVariant]{MetadataVariant{
-                name: "Named",
-                payload: MetadataPayload.Named{fields: [MetadataField]{MetadataField{name: "first"}, MetadataField{name: "second"}}}
-            }}}
-        }},
-        rendered: 0
+        definitions: [MetadataDefinition]{
+            MetadataDefinition{
+                key: "Choice",
+                kind: MetadataDefinitionKind.Enum{
+                    variants: [MetadataVariant]{
+                        MetadataVariant{
+                            name: "Named",
+                            payload: MetadataPayload.Named{fields: [MetadataField]{MetadataField{name: "first"}, MetadataField{name: "second"}}},
+                        },
+                    },
+                },
+            },
+        },
+        rendered: 0,
     }
     names := render_metadata(emitter)
     assert(names == [String]{"first", "second"})

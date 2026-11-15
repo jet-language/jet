@@ -120,7 +120,9 @@ jet_cli_report_file: fn(base: JetCLIReportBase?, value: String) -> String Never!
 // `absolute` relative to the directory `root`, or None outside it.
 jet_cli_report_under: fn(root: String, absolute: String) -> String? Never! {
     prefix: if root.ends_with("/") -> root.copy() else -> "{root}/"
-    if absolute.starts_with(prefix) && absolute.len() > prefix.len() -> return Val(absolute.removeprefix(prefix))
+    if absolute.starts_with(prefix) && absolute.len() > prefix.len() {
+        return Val(absolute.removeprefix(prefix))
+    }
     None
 }
 
@@ -218,7 +220,9 @@ jet_cli_json_control_quote: fn(value: String) -> String Never! {
         }
         width := 1
         if escape.len() == 0 {
-            if byte < 32 || byte == 127 -> escape = "\\u00{jet_cli_report_hex_digit((byte >> 4).bit_and(15))}{jet_cli_report_hex_digit(byte.bit_and(15))}"
+            if byte < 32 || byte == 127 {
+                escape = "\\u00{jet_cli_report_hex_digit((byte >> 4).bit_and(15))}{jet_cli_report_hex_digit(byte.bit_and(15))}"
+            }
             if byte == 194 && index + 1 < bytes.len() {
                 next_byte: Int{bytes[index + 1]}
                 if next_byte >= 128 && next_byte <= 159 {
@@ -229,9 +233,7 @@ jet_cli_json_control_quote: fn(value: String) -> String Never! {
         }
         if escape.len() > 0 {
             loop escaped in escape.bytes() -> out.push(escaped)
-        } else {
-            out.push(bytes[index])
-        }
+        } else { out.push(bytes[index]) }
         index += width
     }
     out.push(U8{34})
@@ -274,7 +276,9 @@ jet_cli_build_error_json: fn(report: DiagnosticBuildError) -> String Never! {
         }
     }
     fields.push("\"cause\":{cause}")
-    if report.typed_identity == .Val(identity) -> fields.push("\"typed_identity\":{jet_cli_json_control_quote(identity)}")
+    if report.typed_identity == .Val(identity) {
+        fields.push("\"typed_identity\":{jet_cli_json_control_quote(identity)}")
+    }
     if report.context_frames.len() > 0 {
         frames: loop frame in report.context_frames -> "{{\"text\":{jet_cli_json_control_quote(frame.text)},\"file\":{jet_cli_json_control_quote(frame.file)},\"line\":{frame.line}}}"
         fields.push("\"context_frames\":[{frames.join(",")}]")
@@ -320,12 +324,16 @@ jet_cli_report_edits_json: fn(diagnostic: Diagnostic, base: JetCLIReportBase?, r
     rendered := [String]{}
     if diagnostic.edit == .Val(edit) {
         rendered.push(jet_cli_report_edit_json(edit, base, report_file, grade))
-        loop other in diagnostic.fix_edits -> rendered.push(jet_cli_report_edit_json(other, base, report_file, grade))
+        loop other in diagnostic.fix_edits {
+            rendered.push(jet_cli_report_edit_json(other, base, report_file, grade))
+        }
     }
     if diagnostic.structured == .Val(structured) {
         if structured == {
             .SuggestedEdits(alternatives) -> {
-                loop alternative in alternatives -> rendered.push(jet_cli_report_edit_json(alternative, base, report_file, grade))
+                loop alternative in alternatives {
+                    rendered.push(jet_cli_report_edit_json(alternative, base, report_file, grade))
+                }
             }
             .CryptoMisuse(_, _, _, _) | .BuildError(_) | .RuntimeHostFault(_) -> {}
         }
@@ -354,7 +362,9 @@ jet_cli_report_cause_names: fn(cause: DiagnosticCause, diagnostic: Diagnostic) -
 // name it in their cause chain.
 jet_cli_report_clear_counts: fn(diagnostics: [Diagnostic]) -> [Int] Never! {
     any_cause: loop diagnostic in diagnostics {
-        if diagnostic.cause.len() > 0 -> break true
+        if diagnostic.cause.len() > 0 {
+            break true
+        }
     } ?? false
     counts := [Int]{}
     loop (index, diagnostic) in diagnostics {
@@ -363,7 +373,9 @@ jet_cli_report_clear_counts: fn(diagnostics: [Diagnostic]) -> [Int] Never! {
             loop (dependent_index, dependent) in diagnostics {
                 if dependent_index == index -> next
                 named: loop cause in dependent.cause {
-                    if jet_cli_report_cause_names(cause, diagnostic) -> break true
+                    if jet_cli_report_cause_names(cause, diagnostic) {
+                        break true
+                    }
                 } ?? false
                 if named -> count += 1
             }
@@ -404,20 +416,18 @@ jet_cli_report_json_with: fn(diagnostic: Diagnostic, base: JetCLIReportBase?, fi
     if diagnostic.span == .Val(span) {
         position: diagnostic_source_position(sources, diagnostic.origin, source)
         out = "{out},\"line\":{diagnostic_source_line(sources.texts[position], span.start)},\"col\":{diagnostic_source_column(sources.texts[position], span.start)},\"span\":{jet_cli_report_span(span.start, span.end)}"
-    } else {
-        out = "{out},\"line\":null,\"col\":null,\"span\":null"
-    }
+    } else { out = "{out},\"line\":null,\"col\":null,\"span\":null" }
     if jet_cli_report_edit_count(diagnostic) > 0 {
-        if diagnostic.no_fix_reason != None -> panic("internal compiler error: a report cannot carry fix_edits and no_fix_reason (diagnostic `{diagnostic.code}`)")
+        if diagnostic.no_fix_reason != None {
+            panic("internal compiler error: a report cannot carry fix_edits and no_fix_reason (diagnostic `{diagnostic.code}`)")
+        }
         safety: diagnostic.safety ?? panic("internal compiler error: diagnostic `{diagnostic.code}` has an edit without a safety grade")
         grade: jet_cli_json_string(jet_cli_report_safety(safety))
         rendered: jet_cli_report_edits_json(diagnostic, base, report_file, grade)
         out = "{out},\"fix_edits\":[{rendered.join(",")}]"
     } else if diagnostic.no_fix_reason == .Val(reason) {
         out = "{out},\"no_fix_reason\":{{\"kind\":{jet_cli_json_string(jet_cli_report_no_fix_kind(reason.kind))},\"next\":{jet_cli_json_string(reason.next)}}}"
-    } else {
-        out = "{out},\"fix_edits\":[]"
-    }
+    } else { out = "{out},\"fix_edits\":[]" }
     causes: loop cause in diagnostic.cause -> {
         cause_file := "null"
         cause_line := "null"
@@ -448,10 +458,14 @@ jet_cli_report_json_with: fn(diagnostic: Diagnostic, base: JetCLIReportBase?, fi
         if structured == {
             .CryptoMisuse(reason, operation, expected, actual) -> {
                 out = "{out},\"reason\":{jet_cli_json_string(jet_cli_report_crypto_reason(reason))},\"operation\":{jet_cli_json_string(operation)}"
-                if expected == .Val(expected_text) -> out = "{out},\"expected\":{jet_cli_json_string(expected_text)}"
+                if expected == .Val(expected_text) {
+                    out = "{out},\"expected\":{jet_cli_json_string(expected_text)}"
+                }
                 if actual == .Val(actual_value) -> out = "{out},\"actual\":{actual_value}"
             }
-            .BuildError(error_report) -> out = "{out},\"build_error\":{jet_cli_build_error_json(error_report)}"
+            .BuildError(error_report) -> {
+                out = "{out},\"build_error\":{jet_cli_build_error_json(error_report)}"
+            }
             .SuggestedEdits(_) | .RuntimeHostFault(_) -> {}
         }
     }
@@ -466,7 +480,9 @@ jet_cli_reports_json: fn(base: JetCLIReportBase?, file: String, source: String, 
     clears: jet_cli_report_clear_counts(diagnostics)
     sources := diagnostic_source_texts()
     reports := [String]{}
-    loop (index, diagnostic) in diagnostics -> reports.push(jet_cli_report_json_with(diagnostic, base, report_file, source, clears[index], sources))
+    loop (index, diagnostic) in diagnostics {
+        reports.push(jet_cli_report_json_with(diagnostic, base, report_file, source, clears[index], sources))
+    }
     reports
 }
 

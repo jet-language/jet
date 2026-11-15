@@ -46,7 +46,9 @@ store_materialize_receipt: fn(roots: HangarRoots, entry: StoreEntry) -> (digest:
             }
             return Ok((digest: digest, wrote: false))
         }
-        .Err(error) -> if !StoreError.IO(error).is_not_found() -> return Err(StoreError.IO(error))
+        .Err(error) -> {
+            if !StoreError.IO(error).is_not_found() -> return Err(StoreError.IO(error))
+        }
     }
 
     sequence: process_sequence_take(STORE_RECEIPT_SEQUENCE)
@@ -132,12 +134,16 @@ store_render_receipt: fn(entry: StoreEntry) -> String Never! {
         }
         .Err(_) -> {}
     }
-    loop reference in store_sorted_unique(entry.references) -> inputs.push(store_receipt_input("closure", reference))
+    loop reference in store_sorted_unique(entry.references) {
+        inputs.push(store_receipt_input("closure", reference))
+    }
     action: store_entry_action_key(entry)
     outputs_map := entry.named_outputs.copy()
     outputs_map["out"] = entry.envelope.output_hash
     outputs := [JetDevelopmentReceiptInput]{}
-    loop name in store_sorted_keys(outputs_map) -> outputs.push(store_receipt_input(name, outputs_map[name]))
+    loop name in store_sorted_keys(outputs_map) {
+        outputs.push(store_receipt_input(name, outputs_map[name]))
+    }
     receipt: JetDevelopmentReceipt{
         act: "package-realization",
         locked_closure: action,

@@ -12,7 +12,9 @@ Args: struct {
 }
 
 WORDS: 1024
+
 ROUNDS: 64
+
 PAGE_BYTES: 65536
 
 // Allocate, write, read and free: one block of 1 to 64 words per turn.
@@ -52,7 +54,7 @@ grow: fn(n: Int) -> Int {
                 mem.copy<I64>(fresh.cast<I64>(), bytes.cast<I64>(), count)
                 mem.free_raw(bytes)
                 bytes = fresh
-                count = count * 2
+                count *= 2
             }
             if used < 0 || used >= count -> panic("word {used} is outside {count}")
             mem.volatile_write(bytes.cast<I64>().offset(used), I64{i})

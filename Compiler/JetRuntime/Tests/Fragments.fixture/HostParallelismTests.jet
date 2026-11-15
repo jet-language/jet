@@ -11,19 +11,23 @@
     cpu_ctx_drop(ctx)
     quota
 }
+
 #Export(c) jet_rt_host_cpu_online_fixture: fn(root: I64, root_len: I64) -> I64 {
     ctx: cpu_ctx_new(root, root_len)
     count: cpu_online_count(ctx)
     cpu_ctx_drop(ctx)
     count
 }
+
 #Export(c) jet_rt_host_cpu_parallelism_fixture: fn(root: I64, root_len: I64) -> I64 {
     cpu_available_parallelism(root, root_len)
 }
 
 // A failed check stops the process (status 101) with what failed on stderr.
 host_parallelism_require: fn(ok: Bool, what: I64) {
-    if ok -> return
+    if ok {
+        return
+    }
     jet_rt_unreachable(rt_text_data(what), rt_text_len(what))
 }
 
@@ -89,7 +93,7 @@ host_parallelism_allowed: fn(root: I64, error: I64) -> I64 {
         end: cpu_find(data, at, length, I64{10})
         if (end - at >= rt_text_len(key) && rt_text_equal_bytes(wrapping(data + at), rt_text_data(key), rt_text_len(key))) {
             value := at + rt_text_len(key)
-            loop value < end && cpu_space(rt_text_byte(wrapping(data + value))) { value += I64{1} }
+            loop value < end && cpu_space(rt_text_byte(wrapping(data + value))) -> value += I64{1}
             // Keep the newline so the list reads as the sysfs file does.
             host_parallelism_put_bytes(root, rt_static_text("sys/devices/system/cpu"), rt_static_text("online"), wrapping(data + value), end - value + I64{1}, error)
             count = jet_rt_host_cpu_online_fixture(rt_text_data(root), rt_text_len(root))
@@ -106,7 +110,9 @@ host_parallelism_tests: fn() {
     scratch: rt_env_get(rt_static_text("TMPDIR"))
     host_parallelism_require(scratch != I64{0}, rt_static_text("host parallelism: TMPDIR names no scratch directory"))
     base: host_parallelism_join(scratch, rt_static_text("/"), rt_static_text("jet-cpu"))
-    if (jet_std_fs_remove_all_raw(base, true, error) != I64{1}) -> jet_rt_handle_drop_io_error(rt_text_word(error))
+    if (jet_std_fs_remove_all_raw(base, true, error) != I64{1}) {
+        jet_rt_handle_drop_io_error(rt_text_word(error))
+    }
     root := I64{0}
 
     // v2: limits are read from the group and every ancestor; the minimum wins.

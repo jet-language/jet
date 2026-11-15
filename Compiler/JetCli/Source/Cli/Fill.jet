@@ -89,7 +89,9 @@ jet_cli_fill_effects: fn(function: FnBody, alias: String, facts: [SemEffect]) ->
             if fact.function == key {
                 required := [String]{}
                 loop row in fact.inferred {
-                    if row != "Panic" && row != "Mem" && row != "Unsafe" && !row.starts_with("Mem.") -> required.push(row.copy())
+                    if row != "Panic" && row != "Mem" && row != "Unsafe" && !row.starts_with("Mem.") {
+                        required.push(row.copy())
+                    }
                 }
                 return if required.len() == 0 -> "none" else -> "[{required.join(", ")}]"
             }
@@ -166,16 +168,16 @@ jet_cli_fill_report: fn(result: JetDriverCompileResult, file: String?, line: Int
                 effects: jet_cli_fill_effects(function, unit.alias, index.effects)
                 candidates: if include_candidates -> jet_cli_fill_candidates(unit, function, infos, goal) else -> [String]{}
                 cards.push(
-                jet_cli_status_object(
-                [JetCLIStatusField]{
-                    jet_cli_status_field("file", jet_cli_status_text(unit.path)),
-                    jet_cli_status_field("line", jet_cli_status_int(goal_line)),
-                    jet_cli_status_field("function", jet_cli_status_text(name)),
-                    jet_cli_status_field("expected_type", jet_cli_status_text(goal.expected)),
-                    jet_cli_status_field("required_effects", jet_cli_status_text(effects)),
-                    jet_cli_status_field("candidates", jet_cli_status_texts(candidates)),
-                },
-                ),
+                    jet_cli_status_object(
+                        [JetCLIStatusField]{
+                            jet_cli_status_field("file", jet_cli_status_text(unit.path)),
+                            jet_cli_status_field("line", jet_cli_status_int(goal_line)),
+                            jet_cli_status_field("function", jet_cli_status_text(name)),
+                            jet_cli_status_field("expected_type", jet_cli_status_text(goal.expected)),
+                            jet_cli_status_field("required_effects", jet_cli_status_text(effects)),
+                            jet_cli_status_field("candidates", jet_cli_status_texts(candidates)),
+                        },
+                    ),
                 )
                 text = "{text}goal: {unit.path}:{goal_line} ({name})\n  expected type: {goal.expected}\n  required effects: {effects}\n"
                 if include_candidates {
@@ -227,8 +229,10 @@ jet_cli_compile_fill: fn(target: String, json: Bool, color: Bool) -> JetDriverVe
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled: jet_cli_compile_file(file, color, None, JetDriverCompileMode.Doc)
     if compiled == {
-        .Refused(refusal) -> output = refusal.move()
-        .Compiled(result, snapshot) -> jet_cli_finish(jet_cli_fill_result(file, line, json, color, result, snapshot))
+        .Refused(refusal) -> { output = refusal.move() }
+        .Compiled(result, snapshot) -> {
+            jet_cli_finish(jet_cli_fill_result(file, line, json, color, result, snapshot))
+        }
     }
     output
 }
@@ -245,7 +249,9 @@ jet_cli_fill_result: fn(file: String, line: Int?, json: Bool, color: Bool, resul
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
     checked_report: if jet_cli_fill_report(result, Val(file), line, true, json) == {
         .Ok(value) -> value
-        .Err(error) -> { return jet_cli_ice(error.message) }
+        .Err(error) -> {
+            return jet_cli_ice(error.message)
+        }
     }
     report: checked_report ?? if json -> jet_cli_status_render("fill", true, [JetCLIStatusField]{jet_cli_status_field("fill", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("goals", jet_cli_status_array([JetCLIStatusValue]{}))}))}) else -> "no goals found in '{file}'"
     JetDriverVerbOutput{stdout: "{report}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}

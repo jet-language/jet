@@ -9,7 +9,6 @@ package: {
 // the caller's map: the map outlives every window, and none is copied. A map
 // shared between tasks sits in a `Shared` cell; a read guard holds the cell's
 // lock, and a window of the guarded map is rooted in the guard.
-
 use files: core.files
 
 #Error
@@ -48,9 +47,7 @@ starting_with: fn(mapped: MappedFile, prefix: U8) -> [View<U8>] {
     found
 }
 
-text: fn(bytes: View<U8>) -> String {
-    String.from_bytes(bytes.copy()) ?? "?"
-}
+text: fn(bytes: View<U8>) -> String { String.from_bytes(bytes.copy()) ?? "?" }
 
 guarded_header: fn(guard: SharedGuard<MappedFile>, size: Int) -> View<U8>? {
     guard.value.window_len(0, size) ?? return None
@@ -69,20 +66,20 @@ run: fn() {
     mapped: files.map(path)
 
     if header(mapped, 5) == {
-        .Val(window) -> print("option: {text(window)}")
+        .Val(window) -> { print("option: {text(window)}") }
         .None -> print("option: none")
     }
     print("option past the end is None: {header(mapped, 99) == None}")
     if header_or(mapped, 3) == {
-        .Ok(window) -> print("result: {text(window)}")
+        .Ok(window) -> { print("result: {text(window)}") }
         .Err(_) -> print("result: short")
     }
     if header_or(mapped, 99) == {
-        .Ok(_) -> print("result past the end: ok")
+        .Ok(_) -> { print("result past the end: ok") }
         .Err(_) -> print("result past the end: short")
     }
     if first_two(mapped) == {
-        .Val(pair) -> print("pair: {text(pair.first)} {text(pair.second)}")
+        .Val(pair) -> { print("pair: {text(pair.first)} {text(pair.second)}") }
         .None -> print("pair: none")
     }
     b_lines: starting_with(mapped, 98)

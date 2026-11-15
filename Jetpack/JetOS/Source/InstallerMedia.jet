@@ -20,9 +20,7 @@ jetos_copy_generation_payload_deref: fn(source: String, destination: String) IOE
     loop entry in entries {
         if entry.name == "root" -> next
         target: files.join(destination, entry.name)
-        if files.stat(entry.path).is_dir {
-            jetos_copy_dir_recursive_deref(entry.path, target)
-        } else {
+        if files.stat(entry.path).is_dir -> jetos_copy_dir_recursive_deref(entry.path, target) else {
             jetos_copy_file_replace(entry.path, target)
         }
     }
@@ -33,7 +31,9 @@ jetos_copy_generation_payload_deref: fn(source: String, destination: String) IOE
 jetos_deref_profile_bin_symlinks: fn(system: String) IOError! -[FS]> {
     entries: if files.list_dir(files.join(system, "sw/bin")) == {
         .Ok(listed) -> listed
-        .Err(_) -> { return }
+        .Err(_) -> {
+            return
+        }
     }
     loop entry in entries {
         if !files.stat(entry.path).is_symlink -> next
@@ -70,7 +70,9 @@ jetos_copy_dir_recursive_deref: fn(source: String, destination: String) IOError!
                 }
             }
             .Err(error) -> {
-                if !is_link -> return Err(foundation_io_error_with_cause(error, "reading `{path}` while copying to `{target}` failed: {error}"))
+                if !is_link {
+                    return Err(foundation_io_error_with_cause(error, "reading `{path}` while copying to `{target}` failed: {error}"))
+                }
             }
         }
     }

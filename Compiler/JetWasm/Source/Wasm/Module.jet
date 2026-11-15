@@ -5,12 +5,19 @@
 // offset in the module for trap frames.
 
 WASM_I32: 0x7f
+
 WASM_I64: 0x7e
+
 WASM_F32: 0x7d
+
 WASM_F64: 0x7c
+
 WASM_V128: 0x7b
+
 WASM_FUNCREF: 0x70
+
 WASM_EXTERNREF: 0x6f
+
 // The validator's bottom type: an operand popped from an unreachable stack.
 WASM_UNKNOWN: 0
 
@@ -18,20 +25,29 @@ WASM_UNKNOWN: 0
 WASM_BLOCK_EMPTY: -64
 
 WASM_EXTERN_FUNC: 0
+
 WASM_EXTERN_TABLE: 1
+
 WASM_EXTERN_MEMORY: 2
+
 WASM_EXTERN_GLOBAL: 3
 
 WASM_SEGMENT_ACTIVE: 0
+
 WASM_SEGMENT_PASSIVE: 1
+
 WASM_SEGMENT_DECLARATIVE: 2
 
 // One page of linear memory, and the 32-bit memory's page ceiling.
 WASM_PAGE: 65536
+
 WASM_MAX_PAGES: 65536
+
 // Implementation bounds the decoder enforces before allocating.
 WASM_MAX_LOCALS: 50000
+
 WASM_MAX_FUNCTIONS: 1000000
+
 WASM_MAX_TABLE: 10000000
 
 wasm_type_name: fn(code: Int) -> String Never! {
@@ -52,9 +68,7 @@ wasm_is_number: fn(code: Int) -> Bool Never! {
     code == WASM_I32 || code == WASM_I64 || code == WASM_F32 || code == WASM_F64
 }
 
-wasm_is_ref: fn(code: Int) -> Bool Never! {
-    code == WASM_FUNCREF || code == WASM_EXTERNREF
-}
+wasm_is_ref: fn(code: Int) -> Bool Never! { code == WASM_FUNCREF || code == WASM_EXTERNREF }
 
 WasmFuncType: struct {
     params: [Int]
@@ -175,10 +189,20 @@ WasmModule: struct {
 
     empty: fn() -> WasmModule Never! {
         WasmModule{
-            types: [WasmFuncType]{}, imports: [WasmImport]{}, funcs: [Int]{}, tables: [WasmTableType]{},
-            memories: [WasmLimits]{}, globals: [WasmGlobal]{}, exports: [WasmModuleExport]{}, start: None,
-            elems: [WasmElem]{}, datas: [WasmData]{}, data_count: None, codes: [WasmCode]{},
-            name: "", function_names: [Int:String]{},
+            types: [WasmFuncType]{},
+            imports: [WasmImport]{},
+            funcs: [Int]{},
+            tables: [WasmTableType]{},
+            memories: [WasmLimits]{},
+            globals: [WasmGlobal]{},
+            exports: [WasmModuleExport]{},
+            start: None,
+            elems: [WasmElem]{},
+            datas: [WasmData]{},
+            data_count: None,
+            codes: [WasmCode]{},
+            name: "",
+            function_names: [Int:String]{},
         }
     }
 
@@ -204,9 +228,7 @@ WasmModule: struct {
         Val(self.funcs[defined])
     }
 
-    function_count: fn(self) -> Int Never! {
-        self.imported(WASM_EXTERN_FUNC) + self.funcs.len()
-    }
+    function_count: fn(self) -> Int Never! { self.imported(WASM_EXTERN_FUNC) + self.funcs.len() }
 
     // The table type of `index` in the table index space.
     table_type: fn(self, index: Int) -> WasmTableType? {
@@ -222,13 +244,9 @@ WasmModule: struct {
         Val(self.tables[defined])
     }
 
-    table_count: fn(self) -> Int Never! {
-        self.imported(WASM_EXTERN_TABLE) + self.tables.len()
-    }
+    table_count: fn(self) -> Int Never! { self.imported(WASM_EXTERN_TABLE) + self.tables.len() }
 
-    memory_count: fn(self) -> Int Never! {
-        self.imported(WASM_EXTERN_MEMORY) + self.memories.len()
-    }
+    memory_count: fn(self) -> Int Never! { self.imported(WASM_EXTERN_MEMORY) + self.memories.len() }
 
     global_type: fn(self, index: Int) -> WasmGlobalType? {
         seen := 0
@@ -243,9 +261,7 @@ WasmModule: struct {
         Val(self.globals[defined].ty)
     }
 
-    global_count: fn(self) -> Int Never! {
-        self.imported(WASM_EXTERN_GLOBAL) + self.globals.len()
-    }
+    global_count: fn(self) -> Int Never! { self.imported(WASM_EXTERN_GLOBAL) + self.globals.len() }
 
     export_named: fn(self, name: String) -> WasmModuleExport? {
         loop entry in self.exports {
@@ -255,7 +271,5 @@ WasmModule: struct {
     }
 
     // The name a trap frame shows for function `index` ("" without a name section entry).
-    function_name: fn(self, index: Int) -> String Never! {
-        self.function_names.get(index) ?? ""
-    }
+    function_name: fn(self, index: Int) -> String Never! { self.function_names.get(index) ?? "" }
 }

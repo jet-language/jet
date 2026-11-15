@@ -10,7 +10,9 @@ pkg_data_bind_csv: fn(input: String, root_name: String) -> SchemaBuilder DataBin
     seen := [String]{}
     loop header in headers {
         if header.trim() == "" -> return Err(DataBindError{message: "CSV has a missing header"})
-        if seen.contains(header) -> return Err(DataBindError{message: "CSV has a duplicate header {header}"})
+        if seen.contains(header) {
+            return Err(DataBindError{message: "CSV has a duplicate header {header}"})
+        }
         seen.push(header.copy())
     }
     width: headers.len()
@@ -18,7 +20,9 @@ pkg_data_bind_csv: fn(input: String, root_name: String) -> SchemaBuilder DataBin
     loop _ in 0..<width -> columns.push([String]{})
     loop row_index in 1..<rows.len() {
         row: rows[row_index]
-        if row.len() != width -> return Err(DataBindError{message: "CSV row has {row.len()} fields but header has {width}"})
+        if row.len() != width {
+            return Err(DataBindError{message: "CSV row has {row.len()} fields but header has {width}"})
+        }
         loop index in 0..<width -> columns[index].push(row[index])
     }
     builder := SchemaBuilder.new()
@@ -84,7 +88,9 @@ pkg_data_parse_csv: fn(input: String) -> [[String]] DataBindError! {
         }
         if code == {
             34 -> {
-                if field.len() != 0 -> return Err(DataBindError{message: "CSV quote must start a field"})
+                if field.len() != 0 {
+                    return Err(DataBindError{message: "CSV quote must start a field"})
+                }
                 quoted = true
                 index += 1
             }
@@ -112,10 +118,10 @@ pkg_data_parse_csv: fn(input: String) -> [[String]] DataBindError! {
         row.push(pkg_bytes_text(field, 0, field.len()))
         rows.push(row)
     }
-    loop rows.len() > 0 && rows[rows.len() - 1].len() == 0 {
-        _: rows.pop()
+    loop rows.len() > 0 && rows[rows.len() - 1].len() == 0 -> _: rows.pop()
+    if rows.len() < 2 {
+        return Err(DataBindError{message: "CSV needs a header and at least one data row"})
     }
-    if rows.len() < 2 -> return Err(DataBindError{message: "CSV needs a header and at least one data row"})
     Ok(rows)
 }
 
@@ -125,11 +131,7 @@ pkg_data_csv_type: fn(values: [String]) -> (ty: BoundType, optional: Bool) Never
     optional := false
     nonempty := [String]{}
     loop value in values {
-        if value == "" {
-            optional = true
-        } else {
-            nonempty.push(value.copy())
-        }
+        if value == "" -> optional = true else -> nonempty.push(value.copy())
     }
     if nonempty.len() == 0 -> return (optional: optional, ty: BoundType.Scalar("String"))
     all_bool := true

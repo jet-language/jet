@@ -19,11 +19,17 @@ Mixed: struct {
 }
 
 SIZE: #run { Mixed.reflect().layout.size ?? -1 }
+
 ALIGNMENT: #run { Mixed.reflect().layout.alignment ?? -1 }
+
 AT_A: #run { Mixed.reflect().layout.fields[0].offset ?? -1 }
+
 AT_B: #run { Mixed.reflect().layout.fields[1].offset ?? -1 }
+
 AT_C: #run { Mixed.reflect().layout.fields[2].offset ?? -1 }
+
 AT_D: #run { Mixed.reflect().layout.fields[3].offset ?? -1 }
+
 AT_E: #run { Mixed.reflect().layout.fields[4].offset ?? -1 }
 
 run: fn() {
@@ -31,7 +37,9 @@ run: fn() {
     names: [String]{"size", "alignment", "a", "b", "c", "d", "e"}
     loop index in 0..<facts.len() {
         native: c.layout_fact(I64{index})
-        if (native != I64{facts[index]}) -> panic("C {names[index]} is {native}, Mixed.reflect().layout says {facts[index]}")
+        if (native != I64{facts[index]}) {
+            panic("C {names[index]} is {native}, Mixed.reflect().layout says {facts[index]}")
+        }
     }
     print("C agrees with Mixed.reflect().layout: size {SIZE}, alignment {ALIGNMENT}, a {AT_A}, b {AT_B}, c {AT_C}, d {AT_D}, e {AT_E}")
     value := Mixed{a: U8{1}, b: I64{10}, c: U8{2}, d: I64{20}, e: U8{3}}

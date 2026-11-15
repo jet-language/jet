@@ -17,7 +17,9 @@ impl Theme {
         }
         estimate := ""
         if plan.estimated_seconds == .Val(seconds) {
-            if plan.download_bytes != Val(0) -> estimate = " · about {terminal_human_duration(time.duration_ms(seconds * 1000))}"
+            if plan.download_bytes != Val(0) {
+                estimate = " · about {terminal_human_duration(time.duration_ms(seconds * 1000))}"
+            }
         }
         "{label}: {plan.new} new, {plan.cached} cached, {plan.repaired} repaired · {download} · on disk {disk}{estimate}"
     }
@@ -83,7 +85,5 @@ impl ByteProgress {
 
 impl LiveRegion {
     // The sink a provider reports byte and object progress through.
-    progress_handle: fn(self) -> ProgressHandle Never! {
-        self.progress.handle()
-    }
+    progress_handle: fn(self) -> ProgressHandle Never! { self.progress.handle() }
 }

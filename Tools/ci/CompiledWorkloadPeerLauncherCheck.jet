@@ -16,16 +16,26 @@ use {
 }
 
 TOOL: "/Tools/ci/CompiledWorkloadPeerLauncherCheck.jet"
+
 CONTRACT: "compiled-workload-peer-isolation-v1"
+
 LAUNCHER: "CompiledWorkloadPeerLauncher"
+
 PROBE: "CompiledWorkloadPeerProbe"
+
 SIGTERM: 15
 
 #Error
 Problem: struct {
     message: String
-    impl Display { display: fn(self) -> String { self.message.copy() } }
-    impl Debug { debug: fn(self) -> String { self.message.copy() } }
+
+    impl Display {
+        display: fn(self) -> String { self.message.copy() }
+    }
+
+    impl Debug {
+        debug: fn(self) -> String { self.message.copy() }
+    }
 }
 
 problem: fn(message: String) -> Problem Never! { Problem{message: message} }
@@ -85,18 +95,28 @@ check: fn(layout: Layout) -[Env, Exec, FS, IO, Time, Time.Wait]> String Problem!
         rejected(escape, "cwd") ?? return Err(err)
         return Ok("fail-closed unavailable host ({contract.stderr.trim()})")
     }
-    if contract.stderr != "" -> return Err(problem("contract output is not exact: stdout={contract.stdout} stderr={contract.stderr}"))
+    if contract.stderr != "" {
+        return Err(problem("contract output is not exact: stdout={contract.stdout} stderr={contract.stderr}"))
+    }
     probe: build(layout, jet, PROBE, "compiled-workload-peer-probe") ?? return Err(err)
 
     outside_file: "{layout.outside}/marker"
     write: launch(probe_spec(layout, launcher, "disabled", probe, "write").env("PEER_OUTSIDE", outside_file))
-    if write.code != 0 || write.signal != None || write.stdout != "outside=blocked\n" -> return Err(problem("write policy mismatch: {shown(write)}"))
-    if !files.exists("{layout.run_root}/inside") || files.exists(outside_file) -> return Err(problem("write policy did not confine the writable tree"))
+    if write.code != 0 || write.signal != None || write.stdout != "outside=blocked\n" {
+        return Err(problem("write policy mismatch: {shown(write)}"))
+    }
+    if !files.exists("{layout.run_root}/inside") || files.exists(outside_file) {
+        return Err(problem("write policy did not confine the writable tree"))
+    }
 
     disabled: launch(probe_spec(layout, launcher, "disabled", probe, "network"))
-    if disabled.code != 0 || disabled.signal != None || disabled.stdout != "loopback=blocked\nexternal=blocked\n" -> return Err(problem("disabled network mismatch: {shown(disabled)}"))
+    if disabled.code != 0 || disabled.signal != None || disabled.stdout != "loopback=blocked\nexternal=blocked\n" {
+        return Err(problem("disabled network mismatch: {shown(disabled)}"))
+    }
     loopback: launch(probe_spec(layout, launcher, "loopback-only", probe, "network"))
-    if loopback.code != 0 || loopback.signal != None || loopback.stdout != "loopback=allowed\nexternal=blocked\n" -> return Err(problem("loopback-only network mismatch: {shown(loopback)}"))
+    if loopback.code != 0 || loopback.signal != None || loopback.stdout != "loopback=allowed\nexternal=blocked\n" {
+        return Err(problem("loopback-only network mismatch: {shown(loopback)}"))
+    }
 
     escape: launch(process.cmd(launch_args(layout, launcher, layout.outside, "disabled", [String]{probe.copy(), "result"})).cwd(layout.run_root))
     rejected(escape, "cwd") ?? return Err(err)
@@ -104,18 +124,24 @@ check: fn(layout: Layout) -[Env, Exec, FS, IO, Time, Time.Wait]> String Problem!
     rejected(authority, "unsupported network authority") ?? return Err(err)
 
     result: launch(probe_spec(layout, launcher, "disabled", probe, "result"))
-    if result.code != 23 || result.signal != None || result.stdout != "stdout-exact\n" || result.stderr != "stderr-exact\n" -> return Err(problem("result propagation mismatch: {shown(result)}"))
+    if result.code != 23 || result.signal != None || result.stdout != "stdout-exact\n" || result.stderr != "stderr-exact\n" {
+        return Err(problem("result propagation mismatch: {shown(result)}"))
+    }
 
     marker: "{layout.run_root}/descendant-marker"
     descendant: launch(probe_spec(layout, launcher, "disabled", probe, "descendant").env("PEER_MARKER", marker))
-    if descendant.code != 0 || descendant.signal != None || descendant.stdout != "spawned\n" -> return Err(problem("descendant launch mismatch: {shown(descendant)}"))
+    if descendant.code != 0 || descendant.signal != None || descendant.stdout != "spawned\n" {
+        return Err(problem("descendant launch mismatch: {shown(descendant)}"))
+    }
     // The descendant would write its marker 600 ms after it started.
     time.sleep(800ms)
     if files.exists(marker) -> return Err(problem("descendant survived launcher exit"))
 
     if !sys.is_windows() {
         signal: launch(probe_spec(layout, launcher, "disabled", probe, "signal"))
-        if signal.signal != Val(SIGTERM) -> return Err(problem("signal propagation mismatch: {shown(signal)}"))
+        if signal.signal != Val(SIGTERM) {
+            return Err(problem("signal propagation mismatch: {shown(signal)}"))
+        }
     }
     missing_primitive(layout, launcher) ?? return Err(err)
     Ok("filesystem, network, path, authority, result, signal, and descendant checks passed")
@@ -143,7 +169,9 @@ launch: fn(spec: ProcessSpec) -[Exec, Time.Wait]> Ran Never! {
 }
 
 rejected: fn(ran: Ran, text: String) Problem! {
-    if ran.code == 0 && ran.signal == None -> return Err(problem("expected rejection containing {text}"))
+    if ran.code == 0 && ran.signal == None {
+        return Err(problem("expected rejection containing {text}"))
+    }
     output: "{ran.stderr}{ran.stdout}"
     if !output.contains(text) -> return Err(problem("rejection did not name {text}: {output}"))
     Ok()
@@ -159,7 +187,9 @@ shown: fn(ran: Ran) -> String Never! {
 build: fn(layout: Layout, jet: String, stem: String, name: String) -[Env, Exec, FS, Time.Wait]> String Problem! {
     source: "{layout.root}/Tools/ci/{stem}.jet"
     receipt: process.cmd([String]{jet.copy(), "build", "--quiet", source}).cwd(layout.root).stdout(.Inherit).stderr(.Inherit).run() ?? return Err(problem("{stem} build could not start: {err}"))
-    if receipt.code != 0 || receipt.signal != None -> return Err(problem("{stem} build failed with {receipt.code}"))
+    if receipt.code != 0 || receipt.signal != None {
+        return Err(problem("{stem} build failed with {receipt.code}"))
+    }
     suffix: if sys.is_windows() -> ".exe" else -> ""
     built: "{layout.root}/Tools/ci/.jet/build/{stem}{suffix}"
     target: "{layout.run_root}/{name}{suffix}"

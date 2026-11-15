@@ -4,11 +4,21 @@
 // manifest parser: every plan it produces is re-checked with PackageFacts and
 // ConfigFacts before any byte is written. Offsets are UTF-8 byte offsets and
 // cuts happen only at ASCII delimiters, so every slice is whole scalars.
-
 use {
     jet_pkg_model.[
-        MemberRef, PackageFacts, pkg_bytes_code, pkg_bytes_is_word, pkg_bytes_starts_with, pkg_bytes_text, pkg_debug_deps,
-        pkg_debug_environments, pkg_debug_opt_str, pkg_debug_outputs, pkg_debug_services, pkg_debug_str, pkg_debug_str_map,
+        MemberRef,
+        PackageFacts,
+        pkg_bytes_code,
+        pkg_bytes_is_word,
+        pkg_bytes_starts_with,
+        pkg_bytes_text,
+        pkg_debug_deps,
+        pkg_debug_environments,
+        pkg_debug_opt_str,
+        pkg_debug_outputs,
+        pkg_debug_services,
+        pkg_debug_str,
+        pkg_debug_str_map,
         pkg_sha256_hex,
     ]
     files: core.files
@@ -59,11 +69,7 @@ env_transition_source_entries: fn(source: String) -> [TransitionSourceEntry] Nev
             next
         }
         if quoted {
-            if escaped {
-                escaped = false
-            } else if byte == 92 {
-                escaped = true
-            } else if byte == 34 {
+            if escaped -> escaped = false else if byte == 92 -> escaped = true else if byte == 34 {
                 quoted = false
             }
             next
@@ -78,7 +84,9 @@ env_transition_source_entries: fn(source: String) -> [TransitionSourceEntry] Nev
             10 | 44 -> {
                 if depth == 0 {
                     text: pkg_bytes_text(raw, start, index)
-                    if text.trim() != "" -> entries.push(TransitionSourceEntry{raw: text, field: env_transition_source_field(text)})
+                    if text.trim() != "" {
+                        entries.push(TransitionSourceEntry{raw: text, field: env_transition_source_field(text)})
+                    }
                     start = index + 1
                 }
             }
@@ -86,7 +94,9 @@ env_transition_source_entries: fn(source: String) -> [TransitionSourceEntry] Nev
         }
     }
     tail: pkg_bytes_text(raw, start, raw.len())
-    if tail.trim() != "" -> entries.push(TransitionSourceEntry{raw: tail, field: env_transition_source_field(tail)})
+    if tail.trim() != "" {
+        entries.push(TransitionSourceEntry{raw: tail, field: env_transition_source_field(tail)})
+    }
     entries
 }
 
@@ -101,11 +111,7 @@ env_transition_source_field: fn(raw: String) -> String? Never! {
     loop index in 0..<bytes.len() {
         byte: Int{bytes[index]}
         if quoted {
-            if escaped {
-                escaped = false
-            } else if byte == 92 {
-                escaped = true
-            } else if byte == 34 {
+            if escaped -> escaped = false else if byte == 92 -> escaped = true else if byte == 34 {
                 quoted = false
             }
             next
@@ -182,7 +188,9 @@ env_transition_require_output_declaration: fn(entries: [TransitionSourceEntry], 
         value: env_transition_field_value(entry.raw, "outputs") ?? return Err(env_transition_error("outputs has no value in {path}"))
         body: env_transition_record_body(value) ?? return Err(env_transition_error("outputs in {path} is not a record"))
         matches: loop child in env_transition_source_entries(body) if child.field == Val((name)) -> child
-        if matches.len() != 1 -> return Err(env_transition_error("outputs.{name} must be declared exactly once in {path}"))
+        if matches.len() != 1 {
+            return Err(env_transition_error("outputs.{name} must be declared exactly once in {path}"))
+        }
         _: env_transition_field_value(matches[0].raw, name) ?? return Err(env_transition_error("outputs.{name} has no value in {path}"))
         return
     }
@@ -190,9 +198,13 @@ env_transition_require_output_declaration: fn(entries: [TransitionSourceEntry], 
     loop entry in entries {
         if entry.field != Val(name) -> next
         value: env_transition_field_value(entry.raw, name) ?? next
-        if env_transition_config_value(value).starts_with("Output.") || value.trim_start().starts_with("Output: ") -> count += 1
+        if env_transition_config_value(value).starts_with("Output.") || value.trim_start().starts_with("Output: ") {
+            count += 1
+        }
     }
-    if count != 1 -> return Err(env_transition_error("outputs.{name} must be declared exactly once in {path}"))
+    if count != 1 {
+        return Err(env_transition_error("outputs.{name} must be declared exactly once in {path}"))
+    }
 }
 
 // The body of an inline `name: Config{...}` entry.
@@ -223,20 +235,12 @@ env_transition_matching_delimiter: fn(value: [U8], open: Int, left: Int, right: 
     loop index in open..<value.len() {
         byte: Int{value[index]}
         if quoted {
-            if escaped {
-                escaped = false
-            } else if byte == 92 {
-                escaped = true
-            } else if byte == 34 {
+            if escaped -> escaped = false else if byte == 92 -> escaped = true else if byte == 34 {
                 quoted = false
             }
             next
         }
-        if byte == 34 {
-            quoted = true
-        } else if byte == left {
-            depth += 1
-        } else if byte == right {
+        if byte == 34 -> quoted = true else if byte == left -> depth += 1 else if byte == right {
             depth -= 1
             if depth == 0 -> return Val(index)
         }
@@ -324,7 +328,9 @@ env_transition_add_member_reference: fn(source: String, existing: [MemberRef], d
     loop member in existing {
         if member == {
             .Path(path) -> {
-                if path == reference -> return Err(env_transition_error("member {reference} is already listed"))
+                if path == reference {
+                    return Err(env_transition_error("member {reference} is already listed"))
+                }
             }
             .Find(_) -> {}
         }
@@ -371,11 +377,7 @@ env_transition_strip_comments: fn(value: String) -> String Never! {
         index += 1
         if quoted {
             output.push(byte)
-            if escaped {
-                escaped = false
-            } else if code == 92 {
-                escaped = true
-            } else if code == 34 {
+            if escaped -> escaped = false else if code == 92 -> escaped = true else if code == 34 {
                 quoted = false
             }
         } else if code == 34 {
@@ -391,9 +393,7 @@ env_transition_strip_comments: fn(value: String) -> String Never! {
                     break
                 }
             }
-        } else {
-            output.push(byte)
-        }
+        } else { output.push(byte) }
     }
     pkg_bytes_text(output, 0, output.len())
 }
@@ -412,11 +412,7 @@ env_transition_mask_comments: fn(value: String) -> String Never! {
         code: Int{bytes[index]}
         next_code: pkg_bytes_code(bytes, index + 1)
         if line_comment {
-            if code == 10 {
-                line_comment = false
-            } else {
-                bytes[index] = U8{32}
-            }
+            if code == 10 -> line_comment = false else -> bytes[index] = U8{32}
             index += 1
             next
         }
@@ -439,11 +435,7 @@ env_transition_mask_comments: fn(value: String) -> String Never! {
         }
         if quoted {
             if code != 10 -> bytes[index] = U8{32}
-            if escaped {
-                escaped = false
-            } else if code == 92 {
-                escaped = true
-            } else if code == 34 {
+            if escaped -> escaped = false else if code == 92 -> escaped = true else if code == 34 {
                 quoted = false
             }
             index += 1
@@ -463,9 +455,7 @@ env_transition_mask_comments: fn(value: String) -> String Never! {
             bytes[index + 1] = U8{32}
             block_depth = 1
             index += 2
-        } else {
-            index += 1
-        }
+        } else { index += 1 }
     }
     pkg_bytes_text(bytes, 0, bytes.len())
 }

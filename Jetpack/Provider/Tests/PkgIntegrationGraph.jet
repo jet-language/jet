@@ -62,7 +62,9 @@ provider_pkg_integration_hidden: fn(graph: PackageGraph, dep: String) -> Missing
 // The exact ordered list is asserted.
 #Test("pkg integration lsp_completion_hides_transitive_deps") {
     visible := [String]{}
-    loop edge in provider_pkg_integration_graph().visible_edges("app") -> visible.push(edge.dependency)
+    loop edge in provider_pkg_integration_graph().visible_edges("app") {
+        visible.push(edge.dependency)
+    }
     assert_eq(visible, [String]{"ui"})
     assert(!visible.contains("log"))
 }

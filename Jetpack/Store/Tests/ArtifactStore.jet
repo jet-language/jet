@@ -95,7 +95,7 @@ store_artifact_test_host_limit: fn(store: ArtifactStore) -[FS]> Int? Never! {
     store: store_artifact_test_open(ArtifactStoreConfig.new(root).with_cap_bytes(1024).with_reserve_bytes(0).with_lock_wait(time.duration_ms(25)))
     lock: store.acquire_lock() ?? panic("test lock")
     if store.acquire_lock() == {
-        .Ok(_) -> panic("live lock unexpectedly acquired")
+        .Ok(_) -> { panic("live lock unexpectedly acquired") }
         .Err(error) -> {
             text: error.message()
             if error == {
@@ -104,7 +104,9 @@ store_artifact_test_host_limit: fn(store: ArtifactStore) -[FS]> Int? Never! {
                     assert_eq(owner_pid, Val(store.owner().pid()))
                     assert(elapsed_ns >= 25000000, "the wait lasts at least the configured bound")
                 }
-                .IO(_) | .Config(_) | .InvalidDigest(_) | .InvalidKey(_) | .Corrupt(_, _) | .Conflict(_) | .Capacity(_, _, _, _) -> panic("unexpected lock error: {text}")
+                .IO(_) | .Config(_) | .InvalidDigest(_) | .InvalidKey(_) | .Corrupt(_, _) | .Conflict(_) | .Capacity(_, _, _, _) -> {
+                    panic("unexpected lock error: {text}")
+                }
             }
             assert(text.contains("owner pid"))
             assert(text.contains("after waiting"))
@@ -169,7 +171,7 @@ store_artifact_test_host_limit: fn(store: ArtifactStore) -[FS]> Int? Never! {
     store.publish_action(action, "record".bytes()) ?? panic("publish")
     assert_eq(store_artifact_test_action(store, action), Val("record".bytes()))
     if store.publish_action(action, "different".bytes()) == {
-        .Ok(_) -> panic("a different record replaced an immutable action")
+        .Ok(_) -> { panic("a different record replaced an immutable action") }
         .Err(error) -> assert_eq(store_artifact_test_kind(error), "conflict")
     }
     files.write_bytes(store.action_path(action), "bad".bytes()) ?? panic("corrupt")
@@ -276,7 +278,7 @@ store_artifact_test_tallied: fn(store: ArtifactStore) -[FS, Env, Time, Rand]> In
     root: store_artifact_test_root("cap")
     store: store_artifact_test_store(root, 3)
     if store.publish_blob("four".bytes()) == {
-        .Ok(_) -> panic("an oversized blob was admitted")
+        .Ok(_) -> { panic("an oversized blob was admitted") }
         .Err(error) -> assert_eq(store_artifact_test_kind(error), "capacity")
     }
     assert_eq(store_artifact_test_entries(files.join(root, "cas")), 0)
@@ -323,11 +325,11 @@ store_artifact_test_tallied: fn(store: ArtifactStore) -[FS, Env, Time, Rand]> In
 
 #Test("artifact store distinguishes u64 parse overflow from unit multiplication overflow") {
     if store_artifact_parse_size("18446744073709551616") == {
-        .Err(error) -> assert_eq(error.message(), "invalid byte size `18446744073709551616`")
+        .Err(error) -> { assert_eq(error.message(), "invalid byte size `18446744073709551616`") }
         .Ok(_) -> panic("an overflowing u64 count must fail")
     }
     if store_artifact_parse_size("18014398509481984K") == {
-        .Err(error) -> assert_eq(error.message(), "byte size `18014398509481984K` is too large")
+        .Err(error) -> { assert_eq(error.message(), "byte size `18014398509481984K` is too large") }
         .Ok(_) -> panic("unit multiplication overflow must fail")
     }
     assert_eq(store_artifact_saturating_add(STORE_ARTIFACT_U64_MAX, 1), STORE_ARTIFACT_U64_MAX)
@@ -352,7 +354,7 @@ store_artifact_test_tallied: fn(store: ArtifactStore) -[FS, Env, Time, Rand]> In
     root: store_artifact_test_root("reserve")
     gated: store_artifact_test_open(ArtifactStoreConfig.new(root).with_cap_bytes(STORE_ARTIFACT_U64_MAX).with_reserve_bytes(STORE_ARTIFACT_U64_MAX))
     if gated.publish_blob("reserve".bytes()) == {
-        .Ok(_) -> panic("a publish breaching the disk reserve was admitted")
+        .Ok(_) -> { panic("a publish breaching the disk reserve was admitted") }
         .Err(error) -> assert_eq(store_artifact_test_kind(error), "capacity")
     }
     store_artifact_test_cleanup(root)
@@ -395,7 +397,9 @@ store_artifact_test_tallied: fn(store: ArtifactStore) -[FS, Env, Time, Rand]> In
 // live `sleep` child whose kernel identity owns the lease file, which is the
 // ownership record the Rust child writes through `acquire_lease`.
 #Test("artifact store second process live lease blocks prune") {
-    if !sys.is_linux() -> return
+    if !sys.is_linux() {
+        return
+    }
     root: store_artifact_test_root("second-process")
     store: store_artifact_test_store(root, 1024)
     object: store.publish_blob("leased".bytes()) ?? panic("publish")
@@ -421,14 +425,161 @@ store_artifact_test_tallied: fn(store: ArtifactStore) -[FS, Env, Time, Rand]> In
 // The previous store schema's action record (tests/fixtures/build-metadata-compat/store-v0.magic).
 store_artifact_test_store_v0_fixture: fn() -> [U8] {
     [U8]{
-        106, 101, 116, 46, 115, 116, 111, 114, 101, 46, 118, 48, 0, 97, 99, 116, 105, 111, 110, 0,
-        120, 251, 6, 234, 88, 179, 10, 121, 213, 215, 176, 199, 144, 21, 43, 9, 132, 194, 31, 178,
-        14, 131, 15, 242, 131, 12, 46, 153, 242, 178, 10, 155, 63, 0, 0, 0, 0, 0, 0, 0,
-        222, 23, 126, 177, 236, 191, 52, 165, 139, 61, 63, 111, 128, 223, 180, 224, 231, 55, 96, 238,
-        255, 227, 55, 120, 167, 119, 107, 41, 62, 64, 145, 53, 106, 101, 116, 46, 115, 116, 111, 114,
-        101, 46, 118, 48, 0, 97, 114, 116, 105, 102, 97, 99, 116, 0, 51, 229, 31, 75, 78, 207,
-        4, 59, 49, 97, 28, 61, 69, 227, 136, 128, 232, 216, 205, 10, 60, 236, 112, 55, 51, 130,
-        166, 178, 188, 254, 134, 29, 216, 115, 8, 0, 0, 0, 0, 0, 1,
+        106,
+        101,
+        116,
+        46,
+        115,
+        116,
+        111,
+        114,
+        101,
+        46,
+        118,
+        48,
+        0,
+        97,
+        99,
+        116,
+        105,
+        111,
+        110,
+        0,
+        120,
+        251,
+        6,
+        234,
+        88,
+        179,
+        10,
+        121,
+        213,
+        215,
+        176,
+        199,
+        144,
+        21,
+        43,
+        9,
+        132,
+        194,
+        31,
+        178,
+        14,
+        131,
+        15,
+        242,
+        131,
+        12,
+        46,
+        153,
+        242,
+        178,
+        10,
+        155,
+        63,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        222,
+        23,
+        126,
+        177,
+        236,
+        191,
+        52,
+        165,
+        139,
+        61,
+        63,
+        111,
+        128,
+        223,
+        180,
+        224,
+        231,
+        55,
+        96,
+        238,
+        255,
+        227,
+        55,
+        120,
+        167,
+        119,
+        107,
+        41,
+        62,
+        64,
+        145,
+        53,
+        106,
+        101,
+        116,
+        46,
+        115,
+        116,
+        111,
+        114,
+        101,
+        46,
+        118,
+        48,
+        0,
+        97,
+        114,
+        116,
+        105,
+        102,
+        97,
+        99,
+        116,
+        0,
+        51,
+        229,
+        31,
+        75,
+        78,
+        207,
+        4,
+        59,
+        49,
+        97,
+        28,
+        61,
+        69,
+        227,
+        136,
+        128,
+        232,
+        216,
+        205,
+        10,
+        60,
+        236,
+        112,
+        55,
+        51,
+        130,
+        166,
+        178,
+        188,
+        254,
+        134,
+        29,
+        216,
+        115,
+        8,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
     }
 }
 
@@ -438,12 +589,16 @@ STORE_ARTIFACT_TEST_BUILD_RECORD_V0: #run `{"schema":"jet.build-record/v0","prog
 #Test("artifact store previous store and build record fixtures fail closed") {
     action: ActionHandle.from_key("build-metadata-compat")
     if store_artifact_decode_action(action, store_artifact_test_store_v0_fixture()) == {
-        .Ok(_) -> panic("previous store schema must be rejected")
-        .Err(error) -> assert_eq(error.reason, "action record has an unknown version or short header")
+        .Ok(_) -> { panic("previous store schema must be rejected") }
+        .Err(error) -> {
+            assert_eq(error.reason, "action record has an unknown version or short header")
+        }
     }
     if BuildRecord.from_json(STORE_ARTIFACT_TEST_BUILD_RECORD_V0) == {
-        .Ok(_) -> panic("previous build-record schema must be rejected")
-        .Err(error) -> assert_eq(error.reason, "unsupported build record schema `jet.build-record/v0`")
+        .Ok(_) -> { panic("previous build-record schema must be rejected") }
+        .Err(error) -> {
+            assert_eq(error.reason, "unsupported build record schema `jet.build-record/v0`")
+        }
     }
 }
 
@@ -497,10 +652,13 @@ STORE_ARTIFACT_TEST_BUILD_RECORD_V0: #run `{"schema":"jet.build-record/v0","prog
 #Test("artifact store build record wire preserves fixed field order and Core JSON quoting") {
     c1: String.from_bytes([U8]{127, 194, 133}) ?? panic("valid C1 control scalars")
     c0: String.from_bytes([U8]{8, 12}) ?? panic("valid C0 control scalars")
-    record: BuildRecord.new("main\".jet", [BuildNodeRecord]{
-        BuildNodeRecord{kind: "check", key: "key", subject: "main.jet", duration_ms: Float{1.5}, why_ran: "line\nnext\t", inputs: [String]{"a\\b", c1, c0}},
-        BuildNodeRecord{kind: "link", key: "out", subject: "main", duration_ms: Float{-1.0}, why_ran: "first-run", inputs: [String]{}},
-    })
+    record: BuildRecord.new(
+        "main\".jet",
+        [BuildNodeRecord]{
+            BuildNodeRecord{kind: "check", key: "key", subject: "main.jet", duration_ms: Float{1.5}, why_ran: "line\nnext\t", inputs: [String]{"a\\b", c1, c0}},
+            BuildNodeRecord{kind: "link", key: "out", subject: "main", duration_ms: Float{-1.0}, why_ran: "first-run", inputs: [String]{}},
+        },
+    )
     // Core's writer escapes C0 controls (`\b`, `\f`) and leaves DEL and C1 raw.
     expected: [String]{`{"schema":"jet.build-record/v1","program":"main\".jet","nodes":[{"kind":"check","key":"key","subject":"main.jet","duration_ms":1.5,"why_ran":"line\nnext\t","inputs":["a\\b","`, c1, `","\b\f"]},{"kind":"link","key":"out","subject":"main","duration_ms":0,"why_ran":"first-run","inputs":[]}]}`}.join("")
     assert_eq(record.to_json(), expected)
@@ -510,16 +668,19 @@ STORE_ARTIFACT_TEST_BUILD_RECORD_V0: #run `{"schema":"jet.build-record/v0","prog
 }
 
 #Test("artifact store build record parser preserves schema and failure domains") {
-    record: BuildRecord.new("main.jet", [BuildNodeRecord]{
-        BuildNodeRecord{kind: "check", key: "key", subject: "main.jet", duration_ms: Float{1.5}, why_ran: "first-run", inputs: [String]{"main.jet"}},
-    })
+    record: BuildRecord.new(
+        "main.jet",
+        [BuildNodeRecord]{
+            BuildNodeRecord{kind: "check", key: "key", subject: "main.jet", duration_ms: Float{1.5}, why_ran: "first-run", inputs: [String]{"main.jet"}},
+        },
+    )
     assert_eq(BuildRecord.from_json(record.to_json()) ?? panic("build record round trip"), record)
     if BuildRecord.from_json("not JSON") == {
-        .Err(error) -> assert_eq(error.reason, "build record is not valid JSON")
+        .Err(error) -> { assert_eq(error.reason, "build record is not valid JSON") }
         .Ok(_) -> panic("invalid JSON must fail")
     }
     if BuildRecord.from_json(`{"schema":"jet.build-record/v1","program":"main.jet","nodes":[{"duration_ms":-1}]}`) == {
-        .Err(error) -> assert_eq(error.reason, "build record node duration_ms is out of range")
+        .Err(error) -> { assert_eq(error.reason, "build record node duration_ms is out of range") }
         .Ok(_) -> panic("negative duration must fail")
     }
 }
@@ -531,10 +692,13 @@ STORE_ARTIFACT_TEST_BUILD_RECORD_V0: #run `{"schema":"jet.build-record/v0","prog
 #Test("artifact store build record fractional wire preserves Core JSON escaping and node order") {
     c1: String.from_bytes([U8]{127, 194, 133}) ?? panic("valid C1 control scalars")
     controls: String.from_bytes([U8]{8, 12, 127, 194, 133}) ?? panic("valid control scalars")
-    record: BuildRecord.new("main\".jet", [BuildNodeRecord]{
-        BuildNodeRecord{kind: "check", key: "key", subject: "main.jet", duration_ms: Float{1.5}, why_ran: "line\nnext\t", inputs: [String]{"a\\b", controls}},
-        BuildNodeRecord{kind: "compile", key: "out", subject: "main", duration_ms: Float{9030.391929}, why_ran: "first-run", inputs: [String]{}},
-    })
+    record: BuildRecord.new(
+        "main\".jet",
+        [BuildNodeRecord]{
+            BuildNodeRecord{kind: "check", key: "key", subject: "main.jet", duration_ms: Float{1.5}, why_ran: "line\nnext\t", inputs: [String]{"a\\b", controls}},
+            BuildNodeRecord{kind: "compile", key: "out", subject: "main", duration_ms: Float{9030.391929}, why_ran: "first-run", inputs: [String]{}},
+        },
+    )
     assert_eq(record.to_json(), [String]{`{"schema":"jet.build-record/v1","program":"main\".jet","nodes":[{"kind":"check","key":"key","subject":"main.jet","duration_ms":1.5,"why_ran":"line\nnext\t","inputs":["a\\b","\b\f`, c1, `"]},{"kind":"compile","key":"out","subject":"main","duration_ms":9030.391929,"why_ran":"first-run","inputs":[]}]}`}.join(""))
 }
 
@@ -555,9 +719,12 @@ STORE_ARTIFACT_TEST_BUILD_RECORD_V0: #run `{"schema":"jet.build-record/v0","prog
     files.create_dir_all(workspace) ?? panic("workspace")
     files.create_dir_all(other) ?? panic("other workspace")
     store: store_artifact_test_store(cache, 1048576)
-    record: BuildRecord.new("run.jet", [BuildNodeRecord]{
-        BuildNodeRecord{kind: "compile", key: "checked-node", subject: "run.jet", duration_ms: 2.0, why_ran: "source changed", inputs: [String]{"run.jet"}},
-    })
+    record: BuildRecord.new(
+        "run.jet",
+        [BuildNodeRecord]{
+            BuildNodeRecord{kind: "compile", key: "checked-node", subject: "run.jet", duration_ms: 2.0, why_ran: "source changed", inputs: [String]{"run.jet"}},
+        },
+    )
     _: store.publish_last_build_record(workspace, "checked-record", record) ?? panic("publish latest")
     found: if store.last_build_record(workspace, "run.jet") == {
         .Ok(latest) -> latest
@@ -589,7 +756,7 @@ STORE_ARTIFACT_TEST_BUILD_RECORD_V0: #run `{"schema":"jet.build-record/v0","prog
     refused: [String]{"", ".", "..", "../outside", "a/b", "a\\b", "/etc", "~"}
     loop namespace in refused {
         if store.publish_lto(namespace, "lto".bytes()) == {
-            .Ok(_) -> panic("LTO namespace `{namespace}` must be refused")
+            .Ok(_) -> { panic("LTO namespace `{namespace}` must be refused") }
             .Err(error) -> assert_eq(store_artifact_test_kind(error), "invalid-key")
         }
     }
@@ -597,7 +764,7 @@ STORE_ARTIFACT_TEST_BUILD_RECORD_V0: #run `{"schema":"jet.build-record/v0","prog
     assert(!files.exists(files.join(parent, "outside")), "a refused namespace created a directory outside the store")
     loop key in refused {
         if store.publish_bytes(key, "payload".bytes(), executable: false, durable: true) == {
-            .Ok(_) -> panic("artifact key `{key}` must be refused")
+            .Ok(_) -> { panic("artifact key `{key}` must be refused") }
             .Err(error) -> assert_eq(store_artifact_test_kind(error), "invalid-digest")
         }
     }
@@ -608,7 +775,9 @@ STORE_ARTIFACT_TEST_BUILD_RECORD_V0: #run `{"schema":"jet.build-record/v0","prog
 }
 
 #Test("artifact store refuses a symlinked layout directory without touching its target") {
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     parent: store_artifact_test_root("escape-layout")
     root: files.join(parent, "store")
     outside: files.join(parent, "outside")
@@ -616,15 +785,19 @@ STORE_ARTIFACT_TEST_BUILD_RECORD_V0: #run `{"schema":"jet.build-record/v0","prog
     files.create_dir_all(outside) ?? panic("outside")
     files.symlink(outside, files.join(root, "cas")) ?? panic("cas link")
     if ArtifactStore.open(ArtifactStoreConfig.new(root).with_cap_bytes(1024).with_reserve_bytes(0)) == {
-        .Ok(_) -> panic("a symlinked cas directory must be refused")
-        .Err(error) -> assert(error.message().contains("store directory is a symlink"), "unexpected refusal: {error.message()}")
+        .Ok(_) -> { panic("a symlinked cas directory must be refused") }
+        .Err(error) -> {
+            assert(error.message().contains("store directory is a symlink"), "unexpected refusal: {error.message()}")
+        }
     }
     assert_eq(store_artifact_test_entries(outside), 0)
     store_artifact_test_cleanup(parent)
 }
 
 #Test("artifact store never follows a symlinked object out of the cache") {
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     parent: store_artifact_test_root("escape-object")
     root: files.join(parent, "store")
     outside: files.join(parent, "outside-object")

@@ -2,11 +2,17 @@
 // Sequence stops remain the canonical foreign index/capacity stops in Trap.
 // Existing native List ABI (Collections.jet:1-3); holders own their shell.
 DATA_SEQUENCE_BYTES: I64{24}
+
 DATA_SEQUENCE_LENGTH: I64{0}
+
 DATA_SEQUENCE_CAPACITY: I64{8}
+
 DATA_SEQUENCE_DATA: I64{16}
+
 data_sequence_new: fn(capacity: I64, stride: I64) -> I64 {
-    if (capacity < I64{0} || capacity > I64{9223372036854775807} /% stride) -> rt_seq_capacity_overflow_stop()
+    if (capacity < I64{0} || capacity > I64{9223372036854775807} /% stride) {
+        rt_seq_capacity_overflow_stop()
+    }
     header: jet_rt_alloc(DATA_SEQUENCE_BYTES, I64{8})
     data: if (capacity == I64{0}) -> I64{8} else -> jet_rt_alloc(capacity * stride, I64{8})
     rt_text_store(wrapping(header + DATA_SEQUENCE_LENGTH), I64{0})
@@ -14,11 +20,13 @@ data_sequence_new: fn(capacity: I64, stride: I64) -> I64 {
     rt_text_store(wrapping(header + DATA_SEQUENCE_DATA), data)
     header
 }
+
 data_sequence_slot: fn(sequence: I64, index: I64, stride: I64) -> I64 {
     length: rt_text_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
-    if (index < I64{0} || index >= length) -> rt_seq_index_oob_stop(length, index)
+    if (index < I64{0} || index >= length) { rt_seq_index_oob_stop(length, index) }
     rt_text_word(wrapping(sequence + DATA_SEQUENCE_DATA)) + index * stride
 }
+
 data_sequence_reserve: fn(sequence: I64, stride: I64) -> I64 {
     length: rt_text_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
     capacity: rt_text_word(wrapping(sequence + DATA_SEQUENCE_CAPACITY))
@@ -30,11 +38,12 @@ data_sequence_reserve: fn(sequence: I64, stride: I64) -> I64 {
     next: if (capacity == I64{0}) -> I64{4} else if (capacity > limit /% I64{2}) -> limit else -> capacity * I64{2}
     data: jet_rt_alloc(next * stride, I64{8})
     coll_copy(old, data, length * stride)
-    if (capacity != I64{0}) -> jet_rt_free(old, capacity * stride, I64{8})
+    if (capacity != I64{0}) { jet_rt_free(old, capacity * stride, I64{8}) }
     rt_text_store(wrapping(sequence + DATA_SEQUENCE_CAPACITY), next)
     rt_text_store(wrapping(sequence + DATA_SEQUENCE_DATA), data)
     data + length * stride
 }
+
 data_u8_list_copy_into: fn(source: I64, target: I64) {
     length: rt_text_word(wrapping(source + DATA_SEQUENCE_LENGTH))
     data: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * RT_HOST_U8_STRIDE, I64{8})
@@ -48,10 +57,14 @@ data_u8_list_copy_into: fn(source: I64, target: I64) {
         at += I64{1}
     }
 }
+
 data_u8_list_drop_fields: fn(value: I64) {
     capacity: rt_text_word(wrapping(value + DATA_SEQUENCE_CAPACITY))
-    if (capacity != I64{0}) -> jet_rt_free(rt_text_word(wrapping(value + DATA_SEQUENCE_DATA)), capacity * RT_HOST_U8_STRIDE, I64{8})
+    if (capacity != I64{0}) {
+        jet_rt_free(rt_text_word(wrapping(value + DATA_SEQUENCE_DATA)), capacity * RT_HOST_U8_STRIDE, I64{8})
+    }
 }
+
 data_text_list_copy_into: fn(source: I64, target: I64) {
     length: rt_text_word(source)
     data: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * I64{8}, I64{8})

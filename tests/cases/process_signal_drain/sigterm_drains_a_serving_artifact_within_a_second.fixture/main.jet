@@ -29,13 +29,13 @@ run: fn() {
     entry_report: entry_server.serve() ?? process.fail(1, "entry serve: {err}")
     print("entry drained: accepted={entry_report.accepted}")
     if serving.join() == {
-        .Ok(task_report) -> print("task drained: accepted={task_report.accepted}")
-        .Err(.Cancelled) -> print("task: cancelled")
-        .Err(.DeadlineBlown) -> print("task: deadline")
+        .Ok(task_report) -> { print("task drained: accepted={task_report.accepted}") }
+        .Err(.Cancelled) -> { print("task: cancelled") }
+        .Err(.DeadlineBlown) -> { print("task: deadline") }
         .Err(.Panicked(reason)) -> print("task: panicked {reason}")
     }
     if sleeping.join() == {
-        .Ok(_) -> print("sleep: finished")
+        .Ok(_) -> { print("sleep: finished") }
         .Err(_) -> print("sleep: cancelled")
     }
 }

@@ -14,17 +14,13 @@ sum_until: fn(n: Int, stop: Int) -> Int {
 
 window: fn(n: Int) -> Int {
     total := 0
-    loop i in (n - 3)..<n {
-        total += i % 1000
-    }
+    loop i in (n - 3)..<n -> total += i % 1000
     total
 }
 
 last_double: fn(n: Int) -> Int {
     last := 0
-    loop i in (n - 2)..<n {
-        last = i * 2
-    }
+    loop i in (n - 2)..<n -> last = i * 2
     last
 }
 
@@ -39,21 +35,15 @@ neg_parts: fn(n: Int) -> Int {
 
 span: fn(start: Int, stop: Int) -> Int {
     total := 0
-    loop i in start..<stop {
-        total += i * 3 + i % 5
-    }
+    loop i in start..<stop -> total += i * 3 + i % 5
     total
 }
 
 run: fn() {
     stops: [Int]{10, 4611686018427387909, -4611686018427387913}
-    loop n in stops {
-        print(sum_until(n, 20))
-    }
+    loop n in stops { print(sum_until(n, 20)) }
     ends: [Int]{4611686018427387901, 4611686018427387902, 4611686018427387906, 1003}
-    loop n in ends {
-        print([Int]{window(n), last_double(n)})
-    }
+    loop n in ends { print([Int]{window(n), last_double(n)}) }
     negs: [Int]{10, 4611686018427387904, 4611686018427387909}
     print([Int]{neg_parts(negs[0]), neg_parts(negs[1]), neg_parts(negs[2])})
     spans: [Int]{10, 14, -4611686018427387906, -4611686018427387902}

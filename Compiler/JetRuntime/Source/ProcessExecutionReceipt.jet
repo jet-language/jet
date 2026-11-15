@@ -8,7 +8,7 @@ process_execution_sort_unique: fn(list: I64) {
         loop j > (I64{0}) {
             a: fd_word(data, (j - I64{1}) * I64{8})
             b: fd_word(data, j * I64{8})
-            if (jet_rt_string_compare(a, b) <= I64{0}) -> break
+            if (jet_rt_string_compare(a, b) <= I64{0}) { break }
             fd_put(data, j * I64{8}, a)
             fd_put(data, (j - I64{1}) * I64{8}, b)
             j -= I64{1}
@@ -19,7 +19,9 @@ process_execution_sort_unique: fn(list: I64) {
     write := I64{0}
     loop read < fd_word(list, I64{0}) {
         value: fd_word(data, read * I64{8})
-        if (write != I64{0} && jet_rt_string_eq(value, fd_word(data, (write - I64{1}) * I64{8}))) { jet_rt_string_drop(value) } else {
+        if (write != I64{0} && jet_rt_string_eq(value, fd_word(data, (write - I64{1}) * I64{8}))) {
+            jet_rt_string_drop(value)
+        } else {
             fd_put(data, write * I64{8}, value)
             write += I64{1}
         }
@@ -27,16 +29,18 @@ process_execution_sort_unique: fn(list: I64) {
     }
     fd_put(list, I64{0}, write)
 }
+
 process_execution_join: fn(list: I64) -> I64 {
     text: jet_rt_string_builder_new()
     at := I64{0}
     loop at < fd_word(list, I64{0}) {
-        if (at != I64{0}) -> jet_rt_string_builder_push(text, rt_static_text("\n"))
+        if (at != I64{0}) { jet_rt_string_builder_push(text, rt_static_text("\n")) }
         jet_rt_string_builder_push(text, fd_word(fd_word(list, I64{16}), at * I64{8}))
         at += I64{1}
     }
     jet_rt_string_builder_finish(text)
 }
+
 process_execution_hash: fn(text: I64) -> I64 {
     scratch: jet_rt_alloc(I64{608}, I64{8})
     jet_rt_native_sha256(rt_text_data(text), rt_text_len(text), scratch, wrapping(scratch + I64{32}))
@@ -52,6 +56,7 @@ process_execution_hash: fn(text: I64) -> I64 {
     jet_rt_free(scratch, I64{608}, I64{8})
     jet_rt_string_builder_finish(result)
 }
+
 // The digest of the material text at `material_slot`, published once at
 // `digest_slot` (0 until a read asks for it). A plan or receipt keeps its
 // digest materials, so building one hashes nothing: only a read of its
@@ -59,12 +64,13 @@ process_execution_hash: fn(text: I64) -> I64 {
 // may race; one publishes its digest and the other drops its own.
 process_execution_lazy_digest: fn(material_slot: I64, digest_slot: I64) -> I64 {
     known: atomic_word_load(digest_slot)
-    if (known != I64{0}) -> return known
+    if (known != I64{0}) { return known }
     digest: process_execution_hash(encoding_word(material_slot))
     if atomic_word_cas(digest_slot, I64{0}, digest) -> return digest
     jet_rt_string_drop(digest)
     atomic_word_load(digest_slot)
 }
+
 // The text `input_digest` hashes: the command's words, length-prefixed.
 process_execution_input_material: fn(spec: I64) -> I64 {
     text: jet_rt_string_builder_new()
@@ -81,14 +87,17 @@ process_execution_input_material: fn(spec: I64) -> I64 {
     }
     jet_rt_string_builder_finish(text)
 }
+
 process_execution_mode: fn(mode: I64) -> I64 {
-    if (mode == PROCESS_STREAM_CAPTURE) -> rt_static_text("capture") else -> if (mode == HOST_PROCESS_STREAM_INHERIT) -> rt_static_text("inherit") else -> if (mode == PROCESS_STREAM_STDOUT) -> rt_static_text("stdout") else -> rt_static_text("stream")
+    if (mode == PROCESS_STREAM_CAPTURE) -> rt_static_text("capture") else if (mode == HOST_PROCESS_STREAM_INHERIT) -> rt_static_text("inherit") else if (mode == PROCESS_STREAM_STDOUT) -> rt_static_text("stdout") else -> rt_static_text("stream")
 }
+
 process_execution_decimal: fn(value: I64) -> I64 {
     text: jet_rt_string_builder_new()
     rt_text_push_number(text, value)
     jet_rt_string_builder_finish(text)
 }
+
 process_execution_material_field: fn(text: I64, key: I64, value: I64) {
     jet_rt_string_builder_push(text, key)
     jet_rt_string_builder_push(text, rt_static_text("="))
@@ -97,6 +106,7 @@ process_execution_material_field: fn(text: I64, key: I64, value: I64) {
     jet_rt_string_builder_push(text, value)
     jet_rt_string_builder_push(text, rt_static_text("\n"))
 }
+
 process_execution_limit_keys: fn() -> I64 {
     keys: data_sequence_new(I64{5}, I64{8})
     process_text_list_push(keys, rt_static_text("timeout-ms"))
@@ -106,6 +116,7 @@ process_execution_limit_keys: fn() -> I64 {
     process_text_list_push(keys, rt_static_text("open-file-limit"))
     keys
 }
+
 // The text `policy_digest` hashes: every policy fact the spec sets.
 process_execution_policy_material: fn(spec: I64) -> I64 {
     envkeys: data_sequence_new(I64{0}, I64{8})
@@ -176,6 +187,7 @@ process_execution_policy_material: fn(spec: I64) -> I64 {
     process_text_list_drop(envkeys, false)
     material
 }
+
 process_execution_limits: fn(spec: I64) -> I64 {
     list: data_sequence_new(I64{6}, I64{8})
     process_text_list_push(list, rt_static_text("private-tmpfs-bytes=67108864"))
@@ -220,6 +232,7 @@ process_execution_limits: fn(spec: I64) -> I64 {
     }
     list
 }
+
 // Policy secret values first, then secret-named environment values.
 process_execution_secrets: fn(spec: I64) -> I64 {
     secrets: data_sequence_new(I64{0}, I64{8})
@@ -230,7 +243,9 @@ process_execution_secrets: fn(spec: I64) -> I64 {
         row: wrapping(fd_word(sets, I64{16}) + at * I64{16})
         name: jet_text_ascii_lower(fd_word(row, I64{0}))
         secret: jet_string_contains(name, rt_static_text("secret")) || jet_string_contains(name, rt_static_text("token")) || jet_string_contains(name, rt_static_text("password")) || jet_string_contains(name, rt_static_text("passwd")) || jet_string_contains(name, rt_static_text("credential")) || jet_string_contains(name, rt_static_text("key"))
-        if (secret && rt_text_len(fd_word(row, I64{8})) != I64{0}) -> process_text_list_push(secrets, fd_word(row, I64{8}))
+        if (secret && rt_text_len(fd_word(row, I64{8})) != I64{0}) {
+            process_text_list_push(secrets, fd_word(row, I64{8}))
+        }
         jet_rt_string_drop(name)
         at += I64{1}
     }
@@ -251,7 +266,9 @@ process_execution_secrets: fn(spec: I64) -> I64 {
     write := I64{0}
     loop read < fd_word(secrets, I64{0}) {
         value: fd_word(data, read * I64{8})
-        if (write != I64{0} && jet_rt_string_eq(value, fd_word(data, (write - I64{1}) * I64{8}))) { jet_rt_string_drop(value) } else {
+        if (write != I64{0} && jet_rt_string_eq(value, fd_word(data, (write - I64{1}) * I64{8}))) {
+            jet_rt_string_drop(value)
+        } else {
             fd_put(data, write * I64{8}, value)
             write += I64{1}
         }
@@ -260,6 +277,7 @@ process_execution_secrets: fn(spec: I64) -> I64 {
     fd_put(secrets, I64{0}, write)
     secrets
 }
+
 process_execution_redact: fn(text: I64, secrets: I64) -> I64 {
     result := jet_rt_string_clone(text)
     at := I64{0}
@@ -271,6 +289,7 @@ process_execution_redact: fn(text: I64, secrets: I64) -> I64 {
     }
     result
 }
+
 // The canonical path of the first regular file among `candidates`, or 0.
 process_execution_first_file: fn(candidates: I64) -> I64 {
     scratch: jet_rt_alloc(I64{176}, I64{8})
@@ -289,12 +308,13 @@ process_execution_first_file: fn(candidates: I64) -> I64 {
             }
         }
         jet_rt_free(name, rt_text_len(candidate) + I64{1}, I64{1})
-        if (found != I64{0}) -> break
+        if (found != I64{0}) { break }
         at += I64{1}
     }
     jet_rt_free(scratch, I64{176}, I64{8})
     found
 }
+
 process_execution_identity: fn(spec: I64) -> I64 {
     // Receipt resolution is best-effort and never turns successful execution
     // into a Resolve failure. Snapshot PATH is independent of child overrides.
@@ -303,11 +323,12 @@ process_execution_identity: fn(spec: I64) -> I64 {
     direct: process_execution_has(command, I64{47}) || process_execution_has(command, I64{92})
     candidates: if (direct || path == I64{0}) -> data_sequence_new(I64{0}, I64{8}) else -> process_execution_candidates(command, path)
     if direct -> process_text_list_push(candidates, command)
-    if (path != I64{0}) -> jet_rt_string_drop(path)
+    if (path != I64{0}) { jet_rt_string_drop(path) }
     found: process_execution_first_file(candidates)
     process_text_list_drop(candidates, false)
     if (found == I64{0}) -> jet_rt_string_clone(process_execution_first(spec)) else -> found
 }
+
 process_execution_receipt: fn(child: I64, status: I64) -> I64 {
     spec: fd_word(child, I64{24})
     signal: status.bit_and(I64{127})
@@ -326,6 +347,7 @@ process_execution_receipt: fn(child: I64, status: I64) -> I64 {
     process_text_list_drop(secrets, false)
     receipt
 }
+
 // `output` and `errors` are borrowed raw texts; `secrets` (borrowed) redacts
 // them, while argv and the authority redact with the spec's own policy and
 // environment secrets. An authority-bound receipt names the backend that ran it
@@ -368,25 +390,37 @@ process_receipt_build: fn(spec: I64, pid: I64, code: I64, success: Bool, signal:
     process_text_list_push(outputs, entry)
     jet_rt_string_drop(entry)
     fd_put(receipt, I64{112}, outputs)
-    fd_put(receipt, I64{120}, if (bound || fd_word(secrets, I64{0}) != I64{0}) -> { I64{1} } else -> { I64{0} })
+    fd_put(
+        receipt,
+        I64{120},
+        if (bound || fd_word(secrets, I64{0}) != I64{0}) -> { I64{1} } else -> { I64{0} },
+    )
     fd_put(receipt, I64{128}, jet_int_owned_from_i64(pid))
-    fd_put(receipt, I64{136}, if timed_out -> { PROCESS_RESOURCE_WALL_TIME } else -> { INT_OPTION_NONE })
+    fd_put(
+        receipt,
+        I64{136},
+        if timed_out -> { PROCESS_RESOURCE_WALL_TIME } else -> { INT_OPTION_NONE },
+    )
     fd_put(receipt, I64{144}, INT_OPTION_NONE)
     fd_put(receipt, I64{152}, INT_OPTION_NONE)
     fd_put(receipt, I64{160}, INT_OPTION_NONE)
     receipt
 }
+
 // A reap's rusage on the receipt: peak_memory_bytes from ru_maxrss (KiB, the
 // largest single process) or, under a memory_scope, the scope's memory.peak
 // (all its processes together, rounded up to KiB); user_cpu_ns and
 // system_cpu_ns of the child and the descendants it waited for. A negative
 // word (not reaped here) leaves all three absent.
 process_receipt_usage: fn(receipt: I64, peak_kib: I64, user_ns: I64, system_ns: I64) {
-    if (peak_kib < I64{0} || user_ns < I64{0} || system_ns < I64{0}) -> return
+    if (peak_kib < I64{0} || user_ns < I64{0} || system_ns < I64{0}) {
+        return
+    }
     fd_put(receipt, I64{144}, jet_int_owned_from_i64(peak_kib * I64{1024}))
     fd_put(receipt, I64{152}, jet_int_owned_from_i64(user_ns))
     fd_put(receipt, I64{160}, jet_int_owned_from_i64(system_ns))
 }
+
 // String::from_utf8 is strict in both Rust collection lanes. The scanner's
 // negative width is Utf8Error.error_len; a truncated valid prefix has None.
 // Only a text capture is decoded strictly: a streamed output's bytes were
@@ -394,15 +428,16 @@ process_receipt_usage: fn(receipt: I64, peak_kib: I64, user_ns: I64, system_ns: 
 // (process_execution_receipt_text) and wait does not fail on them.
 process_execution_validate_output: fn(child: I64, err: I64) -> Bool {
     spec: fd_word(child, I64{24})
-    (fd_word(spec, PROCESS_SPEC_STDOUT) != PROCESS_STREAM_CAPTURE || process_execution_validate_text(fd_word(child, I64{80}), rt_static_text("process stdout"), err)) &&
-        (fd_word(spec, PROCESS_SPEC_STDERR) != PROCESS_STREAM_CAPTURE || process_execution_validate_text(fd_word(child, I64{88}), rt_static_text("process stderr"), err))
+    (fd_word(spec, PROCESS_SPEC_STDOUT) != PROCESS_STREAM_CAPTURE || process_execution_validate_text(fd_word(child, I64{80}), rt_static_text("process stdout"), err)) && (fd_word(spec, PROCESS_SPEC_STDERR) != PROCESS_STREAM_CAPTURE || process_execution_validate_text(fd_word(child, I64{88}), rt_static_text("process stderr"), err))
 }
+
 // The receipt's copy of one output (`text` borrowed): exact for a text
 // capture, which process_execution_validate_output already decoded, and
 // lossy for a streamed output, whose bytes need not be UTF-8.
 process_execution_receipt_text: fn(text: I64, mode: I64) -> I64 {
     if (mode == PROCESS_STREAM_CAPTURE) -> rt_text_copy(rt_text_data(text), rt_text_len(text)) else -> rt_text_lossy(rt_text_data(text), rt_text_len(text))
 }
+
 // `label` (borrowed) names the reader in the Read error.
 process_execution_validate_text: fn(text: I64, label: I64, err: I64) -> Bool {
     length: rt_text_len(text)
@@ -412,7 +447,15 @@ process_execution_validate_text: fn(text: I64, label: I64, err: I64) -> Bool {
         width: rt_text_valid_width(wrapping(data + at), length - at, I64{1})
         if (width < I64{0}) {
             lead: rt_text_byte(wrapping(data + at))
-            expected: if (lead >= I64{194} && lead <= I64{223}) -> { I64{2} } else -> { if (lead >= I64{224} && lead <= I64{239}) -> { I64{3} } else -> { if (lead >= I64{240} && lead <= I64{244}) -> { I64{4} } else -> { I64{1} } } }
+            expected: if (lead >= I64{194} && lead <= I64{223}) -> {
+                I64{2}
+            } else if (lead >= I64{224} && lead <= I64{239}) -> {
+                I64{3}
+            } else if (lead >= I64{240} && lead <= I64{244}) -> {
+                I64{4}
+            } else -> {
+                I64{1}
+            }
             cause: jet_rt_string_builder_new()
             if (expected > I64{1} && at - width == length) {
                 jet_rt_string_builder_push(cause, rt_static_text("incomplete utf-8 byte sequence from index "))

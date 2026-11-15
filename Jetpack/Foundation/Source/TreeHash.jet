@@ -75,7 +75,9 @@ TreeHashBudget: struct {
 foundation_try_tree_hash: fn(root: String) -[FS]> String TreeHashError! {
     root_stat: if files.stat(root) == {
         .Ok(stat) -> stat
-        .Err(error) -> { return Err(TreeHashError.IO{path: root, detail: "{error}"}) }
+        .Err(error) -> {
+            return Err(TreeHashError.IO{path: root, detail: "{error}"})
+        }
     }
     if root_stat.is_symlink -> return Err(TreeHashError.Symlink(root))
     if !root_stat.is_dir -> return Err(TreeHashError.Special(root))
@@ -107,14 +109,20 @@ foundation_collect_tree_files: fn(directory: String, relative_dir: String, root:
     // automatic membership, not explicit imports or source-tree identity.
     entries: if files.list_dir(directory) == {
         .Ok(listed) -> listed
-        .Err(error) -> { return Err(TreeHashError.IO{path: directory, detail: "{error}"}) }
+        .Err(error) -> {
+            return Err(TreeHashError.IO{path: directory, detail: "{error}"})
+        }
     }
     loop entry in entries {
-        if budget.nodes >= MAX_TREE_NODES -> return Err(TreeHashError.TooLarge{path: entry.path, limit: MAX_TREE_NODES})
+        if budget.nodes >= MAX_TREE_NODES {
+            return Err(TreeHashError.TooLarge{path: entry.path, limit: MAX_TREE_NODES})
+        }
         budget.nodes += 1
         stat: if files.stat(entry.path) == {
             .Ok(found) -> found
-            .Err(error) -> { return Err(TreeHashError.IO{path: entry.path, detail: "{error}"}) }
+            .Err(error) -> {
+                return Err(TreeHashError.IO{path: entry.path, detail: "{error}"})
+            }
         }
         if stat.is_symlink -> return Err(TreeHashError.Symlink(entry.path))
         if !stat.is_dir && !stat.is_file -> return Err(TreeHashError.Special(entry.path))
@@ -122,11 +130,15 @@ foundation_collect_tree_files: fn(directory: String, relative_dir: String, root:
         relative: if relative_dir == "" -> entry.name else -> "{relative_dir}/{entry.name}"
         if {
             stat.is_dir -> {
-                if depth >= MAX_TREE_DEPTH -> return Err(TreeHashError.TooLarge{path: entry.path, limit: MAX_TREE_DEPTH})
+                if depth >= MAX_TREE_DEPTH {
+                    return Err(TreeHashError.TooLarge{path: entry.path, limit: MAX_TREE_DEPTH})
+                }
                 foundation_collect_tree_files(entry.path, relative, root, out, depth + 1, budget)
             }
             else -> {
-                if out.len() >= MAX_TREE_FILES -> return Err(TreeHashError.TooLarge{path: root, limit: MAX_TREE_FILES})
+                if out.len() >= MAX_TREE_FILES {
+                    return Err(TreeHashError.TooLarge{path: root, limit: MAX_TREE_FILES})
+                }
                 out.push(TreeHashFile{relative: relative.replace("\\", "/"), path: entry.path, stat: stat})
             }
         }
@@ -144,12 +156,20 @@ foundation_hash_regular_nofollow: fn(path: String, expected: Stat, hasher: &Stre
     reader := files.open(path, links: .Refuse) ?? return Err(TreeHashError.IO{path: path, detail: "{err}"})
     opened: if reader.stat() == {
         .Ok(stat) -> stat
-        .Err(error) -> { return Err(TreeHashError.IO{path: path, detail: "{error}"}) }
+        .Err(error) -> {
+            return Err(TreeHashError.IO{path: path, detail: "{error}"})
+        }
     }
-    if !opened.is_file || !foundation_same_file_identity(expected, opened) -> return Err(TreeHashError.IO{path: path, detail: "file changed before hashing"})
-    if opened.size > MAX_TREE_FILE_BYTES -> return Err(TreeHashError.TooLarge{path: path, limit: MAX_TREE_FILE_BYTES})
+    if !opened.is_file || !foundation_same_file_identity(expected, opened) {
+        return Err(TreeHashError.IO{path: path, detail: "file changed before hashing"})
+    }
+    if opened.size > MAX_TREE_FILE_BYTES {
+        return Err(TreeHashError.TooLarge{path: path, limit: MAX_TREE_FILE_BYTES})
+    }
     next_total: total_bytes + opened.size
-    if next_total > MAX_TREE_TOTAL_BYTES -> return Err(TreeHashError.TooLarge{path: path, limit: MAX_TREE_TOTAL_BYTES})
+    if next_total > MAX_TREE_TOTAL_BYTES {
+        return Err(TreeHashError.TooLarge{path: path, limit: MAX_TREE_TOTAL_BYTES})
+    }
     length := [U8]{}
     loop shift in FOUNDATION_U64_SHIFTS -> length.push(U8{((opened.size >> shift)).bit_and(255)})
     hasher.update(length)
@@ -157,18 +177,26 @@ foundation_hash_regular_nofollow: fn(path: String, expected: Stat, hasher: &Stre
     loop {
         chunk: if reader.read_bytes(FOUNDATION_READ_CHUNK) == {
             .Ok(bytes) -> bytes
-            .Err(error) -> { return Err(TreeHashError.IO{path: path, detail: "{error}"}) }
+            .Err(error) -> {
+                return Err(TreeHashError.IO{path: path, detail: "{error}"})
+            }
         }
         if chunk.len() == 0 -> break
         actual_length += chunk.len()
         hasher.update(chunk)
-        if actual_length > opened.size -> return Err(TreeHashError.IO{path: path, detail: "file grew while hashing"})
+        if actual_length > opened.size {
+            return Err(TreeHashError.IO{path: path, detail: "file grew while hashing"})
+        }
     }
     after: if reader.stat() == {
         .Ok(stat) -> stat
-        .Err(error) -> { return Err(TreeHashError.IO{path: path, detail: "{error}"}) }
+        .Err(error) -> {
+            return Err(TreeHashError.IO{path: path, detail: "{error}"})
+        }
     }
-    if !foundation_same_file_identity(expected, after) || after.size != actual_length -> return Err(TreeHashError.IO{path: path, detail: "file changed while hashing"})
+    if !foundation_same_file_identity(expected, after) || after.size != actual_length {
+        return Err(TreeHashError.IO{path: path, detail: "file changed while hashing"})
+    }
     total_bytes = next_total
 }
 
@@ -179,12 +207,17 @@ FoundationNofollowFile: struct {
     handle: FileReader
     expected: Stat
 }
+
 foundation_open_regular_nofollow: fn(path: String) -[FS]> FoundationNofollowFile IOError! {
     expected: files.stat(path)
-    if expected.is_symlink || !expected.is_file -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("file is not a regular file")}))
+    if expected.is_symlink || !expected.is_file {
+        return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("file is not a regular file")}))
+    }
     handle: files.open(path, links: .Refuse)
     opened: handle.stat()
-    if !opened.is_file || !foundation_same_file_identity(expected, opened) -> return Err(IOError.Other(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("file changed before reading")}))
+    if !opened.is_file || !foundation_same_file_identity(expected, opened) {
+        return Err(IOError.Other(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("file changed before reading")}))
+    }
     Ok(FoundationNofollowFile{handle: handle, expected: expected})
 }
 
@@ -193,19 +226,25 @@ foundation_open_regular_nofollow: fn(path: String) -[FS]> FoundationNofollowFile
 // identity and length while it is read.
 foundation_sha256_file_hex: fn(path: String) -[FS]> String IOError! {
     opened := foundation_open_regular_nofollow(path)
-    if opened.expected.size > MAX_TREE_FILE_BYTES -> return Err(foundation_io_error(false, path, "file exceeds the tree hashing bound"))
+    if opened.expected.size > MAX_TREE_FILE_BYTES {
+        return Err(foundation_io_error(false, path, "file exceeds the tree hashing bound"))
+    }
     hasher := StreamingSHA256.new()
     actual_length := 0
     loop {
         chunk: opened.handle.read_bytes(FOUNDATION_READ_CHUNK)
         if chunk.len() == 0 -> break
         actual_length += chunk.len()
-        if actual_length > MAX_TREE_FILE_BYTES -> return Err(foundation_io_error(false, path, "file grew beyond the tree hashing bound"))
+        if actual_length > MAX_TREE_FILE_BYTES {
+            return Err(foundation_io_error(false, path, "file grew beyond the tree hashing bound"))
+        }
         hasher.update(chunk)
     }
     after: opened.handle.stat()
     path_after: files.stat(path)
-    if actual_length != opened.expected.size || !foundation_same_file_identity(opened.expected, after) || !foundation_same_file_identity(opened.expected, path_after) -> return Err(IOError.Other(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("file changed while hashing")}))
+    if actual_length != opened.expected.size || !foundation_same_file_identity(opened.expected, after) || !foundation_same_file_identity(opened.expected, path_after) {
+        return Err(IOError.Other(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("file changed while hashing")}))
+    }
     Ok(hasher.finalize_hex())
 }
 
@@ -213,14 +252,18 @@ foundation_sha256_file_hex: fn(path: String) -[FS]> String IOError! {
 // bound is capped by the tree-file bound, checked before and during the read;
 // afterwards the handle and the path must still name the same unchanged file.
 foundation_read_file_nofollow: fn(path: String, max_bytes: Int) -[FS]> [U8] IOError! {
-    if max_bytes > MAX_TREE_FILE_BYTES -> return Err(foundation_io_error(false, path, "file read bound exceeds the tree hashing bound"))
+    if max_bytes > MAX_TREE_FILE_BYTES {
+        return Err(foundation_io_error(false, path, "file read bound exceeds the tree hashing bound"))
+    }
     opened := foundation_open_regular_nofollow(path)
     bound_error: IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("file exceeds its read bound")})
     if opened.expected.size > max_bytes -> return Err(bound_error)
     content: foundation_read_handle_bounded(opened.handle, max_bytes, bound_error)
     after: opened.handle.stat()
     path_after: files.stat(path)
-    if content.len() != opened.expected.size || !foundation_same_file_identity(opened.expected, after) || !foundation_same_file_identity(opened.expected, path_after) -> return Err(IOError.Other(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("file changed while reading")}))
+    if content.len() != opened.expected.size || !foundation_same_file_identity(opened.expected, after) || !foundation_same_file_identity(opened.expected, path_after) {
+        return Err(IOError.Other(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("file changed while reading")}))
+    }
     Ok(content)
 }
 
@@ -255,7 +298,9 @@ foundation_open_or_create_directory: fn(parent: Directory, name: String) -[FS]> 
             .Err(error) -> {
                 if error == {
                     .AlreadyExists(_) -> {}
-                    .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> { return Err(error) }
+                    .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> {
+                        return Err(error)
+                    }
                 }
                 created = false
             }
@@ -278,8 +323,16 @@ FoundationPublicationDirectory: struct {
 // Typed publication policy; defaults preserve every existing caller's 0600,
 // replace-regular-file, refuse-links behavior. Signing uses create-new or force
 // replacement of a symlink BINDING (never its referent) and public mode 0644.
-FoundationPublicationCreate: enum { Replace CreateNew }
-FoundationPublicationLinks: enum { Refuse ReplaceBinding }
+FoundationPublicationCreate: enum {
+    Replace
+    CreateNew
+}
+
+FoundationPublicationLinks: enum {
+    Refuse
+    ReplaceBinding
+}
+
 FoundationPublicationPolicy: struct {
     mode: Int{384}
     create: FoundationPublicationCreate{FoundationPublicationCreate.Replace}
@@ -290,10 +343,22 @@ FoundationPublicationPolicy: struct {
 // Phase is recorded at the producing operation, never guessed from IO text.
 // All callers share this one publisher; callers needing only IO project error.
 FoundationPublicationPhase: enum {
-    PreparePath OpenRoot OpenParent InspectDestination CreateStage
-    WriteStage SetMode SyncStage InspectStage ValidateSource
-    ValidateAuthority Rename SyncParent ValidatePublished
+    PreparePath
+    OpenRoot
+    OpenParent
+    InspectDestination
+    CreateStage
+    WriteStage
+    SetMode
+    SyncStage
+    InspectStage
+    ValidateSource
+    ValidateAuthority
+    Rename
+    SyncParent
+    ValidatePublished
 }
+
 #Error
 FoundationPublicationError: struct {
     phase: FoundationPublicationPhase
@@ -307,9 +372,11 @@ FoundationPublicationError: struct {
 // after write/fsync, before the final authority checks and descriptor-relative
 // rename; failure removes the stage. None uses the same mechanism without
 // source validation (e.g. a new lock).
-foundation_write_file_nofollow_at_root: fn(root: String, relative: String, contents: [U8], before_rename: (fn() IOError! -[FS, Env]>)?, policy: FoundationPublicationPolicy{FoundationPublicationPolicy{}}) FoundationPublicationError! -[FS, Env, Time]> {
+foundation_write_file_nofollow_at_root: fn(root: String, relative: String, contents: [U8], before_rename: (fn() -[FS, Env]> IOError!)?, policy: FoundationPublicationPolicy{FoundationPublicationPolicy{}}) FoundationPublicationError! -[FS, Env, Time]> {
     components: foundation_normal_components(true, relative) ?? return Err(FoundationPublicationError{phase: .PreparePath, error: err})
-    if components.len() == 0 -> return Err(FoundationPublicationError{phase: .PreparePath, error: foundation_io_error(true, relative, "file authority publication path is empty")})
+    if components.len() == 0 {
+        return Err(FoundationPublicationError{phase: .PreparePath, error: foundation_io_error(true, relative, "file authority publication path is empty")})
+    }
     directories := foundation_open_root_directories(root, policy.create_root) ?? return Err(FoundationPublicationError{phase: .OpenRoot, error: err})
     loop index in 0..<(components.len() - 1) {
         name: components[index]
@@ -324,11 +391,15 @@ foundation_write_file_nofollow_at_root: fn(root: String, relative: String, conte
     // Preserve absence separately from an inspection failure.
     expected_destination := FileID?{None}
     if foundation_inspect_destination(directories[leaf].handle, final_name, policy.destination_links) == {
-        .Val(identity) -> expected_destination = Val(identity)
+        .Val(identity) -> { expected_destination = Val(identity) }
         .None -> {}
-        .Err(error) -> { return Err(FoundationPublicationError{phase: .InspectDestination, error: error}) }
+        .Err(error) -> {
+            return Err(FoundationPublicationError{phase: .InspectDestination, error: error})
+        }
     }
-    if policy.create == .CreateNew && expected_destination != None -> return Err(FoundationPublicationError{phase: .InspectDestination, error: IOError.AlreadyExists(IOContext{operation: .Write, resource: Val(relative), os_code: None, cause: Val("file authority publication target already exists")})})
+    if policy.create == .CreateNew && expected_destination != None {
+        return Err(FoundationPublicationError{phase: .InspectDestination, error: IOError.AlreadyExists(IOContext{operation: .Write, resource: Val(relative), os_code: None, cause: Val("file authority publication target already exists")})})
+    }
     stamp: time.unix_ms(time.now())
     pid: sys.pid()
     loop attempt in 0..<128 {
@@ -351,10 +422,16 @@ foundation_write_file_nofollow_at_root: fn(root: String, relative: String, conte
                 foundation_ensure_directories_current(directories) ?? return Err(FoundationPublicationError{phase: .ValidatePublished, error: err})
                 published: if foundation_inspect_destination(directories[leaf].handle, final_name) == {
                     .Val(identity) -> identity
-                    .None -> { return Err(FoundationPublicationError{phase: .ValidatePublished, error: IOError.Other(IOContext{operation: .Write, resource: Val(relative), os_code: None, cause: Val("file authority publication target disappeared after rename")})}) }
-                    .Err(error) -> { return Err(FoundationPublicationError{phase: .ValidatePublished, error: error}) }
+                    .None -> {
+                        return Err(FoundationPublicationError{phase: .ValidatePublished, error: IOError.Other(IOContext{operation: .Write, resource: Val(relative), os_code: None, cause: Val("file authority publication target disappeared after rename")})})
+                    }
+                    .Err(error) -> {
+                        return Err(FoundationPublicationError{phase: .ValidatePublished, error: error})
+                    }
                 }
-                if published != staged -> return Err(FoundationPublicationError{phase: .ValidatePublished, error: IOError.Other(IOContext{operation: .Write, resource: Val(relative), os_code: None, cause: Val("file authority publication target changed after rename")})})
+                if published != staged {
+                    return Err(FoundationPublicationError{phase: .ValidatePublished, error: IOError.Other(IOContext{operation: .Write, resource: Val(relative), os_code: None, cause: Val("file authority publication target changed after rename")})})
+                }
                 return
             }
             .Err(error) -> {
@@ -391,8 +468,12 @@ FoundationFileAuthority: struct {
             }
         }
         bound: files.stat(self.path)
-        if bound.is_symlink || !bound.is_file -> return Err(IOError.Other(IOContext{operation: .Read, resource: Val(self.path), os_code: None, cause: Val("file authority input is not a regular file")}))
-        if bound.links != 1 -> return Err(IOError.Other(IOContext{operation: .Read, resource: Val(self.path), os_code: None, cause: Val("file authority input has multiple hard links")}))
+        if bound.is_symlink || !bound.is_file {
+            return Err(IOError.Other(IOContext{operation: .Read, resource: Val(self.path), os_code: None, cause: Val("file authority input is not a regular file")}))
+        }
+        if bound.links != 1 {
+            return Err(IOError.Other(IOContext{operation: .Read, resource: Val(self.path), os_code: None, cause: Val("file authority input has multiple hard links")}))
+        }
         if !foundation_same_authority_identity(self.identity, bound) {
             return Err(IOError.Other(IOContext{operation: .Read, resource: Val(self.path), os_code: None, cause: Val("file authority input moved while it was held")}))
         }
@@ -431,7 +512,9 @@ FoundationFileAuthority: struct {
     // Remove only this checked file's binding through its ORIGINAL parent.
     // Used by TUF rollback; a borrowed file authority cannot delete siblings.
     remove: fn(self, basename: String) IOError! -[FS]> {
-        if basename != files.basename(self.relative) -> return Err(foundation_io_error(true, basename, "file authority removal name does not match its held file"))
+        if basename != files.basename(self.relative) {
+            return Err(foundation_io_error(true, basename, "file authority removal name does not match its held file"))
+        }
         self.revalidate()
         self.directories[self.directories.len() - 1].handle.remove(basename)
         self.directories[self.directories.len() - 1].handle.fsync()
@@ -444,9 +527,8 @@ FoundationFileAuthority: struct {
 FoundationDirectoryAuthority: struct {
     priv directories: [FoundationPublicationDirectory]
 
-    revalidate: fn(self) IOError! -[FS]> {
-        foundation_ensure_directories_current(self.directories)
-    }
+    revalidate: fn(self) IOError! -[FS]> { foundation_ensure_directories_current(self.directories) }
+
     // RuntimePolicy keys a session's nested claims by this ORIGINAL root inode.
     identity: fn(self) -[FS]> FileID IOError! {
         self.revalidate()
@@ -454,6 +536,7 @@ FoundationDirectoryAuthority: struct {
         self.revalidate()
         Ok(info.id)
     }
+
     // Markers are opened relative to the retained parent, never a pathname.
     // The RuntimePolicy caller validates regular-file kind and marker identity.
     open_file: fn(self, name: String) -[FS]> FileReader IOError! {
@@ -463,11 +546,13 @@ FoundationDirectoryAuthority: struct {
         self.revalidate()
         Ok(reader)
     }
+
     create_exclusive: fn(self, name: String, mode: Int) -[FS]> FileWriter IOError! {
         foundation_directory_authority_name(name)
         self.revalidate()
         self.directories[self.directories.len() - 1].handle.create(name, if_exists: .Refuse, mode: Val(mode))
     }
+
     remove: fn(self, name: String) IOError! -[FS]> {
         foundation_directory_authority_name(name)
         self.revalidate()
@@ -475,6 +560,7 @@ FoundationDirectoryAuthority: struct {
         self.directories[self.directories.len() - 1].handle.fsync()
         self.revalidate()
     }
+
     // Registry clone installation: mutate only this retained parent, never
     // reopen a path for staging/rollback. Core Directory leaves remain #3593.
     entry_stat: fn(self, name: String) -[FS]> Stat IOError! {
@@ -484,6 +570,7 @@ FoundationDirectoryAuthority: struct {
         self.revalidate()
         Ok(info)
     }
+
     rename: fn(self, from: String, to: String, if_exists: RenameIfExists{.Refuse}) IOError! -[FS]> {
         foundation_directory_authority_name(from)
         foundation_directory_authority_name(to)
@@ -491,6 +578,7 @@ FoundationDirectoryAuthority: struct {
         self.directories[self.directories.len() - 1].handle.rename(from, to, if_exists: if_exists)
         self.revalidate()
     }
+
     remove_tree: fn(self, name: String) IOError! -[FS]> {
         foundation_directory_authority_name(name)
         self.revalidate()
@@ -499,14 +587,14 @@ FoundationDirectoryAuthority: struct {
         self.revalidate()
     }
 
-    path: fn(self) -> String Never! {
-        self.directories[self.directories.len() - 1].path
-    }
+    path: fn(self) -> String Never! { self.directories[self.directories.len() - 1].path }
+
     fsync: fn(self) IOError! -[FS]> {
         self.revalidate()
         self.directories[self.directories.len() - 1].handle.fsync()
         self.revalidate()
     }
+
     // The process owns a duplicate of this held directory through exec. Git
     // consumes only the child fd/cwd, never a re-opened authority pathname, so
     // the held descriptor stays the authority even if its path was swapped.
@@ -515,6 +603,7 @@ FoundationDirectoryAuthority: struct {
             files.compiler_with_process_directory(spec, self.directories[self.directories.len() - 1].handle, child_fd, as_cwd)
         }
     }
+
     child: fn(self, name: String, create: Bool{false}) -[FS]> FoundationDirectoryAuthority IOError! {
         foundation_directory_authority_name(name)
         self.revalidate()
@@ -528,6 +617,7 @@ FoundationDirectoryAuthority: struct {
         foundation_ensure_directories_current(directories)
         Ok(FoundationDirectoryAuthority{directories: directories})
     }
+
     private_child: fn(self, prefix: String) -[FS, Env, Time]> FoundationDirectoryAuthority IOError! {
         foundation_directory_authority_name(prefix)
         self.revalidate()
@@ -545,6 +635,7 @@ FoundationDirectoryAuthority: struct {
         }
         Err(IOError.AlreadyExists(IOContext{operation: .Write, resource: Val(self.path()), os_code: None, cause: Val("could not reserve a private source directory")}))
     }
+
     // Traverse and read only the retained directory handles.
     // Files are kept open through hashing; a rebound path cannot redirect bytes.
     tree_hash: fn(self, reject_hardlinks: Bool{false}) -[FS]> String IOError! {
@@ -556,7 +647,9 @@ FoundationDirectoryAuthority: struct {
         total := 0
         // Indexed: each held reader advances, so the walk writes through the list.
         loop index in 0..<rows.len() {
-            if rows[index].identity.size > MAX_TREE_FILE_BYTES || rows[index].identity.size > MAX_TREE_TOTAL_BYTES - total -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(rows[index].relative), os_code: None, cause: Val("package tree exceeds the hashing size bound")}))
+            if rows[index].identity.size > MAX_TREE_FILE_BYTES || rows[index].identity.size > MAX_TREE_TOTAL_BYTES - total {
+                return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(rows[index].relative), os_code: None, cause: Val("package tree exceeds the hashing size bound")}))
+            }
             hasher.update(rows[index].relative.bytes())
             hasher.update([U8]{0})
             length: loop shift in FOUNDATION_U64_SHIFTS -> U8{(rows[index].identity.size >> shift).bit_and(255)}
@@ -566,17 +659,22 @@ FoundationDirectoryAuthority: struct {
                 chunk: rows[index].reader.read_bytes(FOUNDATION_READ_CHUNK)
                 if chunk.len() == 0 -> break
                 actual += chunk.len()
-                if actual > rows[index].identity.size -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(rows[index].relative), os_code: None, cause: Val("package source file grew while hashing")}))
+                if actual > rows[index].identity.size {
+                    return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(rows[index].relative), os_code: None, cause: Val("package source file grew while hashing")}))
+                }
                 hasher.update(chunk)
             }
             after: rows[index].reader.stat()
-            if actual != rows[index].identity.size || !foundation_same_file_identity(rows[index].identity, after) -> return Err(IOError.Other(IOContext{operation: .Read, resource: Val(rows[index].relative), os_code: None, cause: Val("package source file changed while hashing")}))
+            if actual != rows[index].identity.size || !foundation_same_file_identity(rows[index].identity, after) {
+                return Err(IOError.Other(IOContext{operation: .Read, resource: Val(rows[index].relative), os_code: None, cause: Val("package source file changed while hashing")}))
+            }
             total += actual
         }
         self.revalidate()
         digest: hasher.finalize_hex()
         Ok("sha256-{digest}")
     }
+
     copy_tree_from: fn(self, source: FoundationDirectoryAuthority, reject_hardlinks: Bool{true}) IOError! -[FS]> {
         source.revalidate()
         self.revalidate()
@@ -585,13 +683,17 @@ FoundationDirectoryAuthority: struct {
         self.revalidate()
     }
 }
+
 foundation_open_directory_authority: fn(root: String, create: Bool{false}) -[FS, Env]> FoundationDirectoryAuthority IOError! {
     directories: foundation_open_root_directories(root, create)
     Ok(FoundationDirectoryAuthority{directories: directories})
 }
+
 foundation_directory_authority_name: fn(name: String) IOError! {
     components: foundation_normal_components(true, name)
-    if components.len() != 1 || components[0] != name -> return Err(foundation_io_error(true, name, "directory authority operation needs one normal basename"))
+    if components.len() != 1 || components[0] != name {
+        return Err(foundation_io_error(true, name, "directory authority operation needs one normal basename"))
+    }
 }
 
 // The source-store excludes these names whether they name files or directories,
@@ -599,26 +701,35 @@ foundation_directory_authority_name: fn(name: String) IOError! {
 foundation_source_tree_ignored: fn(name: String) -> Bool Never! {
     name.starts_with(".") || name == "build" || name == "target"
 }
+
 FoundationHeldTreeFile: struct {
     relative: String
     reader: FileReader
     identity: Stat
 }
+
 foundation_held_tree_names: fn(directory: Directory) -[FS]> [String] IOError! {
     out := [String]{}
     loop entry in directory.list() {
-        if !entry.name_is_unicode -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(entry.path), os_code: None, cause: Val("package tree contains a non-UTF-8 name")}))
+        if !entry.name_is_unicode {
+            return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(entry.path), os_code: None, cause: Val("package tree contains a non-UTF-8 name")}))
+        }
         out.push(entry.name)
     }
     Ok(out)
 }
+
 foundation_collect_held_tree: fn(directory: Directory, relative: String, rows: &[FoundationHeldTreeFile], depth: Int, reject_hardlinks: Bool) IOError! -[FS]> {
-    if depth > MAX_TREE_DEPTH -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(relative), os_code: None, cause: Val("package tree exceeds the maximum directory depth")}))
+    if depth > MAX_TREE_DEPTH {
+        return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(relative), os_code: None, cause: Val("package tree exceeds the maximum directory depth")}))
+    }
     names: foundation_held_tree_names(directory)
     loop name in names {
         path: if relative == "" -> name else -> files.join(relative, name)
         info: directory.entry_stat(name)
-        if info.is_symlink -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("package tree contains a symlink")}))
+        if info.is_symlink {
+            return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("package tree contains a symlink")}))
+        }
         if info.is_dir {
             child: directory.open_directory(name)
             if foundation_source_tree_ignored(name) -> next
@@ -626,16 +737,24 @@ foundation_collect_held_tree: fn(directory: Directory, relative: String, rows: &
         } else if info.is_file {
             reader: directory.open(name)
             opened: reader.stat()
-            if !opened.is_file -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("package tree contains a special entry")}))
-            if reject_hardlinks && opened.links > 1 -> return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("refusing multiply linked source file")}))
+            if !opened.is_file {
+                return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("package tree contains a special entry")}))
+            }
+            if reject_hardlinks && opened.links > 1 {
+                return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("refusing multiply linked source file")}))
+            }
             if foundation_source_tree_ignored(name) -> next
-            if rows.len() >= MAX_TREE_FILES -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("package tree contains too many files")}))
+            if rows.len() >= MAX_TREE_FILES {
+                return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("package tree contains too many files")}))
+            }
             rows.push(FoundationHeldTreeFile{relative: path, reader: reader, identity: opened})
         } else {
             return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("package tree contains a special entry")}))
         }
     }
-    if names != foundation_held_tree_names(directory) -> return Err(IOError.Other(IOContext{operation: .Read, resource: Val(relative), os_code: None, cause: Val("package source changed while inspecting directory")}))
+    if names != foundation_held_tree_names(directory) {
+        return Err(IOError.Other(IOContext{operation: .Read, resource: Val(relative), os_code: None, cause: Val("package source changed while inspecting directory")}))
+    }
 }
 
 foundation_copy_held_tree: fn(source: Directory, destination: Directory, relative: String, reject_hardlinks: Bool) IOError! -[FS]> {
@@ -643,7 +762,9 @@ foundation_copy_held_tree: fn(source: Directory, destination: Directory, relativ
     loop name in names {
         path: if relative == "" -> name else -> files.join(relative, name)
         info: source.entry_stat(name)
-        if info.is_symlink -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("package tree contains a symlink")}))
+        if info.is_symlink {
+            return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("package tree contains a symlink")}))
+        }
         if info.is_dir {
             child_source: source.open_directory(name)
             if foundation_source_tree_ignored(name) -> next
@@ -654,16 +775,24 @@ foundation_copy_held_tree: fn(source: Directory, destination: Directory, relativ
         } else if info.is_file {
             reader := source.open(name)
             opened: reader.stat()
-            if !opened.is_file -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("package tree contains a special entry")}))
-            if reject_hardlinks && opened.links > 1 -> return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("refusing multiply linked source file")}))
+            if !opened.is_file {
+                return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("package tree contains a special entry")}))
+            }
+            if reject_hardlinks && opened.links > 1 {
+                return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("refusing multiply linked source file")}))
+            }
             if foundation_source_tree_ignored(name) -> next
             actual: foundation_copy_held_reader(reader, destination, name)
-            if actual != opened.size || !foundation_same_file_identity(opened, reader.stat()) -> return Err(IOError.Other(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("package source file changed while copying")}))
+            if actual != opened.size || !foundation_same_file_identity(opened, reader.stat()) {
+                return Err(IOError.Other(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("package source file changed while copying")}))
+            }
         } else {
             return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("package tree contains a special entry")}))
         }
     }
-    if names != foundation_held_tree_names(source) -> return Err(IOError.Other(IOContext{operation: .Read, resource: Val(relative), os_code: None, cause: Val("package source changed while copying directory")}))
+    if names != foundation_held_tree_names(source) {
+        return Err(IOError.Other(IOContext{operation: .Read, resource: Val(relative), os_code: None, cause: Val("package source changed while copying directory")}))
+    }
 }
 
 foundation_copy_held_reader: fn(reader: &FileReader, destination: Directory, name: String) -[FS]> Int IOError! {
@@ -708,7 +837,9 @@ foundation_resolve_path_ancestors: fn(path: String, create: Bool{false}) -[FS, E
                 foundation_open_directory_authority(missing, true)
                 missing
             }
-            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> { return Err(error) }
+            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
+                return Err(error)
+            }
         }
     }
     Ok(files.join(parent, name))
@@ -720,7 +851,9 @@ foundation_resolve_path_ancestors: fn(path: String, create: Bool{false}) -[FS, E
 foundation_open_file_authority: fn(root: String, relative: String) -[FS, Env]> FoundationFileAuthority IOError! {
     components: foundation_normal_components(false, relative)
     directories := foundation_open_root_directories(root)
-    if components.len() == 0 -> return Err(foundation_io_error(false, relative, "file authority path is empty"))
+    if components.len() == 0 {
+        return Err(foundation_io_error(false, relative, "file authority path is empty"))
+    }
     loop index in 0..<(components.len() - 1) {
         name: components[index]
         parent_index: directories.len() - 1
@@ -735,11 +868,17 @@ foundation_open_file_authority: fn(root: String, relative: String) -[FS, Env]> F
     // a directory or special file gets the same refusal as the descriptor
     // check below, and a link fails its no-follow open.
     entry: directories[leaf].handle.entry_stat(final_name)
-    if !entry.is_symlink && !entry.is_file -> return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: Val(relative), os_code: None, cause: Val("file authority input is not a regular file")}))
+    if !entry.is_symlink && !entry.is_file {
+        return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: Val(relative), os_code: None, cause: Val("file authority input is not a regular file")}))
+    }
     handle: directories[leaf].handle.open(final_name)
     opened: handle.stat()
-    if !opened.is_file -> return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: Val(relative), os_code: None, cause: Val("file authority input is not a regular file")}))
-    if opened.links != 1 -> return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: Val(relative), os_code: None, cause: Val("file authority input has multiple hard links")}))
+    if !opened.is_file {
+        return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: Val(relative), os_code: None, cause: Val("file authority input is not a regular file")}))
+    }
+    if opened.links != 1 {
+        return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: Val(relative), os_code: None, cause: Val("file authority input has multiple hard links")}))
+    }
     path: files.join(directories[leaf].path, final_name)
     Ok(FoundationFileAuthority{directories: directories, handle: handle, relative: relative, path: path, identity: opened})
 }
@@ -747,7 +886,9 @@ foundation_open_file_authority: fn(root: String, relative: String) -[FS, Env]> F
 // Rust `read_file_nofollow_at_root`: one regular file below `root`, read from
 // the held no-follow handle and bounded by `max_bytes`.
 foundation_read_file_nofollow_at_root: fn(root: String, relative: String, max_bytes: Int) -[FS, Env]> [U8] IOError! {
-    if max_bytes > MAX_TREE_FILE_BYTES -> return Err(foundation_io_error(false, relative, "file read bound exceeds the tree hashing bound"))
+    if max_bytes > MAX_TREE_FILE_BYTES {
+        return Err(foundation_io_error(false, relative, "file read bound exceeds the tree hashing bound"))
+    }
     source := foundation_open_file_authority(root, relative)
     source.read_bounded(max_bytes)
 }
@@ -765,28 +906,38 @@ foundation_same_directory: fn(path_stat: Stat, held: Stat) -> Bool Never! {
 
 // One staging/rename path; the callback is fallible production validation,
 // not a notification hook. All failures here are pre-publication.
-foundation_stage_and_rename: fn(directories: [FoundationPublicationDirectory], parent: Directory, writer: &FileWriter, temporary: String, final_name: String, contents: [U8], expected_destination: FileID?, before_rename: (fn() IOError! -[FS, Env]>)?, policy: FoundationPublicationPolicy{FoundationPublicationPolicy{}}) -[FS, Env]> FileID FoundationPublicationError! {
+foundation_stage_and_rename: fn(directories: [FoundationPublicationDirectory], parent: Directory, writer: &FileWriter, temporary: String, final_name: String, contents: [U8], expected_destination: FileID?, before_rename: (fn() -[FS, Env]> IOError!)?, policy: FoundationPublicationPolicy{FoundationPublicationPolicy{}}) -[FS, Env]> FileID FoundationPublicationError! {
     writer.write_bytes(contents) ?? return Err(FoundationPublicationError{phase: .WriteStage, error: err})
     // #3593: permissions are applied to the HELD writer, never a pathname.
     // The stage starts owner-only even when its final public mode is 0644.
     writer.set_mode(policy.mode) ?? return Err(FoundationPublicationError{phase: .SetMode, error: err})
     writer.fsync() ?? return Err(FoundationPublicationError{phase: .SyncStage, error: err})
     staged: writer.stat() ?? return Err(FoundationPublicationError{phase: .InspectStage, error: err})
-    if staged.links != 1 -> return Err(FoundationPublicationError{phase: .InspectStage, error: IOError.PermissionDenied(IOContext{operation: .Write, resource: Val(temporary), os_code: None, cause: Val("file authority temporary has multiple hard links")})})
-    if staged.mode.bit_and(4095) != policy.mode -> return Err(FoundationPublicationError{phase: .InspectStage, error: IOError.PermissionDenied(IOContext{operation: .Write, resource: Val(temporary), os_code: None, cause: Val("file authority temporary has incorrect permissions")})})
-    if before_rename == .Val(validate) -> validate() ?? return Err(FoundationPublicationError{phase: .ValidateSource, error: err})
+    if staged.links != 1 {
+        return Err(FoundationPublicationError{phase: .InspectStage, error: IOError.PermissionDenied(IOContext{operation: .Write, resource: Val(temporary), os_code: None, cause: Val("file authority temporary has multiple hard links")})})
+    }
+    if staged.mode.bit_and(4095) != policy.mode {
+        return Err(FoundationPublicationError{phase: .InspectStage, error: IOError.PermissionDenied(IOContext{operation: .Write, resource: Val(temporary), os_code: None, cause: Val("file authority temporary has incorrect permissions")})})
+    }
+    if before_rename == .Val(validate) {
+        validate() ?? return Err(FoundationPublicationError{phase: .ValidateSource, error: err})
+    }
     foundation_ensure_directories_current(directories) ?? return Err(FoundationPublicationError{phase: .ValidateAuthority, error: err})
     destination := FileID?{None}
     if foundation_inspect_destination(parent, final_name, policy.destination_links) == {
-        .Val(identity) -> destination = Val(identity)
+        .Val(identity) -> { destination = Val(identity) }
         .None -> {}
-        .Err(error) -> { return Err(FoundationPublicationError{phase: .InspectDestination, error: error}) }
+        .Err(error) -> {
+            return Err(FoundationPublicationError{phase: .InspectDestination, error: error})
+        }
     }
     if destination != expected_destination {
         // An immutable CreateNew contender appeared after staging. Report the
         // typed collision so callers can authenticate identical/conflict bytes;
         // ordinary replacement and every authority/durability refusal stay Other.
-        if policy.create == .CreateNew && expected_destination == None && destination != None -> return Err(FoundationPublicationError{phase: .InspectDestination, error: IOError.AlreadyExists(IOContext{operation: .Write, resource: Val(final_name), os_code: None, cause: Val("file authority publication target already exists")})})
+        if policy.create == .CreateNew && expected_destination == None && destination != None {
+            return Err(FoundationPublicationError{phase: .InspectDestination, error: IOError.AlreadyExists(IOContext{operation: .Write, resource: Val(final_name), os_code: None, cause: Val("file authority publication target already exists")})})
+        }
         return Err(FoundationPublicationError{phase: .InspectDestination, error: IOError.Other(IOContext{operation: .Write, resource: Val(final_name), os_code: None, cause: Val("file authority publication target changed while staging")})})
     }
     if policy.create == .CreateNew {
@@ -805,11 +956,17 @@ foundation_inspect_destination: fn(parent: Directory, name: String, links: Found
     if parent.entry_stat(name) == {
         .Ok(stat) -> {
             if stat.is_symlink && links == .ReplaceBinding {
-                if stat.links != 1 -> return Err(IOError.PermissionDenied(IOContext{operation: .Write, resource: Val(name), os_code: None, cause: Val("file authority publication target has multiple hard links")}))
+                if stat.links != 1 {
+                    return Err(IOError.PermissionDenied(IOContext{operation: .Write, resource: Val(name), os_code: None, cause: Val("file authority publication target has multiple hard links")}))
+                }
                 return Ok(Val(stat.id))
             }
-            if stat.is_symlink || !stat.is_file -> return Err(IOError.PermissionDenied(IOContext{operation: .Write, resource: Val(name), os_code: None, cause: Val("file authority publication target is not a regular file")}))
-            if stat.links != 1 -> return Err(IOError.PermissionDenied(IOContext{operation: .Write, resource: Val(name), os_code: None, cause: Val("file authority publication target has multiple hard links")}))
+            if stat.is_symlink || !stat.is_file {
+                return Err(IOError.PermissionDenied(IOContext{operation: .Write, resource: Val(name), os_code: None, cause: Val("file authority publication target is not a regular file")}))
+            }
+            if stat.links != 1 {
+                return Err(IOError.PermissionDenied(IOContext{operation: .Write, resource: Val(name), os_code: None, cause: Val("file authority publication target has multiple hard links")}))
+            }
             Ok(Val(stat.id))
         }
         .Err(error) -> if error == {
@@ -822,7 +979,9 @@ foundation_inspect_destination: fn(parent: Directory, name: String, links: Found
 // One no-follow root walk shared by reads and writes.
 foundation_open_root_directories: fn(root: String, create: Bool{false}) -[FS, Env]> [FoundationPublicationDirectory] IOError! {
     loop part in root.split("/") {
-        if part == ".." -> return Err(foundation_io_error(true, root, "file authority root must not contain parent components"))
+        if part == ".." {
+            return Err(foundation_io_error(true, root, "file authority root must not contain parent components"))
+        }
     }
     absolute: files.absolute(root)
     directories := [FoundationPublicationDirectory]{FoundationPublicationDirectory{handle: files.open_directory("/"), path: "/", publication_parent: false}}
@@ -869,11 +1028,15 @@ foundation_ensure_directories_current: fn(directories: [FoundationPublicationDir
 // Rust rooted_authority::normal_components: the plain components of a
 // relative path; `..` and absolute paths are refused.
 foundation_normal_components: fn(write: Bool, relative: String) -> [String] IOError! {
-    if relative.starts_with("/") -> return Err(foundation_io_error(write, relative, "file authority path must be relative and normalized"))
+    if relative.starts_with("/") {
+        return Err(foundation_io_error(write, relative, "file authority path must be relative and normalized"))
+    }
     components := [String]{}
     loop part in relative.split("/") {
         if part == "" || part == "." -> next
-        if part == ".." -> return Err(foundation_io_error(write, relative, "file authority path must be relative and normalized"))
+        if part == ".." {
+            return Err(foundation_io_error(write, relative, "file authority path must be relative and normalized"))
+        }
         components.push(part)
     }
     Ok(components)
@@ -909,9 +1072,13 @@ foundation_io_error_with_cause: fn(error: IOError, cause: String) -> IOError Nev
 // Core Directory open/list/unlink leaves remain #3593; no pathname fallback.
 foundation_remove_held_tree: fn(parent: Directory, child: String) IOError! -[FS]> {
     directory: parent.open_directory(child) ?? {
-        if err == .NotFound(_) -> return
+        if err == .NotFound(_) {
+            return
+        }
         parent.remove(child) ?? {
-            if err == .NotFound(_) -> return
+            if err == .NotFound(_) {
+                return
+            }
             return Err(err)
         }
         return

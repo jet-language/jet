@@ -67,7 +67,9 @@ s3_truth_example_paths: fn(text: String) -> [String] {
             if end + width > raw.len() -> break
             if width == 1 {
                 b: raw[end]
-                if !s3_truth_ascii_word_byte(b) && b != (U8{46}) && b != (U8{45}) && b != (U8{47}) -> break
+                if !s3_truth_ascii_word_byte(b) && b != (U8{46}) && b != (U8{45}) && b != (U8{47}) {
+                    break
+                }
             } else {
                 ch: policy_slice_raw(raw, end, end + width)
                 if !s3_truth_text.is_alphabetic(ch) && !s3_truth_text.is_numeric(ch) -> break
@@ -145,9 +147,15 @@ s3_truth_retired_senses: fn(text: String) -> [String] {
     loop raw in text.lines() {
         line: s3_truth_parse.lower(raw)
         called: line.contains("called") || line.contains("as a")
-        if called && line.contains("codec") && s3_truth_contains_word(line, "stream") -> codec = true
-        if called && line.contains("event") && s3_truth_contains_word(line, "stream") -> event = true
-        if called && line.contains("collecting loop") && line.contains("yielding") -> collecting = true
+        if called && line.contains("codec") && s3_truth_contains_word(line, "stream") {
+            codec = true
+        }
+        if called && line.contains("event") && s3_truth_contains_word(line, "stream") {
+            event = true
+        }
+        if called && line.contains("collecting loop") && line.contains("yielding") {
+            collecting = true
+        }
     }
     // Original sort_unstable + dedup order and unique labels.
     result := [String]{}
@@ -205,7 +213,9 @@ s3_guard_vocabulary_senses: fn() {
     loop i in 0..<labels.len() {
         found: s3_truth_retired_senses(hostile[i])
         matched := false
-        loop label in found { if label == labels[i] -> matched = true }
+        loop label in found {
+            if label == labels[i] -> matched = true
+        }
         assert(matched, "hostile fixture must be rejected: {labels[i]}")
     }
     markdown: s3_truth_md_paths("Docs")
@@ -222,7 +232,9 @@ s3_guard_vocabulary_senses: fn() {
             if candidate != docs_root && !candidate.starts_with("{docs_root}/") -> next
             if !candidate.ends_with(".md") || candidate.ends_with("/.md") -> next
             // Dated evidence keeps its words as recorded (retirement_ratchet.jet).
-            if guards_dated_evidence("Docs{policy_slice_bytes(candidate, docs_root.count_bytes(), candidate.count_bytes())}") -> next
+            if guards_dated_evidence("Docs{policy_slice_bytes(candidate, docs_root.count_bytes(), candidate.count_bytes())}") {
+                next
+            }
             if seen.get(candidate) ?? false -> next
             _: seen.add(candidate.copy(), true)
             targets.push(candidate)
@@ -236,8 +248,12 @@ s3_guard_vocabulary_senses: fn() {
             if retired.len() > 0 -> violations.push("{target}: retired senses: {retired}")
             has_word := false
             words: [String]{"stream", "reader", "event", "collecting loop"}
-            loop word in words { if s3_truth_contains_word(text, word) -> has_word = true }
-            if has_word && !text.contains("vocabulary.md") -> violations.push("{target}: uses Jet vocabulary without linking Docs/spec/vocabulary.md")
+            loop word in words {
+                if s3_truth_contains_word(text, word) -> has_word = true
+            }
+            if has_word && !text.contains("vocabulary.md") {
+                violations.push("{target}: uses Jet vocabulary without linking Docs/spec/vocabulary.md")
+            }
         }
     }
     assert(violations.len() == 0, "linked Markdown targets must use the vocabulary page and current senses: {violations}")
@@ -249,9 +265,7 @@ s3_guard_vocabulary_senses: fn() {
 }
 
 // Port of tests/truthfulness.rs:1110-1173, including the Tower-record fallback.
-s3_truth_decision_id_byte: fn(b: U8) -> Bool Never! {
-    s3_truth_ascii_word_byte(b) || b == (U8{45})
-}
+s3_truth_decision_id_byte: fn(b: U8) -> Bool Never! { s3_truth_ascii_word_byte(b) || b == (U8{45}) }
 
 s3_truth_exact_decision_token: fn(text: String, authority: String) -> Bool {
     raw: text.bytes()
@@ -267,11 +281,11 @@ s3_truth_exact_decision_token: fn(text: String, authority: String) -> Bool {
         if end < raw.len() -> after = s3_truth_decision_id_byte(raw[end])
         if !before && !after -> return true
         // The original match_indices is non-overlapping.
-        if length > 0 {
-            offset = end
-        } else {
+        if length > 0 -> offset = end else {
             offset = found + 1
-            loop offset < raw.len() && raw[offset] >= (U8{128}) && raw[offset] < (U8{192}) -> offset += 1
+            loop offset < raw.len() && raw[offset] >= (U8{128}) && raw[offset] < (U8{192}) {
+                offset += 1
+            }
         }
     }
     false

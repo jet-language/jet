@@ -3,7 +3,10 @@
 // publishes one complete canonical serialization atomically.
 use {
     jetpack_foundation.[
-        REF_CHANNEL_MARKER, REF_PROVIDER_AT, REF_SOURCE_JETPACK, UNIFIED_LOCK_FILE,
+        REF_CHANNEL_MARKER,
+        REF_PROVIDER_AT,
+        REF_SOURCE_JETPACK,
+        UNIFIED_LOCK_FILE,
         foundation_write_file_nofollow_at_root,
     ]
     jet_foundation.[RuntimeLayer]
@@ -32,8 +35,12 @@ pkg_lock_read_text: fn(path: String) -[FS]> String LockError! {
             has_newline: end < chunk.len()
             content_length: end - offset
             take_length: if has_newline -> content_length + 1 else -> content_length
-            if line_length + content_length > PKG_MAX_LOCK_VALUE_BYTES -> return Err(LockError.Invalid(pkg_lock_oversized_value_message(line_number)))
-            if raw.len() + take_length > PKG_MAX_LOCK_BYTES -> return Err(LockError.Invalid(pkg_lock_oversized_file_message()))
+            if line_length + content_length > PKG_MAX_LOCK_VALUE_BYTES {
+                return Err(LockError.Invalid(pkg_lock_oversized_value_message(line_number)))
+            }
+            if raw.len() + take_length > PKG_MAX_LOCK_BYTES {
+                return Err(LockError.Invalid(pkg_lock_oversized_file_message()))
+            }
             loop index in offset..<(offset + take_length) -> raw.push(chunk[index])
             if {
                 has_newline -> {
@@ -109,7 +116,9 @@ pkg_lock_load_or_empty: fn(project_root: String) -[FS]> LockFile {
 // rejected lock never replaces the last good lock or leaves scratch bytes.
 pkg_lock_write_atomically: fn(project_root: String, contents: [U8]) LockError! -[FS, Env, Time]> {
     path: pkg_lock_file_path(project_root)
-    if contents.len() > PKG_MAX_LOCK_BYTES -> return Err(LockError.Invalid("internal error: refusing to write project lock `{path}`: serialized lock is {contents.len()} bytes, over the 1 MiB limit"))
+    if contents.len() > PKG_MAX_LOCK_BYTES {
+        return Err(LockError.Invalid("internal error: refusing to write project lock `{path}`: serialized lock is {contents.len()} bytes, over the 1 MiB limit"))
+    }
     if foundation_write_file_nofollow_at_root(project_root, UNIFIED_LOCK_FILE, contents, None) == {
         .Ok(_) -> {}
         .Err(error) -> return Err(LockError.Invalid("could not atomically publish project lock `{path}`: {error.error}"))
@@ -120,7 +129,7 @@ pkg_lock_write_atomically: fn(project_root: String, contents: [U8]) LockError! -
 // write is reported, never a silently successful update.
 pkg_lock_publish_or_report: fn(project_root: String, contents: String) -[FS, Env, Time, IO]> {
     if pkg_lock_write_atomically(project_root, contents.bytes()) == {
-        .Err(error) -> eprint(error.message())
+        .Err(error) -> { eprint(error.message()) }
         .Ok(_) -> {}
     }
 }
@@ -187,8 +196,12 @@ pkg_lock_envelope_output_is: fn(package: LockedPackage, output_hash: String) -> 
 pkg_lock_record_nix_realization: fn(project_root: String, name: String, version: String, reference_input: String, output: String, nix_closure: NixClosureRecord, envelope: LockEnvelope) LockError! -[FS, Env, Exec, Time, Time.Wait]> {
     nix_closure.validate()
     envelope.validate_nix_catalog()
-    if nix_closure.output != output || envelope.output_hash != output -> return Err(LockError.Invalid("Nix closure and envelope outputs must match the realized output digest"))
-    if envelope.platform != nix_closure.system -> return Err(LockError.Invalid("Nix closure system does not match the lock envelope platform"))
+    if nix_closure.output != output || envelope.output_hash != output {
+        return Err(LockError.Invalid("Nix closure and envelope outputs must match the realized output digest"))
+    }
+    if envelope.platform != nix_closure.system {
+        return Err(LockError.Invalid("Nix closure system does not match the lock envelope platform"))
+    }
     reference: pkg_canonical_locked_ref(reference_input)
     lock := pkg_lock_load_for_update(project_root)
     source_name: pkg_lock_reference_source_name(reference)
@@ -208,7 +221,9 @@ pkg_lock_record_nix_realization: fn(project_root: String, name: String, version:
             .Nix(locked_reference, locked_output) -> {
                 if locked_reference != reference || locked_output != output -> next
                 locked_closure: package.nix_closure ?? next
-                if locked_closure != nix_closure || !pkg_lock_envelope_output_is(package, envelope.output_hash) -> next
+                if locked_closure != nix_closure || !pkg_lock_envelope_output_is(package, envelope.output_hash) {
+                    next
+                }
                 existing_receipt = package.receipt
                 break
             }
@@ -257,14 +272,20 @@ pkg_lock_record_foreign_realization: fn(project_root: String, name: String, vers
 // later bridge build replaces the earlier bridge records and leaves
 // user/provider records untouched.
 pkg_lock_record_rust_bridge: fn(project_root: String, bridge_identity: String, packages: [LockedPackage]) LockError! -[FS, Env, Exec, Time, Time.Wait]> {
-    if bridge_identity.trim() == "" -> return Err(LockError.Invalid("Rust bridge lock identity is empty"))
-    if packages.len() == 0 -> return
+    if bridge_identity.trim() == "" {
+        return Err(LockError.Invalid("Rust bridge lock identity is empty"))
+    }
+    if packages.len() == 0 {
+        return
+    }
     lock := pkg_lock_load_for_update(project_root)
     lock.version = PKG_LOCK_VERSION
     kept := [LockedPackage]{}
     loop package in lock.packages {
         if package.provenance_build() == {
-            .Val(build) -> if build.starts_with(PKG_RUST_BRIDGE_PROVENANCE_PREFIX) -> next
+            .Val(build) -> {
+                if build.starts_with(PKG_RUST_BRIDGE_PROVENANCE_PREFIX) -> next
+            }
             .None -> {}
         }
         kept.push(package)
@@ -310,13 +331,17 @@ pkg_lock_locked_nix_package_strict: fn(project_root: String, reference_input: St
             .Nix(locked_reference, output) -> {
                 if locked_reference != reference -> next
                 closure: package.nix_closure ?? return Err(LockError.Invalid("Nix package is missing its portable closure record"))
-                if closure.output != output -> return Err(LockError.Invalid("Nix source output disagrees with its closure record"))
+                if closure.output != output {
+                    return Err(LockError.Invalid("Nix source output disagrees with its closure record"))
+                }
                 envelope := package.envelope ?? LockEnvelope.empty()
                 if package.envelope == None {
                     envelope.output_hash = closure.output
                     envelope.platform = closure.system
                 }
-                if envelope.output_hash != closure.output || envelope.platform != closure.system -> return Err(LockError.Invalid("Nix envelope identity disagrees with its closure record"))
+                if envelope.output_hash != closure.output || envelope.platform != closure.system {
+                    return Err(LockError.Invalid("Nix envelope identity disagrees with its closure record"))
+                }
                 envelope.validate_nix_catalog()
                 return Ok(Val((closure: closure, envelope: envelope, name: package.name, version: package.version)))
             }

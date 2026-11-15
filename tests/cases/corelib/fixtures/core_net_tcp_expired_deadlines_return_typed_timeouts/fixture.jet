@@ -1,4 +1,5 @@
 package: { name: "tcp-expired-deadlines" authority: { allow: [Net, Time] } }
+
 use {
     net: core.net
     tasks: core.tasks
@@ -20,7 +21,7 @@ run: fn() {
 
     first := net.tcp_connect(address) ?? panic("first connect")
     if first.read_bytes(1, deadline: 0ms) == {
-        .Ok(_) -> print("unexpected first read")
+        .Ok(_) -> { print("unexpected first read") }
         .Err(error) -> print(net.error_message(error))
     }
     first.close() ?? panic("first close")
@@ -28,7 +29,7 @@ run: fn() {
     second := net.tcp_connect(address) ?? panic("second connect")
     #Deadline(0ms) {
         if second.read_bytes(1) == {
-            .Ok(_) -> print("unexpected second read")
+            .Ok(_) -> { print("unexpected second read") }
             .Err(error) -> print(net.error_message(error))
         }
     }

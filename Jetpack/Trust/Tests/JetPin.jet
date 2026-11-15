@@ -2,13 +2,25 @@
 // set the process-global toolchain object variable restore it before return.
 use {
     jetpack_foundation.[
-        BINARY_NAME, PACKAGE_FILE, TOOLCHAIN_EXEC_MARKER_ENV, TOOLCHAIN_OBJECT_ENV,
+        BINARY_NAME,
+        PACKAGE_FILE,
+        TOOLCHAIN_EXEC_MARKER_ENV,
+        TOOLCHAIN_OBJECT_ENV,
     ]
     jetpack_trust.[
-        TrustError, trust_pin_channel_of, trust_pin_classify_channel, trust_pin_decide,
-        trust_pin_identity_preparse, trust_pin_lock_write_diagnostic, trust_pin_locked_toolchain,
-        trust_pin_move, trust_pin_realize_jet_binary, trust_pin_report, trust_pin_resolve_channel,
-        trust_pin_toolchain_record, trust_pin_write_init,
+        TrustError,
+        trust_pin_channel_of,
+        trust_pin_classify_channel,
+        trust_pin_decide,
+        trust_pin_identity_preparse,
+        trust_pin_lock_write_diagnostic,
+        trust_pin_locked_toolchain,
+        trust_pin_move,
+        trust_pin_realize_jet_binary,
+        trust_pin_report,
+        trust_pin_resolve_channel,
+        trust_pin_toolchain_record,
+        trust_pin_write_init,
     ]
     jet_foundation.[diagnostic_display_name]
     jet_pkg_model.[pkg_lock_record_toolchain]
@@ -33,11 +45,9 @@ trust_pin_test_manifest: fn(root: String, text: String) {
 trust_pin_test_code: fn(result: String TrustError!) -> String {
     if result == {
         .Ok(_) -> panic("expected a pin diagnostic")
-        .Err(error) -> {
-            if error == {
-                .Pin(diagnostic) -> diagnostic.code
-                .EmptyInputName | .DuplicateInput(_) | .ConflictingInput(_, _) | .MissingFollows(_, _) | .FollowsCycle(_) | .MissingRevision(_) | .InvalidAssignment(_) | .StaleSemanticLock(_) | .IO(_) | .Rejected(_) | .Grant(_) | .Secret(_) | .Root(_) -> panic("expected a pin diagnostic, got {error.message()}")
-            }
+        .Err(error) -> if error == {
+            .Pin(diagnostic) -> diagnostic.code
+            .EmptyInputName | .DuplicateInput(_) | .ConflictingInput(_, _) | .MissingFollows(_, _) | .FollowsCycle(_) | .MissingRevision(_) | .InvalidAssignment(_) | .StaleSemanticLock(_) | .IO(_) | .Rejected(_) | .Grant(_) | .Secret(_) | .Root(_) -> panic("expected a pin diagnostic, got {error.message()}")
         }
     }
 }
@@ -166,7 +176,9 @@ TRUST_PIN_E1224_SNAPSHOT: "Error [jet.PackageFileOperationFailed]: Couldn't writ
                     assert_eq(diagnostic.code, "E1251")
                     assert(diagnostic.what.contains("a0.4.0"))
                 }
-                .EmptyInputName | .DuplicateInput(_) | .ConflictingInput(_, _) | .MissingFollows(_, _) | .FollowsCycle(_) | .MissingRevision(_) | .InvalidAssignment(_) | .StaleSemanticLock(_) | .IO(_) | .Rejected(_) | .Grant(_) | .Secret(_) | .Root(_) -> panic("expected a pin diagnostic")
+                .EmptyInputName | .DuplicateInput(_) | .ConflictingInput(_, _) | .MissingFollows(_, _) | .FollowsCycle(_) | .MissingRevision(_) | .InvalidAssignment(_) | .StaleSemanticLock(_) | .IO(_) | .Rejected(_) | .Grant(_) | .Secret(_) | .Root(_) -> {
+                    panic("expected a pin diagnostic")
+                }
             }
         }
         .Ok(_) -> panic("expected E1251")

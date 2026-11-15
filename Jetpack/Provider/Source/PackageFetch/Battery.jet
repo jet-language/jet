@@ -14,7 +14,9 @@ pkg_fetch_toolchain_root: fn(start: String) -[FS, Env]> String? Never! {
     if sys.get(ENV_JET_TOOLCHAIN_ROOT) == .Val(root) -> return Val(root)
     current := start
     loop {
-        if files.is_dir(files.join(current, "Core")) && files.is_dir(files.join(current, "Compiler/Prelude")) -> return Val(current)
+        if files.is_dir(files.join(current, "Core")) && files.is_dir(files.join(current, "Compiler/Prelude")) {
+            return Val(current)
+        }
         parent: files.dirname(current)
         if parent == "" || parent == current -> return None
         current = parent
@@ -78,6 +80,8 @@ pkg_fetch_locked_battery: fn(root: String, package: LockedPackage, requirement: 
     snapshot: pkg_source_snapshot_tree(directory) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
     shipped: snapshot.content_hash
     close(snapshot)
-    if package.source_hash() != Val(shipped) -> return Err(pkg_fetch_locked_error(name, "this toolchain's `{name}` battery is not the one `.jet/lock` pins"))
+    if package.source_hash() != Val(shipped) {
+        return Err(pkg_fetch_locked_error(name, "this toolchain's `{name}` battery is not the one `.jet/lock` pins"))
+    }
     pkg_fetch_locked_source(name, package, Val(directory))
 }

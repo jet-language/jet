@@ -29,14 +29,22 @@ use {
 }
 
 USAGE: "usage: allocator.mjs OUTPUT O0_JET_OBJECT O1_JET_OBJECT REMAINING_NATIVE_STATICLIB CPU"
+
 ROUNDS: 7
+
 EXPECTED: "4000024000000\n"
+
 JET_ENV: "Tools/agent/JetEnv.jet"
+
 ARMS: [String]{"O0", "O1", "Rust"}
+
 // spawnSync's maxBuffer for the build steps (16 MiB) and the timed runs (1 MiB).
 STEP_OUTPUT: 16777216
+
 RUN_OUTPUT: 1048576
+
 RUN_TIMEOUT_SECONDS: 300
+
 // The Linux signal names by number, as node names a stopped child's signal.
 SIGNALS: [String]{"", "SIGHUP", "SIGINT", "SIGQUIT", "SIGILL", "SIGTRAP", "SIGABRT", "SIGBUS", "SIGFPE", "SIGKILL", "SIGUSR1", "SIGSEGV", "SIGUSR2", "SIGPIPE", "SIGALRM", "SIGTERM", "SIGSTKFLT", "SIGCHLD", "SIGCONT", "SIGSTOP", "SIGTSTP", "SIGTTIN", "SIGTTOU", "SIGURG", "SIGXCPU", "SIGXFSZ", "SIGVTALRM", "SIGPROF", "SIGWINCH", "SIGIO", "SIGPWR", "SIGSYS"}
 
@@ -158,17 +166,23 @@ Ended: struct {
 
 run: fn() -> Never Err! {
     args: process.args()
-    if args.len() < 5 || !regex.full_match(Regex{"[0-9]+(?:[-,][0-9]+)*"}, args[4]) -> return Err(USAGE)
+    if args.len() < 5 || !regex.full_match(Regex{"[0-9]+(?:[-,][0-9]+)*"}, args[4]) {
+        return Err(USAGE)
+    }
     cpu: args[4]
     unset: ["PQ_JOB", "FINAL_E2_SHA", "COMPOSED_SHA"].filter(fn(key) { process.env_get_or(key, "") == "" })
-    if unset.len() > 0 -> return Err("missing {unset[0]}; run in the held O1 runtime epoch measure job")
+    if unset.len() > 0 {
+        return Err("missing {unset[0]}; run in the held O1 runtime epoch measure job")
+    }
     source: files.dirname(files.dirname(sys.executable()))
     tree: files.normalize(files.join(source, "../../.."))
     out: files.resolve(args[0])
     o0: files.resolve(args[1])
     o1: files.resolve(args[2])
     remaining: files.resolve(args[3])
-    if files.exists(files.join(out, "result.json")) || files.exists(files.join(out, "samples.jsonl")) -> return Err("refusing to overwrite cell evidence")
+    if files.exists(files.join(out, "result.json")) || files.exists(files.join(out, "samples.jsonl")) {
+        return Err("refusing to overwrite cell evidence")
+    }
     files.create_dir_all(out)
     pins: Pins{
         cell: "runtime-allocator-64B",
@@ -193,7 +207,10 @@ run: fn() -> Never Err! {
     }
     linked := [Bool]{}
     if built.all(fn(ok) { ok }) {
-        loop link in [(arm: "O0", libraries: [o0, remaining]), (arm: "O1", libraries: [o1, remaining]), (arm: "Rust", libraries: [rust])] -> linked.push(step(steps, out, tree, "link-{link.arm}", ["cc", "-fno-lto", driver].concat(link.libraries).concat(["-lpthread", "-ldl", "-lm", "-o", files.join(out, link.arm)])))
+        loop link in
+            [(arm: "O0", libraries: [o0, remaining]), (arm: "O1", libraries: [o1, remaining]), (arm: "Rust", libraries: [rust])] {
+            linked.push(step(steps, out, tree, "link-{link.arm}", ["cc", "-fno-lto", driver].concat(link.libraries).concat(["-lpthread", "-ldl", "-lm", "-o", files.join(out, link.arm)])))
+        }
     }
     files.write(files.join(out, "build.json"), "{json.stringify(Build{pins: pins.copy(), steps: steps}, 2)}\n")  // copy: result.json repeats the pins
     if !built.concat(linked).all(fn(ok) { ok }) -> process.exit(1)
@@ -209,7 +226,9 @@ run: fn() -> Never Err! {
             elapsed: started.elapsed().ns
             ok: ended.rc == Val(0) && ended.output == EXPECTED && ended.errors == ""
             files.append_all(samples, "{json.stringify(Sample{arm: arms[k].name.copy(), round: round + 1, cpu: cpu.copy(), wall_ns: "{elapsed}", rc: ended.rc.encode(), signal: ended.signal.encode(), stdout: ended.output.copy(), stderr: ended.errors.copy(), error: ended.error.copy(), verdict: if ok -> "PASS" else -> "WRONG"}, 0)}\n")  // copy: the arm and the run keep their text
-            if ok -> arms[k].samples.push(Float.from_int(elapsed) / 1000000.0) else -> arms[k].verdict = "WRONG"
+            if ok -> arms[k].samples.push(Float.from_int(elapsed) / 1000000.0) else {
+                arms[k].verdict = "WRONG"
+            }
         }
     }
     measured := [Measured]{}
@@ -250,8 +269,12 @@ step: fn(steps: &[Step], out: String, tree: String, name: String, argv: [String]
 // that kept it from starting or ending (node's `spawnSync PROGRAM CODE`).
 spawn: fn(spec: ProcessSpec, program: String) -[Exec, Time.Wait]> Ended Never! {
     receipt: spec.run() ?? return Ended{rc: None, signal: None, error: Val("spawnSync {program} {error_code(err)}"), output: "", errors: ""}
-    if receipt.timed_out -> return Ended{rc: None, signal: Val("SIGTERM"), error: Val("spawnSync {program} ETIMEDOUT"), output: receipt.output, errors: receipt.errors}
-    if receipt.signal == .Val(number) -> return Ended{rc: None, signal: Val(SIGNALS.get(number) ?? "SIG{number}"), error: None, output: receipt.output, errors: receipt.errors}
+    if receipt.timed_out {
+        return Ended{rc: None, signal: Val("SIGTERM"), error: Val("spawnSync {program} ETIMEDOUT"), output: receipt.output, errors: receipt.errors}
+    }
+    if receipt.signal == .Val(number) {
+        return Ended{rc: None, signal: Val(SIGNALS.get(number) ?? "SIG{number}"), error: None, output: receipt.output, errors: receipt.errors}
+    }
     Ended{rc: Val(receipt.code), signal: None, error: None, output: receipt.output, errors: receipt.errors}
 }
 

@@ -18,7 +18,6 @@
 // handlers), the entry, the stdout flush and status 0. The decision reads
 // only the built module, so every tier that builds the executable from it
 // makes the same one.
-
 use jet_foundation.[name_rows_value]
 
 // The runtime routes whose behaviour doesn't depend on the process root:
@@ -182,11 +181,17 @@ ir_entry_root_need: fn(m: IRModule) -> String Never! {
         if f.asm != None -> next
         loop at in 0..<f.op.len() {
             if f.op[at] == .CallRuntime {
-                if !free[f.a[at]] -> return "`{f.name}` calls the runtime route `{m.names[f.a[at]]}`"
+                if !free[f.a[at]] {
+                    return "`{f.name}` calls the runtime route `{m.names[f.a[at]]}`"
+                }
                 next
             }
-            if f.op[at] != .Call || f.a[at] < 0 || (f.a[at] != poll && f.a[at] != trap && f.a[at] != turn) -> next
-            if at + 1 >= f.op.len() || f.op[at + 1] != .If || f.a[at + 1] != f.dst[at] || f.b[at + 1] >= 0 -> return "`{f.name}` has a stop point without its stop edge"
+            if f.op[at] != .Call || f.a[at] < 0 || (f.a[at] != poll && f.a[at] != trap && f.a[at] != turn) {
+                next
+            }
+            if at + 1 >= f.op.len() || f.op[at + 1] != .If || f.a[at + 1] != f.dst[at] || f.b[at + 1] >= 0 {
+                return "`{f.name}` has a stop point without its stop edge"
+            }
             edges.push(id)
             edges.push(at + 2)
             edges.push(f.c[at + 1])
@@ -211,7 +216,10 @@ ir_entry_root_need: fn(m: IRModule) -> String Never! {
 // routine's function (-1: it drops nothing a process exit could observe,
 // -2: its routine is missing), and per function whether running it does
 // nothing a process exit could observe.
-IREntryQuiet: struct { glue: [Int], functions: [Bool] }
+IREntryQuiet: struct {
+    glue: [Int]
+    functions: [Bool]
+}
 
 // Whether instruction `at` of `f` (on a stop edge, or in a function one
 // reaches) does nothing a process exit could observe: it is no indirect
@@ -266,7 +274,9 @@ ir_entry_quiet_functions: fn(m: IRModule, seeds: [Int]) -> IREntryQuiet Never! {
         members.push(id)
         loop at in 0..<f.op.len() {
             if f.op[at] == .Call -> work.push(f.a[at])
-            if f.op[at] == .Drop && q.glue[f.slot_type[f.a[at]]] >= 0 -> work.push(q.glue[f.slot_type[f.a[at]]])
+            if f.op[at] == .Drop && q.glue[f.slot_type[f.a[at]]] >= 0 {
+                work.push(q.glue[f.slot_type[f.a[at]]])
+            }
         }
     }
     changed := true

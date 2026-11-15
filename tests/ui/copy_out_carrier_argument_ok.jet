@@ -7,6 +7,7 @@ Res: struct {
         close: fn(&&self) { print("close {self.name}") }
     }
 }
+
 peek: fn(r: Res?) -> Int {
     if r == .Val(inner) -> return inner.name.len()
     0
@@ -17,9 +18,7 @@ peek_result: fn(r: Res Err!) -> Int {
     0
 }
 
-wrap: fn(env: Res) -> Int {
-    peek(Val(env)) + peek_result(Ok(env))
-}
+wrap: fn(env: Res) -> Int { peek(Val(env)) + peek_result(Ok(env)) }
 
 run: fn() {
     owned := Res{name: "kept"}

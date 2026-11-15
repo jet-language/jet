@@ -25,7 +25,7 @@ RecipeBuildContext: struct {
     output_root: String
     // Realized `Pkg` build-tool deps: tool name -> absolute executable path.
     // An `exec` step may only name a tool present here (E1238).
-    tools: [String: String]
+    tools: [String:String]
     // Where locked fetches cache their bytes (keyed by sha256).
     fetch_cache: String
     // `--offline`: no would-be network fetch may touch the wire.
@@ -52,7 +52,9 @@ RunReport: struct {
     }
 
     add_effect: fn(&self, name: String) Never! {
-        if self.effects.contains(name) -> return
+        if self.effects.contains(name) {
+            return
+        }
         self.effects.push(name.copy())
         self.effects.sort()
     }
@@ -74,10 +76,14 @@ recipe_validate: fn(recipe: BuildRecipe, ctx: RecipeBuildContext) RecipeDiagnost
     loop step in recipe.steps {
         if step == {
             .Fetch(url, sha256) -> {
-                if recipe_credentialed_fetch_url(url) -> return Err(RecipeDiagnostic.e1236_credentialed_url())
-                if !recipe_valid_sha256(sha256) -> return Err(RecipeDiagnostic.e1236_invalid_hash(url, sha256))
+                if recipe_credentialed_fetch_url(url) {
+                    return Err(RecipeDiagnostic.e1236_credentialed_url())
+                }
+                if !recipe_valid_sha256(sha256) {
+                    return Err(RecipeDiagnostic.e1236_invalid_hash(url, sha256))
+                }
             }
-            .Exec(tool, _) -> recipe_realized_tool(ctx.tools, tool)
+            .Exec(tool, _) -> { recipe_realized_tool(ctx.tools, tool) }
             .Install(src, dest) -> {
                 recipe_confined_source(ctx.source_dir, src, false)
                 recipe_confined_dest(ctx.output_root, dest)
@@ -94,7 +100,7 @@ recipe_validate: fn(recipe: BuildRecipe, ctx: RecipeBuildContext) RecipeDiagnost
 // step becomes a typed action under one package target; toolchain,
 // capability and environment allowlists are declared on each action so the
 // action key is the complete cache identity.
-recipe_lower_to_plan: fn(recipe: BuildRecipe, package: String, tools: [String: String]) -[FS, Env, Rand]> HermeticBuildPlan RecipeDiagnostic! {
+recipe_lower_to_plan: fn(recipe: BuildRecipe, package: String, tools: [String:String]) -[FS, Env, Rand]> HermeticBuildPlan RecipeDiagnostic! {
     recipe_validate_finite(recipe, package)
     host: PlatformKey.host()
     plan_ctx := HermeticBuildContext.new()
@@ -104,7 +110,9 @@ recipe_lower_to_plan: fn(recipe: BuildRecipe, package: String, tools: [String: S
         step: recipe.steps[index]
         spec := if step == {
             .Fetch(url, sha256) -> {
-                if recipe_credentialed_fetch_url(url) -> return Err(RecipeDiagnostic.e1236_credentialed_url())
+                if recipe_credentialed_fetch_url(url) {
+                    return Err(RecipeDiagnostic.e1236_credentialed_url())
+                }
                 ActionSpec.new([String]{"jet-fetch", url, sha256})
                     .with_kind(.Generic)
                     .with_inputs([String]{"."})
@@ -131,32 +139,28 @@ recipe_lower_to_plan: fn(recipe: BuildRecipe, package: String, tools: [String: S
                     .with_label("recipe.step", "exec")
                     .with_label("recipe.tool", tool)
             }
-            .Install(src, dest) -> {
-                ActionSpec.new([String]{"jet-install", src, dest})
-                    .with_kind(.SourceArchive)
-                    .with_inputs([String]{src})
-                    .with_cap(.FS)
-                    .with_env("SOURCE_DATE_EPOCH", "0")
-                    .with_env_allowlist([String]{"SOURCE_DATE_EPOCH"})
-                    .with_helper_version("jet-install", RECIPE_HELPER_VERSION)
-                    .with_label("recipe.step", "install")
-                    .with_label("install.dest", dest)
-            }
-            .InstallTree(src, dest) -> {
-                ActionSpec.new([String]{"jet-install-tree", src, dest})
-                    .with_kind(.SourceArchive)
-                    .with_inputs([String]{src})
-                    .with_cap(.FS)
-                    .with_env("SOURCE_DATE_EPOCH", "0")
-                    .with_env_allowlist([String]{"SOURCE_DATE_EPOCH"})
-                    .with_helper_version("jet-install-tree", RECIPE_HELPER_VERSION)
-                    .with_label("recipe.step", "install-tree")
-                    .with_label("install.dest", dest)
-            }
+            .Install(src, dest) -> ActionSpec.new([String]{"jet-install", src, dest})
+                .with_kind(.SourceArchive)
+                .with_inputs([String]{src})
+                .with_cap(.FS)
+                .with_env("SOURCE_DATE_EPOCH", "0")
+                .with_env_allowlist([String]{"SOURCE_DATE_EPOCH"})
+                .with_helper_version("jet-install", RECIPE_HELPER_VERSION)
+                .with_label("recipe.step", "install")
+                .with_label("install.dest", dest)
+            .InstallTree(src, dest) -> ActionSpec.new([String]{"jet-install-tree", src, dest})
+                .with_kind(.SourceArchive)
+                .with_inputs([String]{src})
+                .with_cap(.FS)
+                .with_env("SOURCE_DATE_EPOCH", "0")
+                .with_env_allowlist([String]{"SOURCE_DATE_EPOCH"})
+                .with_helper_version("jet-install-tree", RECIPE_HELPER_VERSION)
+                .with_label("recipe.step", "install-tree")
+                .with_label("install.dest", dest)
         }
         outputs := [String]{recipe_step_marker(package, index)}
         if step == {
-            .Install(_, dest) -> outputs.push(recipe_declared_output_path(package, dest))
+            .Install(_, dest) -> { outputs.push(recipe_declared_output_path(package, dest)) }
             .InstallTree(_, dest) -> outputs.push(recipe_declared_output_path(package, dest))
             .Fetch(_, _) | .Exec(_, _) -> {}
         }
@@ -189,13 +193,15 @@ recipe_validate_finite: fn(recipe: BuildRecipe, package: String) RecipeDiagnosti
     if package == "" || package == "." || package == ".." || pkg_text_has_control(package) || package.contains("/") || package.contains("\\") {
         return Err(RecipeDiagnostic.e1238_plan("recipe package name is not one safe path segment"))
     }
-    if recipe.steps.len() == 0 -> return Err(RecipeDiagnostic.e1238_plan("recipe must declare at least one finite staged action"))
+    if recipe.steps.len() == 0 {
+        return Err(RecipeDiagnostic.e1238_plan("recipe must declare at least one finite staged action"))
+    }
     root: recipe_normalize(".jet/recipe/{package}/outputs")
     declared := [RecipeDeclaredOutput]{}
     loop index in 0..<recipe.steps.len() {
         target: if recipe.steps[index] == {
-            .Install(_, dest) -> RecipeOutputTarget{dest, is_tree: false}
-            .InstallTree(_, dest) -> RecipeOutputTarget{dest, is_tree: true}
+            .Install(_, dest) -> RecipeOutputTarget{dest: dest, is_tree: false}
+            .InstallTree(_, dest) -> RecipeOutputTarget{dest: dest, is_tree: true}
             .Fetch(_, _) | .Exec(_, _) -> next
         }
         output: recipe_declared_output_path(package, target.dest)
@@ -208,7 +214,7 @@ recipe_validate_finite: fn(recipe: BuildRecipe, package: String) RecipeDiagnosti
                 return Err(RecipeDiagnostic.e1238_output_conflict(previous.output, previous.step, output, step_name))
             }
         }
-        declared.push(RecipeDeclaredOutput{output, step: step_name})
+        declared.push(RecipeDeclaredOutput{output: output, step: step_name})
     }
 }
 
@@ -232,7 +238,9 @@ recipe_declared_output_path: fn(package: String, dest: String) -> String RecipeD
     }
     root: ".jet/recipe/{package}/outputs"
     normalized: recipe_normalize("{root}/{dest}")
-    if !recipe_path_within(normalized, recipe_normalize(root)) -> return Err(RecipeDiagnostic.e1237(dest))
+    if !recipe_path_within(normalized, recipe_normalize(root)) {
+        return Err(RecipeDiagnostic.e1237(dest))
+    }
     Ok(normalized)
 }
 
@@ -246,7 +254,9 @@ recipe_output_paths_overlap: fn(left: String, right: String) -> Bool Never! {
 recipe_plan_fingerprint: fn(plan: HermeticBuildPlan) -> String RecipeDiagnostic! {
     if plan.execution_model() == {
         .Ok(_) -> {}
-        .Err(error) -> { return Err(RecipeDiagnostic.new("E1238", "could not admit lowered BuildPlan execution graph", error.debug_text(), "remove cyclic or incomplete stage dependencies before caching.")) }
+        .Err(error) -> {
+            return Err(RecipeDiagnostic.new("E1238", "could not admit lowered BuildPlan execution graph", error.debug_text(), "remove cyclic or incomplete stage dependencies before caching."))
+        }
     }
     Ok(build_complete_recipe_fingerprint(plan))
 }
@@ -259,9 +269,13 @@ recipe_admitted_step_order: fn(plan: HermeticBuildPlan, step_count: Int) -> [Int
     loop _ in 0..<step_count -> seen.push(false)
     order := [Int]{}
     loop stage in model.stages {
-        if stage.actions.len() != 1 -> return Err(RecipeDiagnostic.e1238_plan("recipe stage graph must admit exactly one action per finite stage"))
+        if stage.actions.len() != 1 {
+            return Err(RecipeDiagnostic.e1238_plan("recipe stage graph must admit exactly one action per finite stage"))
+        }
         action_id: stage.actions[0]
-        if action_id < 0 || action_id >= plan.actions.len() -> return Err(RecipeDiagnostic.e1238_plan("recipe stage graph refers to an unknown action"))
+        if action_id < 0 || action_id >= plan.actions.len() {
+            return Err(RecipeDiagnostic.e1238_plan("recipe stage graph refers to an unknown action"))
+        }
         action: plan.actions[action_id]
         index_text: action.labels.get("stage.index") ?? return Err(RecipeDiagnostic.e1238_plan("recipe action is missing its finite stage index"))
         index: recipe_parse_count(index_text) ?? return Err(RecipeDiagnostic.e1238_plan("recipe action is missing its finite stage index"))
@@ -270,7 +284,9 @@ recipe_admitted_step_order: fn(plan: HermeticBuildPlan, step_count: Int) -> [Int
         if bound != step_count || index != stage.index || index >= step_count {
             return Err(RecipeDiagnostic.e1238_plan("recipe action stage facts do not match the finite recipe bound"))
         }
-        if seen[index] -> return Err(RecipeDiagnostic.e1238_plan("recipe stage graph repeats one action identity"))
+        if seen[index] {
+            return Err(RecipeDiagnostic.e1238_plan("recipe stage graph repeats one action identity"))
+        }
         seen[index] = true
         order.push(index)
     }

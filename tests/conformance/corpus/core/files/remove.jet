@@ -8,9 +8,11 @@ run: fn() {
     root: testing.temp_dir("files-remove")
     path: Path.from(root).join("fixture.txt")
     files.write(path, "fixture") ?? panic("seed")
-    print((fn() {
-        files.remove(path)
-        true
-    })())
+    print(
+        (fn() {
+            files.remove(path)
+            true
+        })(),
+    )
     files.remove_all(root) ?? panic("cleanup")
 }

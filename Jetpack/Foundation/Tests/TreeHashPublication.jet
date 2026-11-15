@@ -6,11 +6,18 @@
 // publication fallback and no fake Directory/FileWriter provider.
 use {
     jetpack_foundation.[
-        FoundationPublicationCreate, FoundationPublicationLinks, FoundationPublicationPhase,
-        FoundationPublicationPolicy, MAX_TREE_FILE_BYTES, StreamingSHA256,
-        foundation_open_directory_authority, foundation_open_file_authority,
-        foundation_open_or_create_directory, foundation_open_root_directories,
-        foundation_remove_held_tree, foundation_stage_and_rename,
+        FoundationPublicationCreate,
+        FoundationPublicationLinks,
+        FoundationPublicationPhase,
+        FoundationPublicationPolicy,
+        MAX_TREE_FILE_BYTES,
+        StreamingSHA256,
+        foundation_open_directory_authority,
+        foundation_open_file_authority,
+        foundation_open_or_create_directory,
+        foundation_open_root_directories,
+        foundation_remove_held_tree,
+        foundation_stage_and_rename,
         foundation_write_file_nofollow_at_root,
     ]
     jet_foundation.[sha256_bytes, sha256_hex_bytes]
@@ -29,12 +36,14 @@ foundation_publication_test_root: fn(label: String) -[FS, Env]> String Never! {
 
 foundation_publication_test_no_temporary: fn(parent: String) Never! -[FS]> {
     entries: files.list_dir(parent) ?? panic("list publication parent")
-    loop entry in entries -> assert(!entry.name.starts_with(".jet-lock-"), "temporary leaked: {entry.path}")
+    loop entry in entries {
+        assert(!entry.name.starts_with(".jet-lock-"), "temporary leaked: {entry.path}")
+    }
 }
 
-foundation_publication_test_reject: fn(root: String, relative: String, validate: (fn() IOError! -[FS, Env]>)?) Never! -[FS, Env, Time]> {
+foundation_publication_test_reject: fn(root: String, relative: String, validate: (fn() -[FS, Env]> IOError!)?) Never! -[FS, Env, Time]> {
     if foundation_write_file_nofollow_at_root(root, relative, "edited".bytes(), validate) == {
-        .Ok(_) -> panic("unsafe publication succeeded")
+        .Ok(_) -> { panic("unsafe publication succeeded") }
         .Err(_) -> {}
     }
 }
@@ -98,8 +107,10 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     files.write(path, "original") ?? panic("write input")
     source := foundation_open_file_authority(root, "input.jet") ?? panic("hold input")
     if source.read_bounded(7) == {
-        .Ok(_) -> panic("oversize rooted read must refuse")
-        .Err(error) -> foundation_publication_test_same_io_error(error, IOError.InvalidInput(IOContext{operation: .Read, resource: Val("input.jet"), os_code: None, cause: Val("file exceeds its read bound")}))
+        .Ok(_) -> { panic("oversize rooted read must refuse") }
+        .Err(error) -> {
+            foundation_publication_test_same_io_error(error, IOError.InvalidInput(IOContext{operation: .Read, resource: Val("input.jet"), os_code: None, cause: Val("file exceeds its read bound")}))
+        }
     }
     assert_eq(source.read_bounded(8) ?? panic("rooted exact-bound read"), "original".bytes())
     files.remove_all(root) ?? panic("cleanup")
@@ -117,7 +128,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
         return Err(IOError.Other(IOContext{operation: .Write, resource: Val(held_path), os_code: None, cause: Val("held source rejected")}))
     })
     if foundation_write_file_nofollow_at_root(root, "input.jet", "edited".bytes(), validate) == {
-        .Ok(_) -> panic("validation refusal must prevent rename")
+        .Ok(_) -> { panic("validation refusal must prevent rename") }
         .Err(error) -> {
             assert_eq(error.phase, FoundationPublicationPhase.ValidateSource)
             foundation_publication_test_same_io_error(error.error, IOError.Other(IOContext{operation: .Write, resource: Val(path), os_code: None, cause: Val("held source rejected")}))
@@ -143,7 +154,9 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
 }
 
 #Test("publication reservation failure does not validate or replace the destination") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     root: foundation_publication_test_root("stage-reservation-failure")
     path: files.join(root, "input.jet")
     files.write(path, "original") ?? panic("write original")
@@ -159,7 +172,9 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
 }
 
 #Test("publication stage write and fsync failures precede validation and rename") {
-    if !sys.is_linux() -> return
+    if !sys.is_linux() {
+        return
+    }
     root: foundation_publication_test_root("stage-write-failure")
     path: files.join(root, "input.jet")
     files.write(path, "original") ?? panic("write original")
@@ -173,7 +188,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
         writer := files.create(device) ?? panic("open kernel device")
         validate: foundation_publication_test_validator(fn() { assert(false, "validation must not run after a stage failure") })
         if foundation_stage_and_rename(directories, directories[leaf].handle, writer, ".jet-lock-write-failure", "input.jet", "edited".bytes(), Val(expected.id), validate) == {
-            .Ok(_) -> panic("a failed stage must not reach rename")
+            .Ok(_) -> { panic("a failed stage must not reach rename") }
             .Err(_) -> {}
         }
     }
@@ -200,8 +215,10 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
         source.revalidate()
     })
     if foundation_write_file_nofollow_at_root(root, "input.jet", "edited".bytes(), validate) == {
-        .Ok(_) -> panic("a mutated held source must not publish")
-        .Err(error) -> foundation_publication_test_same_io_error(error.error, IOError.Other(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("file authority input changed while it was held")}))
+        .Ok(_) -> { panic("a mutated held source must not publish") }
+        .Err(error) -> {
+            foundation_publication_test_same_io_error(error.error, IOError.Other(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("file authority input changed while it was held")}))
+        }
     }
     assert_eq(files.read(path) ?? panic("read concurrent edit"), "concurrent unrelated source edit")
     assert_eq((files.stat(path) ?? panic("stat mutated source")).id, original.id)
@@ -226,8 +243,10 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
         source.revalidate()
     })
     if foundation_write_file_nofollow_at_root(root, "input.jet", "edited".bytes(), validate) == {
-        .Ok(_) -> panic("a replaced source must not approve publication")
-        .Err(error) -> foundation_publication_test_same_io_error(error.error, IOError.Other(IOContext{operation: .Read, resource: Val(source_path), os_code: None, cause: Val("file authority input moved while it was held")}))
+        .Ok(_) -> { panic("a replaced source must not approve publication") }
+        .Err(error) -> {
+            foundation_publication_test_same_io_error(error.error, IOError.Other(IOContext{operation: .Read, resource: Val(source_path), os_code: None, cause: Val("file authority input moved while it was held")}))
+        }
     }
     assert_eq(files.read(destination) ?? panic("read old destination"), "old destination")
     foundation_publication_test_no_temporary(root)
@@ -247,10 +266,14 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     files.rename(path, backup) ?? panic("move source to backup")
     assert_eq((files.stat(backup) ?? panic("stat backup")).id, original.id)
     if foundation_write_file_nofollow_at_root(root, "input.jet", "edited".bytes(), Val(fn() { source.revalidate() })) == {
-        .Ok(_) -> panic("a source renamed away must not publish at its old path")
-        .Err(error) -> if error.error == {
-            .NotFound(_) -> {}
-            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> panic("the renamed-away source path must be refused as missing: {error}")
+        .Ok(_) -> { panic("a source renamed away must not publish at its old path") }
+        .Err(error) -> {
+            if error.error == {
+                .NotFound(_) -> {}
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
+                    panic("the renamed-away source path must be refused as missing: {error}")
+                }
+            }
         }
     }
     assert(!files.exists(path))
@@ -269,8 +292,10 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     files.rename(path, backup) ?? panic("move source to backup")
     files.write(path, "original") ?? panic("write same-byte replacement")
     if foundation_write_file_nofollow_at_root(root, "input.jet", "edited".bytes(), Val(fn() { source.revalidate() })) == {
-        .Ok(_) -> panic("a replacement at the source path must not publish")
-        .Err(error) -> foundation_publication_test_same_io_error(error.error, IOError.Other(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("file authority input moved while it was held")}))
+        .Ok(_) -> { panic("a replacement at the source path must not publish") }
+        .Err(error) -> {
+            foundation_publication_test_same_io_error(error.error, IOError.Other(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("file authority input moved while it was held")}))
+        }
     }
     assert_eq(files.read(path) ?? panic("read replacement"), "original")
     assert((files.stat(path) ?? panic("stat replacement")).id != original.id)
@@ -294,7 +319,9 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
 }
 
 #Test("publication refuses a nested parent swap and cleans through its held parent") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     root: foundation_publication_test_root("parent-swap")
     nested: files.join(root, "nested")
     moved: files.join(root, "nested-old")
@@ -345,7 +372,9 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
 }
 
 #Test("publication refuses a swapped ancestor above its root and cleans the detached stage") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     fixture: foundation_publication_test_root("above-root-swap")
     ancestor: files.join(fixture, "container")
     root: files.join(ancestor, "project")
@@ -374,7 +403,9 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
 }
 
 #Test("publication stage refuses multiply linked temporary before validation and rename") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     root: foundation_publication_test_root("hardlinked-stage")
     path: files.join(root, "input.jet")
     files.write(path, "original") ?? panic("write original")
@@ -385,7 +416,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     files.hard_link(files.join(root, ".jet-lock-hardlinked-stage"), files.join(root, "stage-alias")) ?? panic("link stage")
     validate: foundation_publication_test_validator(fn() { assert(false, "hardlinked stage must be refused before validation") })
     if foundation_stage_and_rename(directories, directories[leaf].handle, writer, ".jet-lock-hardlinked-stage", "input.jet", "edited".bytes(), Val(expected.id), validate) == {
-        .Ok(_) -> panic("hardlinked stage must not publish")
+        .Ok(_) -> { panic("hardlinked stage must not publish") }
         .Err(failure) -> {
             assert(failure.phase == .InspectStage)
             foundation_publication_test_same_io_error(failure.error, IOError.PermissionDenied(IOContext{operation: .Write, resource: Val(".jet-lock-hardlinked-stage"), os_code: None, cause: Val("file authority temporary has multiple hard links")}))
@@ -399,7 +430,9 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
 }
 
 #Test("publication refuses symlink destinations parents and roots without following them") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     root: foundation_publication_test_root("nofollow")
     outside: files.join(root, "outside")
     files.create_dir_all(outside) ?? panic("create outside")
@@ -423,7 +456,9 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
 }
 
 #Test("publication refuses hardlinked and nonregular destinations") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     root: foundation_publication_test_root("hardlink")
     original: files.join(root, "original.jet")
     path: files.join(root, "input.jet")
@@ -445,9 +480,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     root: foundation_publication_test_root("invalid-path")
     validate: foundation_publication_test_validator(fn() { assert(false, "invalid path must not validate") })
     relatives: [String]{"", "/input.jet", "../input.jet", "nested/../../input.jet"}
-    loop relative in relatives {
-        foundation_publication_test_reject(root, relative, validate)
-    }
+    loop relative in relatives { foundation_publication_test_reject(root, relative, validate) }
     assert_eq((files.list_dir(root) ?? panic("list empty root")).len(), 0)
     files.remove_all(root) ?? panic("cleanup")
 }
@@ -455,7 +488,9 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
 // The held file is no longer the object bound at its path once a link replaces
 // it.
 #Test("rooted read rejects final path swap") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     fixture: foundation_publication_test_root("rooted-read-final-swap")
     root: files.join(fixture, "root")
     outside: files.join(fixture, "outside")
@@ -467,7 +502,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     files.remove(payload) ?? panic("remove payload")
     files.symlink(outside, payload) ?? panic("link payload outside")
     if authority.read_bounded(MAX_TREE_FILE_BYTES) == {
-        .Ok(_) -> panic("a swapped final component must not be read")
+        .Ok(_) -> { panic("a swapped final component must not be read") }
         .Err(_) -> {}
     }
     files.remove(payload) ?? panic("unlink payload")
@@ -475,7 +510,9 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
 }
 
 #Test("rooted read rejects ancestor path swap") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     fixture: foundation_publication_test_root("rooted-read-ancestor-swap")
     root: files.join(fixture, "root")
     outside: files.join(fixture, "outside")
@@ -488,7 +525,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     files.rename(nested, files.join(root, "nested-old")) ?? panic("move nested")
     files.symlink(outside, nested) ?? panic("link nested outside")
     if authority.read_bounded(MAX_TREE_FILE_BYTES) == {
-        .Ok(_) -> panic("a swapped ancestor must not be read")
+        .Ok(_) -> { panic("a swapped ancestor must not be read") }
         .Err(_) -> {}
     }
     files.remove(nested) ?? panic("unlink nested")
@@ -496,7 +533,9 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
 }
 
 #Test("rooted read rejects multiply linked input") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     fixture: foundation_publication_test_root("rooted-read-hardlink")
     root: files.join(fixture, "root")
     outside: files.join(fixture, "outside")
@@ -504,7 +543,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     files.write(outside, "outside\n") ?? panic("write outside")
     files.hard_link(outside, files.join(root, "payload.txt")) ?? panic("hardlink payload")
     if foundation_open_file_authority(root, "payload.txt") == {
-        .Ok(_) -> panic("a multiply linked input must not open")
+        .Ok(_) -> { panic("a multiply linked input must not open") }
         .Err(_) -> {}
     }
     files.remove_all(fixture) ?? panic("cleanup")
@@ -518,6 +557,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     assert_eq(policy.destination_links, FoundationPublicationLinks.Refuse)
     assert(!policy.create_root)
 }
+
 #Test("publication create-new never overwrites an existing destination") {
     root: foundation_publication_test_root("create-new")
     path: files.join(root, "seed")
@@ -534,6 +574,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     foundation_publication_test_no_temporary(root)
     files.remove_all(root) ?? panic("cleanup")
 }
+
 #Test("publication public mode is set on staged descriptor before validation") {
     root: foundation_publication_test_root("public-mode")
     policy: FoundationPublicationPolicy{mode: 420}
@@ -554,6 +595,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     foundation_publication_test_no_temporary(root)
     files.remove_all(root) ?? panic("cleanup")
 }
+
 #Test("publication force policy replaces link binding without following target") {
     root: foundation_publication_test_root("replace-link")
     target: files.join(root, "target")
@@ -567,6 +609,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     foundation_publication_test_no_temporary(root)
     files.remove_all(root) ?? panic("cleanup")
 }
+
 #Test("publication create-new refuses competing destination made after staging") {
     root: foundation_publication_test_root("create-new-race")
     path: files.join(root, "seed")
@@ -597,6 +640,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     assert_eq(files.read(files.join(root, "sibling")) ?? panic("sibling read"), "keep")
     files.remove_all(root) ?? panic("cleanup")
 }
+
 #Test("file authority removal refuses replaced held source") {
     root: foundation_publication_test_root("remove-replaced")
     path: files.join(root, "input")
@@ -611,6 +655,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     assert_eq(files.read(path) ?? panic("replacement read"), "replacement")
     files.remove_all(root) ?? panic("cleanup")
 }
+
 #Test("directory authority creates missing root with one protected chain and reserves exclusive locks") {
     fixture: foundation_publication_test_root("directory-lock")
     root: files.join(fixture, "new/nested")
@@ -619,13 +664,14 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     writer.write_bytes("lock".bytes()) ?? panic("write lock")
     writer.fsync() ?? panic("fsync lock")
     if authority.create_exclusive("checkpoint.lock", 384) == {
-        .Err(error) -> assert(error == .AlreadyExists(_))
+        .Err(error) -> { assert(error == .AlreadyExists(_)) }
         .Ok(_) -> panic("exclusive lock replaced")
     }
     authority.remove("checkpoint.lock") ?? panic("remove lock")
     assert(!files.exists(files.join(root, "checkpoint.lock")))
     files.remove_all(fixture) ?? panic("cleanup")
 }
+
 #Test("directory authority refuses moved ancestors before removing a lock") {
     fixture: foundation_publication_test_root("directory-moved")
     root: files.join(fixture, "root")
@@ -679,7 +725,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     collisions: [String]{"ordinary", "linked"}
     loop name in collisions {
         if foundation_open_or_create_directory(parent, name) == {
-            .Ok(_) -> panic("non-directory or link opened as authority")
+            .Ok(_) -> { panic("non-directory or link opened as authority") }
             .Err(_) -> {}
         }
     }
@@ -709,7 +755,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
         return Err(primary)
     })
     if foundation_write_file_nofollow_at_root(root, "input", "edited".bytes(), validate) == {
-        .Ok(_) -> panic("validation failure published")
+        .Ok(_) -> { panic("validation failure published") }
         .Err(error) -> {
             assert_eq(error.phase, FoundationPublicationPhase.ValidateSource)
             foundation_publication_test_same_io_error(error.error, IOError.Other(IOContext{operation: .Write, resource: Val(path), os_code: None, cause: Val("primary validation refusal")}))
@@ -742,7 +788,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
         return Err(primary)
     })
     if foundation_write_file_nofollow_at_root(root, "input", "edited".bytes(), validate) == {
-        .Ok(_) -> panic("validation failure published")
+        .Ok(_) -> { panic("validation failure published") }
         .Err(error) -> {
             assert_eq(error.phase, FoundationPublicationPhase.ValidateSource)
             foundation_publication_test_same_io_error(error.error, IOError.Other(IOContext{operation: .Write, resource: Val(root), os_code: None, cause: Val("primary missing-stage refusal")}))
@@ -782,7 +828,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     expected: [String]{
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
-        "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
+        "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1",
     }
     loop index in 0..<inputs.len() {
         hasher := StreamingSHA256.new()
@@ -834,7 +880,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
 // A validator lambda takes its callable type from this parameter: a bare
 // `() -> {..}` binding infers neither the FS/Env row nor the IOError rail.
 // Escaping validators own their captures, so tests hand them copies.
-foundation_publication_test_validator: fn(validate: fn() IOError! -[FS, Env]>) -> (fn() IOError! -[FS, Env]>)? {
+foundation_publication_test_validator: fn(validate: fn() -[FS, Env]> IOError!) -> (fn() -[FS, Env]> IOError!)? {
     Val(validate)
 }
 

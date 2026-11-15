@@ -45,7 +45,9 @@ condition_unregister: fn(condition: I64, node: I64) {
         current: sync_load(link)
         if current == node {
             sync_store(link, sync_load(node))
-            if sync_load(wrapping(condition + I64{24})) == node -> sync_store(wrapping(condition + I64{24}), previous)
+            if sync_load(wrapping(condition + I64{24})) == node {
+                sync_store(wrapping(condition + I64{24}), previous)
+            }
             break
         }
         previous = current
@@ -87,7 +89,7 @@ condition_unregister: fn(condition: I64, node: I64) {
 
 // Direct E4 fragments for the exact reference messages; no Core String ABI.
 condition_text: fn(kind: I64) -> I64 {
-    text: scheduler_text_new(if kind == (I64{0}) -> I64{36} else -> if kind == (I64{1}) -> I64{24} else -> I64{16})
+    text: scheduler_text_new(if kind == (I64{0}) -> I64{36} else if kind == (I64{1}) -> I64{24} else -> I64{16})
     buffer: sync_load(text)
     if {
         kind == (I64{0}) -> {
@@ -216,7 +218,9 @@ condition_reacquire: fn(cell: I64) -> Bool {
     // A publication stop must still remove/free its registration and leave the
     // guard unheld. Never park or reacquire through an already delivered stop.
     status := jet_rt_session_propagate()
-    if status == (I64{0}) && !notified -> _ := scheduler_yield(reason, wrapping(node + I64{8}), I64{-1})
+    if status == (I64{0}) && !notified {
+        _ := scheduler_yield(reason, wrapping(node + I64{8}), I64{-1})
+    }
     condition_unregister(condition, node)
     jet_rt_free(node, I64{48}, I64{8})
     jet_rt_string_drop(reason)

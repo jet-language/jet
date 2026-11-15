@@ -30,7 +30,9 @@ AuthorityResolver: struct {
     open_for_authority_walk: fn(root: String) -[FS, Env]> AuthorityResolver? AuthorityError! {
         effective: pkg_authority_effective_root(root)
         info: pkg_authority_inspect_root(effective)
-        if pkg_authority_is_shared_directory(info) || !pkg_authority_has_candidate(effective) -> return Ok(None)
+        if pkg_authority_is_shared_directory(info) || !pkg_authority_has_candidate(effective) {
+            return Ok(None)
+        }
         Ok(Val(AuthorityResolver.open(effective)))
     }
 
@@ -86,8 +88,12 @@ AuthorityResolver: struct {
     // independently opened handle. Neither branch duplicates a descriptor.
     directory_handle: fn(self, directory: CheckedDirectory) -> Directory Never! from self | directory {
         if directory.handle == {
-            .Val(handle) -> { return handle }
-            .None -> { return self.root_handle }
+            .Val(handle) -> {
+                return handle
+            }
+            .None -> {
+                return self.root_handle
+            }
         }
     }
 
@@ -149,7 +155,7 @@ AuthorityResolver: struct {
             relative: relative,
             identity: FileIdentity.from_stat(info, AuthorityKind.Directory),
             handle: handle.move(),
-            allow_hardlinks: self.allow_hardlinks
+            allow_hardlinks: self.allow_hardlinks,
         }
         self.revalidate_directory(checked)
         Ok(checked)
@@ -256,7 +262,9 @@ AuthorityResolver: struct {
         found := [CheckedFile]{}
         loop entry in entries {
             relative: pkg_authority_relative_join(scan.relative, entry.name)
-            if entry.info.is_symlink -> return Err(AuthorityError.Symlink(files.join(self.root, relative)))
+            if entry.info.is_symlink {
+                return Err(AuthorityError.Symlink(files.join(self.root, relative)))
+            }
             if extension == {
                 .Val(wanted) -> {
                     if pkg_authority_extension(entry.name) != Val(wanted) -> next
@@ -297,7 +305,9 @@ AuthorityResolver: struct {
         hasher := crypto.Hasher.new()
         loop file in found {
             relative: if directory.relative == "" -> file.relative else -> {
-                if !pkg_paths.is_relative_to(pkg_paths.of(file.relative), pkg_paths.of(directory.relative)) -> return Err(AuthorityError.Escapes(file.path))
+                if !pkg_paths.is_relative_to(pkg_paths.of(file.relative), pkg_paths.of(directory.relative)) {
+                    return Err(AuthorityError.Escapes(file.path))
+                }
                 files.relative(file.relative, directory.relative)
             }
             hasher.update(relative.replace("\\", "/").bytes())
@@ -344,10 +354,10 @@ AuthorityResolver: struct {
                 // `file.move()` moves the checked file in; a plain read would copy its FileReader.
                 candidate: WorkspaceSource{path: file.path, source: source, role: role, checked: file.move()}
                 self.revalidate_source(candidate)
-                if role == WorkspaceSourceRole.Index -> indexes.push(candidate) else -> authorities.push(candidate)
-            } else if name == WORKSPACE_FILE {
-                malformed_canonical = true
-            }
+                if role == WorkspaceSourceRole.Index -> indexes.push(candidate) else {
+                    authorities.push(candidate)
+                }
+            } else if name == WORKSPACE_FILE { malformed_canonical = true }
         }
         self.revalidate_root()
         if malformed_canonical && indexes.len() == 0 -> return Err(AuthorityError.WorkspaceNoModule)
@@ -402,7 +412,9 @@ AuthorityResolver: struct {
         self.revalidate_directory(directory)
         if directory.relative == "" -> return Ok(".")
         canonical: files.join(self.root, directory.relative)
-        if !pkg_authority_path_within(canonical, self.root) -> return Err(AuthorityError.Escapes(directory.path))
+        if !pkg_authority_path_within(canonical, self.root) {
+            return Err(AuthorityError.Escapes(directory.path))
+        }
         Ok(directory.relative.replace("\\", "/"))
     }
 
@@ -480,7 +492,9 @@ AuthorityResolver: struct {
     relative_path: fn(self, path: String) -> String AuthorityError! {
         relative := path
         if files.is_abs(path) {
-            if !pkg_authority_path_within(path, self.root) -> return Err(AuthorityError.Escapes(path))
+            if !pkg_authority_path_within(path, self.root) {
+                return Err(AuthorityError.Escapes(path))
+            }
             trimmed: if self.root.ends_with("/") -> self.root else -> "{self.root}/"
             relative = if path == self.root || path == trimmed -> "" else -> path.removeprefix(trimmed)
         }
@@ -489,9 +503,7 @@ AuthorityResolver: struct {
             if part == {
                 "" | "." -> next
                 ".." -> return Err(AuthorityError.Escapes(path))
-                else -> {
-                    parts.push(part)
-                }
+                else -> { parts.push(part) }
             }
         }
         Ok(parts.join("/"))
@@ -519,7 +531,9 @@ AuthorityResolver: struct {
     }
 
     check_file_links: fn(self, path: String, info: files.Stat) AuthorityError! {
-        if self.allow_hardlinks -> return
+        if self.allow_hardlinks {
+            return
+        }
         pkg_authority_require_single_link(path, info)
     }
 
@@ -541,7 +555,9 @@ pkg_authority_inspect_root: fn(root: String) -[FS]> files.Stat AuthorityError! {
     info: if files.stat(root) == {
         .Ok(found) -> found
         .Err(error) -> {
-            if pkg_io_is_not_found(error) -> return Err(AuthorityError.Missing{path: root, cause: pkg_io_cause(error)})
+            if pkg_io_is_not_found(error) {
+                return Err(AuthorityError.Missing{path: root, cause: pkg_io_cause(error)})
+            }
             return Err(AuthorityError.IO{path: root, operation: "inspect", detail: "{error}"})
         }
     }
@@ -556,7 +572,9 @@ pkg_authority_canonicalize_root: fn(root: String) -[FS, Env]> String AuthorityEr
     canonical: if files.canonicalize(root) == {
         .Ok(resolved) -> resolved
         .Err(error) -> {
-            if pkg_io_is_not_found(error) -> return Err(AuthorityError.Missing{path: root, cause: pkg_io_cause(error)})
+            if pkg_io_is_not_found(error) {
+                return Err(AuthorityError.Missing{path: root, cause: pkg_io_cause(error)})
+            }
             return Err(AuthorityError.IO{path: root, operation: "resolve", detail: "{error}"})
         }
     }

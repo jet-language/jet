@@ -1,4 +1,3 @@
-
 use {
     encoding: core.encoding
     xml: core.encoding.xml
@@ -6,7 +5,7 @@ use {
 }
 
 run: fn() {
-    paths: [String]{ "boundary-4078.xml", "boundary-4079.xml", "boundary-4080.xml", "boundary-4081.xml", "boundary-4082.xml", "boundary-4083.xml", "boundary-4084.xml", "boundary-4085.xml", "boundary-4086.xml", "boundary-4087.xml", "boundary-4088.xml", "boundary-4089.xml", "boundary-4090.xml", "boundary-4091.xml", "boundary-4092.xml", "boundary-4093.xml", "boundary-4094.xml", "boundary-4095.xml", "boundary-4096.xml", "boundary-4097.xml", "boundary-4098.xml", "boundary-4099.xml", "boundary-4100.xml", "boundary-4101.xml", "boundary-4102.xml", "boundary-4103.xml", "boundary-4104.xml", "boundary-4105.xml", "boundary-4106.xml", "boundary-4107.xml", "boundary-4108.xml", "boundary-4109.xml", "boundary-4110.xml" }
+    paths: [String]{"boundary-4078.xml", "boundary-4079.xml", "boundary-4080.xml", "boundary-4081.xml", "boundary-4082.xml", "boundary-4083.xml", "boundary-4084.xml", "boundary-4085.xml", "boundary-4086.xml", "boundary-4087.xml", "boundary-4088.xml", "boundary-4089.xml", "boundary-4090.xml", "boundary-4091.xml", "boundary-4092.xml", "boundary-4093.xml", "boundary-4094.xml", "boundary-4095.xml", "boundary-4096.xml", "boundary-4097.xml", "boundary-4098.xml", "boundary-4099.xml", "boundary-4100.xml", "boundary-4101.xml", "boundary-4102.xml", "boundary-4103.xml", "boundary-4104.xml", "boundary-4105.xml", "boundary-4106.xml", "boundary-4107.xml", "boundary-4108.xml", "boundary-4109.xml", "boundary-4110.xml"}
     passed := 0
     loop path in paths {
         input: files.open(path) ?? panic("open boundary")
@@ -29,14 +28,14 @@ run: fn() {
                         namespace := (name.field("namespace_uri") ?? panic("namespace")).text() ?? ""
                         root_start = local == "r" && namespace == "urn:r"
                     }
-                    if event_kind == "document_end" { document_end = true }
+                    if event_kind == "document_end" -> document_end = true
                 }
                 .Err(_) -> panic("boundary next")
             }
         }
         if reader.next() == {
             .Ok(next) -> {
-                if next == None && document_start && root_start && document_end { passed += 1 }
+                if next == None && document_start && root_start && document_end -> passed += 1
             }
             .Err(_) -> panic("fused eof")
         }
@@ -59,7 +58,9 @@ run: fn() {
             .Err(first) -> {
                 if malformed_reader.next() == {
                     .Ok(_) -> { print("terminal-missed") }
-                    .Err(second) -> { print(first.byte_offset == second.byte_offset && first.reason == second.reason) }
+                    .Err(second) -> {
+                        print(first.byte_offset == second.byte_offset && first.reason == second.reason)
+                    }
                 }
                 break
             }
@@ -127,7 +128,7 @@ run: fn() {
     conflict_reader := xml.reader(conflict_input) ?? panic("encoding conflict reader")
     if conflict_reader.next() == {
         .Ok(start) -> {
-            if start == None { panic("missing document start") }
+            if start == None -> panic("missing document start")
         }
         .Err(_) -> panic("encoding conflict document start")
     }

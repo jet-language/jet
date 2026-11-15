@@ -11,23 +11,27 @@ use {
 live_inspect_u64: fn(out: &[U8], value: U64) Never! {
     loop index in 0..<8 -> out.push(U8{Int{(value >> (index * 8)).bit_and(U64{255})}})
 }
+
 live_inspect_word: fn(out: &[U8], word: Int) Never! {
-    if word < 0 -> live_inspect_u64(out, U64{word + 9223372036854775807 + 1} + U64{9223372036854775808}) else -> live_inspect_u64(out, U64{word})
+    if word < 0 {
+        live_inspect_u64(out, U64{word + 9223372036854775807 + 1} + U64{9223372036854775808})
+    } else { live_inspect_u64(out, U64{word}) }
 }
+
 live_inspect_put: fn(out: &[U8], text: String?) Never! {
     if text == .Val(present) {
         live_inspect_word(out, present.bytes().len())
         loop byte in present.bytes() -> out.push(byte)
-    } else {
-        live_inspect_word(out, -1)
-    }
+    } else { live_inspect_word(out, -1) }
 }
+
 live_inspect_state: fn(state: String) -> Int Never! {
     if state == "queued" -> return 0
     if state == "running" -> return 1
     if state == "blocked" -> return 2
     3
 }
+
 live_inspect_bytes: fn(snapshot: JetLiveSnapshot) -> [U8] Never! {
     out := [U8]{}
     live_inspect_word(out, 3550338754064696650)
@@ -39,7 +43,9 @@ live_inspect_bytes: fn(snapshot: JetLiveSnapshot) -> [U8] Never! {
     live_inspect_u64(out, snapshot.start_ticks)
     live_inspect_word(out, snapshot.clock_hz)
     live_inspect_word(out, if snapshot.runtime.exit -> 1 else -> 0)
-    loop key in ([String]{"arenas", "arena_allocations", "arena_bytes", "workers", "queued"}) -> live_inspect_word(out, snapshot.resources.get(key) ?? 0)
+    loop key in ([String]{"arenas", "arena_allocations", "arena_bytes", "workers", "queued"}) {
+        live_inspect_word(out, snapshot.resources.get(key) ?? 0)
+    }
     live_inspect_put(out, Val(snapshot.session_id.copy()))
     live_inspect_put(out, Val(snapshot.source_id.copy()))
     live_inspect_put(out, Val(snapshot.build_id.copy()))
@@ -79,7 +85,9 @@ live_inspect_bytes: fn(snapshot: JetLiveSnapshot) -> [U8] Never! {
             live_inspect_put(out, Val(value.type_identity.copy()))
             live_inspect_put(out, Val(value.disposition.copy()))
             live_inspect_put(out, Val(value.reason.copy()))
-            if value.rendered_value == .Val(shown) -> live_inspect_put(out, Val(shown.copy())) else -> live_inspect_put(out, None)
+            if value.rendered_value == .Val(shown) -> live_inspect_put(out, Val(shown.copy())) else {
+                live_inspect_put(out, None)
+            }
         }
     }
     if snapshot.event_records.len() > 0 {
@@ -106,12 +114,15 @@ live_inspect_bytes: fn(snapshot: JetLiveSnapshot) -> [U8] Never! {
     live_inspect_word(out, 0)
     out
 }
+
 live_inspect_event: fn(sequence: Int) -> JetLiveEvent Never! {
     JetLiveEvent{sequence: sequence, source: "AsyncEvent", event_id: 2, owner_id: 3, subscription_id: 4, dispatch_id: 5, lifecycle: "HandlerFailed", queued: -1, blocked: 0, running: 1, capacity: 8, overflow: "DropNewest", priority: -17, failure: "Handler", terminal: "None"}
 }
+
 live_inspect_value: fn(value_id: String, type_identity: String, disposition: String, rendered: String?) -> JetLiveValue Never! {
     JetLiveValue{value_id: value_id, type_identity: type_identity, disposition: disposition, reason: "", rendered_value: rendered}
 }
+
 live_inspect_fixture: fn() -> JetLiveSnapshot Never! {
     resources := [String:Int]{}
     resources["arenas"] = 1
@@ -120,37 +131,54 @@ live_inspect_fixture: fn() -> JetLiveSnapshot Never! {
     resources["workers"] = 1
     resources["queued"] = 0
     JetLiveSnapshot{
-        protocol: "jet.live.v1", session_id: "session", source_id: "app.jet", build_id: "build-1",
-        revision: "rev-1", world_id: "world-1", pid: 42, start_id: "", captured_ms: 1,
+        protocol: "jet.live.v1",
+        session_id: "session",
+        source_id: "app.jet",
+        build_id: "build-1",
+        revision: "rev-1",
+        world_id: "world-1",
+        pid: 42,
+        start_id: "",
+        captured_ms: 1,
         values: [JetLiveValue]{live_inspect_value("app.counter", "Int", "kept", Val("7"))},
         tasks: [JetLiveTask]{JetLiveTask{id: 2, parent: 1, state: "blocked", wait: "channel send", deadline_ms: Val(480), cancelled: false}},
         channels: [JetLiveChannel]{JetLiveChannel{id: 1, depth: 4, capacity: Val(4), send_waiters: 1, recv_waiters: 0, closed: false}},
-        effects: [String:Int]{}, resources: resources,
+        effects: [String:Int]{},
+        resources: resources,
         runtime: JetLiveRuntime{elapsed_ns: 7, cpu_ns: None, exit: false},
-        event_records: [JetLiveEvent]{live_inspect_event(1)}, events: None,
-        boot_ns: U64{20000000000}, start_ticks: U64{3}, clock_hz: 100,
+        event_records: [JetLiveEvent]{live_inspect_event(1)},
+        events: None,
+        boot_ns: U64{20000000000},
+        start_ticks: U64{3},
+        clock_hz: 100,
     }
 }
+
 live_inspect_rejected: fn(bytes: [U8], message: String) Never! {
     if jet_live_decode(bytes) == {
-        .Err(error) -> assert(error.message.contains(message))
+        .Err(error) -> { assert(error.message.contains(message)) }
         .Ok(snapshot) -> {
             if jet_cli_live_event_render(snapshot.event_records) == {
-                .Err(error) -> assert(error.message.contains(message))
+                .Err(error) -> { assert(error.message.contains(message)) }
                 .Ok(_) -> panic("unsafe live snapshot accepted: {message}")
             }
         }
     }
 }
+
 live_inspect_decoded: fn(snapshot: JetLiveSnapshot) -> JetLiveSnapshot Never! {
     jet_live_decode(live_inspect_bytes(snapshot)) ?? panic(err.message)
 }
+
 live_inspect_stat: fn(start: String, user: String, system: String) -> String Never! {
     fields := [String]{"S"}
-    loop index in 1..<19 -> fields.push(if index == 11 -> user else if index == 12 -> system else -> "0")
+    loop index in 1..<19 {
+        fields.push(if index == 11 -> user else if index == 12 -> system else -> "0")
+    }
     fields.push(start.copy())
     "42 (name ) with spaces) {fields.join(" ")}\n"
 }
+
 #Test("live_inspect") {
     snapshot: live_inspect_decoded(live_inspect_fixture())
     assert(snapshot.values[0].rendered_value == Val("7"))
@@ -210,7 +238,7 @@ live_inspect_stat: fn(start: String, user: String, system: String) -> String Nev
     assert(bound.start_id == "1234" && bound.runtime.cpu_ns == Val(40000000))
     unbound := live_inspect_decoded(live_inspect_fixture())
     if jet_live_bind(unbound, live_inspect_stat("2001", "5", "2")) == {
-        .Err(error) -> assert(error.message.contains("does not belong to process 42"))
+        .Err(error) -> { assert(error.message.contains("does not belong to process 42")) }
         .Ok(_) -> panic("bound a later process to the snapshot")
     }
     no_cpu := live_inspect_decoded(live_inspect_fixture())
@@ -218,7 +246,7 @@ live_inspect_stat: fn(start: String, user: String, system: String) -> String Nev
     assert(no_cpu.runtime.cpu_ns == None)
     truncated_stat := live_inspect_decoded(live_inspect_fixture())
     if jet_live_bind(truncated_stat, "42 (name) S 1 2\n") == {
-        .Err(error) -> assert(error.message.contains("truncated"))
+        .Err(error) -> { assert(error.message.contains("truncated")) }
         .Ok(_) -> panic("accepted a truncated stat")
     }
     // Corrupt records are refused.
@@ -270,7 +298,8 @@ live_inspect_stat: fn(start: String, user: String, system: String) -> String Nev
         closed.event_records[0].source = source.copy()
         assert(jet_cli_live_text(live_inspect_decoded(closed)).contains("source={source}"))
     }
-    loop lifecycle in ([String]{"Subscribed", "Removed", "DispatchStarted", "Queued", "Backpressured", "Running", "HandlerStarted", "HandlerDelivered", "HandlerFailed", "HandlerContinue", "HandlerTransform", "HandlerCancel", "HandlerFail", "Terminal"}) {
+    loop lifecycle in
+        ([String]{"Subscribed", "Removed", "DispatchStarted", "Queued", "Backpressured", "Running", "HandlerStarted", "HandlerDelivered", "HandlerFailed", "HandlerContinue", "HandlerTransform", "HandlerCancel", "HandlerFail", "Terminal"}) {
         closed := live_inspect_fixture()
         closed.event_records[0].lifecycle = lifecycle.copy()
         assert(jet_cli_live_text(live_inspect_decoded(closed)).contains("lifecycle={lifecycle}"))
@@ -285,7 +314,8 @@ live_inspect_stat: fn(start: String, user: String, system: String) -> String Nev
         closed.event_records[0].failure = failure.copy()
         assert(jet_cli_live_text(live_inspect_decoded(closed)).contains("failure={failure}"))
     }
-    loop terminal in ([String]{"None", "Delivered", "HandlerFailed", "DroppedNewest", "DroppedOldest", "Closed", "Cancelled", "DeadlineExceeded", "Continue", "Cancel", "Fail"}) {
+    loop terminal in
+        ([String]{"None", "Delivered", "HandlerFailed", "DroppedNewest", "DroppedOldest", "Closed", "Cancelled", "DeadlineExceeded", "Continue", "Cancel", "Fail"}) {
         closed := live_inspect_fixture()
         closed.event_records[0].terminal = terminal.copy()
         assert(jet_cli_live_text(live_inspect_decoded(closed)).contains("terminal={terminal}"))

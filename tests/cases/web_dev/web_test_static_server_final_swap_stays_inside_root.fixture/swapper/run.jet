@@ -3,10 +3,12 @@ use {
     sys: core.sys
     time: core.time
 }
+
 s5h_link: fn(outside: String, target: String) -> Bool {
     files.symlink(outside, target) ?? return false
     true
 }
+
 s5h_swap: fn(target: String, parked: String, outside: String) -> Bool {
     files.remove(parked).drop("original ignores cleanup failure")
     files.rename(target, parked) ?? return false
@@ -16,12 +18,15 @@ s5h_swap: fn(target: String, parked: String, outside: String) -> Bool {
     time.sleep(time.duration_ns(50000))
     made
 }
+
 run: fn() {
     root: sys.get("S5_ROOT") ?? panic("root")
     swaps := 0
     files.write(files.join(root, "swapper-ready"), "ready") ?? panic("ready")
     loop !files.exists(files.join(root, "stop")) {
-        if s5h_swap(files.join(root, "root/race.js"), files.join(root, "root/race.js.parked"), files.join(root, "outside.js")) -> swaps = swaps + 1
+        if s5h_swap(files.join(root, "root/race.js"), files.join(root, "root/race.js.parked"), files.join(root, "outside.js")) {
+            swaps += 1
+        }
     }
     print(swaps)
 }

@@ -16,7 +16,9 @@ AppErr: enum {
     Missing(String)
 }
 
-impl AppErr.From(ParseErr) { from: fn(error: ParseErr) -> AppErr { AppErr.Parse(error) } }
+impl AppErr.From(ParseErr) {
+    from: fn(error: ParseErr) -> AppErr { AppErr.Parse(error) }
+}
 
 double: fn(n: Int) -> Int Never! { n * 2 }
 
@@ -45,9 +47,7 @@ find: fn(items: [String], wanted: String) -> String? {
 }
 
 // The explicit carrier spelling of a `Never!` body.
-explicit: fn(n: Int) -> Int Never! {
-    return Ok(double(n))
-}
+explicit: fn(n: Int) -> Int Never! { return Ok(double(n)) }
 
 run: fn() {
     print(double(21))

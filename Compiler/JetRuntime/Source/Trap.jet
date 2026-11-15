@@ -29,7 +29,7 @@ trap_syscall: fn(number: I64, a1: I64, a2: I64, a3: I64, a4: I64, a5: I64, a6: I
 // memory sentry until trap_unmap takes them back.
 trap_map: fn(hint: I64, bytes: I64, flags: I64) -> I64 {
     address: alloc_map_anonymous(hint, bytes, flags)
-    if (address < I64{0}) -> return address
+    if (address < I64{0}) { return address }
     jet_rt_sentry_register_allocation(address, trap_pages(bytes))
     address
 }
@@ -42,9 +42,7 @@ trap_unmap: fn(address: I64, bytes: I64) {
 }
 
 // `bytes` rounded up to whole 4 KiB pages, as the system maps them.
-trap_pages: fn(bytes: I64) -> I64 Never! {
-    wrapping(bytes + I64{4095}).bit_and(I64{-4096})
-}
+trap_pages: fn(bytes: I64) -> I64 Never! { wrapping(bytes + I64{4095}).bit_and(I64{-4096}) }
 
 // The stop rail's root half (Scheduler.jet jet_rt_trap_root): a code word
 // that every control's creation installs (scheduler_control_new). Only a
@@ -55,30 +53,41 @@ trap_pages: fn(bytes: I64) -> I64 Never! {
 trap_root_rail_code := I64{0}
 
 TRAP_ROOT_PREPARE: I64{0}
+
 TRAP_ROOT_WRITE: I64{1}
+
 TRAP_ROOT_WRITE_WORD: I64{2}
+
 TRAP_ROOT_EXIT: I64{3}
+
 TRAP_ROOT_DROP: I64{4}
+
 TRAP_ROOT_SITE_BEGIN: I64{5}
+
 TRAP_ROOT_SITE_END: I64{6}
+
 TRAP_ROOT_JOINED_SITE: I64{7}
 
 // jet_rt_trap_root's `op` with its three words; 0 when no control exists, or
 // for an EXIT with no captured report.
 trap_root: fn(op: I64, a: I64, b: I64, c: I64) -> I64 {
     rail: trap_root_rail_code
-    if (rail == I64{0}) -> return I64{0}
+    if (rail == I64{0}) { return I64{0} }
     coll_call4(rail, op, a, b, c)
 }
 
 trap_write: fn(address: I64, count: I64) {
     capture: scheduler_root_capture_pointer(scheduler_report_control_current())
-    if (capture != I64{0} && trap_root(TRAP_ROOT_WRITE, capture, address, count) != I64{0}) -> return
+    if (capture != I64{0} && trap_root(TRAP_ROOT_WRITE, capture, address, count) != I64{0}) {
+        return
+    }
     at := I64{0}
     loop at < count {
         written: trap_syscall(I64{1}, I64{2}, address + at, count - at, I64{0}, I64{0}, I64{0})
-        if (written == I64{-4}) -> next
-        if (written <= I64{0}) -> return
+        if (written == I64{-4}) { next }
+        if (written <= I64{0}) {
+            return
+        }
         at += written
     }
 }
@@ -86,7 +95,9 @@ trap_write: fn(address: I64, count: I64) {
 // Generated report literals use this path even when the allocator is failing.
 trap_write_word: fn(word: I64, count: I64) {
     capture: scheduler_root_capture_pointer(scheduler_report_control_current())
-    if (capture != I64{0} && trap_root(TRAP_ROOT_WRITE_WORD, capture, word, count) != I64{0}) -> return
+    if (capture != I64{0} && trap_root(TRAP_ROOT_WRITE_WORD, capture, word, count) != I64{0}) {
+        return
+    }
     trap_write_word_raw(word, count)
 }
 
@@ -106,8 +117,10 @@ trap_write_word_raw: fn(word: I64, count: I64) {
         #Unsafe("the OS leaf borrows a stack word; generated calls have 1..8 valid bytes") {
             written = os_write_word_i64(I64{2}, remaining, length)
         }
-        if (written == I64{-4}) -> next
-        if (written <= I64{0} || written >= length) -> return
+        if (written == I64{-4}) { next }
+        if (written <= I64{0} || written >= length) {
+            return
+        }
         length = wrapping(length - written)
         dropped := I64{0}
         loop dropped < written {
@@ -136,13 +149,17 @@ trap_write_handle: fn(handle: I64) {
 // A stop under the process root is published to it (the root half returns
 // 1); any other ends the process.
 trap_exit: fn(status: I64) {
-    if (scheduler_report_domain() == I64{1} && trap_root(TRAP_ROOT_EXIT, status, I64{0}, I64{0}) != I64{0}) -> return
+    if (scheduler_report_domain() == I64{1} && trap_root(TRAP_ROOT_EXIT, status, I64{0}, I64{0}) != I64{0}) {
+        return
+    }
     trap_defect_exit(status)
 }
+
 trap_defect_prepare: fn() {
     control: scheduler_report_control_current()
-    if (control != I64{0}) -> _ := trap_root(TRAP_ROOT_DROP, control, I64{0}, I64{0})
+    if (control != I64{0}) { _ := trap_root(TRAP_ROOT_DROP, control, I64{0}, I64{0}) }
 }
+
 // Every exit_group of a stop, process.exit or defect: the live Secrets are
 // scrubbed first, as no drop will clear them (#5478).
 trap_defect_exit: fn(status: I64) {
@@ -166,7 +183,9 @@ trap_stop: fn(kind: I64, a: I64, b: I64, c: I64, d: I64) {
     code: comptime_serve_stop_code
     if (code == I64{0}) {
         rail: context_on_stop_rail_code
-        if (rail == I64{0}) -> return
+        if (rail == I64{0}) {
+            return
+        }
         // jet_ctx_on_stop_arm installed jet_rt_context_on_stop, a runtime export
         // whose System V signature takes these five words.
         _ := coll_call5(rail, kind, a, b, c, d)
@@ -186,6 +205,7 @@ trap_gs_failure: fn() {
     trap_defect_newline()
     loop { trap_defect_exit(EXIT_ICE) }
 }
+
 // A stop under the process root begins the root's captured report. Any other
 // stop while jet_rt_main runs its entry is a process stop too (spec.md,
 // Cleanup at a process stop): it claims the process exit and runs the exit
@@ -200,7 +220,9 @@ trap_root_prepare: fn() {
         return
     }
     claim: main_process_stop_code
-    if (claim != I64{0} && main_root_control != I64{0}) -> _ := coll_call1(claim, EXIT_RUNTIME_PANIC)
+    if (claim != I64{0} && main_root_control != I64{0}) {
+        _ := coll_call1(claim, EXIT_RUNTIME_PANIC)
+    }
 }
 
 // Keep both the value and divisor non-positive: neither I64.MIN's negation
@@ -211,19 +233,19 @@ trap_number: fn(value: I64) {
     // Both operands are negative, hence the floor quotient is nonnegative.
     // Negating divisor is safe (its magnitude never exceeds 10^18).
     loop number /% (I64{-10}) >= -divisor -> divisor *= I64{10}
-    if (value < I64{0}) -> trap_write_word(I64{45}, I64{1})
+    if (value < I64{0}) { trap_write_word(I64{45}, I64{1}) }
     loop {
         // Same-sign operands make floor division the decimal digit quotient.
         trap_write_word(I64{48} + number /% divisor, I64{1})
         number %= divisor
         // Divide two negatives before negation: -1 /% -10 is 0, not -1.
         divisor = -(divisor /% I64{-10})
-        if (divisor == I64{0}) -> break
+        if (divisor == I64{0}) { break }
     }
 }
 
 trap_line: fn(line: I64) -> I64 Never! {
-    if (line < I64{0} || line > I64{4294967295}) -> return I64{0}
+    if (line < I64{0} || line > I64{4294967295}) { return I64{0} }
     line
 }
 
@@ -231,6 +253,7 @@ trap_header: fn(code: I64) {
     trap_root_prepare()
     trap_header_bytes(code)
 }
+
 trap_header_bytes: fn(code: I64) {
     jet_rt_stdout_flush()
     if {
@@ -246,8 +269,12 @@ trap_header_bytes: fn(code: I64) {
 // (trap_user_location), with no source line or caret. The Core site
 // stays only when the calling chain names no other frame.
 trap_context: fn(file: I64, file_len: I64, line: I64, function: I64, function_len: I64, source: I64, source_len: I64, column: I64, caret: I64) {
-    if fault_frames_off() -> return
-    if trap_core_site(file, file_len) && trap_user_location(function_len != I64{0}) -> return
+    if fault_frames_off() {
+        return
+    }
+    if trap_core_site(file, file_len) && trap_user_location(function_len != I64{0}) {
+        return
+    }
     if (file_len != I64{0}) {
         trap_msg_location()
         trap_write(file, file_len)
@@ -259,7 +286,9 @@ trap_context: fn(file: I64, file_len: I64, line: I64, function: I64, function_le
         }
         trap_msg_newline()
     }
-    if (source_len == I64{0}) -> return
+    if (source_len == I64{0}) {
+        return
+    }
     digits := I64{1}
     remainder := line
     loop remainder >= (I64{10}) {
@@ -314,7 +343,7 @@ trap_user_location: fn(with_function: Bool) -> Bool { trace_walk(I64{0}, with_fu
 // One frame of that walk: function `name`, `file` and `line`. A frame in
 // Core writes nothing and returns false; any other writes its `-->` line.
 trap_user_frame: fn(name: I64, name_len: I64, file: I64, file_len: I64, line: I64, with_function: Bool) -> Bool {
-    if (file_len == I64{0} || trap_core_site(file, file_len)) -> return false
+    if (file_len == I64{0} || trap_core_site(file, file_len)) { return false }
     trap_msg_location()
     trap_write(file, file_len)
     trap_msg_colon()
@@ -331,6 +360,7 @@ trap_footer: fn(code: I64) {
     trap_footer_bytes(code)
     trap_exit(EXIT_RUNTIME_PANIC)
 }
+
 trap_footer_bytes: fn(code: I64) {
     // Exact active registry rows; backticks protect the raw message from the
     // sentence-case pass.
@@ -368,7 +398,9 @@ trap_simple_report: fn(code: I64, file: I64, file_len: I64, line: I64, message: 
         trap_context(file, file_len, trap_line(line), I64{0}, I64{0}, I64{0}, I64{0}, I64{1}, I64{1})
         trap_task_site_end(message, message_len)
     }
-    if rt_task_panic_publish(message, message_len, code) -> return
+    if rt_task_panic_publish(message, message_len, code) {
+        return
+    }
     production_receipt_write(code, file, file_len, trap_line(line), I64{0}, I64{0})
     trap_header(code)
     trap_write(message, message_len)
@@ -397,14 +429,16 @@ trap_task_site_end: fn(message: I64, length: I64) {
 // A root stop that re-raises a failed task it joined shows where that task
 // stopped, under its own context.
 trap_joined_site: fn(message: I64, length: I64) {
-    if fault_frames_off() -> return
+    if fault_frames_off() {
+        return
+    }
     _ := trap_root(TRAP_ROOT_JOINED_SITE, message, length, I64{0})
 }
 
 // TRAP_ROOT_SITE_BEGIN: begin the capture of the current control, unless
 // one is open. 1 when it began.
 trap_task_site_open: fn() -> I64 {
-    if (scheduler_root_capture_pointer(scheduler_control_current()) != I64{0}) -> return I64{0}
+    if (scheduler_root_capture_pointer(scheduler_control_current()) != I64{0}) { return I64{0} }
     scheduler_root_capture_begin()
     I64{1}
 }
@@ -438,7 +472,9 @@ trap_task_site_publish: fn(message: I64, length: I64) {
 // TRAP_ROOT_JOINED_SITE: trap_joined_site's lines.
 trap_joined_site_write: fn(message: I64, length: I64) {
     site: scheduler_joined_site_take(scheduler_report_control_current(), message, length)
-    if (site == I64{0}) -> return
+    if (site == I64{0}) {
+        return
+    }
     if (rt_text_len(site) != I64{0}) {
         trap_write_static(rt_static_text("  = the failed task stopped at:\n"))
         trap_write_handle(site)
@@ -485,7 +521,9 @@ trap_process_stop: fn(code: I64, message: I64, message_len: I64) {
         at += I64{1}
     }
     test_scope_record_raw_stop(word, word_length, data, length)
-    if rt_task_panic_publish_recorded(data, length) -> return
+    if rt_task_panic_publish_recorded(data, length) {
+        return
+    }
     trap_root_prepare()
     jet_rt_stdout_flush()
     if (code_length != I64{5} || !trap_coded_registered(word)) {
@@ -538,7 +576,9 @@ trap_shift_reason: fn(direction: I64, count: I64, count_unsigned: I64, bits: I64
 trap_native_index_range_stop: fn() {
     message: trap_msg_native_index_range_text()
     trap_stop(I64{1}, rt_text_data(message), rt_text_len(message), I64{0}, I64{0})
-    if rt_task_panic_publish(rt_text_data(message), rt_text_len(message), I64{1}) -> return
+    if rt_task_panic_publish(rt_text_data(message), rt_text_len(message), I64{1}) {
+        return
+    }
     trap_native_index_range_root()
 }
 
@@ -554,7 +594,9 @@ trap_native_index_range_root: fn() {
 #Export(c) jet_rt_panic_overflow: fn() {
     message: trap_msg_overflow_text()
     trap_stop(I64{1}, rt_text_data(message), rt_text_len(message), I64{0}, I64{0})
-    if rt_task_panic_publish(rt_text_data(message), rt_text_len(message), I64{1}) -> return
+    if rt_task_panic_publish(rt_text_data(message), rt_text_len(message), I64{1}) {
+        return
+    }
     trap_header(I64{1})
     trap_msg_overflow()
     trap_msg_prelude_end()
@@ -575,7 +617,9 @@ trap_native_index_range_root: fn() {
 #Export(c) jet_rt_panic_message: fn(message: I64, message_len: I64) {
     trap_stop(I64{1}, message, message_len, I64{0}, I64{0})
     if trap_task_site_begin() -> trap_task_site_end(message, message_len)
-    if rt_task_panic_publish(message, message_len, I64{0}) -> return
+    if rt_task_panic_publish(message, message_len, I64{0}) {
+        return
+    }
     trap_header(I64{0})
     trap_write(message, message_len)
     trap_msg_prelude_end()
@@ -589,14 +633,18 @@ trap_native_index_range_root: fn() {
 #Export(c) jet_rt_panic_list_bounds: fn(len: I64, index: Int) {
     native: checked(I64{index}) ?? {
         trap_native_index_range_stop()
-        if (jet_scheduler_native_propagate() != I64{0}) -> return
+        if (jet_scheduler_native_propagate() != I64{0}) {
+            return
+        }
         return
     }
     trap_stop(I64{3}, len, native, I64{0}, I64{0})
     message: trap_list_bounds_reason(len, native)
     published: rt_task_panic_publish(rt_text_data(message), rt_text_len(message), I64{1})
     jet_rt_string_drop(message)
-    if published -> return
+    if published {
+        return
+    }
     trap_header(I64{1})
     trap_msg_list_head()
     trap_number(len)
@@ -692,7 +740,9 @@ trap_u32: fn(address: I64) -> I64 {
 // it, up to a newline. The words are in the frame `area`, or else, when it
 // is 0, `first`, `second` and `third`.
 trap_bounds_locals: fn(area: I64, first: I64, second: I64, third: I64, labels: I64, labels_len: I64) {
-    if (labels_len == I64{0}) -> return
+    if (labels_len == I64{0}) {
+        return
+    }
     trap_msg_locals()
     at := I64{0}
     slot := I64{0}
@@ -795,9 +845,7 @@ rt_seq_index_oob_stop: fn(length: I64, index: I64) {
     rt_text_push_word(reason, I64{7307218078150255136}, I64{8})
     rt_text_push_word(reason, I64{7575186950109161760}, I64{8})
     rt_text_push_word(reason, I64{8307}, I64{2})
-    if (index >= I64{0}) {
-        rt_text_push_number(reason, index)
-    } else {
+    if (index >= I64{0}) { rt_text_push_number(reason, index) } else {
         rt_text_push_number(reason, quotient)
         rt_text_push_word(reason, I64{48} + last, I64{1})
     }
@@ -813,9 +861,7 @@ rt_seq_index_oob_stop: fn(length: I64, index: I64) {
     alloc_write_word(I64{7307218078150255136}, I64{8})
     alloc_write_word(I64{7575186950109161760}, I64{8})
     alloc_write_word(I64{8307}, I64{2})
-    if (index >= I64{0}) {
-        alloc_write_size(index)
-    } else {
+    if (index >= I64{0}) { alloc_write_size(index) } else {
         alloc_write_size(quotient)
         alloc_write_word(I64{48} + last, I64{1})
     }
@@ -845,7 +891,9 @@ trap_rich: fn(file: I64, line: I64, function: I64, source: I64, column: I64, car
         trap_context(trap_word(file), trap_word(wrapping(file + I64{8})), trap_line(line), trap_word(function), trap_word(wrapping(function + I64{8})), trap_word(source), trap_word(wrapping(source + I64{8})), trap_line(column), trap_line(caret))
         trap_task_site_end(trap_word(message), trap_word(wrapping(message + I64{8})))
     }
-    if rt_task_panic_publish(trap_word(message), trap_word(wrapping(message + I64{8})), I64{0}) -> return
+    if rt_task_panic_publish(trap_word(message), trap_word(wrapping(message + I64{8})), I64{0}) {
+        return
+    }
     production_receipt_write(I64{0}, trap_word(file), trap_word(wrapping(file + I64{8})), trap_line(line), trap_word(function), trap_word(wrapping(function + I64{8})))
     trap_header(I64{0})
     trap_write_handle(message)
@@ -915,11 +963,13 @@ trap_require_stop: fn(kind: I64, descriptor: I64, message: I64, left: I64, right
         trap_task_site_end(trap_word(raw), trap_word(wrapping(raw + I64{8})))
     }
     published: rt_task_panic_publish(trap_word(raw), trap_word(wrapping(raw + I64{8})), I64{0})
-    if (kind == I64{1}) -> jet_rt_string_drop(raw)
-    if published -> return
+    if (kind == I64{1}) { jet_rt_string_drop(raw) }
+    if published {
+        return
+    }
     production_receipt_write(I64{0}, trap_word(descriptor), trap_word(wrapping(descriptor + I64{8})), trap_line(trap_word(wrapping(descriptor + I64{16}))), trap_word(wrapping(descriptor + I64{24})), trap_word(wrapping(descriptor + I64{32})))
     trap_header(I64{0})
-    if (kind < I64{2}) -> test_stop_assertion_mark()
+    if (kind < I64{2}) { test_stop_assertion_mark() }
     if {
         (kind == I64{1}) -> {
             trap_msg_expected()
@@ -932,7 +982,9 @@ trap_require_stop: fn(kind: I64, descriptor: I64, message: I64, left: I64, right
     trap_msg_message_end()
     trap_descriptor_context(descriptor, locals)
     // An equality stop's message is its operands, never a joined reason.
-    if (kind != I64{1}) -> trap_joined_site(trap_word(message), trap_word(wrapping(message + I64{8})))
+    if (kind != I64{1}) {
+        trap_joined_site(trap_word(message), trap_word(wrapping(message + I64{8})))
+    }
     trap_footer(I64{0})
 }
 
@@ -946,7 +998,9 @@ trap_descriptor_context: fn(descriptor: I64, locals: I64) {
 // A stop's locals line, when it has any: part of its frame, so `backtrace:
 // off` prints none.
 trap_locals: fn(locals: I64) {
-    if (locals == I64{0} || fault_frames_off()) -> return
+    if (locals == I64{0} || fault_frames_off()) {
+        return
+    }
     if (trap_word(wrapping(locals + I64{8})) > I64{0}) {
         trap_msg_locals()
         trap_write_handle(locals)
@@ -962,7 +1016,9 @@ trap_contract_stop: fn(descriptor: I64, message: I64, locals: I64) {
     data: trap_word(message)
     length: trap_word(wrapping(message + I64{8}))
     test_scope_record_raw_stop(TEST_SCOPE_E3005, I64{5}, data, length)
-    if rt_task_panic_publish_recorded(data, length) -> return
+    if rt_task_panic_publish_recorded(data, length) {
+        return
+    }
     trap_root_prepare()
     jet_rt_stdout_flush()
     trap_msg_header_contract()
@@ -976,7 +1032,7 @@ trap_contract_stop: fn(descriptor: I64, message: I64, locals: I64) {
 }
 
 trap_range_end: fn(start: I64, end: I64, exclusive: U8, len: I64) -> I64 Never! {
-    if (start < I64{0} || end < I64{0} || start > end) -> return I64{-1}
+    if (start < I64{0} || end < I64{0} || start > end) { return I64{-1} }
     if (exclusive != U8{0}) {
         if end <= len -> return end
         return I64{-1}
@@ -990,8 +1046,7 @@ trap_range_stop: fn(view: Bool, start: I64, end: I64, exclusive: U8, len: I64, f
     // The report's message, less its closing backtick, for served code.
     reason: jet_rt_string_builder_new()
     trap_build_msg_range_head(reason)
-    if view -> trap_build_msg_range_view(reason)
-    else -> trap_build_msg_range_slice(reason)
+    if view -> trap_build_msg_range_view(reason) else -> trap_build_msg_range_slice(reason)
     rt_text_push_word(reason, I64{32}, I64{1})
     rt_text_push_number(reason, len)
     trap_build_msg_range_items(reason)
@@ -999,15 +1054,15 @@ trap_range_stop: fn(view: Bool, start: I64, end: I64, exclusive: U8, len: I64, f
     trap_build_msg_range_to(reason)
     rt_text_push_number(reason, end)
     trap_build_msg_range_open(reason)
-    if (exclusive != U8{0}) -> trap_build_msg_exclusive(reason)
-    else -> trap_build_msg_inclusive(reason)
+    if (exclusive != U8{0}) { trap_build_msg_exclusive(reason) } else {
+        trap_build_msg_inclusive(reason)
+    }
     rt_text_push_word(reason, I64{41}, I64{1})
     trap_stop(I64{1}, rt_text_data(reason), rt_text_len(reason), I64{0}, I64{0})
     jet_rt_string_drop(reason)
     trap_header(I64{0})
     trap_msg_range_head()
-    if view -> trap_msg_range_view()
-    else -> trap_msg_range_slice()
+    if view -> trap_msg_range_view() else -> trap_msg_range_slice()
     trap_msg_space()
     trap_number(len)
     trap_msg_range_items()
@@ -1015,8 +1070,7 @@ trap_range_stop: fn(view: Bool, start: I64, end: I64, exclusive: U8, len: I64, f
     trap_msg_range_to()
     trap_number(end)
     trap_msg_range_open()
-    if (exclusive != U8{0}) -> trap_msg_exclusive()
-    else -> trap_msg_inclusive()
+    if (exclusive != U8{0}) { trap_msg_exclusive() } else { trap_msg_inclusive() }
     trap_msg_range_end()
     trap_context(file, file_len, trap_line(line), I64{0}, I64{0}, I64{0}, I64{0}, I64{1}, I64{1})
     trap_footer(I64{0})
@@ -1024,14 +1078,14 @@ trap_range_stop: fn(view: Bool, start: I64, end: I64, exclusive: U8, len: I64, f
 
 #Export(c) jet_rt_slice_end: fn(start: I64, end: I64, exclusive: U8, len: I64, file: I64, file_len: I64, line: I64) -> I64 {
     result: trap_range_end(start, end, exclusive, len)
-    if (result >= I64{0}) -> return result
+    if (result >= I64{0}) { return result }
     trap_range_stop(false, start, end, exclusive, len, file, file_len, line)
     I64{0}
 }
 
 #Export(c) jet_rt_view_end: fn(start: I64, end: I64, exclusive: U8, len: I64, file: I64, file_len: I64, line: I64) -> I64 {
     result: trap_range_end(start, end, exclusive, len)
-    if (result >= I64{0}) -> return result
+    if (result >= I64{0}) { return result }
     trap_range_stop(true, start, end, exclusive, len, file, file_len, line)
     I64{0}
 }
@@ -1055,14 +1109,22 @@ trap_debug_escaped: fn(code: I64) -> Bool Never! {
 }
 
 // Every E4 producer validates UTF-8; this decoder only borrows those bytes.
-TrapScalar: struct { code: I64, width: I64 }
+TrapScalar: struct {
+    code: I64
+    width: I64
+}
+
 trap_scalar: fn(address: I64) -> TrapScalar {
     first: trap_byte(address)
-    if (first < I64{128}) -> return TrapScalar{code: first, width: I64{1}}
+    if (first < I64{128}) { return TrapScalar{code: first, width: I64{1}} }
     second: trap_byte(wrapping(address + I64{1})).bit_and(I64{63})
-    if (first < I64{224}) -> return TrapScalar{code: (first.bit_and(I64{31})) * I64{64} + second, width: I64{2}}
+    if (first < I64{224}) {
+        return TrapScalar{code: (first.bit_and(I64{31})) * I64{64} + second, width: I64{2}}
+    }
     third: trap_byte(wrapping(address + I64{2})).bit_and(I64{63})
-    if (first < I64{240}) -> return TrapScalar{code: (first.bit_and(I64{15})) * I64{4096} + second * I64{64} + third, width: I64{3}}
+    if (first < I64{240}) {
+        return TrapScalar{code: (first.bit_and(I64{15})) * I64{4096} + second * I64{64} + third, width: I64{3}}
+    }
     fourth: trap_byte(wrapping(address + I64{3})).bit_and(I64{63})
     TrapScalar{code: (first.bit_and(I64{7})) * I64{262144} + second * I64{4096} + third * I64{64} + fourth, width: I64{4}}
 }
@@ -1070,10 +1132,10 @@ trap_scalar: fn(address: I64) -> TrapScalar {
 // NUL uses the generic \u{0} escape, CR uses \r, and
 // printable braces are copied unchanged so the result lexes to equal text.
 trap_debug_short: fn(code: I64) -> I64 Never! {
-    if (code == I64{9}) -> return I64{116}
-    if (code == I64{10}) -> return I64{110}
-    if (code == I64{13}) -> return I64{114}
-    if (code == I64{34} || code == I64{92}) -> return code
+    if (code == I64{9}) { return I64{116} }
+    if (code == I64{10}) { return I64{110} }
+    if (code == I64{13}) { return I64{114} }
+    if (code == I64{34} || code == I64{92}) { return code }
     I64{-1}
 }
 

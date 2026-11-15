@@ -19,11 +19,13 @@ run: fn() {
     files.write_bytes(path, [U8]{0x61, 0xFF, 0x62}) ?? panic("write bytes")
 
     if files.read(path) == {
-        .Ok(value) -> print("file as text: accepted {value.len()} bytes")
+        .Ok(value) -> { print("file as text: accepted {value.len()} bytes") }
         .Err(error) -> {
             if error == {
                 .InvalidInput(_) -> print("file as text: typed IOError.InvalidInput")
-                .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> print("file as text: unexpected error: {error}")
+                .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
+                    print("file as text: unexpected error: {error}")
+                }
             }
         }
     }
@@ -32,7 +34,9 @@ run: fn() {
 
     child: process.cmd(["printf", "a\\377b\\n"]).stdout(.Capture)
     if process.run_spec(child) == {
-        .Ok(receipt) -> print("child text: accepted {process.stdout_lines(receipt).len()} lines")
+        .Ok(receipt) -> {
+            print("child text: accepted {process.stdout_lines(receipt).len()} lines")
+        }
         .Err(error) -> print("child text: {error}")
     }
 

@@ -22,12 +22,9 @@ Worker: struct {
     n: Int
 
     impl Sink {
-        finish: fn(&&self) -[]> Int {
-            self.n + 2
-        }
-        peek: fn(self) -[]> Int {
-            self.n + 1
-        }
+        finish: fn(&&self) -[]> Int { self.n + 2 }
+
+        peek: fn(self) -[]> Int { self.n + 1 }
     }
 }
 
@@ -35,25 +32,15 @@ Holder: struct {
     sink: Sink
 }
 
-make: fn(s: Shared<Context>, n: Int) -> Sink {
-    Worker{context: s.copy(), n: n}
-}
+make: fn(s: Shared<Context>, n: Int) -> Sink { Worker{context: s.copy(), n: n} }
 
-read_it: fn(k: Sink) -> Int {
-    k.peek()
-}
+read_it: fn(k: Sink) -> Int { k.peek() }
 
-read_twice: fn(k: Sink) -> Int {
-    read_it(k) + read_it(k)
-}
+read_twice: fn(k: Sink) -> Int { read_it(k) + read_it(k) }
 
-own_it: fn(&&k: Sink) -> Int {
-    k.peek()
-}
+own_it: fn(k: &&Sink) -> Int { k.peek() }
 
-keep_it: fn(&&k: Sink) -> Holder {
-    Holder{sink: k}
-}
+keep_it: fn(k: &&Sink) -> Holder { Holder{sink: k} }
 
 read: fn(s: Shared<Context>) {
     a: make(s, 1)
@@ -71,9 +58,7 @@ owned: fn(s: Shared<Context>) {
 
 loops: fn(s: Shared<Context>) {
     total := 0
-    loop i in 0..<5 {
-        total += read_it(make(s, i)) + own_it(make(s, i))
-    }
+    loop i in 0..<5 -> total += read_it(make(s, i)) + own_it(make(s, i))
     print("loops {total} live {s.strong_count()}")
 }
 

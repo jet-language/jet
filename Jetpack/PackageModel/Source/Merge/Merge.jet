@@ -17,9 +17,7 @@ Pkg: struct {
     source: String
     name: String
 
-    new: fn(source: String, name: String) -> Pkg Never! {
-        Pkg{source: source, name: name}
-    }
+    new: fn(source: String, name: String) -> Pkg Never! { Pkg{source: source, name: name} }
 
     // Parse a `packages:` list body (the text inside `[ … ]`), expanding the
     // type-directed sugar (U6):
@@ -74,11 +72,12 @@ Pkg: struct {
 // Why a merge could not be reconciled (§6 conflict diagnostics).
 #Error
 MergeError: enum {
-    // Two `sources` declarations share a name but resolve to different refs.
     SourceConflict(name: String, a: String, b: String)
-    // A fact setting failed the canonical contribution law.
     FactConflict(error: FactError)
 }
+
+// Two `sources` declarations share a name but resolve to different refs.
+// A fact setting failed the canonical contribution law.
 
 // Split on commas not nested inside `()`/`[]`/`{}` (so `["a", "b"]` is one
 // item). Returns the raw, untrimmed pieces; a trailing comma adds no piece.
@@ -107,14 +106,16 @@ pkg_merge_split_top_level: fn(body: String) -> [String] Never! {
 
 // Merge `sources` maps by key: identical refs de-duplicate; the same name with
 // different refs is a conflict (§6). Each map is read in key order.
-pkg_merge_sources: fn(contribs: [[String: String]]) -> [String: String] MergeError! {
-    out := [String: String]{}
+pkg_merge_sources: fn(contribs: [[String:String]]) -> [String:String] MergeError! {
+    out := [String:String]{}
     loop map in contribs {
         loop name in pkg_merge_sorted_names(map) {
             reference: map[name]
             if out.get(name) == {
                 .Val(existing) -> {
-                    if existing != reference -> return Err(MergeError.SourceConflict{name: name, a: existing, b: reference})
+                    if existing != reference {
+                        return Err(MergeError.SourceConflict{name: name, a: existing, b: reference})
+                    }
                 }
                 .None -> out[name] = reference
             }
@@ -123,7 +124,7 @@ pkg_merge_sources: fn(contribs: [[String: String]]) -> [String: String] MergeErr
     Ok(out)
 }
 
-pkg_merge_sorted_names: fn(map: [String: String]) -> [String] Never! {
+pkg_merge_sorted_names: fn(map: [String:String]) -> [String] Never! {
     names := map.keys().to_list()
     names.sort()
     names
@@ -147,13 +148,13 @@ pkg_merge_packages: fn(lists: [[Pkg]]) -> [Pkg] Never! {
 // span, and source.
 EntryContribution: struct {
     packages: [Pkg]{[Pkg]{}}
-    settings: [String: [FactContribution]]{[String: [FactContribution]]{}}
+    settings: [String:[FactContribution]]{[String:[FactContribution]]{}}
 }
 
 // A fully merged namespace entry: deduped packages + resolved text facts.
 MergedEntry: struct {
     packages: [Pkg]{[Pkg]{}}
-    settings: [String: String]{[String: String]{}}
+    settings: [String:String]{[String:String]{}}
 }
 
 // Merge several contributions to one namespace entry: packages combine and
@@ -162,7 +163,7 @@ MergedEntry: struct {
 pkg_merge_entry: fn(contribs: [EntryContribution]) -> MergedEntry MergeError! {
     lists := [[Pkg]]{}
     loop contribution in contribs -> lists.push(contribution.packages)
-    by_key := [String: [FactContribution]]{}
+    by_key := [String:[FactContribution]]{}
     loop contribution in contribs {
         loop key in pkg_merge_sorted_setting_keys(contribution.settings) {
             writers := by_key.get(key) ?? [FactContribution]{}
@@ -170,7 +171,7 @@ pkg_merge_entry: fn(contribs: [EntryContribution]) -> MergedEntry MergeError! {
             by_key[key] = writers
         }
     }
-    settings := [String: String]{}
+    settings := [String:String]{}
     loop key in pkg_merge_sorted_setting_keys(by_key) {
         if pkg_fact_resolve(FactKey.new(key), by_key[key]) == {
             .Ok(resolved) -> {
@@ -190,7 +191,7 @@ pkg_merge_entry: fn(contribs: [EntryContribution]) -> MergedEntry MergeError! {
     Ok(MergedEntry{packages: pkg_merge_packages(lists), settings: settings})
 }
 
-pkg_merge_sorted_setting_keys: fn(settings: [String: [FactContribution]]) -> [String] Never! {
+pkg_merge_sorted_setting_keys: fn(settings: [String:[FactContribution]]) -> [String] Never! {
     names := settings.keys().to_list()
     names.sort()
     names

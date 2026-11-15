@@ -11,29 +11,86 @@ use {
     live_time: core.time
 }
 
-JetLiveValue: struct { value_id: String, type_identity: String, disposition: String, reason: String, rendered_value: String? }
-JetLiveTask: struct { id: Int, parent: Int, state: String, wait: String, deadline_ms: Int?, cancelled: Bool }
-JetLiveChannel: struct { id: Int, depth: Int, capacity: Int?, send_waiters: Int, recv_waiters: Int, closed: Bool }
-JetLiveRuntime: struct { elapsed_ns: Int, cpu_ns: Int?, exit: Bool }
-JetLiveEvent: struct {
-    sequence: Int, source: String, event_id: Int, owner_id: Int, subscription_id: Int,
-    dispatch_id: Int, lifecycle: String, queued: Int, blocked: Int, running: Int,
-    capacity: Int, overflow: String, priority: Int, failure: String, terminal: String
+JetLiveValue: struct {
+    value_id: String
+    type_identity: String
+    disposition: String
+    reason: String
+    rendered_value: String?
 }
+
+JetLiveTask: struct {
+    id: Int
+    parent: Int
+    state: String
+    wait: String
+    deadline_ms: Int?
+    cancelled: Bool
+}
+
+JetLiveChannel: struct {
+    id: Int
+    depth: Int
+    capacity: Int?
+    send_waiters: Int
+    recv_waiters: Int
+    closed: Bool
+}
+
+JetLiveRuntime: struct {
+    elapsed_ns: Int
+    cpu_ns: Int?
+    exit: Bool
+}
+
+JetLiveEvent: struct {
+    sequence: Int
+    source: String
+    event_id: Int
+    owner_id: Int
+    subscription_id: Int
+    dispatch_id: Int
+    lifecycle: String
+    queued: Int
+    blocked: Int
+    running: Int
+    capacity: Int
+    overflow: String
+    priority: Int
+    failure: String
+    terminal: String
+}
+
 // start_id and runtime.cpu_ns come from the process (jet_live_bind);
 // boot_ns, start_ticks and clock_hz are the writer's facts for that binding.
 // `events` is a reader's rendering of event_records; the codec leaves it None.
 JetLiveSnapshot: struct {
-    protocol: String, session_id: String, source_id: String, build_id: String,
-    revision: String, world_id: String, pid: Int, start_id: String, captured_ms: Int,
-    values: [JetLiveValue], tasks: [JetLiveTask], channels: [JetLiveChannel],
-    effects: [String:Int], resources: [String:Int], runtime: JetLiveRuntime,
-    event_records: [JetLiveEvent], events: String?,
-    boot_ns: U64, start_ticks: U64, clock_hz: Int
+    protocol: String
+    session_id: String
+    source_id: String
+    build_id: String
+    revision: String
+    world_id: String
+    pid: Int
+    start_id: String
+    captured_ms: Int
+    values: [JetLiveValue]
+    tasks: [JetLiveTask]
+    channels: [JetLiveChannel]
+    effects: [String:Int]
+    resources: [String:Int]
+    runtime: JetLiveRuntime
+    event_records: [JetLiveEvent]
+    events: String?
+    boot_ns: U64
+    start_ticks: U64
+    clock_hz: Int
 }
 
 #Error
-JetLiveSnapshotError: struct { message: String }
+JetLiveSnapshotError: struct {
+    message: String
+}
 
 jet_live_error: fn(message: String) -> JetLiveSnapshotError Never! {
     JetLiveSnapshotError{message: message}
@@ -41,18 +98,26 @@ jet_live_error: fn(message: String) -> JetLiveSnapshotError Never! {
 
 // "JETLIVE1" as a little-endian word.
 JET_LIVE_MAGIC: U64{3550338754064696650}
+
 JET_LIVE_ABSENT: U64{18446744073709551615}
+
 JET_LIVE_INT_MAX: U64{9223372036854775807}
 
-JetLiveCursor: struct { bytes: [U8], at: Int }
+JetLiveCursor: struct {
+    bytes: [U8]
+    at: Int
+}
 
 jet_live_word: fn(cursor: &JetLiveCursor) -> U64 JetLiveSnapshotError! {
-    if cursor.bytes.len() - cursor.at < 8 -> return Err(jet_live_error("live runtime snapshot is truncated"))
+    if cursor.bytes.len() - cursor.at < 8 {
+        return Err(jet_live_error("live runtime snapshot is truncated"))
+    }
     value := U64{0}
     loop index in 0..<8 -> value = value.bit_or(U64{cursor.bytes[cursor.at + index]} << (index * 8))
     cursor.at += 8
     Ok(value)
 }
+
 // Unsigned runtime words above Int's range saturate, as the reference
 // codec's i64 cast does.
 jet_live_unsigned: fn(cursor: &JetLiveCursor) -> Int JetLiveSnapshotError! {
@@ -60,19 +125,24 @@ jet_live_unsigned: fn(cursor: &JetLiveCursor) -> Int JetLiveSnapshotError! {
     if value > JET_LIVE_INT_MAX -> return Ok(9223372036854775807)
     Ok(Int{value})
 }
+
 jet_live_signed: fn(cursor: &JetLiveCursor) -> Int JetLiveSnapshotError! {
     value: jet_live_word(cursor)
     if value <= JET_LIVE_INT_MAX -> return Ok(Int{value})
     Ok(Int{value - JET_LIVE_INT_MAX - U64{1}} + (-9223372036854775807 - 1))
 }
+
 jet_live_raw: fn(cursor: &JetLiveCursor) -> [U8]? JetLiveSnapshotError! {
     length: jet_live_word(cursor)
     if length == JET_LIVE_ABSENT -> return Ok(None)
-    if length > (U64{cursor.bytes.len() - cursor.at}) -> return Err(jet_live_error("live runtime snapshot is truncated"))
+    if length > (U64{cursor.bytes.len() - cursor.at}) {
+        return Err(jet_live_error("live runtime snapshot is truncated"))
+    }
     start: cursor.at
     cursor.at += Int{length}
     Ok(Val(cursor.bytes[start..<cursor.at].copy()))
 }
+
 // Observe's text contract: every Unicode Cc control (C0, DEL, C1) shows as
 // one space. The runtime already bounded the text to 160 scalars.
 jet_live_shown: fn(raw: [U8], label: String) -> String JetLiveSnapshotError! {
@@ -93,35 +163,46 @@ jet_live_shown: fn(raw: [U8], label: String) -> String JetLiveSnapshotError! {
     }
     Ok(String.from_bytes(out) ?? return Err(jet_live_error("{label} is not valid UTF-8")))
 }
+
 // An absent text shows as "", except where the view keeps absence.
 jet_live_read_text: fn(cursor: &JetLiveCursor, label: String) -> String JetLiveSnapshotError! {
     raw: jet_live_raw(cursor)
     jet_live_shown(raw ?? [U8]{}, label)
 }
+
 jet_live_read_optional: fn(cursor: &JetLiveCursor, label: String) -> String? JetLiveSnapshotError! {
     raw: jet_live_raw(cursor)
     if raw == .Val(present) -> return Ok(Val(jet_live_shown(present, label)))
     Ok(None)
 }
+
 jet_live_starts: fn(raw: [U8], prefix: String) -> Bool Never! {
     expected: prefix.bytes()
     if raw.len() < expected.len() -> return false
-    loop index in 0..<expected.len() { if raw[index] != expected[index] -> return false }
+    loop index in 0..<expected.len() {
+        if raw[index] != expected[index] -> return false
+    }
     true
 }
+
 jet_live_contains: fn(raw: [U8], word: String) -> Bool Never! {
     expected: word.bytes()
     if raw.len() < expected.len() -> return false
     loop start in 0..<raw.len() - expected.len() + 1 {
         found := true
-        loop index in 0..<expected.len() { if raw[start + index] != expected[index] -> found = false }
+        loop index in 0..<expected.len() {
+            if raw[start + index] != expected[index] -> found = false
+        }
         if found -> return true
     }
     false
 }
+
 jet_live_decode: fn(bytes: [U8]) -> JetLiveSnapshot JetLiveSnapshotError! {
     cursor := JetLiveCursor{bytes: bytes, at: 0}
-    if jet_live_word(cursor) != JET_LIVE_MAGIC -> return Err(jet_live_error("live runtime snapshot has an unsupported schema version"))
+    if jet_live_word(cursor) != JET_LIVE_MAGIC {
+        return Err(jet_live_error("live runtime snapshot has an unsupported schema version"))
+    }
     _: jet_live_word(cursor)
     pid: jet_live_unsigned(cursor)
     captured_ms: jet_live_unsigned(cursor)
@@ -131,7 +212,9 @@ jet_live_decode: fn(bytes: [U8]) -> JetLiveSnapshot JetLiveSnapshotError! {
     clock_hz: jet_live_signed(cursor)
     exit: jet_live_word(cursor) != U64{0}
     resources := [String:Int]{}
-    loop key in ([String]{"arenas", "arena_allocations", "arena_bytes", "workers", "queued"}) -> resources[key] = jet_live_unsigned(cursor)
+    loop key in ([String]{"arenas", "arena_allocations", "arena_bytes", "workers", "queued"}) {
+        resources[key] = jet_live_unsigned(cursor)
+    }
     session_id: jet_live_read_text(cursor, "live runtime snapshot `session_id`")
     source_id: jet_live_read_text(cursor, "live runtime snapshot `source_id`")
     build_id: jet_live_read_text(cursor, "live runtime snapshot `build_id`")
@@ -149,11 +232,15 @@ jet_live_decode: fn(bytes: [U8]) -> JetLiveSnapshot JetLiveSnapshotError! {
     loop {
         section: jet_live_unsigned(cursor)
         if section == 0 -> break
-        if seen.contains(section) -> return Err(jet_live_error("live runtime snapshot repeats a section"))
+        if seen.contains(section) {
+            return Err(jet_live_error("live runtime snapshot repeats a section"))
+        }
         seen.push(section)
         count: jet_live_unsigned(cursor)
         if section == 1 {
-            if count > 4096 -> return Err(jet_live_error("live runtime snapshot has too many tasks"))
+            if count > 4096 {
+                return Err(jet_live_error("live runtime snapshot has too many tasks"))
+            }
             loop _ in 0..<count {
                 id: jet_live_unsigned(cursor)
                 parent: jet_live_unsigned(cursor)
@@ -169,9 +256,15 @@ jet_live_decode: fn(bytes: [U8]) -> JetLiveSnapshot JetLiveSnapshotError! {
                 // The effect counters read the recorded wait, before display.
                 if state_word == (U64{2}) {
                     effects["waiting"] = (effects.get("waiting") ?? 0) + 1
-                    if jet_live_starts(wait_raw, "channel ") -> effects["channel"] = (effects.get("channel") ?? 0) + 1
-                    if jet_live_starts(wait_raw, "time ") -> effects["time"] = (effects.get("time") ?? 0) + 1
-                    if jet_live_contains(wait_raw, "tcp") || jet_live_contains(wait_raw, "network") || jet_live_starts(wait_raw, "udp ") || jet_live_starts(wait_raw, "unix ") || jet_live_starts(wait_raw, "io ") -> effects["io"] = (effects.get("io") ?? 0) + 1
+                    if jet_live_starts(wait_raw, "channel ") {
+                        effects["channel"] = (effects.get("channel") ?? 0) + 1
+                    }
+                    if jet_live_starts(wait_raw, "time ") {
+                        effects["time"] = (effects.get("time") ?? 0) + 1
+                    }
+                    if jet_live_contains(wait_raw, "tcp") || jet_live_contains(wait_raw, "network") || jet_live_starts(wait_raw, "udp ") || jet_live_starts(wait_raw, "unix ") || jet_live_starts(wait_raw, "io ") {
+                        effects["io"] = (effects.get("io") ?? 0) + 1
+                    }
                 }
                 if task_cancelled -> cancelled += 1
                 if state_word == (U64{1}) -> running += 1
@@ -189,15 +282,21 @@ jet_live_decode: fn(bytes: [U8]) -> JetLiveSnapshot JetLiveSnapshotError! {
                 channels.push(JetLiveChannel{id: id, depth: depth, capacity: if bounded -> Val(capacity) else -> None, send_waiters: send_waiters, recv_waiters: recv_waiters, closed: closed})
             }
         } else if section == 3 {
-            if count > 4096 -> return Err(jet_live_error("live runtime snapshot has too many values"))
+            if count > 4096 {
+                return Err(jet_live_error("live runtime snapshot has too many values"))
+            }
             loop _ in 0..<count {
                 value_id: jet_live_read_text(cursor, "live value `value_id`")
                 type_identity: jet_live_read_text(cursor, "live value `type_identity`")
                 disposition: jet_live_read_text(cursor, "live value `disposition`")
                 reason: jet_live_read_text(cursor, "live value `reason`")
                 rendered: jet_live_read_optional(cursor, "live value `rendered_value`")
-                if (![String]{"kept", "migrated", "reset", "rejected"}.contains(disposition)) -> return Err(jet_live_error("live value has an unsupported disposition"))
-                if rendered == .Val(shown) && shown.bytes().len() > 16384 -> return Err(jet_live_error("live value `rendered_value` exceeds the Prelude limit"))
+                if (![String]{"kept", "migrated", "reset", "rejected"}.contains(disposition)) {
+                    return Err(jet_live_error("live value has an unsupported disposition"))
+                }
+                if rendered == .Val(shown) && shown.bytes().len() > 16384 {
+                    return Err(jet_live_error("live value `rendered_value` exceeds the Prelude limit"))
+                }
                 values.push(JetLiveValue{value_id: value_id, type_identity: type_identity, disposition: disposition, reason: reason, rendered_value: rendered})
             }
         } else if section == 4 {
@@ -219,11 +318,11 @@ jet_live_decode: fn(bytes: [U8]) -> JetLiveSnapshot JetLiveSnapshotError! {
                 terminal: jet_live_read_text(cursor, "runtime event observation `terminal`")
                 events.push(JetLiveEvent{sequence: sequence, source: source, event_id: event_id, owner_id: owner_id, subscription_id: subscription_id, dispatch_id: dispatch_id, lifecycle: lifecycle, queued: queued, blocked: blocked, running: event_running, capacity: capacity, overflow: overflow, priority: priority, failure: failure, terminal: terminal})
             }
-        } else {
-            return Err(jet_live_error("live runtime snapshot has an unknown section"))
-        }
+        } else { return Err(jet_live_error("live runtime snapshot has an unknown section")) }
     }
-    if cursor.at != bytes.len() -> return Err(jet_live_error("live runtime snapshot has trailing bytes"))
+    if cursor.at != bytes.len() {
+        return Err(jet_live_error("live runtime snapshot has trailing bytes"))
+    }
     // The registries are id-ordered views; at most 4096 channels are shown.
     tasks.sort_by(fn(left: JetLiveTask, right: JetLiveTask) { left.id <=> right.id })
     channels.sort_by(fn(left: JetLiveChannel, right: JetLiveChannel) { left.id <=> right.id })
@@ -246,11 +345,13 @@ jet_live_stat_ticks: fn(text: String) -> U64? Never! {
     }
     Val(value)
 }
+
 // Ticks in nanoseconds, only below the reference's overflow bound.
 jet_live_ticks_ns: fn(ticks: U64, hz: Int) -> U64? Never! {
     if hz <= 0 || ticks > (U64{18446744073}) -> return None
     Val(ticks * U64{1000000000} /% U64{hz})
 }
+
 // The whitespace-separated fields of /proc/<pid>/stat after the comm.
 jet_live_stat_fields: fn(text: String) -> [String] Never! {
     fields := [String]{}
@@ -259,6 +360,7 @@ jet_live_stat_fields: fn(text: String) -> [String] Never! {
     }
     fields
 }
+
 // Binds the snapshot to the process from its /proc/<pid>/stat text. The
 // process start (field 22) must not follow the writer's boot-clock start,
 // so a reused pid's stale snapshot is refused; utime and stime (fields 14
@@ -271,7 +373,9 @@ jet_live_bind: fn(snapshot: &JetLiveSnapshot, stat: String) JetLiveSnapshotError
     if fields.len() <= 19 -> return Err(jet_live_error("process identity stat is truncated"))
     started: jet_live_stat_ticks(fields[19]) ?? return Err(jet_live_error("process identity stat is malformed"))
     hz: snapshot.clock_hz
-    if hz <= 0 || hz > 1000000000 || started > snapshot.boot_ns /% (U64{1000000000} /% U64{hz}) -> return Err(jet_live_error("live runtime snapshot does not belong to process {snapshot.pid}"))
+    if hz <= 0 || hz > 1000000000 || started > snapshot.boot_ns /% (U64{1000000000} /% U64{hz}) {
+        return Err(jet_live_error("live runtime snapshot does not belong to process {snapshot.pid}"))
+    }
     snapshot.start_id = fields[19]
     utime: jet_live_stat_ticks(fields[11])
     stime: jet_live_stat_ticks(fields[12])
@@ -293,8 +397,11 @@ jet_live_snapshot_path: fn(pid: Int) -[Env]> String {
     if dir == "/" -> return "/jet-observe-{pid}.json"
     "{dir}/jet-observe-{pid}.json"
 }
+
 jet_live_process_stat: fn(pid: Int) -[FS, Time.Wait]> String JetLiveSnapshotError! {
-    if !live_files.is_dir("/proc/{pid}") -> return Err(jet_live_error("process {pid} is no longer running"))
+    if !live_files.is_dir("/proc/{pid}") {
+        return Err(jet_live_error("process {pid} is no longer running"))
+    }
     reader := live_files.open("/proc/{pid}/stat") ?? return Err(jet_live_error("cannot verify process {pid} identity"))
     bytes := [U8]{}
     loop {
@@ -305,23 +412,34 @@ jet_live_process_stat: fn(pid: Int) -[FS, Time.Wait]> String JetLiveSnapshotErro
     }
     Ok(String.from_bytes(bytes) ?? return Err(jet_live_error("cannot verify process {pid} identity")))
 }
+
 // The secure transport: the descriptor opened without following a final link
 // is retained for the whole bounded read. An explicit path is the private
 // boundary filesystem witnesses use; command callers pass
 // `jet_live_snapshot_path(pid)`. The snapshot must belong to `pid`, be fresh,
 // and on Linux/Android carry the process start identity from /proc.
 jet_live_read: fn(pid: Int, path: String) -[FS, Env, Time]> JetLiveSnapshot JetLiveSnapshotError! {
-    if pid <= 0 || pid > 4294967295 -> return Err(jet_live_error("process id must be greater than zero and fit u32"))
+    if pid <= 0 || pid > 4294967295 {
+        return Err(jet_live_error("process id must be greater than zero and fit u32"))
+    }
     entry: live_files.stat(path) ?? return Err(jet_live_error("no live Jet runtime is observable at process {pid}"))
-    if !entry.is_file || entry.is_symlink -> return Err(jet_live_error("live runtime snapshot is not a regular file"))
+    if !entry.is_file || entry.is_symlink {
+        return Err(jet_live_error("live runtime snapshot is not a regular file"))
+    }
     reader := live_files.open(path, links: .Refuse) ?? return Err(jet_live_error("cannot securely open live runtime snapshot for process {pid}"))
     before: reader.stat() ?? return Err(jet_live_error("cannot inspect live runtime snapshot: {err}"))
     if !before.is_file -> return Err(jet_live_error("live runtime snapshot is not a regular file"))
     if live_sys.is_unix() {
-        if (before.mode.bit_and(0o077)) != 0 -> return Err(jet_live_error("live runtime snapshot permissions expose runtime state"))
-        if before.owner != Val(live_sys.getuid()) -> return Err(jet_live_error("live runtime snapshot belongs to another user"))
+        if (before.mode.bit_and(0o077)) != 0 {
+            return Err(jet_live_error("live runtime snapshot permissions expose runtime state"))
+        }
+        if before.owner != Val(live_sys.getuid()) {
+            return Err(jet_live_error("live runtime snapshot belongs to another user"))
+        }
     }
-    if before.size > 1048576 -> return Err(jet_live_error("live runtime snapshot exceeds the 1 MiB safety limit"))
+    if before.size > 1048576 {
+        return Err(jet_live_error("live runtime snapshot exceeds the 1 MiB safety limit"))
+    }
     bytes := [U8]{}
     bytes.try_reserve(if before.size < 65536 -> before.size else -> 65536) ?? panic("live snapshot allocation failed")
     loop {
@@ -329,13 +447,21 @@ jet_live_read: fn(pid: Int, path: String) -[FS, Env, Time]> JetLiveSnapshot JetL
         chunk: reader.read_bytes(if room < 65536 -> room else -> 65536) ?? return Err(jet_live_error("cannot read live runtime snapshot: {err}"))
         if chunk.len() == 0 -> break
         loop byte in chunk -> bytes.push(byte)
-        if bytes.len() > 1048576 -> return Err(jet_live_error("live runtime snapshot exceeds the 1 MiB safety limit"))
+        if bytes.len() > 1048576 {
+            return Err(jet_live_error("live runtime snapshot exceeds the 1 MiB safety limit"))
+        }
     }
     snapshot := jet_live_decode(bytes) ?? return Err(jet_live_error("live runtime snapshot has an invalid or unsafe schema: {err.message}"))
-    if snapshot.pid != pid -> return Err(jet_live_error("live runtime snapshot does not belong to process {pid}"))
+    if snapshot.pid != pid {
+        return Err(jet_live_error("live runtime snapshot does not belong to process {pid}"))
+    }
     now_ms: live_time.unix_ns() /% 1000000
-    if now_ms > snapshot.captured_ms && now_ms - snapshot.captured_ms > 2000 -> return Err(jet_live_error("process {pid} is not publishing a live runtime snapshot"))
+    if now_ms > snapshot.captured_ms && now_ms - snapshot.captured_ms > 2000 {
+        return Err(jet_live_error("process {pid} is not publishing a live runtime snapshot"))
+    }
     platform: live_sys.name()
-    if platform == "linux" || platform == "android" -> jet_live_bind(snapshot, jet_live_process_stat(pid))
+    if platform == "linux" || platform == "android" {
+        jet_live_bind(snapshot, jet_live_process_stat(pid))
+    }
     Ok(snapshot)
 }

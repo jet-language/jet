@@ -6,12 +6,13 @@ use greet
 build: fn(b: Build) -[Meta.Rewrite]> {
     app: b.add_executable("app", ["run.jet"], [])
     meta: b.compiler(app)
-    meta.rewrite_body(greet.hello, #code {
-        "rewritten by the root"
-    })
+    meta.rewrite_body(
+        greet.hello,
+        #code {
+            "rewritten by the root"
+        },
+    )
     b.default(app)
 }
 
-run: fn() {
-    print(greet.hello())
-}
+run: fn() { print(greet.hello()) }

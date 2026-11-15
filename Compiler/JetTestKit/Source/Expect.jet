@@ -1,6 +1,5 @@
 use files: core.files
 
-
 kit_expect_verdict: fn(status: String, detail: String) -> KitVerdict {
     KitVerdict{status: status, detail: detail, diff: ""}
 }
@@ -25,7 +24,9 @@ kit_expect_unified: fn(path: String, expected: String, actual: String) -> String
 kit_expect_diagnostics: fn(text: String) -[]> Int Never! {
     count := 0
     loop line in text.split("\n") {
-        if line.starts_with("Error [") || line.starts_with("Warning [") || line.starts_with("Stop [") -> count += 1
+        if line.starts_with("Error [") || line.starts_with("Warning [") || line.starts_with("Stop [") {
+            count += 1
+        }
     }
     count
 }
@@ -51,11 +52,13 @@ kit_expect_exact_with_count: fn(id: String, path: String, expected: String?, act
             old = value
             present = true
         }
-        .None -> { }
+        .None -> {}
     }
     if present && old == actual -> return kit_expect_verdict("PASS", "")
     if bless.first_tier && (bless.all || kit_expect_named(bless.ids, id)) {
-        if count(actual) < count(old) && !kit_expect_named(bless.allow_shrink, id) -> return kit_expect_verdict("REFUSED", "diagnostic shrink requires --allow-shrink {id}")
+        if count(actual) < count(old) && !kit_expect_named(bless.allow_shrink, id) {
+            return kit_expect_verdict("REFUSED", "diagnostic shrink requires --allow-shrink {id}")
+        }
         files.create_dir_all(files.dirname(path)) ?? return kit_expect_verdict("ERROR", "mkdir snapshot: {err}")
         files.write_atomic(path, actual.bytes()) ?? return kit_expect_verdict("ERROR", "write snapshot: {err}")
         return kit_expect_verdict("PASS", "blessed {path}")
@@ -67,13 +70,17 @@ kit_expect_exact_with_count: fn(id: String, path: String, expected: String?, act
 kit_expect_no_count: fn(text: String) -[]> Int Never! { 0 }
 
 kit_expect_exact: fn(id: String, path: String, expected: String?, actual: String, bless: KitBless, diagnostic: Bool) -> KitVerdict {
-    if diagnostic -> return kit_expect_exact_with_count(id, path, expected, actual, bless, fn(text: String) -[]> { kit_expect_diagnostics(text) })
+    if diagnostic {
+        return kit_expect_exact_with_count(id, path, expected, actual, bless, fn(text: String) -[]> { kit_expect_diagnostics(text) })
+    }
     kit_expect_exact_with_count(id, path, expected, actual, bless, fn(text: String) -[]> { kit_expect_no_count(text) })
 }
 
 kit_expect_exact_bytes: fn(id: String, path: String, expected: [U8]?, actual: [U8], bless: KitBless) -> KitVerdict {
     if expected == {
-        .Val(bytes) -> { if bytes == actual -> return kit_expect_verdict("PASS", "") }
+        .Val(bytes) -> {
+            if bytes == actual -> return kit_expect_verdict("PASS", "")
+        }
         .None -> {}
     }
     if bless.first_tier && (bless.all || kit_expect_named(bless.ids, id)) {

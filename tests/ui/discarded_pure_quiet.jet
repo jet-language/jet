@@ -24,9 +24,7 @@ logged_double: fn(n: Int) -> Int {
     n * 2
 }
 
-announce: fn(n: Int) {
-    print(n)
-}
+announce: fn(n: Int) { print(n) }
 
 apply: fn(f: fn(Int) -> Int, n: Int) -> Int { f(n) }
 
@@ -44,6 +42,7 @@ double: fn(n: Int) -> Int { n * 2 }
 
 // An explicitly infallible no-arrow function still has no result to discard.
 quiet_unit: fn() Never! {}
+
 audited_unit: fn() Never! {
     #Unsafe("the test deliberately keeps this stderr write behind its audit boundary") {
         print("audited unit")
@@ -61,10 +60,13 @@ run: fn() {
     each := fn() { quiet_unit() }
     each()
     // A callback argument brings its own effects to this call site.
-    apply(fn(x: Int) {
-        print(x)
-        x
-    }, 4)
+    apply(
+        fn(x: Int) {
+            print(x)
+            x
+        },
+        4,
+    )
     // A generic callee's effects come from the trait bound it dispatches.
     measure(Square{side: 2})
     // Writing through `&` changes the caller's value, so the call is not pure.

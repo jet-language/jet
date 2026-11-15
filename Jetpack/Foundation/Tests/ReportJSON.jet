@@ -2,7 +2,10 @@ use {
     report_json_math: core.math
     report_json_codec: core.encoding.json
     jetpack_foundation.[
-        ReportEnvelope, StatusEnvelope, StatusFields, report_render_status,
+        ReportEnvelope,
+        StatusEnvelope,
+        StatusFields,
+        report_render_status,
         report_render_status_with_reports,
     ]
 }
@@ -13,19 +16,19 @@ use {
         fields: StatusFields.new().with("value", Dyn.Float(number))
         envelope: StatusEnvelope.new("json", true).with_fields(fields)
         if envelope.json() == {
-            .Ok(_) -> panic("non-finite status JSON accepted")
+            .Ok(_) -> { panic("non-finite status JSON accepted") }
             .Err(error) -> assert_eq(error.message, "JSON cannot encode a non-finite Float")
         }
         if envelope.json_line() == {
-            .Ok(_) -> panic("non-finite status JSON line accepted")
+            .Ok(_) -> { panic("non-finite status JSON line accepted") }
             .Err(error) -> assert_eq(error.message, "JSON cannot encode a non-finite Float")
         }
         if report_render_status("json", true, fields) == {
-            .Ok(_) -> panic("non-finite report status accepted")
+            .Ok(_) -> { panic("non-finite report status accepted") }
             .Err(error) -> assert_eq(error.message, "JSON cannot encode a non-finite Float")
         }
         if report_render_status_with_reports("json", true, [ReportEnvelope]{}, fields) == {
-            .Ok(_) -> panic("non-finite report status with reports accepted")
+            .Ok(_) -> { panic("non-finite report status with reports accepted") }
             .Err(error) -> assert_eq(error.message, "JSON cannot encode a non-finite Float")
         }
     }
@@ -42,6 +45,8 @@ use {
     value: tree.field("value") ?? panic("status value")
     if value == {
         .Number(lexeme) -> assert_eq(lexeme, "1.25")
-        .Null | .Bool(_) | .Int(_) | .Float(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> panic("status value must stay the JSON number 1.25")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {
+            panic("status value must stay the JSON number 1.25")
+        }
     }
 }

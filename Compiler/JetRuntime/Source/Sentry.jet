@@ -6,28 +6,40 @@
 // Source literals borrowed by gate scopes remain alive with the calling image.
 // S36 metadata and the stop boundary share this fault status.
 SENTRY_RUNTIME_EXIT_CODE: EXIT_RUNTIME_PANIC
+
 sentry_root := I64{0}
 
 // runtime-init: 4 when sentry_root
 #Export(c) jet_rt_sentry_init: fn() {
-    if (sentry_root != I64{0}) -> return
+    if (sentry_root != I64{0}) {
+        return
+    }
     root: jet_rt_alloc(I64{112}, I64{8})
     #Unsafe("runtime-init runs before any other thread exists") { sentry_root = root }
     thread_zero(sentry_root, I64{112})
     sync_store(wrapping(sentry_root + I64{24}), I64{1})
 }
+
 sentry_available: fn() -> Bool {
     sync_load(wrapping(sentry_root + I64{16})) == I64{0} || sync_load(wrapping(sentry_root + I64{8})) != I64{0} || sync_load(wrapping(thread_base() + I64{176})) != I64{0}
 }
-#Export(c) jet_rt_sentry_set_hardened: fn(enabled: I64) { _ := sync_swap(wrapping(sentry_root + I64{8}), enabled) }
-#Export(c) jet_rt_sentry_set_release: fn(enabled: I64) { _ := sync_swap(wrapping(sentry_root + I64{16}), enabled) }
+
+#Export(c) jet_rt_sentry_set_hardened: fn(enabled: I64) {
+    _ := sync_swap(wrapping(sentry_root + I64{8}), enabled)
+}
+
+#Export(c) jet_rt_sentry_set_release: fn(enabled: I64) {
+    _ := sync_swap(wrapping(sentry_root + I64{16}), enabled)
+}
+
 sentry_save: fn(save: I64) { coll_copy(wrapping(thread_base() + I64{128}), save, I64{56}) }
+
 #Export(c) jet_rt_sentry_scope_enter: fn(save: I64, enabled: I64, fenced: I64, file: I64, file_len: I64, line: I64, reason: I64, reason_len: I64) {
     sentry_save(save)
     base: thread_base()
     if (fenced != I64{0}) {
         depth: sync_load(wrapping(base + I64{176}))
-        if (depth != I64{-1}) -> sync_store(wrapping(base + I64{176}), wrapping(depth + I64{1}))
+        if (depth != I64{-1}) { sync_store(wrapping(base + I64{176}), wrapping(depth + I64{1})) }
     }
     sync_store(wrapping(base + I64{128}), if (enabled != I64{0} && sentry_available()) -> I64{1} else -> I64{0})
     sync_store(wrapping(base + I64{136}), file)
@@ -36,16 +48,22 @@ sentry_save: fn(save: I64) { coll_copy(wrapping(thread_base() + I64{128}), save,
     sync_store(wrapping(base + I64{160}), reason)
     sync_store(wrapping(base + I64{168}), reason_len)
 }
+
 #Export(c) jet_rt_sentry_policy_enter: fn(save: I64, enabled: I64) {
     sentry_save(save)
     sync_store(wrapping(thread_base() + I64{128}), if (enabled != I64{0} && sentry_available()) -> I64{1} else -> I64{0})
 }
-#Export(c) jet_rt_sentry_scope_leave: fn(save: I64) { coll_copy(save, wrapping(thread_base() + I64{128}), I64{56}) }
+
+#Export(c) jet_rt_sentry_scope_leave: fn(save: I64) {
+    coll_copy(save, wrapping(thread_base() + I64{128}), I64{56})
+}
+
 sentry_sequence: fn() -> I64 {
     sequence: wrapping(sync_load(wrapping(sentry_root + I64{32})) + I64{1})
     sync_store(wrapping(sentry_root + I64{32}), sequence)
     sequence
 }
+
 sentry_stack: fn() -> I64 {
     stack := sync_load(wrapping(thread_base() + I64{184}))
     if (stack == I64{0}) {
@@ -55,6 +73,7 @@ sentry_stack: fn() -> I64 {
     }
     stack
 }
+
 #Export(c) jet_rt_sentry_frame_enter: fn() -> I64 {
     if !sentry_available() -> return I64{0}
     frame: jet_rt_alloc(I64{32}, I64{8})
@@ -67,17 +86,22 @@ sentry_stack: fn() -> I64 {
     scheduler_words_push(sentry_stack(), frame)
     frame
 }
+
 sentry_current_frame: fn() -> I64 {
     stack: sync_load(wrapping(thread_base() + I64{184}))
-    if (stack == I64{0} || sync_load(stack) == I64{0}) -> return I64{0}
+    if (stack == I64{0} || sync_load(stack) == I64{0}) { return I64{0} }
     sync_load(wrapping(sync_load(wrapping(stack + I64{16})) + (sync_load(stack) - I64{1}) * I64{8}))
 }
+
 sentry_words_remove: fn(header: I64, at: I64, width: I64) {
     count: sync_load(header) - width
     data: sync_load(wrapping(header + I64{16}))
-    if at < count -> coll_copy(wrapping(data + count * I64{8}), wrapping(data + at * I64{8}), width * I64{8})
+    if at < count {
+        coll_copy(wrapping(data + count * I64{8}), wrapping(data + at * I64{8}), width * I64{8})
+    }
     sync_store(header, count)
 }
+
 sentry_expire: fn(start: I64, length: I64, sequence: I64) {
     header: wrapping(sentry_root + I64{64})
     data: sync_load(wrapping(header + I64{16}))
@@ -85,7 +109,9 @@ sentry_expire: fn(start: I64, length: I64, sequence: I64) {
     loop at < sync_load(header) {
         row: wrapping(data + at * I64{8})
         if (sync_load(row) == start && sync_load(wrapping(row + I64{8})) == length) {
-            if world_unsigned_before(sync_load(wrapping(row + I64{16})), sequence) -> sync_store(wrapping(row + I64{16}), sequence)
+            if world_unsigned_before(sync_load(wrapping(row + I64{16})), sequence) {
+                sync_store(wrapping(row + I64{16}), sequence)
+            }
             return
         }
         at += I64{3}
@@ -94,8 +120,11 @@ sentry_expire: fn(start: I64, length: I64, sequence: I64) {
     scheduler_words_push(header, length)
     scheduler_words_push(header, sequence)
 }
+
 #Export(c) jet_rt_sentry_frame_leave: fn(frame: I64) {
-    if (frame == I64{0}) -> return
+    if (frame == I64{0}) {
+        return
+    }
     stack: sync_load(wrapping(thread_base() + I64{184}))
     count: sync_load(stack)
     data: sync_load(wrapping(stack + I64{16}))
@@ -134,18 +163,24 @@ sentry_expire: fn(start: I64, length: I64, sequence: I64) {
     }
     sync_mutex_unlock(sentry_root)
     capacity: sync_load(wrapping(header + I64{8}))
-    if (capacity != I64{0}) -> jet_rt_free(rows, capacity * I64{8}, I64{8})
+    if (capacity != I64{0}) { jet_rt_free(rows, capacity * I64{8}, I64{8}) }
     jet_rt_free(frame, I64{32}, I64{8})
 }
+
 sentry_thread_detach: fn() {
     stack: sync_load(wrapping(thread_base() + I64{184}))
-    if (stack == I64{0}) -> return
+    if (stack == I64{0}) {
+        return
+    }
     loop sync_load(stack) != (I64{0}) -> jet_rt_sentry_frame_leave(sentry_current_frame())
     scheduler_words_drop(stack)
     sync_store(wrapping(thread_base() + I64{184}), I64{0})
 }
+
 sentry_register: fn(owner: I64, frame: I64, start: I64, bytes: I64) {
-    if (!sentry_available() || start == I64{0}) -> return
+    if (!sentry_available() || start == I64{0}) {
+        return
+    }
     length: if (bytes == I64{0}) -> I64{1} else -> bytes
     sync_mutex_lock(sentry_root)
     sequence: sentry_sequence()
@@ -175,31 +210,47 @@ sentry_register: fn(owner: I64, frame: I64, start: I64, bytes: I64) {
     }
     sync_mutex_unlock(sentry_root)
 }
-#Export(c) jet_rt_sentry_register_allocation: fn(start: I64, bytes: I64) { sentry_register(I64{0}, I64{0}, start, bytes) }
-#Export(c) jet_rt_sentry_register_owned_allocation: fn(owner: I64, start: I64, bytes: I64) { sentry_register(owner, I64{0}, start, bytes) }
+
+#Export(c) jet_rt_sentry_register_allocation: fn(start: I64, bytes: I64) {
+    sentry_register(I64{0}, I64{0}, start, bytes)
+}
+
+#Export(c) jet_rt_sentry_register_owned_allocation: fn(owner: I64, start: I64, bytes: I64) {
+    sentry_register(owner, I64{0}, start, bytes)
+}
+
 #Export(c) jet_rt_sentry_register_stack_allocation: fn(start: I64, bytes: I64) {
     frame: sentry_current_frame()
-    if (frame != I64{0}) -> sentry_register(I64{0}, frame, start, bytes)
+    if (frame != I64{0}) { sentry_register(I64{0}, frame, start, bytes) }
 }
+
 #Export(c) jet_rt_sentry_stack_address_of: fn(start: I64, bytes: I64) -> I64 {
     jet_rt_sentry_register_stack_allocation(start, bytes)
     start
 }
+
 #Export(c) jet_rt_sentry_quarantine_owner: fn(owner: I64) {
-    if !sentry_available() -> return
+    if !sentry_available() {
+        return
+    }
     sync_mutex_lock(sentry_root)
     header: wrapping(sentry_root + I64{40})
     data: sync_load(wrapping(header + I64{16}))
     at := I64{0}
     loop at < sync_load(header) {
         row: wrapping(data + at * I64{8})
-        if (sync_load(wrapping(row + I64{24})) == owner) -> sync_store(wrapping(row + I64{16}), I64{0})
+        if (sync_load(wrapping(row + I64{24})) == owner) {
+            sync_store(wrapping(row + I64{16}), I64{0})
+        }
         at += I64{5}
     }
     sync_mutex_unlock(sentry_root)
 }
+
 #Export(c) jet_rt_sentry_quarantine: fn(start: I64, bytes: I64) {
-    if (!sentry_available() || start == I64{0}) -> return
+    if (!sentry_available() || start == I64{0}) {
+        return
+    }
     sync_mutex_lock(sentry_root)
     heap: wrapping(sentry_root + I64{40})
     data: sync_load(wrapping(heap + I64{16}))
@@ -239,6 +290,7 @@ sentry_register: fn(owner: I64, frame: I64, start: I64, bytes: I64) {
     }
     sync_mutex_unlock(sentry_root)
 }
+
 // `core.mem.unmapping`'s route: the pages `start ..< start + bytes` of a
 // mapping about to be unmapped leave the live heap storage. A live range
 // inside them goes, and one that overlaps them keeps only its parts
@@ -248,7 +300,9 @@ sentry_register: fn(owner: I64, frame: I64, start: I64, bytes: I64) {
 // therefore a provenance fault (R0801), and the kernel may map the
 // addresses again.
 #Export(c) jet_rt_sentry_unmap: fn(start: I64, bytes: I64) {
-    if (!sentry_available() || start == I64{0} || bytes <= I64{0}) -> return
+    if (!sentry_available() || start == I64{0} || bytes <= I64{0}) {
+        return
+    }
     end: sentry_range_end(start, bytes)
     sync_mutex_lock(sentry_root)
     heap: wrapping(sentry_root + I64{40})
@@ -287,17 +341,19 @@ sentry_register: fn(owner: I64, frame: I64, start: I64, bytes: I64) {
     }
     sync_mutex_unlock(sentry_root)
 }
+
 sentry_range_end: fn(start: I64, length: I64) -> I64 {
     end: wrapping(start + length)
     if world_unsigned_before(end, start) -> I64{-1} else -> end
 }
+
 // Return raw facts: 0 valid, 1 provenance, 2 heap expired, 3 alignment,
 // 4 stack expired, 5 live-range boundary. Provenance precedes alignment, and
 // a misaligned access that starts in live storage reports its alignment: the
 // aligned access it stands for would not run past the storage. Storage
 // registered live after an expiry at the same address shadows that expiry.
 #Export(c) jet_rt_sentry_check: fn(start: I64, bytes: I64, alignment: I64, strict: I64) -> I64 {
-    if (sync_load(wrapping(thread_base() + I64{128})) == I64{0}) -> return I64{0}
+    if (sync_load(wrapping(thread_base() + I64{128})) == I64{0}) { return I64{0} }
     length: if (bytes == I64{0}) -> I64{1} else -> bytes
     align: if (alignment == I64{0}) -> I64{1} else -> alignment
     end: wrapping(start + length)
@@ -319,7 +375,9 @@ sentry_range_end: fn(start: I64, length: I64) -> I64 {
         if (sync_load(wrapping(row + I64{16})) != I64{0}) {
             if inside && !world_unsigned_before(limit, start) {
                 starts_live = true
-                if world_unsigned_before(live_newest, sync_load(wrapping(row + I64{32}))) -> live_newest = sync_load(wrapping(row + I64{32}))
+                if world_unsigned_before(live_newest, sync_load(wrapping(row + I64{32}))) {
+                    live_newest = sync_load(wrapping(row + I64{32}))
+                }
             }
             if inside && !overflow && !world_unsigned_before(limit, end) -> live = true
         } else {
@@ -345,7 +403,9 @@ sentry_range_end: fn(start: I64, length: I64) -> I64 {
             inside: !world_unsigned_before(start, begin)
             if inside && !world_unsigned_before(limit, start) {
                 starts_live = true
-                if world_unsigned_before(live_newest, sync_load(wrapping(row + I64{16}))) -> live_newest = sync_load(wrapping(row + I64{16}))
+                if world_unsigned_before(live_newest, sync_load(wrapping(row + I64{16}))) {
+                    live_newest = sync_load(wrapping(row + I64{16}))
+                }
             }
             if inside && !overflow && !world_unsigned_before(limit, end) -> live = true
             at += I64{3}
@@ -376,10 +436,11 @@ sentry_range_end: fn(start: I64, length: I64) -> I64 {
     }
     sentry_checked_fault(fault, start, align)
 }
+
 // Each detected fault is observed, even if the caller returns
 // it instead of stopping. Classification is complete and its lock is released.
 sentry_checked_fault: fn(fault: I64, start: I64, alignment: I64) -> I64 {
-    if (fault == I64{0}) -> return fault
+    if (fault == I64{0}) { return fault }
     gate: sentry_gate_name()
     detail: sentry_detail(fault, start, alignment)
     sentry_ledger(fault, gate, detail)
@@ -387,6 +448,7 @@ sentry_checked_fault: fn(fault: I64, start: I64, alignment: I64) -> I64 {
     jet_rt_string_drop(detail)
     fault
 }
+
 // The access `site` packs the faulting access's source line (low 32 bits)
 // and column (high 32 bits); 0 when the caller has no source location, and
 // the report then names the gate's line alone.
@@ -398,6 +460,7 @@ sentry_checked_fault: fn(fault: I64, start: I64, alignment: I64) -> I64 {
     }
     start
 }
+
 // A named raw access (`volatile_read`, `volatile_write`): the strict check
 // of jet_rt_sentry_read, whose fault report names the operation, the static
 // text at `operation` (`operation_len` bytes).
@@ -411,7 +474,9 @@ sentry_checked_fault: fn(fault: I64, start: I64, alignment: I64) -> I64 {
 }
 
 sentry_remainder: fn(value: I64, divisor: I64) -> I64 {
-    if ((divisor.bit_and(wrapping(divisor - I64{1}))) == I64{0}) -> return value.bit_and(wrapping(divisor - I64{1}))
+    if ((divisor.bit_and(wrapping(divisor - I64{1}))) == I64{0}) {
+        return value.bit_and(wrapping(divisor - I64{1}))
+    }
     remainder := I64{0}
     shift := I64{63}
     loop {
@@ -420,7 +485,7 @@ sentry_remainder: fn(value: I64, divisor: I64) -> I64 {
         remainder = if !world_unsigned_before(remainder, gap) -> wrapping(remainder - gap) else -> wrapping(remainder + remainder)
         bit: (value >> shift).bit_and(I64{1})
         remainder = if (remainder == wrapping(divisor - I64{1}) && bit != I64{0}) -> I64{0} else -> wrapping(remainder + bit)
-        if (shift == I64{0}) -> break
+        if (shift == I64{0}) { break }
         shift -= I64{1}
     }
     remainder
@@ -430,12 +495,14 @@ sentry_append_owned: fn(text: I64, suffix: I64) {
     jet_rt_string_builder_push(text, suffix)
     jet_rt_string_drop(suffix)
 }
+
 sentry_append_number: fn(text: I64, number: I64) {
     scratch: scheduler_text_new(I64{20})
     count: world_decimal(sync_load(scratch), number)
     sync_store(wrapping(scratch + I64{8}), count)
     sentry_append_owned(text, scratch)
 }
+
 sentry_hex: fn(text: I64, value: I64) {
     shift := I64{60}
     started := false
@@ -445,10 +512,11 @@ sentry_hex: fn(text: I64, value: I64) {
             rt_text_push_scalar(text, if (digit < I64{10}) -> I64{48} + digit else -> I64{87} + digit)
             started = true
         }
-        if (shift == I64{0}) -> break
+        if (shift == I64{0}) { break }
         shift -= I64{4}
     }
 }
+
 // Debug quoting for source gate names; JSON quoting for ledger strings.
 sentry_quote: fn(text: I64, value: I64, json: Bool) {
     rt_text_push_scalar(text, I64{34})
@@ -465,7 +533,7 @@ sentry_quote: fn(text: I64, value: I64, json: Bool) {
             }
             (scalar == I64{10} || scalar == I64{13} || scalar == I64{9}) -> {
                 rt_text_push_scalar(text, I64{92})
-                rt_text_push_scalar(text, if (scalar == I64{10}) -> I64{110} else -> if (scalar == I64{13}) -> I64{114} else -> I64{116})
+                rt_text_push_scalar(text, if (scalar == I64{10}) -> I64{110} else if (scalar == I64{13}) -> I64{114} else -> I64{116})
             }
             (!json && scalar == I64{0}) -> {
                 rt_text_push_scalar(text, I64{92})
@@ -479,7 +547,7 @@ sentry_quote: fn(text: I64, value: I64, json: Bool) {
                     loop {
                         digit: (scalar >> shift).bit_and(I64{15})
                         rt_text_push_scalar(text, if (digit < I64{10}) -> I64{48} + digit else -> I64{87} + digit)
-                        if (shift == I64{0}) -> break
+                        if (shift == I64{0}) { break }
                         shift -= I64{4}
                     }
                 } else {
@@ -493,14 +561,18 @@ sentry_quote: fn(text: I64, value: I64, json: Bool) {
     }
     rt_text_push_scalar(text, I64{34})
 }
+
 sentry_gate_name: fn() -> I64 {
     base: thread_base()
-    if (sync_load(wrapping(base + I64{168})) != I64{0}) -> return rt_text_copy(sync_load(wrapping(base + I64{160})), sync_load(wrapping(base + I64{168})))
+    if (sync_load(wrapping(base + I64{168})) != I64{0}) {
+        return rt_text_copy(sync_load(wrapping(base + I64{160})), sync_load(wrapping(base + I64{168})))
+    }
     text: rt_text_copy(sync_load(wrapping(base + I64{136})), sync_load(wrapping(base + I64{144})))
     rt_text_push_scalar(text, I64{58})
     sentry_append_number(text, sync_load(wrapping(base + I64{152})))
     text
 }
+
 // `{gate}`, `{operation}`, `{detail}` and `{obligation}` fill a registry
 // template; R0801 and R0803 name `{detail}` (sentry_detail).
 sentry_template: fn(text: I64, template: I64, operation: I64, gate: I64, obligation: I64, detail: I64) {
@@ -510,10 +582,12 @@ sentry_template: fn(text: I64, template: I64, operation: I64, gate: I64, obligat
     loop at < end {
         if (trap_byte(wrapping(data + at)) == I64{123}) {
             finish := at + I64{1}
-            loop finish < end && trap_byte(wrapping(data + finish)) != (I64{125}) -> finish += I64{1}
+            loop finish < end && trap_byte(wrapping(data + finish)) != (I64{125}) {
+                finish += I64{1}
+            }
             if finish < end {
                 size: finish - at - I64{1}
-                value: if (size == I64{4}) -> gate else -> if (size == I64{9}) -> operation else -> if (size == I64{6} && detail != I64{0}) -> detail else -> obligation
+                value: if (size == I64{4}) -> gate else if (size == I64{9}) -> operation else if (size == I64{6} && detail != I64{0}) -> detail else -> obligation
                 jet_rt_string_builder_push(text, value)
                 at = finish + I64{1}
                 next
@@ -524,9 +598,11 @@ sentry_template: fn(text: I64, template: I64, operation: I64, gate: I64, obligat
     }
     jet_rt_string_drop(template)
 }
+
 sentry_code: fn(fault: I64) -> I64 {
-    if (fault == I64{2} || fault == I64{4}) -> I64{2} else -> if (fault == I64{3}) -> I64{3} else -> I64{1}
+    if (fault == I64{2} || fault == I64{4}) -> I64{2} else if (fault == I64{3}) -> I64{3} else -> I64{1}
 }
+
 // The live range an out-of-range access is measured against: the one with
 // the highest start at or below `start`, over live heap rows and live frame
 // rows. With none, the detail says no live allocation holds the address.
@@ -578,14 +654,13 @@ sentry_range_detail: fn(fault: I64, start: I64) -> I64 {
     sentry_hex(text, wrapping(best + best_length))
     sentry_append_owned(text, services_msg_sentry_size())
     sentry_append_number(text, best_length)
-    if (fault == I64{5}) {
-        sentry_append_owned(text, services_msg_sentry_past())
-    } else {
+    if (fault == I64{5}) { sentry_append_owned(text, services_msg_sentry_past()) } else {
         sentry_append_owned(text, services_msg_sentry_bytes())
         rt_text_push_scalar(text, I64{41})
     }
     text
 }
+
 // The fault's detail text: for R0801 the live range and the access's offset
 // in it, for R0803 the address and the alignment it needed.
 sentry_detail: fn(fault: I64, start: I64, alignment: I64) -> I64 {
@@ -603,6 +678,7 @@ sentry_detail: fn(fault: I64, start: I64, alignment: I64) -> I64 {
         else -> sentry_range_detail(fault, start)
     }
 }
+
 // The location line names the faulting access's line and column when the
 // caller passed its `site` (jet_rt_sentry_read), else the gate's line.
 sentry_report: fn(fault: I64, operation: I64, obligation: I64, component: I64, fenced: Bool, gate: I64, detail: I64, site: I64) -> I64 {
@@ -624,9 +700,7 @@ sentry_report: fn(fault: I64, operation: I64, obligation: I64, component: I64, f
             sentry_append_number(report, site.bit_and(I64{4294967295}))
             rt_text_push_scalar(report, I64{58})
             sentry_append_number(report, (site >> I64{32}).bit_and(I64{4294967295}))
-        } else {
-            sentry_append_number(report, sync_load(wrapping(base + I64{152})))
-        }
+        } else { sentry_append_number(report, sync_load(wrapping(base + I64{152}))) }
         sentry_append_owned(report, services_msg_sentry_gate())
         sentry_quote(report, gate, false)
         rt_text_push_scalar(report, I64{10})
@@ -663,6 +737,7 @@ sentry_report: fn(fault: I64, operation: I64, obligation: I64, component: I64, f
     sentry_append_owned(report, footer)
     report
 }
+
 // A sentry stop records the raw fault detail (never the
 // rendered report) on every active expectation frame before it stops. The
 // report names `operation`, an owned text, and the access `site`.

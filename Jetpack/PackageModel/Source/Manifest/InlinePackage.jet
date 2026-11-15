@@ -4,9 +4,18 @@
 // endings stay, so later compiler diagnostics still point at the user's file.
 use {
     jetpack_foundation.[
-        BLOCK_COMMENT_OPEN, BUILD_ENTRY_FN, COMMENT_PREFIX, INLINE_PACKAGE_DECL, MANIFEST_BLOCK_AUTHORITY, MANIFEST_BLOCK_BOUNDARIES,
-        MANIFEST_BLOCK_BUILD, MANIFEST_BLOCK_EFFECTS, MANIFEST_BLOCK_GRANTS, MANIFEST_BLOCK_POLICY,
-        MANIFEST_FIELD_NAME, MANIFEST_FIELD_VERSION,
+        BLOCK_COMMENT_OPEN,
+        BUILD_ENTRY_FN,
+        COMMENT_PREFIX,
+        INLINE_PACKAGE_DECL,
+        MANIFEST_BLOCK_AUTHORITY,
+        MANIFEST_BLOCK_BOUNDARIES,
+        MANIFEST_BLOCK_BUILD,
+        MANIFEST_BLOCK_EFFECTS,
+        MANIFEST_BLOCK_GRANTS,
+        MANIFEST_BLOCK_POLICY,
+        MANIFEST_FIELD_NAME,
+        MANIFEST_FIELD_VERSION,
     ]
     jet_foundation.[Diagnostic, Span]
 }
@@ -139,7 +148,9 @@ pkg_manifest_scalar_start: fn(bytes: [U8], at: Int) -> EditSpan? Never! {
         value_start: pkg_skip_ascii_space(bytes, cursor + 1)
         peek: pkg_bytes_code(bytes, value_start)
         if peek == 123 -> next
-        if peek == 46 && pkg_bytes_code(bytes, pkg_skip_ascii_space(bytes, value_start + 1)) == 123 -> next
+        if peek == 46 && pkg_bytes_code(bytes, pkg_skip_ascii_space(bytes, value_start + 1)) == 123 {
+            next
+        }
         i := value_start
         depth := 0
         quoted := false
@@ -193,9 +204,7 @@ pkg_balanced_block_end: fn(bytes: [U8], open: Int) -> Int? Never! {
                     i += 3
                     next
                 }
-            } else if code == quote {
-                quote = -1
-            }
+            } else if code == quote { quote = -1 }
             i += 1
             next
         }
@@ -204,9 +213,7 @@ pkg_balanced_block_end: fn(bytes: [U8], open: Int) -> Int? Never! {
             if pkg_bytes_starts_with(bytes, i, "\"\"\"".bytes()) {
                 triple = true
                 i += 3
-            } else {
-                i += 1
-            }
+            } else { i += 1 }
             next
         }
         if code == 39 {
@@ -223,9 +230,7 @@ pkg_balanced_block_end: fn(bytes: [U8], open: Int) -> Int? Never! {
             i = pkg_skip_block_comment(bytes, i)
             next
         }
-        if code == 123 {
-            depth += 1
-        } else if code == 125 {
+        if code == 123 -> depth += 1 else if code == 125 {
             if depth == 0 -> return None
             depth -= 1
             if depth == 0 -> return Val(i + 1)
@@ -282,13 +287,11 @@ pkg_has_top_level_build_function: fn(bytes: [U8]) -> Bool Never! {
         // `build: fn(…)`, the colon spelling of the build function.
         if depth == 0 && pkg_key_at(bytes, i, BUILD_ENTRY_FN) != None {
             colon: pkg_skip_ascii_space(bytes, i + BUILD_ENTRY_FN.bytes().len())
-            if pkg_bytes_code(bytes, colon) == 58 && pkg_key_at(bytes, pkg_skip_ascii_space(bytes, colon + 1), "fn") != None -> return true
+            if pkg_bytes_code(bytes, colon) == 58 && pkg_key_at(bytes, pkg_skip_ascii_space(bytes, colon + 1), "fn") != None {
+                return true
+            }
         }
-        if code == 123 {
-            depth += 1
-        } else if code == 125 && depth > 0 {
-            depth -= 1
-        }
+        if code == 123 -> depth += 1 else if code == 125 && depth > 0 -> depth -= 1
         i += 1
     }
     false
@@ -306,9 +309,7 @@ pkg_skip_block_comment: fn(bytes: [U8], start: Int) -> Int Never! {
             depth -= 1
             i += 2
             if depth == 0 -> return i
-        } else {
-            i += 1
-        }
+        } else { i += 1 }
     }
     bytes.len()
 }
@@ -345,14 +346,15 @@ InlinePackageBlock: struct {
 // failures stay `PackageParseError`.
 #Error
 InlinePackageError: enum {
-    // A package declaration appears after another top-level declaration.
     NotFirst(span: Span)
-    // More than one top-level package declaration.
     Duplicate(first: Span, duplicate: Span)
-    // The leading carrier has no balanced closing brace.
     Unbalanced(span: Span)
-    // A structural shape that cannot be masked safely.
     Malformed(span: Span, detail: String)
+
+    // A package declaration appears after another top-level declaration.
+    // More than one top-level package declaration.
+    // The leading carrier has no balanced closing brace.
+    // A structural shape that cannot be masked safely.
 
     // The registered diagnostic for this structural failure.
     diagnostic: fn(self) -> Diagnostic Never! {
@@ -389,7 +391,9 @@ pkg_extract_inline_package: fn(source: String) -> InlinePackageBlock? InlinePack
         }
         // The header markers of a Package record are `package.jet`'s; the
         // field reader would take a `#` at the head of these braces for one.
-        if pkg_bytes_code(bytes, pkg_skip_inline_trivia(bytes, block.body_span.start)) == 35 -> return Err(InlinePackageError.Malformed{span: block.span, detail: "a marker isn't a field of the inline Package record"})
+        if pkg_bytes_code(bytes, pkg_skip_inline_trivia(bytes, block.body_span.start)) == 35 {
+            return Err(InlinePackageError.Malformed{span: block.span, detail: "a marker isn't a field of the inline Package record"})
+        }
         return Ok(Val(block))
     }
     if pkg_find_top_level_inline_package(bytes, first) == .Val(found) {
@@ -430,7 +434,9 @@ pkg_inline_package_block: fn(keyword: Int, open: Int, end: Int) -> InlinePackage
 pkg_inline_package_start: fn(bytes: [U8], at: Int) -> EditSpan? Never! {
     end: pkg_key_at(bytes, at, INLINE_PACKAGE_DECL) ?? return None
     cursor := pkg_skip_inline_trivia(bytes, end)
-    if pkg_bytes_code(bytes, cursor) == 58 && pkg_bytes_code(bytes, cursor + 1) != 58 && pkg_bytes_code(bytes, cursor + 1) != 61 -> cursor = pkg_skip_inline_trivia(bytes, cursor + 1)
+    if pkg_bytes_code(bytes, cursor) == 58 && pkg_bytes_code(bytes, cursor + 1) != 58 && pkg_bytes_code(bytes, cursor + 1) != 61 {
+        cursor = pkg_skip_inline_trivia(bytes, cursor + 1)
+    }
     if pkg_bytes_code(bytes, cursor) != 123 -> return None
     Val(EditSpan{start: at, end: cursor})
 }
@@ -541,9 +547,7 @@ pkg_skip_inline_string: fn(bytes: [U8], start: Int) -> Int Never! {
         }
         if triple {
             if pkg_bytes_starts_with(bytes, i, "\"\"\"".bytes()) -> return i + 3
-        } else if code == quote {
-            return i + 1
-        }
+        } else if code == quote { return i + 1 }
         i += 1
     }
     bytes.len()
@@ -571,7 +575,9 @@ pkg_package_markers: fn(text: String) -> [PackageMarker] PackageParseError! {
     loop pkg_bytes_code(bytes, at) == 35 {
         start: at
         cursor := at + 1
-        loop pkg_bytes_is_word(pkg_bytes_code(bytes, cursor)) || (cursor > start + 1 && pkg_bytes_code(bytes, cursor) == 46 && pkg_bytes_is_word(pkg_bytes_code(bytes, cursor + 1))) -> cursor += 1
+        loop pkg_bytes_is_word(pkg_bytes_code(bytes, cursor)) || (cursor > start + 1 && pkg_bytes_code(bytes, cursor) == 46 && pkg_bytes_is_word(pkg_bytes_code(bytes, cursor + 1))) {
+            cursor += 1
+        }
         if cursor == start + 1 -> return Err(PackageParseError.MalformedField("#"))
         name: pkg_bytes_text(bytes, start + 1, cursor)
         args := ""

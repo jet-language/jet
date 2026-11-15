@@ -6,10 +6,17 @@ use files: core.files
     root: "tests/fixtures/foreign_build_hosts/make-cc"
     makefile: files.read("{root}/Makefile") ?? panic("read Make fixture")
     declarations: [String]{
-        "ifeq ($(origin CC),command line)", "ifeq ($(origin CXX),command line)",
-        "--project-root=\"$(PROJECT_ROOT)\"", "--build-root=\"$(BUILD_ROOT)\"",
-        "@flags.rsp", "-MMD", "-MP", "-MF \"$(C_DEPFILE)\"", "-MT \"$(C_OBJECT)\"",
-        "-MF \"$(CXX_DEPFILE)\"", "-MT \"$(CXX_OBJECT)\"",
+        "ifeq ($(origin CC),command line)",
+        "ifeq ($(origin CXX),command line)",
+        "--project-root=\"$(PROJECT_ROOT)\"",
+        "--build-root=\"$(BUILD_ROOT)\"",
+        "@flags.rsp",
+        "-MMD",
+        "-MP",
+        "-MF \"$(C_DEPFILE)\"",
+        "-MT \"$(C_OBJECT)\"",
+        "-MF \"$(CXX_DEPFILE)\"",
+        "-MT \"$(CXX_OBJECT)\"",
     }
     loop declaration in declarations {
         assert(makefile.contains(declaration), "Make fixture omits {declaration}")
@@ -29,9 +36,13 @@ use files: core.files
     root: "tests/fixtures/foreign_build_hosts/cmake-cc"
     cmake: files.read("{root}/CMakeLists.txt") ?? panic("read CMake fixture")
     declarations: [String]{
-        "project(jet_cc_cmake_fixture LANGUAGES C CXX)", "add_executable(cc-driver main.c)",
-        "add_executable(cxx-driver main.cpp)", "target_include_directories",
-        "@${{CMAKE_CURRENT_SOURCE_DIR}}/flags.rsp", "C_STANDARD 11", "CXX_STANDARD 17",
+        "project(jet_cc_cmake_fixture LANGUAGES C CXX)",
+        "add_executable(cc-driver main.c)",
+        "add_executable(cxx-driver main.cpp)",
+        "target_include_directories",
+        "@${{CMAKE_CURRENT_SOURCE_DIR}}/flags.rsp",
+        "C_STANDARD 11",
+        "CXX_STANDARD 17",
     }
     loop declaration in declarations {
         assert(cmake.contains(declaration), "CMake fixture omits {declaration}")
@@ -63,7 +74,5 @@ use files: core.files
     docs: files.read("Docs/spec/reference/cc-driver.md") ?? panic("read driver documentation")
     terms: [String]{"toolchain pack", "fetch-toolchain", "offline", "Make", "CMake", "no PATH fallback", "cross-target", "clean", "no-op", "edit", "error"}
     lower: docs.to_lower()
-    loop term in terms {
-        assert(lower.contains(term.to_lower()), "driver docs omit {term}")
-    }
+    loop term in terms { assert(lower.contains(term.to_lower()), "driver docs omit {term}") }
 }

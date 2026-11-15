@@ -142,20 +142,16 @@ Desk: struct {
     secret: String
 
     // Any caller asks whom its request acts for.
-    #App.Public
-    whoami: fn(self) -> String DeskError! { Ok(acting()) }
+    #App.Public whoami: fn(self) -> String DeskError! { Ok(acting()) }
 
     // A signed-in caller's own notes; no request has a signed-in caller yet.
-    #App.SignedIn
-    mine: fn(self) -> String DeskError! { Ok(acting()) }
+    #App.SignedIn mine: fn(self) -> String DeskError! { Ok(acting()) }
 
-    #App.Webhook(path: "/hooks/notes/:project", signature: app.Signature.GitHub, key: "signing_key")
-    on_event: fn(self, project: String, event: Event) -> String {
+    #App.Webhook(path: "/hooks/notes/:project", signature: app.Signature.GitHub, key: "signing_key") on_event: fn(self, project: String, event: Event) -> String {
         "{project}: {event.action} as {acting()}"
     }
 
-    #App.SigningKey
-    signing_key: fn(self, project: String) -> String? { Val(self.secret.copy()) }
+    #App.SigningKey signing_key: fn(self, project: String) -> String? { Val(self.secret.copy()) }
 }
 
 refused: fn(failure: DeskError) -> String {

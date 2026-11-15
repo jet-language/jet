@@ -5,6 +5,7 @@ use {
     core.image.[Limits]
     core.ui.[Point, Rect, UIRect]
 }
+
 // __core_ui_draw — core.ui's software rasterizer, a private part of
 // core.ui: 2D drawing, images, text, textures and collision checks in Jet.
 //
@@ -39,9 +40,7 @@ color: fn(r: Int, g: Int, b: Int, a: Int) -> Color Never! {
     Color{r: U8{clamp8(r)}, g: U8{clamp8(g)}, b: U8{clamp8(b)}, a: U8{clamp8(a)}}
 }
 
-point_at: fn(x: Float, y: Float) -> Point {
-    Point{x: x, y: y}
-}
+point_at: fn(x: Float, y: Float) -> Point { Point{x: x, y: y} }
 
 rect_of: fn(x: Float, y: Float, width: Float, height: Float) -> Rect {
     Rect{x: x, y: y, width: width, height: height}
@@ -82,13 +81,11 @@ check_collision_circle_rec: fn(center: Point, radius: Float, rec: Rect) -> Bool 
 check_collision_circle_line: fn(center: Point, radius: Float, p1: Point, p2: Point) -> Bool Never! {
     dx: p1.x - p2.x
     dy: p1.y - p2.y
-    if abs_float(dx) + abs_float(dy) <= C_FLT_EPSILON -> return check_collision_circles(p1, 0.0, center, radius)
-    along := ((center.x - p1.x) * (p2.x - p1.x) + (center.y - p1.y) * (p2.y - p1.y)) / (dx * dx + dy * dy)
-    if along > 1.0 {
-        along = Float{1.0}
-    } else if along < 0.0 {
-        along = Float{0.0}
+    if abs_float(dx) + abs_float(dy) <= C_FLT_EPSILON {
+        return check_collision_circles(p1, 0.0, center, radius)
     }
+    along := ((center.x - p1.x) * (p2.x - p1.x) + (center.y - p1.y) * (p2.y - p1.y)) / (dx * dx + dy * dy)
+    if along > 1.0 -> along = Float{1.0} else if along < 0.0 { along = Float{0.0} }
     near_x: p1.x - along * dx - center.x
     near_y: p1.y - along * dy - center.y
     near_x * near_x + near_y * near_y <= radius * radius
@@ -140,7 +137,9 @@ check_collision_point_poly: fn(point: Point, points: [Point]) -> Bool Never! {
     loop at in 0..<points.len() {
         a: points[at]
         b: points[previous]
-        if (a.y > point.y) != (b.y > point.y) && point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x -> inside = !inside
+        if (a.y > point.y) != (b.y > point.y) && point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x {
+            inside = !inside
+        }
         previous = at
     }
     inside
@@ -155,7 +154,9 @@ check_collision_lines: fn(start1: Point, end1: Point, start2: Point, end2: Point
     cross2: start2.x * end2.y - start2.y * end2.x
     xi: ((start2.x - end2.x) * cross1 - (start1.x - end1.x) * cross2) / div
     yi: ((start2.y - end2.y) * cross1 - (start1.y - end1.y) * cross2) / div
-    if outside_span(xi, start1.x, end1.x) || outside_span(xi, start2.x, end2.x) || outside_span(yi, start1.y, end1.y) || outside_span(yi, start2.y, end2.y) -> return None
+    if outside_span(xi, start1.x, end1.x) || outside_span(xi, start2.x, end2.x) || outside_span(yi, start1.y, end1.y) || outside_span(yi, start2.y, end2.y) {
+        return None
+    }
     Val(Point{x: xi, y: yi})
 }
 
@@ -172,7 +173,9 @@ get_collision_rec: fn(rec1: Rect, rec2: Rect) -> Rect Never! {
     right: min_float(rec1.x + rec1.width, rec2.x + rec2.width)
     top: max_float(rec1.y, rec2.y)
     bottom: min_float(rec1.y + rec1.height, rec2.y + rec2.height)
-    if left < right && top < bottom -> return Rect{x: left, y: top, width: right - left, height: bottom - top}
+    if left < right && top < bottom {
+        return Rect{x: left, y: top, width: right - left, height: bottom - top}
+    }
     Rect{x: 0.0, y: 0.0, width: 0.0, height: 0.0}
 }
 
@@ -207,7 +210,9 @@ gen_image_checked: fn(width: Int, height: Int, checks_x: Int, checks_y: Int, fir
 
 // The pixel at (x, y), straight again, or a zero color outside the image.
 get_image_color: fn(image: Image, x: Int, y: Int) -> Color Never! {
-    if x < 0 || x >= image.width || y < 0 || y >= image.height -> return Color{r: 0, g: 0, b: 0, a: 0}
+    if x < 0 || x >= image.width || y < 0 || y >= image.height {
+        return Color{r: 0, g: 0, b: 0, a: 0}
+    }
     rgba: straight_at(image.pixels, (y * image.width + x) * 4)
     color((rgba >> 24).bit_and(255), (rgba >> 16).bit_and(255), (rgba >> 8).bit_and(255), rgba.bit_and(255))
 }
@@ -224,7 +229,9 @@ image_clear_background: fn(image: &Image, color: Color) Never! {
 }
 
 image_draw_pixel: fn(image: &Image, x: Int, y: Int, color: Color) Never! {
-    if x < 0 || x >= image.width || y < 0 || y >= image.height -> return
+    if x < 0 || x >= image.width || y < 0 || y >= image.height {
+        return
+    }
     put_rgba(image.pixels, (y * image.width + x) * 4, premultiply(pack_rgba(color)))
 }
 
@@ -237,17 +244,19 @@ image_draw_rectangle: fn(image: &Image, x: Int, y: Int, width: Int, height: Int,
 // one column still sets its first pixel unless it sits at the left edge, and
 // one with columns but less than one row fills its first row.
 image_draw_rectangle_rec: fn(image: &Image, rec: Rect, color: Color) Never! {
-    if image.width == 0 || image.height == 0 -> return
+    if image.width == 0 || image.height == 0 {
+        return
+    }
     x := rec.x
     y := rec.y
     width := rec.width
     height := rec.height
     if x < 0.0 {
-        width = width + x
+        width += x
         x = Float{0.0}
     }
     if y < 0.0 {
-        height = height + y
+        height += y
         y = Float{0.0}
     }
     if width < 0.0 -> width = Float{0.0}
@@ -256,8 +265,12 @@ image_draw_rectangle_rec: fn(image: &Image, rec: Rect, color: Color) Never! {
     image_h: Float{image.height}
     if x + width >= image_w -> width = image_w - x
     if y + height >= image_h -> height = image_h - y
-    if x >= image_w || y >= image_h -> return
-    if x + width <= 0.0 || y + height <= 0.0 -> return
+    if x >= image_w || y >= image_h {
+        return
+    }
+    if x + width <= 0.0 || y + height <= 0.0 {
+        return
+    }
     left: trunc_int(x)
     top: trunc_int(y)
     columns: trunc_int(width)
@@ -267,7 +280,9 @@ image_draw_rectangle_rec: fn(image: &Image, rec: Rect, color: Color) Never! {
         return
     }
     loop row in top..<(top + max_int(trunc_int(height), 1)) {
-        loop column in left..<(left + columns) -> put_rgba(image.pixels, (row * image.width + column) * 4, rgba)
+        loop column in left..<(left + columns) {
+            put_rgba(image.pixels, (row * image.width + column) * 4, rgba)
+        }
     }
 }
 
@@ -276,24 +291,28 @@ image_draw_rectangle_rec: fn(image: &Image, rec: Rect, color: Color) Never! {
 // One with no whole column or row leaves no pixels, its truncated sides (not
 // below 0) as the size.
 image_crop: fn(image: &Image, crop: Rect) Never! {
-    if image.width == 0 || image.height == 0 -> return
+    if image.width == 0 || image.height == 0 {
+        return
+    }
     x := crop.x
     y := crop.y
     width := crop.width
     height := crop.height
     if x < 0.0 {
-        width = width + x
+        width += x
         x = Float{0.0}
     }
     if y < 0.0 {
-        height = height + y
+        height += y
         y = Float{0.0}
     }
     image_w: Float{image.width}
     image_h: Float{image.height}
     if x + width > image_w -> width = image_w - x
     if y + height > image_h -> height = image_h - y
-    if x > image_w || y > image_h -> return
+    if x > image_w || y > image_h {
+        return
+    }
     left: trunc_int(x)
     top: trunc_int(y)
     columns: trunc_int(width)
@@ -320,7 +339,9 @@ image_crop: fn(image: &Image, crop: Rect) Never! {
 // enlargements, takes the last one. A new size outside gen_image_color's
 // limits leaves the image as it is.
 image_resize_nn: fn(image: &Image, new_width: Int, new_height: Int) Never! {
-    if image.width == 0 || image.height == 0 || !image_size_ok(new_width, new_height) -> return
+    if image.width == 0 || image.height == 0 || !image_size_ok(new_width, new_height) {
+        return
+    }
     x_ratio: (image.width << 16) /% new_width + 1
     y_ratio: (image.height << 16) /% new_height + 1
     pixels := [U8]{}
@@ -469,9 +490,7 @@ image_rgba: fn(pixels: [U8], at: Int) -> Int {
 }
 
 // The packed straight color at byte `at` of premultiplied pixels.
-straight_at: fn(pixels: [U8], at: Int) -> Int {
-    unpremultiply(image_rgba(pixels, at))
-}
+straight_at: fn(pixels: [U8], at: Int) -> Int { unpremultiply(image_rgba(pixels, at)) }
 
 // Premultiplied pixels straight again, each as unpremultiply makes it.
 straight_pixels: fn(pixels: [U8]) -> [U8] {
@@ -539,10 +558,7 @@ draw_rectangle: fn(target: &Image, x: Int, y: Int, width: Int, height: Int, colo
 // when the compiler's Core record is made, before any runtime image exists
 // to run Core code (Compiler/build.jet), so a Core module value is a
 // constant the compiler folds.
-#Memo
-regular_face: fn() -> font.Face {
-    font.regular()
-}
+#Memo regular_face: fn() -> font.Face { font.regular() }
 
 // The built-in face and the glyph masks drawn with it. A window keeps one,
 // so its text reads and checks the face's tables once and draws each
@@ -552,9 +568,7 @@ Typeset: struct {
     cache: font.GlyphCache
 }
 
-typeset: fn() -> Typeset {
-    Typeset{face: regular_face(), cache: font.cache()}
-}
+typeset: fn() -> Typeset { Typeset{face: regular_face(), cache: font.cache()} }
 
 // Text in Atkinson Hyperlegible Next at `size` pixels to the em: the first
 // line's top at `y`, its baseline the face's ascent (rounded) below that,
@@ -666,14 +680,18 @@ coverage_ramp: fn(rgba: Int) -> [Int] {
 // Blends a glyph mask whose origin, on the baseline, is pixel (x, y), in
 // the color whose coverage_ramp is `ramp`.
 paint_mask: fn(target: &Image, mask: font.GlyphMask, x: Int, y: Int, ramp: [Int]) {
-    if mask.width <= 0 || mask.height <= 0 || mask.coverage.len() < mask.width * mask.height || ramp.len() < 256 -> return
+    if mask.width <= 0 || mask.height <= 0 || mask.coverage.len() < mask.width * mask.height || ramp.len() < 256 {
+        return
+    }
     x0: x + mask.left
     y0: y - mask.top
     left: max_int(x0, 0)
     right: min_int(x0 + mask.width, target.width)
     top: max_int(y0, 0)
     bottom: min_int(y0 + mask.height, target.height)
-    if left >= right || top >= bottom -> return
+    if left >= right || top >= bottom {
+        return
+    }
     // blend_pixel's sums, inlined as `fill` inlines them, on the pixels
     // moved out of the image for the loop; a premultiplied channel at
     // weight 255 is the channel itself.
@@ -716,7 +734,9 @@ paint_mask: fn(target: &Image, mask: font.GlyphMask, x: Int, y: Int, ramp: [Int]
 // alpha `alpha`, premultiplied and blended as `fill` does; alpha 255
 // copies and alpha 0 leaves it.
 blend_pixel: fn(pixels: &[U8], at: Int, red: Int, green: Int, blue: Int, alpha: Int) {
-    if alpha == 0 -> return
+    if alpha == 0 {
+        return
+    }
     if alpha == 255 {
         pixels[at] = U8{red}
         pixels[at + 1] = U8{green}
@@ -733,13 +753,9 @@ blend_pixel: fn(pixels: &[U8], at: Int, red: Int, green: Int, blue: Int, alpha: 
 
 // A Float rounded to the nearest whole pixel, halves up; past the Int
 // range it is 0.
-round_px: fn(value: Float) -> Int {
-    checked(Int{core.math.floor(value + 0.5)}) ?? 0
-}
+round_px: fn(value: Float) -> Int { checked(Int{core.math.floor(value + 0.5)}) ?? 0 }
 
-floor_px: fn(value: Float) -> Int {
-    checked(Int{core.math.floor(value)}) ?? 0
-}
+floor_px: fn(value: Float) -> Int { checked(Int{core.math.floor(value)}) ?? 0 }
 
 // A line; both endpoints are drawn.
 draw_line: fn(target: &Image, start_x: Int, start_y: Int, end_x: Int, end_y: Int, color: Color) Never! {
@@ -791,11 +807,15 @@ draw_rectangle_lines_ex: fn(target: &Image, rec: Rect, line_thick: Float, color:
 draw_rectangle_gradient_v: fn(target: &Image, x: Int, y: Int, width: Int, height: Int, top: Color, bottom: Color) Never! {
     rec: int_rectangle(x, y, width, height)
     box: gradient_box(extent_of(target), rec)
-    if box.left >= box.right || box.top >= box.bottom || target.pixels.len() != target.width * target.height * 4 -> return
+    if box.left >= box.right || box.top >= box.bottom || target.pixels.len() != target.width * target.height * 4 {
+        return
+    }
     first: pack_rgba(top)
     last: pack_rgba(bottom)
     levels := [Int]{}
-    loop row in box.top..<box.bottom -> levels.push(axis_rgba(first, last, (Float{row} + 0.5 - rec.y) / rec.height))
+    loop row in box.top..<box.bottom {
+        levels.push(axis_rgba(first, last, (Float{row} + 0.5 - rec.y) / rec.height))
+    }
     span: box.right - box.left
     loop k in 0..<levels.len() {
         if levels[k] >= 0 -> fill(target, box.left, box.top + k, span, 1, levels[k], false)
@@ -823,11 +843,15 @@ draw_rectangle_gradient_v: fn(target: &Image, x: Int, y: Int, width: Int, height
 draw_rectangle_gradient_h: fn(target: &Image, x: Int, y: Int, width: Int, height: Int, left: Color, right: Color) Never! {
     rec: int_rectangle(x, y, width, height)
     box: gradient_box(extent_of(target), rec)
-    if box.left >= box.right || box.top >= box.bottom || target.pixels.len() != target.width * target.height * 4 -> return
+    if box.left >= box.right || box.top >= box.bottom || target.pixels.len() != target.width * target.height * 4 {
+        return
+    }
     first: pack_rgba(left)
     last: pack_rgba(right)
     levels := [Int]{}
-    loop column in box.left..<box.right -> levels.push(axis_rgba(first, last, (Float{column} + 0.5 - rec.x) / rec.width))
+    loop column in box.left..<box.right {
+        levels.push(axis_rgba(first, last, (Float{column} + 0.5 - rec.x) / rec.width))
+    }
     span: box.right - box.left
     opaque: first.bit_and(255) == 255 && last.bit_and(255) == 255
     // Opaque, one row of the levels copied to every row (a column on a tie
@@ -843,7 +867,9 @@ draw_rectangle_gradient_h: fn(target: &Image, x: Int, y: Int, width: Int, height
         loop row in box.top..<box.bottom {
             at := (row * target.width + box.left) * 4
             loop level in levels {
-                if level >= 0 -> blend_pixel(target.pixels, at, (level >> 24).bit_and(255), (level >> 16).bit_and(255), (level >> 8).bit_and(255), level.bit_and(255))
+                if level >= 0 {
+                    blend_pixel(target.pixels, at, (level >> 24).bit_and(255), (level >> 16).bit_and(255), (level >> 8).bit_and(255), level.bit_and(255))
+                }
                 at += 4
             }
         }
@@ -877,7 +903,9 @@ GradientBox: struct {
 }
 
 gradient_box: fn(extent: Extent, rec: Rect) -> GradientBox {
-    if rec.width <= 0.0 || rec.height <= 0.0 -> return GradientBox{left: 0, top: 0, right: 0, bottom: 0}
+    if rec.width <= 0.0 || rec.height <= 0.0 {
+        return GradientBox{left: 0, top: 0, right: 0, bottom: 0}
+    }
     GradientBox{
         left: max_int(center_from(subpixel(rec.x)), 0),
         top: max_int(center_from(subpixel(rec.y)), 0),
@@ -1144,7 +1172,9 @@ parse_atlas: fn(path: String, text: String) -> TextureAtlas Never! {
 // (x, y), unclipped; width 0 for an unknown one.
 sprite_bounds: fn(atlas: TextureAtlas, source: String, x: Int, y: Int) -> UIRect {
     loop region in atlas.regions {
-        if region.name == source -> return UIRect{x: x, y: y, width: region.width, height: region.height}
+        if region.name == source {
+            return UIRect{x: x, y: y, width: region.width, height: region.height}
+        }
     }
     UIRect{x: x, y: y, width: 0, height: 0}
 }
@@ -1156,24 +1186,32 @@ sprite_bounds: fn(atlas: TextureAtlas, source: String, x: Int, y: Int) -> UIRect
 // does an unknown region or an atlas without a texture.
 draw_sprite: fn(target: &Image, atlas: TextureAtlas, source: String, x: Int, y: Int) Never! {
     texture: atlas.texture
-    if texture.width == 0 || target.pixels.len() != target.width * target.height * 4 -> return
+    if texture.width == 0 || target.pixels.len() != target.width * target.height * 4 {
+        return
+    }
     loop region in atlas.regions {
         if region.name != source -> next
         first_column: max_int(0, max_int(-region.x, -x))
         end_column: min_int(region.width, min_int(texture.width - region.x, target.width - x))
         first_row: max_int(0, max_int(-region.y, -y))
         end_row: min_int(region.height, min_int(texture.height - region.y, target.height - y))
-        if first_column >= end_column || first_row >= end_row -> return
+        if first_column >= end_column || first_row >= end_row {
+            return
+        }
         loop row in first_row..<end_row {
             from := ((region.y + row) * texture.width + region.x + first_column) * 4
             at := ((y + row) * target.width + x + first_column) * 4
             loop _ in first_column..<end_column {
                 alpha: byte_at(texture.pixels, from + 3)
                 if alpha == 255 {
-                    loop channel in 0..<4 -> target.pixels[at + channel] = texture.pixels[from + channel]
+                    loop channel in 0..<4 {
+                        target.pixels[at + channel] = texture.pixels[from + channel]
+                    }
                 } else if alpha != 0 {
                     rest: 255 - alpha
-                    loop channel in 0..<4 -> target.pixels[at + channel] = U8{over(byte_at(texture.pixels, from + channel), byte_at(target.pixels, at + channel), rest)}
+                    loop channel in 0..<4 {
+                        target.pixels[at + channel] = U8{over(byte_at(texture.pixels, from + channel), byte_at(target.pixels, at + channel), rest)}
+                    }
                 }
                 from += 4
                 at += 4
@@ -1256,9 +1294,7 @@ png_path: fn(path: String) -> String {
 }
 
 // The text of raw[start..end), which starts and ends at an ASCII byte.
-text_of: fn(raw: [U8], start: Int, end: Int) -> String {
-    String.from_bytes(raw[start..<end]) ?? ""
-}
+text_of: fn(raw: [U8], start: Int, end: Int) -> String { String.from_bytes(raw[start..<end]) ?? "" }
 
 // str::split_whitespace: the runs of scalars that are not White_Space.
 split_fields: fn(text: String) -> [String] {
@@ -1268,9 +1304,7 @@ split_fields: fn(text: String) -> [String] {
         if core.text.is_whitespace(scalar) {
             if field != "" -> out.push(field.copy())
             field = ""
-        } else {
-            field = "{field}{scalar}"
-        }
+        } else { field = "{field}{scalar}" }
     }
     if field != "" -> out.push(field.copy())
     out
@@ -1299,9 +1333,7 @@ Extent: struct {
     height: Int
 }
 
-extent_of: fn(image: Image) -> Extent {
-    Extent{width: image.width, height: image.height}
-}
+extent_of: fn(image: Image) -> Extent { Extent{width: image.width, height: image.height} }
 
 // Paints the runs as `fill` does.
 paint: fn(target: &Image, runs: [Run]) {
@@ -1314,15 +1346,23 @@ paint: fn(target: &Image, runs: [Run]) {
 // (see over), and alpha 0 leaves the image as it was. An image whose
 // pixels do not match its size takes nothing.
 fill: fn(target: &Image, x: Int, y: Int, width: Int, height: Int, rgba: Int, replace: Bool) {
-    if width <= 0 || height <= 0 -> return
-    if target.pixels.len() != target.width * target.height * 4 -> return
+    if width <= 0 || height <= 0 {
+        return
+    }
+    if target.pixels.len() != target.width * target.height * 4 {
+        return
+    }
     alpha: rgba.bit_and(255)
-    if alpha == 0 && !replace -> return
+    if alpha == 0 && !replace {
+        return
+    }
     left: max_int(x, 0)
     top: max_int(y, 0)
     right: min_int(x + width, target.width)
     bottom: min_int(y + height, target.height)
-    if left >= right || top >= bottom -> return
+    if left >= right || top >= bottom {
+        return
+    }
     red: div255((rgba >> 24).bit_and(255) * alpha + 127)
     green: div255((rgba >> 16).bit_and(255) * alpha + 127)
     blue: div255((rgba >> 8).bit_and(255) * alpha + 127)
@@ -1334,7 +1374,9 @@ fill: fn(target: &Image, x: Int, y: Int, width: Int, height: Int, rgba: Int, rep
             target.pixels.fill_repeat(top * target.width * 4..<bottom * target.width * 4, pixel)
             return
         }
-        loop row in top..<bottom -> target.pixels.fill_repeat((row * target.width + left) * 4..<(row * target.width + right) * 4, pixel)
+        loop row in top..<bottom {
+            target.pixels.fill_repeat((row * target.width + left) * 4..<(row * target.width + right) * 4, pixel)
+        }
         return
     }
     // over's sums, the source's bytes hoisted; x / 255 is
@@ -1372,15 +1414,11 @@ solid_row: fn(rgba: Int, count: Int) -> [U8] {
 
 // One premultiplied byte src-over: the source's byte plus `rest`
 // (255 minus the source's alpha) of the image's, rounded.
-over: fn(source: Int, target: Int, rest: Int) -> Int {
-    source + div255(target * rest + 127)
-}
+over: fn(source: Int, target: Int, rest: Int) -> Int { source + div255(target * rest + 127) }
 
 // x / 255 rounded down, for 0 <= x <= 255 * 255 + 127: the sums src-over
 // makes.
-div255: fn(value: Int) -> Int {
-    (value + 1 + (value >> 8)) >> 8
-}
+div255: fn(value: Int) -> Int { (value + 1 + (value >> 8)) >> 8 }
 
 // The inclusive column range a triangle row keeps; empty when lo > hi.
 Span: struct {
@@ -1435,16 +1473,16 @@ isqrt_floor: fn(n: Int) -> Int {
 }
 
 // round(n / d) for d > 0, halves rounding up.
-round_div: fn(n: Int, d: Int) -> Int {
-    (2 * n + d) /% (2 * d)
-}
+round_div: fn(n: Int, d: Int) -> Int { (2 * n + d) /% (2 * d) }
 
 push_clipped: fn(runs: &[Run], extent: Extent, x: Int, y: Int, width: Int, height: Int, rgba: Int) {
     left: max_int(x, 0)
     top: max_int(y, 0)
     right: min_int(x + width, extent.width)
     bottom: min_int(y + height, extent.height)
-    if left >= right || top >= bottom -> return
+    if left >= right || top >= bottom {
+        return
+    }
     runs.push(Run{x: left, y: top, width: right - left, height: bottom - top, rgba: rgba})
 }
 
@@ -1481,9 +1519,7 @@ line_runs: fn(extent: Extent, x0: Int, y0: Int, x1: Int, y1: Int, rgba: Int) -> 
         last: min_int(bx, extent.width - 1)
         loop x <= last {
             y: ay + round_div((x - ax) * (by - ay), bx - ax)
-            if run_width > 0 && y == run_y && x == run_x + run_width {
-                run_width += 1
-            } else {
+            if run_width > 0 && y == run_y && x == run_x + run_width -> run_width += 1 else {
                 if run_width > 0 -> push_clipped(runs, extent, run_x, run_y, run_width, 1, rgba)
                 run_x = x
                 run_y = y
@@ -1507,9 +1543,7 @@ line_runs: fn(extent: Extent, x0: Int, y0: Int, x1: Int, y1: Int, rgba: Int) -> 
     last: min_int(by, extent.height - 1)
     loop y <= last {
         x: ax + round_div((y - ay) * (bx - ax), by - ay)
-        if run_height > 0 && x == run_x && y == run_y + run_height {
-            run_height += 1
-        } else {
+        if run_height > 0 && x == run_x && y == run_y + run_height -> run_height += 1 else {
             if run_height > 0 -> push_clipped(runs, extent, run_x, run_y, 1, run_height, rgba)
             run_x = x
             run_y = y
@@ -1590,7 +1624,9 @@ triangle_runs: fn(extent: Extent, x0: Int, y0: Int, x1: Int, y1: Int, x2: Int, y
         span = edge_span(span, x0, y0, bx, by, row)
         span = edge_span(span, bx, by, cx, cy, row)
         span = edge_span(span, cx, cy, x0, y0, row)
-        if span.lo <= span.hi -> runs.push(Run{x: span.lo, y: row, width: span.hi - span.lo + 1, height: 1, rgba: rgba})
+        if span.lo <= span.hi {
+            runs.push(Run{x: span.lo, y: row, width: span.hi - span.lo + 1, height: 1, rgba: rgba})
+        }
         row += 1
     }
     runs
@@ -1616,9 +1652,7 @@ subpixel: fn(value: Float) -> Int {
 }
 
 // The first pixel whose center lies at or past subpixel coordinate `at`.
-center_from: fn(at: Int) -> Int {
-    -((128 - at) /% 256)
-}
+center_from: fn(at: Int) -> Int { -((128 - at) /% 256) }
 
 // The pixels whose centers lie in the rectangle, left and top edges included.
 rec_runs: fn(extent: Extent, rec: Rect, rgba: Int) -> [Run] {
@@ -1650,11 +1684,7 @@ rect_lines_runs: fn(extent: Extent, x: Int, y: Int, width: Int, height: Int, rgb
 lines_ex_bands: fn(rec: Rect, line_thick: Float) -> [Rect] {
     thick := line_thick
     if thick > rec.width || thick > rec.height {
-        if rec.width >= rec.height {
-            thick = rec.height / 2.0
-        } else {
-            thick = rec.width / 2.0
-        }
+        if rec.width >= rec.height -> thick = rec.height / 2.0 else -> thick = rec.width / 2.0
     }
     side: rec.height - thick * 2.0
     bands := [Rect]{}
@@ -1708,9 +1738,7 @@ gradient_rgba: fn(top_left: Int, bottom_left: Int, bottom_right: Int, top_right:
         br: (bottom_right >> shift).bit_and(255)
         tr: (top_right >> shift).bit_and(255)
         level := Float{0.0}
-        if v >= u {
-            level = Float{tl} * (Float{1.0} - v) + Float{bl} * (v - u) + Float{br} * u
-        } else {
+        if v >= u -> level = Float{tl} * (Float{1.0} - v) + Float{bl} * (v - u) + Float{br} * u else {
             level = Float{tl} * (Float{1.0} - u) + Float{tr} * (u - v) + Float{br} * v
         }
         rgba = (rgba << 8) + clamp8(checked(Int{core.math.floor(level + 0.5)}) ?? 0)
@@ -1740,7 +1768,9 @@ push_piece: fn(pieces: &[Piece], xs: [Float], ys: [Float]) {
         following: (at + 1) %% count
         area += sx[at] * sy[following] - sx[following] * sy[at]
     }
-    if area == 0 -> return
+    if area == 0 {
+        return
+    }
     if area > 0 {
         pieces.push(Piece{xs: sx, ys: sy})
         return
@@ -1827,9 +1857,7 @@ merge_spans: fn(out: &[Span], spans: [Span]) {
             if !taken[at] && (pick < 0 || spans[at].lo < spans[pick].lo) -> pick = at
         }
         taken[pick] = true
-        if open && spans[pick].lo <= hi + 1 {
-            hi = max_int(hi, spans[pick].hi)
-        } else {
+        if open && spans[pick].lo <= hi + 1 -> hi = max_int(hi, spans[pick].hi) else {
             if open -> out.push(Span{lo: lo, hi: hi})
             lo = spans[pick].lo
             hi = spans[pick].hi
@@ -1951,7 +1979,9 @@ difference_runs: fn(extent: Extent, outer: Cover, inner: Cover, rgba: Int) -> [R
         holes := [Span]{}
         j: row - inner.top
         if j >= 0 && j + 1 < inner.starts.len() {
-            loop at in inner.starts[j]..<inner.starts[j + 1] -> holes.push(Span{lo: inner.spans[at].lo, hi: inner.spans[at].hi})
+            loop at in inner.starts[j]..<inner.starts[j + 1] {
+                holes.push(Span{lo: inner.spans[at].lo, hi: inner.spans[at].hi})
+            }
         }
         loop at in outer.starts[k]..<outer.starts[k + 1] {
             push_gaps(runs, extent, row, outer.spans[at].lo, outer.spans[at].hi, holes, rgba)
@@ -2117,23 +2147,21 @@ C_PNG_IDAT: 0x49444154
 
 C_PNG_IEND: 0x49454E44
 
-no_image: fn() -> Image {
-    Image{width: 0, height: 0, pixels: [U8]{}}
-}
+no_image: fn() -> Image { Image{width: 0, height: 0, pixels: [U8]{}} }
 
 // Makes `image` a `width` x `height` image of zero pixels unless it is one
 // already: a window frame's drawing target follows the frame's size, which
 // no PNG limit bounds.
 fit: fn(image: &Image, width: Int, height: Int) {
-    if image.width == width && image.height == height && image.pixels.len() == width * height * 4 -> return
+    if image.width == width && image.height == height && image.pixels.len() == width * height * 4 {
+        return
+    }
     image.width = width
     image.height = height
     image.pixels = solid_row(0, width * height)
 }
 
-byte_at: fn(data: [U8], at: Int) -> Int {
-    Int{data[at]}
-}
+byte_at: fn(data: [U8], at: Int) -> Int { Int{data[at]} }
 
 // A PNG decoded by core.image and premultiplied as it loads. A side above
 // C_PNG_SIDE_MAX, a budget C_PNG_LIMITS does not allow or any fault
@@ -2193,7 +2221,9 @@ coverage: fn(runs: [Run], width: Int, height: Int) -> [Int] {
     loop _ in 0..<(width * height) -> counts.push(0)
     loop run in runs {
         loop y in run.y..<(run.y + run.height) {
-            loop x in run.x..<(run.x + run.width) -> counts[y * width + x] = counts[y * width + x] + 1
+            loop x in run.x..<(run.x + run.width) {
+                counts[y * width + x] = counts[y * width + x] + 1
+            }
         }
     }
     counts
@@ -2741,9 +2771,7 @@ image_words: fn(image: Image) -> [Int] {
     words
 }
 
-gray: fn(value: Int) -> Int {
-    png_rgba(value, value, value, 255)
-}
+gray: fn(value: Int) -> Int { png_rgba(value, value, value, 255) }
 
 #Test("png rows reconstruct through every filter") {
     raw: [U8]{1, 10, 20, 2, 5, 15, 3, 13, 18, 4, 0, 0}

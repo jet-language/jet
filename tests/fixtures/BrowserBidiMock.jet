@@ -26,7 +26,9 @@ use {
 }
 
 READY: "{{\"ready\":true,\"message\":\"ready\"}}"
+
 WS_GUID: "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
 MODES: ["script", "handshake", "malformed-session", "event-storm", "continuous-events", "hostile-malformed", "hostile-mismatched-id", "hostile-protocol-error", "hostile-timeout", "hostile-no-cdp"]
 
 // The Rust tests had no deadline of their own; a client that never connects or stalls ends the
@@ -114,7 +116,9 @@ hex_value: fn(digit: U8) -> Int {
 without_json: fn(name: String) -> String {
     raw: name.bytes()
     suffix: ".json".bytes()
-    if raw.len() >= suffix.len() && find(raw, suffix, raw.len() - suffix.len()) >= 0 -> return sub(raw, 0, raw.len() - suffix.len())
+    if raw.len() >= suffix.len() && find(raw, suffix, raw.len() - suffix.len()) >= 0 {
+        return sub(raw, 0, raw.len() - suffix.len())
+    }
     name.copy()
 }
 
@@ -134,7 +138,9 @@ field: fn(text: String, name: String) -> String {
     sub(raw, start, end)
 }
 
-success: fn(id: String, result: String) -> String { "{{\"type\":\"success\",\"id\":{id},\"result\":{result}}}" }
+success: fn(id: String, result: String) -> String {
+    "{{\"type\":\"success\",\"id\":{id},\"result\":{result}}}"
+}
 
 record: fn(method: String) { print(method) }
 
@@ -279,9 +285,7 @@ read: fn(peer: &Peer) -> String {
 write: fn(peer: &Peer, message: String) {
     bytes: message.bytes()
     frame := [U8]{U8{0x81}}
-    if bytes.len() <= 125 {
-        frame.push(U8{bytes.len()})
-    } else {
+    if bytes.len() <= 125 -> frame.push(U8{bytes.len()}) else {
         if bytes.len() > 65535 -> fail("mock response too large")
         frame.push(U8{126})
         frame.push(U8{bytes.len() /% 256})
@@ -327,7 +331,7 @@ resolve: fn(reply: Dyn, request: String, n: Int) -> Dyn {
 // `{id}` names the request id and `{n}` the occurrence in results and frames. require/forbid are the
 // request assertions the Rust server made before replying.
 run_script: fn(peer: &Peer, spec: Dyn) {
-    seen := [String: Int]{}
+    seen := [String:Int]{}
     stop: child(spec, "stop")
     loop _ in 0..<count(child(spec, "max")) {
         request: read(peer)
@@ -338,10 +342,14 @@ run_script: fn(peer: &Peer, spec: Dyn) {
         seen[method.copy()] = n
         configured: lookup(child(spec, "replies"), method) ?? fail("unexpected BiDi method {method}: {request}")
         loop wanted in items(child(child(spec, "require"), method)) {
-            if !contains(request, text(wanted)) -> fail("{method} request lacks {text(wanted)}: {request}")
+            if !contains(request, text(wanted)) {
+                fail("{method} request lacks {text(wanted)}: {request}")
+            }
         }
         loop unwanted in items(child(child(spec, "forbid"), method)) {
-            if contains(request, text(unwanted)) -> fail("{method} request carries {text(unwanted)}: {request}")
+            if contains(request, text(unwanted)) {
+                fail("{method} request carries {text(unwanted)}: {request}")
+            }
         }
         reply: resolve(configured, request, n)
         fill: fn(template: String) -> String { replace_all(replace_all(template, "{{id}}", id), "{{n}}", "{n}") }
@@ -422,14 +430,20 @@ run_hostile: fn(peer: &Peer, mode: String) {
     id: field(request, "id")
     if mode == {
         "hostile-malformed" -> write(peer, "{{not-json")
-        "hostile-mismatched-id" -> write(peer, "{{\"type\":\"success\",\"id\":{(Int.parse(id) ?? 0) + 1},\"result\":{{}}}}")
-        "hostile-protocol-error" -> write(peer, "{{\"type\":\"error\",\"id\":{id},\"error\":\"invalid argument\",\"message\":\"SECRET SERVER DATA\",\"stacktrace\":\"SECRET STACK\"}}")
+        "hostile-mismatched-id" -> {
+            write(peer, "{{\"type\":\"success\",\"id\":{(Int.parse(id) ?? 0) + 1},\"result\":{{}}}}")
+        }
+        "hostile-protocol-error" -> {
+            write(peer, "{{\"type\":\"error\",\"id\":{id},\"error\":\"invalid argument\",\"message\":\"SECRET SERVER DATA\",\"stacktrace\":\"SECRET STACK\"}}")
+        }
         "hostile-timeout" -> time.sleep(time.duration_ms(500))
         else -> {
             write(peer, success(id, READY))
             session: read(peer)
             if field(session, "method") != "session.new" -> fail("expected session.new: {session}")
-            if !contains(session, "\"capabilities\":{{\"alwaysMatch\":{{}}}}") -> fail("session.new without empty alwaysMatch: {session}")
+            if !contains(session, "\"capabilities\":{{\"alwaysMatch\":{{}}}}") {
+                fail("session.new without empty alwaysMatch: {session}")
+            }
             write(peer, success(field(session, "id"), "{{\"sessionId\":\"no-cdp\",\"capabilities\":{{\"goog:cdp\":false}}}}"))
         }
     }

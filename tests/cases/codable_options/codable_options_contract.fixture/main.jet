@@ -26,8 +26,7 @@ Customer: struct {
 }
 
 // `published` locks the wire shape and still honors the other options.
-#Codable(unknown: .Deny, published)
-Account: struct {
+#Codable(unknown: .Deny, published) Account: struct {
     name: String
 }
 
@@ -99,7 +98,7 @@ run: fn() {
     print(json.to_string(dot) ?? panic("dot"))
     shape: json.decode<Shape>("{{\"kind\":\"Circle\",\"radius\":5}}") ?? panic("shape")
     if shape == {
-        .Circle(radius) -> print("circle {radius}")
+        .Circle(radius) -> { print("circle {radius}") }
         .Dot -> print("dot")
     }
 

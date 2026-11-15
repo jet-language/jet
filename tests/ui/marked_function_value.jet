@@ -1,25 +1,17 @@
 // A function type reads each parameter it doesn't mark, so a named function
 // with a `&` or `&&` parameter is a value only where the type marks it alike.
 Hooks: struct {
-    on_int: fn(Int) -> Unit
+    on_int: fn(Int) -> ()
     on_text: fn(String) -> Int
 }
 
-bump: fn(x: &Int) {
-    x += 1
-}
+bump: fn(x: &Int) { x += 1 }
 
-consume: fn(s: &&String) -> Int {
-    s.len()
-}
+consume: fn(s: &&String) -> Int { s.len() }
 
-show: fn(n: Int) {
-    print(n)
-}
+show: fn(n: Int) { print(n) }
 
-call_with: fn(f: fn(Int) -> Unit) {
-    f(1)
-}
+call_with: fn(f: fn(Int) -> ()) { f(1) }
 
 run: fn() {
     hooks: Hooks{on_int: bump, on_text: consume}

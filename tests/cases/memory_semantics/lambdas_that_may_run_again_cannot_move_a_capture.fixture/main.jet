@@ -1,6 +1,4 @@
-consume: fn(&&s: String) -> Int {
-    s.len()
-}
+consume: fn(s: &&String) -> Int { s.len() }
 
 // Passed to a call that runs it once per item: the second item's run would
 // move a value the first run already gave away.
@@ -46,7 +44,7 @@ in_a_task: fn() {
     s: "abc".repeat(3)
     worker: task { consume(s.move()) }
     if worker.join() == {
-        .Ok(n) -> print(n)
+        .Ok(n) -> { print(n) }
         .Err(_) -> print("failed")
     }
 }

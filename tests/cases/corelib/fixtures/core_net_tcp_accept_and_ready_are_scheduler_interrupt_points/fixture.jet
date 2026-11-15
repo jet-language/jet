@@ -1,4 +1,3 @@
-
 use {
     net: core.net
     tasks: core.tasks
@@ -12,7 +11,7 @@ run: fn() {
     cancelled_accept: task {
         accept_tx.send(1)
         if cancelled_listener.accept() == {
-            .Ok(_) -> print("accept unexpectedly succeeded")
+            .Ok(_) -> { print("accept unexpectedly succeeded") }
             .Err(error) -> print(net.error_message(error))
         }
     }
@@ -37,7 +36,7 @@ run: fn() {
     ready_wait: task &&ready_server {
         wait_tx.send(1)
         if ready_server.ready(interest, deadline: Duration.milliseconds(1000) ?? panic("ready deadline")) == {
-            .Ok(_) -> print("ready unexpectedly succeeded")
+            .Ok(_) -> { print("ready unexpectedly succeeded") }
             .Err(error) -> print(net.error_message(error))
         }
     }

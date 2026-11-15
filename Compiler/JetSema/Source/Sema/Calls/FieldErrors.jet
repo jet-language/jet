@@ -52,7 +52,7 @@ sema_app_field_error_refused: fn(module_name: String, member: String, args: [Cal
         diagnostics.push(sema_field_error_unknown(graph, path.shown, roots, at_span))
         return true
     }
-    holders := roots.copy() // copy: `roots` names the fields the report lists
+    holders := roots.copy()  // copy: `roots` names the fields the report lists
     loop (position, step) in steps {
         found := Type?{None}
         owner := -1
@@ -90,10 +90,10 @@ sema_app_field_error_refused: fn(module_name: String, member: String, args: [Cal
 sema_field_error_at: fn(args: [CallArg]) -> CallArg? {
     loop argument in args {
         if argument.label == .Val(label) {
-            if label.name == "at" -> return Val(argument.copy()) // copy: the call keeps its arguments
+            if label.name == "at" -> return Val(argument.copy())  // copy: the call keeps its arguments
         }
     }
-    if args.len() > 0 && args[0].label == None -> return Val(args[0].copy()) // copy: the call keeps its arguments
+    if args.len() > 0 && args[0].label == None -> return Val(args[0].copy())  // copy: the call keeps its arguments
     None
 }
 
@@ -158,11 +158,15 @@ sema_field_error_roots: fn(graph: SemaRegistrationGraph, environment: SemaScopeE
     frame := scopes.current
     loop frame >= 0 {
         loop binding in scopes.bindings {
-            if binding.frame != frame || binding.symbol.kind != SymbolKind.Parameter || binding.symbol.name == "self" -> next
+            if binding.frame != frame || binding.symbol.kind != SymbolKind.Parameter || binding.symbol.name == "self" {
+                next
+            }
             ty: binding.symbol.ty ?? next
             row: sema_field_error_struct_row(graph, sema_field_error_unwrap(ty), caller) ?? next
             known: loop root in roots {
-                if root.module_index == row.module_index && root.row == row.row -> break true
+                if root.module_index == row.module_index && root.row == row.row {
+                    break true
+                }
             } ?? false
             if !known -> roots.push(row)
         }
@@ -186,7 +190,7 @@ sema_field_error_field: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRo
     if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
         if item == .Struct(definition) {
             loop field in definition.fields {
-                if field.name == name && field.computed == None -> return Val(field.ty.copy()) // copy: the graph keeps its declaration
+                if field.name == name && field.computed == None -> return Val(field.ty.copy())  // copy: the graph keeps its declaration
             }
         }
     }
@@ -200,7 +204,9 @@ sema_field_error_field_names: fn(graph: SemaRegistrationGraph, rows: [SemaRegist
         if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
             if item == .Struct(definition) {
                 loop field in definition.fields {
-                    if field.computed == None && !names.contains(field.name) -> names.push("{field.name}")
+                    if field.computed == None && !names.contains(field.name) {
+                        names.push("{field.name}")
+                    }
                 }
             }
         }
@@ -211,12 +217,12 @@ sema_field_error_field_names: fn(graph: SemaRegistrationGraph, rows: [SemaRegist
 // `ty` without the optional around it: a path reads through an absent value.
 sema_field_error_unwrap: fn(ty: Type) -> Type {
     if ty == .Option(inner) -> return sema_field_error_unwrap(inner)
-    ty.copy() // copy: the caller keeps the type it walks
+    ty.copy()  // copy: the caller keeps the type it walks
 }
 
 // The element type of the list `ty` names, through an optional.
 sema_field_error_element: fn(ty: Type) -> Type? {
-    if sema_field_error_unwrap(ty) == .List(element) -> return Val(element.copy()) // copy: the caller walks on from it
+    if sema_field_error_unwrap(ty) == .List(element) -> return Val(element.copy())  // copy: the caller walks on from it
     None
 }
 

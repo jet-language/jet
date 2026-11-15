@@ -19,10 +19,13 @@ use {
 }
 
 C_BODY_LIMIT: 268435456
+
 C_VLQ_ALPHABET: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
 SOURCE_MAPPING_URL: Regex{"//# sourceMappingURL=app\.js\.map\s*$"}
+
 JET_STATEMENT: Regex{"^\s*[A-Za-z_]\w*: "}
+
 DRIVE_PATH: Regex{"^[A-Za-z]:[\\/]"}
 
 #Error
@@ -239,7 +242,9 @@ parse: fn(body: String, label: String) -> Dyn Failure! {
 
 fetch_response: fn(origin: String, path: String) -> HTTPResponse Failure! {
     response: client.get("{origin}{path}") ?? return Err(Failure{message: "{path} request failed: {err}"})
-    if response.status() < 200 || response.status() > 299 -> return Err(Failure{message: "{path} returned {response.status()}"})
+    if response.status() < 200 || response.status() > 299 {
+        return Err(Failure{message: "{path} returned {response.status()}"})
+    }
     Ok(response)
 }
 

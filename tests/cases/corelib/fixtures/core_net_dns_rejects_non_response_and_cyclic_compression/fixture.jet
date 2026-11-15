@@ -13,23 +13,26 @@ fixture_build: fn(address: String) {
     build: process.cmd([jet, "build", "guest.jet"]).stdout(.Capture).stderr(.Capture).run() ?? panic("build guest")
     assert(build.code == 0, "original guest compilation must succeed")
 }
+
 fixture_run: fn() -> ProcessReceipt {
     process.cmd([".jet/build/guest"]).stdout(.Capture).stderr(.Capture).run() ?? panic("run original guest")
 }
+
 fixture_copy: fn(out: &[U8], bytes: [U8], start: Int, end: Int) {
     loop i in start..<end -> out.push(bytes[i])
 }
+
 fixture_u16: fn(out: &[U8], n: Int) {
     out.push(U8{(n /% 256) %% 256})
     out.push(U8{n %% 256})
 }
+
 fixture_question_end: fn(query: [U8]) -> Int {
     pos := 12
-    loop pos < query.len() && query[pos] != (U8{0}) {
-        pos += Int{query[pos]} + 1
-    }
+    loop pos < query.len() && query[pos] != (U8{0}) -> pos += Int{query[pos]} + 1
     pos + 5
 }
+
 fixture_name: fn(name: String) -> [U8] {
     out := [U8]{}
     loop label in name.split(".") {
@@ -39,6 +42,7 @@ fixture_name: fn(name: String) -> [U8] {
     out.push(U8{0})
     out
 }
+
 fixture_header: fn(query: [U8], flags: Int, answers: Int, authorities: Int, additional: Int) -> [U8] {
     out := [U8]{}
     fixture_copy(out, query, 0, 2)
@@ -50,6 +54,7 @@ fixture_header: fn(query: [U8], flags: Int, answers: Int, authorities: Int, addi
     fixture_copy(out, query, 12, fixture_question_end(query))
     out
 }
+
 fixture_response: fn(query: [U8]) -> [U8] {
     end: fixture_question_end(query)
     qtype: Int{query[end - 4]} * 256 + Int{query[end - 3]}
@@ -60,9 +65,7 @@ fixture_response: fn(query: [U8]) -> [U8] {
     fixture_u16(out, 1)
     fixture_copy(out, [U8]{0, 0, 0, 0}, 0, 4)
     data := [U8]{}
-    if qtype == 16 {
-        data = [U8]{3, 106, 101, 116}
-    } else if qtype == 33 {
+    if qtype == 16 -> data = [U8]{3, 106, 101, 116} else if qtype == 33 {
         fixture_u16(data, 10)
         fixture_u16(data, 20)
         fixture_u16(data, 443)
@@ -73,6 +76,7 @@ fixture_response: fn(query: [U8]) -> [U8] {
     fixture_copy(out, data, 0, data.len())
     out
 }
+
 fixture_pointer: fn(query: [U8], delta: Int) -> [U8] {
     pointer: fixture_question_end(query) + delta
     out := fixture_header(query, 0x8180, 1, 0, 0)
@@ -85,6 +89,7 @@ fixture_pointer: fn(query: [U8], delta: Int) -> [U8] {
     fixture_copy(out, [U8]{192, 0, 2, 1}, 0, 4)
     out
 }
+
 fixture_send: fn(socket: net.UDPSocket, packet: net.UDPPacket, bytes: [U8]) {
     peer: net.socket_addr(packet.host, packet.port) ?? panic("peer")
     (net.udp_send_bytes_to(socket, bytes, peer) ?? panic("send fixture response")).drop("the fixture reply needs no sent byte count")

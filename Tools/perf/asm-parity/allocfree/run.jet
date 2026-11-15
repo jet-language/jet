@@ -2,9 +2,7 @@
 // over 256 slots. Each one releases the block its slot holds and takes a
 // fresh block of a drawn size, from 1 byte to 1 KiB and weighted to the small
 // ones. `n` passes over them; the sum adds every size taken.
-use {
-    mem: core.mem
-}
+use mem: core.mem
 
 #CLI
 Args: struct {
@@ -18,12 +16,11 @@ Op: struct {
 }
 
 OPS: 4096
+
 SLOTS: 256
 
 // The next state of a 31-bit linear congruential generator.
-next: fn(state: Int) -> Int {
-    (state * 1103515245 + 12345).bit_and(2147483647)
-}
+next: fn(state: Int) -> Int { (state * 1103515245 + 12345).bit_and(2147483647) }
 
 // The operations: per operation one draw picks the size (its top three bits
 // a size class of up to 8, 16, 32, 64, 128, 256, 512 or 1024 bytes, the size
@@ -37,7 +34,7 @@ operations: fn() -> [Op] {
         class: (state >> 28).bit_and(7)
         size: 1 + (state >> 12).bit_and((8 << class) - 1)
         state = next(state)
-        ops.push(Op{slot: (state >> 16).bit_and(SLOTS - 1), size})
+        ops.push(Op{slot: (state >> 16).bit_and(SLOTS - 1), size: size})
     }
     ops
 }
@@ -54,9 +51,9 @@ run: fn(args: Args) {
                 held: live[op.slot]
                 if held != 0 {
                     old: mem.Ptr<U8>.from_addr(held)
-                    mem.free_raw(old) // the heap
+                    mem.free_raw(old)  // the heap
                 }
-                block: mem.alloc_raw(op.size, 8) ?? panic("no memory") // the heap
+                block: mem.alloc_raw(op.size, 8) ?? panic("no memory")  // the heap
                 live[op.slot] = mem.address_of(block.*)
                 total += op.size
             }

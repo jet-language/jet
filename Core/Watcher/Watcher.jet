@@ -11,21 +11,13 @@ package: {
 
 use core: core
 
+files: fn(path: String) -[FS]> WatchHandle IOError! { core.watcher.__files(path) }
 
-files: fn(path: String) -[FS]> WatchHandle IOError! {
-    core.watcher.__files(path)
-}
+process_pid: fn(pid: Int) -> WatchHandle Never! { core.watcher.__process_pid(pid) }
 
-process_pid: fn(pid: Int) -> WatchHandle Never! {
-    core.watcher.__process_pid(pid)
-}
-
-port: fn(host: String, port: Int) -[Net]> WatchHandle Never! {
-    core.watcher.__port(host, port)
-}
+port: fn(host: String, port: Int) -[Net]> WatchHandle Never! { core.watcher.__port(host, port) }
 
 set: fn() -> WatchSet Never! { core.watcher.__set() }
-
 
 add: fn(set: WatchSet, handle: WatchHandle) -[IO]> WatchSet Never! {
     set.add(handle)
@@ -34,43 +26,48 @@ add: fn(set: WatchSet, handle: WatchHandle) -[IO]> WatchSet Never! {
 
 remove: fn(set: WatchSet, target: String) -> WatchSet IOError! {
     if target.len() == 0 {
-        return Err(IOError.InvalidInput(IOContext{
-            operation: .Resolve,
-            resource: Val(target),
-            os_code: None,
-            cause: Val("empty target"),
-        }))
+        return Err(
+            IOError.InvalidInput(
+                IOContext{
+                    operation: .Resolve,
+                    resource: Val(target),
+                    os_code: None,
+                    cause: Val("empty target"),
+                },
+            ),
+        )
     }
-    Err(IOError.Other(IOContext{
-        operation: .Resolve,
-        resource: Val(target),
-        os_code: None,
-        cause: Val("watch sets do not support removal"),
-    }))
+    Err(
+        IOError.Other(
+            IOContext{
+                operation: .Resolve,
+                resource: Val(target),
+                os_code: None,
+                cause: Val("watch sets do not support removal"),
+            },
+        ),
+    )
 }
 
 contains: fn(set: WatchSet, target: String) -> Bool IOError! {
     if target.len() == 0 -> return Ok(false)
-    Err(IOError.Other(IOContext{
-        operation: .Resolve,
-        resource: Val(target),
-        os_code: None,
-        cause: Val("watch sets do not expose target lookup"),
-    }))
+    Err(
+        IOError.Other(
+            IOContext{
+                operation: .Resolve,
+                resource: Val(target),
+                os_code: None,
+                cause: Val("watch sets do not expose target lookup"),
+            },
+        ),
+    )
 }
 
-len: fn(set: WatchSet) -> Int Never! {
-    summary_count(set.summary())
-}
+len: fn(set: WatchSet) -> Int Never! { summary_count(set.summary()) }
 
-kind: fn(handle: WatchHandle) -> String Never! {
-    summary_kind(handle.summary())
-}
+kind: fn(handle: WatchHandle) -> String Never! { summary_kind(handle.summary()) }
 
-target: fn(handle: WatchHandle) -> String Never! {
-    summary_target(handle.summary())
-}
-
+target: fn(handle: WatchHandle) -> String Never! { summary_target(handle.summary()) }
 
 WatchDomain: enum {
     File
@@ -78,7 +75,9 @@ WatchDomain: enum {
     Port
 
     impl Equatable {
-        equal: fn(self, rhs: WatchDomain) -> Bool { watch_domain_tag(self) == watch_domain_tag(rhs) }
+        equal: fn(self, rhs: WatchDomain) -> Bool {
+            watch_domain_tag(self) == watch_domain_tag(rhs)
+        }
     }
 }
 
@@ -113,6 +112,7 @@ watch_domain_tag: fn(value: WatchDomain) -> Int Never! {
         .Port -> 2
     }
 }
+
 watch_kind_tag: fn(value: WatchKind) -> Int Never! {
     if value == {
         .Created -> 0
@@ -123,6 +123,7 @@ watch_kind_tag: fn(value: WatchKind) -> Int Never! {
         .Ready -> 5
     }
 }
+
 watch_domain_name: fn(value: WatchDomain) -> String Never! {
     if value == {
         .File -> "File"
@@ -130,6 +131,7 @@ watch_domain_name: fn(value: WatchDomain) -> String Never! {
         .Port -> "Port"
     }
 }
+
 watch_kind_name: fn(value: WatchKind) -> String Never! {
     if value == {
         .Created -> "Created"
@@ -140,6 +142,7 @@ watch_kind_name: fn(value: WatchKind) -> String Never! {
         .Ready -> "Ready"
     }
 }
+
 WatchEvent: struct {
     domain: WatchDomain
     kind: WatchKind
@@ -151,17 +154,18 @@ WatchEvent: struct {
     __show: fn(self) -> String Never! {
         "WatchEvent {{ domain: {watch_domain_name(self.domain)}, kind: {watch_kind_name(self.kind)}, path: {self.path}, detail: {self.detail} }}"
     }
+
     __debug: fn(self) -> String Never! {
         "WatchEvent {{ domain: {watch_domain_name(self.domain)}, kind: {watch_kind_name(self.kind)}, path: {self.path:Debug}, detail: {self.detail:Debug}, pid: {self.pid}, port: {self.port} }}"
     }
 
     impl Equatable {
         equal: fn(self, rhs: WatchEvent) -> Bool {
-            self.domain == rhs.domain && self.kind == rhs.kind && self.path == rhs.path &&
-            self.detail == rhs.detail && self.pid == rhs.pid && self.port == rhs.port
+            self.domain == rhs.domain && self.kind == rhs.kind && self.path == rhs.path && self.detail == rhs.detail && self.pid == rhs.pid && self.port == rhs.port
         }
     }
 }
+
 watch_domain_of: fn(target: Int) -> WatchDomain Never! {
     if {
         target == 1 -> WatchDomain.Process
@@ -199,7 +203,7 @@ impl WatchHandle {
             ev: WatchEvent{domain: watch_domain_of(target), kind: watch_kind_named(texts[at]), path: texts[at + 1], detail: texts[at + 2], pid: pid, port: port}
             out.push(ev.copy())
             _ := bus.emit(ev)
-            at = at + 3
+            at += 3
         }
         out
     }
@@ -221,7 +225,9 @@ impl WatchHandle {
     summary: fn(self) -> String Never! {
         target: core.watcher.__target(self)
         if target == 1 -> return "watch process {core.watcher.__number(self)}"
-        if target == 2 -> return "watch port {core.watcher.__text(self)}:{core.watcher.__number(self)}"
+        if target == 2 {
+            return "watch port {core.watcher.__text(self)}:{core.watcher.__number(self)}"
+        }
         "watch file {core.watcher.__text(self)}"
     }
 }
@@ -281,19 +287,27 @@ recursive: fn(path: String) -[FS]> WatchHandle IOError! {
 
 debounce: fn(handle: WatchHandle, ms: Int) -> WatchHandle IOError! {
     if ms < 0 {
-        return Err(IOError.InvalidInput(IOContext{
-            operation: .Resolve,
-            resource: Val(target(handle)),
-            os_code: None,
-            cause: Val("negative debounce interval"),
-        }))
+        return Err(
+            IOError.InvalidInput(
+                IOContext{
+                    operation: .Resolve,
+                    resource: Val(target(handle)),
+                    os_code: None,
+                    cause: Val("negative debounce interval"),
+                },
+            ),
+        )
     }
-    Err(IOError.Other(IOContext{
-        operation: .Resolve,
-        resource: Val(target(handle)),
-        os_code: None,
-        cause: Val("debounce is not supported by the host watcher"),
-    }))
+    Err(
+        IOError.Other(
+            IOContext{
+                operation: .Resolve,
+                resource: Val(target(handle)),
+                os_code: None,
+                cause: Val("debounce is not supported by the host watcher"),
+            },
+        ),
+    )
 }
 
 poll: fn(handle: WatchHandle) -[IO]> [WatchEvent] Never! { handle.poll() }
@@ -329,9 +343,7 @@ summary_count: fn(text: String) -> Int {
         if seen {
             if b < 48 || b > 57 -> return n
             n = n * 10 + (b - 48)
-        } else if b == 61 {
-            seen = true
-        }
+        } else if b == 61 { seen = true }
     }
     n
 }
@@ -353,7 +365,6 @@ suffix: fn(text: String, start: Int) -> String Never! {
     loop {
         if i >= raw.len() -> return String.from_bytes(out) ?? ""
         out.push(raw[i])
-        i = i + 1
+        i += 1
     }
 }
-

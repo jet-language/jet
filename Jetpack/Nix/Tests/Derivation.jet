@@ -2,9 +2,17 @@
 use {
     files: core.files
     jetpack_nix.[
-        NIX_DEFAULT_STORE_DIR, NixDerivation, NixError, nix_derivation_store, nix_differential_corpus,
-        nix_is_nix32_byte, nix_make_fixed_output_path, nix_nix32_decode, nix_nix32_encode,
-        nix_scan_store_path_digests, nix_verify_aterm_roundtrip,
+        NIX_DEFAULT_STORE_DIR,
+        NixDerivation,
+        NixError,
+        nix_derivation_store,
+        nix_differential_corpus,
+        nix_is_nix32_byte,
+        nix_make_fixed_output_path,
+        nix_nix32_decode,
+        nix_nix32_encode,
+        nix_scan_store_path_digests,
+        nix_verify_aterm_roundtrip,
     ]
 }
 
@@ -43,7 +51,7 @@ nix_test_is_parse_error: fn(error: NixError) -> Bool {
     decoded: nix_nix32_decode(nix_nix32_encode(digest)) ?? panic("encoded Nix32 must decode")
     assert_eq(decoded, digest)
     if nix_nix32_decode("0e") == {
-        .Ok(_) -> panic("`e` is outside the Nix32 alphabet")
+        .Ok(_) -> { panic("`e` is outside the Nix32 alphabet") }
         .Err(error) -> assert_eq(error.message(), "nix drv parse: invalid Nix32 character: 'e'")
     }
 }
@@ -65,7 +73,7 @@ nix_test_is_parse_error: fn(error: NixError) -> Bool {
     drv: NixDerivation.parse(aterm) ?? panic("minimal fixed ATerm must parse")
     assert(drv.is_fixed())
     nix_verify_aterm_roundtrip(aterm, drv) ?? panic("minimal fixed ATerm must roundtrip")
-    store := nix_derivation_store([String: NixDerivation]{})
+    store := nix_derivation_store([String:NixDerivation]{})
     store.verify_output_paths(NIX_DEFAULT_STORE_DIR, "{real}.drv", drv) ?? panic("fixed-output paths must verify")
 }
 
@@ -73,7 +81,7 @@ nix_test_is_parse_error: fn(error: NixError) -> Bool {
     malformed: [String]{`Derive([("out`, `Derive([],[],[],"x86_64-linux","unterminated`}
     loop aterm in malformed {
         if NixDerivation.parse(aterm) == {
-            .Ok(_) -> panic("malformed ATerm must be rejected")
+            .Ok(_) -> { panic("malformed ATerm must be rejected") }
             .Err(error) -> assert(nix_test_is_parse_error(error))
         }
     }
@@ -88,7 +96,9 @@ nix_test_is_parse_error: fn(error: NixError) -> Bool {
 }
 
 #Test("nix differential local store sample") {
-    if !files.is_dir(NIX_DEFAULT_STORE_DIR) -> return
+    if !files.is_dir(NIX_DEFAULT_STORE_DIR) {
+        return
+    }
     report: nix_differential_corpus(NIX_DEFAULT_STORE_DIR, 64) ?? panic("corpus")
     assert_eq(report.divergences, [NixError]{})
     assert(report.checked > 0)

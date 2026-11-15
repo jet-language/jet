@@ -25,9 +25,9 @@ show: fn(e: Expr) -> String {
 // Writes through the write parameter's own window.
 bump: fn(e: &Expr) {
     if &e == {
-        .Pair(_, n) -> n = n + 100
-        .Many(items) -> items.push(7)
-        .Lit(n) -> n = n + 1000
+        .Pair(_, n) -> { n += 100 }
+        .Many(items) -> { items.push(7) }
+        .Lit(n) -> n += 1000
     }
 }
 
@@ -39,9 +39,7 @@ bump_left: fn(e: &Expr) {
     }
 }
 
-sample: fn() -> Expr {
-    Expr.Pair{left: Expr.Lit{n: 1}, n: 2}
-}
+sample: fn() -> Expr { Expr.Pair{left: Expr.Lit{n: 1}, n: 2} }
 
 run: fn() {
     // An owned local.
@@ -77,7 +75,7 @@ run: fn() {
         .Lit(_) | .Many(_) -> {}
     }
     if &field.note == {
-        .Val(text) -> text = "edited"
+        .Val(text) -> { text = "edited" }
         None -> {}
     }
     print("field: {show(holder.expr)} {holder.note ?? "none"} / {show(field.expr)} {field.note ?? "none"}")

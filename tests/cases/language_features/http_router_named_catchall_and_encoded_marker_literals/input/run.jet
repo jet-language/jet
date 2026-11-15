@@ -1,26 +1,30 @@
 package: { name: "http-router-named-catchall" authority: { allow: [Net] } }
+
 use {
     http: core.http
     server: core.http.server
 }
-asset: fn(path: String) -> HTTPResponse HTTPError! {
-    return Ok(server.response(200, "{path}"))
-}
+
+asset: fn(path: String) -> HTTPResponse HTTPError! { return Ok(server.response(200, "{path}")) }
+
 literal: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
     return Ok(server.response(200, "literal"))
 }
-catch: fn(rest: String) -> HTTPResponse HTTPError! {
-    return Ok(server.response(200, "catch"))
-}
+
+catch: fn(rest: String) -> HTTPResponse HTTPError! { return Ok(server.response(200, "catch")) }
+
 param_catch: fn(id: String, rest: String) -> HTTPResponse HTTPError! {
     return Ok(server.response(200, "param-catch"))
 }
+
 param_first: fn(first: String) -> HTTPResponse HTTPError! {
     return Ok(server.response(200, "param-first"))
 }
+
 static_first: fn(last: String) -> HTTPResponse HTTPError! {
     return Ok(server.response(200, "static-first"))
 }
+
 run: fn() {
     router: http.router()
     router.get("/assets/*path", asset)

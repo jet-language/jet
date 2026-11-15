@@ -10,7 +10,6 @@
 // scripts run, opens index.html, and polls the recorded lines (400 times,
 // 50 ms apart) until they equal the expected lines. It prints the expected
 // text and exits 0 on a match; otherwise it names the difference and exits 1.
-
 use {
     browser: core.browser
     files: core.files
@@ -22,6 +21,7 @@ use {
 }
 
 C_HOOK: "() => {{ window.__compiledWorkloadLogs = []; console.log = (...args) => window.__compiledWorkloadLogs.push(args.map(value => String(value)).join(\" \")); }}"
+
 C_LOGS: "(window.__compiledWorkloadLogs || []).join(\"\\n\")"
 
 fail: fn(message: String) -> Never { process.fail(1, message) }

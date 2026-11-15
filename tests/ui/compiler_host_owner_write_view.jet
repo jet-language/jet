@@ -1,6 +1,7 @@
 Owner: trait {
     identity: fn(self) -> Int Never!
 }
+
 TokenOwner: struct {
     token: Int
 
@@ -8,14 +9,21 @@ TokenOwner: struct {
         identity: fn(self) -> Int Never! { self.token }
     }
 }
-Carrier: struct { owner: Owner, adopted: Bool }
+
+Carrier: struct {
+    owner: Owner
+    adopted: Bool
+}
+
 HostValue: enum {
     Leaf(carrier: Carrier)
     List(values: [HostValue])
 }
+
 leaf: fn(token: Int) -> HostValue Never! {
     HostValue.Leaf{carrier: Carrier{owner: TokenOwner{token: token}, adopted: false}}
 }
+
 adopt: fn(value: &HostValue, path: [Int], position: Int) -> Bool Never! {
     if position >= path.len() {
         if &value == .Leaf(carrier) {
@@ -32,10 +40,12 @@ adopt: fn(value: &HostValue, path: [Int], position: Int) -> Bool Never! {
     }
     false
 }
+
 adopted: fn(value: HostValue, token: Int) -> Bool Never! {
     if value == .Leaf(carrier) -> return carrier.adopted && carrier.owner.identity() == token
     false
 }
+
 run: fn() {
     root := HostValue.List{values: [HostValue]{leaf(10), HostValue.List{values: [HostValue]{leaf(20), leaf(30)}}}}
     if !adopt(root, [Int]{1, 0}, 0) -> panic("nested owner adoption failed")
@@ -46,7 +56,9 @@ run: fn() {
             if adopted(values[0], 10) -> panic("sibling owner changed")
             if values[1] == {
                 .List(children) -> {
-                    if !adopted(children[0], 20) || adopted(children[1], 30) -> panic("nested owner identity changed")
+                    if !adopted(children[0], 20) || adopted(children[1], 30) {
+                        panic("nested owner identity changed")
+                    }
                 }
                 .Leaf(_) -> panic("nested aggregate changed")
             }

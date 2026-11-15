@@ -5,24 +5,38 @@
 use diagnostic_unicode: core.text
 
 DIAGNOSTIC_THEME_ACCENT: "1;96"
+
 DIAGNOSTIC_THEME_DIM: "2;37"
+
 DIAGNOSTIC_THEME_WARN: "33"
+
 DIAGNOSTIC_THEME_ERROR: "31"
+
 DIAGNOSTIC_THEME_BOLD: "1"
 
 // One `Theme` role: `ESC [ sgr m text ESC [ 0 m` when color is on.
 diagnostic_theme_paint: fn(color: Bool, sgr: String, text: String) -> String Never! {
     if !color -> return text.copy()
-    escape: String.from_bytes([U8]{"\x1b"}) ?? ""
+    escape: String.from_bytes([U8]{"\x1B"}) ?? ""
     "{escape}[{sgr}m{text}{escape}[0m"
 }
 
-diagnostic_theme_accent: fn(color: Bool, text: String) -> String Never! { diagnostic_theme_paint(color, DIAGNOSTIC_THEME_ACCENT, text) }
-diagnostic_theme_dim: fn(color: Bool, text: String) -> String Never! { diagnostic_theme_paint(color, DIAGNOSTIC_THEME_DIM, text) }
-diagnostic_theme_bold: fn(color: Bool, text: String) -> String Never! { diagnostic_theme_paint(color, DIAGNOSTIC_THEME_BOLD, text) }
+diagnostic_theme_accent: fn(color: Bool, text: String) -> String Never! {
+    diagnostic_theme_paint(color, DIAGNOSTIC_THEME_ACCENT, text)
+}
+
+diagnostic_theme_dim: fn(color: Bool, text: String) -> String Never! {
+    diagnostic_theme_paint(color, DIAGNOSTIC_THEME_DIM, text)
+}
+
+diagnostic_theme_bold: fn(color: Bool, text: String) -> String Never! {
+    diagnostic_theme_paint(color, DIAGNOSTIC_THEME_BOLD, text)
+}
 
 diagnostic_theme_severity: fn(color: Bool, severity: Int, text: String) -> String Never! {
-    if severity == DIAGNOSTIC_LINT -> return diagnostic_theme_paint(color, DIAGNOSTIC_THEME_WARN, text)
+    if severity == DIAGNOSTIC_LINT {
+        return diagnostic_theme_paint(color, DIAGNOSTIC_THEME_WARN, text)
+    }
     diagnostic_theme_paint(color, DIAGNOSTIC_THEME_ERROR, text)
 }
 
@@ -74,7 +88,9 @@ diagnostic_escape_terminal_text: fn(value: String) -> String Never! {
             codepoint == 10 -> diagnostic_push_text(out, "\\n")
             codepoint == 13 -> diagnostic_push_text(out, "\\r")
             codepoint == 9 -> diagnostic_push_text(out, "\\t")
-            diagnostic_is_terminal_control(codepoint) -> diagnostic_push_text(out, "\\u{{{diagnostic_lower_hex(codepoint, 4)}}}")
+            diagnostic_is_terminal_control(codepoint) -> {
+                diagnostic_push_text(out, "\\u{{{diagnostic_lower_hex(codepoint, 4)}}}")
+            }
             else -> {
                 loop offset in 0..<width -> out.push(bytes[index + offset])
             }
@@ -189,7 +205,9 @@ diagnostic_source_position: fn(sources: &DiagnosticSourceTexts, origin: Diagnost
         if known == key -> return position
     }
     sources.keys.push(key)
-    if origin == .Val(found) -> sources.texts.push(diagnostic_source_text(found.source)) else -> sources.texts.push(diagnostic_source_text(source))
+    if origin == .Val(found) -> sources.texts.push(diagnostic_source_text(found.source)) else {
+        sources.texts.push(diagnostic_source_text(source))
+    }
     sources.keys.len() - 1
 }
 
@@ -223,7 +241,9 @@ diagnostic_is_char_boundary: fn(bytes: [U8], index: Int) -> Bool Never! {
 // Rust `src.get(start..end)` up to its first newline; an invalid range is "".
 diagnostic_snippet_first_line: fn(bytes: [U8], span: Span) -> String Never! {
     end: if span.end > bytes.len() -> bytes.len() else -> span.end
-    if span.start > end || !diagnostic_is_char_boundary(bytes, span.start) || !diagnostic_is_char_boundary(bytes, end) -> return ""
+    if span.start > end || !diagnostic_is_char_boundary(bytes, span.start) || !diagnostic_is_char_boundary(bytes, end) {
+        return ""
+    }
     stop := span.start
     loop stop < end && bytes[stop] != (U8{10}) -> stop += 1
     foundation_byte_text(bytes, span.start, stop)
@@ -261,7 +281,9 @@ diagnostic_push_snippet: fn(out: &[U8], diagnostic: Diagnostic, color: Bool, fil
     // Color only the caret glyphs, not the leading pad (keeps columns).
     marks: diagnostic_theme_severity(color, diagnostic.severity, "^".repeat(caret_len))
     if {
-        message == .Val(label_text) -> diagnostic_push_text(out, "    | {pad}{marks} {diagnostic_escape_terminal_text(label_text)}\n")
+        message == .Val(label_text) -> {
+            diagnostic_push_text(out, "    | {pad}{marks} {diagnostic_escape_terminal_text(label_text)}\n")
+        }
         else -> diagnostic_push_text(out, "    | {pad}{marks}\n")
     }
 }
@@ -318,8 +340,12 @@ diagnostic_render_with: fn(diagnostic: Diagnostic, file: String, source: String,
     diagnostic_push_text(out, "{label} [{diagnostic_display_name(diagnostic.code)}]: {what}\n")
     if diagnostic.span != None || diagnostic.labels.len() > 0 {
         position: diagnostic_source_position(sources, diagnostic.origin, source)
-        if diagnostic.span == .Val(span) -> diagnostic_push_snippet(out, diagnostic, color, display, sources.texts[position], span, None)
-        loop secondary in diagnostic.labels -> diagnostic_push_snippet(out, diagnostic, color, display, sources.texts[position], secondary.span, Val(secondary.message))
+        if diagnostic.span == .Val(span) {
+            diagnostic_push_snippet(out, diagnostic, color, display, sources.texts[position], span, None)
+        }
+        loop secondary in diagnostic.labels {
+            diagnostic_push_snippet(out, diagnostic, color, display, sources.texts[position], secondary.span, Val(secondary.message))
+        }
     }
     diagnostic_push_text(out, " {diagnostic_theme_bold(color, "Why:")} {why}\n")
     diagnostic_push_text(out, " {diagnostic_theme_bold(color, "Fix:")} {fix}\n")
@@ -336,21 +362,28 @@ diagnostic_render_with: fn(diagnostic: Diagnostic, file: String, source: String,
     }
     if diagnostic.denial_kind == .Val(kind) {
         diagnostic_push_text(out, " {diagnostic_theme_bold(color, "Denial:")} {diagnostic_escape_terminal_text(kind)}\n")
-        if diagnostic.call_chain.len() > 0 -> diagnostic_push_text(out, " {diagnostic_theme_bold(color, "Call chain:")} {diagnostic_join_escaped(diagnostic.call_chain, " → ")}\n")
-        if diagnostic.scope_chain.len() > 0 -> diagnostic_push_text(out, " {diagnostic_theme_bold(color, "Scope chain:")} {diagnostic_join_escaped(diagnostic.scope_chain, " → ")}\n")
-        if diagnostic.nearest_granting_scope == .Val(scope) -> diagnostic_push_text(out, " {diagnostic_theme_bold(color, "Nearest granting scope:")} {diagnostic_escape_terminal_text(scope)}\n")
+        if diagnostic.call_chain.len() > 0 {
+            diagnostic_push_text(out, " {diagnostic_theme_bold(color, "Call chain:")} {diagnostic_join_escaped(diagnostic.call_chain, " → ")}\n")
+        }
+        if diagnostic.scope_chain.len() > 0 {
+            diagnostic_push_text(out, " {diagnostic_theme_bold(color, "Scope chain:")} {diagnostic_join_escaped(diagnostic.scope_chain, " → ")}\n")
+        }
+        if diagnostic.nearest_granting_scope == .Val(scope) {
+            diagnostic_push_text(out, " {diagnostic_theme_bold(color, "Nearest granting scope:")} {diagnostic_escape_terminal_text(scope)}\n")
+        }
     }
     // Jet's own codes have a reference page; a library diagnostic's code is its type path.
-    if !diagnostic.code.contains(".") -> diagnostic_push_text(out, diagnostic_more_line(diagnostic.code))
+    if !diagnostic.code.contains(".") {
+        diagnostic_push_text(out, diagnostic_more_line(diagnostic.code))
+    }
     String.from_bytes(out) ?? ""
 }
 
 // The reference line that closes every report of a Jet code.
-diagnostic_more_line: fn(code: String) -> String Never! {
-    "More: jet-lang.dev/e/{code}\n"
-}
+diagnostic_more_line: fn(code: String) -> String Never! { "More: jet-lang.dev/e/{code}\n" }
 
 DIAGNOSTIC_STOP_OPEN: "Stop ["
+
 DIAGNOSTIC_STOP_CLOSE: "]: "
 
 // A runtime stop's first line, `Stop [CODE]: what`, as the runtime prints a

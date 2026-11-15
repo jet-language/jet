@@ -11,14 +11,16 @@ use {
 s5_trust_gate_diagnostics: fn(error: PackageGateError) {
     found := false
     loop diagnostic in error.diagnostics {
-        if diagnostic.code == "E3415" && diagnostic.what.contains("trust_grant") && diagnostic.what.contains("package.jet") -> found = true
+        if diagnostic.code == "E3415" && diagnostic.what.contains("trust_grant") && diagnostic.what.contains("package.jet") {
+            found = true
+        }
     }
     assert(found)
 }
 
 s5_trust_gate_refuses: fn(result: Bool PackageGateError!) {
     if result == {
-        .Err(error) -> s5_trust_gate_diagnostics(error)
+        .Err(error) -> { s5_trust_gate_diagnostics(error) }
         .Ok(_) -> panic("trust writer must refuse")
     }
 }

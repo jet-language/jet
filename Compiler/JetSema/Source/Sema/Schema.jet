@@ -2,12 +2,17 @@
 use jet_foundation.[StructDef, Type, foundation_byte_text, type_name]
 
 SNAPSHOT_VERSION: U32{1}
+
 SnapshotField: struct {
     name: String
     ty: String
 }
+
 #Error
-SchemaSnapshotError: struct { message: String }
+SchemaSnapshotError: struct {
+    message: String
+}
+
 SchemaSnapshot: struct {
     schema_version: U32
     type_name: String
@@ -37,10 +42,14 @@ SchemaSnapshot: struct {
                     bytes: rest.bytes()
                     index := if rest.starts_with("+") -> 1 else -> 0
                     number := 0
-                    if index == bytes.len() -> return Err(SchemaSnapshotError{message: "invalid schema_version: {rest}"})
+                    if index == bytes.len() {
+                        return Err(SchemaSnapshotError{message: "invalid schema_version: {rest}"})
+                    }
                     loop index < bytes.len() {
                         digit: Int{bytes[index]} - 48
-                        if digit < 0 || digit > 9 || number > 429496729 || (number == 429496729 && digit > 5) -> return Err(SchemaSnapshotError{message: "invalid schema_version: {rest}"})
+                        if digit < 0 || digit > 9 || number > 429496729 || (number == 429496729 && digit > 5) {
+                            return Err(SchemaSnapshotError{message: "invalid schema_version: {rest}"})
+                        }
                         number = number * 10 + digit
                         index += 1
                     }
@@ -52,7 +61,9 @@ SchemaSnapshot: struct {
                 line.starts_with("field ") -> {
                     rest: line.removeprefix("field ")
                     colon: rest.find(":")
-                    if colon < 0 -> return Err(SchemaSnapshotError{message: "malformed field line: {line}"})
+                    if colon < 0 {
+                        return Err(SchemaSnapshotError{message: "malformed field line: {line}"})
+                    }
                     fields.push(SnapshotField{name: foundation_byte_text(rest.bytes(), 0, colon).trim(), ty: foundation_byte_text(rest.bytes(), colon + 1, rest.count_bytes()).trim()})
                 }
                 else -> return Err(SchemaSnapshotError{message: "unknown line in schema snapshot: {line}"})

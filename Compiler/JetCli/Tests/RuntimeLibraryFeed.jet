@@ -11,13 +11,15 @@ use {
     root: cli_files.mkdtemp("jet-cli-library-feed") ?? panic("create library feed scratch: {err}")
     source: "helper: fn() -> Int {{ 1 }}\n#Export(c) run: fn() {{ _ := helper() }}\n"
     snapshot: JetDriverAuthorizedSourceSnapshot{
-        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{
-            canonical_path: "/library-feed",
-            identity: "library-feed-root",
-            allow_hardlinks: false,
-            files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/library-feed/unit.jet", relative_path: "unit.jet", identity: "library-feed-file", source: source}},
-            foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
-        }},
+        roots: [JetDriverAuthorizedSourceRoot]{
+            JetDriverAuthorizedSourceRoot{
+                canonical_path: "/library-feed",
+                identity: "library-feed-root",
+                allow_hardlinks: false,
+                files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/library-feed/unit.jet", relative_path: "unit.jet", identity: "library-feed-file", source: source}},
+                foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+            },
+        },
         entry_root_identity: "library-feed-root",
         entry_path: "/library-feed/unit.jet",
     }
@@ -29,7 +31,9 @@ use {
     prefix: "{root}/unit"
     built: jet_cli_runtime_library(request, prefix, Val(lifecycle), threads, None)
     if built.internal_problem == .Val(problem) -> panic("the library feed refused: {problem}")
-    if !built.complete -> panic("the library feed failed: {built.diagnostics.map(fn(diagnostic) { "{diagnostic.code} {diagnostic.what}" })} {cli_files.read("{prefix}.issues") ?? ""}")
+    if !built.complete {
+        panic("the library feed failed: {built.diagnostics.map(fn(diagnostic) { "{diagnostic.code} {diagnostic.what}" })} {cli_files.read("{prefix}.issues") ?? ""}")
+    }
     assert_eq(cli_files.read("{prefix}.exports") ?? panic("read the export list: {err}"), "run")
     assert((cli_files.read_bytes("{prefix}.o") ?? panic("read the library object: {err}")).len() > 0)
     cli_files.remove_all(root) ?? panic("library feed cleanup")

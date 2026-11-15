@@ -3,21 +3,27 @@
 // its last job reference closes the completed native fd. Job48: atomic
 // refs0/done8, owned E4 path16, owned FD72*24, status32, owned ParkSlot40. Only
 // the worker writes result fields before release done.
-rt_net_unix_connect_worker_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+rt_net_unix_connect_worker_address: fn() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
 net_unix_connect_job_drop: fn(job: I64) {
-    if (sync_add(job, I64{-1}) != I64{1}) -> return
+    if (sync_add(job, I64{-1}) != I64{1}) {
+        return
+    }
     jet_rt_string_drop(net_word(job, I64{16}))
     jet_fd_drop_raw(net_word(job, I64{24}))
     sync_park_drop(net_word(job, I64{40}))
     jet_rt_free(job, I64{48}, I64{8})
 }
+
 #Export(c) jet_rt_net_unix_connect_worker: fn(job: I64) -> I64 {
     path: net_word(job, I64{16})
     status := net_unix_path_status(path)
     state := I64{0}
     // A pathname too long for sockaddr_un is tried through its directory
     // (net_socket_unix_call); the call reports when no alias fits.
-    if (status == HOST_UNIX_PATH_TOO_LONG) -> status = I64{0}
+    if (status == HOST_UNIX_PATH_TOO_LONG) { status = I64{0} }
     if (status == I64{0}) {
         // CLOEXEC without NONBLOCK: this detached worker alone may block.
         descriptor: host_call(I64{41}, I64{1}, I64{524289}, I64{0})
@@ -25,9 +31,7 @@ net_unix_connect_job_drop: fn(job: I64) {
             state = jet_fd_adopt_unbuffered_raw(descriptor, I64{0})
             scratch: jet_rt_alloc(I64{32}, I64{8})
             called: jet_socket_unix_connect_raw(state, path, scratch)
-            if (called == HOST_UNIX_PATH_TOO_LONG) {
-                status = called
-            } else if (called < I64{0}) {
+            if (called == HOST_UNIX_PATH_TOO_LONG) { status = called } else if (called < I64{0}) {
                 status = -net_word(scratch, I64{8})
             } else {
                 // std switches to nonblocking only after successful connect.
@@ -47,6 +51,7 @@ net_unix_connect_job_drop: fn(job: I64) {
     net_unix_connect_job_drop(job)
     I64{0}
 }
+
 // jet_net_unix_connect: the worker result is polled each 5ms park; an ambient or
 // explicit deadline/cancellation stops the wait, never the worker.
 net_unix_connect_run: fn(path: I64, output: I64, error: I64) -> I64 {
@@ -88,18 +93,22 @@ net_unix_connect_run: fn(path: I64, output: I64, error: I64) -> I64 {
     net_unix_connect_job_drop(job)
     result
 }
+
 #Export(c) jet_net_unix_connect: fn(path: I64, output: I64, error: I64) -> I64 {
     jet_rt_world_reject_uncontrolled(I64{1})
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     net_unix_connect_run(path, output, error)
 }
+
 #Export(c) jet_net_unix_connect_deadline: fn(path: I64, deadline: I64, output: I64, error: I64) -> I64 {
     operation: rt_static_text("unix connect")
     // Duration's provider word is untagged nanoseconds (not an exact Int).
     milliseconds: deadline / I64{1000000}
-    if (milliseconds < I64{0}) -> return net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_clone(rt_static_text("network timeout must be non-negative")), I64{0}, error)
+    if (milliseconds < I64{0}) {
+        return net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_clone(rt_static_text("network timeout must be non-negative")), I64{0}, error)
+    }
     jet_rt_world_reject_uncontrolled(I64{1})
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     save: jet_rt_alloc(I64{16}, I64{8})
     net_route_deadline_push(milliseconds, save)
     result: net_unix_connect_run(path, output, error)

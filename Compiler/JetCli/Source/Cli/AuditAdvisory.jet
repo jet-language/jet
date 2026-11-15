@@ -61,7 +61,9 @@ jet_cli_advisory_audit_flag: fn(args: [String], name: String) -> JetCLIAdvisoryA
 // One failed audit, as a jet.status/v1 line under `--json`.
 jet_cli_advisory_audit_fail: fn(diagnostic: Diagnostic, exit_code: Int, color: Bool, json: Bool) -> JetDriverVerbOutput Never! {
     diagnostics: [Diagnostic]{diagnostic}
-    if json -> return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("audit", false, None, "", "", diagnostics), stderr: "", exit_code: exit_code}
+    if json {
+        return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("audit", false, None, "", "", diagnostics), stderr: "", exit_code: exit_code}
+    }
     JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all("", "", diagnostics, color), exit_code: exit_code}
 }
 
@@ -93,7 +95,9 @@ jet_cli_advisory_audit: fn(root: String, args: [String], color: Bool, json: Bool
     }
     lock_path: cli_files.join(cli_files.join(root, ".jet"), "lock")
     lock_text: cli_files.read(lock_path) ?? {
-        if !cli_files.exists(lock_path) -> return jet_cli_advisory_audit_fail_one(publication_e2611("the unified lockfile", "run `jet fetch`, review the lock, then run `jet inspect audit` again"), color, json)
+        if !cli_files.exists(lock_path) {
+            return jet_cli_advisory_audit_fail_one(publication_e2611("the unified lockfile", "run `jet fetch`, review the lock, then run `jet inspect audit` again"), color, json)
+        }
         return jet_cli_advisory_audit_fail_one(publication_e2611("a readable unified lockfile", "repair `{lock_path}` and run `jet inspect audit` again: {jet_cli_io_error_text(err)}"), color, json)
     }
     lock: pkg_lock_parse(lock_text) ?? return jet_cli_advisory_audit_fail_one(publication_e2611("a valid unified lockfile", "repair `{lock_path}`: {err.message()}"), color, json)
@@ -134,10 +138,16 @@ jet_cli_advisory_audit: fn(root: String, args: [String], color: Bool, json: Bool
     }
     stdout := "audit: feed sequence {report.receipt.sequence} verified (key {report.receipt.key_id}, digest {report.receipt.digest}, offline local feed).\n"
     stdout = "{stdout}audit: policy maturity {report.receipt.maturity_seconds}s; exact exceptions use package#version; {lock.packages.len()} dependencies checked.\n"
-    loop exception in report.source_exceptions -> stdout = "{stdout}audit: source policy exception applied: {exception}\n"
-    if diagnostics.len() == 0 -> return JetDriverVerbOutput{stdout: "{stdout}audit: no advisories found.\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    loop exception in report.source_exceptions {
+        stdout = "{stdout}audit: source policy exception applied: {exception}\n"
+    }
+    if diagnostics.len() == 0 {
+        return JetDriverVerbOutput{stdout: "{stdout}audit: no advisories found.\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
     stderr := "{diagnostic_render_all("", "", diagnostics, color)}\n{report.matches.len()} advisory match(es) found ({critical} critical)\n"
-    if failed -> stderr = "{stderr}audit: policy checks failed. Upgrade the affected dependencies or wait for an approved exception.\n"
+    if failed {
+        stderr = "{stderr}audit: policy checks failed. Upgrade the affected dependencies or wait for an approved exception.\n"
+    }
     JetDriverVerbOutput{stdout: stdout, stderr: stderr, exit_code: exit_code}
 }
 

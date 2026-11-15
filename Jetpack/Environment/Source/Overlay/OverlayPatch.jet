@@ -8,7 +8,6 @@
 // hard-linked input is refused because writing it would change another name.
 // All patches are staged in memory first and committed file by file with an
 // atomic rename; a failed commit restores the files already written.
-
 use {
     jet_pkg_model.[AuthorityResolver, CheckedDirectory, OverlayError, PackageOverride, PatchApplication]
     env_overlay_text: core.text.parse
@@ -18,7 +17,9 @@ use {
 }
 
 OVERLAY_TEMP_ATTEMPTS: 16
+
 OVERLAY_TEMP_MODE: 0o600
+
 OVERLAY_NO_NEWLINE_MARKER: "\\ No newline at end of file"
 
 // Pinned identity of one opened input.
@@ -67,11 +68,9 @@ OverlayStagedFile: struct {
 
 // The staged files of one application, keyed by normalized relative path.
 OverlayStage: struct {
-    entries: [String: OverlayStagedFile]
+    entries: [String:OverlayStagedFile]
 
-    new: fn() -> OverlayStage Never! {
-        OverlayStage{entries: [String: OverlayStagedFile]{}}
-    }
+    new: fn() -> OverlayStage Never! { OverlayStage{entries: [String:OverlayStagedFile]{}} }
 
     // Keys in path order (Rust `BTreeMap` order).
     sorted_keys: fn(self) -> [String] Never! {
@@ -101,18 +100,24 @@ OverlayAuthority: struct {
         parent_path: files.join(self.resolver.root, parent_relative)
         parent: self.resolver.checked_directory(parent_relative) ?? return Err(OverlayError.IO("could not open {label} parent `{parent_path}`: {err.message()}"))
         name: files.basename(relative)
-        if name == "" -> return Err(OverlayError.Patch("{label} `{relative}` has no ordinary final name"))
+        if name == "" {
+            return Err(OverlayError.Patch("{label} `{relative}` has no ordinary final name"))
+        }
         path: files.join(self.resolver.root, relative)
         parent_handle: self.resolver.directory_handle(parent)
         handle := if parent_handle.open(name) == {
             .Ok(file) -> file
             .Err(error) -> {
-                if env_overlay_is_symlink(parent_handle, name) -> return Err(OverlayError.Patch("{label} `{path}` contains a symlink"))
+                if env_overlay_is_symlink(parent_handle, name) {
+                    return Err(OverlayError.Patch("{label} `{path}` contains a symlink"))
+                }
                 return Err(OverlayError.IO("could not read {label} `{path}`: {error}"))
             }
         }
         info: handle.stat() ?? return Err(OverlayError.IO("could not inspect {label} `{path}`: {err}"))
-        if !info.is_file -> return Err(OverlayError.Patch("{label} `{path}` must be a regular file"))
+        if !info.is_file {
+            return Err(OverlayError.Patch("{label} `{path}` must be a regular file"))
+        }
         identity: env_overlay_identity(info) ?? return Err(OverlayError.Patch("{label} `{path}` {ENV_OVERLAY_HARD_LINKED}"))
         bytes := [U8]{}
         loop {
@@ -126,7 +131,7 @@ OverlayAuthority: struct {
             .None -> false
         }
         if !unchanged -> return Err(OverlayError.IO("{label} `{path}` changed while it was read"))
-        Ok(OverlayHeldFile{path, parent: parent.move(), name, handle: handle.move(), identity, mode: (info.mode).bit_and(0o7777), bytes})
+        Ok(OverlayHeldFile{path: path, parent: parent.move(), name: name, handle: handle.move(), identity: identity, mode: (info.mode).bit_and(0o7777), bytes: bytes})
     }
 }
 
@@ -180,7 +185,9 @@ env_overlay_apply_unified_patch_staged: fn(source: OverlayAuthority, patch_text:
         line: lines[at]
         at += 1
         if !line.starts_with("--- ") -> next
-        if at >= lines.len() || !lines[at].starts_with("+++ ") -> return Err(OverlayError.Patch("patch missing `+++` line"))
+        if at >= lines.len() || !lines[at].starts_with("+++ ") {
+            return Err(OverlayError.Patch("patch missing `+++` line"))
+        }
         target: env_overlay_normalize_patch_path(lines[at].removeprefix("+++ ").trim())
         at += 1
         relative: env_overlay_safe_relative_path(target, "patched file")
@@ -194,7 +201,7 @@ env_overlay_apply_unified_patch_staged: fn(source: OverlayAuthority, patch_text:
                 identity: opened.identity,
                 mode: opened.mode,
                 original: opened.bytes,
-                output: opened.bytes
+                output: opened.bytes,
             }
         }
         original: stage.entries[relative].output
@@ -212,7 +219,9 @@ env_overlay_apply_unified_patch_staged: fn(source: OverlayAuthority, patch_text:
             old_seen := 0
             new_seen := 0
             loop !(old_seen == range.old_count && new_seen == range.new_count) {
-                if at >= lines.len() -> return Err(OverlayError.Patch("patch hunk body ended unexpectedly"))
+                if at >= lines.len() {
+                    return Err(OverlayError.Patch("patch hunk body ended unexpectedly"))
+                }
                 hunk_line: lines[at]
                 at += 1
                 if hunk_line == OVERLAY_NO_NEWLINE_MARKER -> next
@@ -220,19 +229,25 @@ env_overlay_apply_unified_patch_staged: fn(source: OverlayAuthority, patch_text:
                 body: String.from_bytes(hunk_line.bytes()[1..<hunk_line.bytes().len()]) ?? ""
                 if {
                     hunk_line.starts_with(" ") -> {
-                        if index >= file_lines.len() || file_lines[index] != body -> return Err(OverlayError.Patch("patch context did not match `{target}`"))
+                        if index >= file_lines.len() || file_lines[index] != body {
+                            return Err(OverlayError.Patch("patch context did not match `{target}`"))
+                        }
                         index += 1
                         old_seen += 1
                         new_seen += 1
                     }
                     hunk_line.starts_with("-") -> {
-                        if index >= file_lines.len() || file_lines[index] != body -> return Err(OverlayError.Patch("patch removal did not match `{target}`"))
+                        if index >= file_lines.len() || file_lines[index] != body {
+                            return Err(OverlayError.Patch("patch removal did not match `{target}`"))
+                        }
                         _: file_lines.remove(index, .Slot)
                         removed += 1
                         old_seen += 1
                     }
                     hunk_line.starts_with("+") -> {
-                        if index > file_lines.len() -> return Err(OverlayError.Patch("patch insertion is outside `{target}`"))
+                        if index > file_lines.len() {
+                            return Err(OverlayError.Patch("patch insertion is outside `{target}`"))
+                        }
                         file_lines.insert(index, body)
                         index += 1
                         added += 1
@@ -246,7 +261,7 @@ env_overlay_apply_unified_patch_staged: fn(source: OverlayAuthority, patch_text:
         output := file_lines.join("\n")
         if trailing_newline -> output = "{output}\n"
         stage.entries[relative].output = output.bytes()
-        applications.push(PatchApplication{path: target, added, removed})
+        applications.push(PatchApplication{path: target, added: added, removed: removed})
     }
     if applications.len() == 0 -> return Err(OverlayError.Patch("patch contains no file hunks"))
     Ok(applications)
@@ -256,7 +271,9 @@ env_overlay_apply_unified_patch_staged: fn(source: OverlayAuthority, patch_text:
 // `Path::components` reads it (empty and interior `.` parts dropped).
 env_overlay_safe_relative_path: fn(raw: String, label: String) -> String OverlayError! {
     refusal: OverlayError.Patch("{label} path `{raw}` must be a non-empty relative path without `..`")
-    if raw == "" || files.is_abs(raw) || raw.contains("\\") || env_overlay_has_control(raw) -> return Err(refusal)
+    if raw == "" || files.is_abs(raw) || raw.contains("\\") || env_overlay_has_control(raw) {
+        return Err(refusal)
+    }
     parts: raw.split("/").to_list()
     names := [String]{}
     loop index in 0..<parts.len() {
@@ -321,26 +338,32 @@ env_overlay_validate_target: fn(entry: OverlayStagedFile, root_handle: Directory
     current: if parent.open(entry.name) == {
         .Ok(file) -> file
         .Err(error) -> {
-            if env_overlay_is_symlink(parent, entry.name) -> return Err(env_overlay_io("patched target contains a symlink"))
+            if env_overlay_is_symlink(parent, entry.name) {
+                return Err(env_overlay_io("patched target contains a symlink"))
+            }
             return Err(error)
         }
     }
     info: current.stat()
     if !info.is_file -> return Err(env_overlay_io("patched target is no longer a regular file"))
     identity: env_overlay_identity(info) ?? return Err(env_overlay_io("patched target {ENV_OVERLAY_HARD_LINKED}"))
-    if identity != entry.identity -> return Err(env_overlay_io("patched target was replaced before commit"))
+    if identity != entry.identity {
+        return Err(env_overlay_io("patched target was replaced before commit"))
+    }
     input: env_overlay_identity(entry.input.stat()) ?? return Err(env_overlay_io("patched target {ENV_OVERLAY_HARD_LINKED}"))
-    if input != entry.identity -> return Err(env_overlay_io("patched target changed after it was read"))
+    if input != entry.identity {
+        return Err(env_overlay_io("patched target changed after it was read"))
+    }
 }
 
 // Write `bytes` to a fresh exclusive temporary beside the target, make it
 // durable, and rename it over the target inside the held parent.
 env_overlay_write_atomically: fn(entry: OverlayStagedFile, root_handle: Directory, parent: Directory, bytes: [U8], verify_target: Bool) IOError! -[FS, Env, Rand]> {
-    if verify_target {
-        env_overlay_validate_target(entry, root_handle, parent)
-    } else {
+    if verify_target -> env_overlay_validate_target(entry, root_handle, parent) else {
         root: root_handle.stat()
-        if !root.is_dir -> return Err(env_overlay_io("source root authority is no longer a directory"))
+        if !root.is_dir {
+            return Err(env_overlay_io("source root authority is no longer a directory"))
+        }
     }
     collision := IOError?{None}
     loop _ in 0..<OVERLAY_TEMP_ATTEMPTS {

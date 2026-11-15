@@ -22,7 +22,7 @@ read_text: fn(stream: &net.TCPStream) -> String {
     }
     stream := net.tcp_connect(address) ?? panic("connect")
     seen := ""
-    loop seen.len() < "0;1;2;3;4;".len() { seen = "{seen}{read_text(stream)}" }
+    loop seen.len() < "0;1;2;3;4;".len() -> seen = "{seen}{read_text(stream)}"
     assert(seen == "0;1;2;3;4;", "every chunk arrives through a fresh wait")
     net.tcp_close(stream) ?? panic("close")
     peer.join() ?? panic("peer")
@@ -39,7 +39,7 @@ read_text: fn(stream: &net.TCPStream) -> String {
     waiter: task {
         parked_tx.send(1)
         if socket.ready(NetReadyInterest.Read, deadline: budget) == {
-            .Ok(_) -> panic("the cancelled wait saw a datagram")
+            .Ok(_) -> { panic("the cancelled wait saw a datagram") }
             .Err(_) -> {}
         }
     }
@@ -55,7 +55,7 @@ read_text: fn(stream: &net.TCPStream) -> String {
     first.join() ?? panic("first send")
     assert(net.udp_packet_data(socket.receive(16, deadline: budget) ?? panic("receive a")) == "a", "datagram after a cancelled wait")
     if socket.ready(NetReadyInterest.Read, deadline: Duration.milliseconds(5) ?? panic("short")) == {
-        .Ok(_) -> panic("the timed out wait saw a datagram")
+        .Ok(_) -> { panic("the timed out wait saw a datagram") }
         .Err(_) -> {}
     }
     second: task {

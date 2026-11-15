@@ -20,21 +20,29 @@ sema_trait_impls_synthesize: fn(items: &[Item]) Never! {
     fields := [String:String]{}
     loop item in items {
         if item == {
-            .Trait(definition) -> traits[definition.name.copy()] = definition.methods.copy()
+            .Trait(definition) -> { traits[definition.name.copy()] = definition.methods.copy() }
             .Impl(definition) -> {
                 if definition.trait_name == .Val(trait_name) {
-                    if definition.delegation_field == None -> pairs["{definition.type_name}|{trait_name}"] = true
+                    if definition.delegation_field == None {
+                        pairs["{definition.type_name}|{trait_name}"] = true
+                    }
                 }
             }
             .Struct(definition) -> {
                 loop block in definition.trait_impls {
-                    if block.delegation_field == None -> pairs["{definition.name}|{block.trait_name}"] = true
+                    if block.delegation_field == None {
+                        pairs["{definition.name}|{block.trait_name}"] = true
+                    }
                 }
-                loop field in definition.fields -> fields["{definition.name}|{field.name}"] = type_name(field.ty)
+                loop field in definition.fields {
+                    fields["{definition.name}|{field.name}"] = type_name(field.ty)
+                }
             }
             .Enum(definition) -> {
                 loop block in definition.trait_impls {
-                    if block.delegation_field == None -> pairs["{definition.name}|{block.trait_name}"] = true
+                    if block.delegation_field == None {
+                        pairs["{definition.name}|{block.trait_name}"] = true
+                    }
                 }
             }
             .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
@@ -117,7 +125,9 @@ sema_trait_impl_owned_defaults: fn(trait_name: String, at: Span, methods: [Func]
     if owned.contract == .Methods(declared, _, _) {
         loop method in declared {
             source: method.default_source ?? next
-            if !sema_trait_impl_writes(methods, method.name) -> declarations = "{declarations}{source}\n"
+            if !sema_trait_impl_writes(methods, method.name) {
+                declarations = "{declarations}{source}\n"
+            }
         }
     }
     if declarations == "" -> return None
@@ -125,7 +135,9 @@ sema_trait_impl_owned_defaults: fn(trait_name: String, at: Span, methods: [Func]
     loop _ in 0..<at.start + 1 -> bytes.push(32)
     loop byte in "{trait_name}: trait {{\n{declarations}}}\n".bytes() -> bytes.push(byte)
     parsed: parse_generated_source(bytes)
-    if parsed.diagnostics.len() > 0 || parsed.program.items.len() != 1 -> panic("the defaults Traits.jet gives `{trait_name}` do not parse")
+    if parsed.diagnostics.len() > 0 || parsed.program.items.len() != 1 {
+        panic("the defaults Traits.jet gives `{trait_name}` do not parse")
+    }
     program := parsed.program.move()
     item: program.items.pop() ?? panic("the defaults Traits.jet gives `{trait_name}` lost their trait")
     extras := [Func]{}

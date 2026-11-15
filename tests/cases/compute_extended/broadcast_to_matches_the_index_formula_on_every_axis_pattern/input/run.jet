@@ -7,7 +7,7 @@ by_formula: fn(data: [Float], shape: [Int], target: [Int]) -> [Float] {
     rank: target.len()
     lead: rank - shape.len()
     n := 1
-    loop d in target -> n = n * d
+    loop d in target -> n *= d
     out := [Float]{}
     loop flat in 0..<n {
         remainder := flat
@@ -19,8 +19,8 @@ by_formula: fn(data: [Float], shape: [Int], target: [Int]) -> [Float] {
             remainder = remainder /% target[axis]
             if axis >= lead {
                 dim: shape[axis - lead]
-                if dim != 1 -> at = at + coordinate * stride
-                stride = stride * dim
+                if dim != 1 -> at += coordinate * stride
+                stride *= dim
             }
         }
         out.push(data[at])
@@ -30,7 +30,7 @@ by_formula: fn(data: [Float], shape: [Int], target: [Int]) -> [Float] {
 
 check: fn(shape: [Int], target: [Int]) {
     n := 1
-    loop d in shape -> n = n * d
+    loop d in shape -> n *= d
     data := [Float]{}
     loop i in 0..<n -> data.push(Float{i} + 1.0)
     flat: compute.from_list(data) ?? panic("from_list")

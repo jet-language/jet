@@ -3,14 +3,15 @@ use {
     zstd: core.archive.zstd
 }
 
-BYTES: #run { [U8]{ 72, 101, 108, 108, 111 } }
+BYTES: #run { [U8]{72, 101, 108, 108, 111} }
+
 ENCODED: #run { zstd.compress(BYTES) ?? [U8]{} }
+
 EXPECTED: #run { zstd.decompress(ENCODED) ?? [U8]{} }
 
 run: fn() {
     restored: zstd.decompress(ENCODED) ?? [U8]{}
     comptime_diff_frame("{EXPECTED}", "{restored}")
-
 }
 
 comptime_diff_frame: fn(expected_text: String, actual_text: String) {

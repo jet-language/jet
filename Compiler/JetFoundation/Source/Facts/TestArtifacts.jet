@@ -1,4 +1,7 @@
-TTestKind: enum { Unit Property }
+TTestKind: enum {
+    Unit
+    Property
+}
 
 TTestParamFact: struct {
     index: Int
@@ -47,6 +50,7 @@ TTestLawVisitor: struct {
     source: [U8]
     relation: [String]
     surfaces: [String]
+
     visit: fn(&self, expression: Expr) Never! -[Mem.Alloc, Mem.Rc, Time.Wait]> {
         if expression == {
             .Call(call, _) -> {
@@ -149,16 +153,10 @@ checked_test_call_text: fn(source: [U8], start: Int, after: Int) -> String Never
             byte: source[at]
             at += 1
             if quote != (U8{0}) {
-                if byte == (U8{92}) {
-                    at += 1
-                } else if byte == quote {
-                    quote = U8{0}
-                }
+                if byte == (U8{92}) -> at += 1 else if byte == quote -> quote = U8{0}
                 next
             }
-            if byte == (U8{34}) || byte == (U8{96}) {
-                quote = byte
-            } else if byte == (U8{40}) {
+            if byte == (U8{34}) || byte == (U8{96}) -> quote = byte else if byte == (U8{40}) {
                 depth += 1
             } else if byte == (U8{41}) {
                 depth -= 1
@@ -195,7 +193,9 @@ checked_test_law: fn(test: TestDef, source: String) -> TTestLawFact Never! {
     partitions := [String]{}
     loop parameter in test.params -> partitions.push("{parameter.name}: {type_name(parameter.ty)}")
     visitor := TTestLawVisitor{source: bytes, relation: [String]{}, surfaces: [String]{}}
-    loop statement in test.body -> ast_visit_statement(statement, fn(expression: Expr) { visitor.visit(expression) }, false)
+    loop statement in test.body {
+        ast_visit_statement(statement, fn(expression: Expr) { visitor.visit(expression) }, false)
+    }
     visitor.surfaces.sort()
     TTestLawFact{precondition: precondition, partitions: partitions, relation: visitor.relation, surfaces: visitor.surfaces}
 }
@@ -206,17 +206,19 @@ checked_test_artifact_fact: fn(module_identity: ModuleID, module_text: String, t
     parameters := [TTestParamFact]{}
     index := 0
     loop parameter in test.params {
-        parameters.push(TTestParamFact{
-            index: index,
-            name: parameter.name,
-            span: parameter.name_span,
-            ty: parameter.ty,
-            convention: parameter.convention,
-            label: parameter.public_label.map(fn(label) { label.name }) ?? parameter.name,
-            zone: parameter.zone,
-            variadic: parameter.variadic,
-            default_present: parameter.default != None,
-        })
+        parameters.push(
+            TTestParamFact{
+                index: index,
+                name: parameter.name,
+                span: parameter.name_span,
+                ty: parameter.ty,
+                convention: parameter.convention,
+                label: parameter.public_label.map(fn(label) { label.name }) ?? parameter.name,
+                zone: parameter.zone,
+                variadic: parameter.variadic,
+                default_present: parameter.default != None,
+            },
+        )
         index += 1
     }
     key := checked_test_artifact_key(module_text, test)

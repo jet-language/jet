@@ -12,12 +12,16 @@ run: fn() {
     print("HEAD: {Sh{"git log {"--format=%h %s | %b"} -n 2"}.text().trim_end().replace("\n", " ")}")
     print("status: {Sh{"git status --porcelain=v1 -uno"}.text().replace("\n", " ")}".trim_end())
     print("origin dev: {Sh{"git --git-dir=origin.git rev-parse --short dev"}.text()}")
-    loop name in ["batch-queue.txt", "landed-subs.txt"] -> print("{name}: {(files.read("scratch/Main/{name}") ?? "none").trim_end().replace("\n", " ")}")
+    loop name in ["batch-queue.txt", "landed-subs.txt"] {
+        print("{name}: {(files.read("scratch/Main/{name}") ?? "none").trim_end().replace("\n", " ")}")
+    }
     batches := loop entry in files.list_dir("lanes/Main/integ") -> entry.name
     batches.sort()
     loop batch in batches {
         made := (loop entry in files.list_dir("lanes/Main/integ/{batch}") -> entry.name).filter(fn(name) { name.ends_with(".landfiles") || name.ends_with(".commitmsg") })
         made.sort()
-        loop name in made -> print("{batch}/{name}: {files.read("lanes/Main/integ/{batch}/{name}").trim_end().replace("\n", " | ")}".trim_end())
+        loop name in made {
+            print("{batch}/{name}: {files.read("lanes/Main/integ/{batch}/{name}").trim_end().replace("\n", " | ")}".trim_end())
+        }
     }
 }

@@ -16,9 +16,7 @@ spaced: fn(line: String) -> String { line.replace("﻿", " ").words().join(" ") 
 flush: fn(changes: [String]) {
     sorted := changes.copy()
     sorted.sort()
-    loop line in sorted {
-        print(line)
-    }
+    loop line in sorted { print(line) }
 }
 
 run: fn() {
@@ -30,9 +28,15 @@ run: fn() {
                 changes = []
                 print("card {line.removeprefix("#### #").partition(" ").head}")
             }
-            line.starts_with("  c") && line.words().len() > 1 && ["REWRITE", "REPLACE", "ADD", "REMOVE"].contains(line.words()[1]) -> changes.push("  {line.words()[0]} {line.words()[1]}")
-            line.starts_with("  TITLE ") || line.starts_with("  BODY changed") || line.starts_with("  PLAN changed") -> changes.push("  {line.words()[0]}")
-            line.starts_with("  CLOSE: ") -> changes.push("  CLOSE {line.removeprefix("  CLOSE: ")}")
+            line.starts_with("  c") && line.words().len() > 1 && ["REWRITE", "REPLACE", "ADD", "REMOVE"].contains(line.words()[1]) -> {
+                changes.push("  {line.words()[0]} {line.words()[1]}")
+            }
+            line.starts_with("  TITLE ") || line.starts_with("  BODY changed") || line.starts_with("  PLAN changed") -> {
+                changes.push("  {line.words()[0]}")
+            }
+            line.starts_with("  CLOSE: ") -> {
+                changes.push("  CLOSE {line.removeprefix("  CLOSE: ")}")
+            }
             line.starts_with("!!!! ") || line == "ALL OK" || line.starts_with("FAILED ") -> {
                 flush(changes)
                 changes = []

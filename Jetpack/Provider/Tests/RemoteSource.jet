@@ -18,7 +18,7 @@ provider_remote_test_parse_fails: fn(upstream: String) -> Bool {
 }
 
 provider_remote_test_dep: fn(target: String) -> DepSource {
-    DepSource.Provider{provider: RefSource.Path, target}
+    DepSource.Provider{provider: RefSource.Path, target: target}
 }
 
 provider_remote_test_member: fn(dep: InRepoDep) -> String? {
@@ -72,7 +72,9 @@ provider_remote_test_outside: fn(dep: InRepoDep) -> String? {
 }
 
 #Test("provider package tree operations reject symlink escape") {
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     base: provider_remote_test_dir("tree-symlink")
     root: files.join(base, "root")
     outside: files.join(base, "outside")
@@ -81,11 +83,11 @@ provider_remote_test_outside: fn(dep: InRepoDep) -> String? {
     files.symlink(outside, files.join(root, "escape.txt")) ?? panic("symlink")
     copied: files.join(base, "copy")
     if provider_tree_fingerprint(root) == {
-        .Ok(_) -> panic("a symlink must not be fingerprinted")
+        .Ok(_) -> { panic("a symlink must not be fingerprinted") }
         .Err(_) -> {}
     }
     if provider_copy_tree(root, copied) == {
-        .Ok(_) -> panic("a symlink must not be copied")
+        .Ok(_) -> { panic("a symlink must not be copied") }
         .Err(_) -> {}
     }
     assert_eq(files.read(outside) ?? panic("outside"), "must not be read or copied")
@@ -97,7 +99,7 @@ provider_remote_test_outside: fn(dep: InRepoDep) -> String? {
     destination_link: files.join(base, "destination-link")
     files.symlink(destination_outside, destination_link) ?? panic("destination symlink")
     if provider_copy_tree(safe_source, destination_link) == {
-        .Ok(_) -> panic("a linked destination must be refused")
+        .Ok(_) -> { panic("a linked destination must be refused") }
         .Err(_) -> {}
     }
     assert(!files.exists(files.join(destination_outside, "safe.txt")))
@@ -106,7 +108,9 @@ provider_remote_test_outside: fn(dep: InRepoDep) -> String? {
 }
 
 #Test("provider source cache rejects symlinked root and parent") {
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     base: provider_remote_test_dir("cache-symlink")
     root: files.join(base, "root")
     outside: files.join(base, "outside")
@@ -115,20 +119,22 @@ provider_remote_test_outside: fn(dep: InRepoDep) -> String? {
     cache_link: files.join(root, "cache")
     files.symlink(outside, cache_link) ?? panic("cache symlink")
     if provider_cache_is_real_directory(cache_link) == {
-        .Ok(_) -> panic("a linked cache must be refused")
+        .Ok(_) -> { panic("a linked cache must be refused") }
         .Err(_) -> {}
     }
     parent_link: files.join(root, "parent")
     files.symlink(outside, parent_link) ?? panic("parent symlink")
     if provider_cache_is_real_directory(files.join(parent_link, "cache")) == {
-        .Ok(_) -> panic("a linked cache parent must be refused")
+        .Ok(_) -> { panic("a linked cache parent must be refused") }
         .Err(_) -> {}
     }
     files.remove_all(base) ?? panic("cleanup")
 }
 
 #Test("provider remote publish rejects symlink before fast rename") {
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     base: provider_remote_test_dir("publish-symlink")
     checkout: files.join(base, "root/checkout")
     files.create_dir_all(checkout) ?? panic("checkout")
@@ -137,7 +143,7 @@ provider_remote_test_outside: fn(dep: InRepoDep) -> String? {
     files.symlink(outside, files.join(checkout, "escape.txt")) ?? panic("symlink")
     cache: files.join(base, "root/cache")
     if provider_publish_remote_checkout(checkout, cache) == {
-        .Ok(_) -> panic("a checkout with a symlink must not be published")
+        .Ok(_) -> { panic("a checkout with a symlink must not be published") }
         .Err(_) -> {}
     }
     assert(!files.exists(cache))
@@ -146,7 +152,9 @@ provider_remote_test_outside: fn(dep: InRepoDep) -> String? {
 }
 
 #Test("provider remote tree fingerprint and copy reject multiply linked source files") {
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     base: provider_remote_test_dir("hardlink")
     source: files.join(base, "checkout")
     destination: files.join(base, "cache")
@@ -155,11 +163,11 @@ provider_remote_test_outside: fn(dep: InRepoDep) -> String? {
     provider_remote_test_write(outside, "outside bytes")
     files.hard_link(outside, files.join(source, "linked.txt")) ?? panic("hard link")
     if provider_tree_fingerprint(source) == {
-        .Ok(_) -> panic("a multiply linked file must not be fingerprinted")
+        .Ok(_) -> { panic("a multiply linked file must not be fingerprinted") }
         .Err(_) -> {}
     }
     if provider_copy_tree(source, destination) == {
-        .Ok(_) -> panic("a multiply linked file must not be copied")
+        .Ok(_) -> { panic("a multiply linked file must not be copied") }
         .Err(_) -> {}
     }
     assert(!files.exists(files.join(destination, "linked.txt")))
@@ -168,7 +176,9 @@ provider_remote_test_outside: fn(dep: InRepoDep) -> String? {
 }
 
 #Test("provider remote checkout ancestor swap stays on held checkout and cache") {
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     base: provider_remote_test_dir("ancestor-swap")
     holder: files.join(base, "root/holder")
     checkout: files.join(holder, "checkout")
@@ -195,7 +205,9 @@ provider_remote_test_outside: fn(dep: InRepoDep) -> String? {
 }
 
 #Test("provider remote cache publication stays on held parent after ancestor swap") {
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     base: provider_remote_test_dir("publish-swap")
     parent: files.join(base, "root/cache-parent")
     checkout: files.join(parent, "checkout")
@@ -218,7 +230,9 @@ provider_remote_test_outside: fn(dep: InRepoDep) -> String? {
 }
 
 #Test("provider remote staging cleanup stays on held parent after ancestor swap") {
-    if sys.is_windows() -> return
+    if sys.is_windows() {
+        return
+    }
     base: provider_remote_test_dir("cleanup-swap")
     parent: files.join(base, "root/cache-parent")
     cache: files.join(parent, "cache")

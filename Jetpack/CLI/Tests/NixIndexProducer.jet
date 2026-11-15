@@ -1,4 +1,3 @@
-
 cli_nix_index_test_scratch: fn() -[FS]> String {
     files.tmpdir("jetpack-nix-index-test-") ?? panic("claim nix index scratch")
 }
@@ -14,12 +13,12 @@ cli_nix_index_test_write: fn(path: String, text: String) -[FS]> {
         "{{\"revision\":\"other\",\"system\":\"x86_64-linux\",\"trust_tier\":\"local-unofficial\",\"nested\":{{\"revision\":\"revision\"}}}}",
         "{{\"revision\":\"revision\",\"system\":\"aarch64-linux\",\"trust_tier\":\"local-unofficial\",\"nested\":{{\"system\":\"x86_64-linux\"}}}}",
         "{{\"revision\":\"revision\",\"system\":\"x86_64-linux\",\"trust_tier\":\"official-signed\",\"nested\":{{\"trust_tier\":\"local-unofficial\"}}}}",
-        "{{\"nested\":{{\"revision\":\"revision\",\"system\":\"x86_64-linux\",\"trust_tier\":\"local-unofficial\"}}}}"
+        "{{\"nested\":{{\"revision\":\"revision\",\"system\":\"x86_64-linux\",\"trust_tier\":\"local-unofficial\"}}}}",
     }
     loop text in invalid {
         value: json.parse(text) ?? panic("parse invalid provenance")
         if cli_nix_index_validate_local_provenance(value, "revision", "x86_64-linux") == {
-            .Ok(_) -> panic("conflicting provenance must be refused")
+            .Ok(_) -> { panic("conflicting provenance must be refused") }
             .Err(_) -> {}
         }
     }
@@ -52,17 +51,28 @@ cli_nix_index_test_write: fn(path: String, text: String) -[FS]> {
     cli_nix_index_test_write(store_paths, "{store_path}\n")
 
     generate_args: [String]{
-        "--channel", channel,
-        "--system", system,
-        "--revision", revision,
-        "--git-revision", revision_file,
-        "--release-metadata", release_metadata,
-        "--packages-json", packages,
-        "--hydra-eval", hydra_eval,
-        "--hydra-build-dir", hydra_build,
-        "--oracle", oracle,
-        "--store-paths", store_paths,
-        "--output", output_root
+        "--channel",
+        channel,
+        "--system",
+        system,
+        "--revision",
+        revision,
+        "--git-revision",
+        revision_file,
+        "--release-metadata",
+        release_metadata,
+        "--packages-json",
+        packages,
+        "--hydra-eval",
+        hydra_eval,
+        "--hydra-build-dir",
+        hydra_build,
+        "--oracle",
+        oracle,
+        "--store-paths",
+        store_paths,
+        "--output",
+        output_root,
     }
     cli_nix_index_generate(generate_args, true) ?? panic("generate the index")
 
@@ -81,13 +91,20 @@ cli_nix_index_test_write: fn(path: String, text: String) -[FS]> {
 
     manifest_output: files.join(temp, "manifest.json")
     manifest_args: [String]{
-        "--channel", channel,
-        "--endpoint", "https://index.example.test",
-        "--generation", "1",
-        "--issued-unix", "124",
-        "--expires-unix", "125",
-        "--target-root", output_root,
-        "--output", manifest_output
+        "--channel",
+        channel,
+        "--endpoint",
+        "https://index.example.test",
+        "--generation",
+        "1",
+        "--issued-unix",
+        "124",
+        "--expires-unix",
+        "125",
+        "--target-root",
+        output_root,
+        "--output",
+        manifest_output,
     }
     cli_nix_index_manifest(manifest_args) ?? panic("build the manifest")
     assert(files.is_file(manifest_output))
@@ -109,7 +126,9 @@ cli_nix_index_test_revision: fn(value: Int) -> String {
 
 #Test("nix index manifest retention marks newest twelve per system") {
     targets := [(released: Int, system: String, revision: String)]{}
-    loop revision in 0..<13 -> targets.push((released: revision, system: "x86_64-linux", revision: cli_nix_index_test_revision(revision)))
+    loop revision in 0..<13 {
+        targets.push((released: revision, system: "x86_64-linux", revision: cli_nix_index_test_revision(revision)))
+    }
     targets.push((released: 1, system: "aarch64-linux", revision: cli_nix_index_test_revision(90)))
     targets.reverse()
 

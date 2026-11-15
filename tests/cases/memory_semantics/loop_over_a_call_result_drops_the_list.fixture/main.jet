@@ -11,6 +11,7 @@ package: {
 use files: core.files
 
 ROUNDS: 40000
+
 GROWTH_LIMIT_KB: 8192
 
 Row: struct {
@@ -113,7 +114,9 @@ measure: fn(name: String, scenario: fn() -> Int) {
     start: status_kb("VmRSS:")
     loop _ in 1..<ROUNDS -> total += scenario()
     grown: status_kb("VmRSS:") - start
-    if grown > GROWTH_LIMIT_KB -> panic("{name}: the resident set grew {grown} kB over {ROUNDS} rounds")
+    if grown > GROWTH_LIMIT_KB {
+        panic("{name}: the resident set grew {grown} kB over {ROUNDS} rounds")
+    }
     print("{name}: {total}, every list dropped")
 }
 

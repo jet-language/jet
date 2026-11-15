@@ -4,27 +4,42 @@
 // musl is not correctly rounded: its comment gives musl's word, and the row
 // holds MPFR's. The program prints one line per function with the rows it
 // checked and how many results differ, plus the first differing rows.
-use {
-    math: core.math
-}
+use math: core.math
 
 CEIL: #run embed_file("corpus/ceil.txt")
+
 FDIM: #run embed_file("corpus/fdim.txt")
+
 FLOOR: #run embed_file("corpus/floor.txt")
+
 FMA: #run embed_file("corpus/fma.txt")
+
 FMAX: #run embed_file("corpus/fmax.txt")
+
 FMIN: #run embed_file("corpus/fmin.txt")
+
 FMOD: #run embed_file("corpus/fmod.txt")
+
 FREXP: #run embed_file("corpus/frexp.txt")
+
 ILOGB: #run embed_file("corpus/ilogb.txt")
+
 LOGB: #run embed_file("corpus/logb.txt")
+
 MODF: #run embed_file("corpus/modf.txt")
+
 NEXTAFTER: #run embed_file("corpus/nextafter.txt")
+
 REMAINDER: #run embed_file("corpus/remainder.txt")
+
 REMQUO: #run embed_file("corpus/remquo.txt")
+
 ROUNDEVEN: #run embed_file("corpus/roundeven.txt")
+
 SCALBN: #run embed_file("corpus/scalbn.txt")
+
 SQRT: #run embed_file("corpus/sqrt.txt")
+
 TRUNC: #run embed_file("corpus/trunc.txt")
 
 hex_value: fn(b: U8) -> Int {
@@ -37,7 +52,7 @@ hex_value: fn(b: U8) -> Int {
 word_at: fn(raw: [U8], at: Int) -> Int {
     n := 0
     loop i in 0..<16 -> n = n * 16 + hex_value(raw[at + i])
-    if n > 9223372036854775807 -> n = n - 18446744073709551616
+    if n > 9223372036854775807 -> n -= 18446744073709551616
     n
 }
 
@@ -62,7 +77,9 @@ is_nan_word: fn(word: Int) -> Bool {
 arity: fn(name: String) -> Int {
     if name == "fma" -> return 3
     if name == "fdim" || name == "fmax" || name == "fmin" || name == "fmod" -> return 2
-    if name == "nextafter" || name == "remainder" || name == "remquo" || name == "scalbn" -> return 2
+    if name == "nextafter" || name == "remainder" || name == "remquo" || name == "scalbn" {
+        return 2
+    }
     1
 }
 
@@ -133,33 +150,31 @@ check: fn(name: String, corpus: String, exact_nan: Bool) {
     loop at < raw.len() {
         if raw[at] == (U8{35}) {
             if marks_mpfr(raw, at) -> mpfr = true
-            loop raw[at] != (U8{10}) -> at = at + 1
-            at = at + 1
+            loop raw[at] != (U8{10}) -> at += 1
+            at += 1
             next
         }
         arguments := [Int]{}
         want := [Int]{}
         loop {
             word: word_at(raw, at)
-            if arguments.len() < count {
-                arguments.push(word)
-            } else {
-                want.push(word)
-            }
-            at = at + 17
+            if arguments.len() < count -> arguments.push(word) else -> want.push(word)
+            at += 17
             if raw[at - 1] == (U8{10}) -> break
         }
         got: evaluate(name, arguments)
-        rows = rows + 1
+        rows += 1
         source: if mpfr -> "mpfr" else -> "musl"
-        if mpfr -> against_mpfr = against_mpfr + 1
+        if mpfr -> against_mpfr += 1
         mpfr = false
         same := got.len() == want.len()
         loop i in 0..<want.len() {
-            if same && got[i] != want[i] && (exact_nan || !is_nan_word(got[i]) || !is_nan_word(want[i])) -> same = false
+            if same && got[i] != want[i] && (exact_nan || !is_nan_word(got[i]) || !is_nan_word(want[i])) {
+                same = false
+            }
         }
         if !same {
-            wrong = wrong + 1
+            wrong += 1
             if wrong <= 3 {
                 shown := [String]{}
                 loop word in arguments -> shown.push(hex_word(word))
@@ -173,9 +188,7 @@ check: fn(name: String, corpus: String, exact_nan: Bool) {
     }
     if against_mpfr > 0 {
         print("{name}: {rows} rows, {wrong} differ from musl, or from MPFR on the {against_mpfr} where musl is not correctly rounded")
-    } else {
-        print("{name}: {rows} rows, {wrong} differ from musl")
-    }
+    } else { print("{name}: {rows} rows, {wrong} differ from musl") }
 }
 
 run: fn() {

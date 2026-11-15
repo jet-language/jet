@@ -88,10 +88,14 @@ jetos_is_linux_kernel_image: fn(path: String) -[FS]> Bool Never! {
 
 // Rust is_linux_kernel_image's byte predicate, shared with its path entry.
 jetos_is_linux_kernel_image_bytes: fn(bytes: [U8]) -> Bool Never! {
-    if bytes.len() >= 4 && bytes[0] == 127 && bytes[1] == 69 && bytes[2] == 76 && bytes[3] == 70 -> return true
+    if bytes.len() >= 4 && bytes[0] == 127 && bytes[1] == 69 && bytes[2] == 76 && bytes[3] == 70 {
+        return true
+    }
     if bytes.len() < 4 || bytes[0] != 77 || bytes[1] != 90 -> return false
     loop offset in 0..<(bytes.len() - 3) {
-        if bytes[offset] == 72 && bytes[offset + 1] == 100 && bytes[offset + 2] == 114 && bytes[offset + 3] == 83 -> return true
+        if bytes[offset] == 72 && bytes[offset + 1] == 100 && bytes[offset + 2] == 114 && bytes[offset + 3] == 83 {
+            return true
+        }
     }
     false
 }
@@ -110,13 +114,17 @@ jetos_is_initrd_image_bytes: fn(bytes: [U8]) -> Bool Never! {
 // Rust render_boot_facts's ordered fields; the caller provides the actual
 // boot profile and the kernel package object (or null).
 jetos_render_boot_facts_parts: fn(boot: JetOSBootProfile, kernel_package: Dyn) -> String Never! {
-    pkg_json_render(Dyn.Object([
-        "loader": Dyn.Text(boot.loader.copy()),
-        "kernel": Dyn.Text(boot.kernel.copy()),
-        "init": Dyn.Text(boot.init.copy()),
-        "initrd_modules": pkg_json_texts(boot.initrd_modules),
-        "kernel_package": kernel_package.copy(),
-    ]))
+    pkg_json_render(
+        Dyn.Object(
+            [
+                "loader": Dyn.Text(boot.loader.copy()),
+                "kernel": Dyn.Text(boot.kernel.copy()),
+                "init": Dyn.Text(boot.init.copy()),
+                "initrd_modules": pkg_json_texts(boot.initrd_modules),
+                "kernel_package": kernel_package.copy(),
+            ],
+        ),
+    )
 }
 
 // The position of the first CachyOS kernel package, not the latest or a
@@ -138,15 +146,17 @@ jetos_render_boot_facts: fn(system: SystemPlan, realized: [JetOSRealizedPackage]
 }
 
 jetos_kernel_package_dyn: fn(entry: JetOSRealizedPackage) -[FS]> Dyn Never! {
-    Dyn.Object([
-        "name": Dyn.Text(entry.entry.name.copy()),
-        "reference": Dyn.Text(entry.entry.reference.copy()),
-        "out": Dyn.Text(entry.entry.out.copy()),
-        "output_hash": Dyn.Text(entry.entry.envelope.output_hash.copy()),
-        "provenance": Dyn.Text(entry.entry.envelope.provenance.copy()),
-        "bootstrap": Dyn.Text("source-built"),
-        "source_recipe": jetos_kernel_source_dyn(entry),
-    ])
+    Dyn.Object(
+        [
+            "name": Dyn.Text(entry.entry.name.copy()),
+            "reference": Dyn.Text(entry.entry.reference.copy()),
+            "out": Dyn.Text(entry.entry.out.copy()),
+            "output_hash": Dyn.Text(entry.entry.envelope.output_hash.copy()),
+            "provenance": Dyn.Text(entry.entry.envelope.provenance.copy()),
+            "bootstrap": Dyn.Text("source-built"),
+            "source_recipe": jetos_kernel_source_dyn(entry),
+        ],
+    )
 }
 
 // The kernel source names the package's original output, NEVER the lease
@@ -158,7 +168,7 @@ jetos_kernel_source_dyn: fn(entry: JetOSRealizedPackage) -[FS]> Dyn Never! {
         (name: "builder", relative: "source/build.sh"),
         (name: "config", relative: "source/config"),
         (name: "patches", relative: "source/patches.manifest"),
-        (name: "initrd_inputs", relative: "source/initrd-inputs.manifest")
+        (name: "initrd_inputs", relative: "source/initrd-inputs.manifest"),
     }
     source_files := [Dyn]{}
     loop fact in facts {
@@ -220,18 +230,16 @@ jetos_write_boot_payload: fn(boot_dir: String, system: SystemPlan, boot: JetOSBo
     files.write(files.join(boot_dir, "limine.conf"), "timeout: 5\nserial: yes\ngraphics: no\nverbose: yes\n/{jetos_release_label(false)} — {system.name}\n    protocol: linux\n    kernel_path: boot():/boot/kernel\n    module_path: boot():/boot/initrd\n    textmode: yes\n    cmdline: console=ttyS0 root=LABEL=jetos-root rw init={boot.init}\n")
     if files.is_file(kernel_path) {
         jetos_copy_file_replace(kernel_path, files.join(boot_dir, "kernel"))
-    } else {
-        files.write(files.join(boot_dir, "kernel"), "{kernel_path}\n")
-    }
+    } else { files.write(files.join(boot_dir, "kernel"), "{kernel_path}\n") }
     if initrd_path == {
         .Val(path) -> {
-            if files.is_file(path) {
-                jetos_copy_file_replace(path, files.join(boot_dir, "initrd"))
-            } else {
+            if files.is_file(path) -> jetos_copy_file_replace(path, files.join(boot_dir, "initrd")) else {
                 files.write(files.join(boot_dir, "initrd"), "{path}\nmodules={boot.initrd_modules.join(",")}\n")
             }
         }
-        .None -> files.write(files.join(boot_dir, "initrd"), "modules={boot.initrd_modules.join(",")}\n")
+        .None -> {
+            files.write(files.join(boot_dir, "initrd"), "modules={boot.initrd_modules.join(",")}\n")
+        }
     }
     module_names: [String]{"isofs.ko.xz", "bochs.ko.xz", "fat.ko.xz", "vfat.ko.xz", "nls_ascii.ko.xz", "nls_cp437.ko.xz", "serio.ko.xz", "i8042.ko.xz", "libps2.ko.xz", "atkbd.ko.xz", "hid-generic.ko.xz", "usbhid.ko.xz", "uhci-hcd.ko.xz", "ehci-hcd.ko.xz", "xhci-hcd.ko.xz"}
     loop module_name in module_names {

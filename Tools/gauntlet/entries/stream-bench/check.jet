@@ -17,19 +17,27 @@ Check: struct {
 
 run: fn(check: Check) {
     printed: (files.read(check.stdout) ?? process.fail(1, "{err}")).trim()
-    if printed == "" -> print("no output") else -> show("", json.parse(printed) ?? process.fail(1, err.display_text()), "")
+    if printed == "" -> print("no output") else {
+        show("", json.parse(printed) ?? process.fail(1, err.display_text()), "")
+    }
 }
 
 // Each value under `value`, the value of field `key`, as `path: value`; under
 // a measured key a number is N.
 show: fn(path: String, value: Dyn, key: String) {
     if value == {
-        .Object(fields) -> loop field in fields -> show("{path}.{field.key}", field.value, field.key)
+        .Object(fields) -> {
+            loop field in fields -> show("{path}.{field.key}", field.value, field.key)
+        }
         .Array(items) -> {
             if items.len() == 0 -> print("{path}: []")
             loop index in 0..<items.len() -> show("{path}[{index}]", items[index], key)
         }
-        .Int(_) | .Float(_) | .Number(_) -> print("{path}: {if MEASURED.contains(key) -> "N" else -> json.stringify(value)}")
-        .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> print("{path}: {json.stringify(value)}")
+        .Int(_) | .Float(_) | .Number(_) -> {
+            print("{path}: {if MEASURED.contains(key) -> "N" else -> json.stringify(value)}")
+        }
+        .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> {
+            print("{path}: {json.stringify(value)}")
+        }
     }
 }

@@ -10,7 +10,9 @@
 // share a staging name.
 
 BUILD_DEBUG_LOG_ROOT: "build-logs"
+
 BUILD_DEBUG_SCRATCH_ROOT: "failed-scratch"
+
 BUILD_DEBUG_STAGE_PREFIX: ".jet-build-stage-"
 
 // One logged recipe step.
@@ -26,7 +28,7 @@ StepLog: struct {
 
     // The step as persisted: secrets in captured output are redacted.
     to_tree: fn(self) -> Dyn Never! {
-        fields := [String: Dyn]{}
+        fields := [String:Dyn]{}
         fields["index"] = Dyn.Int(self.index)
         fields["total"] = Dyn.Int(self.total)
         fields["name"] = Dyn.Text(self.name.copy())
@@ -58,17 +60,17 @@ BuildAttempt: struct {
         now: time.unix_ns()
         BuildAttempt{
             id: "{recipe_debug_safe_name(package)}-{now}",
-            package,
-            reference,
-            provider,
-            recipe_hash,
-            source_hash,
+            package: package,
+            reference: reference,
+            provider: provider,
+            recipe_hash: recipe_hash,
+            source_hash: source_hash,
             platform: pkg_host_key(),
             status: "running",
             failed_step: 0,
             scratch_dir: "",
             log_dir: "",
-            steps: [StepLog]{}
+            steps: [StepLog]{},
         }
     }
 
@@ -81,13 +83,9 @@ BuildAttempt: struct {
         self.steps.push(step.copy())
     }
 
-    mark_ok: fn(&self) Never! {
-        self.status = "ok"
-    }
+    mark_ok: fn(&self) Never! { self.status = "ok" }
 
-    mark_failed: fn(&self) Never! {
-        self.status = "failed"
-    }
+    mark_failed: fn(&self) Never! { self.status = "failed" }
 
     // Write every step's output logs, `attempt.json`, and the package's
     // `latest.json` under `<hangar>/build-logs/<package>/<id>`.
@@ -118,9 +116,7 @@ BuildAttempt: struct {
         stage: files.join(root, "{BUILD_DEBUG_STAGE_PREFIX}{self.id}-{recipe_debug_unique_suffix()}")
         dir: files.join(root, self.id)
         if recipe_debug_stage_scratch(stage, dir, source, output) == {
-            .Ok(_) -> {
-                self.scratch_dir = dir
-            }
+            .Ok(_) -> { self.scratch_dir = dir }
             .Err(error) -> {
                 recipe_debug_remove_tree(stage).drop("failed scratch staging is private")
                 self.scratch_dir = ""
@@ -133,7 +129,7 @@ BuildAttempt: struct {
     to_json: fn(self) -> String Never! {
         steps := [Dyn]{}
         loop step in self.steps -> steps.push(step.to_tree())
-        fields := [String: Dyn]{}
+        fields := [String:Dyn]{}
         fields["id"] = Dyn.Text(self.id.copy())
         fields["package"] = Dyn.Text(self.package.copy())
         fields["reference"] = Dyn.Text(self.reference.copy())
@@ -157,7 +153,9 @@ recipe_debug_stage_scratch: fn(stage: String, dir: String, source: String, outpu
     recipe_debug_copy_tree(source, files.join(stage, "source"))
     if files.stat(output) == {
         .Ok(info) -> {
-            if info.is_symlink -> return Err(StoreError.InvalidData("failed-build output is a symlink; scratch preservation stopped"))
+            if info.is_symlink {
+                return Err(StoreError.InvalidData("failed-build output is a symlink; scratch preservation stopped"))
+            }
             recipe_debug_copy_tree(output, files.join(stage, "output"))
         }
         .Err(error) -> {
@@ -179,14 +177,18 @@ recipe_recover_build_scratch: fn(hangar_dir: String) -[FS]> Int StoreError! {
             return Err(StoreError.IO(error))
         }
     }
-    if info.is_symlink || !info.is_dir -> return Err(StoreError.InvalidData("failed-build scratch root is not a real directory"))
+    if info.is_symlink || !info.is_dir {
+        return Err(StoreError.InvalidData("failed-build scratch root is not a real directory"))
+    }
     recovered := 0
     entries: files.list_dir(root)
     loop entry in entries {
         if !entry.name.starts_with(BUILD_DEBUG_STAGE_PREFIX) -> next
         path: files.join(root, entry.name)
         entry_info: files.stat(path)
-        if entry_info.is_symlink -> return Err(StoreError.InvalidData("failed-build scratch stage is a symlink: {path}"))
+        if entry_info.is_symlink {
+            return Err(StoreError.InvalidData("failed-build scratch stage is a symlink: {path}"))
+        }
         recipe_debug_remove_tree(path)
         recovered += 1
     }
@@ -210,7 +212,9 @@ recipe_debug_latest_json: fn(hangar_dir: String, package: String) -[FS]> String?
             return Err(StoreError.IO(error))
         }
     }
-    if info.is_symlink || !info.is_file -> return Err(StoreError.InvalidData("latest build log is not a regular file"))
+    if info.is_symlink || !info.is_file {
+        return Err(StoreError.InvalidData("latest build log is not a regular file"))
+    }
     Ok(Val(files.read(path)))
 }
 
@@ -313,7 +317,9 @@ recipe_debug_unique_suffix: fn() -[Env, Rand]> String StoreError! {
 recipe_debug_parse_attempt: fn(text: String) -> BuildAttempt StoreError! {
     tree: if pkg_json_parse_protocol(text) == {
         .Parsed(tree) -> tree
-        .Failed(reason) -> { return Err(StoreError.InvalidData(reason)) }
+        .Failed(reason) -> {
+            return Err(StoreError.InvalidData(reason))
+        }
     }
     object: pkg_json_object(tree) ?? return Err(StoreError.InvalidData("build attempt is not a JSON object"))
     attempt := BuildAttempt{
@@ -328,34 +334,36 @@ recipe_debug_parse_attempt: fn(text: String) -> BuildAttempt StoreError! {
         failed_step: recipe_debug_num_field(object, "failed_step"),
         scratch_dir: recipe_debug_str_field(object, "scratch_dir"),
         log_dir: recipe_debug_str_field(object, "log_dir"),
-        steps: [StepLog]{}
+        steps: [StepLog]{},
     }
     steps_value: object.get("steps") ?? return Ok(attempt)
     items: pkg_json_array(steps_value) ?? return Ok(attempt)
     loop item in items {
         step: pkg_json_object(item) ?? return Err(StoreError.InvalidData("build attempt step is not a JSON object"))
-        attempt.steps.push(StepLog{
-            index: recipe_debug_num_field(step, "index"),
-            total: recipe_debug_num_field(step, "total"),
-            name: recipe_debug_str_field(step, "name"),
-            command: recipe_debug_str_field(step, "command"),
-            cwd: recipe_debug_str_field(step, "cwd"),
-            status: recipe_debug_str_field(step, "status"),
-            stdout: recipe_debug_str_field(step, "stdout"),
-            stderr: recipe_debug_str_field(step, "stderr")
-        })
+        attempt.steps.push(
+            StepLog{
+                index: recipe_debug_num_field(step, "index"),
+                total: recipe_debug_num_field(step, "total"),
+                name: recipe_debug_str_field(step, "name"),
+                command: recipe_debug_str_field(step, "command"),
+                cwd: recipe_debug_str_field(step, "cwd"),
+                status: recipe_debug_str_field(step, "status"),
+                stdout: recipe_debug_str_field(step, "stdout"),
+                stderr: recipe_debug_str_field(step, "stderr"),
+            },
+        )
     }
     Ok(attempt)
 }
 
-recipe_debug_str_field: fn(object: [String: Dyn], key: String) -> String StoreError! {
+recipe_debug_str_field: fn(object: [String:Dyn], key: String) -> String StoreError! {
     value: object.get(key) ?? return Err(StoreError.InvalidData("missing key `{key}`"))
     text: pkg_json_text(value) ?? return Err(StoreError.InvalidData("key `{key}` is not a string"))
     Ok(text)
 }
 
 // A non-negative count (a fraction truncates), or 0 when absent or not a count.
-recipe_debug_num_field: fn(object: [String: Dyn], key: String) -> Int Never! {
+recipe_debug_num_field: fn(object: [String:Dyn], key: String) -> Int Never! {
     value: object.get(key) ?? return 0
     if value.decode<Int>() == .Ok(number) -> return if number >= 0 -> number else -> 0
     fraction: value.decode<Float>() ?? return 0
@@ -365,18 +373,24 @@ recipe_debug_num_field: fn(object: [String: Dyn], key: String) -> Int Never! {
 // Copy a real directory tree; links and special entries are refused.
 recipe_debug_copy_tree: fn(src: String, dst: String) StoreError! -[FS]> {
     info: files.stat(src)
-    if info.is_symlink || !info.is_dir -> return Err(StoreError.InvalidData("build scratch source is not a real directory: {src}"))
+    if info.is_symlink || !info.is_dir {
+        return Err(StoreError.InvalidData("build scratch source is not a real directory: {src}"))
+    }
     files.create_dir_all(dst)
     entries: files.list_dir(src)
     loop entry in entries {
         from: files.join(src, entry.name)
         to: files.join(dst, entry.name)
         entry_info: files.stat(from)
-        if entry_info.is_symlink -> return Err(StoreError.InvalidData("build scratch contains a symlink: {from}"))
+        if entry_info.is_symlink {
+            return Err(StoreError.InvalidData("build scratch contains a symlink: {from}"))
+        }
         if {
             entry_info.is_dir -> recipe_debug_copy_tree(from, to)
             entry_info.is_file -> files.copyfile(from, to)
-            else -> { return Err(StoreError.InvalidData("build scratch contains an unsupported entry: {from}")) }
+            else -> {
+                return Err(StoreError.InvalidData("build scratch contains an unsupported entry: {from}"))
+            }
         }
     }
 }
@@ -385,7 +399,9 @@ recipe_debug_copy_tree: fn(src: String, dst: String) StoreError! -[FS]> {
 recipe_debug_ensure_real_directory: fn(path: String, label: String) StoreError! -[FS]> {
     if files.stat(path) == {
         .Ok(info) -> {
-            if info.is_symlink || !info.is_dir -> return Err(StoreError.InvalidData("{label} is not a real directory"))
+            if info.is_symlink || !info.is_dir {
+                return Err(StoreError.InvalidData("{label} is not a real directory"))
+            }
         }
         .Err(error) -> {
             if !store_io_is_not_found(error) -> return Err(StoreError.IO(error))
@@ -397,9 +413,11 @@ recipe_debug_ensure_real_directory: fn(path: String, label: String) StoreError! 
 
 recipe_debug_ensure_absent: fn(path: String, label: String) StoreError! -[FS]> {
     if files.stat(path) == {
-        .Ok(_) -> Err(StoreError.AlreadyExists("{label} already exists: {path}"))
+        .Ok(_) -> { Err(StoreError.AlreadyExists("{label} already exists: {path}")) }
         .Err(error) -> {
-            if store_io_is_not_found(error) -> return
+            if store_io_is_not_found(error) {
+                return
+            }
             Err(StoreError.IO(error))
         }
     }
@@ -410,7 +428,9 @@ recipe_debug_remove_tree: fn(path: String) StoreError! -[FS]> {
     info: if files.stat(path) == {
         .Ok(info) -> info
         .Err(error) -> {
-            if store_io_is_not_found(error) -> return
+            if store_io_is_not_found(error) {
+                return
+            }
             return Err(StoreError.IO(error))
         }
     }
@@ -428,7 +448,9 @@ recipe_debug_write_atomic: fn(path: String, bytes: [U8]) StoreError! -[FS, Env, 
     recipe_debug_ensure_real_directory(parent, "build log parent")
     if files.stat(path) == {
         .Ok(info) -> {
-            if info.is_symlink -> return Err(StoreError.InvalidData("build log destination is a symlink"))
+            if info.is_symlink {
+                return Err(StoreError.InvalidData("build log destination is a symlink"))
+            }
         }
         .Err(_) -> {}
     }

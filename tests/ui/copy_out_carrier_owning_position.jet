@@ -8,20 +8,19 @@ Res: struct {
         close: fn(&&self) { print("close {self.name}") }
     }
 }
-Slot: struct { held: Res? }
+
+Slot: struct {
+    held: Res?
+}
 
 bind: fn(env: Res) -> Int {
     wrapped := Val(env)
     wrapped.len()
 }
 
-store: fn(env: Res) -> Slot {
-    Slot{held: Val(env)}
-}
+store: fn(env: Res) -> Slot { Slot{held: Val(env)} }
 
-give: fn(env: Res) -> Res? {
-    Val(env)
-}
+give: fn(env: Res) -> Res? { Val(env) }
 
 push: fn(env: Res) -> Int {
     kept := [Res?]{}
@@ -29,6 +28,4 @@ push: fn(env: Res) -> Int {
     kept.len()
 }
 
-run: fn() {
-    print("unreached")
-}
+run: fn() { print("unreached") }

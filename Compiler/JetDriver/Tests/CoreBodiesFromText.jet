@@ -6,8 +6,13 @@ use {
     text_sys: core.sys
     text_process: core.process
     jet_driver.[
-        JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
-        JetDriverCompileMode, JetDriverCompileRequest, jet_driver_compile, jet_driver_has_errors,
+        JetDriverAuthorizedSourceFile,
+        JetDriverAuthorizedSourceRoot,
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode,
+        JetDriverCompileRequest,
+        jet_driver_compile,
+        jet_driver_has_errors,
         jet_driver_runtime_interface_sources,
     ]
     jet_cli.[jet_cli_builtin_core_rows, jet_cli_driver_request]
@@ -27,22 +32,18 @@ CoreTextTrace: struct {
         end: fn(self, name: String, items: Int) Never! -[FS, Time]> {}
 
         progress: fn(self, name: String, done: Int, total: Int) Never! -[FS, Time]> {
-            if name.starts_with("counters.") -> text_files.append_all(self.path, "{name} = {done}\n") ?? panic("cannot write the trace: {err}")
+            if name.starts_with("counters.") {
+                text_files.append_all(self.path, "{name} = {done}\n") ?? panic("cannot write the trace: {err}")
+            }
         }
 
-        functions: fn(self) -[]> Bool Never! {
-            false
-        }
+        functions: fn(self) -[]> Bool Never! { false }
 
-        cpu_ns: fn(self) -[Time]> Int Never! {
-            0
-        }
+        cpu_ns: fn(self) -[Time]> Int Never! { 0 }
     }
 }
 
-core_text_sink: fn(trace: &&CoreTextTrace) -> CompilerTraceSink Never! {
-    trace.move()
-}
+core_text_sink: fn(trace: &&CoreTextTrace) -> CompilerTraceSink Never! { trace.move() }
 
 // The counters a Check compile of `source` traces, one `name = value` line
 // each.
@@ -50,13 +51,15 @@ core_text_counters: fn(source: String) -> [String] {
     path: text_files.join(text_sys.temp_dir(), "jet-core-text-{text_process.current_pid()}.trace")
     text_files.write(path, "") ?? panic("cannot start the trace: {err}")
     snapshot: JetDriverAuthorizedSourceSnapshot{
-        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{
-            canonical_path: "/core-text",
-            identity: "core-text-root",
-            allow_hardlinks: false,
-            files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/core-text/main.jet", relative_path: "main.jet", identity: "core-text-file", source: source}},
-            foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
-        }},
+        roots: [JetDriverAuthorizedSourceRoot]{
+            JetDriverAuthorizedSourceRoot{
+                canonical_path: "/core-text",
+                identity: "core-text-root",
+                allow_hardlinks: false,
+                files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/core-text/main.jet", relative_path: "main.jet", identity: "core-text-file", source: source}},
+                foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+            },
+        },
         entry_root_identity: "core-text-root",
         entry_path: "/core-text/main.jet",
     }
@@ -96,7 +99,9 @@ CORE_TEXT_KINDS: [String]{"demand", "generated", "generic", "impl", "prelude", "
     named: core_text_counters("use {{ text_math: core.math }}\n\nrun: fn() {{\n    print(text_math.lcm(4, 6))\n    print(max(1, 2))\n}}\n")
     assert(named.len() == CORE_TEXT_KINDS.len() + 1, "one total and one count per kind:\n{named.join("\n")}")
     total := 0
-    loop kind in CORE_TEXT_KINDS -> total += core_text_value(named, "counters.core.bodies_from_text.{kind}")
+    loop kind in CORE_TEXT_KINDS {
+        total += core_text_value(named, "counters.core.bodies_from_text.{kind}")
+    }
     assert(core_text_value(named, "counters.core.bodies_from_text") == total, "the total is the sum of the kinds:\n{named.join("\n")}")
     // `lcm` and the `gcd` it calls wait for demand; `max` is a Prelude body.
     assert(core_text_value(named, "counters.core.bodies_from_text.demand") >= 2, "`lcm` and `gcd` were not checked on demand:\n{named.join("\n")}")

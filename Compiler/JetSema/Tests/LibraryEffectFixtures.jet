@@ -25,7 +25,9 @@ library_effect_fixture_reject: fn(file: String, code: String) {
         .Compiled(result, snapshot) -> {
             if result.internal_problem != None -> panic("{file}: internal compiler failure")
             loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
-                if diagnostic.severity == DIAGNOSTIC_ERROR && diagnostic.code == code -> return
+                if diagnostic.severity == DIAGNOSTIC_ERROR && diagnostic.code == code {
+                    return
+                }
             }
             panic("{file}: expected checked refusal {code}")
         }
@@ -35,11 +37,13 @@ library_effect_fixture_reject: fn(file: String, code: String) {
 library_effect_fixture_accept: fn(file: String) {
     checked: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program)
     if checked == {
-        .Refused(refusal) -> panic("{file}: {refusal.stderr}")
+        .Refused(refusal) -> { panic("{file}: {refusal.stderr}") }
         .Compiled(result, snapshot) -> {
             if result.internal_problem != None -> panic("{file}: internal compiler failure")
             loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
-                if diagnostic.severity == DIAGNOSTIC_ERROR -> panic("{file}: unexpected {diagnostic.code}")
+                if diagnostic.severity == DIAGNOSTIC_ERROR {
+                    panic("{file}: unexpected {diagnostic.code}")
+                }
             }
         }
     }

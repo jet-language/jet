@@ -41,9 +41,7 @@ sema_receipt_codable: fn(definition: StructDef) -> Bool Never! {
 
 // The marker's one compile-time string argument.
 sema_receipt_marker_name: fn(marker: Marker) -> String? Never! {
-    if marker.ct == .Val(value) {
-        return if value == .Str(text) -> Val(text) else -> None
-    }
+    if marker.ct == .Val(value) -> return if value == .Str(text) -> Val(text) else -> None
     if marker.args.len() != 1 -> return None
     if marker.args[0] == .Expr(expression) {
         if expression == .Str(parts, _, _) {
@@ -132,10 +130,14 @@ sema_receipt_text: fn(text: String, span: Span) -> TExpr Never! {
 sema_receipt_try_attach: fn(receiver: Expr, method: String, span: Span, args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if method != "attach" -> return SemaMethodSpecialCheck{handled: false, value: None}
     receiver_name: if receiver == .Ident(name, _, _) -> name else -> ""
-    if receiver_name != "receipt" || sema_scope_resolve_index(scopes, "receipt") != None -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if receiver_name != "receipt" || sema_scope_resolve_index(scopes, "receipt") != None {
+        return SemaMethodSpecialCheck{handled: false, value: None}
+    }
     if args.len() != 1 {
         diagnostics.push(sema_error("E0103", span, "`receipt.attach` takes exactly one argument", "one typed value becomes one named receipt section", "write `receipt.attach(value)`"))
-        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
+        loop argument in args {
+            _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
+        }
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     payload_span: expr_span(args[0].expr)
@@ -163,11 +165,15 @@ sema_receipt_try_attach: fn(receiver: Expr, method: String, span: Span, args: [C
         diagnostics.push(sema_error("E0905", payload_span, "`{type_name(payload.ty)}` does not implement `Encode`", "a receipt section is the value's canonical encoding", "derive `Codable` on this type, or write its Encode implementation"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if !sema_ownership_check_call_receiver(state, args[0].expr, AccessConvention.Read, scopes, payload_span, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_ownership_check_call_receiver(state, args[0].expr, AccessConvention.Read, scopes, payload_span, diagnostics) {
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
     declared: definition ?? return SemaMethodSpecialCheck{handled: true, value: None}
     record: core_call("core.prelude", "__receipt_attach") ?? panic("checked receipt attach row is missing")
     result: Type.Named{name: "Unit"}
-    if !sema_call_core_record_effects(record, span, [Type]{}, result, TFailureCarrier.Infallible, [FunctionDefaultRef]{}, scopes, context, environment, program, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_call_core_record_effects(record, span, [Type]{}, result, TFailureCarrier.Infallible, [FunctionDefaultRef]{}, scopes, context, environment, program, diagnostics) {
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
     encoded: sema_tree_node(sema_dyn_type(), TExprKind.HandleMethod{receiver: payload, operation: THandleOp.SerdeEncode{stored: false}, args: [TExpr]{}}, payload_span)
     values: [TExpr]{encoded, sema_receipt_text(section ?? "", span), sema_receipt_text(declared.name, span), sema_receipt_text(sema_receipt_schema_digest(declared), span)}
     value: sema_tree_node(result, TExprKind.CoreCall{record: record, args: values, source_span: span, type_args: [Type]{}, widen_to_vec: [Bool]{false, false, false, false}, fallibility: TFailureCarrier.Infallible}, span)

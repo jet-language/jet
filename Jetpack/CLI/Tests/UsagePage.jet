@@ -37,9 +37,7 @@ cli_usage_test_scratch: fn(label: String) -[FS]> String {
 #Test("cli usage hangar help groups store routes") {
     help: cli_usage_with_color(false)
     commands_1: [String]{"hangar list", "hangar clean", "hangar vendor", "hangar cache bind", "hangar shared install"}
-    loop command in commands_1 {
-        assert(help.contains(command), "missing {command}")
-    }
+    loop command in commands_1 { assert(help.contains(command), "missing {command}") }
 }
 
 #Test("cli usage tool is in the canonical route registry and help") {
@@ -79,9 +77,7 @@ cli_usage_test_scratch: fn(label: String) -[FS]> String {
 #Test("cli usage service lifecycle commands are in help") {
     help: cli_usage_with_color(false)
     commands_2: [String]{"services up", "services down", "services health", "services logs", "services wait"}
-    loop command in commands_2 {
-        assert(help.contains(command), "missing {command}")
-    }
+    loop command in commands_2 { assert(help.contains(command), "missing {command}") }
 }
 
 #Test("cli parse splits the trailing command") {
@@ -129,9 +125,7 @@ cli_usage_test_scratch: fn(label: String) -[FS]> String {
     jetpack: cli_usage_with_color(false)
     lines: jetpack.split("\n").to_list()
     headers_3: [String]{"Environments:", "Manifest:", "Store:", "Machines:", "Trust:", "Refs:", "Components:", "Flags:"}
-    loop header in headers_3 {
-        assert(lines.contains(header), "missing header {header}")
-    }
+    loop header in headers_3 { assert(lines.contains(header), "missing header {header}") }
     descriptions_4: [String]{"enter the default project environment", "list globally installed tools", "plan a source-backed package generation", "show realized packages", "choose terminal color policy"}
     loop description in descriptions_4 {
         assert(jetpack.contains(description), "missing help description: {description}")
@@ -139,9 +133,7 @@ cli_usage_test_scratch: fn(label: String) -[FS]> String {
         assert(Int{first} >= 97 && Int{first} <= 122, "description starts lowercase: {description}")
     }
     tokens_5: [String]{"jetpack tool install <ref>", "jetpack hangar list", "jetpack profile plan <name>", "<Component>", "fastfetch@jetpack", "--offline"}
-    loop token in tokens_5 {
-        assert(jetpack.contains(token), "jetpack help lost `{token}`")
-    }
+    loop token in tokens_5 { assert(jetpack.contains(token), "jetpack help lost `{token}`") }
 }
 
 #Test("cli parse reads the long yes flag") {

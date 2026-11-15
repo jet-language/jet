@@ -18,7 +18,6 @@
 // link, and the opened directory or file must be the same file (device and
 // inode) that the path names before and after the open and again before the
 // bytes are sent. Anything else that cannot be opened is 404.
-
 use {
     files: core.files
     net: core.net
@@ -27,6 +26,7 @@ use {
 }
 
 C_MAX_HEAD_BYTES: 32768
+
 C_READ_BYTES: 65536
 
 ServeRoot: struct {
@@ -126,7 +126,9 @@ request_target: fn(stream: &TCPStream) -> String? {
 head_end: fn(head: [U8]) -> Bool {
     if head.len() < 4 -> return false
     loop index in 0..<head.len() - 3 {
-        if head[index] == (U8{13}) && head[index + 1] == (U8{10}) && head[index + 2] == (U8{13}) && head[index + 3] == (U8{10}) -> return true
+        if head[index] == (U8{13}) && head[index + 1] == (U8{10}) && head[index + 2] == (U8{13}) && head[index + 3] == (U8{10}) {
+            return true
+        }
     }
     false
 }
@@ -215,14 +217,18 @@ open_entry: fn(root: ServeRoot, parent: Directory, candidate: String, name: Stri
     if before.is_dir {
         directory: parent.open_directory(name) ?? return open_failed(candidate)
         opened: directory.stat() ?? return Opened.Refused(404)
-        if !unchanged(before, opened, candidate) || !contained(root.path, candidate) -> return Opened.Refused(400)
+        if !unchanged(before, opened, candidate) || !contained(root.path, candidate) {
+            return Opened.Refused(400)
+        }
         if !opened.is_dir -> return Opened.Refused(404)
         return Opened.Dir(HeldDir{directory: directory, stat: opened})
     }
     if !before.is_file -> return Opened.Refused(400)
     reader: parent.open(name) ?? return open_failed(candidate)
     opened: reader.stat() ?? return Opened.Refused(404)
-    if !unchanged(before, opened, candidate) || !contained(root.path, candidate) -> return Opened.Refused(400)
+    if !unchanged(before, opened, candidate) || !contained(root.path, candidate) {
+        return Opened.Refused(400)
+    }
     Opened.File(HeldFile{reader: reader, stat: opened})
 }
 
@@ -243,7 +249,9 @@ file_reply: fn(file: &&HeldFile, served: String) -> Reply {
         loop byte in chunk -> body.push(byte)
     }
     current: held.reader.stat() ?? return refused(404)
-    if !current.is_file || current.links != 1 || !same_file(held.stat, current) -> return refused(400)
+    if !current.is_file || current.links != 1 || !same_file(held.stat, current) {
+        return refused(400)
+    }
     Reply{status: 200, content_type: mime(served), body: body}
 }
 
@@ -258,9 +266,7 @@ contained: fn(root: String, candidate: String) -> Bool {
     actual.starts_with(prefix) && actual != prefix
 }
 
-has_identity: fn(stat: Stat) -> Bool {
-    stat.id.device != 0 && stat.id.inode != 0
-}
+has_identity: fn(stat: Stat) -> Bool { stat.id.device != 0 && stat.id.inode != 0 }
 
 same_file: fn(left: Stat, right: Stat) -> Bool {
     has_identity(left) && has_identity(right) && left.id.device == right.id.device && left.id.inode == right.id.inode

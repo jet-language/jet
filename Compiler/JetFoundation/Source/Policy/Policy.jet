@@ -116,9 +116,13 @@ overflow_mode_parse: fn(name: String) -> ArithmeticMode? Never! {
 // None for any other shape, which the typed marker-argument check reports.
 overflow_marker_mode: fn(marker: Marker) -> ArithmeticMode? Never! {
     if marker.args.len() != 1 || marker.negated -> return None
-    if marker.arg_labels.len() > 0 && marker.arg_labels[0] == .Val(label) && label.name != "mode" -> return None
+    if marker.arg_labels.len() > 0 && marker.arg_labels[0] == .Val(label) && label.name != "mode" {
+        return None
+    }
     if marker.args[0] == .Expr(value) {
-        if value == .EnumLit(type_name, variant, _, args, _, _, _) && type_name == "" && args.len() == 0 -> return overflow_mode_parse(variant)
+        if value == .EnumLit(type_name, variant, _, args, _, _, _) && type_name == "" && args.len() == 0 {
+            return overflow_mode_parse(variant)
+        }
     }
     None
 }
@@ -145,7 +149,11 @@ policy_scope_rank: fn(scope: PolicyScope) -> Int Never! {
     }
 }
 
-PolicyCombine: enum { Tighten Override Merge }
+PolicyCombine: enum {
+    Tighten
+    Override
+    Merge
+}
 
 PolicyRule: struct {
     key: PolicyKey
@@ -154,7 +162,9 @@ PolicyRule: struct {
 }
 
 POLICY_PACKAGE_SCOPES: #run { [PolicyScope]{PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
+
 POLICY_ALL_SCOPES: #run { [PolicyScope]{PolicyScope.Organization, PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
+
 // The overflow mode (`#Overflow`) is a function, method or block policy.
 POLICY_BODY_SCOPES: #run { [PolicyScope]{PolicyScope.Function, PolicyScope.Block} }
 
@@ -214,7 +224,9 @@ PolicySourceText: struct {
 policy_declaration_site: fn(declaration: PolicyDeclaration, sources: [PolicySourceText]) -> String Never! {
     if declaration.span.end <= declaration.span.start -> return declaration.source
     loop source in sources {
-        if source.path == declaration.source -> return "{declaration.source}:{diagnostic_source_line(source.text, declaration.span.start)}:{diagnostic_source_column(source.text, declaration.span.start)}"
+        if source.path == declaration.source {
+            return "{declaration.source}:{diagnostic_source_line(source.text, declaration.span.start)}:{diagnostic_source_column(source.text, declaration.span.start)}"
+        }
     }
     declaration.source
 }
@@ -321,21 +333,29 @@ policy_resolve: fn(key: PolicyKey, declarations: [PolicyDeclaration]) -> Effecti
     ordered := [PolicyDeclaration]{}
     loop scope in POLICY_ALL_SCOPES {
         loop declaration in declarations {
-            if declaration.key == key && declaration.scope == scope -> ordered.push(declaration.copy())
+            if declaration.key == key && declaration.scope == scope {
+                ordered.push(declaration.copy())
+            }
         }
     }
     registry: policy_rule(key)
     chain := [PolicyDeclaration]{}
     effective := PolicyValue?{None}
     loop declaration in ordered {
-        if !registry.scopes.contains(declaration.scope) -> return Err(PolicyError.ProhibitedScope{key: key, scope: declaration.scope, span: declaration.span})
+        if !registry.scopes.contains(declaration.scope) {
+            return Err(PolicyError.ProhibitedScope{key: key, scope: declaration.scope, span: declaration.span})
+        }
         loop previous in chain {
-            if previous.scope == declaration.scope && previous.target == declaration.target -> return Err(PolicyError.Conflict{key: key, scope: declaration.scope, first: previous.span, second: declaration.span, outer_site: previous})
+            if previous.scope == declaration.scope && previous.target == declaration.target {
+                return Err(PolicyError.Conflict{key: key, scope: declaration.scope, first: previous.span, second: declaration.span, outer_site: previous})
+            }
         }
         next := declaration.value
         if effective == .Val(outer) {
             widens: policy_widens(key, outer, declaration.value)
-            if registry.combine == PolicyCombine.Tighten && widens -> return Err(PolicyError.Widening{key: key, outer: outer, inner: declaration.value, span: declaration.span, outer_site: chain[chain.len() - 1]})
+            if registry.combine == PolicyCombine.Tighten && widens {
+                return Err(PolicyError.Widening{key: key, outer: outer, inner: declaration.value, span: declaration.span, outer_site: chain[chain.len() - 1]})
+            }
             if registry.combine == PolicyCombine.Merge {
                 next = policy_merge(outer, declaration.value) ?? return Err(PolicyError.Conflict{key: key, scope: declaration.scope, first: chain[chain.len() - 1].span, second: declaration.span, outer_site: chain[chain.len() - 1]})
             }
@@ -349,10 +369,16 @@ policy_resolve: fn(key: PolicyKey, declarations: [PolicyDeclaration]) -> Effecti
 
 // The widening arm of Rust `resolve_policy`.
 policy_widens: fn(key: PolicyKey, outer: PolicyValue, inner: PolicyValue) -> Bool Never! {
-    if (key == PolicyKey.ScopedGC || key == PolicyKey.ExplicitUnits) && outer == PolicyValue.Enabled && inner == PolicyValue.Enabled -> return false
-    if (key == PolicyKey.Copies || key == PolicyKey.Writes || key == PolicyKey.Failures) && outer == PolicyValue.Explicit && inner == PolicyValue.Explicit -> return false
+    if (key == PolicyKey.ScopedGC || key == PolicyKey.ExplicitUnits) && outer == PolicyValue.Enabled && inner == PolicyValue.Enabled {
+        return false
+    }
+    if (key == PolicyKey.Copies || key == PolicyKey.Writes || key == PolicyKey.Failures) && outer == PolicyValue.Explicit && inner == PolicyValue.Explicit {
+        return false
+    }
     if key == PolicyKey.Sentries {
-        if outer == PolicyValue.On && (inner == PolicyValue.On || inner == PolicyValue.Off) -> return false
+        if outer == PolicyValue.On && (inner == PolicyValue.On || inner == PolicyValue.Off) {
+            return false
+        }
         if outer == PolicyValue.Off && inner == PolicyValue.On -> return true
         if outer == PolicyValue.Off && inner == PolicyValue.Off -> return false
     }
@@ -362,8 +388,12 @@ policy_widens: fn(key: PolicyKey, outer: PolicyValue, inner: PolicyValue) -> Boo
 
 // The `PolicyCombine::Merge` arm of Rust `resolve_policy`; None is a conflict.
 policy_merge: fn(outer: PolicyValue, inner: PolicyValue) -> PolicyValue? Never! {
-    if outer == .Limit(a) && inner == .Limit(b) -> return Val(PolicyValue.Limit{value: if a < b -> a else -> b})
-    if outer == PolicyValue.Enabled && inner == PolicyValue.Enabled -> return Val(PolicyValue.Enabled)
+    if outer == .Limit(a) && inner == .Limit(b) {
+        return Val(PolicyValue.Limit{value: if a < b -> a else -> b})
+    }
+    if outer == PolicyValue.Enabled && inner == PolicyValue.Enabled {
+        return Val(PolicyValue.Enabled)
+    }
     if outer == PolicyValue.Forbid && inner == PolicyValue.Forbid -> return Val(PolicyValue.Forbid)
     None
 }
@@ -373,8 +403,12 @@ policy_gate_widens: fn(outer: PolicyValue, inner: PolicyValue) -> Bool Never! {
     if outer == PolicyValue.Forbid && inner == PolicyValue.Allow -> return true
     if inner == PolicyValue.Allow -> return false
     if outer == PolicyValue.Forbid -> return inner != PolicyValue.Forbid
-    if outer == PolicyValue.Obligations -> return inner != PolicyValue.Obligations && inner != PolicyValue.Track
-    if outer == PolicyValue.PerSite && (inner == PolicyValue.Track || inner == PolicyValue.Skip || inner == PolicyValue.PerSite) -> return false
+    if outer == PolicyValue.Obligations {
+        return inner != PolicyValue.Obligations && inner != PolicyValue.Track
+    }
+    if outer == PolicyValue.PerSite && (inner == PolicyValue.Track || inner == PolicyValue.Skip || inner == PolicyValue.PerSite) {
+        return false
+    }
     if outer == PolicyValue.Default || outer == PolicyValue.GateOnly || outer == PolicyValue.Relaxed {
         if inner == {
             .Track | .Obligations | .Default | .GateOnly | .Relaxed | .Skip -> return false
@@ -383,7 +417,9 @@ policy_gate_widens: fn(outer: PolicyValue, inner: PolicyValue) -> Bool Never! {
     }
     if outer == PolicyValue.Track && inner == PolicyValue.Track -> return false
     if outer == PolicyValue.Skip && inner == PolicyValue.Skip -> return false
-    if outer == PolicyValue.On && (inner == PolicyValue.On || inner == PolicyValue.Off) -> return false
+    if outer == PolicyValue.On && (inner == PolicyValue.On || inner == PolicyValue.Off) {
+        return false
+    }
     if outer == PolicyValue.Off && inner == PolicyValue.Off -> return false
     true
 }
@@ -399,7 +435,9 @@ PolicyValueError: struct {
 // Rust `parse_value`: one package-policy value for `key`.
 policy_parse_value: fn(key: PolicyKey, raw: String) -> PolicyValue PolicyValueError! {
     value: raw.trim()
-    if (key == PolicyKey.ScopedGC || key == PolicyKey.ExplicitUnits) && value == "true" -> return Ok(PolicyValue.Enabled)
+    if (key == PolicyKey.ScopedGC || key == PolicyKey.ExplicitUnits) && value == "true" {
+        return Ok(PolicyValue.Enabled)
+    }
     if key == PolicyKey.Copies {
         if value == ".Explicit" -> return Ok(PolicyValue.Explicit)
         return Err(PolicyValueError{detail: "`copies` must be `.Explicit`"})
@@ -415,7 +453,9 @@ policy_parse_value: fn(key: PolicyKey, raw: String) -> PolicyValue PolicyValueEr
             else -> return Err(PolicyValueError{detail: "`sentries` must be `.On` or `.Off`"})
         }
     }
-    if !policy_key_is_audited_gate(key) -> return Err(PolicyValueError{detail: "package policy `{policy_key_name(key)}` has an unsupported value"})
+    if !policy_key_is_audited_gate(key) {
+        return Err(PolicyValueError{detail: "package policy `{policy_key_name(key)}` has an unsupported value"})
+    }
     if key != PolicyKey.Unsafe && key != PolicyKey.Impure && key != PolicyKey.Nondeterministic {
         if value == {
             ".Forbid" -> return Ok(PolicyValue.Forbid)

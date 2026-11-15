@@ -8,7 +8,7 @@ run: fn() {
     served := 0
     loop request in 0..<256 {
         if s5_web_get(port, "/nested/race.js", None) == .Val(response) {
-            if response.status == 200 -> served = served + 1
+            if response.status == 200 -> served += 1
             if response.status == 200 && response.body != "inside-parent".bytes() {
                 leaked = true
                 break

@@ -12,13 +12,9 @@ slow: fn(value: Int) -> Int {
 run: fn() {
     #Deadline(30ms) {
         task.group workers {
-            if (task.all { slow(1), slow(2) }) == {
-                .Ok(results) -> {
-                    print(results[0], results[1])
-                }
-                .Err(error) -> {
-                    panic("unexpected child task failure")
-                }
+            if (task.all {slow(1), slow(2)}) == {
+                .Ok(results) -> { print(results[0], results[1]) }
+                .Err(error) -> { panic("unexpected child task failure") }
             }
         }
     }

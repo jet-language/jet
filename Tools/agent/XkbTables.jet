@@ -19,10 +19,15 @@ use {
 }
 
 KEYSYMS_PATH: "tests/data/xkb/xkbcommon-keysyms.h"
+
 COMPOSE_PATH: "tests/data/xkb/Compose"
+
 SUMS_PATH: "tests/data/xkb/SHA256SUMS"
+
 TARGET_PATH: "Core/Ui/XkbTables.jet"
+
 DATA_DIRECTORY: "Core/Ui/XkbTables"
+
 DEFINE_PREFIX: "#define XKB_KEY_"
 
 #Error
@@ -51,9 +56,7 @@ Node: struct {
     children: [Int]
 }
 
-fail: fn(message: String) -> TableError {
-    TableError{message: message}
-}
+fail: fn(message: String) -> TableError { TableError{message: message} }
 
 hex_digit: fn(byte: U8) -> Int {
     n: Int{byte}
@@ -107,7 +110,9 @@ parse_keysyms: fn(source: String) -> [Keysym] TableError! {
         name_split: rest.partition(" ")
         name: name_split.head
         value_split: name_split.tail.trim_start().partition(" ")
-        if name == "" || !value_split.head.starts_with("0x") -> return Err(fail("bad keysym row '{raw}'"))
+        if name == "" || !value_split.head.starts_with("0x") {
+            return Err(fail("bad keysym row '{raw}'"))
+        }
         value: hex_value(value_split.head.remove_prefix("0x"))
         rows.push(Keysym{name: name, value: value, scalar: comment_scalar(value_split.tail)})
     }
@@ -118,7 +123,7 @@ parse_keysyms: fn(source: String) -> [Keysym] TableError! {
 // The keysym a Compose or keymap name spells: a header name, or `U<hex>`
 // (the Latin-1 keysym for a Latin-1 scalar, else the Unicode keysym), read
 // like libxkbcommon's xkb_keysym_from_name.
-keysym_value: fn(names: [String: Int], name: String) -> Int? {
+keysym_value: fn(names: [String:Int], name: String) -> Int? {
     if names.get(name) == .Val(value) -> return Val(value)
     if name.len() < 2 || name.len() > 9 || !name.starts_with("U") -> return None
     scalar: hex_value(name.remove_prefix("U")) ?? return None
@@ -137,13 +142,13 @@ quoted: fn(text: String) -> String TableError! {
     i := start + 1
     loop i < raw.len() {
         b: raw[i]
-        if b == (U8{34}) -> return Ok(String.from_bytes(out) ?? return Err(fail("Compose text is not UTF-8")))
+        if b == (U8{34}) {
+            return Ok(String.from_bytes(out) ?? return Err(fail("Compose text is not UTF-8")))
+        }
         if b == (U8{92}) && i + 1 < raw.len() {
             i += 1
             out.push(raw[i])
-        } else {
-            out.push(b)
-        }
+        } else { out.push(b) }
         i += 1
     }
     Err(fail("unterminated Compose text: '{text}'"))
@@ -152,9 +157,7 @@ quoted: fn(text: String) -> String TableError! {
 // The UTF-8 text of one scalar.
 utf8_text: fn(scalar: Int) -> String {
     out := [U8]{}
-    if scalar < 128 {
-        out.push(U8{scalar})
-    } else if scalar < 2048 {
+    if scalar < 128 -> out.push(U8{scalar}) else if scalar < 2048 {
         out.push(U8{192 + (scalar >> 6)})
         out.push(U8{128 + scalar.bit_and(63)})
     } else if scalar < 65536 {
@@ -183,7 +186,7 @@ child_of: fn(nodes: [Node], parent: Int, keysym: Int) -> Int {
 // leaf prefix into an inner node; a sequence that is a prefix of an earlier
 // one is skipped; a repeated sequence replaces the earlier result. A result
 // without text types its keysym's text.
-parse_compose: fn(source: String, names: [String: Int], scalars: [Int: Int]) -> [Node] TableError! {
+parse_compose: fn(source: String, names: [String:Int], scalars: [Int:Int]) -> [Node] TableError! {
     nodes := [Node]{Node{keysym: 0, leaf: false, text: "", children: [Int]{}}}
     loop raw in source.split("\n") {
         if !raw.starts_with("<") -> next
@@ -193,12 +196,12 @@ parse_compose: fn(source: String, names: [String: Int], scalars: [Int: Int]) -> 
         known := true
         loop part in sides.head.replace("\t", " ").split(" ") {
             if part == "" -> next
-            if !part.starts_with("<") || !part.ends_with(">") -> return Err(fail("bad Compose key '{part}' in '{raw}'"))
+            if !part.starts_with("<") || !part.ends_with(">") {
+                return Err(fail("bad Compose key '{part}' in '{raw}'"))
+            }
             if keysym_value(names, part.remove_prefix("<").remove_suffix(">")) == .Val(value) {
                 keys.push(value)
-            } else {
-                known = false
-            }
+            } else { known = false }
         }
         if !known || keys.len() == 0 -> next
         text := quoted(sides.tail)
@@ -240,7 +243,7 @@ parse_compose: fn(source: String, names: [String: Int], scalars: [Int: Int]) -> 
     Ok(nodes)
 }
 
-push_be: fn(&out: [U8], value: Int, width: Int) {
+push_be: fn(out: &[U8], value: Int, width: Int) {
     loop k in 0..<width -> out.push(U8{(value >> ((width - 1 - k) * 8)).bit_and(255)})
 }
 
@@ -252,7 +255,7 @@ embed_line: fn(constant: String, builtin: String, name: String) -> String {
 render: fn(keysyms: [Keysym], nodes: [Node], keysyms_sha: String, compose_sha: String) -> [TableFile] TableError! {
     names := [String]{}
     values := [U8]{}
-    scalars := [Int: Int]{}
+    scalars := [Int:Int]{}
     text_keys := [Int]{}
     loop row in keysyms {
         names.push(row.name.copy())
@@ -275,7 +278,7 @@ render: fn(keysyms: [Keysym], nodes: [Node], keysyms_sha: String, compose_sha: S
     roots: order.len()
     compose_rows := [U8]{}
     pool := [U8]{}
-    pooled := [String: Int]{}
+    pooled := [String:Int]{}
     position := 0
     loop position < order.len() {
         node: nodes[order[position]]
@@ -299,7 +302,9 @@ render: fn(keysyms: [Keysym], nodes: [Node], keysyms_sha: String, compose_sha: S
         }
         position += 1
     }
-    if pool.len() > 16777215 || order.len() > 16777215 -> return Err(fail("Compose table overflows its rows"))
+    if pool.len() > 16777215 || order.len() > 16777215 {
+        return Err(fail("Compose table overflows its rows"))
+    }
     lines := [String]{
         "// GENERATED FILE — do not hand-edit.",
         "// Source: Tools/agent/XkbTables.jet against the vendored libxkbcommon 1.13.2",
@@ -332,14 +337,16 @@ render: fn(keysyms: [Keysym], nodes: [Node], keysyms_sha: String, compose_sha: S
         embed_line("XKB_COMPOSE_TEXT", "embed_bytes", "compose_text.bin"),
         "",
     }
-    Ok([TableFile]{
-        TableFile{path: TARGET_PATH, bytes: lines.join("\n").bytes()},
-        TableFile{path: "{DATA_DIRECTORY}/keysym_names.txt", bytes: name_text.bytes()},
-        TableFile{path: "{DATA_DIRECTORY}/keysym_values.bin", bytes: values},
-        TableFile{path: "{DATA_DIRECTORY}/keysym_scalars.bin", bytes: text_rows},
-        TableFile{path: "{DATA_DIRECTORY}/compose_nodes.bin", bytes: compose_rows},
-        TableFile{path: "{DATA_DIRECTORY}/compose_text.bin", bytes: pool},
-    })
+    Ok(
+        [TableFile]{
+            TableFile{path: TARGET_PATH, bytes: lines.join("\n").bytes()},
+            TableFile{path: "{DATA_DIRECTORY}/keysym_names.txt", bytes: name_text.bytes()},
+            TableFile{path: "{DATA_DIRECTORY}/keysym_values.bin", bytes: values},
+            TableFile{path: "{DATA_DIRECTORY}/keysym_scalars.bin", bytes: text_rows},
+            TableFile{path: "{DATA_DIRECTORY}/compose_nodes.bin", bytes: compose_rows},
+            TableFile{path: "{DATA_DIRECTORY}/compose_text.bin", bytes: pool},
+        },
+    )
 }
 
 // The digest SHA256SUMS records for `name`, or an error naming the gap.
@@ -362,8 +369,8 @@ read_pinned: fn(path: String, sums: String) -[FS]> String TableError! {
 generated_files: fn() -[FS]> [TableFile] TableError! {
     sums: files.read(SUMS_PATH) ?? return Err(fail("cannot read {SUMS_PATH}: {err}"))
     keysyms: parse_keysyms(read_pinned(KEYSYMS_PATH, sums))
-    names := [String: Int]{}
-    scalars := [Int: Int]{}
+    names := [String:Int]{}
+    scalars := [Int:Int]{}
     loop row in keysyms {
         if names.get(row.name) == None -> _: names.add(row.name.copy(), row.value)
         if row.scalar > 0 && scalars.get(row.value) == None -> _: scalars.add(row.value, row.scalar)
@@ -374,12 +381,16 @@ generated_files: fn() -[FS]> [TableFile] TableError! {
 
 table_main: fn(args: [String]) -[FS]> String TableError! {
     check: args.len() == 1 && args[0] == "--check"
-    if args.len() > 1 || (args.len() == 1 && !check) -> return Err(fail("usage: XkbTables.jet [--check]"))
+    if args.len() > 1 || (args.len() == 1 && !check) {
+        return Err(fail("usage: XkbTables.jet [--check]"))
+    }
     outputs: generated_files()
     if check {
         loop output in outputs {
             current: files.read_bytes(output.path) ?? return Err(fail("cannot read {output.path}: {err}"))
-            if current != output.bytes -> return Err(fail("{output.path} is stale; run jet Tools/agent/XkbTables.jet"))
+            if current != output.bytes {
+                return Err(fail("{output.path} is stale; run jet Tools/agent/XkbTables.jet"))
+            }
         }
         return Ok("xkb-tables: {TARGET_PATH} and {DATA_DIRECTORY}/ are current")
     }
@@ -398,13 +409,13 @@ run: fn() { print(table_main(process.args()) ?? process.fail(1, err.message)) }
     assert_eq(rows[0].value, 228)
     assert_eq(rows[0].scalar, 228)
     assert_eq(rows[1].scalar, -1)
-    names := [String: Int]{}
+    names := [String:Int]{}
     loop row in rows -> _: names.add(row.name.copy(), row.value)
     _: names.add("e", 101)
     // Line 1 names an unknown result keysym and line 6 an unknown key, so
     // libxkbcommon skips both.
     source: "<dead_acute> <e>\t\t\t: \"é\"   eacute # LATIN SMALL LETTER E WITH ACUTE\n<dead_acute> <dead_acute> <e> : \"x\"\n<dead_acute> <e> : \"E\"\n<dead_acute> : \"a\"\n<dead_acute> <e> <e> : \"y\"\n<bogus> <e> : \"z\"\n<e> : \"\" adiaeresis\n"
-    nodes: parse_compose(source, names, [Int: Int]{}) ?? panic(err.message)
+    nodes: parse_compose(source, names, [Int:Int]{}) ?? panic(err.message)
     assert_eq(nodes[0].children.len(), 2)
     acute: nodes[nodes[0].children[0]]
     assert_eq(acute.keysym, 65105)

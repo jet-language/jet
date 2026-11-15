@@ -4,11 +4,20 @@ use {
     jet_driver.[JetDriverAuthorizedSourceFile]
     jet_foundation.[AppAuthorizedDirectory]
     jet_cli.[
-        JET_CLI_MAX_SOURCE_FILES, JET_CLI_MAX_SOURCE_TOTAL, JetCLISourceBudget,
-        jet_cli_build_read_chain_current, jet_cli_cache_file, jet_cli_foreign_cache_files,
-        jet_cli_hold_root_chain, jet_cli_identity_key, jet_cli_read_held_source,
-        jet_cli_read_rooted_source, jet_cli_replace_source_budget, jet_cli_source_read_limit,
-        jet_cli_walk_held_sources, jet_cli_walk_sources,
+        JET_CLI_MAX_SOURCE_FILES,
+        JET_CLI_MAX_SOURCE_TOTAL,
+        JetCLISourceBudget,
+        jet_cli_build_read_chain_current,
+        jet_cli_cache_file,
+        jet_cli_foreign_cache_files,
+        jet_cli_hold_root_chain,
+        jet_cli_identity_key,
+        jet_cli_read_held_source,
+        jet_cli_read_rooted_source,
+        jet_cli_replace_source_budget,
+        jet_cli_source_read_limit,
+        jet_cli_walk_held_sources,
+        jet_cli_walk_sources,
     ]
     cli_sys: core.sys
     cli_files: core.files
@@ -20,7 +29,9 @@ snapshot_fixture_files: fn(root: String) -> [JetDriverAuthorizedSourceFile] {
     files := [JetDriverAuthorizedSourceFile]{}
     directories := [AppAuthorizedDirectory]{}
     budget := JetCLISourceBudget{entries: 0, bytes: 0, files: 0}
-    if jet_cli_walk_sources(root, "", 0, files, directories, true, budget) == .Val(problem) -> panic(problem)
+    if jet_cli_walk_sources(root, "", 0, files, directories, true, budget) == .Val(problem) {
+        panic(problem)
+    }
     files
 }
 
@@ -82,11 +93,13 @@ snapshot_fixture_files: fn(root: String) -> [JetDriverAuthorizedSourceFile] {
     root_info: held.stat() ?? panic("root identity")
     assert(jet_cli_identity_key("directory", root_info) == "authority-file-v1;kind=directory;length=0;modified_ns=none;device={root_info.id.device};inode={root_info.id.inode}")
     if jet_cli_read_held_source(held, "main.jet", 1) == {
-        .Err(detail) -> assert(detail.message == "file exceeds its read bound")
+        .Err(detail) -> { assert(detail.message == "file exceeds its read bound") }
         .Ok(_) -> panic("oversized held read was accepted")
     }
     if jet_cli_read_held_source(held, "main.jet", -1) == {
-        .Err(detail) -> assert(detail.message == "file read bound exceeds the tree hashing bound")
+        .Err(detail) -> {
+            assert(detail.message == "file read bound exceeds the tree hashing bound")
+        }
         .Ok(_) -> panic("negative held read bound was accepted")
     }
 

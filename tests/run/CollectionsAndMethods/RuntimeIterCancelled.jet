@@ -3,28 +3,29 @@ package: {
     name: "runtime_iter_cancelled"
     authority: { allow: [IO, Mem.Alloc, Time.Wait] }
 }
+
 mapped_worker: fn(started: Sender<Int>, blocked: Receiver<Int>) -> [Int] {
     [1, 2, 3].lazy().map(
-    fn(n) {
-        if n == 2 {
-            started.send(1) ?? panic("start channel closed")
-            blocked.receive() ?? panic("blocking channel closed")
-        }
-        n * 10
-    },
+        fn(n) {
+            if n == 2 {
+                started.send(1) ?? panic("start channel closed")
+                blocked.receive() ?? panic("blocking channel closed")
+            }
+            n * 10
+        },
     )
         .to_list()
 }
 
 looped_worker: fn(started: Sender<Int>, blocked: Receiver<Int>) -> Int {
     values: [1, 2, 3].lazy().map(
-    fn(n) {
-        if n == 2 {
-            started.send(1) ?? panic("start channel closed")
-            blocked.receive() ?? panic("blocking channel closed")
-        }
-        n * 10
-    },
+        fn(n) {
+            if n == 2 {
+                started.send(1) ?? panic("start channel closed")
+                blocked.receive() ?? panic("blocking channel closed")
+            }
+            n * 10
+        },
     )
     total := 0
     loop n in values -> total += n
@@ -34,13 +35,13 @@ looped_worker: fn(started: Sender<Int>, blocked: Receiver<Int>) -> Int {
 family_worker: fn(family: Int, started: Sender<Int>, blocked: Receiver<Int>) -> Bool {
     if family == 7 {
         return [1, 2, 3, 5].lazy().chunk_while(
-        fn(a: Int, b: Int) {
-            if b == 3 {
-                started.send(1) ?? panic("start channel closed")
-                blocked.receive() ?? panic("blocking channel closed")
-            }
-            b == a + 1
-        },
+            fn(a: Int, b: Int) {
+                if b == 3 {
+                    started.send(1) ?? panic("start channel closed")
+                    blocked.receive() ?? panic("blocking channel closed")
+                }
+                b == a + 1
+            },
         )
             .to_list().len() > 0
     }

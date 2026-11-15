@@ -29,14 +29,15 @@ fs_directory_row: fn(fd: I64, entry: I64, length: I64) -> I64 {
     }
     data
 }
+
 #Export(c) jet_fs_directory_list: fn(handle: I64, output: I64, length: I64, error: I64) -> I64 {
     key: host_native_int(handle)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     base: fs_held_shown(key)
-    if (base == I64{0}) -> return fs_held_closed(HOST_IO_OP_READ, error)
+    if (base == I64{0}) { return fs_held_closed(HOST_IO_OP_READ, error) }
     fd: fs_open_at(key, rt_static_text("."), I64{3}, I64{0}, I64{-1}, I64{0}, error)
     jet_rt_string_drop(base)
-    if (fd < I64{0}) -> return I64{0}
+    if (fd < I64{0}) { return I64{0} }
     scratch: jet_rt_alloc(I64{8192}, I64{8})
     data := I64{0}
     count := I64{0}
@@ -48,20 +49,22 @@ fs_directory_row: fn(fd: I64, entry: I64, length: I64) -> I64 {
         }
         // Rust's readdir loop treats a null entry as termination, including
         // an underlying read error; do not introduce a different error rail.
-        if (got <= I64{0}) -> break
+        if (got <= I64{0}) { break }
         at := I64{0}
         loop at < got {
             entry: wrapping(scratch + at)
             record_length: (rt_text_word(wrapping(entry + I64{16}))).bit_and(I64{65535})
             bytes := I64{0}
-            loop rt_text_byte(wrapping(wrapping(entry + I64{19}) + bytes)) != (I64{0}) -> bytes += I64{1}
+            loop rt_text_byte(wrapping(wrapping(entry + I64{19}) + bytes)) != (I64{0}) {
+                bytes += I64{1}
+            }
             dot: bytes == I64{1} && rt_text_byte(wrapping(entry + I64{19})) == I64{46}
             parent: bytes == I64{2} && rt_text_byte(wrapping(entry + I64{19})) == I64{46} && rt_text_byte(wrapping(entry + I64{20})) == I64{46}
             if !dot && !parent {
                 if (count == capacity) {
                     next_capacity: if (capacity == I64{0}) -> I64{16} else -> capacity * I64{2}
                     next_data: jet_rt_alloc(next_capacity * I64{24}, I64{8})
-                    if (count != I64{0}) -> coll_copy(data, next_data, count * I64{24})
+                    if (count != I64{0}) { coll_copy(data, next_data, count * I64{24}) }
                     jet_rt_free(data, capacity * I64{24}, I64{8})
                     data = next_data
                     capacity = next_capacity

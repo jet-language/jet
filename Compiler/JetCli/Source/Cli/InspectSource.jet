@@ -3,7 +3,9 @@ use jet_driver.[JetDriverCompileResult, JetDriverAuthorizedSourceSnapshot]
 
 jet_cli_inspection_source: fn(result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot, display: String) -> String {
     loop doc_module in result.doc_modules {
-        if doc_module.path == display || doc_module.physical_path == display -> return doc_module.source
+        if doc_module.path == display || doc_module.physical_path == display {
+            return doc_module.source
+        }
     }
     loop generated in result.generated_source_files {
         if generated.path == display -> return generated.source
@@ -12,7 +14,9 @@ jet_cli_inspection_source: fn(result: JetDriverCompileResult, snapshot: JetDrive
     absolute: jet_cli_report_path(cwd, display)
     loop root in snapshot.roots {
         loop file in root.files {
-            if file.path == absolute || file.path == display || file.relative_path == display -> return file.source
+            if file.path == absolute || file.path == display || file.relative_path == display {
+                return file.source
+            }
         }
     }
     ""

@@ -1,6 +1,10 @@
 // Comment-preserving authority holds and the hostile-nesting block boundary.
 use jet_pkg_model.[
-    DepSpec, PackageFacts, PackageParseError, pkg_add_authority_hold, pkg_add_dep,
+    DepSpec,
+    PackageFacts,
+    PackageParseError,
+    pkg_add_authority_hold,
+    pkg_add_dep,
     pkg_edit_block_line_range,
 ]
 
@@ -58,7 +62,7 @@ use jet_pkg_model.[
 #Test("manifest parser still rejects a retired deps record head") {
     raw: "name: \"app\"\nversion: \"0.1.0\"\ndeps: .{{ mylib: ./mylib }}\n"
     if PackageFacts.parse(raw, "package.jet") == {
-        .Err(error) -> assert(error == PackageParseError.RetiredRecordHead)
+        .Err(error) -> { assert(error == PackageParseError.RetiredRecordHead) }
         .Ok(_) -> panic("retired record heads must not be accepted")
     }
 }

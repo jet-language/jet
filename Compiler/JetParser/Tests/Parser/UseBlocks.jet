@@ -21,7 +21,8 @@ use_test_member: fn(import: ImportDecl) -> String {
 }
 
 #Test("a use block reads one import per row in source order") {
-    program: parser_test_program(`use {
+    program: parser_test_program(
+        `use {
     core.files
     fs: core.files
     m: c.math
@@ -31,36 +32,35 @@ use_test_member: fn(import: ImportDecl) -> String {
 }
 
 run: fn() {}
-`)
+`,
+    )
     assert_eq(program.imports.len(), 6)
     assert_eq(use_test_member(use_test_import(program, 0)), "core.[files as files]")
     assert_eq(use_test_module(use_test_import(program, 1)), "core.files")
     assert_eq(use_test_import(program, 1).alias, "fs")
     assert_eq(use_test_module(use_test_import(program, 2)), "c.math")
     assert_eq(use_test_import(program, 2).alias, "m")
-    if use_test_import(program, 3).kind == .File(path, _) {
-        assert_eq(path, "./helper")
-    } else {
+    if use_test_import(program, 3).kind == .File(path, _) -> assert_eq(path, "./helper") else {
         panic("expected a file import")
     }
     assert_eq(use_test_import(program, 3).alias, "helper")
     if use_test_import(program, 4).kind == .Unqualified(module_alias, _, items, _, _) {
         assert_eq(module_alias, "core.math")
         assert_eq(items.len(), 2)
-    } else {
-        panic("expected a member list")
-    }
+    } else { panic("expected a member list") }
     assert_eq(use_test_module(use_test_import(program, 5)), "pkg")
 }
 
 #Test("alias rows bind a module, a member path, a file or a package") {
-    program: parser_test_program(`use plot: js.plotly
+    program: parser_test_program(
+        `use plot: js.plotly
 use biggest: core.math.max
 use h: "./helper"
 use p: pkg
 
 run: fn() {}
-`)
+`,
+    )
     assert_eq(use_test_module(use_test_import(program, 0)), "js.plotly")
     assert_eq(use_test_import(program, 0).alias, "plot")
     assert_eq(use_test_module(use_test_import(program, 1)), "core.math.max")
@@ -71,7 +71,8 @@ run: fn() {}
 }
 
 #Test("several use blocks, a pub block and an inline module block all parse") {
-    program: parser_test_program(`use {
+    program: parser_test_program(
+        `use {
     core.files
     core.term
 }
@@ -94,7 +95,8 @@ inner: module {
 }
 
 run: fn() {}
-`)
+`,
+    )
     assert_eq(program.imports.len(), 6)
     assert(!program.imports[0].is_pub)
     assert(program.imports[2].is_pub)
@@ -115,7 +117,8 @@ run: fn() {}
 }
 
 #Test("fmt writes a block for two or more imports and alias rows") {
-    formatted: parser_test_stable(`use fs: core.files
+    formatted: parser_test_stable(
+        `use fs: core.files
 use core.term
 use plot: js.plotly
 use h: "./helper"
@@ -124,8 +127,11 @@ pub use t: core.time
 pub use core.sys
 
 run: fn() {}
-`)
-    assert_eq(formatted, `use {
+`,
+    )
+    assert_eq(
+        formatted,
+        `use {
     fs: core.files
     core.term
     plot: js.plotly
@@ -139,7 +145,8 @@ pub use {
 }
 
 run: fn() {}
-`)
+`,
+    )
 }
 
 #Test("fmt keeps a lone import on one line") {
@@ -149,7 +156,8 @@ run: fn() {}
 }
 
 #Test("fmt writes an inline module's imports as a block") {
-    formatted: parser_test_stable(`inner: module {
+    formatted: parser_test_stable(
+        `inner: module {
     use core.files
     use io: core.term
 
@@ -157,6 +165,7 @@ run: fn() {}
 }
 
 run: fn() {}
-`)
+`,
+    )
     assert(formatted.contains("    use {{\n        core.files\n        io: core.term\n    }}\n"), formatted)
 }

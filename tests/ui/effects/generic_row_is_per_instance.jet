@@ -1,5 +1,9 @@
 use log: core.log
-Item: trait { get: fn(self) -> Int }
+
+Item: trait {
+    get: fn(self) -> Int
+}
+
 Pure: struct {
     n: Int
 
@@ -7,6 +11,7 @@ Pure: struct {
         get: fn(self) -> Int { self.n }
     }
 }
+
 Logger: struct {
     n: Int
 
@@ -17,10 +22,17 @@ Logger: struct {
         }
     }
 }
+
 Box: struct<T: Item> {
     inner: T
+
     get: fn(self) -> Int { self.inner.get() }
 }
+
 pure_box: fn(b: Box<Pure>) -[]> Int { b.get() }
+
 log_box: fn(b: Box<Logger>) -[Net]> Int { b.get() }
-run: fn() { print(pure_box(Box<Pure>{inner: Pure{n: 1}}) + log_box(Box<Logger>{inner: Logger{n: 2}})) }
+
+run: fn() {
+    print(pure_box(Box<Pure>{inner: Pure{n: 1}}) + log_box(Box<Logger>{inner: Logger{n: 2}}))
+}

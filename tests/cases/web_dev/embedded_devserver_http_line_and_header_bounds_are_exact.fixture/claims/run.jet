@@ -3,7 +3,9 @@ use files: core.files
 s5_web_is_200: fn(response: [U8]) -> Bool {
     prefix: "HTTP/1.1 200 OK{s5_web_crlf()}".bytes()
     if response.len() < prefix.len() -> return false
-    loop index in 0..<prefix.len() { if response[index] != prefix[index] -> return false }
+    loop index in 0..<prefix.len() {
+        if response[index] != prefix[index] -> return false
+    }
     true
 }
 

@@ -2,10 +2,18 @@
 // semantic lock.
 use {
     jetpack_trust.[
-        FlakeGraph, LockInput, SemanticLockFile, SemanticRecord, SourceMapEntry,
-        trust_parse_semantic_lock, trust_semantic_lock_atomic_commit, trust_semantic_lock_live_path,
-        trust_semantic_lock_load, trust_semantic_lock_merge_revalidate_commit,
-        trust_strip_semantic_sections, trust_write_semantic_lock,
+        FlakeGraph,
+        LockInput,
+        SemanticLockFile,
+        SemanticRecord,
+        SourceMapEntry,
+        trust_parse_semantic_lock,
+        trust_semantic_lock_atomic_commit,
+        trust_semantic_lock_live_path,
+        trust_semantic_lock_load,
+        trust_semantic_lock_merge_revalidate_commit,
+        trust_strip_semantic_sections,
+        trust_write_semantic_lock,
     ]
     jet_pkg_model.[LockedSourceChannel, pkg_lock_parse, pkg_lock_record_source_channel]
     crypto: core.crypto
@@ -40,7 +48,7 @@ dependencies = ["app"]
     semantic := SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.2.3", "sha256-log")})
     semantic.inputs = [LockInput]{
         {name: "nixpkgs", url: "github:NixOS/nixpkgs/abc", follows: ""},
-        {name: "home", url: "github:nix-community/home-manager", follows: "nixpkgs"}
+        {name: "home", url: "github:nix-community/home-manager", follows: "nixpkgs"},
     }
     semantic.source_maps = [SourceMapEntry]{SourceMapEntry{pattern: "core.*", sources: [String]{"catalog:core.log", "core"}}}
     trust_semantic_lock_atomic_commit(root, semantic) ?? panic("atomic commit")
@@ -71,7 +79,7 @@ dependencies = ["app"]
     semantic := SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.2.3", "sha256-log")})
     semantic.inputs = [LockInput]{
         {name: "nixpkgs", url: "github:NixOS/nixpkgs/abc", follows: ""},
-        {name: "home", url: "github:nix-community/home-manager", follows: "nixpkgs"}
+        {name: "home", url: "github:nix-community/home-manager", follows: "nixpkgs"},
     }
     semantic.source_maps = [SourceMapEntry]{SourceMapEntry{pattern: "core.*", sources: [String]{"catalog:core.log", "core"}}}
     trust_semantic_lock_atomic_commit(root, semantic) ?? panic("atomic commit")
@@ -95,11 +103,9 @@ dependencies = ["app"]
     right: SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.3.0", "sha256-b")})
     rejected: if trust_semantic_lock_merge_revalidate_commit(root, SemanticLockFile.empty(), left, right) == {
         .Ok(_) -> false
-        .Err(error) -> {
-            if error == {
-                .Rejected(issues) -> issues.len() > 0
-                .EmptyInputName | .DuplicateInput(_) | .ConflictingInput(_, _) | .MissingFollows(_, _) | .FollowsCycle(_) | .MissingRevision(_) | .InvalidAssignment(_) | .StaleSemanticLock(_) | .IO(_) | .Grant(_) | .Secret(_) | .Root(_) | .Pin(_) -> false
-            }
+        .Err(error) -> if error == {
+            .Rejected(issues) -> issues.len() > 0
+            .EmptyInputName | .DuplicateInput(_) | .ConflictingInput(_, _) | .MissingFollows(_, _) | .FollowsCycle(_) | .MissingRevision(_) | .InvalidAssignment(_) | .StaleSemanticLock(_) | .IO(_) | .Grant(_) | .Secret(_) | .Root(_) | .Pin(_) -> false
         }
     }
     assert(rejected, "a conflicting merge is Rejected")
@@ -136,11 +142,9 @@ dependencies = ["app"]
     files.write(flake, "{source}\n# changed\n") ?? panic("change flake")
     stale: if FlakeGraph.load(flake) == {
         .Ok(_) -> false
-        .Err(error) -> {
-            if error == {
-                .StaleSemanticLock(_) -> true
-                .EmptyInputName | .DuplicateInput(_) | .ConflictingInput(_, _) | .MissingFollows(_, _) | .FollowsCycle(_) | .MissingRevision(_) | .InvalidAssignment(_) | .IO(_) | .Rejected(_) | .Grant(_) | .Secret(_) | .Root(_) | .Pin(_) -> false
-            }
+        .Err(error) -> if error == {
+            .StaleSemanticLock(_) -> true
+            .EmptyInputName | .DuplicateInput(_) | .ConflictingInput(_, _) | .MissingFollows(_, _) | .FollowsCycle(_) | .MissingRevision(_) | .InvalidAssignment(_) | .IO(_) | .Rejected(_) | .Grant(_) | .Secret(_) | .Root(_) | .Pin(_) -> false
         }
     }
     assert(stale, "a changed flake is StaleSemanticLock")
@@ -176,7 +180,7 @@ dependencies = ["app"]
     composition: graph.composition ?? panic("composition")
     expected: [String]{
         "./parts/dev.nix\t{crypto.sha256(module_source.bytes()).hex()}",
-        "./shared.nix\t{crypto.sha256(shared_source.bytes()).hex()}"
+        "./shared.nix\t{crypto.sha256(shared_source.bytes()).hex()}",
     }
     assert_eq(composition.module_sources, expected)
     files.write(trust_semantic_lock_live_path(root), trust_write_semantic_lock(graph.semantic_lock())) ?? panic("write lock")
@@ -186,11 +190,9 @@ dependencies = ["app"]
     files.write(shared, "{{ perSystem = {{ }}; }}\n") ?? panic("change shared module")
     stale: if FlakeGraph.load(flake) == {
         .Ok(_) -> false
-        .Err(error) -> {
-            if error == {
-                .StaleSemanticLock(reason) -> reason.contains("composition")
-                .EmptyInputName | .DuplicateInput(_) | .ConflictingInput(_, _) | .MissingFollows(_, _) | .FollowsCycle(_) | .MissingRevision(_) | .InvalidAssignment(_) | .IO(_) | .Rejected(_) | .Grant(_) | .Secret(_) | .Root(_) | .Pin(_) -> false
-            }
+        .Err(error) -> if error == {
+            .StaleSemanticLock(reason) -> reason.contains("composition")
+            .EmptyInputName | .DuplicateInput(_) | .ConflictingInput(_, _) | .MissingFollows(_, _) | .FollowsCycle(_) | .MissingRevision(_) | .InvalidAssignment(_) | .IO(_) | .Rejected(_) | .Grant(_) | .Secret(_) | .Root(_) | .Pin(_) -> false
         }
     }
     assert(stale, "a changed module is a stale composition")

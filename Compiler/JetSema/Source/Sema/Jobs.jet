@@ -30,7 +30,9 @@ SemaJobScheduleResolution: struct {
 }
 
 sema_job_schedule_unit: fn(suffix: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaRegistrationUnitFact? {
-    if program.registration_graph == .Val(graph) -> return sema_expression_unit_literal_time_fact(suffix, graph)
+    if program.registration_graph == .Val(graph) {
+        return sema_expression_unit_literal_time_fact(suffix, graph)
+    }
     None
 }
 
@@ -61,30 +63,48 @@ sema_job_schedule_duration_int: fn(value: Int, unit: SemaRegistrationUnitFact) -
 }
 
 sema_job_schedule_duration_float: fn(value: Float, unit: SemaRegistrationUnitFact) -> SemaJobScheduleResolution {
-    if !math.is_finite(value) || value <= 0.0 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.NonPositiveDuration)}
-    if unit.scale.numerator <= 0 || unit.scale.denominator <= 0 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.DurationOutOfRange)}
+    if !math.is_finite(value) || value <= 0.0 {
+        return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.NonPositiveDuration)}
+    }
+    if unit.scale.numerator <= 0 || unit.scale.denominator <= 0 {
+        return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.DurationOutOfRange)}
+    }
     nanos := value * approx(unit.scale.numerator) / approx(unit.scale.denominator)
     max_int_exclusive: Float{9223372036854775808.0}
-    if !math.is_finite(nanos) || nanos >= max_int_exclusive -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.DurationOutOfRange)}
-    if nanos <= 0.0 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.NonPositiveDuration)}
+    if !math.is_finite(nanos) || nanos >= max_int_exclusive {
+        return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.DurationOutOfRange)}
+    }
+    if nanos <= 0.0 {
+        return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.NonPositiveDuration)}
+    }
     integer_nanos := sema_job_schedule_float_to_int(nanos)
-    if integer_nanos <= 0 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.NonPositiveDuration)}
+    if integer_nanos <= 0 {
+        return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.NonPositiveDuration)}
+    }
     SemaJobScheduleResolution{schedule: Val(EverySchedule.Duration{nanos: integer_nanos}), error: None}
 }
 
 sema_job_schedule_wall_clock: fn(text: String) -> SemaJobScheduleResolution Never! {
     bytes := text.bytes()
-    if bytes.len() != 5 || (Int{bytes[2]}) != 58 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.BadWallClockFormat)}
+    if bytes.len() != 5 || (Int{bytes[2]}) != 58 {
+        return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.BadWallClockFormat)}
+    }
     loop index in ([Int]{0, 1, 3, 4}) {
         digit := Int{bytes[index]}
-        if digit < 48 || digit > 57 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.BadWallClockFormat)}
+        if digit < 48 || digit > 57 {
+            return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.BadWallClockFormat)}
+        }
     }
     hour_text: String.from_bytes(bytes.slice(0, 2)) ?? return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.BadWallClockFormat)}
     minute_text: String.from_bytes(bytes.slice(3, 5)) ?? return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.BadWallClockFormat)}
     hour: Int.parse(hour_text) ?? return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.BadWallClockFormat)}
     minute: Int.parse(minute_text) ?? return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.BadWallClockFormat)}
-    if hour > 23 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.HourOutOfRange)}
-    if minute > 59 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.MinuteOutOfRange)}
+    if hour > 23 {
+        return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.HourOutOfRange)}
+    }
+    if minute > 59 {
+        return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.MinuteOutOfRange)}
+    }
     return SemaJobScheduleResolution{schedule: Val(EverySchedule.WallClockTime{hour: hour, minute: minute}), error: None}
 }
 
@@ -126,7 +146,6 @@ sema_job_schedule_error: fn(reason: EveryScheduleError, span: Span) -> Diagnosti
         .DynamicValue -> sema_error("E0926", span, "a job schedule must be known at compile time", "the marker argument has the right type, but job discovery needs one fixed cadence.", "write a duration or wall-clock literal, e.g. `#Job(every: 5min)` or `#Job(every: \"03:00\")`.")
     }
 }
-
 
 /// Sema and help read the same command registry.
 sema_job_is_reserved: fn(name: String) -> Bool Never! {
@@ -180,7 +199,9 @@ sema_job_cli_commands: fn(items: [Item]) -> [SemaJobCommandWord] {
                 if function.name.starts_with("__computed_") -> next
                 words.push(SemaJobCommandWord{name: unicode.lower(function.name), span: function.name_span})
             }
-            loop binding in definition.cli_bindings -> words.push(SemaJobCommandWord{name: unicode.lower(binding.name), span: binding.name_span})
+            loop binding in definition.cli_bindings {
+                words.push(SemaJobCommandWord{name: unicode.lower(binding.name), span: binding.name_span})
+            }
         }
     }
     words
@@ -249,10 +270,14 @@ sema_check_job_schedules: fn(items: [Item], environment: SemaScopeEnvironment, p
             .Func(function) -> {
                 marker: function.every ?? next
                 if marker.arg == .Expression(expression) {
-                    if expression == .Ident(name, _, _) && sema_job_mistyped_parameter(function.params, name) -> next
+                    if expression == .Ident(name, _, _) && sema_job_mistyped_parameter(function.params, name) {
+                        next
+                    }
                 }
                 resolution: sema_job_resolve_every_arg(marker.arg, environment, program)
-                if resolution.error == .Val(reason) -> diagnostics.push(sema_job_schedule_error(reason, sema_job_every_error_span(marker.arg)))
+                if resolution.error == .Val(reason) {
+                    diagnostics.push(sema_job_schedule_error(reason, sema_job_every_error_span(marker.arg)))
+                }
             }
             .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }

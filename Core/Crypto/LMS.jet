@@ -19,58 +19,75 @@ use {
 /// Why an LMS or LM-OTS operation failed (MBEDTLS_ERR_LMS_*).
 #Error
 LMSError: enum {
-    /// A malformed key, an unsupported type, or a used or absent private
-    /// key (BAD_INPUT_DATA, -0x0011).
     BadInput
-    /// Every leaf of the LMS key has signed (OUT_OF_PRIVATE_KEYS, -0x0013).
     OutOfPrivateKeys
-    /// The signature does not verify (VERIFY_FAILED, -0x0015).
     VerifyFailed
-    /// The random generator failed; C returns the generator's own code.
     RandomFailed
 }
 
+/// A malformed key, an unsupported type, or a used or absent private
+/// key (BAD_INPUT_DATA, -0x0011).
+/// Every leaf of the LMS key has signed (OUT_OF_PRIVATE_KEYS, -0x0013).
+/// The signature does not verify (VERIFY_FAILED, -0x0015).
+/// The random generator failed; C returns the generator's own code.
+
 /// The LM-OTS parameter set (mbedtls_lmots_algorithm_type_t).
 LMOTSType: enum {
-    /// LMOTS_SHA256_N32_W8, IANA type 4: n = 32, w = 8, p = 34.
     SHA256N32W8
 }
 
+/// LMOTS_SHA256_N32_W8, IANA type 4: n = 32, w = 8, p = 34.
+
 /// The LMS parameter set (mbedtls_lms_algorithm_type_t).
 LMSType: enum {
-    /// LMS_SHA256_M32_H10, IANA type 6: m = 32, a tree of height 10.
     SHA256M32H10
 }
 
+/// LMS_SHA256_M32_H10, IANA type 6: m = 32, a tree of height 10.
+
 /// The bytes of the key identifier I.
 KEY_ID_LEN: 16
+
 /// The bytes of a leaf number q.
 LEAF_ID_LEN: 4
+
 /// The bytes of a type code.
 TYPE_LEN: 4
+
 /// n, the bytes of an LM-OTS hash and of the randomizer C.
 N_HASH_LEN: 32
+
 /// p, the Winternitz digits of a 32-byte hash and its checksum at w = 8.
 P_DIGITS: 34
+
 /// m, the bytes of a Merkle tree node.
 M_NODE_LEN: 32
+
 /// h, the height of the Merkle tree.
 TREE_HEIGHT: 10
+
 /// 2^h, the leaves of the Merkle tree.
 LEAF_COUNT: 1024
+
 /// The bytes of an LM-OTS public key: type, I, q and K.
 LMOTS_PUBLIC_KEY_LEN: 56
+
 /// The bytes of an LM-OTS signature: type, C and p hashes.
 LMOTS_SIG_LEN: 1124
+
 /// The bytes of an LMS public key: type, LM-OTS type, I and the root T[1].
 LMS_PUBLIC_KEY_LEN: 56
+
 /// The bytes of an LMS signature: q, the LM-OTS signature, type and h path nodes.
 LMS_SIG_LEN: 1452
 
 // The domain separators of RFC 8554 section 7.1 (D_PBLC, D_MESG, D_LEAF, D_INTR).
 D_PUBLIC: [U8]{0x80, 0x80}
+
 D_MESSAGE: [U8]{0x81, 0x81}
+
 D_LEAF: [U8]{0x82, 0x82}
+
 D_INTERNAL: [U8]{0x83, 0x83}
 
 // The largest Winternitz digit at w = 8.
@@ -199,7 +216,9 @@ public_from_chains: fn(params: LMOTSParams, y: [U8]) -> [U8] Never! {
 
 /// Read an LM-OTS public key: type, I, q and K (mbedtls_lmots_import_public_key).
 lmots_import_public_key: fn(key: [U8]) -> LMOTSPublic LMSError! {
-    if key.len() < TYPE_LEN || get_u32_be(key, 0) != lmots_code(.SHA256N32W8) -> return Err(.BadInput)
+    if key.len() < TYPE_LEN || get_u32_be(key, 0) != lmots_code(.SHA256N32W8) {
+        return Err(.BadInput)
+    }
     if key.len() != LMOTS_PUBLIC_KEY_LEN -> return Err(.BadInput)
     params: LMOTSParams{
         key_id: cipher.bytes_of(key, TYPE_LEN, KEY_ID_LEN),
@@ -230,7 +249,9 @@ lmots_public_key_candidate: fn(params: LMOTSParams, msg: [U8], sig: [U8]) -> [U8
 
 /// Check an LM-OTS signature of msg (mbedtls_lmots_verify).
 lmots_verify: fn(ctx: LMOTSPublic, msg: [U8], sig: [U8]) LMSError! {
-    if sig.len() < TYPE_LEN || get_u32_be(sig, 0) != lmots_code(.SHA256N32W8) -> return Err(.VerifyFailed)
+    if sig.len() < TYPE_LEN || get_u32_be(sig, 0) != lmots_code(.SHA256N32W8) {
+        return Err(.VerifyFailed)
+    }
     candidate: lmots_public_key_candidate(ctx.params, msg, sig) ?? return Err(.VerifyFailed)
     if candidate != ctx.key -> return Err(.VerifyFailed)
 }
@@ -344,8 +365,12 @@ merkle_internal: fn(key_id: [U8], left: [U8], right: [U8], r: Int) -> [U8] Never
 /// Read an LMS public key: type, LM-OTS type, I and T[1]
 /// (mbedtls_lms_import_public_key).
 lms_import_public_key: fn(key: [U8]) -> LMSPublic LMSError! {
-    if key.len() < TYPE_LEN || get_u32_be(key, 0) != lms_code(.SHA256M32H10) -> return Err(.BadInput)
-    if key.len() != LMS_PUBLIC_KEY_LEN || get_u32_be(key, TYPE_LEN) != lmots_code(.SHA256N32W8) -> return Err(.BadInput)
+    if key.len() < TYPE_LEN || get_u32_be(key, 0) != lms_code(.SHA256M32H10) {
+        return Err(.BadInput)
+    }
+    if key.len() != LMS_PUBLIC_KEY_LEN || get_u32_be(key, TYPE_LEN) != lmots_code(.SHA256N32W8) {
+        return Err(.BadInput)
+    }
     params: LMSParams{key_id: cipher.bytes_of(key, 2 * TYPE_LEN, KEY_ID_LEN), ots: .SHA256N32W8, kind: .SHA256M32H10}
     Ok(LMSPublic{params: params, root: cipher.bytes_of(key, 2 * TYPE_LEN + KEY_ID_LEN, M_NODE_LEN)})
 }
@@ -404,7 +429,9 @@ lms_generate_private_key: fn<R: RNG>(kind: LMSType, ots: LMOTSType, rng: &R, see
 merkle_tree: fn(ctx: LMSPrivate) -> [[U8]] Never! {
     tree := [[U8]]{}
     loop _ in 0..<(2 * LEAF_COUNT) -> tree.push([U8]{})
-    loop q in 0..<LEAF_COUNT -> tree[LEAF_COUNT + q] = merkle_leaf(ctx.params.key_id, ctx.ots_public[q].key, LEAF_COUNT + q)
+    loop q in 0..<LEAF_COUNT {
+        tree[LEAF_COUNT + q] = merkle_leaf(ctx.params.key_id, ctx.ots_public[q].key, LEAF_COUNT + q)
+    }
     r := LEAF_COUNT - 1
     loop r > 0 {
         tree[r] = merkle_internal(ctx.params.key_id, tree[2 * r], tree[2 * r + 1], r)
@@ -451,15 +478,73 @@ lms_sign: fn<R: RNG>(ctx: &LMSPrivate, rng: &R, msg: [U8]) -> [U8] LMSError! {
     fixed := FixedRNG{bytes: c}
     sig: lmots_sign(private, fixed, "message".bytes()) ?? panic("sign")
     assert(sig.len() == LMOTS_SIG_LEN)
-    if lmots_verify(public, "message".bytes(), sig) == .Err(_) -> panic("The signature does not verify")
+    if lmots_verify(public, "message".bytes(), sig) == .Err(_) {
+        panic("The signature does not verify")
+    }
     assert(lmots_verify(public, "messagf".bytes(), sig) == .Err(.VerifyFailed))
     assert(lmots_sign(private, fixed, "message".bytes()) == .Err(.BadInput))
     assert(lmots_calculate_public_key(private) == .Err(.BadInput))
 }
 
 #Test("LMS public keys round-trip and malformed keys and signatures are refused") {
-    key: [U8]{0, 0, 0, 6, 0, 0, 0, 4, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
-        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31}
+    key: [U8]{
+        0,
+        0,
+        0,
+        6,
+        0,
+        0,
+        0,
+        4,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+    }
     public: lms_import_public_key(key) ?? panic("import")
     assert(lms_export_public_key(public) == key)
     assert(lms_import_public_key(cipher.bytes_of(key, 0, 3)) == .Err(.BadInput))

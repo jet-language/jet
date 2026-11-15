@@ -1,15 +1,16 @@
-
 use process: core.process
 
 run: fn() {
-    policy: Authority.from_rights([
-        "FS.Read(\"repo\")",
-        "FS.Write(\".jet/build\")",
-        "Exec(\"/usr/bin/true\")",
-    ])
+    policy: Authority.from_rights(
+        [
+            "FS.Read(\"repo\")",
+            "FS.Write(\".jet/build\")",
+            "Exec(\"/usr/bin/true\")",
+        ],
+    )
     spec: process.cmd(["/usr/bin/true", "test"]).cwd("/tmp").under(policy)
     if spec.plan() == {
-        .Ok(_) -> print("planned")
+        .Ok(_) -> { print("planned") }
         .Err(_) -> print("refused")
     }
 }

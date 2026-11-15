@@ -73,19 +73,30 @@ ssl_mfl_code_to_length: fn(mfl: Int) -> Int Never! {
 ssl_session_copy: fn(dst: &ssldefs.SSLSession, src: ssldefs.SSLSession) ssldefs.SSLError! {
     ssldefs.ssl_session_wipe(dst)
     dst = ssldefs.SSLSession{
-        valid: true, mfl_code: src.mfl_code, exported: src.exported, endpoint: src.endpoint,
-        tls_version: src.tls_version, start: src.start, ciphersuite: src.ciphersuite,
-        id: src.id.copy(), master: src.master.copy(), verify_result: src.verify_result,
-        ticket: src.ticket.copy(), ticket_lifetime: src.ticket_lifetime,
-        ticket_creation_time: src.ticket_creation_time, ticket_age_add: src.ticket_age_add,
-        ticket_flags: src.ticket_flags, resumption_key: src.resumption_key.copy(),
-        ticket_reception_time: src.ticket_reception_time, encrypt_then_mac: src.encrypt_then_mac,
+        valid: true,
+        mfl_code: src.mfl_code,
+        exported: src.exported,
+        endpoint: src.endpoint,
+        tls_version: src.tls_version,
+        start: src.start,
+        ciphersuite: src.ciphersuite,
+        id: src.id.copy(),
+        master: src.master.copy(),
+        verify_result: src.verify_result,
+        ticket: src.ticket.copy(),
+        ticket_lifetime: src.ticket_lifetime,
+        ticket_creation_time: src.ticket_creation_time,
+        ticket_age_add: src.ticket_age_add,
+        ticket_flags: src.ticket_flags,
+        resumption_key: src.resumption_key.copy(),
+        ticket_reception_time: src.ticket_reception_time,
+        encrypt_then_mac: src.encrypt_then_mac,
         app_secrets: ssldefs.SSLTLS13AppSecrets{
             client_application_traffic_secret_n: src.app_secrets.client_application_traffic_secret_n.copy(),
             server_application_traffic_secret_n: src.app_secrets.server_application_traffic_secret_n.copy(),
             exporter_master_secret: src.app_secrets.exporter_master_secret.copy(),
-            resumption_master_secret: src.app_secrets.resumption_master_secret.copy()
-        }
+            resumption_master_secret: src.app_secrets.resumption_master_secret.copy(),
+        },
     }
     if src.endpoint == ssldefs.SSL_IS_CLIENT -> dst.hostname = src.hostname.copy()
     if src.peer_cert == {
@@ -137,13 +148,13 @@ ssl_reset_checksum: fn(ssl: &ssldefs.SSLContext) Never! {
 ssl_update_checksum: fn(hs: &ssldefs.SSLHandshake, buf: [U8], off: Int, len: Int) Never! {
     if hs.checksum_md != 2 {
         if &hs.fin_sha256 == {
-            .Val(c) -> hashes.hash_update_range(c, buf, off, len)
+            .Val(c) -> { hashes.hash_update_range(c, buf, off, len) }
             None -> {}
         }
     }
     if hs.checksum_md != 1 {
         if &hs.fin_sha384 == {
-            .Val(c) -> hashes.hash_update_range(c, buf, off, len)
+            .Val(c) -> { hashes.hash_update_range(c, buf, off, len) }
             None -> {}
         }
     }
@@ -171,15 +182,11 @@ ssl_handshake_init: fn(ssl: &ssldefs.SSLContext) Never! {
     if ssl.transform_negotiate >= 0 {
         ssldefs.ssl_transform_wipe(ssl.tpool[ssl.transform_negotiate])
         ssl.tpool[ssl.transform_negotiate] = ssldefs.SSLTransform{valid: true}
-    } else {
-        ssl.transform_negotiate = ssldefs.ssl_transform_alloc(ssl)
-    }
+    } else { ssl.transform_negotiate = ssldefs.ssl_transform_alloc(ssl) }
     if ssl.session_negotiate >= 0 {
         ssldefs.ssl_session_wipe(ssl.spool[ssl.session_negotiate])
         ssl.spool[ssl.session_negotiate] = ssldefs.SSLSession{valid: true, verify_result: 0xFFFFFFFF}
-    } else {
-        ssl.session_negotiate = ssldefs.ssl_session_alloc(ssl)
-    }
+    } else { ssl.session_negotiate = ssldefs.ssl_session_alloc(ssl) }
     if ssl.has_handshake -> ssl_handshake_free(ssl)
     ssl.handshake = ssl_handshake_params_init()
     ssl.has_handshake = true
@@ -194,9 +201,7 @@ ssl_handshake_init: fn(ssl: &ssldefs.SSLContext) Never! {
 
 /// The cookie writer a DTLS server has until one is configured
 /// (ssl_cookie_write_dummy).
-ssl_cookie_write_dummy: fn(cli_id: [U8]) -> [U8] ssldefs.SSLError! {
-    Err(.FeatureUnavailable)
-}
+ssl_cookie_write_dummy: fn(cli_id: [U8]) -> [U8] ssldefs.SSLError! { Err(.FeatureUnavailable) }
 
 /// The cookie checker a DTLS server has until one is configured
 /// (ssl_cookie_check_dummy).
@@ -236,7 +241,9 @@ ssl_conf_version_check: fn(conf: ssldefs.SSLConfig) ssldefs.SSLError! {
         if conf.transport == ssldefs.SSL_TRANSPORT_DATAGRAM -> return Err(.FeatureUnavailable)
         return
     }
-    if ssl_conf_is_tls12_only(conf) -> return
+    if ssl_conf_is_tls12_only(conf) {
+        return
+    }
     if ssl_conf_is_hybrid_tls12_tls13(conf) {
         if conf.transport == ssldefs.SSL_TRANSPORT_DATAGRAM -> return Err(.FeatureUnavailable)
         return
@@ -333,7 +340,9 @@ ssl_session_reset: fn(ssl: &ssldefs.SSLContext) Never! { ssl_session_reset_int(s
 /// secrets are wiped, its buffered and in-flight messages and its TLS 1.3
 /// handshake transform released, and the state cleared.
 ssl_handshake_free: fn(ssl: &ssldefs.SSLContext) Never! {
-    if !ssl.has_handshake -> return
+    if !ssl.has_handshake {
+        return
+    }
     ssldefs.ssl_wipe(ssl.handshake.premaster)
     ssldefs.ssl_wipe(ssl.handshake.randbytes)
     ssldefs.ssl_wipe(ssl.handshake.tls13_early_secret)
@@ -343,7 +352,7 @@ ssl_handshake_free: fn(ssl: &ssldefs.SSLContext) Never! {
     ssldefs.ssl_wipe(ssl.handshake.server_handshake_traffic_secret)
     ssldefs.ssl_wipe(ssl.handshake.finished_digest)
     if &ssl.handshake.psk == {
-        .Val(p) -> ssldefs.ssl_wipe(p)
+        .Val(p) -> { ssldefs.ssl_wipe(p) }
         None -> {}
     }
     sslmsg.ssl_flight_free(ssl.handshake)
@@ -372,7 +381,7 @@ ssl_free: fn(ssl: &ssldefs.SSLContext) Never! {
     loop i in 0..<ssl.tpool.len() -> ssldefs.ssl_transform_release(ssl, i)
     loop i in 0..<ssl.spool.len() -> ssldefs.ssl_session_release(ssl, i)
     if &ssl.conf.psk == {
-        .Val(p) -> ssldefs.ssl_wipe(p)
+        .Val(p) -> { ssldefs.ssl_wipe(p) }
         None -> {}
     }
     ssl = ssldefs.SSLContext{}
@@ -390,10 +399,14 @@ ssl_set_timer_cb: fn(ssl: &ssldefs.SSLContext, enabled: Bool) Never! {
 
 /// Offer to resume `session` (mbedtls_ssl_set_session).
 ssl_set_session: fn(ssl: &ssldefs.SSLContext, session: ssldefs.SSLSession) ssldefs.SSLError! {
-    if ssl.session_negotiate < 0 || ssl.conf.endpoint != ssldefs.SSL_IS_CLIENT -> return Err(.BadInputData)
+    if ssl.session_negotiate < 0 || ssl.conf.endpoint != ssldefs.SSL_IS_CLIENT {
+        return Err(.BadInputData)
+    }
     if ssl.handshake.resume == 1 -> return Err(.FeatureUnavailable)
     if session.tls_version == ssldefs.SSL_VERSION_TLS1_3 {
-        if !ssl_validate_ciphersuite(ssl, suites.ssl_ciphersuite_from_id(session.ciphersuite), ssldefs.SSL_VERSION_TLS1_3, ssldefs.SSL_VERSION_TLS1_3) -> return Err(.BadInputData)
+        if !ssl_validate_ciphersuite(ssl, suites.ssl_ciphersuite_from_id(session.ciphersuite), ssldefs.SSL_VERSION_TLS1_3, ssldefs.SSL_VERSION_TLS1_3) {
+            return Err(.BadInputData)
+        }
     }
     ssl_session_copy(ssl.spool[ssl.session_negotiate], session) ?? return Err(err)
     ssl.handshake.resume = 1
@@ -403,7 +416,7 @@ ssl_set_session: fn(ssl: &ssldefs.SSLContext, session: ssldefs.SSLSession) sslde
 /// (mbedtls_ssl_conf_own_cert).
 ssl_conf_own_cert: fn(conf: &ssldefs.SSLConfig, kc: &&ssldefs.SSLKeyCert?) Never! {
     if kc == {
-        .Val(k) -> conf.key_cert.push(k)
+        .Val(k) -> { conf.key_cert.push(k) }
         None -> conf.key_cert = [ssldefs.SSLKeyCert]{}
     }
 }
@@ -412,7 +425,7 @@ ssl_conf_own_cert: fn(conf: &ssldefs.SSLConfig, kc: &&ssldefs.SSLKeyCert?) Never
 /// added, or with None removed (mbedtls_ssl_set_hs_own_cert).
 ssl_set_hs_own_cert: fn(ssl: &ssldefs.SSLContext, kc: &&ssldefs.SSLKeyCert?) Never! {
     if kc == {
-        .Val(k) -> ssl.handshake.sni_key_cert.push(k)
+        .Val(k) -> { ssl.handshake.sni_key_cert.push(k) }
         None -> ssl.handshake.sni_key_cert = [ssldefs.SSLKeyCert]{}
     }
 }
@@ -470,7 +483,9 @@ ssl_own_key_cert_is_hs: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
 ssl_own_key_sign_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext, kind: oids.PKType, md: hashes.Md?, hash: [U8], sig_size: Int, rng: &R) -> [U8] pk.PKError! {
     i: ssl_own_key_cert(ssl)
     if i < 0 -> return Err(.BadInput)
-    if ssl_own_key_cert_is_hs(ssl) -> return pk.pk_sign_ext(kind, ssl.handshake.sni_key_cert[i].key, md, hash, sig_size, rng)
+    if ssl_own_key_cert_is_hs(ssl) {
+        return pk.pk_sign_ext(kind, ssl.handshake.sni_key_cert[i].key, md, hash, sig_size, rng)
+    }
     pk.pk_sign_ext(kind, ssl.conf.key_cert[i].key, md, hash, sig_size, rng)
 }
 
@@ -479,7 +494,9 @@ ssl_own_key_sign_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext, kind: oids.PKType, md
 ssl_own_key_sign: fn<R: RNG>(ssl: &ssldefs.SSLContext, md: hashes.Md?, hash: [U8], sig_size: Int, rng: &R) -> [U8] pk.PKError! {
     i: ssl_own_key_cert(ssl)
     if i < 0 -> return Err(.BadInput)
-    if ssl_own_key_cert_is_hs(ssl) -> return pk.pk_sign(ssl.handshake.sni_key_cert[i].key, md, hash, sig_size, rng)
+    if ssl_own_key_cert_is_hs(ssl) {
+        return pk.pk_sign(ssl.handshake.sni_key_cert[i].key, md, hash, sig_size, rng)
+    }
     pk.pk_sign(ssl.conf.key_cert[i].key, md, hash, sig_size, rng)
 }
 
@@ -533,7 +550,9 @@ ssl_own_cert_pk_len: fn(ssl: ssldefs.SSLContext) -> Int Never! {
 ssl_own_key_decrypt_fixed: fn<R: RNG>(ssl: &ssldefs.SSLContext, input: [U8], len: Int, rng: &R) -> rsa.V15Fixed pk.PKError! {
     i: ssl_own_key_cert(ssl)
     if i < 0 -> return Err(.BadInput)
-    if ssl_own_key_cert_is_hs(ssl) -> return pk.pk_decrypt_fixed(ssl.handshake.sni_key_cert[i].key, input, len, rng)
+    if ssl_own_key_cert_is_hs(ssl) {
+        return pk.pk_decrypt_fixed(ssl.handshake.sni_key_cert[i].key, input, len, rng)
+    }
     pk.pk_decrypt_fixed(ssl.conf.key_cert[i].key, input, len, rng)
 }
 
@@ -585,7 +604,7 @@ ssl_conf_has_static_psk: fn(conf: ssldefs.SSLConfig) -> Bool Never! {
 // Drop the configured PSK and identity (ssl_conf_remove_psk).
 ssl_conf_remove_psk: fn(conf: &ssldefs.SSLConfig) Never! {
     if &conf.psk == {
-        .Val(p) -> ssldefs.ssl_wipe(p)
+        .Val(p) -> { ssldefs.ssl_wipe(p) }
         None -> {}
     }
     conf.psk = None
@@ -613,7 +632,7 @@ ssl_set_hs_psk: fn(ssl: &ssldefs.SSLContext, psk: [U8]) ssldefs.SSLError! {
     if psk.len() > ssldefs.SSL_PSK_MAX_LEN -> return Err(.BadInputData)
     // ssl_remove_psk.
     if &ssl.handshake.psk == {
-        .Val(p) -> ssldefs.ssl_wipe(p)
+        .Val(p) -> { ssldefs.ssl_wipe(p) }
         None -> {}
     }
     ssl.handshake.psk = Val(psk.copy())
@@ -623,11 +642,15 @@ ssl_set_hs_psk: fn(ssl: &ssldefs.SSLContext, psk: [U8]) ssldefs.SSLError! {
 /// configuration's; PrivateKeyRequired when there is none.
 ssl_get_psk: fn(ssl: ssldefs.SSLContext) -> [U8] ssldefs.SSLError! {
     if ssl.handshake.psk == {
-        .Val(k) -> { if k.len() > 0 -> return Ok(k) }
+        .Val(k) -> {
+            if k.len() > 0 -> return Ok(k)
+        }
         None -> {}
     }
     if ssl.conf.psk == {
-        .Val(k) -> { if k.len() > 0 -> return Ok(k) }
+        .Val(k) -> {
+            if k.len() > 0 -> return Ok(k)
+        }
         None -> {}
     }
     Err(.PrivateKeyRequired)
@@ -655,21 +678,25 @@ ssl_conf_dh_param_bin: fn(conf: &ssldefs.SSLConfig, dhm_p: [U8], dhm_g: [U8]) ss
 
 /// A TLS 1.2 SignatureAndHashAlgorithm value
 /// (MBEDTLS_SSL_TLS12_SIG_AND_HASH_ALG).
-ssl_tls12_sig_and_hash_alg: fn(sig: Int, hash: Int) -> Int Never! {
-    (hash * 256).bit_or(sig)
-}
+ssl_tls12_sig_and_hash_alg: fn(sig: Int, hash: Int) -> Int Never! { (hash * 256).bit_or(sig) }
 
 /// The groups a default configuration offers, cheapest first
 /// (ssl_preset_default_groups).
 ssl_preset_default_groups: fn() -> [Int] Never! {
     [Int]{
-        ssldefs.SSL_IANA_TLS_GROUP_X25519, ssldefs.SSL_IANA_TLS_GROUP_SECP256R1,
-        ssldefs.SSL_IANA_TLS_GROUP_SECP384R1, ssldefs.SSL_IANA_TLS_GROUP_X448,
-        ssldefs.SSL_IANA_TLS_GROUP_SECP521R1, ssldefs.SSL_IANA_TLS_GROUP_BP256R1,
-        ssldefs.SSL_IANA_TLS_GROUP_BP384R1, ssldefs.SSL_IANA_TLS_GROUP_BP512R1,
-        ssldefs.SSL_IANA_TLS_GROUP_FFDHE2048, ssldefs.SSL_IANA_TLS_GROUP_FFDHE3072,
-        ssldefs.SSL_IANA_TLS_GROUP_FFDHE4096, ssldefs.SSL_IANA_TLS_GROUP_FFDHE6144,
-        ssldefs.SSL_IANA_TLS_GROUP_FFDHE8192
+        ssldefs.SSL_IANA_TLS_GROUP_X25519,
+        ssldefs.SSL_IANA_TLS_GROUP_SECP256R1,
+        ssldefs.SSL_IANA_TLS_GROUP_SECP384R1,
+        ssldefs.SSL_IANA_TLS_GROUP_X448,
+        ssldefs.SSL_IANA_TLS_GROUP_SECP521R1,
+        ssldefs.SSL_IANA_TLS_GROUP_BP256R1,
+        ssldefs.SSL_IANA_TLS_GROUP_BP384R1,
+        ssldefs.SSL_IANA_TLS_GROUP_BP512R1,
+        ssldefs.SSL_IANA_TLS_GROUP_FFDHE2048,
+        ssldefs.SSL_IANA_TLS_GROUP_FFDHE3072,
+        ssldefs.SSL_IANA_TLS_GROUP_FFDHE4096,
+        ssldefs.SSL_IANA_TLS_GROUP_FFDHE6144,
+        ssldefs.SSL_IANA_TLS_GROUP_FFDHE8192,
     }
 }
 
@@ -682,11 +709,15 @@ ssl_preset_suiteb_groups: fn() -> [Int] Never! {
 /// may be negotiated (ssl_preset_default_sig_algs).
 ssl_preset_default_sig_algs: fn() -> [Int] Never! {
     [Int]{
-        ssldefs.TLS1_3_SIG_ECDSA_SECP256R1_SHA256, ssldefs.TLS1_3_SIG_ECDSA_SECP384R1_SHA384,
-        ssldefs.TLS1_3_SIG_ECDSA_SECP521R1_SHA512, ssldefs.TLS1_3_SIG_RSA_PSS_RSAE_SHA512,
-        ssldefs.TLS1_3_SIG_RSA_PSS_RSAE_SHA384, ssldefs.TLS1_3_SIG_RSA_PSS_RSAE_SHA256,
-        ssldefs.TLS1_3_SIG_RSA_PKCS1_SHA512, ssldefs.TLS1_3_SIG_RSA_PKCS1_SHA384,
-        ssldefs.TLS1_3_SIG_RSA_PKCS1_SHA256
+        ssldefs.TLS1_3_SIG_ECDSA_SECP256R1_SHA256,
+        ssldefs.TLS1_3_SIG_ECDSA_SECP384R1_SHA384,
+        ssldefs.TLS1_3_SIG_ECDSA_SECP521R1_SHA512,
+        ssldefs.TLS1_3_SIG_RSA_PSS_RSAE_SHA512,
+        ssldefs.TLS1_3_SIG_RSA_PSS_RSAE_SHA384,
+        ssldefs.TLS1_3_SIG_RSA_PSS_RSAE_SHA256,
+        ssldefs.TLS1_3_SIG_RSA_PKCS1_SHA512,
+        ssldefs.TLS1_3_SIG_RSA_PKCS1_SHA384,
+        ssldefs.TLS1_3_SIG_RSA_PKCS1_SHA256,
     }
 }
 
@@ -702,7 +733,7 @@ ssl_tls12_preset_default_sig_algs: fn() -> [Int] Never! {
         ssl_tls12_sig_and_hash_alg(ssldefs.SSL_SIG_RSA, ssldefs.SSL_HASH_SHA384),
         ssl_tls12_sig_and_hash_alg(ssldefs.SSL_SIG_ECDSA, ssldefs.SSL_HASH_SHA256),
         ssldefs.TLS1_3_SIG_RSA_PSS_RSAE_SHA256,
-        ssl_tls12_sig_and_hash_alg(ssldefs.SSL_SIG_RSA, ssldefs.SSL_HASH_SHA256)
+        ssl_tls12_sig_and_hash_alg(ssldefs.SSL_SIG_RSA, ssldefs.SSL_HASH_SHA256),
     }
 }
 
@@ -717,7 +748,7 @@ ssl_preset_suiteb_sig_algs: fn() -> [Int] Never! {
 ssl_tls12_preset_suiteb_sig_algs: fn() -> [Int] Never! {
     [Int]{
         ssl_tls12_sig_and_hash_alg(ssldefs.SSL_SIG_ECDSA, ssldefs.SSL_HASH_SHA256),
-        ssl_tls12_sig_and_hash_alg(ssldefs.SSL_SIG_ECDSA, ssldefs.SSL_HASH_SHA384)
+        ssl_tls12_sig_and_hash_alg(ssldefs.SSL_SIG_ECDSA, ssldefs.SSL_HASH_SHA384),
     }
 }
 
@@ -781,7 +812,9 @@ ssl_get_hostname_pointer: fn(ssl: ssldefs.SSLContext) -> String? Never! {
 /// None skips the check (mbedtls_ssl_set_hostname).
 ssl_set_hostname: fn(ssl: &ssldefs.SSLContext, hostname: String?) ssldefs.SSLError! {
     if hostname == {
-        .Val(h) -> { if h.bytes().len() > ssldefs.SSL_MAX_HOST_NAME_LEN -> return Err(.BadInputData) }
+        .Val(h) -> {
+            if h.bytes().len() > ssldefs.SSL_MAX_HOST_NAME_LEN -> return Err(.BadInputData)
+        }
         None -> {}
     }
     ssl.hostname = hostname
@@ -795,14 +828,18 @@ ssl_conf_alpn_protocols: fn(conf: &ssldefs.SSLConfig, protos: [String]) ssldefs.
     loop p in protos {
         cur_len: p.bytes().len()
         tot_len += cur_len
-        if cur_len == 0 || cur_len > ssldefs.SSL_MAX_ALPN_NAME_LEN || tot_len > ssldefs.SSL_MAX_ALPN_LIST_LEN -> return Err(.BadInputData)
+        if cur_len == 0 || cur_len > ssldefs.SSL_MAX_ALPN_NAME_LEN || tot_len > ssldefs.SSL_MAX_ALPN_LIST_LEN {
+            return Err(.BadInputData)
+        }
     }
     conf.alpn_list = Val(protos)
 }
 
 /// The largest record to ask the peer for (mbedtls_ssl_conf_max_frag_len).
 ssl_conf_max_frag_len: fn(conf: &ssldefs.SSLConfig, mfl_code: Int) ssldefs.SSLError! {
-    if mfl_code < 0 || mfl_code >= ssldefs.SSL_MAX_FRAG_LEN_INVALID || ssl_mfl_code_to_length(mfl_code) > ssldefs.TLS_EXT_ADV_CONTENT_LEN -> return Err(.BadInputData)
+    if mfl_code < 0 || mfl_code >= ssldefs.SSL_MAX_FRAG_LEN_INVALID || ssl_mfl_code_to_length(mfl_code) > ssldefs.TLS_EXT_ADV_CONTENT_LEN {
+        return Err(.BadInputData)
+    }
     conf.mfl_code = mfl_code
 }
 
@@ -828,7 +865,9 @@ ssl_conf_get_session_tickets: fn(conf: ssldefs.SSLConfig) -> Int Never! {
 
 /// mbedtls_ssl_conf_is_signal_new_session_tickets_enabled.
 ssl_conf_is_signal_new_session_tickets_enabled: fn(conf: ssldefs.SSLConfig) -> Int Never! {
-    if conf.session_tickets.bit_and(2) != 0 -> return ssldefs.SSL_TLS1_3_SIGNAL_NEW_SESSION_TICKETS_ENABLED
+    if conf.session_tickets.bit_and(2) != 0 {
+        return ssldefs.SSL_TLS1_3_SIGNAL_NEW_SESSION_TICKETS_ENABLED
+    }
     ssldefs.SSL_TLS1_3_SIGNAL_NEW_SESSION_TICKETS_DISABLED
 }
 
@@ -877,7 +916,9 @@ ssl_get_version: fn(ssl: ssldefs.SSLContext) -> String Never! {
 ssl_get_input_max_frag_len: fn(ssl: ssldefs.SSLContext) -> Int Never! {
     max_len := ssldefs.SSL_IN_CONTENT_LEN
     // A TLS 1.2 client past ServerHelloDone uses the length it asked for.
-    if ssl.conf.endpoint == ssldefs.SSL_IS_CLIENT && ssl.state >= ssldefs.SSL_SERVER_HELLO_DONE -> return ssl_mfl_code_to_length(ssl.conf.mfl_code)
+    if ssl.conf.endpoint == ssldefs.SSL_IS_CLIENT && ssl.state >= ssldefs.SSL_SERVER_HELLO_DONE {
+        return ssl_mfl_code_to_length(ssl.conf.mfl_code)
+    }
     if ssl.session_out >= 0 {
         read_mfl: ssl_mfl_code_to_length(ssl.spool[ssl.session_out].mfl_code)
         if read_mfl < max_len -> max_len = read_mfl
@@ -970,9 +1011,13 @@ ssl_get_session: fn(ssl: &ssldefs.SSLContext, dst: &ssldefs.SSLSession) ssldefs.
 /// (mbedtls_ssl_get_extension_id).
 ssl_get_extension_id: fn(extension_type: Int) -> Int Never! {
     if extension_type == ssldefs.TLS_EXT_SERVERNAME -> return ssldefs.SSL_EXT_ID_SERVERNAME
-    if extension_type == ssldefs.TLS_EXT_MAX_FRAGMENT_LENGTH -> return ssldefs.SSL_EXT_ID_MAX_FRAGMENT_LENGTH
+    if extension_type == ssldefs.TLS_EXT_MAX_FRAGMENT_LENGTH {
+        return ssldefs.SSL_EXT_ID_MAX_FRAGMENT_LENGTH
+    }
     if extension_type == ssldefs.TLS_EXT_STATUS_REQUEST -> return ssldefs.SSL_EXT_ID_STATUS_REQUEST
-    if extension_type == ssldefs.TLS_EXT_SUPPORTED_GROUPS -> return ssldefs.SSL_EXT_ID_SUPPORTED_GROUPS
+    if extension_type == ssldefs.TLS_EXT_SUPPORTED_GROUPS {
+        return ssldefs.SSL_EXT_ID_SUPPORTED_GROUPS
+    }
     if extension_type == ssldefs.TLS_EXT_SIG_ALG -> return ssldefs.SSL_EXT_ID_SIG_ALG
     if extension_type == ssldefs.TLS_EXT_USE_SRTP -> return ssldefs.SSL_EXT_ID_USE_SRTP
     if extension_type == ssldefs.TLS_EXT_HEARTBEAT -> return ssldefs.SSL_EXT_ID_HEARTBEAT
@@ -983,25 +1028,41 @@ ssl_get_extension_id: fn(extension_type: Int) -> Int Never! {
     if extension_type == ssldefs.TLS_EXT_PADDING -> return ssldefs.SSL_EXT_ID_PADDING
     if extension_type == ssldefs.TLS_EXT_PRE_SHARED_KEY -> return ssldefs.SSL_EXT_ID_PRE_SHARED_KEY
     if extension_type == ssldefs.TLS_EXT_EARLY_DATA -> return ssldefs.SSL_EXT_ID_EARLY_DATA
-    if extension_type == ssldefs.TLS_EXT_SUPPORTED_VERSIONS -> return ssldefs.SSL_EXT_ID_SUPPORTED_VERSIONS
+    if extension_type == ssldefs.TLS_EXT_SUPPORTED_VERSIONS {
+        return ssldefs.SSL_EXT_ID_SUPPORTED_VERSIONS
+    }
     if extension_type == ssldefs.TLS_EXT_COOKIE -> return ssldefs.SSL_EXT_ID_COOKIE
-    if extension_type == ssldefs.TLS_EXT_PSK_KEY_EXCHANGE_MODES -> return ssldefs.SSL_EXT_ID_PSK_KEY_EXCHANGE_MODES
+    if extension_type == ssldefs.TLS_EXT_PSK_KEY_EXCHANGE_MODES {
+        return ssldefs.SSL_EXT_ID_PSK_KEY_EXCHANGE_MODES
+    }
     if extension_type == ssldefs.TLS_EXT_CERT_AUTH -> return ssldefs.SSL_EXT_ID_CERT_AUTH
     if extension_type == ssldefs.TLS_EXT_OID_FILTERS -> return ssldefs.SSL_EXT_ID_OID_FILTERS
-    if extension_type == ssldefs.TLS_EXT_POST_HANDSHAKE_AUTH -> return ssldefs.SSL_EXT_ID_POST_HANDSHAKE_AUTH
+    if extension_type == ssldefs.TLS_EXT_POST_HANDSHAKE_AUTH {
+        return ssldefs.SSL_EXT_ID_POST_HANDSHAKE_AUTH
+    }
     if extension_type == ssldefs.TLS_EXT_SIG_ALG_CERT -> return ssldefs.SSL_EXT_ID_SIG_ALG_CERT
     if extension_type == ssldefs.TLS_EXT_KEY_SHARE -> return ssldefs.SSL_EXT_ID_KEY_SHARE
     if extension_type == ssldefs.TLS_EXT_TRUNCATED_HMAC -> return ssldefs.SSL_EXT_ID_TRUNCATED_HMAC
-    if extension_type == ssldefs.TLS_EXT_SUPPORTED_POINT_FORMATS -> return ssldefs.SSL_EXT_ID_SUPPORTED_POINT_FORMATS
-    if extension_type == ssldefs.TLS_EXT_ENCRYPT_THEN_MAC -> return ssldefs.SSL_EXT_ID_ENCRYPT_THEN_MAC
-    if extension_type == ssldefs.TLS_EXT_EXTENDED_MASTER_SECRET -> return ssldefs.SSL_EXT_ID_EXTENDED_MASTER_SECRET
-    if extension_type == ssldefs.TLS_EXT_RECORD_SIZE_LIMIT -> return ssldefs.SSL_EXT_ID_RECORD_SIZE_LIMIT
+    if extension_type == ssldefs.TLS_EXT_SUPPORTED_POINT_FORMATS {
+        return ssldefs.SSL_EXT_ID_SUPPORTED_POINT_FORMATS
+    }
+    if extension_type == ssldefs.TLS_EXT_ENCRYPT_THEN_MAC {
+        return ssldefs.SSL_EXT_ID_ENCRYPT_THEN_MAC
+    }
+    if extension_type == ssldefs.TLS_EXT_EXTENDED_MASTER_SECRET {
+        return ssldefs.SSL_EXT_ID_EXTENDED_MASTER_SECRET
+    }
+    if extension_type == ssldefs.TLS_EXT_RECORD_SIZE_LIMIT {
+        return ssldefs.SSL_EXT_ID_RECORD_SIZE_LIMIT
+    }
     if extension_type == ssldefs.TLS_EXT_SESSION_TICKET -> return ssldefs.SSL_EXT_ID_SESSION_TICKET
     ssldefs.SSL_EXT_ID_UNRECOGNIZED
 }
 
 /// mbedtls_ssl_get_extension_mask.
-ssl_get_extension_mask: fn(extension_type: Int) -> Int Never! { 1 << ssl_get_extension_id(extension_type) }
+ssl_get_extension_mask: fn(extension_type: Int) -> Int Never! {
+    1 << ssl_get_extension_id(extension_type)
+}
 
 /// Record a TLS 1.3 extension as sent (mbedtls_ssl_tls13_set_hs_sent_ext_mask).
 ssl_tls13_set_hs_sent_ext_mask: fn(ssl: &ssldefs.SSLContext, extension_type: Int) Never! {
@@ -1138,12 +1199,16 @@ ssl_tls13_named_group_is_ffdh: fn(g: Int) -> Bool Never! {
 }
 
 /// Whether a group is configured (mbedtls_ssl_named_group_is_offered).
-ssl_named_group_is_offered: fn(ssl: ssldefs.SSLContext, g: Int) -> Bool Never! { ssl_check_curve_tls_id(ssl, g) }
+ssl_named_group_is_offered: fn(ssl: ssldefs.SSLContext, g: Int) -> Bool Never! {
+    ssl_check_curve_tls_id(ssl, g)
+}
 
 /// Whether TLS 1.3 can agree a key over a group
 /// (mbedtls_ssl_named_group_is_supported).
 ssl_named_group_is_supported: fn(g: Int) -> Bool Never! {
-    if ssl_tls13_named_group_is_ecdhe(g) && ssl_get_ecp_group_id_from_tls_id(g) != .Unknown -> return true
+    if ssl_tls13_named_group_is_ecdhe(g) && ssl_get_ecp_group_id_from_tls_id(g) != .Unknown {
+        return true
+    }
     ssl_tls13_named_group_is_ffdh(g)
 }
 
@@ -1175,7 +1240,9 @@ ssl_tls13_sig_alg_curve: fn(sig_alg: Int) -> ecp.GroupID Never! {
 
 /// mbedtls_ssl_tls13_sig_alg_is_supported.
 ssl_tls13_sig_alg_is_supported: fn(sig_alg: Int) -> Bool Never! {
-    if sig_alg == ssldefs.TLS1_3_SIG_RSA_PKCS1_SHA256 || sig_alg == ssldefs.TLS1_3_SIG_RSA_PKCS1_SHA384 || sig_alg == ssldefs.TLS1_3_SIG_RSA_PKCS1_SHA512 -> return true
+    if sig_alg == ssldefs.TLS1_3_SIG_RSA_PKCS1_SHA256 || sig_alg == ssldefs.TLS1_3_SIG_RSA_PKCS1_SHA384 || sig_alg == ssldefs.TLS1_3_SIG_RSA_PKCS1_SHA512 {
+        return true
+    }
     ssl_tls13_sig_alg_for_cert_verify_is_supported(sig_alg)
 }
 
@@ -1206,9 +1273,15 @@ ssl_get_pk_type_and_md_alg_from_sig_alg: fn(sig_alg: Int) -> SSLSigAlgParts ssld
         }
         None -> {}
     }
-    if sig_alg == ssldefs.TLS1_3_SIG_RSA_PSS_RSAE_SHA256 -> return Ok(SSLSigAlgParts{pk_type: .RSASSAPSS, md_alg: .SHA256})
-    if sig_alg == ssldefs.TLS1_3_SIG_RSA_PSS_RSAE_SHA384 -> return Ok(SSLSigAlgParts{pk_type: .RSASSAPSS, md_alg: .SHA384})
-    if sig_alg == ssldefs.TLS1_3_SIG_RSA_PSS_RSAE_SHA512 -> return Ok(SSLSigAlgParts{pk_type: .RSASSAPSS, md_alg: .SHA512})
+    if sig_alg == ssldefs.TLS1_3_SIG_RSA_PSS_RSAE_SHA256 {
+        return Ok(SSLSigAlgParts{pk_type: .RSASSAPSS, md_alg: .SHA256})
+    }
+    if sig_alg == ssldefs.TLS1_3_SIG_RSA_PSS_RSAE_SHA384 {
+        return Ok(SSLSigAlgParts{pk_type: .RSASSAPSS, md_alg: .SHA384})
+    }
+    if sig_alg == ssldefs.TLS1_3_SIG_RSA_PSS_RSAE_SHA512 {
+        return Ok(SSLSigAlgParts{pk_type: .RSASSAPSS, md_alg: .SHA512})
+    }
     Err(.FeatureUnavailable)
 }
 
@@ -1224,8 +1297,12 @@ ssl_tls12_sig_alg_is_supported: fn(sig_alg: Int) -> Bool Never! {
 /// Whether the protocol version in use can sign with an algorithm
 /// (mbedtls_ssl_sig_alg_is_supported).
 ssl_sig_alg_is_supported: fn(ssl: ssldefs.SSLContext, sig_alg: Int) -> Bool Never! {
-    if ssl.tls_version == ssldefs.SSL_VERSION_TLS1_2 -> return ssl_tls12_sig_alg_is_supported(sig_alg)
-    if ssl.tls_version == ssldefs.SSL_VERSION_TLS1_3 -> return ssl_tls13_sig_alg_is_supported(sig_alg)
+    if ssl.tls_version == ssldefs.SSL_VERSION_TLS1_2 {
+        return ssl_tls12_sig_alg_is_supported(sig_alg)
+    }
+    if ssl.tls_version == ssldefs.SSL_VERSION_TLS1_3 {
+        return ssl_tls13_sig_alg_is_supported(sig_alg)
+    }
     false
 }
 
@@ -1242,49 +1319,79 @@ ssl_tls13_cipher_suite_is_offered: fn(ssl: ssldefs.SSLContext, cipher_suite: Int
 // TLS 1.3 key exchange modes and ticket flags (ssl_misc.h).
 
 /// mbedtls_ssl_conf_tls13_is_kex_mode_enabled.
-ssl_conf_tls13_is_kex_mode_enabled: fn(ssl: ssldefs.SSLContext, mask: Int) -> Bool Never! { ssl.conf.tls13_kex_modes.bit_and(mask) != 0 }
+ssl_conf_tls13_is_kex_mode_enabled: fn(ssl: ssldefs.SSLContext, mask: Int) -> Bool Never! {
+    ssl.conf.tls13_kex_modes.bit_and(mask) != 0
+}
 
 /// mbedtls_ssl_conf_tls13_is_psk_enabled.
-ssl_conf_tls13_is_psk_enabled: fn(ssl: ssldefs.SSLContext) -> Bool Never! { ssl_conf_tls13_is_kex_mode_enabled(ssl, ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK) }
+ssl_conf_tls13_is_psk_enabled: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
+    ssl_conf_tls13_is_kex_mode_enabled(ssl, ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK)
+}
 
 /// mbedtls_ssl_conf_tls13_is_psk_ephemeral_enabled.
-ssl_conf_tls13_is_psk_ephemeral_enabled: fn(ssl: ssldefs.SSLContext) -> Bool Never! { ssl_conf_tls13_is_kex_mode_enabled(ssl, ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_EPHEMERAL) }
+ssl_conf_tls13_is_psk_ephemeral_enabled: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
+    ssl_conf_tls13_is_kex_mode_enabled(ssl, ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_EPHEMERAL)
+}
 
 /// mbedtls_ssl_conf_tls13_is_ephemeral_enabled.
-ssl_conf_tls13_is_ephemeral_enabled: fn(ssl: ssldefs.SSLContext) -> Bool Never! { ssl_conf_tls13_is_kex_mode_enabled(ssl, ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL) }
+ssl_conf_tls13_is_ephemeral_enabled: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
+    ssl_conf_tls13_is_kex_mode_enabled(ssl, ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL)
+}
 
 /// mbedtls_ssl_conf_tls13_is_some_ephemeral_enabled.
-ssl_conf_tls13_is_some_ephemeral_enabled: fn(ssl: ssldefs.SSLContext) -> Bool Never! { ssl_conf_tls13_is_kex_mode_enabled(ssl, ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL_ALL) }
+ssl_conf_tls13_is_some_ephemeral_enabled: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
+    ssl_conf_tls13_is_kex_mode_enabled(ssl, ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL_ALL)
+}
 
 /// mbedtls_ssl_conf_tls13_is_some_psk_enabled.
-ssl_conf_tls13_is_some_psk_enabled: fn(ssl: ssldefs.SSLContext) -> Bool Never! { ssl_conf_tls13_is_kex_mode_enabled(ssl, ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_ALL) }
+ssl_conf_tls13_is_some_psk_enabled: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
+    ssl_conf_tls13_is_kex_mode_enabled(ssl, ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_ALL)
+}
 
 /// mbedtls_ssl_tls13_is_kex_mode_supported: a mode both sides allow.
-ssl_tls13_is_kex_mode_supported: fn(ssl: ssldefs.SSLContext, mask: Int) -> Bool Never! { ssl.handshake.tls13_kex_modes.bit_and(mask) != 0 }
+ssl_tls13_is_kex_mode_supported: fn(ssl: ssldefs.SSLContext, mask: Int) -> Bool Never! {
+    ssl.handshake.tls13_kex_modes.bit_and(mask) != 0
+}
 
 /// mbedtls_ssl_tls13_is_psk_supported.
-ssl_tls13_is_psk_supported: fn(ssl: ssldefs.SSLContext) -> Bool Never! { ssl_tls13_is_kex_mode_supported(ssl, ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK) }
+ssl_tls13_is_psk_supported: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
+    ssl_tls13_is_kex_mode_supported(ssl, ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK)
+}
 
 /// mbedtls_ssl_tls13_is_psk_ephemeral_supported.
-ssl_tls13_is_psk_ephemeral_supported: fn(ssl: ssldefs.SSLContext) -> Bool Never! { ssl_tls13_is_kex_mode_supported(ssl, ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_EPHEMERAL) }
+ssl_tls13_is_psk_ephemeral_supported: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
+    ssl_tls13_is_kex_mode_supported(ssl, ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_EPHEMERAL)
+}
 
 /// mbedtls_ssl_tls13_is_ephemeral_supported.
-ssl_tls13_is_ephemeral_supported: fn(ssl: ssldefs.SSLContext) -> Bool Never! { ssl_tls13_is_kex_mode_supported(ssl, ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL) }
+ssl_tls13_is_ephemeral_supported: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
+    ssl_tls13_is_kex_mode_supported(ssl, ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL)
+}
 
 /// mbedtls_ssl_tls13_is_some_ephemeral_supported.
-ssl_tls13_is_some_ephemeral_supported: fn(ssl: ssldefs.SSLContext) -> Bool Never! { ssl_tls13_is_kex_mode_supported(ssl, ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL_ALL) }
+ssl_tls13_is_some_ephemeral_supported: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
+    ssl_tls13_is_kex_mode_supported(ssl, ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL_ALL)
+}
 
 /// mbedtls_ssl_tls13_is_some_psk_supported.
-ssl_tls13_is_some_psk_supported: fn(ssl: ssldefs.SSLContext) -> Bool Never! { ssl_tls13_is_kex_mode_supported(ssl, ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_ALL) }
+ssl_tls13_is_some_psk_supported: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
+    ssl_tls13_is_kex_mode_supported(ssl, ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_ALL)
+}
 
 /// mbedtls_ssl_tls13_key_exchange_mode_check: the negotiated mode.
-ssl_tls13_key_exchange_mode_check: fn(ssl: ssldefs.SSLContext, mask: Int) -> Bool Never! { ssl.handshake.key_exchange_mode.bit_and(mask) != 0 }
+ssl_tls13_key_exchange_mode_check: fn(ssl: ssldefs.SSLContext, mask: Int) -> Bool Never! {
+    ssl.handshake.key_exchange_mode.bit_and(mask) != 0
+}
 
 /// mbedtls_ssl_tls13_key_exchange_mode_with_psk.
-ssl_tls13_key_exchange_mode_with_psk: fn(ssl: ssldefs.SSLContext) -> Bool Never! { ssl_tls13_key_exchange_mode_check(ssl, ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_ALL) }
+ssl_tls13_key_exchange_mode_with_psk: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
+    ssl_tls13_key_exchange_mode_check(ssl, ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_ALL)
+}
 
 /// mbedtls_ssl_tls13_key_exchange_mode_with_ephemeral.
-ssl_tls13_key_exchange_mode_with_ephemeral: fn(ssl: ssldefs.SSLContext) -> Bool Never! { ssl_tls13_key_exchange_mode_check(ssl, ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL_ALL) }
+ssl_tls13_key_exchange_mode_with_ephemeral: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
+    ssl_tls13_key_exchange_mode_check(ssl, ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL_ALL)
+}
 
 /// mbedtls_ssl_tls13_session_get_ticket_flags.
 ssl_tls13_session_get_ticket_flags: fn(session: ssldefs.SSLSession, flags: Int) -> Int Never! {
@@ -1292,13 +1399,19 @@ ssl_tls13_session_get_ticket_flags: fn(session: ssldefs.SSLSession, flags: Int) 
 }
 
 /// mbedtls_ssl_tls13_session_ticket_has_flags.
-ssl_tls13_session_ticket_has_flags: fn(session: ssldefs.SSLSession, flags: Int) -> Bool Never! { ssl_tls13_session_get_ticket_flags(session, flags) != 0 }
+ssl_tls13_session_ticket_has_flags: fn(session: ssldefs.SSLSession, flags: Int) -> Bool Never! {
+    ssl_tls13_session_get_ticket_flags(session, flags) != 0
+}
 
 /// mbedtls_ssl_tls13_session_ticket_allow_psk.
-ssl_tls13_session_ticket_allow_psk: fn(session: ssldefs.SSLSession) -> Bool Never! { ssl_tls13_session_ticket_has_flags(session, ssldefs.SSL_TLS1_3_TICKET_ALLOW_PSK_RESUMPTION) }
+ssl_tls13_session_ticket_allow_psk: fn(session: ssldefs.SSLSession) -> Bool Never! {
+    ssl_tls13_session_ticket_has_flags(session, ssldefs.SSL_TLS1_3_TICKET_ALLOW_PSK_RESUMPTION)
+}
 
 /// mbedtls_ssl_tls13_session_ticket_allow_psk_ephemeral.
-ssl_tls13_session_ticket_allow_psk_ephemeral: fn(session: ssldefs.SSLSession) -> Bool Never! { ssl_tls13_session_ticket_has_flags(session, ssldefs.SSL_TLS1_3_TICKET_ALLOW_PSK_EPHEMERAL_RESUMPTION) }
+ssl_tls13_session_ticket_allow_psk_ephemeral: fn(session: ssldefs.SSLSession) -> Bool Never! {
+    ssl_tls13_session_ticket_has_flags(session, ssldefs.SSL_TLS1_3_TICKET_ALLOW_PSK_EPHEMERAL_RESUMPTION)
+}
 
 /// mbedtls_ssl_tls13_session_set_ticket_flags.
 ssl_tls13_session_set_ticket_flags: fn(session: &ssldefs.SSLSession, flags: Int) Never! {
@@ -1311,14 +1424,18 @@ ssl_tls13_session_clear_ticket_flags: fn(session: &ssldefs.SSLSession, flags: In
 }
 
 /// Whether a record transform is AEAD (mbedtls_ssl_transform_uses_aead).
-ssl_transform_uses_aead: fn(t: ssldefs.SSLTransform) -> Bool Never! { t.maclen == 0 && t.taglen != 0 }
+ssl_transform_uses_aead: fn(t: ssldefs.SSLTransform) -> Bool Never! {
+    t.maclen == 0 && t.taglen != 0
+}
 
 // ---------------------------------------------------------------------------
 // Buffer bounds.
 
 /// Whether `need` bytes fit between the offsets `cur` and `end`
 /// (mbedtls_ssl_chk_buf_ptr, true where it returns 0).
-ssl_chk_buf_ptr: fn(cur: Int, end: Int, need: Int) -> Bool Never! { cur <= end && need <= end - cur }
+ssl_chk_buf_ptr: fn(cur: Int, end: Int, need: Int) -> Bool Never! {
+    cur <= end && need <= end - cur
+}
 
 /// BufferTooSmall unless `need` bytes fit (MBEDTLS_SSL_CHK_BUF_PTR).
 ssl_chk_buf: fn(cur: Int, end: Int, need: Int) ssldefs.SSLError! {
@@ -1360,11 +1477,15 @@ ssl_handshake_step_endpoint: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) sslde
             return
         }
         if ssl.state == ssldefs.SSL_CLIENT_HELLO -> return sslcli.ssl_write_client_hello(ssl, rng)
-        if ssl.tls_version == ssldefs.SSL_VERSION_TLS1_3 -> return cli13.ssl_tls13_handshake_client_step(ssl, rng)
+        if ssl.tls_version == ssldefs.SSL_VERSION_TLS1_3 {
+            return cli13.ssl_tls13_handshake_client_step(ssl, rng)
+        }
         return cli12.ssl_handshake_client_step(ssl, rng)
     }
     if ssl.conf.endpoint == ssldefs.SSL_IS_SERVER {
-        if ssl.tls_version == ssldefs.SSL_VERSION_TLS1_3 -> return srv13.ssl_tls13_handshake_server_step(ssl, rng)
+        if ssl.tls_version == ssldefs.SSL_VERSION_TLS1_3 {
+            return srv13.ssl_tls13_handshake_server_step(ssl, rng)
+        }
         return srv12.ssl_handshake_server_step(ssl, rng)
     }
     Err(.BadInputData)
@@ -1377,7 +1498,9 @@ ssl_handshake_step_endpoint: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) sslde
 /// handshake transform. The empty structure stays for the post-handshake
 /// NewSessionTicket, as mbedtls keeps the structure itself until ssl_free.
 ssl_handshake_step: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
-    if !ssl.has_conf || !ssl.has_handshake || ssl.state == ssldefs.SSL_HANDSHAKE_OVER -> return Err(.BadInputData)
+    if !ssl.has_conf || !ssl.has_handshake || ssl.state == ssldefs.SSL_HANDSHAKE_OVER {
+        return Err(.BadInputData)
+    }
     ssl_prepare_handshake_step(ssl, rng) ?? return Err(err)
     sslmsg.ssl_handle_pending_alert(ssl, rng) ?? return Err(err)
     if ssl_handshake_step_endpoint(ssl, rng) == {
@@ -1387,7 +1510,9 @@ ssl_handshake_step: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLErr
         }
         .Ok(_) -> {}
     }
-    if ssl.state == ssldefs.SSL_HANDSHAKE_OVER && ssl.tls_version == ssldefs.SSL_VERSION_TLS1_3 -> ssl_handshake_free(ssl)
+    if ssl.state == ssldefs.SSL_HANDSHAKE_OVER && ssl.tls_version == ssldefs.SSL_VERSION_TLS1_3 {
+        ssl_handshake_free(ssl)
+    }
 }
 
 /// Perform the handshake to its end (mbedtls_ssl_handshake). DTLS needs the
@@ -1395,9 +1520,7 @@ ssl_handshake_step: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLErr
 ssl_handshake: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     if !ssl.has_conf -> return Err(.BadInputData)
     if sslmsg.ssl_is_dtls(ssl) && !ssl.timer.enabled -> return Err(.BadInputData)
-    loop ssl.state != ssldefs.SSL_HANDSHAKE_OVER {
-        ssl_handshake_step(ssl, rng) ?? return Err(err)
-    }
+    loop ssl.state != ssldefs.SSL_HANDSHAKE_OVER { ssl_handshake_step(ssl, rng) ?? return Err(err) }
 }
 
 // Write a HelloRequest (ssl_write_hello_request).
@@ -1415,7 +1538,9 @@ ssl_start_renegotiation: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.S
     // RFC 6347 4.2.2: the HelloRequest has message_seq 0, so the
     // ServerHello that answers it has 1.
     if sslmsg.ssl_is_dtls(ssl) && ssl.renego_status == ssldefs.SSL_RENEGOTIATION_PENDING {
-        if ssl.conf.endpoint == ssldefs.SSL_IS_SERVER -> ssl.handshake.out_msg_seq = 1 else -> ssl.handshake.in_msg_seq = 1
+        if ssl.conf.endpoint == ssldefs.SSL_IS_SERVER -> ssl.handshake.out_msg_seq = 1 else {
+            ssl.handshake.in_msg_seq = 1
+        }
     }
     sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_HELLO_REQUEST)
     ssl.renego_status = ssldefs.SSL_RENEGOTIATION_IN_PROGRESS
@@ -1453,7 +1578,9 @@ ssl_resend_hello_request: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.
             ratio = ratio >> 1
         }
         ssl.renego_records_seen += 1
-        if ssl.renego_records_seen > doublings -> return
+        if ssl.renego_records_seen > doublings {
+            return
+        }
     }
     ssl_write_hello_request(ssl, rng) ?? return Err(err)
 }
@@ -1495,8 +1622,12 @@ ssl_tls_prf_generic: fn(md: hashes.Md, secret: [#Secret U8], label: [U8], random
 /// The TLS 1.2 PRF of type `prf`, SSL_TLS_PRF_SHA384 or SSL_TLS_PRF_SHA256
 /// (mbedtls_ssl_tls_prf); FeatureUnavailable for any other.
 ssl_tls_prf: fn(prf: Int, secret: [#Secret U8], label: [U8], random: [U8], dlen: Int) -> [U8] ssldefs.SSLError! {
-    if prf == ssldefs.SSL_TLS_PRF_SHA384 -> return Ok(ssl_tls_prf_generic(.SHA384, secret, label, random, dlen))
-    if prf == ssldefs.SSL_TLS_PRF_SHA256 -> return Ok(ssl_tls_prf_generic(.SHA256, secret, label, random, dlen))
+    if prf == ssldefs.SSL_TLS_PRF_SHA384 {
+        return Ok(ssl_tls_prf_generic(.SHA384, secret, label, random, dlen))
+    }
+    if prf == ssldefs.SSL_TLS_PRF_SHA256 {
+        return Ok(ssl_tls_prf_generic(.SHA256, secret, label, random, dlen))
+    }
     Err(.FeatureUnavailable)
 }
 
@@ -1572,7 +1703,9 @@ ssl_calc_verify: fn(ssl: ssldefs.SSLContext) -> [U8] ssldefs.SSLError! {
 // which is wiped; nothing for a resumed session (ssl_compute_master). With
 // the extended master secret the seed is the session hash (RFC 7627 4).
 ssl_compute_master: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
-    if ssl.handshake.resume != 0 -> return
+    if ssl.handshake.resume != 0 {
+        return
+    }
     lbl := "master secret".bytes()
     seed := ssl.handshake.randbytes
     if ssl.handshake.extended_ms == ssldefs.SSL_EXTENDED_MS_ENABLED {
@@ -1671,13 +1804,13 @@ ssl_tls12_populate_transform: fn(ssl: &ssldefs.SSLContext, tix: Int, ciphersuite
         mac_key_len = hashes.md_size(cs.mac)
         ssl.tpool[tix].maclen = mac_key_len
         ssl.tpool[tix].ivlen = info.iv_size
-        if ssl_mode == .Stream {
-            ssl.tpool[tix].minlen = mac_key_len
-        } else {
+        if ssl_mode == .Stream -> ssl.tpool[tix].minlen = mac_key_len else {
             // One block past the MAC with encrypt-then-MAC, else the first
             // block multiple past it; then the explicit IV.
             block_size: info.block_size
-            if ssl_mode == .CBCETM -> ssl.tpool[tix].minlen = mac_key_len + block_size else -> ssl.tpool[tix].minlen = mac_key_len + block_size - mac_key_len %% block_size
+            if ssl_mode == .CBCETM -> ssl.tpool[tix].minlen = mac_key_len + block_size else {
+                ssl.tpool[tix].minlen = mac_key_len + block_size - mac_key_len %% block_size
+            }
             if tls_version != ssldefs.SSL_VERSION_TLS1_2 {
                 ssldefs.ssl_wipe(keyblk)
                 return Err(.InternalError)
@@ -1748,8 +1881,10 @@ ssl_psk_derive_premaster: fn<R: RNG>(ssl: &ssldefs.SSLContext, key_ex: suites.SS
     // Only DHE-PSK goes on without a PSK, with the DH secret alone.
     psk := [U8]{}
     if ssl_get_psk(ssl) == {
-        .Ok(k) -> psk = k
-        .Err(_) -> { if key_ex != .DHEPSK -> return Err(.InternalError) }
+        .Ok(k) -> { psk = k }
+        .Err(_) -> {
+            if key_ex != .DHEPSK -> return Err(.InternalError)
+        }
     }
     end: ssl.handshake.premaster.len()
     p := 0
@@ -1773,7 +1908,9 @@ ssl_psk_derive_premaster: fn<R: RNG>(ssl: &ssldefs.SSLContext, key_ex: suites.SS
         .DHEPSK -> {
             secret := if &ssl.handshake.dhm_ctx == {
                 .Val(ctx) -> dhm.dhm_calc_secret(ctx, rng) ?? return Err(.DHM(err))
-                None -> return Err(.InternalError)
+                None -> {
+                    return Err(.InternalError)
+                }
             }
             if secret.len() > end - (p + 2) {
                 ssldefs.ssl_wipe(secret)
@@ -1788,7 +1925,9 @@ ssl_psk_derive_premaster: fn<R: RNG>(ssl: &ssldefs.SSLContext, key_ex: suites.SS
             plen: end - (p + 2)
             z := if &ssl.handshake.ecdh_ctx == {
                 .Val(ctx) -> ecdh.ecdh_calc_secret(ctx, plen, rng) ?? return Err(.ECP(err))
-                None -> return Err(.InternalError)
+                None -> {
+                    return Err(.InternalError)
+                }
             }
             ssldefs.ssl_put_u16(ssl.handshake.premaster, p, z.len())
             ssldefs.ssl_copy_into(ssl.handshake.premaster, p + 2, z, 0, z.len())
@@ -1889,7 +2028,9 @@ ssl_parse_certificate_chain: fn<R: RNG>(ssl: &ssldefs.SSLContext, chain: &[x509c
             if ssl.session >= 0 {
                 if ssl.spool[ssl.session].peer_cert == {
                     .Val(old) -> {
-                        if old.len() > 0 && old[0].raw.len() == n -> same = ssldefs.ssl_range_eq(old[0].raw, 0, ssl.in_buf, m + i, n)
+                        if old.len() > 0 && old[0].raw.len() == n {
+                            same = ssldefs.ssl_range_eq(old[0].raw, 0, ssl.in_buf, m + i, n)
+                        }
                     }
                     None -> {}
                 }
@@ -2038,9 +2179,7 @@ ssl_handshake_wrapup: fn(ssl: &ssldefs.SSLContext) Never! {
     if sslmsg.ssl_is_dtls(ssl) && ssl.handshake.flight.len() != 0 {
         // Cancel the timer, the handshake is freed when the peer is heard.
         sslmsg.ssl_set_timer(ssl, 0)
-    } else {
-        ssl_handshake_wrapup_free_hs_transform(ssl)
-    }
+    } else { ssl_handshake_wrapup_free_hs_transform(ssl) }
     sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_HANDSHAKE_OVER)
 }
 
@@ -2060,11 +2199,13 @@ ssl_write_finished: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLErr
     ssl.out_buf[ssl.out_msg] = ssldefs.ssl_byte(ssldefs.SSL_HS_FINISHED)
     // In a resumed handshake the server's Finished comes first.
     if ssl.handshake.resume != 0 {
-        if ssl.conf.endpoint == ssldefs.SSL_IS_CLIENT -> sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_HANDSHAKE_WRAPUP)
-        if ssl.conf.endpoint == ssldefs.SSL_IS_SERVER -> sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_CLIENT_CHANGE_CIPHER_SPEC)
-    } else {
-        sslmsg.ssl_handshake_increment_state(ssl)
-    }
+        if ssl.conf.endpoint == ssldefs.SSL_IS_CLIENT {
+            sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_HANDSHAKE_WRAPUP)
+        }
+        if ssl.conf.endpoint == ssldefs.SSL_IS_SERVER {
+            sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_CLIENT_CHANGE_CIPHER_SPEC)
+        }
+    } else { sslmsg.ssl_handshake_increment_state(ssl) }
     // Switch to the new epoch, or reset the sequence number.
     if sslmsg.ssl_is_dtls(ssl) {
         ssl.handshake.alt_transform_out = ssl.transform_out
@@ -2079,9 +2220,7 @@ ssl_write_finished: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLErr
         }
         // The epoch must not wrap.
         if i == 0 -> return Err(.CounterWrapping)
-    } else {
-        ssldefs.ssl_fill(ssl.cur_out_ctr, 0, ssldefs.SSL_SEQUENCE_NUMBER_LEN, U8{0})
-    }
+    } else { ssldefs.ssl_fill(ssl.cur_out_ctr, 0, ssldefs.SSL_SEQUENCE_NUMBER_LEN, U8{0}) }
     ssl.transform_out = ssl.transform_negotiate
     ssl.session_out = ssl.session_negotiate
     if sslmsg.ssl_is_dtls(ssl) -> sslmsg.ssl_send_flight_completed(ssl)
@@ -2114,11 +2253,13 @@ ssl_parse_finished: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLErr
     ssldefs.ssl_copy_into(ssl.peer_verify_data, 0, buf, 0, hash_len)
     ssldefs.ssl_wipe(buf)
     if ssl.handshake.resume != 0 {
-        if ssl.conf.endpoint == ssldefs.SSL_IS_CLIENT -> sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_CLIENT_CHANGE_CIPHER_SPEC)
-        if ssl.conf.endpoint == ssldefs.SSL_IS_SERVER -> sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_HANDSHAKE_WRAPUP)
-    } else {
-        sslmsg.ssl_handshake_increment_state(ssl)
-    }
+        if ssl.conf.endpoint == ssldefs.SSL_IS_CLIENT {
+            sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_CLIENT_CHANGE_CIPHER_SPEC)
+        }
+        if ssl.conf.endpoint == ssldefs.SSL_IS_SERVER {
+            sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_HANDSHAKE_WRAPUP)
+        }
+    } else { sslmsg.ssl_handshake_increment_state(ssl) }
     if sslmsg.ssl_is_dtls(ssl) -> sslmsg.ssl_recv_flight_completed(ssl)
 }
 
@@ -2221,8 +2362,12 @@ ssl_parse_sig_alg_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) ssldefs.
         ssl_chk_buf_read(ssl, p, supported_sig_algs_end, 2) ?? return Err(err)
         sig_alg: ssldefs.ssl_get_u16(ssl.in_buf, p)
         p += 2
-        if ssl.tls_version == ssldefs.SSL_VERSION_TLS1_2 && !(ssl_sig_alg_is_supported(ssl, sig_alg) && ssl_sig_alg_is_offered(ssl, sig_alg)) -> next
-        if ssl.handshake.received_sig_algs.len() + 1 < ssldefs.RECEIVED_SIG_ALGS_SIZE -> ssl.handshake.received_sig_algs.push(sig_alg)
+        if ssl.tls_version == ssldefs.SSL_VERSION_TLS1_2 && !(ssl_sig_alg_is_supported(ssl, sig_alg) && ssl_sig_alg_is_offered(ssl, sig_alg)) {
+            next
+        }
+        if ssl.handshake.received_sig_algs.len() + 1 < ssldefs.RECEIVED_SIG_ALGS_SIZE {
+            ssl.handshake.received_sig_algs.push(sig_alg)
+        }
     }
     if p != end {
         sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_DECODE_ERROR, .DecodeError)
@@ -2255,7 +2400,7 @@ ssl_parse_server_name_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) ssld
                 .Val(cb) -> {
                     call: cb.call
                     if call(name) == {
-                        .Ok(ov) -> ssl_apply_hs_override(ssl, ov)
+                        .Ok(ov) -> { ssl_apply_hs_override(ssl, ov) }
                         .Err(_) -> {
                             sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_UNRECOGNIZED_NAME, .UnrecognizedName)
                             return Err(.UnrecognizedName)
@@ -2333,7 +2478,9 @@ ssl_write_alpn_ext: fn(ssl: &ssldefs.SSLContext, p: Int, end: Int) -> Int ssldef
 /// (mbedtls_ssl_session_set_hostname); None clears it.
 ssl_session_set_hostname: fn(session: &ssldefs.SSLSession, hostname: String?) ssldefs.SSLError! {
     if hostname == {
-        .Val(h) -> { if h.bytes().len() > ssldefs.SSL_MAX_HOST_NAME_LEN -> return Err(.BadInputData) }
+        .Val(h) -> {
+            if h.bytes().len() > ssldefs.SSL_MAX_HOST_NAME_LEN -> return Err(.BadInputData)
+        }
         None -> {}
     }
     session.hostname = hostname
@@ -2407,15 +2554,33 @@ ssl_verify_failure_is_soft: fn(e: ssldefs.SSLError) -> Bool Never! {
 // The alert for a rejected certificate, by the first of its failures in
 // C's order.
 ssl_verify_alert: fn(verify_result: Int) -> Int Never! {
-    if verify_result.bit_and(x509.X509_BADCERT_OTHER) != 0 -> return ssldefs.SSL_ALERT_MSG_ACCESS_DENIED
-    if verify_result.bit_and(x509.X509_BADCERT_CN_MISMATCH) != 0 -> return ssldefs.SSL_ALERT_MSG_BAD_CERT
-    if verify_result.bit_and(x509.X509_BADCERT_KEY_USAGE) != 0 -> return ssldefs.SSL_ALERT_MSG_UNSUPPORTED_CERT
-    if verify_result.bit_and(x509.X509_BADCERT_EXT_KEY_USAGE) != 0 -> return ssldefs.SSL_ALERT_MSG_UNSUPPORTED_CERT
-    if verify_result.bit_and(x509.X509_BADCERT_BAD_PK) != 0 -> return ssldefs.SSL_ALERT_MSG_UNSUPPORTED_CERT
-    if verify_result.bit_and(x509.X509_BADCERT_BAD_KEY) != 0 -> return ssldefs.SSL_ALERT_MSG_UNSUPPORTED_CERT
-    if verify_result.bit_and(x509.X509_BADCERT_EXPIRED) != 0 -> return ssldefs.SSL_ALERT_MSG_CERT_EXPIRED
-    if verify_result.bit_and(x509.X509_BADCERT_REVOKED) != 0 -> return ssldefs.SSL_ALERT_MSG_CERT_REVOKED
-    if verify_result.bit_and(x509.X509_BADCERT_NOT_TRUSTED) != 0 -> return ssldefs.SSL_ALERT_MSG_UNKNOWN_CA
+    if verify_result.bit_and(x509.X509_BADCERT_OTHER) != 0 {
+        return ssldefs.SSL_ALERT_MSG_ACCESS_DENIED
+    }
+    if verify_result.bit_and(x509.X509_BADCERT_CN_MISMATCH) != 0 {
+        return ssldefs.SSL_ALERT_MSG_BAD_CERT
+    }
+    if verify_result.bit_and(x509.X509_BADCERT_KEY_USAGE) != 0 {
+        return ssldefs.SSL_ALERT_MSG_UNSUPPORTED_CERT
+    }
+    if verify_result.bit_and(x509.X509_BADCERT_EXT_KEY_USAGE) != 0 {
+        return ssldefs.SSL_ALERT_MSG_UNSUPPORTED_CERT
+    }
+    if verify_result.bit_and(x509.X509_BADCERT_BAD_PK) != 0 {
+        return ssldefs.SSL_ALERT_MSG_UNSUPPORTED_CERT
+    }
+    if verify_result.bit_and(x509.X509_BADCERT_BAD_KEY) != 0 {
+        return ssldefs.SSL_ALERT_MSG_UNSUPPORTED_CERT
+    }
+    if verify_result.bit_and(x509.X509_BADCERT_EXPIRED) != 0 {
+        return ssldefs.SSL_ALERT_MSG_CERT_EXPIRED
+    }
+    if verify_result.bit_and(x509.X509_BADCERT_REVOKED) != 0 {
+        return ssldefs.SSL_ALERT_MSG_CERT_REVOKED
+    }
+    if verify_result.bit_and(x509.X509_BADCERT_NOT_TRUSTED) != 0 {
+        return ssldefs.SSL_ALERT_MSG_UNKNOWN_CA
+    }
     ssldefs.SSL_ALERT_MSG_CERT_UNKNOWN
 }
 
@@ -2465,11 +2630,13 @@ ssl_verify_certificate: fn<R: RNG>(ssl: &ssldefs.SSLContext, authmode: Int, chai
     }
     vrfy := ssl.conf.f_vrfy
     if ssl.f_vrfy == {
-        .Val(_) -> vrfy = ssl.f_vrfy
+        .Val(_) -> { vrfy = ssl.f_vrfy }
         None -> {}
     }
     // get_hostname_for_verification.
-    if !ssl_has_set_hostname_been_called(ssl) && ssl.conf.endpoint == ssldefs.SSL_IS_CLIENT && ssl.conf.authmode == ssldefs.SSL_VERIFY_REQUIRED -> return Err(.CertificateVerificationWithoutHostname)
+    if !ssl_has_set_hostname_been_called(ssl) && ssl.conf.endpoint == ssldefs.SSL_IS_CLIENT && ssl.conf.authmode == ssldefs.SSL_VERIFY_REQUIRED {
+        return Err(.CertificateVerificationWithoutHostname)
+    }
     cn: ssl_hostname_bytes(ssl)
     have_ca_chain: ssl.handshake.sni_ca_chain != None || ssl.conf.ca_chain != None
     failed := false
@@ -2481,7 +2648,9 @@ ssl_verify_certificate: fn<R: RNG>(ssl: &ssldefs.SSLContext, authmode: Int, chai
             // C's flags: those of the failed check, all set for any other error.
             if e == {
                 .CertVerifyFailed(f) -> ssl.spool[sn].verify_result = f
-                .FeatureUnavailable(_) | .UnknownOid | .InvalidFormat(_) | .InvalidVersion(_) | .InvalidSerial(_) | .InvalidAlg(_) | .InvalidAlgOid(_) | .InvalidName(_) | .InvalidDate(_) | .InvalidSignature(_) | .InvalidExtensions(_) | .UnknownVersion | .UnknownSigAlg(_) | .SigMismatch | .CertUnknownFormat | .BadInput | .BufferTooSmall | .FatalError | .Callback(_) | .Asn1(_) | .PK(_) | .PEM(_) | .OID(_) -> ssl.spool[sn].verify_result = 0xFFFFFFFF
+                .FeatureUnavailable(_) | .UnknownOid | .InvalidFormat(_) | .InvalidVersion(_) | .InvalidSerial(_) | .InvalidAlg(_) | .InvalidAlgOid(_) | .InvalidName(_) | .InvalidDate(_) | .InvalidSignature(_) | .InvalidExtensions(_) | .UnknownVersion | .UnknownSigAlg(_) | .SigMismatch | .CertUnknownFormat | .BadInput | .BufferTooSmall | .FatalError | .Callback(_) | .Asn1(_) | .PK(_) | .PEM(_) | .OID(_) -> {
+                    ssl.spool[sn].verify_result = 0xFFFFFFFF
+                }
             }
         }
         None -> ssl.spool[sn].verify_result = 0
@@ -2510,7 +2679,9 @@ ssl_verify_certificate: fn<R: RNG>(ssl: &ssldefs.SSLContext, authmode: Int, chai
     }
     // VERIFY_OPTIONAL goes on with an unacceptable certificate, but not past
     // other errors, such as a verification callback's.
-    if failed && authmode == ssldefs.SSL_VERIFY_OPTIONAL && ssl_verify_failure_is_soft(reason) -> failed = false
+    if failed && authmode == ssldefs.SSL_VERIFY_OPTIONAL && ssl_verify_failure_is_soft(reason) {
+        failed = false
+    }
     // Verifying without trust anchors is a configuration error.
     if !have_ca_chain && authmode == ssldefs.SSL_VERIFY_REQUIRED {
         failed = true
@@ -2636,7 +2807,9 @@ VecTally: struct {
     failures: [String]
 }
 
-vec_tally: fn(what: String) -> VecTally Never! { VecTally{what: what, pass: 0, fail: 0, lenient: 0, failures: [String]{}} }
+vec_tally: fn(what: String) -> VecTally Never! {
+    VecTally{what: what, pass: 0, fail: 0, lenient: 0, failures: [String]{}}
+}
 
 vec_check: fn(t: &VecTally, ok: Bool, record: String) Never! {
     if ok {
@@ -2725,7 +2898,9 @@ vec_nist: fn(file: String) -[FS.Read]> [VecRecord] {
         }
         in_header = false
         if line.is_empty() {
-            if names.len() > 0 -> out.push(VecRecord{section: section.copy(), names: names.move(), values: values.move()})
+            if names.len() > 0 {
+                out.push(VecRecord{section: section.copy(), names: names.move(), values: values.move()})
+            }
             names = [String]{}
             values = [String]{}
             next
@@ -2743,7 +2918,9 @@ vec_nist: fn(file: String) -[FS.Read]> [VecRecord] {
             }
         }
     }
-    if names.len() > 0 -> out.push(VecRecord{section: section.copy(), names: names.move(), values: values.move()})
+    if names.len() > 0 {
+        out.push(VecRecord{section: section.copy(), names: names.move(), values: values.move()})
+    }
     out
 }
 
@@ -2765,7 +2942,9 @@ vec_field: fn(r: VecRecord, name: String) -> String { vec_field_nth(r, name, 0) 
 
 vec_bytes: fn(r: VecRecord, name: String) -> [U8] { vec_hex(vec_field(r, name)) }
 
-vec_label: fn(file: String, r: VecRecord, n: Int) -> String Never! { "{file} {r.section} record {n}" }
+vec_label: fn(file: String, r: VecRecord, n: Int) -> String Never! {
+    "{file} {r.section} record {n}"
+}
 
 // ---------------------------------------------------------------------------
 // Wycheproof files
@@ -2777,7 +2956,9 @@ vec_cache_dir: fn() -[Env]> String {
     "{root}/jet/vectors/wycheproof/{VEC_WYCHEPROOF_COMMIT}"
 }
 
-vec_sha256_hex: fn(bytes: [U8]) -> String Never! { core.encoding.bytes_to_hex(hashes.hash(.SHA256, bytes)) }
+vec_sha256_hex: fn(bytes: [U8]) -> String Never! {
+    core.encoding.bytes_to_hex(hashes.hash(.SHA256, bytes))
+}
 
 /// The body of an HTTPS GET of `path` on `host` over this module's own
 /// client. The response must be a 200 with a Content-Length.
@@ -2795,7 +2976,9 @@ vec_https_get: fn(host: String, path: String) -[Net, Time.Wait]> [U8] {
         }
         if head >= 0 && raw.len() >= head + length -> break
         chunk: core.net.tls.read_bytes(stream, 65536) ?? panic("Fetching {url}: {err}")
-        if chunk.is_empty() -> panic("Fetching {url}: the connection closed after {raw.len()} bytes")
+        if chunk.is_empty() {
+            panic("Fetching {url}: the connection closed after {raw.len()} bytes")
+        }
         loop b in chunk -> raw.push(b)
     }
     _: core.net.tls.close(stream) ?? panic("Fetching {url}: {err}")
@@ -2818,7 +3001,9 @@ vec_body_length: fn(url: String, head: [U8]) -> Int {
     if !lines[0].starts_with("HTTP/1.1 200") -> panic("Fetching {url}: {lines[0]}")
     loop line in lines {
         parts: line.split(":").to_list()
-        if parts.len() == 2 && parts[0].trim().to_lower() == "content-length" -> return Int.parse(parts[1].trim()) ?? panic("Fetching {url}: Content-Length `{parts[1]}`")
+        if parts.len() == 2 && parts[0].trim().to_lower() == "content-length" {
+            return Int.parse(parts[1].trim()) ?? panic("Fetching {url}: Content-Length `{parts[1]}`")
+        }
     }
     panic("Fetching {url}: the response has no Content-Length")
 }
@@ -2940,7 +3125,9 @@ vec_certificate_verify: fn(key: &&pk.PKContext, algorithm: Int, signature: [U8],
     body := [U8]{ssldefs.ssl_byte(algorithm >> 8), ssldefs.ssl_byte(algorithm), ssldefs.ssl_byte(signature.len() >> 8), ssldefs.ssl_byte(signature.len())}
     body.extend(signature.copy())
     ssl.in_buf = body.copy()
-    if gen13.ssl_tls13_parse_certificate_verify(ssl, 0, body.len(), signed) == .Err(_) -> return ssl.alert_type
+    if gen13.ssl_tls13_parse_certificate_verify(ssl, 0, body.len(), signed) == .Err(_) {
+        return ssl.alert_type
+    }
     0
 }
 
@@ -3018,7 +3205,9 @@ vec_ec_key: fn(id: ecp.GroupID) -> pk.PKContext {
     t := vec_tally(file)
     loop g in vec_items(vec_wycheproof(file), "testGroups") {
         key_size: vec_int(g, "keySize")
-        if (key_size != 128 && key_size != 256) || vec_int(g, "ivSize") != 96 || vec_int(g, "tagSize") != 128 -> next
+        if (key_size != 128 && key_size != 256) || vec_int(g, "ivSize") != 96 || vec_int(g, "tagSize") != 128 {
+            next
+        }
         loop c in vec_items(g, "tests") {
             key: vec_wy_hex(c, "key")
             iv: vec_wy_hex(c, "iv")
@@ -3027,7 +3216,9 @@ vec_ec_key: fn(id: ecp.GroupID) -> pk.PKContext {
             sealed: vec_concat(vec_wy_hex(c, "ct"), vec_wy_hex(c, "tag"))
             opened: vec_gcm_open(key, iv, aad, sealed)
             accepted := vec_is(opened, msg)
-            if vec_text(c, "result") == "valid" -> accepted = accepted && vec_is(vec_gcm_seal(key, iv, aad, msg), sealed)
+            if vec_text(c, "result") == "valid" {
+                accepted = accepted && vec_is(vec_gcm_seal(key, iv, aad, msg), sealed)
+            }
             vec_wy_verdict(t, file, c, accepted, false)
         }
     }
@@ -3046,7 +3237,9 @@ vec_ec_key: fn(id: ecp.GroupID) -> pk.PKContext {
             msg: vec_wy_hex(c, "msg")
             sealed: vec_concat(vec_wy_hex(c, "ct"), vec_wy_hex(c, "tag"))
             accepted := vec_is(vec_chacha_open(key, iv, aad, sealed), msg)
-            if vec_text(c, "result") == "valid" -> accepted = accepted && vec_is(vec_chacha_seal(key, iv, aad, msg), sealed)
+            if vec_text(c, "result") == "valid" {
+                accepted = accepted && vec_is(vec_chacha_seal(key, iv, aad, msg), sealed)
+            }
             vec_wy_verdict(t, file, c, accepted, false)
         }
     }
@@ -3075,7 +3268,9 @@ vec_ecdh: fn(id: ecp.GroupID, private: [U8], public: [U8]) -> [U8]? {
     rng := vec_rng()
     z: ecdh.ecdh_compute_shared(key.grp, q, key.d, rng) ?? return None
     size: (key.grp.pbits + 7) >> 3
-    if ecp.group_type(key.grp) == .Montgomery -> return Val(bn.write_binary_le(z, size) ?? return None)
+    if ecp.group_type(key.grp) == .Montgomery {
+        return Val(bn.write_binary_le(z, size) ?? return None)
+    }
     Val(bn.write_binary(z, size) ?? return None)
 }
 
@@ -3186,7 +3381,9 @@ vec_pk_verify: fn(der: [U8], md: hashes.Md, msg: [U8], sig: [U8], pss: Int?) -> 
     ctx := pkparse.pk_parse_public_key(der) ?? return false
     hash: hashes.hash(md, msg)
     if pss == {
-        .Val(salt) -> pk.pk_verify_ext(.RSASSAPSS, Val(pk.PSSOptions{mgf1_hash_id: Val(md), expected_salt_len: salt}), ctx, Val(md), hash, sig) ?? return false
+        .Val(salt) -> {
+            pk.pk_verify_ext(.RSASSAPSS, Val(pk.PSSOptions{mgf1_hash_id: Val(md), expected_salt_len: salt}), ctx, Val(md), hash, sig) ?? return false
+        }
         None -> pk.pk_verify(ctx, Val(md), hash, sig) ?? return false
     }
     true
@@ -3209,9 +3406,14 @@ vec_pk_verify: fn(der: [U8], md: hashes.Md, msg: [U8], sig: [U8], pss: Int?) -> 
 
 #Test("Wycheproof RSA PKCS#1 v1.5 vectors verify at 2048, 3072 and 4096 bits with SHA-256, SHA-384 and SHA-512") {
     files: [String]{
-        "rsa_signature_2048_sha256", "rsa_signature_2048_sha384", "rsa_signature_2048_sha512",
-        "rsa_signature_3072_sha256", "rsa_signature_3072_sha384",
-        "rsa_signature_4096_sha256", "rsa_signature_4096_sha384", "rsa_signature_4096_sha512",
+        "rsa_signature_2048_sha256",
+        "rsa_signature_2048_sha384",
+        "rsa_signature_2048_sha512",
+        "rsa_signature_3072_sha256",
+        "rsa_signature_3072_sha384",
+        "rsa_signature_4096_sha256",
+        "rsa_signature_4096_sha384",
+        "rsa_signature_4096_sha512",
     }
     loop file in files {
         t := vec_tally(file)
@@ -3229,14 +3431,20 @@ vec_pk_verify: fn(der: [U8], md: hashes.Md, msg: [U8], sig: [U8], pss: Int?) -> 
 
 #Test("Wycheproof RSASSA-PSS vectors verify with MGF1 over the signing hash and a salt of its length") {
     files: [String]{
-        "rsa_pss_2048_sha256_mgf1_32", "rsa_pss_3072_sha256_mgf1_32", "rsa_pss_4096_sha256_mgf1_32",
-        "rsa_pss_2048_sha384_mgf1_48", "rsa_pss_4096_sha384_mgf1_48", "rsa_pss_4096_sha512_mgf1_64",
+        "rsa_pss_2048_sha256_mgf1_32",
+        "rsa_pss_3072_sha256_mgf1_32",
+        "rsa_pss_4096_sha256_mgf1_32",
+        "rsa_pss_2048_sha384_mgf1_48",
+        "rsa_pss_4096_sha384_mgf1_48",
+        "rsa_pss_4096_sha512_mgf1_64",
     }
     loop file in files {
         t := vec_tally(file)
         loop g in vec_items(vec_wycheproof(file), "testGroups") {
             md: vec_md_named(vec_text(g, "sha")) ?? panic("{file}: hash {vec_text(g, "sha")}")
-            if vec_md_named(vec_text(g, "mgfSha")) != Val(md) -> panic("{file}: MGF1 hash {vec_text(g, "mgfSha")}")
+            if vec_md_named(vec_text(g, "mgfSha")) != Val(md) {
+                panic("{file}: MGF1 hash {vec_text(g, "mgfSha")}")
+            }
             der: vec_wy_hex(g, "publicKeyDer")
             salt: vec_int(g, "sLen")
             loop c in vec_items(g, "tests") {
@@ -3258,7 +3466,8 @@ vec_pk_signs: fn(der: [U8], md: hashes.Md, msg: [U8], want: [U8]) -> Bool {
 }
 
 #Test("Wycheproof RSA PKCS#1 v1.5 signing vectors sign at 2048, 3072 and 4096 bits with SHA-256, SHA-384 and SHA-512") {
-    loop file in ([String]{"rsa_pkcs1_2048_sig_gen", "rsa_pkcs1_3072_sig_gen", "rsa_pkcs1_4096_sig_gen"}) {
+    loop file in
+        ([String]{"rsa_pkcs1_2048_sig_gen", "rsa_pkcs1_3072_sig_gen", "rsa_pkcs1_4096_sig_gen"}) {
         t := vec_tally(file)
         loop g in vec_items(vec_wycheproof(file), "testGroups") {
             // SHA-1 and SHA-224 are not among the signature schemes Core's TLS offers.
@@ -3350,7 +3559,9 @@ vec_rsa_verifies: fn(n: [U8], e: [U8], md: hashes.Md, hash: [U8], sig: [U8], pss
                 mac: hashes.hmac(md, vec_wy_hex(c, "key"), vec_wy_hex(c, "msg"))
                 want: vec_wy_hex(c, "tag")
                 accepted := want.len() == tag_bytes && tag_bytes <= mac.len()
-                if accepted -> loop i in 0..<tag_bytes -> accepted = accepted && mac[i] == want[i]
+                if accepted {
+                    loop i in 0..<tag_bytes -> accepted = accepted && mac[i] == want[i]
+                }
                 vec_wy_verdict(t, file, c, accepted, false)
             }
         }
@@ -3451,7 +3662,8 @@ vec_pbkdf2_public: fn(c: Dyn) -> Bool {
 // ExpertCt.jet), which core.crypto's envelopes, seal and signatures call
 // ---------------------------------------------------------------------------
 
-#Unsafe("`key` and `iv` are a vector record's, used for that record only") vec_expert_gcm_seal: fn(key: [U8], iv: [U8], aad: [U8], plain: [U8]) -> [U8]? {
+#Unsafe("`key` and `iv` are a vector record's, used for that record only")
+vec_expert_gcm_seal: fn(key: [U8], iv: [U8], aad: [U8], plain: [U8]) -> [U8]? {
     out := [U8]{}
     #Unsafe("a vector record's key and nonce, used for that record only") {
         out = core.crypto.expert.aes256gcm_seal(key, iv, plain, aad) ?? return None
@@ -3459,7 +3671,8 @@ vec_pbkdf2_public: fn(c: Dyn) -> Bool {
     Val(out)
 }
 
-#Unsafe("`key` and `iv` are a vector record's, used for that record only") vec_expert_gcm_open: fn(key: [U8], iv: [U8], aad: [U8], sealed: [U8]) -> [U8]? {
+#Unsafe("`key` and `iv` are a vector record's, used for that record only")
+vec_expert_gcm_open: fn(key: [U8], iv: [U8], aad: [U8], sealed: [U8]) -> [U8]? {
     out := [U8]{}
     #Unsafe("a vector record's key and nonce, used for that record only") {
         out = core.crypto.expert.aes256gcm_open(key, iv, sealed, aad) ?? return None
@@ -3467,7 +3680,8 @@ vec_pbkdf2_public: fn(c: Dyn) -> Bool {
     Val(out)
 }
 
-#Unsafe("`key` and `iv` are a vector record's, used for that record only") vec_expert_xchacha_seal: fn(key: [U8], iv: [U8], aad: [U8], plain: [U8]) -> [U8]? {
+#Unsafe("`key` and `iv` are a vector record's, used for that record only")
+vec_expert_xchacha_seal: fn(key: [U8], iv: [U8], aad: [U8], plain: [U8]) -> [U8]? {
     out := [U8]{}
     #Unsafe("a vector record's key and nonce, used for that record only") {
         out = core.crypto.expert.xchacha20poly1305_seal(key, iv, plain, aad) ?? return None
@@ -3475,7 +3689,8 @@ vec_pbkdf2_public: fn(c: Dyn) -> Bool {
     Val(out)
 }
 
-#Unsafe("`key` and `iv` are a vector record's, used for that record only") vec_expert_xchacha_open: fn(key: [U8], iv: [U8], aad: [U8], sealed: [U8]) -> [U8]? {
+#Unsafe("`key` and `iv` are a vector record's, used for that record only")
+vec_expert_xchacha_open: fn(key: [U8], iv: [U8], aad: [U8], sealed: [U8]) -> [U8]? {
     out := [U8]{}
     #Unsafe("a vector record's key and nonce, used for that record only") {
         out = core.crypto.expert.xchacha20poly1305_open(key, iv, sealed, aad) ?? return None
@@ -3515,7 +3730,9 @@ vec_pbkdf2_public: fn(c: Dyn) -> Bool {
     file: "aes_gcm"
     t := vec_tally("{file} (expert)")
     loop g in vec_items(vec_wycheproof(file), "testGroups") {
-        if vec_int(g, "keySize") != 256 || vec_int(g, "ivSize") != 96 || vec_int(g, "tagSize") != 128 -> next
+        if vec_int(g, "keySize") != 256 || vec_int(g, "ivSize") != 96 || vec_int(g, "tagSize") != 128 {
+            next
+        }
         loop c in vec_items(g, "tests") {
             key: vec_wy_hex(c, "key")
             iv: vec_wy_hex(c, "iv")
@@ -3525,7 +3742,9 @@ vec_pbkdf2_public: fn(c: Dyn) -> Bool {
             accepted := false
             #Unsafe("the record's key and IV are used for that record only") {
                 accepted = vec_is(vec_expert_gcm_open(key, iv, aad, sealed), msg)
-                if vec_text(c, "result") == "valid" -> accepted = accepted && vec_is(vec_expert_gcm_seal(key, iv, aad, msg), sealed)
+                if vec_text(c, "result") == "valid" {
+                    accepted = accepted && vec_is(vec_expert_gcm_seal(key, iv, aad, msg), sealed)
+                }
             }
             vec_wy_verdict(t, file, c, accepted, false)
         }
@@ -3547,7 +3766,9 @@ vec_pbkdf2_public: fn(c: Dyn) -> Bool {
             accepted := false
             #Unsafe("the record's key and nonce are used for that record only") {
                 accepted = vec_is(vec_expert_xchacha_open(key, iv, aad, sealed), msg)
-                if vec_text(c, "result") == "valid" -> accepted = accepted && vec_is(vec_expert_xchacha_seal(key, iv, aad, msg), sealed)
+                if vec_text(c, "result") == "valid" {
+                    accepted = accepted && vec_is(vec_expert_xchacha_seal(key, iv, aad, msg), sealed)
+                }
             }
             vec_wy_verdict(t, file, c, accepted, false)
         }
@@ -3555,7 +3776,8 @@ vec_pbkdf2_public: fn(c: Dyn) -> Bool {
     vec_assert(t)
 }
 
-#Unsafe("`private` is a vector record's key, used for that record only") vec_expert_x25519: fn(private: [U8], public: [U8]) -> [U8]? {
+#Unsafe("`private` is a vector record's key, used for that record only")
+vec_expert_x25519: fn(private: [U8], public: [U8]) -> [U8]? {
     out := [U8]{}
     #Unsafe("a vector record's private key, used for that record only") {
         shared: core.crypto.expert.x25519_raw(private, public) ?? return None
@@ -3564,7 +3786,8 @@ vec_pbkdf2_public: fn(c: Dyn) -> Bool {
     Val(out)
 }
 
-#Unsafe("the arguments are a vector record's public key, message and signature") vec_expert_ed25519_verifies: fn(public: [U8], msg: [U8], sig: [U8]) -> Bool {
+#Unsafe("the arguments are a vector record's public key, message and signature")
+vec_expert_ed25519_verifies: fn(public: [U8], msg: [U8], sig: [U8]) -> Bool {
     accepted := false
     #Unsafe("verification of a vector record's public signature") {
         accepted = core.crypto.expert.ed25519_verify_strict(public, msg, sig) ?? return false
@@ -3633,8 +3856,7 @@ CtRand: struct {
     }
 }
 
-#Overflow(.Wrapping)
-ct_next: fn(r: &CtRand) -> U64 Never! {
+#Overflow(.Wrapping) ct_next: fn(r: &CtRand) -> U64 Never! {
     x := r.s.copy()
     x = x.bit_xor(x << 13)
     x = x.bit_xor(x >> 7)
@@ -3687,11 +3909,7 @@ ct_measure: fn(what: String, samples: Int, batch: Int, fixed: [U8], op: fn([U8])
     loop _ in 0..<samples {
         pick: ct_next(r).bit_and(U64{1}) == U64{1}
         random.push(pick)
-        if pick {
-            inputs.push(ct_bytes(r, fixed.len()))
-        } else {
-            inputs.push(fixed.copy())
-        }
+        if pick -> inputs.push(ct_bytes(r, fixed.len())) else -> inputs.push(fixed.copy())
     }
     sink := 0
     loop i in 0..<32 -> sink = sink.bit_xor(op(inputs[i %% samples]))
@@ -3716,7 +3934,9 @@ ct_measure: fn(what: String, samples: Int, batch: Int, fixed: [U8], op: fn([U8])
 /// `ct_measure`, failing when the t reaches 10 in size.
 ct_dudect: fn(what: String, samples: Int, batch: Int, fixed: [U8], op: fn([U8]) -> Int) -[Time, IO]> Float {
     t: ct_measure(what, samples, batch, fixed, op)
-    if ct_abs(t) >= (Float{10}) -> panic("{what}: Welch's t is {t} between fixed and random secrets over {samples} runs; dudect's leak threshold is 10")
+    if ct_abs(t) >= (Float{10}) {
+        panic("{what}: Welch's t is {t} between fixed and random secrets over {samples} runs; dudect's leak threshold is 10")
+    }
     t
 }
 
@@ -3879,7 +4099,8 @@ ct_base64_decoded: fn(bytes: [U8]) -> Int Never! {
     ct_dudect("PEM base64 decode", 5000, 8, ct_bytes(r, 64), fn(x) { ct_base64_decoded(x) })
 }
 
-#Unsafe("`seed` is a timing run's test key, used for that run only") vec_expert_ed25519_sign: fn(seed: [U8], msg: [U8]) -> Int {
+#Unsafe("`seed` is a timing run's test key, used for that run only")
+vec_expert_ed25519_sign: fn(seed: [U8], msg: [U8]) -> Int {
     n := 0
     #Unsafe("a timing run's test key, used for that run only") {
         sig: core.crypto.expert.ed25519_sign(seed, msg) ?? return 0
@@ -3920,14 +4141,16 @@ ct_envelope_opened: fn(identity: X25519SecretKey, box: Sealed) -> Int {
 
 /// The length of the key core.crypto unwraps of `wrapped` for `holder`; 0 for
 /// a refused one.
-#Unsafe("a timing run's test key, used for that run only") ct_key_unwrapped: fn(holder: X25519SecretKey, wrapped: WrappedKey) -> Int {
+#Unsafe("a timing run's test key, used for that run only")
+ct_key_unwrapped: fn(holder: X25519SecretKey, wrapped: WrappedKey) -> Int {
     key: core.crypto.unwrap(holder, wrapped) ?? return 0
     key.bytes.len()
 }
 
 /// The length of core.crypto's X25519 shared secret of the private key
 /// `secret` and `peer`; 0 for a refused one.
-#Unsafe("a timing run's test key, used for that run only") ct_shared: fn(secret: [U8], peer: X25519PublicKey) -> Int {
+#Unsafe("a timing run's test key, used for that run only")
+ct_shared: fn(secret: [U8], peer: X25519PublicKey) -> Int {
     key: X25519SecretKey.from_bytes(secret) ?? return 0
     shared: core.crypto.x25519(key, peer) ?? return 0
     shared.bytes.len()
@@ -4108,8 +4331,10 @@ CtKxBlocks: struct {
 /// good block, any other the next bad one, in the same turn.
 ct_rsa_kx_block_turn: fn(blocks: &CtKxBlocks, ssl: &ssldefs.SSLContext, x: [U8], rng: &CtRand) -> Int {
     k: blocks.turn %% 16
-    blocks.turn = blocks.turn + 1
-    if x[0] == (U8{255}) && x[1] == (U8{255}) -> return ct_rsa_kx_after_private(ssl, blocks.good[k], rng)
+    blocks.turn += 1
+    if x[0] == (U8{255}) && x[1] == (U8{255}) {
+        return ct_rsa_kx_after_private(ssl, blocks.good[k], rng)
+    }
     ct_rsa_kx_after_private(ssl, blocks.bad[k], rng)
 }
 
@@ -4146,7 +4371,9 @@ ct_rsa_kx_block_turn: fn(blocks: &CtKxBlocks, ssl: &ssldefs.SSLContext, x: [U8],
     }
     fast := CtRand{s: U64{97}}
     t: ct_measure("TLS 1.2 RSA premaster after the private operation", 20000, 1, [U8]{255, 255}, fn(x) { ct_rsa_kx_block_turn(blocks, ssl, x, fast) })
-    if ct_abs(t) >= (Float{9} / Float{2}) -> panic("TLS 1.2 RSA premaster after the private operation: Welch's t is {t} between good and bad padding; the bound is 4.5")
+    if ct_abs(t) >= (Float{9} / Float{2}) {
+        panic("TLS 1.2 RSA premaster after the private operation: Welch's t is {t} between good and bad padding; the bound is 4.5")
+    }
 }
 
 /// The data block DB = lHash || PS || 0x01 || M of an EME-OAEP block
@@ -4215,8 +4442,10 @@ CtOaepBlocks: struct {
 /// good block, any other the next bad one, in the same turn.
 ct_oaep_block_turn: fn(blocks: &CtOaepBlocks, x: [U8]) -> Int {
     k: blocks.turn %% 16
-    blocks.turn = blocks.turn + 1
-    if x[0] == (U8{255}) && x[1] == (U8{255}) -> return ct_oaep_after_private(blocks.good[k], blocks.label)
+    blocks.turn += 1
+    if x[0] == (U8{255}) && x[1] == (U8{255}) {
+        return ct_oaep_after_private(blocks.good[k], blocks.label)
+    }
     ct_oaep_after_private(blocks.bad[k], blocks.label)
 }
 
@@ -4253,7 +4482,9 @@ ct_oaep_block_turn: fn(blocks: &CtOaepBlocks, x: [U8]) -> Int {
         }
     }
     t: ct_measure("RSAES-OAEP after the private operation", 20000, 1, [U8]{255, 255}, fn(x) { ct_oaep_block_turn(blocks, x) })
-    if ct_abs(t) >= (Float{9} / Float{2}) -> panic("RSAES-OAEP after the private operation: Welch's t is {t} between good and bad blocks; the bound is 4.5")
+    if ct_abs(t) >= (Float{9} / Float{2}) {
+        panic("RSAES-OAEP after the private operation: Welch's t is {t} between good and bad blocks; the bound is 4.5")
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -4375,12 +4606,11 @@ ct_redraw_integer: fn(r: &CtRand, buf: &[U8], at: Int, len: Int, odd: Bool) {
     ctx := ct_rsa_key()
     rng := vec_rng()
     rsa_der: ct_rsa_key_der()
-    #Unsafe("test keys and nonces, each used for this run only") {
-        ct_entry(r, ctx, rng, rsa_der)
-    }
+    #Unsafe("test keys and nonces, each used for this run only") { ct_entry(r, ctx, rng, rsa_der) }
 }
 
-#Unsafe("`r` draws test keys and nonces, each used for this run only") ct_entry: fn(r: &CtRand, ctx: &rsa.RSAContext, rng: &drbg.HMACDrbg, rsa_der: [U8]) {
+#Unsafe("`r` draws test keys and nonces, each used for this run only")
+ct_entry: fn(r: &CtRand, ctx: &rsa.RSAContext, rng: &drbg.HMACDrbg, rsa_der: [U8]) {
     mac: ct_bytes(r, 32)
     flipped: ct_last_flipped(mac)
     assert(ctime.memcmp(mac, 0, flipped, 0, 32) != 0)
@@ -4597,7 +4827,9 @@ ct_rsa_keys: fn() -[FS, Env, Net, Time.Wait]> [[U8]] {
         e: rsa.rsa_export(ctx.rsa, .E) ?? panic("E")
         p: rsa.rsa_export(ctx.rsa, .P) ?? panic("P")
         q: rsa.rsa_export(ctx.rsa, .Q) ?? panic("Q")
-        if bn.bitlen(p) == 1024 && bn.bitlen(q) == 1024 && bn.cmp_int(e, 65537) == 0 -> out.push(der)
+        if bn.bitlen(p) == 1024 && bn.bitlen(q) == 1024 && bn.cmp_int(e, 65537) == 0 {
+            out.push(der)
+        }
     }
     out
 }
@@ -4812,7 +5044,7 @@ ct_cbc_record: fn(t: &ssldefs.SSLTransform, plain: [U8], pad: Int, iv: [U8], mac
     assert(body.len() %% 16 == 0)
     enc := [U8]{}
     if &t.cipher_enc == {
-        .Val(c) -> enc = layer.cipher_crypt(c, iv, body) ?? panic("encrypt: {err}")
+        .Val(c) -> { enc = layer.cipher_crypt(c, iv, body) ?? panic("encrypt: {err}") }
         None -> panic("no cipher")
     }
     out := [U8]{23, 3, 3, 0, 0}
@@ -4858,7 +5090,9 @@ ct_cbc_open: fn(t: &ssldefs.SSLTransform, sealed: [U8], tail: [U8]) -> Int {
     assert_eq(ct_cbc_open(ssl.tpool[1], forged, good_pad), invalid_mac)
     assert_eq(ct_cbc_open(ssl.tpool[1], forged, ct_last_flipped(good_pad)), invalid_mac)
     t: ct_measure("TLS 1.2 CBC ssl_decrypt_buf, good against bad padding", 9000, 4, good_pad, fn(x) { ct_cbc_open(ssl.tpool[1], forged, x) })
-    if ct_abs(t) >= (Float{9} / Float{2}) -> panic("TLS 1.2 CBC padding: Welch's t is {t} between good and bad padding; the bound is 4.5")
+    if ct_abs(t) >= (Float{9} / Float{2}) {
+        panic("TLS 1.2 CBC padding: Welch's t is {t} between good and bad padding; the bound is 4.5")
+    }
 }
 
 /// exp_mod of the fixed `base` by the secret exponent `e` modulo the P-256

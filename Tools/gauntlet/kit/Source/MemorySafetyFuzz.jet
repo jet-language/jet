@@ -16,18 +16,30 @@ use {
 }
 
 CASE_KINDS: ["valid", "boundary", "oob", "use-after-free", "wrong-output"]
+
 CASE_VALID: 0
+
 CASE_BOUNDARY: 1
+
 CASE_OOB: 2
+
 CASE_USE_AFTER_FREE: 3
+
 CASE_WRONG_OUTPUT: 4
+
 RECORD_METADATA_BYTES: 4
+
 WORD_MASK: 4294967295
+
 CORPUS_GENERATOR: "xorshift32-v1"
+
 SHAPE_REFUSED: "memory-safety corpus must declare a bounded xorshift32 record shape"
+
 NUL: String.from_bytes_lossy([U8]{0})
+
 // What a run that names no target commit or output limit records.
 MEMORY_TARGET_COMMIT: "working-tree"
+
 MEMORY_OUTPUT_LIMIT: 8192
 
 // Where the adapter runs: the gauntlet run's directory, the repository, the
@@ -289,9 +301,7 @@ limited: fn(text: String, limit: Int) -> String {
 
 texts: fn(list: [String]) -> Dyn { Dyn.Array(list.map(fn(text) { Dyn.Text(text.copy()) })) }
 
-or_null_int: fn(value: Int?) -> Dyn {
-    if value == .Val(n) -> Dyn.Int(n) else -> Dyn.Null
-}
+or_null_int: fn(value: Int?) -> Dyn { if value == .Val(n) -> Dyn.Int(n) else -> Dyn.Null }
 
 or_null_text: fn(value: String?) -> Dyn {
     if value == .Val(text) -> Dyn.Text(text) else -> Dyn.Null
@@ -316,7 +326,7 @@ evidence_of: fn(outcome: CommandOutcome, limit: Int) -> Evidence {
         stdout: limited(outcome.stdout, limit),
         stderr: limited(outcome.stderr, limit),
         stdout_bytes: base64.encode(outcome.stdout.bytes()),
-        stderr_bytes: base64.encode(outcome.stderr.bytes())
+        stderr_bytes: base64.encode(outcome.stderr.bytes()),
     }
 }
 
@@ -344,7 +354,9 @@ failure_process: fn(reason: String) -> Dyn {
 // same signature.
 normalize_finding_text: fn(text: String, run: FuzzRun, limit: Int) -> String {
     normalized := text.copy()
-    loop root in [run.run_dir, run.repo_dir].filter(fn(root) { root != "" }) -> normalized = normalized.replace(root, "<path>")
+    loop root in [run.run_dir, run.repo_dir].filter(fn(root) { root != "" }) {
+        normalized = normalized.replace(root, "<path>")
+    }
     addresses: Regex{"0[xX][0-9a-fA-F]+"}.replace(normalized, "0xADDRESS")
     lines: Regex{":\d+(?::\d+)?"}.replace(addresses, ":LINE")
     limited(Regex{"\s+"}.replace(lines, " ").trim(), limit)
@@ -363,9 +375,7 @@ kind_for_evidence: fn(hit: Hit) -> String {
     if sanitizer.is_match("{hit.pattern} {hit.line}".lower()) -> "sanitizer" else -> "crash"
 }
 
-shown_code: fn(code: Int?) -> String {
-    if code == .Val(n) -> "{n}" else -> "null"
-}
+shown_code: fn(code: Int?) -> String { if code == .Val(n) -> "{n}" else -> "null" }
 
 // The budget's wall timeout as the axis declares it.
 wall_budget: fn(pass: AxisPass) -> String {
@@ -384,7 +394,9 @@ classify: fn(phase: String, evidence: Evidence, pass: AxisPass, patterns: [Strin
         detail: evidence.resource_exceeded ?? "wall timeout after {wall_budget(pass)}ms"
         findings.push(Finding{kind: "timeout", phase: phase, detail: detail, pattern: "timeout", excerpts: [detail]})
     }
-    loop hit in hits -> findings.push(Finding{kind: kind_for_evidence(hit), phase: phase, detail: hit.line, pattern: hit.pattern, excerpts: [hit.line]})
+    loop hit in hits {
+        findings.push(Finding{kind: kind_for_evidence(hit), phase: phase, detail: hit.line, pattern: hit.pattern, excerpts: [hit.line]})
+    }
     failed: evidence.signal != None || (evidence.code != None && evidence.code != Val(0))
     if !stopped && hits.len() == 0 && failed {
         detail: if evidence.signal == .Val(signal) -> "signal {signal}" else -> "exit {shown_code(evidence.code)}"
@@ -504,7 +516,9 @@ record_finding: fn(receipts: &[FindingReceipt], finding: Finding, runner: Dyn, p
     key: sha256_text("memory_safety_fuzz{NUL}{finding.kind}{NUL}{signature}")
     wanted: key.copy()
     found: receipts.position(fn(receipt) { receipt.dedupe_key == wanted })
-    if found == None -> receipts.push(FindingReceipt{dedupe_key: key, kind: finding.kind.copy(), signature: signature, rails: [String]{}, occurrences: [Dyn]{}, payload: hardening_payload(finding, runner, process, pass, command)})
+    if found == None {
+        receipts.push(FindingReceipt{dedupe_key: key, kind: finding.kind.copy(), signature: signature, rails: [String]{}, occurrences: [Dyn]{}, payload: hardening_payload(finding, runner, process, pass, command)})
+    }
     at: found ?? receipts.len() - 1
     rail: text_or_empty(runner, "id")
     if !receipts[at].rails.contains(rail) -> receipts[at].rails.push(rail.copy())
@@ -631,11 +645,13 @@ fail_runner: fn(result: &Dyn, reason: String) {
 // its compile and run stages, recording each into `result`. A runner that
 // cannot go on records why and stops; a host error is the caller's to
 // charge to `progress.stage`.
-run_stages: fn<H: MemoryAxisHost>(pass: AxisPass, runner: Dyn, host: H, result: &Dyn, progress: &RunnerProgress) -[FS, Exec]> Err! {
+run_stages: fn<H: MemoryAxisHost>(pass: AxisPass, runner: Dyn, host: H, result: &Dyn, progress: &RunnerProgress) Err! -[FS, Exec]> {
     runner_dir: files.join(pass.axis_dir, Regex{"[^A-Za-z0-9_.-]"}.replace(text_or_empty(runner, "id"), "_"))
     files.create_dir_all(runner_dir)
     staged: host.stage_files(runner_dir, dyn_at(runner, "files"))
-    if staged == .Array(_) -> result["source_files"] = staged else -> return Err("axis file staging did not return a file list")
+    if staged == .Array(_) -> result["source_files"] = staged else {
+        return Err("axis file staging did not return a file list")
+    }
     input_path: host.stage_path(runner_dir, text_or_empty(pass.axis, "corpus/path"))
     files.create_dir_all(files.dirname(input_path))
     files.write_bytes(input_path, pass.corpus.data)
@@ -682,7 +698,9 @@ run_stages: fn<H: MemoryAxisHost>(pass: AxisPass, runner: Dyn, host: H, result: 
         progress.findings.extend(classify("compile", evidence, pass, patterns))
         if evidence.code != Val(0) || evidence.timed_out || evidence.resource_exceeded != None {
             result["findings"] = findings_tree(progress.findings, pass, progress.probes)
-            if progress.findings.len() > 0 -> result["status"] = "finding" else -> fail_runner(result, "compile exited {shown_code(evidence.code)}")
+            if progress.findings.len() > 0 -> result["status"] = "finding" else {
+                fail_runner(result, "compile exited {shown_code(evidence.code)}")
+            }
             return Ok()
         }
     }
@@ -713,7 +731,9 @@ run_stages: fn<H: MemoryAxisHost>(pass: AxisPass, runner: Dyn, host: H, result: 
         evidence.resource_exceeded != None -> fail_runner(result, evidence.resource_exceeded ?? "")
         evidence.timed_out -> fail_runner(result, "run exceeded {wall_budget(pass)}ms wall budget")
         evidence.code != Val(0) -> fail_runner(result, "run exited {shown_code(evidence.code)}")
-        evidence.stdout != pass.expected -> fail_runner(result, "run stdout did not match the declared oracle")
+        evidence.stdout != pass.expected -> {
+            fail_runner(result, "run stdout did not match the declared oracle")
+        }
         else -> result["status"] = "complete"
     }
     Ok()
@@ -758,14 +778,18 @@ run_memory_safety_fuzz_axis: fn<H: MemoryAxisHost>(axis: Dyn, run: FuzzRun, host
         outcome: run_runner(pass, runner, host)
         process: first_member(outcome.result, ["run/process", "compile/process"]) ?? evidence_tree(evidence_of(CommandOutcome{code: None, signal: None, timed_out: false, resource_exceeded: None, stdout: "", stderr: ""}, 0))
         command: first_member(outcome.result, ["run/command", "compile/command", "declared_run", "declared_compile"]) ?? Dyn.Array([Dyn]{})
-        loop finding in outcome.findings -> record_finding(receipts, finding, runner, process, pass, command)
+        loop finding in outcome.findings {
+            record_finding(receipts, finding, runner, process, pass, command)
+        }
         runners.push(outcome.result)
     }
     measured: runners.all(fn(result) { finished(result) })
     receipts.sort_by(fn(receipt: FindingReceipt) { receipt.dedupe_key.slice(0, 16) })
     occurrences: receipts.map(fn(receipt) { receipt.occurrences.len() }).sum()
     blockers := runners.filter(fn(result) { !finished(result) }).map(fn(result) { "{text_or_empty(result, "id")}: {text_at(result, "reason") ?? "status {text_or_empty(result, "status")}"}" })
-    if receipts.len() > 0 -> blockers.push("{receipts.len()} deduplicated finding receipt(s) require Tower CLI tracking")
+    if receipts.len() > 0 {
+        blockers.push("{receipts.len()} deduplicated finding receipt(s) require Tower CLI tracking")
+    }
     valid: summary.counts[CASE_VALID]
     findings: Dyn.Array(receipts.map(fn(receipt) { receipt_tree(receipt) }))
     corpus_out := Dyn.object()
@@ -788,7 +812,9 @@ run_memory_safety_fuzz_axis: fn<H: MemoryAxisHost>(axis: Dyn, run: FuzzRun, host
     oracle["output"] = expected
     counts: [(key: "memory_safety_findings", value: receipts.len()), (key: "finding_occurrences", value: occurrences), (key: "valid_cases", value: valid), (key: "adversarial_cases", value: corpus.case_count - valid)]
     metrics := Dyn.object()
-    loop count in counts -> metrics[count.key] = if measured -> Dyn.Int(count.value) else -> Dyn.Null
+    loop count in counts {
+        metrics[count.key] = if measured -> Dyn.Int(count.value) else -> Dyn.Null
+    }
     publication := Dyn.object()
     publication["status"] = if blockers.len() == 0 -> "ready" else -> "blocked"
     publication["blockers"] = texts(blockers)
@@ -826,20 +852,32 @@ test_memory_axis: fn() -> Dyn {
 // "digest" (every file digest is wrong).
 TestMemoryHost: struct {
     fails: String
+
     impl MemoryAxisHost {
         stage_files: fn(self, _dir: String, declared: Dyn) -> Dyn Err! {
             if self.fails == "staging" -> return Err("staging failed")
             Ok(declared)
         }
-        stage_path: fn(self, dir: String, relative: String) -> String Err! { Ok(files.join(dir, relative)) }
+
+        stage_path: fn(self, dir: String, relative: String) -> String Err! {
+            Ok(files.join(dir, relative))
+        }
+
         probe_tools: fn(self, _dir: String, _tools: Dyn, _jet_bin: String) -> [Dyn] Err! {
             Ok([json.parse("{{\"tool\":\"test-tool\",\"status\":\"available\"}}") ?? Dyn.Null])
         }
-        command: fn(self, declared: Dyn, _jet_bin: String) -> [String] Err! { Ok(texts_at(declared, "")) }
+
+        command: fn(self, declared: Dyn, _jet_bin: String) -> [String] Err! {
+            Ok(texts_at(declared, ""))
+        }
+
         run_command: fn(self, _dir: String, command: [String], _budget: Dyn) -> CommandRun Err! {
-            if self.fails == "compile" || (self.fails == "run" && command[0] == "test-runner") -> return Err("{self.fails} failed")
+            if self.fails == "compile" || (self.fails == "run" && command[0] == "test-runner") {
+                return Err("{self.fails} failed")
+            }
             Ok(CommandRun{command: command, process: CommandOutcome{code: Val(0), signal: None, timed_out: false, resource_exceeded: None, stdout: "", stderr: ""}})
         }
+
         file_sha256: fn(self, path: String) -> String Err! {
             if self.fails == "digest" -> return Ok("bad-digest")
             Ok(crypto.sha256(files.read_bytes(path)).hex())
@@ -873,7 +911,9 @@ assert_blocked: fn(report: Dyn, stage: String, copied: Dyn) {
     assert(found_at(runner, "corpus/generated_sha256") == generated)
     assert(found_at(runner, "corpus/copied_sha256") == copied)
     assert(is_true(runner, "corpus/matches_generator") == (copied == generated))
-    loop key in ["case_count", "bytes_per_case", "bytes", "case_kinds"] -> assert(found_at(runner, "corpus/{key}") == found_at(report, "corpus/{key}"))
+    loop key in ["case_count", "bytes_per_case", "bytes", "case_kinds"] {
+        assert(found_at(runner, "corpus/{key}") == found_at(report, "corpus/{key}"))
+    }
     assert(found_at(report, "metrics/valid_cases") == Dyn.Null && found_at(report, "metrics/adversarial_cases") == Dyn.Null)
 }
 

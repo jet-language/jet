@@ -66,7 +66,7 @@ trust_lock_input_issues: fn(inputs: [LockInput]) -> [ValidationIssue] Never! {
             issues.push(ValidationIssue.MissingFollows{input: input.name, follows: input.follows})
         }
     }
-    edges := [String: String]{}
+    edges := [String:String]{}
     loop input in inputs {
         if input.follows != "" && names.contains(input.follows) -> edges[input.name] = input.follows
     }
@@ -82,7 +82,7 @@ trust_lock_input_issues: fn(inputs: [LockInput]) -> [ValidationIssue] Never! {
 
 // Floyd's walk along `follows` edges; the meeting node when `start`
 // reaches a cycle.
-trust_lock_cycle_from: fn(start: String, edges: [String: String]) -> String? Never! {
+trust_lock_cycle_from: fn(start: String, edges: [String:String]) -> String? Never! {
     slow := start
     fast := start
     loop {
@@ -95,7 +95,7 @@ trust_lock_cycle_from: fn(start: String, edges: [String: String]) -> String? Nev
 
 trust_lock_record_issues: fn(lock: SemanticLockFile) -> [ValidationIssue] Never! {
     issues := [ValidationIssue]{}
-    seen_platform := [String: String]{}
+    seen_platform := [String:String]{}
     loop record in lock.records {
         key: record.identity.semantic_key()
         if record.identity.hash == "" {
@@ -127,7 +127,7 @@ trust_lock_source_map_issues: fn(lock: SemanticLockFile) -> [ValidationIssue] Ne
         if record.identity.kind != LockRecordKind.Package -> next
         package: trust_lock_source_package(record.identity.key)
         map: trust_lock_matching_source_map(lock.source_maps, package) ?? next
-        source: if record.rationales.len() == 0 -> "" else -> if record.rationales[0].source_ref != "" -> record.rationales[0].source_ref else -> record.rationales[0].provider
+        source: if record.rationales.len() == 0 -> "" else if record.rationales[0].source_ref != "" -> record.rationales[0].source_ref else -> record.rationales[0].provider
         if source == "" -> next
         authority: trust_lock_source_authority(source)
         allowed := false

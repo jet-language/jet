@@ -17,11 +17,9 @@ error_name: fn(error: vault.VaultError) -> String Never! {
         .UnsupportedProvider -> "UnsupportedProvider"
         .InvalidEncoding -> "InvalidEncoding"
         .DurabilityUnknown -> "DurabilityUnknown"
-        .Crypto(cause) -> {
-            if cause == {
-                .Unavailable -> "Crypto"
-                .OpenFailed | .VerifyFailed | .KeyRejected | .Length -> panic("Crypto must contain the public CryptoError case")
-            }
+        .Crypto(cause) -> if cause == {
+            .Unavailable -> "Crypto"
+            .OpenFailed | .VerifyFailed | .KeyRejected | .Length -> panic("Crypto must contain the public CryptoError case")
         }
         .IO{operation, redacted_path} -> {
             assert_eq(operation, "read")
@@ -45,20 +43,36 @@ status_name: fn(status: vault.KeyStatus) -> String Never! {
 
 run: fn() {
     cases: [vault.VaultError]{
-        .InvalidName, .NotFound, .WrongType, .Revoked, .Locked,
-        .AuthorityDenied, .Conflict, .UnsupportedProvider, .InvalidEncoding,
-        .DurabilityUnknown, .Crypto(crypto.CryptoError.Unavailable),
+        .InvalidName,
+        .NotFound,
+        .WrongType,
+        .Revoked,
+        .Locked,
+        .AuthorityDenied,
+        .Conflict,
+        .UnsupportedProvider,
+        .InvalidEncoding,
+        .DurabilityUnknown,
+        .Crypto(crypto.CryptoError.Unavailable),
         .IO{operation: "read", redacted_path: "<vault>"},
-        .Internal{incident_id: "vault-4835"}
+        .Internal{incident_id: "vault-4835"},
     }
     names: [String]{
-        "InvalidName", "NotFound", "WrongType", "Revoked", "Locked",
-        "AuthorityDenied", "Conflict", "UnsupportedProvider", "InvalidEncoding",
-        "DurabilityUnknown", "Crypto", "IO", "Internal"
+        "InvalidName",
+        "NotFound",
+        "WrongType",
+        "Revoked",
+        "Locked",
+        "AuthorityDenied",
+        "Conflict",
+        "UnsupportedProvider",
+        "InvalidEncoding",
+        "DurabilityUnknown",
+        "Crypto",
+        "IO",
+        "Internal",
     }
-    loop index in 0..<cases.len() {
-        assert_eq(error_name(cases[index]), names[index])
-    }
+    loop index in 0..<cases.len() { assert_eq(error_name(cases[index]), names[index]) }
     assert_eq(status_name(vault.KeyStatus.Active), "Active")
     assert_eq(status_name(vault.KeyStatus.Retired), "Retired")
     assert_eq(status_name(vault.KeyStatus.Revoked), "Revoked")

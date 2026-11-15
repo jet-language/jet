@@ -8,6 +8,7 @@ pool_worker: fn(token: Int, returned: Sender<Int>) -> Int {
     returned.send(token)
     return token
 }
+
 pool_demo: fn() -> [Int] {
     { sender: returned, receiver: available }: channel<Int>(capacity: 2)
     returned.send(1)
@@ -25,7 +26,7 @@ pool_demo: fn() -> [Int] {
     leases := [
         first.join() ?? panic("first worker failed"),
         second.join() ?? panic("second worker failed"),
-        third.join() ?? panic("third worker failed")
+        third.join() ?? panic("third worker failed"),
     ]
     leases.sort()
     return leases

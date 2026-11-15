@@ -2,7 +2,6 @@
 // selected once, when the toolchain packages the runtime library; its
 // receipt (`layout`, `export`, `data` and `import` rows) is what the program
 // partition is placed and linked against at `jet build --target web`.
-
 use {
     jet_backend.[X64DataExport]
     jet_foundation.[CHECKED_ALLOC_RUNTIME_EXPORTS, foundation_json_escape]
@@ -37,14 +36,20 @@ web_runtime_partition: fn(m: IRModule, exports: [IRLibraryExport], data: [X64Dat
     loop row in exports {
         if CHECKED_ALLOC_RUNTIME_EXPORTS.contains(row.symbol) -> next
         rows[row.symbol.copy()] = row.function
-        if row.init_priority >= 0 -> hooks.push(WebHook{row: row.function, priority: row.init_priority, fini: false})
-        if row.fini_priority >= 0 -> hooks.push(WebHook{row: row.function, priority: row.fini_priority, fini: true})
+        if row.init_priority >= 0 {
+            hooks.push(WebHook{row: row.function, priority: row.init_priority, fini: false})
+        }
+        if row.fini_priority >= 0 {
+            hooks.push(WebHook{row: row.function, priority: row.fini_priority, fini: true})
+        }
     }
     built := web_module(m, false, WebLayout{data_base: WEB_DATA_BASE, table_base: 0}, [String:String]{}, -1, web_host_functions(), rows, hooks)
     lines := [String]{"layout\t{built.data_end}\t{built.slots}"}
     loop row in built.exports -> lines.push("export\t{row}")
     loop row in data {
-        if row.data >= 0 && row.data < built.data_at.len() -> lines.push("data\t{row.symbol}\t{built.data_at[row.data]}")
+        if row.data >= 0 && row.data < built.data_at.len() {
+            lines.push("data\t{row.symbol}\t{built.data_at[row.data]}")
+        }
     }
     loop row in built.imports -> lines.push("import\t{row}")
     lines.push("")
@@ -199,14 +204,8 @@ web_source_name: fn(source: String, entry: String) -> String Never! {
 
 // The generated host files of a web build: `app.js`, `jet_dom_runtime.js`,
 // `index.html`.
-web_app_js: fn() -> String Never! {
-    WEB_APP_JS
-}
+web_app_js: fn() -> String Never! { WEB_APP_JS }
 
-web_dom_runtime_js: fn() -> String Never! {
-    WEB_DOM_RUNTIME_JS
-}
+web_dom_runtime_js: fn() -> String Never! { WEB_DOM_RUNTIME_JS }
 
-web_index_html: fn() -> String Never! {
-    WEB_INDEX_HTML
-}
+web_index_html: fn() -> String Never! { WEB_INDEX_HTML }

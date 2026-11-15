@@ -53,13 +53,15 @@ take_while: fn(src: Input, predicate: fn(String) -> Bool Never!) -> Took Never! 
         width: utf8_width(raw, i)
         scalar: String.from_bytes(slice_range(raw, i, i + width)) ?? break
         if !predicate(scalar) -> break
-        i = i + width
+        i += width
     }
     chunk: String.from_bytes(slice_range(raw, src.pos, i)) ?? ""
     {next: Input{text: src.text, pos: i}, chunk: chunk}
 }
 
-skip_ws: fn(src: Input) -> Input Never! { take_while(src, fn(scalar: String) { unicode.is_whitespace(scalar) }).next }
+skip_ws: fn(src: Input) -> Input Never! {
+    take_while(src, fn(scalar: String) { unicode.is_whitespace(scalar) }).next
+}
 
 digit: fn(src: Input) -> Digit? Never! {
     b: peek(src) ?? return None
@@ -93,9 +95,15 @@ utf8_width: fn(raw: [U8], at: Int) -> Int {
     if at < 0 || at >= raw.len() -> return 1
     b: raw[at]
     if b < 128 -> return 1
-    if b >= 194 && b <= 223 && at + 1 < raw.len() && raw[at + 1] >= 128 && raw[at + 1] <= 191 -> return 2
-    if b >= 224 && b <= 239 && at + 2 < raw.len() && raw[at + 1] >= 128 && raw[at + 1] <= 191 && raw[at + 2] >= 128 && raw[at + 2] <= 191 -> return 3
-    if b >= 240 && b <= 244 && at + 3 < raw.len() && raw[at + 1] >= 128 && raw[at + 1] <= 191 && raw[at + 2] >= 128 && raw[at + 2] <= 191 && raw[at + 3] >= 128 && raw[at + 3] <= 191 -> return 4
+    if b >= 194 && b <= 223 && at + 1 < raw.len() && raw[at + 1] >= 128 && raw[at + 1] <= 191 {
+        return 2
+    }
+    if b >= 224 && b <= 239 && at + 2 < raw.len() && raw[at + 1] >= 128 && raw[at + 1] <= 191 && raw[at + 2] >= 128 && raw[at + 2] <= 191 {
+        return 3
+    }
+    if b >= 240 && b <= 244 && at + 3 < raw.len() && raw[at + 1] >= 128 && raw[at + 1] <= 191 && raw[at + 2] >= 128 && raw[at + 2] <= 191 && raw[at + 3] >= 128 && raw[at + 3] <= 191 {
+        return 4
+    }
     1
 }
 
@@ -110,7 +118,7 @@ slice_range: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     loop {
         if i >= hi -> return out
         out.push(raw[i])
-        i = i + 1
+        i += 1
     }
 }
 

@@ -8,9 +8,13 @@ build: fn(b: Build) {
     app: b.add_executable("app", ["main.jet"], [])
     meta: b.compiler(app)
     fields := [CompilerField]{}
-    loop field in Seed.reflect().fields -> fields.push(CompilerField{name: field.name.copy(), type: field.type.copy()})
+    loop field in Seed.reflect().fields {
+        fields.push(CompilerField{name: field.name.copy(), type: field.type.copy()})
+    }
     point: meta.add_struct("Point", fields, scope: "point")
-    if point.identity != "point.Point" || point.name != "Point" -> panic("`meta.add_struct` returned {point.identity}")
+    if point.identity != "point.Point" || point.name != "Point" {
+        panic("`meta.add_struct` returned {point.identity}")
+    }
     meta.add_struct("Pin", [CompilerField]{CompilerField{name: "at", type: point}}, scope: "pin")
     b.default(app)
 }

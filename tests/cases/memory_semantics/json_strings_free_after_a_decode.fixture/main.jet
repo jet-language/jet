@@ -14,7 +14,9 @@ use {
 }
 
 RECORDS: 20000
+
 ROUNDS: 20
+
 GROWTH_LIMIT_KB: 8192
 
 Key: struct {
@@ -61,7 +63,9 @@ measure: fn(name: String, text: String, scenario: fn(String) -> Int) {
     start: status_kb("VmRSS:")
     loop _ in 1..<ROUNDS -> total += scenario(text)
     grown: status_kb("VmRSS:") - start
-    if grown > GROWTH_LIMIT_KB -> panic("{name}: the resident set grew {grown} kB over {ROUNDS} rounds")
+    if grown > GROWTH_LIMIT_KB {
+        panic("{name}: the resident set grew {grown} kB over {ROUNDS} rounds")
+    }
     print("{name}: {total}, the strings freed")
 }
 

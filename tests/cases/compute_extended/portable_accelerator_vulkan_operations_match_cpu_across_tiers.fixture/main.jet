@@ -1,4 +1,3 @@
-
 use compute: core.compute
 
 run: fn() {
@@ -7,7 +6,7 @@ run: fn() {
     left_f32: compute.matmul_f32_tile(left_cpu, compute.eye(2) ?? panic("eye")) ?? panic("left f32")
     right_f32: compute.matmul_f32_tile(right_cpu, compute.eye(2) ?? panic("eye")) ?? panic("right f32")
     if compute.on_device(left_f32, compute.device_vulkan()) == {
-        .Err(_) -> print("vulkan:unavailable")
+        .Err(_) -> { print("vulkan:unavailable") }
         .Ok(left) -> {
             right: compute.on_device(right_f32, compute.device_vulkan()) ?? panic("right Vulkan")
             if !compute.placement(left).contains("backend=vulkan") -> panic("Vulkan receipt")

@@ -14,52 +14,80 @@ use {
 
 // S41: `len` counts Unicode scalars, the items `loop c in s.chars()` visits.
 // UTF-8 byte length is `count_bytes()` (or `text.byte_count`).
-len: fn(receiver: String) -> Int {
-    receiver.chars().len()
-}
+len: fn(receiver: String) -> Int { receiver.chars().len() }
 
 // Unicode 17 case mapping (jet_unicode_lower/upper,
 // jet_text_casefold/title/capitalize/swapcase).
 lower: fn(receiver: String) -> String { string_unicode.lower(receiver) }
+
 to_lower: fn(receiver: String) -> String { string_unicode.lower(receiver) }
+
 upper: fn(receiver: String) -> String { string_unicode.upper(receiver) }
+
 to_upper: fn(receiver: String) -> String { string_unicode.upper(receiver) }
+
 casefold: fn(receiver: String) -> String { string_unicode.casefold(receiver) }
+
 title: fn(receiver: String) -> String { string_unicode.title(receiver) }
+
 to_title: fn(receiver: String) -> String { string_unicode.title(receiver) }
+
 capitalize: fn(receiver: String) -> String { string_unicode.capitalize(receiver) }
+
 swapcase: fn(receiver: String) -> String { string_unicode.swapcase(receiver) }
+
 to_ascii_lower: fn(receiver: String) -> String { string_unicode.ascii_lower(receiver) }
+
 to_ascii_upper: fn(receiver: String) -> String { string_unicode.ascii_upper(receiver) }
 
 // Unicode White_Space trimming (Rust jet_unicode_trim*, jet_text_parse_*strip).
 trim: fn(receiver: String) -> String { string_unicode.trim(receiver) }
+
 strip: fn(receiver: String) -> String { string_unicode.trim(receiver) }
+
 trim_start: fn(receiver: String) -> String { string_unicode.trim_start(receiver) }
+
 lstrip: fn(receiver: String) -> String { string_unicode.trim_start(receiver) }
+
 trim_end: fn(receiver: String) -> String { string_unicode.trim_end(receiver) }
+
 rstrip: fn(receiver: String) -> String { string_unicode.trim_end(receiver) }
 
 // Scalar predicates over the pinned Unicode 17 properties. Empty text is false
 // except for isascii/isprintable.
 is_alphabetic: fn(receiver: String) -> Bool { string_unicode.is_alphabetic(receiver) }
+
 isalpha: fn(receiver: String) -> Bool { string_unicode.is_alphabetic(receiver) }
+
 is_numeric: fn(receiver: String) -> Bool { string_unicode.is_numeric(receiver) }
+
 isnumeric: fn(receiver: String) -> Bool { string_unicode.is_numeric(receiver) }
+
 is_whitespace: fn(receiver: String) -> Bool { string_unicode.is_whitespace(receiver) }
+
 isspace: fn(receiver: String) -> Bool { string_unicode.is_whitespace(receiver) }
+
 isalnum: fn(receiver: String) -> Bool { string_unicode.is_alnum(receiver) }
+
 isprintable: fn(receiver: String) -> Bool { string_unicode.isprintable(receiver) }
+
 isidentifier: fn(receiver: String) -> Bool { string_unicode.is_identifier(receiver) }
+
 is_lower: fn(receiver: String) -> Bool { string_unicode.is_lower(receiver) }
+
 islower: fn(receiver: String) -> Bool { string_unicode.is_lower(receiver) }
+
 is_upper: fn(receiver: String) -> Bool { string_unicode.is_upper(receiver) }
+
 isupper: fn(receiver: String) -> Bool { string_unicode.is_upper(receiver) }
+
 istitle: fn(receiver: String) -> Bool { string_unicode.is_title(receiver) }
 
 // Rust jet_text_unicode_is_ascii: every UTF-8 byte is ASCII; empty is true.
 is_ascii: fn(receiver: String) -> Bool { ascii_only(receiver) }
+
 isascii: fn(receiver: String) -> Bool { ascii_only(receiver) }
+
 ascii_only: fn(text: String) -> Bool {
     loop b in string_unicode.utf8_bytes(text) {
         if b > (U8{127}) -> return false
@@ -70,7 +98,9 @@ ascii_only: fn(text: String) -> Bool {
 // Rust jet_text_isdecimal/isdigit: nonempty and every scalar is ASCII 0-9,
 // so every UTF-8 byte is one.
 isdecimal: fn(receiver: String) -> Bool { ascii_digits(receiver) }
+
 isdigit: fn(receiver: String) -> Bool { ascii_digits(receiver) }
+
 ascii_digits: fn(text: String) -> Bool {
     raw: string_unicode.utf8_bytes(text)
     if raw.len() == 0 -> return false
@@ -85,9 +115,11 @@ ascii_digits: fn(text: String) -> Bool {
 find: fn(receiver: String, needle: String) -> Int {
     byte_find(string_unicode.utf8_bytes(receiver), string_unicode.utf8_bytes(needle), false)
 }
+
 rfind: fn(receiver: String, needle: String) -> Int {
     byte_find(string_unicode.utf8_bytes(receiver), string_unicode.utf8_bytes(needle), true)
 }
+
 byte_find: fn(raw: [U8], needle: [U8], last: Bool) -> Int {
     if needle.len() > raw.len() -> return -1
     span: raw.len() - needle.len()
@@ -97,12 +129,14 @@ byte_find: fn(raw: [U8], needle: [U8], last: Bool) -> Int {
     }
     -1
 }
+
 bytes_match_at: fn(raw: [U8], at: Int, needle: [U8]) -> Bool {
     loop j in 0..<needle.len() {
         if raw[at + j] != needle[j] -> return false
     }
     true
 }
+
 byte_text: fn(raw: [U8], start: Int, end: Int) -> String {
     out := [U8]{}
     loop i in start..<end -> out.push(raw[i])
@@ -118,6 +152,7 @@ partition: fn(receiver: String, sep: String) -> (head: String, sep: String, tail
     if at < 0 -> return (head: receiver.copy(), sep: "", tail: "")
     (head: byte_text(raw, 0, at), sep: sep.copy(), tail: byte_text(raw, at + needle.len(), raw.len()))
 }
+
 rpartition: fn(receiver: String, sep: String) -> (head: String, sep: String, tail: String) {
     raw: string_unicode.utf8_bytes(receiver)
     needle: string_unicode.utf8_bytes(sep)
@@ -128,9 +163,19 @@ rpartition: fn(receiver: String, sep: String) -> (head: String, sep: String, tai
 
 // Rust jet_text_remove_prefix/suffix: byte-exact affix, otherwise unchanged.
 removeprefix: fn(receiver: String, prefix: String) -> String { strip_affix(receiver, prefix, true) }
-remove_prefix: fn(receiver: String, prefix: String) -> String { strip_affix(receiver, prefix, true) }
-removesuffix: fn(receiver: String, suffix: String) -> String { strip_affix(receiver, suffix, false) }
-remove_suffix: fn(receiver: String, suffix: String) -> String { strip_affix(receiver, suffix, false) }
+
+remove_prefix: fn(receiver: String, prefix: String) -> String {
+    strip_affix(receiver, prefix, true)
+}
+
+removesuffix: fn(receiver: String, suffix: String) -> String {
+    strip_affix(receiver, suffix, false)
+}
+
+remove_suffix: fn(receiver: String, suffix: String) -> String {
+    strip_affix(receiver, suffix, false)
+}
+
 strip_affix: fn(text: String, affix: String, front: Bool) -> String {
     raw: string_unicode.utf8_bytes(text)
     cut: string_unicode.utf8_bytes(affix)
@@ -158,13 +203,13 @@ expandtabs: fn(receiver: String, tabsize: Int) -> String {
             if width > 0 {
                 spaces: width - (column %% width)
                 loop _ in 0..<spaces -> out.push(U8{32})
-                column = column + spaces
+                column += spaces
             }
         } else {
             loop i in at..<(at + step) -> out.push(raw[i])
-            if b == (U8{10}) || b == (U8{13}) -> column = 0 else -> column = column + 1
+            if b == (U8{10}) || b == (U8{13}) -> column = 0 else -> column += 1
         }
-        at = at + step
+        at += step
     }
     String.from_bytes(out) ?? panic("tab expansion keeps whole UTF-8 scalars")
 }
@@ -175,11 +220,25 @@ normalize: fn(receiver: String) -> String { string_normal.normalize(receiver, fa
 // Rust jet_text_pad_start/pad_end/center(_ref): pad to `width` display columns
 // (portable-default grapheme widths) with whole first-grapheme units of `fill`;
 // a remainder, empty fill or unusable unit pads with spaces.
-pad_start: fn(receiver: String, width: Int, fill: String) -> String { string_width.pad(receiver, width, fill, true, false) }
-rjust: fn(receiver: String, width: Int, fill: String) -> String { string_width.pad(receiver, width, fill, true, false) }
-pad_end: fn(receiver: String, width: Int, fill: String) -> String { string_width.pad(receiver, width, fill, false, true) }
-ljust: fn(receiver: String, width: Int, fill: String) -> String { string_width.pad(receiver, width, fill, false, true) }
-center: fn(receiver: String, width: Int, fill: String) -> String { string_width.pad(receiver, width, fill, true, true) }
+pad_start: fn(receiver: String, width: Int, fill: String) -> String {
+    string_width.pad(receiver, width, fill, true, false)
+}
+
+rjust: fn(receiver: String, width: Int, fill: String) -> String {
+    string_width.pad(receiver, width, fill, true, false)
+}
+
+pad_end: fn(receiver: String, width: Int, fill: String) -> String {
+    string_width.pad(receiver, width, fill, false, true)
+}
+
+ljust: fn(receiver: String, width: Int, fill: String) -> String {
+    string_width.pad(receiver, width, fill, false, true)
+}
+
+center: fn(receiver: String, width: Int, fill: String) -> String {
+    string_width.pad(receiver, width, fill, true, true)
+}
 
 // Rust jet_text_compare: `str::cmp`, i.e. lexicographic UTF-8 byte order.
 compare: fn(receiver: String, other: String) -> Int {
@@ -203,7 +262,7 @@ reverse: fn(receiver: String) -> String {
     end := raw.len()
     loop end > 0 {
         start := end - 1
-        loop start > 0 && (raw[start].bit_and(U8{192})) == (U8{128}) -> start = start - 1
+        loop start > 0 && (raw[start].bit_and(U8{192})) == (U8{128}) -> start -= 1
         loop i in start..<end -> out.push(raw[i])
         end = start
     }
@@ -215,7 +274,7 @@ zfill: fn(receiver: String, width: Int) -> String {
     raw: string_unicode.utf8_bytes(receiver)
     length := 0
     loop b in raw {
-        if (b.bit_and(U8{192})) != (U8{128}) -> length = length + 1
+        if (b.bit_and(U8{192})) != (U8{128}) -> length += 1
     }
     if width <= length -> return receiver.copy()
     out := [U8]{}

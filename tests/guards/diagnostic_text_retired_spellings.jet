@@ -41,7 +41,9 @@ dr_source_violations: fn(violations: &[String]) {
             if !path.ends_with(".jet") -> next
             source: dr_files.read(path) ?? panic("read {path}: {err}")
             loop (index, line) in source.lines() {
-                if !line.trim().starts_with("//") -> dr_report("{path}:{index + 1}", line, violations)
+                if !line.trim().starts_with("//") {
+                    dr_report("{path}:{index + 1}", line, violations)
+                }
             }
         }
     }

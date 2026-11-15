@@ -8,10 +8,10 @@
 // terminal owns rendering, so callbacks carry its IO/Env/wait effects. Rust
 // installed it thread-locally; the provider context carries it explicitly here.
 ProgressHandle: struct {
-    discovered_bytes: fn(Int) Never! -[IO, Env, Time.Wait]>
-    transferred_bytes: fn(Int) Never! -[IO, Env, Time.Wait]>
-    phase: fn(String) Never! -[IO, Env, Time.Wait]>
-    object_progress: fn(Int, Int) Never! -[IO, Env, Time.Wait]>
+    discovered_bytes: fn(Int) -[IO, Env, Time.Wait]> Never!
+    transferred_bytes: fn(Int) -[IO, Env, Time.Wait]> Never!
+    phase: fn(String) -[IO, Env, Time.Wait]> Never!
+    object_progress: fn(Int, Int) -[IO, Env, Time.Wait]> Never!
 
     silent: fn() -> ProgressHandle Never! {
         ProgressHandle{
@@ -76,12 +76,13 @@ VerifiedRealization: struct {
 #Error
 RealizeError: enum {
     Provider(ProviderError)
-    // A project lock named the Nix closure, but its portable bytes or
-    // identity could not be replayed. Kept distinct from generic Hangar
-    // failures so callers can render the registered cache diagnostic.
     LockedNix(StoreError)
     Store(StoreError)
     Integrity(IntegrityFailure)
+
+    // A project lock named the Nix closure, but its portable bytes or
+    // identity could not be replayed. Kept distinct from generic Hangar
+    // failures so callers can render the registered cache diagnostic.
 
     message: fn(self) -> String Never! {
         if self == {
@@ -172,7 +173,7 @@ store_record_verified_mode: fn(verification: &StoreVerification, roots: HangarRo
         .Val(meta) -> meta.realized_at ?? now
         .None -> now
     }
-    producer := ProducerRecord.decode(store_canonical_producer("store-record", "cas:{cache_identity.source_fingerprint}", envelope.output_hash, cache_identity, [String: String]{"reference": reference}))
+    producer := ProducerRecord.decode(store_canonical_producer("store-record", "cas:{cache_identity.source_fingerprint}", envelope.output_hash, cache_identity, [String:String]{"reference": reference}))
     producer.bind_cache_provenance(reference, envelope.output_hash, cache_identity, [String]{})
     provider_refresh_provider_facts(producer, reference) ?? return Err(StoreError.Other("{err}"))
     entry: StoreEntry{
@@ -186,7 +187,7 @@ store_record_verified_mode: fn(verification: &StoreVerification, roots: HangarRo
         envelope: envelope,
         cache_identity: cache_identity,
         references: [String]{},
-        named_outputs: [String: String]{},
+        named_outputs: [String:String]{},
         platform_artifact_kind: "",
         producer_record: producer.encode(),
         receipt: "",
@@ -219,7 +220,7 @@ store_record_realized_mode_unlocked: fn(verification: &StoreVerification, roots:
     // Capture named-output identities before projection may move a local
     // staging path into Hangar. The bytes, not the transient source
     // spelling, are the durable output facts.
-    named_outputs := [String: String]{}
+    named_outputs := [String:String]{}
     loop name in store_sorted_keys(realized.named_outputs) {
         path: realized.named_outputs[name]
         digest: store_canonical_graph_digest(roots, graph, path) ?? store_verified_output_hash(verification, path, None, false) ?? return Err(err)
@@ -245,7 +246,7 @@ store_record_realized_mode_unlocked: fn(verification: &StoreVerification, roots:
 
 // The staging half of realized recording: project or stage the outputs and
 // build the package record the transaction will commit.
-store_record_realized_in_transaction: fn(roots: HangarRoots, realized: Realized, graph: ClosureGraph, captured_outputs: [String: String], transaction: &AdmissionTransaction) -> StoreEntry StoreError! {
+store_record_realized_in_transaction: fn(roots: HangarRoots, realized: Realized, graph: ClosureGraph, captured_outputs: [String:String], transaction: &AdmissionTransaction) -> StoreEntry StoreError! {
     paths: if realized.producer.provider == "nix" -> store_project_nix_outputs_unlocked(roots, realized, graph, transaction) else -> store_stage_local_output_unlocked(roots, realized.out, realized.bin, realized.rlib, realized.envelope.output_hash, transaction)
     named_outputs := captured_outputs.copy()
     named_outputs["out"] = realized.envelope.output_hash
@@ -307,7 +308,9 @@ store_record_realized_in_transaction: fn(roots: HangarRoots, realized: Realized,
 // callers.
 store_realize_verified: fn(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, request: RealizeRequest) -> VerifiedRealization RealizeError! {
     if request == {
-        .Package(spec, _) -> store_enforce_manifest_provenance_floor(ctx.project_dir, spec.package)
+        .Package(spec, _) -> {
+            store_enforce_manifest_provenance_floor(ctx.project_dir, spec.package)
+        }
         .Adapter(_, _, _) -> {}
     }
     // WAL is authority. Recover package projections before cache
@@ -346,67 +349,77 @@ store_realize_verified: fn(verification: &StoreVerification, roots: HangarRoots,
     // the next realization builds it again, never silently rebuilt or reused.
     candidate: store_find_by_reference_read_only(roots, reference)
     if candidate == .Val(found) {
-    if expectation == .Val(wanted) {
-        hit: if store_find_verified_by_reference(verification, roots, reference, wanted) == {
-            .Ok(value) -> value
-            .Err(error) -> { return Err(RealizeError.Store(error)) }
-        }
-        if hit == {
-            .Val(verified) -> {
-                store_validate_adapter_request_hook(request, verified.entry, wanted)
-                store_authorize_and_project_realization(ctx, verified.entry)
-                return Ok(VerifiedRealization{entry: verified.entry, source_state_value: SourceState.Cached, lease: verified.lease.move()})
+        if expectation == .Val(wanted) {
+            hit: if store_find_verified_by_reference(verification, roots, reference, wanted) == {
+                .Ok(value) -> value
+                .Err(error) -> {
+                    return Err(RealizeError.Store(error))
+                }
             }
-            .None -> {
-                proof: store_verify_cache_entry(verification, roots, found, reference, wanted)
-                if cache_bindings.len() > 0 {
-                    substituted: store_try_substitute_invalid_candidate(verification, roots, found, wanted, cache_bindings) ?? return Err(RealizeError.Store(err))
-                    if substituted {
-                        again: if store_find_verified_by_reference(verification, roots, reference, wanted) == {
-                            .Ok(value) -> value
-                            .Err(error) -> { return Err(RealizeError.Store(error)) }
-                        }
-                        if again == {
-                            .Val(verified) -> {
-                                store_validate_adapter_request_hook(request, verified.entry, wanted)
-                                store_authorize_and_project_realization(ctx, verified.entry)
-                                return Ok(VerifiedRealization{entry: verified.entry, source_state_value: SourceState.Substituted, lease: verified.lease.move()})
+            if hit == {
+                .Val(verified) -> {
+                    store_validate_adapter_request_hook(request, verified.entry, wanted)
+                    store_authorize_and_project_realization(ctx, verified.entry)
+                    return Ok(VerifiedRealization{entry: verified.entry, source_state_value: SourceState.Cached, lease: verified.lease.move()})
+                }
+                .None -> {
+                    proof: store_verify_cache_entry(verification, roots, found, reference, wanted)
+                    if cache_bindings.len() > 0 {
+                        substituted: store_try_substitute_invalid_candidate(verification, roots, found, wanted, cache_bindings) ?? return Err(RealizeError.Store(err))
+                        if substituted {
+                            again: if store_find_verified_by_reference(verification, roots, reference, wanted) == {
+                                .Ok(value) -> value
+                                .Err(error) -> {
+                                    return Err(RealizeError.Store(error))
+                                }
                             }
-                            .None -> {}
+                            if again == {
+                                .Val(verified) -> {
+                                    store_validate_adapter_request_hook(request, verified.entry, wanted)
+                                    store_authorize_and_project_realization(ctx, verified.entry)
+                                    return Ok(VerifiedRealization{entry: verified.entry, source_state_value: SourceState.Substituted, lease: verified.lease.move()})
+                                }
+                                .None -> {}
+                            }
                         }
                     }
-                }
-                if cache_bindings.len() == 0 && !indexed_nix_repair && !locked_nix {
-                    failure := store_integrity_failure(verification, roots, found, wanted, proof)
-                    if store_quarantine_invalid_entry(verification, roots, found, wanted) == {
-                        .Err(error) -> failure.actual = "{failure.actual}; quarantine failed: {error.message()}"
-                        .Ok(_) -> {}
-                    }
-                    return Err(RealizeError.Integrity(failure))
-                }
-                if store_quarantine_invalid_entry(verification, roots, found, wanted) == {
-                    .Err(error) -> {
+                    if cache_bindings.len() == 0 && !indexed_nix_repair && !locked_nix {
                         failure := store_integrity_failure(verification, roots, found, wanted, proof)
-                        failure.actual = "{failure.actual}; quarantine failed: {error.message()}"
+                        if store_quarantine_invalid_entry(verification, roots, found, wanted) == {
+                            .Err(error) -> {
+                                failure.actual = "{failure.actual}; quarantine failed: {error.message()}"
+                            }
+                            .Ok(_) -> {}
+                        }
                         return Err(RealizeError.Integrity(failure))
                     }
-                    .Ok(_) -> {}
+                    if store_quarantine_invalid_entry(verification, roots, found, wanted) == {
+                        .Err(error) -> {
+                            failure := store_integrity_failure(verification, roots, found, wanted, proof)
+                            failure.actual = "{failure.actual}; quarantine failed: {error.message()}"
+                            return Err(RealizeError.Integrity(failure))
+                        }
+                        .Ok(_) -> {}
+                    }
                 }
             }
         }
-    }
     }
 
     if expectation == {
         .Val(wanted) -> {
             shared: if store_reuse_shared_entry(verification, roots, reference, wanted) == {
                 .Ok(value) -> value
-                .Err(error) -> { return Err(RealizeError.Store(error)) }
+                .Err(error) -> {
+                    return Err(RealizeError.Store(error))
+                }
             }
             if shared != None {
                 hit: if store_find_verified_by_reference(verification, roots, reference, wanted) == {
                     .Ok(value) -> value
-                    .Err(error) -> { return Err(RealizeError.Store(error)) }
+                    .Err(error) -> {
+                        return Err(RealizeError.Store(error))
+                    }
                 }
                 if hit == {
                     .Val(verified) -> {
@@ -438,7 +451,7 @@ store_realize_verified: fn(verification: &StoreVerification, roots: HangarRoots,
 store_register_prepared: fn(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, prepared: PreparedRealization) -> VerifiedRealization RealizeError! {
     realized := prepared.realized
     if prepared.attestation == {
-        .Val(attestation) -> realized.producer.facts["cache.reproducibility"] = attestation
+        .Val(attestation) -> { realized.producer.facts["cache.reproducibility"] = attestation }
         .None -> {}
     }
     // The provider snapshots its Nix lock facts before producing bytes.
@@ -458,14 +471,18 @@ store_register_prepared: fn(verification: &StoreVerification, roots: HangarRoots
     if !store_is_private_untrusted_build(realized.producer) {
         store_promote_shared_entry(verification, roots, entry) ?? return Err(RealizeError.Store(err))
         if realized.source_state == {
-            .Built | .Downloaded -> store_publish_realized_to_bound_caches(verification, roots, entry)
+            .Built | .Downloaded -> {
+                store_publish_realized_to_bound_caches(verification, roots, entry)
+            }
             .Cached | .Substituted -> {}
         }
     }
     store_progress_phase(ctx, "Activating")
     lease: store_snapshot_lease(verification, roots, entry) ?? return Err(RealizeError.Store(err))
     if prepared.action_key == {
-        .Val(action_key) -> store_clear_reproducibility_report(roots, action_key) ?? return Err(RealizeError.Store(err))
+        .Val(action_key) -> {
+            store_clear_reproducibility_report(roots, action_key) ?? return Err(RealizeError.Store(err))
+        }
         .None -> {}
     }
     Ok(VerifiedRealization{entry: entry, source_state_value: realized.source_state, lease: lease})
@@ -484,7 +501,7 @@ store_realize_request_facts: fn(verification: &StoreVerification, request: Reali
 
 store_progress_phase: fn(ctx: ProviderCtx, phase: String) Never! -[IO, Env, Time.Wait]> {
     if ctx.progress == {
-        .Val(progress) -> progress.phase(phase)
+        .Val(progress) -> { progress.phase(phase) }
         .None -> {}
     }
 }
@@ -497,7 +514,9 @@ store_project_has_locked_nix: fn(project_dir: String?, raw: String) -> Bool Neve
 
 store_validate_adapter_request_hook: fn(request: RealizeRequest, entry: StoreEntry, expectation: CacheExpectation) RealizeError! {
     if request == {
-        .Adapter(plan, table, _) -> store_validate_cached_adapter_hook(entry, plan, table, expectation) ?? return Err(RealizeError.Store(err))
+        .Adapter(plan, table, _) -> {
+            store_validate_cached_adapter_hook(entry, plan, table, expectation) ?? return Err(RealizeError.Store(err))
+        }
         .Package(_, _) -> {}
     }
 }
@@ -534,7 +553,9 @@ store_certify_prepared: fn(verification: &StoreVerification, roots: HangarRoots,
     action_key: prepared.action_key ?? return Err(RealizeError.Store(StoreError.InvalidData("independent certification produced no action identity")))
     if options.cancelled == {
         .Val(cancelled) -> {
-            if cancelled() -> return Err(RealizeError.Store(StoreError.Interrupted("independent reproducibility certification cancelled")))
+            if cancelled() {
+                return Err(RealizeError.Store(StoreError.Interrupted("independent reproducibility certification cancelled")))
+            }
         }
         .None -> {}
     }
@@ -572,13 +593,17 @@ store_authorize_and_project_realization: fn(ctx: ProviderCtx, entry: StoreEntry)
     producer: ProducerRecord.decode(entry.producer_record) ?? return Err(RealizeError.Store(StoreError.Other(err.message())))
     store_require_catalog_permission(producer.facts.get("nix.index.tier"), ctx.allow_local_nix_catalog) ?? return Err(RealizeError.LockedNix(err))
     project: ctx.project_dir ?? return
-    if !files.is_dir(project) -> return
+    if !files.is_dir(project) {
+        return
+    }
     if entry.receipt == "" {
         return Err(RealizeError.Store(StoreError.InvalidData("Hangar entry `{entry.id}` has no connected receipt")))
     }
     lock_path: files.join(project, UNIFIED_LOCK_FILE)
     present: store_validate_project_lock_path(lock_path) ?? return Err(RealizeError.Store(err))
-    if !present -> return
+    if !present {
+        return
+    }
     store_project_receipt_under_lock(ctx, project, producer, entry) ?? return Err(RealizeError.Store(err))
 }
 
@@ -599,8 +624,12 @@ store_project_receipt_under_lock: fn(ctx: ProviderCtx, project: String, producer
 }
 
 store_record_receipt_projection: fn(project_root: String, package_name: String, package_version: String, reference: String, output_hash: String, receipt: String) -> Bool StoreError! {
-    if !store_valid_receipt_digest(receipt) -> return Err(StoreError.InvalidData("invalid Hangar receipt digest `{receipt}`"))
-    if output_hash == "" && reference == "" -> return Err(StoreError.InvalidData("Hangar receipt projection has no package identity"))
+    if !store_valid_receipt_digest(receipt) {
+        return Err(StoreError.InvalidData("invalid Hangar receipt digest `{receipt}`"))
+    }
+    if output_hash == "" && reference == "" {
+        return Err(StoreError.InvalidData("Hangar receipt projection has no package identity"))
+    }
     lock_path: files.join(project_root, UNIFIED_LOCK_FILE)
     if !store_validate_project_lock_path(lock_path) -> return Ok(false)
     raw: files.read(lock_path)
@@ -613,7 +642,9 @@ store_record_receipt_projection: fn(project_root: String, package_name: String, 
             break
         }
     }
-    if package_index < 0 -> return Err(StoreError.InvalidData("Hangar receipt `{receipt}` has no matching package in project lock `{lock_path}`"))
+    if package_index < 0 {
+        return Err(StoreError.InvalidData("Hangar receipt `{receipt}` has no matching package in project lock `{lock_path}`"))
+    }
     if lock.packages[package_index].receipt == Val((receipt)) -> return Ok(false)
     lock.packages[package_index].receipt = Val(receipt)
     pkg_lock_ensure_build_stamp(project_root, lock)
@@ -628,7 +659,9 @@ store_validate_project_lock_path: fn(path: String) -> Bool StoreError! {
     if managed == "" -> return Err(StoreError.Other("project lock has no managed directory"))
     if files.stat(managed) == {
         .Ok(metadata) -> {
-            if metadata.is_symlink || !metadata.is_dir -> return Err(StoreError.InvalidData("project managed directory `{managed}` is not a real directory"))
+            if metadata.is_symlink || !metadata.is_dir {
+                return Err(StoreError.InvalidData("project managed directory `{managed}` is not a real directory"))
+            }
         }
         .Err(error) -> {
             if StoreError.IO(error).is_not_found() -> return Ok(false)
@@ -637,7 +670,9 @@ store_validate_project_lock_path: fn(path: String) -> Bool StoreError! {
     }
     if files.stat(path) == {
         .Ok(metadata) -> {
-            if metadata.is_symlink || !metadata.is_file -> return Err(StoreError.InvalidData("project lock `{path}` is not a real file"))
+            if metadata.is_symlink || !metadata.is_file {
+                return Err(StoreError.InvalidData("project lock `{path}` is not a real file"))
+            }
             Ok(true)
         }
         .Err(error) -> {
@@ -769,7 +804,9 @@ store_discard_substitution_stage: fn(path: String) StoreError! {
 // build into a failed realization.
 store_publish_realized_to_bound_caches: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) Never! {
     producer: ProducerRecord.decode(entry.producer_record) ?? return
-    if store_is_private_untrusted_build(producer) -> return
+    if store_is_private_untrusted_build(producer) {
+        return
+    }
     bindings: store_list_cache_bindings(roots) ?? return
     loop binding in bindings {
         if !binding.allow_write -> next
@@ -782,8 +819,8 @@ store_publish_realized_to_bound_caches: fn(verification: &StoreVerification, roo
 // recipe. Keeping the leases alive for the duration of the adapter build
 // prevents a dependency snapshot from disappearing while the child process
 // is using it.
-store_realize_adapter_tools: fn(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, plan: AdapterPlan, table: SourceTable) -> (tools: [String: String], leases: [CacheLease]) RealizeError! {
-    tools := [String: String]{}
+store_realize_adapter_tools: fn(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, plan: AdapterPlan, table: SourceTable) -> (tools: [String:String], leases: [CacheLease]) RealizeError! {
+    tools := [String:String]{}
     dependency_leases := [CacheLease]{}
     loop dependency in plan.deps {
         raw: envmodel_pkg_ref(dependency)
@@ -808,10 +845,16 @@ store_realize_adapter_tools: fn(verification: &StoreVerification, roots: HangarR
         lease.validate() ?? return Err(RealizeError.Store(StoreError.IO(err)))
         loop member in receipt.executable_members {
             if lease.executable_for_command(member) == {
-                .Ok(found) -> { if found == None -> return Err(RealizeError.Provider(ProviderError.Adapter("build dependency `{dependency.name}` lost executable `{member}` from its verified lease"))) }
+                .Ok(found) -> {
+                    if found == None {
+                        return Err(RealizeError.Provider(ProviderError.Adapter("build dependency `{dependency.name}` lost executable `{member}` from its verified lease")))
+                    }
+                }
                 .Err(error) -> { return Err(RealizeError.Store(StoreError.IO(error))) }
             }
-            if tools.has_key(member) -> return Err(RealizeError.Provider(ProviderError.Adapter("build dependencies provide the same executable `{member}`")))
+            if tools.has_key(member) {
+                return Err(RealizeError.Provider(ProviderError.Adapter("build dependencies provide the same executable `{member}`")))
+            }
             // The recipe names the durable member the revalidated lease
             // keeps alive for the whole adapter build.
             tools[member] = files.join(bin_dir, member)

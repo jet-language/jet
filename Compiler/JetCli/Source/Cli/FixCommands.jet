@@ -28,7 +28,9 @@ JetCLIFixRound: struct {
 jet_cli_fix_round: fn(fixes: [JetCLIFix], repairs: [JetCLIFix], all: Bool) -> JetCLIFixRound Never! {
     usable: if all -> fixes else -> jet_cli_safe_fixes(fixes)
     usable_repairs: if all -> repairs else -> jet_cli_safe_fixes(repairs)
-    if usable_repairs.len() == 0 || usable_repairs.len() == usable.len() -> return JetCLIFixRound{fixes: usable, held: false}
+    if usable_repairs.len() == 0 || usable_repairs.len() == usable.len() {
+        return JetCLIFixRound{fixes: usable, held: false}
+    }
     JetCLIFixRound{fixes: usable_repairs, held: true}
 }
 
@@ -77,11 +79,15 @@ jet_cli_fix_collect: fn(file: String, source: String, files: [JetCLIFixFile], te
     if jet_cli_fix_compile(file, source, files, texts) == {
         .Refused(output) -> return JetCLIFixQuery.Refused{output: output}
         .Compiled(result, snapshot) -> {
-            if result.internal_problem == .Val(problem) -> return JetCLIFixQuery.Refused{output: jet_cli_ice(problem)}
+            if result.internal_problem == .Val(problem) {
+                return JetCLIFixQuery.Refused{output: jet_cli_ice(problem)}
+            }
             loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
                 if diagnostic.origin == .Val(origin) {
                     if origin.path != canonical || origin.source != source {
-                        if diagnostic.severity == DIAGNOSTIC_ERROR && jet_cli_fix_names_file(files, origin.path) -> errors.push("{origin.path}: {diagnostic.code}: {diagnostic.what}")
+                        if diagnostic.severity == DIAGNOSTIC_ERROR && jet_cli_fix_names_file(files, origin.path) {
+                            errors.push("{origin.path}: {diagnostic.code}: {diagnostic.what}")
+                        }
                         next
                     }
                 }
@@ -152,7 +158,9 @@ jet_cli_fix_retired_run_words: fn(source: String) -> [Span] {
         token: lexed.tokens[index]
         if !jet_cli_fix_meaningful(token) -> next
         if token.kind == TOKEN_IDENT && token.span.end - token.span.start == 8 && foundation_byte_text(bytes, token.span.start, token.span.end) == "comptime" {
-            if jet_cli_fix_next_opens_block(lexed.tokens, index + 1) && jet_cli_fix_starts_value(bytes, lexed.tokens, previous, token.span.start) -> sites.push(token.span)
+            if jet_cli_fix_next_opens_block(lexed.tokens, index + 1) && jet_cli_fix_starts_value(bytes, lexed.tokens, previous, token.span.start) {
+                sites.push(token.span)
+            }
         }
         previous = index
     }
@@ -173,7 +181,9 @@ jet_cli_fix_next_opens_block: fn(tokens: [Token], from: Int) -> Bool {
 jet_cli_fix_starts_value: fn(bytes: [U8], tokens: [Token], previous: Int, start: Int) -> Bool {
     if previous < 0 -> return true
     before: tokens[previous]
-    if before.kind == TOKEN_COLON || before.kind == TOKEN_COLON_EQ || before.kind == TOKEN_EQ || before.kind == TOKEN_LBRACE || before.kind == TOKEN_RBRACE || before.kind == TOKEN_SEMI -> return true
+    if before.kind == TOKEN_COLON || before.kind == TOKEN_COLON_EQ || before.kind == TOKEN_EQ || before.kind == TOKEN_LBRACE || before.kind == TOKEN_RBRACE || before.kind == TOKEN_SEMI {
+        return true
+    }
     loop at in before.span.end..<start {
         if (Int{bytes[at]}) == 10 -> return true
     }
@@ -243,9 +253,7 @@ jet_cli_fix_differs: fn(a: JetCLIFixApply, b: JetCLIFixApply) -> Bool Never! {
             if b.texts[row] != None -> return true
         } else if row >= b.texts.len() {
             if a.texts[row] != None -> return true
-        } else if a.texts[row] != b.texts[row] {
-            return true
-        }
+        } else if a.texts[row] != b.texts[row] { return true }
     }
     false
 }
@@ -327,7 +335,9 @@ jet_cli_fix_settle: fn(files: &[JetCLIFixFile], texts: &&[String?]) Never! {
 jet_cli_fix_checked: fn(file: String, source: String, files: [JetCLIFixFile], fixes: [JetCLIFix], baseline: [String], rejected: &[JetCLIFixSkip], refused: &[JetCLIFixSkip]) -> JetCLIFixApply {
     whole: jet_cli_fix_apply_non_overlapping(source, files, fixes, jet_cli_fix_all(fixes))
     loop refusal in whole.refused -> jet_cli_fix_skip(refused, fixes[refusal.fix], refusal.reason)
-    if !jet_cli_fix_changes(whole, source, files) || jet_cli_fix_errors(file, whole.source, files, whole.texts).len() <= baseline.len() -> return whole
+    if !jet_cli_fix_changes(whole, source, files) || jet_cli_fix_errors(file, whole.source, files, whole.texts).len() <= baseline.len() {
+        return whole
+    }
     kept := [Int]{}
     result := JetCLIFixApply{source: source, applied: 0, deferred: whole.deferred}
     loop (index, fix) in fixes {
@@ -357,7 +367,9 @@ jet_cli_fix_checked: fn(file: String, source: String, files: [JetCLIFixFile], fi
 // Records `fix` as skipped, once per edit.
 jet_cli_fix_skip: fn(skips: &[JetCLIFixSkip], fix: JetCLIFix, reason: String) Never! {
     loop skip in skips {
-        if skip.edit.span.start == fix.edit.span.start && skip.edit.span.end == fix.edit.span.end && skip.edit.new_text == fix.edit.new_text -> return
+        if skip.edit.span.start == fix.edit.span.start && skip.edit.span.end == fix.edit.span.end && skip.edit.new_text == fix.edit.new_text {
+            return
+        }
     }
     skips.push(JetCLIFixSkip{title: fix.title, edit: fix.edit, reason: reason})
 }
@@ -371,7 +383,9 @@ jet_cli_fix_markers: fn(before: String, inside: Bool) -> JetCLIFixApply {
     round := 0
     loop round < 16 {
         fixes := [JetCLIFix]{}
-        loop edit in parser_marker_placement_edits(source.bytes(), inside) -> fixes.push(JetCLIFix{title: "move the markers", edit: edit, applicability: DiagnosticFixApplicability.Safe, safety: DiagnosticFixSafety.BehaviorPreserving})
+        loop edit in parser_marker_placement_edits(source.bytes(), inside) {
+            fixes.push(JetCLIFix{title: "move the markers", edit: edit, applicability: DiagnosticFixApplicability.Safe, safety: DiagnosticFixSafety.BehaviorPreserving})
+        }
         if fixes.len() == 0 -> break
         applied: jet_cli_fix_apply_non_overlapping(source, [JetCLIFixFile]{}, fixes, jet_cli_fix_all(fixes))
         if applied.source == source -> break
@@ -410,7 +424,9 @@ jet_cli_fix_run: fn(file: String, dry_run: Bool, all: Bool, markers: String, mod
     skips := [JetCLIFixSkip]{}
     if !all && suggestions {
         loop fix in all_fixes {
-            if jet_cli_safe_fixes([JetCLIFix]{fix}).len() == 0 -> jet_cli_fix_skip(skips, fix, "needs review: `jet fix --all` applies it")
+            if jet_cli_safe_fixes([JetCLIFix]{fix}).len() == 0 {
+                jet_cli_fix_skip(skips, fix, "needs review: `jet fix --all` applies it")
+            }
         }
     }
     rejected := [JetCLIFixSkip]{}
@@ -437,7 +453,9 @@ jet_cli_fix_run: fn(file: String, dry_run: Bool, all: Bool, markers: String, mod
         // The pinned file must check no worse than the input.
         if jet_cli_fix_pin_failures(file, before, color) == {
             .Refused(output) -> return output
-            .Pinned(pinned) -> { if pinned == .Val(value) -> applied = value }
+            .Pinned(pinned) -> {
+                if pinned == .Val(value) -> applied = value
+            }
         }
         count = applied.applied
         if applied.source != before && jet_cli_fix_errors(file, applied.source, files, [String?]{}).len() > baseline.len() {
@@ -457,7 +475,9 @@ jet_cli_fix_run: fn(file: String, dry_run: Bool, all: Bool, markers: String, mod
         loop round < 16 && (applied.deferred > 0 || held) {
             next := if jet_cli_fix_collect(file, applied.source, files, [String?]{}, all) == {
                 .Fixes(found, _, repairs) -> jet_cli_fix_round(found, if stalled -> [JetCLIFix]{} else -> repairs, true)
-                .Refused(output) -> { return output }
+                .Refused(output) -> {
+                    return output
+                }
             }
             held = next.held
             more: jet_cli_fix_resolve(files, canonical, next.fixes.move())
@@ -479,41 +499,59 @@ jet_cli_fix_run: fn(file: String, dry_run: Bool, all: Bool, markers: String, mod
     // Each rolled-back fix, with the error its edit adds, and each fix
     // refused whole, with why.
     rolled := ""
-    loop skip in rejected -> rolled = "{rolled}{file}: rolled back the fix at {skip.edit.span.start}..{skip.edit.span.end} -> `{skip.edit.new_text}`: {skip.reason}\n"
-    loop skip in refused -> rolled = "{rolled}{file}: refused the fix at {skip.edit.span.start}..{skip.edit.span.end} -> `{skip.edit.new_text}`: {skip.reason}\n"
+    loop skip in rejected {
+        rolled = "{rolled}{file}: rolled back the fix at {skip.edit.span.start}..{skip.edit.span.end} -> `{skip.edit.new_text}`: {skip.reason}\n"
+    }
+    loop skip in refused {
+        rolled = "{rolled}{file}: refused the fix at {skip.edit.span.start}..{skip.edit.span.end} -> `{skip.edit.new_text}`: {skip.reason}\n"
+    }
     status := ""
     if applied.source == before && !jet_cli_fix_touched(files) {
-        if json -> return JetDriverVerbOutput{stdout: jet_cli_fix_status(file, dry_run, 0, skips, None), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        if json {
+            return JetDriverVerbOutput{stdout: jet_cli_fix_status(file, dry_run, 0, skips, None), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        }
         detail: if skipped == 0 -> "" else -> " ({skipped} suggestion{if skipped == 1 -> "" else -> "s"} need review)"
         status = "{rolled}{file}: no changes made{detail}\n"
         return JetDriverVerbOutput{stdout: "", stderr: if quiet -> "" else -> status, exit_code: JET_DRIVER_EXIT_OK}
     }
     diff := ""
     if dry_run {
-        if json -> return JetDriverVerbOutput{stdout: jet_cli_fix_status(file, dry_run, count, skips, None), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        if json {
+            return JetDriverVerbOutput{stdout: jet_cli_fix_status(file, dry_run, count, skips, None), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        }
         diff = jet_format_unified_diff(file, before, applied.source)
         loop changed in files.move() {
             if changed.source == .Val(edited) {
                 if changed.before == .Val(original) {
-                    if edited != original -> diff = "{diff}{jet_format_unified_diff(jet_cli_fix_display(file, changed.path.move()), original, edited)}"
+                    if edited != original {
+                        diff = "{diff}{jet_format_unified_diff(jet_cli_fix_display(file, changed.path.move()), original, edited)}"
+                    }
                 }
             }
         }
         status = "{rolled}{file}: would apply {count} fix{if count == 1 -> "" else -> "es"} (dry run; nothing written)\n"
-        if skipped > 0 -> status = "{status}{file}: skipped {skipped} suggestion{if skipped == 1 -> "" else -> "s"} for review (dry run)\n"
+        if skipped > 0 {
+            status = "{status}{file}: skipped {skipped} suggestion{if skipped == 1 -> "" else -> "s"} for review (dry run)\n"
+        }
     } else {
         others := [JetCLISourceChange]{}
         loop changed in files.move() {
             if changed.source == .Val(edited) {
                 if changed.before == .Val(original) {
-                    if edited != original -> others.push(JetCLISourceChange{path: changed.path.move(), before: original.bytes(), after: edited.bytes()})
+                    if edited != original {
+                        others.push(JetCLISourceChange{path: changed.path.move(), before: original.bytes(), after: edited.bytes()})
+                    }
                 }
             }
         }
         log: jet_cli_commit_fix(file, before.bytes(), applied.source.bytes(), None, skips, others.move()) ?? return jet_cli_report_output("", "E2105", err.message, jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
-        if json -> return JetDriverVerbOutput{stdout: jet_cli_fix_status(file, dry_run, count, skips, Val(log)), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        if json {
+            return JetDriverVerbOutput{stdout: jet_cli_fix_status(file, dry_run, count, skips, Val(log)), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        }
         status = "{rolled}{file}: applied {count} fix{if count == 1 -> "" else -> "es"}\n"
-        if skipped > 0 -> status = "{status}{file}: skipped {skipped} suggestion{if skipped == 1 -> "" else -> "s"} for review\n"
+        if skipped > 0 {
+            status = "{status}{file}: skipped {skipped} suggestion{if skipped == 1 -> "" else -> "s"} for review\n"
+        }
         status = "{status}  log: {log}\n"
     }
     JetDriverVerbOutput{stdout: diff, stderr: if quiet -> "" else -> status, exit_code: JET_DRIVER_EXIT_OK}
@@ -536,18 +574,22 @@ jet_cli_fix_display: fn(file: String, path: &&String) -[FS, Env]> String Never! 
 // `jet fix --all` or a hand edit decides it; a rolled-back fix names the
 // error it adds. `log` is the replay log of a written file.
 jet_cli_fix_status: fn(file: String, dry_run: Bool, count: Int, skips: [JetCLIFixSkip], log: String?) -> String Never! {
-    skipped: loop skip in skips -> jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("title", jet_cli_status_text(skip.title)),
-        jet_cli_status_field("reason", jet_cli_status_text(skip.reason)),
-        jet_cli_status_field("span", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("start", jet_cli_status_int(skip.edit.span.start)), jet_cli_status_field("end", jet_cli_status_int(skip.edit.span.end))})),
-        jet_cli_status_field("new_text", jet_cli_status_text(skip.edit.new_text)),
-    })
-    fix: jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("file", jet_cli_status_text(file)),
-        jet_cli_status_field("dry_run", jet_cli_status_bool(dry_run)),
-        jet_cli_status_field("applied", jet_cli_status_int(count)),
-        jet_cli_status_field("skipped", jet_cli_status_array(skipped)),
-        jet_cli_status_field("log", jet_cli_status_optional_text(log)),
-    })
+    skipped: loop skip in skips -> jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("title", jet_cli_status_text(skip.title)),
+            jet_cli_status_field("reason", jet_cli_status_text(skip.reason)),
+            jet_cli_status_field("span", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("start", jet_cli_status_int(skip.edit.span.start)), jet_cli_status_field("end", jet_cli_status_int(skip.edit.span.end))})),
+            jet_cli_status_field("new_text", jet_cli_status_text(skip.edit.new_text)),
+        },
+    )
+    fix: jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("file", jet_cli_status_text(file)),
+            jet_cli_status_field("dry_run", jet_cli_status_bool(dry_run)),
+            jet_cli_status_field("applied", jet_cli_status_int(count)),
+            jet_cli_status_field("skipped", jet_cli_status_array(skipped)),
+            jet_cli_status_field("log", jet_cli_status_optional_text(log)),
+        },
+    )
     "{jet_cli_status_render("fix", true, [JetCLIStatusField]{jet_cli_status_field("fix", fix)})}\n"
 }

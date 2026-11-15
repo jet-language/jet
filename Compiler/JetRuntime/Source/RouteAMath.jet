@@ -5,6 +5,7 @@
 // OS thread owns one word, seeded 0x4d595df4d0f33173 (thread_local! JET_RNG).
 // TLS words hold `state XOR seed` so a fresh thread's zero word is the seed.
 RANDOM_DEFAULT_STATE: I64{5573589319906701683}
+
 random_state_key := I64{0}
 
 // runtime-init: 3 when random_state_key
@@ -17,12 +18,15 @@ random_state_key := I64{0}
 }
 
 random_thread_state: fn() -> I64 { jet_rt_tls_get(random_state_key).bit_xor(RANDOM_DEFAULT_STATE) }
-random_thread_store: fn(value: I64) { jet_rt_tls_set(random_state_key, value.bit_xor(RANDOM_DEFAULT_STATE)) }
+
+random_thread_store: fn(value: I64) {
+    jet_rt_tls_set(random_state_key, value.bit_xor(RANDOM_DEFAULT_STATE))
+}
 
 // The raw u64 bits, not an exact Int.
 #Export(c) jet_random_state_raw: fn() -> I64 {
     world: world_current()
-    if (world == I64{0}) -> return random_thread_state()
+    if (world == I64{0}) { return random_thread_state() }
     sync_mutex_lock(wrapping(world + I64{8}))
     value: sync_load(wrapping(world + I64{40}))
     sync_mutex_unlock(wrapping(world + I64{8}))
@@ -33,12 +37,12 @@ random_thread_store: fn(value: I64) { jet_rt_tls_set(random_state_key, value.bit
 // accepted replacement as "rng:{value}".
 #Export(c) jet_random_try_update_raw: fn(expected: I64, replacement: I64) -> Bool {
     old: jet_int_checked_fixed(expected, I64{7}, I64{0}, I64{0}, I64{0})
-    if (jet_scheduler_native_propagate() != I64{0}) -> return false
+    if (jet_scheduler_native_propagate() != I64{0}) { return false }
     new: jet_int_checked_fixed(replacement, I64{7}, I64{0}, I64{0}, I64{0})
-    if (jet_scheduler_native_propagate() != I64{0}) -> return false
+    if (jet_scheduler_native_propagate() != I64{0}) { return false }
     world: world_current()
     if (world == I64{0}) {
-        if (random_thread_state() != old) -> return false
+        if (random_thread_state() != old) { return false }
         random_thread_store(new)
         return true
     }
@@ -56,8 +60,12 @@ random_thread_store: fn(value: I64) { jet_rt_tls_set(random_state_key, value.bit
 // A World takes the seed (journaled); else the thread word.
 #Export(c) jet_std_random_seed: fn(seed: I64) {
     value: jet_int_owned_to_i64(seed)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return
-    if jet_rt_world_rng_seed(value) -> return
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        return
+    }
+    if jet_rt_world_rng_seed(value) {
+        return
+    }
     random_thread_store(value)
 }
 

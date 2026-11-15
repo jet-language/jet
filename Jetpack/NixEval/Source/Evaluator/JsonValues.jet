@@ -8,7 +8,9 @@ NIXEVAL_JSON_INTEGER_BOUND: 9223372036854775808
 
 impl NixEvaluator {
     encode_json: fn(&self, value: NixEvalValue, depth: Int) -> String NixEvalError! {
-        if depth > NIXEVAL_EXPRESSION_LIMIT -> return Err(NixEvalError.ResourceLimit("JSON value is too deeply nested"))
+        if depth > NIXEVAL_EXPRESSION_LIMIT {
+            return Err(NixEvalError.ResourceLimit("JSON value is too deeply nested"))
+        }
         if value == {
             .Null -> return Ok("null")
             .Bool(flag) -> return Ok(if flag -> "true" else -> "false")
@@ -39,7 +41,9 @@ impl NixEvaluator {
     }
 
     json_to_value: fn(&self, document: NixEvalJSON, index: Int, depth: Int) -> NixEvalValue NixEvalError! {
-        if depth > NIXEVAL_EXPRESSION_LIMIT -> return Err(NixEvalError.ResourceLimit("JSON value is too deeply nested"))
+        if depth > NIXEVAL_EXPRESSION_LIMIT {
+            return Err(NixEvalError.ResourceLimit("JSON value is too deeply nested"))
+        }
         if document.node(index) == {
             .Null -> NixEvalValue.Null
             .Bool(flag) -> NixEvalValue.Bool(flag)
@@ -54,7 +58,7 @@ impl NixEvaluator {
                 NixEvalValue.List(values)
             }
             .Object(members) -> {
-                fields := [String: Int]{}
+                fields := [String:Int]{}
                 loop entry in members {
                     converted: self.json_to_value(document, entry.value, depth + 1)
                     fields[entry.key] = self.value_thunk(converted)

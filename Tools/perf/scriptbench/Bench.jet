@@ -117,9 +117,7 @@ fail: fn(message: String) -> Never {
     process.exit(2)
 }
 
-member: fn(d: Dyn, name: String) -> Dyn {
-    d.field(name) ?? fail("manifest: no `{name}`")
-}
+member: fn(d: Dyn, name: String) -> Dyn { d.field(name) ?? fail("manifest: no `{name}`") }
 
 text_of: fn(d: Dyn, name: String) -> String {
     member(d, name).text() ?? fail("manifest: `{name}` is not text")
@@ -138,7 +136,9 @@ items: fn(d: Dyn) -> [Dyn] {
 
 texts_of: fn(d: Dyn, name: String) -> [String] {
     out := [String]{}
-    loop item in items(member(d, name)) -> out.push(item.text() ?? fail("manifest: `{name}` holds a non-text item"))
+    loop item in items(member(d, name)) {
+        out.push(item.text() ?? fail("manifest: `{name}` holds a non-text item"))
+    }
     out
 }
 
@@ -147,27 +147,48 @@ load: fn(path: String) -> Manifest {
     tree: json.parse(raw) ?? fail("{path} is not JSON")
     md: member(tree, "method")
     method: Method{
-        rounds: int_of(md, "rounds"), warmup: int_of(md, "warmup"), runs: int_of(md, "runs"),
-        slow_ms: int_of(md, "slow_ms"), slow_warmup: int_of(md, "slow_warmup"),
-        slow_runs: int_of(md, "slow_runs"), timeout_s: int_of(md, "timeout_s"),
+        rounds: int_of(md, "rounds"),
+        warmup: int_of(md, "warmup"),
+        runs: int_of(md, "runs"),
+        slow_ms: int_of(md, "slow_ms"),
+        slow_warmup: int_of(md, "slow_warmup"),
+        slow_runs: int_of(md, "slow_runs"),
+        timeout_s: int_of(md, "timeout_s"),
     }
     report := [String]{}
-    loop item in items(member(tree, "report_only")) -> report.push("{text_of(item, "workload")}/{text_of(item, "tier")}")
+    loop item in items(member(tree, "report_only")) {
+        report.push("{text_of(item, "workload")}/{text_of(item, "tier")}")
+    }
     peers := [Peer]{}
-    loop item in items(member(tree, "peers")) -> peers.push(Peer{name: text_of(item, "name"), file: text_of(item, "file"), argv: texts_of(item, "argv")})
+    loop item in items(member(tree, "peers")) {
+        peers.push(Peer{name: text_of(item, "name"), file: text_of(item, "file"), argv: texts_of(item, "argv")})
+    }
     workloads := [Workload]{}
     loop item in items(member(tree, "workloads")) {
         servers := [Server]{}
-        loop s in items(member(item, "servers")) -> servers.push(Server{port: int_of(s, "port"), delay_ms: int_of(s, "delay_ms")})
-        workloads.push(Workload{
-            id: text_of(item, "id"), dir: text_of(item, "dir"), what: text_of(item, "what"),
-            cards: texts_of(item, "cards"), args: texts_of(item, "args"), servers: servers,
-            peers: texts_of(item, "peers"),
-        })
+        loop s in items(member(item, "servers")) {
+            servers.push(Server{port: int_of(s, "port"), delay_ms: int_of(s, "delay_ms")})
+        }
+        workloads.push(
+            Workload{
+                id: text_of(item, "id"),
+                dir: text_of(item, "dir"),
+                what: text_of(item, "what"),
+                cards: texts_of(item, "cards"),
+                args: texts_of(item, "args"),
+                servers: servers,
+                peers: texts_of(item, "peers"),
+            },
+        )
     }
     Manifest{
-        method: method, hyperfine: text_of(tree, "hyperfine"), server: texts_of(tree, "server"),
-        path: texts_of(tree, "path"), report_only: report, peers: peers, workloads: workloads,
+        method: method,
+        hyperfine: text_of(tree, "hyperfine"),
+        server: texts_of(tree, "server"),
+        path: texts_of(tree, "path"),
+        report_only: report,
+        peers: peers,
+        workloads: workloads,
     }
 }
 
@@ -201,7 +222,9 @@ options: fn() -> Options {
             "--out" -> opts.out = value
             "--jet" -> opts.jet = value
             "--edit" -> opts.edit = value
-            else -> fail("unknown argument `{flag}`; usage: Bench.jet --list | --check-floor --out DIR [--jet PATH] | --data DIR --out DIR [--only w01,w02] [--jet PATH]")
+            else -> {
+                fail("unknown argument `{flag}`; usage: Bench.jet --list | --check-floor --out DIR [--jet PATH] | --data DIR --out DIR [--only w01,w02] [--jet PATH]")
+            }
         }
         i += 2
     }
@@ -223,7 +246,9 @@ list: fn(m: Manifest) -> Int {
         print("  tool    {state.pad_end(8, " ")} {tool}")
     }
     print("workloads:")
-    loop w in m.workloads -> print("  {w.id} {w.dir.pad_end(13, " ")} {w.cards.join(",").pad_end(13, " ")} {w.what} [{w.peers.join(" ")}]")
+    loop w in m.workloads {
+        print("  {w.id} {w.dir.pad_end(13, " ")} {w.cards.join(",").pad_end(13, " ")} {w.what} [{w.peers.join(" ")}]")
+    }
     print("comparator: every cell is Jet over one peer for one metric; 1.00 or more is a LOSS; no averaging")
     if missing > 0 -> return 1
     0
@@ -242,7 +267,7 @@ micros: fn(d: Dyn) -> Int {
     k := exp - frac.count_bytes() + 6
     value := digits
     loop k > 0 {
-        value = value * 10
+        value *= 10
         k -= 1
     }
     loop k < 0 {
@@ -425,6 +450,7 @@ READER: "Tools/perf/scriptbench/vmhwm.c"
 // Readings per command in the floor check, and how far, in percent, the
 // launcher's median may sit from the reader's.
 FLOOR_RUNS: 11
+
 FLOOR_PERCENT: 5
 
 median: fn(values: [Int]) -> Int {
@@ -439,7 +465,9 @@ reader_kb: fn(reader: String, report: String, argv: [String], cwd: String) -> In
     full.extend(argv.copy())
     receipt: process.cmd(full).cwd(cwd).output_limit(16777216).run() ?? fail("the reader could not start")
     kb: Int.parse((fs.read(report) ?? "").trim().removeprefix("vmhwm ")) ?? -1
-    if !receipt.success || kb < 0 -> fail("the reader's run of {argv[0]} failed (exit {receipt.code}): {receipt.errors}")
+    if !receipt.success || kb < 0 {
+        fail("the reader's run of {argv[0]} failed (exit {receipt.code}): {receipt.errors}")
+    }
     kb
 }
 
@@ -453,7 +481,9 @@ check_floor: fn(m: Manifest, opts: Options, root: String, bench: String, launche
     if !built.success -> fail("the reader {READER} does not build: {built.errors}")
     hello := ""
     loop w in m.workloads {
-        if w.id == HELLO -> hello = build(opts, bench, w, "O2", "--release") ?? fail("the hello {w.dir} does not build")
+        if w.id == HELLO {
+            hello = build(opts, bench, w, "O2", "--release") ?? fail("the hello {w.dir} does not build")
+        }
     }
     if hello == "" -> fail("manifest: no workload `{HELLO}`")
     names: ["hello", "true"]
@@ -553,7 +583,9 @@ run: fn() {
         floor_opts: Options{list: false, check_floor: true, only: [String]{}, data: opts.out.copy(), out: opts.out.copy(), jet: opts.jet.copy(), edit: ""}
         process.exit(check_floor(m, floor_opts, root, bench, build_launcher(root, opts.out)))
     }
-    if opts.data == "" || opts.out == "" || opts.jet == "" -> fail("--data, --out and a jet compiler (--jet or PATH) are required; --check-floor needs --out and the compiler")
+    if opts.data == "" || opts.out == "" || opts.jet == "" {
+        fail("--data, --out and a jet compiler (--jet or PATH) are required; --check-floor needs --out and the compiler")
+    }
     fs.create_dir_all("{opts.out}/json") ?? fail("mkdir {opts.out}/json")
     launcher: build_launcher(root, opts.out)
     gen: process.cmd([opts.jet.copy(), "run", "{bench}/Gen.jet", "--", opts.data.copy()]).output_limit(16777216).run() ?? fail("Gen.jet could not start")
@@ -569,7 +601,9 @@ run: fn() {
         flags: ["-O0", "-O1", "--release"]
         bins := [String]{}
         loop k in 0..<3 {
-            if build(opts, bench, w, levels[k], flags[k]) == .Val(bin) -> bins.push(bin) else -> errors += 1
+            if build(opts, bench, w, levels[k], flags[k]) == .Val(bin) -> bins.push(bin) else {
+                errors += 1
+            }
         }
         if bins.len() != 3 -> next
         servers: start_servers(m, bench, w)
@@ -614,15 +648,17 @@ run: fn() {
                 } else if c.name != "jet-O0" && c.name != "jet-O1" {
                     commands.push(Command{name: c.name.copy(), argv: c.argv.copy(), slow: ms > m.method.slow_ms, cache: c.cache.copy(), prepare: c.prepare.copy()})
                 }
-            } else {
-                errors += 1
-            }
+            } else { errors += 1 }
         }
         measured: measure(m, opts, w.id, commands, launcher)
         loop child in servers -> child.kill().drop("the fixture server may already be gone")
         if measured == .Val(stats) {
-            loop s in stats -> print("  {s.name.pad_end(13, " ")} wall {ms_text(s.wall).pad_start(11, " ")}  cpu {ms_text(s.cpu).pad_start(11, " ")}  rss {mb_text(s.rss).pad_start(9, " ")}")
-            loop t in timed_out -> print("  {t.pad_end(13, " ")} TIMEOUT (over {m.method.timeout_s} s)")
+            loop s in stats {
+                print("  {s.name.pad_end(13, " ")} wall {ms_text(s.wall).pad_start(11, " ")}  cpu {ms_text(s.cpu).pad_start(11, " ")}  rss {mb_text(s.rss).pad_start(9, " ")}")
+            }
+            loop t in timed_out {
+                print("  {t.pad_end(13, " ")} TIMEOUT (over {m.method.timeout_s} s)")
+            }
             tiers: ["jet-bin", "jet-run-first", "jet-run-edit"]
             loop tier in tiers {
                 ji: stat_index(stats, tier)
@@ -658,9 +694,7 @@ run: fn() {
                     }
                 }
             }
-        } else {
-            errors += 1
-        }
+        } else { errors += 1 }
     }
     fs.write("{opts.out}/cells.tsv", "{rows.join("\n")}\n") ?? fail("can't write {opts.out}/cells.tsv")
     print("scriptbench: {rows.len() - 1} cells, {losses} LOSS, {errors} errors; cells in {opts.out}/cells.tsv")

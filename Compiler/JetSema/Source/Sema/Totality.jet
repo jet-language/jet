@@ -32,7 +32,9 @@ sema_totality_rows: fn(modules: [SemaGraphModuleResult], table: ModuleTable) -> 
             rows.push(SemaTotalityRow{owner: owner, function: "-", reason: "incomplete with no recorded cause"})
             next
         }
-        loop reason in graph_module.incomplete_reasons -> rows.push(sema_totality_reason_row(owner, reason))
+        loop reason in graph_module.incomplete_reasons {
+            rows.push(sema_totality_reason_row(owner, reason))
+        }
     }
     rows
 }

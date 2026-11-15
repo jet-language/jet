@@ -22,7 +22,10 @@ use jet_foundation.[
     type_name,
 ]
 
-SemaSourceOrigin: enum { Snapshot CompilerGenerated }
+SemaSourceOrigin: enum {
+    Snapshot
+    CompilerGenerated
+}
 
 sema_module_is_core_source: fn(module_identity: String) -> Bool Never! {
     module_identity.starts_with("<corelib>/")
@@ -38,7 +41,9 @@ SemaSourceSegment: struct {
 
 sema_source_file_at: fn(segments: [SemaSourceSegment], fallback: String, fallback_origin: SemaSourceOrigin, site: Span) -> String Never! {
     loop segment in segments {
-        if site.start >= segment.generated.start && site.start < segment.generated.end -> return segment.source_file
+        if site.start >= segment.generated.start && site.start < segment.generated.end {
+            return segment.source_file
+        }
     }
     if fallback_origin == SemaSourceOrigin.Snapshot -> fallback else -> ""
 }
@@ -65,7 +70,9 @@ sema_source_location_at: fn(segments: [SemaSourceSegment], site: Span) -> SemaSo
             if matches == 0 {
                 final_end := segments[0].generated.end
                 loop index in 1..<segments.len() {
-                    if segments[index].generated.end > final_end -> final_end = segments[index].generated.end
+                    if segments[index].generated.end > final_end {
+                        final_end = segments[index].generated.end
+                    }
                 }
                 if site.start != final_end -> return None
                 loop (index, segment) in segments {
@@ -90,7 +97,9 @@ sema_source_location_at: fn(segments: [SemaSourceSegment], site: Span) -> SemaSo
     }
     if matches != 1 || candidate < 0 -> return None
     segment: segments[candidate]
-    if segment.source_file == "" || segment.generated.start < 0 || segment.source_start < 0 -> return None
+    if segment.source_file == "" || segment.generated.start < 0 || segment.source_start < 0 {
+        return None
+    }
     Val(SemaSourceLocation{source_path: segment.source_file, aggregate_start: segment.generated.start, source_start: segment.source_start, origin: segment.origin})
 }
 
@@ -130,7 +139,9 @@ sema_diagnostic_with_source_location: fn(diagnostic: &&Diagnostic, segments: [Se
     }
     // Compiler-generated source has no author to edit it: its diagnostic keeps
     // the report but proposes no source edit (the codec rejects one).
-    if location.origin == SemaSourceOrigin.CompilerGenerated -> updated = diagnostic_without_fix(updated)
+    if location.origin == SemaSourceOrigin.CompilerGenerated {
+        updated = diagnostic_without_fix(updated)
+    }
     if updated.source_path != None {
         if updated.source_path != Val(location.source_path) || updated.source_offset != Val(location.aggregate_start) || updated.source_start != Val(location.source_start) {
             updated.source_path = None
@@ -192,7 +203,9 @@ sema_link_reports_to_first_error: fn(diagnostics: &[Diagnostic], root_start: Int
             break
         }
     }
-    if root < 0 -> return
+    if root < 0 {
+        return
+    }
     loop index in start..<diagnostics.len() {
         diagnostics[index] = diagnostic_caused_by(diagnostics[index].copy(), diagnostics[root])
     }
@@ -205,8 +218,12 @@ sema_link_reports_to_first_error: fn(diagnostics: &[Diagnostic], root_start: Int
 sema_source_line_at: fn(segments: [SemaSourceSegment], site: Span) -> Int? {
     last_index := -1
     loop (index, segment) in segments {
-        if site.start >= segment.generated.start && site.start < segment.generated.end -> return sema_source_segment_line(segment, site.start - segment.generated.start)
-        if last_index < 0 || segment.generated.end > segments[last_index].generated.end -> last_index = index
+        if site.start >= segment.generated.start && site.start < segment.generated.end {
+            return sema_source_segment_line(segment, site.start - segment.generated.start)
+        }
+        if last_index < 0 || segment.generated.end > segments[last_index].generated.end {
+            last_index = index
+        }
     }
     if last_index < 0 || site.start < segments[last_index].generated.end -> return None
     sema_source_segment_line(segments[last_index], segments[last_index].generated.end - segments[last_index].generated.start)
@@ -219,12 +236,8 @@ sema_source_segment_line: fn(segment: SemaSourceSegment, local_offset: Int) -> I
     loop low < high {
         middle: (low + high) /% 2
         if {
-            segment.line_starts[middle] <= local_offset -> {
-                low = middle + 1
-            }
-            else -> {
-                high = middle
-            }
+            segment.line_starts[middle] <= local_offset -> { low = middle + 1 }
+            else -> { high = middle }
         }
     }
     if low == 0 -> return None
@@ -237,7 +250,9 @@ sema_source_segment_line: fn(segment: SemaSourceSegment, local_offset: Int) -> I
 sema_source_column_at: fn(segments: [SemaSourceSegment], site: Span) -> Int? {
     line: sema_source_line_at(segments, site) ?? return None
     loop segment in segments {
-        if site.start >= segment.generated.start && site.start < segment.generated.end -> return Val(site.start - segment.generated.start - segment.line_starts[line - 1] + 1)
+        if site.start >= segment.generated.start && site.start < segment.generated.end {
+            return Val(site.start - segment.generated.start - segment.line_starts[line - 1] + 1)
+        }
     }
     None
 }
@@ -334,9 +349,15 @@ sema_unknown_name: fn(name: String, span: Span) -> Diagnostic {
 // itself E0003): its fix names the loop item instead. A name another
 // language spells for a built-in Jet value or type gets the Jet spelling.
 sema_unknown_name_declare_fix: fn(name: String) -> String Never! {
-    if name.starts_with("$") -> return "read a fact root such as `#build.target.os`, or read the fact on its subject, such as `T.reflect().fields`"
-    if name == "it" -> return "`it` is the item only inside a bindingless loop such as `loop items -> it * 2`; elsewhere name the item: `loop item in items {{ ... }}`"
-    if sema_unknown_name_jet_spelling(name) == .Val(spelling) -> return sema_unknown_name_jet_spelling_fix(name, spelling)
+    if name.starts_with("$") {
+        return "read a fact root such as `#build.target.os`, or read the fact on its subject, such as `T.reflect().fields`"
+    }
+    if name == "it" {
+        return "`it` is the item only inside a bindingless loop such as `loop items -> it * 2`; elsewhere name the item: `loop item in items {{ ... }}`"
+    }
+    if sema_unknown_name_jet_spelling(name) == .Val(spelling) {
+        return sema_unknown_name_jet_spelling_fix(name, spelling)
+    }
     "declare it first: `{name}: ...`"
 }
 
@@ -366,13 +387,21 @@ sema_unknown_name_jet_spelling_fix: fn(name: String, spelling: String) -> String
 // E0102's near function name carries one), or declaring it. `_` is never a
 // name: read as a value it is a hole outside a hole table's header (E0947).
 sema_unknown_name_in: fn(name: String, span: Span, scopes: SemaScopeTable) -> Diagnostic {
-    if name == "_" -> return sema_error("E0947", span, "`_` stands for an arm's candidate only in the header of an `if` table", "in `if header {{ candidate -> body }}` each candidate takes the place of the header's `_`; nowhere else does `_` have a value", "write the value here, or move the test into an `if` header followed by `{{` and its arms")
+    if name == "_" {
+        return sema_error("E0947", span, "`_` stands for an arm's candidate only in the header of an `if` table", "in `if header {{ candidate -> body }}` each candidate takes the place of the header's `_`; nowhere else does `_` have a value", "write the value here, or move the test into an `if` header followed by `{{` and its arms")
+    }
     what: "nothing named `{name}` exists here"
     why: "a name must be declared before it's used"
-    if core_module_for_alias(name) == .Val(owner) -> return sema_error("E0107", span, what, why, "add `use {name}: {owner}`")
-    if sema_unknown_name_jet_spelling(name) == .Val(spelling) -> return diagnostic_with_edit(sema_error("E0107", span, what, why, sema_unknown_name_jet_spelling_fix(name, spelling)), TextEdit{span: span, new_text: spelling})
+    if core_module_for_alias(name) == .Val(owner) {
+        return sema_error("E0107", span, what, why, "add `use {name}: {owner}`")
+    }
+    if sema_unknown_name_jet_spelling(name) == .Val(spelling) {
+        return diagnostic_with_edit(sema_error("E0107", span, what, why, sema_unknown_name_jet_spelling_fix(name, spelling)), TextEdit{span: span, new_text: spelling})
+    }
     near: sema_scope_near_visible_names(scopes, name)
-    if near.len() == 0 -> return sema_error("E0107", span, what, why, sema_unknown_name_declare_fix(name))
+    if near.len() == 0 {
+        return sema_error("E0107", span, what, why, sema_unknown_name_declare_fix(name))
+    }
     names := ""
     loop (index, candidate) in near {
         names = if {
@@ -394,7 +423,9 @@ sema_unknown_name_in: fn(name: String, span: Span, scopes: SemaScopeTable) -> Di
 // the order. In a body comptime site's staged check, a run-time local or
 // parameter of the function around the site is E0640 instead.
 sema_unknown_name_at: fn(name: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Diagnostic {
-    if scopes.comptime_runtime_locals.contains(name) -> return sema_comptime_reads_runtime_value(name, span)
+    if scopes.comptime_runtime_locals.contains(name) {
+        return sema_comptime_reads_runtime_value(name, span)
+    }
     if program.registration_graph == .Val(graph) {
         if sema_registration_module_index(graph, environment.module_identity) == .Val(index) {
             if graph.modules[index].program.entry_locals.contains(name) {
@@ -420,7 +451,9 @@ sema_comptime_reads_runtime_value: fn(name: String, span: Span) -> Diagnostic {
 }
 
 sema_type_mismatch: fn(required: Type, offered: Type, span: Span) -> Diagnostic {
-    if sema_nested_fn_failure_mismatch(required, offered, span) == .Val(nested_fn) -> return nested_fn
+    if sema_nested_fn_failure_mismatch(required, offered, span) == .Val(nested_fn) {
+        return nested_fn
+    }
     if sema_typed_text_mismatch(required, offered, span) == .Val(typed_text) -> return typed_text
     // A plain value offered to a `T?` slot is a payload mismatch.
     if required == .Option(payload) {
@@ -449,10 +482,14 @@ sema_type_mismatch: fn(required: Type, offered: Type, span: Span) -> Diagnostic 
 // (E0310) must be tested before its value is used.
 sema_plain_carrier_mismatch: fn(required: Type, offered: Type, span: Span) -> Diagnostic? {
     if offered == .Result(ok, _) {
-        if !(required == .Result(_, _)) && type_identity_equal(ok, required) -> return Val(sema_error("E0401", span, "this needs {sema_type_show(required)}, but the value is {sema_type_show(offered)}", "a fallible result must be checked before its value is used", "use `?`, `??`, or test with `== Ok(...)` / `== Err(...)`"))
+        if !(required == .Result(_, _)) && type_identity_equal(ok, required) {
+            return Val(sema_error("E0401", span, "this needs {sema_type_show(required)}, but the value is {sema_type_show(offered)}", "a fallible result must be checked before its value is used", "use `?`, `??`, or test with `== Ok(...)` / `== Err(...)`"))
+        }
     }
     if offered == .Option(inner) {
-        if !(required == .Option(_)) && type_identity_equal(inner, required) -> return Val(sema_error("E0310", span, "this needs {sema_type_show(required)}, but the value is {sema_type_show(offered)}", "a plain value is required here, not an optional one", "test with `== Val(...)` or `== None` first, e.g. `if x == Val(n) {{ ... }}`"))
+        if !(required == .Option(_)) && type_identity_equal(inner, required) {
+            return Val(sema_error("E0310", span, "this needs {sema_type_show(required)}, but the value is {sema_type_show(offered)}", "a plain value is required here, not an optional one", "test with `== Val(...)` or `== None` first, e.g. `if x == Val(n) {{ ... }}`"))
+        }
     }
     None
 }
@@ -460,7 +497,9 @@ sema_plain_carrier_mismatch: fn(required: Type, offered: Type, span: Span) -> Di
 // E0108: a write whose value doesn't fit the binding or field it lands in;
 // `holder` is "binding" or "field".
 sema_slot_holds_mismatch: fn(slot: String, holder: String, required: Type, offered: Type, span: Span) -> Diagnostic {
-    if sema_nested_fn_failure_mismatch(required, offered, span) == .Val(nested_fn) -> return nested_fn
+    if sema_nested_fn_failure_mismatch(required, offered, span) == .Val(nested_fn) {
+        return nested_fn
+    }
     fix: if required == Type.Int && sema_type_nominal_leaf(offered) == "Fraction" -> "use `/%` to divide and round down (`/%=` in place), or make the {holder} a Float" else -> sema_type_fix_hint(required, offered)
     sema_error("E0108", span, "{slot} holds {sema_type_show(required)}, but this value is {sema_type_show(offered)}", "a {holder} keeps one type for its whole life", fix)
 }
@@ -486,7 +525,9 @@ sema_integer_narrowing_fix: fn(want: Type, got: Type) -> String? {
 sema_typed_text_mismatch: fn(required: Type, offered: Type, span: Span) -> Diagnostic? {
     if required == .Named(name) && offered == Type.String {
         head: sema_call_reflection_leaf_name(name)
-        if head == "Regex" -> return Val(sema_error("E0152", span, "a `String` is not a `Regex` pattern", "regex patterns are typed literals, so Jet can validate them before the program runs", "write `Regex{{\"...\"}}` here, or call `re.compile(text)` for a pattern built at run time"))
+        if head == "Regex" {
+            return Val(sema_error("E0152", span, "a `String` is not a `Regex` pattern", "regex patterns are typed literals, so Jet can validate them before the program runs", "write `Regex{{\"...\"}}` here, or call `re.compile(text)` for a pattern built at run time"))
+        }
         if head == "SQL" || head == "HTML" || head == "Sh" {
             why: if head == "Sh" -> "a runtime string could change the executable or argument boundaries; only a checked literal may build `Sh`, where every `{{value}}` hole is exactly one argv item" else -> "interpolating untrusted text into a query or page is how injection happens; only a checked literal (its `{{value}}` holes become bound parameters or escaped insertions) may build one"
             return Val(sema_error("E0149", span, "a runtime `String` can't be used as `{head}`", why, "write `{head}{{\"...\"}}` with `{{value}}` holes, or use `{head}.raw(\"…\")` if you have audited the text"))
@@ -513,7 +554,9 @@ sema_nested_fn_failure_mismatch: fn(required: Type, offered: Type, span: Span) -
 sema_value_mismatch_index: fn(diagnostics: [Diagnostic], start: Int, span: Span) -> Int? {
     index := start
     loop index < diagnostics.len() {
-        if diagnostics[index].code == "E0108" && diagnostics[index].span == (Val(span)) -> return Val(index)
+        if diagnostics[index].code == "E0108" && diagnostics[index].span == (Val(span)) {
+            return Val(index)
+        }
         index += 1
     }
     None
@@ -576,10 +619,12 @@ sema_type_show_quoted: fn(ty: Type) -> String Never! {
 sema_type_int_range_text: fn(signed: Bool, bits: Int) -> String Never! {
     if bits == 64 && signed -> return "-9223372036854775808 to 9223372036854775807"
     if bits == 64 -> return "0 to 18446744073709551615"
-    if bits == 128 && signed -> return "-170141183460469231731687303715884105728 to 170141183460469231731687303715884105727"
+    if bits == 128 && signed {
+        return "-170141183460469231731687303715884105728 to 170141183460469231731687303715884105727"
+    }
     if bits == 128 -> return "0 to 340282366920938463463374607431768211455"
     span := 1
-    loop _ in 0..<bits -> span = span * 2
+    loop _ in 0..<bits -> span *= 2
     if signed -> return "{0 - span / 2} to {span / 2 - 1}"
     "0 to {span - 1}"
 }
@@ -600,14 +645,20 @@ sema_type_nominal_leaf: fn(ty: Type) -> String Never! {
 // reference's `type_fix_hint`). A fix never prescribes what was written.
 sema_type_fix_hint: fn(want: Type, got: Type) -> String Never! {
     want_show: sema_type_show(want)
-    if want_show == sema_type_show(got) -> return "these are two different declarations that both print as {want_show}; make both sides name the same one (import it once and use that name)"
+    if want_show == sema_type_show(got) {
+        return "these are two different declarations that both print as {want_show}; make both sides name the same one (import it once and use that name)"
+    }
     want_leaf: sema_type_nominal_leaf(want)
-    if want_leaf != "" && want_leaf == sema_type_nominal_leaf(got) -> return "these names may refer to one declaration; make both sides use one spelling for `{want_leaf}`"
+    if want_leaf != "" && want_leaf == sema_type_nominal_leaf(got) {
+        return "these names may refer to one declaration; make both sides use one spelling for `{want_leaf}`"
+    }
     if sema_integer_narrowing_fix(want, got) == .Val(narrowing) -> return narrowing
     if want == {
         .Float -> {
             if got == Type.Int -> return "write the number with a decimal part, like `2.0`"
-            if sema_type_nominal_leaf(got) == "Decimal" -> return "convert it with `.to_float()`, or keep Decimal on both sides"
+            if sema_type_nominal_leaf(got) == "Decimal" {
+                return "convert it with `.to_float()`, or keep Decimal on both sides"
+            }
         }
         .Int -> {
             if got == Type.Float -> return "drop the decimal part, like `2`"
@@ -635,13 +686,25 @@ sema_return_value_fix: fn(want: Type, got: Type) -> String Never! {
     // The checker hands over the types as written and as inferred: a written
     // `Int` may still be the name `Int` and a Core `Fraction` its qualified
     // name, so the shapes below compare by name, not by representation.
-    if type_name(success) == "Int" && sema_type_nominal_leaf(offered) == "Fraction" -> return "`/` on whole numbers makes an exact Fraction; divide with `/%` to get a whole number rounded down"
-    if success == .List(item) && type_name(item) == type_name(offered) -> return "wrap the value in a list: `[value]`"
-    if offered == .List(item) && type_name(item) == type_name(success) -> return "this is a whole list; hand back one element, or combine the elements into one value"
-    if offered == .Option(item) && type_name(item) == type_name(success) -> return "the value may be missing; supply a fallback with `?? default`, or leave early when it is `None`"
-    if type_name(success) == "String" -> return "put the value in text with interpolation: \"{{value}}\""
+    if type_name(success) == "Int" && sema_type_nominal_leaf(offered) == "Fraction" {
+        return "`/` on whole numbers makes an exact Fraction; divide with `/%` to get a whole number rounded down"
+    }
+    if success == .List(item) && type_name(item) == type_name(offered) {
+        return "wrap the value in a list: `[value]`"
+    }
+    if offered == .List(item) && type_name(item) == type_name(success) {
+        return "this is a whole list; hand back one element, or combine the elements into one value"
+    }
+    if offered == .Option(item) && type_name(item) == type_name(success) {
+        return "the value may be missing; supply a fallback with `?? default`, or leave early when it is `None`"
+    }
+    if type_name(success) == "String" {
+        return "put the value in text with interpolation: \"{{value}}\""
+    }
     hint: sema_type_fix_hint(want, got)
-    if hint.starts_with("use ") && hint.ends_with(" here") -> return "hand back a {type_name(want)} value: convert this value to {type_name(want)}, or return the value you meant"
+    if hint.starts_with("use ") && hint.ends_with(" here") {
+        return "hand back a {type_name(want)} value: convert this value to {type_name(want)}, or return the value you meant"
+    }
     hint
 }
 
@@ -668,7 +731,9 @@ sema_core_canonical_leaf: fn(name: String, module_name: String, source: String) 
     owner: parts.slice(0, parts.len() - 1).join("::")
     core_owner: "<corelib>/{module_name}"
     source_suffix: "::{source}"
-    if owner == core_owner || (owner.starts_with("<corelib>/") && owner.ends_with(source_suffix)) -> return Val(leaf)
+    if owner == core_owner || (owner.starts_with("<corelib>/") && owner.ends_with(source_suffix)) {
+        return Val(leaf)
+    }
     None
 }
 
@@ -693,7 +758,9 @@ sema_expiring_secret_loan_type: fn(ty: Type) -> Type Never! {
 sema_is_expiring_secret_member_type: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Tagged(marker, inner) -> {
-            if marker != (TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}) -> return false
+            if marker != (TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}) {
+                return false
+            }
             if inner == .Named(name) -> return sema_expiring_secret_leaf(name)
             false
         }
@@ -705,7 +772,6 @@ sema_is_expiring_secret_member_type: fn(ty: Type) -> Bool Never! {
 sema_expiring_secret_leaf: fn(leaf: String) -> Bool Never! {
     leaf == "Secret" || leaf == "SigningKey" || leaf == "X25519SecretKey"
 }
-
 
 // Whether a value of `ty` carries an ExpiringSecret loan anywhere a store,
 // return or escape could keep it.

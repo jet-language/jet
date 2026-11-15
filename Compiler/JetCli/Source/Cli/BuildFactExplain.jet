@@ -11,6 +11,7 @@ use {
 }
 
 JET_CLI_BUILD_FACT_WHY: "the nearest source writer wins within the most explicit contribution layer; same-layer disagreement is an error"
+
 JET_CLI_BUILD_FACT_FIX: "change the effective writer, or remove it to inherit the next writer in the chain"
 
 // A module value query `binding.function` (`jet explain tuned.slots`): the
@@ -62,7 +63,9 @@ jet_cli_build_fact_explain_host: fn(key: String, file: String, profile: String, 
                 explanation: DiagnosticExplanation{code: code, stage: "", meaning: lines[0], what: Val(lines.join("\n")), why: Val(JET_CLI_BUILD_FACT_WHY), fix: Val(JET_CLI_BUILD_FACT_FIX), example: None}
                 return jet_cli_explanation_output(explanation, color, json)
             }
-            if explained.diagnostics.len() == 0 -> return JetCLIPlan.Done{output: jet_cli_ice("build fact `{key}` resolved to no writer")}
+            if explained.diagnostics.len() == 0 {
+                return JetCLIPlan.Done{output: jet_cli_ice("build fact `{key}` resolved to no writer")}
+            }
             presented: jet_driver_present_diagnostics(explained.diagnostics, snapshot, [SourceFile]{})
             JetCLIPlan.Done{output: jet_cli_lint_errors(snapshot.entry_path, jet_cli_build_fact_entry_source(snapshot), presented, color, json)}
         }
@@ -78,7 +81,9 @@ jet_cli_module_value: fn(query: String, source: String) -> JetCLIModuleValue? Ne
     lines: source.split("\n").to_list()
     instantiation := ""
     loop line in lines {
-        if line.starts_with("{parts[0]}: ") -> instantiation = line.removeprefix("{parts[0]}: ").trim()
+        if line.starts_with("{parts[0]}: ") {
+            instantiation = line.removeprefix("{parts[0]}: ").trim()
+        }
     }
     call: instantiation.split("(").to_list()
     if call.len() != 2 || !call[1].ends_with(")") -> return None
@@ -93,7 +98,9 @@ jet_cli_module_value: fn(query: String, source: String) -> JetCLIModuleValue? Ne
         if line.starts_with("{module_name}: module") {
             head: line.split("(").to_list()
             if head.len() < 2 -> return None
-            loop parameter in head[1].split(")").to_list()[0].split(",") -> parameters.push(parameter.split(":").to_list()[0].trim())
+            loop parameter in head[1].split(")").to_list()[0].split(",") {
+                parameters.push(parameter.split(":").to_list()[0].trim())
+            }
             inside = true
             next
         }

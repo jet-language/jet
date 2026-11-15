@@ -6,14 +6,38 @@
 helper: fn() -> Int { 1 }
 
 shapes: fn(meta: Compiler) {
-    meta.publish(#code { extra: fn() -> Int { 2 } })
-    meta.add(#code { extra: fn() -> Int { 2 } }, scope: "extra", 3)
+    meta.publish(
+        #code {
+            extra: fn() -> Int { 2 }
+        },
+    )
+    meta.add(
+        #code {
+            extra: fn() -> Int { 2 }
+        },
+        scope: "extra",
+        3,
+    )
     meta.add(scope: "extra")
-    meta.add(#code { extra: fn() -> Int { 2 } })
+    meta.add(
+        #code {
+            extra: fn() -> Int { 2 }
+        },
+    )
     meta.rewrite_body(helper)
-    meta.rewrite_body(helper, code: #code { 2 })
+    meta.rewrite_body(
+        helper,
+        code: #code {
+            2
+        },
+    )
     count: 3
-    meta.rewrite_body(count, #code { 2 })
+    meta.rewrite_body(
+        count,
+        #code {
+            2
+        },
+    )
     meta.allow_rewrite("greet")
     name: "greet"
     meta.allow_rewrite(package: name)

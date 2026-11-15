@@ -24,24 +24,24 @@ run: fn() {
     }
     trapping: plugin.load("start_trap.wat", policy)
     if trapping.seven() == {
-        .Ok(value) -> print("start_trap.wat loaded: {value}")
+        .Ok(value) -> { print("start_trap.wat loaded: {value}") }
         .Err(error) -> {
             if error == {
-                .Guest(fault) -> print("start_trap.wat failed: {fault.message}")
-                .Denied(fault) -> print("start_trap.wat failed: {fault.message}")
-                .Defect(fault) -> print("start_trap.wat failed: {fault.message}")
+                .Guest(fault) -> { print("start_trap.wat failed: {fault.message}") }
+                .Denied(fault) -> { print("start_trap.wat failed: {fault.message}") }
+                .Defect(fault) -> { print("start_trap.wat failed: {fault.message}") }
                 .Budget(_, fault) -> print("start_trap.wat failed: {fault.message}")
             }
         }
     }
     guarded: plugin.load("importing_start_trap.wat", policy)
     if guarded.seven() == {
-        .Ok(value) -> print("importing_start_trap.wat loaded: {value}")
+        .Ok(value) -> { print("importing_start_trap.wat loaded: {value}") }
         .Err(error) -> {
             if error == {
-                .Denied(fault) -> print("importing_start_trap.wat denied: {fault.message}")
-                .Guest(fault) -> print("importing_start_trap.wat failed: {fault.message}")
-                .Defect(fault) -> print("importing_start_trap.wat failed: {fault.message}")
+                .Denied(fault) -> { print("importing_start_trap.wat denied: {fault.message}") }
+                .Guest(fault) -> { print("importing_start_trap.wat failed: {fault.message}") }
+                .Defect(fault) -> { print("importing_start_trap.wat failed: {fault.message}") }
                 .Budget(_, fault) -> print("importing_start_trap.wat failed: {fault.message}")
             }
         }

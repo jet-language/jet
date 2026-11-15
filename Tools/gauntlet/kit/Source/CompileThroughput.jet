@@ -11,21 +11,24 @@ use {
 }
 
 COMPILE_THROUGHPUT_SCHEMA: "gauntlet-axis-compile-throughput-v1"
+
 COMPILE_THROUGHPUT_HARNESS: "Tools/perf/compile-throughput/Throughput.jet"
 
 // Why `axis` (the manifest's axes.compile_throughput, null when it is
 // missing) is not the cell this adapter runs.
 compile_throughput_contract_issues: fn(axis: Dyn) -> [String] {
     if axis == Dyn.Null -> return ["compile_throughput axis is missing"]
-    contract_issues([ContractRule]{
-        {holds: text_at(axis, "status") == Val("required"), issue: "compile_throughput must be required"},
-        {holds: text_at(axis, "schema") == Val(COMPILE_THROUGHPUT_SCHEMA), issue: "compile_throughput schema must be {COMPILE_THROUGHPUT_SCHEMA}"},
-        {holds: text_at(axis, "metric") == Val("clean_build_wall_ns"), issue: "compile_throughput metric must be clean_build_wall_ns"},
-        {holds: text_at(axis, "harness") == Val(COMPILE_THROUGHPUT_HARNESS), issue: "compile_throughput harness must be {COMPILE_THROUGHPUT_HARNESS}"},
-        {holds: ids_at(axis, "programs") == ["bench300k", "selfhost"], issue: "compile_throughput programs must be bench300k and selfhost"},
-        {holds: ids_at(axis, "arms") == ["default", "single"], issue: "compile_throughput arms must be default and single"},
-        {holds: int_at(axis, "samples") == Val(5) && int_at(axis, "warmups") == Val(1), issue: "compile_throughput takes 5 samples after 1 warmup"},
-    })
+    contract_issues(
+        [ContractRule]{
+            {holds: text_at(axis, "status") == Val("required"), issue: "compile_throughput must be required"},
+            {holds: text_at(axis, "schema") == Val(COMPILE_THROUGHPUT_SCHEMA), issue: "compile_throughput schema must be {COMPILE_THROUGHPUT_SCHEMA}"},
+            {holds: text_at(axis, "metric") == Val("clean_build_wall_ns"), issue: "compile_throughput metric must be clean_build_wall_ns"},
+            {holds: text_at(axis, "harness") == Val(COMPILE_THROUGHPUT_HARNESS), issue: "compile_throughput harness must be {COMPILE_THROUGHPUT_HARNESS}"},
+            {holds: ids_at(axis, "programs") == ["bench300k", "selfhost"], issue: "compile_throughput programs must be bench300k and selfhost"},
+            {holds: ids_at(axis, "arms") == ["default", "single"], issue: "compile_throughput arms must be default and single"},
+            {holds: int_at(axis, "samples") == Val(5) && int_at(axis, "warmups") == Val(1), issue: "compile_throughput takes 5 samples after 1 warmup"},
+        },
+    )
 }
 
 // The axis report the gauntlet publishes.
@@ -73,19 +76,21 @@ run_compile_throughput_adapter: fn(axis: Dyn, run: AxisRun) -[FS, Exec]> Compile
             metrics["{text_or_empty(program, "id")}.{text_or_empty(arm, "id")}"] = readings
         }
     }
-    Ok(CompileThroughputReport{
-        id: "compile_throughput",
-        required: text_at(axis, "status") == Val("required"),
-        status: if complete -> "complete" else -> "incomplete",
-        contract: axis,
-        schema: member(axis, "schema"),
-        metric: member(axis, "metric"),
-        receipt: receipt_path,
-        compiler: dyn_at(receipt, "compiler"),
-        metrics: metrics,
-        gates: dyn_at(receipt, "gates"),
-        publication: Publication{status: if is_true(receipt, "passed") -> "ready" else -> "blocked", blockers: blockers}
-    })
+    Ok(
+        CompileThroughputReport{
+            id: "compile_throughput",
+            required: text_at(axis, "status") == Val("required"),
+            status: if complete -> "complete" else -> "incomplete",
+            contract: axis,
+            schema: member(axis, "schema"),
+            metric: member(axis, "metric"),
+            receipt: receipt_path,
+            compiler: dyn_at(receipt, "compiler"),
+            metrics: metrics,
+            gates: dyn_at(receipt, "gates"),
+            publication: Publication{status: if is_true(receipt, "passed") -> "ready" else -> "blocked", blockers: blockers},
+        },
+    )
 }
 
 test_axis: fn() -> Dyn {

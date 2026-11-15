@@ -1,4 +1,3 @@
-
 use {
     compute: core.compute
     core.compute.[ComputeError]
@@ -15,11 +14,9 @@ run: fn() {
 
     singular: compute.reshape(compute.from_list([1.0, 2.0, 2.0, 4.0]) ?? panic("singular"), [2, 2]) ?? panic("singular shape")
     if solve.lu(singular) == {
-        .Ok(_) -> print("singular:accepted")
+        .Ok(_) -> { print("singular:accepted") }
         .Err(error) -> {
-            if error == ComputeError.Singular {
-                print("singular:Singular")
-            } else {
+            if error == ComputeError.Singular -> print("singular:Singular") else {
                 print("singular:wrong-error")
             }
         }
@@ -27,11 +24,9 @@ run: fn() {
 
     wrong_rhs: compute.from_list([1.0, 2.0]) ?? panic("wrong_rhs")
     if solve.dense(scaled, wrong_rhs) == {
-        .Ok(_) -> print("shape:accepted")
+        .Ok(_) -> { print("shape:accepted") }
         .Err(error) -> {
-            if error == ComputeError.Shape {
-                print("shape:Shape")
-            } else {
+            if error == ComputeError.Shape -> print("shape:Shape") else {
                 print("shape:wrong-error")
             }
         }
@@ -42,20 +37,16 @@ run: fn() {
     if compute.on_device(compute.full([1, 1], 1.0) ?? panic("cuda value"), compute.device_cuda()) == {
         .Ok(cuda) -> {
             if solve.lu(cuda) == {
-                .Ok(_) -> print("device:accepted")
+                .Ok(_) -> { print("device:accepted") }
                 .Err(error) -> {
-                    if error == ComputeError.Unsupported {
-                        print("device:Unsupported")
-                    } else {
+                    if error == ComputeError.Unsupported -> print("device:Unsupported") else {
                         print("device:wrong-error")
                     }
                 }
             }
         }
         .Err(error) -> {
-            if error == ComputeError.Device {
-                print("device:Unsupported")
-            } else {
+            if error == ComputeError.Device -> print("device:Unsupported") else {
                 print("device:wrong-error")
             }
         }

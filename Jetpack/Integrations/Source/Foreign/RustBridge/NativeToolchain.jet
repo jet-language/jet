@@ -11,7 +11,6 @@ use {
     jet_pkg_model.[pkg_ascii_lower]
 }
 
-
 // One resolved native compiler or archiver for inline C/C++ bodies.
 NativeTool: struct {
     path: String
@@ -92,10 +91,14 @@ pkg_ffi_resolve_native_tool: fn(variable: String, target: String, host: String, 
     selected = sys.get("{variable}_{target_key}") ?? selected
     path: pkg_ffi_locate_tool(selected) ?? return Err(pkg_ffi_tool_error("selected native tool `{selected}` was not found"))
     receipt: process.cmd([String]{path, "--version"}).run() ?? return Err(pkg_ffi_tool_error("couldn't inspect native tool `{path}`: {err}"))
-    if !receipt.success -> return Err(pkg_ffi_tool_error("selected native tool `{path}` rejected `--version`"))
+    if !receipt.success {
+        return Err(pkg_ffi_tool_error("selected native tool `{path}` rejected `--version`"))
+    }
     version: "{receipt.output}{receipt.errors}"
     target_arg := String?{None}
-    if variable != "AR" && pkg_ascii_lower(version).contains("clang") -> target_arg = Val("--target={target}")
+    if variable != "AR" && pkg_ascii_lower(version).contains("clang") {
+        target_arg = Val("--target={target}")
+    }
     Ok(NativeTool{path: path, identity: "{path}\n{version}", target_arg: target_arg})
 }
 
@@ -119,8 +122,12 @@ pkg_ffi_locate_tool: fn(requested: String) -[FS, Env]> String? Never! {
 
 pkg_ffi_inline_toolchain_identity: fn(toolchain: InlineNativeToolchain) -> String Never! {
     value := "target={toolchain.target}\nruntime={pkg_ffi_cxx_runtime_for_target(toolchain.target)}\nproof-suffix={pkg_ffi_proof_suffix_for_target(toolchain.target)}\nundefined={pkg_ffi_undefined_symbol_flag_for_target(toolchain.target)}\n"
-    if toolchain.cc == .Val(tool) -> value = "{value}cc={tool.identity}\ntarget-arg={pkg_ffi_rust_debug_optional(tool.target_arg)}\n"
-    if toolchain.cxx == .Val(tool) -> value = "{value}cxx={tool.identity}\ntarget-arg={pkg_ffi_rust_debug_optional(tool.target_arg)}\n"
+    if toolchain.cc == .Val(tool) {
+        value = "{value}cc={tool.identity}\ntarget-arg={pkg_ffi_rust_debug_optional(tool.target_arg)}\n"
+    }
+    if toolchain.cxx == .Val(tool) {
+        value = "{value}cxx={tool.identity}\ntarget-arg={pkg_ffi_rust_debug_optional(tool.target_arg)}\n"
+    }
     "{value}ar={toolchain.ar.identity}\narchive-flags=rcs\n"
 }
 

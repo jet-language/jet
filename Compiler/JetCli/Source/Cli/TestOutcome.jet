@@ -11,14 +11,46 @@ use {
     jet_driver.[JetDriverAuthorizedSourceRoot]
     jet_foundation.[JET_BUILD_DEFAULT_PROFILE]
     jet_foundation.[
-        BuildOptions, Diagnostic, EvidenceAttachment, EvidenceBuild, EvidenceDiagnostic, EvidenceExpectation, EvidenceKind, EvidenceOutcome,
-        EvidenceProducerKind, EvidenceRecord, EvidenceReport,
-        EvidenceRevision, EvidenceSource, EVIDENCE_BUILD_REVISION_ENV, EVIDENCE_PROFILE_ENV,
-        EVIDENCE_REPORT_ENV, EVIDENCE_REPORT_ID_ENV, EVIDENCE_REVISION_ENV, EVIDENCE_SOURCE_REVISION_ENV,
-        EVIDENCE_TARGET_ENV, EVIDENCE_TOOLCHAIN_ENV, TTestFact, TTestKind, TTestLawFact, build_options_key,
-        evidence_expectation_error_text, evidence_identity_for_record, evidence_merge_error_text, evidence_record_checked_derivation,
-        evidence_record_from_test_codes, evidence_record_new, evidence_record_set_expectation, evidence_report_add_record_with_derivation,
-        evidence_report_encode, evidence_report_json, evidence_report_new, evidence_report_write, evidence_stable_token, diagnostic_from_registry, diagnostic_stop_parse,
+        BuildOptions,
+        Diagnostic,
+        EvidenceAttachment,
+        EvidenceBuild,
+        EvidenceDiagnostic,
+        EvidenceExpectation,
+        EvidenceKind,
+        EvidenceOutcome,
+        EvidenceProducerKind,
+        EvidenceRecord,
+        EvidenceReport,
+        EvidenceRevision,
+        EvidenceSource,
+        EVIDENCE_BUILD_REVISION_ENV,
+        EVIDENCE_PROFILE_ENV,
+        EVIDENCE_REPORT_ENV,
+        EVIDENCE_REPORT_ID_ENV,
+        EVIDENCE_REVISION_ENV,
+        EVIDENCE_SOURCE_REVISION_ENV,
+        EVIDENCE_TARGET_ENV,
+        EVIDENCE_TOOLCHAIN_ENV,
+        TTestFact,
+        TTestKind,
+        TTestLawFact,
+        build_options_key,
+        evidence_expectation_error_text,
+        evidence_identity_for_record,
+        evidence_merge_error_text,
+        evidence_record_checked_derivation,
+        evidence_record_from_test_codes,
+        evidence_record_new,
+        evidence_record_set_expectation,
+        evidence_report_add_record_with_derivation,
+        evidence_report_encode,
+        evidence_report_json,
+        evidence_report_new,
+        evidence_report_write,
+        evidence_stable_token,
+        diagnostic_from_registry,
+        diagnostic_stop_parse,
     ]
     jet_pkg_model.[JET_VERSION, ClaimsGrade, ClaimsProjection, ManifestError, PackageFacts, WorkspaceDeclarationCache]
 }
@@ -123,7 +155,9 @@ jet_cli_test_property_failure: fn(stderr: String) -> JetCLITestPropertyFailure? 
         number: Int.parse(jet_cli_test_text(bytes, head.len(), of)) ?? return None
         seed: jet_cli_test_text(bytes, seed_at + " (seed ".len(), semi)
         minimized := ""
-        if index + 1 < lines.len() && lines[index + 1].starts_with("minimized_inputs: ") -> minimized = lines[index + 1].removeprefix("minimized_inputs: ")
+        if index + 1 < lines.len() && lines[index + 1].starts_with("minimized_inputs: ") {
+            minimized = lines[index + 1].removeprefix("minimized_inputs: ")
+        }
         return Val(JetCLITestPropertyFailure{case_number: number, seed: seed, minimized: minimized})
     }
     None
@@ -288,15 +322,9 @@ jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptio
         expected_failure: parts.flags.bit_and(2) != 0
         skipped: parts.flags.bit_and(4) != 0
         ran_failed: if expected_failure -> ok else -> !ok
-        if skipped {
-            tally.skipped += 1
-        } else if expected_failure && ok {
+        if skipped -> tally.skipped += 1 else if expected_failure && ok {
             tally.expected_failures += 1
-        } else if expected_failure {
-            tally.unexpected_passes += 1
-        } else if ok {
-            tally.passed += 1
-        } else {
+        } else if expected_failure { tally.unexpected_passes += 1 } else if ok { tally.passed += 1 } else {
             tally.failed += 1
         }
         stop := JetCLITestStop?{None}
@@ -316,12 +344,18 @@ jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptio
         // others have a line; the cases its `#Pre` rejected never count.
         line: if claim.kind == 3 -> checked(U32{parts.property.map(fn(run) { run.cases }) ?? 0}) ?? (U32{0}) else -> claim.line
         record := evidence_record_from_test_codes(claim.kind, state, parts.name, message, claim.file, line, report_id, build, revision) ?? return Err(err.message)
-        if mismatch == .Val(found) -> record.diagnostics = [EvidenceDiagnostic]{EvidenceDiagnostic{code: found.code.copy(), message: found.message.copy(), source: Val(EvidenceSource{path: found.file.copy(), line: found.line, column: U32{1}})}}
+        if mismatch == .Val(found) {
+            record.diagnostics = [EvidenceDiagnostic]{EvidenceDiagnostic{code: found.code.copy(), message: found.message.copy(), source: Val(EvidenceSource{path: found.file.copy(), line: found.line, column: U32{1}})}}
+        }
         if claim.kind == 3 -> jet_cli_test_law_attachments(record, claim.law, parts.property)
         if claim.kind == 3 && state == 1 && jet_cli_test_property_failure(parts.stderr) == .Val(failure) {
             record.attachments.push(EvidenceAttachment{name: "case", value: "{failure.case_number}"})
-            if parts.property == None -> record.attachments.push(EvidenceAttachment{name: "seed", value: failure.seed.copy()})
-            if failure.minimized != "" -> record.attachments.push(EvidenceAttachment{name: "minimized_inputs", value: failure.minimized.copy()})
+            if parts.property == None {
+                record.attachments.push(EvidenceAttachment{name: "seed", value: failure.seed.copy()})
+            }
+            if failure.minimized != "" {
+                record.attachments.push(EvidenceAttachment{name: "minimized_inputs", value: failure.minimized.copy()})
+            }
         }
         if expected_failure && !skipped {
             evidence_record_set_expectation(record, EvidenceExpectation.ExpectedFailure) ?? return Err(evidence_expectation_error_text(err))
@@ -368,35 +402,46 @@ jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptio
     floor_text := String?{None}
     if floor == .Val(required) -> floor_text = Val(required.render())
     selected: tally.passed + tally.failed + tally.skipped + tally.expected_failures + tally.unexpected_passes
-    test: jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("failed", jet_cli_status_int(tally.failed)),
-        jet_cli_status_field("passed", jet_cli_status_int(tally.passed)),
-        jet_cli_status_field("skipped", jet_cli_status_int(tally.skipped)),
-        jet_cli_status_field("selected", jet_cli_status_int(selected)),
-        jet_cli_status_field("expectedFailures", jet_cli_status_int(tally.expected_failures)),
-        jet_cli_status_field("unexpectedPasses", jet_cli_status_int(tally.unexpected_passes)),
-    })
-    claims: jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("grade", jet_cli_status_text(grade.copy())),
-        jet_cli_status_field("floor", jet_cli_status_optional_text(floor_text)),
-        jet_cli_status_field("floorMet", jet_cli_status_bool(projection.floor_met(floor))),
-        jet_cli_status_field("generatedAttempts", jet_cli_status_int(projection.generated_attempts)),
-        jet_cli_status_field("generated", jet_cli_status_int(projection.generated_successes)),
-        jet_cli_status_field("examples", jet_cli_status_int(projection.examples_successes)),
-    })
-    summaries: jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("claims", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("grade", jet_cli_status_text(grade.copy()))})),
-    })
+    test: jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("failed", jet_cli_status_int(tally.failed)),
+            jet_cli_status_field("passed", jet_cli_status_int(tally.passed)),
+            jet_cli_status_field("skipped", jet_cli_status_int(tally.skipped)),
+            jet_cli_status_field("selected", jet_cli_status_int(selected)),
+            jet_cli_status_field("expectedFailures", jet_cli_status_int(tally.expected_failures)),
+            jet_cli_status_field("unexpectedPasses", jet_cli_status_int(tally.unexpected_passes)),
+        },
+    )
+    claims: jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("grade", jet_cli_status_text(grade.copy())),
+            jet_cli_status_field("floor", jet_cli_status_optional_text(floor_text)),
+            jet_cli_status_field("floorMet", jet_cli_status_bool(projection.floor_met(floor))),
+            jet_cli_status_field("generatedAttempts", jet_cli_status_int(projection.generated_attempts)),
+            jet_cli_status_field("generated", jet_cli_status_int(projection.generated_successes)),
+            jet_cli_status_field("examples", jet_cli_status_int(projection.examples_successes)),
+        },
+    )
+    summaries: jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("claims", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("grade", jet_cli_status_text(grade.copy()))})),
+        },
+    )
     // `Float` carries JSON text already rendered: the canonical report JSON.
     // E2942 rides in `reports`, as every failing diagnostic does.
     reports: if below == .Val(diagnostic) -> jet_cli_reports_json(None, file, "", [Diagnostic]{diagnostic.copy()}) else -> [String]{}
-    status: jet_cli_status_render_with_reports("test", ok, reports, [JetCLIStatusField]{
-        jet_cli_status_field("test", test),
-        jet_cli_status_field("evidence", JetCLIStatusValue.Float{text: evidence_report_json(report)}),
-        jet_cli_status_field("grade", jet_cli_status_text(grade)),
-        jet_cli_status_field("claims", claims),
-        jet_cli_status_field("summaries", summaries),
-    })
+    status: jet_cli_status_render_with_reports(
+        "test",
+        ok,
+        reports,
+        [JetCLIStatusField]{
+            jet_cli_status_field("test", test),
+            jet_cli_status_field("evidence", JetCLIStatusValue.Float{text: evidence_report_json(report)}),
+            jet_cli_status_field("grade", jet_cli_status_text(grade)),
+            jet_cli_status_field("claims", claims),
+            jet_cli_status_field("summaries", summaries),
+        },
+    )
     Ok(JetCLITestOutcome{status: status, report: report, below: below})
 }
 
@@ -408,7 +453,9 @@ jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptio
 // when it was that test's final failure; each tie is its own record.
 jet_cli_test_contract_record: fn(contract: JetNativeTestContract, file: String, report_id: String, build: EvidenceBuild, revision: EvidenceRevision) -> EvidenceRecord Err! {
     fields: contract.site.split("\t").to_list()
-    if fields.len() < 4 || (fields[0] != "Pre" && fields[0] != "Post") -> return Err("native contract site `{contract.site}` is malformed")
+    if fields.len() < 4 || (fields[0] != "Pre" && fields[0] != "Post") {
+        return Err("native contract site `{contract.site}` is malformed")
+    }
     line: Int.parse(fields[1]) ?? return Err("native contract site line is invalid")
     column: Int.parse(fields[2]) ?? return Err("native contract site column is invalid")
     named := fields[3].copy()
@@ -422,7 +469,9 @@ jet_cli_test_contract_record: fn(contract: JetNativeTestContract, file: String, 
     identity: evidence_identity_for_record(report_id, fields[0], EvidenceProducerKind.Test, EvidenceKind.Contract, source, U64{1}, detail)
     record := evidence_record_new(identity, EvidenceKind.Contract, EvidenceProducerKind.Test, if contract.held -> EvidenceOutcome.Passed else -> EvidenceOutcome.Failed, U64{1}, source.copy(), build, revision)
     record.detail = detail
-    if !contract.held -> record.diagnostics.push(EvidenceDiagnostic{code: "E3005", message: "#{fields[0]} contract failed", source: Val(source)})
+    if !contract.held {
+        record.diagnostics.push(EvidenceDiagnostic{code: "E3005", message: "#{fields[0]} contract failed", source: Val(source)})
+    }
     if !contract.held && contract.test != "" {
         last: if contract.last -> "true" else -> "false"
         record.attachments.push(EvidenceAttachment{name: "test", value: contract.test.copy()})

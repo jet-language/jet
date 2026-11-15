@@ -17,7 +17,8 @@ use files: core.files
     root: cases_test_root("wiring-nulls")
     source: "step: jet -c 'cat; printf out; printf err >&2'\nstdin: null\nstdout: null\nstderr: null\nstep: printf observed\nstdout: = \"observed\"\n"
     assert_eq(cases_test_advanced(root, "discard", source).verdict.status, "PASS")
-    loop unobservable in ["step: printf x\nstdout: null\ncapture: value = text stdout\n", "step: printf '{{}}'\nstdout: null\njson: stdout doc $ valid # original predicate\n", "session peer raw: cat\nstdout: null\nrecv peer timeout 1s\nclose peer\n", "spawn peer: printf x\nstdout: null\nwait: peer\nstdout: empty\n", "session peer raw: cat\nstderr: null\nclose peer\nstderr: empty\n", "step: printf x\nstdout: null\nfor line stdout as row\nstep: true\nend for\n"] {
+    loop unobservable in
+        ["step: printf x\nstdout: null\ncapture: value = text stdout\n", "step: printf '{{}}'\nstdout: null\njson: stdout doc $ valid # original predicate\n", "session peer raw: cat\nstdout: null\nrecv peer timeout 1s\nclose peer\n", "spawn peer: printf x\nstdout: null\nwait: peer\nstdout: empty\n", "session peer raw: cat\nstderr: null\nclose peer\nstderr: empty\n", "step: printf x\nstdout: null\nfor line stdout as row\nstep: true\nend for\n"] {
         refused: cases_test_advanced(root, "unobservable", unobservable)
         assert_eq(refused.verdict.status, "REFUSED")
         assert(refused.verdict.detail.contains("nulled stream"))
@@ -47,11 +48,13 @@ use files: core.files
     partial: cases_test_advanced(root, "partial", "step: false\npty: stdin,stdout,stderr\n")
     assert_eq(partial.verdict.status, "REFUSED")
     assert_eq(partial.verdict.detail, "pty-stdio")
-    loop orphan in ["step: false\npty-send: \"x\\n\" after 1ms\n", "step: false\npty-close: after 1ms\n", "step: false\npty-resize: 30x100 at 1ms\n", "session peer raw: cat\npty-send: \"x\" after 1ms\nclose peer\n", "step: false\npty: true\npty: true\n"] {
+    loop orphan in
+        ["step: false\npty-send: \"x\\n\" after 1ms\n", "step: false\npty-close: after 1ms\n", "step: false\npty-resize: 30x100 at 1ms\n", "session peer raw: cat\npty-send: \"x\" after 1ms\nclose peer\n", "step: false\npty: true\npty: true\n"] {
         refused: cases_test_advanced(root, "orphan", orphan)
         assert_eq(refused.verdict.status, "REFUSED")
     }
-    loop modifier in ["pty: false", "pty: output", "pty: true size -1x80", "pty: true size nox0", "pty: true size 0x", "pty-resize: 24x80 after 1ms", "stderr-to-stdout: false", "stdout: file ../escape"] {
+    loop modifier in
+        ["pty: false", "pty: output", "pty: true size -1x80", "pty: true size nox0", "pty: true size 0x", "pty-resize: 24x80 after 1ms", "stderr-to-stdout: false", "stdout: file ../escape"] {
         refused: cases_test_advanced(root, "noncanonical", "step: false\n{modifier}\n")
         assert_eq(refused.verdict.status, "REFUSED")
         assert(refused.verdict.detail != "pty-stdio")
@@ -69,10 +72,14 @@ use files: core.files
     assert_eq(cases_test_advanced(root, "path", source).verdict.status, "PASS")
     assert_eq(cases_test_advanced(root, "quoted-name", "step: printf snapshot\nstdout: = \"snapshot\"\n").verdict.status, "PASS")
     assert_eq(cases_test_advanced(root, "literal-not-file", "step: printf expected\nstdout: = \"snapshot\"\n").verdict.status, "FAIL")
-    loop assertion in ["stdout: = \"snapshot\"", "stdout: = path \"two words.out\"", "stdout: = snapshot"] {
+    loop assertion in
+        ["stdout: = \"snapshot\"", "stdout: = path \"two words.out\"", "stdout: = snapshot"] {
         failed: cases_test_advanced(root, "not-snapshot-literal", "step: printf wrong\n{assertion}\n")
         assert_eq(failed.verdict.status, "FAIL")
     }
-    loop invalid in ["write: value \"not a template\"\n", "write: value = unquoted\n", "step: printf expected\nstdout: == \"expected\"\n"] -> assert_eq(cases_test_advanced(root, "invalid-rhs", invalid).verdict.status, "REFUSED")
+    loop invalid in
+        ["write: value \"not a template\"\n", "write: value = unquoted\n", "step: printf expected\nstdout: == \"expected\"\n"] {
+        assert_eq(cases_test_advanced(root, "invalid-rhs", invalid).verdict.status, "REFUSED")
+    }
     files.remove_all(root) ?? panic("remove RHS scratch")
 }

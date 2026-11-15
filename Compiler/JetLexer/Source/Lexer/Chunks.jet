@@ -23,6 +23,7 @@ use jet_foundation.[
 
 // A chunk thread is admitted for at least this many source bytes.
 LEXER_CHUNK_MIN_BYTES: 262144
+
 // Each chunk thread holds its chunk's facts and tokens beside the source:
 // about this much per source byte of the chunk.
 LEXER_CHUNK_SCRATCH_PER_SOURCE_BYTE: 96
@@ -109,7 +110,9 @@ LEXER_CHUNK_HEAD_WORDS: [String]{"fn", "pub", "priv", "struct", "enum", "impl", 
 // is a token, which the chunk before it proves by ending there.
 lexer_chunk_head_at: fn(source: [U8], at: Int) -> Bool Never! {
     if at < 3 || at >= source.len() -> return false
-    if source[at - 1] != (U8{10}) || source[at - 2] != (U8{125}) || source[at - 3] != (U8{10}) -> return false
+    if source[at - 1] != (U8{10}) || source[at - 2] != (U8{125}) || source[at - 3] != (U8{10}) {
+        return false
+    }
     first: Int{source[at]}
     if first == 35 -> return true
     lower: first >= 97 && first <= 122
@@ -142,7 +145,9 @@ lexer_chunk_cut: fn(source: [U8], target: Int) -> Int Never! {
 // lex_with_terminators on the admitted compiler threads.
 lex_with_terminators_threads: fn(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool, threads: CompilerThreads) -> LexedThreads {
     workers: compiler_threads_admit(threads, source.len(), source.len(), LEXER_CHUNK_MIN_BYTES, LEXER_CHUNK_MIN_BYTES * LEXER_CHUNK_SCRATCH_PER_SOURCE_BYTE, 0)
-    if workers <= 1 -> return lexed_threads_single(source, config_surface, allow_reserved_identifiers)
+    if workers <= 1 {
+        return lexed_threads_single(source, config_surface, allow_reserved_identifiers)
+    }
     bounds := [Int]{0}
     loop share in 1..<workers {
         target := share * source.len() /% workers
@@ -153,10 +158,14 @@ lex_with_terminators_threads: fn(source: [U8], config_surface: Bool, allow_reser
         bounds.push(cut)
     }
     bounds.push(source.len())
-    if bounds.len() <= 2 -> return lexed_threads_single(source, config_surface, allow_reserved_identifiers)
+    if bounds.len() <= 2 {
+        return lexed_threads_single(source, config_surface, allow_reserved_identifiers)
+    }
     inputs: Shared{LexerChunkShared{source: source, config_surface: config_surface, allow_reserved_identifiers: allow_reserved_identifiers}}
     parts := [Shared<LexerChunkPart>]{}
-    loop chunk in 0..<(bounds.len() - 1) -> parts.push(Shared{LexerChunkPart{start: bounds[chunk], end: bounds[chunk + 1], outputs: [LexerChunkOutput]{}}})
+    loop chunk in 0..<(bounds.len() - 1) {
+        parts.push(Shared{LexerChunkPart{start: bounds[chunk], end: bounds[chunk + 1], outputs: [LexerChunkOutput]{}}})
+    }
     _ := lexer_lex_chunk_parts(inputs, parts, 0)
     clean := true
     loop part in parts {
@@ -278,7 +287,9 @@ lexer_lex_chunk_part: fn(inputs: Shared<LexerChunkShared>, part: Shared<LexerChu
     if !last {
         if scanned.stop != to -> clean = false
         count: facts.len() /% 4
-        if count == 0 || facts[(count - 1) * 4] != K_RBRACE || facts[(count - 1) * 4 + 1] != to - 2 || facts[(count - 1) * 4 + 2] != to - 1 -> clean = false
+        if count == 0 || facts[(count - 1) * 4] != K_RBRACE || facts[(count - 1) * 4 + 1] != to - 2 || facts[(count - 1) * 4 + 2] != to - 1 {
+            clean = false
+        }
     }
     if !lexer_chunk_delimiters_nest(facts, if seed -> 1 else -> 0, !last) -> clean = false
     tables := token_tables()
@@ -322,7 +333,9 @@ lexer_remap_chunk_part: fn(part: Shared<LexerChunkPart>) -> Int {
     loop row in 0..<output.tables.literals.len() {
         output.tables.literals[row].suffix = lexer_remap_name(output.tables.literals[row].suffix, map)
         output.tables.literals[row].head_decoded = lexer_remap_name(output.tables.literals[row].head_decoded, map)
-        if output.tables.literals[row].head >= 0 -> output.tables.literals[row].head = output.tables.literals[row].head + base
+        if output.tables.literals[row].head >= 0 {
+            output.tables.literals[row].head = output.tables.literals[row].head + base
+        }
         loop part_index in 0..<output.tables.literals[row].string_parts.len() {
             output.tables.literals[row].string_parts[part_index].text = lexer_remap_name(output.tables.literals[row].string_parts[part_index].text, map)
             lexer_remap_tokens(output.tables.literals[row].string_parts[part_index].tokens, map, base)
@@ -332,9 +345,7 @@ lexer_remap_chunk_part: fn(part: Shared<LexerChunkPart>) -> Int {
     1
 }
 
-lexer_remap_name: fn(name: Name, map: [Int]) -> Name Never! {
-    Name{id: U32{map[name_index(name)]}}
-}
+lexer_remap_name: fn(name: Name, map: [Int]) -> Name Never! { Name{id: U32{map[name_index(name)]}} }
 
 lexer_remap_tokens: fn(tokens: &[Token], map: [Int], base: Int) Never! {
     loop index in 0..<tokens.len() {

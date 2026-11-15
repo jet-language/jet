@@ -38,6 +38,7 @@ compiler_dyn_fixture_schema: fn() -> I64 {
     dyn_store(facts + I64{88}, I64{8})
     schema
 }
+
 compiler_dyn_fixture_datetime: fn(secs: I64, nanos: I64, leap: I64, offset: I64) -> I64 {
     glue: jet_rt_alloc(DYN_DATETIME_BYTES, I64{8})
     dyn_store(glue + DYN_DATETIME_SECS, secs)
@@ -46,6 +47,7 @@ compiler_dyn_fixture_datetime: fn(secs: I64, nanos: I64, leap: I64, offset: I64)
     dyn_store(glue + DYN_DATETIME_OFFSET, offset)
     dyn_new(DYN_DATETIME, glue)
 }
+
 // The fixed-offset zone the native ZonedDateTime of `tree` receives: the
 // `expected` name, no transitions and one info holding the offset.
 compiler_dyn_fixture_zone: fn(schema: I64, tree: I64, expected: I64, offset: I64) -> Bool {
@@ -59,6 +61,7 @@ compiler_dyn_fixture_zone: fn(schema: I64, tree: I64, expected: I64, offset: I64
     jet_rt_handle_drop_dyn(tree)
     named && info
 }
+
 // A native zone with transitions resolves the offset of the transition at or
 // before the instant: [at 0 -> info 1, at 100 -> info 0] at secs 50 is 7200.
 compiler_dyn_fixture_transitions: fn(schema: I64) -> Bool {
@@ -95,6 +98,7 @@ compiler_dyn_fixture_transitions: fn(schema: I64) -> Bool {
     jet_rt_handle_drop_dyn(tree)
     resolved
 }
+
 compiler_dyn_fixture_roundtrip: fn(schema: I64, tree: I64) -> Bool {
     native: jet_rt_dyn_to_native(schema, tree)
     cloned: jet_rt_dyn_from_native(schema, native)
@@ -105,10 +109,13 @@ compiler_dyn_fixture_roundtrip: fn(schema: I64, tree: I64) -> Bool {
     jet_rt_handle_drop_dyn(tree)
     same
 }
+
 #Export(c) jet_rt_dyn_native_fixture: fn() -> I64 {
     schema: compiler_dyn_fixture_schema()
     slots: jet_rt_alloc(I64{16}, I64{8})
-    if (jet_std_json_parse(rt_static_text("{{\"s\":\"é\",\"n\":1.500e+2,\"a\":[true,null,{{\"x\":-0}}]}}"), slots, slots + I64{8}) != I64{1}) -> return I64{1}
+    if (jet_std_json_parse(rt_static_text("{{\"s\":\"é\",\"n\":1.500e+2,\"a\":[true,null,{{\"x\":-0}}]}}"), slots, slots + I64{8}) != I64{1}) {
+        return I64{1}
+    }
     tree: dyn_word(slots)
     jet_rt_free(slots, I64{16}, I64{8})
     if !compiler_dyn_fixture_roundtrip(schema, tree) -> return I64{2}
@@ -116,7 +123,9 @@ compiler_dyn_fixture_roundtrip: fn(schema: I64, tree: I64) -> Bool {
     int_tree: jet_rt_record_new_dyn_int(exact)
     jet_rt_int_drop(exact)
     if !compiler_dyn_fixture_roundtrip(schema, int_tree) -> return I64{3}
-    if !compiler_dyn_fixture_roundtrip(schema, jet_rt_record_new_dyn_float(Float{-0.0})) -> return I64{4}
+    if !compiler_dyn_fixture_roundtrip(schema, jet_rt_record_new_dyn_float(Float{-0.0})) {
+        return I64{4}
+    }
     bytes: data_sequence_new(I64{3}, RT_HOST_U8_STRIDE)
     data: dyn_word(bytes + DATA_SEQUENCE_DATA)
     host_u8_put(data, I64{0}, I64{0})
@@ -124,10 +133,18 @@ compiler_dyn_fixture_roundtrip: fn(schema: I64, tree: I64) -> Bool {
     host_u8_put(data, I64{2}, I64{255})
     dyn_store(bytes + DATA_SEQUENCE_LENGTH, I64{3})
     if !compiler_dyn_fixture_roundtrip(schema, jet_rt_record_new_dyn_bytes(bytes)) -> return I64{5}
-    if !compiler_dyn_fixture_roundtrip(schema, compiler_dyn_fixture_datetime(I64{-1}, I64{5}, I64{1}, I64{-18000})) -> return I64{6}
-    if !compiler_dyn_fixture_roundtrip(schema, compiler_dyn_fixture_datetime(I64{1363896240}, I64{0}, I64{0}, I64{0})) -> return I64{7}
-    if !compiler_dyn_fixture_zone(schema, compiler_dyn_fixture_datetime(I64{0}, I64{0}, I64{0}, I64{-19800}), rt_static_text("-05:30"), I64{-19800}) -> return I64{8}
-    if !compiler_dyn_fixture_zone(schema, compiler_dyn_fixture_datetime(I64{0}, I64{0}, I64{0}, I64{0}), rt_static_text("UTC"), I64{0}) -> return I64{9}
+    if !compiler_dyn_fixture_roundtrip(schema, compiler_dyn_fixture_datetime(I64{-1}, I64{5}, I64{1}, I64{-18000})) {
+        return I64{6}
+    }
+    if !compiler_dyn_fixture_roundtrip(schema, compiler_dyn_fixture_datetime(I64{1363896240}, I64{0}, I64{0}, I64{0})) {
+        return I64{7}
+    }
+    if !compiler_dyn_fixture_zone(schema, compiler_dyn_fixture_datetime(I64{0}, I64{0}, I64{0}, I64{-19800}), rt_static_text("-05:30"), I64{-19800}) {
+        return I64{8}
+    }
+    if !compiler_dyn_fixture_zone(schema, compiler_dyn_fixture_datetime(I64{0}, I64{0}, I64{0}, I64{0}), rt_static_text("UTC"), I64{0}) {
+        return I64{9}
+    }
     if !compiler_dyn_fixture_transitions(schema) -> return I64{10}
     jet_rt_free(schema, I64{752}, I64{8})
     I64{0}

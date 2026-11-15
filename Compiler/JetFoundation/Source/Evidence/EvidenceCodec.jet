@@ -105,7 +105,6 @@ evidence_decode_derivation: fn(cursor: &EvidenceCursor) -> DerivationRecord Evid
         1 -> Val(DerivationObservation{event_id: evidence_get_optional(cursor), counterexample_id: evidence_get_optional(cursor)})
         else -> {
             return Err(evidence_codec_error("unknown derivation observation marker {observation_marker}"))
-
         }
     }
     payload_marker: evidence_get_byte(cursor)
@@ -114,7 +113,6 @@ evidence_decode_derivation: fn(cursor: &EvidenceCursor) -> DerivationRecord Evid
         1 -> Val(DerivationPayload.FrameSchedule{schedule: evidence_decode_frame_schedule(evidence_get_string(cursor))})
         else -> {
             return Err(evidence_codec_error("unknown derivation payload marker {payload_marker}"))
-
         }
     }
     value := derivation_record(subject, claim, producer, method, rule, premises, derivation_identity(source, build, run, target))
@@ -201,7 +199,6 @@ evidence_decode_record: fn(cursor: &EvidenceCursor) -> EvidenceDecodedRecord Evi
         1 -> Val(evidence_decode_derivation(cursor))
         else -> {
             return Err(evidence_codec_error("unknown derivation definition marker {definition_marker}"))
-
         }
     }
     completeness_value: if completeness == {

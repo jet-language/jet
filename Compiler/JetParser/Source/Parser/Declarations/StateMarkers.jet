@@ -5,29 +5,27 @@
 // edit that rewrites the owner's state list and every marked signature; a
 // marker whose owner, list or signature the edit cannot settle is reported
 // without one.
-use {
-    jet_foundation.[
-        COMMENT_PREFIX,
-        Diagnostic,
-        Func,
-        Item,
-        MARKER_STATE,
-        Marker,
-        NameTable,
-        Program,
-        Span,
-        StateDecl,
-        TextEdit,
-        Type,
-        diagnostic_from_registry,
-        diagnostic_with_edit,
-        foundation_byte_text,
-        name_find,
-        name_index,
-        name_intern,
-        name_table,
-    ]
-}
+use jet_foundation.[
+    COMMENT_PREFIX,
+    Diagnostic,
+    Func,
+    Item,
+    MARKER_STATE,
+    Marker,
+    NameTable,
+    Program,
+    Span,
+    StateDecl,
+    TextEdit,
+    Type,
+    diagnostic_from_registry,
+    diagnostic_with_edit,
+    foundation_byte_text,
+    name_find,
+    name_index,
+    name_intern,
+    name_table,
+]
 
 StateMarkerOwner: struct {
     state: StateDecl?
@@ -54,14 +52,20 @@ StateMarkerSite: struct {
 parser_state_marker_migration: fn(program: Program, source: [U8], diagnostics: &[Diagnostic]) Never! {
     sites := [StateMarkerSite]{}
     parser_state_marker_sites(program.items, sites)
-    if sites.len() == 0 -> return
+    if sites.len() == 0 {
+        return
+    }
     owners := StateMarkerOwners{names: name_table(), rows: [StateMarkerOwner?]{}}
     parser_state_marker_owners(program.items, owners)
     order := [String]{}
     loop index in 0..<sites.len() {
-        if sites[index].free -> sites[index].owner = parser_state_marker_free_owner(sites[index].function, owners)
+        if sites[index].free {
+            sites[index].owner = parser_state_marker_free_owner(sites[index].function, owners)
+        }
         if {
-            sites[index].owner == "" -> diagnostics.push(parser_state_marker_report(sites[index].function.name, false, sites[index].marker.span, None))
+            sites[index].owner == "" -> {
+                diagnostics.push(parser_state_marker_report(sites[index].function.name, false, sites[index].marker.span, None))
+            }
             !order.contains(sites[index].owner) -> order.push(sites[index].owner.copy())
             else -> {}
         }
@@ -76,21 +80,31 @@ parser_state_marker_migration: fn(program: Program, source: [U8], diagnostics: &
 parser_state_marker_sites: fn(items: [Item], sites: &[StateMarkerSite]) Never! {
     loop item in items {
         if item == {
-            .Func(function) -> parser_state_marker_function_sites(function, "", true, sites)
+            .Func(function) -> { parser_state_marker_function_sites(function, "", true, sites) }
             .Struct(definition) -> {
-                loop method in definition.methods -> parser_state_marker_function_sites(method, definition.name, false, sites)
+                loop method in definition.methods {
+                    parser_state_marker_function_sites(method, definition.name, false, sites)
+                }
                 loop block in definition.trait_impls {
-                    loop method in block.methods -> parser_state_marker_function_sites(method, definition.name, false, sites)
+                    loop method in block.methods {
+                        parser_state_marker_function_sites(method, definition.name, false, sites)
+                    }
                 }
             }
             .Enum(definition) -> {
-                loop method in definition.methods -> parser_state_marker_function_sites(method, definition.name, false, sites)
+                loop method in definition.methods {
+                    parser_state_marker_function_sites(method, definition.name, false, sites)
+                }
                 loop block in definition.trait_impls {
-                    loop method in block.methods -> parser_state_marker_function_sites(method, definition.name, false, sites)
+                    loop method in block.methods {
+                        parser_state_marker_function_sites(method, definition.name, false, sites)
+                    }
                 }
             }
             .Impl(implementation) -> {
-                loop method in implementation.methods -> parser_state_marker_function_sites(method, implementation.type_name, false, sites)
+                loop method in implementation.methods {
+                    parser_state_marker_function_sites(method, implementation.type_name, false, sites)
+                }
             }
             .CodeModule(row) -> {
                 if row.body == .Val(body) -> parser_state_marker_sites(body, sites)
@@ -112,8 +126,12 @@ parser_state_marker_function_sites: fn(function: Func, owner: String, free: Bool
 parser_state_marker_owners: fn(items: [Item], owners: &StateMarkerOwners) Never! {
     loop item in items {
         if item == {
-            .Struct(definition) -> parser_state_marker_owner_add(owners, definition.name, StateMarkerOwner{state: definition.state.copy(), generic: definition.type_params.len() > 0})
-            .Enum(definition) -> parser_state_marker_owner_add(owners, definition.name, StateMarkerOwner{state: definition.state.copy(), generic: definition.type_params.len() > 0})
+            .Struct(definition) -> {
+                parser_state_marker_owner_add(owners, definition.name, StateMarkerOwner{state: definition.state.copy(), generic: definition.type_params.len() > 0})
+            }
+            .Enum(definition) -> {
+                parser_state_marker_owner_add(owners, definition.name, StateMarkerOwner{state: definition.state.copy(), generic: definition.type_params.len() > 0})
+            }
             .CodeModule(row) -> {
                 if row.body == .Val(body) -> parser_state_marker_owners(body, owners)
             }
@@ -142,10 +160,14 @@ parser_state_marker_owner: fn(owners: StateMarkerOwners, name: String) -> StateM
 // A free function belongs to the type of its first parameter, else to the
 // type it returns, when the file declares that type.
 parser_state_marker_free_owner: fn(function: Func, owners: StateMarkerOwners) -> String Never! {
-    if function.params.len() > 0 && function.params[0].ty == .Named(name) && parser_state_marker_owner(owners, name) != None -> return name
+    if function.params.len() > 0 && function.params[0].ty == .Named(name) && parser_state_marker_owner(owners, name) != None {
+        return name
+    }
     if function.return_type == .Val(result) {
         if result == .Named(name) && parser_state_marker_owner(owners, name) != None -> return name
-        if result == .Result(ok, _) && ok == .Named(name) && parser_state_marker_owner(owners, name) != None -> return name
+        if result == .Result(ok, _) && ok == .Named(name) && parser_state_marker_owner(owners, name) != None {
+            return name
+        }
     }
     ""
 }
@@ -156,7 +178,9 @@ parser_state_marker_report: fn(subject: String, owned: Bool, span: Span, edit: T
     if edit == .Val(rewrite) {
         return diagnostic_with_edit(diagnostic_from_registry("E0175", Val(span), what, why, "run `jet fix` to write each marker's states into its signature and its moves into the state list of `{subject}`"), rewrite)
     }
-    if owned -> return diagnostic_from_registry("E0175", Val(span), what, why, "write the states into the signature (`self: &&{subject}.A`, `-> {subject}.B`), add `A -> B` to the state list of `{subject}`, and delete the marker")
+    if owned {
+        return diagnostic_from_registry("E0175", Val(span), what, why, "write the states into the signature (`self: &&{subject}.A`, `-> {subject}.B`), add `A -> B` to the state list of `{subject}`, and delete the marker")
+    }
     diagnostic_from_registry("E0175", Val(span), what, why, "type the parameter and result by their owner's states (`Owner.A`, `-> Owner.B`), add `A -> B` to the owner's state list, and delete the marker")
 }
 
@@ -168,10 +192,14 @@ parser_state_marker_edit: fn(owner: String, info: StateMarkerOwner?, group: [Sta
     found: info ?? return None
     if found.generic -> return None
     state: found.state ?? return None
-    if state.groups.len() > 0 || !parser_state_marker_text_is(source, state.span.start, "state") -> return None
+    if state.groups.len() > 0 || !parser_state_marker_text_is(source, state.span.start, "state") {
+        return None
+    }
     open: parser_state_marker_skip_space(source, state.span.start + 5)
     if !parser_state_marker_text_is(source, open, "{{") -> return None
-    if foundation_byte_text(source, state.span.start, state.span.end).contains(COMMENT_PREFIX) -> return None
+    if foundation_byte_text(source, state.span.start, state.span.end).contains(COMMENT_PREFIX) {
+        return None
+    }
     // Each state's moves, at the state's index of `state.states`.
     moves := [[String]]{}
     loop _ in state.states -> moves.push([String]{})
@@ -183,10 +211,14 @@ parser_state_marker_edit: fn(owner: String, info: StateMarkerOwner?, group: [Sta
     }
     edits := [TextEdit]{}
     loop site in group {
-        if site.marker.inside || !parser_state_marker_text_is(source, site.marker.span.start, "#") -> return None
+        if site.marker.inside || !parser_state_marker_text_is(source, site.marker.span.start, "#") {
+            return None
+        }
         edits.push(TextEdit{span: Span{start: site.marker.span.start, end: parser_state_marker_skip_space(source, site.marker.span.end)}, new_text: ""})
         from := String?{None}
-        if site.paths.len() == 1 || site.paths[0] != "_" -> from = Val(parser_state_marker_leaf(site.paths[0]))
+        if site.paths.len() == 1 || site.paths[0] != "_" {
+            from = Val(parser_state_marker_leaf(site.paths[0]))
+        }
         if from == .Val(name) {
             if parser_state_marker_state_at(state, name) == None -> return None
             edits.push(parser_state_marker_param_edit(site.function, owner, name, source) ?? return None)
@@ -214,14 +246,18 @@ parser_state_marker_param_edit: fn(function: Func, owner: String, state: String,
     if param.declared_footprint != None -> return None
     if param.ty_span.start == param.name_span.start && param.ty_span.end == param.name_span.end {
         end: param.name_span.end
-        if param.name != "self" || end < 4 || foundation_byte_text(source, end - 4, end) != "self" -> return None
+        if param.name != "self" || end < 4 || foundation_byte_text(source, end - 4, end) != "self" {
+            return None
+        }
         start := end - 4
         loop start > 0 && (Int{source[start - 1]}) == 38 -> start -= 1
         caps: foundation_byte_text(source, start, end - 4)
         return Val(TextEdit{span: Span{start: start, end: end}, new_text: "self: {caps}{owner}.{state}"})
     }
     start := param.ty_span.start
-    loop start < param.ty_span.end && (Int{source[start]} == 38 || parser_state_marker_blank(source[start])) -> start += 1
+    loop start < param.ty_span.end && (Int{source[start]} == 38 || parser_state_marker_blank(source[start])) {
+        start += 1
+    }
     written: foundation_byte_text(source, start, param.ty_span.end)
     if written != owner && written != "Self" -> return None
     Val(TextEdit{span: Span{start: start, end: param.ty_span.end}, new_text: "{owner}.{state}"})
@@ -256,7 +292,9 @@ parser_state_marker_list: fn(state: StateDecl, moves: [[String]], source: [U8]) 
     line_start := state.span.start
     loop line_start > 0 && (Int{source[line_start - 1]}) != 10 -> line_start -= 1
     indent_end := line_start
-    loop indent_end < state.span.start && parser_state_marker_blank(source[indent_end]) -> indent_end += 1
+    loop indent_end < state.span.start && parser_state_marker_blank(source[indent_end]) {
+        indent_end += 1
+    }
     indent: foundation_byte_text(source, line_start, indent_end)
     lines := [String]{"state {{"}
     loop member in state.states {
@@ -302,7 +340,9 @@ parser_state_marker_text_is: fn(source: [U8], at: Int, word: String) -> Bool Nev
 
 parser_state_marker_skip_space: fn(source: [U8], at: Int) -> Int Never! {
     end := at
-    loop end < source.len() && (parser_state_marker_blank(source[end]) || Int{source[end]} == 10 || Int{source[end]} == 13) -> end += 1
+    loop end < source.len() && (parser_state_marker_blank(source[end]) || Int{source[end]} == 10 || Int{source[end]} == 13) {
+        end += 1
+    }
     end
 }
 

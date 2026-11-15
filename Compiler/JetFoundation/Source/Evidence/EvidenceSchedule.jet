@@ -115,7 +115,6 @@ evidence_schedule_access: fn(value: Dyn) -> ResourceAccess EvidenceCodecError! {
         "move" -> ResourceAccessMode.Move
         else -> {
             return Err(evidence_codec_error("unsupported resource access mode `{mode_text}`"))
-
         }
     }
     Ok(ResourceAccess{resource: evidence_schedule_identity(evidence_schedule_field(fields, "resource")), mode: mode, region: evidence_schedule_region(evidence_schedule_field(fields, "region")), layout: evidence_schedule_layout(evidence_schedule_field(fields, "layout")), temporary: evidence_schedule_bool(evidence_schedule_field(fields, "temporary"), "temporary")})
@@ -150,7 +149,6 @@ evidence_decode_frame_schedule: fn(text: String) -> FrameSchedule EvidenceCodecE
         .Ok(value) -> value
         .Err(error) -> {
             return Err(evidence_codec_error("invalid frame schedule JSON: {error.reason}"))
-
         }
     }
     fields: evidence_schedule_object(tree, "frame schedule")

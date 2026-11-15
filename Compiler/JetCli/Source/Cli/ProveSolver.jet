@@ -14,16 +14,25 @@ use {
 
 // Fixed work bounds (one obligation each, except the obligation count).
 JET_CLI_SOLVER_MAX_OBLIGATIONS: 10000
+
 JET_CLI_SOLVER_MAX_TERMS: 50000
+
 JET_CLI_SOLVER_MAX_VARIABLES: 256
+
 JET_CLI_SOLVER_MAX_STEPS: 1000000
+
 JET_CLI_SOLVER_BACKEND: "native-presburger"
+
 JET_CLI_SOLVER_BACKEND_VERSION: "1"
+
 // Checked i128: every coefficient and constant stays inside it.
 JET_CLI_SOLVER_I128_MAX: 170141183460469231731687303715884105727
+
 JET_CLI_SOLVER_I128_MIN: -170141183460469231731687303715884105728
+
 // 256-bit source literals: a literal outside is a structural limit.
 JET_CLI_SOLVER_LITERAL_MAX: 57896044618658097711785492504343953926634992332820282019728792003956564819967
+
 JET_CLI_SOLVER_LITERAL_MIN: -57896044618658097711785492504343953926634992332820282019728792003956564819968
 
 // Why a search stopped without an answer: `coefficient_overflow`,
@@ -71,7 +80,9 @@ jet_cli_solver_unknown: fn(reason: String) -> JetCLISolverUnknown Never! {
 }
 
 jet_cli_solver_checked: fn(value: Int) -> Int JetCLISolverUnknown! {
-    if value > JET_CLI_SOLVER_I128_MAX || value < JET_CLI_SOLVER_I128_MIN -> return Err(jet_cli_solver_unknown("coefficient_overflow"))
+    if value > JET_CLI_SOLVER_I128_MAX || value < JET_CLI_SOLVER_I128_MIN {
+        return Err(jet_cli_solver_unknown("coefficient_overflow"))
+    }
     Ok(value)
 }
 
@@ -88,11 +99,15 @@ jet_cli_solver_combine: fn(left: JetCLISolverAffine, factor: Int, right: JetCLIS
             i += 1
         } else if take_right {
             scaled: jet_cli_solver_checked(factor * right.terms[j].coefficient)
-            if scaled != 0 -> terms.push(JetCLISolverTerm{variable: right.terms[j].variable, coefficient: scaled})
+            if scaled != 0 {
+                terms.push(JetCLISolverTerm{variable: right.terms[j].variable, coefficient: scaled})
+            }
             j += 1
         } else {
             sum: jet_cli_solver_checked(left.terms[i].coefficient + jet_cli_solver_checked(factor * right.terms[j].coefficient))
-            if sum != 0 -> terms.push(JetCLISolverTerm{variable: left.terms[i].variable, coefficient: sum})
+            if sum != 0 {
+                terms.push(JetCLISolverTerm{variable: left.terms[i].variable, coefficient: sum})
+            }
             i += 1
             j += 1
         }
@@ -133,12 +148,18 @@ jet_cli_solver_atom: fn(affine: JetCLISolverAffine, relation: String) -> JetCLIS
     reduced := affine.copy()
     if g > 1 {
         terms := [JetCLISolverTerm]{}
-        loop term in affine.terms -> terms.push(JetCLISolverTerm{variable: term.variable, coefficient: term.coefficient /% g})
+        loop term in affine.terms {
+            terms.push(JetCLISolverTerm{variable: term.variable, coefficient: term.coefficient /% g})
+        }
         constant: if relation == "le" -> -((-affine.constant) /% g) else -> affine.constant /% g
-        if relation != "le" && constant * g != affine.constant -> return Ok(JetCLISolverBool.Constant(relation == "ne"))
+        if relation != "le" && constant * g != affine.constant {
+            return Ok(JetCLISolverBool.Constant(relation == "ne"))
+        }
         reduced = JetCLISolverAffine{constant: constant, terms: terms}
     }
-    if relation == "le" -> return Ok(JetCLISolverBool.Atom(JetCLISolverAtom{affine: reduced, relation: relation}))
+    if relation == "le" {
+        return Ok(JetCLISolverBool.Atom(JetCLISolverAtom{affine: reduced, relation: relation}))
+    }
     flip: reduced.terms.len() > 0 && reduced.terms[0].coefficient < 0
     Ok(JetCLISolverBool.Atom(JetCLISolverAtom{affine: if flip -> jet_cli_solver_scale(reduced, -1) else -> reduced, relation: relation}))
 }
@@ -161,7 +182,9 @@ jet_cli_solver_compare: fn(lhs: JetCLISolverAffine, op: String, rhs: JetCLISolve
 
 jet_cli_solver_terms_json: fn(value: JetCLISolverAffine) -> String Never! {
     terms := [String]{}
-    loop term in value.terms -> terms.push("{{\"coefficient\":\"{term.coefficient}\",\"variable\":{foundation_json_quote(term.variable)}}}")
+    loop term in value.terms {
+        terms.push("{{\"coefficient\":\"{term.coefficient}\",\"variable\":{foundation_json_quote(term.variable)}}}")
+    }
     "[{terms.join(",")}]"
 }
 
@@ -241,15 +264,23 @@ jet_cli_solver_normalize_list: fn(conj: Bool, children: [JetCLISolverBool]) -> J
             .Constant(value) -> {
                 if value != conj -> return JetCLISolverBool.Constant(value)
             }
-            .And(inner) -> if conj -> flat = inner.copy() else -> flat.push(normal.copy())
-            .Or(inner) -> if conj -> flat.push(normal.copy()) else -> flat = inner.copy()
+            .And(inner) -> {
+                if conj -> flat = inner.copy() else -> flat.push(normal.copy())
+            }
+            .Or(inner) -> {
+                if conj -> flat.push(normal.copy()) else -> flat = inner.copy()
+            }
             .Atom(_) -> flat.push(normal.move())
         }
         loop item in flat {
             text: jet_cli_solver_bool_json(item)
             if item == {
-                .Atom(atom) -> keyed.push(JetCLISolverKeyed{rank: 0, key: jet_cli_solver_terms_json(atom.affine), constant: atom.affine.constant, relation: atom.relation.copy(), text: text, node: nodes.len()})
-                .Constant(_) | .And(_) | .Or(_) -> keyed.push(JetCLISolverKeyed{rank: 1, key: text.copy(), constant: 0, relation: "", text: text, node: nodes.len()})
+                .Atom(atom) -> {
+                    keyed.push(JetCLISolverKeyed{rank: 0, key: jet_cli_solver_terms_json(atom.affine), constant: atom.affine.constant, relation: atom.relation.copy(), text: text, node: nodes.len()})
+                }
+                .Constant(_) | .And(_) | .Or(_) -> {
+                    keyed.push(JetCLISolverKeyed{rank: 1, key: text.copy(), constant: 0, relation: "", text: text, node: nodes.len()})
+                }
             }
             nodes.push(item.copy())
         }
@@ -269,7 +300,9 @@ jet_cli_solver_negate: fn(node: JetCLISolverBool) -> JetCLISolverBool JetCLISolv
     if node == {
         .Constant(value) -> Ok(JetCLISolverBool.Constant(!value))
         .Atom(atom) -> {
-            if atom.relation == "le" -> return Ok(JetCLISolverBool.Atom(JetCLISolverAtom{affine: jet_cli_solver_combine(jet_cli_solver_constant(1), -1, atom.affine), relation: "le"}))
+            if atom.relation == "le" {
+                return Ok(JetCLISolverBool.Atom(JetCLISolverAtom{affine: jet_cli_solver_combine(jet_cli_solver_constant(1), -1, atom.affine), relation: "le"}))
+            }
             jet_cli_solver_atom(atom.affine, if atom.relation == "eq" -> "ne" else -> "eq")
         }
         .And(children) -> {
@@ -316,9 +349,13 @@ jet_cli_solver_branches: fn(node: JetCLISolverBool, steps: &JetCLISolverSteps) -
     if node == {
         .Constant(value) -> Ok(if value -> [[JetCLISolverAffine]]{[JetCLISolverAffine]{}} else -> [[JetCLISolverAffine]]{})
         .Atom(atom) -> {
-            if atom.relation == "le" -> return Ok([[JetCLISolverAffine]]{[JetCLISolverAffine]{atom.affine}})
+            if atom.relation == "le" {
+                return Ok([[JetCLISolverAffine]]{[JetCLISolverAffine]{atom.affine}})
+            }
             negated: jet_cli_solver_scale(atom.affine, -1)
-            if atom.relation == "eq" -> return Ok([[JetCLISolverAffine]]{[JetCLISolverAffine]{atom.affine, negated}})
+            if atom.relation == "eq" {
+                return Ok([[JetCLISolverAffine]]{[JetCLISolverAffine]{atom.affine, negated}})
+            }
             Ok([[JetCLISolverAffine]]{[JetCLISolverAffine]{jet_cli_solver_combine(atom.affine, 1, jet_cli_solver_constant(1))}, [JetCLISolverAffine]{jet_cli_solver_combine(negated, 1, jet_cli_solver_constant(1))}})
         }
         .Or(children) -> {
@@ -392,7 +429,9 @@ jet_cli_solver_reduce: fn(row: JetCLISolverDerived) -> JetCLISolverDerived Never
     loop m in row.multipliers -> g = jet_cli_solver_gcd(g, m)
     if g <= 1 -> return row.copy()
     terms := [JetCLISolverTerm]{}
-    loop term in row.affine.terms -> terms.push(JetCLISolverTerm{variable: term.variable, coefficient: term.coefficient /% g})
+    loop term in row.affine.terms {
+        terms.push(JetCLISolverTerm{variable: term.variable, coefficient: term.coefficient /% g})
+    }
     multipliers := [Int]{}
     loop m in row.multipliers -> multipliers.push(m /% g)
     JetCLISolverDerived{affine: JetCLISolverAffine{constant: row.affine.constant /% g, terms: terms}, multipliers: multipliers}
@@ -435,7 +474,9 @@ jet_cli_solver_refute: fn(ineqs: [JetCLISolverAffine], steps: &JetCLISolverSteps
         next_rows := [JetCLISolverDerived]{}
         loop row in rows {
             c: jet_cli_solver_coefficient(row.affine, variable)
-            if c > 0 -> positive.push(row) else if c < 0 -> negative.push(row) else -> next_rows.push(row)
+            if c > 0 -> positive.push(row) else if c < 0 -> negative.push(row) else {
+                next_rows.push(row)
+            }
         }
         loop p in positive {
             loop q in negative {
@@ -444,11 +485,15 @@ jet_cli_solver_refute: fn(ineqs: [JetCLISolverAffine], steps: &JetCLISolverSteps
                 cq: -jet_cli_solver_coefficient(q.affine, variable)
                 combined: jet_cli_solver_combine(jet_cli_solver_scale(p.affine, cq), cp, q.affine)
                 multipliers := [Int]{}
-                loop k in 0..<count -> multipliers.push(jet_cli_solver_checked(cq * p.multipliers[k] + cp * q.multipliers[k]))
+                loop k in 0..<count {
+                    multipliers.push(jet_cli_solver_checked(cq * p.multipliers[k] + cp * q.multipliers[k]))
+                }
                 row: jet_cli_solver_reduce(JetCLISolverDerived{affine: combined, multipliers: multipliers})
                 if row.affine.terms.len() == 0 {
                     _: jet_cli_solver_charge(steps)
-                    if row.affine.constant > 0 -> return Ok(JetCLISolverSearch.Unsat(row.multipliers))
+                    if row.affine.constant > 0 {
+                        return Ok(JetCLISolverSearch.Unsat(row.multipliers))
+                    }
                     next
                 }
                 next_rows.push(row)
@@ -469,7 +514,9 @@ jet_cli_solver_refute: fn(ineqs: [JetCLISolverAffine], steps: &JetCLISolverSteps
             loop term in row.affine.terms {
                 if term.variable == variable -> next
                 loop known in values {
-                    if known.name == term.variable -> rest = jet_cli_solver_checked(rest + jet_cli_solver_checked(term.coefficient * known.value))
+                    if known.name == term.variable {
+                        rest = jet_cli_solver_checked(rest + jet_cli_solver_checked(term.coefficient * known.value))
+                    }
                 }
             }
             if c > 0 {
@@ -587,7 +634,9 @@ jet_cli_solver_search: fn(formula: JetCLISolverFormula, steps: &JetCLISolverStep
         }
     }
     parts := [String]{}
-    loop (index, _) in branches -> parts.push("{{\"branchIndex\":{index},\"proof\":{jet_cli_solver_proof_json(proofs, index)}}}")
+    loop (index, _) in branches {
+        parts.push("{{\"branchIndex\":{index},\"proof\":{jet_cli_solver_proof_json(proofs, index)}}}")
+    }
     Ok(JetCLISolverOutcome.Proved(JetCLISolverProved{certificate: "{{\"branches\":[{parts.join(",")}],\"kind\":\"branches\"}}", steps: steps.used}))
 }
 
@@ -631,9 +680,13 @@ jet_cli_solver_complete: fn(formula: JetCLISolverFormula, values: [JetCLISolverV
 
 jet_cli_solver_collect_affines: fn(node: JetCLISolverBool, out: &[JetCLISolverAffine]) Never! {
     if node == {
-        .Atom(atom) -> out.push(atom.affine)
-        .And(children) -> loop child in children -> jet_cli_solver_collect_affines(child, out)
-        .Or(children) -> loop child in children -> jet_cli_solver_collect_affines(child, out)
+        .Atom(atom) -> { out.push(atom.affine) }
+        .And(children) -> {
+            loop child in children -> jet_cli_solver_collect_affines(child, out)
+        }
+        .Or(children) -> {
+            loop child in children -> jet_cli_solver_collect_affines(child, out)
+        }
         .Constant(_) -> {}
     }
 }

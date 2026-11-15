@@ -76,7 +76,9 @@ cli_test_host_compiler: fn() -> String {
 }
 
 #Test("strict cached jobs reject undeclared project access") {
-    if !sys.is_linux() -> return
+    if !sys.is_linux() {
+        return
+    }
     root: cli_test_job_root("access-proof")
     entry: files.join(root, "main.jet")
     input: files.join(root, "input.txt")
@@ -130,7 +132,7 @@ cli_test_host_compiler: fn() -> String {
         env.vars[name] = "not-for-cache"
         plan: RunPlan.empty(".", cli_builtin_table())
         if cli_validate_cached_job_environment(plan, env) == {
-            .Ok(_) -> panic("{name} must be refused")
+            .Ok(_) -> { panic("{name} must be refused") }
             .Err(error) -> assert(error.message().contains("secret-bearing environment variable"))
         }
     }
@@ -168,14 +170,14 @@ cli_test_host_compiler: fn() -> String {
     first.active_environment = Val("dev")
     second := first
     second.active_environment = Val("ci")
-    no_vars: [String: String]{}
+    no_vars: [String:String]{}
     assert(cli_task_environment_hash_with_vars([RefSpec]{}, table, [SecretSpec]{}, first, no_vars) != cli_task_environment_hash_with_vars([RefSpec]{}, table, [SecretSpec]{}, second, no_vars))
 }
 
 #Test("task environment hash changes when allowed dotenv value changes") {
     table: SourceTable.empty()
     facts: EnvironmentFacts{}
-    first := [String: String]{}
+    first := [String:String]{}
     first["PORT"] = "8080"
     second := first
     second["PORT"] = "8081"

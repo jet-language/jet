@@ -3,6 +3,7 @@ package: {
     version: "0.1.0"
     authority: { allow: [Exec, FS, FS.Write, IO, Mem.Alloc] }
 }
+
 // `core.mod.load` fails with `ModError`, one case per action a
 // caller can take: fix the grant, skip, replace the file, or rebuild. This
 // example needs no built library; it drives the refusals that happen before
@@ -41,14 +42,16 @@ run: fn() {
 
     // Every case keeps the provider's reason.
     if library.load(missing, grant: {read: [granted]}) == {
-        .Ok(_) -> print("loaded")
-        .Err(.NotFound(reason)) -> print("reason names the path: {reason.contains("missing.jetlib")}")
+        .Ok(_) -> { print("loaded") }
+        .Err(.NotFound(reason)) -> {
+            print("reason names the path: {reason.contains("missing.jetlib")}")
+        }
         .Err(error) -> print("unexpected: {error}")
     }
     // `unload` is a typed refusal: loaded handles unload on drop.
     if library.unload(CompiledModule{path: plain, handle: 0}) == {
-        .Ok(_) -> print("unloaded")
-        .Err(.Unsupported(_)) -> print("unload: Unsupported")
+        .Ok(_) -> { print("unloaded") }
+        .Err(.Unsupported(_)) -> { print("unload: Unsupported") }
         .Err(error) -> print("unexpected: {error}")
     }
 }

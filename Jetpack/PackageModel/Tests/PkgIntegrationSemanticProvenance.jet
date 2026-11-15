@@ -1,8 +1,13 @@
 // Existing typed manifest + Lock API.
 // Rust ProvenanceRequirement::None is Jet Unrequired; no semantic weakening.
 use jet_pkg_model.[
-    DependencyProvenance, LockEnvelope, PackageFacts, ProvenanceRequirement,
-    pkg_lock_enforce_provenance_requirement, pkg_lock_parse, pkg_lock_write,
+    DependencyProvenance,
+    LockEnvelope,
+    PackageFacts,
+    ProvenanceRequirement,
+    pkg_lock_enforce_provenance_requirement,
+    pkg_lock_parse,
+    pkg_lock_write,
 ]
 
 #Test("provenance policy none logged attested and roundtrip") {
@@ -13,7 +18,8 @@ use jet_pkg_model.[
         trust: facts.authority.trust ?? panic("trust")
         assert_eq(trust.require, Val(expected[index]))
     }
-    lock := pkg_lock_parse(`version = 1
+    lock := pkg_lock_parse(
+        `version = 1
 
 [[package]]
 name = "textkit"
@@ -25,7 +31,8 @@ dependencies = []
 
 [root]
 dependencies = ["textkit"]
-`) ?? panic("provenance fixture parse")
+`,
+    ) ?? panic("provenance fixture parse")
     if pkg_lock_enforce_provenance_requirement(lock, ProvenanceRequirement.Unrequired) == {
         .Ok(_) -> {}
         .Err(_) -> panic("none must accept")

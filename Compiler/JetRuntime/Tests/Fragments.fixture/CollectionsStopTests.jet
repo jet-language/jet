@@ -44,9 +44,7 @@ coll_stop_take_snapshot: fn() {
 // environment read loads the process-wide environment table once. The host
 // loads it before any case snapshots, so the totals count only the case's
 // own blocks.
-#Export(c) collections_stop_warm: fn() {
-    _ := terminal_color_enabled()
-}
+#Export(c) collections_stop_warm: fn() { _ := terminal_color_enabled() }
 
 #Export(c) collections_stop_test: fn(family: I64, unary: I64, binary: I64, show: I64, release: I64, list_drop: I64) {
     coll_stop_take_snapshot()
@@ -101,7 +99,9 @@ coll_stop_take_snapshot: fn() {
 // Focused review witnesses use owning pointer elements, not inert integers.
 // Every case checks all eight allocator classes after its complete cleanup.
 #Import(c) coll_stop_after_free: fn(address: I64) = "coll_stop_after_free"
+
 #Import(c) coll_stop_arm: fn(address: I64) = "coll_stop_arm"
+
 // The instrumented iterator advances progress through the C host's wrapper,
 // which delegates the real advance once and then stops via the budget rail.
 #Import(c) coll_stop_progress_advance: fn(state: I64) = "coll_stop_progress_advance"

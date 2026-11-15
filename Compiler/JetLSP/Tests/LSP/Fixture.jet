@@ -20,16 +20,18 @@ LSPFixtureChecker: struct {
             loop overlay in overlays {
                 parsed: parse_source(overlay.source.bytes())
                 alias: lsp_fixture_alias(overlay.path)
-                modules.push(JetDriverDocModule{
-                    path: overlay.path.copy(),
-                    physical_path: overlay.path.copy(),
-                    alias: alias.copy(),
-                    source: overlay.source.copy(),
-                    items: parsed.program.items.copy(),
-                    block_spans: parsed.program.block_spans.copy(),
-                    imports: parsed.program.imports.copy(),
-                    module_name: alias,
-                })
+                modules.push(
+                    JetDriverDocModule{
+                        path: overlay.path.copy(),
+                        physical_path: overlay.path.copy(),
+                        alias: alias.copy(),
+                        source: overlay.source.copy(),
+                        items: parsed.program.items.copy(),
+                        block_spans: parsed.program.block_spans.copy(),
+                        imports: parsed.program.imports.copy(),
+                        module_name: alias,
+                    },
+                )
                 if overlay.path == entry -> diagnostics = parsed.diagnostics.copy()
             }
             index: semindex_build(modules, SemEffectProjection{required: [String]{}, granted: [String]{}, denied: [String]{}, authority: ""})
@@ -98,7 +100,9 @@ lsp_test_error_code: fn(server: &LSPServer, method: String, params: String) -> I
     lsp_test_int(error, "code")
 }
 
-lsp_test_text_document: fn(uri: String) -> String Never! { "\"textDocument\":{{\"uri\":{foundation_json_quote(uri)}}}" }
+lsp_test_text_document: fn(uri: String) -> String Never! {
+    "\"textDocument\":{{\"uri\":{foundation_json_quote(uri)}}}"
+}
 
 // Positional request params on the document.
 lsp_test_at: fn(uri: String, line: Int, character: Int) -> String Never! {

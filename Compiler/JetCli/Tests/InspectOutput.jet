@@ -1,9 +1,14 @@
 // Production sema Output selection and CLI report, not CLI text resolution.
 use {
     jet_driver.[
-        JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, JetDriverAuthorizedSourceFile,
-        JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode,
-        JetDriverCompileRequest, jet_driver_output_query,
+        JET_DRIVER_EXIT_OK,
+        JET_DRIVER_EXIT_USER_ERROR,
+        JetDriverAuthorizedSourceFile,
+        JetDriverAuthorizedSourceRoot,
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode,
+        JetDriverCompileRequest,
+        jet_driver_output_query,
     ]
     jet_cli.[jet_cli_driver_request, jet_cli_output_host, jet_cli_output_report]
     jet_sema.[SchemaSnapshot]
@@ -12,6 +17,7 @@ use {
 inspect_output_require: fn(ok: Bool, message: String) Never! {
     if !ok -> panic("InspectOutput: {message}")
 }
+
 inspect_output_request: fn(source: String) -> JetDriverCompileRequest {
     snapshot: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: "/inspect-output", identity: "output-root", allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/inspect-output/run.jet", relative_path: "run.jet", identity: "output-source", source: source}}, foreign_cache_files: []}}, entry_root_identity: "output-root", entry_path: "/inspect-output/run.jet"}
     request := jet_cli_driver_request(snapshot, [], Val(1), JetDriverCompileMode.Doc)
@@ -19,6 +25,7 @@ inspect_output_request: fn(source: String) -> JetDriverCompileRequest {
     request.schema_snapshots = Val([String:SchemaSnapshot]{})
     request
 }
+
 #Test("inspect_output") {
     source: "APP: Output.Executable{{name: \"demo\", entry: start}}\nstart: fn() Never! {{}}"
     request: inspect_output_request(source)

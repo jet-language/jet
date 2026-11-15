@@ -77,9 +77,9 @@ NixTestCacheServer: struct {
     endpoint: String
     priv site: String
     priv server: HTTPServer
-    priv serving: Task<Unit>
+    priv serving: Task<()>
 
-    start: fn(site: String, routes: [String: [U8]]) -> NixTestCacheServer Never! {
+    start: fn(site: String, routes: [String:[U8]]) -> NixTestCacheServer Never! {
         store_nix_test_write_site(site, routes)
         mux: core_web.app()
         mux.static_files("/", site)
@@ -89,11 +89,11 @@ NixTestCacheServer: struct {
             _: server.serve() ?? panic("serve test cache")
         }
         time.sleep(time.duration_ms(20))
-        NixTestCacheServer{endpoint: "http://{address}", site, server, serving}
+        NixTestCacheServer{endpoint: "http://{address}", site: site, server: server, serving: serving}
     }
 
     // Serve exactly `routes` from now on.
-    replace_routes: fn(self, routes: [String: [U8]]) Never! {
+    replace_routes: fn(self, routes: [String:[U8]]) Never! {
         store_nix_test_write_site(self.site, routes)
     }
 
@@ -103,7 +103,7 @@ NixTestCacheServer: struct {
     }
 }
 
-store_nix_test_write_site: fn(site: String, routes: [String: [U8]]) Never! {
+store_nix_test_write_site: fn(site: String, routes: [String:[U8]]) Never! {
     if files.lexists(site) -> files.remove_all(site) ?? panic("clear test cache site")
     files.create_dir_all(site) ?? panic("test cache site")
     loop route in routes {

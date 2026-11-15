@@ -1,12 +1,9 @@
-
 use {
     tasks: core.tasks
     time: core.time
 }
 
-fast_nine: fn() -> Int {
-    return 9
-}
+fast_nine: fn() -> Int { return 9 }
 
 slow_one: fn() -> Int {
     time.sleep(300ms)
@@ -15,10 +12,7 @@ slow_one: fn() -> Int {
 
 run: fn() {
     task.group g {
-        winner: (task.race {
-            slow_one(),
-            fast_nine()
-        }) ?? panic("race failed")
+        winner: (task.race {slow_one(), fast_nine()}) ?? panic("race failed")
         print(winner)
     }
 }

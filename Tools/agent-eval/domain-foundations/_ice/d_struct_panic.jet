@@ -1,8 +1,12 @@
-M: struct { priv value: Float }
+M: struct {
+    priv value: Float
+}
+
 checked: fn(x: Float) -> M Err! {
     if !x.is_finite() -> return Err("not finite")
-    return Ok(M{ value: x })
+    return Ok(M{value: x})
 }
+
 run: fn() {
     v: checked(1.0) ?? panic("failed")
     print("{v.value}")

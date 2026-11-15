@@ -3,19 +3,19 @@ ReservoirSampler: struct {
     state: ReservoirState
 
     impl Display {
-        display: fn(self) -> String {
-            "ReservoirSampler(n={self.state.count})"
-        }
+        display: fn(self) -> String { "ReservoirSampler(n={self.state.count})" }
     }
 
     new: fn(capacity: Int) -> ReservoirSampler Never! {
         limit: if capacity < 1 -> 1 else -> capacity
-        ReservoirSampler{state: ReservoirState{
-            capacity: limit,
-            items: [String]{},
-            count: U64{0},
-            rng: U64{16045690984503098046},
-        }}
+        ReservoirSampler{
+            state: ReservoirState{
+                capacity: limit,
+                items: [String]{},
+                count: U64{0},
+                rng: U64{16045690984503098046},
+            },
+        }
     }
 
     add: fn(&self, item: String) Never! {
@@ -33,9 +33,7 @@ ReservoirSampler: struct {
         if index < (U64{self.state.capacity}) -> self.state.items[Int{index}] = item
     }
 
-    sample: fn(self) -> [String] Never! {
-        self.state.items.copy()
-    }
+    sample: fn(self) -> [String] Never! { self.state.items.copy() }
 }
 
 ReservoirState: struct {

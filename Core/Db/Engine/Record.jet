@@ -84,7 +84,9 @@ parse_header: fn(rec: [U8]) -> RecordHeader SQLError! {
 decode_record: fn(rec: [U8], enc: Int) -> [Mem] SQLError! {
     header: parse_header(rec) ?? return Err(err)
     values := [Mem]{}
-    loop i in 0..<header.types.len() -> values.push(serial_get(rec, header.offsets[i], header.types[i], enc))
+    loop i in 0..<header.types.len() {
+        values.push(serial_get(rec, header.offsets[i], header.types[i], enc))
+    }
     Ok(values)
 }
 
@@ -131,9 +133,7 @@ put_signed: fn(out: &[U8], value: Int, n: Int) Never! {
 // sqlite3VdbeSerialPut: append the body bytes of m as serial type `t`; a
 // MEM_Zero blob or text is expanded with its zero bytes.
 serial_put: fn(out: &[U8], m: Mem, t: Int) Never! {
-    if t >= 1 && t <= 6 {
-        put_signed(out, m.i, serial_len(t))
-    } else if t == 7 {
+    if t >= 1 && t <= 6 -> put_signed(out, m.i, serial_len(t)) else if t == 7 {
         put_signed(out, math.to_bits(m.r), 8)
     } else if t >= 12 {
         loop b in m.z -> out.push(b)
@@ -172,7 +172,9 @@ make_record: fn(values: &[Mem], file_format: Int) -> [U8] Never! {
 // Built-in collating sequences (datatype3.html section 7.1; main.c
 // binCollFunc, nocaseCollatingFunc and the RTRIM form of binCollFunc).
 COLL_BINARY: 0
+
 COLL_NOCASE: 1
+
 COLL_RTRIM: 2
 
 // The encoding a built-in collation compares in: openDatabase registers
@@ -254,20 +256,12 @@ int_float_compare: fn(i: Int, r: Float) -> Int Never! {
     bits: util.as_u64(math.to_bits(r))
     e := (bits >> 52).bit_and(2047)
     m := bits.bit_and(4503599627370495)
-    if e == 0 {
-        e = 1
-    } else {
-        m += 4503599627370496
-    }
+    if e == 0 -> e = 1 else -> m += 4503599627370496
     if bits >= 9223372036854775808 -> m = 0 - m
     shift: e - 1075
     lhs := i
     rhs := m
-    if shift >= 0 {
-        rhs = m * (1 << shift)
-    } else {
-        lhs = i * (1 << (0 - shift))
-    }
+    if shift >= 0 -> rhs = m * (1 << shift) else -> lhs = i * (1 << (0 - shift))
     if lhs < rhs -> return -1
     if lhs > rhs -> return 1
     0
@@ -398,11 +392,7 @@ record_unpack: fn(info: KeyInfo, n_key: Int, key: [U8], p: &UnpackedRecord) Neve
         n: serial_len(t.value)
         m := serial_get(key_slice(key, d, n), 0, t.value, info.enc)
         m.enc = info.enc
-        if u < p.mem.len() {
-            p.mem[u] = m
-        } else {
-            p.mem.push(m)
-        }
+        if u < p.mem.len() -> p.mem[u] = m else -> p.mem.push(m)
         d += n
         u += 1
         if u >= p.n_field -> break
@@ -454,9 +444,7 @@ record_compare_with_skip: fn(n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord
     idx1 := 0
     if skip {
         s1 := key_byte(buf, at + 1)
-        if s1 < 128 {
-            idx1 = 2
-        } else {
+        if s1 < 128 -> idx1 = 2 else {
             v: key_varint(buf, at + 1)
             s1 = v.value
             idx1 = 1 + v.len
@@ -466,9 +454,7 @@ record_compare_with_skip: fn(n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord
         i = 1
     } else {
         sz_hdr1 = key_byte(buf, at)
-        if sz_hdr1 < 128 {
-            idx1 = 1
-        } else {
+        if sz_hdr1 < 128 -> idx1 = 1 else {
             v: key_varint(buf, at)
             sz_hdr1 = v.value
             idx1 = v.len
@@ -485,38 +471,22 @@ record_compare_with_skip: fn(n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord
         serial_type := 0
         if rhs.flags.bit_and(MEM_INT.bit_or(MEM_INT_REAL)) != 0 {
             serial_type = key_byte(buf, at + idx1)
-            if serial_type >= 10 {
-                rc = if serial_type == 10 -> -1 else -> 1
-            } else if serial_type == 0 {
+            if serial_type >= 10 -> rc = if serial_type == 10 -> -1 else -> 1 else if serial_type == 0 {
                 rc = -1
             } else if serial_type == 7 {
                 rc = 0 - int_float_compare(rhs.i, decode_real(buf, at + d1))
-            } else {
-                rc = compare_ints(decode_int(serial_type, buf, at + d1), rhs.i)
-            }
+            } else { rc = compare_ints(decode_int(serial_type, buf, at + d1), rhs.i) }
         } else if rhs.flags.bit_and(MEM_REAL) != 0 {
             serial_type = key_byte(buf, at + idx1)
-            if serial_type >= 10 {
-                rc = if serial_type == 10 -> -1 else -> 1
-            } else if serial_type == 0 {
+            if serial_type >= 10 -> rc = if serial_type == 10 -> -1 else -> 1 else if serial_type == 0 {
                 rc = -1
             } else if serial_type == 7 {
                 r: decode_real(buf, at + d1)
-                if r < rhs.r {
-                    rc = -1
-                } else if r > rhs.r {
-                    rc = 1
-                }
-            } else {
-                rc = int_float_compare(decode_int(serial_type, buf, at + d1), rhs.r)
-            }
+                if r < rhs.r -> rc = -1 else if r > rhs.r -> rc = 1
+            } else { rc = int_float_compare(decode_int(serial_type, buf, at + d1), rhs.r) }
         } else if rhs.flags.bit_and(MEM_STR) != 0 {
             serial_type = key_varint(buf, at + idx1).value
-            if serial_type < 12 {
-                rc = -1
-            } else if serial_type.bit_and(1) == 0 {
-                rc = 1
-            } else {
+            if serial_type < 12 -> rc = -1 else if serial_type.bit_and(1) == 0 -> rc = 1 else {
                 n: (serial_type - 12) /% 2
                 if d1 + n > n_key1 || p.key_info.n_all_field <= i {
                     p.err_code = base.CORRUPT
@@ -534,20 +504,14 @@ record_compare_with_skip: fn(n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord
             }
         } else if rhs.flags.bit_and(MEM_BLOB) != 0 {
             serial_type = key_varint(buf, at + idx1).value
-            if serial_type < 12 || serial_type.bit_and(1) != 0 {
-                rc = -1
-            } else {
+            if serial_type < 12 || serial_type.bit_and(1) != 0 -> rc = -1 else {
                 n: (serial_type - 12) /% 2
                 if d1 + n > n_key1 {
                     p.err_code = base.CORRUPT
                     return 0
                 }
                 if rhs.flags.bit_and(MEM_ZERO) != 0 {
-                    if !all_zero(key_slice(buf, at + d1, n)) {
-                        rc = 1
-                    } else {
-                        rc = n - rhs.i
-                    }
+                    if !all_zero(key_slice(buf, at + d1, n)) -> rc = 1 else -> rc = n - rhs.i
                 } else {
                     n_cmp: if n < rhs.z.len() -> n else -> rhs.z.len()
                     rc = key_memcmp(buf, at + d1, rhs.z, n_cmp)
@@ -562,7 +526,9 @@ record_compare_with_skip: fn(n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord
             sort_flags: sort_flags_of(p.key_info, i)
             if sort_flags != 0 {
                 nulls: if serial_type == 0 || rhs.flags.bit_and(MEM_NULL) != 0 -> 1 else -> 0
-                if sort_flags.bit_and(KEYINFO_ORDER_BIGNULL) == 0 || sort_flags.bit_and(KEYINFO_ORDER_DESC) != nulls -> rc = 0 - rc
+                if sort_flags.bit_and(KEYINFO_ORDER_BIGNULL) == 0 || sort_flags.bit_and(KEYINFO_ORDER_DESC) != nulls {
+                    rc = 0 - rc
+                }
             }
             return rc
         }
@@ -590,7 +556,9 @@ record_compare: fn(n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord) -> Int N
 record_compare_int: fn(n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord) -> Int Never! {
     body: at + key_byte(buf, at).bit_and(63)
     serial_type: key_byte(buf, at + 1)
-    if serial_type == 0 || serial_type == 7 || serial_type > 9 -> return record_compare(n_key1, buf, at, p)
+    if serial_type == 0 || serial_type == 7 || serial_type > 9 {
+        return record_compare(n_key1, buf, at, p)
+    }
     lhs: decode_int(serial_type, buf, body)
     v: p.u_i
     if v > lhs -> return p.r1
@@ -632,7 +600,9 @@ record_compare_string: fn(n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord) -
 
 // The comparisons sqlite3VdbeFindCompare chooses among.
 COMPARE_GENERIC: 0
+
 COMPARE_INT: 1
+
 COMPARE_STRING: 2
 
 // sqlite3VdbeFindCompare: the comparison for p, setting r1, r2 and the

@@ -16,10 +16,33 @@ use {
     jet_foundation.[BUILD_REUSE_SAVED_WORK, BuildOptions, Diagnostic, build_option_duration_ms, build_options_value, compiler_threads_failure_text, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all, jet_target_triple_os, target_os_key]
     jet_pkg_model.[OverlayPolicy, WorkspaceDeclarationCache, pkg_build_entry_source, pkg_parse_workspace_policy, pkg_resolve_workspace_source]
     jetpack_build.[
-        ActionOutcome, ActionSpec, BuildArtifactStoreHandle, BuildExecutionError, BuildProbeFact, BuildProvenance, ContentDigest,
-        HermeticActionHandle, HermeticBuildContext, HermeticBuildError, HermeticBuildPlan, LinkerIdentity, ProbeHandle,
-        ProbeSpec, SDKIdentity, SigningIdentityHandle, SigningIdentitySpec, SysrootIdentity, TargetRef, TargetSpec,
-        ToolchainHandle, ToolchainSpec, build_action_failure_stderr, build_execute_actions, build_execute_probes, build_execution_batches, build_probes_run_sandboxed,
+        ActionOutcome,
+        ActionSpec,
+        BuildArtifactStoreHandle,
+        BuildExecutionError,
+        BuildProbeFact,
+        BuildProvenance,
+        ContentDigest,
+        HermeticActionHandle,
+        HermeticBuildContext,
+        HermeticBuildError,
+        HermeticBuildPlan,
+        LinkerIdentity,
+        ProbeHandle,
+        ProbeSpec,
+        SDKIdentity,
+        SigningIdentityHandle,
+        SigningIdentitySpec,
+        SysrootIdentity,
+        TargetRef,
+        TargetSpec,
+        ToolchainHandle,
+        ToolchainSpec,
+        build_action_failure_stderr,
+        build_execute_actions,
+        build_execute_probes,
+        build_execution_batches,
+        build_probes_run_sandboxed,
     ]
     jetpack_foundation.[BuildEffect, NATIVE_SANDBOX_FIX, foundation_native_sandbox_prepare]
 }
@@ -105,13 +128,19 @@ jet_cli_build_run_graph: fn(graph: BuildPlanExecution, receipt: BuildGraph, made
     action_timeout_ms: build_option_duration_ms(build_options_value(options, "action_timeout")) ?? panic("the resolved `action_timeout` is a checked duration")
     if graph.actions.len() == 0 && graph.probes.len() == 0 {
         nodes := [JetCLIBuildNode]{}
-        loop index in 0..<selected.executables.len() -> nodes.push(JetCLIBuildNode{kind: .Image, id: selected.executables[index].target, name: selected.executables[index].name.copy(), needs: [Int]{}})
-        loop index in 0..<selected.libraries.len() -> nodes.push(JetCLIBuildNode{kind: .Library, id: index, name: selected.libraries[index].name.copy(), needs: [Int]{}})
-        return jet_cli_build_run_nodes(nodes, None, None, [BuildEffect]{}, [BuildProbeFact]{}, graph, receipt, made, selected, JetCLIBuildNeeds{steps: [Int]{}, host: [Int]{}, images: [Int]{}}, root, member, options, threads, invocation, generated, [String: String]{}, trace_sink, color)
+        loop index in 0..<selected.executables.len() {
+            nodes.push(JetCLIBuildNode{kind: .Image, id: selected.executables[index].target, name: selected.executables[index].name.copy(), needs: [Int]{}})
+        }
+        loop index in 0..<selected.libraries.len() {
+            nodes.push(JetCLIBuildNode{kind: .Library, id: index, name: selected.libraries[index].name.copy(), needs: [Int]{}})
+        }
+        return jet_cli_build_run_nodes(nodes, None, None, [BuildEffect]{}, [BuildProbeFact]{}, graph, receipt, made, selected, JetCLIBuildNeeds{steps: [Int]{}, host: [Int]{}, images: [Int]{}}, root, member, options, threads, invocation, generated, [String:String]{}, trace_sink, color)
     }
     workspace := OverlayPolicy.empty()
     // copy: `refused` is a payload view of the policy read's result.
-    if jet_cli_build_workspace_policy(workspace, root) == .Val(refused) -> return jet_cli_build_policy_refused(refused.copy(), color)
+    if jet_cli_build_workspace_policy(workspace, root) == .Val(refused) {
+        return jet_cli_build_policy_refused(refused.copy(), color)
+    }
     last: jet_cli_build_last(root)
     plan: jet_cli_build_hermetic_plan(graph, action_timeout_ms, last.kept) ?? return jet_cli_ice("the checked build plan does not lower to the executor's graph: {err.debug_text()}")
     prereqs: plan.action_prereqs() ?? return jet_cli_ice("the checked build plan is not a valid executor graph: {err.debug_text()}")
@@ -143,7 +172,9 @@ jet_cli_build_run_graph: fn(graph: BuildPlanExecution, receipt: BuildGraph, made
     loop step in needs.steps {
         action: plan.actions[step]
         loop cap in action.caps {
-            if !grants.contains(cap) -> return jet_cli_build_execution_error(BuildExecutionError.MissingGrant{action: action.name, capability: cap}, member, color)
+            if !grants.contains(cap) {
+                return jet_cli_build_execution_error(BuildExecutionError.MissingGrant{action: action.name, capability: cap}, member, color)
+            }
         }
     }
     probe_ids := plan.selected_probe_ids() ?? return jet_cli_ice("the checked build plan is not a valid executor graph: {err.debug_text()}")
@@ -167,11 +198,15 @@ jet_cli_build_run_graph: fn(graph: BuildPlanExecution, receipt: BuildGraph, made
     // program or a folder) reports its own failure first.
     sandboxed_probes: build_probes_run_sandboxed(plan, probe_ids)
     if sandboxed_probes {
-        if foundation_native_sandbox_prepare() == .Err(error) -> return jet_cli_build_execution_error(BuildExecutionError.SandboxUnavailable{reason: error.message()}, member, color)
+        if foundation_native_sandbox_prepare() == .Err(error) {
+            return jet_cli_build_execution_error(BuildExecutionError.SandboxUnavailable{reason: error.message()}, member, color)
+        }
     }
     probes: build_execute_probes(plan, probe_ids) ?? return jet_cli_build_execution_error(err, member, color)
     if needs.steps.len() > 0 && !sandboxed_probes {
-        if foundation_native_sandbox_prepare() == .Err(error) -> return jet_cli_build_execution_error(BuildExecutionError.SandboxUnavailable{reason: error.message()}, member, color)
+        if foundation_native_sandbox_prepare() == .Err(error) {
+            return jet_cli_build_execution_error(BuildExecutionError.SandboxUnavailable{reason: error.message()}, member, color)
+        }
     }
     // A file of a listed package (`b.dependency(name).file(path)`) is copied
     // to its `.jet/deps/<name>/` path, where a step's sandbox reads it; a
@@ -204,7 +239,7 @@ jet_cli_build_run_graph: fn(graph: BuildPlanExecution, receipt: BuildGraph, made
 // the time of every node that ran (jet_cli_build_record). Without `store` no
 // step is reused and nothing is stored. A file trace also takes the trace of
 // every jet process a step starts (jet_cli_build_splice_traces).
-jet_cli_build_run_nodes: fn(nodes: [JetCLIBuildNode], plan: HermeticBuildPlan?, store: BuildArtifactStoreHandle?, grants: [BuildEffect], probes: [BuildProbeFact], graph: BuildPlanExecution, receipt: BuildGraph, made: [BuildSessionGeneratedModule], selected: BuildPlanSelection, needs: JetCLIBuildNeeds, root: String, member: String?, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, generated: [JetDriverGeneratedModule], last_kept: [String: String], trace_sink: JetCLITraceSink?, color: Bool) -> JetDriverVerbOutput {
+jet_cli_build_run_nodes: fn(nodes: [JetCLIBuildNode], plan: HermeticBuildPlan?, store: BuildArtifactStoreHandle?, grants: [BuildEffect], probes: [BuildProbeFact], graph: BuildPlanExecution, receipt: BuildGraph, made: [BuildSessionGeneratedModule], selected: BuildPlanSelection, needs: JetCLIBuildNeeds, root: String, member: String?, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, generated: [JetDriverGeneratedModule], last_kept: [String:String], trace_sink: JetCLITraceSink?, color: Bool) -> JetDriverVerbOutput {
     jobs: threads ?? cli_sys.cpu_count()
     traces: jet_cli_build_step_traces(root, trace_sink)
     // Per node: 0 waiting, 1 done, 2 failed, 3 never started.
@@ -213,7 +248,7 @@ jet_cli_build_run_nodes: fn(nodes: [JetCLIBuildNode], plan: HermeticBuildPlan?, 
     failures := [JetDriverVerbOutput]{}
     times := [JetDriverBuildTime]{}
     // Per step that ran: whether the store gave back its outputs.
-    reused := [Int: Bool]{}
+    reused := [Int:Bool]{}
     loop {
         ready_steps := [Int]{}
         ready_target := -1
@@ -230,7 +265,9 @@ jet_cli_build_run_nodes: fn(nodes: [JetCLIBuildNode], plan: HermeticBuildPlan?, 
                 next
             }
             if waiting -> next
-            if nodes[index].kind == .Step -> ready_steps.push(nodes[index].id) else if ready_target < 0 -> ready_target = index
+            if nodes[index].kind == .Step -> ready_steps.push(nodes[index].id) else if ready_target < 0 {
+                ready_target = index
+            }
         }
         built := JetDriverVerbOutput?{None}
         built_ms := 0
@@ -276,7 +313,9 @@ jet_cli_build_run_nodes: fn(nodes: [JetCLIBuildNode], plan: HermeticBuildPlan?, 
         }
     }
     kept: jet_cli_build_kept(root, graph, reused, last_kept)
-    if jet_cli_build_record(root, receipt, made, reused, kept, times, color) == .Val(unrecorded) -> failures.push(unrecorded)
+    if jet_cli_build_record(root, receipt, made, reused, kept, times, color) == .Val(unrecorded) {
+        failures.push(unrecorded)
+    }
     jet_cli_build_failures(failures)
 }
 
@@ -286,7 +325,7 @@ jet_cli_build_run_nodes: fn(nodes: [JetCLIBuildNode], plan: HermeticBuildPlan?, 
 // `target_ms` its wall time; None when none did.
 JetCLIBuildStepsRan: struct {
     batches: [[Int]]
-    results: [[Result<ActionOutcome, BuildExecutionError>]]
+    results: [[ActionOutcome BuildExecutionError!]]
     walls: [Int]
     target: JetDriverVerbOutput?
     target_ms: Int
@@ -295,7 +334,7 @@ JetCLIBuildStepsRan: struct {
 // Run the ready steps `ready`, batch by batch, each batch one `build.step`
 // span named by its steps, in the lane of the task that runs them.
 jet_cli_build_run_steps: fn(executor: HermeticBuildPlan, ready: [Int], store: BuildArtifactStoreHandle?, grants: [BuildEffect], probes: [BuildProbeFact], jobs: Int, traces: String?, graph: BuildPlanExecution, root: String, trace_sink: JetCLITraceSink?) -> JetCLIBuildStepsRan {
-    ran := JetCLIBuildStepsRan{batches: build_execution_batches(executor, ready), results: [[Result<ActionOutcome, BuildExecutionError>]]{}, walls: [Int]{}, target: None, target_ms: 0}
+    ran := JetCLIBuildStepsRan{batches: build_execution_batches(executor, ready), results: [[ActionOutcome BuildExecutionError!]]{}, walls: [Int]{}, target: None, target_ms: 0}
     loop batch in ran.batches {
         names: loop id in batch -> graph.actions[id].name.copy()
         if trace_sink == .Val(sink) -> sink.begin("build.step", names.join(" "), -1, -1)
@@ -374,7 +413,7 @@ jet_cli_build_step_traces: fn(root: String, trace_sink: JetCLITraceSink?) -[FS]>
 // Splices each trace a step of the batch that just ran left in `folder`
 // (`<action id>-<file>`) into the build's trace as its own process, named by
 // its step (Request.jet jet_cli_trace_splice), and removes the file.
-jet_cli_build_splice_traces: fn(sink: JetCLITraceSink, folder: String, graph: BuildPlanExecution) -[FS]> Never! {
+jet_cli_build_splice_traces: fn(sink: JetCLITraceSink, folder: String, graph: BuildPlanExecution) Never! -[FS]> {
     entries := cli_files.list_dir(folder) ?? return
     entries.sort_by(fn(left, right) { left.name <=> right.name })
     loop entry in entries {
@@ -382,7 +421,9 @@ jet_cli_build_splice_traces: fn(sink: JetCLITraceSink, folder: String, graph: Bu
         if entry.name.split_once("-") == .Val(pair) {
             id: Int.parse(pair.before) ?? -1
             if id >= 0 && id < graph.actions.len() {
-                if cli_files.read(path) == .Ok(text) -> jet_cli_trace_splice(sink, graph.actions[id].name, text)
+                if cli_files.read(path) == .Ok(text) {
+                    jet_cli_trace_splice(sink, graph.actions[id].name, text)
+                }
             }
         }
         cli_files.remove(path).drop("a spliced trace left behind is cleared by the next traced build")
@@ -406,7 +447,7 @@ jet_cli_build_node_kind: fn(kind: JetCLIBuildNodeKind) -> String Never! {
 // identity and the producer chain that made it, which the editor shows on
 // the module (`jet self lsp`); and `times.json`, its BuildTimes. A record
 // that can't be written is the failure returned.
-jet_cli_build_record: fn(root: String, receipt: BuildGraph, made: [BuildSessionGeneratedModule], reused: [Int: Bool], kept: [JetDriverBuildKept], times: [JetDriverBuildTime], color: Bool) -[FS]> JetDriverVerbOutput? Never! {
+jet_cli_build_record: fn(root: String, receipt: BuildGraph, made: [BuildSessionGeneratedModule], reused: [Int:Bool], kept: [JetDriverBuildKept], times: [JetDriverBuildTime], color: Bool) -[FS]> JetDriverVerbOutput? Never! {
     graph := receipt.copy()
     hits := [BuildGraphAction]{}
     loop index in 0..<graph.actions.len() {
@@ -430,13 +471,17 @@ jet_cli_build_record: fn(root: String, receipt: BuildGraph, made: [BuildSessionG
 // The digest of each output the graph keeps in git, for the receipt: the
 // bytes on disk for a step that finished this run (`reused` names those), the
 // last build's (`last_kept`) for one that didn't run.
-jet_cli_build_kept: fn(root: String, graph: BuildPlanExecution, reused: [Int: Bool], last_kept: [String: String]) -[FS]> [JetDriverBuildKept] Never! {
+jet_cli_build_kept: fn(root: String, graph: BuildPlanExecution, reused: [Int:Bool], last_kept: [String:String]) -[FS]> [JetDriverBuildKept] Never! {
     kept := [JetDriverBuildKept]{}
     loop (id, action) in graph.actions {
         loop path in action.kept {
             digest := last_kept.get(path)
-            if reused.get(id) != None && cli_files.read_bytes(jet_cli_entry_join(root, path)) == .Ok(bytes) -> digest = Val(ContentDigest.from_bytes(bytes).as_str())
-            if digest == .Val(held) -> kept.push(JetDriverBuildKept{path: path.copy(), digest: held.copy()})
+            if reused.get(id) != None && cli_files.read_bytes(jet_cli_entry_join(root, path)) == .Ok(bytes) {
+                digest = Val(ContentDigest.from_bytes(bytes).as_str())
+            }
+            if digest == .Val(held) {
+                kept.push(JetDriverBuildKept{path: path.copy(), digest: held.copy()})
+            }
         }
     }
     kept
@@ -447,11 +492,11 @@ jet_cli_build_kept: fn(root: String, graph: BuildPlanExecution, reused: [Int: Bo
 // any build has recorded one.
 JetCLIBuildLast: struct {
     made: [String]
-    kept: [String: String]
+    kept: [String:String]
 }
 
 jet_cli_build_last: fn(root: String) -[FS]> JetCLIBuildLast Never! {
-    last := JetCLIBuildLast{made: [String]{}, kept: [String: String]{}}
+    last := JetCLIBuildLast{made: [String]{}, kept: [String:String]{}}
     receipt_text: cli_files.read(jet_cli_entry_join(root, ".jet/build/receipt.json")) ?? ""
     if jet_cli_status_value_parse(receipt_text) == .Ok(receipt) {
         actions: jet_cli_status_list(jet_cli_status_get(receipt, "actions")) ?? [JetCLIStatusValue]{}
@@ -481,7 +526,9 @@ jet_cli_build_overwrite: fn(root: String, graph: BuildPlanExecution, steps: [Int
     loop step in steps {
         loop output in graph.actions[step].outputs {
             path: jet_cli_entry_join(root, output)
-            if made.contains(output) || graph.actions[step].kept.contains(output) || !(cli_files.exists(path) || cli_files.is_symlink(path)) -> next
+            if made.contains(output) || graph.actions[step].kept.contains(output) || !(cli_files.exists(path) || cli_files.is_symlink(path)) {
+                next
+            }
             if jet_cli_build_tree_output(root, output) -> next
             return Val("step `{graph.actions[step].name}` would overwrite `{output}`, a file no build made")
         }
@@ -538,7 +585,9 @@ jet_cli_build_target_node: fn(node: JetCLIBuildNode, graph: BuildPlanExecution, 
     host_options := jet_cli_build_options_set(options, "output_dir", host_dir)
     host_options = jet_cli_build_options_set(host_options, "os", "linux")
     host_options = jet_cli_build_options_set(host_options, "min_os", "")
-    if node.kind == .Host -> return jet_cli_compile_target(source_path, row.name, source, row.sources, generated, color, host_options, threads, invocation, trace_sink)
+    if node.kind == .Host {
+        return jet_cli_compile_target(source_path, row.name, source, row.sources, generated, color, host_options, threads, invocation, trace_sink)
+    }
     target_options: jet_cli_build_toolchain_options(graph, row, options)
     built: jet_cli_compile_target(source_path, row.name, source, row.sources, generated, color, target_options.copy(), threads, invocation, trace_sink)
     if built.exit_code != JET_DRIVER_EXIT_OK -> return built
@@ -553,9 +602,13 @@ jet_cli_build_target_node: fn(node: JetCLIBuildNode, graph: BuildPlanExecution, 
     copies_dir: jet_cli_entry_join(root, BUILD_SESSION_IMAGE_DIR)
     refused: if needs.images.contains(target) -> jet_cli_build_step_image(image, row.name, copies_dir) else -> None
     if trace_sink == .Val(sink) -> sink.end("build.image", -1)
-    if refused == .Val(problem) -> return jet_cli_build_failed(problem, jet_cli_why("E2105"), "make `{copies_dir}` writable", color)
+    if refused == .Val(problem) {
+        return jet_cli_build_failed(problem, jet_cli_why("E2105"), "make `{copies_dir}` writable", color)
+    }
     if !wants_host -> return built
-    if cross -> return jet_cli_compile_target(source_path, row.name, source, row.sources, generated, color, host_options, threads, invocation, trace_sink)
+    if cross {
+        return jet_cli_compile_target(source_path, row.name, source, row.sources, generated, color, host_options, threads, invocation, trace_sink)
+    }
     tool: cli_files.join(host_dir, row.name)
     cli_files.create_dir_all(host_dir) ?? return jet_cli_build_failed("couldn't create `{host_dir}` for the host copy of `{row.name}`: {err}", jet_cli_why("E2105"), "make `{host_dir}` writable", color)
     if trace_sink == .Val(sink) -> sink.begin("build.host", row.name, -1, -1)
@@ -575,9 +628,15 @@ jet_cli_build_target_image: fn(source_path: String, name: String, options: Build
     source_dir: jet_cli_parent(cli_files.realpath(source_path) ?? source_path) ?? root
     cache := WorkspaceDeclarationCache.new()
     source_root := source_dir.copy()
-    if jet_cli_find_package_root_checked(cache, source_dir) == .Ok(found) && found == .Val(package_root) -> source_root = package_root.copy()
+    if jet_cli_find_package_root_checked(cache, source_dir) == .Ok(found) && found == .Val(package_root) {
+        source_root = package_root.copy()
+    }
     written: build_options_value(options, "output_dir")
-    image_dir: if { written == "" -> "{source_root}/.jet/build" written.starts_with("/") -> written.copy() else -> "{source_root}/{written}" }
+    image_dir: if {
+        written == "" -> "{source_root}/.jet/build"
+        written.starts_with("/") -> written.copy()
+        else -> "{source_root}/{written}"
+    }
     cli_files.join(image_dir, name)
 }
 
@@ -637,7 +696,7 @@ jet_cli_build_failures: fn(failures: [JetDriverVerbOutput]) -> JetDriverVerbOutp
 // needs, and their prerequisites; for each `b.host` tool a step runs and each
 // `b.image` it reads, its target and the steps it needs. Steps ascending,
 // targets in first use.
-jet_cli_build_needs: fn(graph: BuildPlanExecution, plan: HermeticBuildPlan, selected: BuildPlanSelection, prereqs: [Int: [Int]]) -> JetCLIBuildNeeds HermeticBuildError! {
+jet_cli_build_needs: fn(graph: BuildPlanExecution, plan: HermeticBuildPlan, selected: BuildPlanSelection, prereqs: [Int:[Int]]) -> JetCLIBuildNeeds HermeticBuildError! {
     steps := plan.selected_action_ids() ?? return Err(err)
     loop executable in selected.executables {
         loop step in jet_cli_build_target_steps(graph, executable.target) {
@@ -673,7 +732,7 @@ jet_cli_build_needs: fn(graph: BuildPlanExecution, plan: HermeticBuildPlan, sele
         }
     }
     steps.sort()
-    Ok(JetCLIBuildNeeds{steps, host, images})
+    Ok(JetCLIBuildNeeds{steps: steps, host: host, images: images})
 }
 
 // The targets whose `kind` build `action` reads: `host` for its `b.host`
@@ -708,7 +767,9 @@ jet_cli_build_target_steps: fn(graph: BuildPlanExecution, target: Int) -> [Int] 
         loop index in 0..<graph.actions.len() {
             if steps.contains(index) -> next
             makes_source: loop output in graph.actions[index].outputs {
-                if row.sources.contains(output) -> break true
+                if row.sources.contains(output) {
+                    break true
+                }
             } ?? false
             if makes_source -> steps.push(index)
         }
@@ -719,15 +780,15 @@ jet_cli_build_target_steps: fn(graph: BuildPlanExecution, target: Int) -> [Int] 
 // The nodes of the build: the steps, the selected executables and
 // libraries, then the unselected targets whose image a step reads, then the
 // host-only targets, each with what it waits on.
-jet_cli_build_nodes: fn(graph: BuildPlanExecution, selected: BuildPlanSelection, needs: JetCLIBuildNeeds, prereqs: [Int: [Int]]) -> [JetCLIBuildNode] Never! {
+jet_cli_build_nodes: fn(graph: BuildPlanExecution, selected: BuildPlanSelection, needs: JetCLIBuildNeeds, prereqs: [Int:[Int]]) -> [JetCLIBuildNode] Never! {
     nodes := [JetCLIBuildNode]{}
-    step_nodes := [Int: Int]{}
+    step_nodes := [Int:Int]{}
     loop step in needs.steps {
         step_nodes[step] = nodes.len()
         nodes.push(JetCLIBuildNode{kind: .Step, id: step, name: graph.actions[step].name.copy(), needs: [Int]{}})
     }
     // The node that builds each executable target a step uses.
-    target_nodes := [Int: Int]{}
+    target_nodes := [Int:Int]{}
     loop executable in selected.executables {
         target_nodes[executable.target] = nodes.len()
         nodes.push(JetCLIBuildNode{kind: .Image, id: executable.target, name: executable.name.copy(), needs: jet_cli_build_step_nodes(step_nodes, jet_cli_build_target_steps(graph, executable.target))})
@@ -750,7 +811,9 @@ jet_cli_build_nodes: fn(graph: BuildPlanExecution, selected: BuildPlanSelection,
         index: step_nodes.get(step) ?? panic("a needed step has a node")
         waits := jet_cli_build_step_nodes(step_nodes, prereqs.get(step) ?? [Int]{})
         uses := jet_cli_build_step_targets(graph, graph.actions[step], "host")
-        loop target in jet_cli_build_step_targets(graph, graph.actions[step], "image") -> uses.push(target)
+        loop target in jet_cli_build_step_targets(graph, graph.actions[step], "image") {
+            uses.push(target)
+        }
         loop target in uses {
             made: target_nodes.get(target) ?? panic("a target a step uses has a node")
             if !waits.contains(made) -> waits.push(made)
@@ -762,7 +825,7 @@ jet_cli_build_nodes: fn(graph: BuildPlanExecution, selected: BuildPlanSelection,
     nodes
 }
 
-jet_cli_build_step_nodes: fn(step_nodes: [Int: Int], steps: [Int]) -> [Int] Never! {
+jet_cli_build_step_nodes: fn(step_nodes: [Int:Int], steps: [Int]) -> [Int] Never! {
     out := [Int]{}
     loop step in steps {
         node: step_nodes.get(step) ?? next
@@ -782,7 +845,9 @@ jet_cli_build_cycle: fn(nodes: [JetCLIBuildNode]) -> [String] Never! {
         loop index in 0..<nodes.len() {
             if done[index] -> next
             ready: loop need in nodes[index].needs {
-                if !done[need] -> break false
+                if !done[need] {
+                    break false
+                }
             } ?? true
             if ready {
                 done[index] = true
@@ -808,12 +873,16 @@ jet_cli_build_workspace_policy: fn(policy: &OverlayPolicy, root: String) -[FS, E
     cache := WorkspaceDeclarationCache.new()
     found: if jet_cli_find_workspace_root_checked(cache, root) == {
         .Ok(nearest) -> nearest
-        .Err(error) -> { return Val("Workspace build policy above `{root}` is present but unavailable: {error.diagnostic.what}") }
+        .Err(error) -> {
+            return Val("Workspace build policy above `{root}` is present but unavailable: {error.diagnostic.what}")
+        }
     }
     workspace: found ?? return None
     resolved: if pkg_resolve_workspace_source(cache, workspace) == {
         .Ok(read) -> read
-        .Err(error) -> { return Val("Workspace build policy in `{workspace}` is present but unavailable: {error.diagnostic.what}") }
+        .Err(error) -> {
+            return Val("Workspace build policy in `{workspace}` is present but unavailable: {error.diagnostic.what}")
+        }
     }
     source: resolved ?? return None
     parsed: pkg_parse_workspace_policy(source.source) ?? return Val("Workspace build policy in `{source.path}`: {err.message()}")
@@ -855,7 +924,9 @@ jet_cli_build_execution_error: fn(error: BuildExecutionError, member: String?, c
     if error == {
         .MissingGrant(action, capability) -> {
             subject: if action.starts_with("probe ") -> "build probe `{action.slice(6..<action.len())}`" else -> "build action `{action}`"
-            if member == .Val(name) -> return jet_cli_build_execution_failed("E3504", "{subject} of workspace member `{name}` asks for ungranted `{capability.name()}` authority", None, "grant `{capability.name()}` in `{name}`'s package authority or in the workspace's `policy: {{ grants: {{ \"{name}\": #({capability.name()}) }} }}`; `--allow` grants the root build only", color)
+            if member == .Val(name) {
+                return jet_cli_build_execution_failed("E3504", "{subject} of workspace member `{name}` asks for ungranted `{capability.name()}` authority", None, "grant `{capability.name()}` in `{name}`'s package authority or in the workspace's `policy: {{ grants: {{ \"{name}\": #({capability.name()}) }} }}`; `--allow` grants the root build only", color)
+            }
             jet_cli_build_execution_failed("E3503", "{subject} needs `{capability.name()}`, which this build does not grant", None, "grant it with `--allow={capability.name()}` or in package or workspace policy; `build: fn` declares the effect and makes the call inside `#Impure(\"reason\")`", color)
         }
         .SandboxUnavailable(reason) -> jet_cli_build_refusal("E3505", "build actions run only in the native sandbox, and none is available here: {reason}", JET_CLI_BUILD_SANDBOX_WHY, None, "{NATIVE_SANDBOX_FIX}; Jet never runs a build action outside the sandbox", color)
@@ -904,6 +975,7 @@ jet_cli_build_refusal: fn(code: String, what: String, why: String, detail: Strin
 // Where a `b.jet()` step finds the running compiler's folder, and the
 // toolchain it runs on, named so no `b.toolchain` name can collide.
 JET_CLI_BUILD_JET_MOUNT: "/jet/compiler"
+
 JET_CLI_BUILD_JET_TOOLCHAIN: "(jet)"
 
 // The executor's graph of the session plan: every declared toolchain, signing
@@ -915,7 +987,7 @@ JET_CLI_BUILD_JET_TOOLCHAIN: "(jet)"
 // so the step gets this compiler's identity in `JET_COMPILER_IDENTITY`: an
 // unpublished compiler has no IDENTITY file beside it. `last_kept` is the
 // digest each kept output had when the last build left it.
-jet_cli_build_hermetic_plan: fn(graph: BuildPlanExecution, action_timeout_ms: Int, last_kept: [String: String]) -> HermeticBuildPlan HermeticBuildError! {
+jet_cli_build_hermetic_plan: fn(graph: BuildPlanExecution, action_timeout_ms: Int, last_kept: [String:String]) -> HermeticBuildPlan HermeticBuildError! {
     build := HermeticBuildContext.new()
     provenance: BuildProvenance.user_declared("fn build", None)
     toolchains := [ToolchainHandle]{build.default_host_toolchain()}
@@ -924,7 +996,9 @@ jet_cli_build_hermetic_plan: fn(graph: BuildPlanExecution, action_timeout_ms: In
         toolchains.push(build.toolchain(declared.name, jet_cli_build_toolchain_spec(declared, provenance)))
     }
     runs_jet: loop action in graph.actions {
-        if graph.files[action.tool].kind == "jet" -> break true
+        if graph.files[action.tool].kind == "jet" {
+            break true
+        }
     } ?? false
     jet_identity := ""
     if runs_jet {
@@ -936,7 +1010,9 @@ jet_cli_build_hermetic_plan: fn(graph: BuildPlanExecution, action_timeout_ms: In
         toolchains.push(build.toolchain(JET_CLI_BUILD_JET_TOOLCHAIN, spec))
     }
     signing := [SigningIdentityHandle]{}
-    loop identity in graph.signing -> signing.push(build.signing_identity(identity.name, SigningIdentitySpec.new(identity.label, provenance)))
+    loop identity in graph.signing {
+        signing.push(build.signing_identity(identity.name, SigningIdentitySpec.new(identity.label, provenance)))
+    }
     probes := [ProbeHandle]{}
     loop probe in graph.probes {
         spec: if probe.kind == {
@@ -976,20 +1052,30 @@ jet_cli_build_hermetic_plan: fn(graph: BuildPlanExecution, action_timeout_ms: In
 
 jet_cli_build_toolchain_spec: fn(declared: BuildSessionToolchain, provenance: BuildProvenance) -> ToolchainSpec Never! {
     spec := ToolchainSpec.target(declared.target_triple, provenance).with_host_triple(declared.host_triple)
-    if declared.sdk == .Val(sdk) -> spec = spec.with_sdk(SDKIdentity.new(sdk, "declared", provenance))
-    if declared.linker == .Val(linker) -> spec = spec.with_linker(LinkerIdentity.new(linker, provenance))
-    if declared.sysroot == .Val(sysroot) -> spec = spec.with_sysroot(SysrootIdentity.new(sysroot, "declared", provenance))
+    if declared.sdk == .Val(sdk) {
+        spec = spec.with_sdk(SDKIdentity.new(sdk, "declared", provenance))
+    }
+    if declared.linker == .Val(linker) {
+        spec = spec.with_linker(LinkerIdentity.new(linker, provenance))
+    }
+    if declared.sysroot == .Val(sysroot) {
+        spec = spec.with_sysroot(SysrootIdentity.new(sysroot, "declared", provenance))
+    }
     spec
 }
 
-jet_cli_build_action_spec: fn(action: BuildSessionAction, files: [BuildSessionFile], toolchain: ToolchainHandle, probes: [ProbeHandle], signing: [SigningIdentityHandle], action_timeout_ms: Int, last_kept: [String: String]) -> ActionSpec Never! {
+jet_cli_build_action_spec: fn(action: BuildSessionAction, files: [BuildSessionFile], toolchain: ToolchainHandle, probes: [ProbeHandle], signing: [SigningIdentityHandle], action_timeout_ms: Int, last_kept: [String:String]) -> ActionSpec Never! {
     spec := ActionSpec.new(action.argv).with_inputs(action.inputs).with_outputs(action.outputs).with_toolchain(toolchain).with_timeout_ms(action.timeout_ms ?? action_timeout_ms)
     loop path in action.kept -> spec = spec.with_kept(path, last_kept.get(path))
     loop id in action.folders {
         file: files[id]
-        if file.probe == .Val(probe) -> spec = spec.with_found_folder(file.path, probes[probe]) else -> spec = spec.with_folder(file.path, file.from)
+        if file.probe == .Val(probe) -> spec = spec.with_found_folder(file.path, probes[probe]) else {
+            spec = spec.with_folder(file.path, file.from)
+        }
     }
-    loop program in action.programs -> spec = spec.with_found_program(program.at, program.flag, probes[program.probe])
+    loop program in action.programs {
+        spec = spec.with_found_program(program.at, program.flag, probes[program.probe])
+    }
     loop cap in action.caps {
         if BuildEffect.parse(cap) == .Val(parsed) -> spec = spec.with_cap(parsed)
     }

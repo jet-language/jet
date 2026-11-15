@@ -3,7 +3,6 @@
 // (its last segment). This is authored Jet source and the routes' only home:
 // keep every row table sorted by hand. Each table's KEYS/KEY_ROWS lookup
 // index is computed from the table at build time (ir_key_index).
-
 use jet_foundation.[IRRuntimeHandle, IR_RUNTIME_HANDLES, RUNTIME_C_EXPORTS, ir_key_index, ir_key_index_keys, ir_key_row, ir_runtime_handle_keys, ir_runtime_handle_row]
 
 // The runtime ABI atom projection; nominal identities stay unchanged.
@@ -44,7 +43,21 @@ runtime_abi_atom: fn(name: String) -> String Never! {
 // the mapped executable, IR_ROUTES_FROZEN): its header is frozen (cap 0), so
 // no owner frees the bytes and a writer copies them first; it crosses only
 // as an Option's payload.
-IRRouteCarrier: enum { Word Flag Float Text Unit Handle(name: String) HandleMut(name: String) List(elem: IRRouteCarrier) ListMut(elem: IRRouteCarrier) Frozen(elem: IRRouteCarrier) Option(some: IRRouteCarrier) Tag(name: String, variants: String) Tuple(items: [IRRouteCarrier]) }
+IRRouteCarrier: enum {
+    Word
+    Flag
+    Float
+    Text
+    Unit
+    Handle(name: String)
+    HandleMut(name: String)
+    List(elem: IRRouteCarrier)
+    ListMut(elem: IRRouteCarrier)
+    Frozen(elem: IRRouteCarrier)
+    Option(some: IRRouteCarrier)
+    Tag(name: String, variants: String)
+    Tuple(items: [IRRouteCarrier])
+}
 
 IRRouteResult: enum {
     Plain(carrier: IRRouteCarrier)
@@ -53,7 +66,13 @@ IRRouteResult: enum {
     Tuple(items: [IRRouteCarrier])
 }
 
-IRRoute: struct { symbol: String, export: String, native_lists: Bool, params: [IRRouteCarrier], result: IRRouteResult }
+IRRoute: struct {
+    symbol: String
+    export: String
+    native_lists: Bool
+    params: [IRRouteCarrier]
+    result: IRRouteResult
+}
 
 IR_RUNTIME_ROUTES: #run { [IRRoute]{
     IRRoute{symbol: "jet_authority_from_rights", export: "jet_authority_from_rights", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.List{elem: IRRouteCarrier.Text}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetAuthority"}}},
@@ -1260,10 +1279,11 @@ IR_RUNTIME_ROUTES: #run { [IRRoute]{
 } }
 
 ir_runtime_route_keys: fn() -> [String] Never! {
-    loop route in IR_RUNTIME_ROUTES -> route.symbol.copy() // copy: the global route table can't be moved from
+    loop route in IR_RUNTIME_ROUTES -> route.symbol.copy()  // copy: the global route table can't be moved from
 }
 
 IR_RUNTIME_ROUTE_KEY_ROWS: #run ir_key_index(ir_runtime_route_keys())
+
 IR_RUNTIME_ROUTE_KEYS: #run ir_key_index_keys(ir_runtime_route_keys(), IR_RUNTIME_ROUTE_KEY_ROWS)
 
 ir_runtime_route: fn(symbol: String) -> IRRoute? {
@@ -1272,7 +1292,6 @@ ir_runtime_route: fn(symbol: String) -> IRRoute? {
     // IR_RUNTIME_ROUTES table, which can't be moved from.
     Val(IR_RUNTIME_ROUTES[position].copy())
 }
-
 
 // Opaque native providers: physical ownership ABI only, no Rust schema. A
 // Core-declared shape here crosses a route as a heap shell of its declared
@@ -1288,11 +1307,13 @@ IR_NATIVE_PROVIDER_HANDLES: #run { [IRRuntimeHandle]{
 } }
 
 IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS: #run ir_key_index(ir_runtime_handle_keys(IR_NATIVE_PROVIDER_HANDLES))
+
 IR_NATIVE_PROVIDER_HANDLE_KEYS: #run ir_key_index_keys(ir_runtime_handle_keys(IR_NATIVE_PROVIDER_HANDLES), IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS)
 
 // The runtime's C export table (RUNTIME_C_EXPORTS, generated from every
 // JetRuntime #Export(c)), indexed for halving search.
 IR_RUNTIME_EXPORT_KEY_ROWS: #run ir_key_index(RUNTIME_C_EXPORTS)
+
 IR_RUNTIME_EXPORT_KEYS: #run ir_key_index_keys(RUNTIME_C_EXPORTS, IR_RUNTIME_EXPORT_KEY_ROWS)
 
 // Whether the runtime exports C symbol `symbol`.
@@ -1513,8 +1534,13 @@ IR_GENERATED_RECORDS: #run { [IRRecordSchema]{
     IRRecordSchema{jet_name: "XMLReason", variants: "InvalidEncoding,Malformed,MismatchedTag,InvalidName,Namespace,DuplicateAttribute,Entity,EntityCycle,Limit,Canonicalization,Shape,Unsupported", fields: ""},
     IRRecordSchema{jet_name: "XMLRenderOptions", variants: "", fields: "encoding=Tag.XMLEncoding,lexical=Tag.XMLLexicalPolicy"},
 } }
+
 // Declaration-proven scalar records; the IR builder still proves the actual native field.
-IRRuntimeWordRecord: struct { runtime: String, field: String }
+IRRuntimeWordRecord: struct {
+    runtime: String
+    field: String
+}
+
 IR_WORD_RECORDS: #run { [IRRuntimeWordRecord]{
     IRRuntimeWordRecord{runtime: "__jet__x3ccorelib_x3e_score_dtime_c_cInstant", field: "start_ns"},
     IRRuntimeWordRecord{runtime: "__jet__x3ccorelib_x3e_score_dtime_c_cStopwatch", field: "start_ns"},
@@ -1527,7 +1553,12 @@ IR_WORD_RECORDS: #run { [IRRuntimeWordRecord]{
 // write read-only caller stack headers, never owned/freeable field values.
 // A "Text.Owned" field the carrier derives (no stored text) returns a fresh
 // String the read owns.
-IRHandleField: struct { runtime: String, field: String, kind: String, header_bytes: Int }
+IRHandleField: struct {
+    runtime: String
+    field: String
+    kind: String
+    header_bytes: Int
+}
 
 IR_HANDLE_FIELDS: #run { [IRHandleField]{
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_ddb_dsql_c_cJetSQLQuery", field: "__jet_source", kind: "Text", header_bytes: 0},
@@ -1672,6 +1703,7 @@ ir_handle_field_keys: fn() -> [String] Never! {
 }
 
 IR_HANDLE_FIELD_KEY_ROWS: #run ir_key_index(ir_handle_field_keys())
+
 IR_HANDLE_FIELD_KEYS: #run ir_key_index_keys(ir_handle_field_keys(), IR_HANDLE_FIELD_KEY_ROWS)
 
 ir_runtime_handle_field: fn(runtime: String, field: String) -> IRHandleField? {
@@ -1680,8 +1712,24 @@ ir_runtime_handle_field: fn(runtime: String, field: String) -> IRHandleField? {
     // IR_HANDLE_FIELDS table, which can't be moved from.
     Val(IR_HANDLE_FIELDS[position].copy())
 }
-IREnvironmentOp: enum { Bytes Set Remove Columns Compare Seed Text }
-IREnvironmentRoute: struct { symbol: String, export: String, op: IREnvironmentOp, arity: Int }
+
+IREnvironmentOp: enum {
+    Bytes
+    Set
+    Remove
+    Columns
+    Compare
+    Seed
+    Text
+}
+
+IREnvironmentRoute: struct {
+    symbol: String
+    export: String
+    op: IREnvironmentOp
+    arity: Int
+}
+
 IR_ENVIRONMENT_ROUTES: #run { [IREnvironmentRoute]{
     IREnvironmentRoute{symbol: "jet_sys_env_value_raw", export: "jet_rt_logical_env_get_os", op: IREnvironmentOp.Bytes, arity: 1},
     IREnvironmentRoute{symbol: "jet_std_env_try_set", export: "jet_rt_logical_env_set", op: IREnvironmentOp.Set, arity: 2},
@@ -1692,15 +1740,23 @@ IR_ENVIRONMENT_ROUTES: #run { [IREnvironmentRoute]{
     IREnvironmentRoute{symbol: "jet_std_env_init", export: "jet_rt_logical_env_seed", op: IREnvironmentOp.Seed, arity: 0},
     IREnvironmentRoute{symbol: "jet_rt_logical_env_get", export: "jet_rt_logical_env_get", op: IREnvironmentOp.Text, arity: 1},
 } }
+
 ir_environment_route: fn(symbol: String) -> IREnvironmentRoute? {
     // copy: the caller gets an owned route row, while the row stays in the global
     // IR_ENVIRONMENT_ROUTES table, which can't be moved from.
-    loop route in IR_ENVIRONMENT_ROUTES { if route.symbol == symbol -> return Val(route.copy()) }
+    loop route in IR_ENVIRONMENT_ROUTES {
+        if route.symbol == symbol -> return Val(route.copy())
+    }
     None
 }
 
 // Candidate source identities; the backend validates against the actual native layout.
-IRNativeType: struct { jet_name: String, declaration: String, arguments: String }
+IRNativeType: struct {
+    jet_name: String
+    declaration: String
+    arguments: String
+}
+
 IR_NATIVE_TYPES: #run { [IRNativeType]{
     IRNativeType{jet_name: "<corelib>/core.crypto.vault::ExpiryCloseProbe", declaration: "<corelib>/core.crypto.vault::ExpiryCloseProbe", arguments: ""},
     IRNativeType{jet_name: "<corelib>/core.crypto.vault::KeyRef", declaration: "<corelib>/core.crypto.vault::KeyRef", arguments: "T"},
@@ -1794,10 +1850,11 @@ IR_NATIVE_TYPES: #run { [IRNativeType]{
 } }
 
 ir_native_type_keys: fn() -> [String] Never! {
-    loop row in IR_NATIVE_TYPES -> row.jet_name.copy() // copy: the global native type table can't be moved from
+    loop row in IR_NATIVE_TYPES -> row.jet_name.copy()  // copy: the global native type table can't be moved from
 }
 
 IR_NATIVE_TYPE_KEY_ROWS: #run ir_key_index(ir_native_type_keys())
+
 IR_NATIVE_TYPE_KEYS: #run ir_key_index_keys(ir_native_type_keys(), IR_NATIVE_TYPE_KEY_ROWS)
 
 ir_native_type: fn(name: String) -> IRNativeType? {
@@ -1811,11 +1868,13 @@ ir_native_type: fn(name: String) -> IRNativeType? {
 // handle or tag, and its members'.
 ir_route_carrier_names: fn(carrier: IRRouteCarrier, out: &[String]) Never! {
     if carrier == {
-        .Handle(name) | .HandleMut(name) -> out.push(name.copy())
+        .Handle(name) | .HandleMut(name) -> { out.push(name.copy()) }
         .Tag(name, _) -> out.push(name.copy())
-        .List(elem) | .ListMut(elem) | .Frozen(elem) -> ir_route_carrier_names(elem, out)
-        .Option(some) -> ir_route_carrier_names(some, out)
-        .Tuple(items) -> { loop item in items -> ir_route_carrier_names(item, out) }
+        .List(elem) | .ListMut(elem) | .Frozen(elem) -> { ir_route_carrier_names(elem, out) }
+        .Option(some) -> { ir_route_carrier_names(some, out) }
+        .Tuple(items) -> {
+            loop item in items -> ir_route_carrier_names(item, out)
+        }
         .Word | .Flag | .Float | .Text | .Unit -> {}
     }
 }
@@ -1827,13 +1886,15 @@ ir_route_carrier_names: fn(carrier: IRRouteCarrier, out: &[String]) Never! {
     loop route in IR_RUNTIME_ROUTES {
         loop param in route.params -> ir_route_carrier_names(param, readers)
         if route.result == {
-            .Plain(carrier) -> ir_route_carrier_names(carrier, readers)
-            .Option(some) -> ir_route_carrier_names(some, readers)
+            .Plain(carrier) -> { ir_route_carrier_names(carrier, readers) }
+            .Option(some) -> { ir_route_carrier_names(some, readers) }
             .Result(ok, err) -> {
                 ir_route_carrier_names(ok, readers)
                 ir_route_carrier_names(err, readers)
             }
-            .Tuple(items) -> { loop item in items -> ir_route_carrier_names(item, readers) }
+            .Tuple(items) -> {
+                loop item in items -> ir_route_carrier_names(item, readers)
+            }
         }
     }
     loop row in IR_GENERATED_RECORDS {

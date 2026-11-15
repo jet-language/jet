@@ -9,24 +9,25 @@
 use jet_foundation.[record_open_schema]
 
 ArtifactRecordKind: enum {
-    // Action record under the package check key.
     PkgCheck
-    // Package interface record (content addressed).
     Iface
-    // Typed diagnostics of one package check (content addressed).
     Diags
-    // Item graph of one package check (content addressed).
     Items
-    // Lowered bodies for build lenses (content addressed).
     Body
-    // Action record under the program key.
     Program
-    // Action record for one package's compiled output.
     PkgObject
-    // Action record under one item's check key.
     ItemCheck
-    // Action record under one compile-time constant's evaluation key.
     ComptimeValue
+
+    // Action record under the package check key.
+    // Package interface record (content addressed).
+    // Typed diagnostics of one package check (content addressed).
+    // Item graph of one package check (content addressed).
+    // Lowered bodies for build lenses (content addressed).
+    // Action record under the program key.
+    // Action record for one package's compiled output.
+    // Action record under one item's check key.
+    // Action record under one compile-time constant's evaluation key.
 
     schema: fn(self) -> String Never! {
         if self == {
@@ -68,8 +69,14 @@ ArtifactRecordKind: enum {
 }
 
 STORE_ARTIFACT_RECORD_KINDS: #run { [ArtifactRecordKind]{
-    ArtifactRecordKind.PkgCheck, ArtifactRecordKind.Iface, ArtifactRecordKind.Diags, ArtifactRecordKind.Items,
-    ArtifactRecordKind.Body, ArtifactRecordKind.Program, ArtifactRecordKind.PkgObject, ArtifactRecordKind.ItemCheck,
+    ArtifactRecordKind.PkgCheck,
+    ArtifactRecordKind.Iface,
+    ArtifactRecordKind.Diags,
+    ArtifactRecordKind.Items,
+    ArtifactRecordKind.Body,
+    ArtifactRecordKind.Program,
+    ArtifactRecordKind.PkgObject,
+    ArtifactRecordKind.ItemCheck,
     ArtifactRecordKind.ComptimeValue,
 } }
 
@@ -99,7 +106,9 @@ impl ArtifactStore {
         bytes: if kind.is_action() -> self.get_action(kind.action(key)) else -> {
             digest: if ArtifactDigest.from_hex(key) == {
                 .Ok(value) -> value
-                .Err(_) -> { return Ok(None) }
+                .Err(_) -> {
+                    return Ok(None)
+                }
             }
             self.blob_by_digest(digest)
         }
@@ -119,7 +128,9 @@ impl ArtifactStore {
 
     // Record one use of each action record `keys` names, in one journal write.
     touch_records: fn(self, kind: ArtifactRecordKind, keys: [String]) Never! -[FS, Env, Time, Rand]> {
-        if !kind.is_action() -> return
+        if !kind.is_action() {
+            return
+        }
         actions := [ActionHandle]{}
         loop key in keys -> actions.push(kind.action(key))
         self.touch_actions(actions)
@@ -128,10 +139,14 @@ impl ArtifactStore {
     // Publish many action records of one kind in one store transaction.
     // Bytes that do not decode as the kind's schema are skipped.
     put_records: fn(self, kind: ArtifactRecordKind, records: [ArtifactRecordPublication]) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
-        if !kind.is_action() -> return Err(ArtifactStoreError.Config("{kind.schema()} records are content addressed; publish them one by one"))
+        if !kind.is_action() {
+            return Err(ArtifactStoreError.Config("{kind.schema()} records are content addressed; publish them one by one"))
+        }
         actions := [ArtifactActionPublication]{}
         loop record in records {
-            if record_open_schema(record.bytes, kind.schema()).problem == None -> actions.push(ArtifactActionPublication{action: kind.action(record.key), bytes: record.bytes})
+            if record_open_schema(record.bytes, kind.schema()).problem == None {
+                actions.push(ArtifactActionPublication{action: kind.action(record.key), bytes: record.bytes})
+            }
         }
         self.publish_actions(actions)
     }

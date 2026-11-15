@@ -234,9 +234,7 @@ jet_cli_script_sources: fn(entered: String, snapshot: JetDriverAuthorizedSourceS
             loop entry in directory.entries {
                 if entry.is_directory {
                     if walked.contains(entry.path) -> jet_cli_script_frame(framed, "{entry.name}/")
-                } else if entry.name.ends_with(".jet") {
-                    jet_cli_script_frame(framed, entry.name)
-                }
+                } else if entry.name.ends_with(".jet") { jet_cli_script_frame(framed, entry.name) }
             }
         }
     }
@@ -297,10 +295,14 @@ jet_cli_eval_names_core: fn(lines: String) -> Bool Never! {
     tokens: lex(lines.bytes()).tokens
     reads := false
     loop (index, token) in tokens {
-        if token.kind != TOKEN_IDENT || jet_cli_repl_bytes(lines, token.span.start, token.span.end) != "core" -> next
+        if token.kind != TOKEN_IDENT || jet_cli_repl_bytes(lines, token.span.start, token.span.end) != "core" {
+            next
+        }
         before: if index > 0 -> tokens[index - 1].kind else -> TOKEN_EOF
         after: if index + 1 < tokens.len() -> tokens[index + 1].kind else -> TOKEN_EOF
-        if (before == TOKEN_KW_USE && after != TOKEN_DOT) || after == TOKEN_COLON || after == TOKEN_COLON_EQ -> return false
+        if (before == TOKEN_KW_USE && after != TOKEN_DOT) || after == TOKEN_COLON || after == TOKEN_COLON_EQ {
+            return false
+        }
         if after == TOKEN_DOT && before != TOKEN_DOT -> reads = true
     }
     reads
@@ -325,14 +327,14 @@ jet_cli_eval_final_if: fn(body: String) -> Int? Never! {
         if token.kind == TOKEN_EOF -> break
         if line < starts.len() && token.span.start >= starts[line] {
             if token.kind == TOKEN_KW_IF -> start = token.span.start
-            loop line < starts.len() && starts[line] <= token.span.start {
-                line += 1
-            }
+            loop line < starts.len() && starts[line] <= token.span.start -> line += 1
         }
     }
     if start < 0 -> return None
     tail: jet_cli_repl_bytes(body, start, bytes.len())
-    if jet_cli_eval_parses(tail, "") || !jet_cli_eval_parses(tail, " -> Int") || !jet_cli_eval_parses("({tail})", "") -> return None
+    if jet_cli_eval_parses(tail, "") || !jet_cli_eval_parses(tail, " -> Int") || !jet_cli_eval_parses("({tail})", "") {
+        return None
+    }
     Val(start)
 }
 
@@ -377,8 +379,12 @@ jet_cli_eval_line_starts: fn(bytes: [U8], tokens: [Token]) -> [Int] Never! {
                 if bytes[at] == (U8{10}) && starts[starts.len() - 1] < at + 1 -> starts.push(at + 1)
             }
         }
-        if token.kind == TOKEN_LBRACE || token.kind == TOKEN_LPAREN || token.kind == TOKEN_LBRACKET -> depth += 1
-        if (token.kind == TOKEN_RBRACE || token.kind == TOKEN_RPAREN || token.kind == TOKEN_RBRACKET) && depth > 0 -> depth -= 1
+        if token.kind == TOKEN_LBRACE || token.kind == TOKEN_LPAREN || token.kind == TOKEN_LBRACKET {
+            depth += 1
+        }
+        if (token.kind == TOKEN_RBRACE || token.kind == TOKEN_RPAREN || token.kind == TOKEN_RBRACKET) && depth > 0 {
+            depth -= 1
+        }
         previous = token.span.end
     }
     starts
@@ -421,9 +427,7 @@ jet_cli_entry_file: fn(kind: String, source: String) -> String? {
 
 // Whether `file` is the entry file `jet run -` wrote for its piped source
 // (jet_cli_entry_file's `stdin` kind). The command named that program `-`.
-jet_cli_stdin_entry: fn(file: String) -> Bool Never! {
-    jet_cli_kept_entry(file, "stdin")
-}
+jet_cli_stdin_entry: fn(file: String) -> Bool Never! { jet_cli_kept_entry(file, "stdin") }
 
 // Whether `file` is an entry file of jet_cli_entry_file's `kind`: a 64-digit
 // content hash under `jet/scripts/<kind>`.
@@ -492,7 +496,9 @@ jet_cli_script_kept_run: fn(keep: JetCLIScriptKeep, file: String, source: String
     text: cli_files.read(record) ?? return None
     rows: text.split("\n").to_list()
     program: jet_cli_script_record_program(rows) ?? return None
-    if !jet_cli_script_record_matches(rows, keep) || rows[3] != build_options_value(options, "optimize") -> return None
+    if !jet_cli_script_record_matches(rows, keep) || rows[3] != build_options_value(options, "optimize") {
+        return None
+    }
     executable: x64_executable_kept("{directory}/{program}") ?? return None
     read_scope: if rows[8] == "" -> [String]{} else -> rows[8].split("\t").to_list()
     authority := JetCLIAuthority{required: jet_cli_script_rights(rows[4]), granted: jet_cli_script_rights(rows[5]), denied: jet_cli_script_rights(rows[6]), authority: rows[7], invocation_denied: [String]{}, read_scope: read_scope}
@@ -510,7 +516,9 @@ jet_cli_script_kept_run: fn(keep: JetCLIScriptKeep, file: String, source: String
 // each Core source jet supplies as text still hashes as recorded.
 jet_cli_script_record_matches: fn(rows: [String], keep: JetCLIScriptKeep) -> Bool {
     end: JET_CLI_SCRIPT_RECORD_HEAD + JET_CLI_SCRIPT_TOOLCHAIN_ROWS
-    if rows[2] != keep.sources || rows.len() < end || rows[JET_CLI_SCRIPT_RECORD_HEAD..<end].join("\n") != keep.toolchain -> return false
+    if rows[2] != keep.sources || rows.len() < end || rows[JET_CLI_SCRIPT_RECORD_HEAD..<end].join("\n") != keep.toolchain {
+        return false
+    }
     loop row in rows[end..<rows.len()] {
         named: row.partition(" ")
         if named.tail.starts_with(JET_CLI_SCRIPT_TEXT_IDENTITY) {
@@ -533,7 +541,9 @@ jet_cli_script_used: fn(record: String, text: String) {
     status: cli_files.stat(record) ?? return
     written: status.modified.to_unix_ns() ?? return
     since: cli_time.unix_ns() - written
-    if since >= 0 && since < JET_CLI_SCRIPT_USED_GRAIN_NS -> return
+    if since >= 0 && since < JET_CLI_SCRIPT_USED_GRAIN_NS {
+        return
+    }
     _: jet_cli_script_record_put(record, text)
 }
 
@@ -658,9 +668,13 @@ jet_cli_script_keep: fn(keep: JetCLIScriptKeep, executable: X64Executable, autho
         return false
     }
     cli_files.rename(staged, "{directory}/{program}") ?? return false
-    if !jet_cli_script_record_put(record, jet_cli_script_record_encode(program, keep, level, authority, core_rows)) -> return false
+    if !jet_cli_script_record_put(record, jet_cli_script_record_encode(program, keep, level, authority, core_rows)) {
+        return false
+    }
     if previous == .Val(old) {
-        if old != program -> cli_files.remove("{directory}/{old}").drop("a stale program only takes space")
+        if old != program {
+            cli_files.remove("{directory}/{old}").drop("a stale program only takes space")
+        }
     }
     jet_cli_script_trim(directory)
     true

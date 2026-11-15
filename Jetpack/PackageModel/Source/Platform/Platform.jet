@@ -7,13 +7,17 @@
 use pkg_platform_core_sys: core.sys
 
 OS_LINUX: "linux"
+
 OS_MACOS: "macos"
+
 OS_WINDOWS: "windows"
 
 ARCH_X64: "x86_64"
+
 ARCH_ARM64: "aarch64"
 
 TIER_ONE_OSES: #run { [String]{OS_LINUX, OS_MACOS, OS_WINDOWS} }
+
 TIER_ONE_ARCHES: #run { [String]{ARCH_X64, ARCH_ARM64} }
 
 // An `arch-os` target identity. The fields stay open strings because a host
@@ -46,19 +50,13 @@ PlatformKey: struct {
         PlatformKey{arch: arch, os: os}
     }
 
-    envelope_key: fn(self) -> String Never! {
-        "{self.arch}-{self.os}"
-    }
+    envelope_key: fn(self) -> String Never! { "{self.arch}-{self.os}" }
 
-    is_tier_one: fn(self) -> Bool Never! {
-        pkg_is_tier_one(self.arch, self.os)
-    }
+    is_tier_one: fn(self) -> Bool Never! { pkg_is_tier_one(self.arch, self.os) }
 }
 
 // The host's `arch-os` envelope key (Rust `host_key`).
-pkg_host_key: fn() -[Env]> String Never! {
-    PlatformKey.host().envelope_key()
-}
+pkg_host_key: fn() -[Env]> String Never! { PlatformKey.host().envelope_key() }
 
 pkg_is_tier_one: fn(arch: String, os: String) -> Bool Never! {
     arch_ok: if arch == {

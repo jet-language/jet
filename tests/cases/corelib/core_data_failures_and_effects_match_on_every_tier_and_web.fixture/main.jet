@@ -13,7 +13,7 @@ Ticket: struct {
 // Prints what a core.data call returned: its value, or its typed failure.
 attempt: fn(label: String, body: fn() -> String DataError!) {
     if body() == {
-        .Ok(text) -> print("{label}: ok {text}")
+        .Ok(text) -> { print("{label}: ok {text}") }
         .Err(error) -> print("{label}: {error}")
     }
 }
@@ -45,14 +45,16 @@ run: fn() {
     // A file loader reads nothing until core.files.data reads it; a missing file is IO.
     missing := data.load_default<[Ticket]>("absent.csv") ?? panic("a csv locator makes a loader")
     if files_data.read(missing) == {
-        .Ok(_) -> print("missing file: ok")
+        .Ok(_) -> { print("missing file: ok") }
         .Err(error) -> print("missing file: {error.kind} {error.operation}")
     }
     files.write("tickets.csv", "team,minutes\nCore,4.0\nTools,5.5\n") ?? panic("write tickets.csv: {err}")
     present := data.load_default<[Ticket]>("tickets.csv") ?? panic("a csv locator makes a loader")
     files_data.read(present) ?? panic("read tickets.csv: {err}")
     if data.snapshot(present) == {
-        .Ok(snapshot) -> print("present file: ok {snapshot.value.len()} rows, {snapshot.value[1].team} {snapshot.value[1].minutes}")
+        .Ok(snapshot) -> {
+            print("present file: ok {snapshot.value.len()} rows, {snapshot.value[1].team} {snapshot.value[1].minutes}")
+        }
         .Err(error) -> print("present file: {error}")
     }
 }

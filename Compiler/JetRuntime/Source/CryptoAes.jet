@@ -9,9 +9,12 @@
 // then four zero blocks (64 bytes). Set up only on a host whose cpuid
 // reports the instructions; the table lives for the process.
 aes_ni_table := I64{0}
+
 // runtime-init: 4 when aes_ni_table
 #Export(c) jet_rt_aes_ni_init: fn() {
-    if (aes_ni_table != I64{0} || !aes_ni_present()) -> return
+    if (aes_ni_table != I64{0} || !aes_ni_present()) {
+        return
+    }
     table: jet_rt_alloc(I64{80}, I64{8})
     rt_text_store(table, I64{0x08090a0b0c0d0e0f})
     rt_text_store(wrapping(table + I64{8}), I64{0x0001020304050607})
@@ -20,30 +23,40 @@ aes_ni_table := I64{0}
         rt_text_store(wrapping(table + at), I64{0})
         at += I64{8}
     }
-    #Unsafe("runtime-init runs before any other thread exists") {
-        aes_ni_table = table
-    }
+    #Unsafe("runtime-init runs before any other thread exists") { aes_ni_table = table }
 }
 
 // CPUID.1:ECX bits 25 (AES-NI), 1 (PCLMULQDQ) and 9 (SSSE3, for pshufb).
 aes_ni_present: fn() -> Bool {
     #Unsafe("cpuid only reports processor identification") {
-        if (os_cpuid_ecx_i64(I64{1}, I64{0}).bit_and(I64{33554946}) == I64{33554946}) -> return true
+        if (os_cpuid_ecx_i64(I64{1}, I64{0}).bit_and(I64{33554946}) == I64{33554946}) {
+            return true
+        }
     }
     false
 }
 
 // The core.crypto.__aes_blocks operations, as Cipher.jet numbers them.
 RT_AES_ECB_ENC: I64{0}
+
 RT_AES_ECB_DEC: I64{1}
+
 RT_AES_CBC_ENC: I64{2}
+
 RT_AES_CBC_DEC: I64{3}
+
 RT_AES_CTR: I64{4}
+
 RT_AES_CTR32: I64{5}
+
 RT_AES_CFB_ENC: I64{6}
+
 RT_AES_CFB_DEC: I64{7}
+
 RT_AES_OFB: I64{8}
+
 RT_AES_XTS_ENC: I64{9}
+
 RT_AES_XTS_DEC: I64{10}
 
 // dst[0..bytes) = a ^ b, bytes a multiple of 8.
@@ -62,20 +75,12 @@ rt_aes_xor: fn(dst: I64, a: I64, b: I64, bytes: I64) {
 rt_aes_four: fn(keys: I64, rounds: I64, decrypt: Bool, src: I64, mask: I64, out: I64) {
     #Unsafe("the caller holds (rounds + 1) round keys at keys and four blocks at src, mask and out") {
         if decrypt {
-            if (rounds == I64{10}) {
-                os_aes_decrypt4_10_i64(keys, src, mask, out)
-            } else if (rounds == I64{12}) {
+            if (rounds == I64{10}) { os_aes_decrypt4_10_i64(keys, src, mask, out) } else if (rounds == I64{12}) {
                 os_aes_decrypt4_12_i64(keys, src, mask, out)
-            } else {
-                os_aes_decrypt4_14_i64(keys, src, mask, out)
-            }
-        } else if (rounds == I64{10}) {
-            os_aes_encrypt4_10_i64(keys, src, mask, out)
-        } else if (rounds == I64{12}) {
+            } else { os_aes_decrypt4_14_i64(keys, src, mask, out) }
+        } else if (rounds == I64{10}) { os_aes_encrypt4_10_i64(keys, src, mask, out) } else if (rounds == I64{12}) {
             os_aes_encrypt4_12_i64(keys, src, mask, out)
-        } else {
-            os_aes_encrypt4_14_i64(keys, src, mask, out)
-        }
+        } else { os_aes_encrypt4_14_i64(keys, src, mask, out) }
     }
 }
 
@@ -97,13 +102,9 @@ rt_aes_group: fn(keys: I64, rounds: I64, decrypt: Bool, src: I64, mask: I64, out
 // stores, so chain may be src or pre.
 rt_aes_one: fn(keys: I64, rounds: I64, src: I64, pre: I64, post: I64, out: I64, chain: I64) {
     #Unsafe("the caller holds (rounds + 1) round keys at keys and one block at src, pre, post, out and chain") {
-        if (rounds == I64{10}) {
-            os_aes_encrypt1_10_i64(keys, src, pre, post, out, chain)
-        } else if (rounds == I64{12}) {
+        if (rounds == I64{10}) { os_aes_encrypt1_10_i64(keys, src, pre, post, out, chain) } else if (rounds == I64{12}) {
             os_aes_encrypt1_12_i64(keys, src, pre, post, out, chain)
-        } else {
-            os_aes_encrypt1_14_i64(keys, src, pre, post, out, chain)
-        }
+        } else { os_aes_encrypt1_14_i64(keys, src, pre, post, out, chain) }
     }
 }
 
@@ -114,7 +115,9 @@ rt_aes_increment: fn(ctr: I64, width: I64) {
     loop i >= (I64{16} - width) {
         byte: (rt_text_byte(wrapping(ctr + i)) + I64{1}).bit_and(I64{255})
         rt_text_put(wrapping(ctr + i), byte)
-        if (byte != I64{0}) -> return
+        if (byte != I64{0}) {
+            return
+        }
         i -= I64{1}
     }
 }
@@ -137,15 +140,19 @@ rt_aes_xts_double: fn(t: I64) {
 // or for arguments outside those bounds.
 #Export(c) jet_crypto_aes_blocks: fn(keys: I64, keys_len: I64, rounds: I64, op: I64, iv_header: I64, src: I64, length: I64, offset: I64, count: I64, out_header: I64) -> Bool {
     table: aes_ni_table
-    if (table == I64{0} || RT_HOST_U8_STRIDE != I64{1}) -> return false
+    if (table == I64{0} || RT_HOST_U8_STRIDE != I64{1}) { return false }
     r: jet_int_owned_to_i64(rounds)
     kind: jet_int_owned_to_i64(op)
     start: jet_int_owned_to_i64(offset)
     blocks: jet_int_owned_to_i64(count)
-    if ((r != I64{10} && r != I64{12} && r != I64{14}) || keys_len != (r + I64{1}) * I64{16} || kind < RT_AES_ECB_ENC || kind > RT_AES_XTS_DEC) -> return false
-    if (rt_text_word(iv_header) != I64{16} || start < I64{0} || blocks < I64{0} || start > length || blocks > (length - start) / I64{16}) -> return false
+    if ((r != I64{10} && r != I64{12} && r != I64{14}) || keys_len != (r + I64{1}) * I64{16} || kind < RT_AES_ECB_ENC || kind > RT_AES_XTS_DEC) {
+        return false
+    }
+    if (rt_text_word(iv_header) != I64{16} || start < I64{0} || blocks < I64{0} || start > length || blocks > (length - start) / I64{16}) {
+        return false
+    }
     used: rt_text_word(out_header)
-    if (blocks > (rt_text_word(wrapping(out_header + I64{8})) - used) / I64{16}) -> return false
+    if (blocks > (rt_text_word(wrapping(out_header + I64{8})) - used) / I64{16}) { return false }
     iv: rt_text_word(wrapping(iv_header + I64{16}))
     data: wrapping(src + start)
     out: wrapping(rt_text_word(wrapping(out_header + I64{16})) + used)
@@ -169,9 +176,7 @@ rt_aes_xts_double: fn(t: I64) {
             rt_text_bytes_copy(masks, iv, I64{16})
             rt_text_bytes_copy(wrapping(masks + I64{16}), at, bytes - I64{16})
             rt_text_bytes_copy(iv, wrapping(at + (bytes - I64{16})), I64{16})
-            if (kind == RT_AES_CBC_DEC) {
-                rt_aes_group(keys, r, true, at, masks, to, n, scratch)
-            } else {
+            if (kind == RT_AES_CBC_DEC) { rt_aes_group(keys, r, true, at, masks, to, n, scratch) } else {
                 rt_aes_group(keys, r, false, masks, at, to, n, scratch)
             }
         } else if (kind == RT_AES_CTR || kind == RT_AES_CTR32) {
@@ -200,9 +205,7 @@ rt_aes_xts_double: fn(t: I64) {
             loop b < n {
                 block: wrapping(at + b * I64{16})
                 into: wrapping(to + b * I64{16})
-                if (kind == RT_AES_CBC_ENC) {
-                    rt_aes_one(keys, r, block, iv, zero, into, iv)
-                } else if (kind == RT_AES_OFB) {
+                if (kind == RT_AES_CBC_ENC) { rt_aes_one(keys, r, block, iv, zero, into, iv) } else if (kind == RT_AES_OFB) {
                     rt_aes_one(keys, r, iv, zero, block, into, iv)
                 } else {
                     rt_aes_one(keys, r, iv, zero, block, into, masks)
@@ -232,17 +235,19 @@ rt_aes_xts_double: fn(t: I64) {
 // those bounds.
 #Export(c) jet_crypto_ghash_blocks: fn(h: I64, h_len: I64, y_header: I64, data: I64, length: I64, offset: I64, count: I64) -> Bool {
     table: aes_ni_table
-    if (table == I64{0} || RT_HOST_U8_STRIDE != I64{1}) -> return false
+    if (table == I64{0} || RT_HOST_U8_STRIDE != I64{1}) { return false }
     start: jet_int_owned_to_i64(offset)
     blocks: jet_int_owned_to_i64(count)
-    if (h_len != I64{16} || rt_text_word(y_header) != I64{16} || start < I64{0} || blocks < I64{0} || start > length || blocks > (length - start) / I64{16}) -> return false
+    if (h_len != I64{16} || rt_text_word(y_header) != I64{16} || start < I64{0} || blocks < I64{0} || start > length || blocks > (length - start) / I64{16}) {
+        return false
+    }
     y: rt_text_word(wrapping(y_header + I64{16}))
     zero: wrapping(table + I64{16})
     at := wrapping(data + start)
     left := blocks
     // H, H^2, H^3, H^4 for the four-block steps: each power is (H^k ^ 0) * H.
     powers: if (left >= I64{4}) -> jet_rt_alloc(I64{64}, I64{8}) else -> I64{0}
-    if (powers != I64{0}) -> rt_text_bytes_copy(powers, h, I64{16})
+    if (powers != I64{0}) { rt_text_bytes_copy(powers, h, I64{16}) }
     #Unsafe("y and h hold one block, the range check keeps every block inside the length borrowed bytes, and the powers table holds four") {
         if (powers != I64{0}) {
             k := I64{1}

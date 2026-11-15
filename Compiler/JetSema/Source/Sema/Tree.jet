@@ -118,7 +118,6 @@ TNamedEnumArg: struct {
 
 TPatternShape: enum {
     Variant(variant: String, bindings: [TPatternBinding], leading_dot: Bool, span: Span)
-    // S31: `inner` is a nested payload pattern (`.Val(.Rect(w, h))`).
     Present(binding: String, binding_span: Span, inner: TNestedPattern?, span: Span)
     Absent(span: Span)
     Ok(binding: String, binding_span: Span, inner: TNestedPattern?, span: Span)
@@ -131,6 +130,8 @@ TPatternShape: enum {
     Text(parts: [TTextPatternPart], span: Span)
     Binary(parts: [TBinaryPatternPart], span: Span)
 }
+
+// S31: `inner` is a nested payload pattern (`.Val(.Rect(w, h))`).
 
 // S31: a checked nested payload pattern with the payload type's owner.
 TNestedPattern: struct {
@@ -181,9 +182,7 @@ tree_pattern_key_identity: fn(key: TExpr, context: SemaCheckContext) -> String? 
             .IntLit(_, _) | .FloatLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> None
         }
         .EnumLit(owner, variant, _) -> Val("enum:{owner}:{variant}")
-        .Unary(op, value) -> {
-            if op == TUnaryOp.Neg && value.kind == .IntLit(number, _) -> Val("int:{-number}") else -> None
-        }
+        .Unary(op, value) -> if op == TUnaryOp.Neg && value.kind == .IntLit(number, _) -> Val("int:{-number}") else -> None
         .CtLit(value) -> if value == {
             .Int(number) -> Val("int:{number}")
             .BigInt(number) -> Val("int:{number}")
@@ -253,8 +252,6 @@ TStmt: enum {
     ForIn(label: String?, variable: TLocal, variable_two: TLocal?, source: TExpr, collection: TExpr, step: TExpr?, method_kind: TForInMethod?, columnar: Bool, by_value: Bool, source_stable: Bool, body: [TStmt], span: Span)
     Inline(body: [TStmt], span: Span)
     DebugOnly(body: [TStmt], span: Span)
-    // An `#On(.Deep)` body: emitted only in a function the compile's
-    // `--deep-checks` request selects.
     DeepCheck(body: [TStmt], span: Span)
     MixedSwitch(subject: TExpr, class: TBranchClass, arms: [TMixedArm], else_body: [TStmt]?, span: Span)
     Unsafe(gate: TUnsafeGate, body: [TStmt])
@@ -272,6 +269,9 @@ TStmt: enum {
     Transact(handle: TLocal?, snapshots: [TTransactionSnapshot], stm: TLocal?, body: [TStmt], span: Span)
     GCEdit(root: String, slot: String, edges: [String], replace_all: Bool, index_temp: TExpr?, statement: TStmt, span: Span)
 }
+
+// An `#On(.Deep)` body: emitted only in a function the compile's
+// `--deep-checks` request selects.
 
 TRangeArm: struct {
     lo: Int
@@ -292,7 +292,10 @@ TContextGuard: struct {
     key: String{""}
 }
 
-TUnitRounding: struct { mode: TUnitRoundingMode, digits: TExpr }
+TUnitRounding: struct {
+    mode: TUnitRoundingMode
+    digits: TExpr
+}
 
 TExprKind: enum {
     IntLit(value: Int, width: TIntegerWidth?)
@@ -344,7 +347,6 @@ TExprKind: enum {
     ListSpread(parts: [TListSpreadPart])
     MapLit(entries: [TMapEntry])
     PoolSlot(pool: TExpr, id: TExpr, mutable: Bool, field: String?, line: Int, source_line: String)
-    // #4318: `fact` is the sema decision behind the copy; IR keeps it on Copy.
     Clone(value: TExpr, fact: CopyFact)
     ExplicitCopy(value: TExpr)
     MaterializeView(value: TExpr)
@@ -372,10 +374,12 @@ TExprKind: enum {
     SelectRecv(builder: TExpr, channel: TExpr)
     SelectAfter(builder: TExpr, duration: TExpr, value: TExpr?)
     FnValue(kind: TFnValueKind)
-    // A node the checker built as row `index` of its arena (sema_node): the
-    // row's NodeKind holds the node, with arena row indices as children.
     Flat(index: Int)
 }
+
+// #4318: `fact` is the sema decision behind the copy; IR keeps it on Copy.
+// A node the checker built as row `index` of its arena (sema_node): the
+// row's NodeKind holds the node, with arena row indices as children.
 
 // `id` keys the node's row in its function's flat body (BodyFlatten.jet): the
 // AST NodeId of the expression sema checked it from, or a negative
@@ -439,33 +443,34 @@ THostCall: enum {
     SwitchSubjectValue
     YieldSend(value: TExpr)
     NumericBounds(ty: Type, member: String)
-    // A Tier-1 comptime input (`embed_file`, `embed_bytes`, `find`): its
-    // String path or glob, relative to the source file being compiled, or
-    // after JET_COMPTIME_TOOLCHAIN_PREFIX relative to the toolchain tree. A
-    // literal is the checked, normalized literal; a computed value is checked
-    // against the same path law when the comptime evaluation reaches it
-    // (sema_comptime_input_value_problem). The compiler reads and records the
-    // input; it never runs at runtime. `net.fetch(url, sha256: "…")` in
-    // comptime code is the `fetch` input, the pinned download of its String
-    // URL (`path`), whose content must hash to the written SHA-256 (`pin`,
-    // E3413). Every other input has no pin.
     ComptimeInput(builtin: String, path: TExpr, pin: String?)
-    // `name.cache()` on a memoized function: its result store's `MemoStats`
-    // record, with the written bound ("128", "none").
     MemoStats(function: DeclID, bound: String)
-    // A `context.<field>` read of the current task context
-    // (Expressions/Places.jet sema_expression_context_read).
     ContextRead(field: String)
-    // `context.get(key)` of the `#ContextKey` constant whose SymbolID key
-    // text is `key`; `default` reads the constant itself, and `equatable`
-    // says the value's type has equality (ContextKeys.jet).
     ContextGet(key: String, default: TExpr, equatable: Bool)
-    // `debug(value)`'s trace line, `write` the `core.term.eprint` call of it
-    // (Calls/Direct.jet sema_call_check_special_debug). Running code makes
-    // the call; compile-time code hands its one argument, the line, to the
-    // compiler, which prints it while compiling.
     DebugTrace(write: TExpr)
 }
+
+// A Tier-1 comptime input (`embed_file`, `embed_bytes`, `find`): its
+// String path or glob, relative to the source file being compiled, or
+// after JET_COMPTIME_TOOLCHAIN_PREFIX relative to the toolchain tree. A
+// literal is the checked, normalized literal; a computed value is checked
+// against the same path law when the comptime evaluation reaches it
+// (sema_comptime_input_value_problem). The compiler reads and records the
+// input; it never runs at runtime. `net.fetch(url, sha256: "…")` in
+// comptime code is the `fetch` input, the pinned download of its String
+// URL (`path`), whose content must hash to the written SHA-256 (`pin`,
+// E3413). Every other input has no pin.
+// `name.cache()` on a memoized function: its result store's `MemoStats`
+// record, with the written bound ("128", "none").
+// A `context.<field>` read of the current task context
+// (Expressions/Places.jet sema_expression_context_read).
+// `context.get(key)` of the `#ContextKey` constant whose SymbolID key
+// text is `key`; `default` reads the constant itself, and `equatable`
+// says the value's type has equality (ContextKeys.jet).
+// `debug(value)`'s trace line, `write` the `core.term.eprint` call of it
+// (Calls/Direct.jet sema_call_check_special_debug). Running code makes
+// the call; compile-time code hands its one argument, the line, to the
+// compiler, which prints it while compiling.
 
 TCoreClosureKind: enum {
     Spawn(group: TExpr?, site: Int, label: String?, executable: TLambda)
@@ -473,13 +478,14 @@ TCoreClosureKind: enum {
     Guard(executable: TLambda)
     OnCommit(handle_name: String, executable: TLambda)
     OnRollback(handle_name: String, executable: TLambda)
-    // A button's click handler, registered as the click slot Int it yields.
     UIClickSlot(executable: TLambda)
     UITextInputOnDrop(state: TExpr, ime: TExpr, executable: TLambda)
     ReactiveDerived(executable: TLambda)
     ReactiveEffect(executable: TLambda)
     UIReactiveRender(executable: TLambda)
 }
+
+// A button's click handler, registered as the click slot Int it yields.
 
 TFnValueKind: enum {
     NamedFn(function: DeclID?, lambda: TLambda?)
@@ -492,15 +498,12 @@ THandleOp: enum {
     Hardware(operation: THardwareCall)
     DurationNew(unit: String, float: Bool)
     FileReaderReadLine
-    // `into`: read_into, appending to the caller's [U8] (#5976).
     FileReaderRead(into: Bool)
     FileReaderSeek
     FileReaderPath
     MappedFileWindow
     MappedFileWindowLen
     MappedFileLines
-    // The ambient `input`: the receiver (core.term __InputLines) as a lazy
-    // `Iter<String>` of its `read_line` lines.
     LinesIter
     MappedFileLen
     MappedFileIsEmpty
@@ -575,8 +578,6 @@ THandleOp: enum {
     DurationTotalSeconds
     DurationDifference
     TestSuiteRun
-    // `t.<setting>(…)` (Registry/TestSettings.jet): args are the plan-file
-    // environment key and the `name<TAB>value<NL>` line.
     TestSetting
     DurationAbs
     DurationNegated
@@ -597,7 +598,6 @@ THandleOp: enum {
     TCPStreamPeerAddr
     TCPStreamLocalAddr
     TCPStreamClose
-    // `into`: read_into, appending to the caller's [U8] (#5976).
     TCPStreamReadBytes(into: Bool)
     TCPStreamReadBytesDeadline(into: Bool)
     TCPStreamReadText
@@ -692,9 +692,6 @@ THandleOp: enum {
     DynFloat
     DynToText
     DynEqualUnordered
-    // `stored`: the storage codec of `tree.decode_stored<T>()` /
-    // `value.encode_stored()`, which keeps the `#Secret` fields the wire codec
-    // skips.
     DynDecode(ty: Type, stored: Bool)
     DynIndexKey(site: String, location: TPanicLoc)
     DynIndexAt(site: String, location: TPanicLoc)
@@ -760,13 +757,24 @@ THandleOp: enum {
     ProcessLines
 }
 
+// `into`: read_into, appending to the caller's [U8] (#5976).
+// The ambient `input`: the receiver (core.term __InputLines) as a lazy
+// `Iter<String>` of its `read_line` lines.
+// `t.<setting>(…)` (Registry/TestSettings.jet): args are the plan-file
+// environment key and the `name<TAB>value<NL>` line.
+// `into`: read_into, appending to the caller's [U8] (#5976).
+// `stored`: the storage codec of `tree.decode_stored<T>()` /
+// `value.encode_stored()`, which keeps the `#Secret` fields the wire codec
+// skips.
+
 TRequireKind: enum {
     Require(cond: TExpr, msg: TExpr?)
-    // `hook`: the authored `equal`/`compare` implementation `==` dispatches
-    // to for the operands' type; None compares them structurally.
     RequireEq(left: TExpr, right: TExpr, hook: TMethodRef?)
     Panic(msg: TExpr)
 }
+
+// `hook`: the authored `equal`/`compare` implementation `==` dispatches
+// to for the operands' type; None compares them structurally.
 
 TLambda: struct {
     executable: TLambdaBody
@@ -875,27 +883,25 @@ tree_each_pattern_child: fn(pattern: TPattern, visit: fn(TExpr) -[Mem.Alloc, Mem
 tree_each_pattern_shape_child: fn(shape: TPatternShape, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if shape == {
         .Variant(_, slots, _, _) | .List(slots, _, _) -> {
-            loop slot in slots {
-                tree_each_pattern_slot_child(slot, visit)
-            }
+            loop slot in slots { tree_each_pattern_slot_child(slot, visit) }
         }
         .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
             if inner == .Val(nested) -> tree_each_pattern_shape_child(nested.shape, visit)
         }
-        .Map(entries, _, _) -> loop entry in entries {
-            visit(entry.key)
-            tree_each_pattern_slot_child(entry.slot, visit)
+        .Map(entries, _, _) -> {
+            loop entry in entries {
+                visit(entry.key)
+                tree_each_pattern_slot_child(entry.slot, visit)
+            }
         }
         .Or(alternatives, _) -> {
-            loop alternative in alternatives {
-                tree_each_pattern_shape_child(alternative, visit)
-            }
+            loop alternative in alternatives { tree_each_pattern_shape_child(alternative, visit) }
         }
         .Struct(fields, _) -> {
             loop field in fields {
                 if field == {
-                    .Value(_, value, _) -> visit(value)
-                    .Nested(_, inner, _) -> tree_each_pattern_shape_child(inner.shape, visit)
+                    .Value(_, value, _) -> { visit(value) }
+                    .Nested(_, inner, _) -> { tree_each_pattern_shape_child(inner.shape, visit) }
                     .Bind(_, _, _) -> {}
                 }
             }
@@ -906,7 +912,7 @@ tree_each_pattern_shape_child: fn(shape: TPatternShape, visit: fn(TExpr) -[Mem.A
 
 tree_each_pattern_slot_child: fn(slot: TPatternBinding, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if slot == {
-        .Value(value) -> visit(value)
+        .Value(value) -> { visit(value) }
         .Nested(inner) -> tree_each_pattern_shape_child(inner.shape, visit)
         .Wildcard | .Bind(_, _) | .Range(_, _) -> {}
     }
@@ -914,7 +920,7 @@ tree_each_pattern_slot_child: fn(slot: TPatternBinding, visit: fn(TExpr) -[Mem.A
 
 tree_each_if_cond_child: fn(condition: TIfCond, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if condition == {
-        .Plain(value) -> visit(value)
+        .Plain(value) -> { visit(value) }
         .And(left, right) -> {
             tree_each_if_cond_child(left, visit)
             tree_each_if_cond_child(right, visit)
@@ -928,19 +934,15 @@ tree_each_if_cond_child: fn(condition: TIfCond, visit: fn(TExpr) -[Mem.Alloc, Me
 
 tree_each_lambda_child: fn(lambda: TLambda, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if lambda.executable == {
-        .Expr(value) -> visit(value)
+        .Expr(value) -> { visit(value) }
         .Block(body) -> {
-            loop statement in body {
-                tree_each_stmt_child(statement, visit)
-            }
+            loop statement in body { tree_each_stmt_child(statement, visit) }
         }
     }
 }
 
 tree_each_stmt_list_child: fn(statements: [TStmt], visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
-    loop statement in statements {
-        tree_each_stmt_child(statement, visit)
-    }
+    loop statement in statements { tree_each_stmt_child(statement, visit) }
 }
 
 tree_each_match_arm_child: fn(arms: [TMatchArm], visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
@@ -961,9 +963,7 @@ tree_each_else_child: fn(else_body: [TStmt]?, visit: fn(TExpr) -[Mem.Alloc, Mem.
                 tree_each_if_cond_child(condition, visit)
                 tree_each_stmt_list_child(then_body, visit)
                 tree_each_else_child(nested_else, visit)
-            } else {
-                tree_each_stmt_child(statement, visit)
-            }
+            } else { tree_each_stmt_child(statement, visit) }
         }
     }
 }
@@ -986,16 +986,18 @@ tree_each_stmt_child: fn(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc,
             }
             _ := result
         }
-        .Let(_, _, init, _, _, _) -> visit(init)
+        .Let(_, _, init, _, _, _) -> { visit(init) }
         .RefutableBind(pattern, init, fallback, _) -> {
             tree_each_pattern_child(pattern, visit)
             visit(init)
             tree_each_stmt_list_child(fallback, visit)
         }
-        .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) | .ListDestructure(_, init, _, _, _, _) -> visit(init)
+        .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) | .ListDestructure(_, init, _, _, _, _) -> {
+            visit(init)
+        }
         .Assign(place, _, value, _, _) -> {
             if place == {
-                .Expr(place_value) -> visit(place_value)
+                .Expr(place_value) -> { visit(place_value) }
                 .Local(_) -> {}
             }
             visit(value)
@@ -1003,19 +1005,19 @@ tree_each_stmt_child: fn(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc,
         .Return(value, _) -> {
             if value == Val(nested) -> visit(nested)
         }
-        .ExprStmt(value, _) -> visit(value)
+        .ExprStmt(value, _) -> { visit(value) }
         .TaskGroup(_, args, body, _) -> {
             if args.limit == Val(nested) -> visit(nested)
             if args.stack == Val(nested) -> visit(nested)
             tree_each_stmt_list_child(body, visit)
         }
-        .DeferClose(close, _, _) -> visit(close)
+        .DeferClose(close, _, _) -> { visit(close) }
         .If(condition, then_body, else_body, _, _) -> {
             tree_each_if_cond_child(condition, visit)
             tree_each_stmt_list_child(then_body, visit)
             tree_each_else_child(else_body, visit)
         }
-        .Loop(_, body, _) -> tree_each_stmt_list_child(body, visit)
+        .Loop(_, body, _) -> { tree_each_stmt_list_child(body, visit) }
         .While(_, condition, body, _) -> {
             visit(condition)
             tree_each_stmt_list_child(body, visit)
@@ -1023,9 +1025,7 @@ tree_each_stmt_child: fn(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc,
         .CountedLoop(_, init, condition, step, _, body, _) -> {
             tree_each_stmt_child(init, visit)
             visit(condition)
-            if step == Val(nested) {
-                tree_each_stmt_child(nested, visit)
-            }
+            if step == Val(nested) -> tree_each_stmt_child(nested, visit)
             tree_each_stmt_list_child(body, visit)
         }
         .ForRange(_, _, start, end, step, _, body, _, _) -> {
@@ -1041,7 +1041,7 @@ tree_each_stmt_child: fn(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc,
             if step == Val(nested_step) -> visit(nested_step)
             tree_each_stmt_list_child(body, visit)
         }
-        .BreakValue(_, value, _) -> visit(value)
+        .BreakValue(_, value, _) -> { visit(value) }
         .Match(subject, arms, _, _) -> {
             visit(subject)
             tree_each_match_arm_child(arms, visit)
@@ -1049,15 +1049,11 @@ tree_each_stmt_child: fn(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc,
         .EnumMatch(scrutinee, arms, else_body, _, _) -> {
             visit(scrutinee)
             tree_each_match_arm_child(arms, visit)
-            if else_body == Val(nested) {
-                tree_each_stmt_list_child(nested, visit)
-            }
+            if else_body == Val(nested) -> tree_each_stmt_list_child(nested, visit)
         }
         .RangeSwitch(subject, arms, else_body, _) -> {
             visit(subject)
-            loop arm in arms {
-                tree_each_stmt_list_child(arm.body, visit)
-            }
+            loop arm in arms { tree_each_stmt_list_child(arm.body, visit) }
             tree_each_stmt_list_child(else_body, visit)
         }
         .ForIn(_, _, _, source, collection, step, _, _, _, _, body, _) -> {
@@ -1066,21 +1062,23 @@ tree_each_stmt_child: fn(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc,
             if step == Val(nested) -> visit(nested)
             tree_each_stmt_list_child(body, visit)
         }
-        .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) -> tree_each_stmt_list_child(body, visit)
+        .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) -> {
+            tree_each_stmt_list_child(body, visit)
+        }
         .MixedSwitch(subject, _, arms, else_body, _) -> {
             visit(subject)
             loop arm in arms {
                 visit(arm.condition)
                 tree_each_stmt_list_child(arm.body, visit)
             }
-            if else_body == Val(nested) {
-                tree_each_stmt_list_child(nested, visit)
-            }
+            if else_body == Val(nested) -> tree_each_stmt_list_child(nested, visit)
         }
         .Unsafe(_, body) -> tree_each_stmt_list_child(body, visit)
-        .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) -> tree_each_stmt_list_child(body, visit)
-        .Reactive(executable, _) -> tree_each_lambda_child(executable, visit)
-        .Layout(_, _, body, _) -> tree_each_stmt_list_child(body, visit)
+        .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) -> {
+            tree_each_stmt_list_child(body, visit)
+        }
+        .Reactive(executable, _) -> { tree_each_lambda_child(executable, visit) }
+        .Layout(_, _, body, _) -> { tree_each_stmt_list_child(body, visit) }
         .ContextBlock(guards, body, _) -> {
             loop guard in guards -> visit(guard.value)
             tree_each_stmt_list_child(body, visit)
@@ -1092,7 +1090,7 @@ tree_each_stmt_child: fn(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc,
             }
             tree_each_stmt_list_child(body, visit)
         }
-        .Transact(_, _, _, body, _) -> tree_each_stmt_list_child(body, visit)
+        .Transact(_, _, _, body, _) -> { tree_each_stmt_list_child(body, visit) }
         .GCEdit(_, _, _, _, index_temp, edited, _) -> {
             if index_temp == Val(nested) -> visit(nested)
             tree_each_stmt_child(edited, visit)
@@ -1103,7 +1101,7 @@ tree_each_stmt_child: fn(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc,
 
 tree_each_place_child: fn(place: TPlace, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if place == {
-        .Expr(value) -> visit(value)
+        .Expr(value) -> { visit(value) }
         .Local(_) -> {}
     }
 }
@@ -1124,7 +1122,7 @@ tree_each_require_child: fn(requirement: TRequireKind, visit: fn(TExpr) -[Mem.Al
 
 tree_each_or_fallback_child: fn(fallback: TOrFallback, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if fallback == {
-        .Value(value) -> visit(value)
+        .Value(value) -> { visit(value) }
         .Return(value) -> {
             if value == Val(nested) -> visit(nested)
         }
@@ -1147,12 +1145,12 @@ tree_each_host_call_child: fn(call: THostCall, visit: fn(TExpr) -[Mem.Alloc, Mem
             visit(receiver)
             loop value in args -> visit(value)
         }
-        .CellGuardProject(receiver, _, _, _, _) -> visit(receiver)
-        .OptionProbe(inner, _) -> visit(inner)
-        .TupleIndex(base, _) -> visit(base)
-        .YieldSend(value) -> visit(value)
-        .ComptimeInput(_, path, _) -> visit(path)
-        .DebugTrace(write) -> visit(write)
+        .CellGuardProject(receiver, _, _, _, _) -> { visit(receiver) }
+        .OptionProbe(inner, _) -> { visit(inner) }
+        .TupleIndex(base, _) -> { visit(base) }
+        .YieldSend(value) -> { visit(value) }
+        .ComptimeInput(_, path, _) -> { visit(path) }
+        .DebugTrace(write) -> { visit(write) }
         .ContextGet(_, default, _) -> visit(default)
         .SwitchSubjectValue | .NumericBounds(_, _) | .MemoStats(_, _) | .ContextRead(_) -> {}
     }
@@ -1175,22 +1173,29 @@ tree_each_core_closure_child: fn(kind: TCoreClosureKind, visit: fn(TExpr) -[Mem.
             tree_each_lambda_child(executable, visit)
         }
         .Guard(executable) -> tree_each_lambda_child(executable, visit)
-        .ReactiveDerived(executable) | .ReactiveEffect(executable) | .UIReactiveRender(executable) | .UIClickSlot(executable) -> tree_each_lambda_child(executable, visit)
-        .OnCommit(_, executable) | .OnRollback(_, executable) -> tree_each_lambda_child(executable, visit)
+        .ReactiveDerived(executable) | .ReactiveEffect(executable) | .UIReactiveRender(executable) | .UIClickSlot(executable) -> {
+            tree_each_lambda_child(executable, visit)
+        }
+        .OnCommit(_, executable) | .OnRollback(_, executable) -> {
+            tree_each_lambda_child(executable, visit)
+        }
     }
-
 }
 
 tree_each_expr_child: fn(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if expression.kind == {
-        .StrLit(parts) -> loop part in parts {
-            if part == {
-                .Interpolation(value, _) -> visit(value)
-                .Literal(_) -> {}
+        .StrLit(parts) -> {
+            loop part in parts {
+                if part == {
+                    .Interpolation(value, _) -> { visit(value) }
+                    .Literal(_) -> {}
+                }
             }
         }
-        .InlineBlock(body) -> tree_each_stmt_list_child(body, visit)
-        .Call(_, _, args) -> loop argument in args -> visit(argument.value)
+        .InlineBlock(body) -> { tree_each_stmt_list_child(body, visit) }
+        .Call(_, _, args) -> {
+            loop argument in args -> visit(argument.value)
+        }
         .IndirectCall(callee, _, args, _) -> {
             visit(callee)
             loop argument in args -> visit(argument.value)
@@ -1199,22 +1204,28 @@ tree_each_expr_child: fn(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc
             visit(receiver)
             loop argument in args -> visit(argument.value)
         }
-        .DistinctCtor(argument) | .TraitBox(argument, _) -> visit(argument)
+        .DistinctCtor(argument) | .TraitBox(argument, _) -> { visit(argument) }
         .UnitConvert(argument, _, _, rounding, _, _, _, _) -> {
             visit(argument)
             if rounding == Val(rounding_value) -> visit(rounding_value.digits)
         }
-        .MathBuiltin(_, _, args) | .PreciseBuiltin(_, _, args) -> loop value in args -> visit(value)
-        .Print(value) | .Drop(value) | .Close(value) | .Move(value) -> visit(value)
-        .RequireStop(kind, _, _) -> tree_each_require_child(kind, visit)
+        .MathBuiltin(_, _, args) | .PreciseBuiltin(_, _, args) -> {
+            loop value in args -> visit(value)
+        }
+        .Print(value) | .Drop(value) | .Close(value) | .Move(value) -> { visit(value) }
+        .RequireStop(kind, _, _) -> { tree_each_require_child(kind, visit) }
         .Binary(_, _, _, lhs, rhs) -> {
             visit(lhs)
             visit(rhs)
         }
-        .CompareChain(operands, _, _) -> loop value in operands -> visit(value)
-        .Unary(_, operand) -> visit(operand)
-        .StructLit(fields) -> loop field in fields -> visit(field.value)
-        .Field(receiver, _) -> visit(receiver)
+        .CompareChain(operands, _, _) -> {
+            loop value in operands -> visit(value)
+        }
+        .Unary(_, operand) -> { visit(operand) }
+        .StructLit(fields) -> {
+            loop field in fields -> visit(field.value)
+        }
+        .Field(receiver, _) -> { visit(receiver) }
         .Index(base, index, _, _, _, _) -> {
             visit(base)
             visit(index)
@@ -1229,52 +1240,70 @@ tree_each_expr_child: fn(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc
             visit(start)
             visit(end)
         }
-        .Tuple(values) | .List(values, _) -> loop value in values -> visit(value)
-        .Map(entries) | .MapLit(entries) -> loop entry in entries {
-            visit(entry.key)
-            visit(entry.value)
+        .Tuple(values) | .List(values, _) -> {
+            loop value in values -> visit(value)
+        }
+        .Map(entries) | .MapLit(entries) -> {
+            loop entry in entries {
+                visit(entry.key)
+                visit(entry.value)
+            }
         }
         .EnumLit(_, _, payload) -> {
             if payload == {
-                .Positional(args) -> loop argument in args -> visit(argument.value)
-                .Named(fields) -> loop field in fields -> visit(field.value.value)
+                .Positional(args) -> {
+                    loop argument in args -> visit(argument.value)
+                }
+                .Named(fields) -> {
+                    loop field in fields -> visit(field.value.value)
+                }
                 .Unit -> {}
             }
         }
-        .Present(value) | .Ok(value) | .Err(value) | .DistinctRaw(value) -> visit(value)
-        .Try(value, _, _) -> visit(value)
+        .Present(value) | .Ok(value) | .Err(value) | .DistinctRaw(value) -> { visit(value) }
+        .Try(value, _, _) -> { visit(value) }
         .TryWithContext(inner, note, _, _, _, _) -> {
             visit(inner)
             if note == Val(note_value) -> visit(note_value)
         }
-        .Lambda(value) -> tree_each_lambda_child(value, visit)
-        .Borrow(place, _) -> visit(place)
+        .Lambda(value) -> { tree_each_lambda_child(value, visit) }
+        .Borrow(place, _) -> { visit(place) }
         .RawAddressOf(place) -> tree_each_place_child(place, visit)
-        .RawOf(value) | .Deref(value) | .PtrFromAddr(value, _) | .LayoutLiteral(value) -> visit(value)
+        .RawOf(value) | .Deref(value) | .PtrFromAddr(value, _) | .LayoutLiteral(value) -> {
+            visit(value)
+        }
         .LayoutCompare(_, lhs, rhs) -> {
             visit(lhs)
             visit(rhs)
         }
-        .SharedGuardValue(guard) -> visit(guard)
+        .SharedGuardValue(guard) -> { visit(guard) }
         .SharedGuardWait(guard, condition, predicate) -> {
             visit(guard)
             visit(condition)
             tree_each_lambda_child(predicate, visit)
         }
-        .CoreCall(_, args, _, _, _, _) -> loop value in args -> visit(value)
-        .HostCall(call) -> tree_each_host_call_child(call, visit)
+        .CoreCall(_, args, _, _, _, _) -> {
+            loop value in args -> visit(value)
+        }
+        .HostCall(call) -> { tree_each_host_call_child(call, visit) }
         .JSONLit(_, argument, _) -> {
             if argument == Val(argument_value) -> visit(argument_value)
         }
-        .AllocNew(_, args) -> loop argument in args -> visit(argument.value)
-        .ListLit(values) -> loop value in values -> visit(value)
-        .ListSpread(parts) -> tree_each_list_spread_child(parts, visit)
+        .AllocNew(_, args) -> {
+            loop argument in args -> visit(argument.value)
+        }
+        .ListLit(values) -> {
+            loop value in values -> visit(value)
+        }
+        .ListSpread(parts) -> { tree_each_list_spread_child(parts, visit) }
         .PoolSlot(pool, id, _, _, _, _) -> {
             visit(pool)
             visit(id)
         }
-        .Clone(value, _) | .ExplicitCopy(value) | .MaterializeView(value) -> visit(value)
-        .StaticCall(_, _, _, _, args) -> loop argument in args -> visit(argument.value)
+        .Clone(value, _) | .ExplicitCopy(value) | .MaterializeView(value) -> { visit(value) }
+        .StaticCall(_, _, _, _, args) -> {
+            loop argument in args -> visit(argument.value)
+        }
         .BuiltinMethod(receiver, _, args) -> {
             visit(receiver)
             loop value in args -> visit(value)
@@ -1290,7 +1319,7 @@ tree_each_expr_child: fn(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc
             visit(value)
             tree_each_or_fallback_child(fallback, visit)
         }
-        .OptField(base, _, _) -> visit(base)
+        .OptField(base, _, _) -> { visit(base) }
         .OptMethodCall(base, _, call, _) -> {
             visit(base)
             visit(call)
@@ -1303,7 +1332,7 @@ tree_each_expr_child: fn(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc
             visit(receiver)
             loop value in args -> visit(value)
         }
-        .NumericMethod(receiver, _) -> visit(receiver)
+        .NumericMethod(receiver, _) -> { visit(receiver) }
         .NumericBinaryMethod(receiver, _, argument) -> {
             visit(receiver)
             visit(argument)
@@ -1317,7 +1346,7 @@ tree_each_expr_child: fn(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc
             loop value in args -> visit(value)
         }
         .CoreClosureCall(kind) -> tree_each_core_closure_child(kind, visit)
-        .TaskGroupAll(tasks) | .TaskGroupRace(tasks) | .TaskGroupAny(tasks) -> visit(tasks)
+        .TaskGroupAll(tasks) | .TaskGroupRace(tasks) | .TaskGroupAny(tasks) -> { visit(tasks) }
         .SelectRecv(builder, channel) -> {
             visit(builder)
             visit(channel)
@@ -1335,9 +1364,7 @@ tree_each_expr_child: fn(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc
 tree_each_fn_value_child: fn(kind: TFnValueKind, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if kind == {
         .NamedFn(_, lambda) -> {
-            if lambda == Val(lambda_value) {
-                tree_each_lambda_child(lambda_value, visit)
-            }
+            if lambda == Val(lambda_value) -> tree_each_lambda_child(lambda_value, visit)
         }
         .Policy(_, policy_args, _, _, _, callee) -> {
             loop argument in policy_args -> visit(argument.value)

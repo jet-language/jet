@@ -13,6 +13,7 @@ package: {
 use files: core.files
 
 BIG: 64_000_000
+
 PEAK_GROWTH_LIMIT_KB: 16384
 
 kind: fn(handle: Directory | FileReader) -> String {
@@ -74,7 +75,9 @@ run: fn() {
     peak: status_kb("VmHWM:")
     print("lent text: {measure(big)} bytes, again {measure(big)}, still held {big.count_bytes()}")
     grown: status_kb("VmHWM:") - peak
-    if grown > PEAK_GROWTH_LIMIT_KB -> panic("the peak resident set grew {grown} kB: the lent text was copied")
+    if grown > PEAK_GROWTH_LIMIT_KB {
+        panic("the peak resident set grew {grown} kB: the lent text was copied")
+    }
     print("lent text not copied: true")
     print("plain value: {measure(7)}")
     word: "kept".repeat(2)

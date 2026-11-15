@@ -10,12 +10,13 @@
 
 // How an owned trait's method takes its receiver.
 OwnedReceiver: enum {
-    // No receiver: `zero: fn() -> Self`.
     Static
-    // `self` with whatever access the impl writes; the trait fixes none.
     Any
     Fixed(access: AccessConvention)
 }
+
+// No receiver: `zero: fn() -> Self`.
+// `self` with whatever access the impl writes; the trait fixes none.
 
 // A parameter after the receiver: `buffer: &[U8]` takes Write access.
 OwnedParam: struct {
@@ -37,28 +38,29 @@ OwnedMethod: struct {
 }
 
 OwnedContract: enum {
-    // Fixed methods and associated types. `shares` names the trait whose
-    // impl on the same type binds the associated names these methods use
-    // (`IndexMut` reads `Index`'s `Key` and `Value`).
     Methods(methods: [OwnedMethod], associated: [String], shares: String?)
-    // `fn {hook}(self, rhs: Rhs) -> {result}`; no result admits any declared
-    // one (the arithmetic hooks, whose right-hand type may be written).
     Operator(hook: String, result: Type?)
-    // `encode: fn(self) -> Dyn` or the static `decode: fn(tree: Dyn) -> T [FieldError]!`.
     Codec(verb: String)
-    // `#run from_literal: fn(value: Source) -> T` on the literal's source.
     Literal(source: Type)
-    // `{hook}: fn(value: Source) -> Self` on the destination type, with the
-    // source written after the trait (`impl Celsius.From(Float)`); a type
-    // takes one impl per source.
     Conversion(hook: String)
-    // A `distinct String` type's pure checker and hole encoder; the prelude
-    // spells the same declaration for readers.
     CheckedText
-    // Derived by the compiler from the type itself; an impl adds no methods
-    // the compiler reads.
     Derived
 }
+
+// Fixed methods and associated types. `shares` names the trait whose
+// impl on the same type binds the associated names these methods use
+// (`IndexMut` reads `Index`'s `Key` and `Value`).
+// `fn {hook}(self, rhs: Rhs) -> {result}`; no result admits any declared
+// one (the arithmetic hooks, whose right-hand type may be written).
+// `encode: fn(self) -> Dyn` or the static `decode: fn(tree: Dyn) -> T [FieldError]!`.
+// `#run from_literal: fn(value: Source) -> T` on the literal's source.
+// `{hook}: fn(value: Source) -> Self` on the destination type, with the
+// source written after the trait (`impl Celsius.From(Float)`); a type
+// takes one impl per source.
+// A `distinct String` type's pure checker and hole encoder; the prelude
+// spells the same declaration for readers.
+// Derived by the compiler from the type itself; an impl adds no methods
+// the compiler reads.
 
 OwnedTrait: struct {
     name: String
@@ -97,7 +99,9 @@ owned_trait: fn(name: String) -> OwnedTrait? Never! {
 owned_trait_declares: fn(owned: OwnedTrait, method: String) -> Bool Never! {
     if owned.contract == {
         .Methods(methods, _, _) -> loop declared in methods {
-            if declared.name == method -> break true
+            if declared.name == method {
+                break true
+            }
         } ?? false
         .Operator(hook, _) -> hook == method
         .Codec(verb) -> verb == method
@@ -265,7 +269,9 @@ owned_trait_requirers: fn(trait_name: String) -> [String] Never! {
 owned_trait_family: fn(marker: String) -> [String] Never! {
     members := [String]{}
     loop owned in OWNED_TRAITS {
-        if owned.auto_derive_family == .Val(name) && name == marker -> members.push(owned.name.copy())
+        if owned.auto_derive_family == .Val(name) && name == marker {
+            members.push(owned.name.copy())
+        }
     }
     members
 }

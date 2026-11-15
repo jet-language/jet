@@ -222,17 +222,11 @@ key_base: fn(key: String) -> String Never! {
 
 /// A report names a function or type by its dotted path; the log and the
 /// directives key them `module::name`.
-dotted: fn(text: String) -> String Never! {
-    text.replace("::", ".")
-}
+dotted: fn(text: String) -> String Never! { text.replace("::", ".") }
 
-slot_ref: fn(token: String) -> Int Never! {
-    Int.parse(token.trim().removeprefix("s")) ?? -1
-}
+slot_ref: fn(token: String) -> Int Never! { Int.parse(token.trim().removeprefix("s")) ?? -1 }
 
-number: fn(token: String) -> Int Never! {
-    Int.parse(token.trim()) ?? -1
-}
+number: fn(token: String) -> Int Never! { Int.parse(token.trim()) ?? -1 }
 
 /// Reads one log into `c`; the problems it found.
 read_log: fn(c: &Check, text: String) -> [String] Never! {
@@ -406,7 +400,9 @@ reads: fn(c: Check, k: Int) -> [Int] Never! {
     op: c.op_name[k]
     local := [Int]{}
     if op == {
-        "copy" | "move" | "drop" | "close" | "neg" | "not" | "sqrt" | "convert" | "int_big" | "load" | "offset" | "if" | "br_if" -> local.push(c.op_a[k])
+        "copy" | "move" | "drop" | "close" | "neg" | "not" | "sqrt" | "convert" | "int_big" | "load" | "offset" | "if" | "br_if" -> {
+            local.push(c.op_a[k])
+        }
         "add" | "sub" | "mul" | "div" | "rem" | "floordiv" | "mod" | "bitand" | "bitor" | "bitxor" | "shl" | "shr" | "eq" | "ne" | "lt" | "le" | "gt" | "ge" | "concat" -> {
             local.push(c.op_a[k])
             local.push(c.op_b[k])
@@ -474,7 +470,9 @@ declassify_inlined: fn(c: &Check, spec: Spec) Never! {
             }
             loop j in first..<last {
                 into: c.op_name[j] == "copy_bytes" || c.op_name[j] == "store"
-                if into && in_site(c, sites_at, c.op_site[j], site) && c.op_dst[j] < 0 && verdict.get(c.op_a[j]) != None -> c.op_declassified[j] = true
+                if into && in_site(c, sites_at, c.op_site[j], site) && c.op_dst[j] < 0 && verdict.get(c.op_a[j]) != None {
+                    c.op_declassified[j] = true
+                }
             }
         }
     }
@@ -498,24 +496,22 @@ slot_of: fn(c: Check, i: Int, local: Int) -> Int Never! {
 }
 
 /// The checked type of instance slot `slot`.
-type_of: fn(c: Check, slot: Int) -> String Never! {
-    c.slot_type[c.state_static[slot]]
-}
+type_of: fn(c: Check, slot: Int) -> String Never! { c.slot_type[c.state_static[slot]] }
 
 is_list: fn(ty: String) -> Bool Never! {
     ty.starts_with("[") && ty.ends_with("]") && !ty.split("::").to_list().join("").contains(":")
 }
 
-is_tagged: fn(ty: String) -> Bool Never! {
-    ty.starts_with("?") || ty.contains(" ! ")
-}
+is_tagged: fn(ty: String) -> Bool Never! { ty.starts_with("?") || ty.contains(" ! ") }
 
 scalar_kind: fn(kind: String) -> Bool Never! {
     kind == "Int" || kind == "Word" || kind == "Bool" || kind == "Char" || kind == "Float" || kind == "Float32"
 }
 
 set_value: fn(c: &Check, slot: Int, on: Bool) -> Bool Never! {
-    if slot < 0 || !on || c.value[slot] || c.slot_public[c.state_static[slot]] || slot == c.at_declassified -> return false
+    if slot < 0 || !on || c.value[slot] || c.slot_public[c.state_static[slot]] || slot == c.at_declassified {
+        return false
+    }
     c.value[slot] = true
     c.why_value[slot] = c.at_op
     c.why_value_in[slot] = c.at_inst
@@ -527,7 +523,9 @@ set_value: fn(c: &Check, slot: Int, on: Bool) -> Bool Never! {
 /// find_addresses finds no address reaches, so its contents bit stays
 /// clear: a length summed with an address is no address itself.
 set_contents: fn(c: &Check, slot: Int, on: Bool) -> Bool Never! {
-    if slot < 0 || !on || c.contents[slot] || c.slot_public[c.state_static[slot]] || slot == c.at_declassified -> return false
+    if slot < 0 || !on || c.contents[slot] || c.slot_public[c.state_static[slot]] || slot == c.at_declassified {
+        return false
+    }
     ty: type_of(c, slot)
     if ty == "Int" || ty == "Bool" || !c.slot_addr[c.state_static[slot]] -> return false
     c.contents[slot] = true
@@ -578,11 +576,11 @@ find_addresses: fn(c: &Check, spec: Spec) Never! {
                         if callee >= 0 && c.fn_params[callee] == c.op_args[k].len() {
                             is = returns[callee]
                             loop (p, arg) in c.op_args[k] {
-                                if arg >= 0 && c.slot_addr[base + arg] && mark_address(c, c.fn_slot[callee] + p) -> changed = true
+                                if arg >= 0 && c.slot_addr[base + arg] && mark_address(c, c.fn_slot[callee] + p) {
+                                    changed = true
+                                }
                             }
-                        } else {
-                            is = true
-                        }
+                        } else { is = true }
                     }
                     "return" -> {
                         if a >= 0 && c.slot_addr[a] && !returns[f] {
@@ -590,7 +588,9 @@ find_addresses: fn(c: &Check, spec: Spec) Never! {
                             changed = true
                         }
                     }
-                    "const" | "eq" | "ne" | "lt" | "le" | "gt" | "ge" | "mul" | "div" | "rem" | "floordiv" | "mod" | "bitand" | "bitor" | "bitxor" | "shl" | "shr" | "neg" | "not" | "sqrt" | "convert" | "int_big" -> is = false
+                    "const" | "eq" | "ne" | "lt" | "le" | "gt" | "ge" | "mul" | "div" | "rem" | "floordiv" | "mod" | "bitand" | "bitor" | "bitxor" | "shl" | "shr" | "neg" | "not" | "sqrt" | "convert" | "int_big" -> {
+                        is = false
+                    }
                     else -> is = true
                 }
                 if is && c.op_dst[k] >= 0 && mark_address(c, base + c.op_dst[k]) -> changed = true
@@ -630,7 +630,9 @@ access: fn(c: Check, spec: Spec, a: Int, offset: Int) -> FieldAt Never! {
     ty: c.slot_type[a]
     payload: c.slot_payload[a]
     from: c.slot_payload_at[a]
-    if payload != "" && payload != "?" && offset >= from -> return field_at(c, spec, payload, offset - from)
+    if payload != "" && payload != "?" && offset >= from {
+        return field_at(c, spec, payload, offset - from)
+    }
     elem: c.slot_elem[a]
     if elem == "" || elem == "?" || aggregate_type(ty) -> return field_at(c, spec, ty, offset)
     size: type_size(c, elem)
@@ -667,7 +669,9 @@ find_elements: fn(c: &Check, spec: Spec) Never! {
             if c.op_name[k] != "offset" || c.op_a[k] < 0 -> next
             a: base + c.op_a[k]
             enum_ty: c.slot_type[a]
-            if !is_struct(enum_ty) || c.members.get(key_base(enum_ty)) != None || !is_struct(c.slot_type[d]) -> next
+            if !is_struct(enum_ty) || c.members.get(key_base(enum_ty)) != None || !is_struct(c.slot_type[d]) {
+                next
+            }
             known: c.slot_payload[a]
             if known == "" {
                 c.slot_payload[a] = c.slot_type[d].copy()
@@ -691,7 +695,9 @@ find_elements: fn(c: &Check, spec: Spec) Never! {
                 if op == {
                     "load" -> {
                         at: access(c, spec, a, c.op_b[k])
-                        if is_list(at.ty) && at.offset == 16 -> elem = at.ty.removeprefix("[").removesuffix("]")
+                        if is_list(at.ty) && at.offset == 16 {
+                            elem = at.ty.removeprefix("[").removesuffix("]")
+                        }
                     }
                     "copy" | "move" -> elem = c.slot_elem[a].copy()
                     "add" | "sub" -> {
@@ -702,9 +708,7 @@ find_elements: fn(c: &Check, spec: Spec) Never! {
                             elem = if scaled(c, base, c.op_b[k], type_size(c, ea), 0) -> ea.copy() else -> "?"
                         } else if op == "add" && eb != "" && eb != "?" && ea == "" {
                             elem = if scaled(c, base, c.op_a[k], type_size(c, eb), 0) -> eb.copy() else -> "?"
-                        } else if ea != "" || eb != "" {
-                            elem = "?"
-                        }
+                        } else if ea != "" || eb != "" { elem = "?" }
                     }
                     else -> {}
                 }
@@ -729,8 +733,12 @@ scaled: fn(c: Check, base: Int, local: Int, size: Int, depth: Int) -> Bool Never
         ok := false
         if op == {
             "const" -> ok = c.op_a[k] %% size == 0
-            "mul" -> ok = scaled(c, base, c.op_a[k], size, depth + 1) || scaled(c, base, c.op_b[k], size, depth + 1)
-            "add" -> ok = scaled(c, base, c.op_a[k], size, depth + 1) && scaled(c, base, c.op_b[k], size, depth + 1)
+            "mul" -> {
+                ok = scaled(c, base, c.op_a[k], size, depth + 1) || scaled(c, base, c.op_b[k], size, depth + 1)
+            }
+            "add" -> {
+                ok = scaled(c, base, c.op_a[k], size, depth + 1) && scaled(c, base, c.op_b[k], size, depth + 1)
+            }
             "copy" | "move" -> ok = scaled(c, base, c.op_a[k], size, depth + 1)
             else -> {}
         }
@@ -819,7 +827,9 @@ field_at: fn(c: Check, spec: Spec, ty: String, offset: Int) -> FieldAt Never! {
     off := offset
     leaf := ""
     loop {
-        if public_field(c, spec, at, off) || spec.public_types.get(key_base(at)) != None -> return FieldAt{ty: at, offset: off, public: true, leaf: ""}
+        if public_field(c, spec, at, off) || spec.public_types.get(key_base(at)) != None {
+            return FieldAt{ty: at, offset: off, public: true, leaf: ""}
+        }
         inner := ""
         start := -1
         if is_tuple(at) {
@@ -854,21 +864,19 @@ field_at: fn(c: Check, spec: Spec, ty: String, offset: Int) -> FieldAt Never! {
             }
         }
         leaf = inner.copy()
-        if start < 0 || !(is_struct(inner) || is_list(inner) || is_tagged(inner) || is_tuple(inner)) -> break
+        if start < 0 || !(is_struct(inner) || is_list(inner) || is_tagged(inner) || is_tuple(inner)) {
+            break
+        }
         at = inner
         off -= start
     }
     FieldAt{ty: at, offset: off, public: false, leaf: leaf}
 }
 
-is_tuple: fn(ty: String) -> Bool Never! {
-    ty.starts_with("(") && ty.ends_with(")")
-}
+is_tuple: fn(ty: String) -> Bool Never! { ty.starts_with("(") && ty.ends_with(")") }
 
 /// How many times `mark` occurs in `text`.
-occurrences: fn(text: String, mark: String) -> Int Never! {
-    text.split(mark).to_list().len() - 1
-}
+occurrences: fn(text: String, mark: String) -> Int Never! { text.split(mark).to_list().len() - 1 }
 
 /// The element types of tuple type `ty` (`(a: T, U)`), names dropped.
 tuple_elements: fn(ty: String) -> [String] Never! {
@@ -897,7 +905,9 @@ member_keys: fn(c: Check, ty: String) -> [String] Never! {
 /// the log does not tell it (an Option, a Result, an unlisted struct).
 type_size: fn(c: Check, ty: String) -> Int Never! {
     if is_list(ty) -> return 24
-    if ty == "Int" || ty == "I64" || ty == "U64" || ty == "Float" || ty == "String" -> return if ty == "String" -> 24 else -> 8
+    if ty == "Int" || ty == "I64" || ty == "U64" || ty == "Float" || ty == "String" {
+        return if ty == "String" -> 24 else -> 8
+    }
     if ty == "I32" || ty == "U32" || ty == "Float32" || ty == "Char" -> return 4
     if ty == "I16" || ty == "U16" -> return 2
     if ty == "Bool" || ty == "I8" || ty == "U8" -> return 1
@@ -944,7 +954,9 @@ flow: fn(c: &Check, spec: Spec, i: Int, k: Int) -> Bool Never! {
                 // A reference past the struct's start to a public Int or
                 // Bool member (`&ctx.iv_off`) points at no secret; what is
                 // stored through it still reaches the struct.
-                if c.op_b[k] != 0 && type_of(c, d) == "Pointer" && exact_member(c, spec, at, -1) -> return set_contents(c, a, c.contents[d])
+                if c.op_b[k] != 0 && type_of(c, d) == "Pointer" && exact_member(c, spec, at, -1) {
+                    return set_contents(c, a, c.contents[d])
+                }
             }
             changed = set_value(c, d, c.value[a]) || changed
             changed = set_contents(c, d, c.contents[a]) || changed
@@ -966,7 +978,9 @@ flow: fn(c: &Check, spec: Spec, i: Int, k: Int) -> Bool Never! {
             changed = set_value(c, d, c.value[a] || c.value[b]) || changed
             changed = set_contents(c, d, c.contents[a] || c.contents[b]) || changed
         }
-        "neg" | "not" | "sqrt" | "convert" | "int_big" -> changed = set_value(c, d, c.value[a]) || changed
+        "neg" | "not" | "sqrt" | "convert" | "int_big" -> {
+            changed = set_value(c, d, c.value[a]) || changed
+        }
         "load" -> {
             at: access(c, spec, c.state_static[a], c.op_b[k])
             if at.public -> return false
@@ -989,7 +1003,9 @@ flow: fn(c: &Check, spec: Spec, i: Int, k: Int) -> Bool Never! {
             v: slot_of(c, i, c.op_c[k])
             // A word stored into a public member stays out of the struct's
             // secrets; a secret one is a finding (findings_of).
-            if exact_member(c, spec, access(c, spec, c.state_static[a], c.op_b[k]), v) -> return false
+            if exact_member(c, spec, access(c, spec, c.state_static[a], c.op_b[k]), v) {
+                return false
+            }
             changed = set_contents(c, a, c.value[v] || c.contents[v]) || changed
         }
         "copy_bytes" -> {
@@ -1064,9 +1080,7 @@ flow: fn(c: &Check, spec: Spec, i: Int, k: Int) -> Bool Never! {
 }
 
 /// Whether register text `reg` names the frame (or no register at all).
-frame_register: fn(reg: String) -> Bool Never! {
-    reg == "rbp" || reg == "rsp" || reg == "-"
-}
+frame_register: fn(reg: String) -> Bool Never! { reg == "rbp" || reg == "rsp" || reg == "-" }
 
 /// The way a secret reached `slots` (an instruction's inputs), newest first:
 /// the instruction that first set each bit, back to a root or at most eight
@@ -1171,9 +1185,13 @@ findings_of: fn(c: Check, spec: Spec, i: Int, seen: &[String:Bool]) -> [String] 
                 regs: c.row_text[r].removeprefix("memory ").partition(" ")
                 if !(frame_register(regs.head) && frame_register(regs.tail)) {
                     if op == "load" || op == "store" || op == "stream_store" {
-                        if c.value[slot_of(c, i, c.op_a[k])] -> problem = "memory access at a secret address"
+                        if c.value[slot_of(c, i, c.op_a[k])] {
+                            problem = "memory access at a secret address"
+                        }
                     } else if op == "copy_bytes" {
-                        if c.value[slot_of(c, i, c.op_a[k])] || c.value[slot_of(c, i, c.op_b[k])] -> problem = "memory copy at a secret address"
+                        if c.value[slot_of(c, i, c.op_a[k])] || c.value[slot_of(c, i, c.op_b[k])] {
+                            problem = "memory copy at a secret address"
+                        }
                     } else if secret {
                         problem = "memory operand of an instruction with a secret input"
                     }
@@ -1188,13 +1206,17 @@ findings_of: fn(c: Check, spec: Spec, i: Int, seen: &[String:Bool]) -> [String] 
                 if op != "copy_bytes" && secret -> problem = "string operation with a secret input"
             }
             "call" -> {
-                if op == "call_indirect" && c.value[slot_of(c, i, c.op_a[k])] -> problem = "call through a secret register"
+                if op == "call_indirect" && c.value[slot_of(c, i, c.op_a[k])] {
+                    problem = "call through a secret register"
+                }
             }
             "asm" -> {
                 // The template of a cleared routine (the optimizer's fill)
                 // may take secret memory, never a secret word.
                 cleared: op == "call" && spec.runtime.get(key_base(c.op_callee[k])) != None
-                if secret || (!cleared && any_contents(c, ins)) -> problem = "inline-asm template given a secret (refused: its bytes are not checked)"
+                if secret || (!cleared && any_contents(c, ins)) {
+                    problem = "inline-asm template given a secret (refused: its bytes are not checked)"
+                }
             }
             else -> {}
         }
@@ -1234,9 +1256,7 @@ findings_of: fn(c: Check, spec: Spec, i: Int, seen: &[String:Bool]) -> [String] 
         } else if op == "call_runtime" {
             if spec.runtime.get(c.op_callee[k]) != None && !word -> next
             line = "{c.fn_base[f]} at `{c.op_text[k]}`: a secret reaches the runtime routine `{c.op_callee[k]}`"
-        } else {
-            line = "{c.fn_base[f]} at `{c.op_text[k]}`: a secret reaches an indirect call"
-        }
+        } else { line = "{c.fn_base[f]} at `{c.op_text[k]}`: a secret reaches an indirect call" }
         if seen.get(line) != None -> next
         seen[line.copy()] = true
         out.push(marked(c, spec, f, k, "{line}, from {trail(c, ins)}"))
@@ -1283,7 +1303,9 @@ read_spec: fn(text: String, dropped: [String:Bool]) -> Spec Never! {
             "runtime" -> spec.runtime[words[1].copy()] = true
             "secret-struct" -> spec.secret_structs[words[1].copy()] = true
             "public-type" -> spec.public_types[words[1].copy()] = true
-            "public-field" -> if words.len() == 3 -> spec.public_fields["{words[1]}/{words[2]}"] = true
+            "public-field" -> {
+                if words.len() == 3 -> spec.public_fields["{words[1]}/{words[2]}"] = true
+            }
             "public-tag" -> spec.public_tags[words[1].copy()] = true
             "expected" -> {
                 // The reason is required: an expected finding says why.
@@ -1405,9 +1427,7 @@ run: fn() {
                 if line.starts_with("expected `") {
                     expected += 1
                     hit[line.removeprefix("expected `").partition("`").head.copy()] = true
-                } else {
-                    findings += 1
-                }
+                } else { findings += 1 }
             }
         }
         failed += findings

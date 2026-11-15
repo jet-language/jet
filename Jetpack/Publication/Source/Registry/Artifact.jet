@@ -11,11 +11,15 @@ publication_artifact_path: fn(repo: String, name: String, version: String) -> St
     publication_validate_index_component(version, "package version")
     Ok(files.join(files.join(files.join(repo, "artifacts"), name), version))
 }
+
 publication_ensure_real_directory: fn(path: String, label: String) IOError! -[FS, Env]> {
     info: files.stat(path)
-    if info.is_symlink || !info.is_dir -> return Err(publication_read_error(.InvalidInput, path, "{label} is not a real directory"))
+    if info.is_symlink || !info.is_dir {
+        return Err(publication_read_error(.InvalidInput, path, "{label} is not a real directory"))
+    }
     _: foundation_open_directory_authority(path)
 }
+
 publication_load_publish_lock: fn(source: String) -[FS, Env]> LockFile? IOError! {
     bytes: foundation_read_file_nofollow_at_root(source, UNIFIED_LOCK_FILE, PKG_MAX_LOCK_BYTES) ?? {
         if err == .NotFound(_) -> return Ok(None)
@@ -25,18 +29,22 @@ publication_load_publish_lock: fn(source: String) -[FS, Env]> LockFile? IOError!
     parsed: pkg_lock_parse(text) ?? return Err(publication_invalid_oci("published lock is invalid: {err.message()}"))
     Ok(Val(parsed))
 }
+
 publication_registry_artifact_hash: fn(root: String) -[FS, Env]> String IOError! {
     held: foundation_open_directory_authority(root)
     held.tree_hash()
 }
+
 PublicationArtifactSnapshot: struct {
     source: PackageSourceSnapshot
+
     path: fn(self) -> String Never! { self.source.path() }
 
     impl Close {
         close: fn(&&self) -[FS]> { close(self.source) }
     }
 }
+
 publication_snapshot_verified_artifact: fn(repo: String, entry: PublicationIndexEntry) -[FS, Env, Time]> PublicationArtifactSnapshot IOError! {
     path: publication_artifact_path(repo, entry.name, entry.version)
     held: foundation_open_directory_authority(repo)
@@ -44,7 +52,9 @@ publication_snapshot_verified_artifact: fn(repo: String, entry: PublicationIndex
     package: artifacts.child(entry.name)
     source: package.child(entry.version)
     before: source.tree_hash()
-    if entry.content_hash != "" && before != entry.content_hash -> return Err(publication_invalid_oci("registry source artifact for {entry.name} {entry.version} failed its content hash"))
+    if entry.content_hash != "" && before != entry.content_hash {
+        return Err(publication_invalid_oci("registry source artifact for {entry.name} {entry.version} failed its content hash"))
+    }
     publication_verify_oci_referrers(repo, entry)
     // Keep the private snapshot on the checkout's disk rather than /tmp.
     snapshot: pkg_source_snapshot_into(source, held) ?? return Err(publication_invalid_oci(err.diagnostic.what))
@@ -76,13 +86,18 @@ publication_snapshot_verified_artifact: fn(repo: String, entry: PublicationIndex
 // stage and any OCI referrer state this publish created.
 publication_ensure_real_directory_if_present: fn(path: String, label: String) IOError! -[FS, Env]> {
     if files.stat(path) == {
-        .Ok(_) -> publication_ensure_real_directory(path, label)
-        .Err(error) -> if error == {
-            .NotFound(_) -> {}
-            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> { return Err(error) }
+        .Ok(_) -> { publication_ensure_real_directory(path, label) }
+        .Err(error) -> {
+            if error == {
+                .NotFound(_) -> {}
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
+                    return Err(error)
+                }
+            }
         }
     }
 }
+
 publication_publish_artifact: fn(repo: String, source: String, name: String, version: String, expected_hash: String) -[FS, Env, Time]> String IOError! {
     destination: publication_artifact_path(repo, name, version)
     publication_ensure_real_directory(repo, "registry checkout")
@@ -92,22 +107,31 @@ publication_publish_artifact: fn(repo: String, source: String, name: String, ver
     close(snapshot)
     result
 }
+
 publication_publish_snapshot: fn(repo: String, held: FoundationDirectoryAuthority, source: String, snapshot: FoundationDirectoryAuthority, actual: String, name: String, version: String, expected_hash: String, destination: String) -[FS, Env, Time]> String IOError! {
     publication_validate_registry_metadata_file(snapshot.path(), name, version)
-    if expected_hash != "" && actual != expected_hash -> return Err(publication_read_error(.InvalidInput, source, "registry source hash changed during publish: expected {expected_hash}, got {actual}"))
+    if expected_hash != "" && actual != expected_hash {
+        return Err(publication_read_error(.InvalidInput, source, "registry source hash changed during publish: expected {expected_hash}, got {actual}"))
+    }
     publication_ensure_real_directory_if_present(files.join(repo, "artifacts"), "registry artifact root")
     publication_ensure_real_directory_if_present(files.dirname(destination), "registry artifact package directory")
     package: held.child("artifacts", true).child(name, true)
     if package.child(version) == {
         .Ok(existing) -> {
-            if existing.tree_hash() != actual -> return Err(publication_read_error(.AlreadyExists, destination, "registry artifact already exists with conflicting source bytes"))
+            if existing.tree_hash() != actual {
+                return Err(publication_read_error(.AlreadyExists, destination, "registry artifact already exists with conflicting source bytes"))
+            }
             publication_stage_oci_sbom(repo, source, name, version, actual)
             publication_finalize_oci_referrers_for_package(repo, name, version)
             return Ok(destination)
         }
-        .Err(error) -> if error == {
-            .NotFound(_) -> {}
-            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> { return Err(error) }
+        .Err(error) -> {
+            if error == {
+                .NotFound(_) -> {}
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
+                    return Err(error)
+                }
+            }
         }
     }
     subject_root: files.join(files.join(repo, "referrers"), actual)
@@ -124,37 +148,57 @@ publication_publish_snapshot: fn(repo: String, held: FoundationDirectoryAuthorit
         failure = Val(rename_error)
     } else {
         published = true
-        if publication_finalize_oci_referrers_for_package(repo, name, version) == .Err(finalize_error) -> failure = Val(finalize_error)
+        if publication_finalize_oci_referrers_for_package(repo, name, version) == .Err(finalize_error) {
+            failure = Val(finalize_error)
+        }
     }
     if failure == .Val(error) {
-        if !published -> package.remove_tree(stage_name).drop("publish rollback preserves the primary error")
-        if !pending_existed -> files.remove(pending).drop("publish rollback preserves the primary error")
-        if published && !subject_root_existed -> package.remove_tree(version).drop("publish rollback preserves the primary error")
-        if !subject_root_existed -> files.remove_all(subject_root).drop("publish rollback preserves the primary error")
+        if !published {
+            package.remove_tree(stage_name).drop("publish rollback preserves the primary error")
+        }
+        if !pending_existed {
+            files.remove(pending).drop("publish rollback preserves the primary error")
+        }
+        if published && !subject_root_existed {
+            package.remove_tree(version).drop("publish rollback preserves the primary error")
+        }
+        if !subject_root_existed {
+            files.remove_all(subject_root).drop("publish rollback preserves the primary error")
+        }
         return Err(error)
     }
     Ok(destination)
 }
+
 publication_publish_stage: fn(repo: String, source: String, name: String, version: String, actual: String, stage: FoundationDirectoryAuthority, snapshot: FoundationDirectoryAuthority) IOError! -[FS, Env, Time]> {
     publication_stage_oci_sbom(repo, source, name, version, actual)
     stage.copy_tree_from(snapshot)
-    if stage.tree_hash() != actual -> return Err(publication_read_error(.InvalidInput, stage.path(), "staged registry artifact does not match its source hash"))
+    if stage.tree_hash() != actual {
+        return Err(publication_read_error(.InvalidInput, stage.path(), "staged registry artifact does not match its source hash"))
+    }
     // The machine lock is published evidence beside, not inside, the digest.
     if publication_load_publish_lock(source) == .Val(lock) {
         foundation_write_file_nofollow_at_root(stage.path(), UNIFIED_LOCK_FILE, pkg_lock_write(lock).bytes(), None) ?? return Err(err.error)
     }
 }
+
 publication_verify_artifact: fn(repo: String, entry: PublicationIndexEntry) -[FS, Env]> String IOError! {
     path: publication_artifact_path(repo, entry.name, entry.version)
     publication_ensure_real_directory_if_present(repo, "registry checkout")
     publication_ensure_real_directory_if_present(files.join(repo, "artifacts"), "registry artifact root")
     publication_ensure_real_directory_if_present(files.dirname(path), "registry artifact package directory")
     info: files.stat(path) ?? {
-        if err == .NotFound(_) -> return Err(publication_read_error(.NotFound, path, "registry has no source artifact for {entry.name} {entry.version}"))
+        if err == .NotFound(_) {
+            return Err(publication_read_error(.NotFound, path, "registry has no source artifact for {entry.name} {entry.version}"))
+        }
         return Err(err)
     }
-    if info.is_symlink || !info.is_dir -> return Err(publication_read_error(.NotFound, path, "registry has no source artifact for {entry.name} {entry.version}"))
-    if entry.content_hash != "" && publication_registry_artifact_hash(path) != entry.content_hash -> return Err(publication_read_error(.InvalidInput, path, "registry source artifact for {entry.name} {entry.version} failed its content hash"))
+    if info.is_symlink || !info.is_dir {
+        return Err(publication_read_error(.NotFound, path, "registry has no source artifact for {entry.name} {entry.version}"))
+    }
+    if entry.content_hash != "" && publication_registry_artifact_hash(path) != entry.content_hash {
+        return Err(publication_read_error(.InvalidInput, path, "registry source artifact for {entry.name} {entry.version} failed its content hash"))
+    }
     publication_verify_oci_referrers(repo, entry)
     Ok(path)
 }
@@ -167,11 +211,13 @@ publication_api_snapshot_path: fn(repo: String, name: String, version: String) -
     publication_validate_index_component(version, "package version")
     Ok(files.join(files.join(files.join(repo, "apis"), name), "{version}.api"))
 }
+
 publication_write_api_snapshot: fn(repo: String, name: String, version: String, text: String) -[FS, Env, Time]> String IOError! {
     path: publication_api_snapshot_path(repo, name, version)
     publication_write_oci_file(path, text.bytes(), "registry API snapshot")
     Ok(path)
 }
+
 // None when the version has no snapshot; a present snapshot must be this
 // format version, name this package and version, and hold only signature rows.
 publication_read_api_snapshot: fn(repo: String, name: String, version: String) -[FS, Env]> PackageCapabilitySnapshot? IOError! {
@@ -186,7 +232,9 @@ publication_read_api_snapshot: fn(repo: String, name: String, version: String) -
         return Err(publication_read_error(.InvalidInput, path, "registry API snapshot is not api_version {PKG_API_SNAPSHOT_VERSION} for {name} {version}"))
     }
     loop line in snapshot.signatures {
-        if pkg_api_snapshot_line_name(line) == None -> return Err(publication_read_error(.InvalidInput, path, "registry API snapshot has a row without a kind: {line}"))
+        if pkg_api_snapshot_line_name(line) == None {
+            return Err(publication_read_error(.InvalidInput, path, "registry API snapshot has a row without a kind: {line}"))
+        }
     }
     Ok(Val(snapshot))
 }

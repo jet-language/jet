@@ -33,23 +33,41 @@ Posting: enum {
 }
 
 PLAIN_SENTENCE_WORDS: 32
+
 PLAIN_PARAGRAPH_WORDS: 90
+
 SURFACE_MITIGATION_WORDS: 24
+
 SURFACE_GIST_WORDS: 22
+
 SURFACE_LESSON_WORDS: 70
+
 SURFACE_WHY_WORDS: 40
+
 SURFACE_SENTENCE_WORDS: 24
+
 SURFACE_BULLET_WORDS: 14
+
 SURFACE_TOTAL_WORDS: 430
+
 SURFACE_CODE_LINES: 14
+
 SURFACE_JARGON: [String]{"ratchet", "seam", "facet", "substrate", "tier-parity", "tier parity", "ring 0", "ring 1", "rings"}
+
 SITUATION_MIN_CHARS: 300
+
 SITUATION_MAX_CHARS: 1200
+
 DISSENT_AUTHOR: "Author model family: "
+
 DISSENT_ADVERSARIAL: " Adversarial model family: "
+
 FRESH_AGENT: "Fresh agent: "
+
 TRIO_SIDES: [String]{"current", "wild"}
+
 BULLET_LISTS: [String]{"gains", "losses"}
+
 OPTION_PARTS: [String]{"name", "detail", "code"}
 
 // ---- payload values ----------------------------------------------------
@@ -217,7 +235,9 @@ close_run: fn(out: &[String], current: &[String], run: &[String]) Never! {
             current = [String]{}
             loop index in (last + 1)..<run.len() -> current.push(run[index])
         }
-        else -> loop piece in run -> current.push(piece.copy())
+        else -> {
+            loop piece in run -> current.push(piece.copy())
+        }
     }
     run = [String]{}
 }
@@ -292,7 +312,9 @@ prose_density_gaps: fn(label: String, value: Dyn) -> [String] Never! {
     loop line in text.split("\n") {
         opener: fence_opener(line)
         if fence != "" {
-            if opener == .Val(open) && open.mark == fence_mark && open.marker.len() >= fence.len() && open.rest.trim() == "" -> fence = ""
+            if opener == .Val(open) && open.mark == fence_mark && open.marker.len() >= fence.len() && open.rest.trim() == "" {
+                fence = ""
+            }
             kept.push("")
             next
         }
@@ -308,12 +330,16 @@ prose_density_gaps: fn(label: String, value: Dyn) -> [String] Never! {
     loop paragraph in paragraph_list(kept.join("\n").trim()) {
         paragraph_number += 1
         paragraph_words: word_count(paragraph)
-        if paragraph_words > PLAIN_PARAGRAPH_WORDS -> gaps.push("{label} paragraph {paragraph_number} has {paragraph_words} words (max {PLAIN_PARAGRAPH_WORDS})")
+        if paragraph_words > PLAIN_PARAGRAPH_WORDS {
+            gaps.push("{label} paragraph {paragraph_number} has {paragraph_words} words (max {PLAIN_PARAGRAPH_WORDS})")
+        }
         sentence_number := 0
         loop sentence in sentence_list(paragraph) {
             sentence_number += 1
             sentence_words: word_count(sentence)
-            if sentence_words > PLAIN_SENTENCE_WORDS -> gaps.push("{label} sentence {sentence_number} has {sentence_words} words (max {PLAIN_SENTENCE_WORDS})")
+            if sentence_words > PLAIN_SENTENCE_WORDS {
+                gaps.push("{label} sentence {sentence_number} has {sentence_words} words (max {PLAIN_SENTENCE_WORDS})")
+            }
         }
     }
     gaps
@@ -331,7 +357,9 @@ example_prose_density_gaps: fn(label: String, value: Dyn) -> [String] Never! {
         loop sentence in sentence_list(line) {
             sentence_number += 1
             sentence_words: word_count(sentence)
-            if sentence_words > PLAIN_SENTENCE_WORDS -> gaps.push("{label} line {line_number} sentence {sentence_number} has {sentence_words} words (max {PLAIN_SENTENCE_WORDS})")
+            if sentence_words > PLAIN_SENTENCE_WORDS {
+                gaps.push("{label} line {line_number} sentence {sentence_number} has {sentence_words} words (max {PLAIN_SENTENCE_WORDS})")
+            }
         }
     }
     gaps
@@ -348,9 +376,13 @@ unicode_line_break: fn(piece: String) -> Bool Never! {
     bytes.len() == 3 && Int{bytes[0]} == 226 && Int{bytes[1]} == 128 && (Int{bytes[2]} == 168 || Int{bytes[2]} == 169)
 }
 
-line_terminator: fn(piece: String) -> Bool Never! { piece == "\n" || piece == "\r" || unicode_line_break(piece) }
+line_terminator: fn(piece: String) -> Bool Never! {
+    piece == "\n" || piece == "\r" || unicode_line_break(piece)
+}
 
-space_at: fn(scalars: [String], position: Int) -> Bool Never! { position < scalars.len() && scalars[position].is_whitespace() }
+space_at: fn(scalars: [String], position: Int) -> Bool Never! {
+    position < scalars.len() && scalars[position].is_whitespace()
+}
 
 // What a line of `scalars` starts with at `at`, after `^\s*`: "bullet"
 // (`[-*+•]\s`), "number" (`\d+[.)]\s`), "heading" (`#{1,6}\s`), "fence"
@@ -391,7 +423,9 @@ line_marker: fn(scalars: [String], at: Int) -> String Never! {
             run += 1
         }
         end: index + run
-        if end < scalars.len() && (scalars[end] == "." || scalars[end] == ")") && space_at(scalars, end + 1) -> return "number"
+        if end < scalars.len() && (scalars[end] == "." || scalars[end] == ")") && space_at(scalars, end + 1) {
+            return "number"
+        }
     }
     ""
 }
@@ -440,7 +474,9 @@ jargon_in: fn(text: String) -> String Never! {
                     break
                 }
             }
-            if !matched || word_byte(lower, start - 1) || word_byte(lower, start + needle.len()) -> next
+            if !matched || word_byte(lower, start - 1) || word_byte(lower, start + needle.len()) {
+                next
+            }
             best = start
             best_length = needle.len()
             break
@@ -486,7 +522,9 @@ dissent: fn(pass: Dyn) -> Dissent? Never! {
 dissent_metadata_gaps: fn(payload: Dyn) -> [String] Never! {
     metadata: dissent(field(field(payload, "reviewPasses"), "adversarial"))
     if metadata == .Val(found) && found.author != "" && found.adversarial != "" {
-        if found.agent == "" -> return [String]{"reviewPasses.adversarial (model provenance must be followed by `Fresh agent: <agent-id>.`)"}
+        if found.agent == "" {
+            return [String]{"reviewPasses.adversarial (model provenance must be followed by `Fresh agent: <agent-id>.`)"}
+        }
         return [String]{}
     }
     [String]{"reviewPasses.adversarial (must begin with `Author model family: <family>. Adversarial model family: <family>.`)"}
@@ -494,7 +532,9 @@ dissent_metadata_gaps: fn(payload: Dyn) -> [String] Never! {
 
 // store.mjs `reviewPassSummary`: an adversarial pass without its provenance.
 review_pass_summary: fn(key: String, pass: Dyn) -> Dyn Never! {
-    if key == "adversarial" && dissent(pass) == .Val(found) && found.summary != "" -> return Dyn.Text(found.summary)
+    if key == "adversarial" && dissent(pass) == .Val(found) && found.summary != "" {
+        return Dyn.Text(found.summary)
+    }
     pass.copy()
 }
 
@@ -503,9 +543,13 @@ review_pass_summary: fn(key: String, pass: Dyn) -> Dyn Never! {
 // store.mjs `mitigationGaps`.
 mitigation_gaps: fn(label: String, item: Dyn) -> [String] Never! {
     gaps := [String]{}
-    if has_field(item, "whyUnavoidable") -> gaps.push("{label} (use mitigation, not whyUnavoidable)")
+    if has_field(item, "whyUnavoidable") {
+        gaps.push("{label} (use mitigation, not whyUnavoidable)")
+    }
     mitigation: field(item, "mitigation")
-    if is_text(mitigation) && line_markers(string_value(mitigation)).len() > 0 -> gaps.push("{label}.mitigation (plain prose, no lists, headings, or code blocks)")
+    if is_text(mitigation) && line_markers(string_value(mitigation)).len() > 0 {
+        gaps.push("{label}.mitigation (plain prose, no lists, headings, or code blocks)")
+    }
     gaps
 }
 
@@ -576,7 +620,9 @@ option_keys: fn(payload: Dyn) -> [String] Never! {
 // The `reason` of the `whyNot` entry whose key is `key`.
 why_not_reason: fn(why_not: [Dyn], key: String) -> String Never! {
     loop item in why_not {
-        if field(item, "key") == .Text(found) && found == key -> return string_value(field(item, "reason")).trim()
+        if field(item, "key") == .Text(found) && found == key {
+            return string_value(field(item, "reason")).trim()
+        }
     }
     ""
 }
@@ -604,21 +650,27 @@ surface_gaps: fn(payload: Dyn, posting: Posting) -> [String] Never! {
     gist: string_value(field(surface, "gist")).trim()
     if gist != "" && !gist.ends_with("?") -> gaps.push("surface.gist (must be a question)")
     need(gaps, prose, "lesson", field(surface, "lesson"), SURFACE_LESSON_WORDS)
-    if paragraph_list(string_value(field(surface, "lesson")).trim()).len() > 1 -> gaps.push("surface.lesson (one paragraph maximum)")
+    if paragraph_list(string_value(field(surface, "lesson")).trim()).len() > 1 {
+        gaps.push("surface.lesson (one paragraph maximum)")
+    }
     trio: field(surface, "trio")
     loop side in TRIO_SIDES {
         pane: field(trio, side)
         need(gaps, prose, "trio.{side}.note", field(pane, "note"), 0)
         if string_value(field(pane, "code")).trim() == "" -> gaps.push("surface.trio.{side}.code")
     }
-    if string_value(field(field(trio, "wild"), "lang")).trim() == "" -> gaps.push("surface.trio.wild.lang")
+    if string_value(field(field(trio, "wild"), "lang")).trim() == "" {
+        gaps.push("surface.trio.wild.lang")
+    }
     keys: option_keys(payload)
     surface_options: items(field(surface, "options"))
     surface_keys := [String]{}
     loop option in surface_options -> surface_keys.push(js_text(field(option, "key")))
     // Tower compares the NUL-joined key lists.
     nul: String.from_bytes([U8]{U8{0}}) ?? ""
-    if surface_keys.join(nul) != keys.join(nul) -> gaps.push("surface.options (keys must match options[] in order)")
+    if surface_keys.join(nul) != keys.join(nul) {
+        gaps.push("surface.options (keys must match options[] in order)")
+    }
     loop option in surface_options {
         key: key_or(option, "?")
         need(gaps, prose, "options[{key}].name", field(option, "name"), 0)
@@ -633,19 +685,27 @@ surface_gaps: fn(payload: Dyn, posting: Posting) -> [String] Never! {
                 index += 1
                 need(gaps, prose, "options[{key}].{list}[{index}]", entry, 0)
                 count: word_count(string_value(entry).trim())
-                if count > SURFACE_BULLET_WORDS -> gaps.push("surface.options[{key}].{list}[{index}] has {count} words (max {SURFACE_BULLET_WORDS})")
+                if count > SURFACE_BULLET_WORDS {
+                    gaps.push("surface.options[{key}].{list}[{index}] has {count} words (max {SURFACE_BULLET_WORDS})")
+                }
             }
         }
         code: string_value(field(field(option, "proposed"), "code")).trim()
         if {
             code == "" -> gaps.push("surface.options[{key}].proposed.code")
-            code.split("\n").to_list().len() > SURFACE_CODE_LINES -> gaps.push("surface.options[{key}].proposed.code (max {SURFACE_CODE_LINES} lines)")
+            code.split("\n").to_list().len() > SURFACE_CODE_LINES -> {
+                gaps.push("surface.options[{key}].proposed.code (max {SURFACE_CODE_LINES} lines)")
+            }
         }
     }
     recommendation: field(surface, "recommendation")
     rec: field(payload, "rec")
-    if field(recommendation, "rec") != rec -> gaps.push("surface.recommendation.rec (must equal rec)")
-    if posting == .New && keys.len() > 0 && (keys[0] != "A" || rec != Dyn.Text("A")) -> gaps.push("rec (new ballots list the recommended option first, as A)")
+    if field(recommendation, "rec") != rec {
+        gaps.push("surface.recommendation.rec (must equal rec)")
+    }
+    if posting == .New && keys.len() > 0 && (keys[0] != "A" || rec != Dyn.Text("A")) {
+        gaps.push("rec (new ballots list the recommended option first, as A)")
+    }
     need(gaps, prose, "recommendation.why", field(recommendation, "why"), SURFACE_WHY_WORDS)
     loop list in BULLET_LISTS {
         entries: items(field(recommendation, list))
@@ -669,22 +729,30 @@ surface_gaps: fn(payload: Dyn, posting: Posting) -> [String] Never! {
                     else -> {
                         prose.push(Prose{label: "{label}.loss", text: loss.copy()})
                         count: word_count(loss)
-                        if count >= SURFACE_BULLET_WORDS -> gaps.push("surface.{label}.loss has {count} words (under {SURFACE_BULLET_WORDS} words)")
+                        if count >= SURFACE_BULLET_WORDS {
+                            gaps.push("surface.{label}.loss has {count} words (under {SURFACE_BULLET_WORDS} words)")
+                        }
                     }
                 }
                 if {
-                    mitigation == "" -> gaps.push("surface.{label}.mitigation (required for \"{if loss == "" -> "?" else -> loss}\")")
+                    mitigation == "" -> {
+                        gaps.push("surface.{label}.mitigation (required for \"{if loss == "" -> "?" else -> loss}\")")
+                    }
                     else -> {
                         prose.push(Prose{label: "{label}.mitigation", text: mitigation.copy()})
                         count: word_count(mitigation)
-                        if count >= SURFACE_MITIGATION_WORDS -> gaps.push("surface.{label}.mitigation has {count} words (under {SURFACE_MITIGATION_WORDS} words)")
+                        if count >= SURFACE_MITIGATION_WORDS {
+                            gaps.push("surface.{label}.mitigation has {count} words (under {SURFACE_MITIGATION_WORDS} words)")
+                        }
                     }
                 }
                 next
             }
             need(gaps, prose, label, entry, 0)
             count: word_count(string_value(entry).trim())
-            if count > SURFACE_BULLET_WORDS -> gaps.push("surface.{label} has {count} words (max {SURFACE_BULLET_WORDS})")
+            if count > SURFACE_BULLET_WORDS {
+                gaps.push("surface.{label} has {count} words (max {SURFACE_BULLET_WORDS})")
+            }
         }
     }
     why_not: items(field(recommendation, "whyNot"))
@@ -702,12 +770,16 @@ surface_gaps: fn(payload: Dyn, posting: Posting) -> [String] Never! {
         total += word_count(entry.text)
         loop sentence in sentences(entry.text) {
             count: word_count(sentence)
-            if count > SURFACE_SENTENCE_WORDS -> gaps.push("surface.{entry.label} sentence has {count} words (max {SURFACE_SENTENCE_WORDS})")
+            if count > SURFACE_SENTENCE_WORDS {
+                gaps.push("surface.{entry.label} sentence has {count} words (max {SURFACE_SENTENCE_WORDS})")
+            }
         }
         jargon: jargon_in(entry.text)
         if jargon != "" -> gaps.push("surface.{entry.label} uses project jargon \"{jargon}\"")
     }
-    if total > SURFACE_TOTAL_WORDS -> gaps.push("surface prose has {total} words (max {SURFACE_TOTAL_WORDS})")
+    if total > SURFACE_TOTAL_WORDS {
+        gaps.push("surface prose has {total} words (max {SURFACE_TOTAL_WORDS})")
+    }
     gaps
 }
 
@@ -719,16 +791,22 @@ situation_gaps: fn(situation: Dyn) -> [String] Never! {
     // JavaScript string length: UTF-16 code units.
     length := 0
     loop scalar in text.chars() -> length += if "{scalar}".count_bytes() == 4 -> 2 else -> 1
-    if length < SITUATION_MIN_CHARS || length > SITUATION_MAX_CHARS -> gaps.push("situation has {length} characters (need {SITUATION_MIN_CHARS}-{SITUATION_MAX_CHARS})")
+    if length < SITUATION_MIN_CHARS || length > SITUATION_MAX_CHARS {
+        gaps.push("situation has {length} characters (need {SITUATION_MIN_CHARS}-{SITUATION_MAX_CHARS})")
+    }
     markers: line_markers(text)
-    if markers.contains("bullet") || markers.contains("number") -> gaps.push("situation (plain prose, not a bullet list)")
+    if markers.contains("bullet") || markers.contains("number") {
+        gaps.push("situation (plain prose, not a bullet list)")
+    }
     if markers.contains("heading") -> gaps.push("situation (plain prose, no headings)")
     if markers.contains("fence") -> gaps.push("situation (plain prose, no code blocks)")
     index := 0
     loop sentence in sentences(text) {
         index += 1
         count: word_count(sentence)
-        if count > PLAIN_SENTENCE_WORDS -> gaps.push("situation sentence {index} has {count} words (max {PLAIN_SENTENCE_WORDS})")
+        if count > PLAIN_SENTENCE_WORDS {
+            gaps.push("situation sentence {index} has {count} words (max {PLAIN_SENTENCE_WORDS})")
+        }
     }
     gaps
 }
@@ -738,14 +816,20 @@ short_ballot_gaps: fn(payload: Dyn) -> [String] Never! {
     gaps := [String]{}
     tags := [String]{}
     loop entry in items(field(payload, "cardTags")) -> tags.push(ascii_lower(js_text(entry).trim()))
-    loop entry in items(field(field(payload, "card"), "tags")) -> tags.push(ascii_lower(js_text(entry).trim()))
+    loop entry in items(field(field(payload, "card"), "tags")) {
+        tags.push(ascii_lower(js_text(entry).trim()))
+    }
     blocked := [String]{}
-    if ascii_lower(js_text(field(payload, "group")).trim()) == "syntax" -> blocked.push("syntax-group decisions require a full ballot")
+    if ascii_lower(js_text(field(payload, "group")).trim()) == "syntax" {
+        blocked.push("syntax-group decisions require a full ballot")
+    }
     if tags.contains("carve-out") -> blocked.push("cards tagged carve-out require a full ballot")
     if tags.contains("full") -> blocked.push("cards tagged full require a full ballot")
     if {
         blocked.len() > 0 -> gaps.push("short ballot refused: {blocked.join("; ")}")
-        items(field(payload, "options")).len() > 3 && !present(field(payload, "shortAuthorizedBy")) -> gaps.push("shortAuthorizedBy (short profile without owner authorization is limited to one mechanism with at most three options)")
+        items(field(payload, "options")).len() > 3 && !present(field(payload, "shortAuthorizedBy")) -> {
+            gaps.push("shortAuthorizedBy (short profile without owner authorization is limited to one mechanism with at most three options)")
+        }
     }
     if !is_null(field(payload, "reviewPasses")) -> gaps.push("short ballots must omit reviewPasses")
     gaps
@@ -768,11 +852,15 @@ ballot_gaps: fn(payload: Dyn, posting: Posting) -> [String] Never! {
     mode := js_text(field(payload, "ballotMode"))
     if mode == "" -> mode = "full"
     if mode != "full" && mode != "short" -> gaps.push("ballotMode (full or short)")
-    if mode == "full" || string_value(field(payload, "situation")).trim() != "" -> gaps.extend(situation_gaps(field(payload, "situation")))
+    if mode == "full" || string_value(field(payload, "situation")).trim() != "" {
+        gaps.extend(situation_gaps(field(payload, "situation")))
+    }
     if !present(field(payload, "gist")) -> gaps.push("gist")
     if {
         !present(field(payload, "lesson")) -> gaps.push("lesson")
-        paragraph_list(js_text(field(payload, "lesson")).trim()).len() > 1 -> gaps.push("lesson (one paragraph maximum)")
+        paragraph_list(js_text(field(payload, "lesson")).trim()).len() > 1 -> {
+            gaps.push("lesson (one paragraph maximum)")
+        }
     }
     if !present(field(payload, "story")) -> gaps.push("story")
     if !present(field(payload, "inWild")) -> gaps.push("inWild")
@@ -804,7 +892,9 @@ ballot_gaps: fn(payload: Dyn, posting: Posting) -> [String] Never! {
     }
     rec: field(payload, "rec")
     if !present(rec) -> gaps.push("rec")
-    if js_text(rec) != "" && !(is_text(rec) && keys.contains(string_value(rec))) -> gaps.push("rec (must match an option key)")
+    if js_text(rec) != "" && !(is_text(rec) && keys.contains(string_value(rec))) {
+        gaps.push("rec (must match an option key)")
+    }
     recommendation: field(payload, "recommendation")
     if !is_object(recommendation) && !is_array(recommendation) -> gaps.push("recommendation")
     if is_object(recommendation) || is_array(recommendation) {
@@ -832,7 +922,9 @@ ballot_gaps: fn(payload: Dyn, posting: Posting) -> [String] Never! {
             loss: string_value(field(item, "loss")).trim()
             gaps.extend(mitigation_gaps("recommendation.losses[{index}]", item))
             if loss == "" -> gaps.push("recommendation.losses[{index}].loss (required)")
-            if string_value(field(item, "mitigation")).trim() == "" -> gaps.push("recommendation.losses[{index}].mitigation (required for \"{if loss == "" -> "?" else -> loss}\")")
+            if string_value(field(item, "mitigation")).trim() == "" {
+                gaps.push("recommendation.losses[{index}].mitigation (required for \"{if loss == "" -> "?" else -> loss}\")")
+            }
         }
     }
     passes: field(payload, "reviewPasses")
@@ -846,7 +938,9 @@ ballot_gaps: fn(payload: Dyn, posting: Posting) -> [String] Never! {
                 summary: string_value(review_pass_summary(key, field(passes, key)))
                 if {
                     summary.trim() == "" -> gaps.push("reviewPasses.{key} (need text)")
-                    sentences(summary).len() > 2 -> gaps.push("reviewPasses.{key} (need 1-2 sentences)")
+                    sentences(summary).len() > 2 -> {
+                        gaps.push("reviewPasses.{key} (need 1-2 sentences)")
+                    }
                 }
             }
             gaps.extend(dissent_metadata_gaps(payload))
@@ -864,16 +958,28 @@ payload_gaps: fn(payload: Dyn, posting: Posting) -> [String] Never! {
     if !is_object(payload) -> return [String]{"the payload is not a JSON object"}
     gaps := [String]{}
     if !present(field(payload, "cardId")) -> gaps.push("cardId")
-    if field(payload, "draft") != Dyn.Bool(false) -> gaps.push("posting payload must set draft:false")
-    if posting == .New && !present(field(payload, "title")) -> gaps.push("E_INVALID: decision needs a title")
+    if field(payload, "draft") != Dyn.Bool(false) {
+        gaps.push("posting payload must set draft:false")
+    }
+    if posting == .New && !present(field(payload, "title")) {
+        gaps.push("E_INVALID: decision needs a title")
+    }
     group: js_text(field(payload, "group"))
-    if group == "acceptance" || js_text(field(payload, "id")).starts_with("D-ACCEPT-") -> gaps.push("E_INVALID: acceptance ballots are system-generated; use the card acceptance workflow")
+    if group == "acceptance" || js_text(field(payload, "id")).starts_with("D-ACCEPT-") {
+        gaps.push("E_INVALID: acceptance ballots are system-generated; use the card acceptance workflow")
+    }
     situation: field(payload, "situation")
-    if !is_null(situation) && !is_text(situation) -> gaps.push("E_INVALID: decision situation must be a string")
+    if !is_null(situation) && !is_text(situation) {
+        gaps.push("E_INVALID: decision situation must be a string")
+    }
     if group == "verdict" {
         superseded: string_value(field(payload, "supersededBy")).trim()
-        if superseded == "" -> gaps.push("E_INVALID: verdict needs a supersession link (`supersededBy`)")
-        if superseded != "" && superseded == js_text(field(payload, "id")) -> gaps.push("E_INVALID: verdict cannot supersede itself")
+        if superseded == "" {
+            gaps.push("E_INVALID: verdict needs a supersession link (`supersededBy`)")
+        }
+        if superseded != "" && superseded == js_text(field(payload, "id")) {
+            gaps.push("E_INVALID: verdict cannot supersede itself")
+        }
     }
     gaps.extend(ballot_gaps(payload, posting))
     gaps

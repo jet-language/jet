@@ -7,8 +7,18 @@ use {
     jet_foundation.[Diagnostic, diagnostic_from_registry]
     jetpack_foundation.[MODULE_FIELD_MEMBERS, NS_WORKSPACE, WORKSPACE_FILE]
     jet_lexer.[
-        TOKEN_BLOCK_COMMENT, TOKEN_COLON, TOKEN_DOT, TOKEN_IDENT, TOKEN_KW_MODULE, TOKEN_LBRACE,
-        TOKEN_LINE_COMMENT, TOKEN_RBRACE, Token, TokenTables, lex, token_text,
+        TOKEN_BLOCK_COMMENT,
+        TOKEN_COLON,
+        TOKEN_DOT,
+        TOKEN_IDENT,
+        TOKEN_KW_MODULE,
+        TOKEN_LBRACE,
+        TOKEN_LINE_COMMENT,
+        TOKEN_RBRACE,
+        Token,
+        TokenTables,
+        lex,
+        token_text,
     ]
     files: core.files
 }
@@ -67,9 +77,7 @@ WorkspacePlanMember: struct {
 WorkspaceSourceError: struct {
     diagnostic: Diagnostic
 
-    message: fn(self) -> String Never! {
-        self.diagnostic.what
-    }
+    message: fn(self) -> String Never! { self.diagnostic.what }
 }
 
 // Resolve the one top-level `.jet` source that declares `workspace: module`.
@@ -100,7 +108,7 @@ pkg_e0995_no_workspace_module: fn() -> Diagnostic Never! {
         None,
         "`{WORKSPACE_FILE}` must declare `{NS_WORKSPACE}: module {{ … }}`",
         "`{WORKSPACE_FILE}` is the monorepo workspace index; it must contain exactly one `{NS_WORKSPACE}: module {{ members: … }}` body",
-        "write `{NS_WORKSPACE}: module {{ members: find(\"./packages\") }}` in `{WORKSPACE_FILE}`"
+        "write `{NS_WORKSPACE}: module {{ members: find(\"./packages\") }}` in `{WORKSPACE_FILE}`",
     )
 }
 
@@ -118,13 +126,13 @@ WorkspaceDeclarationProbe: struct {
 // directory's workspace presence is resolved once per session too, keyed by
 // its canonical root, however many upward walks cross it.
 WorkspaceDeclarationCache: struct {
-    priv probes: [String: WorkspaceDeclarationProbe]
-    priv presence: [String: Bool]
+    priv probes: [String:WorkspaceDeclarationProbe]
+    priv presence: [String:Bool]
     // Lexes actually performed by this session, excluding memo hits.
     lexes: Int{0}
 
     new: fn() -> WorkspaceDeclarationCache Never! {
-        WorkspaceDeclarationCache{probes: [String: WorkspaceDeclarationProbe]{}, presence: [String: Bool]{}}
+        WorkspaceDeclarationCache{probes: [String:WorkspaceDeclarationProbe]{}, presence: [String:Bool]{}}
     }
 }
 
@@ -144,7 +152,9 @@ pkg_workspace_present: fn(cache: &WorkspaceDeclarationCache, resolver: Authority
 // directory it climbs through, and a file where no `workspace` is followed by
 // `:` or by a comment declares nothing, so it is never lexed.
 pkg_workspace_declaration_probe: fn(cache: &WorkspaceDeclarationCache, src: String) -> WorkspaceDeclarationProbe Never! {
-    if !pkg_workspace_head_possible(src) -> return WorkspaceDeclarationProbe{declares_module: false, declares_members: false}
+    if !pkg_workspace_head_possible(src) {
+        return WorkspaceDeclarationProbe{declares_module: false, declares_members: false}
+    }
     if cache.probes.get(src) == .Val(probe) -> return probe
     cache.lexes += 1
     probe: pkg_lex_workspace_declaration(src.bytes())
@@ -188,7 +198,9 @@ pkg_workspace_tokens_declare_module: fn(tokens: [Token], tables: TokenTables) ->
             kind == TOKEN_LBRACE -> depth += 1
             kind == TOKEN_RBRACE -> depth -= 1
             kind == TOKEN_IDENT && depth == 0 && index + 2 < tokens.len() -> {
-                if tokens[index + 1].kind == TOKEN_COLON && tokens[index + 2].kind == TOKEN_KW_MODULE && token_text(tables, tokens[index]) == NS_WORKSPACE && (index == 0 || tokens[index - 1].kind != TOKEN_DOT) -> return true
+                if tokens[index + 1].kind == TOKEN_COLON && tokens[index + 2].kind == TOKEN_KW_MODULE && token_text(tables, tokens[index]) == NS_WORKSPACE && (index == 0 || tokens[index - 1].kind != TOKEN_DOT) {
+                    return true
+                }
             }
             else -> {}
         }
@@ -199,7 +211,9 @@ pkg_workspace_tokens_declare_module: fn(tokens: [Token], tables: TokenTables) ->
 // The `members:` field name appears among the tokens.
 pkg_workspace_tokens_name_members: fn(tokens: [Token], tables: TokenTables) -> Bool Never! {
     loop token in tokens {
-        if token.kind == TOKEN_IDENT && token_text(tables, token) == MODULE_FIELD_MEMBERS -> return true
+        if token.kind == TOKEN_IDENT && token_text(tables, token) == MODULE_FIELD_MEMBERS {
+            return true
+        }
     }
     false
 }
@@ -230,6 +244,6 @@ pkg_e1239_ambiguous_workspace: fn(paths: [String]) -> Diagnostic Never! {
         None,
         "`workspace: module` is declared in more than one file: `{names.join("`, `")}`",
         "the workspace authority is discovered by declaration, so exactly one file may declare `workspace: module {{ … }}`",
-        "keep one declaration and delete the others"
+        "keep one declaration and delete the others",
     )
 }

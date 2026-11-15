@@ -3,30 +3,30 @@
 // (`report_problems_with_summary`, `emit_check_outcome`, `run_explain`), so
 // both front doors print one meaning (I9). Writing the bytes and exiting stay
 // with the host that owns the process.
-use {
-    jet_foundation.[
-        Diagnostic,
-        DiagnosticOrigin,
-        SourceFile,
-        Span,
-        TextEdit,
-        DIAGNOSTIC_ERROR,
-        DIAGNOSTIC_LINT,
-        diagnostic_explanation,
-        diagnostic_explanation_render,
-        diagnostic_from_registry,
-        diagnostic_render_all,
-        diagnostic_without_fix,
-        diagnostic_theme_dim,
-        sha256_hex,
-        EXIT_OK,
-        EXIT_USAGE,
-        EXIT_USER_ERROR,
-    ]
-}
+use jet_foundation.[
+    Diagnostic,
+    DiagnosticOrigin,
+    SourceFile,
+    Span,
+    TextEdit,
+    DIAGNOSTIC_ERROR,
+    DIAGNOSTIC_LINT,
+    diagnostic_explanation,
+    diagnostic_explanation_render,
+    diagnostic_from_registry,
+    diagnostic_render_all,
+    diagnostic_without_fix,
+    diagnostic_theme_dim,
+    sha256_hex,
+    EXIT_OK,
+    EXIT_USAGE,
+    EXIT_USER_ERROR,
+]
 
 JET_DRIVER_EXIT_OK: EXIT_OK
+
 JET_DRIVER_EXIT_USER_ERROR: EXIT_USER_ERROR
+
 JET_DRIVER_EXIT_USAGE: EXIT_USAGE
 
 // A failed verb's typed reports, kept beside the text its stderr renders, so
@@ -48,9 +48,7 @@ JetDriverVerbOutput: struct {
 }
 
 // Accessibility lints that only `jet lint --a11y` shows.
-jet_driver_is_a11y_lint: fn(code: String) -> Bool Never! {
-    code == "E2930" || code == "E2931"
-}
+jet_driver_is_a11y_lint: fn(code: String) -> Bool Never! { code == "E2930" || code == "E2931" }
 
 // The one dim teaching pointer after a rendered report.
 jet_driver_explain_pointer_line: fn(code: String, color: Bool) -> String Never! {
@@ -93,16 +91,22 @@ jet_driver_shift_span: fn(span: Span, shift: Int) -> Span Never! {
 // E0626) keeps the entry-relative display path, so it names that package.
 jet_driver_present_origin: fn(path: String, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [SourceFile]) -> DiagnosticOrigin? Never! {
     loop file in generated {
-        if file.path == path -> return Val(DiagnosticOrigin{display: path, path: path, source: file.source, revision: sha256_hex(file.source)})
+        if file.path == path {
+            return Val(DiagnosticOrigin{display: path, path: path, source: file.source, revision: sha256_hex(file.source)})
+        }
     }
     physical: jet_driver_physical_path(jet_driver_entry_root_path(snapshot), path)
     loop root in snapshot.roots {
         entry: root.identity == snapshot.entry_root_identity
         loop file in root.files {
-            if file.path == physical -> return Val(DiagnosticOrigin{display: if entry -> file.relative_path else -> path, path: physical, source: file.source, revision: sha256_hex(file.source)})
+            if file.path == physical {
+                return Val(DiagnosticOrigin{display: if entry -> file.relative_path else -> path, path: physical, source: file.source, revision: sha256_hex(file.source)})
+            }
         }
         loop file in root.foreign_cache_files {
-            if file.path == physical -> return Val(DiagnosticOrigin{display: file.relative_path, path: physical, source: file.source, revision: sha256_hex(file.source)})
+            if file.path == physical {
+                return Val(DiagnosticOrigin{display: file.relative_path, path: physical, source: file.source, revision: sha256_hex(file.source)})
+            }
         }
     }
     None
@@ -141,16 +145,12 @@ jet_driver_present_diagnostic: fn(diagnostic: Diagnostic, snapshot: JetDriverAut
     if diagnostic.edit == .Val(edit) {
         if jet_driver_present_edit(edit, shift, snapshot, generated, origins) == .Val(moved) {
             presented.edit = Val(moved)
-        } else {
-            placed = false
-        }
+        } else { placed = false }
     }
     loop index in 0..<diagnostic.fix_edits.len() {
         if jet_driver_present_edit(diagnostic.fix_edits[index], shift, snapshot, generated, origins) == .Val(moved) {
             presented.fix_edits[index] = moved
-        } else {
-            placed = false
-        }
+        } else { placed = false }
     }
     if !placed -> presented = diagnostic_without_fix(presented)
     loop index in 0..<presented.labels.len() {
@@ -162,7 +162,9 @@ jet_driver_present_diagnostic: fn(diagnostic: Diagnostic, snapshot: JetDriverAut
     loop index in 0..<presented.cause.len() {
         if presented.cause[index].origin != None -> next
         presented.cause[index].origin = presented.origin
-        if presented.cause[index].span == .Val(cause_span) -> presented.cause[index].span = Val(jet_driver_shift_span(cause_span, shift))
+        if presented.cause[index].span == .Val(cause_span) {
+            presented.cause[index].span = Val(jet_driver_shift_span(cause_span, shift))
+        }
     }
     presented.source_path = None
     presented.source_offset = None
@@ -201,9 +203,7 @@ jet_driver_problem_report: fn(file: String, source: String, diagnostics: [Diagno
     "{rendered}\n{summary}\n{pointer}\n"
 }
 
-jet_driver_plural: fn(count: Int) -> String Never! {
-    if count == 1 -> "" else -> "s"
-}
+jet_driver_plural: fn(count: Int) -> String Never! { if count == 1 -> "" else -> "s" }
 
 // Front-end problems ending in the "N problems found" count. `run`, `dev`,
 // and `test` hide ordinary advisory lints unless `--verbose` asks
@@ -211,7 +211,9 @@ jet_driver_plural: fn(count: Int) -> String Never! {
 jet_driver_report_problems: fn(file: String, source: String, diagnostics: [Diagnostic], color: Bool, show_advisories: Bool) -> String Never! {
     shown := [Diagnostic]{}
     loop diagnostic in diagnostics {
-        if show_advisories || diagnostic.severity != DIAGNOSTIC_LINT -> shown.push(diagnostic.copy())
+        if show_advisories || diagnostic.severity != DIAGNOSTIC_LINT {
+            shown.push(diagnostic.copy())
+        }
     }
     count: shown.len()
     jet_driver_problem_report(file, source, shown, "{count} problem{jet_driver_plural(count)} found", color)
@@ -237,7 +239,9 @@ jet_driver_check_outcome: fn(file: String, source: String, diagnostics: [Diagnos
     count: lints.len()
     stderr := ""
     if {
-        count > 0 -> stderr = jet_driver_problem_report(file, source, lints, "ok: `{file}` has no errors ({count} warning{jet_driver_plural(count)})", color)
+        count > 0 -> {
+            stderr = jet_driver_problem_report(file, source, lints, "ok: `{file}` has no errors ({count} warning{jet_driver_plural(count)})", color)
+        }
         quiet -> {}
         else -> stderr = "ok: `{file}` has no problems\n"
     }

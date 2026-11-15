@@ -18,11 +18,11 @@ use {
         (input: "ŉabc", expected: "ʼNabc"),
         (input: "ΐabc", expected: "Ϊ́abc"),
         (input: "ᾀabc", expected: "ᾈabc"),
-        (input: "ΟΣ ΟΣΑ", expected: "Οσ Οσα"), // interior scalar-local sigma
-        (input: "123ABC ²ABC", expected: "123abc ²abc"), // Numeric starts word
+        (input: "ΟΣ ΟΣΑ", expected: "Οσ Οσα"),  // interior scalar-local sigma
+        (input: "123ABC ²ABC", expected: "123abc ²abc"),  // Numeric starts word
         (input: "abc-def don't", expected: "Abc-Def Don'T"),
-        (input: "áBC", expected: "ÁBc"), // non-Alphabetic Mn resets word
-        (input: "aͅBC", expected: "Aͅbc"), // Other_Alphabetic Mn stays in word
+        (input: "áBC", expected: "ÁBc"),  // non-Alphabetic Mn resets word
+        (input: "aͅBC", expected: "Aͅbc"),  // Other_Alphabetic Mn stays in word
         (input: "界ABC", expected: "界abc"),
         (input: "𐐨𐐀", expected: "𐐀𐐨"),
     ]
@@ -43,7 +43,7 @@ use {
         (input: "Ο'Σ", expected: "ο'ς"),
         (input: "ΟΣ'Α", expected: "οσ'α"),
         (input: "İ", expected: "i̇"),
-        (input: "꟎", expected: "꟏"), // pinned Unicode 17
+        (input: "꟎", expected: "꟏"),  // pinned Unicode 17
         (input: "𐐀", expected: "𐐨"),
         (input: "", expected: ""),
     ]
@@ -59,7 +59,7 @@ use {
         (input: "ﬃABC", expected: "Ffiabc"),
         (input: "ǆABC", expected: "ǅabc"),
         (input: "ևABC", expected: "Եւabc"),
-        (input: "ΟΣ", expected: "Οσ"), // first scalar excluded from suffix context
+        (input: "ΟΣ", expected: "Οσ"),  // first scalar excluded from suffix context
         (input: "AΟΣ", expected: "Aος"),
         (input: "ΣΟΣ", expected: "Σος"),
         (input: "1ABC", expected: "1abc"),
@@ -71,8 +71,8 @@ use {
 
 #Test("swapcase source ordering expansions and uncased preservation") {
     assert_eq(case_parse.swapcase("Straßeİςﬃևǅ界123"), "sTRASSEi̇ΣFFIԵՒǄ界123")
-    assert_eq(case_parse.swapcase("ΟΣ"), "οσ") // no whole-string FinalSigma
-    assert_eq(case_parse.swapcase("ªᴬ"), "ªᴬ") // cased but identity mappings
+    assert_eq(case_parse.swapcase("ΟΣ"), "οσ")  // no whole-string FinalSigma
+    assert_eq(case_parse.swapcase("ªᴬ"), "ªᴬ")  // cased but identity mappings
     assert_eq(case_parse.swapcase(""), "")
 }
 
@@ -92,19 +92,25 @@ use {
         (input: "ß", lower: true, upper: false, title: false),
         (input: "ẞ", lower: false, upper: true, title: true),
         (input: "ª", lower: false, upper: false, title: false),
-        (input: "ᴬ", lower: false, upper: false, title: false), // Other_Lowercase despite name CAPITAL A
+        (input: "ᴬ", lower: false, upper: false, title: false),  // Other_Lowercase despite name CAPITAL A
         (input: "Aᴬ", lower: false, upper: false, title: true),
-        (input: "Ⅻ", lower: false, upper: true, title: true), // Other_Uppercase Nl
-        (input: "Ⓐ", lower: false, upper: true, title: true), // Other_Uppercase So
-        (input: "Aª", lower: false, upper: false, title: true), // Other_Lowercase
-        (input: "Aͅ", lower: false, upper: false, title: true), // Mn Lowercase
+        (input: "Ⅻ", lower: false, upper: true, title: true),  // Other_Uppercase Nl
+        (input: "Ⓐ", lower: false, upper: true, title: true),  // Other_Uppercase So
+        (input: "Aª", lower: false, upper: false, title: true),  // Other_Lowercase
+        (input: "Aͅ", lower: false, upper: false, title: true),  // Mn Lowercase
         (input: "𐐨", lower: true, upper: false, title: false),
         (input: "𐐀", lower: false, upper: true, title: true),
     ]
     loop row in rows {
-        if case_kernel.is_lower(row.input) != row.lower -> panic("literal is_lower mismatch for `{row.input}`")
-        if case_kernel.is_upper(row.input) != row.upper -> panic("literal is_upper mismatch for `{row.input}`")
-        if case_kernel.is_title(row.input) != row.title -> panic("literal is_title mismatch for `{row.input}`")
+        if case_kernel.is_lower(row.input) != row.lower {
+            panic("literal is_lower mismatch for `{row.input}`")
+        }
+        if case_kernel.is_upper(row.input) != row.upper {
+            panic("literal is_upper mismatch for `{row.input}`")
+        }
+        if case_kernel.is_title(row.input) != row.title {
+            panic("literal is_title mismatch for `{row.input}`")
+        }
     }
 }
 
@@ -140,7 +146,7 @@ use {
     assert_eq(case_text.is_numeric("²٣Ⅻ½𝟎"), true)
     assert_eq(case_parse.isspace(""), false)
     assert_eq(case_parse.is_space("​"), false)
-    assert_eq(case_parse.strip(" 　Σ "), "Σ") // U+00A0 U+3000 U+2003
+    assert_eq(case_parse.strip(" 　Σ "), "Σ")  // U+00A0 U+3000 U+2003
     assert_eq(case_parse.lstrip(" Σ "), "Σ ")
     assert_eq(case_parse.rstrip(" Σ "), " Σ")
     assert_eq(case_parse.strip("  "), "")
@@ -151,7 +157,7 @@ use {
     assert_eq(case_parse.is_ascii("AZ09"), true)
     assert_eq(case_parse.isascii(""), true)
     assert_eq(case_parse.isascii("é"), false)
-    assert_eq(case_parse.isprintable("界é​ ͸"), true) // U+200B U+2028 U+0378
+    assert_eq(case_parse.isprintable("界é​ ͸"), true)  // U+200B U+2028 U+0378
     assert_eq(case_parse.isprintable(""), true)
     assert_eq(case_parse.isprintable("\n"), false)
     assert_eq(case_parse.isprintable(String.from_bytes([U8]{194, 133}) ?? panic("NEL fixture")), false)
@@ -172,14 +178,14 @@ use {
         (left: "Straße", right: "STRASSE", equal: true),
         (left: "É", right: "é", equal: true),
         (left: "Å", right: "å", equal: true),
-        (left: "Ạ̊", right: "ạ̊", equal: true), // final NFD ordering
-        (left: "Άͅ", right: "άι", equal: true), // initial NFD before fold U+0345
+        (left: "Ạ̊", right: "ạ̊", equal: true),  // final NFD ordering
+        (left: "Άͅ", right: "άι", equal: true),  // initial NFD before fold U+0345
         (left: "İ", right: "i̇", equal: true),
         (left: "İ", right: "i", equal: false),
         (left: "I", right: "ı", equal: false),
         (left: "ς", right: "σ", equal: true),
         (left: "ﬃ", right: "FFI", equal: true),
-        (left: "Ａ", right: "a", equal: false), // NOT NFKD
+        (left: "Ａ", right: "a", equal: false),  // NOT NFKD
         (left: "각", right: "각", equal: true),
         (left: "", right: "", equal: true),
         (left: "a", right: "", equal: false),

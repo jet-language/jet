@@ -23,11 +23,14 @@ run: fn() -> Never Err! {
     root: files.normalize("{here}/../../..")
     // What sourcing roots.sh leaves set: the environment with the machine's
     // env file over it, the state root, and the work directory under it.
-    roots: sys.env_text("""
+    roots: sys.env_text(
+        """
         JET_STATE_ROOT=${{JET_STATE_ROOT:-${{XDG_CACHE_HOME:-$HOME/.cache}}/jet-dev}}
         ENUM_CODEC_JET_WORK=${{ENUM_CODEC_JET_WORK:-$JET_STATE_ROOT/enum-codec-jet}}
         JET=${{JET:-}}
-        """, sys.env_file("{sys.config_dir() ?? ""}/jet/env"))
+        """,
+        sys.env_file("{sys.config_dir() ?? ""}/jet/env"),
+    )
     work: roots["ENUM_CODEC_JET_WORK"]
     if args.get(0) == Val("--build") {
         jet: roots["JET"]
@@ -46,6 +49,8 @@ run: fn() -> Never Err! {
         if form != "external" -> process.fail(77, "form {form} unavailable for the Jet AOT adapter")
     }
     bin: "{work}/.jet/build/adapter"
-    if !files.can_execute(bin) -> process.fail(2, "jet adapter is not built; run: JET=<jet binary> {sys.executable()} --build")
+    if !files.can_execute(bin) {
+        process.fail(2, "jet adapter is not built; run: JET=<jet binary> {sys.executable()} --build")
+    }
     process.exec([bin].concat(args))
 }

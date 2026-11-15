@@ -5,24 +5,29 @@ LibraryNote: struct {
         sites: [.Function]
     }
 }
+
 Fast: struct {
     impl Marker {
         group: #[LibraryNote(7), Scalar]
     }
 }
-inner: module {
-LibraryNote: struct {
-    value: String
 
-    impl Marker {
-        sites: [.Function]
+inner: module {
+    LibraryNote: struct {
+        value: String
+
+        impl Marker {
+            sites: [.Function]
+        }
     }
-}
-Fast: struct {
-    impl Marker {
-        group: #[LibraryNote("inner"), Inline]
+
+    Fast: struct {
+        impl Marker {
+            group: #[LibraryNote("inner"), Inline]
+        }
     }
+
+    #Fast direct: fn() {}
 }
-#Fast direct: fn() {}
-}
+
 run: fn() {}

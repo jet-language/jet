@@ -21,20 +21,33 @@ use {
 }
 
 JET_CLI_CANVAS_DEBUG_SCHEMA: 1
+
 // The one tier Canvas debugs on.
 JET_CLI_CANVAS_DEBUG_TIER: "native-lldb"
+
 JET_CLI_CANVAS_DEBUG_MAX_SESSIONS: 32
+
 JET_CLI_CANVAS_DEBUG_MAX_COMMANDS: 64
+
 JET_CLI_CANVAS_DEBUG_MAX_BREAKPOINTS: 128
+
 JET_CLI_CANVAS_DEBUG_MAX_WATCHES: 32
+
 // The longest command, watch name or breakpoint anchor, in bytes.
 JET_CLI_CANVAS_DEBUG_MAX_WORD_BYTES: 256
+
 JET_CLI_CANVAS_DEBUG_MAX_CALL_STACK: 32
+
 JET_CLI_CANVAS_DEBUG_MAX_CALL_STACK_BYTES: 16384
+
 JET_CLI_CANVAS_DEBUG_MAX_TRACE_LINES: 128
+
 JET_CLI_CANVAS_DEBUG_MAX_TRACE_BYTES: 32768
+
 JET_CLI_CANVAS_DEBUG_MAX_LOCALS: 64
+
 JET_CLI_CANVAS_DEBUG_MAX_VALUE_BYTES: 4096
+
 JET_CLI_CANVAS_DEBUG_MAX_MESSAGE_BYTES: 16384
 
 // A refused debug request: its jet.canvas.debug error kind and message.
@@ -83,7 +96,7 @@ JetCLICanvasDebugList: struct {
 // so they are plain state.
 JetCLICanvasDebugSessions: struct {
     next_id: Int
-    sessions: [String: JetCLICanvasDebugSession]
+    sessions: [String:JetCLICanvasDebugSession]
 
     // Run `commands` in the session `requested` names (a new one when None),
     // with breakpoints on `breakpoints` first. A program that ends ends its
@@ -104,14 +117,20 @@ JetCLICanvasDebugSessions: struct {
         loop line in breakpoints {
             if session.breakpoints.contains(line) || failed != None -> next
             session.breakpoints.push(line)
-            if jet_cli_canvas_debug_step(session, "break {line}") == .Err(failure) -> failed = Val(failure)
+            if jet_cli_canvas_debug_step(session, "break {line}") == .Err(failure) {
+                failed = Val(failure)
+            }
         }
         loop command in commands {
             if failed != None -> break
             if jet_cli_canvas_debug_step(session, command) == .Err(failure) -> failed = Val(failure)
         }
-        if failed == None && jet_cli_canvas_debug_step(session, "locals") == .Err(failure) -> failed = Val(failure)
-        if failed == None && jet_cli_canvas_debug_step(session, "bt") == .Err(failure) -> failed = Val(failure)
+        if failed == None && jet_cli_canvas_debug_step(session, "locals") == .Err(failure) {
+            failed = Val(failure)
+        }
+        if failed == None && jet_cli_canvas_debug_step(session, "bt") == .Err(failure) {
+            failed = Val(failure)
+        }
         if failed == .Val(failure) {
             jet_cli_canvas_debug_close(session)
             return Err(jet_cli_canvas_debug_unavailable(failure))
@@ -121,12 +140,14 @@ JetCLICanvasDebugSessions: struct {
         stop: session.stop
         if stop.kind != NativeStopKind.Paused {
             jet_cli_canvas_debug_close(session)
-            if stop.kind == NativeStopKind.Exited && stop.code == 0 -> return Ok(JetCLICanvasDebugRun{id: id, transcript: transcript, snapshot: None, running: false})
+            if stop.kind == NativeStopKind.Exited && stop.code == 0 {
+                return Ok(JetCLICanvasDebugRun{id: id, transcript: transcript, snapshot: None, running: false})
+            }
             return Err(jet_cli_canvas_debug_error("diagnostic", transcript))
         }
         snapshot := DebugSnapshot?{None}
         if session.live.snapshot() == {
-            .Ok(found) -> snapshot = found
+            .Ok(found) -> { snapshot = found }
             .Err(failure) -> {
                 jet_cli_canvas_debug_close(session)
                 return Err(jet_cli_canvas_debug_unavailable(failure))
@@ -154,7 +175,9 @@ JetCLICanvasDebugSessions: struct {
 
     // Make room for one more session: the oldest ends when all are taken.
     evict: fn(&self) {
-        if self.sessions.len() < JET_CLI_CANVAS_DEBUG_MAX_SESSIONS -> return
+        if self.sessions.len() < JET_CLI_CANVAS_DEBUG_MAX_SESSIONS {
+            return
+        }
         oldest := ""
         oldest_created := -1
         loop entry in self.sessions {
@@ -177,7 +200,9 @@ JetCLICanvasDebugSessions: struct {
         }
         stale: revision != current_revision || session.revision != revision
         self.release(id)
-        if stale -> return Err(jet_cli_canvas_debug_error("conflict", "debug session is stale for the current source revision"))
+        if stale {
+            return Err(jet_cli_canvas_debug_error("conflict", "debug session is stale for the current source revision"))
+        }
         Ok()
     }
 
@@ -196,7 +221,7 @@ JetCLICanvasDebugSessions: struct {
 }
 
 jet_cli_canvas_debug_sessions: fn() -> JetCLICanvasDebugSessions Never! {
-    JetCLICanvasDebugSessions{next_id: 1, sessions: [String: JetCLICanvasDebugSession]{}}
+    JetCLICanvasDebugSessions{next_id: 1, sessions: [String:JetCLICanvasDebugSession]{}}
 }
 
 jet_cli_canvas_debug_error: fn(kind: String, message: String) -> JetCLICanvasDebugError Never! {
@@ -235,7 +260,7 @@ jet_cli_canvas_debug_open: fn(file: String, source_id: String, revision: String,
     jet_lines: src.split("\n").to_list()
     opened := NativeDebugStep?{None}
     if live.open(jet_file, jet_lines) == {
-        .Ok(step) -> opened = step
+        .Ok(step) -> { opened = step }
         .Err(failure) -> {
             live.close()
             jet_cli_canvas_debug_remove(dir)
@@ -247,10 +272,21 @@ jet_cli_canvas_debug_open: fn(file: String, source_id: String, revision: String,
         jet_cli_canvas_debug_remove(dir)
         return Err(jet_cli_canvas_debug_error("diagnostic", "`{jet_file}` has no `run` function to debug"))
     }
-    Ok(JetCLICanvasDebugSession{
-        source_id: source_id, revision: revision, created: serial, dir: dir, jet_file: jet_file, jet_lines: jet_lines,
-        live: live, stop: first.stop, breakpoints: [Int]{}, commands: 0, transcript: first.text,
-    })
+    Ok(
+        JetCLICanvasDebugSession{
+            source_id: source_id,
+            revision: revision,
+            created: serial,
+            dir: dir,
+            jet_file: jet_file,
+            jet_lines: jet_lines,
+            live: live,
+            stop: first.stop,
+            breakpoints: [Int]{},
+            commands: 0,
+            transcript: first.text,
+        },
+    )
 }
 
 // Run one console command in a paused session, adding its report to the
@@ -280,8 +316,12 @@ jet_cli_canvas_debug_remove: fn(dir: String) {
 // request is a 409 carrying its jet.canvas.debug error.
 jet_cli_canvas_debug_answer: fn(debugs: &JetCLICanvasDebugSessions, state: Shared<CanvasHostState>, file: String, source_id: String, taken: CanvasHostEdit) {
     if jet_cli_canvas_debug_payload(debugs, state, file, source_id, taken.body) == {
-        .Ok(payload) -> taken.reply.send(CanvasHostReply{status: 200, body: canvas_machine_output("canvas.debug", true, payload)})
-        .Err(failure) -> taken.reply.send(CanvasHostReply{status: 409, body: canvas_machine_output("canvas.debug", false, jet_cli_canvas_debug_error_json(failure.kind, failure.message))})
+        .Ok(payload) -> {
+            taken.reply.send(CanvasHostReply{status: 200, body: canvas_machine_output("canvas.debug", true, payload)})
+        }
+        .Err(failure) -> {
+            taken.reply.send(CanvasHostReply{status: 409, body: canvas_machine_output("canvas.debug", false, jet_cli_canvas_debug_error_json(failure.kind, failure.message))})
+        }
     }
 }
 
@@ -291,12 +331,16 @@ jet_cli_canvas_debug_payload: fn(debugs: &JetCLICanvasDebugSessions, state: Shar
     parsed: foundation_json_parse(body) ?? return Err(jet_cli_canvas_debug_error("bad_request", "Canvas debug request is not JSON: {err.message}"))
     request: jet_cli_canvas_debug_request(parsed.move())
     revision: request.revision ?? return Err(jet_cli_canvas_debug_error("bad_request", "missing `revision`"))
-    if request.schema_version != JET_CLI_CANVAS_DEBUG_SCHEMA -> return Err(jet_cli_canvas_debug_error("schema", "Canvas debug schema_version must be 1"))
+    if request.schema_version != JET_CLI_CANVAS_DEBUG_SCHEMA {
+        return Err(jet_cli_canvas_debug_error("schema", "Canvas debug schema_version must be 1"))
+    }
     source_id: request.source_id ?? return Err(jet_cli_canvas_debug_error("bad_request", "missing `source_id`"))
     if jet_cli_canvas_debug_tier(request.tier) == .Val(refused) -> return Err(refused)
     session_id: request.session_id
     if source_id != entry_source {
-        if session_id != None -> return Err(jet_cli_canvas_debug_error("conflict", "the request names `{source_id}`, not the source `{entry_source}` the debug session is bound to"))
+        if session_id != None {
+            return Err(jet_cli_canvas_debug_error("conflict", "the request names `{source_id}`, not the source `{entry_source}` the debug session is bound to"))
+        }
         return Err(jet_cli_canvas_debug_error("not_found", "Canvas debug source_id must name the projected entry `{entry_source}`"))
     }
     src: read_source_without_symlinks(file) ?? {
@@ -314,15 +358,19 @@ jet_cli_canvas_debug_payload: fn(debugs: &JetCLICanvasDebugSessions, state: Shar
         return Err(jet_cli_canvas_debug_error("conflict", "source changed since this Canvas debug state was drawn"))
     }
     anchors := request.anchors.move()
-    if anchors.len() > JET_CLI_CANVAS_DEBUG_MAX_BREAKPOINTS -> return Err(jet_cli_canvas_debug_error("limit", "Canvas debug accepts at most 128 breakpoint spans of 256 bytes each"))
+    if anchors.len() > JET_CLI_CANVAS_DEBUG_MAX_BREAKPOINTS {
+        return Err(jet_cli_canvas_debug_error("limit", "Canvas debug accepts at most 128 breakpoint spans of 256 bytes each"))
+    }
     candidates := request.breakpoints.move()
     stale := [String]{}
     anchors.reverse()
     loop anchors.len() > 0 {
         anchor: anchors.pop() ?? break
-        if anchor.len() > JET_CLI_CANVAS_DEBUG_MAX_WORD_BYTES -> return Err(jet_cli_canvas_debug_error("limit", "Canvas debug accepts at most 128 breakpoint spans of 256 bytes each"))
+        if anchor.len() > JET_CLI_CANVAS_DEBUG_MAX_WORD_BYTES {
+            return Err(jet_cli_canvas_debug_error("limit", "Canvas debug accepts at most 128 breakpoint spans of 256 bytes each"))
+        }
         if jet_cli_canvas_debug_anchor(src, anchor) == {
-            .Val(span) -> candidates.push(jet_cli_canvas_debug_line_of(src, span.start))
+            .Val(span) -> { candidates.push(jet_cli_canvas_debug_line_of(src, span.start)) }
             .None -> stale.push(anchor)
         }
     }
@@ -334,7 +382,9 @@ jet_cli_canvas_debug_payload: fn(debugs: &JetCLICanvasDebugSessions, state: Shar
             stale.push("line:{line}")
             next
         }
-        if breakpoints.len() == 0 || breakpoints[breakpoints.len() - 1] != line -> breakpoints.push(line)
+        if breakpoints.len() == 0 || breakpoints[breakpoints.len() - 1] != line {
+            breakpoints.push(line)
+        }
     }
     watches: request.watches.move()
     commands: request.commands.move()
@@ -355,7 +405,9 @@ jet_cli_canvas_debug_payload: fn(debugs: &JetCLICanvasDebugSessions, state: Shar
 jet_cli_canvas_debug_tier: fn(tier: String?) -> JetCLICanvasDebugError? Never! {
     name: tier ?? return None
     if name == JET_CLI_CANVAS_DEBUG_TIER -> return None
-    if name == "jet-dev-replay" || name == "native-recorded" -> return Val(jet_cli_canvas_debug_error("unsupported", "the {name} Canvas debug tier is unavailable in this jet; use {JET_CLI_CANVAS_DEBUG_TIER}"))
+    if name == "jet-dev-replay" || name == "native-recorded" {
+        return Val(jet_cli_canvas_debug_error("unsupported", "the {name} Canvas debug tier is unavailable in this jet; use {JET_CLI_CANVAS_DEBUG_TIER}"))
+    }
     Val(jet_cli_canvas_debug_error("bad_request", "Canvas debug tier must be {JET_CLI_CANVAS_DEBUG_TIER}"))
 }
 
@@ -366,12 +418,20 @@ jet_cli_canvas_debug_limits: fn(commands: [String], breakpoints: [Int], watches:
         return Err(jet_cli_canvas_debug_error("limit", "Canvas debug accepts at most 64 commands, 128 breakpoints, and 32 watches per session"))
     }
     loop command in commands {
-        if command.len() > JET_CLI_CANVAS_DEBUG_MAX_WORD_BYTES -> return Err(jet_cli_canvas_debug_error("limit", "Canvas debug command and watch names are limited to 256 bytes"))
-        if !jet_cli_canvas_debug_known(command) -> return Err(jet_cli_canvas_debug_error("unsupported", "Canvas debug command `{command}` is not one of step, next, continue, finish, locals, print or backtrace"))
+        if command.len() > JET_CLI_CANVAS_DEBUG_MAX_WORD_BYTES {
+            return Err(jet_cli_canvas_debug_error("limit", "Canvas debug command and watch names are limited to 256 bytes"))
+        }
+        if !jet_cli_canvas_debug_known(command) {
+            return Err(jet_cli_canvas_debug_error("unsupported", "Canvas debug command `{command}` is not one of step, next, continue, finish, locals, print or backtrace"))
+        }
     }
     loop watch in watches {
-        if watch.len() > JET_CLI_CANVAS_DEBUG_MAX_WORD_BYTES -> return Err(jet_cli_canvas_debug_error("limit", "Canvas debug command and watch names are limited to 256 bytes"))
-        if jet_cli_canvas_debug_word_count(watch) != 1 -> return Err(jet_cli_canvas_debug_error("unsupported", "Canvas debug watches must be one source-level name"))
+        if watch.len() > JET_CLI_CANVAS_DEBUG_MAX_WORD_BYTES {
+            return Err(jet_cli_canvas_debug_error("limit", "Canvas debug command and watch names are limited to 256 bytes"))
+        }
+        if jet_cli_canvas_debug_word_count(watch) != 1 {
+            return Err(jet_cli_canvas_debug_error("unsupported", "Canvas debug watches must be one source-level name"))
+        }
     }
     Ok()
 }
@@ -478,7 +538,9 @@ jet_cli_canvas_debug_word_count: fn(text: String) -> Int Never! {
 jet_cli_canvas_debug_lines: fn(text: String) -> [String] Never! {
     lines := [String]{}
     loop line in text.split("\n") -> lines.push(line.removesuffix("\r"))
-    if lines.len() > 0 && lines[lines.len() - 1] == "" -> lines.pop().drop("the text ends with a line break")
+    if lines.len() > 0 && lines[lines.len() - 1] == "" {
+        lines.pop().drop("the text ends with a line break")
+    }
     lines
 }
 
@@ -521,7 +583,9 @@ jet_cli_canvas_debug_anchor: fn(src: String, anchor: String) -> Span? Never! {
     end: Int.parse(parts.after) ?? return None
     bytes: src.bytes()
     if start < 0 || start >= bytes.len() || start > end || end > bytes.len() -> return None
-    if !jet_cli_canvas_debug_boundary(bytes, start) || !jet_cli_canvas_debug_boundary(bytes, end) -> return None
+    if !jet_cli_canvas_debug_boundary(bytes, start) || !jet_cli_canvas_debug_boundary(bytes, end) {
+        return None
+    }
     Val(Span{start: start, end: end})
 }
 
@@ -589,7 +653,9 @@ jet_cli_canvas_debug_document: fn(state: Shared<CanvasHostState>, src: String, s
     loop wire in place.wire_ids -> wires.push(foundation_json_quote(wire))
     active_wire: if place.wire_ids.len() > 0 -> place.wire_ids[0] else -> ""
     marks := [String]{}
-    loop line in breakpoints -> marks.push("{{\"line\":{line},\"source_span\":{jet_cli_canvas_debug_span_json(jet_cli_canvas_debug_line_span(src, line))},\"state\":\"valid\"}}")
+    loop line in breakpoints {
+        marks.push("{{\"line\":{line},\"source_span\":{jet_cli_canvas_debug_span_json(jet_cli_canvas_debug_line_span(src, line))},\"state\":\"valid\"}}")
+    }
     loop anchor in stale {
         span_json: if jet_cli_canvas_debug_anchor(src, anchor) == {
             .Val(span) -> jet_cli_canvas_debug_span_json(span)
@@ -604,7 +670,9 @@ jet_cli_canvas_debug_document: fn(state: Shared<CanvasHostState>, src: String, s
     "{{\"protocol\":\"jet.canvas.debug\",\"schema_version\":{JET_CLI_CANVAS_DEBUG_SCHEMA},\"ok\":true,\"source_id\":{source_json},\"revision\":{revision_json},\"session\":{jet_cli_canvas_debug_session_json(ran.id, phase, source_id, revision)},\"overlay\":{overlay}}}"
 }
 
-jet_cli_canvas_debug_span_json: fn(span: Span) -> String Never! { "{{\"start\":{span.start},\"end\":{span.end}}}" }
+jet_cli_canvas_debug_span_json: fn(span: Span) -> String Never! {
+    "{{\"start\":{span.start},\"end\":{span.end}}}"
+}
 
 // The stop's locals (at most JET_CLI_CANVAS_DEBUG_MAX_LOCALS), or with
 // `watches` the watched ones, each with its Jet type and value.

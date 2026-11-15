@@ -13,10 +13,15 @@ run: fn() {
     backend := ui.tui_backend()
     render_backend: backend.copy()
     ui.reactive_render(fn() {
-        ui.mount(render_backend, ui.box([
-            ui.text(body.get()),
-            ui.button("Save", on_click: fn() { print("save") })
-        ]))
+        ui.mount(
+            render_backend,
+            ui.box(
+                [
+                    ui.text(body.get()),
+                    ui.button("Save", on_click: fn() { print("save") }),
+                ],
+            ),
+        )
     })
     loop line in backend.frame_lines() -> print("frame: {line}")
     body.set("new")

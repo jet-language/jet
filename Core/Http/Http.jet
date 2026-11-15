@@ -19,19 +19,28 @@ use {
     core.http.server.[HTTPMux]
     core.prelude.[SourceLocation]
 }
+
 C_MAX_BODY_BYTES: 1048576
+
 C_MAX_HEADER_BYTES: 32768
+
 C_MAX_HEADER_LINE_BYTES: 8192
+
 C_MAX_HEADER_COUNT: 100
+
 C_MAX_REQUEST_LINE_BYTES: 8192
+
 C_MAX_URL_BYTES: 8192
+
 // core.http — bounded HTTP/1.1 message semantics.
 //
 // The host bridge remains only a typed request/response transport leaf.
 // Method parsing, header/query/cookie codecs, request framing, response
 // parsing, limits, and all deterministic convenience behavior are Jet.
 client: module
+
 server: module
+
 #Error
 HTTPError: enum {
     InvalidMethod
@@ -80,7 +89,9 @@ Method: enum {
         Ok(Method.Custom(token))
     }
 
-    impl Display { display: fn(self) -> String { method_text(self) } }
+    impl Display {
+        display: fn(self) -> String { method_text(self) }
+    }
 }
 
 Version: enum {
@@ -90,10 +101,14 @@ Version: enum {
     HTTP3
 
     http_1_0: fn() -> Version Never! { Version.HTTP10 }
+
     http_1_1: fn() -> Version Never! { Version.HTTP11 }
+
     http_2: fn() -> Version Never! { Version.HTTP2 }
 
-    impl Display { display: fn(self) -> String { version_text(self) } }
+    impl Display {
+        display: fn(self) -> String { version_text(self) }
+    }
 }
 
 Status: struct {
@@ -107,7 +122,9 @@ Status: struct {
         Ok(status(code))
     }
 
-    impl Display { display: fn(self) -> String { "{self.code}" } }
+    impl Display {
+        display: fn(self) -> String { "{self.code}" }
+    }
 }
 
 Header: struct {
@@ -129,7 +146,9 @@ HeaderName: struct {
         Ok(HeaderName{__text: name})
     }
 
-    impl Display { display: fn(self) -> String { self.__text.copy() } }
+    impl Display {
+        display: fn(self) -> String { self.__text.copy() }
+    }
 }
 
 /// A checked field value: HTAB, space, visible ASCII and obs-text bytes
@@ -144,7 +163,9 @@ HeaderValue: struct {
         Ok(HeaderValue{__text: value})
     }
 
-    impl Display { display: fn(self) -> String { self.__text.copy() } }
+    impl Display {
+        display: fn(self) -> String { self.__text.copy() }
+    }
 }
 
 // What a Body holds: its bytes, or for a client response still on its
@@ -189,17 +210,22 @@ Body: struct {
 
     /// The body in pieces of at most `max_chunk` (1..=1 GiB) bytes.
     chunks: fn(self, max_chunk: Int{C_BODY_CHUNK_BYTES}) -[Net]> HTTPBodyChunks Never! {
-        if max_chunk < 1 || max_chunk > C_MAX_CONSUME_BYTES -> return HTTPBodyChunks{__bytes: [U8]{}, __max: 1, __error: Val(HTTPError.BodyTooLarge{limit: 0})}
+        if max_chunk < 1 || max_chunk > C_MAX_CONSUME_BYTES {
+            return HTTPBodyChunks{__bytes: [U8]{}, __max: 1, __error: Val(HTTPError.BodyTooLarge{limit: 0})}
+        }
         HTTPBodyChunks{__bytes: self.stream.held, __max: max_chunk, __live: self.stream.live}
     }
 }
 
 C_MAX_CONSUME_BYTES: 1073741824
+
 C_BODY_CHUNK_BYTES: 65536
 
 // A message body is read once, shared by every copy of its message: the
 // first `text`/`json` read takes it and later reads fail with BodyConsumed.
-priv HTTPBodyCell: struct { taken: Bool }
+priv HTTPBodyCell: struct {
+    taken: Bool
+}
 
 // A server request carries its connection's plain TCP socket (-1 over TLS),
 // shared by every copy, so core.net.ws.upgrade can take the connection over.
@@ -243,7 +269,9 @@ HTTPRequest: struct {
     __peer: String{""}
 
     method: fn(self) -> String Never! { self.method.copy() }
+
     path: fn(self) -> String Never! { self.path.copy() }
+
     body: fn(self) -> Body Never! { self.body.copy() }
 
     /// The body as text, at most `limit` bytes; the first read takes the body.
@@ -303,7 +331,9 @@ HTTPRequest: struct {
     }
 
     // `body(text)`.
-    __with_body: fn(self, text: String) -[Net]> HTTPRequest Never! { self.__with_body_value(body_text(text)) }
+    __with_body: fn(self, text: String) -[Net]> HTTPRequest Never! {
+        self.__with_body_value(body_text(text))
+    }
 
     // `with_body(request, body)`: any body, bytes kept as bytes.
     __with_body_value: fn(self, body: Body) -> HTTPRequest Never! {
@@ -332,61 +362,73 @@ HTTPRequest: struct {
         out.__timeout_ms = Val(ms)
         out
     }
+
     connect_timeout: fn(self, ms: Int) -[Net]> HTTPRequest Never! {
         out := self.copy()
         out.__connect_timeout_ms = Val(ms)
         out
     }
+
     read_timeout: fn(self, ms: Int) -[Net]> HTTPRequest Never! {
         out := self.copy()
         out.__read_timeout_ms = Val(ms)
         out
     }
+
     total_timeout: fn(self, ms: Int) -[Net]> HTTPRequest Never! {
         out := self.copy()
         out.__total_timeout_ms = Val(ms)
         out
     }
+
     dns_timeout: fn(self, ms: Int) -[Net]> HTTPRequest Never! {
         out := self.copy()
         out.__dns_timeout_ms = Val(ms)
         out
     }
+
     tls_timeout: fn(self, ms: Int) -[Net]> HTTPRequest Never! {
         out := self.copy()
         out.__tls_timeout_ms = Val(ms)
         out
     }
+
     write_timeout: fn(self, ms: Int) -[Net]> HTTPRequest Never! {
         out := self.copy()
         out.__write_timeout_ms = Val(ms)
         out
     }
+
     first_byte_timeout: fn(self, ms: Int) -[Net]> HTTPRequest Never! {
         out := self.copy()
         out.__first_byte_timeout_ms = Val(ms)
         out
     }
+
     redirects: fn(self, limit: Int) -[Net]> HTTPRequest Never! {
         out := self.copy()
         out.__redirects = Val(limit)
         out
     }
+
     proxy: fn(self, url: String) -[Net]> HTTPRequest Never! {
         out := self.copy()
         out.__proxy = Val(url)
         out
     }
+
     cookie: fn(self, name: String, value: String) -[Net]> HTTPRequest Never! {
         out := self.copy()
         out.__cookies.push(Header{name: name, value: value})
         out
     }
+
     form: fn(self, name: String, value: String) -[Net]> HTTPRequest Never! {
         out := self.copy()
         out.__form.push(Header{name: name, value: value})
         out
     }
+
     multipart_text: fn(self, name: String, value: String) -[Net]> HTTPRequest Never! {
         out := self.copy()
         out.__multipart.push(Header{name: name, value: value})
@@ -396,6 +438,7 @@ HTTPRequest: struct {
     send: fn(self) -[Net, Time.Wait]> HTTPResponse HTTPError! { provider.__send(self) }
 
     body_len: fn(self) -> Int Never! { body_len(self.body) }
+
     under_limit: fn(self, limit: Int) -> Bool Never! { body_len(self.body) <= limit }
 }
 
@@ -414,6 +457,7 @@ HTTPResponse: struct {
     __cell: Shared<HTTPBodyCell>?{None}
 
     status: fn(self) -> Int Never! { self.status }
+
     body: fn(self) -> Body Never! { self.body.copy() }
 
     /// The body as text, at most `limit` bytes; the first read takes the body.
@@ -441,7 +485,9 @@ HTTPResponse: struct {
 
     trailers: fn(self, fields: &&Headers) -[Net]> HTTPResponse HTTPError! {
         loop field in fields.fields {
-            if !client_header_name(field.name) || !client_header_value(field.value) -> return Err(.InvalidHeader)
+            if !client_header_name(field.name) || !client_header_value(field.value) {
+                return Err(.InvalidHeader)
+            }
         }
         out := self.copy()
         out.__trailers = Val(fields)
@@ -449,9 +495,13 @@ HTTPResponse: struct {
     }
 
     cookies: fn(self) -> [String] Never! { headers_all(self.headers, "set-cookie") }
+
     redirect_history: fn(self) -> [String] Never! { self.__redirect_history.copy() }
+
     timings: fn(self) -> [Int] Never! { self.__timings.copy() }
+
     reused_connection: fn(self) -> Bool Never! { self.__reused }
+
     raw_content_encoding: fn(self) -> String? Never! { self.__raw_encoding.copy() }
 }
 
@@ -481,9 +531,9 @@ __HTTPBodyCursor: struct {
     live: Shared<provider.LiveBody>?
 
     impl Iterator {
-        Item: Result<[U8], HTTPError>
+        Item: [U8] HTTPError!
 
-        next: fn(&self) -[Net]> Result<[U8], HTTPError>? {
+        next: fn(&self) -[Net]> ([U8] HTTPError!)? {
             if self.done -> return None
             if self.error == .Val(error) {
                 self.done = true
@@ -600,9 +650,14 @@ priv text_response: fn(status: Int, text: String) -> HTTPResponse Never! {
 
 priv client_response: fn(status: Int, body: Body, fields: Headers, redirect_history: [String], timings: [Int], reused: Bool, raw_encoding: String?, body_error: HTTPError?) -> HTTPResponse Never! {
     HTTPResponse{
-        status: status, body: body, headers: fields,
-        __redirect_history: redirect_history, __timings: timings, __reused: reused,
-        __raw_encoding: raw_encoding, __body_error: body_error,
+        status: status,
+        body: body,
+        headers: fields,
+        __redirect_history: redirect_history,
+        __timings: timings,
+        __reused: reused,
+        __raw_encoding: raw_encoding,
+        __body_error: body_error,
         __cell: Val(Shared{HTTPBodyCell{taken: false}}),
     }
 }
@@ -640,7 +695,9 @@ client_header_name: fn(name: String) -> Bool Never! {
     loop byte in raw {
         n: Int{byte}
         alnum: (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
-        if !alnum && n != 33 && n != 35 && n != 36 && n != 37 && n != 38 && n != 39 && n != 42 && n != 43 && n != 45 && n != 46 && n != 94 && n != 95 && n != 96 && n != 124 && n != 126 -> return false
+        if !alnum && n != 33 && n != 35 && n != 36 && n != 37 && n != 38 && n != 39 && n != 42 && n != 43 && n != 45 && n != 46 && n != 94 && n != 95 && n != 96 && n != 124 && n != 126 {
+            return false
+        }
     }
     true
 }
@@ -712,9 +769,7 @@ router: fn() -> HTTPRouter Never! {
 }
 
 // The router's route table, for `web.openapi(router)`.
-priv router_mux: fn(router: HTTPRouter) -> HTTPMux Never! {
-    router.__mux
-}
+priv router_mux: fn(router: HTTPRouter) -> HTTPMux Never! { router.__mux }
 
 // A request message, leniently: lines may end in `\n` or `\r\n`, a message
 // without a blank line is all head lines, and an unparseable message is
@@ -791,7 +846,9 @@ version_parse: fn(token: String) -> Version Never! {
 
 // Why a custom route method token was refused.
 #Error
-__MethodTokenError: struct { reason: String }
+__MethodTokenError: struct {
+    reason: String
+}
 
 // The one check of a custom route method token (`mux.custom(token, …)`,
 // `router.custom` and `#Server.Custom`): the compiler runs it on a static
@@ -800,67 +857,124 @@ __MethodTokenError: struct { reason: String }
 // token that is exactly a standard method is refused, since that method has
 // its own verb.
 __method_token_check: fn(token: String) __MethodTokenError! -[]> {
-    if !valid_method(token) -> return Err(__MethodTokenError{reason: "`{token}` is not an HTTP method token: a method is one or more letters, digits or characters of !#$%&'*+-.^_`|~"})
+    if !valid_method(token) {
+        return Err(__MethodTokenError{reason: "`{token}` is not an HTTP method token: a method is one or more letters, digits or characters of !#$%&'*+-.^_`|~"})
+    }
     standard: method_parse(token)
-    if standard != Method.Custom(token.copy()) && method_text(standard) == token -> return Err(__MethodTokenError{reason: "`{token}` is a standard method, which registers with its own verb `{token.lower()}`"})
+    if standard != Method.Custom(token.copy()) && method_text(standard) == token {
+        return Err(__MethodTokenError{reason: "`{token}` is a standard method, which registers with its own verb `{token.lower()}`"})
+    }
     Ok()
 }
 
 status: fn(code: Int) -> Status Never! { Status{code: code, reason: reason_phrase(code)} }
+
 status_ok: fn() -> Status Never! { status(200) }
+
 status_created: fn() -> Status Never! { status(201) }
+
 status_no_content: fn() -> Status Never! { status(204) }
+
 status_moved: fn() -> Status Never! { status(301) }
+
 status_found: fn() -> Status Never! { status(302) }
+
 status_bad_request: fn() -> Status Never! { status(400) }
+
 status_unauthorized: fn() -> Status Never! { status(401) }
+
 status_forbidden: fn() -> Status Never! { status(403) }
+
 status_not_found: fn() -> Status Never! { status(404) }
+
 status_timeout: fn() -> Status Never! { status(408) }
+
 status_server_error: fn() -> Status Never! { status(500) }
+
 status_continue: fn() -> Status Never! { status(100) }
+
 status_switching: fn() -> Status Never! { status(101) }
+
 status_accepted: fn() -> Status Never! { status(202) }
+
 status_non_authoritative: fn() -> Status Never! { status(203) }
+
 status_reset_content: fn() -> Status Never! { status(205) }
+
 status_partial: fn() -> Status Never! { status(206) }
+
 status_multi_status: fn() -> Status Never! { status(207) }
+
 status_already_reported: fn() -> Status Never! { status(208) }
+
 status_see_other: fn() -> Status Never! { status(303) }
+
 status_not_modified: fn() -> Status Never! { status(304) }
+
 status_temporary: fn() -> Status Never! { status(307) }
+
 status_permanent: fn() -> Status Never! { status(308) }
+
 status_payment_required: fn() -> Status Never! { status(402) }
+
 status_method_not_allowed: fn() -> Status Never! { status(405) }
+
 status_not_acceptable: fn() -> Status Never! { status(406) }
+
 status_conflict: fn() -> Status Never! { status(409) }
+
 status_gone: fn() -> Status Never! { status(410) }
+
 status_length_required: fn() -> Status Never! { status(411) }
+
 status_precondition_failed: fn() -> Status Never! { status(412) }
+
 status_payload_too_large: fn() -> Status Never! { status(413) }
+
 status_uri_too_long: fn() -> Status Never! { status(414) }
+
 status_unsupported_media: fn() -> Status Never! { status(415) }
+
 status_range_unsat: fn() -> Status Never! { status(416) }
+
 status_expectation_failed: fn() -> Status Never! { status(417) }
+
 status_teapot: fn() -> Status Never! { status(418) }
+
 status_unprocessable: fn() -> Status Never! { status(422) }
+
 status_locked: fn() -> Status Never! { status(423) }
+
 status_failed_dependency: fn() -> Status Never! { status(424) }
+
 status_too_early: fn() -> Status Never! { status(425) }
+
 status_upgrade_required: fn() -> Status Never! { status(426) }
+
 status_precondition_required: fn() -> Status Never! { status(428) }
+
 status_too_many: fn() -> Status Never! { status(429) }
+
 status_legal: fn() -> Status Never! { status(451) }
+
 status_not_implemented: fn() -> Status Never! { status(501) }
+
 status_bad_gateway: fn() -> Status Never! { status(502) }
+
 status_unavailable: fn() -> Status Never! { status(503) }
+
 status_gateway_timeout: fn() -> Status Never! { status(504) }
+
 status_http_version: fn() -> Status Never! { status(505) }
 
 is_informational: fn(s: Status) -> Bool Never! { s.code >= 100 && s.code < 200 }
+
 is_success: fn(s: Status) -> Bool Never! { s.code >= 200 && s.code < 300 }
+
 is_redirect: fn(s: Status) -> Bool Never! { s.code >= 300 && s.code < 400 }
+
 is_client_error: fn(s: Status) -> Bool Never! { s.code >= 400 && s.code < 500 }
+
 is_server_error: fn(s: Status) -> Bool Never! { s.code >= 500 && s.code < 600 }
 
 headers: fn() -> Headers Never! { Headers{fields: [Header]{}} }
@@ -893,9 +1007,7 @@ headers_set: fn(h: Headers, name: String, value: String) -> Headers Never! {
                 fields.push(Header{name: name, value: trim(value)})
                 replaced = true
             }
-        } else {
-            fields.push(f.copy())
-        }
+        } else { fields.push(f.copy()) }
     }
     if !replaced -> fields.push(Header{name: name, value: trim(value)})
     Headers{fields: fields}
@@ -934,17 +1046,25 @@ headers_parse: fn(lines: [String]) -> Headers Never! {
         name_bytes: slice_b(raw, 0, col)
         value: slice_b(raw, col + 1, raw.len())
         name: String.from_bytes(name_bytes) ?? ""
-        if valid_header_name(name) && !has_ctl(value) -> h = headers_append(h, name, String.from_bytes(value) ?? "")
+        if valid_header_name(name) && !has_ctl(value) {
+            h = headers_append(h, name, String.from_bytes(value) ?? "")
+        }
     }
     h
 }
 
 body_empty: fn() -> Body Never! { body_bytes([U8]{}) }
+
 body_text: fn(text: String) -> Body Never! { body_bytes(text.bytes()) }
-body_bytes: fn(bytes: [U8]) -> Body Never! { Body{stream: body_carrier.BodyStream{held: bytes, live: None}} }
+
+body_bytes: fn(bytes: [U8]) -> Body Never! {
+    Body{stream: body_carrier.BodyStream{held: bytes, live: None}}
+}
 
 // A client response's body still on its connection.
-priv body_live: fn(live: &&provider.LiveBody) -> Body Never! { Body{stream: body_carrier.BodyStream{held: [U8]{}, live: Val(Shared{live})}} }
+priv body_live: fn(live: &&provider.LiveBody) -> Body Never! {
+    Body{stream: body_carrier.BodyStream{held: [U8]{}, live: Val(Shared{live})}}
+}
 
 // The `http.Body.text(text, media_type)`, `http.Body.form(fields)` and
 // `http.Body.json(value)` constructors: sema checks the call and runs these.
@@ -1015,6 +1135,7 @@ body_as_bytes: fn(body: Body) -> [U8] Never! {
     if body.stream.live == .Val(cell) -> return provider.live_seen(cell)
     body.stream.held
 }
+
 body_len: fn(body: Body) -> Int Never! { body_as_bytes(body).len() }
 
 // All of a body's bytes, reading a body still on its connection to its end.
@@ -1118,16 +1239,15 @@ trim: fn(text: String) -> String Never! {
     end := raw.len()
     loop start < end {
         n: Int{raw[start]}
-        if n == 32 || n == 9 || n == 13 || n == 10 -> start = start + 1 else -> break
+        if n == 32 || n == 9 || n == 13 || n == 10 -> start += 1 else -> break
     }
     loop end > start {
         n: Int{raw[end - 1]}
-        if n == 32 || n == 9 || n == 13 || n == 10 -> end = end - 1 else -> break
+        if n == 32 || n == 9 || n == 13 || n == 10 -> end -= 1 else -> break
     }
     if end <= start -> return ""
     String.from_bytes(slice_b(raw, start, end)) ?? ""
 }
-
 
 get: fn(url: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     if !valid_url(url) -> return Err(.InvalidURL)
@@ -1166,19 +1286,18 @@ head: fn(url: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     send_request(req)
 }
 
-
 exchange: fn(method: String, url: String, body: String, header_lines: [String]) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     if !valid_method_token(method) -> return Err(.InvalidMethod)
     if !valid_url(url) -> return Err(.InvalidURL)
     if body.bytes().len() > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
-    if !headers_lines_bounded(header_lines) || !headers_lines_valid(header_lines) -> return Err(.InvalidHeader)
+    if !headers_lines_bounded(header_lines) || !headers_lines_valid(header_lines) {
+        return Err(.InvalidHeader)
+    }
     parsed: headers_parse(header_lines)
     send_request(request_with(method_parse(method), url, parsed, body_text(body)))
 }
 
-send_request: fn(req: HTTPRequest) -[Net, Time.Wait]> HTTPResponse HTTPError! {
-    provider.send(req)
-}
+send_request: fn(req: HTTPRequest) -[Net, Time.Wait]> HTTPResponse HTTPError! { provider.send(req) }
 
 parse_response: fn(url: String, raw: [U8]) -> HTTPResponse HTTPError! {
     split := find_double_crlf(raw)
@@ -1190,20 +1309,30 @@ parse_response: fn(url: String, raw: [U8]) -> HTTPResponse HTTPError! {
     if raw.len() - split > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
     body_raw: slice_b(raw, split, raw.len())
     lines: split_lines(head)
-    if lines.len() == 0 || lines[0].bytes().len() > C_MAX_REQUEST_LINE_BYTES -> return Err(.InvalidStatus)
+    if lines.len() == 0 || lines[0].bytes().len() > C_MAX_REQUEST_LINE_BYTES {
+        return Err(.InvalidStatus)
+    }
     parsed: parse_status_line(lines[0]) ?? return Err(.InvalidStatus)
     hdr_lines := [String]{}
     loop i in 1..<lines.len() {
         if lines[i].bytes().len() > 0 -> hdr_lines.push(lines[i])
     }
-    if !headers_lines_bounded(hdr_lines) || !headers_lines_valid(hdr_lines) -> return Err(.InvalidHeader)
+    if !headers_lines_bounded(hdr_lines) || !headers_lines_valid(hdr_lines) {
+        return Err(.InvalidHeader)
+    }
     h := headers_parse(hdr_lines)
     if has_ambiguous_framing(h) -> return Err(.InvalidFraming)
     if has_unsupported_encoding(h) -> return Err(.UnsupportedEncoding)
-    if response_forbids_content_length(parsed.status.code) && has_header(h, "content-length") -> return Err(.InvalidFraming)
+    if response_forbids_content_length(parsed.status.code) && has_header(h, "content-length") {
+        return Err(.InvalidFraming)
+    }
     expected: content_length(h)
-    if parsed.status.code != 304 && (expected > C_MAX_BODY_BYTES || (expected >= 0 && expected != body_raw.len())) -> return Err(.InvalidFraming)
-    if response_forbids_body(parsed.status.code) && body_raw.len() > 0 -> return Err(.InvalidFraming)
+    if parsed.status.code != 304 && (expected > C_MAX_BODY_BYTES || (expected >= 0 && expected != body_raw.len())) {
+        return Err(.InvalidFraming)
+    }
+    if response_forbids_body(parsed.status.code) && body_raw.len() > 0 {
+        return Err(.InvalidFraming)
+    }
     body_text: String.from_bytes(body_raw) ?? return Err(.UnsupportedEncoding)
     parsed_response := text_response(parsed.status.code, body_text)
     loop line in hdr_lines {
@@ -1225,7 +1354,9 @@ parse_request: fn(raw: [U8]) -> HTTPRequest HTTPError! {
     if raw.len() - split > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
     body_len: raw.len() - split
     lines: split_lines(head)
-    if lines.len() == 0 || lines[0].bytes().len() > C_MAX_REQUEST_LINE_BYTES -> return Err(.InvalidMethod)
+    if lines.len() == 0 || lines[0].bytes().len() > C_MAX_REQUEST_LINE_BYTES {
+        return Err(.InvalidMethod)
+    }
     parts: split_space_line(lines[0])
     if parts.len() != 3 -> return Err(.InvalidMethod)
     if !valid_method(parts[0]) -> return Err(.InvalidMethod)
@@ -1237,7 +1368,9 @@ parse_request: fn(raw: [U8]) -> HTTPRequest HTTPError! {
     }
     parsed_version: version_parse(parts[2])
     if version_text(parsed_version) != parts[2] -> return Err(.Protocol{version: parts[2]})
-    if parsed_version == Version.HTTP2 || parsed_version == Version.HTTP3 -> return Err(.Protocol{version: parts[2]})
+    if parsed_version == Version.HTTP2 || parsed_version == Version.HTTP3 {
+        return Err(.Protocol{version: parts[2]})
+    }
     hlines := [String]{}
     loop i in 1..<lines.len() {
         if lines[i].bytes().len() > 0 -> hlines.push(lines[i])
@@ -1255,7 +1388,9 @@ parse_request: fn(raw: [U8]) -> HTTPRequest HTTPError! {
     if has_ambiguous_framing(h) -> return Err(.InvalidFraming)
     if has_unsupported_encoding(h) -> return Err(.UnsupportedEncoding)
     expected: content_length(h)
-    if expected > C_MAX_BODY_BYTES || (expected >= 0 && expected != body_len) || (expected < 0 && body_len > 0) -> return Err(.InvalidFraming)
+    if expected > C_MAX_BODY_BYTES || (expected >= 0 && expected != body_len) || (expected < 0 && body_len > 0) {
+        return Err(.InvalidFraming)
+    }
     fields := headers()
     loop line in hlines {
         col := index_byte(line.bytes(), 58)
@@ -1293,7 +1428,7 @@ parse_status_line: fn(line: String) -> StatusLine? {
         i := 3
         loop i < parts.len() {
             reason = "{reason} {parts[i]}"
-            i = i + 1
+            i += 1
         }
     }
     Val(StatusLine{version: parsed_version, status: Status{code: code, reason: reason}})
@@ -1311,10 +1446,8 @@ split_space_line: fn(text: String) -> [String] Never! {
             if i == start -> return [String]{}
             out.push(String.from_bytes(slice_b(raw, start, i)) ?? "")
             start = i + 1
-        } else if n < 32 || n == 127 {
-            return [String]{}
-        }
-        i = i + 1
+        } else if n < 32 || n == 127 { return [String]{} }
+        i += 1
     }
     if start == raw.len() -> return [String]{}
     out.push(String.from_bytes(slice_b(raw, start, raw.len())) ?? "")
@@ -1325,17 +1458,19 @@ find_double_crlf: fn(raw: [U8]) -> Int Never! {
     if raw.len() < 4 -> return -1
     i := 0
     loop i + 3 < raw.len() {
-        if raw[i] == (U8{13}) && raw[i + 1] == (U8{10}) && raw[i + 2] == (U8{13}) && raw[i + 3] == (U8{10}) -> return i + 4
-        i = i + 1
+        if raw[i] == (U8{13}) && raw[i + 1] == (U8{10}) && raw[i + 2] == (U8{13}) && raw[i + 3] == (U8{10}) {
+            return i + 4
+        }
+        i += 1
     }
     -1
 }
-
 
 header_text_end: fn(raw: [U8], split: Int) -> Int Never! {
     if split >= 4 && raw[split - 4] == (U8{13}) -> return split - 4
     split - 2
 }
+
 strict_crlf: fn(raw: [U8], end: Int) -> Bool Never! {
     i := 0
     loop i < end {
@@ -1344,7 +1479,7 @@ strict_crlf: fn(raw: [U8], end: Int) -> Bool Never! {
         } else if raw[i] == (U8{10}) {
             if i == 0 || raw[i - 1] != (U8{13}) -> return false
         }
-        i = i + 1
+        i += 1
     }
     true
 }
@@ -1357,16 +1492,15 @@ split_lines: fn(text: String) -> [String] Never! {
     loop i < raw.len() {
         if raw[i] == (U8{10}) {
             end := i
-            if end > start && raw[end - 1] == (U8{13}) -> end = end - 1
+            if end > start && raw[end - 1] == (U8{13}) -> end -= 1
             out.push(String.from_bytes(slice_b(raw, start, end)) ?? "")
             start = i + 1
         }
-        i = i + 1
+        i += 1
     }
     if start < raw.len() -> out.push(String.from_bytes(slice_b(raw, start, raw.len())) ?? "")
     out
 }
-
 
 Cookie: struct {
     name: String
@@ -1414,13 +1548,9 @@ query_set: fn(q: Query, key: String, value: String) -> Query Never! {
                 pairs.push(QueryPair{key: key, value: value})
                 replaced = true
             }
-        } else {
-            pairs.push(p.copy())
-        }
+        } else { pairs.push(p.copy()) }
     }
-    if !replaced {
-        pairs.push(QueryPair{key: key, value: value})
-    }
+    if !replaced -> pairs.push(QueryPair{key: key, value: value})
     Query{pairs: pairs}
 }
 
@@ -1457,13 +1587,14 @@ FormPolicy: enum {
 // Why a strict form or query decode refused its input.
 #Error
 FormDecodeError: enum {
-    // A % not followed by two hex digits.
     Escape
-    // Decoded bytes that are not UTF-8.
     UTF8
-    // Input above 1 MiB.
     TooLarge
 }
+
+// A % not followed by two hex digits.
+// Decoded bytes that are not UTF-8.
+// Input above 1 MiB.
 
 // The fields of a query or form, in order: one leading ? is stripped, empty
 // segments are skipped, a field without = has an empty value, and an empty
@@ -1483,7 +1614,7 @@ priv form_split: fn(text: String, policy: FormPolicy) -> Query FormDecodeError! 
         if i == raw.len() || raw[i] == (U8{38}) {
             if i > start {
                 eq := start
-                loop eq < i && raw[eq] != (U8{61}) -> eq = eq + 1
+                loop eq < i && raw[eq] != (U8{61}) -> eq += 1
                 value_start: if eq < i -> eq + 1 else -> i
                 key: form_scan(raw, start, eq, policy) ?? return Err(err)
                 value: form_scan(raw, value_start, i, policy) ?? return Err(err)
@@ -1491,7 +1622,7 @@ priv form_split: fn(text: String, policy: FormPolicy) -> Query FormDecodeError! 
             }
             start = i + 1
         }
-        i = i + 1
+        i += 1
     }
     Ok(Query{pairs: pairs})
 }
@@ -1504,7 +1635,7 @@ priv form_scan: fn(raw: [U8], from: Int, to: Int, policy: FormPolicy) -> String 
         b: raw[i]
         if b == (U8{43}) {
             out.push(U8{32})
-            i = i + 1
+            i += 1
             next
         }
         if b == (U8{37}) {
@@ -1513,14 +1644,14 @@ priv form_scan: fn(raw: [U8], from: Int, to: Int, policy: FormPolicy) -> String 
                 lo: from_hex(raw[i + 2])
                 if hi >= 0 && lo >= 0 {
                     out.push(U8{hi * 16 + lo})
-                    i = i + 3
+                    i += 3
                     next
                 }
             }
             if policy == FormPolicy.Strict -> return Err(.Escape)
         }
         out.push(b)
-        i = i + 1
+        i += 1
     }
     if policy == FormPolicy.Strict -> return Ok(String.from_bytes(out) ?? return Err(.UTF8))
     Ok(String.from_bytes(out) ?? utf8_replacing(out))
@@ -1553,7 +1684,7 @@ priv utf8_replacing: fn(bytes: [U8]) -> String Never! {
             byte: Int{bytes[at + good]}
             valid: if good == 1 -> byte >= low && byte <= high else -> byte >= 128 && byte <= 191
             if !valid -> break
-            good = good + 1
+            good += 1
         }
         if width > 0 && good == width {
             loop k in 0..<width -> out.push(bytes[at + k])
@@ -1562,7 +1693,7 @@ priv utf8_replacing: fn(bytes: [U8]) -> String Never! {
             out.push(U8{191})
             out.push(U8{189})
         }
-        at = at + good
+        at += good
     }
     String.from_bytes(out) ?? ""
 }
@@ -1580,10 +1711,15 @@ form_component_decode_strict: fn(text: String) -> String FormDecodeError! {
 }
 
 query_decode: fn(text: String) -> Query Never! { form_split(text, FormPolicy.Tolerant) ?? query() }
-query_decode_strict: fn(text: String) -> Query FormDecodeError! { form_split(text, FormPolicy.Strict) }
+
+query_decode_strict: fn(text: String) -> Query FormDecodeError! {
+    form_split(text, FormPolicy.Strict)
+}
 
 form_encode: fn(q: Query) -> String Never! { query_encode(q) }
+
 form_decode: fn(text: String) -> Query Never! { query_decode(text) }
+
 form_decode_strict: fn(text: String) -> Query FormDecodeError! { query_decode_strict(text) }
 
 #Test("form components decode once, tolerant by WHATWG replacement or strict by refusal") {
@@ -1659,7 +1795,9 @@ cookie_encode: fn(c: Cookie) -> String Never! {
     if c.max_age >= 0 -> s = "{s}; Max-Age={c.max_age}"
     if c.http_only -> s = "{s}; HttpOnly"
     if c.secure -> s = "{s}; Secure"
-    if c.same_site == "Strict" || c.same_site == "Lax" || c.same_site == "None" -> s = "{s}; SameSite={c.same_site}"
+    if c.same_site == "Strict" || c.same_site == "Lax" || c.same_site == "None" {
+        s = "{s}; SameSite={c.same_site}"
+    }
     if s.bytes().len() > C_MAX_HEADER_LINE_BYTES -> return ""
     s
 }
@@ -1686,7 +1824,7 @@ cookies_parse: fn(header: String) -> [Cookie] Never! {
             first = false
             start = i + 1
         }
-        i = i + 1
+        i += 1
     }
     out
 }
@@ -1697,15 +1835,14 @@ basic_auth: fn(user: String, password: String) -> String Never! {
 }
 
 bearer_auth: fn(token: String) -> String Never! { "Bearer {token}" }
+
 with_header: fn(req: HTTPRequest, name: String, value: String) -> HTTPRequest Never! {
     if !valid_header_name(name) || has_ctl(value.bytes()) -> return req.copy()
     req.__with_header(name, value)
 }
 
 // The body as given: a byte body stays bytes.
-with_body: fn(req: HTTPRequest, body: Body) -> HTTPRequest Never! {
-    req.__with_body_value(body)
-}
+with_body: fn(req: HTTPRequest, body: Body) -> HTTPRequest Never! { req.__with_body_value(body) }
 
 with_query: fn(url: String, q: Query) -> String Never! {
     enc: query_encode(q)
@@ -1738,8 +1875,14 @@ response_ok: fn(body: Body) -> HTTPResponse Never! {
     make_response(200, body.copy(), fields)
 }
 
-response_json_headers: fn() -> Headers Never! { headers_set(headers(), "content-type", "application/json; charset=utf-8") }
-response_text_headers: fn() -> Headers Never! { headers_set(headers(), "content-type", "text/plain; charset=utf-8") }
+response_json_headers: fn() -> Headers Never! {
+    headers_set(headers(), "content-type", "application/json; charset=utf-8")
+}
+
+response_text_headers: fn() -> Headers Never! {
+    headers_set(headers(), "content-type", "text/plain; charset=utf-8")
+}
+
 has_header: fn(h: Headers, name: String) -> Bool Never! { headers_get(h, name) != None }
 
 content_length: fn(h: Headers) -> Int Never! {
@@ -1769,7 +1912,7 @@ valid_url: fn(url: String) -> Bool Never! {
         if raw[end] == (U8{47}) || raw[end] == (U8{63}) || raw[end] == (U8{35}) -> break
         n: Int{raw[end]}
         if n <= 32 || n >= 127 || n == 34 || n == 92 -> return false
-        end = end + 1
+        end += 1
     }
     end > start
 }
@@ -1788,7 +1931,7 @@ parse_content_length_value: fn(text: String) -> Int? {
             first = n
             start = i + 1
         }
-        i = i + 1
+        i += 1
     }
     if first < 0 -> return None
     Val(first)
@@ -1813,6 +1956,7 @@ has_line_ctl: fn(bytes: [U8]) -> Bool Never! {
 response_forbids_body: fn(code: Int) -> Bool Never! {
     (code >= 100 && code < 200) || code == 204 || code == 205 || code == 304
 }
+
 response_forbids_content_length: fn(code: Int) -> Bool Never! {
     (code >= 100 && code < 200) || code == 204
 }
@@ -1860,6 +2004,7 @@ valid_host_value: fn(value: String) -> Bool Never! {
     parsed: http_url.parse("http://{raw}") ?? return false
     parsed.host() != None && parsed.userinfo().bytes().len() == 0 && parsed.path() == "/" && parsed.query().bytes().len() == 0 && parsed.fragment() == None
 }
+
 token_char: fn(n: Int) -> Bool Never! {
     (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 33 || n == 35 || n == 36 || n == 37 || n == 38 || n == 39 || n == 42 || n == 43 || n == 45 || n == 46 || n == 94 || n == 95 || n == 96 || n == 124 || n == 126
 }
@@ -1882,9 +2027,6 @@ has_unsupported_encoding: fn(h: Headers) -> Bool Never! {
     }
     false
 }
-
-
-
 
 valid_header_line: fn(line: String) -> Bool Never! {
     raw: line.bytes()
@@ -1923,6 +2065,7 @@ valid_header_name: fn(name: String) -> Bool Never! {
     }
     true
 }
+
 has_ctl: fn(bytes: [U8]) -> Bool Never! {
     loop b in bytes {
         n: Int{b}
@@ -1937,7 +2080,9 @@ valid_cookie_token: fn(name: String) -> Bool {
     if raw.len() == 0 -> return false
     loop b in raw {
         n: Int{b}
-        if n <= 32 || n >= 127 || n == 34 || n == 40 || n == 41 || n == 44 || n == 47 || n == 58 || n == 59 || n == 60 || n == 61 || n == 62 || n == 63 || n == 64 || n == 91 || n == 92 || n == 93 || n == 123 || n == 125 -> return false
+        if n <= 32 || n >= 127 || n == 34 || n == 40 || n == 41 || n == 44 || n == 47 || n == 58 || n == 59 || n == 60 || n == 61 || n == 62 || n == 63 || n == 64 || n == 91 || n == 92 || n == 93 || n == 123 || n == 125 {
+            return false
+        }
     }
     true
 }
@@ -1975,9 +2120,7 @@ percent_encode: fn(text: String) -> String {
     loop b in text.bytes() {
         n: Int{b}
         unreserved := (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 45 || n == 46 || n == 95 || n == 126
-        if unreserved -> out.push(b)
-        else if n == 32 -> out.push(U8{43})
-        else {
+        if unreserved -> out.push(b) else if n == 32 -> out.push(U8{43}) else {
             out.push(U8{37})
             out.push(hex_digit(n /% 16))
             out.push(hex_digit(n %% 16))
@@ -2003,7 +2146,7 @@ base64_encode: fn(bytes: [U8]) -> String Never! {
         out.push(alphabet[(block /% 4096) %% 64])
         if have_b -> out.push(alphabet[(block /% 64) %% 64]) else -> out.push(U8{61})
         if have_c -> out.push(alphabet[block %% 64]) else -> out.push(U8{61})
-        i = i + 3
+        i += 3
     }
     String.from_bytes(out) ?? ""
 }
@@ -2034,7 +2177,7 @@ last_index: fn(raw: [U8], code: Int) -> Int {
     i := raw.len() - 1
     loop i >= 0 {
         if (Int{raw[i]}) == code -> return i
-        i = i - 1
+        i -= 1
     }
     -1
 }
@@ -2066,7 +2209,4 @@ slice_str: fn(text: String, start: Int, end: Int) -> String {
     String.from_bytes(slice_b(text.bytes(), start, end)) ?? ""
 }
 
-slice_b: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
-    raw.slice(start, end)
-}
-
+slice_b: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! { raw.slice(start, end) }

@@ -8,6 +8,7 @@ package: {
         reactive: .Library{ entry: reactive }
     }
 }
+
 loadable: module
 
 // Reactive values are immutable Jet carriers. `signal` builds a fresh cell at
@@ -34,15 +35,11 @@ Effect: struct {
     active: Bool
 }
 
-unsubscribe: fn(e: Effect) -> Effect Never! {
-    Effect{last: e.last, active: false}
-}
+unsubscribe: fn(e: Effect) -> Effect Never! { Effect{last: e.last, active: false} }
 
 is_active: fn(e: Effect) -> Bool Never! { e.active }
 
-signal: fn<T>(value: T) -> Signal<T> Never! {
-    Signal<T>{value: value, version: 0}
-}
+signal: fn<T>(value: T) -> Signal<T> Never! { Signal<T>{value: value, version: 0} }
 
 set: fn<T>(sig: Signal<T>, value: T) -> Signal<T> Never! {
     Signal<T>{value: value, version: sig.version + 1}

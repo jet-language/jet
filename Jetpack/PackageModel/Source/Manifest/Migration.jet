@@ -1,7 +1,5 @@
 // The canonical Package/Config formatter.
-use {
-    jet_parser.[jet_format_source]
-}
+use jet_parser.[jet_format_source]
 
 // Why a Package/Config source cannot be formatted (Rust `String` errors).
 #Error
@@ -56,9 +54,13 @@ pkg_format_source: fn(text: String, origin: String) -> String PackageFormatError
         }
     }
     if is_config {
-        if ConfigFacts.parse(text, origin) == .Err(error) -> return Err(PackageFormatError{message: error.message()})
+        if ConfigFacts.parse(text, origin) == .Err(error) {
+            return Err(PackageFormatError{message: error.message()})
+        }
     } else {
-        if PackageFacts.parse(text, origin) == .Err(error) -> return Err(PackageFormatError{message: error.message()})
+        if PackageFacts.parse(text, origin) == .Err(error) {
+            return Err(PackageFormatError{message: error.message()})
+        }
     }
     markers: if is_config -> [PackageMarker]{} else -> pkg_package_markers(text) ?? return Err(PackageFormatError{message: err.message()})
     // The comments above the first header marker stay above the header, a
@@ -68,11 +70,15 @@ pkg_format_source: fn(text: String, origin: String) -> String PackageFormatError
     last_end := -1
     loop comment in source.comments {
         if comment.start >= first -> break
-        if last_end >= 0 && pkg_format_newlines(pkg_binder_slice(source.masked, last_end, comment.start)) > 1 -> leading = "{leading}\n"
+        if last_end >= 0 && pkg_format_newlines(pkg_binder_slice(source.masked, last_end, comment.start)) > 1 {
+            leading = "{leading}\n"
+        }
         leading = "{leading}{pkg_binder_slice(source.text, comment.start, comment.end)}\n"
         last_end = comment.end
     }
-    if last_end >= 0 && pkg_format_newlines(pkg_binder_slice(source.masked, last_end, first)) > 1 -> leading = "{leading}\n"
+    if last_end >= 0 && pkg_format_newlines(pkg_binder_slice(source.masked, last_end, first)) > 1 {
+        leading = "{leading}\n"
+    }
     header := leading
     loop marker in markers {
         header = if marker.args == "" -> "{header}#{marker.name}\n" else -> "{header}#{marker.name}({marker.args})\n"
@@ -81,9 +87,13 @@ pkg_format_source: fn(text: String, origin: String) -> String PackageFormatError
     // same offsets, read from the first marker on.
     record: ManifestSource{text: source.text, masked: pkg_package_markers_masked(source.masked, markers), comments: source.comments}
     body: pkg_format_body(record, first, record.masked.bytes().len(), 0, true)
-    if body.entries == 0 -> return Err(PackageFormatError{message: "Package or Config source has no fields"})
+    if body.entries == 0 {
+        return Err(PackageFormatError{message: "Package or Config source has no fields"})
+    }
     formatted: "{header}{body.lines.join("\n")}\n"
-    if pkg_comment_texts(formatted) != pkg_comment_texts(text) -> return Err(PackageFormatError{message: "Package or Config formatter would move a comment out of order in `{origin}`"})
+    if pkg_comment_texts(formatted) != pkg_comment_texts(text) {
+        return Err(PackageFormatError{message: "Package or Config formatter would move a comment out of order in `{origin}`"})
+    }
     Ok(formatted)
 }
 
@@ -108,7 +118,9 @@ pkg_has_comment: fn(source: ManifestSource, start: Int, end: Int) -> Bool Never!
 pkg_format_body: fn(source: ManifestSource, start: Int, end: Int, indent: Int, top: Bool) -> ManifestBody Never! {
     region: pkg_binder_slice(source.masked, start, end)
     cores := [EditSpan]{}
-    loop span in pkg_top_level_entry_spans(region) -> cores.push(pkg_trim_span(source.masked, EditSpan{start: start + span.start, end: start + span.end}))
+    loop span in pkg_top_level_entry_spans(region) {
+        cores.push(pkg_trim_span(source.masked, EditSpan{start: start + span.start, end: start + span.end}))
+    }
     comma: pkg_package_top_level_comma(region) != None
     trailing_comma: pkg_package_has_trailing_top_level_comma(region)
     pad: " ".repeat(indent)
@@ -129,10 +141,14 @@ pkg_format_body: fn(source: ManifestSource, start: Int, end: Int, indent: Int, t
             text: pkg_binder_slice(source.text, comment.start, comment.end)
             same_line: pkg_format_newlines(pkg_binder_slice(source.masked, last_end, comment.start)) == 0
             if {
-                entry_line && same_line -> lines[lines.len() - 1] = "{lines[lines.len() - 1]} {text}"
+                entry_line && same_line -> {
+                    lines[lines.len() - 1] = "{lines[lines.len() - 1]} {text}"
+                }
                 entry_index == 0 && !top && same_line -> open.push(text)
                 else -> {
-                    if top && lines.len() > 0 && pkg_format_newlines(pkg_binder_slice(source.masked, last_end, comment.start)) > 1 -> lines.push("")
+                    if top && lines.len() > 0 && pkg_format_newlines(pkg_binder_slice(source.masked, last_end, comment.start)) > 1 {
+                        lines.push("")
+                    }
                     lines.push("{pad}{text}")
                 }
             }
@@ -141,7 +157,9 @@ pkg_format_body: fn(source: ManifestSource, start: Int, end: Int, indent: Int, t
         }
         if entry_index == cores.len() -> break
         core: cores[entry_index]
-        if top && lines.len() > 0 && pkg_format_newlines(pkg_binder_slice(source.masked, last_end, core.start)) > 1 -> lines.push("")
+        if top && lines.len() > 0 && pkg_format_newlines(pkg_binder_slice(source.masked, last_end, core.start)) > 1 {
+            lines.push("")
+        }
         separator: if comma && (entry_index + 1 < cores.len() || trailing_comma) -> "," else -> ""
         lines.push("{pad}{pkg_format_entry_at(source, core, indent)}{separator}")
         entry_line = true
@@ -175,9 +193,13 @@ pkg_format_entry_at: fn(source: ManifestSource, core: EditSpan, indent: Int) -> 
     entry: pkg_binder_slice(source.masked, core.start, core.end)
     binding: pkg_split_package_binding(entry) ?? return pkg_format_value_at(source, core, indent)
     colon: core.start + binding.left.bytes().len()
-    if pkg_has_comment(source, core.start, colon + 1) -> return pkg_binder_slice(source.text, core.start, core.end)
+    if pkg_has_comment(source, core.start, colon + 1) {
+        return pkg_binder_slice(source.text, core.start, core.end)
+    }
     left: pkg_binder_words(binding.left).join(" ")
-    if pkg_is_function_value(binding.right) -> return pkg_format_function_entry(left, pkg_binder_slice(source.text, colon + 1, core.end), indent)
+    if pkg_is_function_value(binding.right) {
+        return pkg_format_function_entry(left, pkg_binder_slice(source.text, colon + 1, core.end), indent)
+    }
     "{left}: {pkg_format_value_at(source, pkg_trim_span(source.masked, EditSpan{start: colon + 1, end: core.end}), indent)}"
 }
 
@@ -271,16 +293,16 @@ pkg_package_record_bounds: fn(value: String) -> EditSpan? Never! {
             }
             next
         }
-        if code == 34 {
-            quoted = true
-        } else if code == 123 {
+        if code == 34 -> quoted = true else if code == 123 {
             if open < 0 -> open = index
             depth += 1
         } else if code == 125 {
             depth -= 1
             if depth == 0 {
                 if open < 0 -> return None
-                if pkg_bytes_text(raw, index + 1, raw.len()).trim() == "" -> return Val(EditSpan{start: open, end: index})
+                if pkg_bytes_text(raw, index + 1, raw.len()).trim() == "" {
+                    return Val(EditSpan{start: open, end: index})
+                }
                 return None
             }
         }

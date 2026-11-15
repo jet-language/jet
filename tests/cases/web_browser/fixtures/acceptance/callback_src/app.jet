@@ -1,4 +1,5 @@
 #[Target(Web), HTML(Path{"index.html"})]
+
 // D-JSBIND1: JS event callback invokes a #Export(wasm) bridge (JS -> Wasm
 // inside a browser-style handler), proving callback + compute round-trip.
 use {
@@ -12,9 +13,7 @@ double: fn(n: Int) -> Int { n * 2 }
 #Target(JS)
 init: fn() {
     host.on("#go", "click", fn(ev) {
-        if double(21) == 42 {
-            print("42")
-        }
+        if double(21) == 42 -> print("42")
         local.set("clicked", "yes")
     })
 }

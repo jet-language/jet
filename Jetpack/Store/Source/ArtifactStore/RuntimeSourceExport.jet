@@ -15,13 +15,14 @@ NativeRuntimeScope: enum {
     InherentImpl
     TraitImpl
     Function
-    // A `macro_rules!` body: the items it generates when the runtime invokes
-    // it are part of the runtime boundary (`store_runtime_export_macro_line`).
     Macro
-    // A module-level `thread_local! { … }` block: its statics are items.
     ThreadLocal
     Other
 }
+
+// A `macro_rules!` body: the items it generates when the runtime invokes
+// it are part of the runtime boundary (`store_runtime_export_macro_line`).
+// A module-level `thread_local! { … }` block: its statics are items.
 
 // One open brace and the item it belongs to.
 NativeRuntimeScopeLevel: struct {
@@ -63,14 +64,20 @@ store_runtime_export_source: fn(source: String) -> String Never! {
             raw: line.bytes()
             out.push("{pkg_bytes_text(raw, 0, raw.len() - line.trim_start().bytes().len())}#[macro_export]\n")
         }
-        out.push(if {
-            macro_level >= 0 -> store_runtime_export_macro_line(line, masked, depth == macro_level + 1)
-            direct && pending == "" -> store_runtime_export_line(line, masked, scope)
-            else -> line
-        })
-        if code != "" -> macro_exported = code == "#[macro_export]" || (macro_exported && code.starts_with("#"))
+        out.push(
+            if {
+                macro_level >= 0 -> store_runtime_export_macro_line(line, masked, depth == macro_level + 1)
+                direct && pending == "" -> store_runtime_export_line(line, masked, scope)
+                else -> line
+            },
+        )
+        if code != "" {
+            macro_exported = code == "#[macro_export]" || (macro_exported && code.starts_with("#"))
+        }
         if {
-            direct && pending == "" && store_runtime_starts_item_header(code, scope) -> pending = "{code} "
+            direct && pending == "" && store_runtime_starts_item_header(code, scope) -> {
+                pending = "{code} "
+            }
             direct && pending != "" -> pending = "{pending}{code} "
             else -> {}
         }
@@ -84,7 +91,9 @@ store_runtime_export_source: fn(source: String) -> String Never! {
                 }
                 125 -> {
                     if depth > 0 -> depth -= 1
-                    loop scopes.len() > 0 && scopes[scopes.len() - 1].level > depth -> _ := scopes.pop()
+                    loop scopes.len() > 0 && scopes[scopes.len() - 1].level > depth {
+                        _ := scopes.pop()
+                    }
                     pending = ""
                 }
                 59 -> {
@@ -133,7 +142,9 @@ store_runtime_export_line: fn(line: String, masked: String, scope: NativeRuntime
         .Val(rest) -> "{lead}pub {rest}"
         .None -> if body.starts_with("pub ") -> line else -> "{lead}pub {body}"
     }
-    if scope == NativeRuntimeScope.Module && store_runtime_is_tuple_struct(code) -> return store_runtime_export_tuple_field(exported)
+    if scope == NativeRuntimeScope.Module && store_runtime_is_tuple_struct(code) {
+        return store_runtime_export_tuple_field(exported)
+    }
     exported
 }
 
@@ -154,7 +165,9 @@ store_runtime_export_macro_line: fn(line: String, masked: String, transcriber_it
             .None -> {}
         }
     }
-    if transcriber_item && !code.starts_with("pub") && store_runtime_starts_exportable_item(code) -> return "{lead}pub {body}"
+    if transcriber_item && !code.starts_with("pub") && store_runtime_starts_exportable_item(code) {
+        return "{lead}pub {body}"
+    }
     line.copy()
 }
 
@@ -217,9 +230,7 @@ store_runtime_starts_with_any: fn(code: String, prefixes: [String]) -> Bool Neve
 
 store_runtime_starts_exportable_item: fn(code: String) -> Bool Never! {
     item: store_runtime_strip_visibility(code)
-    store_runtime_starts_with_any(item, [String]{"fn ", "struct ", "enum ", "union ", "trait ", "type ", "const ", "static ", "mod "})
-        || store_runtime_starts_with_any(item, [String]{"unsafe fn ", "async fn ", "const fn ", "async unsafe fn "})
-        || ((item.starts_with("unsafe extern ") || item.starts_with("extern ")) && item.contains(" fn "))
+    store_runtime_starts_with_any(item, [String]{"fn ", "struct ", "enum ", "union ", "trait ", "type ", "const ", "static ", "mod "}) || store_runtime_starts_with_any(item, [String]{"unsafe fn ", "async fn ", "const fn ", "async unsafe fn "}) || ((item.starts_with("unsafe extern ") || item.starts_with("extern ")) && item.contains(" fn "))
 }
 
 store_runtime_starts_impl_member: fn(code: String) -> Bool Never! {
@@ -233,7 +244,9 @@ store_runtime_looks_like_struct_field: fn(code: String) -> Bool Never! {
     raw: item.bytes()
     colon: store_artifact_find(raw, ":".bytes(), 0)
     if colon < 0 -> return false
-    if pkg_bytes_text(raw, 0, colon).ends_with(":") || pkg_bytes_code(raw, colon + 1) == 58 -> return false
+    if pkg_bytes_text(raw, 0, colon).ends_with(":") || pkg_bytes_code(raw, colon + 1) == 58 {
+        return false
+    }
     name: pkg_bytes_text(raw, 0, colon).trim()
     if name == "" -> return false
     loop byte in name.bytes() {

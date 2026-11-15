@@ -11,7 +11,6 @@ package: {
 // the standard streams 0 to 2, is refused when the spec runs, before any
 // child starts. `directory.duplicate()` hands the child a fresh handle to
 // the same directory, so the parent keeps using its own.
-
 use {
     files: core.files
     process: core.process
@@ -52,12 +51,12 @@ run: fn() {
     first: files.open(files.join(scratch.path, "input.txt"))
     second: files.open(files.join(scratch.path, "input.txt"))
     if process.cmd(["true"]).keep_open(first, at: 73).keep_open(second, at: 73).run() == {
-        .Ok(_) -> print("same slot twice: started")
+        .Ok(_) -> { print("same slot twice: started") }
         .Err(error) -> print("same slot twice: {error == .InvalidInput(_)}")
     }
     stdio: files.open(files.join(scratch.path, "input.txt"))
     if process.cmd(["true"]).keep_open(stdio, at: 2).run() == {
-        .Ok(_) -> print("stdio slot: started")
+        .Ok(_) -> { print("stdio slot: started") }
         .Err(error) -> print("stdio slot: {error == .InvalidInput(_)}")
     }
 }

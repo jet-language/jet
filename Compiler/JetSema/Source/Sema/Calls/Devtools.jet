@@ -75,8 +75,14 @@ sema_call_devtools_field_name: fn(expr: Expr) -> String? Never! {
 }
 
 sema_call_devtools_text_arg: fn(label: String, text: String, span: Span) -> CallArg Never! {
-    CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: span, id: AST_NODE_GENERATED},
-        span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: Val(CallLabel{name: label, span: span}), spread: false}
+    CallArg{
+        convention: AccessConvention.Read,
+        expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: span, id: AST_NODE_GENERATED},
+        span: span,
+        flags: AST_EMPTY_CALL_ARG_FLAGS,
+        label: Val(CallLabel{name: label, span: span}),
+        spread: false,
+    }
 }
 
 // Rust `panel_for_field(package, module, field)` then
@@ -175,7 +181,9 @@ sema_check_devtools_panel: fn(func: Func, environment: SemaScopeEnvironment, pro
         return
     }
     state_name := ""
-    if func.params[0].ty == .Named(name) -> state_name = name.copy() else -> return
+    if func.params[0].ty == .Named(name) -> state_name = name.copy() else {
+        return
+    }
     state: sema_devtools_package_struct(environment, program, state_name) ?? {
         diagnostics.push(sema_devtools_panel_error("E1411", func.name, "panel state type `{state_name}` is not a declared struct", "declare `{state_name}: struct` in the same package", func.params[0].ty_span))
         return

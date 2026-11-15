@@ -1,5 +1,10 @@
+Stats: struct {
+    count: Int
+    sum: Int
+    low: Int
+    high: Int
+}
 
-Stats: struct { count: Int, sum: Int, low: Int, high: Int }
 stats: fn(lo: Int, hi: Int) -> Stats {
     if hi - lo <= 1 {
         leaf := Stats{count: 0, sum: 0, low: lo, high: lo}
@@ -15,6 +20,7 @@ stats: fn(lo: Int, hi: Int) -> Stats {
     b: stats(mid, hi)
     Stats{count: a.count + b.count, sum: a.sum + b.sum, low: a.low, high: b.high}
 }
+
 run: fn() {
     s: stats(0, 8)
     print(s.count)

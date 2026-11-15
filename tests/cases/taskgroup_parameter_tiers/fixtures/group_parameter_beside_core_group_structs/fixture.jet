@@ -6,9 +6,7 @@ package: {
     authority: { allow: [IO, Time.Wait] }
 }
 
-use {
-    sys: core.sys
-}
+use sys: core.sys
 
 print_next: fn(group: Group, value: Int) {
     handle: task value + 1
@@ -16,15 +14,15 @@ print_next: fn(group: Group, value: Int) {
 }
 
 start_all: fn(group: Group, left: Int) {
-    if left == 0 -> return
+    if left == 0 {
+        return
+    }
     handle: task left * 10
     start_all(group, left - 1)
     print(handle.join() ?? panic("task failed"))
 }
 
-describe: fn(entry: sys.Group) -> String {
-    "{entry.name}:{entry.gid}:{entry.members.join(",")}"
-}
+describe: fn(entry: sys.Group) -> String { "{entry.name}:{entry.gid}:{entry.members.join(",")}" }
 
 run: fn() {
     task.group group {

@@ -4,14 +4,23 @@
 // stringly escape hatch here.
 use {
     jet_foundation.[
-        CallArg, CtEnumArg, CtKey, CtMapEntry, CtValue, Expr, NamedCtValue, Span,
-        ast_comptime_key_to_value, ast_comptime_value_show, expr_span,
+        CallArg,
+        CtEnumArg,
+        CtKey,
+        CtMapEntry,
+        CtValue,
+        Expr,
+        NamedCtValue,
+        Span,
+        ast_comptime_key_to_value,
+        ast_comptime_value_show,
+        expr_span,
         type_name,
     ]
     jetpack_foundation.[BUILTIN_FIND]
 }
 
-envmodel_evaluate_integration_imports: fn(imports: [Expr], scope: ModuleEvalScope, globals: [String: CtValue]) -> [EnvironmentIntegration] EnvModelEvalError! {
+envmodel_evaluate_integration_imports: fn(imports: [Expr], scope: ModuleEvalScope, globals: [String:CtValue]) -> [EnvironmentIntegration] EnvModelEvalError! {
     leaves := [Expr]{}
     loop import in imports -> envmodel_collect_import_leaves(import, leaves)
     integrations := [EnvironmentIntegration]{}
@@ -27,7 +36,9 @@ envmodel_evaluate_integration_imports: fn(imports: [Expr], scope: ModuleEvalScop
         }
         if existing == {
             .Val(item) -> {
-                if item != integration -> return Err(envmodel_error("E1335", "integration `{integration.name}` has conflicting declarations", "one environment graph cannot silently choose different SDK, host, credential, or grant facts", "merge the integration options so they agree, or keep one declaration", Val(call.name_span)))
+                if item != integration {
+                    return Err(envmodel_error("E1335", "integration `{integration.name}` has conflicting declarations", "one environment graph cannot silently choose different SDK, host, credential, or grant facts", "merge the integration options so they agree, or keep one declaration", Val(call.name_span)))
+                }
             }
             .None -> { integrations.push(integration) }
         }
@@ -51,7 +62,9 @@ envmodel_collect_import_leaves: fn(expr: Expr, out: &[Expr]) Never! {
         .ListLit(items, _, _) -> {
             loop item in items -> envmodel_collect_import_leaves(item, out)
         }
-        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> { out.push(expr.copy()) }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {
+            out.push(expr.copy())
+        }
     }
 }
 
@@ -63,7 +76,7 @@ envmodel_integration_takes_secrets: fn(kind: IntegrationKind) -> Bool Never! {
     }
 }
 
-envmodel_evaluate_integration_call: fn(name: String, args: [CallArg], kind: IntegrationKind, scope: ModuleEvalScope, globals: [String: CtValue]) -> EnvironmentIntegration EnvModelEvalError! {
+envmodel_evaluate_integration_call: fn(name: String, args: [CallArg], kind: IntegrationKind, scope: ModuleEvalScope, globals: [String:CtValue]) -> EnvironmentIntegration EnvModelEvalError! {
     integration := EnvironmentIntegration{kind: kind, name: name, preset: kind.as_str()}
     if kind == {
         .Android -> {
@@ -132,14 +145,18 @@ envmodel_evaluate_integration_call: fn(name: String, args: [CallArg], kind: Inte
     Ok(integration)
 }
 
-envmodel_integration_arg_value: fn(expr: Expr, scope: ModuleEvalScope, globals: [String: CtValue]) -> CtValue EnvModelEvalError! {
-    if envmodel_record_literal(expr) == .Val(record) -> return Ok(envmodel_integration_arg_value(record, scope, globals))
+envmodel_integration_arg_value: fn(expr: Expr, scope: ModuleEvalScope, globals: [String:CtValue]) -> CtValue EnvModelEvalError! {
+    if envmodel_record_literal(expr) == .Val(record) {
+        return Ok(envmodel_integration_arg_value(record, scope, globals))
+    }
     if expr == {
         .Ident(name, _, _) -> Ok(CtValue.Str{value: name})
         .Field(base, member, _, _) -> Ok(CtValue.Str{value: "{envmodel_expression_name(base)}.{member}"})
         .ListLit(values, _, _) -> {
             items := [CtValue]{}
-            loop value in values -> items.push(envmodel_integration_arg_value(value, scope, globals))
+            loop value in values {
+                items.push(envmodel_integration_arg_value(value, scope, globals))
+            }
             Ok(CtValue.List{values: items})
         }
         .MapLit(pairs, _, _) -> {
@@ -156,15 +173,21 @@ envmodel_integration_arg_value: fn(expr: Expr, scope: ModuleEvalScope, globals: 
         }
         .StructLit(type_name, _, _, _, fields, _, _, _) -> {
             lowered := [NamedCtValue]{}
-            loop field in fields -> lowered.push(NamedCtValue{name: field.name, value: envmodel_integration_arg_value(field.value, scope, globals)})
+            loop field in fields {
+                lowered.push(NamedCtValue{name: field.name, value: envmodel_integration_arg_value(field.value, scope, globals)})
+            }
             Ok(CtValue.Struct{type_name: type_name, fields: lowered})
         }
         .EnumLit(type_name, variant, _, args, _, _, _) -> {
             lowered := [CtEnumArg]{}
             loop arg in args {
                 if arg == {
-                    .Positional(value) -> { lowered.push(CtEnumArg{label: None, value: envmodel_integration_arg_value(value, scope, globals)}) }
-                    .Named(label, value) -> { lowered.push(CtEnumArg{label: Val(label), value: envmodel_integration_arg_value(value, scope, globals)}) }
+                    .Positional(value) -> {
+                        lowered.push(CtEnumArg{label: None, value: envmodel_integration_arg_value(value, scope, globals)})
+                    }
+                    .Named(label, value) -> {
+                        lowered.push(CtEnumArg{label: Val(label), value: envmodel_integration_arg_value(value, scope, globals)})
+                    }
                 }
             }
             Ok(CtValue.Enum{type_name: type_name, variant: variant, args: lowered})
@@ -185,7 +208,7 @@ envmodel_lower_integration_arg: fn(integration: &EnvironmentIntegration, key: St
                 integration.losses.push("{key}: secret input must be a named reference; value was redacted")
             } else {
                 loop name in names {
-                    if !integration.secrets.contains(name) { integration.secrets.push(name) }
+                    if !integration.secrets.contains(name) -> integration.secrets.push(name)
                 }
             }
             integration.options[key] = "<redacted-names>"
@@ -195,12 +218,16 @@ envmodel_lower_integration_arg: fn(integration: &EnvironmentIntegration, key: St
                 .Map(entries) -> {
                     loop entry in entries {
                         if entry.key == {
-                            .Str(host) -> integration.options["host.{host}"] = envmodel_integration_value_text(entry.value)
+                            .Str(host) -> {
+                                integration.options["host.{host}"] = envmodel_integration_value_text(entry.value)
+                            }
                             .Int(_) | .BigInt(_) | .Bool(_) | .Char(_) | .Tuple(_) | .Struct(_, _) | .Enum(_, _) -> {}
                         }
                     }
                 }
-                .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> integration.options[key] = display
+                .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {
+                    integration.options[key] = display
+                }
             }
         }
         .Android | .Apple | .CodexAgent | .Editor -> integration.options[key] = display
@@ -258,12 +285,16 @@ envmodel_integration_value_text: fn(value: CtValue) -> String Never! {
         }
         .Map(entries) -> {
             parts := [String]{}
-            loop entry in entries -> parts.push("{envmodel_integration_key_text(entry.key)}={envmodel_integration_value_text(entry.value)}")
+            loop entry in entries {
+                parts.push("{envmodel_integration_key_text(entry.key)}={envmodel_integration_value_text(entry.value)}")
+            }
             parts.join(",")
         }
         .Struct(_, fields) -> {
             parts := [String]{}
-            loop field in fields -> parts.push("{field.name}={envmodel_integration_value_text(field.value)}")
+            loop field in fields {
+                parts.push("{field.name}={envmodel_integration_value_text(field.value)}")
+            }
             parts.join(",")
         }
         .Float(_) | .BigInt(_) | .Bytes(_) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> ast_comptime_value_show(value)

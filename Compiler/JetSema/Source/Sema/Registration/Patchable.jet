@@ -64,7 +64,9 @@ sema_patchable_expand: fn(items: &[Item]) {
 
 sema_patchable_eligible: fn(definition: StructDef) -> Bool Never! {
     marked: loop derived in definition.derives {
-        if derived.name == "Patchable" -> break true
+        if derived.name == "Patchable" {
+            break true
+        }
     } ?? false
     if !marked || definition.type_params.len() != 0 -> return false
     loop field in definition.fields {

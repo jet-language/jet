@@ -66,7 +66,9 @@ sema_type_metadata_variant_auto_ok: fn(payload: VariantPayload) -> Bool Never! {
 sema_type_metadata_enum_auto_ok: fn(definition: EnumDef) -> Bool Never! {
     if definition.is_single_use -> return false
     loop variant_index in 0..<definition.variants.len() {
-        if !sema_type_metadata_variant_auto_ok(definition.variants[variant_index].payload) -> return false
+        if !sema_type_metadata_variant_auto_ok(definition.variants[variant_index].payload) {
+            return false
+        }
     }
     true
 }

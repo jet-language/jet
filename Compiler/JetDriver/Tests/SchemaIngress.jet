@@ -45,11 +45,17 @@ use {
         .IO(error, actual) -> {
             assert(actual == Val((bytes)))
             if error == {
-                .InvalidInput(context) -> assert(context.operation == .Read && (context.resource ?? "") == path && context.os_code == None && context.cause == Val("stream did not contain valid UTF-8"))
-                .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> panic("schema UTF-8 failure was not an invalid-input read")
+                .InvalidInput(context) -> {
+                    assert(context.operation == .Read && (context.resource ?? "") == path && context.os_code == None && context.cause == Val("stream did not contain valid UTF-8"))
+                }
+                .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
+                    panic("schema UTF-8 failure was not an invalid-input read")
+                }
             }
         }
-        .Missing(_) | .Invalid(_, _) | .Parsed(_, _) -> panic("schema UTF-8 failure lost actual bytes or read classification")
+        .Missing(_) | .Invalid(_, _) | .Parsed(_, _) -> {
+            panic("schema UTF-8 failure lost actual bytes or read classification")
+        }
     }
     assert(load_snapshot(root, "Account") == None)
     schema_test_files.remove(path) ?? panic("remove schema fixture file")

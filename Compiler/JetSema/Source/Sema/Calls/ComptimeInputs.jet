@@ -48,9 +48,7 @@ sema_comptime_input_literal: fn(expression: Expr) -> String? Never! {
 }
 
 // The name a comptime input's path or glob stands for: `\` read as `/`.
-sema_comptime_input_named: fn(path: String) -> String Never! {
-    path.replace("\\", "/")
-}
+sema_comptime_input_named: fn(path: String) -> String Never! { path.replace("\\", "/") }
 
 // The path law of a comptime input's normalized name (`named`), judged after
 // any `toolchain:` prefix: "absolute" for an absolute name, "parent" for a
@@ -72,7 +70,9 @@ sema_comptime_input_noun: fn(builtin: String) -> String Never! {
 sema_comptime_input_path_error: fn(builtin: String, problem: String, call: Call) -> Diagnostic {
     span: call.name_span
     noun: sema_comptime_input_noun(builtin)
-    if problem == "absolute" -> return sema_error("E0957", span, "`{builtin}` {noun} must be relative", "an absolute {noun} reaches outside the project", "use a {noun} relative to this file's own directory")
+    if problem == "absolute" {
+        return sema_error("E0957", span, "`{builtin}` {noun} must be relative", "an absolute {noun} reaches outside the project", "use a {noun} relative to this file's own directory")
+    }
     sema_error("E0957", span, "`{builtin}` {noun} can't use `..`", "comptime inputs are named from this file's own directory down, so a build can audit them; `..` is refused even when it names a file inside the package", "drop the `..` and use a {noun} under this file's directory")
 }
 
@@ -82,7 +82,9 @@ sema_comptime_input_path_error: fn(builtin: String, problem: String, call: Call)
 sema_comptime_input_value_problem: fn(builtin: String, named: String, span: Span) -> Diagnostic? {
     problem: sema_comptime_input_path_law(named) ?? return None
     noun: sema_comptime_input_noun(builtin)
-    if problem == "absolute" -> return Val(sema_error("E0957", span, "`{builtin}` {noun} `{named}` must be relative", "an absolute {noun} reaches outside the project, and this one was computed at build time", "compute a {noun} relative to this file's own directory"))
+    if problem == "absolute" {
+        return Val(sema_error("E0957", span, "`{builtin}` {noun} `{named}` must be relative", "an absolute {noun} reaches outside the project, and this one was computed at build time", "compute a {noun} relative to this file's own directory"))
+    }
     Val(sema_error("E0957", span, "`{builtin}` {noun} `{named}` can't use `..`", "comptime inputs are named from this file's own directory down, so a build can audit them; `..` is refused in a computed {noun} too", "compute a {noun} under this file's directory, without `..`"))
 }
 
@@ -96,7 +98,9 @@ sema_call_check_comptime_input: fn(call: Call, expected: Type?, environment: Sem
     }
     path: sema_comptime_input_path_value(call, environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
     result_type: sema_comptime_input_type(builtin)
-    if !sema_comptime_input_record_effect(builtin, "FS.Read", result_type, call.name_span, environment, program, scopes, context, diagnostics) -> return failed
+    if !sema_comptime_input_record_effect(builtin, "FS.Read", result_type, call.name_span, environment, program, scopes, context, diagnostics) {
+        return failed
+    }
     node: sema_tree_node(result_type, TExprKind.HostCall{call: THostCall.ComptimeInput{builtin: builtin, path: path, pin: None}}, call.name_span)
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(node, expected, environment, program, diagnostics)}
 }
@@ -148,7 +152,9 @@ sema_comptime_input_record_effect: fn(api: String, row_effect: String, result_ty
 // jet_driver_build_fetch), and content that misses the pin is E3413. Another
 // `core.net` member is not handled here.
 sema_call_try_comptime_fetch: fn(module_name: String, member: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
-    if module_name != "core.net" || member != "fetch" -> return SemaDirectSpecialCheck{handled: false, value: None}
+    if module_name != "core.net" || member != "fetch" {
+        return SemaDirectSpecialCheck{handled: false, value: None}
+    }
     failed: SemaDirectSpecialCheck{handled: true, value: None}
     pinned := false
     if args.len() == 2 && args[0].label == None {
@@ -165,7 +171,9 @@ sema_call_try_comptime_fetch: fn(module_name: String, member: String, args: [Cal
         diagnostics.push(sema_error("E3414", args[0].span, "`net.fetch` URL must be a String, not {sema_type_show(url.ty)}", "the compiler downloads the URL the String names while it builds", "pass a String URL, e.g. `net.fetch(\"https://example.com/data.txt\", sha256: \"…\")`"))
         return failed
     }
-    if !sema_comptime_input_record_effect("net.fetch", "Net", Type.String, span, environment, program, scopes, context, diagnostics) -> return failed
+    if !sema_comptime_input_record_effect("net.fetch", "Net", Type.String, span, environment, program, scopes, context, diagnostics) {
+        return failed
+    }
     node: sema_tree_node(Type.String, TExprKind.HostCall{call: THostCall.ComptimeInput{builtin: "fetch", path: url, pin: Val(sha256)}}, span)
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(node, expected, environment, program, diagnostics)}
 }

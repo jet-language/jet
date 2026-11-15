@@ -1,19 +1,14 @@
-
 Jobs: struct {
     items: [Int]
 
-    add: fn(&self, value: Int) {
-        self.items.push(value)
-    }
+    add: fn(&self, value: Int) { self.items.push(value) }
 
-    count: fn(self) -[]> Int {
-        return self.items.len()
-    }
+    count: fn(self) -[]> Int { return self.items.len() }
 }
 
 run: fn() {
-    queue := Shared{Jobs{ items: [Int]{} }}
-    other := Shared{Jobs{ items: [Int]{} }}
+    queue := Shared{Jobs{items: [Int]{}}}
+    other := Shared{Jobs{items: [Int]{}}}
     guard: queue.guard_edit()
     other_guard: other.guard_read()
     guard.value.add(1)

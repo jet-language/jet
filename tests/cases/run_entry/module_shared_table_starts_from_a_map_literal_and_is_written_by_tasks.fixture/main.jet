@@ -1,11 +1,13 @@
 // One process-wide table in a module `Shared` cell. The build stores its
 // starting map literal; two tasks each add an entry and read their own back,
 // and run then sees every entry.
-Storage: struct { items: [String: String] }
+Storage: struct {
+    items: [String:String]
+}
 
-STORE: Shared{Storage{items: [String: String]{"theme": "plain"}}}
+STORE: Shared{Storage{items: [String:String]{"theme": "plain"}}}
 
-EMPTY: Shared{Storage{items: [String: String]{}}}
+EMPTY: Shared{Storage{items: [String:String]{}}}
 
 set: fn(key: String, value: String) { STORE.items[key] = value.copy() }
 

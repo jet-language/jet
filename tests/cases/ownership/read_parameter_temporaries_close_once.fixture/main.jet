@@ -11,20 +11,29 @@ Res: struct {
         close: fn(&&self) { print("close {self.name}") }
     }
 }
+
 Held: struct {
     res: Res
 }
 
 make: fn(name: String) -> Res { Res{name: name} }
+
 make_opt: fn(name: String) -> Res? { Val(Res{name: name}) }
+
 make_held: fn(name: String) -> Held? { Val(Held{res: Res{name: name}}) }
 
 show: fn(r: Res) { print("show {r.name}") }
+
 show_opt: fn(r: Res?) { print("show_opt {r != None}") }
+
 show_held: fn(r: Held?) { print("show_held {r != None}") }
+
 show_pair: fn(a: Res, b: Res) { print("show_pair {a.name} {b.name}") }
+
 name_of: fn(r: Res) -> String { r.name }
+
 short: fn(r: Res) -> Bool { r.name.len() < 3 }
+
 found: fn(r: Res, key: String) -> Int? { if r.name == key -> Val(r.name.len()) else -> None }
 
 early: fn(key: String) -> String {
@@ -47,9 +56,7 @@ run: fn() {
     print(early("other"))
     branches(true)
     count := 0
-    loop short(make("w{count}")) && count < 2 {
-        count += 1
-    }
+    loop short(make("w{count}")) && count < 2 -> count += 1
     print("count {count}")
     print("done")
 }

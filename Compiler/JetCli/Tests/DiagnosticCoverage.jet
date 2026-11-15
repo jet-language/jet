@@ -6,8 +6,14 @@
 use {
     jet_foundation.[DiagnosticRegistryStatus, diagnostic_registry_rows]
     jet_cli.[
-        JetCLICoverageBaseline, JetCLICoverageBaselineRow, JetCLICoverageFact, JetCLICoverageFacts,
-        jet_cli_coverage_baseline, jet_cli_coverage_facts, jet_cli_coverage_validate, jet_cli_toolchain_root,
+        JetCLICoverageBaseline,
+        JetCLICoverageBaselineRow,
+        JetCLICoverageFact,
+        JetCLICoverageFacts,
+        jet_cli_coverage_baseline,
+        jet_cli_coverage_facts,
+        jet_cli_coverage_validate,
+        jet_cli_toolchain_root,
     ]
     cli_files: core.files
 }
@@ -44,9 +50,13 @@ coverage_fact: fn(plane: String, edit: Int, reason: Int, uncovered: Int) -> JetC
         if row.structured_fix == .Val(fix) {
             if fix == .CryptoMisuse -> edit = false
         }
-        if edit && row.no_fix_reason != None -> panic("`{row.code}` carries both an edit and a no-fix reason")
+        if edit && row.no_fix_reason != None {
+            panic("`{row.code}` carries both an edit and a no-fix reason")
+        }
         if row.no_fix_reason == .Val(reason) {
-            if reason.next.trim() == "" -> panic("`{row.code}` has a no-fix reason without a next step")
+            if reason.next.trim() == "" {
+                panic("`{row.code}` has a no-fix reason without a next step")
+            }
         }
     }
 }
@@ -73,13 +83,11 @@ coverage_fact: fn(plane: String, edit: Int, reason: Int, uncovered: Int) -> JetC
         if row.structured_fix == .Val(fix) {
             if fix == .CryptoMisuse -> edit = false
         }
-        if edit {
-            edits += 1
-        } else if row.no_fix_reason == .Val(reason) {
+        if edit -> edits += 1 else if row.no_fix_reason == .Val(reason) {
             reasons += 1
             if reason.kind == {
-                .Behavior -> behavior += 1
-                .Design -> design += 1
+                .Behavior -> { behavior += 1 }
+                .Design -> { design += 1 }
                 .Ambiguous -> ambiguous += 1
             }
         }
@@ -112,7 +120,9 @@ coverage_fact: fn(plane: String, edit: Int, reason: Int, uncovered: Int) -> JetC
     text: cli_files.read("{root}/tests/diagnostics_coverage_baseline.txt") ?? panic("read the coverage baseline: {err}")
     baseline: coverage_rows(text)
     assert(baseline.len() > 0)
-    if jet_cli_coverage_validate(baseline, coverage_facts()) == .Val(message) -> panic("registry coverage fell below its floor: {message}")
+    if jet_cli_coverage_validate(baseline, coverage_facts()) == .Val(message) {
+        panic("registry coverage fell below its floor: {message}")
+    }
 }
 
 #Test("diagnostic coverage: the guard refuses every kind of regression") {

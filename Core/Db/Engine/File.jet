@@ -51,7 +51,7 @@ file_is_open: fn(f: SQLFile) -> Bool Never! { f.mem || os.os_is_open(f.os) }
 file_in_memory: fn(f: SQLFile) -> Bool Never! { f.mem }
 
 // The result code of an os layer call.
-file_rc: fn(r: () base.SQLError!) -> Int Never! {
+file_rc: fn(r: base.SQLError!) -> Int Never! {
     if r == .Err(e) -> return e.code
     base.OK
 }
@@ -231,7 +231,9 @@ file_device_characteristics: fn(f: &SQLFile) -> Int Never! {
 // sqlite3OsFileControl(SQLITE_FCNTL_SIZE_HINT); a hint, so its errors are
 // dropped (sqlite3OsFileControlHint).
 file_size_hint: fn(f: &SQLFile, size: Int) Never! -[DB]> {
-    if f.mem || !os.os_is_open(f.os) -> return
+    if f.mem || !os.os_is_open(f.os) {
+        return
+    }
     os.os_size_hint(f.os, size) ?? ()
 }
 
@@ -247,9 +249,7 @@ file_delete: fn(path: String, dir_sync: Bool) -[DB]> Int Never! {
 }
 
 // sqlite3OsAccess(SQLITE_ACCESS_EXISTS).
-file_exists: fn(path: String) -[DB]> Bool Never! {
-    os.os_access(path, os.ACCESS_EXISTS)
-}
+file_exists: fn(path: String) -[DB]> Bool Never! { os.os_access(path, os.ACCESS_EXISTS) }
 
 // sqlite3OsFileControlHint(SQLITE_FCNTL_PERSIST_WAL) asking for the
 // setting: whether the -wal file outlives the last connection.
@@ -286,7 +286,9 @@ file_shm_lock: fn(f: &SQLFile, ofst: Int, n: Int, flags: Int) -[DB]> Int Never! 
 
 // sqlite3OsShmUnmap.
 file_shm_unmap: fn(f: &SQLFile, delete: Bool) Never! -[DB]> {
-    if f.mem -> return
+    if f.mem {
+        return
+    }
     os.os_shm_unmap(f.os, delete)
 }
 

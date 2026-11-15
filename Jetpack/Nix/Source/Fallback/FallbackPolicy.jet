@@ -14,11 +14,17 @@ use {
 }
 
 NIX_FALLBACK_POLICY_ENV: ENV_JETPACK_NIX_FALLBACK_POLICY
+
 NIX_FALLBACK_BIN_ENV: ENV_JETPACK_NIX_FALLBACK_BIN
+
 NIX_FALLBACK_ALLOW_VALUE: "allow"
+
 NIX_FALLBACK_RECEIPT_SCHEMA: "jetpack.nix-fallback-policy.v1"
+
 NIX_FALLBACK_MAX_STDOUT_BYTES: 67108864
+
 NIX_FALLBACK_MAX_STDERR_BYTES: 16384
+
 // Nix environment the one-shot build must not inherit.
 NIX_FALLBACK_SCRUBBED_ENV: [String]{"NIX_PATH", "NIX_CONFIG", "NIX_USER_CONF_FILES", "NIX_REMOTE"}
 
@@ -48,20 +54,24 @@ NixFallbackPolicyReceipt: struct {
     invocations: Int
 
     json: fn(self) -> String Never! {
-        pkg_json_render(Dyn.Object([
-            "schema": Dyn.Text(NIX_FALLBACK_RECEIPT_SCHEMA),
-            "mode": Dyn.Text(self.mode.label()),
-            "allowed": Dyn.Bool(self.allowed),
-            "explicit": Dyn.Bool(self.explicit),
-            "policy": Dyn.Text(self.policy_value.copy()),
-            "reason": Dyn.Text(self.reason.copy()),
-            "nix_invocations": Dyn.Int(self.invocations),
-        ]))
+        pkg_json_render(
+            Dyn.Object(
+                [
+                    "schema": Dyn.Text(NIX_FALLBACK_RECEIPT_SCHEMA),
+                    "mode": Dyn.Text(self.mode.label()),
+                    "allowed": Dyn.Bool(self.allowed),
+                    "explicit": Dyn.Bool(self.explicit),
+                    "policy": Dyn.Text(self.policy_value.copy()),
+                    "reason": Dyn.Text(self.reason.copy()),
+                    "nix_invocations": Dyn.Int(self.invocations),
+                ],
+            ),
+        )
     }
 
     // Receipt facts retained with the producer record, key-ordered.
-    facts: fn(self) -> [String: String] Never! {
-        facts := [String: String]{}
+    facts: fn(self) -> [String:String] Never! {
+        facts := [String:String]{}
         facts["nix.fallback.policy.schema"] = NIX_FALLBACK_RECEIPT_SCHEMA
         facts["nix.fallback.policy.mode"] = self.mode.label()
         facts["nix.fallback.policy.allowed"] = "{self.allowed}"
@@ -82,7 +92,7 @@ NixFallbackPolicyReceipt: struct {
 // The captured output of one permitted local Nix build and its facts.
 NixFallbackRun: struct {
     stdout: String
-    facts: [String: String]
+    facts: [String:String]
 }
 
 // The pure policy decision for the observed offline, CI, terminal and
@@ -105,11 +115,11 @@ nix_fallback_decide: fn(offline: Bool, ci: Bool, interactive: Bool, policy: Stri
         else -> "local Nix fallback allowed by interactive policy"
     }
     NixFallbackPolicyReceipt{
-        mode,
-        allowed,
-        explicit,
+        mode: mode,
+        allowed: allowed,
+        explicit: explicit,
         policy_value: if explicit -> policy.copy() else -> "unset",
-        reason,
+        reason: reason,
         invocations: if allowed -> 1 else -> 0,
     }
 }
@@ -138,7 +148,9 @@ nix_fallback_run: fn(project: String, source_name: String, revision: String, sys
     executable: nix_fallback_discover_executable()
     locked_source: nix_fallback_locked_source_name(project, source_name, revision)
     identity: NixFallbackIdentity.from_project(project, locked_source, executable, system, attr)
-    if identity.nixpkgs_revision != revision -> return Err(NixError.Fallback("local Nix fallback revision differs from the catalog miss"))
+    if identity.nixpkgs_revision != revision {
+        return Err(NixError.Fallback("local Nix fallback revision differs from the catalog miss"))
+    }
     lock_sha256: NixFallbackIdentity.project_lock_sha256(project, locked_source)
     identity.validate_request(identity.locked_nixpkgs_input(), system, attr, lock_sha256)
 
@@ -148,7 +160,9 @@ nix_fallback_run: fn(project: String, source_name: String, revision: String, sys
     spec := process.cmd([String]{identity.executable, "build", "--json", "--no-link", "--no-write-lock-file", "--system", identity.system, input})
     loop name in NIX_FALLBACK_SCRUBBED_ENV -> spec = spec.env_remove(name)
     receipt: spec.stdout(.Capture).stderr(.Capture).run() ?? return Err(NixError.Fallback("could not invoke the bound Nix executable: {err}"))
-    if receipt.output.bytes().len() > NIX_FALLBACK_MAX_STDOUT_BYTES -> return Err(NixError.Fallback("local Nix fallback output exceeded {NIX_FALLBACK_MAX_STDOUT_BYTES} bytes"))
+    if receipt.output.bytes().len() > NIX_FALLBACK_MAX_STDOUT_BYTES {
+        return Err(NixError.Fallback("local Nix fallback output exceeded {NIX_FALLBACK_MAX_STDOUT_BYTES} bytes"))
+    }
     if !receipt.success {
         stderr: nix_truncate_utf8(receipt.errors.trim(), NIX_FALLBACK_MAX_STDERR_BYTES)
         return Err(NixError.Fallback("local Nix fallback failed with status exit status: {receipt.code}; {stderr}"))

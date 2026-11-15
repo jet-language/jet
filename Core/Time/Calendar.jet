@@ -1,4 +1,5 @@
 use time: core.time
+
 // core.time.calendar — Python `calendar` without locale tables.
 //
 // Weeks start on Monday (`MONDAY = 0`) unless a function takes `firstweekday`.
@@ -17,9 +18,9 @@ FRIDAY: 4
 SATURDAY: 5
 
 SUNDAY: 6
+
 // `/%` already rounds toward negative infinity.
 floor_div: fn(a: Int, b: Int) -> Int { a /% b }
-
 
 isleap: fn(year: Int) -> Bool Never! { time.is_leap_year(year) }
 
@@ -52,6 +53,7 @@ floor_before: fn(value: Int, divisor: Int) -> Int {
     }
     floor_div(value - 1, divisor)
 }
+
 weekday: fn(year: Int, month: Int, day: Int) -> Int Never! {
     // Sakamoto: 0 = Sunday. Convert to Monday = 0.
     y := year
@@ -59,24 +61,25 @@ weekday: fn(year: Int, month: Int, day: Int) -> Int Never! {
     if m < 1 -> m = 1
     if m > 12 -> m = 12
     t: [Int]{0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4}
-    if month < 3 -> y = y - 1
+    if month < 3 -> y -= 1
     sun0 := (y + floor_div(y, 4) - floor_div(y, 100) + floor_div(y, 400) + t[m - 1] + day) %% 7
-    if sun0 < 0 -> sun0 = sun0 + 7
+    if sun0 < 0 -> sun0 += 7
     (sun0 + 6) %% 7
-
 }
+
 monthrange: fn(year: Int, month: Int) -> (days: Int, weekday: Int) Never! {
     days: time.days_in_month(year, month)
     (days: days, weekday: weekday(year, month, 1))
 }
 
 monthcalendar: fn(year: Int, month: Int) -> [[Int]] Never! { monthcalendar_start(year, month, 0) }
+
 monthcalendar_start: fn(year: Int, month: Int, firstweekday: Int) -> [[Int]] Never! {
     range: monthrange(year, month)
     first := firstweekday %% 7
-    if first < 0 -> first = first + 7
+    if first < 0 -> first += 7
     start := (range.weekday - first) %% 7
-    if start < 0 -> start = start + 7
+    if start < 0 -> start += 7
     weeks := [[Int]]{}
     week := [Int]{}
     loop _ in 0..<start -> week.push(0)
@@ -87,7 +90,7 @@ monthcalendar_start: fn(year: Int, month: Int, firstweekday: Int) -> [[Int]] Nev
             weeks.push(week)
             week = [Int]{}
         }
-        d = d + 1
+        d += 1
     }
     if week.len() > 0 {
         loop week.len() < 7 -> week.push(0)
@@ -96,13 +99,12 @@ monthcalendar_start: fn(year: Int, month: Int, firstweekday: Int) -> [[Int]] Nev
     weeks
 }
 
-
 yearcalendar: fn(year: Int) -> [[[Int]]] Never! {
     months := [[[Int]]]{}
     m := 1
     loop m <= 12 {
         months.push(monthcalendar(year, m))
-        m = m + 1
+        m += 1
     }
     months
 }
@@ -181,13 +183,13 @@ weekheader: fn(width: Int, firstweekday: Int) -> [String] Never! {
     w := width
     if w < 1 -> w = 1
     first := firstweekday %% 7
-    if first < 0 -> first = first + 7
+    if first < 0 -> first += 7
     out := [String]{}
     i := 0
     loop i < 7 {
         name: day_abbr((i + first) %% 7)
         out.push(clip(name, w))
-        i = i + 1
+        i += 1
     }
     out
 }
@@ -212,7 +214,7 @@ formatyear: fn(year: Int) -> String Never! {
     m := 1
     loop m <= 12 {
         out = "{out}{formatmonth(year, m, 3)}\n"
-        m = m + 1
+        m += 1
     }
     out
 }
@@ -223,16 +225,17 @@ timegm: fn(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int)
     y: year - 1
     offsets: [Int]{0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334}
     days := 365 * y + floor_div(y, 4) - floor_div(y, 100) + floor_div(y, 400) + offsets[m - 1] + d - 1
-    if m > 2 && isleap(year) -> days = days + 1
+    if m > 2 && isleap(year) -> days += 1
     // 719162 is the civil day number of 1970-01-01. The epoch carrier
     // saturates the day product before adding the constrained time of day.
     base: constrain((days - 719162) * 86400, -9223372036854775808, 9223372036854775807)
     seconds: constrain(hour, 0, 23) * 3600 + constrain(minute, 0, 59) * 60 + constrain(second, 0, 59)
     timestamp := constrain(base + seconds, -9223372036854775808, 9223372036854775807)
-    if hour == 23 && minute == 59 && second == 60 -> timestamp = constrain(timestamp + 1, -9223372036854775808, 9223372036854775807)
+    if hour == 23 && minute == 59 && second == 60 {
+        timestamp = constrain(timestamp + 1, -9223372036854775808, 9223372036854775807)
+    }
     timestamp
 }
-
 
 clip: fn(text: String, width: Int) -> String {
     raw: text.bytes()
@@ -241,7 +244,7 @@ clip: fn(text: String, width: Int) -> String {
     i := 0
     loop i < width {
         out.push(raw[i])
-        i = i + 1
+        i += 1
     }
     String.from_bytes(out) ?? text.copy()
 }
@@ -253,7 +256,7 @@ pad: fn(text: String, width: Int) -> String {
     n := width - raw.len()
     loop n > 0 {
         out = " {out}"
-        n = n - 1
+        n -= 1
     }
     out
 }
@@ -266,12 +269,12 @@ center: fn(text: String, width: Int) -> String {
     out := ""
     loop left > 0 {
         out = "{out} "
-        left = left - 1
+        left -= 1
     }
     out = "{out}{text}"
     loop right > 0 {
         out = "{out} "
-        right = right - 1
+        right -= 1
     }
     out
 }
@@ -283,11 +286,10 @@ join_row: fn(cells: [String], width: Int) -> String {
     loop i < cells.len() {
         if i > 0 -> out = "{out} "
         out = "{out}{cells[i]}"
-        i = i + 1
+        i += 1
     }
     out
 }
-
 
 constrain: fn(value: Int, low: Int, high: Int) -> Int Never! {
     if value < low -> return low
@@ -300,7 +302,7 @@ pad_end: fn(text: String, width: Int) -> String Never! {
     n := width - text.bytes().len()
     loop n > 0 {
         out = "{out} "
-        n = n - 1
+        n -= 1
     }
     out
 }

@@ -21,7 +21,6 @@
 // have nothing to free. sqlite3_aggregate_count reads Mem.n, the step count
 // OP_AggStep keeps in the accumulator, which a Jet Mem (whose n is its byte
 // length) does not have; nothing in the library calls it.
-
 use {
     base: __core_db_base
     ast: __core_db_ast
@@ -54,7 +53,9 @@ EXPLAIN_COL_NAMES: [String]{"addr", "opcode", "p1", "p2", "p3", "p4", "p5", "com
 // invokeProfileCallback (checkProfileCallback): report the run that began
 // at Vdbe.start_time to the profile callbacks.
 check_profile: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) Never! -[DB]> {
-    if v.start_time <= 0 -> return
+    if v.start_time <= 0 {
+        return
+    }
     now: os.os_current_time()
     h.profile(db, v, (now - v.start_time) * 1000000)
     v.start_time = 0
@@ -107,9 +108,7 @@ wal_callbacks: fn<H: Host>(h: &H, db: &conn.Conn) -[DB]> Int Never! {
         n_entry: pager.pager_wal_callback(db.btrees[bt].pager)
         if n_entry > 0 && db.wal_hook != conn.WAL_HOOK_NONE && rc == base.OK {
             name: db.dbs[i].name
-            if db.wal_hook == conn.WAL_HOOK_USER {
-                rc = h.wal_hook(db, name, n_entry)
-            } else {
+            if db.wal_hook == conn.WAL_HOOK_USER -> rc = h.wal_hook(db, name, n_entry) else {
                 wal_default_hook(db, name, n_entry)
             }
         }
@@ -120,7 +119,9 @@ wal_callbacks: fn<H: Host>(h: &H, db: &conn.Conn) -[DB]> Int Never! {
 // sqlite3WalDefaultHook: checkpoint a log that reached Conn.wal_arg
 // frames, its result ignored.
 wal_default_hook: fn(db: &conn.Conn, name: [U8], n_frame: Int) Never! -[DB]> {
-    if n_frame < db.wal_arg -> return
+    if n_frame < db.wal_arg {
+        return
+    }
     n_log := -1
     n_ckpt := -1
     _: wal_checkpoint_v2(db, name, wal.CHECKPOINT_PASSIVE, n_log, n_ckpt)
@@ -170,9 +171,7 @@ vdbe_step: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
         }
         if db.n_vdbe_active == 0 -> db.is_interrupted = false
         profiled: db.m_trace.bit_and(conn.TRACE_PROFILE.bit_or(conn.TRACE_XPROFILE)) != 0
-        if profiled && !db.init.busy && v.sql.len() > 0 {
-            v.start_time = os.os_current_time()
-        }
+        if profiled && !db.init.busy && v.sql.len() > 0 -> v.start_time = os.os_current_time()
         db.n_vdbe_active += 1
         if !v.read_only -> db.n_vdbe_write += 1
         if v.is_reader -> db.n_vdbe_read += 1
@@ -181,9 +180,7 @@ vdbe_step: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
         v.state = conn.VDBE_RUN_STATE
     }
     rc := base.OK
-    if v.explain != 0 {
-        rc = aux.list(db, v)
-    } else {
+    if v.explain != 0 -> rc = aux.list(db, v) else {
         db.n_vdbe_exec += 1
         rc = exe.exec<H>(h, db, v)
         db.n_vdbe_exec -= 1
@@ -197,9 +194,7 @@ vdbe_step: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
     if rc == base.DONE && db.auto_commit {
         v.rc = wal_callbacks<H>(h, db)
         if v.rc != base.OK -> rc = base.ERROR
-    } else if rc != base.DONE && savesql {
-        rc = aux.transfer_error(db, v)
-    }
+    } else if rc != base.DONE && savesql { rc = aux.transfer_error(db, v) }
     db.err_code = rc
     if aux.api_exit(db, v.rc) == base.NOMEM {
         v.rc = base.NOMEM
@@ -248,15 +243,9 @@ stmt_step: fn<H: Host>(h: &H, db: &conn.Conn, s: Int) -[DB]> Int Never! {
 stmt_explain: fn<H: Host>(h: &H, db: &conn.Conn, s: Int, e_mode: Int) -[DB]> Int Never! {
     v := conn.vdbe_take(db, s)
     rc := base.OK
-    if v.explain == e_mode {
-        rc = base.OK
-    } else if e_mode < 0 || e_mode > 2 {
+    if v.explain == e_mode -> rc = base.OK else if e_mode < 0 || e_mode > 2 -> rc = base.ERROR else if v.prep_flags.bit_and(conn.PREPARE_SAVESQL) == 0 {
         rc = base.ERROR
-    } else if v.prep_flags.bit_and(conn.PREPARE_SAVESQL) == 0 {
-        rc = base.ERROR
-    } else if v.state != conn.VDBE_READY_STATE {
-        rc = base.BUSY
-    } else if v.n_mem >= 10 && (e_mode != 2 || v.have_eqp_ops) {
+    } else if v.state != conn.VDBE_READY_STATE { rc = base.BUSY } else if v.n_mem >= 10 && (e_mode != 2 || v.have_eqp_ops) {
         // The registers an EXPLAIN listing uses exist already.
         v.explain = e_mode
     } else {
@@ -393,10 +382,14 @@ column_text_enc: fn(db: &conn.Conn, s: Int, i: Int, enc: Int) -> [U8]? Never! {
 }
 
 // sqlite3_column_text.
-column_text: fn(db: &conn.Conn, s: Int, i: Int) -> [U8]? Never! { column_text_enc(db, s, i, base.UTF8) }
+column_text: fn(db: &conn.Conn, s: Int, i: Int) -> [U8]? Never! {
+    column_text_enc(db, s, i, base.UTF8)
+}
 
 // sqlite3_column_text16.
-column_text16: fn(db: &conn.Conn, s: Int, i: Int) -> [U8]? Never! { column_text_enc(db, s, i, base.UTF16NATIVE) }
+column_text16: fn(db: &conn.Conn, s: Int, i: Int) -> [U8]? Never! {
+    column_text_enc(db, s, i, base.UTF16NATIVE)
+}
 
 // sqlite3_column_value: a copy of column i's value.
 column_value: fn(db: &conn.Conn, s: Int, i: Int) -> base.Mem Never! {
@@ -438,34 +431,54 @@ column_name_of: fn(db: &conn.Conn, s: Int, n: Int, enc: Int, use_type: Int) -> [
 }
 
 // sqlite3_column_name.
-column_name: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! { column_name_of(db, s, n, base.UTF8, conn.COLNAME_NAME) }
+column_name: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! {
+    column_name_of(db, s, n, base.UTF8, conn.COLNAME_NAME)
+}
 
 // sqlite3_column_name16.
-column_name16: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! { column_name_of(db, s, n, base.UTF16NATIVE, conn.COLNAME_NAME) }
+column_name16: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! {
+    column_name_of(db, s, n, base.UTF16NATIVE, conn.COLNAME_NAME)
+}
 
 // sqlite3_column_decltype.
-column_decltype: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! { column_name_of(db, s, n, base.UTF8, conn.COLNAME_DECLTYPE) }
+column_decltype: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! {
+    column_name_of(db, s, n, base.UTF8, conn.COLNAME_DECLTYPE)
+}
 
 // sqlite3_column_decltype16.
-column_decltype16: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! { column_name_of(db, s, n, base.UTF16NATIVE, conn.COLNAME_DECLTYPE) }
+column_decltype16: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! {
+    column_name_of(db, s, n, base.UTF16NATIVE, conn.COLNAME_DECLTYPE)
+}
 
 // sqlite3_column_database_name.
-column_database_name: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! { column_name_of(db, s, n, base.UTF8, conn.COLNAME_DATABASE) }
+column_database_name: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! {
+    column_name_of(db, s, n, base.UTF8, conn.COLNAME_DATABASE)
+}
 
 // sqlite3_column_database_name16.
-column_database_name16: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! { column_name_of(db, s, n, base.UTF16NATIVE, conn.COLNAME_DATABASE) }
+column_database_name16: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! {
+    column_name_of(db, s, n, base.UTF16NATIVE, conn.COLNAME_DATABASE)
+}
 
 // sqlite3_column_table_name.
-column_table_name: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! { column_name_of(db, s, n, base.UTF8, conn.COLNAME_TABLE) }
+column_table_name: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! {
+    column_name_of(db, s, n, base.UTF8, conn.COLNAME_TABLE)
+}
 
 // sqlite3_column_table_name16.
-column_table_name16: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! { column_name_of(db, s, n, base.UTF16NATIVE, conn.COLNAME_TABLE) }
+column_table_name16: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! {
+    column_name_of(db, s, n, base.UTF16NATIVE, conn.COLNAME_TABLE)
+}
 
 // sqlite3_column_origin_name.
-column_origin_name: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! { column_name_of(db, s, n, base.UTF8, conn.COLNAME_COLUMN) }
+column_origin_name: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! {
+    column_name_of(db, s, n, base.UTF8, conn.COLNAME_COLUMN)
+}
 
 // sqlite3_column_origin_name16.
-column_origin_name16: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! { column_name_of(db, s, n, base.UTF16NATIVE, conn.COLNAME_COLUMN) }
+column_origin_name16: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! {
+    column_name_of(db, s, n, base.UTF16NATIVE, conn.COLNAME_COLUMN)
+}
 
 // ---------------------------------------------------------------------------
 // Parameters.
@@ -514,7 +527,9 @@ bind_blob: fn(db: &conn.Conn, s: Int, i: Int, z: [U8]?, n: Int) -> Int Never! {
 }
 
 // sqlite3_bind_blob64.
-bind_blob64: fn(db: &conn.Conn, s: Int, i: Int, z: [U8]?, n: Int) -> Int Never! { bind_text_enc(db, s, i, z, n, 0) }
+bind_blob64: fn(db: &conn.Conn, s: Int, i: Int, z: [U8]?, n: Int) -> Int Never! {
+    bind_text_enc(db, s, i, z, n, 0)
+}
 
 // sqlite3_bind_double.
 bind_double: fn(db: &conn.Conn, s: Int, i: Int, r: Float) -> Int Never! {
@@ -524,7 +539,9 @@ bind_double: fn(db: &conn.Conn, s: Int, i: Int, r: Float) -> Int Never! {
 }
 
 // sqlite3_bind_int.
-bind_int: fn(db: &conn.Conn, s: Int, i: Int, value: Int) -> Int Never! { bind_int64(db, s, i, value) }
+bind_int: fn(db: &conn.Conn, s: Int, i: Int, value: Int) -> Int Never! {
+    bind_int64(db, s, i, value)
+}
 
 // sqlite3_bind_int64.
 bind_int64: fn(db: &conn.Conn, s: Int, i: Int, value: Int) -> Int Never! {
@@ -537,7 +554,9 @@ bind_int64: fn(db: &conn.Conn, s: Int, i: Int, value: Int) -> Int Never! {
 bind_null: fn(db: &conn.Conn, s: Int, i: Int) -> Int Never! { unbind(db, s, i - 1) }
 
 // sqlite3_bind_text.
-bind_text: fn(db: &conn.Conn, s: Int, i: Int, z: [U8]?, n: Int) -> Int Never! { bind_text_enc(db, s, i, z, n, base.UTF8) }
+bind_text: fn(db: &conn.Conn, s: Int, i: Int, z: [U8]?, n: Int) -> Int Never! {
+    bind_text_enc(db, s, i, z, n, base.UTF8)
+}
 
 // sqlite3_bind_text64: text of encoding enc (SQLITE_UTF16 is the native
 // order); UTF-16 drops an odd last byte.
@@ -552,7 +571,9 @@ bind_text64: fn(db: &conn.Conn, s: Int, i: Int, z: [U8]?, n: Int, enc_in: Int) -
 }
 
 // sqlite3_bind_text16.
-bind_text16: fn(db: &conn.Conn, s: Int, i: Int, z: [U8]?, n: Int) -> Int Never! { bind_text_enc(db, s, i, z, util.clear_bits(n, 1), base.UTF16NATIVE) }
+bind_text16: fn(db: &conn.Conn, s: Int, i: Int, z: [U8]?, n: Int) -> Int Never! {
+    bind_text_enc(db, s, i, z, util.clear_bits(n, 1), base.UTF16NATIVE)
+}
 
 // sqlite3_bind_value: a copy of value p, by its datatype.
 bind_value: fn(db: &conn.Conn, s: Int, i: Int, p: base.Mem) -> Int Never! {
@@ -580,9 +601,7 @@ bind_zeroblob: fn(db: &conn.Conn, s: Int, i: Int, n: Int) -> Int Never! {
 // sqlite3_bind_zeroblob64: SQLITE_TOOBIG past SQLITE_LIMIT_LENGTH.
 bind_zeroblob64: fn(db: &conn.Conn, s: Int, i: Int, n: Int) -> Int Never! {
     rc := base.OK
-    if n < 0 || n > db.limits[ast.LIMIT_LENGTH] {
-        rc = base.TOOBIG
-    } else {
+    if n < 0 || n > db.limits[ast.LIMIT_LENGTH] -> rc = base.TOOBIG else {
         rc = bind_zeroblob(db, s, i, n)
     }
     aux.api_exit(db, rc)
@@ -700,7 +719,9 @@ result_pointer: fn(v: &conn.Vdbe, handle: Int, ptype: [U8]) Never! {
 // sqlite3_value_pointer: the handle of a pointer value of type ptype.
 value_pointer: fn(m: base.Mem, ptype: [U8]) -> Int? Never! {
     want: base.MEM_NULL.bit_or(conn.MEM_DYN).bit_or(base.MEM_SUBTYPE)
-    if m.flags.bit_and(base.MEM_TYPE_MASK.bit_or(conn.MEM_DYN)) == want && m.subtype == conn.DYN_POINTER && m.z == ptype -> return Val(m.i)
+    if m.flags.bit_and(base.MEM_TYPE_MASK.bit_or(conn.MEM_DYN)) == want && m.subtype == conn.DYN_POINTER && m.z == ptype {
+        return Val(m.i)
+    }
     None
 }
 
@@ -712,7 +733,9 @@ result_subtype: fn(v: &conn.Vdbe, e_subtype: Int) Never! {
 }
 
 // sqlite3_result_text.
-result_text: fn(db: &conn.Conn, v: &conn.Vdbe, z: [U8], n: Int) Never! { result_str(db, v, z, n, base.UTF8) }
+result_text: fn(db: &conn.Conn, v: &conn.Vdbe, z: [U8], n: Int) Never! {
+    result_str(db, v, z, n, base.UTF8)
+}
 
 // sqlite3_result_text64: text of encoding enc (SQLITE_UTF16 is the native
 // order); UTF-16 drops an odd last byte; past 0x7fffffff bytes,
@@ -732,13 +755,19 @@ result_text64: fn(db: &conn.Conn, v: &conn.Vdbe, z: [U8], n: Int, enc_in: Int) N
 }
 
 // sqlite3_result_text16.
-result_text16: fn(db: &conn.Conn, v: &conn.Vdbe, z: [U8], n: Int) Never! { result_str(db, v, z, util.clear_bits(n, 1), base.UTF16NATIVE) }
+result_text16: fn(db: &conn.Conn, v: &conn.Vdbe, z: [U8], n: Int) Never! {
+    result_str(db, v, z, util.clear_bits(n, 1), base.UTF16NATIVE)
+}
 
 // sqlite3_result_text16be.
-result_text16be: fn(db: &conn.Conn, v: &conn.Vdbe, z: [U8], n: Int) Never! { result_str(db, v, z, util.clear_bits(n, 1), base.UTF16BE) }
+result_text16be: fn(db: &conn.Conn, v: &conn.Vdbe, z: [U8], n: Int) Never! {
+    result_str(db, v, z, util.clear_bits(n, 1), base.UTF16BE)
+}
 
 // sqlite3_result_text16le.
-result_text16le: fn(db: &conn.Conn, v: &conn.Vdbe, z: [U8], n: Int) Never! { result_str(db, v, z, util.clear_bits(n, 1), base.UTF16LE) }
+result_text16le: fn(db: &conn.Conn, v: &conn.Vdbe, z: [U8], n: Int) Never! {
+    result_str(db, v, z, util.clear_bits(n, 1), base.UTF16LE)
+}
 
 // sqlite3_result_value: a copy of value p, in the connection's encoding.
 result_value: fn(db: conn.Conn, v: &conn.Vdbe, p: base.Mem) Never! {
@@ -791,7 +820,9 @@ result_error_nomem: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
 result_int_real: fn(v: &conn.Vdbe) Never! {
     o: v.fctx.out
     f: v.mem[o].flags
-    if f.bit_and(base.MEM_INT) != 0 -> v.mem[o].flags = util.clear_bits(f, base.MEM_INT).bit_or(base.MEM_INT_REAL)
+    if f.bit_and(base.MEM_INT) != 0 {
+        v.mem[o].flags = util.clear_bits(f, base.MEM_INT).bit_or(base.MEM_INT_REAL)
+    }
 }
 
 // sqlite3_user_data: pUserData of the function the call runs.
@@ -813,9 +844,7 @@ value_list_value: fn(db: &conn.Conn, v: &conn.Vdbe, list: base.Mem, out: &base.M
     bt: v.csr[ci].bt
     btc: v.csr[ci].btc
     rc := base.OK
-    if b_next {
-        rc = btree.btree_next(db.btrees[bt], btc, 0)
-    } else {
+    if b_next -> rc = btree.btree_next(db.btrees[bt], btc, 0) else {
         dummy := 0
         rc = btree.btree_first(db.btrees[bt], btc, dummy)
         if btree.btree_eof(db.btrees[bt], btc) -> rc = base.DONE
@@ -836,10 +865,14 @@ value_list_value: fn(db: &conn.Conn, v: &conn.Vdbe, list: base.Mem, out: &base.M
 }
 
 // sqlite3_vtab_in_first.
-vtab_in_first: fn(db: &conn.Conn, v: &conn.Vdbe, list: base.Mem, out: &base.Mem) -[DB]> Int Never! { value_list_value(db, v, list, out, false) }
+vtab_in_first: fn(db: &conn.Conn, v: &conn.Vdbe, list: base.Mem, out: &base.Mem) -[DB]> Int Never! {
+    value_list_value(db, v, list, out, false)
+}
 
 // sqlite3_vtab_in_next.
-vtab_in_next: fn(db: &conn.Conn, v: &conn.Vdbe, list: base.Mem, out: &base.Mem) -[DB]> Int Never! { value_list_value(db, v, list, out, true) }
+vtab_in_next: fn(db: &conn.Conn, v: &conn.Vdbe, list: base.Mem, out: &base.Mem) -[DB]> Int Never! {
+    value_list_value(db, v, list, out, true)
+}
 
 // sqlite3StmtCurrentTime: the time of the statement's step in milliseconds
 // of the Julian day, the same for every call within the step.
@@ -863,9 +896,7 @@ aggregate_context: fn(v: &conn.Vdbe, n_byte: Int) -> Int Never! {
     if v.agg_free.pop() == .Val(free) {
         k = free
         v.aggs[k] = conn.agg_state_new()
-    } else {
-        v.aggs.push(conn.agg_state_new())
-    }
+    } else { v.aggs.push(conn.agg_state_new()) }
     v.aggs[k].allocated = true
     run.release_dyn(v, a)
     m := base.mem_init(base.MEM_AGG)
@@ -879,7 +910,9 @@ aggregate_context: fn(v: &conn.Vdbe, n_byte: Int) -> Int Never! {
 get_auxdata: fn(v: conn.Vdbe, i_arg: Int) -> base.Mem? Never! {
     depth: v.frames.len()
     loop a in v.aux {
-        if a.depth == depth && a.i_aux_arg == i_arg && (a.i_aux_op == v.fctx.i_op || i_arg < 0) -> return Val(a.value)
+        if a.depth == depth && a.i_aux_arg == i_arg && (a.i_aux_op == v.fctx.i_op || i_arg < 0) {
+            return Val(a.value)
+        }
     }
     None
 }
@@ -907,13 +940,9 @@ set_auxdata: fn(v: &conn.Vdbe, i_arg: Int, value: base.Mem) Never! {
 // its slot with result columns named `names`.
 api_test_stmt: fn(db: &conn.Conn, ops: [(op: Int, p1: Int, p2: Int, p3: Int)], n_mem: Int, n_var: Int, names: [String]) -> Int Never! {
     v := aux.vdbe_create(db)
-    loop o in ops {
-        _: aux.add_op3(db, v, o.op, o.p1, o.p2, o.p3)
-    }
+    loop o in ops -> _: aux.add_op3(db, v, o.op, o.p1, o.p2, o.p3)
     aux.set_num_cols(v, names.len())
-    loop k in 0..<names.len() {
-        _: aux.set_col_name(db, v, k, conn.COLNAME_NAME, names[k].bytes())
-    }
+    loop k in 0..<names.len() -> _: aux.set_col_name(db, v, k, conn.COLNAME_NAME, names[k].bytes())
     aux.make_ready(db, v, n_var, n_mem, 0, 0, false)
     s: v.slot
     conn.vdbe_put(db, v)

@@ -12,6 +12,7 @@ use {
 }
 
 ETF_VERSION: 131
+
 // The private carrier key of an encoded Atom (see `Atom`).
 ATOM_KEY: "$etf_atom"
 
@@ -46,14 +47,18 @@ Atom: struct {
     name: String
 
     new: fn(name: String) -> Atom EncodingError! {
-        if scalar_count(name) > 255 -> return Err(etf_error(.Limit, 0, "", "an atom has at most 255 characters"))
+        if scalar_count(name) > 255 {
+            return Err(etf_error(.Limit, 0, "", "an atom has at most 255 characters"))
+        }
         Ok(Atom{name: name})
     }
 
     /// An Atom encodes as a one-entry object under a private key the ETF writer
     /// alone turns into an atom; other codecs see that object.
     impl Encode {
-        encode: fn(self) -> Dyn { stream.object_from_entries([(key: String, value: Dyn)]{(key: ATOM_KEY, value: Dyn.Text(self.name.copy()))}) }
+        encode: fn(self) -> Dyn {
+            stream.object_from_entries([(key: String, value: Dyn)]{(key: ATOM_KEY, value: Dyn.Text(self.name.copy()))})
+        }
     }
 
     /// An Atom reads any atom, including `true`, `false` and `nil`, which other
@@ -68,6 +73,7 @@ Atom: struct {
         }
     }
 }
+
 atom_field: fn(name: String) -> Atom [FieldError]! {
     atom: Atom.new(name) ?? return Err([FieldError{path: "", reason: err.reason}])
     Ok(atom)
@@ -77,7 +83,9 @@ atom_field: fn(name: String) -> Atom [FieldError]! {
 atom_name: fn(tree: Dyn) -> String? Never! {
     if tree == .Object(_) {
         entries: stream.object_entries(tree)
-        if entries.len() == 1 && entries[0].key == ATOM_KEY && entries[0].value == .Text(name) -> return Val(name.copy())
+        if entries.len() == 1 && entries[0].key == ATOM_KEY && entries[0].value == .Text(name) {
+            return Val(name.copy())
+        }
     }
     None
 }
@@ -194,29 +202,45 @@ read: fn(bytes: [U8], view: Bool, layout: TermLayout, strings: StringEncoding, l
     if limits.max_total_bytes == Val(total) && bytes.len() > total {
         return Err(etf_error(.Limit, total, "", "max_total_bytes {total} exceeded"))
     }
-    if bytes.len() == 0 -> return Err(etf_error(.Truncated, 0, "", "a standalone ETF term starts with version byte 131"))
-    if (Int{bytes[0]}) != ETF_VERSION -> return Err(etf_error(.Syntax, 0, "", "a standalone ETF term starts with version byte 131, not {Int{bytes[0]}}"))
-    if bytes.len() < 2 -> return Err(etf_error(.Truncated, 1, "$", "the version byte is not followed by a term"))
+    if bytes.len() == 0 {
+        return Err(etf_error(.Truncated, 0, "", "a standalone ETF term starts with version byte 131"))
+    }
+    if (Int{bytes[0]}) != ETF_VERSION {
+        return Err(etf_error(.Syntax, 0, "", "a standalone ETF term starts with version byte 131, not {Int{bytes[0]}}"))
+    }
+    if bytes.len() < 2 {
+        return Err(etf_error(.Truncated, 1, "$", "the version byte is not followed by a term"))
+    }
     op: Int{bytes[1]}
     if op == 80 {
         // COMPRESSED: a four-byte inflated size, then a zlib stream to the end.
-        if bytes.len() < 6 -> return Err(etf_error(.Truncated, bytes.len(), "$", "a compressed term needs its four-byte inflated size"))
+        if bytes.len() < 6 {
+            return Err(etf_error(.Truncated, bytes.len(), "$", "a compressed term needs its four-byte inflated size"))
+        }
         size: u32_at(bytes, 2)
-        if size > limits.max_item_bytes -> return Err(etf_error(.Limit, 2, "$", "max_item_bytes {limits.max_item_bytes} exceeded by a compressed term of {size} bytes"))
+        if size > limits.max_item_bytes {
+            return Err(etf_error(.Limit, 2, "$", "max_item_bytes {limits.max_item_bytes} exceeded by a compressed term of {size} bytes"))
+        }
         inflated := [U8]{}
         status: zlib.decompress_into(slice(bytes, 6, bytes.len()), inflated)
-        if status != zlib.C_INFLATE_OK -> return Err(etf_error(.Syntax, 6, "$", "the compressed term is not a valid zlib stream ({zlib.fault(status)})"))
+        if status != zlib.C_INFLATE_OK {
+            return Err(etf_error(.Syntax, 6, "$", "the compressed term is not a valid zlib stream ({zlib.fault(status)})"))
+        }
         if inflated.len() != size {
             return Err(etf_error(.Syntax, 2, "$", "the compressed term declares {size} inflated bytes but inflates to {inflated.len()}"))
         }
         reader := TermReader{bytes: inflated, at: 0, compressed_at: 1, limits: limits, view: view, layout: layout, strings: strings}
         tree: reader.term("$", 1) ?? return Err(err)
-        if reader.at != reader.bytes.len() -> return Err(reader.fail(.Syntax, "$", "trailing bytes after the compressed term"))
+        if reader.at != reader.bytes.len() {
+            return Err(reader.fail(.Syntax, "$", "trailing bytes after the compressed term"))
+        }
         return Ok(tree)
     }
     reader := TermReader{bytes: bytes, at: 1, compressed_at: -1, limits: limits, view: view, layout: layout, strings: strings}
     tree: reader.term("$", 1) ?? return Err(err)
-    if reader.at != reader.bytes.len() -> return Err(reader.fail(.Syntax, "", "trailing bytes after the term"))
+    if reader.at != reader.bytes.len() {
+        return Err(reader.fail(.Syntax, "", "trailing bytes after the term"))
+    }
     Ok(tree)
 }
 
@@ -251,7 +275,9 @@ TermReader: struct {
     }
 
     need: fn(self, count: Int, path: String) EncodingError! {
-        if count > self.bytes.len() - self.at -> return Err(self.fail(.Truncated, path, "the term ends {count - (self.bytes.len() - self.at)} bytes early"))
+        if count > self.bytes.len() - self.at {
+            return Err(self.fail(.Truncated, path, "the term ends {count - (self.bytes.len() - self.at)} bytes early"))
+        }
     }
 
     byte: fn(&self) -> Int Never! {
@@ -275,18 +301,24 @@ TermReader: struct {
     // A length-prefixed payload's byte count, checked against the item limit
     // and the bytes left before anything is allocated.
     item: fn(self, count: Int, path: String, what: String) EncodingError! {
-        if count > self.limits.max_item_bytes -> return Err(self.fail(.Limit, path, "max_item_bytes {self.limits.max_item_bytes} exceeded by {what} of {count} bytes"))
+        if count > self.limits.max_item_bytes {
+            return Err(self.fail(.Limit, path, "max_item_bytes {self.limits.max_item_bytes} exceeded by {what} of {count} bytes"))
+        }
         self.need(count, path) ?? return Err(err)
     }
 
     // An arity is checked against the bytes left (each element takes at
     // least `per` bytes) before the loop that reads it.
     arity: fn(self, count: Int, per: Int, path: String) EncodingError! {
-        if count > (self.bytes.len() - self.at) /% per -> return Err(self.fail(.Truncated, path, "an arity of {count} is longer than the bytes left"))
+        if count > (self.bytes.len() - self.at) /% per {
+            return Err(self.fail(.Truncated, path, "an arity of {count} is longer than the bytes left"))
+        }
     }
 
     term: fn(&self, path: String, depth: Int) -> Dyn EncodingError! {
-        if depth > self.limits.max_depth -> return Err(self.fail(.Limit, path, "max_depth {self.limits.max_depth} exceeded"))
+        if depth > self.limits.max_depth {
+            return Err(self.fail(.Limit, path, "max_depth {self.limits.max_depth} exceeded"))
+        }
         self.need(1, path) ?? return Err(err)
         op: self.byte()
         if op == 97 {
@@ -305,10 +337,14 @@ TermReader: struct {
             if op == 110 -> count = self.byte() else -> count = self.take_u32()
             self.need(1, path) ?? return Err(err)
             sign: self.byte()
-            if sign > 1 -> return Err(self.fail(.Syntax, path, "a bignum sign byte is 0 or 1, not {sign}"))
+            if sign > 1 {
+                return Err(self.fail(.Syntax, path, "a bignum sign byte is 0 or 1, not {sign}"))
+            }
             self.item(count, path, "a bignum") ?? return Err(err)
             magnitude := 0
-            loop i in 0..<count -> magnitude = magnitude * 256 + (Int{self.bytes[self.at + count - 1 - i]})
+            loop i in 0..<count {
+                magnitude = magnitude * 256 + (Int{self.bytes[self.at + count - 1 - i]})
+            }
             self.at += count
             return Ok(Dyn.Int(if sign == 1 -> -magnitude else -> magnitude))
         }
@@ -362,13 +398,13 @@ TermReader: struct {
             count: self.take_u32()
             proplist: !self.view && self.layout == .Proplist && count > 0 && self.bytes.len() - self.at >= 2 && Int{self.bytes[self.at]} == 104 && Int{self.bytes[self.at + 1]} == 2
             tree := Dyn.Null
-            if proplist {
-                tree = self.pairs(count, path, depth) ?? return Err(err)
-            } else {
+            if proplist -> tree = self.pairs(count, path, depth) ?? return Err(err) else {
                 tree = self.elements(count, path, depth) ?? return Err(err)
             }
             self.need(1, path) ?? return Err(err)
-            if (Int{self.bytes[self.at]}) != 106 -> return Err(self.fail(.Unsupported, path, "an improper list (its tail is not NIL)"))
+            if (Int{self.bytes[self.at]}) != 106 {
+                return Err(self.fail(.Unsupported, path, "an improper list (its tail is not NIL)"))
+            }
             self.at += 1
             return Ok(tree)
         }
@@ -377,7 +413,9 @@ TermReader: struct {
             count: self.take_u32()
             if op == 77 {
                 bits: self.byte()
-                if bits != 8 -> return Err(self.fail(.Unsupported, path, "a bitstring whose last byte holds {bits} bits is not byte-aligned"))
+                if bits != 8 {
+                    return Err(self.fail(.Unsupported, path, "a bitstring whose last byte holds {bits} bits is not byte-aligned"))
+                }
             }
             self.item(count, path, "a binary") ?? return Err(err)
             payload: slice(self.bytes, self.at, self.at + count)
@@ -392,20 +430,28 @@ TermReader: struct {
             loop i in 0..<count {
                 key: self.key("{path}[key {i}]") ?? return Err(err)
                 loop entry in entries {
-                    if entry.key == key -> return Err(self.fail(.Syntax, path, "two map keys are the text {key:Debug}"))
+                    if entry.key == key {
+                        return Err(self.fail(.Syntax, path, "two map keys are the text {key:Debug}"))
+                    }
                 }
                 value: self.term("{path}[{key:Debug}]", depth + 1) ?? return Err(err)
                 entries.push((key: key, value: value))
             }
             return Ok(stream.object_from_entries(entries))
         }
-        if op == 80 -> return Err(self.fail(.Unsupported, path, "a compressed term is only the whole input"))
-        if identity_name(op) == Val(name) -> return Err(self.fail(.Unsupported, path, "{name} (tag {op}) is a native identity, not data"))
+        if op == 80 {
+            return Err(self.fail(.Unsupported, path, "a compressed term is only the whole input"))
+        }
+        if identity_name(op) == Val(name) {
+            return Err(self.fail(.Unsupported, path, "{name} (tag {op}) is a native identity, not data"))
+        }
         Err(self.fail(.Syntax, path, "{op} is not an ETF term tag"))
     }
 
     finite: fn(self, value: Float, path: String) -> Dyn EncodingError! {
-        if !math.is_finite(value) -> return Err(self.fail(.Unsupported, path, "a non-finite float is not data"))
+        if !math.is_finite(value) {
+            return Err(self.fail(.Unsupported, path, "a non-finite float is not data"))
+        }
         Ok(Dyn.Float(value))
     }
 
@@ -427,10 +473,14 @@ TermReader: struct {
             self.need(2, path) ?? return Err(err)
             tuple: self.byte()
             arity: self.byte()
-            if tuple != 104 || arity != 2 -> return Err(self.fail(.Syntax, "{path}[{i}]", "a proplist element is a {{Key, Value}} 2-tuple"))
+            if tuple != 104 || arity != 2 {
+                return Err(self.fail(.Syntax, "{path}[{i}]", "a proplist element is a {{Key, Value}} 2-tuple"))
+            }
             key: self.key("{path}[{i}]") ?? return Err(err)
             loop entry in entries {
-                if entry.key == key -> return Err(self.fail(.Syntax, path, "two proplist keys are the text {key:Debug}"))
+                if entry.key == key {
+                    return Err(self.fail(.Syntax, path, "two proplist keys are the text {key:Debug}"))
+                }
             }
             value: self.term("{path}[{key:Debug}]", depth + 1) ?? return Err(err)
             entries.push((key: key, value: value))
@@ -448,12 +498,12 @@ TermReader: struct {
         raw := [U8]{}
         if op == 100 || op == 115 {
             loop i in 0..<count -> append_scalar(raw, Int{self.bytes[self.at + i]})
-        } else {
-            raw = slice(self.bytes, self.at, self.at + count)
-        }
+        } else { raw = slice(self.bytes, self.at, self.at + count) }
         self.at += count
         text: stream.text_from_bytes(raw) ?? return Err(self.fail(.Syntax, path, "an atom is not valid UTF-8"))
-        if scalar_count(text) > 255 -> return Err(self.fail(.Syntax, path, "an atom has more than 255 characters"))
+        if scalar_count(text) > 255 {
+            return Err(self.fail(.Syntax, path, "an atom has more than 255 characters"))
+        }
         Ok(text)
     }
 
@@ -500,22 +550,32 @@ TermReader: struct {
                         scalar = self.take_u32()
                     }
                     if self.view {
-                        if scalar < 0 || scalar > 1114111 || (scalar >= 55296 && scalar <= 57343) -> return Err(self.fail(.Syntax, path, "a list key holds something other than Unicode scalars"))
+                        if scalar < 0 || scalar > 1114111 || (scalar >= 55296 && scalar <= 57343) {
+                            return Err(self.fail(.Syntax, path, "a list key holds something other than Unicode scalars"))
+                        }
                         append_scalar(raw, scalar)
                     } else {
-                        if scalar < 0 || scalar > 255 -> return Err(self.fail(.Syntax, path, "a list key holds something other than bytes"))
+                        if scalar < 0 || scalar > 255 {
+                            return Err(self.fail(.Syntax, path, "a list key holds something other than bytes"))
+                        }
                         raw.push(U8{scalar})
                     }
-                    if raw.len() > self.limits.max_item_bytes -> return Err(self.fail(.Limit, path, "max_item_bytes {self.limits.max_item_bytes} exceeded by a list key"))
+                    if raw.len() > self.limits.max_item_bytes {
+                        return Err(self.fail(.Limit, path, "max_item_bytes {self.limits.max_item_bytes} exceeded by a list key"))
+                    }
                 }
                 self.need(1, path) ?? return Err(err)
                 tail: self.byte()
-                if tail != 106 -> return Err(self.fail(.Unsupported, path, "an improper list (its tail is not NIL)"))
+                if tail != 106 {
+                    return Err(self.fail(.Unsupported, path, "an improper list (its tail is not NIL)"))
+                }
             }
             text: stream.text_from_bytes(raw) ?? return Err(self.fail(.Syntax, path, "a list key is not UTF-8 text"))
             return Ok(text)
         }
-        if identity_name(op) == Val(name) -> return Err(self.fail(.Unsupported, path, "{name} (tag {op}) is a native identity, not data"))
+        if identity_name(op) == Val(name) {
+            return Err(self.fail(.Unsupported, path, "{name} (tag {op}) is a native identity, not data"))
+        }
         Err(self.fail(.Unsupported, path, "a key with tag {op} is not text"))
     }
 }
@@ -542,28 +602,44 @@ TermWriter: struct {
     }
 
     item: fn(self, count: Int, path: String, what: String) EncodingError! {
-        if count > self.limits.max_item_bytes -> return Err(etf_error(.Limit, self.out.len(), path, "max_item_bytes {self.limits.max_item_bytes} exceeded by {what} of {count} bytes"))
-        if count > 4294967295 -> return Err(etf_error(.Limit, self.out.len(), path, "{what} of {count} bytes exceeds the ETF length field"))
+        if count > self.limits.max_item_bytes {
+            return Err(etf_error(.Limit, self.out.len(), path, "max_item_bytes {self.limits.max_item_bytes} exceeded by {what} of {count} bytes"))
+        }
+        if count > 4294967295 {
+            return Err(etf_error(.Limit, self.out.len(), path, "{what} of {count} bytes exceeds the ETF length field"))
+        }
     }
 
     term: fn(&self, tree: Dyn, path: String, depth: Int) EncodingError! {
-        if depth > self.limits.max_depth -> return Err(etf_error(.Limit, self.out.len(), path, "max_depth {self.limits.max_depth} exceeded"))
+        if depth > self.limits.max_depth {
+            return Err(etf_error(.Limit, self.out.len(), path, "max_depth {self.limits.max_depth} exceeded"))
+        }
         #Unsafe("inspect private typed carriers without changing public Dyn variants") {
             if tree == {
-                .Null -> self.atom("nil", path) ?? return Err(err)
-                .Bool(value) -> self.atom(if value -> "true" else -> "false", path) ?? return Err(err)
-                .Int(value) -> self.put_int(value, path) ?? return Err(err)
-                .Float(value) -> self.put_float(value, path) ?? return Err(err)
+                .Null -> { self.atom("nil", path) ?? return Err(err) }
+                .Bool(value) -> {
+                    self.atom(if value -> "true" else -> "false", path) ?? return Err(err)
+                }
+                .Int(value) -> { self.put_int(value, path) ?? return Err(err) }
+                .Float(value) -> { self.put_float(value, path) ?? return Err(err) }
                 // A Number lexeme is its exact Int when integral, else its float64.
                 .Number(_) -> {
                     if tree.decode<Int>() == {
-                        .Ok(value) -> self.put_int(value, path) ?? return Err(err)
-                        .Err(_) -> self.put_float(tree.decode<Float>() ?? return Err(etf_error(.Unsupported, self.out.len(), path, "number {tree} is outside the ETF Int and float range")), path) ?? return Err(err)
+                        .Ok(value) -> { self.put_int(value, path) ?? return Err(err) }
+                        .Err(_) -> {
+                            self.put_float(tree.decode<Float>() ?? return Err(etf_error(.Unsupported, self.out.len(), path, "number {tree} is outside the ETF Int and float range")), path) ?? return Err(err)
+                        }
                     }
                 }
-                .Text(text) -> self.payload(text.bytes(), self.strings == .UTF8Binary, path) ?? return Err(err)
-                .Bytes(bytes) -> self.payload(bytes, self.byte_arrays == .Binary, path) ?? return Err(err)
-                .DateTime(_) -> self.payload((tree.to_text() ?? "").bytes(), self.strings == .UTF8Binary, path) ?? return Err(err)
+                .Text(text) -> {
+                    self.payload(text.bytes(), self.strings == .UTF8Binary, path) ?? return Err(err)
+                }
+                .Bytes(bytes) -> {
+                    self.payload(bytes, self.byte_arrays == .Binary, path) ?? return Err(err)
+                }
+                .DateTime(_) -> {
+                    self.payload((tree.to_text() ?? "").bytes(), self.strings == .UTF8Binary, path) ?? return Err(err)
+                }
                 .Array(items) -> {
                     if items.len() == 0 {
                         self.put(106)
@@ -572,7 +648,9 @@ TermWriter: struct {
                     self.item(items.len(), path, "a list") ?? return Err(err)
                     self.put(108)
                     self.put_u32(items.len())
-                    loop i in 0..<items.len() -> self.term(items[i], "{path}[{i}]", depth + 1) ?? return Err(err)
+                    loop i in 0..<items.len() {
+                        self.term(items[i], "{path}[{i}]", depth + 1) ?? return Err(err)
+                    }
                     self.put(106)
                 }
                 .Object(_) -> {
@@ -605,7 +683,9 @@ TermWriter: struct {
     }
 
     atom: fn(&self, name: String, path: String) EncodingError! {
-        if scalar_count(name) > 255 -> return Err(etf_error(.Limit, self.out.len(), path, "an atom has at most 255 characters"))
+        if scalar_count(name) > 255 {
+            return Err(etf_error(.Limit, self.out.len(), path, "an atom has at most 255 characters"))
+        }
         bytes: name.bytes()
         if bytes.len() <= 255 {
             self.put(119)
@@ -647,7 +727,9 @@ TermWriter: struct {
     }
 
     put_float: fn(&self, value: Float, path: String) EncodingError! {
-        if !math.is_finite(value) -> return Err(etf_error(.Unsupported, self.out.len(), path, "a non-finite float has no ETF form"))
+        if !math.is_finite(value) {
+            return Err(etf_error(.Unsupported, self.out.len(), path, "a non-finite float has no ETF form"))
+        }
         bits: binary.pack_f64be(value) ?? return Err(etf_error(.Unsupported, self.out.len(), path, "a float has no ETF form"))
         self.put(70)
         loop b in bits -> self.out.push(b)
@@ -685,9 +767,7 @@ TermWriter: struct {
 
 // UTF-8 bytes of one Unicode scalar.
 append_scalar: fn(out: &[U8], scalar: Int) Never! {
-    if scalar < 128 {
-        out.push(U8{scalar})
-    } else if scalar < 2048 {
+    if scalar < 128 -> out.push(U8{scalar}) else if scalar < 2048 {
         out.push(U8{192 + (scalar >> 6)})
         out.push(U8{128 + scalar.bit_and(63)})
     } else if scalar < 65536 {

@@ -12,6 +12,7 @@
 //   is NAR padding rather than the frame checksum Rust's level-19 encoder wrote.
 
 STORE_NIX_TEST_STANDARD_NARINFO: "StorePath: /nix/store/axp6zlky4x2v3jwcbq24a2cz25hzlw9b-ripgrep-15.2.0\nURL: nar/19yag7za8bz38dzxd7g20p8738bmb80n4ci9y3hfaxhy15rxxxyh.nar.zst\nCompression: zstd\nFileHash: sha256:1lhgjf25d2ca7sx1ka4g5lsskicr484vqi7cbndzhz598hbr18zy\nFileSize: 2133450\nNarHash: sha256:19yag7za8bz38dzxd7g20p8738bmb80n4ci9y3hfaxhy15rxxxyh\nNarSize: 7088584\nReferences: 0d8g8n0a11v6f5m2h416ajyxmnkwc3md-glibc-2.42-67 dsn500c5j62qz9f49mi3nhx74jbkf6xq-pcre2-10.47 r48746qznwqxxl9qzd8f08ny8mg1dg2y-gcc-15.3.0-lib\nSig: cache.nixos.org-1:u47N81GjFd/qpAQ8bRz3Ve584pYwp/gWswtHa6PwWSzhfYvw7oTBW0DThOzapKGuxqqnvw9HfKRnggOniyPBDw==\n"
+
 STORE_NIX_TEST_KEY_ID: "test-cache-1"
 
 store_nix_test_parse_fails: fn(text: String) -> Bool Never! {
@@ -156,8 +157,8 @@ NixTestSingleCache: struct {
     server: NixTestCacheServer
 }
 
-store_nix_test_single_object_routes: fn(store_path: String, nar_name: String, nar: [U8], seed: [U8]) -> [String: [U8]] Never! {
-    [String: [U8]]{
+store_nix_test_single_object_routes: fn(store_path: String, nar_name: String, nar: [U8], seed: [U8]) -> [String:[U8]] Never! {
+    [String:[U8]]{
         "/nix-cache-info": store_nix_test_cache_info(),
         "/{store_nix_test_hash_key(store_path)}.narinfo": store_nix_test_signed_narinfo(store_path, nar_name, nar, [String]{}, STORE_NIX_TEST_KEY_ID, seed),
         "/nar/{nar_name}": nar,
@@ -168,11 +169,11 @@ store_nix_test_single_object_cache: fn(label: String, store_path: String, nar_na
     root: store_nix_test_unique_dir(label)
     server: NixTestCacheServer.start(files.join(root, "site"), store_nix_test_single_object_routes(store_path, nar_name, nar, seed))
     roots: store_nix_test_configure_root(files.join(root, "jetpack"), server.endpoint, STORE_NIX_TEST_KEY_ID, seed)
-    NixTestSingleCache{root, roots, server}
+    NixTestSingleCache{root: root, roots: roots, server: server}
 }
 
-store_nix_test_only_cache_info: fn() -> [String: [U8]] Never! {
-    [String: [U8]]{"/nix-cache-info": store_nix_test_cache_info()}
+store_nix_test_only_cache_info: fn() -> [String:[U8]] Never! {
+    [String:[U8]]{"/nix-cache-info": store_nix_test_cache_info()}
 }
 
 store_nix_test_admit: fn(verification: &StoreVerification, roots: HangarRoots, name: String, store_path: String) -> AdmittedNixClosure Never! {
@@ -194,7 +195,7 @@ store_nix_test_object: fn(admitted: AdmittedNixClosure, store_path: String) -> A
 store_nix_test_single_failure: fn(verification: &StoreVerification, label: String, store_path: String, narinfo: [U8], object: [U8], trusted_seed: [U8], expected: NixCacheErrorKind) -> NixCacheError Never! {
     root: store_nix_test_unique_dir(label)
     narinfo_text: String.from_bytes(narinfo) ?? panic("narinfo text")
-    routes := [String: [U8]]{
+    routes := [String:[U8]]{
         "/nix-cache-info": store_nix_test_cache_info(),
         "/{store_nix_test_hash_key(store_path)}.narinfo": narinfo,
     }
@@ -217,7 +218,9 @@ store_nix_test_single_failure: fn(verification: &StoreVerification, label: Strin
     assert_eq(store_list(verification, roots).len(), 0)
     directories: [String]{files.join(roots.hangar_dir(), STORE_OBJECTS_DIR), files.join(roots.hangar_dir(), STORE_RECEIPTS_DIR)}
     loop directory in directories {
-        if files.is_dir(directory) -> assert_eq((files.list_dir(directory) ?? panic("list")).len(), 0)
+        if files.is_dir(directory) {
+            assert_eq((files.list_dir(directory) ?? panic("list")).len(), 0)
+        }
     }
     server.stop()
     store_nix_test_remove_dir(root)
@@ -269,10 +272,12 @@ NixTestProgress: struct {
     key: NixPublicKey.parse(STORE_NIX_DEFAULT_PUBLIC_KEY) ?? panic("upstream key")
     info.verify_signature("/nix/store", [NixPublicKey]{key}) ?? panic("upstream signature must verify")
     wrong_key: NixPublicKey.parse("cache.nixos.org-1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=") ?? panic("wrong key")
-    assert(if info.verify_signature("/nix/store", [NixPublicKey]{wrong_key}) == {
-        .Ok(verified) -> false
-        .Err(failed) -> true
-    })
+    assert(
+        if info.verify_signature("/nix/store", [NixPublicKey]{wrong_key}) == {
+            .Ok(verified) -> false
+            .Err(failed) -> true
+        },
+    )
     changes: [(needle: String, replacement: String)]{
         (needle: "ripgrep-15.2.0", replacement: "ripgrep-15.2.1"),
         (needle: "7088584", replacement: "7088585"),
@@ -281,10 +286,12 @@ NixTestProgress: struct {
     }
     loop change in changes {
         changed: NixNarInfo.parse(STORE_NIX_TEST_STANDARD_NARINFO.replace(change.needle, change.replacement)) ?? panic("changed narinfo parses")
-        assert(if changed.verify_signature("/nix/store", [NixPublicKey]{key}) == {
-            .Ok(verified) -> false
-            .Err(failed) -> true
-        })
+        assert(
+            if changed.verify_signature("/nix/store", [NixPublicKey]{key}) == {
+                .Ok(verified) -> false
+                .Err(failed) -> true
+            },
+        )
     }
 }
 
@@ -332,7 +339,7 @@ NixTestProgress: struct {
     root_info: store_nix_test_signed_zstd_narinfo(root_path, "root.nar.zst", root_nar, [String]{leaf_path}, STORE_NIX_TEST_KEY_ID, seed)
     leaf_info: store_nix_test_signed_narinfo(leaf_path, "leaf.nar", leaf_nar, [String]{}, STORE_NIX_TEST_KEY_ID, seed)
     root_compressed: store_nix_test_encode_zstd(root_nar)
-    routes := [String: [U8]]{
+    routes := [String:[U8]]{
         "/nix-cache-info": store_nix_test_cache_info(),
         "/00000000000000000000000000000000.narinfo": root_info,
         "/nar/root.nar.zst": root_compressed,
@@ -358,9 +365,11 @@ NixTestProgress: struct {
     assert_eq(plan.repaired, 0)
     assert_eq(plan.download_bytes, root_compressed.len() + leaf_nar.len())
     assert_eq(plan.disk_bytes, root_nar.len() + leaf_nar.len())
-    payload_routes := [String: [U8]]{}
+    payload_routes := [String:[U8]]{}
     loop route in routes {
-        if route.key == "/nix-cache-info" || route.key.starts_with("/nar/") -> payload_routes[route.key] = route.value
+        if route.key == "/nix-cache-info" || route.key.starts_with("/nar/") {
+            payload_routes[route.key] = route.value
+        }
     }
     server.replace_routes(payload_routes)
     progress: NixTestProgress.new()
@@ -397,7 +406,7 @@ NixTestProgress: struct {
     store_path: "/nix/store/22222222222222222222222222222222-self"
     seed: store_nix_test_seed(7)
     info: store_nix_test_signed_narinfo(store_path, "self.nar", nar, [String]{store_path}, STORE_NIX_TEST_KEY_ID, seed)
-    routes := [String: [U8]]{
+    routes := [String:[U8]]{
         "/nix-cache-info": store_nix_test_cache_info(),
         "/22222222222222222222222222222222.narinfo": info,
         "/nar/self.nar": nar,
@@ -430,7 +439,7 @@ NixTestProgress: struct {
     shared_path: "/nix/store/22222222222222222222222222222222-shared"
     seed: store_nix_test_seed(8)
     key_id: "shared-cache-1"
-    routes: [String: [U8]]{
+    routes: [String:[U8]]{
         "/nix-cache-info": store_nix_test_cache_info(),
         "/00000000000000000000000000000000.narinfo": store_nix_test_signed_narinfo(first_path, "first.nar", first_nar, [String]{shared_path}, key_id, seed),
         "/11111111111111111111111111111111.narinfo": store_nix_test_signed_narinfo(second_path, "second.nar", second_nar, [String]{shared_path}, key_id, seed),
@@ -526,7 +535,7 @@ NixTestProgress: struct {
     nar: store_nix_test_nar_with_directory_entries([[U8]]{})
     cache: store_nix_test_single_object_cache("planning-admitted", store_path, "planned.nar", nar, store_nix_test_seed(13))
     _: store_nix_test_admit(verification, cache.roots, "out", store_path)
-    cache.server.replace_routes([String: [U8]]{})
+    cache.server.replace_routes([String:[U8]]{})
     plan: store_plan_nix_downloads(verification, cache.roots, [String]{store_path}, false, None) ?? panic("plan")
     assert_eq(plan.new, 0)
     assert_eq(plan.cached, 1)
@@ -563,15 +572,19 @@ NixTestProgress: struct {
     nar: store_nix_test_nar_with_directory_entries([[U8]]{name.bytes()})
     seed: store_nix_test_seed(17)
     cache: store_nix_test_single_object_cache("backslash-name", store_path, "backslash-name.nar", nar, seed)
-    assert(if store_validate_nar(nar) == {
-        .Ok(stats) -> false
-        .Err(failed) -> true
-    })
+    assert(
+        if store_validate_nar(nar) == {
+            .Ok(stats) -> false
+            .Err(failed) -> true
+        },
+    )
     strict_destination: files.join(cache.root, "strict")
-    assert(if store_read_nar_stream(store_nix_test_byte_source(nar, 65536), strict_destination, nar.len()) == {
-        .Ok(stats) -> false
-        .Err(failed) -> true
-    })
+    assert(
+        if store_read_nar_stream(store_nix_test_byte_source(nar, 65536), strict_destination, nar.len()) == {
+            .Ok(stats) -> false
+            .Err(failed) -> true
+        },
+    )
 
     first: store_nix_test_admit(verification, cache.roots, "out", store_path)
     object: store_nix_test_object(first, store_path)
@@ -809,8 +822,8 @@ NixTestProgress: struct {
     digest: "sha256-{store_test_repeat("a", 64)}"
     expected: files.join(files.join(roots.hangar_dir(), "objects"), digest)
     files.create_dir_all(expected) ?? panic("expected object")
-    plan: ProviderPlanFacts.from_facts([String: String]{}) ?? panic("plan facts")
-    producer: ProducerRecord.new("nix", "/nix/store/test.drv", "sha256-source", plan, "nix-test", "policy=test\nplatform=test", [String: String]{}) ?? panic("producer")
+    plan: ProviderPlanFacts.from_facts([String:String]{}) ?? panic("plan facts")
+    producer: ProducerRecord.new("nix", "/nix/store/test.drv", "sha256-source", plan, "nix-test", "policy=test\nplatform=test", [String:String]{}) ?? panic("producer")
     out: files.join(roots.root, "not-the-canonical-object")
     entry: StoreEntry{
         id: "registration-condition",
@@ -823,7 +836,7 @@ NixTestProgress: struct {
         envelope: Envelope{output_hash: digest, platform: pkg_host_platform(), signature: "", provenance: "registration-condition via nix"},
         cache_identity: CacheIdentity{source_fingerprint: "", recipe_fingerprint: "", policy_fingerprint: "", platform: ""},
         references: [String]{},
-        named_outputs: [String: String]{},
+        named_outputs: [String:String]{},
         platform_artifact_kind: "",
         producer_record: producer.encode(),
         receipt: "",

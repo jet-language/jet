@@ -67,7 +67,9 @@ JetCLIDap: struct {
     handle: fn(&self, session: &NativeSession, input: &&JetCLIDapRequest, entry: String) Never! -[FS, Env, Exec, IO, Time.Wait]> {
         request := input.move()
         if request.command == {
-            "initialize" -> self.respond(request, "{{\"supportsConfigurationDoneRequest\":true,\"supportsConditionalBreakpoints\":true,\"supportsLogPoints\":true,\"supportsEvaluateForHovers\":true}}")
+            "initialize" -> {
+                self.respond(request, "{{\"supportsConfigurationDoneRequest\":true,\"supportsConditionalBreakpoints\":true,\"supportsLogPoints\":true,\"supportsEvaluateForHovers\":true}}")
+            }
             "launch" -> {
                 self.stop_on_entry = jet_cli_dap_bool(request.arguments, "stopOnEntry")
                 self.args = jet_cli_dap_texts_of(request.arguments.move(), "args")
@@ -77,26 +79,32 @@ JetCLIDap: struct {
             }
             "setBreakpoints" -> {
                 if self.set_breakpoints(session, request) == {
-                    .Ok(body) -> self.respond(request, body)
+                    .Ok(body) -> { self.respond(request, body) }
                     .Err(failure) -> self.fail(request, failure.detail)
                 }
             }
             "configurationDone" -> {
                 self.respond(request, "{{}}")
-                if self.launched -> return
+                if self.launched {
+                    return
+                }
                 self.launched = true
                 if self.start(session) == {
                     // Only `stopOnEntry` stops for the entry; otherwise the
                     // first stop is a breakpoint's, or a pause.
-                    .Ok(stop) -> self.report(session, stop, if self.stop_on_entry -> "entry" else -> "pause")
+                    .Ok(stop) -> {
+                        self.report(session, stop, if self.stop_on_entry -> "entry" else -> "pause")
+                    }
                     .Err(failure) -> self.stopped_by(failure)
                 }
             }
             "threads" -> self.respond(request, "{{\"threads\":[{{\"id\":1,\"name\":\"run\"}}]}}")
             "stackTrace" -> {
-                if !self.launched || session.finished -> return self.fail(request, "the program is not paused")
+                if !self.launched || session.finished {
+                    return self.fail(request, "the program is not paused")
+                }
                 if jet_cli_dap_stack(session, entry) == {
-                    .Ok(body) -> self.respond(request, body)
+                    .Ok(body) -> { self.respond(request, body) }
                     .Err(failure) -> self.fail(request, failure.detail)
                 }
             }
@@ -105,21 +113,27 @@ JetCLIDap: struct {
                 self.respond(request, "{{\"scopes\":[{{\"name\":\"Locals\",\"presentationHint\":\"locals\",\"variablesReference\":{frame + 1},\"expensive\":false}}]}}")
             }
             "variables" -> {
-                if !self.launched || session.finished -> return self.fail(request, "the program is not paused")
+                if !self.launched || session.finished {
+                    return self.fail(request, "the program is not paused")
+                }
                 if jet_cli_dap_variables(session, jet_cli_dap_int(request.arguments, "variablesReference") - 1) == {
-                    .Ok(body) -> self.respond(request, body)
+                    .Ok(body) -> { self.respond(request, body) }
                     .Err(failure) -> self.fail(request, failure.detail)
                 }
             }
             "evaluate" -> {
-                if !self.launched || session.finished -> return self.fail(request, "the program is not paused")
+                if !self.launched || session.finished {
+                    return self.fail(request, "the program is not paused")
+                }
                 if jet_cli_dap_evaluate(session, jet_cli_dap_string(request.arguments, "expression"), jet_cli_dap_int(request.arguments, "frameId")) == {
-                    .Ok(body) -> self.respond(request, body)
+                    .Ok(body) -> { self.respond(request, body) }
                     .Err(failure) -> self.fail(request, failure.message)
                 }
             }
             "continue" | "next" | "stepIn" | "stepOut" -> {
-                if !self.launched || session.finished -> return self.fail(request, "the program is not paused")
+                if !self.launched || session.finished {
+                    return self.fail(request, "the program is not paused")
+                }
                 self.respond(request, if request.command == "continue" -> "{{\"allThreadsContinued\":true}}" else -> "{{}}")
                 word: if request.command == {
                     "continue" -> "c"
@@ -128,7 +142,9 @@ JetCLIDap: struct {
                     else -> "f"
                 }
                 if self.run(session, word) == {
-                    .Ok(stop) -> self.report(session, stop, if word == "c" -> "pause" else -> "step")
+                    .Ok(stop) -> {
+                        self.report(session, stop, if word == "c" -> "pause" else -> "step")
+                    }
                     .Err(failure) -> self.stopped_by(failure)
                 }
             }
@@ -145,12 +161,16 @@ JetCLIDap: struct {
         loop member in request.arguments {
             if member.key == "source" && member.value == .Object(source) {
                 loop part in source {
-                    if part.key == "path" && part.value == .Text(path) -> file = dap_files.basename(path)
+                    if part.key == "path" && part.value == .Text(path) {
+                        file = dap_files.basename(path)
+                    }
                 }
             }
             if member.key == "breakpoints" && member.value == .Array(items) {
                 loop item in items {
-                    if item == .Object(spec) -> specs.push(JetCLIDapBreakpoint{line: jet_cli_dap_int(spec, "line"), condition: jet_cli_dap_string(spec, "condition"), log: jet_cli_dap_string(spec, "logMessage")})
+                    if item == .Object(spec) {
+                        specs.push(JetCLIDapBreakpoint{line: jet_cli_dap_int(spec, "line"), condition: jet_cli_dap_string(spec, "condition"), log: jet_cli_dap_string(spec, "logMessage")})
+                    }
                 }
             }
         }
@@ -165,7 +185,7 @@ JetCLIDap: struct {
             line: spec.line
             rule := JetCLIDapRule?{None}
             if jet_cli_dap_rule(spec) == {
-                .Ok(parsed) -> rule = parsed
+                .Ok(parsed) -> { rule = parsed }
                 .Err(failure) -> {
                     rows.push("{{\"verified\":false,\"line\":{line},\"message\":{foundation_json_quote(failure.message)}}}")
                     next
@@ -253,7 +273,9 @@ JetCLIDap: struct {
         locals: session.locals() ?? return Err(err)
         if rule.condition == .Val(condition) {
             if jet_cli_dap_condition(condition, locals) == {
-                .Ok(flag) -> if !flag -> return Ok(false)
+                .Ok(flag) -> {
+                    if !flag -> return Ok(false)
+                }
                 .Err(failure) -> {
                     self.say(session, "stderr", "The breakpoint's condition failed: {failure.message}\n")
                     return Ok(true)
@@ -274,7 +296,9 @@ JetCLIDap: struct {
     // An `output` event of `category`, after the program's output so far.
     say: fn(&self, session: &NativeSession, category: String, text: String) Never! -[FS, IO, Time.Wait]> {
         output: session.take_output()
-        if output != "" -> self.event("output", "{{\"category\":\"stdout\",\"output\":{foundation_json_quote(output)}}}")
+        if output != "" {
+            self.event("output", "{{\"category\":\"stdout\",\"output\":{foundation_json_quote(output)}}}")
+        }
         self.event("output", "{{\"category\":\"{category}\",\"output\":{foundation_json_quote(text)}}}")
     }
 
@@ -282,7 +306,9 @@ JetCLIDap: struct {
     // `reason` unless a breakpoint stopped it), or its end.
     report: fn(&self, session: &NativeSession, settled: JetCLIDapStop, reason: String) Never! -[FS, IO, Time.Wait]> {
         output: session.take_output()
-        if output != "" -> self.event("output", "{{\"category\":\"stdout\",\"output\":{foundation_json_quote(output)}}}")
+        if output != "" {
+            self.event("output", "{{\"category\":\"stdout\",\"output\":{foundation_json_quote(output)}}}")
+        }
         stop: settled.stop
         if stop.kind == {
             .Paused -> {
@@ -356,7 +382,9 @@ jet_cli_dap_read: fn() -[IO, Time.Wait]> String? Never! {
         line: (String.from_bytes(header) ?? "").trim()
         header = [U8]{}
         if line == "" && length >= 0 -> break
-        if line.to_lower().starts_with("content-length:") -> length = Int.parse(line.after(":").trim()) ?? -1
+        if line.to_lower().starts_with("content-length:") {
+            length = Int.parse(line.after(":").trim()) ?? -1
+        }
     }
     body := [U8]{}
     loop body.len() < length {
@@ -427,9 +455,7 @@ jet_cli_dap_texts_of: fn(members: &&[(key: String, value: Dyn)], name: String) -
 
 // The integer `value` holds, or -1. A parsed JSON number is a `.Number`
 // lexeme, which foundation_json_integer reads.
-jet_cli_dap_number: fn(value: Dyn) -> Int Never! {
-    foundation_json_integer(value) ?? -1
-}
+jet_cli_dap_number: fn(value: Dyn) -> Int Never! { foundation_json_integer(value) ?? -1 }
 
 // The integer member `name`, or -1.
 jet_cli_dap_int: fn(members: [(key: String, value: Dyn)], name: String) -> Int Never! {
@@ -491,13 +517,9 @@ jet_cli_dap_stack: fn(session: &NativeSession, entry: String) -> String NativeDe
 // The locals of frame `frame` (an LLDB frame index). The innermost frame
 // stays selected, as stepping needs.
 jet_cli_dap_frame_locals: fn(session: &NativeSession, frame: Int) -> [NativeLocal] NativeDebugError! {
-    if frame > 0 {
-        _: session.select_frame(frame) ?? return Err(err)
-    }
+    if frame > 0 -> _: session.select_frame(frame) ?? return Err(err)
     locals: session.locals() ?? return Err(err)
-    if frame > 0 {
-        _: session.select_frame(0) ?? return Err(err)
-    }
+    if frame > 0 -> _: session.select_frame(0) ?? return Err(err)
     Ok(locals)
 }
 
@@ -508,7 +530,9 @@ jet_cli_dap_variables: fn(session: &NativeSession, frame: Int) -> String NativeD
     locals := jet_cli_dap_frame_locals(session, frame) ?? return Err(err)
     locals.sort_by(fn(left: NativeLocal, right: NativeLocal) { left.name <=> right.name })
     rows := [String]{}
-    loop local in locals -> rows.push("{{\"name\":{foundation_json_quote(local.name)},\"value\":{foundation_json_quote(local.value)},\"type\":{foundation_json_quote(local.type_name)},\"variablesReference\":0}}")
+    loop local in locals {
+        rows.push("{{\"name\":{foundation_json_quote(local.name)},\"value\":{foundation_json_quote(local.value)},\"type\":{foundation_json_quote(local.type_name)},\"variablesReference\":0}}")
+    }
     Ok("{{\"variables\":[{rows.join(",")}]}}")
 }
 

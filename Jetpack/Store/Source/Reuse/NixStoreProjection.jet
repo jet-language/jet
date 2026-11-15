@@ -14,10 +14,10 @@ NixStoreProjection: struct {
 
 // Nix entries by every output digest they own, each list in id order.
 NixProjectionIndex: struct {
-    priv by_digest: [String: [StoreEntry]]
+    priv by_digest: [String:[StoreEntry]]
 
     from_entries: fn(entries: [StoreEntry]) -> NixProjectionIndex Never! {
-        by_digest := [String: [StoreEntry]]{}
+        by_digest := [String:[StoreEntry]]{}
         loop entry in entries {
             producer: ProducerRecord.decode(entry.producer_record) ?? next
             if producer.provider != "nix" -> next
@@ -31,7 +31,7 @@ NixProjectionIndex: struct {
                 by_digest[digest] = owners
             }
         }
-        sorted := [String: [StoreEntry]]{}
+        sorted := [String:[StoreEntry]]{}
         loop pair in by_digest -> sorted[pair.key] = store_reuse_entries_by_id(pair.value)
         NixProjectionIndex{by_digest: sorted}
     }
@@ -54,12 +54,14 @@ store_reuse_entries_by_id: fn(entries: [StoreEntry]) -> [StoreEntry] Never! {
 store_nix_store_projection_for_entry_index: fn(roots: HangarRoots, entry: StoreEntry, snapshot_root: String, index: NixProjectionIndex) -> [NixStoreProjection] StoreError! {
     if entry.producer_record == "" -> return Ok([NixStoreProjection]{})
     producer: ProducerRecord.decode(entry.producer_record) ?? return Err(StoreError.Other("cache entry `{entry.id}` has an invalid producer record: {err.message()}"))
-    if producer.provider != "nix" || !store_reuse_has_nix_store_output(producer) -> return Ok([NixStoreProjection]{})
+    if producer.provider != "nix" || !store_reuse_has_nix_store_output(producer) {
+        return Ok([NixStoreProjection]{})
+    }
     pending := [String]{entry.envelope.output_hash}
     loop pair in entry.named_outputs -> pending.push(pair.value)
     pending = store_sorted_unique(pending)
     visited := [String]{}
-    logical_digests := [String: String]{}
+    logical_digests := [String:String]{}
     loop pending.len() > 0 {
         digest: pending[0]
         _: pending.remove(0, .Slot)
@@ -68,7 +70,9 @@ store_nix_store_projection_for_entry_index: fn(roots: HangarRoots, entry: StoreE
         candidates: if digest == entry.envelope.output_hash -> [StoreEntry]{entry} else -> index.by_digest.get(digest) ?? return Err(StoreError.Other("Nix closure object `{digest}` is missing from the warm reuse index"))
         loop candidate in candidates {
             candidate_producer: ProducerRecord.decode(candidate.producer_record) ?? return Err(StoreError.Other("Nix closure entry `{candidate.id}` has invalid producer facts: {err.message()}"))
-            if candidate_producer.provider != "nix" -> return Err(StoreError.Other("Nix closure object `{digest}` is owned by `{candidate_producer.provider}`"))
+            if candidate_producer.provider != "nix" {
+                return Err(StoreError.Other("Nix closure object `{digest}` is owned by `{candidate_producer.provider}`"))
+            }
             output_fact := false
             fact_keys: store_sorted_keys(candidate_producer.facts)
             loop key in fact_keys {
@@ -82,7 +86,9 @@ store_nix_store_projection_for_entry_index: fn(roots: HangarRoots, entry: StoreE
             }
             if !output_fact {
                 if store_reuse_canonical_nix_output_path(candidate_producer, "out") == {
-                    .Ok(path) -> store_reuse_add_nix_projection_path(logical_digests, path, candidate.envelope.output_hash)
+                    .Ok(path) -> {
+                        store_reuse_add_nix_projection_path(logical_digests, path, candidate.envelope.output_hash)
+                    }
                     .Err(_) -> {}
                 }
             }
@@ -90,7 +96,9 @@ store_nix_store_projection_for_entry_index: fn(roots: HangarRoots, entry: StoreE
             pending = store_sorted_unique(pending)
         }
     }
-    if logical_digests.len() == 0 -> return Err(StoreError.Other("Nix cache entry `{entry.id}` has no canonical output path for projection"))
+    if logical_digests.len() == 0 {
+        return Err(StoreError.Other("Nix cache entry `{entry.id}` has no canonical output path for projection"))
+    }
     store_reuse_projection_list(roots, producer, logical_digests, snapshot_root)
 }
 
@@ -99,8 +107,10 @@ store_nix_store_projection_for_entry_index: fn(roots: HangarRoots, entry: StoreE
 store_nix_store_projection_for_entry: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, snapshot_root: String) -> [NixStoreProjection] StoreError! {
     if entry.producer_record == "" -> return Ok([NixStoreProjection]{})
     producer: ProducerRecord.decode(entry.producer_record) ?? return Err(StoreError.Other("cache entry `{entry.id}` has an invalid producer record: {err.message()}"))
-    if producer.provider != "nix" || !store_reuse_has_nix_store_output(producer) -> return Ok([NixStoreProjection]{})
-    logical_digests := [String: String]{}
+    if producer.provider != "nix" || !store_reuse_has_nix_store_output(producer) {
+        return Ok([NixStoreProjection]{})
+    }
+    logical_digests := [String:String]{}
     fact_keys: store_sorted_keys(producer.facts)
     loop key in fact_keys {
         if !key.starts_with("nix.output.") -> next
@@ -110,10 +120,14 @@ store_nix_store_projection_for_entry: fn(verification: &StoreVerification, roots
         path: store_reuse_canonical_nix_output_path(producer, name)
         store_reuse_add_nix_projection_path(logical_digests, path, digest)
     }
-    if logical_digests.len() == 0 -> return Err(StoreError.Other("Nix cache entry `{entry.id}` has no canonical output path for projection"))
+    if logical_digests.len() == 0 {
+        return Err(StoreError.Other("Nix cache entry `{entry.id}` has no canonical output path for projection"))
+    }
     graph: store_closure_graph_structure_unlocked(verification, roots) ?? return Err(StoreError.Other("Nix cache entry `{entry.id}`: a Hangar object in its recorded closure is unavailable: {err.message()}"))
     if graph.records.get(entry.id) == {
-        .Val(record) -> store_reuse_add_closure_objects(roots, graph, record, entry, logical_digests)
+        .Val(record) -> {
+            store_reuse_add_closure_objects(roots, graph, record, entry, logical_digests)
+        }
         .None -> {
             if entry.references.len() > 0 || producer.facts.has_key("nix.closure.receipt") || producer.facts.has_key("nix.cache.closure.receipt.sha256") {
                 return Err(StoreError.Other("Nix closure record `{entry.id}` is missing from the Hangar graph"))
@@ -125,7 +139,7 @@ store_nix_store_projection_for_entry: fn(verification: &StoreVerification, roots
 
 // Every object in the closure of every named root, each with exactly one
 // canonical store path among its owning Nix records.
-store_reuse_add_closure_objects: fn(roots: HangarRoots, graph: ClosureGraph, record: ClosureRecord, entry: StoreEntry, logical_digests: &[String: String]) StoreError! {
+store_reuse_add_closure_objects: fn(roots: HangarRoots, graph: ClosureGraph, record: ClosureRecord, entry: StoreEntry, logical_digests: &[String:String]) StoreError! {
     expected_outputs := entry.named_outputs
     expected_outputs["out"] = entry.envelope.output_hash
     if record.primary != entry.envelope.output_hash || record.outputs != expected_outputs || record.references != store_sorted_unique(entry.references) {
@@ -142,10 +156,14 @@ store_reuse_add_closure_objects: fn(roots: HangarRoots, graph: ClosureGraph, rec
     loop digest in closure_digests {
         object: graph.objects.get(digest) ?? return Err(StoreError.Other("Nix closure object `{digest}` is missing from the Hangar graph"))
         expected_path: store_reuse_object_path(roots, digest)
-        if object.external || !store_reuse_same_path(object.path, expected_path) -> return Err(StoreError.Other("Nix closure object `{digest}` is not a canonical Hangar object"))
+        if object.external || !store_reuse_same_path(object.path, expected_path) {
+            return Err(StoreError.Other("Nix closure object `{digest}` is not a canonical Hangar object"))
+        }
         // Admitted Nix objects are directory, regular file, or symlink roots.
         info: files.stat(expected_path)
-        if !info.is_symlink && !info.is_dir && !info.is_file -> return Err(StoreError.Other("Nix closure object `{digest}` is not a regular Hangar node"))
+        if !info.is_symlink && !info.is_dir && !info.is_file {
+            return Err(StoreError.Other("Nix closure object `{digest}` is not a regular Hangar node"))
+        }
         paths := [String]{}
         loop owner_id in owner_ids {
             owner: graph.records[owner_id]
@@ -153,18 +171,22 @@ store_reuse_add_closure_objects: fn(roots: HangarRoots, graph: ClosureGraph, rec
             loop name in output_names {
                 if owner.outputs[name] != digest -> next
                 owner_producer: ProducerRecord.decode(owner.producer_record) ?? return Err(StoreError.Other("Nix closure record `{owner.id}` has invalid producer facts: {err.message()}"))
-                if owner_producer.provider != "nix" -> return Err(StoreError.Other("Nix closure object `{digest}` is owned by `{owner_producer.provider}`"))
+                if owner_producer.provider != "nix" {
+                    return Err(StoreError.Other("Nix closure object `{digest}` is owned by `{owner_producer.provider}`"))
+                }
                 path: store_reuse_canonical_nix_output_path(owner_producer, name) ?? return Err(StoreError.Other("Nix closure object `{digest}` has no canonical `{name}` output fact: {err.message()}"))
                 paths.push(path)
             }
         }
         unique: store_sorted_unique(paths)
-        if unique.len() != 1 -> return Err(StoreError.Other("Nix closure object `{digest}` has {unique.len()} canonical store paths"))
+        if unique.len() != 1 {
+            return Err(StoreError.Other("Nix closure object `{digest}` has {unique.len()} canonical store paths"))
+        }
         store_reuse_add_nix_projection_path(logical_digests, unique[0], digest)
     }
 }
 
-store_sorted_keys_of_records: fn(records: [String: ClosureRecord]) -> [String] Never! {
+store_sorted_keys_of_records: fn(records: [String:ClosureRecord]) -> [String] Never! {
     keys := records.keys().to_list()
     keys.sort()
     keys
@@ -173,13 +195,13 @@ store_sorted_keys_of_records: fn(records: [String: ClosureRecord]) -> [String] N
 // The projection in logical-path order. The primary logical path (the
 // `out`, else `bin`, output) maps to the lease snapshot; every other path
 // to its canonical Hangar object.
-store_reuse_projection_list: fn(roots: HangarRoots, producer: ProducerRecord, logical_digests: [String: String], snapshot_root: String) -> [NixStoreProjection] StoreError! {
+store_reuse_projection_list: fn(roots: HangarRoots, producer: ProducerRecord, logical_digests: [String:String], snapshot_root: String) -> [NixStoreProjection] StoreError! {
     primary_logical := String?{None}
     primary_names: [String]{"out", "bin"}
     loop name in primary_names {
         if primary_logical != None -> break
         if store_reuse_canonical_nix_output_path(producer, name) == {
-            .Ok(path) -> primary_logical = Val(path)
+            .Ok(path) -> { primary_logical = Val(path) }
             .Err(_) -> {}
         }
     }
@@ -226,13 +248,19 @@ store_reuse_store_fact: fn(value: String?) -> String? Never! {
 
 // Rust `add_nix_projection_path`: one plain `/nix/store/<name>` per digest;
 // a logical path may not map to two digests.
-store_reuse_add_nix_projection_path: fn(logical_digests: &[String: String], logical: String, digest: String) StoreError! {
+store_reuse_add_nix_projection_path: fn(logical_digests: &[String:String], logical: String, digest: String) StoreError! {
     name: files.basename(logical)
-    if logical != "/nix/store/{name}" || name == "" || name == "." || name == ".." -> return Err(StoreError.Other("invalid canonical Nix output path `{logical}`"))
-    if !store_reuse_single_component(digest) -> return Err(StoreError.Other("invalid Hangar digest `{digest}` for `{logical}`"))
+    if logical != "/nix/store/{name}" || name == "" || name == "." || name == ".." {
+        return Err(StoreError.Other("invalid canonical Nix output path `{logical}`"))
+    }
+    if !store_reuse_single_component(digest) {
+        return Err(StoreError.Other("invalid Hangar digest `{digest}` for `{logical}`"))
+    }
     if logical_digests.get(logical) == {
         .Val(existing) -> {
-            if existing != digest -> return Err(StoreError.Other("conflicting canonical Nix output path `{logical}`"))
+            if existing != digest {
+                return Err(StoreError.Other("conflicting canonical Nix output path `{logical}`"))
+            }
         }
         .None -> {}
     }
@@ -244,7 +272,9 @@ store_reuse_add_nix_projection_path: fn(logical_digests: &[String: String], logi
 store_reuse_hangar_projection_object: fn(roots: HangarRoots, digest: String, logical: String) -> String StoreError! {
     object: store_reuse_object_path(roots, digest)
     info: files.stat(object) ?? return Err(StoreError.Other("Nix output `{logical}` Hangar object `{digest}` is unavailable: {err}"))
-    if !info.is_symlink && !info.is_dir && !info.is_file -> return Err(StoreError.Other("Nix output `{logical}` Hangar object `{digest}` is not a regular node"))
+    if !info.is_symlink && !info.is_dir && !info.is_file {
+        return Err(StoreError.Other("Nix output `{logical}` Hangar object `{digest}` is not a regular node"))
+    }
     Ok(object)
 }
 
@@ -252,17 +282,23 @@ store_reuse_sealed_hangar_projection_object: fn(verification: &StoreVerification
     object: store_reuse_hangar_projection_object(roots, digest, logical)
     if sys.name() == "linux" {
         sealed: store_check_seal(verification, object, roots.hangar_dir())
-        if sealed != Val(digest) -> return Err(StoreError.Other("Nix output `{logical}` Hangar object `{digest}` has no valid seal witness"))
+        if sealed != Val(digest) {
+            return Err(StoreError.Other("Nix output `{logical}` Hangar object `{digest}` has no valid seal witness"))
+        }
     }
     Ok(object)
 }
 
 store_reuse_validate_direct_projection_seals: fn(verification: &StoreVerification, roots: HangarRoots, projections: [NixStoreProjection]) StoreError! {
-    if sys.name() != "linux" -> return
+    if sys.name() != "linux" {
+        return
+    }
     loop projection in projections {
         if projection.primary -> next
         sealed: store_check_seal(verification, projection.source, roots.hangar_dir())
-        if sealed != Val(projection.digest) -> return Err(StoreError.Other("Nix output `{projection.logical}` Hangar object `{projection.digest}` has no valid seal witness"))
+        if sealed != Val(projection.digest) {
+            return Err(StoreError.Other("Nix output `{projection.logical}` Hangar object `{projection.digest}` has no valid seal witness"))
+        }
     }
 }
 
@@ -281,12 +317,16 @@ store_reuse_open_nix_projection_sources: fn(projections: [NixStoreProjection]) -
     stable := [NixProjectionPath]{}
     bindings := [NixProjectionBinding]{}
     if sys.name() != "linux" {
-        loop projection in projections -> stable.push(NixProjectionPath{logical: projection.logical, source: LeaseText.plain(projection.source)})
+        loop projection in projections {
+            stable.push(NixProjectionPath{logical: projection.logical, source: LeaseText.plain(projection.source)})
+        }
         return Ok(OpenedNixProjection{stable: stable, bindings: bindings})
     }
     loop projection in projections {
         info: files.stat(projection.source) ?? return Err(StoreError.Other("Nix output `{projection.logical}` Hangar object `{projection.digest}` is unavailable: {err}"))
-        if !info.is_symlink && !info.is_dir && !info.is_file -> return Err(StoreError.Other("Nix projection source `{projection.source}` is not a regular node"))
+        if !info.is_symlink && !info.is_dir && !info.is_file {
+            return Err(StoreError.Other("Nix projection source `{projection.source}` is not a regular node"))
+        }
         if info.is_symlink {
             target: files.read_link(projection.source) ?? return Err(StoreError.Other("Nix output `{projection.logical}` Hangar object `{projection.digest}` is unavailable: {err}"))
             stable.push(NixProjectionPath{logical: projection.logical, source: LeaseText.plain(projection.source)})
@@ -295,7 +335,9 @@ store_reuse_open_nix_projection_sources: fn(projections: [NixStoreProjection]) -
         }
         handle: store_reuse_open_projection_handle(projection, info.is_dir)
         opened: store_reuse_projection_handle_stat(handle)
-        if opened.id != info.id -> return Err(StoreError.Other("Nix projection source `{projection.source}` changed while opening"))
+        if opened.id != info.id {
+            return Err(StoreError.Other("Nix projection source `{projection.source}` changed while opening"))
+        }
         source: if handle == {
             .Directory(held) -> held.child_text("")
             .File(_) -> LeaseText.plain(projection.source)

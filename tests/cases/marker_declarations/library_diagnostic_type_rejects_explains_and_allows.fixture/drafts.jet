@@ -3,8 +3,11 @@ DraftRoute: struct {
 
     impl Diagnostic {
         severity: .Warning
+
         what: fn(self) -> String { "`{self.name}` is a draft route" }
+
         why: fn(self) -> String { "a draft route has not been reviewed" }
+
         fix: fn(self) -> String { "review the route, then remove `#Draft`" }
     }
 }
@@ -19,8 +22,7 @@ Draft: struct {
     }
 }
 
-#Draft
-shown: fn() {}
+#Draft shown: fn() {}
 
 #[Allow(drafts.DraftRoute, "the release checklist reviews this route"), Draft]
 reviewed: fn() {}

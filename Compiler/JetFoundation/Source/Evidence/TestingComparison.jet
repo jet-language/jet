@@ -101,7 +101,9 @@ comparison_status_as_str: fn(status: ComparisonStatus) -> String Never! {
 }
 
 // Rust `ComparisonStatus::is_success`.
-comparison_status_is_success: fn(status: ComparisonStatus) -> Bool Never! { status == ComparisonStatus.Matched }
+comparison_status_is_success: fn(status: ComparisonStatus) -> Bool Never! {
+    status == ComparisonStatus.Matched
+}
 
 // Rust `ObservationRelation::as_str`.
 observation_relation_as_str: fn(relation: ObservationRelation) -> String Never! {
@@ -152,19 +154,33 @@ comparison_record_terminal: fn(relation: ObservationRelation, status: Comparison
 // Rust `ComparisonRecord::validate`: a matched record is a finite
 // non-discarded sample, and no status carries the universal-proof bit.
 comparison_record_validate: fn(record: ComparisonRecord) ComparisonRecordError! {
-    if record.schema_version != TEST_COMPARISON_SCHEMA_VERSION -> return Err(ComparisonRecordError{message: "unsupported comparison schema version {record.schema_version}"})
-    if record.universal_proof -> return Err(ComparisonRecordError{message: "comparison records cannot claim universal proof"})
-    if record.status == ComparisonStatus.Matched && (record.samples.len() == 0 || record.discarded_cases != 0) -> return Err(ComparisonRecordError{message: "matched comparison records require non-empty samples and no discarded cases"})
-    if record.first_difference == .Val(index) && index >= record.samples.len() -> return Err(ComparisonRecordError{message: "comparison first_difference is outside samples"})
-    if record.reduced_counterexample != None && record.status != ComparisonStatus.Mismatch -> return Err(ComparisonRecordError{message: "comparison reduced_counterexample is only valid for a mismatch"})
+    if record.schema_version != TEST_COMPARISON_SCHEMA_VERSION {
+        return Err(ComparisonRecordError{message: "unsupported comparison schema version {record.schema_version}"})
+    }
+    if record.universal_proof {
+        return Err(ComparisonRecordError{message: "comparison records cannot claim universal proof"})
+    }
+    if record.status == ComparisonStatus.Matched && (record.samples.len() == 0 || record.discarded_cases != 0) {
+        return Err(ComparisonRecordError{message: "matched comparison records require non-empty samples and no discarded cases"})
+    }
+    if record.first_difference == .Val(index) && index >= record.samples.len() {
+        return Err(ComparisonRecordError{message: "comparison first_difference is outside samples"})
+    }
+    if record.reduced_counterexample != None && record.status != ComparisonStatus.Mismatch {
+        return Err(ComparisonRecordError{message: "comparison reduced_counterexample is only valid for a mismatch"})
+    }
     loop sample in record.samples -> comparison_sample_validate(sample)
     if record.reduced_counterexample == .Val(sample) -> comparison_sample_validate(sample)
 }
 
 // Rust `validate_comparison_sample`.
 comparison_sample_validate: fn(sample: ComparisonSample) ComparisonRecordError! {
-    if !comparison_identity_is_complete(sample.identity) -> return Err(ComparisonRecordError{message: "comparison sample identity is incomplete"})
-    if (sample.reference_replay != None) != (sample.candidate_replay != None) -> return Err(ComparisonRecordError{message: "comparison sample replay fields must be paired"})
+    if !comparison_identity_is_complete(sample.identity) {
+        return Err(ComparisonRecordError{message: "comparison sample identity is incomplete"})
+    }
+    if (sample.reference_replay != None) != (sample.candidate_replay != None) {
+        return Err(ComparisonRecordError{message: "comparison sample replay fields must be paired"})
+    }
 }
 
 // Rust `ComparisonRecord::to_json`: the complete canonical payload.
@@ -176,18 +192,20 @@ comparison_record_to_json: fn(record: ComparisonRecord) -> CanonicalJSON Compari
     if record.reduced_counterexample == .Val(sample) -> reduced = comparison_sample_json(sample)
     first_difference := CanonicalJSON.Null
     if record.first_difference == .Val(index) -> first_difference = CanonicalJSON.Integer("{index}")
-    canonical_json_object([CanonicalJSONField]{
-        {key: "contamination", value: comparison_optional_string_json(record.contamination)},
-        {key: "discarded_cases", value: CanonicalJSON.Integer("{record.discarded_cases}")},
-        {key: "first_difference", value: first_difference},
-        {key: "reason", value: comparison_optional_string_json(record.reason)},
-        {key: "reduced_counterexample", value: reduced},
-        {key: "relation", value: CanonicalJSON.String(observation_relation_as_str(record.relation))},
-        {key: "samples", value: CanonicalJSON.Array(samples)},
-        {key: "schema_version", value: CanonicalJSON.Integer("{record.schema_version}")},
-        {key: "status", value: CanonicalJSON.String(comparison_status_as_str(record.status))},
-        {key: "universal_proof", value: CanonicalJSON.Bool(record.universal_proof)},
-    })
+    canonical_json_object(
+        [CanonicalJSONField]{
+            {key: "contamination", value: comparison_optional_string_json(record.contamination)},
+            {key: "discarded_cases", value: CanonicalJSON.Integer("{record.discarded_cases}")},
+            {key: "first_difference", value: first_difference},
+            {key: "reason", value: comparison_optional_string_json(record.reason)},
+            {key: "reduced_counterexample", value: reduced},
+            {key: "relation", value: CanonicalJSON.String(observation_relation_as_str(record.relation))},
+            {key: "samples", value: CanonicalJSON.Array(samples)},
+            {key: "schema_version", value: CanonicalJSON.Integer("{record.schema_version}")},
+            {key: "status", value: CanonicalJSON.String(comparison_status_as_str(record.status))},
+            {key: "universal_proof", value: CanonicalJSON.Bool(record.universal_proof)},
+        },
+    )
 }
 
 // Rust `ComparisonRecord::artifact_id`: stable identity of the payload.
@@ -197,7 +215,9 @@ comparison_record_artifact_id: fn(record: ComparisonRecord) -> String Comparison
 
 // Rust `ComparisonRecord::assert_equal`: tests the verdict, not structure.
 comparison_record_assert_equal: fn(record: ComparisonRecord) ComparisonAssertionError! {
-    if record.status == ComparisonStatus.Matched && record.samples.len() != 0 && record.discarded_cases == 0 -> return
+    if record.status == ComparisonStatus.Matched && record.samples.len() != 0 && record.discarded_cases == 0 {
+        return
+    }
     return Err(ComparisonAssertionError{status: record.status, reason: record.reason ?? "comparison did not establish equality"})
 }
 
@@ -220,13 +240,15 @@ comparison_strings_json: fn(values: [String]) -> CanonicalJSON Never! {
 
 // Rust `comparison_observation_json`.
 comparison_observation_json: fn(observation: ComparisonObservation) -> CanonicalJSON ComparisonRecordError! {
-    canonical_json_object([CanonicalJSONField]{
-        {key: "cleanup", value: comparison_strings_json(observation.cleanup)},
-        {key: "mutation", value: comparison_optional_string_json(observation.mutation)},
-        {key: "ordered_effects", value: comparison_strings_json(observation.ordered_effects)},
-        {key: "raw", value: CanonicalJSON.String(observation.raw)},
-        {key: "typed_failure", value: comparison_optional_string_json(observation.typed_failure)},
-    })
+    canonical_json_object(
+        [CanonicalJSONField]{
+            {key: "cleanup", value: comparison_strings_json(observation.cleanup)},
+            {key: "mutation", value: comparison_optional_string_json(observation.mutation)},
+            {key: "ordered_effects", value: comparison_strings_json(observation.ordered_effects)},
+            {key: "raw", value: CanonicalJSON.String(observation.raw)},
+            {key: "typed_failure", value: comparison_optional_string_json(observation.typed_failure)},
+        },
+    )
 }
 
 comparison_optional_observation_json: fn(observation: ComparisonObservation?) -> CanonicalJSON ComparisonRecordError! {
@@ -238,26 +260,30 @@ comparison_optional_observation_json: fn(observation: ComparisonObservation?) ->
 comparison_identity_json: fn(identity: ComparisonIdentity) -> CanonicalJSON ComparisonRecordError! {
     seed := CanonicalJSON.Null
     if identity.seed == .Val(number) -> seed = CanonicalJSON.Integer("{number}")
-    canonical_json_object([CanonicalJSONField]{
-        {key: "case_id", value: CanonicalJSON.String(identity.case_id)},
-        {key: "input_id", value: CanonicalJSON.String(identity.input_id)},
-        {key: "seed", value: seed},
-        {key: "source", value: CanonicalJSON.String(identity.source)},
-        {key: "target", value: CanonicalJSON.String(identity.target)},
-        {key: "tool", value: CanonicalJSON.String(identity.tool)},
-    })
+    canonical_json_object(
+        [CanonicalJSONField]{
+            {key: "case_id", value: CanonicalJSON.String(identity.case_id)},
+            {key: "input_id", value: CanonicalJSON.String(identity.input_id)},
+            {key: "seed", value: seed},
+            {key: "source", value: CanonicalJSON.String(identity.source)},
+            {key: "target", value: CanonicalJSON.String(identity.target)},
+            {key: "tool", value: CanonicalJSON.String(identity.tool)},
+        },
+    )
 }
 
 // Rust `comparison_sample_json`.
 comparison_sample_json: fn(sample: ComparisonSample) -> CanonicalJSON ComparisonRecordError! {
     declared_equal := CanonicalJSON.Null
     if sample.declared_equal == .Val(flag) -> declared_equal = CanonicalJSON.Bool(flag)
-    canonical_json_object([CanonicalJSONField]{
-        {key: "candidate", value: comparison_observation_json(sample.candidate)},
-        {key: "candidate_replay", value: comparison_optional_observation_json(sample.candidate_replay)},
-        {key: "declared_equal", value: declared_equal},
-        {key: "identity", value: comparison_identity_json(sample.identity)},
-        {key: "reference", value: comparison_observation_json(sample.reference)},
-        {key: "reference_replay", value: comparison_optional_observation_json(sample.reference_replay)},
-    })
+    canonical_json_object(
+        [CanonicalJSONField]{
+            {key: "candidate", value: comparison_observation_json(sample.candidate)},
+            {key: "candidate_replay", value: comparison_optional_observation_json(sample.candidate_replay)},
+            {key: "declared_equal", value: declared_equal},
+            {key: "identity", value: comparison_identity_json(sample.identity)},
+            {key: "reference", value: comparison_observation_json(sample.reference)},
+            {key: "reference_replay", value: comparison_optional_observation_json(sample.reference_replay)},
+        },
+    )
 }

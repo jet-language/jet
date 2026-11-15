@@ -8,7 +8,7 @@ use {
     jet_parser.[JetParserState, jet_format_source, jfmt_apply_source_edits, parse_source, parser_current, parser_current_kind, parser_line_starts, parser_prepare_tokens, parser_take_type_close]
 }
 
-PC_FMT_RUNTIME_SOURCE: #run { ```#Import(c) no_result: fn() = "jet_rt_trap"
+PC_FMT_RUNTIME_SOURCE: #run { `#Import(c) no_result: fn() = "jet_rt_trap"
 
 #Import(c) scalar: fn(value: I64) -> I64 = "jet_rt_iter_next"
 
@@ -25,14 +25,16 @@ attributed_no_result: fn(value: I64) = "jet_rt_thread_reset"
 counter := I64{0}
 
 limit: I64{0}
-``` }
+` }
 
 // The marker structs of MARKER_SOURCE, in source order: each `Name: struct {`
 // line at the left margin.
 pc_marker_names: fn() -> [String] {
     names := [String]{}
     loop line in MARKER_SOURCE.lines() {
-        if line.ends_with(": struct {{") && !line.starts_with(" ") && !line.starts_with("/") -> names.push(line.removesuffix(": struct {{"))
+        if line.ends_with(": struct {{") && !line.starts_with(" ") && !line.starts_with("/") {
+            names.push(line.removesuffix(": struct {{"))
+        }
     }
     names
 }
@@ -58,7 +60,9 @@ pc_binding_values: fn(parsed: ParseResult) -> [Int] {
     loop item in parsed.program.items {
         if item == .Func(func) {
             loop statement in func.body {
-                if statement == .Val(binding) && binding.init == .Int(value, _, _, _, _) -> values.push(value)
+                if statement == .Val(binding) && binding.init == .Int(value, _, _, _, _) {
+                    values.push(value)
+                }
             }
         }
     }
@@ -93,7 +97,9 @@ pc_module_markers: fn() {
     active: parse_source("#Import c.sqlite3: module {{ close: fn(database: U64) -> I32 = \"sqlite3_close\" }}\nrun: fn() {{}}\n".bytes())
     pc_require(active.diagnostics.len() == 0, "canonical module import is active")
     pc_require(active.program.items.len() == 2, "C module heads precede unattached library file rules")
-    loop fact in active.program.rule_facts -> pc_require(fact.site != Val(RuleSite.File), "C import marker is not a file rule")
+    loop fact in active.program.rule_facts {
+        pc_require(fact.site != Val(RuleSite.File), "C import marker is not a file rule")
+    }
     bindgen: parse_source("#Bindgen c.sample.__bindgen__: module {{ }}".bytes())
     // The marker is active and parses; a hand-written `#Bindgen` is the
     // driver's E3207, never the generic lexical E0067.
@@ -193,7 +199,8 @@ pc_formatter_edit_boundaries: fn() {
 // Exercise the production Source parser, not the reference parser used to
 // compile this fixture. Semantic Output field/binder checks belong to sema.
 pc_output_provider: fn() {
-    loop kind in ([String]{"Library", "Executable", "Service", "Check", "Environment", "Image", "Bundle", "System", "Fleet"}) {
+    loop kind in
+        ([String]{"Library", "Executable", "Service", "Check", "Environment", "Image", "Bundle", "System", "Fleet"}) {
         source: "app: Output.{kind}{{ name: \"artifact\", entry: run }}\n"
         parsed: parse_source(source.bytes())
         pc_require(parsed.diagnostics.len() == 0 && parsed.program.script_body.len() == 0, "{kind} enters the item route before module bindings")
@@ -271,8 +278,12 @@ pc_current_kind_equivalence: fn() {
         expected: parser_current(oracle).kind
         actual: parser_current_kind(state)
         pc_require(actual == expected && pc_same_state(state, oracle), "kind-only query preserves full parser state and the token-accessor verdict")
-        if split -> pc_require(actual == TOKEN_GT && state.position == before, "pending GT precedes trivia and does not advance the cursor")
-        if !split -> pc_require(state.position > before, "mixed and trivia-only comments advance to the same real token or EOF")
+        if split {
+            pc_require(actual == TOKEN_GT && state.position == before, "pending GT precedes trivia and does not advance the cursor")
+        }
+        if !split {
+            pc_require(state.position > before, "mixed and trivia-only comments advance to the same real token or EOF")
+        }
         stable: state.position
         pc_require(parser_current_kind(state) == actual && state.position == stable, "repeated current-kind query is idempotent")
         if split {
@@ -294,8 +305,12 @@ pc_current_kind_equivalence: fn() {
             expected_at: parser_current(oracle).kind
             actual_at: parser_current_kind(state)
             pc_require(actual_at == expected_at && pc_same_state(state, oracle), "valid, comment, actual EOF, and invalid cursors match the canonical token accessor")
-            if cursor < 0 || cursor >= state.tokens.len() -> pc_require(actual_at == TOKEN_EOF && state.position == cursor, "negative, end, and beyond-end cursors return EOF without advancing")
-            if cursor == state.tokens.len() - 1 -> pc_require(actual_at == TOKEN_EOF && state.position == cursor, "the real EOF token is read without advancing")
+            if cursor < 0 || cursor >= state.tokens.len() {
+                pc_require(actual_at == TOKEN_EOF && state.position == cursor, "negative, end, and beyond-end cursors return EOF without advancing")
+            }
+            if cursor == state.tokens.len() - 1 {
+                pc_require(actual_at == TOKEN_EOF && state.position == cursor, "the real EOF token is read without advancing")
+            }
             after: state.position
             pc_require(parser_current_kind(state) == actual_at && state.position == after, "all non-pending cursor cases remain idempotent")
         }
@@ -402,6 +417,7 @@ pc_named_struct_pattern_rhs: fn() {
     anonymous: if record == .PatternTest(_, pattern, _, _) -> (if pattern == .Struct(fields, _, _, head) -> fields.len() == 1 && head == None else -> false) else -> false
     pc_require(anonymous, "record-shaped braces after `==` are an anonymous struct pattern")
 }
+
 pc_allow_and_fact_roots: fn() {
     allowed: parse_source("run: fn() {{ #Allow(jet.UnitScalarRewrap, \"reviewed\")\n print(\"kept\")\n }}".bytes())
     pc_require(allowed.diagnostics.len() == 0, "allow attaches across layout")
@@ -424,6 +440,7 @@ pc_allow_and_fact_roots: fn() {
     }
     pc_require(parse_source("run: fn() {{ print(Int.reflect().layout) }}".bytes()).diagnostics.len() == 0, "subject member fact parses")
 }
+
 run: fn() {
     canonical: parse_source("run: fn() {{\n values: [JSON]{{JSON.Null}}\n print(values.len())\n}}\n".bytes())
     pc_require(canonical.diagnostics.len() == 0, "canonical newline collection consumer")

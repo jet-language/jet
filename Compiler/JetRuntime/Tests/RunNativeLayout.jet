@@ -18,9 +18,13 @@ use {
 }
 
 HERE: "Compiler/JetRuntime/Tests"
+
 TEXT: "Compiler/JetRuntime/Source/NativeLayoutText.jet"
+
 POLICY: "Compiler/JetCli/Source/Cli/native-c-policy.tsv"
+
 OWNERSHIP: "Layout6 ownership/registry/clone/drop OK"
+
 LITERAL_BYTES: 432
 
 Policy: struct {
@@ -37,9 +41,7 @@ resolve: fn(cwd: String, path: String) -> String {
     loop part in full.split("/").to_list() {
         if part == ".." {
             if parts.len() > 0 -> _: parts.pop()
-        } else if part != "" && part != "." {
-            parts.push(part)
-        }
+        } else if part != "" && part != "." { parts.push(part) }
     }
     "/{parts.join("/")}"
 }
@@ -92,7 +94,9 @@ literal_departures: fn(block: [U8]) -> [Int] {
             bad.push(index)
             next
         }
-        if String.from_bytes_lossy(block[start..<start + length]) != expected[index] -> bad.push(index)
+        if String.from_bytes_lossy(block[start..<start + length]) != expected[index] {
+            bad.push(index)
+        }
     }
     bad
 }
@@ -106,14 +110,12 @@ load_policy: fn(root: String) -> Policy {
         line: lines[index]
         if line == "" || line.starts_with("#") -> next
         fields: line.split("\t").to_list()
-        if fields.len() != 2 || fields[1] == "" -> fail("native-c-policy.tsv:{index + 1}: expected \"kind<TAB>value\"")
-        if fields[0] == "flag" {
-            flags.push(fields[1])
-        } else if fields[0] == "hardening-remove" {
-            removed.push(fields[1])
-        } else {
-            fail("native-c-policy.tsv:{index + 1}: unknown policy kind {fields[0]}")
+        if fields.len() != 2 || fields[1] == "" {
+            fail("native-c-policy.tsv:{index + 1}: expected \"kind<TAB>value\"")
         }
+        if fields[0] == "flag" -> flags.push(fields[1]) else if fields[0] == "hardening-remove" {
+            removed.push(fields[1])
+        } else { fail("native-c-policy.tsv:{index + 1}: unknown policy kind {fields[0]}") }
     }
     Policy{flags: flags, removed: removed}
 }
@@ -156,7 +158,9 @@ observation_differs: fn(actual: String, expected: String) -> Bool {
 run: fn() {
     root: files.cwd() ?? fail("cannot read the working directory: {err}")
     args: process.args()
-    if args.len() < 2 || args[0] == "" -> fail("usage: RunNativeLayout.jet OUT JET_ONLY_RUNTIME_OBJECT_OR_ARCHIVE... [LINK_ARG...]")
+    if args.len() < 2 || args[0] == "" {
+        fail("usage: RunNativeLayout.jet OUT JET_ONLY_RUNTIME_OBJECT_OR_ARCHIVE... [LINK_ARG...]")
+    }
     out: resolve(root, args[0])
     files.create_dir_all(out) ?? fail("cannot create {out}: {err}")
     source: files.read("{root}/{TEXT}") ?? fail("cannot read {TEXT}: {err}")
@@ -172,20 +176,32 @@ run: fn() {
     }
     binary: "{out}/native-layout"
     cc_args := [String]{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "{root}/{HERE}/NativeLayoutWitness.c"}
-    loop input in args[1..<args.len()] -> cc_args.push(if input.starts_with("-") -> input.copy() else -> resolve(root, input))
+    loop input in args[1..<args.len()] {
+        cc_args.push(if input.starts_with("-") -> input.copy() else -> resolve(root, input))
+    }
     cc_args.extend([String]{"-lm", "-pthread", "-o", binary.copy()})
     built: logged(native_cc(load_policy(root), cc_args).cwd(root.copy()), "{out}/native-link.log")
-    if built.signal != None || built.code != 0 -> fail("native-link: exit {built.code}; see {out}/native-link.log")
+    if built.signal != None || built.code != 0 {
+        fail("native-link: exit {built.code}; see {out}/native-link.log")
+    }
     executed: logged(process.cmd([String]{binary.copy(), vectors_path.move()}).cwd(root.copy()).output_limit(16777216), "{out}/native-execute.log")
-    if executed.signal != None || executed.code != 0 -> fail("native-execute: exit {executed.code}; see {out}/native-execute.log")
+    if executed.signal != None || executed.code != 0 {
+        fail("native-execute: exit {executed.code}; see {out}/native-execute.log")
+    }
     actual := executed.output.trim().split("\n").to_list()
-    if actual.len() == 0 || actual[actual.len() - 1] != OWNERSHIP -> fail("ownership witness did not complete")
+    if actual.len() == 0 || actual[actual.len() - 1] != OWNERSHIP {
+        fail("ownership witness did not complete")
+    }
     _: actual.pop()
     rows: frozen.trim().split("\n").to_list()
     expected: rows.filter(fn(row) { !row.starts_with("p ") })
-    if expected.len() != actual.len() -> fail("native observation count mismatch: {actual.len()} != {expected.len()}")
+    if expected.len() != actual.len() {
+        fail("native observation count mismatch: {actual.len()} != {expected.len()}")
+    }
     loop index in 0..<expected.len() {
-        if observation_differs(actual[index], expected[index]) -> fail("observation mismatch {index}: {actual[index]} != {expected[index]}")
+        if observation_differs(actual[index], expected[index]) {
+            fail("observation mismatch {index}: {actual[index]} != {expected[index]}")
+        }
     }
     fatal := 0
     loop row in rows {
@@ -194,7 +210,9 @@ run: fn() {
         mode: parts[0]
         message: parts[1..<parts.len()].join("|")
         stopped: logged(process.cmd([String]{binary.copy(), "--fatal", mode.copy()}).cwd(root.copy()), "{out}/{mode}.log")
-        if stopped.signal != None || stopped.code != 70 || !stopped.errors.contains(message) -> fail("fatal {mode} did not preserve seed message/exit70")
+        if stopped.signal != None || stopped.code != 70 || !stopped.errors.contains(message) {
+            fail("fatal {mode} did not preserve seed message/exit70")
+        }
         fatal += 1
     }
     print("Layout6: 12 draft literals exact; native/seed {expected.len()} observations + {fatal} fatal modes + ownership OK")

@@ -6,7 +6,6 @@
 // the provider retains, invoked through the typed lazy.callback helper with
 // the payload's slot lent for the call (its result written to the
 // provider's slot), and released once by the release helper.
-
 use jet_foundation.[Span, BodyHandleOp, Type, type_carrier_identity]
 
 // The compiler-known `Event<T>`.
@@ -22,8 +21,12 @@ ir_event_row: fn(m: &IRModule, ty: Type) -> Int Never! {
 // `core.event.__event_with_policy<T>(policy)`: the provider borrows the
 // policy, which is released here when consumed.
 ir_event_with_policy: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, args: [Int], span: Span) -> Int Never! {
-    if !ir_event_type(result_ty) -> return ir_fail_slot(b, span, "Event.with_policy producing {ir_type_name(result_ty)}")
-    if args.len() != 1 -> return ir_fail_slot(b, span, "Event.with_policy with {args.len()} arguments")
+    if !ir_event_type(result_ty) {
+        return ir_fail_slot(b, span, "Event.with_policy producing {ir_type_name(result_ty)}")
+    }
+    if args.len() != 1 {
+        return ir_fail_slot(b, span, "Event.with_policy with {args.len()} arguments")
+    }
     policy: ir_expr(m, p, b, args[0])
     if ir_failed(b) || policy < 0 -> return -1
     event_row: ir_event_row(m, result_ty)
@@ -43,15 +46,31 @@ ir_event_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     if route.module_name != "core.event" -> return None
     symbol: route.symbol
     if ir_event_listen_export(symbol) == .Val(listen) {
-        if symbol.ends_with("::on") -> return Val(ir_event_listen(m, p, b, ty, receiver, args, listen, false, false, span))
-        if symbol.ends_with("::once") -> return Val(ir_event_listen(m, p, b, ty, receiver, args, listen, false, true, span))
-        if symbol.ends_with("::on_priority") -> return Val(ir_event_listen(m, p, b, ty, receiver, args, listen, true, false, span))
+        if symbol.ends_with("::on") {
+            return Val(ir_event_listen(m, p, b, ty, receiver, args, listen, false, false, span))
+        }
+        if symbol.ends_with("::once") {
+            return Val(ir_event_listen(m, p, b, ty, receiver, args, listen, false, true, span))
+        }
+        if symbol.ends_with("::on_priority") {
+            return Val(ir_event_listen(m, p, b, ty, receiver, args, listen, true, false, span))
+        }
     }
-    if symbol == "jet_std::JetEvent::emit" -> return Val(ir_event_emit(m, p, b, ty, receiver, args, span))
-    if symbol == "jet_std::JetHook::run" -> return Val(ir_hook_run(m, p, b, ty, receiver, args, span))
-    if symbol == "jet_std::JetDecisionHook::run" -> return Val(ir_decision_hook_run(m, p, b, ty, receiver, args, span))
-    if symbol == "jet_std::JetAsyncEvent::emit_async" -> return Val(ir_async_emit(m, p, b, ty, receiver, args, span))
-    if symbol == "jet_std::JetDispatchReport::failures" -> return Val(ir_dispatch_report_failures(m, p, b, ty, receiver, args, span))
+    if symbol == "jet_std::JetEvent::emit" {
+        return Val(ir_event_emit(m, p, b, ty, receiver, args, span))
+    }
+    if symbol == "jet_std::JetHook::run" {
+        return Val(ir_hook_run(m, p, b, ty, receiver, args, span))
+    }
+    if symbol == "jet_std::JetDecisionHook::run" {
+        return Val(ir_decision_hook_run(m, p, b, ty, receiver, args, span))
+    }
+    if symbol == "jet_std::JetAsyncEvent::emit_async" {
+        return Val(ir_async_emit(m, p, b, ty, receiver, args, span))
+    }
+    if symbol == "jet_std::JetDispatchReport::failures" {
+        return Val(ir_dispatch_report_failures(m, p, b, ty, receiver, args, span))
+    }
     export: if symbol == {
         "jet_std::JetEvent::listener_count" -> "jet_event_listener_count"
         "jet_std::JetEvent::trace" -> "jet_event_trace"
@@ -83,7 +102,9 @@ ir_event_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
 // The provider registration of a family's on / once / on_priority row.
 ir_event_listen_export: fn(symbol: String) -> String? Never! {
     if symbol.starts_with("jet_std::JetEvent::") -> return Val("jet_event_listen")
-    if symbol.starts_with("jet_std::JetHook::") || symbol.starts_with("jet_std::JetDecisionHook::") -> return Val("jet_hook_listen")
+    if symbol.starts_with("jet_std::JetHook::") || symbol.starts_with("jet_std::JetDecisionHook::") {
+        return Val("jet_hook_listen")
+    }
     if symbol.starts_with("jet_std::JetAsyncEvent::") -> return Val("jet_async_event_listen")
     None
 }
@@ -95,9 +116,7 @@ ir_event_query: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
     handle: ir_expr(m, p, b, receiver)
     if ir_failed(b) || handle < 0 -> return -1
     result := -1
-    if ir_unit_type(ty) {
-        _: ir_runtime(m, b, export, [Int]{handle}, -1)
-    } else {
+    if ir_unit_type(ty) -> _: ir_runtime(m, b, export, [Int]{handle}, -1) else {
         row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
         result = ir_runtime(m, b, export, [Int]{handle}, row)
         b.fresh[result] = m.types[row].drop != ""
@@ -110,14 +129,16 @@ ir_event_query: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
 // handler's closure box, so a kept handler is cloned for it first; the
 // priority crosses as a native word.
 ir_event_listen: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], export: String, prioritized: Bool, once: Bool, span: Span) -> Int Never! {
-    if args.len() != (if prioritized -> 3 else -> 2) -> return ir_fail_slot(b, span, "Event listener registration with {args.len()} arguments")
+    if args.len() != (if prioritized -> 3 else -> 2) {
+        return ir_fail_slot(b, span, "Event listener registration with {args.len()} arguments")
+    }
     handler_ty: ir_ty(p, b, args[args.len() - 1])
     closure_ty: handler_ty
     if ir_untag(closure_ty) == .Fn(params, _, _, _, _, _) {
-        if params.len() != 1 -> return ir_fail_slot(b, span, "Event handler taking {params.len()} parameters")
-    } else {
-        return ir_fail_slot(b, span, "Event handler of {ir_type_name(closure_ty)}")
-    }
+        if params.len() != 1 {
+            return ir_fail_slot(b, span, "Event handler taking {params.len()} parameters")
+        }
+    } else { return ir_fail_slot(b, span, "Event handler of {ir_type_name(closure_ty)}") }
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     event: ir_expr(m, p, b, receiver)
     if ir_failed(b) || event < 0 -> return -1
@@ -130,9 +151,7 @@ ir_event_listen: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
         if ir_untag(ir_ty(p, b, args[1])) == Type.Int {
             word_row: ir_word_row(m)
             priority = ir_runtime(m, b, "jet_int_owned_to_i64", [Int]{value}, word_row)
-        } else {
-            priority = value
-        }
+        } else { priority = value }
         if priority != value -> ir_release(m, b, value)
     }
     closure: ir_expr(m, p, b, args[args.len() - 1])
@@ -217,7 +236,9 @@ ir_hook_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, args
 // word (the provider has one).
 ir_decision_hook_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, args: [Int], span: Span) -> Int Never! {
     row: ir_event_family_row(m, p, result_ty) ?? return ir_fail_slot(b, span, "DecisionHook.new producing {ir_type_name(result_ty)}")
-    if args.len() != 1 -> return ir_fail_slot(b, span, "DecisionHook.new with {args.len()} arguments")
+    if args.len() != 1 {
+        return ir_fail_slot(b, span, "DecisionHook.new with {args.len()} arguments")
+    }
     policy: ir_expr(m, p, b, args[0])
     if ir_failed(b) || policy < 0 -> return -1
     hook: ir_runtime(m, b, "jet_decision_hook_new", [Int]{policy}, row)
@@ -262,10 +283,16 @@ ir_async_event_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Typ
 // passed here (the runtime's FAILURE_* offsets in AsyncEvents.jet), each
 // Handler payload a clone of the report's E.
 ir_dispatch_report_failures: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
-    if args.len() != 0 -> return ir_fail_slot(b, span, "DispatchReport.failures with {args.len()} arguments")
-    failure_ty: if ir_untag(ty) == .List(element) -> element.copy() else -> { return ir_fail_slot(b, span, "DispatchReport.failures producing {ir_type_name(ty)}") }
+    if args.len() != 0 {
+        return ir_fail_slot(b, span, "DispatchReport.failures with {args.len()} arguments")
+    }
+    failure_ty: if ir_untag(ty) == .List(element) -> element.copy() else -> {
+        return ir_fail_slot(b, span, "DispatchReport.failures producing {ir_type_name(ty)}")
+    }
     failure_row: ir_value_type(m, p, failure_ty) ?? return ir_type_fail(b, span, failure_ty)
-    if m.types[failure_row].kind != .Pointer -> return ir_fail_slot(b, span, "DispatchReport failures of {ir_type_name(failure_ty)}")
+    if m.types[failure_row].kind != .Pointer {
+        return ir_fail_slot(b, span, "DispatchReport failures of {ir_type_name(failure_ty)}")
+    }
     failure_def: ir_enum_def(m, p, failure_row) ?? return ir_fail_slot(b, span, "DispatchFailure without a declaration")
     failure_args: ir_row_args(m, failure_row)
     handler: ir_event_variant(m, p, failure_def, failure_args, "Handler") ?? return ir_fail_slot(b, span, "layout of DispatchFailure.Handler")
@@ -275,11 +302,15 @@ ir_dispatch_report_failures: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: T
     if ir_failed(b) || report < 0 -> return -1
     words: [Int]{
         ir_word_const(m, b, ir_align8(bytes)),
-        ir_word_const(m, b, handler.index), ir_word_const(m, b, handler.offset),
-        ir_word_const(m, b, panicked.index), ir_word_const(m, b, panicked.offset),
+        ir_word_const(m, b, handler.index),
+        ir_word_const(m, b, handler.offset),
+        ir_word_const(m, b, panicked.index),
+        ir_word_const(m, b, panicked.offset),
     }
     layout: ir_out_slot(m, b, words.len())
-    loop (position, word) in words -> ir_emit(b.f, IROp.Store, -1, layout, position * 8, word, b.line)
+    loop (position, word) in words {
+        ir_emit(b.f, IROp.Store, -1, layout, position * 8, word, b.line)
+    }
     result: ir_event_out_value(m, p, b, ty, "jet_dispatch_report_failures", [Int]{report, layout}, span)
     ir_release(m, b, report)
     result
@@ -361,13 +392,19 @@ ir_event_variant: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type], variant
 // HookOutcome box from the layout words passed here (the runtime's
 // DECISION_* / OUTCOME_* offsets in EventHooks.jet).
 ir_decision_hook_run: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
-    if args.len() != 1 -> return ir_fail_slot(b, span, "DecisionHook.run with {args.len()} arguments")
+    if args.len() != 1 {
+        return ir_fail_slot(b, span, "DecisionHook.run with {args.len()} arguments")
+    }
     outcome_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     type_args: ir_type_args(ir_untag(ty))
-    if type_args.len() != 2 || m.types[outcome_row].kind != .Pointer -> return ir_fail_slot(b, span, "DecisionHook.run producing {ir_type_name(ty)}")
+    if type_args.len() != 2 || m.types[outcome_row].kind != .Pointer {
+        return ir_fail_slot(b, span, "DecisionHook.run producing {ir_type_name(ty)}")
+    }
     decision_ty: Type.Apply{name: "HookDecision", args: type_args.copy()}
     decision_row: ir_value_type(m, p, decision_ty) ?? return ir_type_fail(b, span, decision_ty)
-    if m.types[decision_row].kind != .Pointer -> return ir_fail_slot(b, span, "DecisionHook decisions of {ir_type_name(decision_ty)}")
+    if m.types[decision_row].kind != .Pointer {
+        return ir_fail_slot(b, span, "DecisionHook decisions of {ir_type_name(decision_ty)}")
+    }
     outcome_def: ir_enum_def(m, p, outcome_row) ?? return ir_fail_slot(b, span, "HookOutcome without a declaration")
     decision_def: ir_enum_def(m, p, decision_row) ?? return ir_fail_slot(b, span, "HookDecision without a declaration")
     outcome_args: ir_row_args(m, outcome_row)
@@ -390,17 +427,25 @@ ir_decision_hook_run: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, re
     d_meta: ir_lazy_meta(m, p, b, decision_ty, span)
     if d_meta < 0 -> return -1
     words: [Int]{
-        t_meta, e_meta, d_meta,
-        ir_word_const(m, b, transform.index), ir_word_const(m, b, transform.offset),
+        t_meta,
+        e_meta,
+        d_meta,
+        ir_word_const(m, b, transform.index),
+        ir_word_const(m, b, transform.offset),
         ir_word_const(m, b, cancel.index),
-        ir_word_const(m, b, fail.index), ir_word_const(m, b, fail.offset),
+        ir_word_const(m, b, fail.index),
+        ir_word_const(m, b, fail.offset),
         ir_word_const(m, b, ir_align8(bytes)),
-        ir_word_const(m, b, kept.index), ir_word_const(m, b, kept.offset),
+        ir_word_const(m, b, kept.index),
+        ir_word_const(m, b, kept.offset),
         ir_word_const(m, b, cancelled.index),
-        ir_word_const(m, b, failed.index), ir_word_const(m, b, failed.offset),
+        ir_word_const(m, b, failed.index),
+        ir_word_const(m, b, failed.offset),
     }
     layout: ir_out_slot(m, b, words.len())
-    loop (position, word) in words -> ir_emit(b.f, IROp.Store, -1, layout, position * 8, word, b.line)
+    loop (position, word) in words {
+        ir_emit(b.f, IROp.Store, -1, layout, position * 8, word, b.line)
+    }
     outcome: ir_runtime(m, b, "jet_decision_hook_run", [Int]{hook, payload.slot, layout}, outcome_row)
     b.fresh[outcome] = true
     ir_release(m, b, payload.value)
@@ -411,7 +456,9 @@ ir_decision_hook_run: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, re
 // AsyncEvent.emit_async(payload): the entry takes over the moved payload
 // under T's descriptor and its task's result is the DispatchReport.
 ir_async_emit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
-    if args.len() != 1 -> return ir_fail_slot(b, span, "AsyncEvent.emit_async with {args.len()} arguments")
+    if args.len() != 1 {
+        return ir_fail_slot(b, span, "AsyncEvent.emit_async with {args.len()} arguments")
+    }
     element: ir_task_element(ty) ?? return ir_fail_slot(b, span, "AsyncEvent.emit_async producing {ir_type_name(ty)}")
     task_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     payload_ty: ir_ty(p, b, args[0])

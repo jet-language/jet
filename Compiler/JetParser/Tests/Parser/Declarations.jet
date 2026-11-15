@@ -5,12 +5,15 @@ use {
 
 marker_test_decl: fn(source: String) -> MarkerDecl {
     program: parser_test_program(source)
-    loop item in program.items { if item == .MarkerDecl(value) -> return value }
+    loop item in program.items {
+        if item == .MarkerDecl(value) -> return value
+    }
     panic("expected marker declaration")
 }
 
 #Test("a_marker_struct_reads_its_fields_and_settings") {
-    program: parser_test_program(`Inline: struct {
+    program: parser_test_program(
+        `Inline: struct {
     mode: InlineMode
 
     impl Marker {
@@ -18,7 +21,8 @@ marker_test_decl: fn(source: String) -> MarkerDecl {
     }
 }
 run: fn() {}
-`)
+`,
+    )
     program.items[0] == .Struct(definition) ?? panic("the marker is a struct")
     assert_eq(definition.fields.len(), 1)
     decl: definition.marker ?? panic("the struct declares a marker")
@@ -26,31 +30,45 @@ run: fn() {}
     assert_eq(decl.params.len(), 2)
     assert_eq(decl.params[0].name, "mode")
     assert_eq(decl.params[1].name, "$sites")
-    assert_eq(marker_test_decl(`Inline: struct { impl Marker { sites: [.Function] } }
+    assert_eq(
+        marker_test_decl(
+            `Inline: struct { impl Marker { sites: [.Function] } }
 run: fn() {}
-`).name, "Inline")
+`,
+        )
+            .name,
+        "Inline",
+    )
 }
 
 #Test("empty_and_every_published_site_value_parse_as_settings") {
-    assert(marker_test_decl(`NoParameters: struct {
+    assert(
+        marker_test_decl(
+            `NoParameters: struct {
     impl Marker {}
 }
 run: fn() {}
-`).params.is_empty())
-    empty: marker_test_decl(`Empty: struct {
+`,
+        )
+            .params.is_empty(),
+    )
+    empty: marker_test_decl(
+        `Empty: struct {
     impl Marker {
         sites: []
         repeatable: false
     }
 }
 run: fn() {}
-`)
+`,
+    )
     assert_eq(empty.params.len(), 2)
     loop param in empty.params {
         assert(param.ty == None)
         assert(param.value != None)
     }
-    many: marker_test_decl(`Many: struct {
+    many: marker_test_decl(
+        `Many: struct {
     impl Marker {
         sites: [.Type, .Field]
         repeatable: true
@@ -60,17 +78,21 @@ run: fn() {}
     }
 }
 run: fn() {}
-`)
+`,
+    )
     assert_eq(many.params.len(), 5)
     loop param in many.params {
         assert(param.ty == None)
         assert(param.value != None)
     }
-    loop site in MARKER_SOURCE_SITES -> _: marker_test_decl("Uses: struct {{ impl Marker {{ sites: [.{site}] }} }}\nrun: fn() {{}}\n")
+    loop site in MARKER_SOURCE_SITES {
+        _: marker_test_decl("Uses: struct {{ impl Marker {{ sites: [.{site}] }} }}\nrun: fn() {{}}\n")
+    }
 }
 
 #Test("fact_plane_struct_parses_its_law_columns") {
-    program: parser_test_program(`Exactness: struct {
+    program: parser_test_program(
+        `Exactness: struct {
     impl Fact {
         holds: .Value
         safe: .Gain
@@ -78,7 +100,8 @@ run: fn() {}
     }
 }
 run: fn() {}
-`)
+`,
+    )
     program.items[0] == .FactDecl(decl) ?? panic("fact plane")
     assert_eq(decl.name, "Exactness")
     names := [String]{}
@@ -109,16 +132,19 @@ run: fn() {}
 }
 
 #Test("fact_plane_struct_refuses_other_members_and_a_second_block") {
-    members: parser_test_errors(`Flow: struct {
+    members: parser_test_errors(
+        `Flow: struct {
     level: Int
     impl Fact {
         holds: .Value
     }
 }
 run: fn() {}
-`)
+`,
+    )
     assert(members.len() > 0 && members[0].what.contains("declares more than its `impl Fact` block"), "a field beside `impl Fact` is refused")
-    twice: parser_test_errors(`Flow: struct {
+    twice: parser_test_errors(
+        `Flow: struct {
     impl Fact {
         holds: .Value
     }
@@ -127,37 +153,44 @@ run: fn() {}
     }
 }
 run: fn() {}
-`)
+`,
+    )
     assert_eq(parser_test_diagnostic(twice, "E0908").what, "`Flow` has a second `impl Fact` block")
 }
 
 #Test("the_fact_declaration_word_is_gone") {
-    diagnostics: parser_test_errors(`fact Exactness(holds: .Value, safe: .Gain, gates: [approx, raw])
+    diagnostics: parser_test_errors(
+        `fact Exactness(holds: .Value, safe: .Gain, gates: [approx, raw])
 run: fn() {}
-`)
+`,
+    )
     assert_eq(diagnostics[0].code, "E0003")
     assert(diagnostics[0].what.contains("`fact` is not a Jet word"), diagnostics[0].what)
 }
 
 #Test("an_unknown_top_word_lists_the_declaration_forms") {
-    diagnostics: parser_test_errors(`
+    diagnostics: parser_test_errors(
+        `
 frobnicate Selector on [.Text] {
     check @body
 }
 run: fn() {}
-`)
+`,
+    )
     assert_eq(diagnostics[0].code, "E0003")
     assert(diagnostics[0].what.contains("`frobnicate` is not a Jet word"), diagnostics[0].what)
     assert(diagnostics[0].why.contains("`name: value`"), diagnostics[0].why)
 }
 
 #Test("a_retired_binding_word_gets_the_generic_statement_error") {
-    diagnostics: parser_test_errors(`run: fn() {
+    diagnostics: parser_test_errors(
+        `run: fn() {
     let total = 3
     let mut seen = 0
     var mut kept = 2
 }
-`)
+`,
+    )
     words: [String]{"let", "let", "var"}
     assert_eq(diagnostics.len(), words.len())
     loop (index, word) in words {
@@ -168,7 +201,8 @@ run: fn() {}
 }
 
 #Test("fields_join_the_settings_and_a_last_list_field_is_variadic") {
-    decl: marker_test_decl(`Pre: struct {
+    decl: marker_test_decl(
+        `Pre: struct {
     condition: String
     message: String{"failed"}
     tags: [String]
@@ -179,30 +213,34 @@ run: fn() {}
     }
 }
 run: fn() {}
-`)
+`,
+    )
     names := [String]{}
     loop param in decl.params -> names.push(param.name)
     assert_eq(names, [String]{"condition", "message", "tags", "$sites", "$repeatable"})
     loop param in decl.params {
-        if param.name.starts_with("$") {
-            assert(param.ty == None && param.value != None)
-        } else { assert(param.ty != None) }
+        if param.name.starts_with("$") -> assert(param.ty == None && param.value != None) else {
+            assert(param.ty != None)
+        }
     }
     assert(!decl.params[0].variadic && decl.params[1].value != None && decl.params[2].variadic)
     assert_eq(MARKER_SOURCE_SITES.len(), 20)
 }
 
 #Test("a_marker_struct_holds_a_group_or_a_template") {
-    group: marker_test_decl(`Fast: struct {
+    group: marker_test_decl(
+        `Fast: struct {
     impl Marker {
         group: #[Inline(.Always), Scalar]
     }
 }
 run: fn() {}
-`)
+`,
+    )
     members: group.group ?? panic("the marker is a group")
     assert_eq(members.len(), 2)
-    template: marker_test_decl(`Logged: struct {
+    template: marker_test_decl(
+        `Logged: struct {
     impl Marker {
         sites: [.Function]
 
@@ -212,19 +250,22 @@ run: fn() {}
     }
 }
 run: fn() {}
-`)
+`,
+    )
     assert(template.body != None)
 }
 
 #Test("impl_marker_rejects_a_method_a_marker_does_not_have") {
-    diagnostics: parser_test_errors(`Bad: struct {
+    diagnostics: parser_test_errors(
+        `Bad: struct {
     impl Marker {
         sites: [.Function]
         render: fn(self) {}
     }
 }
 run: fn() {}
-`)
+`,
+    )
     codes := [String]{}
     loop diagnostic in diagnostics -> codes.push(diagnostic.code)
     assert_eq(codes, [String]{"E0907"})
@@ -234,7 +275,8 @@ run: fn() {}
 // checks against the Core trait (an unknown or repeated one is E0936/E0937
 // there), so the parser keeps each one as written.
 #Test("impl_marker_settings_become_marker_constants") {
-    program: parser_test_program(`Traced: struct {
+    program: parser_test_program(
+        `Traced: struct {
     impl Marker {
         sites: [.Function]
         sites: [.Method]
@@ -242,7 +284,8 @@ run: fn() {}
     }
 }
 run: fn() {}
-`)
+`,
+    )
     program.items[0] == .Struct(definition) ?? panic("struct")
     assert_eq(definition.trait_impls.len(), 1)
     block: definition.trait_impls[0]
@@ -254,24 +297,28 @@ run: fn() {}
 }
 
 #Test("impl_marker_group_implements_no_marker") {
-    program: parser_test_program(`Pair: struct {
+    program: parser_test_program(
+        `Pair: struct {
     impl Marker {
         group: #[Inline, Scalar]
     }
 }
 run: fn() {}
-`)
+`,
+    )
     program.items[0] == .Struct(definition) ?? panic("struct")
     assert_eq(definition.trait_impls.len(), 0)
 }
 
 #Test("nested_state_section_is_stored_on_struct_not_as_an_item") {
-    program: parser_test_program(`Door: struct {
+    program: parser_test_program(
+        `Door: struct {
     state { Open, Closed }
     value: Int
 }
 run: fn() {}
-`)
+`,
+    )
     program.items[0] == .Struct(definition) ?? panic("struct")
     state: definition.state ?? panic("struct-owned state set")
     names := [String]{}
@@ -313,9 +360,12 @@ run: fn() {}
     assert(formatted.ok)
     assert(formatted.text.contains("    state {{\n        Draft -> Confirmed, Cancelled\n        Confirmed -> Shipped, Cancelled\n        Shipped\n        Cancelled\n        Open: Draft | Confirmed\n    }}\n"))
     assert_eq(jet_format_source(formatted.text, false).text, formatted.text)
-    flat: jet_format_source(`Door: struct { state { Open, Closed } }
+    flat: jet_format_source(
+        `Door: struct { state { Open, Closed } }
 run: fn() {}
-`, false)
+`,
+        false,
+    )
     assert(flat.text.contains("state {{ Open, Closed }}"))
 }
 
@@ -384,24 +434,43 @@ run: fn() {}
 }
 
 #Test("ineligible_state_section_uses_one_registered_parser_diagnostic") {
-    loop testcase in [
-        (source: `Door: trait { state { Open } }
+    loop testcase in
+        [
+        (
+            source: `Door: trait { state { Open } }
 run: fn() {}
-`, owner: "trait"),
-        (source: `Door: state { Open }
+`,
+            owner: "trait",
+        ),
+        (
+            source: `Door: state { Open }
 run: fn() {}
-`, owner: "alias"),
-        (source: `impl Door { state { Open } }
+`,
+            owner: "alias",
+        ),
+        (
+            source: `impl Door { state { Open } }
 run: fn() {}
-`, owner: "impl"),
-        (source: `Door: module { state { Open } }
+`,
+            owner: "impl",
+        ),
+        (
+            source: `Door: module { state { Open } }
 run: fn() {}
-`, owner: "module"),
-        (source: `Door: module<T> { state { Open } }
+`,
+            owner: "module",
+        ),
+        (
+            source: `Door: module<T> { state { Open } }
 run: fn() {}
-`, owner: "module"),
-        (source: `run: fn() { value: { x: 1, state { Open } } }
-`, owner: "anonymous shape")
+`,
+            owner: "module",
+        ),
+        (
+            source: `run: fn() { value: { x: 1, state { Open } } }
+`,
+            owner: "anonymous shape",
+        ),
     ] {
         source: testcase.source
         owner: testcase.owner
@@ -550,7 +619,9 @@ area: fn() -> Int {
 }
 `
     moved: inbody_test_apply(inside, parser_marker_placement_edits(inside.bytes(), false))
-    assert_eq(moved, `#[Layout(c), Codable]
+    assert_eq(
+        moved,
+        `#[Layout(c), Codable]
 Pixel: struct {
     r: Int
 }
@@ -559,7 +630,8 @@ Pixel: struct {
 area: fn() -> Int {
     1
 }
-`)
+`,
+    )
     assert(parser_marker_placement_edits(moved.bytes(), false).is_empty())
     assert_eq(inbody_test_apply(moved, parser_marker_placement_edits(moved.bytes(), true)), inside)
     assert(parser_marker_placement_edits(inside.bytes(), true).is_empty())
@@ -574,41 +646,62 @@ Pixel: struct {
 `
     diagnostic: parser_test_diagnostic(parser_test_errors(source), "E0942")
     upward: diagnostic.edit ?? panic("E0942 moves the set above")
-    assert_eq(inbody_test_apply(source, [TextEdit]{upward}), `#[Codable, Layout(c)]
+    assert_eq(
+        inbody_test_apply(source, [TextEdit]{upward}),
+        `#[Codable, Layout(c)]
 Pixel: struct {
     r: Int
 }
-`)
+`,
+    )
     diagnostic.structured == .Val(.SuggestedEdits(alternatives)) ?? panic("E0942 offers the move into the body")
     assert_eq(alternatives.len(), 1)
-    assert_eq(inbody_test_apply(source, alternatives), `Pixel: struct {
+    assert_eq(
+        inbody_test_apply(source, alternatives),
+        `Pixel: struct {
     r: Int
     #Codable: true
     #Layout: c
 }
-`)
+`,
+    )
 }
 
 #Test("a_marker_line_in_a_nested_block_or_shaping_a_body_is_e0355") {
-    nested: parser_test_diagnostic(parser_test_errors(`run: fn() {
+    nested: parser_test_diagnostic(
+        parser_test_errors(
+            `run: fn() {
     if true {
         #Inline: true
     }
 }
-`), "E0355")
+`,
+        ),
+        "E0355",
+    )
     assert(nested.what.contains("Block"))
-    shaping: parser_test_diagnostic(parser_test_errors(`put: fn() {
+    shaping: parser_test_diagnostic(
+        parser_test_errors(
+            `put: fn() {
     #FFI: true
 }
-`), "E0355")
+`,
+        ),
+        "E0355",
+    )
     assert(shaping.what.contains("inside the body it shapes"))
 }
 
 #Test("a_marker_line_value_must_be_simple_or_parenthesized") {
-    diagnostic: parser_test_diagnostic(parser_test_errors(`Pixel: struct {
+    diagnostic: parser_test_diagnostic(
+        parser_test_errors(
+            `Pixel: struct {
     r: Int
     #Deprecated: since: "1"
 }
-`), "E0943")
+`,
+        ),
+        "E0943",
+    )
     assert(diagnostic.edit != None)
 }

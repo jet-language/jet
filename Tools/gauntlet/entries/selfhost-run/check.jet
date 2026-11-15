@@ -10,12 +10,15 @@ use {
 }
 
 MEASURED: [String]{"latencyMs", "peakRssBytes"}
+
 BROKEN: "invalid reasoning JSON"
 
 // `value` with `root` shown as <runRoot> and `here` as <cwd>, every measured
 // figure as <measured> and the parser's wording dropped.
 steady: fn(value: Dyn, root: String, here: String) -> Dyn {
-    if value == .Text(text) -> return Dyn.Text(if text.starts_with(BROKEN) -> BROKEN else -> text.replace(root, "<runRoot>").replace(here, "<cwd>"))
+    if value == .Text(text) {
+        return Dyn.Text(if text.starts_with(BROKEN) -> BROKEN else -> text.replace(root, "<runRoot>").replace(here, "<cwd>"))
+    }
     if value == .Array(list) {
         out := [Dyn]{}
         loop item in list -> out.push(steady(item, root, here))
@@ -35,6 +38,7 @@ steady: fn(value: Dyn, root: String, here: String) -> Dyn {
 Check: struct {
     #Doc("The file holding the program's output") stdout: String
 }
+
 run: fn(check: Check) {
     printed: files.read(check.stdout) ?? panic("no output file: {err}")
     receipt: json.parse(printed) ?? panic("the output is not JSON: {err}")
@@ -44,5 +48,7 @@ run: fn(check: Check) {
     print(json.stringify(shown, 2))
     // With --output out/receipt.json the program writes the receipt there too.
     written: files.read("out/receipt.json") ?? ""
-    if written != "" -> print("out/receipt.json {if written == printed -> "holds" else -> "differs from"} the printed receipt")
+    if written != "" {
+        print("out/receipt.json {if written == printed -> "holds" else -> "differs from"} the printed receipt")
+    }
 }

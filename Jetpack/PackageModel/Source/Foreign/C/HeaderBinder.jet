@@ -146,7 +146,7 @@ pkg_cbind_provenance: fn(bound: CBindFiles, lib: String, stem: String, header_pa
     identity.field("handle_facts", bound.handle_keys.join("\n").bytes())
     identity.field("link_closure", bound.link_closure.bytes())
     if dependency == {
-        .Val(target) -> identity.field("dependency", target.bytes())
+        .Val(target) -> { identity.field("dependency", target.bytes()) }
         .None -> identity.field("dependency_missing", "true".bytes())
     }
     pkg_bridge_add_archive_inputs(identity, archives.copy())
@@ -174,7 +174,9 @@ pkg_cbind_provenance: fn(bound: CBindFiles, lib: String, stem: String, header_pa
         fields.push((name: "linked-archive-sha256", value: digest))
     }
     artifacts := [(name: String, digest: String)]{(name: "{stem}.jet", digest: cache_sha)}
-    if bound.metadata == .Val(text) -> artifacts.push((name: "{stem}.metadata", digest: pkg_sha256_hex(text.bytes())))
+    if bound.metadata == .Val(text) {
+        artifacts.push((name: "{stem}.metadata", digest: pkg_sha256_hex(text.bytes())))
+    }
     pkg_bridge_render_provenance(identity.finish(), fields, artifacts)
 }
 
@@ -187,7 +189,9 @@ pkg_cbind_stale_input: fn(provenance: String, cache: [U8]) -[FS]> String? Never!
     archive := ""
     loop line in provenance.split("\n") {
         row: line.split_once("=") ?? next
-        if row.before == "cache-sha256" && row.after != pkg_sha256_hex(cache) -> return Val("the generated cache")
+        if row.before == "cache-sha256" && row.after != pkg_sha256_hex(cache) {
+            return Val("the generated cache")
+        }
         if row.before == "linked-archive" -> archive = row.after
         if row.before != "linked-archive-sha256" || archive == "" -> next
         current: if cbind_core_files.read_bytes(archive) == .Ok(bytes) -> pkg_sha256_hex(bytes) else -> "missing"
@@ -263,8 +267,12 @@ pkg_cffi_metadata_escape: fn(value: String) -> String Never! {
 // `handle=lib|typedef|JetName|close|close-source|thread-safety` row per fact.
 pkg_cffi_render_binding_metadata: fn(lib: String, handle_facts: [FFIHandleFact], link_closure: FFILinkClosure) -> String Never! {
     out := "schema={C_BINDING_METADATA_SCHEMA}\nlibrary={pkg_cffi_metadata_escape(lib)}\n"
-    loop direct in link_closure.direct -> out = "{out}closure.direct={pkg_cffi_metadata_escape(direct)}\n"
-    loop transitive in link_closure.transitive -> out = "{out}closure.transitive={pkg_cffi_metadata_escape(transitive)}\n"
+    loop direct in link_closure.direct {
+        out = "{out}closure.direct={pkg_cffi_metadata_escape(direct)}\n"
+    }
+    loop transitive in link_closure.transitive {
+        out = "{out}closure.transitive={pkg_cffi_metadata_escape(transitive)}\n"
+    }
     loop fact in pkg_cffi_sorted_facts(handle_facts) {
         out = "{out}handle={pkg_cffi_metadata_escape(fact.lib)}|{pkg_cffi_metadata_escape(fact.typedef_name)}|{pkg_cffi_metadata_escape(fact.jet_name)}|{pkg_cffi_metadata_escape(fact.close)}|{pkg_ffi_close_source_name(fact.close_source)}|{pkg_ffi_thread_safety_name(fact.thread_safety)}\n"
     }
@@ -291,7 +299,7 @@ pkg_cbind_generate_with_options: fn(header_src: String, lib: String, overlay: Ha
 // Generate a C cache and append caller-selected, already-resolved facades.
 // Plans are accepted only when their boundary digest matches this exact
 // header/overlay generation.
-pkg_cbind_generate_with_overlay_and_plans: fn(header_src: String, lib: String, overlay: HandleOverlay, plans: [String: BindingPlan]) -> CBindResult CBindError! {
+pkg_cbind_generate_with_overlay_and_plans: fn(header_src: String, lib: String, overlay: HandleOverlay, plans: [String:BindingPlan]) -> CBindResult CBindError! {
     result := pkg_cbind_generate_with_overlay(header_src, lib, overlay)
     pkg_cbind_attach_plans(result, plans, "generated")
     Ok(result)
@@ -300,7 +308,7 @@ pkg_cbind_generate_with_overlay_and_plans: fn(header_src: String, lib: String, o
 // Generate against a caller-supplied canonical boundary contract and carry
 // the selected plans into the cache. The contract identity must still name
 // this exact header/library generation.
-pkg_cbind_generate_with_contract_and_plans: fn(header_src: String, lib: String, overlay: HandleOverlay, contract: ForeignBoundaryContract, plans: [String: BindingPlan]) -> CBindResult CBindError! {
+pkg_cbind_generate_with_contract_and_plans: fn(header_src: String, lib: String, overlay: HandleOverlay, contract: ForeignBoundaryContract, plans: [String:BindingPlan]) -> CBindResult CBindError! {
     result := pkg_cbind_generate_with_overlay(header_src, lib, overlay)
     if result.boundary.identity != contract.identity || result.boundary.library != contract.library {
         return Err(CBindError{message: "canonical foreign boundary contract is stale against the generated C source"})
@@ -320,7 +328,9 @@ pkg_cbind_generate_with_descriptor: fn(header_src: String, lib: String, descript
 
 // Descriptor-aware generation with explicit opaque-handle facts.
 pkg_cbind_generate_with_descriptor_and_overlay: fn(header_src: String, lib: String, descriptor: BinderDescriptor, overlay: HandleOverlay) -> CBindResult CBindError! {
-    if pkg_cbind_overlay_contains_line_break(overlay) -> return Err(CBindError{message: "C binding overlay identities cannot contain line breaks"})
+    if pkg_cbind_overlay_contains_line_break(overlay) {
+        return Err(CBindError{message: "C binding overlay identities cannot contain line breaks"})
+    }
     contract: descriptor.contract
     cleaned: pkg_cbind_strip_comments_and_directives(header_src)
     discovery: OpaqueHandleDiscovery.discover(cleaned, lib, overlay)
@@ -362,8 +372,12 @@ pkg_cbind_generate_with_descriptor_and_overlay: fn(header_src: String, lib: Stri
         reasons := [String]{}
         loop entry in skipped -> reasons.push("skipped `{entry.name}`: {entry.reason}")
         unresolved := [String]{}
-        loop entry in discovery.unresolved -> unresolved.push("`{entry.typedef_name}`: {entry.reason}")
-        if unresolved.len() > 0 -> reasons.push("opaque handle bindings were unresolved: {unresolved.join("; ")}")
+        loop entry in discovery.unresolved {
+            unresolved.push("`{entry.typedef_name}`: {entry.reason}")
+        }
+        if unresolved.len() > 0 {
+            reasons.push("opaque handle bindings were unresolved: {unresolved.join("; ")}")
+        }
         suffix: if reasons.len() == 0 -> "" else -> "; {reasons.join("; ")}"
         return Err(CBindError{message: "no bindable C function prototypes found for `{lib}`{suffix}"})
     }
@@ -376,7 +390,7 @@ pkg_cbind_generate_with_descriptor_and_overlay: fn(header_src: String, lib: Stri
         "c-bind-source-v1;descriptor={descriptor_stamp}",
         "generated-c-bindgen",
         "jet-pkg-model:c-bind",
-        pkg_bridge_foreign_host_target()
+        pkg_bridge_foreign_host_target(),
     )
     boundary := ForeignBoundaryContract.new(descriptor, lib, boundary_identity)
     if discovery.handles.len() == 0 {
@@ -395,17 +409,19 @@ pkg_cbind_generate_with_descriptor_and_overlay: fn(header_src: String, lib: Stri
     boundary_stamp: boundary.stamp()
     type_declarations: catalog.render_type_declarations()
     source: "// jet-ffi-descriptor={descriptor_stamp}\n// jet-ffi-boundary={boundary_stamp}\n{type_declarations}#Bindgen c.{module_lib}.__bindgen__: module {{\n{lines.join("")}}}\n"
-    Ok(CBindResult{
-        source: source,
-        bound: bound,
-        skipped: skipped,
-        handles: discovery.handles,
-        handle_skipped: discovery.unresolved,
-        link_closure: LinkClosure.new(lib, overlay.links),
-        descriptor_stamp: descriptor_stamp,
-        boundary: boundary,
-        plans: [BindingPlan]{}
-    })
+    Ok(
+        CBindResult{
+            source: source,
+            bound: bound,
+            skipped: skipped,
+            handles: discovery.handles,
+            handle_skipped: discovery.unresolved,
+            link_closure: LinkClosure.new(lib, overlay.links),
+            descriptor_stamp: descriptor_stamp,
+            boundary: boundary,
+            plans: [BindingPlan]{},
+        },
+    )
 }
 
 pkg_cbind_c_descriptor: fn() -> BinderDescriptor CBindError! {
@@ -415,14 +431,18 @@ pkg_cbind_c_descriptor: fn() -> BinderDescriptor CBindError! {
 
 // Check each plan against its key and the result's boundary, then append the
 // plans' facades in key order. `against` names the boundary in the refusal.
-pkg_cbind_attach_plans: fn(result: &CBindResult, plans: [String: BindingPlan], against: String) CBindError! {
+pkg_cbind_attach_plans: fn(result: &CBindResult, plans: [String:BindingPlan], against: String) CBindError! {
     boundary_digest: result.boundary.digest()
     names := plans.keys().to_list()
     names.sort()
     loop name in names {
         plan: plans[name]
-        if name != plan.operation.name -> return Err(CBindError{message: "adaptation plan key `{name}` names `{plan.operation.name}`"})
-        if plan.boundary_digest != boundary_digest -> return Err(CBindError{message: "adaptation plan `{name}` is stale against the {against} C boundary"})
+        if name != plan.operation.name {
+            return Err(CBindError{message: "adaptation plan key `{name}` names `{plan.operation.name}`"})
+        }
+        if plan.boundary_digest != boundary_digest {
+            return Err(CBindError{message: "adaptation plan `{name}` is stale against the {against} C boundary"})
+        }
     }
     selected := [BindingPlan]{}
     loop name in names {
@@ -440,7 +460,9 @@ pkg_cbind_boundary_overlay_identity: fn(overlay: HandleOverlay) -> String Never!
     close_keys := overlay.close_functions.keys().to_list()
     close_keys.sort()
     close := [String]{}
-    loop key in close_keys -> close.push("{pkg_cbind_debug_quote(key)}: {pkg_cbind_debug_quote(overlay.close_functions[key])}")
+    loop key in close_keys {
+        close.push("{pkg_cbind_debug_quote(key)}: {pkg_cbind_debug_quote(overlay.close_functions[key])}")
+    }
     safety_keys := overlay.thread_safety.keys().to_list()
     safety_keys.sort()
     safety := [String]{}
@@ -488,9 +510,7 @@ pkg_cbind_debug_quote: fn(value: String) -> String Never! {
             13 -> out.push("\\r")
             0 -> out.push("\\0")
             else -> {
-                if code < 32 || code == 127 {
-                    out.push("\\u{{{pkg_cbind_lower_hex(code)}}}")
-                } else {
+                if code < 32 || code == 127 -> out.push("\\u{{{pkg_cbind_lower_hex(code)}}}") else {
                     out.push(pkg_bytes_text(raw, index, index + width))
                 }
             }
@@ -515,7 +535,9 @@ pkg_cbind_lower_hex: fn(value: Int) -> String Never! {
 
 pkg_cbind_overlay_contains_line_break: fn(overlay: HandleOverlay) -> Bool Never! {
     loop entry in overlay.close_functions {
-        if pkg_cbind_has_line_break(entry.key) || pkg_cbind_has_line_break(entry.value) -> return true
+        if pkg_cbind_has_line_break(entry.key) || pkg_cbind_has_line_break(entry.value) {
+            return true
+        }
     }
     loop entry in overlay.thread_safety {
         if pkg_cbind_has_line_break(entry.key) -> return true

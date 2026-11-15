@@ -32,8 +32,12 @@ process_rows: fn() -> [ProcessRow]? {
         status: files.read("/proc/{item.name}/status") ?? next
         row := ProcessRow{pid: pid, parent: None, rss_kb: None}
         loop line in status.lines() {
-            if line.starts_with("PPid:") -> row.parent = parsed_int(line.remove_prefix("PPid:").trim())
-            if line.starts_with("VmRSS:") && line.ends_with(" kB") -> row.rss_kb = parsed_int(line.remove_prefix("VmRSS:").remove_suffix(" kB").trim())
+            if line.starts_with("PPid:") {
+                row.parent = parsed_int(line.remove_prefix("PPid:").trim())
+            }
+            if line.starts_with("VmRSS:") && line.ends_with(" kB") {
+                row.rss_kb = parsed_int(line.remove_prefix("VmRSS:").remove_suffix(" kB").trim())
+            }
         }
         rows.push(row)
     }
@@ -41,9 +45,7 @@ process_rows: fn() -> [ProcessRow]? {
 }
 
 // `text` as a whole number, None when it is not one.
-parsed_int: fn(text: String) -> Int? {
-    Val(Int.parse(text) ?? return None)
-}
+parsed_int: fn(text: String) -> Int? { Val(Int.parse(text) ?? return None) }
 
 // `root` and every process below it in `rows`, `root` first.
 process_tree: fn(rows: [ProcessRow], root: Int) -> [Int] {

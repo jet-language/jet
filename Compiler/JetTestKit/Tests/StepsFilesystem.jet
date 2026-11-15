@@ -8,7 +8,8 @@ use files: core.files
     kit_exec_write(files.join(directory, "short.out"), "Ax")
     source: "fixture: tree\nmkdir: sub/deep\nfile: sub/deep is-dir\nhardlink: source hard\nsymlink: source symbolic\nchmod: source 0600\nfile: source mode = 0600\nfile: source size = 5\nfile: source size > 4 # original predicate\npoke: source at 1 hex \"78\"\npoke: source at mid xor \"01\"\nfile: source = changed.out\nfile: hard = changed.out\nfile: symbolic = changed.out\nrename: sub renamed\nfile: sub absent\nfile: renamed/deep is-dir\ntruncate: source 3\ntruncate: source -1\nfile: source = short.out\nfile: hard size = 2\n"
     assert_eq(cases_test_advanced(root, "actions", source).verdict.status, "PASS")
-    loop (index, wrong) in ["mkdir: source/child", "hardlink: missing hard", "symlink: source source", "rename: missing destination", "truncate: source -6", "poke: source at 5 hex \"ff\""] {
+    loop (index, wrong) in
+        ["mkdir: source/child", "hardlink: missing hard", "symlink: source source", "rename: missing destination", "truncate: source -6", "poke: source at 5 hex \"ff\""] {
         assert_eq(cases_test_advanced(root, "error-{index}", "fixture: tree\n{wrong}\n").verdict.status, "ERROR")
     }
     assert_eq(cases_test_advanced(root, "wrong-mode", "fixture: tree\nchmod: source 0600\nfile: source mode = 0700\n").verdict.status, "FAIL")
@@ -21,7 +22,8 @@ use files: core.files
     kit_exec_write(files.join(directory, "tree/value"), "abc")
     source: "fixture: tree\nstep: printf ready\nfile: value size = 3\nfile: value size >= 3 # original predicate\nfile: value size <= 3 # original predicate\nfile: value size < 4 # original predicate\nfile: value size > 2 # original predicate\nfile: value sha256 = \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"\n"
     assert_eq(cases_test_advanced(root, "metadata", source).verdict.status, "PASS")
-    loop comparison in ["size = 4", "size >= 4", "size <= 2", "size < 3", "size > 3", "sha256 = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\""] {
+    loop comparison in
+        ["size = 4", "size >= 4", "size <= 2", "size < 3", "size > 3", "sha256 = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\""] {
         assert_eq(cases_test_advanced(root, "wrong", "fixture: tree\nstep: printf ready\nfile: value {comparison} # original predicate\n").verdict.status, "FAIL")
     }
     files.remove_all(root) ?? panic("remove metadata scratch")
@@ -35,7 +37,8 @@ use files: core.files
     assert_eq(cases_test_advanced(root, "deadline", "await: file absent timeout 20ms\n").verdict.status, "FAIL")
     assert_eq(cases_test_advanced(root, "resize", "resize: sparse 100000000000\n").verdict.status, "REFUSED")
     // Malformed poke hex is a run-time ERROR (StepsGapForms), not refused grammar.
-    loop invalid in ["mkdir: ../escape", "hardlink: a ../escape", "rename: a ../escape", "chmod: a 0800", "poke: a at -1 hex \"ff\"", "await: file a timeout 0s", "await: file a timeout -1s", "resize: a -1"] {
+    loop invalid in
+        ["mkdir: ../escape", "hardlink: a ../escape", "rename: a ../escape", "chmod: a 0800", "poke: a at -1 hex \"ff\"", "await: file a timeout 0s", "await: file a timeout -1s", "resize: a -1"] {
         assert_eq(cases_test_advanced(root, "invalid", "{invalid}\n").verdict.status, "REFUSED")
     }
     files.remove_all(root) ?? panic("remove readiness scratch")
@@ -52,7 +55,8 @@ use files: core.files
     kit_exec_write(files.join(directory, "count.out"), "2")
     source: "fixture: tree\nstep: printf ready\nentries: . kind file ext = \"tmp\" = 2\nentries: . recursive kind file ext = \"tmp\" parent = \"sub\" = 1\nentries: . kind file name ^= \"o\" name != \"two.tmp\" = 1\nentries: . kind file name $= \".tmp\" name ~ \"tw\" = 1\nentries: . kind file name = \".tmp\" ext = \"tmp\" = 0\nentries: . kind dir >= 2 # original predicate\nfile: . names = [\".tmp\",\"one.tmp\",\"only\",\"sub\",\"two.tmp\"]\ncapture: count = entries . kind file ext = \"tmp\"\nstep: printf \"%s\" {{cap:count}}\nstdout: = count.out\ncapture: selected = sole-entry . kind file name = \"one.tmp\"\nfile: {{cap:selected}} size = 3\ncapture: size = size file {{cap:selected}}\nfile: {{cap:selected}} size = {{cap:size}}\ncapture: first = first-entry only\nfile: only first == {{cap:first}}\nfile: only first ~ only # original predicate\ncapture: total = tree-bytes .\ntree: . bytes = {{cap:total}}\ntree: . !~ forbidden # original predicate\ntree: . kind file depth = 1 ~ hidden # original predicate\ntree: . recursive ext = \"tmp\" ~ three # original predicate\nmkdir: empty\nfile: empty names = []\n"
     assert_eq(cases_test_advanced(root, "entries", source).verdict.status, "PASS")
-    loop (index, wrong) in ["entries: . ext = \"tmp\" = 3", "file: . names = []", "capture: selected = sole-entry . kind file ext = \"tmp\"", "capture: first = first-entry empty", "file: empty first empty", "tree: . !~ hidden # original predicate", "tree: . ~ absent # original predicate", "tree: . bytes = 0"] {
+    loop (index, wrong) in
+        ["entries: . ext = \"tmp\" = 3", "file: . names = []", "capture: selected = sole-entry . kind file ext = \"tmp\"", "capture: first = first-entry empty", "file: empty first empty", "tree: . !~ hidden # original predicate", "tree: . ~ absent # original predicate", "tree: . bytes = 0"] {
         assert_eq(cases_test_advanced(root, "fail-{index}", "fixture: tree\nmkdir: empty\n{wrong}\n").verdict.status, "FAIL")
     }
     files.remove_all(root) ?? panic("remove directory selection scratch")
@@ -160,7 +164,8 @@ use files: core.files
     source: "requires: os:unix\nchmod: {{tmp}} 0700\nfile: {{tmp}} is-dir\nmkdir: {{tmp}}/nested\nwrite: {{tmp}}/nested/owned = \"temporary\"\nfile: {{tmp}}/nested/owned = \"temporary\"\nstep: jet -c 'printf %s \"$TMPDIR\"'\nstdout: = \"{{tmp}}\"\n"
     assert_eq(cases_test_advanced(root, "setup", source).verdict.status, "PASS")
     assert_eq(cases_test_advanced(root, "wrong", "mkdir: {{tmp}}/nested\nwrite: {{tmp}}/nested/value = \"x\"\nfile: {{tmp}}/nested/value = \"y\"\n").verdict.status, "FAIL")
-    loop (index, path) in ["{{tmp}}/../escape", "{{tmp}}/../../escape", "{{root}}/escape", "{{scratch}}/escape", "../escape"] {
+    loop (index, path) in
+        ["{{tmp}}/../escape", "{{tmp}}/../../escape", "{{root}}/escape", "{{scratch}}/escape", "../escape"] {
         assert_eq(cases_test_advanced(root, "escape-{index}", "mkdir: {path}\n").verdict.status, "REFUSED")
     }
     env: kit_test_steps_env()
@@ -175,13 +180,20 @@ use files: core.files
     directory: files.join(root, "tests/cases/group")
     kit_exec_write(files.join(directory, "tree/value"), "ready")
     kit_exec_write(files.join(directory, "tree/doc.json"), "{{\"ready\":true}}")
-    loop assertion in ["file: value = \"ready\"", "entries: . kind file name = \"value\" = 1", "tree: . bytes = 19", "json: file doc.json doc $.ready = true", "capture: value = text file value\ncap:value: = \"ready\""] {
+    loop assertion in
+        ["file: value = \"ready\"", "entries: . kind file name = \"value\" = 1", "tree: . bytes = 19", "json: file doc.json doc $.ready = true", "capture: value = text file value\ncap:value: = \"ready\""] {
         plan: kit_steps_parse_case("fixture: tree\n{assertion}\n")
         assert_eq(plan.error, "")
         assert_eq(cases_test_advanced(root, "independent", "fixture: tree\n{assertion}\n").verdict.status, "PASS")
     }
-    loop assertion in ["file: value = \"wrong\"", "entries: . kind file name = \"value\" = 0", "tree: . bytes = 0", "json: file doc.json doc $.ready = false", "capture: value = text file value\ncap:value: = \"wrong\""] -> assert_eq(cases_test_advanced(root, "wrong", "fixture: tree\n{assertion}\n").verdict.status, "FAIL")
-    loop assertion in ["stdout: empty", "stderr: empty", "exit: 0", "elapsed: absent <= 1s", "json: stdout doc $ valid", "capture: value = text stdout"] -> assert(kit_steps_parse_case("fixture: tree\n{assertion}\n").error != "")
+    loop assertion in
+        ["file: value = \"wrong\"", "entries: . kind file name = \"value\" = 0", "tree: . bytes = 0", "json: file doc.json doc $.ready = false", "capture: value = text file value\ncap:value: = \"wrong\""] {
+        assert_eq(cases_test_advanced(root, "wrong", "fixture: tree\n{assertion}\n").verdict.status, "FAIL")
+    }
+    loop assertion in
+        ["stdout: empty", "stderr: empty", "exit: 0", "elapsed: absent <= 1s", "json: stdout doc $ valid", "capture: value = text stdout"] {
+        assert(kit_steps_parse_case("fixture: tree\n{assertion}\n").error != "")
+    }
     files.remove_all(root) ?? panic("remove independent assertion scratch")
 }
 

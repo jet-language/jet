@@ -1,13 +1,12 @@
-
 label: fn(value: Int) -> String Never! {
     if value == {
-        1 -> { "one" }
-        else -> { "other" }
+        1 -> "one"
+        else -> "other"
     }
 }
 
 early: fn(flag: Bool) -> String Never! {
-    if flag { return "early" }
+    if flag -> return "early"
     "late"
 }
 
@@ -20,25 +19,33 @@ Packet: enum {
 
 packet_value: fn(packet: Packet) -> Int Never! {
     if packet == {
-        .Data(10..19) -> { 100 }
+        .Data(10..19) -> 100
         .Data(value) | .Retry(value) -> {
             if value == 0 -> return 9
             if value > 0 -> { value + 1 } else -> { -1 }
         }
-        .Ignore(_) -> { 0 }
-        .Empty -> { 0 }
-        else -> { -2 }
+        .Ignore(_) -> 0
+        .Empty -> 0
+        else -> -2
     }
 }
 
 EXPECTED_ONE: #run label(1)
+
 EXPECTED_OTHER: #run label(2)
+
 EXPECTED_EARLY: #run early(true)
+
 EXPECTED_LATE: #run early(false)
+
 EXPECTED_RANGE: #run packet_value(Packet.Data(12))
+
 EXPECTED_OR: #run packet_value(Packet.Retry(2))
+
 EXPECTED_NESTED_RETURN: #run packet_value(Packet.Data(0))
+
 EXPECTED_EMPTY: #run packet_value(Packet.Empty)
+
 EXPECTED_WILDCARD: #run packet_value(Packet.Ignore(17))
 
 run: fn() {

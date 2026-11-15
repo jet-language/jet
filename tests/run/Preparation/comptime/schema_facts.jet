@@ -19,7 +19,9 @@ fact_names: fn(snapshot: compiler.SchemaSnapshot, kind: compiler.FactKind) -> [S
 }
 
 // A snapshot's identity, as text.
-identity_text: fn(snapshot: compiler.SchemaSnapshot) -> String { snapshot_text(snapshot.identity()) }
+identity_text: fn(snapshot: compiler.SchemaSnapshot) -> String {
+    snapshot_text(snapshot.identity())
+}
 
 snapshot_text: fn(id: compiler.SnapshotID) -> String { id.text() }
 
@@ -45,13 +47,21 @@ query_end: fn(snapshot: compiler.SchemaSnapshot, at: compiler.QueryTime?, limit:
 }
 
 MARKERS: #run fact_names(SCHEMA, compiler.FactKind.Marker)
+
 READS: #run fact_names(SCHEMA, compiler.FactKind.Read)
+
 TRUNCATED: #run query_end(SCHEMA, None, Val(1))
+
 UNSUPPORTED: #run query_end(SCHEMA, Val(compiler.QueryTime{elapsed_ms: 0}), None)
+
 COMPLETE: #run query_end(SCHEMA, None, None)
+
 ONE_IDENTITY: #run { identity_text(compiler.schema()) == identity_text(SCHEMA) }
+
 TRUNCATED_TEXT: #run error_text(compiler.MetadataError{kind: compiler.MetadataFailure.Truncated{limit: 1, observed: 3}, query: "query", source: None})
+
 STALE_TEXT: #run error_text(compiler.MetadataError{kind: compiler.MetadataFailure.Stale{requested: SCHEMA.identity(), current: compiler.schema().identity()}, query: "query", source: None})
+
 STALE_NAMES_BOTH: #run { STALE_TEXT == "query: snapshot {identity_text(SCHEMA)} is stale; the current one is {identity_text(SCHEMA)}" }
 
 run: fn() {

@@ -8,17 +8,27 @@
 // accept rule.
 
 TOOLCHAIN_DEFAULT_ENDPOINT: "https://dl.jet-lang.dev"
+
 TOOLCHAIN_DEFAULT_CHANNEL: "stable"
+
 TOOLCHAIN_ENDPOINT_ENV: ENV_JET_TOOLCHAIN_ENDPOINT
+
 TOOLCHAIN_MANIFEST_DOMAIN: "jet-toolchain-channel-v1\n"
+
 TOOLCHAIN_ARTIFACT_DOMAIN: "jet-toolchain-artifact-v1\n"
 
 TOOLCHAIN_MAX_MANIFEST_BYTES: 1048576
+
 TOOLCHAIN_MAX_SIGNATURE_BYTES: 16384
+
 TOOLCHAIN_MAX_ARTIFACT_BYTES: 536870912
+
 TOOLCHAIN_MAX_STATE_BYTES: 16384
+
 TOOLCHAIN_MAX_ARTIFACTS: 64
+
 TOOLCHAIN_MAX_CLOCK_SKEW_SECONDS: 300
+
 TOOLCHAIN_MAX_MANIFEST_AGE_SECONDS: 2592000
 
 // What one `jet self update` invocation asks for.
@@ -98,15 +108,25 @@ ToolchainChannelManifest: struct {
             published_at: recipe_update_integer(recipe_update_field(fields, "published_at"), "manifest publication time"),
             expires_at: recipe_update_integer(recipe_update_field(fields, "expires_at"), "manifest expiry time"),
             min_version: recipe_update_text(recipe_update_field(fields, "min_version"), "manifest minimum version"),
-            artifacts
+            artifacts: artifacts,
         }
-        if manifest.schema != 1 -> return Err(RecipeError.Update("unsupported toolchain channel schema"))
-        if manifest.channel != expected_channel -> return Err(RecipeError.Update("toolchain channel manifest disagrees with the requested channel"))
+        if manifest.schema != 1 {
+            return Err(RecipeError.Update("unsupported toolchain channel schema"))
+        }
+        if manifest.channel != expected_channel {
+            return Err(RecipeError.Update("toolchain channel manifest disagrees with the requested channel"))
+        }
         SemanticVersion.parse(manifest.version, "toolchain version")
         SemanticVersion.parse(manifest.min_version, "manifest minimum version")
-        if manifest.sequence == 0 -> return Err(RecipeError.Update("toolchain channel manifest sequence must be positive"))
-        if manifest.artifacts.len() == 0 -> return Err(RecipeError.Update("toolchain channel manifest has no artifacts"))
-        if manifest.artifacts.len() > TOOLCHAIN_MAX_ARTIFACTS -> return Err(RecipeError.Update("toolchain channel manifest has too many artifacts"))
+        if manifest.sequence == 0 {
+            return Err(RecipeError.Update("toolchain channel manifest sequence must be positive"))
+        }
+        if manifest.artifacts.len() == 0 {
+            return Err(RecipeError.Update("toolchain channel manifest has no artifacts"))
+        }
+        if manifest.artifacts.len() > TOOLCHAIN_MAX_ARTIFACTS {
+            return Err(RecipeError.Update("toolchain channel manifest has too many artifacts"))
+        }
         loop index in 1..<manifest.artifacts.len() {
             if manifest.artifacts[index - 1].target >= manifest.artifacts[index].target {
                 return Err(RecipeError.Update("toolchain channel artifacts are not sorted by target"))
@@ -115,7 +135,9 @@ ToolchainChannelManifest: struct {
         targets := [String]{}
         loop artifact in manifest.artifacts {
             recipe_update_validate_component(artifact.target, "artifact target")
-            if targets.contains(artifact.target) -> return Err(RecipeError.Update("toolchain channel manifest repeats an artifact target"))
+            if targets.contains(artifact.target) {
+                return Err(RecipeError.Update("toolchain channel manifest repeats an artifact target"))
+            }
             targets.push(artifact.target)
             expected_path: "v1/{manifest.channel}/{manifest.version}/jet-{manifest.version}-{artifact.target}"
             if artifact.path != expected_path || artifact.signature != "{expected_path}.sig.json" {
@@ -128,7 +150,9 @@ ToolchainChannelManifest: struct {
                 return Err(RecipeError.Update("toolchain artifact size is outside the channel bound"))
             }
         }
-        if manifest.canonical().bytes() != bytes -> return Err(RecipeError.Update("toolchain channel manifest bytes are not canonical"))
+        if manifest.canonical().bytes() != bytes {
+            return Err(RecipeError.Update("toolchain channel manifest bytes are not canonical"))
+        }
         Ok(manifest)
     }
 
@@ -136,7 +160,7 @@ ToolchainChannelManifest: struct {
     canonical: fn(self) -> String Never! {
         artifacts := [Dyn]{}
         loop artifact in self.artifacts -> artifacts.push(artifact.to_tree())
-        fields := [String: Dyn]{}
+        fields := [String:Dyn]{}
         fields["schema"] = Dyn.Int(self.schema)
         fields["channel"] = Dyn.Text(self.channel.copy())
         fields["version"] = Dyn.Text(self.version.copy())
@@ -160,17 +184,19 @@ ToolchainArtifact: struct {
     parse: fn(value: Dyn) -> ToolchainArtifact RecipeError! {
         fields: recipe_update_object(value, "toolchain artifact")
         recipe_update_reject_unknown(fields, [String]{"target", "path", "sha256", "size", "signature"})
-        Ok(ToolchainArtifact{
-            target: recipe_update_text(recipe_update_field(fields, "target"), "artifact target"),
-            path: recipe_update_text(recipe_update_field(fields, "path"), "artifact path"),
-            sha256: recipe_update_text(recipe_update_field(fields, "sha256"), "artifact digest"),
-            size: recipe_update_integer(recipe_update_field(fields, "size"), "artifact size"),
-            signature: recipe_update_text(recipe_update_field(fields, "signature"), "artifact signature path")
-        })
+        Ok(
+            ToolchainArtifact{
+                target: recipe_update_text(recipe_update_field(fields, "target"), "artifact target"),
+                path: recipe_update_text(recipe_update_field(fields, "path"), "artifact path"),
+                sha256: recipe_update_text(recipe_update_field(fields, "sha256"), "artifact digest"),
+                size: recipe_update_integer(recipe_update_field(fields, "size"), "artifact size"),
+                signature: recipe_update_text(recipe_update_field(fields, "signature"), "artifact signature path"),
+            },
+        )
     }
 
     to_tree: fn(self) -> Dyn Never! {
-        fields := [String: Dyn]{}
+        fields := [String:Dyn]{}
         fields["target"] = Dyn.Text(self.target.copy())
         fields["path"] = Dyn.Text(self.path.copy())
         fields["sha256"] = Dyn.Text(self.sha256.copy())
@@ -195,15 +221,17 @@ ToolchainSignatureSidecar: struct {
             schema: recipe_update_integer(recipe_update_field(fields, "schema"), "signature schema"),
             key_id: recipe_update_text(recipe_update_field(fields, "key_id"), "signature key id"),
             algorithm: recipe_update_text(recipe_update_field(fields, "algorithm"), "signature algorithm"),
-            signature: recipe_update_text(recipe_update_field(fields, "signature"), "signature bytes")
+            signature: recipe_update_text(recipe_update_field(fields, "signature"), "signature bytes"),
         }
-        if sidecar.canonical().bytes() != bytes -> return Err(RecipeError.Update("{label} signature bytes are not canonical"))
+        if sidecar.canonical().bytes() != bytes {
+            return Err(RecipeError.Update("{label} signature bytes are not canonical"))
+        }
         Ok(sidecar)
     }
 
     // The canonical sidecar encoding (no trailing newline).
     canonical: fn(self) -> String Never! {
-        fields := [String: Dyn]{}
+        fields := [String:Dyn]{}
         fields["schema"] = Dyn.Int(self.schema)
         fields["key_id"] = Dyn.Text(self.key_id.copy())
         fields["algorithm"] = Dyn.Text(self.algorithm.copy())
@@ -235,20 +263,24 @@ ToolchainUpdateState: struct {
             platform: recipe_update_text(recipe_update_field(fields, "platform"), "state platform"),
             sequence: recipe_update_integer(recipe_update_field(fields, "sequence"), "state sequence"),
             version: recipe_update_text(recipe_update_field(fields, "version"), "state version"),
-            sha256: recipe_update_text(recipe_update_field(fields, "sha256"), "state digest")
+            sha256: recipe_update_text(recipe_update_field(fields, "sha256"), "state digest"),
         }
-        if state.schema != 1 || state.sequence == 0 -> return Err(RecipeError.Update("toolchain update state schema is unsupported"))
+        if state.schema != 1 || state.sequence == 0 {
+            return Err(RecipeError.Update("toolchain update state schema is unsupported"))
+        }
         recipe_update_validate_component(state.channel, "state channel")
         recipe_update_validate_component(state.platform, "state platform")
         SemanticVersion.parse(state.version, "state version")
         recipe_update_validate_digest(state.sha256, "state digest")
-        if state.canonical().bytes() != bytes -> return Err(RecipeError.Update("toolchain update state is not canonical"))
+        if state.canonical().bytes() != bytes {
+            return Err(RecipeError.Update("toolchain update state is not canonical"))
+        }
         Ok(state)
     }
 
     // The canonical state encoding, newline-terminated.
     canonical: fn(self) -> String Never! {
-        fields := [String: Dyn]{}
+        fields := [String:Dyn]{}
         fields["schema"] = Dyn.Int(self.schema)
         fields["channel"] = Dyn.Text(self.channel.copy())
         fields["platform"] = Dyn.Text(self.platform.copy())
@@ -293,16 +325,18 @@ SemanticVersion: struct {
         numbers: core.split(".").to_list()
         components := [Int]{}
         loop index in 0..<3 {
-            if index >= numbers.len() -> return Err(RecipeError.Update("{label} must use major.minor.patch"))
+            if index >= numbers.len() {
+                return Err(RecipeError.Update("{label} must use major.minor.patch"))
+            }
             components.push(recipe_update_version_number(numbers[index], label))
         }
         if numbers.len() > 3 -> return Err(RecipeError.Update("{label} must use major.minor.patch"))
         pre := [PreIdentifier]{}
         if pre_text == {
-            .Val(text) -> pre = recipe_update_parse_pre(text, label)
+            .Val(text) -> { pre = recipe_update_parse_pre(text, label) }
             .None -> {}
         }
-        Ok(SemanticVersion{major: components[0], minor: components[1], patch: components[2], pre})
+        Ok(SemanticVersion{major: components[0], minor: components[1], patch: components[2], pre: pre})
     }
 
     // -1, 0 or 1 by SemVer precedence.
@@ -326,22 +360,18 @@ SemanticVersion: struct {
 // Numeric identifiers sort before text; each kind compares by value.
 recipe_update_compare_pre: fn(left: PreIdentifier, right: PreIdentifier) -> Int Never! {
     if left == {
-        .Numeric(left_number) -> {
-            if right == {
-                .Numeric(right_number) -> {
-                    if left_number == right_number -> return 0
-                    if left_number < right_number -> -1 else -> 1
-                }
-                .Text(_) -> -1
+        .Numeric(left_number) -> if right == {
+            .Numeric(right_number) -> {
+                if left_number == right_number -> return 0
+                if left_number < right_number -> -1 else -> 1
             }
+            .Text(_) -> -1
         }
-        .Text(left_text) -> {
-            if right == {
-                .Numeric(_) -> 1
-                .Text(right_text) -> {
-                    if left_text == right_text -> return 0
-                    if left_text < right_text -> -1 else -> 1
-                }
+        .Text(left_text) -> if right == {
+            .Numeric(_) -> 1
+            .Text(right_text) -> {
+                if left_text == right_text -> return 0
+                if left_text < right_text -> -1 else -> 1
             }
         }
     }
@@ -360,14 +390,16 @@ recipe_update_parse_pre: fn(value: String, label: String) -> [PreIdentifier] Rec
     identifiers := [PreIdentifier]{}
     parts: value.split(".").to_list()
     loop identifier in parts {
-        if identifier == "" || !recipe_update_all_ident(identifier) -> return Err(RecipeError.Update("{label} has an invalid prerelease"))
+        if identifier == "" || !recipe_update_all_ident(identifier) {
+            return Err(RecipeError.Update("{label} has an invalid prerelease"))
+        }
         if recipe_update_all_digits(identifier) {
-            if identifier.bytes().len() > 1 && identifier.starts_with("0") -> return Err(RecipeError.Update("{label} has a leading-zero prerelease number"))
+            if identifier.bytes().len() > 1 && identifier.starts_with("0") {
+                return Err(RecipeError.Update("{label} has a leading-zero prerelease number"))
+            }
             number: Int.parse(identifier) ?? return Err(RecipeError.Update("{label} has an invalid prerelease"))
             identifiers.push(PreIdentifier.Numeric(number))
-        } else {
-            identifiers.push(PreIdentifier.Text(identifier))
-        }
+        } else { identifiers.push(PreIdentifier.Text(identifier)) }
     }
     Ok(identifiers)
 }
@@ -377,7 +409,9 @@ recipe_update_validate_build: fn(value: String, label: String) RecipeError! {
     if value == "" -> return Err(RecipeError.Update("{label} has an empty build"))
     parts: value.split(".").to_list()
     loop identifier in parts {
-        if identifier == "" || !recipe_update_all_ident(identifier) -> return Err(RecipeError.Update("{label} has an invalid build"))
+        if identifier == "" || !recipe_update_all_ident(identifier) {
+            return Err(RecipeError.Update("{label} has an invalid build"))
+        }
     }
 }
 
@@ -411,13 +445,23 @@ recipe_update_validate_release_policy: fn(version: String, min_version: String, 
     if candidate.compare(running) < 0 {
         return Err(RecipeError.Update("refusing toolchain downgrade from {running_version} to {version}; no downgrade override is authorized"))
     }
-    if expires_at <= published_at -> return Err(RecipeError.Update("toolchain channel manifest expiry must be after publication"))
-    if published_at == 0 || expires_at == 0 -> return Err(RecipeError.Update("toolchain channel manifest timestamps must be positive"))
-    if expires_at - published_at > TOOLCHAIN_MAX_MANIFEST_AGE_SECONDS -> return Err(RecipeError.Update("toolchain channel manifest validity exceeds the freshness window"))
-    if published_at > now + TOOLCHAIN_MAX_CLOCK_SKEW_SECONDS -> return Err(RecipeError.Update("toolchain channel manifest publication time is too far in the future"))
+    if expires_at <= published_at {
+        return Err(RecipeError.Update("toolchain channel manifest expiry must be after publication"))
+    }
+    if published_at == 0 || expires_at == 0 {
+        return Err(RecipeError.Update("toolchain channel manifest timestamps must be positive"))
+    }
+    if expires_at - published_at > TOOLCHAIN_MAX_MANIFEST_AGE_SECONDS {
+        return Err(RecipeError.Update("toolchain channel manifest validity exceeds the freshness window"))
+    }
+    if published_at > now + TOOLCHAIN_MAX_CLOCK_SKEW_SECONDS {
+        return Err(RecipeError.Update("toolchain channel manifest publication time is too far in the future"))
+    }
     if expires_at <= now -> return Err(RecipeError.Update("toolchain channel manifest has expired"))
     age: if now > published_at -> now - published_at else -> 0
-    if age > TOOLCHAIN_MAX_MANIFEST_AGE_SECONDS -> return Err(RecipeError.Update("toolchain channel manifest is older than the freshness window"))
+    if age > TOOLCHAIN_MAX_MANIFEST_AGE_SECONDS {
+        return Err(RecipeError.Update("toolchain channel manifest is older than the freshness window"))
+    }
 }
 
 // A new accepted state must stay on the same channel and platform, advance
@@ -468,7 +512,7 @@ recipe_update_parse_json: fn(text: String, label: String) -> Dyn RecipeError! {
     }
 }
 
-recipe_update_object: fn(value: Dyn, label: String) -> [String: Dyn] RecipeError! {
+recipe_update_object: fn(value: Dyn, label: String) -> [String:Dyn] RecipeError! {
     pkg_json_object(value) ?? return Err(RecipeError.Update("{label} must be an object"))
 }
 
@@ -476,14 +520,16 @@ recipe_update_array: fn(value: Dyn, label: String) -> [Dyn] RecipeError! {
     pkg_json_array(value) ?? return Err(RecipeError.Update("{label} must be an array"))
 }
 
-recipe_update_field: fn(fields: [String: Dyn], name: String) -> Dyn RecipeError! {
+recipe_update_field: fn(fields: [String:Dyn], name: String) -> Dyn RecipeError! {
     fields.get(name) ?? return Err(RecipeError.Update("missing toolchain field {name}"))
 }
 
 // The first field outside `allowed`, in document order, is refused.
-recipe_update_reject_unknown: fn(fields: [String: Dyn], allowed: [String]) RecipeError! {
+recipe_update_reject_unknown: fn(fields: [String:Dyn], allowed: [String]) RecipeError! {
     loop entry in fields {
-        if !allowed.contains(entry.key) -> return Err(RecipeError.Update("unknown toolchain field {entry.key}"))
+        if !allowed.contains(entry.key) {
+            return Err(RecipeError.Update("unknown toolchain field {entry.key}"))
+        }
     }
 }
 
@@ -499,7 +545,9 @@ recipe_update_integer: fn(value: Dyn, label: String) -> Int RecipeError! {
 
 // A channel, platform or target: ASCII alphanumerics and `._+-`, never `.`/`..`.
 recipe_update_validate_component: fn(value: String, label: String) RecipeError! {
-    if value == "" || value == "." || value == ".." -> return Err(RecipeError.Update("{label} contains unsafe characters"))
+    if value == "" || value == "." || value == ".." {
+        return Err(RecipeError.Update("{label} contains unsafe characters"))
+    }
     loop byte in value.bytes() {
         code: Int{byte}
         ok: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 46 || code == 95 || code == 43 || code == 45
@@ -513,7 +561,9 @@ recipe_update_validate_relative_path: fn(path: String) RecipeError! {
     if unsafe_text -> return Err(RecipeError.Update("toolchain path is unsafe"))
     parts: path.split("/").to_list()
     loop part in parts {
-        if part == "" || part == "." || part == ".." -> return Err(RecipeError.Update("toolchain path is unsafe"))
+        if part == "" || part == "." || part == ".." {
+            return Err(RecipeError.Update("toolchain path is unsafe"))
+        }
     }
 }
 
@@ -523,7 +573,9 @@ recipe_update_validate_digest: fn(value: String, label: String) RecipeError! {
     if raw.len() != 64 -> return Err(RecipeError.Update("{label} is malformed"))
     loop byte in raw {
         code: Int{byte}
-        if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return Err(RecipeError.Update("{label} is malformed"))
+        if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) {
+            return Err(RecipeError.Update("{label} is malformed"))
+        }
     }
 }
 

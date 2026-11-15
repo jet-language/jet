@@ -5,6 +5,7 @@ Res: struct {
     listeners: [TCPListener]
 
     release_empty: fn(&&self) {}
+
     release_field: fn(&&self) { held: self.listeners }
 }
 
@@ -21,7 +22,7 @@ release_free: fn(r: &&Res) {}
 
 try_bind: fn(label: String, port: Int) {
     if net.tcp_listen("127.0.0.1:{port}") == {
-        .Ok(_) -> print("{label}: rebind ok")
+        .Ok(_) -> { print("{label}: rebind ok") }
         .Err(e) -> print("{label}: rebind FAILED {e}")
     }
 }

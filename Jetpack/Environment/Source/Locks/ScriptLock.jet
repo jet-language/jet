@@ -14,14 +14,15 @@
 // `script_hash` is the file-content hash the lock is keyed by (editing the
 // script makes the lock stale); `content_hash` is each dep's realized-source
 // tree hash.
-
 use {
     jet_pkg_model.[pkg_binder_trim_matches]
     files: core.files
 }
 
 SCRIPT_LOCK_VERSION: 1
+
 SCRIPT_LOCK_DEP_HEADER: "[[dep]]"
+
 SCRIPT_LOCK_U32_MAX: 4294967295
 
 LockedInlineDep: struct {
@@ -43,9 +44,7 @@ ScriptLockFile: struct {
 
 // `stats.jet` -> `stats.jet.lock`, right next to the script and never inside
 // a `.jet/` folder, since a bare script may not have one yet.
-env_script_lock_sidecar_path: fn(script_path: String) -> String Never! {
-    "{script_path}.lock"
-}
+env_script_lock_sidecar_path: fn(script_path: String) -> String Never! { "{script_path}.lock" }
 
 env_script_lock_write: fn(script_path: String, lock: ScriptLockFile) IOError! -[FS]> {
     files.write(env_script_lock_sidecar_path(script_path), env_script_lock_render(lock))
@@ -105,7 +104,7 @@ env_script_lock_parse: fn(raw: String) -> ScriptLockFile EnvironmentError! {
         }
     }
     if in_dep -> deps.push(current)
-    Ok(ScriptLockFile{version, script_hash, deps})
+    Ok(ScriptLockFile{version: version, script_hash: script_hash, deps: deps})
 }
 
 // Rust `str::parse::<u32>`: an optional `+`, then decimal digits in range.

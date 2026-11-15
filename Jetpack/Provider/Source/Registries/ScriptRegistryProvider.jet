@@ -42,9 +42,7 @@ ScriptRegistryKind: struct {
         }
     }
 
-    error_kind: fn(self) -> RegistryErrorKind Never! {
-        RegistryErrorKind.Registry(self.title)
-    }
+    error_kind: fn(self) -> RegistryErrorKind Never! { RegistryErrorKind.Registry(self.title) }
 }
 
 SCRIPT_REGISTRY_KINDS: [ScriptRegistryKind]{
@@ -71,10 +69,11 @@ RegistryDependency: struct {
 RegistryIntegrity: enum {
     SHA256(String)
     SHA1(String)
-    // A GitHub zipball of a full commit reference whose source authority the
-    // metadata proves; only non-emptiness is checkable.
     ImmutableGit(repository: String, reference: String)
 }
+
+// A GitHub zipball of a full commit reference whose source authority the
+// metadata proves; only non-emptiness is checkable.
 
 // One registry release candidate.
 RegistryPackage: struct {
@@ -84,7 +83,7 @@ RegistryPackage: struct {
     integrity: RegistryIntegrity
     dependencies: [RegistryDependency]
     // Packagist PSR-4 prefix -> relative directories.
-    psr4: [String: [String]]
+    psr4: [String:[String]]
 }
 
 // A fetched archive of the resolved closure.
@@ -111,17 +110,21 @@ ScriptRegistryProvider: struct {
         authority: provider_script_registry_cache_authority(self.kind, ctx) ?? return None
         identity := provider_cache_identity(locked.source_hash, self.kind.recipe, ctx, authority.provenance())
         identity.platform = provider_registry_locked_platform(locked.envelope)
-        Val(CacheExpectation{identity, owned_output: Val(locked.output), allow_unsigned_local: true})
+        Val(CacheExpectation{identity: identity, owned_output: Val(locked.output), allow_unsigned_local: true})
     }
 
     plan_downloads: fn(self, verification: &StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -> DownloadPlan ProviderError! {
         plan := DownloadPlan.empty()
-        loop spec in specs -> plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
+        loop spec in specs {
+            plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
+        }
         Ok(plan)
     }
 
     realize: fn(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
-        if ctx.offline -> return Err(ProviderError.Offline("`{spec.raw}` is not in verified Hangar and --offline forbids {self.kind.title} metadata or source fetches"))
+        if ctx.offline {
+            return Err(ProviderError.Offline("`{spec.raw}` is not in verified Hangar and --offline forbids {self.kind.title} metadata or source fetches"))
+        }
         realized: provider_script_realize(self.kind, spec, ctx) ?? return Err(err.into_provider(self.kind.error_kind()))
         Ok(realized)
     }
@@ -144,14 +147,14 @@ provider_script_realize: fn(kind: ScriptRegistryKind, spec: RefSpec, ctx: Provid
     scratch: provider_registry_scratch(ctx.store_dir, kind.label(), "could not create provider scratch")
     guard := RegistryScratch{path: scratch}
     defer close(guard)
-    packages: provider_script_resolve_closure(kind, authority, scratch, root_ref.name, root_ref.version, [String: [RegistryPackage]]{})
+    packages: provider_script_resolve_closure(kind, authority, scratch, root_ref.name, root_ref.version, [String:[RegistryPackage]]{})
     artifacts := [RegistryArtifact]{}
     loop package in packages {
         path: files.join(scratch, "{provider_script_safe_filename(package.name)}-{provider_script_safe_filename(package.version)}{kind.archive_suffix}")
         authority.to_path(package.url, path, scratch)
         bytes: provider_registry_read_bytes(path, "could not read fetched source")
         provider_script_verify_integrity(package, bytes)
-        artifacts.push(RegistryArtifact{package, path, sha256: pkg_sha256_hex(bytes)})
+        artifacts.push(RegistryArtifact{package: package, path: path, sha256: pkg_sha256_hex(bytes)})
     }
     source_hash: provider_script_closure_hash(kind, artifacts)
     if ctx.project_dir == {
@@ -167,7 +170,9 @@ provider_script_realize: fn(kind: ScriptRegistryKind, spec: RefSpec, ctx: Provid
         }
         .None -> {}
     }
-    if artifacts.len() == 0 -> return Err(RegistryError.Reason("resolved closure omitted root package"))
+    if artifacts.len() == 0 {
+        return Err(RegistryError.Reason("resolved closure omitted root package"))
+    }
     root: artifacts[artifacts.len() - 1]
     out_dir: provider_registry_fresh_output(ctx.store_dir, provider_script_safe_filename(root.package.name), provider_script_safe_filename(root.package.version), source_hash)
     sources: files.join(out_dir, "sources")
@@ -182,34 +187,42 @@ provider_script_realize: fn(kind: ScriptRegistryKind, spec: RefSpec, ctx: Provid
 
     envelope: Envelope.for_output(out_dir, spec.raw, kind.recipe)
     dependencies := [String]{}
-    loop index in 0..<(artifacts.len() - 1) -> dependencies.push("{artifacts[index].package.name}#version={artifacts[index].package.version}")
+    loop index in 0..<(artifacts.len() - 1) {
+        dependencies.push("{artifacts[index].package.name}#version={artifacts[index].package.version}")
+    }
     if ctx.project_dir == {
-        .Val(project) -> pkg_lock_record_registry_realization(project, kind.label(), root.package.name, root.package.version, spec.raw, out_dir, source_hash, repository, fetch_authority, dependencies, provider_registry_lock_envelope(envelope))
+        .Val(project) -> {
+            pkg_lock_record_registry_realization(project, kind.label(), root.package.name, root.package.version, spec.raw, out_dir, source_hash, repository, fetch_authority, dependencies, provider_registry_lock_envelope(envelope))
+        }
         .None -> {}
     }
     identity: provider_cache_identity(source_hash, kind.recipe, ctx, fetch_authority)
     objects := [RegistrySourceObject]{}
-    loop artifact in artifacts -> objects.push(RegistrySourceObject{name: artifact.package.name, sha256: artifact.sha256, file_name: files.basename(artifact.path)})
+    loop artifact in artifacts {
+        objects.push(RegistrySourceObject{name: artifact.package.name, sha256: artifact.sha256, file_name: files.basename(artifact.path)})
+    }
     edges: provider_registry_dependency_objects(root.package.name, objects)
     facts := edges.facts
     facts["repository"] = repository
     facts["fetch.authority"] = fetch_authority
-    extra: [String: String]{"scripts": "disabled", "plugins": "disabled"}
+    extra: [String:String]{"scripts": "disabled", "plugins": "disabled"}
     producer: provider_registry_producer(kind.label(), "{kind.label()}-install", source_hash, repository, fetch_authority, root.package.version, extra, kind.recipe, identity, facts)
-    Ok(Realized{
-        name: provider_script_safe_filename(root.package.name),
-        version: root.package.version,
-        reference: spec.raw,
-        out: out_dir,
-        bin: "",
-        rlib: "",
-        envelope,
-        cache_identity: identity,
-        source_state: SourceState.Built,
-        named_outputs: [String: String]{"out": out_dir},
-        references: edges.references,
-        producer,
-    })
+    Ok(
+        Realized{
+            name: provider_script_safe_filename(root.package.name),
+            version: root.package.version,
+            reference: spec.raw,
+            out: out_dir,
+            bin: "",
+            rlib: "",
+            envelope: envelope,
+            cache_identity: identity,
+            source_state: SourceState.Built,
+            named_outputs: [String:String]{"out": out_dir},
+            references: edges.references,
+            producer: producer,
+        },
+    )
 }
 
 // `name#version=<exact>`; anything else is mutable and refused.
@@ -223,7 +236,9 @@ provider_script_parse_ref: fn(kind: ScriptRegistryKind, raw: String) -> (name: S
         .Val(pair) -> pair.after
         .None -> ""
     }
-    if !kind.valid_name(name) -> return Err(RegistryError.Reason("invalid {kind.title} package name `{name}`"))
+    if !kind.valid_name(name) {
+        return Err(RegistryError.Reason("invalid {kind.title} package name `{name}`"))
+    }
     version: if selector.starts_with("version=") -> selector.removeprefix("version=") else -> ""
     if version == "" || !provider_script_safe_piece(version, "+_-.") {
         return Err(RegistryError.Reason("{kind.title} ref `{raw}` is mutable; use `{name}#version=<exact>`"))
@@ -237,13 +252,13 @@ provider_script_parse_ref: fn(kind: ScriptRegistryKind, raw: String) -> (name: S
 // and order it dependencies first. `candidates` pre-seeds per-name release
 // lists already in solver order (`provider_script_sorted_candidates`);
 // missing names are fetched from the registry.
-provider_script_resolve_closure: fn(kind: ScriptRegistryKind, authority: RegistryAuthority, scratch: String, root: String, version: String, candidates: [String: [RegistryPackage]]) -[FS, Env, Net, Time.Wait]> [RegistryPackage] RegistryError! {
-    solver := ScriptRegistrySolver{kind, authority, scratch, candidates}
-    constraints := [String: [String]]{}
+provider_script_resolve_closure: fn(kind: ScriptRegistryKind, authority: RegistryAuthority, scratch: String, root: String, version: String, candidates: [String:[RegistryPackage]]) -[FS, Env, Net, Time.Wait]> [RegistryPackage] RegistryError! {
+    solver := ScriptRegistrySolver{kind: kind, authority: authority, scratch: scratch, candidates: candidates}
+    constraints := [String:[String]]{}
     constraints[root] = [String]{"={version}"}
-    solution: solver.solve(constraints, [String: RegistryPackage]{})
+    solution: solver.solve(constraints, [String:RegistryPackage]{})
     selected: solution ?? return Err(RegistryError.Reason("no complete dependency solution exists for `{root}` {version}"))
-    walk := ScriptRegistryOrderWalk{selected, active: [String]{}, done: [String]{}, out: [RegistryPackage]{}}
+    walk := ScriptRegistryOrderWalk{selected: selected, active: [String]{}, done: [String]{}, out: [RegistryPackage]{}}
     walk.visit(root)
     Ok(walk.out)
 }
@@ -255,12 +270,14 @@ ScriptRegistrySolver: struct {
     kind: ScriptRegistryKind
     authority: RegistryAuthority
     scratch: String
-    candidates: [String: [RegistryPackage]]
+    candidates: [String:[RegistryPackage]]
 
-    solve: fn(&self, constraints: [String: [String]], selected: [String: RegistryPackage]) -[FS, Env, Net, Time.Wait]> [String: RegistryPackage]? RegistryError! {
+    solve: fn(&self, constraints: [String:[String]], selected: [String:RegistryPackage]) -[FS, Env, Net, Time.Wait]> [String:RegistryPackage]? RegistryError! {
         loop entry in selected {
             requirements: constraints.get(entry.key) ?? next
-            if !provider_script_meets_all(self.kind, entry.value.version, requirements) -> return Ok(None)
+            if !provider_script_meets_all(self.kind, entry.value.version, requirements) {
+                return Ok(None)
+            }
         }
         names := constraints.keys().to_list()
         names.sort()
@@ -313,14 +330,18 @@ provider_script_meets_all: fn(kind: ScriptRegistryKind, version: String, require
 
 // Dependencies before dependents, each once; a cycle is refused.
 ScriptRegistryOrderWalk: struct {
-    selected: [String: RegistryPackage]
+    selected: [String:RegistryPackage]
     active: [String]
     done: [String]
     out: [RegistryPackage]
 
     visit: fn(&self, name: String) RegistryError! {
-        if self.done.contains(name) -> return
-        if self.active.contains(name) -> return Err(RegistryError.Reason("dependency cycle includes `{name}`"))
+        if self.done.contains(name) {
+            return
+        }
+        if self.active.contains(name) {
+            return Err(RegistryError.Reason("dependency cycle includes `{name}`"))
+        }
         self.active.push(name.copy())
         package: self.selected.get(name) ?? return Err(RegistryError.Reason("resolved package `{name}` disappeared"))
         loop dependency in package.dependencies -> self.visit(dependency.name)
@@ -343,19 +364,25 @@ provider_script_fetch_candidates: fn(kind: ScriptRegistryKind, authority: Regist
 
 provider_script_install_artifact: fn(kind: ScriptRegistryKind, artifact: RegistryArtifact, out: String, scratch: String) RegistryError! -[FS, Exec, Time.Wait]> {
     if kind.family == {
-        .RubyGems -> provider_rubygems_install(artifact, out, scratch)
-        .Cpan -> provider_cpan_install(artifact, out, scratch)
+        .RubyGems -> { provider_rubygems_install(artifact, out, scratch) }
+        .Cpan -> { provider_cpan_install(artifact, out, scratch) }
         .Packagist -> provider_packagist_install(artifact, out, scratch)
-        .Core | .Nix | .Path | .Github | .JetRegistry | .Npm | .PyPI | .Cargo | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Cran | .LuaRocks | .JetPackage -> Err(RegistryError.Reason("{kind.title} has no installer"))
+        .Core | .Nix | .Path | .Github | .JetRegistry | .Npm | .PyPI | .Cargo | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Cran | .LuaRocks | .JetPackage -> {
+            Err(RegistryError.Reason("{kind.title} has no installer"))
+        }
     }
 }
 
 provider_script_write_runtime_projection: fn(kind: ScriptRegistryKind, artifacts: [RegistryArtifact], out: String) RegistryError! -[FS, Env]> {
     if kind.family == {
-        .RubyGems -> provider_rubygems_write_projection(artifacts, out)
-        .Cpan -> provider_registry_write_text(files.join(out, "perl5lib"), "lib\n", "could not write Perl runtime projection")
+        .RubyGems -> { provider_rubygems_write_projection(artifacts, out) }
+        .Cpan -> {
+            provider_registry_write_text(files.join(out, "perl5lib"), "lib\n", "could not write Perl runtime projection")
+        }
         .Packagist -> provider_packagist_write_autoloader(artifacts, out)
-        .Core | .Nix | .Path | .Github | .JetRegistry | .Npm | .PyPI | .Cargo | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Cran | .LuaRocks | .JetPackage -> Err(RegistryError.Reason("{kind.title} has no runtime projection"))
+        .Core | .Nix | .Path | .Github | .JetRegistry | .Npm | .PyPI | .Cargo | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Cran | .LuaRocks | .JetPackage -> {
+            Err(RegistryError.Reason("{kind.title} has no runtime projection"))
+        }
     }
 }
 
@@ -367,7 +394,9 @@ provider_script_reject_tree_features: fn(kind: ScriptRegistryKind, root: String,
     loop suffix in kind.native_suffixes -> markers.push(suffix.copy())
     loop entry in entries {
         stat: files.stat(entry.path) ?? return Err(RegistryError.Reason("could not inspect installed source: {err}"))
-        if stat.is_symlink -> return Err(RegistryError.Reason("installed source contains a symbolic link"))
+        if stat.is_symlink {
+            return Err(RegistryError.Reason("installed source contains a symbolic link"))
+        }
         name: pkg_ascii_lower(entry.name)
         loop marker in markers {
             item: pkg_ascii_lower(marker)
@@ -402,16 +431,24 @@ provider_script_copy_tree: fn(source: String, destination: String) RegistryError
 
 provider_script_verify_integrity: fn(package: RegistryPackage, bytes: [U8]) RegistryError! {
     if package.integrity == {
-        .SHA256(expected) -> provider_script_check_digest("SHA-256", package, expected, pkg_sha256_hex(bytes))
-        .SHA1(expected) -> provider_script_check_digest("SHA-1", package, expected, crypto.sha1(bytes))
+        .SHA256(expected) -> {
+            provider_script_check_digest("SHA-256", package, expected, pkg_sha256_hex(bytes))
+        }
+        .SHA1(expected) -> {
+            provider_script_check_digest("SHA-1", package, expected, crypto.sha1(bytes))
+        }
         .ImmutableGit(repository, reference) -> {
-            if bytes.len() == 0 -> return Err(RegistryError.Reason("empty source fetched for immutable `{repository}` reference `{reference}`"))
+            if bytes.len() == 0 {
+                return Err(RegistryError.Reason("empty source fetched for immutable `{repository}` reference `{reference}`"))
+            }
         }
     }
 }
 
 provider_script_check_digest: fn(algorithm: String, package: RegistryPackage, expected: String, actual: String) RegistryError! {
-    if expected != actual -> return Err(RegistryError.Reason("{algorithm} source hash mismatch for `{package.name}` {package.version} (metadata {expected}, fetched {actual})"))
+    if expected != actual {
+        return Err(RegistryError.Reason("{algorithm} source hash mismatch for `{package.name}` {package.version} (metadata {expected}, fetched {actual})"))
+    }
 }
 
 // The closure identity: every archive's package name, version, and SHA-256.
@@ -427,7 +464,9 @@ provider_script_closure_hash: fn(kind: ScriptRegistryKind, artifacts: [RegistryA
 
 provider_script_render_provenance: fn(kind: ScriptRegistryKind, repository: String, fetch_authority: String, source_hash: String, artifacts: [RegistryArtifact]) -> String Never! {
     lines := [String]{"schema=jet-{kind.label()}-provider-v1\nrepository={repository}\nfetch_authority={fetch_authority}\nsource_hash={source_hash}\nscripts=disabled\nplugins=disabled\n"}
-    loop artifact in artifacts -> lines.push("package={artifact.package.name}:{artifact.package.version}:{artifact.sha256}\n")
+    loop artifact in artifacts {
+        lines.push("package={artifact.package.name}:{artifact.package.version}:{artifact.sha256}\n")
+    }
     lines.join("")
 }
 
@@ -538,6 +577,7 @@ provider_script_version_satisfies: fn(kind: ScriptRegistryKind, actual: String, 
 }
 
 SCRIPT_REGISTRY_OPERATORS: [String]{">=", "<=", "!=", "==", "~>", "=", ">", "<", "~", "^"}
+
 SCRIPT_REGISTRY_COMPOSER_OPERATORS: [String]{">=", "<=", "!=", "==", "=", ">", "<", "~", "^"}
 
 // One constraint token: an operator token with its version in the next
@@ -549,7 +589,9 @@ provider_script_constraint_at: fn(tokens: [String], index: Int, operators: [Stri
         return Val((operator: token, wanted: tokens[index + 1], consumed: 2))
     }
     loop operator in operators {
-        if token.starts_with(operator) -> return Val((operator: operator, wanted: token.removeprefix(operator), consumed: 1))
+        if token.starts_with(operator) {
+            return Val((operator: operator, wanted: token.removeprefix(operator), consumed: 1))
+        }
     }
     Val((operator: "=", wanted: token, consumed: 1))
 }
@@ -558,7 +600,9 @@ provider_script_constraint_at: fn(tokens: [String], index: Int, operators: [Stri
 // comparisons.
 provider_script_basic_satisfies: fn(actual: String, raw_requirement: String) -> Bool Never! {
     requirement: raw_requirement.trim()
-    if requirement == "" || requirement == "*" || requirement == ">= 0" || requirement == ">=0" -> return true
+    if requirement == "" || requirement == "*" || requirement == ">= 0" || requirement == ">=0" {
+        return true
+    }
     alternatives: requirement.split("||").to_list()
     loop alternative in alternatives {
         tokens: provider_registry_words(alternative.replace(",", " "))
@@ -650,7 +694,9 @@ provider_script_composer_wildcard: fn(raw_actual: String, wanted: String) -> Boo
     if wildcard <= 0 -> return false
     pairs: if wildcard < actual.len() -> wildcard else -> actual.len()
     loop index in 0..<pairs {
-        if provider_registry_parse_u64(wanted_parts[index]) != provider_registry_parse_u64(actual[index]) -> return false
+        if provider_registry_parse_u64(wanted_parts[index]) != provider_registry_parse_u64(actual[index]) {
+            return false
+        }
     }
     actual.len() >= wildcard
 }
@@ -661,7 +707,9 @@ provider_script_composer_hyphen: fn(actual: String, raw_lower: String, raw_upper
     lower: provider_script_trim_v(raw_lower)
     upper: provider_script_trim_v(raw_upper)
     if provider_script_compare_versions(actual, lower) == Ordering.Less -> return false
-    if upper.split(".").to_list().len() >= 3 -> return provider_script_compare_versions(actual, upper) != Ordering.Greater
+    if upper.split(".").to_list().len() >= 3 {
+        return provider_script_compare_versions(actual, upper) != Ordering.Greater
+    }
     if provider_script_partial_upper_bound(upper) == {
         .Val(exclusive) -> provider_script_compare_versions(actual, exclusive) == Ordering.Less
         .None -> false
@@ -703,17 +751,13 @@ provider_script_satisfies_one: fn(raw_actual: String, operator: String, wanted: 
         "<" -> order == Ordering.Less
         "!=" -> order != Ordering.Equal
         "=" | "==" -> order == Ordering.Equal
-        "~" | "~>" -> {
-            if provider_script_upper_bound(wanted, operator == "~>") == {
-                .Val(upper) -> order != Ordering.Less && provider_script_compare_versions(actual, upper) == Ordering.Less
-                .None -> false
-            }
+        "~" | "~>" -> if provider_script_upper_bound(wanted, operator == "~>") == {
+            .Val(upper) -> order != Ordering.Less && provider_script_compare_versions(actual, upper) == Ordering.Less
+            .None -> false
         }
-        "^" -> {
-            if provider_script_caret_upper_bound(wanted) == {
-                .Val(upper) -> order != Ordering.Less && provider_script_compare_versions(actual, upper) == Ordering.Less
-                .None -> false
-            }
+        "^" -> if provider_script_caret_upper_bound(wanted) == {
+            .Val(upper) -> order != Ordering.Less && provider_script_compare_versions(actual, upper) == Ordering.Less
+            .None -> false
         }
         else -> false
     }
@@ -762,11 +806,13 @@ provider_script_bump: fn(parts: [Int], index: Int) -> String? Never! {
     if index >= parts.len() -> return None
     bumped := [Int]{}
     loop position in 0..<parts.len() {
-        bumped.push(if {
-            position < index -> parts[position]
-            position == index -> parts[position] + 1
-            else -> 0
-        })
+        bumped.push(
+            if {
+                position < index -> parts[position]
+                position == index -> parts[position] + 1
+                else -> 0
+            },
+        )
     }
     Val(provider_script_join_parts(bumped))
 }
@@ -783,17 +829,13 @@ provider_script_compare_versions: fn(raw_left: String, raw_right: String) -> Ord
         a_number: provider_registry_parse_u64(a)
         b_number: provider_registry_parse_u64(b)
         order: if a_number == {
-            .Val(x) -> {
-                if b_number == {
-                    .Val(y) -> x <=> y
-                    .None -> Ordering.Greater
-                }
+            .Val(x) -> if b_number == {
+                .Val(y) -> x <=> y
+                .None -> Ordering.Greater
             }
-            .None -> {
-                if b_number == {
-                    .Val(_) -> Ordering.Less
-                    .None -> a <=> b
-                }
+            .None -> if b_number == {
+                .Val(_) -> Ordering.Less
+                .None -> a <=> b
             }
         }
         if order != Ordering.Equal -> return order

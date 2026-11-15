@@ -18,16 +18,26 @@ use {
 }
 
 BASELINE: "Tools/perf/web-bundle-baseline.tsv"
+
 JET_ENV: "Tools/agent/JetEnv.jet"
+
 EXPECTED_HEADER: "version\tworkload\tsource\tsource_sha256\twasm_bytes\trt_wasm_bytes\tglue_bytes\truntime_bytes\tbundle_bytes\tregression_pct"
+
 BUILD_DIR: ".jet/build"
+
 MANIFEST: "web.manifest.json"
+
 // The manifest fields that name a script; each partition names its wasm `module`.
 MANIFEST_SCRIPTS: [String]{"entry", "host"}
+
 APP_WASM: "app.wasm"
+
 RT_WASM: "rt.wasm"
+
 GLUE: "app.js"
+
 DOM_RUNTIME: "jet_dom_runtime.js"
+
 // Every file a web build ships.
 ARTIFACTS: [String]{APP_WASM, RT_WASM, GLUE, DOM_RUNTIME}
 
@@ -49,7 +59,9 @@ fail: fn(message: String) -[IO]> Int Never! {
     1
 }
 
-byte_text: fn(bytes: [U8], start: Int, end: Int) -> String Never! { String.from_bytes_lossy(bytes[start..<end]) }
+byte_text: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
+    String.from_bytes_lossy(bytes[start..<end])
+}
 
 is_digit: fn(code: Int) -> Bool Never! { code >= 48 && code <= 57 }
 
@@ -236,12 +248,16 @@ check_rows: fn(root: String, text: String, scratch: String, run_dir: String) -[E
         if !valid_workload(row.workload) -> return fail("invalid workload: {row.workload}")
         if seen.contains(row.workload) -> return fail("duplicate workload: {row.workload}")
         seen.push(row.workload.copy())
-        if row.source.starts_with("/") || row.source.contains("..") -> return fail("unsafe workload source: {row.source}")
+        if row.source.starts_with("/") || row.source.contains("..") {
+            return fail("unsafe workload source: {row.source}")
+        }
         source_path: "{root}/{row.source}"
         if !regular_file(source_path) -> return fail("missing workload source: {row.source}")
         if !valid_hash(row.source_hash) -> return fail("invalid source hash: {row.source}")
         source_bytes: files.read_bytes(source_path) ?? [U8]{}
-        if row.source_hash != crypto.sha256(source_bytes).hex() -> return fail("source changed: {row.source}")
+        if row.source_hash != crypto.sha256(source_bytes).hex() {
+            return fail("source changed: {row.source}")
+        }
         values: [String]{row.wasm, row.rt_wasm, row.glue, row.runtime, row.bundle, row.regression}
         loop value in values {
             if !all_digits(value) -> return fail("invalid baseline value for {row.workload}")
@@ -252,7 +268,9 @@ check_rows: fn(root: String, text: String, scratch: String, run_dir: String) -[E
         runtime_base: number(row.runtime)
         bundle_base: number(row.bundle)
         regression: number(row.regression)
-        if !(wasm_base > 0 && rt_wasm_base > 0 && rt_wasm_base <= wasm_base && glue_base > 0 && runtime_base > 0 && bundle_base == wasm_base + glue_base + runtime_base) -> return fail("invalid bundle totals: {row.workload}")
+        if !(wasm_base > 0 && rt_wasm_base > 0 && rt_wasm_base <= wasm_base && glue_base > 0 && runtime_base > 0 && bundle_base == wasm_base + glue_base + runtime_base) {
+            return fail("invalid bundle totals: {row.workload}")
+        }
         if regression > 100 -> return fail("regression limit exceeds 100%: {row.workload}")
 
         case_dir: "{run_dir}/{row.workload}"
@@ -289,11 +307,17 @@ check_rows: fn(root: String, text: String, scratch: String, run_dir: String) -[E
         manifest: files.read("{out}/{MANIFEST}") ?? return fail("missing {MANIFEST}: {row.workload}: {err}")
         named: manifest_files(manifest) ?? return fail("unreadable {MANIFEST}: {row.workload}: {err.message}")
         loop name in named {
-            if !ARTIFACTS.contains(name) -> return fail("{row.workload}: {MANIFEST} names {name}, which the gate does not count")
+            if !ARTIFACTS.contains(name) {
+                return fail("{row.workload}: {MANIFEST} names {name}, which the gate does not count")
+            }
         }
         loop artifact in ARTIFACTS {
-            if !named.contains(artifact) -> return fail("{row.workload}: {MANIFEST} no longer names {artifact}")
-            if !files.is_file("{out}/{artifact}") -> return fail("missing regular artifact: {row.workload}/{artifact}")
+            if !named.contains(artifact) {
+                return fail("{row.workload}: {MANIFEST} no longer names {artifact}")
+            }
+            if !files.is_file("{out}/{artifact}") {
+                return fail("missing regular artifact: {row.workload}/{artifact}")
+            }
         }
         rt_wasm_current: file_bytes("{out}/{RT_WASM}")
         wasm_current: file_bytes("{out}/{APP_WASM}") + rt_wasm_current
@@ -302,10 +326,16 @@ check_rows: fn(root: String, text: String, scratch: String, run_dir: String) -[E
         bundle_current: wasm_current + glue_current + runtime_current
         print("{row.workload}\twasm={wasm_current}\trt_wasm={rt_wasm_current}\tglue={glue_current}\truntime={runtime_current}\tbundle={bundle_current}")
         if !check_size(row.workload, "wasm", wasm_base, wasm_current, regression) -> failures += 1
-        if !check_size(row.workload, "rt_wasm", rt_wasm_base, rt_wasm_current, regression) -> failures += 1
+        if !check_size(row.workload, "rt_wasm", rt_wasm_base, rt_wasm_current, regression) {
+            failures += 1
+        }
         if !check_size(row.workload, "glue", glue_base, glue_current, regression) -> failures += 1
-        if !check_size(row.workload, "runtime", runtime_base, runtime_current, regression) -> failures += 1
-        if !check_size(row.workload, "bundle", bundle_base, bundle_current, regression) -> failures += 1
+        if !check_size(row.workload, "runtime", runtime_base, runtime_current, regression) {
+            failures += 1
+        }
+        if !check_size(row.workload, "bundle", bundle_base, bundle_current, regression) {
+            failures += 1
+        }
         rows += 1
     }
     if rows != 3 -> return fail("expected 3 web workloads, got {rows}")

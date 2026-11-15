@@ -1,24 +1,19 @@
-
 env_shell_test_env: fn(dirs: [String]) -> ShellEnv {
     ShellEnv{
         bin_dirs: dirs,
-        vars: [String: String]{},
+        vars: [String:String]{},
         unset_vars: [String]{},
         refs: [String]{},
         label: JETPACK_PROMPT_LABEL,
         prompt_path: PromptPathMode.Short,
         prompt_strip: PromptStripMode.Off,
-        cache_leases: [CacheLease]{}
+        cache_leases: [CacheLease]{},
     }
 }
 
-env_shell_test_esc: fn() -> String {
-    env_shell_control(27)
-}
+env_shell_test_esc: fn() -> String { env_shell_control(27) }
 
-env_shell_test_cr: fn() -> String {
-    env_shell_control(13)
-}
+env_shell_test_cr: fn() -> String { env_shell_control(13) }
 
 env_shell_test_temp_dir: fn(prefix: String) -> String {
     files.tmpdir(prefix) ?? panic("claim temp dir")
@@ -145,7 +140,7 @@ env_shell_test_read_marker: fn(marker: String, shell: String, output: String) {
     inits: [String]{
         env_shell_bash_rc("jetpack", PromptPathMode.Short, PromptStripMode.Off),
         env_shell_zsh_rc("jetpack", PromptPathMode.Short, PromptStripMode.Off),
-        env_shell_fish_init("jetpack", PromptPathMode.Short, PromptStripMode.Off)
+        env_shell_fish_init("jetpack", PromptPathMode.Short, PromptStripMode.Off),
     }
     loop init in inits {
         loop sgr in expected {
@@ -197,13 +192,13 @@ env_shell_test_read_marker: fn(marker: String, shell: String, output: String) {
     assert(fish.contains("function __jet_help_postexec --on-event fish_postexec"))
 
     rcs: [String]{bash, zsh, fish}
-    loop rc in rcs {
-        assert(!rc.contains("eval $picked"), "help selection must never execute")
-    }
+    loop rc in rcs { assert(!rc.contains("eval $picked"), "help selection must never execute") }
 }
 
 #Test("help prefill widgets preserve edit buffer in real shells") {
-    if !env_shell_test_require_shells() -> return
+    if !env_shell_test_require_shells() {
+        return
+    }
     dir: env_shell_test_temp_dir("jetpack-help-prefill-")
     marker: files.join(dir, "selected-bytes")
     fake_jet: files.join(dir, "jet")
@@ -282,7 +277,9 @@ env_shell_test_read_marker: fn(marker: String, shell: String, output: String) {
 }
 
 #Test("hostile prompt labels are not reexpanded in real shells") {
-    if !env_shell_test_require_shells() -> return
+    if !env_shell_test_require_shells() {
+        return
+    }
     path: sys.get("PATH") ?? ""
     backtick: "`"
 
@@ -418,9 +415,11 @@ env_shell_test_read_marker: fn(marker: String, shell: String, output: String) {
 }
 
 #Test("nix projection uses an empty store not the host store as lower") {
-    if !sys.is_linux() -> return
+    if !sys.is_linux() {
+        return
+    }
     scratch := ShellScratch.empty()
-    mounts: env_shell_projection_fstab([String: String]{}, scratch) ?? panic("build projection fstab")
+    mounts: env_shell_projection_fstab([String:String]{}, scratch) ?? panic("build projection fstab")
     fstab: files.read(mounts.fstab_path) ?? panic("read projection fstab")
     close(scratch)
     assert(fstab.contains("jetpack-nix-store /nix tmpfs mode=0755,x-mount.mkdir"))
@@ -433,7 +432,7 @@ env_shell_test_read_marker: fn(marker: String, shell: String, output: String) {
 }
 
 #Test("nix projection keeps absolute store binary on logical path") {
-    projections: [String: String]{"/nix/store/root": "/missing-hangar-object"}
+    projections: [String:String]{"/nix/store/root": "/missing-hangar-object"}
     binary: "/nix/store/root/bin/true"
     assert_eq(env_shell_logical_executable_path(projections, binary), Val(binary))
 }

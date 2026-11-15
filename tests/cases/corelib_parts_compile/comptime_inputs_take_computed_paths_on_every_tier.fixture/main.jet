@@ -3,13 +3,9 @@
 // returns is embedded.
 DIR: "inputs"
 
-TEXTS: #run {
-    loop path in find("{DIR}/*.txt") -> "{path}={embed_file(path).trim()}"
-}
+TEXTS: #run { loop path in find("{DIR}/*.txt") -> "{path}={embed_file(path).trim()}" }
 
-SIZES: #run {
-    loop path in find("{DIR}/**/*.md") -> "{path}:{embed_bytes(path).len()}"
-}
+SIZES: #run { loop path in find("{DIR}/**/*.md") -> "{path}:{embed_bytes(path).len()}" }
 
 run: fn() {
     print(TEXTS.join("|"))

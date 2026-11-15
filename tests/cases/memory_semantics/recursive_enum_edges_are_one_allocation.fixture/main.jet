@@ -19,6 +19,7 @@ GROWTH_KB: 8192
 // Links in one chain, and chains built: a million links in all, each chain
 // shallow enough for its recursive drop.
 CHAIN_DEPTH: 1000
+
 CHAINS: 1000
 
 Chain: enum {
@@ -58,9 +59,7 @@ status_kb: fn(field: String) -> Int {
 
 chain: fn(depth: Int) -> Chain {
     link := Chain.End
-    loop _ in 0..<depth {
-        link = Chain.Link{next: link.move()}
-    }
+    loop _ in 0..<depth -> link = Chain.Link{next: link.move()}
     link
 }
 
@@ -78,14 +77,10 @@ one_allocation_per_link: fn() {
     warm: chain(CHAIN_DEPTH)
     before: status_kb("VmRSS:")
     chains := [Chain]{}
-    loop _ in 0..<CHAINS {
-        chains.push(chain(CHAIN_DEPTH))
-    }
+    loop _ in 0..<CHAINS { chains.push(chain(CHAIN_DEPTH)) }
     grown: status_kb("VmRSS:") - before
     links := 0
-    loop link in chains {
-        links += chain_depth(link)
-    }
+    loop link in chains -> links += chain_depth(link)
     if links != CHAINS * CHAIN_DEPTH -> panic("built {links} links")
     per_link: grown * 1024 /% links
     if per_link >= 80 -> panic("a chain link costs {per_link} bytes: its edge is wrapped")
@@ -115,8 +110,12 @@ expressions: fn(from: Int, to: Int) -> Int {
         rewrite_left(b, 100)
         c := b.copy()
         rewrite_left(c, 1000)
-        if eval(a) != i % 7 - i % 13 + 7 -> panic("a write through a copy's edge showed in the original")
-        if eval(b) != 100 - i % 13 + 7 || eval(c) != 1000 - i % 13 + 7 -> panic("a rewritten copy lost its edge")
+        if eval(a) != i % 7 - i % 13 + 7 {
+            panic("a write through a copy's edge showed in the original")
+        }
+        if eval(b) != 100 - i % 13 + 7 || eval(c) != 1000 - i % 13 + 7 {
+            panic("a rewritten copy lost its edge")
+        }
         total += eval(a) + eval(b) + eval(c)
     }
     total
@@ -128,9 +127,7 @@ scope_depth: fn(scope: Scope) -> Int {
     1 + up + down + scope.name.len()
 }
 
-detach: fn(scope: &Scope) {
-    scope.parent = None
-}
+detach: fn(scope: &Scope) { scope.parent = None }
 
 scopes: fn(from: Int, to: Int) -> Int {
     total := 0
@@ -140,7 +137,9 @@ scopes: fn(from: Int, to: Int) -> Int {
         other := child.copy()
         detach(other)
         other.body = Body.Empty
-        if scope_depth(child) != scope_depth(root) + 2 + scope_depth(Scope{name: "n{i}", parent: None, body: Body.Empty}) -> panic("a write through a copy's edge showed in the original")
+        if scope_depth(child) != scope_depth(root) + 2 + scope_depth(Scope{name: "n{i}", parent: None, body: Body.Empty}) {
+            panic("a write through a copy's edge showed in the original")
+        }
         total += scope_depth(child) + scope_depth(other)
     }
     total

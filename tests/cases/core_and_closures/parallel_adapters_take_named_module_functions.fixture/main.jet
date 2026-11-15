@@ -4,31 +4,39 @@ Bad: struct {
 }
 
 double: fn(n: Int) -> Int { n * 2 }
+
 even: fn(n: Int) -> Bool { n % 2 == 0 }
+
 zero: fn() -> Int { 0 }
+
 add: fn(acc: Int, n: Int) -> Int { acc + n }
+
 even_n: fn(n: Int) -> Bool Never! { n % 2 == 0 }
+
 pick: fn(n: Int) -> Bool Bad! {
     if n == 130 || n == 70 || n == 200 -> return Err(Bad{at: n})
     Ok(n % 3 == 0)
 }
+
 step: fn(acc: Int, n: Int) -> Int Bad! {
     if n == 150 || n == 90 -> return Err(Bad{at: n})
     Ok(acc + n)
 }
+
 seed: fn() -> Int Bad! { Ok(0) }
+
 merge: fn(left: Int, right: Int) -> Int Bad! { Ok(left + right) }
 
 show_list: fn(label: String, value: [Int] Bad!) {
     if value == {
-        .Ok(v) -> print("{label} ok {v.len()} {v.first()} {v.last()}")
+        .Ok(v) -> { print("{label} ok {v.len()} {v.first()} {v.last()}") }
         .Err(e) -> print("{label} err {e.at}")
     }
 }
 
 show_fold: fn(label: String, value: Int Bad!) {
     if value == {
-        .Ok(v) -> print("{label} ok {v}")
+        .Ok(v) -> { print("{label} ok {v}") }
         .Err(e) -> print("{label} err {e.at}")
     }
 }
@@ -46,11 +54,11 @@ run: fn() {
     small: [Int]{1, 2, 3, 6, 9}
     show_list("filter-ok", small.para_filter(pick))
     if big.para_partition(pick) == {
-        .Ok(v) -> print("partition ok {v.true_.len()}")
+        .Ok(v) -> { print("partition ok {v.true_.len()}") }
         .Err(e) -> print("partition err {e.at}")
     }
     if small.para_partition(pick) == {
-        .Ok(v) -> print("partition-ok {v.false_} {v.true_}")
+        .Ok(v) -> { print("partition-ok {v.false_} {v.true_}") }
         .Err(e) -> print("partition-ok err {e.at}")
     }
     show_fold("fold", big.para_fold(seed, step, merge))

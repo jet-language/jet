@@ -1,8 +1,5 @@
 // The machine-wide artifact store as the build executor's CAS.
-
-use {
-    jetpack_artifact_store.[ArtifactDigest, ArtifactStore, ArtifactStoreError]
-}
+use jetpack_artifact_store.[ArtifactDigest, ArtifactStore, ArtifactStoreError]
 
 BuildArtifactStoreHandle: struct {
     store: ArtifactStore
@@ -25,12 +22,16 @@ BuildArtifactStoreHandle: struct {
     }
 
     get_blob: fn(self, digest: ContentDigest) -[FS, Env, Exec, Time, Rand]> [U8]? BuildIOError! {
-        if !digest.as_str().starts_with("sha256:") -> return Err(BuildIOError.new(.InvalidInput, "artifact digest has no sha256 prefix"))
+        if !digest.as_str().starts_with("sha256:") {
+            return Err(BuildIOError.new(.InvalidInput, "artifact digest has no sha256 prefix"))
+        }
         parsed: ArtifactDigest.from_hex(digest.as_str().removeprefix("sha256:")) ?? return Err(build_store_io_error(err))
         found: if self.store.blob_by_digest(parsed) == {
             .Val(bytes) -> Val(bytes)
             .None -> None
-            .Err(error) -> { return Err(build_store_io_error(error)) }
+            .Err(error) -> {
+                return Err(build_store_io_error(error))
+            }
         }
         Ok(found)
     }
@@ -43,7 +44,9 @@ BuildArtifactStoreHandle: struct {
         found: if self.store.get_action(self.store.action(key)) == {
             .Val(bytes) -> Val(bytes)
             .None -> None
-            .Err(error) -> { return Err(build_store_io_error(error)) }
+            .Err(error) -> {
+                return Err(build_store_io_error(error))
+            }
         }
         Ok(found)
     }

@@ -10,6 +10,7 @@
 // generated source and of the shared expected output, so the text below is
 // the workload byte for byte, the header naming midsize.mjs included.
 UNITS: 90
+
 MODULUS: 1000003
 
 // One unit's constants: multipliers c1, c2, c3, thresholds t1 < t2, and the
@@ -40,63 +41,63 @@ every_unit: fn(render: fn(Int) -> String) -> String {
 jet_unit: fn(i: Int) -> String {
     k: unit_constants(i)
     """
-        // Unit {i}: state step, classification, and scoring.
-        State{i}: struct {{
-            a: Int
-            b: Int
-            c: Int
-        }}
+    // Unit {i}: state step, classification, and scoring.
+    State{i}: struct {{
+        a: Int
+        b: Int
+        c: Int
+    }}
 
-        Kind{i}: enum {{
-            Low(Int)
-            Mid(Int)
-            High
-        }}
+    Kind{i}: enum {{
+        Low(Int)
+        Mid(Int)
+        High
+    }}
 
-        classify_{i}: fn(x: Int) -> Kind{i} {{
-            if x < {k.t1} {{
-                return Kind{i}.Low(x)
+    classify_{i}: fn(x: Int) -> Kind{i} {{
+        if x < {k.t1} {{
+            return Kind{i}.Low(x)
+        }}
+        if x < {k.t2} {{
+            return Kind{i}.Mid(x - {k.t1})
+        }}
+        return Kind{i}.High
+    }}
+
+    score_{i}: fn(kind: Kind{i}) -> Int {{
+        return if kind == {{
+            .Low(v) -> v * {k.c1} + 1
+            .Mid(v) -> v * {k.c2} + 7
+            .High -> {k.c3}
+        }}
+    }}
+
+    step_{i}: fn(s: State{i}, x: Int) -> State{i} {{
+        a: (s.a * {k.c1} + x + 1) % {MODULUS}
+        b: (s.b + a * {k.c2}) % {MODULUS}
+        c: (s.c + a + b * 3) % {MODULUS}
+        return State{i}{{a: a, b: b, c: c}}
+    }}
+
+    unit_{i}: fn(seed: Int) -> Int {{
+        s := State{i}{{a: seed % {MODULUS}, b: {k.c2}, c: {k.c3}}}
+        values := [Int]{{}}
+        loop j in 0..<{k.n} {{
+            s = step_{i}(s, j)
+            &values.push(score_{i}(classify_{i}(s.a % 1000)))
+        }}
+        total := 0
+        loop v in values {{
+            if v % 2 == 0 {{
+                total += v
+            }} else {{
+                total += v * 3
             }}
-            if x < {k.t2} {{
-                return Kind{i}.Mid(x - {k.t1})
-            }}
-            return Kind{i}.High
         }}
+        return (total + s.b + s.c) % {MODULUS}
+    }}
 
-        score_{i}: fn(kind: Kind{i}) -> Int {{
-            return if kind == {{
-                .Low(v) -> v * {k.c1} + 1
-                .Mid(v) -> v * {k.c2} + 7
-                .High -> {k.c3}
-            }}
-        }}
-
-        step_{i}: fn(s: State{i}, x: Int) -> State{i} {{
-            a: (s.a * {k.c1} + x + 1) % {MODULUS}
-            b: (s.b + a * {k.c2}) % {MODULUS}
-            c: (s.c + a + b * 3) % {MODULUS}
-            return State{i}{{a: a, b: b, c: c}}
-        }}
-
-        unit_{i}: fn(seed: Int) -> Int {{
-            s := State{i}{{a: seed % {MODULUS}, b: {k.c2}, c: {k.c3}}}
-            values := [Int]{{}}
-            loop j in 0..<{k.n} {{
-                s = step_{i}(s, j)
-                &values.push(score_{i}(classify_{i}(s.a % 1000)))
-            }}
-            total := 0
-            loop v in values {{
-                if v % 2 == 0 {{
-                    total += v
-                }} else {{
-                    total += v * 3
-                }}
-            }}
-            return (total + s.b + s.c) % {MODULUS}
-        }}
-
-        """
+    """
 }
 
 go_unit: fn(i: Int) -> String {
@@ -172,134 +173,139 @@ go_unit: fn(i: Int) -> String {
 zig_unit: fn(i: Int) -> String {
     k: unit_constants(i)
     """
-        // Unit {i}: state step, classification, and scoring.
-        const State{i} = struct {{
-            a: i64,
-            b: i64,
-            c: i64,
+    // Unit {i}: state step, classification, and scoring.
+    const State{i} = struct {{
+        a: i64,
+        b: i64,
+        c: i64,
+    }};
+
+    const Kind{i} = union(enum) {{
+        low: i64,
+        mid: i64,
+        high: void,
+    }};
+
+    fn classify{i}(x: i64) Kind{i} {{
+        if (x < {k.t1}) {{
+            return .{{ .low = x }};
+        }}
+        if (x < {k.t2}) {{
+            return .{{ .mid = x - {k.t1} }};
+        }}
+        return .high;
+    }}
+
+    fn score{i}(kind: Kind{i}) i64 {{
+        return switch (kind) {{
+            .low => |v| v * {k.c1} + 1,
+            .mid => |v| v * {k.c2} + 7,
+            .high => {k.c3},
         }};
+    }}
 
-        const Kind{i} = union(enum) {{
-            low: i64,
-            mid: i64,
-            high: void,
-        }};
+    fn step{i}(s: State{i}, x: i64) State{i} {{
+        const a = @mod(s.a * {k.c1} + x + 1, {MODULUS});
+        const b = @mod(s.b + a * {k.c2}, {MODULUS});
+        const c = @mod(s.c + a + b * 3, {MODULUS});
+        return .{{ .a = a, .b = b, .c = c }};
+    }}
 
-        fn classify{i}(x: i64) Kind{i} {{
-            if (x < {k.t1}) {{
-                return .{{ .low = x }};
-            }}
-            if (x < {k.t2}) {{
-                return .{{ .mid = x - {k.t1} }};
-            }}
-            return .high;
+    fn unit{i}(allocator: std.mem.Allocator, seed: i64) !i64 {{
+        var s = State{i}{{ .a = @mod(seed, {MODULUS}), .b = {k.c2}, .c = {k.c3} }};
+        var values: std.ArrayList(i64) = .empty;
+        defer values.deinit(allocator);
+        var j: i64 = 0;
+        while (j < {k.n}) : (j += 1) {{
+            s = step{i}(s, j);
+            try values.append(allocator, score{i}(classify{i}(@mod(s.a, 1000))));
         }}
-
-        fn score{i}(kind: Kind{i}) i64 {{
-            return switch (kind) {{
-                .low => |v| v * {k.c1} + 1,
-                .mid => |v| v * {k.c2} + 7,
-                .high => {k.c3},
-            }};
-        }}
-
-        fn step{i}(s: State{i}, x: i64) State{i} {{
-            const a = @mod(s.a * {k.c1} + x + 1, {MODULUS});
-            const b = @mod(s.b + a * {k.c2}, {MODULUS});
-            const c = @mod(s.c + a + b * 3, {MODULUS});
-            return .{{ .a = a, .b = b, .c = c }};
-        }}
-
-        fn unit{i}(allocator: std.mem.Allocator, seed: i64) !i64 {{
-            var s = State{i}{{ .a = @mod(seed, {MODULUS}), .b = {k.c2}, .c = {k.c3} }};
-            var values: std.ArrayList(i64) = .empty;
-            defer values.deinit(allocator);
-            var j: i64 = 0;
-            while (j < {k.n}) : (j += 1) {{
-                s = step{i}(s, j);
-                try values.append(allocator, score{i}(classify{i}(@mod(s.a, 1000))));
+        var total: i64 = 0;
+        for (values.items) |v| {{
+            if (@mod(v, 2) == 0) {{
+                total += v;
+            }} else {{
+                total += v * 3;
             }}
-            var total: i64 = 0;
-            for (values.items) |v| {{
-                if (@mod(v, 2) == 0) {{
-                    total += v;
-                }} else {{
-                    total += v * 3;
-                }}
-            }}
-            return @mod(total + s.b + s.c, {MODULUS});
         }}
+        return @mod(total + s.b + s.c, {MODULUS});
+    }}
 
-        """
+    """
 }
 
 rust_unit: fn(i: Int) -> String {
     k: unit_constants(i)
     """
-        // Unit {i}: state step, classification, and scoring.
-        struct State{i} {{
-            a: i64,
-            b: i64,
-            c: i64,
-        }}
+    // Unit {i}: state step, classification, and scoring.
+    struct State{i} {{
+        a: i64,
+        b: i64,
+        c: i64,
+    }}
 
-        enum Kind{i} {{
-            Low(i64),
-            Mid(i64),
-            High,
-        }}
+    enum Kind{i} {{
+        Low(i64),
+        Mid(i64),
+        High,
+    }}
 
-        fn classify_{i}(x: i64) -> Kind{i} {{
-            if x < {k.t1} {{
-                return Kind{i}::Low(x);
+    fn classify_{i}(x: i64) -> Kind{i} {{
+        if x < {k.t1} {{
+            return Kind{i}::Low(x);
+        }}
+        if x < {k.t2} {{
+            return Kind{i}::Mid(x - {k.t1});
+        }}
+        Kind{i}::High
+    }}
+
+    fn score_{i}(kind: Kind{i}) -> i64 {{
+        match kind {{
+            Kind{i}::Low(v) => v * {k.c1} + 1,
+            Kind{i}::Mid(v) => v * {k.c2} + 7,
+            Kind{i}::High => {k.c3},
+        }}
+    }}
+
+    fn step_{i}(s: &State{i}, x: i64) -> State{i} {{
+        let a = (s.a * {k.c1} + x + 1) % {MODULUS};
+        let b = (s.b + a * {k.c2}) % {MODULUS};
+        let c = (s.c + a + b * 3) % {MODULUS};
+        State{i} {{ a, b, c }}
+    }}
+
+    fn unit_{i}(seed: i64) -> i64 {{
+        let mut s = State{i} {{ a: seed % {MODULUS}, b: {k.c2}, c: {k.c3} }};
+        let mut values: Vec<i64> = Vec::new();
+        for j in 0..{k.n} {{
+            s = step_{i}(&s, j);
+            values.push(score_{i}(classify_{i}(s.a % 1000)));
+        }}
+        let mut total: i64 = 0;
+        for v in &values {{
+            if v % 2 == 0 {{
+                total += v;
+            }} else {{
+                total += v * 3;
             }}
-            if x < {k.t2} {{
-                return Kind{i}::Mid(x - {k.t1});
-            }}
-            Kind{i}::High
         }}
+        (total + s.b + s.c) % {MODULUS}
+    }}
 
-        fn score_{i}(kind: Kind{i}) -> i64 {{
-            match kind {{
-                Kind{i}::Low(v) => v * {k.c1} + 1,
-                Kind{i}::Mid(v) => v * {k.c2} + 7,
-                Kind{i}::High => {k.c3},
-            }}
-        }}
-
-        fn step_{i}(s: &State{i}, x: i64) -> State{i} {{
-            let a = (s.a * {k.c1} + x + 1) % {MODULUS};
-            let b = (s.b + a * {k.c2}) % {MODULUS};
-            let c = (s.c + a + b * 3) % {MODULUS};
-            State{i} {{ a, b, c }}
-        }}
-
-        fn unit_{i}(seed: i64) -> i64 {{
-            let mut s = State{i} {{ a: seed % {MODULUS}, b: {k.c2}, c: {k.c3} }};
-            let mut values: Vec<i64> = Vec::new();
-            for j in 0..{k.n} {{
-                s = step_{i}(&s, j);
-                values.push(score_{i}(classify_{i}(s.a % 1000)));
-            }}
-            let mut total: i64 = 0;
-            for v in &values {{
-                if v % 2 == 0 {{
-                    total += v;
-                }} else {{
-                    total += v * 3;
-                }}
-            }}
-            (total + s.b + s.c) % {MODULUS}
-        }}
-
-        """
+    """
 }
 
 HEADER: "Mid-size build-time workload (generated by Tools/perf/build-time/midsize.mjs; do not edit)."
 
 jet_fold: fn(i: Int) -> String { "    total = (total * 31 + unit_{i}({seed(i)})) % {MODULUS}" }
+
 go_fold: fn(i: Int) -> String { "\ttotal = (total*31 + unit{i}({seed(i)})) % {MODULUS}" }
-zig_fold: fn(i: Int) -> String { "    total = @mod(total * 31 + try unit{i}(allocator, {seed(i)}), {MODULUS});" }
+
+zig_fold: fn(i: Int) -> String {
+    "    total = @mod(total * 31 + try unit{i}(allocator, {seed(i)}), {MODULUS});"
+}
+
 rust_fold: fn(i: Int) -> String { "    total = (total * 31 + unit_{i}({seed(i)})) % {MODULUS};" }
 
 // Each program: the header, every unit, then `run`/`main` with every fold.
@@ -338,4 +344,6 @@ languages: fn() -> [Language] {
 }
 
 // The whole program in `language`.
-midsize: fn(language: Language) -> String { language.program(every_unit(language.unit), every_unit(language.fold)) }
+midsize: fn(language: Language) -> String {
+    language.program(every_unit(language.unit), every_unit(language.fold))
+}

@@ -13,21 +13,13 @@ Root: struct {
     session: Session
 }
 
-consume: fn(s: &&Session) -> Int {
-    s.id
-}
+consume: fn(s: &&Session) -> Int { s.id }
 
-sink: fn(slot: &[Session], s: &&Session) {
-    slot.push(s)
-}
+sink: fn(slot: &[Session], s: &&Session) { slot.push(s) }
 
-read_param: fn(s: Session) -> Int {
-    consume(s)
-}
+read_param: fn(s: Session) -> Int { consume(s) }
 
-write_param: fn(s: &Session, slot: &[Session]) {
-    sink(slot, s)
-}
+write_param: fn(s: &Session, slot: &[Session]) { sink(slot, s) }
 
 field_view: fn(r: Root) -> Int {
     view: r.session

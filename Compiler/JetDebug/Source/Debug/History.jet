@@ -7,6 +7,7 @@
 
 // Rust MAX_DEBUG_HISTORY and MAX_DEBUG_WATCHES: independent bounds.
 DEBUG_HISTORY_MAX_EVENTS: 100000
+
 DEBUG_HISTORY_MAX_WATCHES: 32
 
 // Rust DebugEvent: one post-statement source event already projected into
@@ -87,15 +88,17 @@ DebugHistory: struct {
                     if grouped.get(act.sequence) == .Val(group) -> writes = group.copy()
                 }
             }
-            events.push(DebugEvent{
-                sequence: act.sequence,
-                function: act.function.copy(),
-                line: act.line,
-                depth: 0,
-                stack: [FrameSnapshot]{FrameSnapshot{function: act.function.copy(), line: act.line}},
-                locals: act.locals.copy(),
-                writes: writes.move(),
-            })
+            events.push(
+                DebugEvent{
+                    sequence: act.sequence,
+                    function: act.function.copy(),
+                    line: act.line,
+                    depth: 0,
+                    stack: [FrameSnapshot]{FrameSnapshot{function: act.function.copy(), line: act.line}},
+                    locals: act.locals.copy(),
+                    writes: writes.move(),
+                },
+            )
         }
         last_sequence: if run.acts.len() > 0 -> run.acts[run.acts.len() - 1].sequence else -> 0
         DebugHistory{
@@ -204,8 +207,12 @@ debug_derive_recorded_writes: fn(run: RecordedRun) -> [DebugIndexedWrite] Never!
     loop (index, act) in run.acts {
         after := debug_snapshot_map(act.locals)
         if {
-            index > 0 && run.acts[index - 1].function == act.function -> debug_diff_snapshots(writes, act.sequence, act.line, run.acts[index - 1].locals, previous, act.locals, after)
-            else -> debug_diff_snapshots(writes, act.sequence, act.line, unbound_values, unbound_slots, act.locals, after)
+            index > 0 && run.acts[index - 1].function == act.function -> {
+                debug_diff_snapshots(writes, act.sequence, act.line, run.acts[index - 1].locals, previous, act.locals, after)
+            }
+            else -> {
+                debug_diff_snapshots(writes, act.sequence, act.line, unbound_values, unbound_slots, act.locals, after)
+            }
         }
         previous = after.move()
     }
@@ -226,7 +233,7 @@ debug_writes_by_sequence: fn(run: RecordedRun) -> [Int:[DebugWrite]] Never! {
         write: derived.pop() ?? break
         converted: DebugWrite{line: write.line, place: write.place, old_value: write.old_value, new_value: write.new_value}
         if slots.get(write.sequence) == {
-            .Val(slot) -> groups[slot].push(converted)
+            .Val(slot) -> { groups[slot].push(converted) }
             .None -> {
                 slots[write.sequence] = groups.len()
                 sequences.push(write.sequence)

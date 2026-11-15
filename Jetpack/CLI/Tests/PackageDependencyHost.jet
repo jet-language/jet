@@ -10,13 +10,13 @@
         {name: "zeta", version: "2.3.4", source: .Registry{registry: "stable", reference: "zeta#2.3.4", output: "out", source_hash: "hash", repository: "repo", authority: "auth", tier: "core", gate_status: "passed"}},
         {name: "alpha", version: "0.1.2", source: .Registry{registry: "community", reference: "alpha#0.1.2", output: "other", source_hash: "hash", repository: "repo", authority: "auth", tier: "community", gate_status: "local"}},
     }
-    fetched: PackageFetchResult{lock: lock, directories: [String: String]{}}
+    fetched: PackageFetchResult{lock: lock, directories: [String:String]{}}
     tiers: "resolved `zeta` 2.3.4 from registry `stable` (tier: core; gate status: passed)\nresolved `alpha` 0.1.2 from registry `community` (tier: community; gate status: local)\n"
     assert_eq(cli_package_dependency_success(fetched, PackageFetchOptions{}), "{tiers}fetched all dependencies\n")
     assert_eq(cli_package_dependency_success(fetched, PackageFetchOptions{locked: true}), "{tiers}lock verified\n")
     assert_eq(cli_package_dependency_success(fetched, PackageFetchOptions{update: true}), "{tiers}updated all moving selectors\n")
     assert_eq(cli_package_dependency_success(fetched, PackageFetchOptions{update: true, update_dep: Val("local")}), "{tiers}updated `local`\n")
-    replaced: PackageFetchResult{lock: lock, directories: [String: String]{}, replaced_views: [String]{"local"}}
+    replaced: PackageFetchResult{lock: lock, directories: [String:String]{}, replaced_views: [String]{"local"}}
     assert_eq(cli_package_dependency_success(replaced, PackageFetchOptions{update: true}), "{tiers}replaced the stale dependency view `local` with a verified copy of its store entry\nupdated all moving selectors\n")
     assert_eq(cli_package_dependency_edit_success("add", "local", "/project/package.jet"), "added `local` to /project/package.jet\n")
     assert_eq(cli_package_dependency_edit_success("remove", "local", "/project/run.jet"), "removed `local` from /project/run.jet\n")
@@ -25,11 +25,20 @@
 #Test("package dependency host publication errors name their phase") {
     failure: IOError.Other(IOContext{operation: .Write, resource: Val("/project/package.jet"), os_code: None, cause: Val("failure")})
     detail: "{failure}"
-    loop phase in ([FoundationPublicationPhase]{.CreateStage, .WriteStage, .SetMode, .InspectStage}) -> assert_eq(cli_package_dependency_publication_error("/project/package.jet", FoundationPublicationError{phase: phase, error: failure}), "could not stage /project/package.jet: {detail}")
-    loop phase in ([FoundationPublicationPhase]{.SyncStage, .SyncParent}) -> assert_eq(cli_package_dependency_publication_error("/project/package.jet", FoundationPublicationError{phase: phase, error: failure}), "could not sync /project/package.jet: {detail}")
+    loop phase in ([FoundationPublicationPhase]{.CreateStage, .WriteStage, .SetMode, .InspectStage}) {
+        assert_eq(cli_package_dependency_publication_error("/project/package.jet", FoundationPublicationError{phase: phase, error: failure}), "could not stage /project/package.jet: {detail}")
+    }
+    loop phase in ([FoundationPublicationPhase]{.SyncStage, .SyncParent}) {
+        assert_eq(cli_package_dependency_publication_error("/project/package.jet", FoundationPublicationError{phase: phase, error: failure}), "could not sync /project/package.jet: {detail}")
+    }
     assert_eq(cli_package_dependency_publication_error("/project/package.jet", FoundationPublicationError{phase: .ValidateSource, error: failure}), "package source changed before publishing: {detail}")
-    loop phase in ([FoundationPublicationPhase]{.InspectDestination, .ValidateAuthority, .Rename, .ValidatePublished}) -> assert_eq(cli_package_dependency_publication_error("/project/package.jet", FoundationPublicationError{phase: phase, error: failure}), "could not publish /project/package.jet: {detail}")
-    loop phase in ([FoundationPublicationPhase]{.OpenRoot, .OpenParent}) -> assert_eq(cli_package_dependency_publication_error("/project/package.jet", FoundationPublicationError{phase: phase, error: failure}), "could not open package source authority: {detail}")
+    loop phase in
+        ([FoundationPublicationPhase]{.InspectDestination, .ValidateAuthority, .Rename, .ValidatePublished}) {
+        assert_eq(cli_package_dependency_publication_error("/project/package.jet", FoundationPublicationError{phase: phase, error: failure}), "could not publish /project/package.jet: {detail}")
+    }
+    loop phase in ([FoundationPublicationPhase]{.OpenRoot, .OpenParent}) {
+        assert_eq(cli_package_dependency_publication_error("/project/package.jet", FoundationPublicationError{phase: phase, error: failure}), "could not open package source authority: {detail}")
+    }
     assert_eq(cli_package_dependency_publication_error("/project/package.jet", FoundationPublicationError{phase: .PreparePath, error: failure}), "could not check /project/package.jet: {detail}")
 }
 
@@ -44,7 +53,7 @@
     git: cli_package_dependency_add_spec([String]{"add", "local", "--git", "url", "--rev", "rev", "--branch", "branch", "--tag", "tag"}, Val("local"), false, false) ?? panic("tag wins")
     assert_eq(git, (name: "local", spec: DepSpec.Git{url: "url", selector: GitSelector.Tag("tag")}))
     if cli_package_dependency_add_spec([String]{"add"}, None, false, false) == {
-        .Ok(_) -> panic("missing dependency name")
+        .Ok(_) -> { panic("missing dependency name") }
         .Err(error) -> {
             assert_eq(error.output.stdout, "")
             assert(error.output.stderr.starts_with("Error [jet.InvalidCommandInput]: `jet add` needs a dependency name\n"), error.output.stderr)
@@ -52,7 +61,7 @@
         }
     }
     if cli_package_dependency_words([String]{"fetch", "--path", "x"}, false, false) == {
-        .Ok(_) -> panic("fetch takes no --path")
+        .Ok(_) -> { panic("fetch takes no --path") }
         .Err(error) -> {
             assert(error.output.stderr.starts_with("Error [jet.UnknownFlag]: `--path` isn't a `jet fetch` flag\n"), error.output.stderr)
             assert_eq(error.output.exit_code, EXIT_USAGE)
@@ -82,8 +91,10 @@
     concurrent: "{expected}// concurrent writer\n"
     files.write(path, concurrent) ?? panic("concurrent fixture edit")
     if cli_package_dependency_publish(second, removed) == {
-        .Ok(_) -> panic("must not overwrite concurrent writer")
-        .Err(error) -> assert_eq(error.message, "{path} changed while the package edit was prepared")
+        .Ok(_) -> { panic("must not overwrite concurrent writer") }
+        .Err(error) -> {
+            assert_eq(error.message, "{path} changed while the package edit was prepared")
+        }
     }
     assert_eq(files.read(path) ?? panic("read concurrent carrier"), concurrent)
     absent: cli_package_dependency(root, path, [String]{"remove", "absent"}, false, false)

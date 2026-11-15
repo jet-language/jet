@@ -11,6 +11,7 @@
 // through openat/mkdirat/renameat/unlinkat FFI.
 
 PROVIDER_HELD_PRIVATE_MODE: 0o700
+
 PROVIDER_READ_CHUNK_BYTES: 65536
 
 // Resolve a `core` upstream to a local checkout: `path:` sources in place,
@@ -38,32 +39,33 @@ provider_source_repo: fn(upstream: String, want_package: String, ctx: ProviderCt
 provider_fetch_remote_repo_indexed: fn(remote: RemoteSource, want_package: String, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time.Wait, Rand]> String ProviderError! {
     cache: provider_source_cache_dir(ctx.store_dir, remote)
     if provider_cache_is_real_directory(cache) -> return Ok(cache)
-    if ctx.offline -> return Err(ProviderError.Offline("`{remote.label}` has no cached checkout and --offline forbids fetching source"))
+    if ctx.offline {
+        return Err(ProviderError.Offline("`{remote.label}` has no cached checkout and --offline forbids fetching source"))
+    }
     provider_ensure_network_allowed("fetch source repo")
     if provider_try_sparse_member_fetch(remote, want_package, cache) == {
         .Materialized(repo) -> Ok(repo)
         .NotMonorepo -> provider_fetch_remote_repo(remote, ctx)
         .DepOutside(error) -> Err(error)
-        .SparseFailed -> {
-            if provider_fetch_remote_repo(remote, ctx) == {
-                .Ok(repo) -> Ok(repo)
-                .Err(_) -> Err(ProviderError.MonorepoFetch("sparse subtree checkout and full-clone fallback both failed for `{remote.label}`"))
-            }
+        .SparseFailed -> if provider_fetch_remote_repo(remote, ctx) == {
+            .Ok(repo) -> Ok(repo)
+            .Err(_) -> Err(ProviderError.MonorepoFetch("sparse subtree checkout and full-clone fallback both failed for `{remote.label}`"))
         }
     }
 }
 
 // The result of one index-first sparse member fetch.
 SparseOutcome: enum {
-    // The member subtree and its in-repo dependencies are checked out here.
     Materialized(String)
-    // Not a monorepo member layout; the caller does a full clone.
     NotMonorepo
-    // An in-repo dependency resolves inside the repo but is not a member.
     DepOutside(ProviderError)
-    // A monorepo was detected but the sparse git mechanics failed.
     SparseFailed
 }
+
+// The member subtree and its in-repo dependencies are checked out here.
+// Not a monorepo member layout; the caller does a full clone.
+// An in-repo dependency resolves inside the repo but is not a member.
+// A monorepo was detected but the sparse git mechanics failed.
 
 // Fetch only `want_package`'s member subtree through a blob-less partial
 // clone and a cone sparse checkout. The member index and the member's
@@ -91,8 +93,12 @@ provider_sparse_member_fetch_in: fn(remote: RemoteSource, want_package: String, 
     tmp: staging.directory.path
     if !provider_remote_revision_is_safe(remote.rev) -> return SparseOutcome.SparseFailed
     rev: remote.rev ?? "HEAD"
-    if !(provider_git_in(tmp, [String]{"init", "--quiet"}) && provider_git_in(tmp, [String]{"remote", "add", "origin", remote.url})) -> return SparseOutcome.SparseFailed
-    if !provider_git_in(tmp, [String]{"fetch", "--quiet", "--depth", "1", "--filter=blob:none", "origin", rev}) -> return SparseOutcome.SparseFailed
+    if !(provider_git_in(tmp, [String]{"init", "--quiet"}) && provider_git_in(tmp, [String]{"remote", "add", "origin", remote.url})) {
+        return SparseOutcome.SparseFailed
+    }
+    if !provider_git_in(tmp, [String]{"fetch", "--quiet", "--depth", "1", "--filter=blob:none", "origin", rev}) {
+        return SparseOutcome.SparseFailed
+    }
     // Trees are present under blob:none; blobs are fetched lazily only when
     // `show` or the checkout touches them.
     listing: provider_git_output_in(tmp, [String]{"ls-tree", "-r", "--name-only", "FETCH_HEAD"}) ?? return SparseOutcome.SparseFailed
@@ -108,7 +114,9 @@ provider_sparse_member_fetch_in: fn(remote: RemoteSource, want_package: String, 
     marker := String?{None}
     marker_names: [String]{PACKAGE_FILE}
     loop name in marker_names {
-        if marker == None -> marker = provider_git_output_in(tmp, [String]{"show", "FETCH_HEAD:{target}/{name}"})
+        if marker == None {
+            marker = provider_git_output_in(tmp, [String]{"show", "FETCH_HEAD:{target}/{name}"})
+        }
     }
     if marker == {
         .Val(text) -> {
@@ -133,11 +141,15 @@ provider_sparse_member_fetch_in: fn(remote: RemoteSource, want_package: String, 
     }
     // Cone mode also keeps root files, so the root marker and workspace file
     // stay available for discovery.
-    if !provider_git_in(tmp, [String]{"sparse-checkout", "init", "--cone"}) -> return SparseOutcome.SparseFailed
+    if !provider_git_in(tmp, [String]{"sparse-checkout", "init", "--cone"}) {
+        return SparseOutcome.SparseFailed
+    }
     set_args := [String]{"sparse-checkout", "set"}
     loop path in wanted -> set_args.push(path)
     if !provider_git_in(tmp, set_args) -> return SparseOutcome.SparseFailed
-    if !provider_git_in(tmp, [String]{"checkout", "--quiet", "FETCH_HEAD"}) -> return SparseOutcome.SparseFailed
+    if !provider_git_in(tmp, [String]{"checkout", "--quiet", "FETCH_HEAD"}) {
+        return SparseOutcome.SparseFailed
+    }
     // The opened checkout authority is kept through validation and
     // publication.
     if provider_publish_remote_checkout_held(staging, cache_parent) == {
@@ -175,9 +187,13 @@ provider_fetch_remote_repo: fn(remote: RemoteSource, ctx: ProviderCtx) -[FS, Env
     provider_validate_remote_source(remote)
     cache: provider_source_cache_dir(ctx.store_dir, remote)
     if provider_cache_is_real_directory(cache) -> return Ok(cache)
-    if ctx.offline -> return Err(ProviderError.Offline("`{remote.label}` has no cached checkout and --offline forbids fetching source"))
+    if ctx.offline {
+        return Err(ProviderError.Offline("`{remote.label}` has no cached checkout and --offline forbids fetching source"))
+    }
     provider_ensure_network_allowed("fetch source repo")
-    if !provider_git_available() -> return Err(ProviderError.CoreBuild("remote `core` sources need the `git` command to fetch source repos"))
+    if !provider_git_available() {
+        return Err(ProviderError.CoreBuild("remote `core` sources need the `git` command to fetch source repos"))
+    }
     cache_parent: HeldCacheParent.open_or_create(cache) ?? return Err(ProviderError.CoreBuild("could not create source cache: {err}"))
     present: cache_parent.is_real_directory() ?? return Err(ProviderError.CoreBuild("could not inspect source cache: {err}"))
     if present -> return Ok(cache)
@@ -205,7 +221,9 @@ provider_clone_into_staging: fn(remote: RemoteSource, cache: String, cache_paren
     }
     if remote.rev == {
         .Val(rev) -> {
-            if !provider_remote_revision_is_safe(Val(rev)) -> return Err(ProviderError.CoreBuild("remote revision is not allowed"))
+            if !provider_remote_revision_is_safe(Val(rev)) {
+                return Err(ProviderError.CoreBuild("remote revision is not allowed"))
+            }
             checked: foundation_hardened_git_command().args_extend([String]{"-C", tmp, "checkout", "--quiet", rev}).run() ?? return Err(ProviderError.CoreBuild("could not run `git checkout`: {err}"))
             if !checked.success {
                 return Err(ProviderError.CoreBuild("failed to check out `{rev}` from `{remote.label}`: {provider_last_line(checked.errors, "git checkout failed")}"))
@@ -245,9 +263,11 @@ provider_open_held_directory: fn(path: String, create: Bool) -[FS]> Directory IO
     current := files.open_directory(if files.is_abs(path) -> "/" else -> ".")
     loop part in files.split_slash(path) {
         if part == "" || part == "." -> next
-        if part == ".." -> return Err(provider_io_error_invalid(path, "directory path contains a parent component"))
+        if part == ".." {
+            return Err(provider_io_error_invalid(path, "directory path contains a parent component"))
+        }
         if current.open_directory(part) == {
-            .Ok(next_directory) -> current = next_directory
+            .Ok(next_directory) -> { current = next_directory }
             .Err(error) -> {
                 if !create || !store_io_is_not_found(error) -> return Err(error)
                 provider_create_private_child(current, part)
@@ -273,10 +293,12 @@ HeldCacheParent: struct {
 
     open_with: fn(cache: String, create: Bool) -[FS]> HeldCacheParent IOError! {
         name: files.basename(cache)
-        if name == "" || name == "." || name == ".." -> return Err(provider_io_error_invalid(cache, "cache path has no final name"))
+        if name == "" || name == "." || name == ".." {
+            return Err(provider_io_error_invalid(cache, "cache path has no final name"))
+        }
         parent: files.dirname(cache)
         directory: provider_open_held_directory(if parent == "" -> "." else -> parent, create)
-        Ok(HeldCacheParent{directory, name})
+        Ok(HeldCacheParent{directory: directory, name: name})
     }
 
     // True for a real cache directory, false when absent or not a
@@ -287,7 +309,9 @@ HeldCacheParent: struct {
             .Err(error) -> {
                 if store_io_is_not_found(error) -> return Ok(false)
                 info: self.directory.entry_stat(self.name) ?? return Err(error)
-                if info.is_symlink -> return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: Val(self.name), os_code: None, cause: Val("source cache path must not be a symlink")}))
+                if info.is_symlink {
+                    return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: Val(self.name), os_code: None, cause: Val("source cache path must not be a symlink")}))
+                }
                 if !info.is_dir -> return Ok(false)
                 Err(error)
             }
@@ -299,7 +323,9 @@ HeldCacheParent: struct {
         if self.directory.open_directory(self.name) == {
             .Ok(_) -> {}
             .Err(error) -> {
-                if store_io_is_not_found(error) -> return
+                if store_io_is_not_found(error) {
+                    return
+                }
                 file: self.directory.open(self.name) ?? return Err(error)
                 provider_reject_multiply_linked(file.stat())
             }
@@ -330,17 +356,19 @@ HeldDirectoryEntry: struct {
 
     open: fn(path: String) -[FS]> HeldDirectoryEntry IOError! {
         name: files.basename(path)
-        if name == "" || name == "." || name == ".." -> return Err(provider_io_error_invalid(path, "directory path has no final name"))
+        if name == "" || name == "." || name == ".." {
+            return Err(provider_io_error_invalid(path, "directory path has no final name"))
+        }
         parent_path: files.dirname(path)
         parent: provider_open_held_directory(if parent_path == "" -> "." else -> parent_path, false)
         directory: parent.open_directory(name)
-        Ok(HeldDirectoryEntry{parent, name, directory})
+        Ok(HeldDirectoryEntry{parent: parent, name: name, directory: directory})
     }
 
     from_child: fn(parent: Directory, name: String) -[FS]> HeldDirectoryEntry IOError! {
         owned: provider_reopen_held_directory(parent)
         directory: owned.open_directory(name)
-        Ok(HeldDirectoryEntry{parent: owned, name, directory})
+        Ok(HeldDirectoryEntry{parent: owned, name: name, directory: directory})
     }
 
     // A CSPRNG-named private directory under `parent`, never reusing or
@@ -437,7 +465,9 @@ provider_collect_fingerprint_files: fn(directory: Directory, relative: String, o
     loop entry in entries {
         child_relative: if relative == "" -> entry.name else -> "{relative}/{entry.name}"
         info: directory.entry_stat(entry.name)
-        if info.is_symlink -> return Err(provider_io_error_other(files.join(directory.path, entry.name), "refusing symlink in fingerprinted package tree: {files.join(directory.path, entry.name)}"))
+        if info.is_symlink {
+            return Err(provider_io_error_other(files.join(directory.path, entry.name), "refusing symlink in fingerprinted package tree: {files.join(directory.path, entry.name)}"))
+        }
         if info.is_dir {
             child: directory.open_directory(entry.name)
             provider_collect_fingerprint_files(child, child_relative, out)
@@ -473,7 +503,9 @@ provider_copy_tree_held: fn(source: Directory, destination: Directory) ProviderR
     loop entry in entries {
         source_path: files.join(source.path, entry.name)
         info: source.entry_stat(entry.name) ?? return Err(ProviderReason{message: "{err}"})
-        if info.is_symlink -> return Err(ProviderReason{message: "refusing symlink in copied package tree: {source_path}"})
+        if info.is_symlink {
+            return Err(ProviderReason{message: "refusing symlink in copied package tree: {source_path}"})
+        }
         if info.is_dir {
             child_destination: provider_open_or_create_child(destination, entry.name) ?? return Err(ProviderReason{message: "{err}"})
             child_source: source.open_directory(entry.name) ?? return Err(ProviderReason{message: "{err}"})
@@ -540,7 +572,9 @@ provider_fill_temp_file: fn(reader: &FileReader, before: Stat, destination: Dire
     writer.fsync()
     after: reader.stat()
     unchanged: after.is_file && after.id == before.id && after.size == before.size && after.modified == before.modified
-    if !unchanged -> return Err(provider_io_error_other(temporary, "source file changed while copying"))
+    if !unchanged {
+        return Err(provider_io_error_other(temporary, "source file changed while copying"))
+    }
     destination.rename(temporary, destination_name)
 }
 
@@ -549,7 +583,9 @@ provider_create_private_child: fn(parent: Directory, name: String) IOError! -[FS
     if parent.create_directory(name, mode: Val(PROVIDER_HELD_PRIVATE_MODE)) == {
         .Ok(_) -> {}
         .Err(error) -> {
-            if store_io_is_already_exists(error) -> return
+            if store_io_is_already_exists(error) {
+                return
+            }
             Err(error)
         }
     }

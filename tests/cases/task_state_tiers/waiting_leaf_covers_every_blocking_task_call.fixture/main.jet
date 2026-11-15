@@ -16,9 +16,7 @@ pause: fn() {
     tasks.timeout(millis(1))
 }
 
-receive_one: fn(rx: Receiver<Int>) -[Time.Wait]> Int {
-    tasks.recv(rx) ?? -1
-}
+receive_one: fn(rx: Receiver<Int>) -[Time.Wait]> Int { tasks.recv(rx) ?? -1 }
 
 wait_only: fn(ticks: Receiver<Int>) -[Time.Wait]> Int {
     pause()
@@ -29,9 +27,7 @@ wait_only: fn(ticks: Receiver<Int>) -[Time.Wait]> Int {
     first + tick + (all[0] ?? 0)
 }
 
-timer: fn() -[Time.Wait]> Receiver<Int> {
-    tasks.interval(millis(1))
-}
+timer: fn() -[Time.Wait]> Receiver<Int> { tasks.interval(millis(1)) }
 
 run: fn() {
     ticks: timer()

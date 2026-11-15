@@ -19,11 +19,17 @@ run: fn(check: Check) {
     here: files.cwd() ?? process.fail(1, "no working directory: {err}")
     output: files.read(check.stdout) ?? process.fail(1, "no output file: {err}")
     if json.parse(output) == {
-        .Ok(report) -> print((json.canonical(report) ?? process.fail(1, "the report has no canonical form: {err}")).replace(here, "."))
-        .Err(_) -> loop line in output.lines() -> print(line)
+        .Ok(report) -> {
+            print((json.canonical(report) ?? process.fail(1, "the report has no canonical form: {err}")).replace(here, "."))
+        }
+        .Err(_) -> {
+            loop line in output.lines() -> print(line)
+        }
     }
     if files.exists("argv.txt") {
-        loop line in (files.read("argv.txt") ?? "").replace(here, ".").lines() -> print("harness: {line}")
+        loop line in (files.read("argv.txt") ?? "").replace(here, ".").lines() {
+            print("harness: {line}")
+        }
     }
     receipt: "run/axes/build_system/receipt.json"
     print("receipt: {if files.exists(receipt) -> "written" else -> "none"}")

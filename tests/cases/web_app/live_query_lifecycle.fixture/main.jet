@@ -20,9 +20,7 @@ open_tasks: fn(board: String) -[DB.Read]> Int CountError! {
     board.len()
 }
 
-runs: fn() -> Int {
-    RUNS.guard_read().value
-}
+runs: fn() -> Int { RUNS.guard_read().value }
 
 count: fn(state: Loadable<Int, CountError>) -> String {
     if state == {
@@ -32,7 +30,7 @@ count: fn(state: Loadable<Int, CountError>) -> String {
     }
 }
 
-titles: fn(state: Loadable<[[String: db.DBValue]], db.DBError>) -> String {
+titles: fn(state: Loadable<[[String:db.DBValue]], db.DBError>) -> String {
     if state == {
         .Loaded(rows) -> {
             out := [String]{}

@@ -3,9 +3,7 @@
 // frames that feed SHA-256 identities.
 
 // Lowercase hex of the UTF-8 bytes of `value`.
-store_hex_text: fn(value: String) -> String Never! {
-    store_hex_bytes(value.bytes())
-}
+store_hex_text: fn(value: String) -> String Never! { store_hex_bytes(value.bytes()) }
 
 // Lowercase hex of `bytes`.
 store_hex_bytes: fn(bytes: [U8]) -> String Never! {
@@ -47,6 +45,7 @@ store_is_lower_hex: fn(value: String, count: Int) -> Bool Never! {
     }
     true
 }
+
 // One decoded lowercase-hex text field, or the reason it failed.
 StoreUnhex: enum {
     Text(String)
@@ -151,7 +150,7 @@ store_sorted_unique: fn(values: [String]) -> [String] Never! {
 }
 
 // The keys of `map` in Rust `BTreeMap` order.
-store_sorted_keys: fn(map: [String: String]) -> [String] Never! {
+store_sorted_keys: fn(map: [String:String]) -> [String] Never! {
     keys := map.keys().to_list()
     keys.sort()
     keys
@@ -208,6 +207,4 @@ store_path_is_normal_relative: fn(path: String) -> Bool Never! {
 }
 
 // SHA-256 of `bytes` as lowercase hex.
-store_sha256_hex: fn(bytes: [U8]) -> String Never! {
-    pkg_sha256_hex(bytes)
-}
+store_sha256_hex: fn(bytes: [U8]) -> String Never! { pkg_sha256_hex(bytes) }

@@ -83,7 +83,9 @@ jet_cli_completions_zsh: fn() -> String Never! {
         if shown.len() == 0 -> next
         actions := [String]{}
         loop action in command.actions {
-            if shown.contains(action.name) -> actions.push("'{action.name}:{jet_cli_completion_zsh_escape(action.summary)}'")
+            if shown.contains(action.name) {
+                actions.push("'{action.name}:{jet_cli_completion_zsh_escape(action.summary)}'")
+            }
         }
         nested.push("            {command.name}) _values 'action' {actions.join(" ")} ;;")
     }

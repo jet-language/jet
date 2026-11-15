@@ -22,17 +22,21 @@ deep: fn(n: Int) -> Int {
     twice(deep, n)
 }
 
-twice: fn(step: fn(Int) -> Int, n: Int) -> Int {
-    step(n - 1) + step(n - 2)
-}
+twice: fn(step: fn(Int) -> Int, n: Int) -> Int { step(n - 1) + step(n - 2) }
 
 seven: fn() -> Int { 7 }
 
 failure_label: fn(error: TaskFailure) -> String {
     if error == {
-        .Cancelled -> { return "cancelled" }
-        .DeadlineBlown -> { return "deadline" }
-        .Panicked(_) -> { return "panicked" }
+        .Cancelled -> {
+            return "cancelled"
+        }
+        .DeadlineBlown -> {
+            return "deadline"
+        }
+        .Panicked(_) -> {
+            return "panicked"
+        }
     }
 }
 
@@ -60,7 +64,7 @@ run: fn() {
         // No pause: a plain cancel stops the busy recursion, and its cleanup runs.
         burner.cancel()
         if burner.join() == {
-            .Ok(_) -> print("the burner finished")
+            .Ok(_) -> { print("the burner finished") }
             .Err(error) -> print("the burner: {failure_label(error)}")
         }
     }
@@ -72,7 +76,7 @@ run: fn() {
         deep(90)
     }
     if timed.join() == {
-        .Ok(_) -> print("the timed burner finished")
+        .Ok(_) -> { print("the timed burner finished") }
         .Err(error) -> print("the timed burner: {failure_label(error)}")
     }
 }

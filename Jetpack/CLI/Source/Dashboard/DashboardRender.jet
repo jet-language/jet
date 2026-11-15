@@ -3,12 +3,19 @@
 // terminal width; colored lines are cut with their SGR state intact.
 
 DASHBOARD_SCREEN_ENTER_CODES: "[?1049h"
+
 DASHBOARD_SCREEN_HIDE_CURSOR: "[?25l"
+
 DASHBOARD_SCREEN_SHOW_CURSOR: "[?25h"
+
 DASHBOARD_SCREEN_LEAVE_CODES: "[?1049l"
+
 DASHBOARD_CLEAR_HOME: "[2J"
+
 DASHBOARD_CURSOR_HOME: "[H"
+
 DASHBOARD_BUSY_NOTE: "refreshing; store busy (another jetpack is running)"
+
 DASHBOARD_KEYS_HINT: "r refresh · q quit"
 
 // The alternate screen with a hidden cursor while the dashboard runs; the
@@ -56,7 +63,9 @@ cli_dashboard_terminal_width: fn() -[IO, Env]> Int Never! {
         width: cli_parse_u64(columns) ?? 0
         if width > 0 -> return width
     }
-    if cli_dashboard_interactive_mode(term.stdin().is_tty(), term.stdout().is_tty()) -> return term.terminal_width()
+    if cli_dashboard_interactive_mode(term.stdin().is_tty(), term.stdout().is_tty()) {
+        return term.terminal_width()
+    }
     80
 }
 
@@ -114,8 +123,12 @@ cli_dashboard_render_width_with_note: fn(snapshot: DashboardSnapshot, width: Int
     cli_dashboard_push_line(out, width, 0, theme.cyan("Project environment"))
     cli_dashboard_push_line(out, width, 2, cli_dashboard_field(theme, "state", cli_dashboard_environment_value(theme, project)))
     cli_dashboard_push_line(out, width, 2, cli_dashboard_field(theme, "env file", theme.gray(cli_dashboard_sanitize(project.env_file))))
-    if project.declared_packages == .Val(count) -> cli_dashboard_push_line(out, width, 2, cli_dashboard_field(theme, "declared", theme.cyan("{count} package(s)")))
-    if project.locked_packages == .Val(count) -> cli_dashboard_push_line(out, width, 2, cli_dashboard_field(theme, "locked", theme.cyan("{count} package(s)")))
+    if project.declared_packages == .Val(count) {
+        cli_dashboard_push_line(out, width, 2, cli_dashboard_field(theme, "declared", theme.cyan("{count} package(s)")))
+    }
+    if project.locked_packages == .Val(count) {
+        cli_dashboard_push_line(out, width, 2, cli_dashboard_field(theme, "locked", theme.cyan("{count} package(s)")))
+    }
     cli_dashboard_push_line(out, width, 2, cli_dashboard_field(theme, "lock", cli_dashboard_lock_value(theme, project.lock, project.locked_packages)))
     cli_dashboard_push_line(out, width, 2, cli_dashboard_field(theme, "active", cli_dashboard_active_value(theme, project)))
     out.push("\n")
@@ -134,7 +147,9 @@ cli_dashboard_render_width_with_note: fn(snapshot: DashboardSnapshot, width: Int
     cli_dashboard_push_line(out, width, 0, theme.cyan("Doctor findings"))
     loop check in snapshot.doctor.checks {
         cli_dashboard_push_line(out, width, 2, "[{cli_dashboard_health_mark(theme, check.health)}] {theme.bold(terminal_pad_end(check.name, 12))} {cli_dashboard_sanitize(check.detail)}")
-        if check.fix != "" -> cli_dashboard_push_line(out, width, 4, theme.gray("fix: {cli_dashboard_sanitize(check.fix)}"))
+        if check.fix != "" {
+            cli_dashboard_push_line(out, width, 4, theme.gray("fix: {cli_dashboard_sanitize(check.fix)}"))
+        }
     }
     out.push("\n")
 
@@ -142,7 +157,9 @@ cli_dashboard_render_width_with_note: fn(snapshot: DashboardSnapshot, width: Int
     if snapshot.activity.len() == 0 {
         cli_dashboard_push_line(out, width, 2, theme.gray("none recorded"))
     } else {
-        loop activity in snapshot.activity -> cli_dashboard_push_line(out, width, 2, theme.gray(cli_dashboard_activity_text(activity)))
+        loop activity in snapshot.activity {
+            cli_dashboard_push_line(out, width, 2, theme.gray(cli_dashboard_activity_text(activity)))
+        }
     }
     out.push("\n")
     cli_dashboard_push_line(out, width, 0, theme.gray(DASHBOARD_KEYS_HINT))
@@ -241,7 +258,9 @@ cli_dashboard_format_size: fn(bytes: Int) -> String Never! {
 cli_dashboard_round_even: fn(value: Int, divisor: Int) -> Int Never! {
     quotient: value /% divisor
     remainder: value % divisor
-    if remainder * 2 > divisor || (remainder * 2 == divisor && quotient % 2 == 1) -> return quotient + 1
+    if remainder * 2 > divisor || (remainder * 2 == divisor && quotient % 2 == 1) {
+        return quotient + 1
+    }
     quotient
 }
 

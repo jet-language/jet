@@ -4,6 +4,7 @@ use jet_pkg_model.[ProviderFacts, pkg_sha256_hex]
 
 // The fail-closed scale budget of the generation resolver.
 ENVMODEL_MAX_RESOLVER_NODES: 100000
+
 ENVMODEL_RESOLVER_BUDGET_NAME: "__jet_resolver_budget__:"
 
 // One source-backed package-generation declaration. This is deliberately
@@ -16,7 +17,7 @@ PackageProfileSpec: struct {
     packages: [String]{[String]{}}
     // Exact path -> selected provider identity, from the ratified collision
     // map. The provider is checked against realized contenders later.
-    collisions: [String: String]{[String: String]{}}
+    collisions: [String:String]{[String:String]{}}
     // Source modules that contributed this equal declaration.
     sources: [String]{[String]{}}
 }
@@ -35,7 +36,7 @@ ResolvedPackageProfile: struct {
     selected_profiles: [String]{[String]{}}
     applied: [String]{[String]{}}
     packages: [PackageProfilePackage]{[PackageProfilePackage]{}}
-    collisions: [String: String]{[String: String]{}}
+    collisions: [String:String]{[String:String]{}}
     sources: [String]{[String]{}}
 }
 
@@ -64,10 +65,10 @@ PackageProfilePlan: struct {
     selected_profiles: [String]{[String]{}}
     applied: [String]{[String]{}}
     packages: [PackageProfileFact]{[PackageProfileFact]{}}
-    collisions: [String: String]{[String: String]{}}
+    collisions: [String:String]{[String:String]{}}
     sources: [String]{[String]{}}
     fingerprint: String{""}
-    provider_facts: [String: ProviderFacts]{[String: ProviderFacts]{}}
+    provider_facts: [String:ProviderFacts]{[String:ProviderFacts]{}}
 
     // Seal the plan: its canonical length-prefixed identity and the per-ref
     // provider facts index.
@@ -75,7 +76,9 @@ PackageProfilePlan: struct {
         updated := self
         lines := [String]{"jet-package-profile-plan-v1\n"}
         lines.push(envmodel_fingerprint_line("name", updated.name))
-        loop value in updated.selected_profiles -> lines.push(envmodel_fingerprint_line("selected", value))
+        loop value in updated.selected_profiles {
+            lines.push(envmodel_fingerprint_line("selected", value))
+        }
         loop value in updated.applied -> lines.push(envmodel_fingerprint_line("applied", value))
         loop value in updated.sources -> lines.push(envmodel_fingerprint_line("source", value))
         loop package in updated.packages {
@@ -85,7 +88,9 @@ PackageProfilePlan: struct {
             lines.push(envmodel_fingerprint_line("package.upstream", package.upstream ?? "<none>"))
             lines.push(envmodel_fingerprint_line("package.provider", package.provider))
             lines.push(envmodel_fingerprint_line("package.channel", package.channel ?? "<none>"))
-            loop owner in package.declared_by -> lines.push(envmodel_fingerprint_line("package.declared_by", owner))
+            loop owner in package.declared_by {
+                lines.push(envmodel_fingerprint_line("package.declared_by", owner))
+            }
             lines.push(envmodel_fingerprint_line("package.provider_facts", package.provider_facts.digest()))
         }
         loop path in envmodel_sorted_keys(updated.collisions) {
@@ -93,7 +98,7 @@ PackageProfilePlan: struct {
             lines.push(envmodel_fingerprint_line("collision.provider", updated.collisions[path]))
         }
         updated.fingerprint = "sha256-{pkg_sha256_hex(lines.join("").bytes())}"
-        facts := [String: ProviderFacts]{}
+        facts := [String:ProviderFacts]{}
         loop package in updated.packages -> facts[package.raw] = package.provider_facts
         updated.provider_facts = facts
         updated
@@ -115,7 +120,9 @@ PackageProfileError: enum {
             .Missing(name) -> "package generation '{name}' does not exist"
             .Cycle(names) -> "package generation inheritance cycle: {names.join(" -> ")}"
             .Conflict(name) -> {
-                if name.starts_with(ENVMODEL_RESOLVER_BUDGET_NAME) -> return "package generation resolver exceeds {name.removeprefix(ENVMODEL_RESOLVER_BUDGET_NAME)} entries"
+                if name.starts_with(ENVMODEL_RESOLVER_BUDGET_NAME) {
+                    return "package generation resolver exceeds {name.removeprefix(ENVMODEL_RESOLVER_BUDGET_NAME)} entries"
+                }
                 "package generation fact '{name}' conflicts"
             }
         }
@@ -128,10 +135,11 @@ envmodel_resolver_budget_error: fn() -> PackageProfileError Never! {
 
 // Resolver visit state: absent, entered (on the stack), or finished.
 ENVMODEL_PROFILE_ENTERED: 1
+
 ENVMODEL_PROFILE_FINISHED: 2
 
 PackageProfileSet: struct {
-    profiles: [String: PackageProfileSpec]{[String: PackageProfileSpec]{}}
+    profiles: [String:PackageProfileSpec]{[String:PackageProfileSpec]{}}
 
     // An equal re-declaration merges its source modules; different facts
     // under one name conflict.
@@ -147,7 +155,9 @@ PackageProfileSet: struct {
             self.profiles[profile.name] = merged
             return
         }
-        if self.profiles.len() >= ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
+        if self.profiles.len() >= ENVMODEL_MAX_RESOLVER_NODES {
+            return Err(envmodel_resolver_budget_error())
+        }
         self.profiles[profile.name] = profile
     }
 
@@ -159,22 +169,24 @@ PackageProfileSet: struct {
     // full resolver budget within a bounded native stack.
     resolve_many: fn(self, names: [String]) -> ResolvedPackageProfile PackageProfileError! {
         selected := [String]{}
-        selected_seen := [String: Bool]{}
+        selected_seen := [String:Bool]{}
         loop name in names {
             if selected_seen.get(name) == None {
                 selected_seen[name] = true
-                if selected.len() >= ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
+                if selected.len() >= ENVMODEL_MAX_RESOLVER_NODES {
+                    return Err(envmodel_resolver_budget_error())
+                }
                 selected.push(name.copy())
             }
         }
         resolved := ResolvedPackageProfile{name: selected.join("+"), selected_profiles: selected}
-        state := [String: Int]{}
+        state := [String:Int]{}
         stack := [String]{}
         frame_names := [String]{}
         frame_next := [Int]{}
-        source_seen := [String: Bool]{}
-        declared_by_seen := [String: Bool]{}
-        package_indices := [String: Int]{}
+        source_seen := [String:Bool]{}
+        declared_by_seen := [String:Bool]{}
+        package_indices := [String:Int]{}
         loop name in selected {
             if (state.get(name) ?? 0) == ENVMODEL_PROFILE_FINISHED -> next
             frame_names.push(name)
@@ -183,8 +195,12 @@ PackageProfileSet: struct {
                 top: frame_names.len() - 1
                 current: frame_names[top].copy()
                 if state.get(current) == None {
-                    if self.profiles.get(current) == None -> return Err(PackageProfileError.Missing(current))
-                    if state.len() >= ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
+                    if self.profiles.get(current) == None {
+                        return Err(PackageProfileError.Missing(current))
+                    }
+                    if state.len() >= ENVMODEL_MAX_RESOLVER_NODES {
+                        return Err(envmodel_resolver_budget_error())
+                    }
                     state[current] = ENVMODEL_PROFILE_ENTERED
                     stack.push(current.copy())
                 }
@@ -200,7 +216,9 @@ PackageProfileSet: struct {
                     loop source in profile.sources {
                         if source_seen.get(source) == None {
                             source_seen[source] = true
-                            if resolved.sources.len() >= ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
+                            if resolved.sources.len() >= ENVMODEL_MAX_RESOLVER_NODES {
+                                return Err(envmodel_resolver_budget_error())
+                            }
                             resolved.sources.push(source.copy())
                         }
                     }
@@ -208,7 +226,9 @@ PackageProfileSet: struct {
                         package_index: if package_indices.get(raw) == {
                             .Val(index) -> index
                             .None -> {
-                                if resolved.packages.len() >= ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
+                                if resolved.packages.len() >= ENVMODEL_MAX_RESOLVER_NODES {
+                                    return Err(envmodel_resolver_budget_error())
+                                }
                                 index: resolved.packages.len()
                                 package_indices[raw] = index
                                 resolved.packages.push(PackageProfilePackage{raw: raw})
@@ -226,10 +246,14 @@ PackageProfileSet: struct {
                         provider: profile.collisions[path]
                         if resolved.collisions.get(path) == {
                             .Val(existing) -> {
-                                if existing != provider -> return Err(PackageProfileError.Conflict("{current}.collisions.{path}"))
+                                if existing != provider {
+                                    return Err(PackageProfileError.Conflict("{current}.collisions.{path}"))
+                                }
                             }
                             .None -> {
-                                if resolved.collisions.len() >= ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
+                                if resolved.collisions.len() >= ENVMODEL_MAX_RESOLVER_NODES {
+                                    return Err(envmodel_resolver_budget_error())
+                                }
                                 resolved.collisions[path] = provider
                             }
                         }

@@ -28,17 +28,24 @@ use {
 }
 
 USAGE: "usage: profile.mjs analyze <perf.script> <map.json> <repo> <out> <graph> | needs-dwarf <summary.json> | render <folded> <svg>"
+
 MAP_SCHEMA: "jet-bootstrap-source-map/v2"
+
 WIDTH: 1400
+
 UNCLASSIFIED: "unclassified"
+
 // U+FFFD, what UTF-8 output writes for a lone surrogate.
 REPLACEMENT: "�"
+
 // The phases phases.txt lists, in its order.
 PHASES: [String]{"registration", "sema check", "comptime", "lowering", "optimization", "emission", "unclassified"}
+
 // The Jet module each jetc_<library> crate builds.
-MODULES: [String: String]{"jetfoundation": "JetFoundation", "jetsema": "JetSema", "jetcomptime": "JetComptime", "jetparser": "JetParser", "jetlexer": "JetLexer", "jetdriver": "JetDriver", "jeteval": "JetEval", "jetbackend": "JetBackend", "jetcli": "JetCli"}
+MODULES: [String:String]{"jetfoundation": "JetFoundation", "jetsema": "JetSema", "jetcomptime": "JetComptime", "jetparser": "JetParser", "jetlexer": "JetLexer", "jetdriver": "JetDriver", "jeteval": "JetEval", "jetbackend": "JetBackend", "jetcli": "JetCli"}
+
 // The byte each `_` escape letter of a generated name stands for.
-ESCAPES: [String: String]{"_u": "_", "_d": ".", "_c": ":", "_s": "/", "_b": "\\", "_h": "-"}
+ESCAPES: [String:String]{"_u": "_", "_d": ".", "_c": ":", "_s": "/", "_b": "\\", "_h": "-"}
 
 // A name `pattern` places: a phase, or a module.
 Rule: struct {
@@ -55,12 +62,14 @@ FUNCTION_PHASES: [Rule]{
     {pattern: Regex{"\b(?:ir_|lower_|lowering_)"}, name: "lowering"},
     {pattern: Regex{"\b(?:sema_check_|sema_function_check|sema_expr_|sema_statement_|check_expression|check_program)"}, name: "sema check"},
 }
+
 // The phases a frame's crate guesses, for a stack no function places.
 CRATE_PHASES: [Rule]{
     {pattern: Regex{"\b(?:jetsema::|sema_)"}, name: "sema check"},
     {pattern: Regex{"\bjetbackend::"}, name: "emission"},
     {pattern: Regex{"\bjetir::"}, name: "lowering"},
 }
+
 // The module a bare function name's prefix places it in.
 PREFIX_MODULES: [Rule]{
     {pattern: Regex{"^sema_"}, name: "JetSema"},
@@ -97,14 +106,14 @@ Decl: struct {
 
 // The declarations by name: `slots` gives each name's place in `groups`.
 Index: struct {
-    slots: [String: Int]
+    slots: [String:Int]
     groups: [[Decl]]
 }
 
 // Counts by key, in first-seen order.
 Counts: struct {
     entries: [(key: String, count: Int)]
-    slots: [String: Int]
+    slots: [String:Int]
 }
 
 // A frame's samples: every sample it is on and those it is the leaf of.
@@ -122,7 +131,7 @@ Profile: struct {
     unresolved_roots: Int
     jet_stacks: Int
     rows: [Row]
-    row_slots: [String: Int]
+    row_slots: [String:Int]
     folded: Counts
     phases: Counts
 }
@@ -153,24 +162,28 @@ Node: struct {
     name: String
     count: Int
     children: [String]
-    slots: [String: Int]
+    slots: [String:Int]
 }
 
 run: fn() -> Never Err! {
     args: process.args()
     if {
-        args.len() == 6 && args[0] == "analyze" -> analyze(args[1], args[2], args[3], args[4], args[5])
-        args.len() == 2 && args[0] == "needs-dwarf" -> process.exit(if json.decode<Summary>(read_text(args[1])).needs_dwarf -> 0 else -> 1)
-        args.len() == 3 && args[0] == "render" -> files.write(args[2], render_folded(read_text(args[1])))
+        args.len() == 6 && args[0] == "analyze" -> {
+            analyze(args[1], args[2], args[3], args[4], args[5])
+        }
+        args.len() == 2 && args[0] == "needs-dwarf" -> {
+            process.exit(if json.decode<Summary>(read_text(args[1])).needs_dwarf -> 0 else -> 1)
+        }
+        args.len() == 3 && args[0] == "render" -> {
+            files.write(args[2], render_folded(read_text(args[1])))
+        }
         else -> process.fail(2, USAGE)
     }
     process.exit(0)
 }
 
 // The file's text; bytes that are not UTF-8 read as U+FFFD.
-read_text: fn(path: String) -[FS]> String Err! {
-    String.from_bytes_lossy(files.read_bytes(path))
-}
+read_text: fn(path: String) -[FS]> String Err! { String.from_bytes_lossy(files.read_bytes(path)) }
 
 // The Jet path a generated `__jet_` name encodes. The name escapes UTF-8
 // bytes, not scalars: `_u` `_d` `_c` `_s` `_b` `_h` are `_` `.` `:` `/` `\`
@@ -202,7 +215,7 @@ jet_name: fn(symbol: String, index: Index) -> String Never! {
 // Every `name:` declaration in the files the source map lists, read from REPO.
 // A missing map only leaves the names without locations.
 source_index: fn(map_file: String, repo: String) -[Env, FS, IO]> Index Err! {
-    index := Index{slots: [String: Int]{}, groups: [[Decl]]{}}
+    index := Index{slots: [String:Int]{}, groups: [[Decl]]{}}
     if !files.exists(map_file) {
         term.eprint("Source map unavailable: {map_file}; names still decoded, no declaration locations.")
         return Ok(index)
@@ -227,7 +240,7 @@ source_index: fn(map_file: String, repo: String) -[Env, FS, IO]> Index Err! {
 }
 
 // The place of `key` in `slots`, which gives it `next` when it is new.
-slot_of: fn(slots: &[String: Int], next: Int, key: String) -> Int Never! {
+slot_of: fn(slots: &[String:Int], next: Int, key: String) -> Int Never! {
     if !slots.has_key(key) -> slots[key.copy()] = next  // copy: the slots and the list both hold the key
     slots[key]
 }
@@ -242,7 +255,9 @@ declaration_location: fn(symbol: String, index: Index) -> String Never! {
     loop name in names {
         wanted: Val(found.groups[0].copy())  // copy: the filter keeps its own module
         hits: index.groups[index.slots.get(name) ?? next].filter(fn(decl) { decl.module == wanted })
-        if hits.len() == 1 -> return " [decl {hits[0].location}{if hits[0].mapped -> "" else -> " (current source)"}]"
+        if hits.len() == 1 {
+            return " [decl {hits[0].location}{if hits[0].mapped -> "" else -> " (current source)"}]"
+        }
     }
     ""
 }
@@ -283,7 +298,7 @@ count_of: fn(counts: Counts, key: String) -> Int Never! {
 // A frame's display name: the Jet name, a bare function name that one file
 // declares or whose prefix places it qualified by its module, and the
 // declaration location. `names` keeps each symbol's result.
-normalize: fn(raw: String, index: Index, names: &[String: String]) -> String Never! {
+normalize: fn(raw: String, index: Index, names: &[String:String]) -> String Never! {
     if names.get(raw) == .Val(known) -> return known
     name := jet_name(raw, index)
     // Optimized Rust DWARF/perf may expose only the bare Jet function name.
@@ -300,17 +315,25 @@ normalize: fn(raw: String, index: Index, names: &[String: String]) -> String Nev
 
 // Counts one sample's stack, leaf first, into `profile` and empties it.
 flush: fn(profile: &Profile, stack: &[String]) Never! {
-    if stack.len() == 0 -> return
+    if stack.len() == 0 {
+        return
+    }
     profile.samples += 1
     if stack.len() <= 2 -> profile.short_stacks += 1
     // The root frame unresolved: [unknown], a bare address or unknown, in any
     // ASCII case.
-    if regex.is_match(Regex{"^(?:\[unknown\]|0x[0-9a-f]+|unknown)(?: |$)"}, stack[stack.len() - 1].to_ascii_lower()) -> profile.unresolved_roots += 1
-    if stack.any(fn(frame) { regex.is_match(Regex{"\bJet[A-Za-z]+::"}, frame) }) -> profile.jet_stacks += 1
+    if regex.is_match(Regex{"^(?:\[unknown\]|0x[0-9a-f]+|unknown)(?: |$)"}, stack[stack.len() - 1].to_ascii_lower()) {
+        profile.unresolved_roots += 1
+    }
+    if stack.any(fn(frame) { regex.is_match(Regex{"\bJet[A-Za-z]+::"}, frame) }) {
+        profile.jet_stacks += 1
+    }
     add(profile.phases, classify(stack))
     loop frame in stack {
         slot: slot_of(profile.row_slots, profile.rows.len(), frame)
-        if slot == profile.rows.len() -> profile.rows.push(Row{name: frame.copy(), inclusive: 0, own: 0, last: 0})  // copy: the slots and the rows both hold the frame
+        if slot == profile.rows.len() {
+            profile.rows.push(Row{name: frame.copy(), inclusive: 0, own: 0, last: 0})  // copy: the slots and the rows both hold the frame
+        }
         if profile.rows[slot].last == profile.samples -> next
         profile.rows[slot].last = profile.samples
         profile.rows[slot].inclusive += 1
@@ -322,26 +345,32 @@ flush: fn(profile: &Profile, stack: &[String]) Never! {
     stack.clear()
 }
 
-analyze: fn(script: String, map_file: String, repo: String, out: String, graph: String) -[Env, FS, IO]> Err! {
+analyze: fn(script: String, map_file: String, repo: String, out: String, graph: String) Err! -[Env, FS, IO]> {
     index: source_index(map_file, repo)
-    names := [String: String]{}
-    profile := Profile{samples: 0, short_stacks: 0, unresolved_roots: 0, jet_stacks: 0, rows: [Row]{}, row_slots: [String: Int]{}, folded: Counts{entries: [(key: String, count: Int)]{}, slots: [String: Int]{}}, phases: Counts{entries: [(key: String, count: Int)]{}, slots: [String: Int]{}}}
+    names := [String:String]{}
+    profile := Profile{samples: 0, short_stacks: 0, unresolved_roots: 0, jet_stacks: 0, rows: [Row]{}, row_slots: [String:Int]{}, folded: Counts{entries: [(key: String, count: Int)]{}, slots: [String:Int]{}}, phases: Counts{entries: [(key: String, count: Int)]{}, slots: [String:Int]{}}}
     stack := [String]{}
     loop line in read_text(script).replace("\r\n", "\n").replace("\r", "\n").split("\n") {
         // perf script callchain rows: address symbol (DSO), including (inlined).
         frame: regex.match(Regex{"^\s+([0-9a-fA-F]+)\s+([^\n\r\u2028\u2029]+?)\s+\(([^()]*)\)(?:\s+\([iI][nN][lL][iI][nN][eE][dD]\))?\s*$"}, line)
         if {
             line.trim() == "" -> flush(profile, stack)
-            frame == .Val(row) -> stack.push(normalize(regex.replace(Regex{"\+0x[0-9a-f]+$"}, row.groups[1], ""), index, names))
+            frame == .Val(row) -> {
+                stack.push(normalize(regex.replace(Regex{"\+0x[0-9a-f]+$"}, row.groups[1], ""), index, names))
+            }
             // An event header starts a new sample. The callchain includes its
             // leaf; don't count the header's copy of that leaf a second time.
-            regex.is_match(Regex{"^\S[^\n\r\u2028\u2029]*[0-9]+\.[0-9]+:"}, line) -> flush(profile, stack)
+            regex.is_match(Regex{"^\S[^\n\r\u2028\u2029]*[0-9]+\.[0-9]+:"}, line) -> {
+                flush(profile, stack)
+            }
             else -> {}
         }
     }
     flush(profile, stack)
     samples: profile.samples
-    if samples == 0 -> return Err("No CPU samples captured; check PID activity and perf permissions.")
+    if samples == 0 {
+        return Err("No CPU samples captured; check PID activity and perf permissions.")
+    }
     ranked := profile.rows
     ranked.sort_by(fn(a, b) { if a.inclusive != b.inclusive -> b.inclusive <=> a.inclusive else -> b.own <=> a.own })
     rows: ranked.take(30).map(fn(row) { TopRow{name: row.name.copy(), inclusive: row.inclusive, own: row.own} }).to_list()  // copy: the report owns its names
@@ -362,7 +391,9 @@ analyze: fn(script: String, map_file: String, repo: String, out: String, graph: 
     // Each phase's count, in the order the samples first named it (a map
     // encodes in key order).
     phase_counts := [(key: String, value: Dyn)]{}
-    loop phase in profile.phases.entries -> phase_counts.push((key: phase.key.copy(), value: phase.count.encode()))  // copy: the summary owns its keys
+    loop phase in profile.phases.entries {
+        phase_counts.push((key: phase.key.copy(), value: phase.count.encode()))  // copy: the summary owns its keys
+    }
     summary: Report{
         samples: samples,
         graph: graph.copy(),  // copy: the summary owns its text
@@ -381,7 +412,7 @@ analyze: fn(script: String, map_file: String, repo: String, out: String, graph: 
 // frame's full Jet name and samples in its hover title; an error when no line
 // holds a sample.
 render_folded: fn(folded: String) -> String Err! {
-    nodes := [Node]{{name: "all samples", count: 0, children: [String]{}, slots: [String: Int]{}}}
+    nodes := [Node]{{name: "all samples", count: 0, children: [String]{}, slots: [String:Int]{}}}
     depth := 0
     loop line in folded.trim().split("\n") {
         found: regex.match(Regex{"^([^\n\r\u2028\u2029]*) ([1-9][0-9]*|0+[1-9][0-9]*)$"}, line) ?? next
@@ -394,7 +425,7 @@ render_folded: fn(folded: String) -> String Err! {
             child: slot_of(nodes[at].slots, nodes.len(), name)
             if child == nodes.len() {
                 nodes[at].children.push(name.copy())  // copy: the parent's children and the node both hold the frame
-                nodes.push(Node{name: name.copy(), count: 0, children: [String]{}, slots: [String: Int]{}})  // copy: the parent's children and the node both hold the frame
+                nodes.push(Node{name: name.copy(), count: 0, children: [String]{}, slots: [String:Int]{}})  // copy: the parent's children and the node both hold the frame
             }
             nodes[child].count += count
             at = child
@@ -455,7 +486,9 @@ utf16_prefix: fn(name: String, limit: Int) -> String Never! {
     units := 0
     loop scalar in text.scalars(name) {
         units += scalar.bytes().len() /% 3 + 1
-        if units > limit -> return "{kept.join("")}{if units == limit + 1 && scalar.bytes().len() == 4 -> REPLACEMENT else -> ""}"
+        if units > limit {
+            return "{kept.join("")}{if units == limit + 1 && scalar.bytes().len() == 4 -> REPLACEMENT else -> ""}"
+        }
         kept.push(scalar)
     }
     kept.join("")

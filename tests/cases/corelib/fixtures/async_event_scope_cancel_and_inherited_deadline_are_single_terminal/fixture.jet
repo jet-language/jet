@@ -1,4 +1,5 @@
 package: { name: "async-event-scope-cancel" authority: { allow: [Time] } }
+
 use {
     event: core.event
     tasks: core.tasks
@@ -6,7 +7,7 @@ use {
 
 owner_teardown_task: fn() -> Task<DispatchReport<String>> {
     owner_scope: event.scope()
-    ev: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    ev: event.async_result<Int, String>(AsyncPolicy{capacity: 1, overflow: .Block}, .Collect) ?? panic("policy")
     { sender: started_tx, receiver: started_rx }: channel<Int>()
     { sender: release_tx, receiver: release_rx }: channel<Int>()
     ev.on(owner_scope, fn(n: Int) {
@@ -24,15 +25,13 @@ owner_teardown_task: fn() -> Task<DispatchReport<String>> {
 // no deadline of its own, so it reads the entry's DeadlineExceeded report
 // instead of being stopped once the deadline has passed.
 emit_expiring: fn(ev: AsyncEvent<Int, String>, n: Int) -> Task<DispatchReport<String>> {
-    #Deadline(20ms) {
-        return ev.emit_async(n)
-    }
+    #Deadline(20ms) { return ev.emit_async(n) }
     panic("the deadline block returns")
 }
 
 run: fn() {
     cancel_scope: event.scope()
-    cancelled: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    cancelled: event.async_result<Int, String>(AsyncPolicy{capacity: 1, overflow: .Block}, .Collect) ?? panic("policy")
     { sender: cancel_started_tx, receiver: cancel_started_rx }: channel<Int>()
     { sender: cancel_release_tx, receiver: cancel_release_rx }: channel<Int>()
     cancelled.on(cancel_scope, fn(n: Int) {
@@ -54,7 +53,7 @@ run: fn() {
     print("after-cancel q={cancelled.queued_count()} r={cancelled.running_count()} p={cancelled.blocked_count()}")
 
     queued_scope: event.scope()
-    queued_deadline: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    queued_deadline: event.async_result<Int, String>(AsyncPolicy{capacity: 1, overflow: .Block}, .Collect) ?? panic("policy")
     { sender: queued_started_tx, receiver: queued_started_rx }: channel<Int>()
     { sender: queued_release_tx, receiver: queued_release_rx }: channel<Int>()
     queued_deadline.on(queued_scope, fn(n: Int) {
@@ -70,7 +69,7 @@ run: fn() {
     _: queued_running.join() ?? panic("queued running join")
 
     pending_scope: event.scope()
-    pending_deadline: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    pending_deadline: event.async_result<Int, String>(AsyncPolicy{capacity: 1, overflow: .Block}, .Collect) ?? panic("policy")
     { sender: pending_started_tx, receiver: pending_started_rx }: channel<Int>()
     { sender: pending_release_tx, receiver: pending_release_rx }: channel<Int>()
     pending_deadline.on(pending_scope, fn(n: Int) {

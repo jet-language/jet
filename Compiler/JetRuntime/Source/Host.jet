@@ -31,7 +31,7 @@ host_root := I64{0}
 #Export(c) jet_rt_host_program_start: fn() {
     #Unsafe("rt_sigaction synchronously borrows the four-word SIG_IGN action; no signal handler or restorer runs for ignored SIGPIPE") {
         status: os_syscall_stack4_i64(I64{13}, I64{13}, I64{1}, I64{0}, I64{0}, I64{0}, I64{8})
-        if (status < I64{0}) -> host_sigpipe_refused()
+        if (status < I64{0}) { host_sigpipe_refused() }
     }
 }
 
@@ -192,14 +192,16 @@ host_is_tty: fn(fd: I64) -> Bool {
 // standard streams; any other Int reads false. An exact Int 0..2 is its own
 // inline word, so the borrowed word compares directly.
 #Export(c) jet_term_is_terminal_raw: fn(fd: I64) -> Bool {
-    if (fd < I64{0} || fd > I64{2}) -> return false
+    if (fd < I64{0} || fd > I64{2}) { return false }
     host_is_tty(fd)
 }
 
 // runtime-fini: 1 when host_root
 #Export(c) jet_rt_stdout_flush: fn() {
     // A terminal host fault may precede the runtime's init array.
-    if (host_root == I64{0}) -> return
+    if (host_root == I64{0}) {
+        return
+    }
     host_lock()
     _ := host_stdout_flush_locked()
     host_unlock()
@@ -210,7 +212,9 @@ host_is_tty: fn(fd: I64) -> Bool {
 // already printed (Rust's line writer holds none). The forking thread
 // blocks on the lock and never parks a fiber, as for the fork gate.
 host_fork_hold: fn() {
-    if (host_root == I64{0}) -> return
+    if (host_root == I64{0}) {
+        return
+    }
     sync_thread_lock(host_root)
     _ := host_stdout_flush_locked()
 }
@@ -218,15 +222,21 @@ host_fork_hold: fn() {
 // The parent unlocks. The child, whose only thread is the forking one,
 // stores the lock's initial state.
 host_fork_release: fn(child: Bool) {
-    if (host_root == I64{0}) -> return
-    if child { sync_store(host_root, I64{0}) } else { host_unlock() }
+    if (host_root == I64{0}) {
+        return
+    }
+    if child -> sync_store(host_root, I64{0}) else -> host_unlock()
 }
 
 // The fault report's flush (Fault.jet): skipped when the lock is held, since
 // the faulting thread may hold it mid-write and would wait forever.
 host_stdout_flush_fault: fn() {
-    if (host_root == I64{0}) -> return
-    if !sync_mutex_try_lock(host_root) -> return
+    if (host_root == I64{0}) {
+        return
+    }
+    if !sync_mutex_try_lock(host_root) {
+        return
+    }
     _ := host_stdout_flush_locked()
     host_unlock()
 }
@@ -243,7 +253,9 @@ host_print_capture_install: fn(code: I64) {
 
 #Export(c) jet_term_write_stdout_line: fn(value: I64, flush: U8) {
     capture: host_print_capture_code
-    if (capture != I64{0} && coll_call1(capture, value) != I64{0}) -> return
+    if (capture != I64{0} && coll_call1(capture, value) != I64{0}) {
+        return
+    }
     // `value` is a borrowed E4 JetCText header; stdout copies its bytes before
     // returning.
     _ := host_stdout_write(rt_text_word(value), rt_text_word(wrapping(value + I64{8})), true, flush != U8{0})
@@ -264,7 +276,9 @@ host_print_capture_install: fn(code: I64) {
         loop at <= length {
             count: os_write_line_i64(I64{1}, wrapping(bytes + at), wrapping(length - at))
             if (count == I64{-4}) { next }
-            if (count <= I64{0}) { return }
+            if (count <= I64{0}) {
+                return
+            }
             at = wrapping(at + count)
         }
     }

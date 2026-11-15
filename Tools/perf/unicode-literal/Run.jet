@@ -39,17 +39,46 @@ use {
 }
 
 ORIGINAL_BYTES: 1487610
+
 GIB: 1073741824
+
 HEX: [String]{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F"}
 
-Options: struct { work: String, memory: String, bytes: Int, receipt: String, time: String }
+Options: struct {
+    work: String
+    memory: String
+    bytes: Int
+    receipt: String
+    time: String
+}
 
-TraceArgs: struct { rss_kb: Int?, peak_rss_kb: Int? }
-TraceEvent: struct { name: String, ph: String, cat: String?, ts: Int?, tid: Int, args: TraceArgs? }
-OpenSpan: struct { kind: String, ts: Int }
+TraceArgs: struct {
+    rss_kb: Int?
+    peak_rss_kb: Int?
+}
+
+TraceEvent: struct {
+    name: String
+    ph: String
+    cat: String?
+    ts: Int?
+    tid: Int
+    args: TraceArgs?
+}
+
+OpenSpan: struct {
+    kind: String
+    ts: Int
+}
+
 // A top-level span of the opening lane: its wall and the process's resident
 // and peak resident memory at its end.
-PhaseMemory: struct { kind: String, wall_us: Int, rss_kb: Int, peak_rss_kb: Int }
+PhaseMemory: struct {
+    kind: String
+    wall_us: Int
+    rss_kb: Int
+    peak_rss_kb: Int
+}
 
 usage: fn(message: String) -> Never {
     term.eprint("Run.jet: {message}")
@@ -106,7 +135,7 @@ trace_phases: fn(text: String) -> [PhaseMemory] {
         if event.tid != lane -> next
         ts: event.ts ?? next
         if event.ph == "B" {
-            stack.push(OpenSpan{kind: event.cat ?? event.name, ts})
+            stack.push(OpenSpan{kind: event.cat ?? event.name, ts: ts})
             next
         }
         open: stack.pop() ?? next
@@ -121,7 +150,7 @@ time_value: fn(report: String, key: String) -> String {
     prefix: "{key}: "
     loop raw in report.split("\n") {
         line: raw.trim()
-        if line.starts_with(prefix) -> return line.remove_prefix(prefix).copy() // copy: the value outlives the report's lines
+        if line.starts_with(prefix) -> return line.remove_prefix(prefix).copy()  // copy: the value outlives the report's lines
     }
     ""
 }
@@ -138,20 +167,24 @@ phase_table: fn(phases: [PhaseMemory]) -> [String] {
 // The IDENTITY file beside a jet, else "".
 identity_of: fn(jet: String) -> String {
     identity_file: files.join(files.dirname(jet), "IDENTITY")
-    if files.is_file(identity_file) -> (files.read(identity_file) ?? "").trim().partition("\n").head.copy() else -> "" // copy: the identity outlives the file text
+    if files.is_file(identity_file) -> (files.read(identity_file) ?? "").trim().partition("\n").head.copy() else -> ""  // copy: the identity outlives the file text
 }
 
 run: fn() -> Never {
     options := parse_options(process.args())
     jet: sys.get("JET") ?? usage("set JET to the compiler to measure")
     if !files.is_file(jet) -> usage("JET={jet} is not a file")
-    if options.work == "" -> options.work = files.join(sys.temp_dir(), "jet-unicode-literal-{time.now().to_unix_ms()}")
+    if options.work == "" {
+        options.work = files.join(sys.temp_dir(), "jet-unicode-literal-{time.now().to_unix_ms()}")
+    }
     work: files.absolute(options.work) ?? usage("cannot resolve --work {options.work}")
     files.remove_all(work) ?? ()
     program: files.join(work, "program")
     store: files.join(work, "store")
     cache: files.join(work, "cache")
-    loop dir in ([String]{program, store, cache}) -> files.create_dir_all(dir) ?? usage("cannot create {dir}: {err}")
+    loop dir in ([String]{program, store, cache}) {
+        files.create_dir_all(dir) ?? usage("cannot create {dir}: {err}")
+    }
     source: program_source(options.bytes)
     main: files.join(program, "main.jet")
     files.write(main, source) ?? usage("cannot write {main}: {err}")
@@ -190,12 +223,16 @@ run: fn() -> Never {
     verdict: if passed -> "PASS" else -> "FAIL"
     shown_status: if status == "" -> "-" else -> status
     lines.push("unicode literal: {verdict}: exit {receipt.code}, time -v exit status {shown_status}, peak {time_peak /% 1024} MiB (time -v), {peak /% 1024} MiB (trace)")
-    if !passed && receipt.errors.trim() != "" -> lines.push("stderr: {receipt.errors.trim().partition("\n").head}")
+    if !passed && receipt.errors.trim() != "" {
+        lines.push("stderr: {receipt.errors.trim().partition("\n").head}")
+    }
     // The receipt is committed, so it names the jet and the work directory
     // as $JET and <work>, not by their paths on the measuring machine.
     text: "{lines.join("\n")}\n".replace(jet, "$JET").replace(work, "<work>")
     files.write(files.join(work, "receipt.txt"), text) ?? usage("cannot write {work}/receipt.txt: {err}")
-    if options.receipt != "" -> files.write(options.receipt, text) ?? usage("cannot write {options.receipt}: {err}")
+    if options.receipt != "" {
+        files.write(options.receipt, text) ?? usage("cannot write {options.receipt}: {err}")
+    }
     print(text)
     process.exit(if passed -> 0 else -> 1)
 }

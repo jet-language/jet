@@ -57,7 +57,9 @@ link_read_archive: fn(path: String, bytes: [U8]) -> LinkArchive Never! {
     magic: [Int]{0x21, 0x3c, 0x61, 0x72, 0x63, 0x68, 0x3e, 0x0a}
     if bytes.len() < 8 -> return link_ar_failure(path, "not an archive (too short)")
     loop (k, byte) in magic {
-        if (Int{bytes[k]}) != byte -> return link_ar_failure(path, "not an `ar` archive (thin and BSD archives are not supported)")
+        if (Int{bytes[k]}) != byte {
+            return link_ar_failure(path, "not an `ar` archive (thin and BSD archives are not supported)")
+        }
     }
     archive := LinkArchive{path: path, names: [String]{}, starts: [Int]{}, sizes: [Int]{}, symbol_names: [String]{}, symbol_members: [Int]{}, errors: [String]{}}
     // Header offset of every ordinary member, to translate index entries.
@@ -102,9 +104,7 @@ link_read_archive: fn(path: String, bytes: [U8]) -> LinkArchive Never! {
                     return archive
                 }
                 name = link_ar_text(bytes, long_names_at + offset, long_names_end, 0x2f)
-            } else {
-                name = link_ar_text(bytes, at, at + 16, 0x2f)
-            }
+            } else { name = link_ar_text(bytes, at, at + 16, 0x2f) }
             ordinals.add(at, archive.names.len()).drop("member header offsets are unique")
             archive.names.push(name)
             archive.starts.push(start)

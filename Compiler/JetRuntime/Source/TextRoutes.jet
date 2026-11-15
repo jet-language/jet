@@ -1,7 +1,10 @@
 // Current native C route ABI, reusing E4 ownership and Unicode/search kernels.
 // Lists return count plus an owned word-column, exactly as CAbiRoutes list_out.
 #Export(c) jet_string_copy: fn(value: I64) -> I64 { jet_rt_string_clone(value) }
-#Export(c) jet_string_count_bytes: fn(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_len(value)) }
+
+#Export(c) jet_string_count_bytes: fn(value: I64) -> I64 {
+    jet_int_owned_from_i64(rt_text_len(value))
+}
 
 // `s.capacity()`: the bytes `s` holds before it must grow; a static text
 // or a frame view (no buffer of its own to grow) answers its length.
@@ -105,7 +108,9 @@ rt_text_hash_fold: fn(hash: I64, word: I64) -> I64 {
         if (rt_text_byte(wrapping(bytes + at)) == I64{10}) { count += I64{1} }
         at += I64{1}
     }
-    if (length != I64{0} && rt_text_byte(wrapping(wrapping(bytes + length) - I64{1})) != I64{10}) { count += I64{1} }
+    if (length != I64{0} && rt_text_byte(wrapping(wrapping(bytes + length) - I64{1})) != I64{10}) {
+        count += I64{1}
+    }
     if (count > I64{1152921504606846975}) {
         rt_text_capacity_stop()
         return I64{0}
@@ -124,7 +129,9 @@ rt_text_hash_fold: fn(hash: I64, word: I64) -> I64 {
         }
         at += I64{1}
     }
-    if (start < length) { rt_text_store(wrapping(words + index * I64{8}), rt_text_slice(value, start, length)) }
+    if (start < length) {
+        rt_text_store(wrapping(words + index * I64{8}), rt_text_slice(value, start, length))
+    }
     count
 }
 
@@ -169,14 +176,16 @@ rt_text_hash_fold: fn(hash: I64, word: I64) -> I64 {
         width: if ascii -> I64{1} else -> rt_text_width(wrapping(bytes + at))
         at += width
     }
-    if (start >= I64{0}) { rt_text_store(wrapping(words + index * I64{8}), rt_text_slice(value, start, length)) }
+    if (start >= I64{0}) {
+        rt_text_store(wrapping(words + index * I64{8}), rt_text_slice(value, start, length))
+    }
     count
 }
 
 #Export(c) jet_string_repeat: fn(value: I64, count: I64) -> I64 {
     length: rt_text_len(value)
     native: jet_int_owned_to_i64(count)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     times: if (native < I64{0}) -> I64{0} else -> native
     if (times == I64{0} || length == I64{0}) { return rt_text_builder_with_capacity(I64{0}) }
     if (times > I64{9223372036854775807} /% length) {
@@ -204,9 +213,7 @@ rt_text_hash_fold: fn(hash: I64, word: I64) -> I64 {
     replacement: rt_text_len(to)
     matches := I64{0}
     at := I64{0}
-    if (width == I64{0}) {
-        matches = jet_char_len(value) + I64{1}
-    } else {
+    if (width == I64{0}) { matches = jet_char_len(value) + I64{1} } else {
         loop at <= length {
             found: rt_text_find(value, from, at, false)
             if (found < I64{0}) { break }
@@ -251,35 +258,40 @@ rt_text_ascii: fn(value: I64, upper: Bool) -> I64 {
     at := I64{0}
     loop at < length {
         byte: rt_text_byte(wrapping(data + at))
-        if (upper && byte >= I64{97} && byte <= I64{122}) { rt_text_put(wrapping(data + at), byte - I64{32}) }
-        if (!upper && byte >= I64{65} && byte <= I64{90}) { rt_text_put(wrapping(data + at), byte + I64{32}) }
+        if (upper && byte >= I64{97} && byte <= I64{122}) {
+            rt_text_put(wrapping(data + at), byte - I64{32})
+        }
+        if (!upper && byte >= I64{65} && byte <= I64{90}) {
+            rt_text_put(wrapping(data + at), byte + I64{32})
+        }
         at += I64{1}
     }
     result
 }
 
 #Export(c) jet_text_ascii_lower: fn(value: I64) -> I64 { rt_text_ascii(value, false) }
+
 #Export(c) jet_text_ascii_upper: fn(value: I64) -> I64 { rt_text_ascii(value, true) }
 
 #Export(c) jet_string_slice: fn(value: I64, start: I64, end: I64, file: I64, line: I64) -> I64 {
     // CAbiRoutes fixed::<u32> decodes an exact Int then checks the width.
     native_line: jet_int_owned_to_i64(line)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     if (native_line < I64{0} || native_line > I64{4294967295}) {
         trap_native_index_range_stop()
         return I64{0}
     }
     first: jet_int_owned_to_i64(start)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     last: jet_int_owned_to_i64(end)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     jet_rt_string_slice_range(value, first, last, U8{1}, rt_text_data(file), rt_text_len(file), native_line)
 }
 
 #Export(c) jet_string_slice_builtin: fn(value: I64, start: I64, end: I64) -> I64 {
     first: jet_int_owned_to_i64(start)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     last: jet_int_owned_to_i64(end)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     rt_text_slice_range(value, first, last, U8{1}, I64{0}, I64{0}, I64{0}, true)
 }

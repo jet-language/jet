@@ -19,7 +19,7 @@ CargoToolchain: struct {
     // A pinned/realized object (reproducible output hash), or the host dev toolchain.
     pinned: Bool
     // Prebuilt ring artifacts keyed by ring name (`http`, `regex`, …).
-    ring_artifacts: [String: String]
+    ring_artifacts: [String:String]
 
     // The active build toolchain, or None when neither a realized object nor
     // a host toolchain is available.
@@ -50,9 +50,7 @@ CargoToolchain: struct {
     }
 
     // The prebuilt ring artifact for `ring`, when this toolchain carries one.
-    ring_artifact: fn(self, ring: String) -> String? Never! {
-        self.ring_artifacts.get(ring)
-    }
+    ring_artifact: fn(self, ring: String) -> String? Never! { self.ring_artifacts.get(ring) }
 }
 
 // Read a realized toolchain object at `dir`; it needs an executable `cargo`.
@@ -67,8 +65,10 @@ recipe_toolchain_from_object: fn(dir: String) -[FS, Env]> CargoToolchain? Never!
     }
     version_path: files.join(dir, "version")
     version := ""
-    if recipe_toolchain_is_regular_file(version_path) -> version = (files.read(version_path) ?? "").trim()
-    ring_artifacts := [String: String]{}
+    if recipe_toolchain_is_regular_file(version_path) {
+        version = (files.read(version_path) ?? "").trim()
+    }
+    ring_artifacts := [String:String]{}
     ring_dir: files.join(dir, "ring")
     if files.stat(ring_dir) == {
         .Ok(ring_info) -> {
@@ -83,7 +83,7 @@ recipe_toolchain_from_object: fn(dir: String) -[FS, Env]> CargoToolchain? Never!
         .Err(_) -> {}
     }
     id: if version == "" -> "toolchain" else -> "toolchain-{version}"
-    Val(CargoToolchain{cargo, id, version, pinned: true, ring_artifacts})
+    Val(CargoToolchain{cargo: cargo, id: id, version: version, pinned: true, ring_artifacts: ring_artifacts})
 }
 
 // A regular file, never a link to one.
@@ -98,7 +98,7 @@ recipe_toolchain_host: fn() -[FS, Env, Exec, Time.Wait]> CargoToolchain? Never! 
     cargo: files.canonicalize(found) ?? return None
     receipt: process.cmd([String]{cargo, "--version"}).stdout(.Capture).stderr(.Capture).run() ?? return None
     if !receipt.success -> return None
-    Val(CargoToolchain{cargo, id: "host", version: "", pinned: false, ring_artifacts: [String: String]{}})
+    Val(CargoToolchain{cargo: cargo, id: "host", version: "", pinned: false, ring_artifacts: [String:String]{}})
 }
 
 // E1240: no realized Rust toolchain and no Nix to build an `extern rust`
@@ -108,6 +108,6 @@ recipe_toolchain_e1240: fn() -> RecipeDiagnostic Never! {
         "E1240",
         "no Rust build toolchain is available to build this package",
         "building an `extern rust` bridge dependency needs a pinned Rust toolchain (realized into the hangar) or Nix. Neither is present, so the bridge can't be compiled reproducibly.",
-        "run `jet update jet` to realize the pinned toolchain, or install Nix so the bridge builds through the compatibility provider."
+        "run `jet update jet` to realize the pinned toolchain, or install Nix so the bridge builds through the compatibility provider.",
     )
 }

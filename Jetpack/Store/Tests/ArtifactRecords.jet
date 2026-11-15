@@ -24,9 +24,7 @@ store_records_test_read: fn(store: ArtifactStore, kind: ArtifactRecordKind, key:
     }
 }
 
-store_records_test_refused: fn(published: Bool) {
-    assert(!published)
-}
+store_records_test_refused: fn(published: Bool) { assert(!published) }
 
 #Test("records round trip by kind and key") {
     root: store_records_test_root("round-trip")
@@ -60,11 +58,14 @@ store_records_test_refused: fn(published: Bool) {
     second: store_records_test_record(ArtifactRecordKind.ItemCheck.schema(), "two")
     expected_first: Val(first)
     expected_second: Val(second)
-    store.put_records(ArtifactRecordKind.ItemCheck, [ArtifactRecordPublication]{
-        ArtifactRecordPublication{key: "a", bytes: first},
-        ArtifactRecordPublication{key: "b", bytes: second},
-        ArtifactRecordPublication{key: "c", bytes: store_records_test_record(ArtifactRecordKind.Program.schema(), "wrong kind")},
-    }) ?? panic("publish batch")
+    store.put_records(
+        ArtifactRecordKind.ItemCheck,
+        [ArtifactRecordPublication]{
+            ArtifactRecordPublication{key: "a", bytes: first},
+            ArtifactRecordPublication{key: "b", bytes: second},
+            ArtifactRecordPublication{key: "c", bytes: store_records_test_record(ArtifactRecordKind.Program.schema(), "wrong kind")},
+        },
+    ) ?? panic("publish batch")
     assert(store_records_test_read(store, ArtifactRecordKind.ItemCheck, "a", false) == expected_first)
     assert(store_records_test_read(store, ArtifactRecordKind.ItemCheck, "b", false) == expected_second)
     assert(store_records_test_read(store, ArtifactRecordKind.ItemCheck, "c", false) == None)

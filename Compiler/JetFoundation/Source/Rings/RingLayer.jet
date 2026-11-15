@@ -241,7 +241,9 @@ jet_ring_dependency_keys: fn(usage: String) -> [String] Never! {
             break
         }
     }
-    if helper.len() > 0 && module_name != "core" -> jet_ring_insert_string(dependencies, module_name)
+    if helper.len() > 0 && module_name != "core" {
+        jet_ring_insert_string(dependencies, module_name)
+    }
     if usage == "core::json" -> jet_ring_insert_string(dependencies, "core.encoding.json")
     if usage == "core::bytes" -> jet_ring_insert_string(dependencies, "core.encoding")
     if !jet_ring_is_namespace_only(module_name) {
@@ -259,7 +261,9 @@ jet_ring_dependency_keys: fn(usage: String) -> [String] Never! {
 jet_ring_insert_string: fn(rows: &[String], value: String) Never! {
     index := 0
     loop index < rows.len() {
-        if rows[index] == value -> return
+        if rows[index] == value {
+            return
+        }
         if value < rows[index] -> break
         index += 1
     }
@@ -297,7 +301,7 @@ jet_ring_closure_order: fn(rows: [JetRingLayerFact]) -> [Int] Never! {
             start = end
         }
         order = merged
-        width = width * 2
+        width *= 2
     }
     order
 }

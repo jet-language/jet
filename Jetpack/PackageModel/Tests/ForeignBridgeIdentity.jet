@@ -1,9 +1,17 @@
 use {
     jet_pkg_model.[
-        BinderCapability, BinderDescriptor, FOREIGN_BRIDGE_IDENTITY_SCHEMA, ForeignIdentityBuilder,
-        ForeignLanguage, ForeignScalar, ScalarBridgeFunction, pkg_binder_descriptor,
-        pkg_bridge_compile_scalar_sidecar_with_identity, pkg_bridge_render_scalar_c,
-        pkg_bridge_render_scalar_jet, pkg_bridge_scalar_bridge_identity,
+        BinderCapability,
+        BinderDescriptor,
+        FOREIGN_BRIDGE_IDENTITY_SCHEMA,
+        ForeignIdentityBuilder,
+        ForeignLanguage,
+        ForeignScalar,
+        ScalarBridgeFunction,
+        pkg_binder_descriptor,
+        pkg_bridge_compile_scalar_sidecar_with_identity,
+        pkg_bridge_render_scalar_c,
+        pkg_bridge_render_scalar_jet,
+        pkg_bridge_scalar_bridge_identity,
     ]
     files: core.files
     process: core.process
@@ -79,7 +87,9 @@ pkg_bridge_test_tool_runs: fn(tool: String) -[Exec, Time.Wait]> Bool Never! {
 }
 
 #Test("scalar bridge cache reuses identical inputs and misses source changes") {
-    if !pkg_bridge_test_tool_runs("cc") || !pkg_bridge_test_tool_runs("ar") -> return
+    if !pkg_bridge_test_tool_runs("cc") || !pkg_bridge_test_tool_runs("ar") {
+        return
+    }
     scratch: files.temp_dir("jet-scalar-bridge-cache") ?? panic("scratch")
     root: scratch.path
     source: files.join(root, "ops.py")

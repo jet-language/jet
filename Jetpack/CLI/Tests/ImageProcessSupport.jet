@@ -37,13 +37,13 @@ cli_test_ingest_executable_for_platform: fn(verification: &StoreVerification, ro
             source_fingerprint: "sha256-source-{name}",
             recipe_fingerprint: "sha256-recipe-{name}",
             policy_fingerprint: "policy=image-test",
-            platform: platform
+            platform: platform,
         },
         references: [String]{},
-        outputs: [String: String]{"out": source},
+        outputs: [String:String]{"out": source},
         signature: "",
         provenance: "image-test",
-        platform_artifact_kind: ""
+        platform_artifact_kind: "",
     }
     _: store_ingest_tree(verification, roots, request) ?? panic("ingest {name}: {err.message()}")
 }
@@ -91,7 +91,9 @@ cli_test_image_layer: fn(root: String) -[FS]> [U8] {
     magic: "ustar".bytes()
     blobs: cli_test_image_blobs(root)
     loop blob in blobs {
-        if blob.len() >= 263 && blob.slice(257, 262) == magic && (Int{blob[262]}) == 0 -> return blob
+        if blob.len() >= 263 && blob.slice(257, 262) == magic && (Int{blob[262]}) == 0 {
+            return blob
+        }
     }
     panic("image has no ustar layer blob")
 }
@@ -149,7 +151,9 @@ cli_test_registry_server: fn(listener: net.TCPListener, expected_requests: Int) 
                 extra_headers = "Location: /test-upload{cli_test_crlf()}"
             }
             "PUT" -> {
-                if path.contains("/blobs/uploads/") || path.starts_with("/test-upload") || path.contains("/manifests/") -> status = 201
+                if path.contains("/blobs/uploads/") || path.starts_with("/test-upload") || path.contains("/manifests/") {
+                    status = 201
+                }
             }
             else -> {}
         }
@@ -162,9 +166,7 @@ cli_test_registry_server: fn(listener: net.TCPListener, expected_requests: Int) 
 }
 
 // An HTTP line ending (carriage return, line feed).
-cli_test_crlf: fn() -> String {
-    "\r\n"
-}
+cli_test_crlf: fn() -> String { "\r\n" }
 
 // `jetpack <args>` for an image claim, run in `project` with NO_COLOR.
 cli_test_image_jetpack: fn(project: String, args: [String]) -[Env, Exec]> ProcessSpec {

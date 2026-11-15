@@ -3,6 +3,7 @@ use {
     files: core.files
     process: core.process
 }
+
 check_links: fn(path: String) {
     info: files.stat(path) ?? return
     if info.is_symlink {
@@ -16,6 +17,7 @@ check_links: fn(path: String) {
         loop entry in entries -> check_links(entry.path)
     }
 }
+
 run: fn() {
     args: process.args()
     assert(args.len() == 1)

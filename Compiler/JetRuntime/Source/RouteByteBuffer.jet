@@ -6,10 +6,20 @@
 // operands are the exact Int of the checked fixed-width value.
 
 byte_buffer_sequence: fn(buffer: I64) -> I64 { dyn_word(wrapping(buffer + BYTE_BUFFER_SEQUENCE)) }
-byte_buffer_len: fn(buffer: I64) -> I64 { dyn_word(wrapping(byte_buffer_sequence(buffer) + DATA_SEQUENCE_LENGTH)) }
-byte_buffer_data: fn(buffer: I64) -> I64 { dyn_word(wrapping(byte_buffer_sequence(buffer) + DATA_SEQUENCE_DATA)) }
+
+byte_buffer_len: fn(buffer: I64) -> I64 {
+    dyn_word(wrapping(byte_buffer_sequence(buffer) + DATA_SEQUENCE_LENGTH))
+}
+
+byte_buffer_data: fn(buffer: I64) -> I64 {
+    dyn_word(wrapping(byte_buffer_sequence(buffer) + DATA_SEQUENCE_DATA))
+}
+
 byte_buffer_position: fn(buffer: I64) -> I64 { dyn_word(wrapping(buffer + BYTE_BUFFER_POSITION)) }
-byte_buffer_set_position: fn(buffer: I64, position: I64) { dyn_store(wrapping(buffer + BYTE_BUFFER_POSITION), position) }
+
+byte_buffer_set_position: fn(buffer: I64, position: I64) {
+    dyn_store(wrapping(buffer + BYTE_BUFFER_POSITION), position)
+}
 
 // A fresh buffer holding a copy of `length` bytes at `data`, cursor at 0.
 byte_buffer_of: fn(data: I64, length: I64, capacity: I64) -> I64 {
@@ -35,7 +45,9 @@ byte_buffer_from_text: fn(text: I64) -> I64 {
 }
 
 // The lossy UTF-8 reading of the buffer's bytes as a fresh text.
-byte_buffer_text: fn(buffer: I64) -> I64 { jet_string_from_bytes_lossy(byte_buffer_data(buffer), byte_buffer_len(buffer)) }
+byte_buffer_text: fn(buffer: I64) -> I64 {
+    jet_string_from_bytes_lossy(byte_buffer_data(buffer), byte_buffer_len(buffer))
+}
 
 // The write address of `extra` more bytes at the end, growing the sequence
 // geometrically; the caller stores them and then byte_buffer_commit.
@@ -52,12 +64,10 @@ byte_buffer_reserve: fn(buffer: I64, extra: I64) -> I64 {
     }
     needed: length + extra
     grown := if (capacity < I64{8}) -> I64{8} else -> capacity
-    loop grown < needed {
-        grown = if (grown > limit /% I64{2}) -> limit else -> grown * I64{2}
-    }
+    loop grown < needed -> grown = if (grown > limit /% I64{2}) -> limit else -> grown * I64{2}
     data: jet_rt_alloc(grown * RT_HOST_U8_STRIDE, I64{8})
     coll_copy(old, data, length * RT_HOST_U8_STRIDE)
-    if (capacity != I64{0}) -> jet_rt_free(old, capacity * RT_HOST_U8_STRIDE, I64{8})
+    if (capacity != I64{0}) { jet_rt_free(old, capacity * RT_HOST_U8_STRIDE, I64{8}) }
     dyn_store(wrapping(sequence + DATA_SEQUENCE_CAPACITY), grown)
     dyn_store(wrapping(sequence + DATA_SEQUENCE_DATA), data)
     data + length * RT_HOST_U8_STRIDE
@@ -72,7 +82,9 @@ byte_buffer_commit: fn(buffer: I64, extra: I64) {
 // `little`, most significant first otherwise.
 byte_buffer_put_word: fn(buffer: I64, bits: I64, width: I64, little: Bool) {
     target: byte_buffer_reserve(buffer, width)
-    if (target == I64{0}) -> return
+    if (target == I64{0}) {
+        return
+    }
     at := I64{0}
     loop at < width {
         shift: if little -> at * I64{8} else -> (width - I64{1} - at) * I64{8}
@@ -83,9 +95,13 @@ byte_buffer_put_word: fn(buffer: I64, bits: I64, width: I64, little: Bool) {
 }
 
 byte_buffer_put_bytes: fn(buffer: I64, data: I64, length: I64) {
-    if (length <= I64{0}) -> return
+    if (length <= I64{0}) {
+        return
+    }
     target: byte_buffer_reserve(buffer, length)
-    if (target == I64{0}) -> return
+    if (target == I64{0}) {
+        return
+    }
     at := I64{0}
     loop at < length {
         host_u8_put(target, at, host_u8_get(data, at))
@@ -96,7 +112,9 @@ byte_buffer_put_bytes: fn(buffer: I64, data: I64, length: I64) {
 
 // The two's-complement bit pattern of an exact Int that holds a checked
 // fixed-width value (a U64 above I64.MAX wraps to its unsigned bits).
-byte_buffer_bits: fn(carrier: I64) -> I64 { if int_inline(carrier) -> carrier else -> int_word(carrier) }
+byte_buffer_bits: fn(carrier: I64) -> I64 {
+    if int_inline(carrier) -> carrier else -> int_word(carrier)
+}
 
 // An index or count operand: an exact Int beyond the inline range is past
 // any buffer (or below zero).
@@ -116,17 +134,17 @@ byte_buffer_f32_bits: fn(value: Float) -> I64 {
         quiet: if (mantissa != I64{0} && payload == I64{0}) -> I64{1} else -> payload
         return sign.bit_or(I64{2139095040}).bit_or(quiet)
     }
-    if (exponent == I64{0}) -> return sign
+    if (exponent == I64{0}) { return sign }
     biased: exponent - I64{896}
-    if (biased >= I64{1}) -> return sign.bit_or(biased << I64{23}).bit_or(mantissa >> I64{29})
+    if (biased >= I64{1}) { return sign.bit_or(biased << I64{23}).bit_or(mantissa >> I64{29}) }
     shift: I64{30} - biased
-    if (shift > I64{53}) -> return sign
+    if (shift > I64{53}) { return sign }
     sign.bit_or(mantissa.bit_or(I64{4503599627370496}) >> shift)
 }
 
 // An Option<U8> payload: the byte at `at` written to `some`, or absent.
 byte_buffer_option_byte: fn(buffer: I64, at: I64, some: I64) -> I64 {
-    if (at < I64{0} || at >= byte_buffer_len(buffer)) -> return I64{0}
+    if (at < I64{0} || at >= byte_buffer_len(buffer)) { return I64{0} }
     dyn_store(some, host_u8_get(byte_buffer_data(buffer), at))
     I64{1}
 }
@@ -152,7 +170,7 @@ byte_buffer_list: fn(data: I64, length: I64, output: I64) -> I64 {
 // (data_out, len_out); absent when fewer remain.
 byte_buffer_take: fn(buffer: I64, count: I64, data_out: I64, len_out: I64) -> I64 {
     position: byte_buffer_position(buffer)
-    if (count < I64{0} || count > byte_buffer_len(buffer) - position) -> return I64{0}
+    if (count < I64{0} || count > byte_buffer_len(buffer) - position) { return I64{0} }
     dyn_store(len_out, byte_buffer_list(wrapping(byte_buffer_data(buffer) + position * RT_HOST_U8_STRIDE), count, data_out))
     byte_buffer_set_position(buffer, position + count)
     I64{1}
@@ -213,7 +231,7 @@ byte_buffer_find: fn(buffer: I64, needle: I64, some: I64, last: Bool) -> I64 {
     text: byte_buffer_text(buffer)
     at: rt_text_find(text, needle, I64{0}, last)
     jet_rt_string_drop(text)
-    if (at < I64{0}) -> return I64{0}
+    if (at < I64{0}) { return I64{0} }
     dyn_store(some, jet_int_owned_from_i64(at))
     I64{1}
 }
@@ -240,7 +258,7 @@ byte_buffer_order: fn(left: I64, right: I64) -> I64 {
     loop at < common {
         a: host_u8_get(left_data, at)
         z: host_u8_get(right_data, at)
-        if (a != z) -> return if a < z -> I64{-1} else -> I64{1}
+        if (a != z) { return if a < z -> I64{-1} else -> I64{1} }
         at += I64{1}
     }
     if left_len == right_len -> I64{0} else if left_len < right_len -> I64{-1} else -> I64{1}
@@ -261,26 +279,50 @@ byte_buffer_assign: fn(target: I64, source: I64) {
     byte_buffer_of(I64{0}, I64{0}, if (wanted < I64{0}) -> I64{0} else -> wanted)
 }
 
-#Export(c) jet_byte_buffer_from: fn(data: I64, length: I64) -> I64 { byte_buffer_of(data, length, I64{0}) }
+#Export(c) jet_byte_buffer_from: fn(data: I64, length: I64) -> I64 {
+    byte_buffer_of(data, length, I64{0})
+}
 
-#Export(c) jet_byte_buffer_clone: fn(buffer: I64) -> I64 { jet_rt_handle_clone_jet_byte_buffer(buffer) }
+#Export(c) jet_byte_buffer_clone: fn(buffer: I64) -> I64 {
+    jet_rt_handle_clone_jet_byte_buffer(buffer)
+}
 
-#Export(c) jet_byte_buffer_to_bytes: fn(buffer: I64, output: I64) -> I64 { byte_buffer_list(byte_buffer_data(buffer), byte_buffer_len(buffer), output) }
-#Export(c) jet_byte_buffer_buffer: fn(buffer: I64, output: I64) -> I64 { jet_byte_buffer_to_bytes(buffer, output) }
-#Export(c) jet_byte_buffer_get_buffer: fn(buffer: I64, output: I64) -> I64 { jet_byte_buffer_to_bytes(buffer, output) }
+#Export(c) jet_byte_buffer_to_bytes: fn(buffer: I64, output: I64) -> I64 {
+    byte_buffer_list(byte_buffer_data(buffer), byte_buffer_len(buffer), output)
+}
 
-#Export(c) jet_byte_buffer_capacity: fn(buffer: I64) -> I64 { jet_int_owned_from_i64(dyn_word(wrapping(byte_buffer_sequence(buffer) + DATA_SEQUENCE_CAPACITY))) }
-#Export(c) jet_byte_buffer_len: fn(buffer: I64) -> I64 { jet_int_owned_from_i64(byte_buffer_len(buffer)) }
-#Export(c) jet_byte_buffer_position: fn(buffer: I64) -> I64 { jet_int_owned_from_i64(byte_buffer_position(buffer)) }
+#Export(c) jet_byte_buffer_buffer: fn(buffer: I64, output: I64) -> I64 {
+    jet_byte_buffer_to_bytes(buffer, output)
+}
+
+#Export(c) jet_byte_buffer_get_buffer: fn(buffer: I64, output: I64) -> I64 {
+    jet_byte_buffer_to_bytes(buffer, output)
+}
+
+#Export(c) jet_byte_buffer_capacity: fn(buffer: I64) -> I64 {
+    jet_int_owned_from_i64(dyn_word(wrapping(byte_buffer_sequence(buffer) + DATA_SEQUENCE_CAPACITY)))
+}
+
+#Export(c) jet_byte_buffer_len: fn(buffer: I64) -> I64 {
+    jet_int_owned_from_i64(byte_buffer_len(buffer))
+}
+
+#Export(c) jet_byte_buffer_position: fn(buffer: I64) -> I64 {
+    jet_int_owned_from_i64(byte_buffer_position(buffer))
+}
+
 #Export(c) jet_byte_buffer_is_empty: fn(buffer: I64) -> Bool { byte_buffer_len(buffer) == I64{0} }
-#Export(c) jet_byte_buffer_eof: fn(buffer: I64) -> Bool { byte_buffer_position(buffer) >= byte_buffer_len(buffer) }
+
+#Export(c) jet_byte_buffer_eof: fn(buffer: I64) -> Bool {
+    byte_buffer_position(buffer) >= byte_buffer_len(buffer)
+}
 
 #Export(c) jet_byte_buffer_is_ascii: fn(buffer: I64) -> Bool {
     data: byte_buffer_data(buffer)
     length: byte_buffer_len(buffer)
     at := I64{0}
     loop at < length {
-        if (host_u8_get(data, at) >= I64{128}) -> return false
+        if (host_u8_get(data, at) >= I64{128}) { return false }
         at += I64{1}
     }
     true
@@ -290,9 +332,13 @@ byte_buffer_assign: fn(target: I64, source: I64) {
     dyn_store(wrapping(byte_buffer_sequence(buffer) + DATA_SEQUENCE_LENGTH), I64{0})
     byte_buffer_set_position(buffer, I64{0})
 }
+
 #Export(c) jet_byte_buffer_close: fn(buffer: I64) { jet_byte_buffer_clear(buffer) }
+
 #Export(c) jet_byte_buffer_shutdown: fn(buffer: I64) { jet_byte_buffer_clear(buffer) }
+
 #Export(c) jet_byte_buffer_flush: fn(_buffer: I64) {}
+
 #Export(c) jet_byte_buffer_rewind: fn(buffer: I64) { byte_buffer_set_position(buffer, I64{0}) }
 
 #Export(c) jet_byte_buffer_seek: fn(buffer: I64, index: I64) {
@@ -301,50 +347,81 @@ byte_buffer_assign: fn(target: I64, source: I64) {
     byte_buffer_set_position(buffer, if (at <= I64{0}) -> I64{0} else if at > length -> length else -> at)
 }
 
-#Export(c) jet_byte_buffer_get: fn(buffer: I64, index: I64, some: I64) -> I64 { byte_buffer_option_byte(buffer, byte_buffer_index(index), some) }
-#Export(c) jet_byte_buffer_first: fn(buffer: I64, some: I64) -> I64 { byte_buffer_option_byte(buffer, I64{0}, some) }
+#Export(c) jet_byte_buffer_get: fn(buffer: I64, index: I64, some: I64) -> I64 {
+    byte_buffer_option_byte(buffer, byte_buffer_index(index), some)
+}
+
+#Export(c) jet_byte_buffer_first: fn(buffer: I64, some: I64) -> I64 {
+    byte_buffer_option_byte(buffer, I64{0}, some)
+}
 
 #Export(c) jet_byte_buffer_read_byte: fn(buffer: I64, some: I64) -> I64 {
     position: byte_buffer_position(buffer)
-    if (byte_buffer_option_byte(buffer, position, some) == I64{0}) -> return I64{0}
+    if (byte_buffer_option_byte(buffer, position, some) == I64{0}) { return I64{0} }
     byte_buffer_set_position(buffer, position + I64{1})
     I64{1}
 }
-#Export(c) jet_byte_buffer_next: fn(buffer: I64, some: I64) -> I64 { jet_byte_buffer_read_byte(buffer, some) }
+
+#Export(c) jet_byte_buffer_next: fn(buffer: I64, some: I64) -> I64 {
+    jet_byte_buffer_read_byte(buffer, some)
+}
 
 #Export(c) jet_byte_buffer_read: fn(buffer: I64, data_out: I64, len_out: I64) -> I64 {
     remaining: byte_buffer_len(buffer) - byte_buffer_position(buffer)
-    if (remaining <= I64{0}) -> return I64{0}
+    if (remaining <= I64{0}) { return I64{0} }
     byte_buffer_take(buffer, remaining, data_out, len_out)
 }
 
-#Export(c) jet_byte_buffer_read_bytes: fn(buffer: I64, count: I64, data_out: I64, len_out: I64) -> I64 { byte_buffer_take(buffer, byte_buffer_index(count), data_out, len_out) }
+#Export(c) jet_byte_buffer_read_bytes: fn(buffer: I64, count: I64, data_out: I64, len_out: I64) -> I64 {
+    byte_buffer_take(buffer, byte_buffer_index(count), data_out, len_out)
+}
 
 #Export(c) jet_byte_buffer_read_string: fn(buffer: I64, count: I64, some: I64) -> I64 {
     wanted: byte_buffer_index(count)
     position: byte_buffer_position(buffer)
-    if (wanted < I64{0} || wanted > byte_buffer_len(buffer) - position) -> return I64{0}
+    if (wanted < I64{0} || wanted > byte_buffer_len(buffer) - position) { return I64{0} }
     dyn_store(some, jet_string_from_bytes_lossy(wrapping(byte_buffer_data(buffer) + position * RT_HOST_U8_STRIDE), wanted))
     byte_buffer_set_position(buffer, position + wanted)
     I64{1}
 }
 
 #Export(c) jet_byte_buffer_to_string: fn(buffer: I64) -> I64 { byte_buffer_text(buffer) }
+
 #Export(c) jet_byte_buffer_string: fn(buffer: I64) -> I64 { byte_buffer_text(buffer) }
 
 #Export(c) jet_byte_buffer_trim: fn(buffer: I64) -> I64 { byte_buffer_mapped(buffer, I64{0}) }
+
 #Export(c) jet_byte_buffer_trim_start: fn(buffer: I64) -> I64 { byte_buffer_mapped(buffer, I64{1}) }
+
 #Export(c) jet_byte_buffer_trim_end: fn(buffer: I64) -> I64 { byte_buffer_mapped(buffer, I64{2}) }
+
 #Export(c) jet_byte_buffer_to_lower: fn(buffer: I64) -> I64 { byte_buffer_mapped(buffer, I64{3}) }
+
 #Export(c) jet_byte_buffer_to_upper: fn(buffer: I64) -> I64 { byte_buffer_mapped(buffer, I64{4}) }
+
 #Export(c) jet_byte_buffer_to_title: fn(buffer: I64) -> I64 { byte_buffer_mapped(buffer, I64{5}) }
+
 #Export(c) jet_byte_buffer_title: fn(buffer: I64) -> I64 { byte_buffer_mapped(buffer, I64{5}) }
 
-#Export(c) jet_byte_buffer_contains: fn(buffer: I64, needle: I64) -> Bool { byte_buffer_test(buffer, needle, I64{0}) }
-#Export(c) jet_byte_buffer_starts_with: fn(buffer: I64, prefix: I64) -> Bool { byte_buffer_test(buffer, prefix, I64{1}) }
-#Export(c) jet_byte_buffer_ends_with: fn(buffer: I64, suffix: I64) -> Bool { byte_buffer_test(buffer, suffix, I64{2}) }
-#Export(c) jet_byte_buffer_index_of: fn(buffer: I64, needle: I64, some: I64) -> I64 { byte_buffer_find(buffer, needle, some, false) }
-#Export(c) jet_byte_buffer_last_index_of: fn(buffer: I64, needle: I64, some: I64) -> I64 { byte_buffer_find(buffer, needle, some, true) }
+#Export(c) jet_byte_buffer_contains: fn(buffer: I64, needle: I64) -> Bool {
+    byte_buffer_test(buffer, needle, I64{0})
+}
+
+#Export(c) jet_byte_buffer_starts_with: fn(buffer: I64, prefix: I64) -> Bool {
+    byte_buffer_test(buffer, prefix, I64{1})
+}
+
+#Export(c) jet_byte_buffer_ends_with: fn(buffer: I64, suffix: I64) -> Bool {
+    byte_buffer_test(buffer, suffix, I64{2})
+}
+
+#Export(c) jet_byte_buffer_index_of: fn(buffer: I64, needle: I64, some: I64) -> I64 {
+    byte_buffer_find(buffer, needle, some, false)
+}
+
+#Export(c) jet_byte_buffer_last_index_of: fn(buffer: I64, needle: I64, some: I64) -> I64 {
+    byte_buffer_find(buffer, needle, some, true)
+}
 
 #Export(c) jet_byte_buffer_replace: fn(buffer: I64, from: I64, to: I64) -> I64 {
     text: byte_buffer_text(buffer)
@@ -391,7 +468,7 @@ byte_buffer_assign: fn(target: I64, source: I64) {
     at := I64{0}
     loop at <= length {
         found: rt_text_find(text, separator, at, false)
-        if (found < I64{0}) -> break
+        if (found < I64{0}) { break }
         count += I64{1}
         at = found + width
     }
@@ -419,7 +496,9 @@ byte_buffer_assign: fn(target: I64, source: I64) {
     result: jet_rt_string_builder_new()
     at := I64{0}
     loop at < count {
-        if (at != I64{0}) -> rt_text_append(result, rt_text_data(separator), rt_text_len(separator))
+        if (at != I64{0}) {
+            rt_text_append(result, rt_text_data(separator), rt_text_len(separator))
+        }
         part: dyn_word(wrapping(parts + at * I64{8}))
         rt_text_append(result, rt_text_data(part), rt_text_len(part))
         at += I64{1}
@@ -445,7 +524,7 @@ byte_buffer_assign: fn(target: I64, source: I64) {
         matched := true
         offset := I64{0}
         loop matched && offset < width {
-            if (host_u8_get(data, at + offset) != host_u8_get(needle, offset)) -> matched = false
+            if (host_u8_get(data, at + offset) != host_u8_get(needle, offset)) { matched = false }
             offset += I64{1}
         }
         if matched -> found = at
@@ -466,11 +545,21 @@ byte_buffer_assign: fn(target: I64, source: I64) {
     I64{1}
 }
 
-#Export(c) jet_byte_buffer_equal: fn(buffer: I64, other: I64) -> Bool { byte_buffer_order(buffer, other) == I64{0} }
-#Export(c) jet_byte_buffer_compare: fn(buffer: I64, other: I64) -> I64 { jet_int_owned_from_i64(byte_buffer_order(buffer, other)) }
+#Export(c) jet_byte_buffer_equal: fn(buffer: I64, other: I64) -> Bool {
+    byte_buffer_order(buffer, other) == I64{0}
+}
 
-#Export(c) jet_byte_buffer_copy_to: fn(buffer: I64, other: I64) { byte_buffer_assign(other, buffer) }
-#Export(c) jet_byte_buffer_write_to: fn(buffer: I64, other: I64) { byte_buffer_put_bytes(other, byte_buffer_data(buffer), byte_buffer_len(buffer)) }
+#Export(c) jet_byte_buffer_compare: fn(buffer: I64, other: I64) -> I64 {
+    jet_int_owned_from_i64(byte_buffer_order(buffer, other))
+}
+
+#Export(c) jet_byte_buffer_copy_to: fn(buffer: I64, other: I64) {
+    byte_buffer_assign(other, buffer)
+}
+
+#Export(c) jet_byte_buffer_write_to: fn(buffer: I64, other: I64) {
+    byte_buffer_put_bytes(other, byte_buffer_data(buffer), byte_buffer_len(buffer))
+}
 
 // i64::from_str over the trimmed lossy reading, with Rust's error texts.
 #Export(c) jet_byte_buffer_parse: fn(buffer: I64, ok: I64, err: I64) -> I64 {
@@ -505,14 +594,12 @@ byte_buffer_assign: fn(target: I64, source: I64) {
         if !overflow {
             if (value < I64{-922337203685477580} || (value == I64{-922337203685477580} && digit > I64{8})) {
                 overflow = true
-            } else {
-                value = value * I64{10} - digit
-            }
+            } else { value = value * I64{10} - digit }
         }
         at += I64{1}
     }
     jet_rt_string_drop(text)
-    if (!negative && !overflow && value == I64{-9223372036854775807} - I64{1}) -> overflow = true
+    if (!negative && !overflow && value == I64{-9223372036854775807} - I64{1}) { overflow = true }
     if overflow {
         dyn_store(err, if negative -> rt_static_text("number too small to fit in target type") else -> rt_static_text("number too large to fit in target type"))
         return I64{0}
@@ -521,24 +608,86 @@ byte_buffer_assign: fn(target: I64, source: I64) {
     I64{1}
 }
 
-#Export(c) jet_byte_buffer_write_bytes: fn(buffer: I64, data: I64, length: I64) { byte_buffer_put_bytes(buffer, data, length) }
-#Export(c) jet_byte_buffer_write: fn(buffer: I64, data: I64, length: I64) { byte_buffer_put_bytes(buffer, data, length) }
-#Export(c) jet_byte_buffer_write_u8: fn(buffer: I64, value: I64) { byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{1}, true) }
-#Export(c) jet_byte_buffer_write_byte: fn(buffer: I64, value: I64) { byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{1}, true) }
-#Export(c) jet_byte_buffer_write_i8: fn(buffer: I64, value: I64) { byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{1}, true) }
-#Export(c) jet_byte_buffer_write_u16_le: fn(buffer: I64, value: I64) { byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{2}, true) }
-#Export(c) jet_byte_buffer_write_u16_be: fn(buffer: I64, value: I64) { byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{2}, false) }
-#Export(c) jet_byte_buffer_write_i16_le: fn(buffer: I64, value: I64) { byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{2}, true) }
-#Export(c) jet_byte_buffer_write_i16_be: fn(buffer: I64, value: I64) { byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{2}, false) }
-#Export(c) jet_byte_buffer_write_u32_le: fn(buffer: I64, value: I64) { byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{4}, true) }
-#Export(c) jet_byte_buffer_write_u32_be: fn(buffer: I64, value: I64) { byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{4}, false) }
-#Export(c) jet_byte_buffer_write_i32_le: fn(buffer: I64, value: I64) { byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{4}, true) }
-#Export(c) jet_byte_buffer_write_i32_be: fn(buffer: I64, value: I64) { byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{4}, false) }
-#Export(c) jet_byte_buffer_write_u64_le: fn(buffer: I64, value: I64) { byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{8}, true) }
-#Export(c) jet_byte_buffer_write_u64_be: fn(buffer: I64, value: I64) { byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{8}, false) }
-#Export(c) jet_byte_buffer_write_i64_le: fn(buffer: I64, value: I64) { byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{8}, true) }
-#Export(c) jet_byte_buffer_write_i64_be: fn(buffer: I64, value: I64) { byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{8}, false) }
-#Export(c) jet_byte_buffer_write_f32_le: fn(buffer: I64, value: Float) { byte_buffer_put_word(buffer, byte_buffer_f32_bits(value), I64{4}, true) }
-#Export(c) jet_byte_buffer_write_f32_be: fn(buffer: I64, value: Float) { byte_buffer_put_word(buffer, byte_buffer_f32_bits(value), I64{4}, false) }
-#Export(c) jet_byte_buffer_write_f64_le: fn(buffer: I64, value: Float) { byte_buffer_put_word(buffer, rt_f64_bits(value), I64{8}, true) }
-#Export(c) jet_byte_buffer_write_f64_be: fn(buffer: I64, value: Float) { byte_buffer_put_word(buffer, rt_f64_bits(value), I64{8}, false) }
+#Export(c) jet_byte_buffer_write_bytes: fn(buffer: I64, data: I64, length: I64) {
+    byte_buffer_put_bytes(buffer, data, length)
+}
+
+#Export(c) jet_byte_buffer_write: fn(buffer: I64, data: I64, length: I64) {
+    byte_buffer_put_bytes(buffer, data, length)
+}
+
+#Export(c) jet_byte_buffer_write_u8: fn(buffer: I64, value: I64) {
+    byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{1}, true)
+}
+
+#Export(c) jet_byte_buffer_write_byte: fn(buffer: I64, value: I64) {
+    byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{1}, true)
+}
+
+#Export(c) jet_byte_buffer_write_i8: fn(buffer: I64, value: I64) {
+    byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{1}, true)
+}
+
+#Export(c) jet_byte_buffer_write_u16_le: fn(buffer: I64, value: I64) {
+    byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{2}, true)
+}
+
+#Export(c) jet_byte_buffer_write_u16_be: fn(buffer: I64, value: I64) {
+    byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{2}, false)
+}
+
+#Export(c) jet_byte_buffer_write_i16_le: fn(buffer: I64, value: I64) {
+    byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{2}, true)
+}
+
+#Export(c) jet_byte_buffer_write_i16_be: fn(buffer: I64, value: I64) {
+    byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{2}, false)
+}
+
+#Export(c) jet_byte_buffer_write_u32_le: fn(buffer: I64, value: I64) {
+    byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{4}, true)
+}
+
+#Export(c) jet_byte_buffer_write_u32_be: fn(buffer: I64, value: I64) {
+    byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{4}, false)
+}
+
+#Export(c) jet_byte_buffer_write_i32_le: fn(buffer: I64, value: I64) {
+    byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{4}, true)
+}
+
+#Export(c) jet_byte_buffer_write_i32_be: fn(buffer: I64, value: I64) {
+    byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{4}, false)
+}
+
+#Export(c) jet_byte_buffer_write_u64_le: fn(buffer: I64, value: I64) {
+    byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{8}, true)
+}
+
+#Export(c) jet_byte_buffer_write_u64_be: fn(buffer: I64, value: I64) {
+    byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{8}, false)
+}
+
+#Export(c) jet_byte_buffer_write_i64_le: fn(buffer: I64, value: I64) {
+    byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{8}, true)
+}
+
+#Export(c) jet_byte_buffer_write_i64_be: fn(buffer: I64, value: I64) {
+    byte_buffer_put_word(buffer, byte_buffer_bits(value), I64{8}, false)
+}
+
+#Export(c) jet_byte_buffer_write_f32_le: fn(buffer: I64, value: Float) {
+    byte_buffer_put_word(buffer, byte_buffer_f32_bits(value), I64{4}, true)
+}
+
+#Export(c) jet_byte_buffer_write_f32_be: fn(buffer: I64, value: Float) {
+    byte_buffer_put_word(buffer, byte_buffer_f32_bits(value), I64{4}, false)
+}
+
+#Export(c) jet_byte_buffer_write_f64_le: fn(buffer: I64, value: Float) {
+    byte_buffer_put_word(buffer, rt_f64_bits(value), I64{8}, true)
+}
+
+#Export(c) jet_byte_buffer_write_f64_be: fn(buffer: I64, value: Float) {
+    byte_buffer_put_word(buffer, rt_f64_bits(value), I64{8}, false)
+}

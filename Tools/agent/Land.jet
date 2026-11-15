@@ -177,18 +177,27 @@ use {
 }
 
 SPEED_LANES: [String]{"O0Speed", "RustOut"}
+
 COMPILER_PREFIXES: [String]{"Compiler/", "Core/", "Jetpack/"}
+
 IDENTITY_KEYS: [String]{"user.name", "user.email"}
+
 JOB_FILES: [String]{".patch", ".msg"}
+
 // The preflight receipt: its schema, the census passes it must list clean
 // (every pass but the Core #Tests, which CENSUS_CORE_TESTS=0 skips), and the
 // trees an export needs for the source identity.
 RECEIPT_SCHEMA: "jet.preflight-receipt.v2"
+
 RECEIPT_PASSES: [String]{"check", "build", "guards", "runtime-pack", "core-bodies", "codegen", "selfcheck", "selfcheck-core", "areas"}
+
 IDENTITY_TREES: [String]{"Compiler", "Core", "Jetpack"}
+
 // Test inputs the gate leaves to the tests: cases, ui and run fixtures.
 TEST_INPUT_PREFIXES: [String]{"tests/cases/", "tests/ui/", "tests/run/"}
+
 TEST_INPUT_MARKS: [String]{".fixture/", "/fixtures/"}
+
 // Every heavy pass: its memory capped in its own systemd scope (the whole
 // process tree, the runtime pack's steps among them, shares the cap; an
 // address-space limit would count the fibers' reserved stacks, not memory),
@@ -198,21 +207,31 @@ TEST_INPUT_MARKS: [String]{".fixture/", "/fixtures/"}
 // check 6.6G, its build 8.5G, a guard shard under 1G, the Core self-check
 // 2.3G).
 HEAVY_MEMORY: "32G"
+
 CHECK_MEMORY: "12G"
+
 BUILD_MEMORY: "16G"
+
 GUARD_MEMORY: "4G"
+
 CORE_MEMORY: "8G"
+
 HEAVY_CPUS: "16-27"
+
 // The census's concurrent passes share these CPUs.
 CENSUS_CPUS: "8-31"
+
 HEAVY_STACK: "--stack=1073741824:1073741824"
+
 // The census runs tests/guards as GUARD_SHARDS `--shard=I/N` runs at once.
 GUARD_SHARDS: 4
+
 // The guard packages under tests/guards (each with its own package.jet, so a
 // `jet test tests/guards` run leaves it out) the census runs, each whole,
 // beside the shards. They compile Compiler packages, so each takes
 // CORE_MEMORY.
 GUARD_PACKAGES: [String]{"core_declarations"}
+
 // The Jetpack areas' check scopes share area_budget bytes (MemAvailable at
 // launch less TRAIN_FLOOR_GIB, at most AREA_BUDGET_MAX): each is capped at
 // its last measured peak (r14/area-peaks.tsv; AREA_UNMEASURED when it has
@@ -221,17 +240,24 @@ GUARD_PACKAGES: [String]{"core_declarations"}
 // alone after the lanes, under the whole budget then (area_again).
 // CENSUS_AREA_CAP (bytes) caps every area's check instead, again checks too.
 AREA_BUDGET_MAX: 34359738368
+
 GIB: 1073741824
+
 AREA_UNMEASURED: 4294967296
+
 AREA_MARGIN: 268435456
+
 // A file under these changes the checker (the compiler and the Core it
 // checks with) or the area assembler, so it reaches every Jetpack area.
 CHECKER_PREFIXES: [String]{"Compiler/", "Core/", "Jetpack/Bootstrap/"}
+
 // The census passes in the order their lines print.
 PASS_ORDER: [String]{"check", "build", "guards", "runtime-pack", "core-bodies", "codegen", "selfcheck", "selfcheck-core", "core-tests", "areas"}
+
 // The failing Core #Tests the core-tests pass tolerates: one "FILE: test
 // title" per line (# comments), each file run by the pass.
 CORE_KNOWN: "Tools/agent/core-known.txt"
+
 // The ratchets every commit keeps, each run as `jet TOOL --check`, and how
 // many run at once.
 RATCHETS: [String]{
@@ -257,6 +283,7 @@ RATCHETS: [String]{
     "Compiler/Toolchain/PreludeRows/Main.jet",
     "Compiler/Toolchain/BodyCodec/Main.jet",
 }
+
 RATCHET_JOBS: 5
 
 run: fn() {
@@ -390,7 +417,9 @@ touched_paths: fn(dir: String, patch: String) -[Exec, Time.Wait]> [String] Never
             next
         }
         loop _ in 0..<2 {
-            if index < fields.len() && !paths.contains(fields[index]) -> paths.push(fields[index].copy())
+            if index < fields.len() && !paths.contains(fields[index]) {
+                paths.push(fields[index].copy())
+            }
             index += 1
         }
     }
@@ -477,9 +506,13 @@ land_main: fn(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
 
 // Clone `source` into `dir` with the checkout's commit identity.
 scratch_copy: fn(source: String, dir: String) -[Exec, FS, IO, Time.Wait]> String LandError! {
-    if files.exists(dir) -> return Err(LandError{message: "{dir} already exists; a scratch copy needs a new directory"})
+    if files.exists(dir) {
+        return Err(LandError{message: "{dir} already exists; a scratch copy needs a new directory"})
+    }
     cloned: git(source, [String]{"clone", "--quiet", "--no-hardlinks", source, dir})
-    if cloned.code != 0 -> return Err(LandError{message: "git clone into {dir} failed: {first_line(cloned)}"})
+    if cloned.code != 0 {
+        return Err(LandError{message: "git clone into {dir} failed: {first_line(cloned)}"})
+    }
     loop key in IDENTITY_KEYS {
         value: git(source, [String]{"config", "--get", key})
         if value.code == 0 -> git(dir, [String]{"config", key, value.output.trim()})
@@ -534,7 +567,9 @@ revert: fn(dir: String, applied: [String]) Never! -[Exec, IO, Time.Wait]> {
     loop step in 0..<applied.len() {
         patch: applied[applied.len() - 1 - step]
         undone: git(dir, [String]{"apply", "-R", patch})
-        if undone.code != 0 -> term.eprint("land: could not revert {files.basename(patch)}: {first_line(undone)}; check `git status` in {dir}")
+        if undone.code != 0 {
+            term.eprint("land: could not revert {files.basename(patch)}: {first_line(undone)}; check `git status` in {dir}")
+        }
     }
 }
 
@@ -551,7 +586,9 @@ check: fn(dir: String, touched: [String]) -[Exec, Env, FS, IO, Time.Wait]> Bool 
     targets := [String]{}
     loop path in touched {
         if compiler_input(path) -> compiler = true
-        if path.ends_with(".jet") && files.basename(path) != "package.jet" && files.exists(files.join(dir, path)) -> targets.push(path.copy())
+        if path.ends_with(".jet") && files.basename(path) != "package.jet" && files.exists(files.join(dir, path)) {
+            targets.push(path.copy())
+        }
     }
     if compiler -> targets = [String]{""}
     if targets.len() == 0 {
@@ -625,12 +662,16 @@ commit_stack: fn(dir: String, pre: String, pairs: [Pair]) -[Exec, Env, FS, Time.
     // apply leaves those untracked), so the worktree is compared with it.
     if failure == "" {
         git_index(dir, index, [String]{"update-index", "-q", "--refresh"})
-        if git_index(dir, index, [String]{"diff", "--quiet", "--"}).code != 0 -> failure = "the commits do not match the checked worktree"
+        if git_index(dir, index, [String]{"diff", "--quiet", "--"}).code != 0 {
+            failure = "the commits do not match the checked worktree"
+        }
     }
     files.remove(index) ?? ()
     if failure != "" -> return Err(LandError{message: failure})
     moved: git(dir, [String]{"update-ref", "-m", "land: {pairs.len()} commit(s) on {pre.slice(0..<10)}", "HEAD", tip, pre})
-    if moved.code != 0 -> return Err(LandError{message: "update-ref of HEAD {pre.slice(0..<10)} failed (HEAD moved?): {first_line(moved)}"})
+    if moved.code != 0 {
+        return Err(LandError{message: "update-ref of HEAD {pre.slice(0..<10)} failed (HEAD moved?): {first_line(moved)}"})
+    }
     Ok(landed)
 }
 
@@ -677,7 +718,9 @@ queue_main: fn(args: [String]) -[Exec, Env, FS, IO, Time]> Int Never! {
         name := "{start + at}-{lane}{suffix}"
         // Never overwrite a queued or taken job with the same second-based name.
         loop {
-            if !files.exists("{queue}/{name}.job") && !files.exists("{queue}/taken/{name}.job") -> break
+            if !files.exists("{queue}/{name}.job") && !files.exists("{queue}/taken/{name}.job") {
+                break
+            }
             start += 1
             name = "{start + at}-{lane}{suffix}"
         }
@@ -709,12 +752,16 @@ pareto_refusal: fn(lane: String, bases: [String]) -[Env, FS]> String Never! {
         wall: tagged_seconds(message, "PARETO:")
         stage := false
         loop line in message.lines() {
-            if line.starts_with("PARETO-STAGE:") && line.remove_prefix("PARETO-STAGE:").trim() != "" -> stage = true
+            if line.starts_with("PARETO-STAGE:") && line.remove_prefix("PARETO-STAGE:").trim() != "" {
+                stage = true
+            }
         }
         small: tagged_seconds(message, "SMALL-WIN:") != None
         if stage || (wall ?? -1.0) >= 0.5 -> next
         if small && approved -> next
-        if small -> return "NOT QUEUED: {base} is a small win, but {lane} has no approved Pareto design yet; send the big-win design first (owner order: Pareto work first)"
+        if small {
+            return "NOT QUEUED: {base} is a small win, but {lane} has no approved Pareto design yet; send the big-win design first (owner order: Pareto work first)"
+        }
         return "NOT QUEUED: {base}.msg needs a PARETO: >=0.5 s, PARETO-STAGE: or SMALL-WIN: line"
     }
     ""
@@ -739,7 +786,9 @@ tagged_seconds: fn(message: String, marker: String) -> Float? Never! {
         unit_end: after.remove_prefix("s").bytes()
         if unit_end.len() > 0 {
             code: Int{unit_end[0]}
-            if (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 -> next
+            if (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 {
+                next
+            }
         }
         return Val(Float.parse(number) ?? 0.0)
     }
@@ -782,9 +831,11 @@ stack_applies: fn(worktree: String, bases: [String]) -[Exec, Env, FS, IO, Time.W
 // The nonblank lines CompilerPackages.jet prints for `args` on `tree`.
 compiler_packages_run: fn(tree: String, args: [String]) -[Exec, Env, FS, Time.Wait]> [String] LandError! {
     argv := [String]{"{seed_dir()}/jet", files.join(dev_worktree(), "Tools/agent/CompilerPackages.jet"), "--root", tree}
-    argv.extend(args.copy()) // copy: the caller keeps its arguments
+    argv.extend(args.copy())  // copy: the caller keeps its arguments
     ran: run_in(tree, argv, "")
-    if ran.code != 0 -> return Err(LandError{message: "Tools/agent/CompilerPackages.jet {args[0]} on {tree} failed: {first_line(ran)}"})
+    if ran.code != 0 {
+        return Err(LandError{message: "Tools/agent/CompilerPackages.jet {args[0]} on {tree} failed: {first_line(ran)}"})
+    }
     lines := [String]{}
     loop line in ran.output.lines() {
         if line != "" -> lines.push(line.copy())
@@ -795,7 +846,9 @@ compiler_packages_run: fn(tree: String, args: [String]) -[Exec, Env, FS, Time.Wa
 // The compiler's source identity of `tree`: `<binary>@<version>#<sha256>`.
 compiler_source_identity: fn(tree: String) -[Exec, Env, FS, Time.Wait]> String LandError! {
     rows: compiler_packages_run(tree, [String]{"identity"}) ?? return Err(err)
-    if rows.len() != 1 -> return Err(LandError{message: "Tools/agent/CompilerPackages.jet identity on {tree} printed {rows.len()} lines"})
+    if rows.len() != 1 {
+        return Err(LandError{message: "Tools/agent/CompilerPackages.jet identity on {tree} printed {rows.len()} lines"})
+    }
     rows[0].copy()
 }
 
@@ -811,7 +864,7 @@ compiler_package_dirs: fn(tree: String) -[Exec, Env, FS, Time.Wait]> [String] La
 compiler_input_paths: fn(tree: String, paths: [String]) -[Exec, Env, FS, Time.Wait]> [String] LandError! {
     if paths.len() == 0 -> return Ok([String]{})
     args := [String]{"select"}
-    args.extend(paths.copy()) // copy: the caller keeps its paths
+    args.extend(paths.copy())  // copy: the caller keeps its paths
     compiler_packages_run(tree, args)
 }
 
@@ -834,7 +887,9 @@ repo_join: fn(directory: String, path: String) -> String Never! {
 // Does a commit touching `path` need the census beyond the compiler inputs:
 // a runtime, backend, Core or Jetpack source or a sources.list?
 census_source: fn(path: String) -> Bool Never! {
-    if path.starts_with("Compiler/JetRuntime/Source/") || path.starts_with("Compiler/JetBackend/Source/") || path.starts_with("Core/") -> return true
+    if path.starts_with("Compiler/JetRuntime/Source/") || path.starts_with("Compiler/JetBackend/Source/") || path.starts_with("Core/") {
+        return true
+    }
     if path == "Compiler/JetRuntime/sources.list" || path.ends_with("/sources.list") -> return true
     path.starts_with("Jetpack/") && path.removeprefix("Jetpack/").contains("/Source/")
 }
@@ -916,11 +971,15 @@ export_tree: fn(repo: String, commit: String, dir: String, paths: [String]) Land
     }
     unpacked: run_in(dir, [String]{"tar", "-x", "-f", archive, "-C", dir}, "")
     files.remove(archive) ?? ()
-    if unpacked.code != 0 -> return Err(LandError{message: "unpacking {commit} failed: {first_line(unpacked)}"})
+    if unpacked.code != 0 {
+        return Err(LandError{message: "unpacking {commit} failed: {first_line(unpacked)}"})
+    }
     Ok()
 }
 
-dev_worktree: fn() -[Exec, Env, FS, Time.Wait]> String Never! { root("JET_DEV_WORKTREE", checkout_top()) }
+dev_worktree: fn() -[Exec, Env, FS, Time.Wait]> String Never! {
+    root("JET_DEV_WORKTREE", checkout_top())
+}
 
 // The seed compiler's directory: $JET_SEED, else the current seed.
 seed_dir: fn() -[Env, FS]> String Never! {
@@ -1111,7 +1170,9 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
 receipt_rows: fn(runs: [PassRun]) -> [Dyn] Never! {
     out := [Dyn]{}
     loop run in runs {
-        if run.name != "" -> out.push(Dyn.Object([String: Dyn]{"name": Dyn.Text(run.name.copy()), "rc": Dyn.Int(run.rc), "note": Dyn.Text(run.note.copy())}))
+        if run.name != "" {
+            out.push(Dyn.Object([String:Dyn]{"name": Dyn.Text(run.name.copy()), "rc": Dyn.Int(run.rc), "note": Dyn.Text(run.note.copy())}))
+        }
     }
     out
 }
@@ -1152,7 +1213,7 @@ codegen_pass: fn(snap: String, out: String, self_jet: String, identity: String) 
     code: run_logged(snap, [String]{self_jet, "Tools/perf/CodegenCeiling.jet", "--check", "--jet", self_jet}, env, "{out}/codegen")
     lines := [String]{"codegen rc={code}"}
     if code != 0 -> lines.push(clip(files.read("{out}/codegen.err") ?? "", 600))
-    PassRun{name: "codegen", rc: code, seconds: time.elapsed(watch).ns /% 1000000000, peak: 0, note: "", lines}
+    PassRun{name: "codegen", rc: code, seconds: time.elapsed(watch).ns /% 1000000000, peak: 0, note: "", lines: lines}
 }
 
 // The hello world the core-bodies pass checks.
@@ -1180,8 +1241,10 @@ core_bodies_pass: fn(out: String, self_jet: String, identity: String) -[Exec, FS
     rc: if code == 0 && loaded -> 0 else -> 1
     lines := [String]{"core-bodies rc={rc} bodies_loaded={counts.loaded} bodies_from_text={counts.from_text}"}
     if code != 0 -> lines.push(clip(errors, 600))
-    if code == 0 && !loaded -> lines.push("the built jet checked hello.jet loading no Core function checks from its Core bodies file")
-    PassRun{name: "core-bodies", rc, seconds: time.elapsed(watch).ns /% 1000000000, peak: 0, note: "", lines}
+    if code == 0 && !loaded {
+        lines.push("the built jet checked hello.jet loading no Core function checks from its Core bodies file")
+    }
+    PassRun{name: "core-bodies", rc: rc, seconds: time.elapsed(watch).ns /% 1000000000, peak: 0, note: "", lines: lines}
 }
 
 // A check's Core function checks: how many it loaded from the Core bodies
@@ -1242,7 +1305,9 @@ compile_pass: fn(name: String, snap: String, out: String, memory: String, second
 // `jet build Compiler` of the snapshot, then the kept sources it regenerates
 // (`kept: true`), which must be committed as it wrote them.
 build_pass: fn(passes: Passes, worktree: String, head: String, snap: String, out: String, seed_jet: String, identity: String, package_dirs: [String], named: [String]) -[Exec, FS, Time, Time.Wait]> PassRun Never! {
-    if !passes.build -> return PassRun{name: "", rc: 0, seconds: 0, peak: 0, note: "", lines: [String]{}}
+    if !passes.build {
+        return PassRun{name: "", rc: 0, seconds: 0, peak: 0, note: "", lines: [String]{}}
+    }
     run := compile_pass("build", snap, out, BUILD_MEMORY, 1800, [String]{seed_jet, "{snap}/Tools/agent/JetEnv.jet", seed_jet, "build", "-O1", "--threads", "12", "Compiler"}, identity, package_dirs, 21)
     if run.rc != 0 -> return run
     stale: stale_kept(worktree, head, snap, named)
@@ -1286,7 +1351,9 @@ guard_failures: fn(text: String) -> [String] Never! {
         if line.ends_with(": FAIL") -> out.push("  FAIL {line.removesuffix(": FAIL")}")
         tally: line.partition(" passed, ")
         failed: tally.tail.partition(" failed")
-        if tally.sep != "" && (Int.parse(tally.head) ?? -1) >= 0 && failed.sep != "" && (Int.parse(failed.head) ?? -1) >= 0 && (failed.tail == "" || failed.tail.starts_with(", ")) -> finished = true
+        if tally.sep != "" && (Int.parse(tally.head) ?? -1) >= 0 && failed.sep != "" && (Int.parse(failed.head) ?? -1) >= 0 && (failed.tail == "" || failed.tail.starts_with(", ")) {
+            finished = true
+        }
     }
     if !finished -> out.push("  did not finish (no `N passed, M failed` tally)")
     out
@@ -1328,7 +1395,9 @@ core_tests_pass: fn(snap: String, out: String, seed_jet: String, self_jet: Strin
     }
     targets := [String]{}
     loop path in named {
-        if path.starts_with("Core/") && path.ends_with(".jet") && !targets.contains(path) && (files.read("{snap}/{path}") ?? "").contains("#Test") -> targets.push(path.copy())
+        if path.starts_with("Core/") && path.ends_with(".jet") && !targets.contains(path) && (files.read("{snap}/{path}") ?? "").contains("#Test") {
+            targets.push(path.copy())
+        }
     }
     loop row in known {
         path: row.partition(": ").head
@@ -1368,7 +1437,9 @@ area_runs: fn(snap: String, out: String, r14: String, self_jet: String, identity
     watch: time.start()
     env: [Setting]{Setting{name: "JET_COMPILER_IDENTITY", value: identity.copy()}, Setting{name: "JET_TOOLCHAIN_ROOT", value: snap.copy()}}
     listed: run_in_env(snap, [String]{self_jet, "{snap}/Jetpack/Bootstrap/Assemble.jet", "areas", "populated"}, env)
-    if listed.code != 0 -> return [PassRun]{PassRun{name: "areas", rc: 1, seconds: 0, peak: 0, note: "", lines: [String]{"areas rc=1 (Assemble.jet areas populated: {first_line(listed)})"}}}
+    if listed.code != 0 {
+        return [PassRun]{PassRun{name: "areas", rc: 1, seconds: 0, peak: 0, note: "", lines: [String]{"areas rc=1 (Assemble.jet areas populated: {first_line(listed)})"}}}
+    }
     all := [String]{}
     loop line in listed.output.lines() {
         if line.trim() != "" -> all.push(line.trim().copy())
@@ -1392,7 +1463,9 @@ area_runs: fn(snap: String, out: String, r14: String, self_jet: String, identity
     known: read_peaks(files.read(peaks_path) ?? "")
     forced: Int.parse(process.env_nonempty("CENSUS_AREA_CAP") ?? "") ?? 0
     caps := [Int]{}
-    loop area in reached -> caps.push(if forced > 0 -> forced else -> area_cap(peak_of(known, area)))
+    loop area in reached {
+        caps.push(if forced > 0 -> forced else -> area_cap(peak_of(known, area)))
+    }
     lanes: pack_lanes(reached, caps, area_budget(available_gib() * GIB))
     state: "{out}/jetpack-areas-state"
     home: "{out}/jetpack-areas-home"
@@ -1405,18 +1478,24 @@ area_runs: fn(snap: String, out: String, r14: String, self_jet: String, identity
     }
     loop at in 0..<checked.len() {
         area: checked[at].name.removeprefix("area:")
-        if checked[at].rc == 0 || !checked[at].name.starts_with("area:") || !area_killed(state, area) -> next
+        if checked[at].rc == 0 || !checked[at].name.starts_with("area:") || !area_killed(state, area) {
+            next
+        }
         cap: cap_of(reached, caps, area)
         again: area_again(cap, forced, area_budget(available_gib() * GIB))
         if again == 0 -> next
         rerun: area_lane([String]{area.copy()}, [String]{area.copy()}, [Int]{again}, snap.copy(), state.copy(), home.copy(), self_jet.copy(), identity.copy())
-        if rerun.len() == 1 -> checked[at] = PassRun{name: rerun[0].name.copy(), rc: rerun[0].rc, seconds: checked[at].seconds + rerun[0].seconds, peak: rerun[0].peak, note: "{rerun[0].note}, again alone after the {cap /% 1048576}M cap killed it", lines: rerun[0].lines.copy()}
+        if rerun.len() == 1 {
+            checked[at] = PassRun{name: rerun[0].name.copy(), rc: rerun[0].rc, seconds: checked[at].seconds + rerun[0].seconds, peak: rerun[0].peak, note: "{rerun[0].note}, again alone after the {cap /% 1048576}M cap killed it", lines: rerun[0].lines.copy()}
+        }
     }
     files.remove_all(home) ?? ()
     updated := known.copy()
     loop run in checked {
         area: run.name.removeprefix("area:")
-        if run.peak > 0 -> updated = with_peak(updated, area, peak_after(peak_of(known, area), run.peak, run.rc))
+        if run.peak > 0 {
+            updated = with_peak(updated, area, peak_after(peak_of(known, area), run.peak, run.rc))
+        }
     }
     files.write(peaks_path, peak_rows(updated)) ?? ()
     rc := 0
@@ -1471,7 +1550,9 @@ area_lane: fn(lane_areas: [String], areas: [String], caps: [Int], snap: String, 
         lines := [String]{"area {area} FAILED exit {code} (log {log}.out)"}
         loop line in "{files.read("{log}.out") ?? ""}{files.read("{log}.err") ?? ""}".lines() {
             if lines.len() > 6 -> break
-            if line.starts_with("  --> ") || line.starts_with("Error [") -> lines.push(clip(line, 200))
+            if line.starts_with("  --> ") || line.starts_with("Error [") {
+                lines.push(clip(line, 200))
+            }
         }
         out.push(PassRun{name: "area:{area}", rc: code, seconds: time.elapsed(watch).ns /% 1000000000, peak: peak, note: "cap {cap /% 1048576}M", lines: lines})
     }
@@ -1485,7 +1566,9 @@ area_peak: fn(state: String, area: String) -[FS]> Int Never! {
     loop entry in entries("{state}/jetpack-bootstrap") {
         if !entry.is_dir || !entry.name.starts_with("census-each-{area}-") -> next
         loop line in (files.read("{state}/jetpack-bootstrap/{entry.name}/check.receipt") ?? "").lines() {
-            if line.starts_with("check-peak-bytes:") -> peak = Int.parse(line.removeprefix("check-peak-bytes:").trim()) ?? peak
+            if line.starts_with("check-peak-bytes:") {
+                peak = Int.parse(line.removeprefix("check-peak-bytes:").trim()) ?? peak
+            }
         }
     }
     peak
@@ -1534,7 +1617,9 @@ areas_reached: fn(areas: [String], sources: [[String]], named: [String]) -> [Str
     if reaches_every_area(named) -> return areas.copy()
     out := [String]{}
     loop at in 0..<areas.len() {
-        if at < sources.len() && sources[at].any(fn(path) { named.contains(path) }) -> out.push(areas[at].copy())
+        if at < sources.len() && sources[at].any(fn(path) { named.contains(path) }) {
+            out.push(areas[at].copy())
+        }
     }
     out
 }
@@ -1592,7 +1677,9 @@ read_peaks: fn(text: String) -> [Setting] Never! {
     out := [Setting]{}
     loop line in text.lines() {
         row: line.partition("\t")
-        if row.sep != "" && row.head != "" && (Int.parse(row.tail.trim()) ?? 0) > 0 -> out = with_peak(out, row.head, Int.parse(row.tail.trim()) ?? 0)
+        if row.sep != "" && row.head != "" && (Int.parse(row.tail.trim()) ?? 0) > 0 {
+            out = with_peak(out, row.head, Int.parse(row.tail.trim()) ?? 0)
+        }
     }
     out
 }
@@ -1624,7 +1711,9 @@ peak_rows: fn(peaks: [Setting]) -> String Never! {
 census_finish: fn(runs: [PassRun], out: String) -[FS, IO]> Int Never! {
     loop name in PASS_ORDER {
         loop run in runs {
-            if run.name == name -> loop line in run.lines -> print(line)
+            if run.name == name {
+                loop line in run.lines -> print(line)
+            }
         }
     }
     files.write("{out}/phases.tsv", phase_rows(runs)) ?? print("census: {out}/phases.tsv cannot be written: {err}")
@@ -1661,7 +1750,9 @@ stale_kept: fn(worktree: String, head: String, snap: String, named: [String]) -[
     loop row in array_field(receipt, "kept") {
         path: "Compiler/{text_field(row, "path")}"
         committed: if named.contains(path) -> files.read(files.join(worktree, path)) ?? "" else -> git(worktree, [String]{"show", "{head}:{path}"}).output
-        if "sha256:{crypto.sha256(committed.bytes()).hex()}" != text_field(row, "digest") -> stale.push(path)
+        if "sha256:{crypto.sha256(committed.bytes()).hex()}" != text_field(row, "digest") {
+            stale.push(path)
+        }
     }
     stale
 }
@@ -1765,7 +1856,9 @@ span_place: fn(tree: String, package_dirs: [String], span: String) -[FS]> Place 
     at: span.rpartition(":")
     if at.sep == "" -> return Place{file: "", offset: 0}
     range: at.tail.partition("..")
-    if range.sep == "" || !is_digits(range.head) || !is_digits(range.tail) -> return Place{file: "", offset: 0}
+    if range.sep == "" || !is_digits(range.head) || !is_digits(range.tail) {
+        return Place{file: "", offset: 0}
+    }
     offset: Int.parse(range.head) ?? return Place{file: "", offset: 0}
     Place{file: source_file(tree, package_dirs, at.head), offset: offset}
 }
@@ -1863,7 +1956,9 @@ ratchets: fn(worktree: String) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
         }
         failed += 1
         output := [String]{}
-        loop line in process.combined_output(receipt).trim_end().split("\n") -> output.push(line.copy())
+        loop line in process.combined_output(receipt).trim_end().split("\n") {
+            output.push(line.copy())
+        }
         // The verdict is at the end (CoreCoverage prints its module table first).
         tail: if output.len() > 40 -> output.len() - 40 else -> 0
         lines := [String]{}
@@ -2098,7 +2193,9 @@ seeds_root: fn() -[Env, FS]> String Never! {
     root("JET_SEEDS", "{process.env_nonempty("XDG_DATA_HOME") ?? "{process.env_nonempty("HOME") ?? ""}/.local/share"}/jet-seeds")
 }
 
-base_root: fn() -[Env, FS]> String Never! { root("JET_BASE_ROOT", "{scratch_root()}/discovery/base") }
+base_root: fn() -[Env, FS]> String Never! {
+    root("JET_BASE_ROOT", "{scratch_root()}/discovery/base")
+}
 
 // The environment a detached run of this tool starts with: PATH, the roots,
 // and the seed's identity with `tools` as its toolchain root.
@@ -2158,10 +2255,14 @@ newest_first: fn(items: [Dated]) -> [Dated] Never! {
 mtime: fn(path: String) -[FS]> Int Never! { files.getmtime(path) ?? 0 }
 
 // The entries of the directory `dir`, none when it cannot be listed.
-entries: fn(dir: String) -[FS]> [files.DirEntry] Never! { files.list_dir(dir) ?? [files.DirEntry]{} }
+entries: fn(dir: String) -[FS]> [files.DirEntry] Never! {
+    files.list_dir(dir) ?? [files.DirEntry]{}
+}
 
 // The first line of the file at `path`, "" when it cannot be read.
-first_line_of: fn(path: String) -[FS]> String Never! { (files.read(path) ?? "").partition("\n").head.trim() }
+first_line_of: fn(path: String) -[FS]> String Never! {
+    (files.read(path) ?? "").partition("\n").head.trim()
+}
 
 // `text` with `git stripspace`'s cleanup: trailing whitespace removed, runs
 // of blank lines collapsed, no blank lines at either end, one final newline.
@@ -2378,7 +2479,9 @@ batch: fn(tools: String, dir: String, jobs: [Job]) -[Exec, Env, FS, IO, Time, Ti
     tip := pre.copy()
     failure := ""
     landed := [String]{}
-    if git_index(dir, index, [String]{"read-tree", pre}).code != 0 -> failure = "read-tree of the pre-batch HEAD failed"
+    if git_index(dir, index, [String]{"read-tree", pre}).code != 0 {
+        failure = "read-tree of the pre-batch HEAD failed"
+    }
     loop group in 0..<applied.len() {
         if failure != "" -> break
         if roots[group] != group -> next
@@ -2396,7 +2499,9 @@ batch: fn(tools: String, dir: String, jobs: [Job]) -[Exec, Env, FS, IO, Time, Ti
                 failure = "the message {job.message} cannot be read: {err}"
                 break
             }
-            if members.len() > 1 && message == "" -> message = "{text.partition("\n").head} (with {members.len() - 1} more landed together: shared files)\n\n"
+            if members.len() > 1 && message == "" {
+                message = "{text.partition("\n").head} (with {members.len() - 1} more landed together: shared files)\n\n"
+            }
             message = if members.len() == 1 -> text.copy() else -> "{message}== {job.lane} ({name})\n{text}\n"
             names.push("{job.lane} {name}")
             paths.extend(applied[at].paths.copy())
@@ -2446,13 +2551,17 @@ batch: fn(tools: String, dir: String, jobs: [Job]) -[Exec, Env, FS, IO, Time, Ti
         if want == "" || want != chained {
             shown_want: if want == "" -> "none" else -> want.copy()
             failure = "the commit chain's tree {short_sha(tip)} is not the verified worktree ({shown_want}): some changed path is in no commit"
-            if want != "" -> say(log, "tree diff (chain vs verified): {git(dir, [String]{"diff-tree", "-r", "--name-status", chained, want}).output.trim_end().first_lines(20).join(" ")}")
+            if want != "" {
+                say(log, "tree diff (chain vs verified): {git(dir, [String]{"diff-tree", "-r", "--name-status", chained, want}).output.trim_end().first_lines(20).join(" ")}")
+            }
         }
     }
     // Publish every commit at once: HEAD moves only if it is still the pre-batch HEAD.
     if failure == "" {
         moved: git(dir, [String]{"update-ref", "-m", "batch-land: {landed.len()} commit(s) on {short_sha(pre)}", "HEAD", tip, pre})
-        if moved.code != 0 -> failure = "update-ref of HEAD {short_sha(pre)} -> {short_sha(tip)} failed (HEAD moved?): {first_line(moved)}"
+        if moved.code != 0 {
+            failure = "update-ref of HEAD {short_sha(pre)} -> {short_sha(tip)} failed (HEAD moved?): {first_line(moved)}"
+        }
     }
     files.remove(index) ?? ()
     if failure != "" {
@@ -2464,7 +2573,9 @@ batch: fn(tools: String, dir: String, jobs: [Job]) -[Exec, Env, FS, IO, Time, Ti
     }
     // The worktree already is the new HEAD; bring the index along.
     synced: git(dir, [String]{"read-tree", "--reset", "HEAD"}).code == 0 && git(dir, [String]{"update-index", "-q", "--refresh"}).code == 0
-    if !synced -> say(log, "!!!!!!!! index sync after landing failed: run git read-tree --reset HEAD in {dir}")
+    if !synced {
+        say(log, "!!!!!!!! index sync after landing failed: run git read-tree --reset HEAD in {dir}")
+    }
     git(dir, [String]{"hook", "run", "--ignore-missing", "post-commit"})
     loop line in landed {
         parts: line.partition(" ")
@@ -2493,20 +2604,30 @@ batch: fn(tools: String, dir: String, jobs: [Job]) -[Exec, Env, FS, IO, Time, Ti
 // line and of the train's whole-profile lines (GiB); how many gate checks run
 // at once, and at most how many test lines.
 TRAIN_FLOOR_GIB: 12
+
 GATE_GIB: 12
+
 GATE_JOBS: 2
+
 TEST_GIB: 10
+
 PROFILE_GIB: 16
+
 TEST_JOBS_MAX: 4
+
 TEST_SECONDS: 1500
+
 // The whole profiles every ui and golden row of a compiler change is in: the
 // train runs each once when a job changes a compiler input.
 TRAIN_PROFILES: [String]{"ui", "golden"}
+
 // The keep-going reports of the census passes (`census`), for the rows a
 // failed build attributes.
 CENSUS_PASSES: [String]{"check", "build", "selfcheck", "selfcheck-core"}
+
 // The units of a test row's timings, and the marks around a path in a row.
 TIME_UNITS: [String]{"ms", "µs", "us", "ns", "s"}
+
 PATH_MARKS: [String]{"`", "'", "\"", "(", ")", "[", "]", ","}
 
 Stage: struct {
@@ -2562,7 +2683,9 @@ seed_split: fn(job: Job) -[FS]> Bool Never! {
     loop line in text.lines() {
         if !line.starts_with("seed:") -> next
         value: line.removeprefix("seed:").trim()
-        if value.starts_with("needed") || value.starts_with("after") || value.starts_with("a jet built") -> return true
+        if value.starts_with("needed") || value.starts_with("after") || value.starts_with("a jet built") {
+            return true
+        }
     }
     false
 }
@@ -2616,7 +2739,9 @@ compose: fn(dir: String, jobs: [Job], aside: [String], log: String) -[Exec, Env,
         say(log, "APPLIED {job.lane} {name} ({paths.len()} files)")
         applied.push(Applied{job: job.copy(), paths: paths})
     }
-    if applied.len() == 0 -> return Composed{ok: true, applied: applied, all: all, regenerated: [String]{}}
+    if applied.len() == 0 {
+        return Composed{ok: true, applied: applied, all: all, regenerated: [String]{}}
+    }
     // The runtime generators' outputs (stop exports, lifecycle) for the batch's runtime sources.
     generated: seed_run(dir, [String]{"Tools/agent/RuntimeGenerators.jet"}, 900)
     say(log, "RuntimeGenerators rc={generated.code} {both(generated).trim_end().last_lines(2).join(" ")}")
@@ -2694,7 +2819,9 @@ prebuild_gate: fn(dir: String, applied: [Applied], work: String, log: String) -[
         report: "{work}/gate-{at}.tsv"
         argv: capped(GATE_GIB, [String]{"{seed}/jet", "check", "--threads", "8", "{dir}/{packages[at]}"})
         spec := process.cmd(argv).cwd(cwd).timeout(time.duration_seconds(1200)).output_limit(268435456)
-        loop setting in compile_env(identity, dir, report) -> spec = spec.env(setting.name, setting.value)
+        loop setting in compile_env(identity, dir, report) {
+            spec = spec.env(setting.name, setting.value)
+        }
         specs.push(spec)
     }
     say(log, "gate: the seed's check of {packages.join(" ")}")
@@ -2851,9 +2978,13 @@ seal: fn(dir: String, pre: String, composed: Composed, work: String, from: Strin
     files.create_dir_all(jet) ?? return "{jet}: {err}"
     files.copy("{from}/jet", "{jet}/jet") ?? return "{from}/jet: {err}"
     files.set_mode("{jet}/jet", 0o755) ?? return "{jet}/jet: {err}"
-    if files.is_dir("{from}/jet-runtime") -> files.copy_dir("{from}/jet-runtime", "{jet}/jet-runtime") ?? return "{from}/jet-runtime: {err}"
+    if files.is_dir("{from}/jet-runtime") {
+        files.copy_dir("{from}/jet-runtime", "{jet}/jet-runtime") ?? return "{from}/jet-runtime: {err}"
+    }
     pack: "{seed}/jet-cc-pack-x86_64-linux.tar.zst"
-    if files.is_file(pack) -> files.copy(pack, "{jet}/jet-cc-pack-x86_64-linux.tar.zst") ?? return "{pack}: {err}"
+    if files.is_file(pack) {
+        files.copy(pack, "{jet}/jet-cc-pack-x86_64-linux.tar.zst") ?? return "{pack}: {err}"
+    }
     files.set_mode(sealed, 0o555) ?? return "{sealed} cannot be sealed: {err}"
     ""
 }
@@ -2900,7 +3031,9 @@ train_tests: fn(dir: String, pre: String, composed: Composed, work: String, log:
             loop entry in lines {
                 if entry.line == whole -> listed = true
             }
-            if !listed -> lines.push(TestLine{line: "{whole} --jobs=8", owners: [String]{}, train: true, code: -1})
+            if !listed {
+                lines.push(TestLine{line: "{whole} --jobs=8", owners: [String]{}, train: true, code: -1})
+            }
         }
     }
     red := [String]{}
@@ -3084,7 +3217,9 @@ error_lines: fn(text: String, limit: Int) -> [String] Never! {
     out := [String]{}
     loop line in text.lines() {
         if out.len() >= limit -> break
-        if line.contains("error") || line.contains("Error") || line.contains("panic") || line.contains("failed") -> out.push(line.copy())
+        if line.contains("error") || line.contains("Error") || line.contains("panic") || line.contains("failed") {
+            out.push(line.copy())
+        }
     }
     out
 }
@@ -3115,9 +3250,7 @@ stem_owners: fn(applied: [Applied], row: String) -> [String] Never! {
 // A word of a row as a path: quotes and brackets dropped, and a `:line` after it.
 path_token: fn(word: String) -> String Never! {
     token := word.copy()
-    loop mark in PATH_MARKS {
-        token = token.removeprefix(mark).removesuffix(mark)
-    }
+    loop mark in PATH_MARKS -> token = token.removeprefix(mark).removesuffix(mark)
     token.partition(":").head.copy()
 }
 
@@ -3149,17 +3282,27 @@ chain_commit: fn(dir: String, index: String, tip: String, what: String, paths: [
         if path == "" || live.contains(path) -> next
         if on_disk(dir, path) || tracked.contains(path) -> live.push(path.copy())
     }
-    if live.len() == 0 -> return Err(LandError{message: "{what}: none of its paths is on disk or tracked"})
+    if live.len() == 0 {
+        return Err(LandError{message: "{what}: none of its paths is on disk or tracked"})
+    }
     added: git_paths(dir, index, [String]{"add", "-A"}, live)
-    if added.code != 0 -> return Err(LandError{message: "{what}: git add failed: {first_line(added)}"})
+    if added.code != 0 {
+        return Err(LandError{message: "{what}: git add failed: {first_line(added)}"})
+    }
     tree: git_index(dir, index, [String]{"write-tree"})
-    if tree.code != 0 -> return Err(LandError{message: "{what}: write-tree failed: {first_line(tree)}"})
-    if tree.output.trim() == git(dir, [String]{"rev-parse", "{tip}^{{tree}}"}).output.trim() -> return Err(LandError{message: "{what}: would be an empty commit (its net change is nothing, or an earlier commit of this batch took it: a grouping bug)"})
+    if tree.code != 0 {
+        return Err(LandError{message: "{what}: write-tree failed: {first_line(tree)}"})
+    }
+    if tree.output.trim() == git(dir, [String]{"rev-parse", "{tip}^{{tree}}"}).output.trim() {
+        return Err(LandError{message: "{what}: would be an empty commit (its net change is nothing, or an earlier commit of this batch took it: a grouping bug)"})
+    }
     file: "{index}.msg"
     files.write(file, stripspace(message)) ?? return Err(LandError{message: "{what}: the message cannot be written to {file}: {err}"})
     made: git(dir, [String]{"commit-tree", tree.output.trim(), "-p", tip, "-F", file})
     files.remove(file) ?? ()
-    if made.code != 0 -> return Err(LandError{message: "{what}: commit-tree failed: {first_line(made)}"})
+    if made.code != 0 {
+        return Err(LandError{message: "{what}: commit-tree failed: {first_line(made)}"})
+    }
     made.output.trim()
 }
 
@@ -3169,10 +3312,14 @@ chain_commit: fn(dir: String, index: String, tip: String, what: String, paths: [
 revert_batch: fn(dir: String, applied: [Applied], all: [String], log: String) -[Exec, Env, FS, IO, Time.Wait]> {
     loop step in 0..<applied.len() {
         patch: applied[applied.len() - 1 - step].job.patch
-        if git(dir, [String]{"apply", "-R", patch}).code != 0 -> say(log, "reverse-apply failed (restoring paths instead): {files.basename(patch)}")
+        if git(dir, [String]{"apply", "-R", patch}).code != 0 {
+            say(log, "reverse-apply failed (restoring paths instead): {files.basename(patch)}")
+        }
     }
     loop path in dirty_paths(dir) {
-        if git_paths(dir, "", [String]{"checkout", "HEAD"}, [String]{path}).code != 0 -> git_paths(dir, "", [String]{"rm", "-q", "--cached"}, [String]{path})
+        if git_paths(dir, "", [String]{"checkout", "HEAD"}, [String]{path}).code != 0 {
+            git_paths(dir, "", [String]{"rm", "-q", "--cached"}, [String]{path})
+        }
     }
     tracked: nul_paths(git_paths(dir, "", [String]{"ls-files", "-z"}, all))
     loop path in all {
@@ -3181,7 +3328,9 @@ revert_batch: fn(dir: String, applied: [Applied], all: [String], log: String) -[
         if files.is_dir(full) -> files.remove_all(full) ?? () else -> files.remove(full) ?? ()
     }
     left: git(dir, [String]{"status", "--porcelain", "--untracked-files=no"}).output
-    if left.trim() == "" -> return
+    if left.trim() == "" {
+        return
+    }
     say(log, "REVERT LEFT THE WORKTREE DIRTY")
     loop line in left.trim_end().first_lines(20) -> say(log, line)
     files.write("{run_root()}/lander.stop", "") ?? ()
@@ -3287,7 +3436,9 @@ admit: fn(tools: String, queue: String, results: String, log: String, queued: [J
         stacked := [String]{"Tools/agent/Land.jet", "prescreen", queued[queued.len() - 1].patch.copy()}
         loop at in 0..<(queued.len() - 1) -> stacked.push(queued[at].patch.copy())
         if seed_run(tools, stacked, 0).code == 0 {
-            loop job in queued -> files.rename("{queue}/{job.name}.job", "{queue}/taken/{job.name}.job") ?? ()
+            loop job in queued {
+                files.rename("{queue}/{job.name}.job", "{queue}/taken/{job.name}.job") ?? ()
+            }
             note(log, "prescreen clean (stacked) {queued.len()} job(s)")
             return queued.copy()
         }
@@ -3357,7 +3508,9 @@ land_bisecting: fn(tools: String, worktree: String, results: String, log: String
 // Each job's result file from a batch report: LANDED <sha>, STALE (does not
 // apply), LANDED already-on-dev, or REJECTED `why` with the report's tail.
 write_results: fn(results: String, jobs: [Job], report: String, why: String) -[FS]> {
-    loop job in jobs -> files.write("{results}/{job.name}.result", job_result(job, report, why)) ?? ()
+    loop job in jobs {
+        files.write("{results}/{job.name}.result", job_result(job, report, why)) ?? ()
+    }
 }
 
 job_result: fn(job: Job, report: String, why: String) -> String Never! {
@@ -3372,16 +3525,24 @@ job_result: fn(job: Job, report: String, why: String) -> String Never! {
             landed = line.remove_prefix("COMMITTED ").partition(" ").head.copy()
             next
         }
-        if line.starts_with("DOES NOT APPLY {job.lane} {name} - an earlier patch of its stack did not apply") -> stale_stack = true
+        if line.starts_with("DOES NOT APPLY {job.lane} {name} - an earlier patch of its stack did not apply") {
+            stale_stack = true
+        }
         if line.starts_with("DOES NOT APPLY {job.lane} {name} ") -> stale = true
         if line == "SKIP (already on dev) {job.lane} {name}" -> skipped = true
-        if line.starts_with("SET ASIDE {job.lane} {name} - ") -> aside = line.remove_prefix("SET ASIDE {job.lane} {name} - ").copy()
+        if line.starts_with("SET ASIDE {job.lane} {name} - ") {
+            aside = line.remove_prefix("SET ASIDE {job.lane} {name} - ").copy()
+        }
     }
     if landed != "" -> return "LANDED {landed}\n"
-    if stale_stack -> return "STALE an earlier patch of its stack did not apply; rebase the stack onto HEAD\n"
+    if stale_stack {
+        return "STALE an earlier patch of its stack did not apply; rebase the stack onto HEAD\n"
+    }
     if stale -> return "STALE does not apply to HEAD; rebase\n"
     if skipped -> return "LANDED already-on-dev\n"
-    if aside != "" -> return "REJECTED set aside by the train: {aside}\n{rows_of(report, job, name).join("\n")}\n"
+    if aside != "" {
+        return "REJECTED set aside by the train: {aside}\n{rows_of(report, job, name).join("\n")}\n"
+    }
     tail := [String]{}
     loop line in report.lines() {
         if !line.starts_with("nm: ") -> tail.push(line.copy())
@@ -3394,9 +3555,11 @@ job_result: fn(job: Job, report: String, why: String) -> String Never! {
 // The published compilers kept, newest first by publish time (plus the newest
 // one with a finished golden census).
 BASE_KEEP: 6
+
 // The paths a hosted jetpack is built from (with the compiler they make): a
 // published jetpack is reused for a commit that changes none of them.
 JETPACK_INPUTS: [String]{"Jetpack", "Core", "Compiler"}
+
 GOLD_EXCLUDE: "Systems/Process/OSProcessControl"
 
 publish_main: fn(args: [String]) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
@@ -3405,9 +3568,15 @@ publish_main: fn(args: [String]) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Neve
     step: if {
         args.len() == 1 && args[0] == "latest" -> publish_latest(dev_worktree())
         args.len() == 2 && args[0] == "base" -> publish_base(tools, dev_worktree(), args[1])
-        args.len() == 1 && args[0] == "golden-worker" -> return golden_worker_main(tools)
-        args.len() == 1 && args[0] == "golden-run" -> return golden_run(dev_worktree())
-        args.len() == 2 && args[0] == "jetpack" -> return jetpack_run(dev_worktree(), args[1])
+        args.len() == 1 && args[0] == "golden-worker" -> {
+            return golden_worker_main(tools)
+        }
+        args.len() == 1 && args[0] == "golden-run" -> {
+            return golden_run(dev_worktree())
+        }
+        args.len() == 2 && args[0] == "jetpack" -> {
+            return jetpack_run(dev_worktree(), args[1])
+        }
         else -> usage()
     }
     print(step.line)
@@ -3424,7 +3593,9 @@ publish_latest: fn(dir: String) -[Exec, Env, FS, Time.Wait]> Step Never! {
     s1: "{scratch}/discovery/r14/snap/Compiler/JetCli/.jet/build/jet"
     pack: "{scratch}/discovery/r14/snap/Compiler/JetCli/.jet/build/jet-runtime"
     if !files.is_file(s1) -> return Step{ok: false, line: "publish-latest: no census compiler"}
-    if !files.exists("{pack}/native.key") -> return Step{ok: false, line: "publish-latest: the census build made no runtime pack"}
+    if !files.exists("{pack}/native.key") {
+        return Step{ok: false, line: "publish-latest: the census build made no runtime pack"}
+    }
     staged: "{b2}/install-latest.new.{sys.pid()}"
     files.remove_all(staged) ?? ()
     files.create_dir_all(staged) ?? return Step{ok: false, line: "publish-latest: {staged} cannot be created: {err}"}
@@ -3455,7 +3626,9 @@ publish_base: fn(tools: String, repo: String, commit: String) -[Exec, Env, FS, I
     if parsed.code != 0 -> return Step{ok: false, line: "publish-base: unknown commit {commit}"}
     sha: parsed.output.trim()
     published: first_line_of("{latest}/COMMIT")
-    if published != sha -> return Step{ok: false, line: "publish-base: install-latest is {short_sha(published)}, not {short_sha(sha)}; nothing published"}
+    if published != sha {
+        return Step{ok: false, line: "publish-base: install-latest is {short_sha(published)}, not {short_sha(sha)}; nothing published"}
+    }
     dir: "{base}/{sha}"
     state := "already published"
     if !files.is_dir(dir) {
@@ -3512,7 +3685,9 @@ prune_bases: fn(base: String) -[FS]> {
     loop entry in entries(base) {
         if entry.name.starts_with(".") || entry.name == "latest" -> next
         dir: "{base}/{entry.name}"
-        if files.exists("{dir}/.published") -> published.push(Dated{path: dir, time: mtime("{dir}/.published")})
+        if files.exists("{dir}/.published") {
+            published.push(Dated{path: dir, time: mtime("{dir}/.published")})
+        }
         if files.exists("{dir}/goldens.json") && mtime("{dir}/goldens.json") > golden_time {
             golden = dir
             golden_time = mtime("{dir}/goldens.json")
@@ -3531,7 +3706,9 @@ want_goldens: fn(tools: String, base: String, sha: String) -[Exec, Env, FS, Time
     _want: files.lock("{base}/.golden-want.lock") ?? return "golden run not wanted: the want lock cannot be taken: {err}"
     files.write("{base}/.golden-want.new", "{sha}\n") ?? return "golden run not wanted: {err}"
     files.rename("{base}/.golden-want.new", "{base}/.golden-want") ?? return "golden run not wanted: {err}"
-    if !lock_free("{base}/.golden-worker.lock") -> return "golden run wanted (worker busy; it takes the newest)"
+    if !lock_free("{base}/.golden-worker.lock") {
+        return "golden run wanted (worker busy; it takes the newest)"
+    }
     started: start_unit(tools, "base-goldens-{sha.slice(0..<9)}-{epoch()}", [String]{"MemoryMax=4G", "MemorySwapMax=0", "LimitCORE=0"}, [String]{"publish", "golden-worker"}, "{base}/goldens-worker.log")
     if started.code == 0 -> "golden run queued" else -> "golden worker failed to start: {first_line(started)}"
 }
@@ -3540,7 +3717,9 @@ want_goldens: fn(tools: String, base: String, sha: String) -[Exec, Env, FS, Time
 golden_wanted: fn(base: String) -[FS]> String Never! {
     sha: first_line_of("{base}/.golden-want")
     dir: "{base}/{sha}"
-    if sha == "" || !files.is_dir(dir) || files.exists("{dir}/goldens.json") || files.exists("{dir}/goldens.failed") -> return ""
+    if sha == "" || !files.is_dir(dir) || files.exists("{dir}/goldens.json") || files.exists("{dir}/goldens.failed") {
+        return ""
+    }
     sha
 }
 
@@ -3716,7 +3895,9 @@ jetpack_reuse: fn(repo: String, base: String, sha: String) -[Exec, FS, Time.Wait
     loop entry in entries(base) {
         if entry.name.starts_with(".") || entry.name == "latest" || entry.name == sha -> next
         jetpack: "{base}/{entry.name}/jetpack"
-        if files.is_file(jetpack) && files.is_file("{base}/{entry.name}/jetpack.receipt") -> built.push(Dated{path: entry.name.copy(), time: mtime(jetpack)})
+        if files.is_file(jetpack) && files.is_file("{base}/{entry.name}/jetpack.receipt") {
+            built.push(Dated{path: entry.name.copy(), time: mtime(jetpack)})
+        }
     }
     loop prev in newest_first(built) {
         args := [String]{"diff", "--quiet", prev.path, sha, "--"}
@@ -3764,7 +3945,9 @@ jetpack_build: fn(repo: String, base: String, sha: String, tree: String, tmp: St
     loop entry in entries(bootstrap) {
         if !entry.name.starts_with("{worker}-") -> next
         bin: "{bootstrap}/{entry.name}/hosted/project/.jet/build/jetpack"
-        if files.is_file(bin) -> runs.push(Dated{path: "{bootstrap}/{entry.name}", time: mtime(bin)})
+        if files.is_file(bin) {
+            runs.push(Dated{path: "{bootstrap}/{entry.name}", time: mtime(bin)})
+        }
     }
     newest: newest_first(runs)
     if built.code != 0 || newest.len() == 0 {
@@ -3873,7 +4056,9 @@ train_verdict: fn(code: Int, output: String, head: String, out: String) -> Strin
     if code == 0 {
         version := ""
         loop line in output.lines() {
-            if line.starts_with("PASS:") -> version = line.remove_prefix("PASS:").trim().partition(" ").head.copy()
+            if line.starts_with("PASS:") {
+                version = line.remove_prefix("PASS:").trim().partition(" ").head.copy()
+            }
         }
         return "RELEASE READY {version} from {short_sha(head)}; run the commands in {out}"
     }
@@ -3902,15 +4087,17 @@ receipt_path: fn(source_identity: String, dir: String) -> String Never! {
 write_receipt: fn(source_identity: String, seed_identity: String, commit: String, named: [String], rows: [Dyn], dir: String) -[Env, FS, Time]> String LandError! {
     files.create_dir_all(dir) ?? return Err(LandError{message: "`{dir}` cannot be created: {err}"})
     path: receipt_path(source_identity, dir)
-    receipt: Dyn.Object([String: Dyn]{
-        "schema": Dyn.Text(RECEIPT_SCHEMA.copy()),
-        "sourceIdentity": Dyn.Text(source_identity.copy()),
-        "seedIdentity": Dyn.Text(seed_identity.copy()),
-        "commit": Dyn.Text(commit.copy()),
-        "files": Dyn.Array(named.map(fn(name) { Dyn.Text(name.copy()) })),
-        "rows": Dyn.Array(rows.copy()),
-        "finished": Dyn.Text("{time.isoformat(time.now_utc())}Z"),
-    })
+    receipt: Dyn.Object(
+        [String:Dyn]{
+            "schema": Dyn.Text(RECEIPT_SCHEMA.copy()),
+            "sourceIdentity": Dyn.Text(source_identity.copy()),
+            "seedIdentity": Dyn.Text(seed_identity.copy()),
+            "commit": Dyn.Text(commit.copy()),
+            "files": Dyn.Array(named.map(fn(name) { Dyn.Text(name.copy()) })),
+            "rows": Dyn.Array(rows.copy()),
+            "finished": Dyn.Text("{time.isoformat(time.now_utc())}Z"),
+        },
+    )
     text: json.to_string_pretty(receipt) ?? return Err(LandError{message: "the receipt cannot be encoded: {err}"})
     temp: "{path}.{sys.pid()}.tmp"
     files.write(temp, "{text}\n") ?? return Err(LandError{message: "`{temp}` cannot be written: {err}"})
@@ -3928,7 +4115,9 @@ Admission: struct {
 // clean and hold every RECEIPT_PASSES pass?
 gate: fn(source_identity: String, seed_identity: String, dir: String) -[FS]> Admission Never! {
     path: receipt_path(source_identity, dir)
-    if !files.exists(path) -> return Admission{admitted: false, reason: "no preflight receipt for source identity {source_identity}"}
+    if !files.exists(path) {
+        return Admission{admitted: false, reason: "no preflight receipt for source identity {source_identity}"}
+    }
     text: files.read(path) ?? return Admission{admitted: false, reason: "receipt {path} cannot be read ({err})"}
     tree: json.parse(text) ?? return Admission{admitted: false, reason: "receipt {path} is not JSON ({err})"}
     if text_field(tree, "schema") != RECEIPT_SCHEMA || text_field(tree, "sourceIdentity") != source_identity {
@@ -3939,7 +4128,9 @@ gate: fn(source_identity: String, seed_identity: String, dir: String) -[FS]> Adm
         return Admission{admitted: false, reason: "the preflight receipt for source identity {source_identity} is from a census by seed {census_seed}, not {seed_identity}"}
     }
     problem: receipt_rows_problem(array_field(tree, "rows"))
-    if problem != "" -> return Admission{admitted: false, reason: "the preflight receipt {path} {problem}"}
+    if problem != "" {
+        return Admission{admitted: false, reason: "the preflight receipt {path} {problem}"}
+    }
     count: array_field(tree, "files").len()
     named: if count > 0 -> " + {count} worktree file(s)" else -> ""
     Admission{admitted: true, reason: "preflight receipt {path}: census of {short_sha(text_field(tree, "commit"))}{named} by seed {seed_identity}, finished {text_field(tree, "finished")}"}
@@ -3982,7 +4173,9 @@ receipt_main: fn(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
         print(identity)
         return 0
     }
-    if !((args.len() == 4 && args[0] == "check") || (args.len() == 5 && args[0] == "commit")) -> usage()
+    if !((args.len() == 4 && args[0] == "check") || (args.len() == 5 && args[0] == "commit")) {
+        usage()
+    }
     launcher: args[1]
     seed: absolute(args[args.len() - 1])
     seed_identity: read_identity(seed)
@@ -4088,7 +4281,9 @@ int_field: fn(tree: Dyn, name: String) -> Int? Never! {
     seed: "jet@a0.0.43#bbbb"
     assert_eq(gate(source, seed, dir).reason, "no preflight receipt for source identity jet@a0.0.43#aaaa")
     clean := [PassRun]{}
-    loop pass in RECEIPT_PASSES -> clean.push(PassRun{name: pass.copy(), rc: 0, seconds: 1, peak: 0, note: "", lines: [String]{}})
+    loop pass in RECEIPT_PASSES {
+        clean.push(PassRun{name: pass.copy(), rc: 0, seconds: 1, peak: 0, note: "", lines: [String]{}})
+    }
     clean.push(PassRun{name: "area:CLI", rc: 0, seconds: 1, peak: 0, note: "cap 7000M", lines: [String]{}})
     clean.push(PassRun{name: "", rc: 0, seconds: 0, peak: 0, note: "", lines: [String]{}})
     rows: receipt_rows(clean)
@@ -4141,12 +4336,15 @@ int_field: fn(tree: Dyn, name: String) -> Int? Never! {
     files.create_dir_all("{tree}/Compiler/JetCli/Source") ?? panic("{tree}: {err}")
     files.write("{tree}/Compiler/JetCli/Source/Main.jet", "a\nb\nc\n") ?? panic("{tree}: {err}")
     files.write("{tree}/report.tsv", "span\tcode\tphase\tmessage\titem\n/elsewhere/Compiler/JetCli/Source/Main.jet:4..5\tE0109\tsema\tmismatch\tmain\nSource/Main.jet:2..3\tE0109\tsema\tagain\tmain\n-\tE0505\tborrow\tmoved\tf\n") ?? panic("{tree}: {err}")
-    assert_eq(census_rows("{tree}/report.tsv", tree, [String]{"Compiler/JetCli"}), [String]{
-        "3 rows {{\"E0109\":2,\"E0505\":1}}",
-        "E0109\tCompiler/JetCli/Source/Main.jet:3\tsema: mismatch",
-        "E0109\tCompiler/JetCli/Source/Main.jet:2\tsema: again",
-        "E0505\tf\tborrow: moved",
-    })
+    assert_eq(
+        census_rows("{tree}/report.tsv", tree, [String]{"Compiler/JetCli"}),
+        [String]{
+            "3 rows {{\"E0109\":2,\"E0505\":1}}",
+            "E0109\tCompiler/JetCli/Source/Main.jet:3\tsema: mismatch",
+            "E0109\tCompiler/JetCli/Source/Main.jet:2\tsema: again",
+            "E0505\tf\tborrow: moved",
+        },
+    )
     assert_eq(report_rows("{tree}/report.tsv"), 3)
     files.remove_all(tree) ?? ()
 }

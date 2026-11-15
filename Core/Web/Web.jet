@@ -1189,9 +1189,7 @@ priv app_image_from: fn(app: App, source: String, path: String) -[FS.Read]> HTTP
 priv app_image_cached: fn(app: App, path: String) -> HTTPResponse? Never! {
     guard: app.__state.guard_read()
     format: if path.ends_with(".png") -> ImageFormat.PNG else -> ImageFormat.JPEG
-    if guard.value.image_bytes.get(path) == .Val(bytes) {
-        return Val(image_response(bytes, format))
-    }
+    if guard.value.image_bytes.get(path) == .Val(bytes) -> return Val(image_response(bytes, format))
     None
 }
 
@@ -1286,9 +1284,7 @@ priv app_remote_limited: fn(limit: AppRemoteLimit, request: HTTPRequest) -> Int?
     now: rt.clock_mono_ns()
     guard := limit.windows.guard_edit()
     window := guard.value.get(request.__peer) ?? AppRemoteWindow{start_ns: now, calls: 0}
-    if now - window.start_ns >= limit.window_ns {
-        window = AppRemoteWindow{start_ns: now, calls: 0}
-    }
+    if now - window.start_ns >= limit.window_ns -> window = AppRemoteWindow{start_ns: now, calls: 0}
     if window.calls >= limit.calls -> return Val(window.start_ns + limit.window_ns - now)
     window.calls += 1
     if guard.value.len() >= APP_REMOTE_LIMIT_ADDRESSES {
@@ -1336,9 +1332,7 @@ priv RemoteArgs: struct {
 // errors (`app_invalid_json`) when the body is no JSON array of arguments
 // the method takes.
 priv app_remote_response: fn(endpoint: AppRemote, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
-    if app_remote_limited(endpoint.limit, request) == .Val(wait_ns) {
-        return app_limited(wait_ns)
-    }
+    if app_remote_limited(endpoint.limit, request) == .Val(wait_ns) -> return app_limited(wait_ns)
     text: request.text() ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments can't be read: {err}"}}))
     tree: live_json.parse(text) ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments are not JSON: {err}"}}))
     reply: endpoint.answer(RemoteArgs{tree: tree}) ?? return app_json(422, app_invalid_json(err))
@@ -1364,9 +1358,7 @@ priv AppWebhook: struct {
 priv app_webhook_response: fn(hook: AppWebhook, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
     unsigned: app_json(401, app_error_json("`{request.path}` takes only deliveries signed with its key"))
     values := [String]{}
-    loop name in hook.params {
-        values.push(app_json_string(request.param(name) ?? ""))
-    }
+    loop name in hook.params { values.push(app_json_string(request.param(name) ?? "")) }
     params: live_json.parse("[{values.join(",")}]") ?? return unsigned
     // A path parameter the key method can't take, or no key: either is 401.
     key: hook.key(RemoteArgs{tree: params}) ?? return unsigned
@@ -1425,7 +1417,9 @@ priv AppTraceSettings: struct {
 
 // The OpenTelemetry SDK's batch span processor defaults.
 C_APP_TRACE_DELAY_MS: 5000
+
 C_APP_TRACE_MAX_QUEUE: 2048
+
 C_APP_TRACE_BATCH: 512
 
 // The OTEL_* variables the export reads, by name; an unset one is absent.
@@ -1617,8 +1611,12 @@ priv app_traceparent: fn(header: String) -> AppTraceParent Never! {
     // Version ff is invalid; a later version may add fields after these four.
     if !app_lower_hex(parts[0], 2) || parts[0] == "ff" -> return none
     if parts[0] == "00" && parts.len() != 4 -> return none
-    if !app_lower_hex(parts[1], 32) || !app_lower_hex(parts[2], 16) || !app_lower_hex(parts[3], 2) -> return none
-    if parts[1] == "00000000000000000000000000000000" || parts[2] == "0000000000000000" -> return none
+    if !app_lower_hex(parts[1], 32) || !app_lower_hex(parts[2], 16) || !app_lower_hex(parts[3], 2) {
+        return none
+    }
+    if parts[1] == "00000000000000000000000000000000" || parts[2] == "0000000000000000" {
+        return none
+    }
     AppTraceParent{trace_id: parts[1].copy(), span_id: parts[2].copy()}
 }
 
@@ -1646,9 +1644,7 @@ priv app_trace_push: fn(export: AppTraceExport, span: &&TraceSpan) Never! {
     held.span_id = make_trace_id("span:{seed}", 8)
     if held.trace_id == "" -> held.trace_id = make_trace_id("trace:{seed}", 16)
     slot: (guard.value.first + guard.value.count) %% capacity
-    if slot < guard.value.spans.len() {
-        guard.value.spans[slot] = held
-    } else {
+    if slot < guard.value.spans.len() -> guard.value.spans[slot] = held else {
         guard.value.spans.push(held)
     }
     if guard.value.count < capacity {
@@ -1666,7 +1662,9 @@ priv app_trace_take: fn(export: AppTraceExport) -> [TraceSpan] Never! {
     guard := export.queue.guard_edit()
     size: if guard.value.count < export.settings.batch -> guard.value.count else -> export.settings.batch
     taken := [TraceSpan]{}
-    loop index in 0..<size -> taken.push(guard.value.spans[(guard.value.first + index) %% capacity].copy())
+    loop index in 0..<size {
+        taken.push(guard.value.spans[(guard.value.first + index) %% capacity].copy())
+    }
     guard.value.first = (guard.value.first + size) %% capacity
     guard.value.count -= size
     taken
@@ -1687,13 +1685,17 @@ priv app_trace_flush: fn(export: AppTraceExport) Never! -[Net, Time.Wait]> {
     loop {
         batch: app_trace_take(export)
         size: batch.len()
-        if size == 0 -> return
+        if size == 0 {
+            return
+        }
         if !app_trace_post(export.settings, batch) {
             guard := export.queue.guard_edit()
             guard.value.dropped += size
             log_rt.metric_publish("jet.trace.dropped_spans", guard.value.dropped)
         }
-        if size < export.settings.batch -> return
+        if size < export.settings.batch {
+            return
+        }
     }
 }
 
@@ -1901,9 +1903,7 @@ Mount: struct {
 
 // `web.openapi(app)` checks as `__openapi_app(app)` below (sema
 // sema_call_http_web_openapi_mux); a router renders its route table the same way.
-openapi: fn(router: HTTPRouter) -> String OpenAPIError! {
-    openapi_mux(web_http.router_mux(router))
-}
+openapi: fn(router: HTTPRouter) -> String OpenAPIError! { openapi_mux(web_http.router_mux(router)) }
 
 // An App's document: its handler rows; pages, server functions and static
 // files carry no endpoint contract and are not API operations.
@@ -2173,13 +2173,9 @@ priv openapi_schema: fn(value: Dyn, path: String, errors: &[String]) -> String O
                 return Err(openapi_fault("OpenAPI schema `oneOf` must be an array"))
             }
         }
-        if items.len() == 0 {
-            errors.push(openapi_problem(path, "oneOf needs at least one schema"))
-        }
+        if items.len() == 0 -> errors.push(openapi_problem(path, "oneOf needs at least one schema"))
         rendered := [String]{}
-        loop item in items {
-            rendered.push(openapi_schema(item, path, errors) ?? return Err(err))
-        }
+        loop item in items { rendered.push(openapi_schema(item, path, errors) ?? return Err(err)) }
         return Ok("{{\"oneOf\":[{rendered.join(",")}]}}")
     }
     Ok("{{}}")

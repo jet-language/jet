@@ -20,7 +20,7 @@ MetadataFacts: struct {
     trust_roots: [String]
     todos: [String]
     // Typed projection of native fields, by fact key.
-    typed: [String: [String]]
+    typed: [String:[String]]
     replacement_candidates: [ReplacementCandidate]
     conflicts: [String]
 
@@ -40,9 +40,9 @@ MetadataFacts: struct {
             bins: [String]{},
             trust_roots: [String]{},
             todos: [String]{},
-            typed: [String: [String]]{},
+            typed: [String:[String]]{},
             replacement_candidates: [ReplacementCandidate]{},
-            conflicts: [String]{}
+            conflicts: [String]{},
         }
     }
 
@@ -64,7 +64,9 @@ MetadataFacts: struct {
         facts := MetadataFacts.empty(ProviderFamily.PyPI, name)
         facts.version = version
         facts.source_identity = "pypi:{name}@{version}"
-        if dynamic_metadata -> facts.todos.push("dynamic metadata must be resolved before build execution")
+        if dynamic_metadata {
+            facts.todos.push("dynamic metadata must be resolved before build execution")
+        }
         facts
     }
 
@@ -92,7 +94,9 @@ MetadataFacts: struct {
     // binary's digest, a SwiftPM revision, a GitHub release revision when
     // unversioned, else the version, else the digest. Empty when none.
     identity_selector: fn(self) -> (key: String, value: String) Never! {
-        if self.family == ProviderFamily.Binary -> return (key: "digest", value: self.integrity_hash)
+        if self.family == ProviderFamily.Binary {
+            return (key: "digest", value: self.integrity_hash)
+        }
         if self.family == ProviderFamily.SwiftPM {
             if self.first_typed("provider.revision") == {
                 .Val(revision) -> {
@@ -104,7 +108,9 @@ MetadataFacts: struct {
         if self.family == ProviderFamily.Github && self.version == "" {
             if self.first_typed("provider.github.revision") == {
                 .Val(revision) -> {
-                    if ProviderSelector.parse("#revision={revision}").is_exact() -> return (key: "revision", value: revision)
+                    if ProviderSelector.parse("#revision={revision}").is_exact() {
+                        return (key: "revision", value: revision)
+                    }
                 }
                 .None -> {}
             }
@@ -129,7 +135,9 @@ ProviderFactReport: struct {
     with_identity: fn(facts: MetadataFacts) -> ProviderFactReport Never! {
         losses := [String]{}
         if facts.name == "" -> losses.push("provider metadata has no package name")
-        if facts.identity_selector().value == "" -> losses.push("provider metadata has no exact version, revision, or digest")
+        if facts.identity_selector().value == "" {
+            losses.push("provider metadata has no exact version, revision, or digest")
+        }
         conflicts: facts.conflicts
         ProviderFactReport{facts: facts, losses: losses, conflicts: conflicts, native_format: "", native_document: ""}
     }

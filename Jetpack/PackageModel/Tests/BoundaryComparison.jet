@@ -8,17 +8,45 @@
 // No alternate comparison, evidence or hash provider.
 use {
     jet_pkg_model.[
-        ForeignArtifactCoverage, ForeignBoundaryContract, ForeignBoundaryIdentity, ForeignBridgeError,
-        ForeignLanguage, ForeignSourceAuthority, ForeignSourceReceipt, pkg_binder_descriptor,
+        ForeignArtifactCoverage,
+        ForeignBoundaryContract,
+        ForeignBoundaryIdentity,
+        ForeignBridgeError,
+        ForeignLanguage,
+        ForeignSourceAuthority,
+        ForeignSourceReceipt,
+        pkg_binder_descriptor,
     ]
     jet_foundation.[
-        ComparisonIdentity, ComparisonObservation, ComparisonRecord, ComparisonSample, ComparisonStatus,
-        DerivationRecord, EvidenceBuild, EvidenceExpectation, EvidenceIdentity, EvidenceKind,
-        EvidenceOutcome, EvidenceProducerKind, EvidenceRecord, EvidenceRevision, EvidenceSource,
-        DerivationMethod, DerivationRef, ObservationRelation, TEST_COMPARISON_SCHEMA_VERSION,
-        comparison_assertion_error_text, comparison_record_artifact_id, comparison_record_assert_equal,
-        comparison_status_as_str, derivation_identity, derivation_record, derivation_record_reference,
-        evidence_outcome_name, evidence_record_new, observation_relation_as_str,
+        ComparisonIdentity,
+        ComparisonObservation,
+        ComparisonRecord,
+        ComparisonSample,
+        ComparisonStatus,
+        DerivationRecord,
+        EvidenceBuild,
+        EvidenceExpectation,
+        EvidenceIdentity,
+        EvidenceKind,
+        EvidenceOutcome,
+        EvidenceProducerKind,
+        EvidenceRecord,
+        EvidenceRevision,
+        EvidenceSource,
+        DerivationMethod,
+        DerivationRef,
+        ObservationRelation,
+        TEST_COMPARISON_SCHEMA_VERSION,
+        comparison_assertion_error_text,
+        comparison_record_artifact_id,
+        comparison_record_assert_equal,
+        comparison_status_as_str,
+        derivation_identity,
+        derivation_record,
+        derivation_record_reference,
+        evidence_outcome_name,
+        evidence_record_new,
+        observation_relation_as_str,
         testing_compare_samples_with_discarded,
     ]
 }
@@ -26,26 +54,31 @@ use {
 pkg_boundary_test_identity: fn() -> ForeignBoundaryIdentity Never! {
     ForeignBoundaryIdentity.new("source", "overlay", "generator", "implementation", "toolchain", "target")
 }
+
 pkg_boundary_test_contract: fn(language: ForeignLanguage) -> ForeignBoundaryContract Never! {
     descriptor: pkg_binder_descriptor(language) ?? panic("registered descriptor")
     identity: pkg_boundary_test_identity()
     coverage: ForeignArtifactCoverage.new("artifact", identity.target, identity.generator).with_transitive_dependencies([String]{}).with_reachable_callbacks([String]{}).with_compiler_flags([String]{"-O2"})
     ForeignBoundaryContract.new(descriptor, "probe", identity).with_artifact_coverage(coverage)
 }
+
 pkg_boundary_test_derivation: fn(contract: ForeignBoundaryContract) -> DerivationRecord Never! {
     derivation_record("probe", "replacement", "jet-test", DerivationMethod.SampledAgreement, "comparison", [String]{}, contract.identity.derivation_identity())
 }
+
 pkg_boundary_test_evidence: fn(derivation: DerivationRecord) -> EvidenceRecord Never! {
     identity: EvidenceIdentity{report_id: "report", claim_id: "replacement", evidence_id: "observation"}
     record := evidence_record_new(identity, EvidenceKind.Unit, EvidenceProducerKind.Test, EvidenceOutcome.Passed, U64{1}, EvidenceSource{path: "probe.jet", line: U32{1}, column: U32{1}}, EvidenceBuild{toolchain: "toolchain", target: "target", profile: "test"}, EvidenceRevision{source: "source", build: "build", revision: "run"})
     record.derivation = Val(derivation_record_reference(derivation))
     record
 }
+
 // Test-local constructors over the canonical TestingComparison records, built
 // the way Compiler/JetFoundation/Tests/ComparisonEquality.jet builds them.
 pkg_boundary_test_observation: fn(raw: String) -> ComparisonObservation Never! {
     ComparisonObservation{raw: raw, typed_failure: None, mutation: None, ordered_effects: [String]{}, cleanup: [String]{}}
 }
+
 pkg_boundary_test_sample: fn(candidate: String, declared_equal: Bool) -> ComparisonSample Never! {
     ComparisonSample{
         identity: ComparisonIdentity{case_id: "case", input_id: "input", seed: None, source: "source", tool: "toolchain", target: "target"},
@@ -56,34 +89,41 @@ pkg_boundary_test_sample: fn(candidate: String, declared_equal: Bool) -> Compari
         declared_equal: Val(declared_equal),
     }
 }
+
 pkg_boundary_test_with_replays: fn(sample: ComparisonSample, reference: ComparisonObservation, candidate: ComparisonObservation) -> ComparisonSample Never! {
     replayed := sample
     replayed.reference_replay = Val(reference)
     replayed.candidate_replay = Val(candidate)
     replayed
 }
+
 // A terminal record with no samples: the verdict engine's own record shape.
 pkg_boundary_test_terminal: fn(relation: ObservationRelation, status: ComparisonStatus, reason: String) -> ComparisonRecord Never! {
     ComparisonRecord{schema_version: U16{1}, status: status, relation: relation, samples: [ComparisonSample]{}, discarded_cases: 0, first_difference: None, reduced_counterexample: None, contamination: None, reason: Val(reason), universal_proof: false}
 }
+
 pkg_boundary_test_compare: fn(relation: ObservationRelation, samples: [ComparisonSample]) -> ComparisonRecord Never! {
     testing_compare_samples_with_discarded(relation, samples, 0)
 }
+
 pkg_boundary_test_comparison: fn(candidate: String, declared_equal: Bool) -> ComparisonRecord Never! {
     pkg_boundary_test_compare(ObservationRelation.TypedEquality, [ComparisonSample]{pkg_boundary_test_sample(candidate, declared_equal)})
 }
+
 pkg_boundary_test_accept: fn(contract: &ForeignBoundaryContract, comparison: ComparisonRecord) -> ForeignSourceReceipt ForeignBridgeError! {
     derivation: pkg_boundary_test_derivation(contract.copy())
     current_identity: contract.identity.copy()
     current_coverage: contract.artifact_coverage.copy()
     contract.accept_reasoned_replacement(current_identity, current_coverage, derivation, pkg_boundary_test_evidence(derivation), comparison, "replacement")
 }
+
 pkg_boundary_test_accept_error: fn(contract: &ForeignBoundaryContract, comparison: ComparisonRecord) -> String Never! {
     if pkg_boundary_test_accept(contract, comparison) == {
         .Ok(_) -> panic("replacement must be refused")
         .Err(error) -> error.message
     }
 }
+
 pkg_boundary_test_receipt_error: fn(receipt: ForeignSourceReceipt) -> String Never! {
     if receipt.validate() == {
         .Ok(_) -> panic("receipt must be refused")
@@ -354,8 +394,12 @@ pkg_boundary_test_receipt_error: fn(receipt: ForeignSourceReceipt) -> String Nev
             4 -> row.replacement_identity = ""
             5 -> row.comparison_artifact_id = ""
             6 -> row.comparison_artifact_id = "abc"
-            7 -> row.comparison_artifact_id = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-            else -> row.comparison_artifact_id = "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg"
+            7 -> {
+                row.comparison_artifact_id = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            }
+            else -> {
+                row.comparison_artifact_id = "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg"
+            }
         }
         assert_eq(pkg_boundary_test_receipt_error(row), "foreign source receipt has incomplete identity or coverage")
     }

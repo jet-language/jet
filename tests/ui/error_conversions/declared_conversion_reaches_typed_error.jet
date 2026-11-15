@@ -1,22 +1,22 @@
+#Error
+SourceErr: enum {
+    One
+}
 
 #Error
-SourceErr: enum { One }
-#Error
-TargetErr: enum { One }
+TargetErr: enum {
+    One
+}
 
 impl TargetErr.From(SourceErr) {
     from: fn(error: SourceErr) -> TargetErr { return TargetErr.One }
 }
 
-read: fn() -> Int SourceErr! {
-    return Err(SourceErr.One)
-}
+read: fn() -> Int SourceErr! { return Err(SourceErr.One) }
 
 outer: fn() -> Int TargetErr! {
     value: read()
     return Ok(value)
 }
 
-run: fn() TargetErr! {
-    outer()
-}
+run: fn() TargetErr! { outer() }

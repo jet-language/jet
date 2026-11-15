@@ -48,7 +48,9 @@ jet_cli_record_path_validate: fn(path: String) JetCLIReadError! {
             return Err(jet_cli_read_error("record index path is empty, too large, or uses unsafe separators"))
         }
     }
-    if path.starts_with("/") -> return Err(jet_cli_read_error("record index path must be project-relative"))
+    if path.starts_with("/") {
+        return Err(jet_cli_read_error("record index path must be project-relative"))
+    }
     components := [String]{}
     loop (index, component) in path.split("/").to_list() {
         if component == "" || (component == "." && index > 0) -> next
@@ -96,8 +98,12 @@ jet_cli_record_entry_validate: fn(entry: JetCLIRecordIndexEntry) JetCLIReadError
         return Err(jet_cli_read_error("record artifact_id contains an unsafe path component"))
     }
     jet_cli_record_path_validate(entry.path)
-    if entry.consumed.len() > 1024 -> return Err(jet_cli_read_error("record consumed has too many links"))
-    if entry.produced.len() > 1024 -> return Err(jet_cli_read_error("record produced has too many links"))
+    if entry.consumed.len() > 1024 {
+        return Err(jet_cli_read_error("record consumed has too many links"))
+    }
+    if entry.produced.len() > 1024 {
+        return Err(jet_cli_read_error("record produced has too many links"))
+    }
     loop link in entry.consumed -> jet_driver_record_link_validate(link)
     loop link in entry.produced -> jet_driver_record_link_validate(link)
 }
@@ -140,14 +146,15 @@ jet_cli_record_boolean: fn(value: JetCLIStatusValue, field: String) -> Bool JetC
 
 jet_cli_record_links_parse: fn(value: JetCLIStatusValue, field: String) -> [JetDriverRecordLink] JetCLIReadError! {
     values: jet_cli_status_list(jet_cli_status_get(value, field)) ?? return Err(jet_cli_read_error("record index field `{field}` must be an array"))
-    if values.len() > 1024 -> return Err(jet_cli_read_error("record index field `{field}` has too many links"))
+    if values.len() > 1024 {
+        return Err(jet_cli_read_error("record index field `{field}` has too many links"))
+    }
     links := [JetDriverRecordLink]{}
     loop item in values {
         fields: if item == {
             .Object(fields) -> fields
             .Null | .Bool(_) | .Integer(_) | .Float(_) | .Text(_) | .Array(_) -> {
                 return Err(jet_cli_read_error("record index {field} link must be an object"))
-
             }
         }
         loop child in fields {
@@ -167,14 +174,15 @@ jet_cli_record_links_parse: fn(value: JetCLIStatusValue, field: String) -> [JetD
 JET_CLI_RECORD_INDEX_FIELDS: [String]{"capture", "consumed", "engine", "id", "kind", "links_version", "path", "produced", "recorded_sequence", "saved", "size", "target_inputs_sha256", "tool_version", "version"}
 
 jet_cli_record_index_parse_line: fn(line: String) -> JetCLIRecordIndexEntry JetCLIReadError! {
-    if line.bytes().len() > 1048576 -> return Err(jet_cli_read_error("record index line exceeds the 1 MiB limit"))
+    if line.bytes().len() > 1048576 {
+        return Err(jet_cli_read_error("record index line exceeds the 1 MiB limit"))
+    }
     tree: jet_cli_status_tree_parse(line) ?? return Err(jet_cli_read_error("record index line is not valid JSON"))
     value: jet_cli_status_from_tree(tree)
     fields: if value == {
         .Object(fields) -> fields
         .Null | .Bool(_) | .Integer(_) | .Float(_) | .Text(_) | .Array(_) -> {
             return Err(jet_cli_read_error("record index line must be a JSON object"))
-
         }
     }
     loop field in fields {
@@ -185,7 +193,9 @@ jet_cli_record_index_parse_line: fn(line: String) -> JetCLIRecordIndexEntry JetC
     version: jet_cli_record_integer(value, "version")
     if version != 1 -> return Err(jet_cli_read_error("unsupported record index version {version}"))
     links_version: jet_cli_record_integer(value, "links_version")
-    if links_version != 1 -> return Err(jet_cli_read_error("unsupported record links version {links_version}"))
+    if links_version != 1 {
+        return Err(jet_cli_read_error("unsupported record links version {links_version}"))
+    }
     identity: JetCLIRecordIdentity{target_inputs_sha256: jet_cli_record_string(value, "target_inputs_sha256"), tool_version: jet_cli_record_string(value, "tool_version"), engine: jet_cli_record_string(value, "engine")}
     jet_cli_record_identity_validate(identity)
     kind: jet_cli_record_string(value, "kind")
@@ -222,7 +232,6 @@ jet_cli_record_entry_is_disposable: fn(entry: JetCLIRecordIndexEntry) -> Bool Ne
         "evidence" -> ".jet/evidence"
         else -> {
             return false
-
         }
     }
     // Path::starts_with compares components rather than string prefixes.

@@ -5,7 +5,7 @@ use jet_pkg_model.[InlinePackageBlock, PackageFacts, pkg_binder_slice, pkg_extra
 #Test("build profile rejects retired environment payload") {
     hostile: "release: Build.{{ optimize: \"O2\", env: \"RUSTFLAGS=--cfg=hostile; touch pwned\" }}"
     if pkg_parse_build(hostile) == {
-        .Ok(_) -> panic("retired build-profile environment data must not reach rustc")
+        .Ok(_) -> { panic("retired build-profile environment data must not reach rustc") }
         .Err(_) -> {}
     }
 }
@@ -16,7 +16,7 @@ use jet_pkg_model.[InlinePackageBlock, PackageFacts, pkg_binder_slice, pkg_extra
 pkg_test_scan_inline_package: fn(source: String) -> InlinePackageBlock? Never! {
     scanned := InlinePackageBlock?{None}
     if pkg_extract_inline_package(source) == {
-        .Ok(found) -> scanned = found
+        .Ok(found) -> { scanned = found }
         .Err(error) -> panic("inline Package scan failed: {error.message()}")
     }
     scanned
@@ -55,15 +55,19 @@ pkg_test_scan_inline_package: fn(source: String) -> InlinePackageBlock? Never! {
 
 #Test("inline package rejects not first duplicate and unbalanced") {
     if pkg_extract_inline_package("run: fn() {{}}\npackage {{ name: \"demo\" }}\n") == {
-        .Err(error) -> assert(error.message() == "the inline Package declaration must be first")
+        .Err(error) -> { assert(error.message() == "the inline Package declaration must be first") }
         .Ok(_) -> panic("a later carrier is not first")
     }
     if pkg_extract_inline_package("package: {{ name: \"one\" }}\npackage: {{ name: \"two\" }}\nrun: fn() {{}}\n") == {
-        .Err(error) -> assert(error.message() == "only one inline Package declaration is allowed")
+        .Err(error) -> {
+            assert(error.message() == "only one inline Package declaration is allowed")
+        }
         .Ok(_) -> panic("a second carrier is a duplicate")
     }
     if pkg_extract_inline_package("package: {{ name: \"demo\"\nrun: fn() {{}}\n") == {
-        .Err(error) -> assert(error.message() == "the inline Package declaration is missing its closing `}}`")
+        .Err(error) -> {
+            assert(error.message() == "the inline Package declaration is missing its closing `}}`")
+        }
         .Ok(_) -> panic("an unclosed carrier is unbalanced")
     }
 }

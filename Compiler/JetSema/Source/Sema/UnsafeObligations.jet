@@ -86,7 +86,9 @@ SemaUnsafeOperation: struct {
 // (`mem.copy(…)`), or a direct call of one of the runtime's raw intrinsics
 // (JetBackend Source/OS/Linux.jet).
 SEMA_RAW_METHOD: "method"
+
 SEMA_RAW_MEM: "mem"
+
 SEMA_RAW_CALL: "call"
 
 // One raw memory operation: the name it is written with (every name it
@@ -169,7 +171,9 @@ sema_unsafe_call_operation: fn(name: String, args: [CallArg], span: Span, out: &
     loop row in SEMA_UNSAFE_RAW_OPERATIONS {
         if row.form != SEMA_RAW_CALL -> next
         if !(if row.prefix -> name.starts_with(row.name) else -> name == row.name) -> next
-        if row.syscalls.len() > 0 && (args.len() == 0 || !row.syscalls.contains(sema_unsafe_syscall_name(args[0].expr))) -> next
+        if row.syscalls.len() > 0 && (args.len() == 0 || !row.syscalls.contains(sema_unsafe_syscall_name(args[0].expr))) {
+            next
+        }
         roots := [String]{}
         loop index in 0..<row.pointers {
             if index < args.len() -> sema_unsafe_address_roots(args[index].expr, roots)
@@ -224,13 +228,19 @@ sema_unsafe_package_surface: fn(modules: [SemaGateModule], result: &UnsafeInspec
             if row.unit == .Val(unit) -> sema_unsafe_unit_kernel(row, unit, path, kernel, result) else {
                 within: sema_unsafe_path_within(path, kernel)
                 if within {
-                    loop item in row.program.items -> sema_unsafe_kernel_item(item, row.program, row.source, result)
+                    loop item in row.program.items {
+                        sema_unsafe_kernel_item(item, row.program, row.source, result)
+                    }
                 }
                 if !within {
                     loop gate in result.gates {
                         if gate.source != row.source -> next
-                        loop operation in gate.operations -> sema_unsafe_memory_refusal(result, row.source, path, kernel.len() == 0, operation.kind, operation.span, "")
-                        loop operation in gate.memory_operations -> sema_unsafe_memory_refusal(result, row.source, path, kernel.len() == 0, operation.kind, operation.span, "")
+                        loop operation in gate.operations {
+                            sema_unsafe_memory_refusal(result, row.source, path, kernel.len() == 0, operation.kind, operation.span, "")
+                        }
+                        loop operation in gate.memory_operations {
+                            sema_unsafe_memory_refusal(result, row.source, path, kernel.len() == 0, operation.kind, operation.span, "")
+                        }
                     }
                 }
             }
@@ -283,7 +293,9 @@ SEMA_MAPPING_KEEPERS: [(package: String, path: String, checkout: String)]{
 // primitives.
 sema_unsafe_mapping_keepers: fn(row: SemaGateModule, result: &UnsafeInspection) Never! {
     loop keeper in SEMA_MAPPING_KEEPERS {
-        if row.package_identity.starts_with(keeper.package) && row.policy_path == (Val(keeper.path)) -> return
+        if row.package_identity.starts_with(keeper.package) && row.policy_path == (Val(keeper.path)) {
+            return
+        }
     }
     starts: if row.unit == .Val(unit) -> (loop source in unit.sources -> source.start) else -> [Int]{}
     loop gate in result.gates {
@@ -322,7 +334,9 @@ sema_unsafe_runtime_package: fn(package_identity: String) -> Bool Never! {
 // marks; None for any other file, so no other package's comment can rename
 // where its operations stand.
 sema_unsafe_unit_map: fn(package_identity: String, text: String) -> SemaUnitMap? Never! {
-    if !sema_unsafe_runtime_package(package_identity) || !text.contains(SEMA_UNSAFE_UNIT_SOURCE_MARK) -> return None
+    if !sema_unsafe_runtime_package(package_identity) || !text.contains(SEMA_UNSAFE_UNIT_SOURCE_MARK) {
+        return None
+    }
     unit := SemaUnitMap{sources: [SemaUnitSource]{}, line_starts: [Int]{}}
     offset := 0
     loop line in text.split("\n") {
@@ -355,12 +369,18 @@ sema_unsafe_unit_kernel: fn(row: SemaGateModule, unit: SemaUnitMap, path: String
     starts: loop source in unit.sources -> source.start
     loop gate in result.gates {
         if gate.source != row.source -> next
-        loop operation in gate.operations -> sema_unsafe_unit_refusal(result, row.source, unit, starts, path, kernel, operation.kind, operation.span)
-        loop operation in gate.memory_operations -> sema_unsafe_unit_refusal(result, row.source, unit, starts, path, kernel, operation.kind, operation.span)
+        loop operation in gate.operations {
+            sema_unsafe_unit_refusal(result, row.source, unit, starts, path, kernel, operation.kind, operation.span)
+        }
+        loop operation in gate.memory_operations {
+            sema_unsafe_unit_refusal(result, row.source, unit, starts, path, kernel, operation.kind, operation.span)
+        }
     }
     loop item in row.program.items {
         index: sema_unsafe_last_at(starts, sema_compiler_index_item_span(item).start) ?? next
-        if sema_unsafe_path_within(unit.sources[index].path, kernel) -> sema_unsafe_kernel_item(item, row.program, row.source, result)
+        if sema_unsafe_path_within(unit.sources[index].path, kernel) {
+            sema_unsafe_kernel_item(item, row.program, row.source, result)
+        }
     }
 }
 
@@ -374,7 +394,9 @@ sema_unsafe_unit_refusal: fn(result: &UnsafeInspection, source: String, unit: Se
         return
     }
     owner: unit.sources[index]
-    if sema_unsafe_path_within(owner.path, kernel) -> return
+    if sema_unsafe_path_within(owner.path, kernel) {
+        return
+    }
     line: (sema_unsafe_last_at(unit.line_starts, span.start) ?? 0) + 2 - owner.line
     sema_unsafe_memory_refusal(result, source, owner.path, kernel.len() == 0, kind, span, "{owner.path}:{line}")
 }
@@ -387,20 +409,30 @@ sema_unsafe_unit_refusal: fn(result: &UnsafeInspection, source: String, unit: Se
 // it in its own gate.
 sema_unsafe_kernel_item: fn(item: Item, program: Program, source: String, result: &UnsafeInspection) Never! {
     if item == {
-        .Func(function) -> sema_unsafe_kernel_function(function, "", [Field]{}, source, result)
+        .Func(function) -> { sema_unsafe_kernel_function(function, "", [Field]{}, source, result) }
         .Struct(definition) -> {
-            loop function in definition.methods -> sema_unsafe_kernel_function(function, definition.name, definition.fields, source, result)
+            loop function in definition.methods {
+                sema_unsafe_kernel_function(function, definition.name, definition.fields, source, result)
+            }
             loop implementation in definition.trait_impls {
-                loop function in implementation.methods -> sema_unsafe_kernel_function(function, definition.name, definition.fields, source, result)
+                loop function in implementation.methods {
+                    sema_unsafe_kernel_function(function, definition.name, definition.fields, source, result)
+                }
             }
         }
         .Enum(definition) -> {
-            loop function in definition.methods -> sema_unsafe_kernel_function(function, definition.name, [Field]{}, source, result)
+            loop function in definition.methods {
+                sema_unsafe_kernel_function(function, definition.name, [Field]{}, source, result)
+            }
             loop implementation in definition.trait_impls {
-                loop function in implementation.methods -> sema_unsafe_kernel_function(function, definition.name, [Field]{}, source, result)
+                loop function in implementation.methods {
+                    sema_unsafe_kernel_function(function, definition.name, [Field]{}, source, result)
+                }
             }
         }
-        .Impl(implementation) -> sema_unsafe_kernel_impl(implementation, program, source, result)
+        .Impl(implementation) -> {
+            sema_unsafe_kernel_impl(implementation, program, source, result)
+        }
         .CodeModule(row) -> {
             if row.body == .Val(items) {
                 loop child in items -> sema_unsafe_kernel_item(child, program, source, result)
@@ -415,12 +447,16 @@ sema_unsafe_kernel_impl: fn(implementation: ImplDef, program: Program, source: S
     loop item in program.items {
         if item == .Struct(definition) {
             if definition.name == implementation.type_name {
-                loop function in implementation.methods -> sema_unsafe_kernel_function(function, definition.name, definition.fields, source, result)
+                loop function in implementation.methods {
+                    sema_unsafe_kernel_function(function, definition.name, definition.fields, source, result)
+                }
                 return
             }
         }
     }
-    loop function in implementation.methods -> sema_unsafe_kernel_function(function, implementation.type_name, [Field]{}, source, result)
+    loop function in implementation.methods {
+        sema_unsafe_kernel_function(function, implementation.type_name, [Field]{}, source, result)
+    }
 }
 
 // The caller-chosen addresses `function` can reach: its address parameters
@@ -438,7 +474,9 @@ sema_unsafe_kernel_function: fn(function: Func, owner: String, fields: [Field], 
     loop field in fields {
         if field.is_pub && sema_unsafe_address_type(field.ty) -> names.push("self.{field.name}")
     }
-    if names.len() == 0 -> return
+    if names.len() == 0 {
+        return
+    }
     // origins[i]: the index in `names` of the parameter or field names[i] comes from.
     origins := [Int]{}
     loop index in 0..<names.len() -> origins.push(index)
@@ -450,8 +488,12 @@ sema_unsafe_kernel_function: fn(function: Func, owner: String, fields: [Field], 
     reported := [Int]{}
     loop gate in result.gates {
         if gate.source != source -> next
-        loop operation in gate.operations -> sema_unsafe_kernel_address(function, owner, operation.kind, operation.span, operation.address, names, origins, reported, source, result)
-        loop operation in gate.memory_operations -> sema_unsafe_kernel_address(function, owner, operation.kind, operation.span, operation.address, names, origins, reported, source, result)
+        loop operation in gate.operations {
+            sema_unsafe_kernel_address(function, owner, operation.kind, operation.span, operation.address, names, origins, reported, source, result)
+        }
+        loop operation in gate.memory_operations {
+            sema_unsafe_kernel_address(function, owner, operation.kind, operation.span, operation.address, names, origins, reported, source, result)
+        }
     }
 }
 
@@ -470,15 +512,25 @@ sema_unsafe_address_type: fn(ty: Type) -> Bool Never! {
 // with the origin it came from.
 sema_unsafe_address_locals: fn(body: [Stmt], names: &[String], origins: &[Int]) Never! {
     loop statement in body {
-        if statement == .Val(binding) -> sema_unsafe_address_local(binding.name, binding.init, names, origins)
-        if statement == .Assign(.Local(name, _), _, _, value) -> sema_unsafe_address_local(name, value, names, origins)
-        if statement == .Unsafe(_, _, nested, _) -> sema_unsafe_address_locals(nested, names, origins)
-        loop nested in sema_unsafe_nested_bodies(statement) -> sema_unsafe_address_locals(nested, names, origins)
+        if statement == .Val(binding) {
+            sema_unsafe_address_local(binding.name, binding.init, names, origins)
+        }
+        if statement == .Assign(.Local(name, _), _, _, value) {
+            sema_unsafe_address_local(name, value, names, origins)
+        }
+        if statement == .Unsafe(_, _, nested, _) {
+            sema_unsafe_address_locals(nested, names, origins)
+        }
+        loop nested in sema_unsafe_nested_bodies(statement) {
+            sema_unsafe_address_locals(nested, names, origins)
+        }
     }
 }
 
 sema_unsafe_address_local: fn(name: String, value: Expr, names: &[String], origins: &[Int]) Never! {
-    if name == "" || names.contains(name) -> return
+    if name == "" || names.contains(name) {
+        return
+    }
     roots := [String]{}
     sema_unsafe_address_roots(value, roots)
     loop index in 0..<names.len() {
@@ -492,7 +544,9 @@ sema_unsafe_address_local: fn(name: String, value: Expr, names: &[String], origi
 // Refuse a raw operation inside `function` whose address comes from one of
 // `names`; each origin is reported once.
 sema_unsafe_kernel_address: fn(function: Func, owner: String, kind: String, span: Span, address: [String], names: [String], origins: [Int], reported: &[Int], source: String, result: &UnsafeInspection) Never! {
-    if span.start < function.span.start || span.end > function.span.end -> return
+    if span.start < function.span.start || span.end > function.span.end {
+        return
+    }
     loop index in 0..<names.len() {
         if !address.contains(names[index]) || reported.contains(origins[index]) -> next
         reported.push(origins[index])
@@ -527,13 +581,15 @@ sema_unsafe_address_roots: fn(expression: Expr, out: &[String]) Never! {
             }
             sema_unsafe_address_roots(base, out)
         }
-        .PtrFromAddr(_, _, _, addr, _, _) -> sema_unsafe_address_roots(addr, out)
+        .PtrFromAddr(_, _, _, addr, _, _) -> { sema_unsafe_address_roots(addr, out) }
         .MethodCall(receiver, method, _, _, _, args, _) -> {
             if method == "offset" || method == "byte_offset" {
                 sema_unsafe_pointer_roots(receiver, args, out)
                 return
             }
-            if method == "address_of" && sema_unsafe_mem_receiver(receiver) -> return
+            if method == "address_of" && sema_unsafe_mem_receiver(receiver) {
+                return
+            }
             sema_unsafe_address_roots(receiver, out)
             loop argument in args -> sema_unsafe_address_roots(argument.expr, out)
         }
@@ -976,7 +1032,7 @@ sema_unsafe_shallow_operations: fn(statement: Stmt, out: &[SemaUnsafeOperation])
                     sema_unsafe_expr_operations(base, out)
                     sema_unsafe_expr_operations(index, out)
                 }
-                .Field(base, _, _) -> sema_unsafe_expr_operations(base, out)
+                .Field(base, _, _) -> { sema_unsafe_expr_operations(base, out) }
                 .Local(_, _) -> {}
             }
             sema_unsafe_expr_operations(value, out)
@@ -1125,7 +1181,9 @@ sema_unsafe_expr_operations: fn(expression: Expr, out: &[SemaUnsafeOperation]) N
                 }
                 .Block(body, block_value, _) -> {
                     loop statement in body -> sema_unsafe_shallow_operations(statement, out)
-                    if block_value == .Val(nested_value) -> sema_unsafe_expr_operations(nested_value, out)
+                    if block_value == .Val(nested_value) {
+                        sema_unsafe_expr_operations(nested_value, out)
+                    }
                 }
                 .Panic(_, args) -> {
                     loop argument in args -> sema_unsafe_expr_operations(argument.expr, out)

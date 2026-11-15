@@ -10,19 +10,38 @@ use {
 impact_test_definition: fn(name: String, module_path: String) -> SemDefinition Never! {
     SemDefinition{
         def: SemDef{
-            identity: "const:{module_path}.{name}", name: name.copy(), qualified_name: "{module_path}.{name}",
-            def_span: Span{start: 0, end: 0}, module_path: module_path.copy(), kind: SemKind.Const,
+            identity: "const:{module_path}.{name}",
+            name: name.copy(),
+            qualified_name: "{module_path}.{name}",
+            def_span: Span{start: 0, end: 0},
+            module_path: module_path.copy(),
+            kind: SemKind.Const,
         },
-        view_provenance: None, derives: [String]{}, nominal_base: None, trait_contracts: [SemTraitContract]{},
+        view_provenance: None,
+        derives: [String]{},
+        nominal_base: None,
+        trait_contracts: [SemTraitContract]{},
     }
 }
+
 impact_test_reference: fn(name: String, start: Int) -> SemRef Never! {
-    SemRef{name: name.copy(), module_path: "mód", scope_identity: None,
-        target: None, fact: None, span: Span{start, end: start + 4}}
+    SemRef{
+        name: name.copy(),
+        module_path: "mód",
+        scope_identity: None,
+        target: None,
+        fact: None,
+        span: Span{start: start, end: start + 4},
+    }
 }
+
 impact_test_edge: fn(caller: String, callee: String, start: Int) -> SemCall Never! {
-    SemCall{caller: caller.copy(), callee: callee.copy(), module_path: "mód",
-        span: Span{start, end: start + 4}}
+    SemCall{
+        caller: caller.copy(),
+        callee: callee.copy(),
+        module_path: "mód",
+        span: Span{start: start, end: start + 4},
+    }
 }
 
 #Test("impact_depth_zero_retains_direct_sites_and_utf8_byte_spans") {
@@ -30,7 +49,8 @@ impact_test_edge: fn(caller: String, callee: String, start: Int) -> SemCall Neve
         [SemDefinition]{impact_test_definition("target", "mód")},
         [SemRef]{impact_test_reference("target", 7), impact_test_reference("other", 11)},
         [SemCall]{impact_test_edge("run", "target", 19), impact_test_edge("target", "leaf", 27)},
-        "target", 0,
+        "target",
+        0,
     )
     assert(report.found)
     assert_eq(report.definition_module, Val("mód"))
@@ -84,9 +104,11 @@ impact_test_edge: fn(caller: String, callee: String, start: Int) -> SemCall Neve
 
 #Test("impact_direct_sites_keep_repeated_pairs_while_bfs_keeps_first") {
     report: impact_report(
-        [SemDefinition]{impact_test_definition("target", "mód")}, [SemRef]{},
+        [SemDefinition]{impact_test_definition("target", "mód")},
+        [SemRef]{},
         [SemCall]{impact_test_edge("run", "target", 3), impact_test_edge("run", "target", 15)},
-        "target", 3,
+        "target",
+        3,
     )
     assert_eq(report.call_sites.len(), 2)
     assert_eq(report.call_sites[0].span_start, 3)
@@ -116,8 +138,11 @@ impact_test_edge: fn(caller: String, callee: String, start: Int) -> SemCall Neve
 #Test("impact_qualified_resolution_uses_last_separator_and_original_query") {
     definitions: [SemDefinition]{impact_test_definition("target", "prefix.mód.nested"), impact_test_definition("target", "mód.nested")}
     references: [SemRef]{impact_test_reference("target", 1), impact_test_reference("mód.nested.target", 5)}
-    calls: [SemCall]{impact_test_edge("run", "target", 9), impact_test_edge("other", "mód.nested.target", 13),
-        impact_test_edge("mód.nested.target", "leaf", 17)}
+    calls: [SemCall]{
+        impact_test_edge("run", "target", 9),
+        impact_test_edge("other", "mód.nested.target", 13),
+        impact_test_edge("mód.nested.target", "leaf", 17),
+    }
     qualified: impact_report(definitions, references, calls, "mód.nested.target", 3)
     assert(qualified.found)
     assert_eq(qualified.definition_module, Val("prefix.mód.nested"))
@@ -146,8 +171,13 @@ impact_test_edge: fn(caller: String, callee: String, start: Int) -> SemCall Neve
 
 #Test("impact_json_escapes_rust_control_set_and_retains_unicode") {
     name: String.from_bytes([U8]{34, 92, 10, 13, 9, 8, 12, 0, 31, 127, 194, 128, 194, 159, 195, 169}) ?? panic("valid UTF-8")
-    report: impact_report([SemDefinition]{impact_test_definition(name, "mód")},
-        [SemRef]{impact_test_reference(name, 3)}, [SemCall]{impact_test_edge(name, name, 7)}, name, 1)
+    report: impact_report(
+        [SemDefinition]{impact_test_definition(name, "mód")},
+        [SemRef]{impact_test_reference(name, 3)},
+        [SemCall]{impact_test_edge(name, name, 7)},
+        name,
+        1,
+    )
     quoted: `"\"\\\n\r\t\u0008\u000c\u0000\u001f\u007f\u0080\u009fé"`
     output: report.to_json()
     assert(output.contains("\"symbol\":{quoted},\"found\":true"))
@@ -156,9 +186,13 @@ impact_test_edge: fn(caller: String, callee: String, start: Int) -> SemCall Neve
 }
 
 #Test("impact_report_renders_ordered_consumer_text_and_json") {
-    report: impact_report([SemDefinition]{impact_test_definition("target", "mód")},
+    report: impact_report(
+        [SemDefinition]{impact_test_definition("target", "mód")},
         [SemRef]{impact_test_reference("target", 3)},
-        [SemCall]{impact_test_edge("run", "target", 7), impact_test_edge("target", "leaf", 11)}, "target", 2)
+        [SemCall]{impact_test_edge("run", "target", 7), impact_test_edge("target", "leaf", 11)},
+        "target",
+        2,
+    )
     expected_text: "blast radius for `target` (defined in mód)\n  references:        1\n  direct call sites: 1\n  upstream callers:  1 (depth <= 2)\n  downstream callees:1 (depth <= 2)\n  ref  mód:3..7\n  call run -> target @ mód:7..11\n  upstream[d1] run -> target @ mód\n  downstream[d1] target -> leaf @ mód\n"
     assert_eq(report.render_text(), expected_text)
     expected_json: `{"symbol":"target","found":true,"depth_limit":2,"definition_module":"mód","references":[{"depth":1,"name":"target","module_path":"mód","span":{"start":3,"end":7}}],"call_sites":[{"depth":1,"caller":"run","callee":"target","module_path":"mód","span":{"start":7,"end":11}}],"upstream_callers":[{"depth":1,"caller":"run","callee":"target","module_path":"mód","span":{"start":7,"end":11}}],"downstream_callees":[{"depth":1,"caller":"target","callee":"leaf","module_path":"mód","span":{"start":11,"end":15}}]}`
@@ -195,6 +229,7 @@ impact_test_cli_upstream: fn(exit_code: Int, stdout: String) Never! {
     assert(stdout.contains("blast radius for `report`"))
     assert(stdout.contains("upstream"))
 }
+
 impact_test_cli_json: fn(exit_code: Int, stdout: String) Never! {
     assert_eq(exit_code, 0)
     assert(stdout.starts_with("{{\"schema\":\"jet.status/v1\""))
@@ -202,6 +237,5 @@ impact_test_cli_json: fn(exit_code: Int, stdout: String) Never! {
     assert(stdout.contains("\"found\":true"))
     assert(stdout.contains("\"check\":{{\"status\":\"passed\""))
 }
-impact_test_cli_unknown: fn(exit_code: Int) Never! {
-    assert(exit_code != 0)
-}
+
+impact_test_cli_unknown: fn(exit_code: Int) Never! { assert(exit_code != 0) }

@@ -19,9 +19,7 @@ EnvironmentSelection: struct {
         "{self.reference}\t{self.name}\t{self.version}\t{self.output_hash}"
     }
 
-    key: fn(self) -> String Never! {
-        "{self.base_key()}\t{self.metadata}"
-    }
+    key: fn(self) -> String Never! { "{self.base_key()}\t{self.metadata}" }
 }
 
 store_environment_entry_selection: fn(entry: StoreEntry) -> EnvironmentSelection Never! {
@@ -40,10 +38,10 @@ store_environment_entry_selection: fn(entry: StoreEntry) -> EnvironmentSelection
 // Selected entries keyed by their full selection; among duplicates the most
 // recently used (then greatest id) wins.
 EnvironmentEntryIndex: struct {
-    priv by_selection: [String: StoreEntry]
+    priv by_selection: [String:StoreEntry]
 
     from_entries: fn(entries: [StoreEntry]) -> EnvironmentEntryIndex Never! {
-        index := EnvironmentEntryIndex{by_selection: [String: StoreEntry]{}}
+        index := EnvironmentEntryIndex{by_selection: [String:StoreEntry]{}}
         loop entry in entries -> index.offer(store_environment_entry_selection(entry).key(), entry)
         index
     }
@@ -51,13 +49,13 @@ EnvironmentEntryIndex: struct {
     // Build only the receipt members that can be selected. Store metadata
     // hashes for unrelated entries cannot affect an environment stamp.
     from_entries_for_selections: fn(entries: [StoreEntry], selections: [EnvironmentSelection]) -> EnvironmentEntryIndex Never! {
-        wanted := [String: Bool]{}
-        base_keys := [String: Bool]{}
+        wanted := [String:Bool]{}
+        base_keys := [String:Bool]{}
         loop selection in selections {
             wanted[selection.key()] = true
             base_keys[selection.base_key()] = true
         }
-        index := EnvironmentEntryIndex{by_selection: [String: StoreEntry]{}}
+        index := EnvironmentEntryIndex{by_selection: [String:StoreEntry]{}}
         loop entry in entries {
             base: "{entry.reference}\t{entry.name}\t{entry.version}\t{entry.envelope.output_hash}"
             if !base_keys.has_key(base) -> next
@@ -166,7 +164,9 @@ store_append_external_output_stamp: fn(stamp: &[U8], path: String) Never! {
                         store_append_environment_stamp_field(stamp, "target-present".bytes())
                         store_append_external_metadata_stamp(stamp, target)
                     }
-                    .Err(error) -> store_append_stat_failure(stamp, error, "target-missing", "target-error")
+                    .Err(error) -> {
+                        store_append_stat_failure(stamp, error, "target-missing", "target-error")
+                    }
                 }
             }
         }
@@ -206,8 +206,10 @@ store_environment_entry_stamp_with_index: fn(roots: HangarRoots, project: String
             .Val(entry) -> {
                 store_append_environment_stamp_field(canonical, "seal-v1".bytes())
                 if files.read_bytes(files.join(seals, entry.envelope.output_hash)) == {
-                    .Ok(bytes) -> store_append_environment_stamp_field(canonical, bytes)
-                    .Err(error) -> store_append_environment_stamp_field(canonical, "error:{store_io_kind_name(error)}".bytes())
+                    .Ok(bytes) -> { store_append_environment_stamp_field(canonical, bytes) }
+                    .Err(error) -> {
+                        store_append_environment_stamp_field(canonical, "error:{store_io_kind_name(error)}".bytes())
+                    }
                 }
                 selected.push(entry)
             }
@@ -215,7 +217,9 @@ store_environment_entry_stamp_with_index: fn(roots: HangarRoots, project: String
         }
     }
     store_append_environment_stamp_field(canonical, "external-output-stamps-v1".bytes())
-    loop path in store_external_output_paths(roots, selected) -> store_append_external_output_stamp(canonical, path)
+    loop path in store_external_output_paths(roots, selected) {
+        store_append_external_output_stamp(canonical, path)
+    }
     Ok(store_sha256_hex(canonical))
 }
 

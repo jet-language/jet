@@ -209,10 +209,12 @@ jet_cli_foreign_parse: fn(binder: JetCLIForeignBinder, args: [String], color: Bo
             "--ar" -> request.archiver = Val(value)
             // copy: `value` borrows its argv word; the request list owns its own.
             "-I" -> request.include_dirs.push(value.copy())
-            "-L" -> request.library_dirs.push(value.copy()) // copy: the request list owns its own word.
-            "-l" -> request.libraries.push(value.copy()) // copy: the request list owns its own word.
-            "--namespace" -> request.namespaces.push(value.copy()) // copy: the request list owns its own word.
-            "--instantiate" -> request.templates.push(jet_cli_foreign_instantiation(value) ?? return jet_cli_foreign_usage_failure(binder))
+            "-L" -> request.library_dirs.push(value.copy())  // copy: the request list owns its own word.
+            "-l" -> request.libraries.push(value.copy())  // copy: the request list owns its own word.
+            "--namespace" -> request.namespaces.push(value.copy())  // copy: the request list owns its own word.
+            "--instantiate" -> {
+                request.templates.push(jet_cli_foreign_instantiation(value) ?? return jet_cli_foreign_usage_failure(binder))
+            }
             else -> request.companion = Val(value)
         }
         index += 2
@@ -297,15 +299,21 @@ jet_cli_foreign_bind_request: fn(binder: JetCLIForeignBinder, request: JetCLIFor
         output.stderr = "{output.stderr}{jet_cli_foreign_usage(binder)}"
         return output
     }
-    if binder.language == .Cobol && request.companion == None -> return jet_cli_foreign_usage_failure_output(binder)
-    if binder.language == .Cpp && (request.target == None || request.clang == None || request.archiver == None) -> return jet_cli_foreign_usage_failure_output(binder)
+    if binder.language == .Cobol && request.companion == None {
+        return jet_cli_foreign_usage_failure_output(binder)
+    }
+    if binder.language == .Cpp && (request.target == None || request.clang == None || request.archiver == None) {
+        return jet_cli_foreign_usage_failure_output(binder)
+    }
     lib: jet_cli_foreign_lib(binder, request)
     // The C++ binder reads the header itself.
     source := ""
     if binder.language != .Cpp {
         source = cli_files.read(request.path) ?? return jet_cli_foreign_fail(binder, request.path, "{binder.input} could not be read ({jet_cli_io_error_text(err)})", color)
     }
-    if binder.language == .JS && request.companion == None -> return jet_cli_foreign_fail(binder, request.path, "the Node broker is opt-in; provide the matching runtime with `--runtime <module.js>`", color)
+    if binder.language == .JS && request.companion == None {
+        return jet_cli_foreign_fail(binder, request.path, "the Node broker is opt-in; provide the matching runtime with `--runtime <module.js>`", color)
+    }
     copybook := ""
     if binder.language == .Cobol && request.companion == .Val(copybook_path) {
         copybook = cli_files.read(copybook_path) ?? return jet_cli_foreign_fail(binder, copybook_path, "the copybook could not be read ({jet_cli_io_error_text(err)})", color)
@@ -319,7 +327,9 @@ jet_cli_foreign_bind_request: fn(binder: JetCLIForeignBinder, request: JetCLIFor
 // Bind into the cache `out` and its directory.
 jet_cli_foreign_bind_to: fn(binder: JetCLIForeignBinder, request: JetCLIForeignBindRequest, source: String, copybook: String, lib: String, out: String, color: Bool) -> JetDriverVerbOutput {
     cache: jet_cli_parent(out) ?? "."
-    if binder.language == .Dart -> return jet_cli_foreign_bind_dart(binder, request, source, lib, out, cache, color)
+    if binder.language == .Dart {
+        return jet_cli_foreign_bind_dart(binder, request, source, lib, out, cache, color)
+    }
     bound: jet_cli_foreign_generate(binder, request, source, copybook, lib, out, cache) ?? return jet_cli_foreign_fail(binder, request.path, err.message(), color)
     loop file in bound.files {
         cli_files.write(file.path, file.text) ?? return jet_cli_foreign_fail(binder, request.path, "{file.what} could not be written ({jet_cli_io_error_text(err)})", color)
@@ -372,7 +382,9 @@ jet_cli_foreign_generate: fn(binder: JetCLIForeignBinder, request: JetCLIForeign
             copybook_path: request.companion ?? ""
             result: pkg_cobol_bind(path, source, copybook_path, copybook, lib, cache)
             stdout := "bound GnuCOBOL program `{result.program}` and {result.layout.width}-byte copybook `{result.layout.name}` → {out}\n"
-            loop field in result.layout.fields -> stdout = "{stdout}  layout: {field.name} offset={field.offset} width={field.width} type={field.kind.jet_type()}\n"
+            loop field in result.layout.fields {
+                stdout = "{stdout}  layout: {field.name} offset={field.offset} width={field.width} type={field.kind.jet_type()}\n"
+            }
             return JetCLIForeignBound{files: [JetCLIForeignFile]{JetCLIForeignFile{path: out, text: result.source, what: cache_file}, JetCLIForeignFile{path: provenance, text: result.provenance, what: recorded}, JetCLIForeignFile{path: "{cache}/{lib}.cobol-path", text: "{result.runtime_dir}\n", what: "the libcob runtime identity"}}, stdout: stdout}
         }
         .JS -> {
@@ -418,9 +430,13 @@ jet_cli_foreign_generate: fn(binder: JetCLIForeignBinder, request: JetCLIForeign
         }
         .Cpp -> {
             include_dirs := [String]{}
-            loop directory in request.include_dirs -> include_dirs.push(jet_cli_foreign_native_path(directory))
+            loop directory in request.include_dirs {
+                include_dirs.push(jet_cli_foreign_native_path(directory))
+            }
             library_dirs := [String]{}
-            loop directory in request.library_dirs -> library_dirs.push(jet_cli_foreign_native_path(directory))
+            loop directory in request.library_dirs {
+                library_dirs.push(jet_cli_foreign_native_path(directory))
+            }
             options: CppBindOptions{
                 lib: lib,
                 target: request.target ?? "",
@@ -464,7 +480,9 @@ jet_cli_foreign_bind_dart: fn(binder: JetCLIForeignBinder, request: JetCLIForeig
     cli_files.write(host, result.host_source) ?? return jet_cli_foreign_dart_fail(binder, request.path, "the Dart host wrapper could not be written ({jet_cli_io_error_text(err)})", out, cache, lib, color)
     compute_source: cli_files.read(compute) ?? return jet_cli_foreign_dart_fail(binder, request.path, "the Jet compute source could not be read ({jet_cli_io_error_text(err)})", out, cache, lib, color)
     _: pkg_dart_bind_compute_provenance(result.provenance, compute, compute_source) ?? return jet_cli_foreign_dart_fail(binder, request.path, err.message(), out, cache, lib, color)
-    if jet_cli_compile_file(compute, false, None, JetDriverCompileMode.Check) == .Refused(_) -> return jet_cli_foreign_dart_fail(binder, request.path, "the Jet compute source did not pass Jet front-end checks", out, cache, lib, color)
+    if jet_cli_compile_file(compute, false, None, JetDriverCompileMode.Check) == .Refused(_) {
+        return jet_cli_foreign_dart_fail(binder, request.path, "the Jet compute source did not pass Jet front-end checks", out, cache, lib, color)
+    }
     jet_cli_foreign_dart_clear(out, cache, lib)
     jet_cli_not_ported_output("inspect bind dart --jet", color)
 }

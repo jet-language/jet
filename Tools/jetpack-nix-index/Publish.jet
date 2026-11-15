@@ -14,6 +14,7 @@ use {
 }
 
 OPTIONS: ["--target-root", "--manifest", "--manifest-request", "--destination", "--sign-index", "--sign-manifest", "--upload"]
+
 REQUIRED: ["--target-root", "--manifest", "--destination", "--sign-index", "--sign-manifest", "--upload"]
 
 // A refusal and the exit status it ends the run with: 2 for a usage error,
@@ -26,7 +27,7 @@ PublishError: struct {
 
 run: fn() {
     if publish(process.args()) == {
-        .Ok(_) -> print("published immutable targets, then manifest")
+        .Ok(_) -> { print("published immutable targets, then manifest") }
         .Err(error) -> {
             if error.message == "" -> process.exit(error.code)
             process.fail(error.code, error.message)
@@ -34,22 +35,26 @@ run: fn() {
     }
 }
 
-failed: fn(message: String) -> PublishError Never! {
-    PublishError{message: message, code: 1}
-}
+failed: fn(message: String) -> PublishError Never! { PublishError{message: message, code: 1} }
 
-publish: fn(args: [String]) -[Env, Exec, FS, Time.Wait]> PublishError! {
-    values := [String: String]{}
+publish: fn(args: [String]) PublishError! -[Env, Exec, FS, Time.Wait]> {
+    values := [String:String]{}
     index := 0
     loop index < args.len() {
         name: args[index]
-        if !OPTIONS.contains(name) -> return Err(PublishError{message: "unknown option: {name}", code: 2})
-        if index + 1 >= args.len() || args[index + 1] == "" -> return Err(PublishError{message: "missing {name.removeprefix("--").replace("-", " ")}", code: 2})
+        if !OPTIONS.contains(name) {
+            return Err(PublishError{message: "unknown option: {name}", code: 2})
+        }
+        if index + 1 >= args.len() || args[index + 1] == "" {
+            return Err(PublishError{message: "missing {name.removeprefix("--").replace("-", " ")}", code: 2})
+        }
         values[name] = args[index + 1]
         index += 2
     }
     loop name in REQUIRED {
-        if (values.get(name) ?? "") == "" -> return Err(PublishError{message: "missing {name.replace("-", "_").replace("__", "--")}", code: 2})
+        if (values.get(name) ?? "") == "" {
+            return Err(PublishError{message: "missing {name.replace("-", "_").replace("__", "--")}", code: 2})
+        }
     }
     target_root: values["--target-root"]
     manifest: values["--manifest"]
@@ -57,7 +62,9 @@ publish: fn(args: [String]) -[Env, Exec, FS, Time.Wait]> PublishError! {
     upload: values["--upload"]
     manifest_request: values.get("--manifest-request") ?? "{manifest}.sig.request"
     if !files.is_file(manifest) -> return Err(failed("manifest is missing"))
-    if !files.is_file(manifest_request) -> return Err(failed("manifest signing request is missing; caller must provide the domain-prefixed bytes"))
+    if !files.is_file(manifest_request) {
+        return Err(failed("manifest signing request is missing; caller must provide the domain-prefixed bytes"))
+    }
 
     loop target in targets(target_root) ?? return Err(err) {
         request: "{target}.sig.request"
@@ -99,7 +106,7 @@ targets: fn(root: String) -[FS]> [String] PublishError! {
 
 // Run `argv` on the terminal's stdio; a nonzero exit (or a signal) ends the
 // run with that status, as `set -e` ends the shell.
-call: fn(argv: [String]) -[Exec, Time.Wait]> PublishError! {
+call: fn(argv: [String]) PublishError! -[Exec, Time.Wait]> {
     receipt: process.cmd(argv.copy()).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? return Err(failed("cannot run {argv[0]}: {err}"))
     if receipt.signal == .Val(number) -> return Err(PublishError{message: "", code: 128 + number})
     if receipt.code != 0 -> return Err(PublishError{message: "", code: receipt.code})
@@ -109,7 +116,7 @@ call: fn(argv: [String]) -[Exec, Time.Wait]> PublishError! {
 // Sign `request` into `output` once: the signer writes a temporary file
 // beside it, which must be a regular file. An existing signature must hold
 // the same bytes; a new one is renamed into place.
-sign_immutable: fn(signer: String, request: String, output: String) -[Env, Exec, FS, Time.Wait]> PublishError! {
+sign_immutable: fn(signer: String, request: String, output: String) PublishError! -[Env, Exec, FS, Time.Wait]> {
     temporary: "{output}.partial.{sys.getpid()}"
     if call([signer.copy(), request.copy(), temporary.copy()]) == .Err(error) {
         files.remove(temporary).drop("the partial signature is removed best-effort")

@@ -6,7 +6,6 @@
 // with PackageFacts, and every reverse plan is checked against the exact
 // bytes its journal recorded. A plan is safe to preview, apply, and fold
 // without timestamps or last-writer-wins behavior.
-
 use {
     jetpack_foundation.[env_runtime_lock]
     jet_pkg_model.[ConfigFacts, PackageFacts, PackageOutputKind, PackageParseError, pkg_debug_output, pkg_sha256_hex]
@@ -74,7 +73,7 @@ TransitionPlan: struct {
             old: if self.reverse -> change.after else -> change.before
             new: if self.reverse -> change.before else -> change.after
             if old == new -> next
-            action: if old == None -> ChangeAction.Create else -> if new == None -> ChangeAction.Remove else -> ChangeAction.Update
+            action: if old == None -> ChangeAction.Create else if new == None -> ChangeAction.Remove else -> ChangeAction.Update
             changes.push(ChangeSummary{path: change.relative, action: action})
         }
         TransitionSummary{operation: self.operation, changes: changes, before_fingerprint: self.before_fingerprint, after_fingerprint: self.after_fingerprint, journal: self.journal_path}
@@ -118,7 +117,9 @@ TransitionPlan: struct {
         // its after-state and leave any untouched path alone.
         if forward {
             journal_parent: files.dirname(self.journal_path)
-            if journal_parent == "" -> return Err(env_transition_error("transition journal has no parent"))
+            if journal_parent == "" {
+                return Err(env_transition_error("transition journal has no parent"))
+            }
             env_transition_create_real_dirs(self.root, journal_parent)
             env_transition_write_atomic(self.journal_path, self.journal)
         }
@@ -155,14 +156,18 @@ TransitionPlan: struct {
                     if current == snapshot.state -> next
                     if current == written {
                         if env_transition_apply_state(self.root, snapshot.path, snapshot.state) == {
-                            .Err(rollback) -> failures.push("{change.relative}: {rollback.message()}")
+                            .Err(rollback) -> {
+                                failures.push("{change.relative}: {rollback.message()}")
+                            }
                             .Ok(_) -> {}
                         }
                         next
                     }
                     failures.push("{change.relative} changed during rollback; its newer bytes were preserved")
                 }
-                .Err(read_error) -> failures.push("{change.relative} could not be inspected during rollback: {read_error.message()}")
+                .Err(read_error) -> {
+                    failures.push("{change.relative} could not be inspected during rollback: {read_error.message()}")
+                }
             }
         }
         if failures.len() == 0 -> return error.copy()
@@ -205,7 +210,9 @@ env_transition_split_plan: fn(root: String, target: SplitTarget) -[FS, Env]> Tra
     package_text: String.from_bytes(package_bytes) ?? return Err(env_transition_error("{TRANSITION_PACKAGE_FILE} must be UTF-8"))
     loaded: if PackageFacts.load(canonical) == {
         .Ok(found) -> found
-        .Err(error) -> { return Err(env_transition_package_error(package_path, error)) }
+        .Err(error) -> {
+            return Err(env_transition_package_error(package_path, error))
+        }
     }
     package: loaded ?? return Err(env_transition_error("no {TRANSITION_PACKAGE_FILE} found in {canonical}"))
     entries: env_transition_source_entries(package_text)
@@ -220,7 +227,7 @@ env_transition_split_plan: fn(root: String, target: SplitTarget) -[FS, Env]> Tra
             if names.len() == 0 {
                 return Err(env_transition_error("environments is empty; there is no closed fact to split"))
             }
-            config_name: if names.len() == 1 -> names[0] else -> if names.contains("development") -> "development" else -> ""
+            config_name: if names.len() == 1 -> names[0] else if names.contains("development") -> "development" else -> ""
             if config_name == "" {
                 return Err(env_transition_error("jet split env found more than one Environment; name one closed Config first"))
             }
@@ -259,7 +266,9 @@ env_transition_split_plan: fn(root: String, target: SplitTarget) -[FS, Env]> Tra
             env_transition_validate_name(name, "host")
             env_transition_require_output_declaration(entries, name, package_path)
             output: package.outputs.get(name) ?? return Err(env_transition_error("outputs.{name} is not declared in {TRANSITION_PACKAGE_FILE}"))
-            if output.kind != PackageOutputKind.System -> return Err(env_transition_error("outputs.{name} is {output.kind.debug_name()}, but host extraction needs a System Output"))
+            if output.kind != PackageOutputKind.System {
+                return Err(env_transition_error("outputs.{name} is {output.kind.debug_name()}, but host extraction needs a System Output"))
+            }
             destination: "package/fleet.jet"
             env_transition_ensure_new_file(canonical, destination)
             config_text: env_transition_render_fleet_config(name, output.name)
@@ -296,7 +305,9 @@ env_transition_fold_plan: fn(root: String, path: String) -[FS, Env]> TransitionP
         loop change in journal.changes {
             if change.relative == relative -> records_relative = true
         }
-        if records_relative -> matches.push(TransitionJournalMatch{path: journal_path, journal: journal})
+        if records_relative {
+            matches.push(TransitionJournalMatch{path: journal_path, journal: journal})
+        }
     }
     if matches.len() != 1 {
         return Err(env_transition_error("expected one transition journal for {relative}, found {matches.len()}"))
@@ -316,7 +327,7 @@ env_transition_forward_plan: fn(root: String, operation: String, changes: [Trans
     if encoded.len() > TRANSITION_MAX_JOURNAL_BYTES {
         return Err(env_transition_error("transition journal exceeds the {TRANSITION_MAX_JOURNAL_BYTES}-byte limit"))
     }
-    Ok(TransitionPlan{root, operation, changes, journal_path, journal: encoded, before_fingerprint, after_fingerprint, reverse: false})
+    Ok(TransitionPlan{root: root, operation: operation, changes: changes, journal_path: journal_path, journal: encoded, before_fingerprint: before_fingerprint, after_fingerprint: after_fingerprint, reverse: false})
 }
 
 // `original` is already fully composed by PackageFacts.load and serves as

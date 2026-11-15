@@ -22,9 +22,13 @@ use {
 // transport, scheduler ordering and native error mapping until the Jet runtime
 // socket layer replaces them; public spellings always enter source policy.
 url: module
+
 mime: module
+
 tls: module
+
 ws: module
+
 ip: module
 
 SocketAddr: struct {
@@ -39,7 +43,6 @@ NetReady: struct {
     readable: Bool
     writable: Bool
 }
-
 
 // JetNetErrorDetail: public construction is already supported.
 NetErrorDetail: struct {
@@ -78,6 +81,7 @@ NetError: enum {
     impl Display {
         display: fn(self) -> String { net_error_text(self) }
     }
+
     impl Debug {
         debug: fn(&&self) -> String { net_error_text(self) }
     }
@@ -103,6 +107,7 @@ net_error_text: fn(err: NetError) -> String Never! {
     detail: NetErrorDetail{operation: "read", address: None, name: None, message: "closed", os_code: None}
     assert(net_error_text(NetError.Closed(detail)) == "closed")
 }
+
 // Compiler-private platform result: exact Int fields use the existing record
 // codec rather than a tuple nested inside Result.
 __ResolveError: struct {
@@ -119,7 +124,6 @@ UDPPacket: struct {
     original_len: Int
     truncated: Bool
 }
-
 
 SRVRecord: struct {
     target: String
@@ -158,16 +162,16 @@ interfaces: fn() -[FS.Read]> [NetInterface] Never! {
 
 #Test("the host's interfaces come in index order and name the loopback") {
     found: interfaces()
-    loop i in 1..<found.len() {
-        assert(found[i - 1].index < found[i].index)
-    }
+    loop i in 1..<found.len() { assert(found[i - 1].index < found[i].index) }
     if core.files.exists("/sys/class/net/lo") {
         assert(found.any(fn(item: NetInterface) { item.name == "lo" && item.index > 0 }))
     }
 }
 
 ip_addr: fn(text: String) -> IPAddr NetError! {
-    if !valid_text(text) -> return Err(net_err("ip_addr", text, "IP address is empty or contains control bytes"))
+    if !valid_text(text) {
+        return Err(net_err("ip_addr", text, "IP address is empty or contains control bytes"))
+    }
     bytes: parse_ip_bytes(text) ?? return Err(net_err("parse IP address", text, "invalid IP address `{text}`: invalid IP address syntax"))
     #Unsafe("checked IPv4/IPv6 octets transferred into the native address carrier") {
         return core.net.__ip_from_bytes(bytes)
@@ -179,7 +183,9 @@ ip_to_string_impl: fn(addr: IPAddr) -> String Never! {
         return format_ip_bytes(core.net.__ip_bytes(addr))
     }
 }
+
 ip_to_string: fn(addr: IPAddr) -> String Never! { ip_to_string_impl(addr) }
+
 ip_is_ipv4: fn(addr: IPAddr) -> Bool Never! {
     #Unsafe("read the native IP address discriminant") { return core.net.__ip_is_v4(addr) }
 }
@@ -198,7 +204,9 @@ socket_addrs: fn(host: String, port: Int) -[Net, Time.Wait]> [SocketAddr] NetErr
 }
 
 resolve_socket_addrs: fn(operation: String, host: String, port: Int) -[Net, Time.Wait]> [SocketAddr] NetError! {
-    if !valid_host_text(host) -> return Err(net_err(operation, host, "socket host is empty or contains invalid bytes"))
+    if !valid_host_text(host) {
+        return Err(net_err(operation, host, "socket host is empty or contains invalid bytes"))
+    }
     if !valid_port(port) -> return Err(net_err(operation, host, "port must be in 0..=65535"))
     host_text := host
     if contains_byte(host, 58) && !starts_with(host, "[") -> host_text = "[{host}]"
@@ -212,7 +220,9 @@ resolve_socket_addrs: fn(operation: String, host: String, port: Int) -[Net, Time
 }
 
 socket_addr_parse: fn(text: String) -> SocketAddr NetError! {
-    if !valid_text(text) -> return Err(net_err("socket_addr_parse", text, "socket address is empty or contains control bytes"))
+    if !valid_text(text) {
+        return Err(net_err("socket_addr_parse", text, "socket address is empty or contains control bytes"))
+    }
     raw: text.bytes()
     host := ""
     port_text := ""
@@ -220,7 +230,9 @@ socket_addr_parse: fn(text: String) -> SocketAddr NetError! {
     bytes := [U8]{}
     if raw[0] == (U8{91}) {
         close: last_index(raw, 93)
-        if close < 2 || close + 2 >= raw.len() || raw[close + 1] != (U8{58}) -> return Err(invalid_socket(text))
+        if close < 2 || close + 2 >= raw.len() || raw[close + 1] != (U8{58}) {
+            return Err(invalid_socket(text))
+        }
         host = slice(raw, 1, close)
         port_text = slice(raw, close + 2, raw.len())
         percent: last_index(host.bytes(), 37)
@@ -245,11 +257,15 @@ socket_addr_parse: fn(text: String) -> SocketAddr NetError! {
 }
 
 socket_host: fn(addr: SocketAddr) -> String Never! {
-    #Unsafe("read socket IP representation; formatting stays in Jet") { return ip_to_string_impl(core.net.__socket_ip(addr)) }
+    #Unsafe("read socket IP representation; formatting stays in Jet") {
+        return ip_to_string_impl(core.net.__socket_ip(addr))
+    }
 }
+
 socket_port: fn(addr: SocketAddr) -> Int Never! {
     #Unsafe("read native socket port") { return core.net.__socket_port(addr) }
 }
+
 socket_to_string_impl: fn(addr: SocketAddr) -> String Never! {
     host: socket_host(addr)
     port: socket_port(addr)
@@ -257,6 +273,7 @@ socket_to_string_impl: fn(addr: SocketAddr) -> String Never! {
     scope: socket_scope(addr)
     if scope == 0 -> "[{host}]:{port}" else -> "[{host}%{scope}]:{port}"
 }
+
 socket_to_string: fn(addr: SocketAddr) -> String Never! { socket_to_string_impl(addr) }
 
 socket_scope: fn(addr: SocketAddr) -> Int Never! {
@@ -264,10 +281,13 @@ socket_scope: fn(addr: SocketAddr) -> Int Never! {
         return core.net.__socket_scope(addr) ?? 0
     }
 }
+
 socket_type: fn(stream: TCPStream) -> String Never! { "stream" }
 
 tcp_listen: fn(addr: String) -[Net]> TCPListener NetError! {
-    if !valid_text(addr) -> return Err(net_err("tcp_listen", addr, "listen address is empty or contains control bytes"))
+    if !valid_text(addr) {
+        return Err(net_err("tcp_listen", addr, "listen address is empty or contains control bytes"))
+    }
     core.net.__tcp_listen(addr)
 }
 
@@ -280,7 +300,9 @@ tcp_accept: fn(listener: TCPListener) -[Net, Time.Wait]> TCPStream NetError! {
 }
 
 tcp_connect: fn(addr: String) -[Net, Time.Wait]> TCPStream NetError! {
-    if !valid_text(addr) -> return Err(net_err("tcp_connect", addr, "connect address is empty or contains control bytes"))
+    if !valid_text(addr) {
+        return Err(net_err("tcp_connect", addr, "connect address is empty or contains control bytes"))
+    }
     core.net.__tcp_connect(addr)
 }
 
@@ -291,78 +313,86 @@ tcp_connect_addr: fn(addr: SocketAddr) -[Net, Time.Wait]> TCPStream NetError! {
 // The address-family race is bounded by the `#Deadline` in force alone, as
 // `tcp_connect` is.
 tcp_connect_happy: fn(host: String, port: Int) -[Net, Time.Wait]> TCPStream NetError! {
-    if !valid_host_text(host) -> return Err(net_err("tcp_connect_happy", host, "connect host is empty or contains invalid bytes"))
-    if !valid_port(port) -> return Err(net_err("tcp_connect_happy", host, "port must be in 0..=65535"))
+    if !valid_host_text(host) {
+        return Err(net_err("tcp_connect_happy", host, "connect host is empty or contains invalid bytes"))
+    }
+    if !valid_port(port) {
+        return Err(net_err("tcp_connect_happy", host, "port must be in 0..=65535"))
+    }
     core.net.__tcp_connect_happy(host, port, C_NO_LIMIT_MS)
 }
 
 create_connection: fn(host: String, port: Int) -[Net, Time.Wait]> TCPStream NetError! {
-    if !valid_host_text(host) -> return Err(net_err("create_connection", host, "connect host is empty or contains invalid bytes"))
-    if !valid_port(port) -> return Err(net_err("create_connection", host, "port must be in 0..=65535"))
+    if !valid_host_text(host) {
+        return Err(net_err("create_connection", host, "connect host is empty or contains invalid bytes"))
+    }
+    if !valid_port(port) {
+        return Err(net_err("create_connection", host, "port must be in 0..=65535"))
+    }
     tcp_connect(format_host_port(host, port))
 }
 
 create_server: fn(host: String, port: Int) -[Net]> TCPListener NetError! {
-    if !valid_host_text(host) -> return Err(net_err("create_server", host, "listen host is empty or contains invalid bytes"))
+    if !valid_host_text(host) {
+        return Err(net_err("create_server", host, "listen host is empty or contains invalid bytes"))
+    }
     if !valid_port(port) -> return Err(net_err("create_server", host, "port must be in 0..=65535"))
     tcp_listen(format_host_port(host, port))
 }
-send: fn(&stream: TCPStream, text: String) -[Net, Time.Wait]> Int NetError! {
+
+send: fn(stream: &TCPStream, text: String) -[Net, Time.Wait]> Int NetError! {
     stream.write_some(text.bytes())
 }
 
-tcp_read: fn(&stream: TCPStream) -[Net, Time.Wait]> String NetError! {
-    stream.read(8192)
-}
+tcp_read: fn(stream: &TCPStream) -[Net, Time.Wait]> String NetError! { stream.read(8192) }
 
-tcp_write: fn(&stream: TCPStream, text: String) NetError! -[Net, Time.Wait]> {
+tcp_write: fn(stream: &TCPStream, text: String) NetError! -[Net, Time.Wait]> {
     return stream.write(text)
 }
-tcp_read_bytes: fn(&stream: TCPStream, n: Int) -[Net, Time.Wait]> [U8] NetError! {
+
+tcp_read_bytes: fn(stream: &TCPStream, n: Int) -[Net, Time.Wait]> [U8] NetError! {
     if n < 0 -> return Err(net_err("tcp_read_bytes", "", "read limit must be non-negative"))
     stream.read_bytes(n)
 }
 
-tcp_read_text: fn(&stream: TCPStream, n: Int) -[Net, Time.Wait]> String NetError! {
+tcp_read_text: fn(stream: &TCPStream, n: Int) -[Net, Time.Wait]> String NetError! {
     if n < 0 -> return Err(net_err("tcp_read_text", "", "read limit must be non-negative"))
     stream.read(n)
 }
 
-tcp_write_bytes: fn(&stream: TCPStream, bytes: [U8]) NetError! -[Net, Time.Wait]> {
+tcp_write_bytes: fn(stream: &TCPStream, bytes: [U8]) NetError! -[Net, Time.Wait]> {
     return stream.write_bytes(bytes)
 }
 
-tcp_write_all_bytes: fn(&stream: TCPStream, bytes: [U8]) NetError! -[Net, Time.Wait]> {
+tcp_write_all_bytes: fn(stream: &TCPStream, bytes: [U8]) NetError! -[Net, Time.Wait]> {
     return stream.write_bytes(bytes)
 }
 
-tcp_write_text: fn(&stream: TCPStream, text: String) NetError! -[Net, Time.Wait]> {
+tcp_write_text: fn(stream: &TCPStream, text: String) NetError! -[Net, Time.Wait]> {
     return stream.write(text)
 }
 
-tcp_shutdown: fn(&stream: TCPStream, how: NetShutdown) NetError! -[Net]> {
+tcp_shutdown: fn(stream: &TCPStream, how: NetShutdown) NetError! -[Net]> {
     return stream.shutdown(how)
 }
 
-tcp_close: fn(&stream: TCPStream) NetError! -[Net]> {
-    return stream.close()
-}
-tcp_ready: fn(&stream: TCPStream, interest: NetReadyInterest, deadline_ms: Int) -[Net, Time.Wait]> NetReady NetError! {
-    if !valid_timeout(deadline_ms) -> return Err(net_err("tcp_ready", "", "deadline must be non-negative"))
+tcp_close: fn(stream: &TCPStream) NetError! -[Net]> { return stream.close() }
+
+tcp_ready: fn(stream: &TCPStream, interest: NetReadyInterest, deadline_ms: Int) -[Net, Time.Wait]> NetReady NetError! {
+    if !valid_timeout(deadline_ms) {
+        return Err(net_err("tcp_ready", "", "deadline must be non-negative"))
+    }
     deadline: Duration.milliseconds(deadline_ms) ?? return Err(net_err("tcp_ready", "", "deadline is too large"))
     stream.ready(interest, deadline: deadline)
 }
 
 ready_readable: fn(ready: NetReady) -> Bool Never! { ready.readable }
+
 ready_writable: fn(ready: NetReady) -> Bool Never! { ready.writable }
 
-tcp_local_addr: fn(stream: TCPStream) -[Net]> String NetError! {
-    stream.local_addr()
-}
+tcp_local_addr: fn(stream: TCPStream) -[Net]> String NetError! { stream.local_addr() }
 
-tcp_peer_addr: fn(stream: TCPStream) -[Net]> String NetError! {
-    stream.peer_addr()
-}
+tcp_peer_addr: fn(stream: TCPStream) -[Net]> String NetError! { stream.peer_addr() }
 
 tcp_local_socket_addr: fn(stream: TCPStream) -[Net]> SocketAddr NetError! {
     core.net.__tcp_local_socket_addr(stream)
@@ -378,41 +408,42 @@ listener_local_socket_addr: fn(listener: TCPListener) -[Net]> SocketAddr NetErro
 
 // One plain-text HTTP/1.1 reply, then the write half closes.
 tcp_reply: fn(stream: &&TCPStream, status: String, body: String) NetError! -[Net, Time.Wait]> {
-    if !valid_status(status) -> return Err(net_err("tcp_reply", "", "status must be a three-digit HTTP status without control bytes"))
+    if !valid_status(status) {
+        return Err(net_err("tcp_reply", "", "status must be a three-digit HTTP status without control bytes"))
+    }
     conn := stream.move()
     conn.write_bytes("HTTP/1.1 {status}\r\nContent-Length: {body.bytes().len()}\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n{body}".bytes()) ?? return Err(err)
     return conn.shutdown(NetShutdown.Write)
 }
 
-nodelay: fn(stream: TCPStream) -[Net]> Bool NetError! {
-    core.net.__nodelay(stream)
-}
+nodelay: fn(stream: TCPStream) -[Net]> Bool NetError! { core.net.__nodelay(stream) }
 
-set_nodelay: fn(&stream: TCPStream, on: Bool) NetError! -[Net]> {
+set_nodelay: fn(stream: &TCPStream, on: Bool) NetError! -[Net]> {
     core.net.__set_nodelay(stream, on)
 }
 
-ttl: fn(stream: TCPStream) -[Net]> Int NetError! {
-    core.net.__ttl(stream)
-}
-set_ttl: fn(&stream: TCPStream, hops: Int) NetError! -[Net]> {
+ttl: fn(stream: TCPStream) -[Net]> Int NetError! { core.net.__ttl(stream) }
+
+set_ttl: fn(stream: &TCPStream, hops: Int) NetError! -[Net]> {
     if hops < 0 || hops > 4294967295 -> return Err(net_err("set_ttl", "", "ttl must fit u32"))
     core.net.__set_ttl(stream, hops)
 }
 
-sendfile: fn(&stream: TCPStream, path: String) -[Net, Time.Wait]> Int NetError! {
-    if !valid_text(path) -> return Err(net_err("sendfile", path, "path is empty or contains control bytes"))
+sendfile: fn(stream: &TCPStream, path: String) -[Net, Time.Wait]> Int NetError! {
+    if !valid_text(path) {
+        return Err(net_err("sendfile", path, "path is empty or contains control bytes"))
+    }
     core.net.sendfile(stream, path)
 }
 
 udp_bind: fn(addr: String) -[Net]> UDPSocket NetError! {
-    if !valid_text(addr) -> return Err(net_err("udp_bind", addr, "bind address is empty or contains control bytes"))
+    if !valid_text(addr) {
+        return Err(net_err("udp_bind", addr, "bind address is empty or contains control bytes"))
+    }
     core.net.__udp_bind(addr)
 }
 
-udp_bind_addr: fn(addr: SocketAddr) -[Net]> UDPSocket NetError! {
-    core.net.__udp_bind_addr(addr)
-}
+udp_bind_addr: fn(addr: SocketAddr) -[Net]> UDPSocket NetError! { core.net.__udp_bind_addr(addr) }
 
 udp_local_addr: fn(socket: UDPSocket) -[Net]> SocketAddr NetError! {
     core.net.__udp_local_addr(socket)
@@ -437,15 +468,23 @@ udp_receive: fn(socket: UDPSocket, limit: Int) -[Net, Time.Wait]> UDPPacket NetE
 }
 
 udp_packet_data: fn(packet: UDPPacket) -> String Never! { decode_utf8_lossy(packet.data) }
+
 udp_packet_addr: fn(packet: UDPPacket) -> SocketAddr Never! {
-    #Unsafe("read the native UDP packet's socket-address carrier") { return core.net.__udp_packet_addr(packet) }
+    #Unsafe("read the native UDP packet's socket-address carrier") {
+        return core.net.__udp_packet_addr(packet)
+    }
 }
+
 udp_packet_bytes: fn(packet: UDPPacket) -> [U8] Never! { packet.data }
+
 udp_packet_original_len: fn(packet: UDPPacket) -> Int Never! { packet.original_len }
+
 udp_packet_truncated: fn(packet: UDPPacket) -> Bool Never! { packet.truncated }
 
 unix_listen: fn(path: String) -[Net]> UnixListener NetError! {
-    if !valid_text(path) -> return Err(net_err("unix_listen", path, "socket path is empty or contains control bytes"))
+    if !valid_text(path) {
+        return Err(net_err("unix_listen", path, "socket path is empty or contains control bytes"))
+    }
     core.net.__unix_listen(path)
 }
 
@@ -463,20 +502,20 @@ __unix_connect_deadline_entry: fn(path: String, deadline: Duration) -[Net, Time.
     core.net.__unix_connect_deadline_host(path, deadline)
 }
 
-unix_read: fn(&stream: UnixStream) -[Net, Time.Wait]> String NetError! {
+unix_read: fn(stream: &UnixStream) -[Net, Time.Wait]> String NetError! {
     core.net.__unix_read(stream)
 }
 
-unix_write: fn(&stream: UnixStream, text: String) NetError! -[Net, Time.Wait]> {
+unix_write: fn(stream: &UnixStream, text: String) NetError! -[Net, Time.Wait]> {
     core.net.unix_write(stream, text)
 }
 
-unix_read_bytes: fn(&stream: UnixStream, n: Int) -[Net, Time.Wait]> [U8] NetError! {
+unix_read_bytes: fn(stream: &UnixStream, n: Int) -[Net, Time.Wait]> [U8] NetError! {
     if n <= 0 -> return Err(net_err("unix_read_bytes", "", "read limit must be positive"))
     core.net.unix_read_bytes(stream, n)
 }
 
-unix_write_all_bytes: fn(&stream: UnixStream, bytes: [U8]) NetError! -[Net, Time.Wait]> {
+unix_write_all_bytes: fn(stream: &UnixStream, bytes: [U8]) NetError! -[Net, Time.Wait]> {
     core.net.__unix_write_all_bytes(stream, bytes)
 }
 
@@ -491,9 +530,11 @@ UnixMessage: struct {
 // Sends every byte with `fds` attached (SCM_RIGHTS) to the first byte the
 // peer reads; the peer receives its own copies, so `fds` stay open here.
 // Descriptors need at least one byte to ride with; at most 253 per send.
-unix_send: fn(&stream: UnixStream, bytes: [U8], fds: [sys.Fd]) NetError! -[Net, Time.Wait]> {
+unix_send: fn(stream: &UnixStream, bytes: [U8], fds: [sys.Fd]) NetError! -[Net, Time.Wait]> {
     if bytes.len() == 0 -> return Err(net_err("unix_send", "", "a send needs at least one byte"))
-    if fds.len() > 253 -> return Err(net_err("unix_send", "", "a send carries at most 253 descriptors"))
+    if fds.len() > 253 {
+        return Err(net_err("unix_send", "", "a send carries at most 253 descriptors"))
+    }
     tokens := [Int]{}
     loop fd in fds { tokens.push(sys.__fd_token(fd)) }
     core.net.__unix_send_fds_raw(stream, bytes, tokens)
@@ -502,8 +543,10 @@ unix_send: fn(&stream: UnixStream, bytes: [U8], fds: [sys.Fd]) NetError! -[Net, 
 // At most `max` bytes, 1 B to 16 MiB, from one message, with any descriptors
 // it carried. A message whose descriptors did not all arrive fails with
 // `.Protocol`, and the ones that did are closed.
-unix_receive: fn(&stream: UnixStream, max: Int) -[Net, Time.Wait]> UnixMessage NetError! {
-    if max < 1 || max > 16777216 -> return Err(net_err("unix_receive", "", "a receive takes 1 to 16777216 bytes"))
+unix_receive: fn(stream: &UnixStream, max: Int) -[Net, Time.Wait]> UnixMessage NetError! {
+    if max < 1 || max > 16777216 {
+        return Err(net_err("unix_receive", "", "a receive takes 1 to 16777216 bytes"))
+    }
     packed: core.net.__unix_receive_fds_raw(stream, max)
     if packed.len() == 0 -> return Ok(UnixMessage{bytes: [U8]{}, fds: [sys.Fd]{}})
     // The leaf appends each descriptor's token as eight little-endian bytes
@@ -513,7 +556,7 @@ unix_receive: fn(&stream: UnixStream, max: Int) -[Net, Time.Wait]> UnixMessage N
     fds := [sys.Fd]{}
     loop index in 0..<count {
         token := 0
-        loop byte in 0..<8 { token = token * 256 + (Int{packed[end + index * 8 + 7 - byte]}) }
+        loop byte in 0..<8 -> token = token * 256 + (Int{packed[end + index * 8 + 7 - byte]})
         fds.push(sys.__fd_adopt(token))
     }
     Ok(UnixMessage{bytes: packed[0..<end].copy(), fds: fds})
@@ -522,26 +565,27 @@ unix_receive: fn(&stream: UnixStream, max: Int) -[Net, Time.Wait]> UnixMessage N
 // Waits on the calling thread until `stream` has bytes, descriptors or a
 // hang-up to read: true then, false once `timeout_ns` nanoseconds pass
 // (negative: wait without limit). Interrupted waits resume with the time left.
-unix_wait: fn(&stream: UnixStream, timeout_ns: Int) -[Net, Time.Wait]> Bool NetError! {
+unix_wait: fn(stream: &UnixStream, timeout_ns: Int) -[Net, Time.Wait]> Bool NetError! {
     ready: core.net.__unix_wait_raw(stream, timeout_ns)
     Ok(ready != 0)
 }
 
-unix_shutdown: fn(&stream: UnixStream, how: NetShutdown) NetError! -[Net]> {
+unix_shutdown: fn(stream: &UnixStream, how: NetShutdown) NetError! -[Net]> {
     core.net.__unix_shutdown(stream, how)
 }
 
-unix_close: fn(&stream: UnixStream) NetError! -[Net]> {
-    core.net.__unix_close(stream)
-}
+unix_close: fn(stream: &UnixStream) NetError! -[Net]> { core.net.__unix_close(stream) }
 
 // A lookup waits at most C_DNS_WAIT_MS, or less when the `#Deadline` in force
 // ends sooner.
 C_DNS_WAIT_MS: 5000
+
 C_NO_LIMIT_MS: 9223372036854775807
 
 dns_a: fn(name: String) -[Net, Time.Wait]> [IPAddr] NetError! {
-    if !valid_text(name) -> return Err(net_err("dns_a", name, "DNS name is empty or contains control bytes"))
+    if !valid_text(name) {
+        return Err(net_err("dns_a", name, "DNS name is empty or contains control bytes"))
+    }
     if core.net.__dns_a_lookup(name, C_DNS_WAIT_MS) == {
         .Ok(addresses) -> Ok(addresses)
         .Err(message) -> Err(dns_error(name, message))
@@ -549,7 +593,9 @@ dns_a: fn(name: String) -[Net, Time.Wait]> [IPAddr] NetError! {
 }
 
 dns_aaaa: fn(name: String) -[Net, Time.Wait]> [IPAddr] NetError! {
-    if !valid_text(name) -> return Err(net_err("dns_aaaa", name, "DNS name is empty or contains control bytes"))
+    if !valid_text(name) {
+        return Err(net_err("dns_aaaa", name, "DNS name is empty or contains control bytes"))
+    }
     if core.net.__dns_aaaa_lookup(name, C_DNS_WAIT_MS) == {
         .Ok(addresses) -> Ok(addresses)
         .Err(message) -> Err(dns_error(name, message))
@@ -557,7 +603,9 @@ dns_aaaa: fn(name: String) -[Net, Time.Wait]> [IPAddr] NetError! {
 }
 
 dns_a_at: fn(server: String, name: String) -[Net, Time.Wait]> [IPAddr] NetError! {
-    if !valid_text(server) || !valid_text(name) -> return Err(net_err("dns_a_at", name, "DNS server/name is empty or contains control bytes"))
+    if !valid_text(server) || !valid_text(name) {
+        return Err(net_err("dns_a_at", name, "DNS server/name is empty or contains control bytes"))
+    }
     _: socket_addr_parse(server) ?? return Err(net_err("dns_a_at", server, "DNS server must be an IP socket address"))
     if core.net.__dns_a_at_lookup(server, name, C_DNS_WAIT_MS) == {
         .Ok(addresses) -> Ok(addresses)
@@ -566,7 +614,9 @@ dns_a_at: fn(server: String, name: String) -[Net, Time.Wait]> [IPAddr] NetError!
 }
 
 dns_aaaa_at: fn(server: String, name: String) -[Net, Time.Wait]> [IPAddr] NetError! {
-    if !valid_text(server) || !valid_text(name) -> return Err(net_err("dns_aaaa_at", name, "DNS server/name is empty or contains control bytes"))
+    if !valid_text(server) || !valid_text(name) {
+        return Err(net_err("dns_aaaa_at", name, "DNS server/name is empty or contains control bytes"))
+    }
     _: socket_addr_parse(server) ?? return Err(net_err("dns_aaaa_at", server, "DNS server must be an IP socket address"))
     if core.net.__dns_aaaa_at_lookup(server, name, C_DNS_WAIT_MS) == {
         .Ok(addresses) -> Ok(addresses)
@@ -575,7 +625,9 @@ dns_aaaa_at: fn(server: String, name: String) -[Net, Time.Wait]> [IPAddr] NetErr
 }
 
 dns_txt: fn(name: String) -[Net, Time.Wait]> [String] NetError! {
-    if !valid_text(name) -> return Err(net_err("dns_txt", name, "DNS name is empty or contains control bytes"))
+    if !valid_text(name) {
+        return Err(net_err("dns_txt", name, "DNS name is empty or contains control bytes"))
+    }
     if rt.dns_txt_lookup(name, C_DNS_WAIT_MS) == {
         .Ok(texts) -> Ok(texts)
         .Err(error) -> Err(dns_error(name, error.message))
@@ -583,7 +635,9 @@ dns_txt: fn(name: String) -[Net, Time.Wait]> [String] NetError! {
 }
 
 dns_txt_at: fn(server: String, name: String) -[Net, Time.Wait]> [String] NetError! {
-    if !valid_text(server) || !valid_text(name) -> return Err(net_err("dns_txt_at", name, "DNS server/name is empty or contains control bytes"))
+    if !valid_text(server) || !valid_text(name) {
+        return Err(net_err("dns_txt_at", name, "DNS server/name is empty or contains control bytes"))
+    }
     _: socket_addr_parse(server) ?? return Err(net_err("dns_txt_at", server, "DNS server must be an IP socket address"))
     if rt.dns_txt_at_lookup(server, name, C_DNS_WAIT_MS) == {
         .Ok(texts) -> Ok(texts)
@@ -592,7 +646,9 @@ dns_txt_at: fn(server: String, name: String) -[Net, Time.Wait]> [String] NetErro
 }
 
 dns_ptr: fn(addr: String) -[Net, Time.Wait]> [String] NetError! {
-    if !valid_text(addr) -> return Err(net_err("dns_ptr", addr, "DNS address is empty or contains control bytes"))
+    if !valid_text(addr) {
+        return Err(net_err("dns_ptr", addr, "DNS address is empty or contains control bytes"))
+    }
     if rt.dns_ptr_lookup(addr, C_DNS_WAIT_MS) == {
         .Ok(names) -> Ok(names)
         .Err(error) -> Err(dns_error(addr, error.message))
@@ -600,7 +656,9 @@ dns_ptr: fn(addr: String) -[Net, Time.Wait]> [String] NetError! {
 }
 
 dns_srv: fn(name: String) -[Net, Time.Wait]> [SRVRecord] NetError! {
-    if !valid_text(name) -> return Err(net_err("dns_srv", name, "DNS name is empty or contains control bytes"))
+    if !valid_text(name) {
+        return Err(net_err("dns_srv", name, "DNS name is empty or contains control bytes"))
+    }
     if core.net.__dns_srv_lookup(name, C_DNS_WAIT_MS) == {
         .Ok(records) -> Ok(srv_records(records))
         .Err(message) -> Err(dns_error(name, message))
@@ -608,7 +666,9 @@ dns_srv: fn(name: String) -[Net, Time.Wait]> [SRVRecord] NetError! {
 }
 
 dns_srv_at: fn(server: String, name: String) -[Net, Time.Wait]> [SRVRecord] NetError! {
-    if !valid_text(server) || !valid_text(name) -> return Err(net_err("dns_srv_at", name, "DNS server/name is empty or contains control bytes"))
+    if !valid_text(server) || !valid_text(name) {
+        return Err(net_err("dns_srv_at", name, "DNS server/name is empty or contains control bytes"))
+    }
     _: socket_addr_parse(server) ?? return Err(net_err("dns_srv_at", server, "DNS server must be an IP socket address"))
     if core.net.__dns_srv_at_lookup(server, name, C_DNS_WAIT_MS) == {
         .Ok(records) -> Ok(srv_records(records))
@@ -623,7 +683,9 @@ dns_error: fn(name: String, message: String) -> NetError Never! {
     detail: NetErrorDetail{operation: "dns", address: None, name: Val(name), message: message, os_code: None}
     if starts_with(message, "network operation cancelled") -> return NetError.Cancelled(detail)
     if starts_with(message, "network protocol error") -> return NetError.Protocol(detail)
-    if message.contains("timed out") || message.contains("timeout") -> return NetError.Timeout(detail)
+    if message.contains("timed out") || message.contains("timeout") {
+        return NetError.Timeout(detail)
+    }
     NetError.DNS(NetDNSError.Failure(message))
 }
 
@@ -633,7 +695,9 @@ dns_error: fn(name: String, message: String) -> NetError Never! {
     assert(error_name(missing) == expected_name)
     if missing == {
         .DNS(.NotFound(name)) -> assert(name == "example.test")
-        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> panic("DNS NotFound")
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> {
+            panic("DNS NotFound")
+        }
     }
     cancelled: dns_error("example.test", "network operation cancelled: timeout")
     if cancelled == {
@@ -644,19 +708,25 @@ dns_error: fn(name: String, message: String) -> NetError Never! {
             assert(detail.os_code == None)
             assert(detail.message == "network operation cancelled: timeout")
         }
-        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> panic("DNS cancellation")
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> {
+            panic("DNS cancellation")
+        }
     }
     protocol: dns_error("example.test", "network protocol error: timeout")
     if protocol == .Protocol(_) {
+
     } else { panic("DNS protocol") }
     loop message in ([String]{"network timed out", "network timeout", "DNS worker timeout"}) {
         if dns_error("example.test", message) == .Timeout(_) {
+
         } else { panic("DNS timeout") }
     }
     failure: dns_error("example.test", "DNS lookup worker failed")
     if failure == {
         .DNS(.Failure(message)) -> assert(message == "DNS lookup worker failed")
-        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> panic("DNS failure")
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> {
+            panic("DNS failure")
+        }
     }
     assert(error_name(failure) == None)
 }
@@ -684,12 +754,17 @@ gethostbyaddr: fn(addr: String) -[Net, Time.Wait]> String NetError! {
 }
 
 dns_srv_target: fn(record: SRVRecord) -> String Never! { record.target.copy() }
+
 dns_srv_port: fn(record: SRVRecord) -> Int Never! { record.port }
+
 dns_srv_priority: fn(record: SRVRecord) -> Int Never! { record.priority }
+
 dns_srv_weight: fn(record: SRVRecord) -> Int Never! { record.weight }
 
 getservbyname: fn(name: String) -[Net, Time.Wait]> Int NetError! {
-    if !valid_text(name) -> return Err(net_err("getservbyname", name, "service name is empty or contains control bytes"))
+    if !valid_text(name) {
+        return Err(net_err("getservbyname", name, "service name is empty or contains control bytes"))
+    }
     key: ascii_lower(name)
     if key == {
         "ftp" -> Ok(21)
@@ -710,7 +785,9 @@ getservbyname: fn(name: String) -[Net, Time.Wait]> Int NetError! {
 }
 
 getservbyport: fn(port: Int) -[Net, Time.Wait]> String NetError! {
-    if !valid_port(port) -> return Err(net_err("getservbyport", "{port}", "port must be in 0..=65535"))
+    if !valid_port(port) {
+        return Err(net_err("getservbyport", "{port}", "port must be in 0..=65535"))
+    }
     if port == {
         21 -> Ok("ftp")
         22 -> Ok("ssh")
@@ -730,13 +807,15 @@ getservbyport: fn(port: Int) -[Net, Time.Wait]> String NetError! {
 }
 
 service_error: fn(operation: String, message: String) -> NetError Never! {
-    NetError.InvalidInput(NetErrorDetail{
-        operation: operation,
-        address: None,
-        name: None,
-        message: message,
-        os_code: None,
-    })
+    NetError.InvalidInput(
+        NetErrorDetail{
+            operation: operation,
+            address: None,
+            name: None,
+            message: message,
+            os_code: None,
+        },
+    )
 }
 
 // Error accessors inspect the checked nominal payload; no transport call is
@@ -745,11 +824,14 @@ error_operation: fn(err: NetError) -> String Never! {
     detail: error_detail(err) ?? return "dns"
     detail.operation
 }
+
 error_message: fn(err: NetError) -> String Never! { "{err}" }
+
 error_address: fn(err: NetError) -> String? Never! {
     detail: error_detail(err) ?? return None
     detail.address
 }
+
 error_name: fn(err: NetError) -> String? Never! {
     if err == .DNS(dns) {
         if dns == .NotFound(name) -> return Val(name)
@@ -758,6 +840,7 @@ error_name: fn(err: NetError) -> String? Never! {
     detail: error_detail(err) ?? return None
     detail.name
 }
+
 error_os_code: fn(err: NetError) -> Int? Never! {
     detail: error_detail(err) ?? return None
     detail.os_code
@@ -788,13 +871,15 @@ addressfamily: fn(addr: SocketAddr) -> String Never! {
 }
 
 net_err: fn(op: String, addr: String, message: String) -> NetError Never! {
-    NetError.InvalidInput(NetErrorDetail{
-        operation: op,
-        address: Val(addr),
-        name: None,
-        message: message,
-        os_code: None,
-    })
+    NetError.InvalidInput(
+        NetErrorDetail{
+            operation: op,
+            address: Val(addr),
+            name: None,
+            message: message,
+            os_code: None,
+        },
+    )
 }
 
 resolve_all: fn(text: String, addresses: [SocketAddr]) -> [SocketAddr] NetError! {
@@ -825,9 +910,6 @@ resolve_error: fn(text: String, error: __ResolveError) -> NetError Never! {
     NetError.Other(detail)
 }
 
-
-
-
 valid_text: fn(text: String) -> Bool Never! {
     raw: text.bytes()
     if raw.len() == 0 -> return false
@@ -841,7 +923,9 @@ valid_text: fn(text: String) -> Bool Never! {
 valid_status: fn(status: String) -> Bool Never! {
     raw: status.bytes()
     if raw.len() < 3 -> return false
-    if (Int{raw[0]}) < 48 || (Int{raw[0]}) > 57 || (Int{raw[1]}) < 48 || (Int{raw[1]}) > 57 || (Int{raw[2]}) < 48 || (Int{raw[2]}) > 57 -> return false
+    if (Int{raw[0]}) < 48 || (Int{raw[0]}) > 57 || (Int{raw[1]}) < 48 || (Int{raw[1]}) > 57 || (Int{raw[2]}) < 48 || (Int{raw[2]}) > 57 {
+        return false
+    }
     if raw.len() > 3 && raw[3] != (U8{32}) -> return false
     loop b in raw {
         n: Int{b}
@@ -860,7 +944,7 @@ valid_host_text: fn(host: String) -> Bool Never! {
         if n <= 32 || n == 127 || n == 47 || n == 63 || n == 35 || n == 64 -> return false
         if n == 91 && i != 0 -> return false
         if n == 93 && (i == 0 || raw[0] != (U8{91}) || i != raw.len() - 1) -> return false
-        i = i + 1
+        i += 1
     }
     true
 }
@@ -909,7 +993,7 @@ last_index: fn(raw: [U8], b: Int) -> Int Never! {
     i := raw.len() - 1
     loop i >= 0 {
         if (Int{raw[i]}) == b -> return i
-        i = i - 1
+        i -= 1
     }
     -1
 }
@@ -959,12 +1043,18 @@ slice_bytes: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
             assert(detail.name == None && detail.os_code == expected_os_code)
             assert(detail.message == "resolve socket address failed: denied")
         }
-        .InvalidInput(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> assert(false)
+        .InvalidInput(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> {
+            assert(false)
+        }
     }
     empty: resolve_error("[::1]:0", __ResolveError{kind: 0, has_os_code: false, os_code: 0, message: "no address"})
     if empty == {
-        .Other(detail) -> assert(detail.message == "resolve socket address failed: no address" && detail.os_code == None)
-        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .DNS(_) -> assert(false)
+        .Other(detail) -> {
+            assert(detail.message == "resolve socket address failed: no address" && detail.os_code == None)
+        }
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .DNS(_) -> {
+            assert(false)
+        }
     }
 }
 
@@ -1067,7 +1157,7 @@ parse_ip_bytes: fn(text: String) -> [U8]? Never! {
     }
     loop position <= raw.len() {
         if position < raw.len() && raw[position] != (U8{58}) {
-            position = position + 1
+            position += 1
             next
         }
         if position == start {
@@ -1092,14 +1182,12 @@ parse_ip_bytes: fn(text: String) -> [U8]? Never! {
         }
         if words.len() > 8 -> return None
         if position == raw.len() -> break
-        position = position + 1
+        position += 1
         if position < raw.len() && raw[position] == (U8{58}) {
             if compression >= 0 -> return None
             compression = words.len()
-            position = position + 1
-        } else if position == raw.len() {
-            return None
-        }
+            position += 1
+        } else if position == raw.len() { return None }
         start = position
     }
     if compression < 0 && words.len() != 8 -> return None
@@ -1155,11 +1243,11 @@ format_ip_bytes: fn(bytes: [U8]) -> String Never! {
     i := 0
     loop i < 8 {
         if words[i] != 0 {
-            i = i + 1
+            i += 1
             next
         }
         start: i
-        loop i < 8 && words[i] == 0 -> i = i + 1
+        loop i < 8 && words[i] == 0 -> i += 1
         if i - start > best_length {
             best_start = start
             best_length = i - start
@@ -1170,22 +1258,24 @@ format_ip_bytes: fn(bytes: [U8]) -> String Never! {
     loop i < 8 {
         if i == best_start {
             result = "{result}::"
-            i = i + best_length
+            i += best_length
             next
         }
         if result.len() > 0 && !result.ends_with(":") -> result = "{result}:"
         result = "{result}{net_hex_word(words[i])}"
-        i = i + 1
+        i += 1
     }
     result
 }
 
 #Test("native address parsing and canonical formatting policy") {
-    loop text in ([String]{"0.0.0.0", "127.0.0.1", "255.255.255.255", "::", "::1", "2001:db8::1", "::ffff:192.0.2.1", "1:2:3:4:5:6:7:8"}) {
+    loop text in
+        ([String]{"0.0.0.0", "127.0.0.1", "255.255.255.255", "::", "::1", "2001:db8::1", "::ffff:192.0.2.1", "1:2:3:4:5:6:7:8"}) {
         bytes: parse_ip_bytes(text) ?? panic("valid IP address")
         assert(format_ip_bytes(bytes) == text)
     }
-    loop text in ([String]{"01.2.3.4", "1.2.3", "256.2.3.4", "1.2.3.4.", ":::1", "1:::2", ":1:2:3:4:5:6:7", "1:2:3:4:5:6:7:", "1:2:3:4:5:6:7:8::", "::1::", "::ffff:01.2.3.4"}) {
+    loop text in
+        ([String]{"01.2.3.4", "1.2.3", "256.2.3.4", "1.2.3.4.", ":::1", "1:::2", ":1:2:3:4:5:6:7", "1:2:3:4:5:6:7:", "1:2:3:4:5:6:7:8::", "::1::", "::ffff:01.2.3.4"}) {
         assert(parse_ip_bytes(text) == None)
     }
     bytes: parse_ip_bytes("2001:0DB8:0:0:1:0:0:1") ?? panic("uppercase IP")
@@ -1199,7 +1289,8 @@ format_ip_bytes: fn(bytes: [U8]) -> String Never! {
     ipv6: ip_addr("2001:0DB8:0:0:1:0:0:1") ?? panic("IPv6 carrier")
     assert(!ip_is_ipv4(ipv6))
     assert(ip_to_string(ipv6) == "2001:db8::1:0:0:1")
-    loop text in ([String]{"127.0.0.1:0", "192.0.2.1:65535", "[::1]:80", "[fe80::1%4294967295]:65535", "[::ffff:192.0.2.1]:53"}) {
+    loop text in
+        ([String]{"127.0.0.1:0", "192.0.2.1:65535", "[::1]:80", "[fe80::1%4294967295]:65535", "[::ffff:192.0.2.1]:53"}) {
         address: socket_addr_parse(text) ?? panic("socket carrier")
         assert(socket_to_string(address) == text)
         roundtrip: socket_addr_parse(socket_to_string(address)) ?? panic("socket roundtrip")
@@ -1210,6 +1301,7 @@ format_ip_bytes: fn(bytes: [U8]) -> String Never! {
     assert(socket_to_string(unscoped) == "[fe80::1]:80")
     loop text in ([String]{"[::1%4294967296]:80", "[::1%eth0]:80", "[::1]:65536", "127.0.0.1:-1"}) {
         if socket_addr_parse(text) == .Err(_) {
+
         } else { panic("invalid socket carrier accepted") }
     }
 }
@@ -1234,7 +1326,7 @@ decode_utf8_lossy: fn(bytes: [U8]) -> String Never! {
         lead: Int{bytes[i]}
         if lead < 128 {
             out.push(bytes[i])
-            i = i + 1
+            i += 1
             next
         }
         width := 0
@@ -1257,7 +1349,7 @@ decode_utf8_lossy: fn(bytes: [U8]) -> String Never! {
                 valid = false
                 break
             }
-            consumed = consumed + 1
+            consumed += 1
         }
         if valid {
             loop j in i..<(i + width) -> out.push(bytes[j])
@@ -1266,7 +1358,7 @@ decode_utf8_lossy: fn(bytes: [U8]) -> String Never! {
             out.push(U8{191})
             out.push(U8{189})
         }
-        i = i + consumed
+        i += consumed
     }
     String.from_bytes(out) ?? ""
 }

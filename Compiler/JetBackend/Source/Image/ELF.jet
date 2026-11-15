@@ -7,6 +7,7 @@
 // program headers alone.
 
 ELF64_HEADER_SIZE: 64
+
 X64ExecutableResult: struct {
     bytes: [U8]
     errors: [String]
@@ -56,12 +57,18 @@ ELF64_JET_PART_NOTE: 1246056449
 x64_executable_add_parts: fn(image: [U8], names: [String], payloads: [[U8]]) -> [U8] Err! {
     plan: x64_image_segments(image)
     if plan.failure != "" -> return Err(plan.failure)
-    if names.len() != payloads.len() || names.len() == 0 -> return Err("image parts need one payload per name, and at least one")
+    if names.len() != payloads.len() || names.len() == 0 {
+        return Err("image parts need one payload per name, and at least one")
+    }
     labels := [[U8]]{}
     loop name in names {
         label: name.bytes()
-        if label.len() == 0 || label.contains(U8{0}) -> return Err("an image part's name must be nonempty, with no NUL byte")
-        if x64_executable_part(image, name) != None -> return Err("the image already holds a part named `{name}`")
+        if label.len() == 0 || label.contains(U8{0}) {
+            return Err("an image part's name must be nonempty, with no NUL byte")
+        }
+        if x64_executable_part(image, name) != None {
+            return Err("the image already holds a part named `{name}`")
+        }
         loop earlier in labels {
             if earlier == label -> return Err("two image parts are named `{name}`")
         }
@@ -70,7 +77,9 @@ x64_executable_add_parts: fn(image: [U8], names: [String], payloads: [[U8]]) -> 
     phoff: loader_u64(image, 32)
     phnum: loader_u16(image, 56)
     count: phnum + 1 + names.len()
-    if count > 65535 -> return Err("the image has no room for {names.len() + 1} more program headers")
+    if count > 65535 {
+        return Err("the image has no room for {names.len() + 1} more program headers")
+    }
     first: plan.segments[0]
     distance: first.vaddr - first.offset
     at := os_page_round(image.len())
@@ -154,7 +163,9 @@ x64_executable_part: fn(image: [U8], name: String) -> [U8]? Never! {
 x64_part_note: fn(bytes: [U8], from: Int, size: Int, label: [U8]) -> Int? Never! {
     descriptor: (label.len() + 8) /% 8 * 8
     if from < 0 || from + 16 + descriptor > bytes.len() || size < 16 + descriptor -> return None
-    if loader_u32(bytes, from) != 4 || loader_u32(bytes, from + 8) != ELF64_JET_PART_NOTE || loader_u32(bytes, from + 12) != 0x0074654a -> return None
+    if loader_u32(bytes, from) != 4 || loader_u32(bytes, from + 8) != ELF64_JET_PART_NOTE || loader_u32(bytes, from + 12) != 0x0074654a {
+        return None
+    }
     length: loader_u32(bytes, from + 4)
     if length < descriptor || 16 + length > size -> return None
     if bytes[from + 16 + label.len()] != 0 -> return None
@@ -166,7 +177,9 @@ x64_part_note: fn(bytes: [U8], from: Int, size: Int, label: [U8]) -> Int? Never!
 
 #Test("image parts are a mapped segment above the others, each on its own page, that their names read back") {
     image := [U8]{}
-    loop byte in ([Int]{0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0}) -> image.push(U8{byte})
+    loop byte in ([Int]{0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0}) {
+        image.push(U8{byte})
+    }
     elf64_u16(image, 2)
     elf64_u16(image, 62)
     elf64_u32(image, 1)

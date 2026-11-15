@@ -91,11 +91,15 @@ RMLR_ROWS: [RmlrRow]{
 
 // The top-level function a line opens (`name: fn…` at column 0), or None.
 rmlr_function_opened: fn(line: String) -> String? Never! {
-    if line.starts_with(" ") || line.starts_with("\t") || line.starts_with("/") || line.starts_with("#") -> return None
+    if line.starts_with(" ") || line.starts_with("\t") || line.starts_with("/") || line.starts_with("#") {
+        return None
+    }
     parts: line.split(": fn").to_list()
     if parts.len() < 2 -> return None
     name: parts[0].to_string()
-    if name.len() == 0 || name.contains(" ") || name.contains("(") || name.contains("\"") -> return None
+    if name.len() == 0 || name.contains(" ") || name.contains("(") || name.contains("\"") {
+        return None
+    }
     Val(name)
 }
 
@@ -128,13 +132,17 @@ rmlr_findings: fn(found: [String:Int]) -> [String] Never! {
     loop key in found.keys() {
         count: found[key]
         if rows.get(key) == .Val(expected) {
-            if count != expected -> findings.push("{key}: {count} raw memory routine calls, its row names {expected}; update the RMLR_ROWS row")
+            if count != expected {
+                findings.push("{key}: {count} raw memory routine calls, its row names {expected}; update the RMLR_ROWS row")
+            }
         } else {
             findings.push("{key}: {count} raw memory routine calls and no RMLR_ROWS row; lower through an existing row, or name the new row")
         }
     }
     loop key in rows.keys() {
-        if found.get(key) == None -> findings.push("{key}: no raw memory routine calls left; delete its RMLR_ROWS row")
+        if found.get(key) == None {
+            findings.push("{key}: no raw memory routine calls left; delete its RMLR_ROWS row")
+        }
     }
     findings.sort()
     findings

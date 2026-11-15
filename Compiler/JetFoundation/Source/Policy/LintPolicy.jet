@@ -6,7 +6,9 @@ use lint_unicode: core.text
 // Canonical package fields. Compiler-scoped names stay distinct from Jetpack
 // Syntax in the flat bootstrap.
 LINT_POLICY_FIELD_LINTS: "lints"
+
 LINT_POLICY_FIELD_DENY: "deny"
+
 LINT_POLICY_BLOCK_POLICY: "policy"
 
 // One parse failure from a lint-selection surface. Code/name are present only
@@ -35,7 +37,9 @@ lint_policy_code_error: fn(detail: String, code: String, name: String?) -> LintP
 lint_registered_lints: fn() -> [DiagnosticRegistryRow] Never! {
     rows := [DiagnosticRegistryRow]{}
     loop row in DIAGNOSTIC_ROWS {
-        if row.severity == DIAGNOSTIC_LINT && row.status != DiagnosticRegistryStatus.Retired -> rows.push(row)
+        if row.severity == DIAGNOSTIC_LINT && row.status != DiagnosticRegistryStatus.Retired {
+            rows.push(row)
+        }
     }
     rows
 }
@@ -87,7 +91,9 @@ lint_parse_policy_lints: fn(body: String) -> [String]? LintPolicyError! {
     lints_body: lint_block_body(body, LINT_POLICY_FIELD_LINTS) ?? return Ok(None)
     deny := [String]{}
     loop entry in lint_key_value_entries(lints_body) {
-        if entry.key != LINT_POLICY_FIELD_DENY -> return Err(lint_policy_error("unknown `policy.lints` field `{entry.key}` — allowed: `{LINT_POLICY_FIELD_DENY}`"))
+        if entry.key != LINT_POLICY_FIELD_DENY {
+            return Err(lint_policy_error("unknown `policy.lints` field `{entry.key}` — allowed: `{LINT_POLICY_FIELD_DENY}`"))
+        }
         deny = lint_parse_name_list(entry.value.trim())
     }
     Ok(Val(deny))
@@ -126,9 +132,7 @@ lint_strip_comments: fn(value: String) -> String Never! {
             at += 2
             loop at < raw.len() && (Int{raw[at]}) != 10 -> at += 1
             if at < raw.len() -> out.push(raw[at])
-        } else {
-            out.push(raw[at])
-        }
+        } else { out.push(raw[at]) }
         at += 1
     }
     String.from_bytes(out) ?? panic("comment removal keeps UTF-8")
@@ -137,15 +141,21 @@ lint_strip_comments: fn(value: String) -> String Never! {
 // Rust `parse_lint_name_list`.
 lint_parse_name_list: fn(value: String) -> [String] LintPolicyError! {
     text: value.trim()
-    if !text.starts_with("[") || !text.ends_with("]") || text.bytes().len() < 2 -> return Err(lint_policy_error("`{LINT_POLICY_FIELD_DENY}:` must be a list like `[same_enum_guard_table, float_money]`"))
+    if !text.starts_with("[") || !text.ends_with("]") || text.bytes().len() < 2 {
+        return Err(lint_policy_error("`{LINT_POLICY_FIELD_DENY}:` must be a list like `[same_enum_guard_table, float_money]`"))
+    }
     names := [String]{}
     loop item in lint_top_level_commas(foundation_byte_text(text.bytes(), 1, text.bytes().len() - 1)) {
         entry: item.trim()
         if entry == "" -> next
         name: lint_unquote(entry)
         if lint_code_for_name(name) == None {
-            if lint_name_for_code(name) == .Val(canonical) -> return Err(lint_policy_code_error("`{name}` is a diagnostic code; use `{canonical}` in `policy.lints.deny`", name, Val(canonical)))
-            if lint_is_diagnostic_code_shape(name) -> return Err(lint_policy_code_error("`{name}` is a diagnostic code; `policy.lints.deny` takes named lint values", name, None))
+            if lint_name_for_code(name) == .Val(canonical) {
+                return Err(lint_policy_code_error("`{name}` is a diagnostic code; use `{canonical}` in `policy.lints.deny`", name, Val(canonical)))
+            }
+            if lint_is_diagnostic_code_shape(name) {
+                return Err(lint_policy_code_error("`{name}` is a diagnostic code; `policy.lints.deny` takes named lint values", name, None))
+            }
             return Err(lint_policy_error("`{name}` isn't a registered lint policy name; allowed: {lint_known_policy_names()}"))
         }
         names.push(name)
@@ -248,11 +258,7 @@ lint_balanced: fn(raw: [U8]) -> String Never! {
                 code == 34 -> quoted = false
                 else -> {}
             }
-        } else if code == 34 {
-            quoted = true
-        } else if code == 123 {
-            depth += 1
-        } else if code == 125 {
+        } else if code == 34 { quoted = true } else if code == 123 { depth += 1 } else if code == 125 {
             depth -= 1
             if depth == 0 -> return foundation_byte_text(raw, 1, at)
         }
@@ -312,6 +318,8 @@ lint_key_value_entries: fn(body: String) -> [(key: String, value: String)] Never
 // Rust `unquote`.
 lint_unquote: fn(value: String) -> String Never! {
     text: value.trim()
-    if text.bytes().len() >= 2 && text.starts_with("\"") && text.ends_with("\"") -> return foundation_byte_text(text.bytes(), 1, text.bytes().len() - 1)
+    if text.bytes().len() >= 2 && text.starts_with("\"") && text.ends_with("\"") {
+        return foundation_byte_text(text.bytes(), 1, text.bytes().len() - 1)
+    }
     text
 }

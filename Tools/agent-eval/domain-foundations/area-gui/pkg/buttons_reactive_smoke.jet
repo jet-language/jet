@@ -13,13 +13,18 @@ run: fn() {
     backend := ui.tui_backend()
     render_backend: backend.copy()
     ui.reactive_render(fn() {
-        ui.mount(render_backend, ui.box([
-            ui.text(body.get()),
-            ui.button("Save", on_click: fn() { print("save") }),
-            ui.button("Undo", on_click: fn() { print("undo") }),
-            ui.button("Redo", on_click: fn() { print("redo") }),
-            ui.button("Toggle theme", on_click: fn() { print("theme") })
-        ]))
+        ui.mount(
+            render_backend,
+            ui.box(
+                [
+                    ui.text(body.get()),
+                    ui.button("Save", on_click: fn() { print("save") }),
+                    ui.button("Undo", on_click: fn() { print("undo") }),
+                    ui.button("Redo", on_click: fn() { print("redo") }),
+                    ui.button("Toggle theme", on_click: fn() { print("theme") }),
+                ],
+            ),
+        )
     })
     body.set("new")
     print("renders: {backend.render_count()}")

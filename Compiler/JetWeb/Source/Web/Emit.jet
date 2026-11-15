@@ -7,7 +7,6 @@
 // import; addresses are i64 values wrapped to i32 at each access. A function
 // with an Aggregate result takes the caller's storage as a hidden first
 // parameter, as the x86-64 selector does, and returns nothing.
-
 use {
     jet_ir.[IRFunction, IRModule, IRType, IRTypeKind]
     jet_wasm.[WASM_F32, WASM_F64, WASM_I32, WASM_I64, wasm_put_fixed, wasm_put_signed, wasm_put_unsigned, wasm_signed, wasm_unsigned]
@@ -15,7 +14,9 @@ use {
 
 // The globals every module imports from `env`, then the program module's own.
 WEB_GLOBAL_SP: 0
+
 WEB_GLOBAL_TLS: 1
+
 WEB_GLOBAL_EDX: 2
 
 // Bytes below the stack pointer a leaf may use for its stack words.
@@ -146,7 +147,9 @@ web_ref: fn(st: &WebState, space: String, name: String, sig: String) -> Int Neve
 
 // The signatures of the C memory routines every module defines itself.
 web_helper_sig: fn(symbol: String) -> String Never! {
-    if symbol == "memcpy" || symbol == "memmove" || symbol == "memset" || symbol == "memcmp" -> return "lll:l"
+    if symbol == "memcpy" || symbol == "memmove" || symbol == "memset" || symbol == "memcmp" {
+        return "lll:l"
+    }
     ""
 }
 
@@ -267,9 +270,27 @@ web_emitter: fn(m: IRModule, f: IRFunction) -> WebEmitter Never! {
     areas := [Int]{}
     loop _ in 0..<f.op.len() -> areas.push(-1)
     WebEmitter{
-        code: [U8]{}, fixups: [Int]{}, locals: locals, local_types: types, params: params, result: web_result_letter(m, f), sret: sret,
-        t0: base, t1: base + 1, t2: base + 2, t3: base + 3, d0: base + 4, s0: base + 5, frame: base + 6, flag: base + 7, ok: base + 8,
-        frame_size: 0, areas: areas, pad_ends: [Int]{}, trap_next: false, wired: false,
+        code: [U8]{},
+        fixups: [Int]{},
+        locals: locals,
+        local_types: types,
+        params: params,
+        result: web_result_letter(m, f),
+        sret: sret,
+        t0: base,
+        t1: base + 1,
+        t2: base + 2,
+        t3: base + 3,
+        d0: base + 4,
+        s0: base + 5,
+        frame: base + 6,
+        flag: base + 7,
+        ok: base + 8,
+        frame_size: 0,
+        areas: areas,
+        pad_ends: [Int]{},
+        trap_next: false,
+        wired: false,
     }
 }
 
@@ -314,11 +335,15 @@ web_finish: fn(e: WebEmitter) -> WebBody Never! {
 // replacing a row at the same offset that no code followed (as JetIR
 // X64Select.jet ir_x64_debug_line does for the native image's rows).
 web_line: fn(e: &WebEmitter, line: Int) Never! {
-    if line <= 0 -> return
+    if line <= 0 {
+        return
+    }
     at: e.code.len()
     count: e.lines.len() /% 2
     if count > 0 {
-        if e.lines[2 * count - 1] == line -> return
+        if e.lines[2 * count - 1] == line {
+            return
+        }
         if e.lines[2 * count - 2] == at {
             e.lines[2 * count - 1] = line
             return
@@ -328,9 +353,7 @@ web_line: fn(e: &WebEmitter, line: Int) Never! {
     e.lines.push(line)
 }
 
-web_op: fn(e: &WebEmitter, byte: Int) Never! {
-    e.code.push(U8{byte})
-}
+web_op: fn(e: &WebEmitter, byte: Int) Never! { e.code.push(U8{byte}) }
 
 web_get: fn(e: &WebEmitter, local: Int) Never! {
     web_op(e, 0x20)
@@ -405,9 +428,7 @@ web_memory_fill: fn(e: &WebEmitter) Never! {
     web_op(e, 0)
 }
 
-web_wrap: fn(e: &WebEmitter) Never! {
-    web_op(e, 0xa7)
-}
+web_wrap: fn(e: &WebEmitter) Never! { web_op(e, 0xa7) }
 
 // `if` with no result.
 web_if: fn(e: &WebEmitter) Never! {
@@ -421,13 +442,9 @@ web_if_value: fn(e: &WebEmitter, ty: Int) Never! {
     web_op(e, ty)
 }
 
-web_else: fn(e: &WebEmitter) Never! {
-    web_op(e, 0x05)
-}
+web_else: fn(e: &WebEmitter) Never! { web_op(e, 0x05) }
 
-web_end: fn(e: &WebEmitter) Never! {
-    web_op(e, 0x0b)
-}
+web_end: fn(e: &WebEmitter) Never! { web_op(e, 0x0b) }
 
 // A call of `callee` (an IR function row or a ref), its index patched later.
 web_call: fn(e: &WebEmitter, callee: Int) Never! {
@@ -509,7 +526,9 @@ web_address: fn(e: &WebEmitter, local: Int, offset: Int) -> Int Never! {
 
 // Sign- or zero-extends the low `bits` of the i64 on top to the whole word.
 web_narrow: fn(e: &WebEmitter, signed: Bool, bits: Int) Never! {
-    if bits <= 0 || bits >= 64 -> return
+    if bits <= 0 || bits >= 64 {
+        return
+    }
     if signed {
         if bits == 8 -> return web_op(e, 0xc2)
         if bits == 16 -> return web_op(e, 0xc3)

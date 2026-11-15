@@ -1,6 +1,11 @@
 use facts: core.compiler
+
 LEXED: #run { facts.lex(`run: fn() {}`) ?? panic("lex") }
+
 PARSED: #run { facts.parse(`run: fn() {}`) ?? panic("parse") }
+
 CHECKED: #run { facts.check(PARSED) ?? panic("check") }
+
 MAPPED: #run { facts.source_map(`run: fn() {}`) ?? panic("map") }
+
 run: fn() { print("compiler queries") }

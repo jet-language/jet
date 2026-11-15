@@ -2,11 +2,26 @@
 use {
     jet_driver.[JetDriverRecordLink, JetDriverRunReceiptSection, jet_driver_run_receipt_encode, jet_driver_run_receipt_section_new]
     jet_foundation.[
-        EvidenceSource, EvidenceBuild, EvidenceRevision, EvidenceAttachment, EvidenceProducerKind,
-        EvidenceKind, EvidenceOutcome, EvidenceReport, evidence_identity_for_record,
-        evidence_record_new, evidence_record_checked_derivation, evidence_report_new,
-        evidence_report_add_record_with_derivation, evidence_merge_error_text, evidence_report_encode, evidence_producer_name,
-        canonical_json_bytes, comparison_record_to_json, ComparisonStatus, comparison_status_as_str,
+        EvidenceSource,
+        EvidenceBuild,
+        EvidenceRevision,
+        EvidenceAttachment,
+        EvidenceProducerKind,
+        EvidenceKind,
+        EvidenceOutcome,
+        EvidenceReport,
+        evidence_identity_for_record,
+        evidence_record_new,
+        evidence_record_checked_derivation,
+        evidence_report_new,
+        evidence_report_add_record_with_derivation,
+        evidence_merge_error_text,
+        evidence_report_encode,
+        evidence_producer_name,
+        canonical_json_bytes,
+        comparison_record_to_json,
+        ComparisonStatus,
+        comparison_status_as_str,
     ]
     jet_pkg_model.[AuthorityResolver, JET_VERSION, WorkspaceDeclarationCache]
     receipt_crypto: core.crypto
@@ -51,7 +66,9 @@ jet_cli_comparison_evidence: fn(run: JetCLIComparisonRun, target: String, artifa
         {name: "target-identity", value: binding.target_identity},
         {name: "coverage", value: binding.coverage_digest},
     }
-    loop assumption in binding.assumptions -> evidence.attachments.push(EvidenceAttachment{name: "assumption", value: assumption})
+    loop assumption in binding.assumptions {
+        evidence.attachments.push(EvidenceAttachment{name: "assumption", value: assumption})
+    }
     evidence.attachments.push(EvidenceAttachment{name: "comparison-artifact", value: artifact_id})
     derivation: evidence_record_checked_derivation(evidence)
     report := evidence_report_new(report_id, EvidenceProducerKind.Test, source_ref, build, revision)
@@ -81,7 +98,9 @@ jet_cli_evidence_persist: fn(cache: &WorkspaceDeclarationCache, report: Evidence
 // `target_inputs_sha256`. `protected` exempts the row from history retention.
 // Evidence history is a per-machine cache, stored without flushes.
 jet_cli_evidence_persist_at: fn(root: String, report: EvidenceReport, bytes: [U8], name: String, target_inputs_sha256: String, protected: Bool) JetCLIReadError! -[FS, Env, Time]> {
-    if name == "" || name.contains("/") || name.contains("\\") || name == "." || name == ".." -> return Err(jet_cli_read_error("evidence report has an unsafe id `{name}`"))
+    if name == "" || name.contains("/") || name.contains("\\") || name == "." || name == ".." {
+        return Err(jet_cli_read_error("evidence report has an unsafe id `{name}`"))
+    }
     held: JetCLIRootedDirectory.open_cache(root, [String]{".jet", "evidence"}, true) ?? return Err(err)
     _: held.publish_immutable("{name}.json", bytes, Val(0o600), 268435456) ?? return Err(err)
     index := jet_cli_record_index_load(root)
@@ -103,7 +122,9 @@ jet_cli_comparison_persist: fn(run: JetCLIComparisonRun, target: String, argv: [
     jet_cli_evidence_persist(cache, report, evidence_bytes, report_id, artifact_id, true) ?? return Err(err)
 
     paths: jet_cli_comparison_input_paths(cache, target)
-    if paths.len() == 0 -> return Err(jet_cli_read_error("comparison corpus has no current input path"))
+    if paths.len() == 0 {
+        return Err(jet_cli_read_error("comparison corpus has no current input path"))
+    }
     claim: jet_cli_receipt_claim("test-compare", paths, argv, terminal)
     // ReceiptStore's target_path consumes the full normalized argv, not the
     // display path. The dispatcher supplies that same selected corpus here.
@@ -120,8 +141,12 @@ jet_cli_comparison_persist: fn(run: JetCLIComparisonRun, target: String, argv: [
     _: jet_cli_receipt_publish(receipt_root, receipt)
     published: if jet_cli_receipt_lookup(receipt_root, claim) == {
         .Val(current) -> current
-        .None -> { return Err(jet_cli_read_error("receipt was not current after publication")) }
-        .Err(error) -> { return Err(error) }
+        .None -> {
+            return Err(jet_cli_read_error("receipt was not current after publication"))
+        }
+        .Err(error) -> {
+            return Err(error)
+        }
     }
     target_digest: jet_cli_receipt_target_identity(cache, target, claim.inputs)
     index := jet_cli_record_index_load(receipt_root)

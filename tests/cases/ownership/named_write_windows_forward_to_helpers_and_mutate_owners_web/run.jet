@@ -1,20 +1,17 @@
-
-Slot: struct { value: Int }
-
-bump: fn(value: &Int, amount: Int) {
-    value += amount
+Slot: struct {
+    value: Int
 }
 
-inspect: fn(first: Slot, second: Slot) {
-    print(first.value + second.value)
-}
+bump: fn(value: &Int, amount: Int) { value += amount }
+
+inspect: fn(first: Slot, second: Slot) { print(first.value + second.value) }
 
 run: fn() {
     whole := 1
     whole_window: &whole
     bump(whole_window, 2)
 
-    slot := Slot{ value: 3 }
+    slot := Slot{value: 3}
     field_window: &slot.value
     bump(field_window, 4)
 
@@ -22,7 +19,7 @@ run: fn() {
     index_window: &values[0]
     bump(index_window, 6)
 
-    read_slot := Slot{ value: 9 }
+    read_slot := Slot{value: 9}
     read_window: &read_slot
     inspect(read_window, read_window)
 

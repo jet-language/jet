@@ -13,9 +13,36 @@
 // one the IR objects link with.
 use {
     jet_ir.[
-        IRClass, IRFunction, IRModule, IROp, IROptInline, IROptOptions, IRSlotKind, IRType, IRTypeKind, IR_OVERFLOW_TRAP, IR_OVERFLOW_WRAP,
-        ir_args, ir_else, ir_emit, ir_end, ir_function_new, ir_intern_name, ir_intern_text, ir_intern_type, ir_lint_module, ir_lint_text, ir_module_new, ir_open, ir_open_if, ir_slot,
-        ir_optimize_module_measured, ir_x64_compile_function, ir_x64_compile_module, ir_x64_object, ir_x64_tables,
+        IRClass,
+        IRFunction,
+        IRModule,
+        IROp,
+        IROptInline,
+        IROptOptions,
+        IRSlotKind,
+        IRType,
+        IRTypeKind,
+        IR_OVERFLOW_TRAP,
+        IR_OVERFLOW_WRAP,
+        ir_args,
+        ir_else,
+        ir_emit,
+        ir_end,
+        ir_function_new,
+        ir_intern_name,
+        ir_intern_text,
+        ir_intern_type,
+        ir_lint_module,
+        ir_lint_text,
+        ir_module_new,
+        ir_open,
+        ir_open_if,
+        ir_slot,
+        ir_optimize_module_measured,
+        ir_x64_compile_function,
+        ir_x64_compile_module,
+        ir_x64_object,
+        ir_x64_tables,
     ]
     jet_backend.[LINK_BASE, x64_link_executable]
     jet_foundation.[CompilerThreads, Type, compiler_threads_single, name_rows_set]
@@ -73,9 +100,7 @@ xp_local: fn(m: &IRModule, f: &IRFunction, ty: Int, name: String) -> Int {
     ir_slot(f, ty, IRSlotKind.Local, ir_intern_name(m, name), line)
 }
 
-xp_temp: fn(f: &IRFunction, ty: Int) -> Int {
-    ir_slot(f, ty, IRSlotKind.Temp, -1, 0)
-}
+xp_temp: fn(f: &IRFunction, ty: Int) -> Int { ir_slot(f, ty, IRSlotKind.Temp, -1, 0) }
 
 xp_set: fn(f: &IRFunction, slot: Int, value: Int) {
     _ := ir_emit(f, IROp.Const, slot, value, -1, -1, 0)
@@ -118,17 +143,11 @@ xp_call: fn(f: &IRFunction, function: Int, args: [Int], dst: Int) {
     _ := ir_emit(f, IROp.Call, dst, function, start, args.len(), 0)
 }
 
-xp_drop: fn(f: &IRFunction, slot: Int) {
-    _ := ir_emit(f, IROp.Drop, -1, slot, -1, -1, 0)
-}
+xp_drop: fn(f: &IRFunction, slot: Int) { _ := ir_emit(f, IROp.Drop, -1, slot, -1, -1, 0) }
 
-xp_return: fn(f: &IRFunction, slot: Int) {
-    _ := ir_emit(f, IROp.Return, -1, slot, -1, -1, 0)
-}
+xp_return: fn(f: &IRFunction, slot: Int) { _ := ir_emit(f, IROp.Return, -1, slot, -1, -1, 0) }
 
-xp_br: fn(f: &IRFunction, depth: Int) {
-    _ := ir_emit(f, IROp.Br, -1, depth, -1, -1, 0)
-}
+xp_br: fn(f: &IRFunction, depth: Int) { _ := ir_emit(f, IROp.Br, -1, depth, -1, -1, 0) }
 
 xp_br_if: fn(f: &IRFunction, condition: Int, depth: Int) {
     _ := ir_emit(f, IROp.BrIf, -1, condition, depth, -1, 0)
@@ -165,9 +184,7 @@ xp_add: fn(m: &IRModule, f: IRFunction) -> Int {
     row
 }
 
-xp_entry: fn(m: &IRModule, f: IRFunction) {
-    m.entry = xp_add(m, f)
-}
+xp_entry: fn(m: &IRModule, f: IRFunction) { m.entry = xp_add(m, f) }
 
 // ---------------------------------------------------------------------------
 // Programs (each mirrors its Jet source in X64ProgramSources.jet).
@@ -447,9 +464,7 @@ xp_strings: fn() -> IRModule {
             xp_runtime(m, f, "jet_rt_int_to_string", [Int]{n}, shown)
             xp_runtime(m, f, "jet_rt_string_builder_push", [Int]{builder, shown}, -1)
             xp_drop(f, shown)
-        } else {
-            xp_runtime(m, f, "jet_rt_string_builder_push", [Int]{builder, a}, -1)
-        }
+        } else { xp_runtime(m, f, "jet_rt_string_builder_push", [Int]{builder, a}, -1) }
     }
     line: xp_temp(f, t.string)
     xp_runtime(m, f, "jet_rt_string_builder_finish", [Int]{builder}, line)
@@ -844,9 +859,7 @@ xp_programs: fn() -> [XPProgram] {
 // ---------------------------------------------------------------------------
 // Driver.
 
-xp_quote: fn(text: String) -> String {
-    text.replace("\n", "\\n")
-}
+xp_quote: fn(text: String) -> String { text.replace("\n", "\\n") }
 
 xp_status: fn(args: [String]) -> Int {
     if args.len() < 3 {
@@ -1021,6 +1034,4 @@ xp_threads: fn() -> Int {
     if same -> 0 else -> 1
 }
 
-run: fn() {
-    process.exit(xp_status(process.args()))
-}
+run: fn() { process.exit(xp_status(process.args())) }

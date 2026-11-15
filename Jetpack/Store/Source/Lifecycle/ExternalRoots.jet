@@ -43,10 +43,14 @@ store_external_root_debug_option: fn(value: String?) -> String Never! {
 store_external_root_validate_label: fn(label: String) StoreError! {
     raw: label.bytes()
     unsafe_label: raw.len() == 0 || raw.len() > 128 || label == "." || label == ".." || label.contains("/") || label.contains("\\")
-    if unsafe_label -> return Err(StoreError.InvalidInput("external root label must be one safe path component"))
+    if unsafe_label {
+        return Err(StoreError.InvalidInput("external root label must be one safe path component"))
+    }
     loop byte in raw {
         code: Int{byte}
-        if code < 32 || code == 127 -> return Err(StoreError.InvalidInput("external root label must be one safe path component"))
+        if code < 32 || code == 127 {
+            return Err(StoreError.InvalidInput("external root label must be one safe path component"))
+        }
     }
 }
 
@@ -72,7 +76,9 @@ store_external_root_targets_unlocked: fn(roots: HangarRoots, reference: String, 
     loop entry in entries {
         if entry.reference != reference -> next
         targets: store_lifecycle_sorted_set(graph.closure(entry.envelope.output_hash))
-        if targets.len() == 0 -> return Err(StoreError.InvalidData("Hangar entry `{reference}` has no closure objects"))
+        if targets.len() == 0 {
+            return Err(StoreError.InvalidData("Hangar entry `{reference}` has no closure objects"))
+        }
         return Ok(targets)
     }
     Err(StoreError.NotFound("no Hangar entry matches `{reference}`"))
@@ -89,7 +95,9 @@ store_external_root_targets: fn(verification: &StoreVerification, roots: HangarR
     if store_external_root_targets_locked(verification, roots, reference) == {
         .Ok(targets) -> Ok(targets)
         .Err(error) -> {
-            if store_external_root_is_missing_reference(error, reference) -> return Err(ExternalRootError.ReferenceNotFound(reference))
+            if store_external_root_is_missing_reference(error, reference) {
+                return Err(ExternalRootError.ReferenceNotFound(reference))
+            }
             Err(ExternalRootError.Store(error))
         }
     }
@@ -117,13 +125,13 @@ store_external_root_view: fn(root: LifecycleRoot) -> ExternalRootView StoreError
         .Val(timestamp) -> Val(timestamp.get())
         .None -> None
     }
-    Ok(ExternalRootView{label, reference, etag: root.etag().render(), closure_size: root.targets.len(), prepared: root.phase == RootPhase.Prepared, expires_at})
+    Ok(ExternalRootView{label: label, reference: reference, etag: root.etag().render(), closure_size: root.targets.len(), prepared: root.phase == RootPhase.Prepared, expires_at: expires_at})
 }
 
 // Rust `map_external_root_error`: a compare-and-swap refusal names the label.
 store_external_root_map_error: fn(label: String, error: StoreError) -> ExternalRootError Never! {
     if error == {
-        .LifecycleConflict(expected, current) -> ExternalRootError.Conflict{label, expected, current}
+        .LifecycleConflict(expected, current) -> ExternalRootError.Conflict{label: label, expected: expected, current: current}
         .IO(_) | .NotFound(_) | .InvalidData(_) | .InvalidInput(_) | .AlreadyExists(_) | .PermissionDenied(_) | .Unsupported(_) | .Interrupted(_) | .Other(_) -> ExternalRootError.Store(error)
     }
 }
@@ -134,7 +142,7 @@ store_external_root_register_locked: fn(verification: &StoreVerification, roots:
     targets: store_external_root_targets_unlocked(roots, reference, graph)
     witness: store_external_root_manual_witness(producer, label, reference, targets)
     identity: RootIdentity.new(RootKind.Manual, id, producer, Incarnation.new(1), witness)
-    update: RootUpdate{identity, targets, metadata, expected_etag, at: LifecycleTimestamp.from_unix_seconds(at)}
+    update: RootUpdate{identity: identity, targets: targets, metadata: metadata, expected_etag: expected_etag, at: LifecycleTimestamp.from_unix_seconds(at)}
     store_lifecycle_atomic_update_unlocked(roots, update, expected, session.known, session.closure_head)
 }
 
@@ -142,7 +150,9 @@ store_external_root_register_snapshot: fn(verification: &StoreVerification, root
     if store_external_root_register_locked(verification, roots, id, producer, label, reference, metadata, expected_etag, expected, at) == {
         .Ok(snapshot) -> Ok(snapshot)
         .Err(error) -> {
-            if store_external_root_is_missing_reference(error, reference) -> return Err(ExternalRootError.ReferenceNotFound(reference))
+            if store_external_root_is_missing_reference(error, reference) {
+                return Err(ExternalRootError.ReferenceNotFound(reference))
+            }
             Err(store_external_root_map_error(label, error))
         }
     }
@@ -163,7 +173,7 @@ store_register_external_root_at: fn(verification: &StoreVerification, roots: Han
     id: store_external_root_manual_id(producer, label)
     expected := RootEtag?{None}
     if expected_etag == {
-        .Val(text) -> expected = Val(RootEtag.parse(text))
+        .Val(text) -> { expected = Val(RootEtag.parse(text)) }
         .None -> {}
     }
     snapshot: store_external_root_register_snapshot(verification, roots, id, producer, label, reference, metadata, expected_etag, expected, at)
@@ -178,7 +188,9 @@ store_list_external_roots: fn(verification: &StoreVerification, roots: HangarRoo
     views := [ExternalRootView]{}
     live_roots: snapshot.root_list()
     loop root in live_roots {
-        if root.identity.kind != RootKind.Manual || root.identity.producer != producer || root.phase == RootPhase.Tombstoned -> next
+        if root.identity.kind != RootKind.Manual || root.identity.producer != producer || root.phase == RootPhase.Tombstoned {
+            next
+        }
         views.push(store_external_root_view(root))
     }
     Ok(views)
@@ -197,7 +209,9 @@ store_unregister_external_root_at: fn(verification: &StoreVerification, roots: H
     producer: ProducerID.new(principal)
     id: store_external_root_manual_id(producer, label)
     snapshot: store_lifecycle_snapshot(verification, roots)
-    if !snapshot.roots.has_key(id.as_str()) -> return Err(ExternalRootError.Store(StoreError.NotFound("external root `{label}` was not found")))
+    if !snapshot.roots.has_key(id.as_str()) {
+        return Err(ExternalRootError.Store(StoreError.NotFound("external root `{label}` was not found")))
+    }
     root: snapshot.roots[id.as_str()]
     if root.identity.kind != RootKind.Manual || root.identity.producer != producer {
         return Err(ExternalRootError.Store(StoreError.PermissionDenied("external root `{label}` is owned by another producer")))
@@ -216,5 +230,5 @@ store_reconcile_profile_generation_root: fn(verification: &StoreVerification, ro
     snapshot: store_lifecycle_prepare_if_absent(verification, roots, identity, store_lifecycle_sorted_set(targets), LifecycleTimestamp.from_unix_seconds(at))
     root: snapshot.roots.get(id.as_str()) ?? return Err(StoreError.Other("generation root disappeared after prepare"))
     if root.phase == RootPhase.Committed -> return Ok(None)
-    Ok(Val(PreparedProfileGenerationRoot{id, incarnation, witness: root_witness}))
+    Ok(Val(PreparedProfileGenerationRoot{id: id, incarnation: incarnation, witness: root_witness}))
 }

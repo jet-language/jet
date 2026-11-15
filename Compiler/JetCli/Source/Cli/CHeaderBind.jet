@@ -19,18 +19,29 @@ use {
     jet_foundation.[CModuleKind, DIAGNOSTIC_ERROR, ImportDecl, Item]
     jet_parser.[parse_source]
     jet_pkg_model.[
-        ArchiveInput, CBindFiles, ForeignBridgeError, HandleOverlay, pkg_cbind_bind_files, pkg_cbind_compute_bind_hash,
-        pkg_cbind_declared_dependency, pkg_cbind_local_archives, pkg_cbind_provenance, pkg_cbind_stale_input,
+        ArchiveInput,
+        CBindFiles,
+        ForeignBridgeError,
+        HandleOverlay,
+        pkg_cbind_bind_files,
+        pkg_cbind_compute_bind_hash,
+        pkg_cbind_declared_dependency,
+        pkg_cbind_local_archives,
+        pkg_cbind_provenance,
+        pkg_cbind_stale_input,
     ]
 }
 
 // The cache directory below a project root, one part at a time.
 JET_CLI_C_BINDINGS_PARTS: [String]{".jet", "bindings", "c"}
+
 // The largest `.hash` sidecar read back: one hex digest and its line end.
 JET_CLI_C_BIND_HASH_LIMIT: 256
+
 // The largest `.provenance` record and `.jet` cache read back to check that
 // a current binding's inputs are unchanged.
 JET_CLI_C_BIND_PROVENANCE_LIMIT: 1048576
+
 JET_CLI_C_BIND_CACHE_LIMIT: 67108864
 
 // One header-path import: the library its basename names and the header.
@@ -43,7 +54,7 @@ JetCLICHeaderImport: struct {
 // and the close contracts its `#Import c.<lib>: module` overlays name.
 JetCLICBindInputs: struct {
     headers: [JetCLICHeaderImport]
-    overlays: [String: HandleOverlay]
+    overlays: [String:HandleOverlay]
 }
 
 jet_cli_c_bind_usage: fn() -> String Never! {
@@ -74,7 +85,7 @@ jet_cli_c_bind_publish: fn(held: JetCLIRootedDirectory, stem: String, bound: CBi
     _: held.remove("{stem}.hash")
     held.replace("{stem}.jet", bound.cache.bytes(), None)
     if bound.metadata == {
-        .Val(text) -> held.replace("{stem}.metadata", text.bytes(), None)
+        .Val(text) -> { held.replace("{stem}.metadata", text.bytes(), None) }
         .None -> { _: held.remove("{stem}.metadata") }
     }
     held.replace("{stem}.provenance", provenance.bytes(), None)
@@ -110,7 +121,7 @@ jet_cli_c_bind_stale: fn(root: String, lib: String) -[FS, Time]> String? Never! 
 // Admit the close contracts a parsed `#Import c.<lib>: module` overlay names:
 // a constructor's `#Close(f)` maps its returned handle to `f`. Contracts
 // already present stay; source markers only fill missing ones.
-jet_cli_c_bind_admit_overlays: fn(items: [Item], overlays: &[String: HandleOverlay]) Never! {
+jet_cli_c_bind_admit_overlays: fn(items: [Item], overlays: &[String:HandleOverlay]) Never! {
     loop item in items {
         if item == {
             .CModule(c_module) -> {
@@ -120,12 +131,16 @@ jet_cli_c_bind_admit_overlays: fn(items: [Item], overlays: &[String: HandleOverl
                     close: function.close ?? next
                     returned: function.return_type ?? next
                     if returned == .Named(handle) {
-                        if !overlay.close_functions.has_key(handle) -> overlay.close_functions[handle] = close.name
+                        if !overlay.close_functions.has_key(handle) {
+                            overlay.close_functions[handle] = close.name
+                        }
                     }
                 }
                 overlays[c_module.lib] = overlay
             }
-            .CodeModule(definition) -> jet_cli_c_bind_admit_overlays(definition.body ?? [Item]{}, overlays)
+            .CodeModule(definition) -> {
+                jet_cli_c_bind_admit_overlays(definition.body ?? [Item]{}, overlays)
+            }
             .GenericModule(definition) -> jet_cli_c_bind_admit_overlays(definition.body, overlays)
             .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
@@ -143,17 +158,25 @@ jet_cli_c_bind_collect_imports: fn(relative_path: String, imports: [ImportDecl],
         if declaration.kind == .File(path, _) {
             if jet_driver_foreign_library_from_header(path) == .Val(lib) {
                 known: loop existing in headers {
-                    if existing.lib == lib -> break true
+                    if existing.lib == lib {
+                        break true
+                    }
                 } ?? false
                 duplicated: loop other in imports {
                     imported: jet_driver_foreign_import_libraries(other)
                     if imported.form == "header" -> next
                     named: loop library in imported.libraries {
-                        if library == lib -> break true
+                        if library == lib {
+                            break true
+                        }
                     } ?? false
-                    if named -> break true
+                    if named {
+                        break true
+                    }
                 } ?? false
-                if !known && !duplicated -> headers.push(JetCLICHeaderImport{lib: lib, header: path})
+                if !known && !duplicated {
+                    headers.push(JetCLICHeaderImport{lib: lib, header: path})
+                }
             } else {
                 jet_cli_c_bind_reach(jet_driver_file_import_path(relative_path, path).path, modules)
             }
@@ -169,7 +192,9 @@ jet_cli_c_bind_collect_imports: fn(relative_path: String, imports: [ImportDecl],
                     jet_cli_c_bind_reach(jet_driver_file_import_path(relative_path, "{definition.name}/module").path, modules)
                 }
             }
-            .GenericModule(definition) -> jet_cli_c_bind_collect_imports(relative_path, definition.imports, definition.body, headers, modules)
+            .GenericModule(definition) -> {
+                jet_cli_c_bind_collect_imports(relative_path, definition.imports, definition.body, headers, modules)
+            }
             .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
@@ -188,7 +213,7 @@ jet_cli_c_bind_reach: fn(path: String, modules: &[String]) Never! {
 // source is parsed only when it names a `.h"` path or an `#Import` overlay;
 // a source that does not parse adds nothing, and the compile reports it.
 jet_cli_c_bind_inputs: fn(files: [JetDriverAuthorizedSourceFile], entry_path: String, package: Bool) -> JetCLICBindInputs Never! {
-    inputs := JetCLICBindInputs{headers: [JetCLICHeaderImport]{}, overlays: [String: HandleOverlay]{}}
+    inputs := JetCLICBindInputs{headers: [JetCLICHeaderImport]{}, overlays: [String:HandleOverlay]{}}
     modules := [String]{}
     if package {
         loop file in files {
@@ -216,11 +241,17 @@ jet_cli_c_bind_inputs: fn(files: [JetDriverAuthorizedSourceFile], entry_path: St
 jet_cli_c_bind_read_file: fn(file: JetDriverAuthorizedSourceFile, inputs: &JetCLICBindInputs, modules: &[String]) Never! {
     parsed: parse_source(file.source.bytes())
     failed: loop diagnostic in parsed.diagnostics {
-        if diagnostic.severity == DIAGNOSTIC_ERROR -> break true
+        if diagnostic.severity == DIAGNOSTIC_ERROR {
+            break true
+        }
     } ?? false
-    if failed -> return
+    if failed {
+        return
+    }
     jet_cli_c_bind_collect_imports(file.relative_path, parsed.program.imports, parsed.program.items, inputs.headers, modules)
-    if file.source.contains("#Import") -> jet_cli_c_bind_admit_overlays(parsed.program.items, inputs.overlays)
+    if file.source.contains("#Import") {
+        jet_cli_c_bind_admit_overlays(parsed.program.items, inputs.overlays)
+    }
 }
 
 // A header path as written: absolute, or relative to the project root.
@@ -242,7 +273,9 @@ jet_cli_c_bind_header_path: fn(root: String, header: String) -> String Never! {
 // does has nothing to bind and none is parsed.
 jet_cli_c_bind_refresh: fn(root: String, entry_path: String, files: [JetDriverAuthorizedSourceFile], color: Bool) -[FS, Env, Time]> JetDriverVerbOutput? Never! {
     names_header: loop file in files {
-        if file.source.contains(".h\"") -> break true
+        if file.source.contains(".h\"") {
+            break true
+        }
     } ?? false
     if !names_header -> return None
     inputs: jet_cli_c_bind_inputs(files, entry_path, cli_files.is_file(jet_cli_authority_path(root, "package.jet")))
@@ -321,7 +354,9 @@ jet_cli_c_header_bind: fn(args: [String], color: Bool) -[FS, Env, Time]> JetCLIP
         if argument != "--pkg" && argument != "--overlay" && argument != "--link" && argument != "-o" && argument != "--out" {
             return jet_cli_c_bind_argument_error("unknown inspect bind argument {argument}", color)
         }
-        if index + 1 >= args.len() || args[index + 1] == "" -> return jet_cli_c_bind_argument_error("inspect bind requires a value after {argument}", color)
+        if index + 1 >= args.len() || args[index + 1] == "" {
+            return jet_cli_c_bind_argument_error("inspect bind requires a value after {argument}", color)
+        }
         value: args[index + 1]
         if argument == {
             "--pkg" -> lib = Val(value)
@@ -332,14 +367,18 @@ jet_cli_c_header_bind: fn(args: [String], color: Bool) -[FS, Env, Time]> JetCLIP
         index += 2
     }
     library: lib ?? jet_driver_foreign_library_from_header(header) ?? return jet_cli_c_bind_argument_error("cannot name the C library of `{header}`; pass --pkg <lib>", color)
-    if !jet_driver_foreign_valid_library(library) -> return jet_cli_c_bind_argument_error("`{library}` is not a C library name", color)
+    if !jet_driver_foreign_valid_library(library) {
+        return jet_cli_c_bind_argument_error("`{library}` is not a C library name", color)
+    }
     header_text: cli_files.read(header) ?? return jet_cli_fail("E3208", jet_cli_c_bind_what(header), jet_cli_c_bind_unreadable(jet_cli_io_error_text(err)), jet_cli_c_bind_fix(library), color, JET_DRIVER_EXIT_USER_ERROR)
-    overlays := [String: HandleOverlay]{}
+    overlays := [String:HandleOverlay]{}
     if overlay_path == .Val(path) {
         overlay_text: cli_files.read(path) ?? return jet_cli_fail("E3208", jet_cli_c_bind_what(header), "the overlay `{path}` could not be read ({err}).", jet_cli_c_bind_fix(library), color, JET_DRIVER_EXIT_USER_ERROR)
         parsed: parse_source(overlay_text.bytes())
         loop diagnostic in parsed.diagnostics {
-            if diagnostic.severity == DIAGNOSTIC_ERROR -> return jet_cli_fail("E3208", jet_cli_c_bind_what(header), "the overlay `{path}` does not parse: {diagnostic.what}", jet_cli_c_bind_fix(library), color, JET_DRIVER_EXIT_USER_ERROR)
+            if diagnostic.severity == DIAGNOSTIC_ERROR {
+                return jet_cli_fail("E3208", jet_cli_c_bind_what(header), "the overlay `{path}` does not parse: {diagnostic.what}", jet_cli_c_bind_fix(library), color, JET_DRIVER_EXIT_USER_ERROR)
+            }
         }
         jet_cli_c_bind_admit_overlays(parsed.program.items, overlays)
     }
@@ -361,7 +400,9 @@ jet_cli_c_header_bind: fn(args: [String], color: Bool) -[FS, Env, Time]> JetCLIP
         directory: cli_files.realpath(parent) ?? return jet_cli_c_bind_io_error(path, "could not resolve output directory {parent} ({err})", color)
         held: JetCLIRootedDirectory.open(directory, [String]{}, false) ?? return jet_cli_c_bind_io_error(path, err.message, color)
         stem: if name.ends_with(".jet") -> name.slice(0..<(name.len() - 4)) else -> name
-        if stem == "" -> return jet_cli_c_bind_argument_error("inspect bind output `{path}` names no file", color)
+        if stem == "" {
+            return jet_cli_c_bind_argument_error("inspect bind output `{path}` names no file", color)
+        }
         provenance: jet_cli_c_bind_provenance(root, directory, stem, library, absolute, header_text, bound) ?? return jet_cli_fail("E3208", jet_cli_c_bind_what(header), "{err.message}.", jet_cli_c_bind_fix(library), color, JET_DRIVER_EXIT_USER_ERROR)
         jet_cli_c_bind_publish(held, stem, bound, provenance) ?? return jet_cli_c_bind_io_error(path, err.message, color)
         return jet_cli_c_bind_done(header, path, bound)

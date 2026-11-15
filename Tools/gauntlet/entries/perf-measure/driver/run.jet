@@ -37,7 +37,9 @@ read_samples: fn(file: String) -> [Sample] {
     text: files.read(file) ?? fail(read_failure(file, err))
     value: json.parse(text) ?? fail(MeasureError{message: "{err}", syntax: true})
     out := [Sample]{}
-    loop item in items(Val(value)) -> out.push(Sample{t_ns: to_number(field(item, "tNs")), cpu_ns: to_number(field(item, "cpuNs")), threads: 0, rss_bytes: 0, processes: 0})
+    loop item in items(Val(value)) {
+        out.push(Sample{t_ns: to_number(field(item, "tNs")), cpu_ns: to_number(field(item, "cpuNs")), threads: 0, rss_bytes: 0, processes: 0})
+    }
     out
 }
 

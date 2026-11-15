@@ -81,7 +81,9 @@ shown: fn(result: Dyn, port: Int) -> Dyn {
     out := Dyn.object()
     out["ok"] = dyn_at(result, "ok")
     loop key in ["status", "headers", "body"] -> put_present(out, key, value_of(result, key))
-    if text_at(result, "error") == .Val(error) -> out["error"] = Dyn.Text(error.replace("{port}", "PORT"))
+    if text_at(result, "error") == .Val(error) {
+        out["error"] = Dyn.Text(error.replace("{port}", "PORT"))
+    }
     out["latency"] = Dyn.Bool((number_at(result, "latencyMs") ?? -1.0) >= 0.0)
     out
 }

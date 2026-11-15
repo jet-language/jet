@@ -7,7 +7,6 @@ package: {
 // written with write_all, made durable with fsync, its mode set through the
 // handle, then read back in bounded chunks while the reader's fstat identity
 // is compared with the path's.
-
 use files: core.files
 
 run: fn() {
@@ -23,7 +22,9 @@ run: fn() {
     print("written size {written.size} mode {written.mode} file {written.is_file}")
     close(writer)
     held_dir: files.open_directory(scratch.path)
-    loop entry in held_dir.list() -> print("entry {entry.name} unicode={entry.name_is_unicode} raw bytes={entry.raw_name.len()} dir={entry.is_dir}")
+    loop entry in held_dir.list() {
+        print("entry {entry.name} unicode={entry.name_is_unicode} raw bytes={entry.raw_name.len()} dir={entry.is_dir}")
+    }
 
     reader := files.open(path, links: .Refuse)
     held: reader.stat()
@@ -40,7 +41,7 @@ run: fn() {
     print("read {total} bytes in {chunks} chunks")
     print("eof read is empty: {reader.read_bytes(5).len() == 0}")
     if reader.read_bytes(0) == {
-        .Ok(_) -> print("read(0): accepted")
+        .Ok(_) -> { print("read(0): accepted") }
         .Err(_) -> print("read(0): InvalidInput")
     }
 

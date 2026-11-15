@@ -60,9 +60,7 @@ MachineFacts: struct {
         if self.sockets == None -> denied.push("!Net")
         if self.files == None -> denied.push("!FS")
         if self.byte_sink == None -> denied.push("!IO")
-        if self.wall_clock == None && self.monotonic_clock == None {
-            denied.push("!Time")
-        } else if self.sleep == None {
+        if self.wall_clock == None && self.monotonic_clock == None -> denied.push("!Time") else if self.sleep == None {
             denied.push("!Time.Wait")
         }
         if self.entropy == None -> denied.push("!Rand")

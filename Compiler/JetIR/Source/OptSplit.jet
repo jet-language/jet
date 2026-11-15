@@ -14,7 +14,6 @@
 // two slots hold the one value and the code reads, writes and drops it as
 // before. Constants and frame addresses keep their slot: the backend holds
 // them in no place.
-
 use jet_foundation.[Type]
 
 // Splits `f`'s Loops (the header comment); returns how many slots it split.
@@ -73,7 +72,9 @@ ir_opt_split_loops: fn(m: IRModule, f: &IRFunction) -> Int Never! {
         touched.clear()
         loop at in head..<(tail + 1) {
             ir_x64_reads_into(f, at, reads)
-            loop slot in reads -> ir_opt_split_note(mark, inside, changed, touched, slot, head, false)
+            loop slot in reads {
+                ir_opt_split_note(mark, inside, changed, touched, slot, head, false)
+            }
             ir_opt_split_note(mark, inside, changed, touched, ir_x64_write(f, at), head, true)
         }
         start: split_slot.len()
@@ -123,7 +124,9 @@ ir_opt_split_loops: fn(m: IRModule, f: &IRFunction) -> Int Never! {
             loop row_at >= 0 && target < heads[open_rows[row_at]] - 1 {
                 row: open_rows[row_at]
                 loop k in first[row]..<(first[row] + counts[row]) {
-                    if split_written[k] -> ir_opt_code_put(code, .Move, split_old[k], split_new[k], -1, -1, line)
+                    if split_written[k] {
+                        ir_opt_code_put(code, .Move, split_old[k], split_new[k], -1, -1, line)
+                    }
                 }
                 row_at -= 1
             }
@@ -133,13 +136,17 @@ ir_opt_split_loops: fn(m: IRModule, f: &IRFunction) -> Int Never! {
         if op == .End -> _ := opens.pop()
         closing: close_of[at]
         if closing >= 0 {
-            loop k in first[closing]..<(first[closing] + counts[closing]) -> current[split_slot[k]] = split_old[k]
+            loop k in first[closing]..<(first[closing] + counts[closing]) {
+                current[split_slot[k]] = split_old[k]
+            }
             _ := open_rows.pop()
         }
         back: back_of[at]
         if back >= 0 {
             loop k in first[back]..<(first[back] + counts[back]) {
-                if split_written[k] -> ir_opt_code_put(code, .Move, split_old[k], split_new[k], -1, -1, line)
+                if split_written[k] {
+                    ir_opt_code_put(code, .Move, split_old[k], split_new[k], -1, -1, line)
+                }
             }
         }
     }
@@ -158,7 +165,9 @@ ir_opt_split_loops: fn(m: IRModule, f: &IRFunction) -> Int Never! {
 // Const, a StackAddress or an Offset of a temp).
 ir_opt_splittable: fn(m: IRModule, f: IRFunction, slot: Int, writes: Int, last: Int) -> Bool Never! {
     row: m.types[f.slot_type[slot]]
-    if row.kind != .Bool && row.kind != .Int && row.kind != .Word && row.kind != .Pointer -> return false
+    if row.kind != .Bool && row.kind != .Int && row.kind != .Word && row.kind != .Pointer {
+        return false
+    }
     if ir_x64_class(ir_x64_shape(row)) != .General -> return false
     if writes != 1 || f.slot_kind[slot] != .Temp -> return true
     op: f.op[last]
@@ -167,7 +176,9 @@ ir_opt_splittable: fn(m: IRModule, f: IRFunction, slot: Int, writes: Int, last: 
 
 // Counts a reference to `slot` (-1: none) in the Loop at `head`.
 ir_opt_split_note: fn(mark: &[Int], inside: &[Int], changed: &[Bool], touched: &[Int], slot: Int, head: Int, write: Bool) Never! {
-    if slot < 0 || slot >= mark.len() -> return
+    if slot < 0 || slot >= mark.len() {
+        return
+    }
     if mark[slot] != head {
         mark[slot] = head
         inside[slot] = 0

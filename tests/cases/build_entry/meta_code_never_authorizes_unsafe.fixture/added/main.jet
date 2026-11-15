@@ -2,17 +2,16 @@
 build: fn(b: Build) {
     app: b.add_executable("app", ["main.jet"], [])
     meta: b.compiler(app)
-    meta.add(#code {
-        added_count: fn() -> Int {
-            #Unsafe("generated") {
-                print("added")
+    meta.add(
+        #code {
+            added_count: fn() -> Int {
+                #Unsafe("generated") { print("added") }
+                1
             }
-            1
-        }
-    }, scope: "added")
+        },
+        scope: "added",
+    )
     b.default(app)
 }
 
-run: fn() {
-    print(2)
-}
+run: fn() { print(2) }

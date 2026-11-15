@@ -15,10 +15,12 @@
 // `rust_native`. An arm that does not build prints the builds on one line and
 // exits 1. Options are read as argparse reads them: a unique prefix names an
 // option, and `--option=value` is `--option value`; a refusal exits 2.
-use core.[files, process, regex, sys, term, text, time]
-use core.text.fmt
-use core.encoding.json
-use core.mem.scope
+use {
+    core.[files, process, regex, sys, term, text, time]
+    core.text.fmt
+    core.encoding.json
+    core.mem.scope
+}
 
 HELP: [
     "usage: corelib_compare.py [-h] [--rounds ROUNDS] [--samples SAMPLES]",
@@ -170,7 +172,7 @@ run: fn() -> Never Err! {
     // `--option=value` splits at its first `=`, as argparse splits it; a
     // positional is refused either way.
     tokens: process.args().flat_map(fn(arg) { text.splitn(arg, "=", 2) })
-    values := [String: String]{"--rounds": "5000", "--samples": "5"}
+    values := [String:String]{"--rounds": "5000", "--samples": "5"}
     require_win := false
     i := 0
     loop i < tokens.len() {
@@ -218,7 +220,9 @@ ascii: fn(written: String) -> String Never! {
 }
 
 // The surrogate pair of an astral character `offset` past U+10000.
-pair: fn(offset: Int) -> String Never! { "\\u{fmt.hex(55296 + offset /% 1024, 4)}\\u{fmt.hex(56320 + offset % 1024, 4)}" }
+pair: fn(offset: Int) -> String Never! {
+    "\\u{fmt.hex(55296 + offset /% 1024, 4)}\\u{fmt.hex(56320 + offset % 1024, 4)}"
+}
 
 // The scalar value of one UTF-8 character of two to four bytes: the lead
 // byte's low 7 - N bits, then six bits from each continuation byte.
@@ -259,8 +263,12 @@ run_binary: fn(root: String, binary: String) -> Int Err! {
     receipt: run_command(process.cmd([binary]).cwd(root))
     elapsed: started.elapsed().ns
     name: files.basename(binary)
-    if !receipt.success -> return Err("{name} failed with exit {built(receipt, binary).exit}\nstdout:\n{receipt.output}\nstderr:\n{receipt.errors}")
-    if receipt.output != EXPECTED -> return Err("{name} output mismatch: expected {json.dumps(EXPECTED.encode())}, got {json.dumps(receipt.output.encode())}")
+    if !receipt.success {
+        return Err("{name} failed with exit {built(receipt, binary).exit}\nstdout:\n{receipt.output}\nstderr:\n{receipt.errors}")
+    }
+    if receipt.output != EXPECTED {
+        return Err("{name} output mismatch: expected {json.dumps(EXPECTED.encode())}, got {json.dumps(receipt.output.encode())}")
+    }
     Ok(elapsed)
 }
 
@@ -310,7 +318,9 @@ measure: fn(options: Options) -> (report: String, code: Int) Err! {
     // native arm when rustc left none.
     ready := paths.map(fn(path) { files.is_file(path) })
     ready.extend([rust.exit == 0, source.exit == 0])
-    if ready.contains(false) -> return Ok((report: tight(json.to_string_pretty(Unbuilt{builds: builds, metric: "runtime_only_ns", passed: false})), code: 1))
+    if ready.contains(false) {
+        return Ok((report: tight(json.to_string_pretty(Unbuilt{builds: builds, metric: "runtime_only_ns", passed: false})), code: 1))
+    }
     // The warm-up checks every output and is left out of the samples.
     loop path in paths -> run_binary(root, path)
     taken := [[Int]]{[], [], []}

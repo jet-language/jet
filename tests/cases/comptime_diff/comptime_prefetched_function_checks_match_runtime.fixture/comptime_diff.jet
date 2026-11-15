@@ -1,4 +1,3 @@
-
 // Many compile-time values whose closures reach a shared call graph: each
 // value's helper is checked ahead of the closures on the compiler threads
 // (jet_driver_comptime_prefetch), and every value must equal its runtime run.
@@ -16,9 +15,7 @@ Point: struct {
 
 mix: fn(seed: Int, salt: Int) -> Int {
     value := seed * 31 + salt
-    loop step in 0..<4 {
-        value = (value * 17 + step) % 1000003
-    }
+    loop step in 0..<4 -> value = (value * 17 + step) % 1000003
     value
 }
 
@@ -34,9 +31,7 @@ digit_sum: fn(value: Int) -> Int {
 
 fold_list: fn(values: [Int]) -> Int {
     total := 0
-    loop (position, value) in values {
-        total = mix(total, value + position)
-    }
+    loop (position, value) in values -> total = mix(total, value + position)
     total
 }
 
@@ -51,9 +46,9 @@ area: fn(shape: Shape) -> Int {
 walk: fn(steps: Int) -> Point {
     point := Point{x: 0, y: 0}
     loop step in 0..<steps {
-        if step % 3 == 0 -> point.x += step
-        else if step % 3 == 1 -> point.y += step
-        else -> point.x -= 1
+        if step % 3 == 0 -> point.x += step else if step % 3 == 1 -> point.y += step else {
+            point.x -= 1
+        }
     }
     point
 }
@@ -75,9 +70,7 @@ collatz_steps: fn(start: Int) -> Int {
 
 label: fn(prefix: String, value: Int) -> String {
     text := prefix
-    loop _ in 0..<digit_sum(value) % 4 {
-        text = "{text}!"
-    }
+    loop _ in 0..<digit_sum(value) % 4 -> text = "{text}!"
     "{text}{value}"
 }
 
@@ -111,19 +104,13 @@ walked: fn(steps: Int) -> Int {
     mix(point.x, point.y)
 }
 
-prime_fold: fn(limit: Int) -> Int {
-    fold_list(primes_below(limit))
-}
+prime_fold: fn(limit: Int) -> Int { fold_list(primes_below(limit)) }
 
-fib_label: fn(n: Int) -> String {
-    label("fib", fib(n))
-}
+fib_label: fn(n: Int) -> String { label("fib", fib(n)) }
 
 collatz_fold: fn(count: Int) -> Int {
     steps := [Int]{}
-    loop start in 1..count {
-        steps.push(collatz_steps(start))
-    }
+    loop start in 1..count { steps.push(collatz_steps(start)) }
     fold_list(steps)
 }
 

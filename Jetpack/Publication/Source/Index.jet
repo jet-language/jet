@@ -7,7 +7,12 @@
 use {
     jet_foundation.[foundation_parse_protocol_json]
     jet_pkg_model.[
-        PublicationRegistryTier, pkg_json_bool, pkg_json_object, pkg_json_render, pkg_json_text, publication_parse_tier,
+        PublicationRegistryTier,
+        pkg_json_bool,
+        pkg_json_object,
+        pkg_json_render,
+        pkg_json_text,
+        publication_parse_tier,
         publication_tier_label,
     ]
     jetpack_foundation.[foundation_write_file_nofollow_at_root]
@@ -28,24 +33,30 @@ PublicationIndexEntry: struct {
 }
 
 publication_index_to_jsonl: fn(entry: PublicationIndexEntry) -> String Never! {
-    pkg_json_render(Dyn.Object([
-        "name": Dyn.Text(entry.name.copy()),
-        "version": Dyn.Text(entry.version.copy()),
-        "content_hash": Dyn.Text(entry.content_hash.copy()),
-        "fingerprint": Dyn.Text(entry.fingerprint.copy()),
-        "yanked": Dyn.Bool(entry.yanked),
-        "tier": Dyn.Text(publication_tier_label(entry.tier)),
-        "gate_status": Dyn.Text(publication_gate_summary(entry.gate_status)),
-        "public_key": Dyn.Text(entry.public_key.copy()),
-        "signature": Dyn.Text(entry.signature.copy()),
-    ]))
+    pkg_json_render(
+        Dyn.Object(
+            [
+                "name": Dyn.Text(entry.name.copy()),
+                "version": Dyn.Text(entry.version.copy()),
+                "content_hash": Dyn.Text(entry.content_hash.copy()),
+                "fingerprint": Dyn.Text(entry.fingerprint.copy()),
+                "yanked": Dyn.Bool(entry.yanked),
+                "tier": Dyn.Text(publication_tier_label(entry.tier)),
+                "gate_status": Dyn.Text(publication_gate_summary(entry.gate_status)),
+                "public_key": Dyn.Text(entry.public_key.copy()),
+                "signature": Dyn.Text(entry.signature.copy()),
+            ],
+        ),
+    )
 }
 
 publication_index_parse_line: fn(line: String) -> PublicationIndexEntry? Never! {
     tree: foundation_parse_protocol_json(line) ?? return None
     fields: pkg_json_object(tree) ?? return None
     loop key in fields.keys() {
-        if key != "name" && key != "version" && key != "content_hash" && key != "fingerprint" && key != "yanked" && key != "tier" && key != "gate_status" && key != "public_key" && key != "signature" -> return None
+        if key != "name" && key != "version" && key != "content_hash" && key != "fingerprint" && key != "yanked" && key != "tier" && key != "gate_status" && key != "public_key" && key != "signature" {
+            return None
+        }
     }
     Val(PublicationIndexEntry{
         name: publication_index_required_string(fields, "name") ?? return None,
@@ -56,19 +67,22 @@ publication_index_parse_line: fn(line: String) -> PublicationIndexEntry? Never! 
         tier: publication_parse_tier(publication_index_required_string(fields, "tier") ?? return None) ?? return None,
         gate_status: publication_parse_gate_status(publication_index_required_string(fields, "gate_status") ?? return None) ?? return None,
         public_key: publication_index_optional_string(fields, "public_key") ?? return None,
-        signature: publication_index_optional_string(fields, "signature") ?? return None
+        signature: publication_index_optional_string(fields, "signature") ?? return None,
     })
 }
-publication_index_required_string: fn(fields: [String: Dyn], key: String) -> String? Never! {
+
+publication_index_required_string: fn(fields: [String:Dyn], key: String) -> String? Never! {
     text: pkg_json_text(fields.get(key) ?? return None) ?? return None
     if text == "" -> return None
     Val(text)
 }
-publication_index_optional_string: fn(fields: [String: Dyn], key: String) -> String? Never! {
+
+publication_index_optional_string: fn(fields: [String:Dyn], key: String) -> String? Never! {
     value: fields.get(key) ?? return Val("")
     pkg_json_text(value)
 }
-publication_index_optional_bool: fn(fields: [String: Dyn], key: String) -> Bool? Never! {
+
+publication_index_optional_bool: fn(fields: [String:Dyn], key: String) -> Bool? Never! {
     value: fields.get(key) ?? return Val(false)
     pkg_json_bool(value)
 }
@@ -80,13 +94,17 @@ publication_pinned_public_key: fn(entries: [PublicationIndexEntry]) -> String? N
     }
     None
 }
+
 publication_is_takeover: fn(entries: [PublicationIndexEntry], candidate: PublicationIndexEntry) -> Bool Never! {
     if candidate.public_key.trim() == "" -> return false
     pinned: publication_pinned_public_key(entries) ?? return false
     pinned != candidate.public_key.trim()
 }
+
 publication_validate_takeover: fn(repo: String, entries: [PublicationIndexEntry], candidate: PublicationIndexEntry) PublicationDiagnosticError! -[FS]> {
-    if !publication_is_takeover(entries, candidate) -> return
+    if !publication_is_takeover(entries, candidate) {
+        return
+    }
     publication_require_takeover_review(repo, candidate.name, candidate.version)
     all := entries.copy()
     all.push(candidate.copy())
@@ -129,17 +147,24 @@ publication_io_error: fn(kind: PublicationIOKind, write: Bool, path: String, cau
         .Other -> IOError.Other(context)
     }
 }
+
 publication_validate_index_component: fn(value: String, label: String) IOError! {
-    if value == "" || value == "." || value == ".." || value.contains("/") || value.contains("\\") -> return Err(publication_index_error(.InvalidInput, value, "registry {label} is not one safe path component"))
+    if value == "" || value == "." || value == ".." || value.contains("/") || value.contains("\\") {
+        return Err(publication_index_error(.InvalidInput, value, "registry {label} is not one safe path component"))
+    }
     loop byte in value.bytes() {
         code: Int{byte}
-        if code < 32 || code == 127 -> return Err(publication_index_error(.InvalidInput, value, "registry {label} is not one safe path component"))
+        if code < 32 || code == 127 {
+            return Err(publication_index_error(.InvalidInput, value, "registry {label} is not one safe path component"))
+        }
     }
 }
+
 publication_index_entry_path: fn(repo: String, name: String) -> String IOError! {
     publication_validate_index_component(name, "package name")
     Ok(files.join(files.join(files.join(repo, "index"), name), "{name}.jsonl"))
 }
+
 publication_read_entries: fn(repo: String, name: String) -[FS]> [PublicationIndexEntry] IOError! {
     path: publication_index_entry_path(repo, name)
     text: publication_index_read_or_empty(path)
@@ -153,6 +178,7 @@ publication_read_entries: fn(repo: String, name: String) -[FS]> [PublicationInde
     }
     Ok(out)
 }
+
 publication_index_read_or_empty: fn(path: String) -[FS]> String IOError! {
     if files.read(path) == {
         .Ok(text) -> Ok(text)
@@ -162,6 +188,7 @@ publication_index_read_or_empty: fn(path: String) -[FS]> String IOError! {
         }
     }
 }
+
 publication_package_names: fn(repo: String) -[FS]> [String] IOError! {
     root: files.join(repo, "index")
     directories: files.list_dir(root) ?? {
@@ -171,7 +198,9 @@ publication_package_names: fn(repo: String) -[FS]> [String] IOError! {
     names := [String]{}
     loop directory in directories {
         metadata: files.stat(directory.path)
-        if metadata.is_symlink -> return Err(publication_index_error(.InvalidInput, directory.path, "registry index package directory must not be a symlink"))
+        if metadata.is_symlink {
+            return Err(publication_index_error(.InvalidInput, directory.path, "registry index package directory must not be a symlink"))
+        }
         if !metadata.is_dir -> next
         name: directory.name
         publication_validate_index_component(name, "package name")
@@ -183,18 +212,22 @@ publication_package_names: fn(repo: String) -[FS]> [String] IOError! {
             }
             next
         }
-        if info.is_symlink || !info.is_file -> return Err(publication_index_error(.InvalidInput, path, "registry index for `{name}` is not a regular file"))
+        if info.is_symlink || !info.is_file {
+            return Err(publication_index_error(.InvalidInput, path, "registry index for `{name}` is not a regular file"))
+        }
         names.push(name.copy())
     }
     names.sort()
     Ok(names)
 }
+
 publication_find_entry: fn(repo: String, name: String, version: String) -[FS]> PublicationIndexEntry? IOError! {
     loop entry in publication_read_entries(repo, name) {
         if entry.version == version -> return Ok(Val(entry))
     }
     Ok(None)
 }
+
 publication_non_yanked_entries: fn(repo: String, name: String) -[FS]> [PublicationIndexEntry] IOError! {
     out := [PublicationIndexEntry]{}
     loop entry in publication_read_entries(repo, name) {
@@ -209,7 +242,9 @@ publication_with_index_lock: fn<T>(repo: String, name: String, action: fn() -[FS
     root: files.join(repo, "index")
     files.create_dir_all(root)
     info: files.stat(root)
-    if info.is_symlink || !info.is_dir -> return Err(publication_index_error(.InvalidInput, root, "registry index root is not a real directory"))
+    if info.is_symlink || !info.is_dir {
+        return Err(publication_index_error(.InvalidInput, root, "registry index root is not a real directory"))
+    }
     path: files.join(root, ".{name}.lock")
     loop _ in 0..<100 {
         writer: files.create(path, if_exists: .Refuse, links: .Refuse) ?? {
@@ -253,12 +288,18 @@ publication_with_index_lock: fn<T>(repo: String, name: String, action: fn() -[FS
 // temporary cleanup; no second pathname publisher. Core authority debt #3593.
 publication_index_atomic_replace: fn(repo: String, path: String, bytes: [U8]) IOError! -[FS, Env, Time]> {
     parent: files.dirname(path)
-    if parent == "" -> return Err(publication_index_error(.InvalidInput, path, "registry index has no parent"))
+    if parent == "" {
+        return Err(publication_index_error(.InvalidInput, path, "registry index has no parent"))
+    }
     if files.stat(path) == .Ok(info) {
-        if info.is_symlink || !info.is_file -> return Err(publication_index_error(.InvalidInput, path, "registry index path must be a regular file"))
+        if info.is_symlink || !info.is_file {
+            return Err(publication_index_error(.InvalidInput, path, "registry index path must be a regular file"))
+        }
     }
     info: files.stat(parent)
-    if info.is_symlink || !info.is_dir -> return Err(publication_index_error(.InvalidInput, parent, "registry index parent is not a real directory"))
+    if info.is_symlink || !info.is_dir {
+        return Err(publication_index_error(.InvalidInput, parent, "registry index parent is not a real directory"))
+    }
     relative: files.relative(path, repo)
     foundation_write_file_nofollow_at_root(repo, relative, bytes, None) ?? return Err(err.error)
 }
@@ -275,7 +316,9 @@ publication_write_index_entry_locked: fn(repo: String, entry: PublicationIndexEn
     if parent != "" {
         files.create_dir_all(parent)
         info: files.stat(parent)
-        if info.is_symlink || !info.is_dir -> return Err(publication_index_error(.InvalidInput, parent, "registry index package directory is not a real directory"))
+        if info.is_symlink || !info.is_dir {
+            return Err(publication_index_error(.InvalidInput, parent, "registry index package directory is not a real directory"))
+        }
     }
     text: publication_index_read_or_empty(path)
     entries := [PublicationIndexEntry]{}
@@ -291,7 +334,9 @@ publication_write_index_entry_locked: fn(repo: String, entry: PublicationIndexEn
         }
         entries.push(existing)
     }
-    if publication_validate_takeover(repo, entries, entry) == .Err(error) -> return Err(publication_index_error(.PermissionDenied, path, "{error.diagnostic.code}: {error.diagnostic.what}"))
+    if publication_validate_takeover(repo, entries, entry) == .Err(error) {
+        return Err(publication_index_error(.PermissionDenied, path, "{error.diagnostic.code}: {error.diagnostic.what}"))
+    }
     separator: if text != "" && !text.ends_with("\n") -> "\n" else -> ""
     // Evidence must finish BEFORE the new immutable version becomes visible.
     publication_finalize_oci_referrers(repo, entry)
@@ -317,9 +362,7 @@ publication_mark_yanked_locked: fn(repo: String, name: String, version: String) 
             entry.yanked = true
             found = true
             output.push(publication_index_to_jsonl(entry))
-        } else {
-            output.push(line)
-        }
+        } else { output.push(line) }
     }
     if found {
         // A final empty item gives join the Rust trailing newline without another copy.

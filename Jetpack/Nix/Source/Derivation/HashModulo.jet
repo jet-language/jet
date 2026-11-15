@@ -4,9 +4,9 @@
 use jetpack_nix_eval.[nixeval_sorted_unique]
 
 NixDerivationStore: struct {
-    derivations: [String: NixDerivation]
+    derivations: [String:NixDerivation]
     // Modulo digests by mask and derivation path.
-    priv memo: [String: [String: [U8]]]
+    priv memo: [String:[String:[U8]]]
 
     read: fn(self, drv_path: String) -> NixDerivation NixError! {
         derivation: self.derivations.get(drv_path) ?? return Err(NixError.DrvIO("missing drv in map store: {drv_path}"))
@@ -16,7 +16,7 @@ NixDerivationStore: struct {
     // Output name -> SHA-256 modulo digest. `mask_outputs` is true for the
     // derivation's own output paths (`staticOutputHashes`) and false for the
     // digests substituted into a parent's inputs (`pathDerivationModulo`).
-    hash_modulo: fn(&self, drv_path: String, drv: NixDerivation, mask_outputs: Bool) -> [String: [U8]] NixError! {
+    hash_modulo: fn(&self, drv_path: String, drv: NixDerivation, mask_outputs: Bool) -> [String:[U8]] NixError! {
         key: "{mask_outputs}:{drv_path}"
         if self.memo.get(key) == {
             .Val(cached) -> return Ok(cached)
@@ -24,7 +24,9 @@ NixDerivationStore: struct {
         }
         loop name in drv.output_names() {
             output: drv.outputs[name]
-            if output.is_floating() || output.is_impure() -> return Err(NixError.DrvUnsupported("floating/impure derivation outputs (staged / trust-gated)"))
+            if output.is_floating() || output.is_impure() {
+                return Err(NixError.DrvUnsupported("floating/impure derivation outputs (staged / trust-gated)"))
+            }
         }
 
         hashes: if drv.is_fixed() -> nix_fixed_modulo_hashes(drv) else -> self.input_modulo_hashes(drv, mask_outputs)
@@ -34,8 +36,8 @@ NixDerivationStore: struct {
 
     // One digest shared by every output, over the ATerm whose input
     // derivations are replaced by their own modulo digests.
-    input_modulo_hashes: fn(&self, drv: NixDerivation, mask_outputs: Bool) -> [String: [U8]] NixError! {
-        inputs := [String: [String]]{}
+    input_modulo_hashes: fn(&self, drv: NixDerivation, mask_outputs: Bool) -> [String:[U8]] NixError! {
+        inputs := [String:[String]]{}
         loop input in drv.input_drvs {
             child: self.read(input.path)
             child_hashes: self.hash_modulo(input.path, child, false)
@@ -48,7 +50,7 @@ NixDerivationStore: struct {
             }
         }
         digest: nix_sha256_digest(drv.unparse(mask_outputs, Val(inputs)).bytes())
-        hashes := [String: [U8]]{}
+        hashes := [String:[U8]]{}
         loop name in drv.output_names() -> hashes[name] = digest.copy()
         Ok(hashes)
     }
@@ -61,7 +63,9 @@ NixDerivationStore: struct {
             loop name in drv.output_names() {
                 output: drv.outputs[name]
                 expected: nix_make_fixed_output_path(store_dir, nix_output_path_name(drv_name, name), output.method_algo, output.hash_hex)
-                if expected != output.path -> return Err(NixError.Divergence{what: "fixed-output `{name}`", expected, actual: output.path})
+                if expected != output.path {
+                    return Err(NixError.Divergence{what: "fixed-output `{name}`", expected: expected, actual: output.path})
+                }
             }
             return
         }
@@ -71,7 +75,9 @@ NixDerivationStore: struct {
             if hashes.get(name) == {
                 .Val(digest) -> {
                     expected: nix_make_output_path(store_dir, name, digest, drv_name)
-                    if expected != output.path -> return Err(NixError.Divergence{what: "input-addressed output `{name}`", expected, actual: output.path})
+                    if expected != output.path {
+                        return Err(NixError.Divergence{what: "input-addressed output `{name}`", expected: expected, actual: output.path})
+                    }
                 }
                 .None -> return Err(NixError.DrvPath("missing modulo hash for output `{name}`"))
             }
@@ -80,17 +86,19 @@ NixDerivationStore: struct {
 }
 
 // A store over `derivations` with an empty modulo memo.
-nix_derivation_store: fn(derivations: [String: NixDerivation]) -> NixDerivationStore Never! {
-    NixDerivationStore{derivations, memo: [String: [String: [U8]]]{}}
+nix_derivation_store: fn(derivations: [String:NixDerivation]) -> NixDerivationStore Never! {
+    NixDerivationStore{derivations: derivations, memo: [String:[String:[U8]]]{}}
 }
 
 // A fixed-output derivation's digests: every output must be fixed and hashes
 // only its own method, content hash and path.
-nix_fixed_modulo_hashes: fn(drv: NixDerivation) -> [String: [U8]] NixError! {
-    hashes := [String: [U8]]{}
+nix_fixed_modulo_hashes: fn(drv: NixDerivation) -> [String:[U8]] NixError! {
+    hashes := [String:[U8]]{}
     loop name in drv.output_names() {
         output: drv.outputs[name]
-        if !output.is_fixed() -> return Err(NixError.DrvUnsupported("mixed fixed/non-fixed outputs"))
+        if !output.is_fixed() {
+            return Err(NixError.DrvUnsupported("mixed fixed/non-fixed outputs"))
+        }
         hashes[name] = nix_sha256_digest("fixed:out:{output.method_algo}:{output.hash_hex}:{output.path}".bytes())
     }
     Ok(hashes)
@@ -100,14 +108,18 @@ nix_fixed_modulo_hashes: fn(drv: NixDerivation) -> [String: [U8]] NixError! {
 // mismatch.
 nix_verify_drv_path: fn(store_dir: String, drv_path: String, aterm: [U8], drv: NixDerivation) NixError! {
     expected: nix_make_text_path(store_dir, nix_store_path_name(drv_path), aterm, drv.references_for_drv_path())
-    if expected != drv_path -> return Err(NixError.Divergence{what: "drvPath", expected, actual: drv_path})
+    if expected != drv_path {
+        return Err(NixError.Divergence{what: "drvPath", expected: expected, actual: drv_path})
+    }
 }
 
 // Re-encode `drv`; any byte divergence from `aterm` fails closed, reporting
 // the first 120 scalars of each side.
 nix_verify_aterm_roundtrip: fn(aterm: String, drv: NixDerivation) NixError! {
     encoded: drv.unparse(false, None)
-    if encoded != aterm -> return Err(NixError.Divergence{what: "ATerm roundtrip", expected: nix_leading_scalars(aterm, 120), actual: nix_leading_scalars(encoded, 120)})
+    if encoded != aterm {
+        return Err(NixError.Divergence{what: "ATerm roundtrip", expected: nix_leading_scalars(aterm, 120), actual: nix_leading_scalars(encoded, 120)})
+    }
 }
 
 nix_leading_scalars: fn(text: String, limit: Int) -> String Never! {

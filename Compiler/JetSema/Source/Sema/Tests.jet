@@ -30,13 +30,15 @@ sema_property_param_diagnostics: fn(test: TestDef) -> [Diagnostic] Never! {
     diagnostics := [Diagnostic]{}
     loop parameter in test.params {
         if sema_property_param_generatable(parameter.ty) -> next
-        diagnostics.push(sema_error(
-            "E0613",
-            parameter.ty_span,
-            "a property test can't generate values of type `{type_name(parameter.ty)}`",
-            "a parameterized `#Test fn` is a property test: Jet generates inputs from each parameter's type, but this type has no built-in generator",
-            "use a generatable type (Int, Float, Bool, String, Char, a sized integer, or a list/optional of those), or write a plain `#Test \"name\" {{ … }}` block and construct the value yourself",
-        ))
+        diagnostics.push(
+            sema_error(
+                "E0613",
+                parameter.ty_span,
+                "a property test can't generate values of type `{type_name(parameter.ty)}`",
+                "a parameterized `#Test fn` is a property test: Jet generates inputs from each parameter's type, but this type has no built-in generator",
+                "use a generatable type (Int, Float, Bool, String, Char, a sized integer, or a list/optional of those), or write a plain `#Test \"name\" {{ … }}` block and construct the value yourself",
+            ),
+        )
     }
     diagnostics
 }

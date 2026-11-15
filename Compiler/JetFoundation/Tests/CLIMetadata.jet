@@ -1,21 +1,42 @@
 // Assemble with the canonical Compiler unit; PortInteg owns execution/proof.
 use jet_foundation.[
-    CLICommandSchema, CLIInputSchema, CLIInputShape, CLISubcommandSchema, CLIValueKind,
-    JET_COMPILER_TARGET_USIZE_MAX, JobArgumentSchema, JobCachePolicy, JobFact, JobScope, JobSkip,
-    RecordDecodeError, StringMapEntry, decode_record, encode_record, read_executable,
+    CLICommandSchema,
+    CLIInputSchema,
+    CLIInputShape,
+    CLISubcommandSchema,
+    CLIValueKind,
+    JET_COMPILER_TARGET_USIZE_MAX,
+    JobArgumentSchema,
+    JobCachePolicy,
+    JobFact,
+    JobScope,
+    JobSkip,
+    RecordDecodeError,
+    StringMapEntry,
+    decode_record,
+    encode_record,
+    read_executable,
 ]
 
-cli_metadata_require: fn(ok: Bool, why: String) Never! { if !ok -> panic("CLI metadata: {why}") }
-cli_metadata_zeros: fn(length: Int) -> [U8] Never! { loop _ in 0..<length -> U8{0} }
+cli_metadata_require: fn(ok: Bool, why: String) Never! {
+    if !ok -> panic("CLI metadata: {why}")
+}
+
+cli_metadata_zeros: fn(length: Int) -> [U8] Never! {
+    loop _ in 0..<length -> U8{0}
+}
+
 cli_metadata_copy: fn(out: &[U8], at: Int, bytes: [U8]) Never! {
     loop index in 0..<bytes.len() -> out[at + index] = bytes[index]
 }
+
 cli_metadata_number: fn(out: &[U8], at: Int, width: Int, value: U64, little: Bool) Never! {
     loop index in 0..<width {
         shift: if little -> index * 8 else -> (width - index - 1) * 8
         out[at + index] = U8{(value >> shift).bit_and(U64{255})}
     }
 }
+
 cli_metadata_elf: fn(record: [U8], wide: Bool, little: Bool) -> [U8] Never! {
     header: if wide -> 64 else -> 52
     stride: if wide -> 64 else -> 40
@@ -43,6 +64,7 @@ cli_metadata_elf: fn(record: [U8], wide: Bool, little: Bool) -> [U8] Never! {
     }
     out
 }
+
 cli_metadata_pe: fn(record: [U8], count: Int, trailing: [U8]) -> [U8] Never! {
     table: 0x80 + 24
     raw: table + count * 40
@@ -63,6 +85,7 @@ cli_metadata_pe: fn(record: [U8], count: Int, trailing: [U8]) -> [U8] Never! {
     }
     out
 }
+
 cli_metadata_mach: fn(record: [U8], wide: Bool) -> [U8] Never! {
     header: if wide -> 32 else -> 28
     sections: if wide -> 72 else -> 56
@@ -83,6 +106,7 @@ cli_metadata_mach: fn(record: [U8], wide: Bool) -> [U8] Never! {
     cli_metadata_copy(out, at, record)
     out
 }
+
 cli_metadata_fat: fn(first: [U8], second: [U8], wide: Bool, little: Bool) -> [U8] Never! {
     stride: if wide -> 32 else -> 20
     width: if wide -> 8 else -> 4
@@ -99,6 +123,7 @@ cli_metadata_fat: fn(first: [U8], second: [U8], wide: Bool, little: Bool) -> [U8
     cli_metadata_copy(out, second_at, second)
     out
 }
+
 cli_metadata_leb: fn(out: &[U8], value: Int) Never! {
     rest := value
     loop {
@@ -109,6 +134,7 @@ cli_metadata_leb: fn(out: &[U8], value: Int) Never! {
         if rest == 0 -> break
     }
 }
+
 cli_metadata_wasm: fn(record: [U8], count: Int) -> [U8] Never! {
     out := [U8]{0, 97, 115, 109, 1, 0, 0, 0}
     payload := [U8]{}
@@ -122,10 +148,12 @@ cli_metadata_wasm: fn(record: [U8], count: Int) -> [U8] Never! {
     }
     out
 }
+
 cli_metadata_accept: fn(bytes: [U8], expected: CLICommandSchema) Never! {
     actual: read_executable(bytes[0..<bytes.len()], JET_COMPILER_TARGET_USIZE_MAX) ?? panic("read fixture")
     cli_metadata_require(actual == expected, "cross-format record round trip")
 }
+
 cli_metadata_refuse: fn(bytes: [U8], expected: RecordDecodeError, maximum: U64) Never! {
     refused: if read_executable(bytes[0..<bytes.len()], maximum) == {
         .Err(error) -> error == expected
@@ -133,6 +161,7 @@ cli_metadata_refuse: fn(bytes: [U8], expected: RecordDecodeError, maximum: U64) 
     }
     cli_metadata_require(refused, "canonical failure classification")
 }
+
 #Test("cli_metadata") {
     input: CLIInputSchema{field: "output_file", flag: "output-file", short: Val("o"), env: Val("OUTPUT_FILE"), help: "destination", metavar: Val("OUTPUT_FILE"), shape: CLIInputShape.Value{kind: CLIValueKind.Path, optional: false, default: None}, positional: Val(U16{0})}
     job: JobFact{name: "release", scope: JobScope.Ship, doc: Val("ship"), arguments: [JobArgumentSchema]{}, after: [String]{}, packages: [String]{"."}, cwd: None, inputs: [String]{"a"}, outputs: [String]{"b"}, skip: Val(JobSkip.UnlessPlatform{platform: "linux"}), cache: JobCachePolicy.Shared, parallel: 2, limits: [StringMapEntry]{StringMapEntry{key: "cpu", value: "2"}}, schedule: Val("daily")}

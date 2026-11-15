@@ -9,8 +9,11 @@ use {
 }
 
 BUILD_SYSTEM_SCHEMA: "gauntlet-axis-build-system-v1"
+
 BUILD_SYSTEM_RECEIPT_SCHEMA: "gauntlet-build-system-receipt-v1"
+
 BUILD_SYSTEM_CELLS: ["eval", "noop", "incremental", "cold_cache", "scratch"]
+
 BUILD_SYSTEM_HARNESS: "Tools/gauntlet/harness/build-system.mjs"
 
 // Why `axis` (the manifest's axes.build_system, null when it is missing) is
@@ -84,7 +87,9 @@ run_build_system_adapter: fn(axis: Dyn, run: AxisRun) -[FS, Exec]> BuildSystemRe
         metrics.push((key: id, value: Dyn.Object([(key: "jet_wall_ns", value: jet), (key: "nix_wall_ns", value: nix)])))
         readings.push((key: id, value: Dyn.Object([(key: "status", value: dyn_at(cell, "status")), (key: "jet", value: jet), (key: "peer", value: nix), (key: "ratio", value: ratio), (key: "verdict", value: dyn_at(cell, "verdict"))])))
         // The ratio as JSON writes it: 1, not 1.0.
-        if text_at(cell, "verdict") != Val("win") -> blockers.push("{id}: jet/nix {if ratio == Dyn.Null -> "unmeasured" else -> json.stringify(ratio)} misses {json.stringify(dyn_at(cell, "target"))}")
+        if text_at(cell, "verdict") != Val("win") {
+            blockers.push("{id}: jet/nix {if ratio == Dyn.Null -> "unmeasured" else -> json.stringify(ratio)} misses {json.stringify(dyn_at(cell, "target"))}")
+        }
     }
     complete: receipt != Dyn.Null && cells.len() == items_at(axis, "cells").len() && cells.all(fn(cell) { text_at(cell, "status") == Val("measured") })
     verdict: if {
@@ -92,19 +97,21 @@ run_build_system_adapter: fn(axis: Dyn, run: AxisRun) -[FS, Exec]> BuildSystemRe
         cells.all(fn(cell) { text_at(cell, "verdict") == Val("win") }) -> "win"
         else -> "loss"
     }
-    Ok(BuildSystemReport{
-        id: "build_system",
-        required: text_at(axis, "status") == Val("required"),
-        status: if complete -> "complete" else -> "incomplete",
-        contract: axis,
-        schema: member(axis, "schema"),
-        metric: member(axis, "metric"),
-        receipt: receipt_path,
-        metrics: Dyn.Object(metrics),
-        comparisons: Dyn.Object([(key: "nix", value: Dyn.Object([(key: "verdict", value: Dyn.Text(verdict)), (key: "cells", value: Dyn.Object(readings))]))]),
-        verdicts: Dyn.Object([(key: "nix", value: Dyn.Text(verdict))]),
-        publication: Publication{status: if is_true(receipt, "passed") -> "ready" else -> "blocked", blockers: blockers}
-    })
+    Ok(
+        BuildSystemReport{
+            id: "build_system",
+            required: text_at(axis, "status") == Val("required"),
+            status: if complete -> "complete" else -> "incomplete",
+            contract: axis,
+            schema: member(axis, "schema"),
+            metric: member(axis, "metric"),
+            receipt: receipt_path,
+            metrics: Dyn.Object(metrics),
+            comparisons: Dyn.Object([(key: "nix", value: Dyn.Object([(key: "verdict", value: Dyn.Text(verdict)), (key: "cells", value: Dyn.Object(readings))]))]),
+            verdicts: Dyn.Object([(key: "nix", value: Dyn.Text(verdict))]),
+            publication: Publication{status: if is_true(receipt, "passed") -> "ready" else -> "blocked", blockers: blockers},
+        },
+    )
 }
 
 test_build_axis: fn() -> Dyn {

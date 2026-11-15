@@ -7,7 +7,7 @@ use {
 }
 
 // Reads `source` to its end, `step` bytes at a time, into one buffer.
-drain: fn<R: Reader>(&source: R, step: Int) -> [U8] IOError! {
+drain: fn<R: Reader>(source: &R, step: Int) -> [U8] IOError! {
     out := [U8]{}
     loop {
         count: source.read_into(out, step) ?? return Err(err)
@@ -17,7 +17,7 @@ drain: fn<R: Reader>(&source: R, step: Int) -> [U8] IOError! {
 }
 
 // Copies `source` into `sink` in reads of `step` bytes; the count written.
-pipe: fn<R: Reader, W: Writer>(&source: R, &sink: W, step: Int) -> Int IOError! {
+pipe: fn<R: Reader, W: Writer>(source: &R, sink: &W, step: Int) -> Int IOError! {
     total := 0
     loop {
         chunk: source.read_bytes(step) ?? return Err(err)
@@ -58,7 +58,7 @@ run: fn() {
     print("cursor {text(head)}|{text(drain(cursor, 4) ?? panic("drain cursor"))}|{cursor.remaining()}")
     refused := "accepted"
     if cursor.read_bytes(0) == {
-        .Err(_) -> refused = "refused"
+        .Err(_) -> { refused = "refused" }
         .Ok(_) -> {}
     }
     print("cursor zero limit {refused}")

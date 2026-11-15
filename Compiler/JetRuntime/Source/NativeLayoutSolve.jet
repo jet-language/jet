@@ -22,7 +22,9 @@ layout_minimize: fn(table: I64, basis: I64, cost: I64, barred: I64, objective: I
     loop {
         enter := I64{0}
         loop enter < n {
-            if (layout_word(wrapping(barred + enter * I64{8})) == I64{0} && layout_float(wrapping(objective + enter * I64{8})) < -LAYOUT_EPS) { break }
+            if (layout_word(wrapping(barred + enter * I64{8})) == I64{0} && layout_float(wrapping(objective + enter * I64{8})) < -LAYOUT_EPS) {
+                break
+            }
             enter += I64{1}
         }
         if (enter == n) { break }
@@ -42,7 +44,7 @@ layout_minimize: fn(table: I64, basis: I64, cost: I64, barred: I64, objective: I
             }
             i += I64{1}
         }
-        if (leave == I64{-1}) { break } // seed unbounded behavior
+        if (leave == I64{-1}) { break }  // seed unbounded behavior
         pivot_row: wrapping(table + leave * width)
         pivot: layout_float(wrapping(pivot_row + enter * I64{8}))
         k := I64{0}
@@ -80,6 +82,7 @@ layout_minimize: fn(table: I64, basis: I64, cost: I64, barred: I64, objective: I
     }
     -layout_float(wrapping(objective + n * I64{8}))
 }
+
 layout_solution_zero: fn(inner: I64, variables: I64) {
     header: wrapping(inner + I64{88})
     // Reuse capacity across dirty resolves; never allocate for an unchanged size.
@@ -91,11 +94,13 @@ layout_solution_zero: fn(inner: I64, variables: I64) {
         at += I64{1}
     }
 }
+
 layout_conflict_push: fn(inner: I64, label: I64) {
     header: wrapping(inner + I64{112})
     layout_put(data_sequence_reserve(header, I64{8}), jet_rt_string_clone(label))
     layout_list_publish(header)
 }
+
 layout_solve: fn(inner: I64) {
     variables: layout_word(wrapping(inner + I64{16}))
     rows: wrapping(inner + I64{40})
@@ -105,7 +110,9 @@ layout_solve: fn(inner: I64) {
     m: permanent + edit_count
     layout_conflicts_clear(inner)
     layout_solution_zero(inner, variables)
-    if (m == I64{0}) -> return
+    if (m == I64{0}) {
+        return
+    }
     n := variables + edit_count * I64{2}
     i := I64{0}
     loop i < permanent {
@@ -241,7 +248,9 @@ layout_solve: fn(inner: I64) {
     i = I64{0}
     loop i < m {
         column: layout_word(wrapping(basis + i * I64{8}))
-        if (column < variables) { layout_float_put(wrapping(solution + column * I64{8}), layout_float(wrapping(wrapping(table + i * width) + n * I64{8}))) }
+        if (column < variables) {
+            layout_float_put(wrapping(solution + column * I64{8}), layout_float(wrapping(wrapping(table + i * width) + n * I64{8})))
+        }
         i += I64{1}
     }
     jet_rt_free(scratch, bytes, I64{8})

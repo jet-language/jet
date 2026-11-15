@@ -4,7 +4,6 @@
 // ID<T> is the (index, generation) pair `add` handed out: a removal bumps its
 // slot's generation, so a stale ID reaches no live value and indexing with it
 // stops.
-
 use jet_foundation.[Type]
 
 IRPoolShape: struct {
@@ -27,24 +26,26 @@ ir_pool_inner: fn(ty: Type) -> Type? Never! {
 }
 
 // What a `Pool<T>` is laid out as: the List of its entries.
-ir_pool_carrier: fn(inner: Type) -> Type Never! {
-    Type.List{element: ir_pool_entry_type(inner)}
-}
+ir_pool_carrier: fn(inner: Type) -> Type Never! { Type.List{element: ir_pool_entry_type(inner)} }
 
 // A Pool entry: its slot's generation and value.
 ir_pool_entry_type: fn(inner: Type) -> Type Never! {
-    Type.Tuple{fields: [TypeTupleField]{
-        TypeTupleField{name: "generation", ty: Type.IntN{signed: true, bits: 64}},
-        TypeTupleField{name: "value", ty: Type.Option{inner: inner}},
-    }}
+    Type.Tuple{
+        fields: [TypeTupleField]{
+            TypeTupleField{name: "generation", ty: Type.IntN{signed: true, bits: 64}},
+            TypeTupleField{name: "value", ty: Type.Option{inner: inner}},
+        },
+    }
 }
 
 // What an `ID<T>` is laid out as.
 ir_pool_id_carrier: fn() -> Type Never! {
-    Type.Tuple{fields: [TypeTupleField]{
-        TypeTupleField{name: "index", ty: Type.IntN{signed: true, bits: 64}},
-        TypeTupleField{name: "generation", ty: Type.IntN{signed: true, bits: 64}},
-    }}
+    Type.Tuple{
+        fields: [TypeTupleField]{
+            TypeTupleField{name: "index", ty: Type.IntN{signed: true, bits: 64}},
+            TypeTupleField{name: "generation", ty: Type.IntN{signed: true, bits: 64}},
+        },
+    }
 }
 
 ir_pool_shape: fn(m: &IRModule, p: IRProgram, inner: Type) -> IRPoolShape? Never! {
@@ -69,8 +70,12 @@ ir_pool_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
     receiver_ty: ir_ty(p, b, receiver)
     inner: ir_pool_inner(receiver_ty) ?? return ir_fail_slot(b, span, "Pool method {method} on {ir_type_name(receiver_ty)}")
     shape: ir_pool_shape(m, p, inner) ?? return ir_type_fail(b, span, receiver_ty)
-    if method == "add" && args.len() == 1 -> return ir_pool_add(m, p, b, shape, receiver, args[0], span)
-    if method == "remove" && args.len() == 1 -> return ir_pool_remove(m, p, b, shape, receiver, args[0], span)
+    if method == "add" && args.len() == 1 {
+        return ir_pool_add(m, p, b, shape, receiver, args[0], span)
+    }
+    if method == "remove" && args.len() == 1 {
+        return ir_pool_remove(m, p, b, shape, receiver, args[0], span)
+    }
     if method == "ids" && args.len() == 0 -> return ir_pool_ids(m, p, b, ty, shape, receiver, span)
     ir_fail_slot(b, span, "Pool method {method} on {ir_type_name(receiver_ty)}")
 }

@@ -259,6 +259,7 @@ SemaGateVisitor: struct {
     source: String
     ledger: GateLedger
     context: Shared<SemaGateContext>
+
     visit: fn(&self, expression: Expr) Never! -[Mem.Alloc, Mem.Rc, Time.Wait]> {
         permit: self.context.guard_read()
         sema_gate_expression_value(self.source, expression, self.ledger, permit.value)
@@ -267,7 +268,9 @@ SemaGateVisitor: struct {
 
 sema_gate_statements: fn(source: String, body: [Stmt], ledger: &GateLedger, context: Shared<SemaGateContext>) Never! {
     visitor := SemaGateVisitor{source: source, ledger: GateLedger{rows: []}, context: context}
-    loop statement in body -> ast_visit_statement(statement, fn(expression: Expr) { visitor.visit(expression) }, false)
+    loop statement in body {
+        ast_visit_statement(statement, fn(expression: Expr) { visitor.visit(expression) }, false)
+    }
     visitor.ledger.rows.reverse()
     loop visitor.ledger.rows.len() > 0 {
         entry: visitor.ledger.rows.pop() ?? break

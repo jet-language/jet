@@ -1,20 +1,15 @@
-
 use {
     event: core.event
     tasks: core.tasks
 }
 
-panic_log_handler: fn(n: Int) {
-    panic("log boom")
-}
+panic_log_handler: fn(n: Int) { panic("log boom") }
 
-panic_ignore_handler: fn(n: Int) {
-    panic("ignore boom")
-}
+panic_ignore_handler: fn(n: Int) { panic("ignore boom") }
 
 run: fn() {
     newest_scope: event.scope()
-    newest: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .DropNewest }, .Collect) ?? panic("policy")
+    newest: event.async_result<Int, String>(AsyncPolicy{capacity: 1, overflow: .DropNewest}, .Collect) ?? panic("policy")
     { sender: newest_started_tx, receiver: newest_started_rx }: channel<Int>()
     { sender: newest_release_tx, receiver: newest_release_rx }: channel<Int>()
     newest.on(newest_scope, fn(n: Int) {
@@ -34,7 +29,7 @@ run: fn() {
     _: newest_second.join() ?? panic("newest second join")
 
     oldest_scope: event.scope()
-    oldest: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .DropOldest }, .Collect) ?? panic("policy")
+    oldest: event.async_result<Int, String>(AsyncPolicy{capacity: 1, overflow: .DropOldest}, .Collect) ?? panic("policy")
     { sender: oldest_started_tx, receiver: oldest_started_rx }: channel<Int>()
     { sender: oldest_release_tx, receiver: oldest_release_rx }: channel<Int>()
     oldest.on(oldest_scope, fn(n: Int) {
@@ -54,7 +49,7 @@ run: fn() {
     _: oldest_third.join() ?? panic("oldest third join")
 
     once_scope: event.scope()
-    once_event: event.async_result<Int, String>(AsyncPolicy{ capacity: 2, overflow: .Block }, .Collect) ?? panic("policy")
+    once_event: event.async_result<Int, String>(AsyncPolicy{capacity: 2, overflow: .Block}, .Collect) ?? panic("policy")
     { sender: once_started_tx, receiver: once_started_rx }: channel<Int>()
     { sender: once_release_tx, receiver: once_release_rx }: channel<Int>()
     once_event.on_priority(once_scope, 10, fn(n: Int) {
@@ -73,38 +68,38 @@ run: fn() {
     print("once first={once_first_report.delivered_handlers()} second={once_second_report.delivered_handlers()}")
 
     failure_scope: event.scope()
-    collect: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    collect: event.async_result<Int, String>(AsyncPolicy{capacity: 1, overflow: .Block}, .Collect) ?? panic("policy")
     collect.on_priority(failure_scope, 10, fn(n: Int) { .Err("high") })
     collect.on_priority(failure_scope, 0, fn(n: Int) { .Err("low") })
     collected: collect.emit_async(1).join() ?? panic("collect join")
     print("collect={collected.state() == .HandlerFailed} handlers={collected.delivered_handlers()} failures={collected.failures().len()}")
     print(collected.trace().summary())
 
-    stop: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .StopFirst) ?? panic("policy")
+    stop: event.async_result<Int, String>(AsyncPolicy{capacity: 1, overflow: .Block}, .StopFirst) ?? panic("policy")
     stop.on_priority(failure_scope, 10, fn(n: Int) { .Err("first") })
     stop.on_priority(failure_scope, 0, fn(n: Int) {})
     stopped: stop.emit_async(1).join() ?? panic("stop join")
     print("stop={stopped.state() == .HandlerFailed} handlers={stopped.delivered_handlers()} failures={stopped.failures().len()}")
 
-    log_errors: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Log) ?? panic("policy")
+    log_errors: event.async_result<Int, String>(AsyncPolicy{capacity: 1, overflow: .Block}, .Log) ?? panic("policy")
     log_errors.on_priority(failure_scope, 10, fn(n: Int) { .Err("logged secret") })
     log_errors.on_priority(failure_scope, 0, fn(n: Int) {})
     logged_error: log_errors.emit_async(1).join() ?? panic("log join")
     print("log error={logged_error.state() == .Delivered} handlers={logged_error.delivered_handlers()} failures={logged_error.failures().len()} traced={logged_error.trace().summary().contains("failed")}")
 
-    ignore_errors: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Ignore) ?? panic("policy")
+    ignore_errors: event.async_result<Int, String>(AsyncPolicy{capacity: 1, overflow: .Block}, .Ignore) ?? panic("policy")
     ignore_errors.on_priority(failure_scope, 10, fn(n: Int) { .Err("ignored secret") })
     ignore_errors.on_priority(failure_scope, 0, fn(n: Int) {})
     ignored_error: ignore_errors.emit_async(1).join() ?? panic("ignore join")
     print("ignore error={ignored_error.state() == .Delivered} handlers={ignored_error.delivered_handlers()} failures={ignored_error.failures().len()} traced={ignored_error.trace().summary().contains("failed")}")
 
-    panic_log: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Log) ?? panic("policy")
+    panic_log: event.async_result<Int, String>(AsyncPolicy{capacity: 1, overflow: .Block}, .Log) ?? panic("policy")
     panic_log.on_priority(failure_scope, 10, fn(n: Int) { panic_log_handler(n) })
     panic_log.on_priority(failure_scope, 0, fn(n: Int) {})
     logged_panic: panic_log.emit_async(1).join() ?? panic("panic log join")
     print("panic log={logged_panic.state() == .HandlerFailed} handlers={logged_panic.delivered_handlers()} failures={logged_panic.failures().len()} traced={logged_panic.trace().summary().contains("panic:log boom")}")
 
-    panic_ignore: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Ignore) ?? panic("policy")
+    panic_ignore: event.async_result<Int, String>(AsyncPolicy{capacity: 1, overflow: .Block}, .Ignore) ?? panic("policy")
     panic_ignore.on_priority(failure_scope, 10, fn(n: Int) { panic_ignore_handler(n) })
     panic_ignore.on_priority(failure_scope, 0, fn(n: Int) {})
     ignored_panic: panic_ignore.emit_async(1).join() ?? panic("panic ignore join")

@@ -59,9 +59,7 @@ stop_writes: fn() {
 run: fn() {
     count: app.live(task_count, "jet")
     last := "pending"
-    loop _ in 0..<50 {
-        last = shown(app.state(count))
-    }
+    loop _ in 0..<50 -> last = shown(app.state(count))
     // Two overtaken runs, then the stale 2 is held instead of a run per read.
     print("50 reads under sustained writes: runs {runs()}, last read {last}")
     stop_writes()

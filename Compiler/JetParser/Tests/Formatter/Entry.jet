@@ -6,11 +6,13 @@ use {
 }
 
 fmt_core_ok: fn(source: String) -> String { parser_test_format(source) }
+
 fmt_core_stable: fn(source: String) -> String {
     formatted: fmt_core_ok(source)
     assert(fmt_core_ok(formatted) == formatted)
     formatted
 }
+
 #Test("trailing_transaction_comment_stays_inside_transaction_block") {
     source: `transfer: fn(from: Shared<Account>, amount: Int) {
     #Transact(tx) {
@@ -23,10 +25,12 @@ fmt_core_stable: fn(source: String) -> String {
     close: parser_test_rfind(formatted, "}}")
     assert(comment < close)
 }
+
 #Test("inner_comment_stays_before_enclosing_block_close") {
     formatted: fmt_core_stable("run: fn() {{\n    if ready {{ launch() /* go */ }}\n}}\n")
     assert(parser_test_find(formatted, "/* go */") < parser_test_find(formatted, "}}"))
 }
+
 #Test("inferred_braces_and_blocks_round_trip") {
     source: `Point: struct {
     x: Int
@@ -52,6 +56,7 @@ run: fn() {
     assert(formatted.contains("accepts({{\"needle\"}})"))
     assert(formatted.contains("block: fn() {{"))
 }
+
 // A checked text literal keeps its type head, its quoted body and every
 // `{hole}` as written: formatting never splices a hole into the text.
 #Test("checked_text_literals_keep_head_body_and_holes") {
@@ -64,6 +69,7 @@ run: fn() {
 `
     assert(fmt_core_stable(source) == source)
 }
+
 #Test("repeated_struct_list_heads_preserve_explicit_heads") {
     source: `Point: struct {
     x: Int
@@ -88,6 +94,7 @@ run: fn() {
     assert(!simplified.contains("compact := [Point]"))
     assert_eq(jet_format_source(simplified, true).text, simplified)
 }
+
 #Test("failure_formatter_keeps_prefix_and_contextual_roles") {
     formatted: fmt_core_stable("load: fn() -> Int? IOError! {{ read()?(\n    \"loading\"\n) }}\n")
     assert(formatted.contains("load: fn() -> Int? IOError!"))
@@ -112,7 +119,8 @@ run: fn() {
 // A field's markers format to themselves, so `#Redact` is written once
 // however often `jet fmt` runs.
 #Test("field_markers_format_to_themselves") {
-    loop source in [
+    loop source in
+        [
         "Login: struct {{\n    user: String\n    #Redact password: String\n}}\n",
         "Login: struct {{\n    #[Redact, Rename(\"pw\")] password: String\n}}\n",
         "Login: struct {{\n    #[Rename(\"pw\"), Redact] password: String\n}}\n",
@@ -299,22 +307,20 @@ g: fn() -> String {
     inline: "g: fn() -> String {{ \"{{if h(P{{n: 1}}) == {{ .Ok(ok) -> \"yes\", .Err(error) -> \"no\" }}}}\" }}\n"
     assert(fmt_core_stable(inline).contains("if h(P{{n: 1}}) == {{ .Ok(ok) -> \"yes\", .Err(error) -> \"no\" }}"), "a table in an interpolation hole stays a table")
 }
+
 #Test("a deep one-line else-if chain formats in linear time") {
     // Each level once rendered its whole tail twice, compact then expanded:
     // at 48 levels the format never finished.
     depth: 48
     line := ""
-    loop _ in 0..<depth {
-        line = "{line}if {{ flag -> print(\"stop\") else -> "
-    }
+    loop _ in 0..<depth -> line = "{line}if {{ flag -> print(\"stop\") else -> "
     line = "{line}if {{ flag -> print(\"stop\") else -> print(\"deep-tail\") }}"
-    loop _ in 0..<depth {
-        line = "{line} }}"
-    }
+    loop _ in 0..<depth -> line = "{line} }}"
     formatted: fmt_core_stable("deep: fn(flag: Bool) -[IO]> {{\n    {line}\n}}\n")
     assert(formatted.contains("print(\"deep-tail\")"))
     assert(!formatted.contains(line), "a chain past the line width expands")
 }
+
 #Test("a comment above a trait member stays above it") {
     source: `Edit: trait {
     // Sets a field from text.
@@ -329,6 +335,7 @@ g: fn() -> String {
     assert(parser_test_find(formatted, "set: fn") < parser_test_find(formatted, "// The current field names."))
     assert(parser_test_find(formatted, "// The current field names.") < parser_test_find(formatted, "names: fn"))
 }
+
 #Test("a marker setting written twice keeps both rows") {
     // Sema reports the second row (E0937); fmt keeps what was written.
     source: `Traced: struct {
@@ -343,6 +350,7 @@ g: fn() -> String {
     formatted: fmt_core_stable(source)
     assert(formatted.contains("sites: [.Function]\n        sites: [.Method]"), "both rows print, in written order")
 }
+
 #Test("a prepared value keeps the braces its author wrote") {
     source: `count: fn() -> Int { 3 }
 
@@ -355,6 +363,7 @@ SUM: #run { count() + 1 }
     assert(formatted.contains("BARE: #run count()\n"), "a bare operand stays bare")
     assert(formatted.contains("SUM: #run {{ count() + 1 }}\n"), "a wider value keeps its braces")
 }
+
 // An empty lambda body written on one line stays `{}`: printed open, it turned
 // the literal or call holding it multi-line, and a second pass then split that.
 // The rows are the corpus's: Jetpack/Store/Tests/StoreIngestLate.jet and the

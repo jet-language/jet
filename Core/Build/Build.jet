@@ -10,8 +10,11 @@ package: {
 }
 
 BUILD_MAX_TARGETS: 65536
+
 BUILD_MAX_ACTIONS: 262144
+
 BUILD_MAX_FILES: 524288
+
 BUILD_MAX_NODES: 524288
 
 // core.build is the read-only boundary for checked BuildPlan facts.  The
@@ -198,7 +201,9 @@ diff_files: fn(before: BuildGraph, after: BuildGraph) -> [BuildGraphFileDelta] {
 affected_files: fn(graph: BuildGraph, changed_actions: [String]) -> [String] {
     pending_actions := [String]{}
     loop action in graph.actions {
-        if contains_string(changed_actions, action.name) -> append_unique(pending_actions, action.name)
+        if contains_string(changed_actions, action.name) {
+            append_unique(pending_actions, action.name)
+        }
     }
     pending_targets := [Int]{}
     seen_actions := [String]{}
@@ -226,7 +231,9 @@ affected_files: fn(graph: BuildGraph, changed_actions: [String]) -> [String] {
                 }
             }
             loop target in graph.targets {
-                if contains_int(target.actions, action.id) -> append_unique_int(pending_targets, target.id)
+                if contains_int(target.actions, action.id) {
+                    append_unique_int(pending_targets, target.id)
+                }
             }
         }
 
@@ -325,19 +332,22 @@ target_name: fn(graph: BuildGraph, id: Int) -> String {
 }
 
 valid_graph: fn(graph: BuildGraph) -> Bool {
-    if graph.targets.len() > BUILD_MAX_TARGETS ||
-        graph.actions.len() > BUILD_MAX_ACTIONS ||
-        graph.files.len() > BUILD_MAX_FILES ||
-        graph.nodes.len() > BUILD_MAX_NODES -> return false
+    if graph.targets.len() > BUILD_MAX_TARGETS || graph.actions.len() > BUILD_MAX_ACTIONS || graph.files.len() > BUILD_MAX_FILES || graph.nodes.len() > BUILD_MAX_NODES {
+        return false
+    }
 
     target_ids := [Int]{}
     target_names := [String]{}
     loop target in graph.targets {
         if target.id < 0 || !valid_graph_text(target.name, 1024) -> return false
-        if contains_int(target_ids, target.id) || contains_string(target_names, target.name) -> return false
+        if contains_int(target_ids, target.id) || contains_string(target_names, target.name) {
+            return false
+        }
         target_ids.push(target.id)
         target_names.push(target.name.copy())
-        if target.deps.len() > BUILD_MAX_TARGETS || target.actions.len() > BUILD_MAX_ACTIONS || target.files.len() > BUILD_MAX_FILES -> return false
+        if target.deps.len() > BUILD_MAX_TARGETS || target.actions.len() > BUILD_MAX_ACTIONS || target.files.len() > BUILD_MAX_FILES {
+            return false
+        }
         loop path in target.files {
             if !valid_graph_path(path) -> return false
         }
@@ -347,10 +357,14 @@ valid_graph: fn(graph: BuildGraph) -> Bool {
     action_names := [String]{}
     loop action in graph.actions {
         if action.id < 0 || !valid_graph_text(action.name, 1024) -> return false
-        if contains_int(action_ids, action.id) || contains_string(action_names, action.name) -> return false
+        if contains_int(action_ids, action.id) || contains_string(action_names, action.name) {
+            return false
+        }
         action_ids.push(action.id)
         action_names.push(action.name.copy())
-        if action.inputs.len() > BUILD_MAX_FILES || action.outputs.len() > BUILD_MAX_FILES -> return false
+        if action.inputs.len() > BUILD_MAX_FILES || action.outputs.len() > BUILD_MAX_FILES {
+            return false
+        }
         loop path in action.inputs {
             if !valid_graph_path(path) -> return false
         }
@@ -395,39 +409,47 @@ valid_graph: fn(graph: BuildGraph) -> Bool {
     }
 
     loop action_key in graph.action_keys {
-        if !valid_graph_text(action_key.action, 1024) || !valid_graph_text(action_key.key, 1024) -> return false
+        if !valid_graph_text(action_key.action, 1024) || !valid_graph_text(action_key.key, 1024) {
+            return false
+        }
         if !contains_string(action_names, action_key.action) -> return false
     }
 
     loop cached in graph.cache_hits {
         if cached.id < 0 || !valid_graph_text(cached.name, 1024) -> return false
-        if !contains_int(action_ids, cached.id) || !contains_string(action_names, cached.name) -> return false
+        if !contains_int(action_ids, cached.id) || !contains_string(action_names, cached.name) {
+            return false
+        }
     }
 
     affected_paths := [String]{}
     loop file in graph.affected_files {
-        if !valid_graph_path(file.path) || contains_string(affected_paths, file.path) -> return false
+        if !valid_graph_path(file.path) || contains_string(affected_paths, file.path) {
+            return false
+        }
         affected_paths.push(file.path.copy())
     }
 
     loop node in graph.nodes {
-        if !valid_graph_text(node.kind, 128) ||
-            !valid_graph_text(node.key, 1024) ||
-            !valid_graph_text(node.subject, 4096) -> return false
-        if node.inputs.len() > BUILD_MAX_FILES || node.input_digests.len() > BUILD_MAX_FILES -> return false
+        if !valid_graph_text(node.kind, 128) || !valid_graph_text(node.key, 1024) || !valid_graph_text(node.subject, 4096) {
+            return false
+        }
+        if node.inputs.len() > BUILD_MAX_FILES || node.input_digests.len() > BUILD_MAX_FILES {
+            return false
+        }
         loop path in node.inputs {
             if !valid_graph_path(path) -> return false
         }
         loop digest in node.input_digests {
-            if !valid_graph_text(digest.name, 4096) || !valid_graph_text(digest.digest, 1024) -> return false
+            if !valid_graph_text(digest.name, 4096) || !valid_graph_text(digest.digest, 1024) {
+                return false
+            }
         }
     }
     true
 }
 
-valid_graph_path: fn(value: String) -> Bool {
-    valid_graph_text(value, 4096)
-}
+valid_graph_path: fn(value: String) -> Bool { valid_graph_text(value, 4096) }
 
 valid_graph_text: fn(value: String, max: Int) -> Bool {
     if value == "" || value.len() > max -> return false

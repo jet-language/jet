@@ -5,7 +5,11 @@ use {
     sys: core.sys
 }
 
-S5HTTPResponse: struct { status: Int, content_type: String, body: [U8] }
+S5HTTPResponse: struct {
+    status: Int
+    content_type: String
+    body: [U8]
+}
 
 s5_web_crlf: fn() -> String { "\r\n" }
 
@@ -25,7 +29,9 @@ s5_web_space_width: fn(bytes: [U8], index: Int) -> Int {
     if index + 2 >= bytes.len() -> return 0
     third: Int{bytes[index + 2]}
     if first == 225 && second == 154 && third == 128 -> return 3
-    if first == 226 && second == 128 && ((third >= 128 && third <= 138) || third == 168 || third == 169 || third == 175) -> return 3
+    if first == 226 && second == 128 && ((third >= 128 && third <= 138) || third == 168 || third == 169 || third == 175) {
+        return 3
+    }
     if first == 226 && second == 129 && third == 159 -> return 3
     if first == 227 && second == 128 && third == 128 -> return 3
     0
@@ -41,10 +47,10 @@ s5_web_words: fn(text: String) -> [String] {
         if width > 0 {
             if start >= 0 -> words.push(String.from_bytes_lossy(s5_web_bytes(bytes, start, index)))
             start = -1
-            index = index + width
+            index += width
         } else {
             if start < 0 -> start = index
-            index = index + 1
+            index += 1
         }
     }
     if start >= 0 -> words.push(String.from_bytes_lossy(s5_web_bytes(bytes, start, bytes.len())))
@@ -59,7 +65,7 @@ s5_web_find: fn(bytes: [U8], marker: [U8]) -> Int? {
             if bytes[index + part] != marker[part] -> found = false
         }
         if found -> return Val(index)
-        index = index + 1
+        index += 1
     }
     None
 }
@@ -80,8 +86,8 @@ s5_web_ascii_equal: fn(left: String, right: String) -> Bool {
     loop index in 0..<a.len() {
         x := Int{a[index]}
         y := Int{b[index]}
-        if x >= 65 && x <= 90 -> x = x + 32
-        if y >= 65 && y <= 90 -> y = y + 32
+        if x >= 65 && x <= 90 -> x += 32
+        if y >= 65 && y <= 90 -> y += 32
         if x != y -> return false
     }
     true
@@ -99,7 +105,7 @@ s5_web_u16: fn(text: String) -> Int? {
         if digit < 0 || digit > 9 -> return None
         if value > (65535 - digit) /% 10 -> return None
         value = value * 10 + digit
-        index = index + 1
+        index += 1
     }
     Val(value)
 }
@@ -123,7 +129,7 @@ s5_web_response: fn(raw: [U8]) -> S5HTTPResponse? {
             }
         }
     }
-    Val(S5HTTPResponse{status, content_type, body: s5_web_bytes(raw, split, raw.len())})
+    Val(S5HTTPResponse{status: status, content_type: content_type, body: s5_web_bytes(raw, split, raw.len())})
 }
 
 s5_web_get: fn(port: Int, path: String, session: String?) -> S5HTTPResponse? {
@@ -164,15 +170,15 @@ s5_web_raw_get: fn(target: String, headers: [String]) -> [U8] {
     "{request}{crlf}".bytes()
 }
 
-s5_web_port: fn() -> Int {
-    s5_web_u16(sys.get("S5_PORT") ?? panic("port")) ?? panic("u16 port")
-}
+s5_web_port: fn() -> Int { s5_web_u16(sys.get("S5_PORT") ?? panic("port")) ?? panic("u16 port") }
 
 s5_web_wait_up: fn(port: Int, timeout_ms: Int) {
     started: time.start()
     loop {
         if s5_web_get(port, "/__jet_dev_version", None) == .Val(response) {
-            if response.status == 200 -> return
+            if response.status == 200 {
+                return
+            }
         }
         assert(time.elapsed(started).ns <= timeout_ms * 1000000, "devserver did not become ready")
         time.sleep(time.duration_ms(100))
@@ -183,7 +189,9 @@ s5_web_wait_root: fn(port: Int, required: Bool) {
     started: time.start()
     loop time.elapsed(started).ns < 10000000000 {
         if s5_web_get(port, "/", None) == .Val(response) {
-            if response.status == 200 -> return
+            if response.status == 200 {
+                return
+            }
         }
         time.sleep(time.duration_ms(25))
     }

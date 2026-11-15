@@ -48,13 +48,17 @@ sema_comptime_module_slot: fn(modules: [Int], module_identity: ModuleID) -> Int?
 
 sema_comptime_body_source_index: fn(context: &SemaCheckContext, row: Int) Never! {
     slot: sema_comptime_index_module_slot(context.comptime_body_source_modules, context.comptime_body_source_rows, context.comptime_body_sources[row].module_identity)
-    if context.comptime_body_source_rows[slot].get(context.comptime_body_sources[row].key) == None -> context.comptime_body_source_rows[slot][context.comptime_body_sources[row].key] = row
+    if context.comptime_body_source_rows[slot].get(context.comptime_body_sources[row].key) == None {
+        context.comptime_body_source_rows[slot][context.comptime_body_sources[row].key] = row
+    }
 }
 
 sema_comptime_body_sources_index: fn(context: &SemaCheckContext) Never! {
     context.comptime_body_source_modules = [Int]{}
     context.comptime_body_source_rows = [[String:Int]]{}
-    loop row in 0..<context.comptime_body_sources.len() -> sema_comptime_body_source_index(context, row)
+    loop row in 0..<context.comptime_body_sources.len() {
+        sema_comptime_body_source_index(context, row)
+    }
 }
 
 // Lambda merges append every canonical row, including duplicates, in order.
@@ -69,7 +73,9 @@ sema_comptime_body_sources_truncate: fn(context: &SemaCheckContext, length: Int)
     loop context.comptime_body_sources.len() > length {
         row: context.comptime_body_sources.len() - 1
         slot: sema_comptime_module_slot(context.comptime_body_source_modules, context.comptime_body_sources[row].module_identity) ?? panic("a body source has no module index")
-        if context.comptime_body_source_rows[slot].get(context.comptime_body_sources[row].key) == (Val(row)) -> _ := context.comptime_body_source_rows[slot].remove(context.comptime_body_sources[row].key)
+        if context.comptime_body_source_rows[slot].get(context.comptime_body_sources[row].key) == (Val(row)) {
+            _ := context.comptime_body_source_rows[slot].remove(context.comptime_body_sources[row].key)
+        }
         _ := context.comptime_body_sources.pop()
     }
 }
@@ -77,8 +83,9 @@ sema_comptime_body_sources_truncate: fn(context: &SemaCheckContext, length: Int)
 sema_comptime_body_value_index_row: fn(modules: &[Int], first_rows: &[[String:Int]], second_rows: &[[String:Int]], module_identity: ModuleID, key: String, row: Int) Never! {
     slot: sema_comptime_index_module_slot(modules, first_rows, module_identity)
     if second_rows.len() < first_rows.len() -> second_rows.push([String:Int]{})
-    if first_rows[slot].get(key) == None -> first_rows[slot][key] = row
-    else if second_rows[slot].get(key) == None -> second_rows[slot][key] = row
+    if first_rows[slot].get(key) == None -> first_rows[slot][key] = row else if second_rows[slot].get(key) == None {
+        second_rows[slot][key] = row
+    }
 }
 
 // First and second positions settle every ordered prefix. Appending future
@@ -119,7 +126,9 @@ sema_comptime_body_values_freeze: fn(values: &&[SemaComptimeBodyValue], work: Sh
 // any caller/evaluator/sink executes. Work is proportional to new item rows.
 sema_comptime_body_facts_append_items: fn(facts: Shared<SemaComptimeBodyFacts>, values: [SemaComptimeItemValue], from: Int, expected_length: Int, count_key_bytes: Bool) -> (length: Int, rows: Int, key_utf8_bytes: Int) {
     permit := facts.guard_edit()
-    if permit.value.values.len() != expected_length -> panic("body publication attempted to append through an old prefix generation")
+    if permit.value.values.len() != expected_length {
+        panic("body publication attempted to append through an old prefix generation")
+    }
     appended := 0
     key_utf8_bytes := 0
     loop index in from..<values.len() {
@@ -186,14 +195,14 @@ sema_comptime_body_work_count: fn(values: SemaComptimeBodyValues, operation: Sem
     cell: values.work ?? return
     permit := cell.guard_edit()
     if operation == {
-        .FunctionsStarted -> permit.value.functions_started += 1
-        .CheckPassStarted -> permit.value.check_passes_started += 1
-        .ContextAttached -> permit.value.context_value_carriers_attached += 1
-        .ContextSnapshot -> permit.value.context_value_snapshots += 1
-        .Query -> permit.value.queries += 1
-        .ModuleProbe -> permit.value.module_probes += 1
-        .FirstRowProbe -> permit.value.first_row_probes += 1
-        .SecondRowProbe -> permit.value.second_row_probes += 1
+        .FunctionsStarted -> { permit.value.functions_started += 1 }
+        .CheckPassStarted -> { permit.value.check_passes_started += 1 }
+        .ContextAttached -> { permit.value.context_value_carriers_attached += 1 }
+        .ContextSnapshot -> { permit.value.context_value_snapshots += 1 }
+        .Query -> { permit.value.queries += 1 }
+        .ModuleProbe -> { permit.value.module_probes += 1 }
+        .FirstRowProbe -> { permit.value.first_row_probes += 1 }
+        .SecondRowProbe -> { permit.value.second_row_probes += 1 }
         .OwnedRowReturned -> permit.value.owned_rows_returned += 1
     }
 }
@@ -230,7 +239,8 @@ sema_comptime_body_work_flush: fn(values: SemaComptimeBodyValues, trace_sink: Co
 
 sema_comptime_body_capture: fn(
     context: &SemaCheckContext,
-    environment: SemaScopeEnvironment, program: SemaProgramTables,
+    environment: SemaScopeEnvironment,
+    program: SemaProgramTables,
     scopes: SemaScopeTable,
     name: String,
     expression: Expr,
@@ -287,7 +297,9 @@ sema_comptime_body_capture_site: fn(
     destination_key := sema_comptime_body_destination_key(function_key, source_span, site_span)
     key: "{environment.module_identity.id}::{destination_key}"
     if sema_comptime_module_slot(context.comptime_body_source_modules, environment.module_identity) == .Val(slot) {
-        if context.comptime_body_source_rows[slot].get(key) == .Val(row) -> return context.comptime_body_sources[row]
+        if context.comptime_body_source_rows[slot].get(key) == .Val(row) {
+            return context.comptime_body_sources[row]
+        }
     }
     source := SemaComptimeBodySource{
         module_identity: environment.module_identity,
@@ -420,4 +432,3 @@ sema_comptime_local_value_reason: fn(value: TComptimeValue) -> String? Never! {
     }
     None
 }
-

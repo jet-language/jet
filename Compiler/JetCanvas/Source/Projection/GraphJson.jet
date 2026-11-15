@@ -2,7 +2,20 @@
 // overlay wired over them, and their JSON.
 use {
     jet_foundation.[
-        DOC_COMMENT_PREFIX, Expr, Func, LValue, MetaAttr, NameLedger, Span, Stmt, Type, access_sigil, expr_span, foundation_byte_text, name_ledger_declaration, type_name,
+        DOC_COMMENT_PREFIX,
+        Expr,
+        Func,
+        LValue,
+        MetaAttr,
+        NameLedger,
+        Span,
+        Stmt,
+        Type,
+        access_sigil,
+        expr_span,
+        foundation_byte_text,
+        name_ledger_declaration,
+        type_name,
     ]
     jet_parser.[jfmt_stmt_span]
 }
@@ -89,7 +102,7 @@ meta_attr_json: fn(meta: MetaAttr?) -> String? Never! {
     tunable := false
     loop field in value.fields {
         if field == {
-            .Category(text, _) -> category = literal_text(text)
+            .Category(text, _) -> { category = literal_text(text) }
             .Tunable(_) -> tunable = true
             .Maturity(_, _) | .Unknown(_, _, _) -> {}
         }
@@ -129,9 +142,7 @@ hint_belongs_to_function: fn(src: String, anchor: Span, hint_span: Span, func_sp
     hint_span.start < next_function_start(src, func_span.end)
 }
 
-spans_touch: fn(a: Span, b: Span) -> Bool Never! {
-    a.start <= b.end && b.start <= a.end
-}
+spans_touch: fn(a: Span, b: Span) -> Bool Never! { a.start <= b.end && b.start <= a.end }
 
 // The offset of the next `name: fn` declaration line at or after `offset`.
 // Offsets are bytes, so lines are cut from the bytes.
@@ -155,7 +166,9 @@ next_function_start: fn(src: String, offset: Int) -> Int Never! {
 is_identifier_text: fn(text: String) -> Bool Never! {
     loop byte in text.bytes() {
         b: Int{byte}
-        if !((b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95) -> return false
+        if !((b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95) {
+            return false
+        }
     }
     true
 }
@@ -169,12 +182,16 @@ add_execution_overlay: fn(g: &GraphBuilder, src: String, body: [Stmt]) {
     loop node in exec_nodes {
         if node.kind != "entry" -> ensure_exec_pin(g, node.id, "exec", "input", node.span, None)
         if {
-            node_has_arm_pins(g, node.id) -> ensure_exec_pin(g, node.id, "else", "output", node.span, Val("else"))
+            node_has_arm_pins(g, node.id) -> {
+                ensure_exec_pin(g, node.id, "else", "output", node.span, Val("else"))
+            }
             node.kind == "loop" -> {
                 ensure_exec_pin(g, node.id, "body", "output", node.span, Val("loop_body"))
                 ensure_exec_pin(g, node.id, "done", "output", node.span, Val("loop_done"))
             }
-            node.kind == "return" -> ensure_exec_pin(g, node.id, "return", "output", node.span, Val("early_return"))
+            node.kind == "return" -> {
+                ensure_exec_pin(g, node.id, "return", "output", node.span, Val("early_return"))
+            }
             node.kind == "branch" || (node.kind == "function" && node.archetype == "control") -> {
                 ensure_exec_pin(g, node.id, "then", "output", node.span, None)
                 ensure_exec_pin(g, node.id, "else", "output", node.span, Val("else"))
@@ -192,12 +209,16 @@ add_execution_overlay: fn(g: &GraphBuilder, src: String, body: [Stmt]) {
     }
     found: entry ?? return
     flow: execution_block(g, src, body)
-    if flow.entry == .Val(input) -> add_control_wire_once(g, "{found.id}:output:then", input.pin, found.span, input.span)
+    if flow.entry == .Val(input) {
+        add_control_wire_once(g, "{found.id}:output:then", input.pin, found.span, input.span)
+    }
 }
 
 node_has_arm_pins: fn(g: GraphBuilder, node_id: String) -> Bool Never! {
     loop pin in g.pins {
-        if pin.node_id == node_id && pin.direction == "output" && (pin.role ?? "") == "arm" -> return true
+        if pin.node_id == node_id && pin.direction == "output" && (pin.role ?? "") == "arm" {
+            return true
+        }
     }
     false
 }
@@ -226,7 +247,9 @@ execution_block: fn(g: &GraphBuilder, src: String, stmts: [Stmt]) -> ExecutionFl
         if {
             current.entry == .Val(entry) -> {
                 if flow.entry == None -> flow.entry = Val(entry)
-                loop previous in exits -> add_control_wire_once(g, previous.pin, entry.pin, previous.span, entry.span)
+                loop previous in exits {
+                    add_control_wire_once(g, previous.pin, entry.pin, previous.span, entry.span)
+                }
                 exits = current.exits
                 reachable = exits.len() > 0
             }
@@ -240,9 +263,7 @@ execution_block: fn(g: &GraphBuilder, src: String, stmts: [Stmt]) -> ExecutionFl
     flow
 }
 
-switched_off: fn(marker_name: String) -> Bool Never! {
-    marker_name == "Off"
-}
+switched_off: fn(marker_name: String) -> Bool Never! { marker_name == "Off" }
 
 // Wires every switch or `#If` arm to its body, and collects the arms' exits.
 execution_arms: fn(g: &GraphBuilder, src: String, stmt: Stmt, arm_bodies: [[Stmt]], else_body: [Stmt]?) -> ExecutionFlow {
@@ -274,11 +295,17 @@ execution_loop: fn(g: &GraphBuilder, src: String, stmt: Stmt, body: [Stmt]) -> E
     node: direct_execution_node(g, stmt) ?? return empty_flow()
     body_flow: execution_block(g, src, body)
     if exec_output(g, node.id, "body") == .Val(output) {
-        if body_flow.entry == .Val(body_entry) -> add_control_wire_once(g, output, body_entry.pin, node.span, body_entry.span)
-        loop exit in body_flow.exits -> add_control_wire_once(g, exit.pin, "{node.id}:input:exec", exit.span, node.span)
+        if body_flow.entry == .Val(body_entry) {
+            add_control_wire_once(g, output, body_entry.pin, node.span, body_entry.span)
+        }
+        loop exit in body_flow.exits {
+            add_control_wire_once(g, exit.pin, "{node.id}:input:exec", exit.span, node.span)
+        }
     }
     exits := [ExecutionEndpoint]{}
-    if exec_output(g, node.id, "done") == .Val(pin) -> exits.push(ExecutionEndpoint{pin: pin, span: node.span})
+    if exec_output(g, node.id, "done") == .Val(pin) {
+        exits.push(ExecutionEndpoint{pin: pin, span: node.span})
+    }
     ExecutionFlow{entry: exec_input(node), exits: exits}
 }
 
@@ -304,7 +331,9 @@ execution_stmt: fn(g: &GraphBuilder, src: String, stmt: Stmt) -> ExecutionFlow {
         .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Yield(_, _) | .DeferClose(_, _) -> {
             node: direct_execution_node(g, stmt) ?? return empty_flow()
             exits := [ExecutionEndpoint]{}
-            if !stmt_is_terminal(stmt) && exec_output(g, node.id, "then") == .Val(pin) -> exits.push(ExecutionEndpoint{pin: pin, span: node.span})
+            if !stmt_is_terminal(stmt) && exec_output(g, node.id, "then") == .Val(pin) {
+                exits.push(ExecutionEndpoint{pin: pin, span: node.span})
+            }
             ExecutionFlow{entry: exec_input(node), exits: exits}
         }
     }
@@ -325,9 +354,7 @@ append_branch_path: fn(g: &GraphBuilder, src: String, output: String?, body: [St
             add_control_wire_once(g, pin, entry.pin, owner_span, entry.span)
             loop exit in body_flow.exits -> exits.push(exit)
         }
-        else -> {
-            exits.push(ExecutionEndpoint{pin: pin, span: owner_span})
-        }
+        else -> { exits.push(ExecutionEndpoint{pin: pin, span: owner_span}) }
     }
 }
 
@@ -375,14 +402,18 @@ exec_input: fn(node: NodeRec) -> ExecutionEndpoint? Never! {
 
 exec_output: fn(g: GraphBuilder, node_id: String, name: String) -> String? Never! {
     loop pin in g.pins {
-        if pin.node_id == node_id && pin.direction == "output" && pin.name == name -> return Val(pin.id)
+        if pin.node_id == node_id && pin.direction == "output" && pin.name == name {
+            return Val(pin.id)
+        }
     }
     None
 }
 
 add_control_wire_once: fn(g: &GraphBuilder, from_pin: String, to_pin: String, from_span: Span, to_span: Span) {
     loop wire in g.wires {
-        if wire.kind == "control" && wire.from_pin == from_pin && wire.to_pin == to_pin -> return
+        if wire.kind == "control" && wire.from_pin == from_pin && wire.to_pin == to_pin {
+            return
+        }
     }
     add_control_wire(g, from_pin, to_pin, from_span, to_span)
 }
@@ -393,7 +424,9 @@ node_wants_exec: fn(node: NodeRec) -> Bool Never! {
 
 ensure_exec_pin: fn(g: &GraphBuilder, node_id: String, name: String, direction: String, span: Span, role: String?) {
     id: "{node_id}:{direction}:{name}"
-    if has_pin(g, id) -> return
+    if has_pin(g, id) {
+        return
+    }
     g.pins.push(PinRec{id: id, node_id: node_id, name: name, direction: direction, ty: "exec", role: role, pattern_source: None, ability: "control", fallible: false, effect_grant_need: None, span: span, pattern_source_span: None, append_op: None, element_index: None})
 }
 
@@ -431,9 +464,7 @@ canvas_hint_lines: fn(src: String, kind: String) -> [CommentHint] Never! {
     out
 }
 
-canvas_comment_hints: fn(src: String) -> [CommentHint] Never! {
-    canvas_hint_lines(src, "comment")
-}
+canvas_comment_hints: fn(src: String) -> [CommentHint] Never! { canvas_hint_lines(src, "comment") }
 
 comment_region_id: fn(graph_id: String, span: Span) -> String Never! {
     "{graph_id}:comment:{span.start}-{span.end}"
@@ -501,16 +532,12 @@ function_signature_text: fn(src: String, f: Func) -> String Never! {
     }
     out := "{f.name}: fn({params.join(", ")}) {func_return_name(f)}"
     if {
-        f.effect_via == .Val(via) -> {
-            out = "{out} -[via {via.name}]>"
-        }
+        f.effect_via == .Val(via) -> { out = "{out} -[via {via.name}]>" }
         f.declared_effects == .Val(entries) -> {
             names: loop entry in entries -> entry.name
             out = "{out} -[{names.join(", ")}]>"
         }
-        f.is_pure -> {
-            out = "{out} -[]>"
-        }
+        f.is_pure -> { out = "{out} -[]>" }
     }
     out
 }
@@ -566,10 +593,14 @@ rails_json: fn(g: GraphBuilder) -> String Never! {
     loop region in g.regions {
         if region.contains("\"kind\":\"task.group\"") -> async_rail = true
         if region.contains("\"kind\":\"authority\"") -> effect_rail = true
-        if region.contains("\"kind\":\"unsafe\"") || region.contains("\"kind\":\"comptime\"") -> proof_rail = true
+        if region.contains("\"kind\":\"unsafe\"") || region.contains("\"kind\":\"comptime\"") {
+            proof_rail = true
+        }
     }
     loop node in g.nodes {
-        if node.title == ".task" || node.title == "spawn" || node.title.ends_with(".spawn") -> async_rail = true
+        if node.title == ".task" || node.title == "spawn" || node.title.ends_with(".spawn") {
+            async_rail = true
+        }
         loop badge in node.badges {
             if badge == "effects" -> effect_rail = true
         }

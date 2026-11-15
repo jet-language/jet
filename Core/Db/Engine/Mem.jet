@@ -45,20 +45,26 @@ change_encoding: fn(m: &Mem, enc: Int) Never! {
         m.enc = enc
         return
     }
-    if m.enc == enc -> return
+    if m.enc == enc {
+        return
+    }
     mem_translate(m, enc)
 }
 
 // sqlite3VdbeMemHandleBom: a UTF-16 text starting with a byte-order mark
 // loses it and takes the encoding it names.
 handle_bom: fn(m: &Mem) Never! {
-    if m.z.len() <= 1 -> return
+    if m.z.len() <= 1 {
+        return
+    }
     b1: Int{m.z[0]}
     b2: Int{m.z[1]}
     bom := 0
     if b1 == 254 && b2 == 255 -> bom = base.UTF16BE
     if b1 == 255 && b2 == 254 -> bom = base.UTF16LE
-    if bom == 0 -> return
+    if bom == 0 {
+        return
+    }
     m.z = m.z[2..<m.z.len()].copy()
     m.enc = bom
 }
@@ -66,8 +72,12 @@ handle_bom: fn(m: &Mem) Never! {
 // sqlite3VdbeMemExpandBlob: a MEM_Zero blob gets its zero bytes appended.
 // A no-change NULL (MEM_Null|MEM_Zero, nothing to expand) is left as is.
 expand_blob: fn(m: &Mem) Never! {
-    if m.flags.bit_and(MEM_ZERO) == 0 -> return
-    if m.z.len() + m.i <= 0 && m.flags.bit_and(MEM_BLOB) == 0 -> return
+    if m.flags.bit_and(MEM_ZERO) == 0 {
+        return
+    }
+    if m.z.len() + m.i <= 0 && m.flags.bit_and(MEM_BLOB) == 0 {
+        return
+    }
     loop _k in 0..<m.i -> m.z.push(U8{0})
     m.flags = clear_bits(m.flags, MEM_ZERO)
 }
@@ -180,9 +190,7 @@ numerify: fn(m: &Mem) Never! {
         if as_int {
             m.i = ix
             set_type_flag(m, MEM_INT)
-        } else {
-            set_type_flag(m, MEM_REAL)
-        }
+        } else { set_type_flag(m, MEM_REAL) }
     }
     m.flags = clear_bits(m.flags, MEM_STR.bit_or(MEM_BLOB).bit_or(MEM_ZERO))
 }
@@ -199,7 +207,9 @@ also_an_int: fn(m: Mem, r: Float) -> Int? Never! {
 // one, and loses its text; with try_for_int a whole REAL becomes INTEGER.
 apply_numeric_affinity: fn(m: &Mem, try_for_int: Bool) Never! {
     rc: util.atof(m.z, m.enc)
-    if rc.kind <= 0 -> return
+    if rc.kind <= 0 {
+        return
+    }
     done := false
     if rc.kind == 1 {
         if also_an_int(m, rc.value) == .Val(ix) {
@@ -224,12 +234,12 @@ apply_affinity: fn(m: &Mem, aff: Int, enc: Int) Never! {
         if m.flags.bit_and(MEM_INT) == 0 {
             if m.flags.bit_and(MEM_REAL.bit_or(MEM_INT_REAL)) == 0 {
                 if m.flags.bit_and(MEM_STR) != 0 -> apply_numeric_affinity(m, true)
-            } else if aff <= base.AFF_REAL {
-                integer_affinity(m)
-            }
+            } else if aff <= base.AFF_REAL { integer_affinity(m) }
         }
     } else if aff == base.AFF_TEXT {
-        if m.flags.bit_and(MEM_STR) == 0 && m.flags.bit_and(MEM_REAL.bit_or(MEM_INT).bit_or(MEM_INT_REAL)) != 0 -> stringify(m, enc, true)
+        if m.flags.bit_and(MEM_STR) == 0 && m.flags.bit_and(MEM_REAL.bit_or(MEM_INT).bit_or(MEM_INT_REAL)) != 0 {
+            stringify(m, enc, true)
+        }
         m.flags = clear_bits(m.flags, MEM_REAL.bit_or(MEM_INT).bit_or(MEM_INT_REAL))
     }
 }
@@ -237,21 +247,17 @@ apply_affinity: fn(m: &Mem, aff: Int, enc: Int) Never! {
 // sqlite3VdbeMemCast: CAST(m AS aff), which converts even when data is
 // lost. NULL stays NULL.
 cast: fn(m: &Mem, aff: Int, enc: Int) Never! {
-    if m.flags.bit_and(MEM_NULL) != 0 -> return
+    if m.flags.bit_and(MEM_NULL) != 0 {
+        return
+    }
     if aff == base.AFF_BLOB {
         if m.flags.bit_and(MEM_BLOB) == 0 {
             apply_affinity(m, base.AFF_TEXT, enc)
             if m.flags.bit_and(MEM_STR) != 0 -> set_type_flag(m, MEM_BLOB)
-        } else {
-            m.flags = clear_bits(m.flags, clear_bits(MEM_TYPE_MASK, MEM_BLOB))
-        }
-    } else if aff == base.AFF_NUMERIC {
-        numerify(m)
-    } else if aff == base.AFF_INTEGER {
+        } else { m.flags = clear_bits(m.flags, clear_bits(MEM_TYPE_MASK, MEM_BLOB)) }
+    } else if aff == base.AFF_NUMERIC { numerify(m) } else if aff == base.AFF_INTEGER {
         integerify(m)
-    } else if aff == base.AFF_REAL {
-        realify(m)
-    } else {
+    } else if aff == base.AFF_REAL { realify(m) } else {
         // MEM_Str == MEM_Blob >> 3: a blob is reread as text.
         m.flags = m.flags.bit_or(m.flags.bit_and(MEM_BLOB) >> 3)
         apply_affinity(m, base.AFF_TEXT, enc)
@@ -319,7 +325,9 @@ set_int64: fn(m: &Mem, v: Int) Never! {
 // sqlite3VdbeMemSetDouble: a NaN leaves NULL.
 set_double: fn(m: &Mem, r: Float) Never! {
     set_null(m)
-    if math.is_nan(r) -> return
+    if math.is_nan(r) {
+        return
+    }
     m.r = r
     m.flags = MEM_REAL
 }
@@ -355,9 +363,7 @@ set_str: fn(m: &Mem, z: [U8], n: Int, enc_in: Int, limit: Int) -> Int Never! {
     enc := enc_in
     nbyte := n
     flags := MEM_STR
-    if nbyte < 0 {
-        nbyte = c_text_len(z, enc, limit)
-    } else if enc == 0 {
+    if nbyte < 0 -> nbyte = c_text_len(z, enc, limit) else if enc == 0 {
         flags = MEM_BLOB
         enc = base.UTF8
     }
@@ -382,9 +388,7 @@ value_text: fn(m: &Mem, enc: Int) -> Bool Never! {
         expand_blob(m)
         m.flags = m.flags.bit_or(MEM_STR)
         if m.enc != enc -> change_encoding(m, enc)
-    } else {
-        stringify(m, enc, false)
-    }
+    } else { stringify(m, enc, false) }
     true
 }
 
@@ -426,7 +430,9 @@ value_subtype: fn(m: Mem) -> Int Never! {
 
 // sqlite3_value_nochange: the unchanged-column NULL of a virtual-table
 // UPDATE.
-value_nochange: fn(m: Mem) -> Bool Never! { m.flags.bit_and(MEM_NULL.bit_or(MEM_ZERO)) == MEM_NULL.bit_or(MEM_ZERO) }
+value_nochange: fn(m: Mem) -> Bool Never! {
+    m.flags.bit_and(MEM_NULL.bit_or(MEM_ZERO)) == MEM_NULL.bit_or(MEM_ZERO)
+}
 
 // sqlite3_value_frombind.
 value_frombind: fn(m: Mem) -> Bool Never! { m.flags.bit_and(MEM_FROM_BIND) != 0 }
@@ -453,11 +459,13 @@ SQLArgs: struct {
             self.used += 1
             int_value(self.args[self.used - 1])
         }
+
         double_arg: fn(&self) -> Float Never! {
             if self.used >= self.args.len() -> return Float{0}
             self.used += 1
             real_value(self.args[self.used - 1])
         }
+
         next_text: fn(&self, out: &[U8]) -> Bool Never! {
             if self.used >= self.args.len() -> return false
             self.used += 1

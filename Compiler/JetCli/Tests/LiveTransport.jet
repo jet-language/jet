@@ -13,15 +13,20 @@ use {
 live_transport_u64: fn(out: &[U8], value: U64) Never! {
     loop index in 0..<8 -> out.push(U8{Int{(value >> (index * 8)).bit_and(U64{255})}})
 }
+
 live_transport_text: fn(out: &[U8], text: String) Never! {
     live_transport_u64(out, U64{text.bytes().len()})
     loop byte in text.bytes() -> out.push(byte)
 }
+
 // A writer whose boot-clock start is `boot_ns`, at 100 ticks per second,
 // with no tasks and optionally one event record.
 live_transport_fixture: fn(pid: Int, boot_ns: U64, captured: Int, event_sequence: Int?) -> [U8] Never! {
     out := [U8]{}
-    loop word in ([U64]{U64{3550338754064696650}, U64{1}, U64{pid}, U64{captured}, U64{0}, boot_ns, U64{0}, U64{100}, U64{0}, U64{0}, U64{0}, U64{0}, U64{0}, U64{0}}) -> live_transport_u64(out, word)
+    loop word in
+        ([U64]{U64{3550338754064696650}, U64{1}, U64{pid}, U64{captured}, U64{0}, boot_ns, U64{0}, U64{100}, U64{0}, U64{0}, U64{0}, U64{0}, U64{0}, U64{0}}) {
+        live_transport_u64(out, word)
+    }
     loop text in ([String]{"s", "app.jet", "b", "r", "w"}) -> live_transport_text(out, text)
     live_transport_u64(out, U64{1})
     live_transport_u64(out, U64{0})
@@ -41,16 +46,20 @@ live_transport_fixture: fn(pid: Int, boot_ns: U64, captured: Int, event_sequence
     live_transport_u64(out, U64{0})
     out
 }
+
 live_transport_rejected: fn(pid: Int, path: String, message: String) {
     if jet_cli_live_read_at(pid, path) == {
-        .Err(error) -> assert(error.message.contains(message))
+        .Err(error) -> { assert(error.message.contains(message)) }
         .Ok(_) -> panic("unsafe transport accepted: {message}")
     }
 }
+
 #Test("live_transport") {
     // /proc start identity is the Linux/Android transport's actual authority.
     platform: cli_sys.name()
-    if platform != "linux" && platform != "android" -> return
+    if platform != "linux" && platform != "android" {
+        return
+    }
     pid: cli_process.current_pid()
     root: "{cli_sys.temp_dir()}/jet-live-transport-{pid}"
     cli_files.create_dir_all(root) ?? panic("exclusive transport fixture directory")

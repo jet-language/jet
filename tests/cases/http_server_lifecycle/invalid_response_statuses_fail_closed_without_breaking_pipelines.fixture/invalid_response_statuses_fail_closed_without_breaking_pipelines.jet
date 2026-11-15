@@ -6,7 +6,9 @@ use {
     net: core.net
 }
 
-S6InvalidCalls: struct { value: Int }
+S6InvalidCalls: struct {
+    value: Int
+}
 
 s6_invalid_crlf: fn() -> String { "\r\n" }
 
@@ -27,15 +29,15 @@ s6_invalid_exchange: fn(addr: String, lines: [String]) -> String {
     calls: Shared{S6InvalidCalls{value: 0}}
     mux: web.app()
     mux.get("/low", fn(_req: HTTPRequest) {
-        calls.value = calls.value + 1
+        calls.value += 1
         Ok(server.response(99, "secret-status-99"))
     })
     mux.get("/high", fn(_req: HTTPRequest) {
-        calls.value = calls.value + 1
+        calls.value += 1
         Ok(server.response(600, "secret-status-600"))
     })
     mux.get("/next", fn(_req: HTTPRequest) {
-        calls.value = calls.value + 1
+        calls.value += 1
         Ok(server.response(200, "next"))
     })
     bound: mux.bind("127.0.0.1:0") ?? panic("bind")

@@ -21,7 +21,7 @@ store_static_cache_serve: fn(site: String) -> StoreTestCacheServer Never! {
     publication_parent: files.tmpdir("static-cache-publication-") ?? panic("publication")
     publication: files.join(publication_parent, "site")
     restored: files.tmpdir("static-cache-restored-") ?? panic("restored")
-    roots: HangarRoots{root, dev_mode: false}
+    roots: HangarRoots{root: root, dev_mode: false}
     files.write(files.join(source, "payload"), "static cache bytes\n") ?? panic("cache source")
     verification := StoreVerification.new()
     request: IngestRequest{
@@ -30,7 +30,7 @@ store_static_cache_serve: fn(site: String) -> StoreTestCacheServer Never! {
         reference: "./static-cache-demo",
         cache_identity: CacheIdentity{source_fingerprint: "sha256:static-cache-source", recipe_fingerprint: "sha256:static-cache-recipe", policy_fingerprint: "sha256:static-cache-policy", platform: pkg_host_platform()},
         references: [String]{},
-        outputs: [String: String]{"out": source},
+        outputs: [String:String]{"out": source},
         signature: "",
         provenance: "static cache test",
         platform_artifact_kind: "",

@@ -11,9 +11,7 @@
 // Its 0 is never a value: compile-time evaluation refuses every runtime
 // intrinsic (Pipeline.jet jet_driver_comptime_function_closure), so a
 // let-bound call stays run-time code and gets the static view too (#6777).
-rt_static_text: fn(_literal: String) -> I64 {
-    I64{0}
-}
+rt_static_text: fn(_literal: String) -> I64 { I64{0} }
 
 rt_text_data: fn(value: I64) -> I64 { rt_text_word(value) }
 
@@ -71,6 +69,7 @@ rt_text_bytes_copy: fn(target: I64, source: I64, len: I64) {
 // instead, block and buffer alike; free and growth find that allocator by
 // address (Alloc.jet), so no reader or writer here tells the two apart.
 RT_TEXT_BLOCK: I64{104}
+
 RT_TEXT_INLINE: I64{64}
 
 // A fresh empty owner whose buffer holds `cap` bytes: its inline bytes, or a
@@ -90,7 +89,7 @@ rt_text_builder_from: fn(cap: I64, carrier: I64) -> I64 {
     rt_text_store(wrapping(header + I64{8}), I64{0})
     rt_text_store(wrapping(header + I64{16}), RT_TEXT_INLINE)
     rt_text_store(wrapping(header + I64{24}), I64{0})
-    if (cap <= RT_TEXT_INLINE) -> return header
+    if (cap <= RT_TEXT_INLINE) { return header }
     data: if (carrier == I64{0}) -> alloc_bytes(cap) else -> alloc_user_need(carrier, cap, I64{1})
     if (data == I64{0} && jet_rt_session_propagate() != I64{0}) {
         rt_text_header_free(header)
@@ -135,9 +134,9 @@ rt_text_immortal: fn(value: I64) -> Bool { rt_text_word(wrapping(value + I64{16}
 // A text under 8 bytes is one word: its bytes are read one at a time and
 // gathered (rt_text_short_word), then stored whole (rt_text_from_word).
 rt_text_copy: fn(ptr: I64, len: I64) -> I64 {
-    if (len < I64{8}) -> return rt_text_from_word(rt_text_short_word(ptr, len), len)
+    if (len < I64{8}) { return rt_text_from_word(rt_text_short_word(ptr, len), len) }
     header: rt_text_builder_with_capacity(len)
-    if (header == I64{0}) -> return I64{0}
+    if (header == I64{0}) { return I64{0} }
     rt_text_bytes_copy(rt_text_data(header), ptr, len)
     rt_text_store(wrapping(header + I64{8}), len)
     header
@@ -150,7 +149,7 @@ rt_text_copy: fn(ptr: I64, len: I64) -> I64 {
 // caller's.
 rt_text_take: fn(data: I64, len: I64, cap: I64) -> I64 {
     header: rt_text_builder_with_capacity(I64{0})
-    if (header == I64{0}) -> return I64{0}
+    if (header == I64{0}) { return I64{0} }
     rt_text_store(header, data)
     rt_text_store(wrapping(header + I64{8}), len)
     rt_text_store(wrapping(header + I64{16}), cap)
@@ -177,7 +176,7 @@ rt_text_short_word: fn(ptr: I64, len: I64) -> I64 {
 // allocation failure.
 rt_text_from_word: fn(word: I64, len: I64) -> I64 {
     header: rt_text_builder_with_capacity(len)
-    if (header == I64{0}) -> return I64{0}
+    if (header == I64{0}) { return I64{0} }
     rt_text_store(rt_text_data(header), word)
     rt_text_store(wrapping(header + I64{8}), len)
     header
@@ -292,7 +291,7 @@ rt_text_reserve_extra: fn(target: I64, old: I64, used: I64, extra: I64) -> I64 {
     }
     needed: used + extra
     cap: rt_text_word(wrapping(target + I64{16}))
-    if (needed <= cap) -> return old
+    if (needed <= cap) { return old }
     // The inline bytes stay with the block; a separate buffer is released.
     separate: !rt_text_inline(target, old)
     grown: if (separate && cap <= I64{4611686018427387903}) -> cap * I64{2} else -> needed
@@ -309,7 +308,7 @@ rt_text_reserve_extra: fn(target: I64, old: I64, used: I64, extra: I64) -> I64 {
     // A buffer a `#Context(allocator:)` block served grows from its
     // allocator (Alloc.jet alloc_grow_try).
     data: alloc_grow_bytes(old, capacity)
-    if (data == I64{0} && jet_rt_session_propagate() != I64{0}) -> return I64{0}
+    if (data == I64{0} && jet_rt_session_propagate() != I64{0}) { return I64{0} }
     rt_text_bytes_copy(data, old, used)
     before: jet_rt_session_status()
     if separate -> free_bytes(old, cap)
@@ -330,17 +329,24 @@ rt_text_append: fn(target: I64, ptr: I64, len: I64) {
     used: rt_text_len(target)
     aliases: ptr >= old && ptr < old + used
     data: rt_text_reserve_extra(target, old, used, len)
-    if (data == I64{0}) -> return
+    if (data == I64{0}) {
+        return
+    }
     // Borrowed self windows survive relocation; empty headers have no window.
     source: if aliases -> wrapping(data + (ptr - old)) else -> ptr
     rt_text_bytes_copy(wrapping(data + used), source, len)
     rt_text_store(wrapping(target + I64{8}), used + len)
 }
+
 rt_text_append_raw_word: fn(target: I64, word: I64, count: I64) {
-    if (count <= I64{0}) -> return
+    if (count <= I64{0}) {
+        return
+    }
     used: rt_text_len(target)
     data: rt_text_reserve_extra(target, rt_text_data(target), used, count)
-    if (data == I64{0}) -> return
+    if (data == I64{0}) {
+        return
+    }
     // The bytes of `word`, low first: a constant shift per byte.
     rest := word
     at := I64{0}
@@ -364,7 +370,9 @@ rt_text_push_scalar: fn(target: I64, scalar: I64) {
     // No transient scalar buffer allocation is necessary.
     used: rt_text_len(target)
     buffer: rt_text_reserve_extra(target, rt_text_data(target), used, width)
-    if (buffer == I64{0}) -> return
+    if (buffer == I64{0}) {
+        return
+    }
     data: wrapping(buffer + used)
     if {
         (width == I64{1}) -> rt_text_put(data, value)
@@ -461,7 +469,7 @@ rt_text_lossy: fn(ptr: I64, len: I64) -> I64 {
         jet_rt_rc_retain(wrapping(value - I64{8}))
         return value
     }
-    if (cap != RT_TEXT_FRAME) -> return value
+    if (cap != RT_TEXT_FRAME) { return value }
     owner: rt_text_builder_with_capacity(rt_text_len(value))
     if (owner != I64{0}) {
         rt_text_store(wrapping(owner + I64{8}), rt_text_len(value))
@@ -471,7 +479,9 @@ rt_text_lossy: fn(ptr: I64, len: I64) -> I64 {
 }
 
 // Borrow both carriers; publish one fresh owner (inline when it fits).
-#Export(c) jet_rt_string_concat: fn(left: I64, right: I64) -> I64 { rt_text_concat(left, right, I64{0}) }
+#Export(c) jet_rt_string_concat: fn(left: I64, right: I64) -> I64 {
+    rt_text_concat(left, right, I64{0})
+}
 
 // jet_rt_string_concat for a program's own text (JetIR BuildTypes.jet), from
 // the allocator a `#Context(allocator:)` block serves values from.
@@ -490,7 +500,7 @@ rt_text_concat: fn(left: I64, right: I64, carrier: I64) -> I64 {
     }
     len: left_len + right_len
     header: rt_text_builder_from(len, carrier)
-    if (header == I64{0}) -> return I64{0}
+    if (header == I64{0}) { return I64{0} }
     data: rt_text_data(header)
     rt_text_bytes_copy(data, rt_text_data(left), left_len)
     rt_text_bytes_copy(wrapping(data + left_len), rt_text_data(right), right_len)
@@ -504,13 +514,17 @@ rt_text_concat: fn(left: I64, right: I64, carrier: I64) -> I64 {
 // shared or static `left` keeps its bytes: the result is a fresh owner (as
 // jet_rt_string_concat) and this owner of `left` is released. On a stop
 // `left` is still owned by the variable and the result is 0.
-#Export(c) jet_rt_string_append: fn(left: I64, right: I64) -> I64 { rt_text_append_owner(left, right, false) }
+#Export(c) jet_rt_string_append: fn(left: I64, right: I64) -> I64 {
+    rt_text_append_owner(left, right, false)
+}
 
 // jet_rt_string_append for a program's own text (JetIR BuildExpr.jet): the
 // fresh owner comes from the allocator a `#Context(allocator:)` block serves
 // values from. An owner appended in place grows from its own buffer's
 // allocator (alloc_grow_bytes).
-#Export(c) jet_rt_string_append_value: fn(left: I64, right: I64) -> I64 { rt_text_append_owner(left, right, true) }
+#Export(c) jet_rt_string_append_value: fn(left: I64, right: I64) -> I64 {
+    rt_text_append_owner(left, right, true)
+}
 
 // Fast path (ScriptBench w12, #6080): a sole heap owner whose spare capacity
 // already holds `right` is written here with one count load and no further
@@ -530,13 +544,13 @@ rt_text_append_owner: fn(left: I64, right: I64, served: Bool) -> I64 {
     }
     if (rt_text_immortal(left) || !jet_rt_rc_unique(wrapping(left - I64{8}))) {
         joined: rt_text_concat(left, right, if served -> alloc_user_current(I64{8}) else -> I64{0})
-        if (joined == I64{0}) -> return I64{0}
+        if (joined == I64{0}) { return I64{0} }
         jet_rt_string_drop(left)
         return joined
     }
     before: rt_text_len(left)
     rt_text_append(left, rt_text_data(right), rt_text_len(right))
-    if (rt_text_len(left) == before && rt_text_len(right) != I64{0}) -> return I64{0}
+    if (rt_text_len(left) == before && rt_text_len(right) != I64{0}) { return I64{0} }
     left
 }
 
@@ -547,7 +561,7 @@ rt_text_append_owner: fn(left: I64, right: I64, served: Bool) -> I64 {
 // the static empty text. A field whose value `s.f.move()` took holds the
 // zero word (ir_zero_drops), which has no owner to consume.
 #Export(c) jet_rt_string_clear: fn(value: I64) -> I64 {
-    if (value == I64{0}) -> return rt_static_text("")
+    if (value == I64{0}) { return rt_static_text("") }
     if (!rt_text_immortal(value) && jet_rt_rc_unique(wrapping(value - I64{8}))) {
         rt_text_store(wrapping(value + I64{8}), I64{0})
         rt_text_store(wrapping(value + I64{24}), I64{0})
@@ -571,7 +585,7 @@ rt_text_append_owner: fn(left: I64, right: I64, served: Bool) -> I64 {
 // The byte offset of character `at` of `value`, or -1 when `at` is negative
 // or past its end.
 rt_text_char_offset: fn(value: I64, at: I64) -> I64 {
-    if (at < I64{0}) -> return I64{-1}
+    if (at < I64{0}) { return I64{-1} }
     rt_text_skip(rt_text_data(value), rt_text_len(value), I64{0}, at)
 }
 
@@ -609,7 +623,7 @@ rt_text_spliced: fn(value: I64, keep: I64, source: I64, extra: I64, resume: I64)
     }
     len: keep + extra + tail
     header: rt_text_builder_with_capacity(len)
-    if (header == I64{0}) -> return I64{0}
+    if (header == I64{0}) { return I64{0} }
     target: rt_text_data(header)
     rt_text_bytes_copy(target, data, keep)
     rt_text_bytes_copy(wrapping(target + keep), source, extra)
@@ -631,21 +645,21 @@ rt_text_spliced: fn(value: I64, keep: I64, source: I64, extra: I64, resume: I64)
         return I64{0}
     }
     extra: rt_text_len(text)
-    if (extra == I64{0}) -> return value
+    if (extra == I64{0}) { return value }
     used: rt_text_len(value)
     source: rt_text_data(text)
     old: rt_text_data(value)
     reads_self: source >= old && source < wrapping(old + used)
     if (!reads_self && rt_text_edit_in_place(value)) {
         data: rt_text_reserve_extra(value, old, used, extra)
-        if (data == I64{0}) -> return I64{0}
+        if (data == I64{0}) { return I64{0} }
         jet_rt_mem_move(wrapping(data + offset + extra), wrapping(data + offset), used - offset)
         rt_text_bytes_copy(wrapping(data + offset), source, extra)
         rt_text_store(wrapping(value + I64{8}), used + extra)
         return value
     }
     spliced: rt_text_spliced(value, offset, source, extra, offset)
-    if (spliced == I64{0}) -> return I64{0}
+    if (spliced == I64{0}) { return I64{0} }
     jet_rt_string_drop(value)
     spliced
 }
@@ -663,7 +677,7 @@ rt_text_spliced: fn(value: I64, keep: I64, source: I64, extra: I64, resume: I64)
         rt_text_edit_outside(message, value, file, file_len, line)
         return I64{0}
     }
-    if (end == start) -> return value
+    if (end == start) { return value }
     used: rt_text_len(value)
     if rt_text_edit_in_place(value) {
         if !rt_text_writable(value) -> return I64{0}
@@ -673,7 +687,7 @@ rt_text_spliced: fn(value: I64, keep: I64, source: I64, extra: I64, resume: I64)
         return value
     }
     spliced: rt_text_spliced(value, start, I64{0}, I64{0}, end)
-    if (spliced == I64{0}) -> return I64{0}
+    if (spliced == I64{0}) { return I64{0} }
     jet_rt_string_drop(value)
     spliced
 }
@@ -690,14 +704,14 @@ rt_text_spliced: fn(value: I64, keep: I64, source: I64, extra: I64, resume: I64)
     }
     used: rt_text_len(value)
     end: rt_text_skip(rt_text_data(value), used, I64{0}, count)
-    if (end < I64{0} || end == used) -> return value
+    if (end < I64{0} || end == used) { return value }
     if rt_text_edit_in_place(value) {
         if !rt_text_writable(value) -> return I64{0}
         rt_text_store(wrapping(value + I64{8}), end)
         return value
     }
     kept: rt_text_copy(rt_text_data(value), end)
-    if (kept == I64{0}) -> return I64{0}
+    if (kept == I64{0}) { return I64{0} }
     jet_rt_string_drop(value)
     kept
 }
@@ -715,7 +729,9 @@ rt_text_spliced: fn(value: I64, keep: I64, source: I64, extra: I64, resume: I64)
     }
     used: rt_text_len(value)
     if rt_text_edit_in_place(value) {
-        if (rt_text_reserve_extra(value, rt_text_data(value), used, extra) == I64{0}) -> return I64{0}
+        if (rt_text_reserve_extra(value, rt_text_data(value), used, extra) == I64{0}) {
+            return I64{0}
+        }
         return value
     }
     if (extra > I64{9223372036854775807} - used) {
@@ -723,7 +739,7 @@ rt_text_spliced: fn(value: I64, keep: I64, source: I64, extra: I64, resume: I64)
         return I64{0}
     }
     header: rt_text_builder_with_capacity(used + extra)
-    if (header == I64{0}) -> return I64{0}
+    if (header == I64{0}) { return I64{0} }
     rt_text_bytes_copy(rt_text_data(header), rt_text_data(value), used)
     rt_text_store(wrapping(header + I64{8}), used)
     jet_rt_string_drop(value)
@@ -749,13 +765,19 @@ rt_text_spliced: fn(value: I64, keep: I64, source: I64, extra: I64, resume: I64)
     if (value == I64{0}) {
         return
     }
-    if rt_text_immortal(value) -> return
-    if !jet_rt_rc_release(wrapping(value - I64{8})) -> return
+    if rt_text_immortal(value) {
+        return
+    }
+    if !jet_rt_rc_release(wrapping(value - I64{8})) {
+        return
+    }
     data: rt_text_data(value)
     if !rt_text_inline(value, data) {
         before: jet_rt_session_status()
         free_bytes(data, rt_text_word(wrapping(value + I64{16})))
-        if (jet_rt_session_status() != before && jet_rt_session_propagate() != I64{0}) -> return
+        if (jet_rt_session_status() != before && jet_rt_session_propagate() != I64{0}) {
+            return
+        }
     }
     rt_text_header_free(value)
 }
@@ -771,25 +793,25 @@ rt_text_spliced: fn(value: I64, keep: I64, source: I64, extra: I64, resume: I64)
 // `len`, so the sums wrap unchecked.
 rt_text_first_difference: fn(left: I64, right: I64, len: I64) -> I64 {
     // Shared owners (and a text compared with itself) hold one buffer.
-    if (left == right) -> return len
+    if (left == right) { return len }
     at := I64{0}
     words: wrapping(len - len.bit_and(I64{7}))
     loop at < words {
         diff: rt_text_word(wrapping(left + at)).bit_xor(rt_text_word(wrapping(right + at)))
-        if (diff != I64{0}) -> return wrapping(at + rt_text_low_byte(diff))
+        if (diff != I64{0}) { return wrapping(at + rt_text_low_byte(diff)) }
         at = wrapping(at + I64{8})
     }
     if (at < len) {
         if (words > I64{0}) {
             last: wrapping(len - I64{8})
             diff: rt_text_word(wrapping(left + last)).bit_xor(rt_text_word(wrapping(right + last)))
-            if (diff == I64{0}) -> return len
+            if (diff == I64{0}) { return len }
             return wrapping(last + rt_text_low_byte(diff))
         }
         if (left.bit_and(I64{4095}) <= I64{4088} && right.bit_and(I64{4095}) <= I64{4088}) {
             // No whole word: len is 1..7, so its low bits are len.
             diff: rt_text_word(left).bit_xor(rt_text_word(right)).bit_and(wrapping((I64{1} << (len.bit_and(I64{7}) * I64{8})) - I64{1}))
-            if (diff == I64{0}) -> return len
+            if (diff == I64{0}) { return len }
             return rt_text_low_byte(diff)
         }
     }
@@ -811,7 +833,7 @@ rt_text_low_byte: fn(diff: I64) -> I64 {
         at = wrapping(at + I64{2})
         rest = rest >> I64{16}
     }
-    if (rest.bit_and(I64{255}) == I64{0}) -> at = wrapping(at + I64{1})
+    if (rest.bit_and(I64{255}) == I64{0}) { at = wrapping(at + I64{1}) }
     at
 }
 
@@ -847,7 +869,7 @@ rt_text_equal_bytes: fn(left: I64, right: I64, len: I64) -> Bool {
     if !rt_text_cacheable(value, len) -> return rt_text_scalars(rt_text_data(value), len)
     cache: rt_text_word(wrapping(value + I64{24}))
     counted: cache >> I64{32}
-    if (counted != I64{0}) -> return counted - I64{1}
+    if (counted != I64{0}) { return counted - I64{1} }
     prefix: cache.bit_and(I64{4294967295})
     scalars: prefix + rt_text_scalars(rt_text_data(value) + prefix, len - prefix)
     rt_text_cache_store(value, if (scalars == len) -> len else -> prefix, scalars + I64{1})
@@ -863,7 +885,7 @@ rt_text_ascii_end: fn(data: I64, from: I64, stop: I64) -> I64 {
             at += I64{8}
             next
         }
-        if (at >= stop || rt_text_byte(wrapping(data + at)) >= I64{128}) -> break
+        if (at >= stop || rt_text_byte(wrapping(data + at)) >= I64{128}) { break }
         at += I64{1}
     }
     at
@@ -883,14 +905,14 @@ rt_text_scalars: fn(data: I64, len: I64) -> I64 {
     words: data + len.bit_and(I64{-8})
     stop: data + len
     loop {
-        if (at >= blocks) -> break
+        if (at >= blocks) { break }
         if (rt_text_word(at).bit_or(rt_text_word(wrapping(at + I64{8}))).bit_or(rt_text_word(wrapping(at + I64{16}))).bit_or(rt_text_word(wrapping(at + I64{24}))).bit_and(I64{-9187201950435737472}) != I64{0}) {
             continuations += rt_text_continuations(at) + rt_text_continuations(wrapping(at + I64{8})) + rt_text_continuations(wrapping(at + I64{16})) + rt_text_continuations(wrapping(at + I64{24}))
         }
         at += I64{32}
     }
     loop {
-        if (at >= words) -> break
+        if (at >= words) { break }
         continuations += rt_text_continuations(at)
         at += I64{8}
     }
@@ -906,8 +928,8 @@ rt_text_scalars: fn(data: I64, len: I64) -> I64 {
         }
     }
     loop {
-        if (at >= stop) -> break
-        if (rt_text_byte(at).bit_and(I64{192}) == I64{128}) -> continuations += I64{1}
+        if (at >= stop) { break }
+        if (rt_text_byte(at).bit_and(I64{192}) == I64{128}) { continuations += I64{1} }
         at += I64{1}
     }
     len - continuations
@@ -934,7 +956,7 @@ rt_text_skip: fn(data: I64, len: I64, from: I64, scalars: I64) -> I64 {
     stop: data + len
     left := scalars
     loop {
-        if (left <= I64{0}) -> break
+        if (left <= I64{0}) { break }
         if (left >= I64{32} && stop - at >= I64{32} && rt_text_word(at).bit_or(rt_text_word(wrapping(at + I64{8}))).bit_or(rt_text_word(wrapping(at + I64{16}))).bit_or(rt_text_word(wrapping(at + I64{24}))).bit_and(I64{-9187201950435737472}) == I64{0}) {
             at += I64{32}
             left -= I64{32}
@@ -945,7 +967,7 @@ rt_text_skip: fn(data: I64, len: I64, from: I64, scalars: I64) -> I64 {
             left -= I64{8}
             next
         }
-        if (at >= stop) -> return I64{-1}
+        if (at >= stop) { return I64{-1} }
         at += rt_text_width(at)
         left -= I64{1}
     }
@@ -956,7 +978,9 @@ rt_text_skip: fn(data: I64, len: I64, from: I64, scalars: I64) -> I64 {
 // would send it (rt_text_find_byte itself answers -1 for a `start` at or
 // past the end), with no call through the general search.
 rt_text_find: fn(value: I64, needle: I64, start: I64, last: Bool) -> I64 {
-    if (rt_text_len(needle) == I64{1}) -> return rt_text_find_byte(rt_text_data(value), rt_text_len(value), rt_text_byte(rt_text_data(needle)), start, last)
+    if (rt_text_len(needle) == I64{1}) {
+        return rt_text_find_byte(rt_text_data(value), rt_text_len(value), rt_text_byte(rt_text_data(needle)), start, last)
+    }
     rt_text_find_bytes(rt_text_data(value), rt_text_len(value), rt_text_data(needle), rt_text_len(needle), start, last)
 }
 
@@ -1013,7 +1037,7 @@ rt_text_find_byte: fn(data: I64, len: I64, target: I64, start: I64, last: Bool) 
         at := len
         loop at > start {
             at -= I64{1}
-            if (rt_text_byte(wrapping(data + at)) == target) -> return at
+            if (rt_text_byte(wrapping(data + at)) == target) { return at }
         }
         return I64{-1}
     }
@@ -1023,7 +1047,7 @@ rt_text_find_byte: fn(data: I64, len: I64, target: I64, start: I64, last: Bool) 
     loop at <= limit {
         word: rt_text_word(wrapping(data + at)).bit_xor(spread)
         found: wrapping(word - I64{72340172838076673}).bit_and(word.bit_not()).bit_and(I64{-9187201950435737472})
-        if (found != I64{0}) -> return wrapping(at + rt_text_low_byte(found))
+        if (found != I64{0}) { return wrapping(at + rt_text_low_byte(found)) }
         at += I64{8}
     }
     if (at < len && len >= I64{8}) {
@@ -1031,11 +1055,11 @@ rt_text_find_byte: fn(data: I64, len: I64, target: I64, start: I64, last: Bool) 
         low: I64{9187201950435737471}
         zero: wrapping(word.bit_and(low) + low).bit_or(word).bit_or(low).bit_not()
         found: (zero >> ((at - limit) * I64{8})).bit_and(wrapping((I64{1} << ((len - at) * I64{8})) - I64{1}))
-        if (found == I64{0}) -> return I64{-1}
+        if (found == I64{0}) { return I64{-1} }
         return wrapping(at + rt_text_low_byte(found))
     }
     loop at < len {
-        if (rt_text_byte(wrapping(data + at)) == target) -> return at
+        if (rt_text_byte(wrapping(data + at)) == target) { return at }
         at += I64{1}
     }
     I64{-1}
@@ -1077,9 +1101,11 @@ rt_text_find_paired: fn(data: I64, len: I64, pattern: I64, n: I64, start: I64) -
         loop k < back && rt_text_byte(wrapping(data + candidate + k)) == rt_text_byte(wrapping(pattern + k)) {
             k = wrapping(k + I64{1})
         }
-        if (k >= back) -> return candidate
+        if (k >= back) { return candidate }
         spent = wrapping(spent + k)
-        if (spent > wrapping(wrapping(candidate - start) * I64{2} + I64{256})) -> return wrapping(I64{-2} - candidate)
+        if (spent > wrapping(wrapping(candidate - start) * I64{2} + I64{256})) {
+            return wrapping(I64{-2} - candidate)
+        }
         at = wrapping(candidate + I64{1})
     }
     loop at <= limit {
@@ -1088,7 +1114,7 @@ rt_text_find_paired: fn(data: I64, len: I64, pattern: I64, n: I64, start: I64) -
             loop k < back && rt_text_byte(wrapping(data + at + k)) == rt_text_byte(wrapping(pattern + k)) {
                 k = wrapping(k + I64{1})
             }
-            if (k >= back) -> return at
+            if (k >= back) { return at }
         }
         at = wrapping(at + I64{1})
     }
@@ -1098,11 +1124,11 @@ rt_text_find_paired: fn(data: I64, len: I64, pattern: I64, n: I64, start: I64) -
 rt_text_find_bytes: fn(data: I64, len: I64, pattern: I64, n: I64, start: I64, last: Bool) -> I64 {
     if start > len || n > len - start -> return I64{-1}
     if (n == I64{0}) { return if last -> len else -> start }
-    if (n == I64{1}) -> return rt_text_find_byte(data, len, rt_text_byte(pattern), start, last)
+    if (n == I64{1}) { return rt_text_find_byte(data, len, rt_text_byte(pattern), start, last) }
     from := start
     if !last {
         found: rt_text_find_paired(data, len, pattern, n, start)
-        if (found >= I64{-1}) -> return found
+        if (found >= I64{-1}) { return found }
         from = wrapping(I64{-2} - found)
     }
     first: rt_text_maximal_suffix(pattern, n, last, true)
@@ -1176,7 +1202,7 @@ rt_text_find_bytes: fn(data: I64, len: I64, pattern: I64, n: I64, start: I64, la
 // after a propagated allocation failure.
 rt_text_with_length: fn(length: I64, capacity: I64) -> I64 {
     header: rt_text_builder_with_capacity(capacity)
-    if (header == I64{0}) -> return I64{0}
+    if (header == I64{0}) { return I64{0} }
     rt_text_store(wrapping(header + I64{8}), length)
     header
 }
@@ -1187,14 +1213,16 @@ rt_text_with_length: fn(length: I64, capacity: I64) -> I64 {
 // ir_text_builder): the builder, and the buffer it grows into
 // (alloc_grow_bytes), come from the allocator a `#Context(allocator:)` block
 // serves values from.
-#Export(c) jet_rt_string_builder_value: fn() -> I64 { rt_text_builder_from(I64{0}, alloc_user_current(I64{8})) }
+#Export(c) jet_rt_string_builder_value: fn() -> I64 {
+    rt_text_builder_from(I64{0}, alloc_user_current(I64{8}))
+}
 
 // The move of the text `value` (JetIR BuildMove.jet): an owner a younger
 // block's allocator served is copied into a fresh owner from the running
 // move's allocator, and this owner of it is released. A static text, a frame
 // view and an owner no younger than the destination stay.
 #Export(c) jet_rt_string_move: fn(value: I64) -> I64 {
-    if (value == I64{0} || rt_text_word(wrapping(value + I64{16})) <= I64{0}) -> return value
+    if (value == I64{0} || rt_text_word(wrapping(value + I64{16})) <= I64{0}) { return value }
     if !jet_rt_move_needed(value) -> return value
     rt_text_into(value, alloc_user_current(I64{8}))
 }
@@ -1204,8 +1232,10 @@ rt_text_with_length: fn(length: I64, capacity: I64) -> I64 {
 // `#Context(allocator:)` block serves values from, and released.
 #Export(c) jet_rt_string_serve: fn(value: I64) -> I64 {
     carrier: alloc_user_current(I64{8})
-    if (carrier == I64{0} || value == I64{0} || rt_text_word(wrapping(value + I64{16})) <= I64{0}) -> return value
-    if (alloc_user_owner(value) == carrier) -> return value
+    if (carrier == I64{0} || value == I64{0} || rt_text_word(wrapping(value + I64{16})) <= I64{0}) {
+        return value
+    }
+    if (alloc_user_owner(value) == carrier) { return value }
     rt_text_into(value, carrier)
 }
 
@@ -1215,7 +1245,7 @@ rt_text_with_length: fn(length: I64, capacity: I64) -> I64 {
 rt_text_into: fn(value: I64, carrier: I64) -> I64 {
     len: rt_text_len(value)
     moved: rt_text_builder_from(len, carrier)
-    if (moved == I64{0}) -> return value
+    if (moved == I64{0}) { return value }
     rt_text_bytes_copy(rt_text_data(moved), rt_text_data(value), len)
     rt_text_store(wrapping(moved + I64{8}), len)
     jet_rt_string_drop(value)
@@ -1229,21 +1259,23 @@ rt_text_into: fn(value: I64, carrier: I64) -> I64 {
 // Pushes `len` bytes the caller guarantees are UTF-8: a compiled program's
 // literal (JetIR Build.jet ir_static_text interns a String's bytes) or a
 // String's own data.
-#Export(c) jet_rt_string_builder_push_static: fn(target: I64, ptr: I64, len: I64) { rt_text_append(target, ptr, len) }
+#Export(c) jet_rt_string_builder_push_static: fn(target: I64, ptr: I64, len: I64) {
+    rt_text_append(target, ptr, len)
+}
 
 #Export(c) jet_rt_string_builder_finish: fn(target: I64) -> I64 { target }
 
 // Where `value.after(needle)` starts: just past the first `needle`, or 0.
 rt_text_after_start: fn(value: I64, needle: I64) -> I64 {
     found: rt_text_find(value, needle, I64{0}, false)
-    if (found < I64{0}) -> return I64{0}
+    if (found < I64{0}) { return I64{0} }
     found + rt_text_len(needle)
 }
 
 // Where `value.before(needle)` ends: at the first `needle`, or the length.
 rt_text_before_end: fn(value: I64, needle: I64) -> I64 {
     found: rt_text_find(value, needle, I64{0}, false)
-    if (found < I64{0}) -> return rt_text_len(value)
+    if (found < I64{0}) { return rt_text_len(value) }
     found
 }
 
@@ -1273,7 +1305,9 @@ rt_text_trim_end: fn(value: I64, start: I64) -> I64 {
     end := rt_text_len(value)
     loop end > start {
         at := end - I64{1}
-        loop at > start && (rt_text_byte(wrapping(data + at)).bit_and(I64{192})) == (I64{128}) -> at -= I64{1}
+        loop at > start && (rt_text_byte(wrapping(data + at)).bit_and(I64{192})) == (I64{128}) {
+            at -= I64{1}
+        }
         if !unicode_is_white_space(rt_text_decode(wrapping(data + at))) -> break
         end = at
     }
@@ -1284,7 +1318,7 @@ rt_text_trim: fn(value: I64) -> I64 {
     start: rt_text_trim_start(value)
     end: rt_text_trim_end(value, start)
     // Nothing to trim: the text is its own result, shared, not copied.
-    if (start == I64{0} && end == rt_text_len(value)) -> return jet_rt_string_clone(value)
+    if (start == I64{0} && end == rt_text_len(value)) { return jet_rt_string_clone(value) }
     rt_text_slice(value, start, end)
 }
 
@@ -1347,14 +1381,14 @@ rt_text_cut_views: fn(value: I64, found: I64, after: I64, cells: I64) -> I64 {
 // there is a cut; 0, cells untouched, when not.
 #Export(c) jet_rt_text_split_frame: fn(value: I64, separator: I64, cells: I64) -> I64 {
     found: rt_text_find(value, separator, I64{0}, false)
-    if (found < I64{0}) -> return I64{0}
+    if (found < I64{0}) { return I64{0} }
     rt_text_cut_views(value, found, wrapping(found + rt_text_len(separator)), cells)
 }
 
 // `value.cut_last(separator)` as frame views (rt_text_cut_views).
 #Export(c) jet_rt_text_cut_last_frame: fn(value: I64, separator: I64, cells: I64) -> I64 {
     found: rt_text_find(value, separator, I64{0}, true)
-    if (found < I64{0}) -> return I64{0}
+    if (found < I64{0}) { return I64{0} }
     rt_text_cut_views(value, found, wrapping(found + rt_text_len(separator)), cells)
 }
 
@@ -1363,7 +1397,9 @@ rt_text_push_word: fn(target: I64, word: I64, len: I64) {
     at := I64{0}
     loop at < len {
         rt_text_push_scalar(target, rest.bit_and(I64{255}))
-        if (jet_rt_session_propagate() != I64{0}) -> return
+        if (jet_rt_session_propagate() != I64{0}) {
+            return
+        }
         rest = rest >> I64{8}
         at += I64{1}
     }
@@ -1416,11 +1452,13 @@ rt_text_slice_range: fn(value: I64, start: I64, end: I64, exclusive: U8, file: I
         if (past <= prefix) {
             // An ASCII slice is counted already: its scalars are its bytes.
             part: rt_text_slice(value, start, past)
-            if (part != I64{0} && rt_text_cacheable(part, past - start)) -> rt_text_cache_store(part, past - start, past - start + I64{1})
+            if (part != I64{0} && rt_text_cacheable(part, past - start)) {
+                rt_text_cache_store(part, past - start, past - start + I64{1})
+            }
             return part
         }
         first = if (start <= prefix) -> start else -> rt_text_skip(data, len, prefix, start - prefix)
-        if (first >= I64{0}) -> at = rt_text_skip(data, len, first, end - start)
+        if (first >= I64{0}) { at = rt_text_skip(data, len, first, end - start) }
         if (at >= I64{0} && exclusive == U8{0}) {
             at = if at < len -> at + rt_text_width(wrapping(data + at)) else -> I64{-1}
         }
@@ -1517,9 +1555,9 @@ text_iter_pull: fn(state: I64, output: I64) -> Bool {
 // 1 stores the next piece, owned, at cell + 24; 0 is the end, or a piece
 // that could not be allocated (its stop is pending in the session).
 #Export(c) jet_rt_text_split_step: fn(text: I64, sep: I64, cell: I64) -> I64 {
-    if (rt_text_word(wrapping(cell + I64{16})) != I64{0}) -> return I64{0}
+    if (rt_text_word(wrapping(cell + I64{16})) != I64{0}) { return I64{0} }
     piece: text_split_piece(text, sep, cell)
-    if (piece == I64{0}) -> return I64{0}
+    if (piece == I64{0}) { return I64{0} }
     rt_text_store(wrapping(cell + I64{24}), piece)
     I64{1}
 }
@@ -1534,7 +1572,7 @@ text_iter_pull: fn(state: I64, output: I64) -> Bool {
 #Export(c) jet_rt_text_line_step: fn(text: I64, cell: I64) -> I64 {
     start: rt_text_word(cell)
     length: rt_text_len(text)
-    if (start >= length) -> return I64{0}
+    if (start >= length) { return I64{0} }
     data: rt_text_data(text)
     found: rt_text_find_byte(data, length, I64{10}, start, false)
     end := length
@@ -1545,7 +1583,7 @@ text_iter_pull: fn(state: I64, output: I64) -> Bool {
     }
     rt_text_store(cell, next)
     line: rt_text_slice(text, start, end)
-    if (line == I64{0}) -> return I64{0}
+    if (line == I64{0}) { return I64{0} }
     rt_text_store(wrapping(cell + I64{8}), line)
     I64{1}
 }
@@ -1639,7 +1677,7 @@ rt_c_string_stop: fn(kind: I64) {
         at += I64{1}
     }
     data: jet_rt_alloc(len + I64{1}, I64{1})
-    if (data == I64{0} && jet_rt_session_propagate() != I64{0}) -> return I64{0}
+    if (data == I64{0} && jet_rt_session_propagate() != I64{0}) { return I64{0} }
     rt_text_bytes_copy(data, source, len)
     rt_text_put(wrapping(data + len), I64{0})
     data

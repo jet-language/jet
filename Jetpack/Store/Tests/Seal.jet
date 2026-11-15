@@ -12,7 +12,7 @@ store_test_seal_fixture: fn(verification: &StoreVerification, roots: HangarRoots
         reference: "path:{name}",
         cache_identity: CacheIdentity{source_fingerprint: "seal-source", recipe_fingerprint: "seal-recipe", policy_fingerprint: "seal-policy", platform: pkg_host_platform()},
         references: [String]{},
-        outputs: [String: String]{"out": source},
+        outputs: [String:String]{"out": source},
         signature: "",
         provenance: "seal-test",
         platform_artifact_kind: platform_artifact_kind,
@@ -43,10 +43,13 @@ store_test_make_writable: fn(path: String) Never! {
     object: ingested.entry.out
     digest: ingested.entry.envelope.output_hash
     assert(files.is_dir(files.join(roots.hangar_dir(), "cas")))
-    assert_eq(if store_check_seal(verification, object, roots.hangar_dir()) == {
-        .Ok(found) -> found
-        .Err(error) -> panic("check")
-    }, Val(digest))
+    assert_eq(
+        if store_check_seal(verification, object, roots.hangar_dir()) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("check")
+        },
+        Val(digest),
+    )
     store_reset_verified_digest_hash_count(verification, object)
     assert_eq(store_try_entry_output_hash(verification, roots, ingested.entry) ?? panic("hash"), digest)
     assert_eq(store_verified_digest_hash_count(verification, object), 0)
@@ -82,10 +85,13 @@ store_test_make_writable: fn(path: String) Never! {
     store_reset_verified_digest_hash_count(verification, object)
     assert_eq((store_list_checked(verification, roots) ?? panic("listing")).len(), 1)
     assert_eq(store_verified_digest_hash_count(verification, object), 0)
-    assert_eq(if store_check_seal(verification, object, roots.hangar_dir()) == {
-        .Ok(found) -> found
-        .Err(error) -> panic("check")
-    }, Val(digest))
+    assert_eq(
+        if store_check_seal(verification, object, roots.hangar_dir()) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("check")
+        },
+        Val(digest),
+    )
     store_test_drop_roots(roots)
 }
 
@@ -136,10 +142,13 @@ store_test_make_writable: fn(path: String) Never! {
     ingested: store_test_seal_fixture(verification, roots, "audit", "seal-test")
     object: ingested.entry.out
     digest: ingested.entry.envelope.output_hash
-    assert_eq(if store_check_seal(verification, object, roots.hangar_dir()) == {
-        .Ok(found) -> found
-        .Err(error) -> panic("check")
-    }, Val(digest))
+    assert_eq(
+        if store_check_seal(verification, object, roots.hangar_dir()) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("check")
+        },
+        Val(digest),
+    )
     payload: files.join(object, "payload")
     store_test_make_writable(payload)
     seconds: store_test_mtime_seconds(payload)
@@ -162,30 +171,40 @@ store_test_make_writable: fn(path: String) Never! {
     digest: ingested.entry.envelope.output_hash
     hangar: roots.hangar_dir()
     store_arm_command_memo(verification)
-    assert_eq(if store_check_seal(verification, object, hangar) == {
-        .Ok(found) -> found
-        .Err(error) -> panic("check")
-    }, Val(digest))
+    assert_eq(
+        if store_check_seal(verification, object, hangar) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("check")
+        },
+        Val(digest),
+    )
     // Drift the tuple identity mid-command: one command holds one coherent
     // verified view so the memoized verdict stands.
     payload: files.join(object, "payload")
     store_test_set_mtime(payload, store_test_mtime_seconds(payload) + 7)
-    assert_eq(if store_check_seal(verification, object, hangar) == {
-        .Ok(found) -> found
-        .Err(error) -> panic("check")
-    }, Val(digest))
+    assert_eq(
+        if store_check_seal(verification, object, hangar) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("check")
+        },
+        Val(digest),
+    )
     // Forgetting the seal forgets the memo too.
     store_remove_seal(verification, object, hangar) ?? panic("remove seal")
-    assert((if store_check_seal(verification, object, hangar) == {
-        .Ok(found) -> found
-        .Err(error) -> panic("check")
-    }) == None)
+    assert(
+        (if store_check_seal(verification, object, hangar) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("check")
+        }) == None,
+    )
     store_disarm_command_memo(verification)
     // A fresh (unarmed) command keeps strict per-use drift detection.
-    assert((if store_check_seal(verification, object, hangar) == {
-        .Ok(found) -> found
-        .Err(error) -> panic("check")
-    }) == None)
+    assert(
+        (if store_check_seal(verification, object, hangar) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("check")
+        }) == None,
+    )
     store_test_drop_roots(roots)
 }
 
@@ -225,9 +244,9 @@ store_test_make_writable: fn(path: String) Never! {
     other_key: store_file_digest_key("other")
     keys: [String]{file_key, output_key, policy_key}
     loop key in keys {
-        store_verified_digest_put(verification, key, VerifiedDigestMemo{path: "object", stamp, digest: key})
+        store_verified_digest_put(verification, key, VerifiedDigestMemo{path: "object", stamp: stamp, digest: key})
     }
-    store_verified_digest_put(verification, other_key, VerifiedDigestMemo{path: "other", stamp, digest: "other-digest"})
+    store_verified_digest_put(verification, other_key, VerifiedDigestMemo{path: "other", stamp: stamp, digest: "other-digest"})
     assert_eq((store_verified_digest_get(verification, file_key) ?? panic("file memo")).digest, file_key)
     assert_eq((store_verified_digest_get(verification, output_key) ?? panic("output memo")).digest, output_key)
     assert_eq((store_verified_digest_get(verification, policy_key) ?? panic("policy memo")).digest, policy_key)
@@ -238,9 +257,7 @@ store_test_make_writable: fn(path: String) Never! {
     assert_eq(store_verified_digest_hash_count(verification, "object"), 0)
     assert(store_verified_digest_get(verification, file_key) == .Val(_))
     store_invalidate_verified_digest(verification, "object")
-    loop key in keys {
-        assert_eq(store_verified_digest_get(verification, key), None)
-    }
+    loop key in keys { assert_eq(store_verified_digest_get(verification, key), None) }
     assert_eq((store_verified_digest_get(verification, other_key) ?? panic("unrelated memo")).digest, "other-digest")
     other := StoreVerification.new()
     assert_eq(store_verified_digest_get(other, other_key), None)

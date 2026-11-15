@@ -8,6 +8,7 @@ vault_crypto_key_text: fn(key: I64, identity: Bool) -> I64 {
     _ := rt_age_key_encode(key, identity, rt_text_data(text))
     text
 }
+
 // Final native Text buffers are encoded directly; no temporary text/key copies.
 vault_crypto_keygen: fn(identity_out: I64, recipient_out: I64) -> I64 {
     scratch: jet_rt_alloc(I64{1632}, I64{8})
@@ -27,6 +28,7 @@ vault_crypto_keygen: fn(identity_out: I64, recipient_out: I64) -> I64 {
     rt_text_store(recipient_out, recipient)
     I64{0}
 }
+
 // Match str::trim using the shared Unicode White_Space facts on a borrowed span.
 // UTF-8 preflight is the seed read_to_string/from_str requirement, not lossy IO.
 vault_crypto_trim_start: fn(data: I64, length: I64) -> I64 {
@@ -38,12 +40,15 @@ vault_crypto_trim_start: fn(data: I64, length: I64) -> I64 {
     }
     start
 }
+
 vault_crypto_trim_end: fn(data: I64, start: I64, length: I64) -> I64 {
     end := length
     loop end > start {
         at := end - I64{1}
         loop {
-            if (at <= start || (rt_text_byte(wrapping(data + at)).bit_and(I64{192})) != I64{128}) -> break
+            if (at <= start || (rt_text_byte(wrapping(data + at)).bit_and(I64{192})) != I64{128}) {
+                break
+            }
             at -= I64{1}
         }
         if !unicode_is_white_space(rt_text_decode(wrapping(data + at))) -> break
@@ -51,6 +56,7 @@ vault_crypto_trim_end: fn(data: I64, start: I64, length: I64) -> I64 {
     }
     end
 }
+
 vault_crypto_decode_key: fn(text: I64, identity: Bool, out: I64) -> Bool {
     data: rt_text_data(text)
     length: rt_text_len(text)
@@ -59,6 +65,7 @@ vault_crypto_decode_key: fn(text: I64, identity: Bool, out: I64) -> Bool {
     end: vault_crypto_trim_end(data, start, length)
     rt_age_key_decode(wrapping(data + start), end - start, identity, out)
 }
+
 // Large per-recipient material is filled in the shared provider's permitted
 // spans. On failure wipe the ENTIRE attempted material, including prior spans.
 vault_crypto_entropy_span: fn(out: I64, count: I64) -> Bool {
@@ -73,26 +80,29 @@ vault_crypto_entropy_span: fn(out: I64, count: I64) -> Bool {
     }
     true
 }
+
 // Pool72: next byte offset0, random bytes8..71. It is private caller scratch,
 // not a second Rand adapter. Rejection sampling retains exact uniform ranges.
 vault_crypto_random_byte: fn(pool: I64) -> I64 {
     at := rt_text_word(pool)
     if (at == I64{64}) {
-        if (rt_crypto_entropy_fill(wrapping(pool + I64{8}), I64{64}) != I64{0}) -> return I64{-1}
+        if (rt_crypto_entropy_fill(wrapping(pool + I64{8}), I64{64}) != I64{0}) { return I64{-1} }
         at = I64{0}
     }
     byte: rt_text_byte(wrapping(wrapping(pool + I64{8}) + at))
     rt_text_store(pool, at + I64{1})
     byte
 }
+
 vault_crypto_uniform: fn(pool: I64, count: I64) -> I64 {
     limit: I64{256} - I64{256} % count
     loop {
         byte: vault_crypto_random_byte(pool)
-        if (byte < I64{0}) -> return I64{-1}
-        if (byte < limit) -> return byte % count
+        if (byte < I64{0}) { return I64{-1} }
+        if (byte < limit) { return byte % count }
     }
 }
+
 // age-core0.10.0 and340-376: tag1..8 graphic ASCII + -grease, args0..4 of1..8
 // graphic ASCII, body0..99 random bytes. Base64 is unpadded at64 columns; a
 // final short (possibly empty) line is always emitted.
@@ -103,30 +113,30 @@ vault_crypto_grease: fn(grease: I64, body: I64, encoded: I64, pool: I64) -> I64 
     rt_text_put(wrapping(grease + I64{1}), I64{62})
     rt_text_put(wrapping(grease + I64{2}), I64{32})
     tag_count: vault_crypto_uniform(pool, I64{8})
-    if (tag_count < I64{0}) -> return I64{-1}
+    if (tag_count < I64{0}) { return I64{-1} }
     at := I64{3}
     remaining := tag_count + I64{1}
     loop remaining > (I64{0}) {
         byte: vault_crypto_uniform(pool, I64{94})
-        if (byte < I64{0}) -> return I64{-1}
+        if (byte < I64{0}) { return I64{-1} }
         rt_text_put(wrapping(grease + at), I64{33} + byte)
         at += I64{1}
         remaining -= I64{1}
     }
-    rt_text_store(wrapping(grease + at), I64{28555834798794541}) // "-grease"
+    rt_text_store(wrapping(grease + at), I64{28555834798794541})  // "-grease"
     at += I64{7}
     args: vault_crypto_uniform(pool, I64{5})
-    if (args < I64{0}) -> return I64{-1}
+    if (args < I64{0}) { return I64{-1} }
     arg := I64{0}
     loop arg < args {
         rt_text_put(wrapping(grease + at), I64{32})
         at += I64{1}
         word_count: vault_crypto_uniform(pool, I64{8})
-        if (word_count < I64{0}) -> return I64{-1}
+        if (word_count < I64{0}) { return I64{-1} }
         remaining = word_count + I64{1}
         loop remaining > (I64{0}) {
             byte: vault_crypto_uniform(pool, I64{94})
-            if (byte < I64{0}) -> return I64{-1}
+            if (byte < I64{0}) { return I64{-1} }
             rt_text_put(wrapping(grease + at), I64{33} + byte)
             at += I64{1}
             remaining -= I64{1}
@@ -136,12 +146,12 @@ vault_crypto_grease: fn(grease: I64, body: I64, encoded: I64, pool: I64) -> I64 
     rt_text_put(wrapping(grease + at), I64{10})
     at += I64{1}
     body_count: vault_crypto_uniform(pool, I64{100})
-    if (body_count < I64{0}) -> return I64{-1}
-    if (rt_crypto_entropy_fill(body, body_count) != I64{0}) -> return I64{-1}
+    if (body_count < I64{0}) { return I64{-1} }
+    if (rt_crypto_entropy_fill(body, body_count) != I64{0}) { return I64{-1} }
     encoded_count: rt_age_b64_encode(body, body_count, encoded)
     offset := I64{0}
     loop {
-        if (encoded_count - offset < I64{64}) -> break
+        if (encoded_count - offset < I64{64}) { break }
         rt_text_bytes_copy(wrapping(grease + at), wrapping(encoded + offset), I64{64})
         rt_text_put(wrapping(wrapping(grease + at) + I64{64}), I64{10})
         offset += I64{64}
@@ -152,11 +162,12 @@ vault_crypto_grease: fn(grease: I64, body: I64, encoded: I64, pool: I64) -> I64 
     rt_text_put(wrapping(wrapping(grease + at) + tail), I64{10})
     at + tail + I64{1}
 }
+
 // Borrowed packed recipients32 * count and borrowed packed plaintext sequence.
 // The vault's recipients policy supplies count1..65535; this raw entry keeps its
 // bound before workspace arithmetic. Binary result adopts exact packed storage.
 vault_crypto_encrypt: fn(recipients: I64, count: I64, plaintext: I64, out: I64) -> I64 {
-    if (count < I64{1} || count > I64{65535}) -> return vault_error_new(I64{4}, I64{0}, I64{0})
+    if (count < I64{1} || count > I64{65535}) { return vault_error_new(I64{4}, I64{0}, I64{0}) }
     work_bytes: I64{2584} + count * I64{32}
     scratch: jet_rt_alloc(work_bytes, I64{8})
     file_key: wrapping(scratch + I64{2048})
@@ -196,6 +207,7 @@ vault_crypto_encrypt: fn(recipients: I64, count: I64, plaintext: I64, out: I64) 
     rt_text_store(out, result)
     I64{0}
 }
+
 // Private store failure mapping is Locked, exactly the seed persistence caller.
 // Cipher length safely bounds plaintext capacity, including multi-chunk files.
 vault_crypto_decrypt: fn(identity: I64, ciphertext: I64, out: I64) -> I64 {
@@ -226,11 +238,15 @@ vault_crypto_decrypt: fn(identity: I64, ciphertext: I64, out: I64) -> I64 {
 // same buffer/header adopts canonical packed U8 length/capacity in BYTES, whose
 // only stride is RT_HOST_U8_STRIDE.
 VAULT_RECIPIENT_SLOT_BYTES: I64{32}
+
 vault_recipient_slots_drop: fn(slots: I64) {
     capacity: rt_text_word(wrapping(slots + DATA_SEQUENCE_CAPACITY))
-    if (capacity != I64{0}) -> jet_rt_free(rt_text_word(wrapping(slots + DATA_SEQUENCE_DATA)), capacity * VAULT_RECIPIENT_SLOT_BYTES, I64{8})
+    if (capacity != I64{0}) {
+        jet_rt_free(rt_text_word(wrapping(slots + DATA_SEQUENCE_DATA)), capacity * VAULT_RECIPIENT_SLOT_BYTES, I64{8})
+    }
     jet_rt_free(slots, DATA_SEQUENCE_BYTES, I64{8})
 }
+
 vault_recipient_entries_drop: fn(entries: I64) {
     count: rt_text_word(wrapping(entries + DATA_SEQUENCE_LENGTH))
     data: rt_text_word(wrapping(entries + DATA_SEQUENCE_DATA))
@@ -240,9 +256,10 @@ vault_recipient_entries_drop: fn(entries: I64) {
         at += I64{1}
     }
     capacity: rt_text_word(wrapping(entries + DATA_SEQUENCE_CAPACITY))
-    if (capacity != I64{0}) -> jet_rt_free(data, capacity * VAULT_PAIR_BYTES, I64{8})
+    if (capacity != I64{0}) { jet_rt_free(data, capacity * VAULT_PAIR_BYTES, I64{8}) }
     jet_rt_free(entries, DATA_SEQUENCE_BYTES, I64{8})
 }
+
 // Stable sorted pair pointers retain original integer slot indices. Move each
 // permutation cycle in-place using one32-byte save span; the inactive sort array
 // becomes visited words, avoiding a second public-key array/copy of every owner.
@@ -276,6 +293,7 @@ vault_recipient_permute: fn(keys: I64, sorted: I64, visited: I64, count: I64, sc
         first += I64{1}
     }
 }
+
 vault_recipients_decode: fn(bytes: I64, length: I64, keys_out: I64, hash_out: I64) -> I64 {
     if !vault_utf8_valid(bytes, length) -> return vault_error_new(I64{8}, I64{0}, I64{0})
     entries: data_sequence_new(I64{0}, VAULT_PAIR_BYTES)
@@ -286,7 +304,7 @@ vault_recipients_decode: fn(bytes: I64, length: I64, keys_out: I64, hash_out: I6
     loop start < length {
         end := start
         loop end < length {
-            if (rt_text_byte(wrapping(bytes + end)) == I64{10}) -> break
+            if (rt_text_byte(wrapping(bytes + end)) == I64{10}) { break }
             end += I64{1}
         }
         begin: vault_crypto_trim_start(wrapping(bytes + start), end - start)
@@ -364,6 +382,7 @@ vault_recipients_decode: fn(bytes: I64, length: I64, keys_out: I64, hash_out: I6
     rt_text_store(keys_out, keys)
     I64{0}
 }
+
 vault_recipients_at_root: fn(root: I64, keys_out: I64, hash_out: I64) -> I64 {
     scratch: jet_rt_alloc(I64{56}, I64{8})
     rt_text_store(scratch, I64{3275089333088118131})

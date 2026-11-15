@@ -25,7 +25,9 @@ use jet_foundation.[
 
 sema_target_denial_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) Never! {
     denied: jet_target_machine_denied_effects(graph.target_machine)
-    if denied.len() == 0 -> return
+    if denied.len() == 0 {
+        return
+    }
     // Each checked function by key: its module result and its row there.
     // The roots are the entry module's `run` and every function an Output
     // links, the entries the artifact starts at (sema_liveness_is_root); a
@@ -36,10 +38,14 @@ sema_target_denial_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegist
         loop (row, function) in modules[module_index].functions {
             if slots.get(function.key) != None -> next
             slots[function.key] = SemaTargetSlot{module_index: module_index, row: row}
-            if function.name == "run" && function.module_identity == graph.entry_module_identity -> roots.push(function.key)
+            if function.name == "run" && function.module_identity == graph.entry_module_identity {
+                roots.push(function.key)
+            }
         }
     }
-    loop reference in graph.output_name_references -> roots.push(symbol_table_key(graph.symbols, reference.symbol.id))
+    loop reference in graph.output_name_references {
+        roots.push(symbol_table_key(graph.symbols, reference.symbol.id))
+    }
     // The functions the entry reaches through calls and function values,
     // in the order the walk first meets them.
     reached := [String]{}
@@ -156,7 +162,7 @@ sema_target_capability_check: fn(graph: SemaRegistrationGraph, core_usage: SemaC
                 if declared.contains(error) || reported.contains(error) -> next
                 diagnostic := jet_target_machine_error_diagnostic(machine, error)
                 if diagnostic.code != "E3311" -> next
-                reported.push(error.copy()) // copy: the validator's list keeps its row.
+                reported.push(error.copy())  // copy: the validator's list keeps its row.
                 diagnostic.span = Val(site.span)
                 found.push(diagnostic)
             }

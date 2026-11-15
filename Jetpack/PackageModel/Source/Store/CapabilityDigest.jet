@@ -13,6 +13,7 @@ use {
 }
 
 PKG_API_SNAPSHOT_VERSION: 4
+
 // The kind keywords a snapshot signature line starts with.
 PKG_API_SNAPSHOT_KINDS: [String]{"cap", "const", "distinct", "enum", "field", "fn", "impl", "require", "struct", "trait", "type", "unit", "variant"}
 
@@ -71,6 +72,7 @@ pkg_api_snapshot_render: fn(package: String, published_version: String, signatur
     body: if signatures.len() == 0 -> "" else -> "{signatures.join("\n")}\n"
     "api_version = {PKG_API_SNAPSHOT_VERSION}\npackage = {package}\npublished_version = {published_version}\n{body}"
 }
+
 pkg_capability_snapshot_text: fn(snapshots: [PackageCapabilitySnapshot]) -> String Never! {
     ordered := snapshots
     ordered.sort_by(fn(left: PackageCapabilitySnapshot, right: PackageCapabilitySnapshot) { left.package <=> right.package })
@@ -78,6 +80,7 @@ pkg_capability_snapshot_text: fn(snapshots: [PackageCapabilitySnapshot]) -> Stri
     loop snapshot in ordered -> parts.push("{snapshot.package}\n{snapshot.signatures.join("\n")}")
     parts.join("\n--\n")
 }
+
 pkg_project_capability_digest: fn(project_root: String) -[FS, Env]> String Never! {
     directory: sys.get(ENV_JET_API_CACHE_DIR) ?? files.join(project_root, ".jet/cache/api")
     entries := files.list_dir(directory) ?? return ""

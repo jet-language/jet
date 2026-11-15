@@ -1,4 +1,3 @@
-
 use {
     web: core.web
     http_client: core.http.client
@@ -12,9 +11,7 @@ Reading: struct {
     degrees: Int
 }
 
-any_origins: fn() -> HTTPCorsOrigins {
-    return .Any
-}
+any_origins: fn() -> HTTPCorsOrigins { return .Any }
 
 run: fn() {
     print(text.casefold("Straße"))
@@ -33,11 +30,11 @@ run: fn() {
     print("{decoded.city}|{request_decoded.degrees}|{request_content_type}|{response_text.text() ?? "invalid body"}")
     malformed: http_client.request("POST", "http://example.test/").body("{{")
     if malformed.json<Reading>() == {
-        .Ok(_) -> print("accepted")
+        .Ok(_) -> { print("accepted") }
         .Err(error) -> print(error)
     }
     if http_server.cors_policy(any_origins(), [], [], true) == {
-        .Ok(_) -> print("accepted")
+        .Ok(_) -> { print("accepted") }
         .Err(error) -> print(error)
     }
 }

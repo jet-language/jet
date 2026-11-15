@@ -19,38 +19,58 @@ use {
 
 // The run tier's cache states, in the order they are timed.
 RUN_CACHE_STATE_ORDER: ["repeat", "edited", "fresh_install"]
+
 // The cache states a run tier is gated on, in the order it settles them.
 GATED_STATE_ORDER: ["edited", "repeat"]
+
 // A Jet tier's verification timeout cap, in milliseconds, when
 // $JET_GAUNTLET_TIER_TIMEOUT_MS names no positive whole number.
 TIER_TIMEOUT_CAP_MS: 180000
+
 // How much of a failed run's stderr a reason keeps, and a timer sample.
 STAGE_REASON_LIMIT: 300
+
 SAMPLE_STDERR_LIMIT: 500
+
 // The timer sample metrics a valid sample holds positive, and its raw ones.
 SAMPLE_METRICS: ["wall_seconds", "peak_rss_kb", "time_to_first_stdout_seconds"]
+
 RAW_SAMPLE_METRICS: ["wall_time_ns", "time_to_first_stdout_ns"]
+
 // The source metrics every Jet tier carries from the Jet row.
 SOURCE_METRIC_NAMES: ["loc", "source_bytes", "tokens", "source_tokens"]
+
 // How long a service has to answer its readiness probe, and each probe.
 SERVICE_READY_MS: 10000
+
 READY_PROBE_MS: 500
+
 // How many times a service's measurement repeats all but its last probe.
 SERVICE_REPEATS: 50
+
 // How long a peer has to open its TCP port, in milliseconds.
 PEER_OPEN_MS: 5000
+
 // A service runs through `sh` so its stdin and stdout are /dev/null.
 QUIET_EXEC: "exec \"$@\" </dev/null >/dev/null"
+
 // The words and punctuation of a source, and its whitespace-separated runs.
 SOURCE_TOKEN: Regex{"[\p{{L}}\p{{N}}_]+|[^\s\p{{L}}\p{{N}}_]"}
+
 SOURCE_WORD: Regex{"\S+"}
+
 COMMAND_SPACE: Regex{"\s+"}
+
 // The separators of a web asset name's parts.
 ASSET_NAME_PART: Regex{"[._-]"}
+
 // The module references a web entry's scripts follow to its other assets.
 WEB_IMPORT_FROM: Regex{"\bimport\s*(?:(?:[\s\S]*?\sfrom\s*)?[\x22']([^\x22']+)[\x22'])"}
+
 WEB_EXPORT_FROM: Regex{"\bexport\s+(?:[\s\S]*?\sfrom\s*)[\x22']([^\x22']+)[\x22']"}
+
 WEB_DYNAMIC_IMPORT: Regex{"\bimport\s*\(\s*[\x22']([^\x22']+)[\x22']\s*\)"}
+
 WEB_ASSET_URL: Regex{"\bnew\s+URL\(\s*[\x22']([^\x22']+)[\x22']\s*,\s*import\.meta\.url\s*\)"}
 
 // How an entry is staged: the `jet` it builds and runs with, the runs each
@@ -75,9 +95,7 @@ Shell: enum {
 }
 
 // The shell `entry` asks its configured commands to run in.
-entry_shell: fn(entry: Dyn) -> Shell {
-    if is_true(entry, "spec/fullShell") -> .Full else -> .Plain
-}
+entry_shell: fn(entry: Dyn) -> Shell { if is_true(entry, "spec/fullShell") -> .Full else -> .Plain }
 
 // What every staged command runs with, and how far the launcher's clock runs
 // ahead of this program's.
@@ -182,7 +200,9 @@ stage_entry: fn(repo_dir: String, entry_dir: String, entry: Dyn, run_dir: String
     service_mode: mode == "service"
     expected_name: if member(entry, "spec/expected") == .Val(named) -> js_text(named) else -> "expected.out"
     expected_path: path_joined(entry_dir, expected_name)
-    if !service_mode && !files.exists(expected_path) -> return Ok(broken_entry(entry, languages_value, languages, options, "missing expected output", provenance))
+    if !service_mode && !files.exists(expected_path) {
+        return Ok(broken_entry(entry, languages_value, languages, options, "missing expected output", provenance))
+    }
     if !service_mode -> provenance["expected_sha256"] = Dyn.Text(file_sha256(expected_path))
     expected: if service_mode -> [U8]{} else -> files.read_bytes(expected_path)
     fixture: dyn_at(entry, "spec/fixtureGen")
@@ -192,19 +212,25 @@ stage_entry: fn(repo_dir: String, entry_dir: String, entry: Dyn, run_dir: String
     if truthy(Val(fixture)) {
         script: js_text(dyn_at(fixture, "script"))
         fixture_dir: path_joined(entry_dir, files.dirname(script))
-        if !files.exists(fixture_dir) -> return Ok(broken_entry(entry, languages_value, languages, options, "missing fixture directory {script}", provenance))
+        if !files.exists(fixture_dir) {
+            return Ok(broken_entry(entry, languages_value, languages, options, "missing fixture directory {script}", provenance))
+        }
         copy_path(fixture_dir, common_fixtures)
         files.create_dir_all(files.dirname(path_joined(entry_stage, fixture_out)))
         cache: sys.get("JET_GAUNTLET_FIXTURE_CACHE") ?? ""
         if {
             cache != "" -> {
                 cached: path_joined(cache, "{name}/{fixture_out}")
-                if !files.exists(cached) -> return Ok(broken_entry(entry, languages_value, languages, options, "fixture cache is missing {name}/{fixture_out}", provenance))
+                if !files.exists(cached) {
+                    return Ok(broken_entry(entry, languages_value, languages, options, "fixture cache is missing {name}/{fixture_out}", provenance))
+                }
                 copy_path(cached, path_joined(entry_stage, fixture_out))
             }
             else -> {
                 ran: run_in(s, entry_stage, ["python3", script, fixture_out.copy()], .Plain, s.timeout_ms)
-                if ran.code != 0 -> return Ok(broken_entry(entry, languages_value, languages, options, "fixture generator exit {ran.code}: {limited(ran.stderr.trim(), STAGE_REASON_LIMIT)}", provenance))
+                if ran.code != 0 {
+                    return Ok(broken_entry(entry, languages_value, languages, options, "fixture generator exit {ran.code}: {limited(ran.stderr.trim(), STAGE_REASON_LIMIT)}", provenance))
+                }
             }
         }
         generated = path_joined(entry_stage, fixture_out)
@@ -219,7 +245,9 @@ stage_entry: fn(repo_dir: String, entry_dir: String, entry: Dyn, run_dir: String
     tiers: jet_tiers(st, rows, jet_reset, options)
     ready := true
     loop rule in tier_policy(mode) {
-        if rule.required && !(dyn_at(tiers, "{rule.tier}/status") == Dyn.Text("ok")) -> ready = false
+        if rule.required && !(dyn_at(tiers, "{rule.tier}/status") == Dyn.Text("ok")) {
+            ready = false
+        }
     }
     loop language in languages {
         status: dyn_at(rows, "{language}/status")
@@ -349,7 +377,9 @@ stage_row: fn(st: Staging, language: String, jet_reset: &Reset) -> Dyn IOError! 
         return Ok(row)
     }
     if source_file == "" -> return Ok(disqualified(row, "unsupported language"))
-    if !files.exists(path_joined(source_dir, source_file)) -> return Ok(disqualified(row, "missing {language}/{source_file}"))
+    if !files.exists(path_joined(source_dir, source_file)) {
+        return Ok(disqualified(row, "missing {language}/{source_file}"))
+    }
     source_tree_sha256: tree_sha256(source_dir)
     if !measures(st, language) {
         row["status"] = Dyn.Text("unavailable")
@@ -373,7 +403,9 @@ stage_row: fn(st: Staging, language: String, jet_reset: &Reset) -> Dyn IOError! 
     expected_name: files.basename(st.expected_path)
     loop item in files.list_dir(st.entry_dir) {
         full: files.join(st.entry_dir, item.name)
-        if item.is_dir || files.is_symlink(full) || !files.is_file(full) || item.name == "entry.json" || item.name == expected_name -> next
+        if item.is_dir || files.is_symlink(full) || !files.is_file(full) || item.name == "entry.json" || item.name == expected_name {
+            next
+        }
         files.copy(full, files.join(staged, item.name))
     }
     fixture_reset := no_reset()
@@ -383,11 +415,13 @@ stage_row: fn(st: Staging, language: String, jet_reset: &Reset) -> Dyn IOError! 
     }
     peer: dyn_at(st.entry, "spec/peer")
     peer_script: js_text(dyn_at(peer, "script"))
-    if truthy(Val(peer)) && !copy_relative_file(st.entry_dir, staged, peer_script) -> return Ok(disqualified(row, "missing peer script {peer_script}"))
+    if truthy(Val(peer)) && !copy_relative_file(st.entry_dir, staged, peer_script) {
+        return Ok(disqualified(row, "missing peer script {peer_script}"))
+    }
     if st.mode != "service" -> files.copy(st.expected_path, files.join(staged, expected_name))
     web_mode: st.mode == "web" || st.mode == "web-app"
     build: if web_mode -> configured_build(st.s, language, staged, st.entry) else -> build_and_measure(st.s, language, staged, command_from_spec(language_spec_value(member(st.entry, "spec/build") ?? Dyn.Null, language), language, st.s.jet_bin, None))
-    row["build"] = if build.build == .Null -> Dyn.Null else -> merged(Dyn{[String: Dyn]{"command": words(build.command ?? [])}}, build.build)
+    row["build"] = if build.build == .Null -> Dyn.Null else -> merged(Dyn{[String:Dyn]{"command": words(build.command ?? [])}}, build.build)
     metrics: source_metrics(source_dir, source_file)
     row["metrics"] = metrics.copy()
     provenance := Dyn.object()
@@ -461,7 +495,9 @@ stage_service: fn(st: Staging, language: String, staged: String, artifact: Strin
     metrics["cleanExit"] = member(service, "cleanExit") ?? Dyn.Bool(false)
     metrics["exitCode"] = or_null(service, "exitCode")
     row["metrics"] = metrics
-    if truthy_at(service, "failure") -> return failed(row, "service_probe_sequence", js_text(dyn_at(service, "failure")))
+    if truthy_at(service, "failure") {
+        return failed(row, "service_probe_sequence", js_text(dyn_at(service, "failure")))
+    }
     row["status"] = Dyn.Text("ok")
     passed(row, "service_probe_sequence")
 }
@@ -632,7 +668,7 @@ jet_tiers: fn(st: Staging, rows: Dyn, jet_reset: Reset, options: StageOptions) -
     peer_failure := ""
     if truthy(Val(peer)) && jet_source {
         if start_peer(st.s, jet_dir, peer) == {
-            .Ok(started) -> peer_service = Val(started)
+            .Ok(started) -> { peer_service = Val(started) }
             .Err(error) -> peer_failure = "peer unavailable: {error.message}"
         }
     }
@@ -750,7 +786,9 @@ tier_prefix: fn(jet_bin: String, tier: String) -> [String] {
 // entry's one run.
 tier_commands: fn(st: Staging, tier: String) -> [[String]] {
     prefix: tier_prefix(st.s.jet_bin, tier)
-    if st.mode == "batch-steps" -> return items_at(st.entry, "spec/steps").map(fn(step) { prefix.concat(words_of(step)) })
+    if st.mode == "batch-steps" {
+        return items_at(st.entry, "spec/steps").map(fn(step) { prefix.concat(words_of(step)) })
+    }
     [prefix.concat(words_of(dyn_at(st.entry, "spec/args")))]
 }
 
@@ -855,7 +893,9 @@ settle_run_tier: fn(tier: &Dyn, metric: String, source_metrics: Dyn, kind: Strin
     }
     slower := gated[0].copy()
     loop state in gated[1..<gated.len()] {
-        if (number_at(state, "metrics/{metric}") ?? 0.0) > (number_at(slower, "metrics/{metric}") ?? 0.0) -> slower = state.copy()
+        if (number_at(state, "metrics/{metric}") ?? 0.0) > (number_at(slower, "metrics/{metric}") ?? 0.0) {
+            slower = state.copy()
+        }
     }
     tier["cache_state"] = dyn_at(slower, "cache_state")
     tier["runtime"] = dyn_at(slower, "runtime")
@@ -893,12 +933,18 @@ timer_sample: fn(run: ToolRun) -> Dyn {
     parsed: parse_json(run.stdout.trim()) ?? Dyn.Null
     object: parsed == .Object(_)
     sample := if object -> parsed else -> Dyn.object()
-    if !object -> sample["error"] = Dyn.Text(if run.stdout != "" -> limited(run.stdout, STAGE_REASON_LIMIT) else -> limited(run.stderr, STAGE_REASON_LIMIT))
-    if run.code != 0 && value_at(sample, "exit_code") == None -> sample["exit_code"] = Dyn.Int(run.code)
+    if !object {
+        sample["error"] = Dyn.Text(if run.stdout != "" -> limited(run.stdout, STAGE_REASON_LIMIT) else -> limited(run.stderr, STAGE_REASON_LIMIT))
+    }
+    if run.code != 0 && value_at(sample, "exit_code") == None {
+        sample["exit_code"] = Dyn.Int(run.code)
+    }
     sample["stderr"] = Dyn.Text(limited(run.stderr.trim(), SAMPLE_STDERR_LIMIT))
     schema: value_at(sample, "schema")
     if !(dyn_at(sample, "schema") == Dyn.Text(TIMER_SCHEMA)) {
-        if member(sample, "error") == None -> sample["error"] = Dyn.Text("timer schema is {json_shown(schema)}; expected {TIMER_SCHEMA}")
+        if member(sample, "error") == None {
+            sample["error"] = Dyn.Text("timer schema is {json_shown(schema)}; expected {TIMER_SCHEMA}")
+        }
         if member(sample, "exit_code") == None -> sample["exit_code"] = Dyn.Int(run.code)
     }
     sample
@@ -925,7 +971,9 @@ verify_steps: fn(s: Stager, cwd: String, commands: [[String]], expected: [U8], r
     Ok(byte_mismatch(expected, output))
 }
 
-failed_run: fn(run: ToolRun) -> String { "exit {run.code}: {limited(run.stderr.trim(), STAGE_REASON_LIMIT)}" }
+failed_run: fn(run: ToolRun) -> String {
+    "exit {run.code}: {limited(run.stderr.trim(), STAGE_REASON_LIMIT)}"
+}
 
 // The samples of `count` timed runs of `command`, each after `before`.
 measure_runs: fn(s: Stager, cwd: String, command: [String], count: Int, shell: Shell, before: &Before, receipt: Dyn) -> Dyn IOError! {
@@ -967,7 +1015,9 @@ before_runs: fn(reset: Reset) -> Before {
     Before{reset: reset, cache_state: "", script: "", original: "", cache_home: "", edits: 0}
 }
 
-no_reset: fn() -> Reset { Reset{state_dir: "", fixture_target: "", fixture_source: "", make_parent: false} }
+no_reset: fn() -> Reset {
+    Reset{state_dir: "", fixture_target: "", fixture_source: "", make_parent: false}
+}
 
 // Runs `before`'s reset, then readies its cache state.
 prepare: fn(before: &Before) IOError! {
@@ -987,7 +1037,9 @@ prepare: fn(before: &Before) IOError! {
 // Restores `reset`'s state directory from its baseline, then its fixture.
 restore: fn(reset: Reset) IOError! {
     if reset.state_dir != "" {
-        loop item in files.list_dir(reset.state_dir) -> files.remove_all(files.join(reset.state_dir, item.name))
+        loop item in files.list_dir(reset.state_dir) {
+            files.remove_all(files.join(reset.state_dir, item.name))
+        }
         copy_path("{reset.state_dir}.baseline", reset.state_dir)
     }
     if reset.fixture_target != "" {
@@ -1040,7 +1092,9 @@ build_and_measure: fn(s: Stager, language: String, source_dir: String, override:
     warm: if int_at(cold, "exit_code") == Val(0) -> timed(s, source_dir, command, .Plain) else -> Dyn.Null
     artifact: if base == "jet" -> discover_jet_artifact(source_dir) else -> path_joined(source_dir, compiled_name(base))
     failure := build_failure(cold, warm)
-    if failure == "" && (artifact == "" || !files.exists(artifact)) -> failure = "build produced no executable"
+    if failure == "" && (artifact == "" || !files.exists(artifact)) {
+        failure = "build produced no executable"
+    }
     Ok(BuildResult{command: Val(command), build: build_samples(cold, warm), artifact: artifact, failure: failure})
 }
 
@@ -1148,7 +1202,9 @@ command_from_spec: fn(value: Dyn, language: String, jet_bin: String, fallback: [
     if value == .Null -> return fallback.copy()
     command := if value == .Array(_) -> words_of(value) else -> COMMAND_SPACE.split(js_text(value).trim())
     if command.len() > 0 && command[0] == "jet" -> command[0] = jet_bin.copy()
-    if language == "jet" && command.len() > 0 && command[0] == "build" -> command = [jet_bin.copy()].concat(command)
+    if language == "jet" && command.len() > 0 && command[0] == "build" {
+        command = [jet_bin.copy()].concat(command)
+    }
     Val(command)
 }
 
@@ -1171,11 +1227,17 @@ words: fn(command: [String]) -> Dyn { Dyn.Array(command.map(fn(word) { Dyn.Text(
 summarize_samples: fn(samples: [Dyn]) -> Dyn {
     valid: samples.len() > 0 && samples.all(fn(sample) { valid_sample(sample) })
     medians := Dyn.object()
-    loop metric in SAMPLE_METRICS -> medians[metric] = if valid -> median_of(field_values(samples, metric)) else -> Dyn.Null
+    loop metric in SAMPLE_METRICS {
+        medians[metric] = if valid -> median_of(field_values(samples, metric)) else -> Dyn.Null
+    }
     raw_medians := Dyn.object()
-    loop metric in RAW_SAMPLE_METRICS -> raw_medians[metric] = if valid -> median_of(field_values(samples, metric)) else -> Dyn.Null
+    loop metric in RAW_SAMPLE_METRICS {
+        raw_medians[metric] = if valid -> median_of(field_values(samples, metric)) else -> Dyn.Null
+    }
     noise_metrics := Dyn.object()
-    loop metric in SAMPLE_METRICS.concat(RAW_SAMPLE_METRICS) -> noise_metrics[metric] = noise_summary(field_values(samples, metric))
+    loop metric in SAMPLE_METRICS.concat(RAW_SAMPLE_METRICS) {
+        noise_metrics[metric] = noise_summary(field_values(samples, metric))
+    }
     noise := Dyn.object()
     noise["method"] = Dyn.Text("sample_range_over_median")
     noise["metrics"] = noise_metrics
@@ -1271,7 +1333,9 @@ source_metrics: fn(source_dir: String, filename: String) -> Dyn IOError! {
     loc := 0
     loop line in source.split("\n") {
         trimmed: line.trim()
-        if trimmed == "" || ["//", "/*", "*", "# ", "#!"].any(fn(prefix) { trimmed.starts_with(prefix) }) || (python && trimmed.starts_with("#")) -> next
+        if trimmed == "" || ["//", "/*", "*", "# ", "#!"].any(fn(prefix) { trimmed.starts_with(prefix) }) || (python && trimmed.starts_with("#")) {
+            next
+        }
         loc += 1
     }
     out := Dyn.object()
@@ -1345,7 +1409,9 @@ measured_asset: fn(name: String) -> Bool {
 record_tree: fn(source_dir: String, dir: String, found: &[WebFile]) IOError! {
     loop item in files.list_dir(dir) {
         full: files.join(dir, item.name)
-        if item.is_dir -> record_tree(source_dir, full, found) else -> record_asset(source_dir, full, found)
+        if item.is_dir -> record_tree(source_dir, full, found) else {
+            record_asset(source_dir, full, found)
+        }
     }
 }
 
@@ -1353,10 +1419,14 @@ record_asset: fn(source_dir: String, file: String, found: &[WebFile]) IOError! {
     identity: files.normalize(file)
     relative: files.relative(identity, source_dir)
     loop known in found {
-        if known.path == relative -> return
+        if known.path == relative {
+            return
+        }
     }
     name: files.basename(identity)
-    if !measured_asset(name) -> return
+    if !measured_asset(name) {
+        return
+    }
     found.push(WebFile{path: relative, bytes: files.stat(identity).size, kind: if name.lower().ends_with(".wasm") -> "wasm" else -> "script"})
 }
 
@@ -1364,11 +1434,15 @@ record_asset: fn(source_dir: String, file: String, found: &[WebFile]) IOError! {
 // imports, exports from or loads by URL, once each.
 visit_module: fn(source_dir: String, file: String, harness_entry: String, seen: &[String], found: &[WebFile]) IOError! {
     identity: files.normalize(file)
-    if seen.contains(identity) -> return
+    if seen.contains(identity) {
+        return
+    }
     seen.push(identity.copy())
     if identity != harness_entry -> record_asset(source_dir, identity, found)
     name: files.basename(identity)
-    if !(name.ends_with(".js") || name.ends_with(".mjs")) -> return
+    if !(name.ends_with(".js") || name.ends_with(".mjs")) {
+        return
+    }
     source: String.from_bytes_lossy(files.read_bytes(identity))
     loop pattern in [WEB_IMPORT_FROM, WEB_EXPORT_FROM, WEB_DYNAMIC_IMPORT, WEB_ASSET_URL] {
         loop found_match in pattern.matches(source) {
@@ -1442,7 +1516,9 @@ run_service: fn(s: Stager, entry: Dyn, cwd: String, prefix: [String], runs: Int)
         last: probes[probes.len() - 1]
         shutdown: service_probe(port, last, protocol)
         latencies.push(number_at(shutdown, "latencyMs") ?? 0.0)
-        if !probe_matches(last, shutdown, Dyn.Text(protocol.copy())) -> measurement = "shutdown probe failed: {or_text(member(shutdown, "error"), "response mismatch")}"
+        if !probe_matches(last, shutdown, Dyn.Text(protocol.copy())) {
+            measurement = "shutdown probe failed: {or_text(member(shutdown, "error"), "response mismatch")}"
+        }
     }
     exit: wait_for_exit(service, 5000)
     if exit.code == None -> stop_process(service)
@@ -1491,7 +1567,9 @@ verify_service: fn(s: Stager, cwd: String, prefix: [String], shell: Shell, confi
     }
     failure := probe_sequence(port, probes, protocol)
     first: wait_for_exit(service, 1000)
-    if first.code != Val(0) && failure == "" -> failure = "verification service exit {exit_shown(first)}"
+    if first.code != Val(0) && failure == "" {
+        failure = "verification service exit {exit_shown(first)}"
+    }
     if first.code == None {
         if failure == "" -> failure = "verification shutdown did not produce a clean exit"
         stop_process(service)
@@ -1529,7 +1607,9 @@ startup_sample: fn(s: Stager, cwd: String, prefix: [String], shell: Shell, confi
 probe_sequence: fn(port: Int, probes: [Dyn], protocol: String) -> String {
     loop index in 0..<probes.len() {
         result: service_probe(port, probes[index], protocol)
-        if !probe_matches(probes[index], result, Dyn.Text(protocol.copy())) -> return "probe {index} failed: {probe_mismatch(probes[index], result, protocol)}"
+        if !probe_matches(probes[index], result, Dyn.Text(protocol.copy())) {
+            return "probe {index} failed: {probe_mismatch(probes[index], result, protocol)}"
+        }
     }
     ""
 }
@@ -1572,19 +1652,25 @@ wait_for_ready: fn(service: &Service, port: Int, config: Dyn, report: String, of
     loop started.elapsed_millis() < SERVICE_READY_MS {
         if ended(service) {
             exit: wait_for_exit(service, 1000)
-            if exit.code == .Val(code) -> return Err(if exit.stderr != "" -> "service exited {code}: {exit.stderr}" else -> "service exited {code}")
+            if exit.code == .Val(code) {
+                return Err(if exit.stderr != "" -> "service exited {code}: {exit.stderr}" else -> "service exited {code}")
+            }
         }
         if {
             protocol == "line" -> {
                 ready: member(config, "ready") ?? default_ready()
                 result: line_probe(port, ready, READY_PROBE_MS)
-                if truthy_at(result, "ok") && strictly_equal(value_at(result, "body"), value_at(ready, "expect")) -> return answered(report, offset_ns)
+                if truthy_at(result, "ok") && strictly_equal(value_at(result, "body"), value_at(ready, "expect")) {
+                    return answered(report, offset_ns)
+                }
             }
             else -> {
                 probe := Dyn.object()
                 probe["method"] = Dyn.Text("GET")
                 probe["path"] = dyn_at(config, "readyPath")
-                if truthy_at(http_probe(port, probe, READY_PROBE_MS), "ok") -> return answered(report, offset_ns)
+                if truthy_at(http_probe(port, probe, READY_PROBE_MS), "ok") {
+                    return answered(report, offset_ns)
+                }
             }
         }
     }
@@ -1661,16 +1747,16 @@ stop_peer: fn(peer: Service?) {
 }
 
 // Whether the service has exited.
-ended: fn(service: &Service) -> Bool {
-    service.exit != None || (service.child.exited() ?? true)
-}
+ended: fn(service: &Service) -> Bool { service.exit != None || (service.child.exited() ?? true) }
 
 // How the service ended, once it does within `timeout_ms`.
 wait_for_exit: fn(service: &Service, timeout_ms: Int) -> ServiceExit {
     if service.exit == .Val(known) -> return known.copy()
     started: time.instant()
     loop !(service.child.exited() ?? true) {
-        if started.elapsed_millis() >= timeout_ms -> return ServiceExit{code: None, signal: "TIMEOUT", stderr: ""}
+        if started.elapsed_millis() >= timeout_ms {
+            return ServiceExit{code: None, signal: "TIMEOUT", stderr: ""}
+        }
         time.sleep(time.duration_ms(PROCESS_POLL_MS))
     }
     exit: if service.child.wait() == {
@@ -1689,7 +1775,9 @@ stop_process: fn(service: &Service) {
         signal_process_tree(pids, "TERM")
         if !processes_ended(pids, 5000) {
             signal_process_tree(pids, "KILL")
-            if !processes_ended(pids, 1000) -> eprint("WARN process {service.child.id()} outlived its KILL")
+            if !processes_ended(pids, 1000) {
+                eprint("WARN process {service.child.id()} outlived its KILL")
+            }
         }
     }
     wait_for_exit(service, 1000).drop("a stopped process is reaped whether or not it ends within a second")

@@ -28,37 +28,38 @@ use {
 /// own codes; the rest are the module codes mbedtls passes through.
 #Error
 CipherLayerError: enum {
-    /// MBEDTLS_ERR_CIPHER_FEATURE_UNAVAILABLE (-0x6080): the call does not
-    /// apply to the cipher's mode, or an IV longer than 16 bytes.
     FeatureUnavailable
-    /// MBEDTLS_ERR_CIPHER_BAD_INPUT_DATA (-0x6100): a wrong key length, a
-    /// short IV, a call in the wrong direction or before setkey.
     BadInputData
-    /// MBEDTLS_ERR_CIPHER_INVALID_PADDING (-0x6200).
     InvalidPadding
-    /// MBEDTLS_ERR_CIPHER_FULL_BLOCK_EXPECTED (-0x6280): ECB input that is
-    /// not one block, or CBC data that does not end on a block without
-    /// padding.
     FullBlockExpected
-    /// MBEDTLS_ERR_CIPHER_AUTH_FAILED (-0x6300): a tag or key-wrap
-    /// integrity check did not verify.
     AuthFailed
-    /// MBEDTLS_ERR_AES_INVALID_INPUT_LENGTH (-0x0022): an XTS data unit
-    /// outside 16 bytes to 2^24 bytes.
     AESInvalidInputLength
-    /// MBEDTLS_ERR_GCM_BAD_INPUT (-0x0014): an empty IV, a tag length
-    /// outside 4..16, or data past the GCM limits or after the AAD closed.
     GCMBadInput
-    /// MBEDTLS_ERR_CCM_BAD_INPUT (-0x000D): a nonce, length or call order
-    /// the CCM state machine refuses.
     CCMBadInput
-    /// MBEDTLS_ERR_CHACHAPOLY_BAD_STATE (-0x0054): AAD after data, or data
-    /// or a tag before the AAD started.
     ChaChaPolyBadState
-    /// MBEDTLS_ERR_CHACHA20_BAD_INPUT_DATA (-0x0051): a ChaCha20-Poly1305
-    /// nonce that is not 12 bytes, or data past the block counter's end.
     ChaCha20BadInput
 }
+
+/// MBEDTLS_ERR_CIPHER_FEATURE_UNAVAILABLE (-0x6080): the call does not
+/// apply to the cipher's mode, or an IV longer than 16 bytes.
+/// MBEDTLS_ERR_CIPHER_BAD_INPUT_DATA (-0x6100): a wrong key length, a
+/// short IV, a call in the wrong direction or before setkey.
+/// MBEDTLS_ERR_CIPHER_INVALID_PADDING (-0x6200).
+/// MBEDTLS_ERR_CIPHER_FULL_BLOCK_EXPECTED (-0x6280): ECB input that is
+/// not one block, or CBC data that does not end on a block without
+/// padding.
+/// MBEDTLS_ERR_CIPHER_AUTH_FAILED (-0x6300): a tag or key-wrap
+/// integrity check did not verify.
+/// MBEDTLS_ERR_AES_INVALID_INPUT_LENGTH (-0x0022): an XTS data unit
+/// outside 16 bytes to 2^24 bytes.
+/// MBEDTLS_ERR_GCM_BAD_INPUT (-0x0014): an empty IV, a tag length
+/// outside 4..16, or data past the GCM limits or after the AAD closed.
+/// MBEDTLS_ERR_CCM_BAD_INPUT (-0x000D): a nonce, length or call order
+/// the CCM state machine refuses.
+/// MBEDTLS_ERR_CHACHAPOLY_BAD_STATE (-0x0054): AAD after data, or data
+/// or a tag before the AAD started.
+/// MBEDTLS_ERR_CHACHA20_BAD_INPUT_DATA (-0x0051): a ChaCha20-Poly1305
+/// nonce that is not 12 bytes, or data past the block counter's end.
 
 // The DES, ARIA and Camellia modes fail only on lengths this layer always
 // passes whole, and on stream offsets it keeps in range.
@@ -313,36 +314,30 @@ keyed_base: fn(info: CipherInfo, key: [U8], decrypt: Bool) -> CipherBase CipherL
     mode: info.mode
     if info.id == {
         .Null -> Ok(CipherBase.Unset)
-        .AES -> {
-            if mode == {
-                .XTS -> {
-                    xk: cipher.xts_key(key, decrypt) ?? return Err(.BadInputData)
-                    Ok(CipherBase.XTS(xk))
-                }
-                .GCM -> Ok(CipherBase.GCMAES(GCMContext<cipher.AESKey>{key: aead.gcm_key(aes_schedule(key, false)), st: aead.gcm_state()}))
-                .CCM | .CCMStarNoTag -> Ok(CipherBase.CCMAES(CCMContext<cipher.AESKey>{key: aes_schedule(key, false), st: aead.ccm_state()}))
-                .KW | .KWP -> Ok(CipherBase.KW(aes_schedule(key, decrypt)))
-                .ECB | .CBC | .CFB | .OFB | .CTR | .Stream | .ChaChaPoly -> Ok(CipherBase.AES(aes_schedule(key, decrypt)))
+        .AES -> if mode == {
+            .XTS -> {
+                xk: cipher.xts_key(key, decrypt) ?? return Err(.BadInputData)
+                Ok(CipherBase.XTS(xk))
+            }
+            .GCM -> Ok(CipherBase.GCMAES(GCMContext<cipher.AESKey>{key: aead.gcm_key(aes_schedule(key, false)), st: aead.gcm_state()}))
+            .CCM | .CCMStarNoTag -> Ok(CipherBase.CCMAES(CCMContext<cipher.AESKey>{key: aes_schedule(key, false), st: aead.ccm_state()}))
+            .KW | .KWP -> Ok(CipherBase.KW(aes_schedule(key, decrypt)))
+            .ECB | .CBC | .CFB | .OFB | .CTR | .Stream | .ChaChaPoly -> Ok(CipherBase.AES(aes_schedule(key, decrypt)))
+        }
+        .Camellia -> if mode == {
+            .GCM -> Ok(CipherBase.GCMCamellia(GCMContext<block128.CamelliaKey>{key: aead.gcm_key(block128.camellia_setkey_enc(key)), st: aead.gcm_state()}))
+            .CCM | .CCMStarNoTag -> Ok(CipherBase.CCMCamellia(CCMContext<block128.CamelliaKey>{key: block128.camellia_setkey_enc(key), st: aead.ccm_state()}))
+            .ECB | .CBC | .CFB | .OFB | .CTR | .Stream | .XTS | .ChaChaPoly | .KW | .KWP -> {
+                if decrypt -> return Ok(CipherBase.Camellia(block128.camellia_setkey_dec(key)))
+                Ok(CipherBase.Camellia(block128.camellia_setkey_enc(key)))
             }
         }
-        .Camellia -> {
-            if mode == {
-                .GCM -> Ok(CipherBase.GCMCamellia(GCMContext<block128.CamelliaKey>{key: aead.gcm_key(block128.camellia_setkey_enc(key)), st: aead.gcm_state()}))
-                .CCM | .CCMStarNoTag -> Ok(CipherBase.CCMCamellia(CCMContext<block128.CamelliaKey>{key: block128.camellia_setkey_enc(key), st: aead.ccm_state()}))
-                .ECB | .CBC | .CFB | .OFB | .CTR | .Stream | .XTS | .ChaChaPoly | .KW | .KWP -> {
-                    if decrypt -> return Ok(CipherBase.Camellia(block128.camellia_setkey_dec(key)))
-                    Ok(CipherBase.Camellia(block128.camellia_setkey_enc(key)))
-                }
-            }
-        }
-        .ARIA -> {
-            if mode == {
-                .GCM -> Ok(CipherBase.GCMARIA(GCMContext<block128.ARIAKey>{key: aead.gcm_key(block128.aria_setkey_enc(key)), st: aead.gcm_state()}))
-                .CCM | .CCMStarNoTag -> Ok(CipherBase.CCMARIA(CCMContext<block128.ARIAKey>{key: block128.aria_setkey_enc(key), st: aead.ccm_state()}))
-                .ECB | .CBC | .CFB | .OFB | .CTR | .Stream | .XTS | .ChaChaPoly | .KW | .KWP -> {
-                    if decrypt -> return Ok(CipherBase.ARIA(block128.aria_setkey_dec(key)))
-                    Ok(CipherBase.ARIA(block128.aria_setkey_enc(key)))
-                }
+        .ARIA -> if mode == {
+            .GCM -> Ok(CipherBase.GCMARIA(GCMContext<block128.ARIAKey>{key: aead.gcm_key(block128.aria_setkey_enc(key)), st: aead.gcm_state()}))
+            .CCM | .CCMStarNoTag -> Ok(CipherBase.CCMARIA(CCMContext<block128.ARIAKey>{key: block128.aria_setkey_enc(key), st: aead.ccm_state()}))
+            .ECB | .CBC | .CFB | .OFB | .CTR | .Stream | .XTS | .ChaChaPoly | .KW | .KWP -> {
+                if decrypt -> return Ok(CipherBase.ARIA(block128.aria_setkey_dec(key)))
+                Ok(CipherBase.ARIA(block128.aria_setkey_enc(key)))
             }
         }
         .DES -> {
@@ -408,7 +403,9 @@ cipher_set_iv: fn(ctx: &CipherContext, iv: [U8]) CipherLayerError! {
     if mode == .Stream && ctx.info.id == .ChaCha20 {
         if iv.len() != 12 -> return Err(.BadInputData)
         if &ctx.base == {
-            .ChaCha20(c) -> { if !aead.chacha20_starts(c, iv, 0) -> return Err(.BadInputData) }
+            .ChaCha20(c) -> {
+                if !aead.chacha20_starts(c, iv, 0) -> return Err(.BadInputData)
+            }
             .Unset | .AES(_) | .XTS(_) | .DES(_) | .Camellia(_) | .ARIA(_) | .GCMAES(_) | .GCMCamellia(_) | .GCMARIA(_) | .CCMAES(_) | .CCMCamellia(_) | .CCMARIA(_) | .ChaChaPoly(_) | .KW(_) -> {}
         }
     }
@@ -434,7 +431,9 @@ cipher_set_iv: fn(ctx: &CipherContext, iv: [U8]) CipherLayerError! {
         }
         actual != 0 -> {
             if {
-                ctx.iv.len() == actual -> { loop i in 0..<actual -> ctx.iv[i] = iv[i] }
+                ctx.iv.len() == actual -> {
+                    loop i in 0..<actual -> ctx.iv[i] = iv[i]
+                }
                 else -> ctx.iv = cipher.bytes_of(iv, 0, actual)
             }
             ctx.iv_size = actual
@@ -492,7 +491,9 @@ ecb_block: fn(ctx: CipherContext, src: [U8], off: Int, out: &[U8]) CipherLayerEr
 cbc_run: fn(ctx: &CipherContext, src: [U8], off: Int, len: Int, out: &[U8]) CipherLayerError! {
     decrypt: decrypting(ctx)
     if ctx.base == {
-        .AES(k) -> { if !cipher.cbc(k, decrypt, ctx.iv, src, off, len, out) -> return Err(.FullBlockExpected) }
+        .AES(k) -> {
+            if !cipher.cbc(k, decrypt, ctx.iv, src, off, len, out) -> return Err(.FullBlockExpected)
+        }
         .DES(k) -> {
             mode: if decrypt -> des.DESMode.Decrypt else -> des.DESMode.Encrypt
             push_all(out, des.des_crypt_cbc(k, mode, ctx.iv, cipher.bytes_of(src, off, len)))
@@ -593,8 +594,12 @@ cipher_update: fn(ctx: &CipherContext, src: [U8], off: Int, len: Int, out: &[U8]
         .ChaChaPoly -> {
             if &ctx.base == {
                 .ChaChaPoly(cp) -> {
-                    if cp.stage != aead.CHACHAPOLY_AAD && cp.stage != aead.CHACHAPOLY_CIPHERTEXT -> return Err(.ChaChaPolyBadState)
-                    if !aead.chachapoly_update(cp, src, off, len, out) -> return Err(.ChaCha20BadInput)
+                    if cp.stage != aead.CHACHAPOLY_AAD && cp.stage != aead.CHACHAPOLY_CIPHERTEXT {
+                        return Err(.ChaChaPolyBadState)
+                    }
+                    if !aead.chachapoly_update(cp, src, off, len, out) {
+                        return Err(.ChaCha20BadInput)
+                    }
                 }
                 .Unset | .AES(_) | .XTS(_) | .DES(_) | .Camellia(_) | .ARIA(_) | .GCMAES(_) | .GCMCamellia(_) | .GCMARIA(_) | .CCMAES(_) | .CCMCamellia(_) | .CCMARIA(_) | .ChaCha20(_) | .KW(_) -> return Err(.BadInputData)
             }
@@ -612,7 +617,11 @@ cipher_update: fn(ctx: &CipherContext, src: [U8], off: Int, len: Int, out: &[U8]
             if ctx.unprocessed_len > 0 -> return Err(.FeatureUnavailable)
             decrypt: decrypting(ctx)
             if ctx.base == {
-                .XTS(xk) -> { if !cipher.xts(xk, decrypt, ctx.iv, src, off, len, out) -> return Err(.AESInvalidInputLength) }
+                .XTS(xk) -> {
+                    if !cipher.xts(xk, decrypt, ctx.iv, src, off, len, out) {
+                        return Err(.AESInvalidInputLength)
+                    }
+                }
                 .Unset | .AES(_) | .DES(_) | .Camellia(_) | .ARIA(_) | .GCMAES(_) | .GCMCamellia(_) | .GCMARIA(_) | .CCMAES(_) | .CCMCamellia(_) | .CCMARIA(_) | .ChaCha20(_) | .ChaChaPoly(_) | .KW(_) -> return Err(.BadInputData)
             }
         }
@@ -621,7 +630,11 @@ cipher_update: fn(ctx: &CipherContext, src: [U8], off: Int, len: Int, out: &[U8]
                 ctx.info.id == .Null -> push_all(out, cipher.bytes_of(src, off, len))
                 else -> {
                     if &ctx.base == {
-                        .ChaCha20(c) -> { if !aead.chacha20_update(c, src, off, len, out) -> return Err(.BadInputData) }
+                        .ChaCha20(c) -> {
+                            if !aead.chacha20_update(c, src, off, len, out) {
+                                return Err(.BadInputData)
+                            }
+                        }
                         .Unset | .AES(_) | .XTS(_) | .DES(_) | .Camellia(_) | .ARIA(_) | .GCMAES(_) | .GCMCamellia(_) | .GCMARIA(_) | .CCMAES(_) | .CCMCamellia(_) | .CCMARIA(_) | .ChaChaPoly(_) | .KW(_) -> return Err(.BadInputData)
                     }
                 }
@@ -727,13 +740,11 @@ cipher_write_tag: fn(ctx: &CipherContext, tag_len: Int) -> [U8] CipherLayerError
 /// The first `tag_len` bytes of the running GCM or ChaCha20-Poly1305 tag.
 finish_tag: fn(ctx: &CipherContext, tag_len: Int) -> [U8] CipherLayerError! {
     if ctx.info.mode == {
-        .GCM -> {
-            if &ctx.base == {
-                .GCMAES(g) -> gcm_tag(g, tag_len)
-                .GCMCamellia(g) -> gcm_tag(g, tag_len)
-                .GCMARIA(g) -> gcm_tag(g, tag_len)
-                .Unset | .AES(_) | .XTS(_) | .DES(_) | .Camellia(_) | .ARIA(_) | .CCMAES(_) | .CCMCamellia(_) | .CCMARIA(_) | .ChaCha20(_) | .ChaChaPoly(_) | .KW(_) -> Err(.BadInputData)
-            }
+        .GCM -> if &ctx.base == {
+            .GCMAES(g) -> gcm_tag(g, tag_len)
+            .GCMCamellia(g) -> gcm_tag(g, tag_len)
+            .GCMARIA(g) -> gcm_tag(g, tag_len)
+            .Unset | .AES(_) | .XTS(_) | .DES(_) | .Camellia(_) | .ARIA(_) | .CCMAES(_) | .CCMCamellia(_) | .CCMARIA(_) | .ChaCha20(_) | .ChaChaPoly(_) | .KW(_) -> Err(.BadInputData)
         }
         .ChaChaPoly -> {
             if tag_len != 16 -> return Err(.BadInputData)
@@ -873,21 +884,17 @@ cipher_auth_encrypt_ext: fn(ctx: &CipherContext, iv: [U8], ad: [U8], input: [U8]
         }
     }
     if mode == {
-        .GCM -> {
-            if ctx.base == {
-                .GCMAES(g) -> gcm_seal(g, iv, ad, input, tag_len)
-                .GCMCamellia(g) -> gcm_seal(g, iv, ad, input, tag_len)
-                .GCMARIA(g) -> gcm_seal(g, iv, ad, input, tag_len)
-                .Unset | .AES(_) | .XTS(_) | .DES(_) | .Camellia(_) | .ARIA(_) | .CCMAES(_) | .CCMCamellia(_) | .CCMARIA(_) | .ChaCha20(_) | .ChaChaPoly(_) | .KW(_) -> Err(.BadInputData)
-            }
+        .GCM -> if ctx.base == {
+            .GCMAES(g) -> gcm_seal(g, iv, ad, input, tag_len)
+            .GCMCamellia(g) -> gcm_seal(g, iv, ad, input, tag_len)
+            .GCMARIA(g) -> gcm_seal(g, iv, ad, input, tag_len)
+            .Unset | .AES(_) | .XTS(_) | .DES(_) | .Camellia(_) | .ARIA(_) | .CCMAES(_) | .CCMCamellia(_) | .CCMARIA(_) | .ChaCha20(_) | .ChaChaPoly(_) | .KW(_) -> Err(.BadInputData)
         }
-        .CCM -> {
-            if ctx.base == {
-                .CCMAES(c) -> ccm_seal(c, iv, ad, input, tag_len)
-                .CCMCamellia(c) -> ccm_seal(c, iv, ad, input, tag_len)
-                .CCMARIA(c) -> ccm_seal(c, iv, ad, input, tag_len)
-                .Unset | .AES(_) | .XTS(_) | .DES(_) | .Camellia(_) | .ARIA(_) | .GCMAES(_) | .GCMCamellia(_) | .GCMARIA(_) | .ChaCha20(_) | .ChaChaPoly(_) | .KW(_) -> Err(.BadInputData)
-            }
+        .CCM -> if ctx.base == {
+            .CCMAES(c) -> ccm_seal(c, iv, ad, input, tag_len)
+            .CCMCamellia(c) -> ccm_seal(c, iv, ad, input, tag_len)
+            .CCMARIA(c) -> ccm_seal(c, iv, ad, input, tag_len)
+            .Unset | .AES(_) | .XTS(_) | .DES(_) | .Camellia(_) | .ARIA(_) | .GCMAES(_) | .GCMCamellia(_) | .GCMARIA(_) | .ChaCha20(_) | .ChaChaPoly(_) | .KW(_) -> Err(.BadInputData)
         }
         .ChaChaPoly -> {
             if iv.len() != ctx.info.iv_size || tag_len != 16 -> return Err(.BadInputData)
@@ -920,21 +927,17 @@ cipher_auth_decrypt_ext: fn(ctx: &CipherContext, iv: [U8], ad: [U8], input: [U8]
     }
     if tag_len < 0 || input.len() < tag_len -> return Err(.BadInputData)
     if mode == {
-        .GCM -> {
-            if ctx.base == {
-                .GCMAES(g) -> gcm_open(g, iv, ad, input, tag_len)
-                .GCMCamellia(g) -> gcm_open(g, iv, ad, input, tag_len)
-                .GCMARIA(g) -> gcm_open(g, iv, ad, input, tag_len)
-                .Unset | .AES(_) | .XTS(_) | .DES(_) | .Camellia(_) | .ARIA(_) | .CCMAES(_) | .CCMCamellia(_) | .CCMARIA(_) | .ChaCha20(_) | .ChaChaPoly(_) | .KW(_) -> Err(.BadInputData)
-            }
+        .GCM -> if ctx.base == {
+            .GCMAES(g) -> gcm_open(g, iv, ad, input, tag_len)
+            .GCMCamellia(g) -> gcm_open(g, iv, ad, input, tag_len)
+            .GCMARIA(g) -> gcm_open(g, iv, ad, input, tag_len)
+            .Unset | .AES(_) | .XTS(_) | .DES(_) | .Camellia(_) | .ARIA(_) | .CCMAES(_) | .CCMCamellia(_) | .CCMARIA(_) | .ChaCha20(_) | .ChaChaPoly(_) | .KW(_) -> Err(.BadInputData)
         }
-        .CCM -> {
-            if ctx.base == {
-                .CCMAES(c) -> ccm_open(c, iv, ad, input, tag_len)
-                .CCMCamellia(c) -> ccm_open(c, iv, ad, input, tag_len)
-                .CCMARIA(c) -> ccm_open(c, iv, ad, input, tag_len)
-                .Unset | .AES(_) | .XTS(_) | .DES(_) | .Camellia(_) | .ARIA(_) | .GCMAES(_) | .GCMCamellia(_) | .GCMARIA(_) | .ChaCha20(_) | .ChaChaPoly(_) | .KW(_) -> Err(.BadInputData)
-            }
+        .CCM -> if ctx.base == {
+            .CCMAES(c) -> ccm_open(c, iv, ad, input, tag_len)
+            .CCMCamellia(c) -> ccm_open(c, iv, ad, input, tag_len)
+            .CCMARIA(c) -> ccm_open(c, iv, ad, input, tag_len)
+            .Unset | .AES(_) | .XTS(_) | .DES(_) | .Camellia(_) | .ARIA(_) | .GCMAES(_) | .GCMCamellia(_) | .GCMARIA(_) | .ChaCha20(_) | .ChaChaPoly(_) | .KW(_) -> Err(.BadInputData)
         }
         .ChaChaPoly -> {
             if iv.len() != ctx.info.iv_size || tag_len != 16 -> return Err(.BadInputData)
@@ -973,6 +976,40 @@ cipher_auth_decrypt_ext: fn(ctx: &CipherContext, iv: [U8], ad: [U8], input: [U8]
     gcm := cipher_setup(cipher_info_from_string("AES-128-GCM") ?? panic("AES-128-GCM"))
     cipher_setkey(gcm, cipher.zero_bytes(16), .Encrypt) ?? panic("setkey")
     out: cipher_auth_encrypt_ext(gcm, cipher.zero_bytes(12), [U8]{}, cipher.zero_bytes(16), 16) ?? panic("seal")
-    assert(out == [U8]{0x03, 0x88, 0xda, 0xce, 0x60, 0xb6, 0xa3, 0x92, 0xf3, 0x28, 0xc2, 0xb9, 0x71, 0xb2, 0xfe, 0x78,
-        0xab, 0x6e, 0x47, 0xd4, 0x2c, 0xec, 0x13, 0xbd, 0xf5, 0x3a, 0x67, 0xb2, 0x12, 0x57, 0xbd, 0xdf})
+    assert(
+        out == [U8]{
+            0x03,
+            0x88,
+            0xda,
+            0xce,
+            0x60,
+            0xb6,
+            0xa3,
+            0x92,
+            0xf3,
+            0x28,
+            0xc2,
+            0xb9,
+            0x71,
+            0xb2,
+            0xfe,
+            0x78,
+            0xab,
+            0x6e,
+            0x47,
+            0xd4,
+            0x2c,
+            0xec,
+            0x13,
+            0xbd,
+            0xf5,
+            0x3a,
+            0x67,
+            0xb2,
+            0x12,
+            0x57,
+            0xbd,
+            0xdf,
+        },
+    )
 }

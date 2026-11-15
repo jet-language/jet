@@ -21,14 +21,10 @@ ArtifactEnvelopeError: struct {
 }
 
 // `jet.store.v1\0action\0`
-store_artifact_action_magic: fn() -> [U8] Never! {
-    store_artifact_magic("action")
-}
+store_artifact_action_magic: fn() -> [U8] Never! { store_artifact_magic("action") }
 
 // `jet.store.v1\0artifact\0`
-store_artifact_record_magic: fn() -> [U8] Never! {
-    store_artifact_magic("artifact")
-}
+store_artifact_record_magic: fn() -> [U8] Never! { store_artifact_magic("artifact") }
 
 store_artifact_magic: fn(label: String) -> [U8] Never! {
     out := [U8]{}
@@ -51,9 +47,7 @@ store_artifact_push_le64: fn(out: &[U8], value: Int) Never! {
 // The little-endian u64 at `bytes[start..<start + 8]`.
 store_artifact_read_le64: fn(bytes: [U8], start: Int) -> Int Never! {
     value := 0
-    loop offset in 0..<8 {
-        value = (value).bit_or((Int{bytes[start + offset]} << (offset * 8)))
-    }
+    loop offset in 0..<8 -> value = (value).bit_or((Int{bytes[start + offset]} << (offset * 8)))
     value
 }
 
@@ -88,7 +82,9 @@ store_artifact_decode_action: fn(action: ActionHandle, bytes: [U8]) -> [U8] Arti
     digest_start: key_end + 8
     digest_end: digest_start + 32
     payload: store_artifact_slice(bytes, digest_end, bytes.len())
-    if length != payload.len() -> return Err(ArtifactEnvelopeError{reason: "action record length does not match its payload"})
+    if length != payload.len() {
+        return Err(ArtifactEnvelopeError{reason: "action record length does not match its payload"})
+    }
     if store_artifact_sha256(payload) != store_artifact_slice(bytes, digest_start, digest_end) {
         return Err(ArtifactEnvelopeError{reason: "action record payload digest mismatch"})
     }
@@ -171,14 +167,20 @@ store_artifact_read_file: fn(path: String) -[FS]> ArtifactRawRead ArtifactStoreE
             return Err(ArtifactStoreError.IO(error))
         }
     }
-    if metadata.is_symlink || !metadata.is_file -> return Ok(ArtifactRawRead.Corrupt("entry is not a regular file"))
+    if metadata.is_symlink || !metadata.is_file {
+        return Ok(ArtifactRawRead.Corrupt("entry is not a regular file"))
+    }
     reader := files.open(path) ?? {
-        if store_artifact_io_missing(err) -> return Ok(ArtifactRawRead.Corrupt("entry disappeared while opening"))
+        if store_artifact_io_missing(err) {
+            return Ok(ArtifactRawRead.Corrupt("entry disappeared while opening"))
+        }
         return Err(ArtifactStoreError.IO(err))
     }
     // FileReader's lexical cleanup keeps the handle live through verification.
     held: reader.stat()
-    if !store_artifact_same_file(metadata, held) -> return Ok(ArtifactRawRead.Corrupt("entry changed while opening"))
+    if !store_artifact_same_file(metadata, held) {
+        return Ok(ArtifactRawRead.Corrupt("entry changed while opening"))
+    }
     bytes := [U8]{}
     loop {
         chunk: reader.read_bytes(65536)
@@ -214,7 +216,9 @@ store_artifact_replace_unsynced: fn(path: String, bytes: [U8]) ArtifactStoreErro
 store_artifact_replace_file: fn(path: String, bytes: [U8], durable: Bool) ArtifactStoreError! -[FS, Env, Rand]> {
     parent: files.dirname(path)
     file_name: files.basename(path)
-    if path == "" || path == "/" -> return Err(ArtifactStoreError.Config("store path has no parent: {path}"))
+    if path == "" || path == "/" {
+        return Err(ArtifactStoreError.Config("store path has no parent: {path}"))
+    }
     if file_name == "" -> return Err(ArtifactStoreError.InvalidKey(path))
     store_artifact_ensure_dir(parent, durable: durable)
     temporary: files.join(parent, ".{file_name}.tmp-{sys.pid()}-{store_artifact_unique_token()}")
@@ -278,8 +282,12 @@ store_artifact_append: fn(path: String, bytes: [U8], durable: Bool) ArtifactStor
 store_artifact_ensure_dir: fn(path: String, durable: Bool) ArtifactStoreError! -[FS]> {
     if files.stat(path) == {
         .Ok(info) -> {
-            if info.is_symlink -> return Err(ArtifactStoreError.Config("store directory is a symlink: {path}"))
-            if info.is_dir -> return
+            if info.is_symlink {
+                return Err(ArtifactStoreError.Config("store directory is a symlink: {path}"))
+            }
+            if info.is_dir {
+                return
+            }
             return Err(ArtifactStoreError.Config("store path is not a directory: {path}"))
         }
         .Err(error) -> {
@@ -306,7 +314,9 @@ store_artifact_sync_dir: fn(path: String) ArtifactStoreError! -[FS]> {
     if files.fsync(path) == {
         .Ok(_) -> {}
         .Err(error) -> {
-            if store_artifact_io_invalid(error) -> return
+            if store_artifact_io_invalid(error) {
+                return
+            }
             return Err(ArtifactStoreError.IO(error))
         }
     }
@@ -347,7 +357,9 @@ store_artifact_filesystem_stats: fn(path: String) -[Exec, Time]> ArtifactDiskSta
     if fields.len() < 5 -> return None
     total: store_artifact_parse_count(fields[1]) ?? return None
     available: store_artifact_parse_count(fields[3]) ?? return None
-    if total > STORE_ARTIFACT_U64_MAX /% 1024 || available > STORE_ARTIFACT_U64_MAX /% 1024 -> return None
+    if total > STORE_ARTIFACT_U64_MAX /% 1024 || available > STORE_ARTIFACT_U64_MAX /% 1024 {
+        return None
+    }
     Val(ArtifactDiskStats{total_bytes: total * 1024, available_bytes: available * 1024})
 }
 

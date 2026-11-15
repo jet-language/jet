@@ -34,7 +34,9 @@ jet_plugin_link: fn(m: &IRModule, root: String, needs: [String]) Never! -[FS]> {
         }
         name: plug_stem(artifact)
         if detail == "" {
-            if plug_link_component(m, id, artifact, name, bytes, needs) == .Err(err) -> detail = err.render()
+            if plug_link_component(m, id, artifact, name, bytes, needs) == .Err(err) {
+                detail = err.render()
+            }
         }
         if detail != "" {
             desc: ir_intern_bytes(m, plug_failure_descriptor(name, bytes, detail))
@@ -68,7 +70,9 @@ plug_sig: fn(keys: &[String:Int], types: &[WasmFuncType], ty: WasmFuncType) -> I
 }
 
 plug_thunk_add: fn(thunks: &[Int:Int], fids: &[Int], fid: Int) Never! {
-    if fid < 0 || thunks.get(fid) != None -> return
+    if fid < 0 || thunks.get(fid) != None {
+        return
+    }
     thunks[fid] = fids.len()
     fids.push(fid)
 }
@@ -97,11 +101,20 @@ plug_link_component: fn(m: &IRModule, id: Int, artifact: String, name: String, b
         loop fid in inst.funcs -> callee_types.push(flat.funcs[fid].ty)
         global_types := [Int]{}
         loop global in inst.globals -> global_types.push(flat.globals[global].value)
-        scopes.push(PlugScope{
-            types: types, type_sigs: type_sigs, funcs: inst.funcs, callee_types: callee_types, tables: inst.tables,
-            memory: if inst.memories.len() > 0 -> inst.memories[0] else -> -1, globals: inst.globals,
-            global_types: global_types, data_base: inst.data_base, elem_base: inst.elem_base,
-        })
+        scopes.push(
+            PlugScope{
+                types: types,
+                type_sigs: type_sigs,
+                funcs: inst.funcs,
+                callee_types: callee_types,
+                tables: inst.tables,
+                memory: if inst.memories.len() > 0 -> inst.memories[0] else -> -1,
+                globals: inst.globals,
+                global_types: global_types,
+                data_base: inst.data_base,
+                elem_base: inst.elem_base,
+            },
+        )
     }
     // The functions a table can hold: those an element segment, a global's
     // initializer or a `ref.func` names. Each signature class dispatches
@@ -143,7 +156,11 @@ plug_link_component: fn(m: &IRModule, id: Int, artifact: String, name: String, b
     names := [String:Int]{}
     loop runtime in PLUG_RUNTIME_NAMES -> names[runtime] = ir_intern_name(m, runtime)
     kit: PlugKit{
-        artifact: artifact, rows: plug_rows(m), names: names, base: base, thunk_base: base + flat.funcs.len(),
+        artifact: artifact,
+        rows: plug_rows(m),
+        names: names,
+        base: base,
+        thunk_base: base + flat.funcs.len(),
         dispatch_base: base + flat.funcs.len() + thunk_fids.len(),
     }
     loop (fid, func) in flat.funcs {
@@ -154,16 +171,18 @@ plug_link_component: fn(m: &IRModule, id: Int, artifact: String, name: String, b
         wm: flat.c.modules[func.source]
         code: wm.codes[func.index - wm.imported(WASM_EXTERN_FUNC)]
         translated: plug_translate(kit, scopes[func.instance], fid, func.ty, code) ?? {
-            loop m.functions.len() > base {
-                _: m.functions.pop()
-            }
+            loop m.functions.len() > base -> _: m.functions.pop()
             return Err(err)
         }
         m.functions.push(translated)
     }
     loop fid in thunk_fids -> m.functions.push(plug_thunk(kit, fid, flat.funcs[fid].ty))
-    loop (class, ty) in sig_types -> m.functions.push(plug_dispatcher(kit, class, ty, targets[class]))
-    loop made in base..<m.functions.len() -> name_rows_set(m.function_rows, m.functions[made].key, made)
+    loop (class, ty) in sig_types {
+        m.functions.push(plug_dispatcher(kit, class, ty, targets[class]))
+    }
+    loop made in base..<m.functions.len() {
+        name_rows_set(m.function_rows, m.functions[made].key, made)
+    }
     desc: ir_intern_bytes(m, plug_descriptor(flat, name, bytes, thunks, sigs, needs))
     plug_guest_entry(m, id, desc, kit.thunk_base, thunk_fids, base, flat.starts)
 }

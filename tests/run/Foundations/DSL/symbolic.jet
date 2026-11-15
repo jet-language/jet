@@ -20,7 +20,7 @@ one: fn() -> Expr { return atom(Node.Const(Float{1.0})) }
 emit_operator: fn(operator: String, code: &[Node]) {
     if operator == "+" -> code.push(Node.Add) else if operator == "-" -> code.push(Node.Sub) else if operator == "*" {
         code.push(Node.Mul)
-    } else if operator == "neg" -> code.push(Node.Neg)
+    } else if operator == "neg" { code.push(Node.Neg) }
 }
 
 precedence: fn(operator: String) -> Int {
@@ -30,9 +30,9 @@ precedence: fn(operator: String) -> Int {
 }
 
 drain_operators: fn(
-operator: String,
-operators: &[String],
-code: &[Node],
+    operator: String,
+    operators: &[String],
+    code: &[Node],
 ) {
     loop operators.len() > 0 {
         top: operators[operators.len() - 1]
@@ -176,9 +176,11 @@ simplify: fn(expr: Expr) -> Expr {
                 left: stack.pop() ?? zero()
                 left_reduced: simplify(left)
                 right_reduced: simplify(right)
-                if is_zero(left_reduced.copy()) || is_zero(right_reduced.copy()) -> stack.push(zero()) else if is_one(left_reduced.copy()) {
-                    stack.push(right_reduced)
-                } else if is_one(right_reduced.copy()) -> stack.push(left_reduced) else if constant_value(left_reduced.copy()) == .Val(left_value) && constant_value(right_reduced.copy()) == .Val(right_value) {
+                if is_zero(left_reduced.copy()) || is_zero(right_reduced.copy()) {
+                    stack.push(zero())
+                } else if is_one(left_reduced.copy()) { stack.push(right_reduced) } else if is_one(right_reduced.copy()) {
+                    stack.push(left_reduced)
+                } else if constant_value(left_reduced.copy()) == .Val(left_value) && constant_value(right_reduced.copy()) == .Val(right_value) {
                     stack.push(atom(Node.Const(left_value * right_value)))
                 } else { stack.push(multiply(left_reduced, right_reduced)) }
             }
@@ -229,10 +231,10 @@ differentiate: fn(expr: Expr, variable: String) -> Expr {
                 left_derivative: derivatives.pop() ?? zero()
                 expressions.push(multiply(left.copy(), right.copy()))
                 derivatives.push(
-                add(
-                multiply(left_derivative, right.copy()),
-                multiply(left.copy(), right_derivative),
-                ),
+                    add(
+                        multiply(left_derivative, right.copy()),
+                        multiply(left.copy(), right_derivative),
+                    ),
                 )
             }
         }

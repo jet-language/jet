@@ -18,9 +18,7 @@ register: fn(n: Int) -[DB]> Bool {
 
 run: fn() {
     workers := [Task<Bool>]{}
-    loop n in 0..<8 {
-        workers.push(task register(n))
-    }
+    loop n in 0..<8 { workers.push(task register(n)) }
     registered := 0
     loop worker in workers {
         if worker.join() ?? panic("register task failed") -> registered += 1
@@ -33,7 +31,7 @@ run: fn() {
     }
     print("logins {logins}")
     if auth.register_user("user3@example.com", "argon2id:3") == {
-        .Ok(_) -> print("duplicate kept")
+        .Ok(_) -> { print("duplicate kept") }
         .Err(error) -> print("duplicate refused: {error}")
     }
 }

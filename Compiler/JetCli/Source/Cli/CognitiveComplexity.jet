@@ -19,18 +19,26 @@ jet_cli_complexity_reports: fn(program: Program) -> [JetCLIComplexityReport] Nev
 jet_cli_complexity_items: fn(items: [Item], reports: &[JetCLIComplexityReport]) Never! {
     loop item in items {
         if item == {
-            .Func(function) -> jet_cli_complexity_function(function, reports)
-            .Impl(implementation) -> loop method in implementation.methods -> jet_cli_complexity_function(method, reports)
+            .Func(function) -> { jet_cli_complexity_function(function, reports) }
+            .Impl(implementation) -> {
+                loop method in implementation.methods {
+                    jet_cli_complexity_function(method, reports)
+                }
+            }
             .Struct(definition) -> {
                 loop method in definition.methods -> jet_cli_complexity_function(method, reports)
                 loop implementation in definition.trait_impls {
-                    loop method in implementation.methods -> jet_cli_complexity_function(method, reports)
+                    loop method in implementation.methods {
+                        jet_cli_complexity_function(method, reports)
+                    }
                 }
             }
             .Enum(definition) -> {
                 loop method in definition.methods -> jet_cli_complexity_function(method, reports)
                 loop implementation in definition.trait_impls {
-                    loop method in implementation.methods -> jet_cli_complexity_function(method, reports)
+                    loop method in implementation.methods {
+                        jet_cli_complexity_function(method, reports)
+                    }
                 }
             }
             .CodeModule(code_module) -> {
@@ -51,6 +59,7 @@ JetCLIComplexityVisitor: struct {
     nesting: [Span]
     mixed: Int
     recursive: Bool
+
     visit: fn(&self, expression: Expr) Never! -[Mem.Alloc, Mem.Rc, Time.Wait]> {
         if expression == {
             .If(_, _, _, _, _, span, _) -> {
@@ -60,7 +69,9 @@ JetCLIComplexityVisitor: struct {
             .Lambda(lambda, _) -> {
                 self.nesting.push(lambda.span)
                 if lambda.body == .Block(body) {
-                    loop nested in body -> jet_cli_complexity_statement(nested, self.controls, self.nesting)
+                    loop nested in body {
+                        jet_cli_complexity_statement(nested, self.controls, self.nesting)
+                    }
                 }
             }
             .Call(call, _) -> {
@@ -85,7 +96,9 @@ jet_cli_complexity_extent: fn(expression: Expr, end: Int) -> Int Never! {
 
 jet_cli_complexity_body_extent: fn(bodies: [[Stmt]], end: Int) -> Int Never! {
     ends := [Int]{end}
-    loop body in bodies -> ast_visit_body(body, fn(inner: Expr) { ends.push(expr_span(inner).end) }, true)
+    loop body in bodies {
+        ast_visit_body(body, fn(inner: Expr) { ends.push(expr_span(inner).end) }, true)
+    }
     jet_cli_complexity_furthest(ends)
 }
 
@@ -164,7 +177,9 @@ jet_cli_complexity_statement: fn(statement: Stmt, controls: &[Span], nesting: &[
             }
             nesting.push(Span{start: span.start, end: jet_cli_complexity_body_extent(bodies, span.end)})
         }
-        .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .Live(body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) | .ContextBlock(_, body, _) | .AssumeDet(_, _, body, _) -> jet_cli_complexity_body(body, controls, nesting)
+        .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .Live(body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) | .ContextBlock(_, body, _) | .AssumeDet(_, _, body, _) -> {
+            jet_cli_complexity_body(body, controls, nesting)
+        }
         .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Yield(_, _) | .DeferClose(_, _) -> {}
     }
 }

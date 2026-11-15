@@ -8,9 +8,9 @@ package: {
         compiler: .Library{ entry: compiler }
     }
 }
-use {
-    query_rows.[fact_kind_refusal, program_fact, run_fact]
-}
+
+use query_rows.[fact_kind_refusal, program_fact, run_fact]
+
 lang: module
 
 Token: struct {
@@ -46,7 +46,13 @@ EXTENSION_POINTS: [ExtensionPoint]{
 
 /// The compiler stage that makes a checked fact available. This is not the
 /// language phase `#phase` reads.
-CompilerStage: enum { Parsed Resolved Typed Prepared Emitted }
+CompilerStage: enum {
+    Parsed
+    Resolved
+    Typed
+    Prepared
+    Emitted
+}
 
 /// A compiler-issued snapshot identity. Source names and casts can't make
 /// one; only the compiler issues it, with the snapshot it names.
@@ -112,7 +118,15 @@ MetadataError: struct {
 /// holds: its claim, the typed sections it published, and the records it
 /// consumed and produced. A store asked for a kind it doesn't hold refuses
 /// with `Unsupported`.
-FactKind: enum { Marker MarkerArg Read Claim Section Consumed Produced }
+FactKind: enum {
+    Marker
+    MarkerArg
+    Read
+    Claim
+    Section
+    Consumed
+    Produced
+}
 
 /// One row of the toolchain's executable schema.
 SchemaFact: struct {
@@ -226,28 +240,42 @@ query: fn(source: FactSource, kind: FactKind, at: QueryTime?{None}, limit: Int?{
     rows := [Fact]{}
     if source == {
         .Schema(snapshot) -> {
-            if at != None -> return Err(MetadataError{kind: MetadataFailure.Unsupported{capability: "a time view of a schema snapshot"}, query: "query", source: None})
-            if kind != FactKind.Marker && kind != FactKind.Read -> return Err(fact_kind_refusal(kind, "schema"))
+            if at != None {
+                return Err(MetadataError{kind: MetadataFailure.Unsupported{capability: "a time view of a schema snapshot"}, query: "query", source: None})
+            }
+            if kind != FactKind.Marker && kind != FactKind.Read {
+                return Err(fact_kind_refusal(kind, "schema"))
+            }
             loop fact in snapshot.facts {
                 if fact.kind == kind -> rows.push(Fact.Schema{fact: fact.copy()})
             }
         }
         .Program(program) -> {
-            if at != None -> return Err(MetadataError{kind: MetadataFailure.Unsupported{capability: "a time view of a checked program"}, query: "query", source: None})
-            if kind != FactKind.Marker && kind != FactKind.MarkerArg && kind != FactKind.Read -> return Err(fact_kind_refusal(kind, "program"))
+            if at != None {
+                return Err(MetadataError{kind: MetadataFailure.Unsupported{capability: "a time view of a checked program"}, query: "query", source: None})
+            }
+            if kind != FactKind.Marker && kind != FactKind.MarkerArg && kind != FactKind.Read {
+                return Err(fact_kind_refusal(kind, "program"))
+            }
             revision: SnapshotID{digest: program.revision()}
             loop package in program.packages() {
                 loop info in package.types {
                     seen := [String]{}
                     scope: FactScope{package: package.name.copy(), module: info.module.copy(), item: info.name.copy()}
                     if kind == FactKind.Marker {
-                        loop marker in info.markers -> rows.push(program_fact(kind, marker.name, info.identity.identity, scope, revision, seen))
+                        loop marker in info.markers {
+                            rows.push(program_fact(kind, marker.name, info.identity.identity, scope, revision, seen))
+                        }
                     } else if kind == FactKind.MarkerArg {
                         loop marker in info.markers {
-                            loop arg in marker.args -> rows.push(program_fact(kind, "{marker.name}.{arg.name}", info.identity.identity, scope, revision, seen))
+                            loop arg in marker.args {
+                                rows.push(program_fact(kind, "{marker.name}.{arg.name}", info.identity.identity, scope, revision, seen))
+                            }
                         }
                     } else {
-                        loop fact in info.facts -> rows.push(program_fact(kind, fact.name, info.identity.identity, scope, revision, seen))
+                        loop fact in info.facts {
+                            rows.push(program_fact(kind, fact.name, info.identity.identity, scope, revision, seen))
+                        }
                     }
                 }
             }
@@ -256,25 +284,43 @@ query: fn(source: FactSource, kind: FactKind, at: QueryTime?{None}, limit: Int?{
                     loop function in package.functions {
                         seen := [String]{}
                         scope: FactScope{package: package.name.copy(), module: function.module.copy(), item: function.name.copy()}
-                        loop fact in function.facts -> rows.push(program_fact(kind, fact.name, function.identity, scope, revision, seen))
+                        loop fact in function.facts {
+                            rows.push(program_fact(kind, fact.name, function.identity, scope, revision, seen))
+                        }
                     }
                 }
             }
         }
         .Run(receipt) -> {
-            if at != None -> return Err(MetadataError{kind: MetadataFailure.Unsupported{capability: "a time view of a run receipt"}, query: "query", source: None})
+            if at != None {
+                return Err(MetadataError{kind: MetadataFailure.Unsupported{capability: "a time view of a run receipt"}, query: "query", source: None})
+            }
             digest: SnapshotID{digest: receipt.digest.copy()}
             if kind == {
                 .Claim -> rows.push(run_fact(kind, receipt.claim.left, receipt.claim.right, receipt.claim.left, digest))
-                .Section -> { loop section in receipt.sections -> rows.push(run_fact(kind, section.left, section.right, section.left, digest)) }
-                .Consumed -> { loop link in receipt.consumed -> rows.push(run_fact(kind, link.right, link.left, "{link.left}/{link.right}", digest)) }
-                .Produced -> { loop link in receipt.produced -> rows.push(run_fact(kind, link.right, link.left, "{link.left}/{link.right}", digest)) }
+                .Section -> {
+                    loop section in receipt.sections {
+                        rows.push(run_fact(kind, section.left, section.right, section.left, digest))
+                    }
+                }
+                .Consumed -> {
+                    loop link in receipt.consumed {
+                        rows.push(run_fact(kind, link.right, link.left, "{link.left}/{link.right}", digest))
+                    }
+                }
+                .Produced -> {
+                    loop link in receipt.produced {
+                        rows.push(run_fact(kind, link.right, link.left, "{link.left}/{link.right}", digest))
+                    }
+                }
                 .Marker | .MarkerArg | .Read -> return Err(fact_kind_refusal(kind, "run"))
             }
         }
     }
     if limit == .Val(most) {
-        if rows.len() > most -> return Err(MetadataError{kind: MetadataFailure.Truncated{limit: most, observed: rows.len()}, query: "query", source: None})
+        if rows.len() > most {
+            return Err(MetadataError{kind: MetadataFailure.Truncated{limit: most, observed: rows.len()}, query: "query", source: None})
+        }
     }
     Ok(rows)
 }

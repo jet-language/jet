@@ -4,14 +4,16 @@ use pkg_json_tree_core: core.encoding.json
 
 // The Rust `Dyn` accessor failures the reference embeds in its errors.
 PKG_JSON_NOT_OBJECT: "expected a Dyn object"
+
 PKG_JSON_NOT_ARRAY: "expected a Dyn array"
+
 PKG_JSON_NOT_STRING: "expected a Dyn string"
 
-pkg_json_object: fn(value: Dyn) -> [String: Dyn]? Never! {
+pkg_json_object: fn(value: Dyn) -> [String:Dyn]? Never! {
     if value == {
         // The object's ordered pairs, indexed by name.
         .Object(fields) -> {
-            members := [String: Dyn]{}
+            members := [String:Dyn]{}
             loop pair in fields -> members[pair.key] = pair.value
             Val(members)
         }
@@ -28,7 +30,7 @@ pkg_json_array: fn(value: Dyn) -> [Dyn]? Never! {
 
 // serde_json object equality: the same names, each value structurally equal
 // with nested object entries in any order.
-pkg_json_objects_equal: fn(left: [String: Dyn], right: [String: Dyn]) -> Bool Never! {
+pkg_json_objects_equal: fn(left: [String:Dyn], right: [String:Dyn]) -> Bool Never! {
     if left.len() != right.len() -> return false
     loop key in left.keys() {
         mine: left.get(key) ?? return false

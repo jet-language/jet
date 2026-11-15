@@ -43,9 +43,13 @@ sema_pure_root_expr: fn(root: String, modules: [SemaGraphModuleResult], decls: D
         fact: sema_effect_find_fact(calls, sema_effect_caller_slot(calls, module_index, owner.key), node.span)
         key := ""
         if fact == .Val(at) {
-            if modules[module_index].call_facts[at].callee == .Val(callee) -> key = symbol_key(symbols, owner.tree.symbols, callee)
+            if modules[module_index].call_facts[at].callee == .Val(callee) {
+                key = symbol_key(symbols, owner.tree.symbols, callee)
+            }
         }
-        if key == "" && node.kind == .Call(callee, _, _) -> key = decl_table_key(decls, symbols, callee)
+        if key == "" && node.kind == .Call(callee, _, _) {
+            key = decl_table_key(decls, symbols, callee)
+        }
         if positions.get(key) == .Val(position) {
             callee_body: modules[position.module_index].functions[position.function_index]
             if !shallow {
@@ -107,7 +111,9 @@ sema_pure_root_expr: fn(root: String, modules: [SemaGraphModuleResult], decls: D
 // The visitor closures stay expression-bodied: they only re-borrow the walk's
 // write parameters, the shape every other body child visitor uses.
 sema_pure_root_visit: fn(root: String, modules: [SemaGraphModuleResult], decls: DeclTable, symbols: SymbolTable, positions: [String:SemaPureRootPosition], calls: SemaEffectCallIndex, owner: FnBody, child: Int, shallow: Bool, visited: &[String:Bool], path: &[String], found: &Diagnostic?) Never! {
-    if found == None -> found = sema_pure_root_expr(root, modules, decls, symbols, positions, calls, owner, child, shallow, visited, path)
+    if found == None {
+        found = sema_pure_root_expr(root, modules, decls, symbols, positions, calls, owner, child, shallow, visited, path)
+    }
 }
 
 // The first diagnostic under one statement of a pure root's body. Its own
@@ -139,7 +145,9 @@ sema_pure_root_function: fn(root: String, modules: [SemaGraphModuleResult], decl
 // `symbols` its symbol table, which call facts name. A runtime root follows
 // its whole call chain.
 check_pure_program_root: fn(entry_key: String, modules: [SemaGraphModuleResult], decls: DeclTable, symbols: SymbolTable) -> [Diagnostic] {
-    if sema_pure_root_find(entry_key, modules, decls, symbols, false) == .Val(diagnostic) -> return [Diagnostic]{diagnostic}
+    if sema_pure_root_find(entry_key, modules, decls, symbols, false) == .Val(diagnostic) {
+        return [Diagnostic]{diagnostic}
+    }
     [Diagnostic]{}
 }
 

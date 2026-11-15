@@ -150,7 +150,9 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
                 exported: sema_registration_resolve_export(graph, declaring_index, name, owner.module_identity, owner.package_identity, [String]{})
                 // copy: the resolved symbol owns its texts, while `found` is a payload view of the
                 // export row in the read-only graph, which keeps them.
-                if exported == .Val(found) -> resolved = Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: found.symbol.copy()}, source_module_identity: found.source_module_identity.copy(), target_module_identity: found.source_module_identity.copy(), visibility: found.visibility})
+                if exported == .Val(found) {
+                    resolved = Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: found.symbol.copy()}, source_module_identity: found.source_module_identity.copy(), target_module_identity: found.source_module_identity.copy(), visibility: found.visibility})
+                }
             }
         }
         if resolved == None {
@@ -176,7 +178,9 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
                 // exported spelling as a second invented function identity.
                 if target.qualified {
                     loop imported in owner.imports {
-                        if imported.declaration.alias != target.module_alias || sema_registration_import_is_unqualified(imported.declaration) -> next
+                        if imported.declaration.alias != target.module_alias || sema_registration_import_is_unqualified(imported.declaration) {
+                            next
+                        }
                         target_index: sema_registration_module_index(graph, imported.target_module_identity) ?? break
                         exported: sema_registration_resolve_export(graph, target_index, target.member, owner.module_identity, owner.package_identity, [String]{}) ?? break
                         // copy: the registered symbol owns its texts, while `exported` is a view of
@@ -196,7 +200,9 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
             }
             callable: if registered == .Val(found) -> sema_registration_callable_row_of(graph, sema_resolved_id(graph, found)) else -> None
             if callable == .Val(row) {
-                if row == .Function(module_index, function_index) -> return Val(SemaOutputTarget{module_index: module_index, function_index: function_index, source_name: path.members[0].name.copy(), references: references.move()})
+                if row == .Function(module_index, function_index) {
+                    return Val(SemaOutputTarget{module_index: module_index, function_index: function_index, source_name: path.members[0].name.copy(), references: references.move()})
+                }
             }
             diagnostics.push(sema_output_error(path.members[0].span, "module `{path.root}` has no function `{path.members[0].name}`", "Output entries use ordinary module member resolution", "update `entry:` to a function that exists"))
             return None
@@ -256,7 +262,9 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
                     // path, which no member-by-member hop spells.
                     last: path.members[path.members.len() - 1]
                     modules := [String]{}
-                    loop position in index..<path.members.len() - 1 -> modules.push(path.members[position].name.copy())
+                    loop position in index..<path.members.len() - 1 {
+                        modules.push(path.members[position].name.copy())
+                    }
                     lifted: sema_inline_member_name(modules.join("."), last.name)
                     names: loop item in path.members -> item.name
                     member_path: names.join(".")
@@ -294,7 +302,9 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
         diagnostics.push(sema_output_error(expr_span(entry), "Output entry is not a function reference", "text names, calls, and runtime reflection are not Output links", "write a bare or qualified function reference, such as `entry: run`"))
         return None
     }
-    if callable == .Function(module_index, function_index) -> return Val(SemaOutputTarget{module_index: module_index, function_index: function_index, source_name: source_name ?? graph.modules[module_index].functions[function_index].declaration.name.copy(), references: references.move()})
+    if callable == .Function(module_index, function_index) {
+        return Val(SemaOutputTarget{module_index: module_index, function_index: function_index, source_name: source_name ?? graph.modules[module_index].functions[function_index].declaration.name.copy(), references: references.move()})
+    }
     diagnostics.push(sema_output_error(expr_span(entry), "Output entry `{sema_resolved_name(graph, symbol)}` is not an ordinary safe Jet function", "package tools invoke checked Jet functions without granting an FFI or unsafe authority boundary", "wrap the boundary in an ordinary safe Jet function and reference that function"))
     None
 }
@@ -313,7 +323,9 @@ sema_output_nested_modules_visible: fn(module_row: SemaRegistrationModule, membe
         loop item in items {
             if item == .CodeModule(definition) && definition.name == members[position].name {
                 body: definition.body ?? return None
-                if position > from && !definition.is_pub && !(definition.is_package_pub && module_row.package_identity == requester_package) -> visible = false
+                if position > from && !definition.is_pub && !(definition.is_package_pub && module_row.package_identity == requester_package) {
+                    visible = false
+                }
                 found = Val(body)
                 break
             }
@@ -326,19 +338,27 @@ sema_output_nested_modules_visible: fn(module_row: SemaRegistrationModule, membe
 sema_output_has_import: fn(module_row: SemaRegistrationModule, name: String) -> Bool {
     loop imported_index in 0..<module_row.imports.len() {
         if module_row.imports[imported_index].declaration.alias == name -> return true
-        loop binding in module_row.imports[imported_index].bindings { if binding.local == name -> return true }
+        loop binding in module_row.imports[imported_index].bindings {
+            if binding.local == name -> return true
+        }
     }
     false
 }
 
 sema_output_cli_parameter: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, ty: Type) -> Bool Never! {
-    if ty == .Named(_) {} else { return false }
-    if sema_type_bound_satisfied_with_generics(graph, ty, "CLI", module_identity, [TGenericParam]{}) == (Val(true)) -> return true
+    if ty == .Named(_) {
+
+    } else { return false }
+    if sema_type_bound_satisfied_with_generics(graph, ty, "CLI", module_identity, [TGenericParam]{}) == (Val(true)) {
+        return true
+    }
     row: sema_type_resolve_nominal_row(graph, ty, module_identity) ?? return false
     nominal: graph.modules[row.module_index].nominals[row.row]
     if nominal.source == .SourceAST(item) {
         if item == .Struct(definition) {
-            loop derivation in definition.derives { if derivation.name == "CLI" -> return true }
+            loop derivation in definition.derives {
+                if derivation.name == "CLI" -> return true
+            }
         }
     }
     false
@@ -348,7 +368,9 @@ sema_output_entry_contract: fn(graph: SemaRegistrationGraph, module_index: Int, 
     params_ok := false
     if kind == OutputKind.Executable {
         if function.parameters.len() == 0 -> params_ok = true
-        if function.parameters.len() == 1 -> params_ok = sema_output_cli_parameter(graph, graph.modules[module_index].module_identity, function.parameters[0].ty)
+        if function.parameters.len() == 1 {
+            params_ok = sema_output_cli_parameter(graph, graph.modules[module_index].module_identity, function.parameters[0].ty)
+        }
     } else if kind == OutputKind.Service || kind == OutputKind.Check {
         params_ok = function.parameters.len() == 0
     }
@@ -394,11 +416,15 @@ sema_output_fact: fn(graph: SemaRegistrationGraph, declaring_index: Int, address
         return None
     }
     kind_name: sema_output_kind_name(kind)
-    if !sema_output_entry_contract(graph, target.module_index, function, target.source_name, kind, expr_span(entry), "change `{target.source_name}: fn` to match the {kind_name} contract", diagnostics) -> return None
+    if !sema_output_entry_contract(graph, target.module_index, function, target.source_name, kind, expr_span(entry), "change `{target.source_name}: fn` to match the {kind_name} contract", diagnostics) {
+        return None
+    }
     params := [OutputParam]{}
     // copy: each Output parameter owns its type, while the parameter rows stay in the checked
     // function in the read-only graph.
-    loop parameter in function.parameters -> params.push(OutputParam{access: parameter.convention, ty: parameter.ty.copy()})
+    loop parameter in function.parameters {
+        params.push(OutputParam{access: parameter.convention, ty: parameter.ty.copy()})
+    }
     lowered_name: if module_row.module_identity == graph.entry_module_identity -> name_mangle(function.declaration.name) else -> "{name_mangle(module_row.module_name)}::{name_mangle(function.declaration.name)}"
     // copy: the ResolvedOutput fact owns its texts. address/output_name are the caller's read
     // parameters, and module_path, source_name and the declaration name/return stay in the
@@ -437,7 +463,9 @@ sema_output_row_index: fn(rows: [SemaOutputRow], entry_index: Int, address: Stri
 }
 
 sema_output_entry_span: fn(graph: SemaRegistrationGraph, entry_index: Int) -> Span {
-    loop item in graph.modules[entry_index].program.items { if item == .Const(definition) -> return definition.name_span }
+    loop item in graph.modules[entry_index].program.items {
+        if item == .Const(definition) -> return definition.name_span
+    }
     Span{start: 0, end: 0}
 }
 
@@ -513,7 +541,9 @@ sema_output_resolve: fn(graph: &SemaRegistrationGraph, intent: SemaOutputIntent,
     if default_address == .Val(address) {
         candidate: sema_output_row_index(rows, entry_index, address)
         if candidate == .Val(index) {
-            if rows[index].fact.kind != OutputKind.Executable -> diagnostics.push(sema_output_error(rows[index].fact.reference, "default `run` Output `{address}` is not an Executable", "defaults preserve tool compatibility", "name an Executable Output for `run:`"))
+            if rows[index].fact.kind != OutputKind.Executable {
+                diagnostics.push(sema_output_error(rows[index].fact.reference, "default `run` Output `{address}` is not an Executable", "defaults preserve tool compatibility", "name an Executable Output for `run:`"))
+            }
         } else {
             diagnostics.push(sema_output_error(sema_output_entry_span(graph, entry_index), "default `run` Output `{address}` does not exist", "defaults use checked Output addresses in the entry module", "point `run:` at a declared Executable Output"))
         }
@@ -531,14 +561,20 @@ sema_output_resolve: fn(graph: &SemaRegistrationGraph, intent: SemaOutputIntent,
             } else {
                 choices := [String]{}
                 loop row in rows {
-                    if row.module_index == entry_index && (row.fact.kind == OutputKind.Executable || row.fact.kind == OutputKind.Service) -> choices.push(row.fact.address.copy())
+                    if row.module_index == entry_index && (row.fact.kind == OutputKind.Executable || row.fact.kind == OutputKind.Service) {
+                        choices.push(row.fact.address.copy())
+                    }
                 }
                 choices.sort()
                 diagnostics.push(sema_output_error(sema_output_entry_span(graph, entry_index), "no compatible Output named `{address}`", "available compatible Outputs: {choices.join(", ")}", "choose one listed Output address"))
             }
         } else if legacy == None {
             compatible := [Int]{}
-            loop (index, row) in rows { if row.module_index == entry_index && row.fact.kind == OutputKind.Executable -> compatible.push(index) }
+            loop (index, row) in rows {
+                if row.module_index == entry_index && row.fact.kind == OutputKind.Executable {
+                    compatible.push(index)
+                }
+            }
             if compatible.len() == 1 {
                 index: compatible[0]
                 rows[index].fact.selected = true
@@ -573,11 +609,15 @@ sema_output_resolve: fn(graph: &SemaRegistrationGraph, intent: SemaOutputIntent,
         }
     }
     selected := false
-    loop row in rows { if row.fact.selected -> selected = true }
+    loop row in rows {
+        if row.fact.selected -> selected = true
+    }
     // With no address, no legacy `run: fn`, no selected Output and no manifest
     // entry binding, a singular run has no entry, alongside any ambiguity
     // reported above.
-    if intent == SemaOutputIntent.Run && explicit_address == None && legacy == None && !selected && !manifest_entry -> diagnostics.push(sema_no_run_diagnostic())
+    if intent == SemaOutputIntent.Run && explicit_address == None && legacy == None && !selected && !manifest_entry {
+        diagnostics.push(sema_no_run_diagnostic())
+    }
     // Drain owned rows from the back, avoiding an indexed move or whole-row
     // clone. Publication writes commute; reverse the reference drain once to
     // retain the original module/item/alias/function order.
@@ -602,7 +642,9 @@ sema_output_resolve: fn(graph: &SemaRegistrationGraph, intent: SemaOutputIntent,
         loop constant_index in 0..<graph.modules[row.module_index].constants.len() {
             // copy: the resolved fact is stored twice: on the program item above and on this
             // registered constant.
-            if graph.modules[row.module_index].constants[constant_index].declaration.name_span == declaration_span -> graph.modules[row.module_index].constants[constant_index].declaration.resolved_output = Val(row.fact.copy())
+            if graph.modules[row.module_index].constants[constant_index].declaration.name_span == declaration_span {
+                graph.modules[row.module_index].constants[constant_index].declaration.resolved_output = Val(row.fact.copy())
+            }
         }
     }
     references.reverse()
@@ -615,7 +657,9 @@ sema_output_resolve: fn(graph: &SemaRegistrationGraph, intent: SemaOutputIntent,
 // there, so the body of `run` still reports its own errors.
 sema_output_legacy_run_contract: fn(graph: SemaRegistrationGraph, intent: SemaOutputIntent) -> [Diagnostic] Never! {
     diagnostics := [Diagnostic]{}
-    if intent != SemaOutputIntent.Run && intent != SemaOutputIntent.Check -> return diagnostics.move()
+    if intent != SemaOutputIntent.Run && intent != SemaOutputIntent.Check {
+        return diagnostics.move()
+    }
     entry_index: sema_registration_module_index(graph, graph.entry_module_identity) ?? return diagnostics.move()
     loop module_row in graph.modules {
         loop constant in module_row.constants {
@@ -638,7 +682,9 @@ sema_output_legacy_run_contract: fn(graph: SemaRegistrationGraph, intent: SemaOu
 sema_output_run_contract_fix: fn(function: SemaRegistrationFunction) -> String Never! {
     if function.declaration.return_type == .Val(ty) {
         if ty == .Result(_, err) {
-            if err == .Named(name) -> return "declare the entry as `run: fn() {name}!` and drop the value it returns: end with `Ok()`"
+            if err == .Named(name) {
+                return "declare the entry as `run: fn() {name}!` and drop the value it returns: end with `Ok()`"
+            }
         }
     }
     "declare the entry as `run: fn()` or `run: fn() IOError!`"
@@ -696,7 +742,9 @@ sema_output_publish_solved_effects: fn(graph: &SemaRegistrationGraph, modules: &
             // copy: `output` is a payload view of the constant's resolved output, and the slot is
             // rewritten with the solved fact on the next lines. Jet has no consuming match to move
             // it out.
-            updated := if modules[module_index].constants[constant_index].declaration.resolved_output == .Val(output) -> sema_output_fact_with_solved_effects(output.copy(), graph, modules, rows, indexed) else -> { next }
+            updated := if modules[module_index].constants[constant_index].declaration.resolved_output == .Val(output) -> sema_output_fact_with_solved_effects(output.copy(), graph, modules, rows, indexed) else -> {
+                next
+            }
             // copy: the solved Output is stored twice: in the returned list here and back on the
             // constant's declaration on the next line.
             outputs.push(updated.copy())
@@ -707,7 +755,9 @@ sema_output_publish_solved_effects: fn(graph: &SemaRegistrationGraph, modules: &
         loop constant_index in 0..<graph.modules[module_index].constants.len() {
             // copy: `output` is a payload view of the registered constant's resolved output, which
             // is rewritten with the solved fact next. Jet has no consuming match to move it out.
-            updated := if graph.modules[module_index].constants[constant_index].declaration.resolved_output == .Val(output) -> sema_output_fact_with_solved_effects(output.copy(), graph, modules, rows, indexed) else -> { next }
+            updated := if graph.modules[module_index].constants[constant_index].declaration.resolved_output == .Val(output) -> sema_output_fact_with_solved_effects(output.copy(), graph, modules, rows, indexed) else -> {
+                next
+            }
             graph.modules[module_index].constants[constant_index].declaration.resolved_output = Val(updated.move())
         }
         // One ordered source walk, not a full item scan for each Output.
@@ -723,8 +773,12 @@ sema_output_publish_solved_effects: fn(graph: &SemaRegistrationGraph, modules: &
                     owned_definition := definition.copy()
                     owned_definition.resolved_output = Val(updated_output.move())
                     owned_definition.move()
-                } else -> { next }
-            } else -> { next }
+                } else -> {
+                    next
+                }
+            } else -> {
+                next
+            }
             graph.modules[module_index].program.items[item_index] = Item.Const{value: updated_definition.move()}
         }
     }

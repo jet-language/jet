@@ -10,11 +10,10 @@ JetCLIRootedFixtureRoot: struct {
     path: String
 
     impl Close {
-        close: fn(&&self) -[FS]> {
-            cli_files.remove_all(self.path).drop("test root cleanup")
-        }
+        close: fn(&&self) -[FS]> { cli_files.remove_all(self.path).drop("test root cleanup") }
     }
 }
+
 #Test("rooted_store") {
     nul_name: String.from_bytes([U8]{U8{97}, U8{0}, U8{98}}) ?? panic("NUL name fixture")
     loop name in ([String]{"", ".", "..", "a/b", "a\\b", nul_name}) {

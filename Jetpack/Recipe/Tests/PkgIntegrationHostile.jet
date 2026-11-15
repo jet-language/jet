@@ -23,15 +23,15 @@ recipe_hostile_rows: fn() -> [[String]] {
     assert(rows.len() == 7, "hostile corpus lost required case")
     loop category in categories {
         found := false
-        loop row in rows { if row[1] == category -> found = true }
+        loop row in rows {
+            if row[1] == category -> found = true
+        }
         assert(found, "hostile corpus lacks category")
     }
     rows
 }
 
-recipe_hostile_quote: fn(path: String) -> String {
-    "'{path.replace("'", "'\\''")}'"
-}
+recipe_hostile_quote: fn(path: String) -> String { "'{path.replace("'", "'\\''")}'" }
 
 recipe_hostile_observe: fn(listener: TCPListener, milliseconds: Int, bytes_predicate: Bool) -> Bool {
     deadline: time.instant() + time.duration_ms(milliseconds)
@@ -51,18 +51,20 @@ recipe_hostile_observe: fn(listener: TCPListener, milliseconds: Int, bytes_predi
                             if chunk.len() == 0 -> break
                             bytes.extend(chunk)
                         }
-                        .Err(_) -> break // Original ignores read_to_end error, retains collected bytes.
+                        .Err(_) -> break  // Original ignores read_to_end error, retains collected bytes.
                     }
                 }
                 hostile_net.tcp_close(stream) ?? panic("drop observer connection")
                 return bytes == "escaped".bytes()
             }
-            .Err(error) -> if error == {
-                .Timeout(_) -> {
-                    if time.instant() >= deadline -> return false
-                    time.sleep(5ms)
+            .Err(error) -> {
+                if error == {
+                    .Timeout(_) -> {
+                        if time.instant() >= deadline -> return false
+                        time.sleep(5ms)
+                    }
+                    .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> return false  // Exact original other-error Boolean, not Timeout conflation.
                 }
-                .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> return false // Exact original other-error Boolean, not Timeout conflation.
             }
         }
     }
@@ -71,15 +73,15 @@ recipe_hostile_observe: fn(listener: TCPListener, milliseconds: Int, bytes_predi
 recipe_hostile_execute: fn(base: String, ctx: RecipeBuildContext, tool: String, args: [String], windows: Bool, id: String) {
     if recipe_run(recipe_sandbox_test_exec(tool, args), ctx, None) == {
         .Ok(report) -> {
-            if windows {
-                assert_eq(report.sandbox_class, "windows-appcontainer")
-            } else {
+            if windows -> assert_eq(report.sandbox_class, "windows-appcontainer") else {
                 assert(report.sandbox_class != "non-executing")
                 status: files.read(files.join(ctx.output_root, "status")) ?? panic("corpus status")
                 assert(status.trim() == "blocked", "corpus attempt must be blocked")
             }
             policies: [String]{"filesystem=", "process=", "network=", "environment=", "devices=", "resources="}
-            loop policy in policies -> assert(report.sandbox_policy.contains(policy), "missing sandbox policy")
+            loop policy in policies {
+                assert(report.sandbox_policy.contains(policy), "missing sandbox policy")
+            }
         }
         .Err(error) -> {
             if windows {
@@ -89,7 +91,9 @@ recipe_hostile_execute: fn(base: String, ctx: RecipeBuildContext, tool: String, 
             }
         }
     }
-    if windows && id == "source-symlink" -> assert(!files.exists(files.join(ctx.output_root, "leak")), "source-symlink leak")
+    if windows && id == "source-symlink" {
+        assert(!files.exists(files.join(ctx.output_root, "leak")), "source-symlink leak")
+    }
     if id == "child-process" -> time.sleep(100ms)
     assert(!files.exists(files.join(base, "host-marker")), "hostile command wrote host marker")
     if !windows {
@@ -98,14 +102,18 @@ recipe_hostile_execute: fn(base: String, ctx: RecipeBuildContext, tool: String, 
                 assert(status != "leaked")
                 assert(status != "escaped")
             }
-            .Err(_) -> {} // Original if let Ok(status).
+            .Err(_) -> {}  // Original if let Ok(status).
         }
     }
 }
 
 recipe_hostile_matrix: fn(windows: Bool) {
-    if windows && !sys.is_windows() -> return
-    if !windows && !sys.is_unix() -> return
+    if windows && !sys.is_windows() {
+        return
+    }
+    if !windows && !sys.is_unix() {
+        return
+    }
     rows: recipe_hostile_rows()
     // A realized tool is a regular file, never a link: name the shell's target.
     shell: if windows -> recipe_sandbox_test_cmd() else -> files.canonicalize(process.which("bash") ?? process.which("sh") ?? panic("hostile corpus needs shell")) ?? panic("resolve the hostile corpus shell")
@@ -119,9 +127,11 @@ recipe_hostile_matrix: fn(windows: Bool) {
         fill: "/tmp/jet-build-hostile-fill-{sys.pid()}-{id}"
         files.create_dir_all(src) ?? panic("source directory")
         files.write(secret, "host-only-secret") ?? panic("host secret")
-        if id == "source-symlink" -> files.symlink(secret, files.join(src, "link")) ?? panic("source symlink")
+        if id == "source-symlink" {
+            files.symlink(secret, files.join(src, "link")) ?? panic("source symlink")
+        }
         tool: if windows -> "hostile-tool" else -> "sh"
-        ctx := RecipeBuildContext{source_dir: src, output_root: out, tools: [String: String]{tool: shell}, fetch_cache: files.join(base, "cache"), offline: false}
+        ctx := RecipeBuildContext{source_dir: src, output_root: out, tools: [String:String]{tool: shell}, fetch_cache: files.join(base, "cache"), offline: false}
         if id == "network-exfiltration" {
             listener: hostile_net.tcp_listen("127.0.0.1:0") ?? panic("network observer")
             port: hostile_net.socket_port(hostile_net.listener_local_socket_addr(listener) ?? panic("observer address"))
@@ -129,7 +139,7 @@ recipe_hostile_matrix: fn(windows: Bool) {
             if windows {
                 windir: sys.get("WINDIR") ?? "C:\\Windows"
                 powershell: files.join(windir, "System32/WindowsPowerShell/v1.0/powershell.exe")
-                ctx.tools = [String: String]{tool: powershell}
+                ctx.tools = [String:String]{tool: powershell}
                 command: "try {{$c=New-Object Net.Sockets.TcpClient('127.0.0.1',{port});$c.Close();exit 70}} catch {{exit 0}}"
                 recipe_hostile_execute(base, ctx, tool, [String]{"-NoProfile", "-NonInteractive", "-Command", command}, true, id)
             } else {
@@ -177,6 +187,7 @@ recipe_hostile_matrix: fn(windows: Bool) {
 #Test("native_windows_appcontainer_uses_the_shared_hostile_corpus") {
     recipe_hostile_matrix(true)
 }
+
 #Test("shared_hostile_corpus_uses_the_recipe_production_path") {
     recipe_hostile_matrix(false)
 }

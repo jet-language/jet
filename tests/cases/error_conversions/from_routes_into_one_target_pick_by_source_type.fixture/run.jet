@@ -18,15 +18,11 @@ AppErr: struct {
 }
 
 impl AppErr.From(ReadErr) {
-    from: fn(error: ReadErr) -> AppErr {
-        AppErr{code: error.code, origin: "read"}
-    }
+    from: fn(error: ReadErr) -> AppErr { AppErr{code: error.code, origin: "read"} }
 }
 
 impl AppErr.From(ParseErr) {
-    from: fn(error: ParseErr) -> AppErr {
-        AppErr{code: error.line, origin: "parse"}
-    }
+    from: fn(error: ParseErr) -> AppErr { AppErr{code: error.line, origin: "parse"} }
 }
 
 read: fn(n: Int) -> Int ReadErr! {
@@ -47,7 +43,7 @@ load: fn(n: Int) -> Int AppErr! {
 
 show: fn(n: Int) {
     if load(n) == {
-        .Ok(ok) -> print("ok {ok}")
+        .Ok(ok) -> { print("ok {ok}") }
         .Err(failure) -> print("failed {failure.code} {failure.origin}")
     }
 }

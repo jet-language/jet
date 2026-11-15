@@ -25,22 +25,17 @@ bytes: fn(n: Int) -[Rand]> [U8] CryptoError! {
     Ok(out)
 }
 
-
 u32: fn() -[Rand]> U32 CryptoError! {
     b: bytes(4) ?? return Err(.Unavailable)
     n := 0
-    loop x in b {
-        n = n * 256 + Int{x}
-    }
+    loop x in b -> n = n * 256 + Int{x}
     Ok(U32{n})
 }
 
 u64: fn() -[Rand]> U64 CryptoError! {
     b: bytes(8) ?? return Err(.Unavailable)
     n := 0
-    loop x in b {
-        n = n * 256 + Int{x}
-    }
+    loop x in b -> n = n * 256 + Int{x}
     Ok(U64{n})
 }
 
@@ -141,7 +136,6 @@ choice: fn(items: [String]) -[Rand]> String CryptoError! {
     Ok(items[i])
 }
 
-
 token_bytes: fn(n: Int) -[Rand]> [U8] CryptoError! { bytes(n) }
 
 randbelow: fn(n: Int) -[Rand]> Int CryptoError! {
@@ -160,12 +154,8 @@ randbits: fn(k: Int) -[Rand]> Int CryptoError! {
     loop x in b -> out = ((out << 8)).bit_or(Int{x})
     Ok(out)
 }
- 
 
-
-compare_digest: fn(a: [U8], b: [U8]) -> Bool Never! {
-    crypto.constant_time_equal_bytes(a, b)
-}
+compare_digest: fn(a: [U8], b: [U8]) -> Bool Never! { crypto.constant_time_equal_bytes(a, b) }
 
 choice_int: fn(items: [Int]) -[Rand]> Int CryptoError! {
     if items.len() == 0 -> return Err(.Length)
@@ -178,7 +168,7 @@ shuffle_ints: fn(items: [Int]) -[Rand]> [Int] CryptoError! {
     loop x in items -> out.push(x)
     i := out.len()
     loop i > 1 {
-        i = i - 1
+        i -= 1
         j: int_range(0, i + 1) ?? return Err(.Unavailable)
         a := out[i]
         b := out[j]
@@ -190,7 +180,7 @@ shuffle_ints: fn(items: [Int]) -[Rand]> [Int] CryptoError! {
                 k == j -> { tmp.push(a) }
                 else -> { tmp.push(out[k]) }
             }
-            k = k + 1
+            k += 1
         }
         out = tmp
     }

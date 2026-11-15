@@ -31,6 +31,7 @@ use {
 }
 
 TOOL: "/Tools/perf/scaling/enqueue/run.jet"
+
 USAGE: "Usage: JET_SCALING_QUEUE_STAMP=EXISTING_JOB jet Tools/perf/scaling/enqueue --compiler LABEL=KIND:PATH [harness options]\nQueues three counter groups (2 parallel rungs, 25 s cap, 8G each) and one serial timing sample (20 s cap, 24G): huge-fns, fan-in and all domains at 125k/1M."
 
 // A queued gate run; `shared` jobs may share the machine.
@@ -76,7 +77,7 @@ queue_plan: fn(config: Config) -> [Job] Never! {
     timing.timeout_s = if config.timeout_s < 20 -> config.timeout_s else -> 20
     timing.memory_max = "24G"
     timing.steps = 2
-    timing.ladders = [String: [Int]]{}
+    timing.ladders = [String:[Int]]{}
     timing.domain_ladder = [Int]{125000, 1000000}
     timing.stop_after_s = None
     timing.profile_top = false
@@ -88,14 +89,18 @@ queue_plan: fn(config: Config) -> [Job] Never! {
 // run-gate's arguments for one job, as enqueue.mjs spells them.
 gate_args: fn(config: Config) -> [String] Never! {
     args := [String]{}
-    loop compiler in config.compilers -> args.extend(["--compiler", "{compiler.label}={compiler.kind}:{compiler.path ?? compiler.template ?? ""}"])
+    loop compiler in config.compilers {
+        args.extend(["--compiler", "{compiler.label}={compiler.kind}:{compiler.path ?? compiler.template ?? ""}"])
+    }
     loop shape in config.shapes -> args.extend(["--shape", shape.copy()])
     args.extend(["--steps", "{config.steps}", "--domain-ladder", config.domain_ladder.map(fn(n) { "{n}" }).join(","), "--memory-max", config.memory_max.copy(), "--timeout", "{config.timeout_s}", "--stop-after", js(config.stop_after_s ?? math.INFINITY)])
     args.extend(["--seed", "{config.seed}", "--jet-command", config.jet_command.copy(), "--work-dir", config.work_dir.copy(), "--build-root", config.build_root.copy(), "--mode", config.mode.copy(), "--jobs", "{config.jobs}"])
     loop layout in config.layouts -> args.extend(["--layout", layout.copy()])
     loop shape in config.shapes {
         if config.bases.get(shape) == .Val(base) -> args.extend(["--base", "{shape}={base}"])
-        if config.ladders.get(shape) == .Val(ladder) -> args.extend(["--ladder", "{shape}={ladder.map(fn(n) { "{n}" }).join(",")}"])
+        if config.ladders.get(shape) == .Val(ladder) {
+            args.extend(["--ladder", "{shape}={ladder.map(fn(n) { "{n}" }).join(",")}"])
+        }
     }
     args
 }

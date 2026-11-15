@@ -38,10 +38,14 @@ Crew: struct {
     #App.SignedIn add_task: fn(self, draft: TaskDraft) -> Int TaskError! {
         errors := [FieldError]{}
         if draft.assignee == .Val(who) {
-            if !self.members.contains(who) -> errors.push(app.field_error(at: "assignee", reason: "Pick someone in this project."))
+            if !self.members.contains(who) {
+                errors.push(app.field_error(at: "assignee", reason: "Pick someone in this project."))
+            }
         }
         loop (index, step) in draft.steps {
-            if step.title == "" -> errors.push(app.field_error(at: "steps[{index}].title", reason: "Give the step a title."))
+            if step.title == "" {
+                errors.push(app.field_error(at: "steps[{index}].title", reason: "Give the step a title."))
+            }
         }
         if errors.len() > 0 -> return Err(TaskError.Invalid(errors))
         Ok(draft.steps.len())

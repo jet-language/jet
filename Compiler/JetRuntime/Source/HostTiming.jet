@@ -16,7 +16,9 @@
 // The answer is fixed for the process, so the first probe is kept; a racing
 // probe stores the same word.
 TIMING_HOST_CONFIRMED: I64{1}
+
 TIMING_HOST_INTEL_DOITM: I64{2}
+
 TIMING_HOST_NO_STATEMENT: I64{3}
 
 timing_host_word := I64{0}
@@ -35,8 +37,10 @@ timing_host_probe: fn() -> I64 {
     #Unsafe("cpuid only reports processor identification") {
         top: os_cpuid_eax_i64(I64{0}, I64{0})
         intel: os_cpuid_ebx_i64(I64{0}, I64{0}) == I64{1970169159} && os_cpuid_edx_i64(I64{0}, I64{0}) == I64{1231384169} && os_cpuid_ecx_i64(I64{0}, I64{0}) == I64{1818588270}
-        if (!intel) -> return TIMING_HOST_NO_STATEMENT
-        if (top >= I64{7} && os_cpuid_edx_i64(I64{7}, I64{0}).bit_and(I64{536870912}) != I64{0}) -> return TIMING_HOST_INTEL_DOITM
+        if (!intel) { return TIMING_HOST_NO_STATEMENT }
+        if (top >= I64{7} && os_cpuid_edx_i64(I64{7}, I64{0}).bit_and(I64{536870912}) != I64{0}) {
+            return TIMING_HOST_INTEL_DOITM
+        }
     }
     TIMING_HOST_CONFIRMED
 }
@@ -53,7 +57,9 @@ timing_host_probe: fn() -> I64 {
 // before any of its code runs.
 #Export(c) jet_rt_timing_admit: fn() {
     host: timing_host()
-    if (host == TIMING_HOST_CONFIRMED) -> return
+    if (host == TIMING_HOST_CONFIRMED) {
+        return
+    }
     reason: if (host == TIMING_HOST_INTEL_DOITM) -> rt_static_text("this Intel processor enumerates IA32_ARCH_CAPABILITIES, so its fixed timing holds only while the operating system sets DOITM, which a program cannot read") else -> rt_static_text("this processor's vendor publishes no data operand independent timing statement")
     message: jet_rt_string_builder_new()
     jet_rt_string_builder_push(message, rt_static_text("policy.harden: this program holds `timing: .Fixed` values and refuses to start on a host that is not confirmed to run them in fixed time: "))

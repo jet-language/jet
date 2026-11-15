@@ -2,15 +2,19 @@
 // `fn(&Seeded) -> Unit` names a function that writes its argument in place.
 // A value of that type is stored in a field and a list, passed and called,
 // and each call changes the caller's value.
-Seeded: struct { value: Int }
+Seeded: struct {
+    value: Int
+}
 
 bump: fn(s: &Seeded) { s.value += 1 }
 
 double: fn(s: &Seeded) { s.value *= 2 }
 
-Holder: struct { step: fn(&Seeded) -> Unit }
+Holder: struct {
+    step: fn(&Seeded) -> ()
+}
 
-apply: fn(f: fn(&Seeded) -> Unit, s: &Seeded) { f(s) }
+apply: fn(f: fn(&Seeded) -> (), s: &Seeded) { f(s) }
 
 run: fn() {
     s := Seeded{value: 1}
@@ -19,10 +23,8 @@ run: fn() {
     print("field {s.value}")
     apply(double, s)
     print("passed {s.value}")
-    steps: [fn(&Seeded) -> Unit]{bump, double}
-    loop step in steps {
-        step(s)
-    }
+    steps: [fn(&Seeded) -> ()]{bump, double}
+    loop step in steps { step(s) }
     print("list {s.value}")
     holder.step(s)
     print("called {s.value}")

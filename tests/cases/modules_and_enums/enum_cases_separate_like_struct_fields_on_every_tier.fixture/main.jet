@@ -1,20 +1,40 @@
 // Enum cases and group leaves are separated as struct fields are: by a `,`
 // or a line break, on one line or across many.
-Point: struct { x: Int, y: Int }
-
-Mode: enum { Fast, Safe }
-
-Shape: enum { Circle(Float), Rect(w: Float, h: Float), Dot }
-
-Level: enum {
-    Low,
-    Mid
-    High,
+Point: struct {
+    x: Int
+    y: Int
 }
 
-Burn: enum { Fire { Hot, Scald }, Cold }
+Mode: enum {
+    Fast
+    Safe
+}
 
-Code: enum { Ok = 0, Warn = 4, Fail = 8 }
+Shape: enum {
+    Circle(Float)
+    Rect(w: Float, h: Float)
+    Dot
+}
+
+Level: enum {
+    Low
+    Mid
+    High
+}
+
+Burn: enum {
+    Fire {
+        Hot
+        Scald
+    }
+    Cold
+}
+
+Code: enum {
+    Ok = 0
+    Warn = 4
+    Fail = 8
+}
 
 mode_name: fn(mode: Mode) -> String {
     if mode == {
@@ -58,7 +78,7 @@ code_name: fn(code: Code) -> String {
 run: fn() {
     p: Point{x: 1, y: 2}
     print("{p.x + p.y} {mode_name(.Fast)} {mode_name(.Safe)}")
-    print("{area(.Circle(2.0))} {area(.Rect(w: 2.0, h: 3.0))} {area(.Dot)}")
+    print("{area(.Circle(2.0))} {area(.Rect{w: 2.0, h: 3.0})} {area(.Dot)}")
     print("{level_rank(.Low)} {level_rank(.Mid)} {level_rank(.High)}")
     print("{burn_name(Burn.Fire.Hot)} {burn_name(Burn.Fire.Scald)} {burn_name(.Cold)}")
     print("{code_name(.Ok)} {code_name(.Warn)} {code_name(.Fail)}")

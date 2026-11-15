@@ -1,17 +1,45 @@
 // Checked graph queries share the Driver invocation; no CLI graph reconstruction.
 use {
     jet_driver.[
-        JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
-        JetDriverAuthorityPolicy, JetDriverCompileRequest, JetDriverCompileResult, JetDriverComptimeInputLog, JetDriverComptimeInputRecord, JetDriverBuildQueryScope, JetDriverBuildQueryResult,
-        JetDriverFailure, JetDriverGeneratedModule, JetDriverVerbOutput, jet_driver_query_build_plan, jet_driver_entry_package_has_build,
-        jet_driver_present_diagnostics, jet_driver_build_plan_json, jet_driver_build_explanation,
-        jet_driver_report_problems, JET_DRIVER_EXIT_OK,
-        JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, JetDriverCompileMode,
+        JetDriverAuthorizedSourceFile,
+        JetDriverAuthorizedSourceRoot,
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverAuthorityPolicy,
+        JetDriverCompileRequest,
+        JetDriverCompileResult,
+        JetDriverComptimeInputLog,
+        JetDriverComptimeInputRecord,
+        JetDriverBuildQueryScope,
+        JetDriverBuildQueryResult,
+        JetDriverFailure,
+        JetDriverGeneratedModule,
+        JetDriverVerbOutput,
+        jet_driver_query_build_plan,
+        jet_driver_entry_package_has_build,
+        jet_driver_present_diagnostics,
+        jet_driver_build_plan_json,
+        jet_driver_build_explanation,
+        jet_driver_report_problems,
+        JET_DRIVER_EXIT_OK,
+        JET_DRIVER_EXIT_USAGE,
+        JET_DRIVER_EXIT_USER_ERROR,
+        JetDriverCompileMode,
     ]
     jet_foundation.[
-        BuildOptionChoice, BuildOptionLayer, BuildOptions, Diagnostic, DIAGNOSTIC_LINT, Span,
-        build_option_argument, build_option_check_removal_note, build_option_row, build_options_check_removals, build_options_value, build_options_with_code,
-        diagnostic_render_all, JET_COMPTIME_TOOLCHAIN_PREFIX,
+        BuildOptionChoice,
+        BuildOptionLayer,
+        BuildOptions,
+        Diagnostic,
+        DIAGNOSTIC_LINT,
+        Span,
+        build_option_argument,
+        build_option_check_removal_note,
+        build_option_row,
+        build_options_check_removals,
+        build_options_value,
+        build_options_with_code,
+        diagnostic_render_all,
+        JET_COMPTIME_TOOLCHAIN_PREFIX,
     ]
     core.build.[BuildGraph, BuildGraphNode]
     build_files: core.files
@@ -19,19 +47,42 @@ use {
     jetpack_artifact_store.[BuildNodeRecord, BuildRecord, ObjectHandle]
     jet_build_session.[BuildPlanExecutable, BuildPlanExecution, BuildPlanSelection, BuildSessionGeneratedModule, BuildSessionOption, BuildSessionPlan, BuildSessionValue, build_plan_contributions, build_plan_execution, build_plan_generated, build_plan_selection]
     jet_pkg_model.[
-        ContributionLayer, FactContribution, FactValue, LockError, LockedBuildContribution, PackageFacts, SourceScope,
-        BuildStamp, ComptimeInput, pkg_lock_build_stamp, pkg_lock_e3512, pkg_lock_e3513, pkg_lock_load, pkg_lock_locked_build_contribution_set, pkg_lock_record_build_contributions, pkg_lock_record_effect_rows, pkg_lock_record_generated_inputs, pkg_lock_sorted_contributions, pkg_lock_widened_note, pkg_manifest_parse, pkg_sha256_hex,
+        ContributionLayer,
+        FactContribution,
+        FactValue,
+        LockError,
+        LockedBuildContribution,
+        PackageFacts,
+        SourceScope,
+        BuildStamp,
+        ComptimeInput,
+        pkg_lock_build_stamp,
+        pkg_lock_e3512,
+        pkg_lock_e3513,
+        pkg_lock_load,
+        pkg_lock_locked_build_contribution_set,
+        pkg_lock_record_build_contributions,
+        pkg_lock_record_effect_rows,
+        pkg_lock_record_generated_inputs,
+        pkg_lock_sorted_contributions,
+        pkg_lock_widened_note,
+        pkg_manifest_parse,
+        pkg_sha256_hex,
     ]
 }
 
 jet_cli_build_report: fn(query: JetDriverBuildQueryResult, subject: String?, json: Bool) -> String Never! {
     plan: query.plan ?? {
-        if json -> return "{jet_cli_status_render("inspect.build", true, [jet_cli_status_field("build", JetCLIStatusValue.Null)])}\n"
+        if json {
+            return "{jet_cli_status_render("inspect.build", true, [jet_cli_status_field("build", JetCLIStatusValue.Null)])}\n"
+        }
         return "default pipeline: no root fn build\n"
     }
     if subject == .Val(name) {
         explanation: jet_driver_build_explanation(plan, name)
-        if json -> return "{jet_cli_status_render("inspect.build", true, [jet_cli_status_field("label", jet_cli_status_text(explanation.label)), jet_cli_status_field("provenance", jet_cli_status_texts(explanation.provenance))])}\n"
+        if json {
+            return "{jet_cli_status_render("inspect.build", true, [jet_cli_status_field("label", jet_cli_status_text(explanation.label)), jet_cli_status_field("provenance", jet_cli_status_texts(explanation.provenance))])}\n"
+        }
         text := "{explanation.label}\n"
         loop fact in explanation.provenance -> text += "  {fact}\n"
         return text
@@ -60,7 +111,9 @@ jet_cli_inspect_build_times: fn(file: String, json: Bool, color: Bool) -[FS]> Je
     malformed: jet_cli_inspect_b_report("E2104", "`{path}` is not a build times record", jet_cli_why("E2104"), rerun, color, json, JET_DRIVER_EXIT_USER_ERROR)
     times: jet_cli_status_value_parse(text) ?? return malformed
     rows: jet_cli_status_list(jet_cli_status_get(times, "rows")) ?? return malformed
-    if json -> return jet_cli_done("{jet_cli_status_render("inspect.build", true, [jet_cli_status_field("times", times)])}\n", "", JET_DRIVER_EXIT_OK)
+    if json {
+        return jet_cli_done("{jet_cli_status_render("inspect.build", true, [jet_cli_status_field("times", times)])}\n", "", JET_DRIVER_EXIT_OK)
+    }
     out := "kind\tname\twall_ms\tresult\n"
     loop row in rows {
         kind: jet_cli_status_string(jet_cli_status_get(row, "kind")) ?? return malformed
@@ -76,7 +129,9 @@ jet_cli_build_query_failure: fn(request: JetDriverCompileRequest, query: JetDriv
     if query.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
     diagnostics: jet_driver_present_diagnostics(query.diagnostics, request.authorized_sources, query.generated_source_files)
     errors: jet_cli_errors(diagnostics)
-    if errors.len() == 0 -> return jet_cli_ice("the checked build query stopped before completing `{file}`")
+    if errors.len() == 0 {
+        return jet_cli_ice("the checked build query stopped before completing `{file}`")
+    }
     source := ""
     loop root in request.authorized_sources.roots {
         loop input in root.files {
@@ -87,11 +142,14 @@ jet_cli_build_query_failure: fn(request: JetDriverCompileRequest, query: JetDriv
     loop diagnostic in diagnostics {
         if verbose || diagnostic.severity != DIAGNOSTIC_LINT -> shown.push(diagnostic)
     }
-    if json -> return {stdout: jet_cli_reports_status_json("diagnostics", false, jet_cli_report_base(file), file, source, shown), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    if json {
+        return {stdout: jet_cli_reports_status_json("diagnostics", false, jet_cli_report_base(file), file, source, shown), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
     // The reports ride along so a `--json` run reached without this flag
     // (`jet build --json`) answers with them (jet_cli_json_outcome).
     {stdout: "", stderr: jet_driver_report_problems(file, source, shown, color, verbose), exit_code: JET_DRIVER_EXIT_USER_ERROR, failure: Val(JetDriverFailure{reports: shown, notice: ""})}
 }
+
 // `jet build` of a package whose `build: fn(b: Build)` configures the build: evaluate it,
 // record the values it contributes to the package's declared settings
 // (jet_cli_record_build_contributions), then run its steps and selected
@@ -128,7 +186,9 @@ jet_cli_workspace_package_entry: fn(file: String, color: Bool) -[FS, Env]> Strin
     sources := [JetDriverAuthorizedSourceFile]{}
     if jet_cli_package_sources(index.root, sources) == None {
         loop source_file in sources {
-            if source_file.path != file && jet_cli_declares_build_entry(source_file.source) -> return source_file.path.copy()
+            if source_file.path != file && jet_cli_declares_build_entry(source_file.source) {
+                return source_file.path.copy()
+            }
         }
     }
     file.copy()
@@ -153,7 +213,7 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
     prepared: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Doc)
     refused := JetDriverVerbOutput?{None}
     if prepared.move() == {
-        .Refused(output) -> refused = Val(output)
+        .Refused(output) -> { refused = Val(output) }
         .Prepared(request, snapshot) -> {
             scope := JetDriverBuildQueryScope{next_session_id: 1}
             query_request := request.move()
@@ -196,7 +256,9 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
                 loop index in 0..<generated.len() {
                     if generated[index].rewrites == None -> next
                     loop module_row in target_generated {
-                        if module_row.relative_path == generated[index].path -> generated[index].source = module_row.source.copy()
+                        if module_row.relative_path == generated[index].path {
+                            generated[index].source = module_row.source.copy()
+                        }
                     }
                 }
             }
@@ -216,7 +278,9 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
             loop note in notes -> jet_cli_write_notice("{note}\n")
             // The command line and profile removals were noted before the compile (jet_cli_build_options).
             loop choice in build_options_check_removals(resolved) {
-                if choice.layer == BuildOptionLayer.Code -> jet_cli_write_notice("{build_option_check_removal_note(choice)}\n")
+                if choice.layer == BuildOptionLayer.Code {
+                    jet_cli_write_notice("{build_option_check_removal_note(choice)}\n")
+                }
             }
             resolved_options = Val(resolved.move())
         }
@@ -250,7 +314,9 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
     generated_inputs := jet_cli_generated_lock_inputs(generated)
     loop input in jet_cli_comptime_lock_rows(root, build_reads) -> generated_inputs.push(input)
     if locked {
-        if pkg_lock_record_generated_inputs(root, generated_inputs, true, BuildStamp.default()) == .Err(error) -> return jet_cli_lock_refusal(error, color)
+        if pkg_lock_record_generated_inputs(root, generated_inputs, true, BuildStamp.default()) == .Err(error) {
+            return jet_cli_lock_refusal(error, color)
+        }
     }
     // Under `--locked`, what each action output held before the graph runs,
     // so one that drifts from its lock row is put back.
@@ -292,7 +358,9 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
     }
     if !locked && generated_inputs.len() > 0 {
         stamp: pkg_lock_build_stamp(root, false) ?? return jet_cli_lock_refusal(err, color)
-        if pkg_lock_record_generated_inputs(root, generated_inputs, false, stamp) == .Err(error) -> return jet_cli_lock_refusal(error, color)
+        if pkg_lock_record_generated_inputs(root, generated_inputs, false, stamp) == .Err(error) {
+            return jet_cli_lock_refusal(error, color)
+        }
     }
     output
 }
@@ -302,8 +370,12 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
 // produces (`produced`), each as "`path` of `target`".
 jet_cli_build_missing_sources: fn(root: String, selected: BuildPlanSelection, generated: [BuildSessionGeneratedModule], produced: [String]) -[FS]> [String] Never! {
     missing := [String]{}
-    loop target in selected.executables -> jet_cli_build_missing_target_sources(root, target, generated, produced, missing)
-    loop target in selected.libraries -> jet_cli_build_missing_target_sources(root, target, generated, produced, missing)
+    loop target in selected.executables {
+        jet_cli_build_missing_target_sources(root, target, generated, produced, missing)
+    }
+    loop target in selected.libraries {
+        jet_cli_build_missing_target_sources(root, target, generated, produced, missing)
+    }
     missing
 }
 
@@ -311,7 +383,9 @@ jet_cli_build_missing_target_sources: fn(root: String, target: BuildPlanExecutab
     loop source in target.sources {
         if produced.contains(source) || build_files.exists(jet_cli_entry_join(root, source)) -> next
         made: loop made_module in generated {
-            if made_module.path == source -> break true
+            if made_module.path == source {
+                break true
+            }
         } ?? false
         if !made -> missing.push("`{source}` of `{target.name}`")
     }
@@ -321,7 +395,9 @@ jet_cli_build_missing_target_sources: fn(root: String, target: BuildPlanExecutab
 // path and the SHA-256 of its bytes.
 jet_cli_generated_lock_inputs: fn(generated: [BuildSessionGeneratedModule]) -> [ComptimeInput] Never! {
     inputs := [ComptimeInput]{}
-    loop source_file in generated -> inputs.push(ComptimeInput{path: source_file.path.copy(), hash: "sha256:{pkg_sha256_hex(source_file.source.bytes())}"})
+    loop source_file in generated {
+        inputs.push(ComptimeInput{path: source_file.path.copy(), hash: "sha256:{pkg_sha256_hex(source_file.source.bytes())}"})
+    }
     inputs
 }
 
@@ -362,8 +438,12 @@ jet_cli_action_outputs_restore: fn(root: String, outputs: [JetCLIActionOutput]) 
     loop output in outputs {
         full: jet_cli_entry_join(root, output.path)
         if {
-            output.present -> build_files.write_bytes(full, output.bytes) ?? jet_cli_write_notice("couldn't restore the build action output `{full}`: {err}\n")
-            build_files.exists(full) -> build_files.remove(full) ?? jet_cli_write_notice("couldn't remove the build action output `{full}`: {err}\n")
+            output.present -> {
+                build_files.write_bytes(full, output.bytes) ?? jet_cli_write_notice("couldn't restore the build action output `{full}`: {err}\n")
+            }
+            build_files.exists(full) -> {
+                build_files.remove(full) ?? jet_cli_write_notice("couldn't remove the build action output `{full}`: {err}\n")
+            }
         }
     }
 }
@@ -402,7 +482,9 @@ jet_cli_generated_shadow: fn(root: String, generated: [BuildSessionGeneratedModu
         prefix := root.copy()
         linked: loop part in source_file.path.split("/") {
             prefix = jet_cli_entry_join(prefix, part)
-            if build_files.is_symlink(prefix) -> break true
+            if build_files.is_symlink(prefix) {
+                break true
+            }
         } ?? false
         if !linked && !build_files.exists(path) -> next
         if !linked && build_files.is_file(path) {
@@ -410,7 +492,9 @@ jet_cli_generated_shadow: fn(root: String, generated: [BuildSessionGeneratedModu
             if on_disk == source_file.source -> next
             digest: "sha256:{pkg_sha256_hex(on_disk.bytes())}"
             managed: loop input in recorded {
-                if input.path == source_file.path && input.hash == digest -> break true
+                if input.path == source_file.path && input.hash == digest {
+                    break true
+                }
             } ?? false
             if managed -> next
         }
@@ -493,7 +577,9 @@ jet_cli_workspace_build_order: fn(root: String, members: [JetCLIWorkspaceMember]
         loop (index, member) in members {
             if placed[index] -> next
             ready: loop need in needs[index] {
-                if !placed[need] -> break false
+                if !placed[need] {
+                    break false
+                }
             } ?? true
             if ready {
                 placed[index] = true
@@ -544,7 +630,9 @@ jet_cli_check_library: fn(file: String, source: String, sources: [String], gener
                 .Refused(refusal) -> refusal.move()
                 .Compiled(result, checked_snapshot) -> {
                     errors: jet_driver_present_diagnostics(jet_cli_errors(result.diagnostics), checked_snapshot, result.generated_source_files)
-                    if errors.len() > 0 -> return JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, errors, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+                    if errors.len() > 0 {
+                        return JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, errors, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+                    }
                     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
                     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
                 }
@@ -588,7 +676,9 @@ jet_cli_root_package_facts: fn(root: JetDriverAuthorizedSourceRoot) -> PackageFa
             if file.relative_path != relative -> next
             inline: if PackageFacts.parse_inline(file.source, file.path) == {
                 .Ok(value) -> value
-                .Err(_) -> { return None }
+                .Err(_) -> {
+                    return None
+                }
             }
             // copy: `carrier` is a payload view of `inline`.
             if inline == .Val(carrier) -> return Val(carrier.facts.copy())
@@ -610,7 +700,9 @@ JetCLIContributedRequest: struct {
 jet_cli_contributed_request: fn(owned_request: &&JetDriverCompileRequest, color: Bool) -> JetCLIContributedRequest {
     request := owned_request.move()
     package: jet_cli_settings_package(request.authorized_sources) ?? return {request: request.move(), refusal: None}
-    if !jet_driver_entry_package_has_build(request) -> return {request: request.move(), refusal: None}
+    if !jet_driver_entry_package_has_build(request) {
+        return {request: request.move(), refusal: None}
+    }
     scope := JetDriverBuildQueryScope{next_session_id: 1}
     response := jet_driver_query_build_plan(request, scope)
     query := response.query.move()
@@ -642,25 +734,31 @@ jet_cli_record_build_contributions: fn(plan: BuildSessionPlan, package: JetCLISe
     facts := [FactContribution]{}
     loop contribution in build_plan_contributions(plan) {
         value: jet_cli_build_fact_value(contribution.value) ?? return Val(jet_cli_ice("`build: fn` contributed `{contribution.key}` a value no setting holds"))
-        facts.push(FactContribution{
-            key: contribution.key.copy(),
-            value: value,
-            scope: SourceScope.Function,
-            layer: ContributionLayer.Environment,
-            span: Span{start: contribution.start, end: contribution.end},
-            source: contribution.source.copy(),
-            reason: Val("computed by fn build"),
-        })
+        facts.push(
+            FactContribution{
+                key: contribution.key.copy(),
+                value: value,
+                scope: SourceScope.Function,
+                layer: ContributionLayer.Environment,
+                span: Span{start: contribution.start, end: contribution.end},
+                source: contribution.source.copy(),
+                reason: Val("computed by fn build"),
+            },
+        )
     }
     if pkg_lock_load(package.root) == .Val(lock) && lock.build_stamp != None {
         recorded := [LockedBuildContribution]{}
         loop row in lock.build_contributions {
             if row.package == package.name -> recorded.push(row.copy())
         }
-        if pkg_lock_sorted_contributions(recorded) == pkg_lock_locked_build_contribution_set(package.name, facts) -> return None
+        if pkg_lock_sorted_contributions(recorded) == pkg_lock_locked_build_contribution_set(package.name, facts) {
+            return None
+        }
     }
     stamp: pkg_lock_build_stamp(package.root, false) ?? return Val(jet_cli_lock_refusal(err, color))
-    if pkg_lock_record_build_contributions(package.root, package.name, facts, false, stamp) == .Err(error) -> return Val(jet_cli_lock_refusal(error, color))
+    if pkg_lock_record_build_contributions(package.root, package.name, facts, false, stamp) == .Err(error) {
+        return Val(jet_cli_lock_refusal(error, color))
+    }
     None
 }
 
@@ -681,7 +779,9 @@ jet_cli_build_fact_value: fn(value: BuildSessionValue) -> FactValue? Never! {
 // carried for `--json` (E3512 for a locked build's drift).
 jet_cli_lock_refusal: fn(error: LockError, color: Bool) -> JetDriverVerbOutput Never! {
     // copy: `diagnostic` is a payload view of `error`.
-    if error == .Reported(diagnostic) -> return jet_cli_lock_reports([Diagnostic]{diagnostic.copy()}, color)
+    if error == .Reported(diagnostic) {
+        return jet_cli_lock_reports([Diagnostic]{diagnostic.copy()}, color)
+    }
     jet_cli_ice("the project lock refused the build: {error.message()}")
 }
 
@@ -714,7 +814,9 @@ jet_cli_lock_effect_rows: fn(file: String, result: JetDriverCompileResult, snaps
     }
     if json -> return recorded
     loop gain in gains {
-        loop reach in gain.reaches -> recorded.stderr = "{recorded.stderr}{pkg_lock_widened_note(gain.name, reach)}"
+        loop reach in gain.reaches {
+            recorded.stderr = "{recorded.stderr}{pkg_lock_widened_note(gain.name, reach)}"
+        }
     }
     recorded
 }
@@ -733,7 +835,9 @@ jet_cli_lock_comptime_inputs: fn(file: String, result: JetDriverCompileResult, l
     inputs: jet_cli_comptime_lock_rows(physical, result.comptime_inputs)
     if inputs.len() == 0 -> return recorded
     stamp: pkg_lock_build_stamp(root, false) ?? return jet_cli_lock_refusal(err, color)
-    if pkg_lock_record_generated_inputs(root, inputs, false, stamp) == .Err(error) -> return jet_cli_lock_refusal(error, color)
+    if pkg_lock_record_generated_inputs(root, inputs, false, stamp) == .Err(error) {
+        return jet_cli_lock_refusal(error, color)
+    }
     recorded
 }
 
@@ -785,7 +889,9 @@ jet_cli_build_host: fn(owned_request: &&JetDriverCompileRequest, scope: &JetDriv
     response := jet_driver_query_build_plan(owned_request, scope)
     request := response.request.move()
     query := response.query.move()
-    if !query.complete || query.internal_problem != None -> return jet_cli_build_query_failure(request, query, file, json, color, verbose)
+    if !query.complete || query.internal_problem != None {
+        return jet_cli_build_query_failure(request, query, file, json, color, verbose)
+    }
     JetDriverVerbOutput{stdout: jet_cli_build_report(query, subject, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
@@ -805,8 +911,7 @@ jet_cli_build_duration: fn(value: Float) -> String Never! {
     scaled := significand * 125
     if exponent < 0 {
         shift: -exponent
-        if shift > 60 -> scaled = 0
-        else {
+        if shift > 60 -> scaled = 0 else {
             divisor: 1 << shift
             quotient: scaled /% divisor
             remainder: scaled % divisor
@@ -854,8 +959,12 @@ JetCLICompileNodeObservation: struct {
 }
 
 jet_cli_build_compile_observation: fn(executed: BuildGraphNode, duration_ms: Float, previous: BuildRecord?, object: ObjectHandle) -> JetCLICompileNodeObservation JetCLIReadError! {
-    if executed.kind != "compile" -> return Err(jet_cli_read_error("native object production requires a compile node"))
-    if duration_ms - duration_ms != 0.0 || duration_ms < 0.0 -> return Err(jet_cli_read_error("native compile duration is not a finite non-negative observation"))
+    if executed.kind != "compile" {
+        return Err(jet_cli_read_error("native object production requires a compile node"))
+    }
+    if duration_ms - duration_ms != 0.0 || duration_ms < 0.0 {
+        return Err(jet_cli_read_error("native compile duration is not a finite non-negative observation"))
+    }
     // CmdCompile15122-15129 names the first canonical input when a prior
     // authenticated record exists. It does not claim that input changed.
     reason: if {
@@ -863,10 +972,12 @@ jet_cli_build_compile_observation: fn(executed: BuildGraphNode, duration_ms: Flo
         executed.inputs.len() > 0 -> "input:{executed.inputs[0]}"
         else -> "first-run"
     }
-    return Ok(JetCLICompileNodeObservation{
-        node: BuildNodeRecord{kind: executed.kind, key: executed.key, subject: executed.subject, duration_ms: duration_ms, why_ran: reason, inputs: executed.inputs},
-        object: object,
-    })
+    return Ok(
+        JetCLICompileNodeObservation{
+            node: BuildNodeRecord{kind: executed.kind, key: executed.key, subject: executed.subject, duration_ms: duration_ms, why_ran: reason, inputs: executed.inputs},
+            object: object,
+        },
+    )
 }
 
 // Only authenticated producer evidence can supply timing/rebuild reasons.
@@ -886,30 +997,40 @@ jet_cli_build_nodes_report: fn(program: String, record: BuildRecord?, planned: [
     if json {
         rows := [JetCLIStatusValue]{}
         loop node in recorded {
-            rows.push(jet_cli_status_object([
-                jet_cli_status_field("kind", jet_cli_status_text(node.kind)),
-                jet_cli_status_field("key", jet_cli_status_text(node.key)),
-                jet_cli_status_field("subject", jet_cli_status_text(node.subject)),
-                jet_cli_status_field("duration_ms", JetCLIStatusValue.Float{text: jet_cli_build_duration(node.duration_ms)}),
-                jet_cli_status_field("why_ran", jet_cli_status_text(node.why_ran)),
-                jet_cli_status_field("inputs", jet_cli_status_texts(node.inputs)),
-            ]))
+            rows.push(
+                jet_cli_status_object(
+                    [
+                        jet_cli_status_field("kind", jet_cli_status_text(node.kind)),
+                        jet_cli_status_field("key", jet_cli_status_text(node.key)),
+                        jet_cli_status_field("subject", jet_cli_status_text(node.subject)),
+                        jet_cli_status_field("duration_ms", JetCLIStatusValue.Float{text: jet_cli_build_duration(node.duration_ms)}),
+                        jet_cli_status_field("why_ran", jet_cli_status_text(node.why_ran)),
+                        jet_cli_status_field("inputs", jet_cli_status_texts(node.inputs)),
+                    ],
+                ),
+            )
         }
         planned_rows := [JetCLIStatusValue]{}
         loop node in planned {
-            planned_rows.push(jet_cli_status_object([
-                jet_cli_status_field("kind", jet_cli_status_text(node.kind)),
-                jet_cli_status_field("key", jet_cli_status_text(node.key)),
-                jet_cli_status_field("subject", jet_cli_status_text(node.subject)),
-                jet_cli_status_field("inputs", jet_cli_status_texts(node.inputs)),
-            ]))
+            planned_rows.push(
+                jet_cli_status_object(
+                    [
+                        jet_cli_status_field("kind", jet_cli_status_text(node.kind)),
+                        jet_cli_status_field("key", jet_cli_status_text(node.key)),
+                        jet_cli_status_field("subject", jet_cli_status_text(node.subject)),
+                        jet_cli_status_field("inputs", jet_cli_status_texts(node.inputs)),
+                    ],
+                ),
+            )
         }
-        document: jet_cli_status_object([
-            jet_cli_status_field("schema", jet_cli_status_text("jet.explain-build/v1")),
-            jet_cli_status_field("program", jet_cli_status_text(program)),
-            jet_cli_status_field("nodes", jet_cli_status_array(rows)),
-            jet_cli_status_field("planned", jet_cli_status_array(planned_rows)),
-        ])
+        document: jet_cli_status_object(
+            [
+                jet_cli_status_field("schema", jet_cli_status_text("jet.explain-build/v1")),
+                jet_cli_status_field("program", jet_cli_status_text(program)),
+                jet_cli_status_field("nodes", jet_cli_status_array(rows)),
+                jet_cli_status_field("planned", jet_cli_status_array(planned_rows)),
+            ],
+        )
         return "{jet_cli_status_json(document)}\n"
     }
     if !measured {
@@ -934,10 +1055,14 @@ jet_cli_build_nodes_host: fn(owned_request: &&JetDriverCompileRequest, scope: &J
     response := jet_driver_query_build_plan(owned_request, scope)
     request := response.request.move()
     query := response.query.move()
-    if !query.complete || query.internal_problem != None -> return jet_cli_build_query_failure(request, query, file, json, color, verbose)
+    if !query.complete || query.internal_problem != None {
+        return jet_cli_build_query_failure(request, query, file, json, color, verbose)
+    }
     if record == {
         .Val(retained) -> {
-            if retained.program != program -> return jet_cli_execute(jet_cli_inspect_b_report("E2104", "build execution-node evidence belongs to another program", jet_cli_why("E2104"), "select the authenticated last-build record for this program", color, json, JET_DRIVER_EXIT_USER_ERROR))
+            if retained.program != program {
+                return jet_cli_execute(jet_cli_inspect_b_report("E2104", "build execution-node evidence belongs to another program", jet_cli_why("E2104"), "select the authenticated last-build record for this program", color, json, JET_DRIVER_EXIT_USER_ERROR))
+            }
             return {stdout: jet_cli_build_nodes_report(program, Val(retained), query.nodes, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
         }
         .None -> return {stdout: jet_cli_build_nodes_report(program, None, query.nodes, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}

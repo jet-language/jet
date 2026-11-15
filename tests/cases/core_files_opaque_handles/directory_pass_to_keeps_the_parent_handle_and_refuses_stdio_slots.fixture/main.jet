@@ -1,5 +1,7 @@
-use files: core.files
-use process: core.process
+use {
+    files: core.files
+    process: core.process
+}
 
 // `directory.pass_to(spec, at)` is kept only for CacheLease until it moves to
 // `spec.keep_open(directory.duplicate())`: the child gets a
@@ -13,7 +15,7 @@ run: fn() -[IO, FS, Exec, Env]> {
     entries: directory.list() ?? panic("list after pass")
     print("parent still lists: {entries.len() > 0}")
     if directory.pass_to(process.cmd(["true"]), 2) == {
-        .Ok(_) -> print("stdio slot: passed")
+        .Ok(_) -> { print("stdio slot: passed") }
         .Err(error) -> print("stdio slot: {error == .InvalidInput(_)}")
     }
 }

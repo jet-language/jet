@@ -7,7 +7,9 @@ use {
 }
 
 NIX_INDEX_DOMAIN: "jet-nixpkgs-index-v1\n"
+
 NIX_INDEX_MANIFEST_DOMAIN: "jet-nixpkgs-channel-manifest-v1\n"
+
 NIX_INDEX_SIGNATURE_ALGORITHM: "ed25519"
 
 nix_index_signature_message: fn(domain: String, bytes: [U8]) -> [U8] Never! {
@@ -28,13 +30,15 @@ nix_index_manifest_signature_request: fn(manifest_bytes: [U8]) -> [U8] Never! {
 
 // The canonical signature sidecar for `signature` under `key_id`.
 nix_index_signature_sidecar: fn(key_id: String, signature: [U8]) -> [U8] Never! {
-    sidecar: NixIndexSignature{schema: NIX_INDEX_SCHEMA, key_id, algorithm: NIX_INDEX_SIGNATURE_ALGORITHM, signature: base64.encode(signature)}
+    sidecar: NixIndexSignature{schema: NIX_INDEX_SCHEMA, key_id: key_id, algorithm: NIX_INDEX_SIGNATURE_ALGORITHM, signature: base64.encode(signature)}
     sidecar.canonical_bytes()
 }
 
 nix_index_decode_signature: fn(encoded: String) -> [U8] NixIndexError! {
     bytes: base64.decode(encoded) ?? return Err(NixIndexError.Invalid("nix index signature is not base64"))
-    if bytes.len() != 64 -> return Err(NixIndexError.Invalid("nix index signature must be 64 bytes"))
+    if bytes.len() != 64 {
+        return Err(NixIndexError.Invalid("nix index signature must be 64 bytes"))
+    }
     Ok(bytes)
 }
 

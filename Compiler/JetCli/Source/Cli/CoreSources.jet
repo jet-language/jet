@@ -111,7 +111,9 @@ JetCLICoreBinding: struct {
 // The binding of a compile of `entry` whose Core sources under test are
 // `core_tests` ("" for none).
 jet_cli_core_binding: fn(entry: String, core_tests: String) -> Shared<JetCLICoreBinding> Never! {
-    if core_tests != "" || !jet_cli_runtime_embedded() -> return Shared{JetCLICoreBinding{toolchain: "", built_in: false}}
+    if core_tests != "" || !jet_cli_runtime_embedded() {
+        return Shared{JetCLICoreBinding{toolchain: "", built_in: false}}
+    }
     toolchain: if jet_cli_toolchain_root(entry) == {
         .Found(root) -> root
         .Missing(_, _) -> ""
@@ -146,6 +148,7 @@ jet_cli_core_binding_bound: fn(binding: Shared<JetCLICoreBinding>) -> Bool Never
 // key: no whole read or parse.
 JetCLICoreSealRead: struct {
     binding: Shared<JetCLICoreBinding>
+
     impl SemaCoreSealSource {
         read: fn(self) -[FS, Env]> SemaCoreSeal? {
             if !jet_cli_core_binding_built_in(self.binding) -> return None
@@ -166,7 +169,9 @@ jet_cli_core_tree_matches: fn(toolchain: String) -> Bool Never! {
     loop (index, file) in JET_CLI_CORE_SOURCES -> built_in[file.path] = index
     loop (index, row) in rows {
         known: CORE_SOURCE_OWNED_ROWS[index]
-        if row.path != known.path || row.module_name != known.module_name || row.alias != known.alias || row.owner != known.owner || row.owned_members != known.owned_members || row.impl_types != known.impl_types || row.runtime != known.runtime -> return false
+        if row.path != known.path || row.module_name != known.module_name || row.alias != known.alias || row.owner != known.owner || row.owned_members != known.owned_members || row.impl_types != known.impl_types || row.runtime != known.runtime {
+            return false
+        }
         at: built_in.get(row.path) ?? return false
         text: cli_files.read(jet_cli_authority_path(toolchain, row.path)) ?? return false
         if text != JET_CLI_CORE_SOURCES[at].text -> return false
@@ -179,7 +184,9 @@ jet_cli_core_tree_matches: fn(toolchain: String) -> Bool Never! {
 }
 
 #Test("the built-in Core sources hold every Core source row and the assets they embed") {
-    loop row in CORE_SOURCE_OWNED_ROWS -> assert(jet_cli_core_source_text(row.path) != None, "{row.path} is built in")
+    loop row in CORE_SOURCE_OWNED_ROWS {
+        assert(jet_cli_core_source_text(row.path) != None, "{row.path} is built in")
+    }
     assert(jet_cli_core_source_text("Core/NoSuch/NoSuch.jet") == None)
     assert((jet_cli_core_asset_bytes("Core/Ui/XkbTables/keysym_values.bin") ?? [U8]{}).len() > 0)
     assert(jet_cli_core_asset_bytes("Core/App/App.jet") == None)

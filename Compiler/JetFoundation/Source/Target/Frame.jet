@@ -35,14 +35,10 @@ jet_frame_types: fn(defs: &&[TTypeDef]) -> JetFrameTypes Never! {
     owned := defs.move()
     rows := [String:Int]{}
     loop (index, definition) in owned {
-        if rows.get(definition.key) == None {
-            rows[definition.key.copy()] = index
-        }
+        if rows.get(definition.key) == None -> rows[definition.key.copy()] = index
     }
     loop (index, definition) in owned {
-        if rows.get(definition.name) == None {
-            rows[definition.name.copy()] = index
-        }
+        if rows.get(definition.name) == None -> rows[definition.name.copy()] = index
     }
     JetFrameTypes{defs: owned.move(), rows: rows.move()}
 }
@@ -96,9 +92,7 @@ jet_frame_storage_bytes: fn(types: JetFrameTypes, ty: Type, env: [String:Int], l
 
 // The bytes a member of `storage` takes in an aggregate: a one-word value
 // takes its word.
-jet_frame_member_bytes: fn(storage: Int) -> Int Never! {
-    if storage == 0 -> 8 else -> storage
-}
+jet_frame_member_bytes: fn(storage: Int) -> Int Never! { if storage == 0 -> 8 else -> storage }
 
 // The length of a fixed list of `measure`, with each number parameter read
 // from `env`.

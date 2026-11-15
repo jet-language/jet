@@ -15,9 +15,7 @@ first: fn(xs: [String]) -> String ListWasEmpty! {
     Ok(xs[0])
 }
 
-to_num: fn(s: String) -> Int BadNumStr! {
-    s.to_int() ?? return Err(BadNumStr{message: "nan"})
-}
+to_num: fn(s: String) -> Int BadNumStr! { s.to_int() ?? return Err(BadNumStr{message: "nan"}) }
 
 increment_first: fn(xs: [String]) -> Int (ListWasEmpty | BadNumStr)! {
     s: first(xs)
@@ -27,7 +25,7 @@ increment_first: fn(xs: [String]) -> Int (ListWasEmpty | BadNumStr)! {
 
 run: fn() {
     if increment_first(["41"]) == {
-        .Ok(n) -> print(n)
+        .Ok(n) -> { print(n) }
         .Err(.ListWasEmpty(_)) -> print("empty")
     }
 }

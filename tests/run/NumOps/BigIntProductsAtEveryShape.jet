@@ -8,7 +8,9 @@ LIMB: 1000000000
 
 number: fn(top: Int, fill: Int, length: Int, negative: Bool) -> Int {
     value := top
-    loop i in 1..<length -> value = value * LIMB + (if i % 3 == 0 -> 0 else -> (fill + i * 7919) % LIMB)
+    loop i in 1..<length {
+        value = value * LIMB + (if i % 3 == 0 -> 0 else -> (fill + i * 7919) % LIMB)
+    }
     if negative -> -value else -> value
 }
 
@@ -44,6 +46,6 @@ run: fn() {
     print(number(1, 0, 7, false) * 999999999)
     print(-1000000000 * number(2, 0, 4, false))
     two := 1
-    loop _ in 0..<1074 -> two = two * 2
+    loop _ in 0..<1074 -> two *= 2
     print(two)
 }

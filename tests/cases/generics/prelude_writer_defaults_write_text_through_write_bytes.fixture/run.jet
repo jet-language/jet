@@ -16,14 +16,12 @@ Sink: struct {
             loop byte in bytes -> self.bytes.push(byte)
         }
 
-        flush: fn(&self) IOError! {
-            self.flushes += 1
-        }
+        flush: fn(&self) IOError! { self.flushes += 1 }
     }
 }
 
 // Greets `name` on `out` through the bound, then flushes it.
-greet: fn<W: Writer>(&out: W, name: String) IOError! {
+greet: fn<W: Writer>(out: &W, name: String) IOError! {
     out.write("hello, ") ?? return Err(err)
     out.write_line(name) ?? return Err(err)
     out.flush()

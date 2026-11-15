@@ -1,4 +1,3 @@
-
 #Error
 ListWasEmpty: struct {
     message: String
@@ -14,9 +13,7 @@ first: fn(xs: [String]) -> String ListWasEmpty! {
     Ok(xs[0])
 }
 
-to_num: fn(s: String) -> Int BadNumStr! {
-    s.to_int() ?? return Err(BadNumStr{message: "nan"})
-}
+to_num: fn(s: String) -> Int BadNumStr! { s.to_int() ?? return Err(BadNumStr{message: "nan"}) }
 
 increment_first: fn(xs: [String]) -> Int (ListWasEmpty | BadNumStr)! {
     s: first(xs)
@@ -27,8 +24,8 @@ increment_first: fn(xs: [String]) -> Int (ListWasEmpty | BadNumStr)! {
 run: fn() {
     loop xs in [["41"], [], ["x"]] {
         if increment_first(xs) == {
-            .Ok(n) -> print(n)
-            .Err(.ListWasEmpty(_)) -> print("empty")
+            .Ok(n) -> { print(n) }
+            .Err(.ListWasEmpty(_)) -> { print("empty") }
             .Err(.BadNumStr(_)) -> print("not a number")
         }
     }

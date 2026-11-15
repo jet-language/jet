@@ -13,17 +13,25 @@ use {
 }
 
 PEER_REVISION: "c8f90650c15282fa8656a041bfbbd2403997a9a7"
+
 PEER_ROOT: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-ripgrep-15.2.0"
+
 PEER_LIB: "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-ripgrep-lib-1.0"
+
 PEER_RUNTIME: "/nix/store/cccccccccccccccccccccccccccccccc-ripgrep-runtime-1.0"
+
 PEER_DRV: "/nix/store/dddddddddddddddddddddddddddddddd-ripgrep-15.2.0.drv"
+
 PEER_CRLF: "\r\n"
 
 // The staged codec is the existing Jetpack raw-block/XXH64 implementation,
 // copied by the .case, not a second test-specific compression implementation.
 NIX_INDEX_MAX_DECODED_BYTES: 268435456
+
 #Error
-NixIndexError: enum { Invalid(String) }
+NixIndexError: enum {
+    Invalid(String)
+}
 
 peer_seed: fn() -> [U8] {
     seed := [U8]{}
@@ -90,8 +98,9 @@ peer_nar: fn(source: String, kind: String) -> [U8] {
         path: files.join(source, "bin/rg")
         peer_write(path, "#!/bin/sh\necho ripgrep 15.2.0\n")
         files.chmod(path, 0o755) ?? panic("fixture executable mode")
-    } else if kind == "lib" -> peer_write(files.join(source, "lib/marker"), "library")
-    else -> peer_write(files.join(source, "share/marker"), "runtime")
+    } else if kind == "lib" { peer_write(files.join(source, "lib/marker"), "library") } else {
+        peer_write(files.join(source, "share/marker"), "runtime")
+    }
     out := [U8]{}
     peer_nar_token(out, "nix-archive-1".bytes())
     peer_nar_node(out, source)
@@ -107,7 +116,9 @@ peer_nix_base32: fn(bytes: [U8]) -> String {
         digit := 0
         loop offset in 0..<5 {
             target: bit + offset
-            if target < 256 && (Int{bytes[target /% 8]}).bit_and(1 << (target % 8)) != 0 -> digit = digit.bit_or(1 << offset)
+            if target < 256 && (Int{bytes[target /% 8]}).bit_and(1 << (target % 8)) != 0 {
+                digit = digit.bit_or(1 << offset)
+            }
         }
         out.push(alphabet[digit])
     }
@@ -126,7 +137,7 @@ peer_narinfo: fn(store_path: String, nar_name: String, nar: [U8], references: [S
 
 // `index_prefix` is "/index" for the loopback peer and "" for a static
 // publication, whose index endpoint is the publication root itself.
-peer_routes: fn(endpoint: String, index_prefix: String, root: String, source: String) -> [String: [U8]] {
+peer_routes: fn(endpoint: String, index_prefix: String, root: String, source: String) -> [String:[U8]] {
     now: time.unix_ns() /% 1000000000
     assert(now >= 0)
     released: if now >= 60 -> now - 60 else -> 0
@@ -138,7 +149,7 @@ peer_routes: fn(endpoint: String, index_prefix: String, root: String, source: St
     digest: crypto.sha256(compressed).hex()
     target: "{index_prefix}/index-v1/{PEER_REVISION}/x86_64-linux/{digest}.json.zst"
     manifest: "{{\"schema\":1,\"channel\":\"nixpkgs-unstable\",\"generation\":1,\"issued_unix\":{released},\"expires_unix\":{expires},\"targets\":[{{\"revision\":\"{PEER_REVISION}\",\"system\":\"x86_64-linux\",\"url\":\"{endpoint}{target}\",\"signature_url\":\"{endpoint}{target}.sig.json\",\"sha256\":\"{digest}\",\"compressed_length\":{compressed.len()},\"decoded_length\":{decoded.bytes().len()},\"record_count\":1,\"index_signature_sha256\":\"{crypto.sha256(sidecar).hex()}\",\"discoverable\":true}}]}}"
-    routes := [String: [U8]]{}
+    routes := [String:[U8]]{}
     routes["{index_prefix}/v1/nixpkgs-unstable/manifest.json"] = manifest.bytes()
     routes["{index_prefix}/v1/nixpkgs-unstable/manifest.json.sig.json"] = peer_sidecar("jet-nixpkgs-channel-manifest-v1\n", manifest)
     routes[target] = compressed
@@ -162,7 +173,7 @@ peer_routes: fn(endpoint: String, index_prefix: String, root: String, source: St
     routes
 }
 
-peer_object_count: fn(counts: [String: Int], path: String, kind: String) -> Int {
+peer_object_count: fn(counts: [String:Int], path: String, kind: String) -> Int {
     name: files.basename(path)
     (counts.get("/{name.slice(0, 32)}.narinfo") ?? 0) + (counts.get("/nar/{kind}.nar") ?? 0)
 }
@@ -220,7 +231,7 @@ run: fn() {
     // Publish READY only after the listener AND signed fixture config exist.
     peer_write("{ready}.tmp", "{port}")
     files.rename("{ready}.tmp", ready) ?? panic("publish fixture READY")
-    counts := [String: Int]{}
+    counts := [String:Int]{}
     online := true
     loop {
         stream := net.tcp_accept(listener) ?? panic("accept Nix fixture request")
@@ -242,7 +253,7 @@ run: fn() {
         counts[path] = (counts.get(path) ?? 0) + 1
         stop: path == "/stop"
         control: stop || path == "/reset" || path == "/offline" || path == "/online"
-        if path == "/reset" -> counts = [String: Int]{}
+        if path == "/reset" -> counts = [String:Int]{}
         if path == "/offline" -> online = false
         if path == "/online" -> online = true
         body: if path == "/counts" -> Val("{{\"root\":{peer_object_count(counts, PEER_ROOT, "root")},\"lib\":{peer_object_count(counts, PEER_LIB, "lib")},\"runtime\":{peer_object_count(counts, PEER_RUNTIME, "runtime")},\"info\":{counts.get("/nix-cache-info") ?? 0}}}".bytes()) else if control -> Val("".bytes()) else if !online -> None else if publishing -> peer_static_file(publication, path) else -> routes.get(path)

@@ -13,10 +13,14 @@ DEBUG_EXPRESSION_MAX_BYTES: 16384
 // `text` read by the compiler's parser as one Jet expression.
 debug_parse_expression: fn(text: String) -> Expr DebugEvaluationError! {
     if text.trim() == "" -> return Err(debug_evaluation_error("the expression is empty"))
-    if text.bytes().len() > DEBUG_EXPRESSION_MAX_BYTES -> return Err(debug_evaluation_error("the expression is longer than {DEBUG_EXPRESSION_MAX_BYTES} bytes"))
+    if text.bytes().len() > DEBUG_EXPRESSION_MAX_BYTES {
+        return Err(debug_evaluation_error("the expression is longer than {DEBUG_EXPRESSION_MAX_BYTES} bytes"))
+    }
     parsed: parse_source("debug_expression: fn() {{\n{text}\n}}\n".bytes())
     loop diagnostic in parsed.diagnostics {
-        if diagnostic.severity == DIAGNOSTIC_ERROR -> return Err(debug_evaluation_error("`{text}` is not a Jet expression: {diagnostic.what}"))
+        if diagnostic.severity == DIAGNOSTIC_ERROR {
+            return Err(debug_evaluation_error("`{text}` is not a Jet expression: {diagnostic.what}"))
+        }
     }
     if parsed.program.items.len() == 1 && parsed.program.items[0] == .Func(function) && function.body.len() == 1 && function.body[0] == .Expr(expr) {
         return Ok(expr)
@@ -38,7 +42,9 @@ debug_is_place: fn(expr: Expr) -> Bool Never! {
         first: member.bytes()
         return first.len() > 0 && (Int{first[0]} < 48 || Int{first[0]} > 57) && debug_is_place(base)
     }
-    if expr == .Index(base, index, _, _, _) && index == .Int(position, _, _, _, _) -> return position >= 0 && debug_is_place(base)
+    if expr == .Index(base, index, _, _, _) && index == .Int(position, _, _, _, _) {
+        return position >= 0 && debug_is_place(base)
+    }
     false
 }
 
@@ -66,7 +72,9 @@ debug_expression_test_place: fn(text: String) -> Bool Never! {
 
 debug_expression_test_refusal: fn(text: String) -> String Never! {
     if debug_parse_expression(text) == {
-        .Ok(_) -> { panic("expected `{text}` to be refused") }
+        .Ok(_) -> {
+            panic("expected `{text}` to be refused")
+        }
         .Err(error) -> error.message
     }
 }

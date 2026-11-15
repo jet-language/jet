@@ -12,7 +12,9 @@ use {
 
 lsp_text_edits_json: fn(src: String, edits: [TextEdit]) -> String Never! {
     rows := [String]{}
-    loop edit in edits -> rows.push("{{\"range\":{lsp_range_json(lsp_byte_span_to_range(src, edit.span))},\"newText\":{foundation_json_quote(edit.new_text)}}}")
+    loop edit in edits {
+        rows.push("{{\"range\":{lsp_range_json(lsp_byte_span_to_range(src, edit.span))},\"newText\":{foundation_json_quote(edit.new_text)}}}")
+    }
     "[{rows.join(",")}]"
 }
 
@@ -65,20 +67,28 @@ lsp_on_type_format_edits: fn(src: String, lexed: Lexed, position: LSPPos, trigge
     trigger_start: offset - 1
     bytes: src.bytes()
     // A trigger inside a character's bytes is no trigger.
-    if !lsp_format_char_boundary(bytes, trigger_start) || !lsp_format_char_boundary(bytes, offset) -> return [TextEdit]{}
-    if foundation_byte_text(bytes, trigger_start, offset) != trigger || lsp_opaque_trigger(tokens, trigger_start, offset) -> return [TextEdit]{}
+    if !lsp_format_char_boundary(bytes, trigger_start) || !lsp_format_char_boundary(bytes, offset) {
+        return [TextEdit]{}
+    }
+    if foundation_byte_text(bytes, trigger_start, offset) != trigger || lsp_opaque_trigger(tokens, trigger_start, offset) {
+        return [TextEdit]{}
+    }
     pairs: lsp_token_brace_pairs(lexed)
     loop pair in pairs {
-        if pair.opaque && pair.open.end <= offset && offset <= pair.close.start -> return [TextEdit]{}
+        if pair.opaque && pair.open.end <= offset && offset <= pair.close.start {
+            return [TextEdit]{}
+        }
     }
     if trigger == "\n" {
         active := LSPTokenBracePair?{None}
         loop pair in pairs {
             if pair.opaque || pair.open.end > offset || offset > pair.close.start -> next
             if active == {
-                .None -> active = Val(pair)
+                .None -> { active = Val(pair) }
                 .Val(previous) -> {
-                    if pair.close.end - pair.open.start < previous.close.end - previous.open.start -> active = Val(pair)
+                    if pair.close.end - pair.open.start < previous.close.end - previous.open.start {
+                        active = Val(pair)
+                    }
                 }
             }
         }
@@ -86,14 +96,18 @@ lsp_on_type_format_edits: fn(src: String, lexed: Lexed, position: LSPPos, trigge
     }
     if trigger != "}}" -> return [TextEdit]{}
     loop pair in pairs {
-        if !pair.opaque && pair.close.start == trigger_start -> return lsp_closing_brace_format_edits(src, pair)
+        if !pair.opaque && pair.close.start == trigger_start {
+            return lsp_closing_brace_format_edits(src, pair)
+        }
     }
     [TextEdit]{}
 }
 
 lsp_opaque_trigger: fn(tokens: [Token], start: Int, end: Int) -> Bool Never! {
     loop token in tokens {
-        if token.span.start <= start && end <= token.span.end && (token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING || token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT) -> return true
+        if token.span.start <= start && end <= token.span.end && (token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING || token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT) {
+            return true
+        }
     }
     false
 }
@@ -102,9 +116,13 @@ lsp_token_brace_pairs: fn(lexed: Lexed) -> [LSPTokenBracePair] Never! {
     opens := [LSPOpenBrace]{}
     pairs := [LSPTokenBracePair]{}
     loop (index, token) in lexed.tokens {
-        if token.kind == TOKEN_LBRACE -> opens.push(LSPOpenBrace{span: token.span, opaque: lsp_typed_body_open(lexed, index)})
+        if token.kind == TOKEN_LBRACE {
+            opens.push(LSPOpenBrace{span: token.span, opaque: lsp_typed_body_open(lexed, index)})
+        }
         if token.kind == TOKEN_RBRACE {
-            if opens.pop() == .Val(open) -> pairs.push(LSPTokenBracePair{open: open.span, close: token.span, opaque: open.opaque})
+            if opens.pop() == .Val(open) {
+                pairs.push(LSPTokenBracePair{open: open.span, close: token.span, opaque: open.opaque})
+            }
         }
     }
     pairs
@@ -120,7 +138,9 @@ lsp_typed_body_open: fn(lexed: Lexed, index: Int) -> Bool Never! {
     before := -1
     loop cursor > 0 {
         cursor -= 1
-        if tokens[cursor].kind == TOKEN_LINE_COMMENT || tokens[cursor].kind == TOKEN_BLOCK_COMMENT -> next
+        if tokens[cursor].kind == TOKEN_LINE_COMMENT || tokens[cursor].kind == TOKEN_BLOCK_COMMENT {
+            next
+        }
         if previous >= 0 {
             before = cursor
             break
@@ -157,18 +177,24 @@ lsp_newline_format_edits: fn(src: String, pair: LSPTokenBracePair, position: LSP
         // the brace moves to a line of its own below it.
         if lsp_blank_bytes(bytes, pair.open.end, line_start) {
             opened := [TextEdit]{}
-            if foundation_byte_text(bytes, line_start, indent_end) != expected -> opened.push(TextEdit{span: Span{start: line_start, end: indent_end}, new_text: expected})
+            if foundation_byte_text(bytes, line_start, indent_end) != expected {
+                opened.push(TextEdit{span: Span{start: line_start, end: indent_end}, new_text: expected})
+            }
             opened.push(TextEdit{span: Span{start: indent_end, end: indent_end}, new_text: "{lsp_line_ending_before(src, line_start)}{base_indent}"})
             return opened
         }
         expected = base_indent.copy()
     }
     edits := [TextEdit]{}
-    if foundation_byte_text(bytes, line_start, indent_end) != expected -> edits.push(TextEdit{span: Span{start: line_start, end: indent_end}, new_text: expected})
+    if foundation_byte_text(bytes, line_start, indent_end) != expected {
+        edits.push(TextEdit{span: Span{start: line_start, end: indent_end}, new_text: expected})
+    }
     if close_on_line == .Val(close) {
         if close.close.start > indent_end {
             gap_start := close.close.start
-            loop gap_start > line_start && (bytes[gap_start - 1] == (U8{32}) || bytes[gap_start - 1] == (U8{9})) -> gap_start -= 1
+            loop gap_start > line_start && (bytes[gap_start - 1] == (U8{32}) || bytes[gap_start - 1] == (U8{9})) {
+                gap_start -= 1
+            }
             edits.push(TextEdit{span: Span{start: gap_start, end: close.close.start}, new_text: "{lsp_line_ending_before(src, line_start)}{base_indent}"})
         }
     }
@@ -179,7 +205,9 @@ lsp_newline_format_edits: fn(src: String, pair: LSPTokenBracePair, position: LSP
 lsp_blank_bytes: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! {
     loop index in start..<end {
         byte: bytes[index]
-        if byte != (U8{32}) && byte != (U8{9}) && byte != (U8{13}) && byte != (U8{10}) -> return false
+        if byte != (U8{32}) && byte != (U8{9}) && byte != (U8{13}) && byte != (U8{10}) {
+            return false
+        }
     }
     true
 }
@@ -238,7 +266,9 @@ lsp_format_requested_lines: fn(src: String, requested: LSPRange) -> TextEdit? Ne
         line_end: lsp_line_content_end(src, first_line)
         if lsp_leading_indent_end(src, first_line, line_end) < line_end -> break
         first_line = line_end
-        loop first_line < end && (bytes[first_line] == (U8{13}) || bytes[first_line] == (U8{10})) -> first_line += 1
+        loop first_line < end && (bytes[first_line] == (U8{13}) || bytes[first_line] == (U8{10})) {
+            first_line += 1
+        }
     }
     indent: foundation_byte_text(bytes, first_line, lsp_leading_indent_end(src, first_line, lsp_line_content_end(src, first_line)))
     replacement: lsp_indent_formatted_fragment(formatted.text, indent)
@@ -263,7 +293,9 @@ lsp_line_boundary: fn(src: String, line: Int) -> Int? Never! {
     index := 0
     loop index < bytes.len() {
         if bytes[index] == (U8{13}) || bytes[index] == (U8{10}) {
-            if bytes[index] == (U8{13}) && index + 1 < bytes.len() && bytes[index + 1] == (U8{10}) -> index += 1
+            if bytes[index] == (U8{13}) && index + 1 < bytes.len() && bytes[index + 1] == (U8{10}) {
+                index += 1
+            }
             current += 1
             if current == line -> return Val(index + 1)
         }

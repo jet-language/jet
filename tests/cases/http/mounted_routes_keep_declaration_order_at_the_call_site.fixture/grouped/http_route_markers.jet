@@ -12,9 +12,13 @@ use {
 }
 
 #Codable
-NewJoke: struct { text: String }
+NewJoke: struct {
+    text: String
+}
 
-JokeState: struct { added: Int }
+JokeState: struct {
+    added: Int
+}
 
 ReadJoke: struct {
     impl Marker {
@@ -26,26 +30,22 @@ Jokes: struct {
     prefix: String
     state: Shared<JokeState>
 
-    #ReadJoke
-    joke: fn(self, id: Int) -> HTTPResponse HTTPError! {
+    #ReadJoke joke: fn(self, id: Int) -> HTTPResponse HTTPError! {
         count: self.state.guard_read().value.added
         Ok(server.response(200, "{self.prefix} {id} added={count}"))
     }
 
-    #Server.Post("/jokes")
-    add: fn(self, request: HTTPRequest) -> HTTPResponse HTTPError! {
+    #Server.Post("/jokes") add: fn(self, request: HTTPRequest) -> HTTPResponse HTTPError! {
         input: request.json<NewJoke>()
         self.state.guard_edit().value.added += 1
         Ok(server.response(201, "{self.prefix}: {input.text}"))
     }
 
-    #Server.Get("/order/:name")
-    first: fn(self, name: String) -> HTTPResponse HTTPError! {
+    #Server.Get("/order/:name") first: fn(self, name: String) -> HTTPResponse HTTPError! {
         Ok(server.response(200, "first:{name}"))
     }
 
-    #Server.Get("/order/fixed")
-    second: fn(self) -> HTTPResponse HTTPError! {
+    #Server.Get("/order/fixed") second: fn(self) -> HTTPResponse HTTPError! {
         Ok(server.response(200, "second"))
     }
 }

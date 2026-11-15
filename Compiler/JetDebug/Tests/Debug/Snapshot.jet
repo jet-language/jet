@@ -2,12 +2,11 @@
 // algorithm. Digests are SHA-256 of the exact Rust identity material.
 // Paused-native product proof (111/131, Canvas debug_source_git) needs a real
 // native pause and is not claimed here.
+use jet_debug.[DebugEvaluationUsage, DebugSnapshot, DebugValue, FrameSnapshot, ValueSnapshot, debug_render_snapshot_locals, evaluate_snapshot]
 
-use {
-    jet_debug.[DebugEvaluationUsage, DebugSnapshot, DebugValue, FrameSnapshot, ValueSnapshot, debug_render_snapshot_locals, evaluate_snapshot]
+debug_snapshot_test_text: fn(bytes: [U8]) -> String Never! {
+    String.from_bytes(bytes) ?? panic("test bytes are not UTF-8")
 }
-
-debug_snapshot_test_text: fn(bytes: [U8]) -> String Never! { String.from_bytes(bytes) ?? panic("test bytes are not UTF-8") }
 
 debug_snapshot_test_repeat: fn(byte: U8, count: Int) -> String Never! {
     bytes := [U8]{}
@@ -40,7 +39,9 @@ debug_snapshot_test_value: fn(type_name: String, value: String) -> DebugValue Ne
 
 debug_snapshot_test_error: fn(snapshot: DebugSnapshot, expression: String) -> String Never! {
     if evaluate_snapshot(snapshot, expression) == {
-        .Ok(_) -> { panic("expected `{expression}` to be refused") }
+        .Ok(_) -> {
+            panic("expected `{expression}` to be refused")
+        }
         .Err(error) -> error.message
     }
 }
@@ -171,9 +172,7 @@ debug_snapshot_test_value_error: fn(type_name: String, value: String) -> String 
     assert_eq(debug_snapshot_test_value("f64", "-2.5"), DebugValue.FloatBits{bits: 13836183955189006336})
     unavailable: "local `probe` has an unavailable Float value"
     rejected: [String]{"inf", "-inf", "NaN", "1e400", "one"}
-    loop raw in rejected {
-        assert_eq(debug_snapshot_test_value_error("f32", raw), unavailable)
-    }
+    loop raw in rejected { assert_eq(debug_snapshot_test_value_error("f32", raw), unavailable) }
 }
 
 #Test("debug_values_unit_text_and_unit_shape_fallthrough") {
@@ -210,9 +209,7 @@ debug_snapshot_test_value_error: fn(type_name: String, value: String) -> String 
     assert_eq(debug_snapshot_test_value("Option", "Some(1, 2)"), DebugValue.Aggregate{kind: DebugAggregateKind.Variant, length: 1})
     shape: "local `probe` has a value shape the safe debugger cannot publish"
     unpublishable: [String]{"opaque", "[", "]", "{{", "Some(1", "(1) x"}
-    loop raw in unpublishable {
-        assert_eq(debug_snapshot_test_value_error("Widget", raw), shape)
-    }
+    loop raw in unpublishable { assert_eq(debug_snapshot_test_value_error("Widget", raw), shape) }
 }
 
 #Test("render_snapshot_locals_orders_by_name_stably") {

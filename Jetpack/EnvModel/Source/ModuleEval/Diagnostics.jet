@@ -148,11 +148,9 @@ envmodel_image_field_shape: fn(field: String, expected: String, span: Span) -> E
 envmodel_merge_error_to_diagnostic: fn(error: MergeError) -> EnvModelEvalError Never! {
     if error == {
         .SourceConflict(name, a, b) -> envmodel_error("E0967", "Source `{name}` is declared with two different refs", "One module declares `{name}` as `{a}`, another as `{b}` — sources merge by name, so the refs must agree", "Make every declaration of this source agree, or rename one of them", None)
-        .FactConflict(fact_error) -> {
-            if fact_error.diagnostic() == {
-                .Val(diagnostic) -> EnvModelEvalError{diagnostic: diagnostic}
-                .None -> envmodel_error("E3521", "fact contribution failed", fact_error.message(), "make the contribution valid, or move it to the supported contribution layer", None)
-            }
+        .FactConflict(fact_error) -> if fact_error.diagnostic() == {
+            .Val(diagnostic) -> EnvModelEvalError{diagnostic: diagnostic}
+            .None -> envmodel_error("E3521", "fact contribution failed", fact_error.message(), "make the contribution valid, or move it to the supported contribution layer", None)
         }
     }
 }

@@ -1,24 +1,27 @@
+#Target(Web)
+
 // Long-lived DOM counter: one reactive signal drives one mounted tree.
 use {
     ui: core.ui
     reactive: core.reactive
 }
 
-#Target(Web)
 run: fn() {
     clicks: reactive.signal(0)
     backend: ui.null_backend()
     ui.reactive_render(fn() {
         current: clicks.get()
-        tree: ui.box([
-            ui.node("count: {current}", 120.0, 32.0),
-            ui.button("increment", fn() {
-                clicks.set(clicks.get() + 1)
-            }),
-            ui.button("reset", fn() {
-                clicks.set(0)
-            })
-        ])
+        tree: ui.box(
+            [
+                ui.node("count: {current}", 120.0, 32.0),
+                ui.button("increment", fn() {
+                    clicks.set(clicks.get() + 1)
+                }),
+                ui.button("reset", fn() {
+                    clicks.set(0)
+                }),
+            ],
+        )
         ui.mount(backend, tree, ui.constraint(0.0, 0.0, 240.0, 120.0))
     })
 }

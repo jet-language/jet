@@ -8,8 +8,13 @@ use {
     run_locals_sys: core.sys
     run_locals_process: core.process
     jet_driver.[
-        JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
-        JetDriverCompileMode, JetDriverCompileRequest, JetDriverCoreSource, jet_driver_has_errors,
+        JetDriverAuthorizedSourceFile,
+        JetDriverAuthorizedSourceRoot,
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode,
+        JetDriverCompileRequest,
+        JetDriverCoreSource,
+        jet_driver_has_errors,
         jet_driver_lowering_inputs,
     ]
     jet_cli.[jet_cli_driver_request, jet_cli_native_session_at]
@@ -40,19 +45,13 @@ RunLocalsTrace: struct {
             run_locals_files.append_all(self.path, line) ?? panic("cannot write the trace: {err}")
         }
 
-        functions: fn(self) -[]> Bool Never! {
-            false
-        }
+        functions: fn(self) -[]> Bool Never! { false }
 
-        cpu_ns: fn(self) -[Time]> Int Never! {
-            0
-        }
+        cpu_ns: fn(self) -[Time]> Int Never! { 0 }
     }
 }
 
-run_locals_sink: fn(trace: &&RunLocalsTrace) -> CompilerTraceSink Never! {
-    trace.move()
-}
+run_locals_sink: fn(trace: &&RunLocalsTrace) -> CompilerTraceSink Never! { trace.move() }
 
 // The compiler under test, never this test binary, owns the runtime pack
 // the `#run` values run on (as InspectBuild.jet's planned `build: fn`).
@@ -74,13 +73,15 @@ RUN_LOCALS_REACH_SOURCE: "fact: fn(n: Int) -> Int {{\n    if n <= 1 -> return 1\
 // trace going to `path`.
 run_locals_request: fn(path: String, source: String, threads: Int) -> JetDriverCompileRequest {
     snapshot: JetDriverAuthorizedSourceSnapshot{
-        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{
-            canonical_path: "/run-locals",
-            identity: "run-locals-root",
-            allow_hardlinks: false,
-            files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/run-locals/main.jet", relative_path: "main.jet", identity: "run-locals-file", source: source}},
-            foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
-        }},
+        roots: [JetDriverAuthorizedSourceRoot]{
+            JetDriverAuthorizedSourceRoot{
+                canonical_path: "/run-locals",
+                identity: "run-locals-root",
+                allow_hardlinks: false,
+                files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/run-locals/main.jet", relative_path: "main.jet", identity: "run-locals-file", source: source}},
+                foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+            },
+        },
         entry_root_identity: "run-locals-root",
         entry_path: "/run-locals/main.jet",
     }
@@ -100,7 +101,9 @@ run_locals_request: fn(path: String, source: String, threads: Int) -> JetDriverC
         front: jet_driver_lowering_inputs(request, None)
         trace: run_locals_files.read(path) ?? panic("cannot read the trace: {err}")
         problems := [String]{}
-        loop diagnostic in front.compile.diagnostics -> problems.push("{diagnostic.code} {diagnostic.what}")
+        loop diagnostic in front.compile.diagnostics {
+            problems.push("{diagnostic.code} {diagnostic.what}")
+        }
         assert(front.compile.complete && front.compile.internal_problem == None && !jet_driver_has_errors(front.compile.diagnostics) && front.inputs != None, "recheck_verify {verify}: the program did not compile: {front.compile.internal_problem:Debug} {problems:Debug}")
         assert(trace.contains("counters.sema.local_values_spliced = "), "recheck_verify {verify}: `big` and `word` did not land in `run`:\n{trace}")
         assert(!trace.contains("counters.sema.local_values_refused"), "recheck_verify {verify}: a pass fell back to the full recheck:\n{trace}")
@@ -121,13 +124,17 @@ run_locals_request: fn(path: String, source: String, threads: Int) -> JetDriverC
         front: jet_driver_lowering_inputs(run_locals_request(path, RUN_LOCALS_REACH_SOURCE, threads), None)
         trace: run_locals_files.read(path) ?? panic("cannot read the trace: {err}")
         problems := [String]{}
-        loop diagnostic in front.compile.diagnostics -> problems.push("{diagnostic.code} {diagnostic.what}")
+        loop diagnostic in front.compile.diagnostics {
+            problems.push("{diagnostic.code} {diagnostic.what}")
+        }
         assert(front.compile.complete && front.compile.internal_problem == None && !jet_driver_has_errors(front.compile.diagnostics), "{threads} threads: the program did not compile: {front.compile.internal_problem:Debug} {problems:Debug}")
         inputs: front.inputs ?? panic("{threads} threads: the program has no lowering inputs")
         if threads > 1 {
             prefetched := false
             loop line in trace.split("\n") {
-                if line.starts_with("< comptime.prefetch items=") && line != "< comptime.prefetch items=0" -> prefetched = true
+                if line.starts_with("< comptime.prefetch items=") && line != "< comptime.prefetch items=0" {
+                    prefetched = true
+                }
             }
             assert(prefetched, "{threads} threads: no pass checked a function ahead:\n{trace}")
         }

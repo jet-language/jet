@@ -9,10 +9,12 @@ run: fn() {
     source: Path.from(root).join("source.txt")
     destination: Path.from(root).join("destination.txt")
     files.write(source, "fixture") ?? panic("seed")
-    print((fn() {
-        files.hard_link(source, destination)
-        true
-    })())
+    print(
+        (fn() {
+            files.hard_link(source, destination)
+            true
+        })(),
+    )
     text: files.read(destination) ?? panic("read")
     assert((text == "fixture"))
     files.remove_all(root) ?? panic("cleanup")

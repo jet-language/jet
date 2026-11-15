@@ -4,10 +4,15 @@ use {
     jet_parser.[parse_source]
     jet_foundation.[Type, TagMarker, Measure, module_none]
     jet_driver.[
-        JET_DRIVER_RUST_FOREIGN_TARGET, JetDriverRustForeignEntry, JetDriverRustForeignFacts,
-        JetDriverRustForeignRecordIndex, jet_driver_rust_foreign_collect_items,
-        jet_driver_rust_foreign_plan, jet_driver_rust_foreign_record_type,
-        jet_driver_rust_foreign_source, jet_driver_rust_foreign_type_key,
+        JET_DRIVER_RUST_FOREIGN_TARGET,
+        JetDriverRustForeignEntry,
+        JetDriverRustForeignFacts,
+        JetDriverRustForeignRecordIndex,
+        jet_driver_rust_foreign_collect_items,
+        jet_driver_rust_foreign_plan,
+        jet_driver_rust_foreign_record_type,
+        jet_driver_rust_foreign_source,
+        jet_driver_rust_foreign_type_key,
     ]
 }
 
@@ -19,6 +24,7 @@ rust_foreign_test_facts: fn(source: String) -> JetDriverRustForeignFacts {
     jet_driver_rust_foreign_collect_items(parsed.program.items, "", module_none(), entries, records)
     JetDriverRustForeignFacts{entries: entries, record_source: "", record_names: records.names}
 }
+
 #Test("native Rust helpers preserve declared dependency set and slot ABI") {
     facts: rust_foreign_test_facts("extern rust \"base64@0.22\" {{\n    encode: fn(s: String) -> String = \"base64::encode\"\n}}\n")
     plan: jet_driver_rust_foreign_plan(facts, "rustc\nfixture-toolchain", JET_DRIVER_RUST_FOREIGN_TARGET, "direct=;transitive=") ?? panic("helper plan: {err}")
@@ -40,6 +46,7 @@ rust_foreign_test_facts: fn(source: String) -> JetDriverRustForeignFacts {
     assert(plan.source.contains("JET_FFI_PANIC_BOUNDARY_DEPTH"))
     assert(plan.source.contains("panic: a foreign function panicked"))
 }
+
 #Test("helper input and shared build identities retain canonical distinctions") {
     facts: rust_foreign_test_facts("extern rust \"std\" {{\n    length: fn(s: String) -> Int = \"std::string::String::len\"\n}}\n")
     base: jet_driver_rust_foreign_plan(facts, "toolchain-a", JET_DRIVER_RUST_FOREIGN_TARGET, "direct=;transitive=") ?? panic("base plan")
@@ -54,6 +61,7 @@ rust_foreign_test_facts: fn(source: String) -> JetDriverRustForeignFacts {
     other_plan: jet_driver_rust_foreign_plan(other, "toolchain-a", JET_DRIVER_RUST_FOREIGN_TARGET, "direct=;transitive=") ?? panic("other plan")
     assert(base.key != other_plan.key && base.shared_key == other_plan.shared_key)
 }
+
 #Test("safe ownership signatures do not invent unsupported native trampolines") {
     facts: rust_foreign_test_facts("extern rust \"std\" {{\n    consume: fn(s: &&String) -> String = \"std::convert::identity\"\n    modify: fn(s: &String) = \"std::string::String::clear\"\n}}\n")
     source: jet_driver_rust_foreign_source(facts)
@@ -62,6 +70,7 @@ rust_foreign_test_facts: fn(source: String) -> JetDriverRustForeignFacts {
     assert(!source.contains("fn jet_ffi_consume_cabi("))
     assert(!source.contains("fn jet_ffi_modify_cabi("))
 }
+
 #Test("helper identity type encoding agrees with the hosted FFI map") {
     assert_eq(jet_driver_rust_foreign_type_key(Type.Float32), "F32")
     assert_eq(jet_driver_rust_foreign_type_key(Type.IntN{signed: false, bits: 32}), "U32")

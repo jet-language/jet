@@ -175,7 +175,7 @@ alloc_test_large_rows: fn() {
         found := false
         at = I64{0}
         loop at < count {
-            if (sync_load(wrapping(held + wrapping(at * I64{8}))) == again) -> found = true
+            if (sync_load(wrapping(held + wrapping(at * I64{8}))) == again) { found = true }
             at = wrapping(at + I64{1})
         }
         alloc_test_require(found)
@@ -236,7 +236,9 @@ alloc_test_full_slabs: fn() {
         loop slab != (I64{0}) {
             alloc_test_require(os_load_i64(wrapping(slab + I64{8})) == previous)
             alloc_test_require(os_load_i64(wrapping(slab + I64{40})) == arena)
-            if (os_load_i64(wrapping(slab + I64{24})) == I64{0}) { empty = wrapping(empty + I64{1}) }
+            if (os_load_i64(wrapping(slab + I64{24})) == I64{0}) {
+                empty = wrapping(empty + I64{1})
+            }
             previous = slab
             slab = os_load_i64(slab)
         }
@@ -351,7 +353,7 @@ priv alloc_test_zero_mark: fn(size: I64, entry_8: Bool) {
         alloc_test_require(os_load_u8(pointer) == I64{165} && os_load_u8(wrapping(pointer + size - I64{1})) == I64{165})
     }
     alloc_test_require(jet_rt_block_release(pointer))
-    if entry_8 { jet_rt_free_8(pointer, size) } else { jet_rt_free(pointer, size, I64{8}) }
+    if entry_8 -> jet_rt_free_8(pointer, size) else -> jet_rt_free(pointer, size, I64{8})
     at = I64{0}
     #Unsafe("a cached small block stays mapped; its payload bytes are not cache links") {
         loop at < size {

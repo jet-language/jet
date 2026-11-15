@@ -22,8 +22,10 @@ use {
 
 /// MBEDTLS_SSL_CACHE_DEFAULT_TIMEOUT: a day, in seconds.
 SSL_CACHE_DEFAULT_TIMEOUT: 86400
+
 /// MBEDTLS_SSL_CACHE_DEFAULT_MAX_ENTRIES.
 SSL_CACHE_DEFAULT_MAX_ENTRIES: 50
+
 // The room C's entry has for a session ID (sizeof(cur->session_id)).
 SSL_CACHE_SESSION_ID_LEN: 32
 
@@ -62,7 +64,9 @@ ssl_cache_find_entry: fn(cache: SSLCacheContext, session_id: [U8]) -> Int ssldef
     loop i in 0..<cache.chain.len() {
         cur: cache.chain[i]
         if ssl_cache_expired(cache, cur, t) -> next
-        if session_id.len() != cur.session_id.len() || !ssldefs.ssl_range_eq(session_id, 0, cur.session_id, 0, cur.session_id.len()) -> next
+        if session_id.len() != cur.session_id.len() || !ssldefs.ssl_range_eq(session_id, 0, cur.session_id, 0, cur.session_id.len()) {
+            next
+        }
         return Ok(i)
     }
     Err(.CacheEntryNotFound)

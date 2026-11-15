@@ -24,6 +24,7 @@ use {
 // The versions a supported_groups extension serves
 // (SSL_WRITE_SUPPORTED_GROUPS_EXT_TLS1_2_FLAG, _TLS1_3_FLAG).
 SSL_WRITE_SUPPORTED_GROUPS_EXT_TLS1_2_FLAG: 1
+
 SSL_WRITE_SUPPORTED_GROUPS_EXT_TLS1_3_FLAG: 2
 
 // The server_name extension with the hostname set, nothing without one
@@ -87,10 +88,14 @@ ssl_cli_write_supported_groups_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, end: 
     loop group in group_list {
         propose_group := false
         if flags.bit_and(SSL_WRITE_SUPPORTED_GROUPS_EXT_TLS1_3_FLAG) != 0 {
-            if ssltls.ssl_tls13_named_group_is_ecdhe(group) && ssltls.ssl_get_ecp_group_id_from_tls_id(group) != .Unknown -> propose_group = true
+            if ssltls.ssl_tls13_named_group_is_ecdhe(group) && ssltls.ssl_get_ecp_group_id_from_tls_id(group) != .Unknown {
+                propose_group = true
+            }
             if ssltls.ssl_tls13_named_group_is_ffdh(group) -> propose_group = true
         }
-        if flags.bit_and(SSL_WRITE_SUPPORTED_GROUPS_EXT_TLS1_2_FLAG) != 0 && ssltls.ssl_tls12_named_group_is_ecdhe(group) && ssltls.ssl_get_ecp_group_id_from_tls_id(group) != .Unknown -> propose_group = true
+        if flags.bit_and(SSL_WRITE_SUPPORTED_GROUPS_EXT_TLS1_2_FLAG) != 0 && ssltls.ssl_tls12_named_group_is_ecdhe(group) && ssltls.ssl_get_ecp_group_id_from_tls_id(group) != .Unknown {
+            propose_group = true
+        }
         if propose_group {
             ssltls.ssl_chk_buf(p, end, 2) ?? return Err(err)
             ssldefs.ssl_put_u16(ssl.out_buf, p, group)
@@ -126,9 +131,13 @@ ssl_cli_write_client_hello_cipher_suites: fn(ssl: &ssldefs.SSLContext, buf: Int,
     ciphersuite_list: ssl.conf.ciphersuite_list.copy()
     loop cipher_suite in ciphersuite_list {
         ciphersuite_info: suites.ssl_ciphersuite_from_id(cipher_suite)
-        if !ssltls.ssl_validate_ciphersuite(ssl, ciphersuite_info, ssl.handshake.min_tls_version, ssl.tls_version) -> next
+        if !ssltls.ssl_validate_ciphersuite(ssl, ciphersuite_info, ssl.handshake.min_tls_version, ssl.tls_version) {
+            next
+        }
         if ciphersuite_info == {
-            .Val(cs) -> { if suites.ssl_ciphersuite_uses_ec(cs) -> tls12_uses_ec = true }
+            .Val(cs) -> {
+                if suites.ssl_ciphersuite_uses_ec(cs) -> tls12_uses_ec = true
+            }
             None -> {}
         }
         ssltls.ssl_chk_buf(p, end, 2) ?? return Err(err)
@@ -208,8 +217,12 @@ ssl_write_client_hello_body: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: Int, end:
         p += cli13.ssl_tls13_write_client_hello_exts(ssl, p, end, rng) ?? return Err(err)
     }
     groups_flags := 0
-    if propose_tls13 && ssltls.ssl_conf_tls13_is_some_ephemeral_enabled(ssl) -> groups_flags = groups_flags.bit_or(SSL_WRITE_SUPPORTED_GROUPS_EXT_TLS1_3_FLAG)
-    if propose_tls12 && tls12_uses_ec -> groups_flags = groups_flags.bit_or(SSL_WRITE_SUPPORTED_GROUPS_EXT_TLS1_2_FLAG)
+    if propose_tls13 && ssltls.ssl_conf_tls13_is_some_ephemeral_enabled(ssl) {
+        groups_flags = groups_flags.bit_or(SSL_WRITE_SUPPORTED_GROUPS_EXT_TLS1_3_FLAG)
+    }
+    if propose_tls12 && tls12_uses_ec {
+        groups_flags = groups_flags.bit_or(SSL_WRITE_SUPPORTED_GROUPS_EXT_TLS1_2_FLAG)
+    }
     if groups_flags != 0 {
         p += ssl_cli_write_supported_groups_ext(ssl, p, end, groups_flags) ?? return Err(err)
     }
@@ -226,9 +239,7 @@ ssl_write_client_hello_body: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: Int, end:
         binders_len = psk_written.binders_len
     }
     extensions_len: p - p_extensions_len - 2
-    if extensions_len == 0 {
-        p = p_extensions_len
-    } else {
+    if extensions_len == 0 -> p = p_extensions_len else {
         ssldefs.ssl_put_u16(ssl.out_buf, p_extensions_len, extensions_len)
     }
     Ok(SSLClientHelloWritten{len: p - buf, binders_len: binders_len})
@@ -268,19 +279,21 @@ ssl_prepare_client_hello: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.
         if ssl.handshake.resume != 0 {
             ssl.tls_version = ssl.spool[sn].tls_version
             ssl.handshake.min_tls_version = ssl.tls_version
-        } else {
-            ssl.handshake.min_tls_version = ssl.conf.min_tls_version
-        }
+        } else { ssl.handshake.min_tls_version = ssl.conf.min_tls_version }
     }
     if (ssl.conf.transport != ssldefs.SSL_TRANSPORT_DATAGRAM || ssl.handshake.cookie == None) && ssl.handshake.hello_retry_request_flag == 0 {
         ssl_cli_generate_random(ssl, rng) ?? return Err(err)
     }
     session_id_len := ssl.spool[sn].id.len()
     if ssl.tls_version == ssldefs.SSL_VERSION_TLS1_2 {
-        if session_id_len < 16 || session_id_len > 32 || ssl.renego_status != ssldefs.SSL_INITIAL_HANDSHAKE || ssl.handshake.resume == 0 -> session_id_len = 0
+        if session_id_len < 16 || session_id_len > 32 || ssl.renego_status != ssldefs.SSL_INITIAL_HANDSHAKE || ssl.handshake.resume == 0 {
+            session_id_len = 0
+        }
         if ssl.renego_status == ssldefs.SSL_INITIAL_HANDSHAKE {
             if ssl.spool[sn].ticket == {
-                .Val(t) -> { if t.len() != 0 -> session_id_len = 32 }
+                .Val(t) -> {
+                    if t.len() != 0 -> session_id_len = 32
+                }
                 None -> {}
             }
         }
@@ -294,11 +307,9 @@ ssl_prepare_client_hello: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.
     context_hostname: ssltls.ssl_get_hostname_pointer(ssl)
     if ssl.tls_version == ssldefs.SSL_VERSION_TLS1_3 && ssl.handshake.resume != 0 {
         hostname_mismatch: if context_hostname == {
-            .Val(h) -> {
-                if ssl.spool[sn].hostname == {
-                    .Val(s) -> h != s
-                    None -> true
-                }
+            .Val(h) -> if ssl.spool[sn].hostname == {
+                .Val(s) -> h != s
+                None -> true
             }
             None -> ssl.spool[sn].hostname != None
         }

@@ -17,15 +17,24 @@ use {
 }
 
 MAX_ARTIFACT_BYTES: 536870912
+
 MAX_MANIFEST_BYTES: 1048576
+
 MAX_ARTIFACTS: 64
+
 MANIFEST_TTL_SECONDS: 2592000
+
 // The largest integer a JSON reader keeps exactly (2^53 - 1).
 SAFE_INTEGER: 9007199254740991
+
 READ_CHUNK: 65536
+
 POSITIVE: Regex{"^[1-9][0-9]*$"}
+
 COMPONENT: Regex{"^[A-Za-z0-9._+-]+$"}
+
 SEMVER: Regex{"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"}
+
 VALUED: ["--version", "--sequence", "--channel", "--min-version", "--published-at", "--expires-at", "--output"]
 
 #Error
@@ -67,9 +76,7 @@ run: fn() {
     print("prepared toolchain channel at {output}; external signatures and hosting remain pending")
 }
 
-failed: fn(message: String) -> StageError Never! {
-    StageError{message: message}
-}
+failed: fn(message: String) -> StageError Never! { StageError{message: message} }
 
 usage: fn() -> String Never! {
     "usage: StageToolchain.jet --version <version> --sequence <n> --output <dir> [--channel <name>] [--min-version <version>] [--published-at <unix-seconds>] [--expires-at <unix-seconds>] --artifact <target>=<file> ..."
@@ -95,15 +102,19 @@ stage: fn(args: [String]) -[Env, FS, Time]> String StageError! {
         }
         size: regular(artifact.file, "artifact input") ?? return Err(err)
         bytes: read_bounded(artifact.file, size, "artifact input", MAX_ARTIFACT_BYTES) ?? return Err(err)
-        staged.push(Staged{
-            target: artifact.target,
-            path: "v1/{options.channel}/{options.version}/jet-{options.version}-{artifact.target}",
-            sha256: crypto.sha256(bytes).hex(),
-            bytes: bytes,
-        })
+        staged.push(
+            Staged{
+                target: artifact.target,
+                path: "v1/{options.channel}/{options.version}/jet-{options.version}-{artifact.target}",
+                sha256: crypto.sha256(bytes).hex(),
+                bytes: bytes,
+            },
+        )
     }
     manifest: manifest_bytes(options, staged)
-    if manifest.len() > MAX_MANIFEST_BYTES -> return Err(failed("manifest exceeds the {MAX_MANIFEST_BYTES} byte bound"))
+    if manifest.len() > MAX_MANIFEST_BYTES {
+        return Err(failed("manifest exceeds the {MAX_MANIFEST_BYTES} byte bound"))
+    }
     manifest_path: "{options.output}/v1/{options.channel}/manifest.json"
     immutable(manifest_path, manifest) ?? return Err(err)
     immutable("{manifest_path}.sig.request", signing_request("jet-toolchain-channel-v1", manifest)) ?? return Err(err)
@@ -144,20 +155,28 @@ parse_args: fn(args: [String]) -[Env, FS, Time]> Options StageError! {
         name: args[index]
         index += 1
         value: if index < args.len() -> args[index] else -> ""
-        if name != "--artifact" && !VALUED.contains(name) -> return Err(failed("{usage()}\nunknown option {name}"))
+        if name != "--artifact" && !VALUED.contains(name) {
+            return Err(failed("{usage()}\nunknown option {name}"))
+        }
         index += 1
-        if name != "--artifact" && (value == "" || value.starts_with("--")) -> return Err(failed("{name} needs a value"))
+        if name != "--artifact" && (value == "" || value.starts_with("--")) {
+            return Err(failed("{name} needs a value"))
+        }
         if name == {
             "--artifact" -> {
                 split: value.partition("=")
-                if split.sep == "" || split.head == "" || split.tail == "" -> return Err(failed("--artifact needs target=path"))
+                if split.sep == "" || split.head == "" || split.tail == "" {
+                    return Err(failed("--artifact needs target=path"))
+                }
                 artifacts.push(Artifact{target: split.head, file: split.tail})
             }
             "--version" -> version = value
             "--sequence" -> sequence = parse_positive(value, "sequence") ?? return Err(err)
             "--channel" -> channel = value
             "--min-version" -> min_version = value
-            "--published-at" -> published = Val(parse_positive(value, "published-at") ?? return Err(err))
+            "--published-at" -> {
+                published = Val(parse_positive(value, "published-at") ?? return Err(err))
+            }
             "--expires-at" -> expires = Val(parse_positive(value, "expires-at") ?? return Err(err))
             "--output" -> output = value
             else -> {}
@@ -172,24 +191,30 @@ parse_args: fn(args: [String]) -[Env, FS, Time]> Options StageError! {
     if artifacts.len() > MAX_ARTIFACTS -> return Err(failed("too many artifact inputs"))
     published_at: published ?? time.now().to_timestamp()
     expires_at: expires ?? published_at + MANIFEST_TTL_SECONDS
-    if expires_at > SAFE_INTEGER -> return Err(failed("expires-at is outside the safe integer range"))
+    if expires_at > SAFE_INTEGER {
+        return Err(failed("expires-at is outside the safe integer range"))
+    }
     if expires_at <= published_at -> return Err(failed("expires-at must be after published-at"))
-    if expires_at - published_at > MANIFEST_TTL_SECONDS -> return Err(failed("expires-at exceeds the 30-day freshness window"))
+    if expires_at - published_at > MANIFEST_TTL_SECONDS {
+        return Err(failed("expires-at exceeds the 30-day freshness window"))
+    }
     resolved := [Artifact]{}
     loop artifact in artifacts {
         validate_component(artifact.target, "artifact target") ?? return Err(err)
         resolved.push(Artifact{target: artifact.target, file: resolve(artifact.file) ?? return Err(err)})
     }
-    Ok(Options{
-        version: version,
-        sequence: sequence,
-        channel: channel,
-        min_version: min_version,
-        published_at: published_at,
-        expires_at: expires_at,
-        output: resolve(output) ?? return Err(err),
-        artifacts: resolved,
-    })
+    Ok(
+        Options{
+            version: version,
+            sequence: sequence,
+            channel: channel,
+            min_version: min_version,
+            published_at: published_at,
+            expires_at: expires_at,
+            output: resolve(output) ?? return Err(err),
+            artifacts: resolved,
+        },
+    )
 }
 
 parse_positive: fn(value: String, label: String) -> Int StageError! {
@@ -201,12 +226,16 @@ parse_positive: fn(value: String, label: String) -> Int StageError! {
 }
 
 validate_semver: fn(value: String, label: String) StageError! {
-    if !SEMVER.is_match(value) -> return Err(failed("{label} must be a SemVer major.minor.patch value"))
+    if !SEMVER.is_match(value) {
+        return Err(failed("{label} must be a SemVer major.minor.patch value"))
+    }
     Ok()
 }
 
 validate_component: fn(value: String, label: String) StageError! {
-    if value == "." || value == ".." || !COMPONENT.is_match(value) -> return Err(failed("{label} contains unsafe characters"))
+    if value == "." || value == ".." || !COMPONENT.is_match(value) {
+        return Err(failed("{label} contains unsafe characters"))
+    }
     Ok()
 }
 
@@ -237,15 +266,19 @@ entry: fn(path: String, label: String) -[FS]> Entry StageError! {
     }
 }
 
-reject_symlink_ancestors: fn(target: String, label: String) -[FS]> StageError! {
+reject_symlink_ancestors: fn(target: String, label: String) StageError! -[FS]> {
     steps: prefixes(target)
     loop (index, cursor) in steps {
         info: entry(cursor, label) ?? return Err(err)
         if info == {
             .Missing -> break
             .Present(found) -> {
-                if found.is_symlink -> return Err(failed("{label} path traverses a symlink: {cursor}"))
-                if index + 1 < steps.len() && !found.is_dir -> return Err(failed("{label} path has a non-directory ancestor: {cursor}"))
+                if found.is_symlink {
+                    return Err(failed("{label} path traverses a symlink: {cursor}"))
+                }
+                if index + 1 < steps.len() && !found.is_dir {
+                    return Err(failed("{label} path has a non-directory ancestor: {cursor}"))
+                }
             }
         }
     }
@@ -258,11 +291,17 @@ regular: fn(file: String, label: String) -[FS]> Int StageError! {
     info: entry(file, label) ?? return Err(err)
     found: if info == {
         .Present(stat) -> stat
-        .Missing -> return Err(failed("{label} is missing: {file}"))
+        .Missing -> {
+            return Err(failed("{label} is missing: {file}"))
+        }
     }
-    if found.is_symlink || !found.is_file -> return Err(failed("{label} is not a regular file: {file}"))
+    if found.is_symlink || !found.is_file {
+        return Err(failed("{label} is not a regular file: {file}"))
+    }
     if found.size == 0 -> return Err(failed("{label} is empty"))
-    if found.size > MAX_ARTIFACT_BYTES -> return Err(failed("{label} exceeds the {MAX_ARTIFACT_BYTES} byte bound"))
+    if found.size > MAX_ARTIFACT_BYTES {
+        return Err(failed("{label} exceeds the {MAX_ARTIFACT_BYTES} byte bound"))
+    }
     Ok(found.size)
 }
 
@@ -274,7 +313,9 @@ read_bounded: fn(file: String, size: Int, label: String, limit: Int) -[FS]> [U8]
     loop {
         chunk: reader.read_bytes(READ_CHUNK) ?? return Err(failed("{label} cannot be read: {file}: {err}"))
         if chunk.len() == 0 -> break
-        if bytes.len() + chunk.len() > limit -> return Err(failed("{label} exceeds the {limit} byte bound"))
+        if bytes.len() + chunk.len() > limit {
+            return Err(failed("{label} exceeds the {limit} byte bound"))
+        }
         bytes.extend(chunk)
     }
     if bytes.len() != size -> return Err(failed("{label} changed while it was read"))
@@ -283,7 +324,7 @@ read_bounded: fn(file: String, size: Int, label: String, limit: Int) -[FS]> [U8]
 }
 
 // Make `dir` and its missing ancestors, each a real directory.
-directory: fn(dir: String, label: String) -[FS]> StageError! {
+directory: fn(dir: String, label: String) StageError! -[FS]> {
     loop cursor in prefixes(dir) {
         info := entry(cursor, label) ?? return Err(err)
         if info == .Missing {
@@ -299,12 +340,16 @@ directory: fn(dir: String, label: String) -[FS]> StageError! {
 // Publish `bytes` at `file` once: an existing file must already hold them.
 // A new file is written beside it, synced, renamed into place, and its
 // directory synced.
-immutable: fn(file: String, bytes: [U8]) -[Env, FS]> StageError! {
+immutable: fn(file: String, bytes: [U8]) StageError! -[Env, FS]> {
     reject_symlink_ancestors(file, "publication") ?? return Err(err)
     existing: entry(file, "publication") ?? return Err(err)
     if existing == .Present(found) {
-        if found.is_symlink || !found.is_file -> return Err(failed("publication path is not a regular file: {file}"))
-        if found.size != bytes.len() -> return Err(failed("immutable publication file changed: {file}"))
+        if found.is_symlink || !found.is_file {
+            return Err(failed("publication path is not a regular file: {file}"))
+        }
+        if found.size != bytes.len() {
+            return Err(failed("immutable publication file changed: {file}"))
+        }
         held: read_bounded(file, found.size, "existing publication file", bytes.len()) ?? return Err(err)
         if held != bytes -> return Err(failed("immutable publication file changed: {file}"))
         return Ok()
@@ -314,7 +359,9 @@ immutable: fn(file: String, bytes: [U8]) -[Env, FS]> StageError! {
     reject_symlink_ancestors(file, "publication") ?? return Err(err)
     partial: "{file}.partial-{sys.getpid()}"
     reject_symlink_ancestors(partial, "publication temporary file") ?? return Err(err)
-    if files.lexists(partial) -> return Err(failed("publication temporary file is already present: {partial}"))
+    if files.lexists(partial) {
+        return Err(failed("publication temporary file is already present: {partial}"))
+    }
     writer := files.create(partial, if_exists: .Refuse, mode: Val(0o644), links: .Refuse) ?? return Err(failed("publication temporary file cannot be created: {partial}: {err}"))
     if publish(writer, partial, file, parent, bytes) == .Err(error) {
         files.remove(partial).drop("the partial file is removed best-effort")
@@ -333,8 +380,14 @@ publish: fn(writer: &files.FileWriter, partial: String, file: String, parent: St
 
 #Test("the manifest is compact JSON in target order with domain-prefixed requests") {
     options: Options{
-        version: "1.2.3", sequence: 7, channel: "stable", min_version: "1.0.0",
-        published_at: 10, expires_at: 20, output: "/out", artifacts: [Artifact]{},
+        version: "1.2.3",
+        sequence: 7,
+        channel: "stable",
+        min_version: "1.0.0",
+        published_at: 10,
+        expires_at: 20,
+        output: "/out",
+        artifacts: [Artifact]{},
     }
     staged: [Staged{target: "x86_64-unknown-linux-gnu", path: "v1/stable/1.2.3/jet-1.2.3-x86_64-unknown-linux-gnu", sha256: "ab", bytes: "hi".bytes()}]
     text: String.from_bytes(manifest_bytes(options, staged)) ?? panic("UTF-8 manifest")

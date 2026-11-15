@@ -49,7 +49,9 @@ jet_cli_memory_read_source: fn(path: String) -[FS, Time.Wait]> String JetCLIRead
     held: JetCLIRootedDirectory.open(parent, [String]{}, false)
     bytes: if held.read(name, Int.MAX) == {
         .Ok(value) -> value
-        .Err(error) -> { return Err(error) }
+        .Err(error) -> {
+            return Err(error)
+        }
     }
     raw: bytes ?? return Err(jet_cli_read_error("source disappeared"))
     Ok(String.from_bytes(raw) ?? return Err(jet_cli_read_error("source is not UTF-8")))
@@ -162,23 +164,23 @@ jet_cli_fix_memory_at: fn(root: String, args: [String], color: Bool, json: Bool)
         values := [JetCLIStatusValue]{}
         loop entry in applied {
             values.push(
-            jet_cli_status_object(
-            [JetCLIStatusField]{
-                jet_cli_status_field("source", jet_cli_status_text(entry.row.source)),
-                jet_cli_status_field("span_start", jet_cli_status_int(entry.row.span_start)),
-                jet_cli_status_field("span_end", jet_cli_status_int(entry.row.span_end)),
-                jet_cli_status_field("repair", jet_cli_status_text(entry.row.repairs[0])),
-                jet_cli_status_field("changed", jet_cli_status_bool(entry.changed && !dry_run)),
-            },
-            ),
+                jet_cli_status_object(
+                    [JetCLIStatusField]{
+                        jet_cli_status_field("source", jet_cli_status_text(entry.row.source)),
+                        jet_cli_status_field("span_start", jet_cli_status_int(entry.row.span_start)),
+                        jet_cli_status_field("span_end", jet_cli_status_int(entry.row.span_end)),
+                        jet_cli_status_field("repair", jet_cli_status_text(entry.row.repairs[0])),
+                        jet_cli_status_field("changed", jet_cli_status_bool(entry.changed && !dry_run)),
+                    },
+                ),
             )
         }
         memory: jet_cli_status_object(
-        [JetCLIStatusField]{
-            jet_cli_status_field("dry_run", jet_cli_status_bool(dry_run)),
-            jet_cli_status_field("applied", jet_cli_status_array(values)),
-            jet_cli_status_field("options", jet_cli_status_int(options.len())),
-        },
+            [JetCLIStatusField]{
+                jet_cli_status_field("dry_run", jet_cli_status_bool(dry_run)),
+                jet_cli_status_field("applied", jet_cli_status_array(values)),
+                jet_cli_status_field("options", jet_cli_status_int(options.len())),
+            },
         )
         return jet_cli_done("{jet_cli_status_render("fix.memory", true, [JetCLIStatusField]{jet_cli_status_field("memory", memory)})}\n", "", JET_DRIVER_EXIT_OK)
     }

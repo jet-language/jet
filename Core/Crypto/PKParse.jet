@@ -54,7 +54,9 @@ group_id_from_specified: fn(data: [U8], params: asn1.ASN1Buf) -> ecp.GroupID pk.
     field_len: asn1.get_tag(data, p, end, SEQUENCE) ?? return Err(.Asn1(err))
     end_field: p + field_len
     oid_len: asn1.get_tag(data, p, end_field, asn1.ASN1_OID) ?? return Err(.Asn1(err))
-    if !oids.is(oids.OID_ANSI_X9_62_PRIME_FIELD, data, asn1.ASN1Buf{tag_id: asn1.ASN1_OID, p: p, len: oid_len}) -> return Err(.FeatureUnavailable)
+    if !oids.is(oids.OID_ANSI_X9_62_PRIME_FIELD, data, asn1.ASN1Buf{tag_id: asn1.ASN1_OID, p: p, len: oid_len}) {
+        return Err(.FeatureUnavailable)
+    }
     p += oid_len
     prime: asn1.get_mpi(data, p, end_field) ?? return Err(.KeyInvalidFormat(Val(err)))
     pbits: bn.bitlen(prime)
@@ -69,12 +71,14 @@ group_id_from_specified: fn(data: [U8], params: asn1.ASN1Buf) -> ecp.GroupID pk.
     p += b_len
     // The optional seed is skipped.
     if asn1.get_tag(data, p, end_curve, asn1.ASN1_BIT_STRING) == {
-        .Ok(seed_len) -> p += seed_len
+        .Ok(seed_len) -> { p += seed_len }
         .Err(_) -> {}
     }
     if p != end_curve -> return Err(.KeyInvalidFormat(Val(.LengthMismatch)))
     g_len: asn1.get_tag(data, p, end, asn1.ASN1_OCTET_STRING) ?? return Err(.KeyInvalidFormat(Val(err)))
-    if g_len < 1 || (data[p] != (U8{2}) && data[p] != (U8{3})) || g_len != bn.size(prime) + 1 -> return Err(.KeyInvalidFormat(None))
+    if g_len < 1 || (data[p] != (U8{2}) && data[p] != (U8{3})) || g_len != bn.size(prime) + 1 {
+        return Err(.KeyInvalidFormat(None))
+    }
     gx: bn.read_binary(cipher.bytes_of(data, p + 1, g_len - 1)) ?? return Err(.KeyInvalidFormat(Val(.Mpi(err))))
     gy_parity: Int{data[p]} - 2
     p += g_len
@@ -96,7 +100,9 @@ group_id_from_specified: fn(data: [U8], params: asn1.ASN1Buf) -> ecp.GroupID pk.
 get_ecparams: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf pk.PKError! {
     if end - p < 1 -> return Err(.KeyInvalidFormat(Val(.OutOfData)))
     tag_id: Int{asn1.layout_byte(data, p)}
-    if tag_id != asn1.ASN1_OID && tag_id != SEQUENCE -> return Err(.KeyInvalidFormat(Val(.UnexpectedTag)))
+    if tag_id != asn1.ASN1_OID && tag_id != SEQUENCE {
+        return Err(.KeyInvalidFormat(Val(.UnexpectedTag)))
+    }
     len: asn1.get_tag(data, p, end, tag_id) ?? return Err(.KeyInvalidFormat(Val(err)))
     params: asn1.ASN1Buf{tag_id: tag_id, p: p, len: len}
     p += len
@@ -111,7 +117,9 @@ use_ecparams: fn(data: [U8], params: asn1.ASN1Buf, key: &pk.PKContext) pk.PKErro
     own: asn1.ASN1Buf{tag_id: params.tag_id, p: 0, len: params.len}
     id := ecp.GroupID.Unknown
     if {
-        params.tag_id == asn1.ASN1_OID -> id = oids.ec_grp(curve, own) ?? return Err(.UnknownNamedCurve)
+        params.tag_id == asn1.ASN1_OID -> {
+            id = oids.ec_grp(curve, own) ?? return Err(.UnknownNamedCurve)
+        }
         else -> id = group_id_from_specified(curve, own)
     }
     pk.pk_ecc_set_group(key, id)
@@ -155,13 +163,15 @@ get_pk_alg: fn(data: [U8], p: &Int, end: Int) -> PKAlg pk.PKError! {
     kind := oids.PKType.RSA
     grp := ecp.GroupID.Unknown
     if oids.pk_alg(data, got.alg) == {
-        .Ok(k) -> kind = k
+        .Ok(k) -> { kind = k }
         .Err(_) -> {
             grp = oids.ec_grp_algid(data, got.alg) ?? return Err(.UnknownPKAlg)
             kind = .ECKey
         }
     }
-    if kind == .RSA && ((got.params.tag_id != asn1.ASN1_NULL && got.params.tag_id != 0) || got.params.len != 0) -> return Err(.InvalidAlg(None))
+    if kind == .RSA && ((got.params.tag_id != asn1.ASN1_NULL && got.params.tag_id != 0) || got.params.len != 0) {
+        return Err(.InvalidAlg(None))
+    }
     Ok(PKAlg{kind: kind, params: got.params, grp: grp})
 }
 
@@ -180,7 +190,7 @@ pk_parse_subpubkey: fn(data: [U8], p: &Int, end: Int) -> pk.PKContext pk.PKError
     if kind == {
         .RSA -> {
             if rsa.rsa_parse_pubkey(body) == {
-                .Ok(r) -> key.rsa = r
+                .Ok(r) -> { key.rsa = r }
                 .Err(e) -> {
                     if e == {
                         .Asn1(a) -> return Err(.InvalidPubkey(Val(a)))
@@ -240,7 +250,7 @@ parse_key_sec1_der: fn<R: RNG>(key: &pk.PKContext, data: [U8], rng: &R) pk.PKErr
                 bits_len: asn1.get_bitstring_null(data, p, end2) ?? return Err(.KeyInvalidFormat(Val(err)))
                 if p + bits_len != end2 -> return Err(.KeyInvalidFormat(Val(.LengthMismatch)))
                 if pk.pk_ecc_set_pubkey(key, public_part(data, p, end2 - p)) == {
-                    .Ok(_) -> pubkey_done = true
+                    .Ok(_) -> { pubkey_done = true }
                     .Err(e) -> {
                         if e != .Ecp(.FeatureUnavailable) -> return Err(.KeyInvalidFormat(None))
                     }
@@ -450,12 +460,97 @@ pk_parse_public_key: fn(key: [U8]) -> pk.PKContext pk.PKError! {
 #Test("A SubjectPublicKeyInfo on a named curve parses, and broken encodings fail as mbedtls does") {
     // secp256r1 generator point as an id-ecPublicKey SubjectPublicKeyInfo.
     der: [U8]{
-        0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a,
-        0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00, 0x04, 0x6b, 0x17, 0xd1, 0xf2, 0xe1,
-        0x2c, 0x42, 0x47, 0xf8, 0xbc, 0xe6, 0xe5, 0x63, 0xa4, 0x40, 0xf2, 0x77, 0x03, 0x7d, 0x81, 0x2d,
-        0xeb, 0x33, 0xa0, 0xf4, 0xa1, 0x39, 0x45, 0xd8, 0x98, 0xc2, 0x96, 0x4f, 0xe3, 0x42, 0xe2, 0xfe,
-        0x1a, 0x7f, 0x9b, 0x8e, 0xe7, 0xeb, 0x4a, 0x7c, 0x0f, 0x9e, 0x16, 0x2b, 0xce, 0x33, 0x57, 0x6b,
-        0x31, 0x5e, 0xce, 0xcb, 0xb6, 0x40, 0x68, 0x37, 0xbf, 0x51, 0xf5
+        0x30,
+        0x59,
+        0x30,
+        0x13,
+        0x06,
+        0x07,
+        0x2a,
+        0x86,
+        0x48,
+        0xce,
+        0x3d,
+        0x02,
+        0x01,
+        0x06,
+        0x08,
+        0x2a,
+        0x86,
+        0x48,
+        0xce,
+        0x3d,
+        0x03,
+        0x01,
+        0x07,
+        0x03,
+        0x42,
+        0x00,
+        0x04,
+        0x6b,
+        0x17,
+        0xd1,
+        0xf2,
+        0xe1,
+        0x2c,
+        0x42,
+        0x47,
+        0xf8,
+        0xbc,
+        0xe6,
+        0xe5,
+        0x63,
+        0xa4,
+        0x40,
+        0xf2,
+        0x77,
+        0x03,
+        0x7d,
+        0x81,
+        0x2d,
+        0xeb,
+        0x33,
+        0xa0,
+        0xf4,
+        0xa1,
+        0x39,
+        0x45,
+        0xd8,
+        0x98,
+        0xc2,
+        0x96,
+        0x4f,
+        0xe3,
+        0x42,
+        0xe2,
+        0xfe,
+        0x1a,
+        0x7f,
+        0x9b,
+        0x8e,
+        0xe7,
+        0xeb,
+        0x4a,
+        0x7c,
+        0x0f,
+        0x9e,
+        0x16,
+        0x2b,
+        0xce,
+        0x33,
+        0x57,
+        0x6b,
+        0x31,
+        0x5e,
+        0xce,
+        0xcb,
+        0xb6,
+        0x40,
+        0x68,
+        0x37,
+        0xbf,
+        0x51,
+        0xf5,
     }
     key: pk_parse_public_key(der) ?? panic("parse")
     assert(pk.pk_get_name(key) == "EC" && pk.pk_get_bitlen(key) == 256 && key.ec.grp.id == .Secp256r1)

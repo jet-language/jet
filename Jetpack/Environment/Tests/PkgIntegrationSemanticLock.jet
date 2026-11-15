@@ -1,5 +1,4 @@
 // Existing Trust tests cover the pure lock operations; these reach real overlays.
-
 use {
     jet_pkg_model.[pkg_parse_workspace_policy]
     jetpack_trust.[trust_apply_overlay_invalidations, trust_explain_semantic_lock, trust_parse_semantic_lock, trust_write_semantic_lock]
@@ -29,7 +28,7 @@ s6_semantic_pkg: fn(owner: String, key: String, exact: String, hash: String) -> 
     package.patches = [String]{"patches/a.patch", "patches/b.patch"}
     after := OverlayPolicy.empty()
     after.overlays = [OverlaySet]{OverlaySet{name: "beta", provider: None, packages: [package]}}
-    actions := [String: [String]]{}
+    actions := [String:[String]]{}
     actions["foo"] = [String]{"action:foo:build", "action:foo:check"}
     invalidations: env_overlay_invalidations_against(before, after, actions) ?? panic("overlay diff")
     assert_eq(invalidations.len(), 1)

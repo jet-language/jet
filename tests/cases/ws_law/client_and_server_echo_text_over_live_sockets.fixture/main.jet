@@ -4,6 +4,7 @@ use {
     ws: core.net.ws
     server: core.http.server
 }
+
 handle: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
     sock: ws.upgrade(req) ?? panic("upgrade")
     message: sock.recv() ?? panic("recv")
@@ -12,6 +13,7 @@ handle: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
     sock.close(1000, "") ?? panic("close")
     return Ok(server.response(500, "unused"))
 }
+
 run: fn() {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     addr: listener.local_addr() ?? panic("address")

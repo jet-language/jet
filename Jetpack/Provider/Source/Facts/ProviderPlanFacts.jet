@@ -6,24 +6,24 @@
 PROVIDER_PLAN_FACTS_HEADER: "jet-build-plan-replay-v1"
 
 ProviderPlanFacts: struct {
-    priv entries: [String: String]
+    priv entries: [String:String]
 
     // Facts with non-empty keys.
-    from_facts: fn(facts: [String: String]) -> ProviderPlanFacts ProviderPlanFactsError! {
+    from_facts: fn(facts: [String:String]) -> ProviderPlanFacts ProviderPlanFactsError! {
         if facts.has_key("") -> return Err(ProviderPlanFactsError.EmptyKey)
         Ok(ProviderPlanFacts{entries: facts})
     }
 
-    facts: fn(self) -> [String: String] Never! {
-        self.entries
-    }
+    facts: fn(self) -> [String:String] Never! { self.entries }
 
     // The replay text (`encode`; the name is taken by the Encode derive).
     render: fn(self) -> String Never! {
         lines := [String]{PROVIDER_PLAN_FACTS_HEADER}
         keys := self.entries.keys().to_list()
         keys.sort()
-        loop key in keys -> lines.push("{provider_plan_hex(key)}\t{provider_plan_hex(self.entries[key])}")
+        loop key in keys {
+            lines.push("{provider_plan_hex(key)}\t{provider_plan_hex(self.entries[key])}")
+        }
         "{lines.join("\n")}\n"
     }
 
@@ -31,8 +31,10 @@ ProviderPlanFacts: struct {
     // non-lowercase hex, non-UTF-8 field, empty key, or repeated key fails.
     parse: fn(raw: String) -> ProviderPlanFacts ProviderPlanFactsError! {
         lines: provider_lines(raw)
-        if lines.len() == 0 || lines[0] != PROVIDER_PLAN_FACTS_HEADER -> return Err(ProviderPlanFactsError.UnsupportedVersion)
-        facts := [String: String]{}
+        if lines.len() == 0 || lines[0] != PROVIDER_PLAN_FACTS_HEADER {
+            return Err(ProviderPlanFactsError.UnsupportedVersion)
+        }
+        facts := [String:String]{}
         loop index in 1..<lines.len() {
             fields: lines[index].split_once("\t") ?? return Err(ProviderPlanFactsError.TruncatedFact)
             key: provider_plan_unhex(fields.before)

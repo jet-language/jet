@@ -13,7 +13,6 @@
 // the stack, then the heap the host's mmap grows. The table: the runtime's
 // slots from 0, then the program's. Each module places its data and slots
 // where the module before it ended (WebLayout).
-
 use {
     jet_foundation.[compiler_threads_single]
     jet_ir.[IRFunction, IRModule, IRX64Tables, IR_STOP_POLL_KEY, IR_STOP_TRAP_KEY, IR_STOP_TURN_KEY, ir_drop_early, ir_tail_calls, ir_x64_tables]
@@ -74,9 +73,27 @@ web_plain_emitter: fn(params: Int, extra: Int, result: String) -> WebEmitter Nev
     types := [Int]{}
     loop _ in 0..<(params + extra) -> types.push(WASM_I64)
     WebEmitter{
-        code: [U8]{}, fixups: [Int]{}, locals: [Int]{}, local_types: types, params: params, result: result, sret: -1,
-        t0: 0, t1: 0, t2: 0, t3: 0, d0: 0, s0: 0, frame: 0, flag: 0, ok: 0,
-        frame_size: 0, areas: [Int]{}, pad_ends: [Int]{}, trap_next: false, wired: false,
+        code: [U8]{},
+        fixups: [Int]{},
+        locals: [Int]{},
+        local_types: types,
+        params: params,
+        result: result,
+        sret: -1,
+        t0: 0,
+        t1: 0,
+        t2: 0,
+        t3: 0,
+        d0: 0,
+        s0: 0,
+        frame: 0,
+        flag: 0,
+        ok: 0,
+        frame_size: 0,
+        areas: [Int]{},
+        pad_ends: [Int]{},
+        trap_next: false,
+        wired: false,
     }
 }
 
@@ -154,7 +171,9 @@ web_hooks_body: fn(st: &WebState, hooks: [WebHook], fini: Bool) -> WebBody Never
     e := web_plain_emitter(0, 0, "")
     priorities := [Int]{}
     loop hook in hooks {
-        if hook.fini == fini && !priorities.contains(hook.priority) -> priorities.push(hook.priority)
+        if hook.fini == fini && !priorities.contains(hook.priority) {
+            priorities.push(hook.priority)
+        }
     }
     priorities.sort()
     loop priority in priorities {
@@ -169,7 +188,9 @@ web_hooks_body: fn(st: &WebState, hooks: [WebHook], fini: Bool) -> WebBody Never
                 st.errors.push("lifecycle hook {hook.row} takes parameters")
                 next
             }
-            if arguments -> loop _ in 0..<3 -> web_i64(e, 0)
+            if arguments {
+                loop _ in 0..<3 -> web_i64(e, 0)
+            }
             web_call_dropping(e, st, hook.row)
         }
     }
@@ -221,9 +242,25 @@ web_module: fn(m: IRModule, app: Bool, layout: WebLayout, runtime: [String:Strin
     places := web_place_data(tables, layout.data_base)
     data_end: places.pop() ?? layout.data_base
     st := WebState{
-        app: app, stop_points: m.stop_points, data_at: places, table_base: layout.table_base, slots: [Int]{}, slot_rows: [Int]{},
-        types: [String]{}, type_rows: [String:Int]{}, refs: [WebRef]{}, ref_rows: [String:Int]{}, internal: [String:Int]{},
-        exports: runtime, hosts: hosts, sigs: [String]{}, poll: web_find_key(m, IR_STOP_POLL_KEY), trap: web_find_key(m, IR_STOP_TRAP_KEY), turn: web_find_key(m, IR_STOP_TURN_KEY), armed: armed, errors: [String]{},
+        app: app,
+        stop_points: m.stop_points,
+        data_at: places,
+        table_base: layout.table_base,
+        slots: [Int]{},
+        slot_rows: [Int]{},
+        types: [String]{},
+        type_rows: [String:Int]{},
+        refs: [WebRef]{},
+        ref_rows: [String:Int]{},
+        internal: [String:Int]{},
+        exports: runtime,
+        hosts: hosts,
+        sigs: [String]{},
+        poll: web_find_key(m, IR_STOP_POLL_KEY),
+        trap: web_find_key(m, IR_STOP_TRAP_KEY),
+        turn: web_find_key(m, IR_STOP_TURN_KEY),
+        armed: armed,
+        errors: [String]{},
     }
     loop (row, f) in m.functions {
         st.slots.push(-1)
@@ -380,7 +417,9 @@ web_module: fn(m: IRModule, app: Bool, layout: WebLayout, runtime: [String:Strin
     lines := [Int]{}
     loop (row, body) in bodies {
         code := body.code.copy()
-        loop pair in 0..<(body.fixups.len() /% 2) -> web_patch_padded(code, body.fixups[2 * pair], web_function_index(body.fixups[2 * pair + 1], defined_base, ref_index))
+        loop pair in 0..<(body.fixups.len() /% 2) {
+            web_patch_padded(code, body.fixups[2 * pair], web_function_index(body.fixups[2 * pair + 1], defined_base, ref_index))
+        }
         wasm_put_unsigned(section, code.len())
         loop pair in 0..<(body.lines.len() /% 2) {
             lines.push(section.len() + body.lines[2 * pair])
@@ -426,7 +465,9 @@ web_module: fn(m: IRModule, app: Bool, layout: WebLayout, runtime: [String:Strin
     total := m.functions.len() + names.len()
     loop row in 0..<total {
         wasm_put_unsigned(entries, defined_base + row)
-        if row < m.functions.len() -> wat_put_name(entries, web_function_name(m.functions[row])) else -> wat_put_name(entries, names[row - m.functions.len()])
+        if row < m.functions.len() -> wat_put_name(entries, web_function_name(m.functions[row])) else {
+            wat_put_name(entries, names[row - m.functions.len()])
+        }
     }
     names_body := [U8]{}
     wasm_put_unsigned(names_body, total)

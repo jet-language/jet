@@ -8,9 +8,7 @@ Fake: struct {
     root: String
 
     impl Lister {
-        read_dir: fn(self, path: String) -> [String] {
-            [String]{self.root, path}
-        }
+        read_dir: fn(self, path: String) -> [String] { [String]{self.root, path} }
     }
 }
 
@@ -20,13 +18,11 @@ Plain: struct {
     read_dir: fn(self) -> Int { self.count }
 }
 
-list_all: fn(host: Fake) -> Int {
-    host.read_dir("x").len()
-}
+list_all: fn(host: Fake) -> Int { host.read_dir("x").len() }
 
 run: fn() {
-    f: Fake{ root: "r" }
+    f: Fake{root: "r"}
     print(list_all(f))
     print(f.read_dir("y")[1])
-    print(Plain{ count: 4 }.read_dir())
+    print(Plain{count: 4}.read_dir())
 }

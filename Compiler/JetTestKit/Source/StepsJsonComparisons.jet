@@ -1,10 +1,11 @@
-
 kit_steps_json_any_contains: fn(value: Dyn, needle: String) -> String? {
     if value == {
         .Array(items) -> {
             loop item in items {
                 if item == {
-                    .Text(text) -> { if text.contains(needle) -> return None }
+                    .Text(text) -> {
+                        if text.contains(needle) -> return None
+                    }
                     .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {}
                 }
             }
@@ -17,7 +18,9 @@ kit_steps_json_any_contains: fn(value: Dyn, needle: String) -> String? {
 kit_steps_json_same_document: fn(text: String, mode: String, path: String, op: String, other: String) -> String? {
     left: kit_steps_json_values(text, mode, path) ?? return Val("JSON left path missing")
     right: kit_steps_json_values(text, mode, other) ?? return Val("JSON right path missing")
-    if left.len() == 0 || right.len() == 0 -> return Val("JSON same-document filter selected no values")
+    if left.len() == 0 || right.len() == 0 {
+        return Val("JSON same-document filter selected no values")
+    }
     if op == "#==" {
         if left.len() != right.len() -> return Val("JSON same-document selection counts differ")
         loop index in 0..<left.len() {

@@ -125,7 +125,9 @@ pkg_import_target_paths: fn(root: String, importer: String, kind: ImportKind) ->
         }
     }
     paths := [String]{base}
-    if !pkg_path_file_name(base).ends_with(".jet") -> paths.push("{pkg_path_without_extension(base)}.jet")
+    if !pkg_path_file_name(base).ends_with(".jet") {
+        paths.push("{pkg_path_without_extension(base)}.jet")
+    }
     paths.push(pkg_path_join(base, "module.jet"))
     out := [String]{}
     loop path in pkg_manifest_sorted(paths) {
@@ -253,14 +255,10 @@ pkg_top_level_function_lines: fn(source: String, wanted: String) -> [Int] Never!
             next
         }
         if block_comment {
-            if previous == 47 && code == 42 {
-                previous = -1
-            } else if previous == 42 && code == 47 {
+            if previous == 47 && code == 42 -> previous = -1 else if previous == 42 && code == 47 {
                 block_comment = false
                 previous = -1
-            } else {
-                previous = code
-            }
+            } else { previous = code }
             if code == 10 -> line += 1
             next
         }
@@ -290,11 +288,7 @@ pkg_top_level_function_lines: fn(source: String, wanted: String) -> [Int] Never!
             previous = -1
             next
         }
-        if code == 123 {
-            depth += 1
-        } else if code == 125 {
-            depth -= 1
-        }
+        if code == 123 -> depth += 1 else if code == 125 -> depth -= 1
         if pkg_bytes_is_word(code) {
             if token_start < 0 {
                 token_start = current
@@ -304,18 +298,16 @@ pkg_top_level_function_lines: fn(source: String, wanted: String) -> [Int] Never!
         }
         if token_start >= 0 {
             token: pkg_bytes_text(raw, token_start, current)
-            if depth == 0 && candidate && colon_seen && token == "fn" -> matches.push(candidate_line)
+            if depth == 0 && candidate && colon_seen && token == "fn" {
+                matches.push(candidate_line)
+            }
             candidate = depth == 0 && token == wanted && previous != 46
             candidate_line = token_line
             colon_seen = false
             token_start = -1
         }
         if candidate && code != 32 && code != 9 {
-            if code == 58 && !colon_seen {
-                colon_seen = true
-            } else {
-                candidate = false
-            }
+            if code == 58 && !colon_seen -> colon_seen = true else -> candidate = false
         }
         previous = if width == 1 -> code else -> 256
         if code == 10 -> line += 1
@@ -352,7 +344,9 @@ pkg_real_build_entry_lines: fn(source: String, candidates: [Int]) -> [Int]? Neve
     real := [Int]{}
     loop item in parsed.program.items {
         if item == .Func(function) {
-            if pkg_is_build_entry(function) -> real.push(pkg_source_line_at(text, function.span.start))
+            if pkg_is_build_entry(function) {
+                real.push(pkg_source_line_at(text, function.span.start))
+            }
         }
     }
     out := [Int]{}

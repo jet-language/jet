@@ -7,9 +7,17 @@
 use {
     jetpack_foundation.[BINARY_NAME]
     jet_foundation.[
-        ComptimeEvalError, CtValue, Expr, Func, JET_COMPILER_SERVICE_COMPTIME_EVALUATE,
-        JET_COMPILER_SERVICE_VERB, compiler_service_comptime_outcome, compiler_service_comptime_request,
-        foundation_parse_protocol_json, jet_config_eval_error, jet_config_eval_placed,
+        ComptimeEvalError,
+        CtValue,
+        Expr,
+        Func,
+        JET_COMPILER_SERVICE_COMPTIME_EVALUATE,
+        JET_COMPILER_SERVICE_VERB,
+        compiler_service_comptime_outcome,
+        compiler_service_comptime_request,
+        foundation_parse_protocol_json,
+        jet_config_eval_error,
+        jet_config_eval_placed,
         jet_config_plain_literal,
     ]
     jet_parser.[jet_config_program]
@@ -34,7 +42,9 @@ ENV_JET_COMPILER: "JET"
 // lookup as the last resort (the reverse of the compiler's
 // same-directory-then-PATH engine search).
 envmodel_find_jet_binary: fn() -[FS, Env]> String Never! {
-    if sys.get(ENV_JET_COMPILER) == .Val(named) && named != "" && files.is_file(named) -> return named
+    if sys.get(ENV_JET_COMPILER) == .Val(named) && named != "" && files.is_file(named) {
+        return named
+    }
     exe: sys.executable()
     if exe != "" {
         name: if sys.is_windows() -> "jet.exe" else -> "jet"
@@ -64,7 +74,7 @@ envmodel_compiler_service: fn(op: String, request: String) -[FS, Env, Exec, Time
 // readable: a plain literal is already its value; every other expression is
 // the config-value program the sibling compiler evaluates (JetCli
 // `jet_config_evaluate_program`), and its refusal is placed on `expr`.
-comptime_evaluate: fn(expr: Expr, source: String, funcs: [String: Func], base_dir: String, globals: [String: CtValue]) -[FS, Env, Exec, Time.Wait]> CtValue ComptimeEvalError! {
+comptime_evaluate: fn(expr: Expr, source: String, funcs: [String:Func], base_dir: String, globals: [String:CtValue]) -[FS, Env, Exec, Time.Wait]> CtValue ComptimeEvalError! {
     if jet_config_plain_literal(expr) == .Val(value) -> return Ok(value)
     program: jet_config_program(expr, source, funcs, globals) ?? return Err(err)
     // copy: the request owns its base directory; `base_dir` is a read parameter the caller keeps.

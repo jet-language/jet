@@ -78,22 +78,25 @@ base_port: fn() -> Int { 8000 }
     assert_eq(envmodel_test_setting_value(entry, "label"), Val(FactValue.Text{value: "ready"}))
     assert_eq(plan.images[0].expose, [Int]{8001})
     // A system option reading the value is evaluated; literal atoms keep their spelling.
-    assert_eq(plan.systems[0].options, [OptionPlan]{
-        OptionPlan{key: "tuning.port", value: "8002"},
-        OptionPlan{key: "network.hostName", value: "web-east"},
-        OptionPlan{key: "services.desktop.profile", value: ".Default"},
-    })
+    assert_eq(
+        plan.systems[0].options,
+        [OptionPlan]{
+            OptionPlan{key: "tuning.port", value: "8002"},
+            OptionPlan{key: "network.hostName", value: "web-east"},
+            OptionPlan{key: "services.desktop.profile", value: ".Default"},
+        },
+    )
     fleets := [FleetPlan]{}
     loop evaluated in modules {
         loop fleet in evaluated.fleets -> fleets.push(fleet)
     }
     assert_eq(fleets.len(), 1)
     overrides: fleets[0].hosts[0].overrides ?? panic("web1 has an override")
-    values := [String: CtValue]{}
+    values := [String:CtValue]{}
     host_options := [OptionPlan]{}
     loop field in overrides.fields {
         if field.value == {
-            .Value(value) -> values[field.name] = value
+            .Value(value) -> { values[field.name] = value }
             .Options(options) -> host_options = options
             .Platform(_) | .Packages(_) | .Services(_) -> {}
         }

@@ -16,12 +16,15 @@ IRHandleRoute: struct {
     borrow_mask: [Bool]
     effect_kind: Effect?
 }
+
 ir_handle_route: fn(closure_method: Bool, module_name: String, member: String, symbol: String, borrow_mask: [Bool], route_effect: Effect?) -> IRHandleRoute Never! {
     IRHandleRoute{closure_method: closure_method, module_name: module_name, member: member, symbol: symbol, borrow_mask: borrow_mask, effect_kind: route_effect}
 }
+
 ir_handle_h: fn(member: String, symbol: String, borrow_mask: [Bool], route_effect: Effect?) -> IRHandleRoute Never! {
     ir_handle_route(false, "core.handle", member, symbol, borrow_mask, route_effect)
 }
+
 ir_handle_core: fn(module_name: String, member: String, symbol: String, borrow_mask: [Bool], route_effect: Effect?) -> IRHandleRoute Never! {
     ir_handle_route(false, module_name, member, symbol, borrow_mask, route_effect)
 }
@@ -39,13 +42,17 @@ ir_handle_task_route: fn(receiver: Type, carrier: TFailureCarrier) -> IRHandleRo
     task_type := ir_handle_type_without_tags(receiver)
     if task_type == {
         .Apply(name, args) -> {
-            if name != "Task" || args.len() != 1 -> panic("checked task join has an unsupported receiver type")
+            if name != "Task" || args.len() != 1 {
+                panic("checked task join has an unsupported receiver type")
+            }
             success := if carrier == {
                 // copy: `value` is a payload of read parameter `carrier`, which keeps the original; the assigned `success` owns this one
                 .Result(value, _) -> value.copy()
                 .Infallible | .Optional(_) | .Diverges(_) -> panic("checked task join has no result carrier")
             }
-            if success != args[0] -> panic("checked task join result disagrees with its task element")
+            if success != args[0] {
+                panic("checked task join result disagrees with its task element")
+            }
             return ir_handle_core("core.tasks", "join", "jet_std::JetTask::join", [Bool]{false}, None)
         }
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> panic("checked task join has an unsupported receiver type")
@@ -230,9 +237,15 @@ ir_handle_reactive_name: fn(ty: Type) -> String? {
 
 ir_handle_reactive_route: fn(receiver: Type, method: String) -> IRHandleRoute? {
     name := ir_handle_reactive_name(receiver) ?? return None
-    if name == "Signal" && method == "get" -> return Val(ir_handle_route(false, "core.reactive", "Signal.get", "jet_std::JetSignal::get", [Bool]{true}, None))
-    if (name == "Derived" || name == "Computed") && method == "get" -> return Val(ir_handle_route(false, "core.reactive", "Derived.get", "jet_std::JetDerived::get", [Bool]{true}, None))
-    if name == "Signal" && method == "set" -> return Val(ir_handle_route(false, "core.reactive", "Signal.set", "jet_std::JetSignal::set", [Bool]{true, false}, None))
+    if name == "Signal" && method == "get" {
+        return Val(ir_handle_route(false, "core.reactive", "Signal.get", "jet_std::JetSignal::get", [Bool]{true}, None))
+    }
+    if (name == "Derived" || name == "Computed") && method == "get" {
+        return Val(ir_handle_route(false, "core.reactive", "Derived.get", "jet_std::JetDerived::get", [Bool]{true}, None))
+    }
+    if name == "Signal" && method == "set" {
+        return Val(ir_handle_route(false, "core.reactive", "Signal.set", "jet_std::JetSignal::set", [Bool]{true, false}, None))
+    }
     None
 }
 
@@ -251,13 +264,8 @@ ir_handle_precise_route: fn(type_name: String, method: String) -> IRHandleRoute?
 
 ir_handle_is_geometry_type: fn(name: String) -> Bool Never! {
     if name == {
-        "Point2" | "Delta2" | "Transform" | "Transform2" | "Ray2" | "ScreenPoint" | "WorldPoint" | "ViewPoint" |
-        "CameraPoint" | "DevicePoint" | "ScreenDelta" | "WorldDelta" | "ViewDelta" | "CameraDelta" | "DeviceDelta" -> {
-            true
-        }
-        else -> {
-            false
-        }
+        "Point2" | "Delta2" | "Transform" | "Transform2" | "Ray2" | "ScreenPoint" | "WorldPoint" | "ViewPoint" | "CameraPoint" | "DevicePoint" | "ScreenDelta" | "WorldDelta" | "ViewDelta" | "CameraDelta" | "DeviceDelta" -> true
+        else -> false
     }
 }
 
@@ -275,12 +283,8 @@ ir_handle_math_route: fn(type_name: String, method: String) -> IRHandleRoute? {
                 "to_array" | "length" | "normalize" | "dot" -> suffix = method
                 else -> {
                     if {
-                        type_name == "Vec3" && method == "cross" -> {
-                            suffix = "cross"
-                        }
-                        else -> {
-                            return None
-                        }
+                        type_name == "Vec3" && method == "cross" -> { suffix = "cross" }
+                        else -> { return None }
                     }
                 }
             }
@@ -291,27 +295,21 @@ ir_handle_math_route: fn(type_name: String, method: String) -> IRHandleRoute? {
                 else -> return None
             }
         }
-        else -> {
-            return None
-        }
+        else -> { return None }
     }
     arity := if {
-        suffix == "point_at_depth" -> {
-            3
-        }
-        suffix == "dot" || suffix == "cross" || suffix == "matmul" || suffix == "transform" || suffix == "add" || suffix == "sub" || suffix == "then" || suffix == "ray" || suffix == "point" -> {
-            2
-        }
-        else -> {
-            1
-        }
+        suffix == "point_at_depth" -> 3
+        suffix == "dot" || suffix == "cross" || suffix == "matmul" || suffix == "transform" || suffix == "add" || suffix == "sub" || suffix == "then" || suffix == "ray" || suffix == "point" -> 2
+        else -> 1
     }
     mask := if {
         arity == 1 -> [Bool]{true}
         arity == 2 -> [Bool]{true, false}
         else -> [Bool]{true, false, false}
     }
-    if ir_handle_is_geometry_type(type_name) -> return Val(ir_handle_route(false, "core.math", "geometry.{type_name}.{suffix}", "jet_math_{type_name}_{suffix}", mask, None))
+    if ir_handle_is_geometry_type(type_name) {
+        return Val(ir_handle_route(false, "core.math", "geometry.{type_name}.{suffix}", "jet_math_{type_name}_{suffix}", mask, None))
+    }
     Val(ir_handle_h("{type_name}.{suffix}", "jet_math_{type_name}_{suffix}", mask, None))
 }
 
@@ -326,76 +324,45 @@ ir_handle_loadable_route: fn(method: String) -> IRHandleRoute? {
 ir_handle_civil_time_route: fn(kind: String, method: String) -> IRHandleRoute? {
     is_date := kind == "Date" || kind == "LocalDate"
     prefix := if {
-        is_date -> {
-            "JetDate"
-        }
-        kind == "LocalTime" -> {
-            "JetLocalTime"
-        }
-        kind == "DateTime" -> {
-            "JetDateTime"
-        }
-        kind == "Instant" -> {
-            "JetInstant"
-        }
-        kind == "Period" -> {
-            "JetPeriod"
-        }
-        kind == "Zone" -> {
-            "JetZone"
-        }
-        kind == "ZonedDateTime" -> {
-            "JetZonedDateTime"
-        }
+        is_date -> "JetDate"
+        kind == "LocalTime" -> "JetLocalTime"
+        kind == "DateTime" -> "JetDateTime"
+        kind == "Instant" -> "JetInstant"
+        kind == "Period" -> "JetPeriod"
+        kind == "Zone" -> "JetZone"
+        kind == "ZonedDateTime" -> "JetZonedDateTime"
         else -> {
             return None
         }
     }
     valid := if {
-        is_date -> {
-            if method == {
-                "year" | "month" | "day" | "weekday" | "iso_weekday" | "day_of_year" | "iso_week" | "iso_week_year" |
-                "quarter_of_year" | "days_in_month" | "is_leap_year" | "to_string" | "add_days" | "add_months" |
-                "add_period" | "subtract_period" | "diff_days" | "truncate" | "replace" | "format" | "format_checked" |
-                "until" | "since" | "with" | "equal" | "compare" -> true
-                else -> false
-            }
+        is_date -> if method == {
+            "year" | "month" | "day" | "weekday" | "iso_weekday" | "day_of_year" | "iso_week" | "iso_week_year" | "quarter_of_year" | "days_in_month" | "is_leap_year" | "to_string" | "add_days" | "add_months" | "add_period" | "subtract_period" | "diff_days" | "truncate" | "replace" | "format" | "format_checked" | "until" | "since" | "with" | "equal" | "compare" -> true
+            else -> false
         }
-        kind == "LocalTime" -> {
-            if method == {
-                "hour" | "minute" | "second" | "millisecond" | "microsecond" | "nanosecond" | "to_string" |
-                "add_duration" | "subtract_duration" | "round" | "truncate" | "floor" | "ceil" | "until" |
-                "since" | "format" | "format_checked" | "equal" | "compare" -> true
-                else -> false
-            }
+        kind == "LocalTime" -> if method == {
+            "hour" | "minute" | "second" | "millisecond" | "microsecond" | "nanosecond" | "to_string" | "add_duration" | "subtract_duration" | "round" | "truncate" | "floor" | "ceil" | "until" | "since" | "format" | "format_checked" | "equal" | "compare" -> true
+            else -> false
         }
-        kind == "DateTime" -> {
-            if method == {
-                "hour" | "minute" | "second" | "millisecond" | "microsecond" | "nanosecond" | "to_timestamp" |
-                "to_unix_ms" | "to_unix_s" | "to_unix_us" | "to_unix_ns" | "date" | "time" | "to_string" |
-                "format_rfc3339" | "format" | "format_checked" | "plus_duration" | "subtract_duration" |
-                "add_nanoseconds" | "difference" | "add_period" | "subtract_period" | "until" | "since" |
-                "truncate" | "round" | "floor" | "ceil" | "replace" | "in_zone" | "with" | "equal" | "compare" -> true
-                else -> false
-            }
+        kind == "DateTime" -> if method == {
+            "hour" | "minute" | "second" | "millisecond" | "microsecond" | "nanosecond" | "to_timestamp" | "to_unix_ms" | "to_unix_s" | "to_unix_us" | "to_unix_ns" | "date" | "time" | "to_string" | "format_rfc3339" | "format" | "format_checked" | "plus_duration" | "subtract_duration" | "add_nanoseconds" | "difference" | "add_period" | "subtract_period" | "until" | "since" | "truncate" | "round" | "floor" | "ceil" | "replace" | "in_zone" | "with" | "equal" | "compare" -> true
+            else -> false
         }
-        kind == "Instant" -> {
-            if method == { "elapsed_millis" | "elapsed" | "equal" | "compare" -> true else -> false }
+        kind == "Instant" -> if method == {
+            "elapsed_millis" | "elapsed" | "equal" | "compare" -> true
+            else -> false
         }
-        kind == "Period" -> {
-            if method == { "years" | "months" | "days" | "sign" | "is_zero" | "abs" | "negated" | "add" | "sub" | "total_in" | "to_string" -> true else -> false }
+        kind == "Period" -> if method == {
+            "years" | "months" | "days" | "sign" | "is_zero" | "abs" | "negated" | "add" | "sub" | "total_in" | "to_string" -> true
+            else -> false
         }
-        kind == "Zone" -> {
-            if method == { "name" | "next_transition" | "previous_transition" | "start_of_day" | "hours_in_day" -> true else -> false }
+        kind == "Zone" -> if method == {
+            "name" | "next_transition" | "previous_transition" | "start_of_day" | "hours_in_day" -> true
+            else -> false
         }
-        else -> {
-            if method == {
-                "date" | "time" | "offset_seconds" | "is_dst" | "to_datetime" | "zone" | "to_string" | "format" |
-                "format_rfc9557" | "format_checked" | "add_duration" | "subtract_duration" | "add_period" |
-                "subtract_period" | "with_time" | "with_zone" | "until" | "since" | "next_transition" |
-                "previous_transition" | "start_of_day" | "hours_in_day" | "equal" | "compare" -> true
-                else -> false
-            }
+        else -> if method == {
+            "date" | "time" | "offset_seconds" | "is_dst" | "to_datetime" | "zone" | "to_string" | "format" | "format_rfc9557" | "format_checked" | "add_duration" | "subtract_duration" | "add_period" | "subtract_period" | "with_time" | "with_zone" | "until" | "since" | "next_transition" | "previous_transition" | "start_of_day" | "hours_in_day" | "equal" | "compare" -> true
+            else -> false
         }
     }
     if !valid -> return None
@@ -420,7 +387,9 @@ ir_handle_civil_time_route: fn(kind: String, method: String) -> IRHandleRoute? {
             if method == "add_duration" -> symbol_method = "add_duration_value"
             if method == "subtract_duration" -> symbol_method = "subtract_duration_value"
             if method == "round" -> symbol_method = "round_with"
-            if method == "truncate" || method == "floor" || method == "ceil" -> symbol_method = "{method}_with"
+            if method == "truncate" || method == "floor" || method == "ceil" {
+                symbol_method = "{method}_with"
+            }
         }
         kind == "DateTime" -> {
             if method == "to_unix_ms" -> symbol_method = "to_unix_ms_value"
@@ -433,7 +402,9 @@ ir_handle_civil_time_route: fn(kind: String, method: String) -> IRHandleRoute? {
             if method == "difference" -> symbol_method = "difference_duration"
             if method == "add_period" -> symbol_method = "add_period_value"
             if method == "subtract_period" -> symbol_method = "subtract_period_value"
-            if method == "truncate" || method == "floor" || method == "ceil" -> symbol_method = "{method}_with"
+            if method == "truncate" || method == "floor" || method == "ceil" {
+                symbol_method = "{method}_with"
+            }
             if method == "round" -> symbol_method = "round_with"
             if method == "in_zone" -> symbol_method = "in_zone_value"
             if method == "with" -> symbol_method = "with_overflow"
@@ -442,20 +413,26 @@ ir_handle_civil_time_route: fn(kind: String, method: String) -> IRHandleRoute? {
             if method == "elapsed" -> symbol_method = "elapsed_duration"
         }
         kind == "Period" -> {
-            if method == "years" || method == "months" || method == "days" -> symbol_method = "{method}_value"
+            if method == "years" || method == "months" || method == "days" {
+                symbol_method = "{method}_value"
+            }
             if method == "add" -> symbol_method = "add_value"
             if method == "sub" -> symbol_method = "sub_value"
             if method == "total_in" -> symbol_method = "total_in_value"
         }
         kind == "Zone" -> {
-            if method == "next_transition" || method == "previous_transition" || method == "start_of_day" || method == "hours_in_day" -> symbol_method = "{method}_value"
+            if method == "next_transition" || method == "previous_transition" || method == "start_of_day" || method == "hours_in_day" {
+                symbol_method = "{method}_value"
+            }
         }
         else -> {
             if method == "add_duration" -> symbol_method = "add_duration_value"
             if method == "subtract_duration" -> symbol_method = "subtract_duration_value"
             if method == "add_period" -> symbol_method = "add_period_value"
             if method == "subtract_period" -> symbol_method = "subtract_period_value"
-            if method == "next_transition" || method == "previous_transition" -> symbol_method = "{method}_value"
+            if method == "next_transition" || method == "previous_transition" {
+                symbol_method = "{method}_value"
+            }
         }
     }
     if (kind == "DateTime" && method == "to_string") || (kind == "LocalTime" && method == "to_string") || (kind == "Date" && method == "to_string") || (kind == "LocalDate" && method == "to_string") || (kind == "ZonedDateTime" && method == "to_string") || (kind == "Period" && method == "to_string") {
@@ -463,16 +440,24 @@ ir_handle_civil_time_route: fn(kind: String, method: String) -> IRHandleRoute? {
     }
     if kind == "DateTime" && method == "format_rfc3339" -> symbol_method = "format_rfc3339"
     if kind == "ZonedDateTime" && method == "format_rfc9557" -> symbol_method = "format_rfc9557"
-    if kind == "ZonedDateTime" && (method == "start_of_day" || method == "hours_in_day") -> symbol_method = method
-    if (kind == "ZonedDateTime" && method == "with_time") || (kind == "ZonedDateTime" && method == "with_zone") -> symbol_method = method
+    if kind == "ZonedDateTime" && (method == "start_of_day" || method == "hours_in_day") {
+        symbol_method = method
+    }
+    if (kind == "ZonedDateTime" && method == "with_time") || (kind == "ZonedDateTime" && method == "with_zone") {
+        symbol_method = method
+    }
     if kind == "DateTime" && method == "date" -> symbol_method = "date"
-    if kind == "ZonedDateTime" && (method == "date" || method == "time" || method == "offset_seconds" || method == "is_dst" || method == "to_datetime" || method == "zone") -> symbol_method = method
+    if kind == "ZonedDateTime" && (method == "date" || method == "time" || method == "offset_seconds" || method == "is_dst" || method == "to_datetime" || method == "zone") {
+        symbol_method = method
+    }
 
     arity := 1
     if {
         is_date -> {
             if method == {
-                "add_days" | "add_months" | "add_period" | "subtract_period" | "diff_days" | "truncate" | "format" | "format_checked" | "equal" | "compare" -> arity = 2
+                "add_days" | "add_months" | "add_period" | "subtract_period" | "diff_days" | "truncate" | "format" | "format_checked" | "equal" | "compare" -> {
+                    arity = 2
+                }
                 "replace" -> arity = 4
                 "until" | "since" -> arity = 6
                 "with" -> arity = 5
@@ -481,7 +466,9 @@ ir_handle_civil_time_route: fn(kind: String, method: String) -> IRHandleRoute? {
         }
         kind == "LocalTime" -> {
             if method == {
-                "add_duration" | "subtract_duration" | "format" | "format_checked" | "equal" | "compare" -> arity = 2
+                "add_duration" | "subtract_duration" | "format" | "format_checked" | "equal" | "compare" -> {
+                    arity = 2
+                }
                 "round" -> arity = 4
                 "truncate" | "floor" | "ceil" -> arity = 3
                 "until" | "since" -> arity = 6
@@ -490,7 +477,9 @@ ir_handle_civil_time_route: fn(kind: String, method: String) -> IRHandleRoute? {
         }
         kind == "DateTime" -> {
             if method == {
-                "format" | "format_checked" | "plus_duration" | "subtract_duration" | "add_nanoseconds" | "difference" | "add_period" | "subtract_period" | "in_zone" | "equal" | "compare" -> arity = 2
+                "format" | "format_checked" | "plus_duration" | "subtract_duration" | "add_nanoseconds" | "difference" | "add_period" | "subtract_period" | "in_zone" | "equal" | "compare" -> {
+                    arity = 2
+                }
                 "until" | "since" -> arity = 6
                 "truncate" | "floor" | "ceil" -> arity = 3
                 "round" -> arity = 4
@@ -511,7 +500,9 @@ ir_handle_civil_time_route: fn(kind: String, method: String) -> IRHandleRoute? {
         }
         kind == "ZonedDateTime" -> {
             if method == {
-                "format" | "format_checked" | "add_duration" | "subtract_duration" | "add_period" | "subtract_period" | "with_zone" | "equal" | "compare" -> arity = 2
+                "format" | "format_checked" | "add_duration" | "subtract_duration" | "add_period" | "subtract_period" | "with_zone" | "equal" | "compare" -> {
+                    arity = 2
+                }
                 "with_time" -> arity = 3
                 "until" | "since" -> arity = 6
                 else -> {}
@@ -527,15 +518,27 @@ ir_handle_civil_time_route: fn(kind: String, method: String) -> IRHandleRoute? {
         index += 1
     }
 
-    if arity == 2 && (method == "format" || method == "format_checked" || method == "truncate") -> mask = [Bool]{true, true}
-    if arity == 6 && (method == "until" || method == "since") -> mask = [Bool]{true, false, true, true, true, false}
+    if arity == 2 && (method == "format" || method == "format_checked" || method == "truncate") {
+        mask = [Bool]{true, true}
+    }
+    if arity == 6 && (method == "until" || method == "since") {
+        mask = [Bool]{true, false, true, true, true, false}
+    }
     if is_date && method == "with" -> mask = [Bool]{true, false, false, false, true}
     if kind == "LocalTime" && method == "round" -> mask = [Bool]{true, true, false, true}
-    if kind == "LocalTime" && (method == "truncate" || method == "floor" || method == "ceil") -> mask = [Bool]{true, true, false}
-    if kind == "DateTime" && method == "replace" -> mask = [Bool]{true, false, false, false, false, false, false}
-    if kind == "DateTime" && method == "with" -> mask = [Bool]{true, false, false, false, false, false, false, true}
+    if kind == "LocalTime" && (method == "truncate" || method == "floor" || method == "ceil") {
+        mask = [Bool]{true, true, false}
+    }
+    if kind == "DateTime" && method == "replace" {
+        mask = [Bool]{true, false, false, false, false, false, false}
+    }
+    if kind == "DateTime" && method == "with" {
+        mask = [Bool]{true, false, false, false, false, false, false, true}
+    }
     if kind == "DateTime" && method == "round" -> mask = [Bool]{true, true, false, true}
-    if kind == "DateTime" && (method == "truncate" || method == "floor" || method == "ceil") -> mask = [Bool]{true, true, false}
+    if kind == "DateTime" && (method == "truncate" || method == "floor" || method == "ceil") {
+        mask = [Bool]{true, true, false}
+    }
     if kind == "Period" && method == "total_in" -> mask = [Bool]{true, true, true}
     if kind == "ZonedDateTime" && method == "with_time" -> mask = [Bool]{true, true, true}
     Val(ir_handle_route(false, "core.time", member, "{prefix}::{symbol_method}", mask, None))
@@ -585,8 +588,12 @@ ir_handle_dynamic_route: fn(operation: BodyHandleOp, receiver: Type, argument_co
                 "io_idle" -> return Val(ir_handle_h("process.spec.io_idle", "jet_process_spec_io_idle", [Bool]{false}, None))
                 "detached" -> return Val(ir_handle_h("process.spec.detached", "jet_process_spec_detached", [Bool]{false}, None))
                 "terminal" -> {
-                    if argument_count == 0 -> return Val(ir_handle_h("process.spec.terminal", "jet_process_spec_terminal", [Bool]{false}, None))
-                    if argument_count == 1 -> return Val(ir_handle_h("process.spec.terminal_with_policy", "jet_process_spec_terminal_with_policy", [Bool]{false, true}, None))
+                    if argument_count == 0 {
+                        return Val(ir_handle_h("process.spec.terminal", "jet_process_spec_terminal", [Bool]{false}, None))
+                    }
+                    if argument_count == 1 {
+                        return Val(ir_handle_h("process.spec.terminal_with_policy", "jet_process_spec_terminal_with_policy", [Bool]{false, true}, None))
+                    }
                     return None
                 }
                 "under" -> return Val(ir_handle_h("process.spec.under", "jet_std_process_spec_under", [Bool]{false, true}, None))
@@ -818,7 +825,9 @@ ir_general_handle_route: fn(operation: BodyHandleOp, receiver: Type, argument_co
                 .Named(name) | .Apply(name, _) -> name == "Sender"
                 .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
             }
-            if sender_receiver -> return Val(ir_handle_core("core.channels", "sender.close", "jet_std::JetSender::close", [Bool]{true}, None))
+            if sender_receiver {
+                return Val(ir_handle_core("core.channels", "sender.close", "jet_std::JetSender::close", [Bool]{true}, None))
+            }
             return Val(ir_handle_core("core.channels", "receiver.close", "jet_std::JetReceiver::close", [Bool]{true}, None))
         }
         .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_, _) | .SerdeEncode(_) | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .HTTPClientMethod(_, _) | .ArgsSpecHelp | .ReaderTakePattern(_, _) | .CursorTakePattern(_, _) | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .Hardware(_) | .HTTPServerMethod(_, _) | .ProcessLines -> return None

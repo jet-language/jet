@@ -17,8 +17,11 @@
     dyn_store(wrapping(result + CSV_ROW_LINE), dyn_word(wrapping(value + CSV_ROW_LINE)))
     result
 }
+
 #Export(c) jet_rt_handle_drop_csv_row: fn(value: I64) {
-    if (value == I64{0}) -> return
+    if (value == I64{0}) {
+        return
+    }
     fields: dyn_word(wrapping(value + CSV_ROW_FIELDS))
     length: dyn_word(wrapping(fields + DATA_SEQUENCE_LENGTH))
     capacity: dyn_word(wrapping(fields + DATA_SEQUENCE_CAPACITY))
@@ -28,10 +31,11 @@
         jet_rt_string_drop(dyn_word(wrapping(data + at * CSV_FIELD_STRIDE)))
         at += I64{1}
     }
-    if (capacity != I64{0}) -> jet_rt_free(data, capacity * CSV_FIELD_STRIDE, I64{8})
+    if (capacity != I64{0}) { jet_rt_free(data, capacity * CSV_FIELD_STRIDE, I64{8}) }
     jet_rt_free(fields, DATA_SEQUENCE_BYTES, I64{8})
     jet_rt_free(value, CSV_ROW_BYTES, I64{8})
 }
+
 #Export(c) jet_rt_handle_eq_csv_row: fn(left: I64, right: I64) -> Bool {
     a: dyn_word(wrapping(left + CSV_ROW_FIELDS))
     b: dyn_word(wrapping(right + CSV_ROW_FIELDS))
@@ -41,7 +45,9 @@
     second: dyn_word(wrapping(b + DATA_SEQUENCE_DATA))
     at := I64{0}
     loop at < length {
-        if !jet_rt_string_eq(dyn_word(wrapping(first + at * CSV_FIELD_STRIDE)), dyn_word(wrapping(second + at * CSV_FIELD_STRIDE))) -> return false
+        if !jet_rt_string_eq(dyn_word(wrapping(first + at * CSV_FIELD_STRIDE)), dyn_word(wrapping(second + at * CSV_FIELD_STRIDE))) {
+            return false
+        }
         at += I64{1}
     }
     dyn_word(wrapping(left + CSV_ROW_LINE)) == dyn_word(wrapping(right + CSV_ROW_LINE))

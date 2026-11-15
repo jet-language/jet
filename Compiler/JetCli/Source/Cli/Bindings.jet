@@ -113,7 +113,9 @@ jet_cli_data_bind_finish: fn(job: JetCLIDataBindJob, selected_root: String) -[FS
         prior: if held.read(name, Int.MAX) == {
             .Val(bytes) -> Val(bytes)
             .None -> None
-            .Err(error) -> { return jet_cli_data_bind_io_error(format, output_path, "inspect", error.message, color) }
+            .Err(error) -> {
+                return jet_cli_data_bind_io_error(format, output_path, "inspect", error.message, color)
+            }
         }
         if prior == .Val(bytes) {
             existing: String.from_bytes(bytes) ?? return jet_cli_data_bind_io_error(format, output_path, "inspect", "the existing output is not UTF-8", color)

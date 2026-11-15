@@ -14,8 +14,13 @@ use {
 }
 
 #Error
-JetCLIForeignLinkError: struct { message: String }
-jet_cli_foreign_link_error: fn(message: String) -> JetCLIForeignLinkError Never! { JetCLIForeignLinkError{message: message} }
+JetCLIForeignLinkError: struct {
+    message: String
+}
+
+jet_cli_foreign_link_error: fn(message: String) -> JetCLIForeignLinkError Never! {
+    JetCLIForeignLinkError{message: message}
+}
 
 JetCLIForeignInputs: struct {
     names: [String]
@@ -47,7 +52,9 @@ jet_cli_native_c_command: fn(argv: [String]) -[Env, Exec]> cli_process.ProcessSp
     if cli_sys.get("NIX_HARDENING_ENABLE") == .Val(enabled) {
         kept := [String]{}
         loop feature in enabled.replace("\t", " ").replace("\n", " ").split(" ") {
-            if feature.len() > 0 && !JET_CLI_NATIVE_C_HARDENING_REMOVED.contains(feature) -> kept.push(feature)
+            if feature.len() > 0 && !JET_CLI_NATIVE_C_HARDENING_REMOVED.contains(feature) {
+                kept.push(feature)
+            }
         }
         spec = spec.env("NIX_HARDENING_ENABLE", kept.join(" "))
     }
@@ -55,10 +62,16 @@ jet_cli_native_c_command: fn(argv: [String]) -[Env, Exec]> cli_process.ProcessSp
 }
 
 // One C compiler command of a batch: its receipt, or why it never ran.
-JetCLINativeCOutcome: struct { receipt: ProcessReceipt?, failure: String }
+JetCLINativeCOutcome: struct {
+    receipt: ProcessReceipt?
+    failure: String
+}
 
 // One launched child of a batch and the command it runs.
-JetCLINativeCChild: struct { index: Int, child: ProcessChild }
+JetCLINativeCChild: struct {
+    index: Int
+    child: ProcessChild
+}
 
 // Runs the C compiler commands `commands` (jet_cli_native_c_command) as
 // child processes, at most one per reported core at a time, and returns
@@ -86,14 +99,18 @@ jet_cli_native_c_run_all: fn(commands: [[String]]) -[Env, Exec, Time.Wait]> [Jet
         }
         // Reap every launched child, in command order.
         loop running in children {
-            loop outcomes.len() < running.index -> outcomes.push(JetCLINativeCOutcome{receipt: None, failure: launch_failures[outcomes.len() - start]})
+            loop outcomes.len() < running.index {
+                outcomes.push(JetCLINativeCOutcome{receipt: None, failure: launch_failures[outcomes.len() - start]})
+            }
             receipt: running.child.wait() ?? {
                 outcomes.push(JetCLINativeCOutcome{receipt: None, failure: "{err}"})
                 next
             }
             outcomes.push(JetCLINativeCOutcome{receipt: Val(receipt), failure: ""})
         }
-        loop outcomes.len() < end -> outcomes.push(JetCLINativeCOutcome{receipt: None, failure: launch_failures[outcomes.len() - start]})
+        loop outcomes.len() < end {
+            outcomes.push(JetCLINativeCOutcome{receipt: None, failure: launch_failures[outcomes.len() - start]})
+        }
         start = end
     }
     outcomes
@@ -103,17 +120,29 @@ jet_cli_native_c_run_all: fn(commands: [[String]]) -[Env, Exec, Time.Wait]> [Jet
 // the compiler's target, sysroot and headers and follow the compiler in
 // every command; `link_flags` follow them in a link: the inline C proof link
 // and a C or C++ program's (Host.jet jet_cli_native_source).
-JetCLINativeCTools: struct { compiler: String, archiver: String, target: String, flags: [String], link_flags: [String] }
+JetCLINativeCTools: struct {
+    compiler: String
+    archiver: String
+    target: String
+    flags: [String]
+    link_flags: [String]
+}
 
 // The tools a Jet program's foreign C closure compiles with, the platform
 // archives it links once (musl's libc, the compiler builtins and, for a Rust
 // helper, the unwinder), and the flags of the inline C proof link.
-JetCLIClosureCTools: struct { tools: JetCLINativeCTools, platform: [String], proof: [String] }
+JetCLIClosureCTools: struct {
+    tools: JetCLINativeCTools
+    platform: [String]
+    proof: [String]
+}
 
 // The pack's glibc target: what `jet run` of a C or C++ file builds.
 JET_CLI_NATIVE_C_PACK_TARGET: "x86_64-unknown-linux-gnu"
+
 // The glibc target's program loader.
 JET_CLI_NATIVE_C_PACK_LOADER: "/lib64/ld-linux-x86-64.so.2"
+
 // The pack's musl target: what a Jet program's C closure compiles for. The
 // program links statically, so it names no loader.
 JET_CLI_CLOSURE_C_PACK_TARGET: "x86_64-unknown-linux-musl"
@@ -126,7 +155,9 @@ JET_CLI_CLOSURE_C_PACK_TARGET: "x86_64-unknown-linux-musl"
 jet_cli_native_c_tools: fn() -[FS, Env, Exec, Time.Wait]> JetCLINativeCTools JetCLIForeignLinkError! {
     named: cli_sys.get("CC") != None || cli_sys.get("AR") != None
     if !named {
-        if cli_sys.get(ENV_JET_CC_PACK_ROOT) == .Val(root) && root != "" -> return Ok(jet_cli_native_c_pack_at(root))
+        if cli_sys.get(ENV_JET_CC_PACK_ROOT) == .Val(root) && root != "" {
+            return Ok(jet_cli_native_c_pack_at(root))
+        }
         if jet_cli_native_c_engine() == .Val(engine) {
             pack: jet_cli_native_c_pack_fetch(engine) ?? return Err(err)
             return Ok(jet_cli_native_c_pack_at(pack.root))
@@ -148,7 +179,9 @@ jet_cli_closure_c_tools: fn(rust_helper: String?) -[FS, Env, Exec, Time.Wait]> J
     if !named {
         if jet_cli_native_c_engine() == .Val(engine) {
             pack: jet_cli_native_c_pack_fetch(engine) ?? return Err(err)
-            if pack.musl_sysroot == "" -> return Err(jet_cli_foreign_link_error("`{engine} env fetch-toolchain --json` named no musl sysroot for the program's C closure"))
+            if pack.musl_sysroot == "" {
+                return Err(jet_cli_foreign_link_error("`{engine} env fetch-toolchain --json` named no musl sysroot for the program's C closure"))
+            }
             root: pack.root
             resources: "{root}/lib/clang/21"
             tools: JetCLINativeCTools{
@@ -156,11 +189,14 @@ jet_cli_closure_c_tools: fn(rust_helper: String?) -[FS, Env, Exec, Time.Wait]> J
                 archiver: "{root}/bin/llvm-ar",
                 target: JET_CLI_CLOSURE_C_PACK_TARGET,
                 flags: [String]{"--target={JET_CLI_CLOSURE_C_PACK_TARGET}", "--sysroot={pack.musl_sysroot}", "-resource-dir={resources}"},
-                link_flags: [String]{"-fuse-ld=lld", "--rtlib=compiler-rt", "--unwindlib=none"}
+                link_flags: [String]{"-fuse-ld=lld", "--rtlib=compiler-rt", "--unwindlib=none"},
             }
             platform := [String]{}
-            loop path in ([String]{"{pack.musl_sysroot}/usr/lib/libc.a", "{resources}/lib/{JET_CLI_CLOSURE_C_PACK_TARGET}/libclang_rt.builtins.a"}) {
-                if !cli_files.is_file(path) -> return Err(jet_cli_foreign_link_error("jet's C toolchain pack lacks `{path}`, which a program's C closure links"))
+            loop path in
+                ([String]{"{pack.musl_sysroot}/usr/lib/libc.a", "{resources}/lib/{JET_CLI_CLOSURE_C_PACK_TARGET}/libclang_rt.builtins.a"}) {
+                if !cli_files.is_file(path) {
+                    return Err(jet_cli_foreign_link_error("jet's C toolchain pack lacks `{path}`, which a program's C closure links"))
+                }
                 platform.push(path)
             }
             if rust_helper != None {
@@ -173,7 +209,9 @@ jet_cli_closure_c_tools: fn(rust_helper: String?) -[FS, Env, Exec, Time.Wait]> J
     tools: jet_cli_native_c_host_tools() ?? return Err(err)
     musl: foundation_find_folder("libc.a", foundation_library_folders()).found ?? return Err(jet_cli_foreign_link_error("no folder on LIBRARY_PATH holds musl's static `libc.a`, which a program's C closure links when no `jetpack` engine of this jet's version ships beside it, or `CC`/`AR` name the C tools"))
     platform := [String]{"{musl.folder}/libc.a"}
-    loop name in ([String]{"libgcc_eh.a", "libgcc.a"}) -> platform.push(jet_cli_native_c_host_archive(tools, name) ?? return Err(err))
+    loop name in ([String]{"libgcc_eh.a", "libgcc.a"}) {
+        platform.push(jet_cli_native_c_host_archive(tools, name) ?? return Err(err))
+    }
     Ok(JetCLIClosureCTools{tools: tools, platform: platform, proof: [String]{"-shared", "-Wl,--no-undefined"}})
 }
 
@@ -189,7 +227,9 @@ jet_cli_native_c_host_tools: fn() -[FS, Env, Exec, Time.Wait]> JetCLINativeCTool
     compiler: cli_process.which(cli_sys.get("CC") ?? "cc") ?? return Err(jet_cli_foreign_link_error("the C compiler is not installed, and no `jetpack` engine of this jet's version ships beside it to provide jet's C toolchain pack"))
     archiver: cli_process.which(cli_sys.get("AR") ?? "ar") ?? return Err(jet_cli_foreign_link_error("the C archiver is not installed, and no `jetpack` engine of this jet's version ships beside it to provide jet's C toolchain pack"))
     target: cli_process.cmd([String]{compiler, "-dumpmachine"}).run() ?? return Err(jet_cli_foreign_link_error("couldn't query C compiler target: {err}"))
-    if !target.success || !target.output.trim().starts_with("x86_64") -> return Err(jet_cli_foreign_link_error("C compiler must target x86_64 for the native linker: {target.output}{target.errors}"))
+    if !target.success || !target.output.trim().starts_with("x86_64") {
+        return Err(jet_cli_foreign_link_error("C compiler must target x86_64 for the native linker: {target.output}{target.errors}"))
+    }
     Ok(JetCLINativeCTools{compiler: compiler, archiver: archiver, target: target.output, flags: [String]{}, link_flags: [String]{}})
 }
 
@@ -198,29 +238,42 @@ jet_cli_native_c_host_archive: fn(tools: JetCLINativeCTools, name: String) -[FS,
     probe := jet_cli_native_c_argv(tools)
     probe.push("-print-file-name={name}")
     receipt: cli_process.cmd(probe).run() ?? return Err(jet_cli_foreign_link_error("couldn't locate the C compiler's `{name}`: {err}"))
-    if !receipt.success -> return Err(jet_cli_foreign_link_error("couldn't locate the C compiler's `{name}`: {receipt.errors}"))
+    if !receipt.success {
+        return Err(jet_cli_foreign_link_error("couldn't locate the C compiler's `{name}`: {receipt.errors}"))
+    }
     path: receipt.output.trim()
-    if path == name || !cli_files.is_file(path) -> return Err(jet_cli_foreign_link_error("the C compiler did not provide `{name}`"))
+    if path == name || !cli_files.is_file(path) {
+        return Err(jet_cli_foreign_link_error("the C compiler did not provide `{name}`"))
+    }
     Ok(path)
 }
 
 // Where the pack and its musl sysroot are, as `jet cc` reaches the pack: the
 // engine puts the pack in the Hangar (verifying a copy already there) and
 // realizes the musl target, building its sysroot once per Hangar.
-JetCLINativeCPack: struct { root: String, musl_sysroot: String }
+JetCLINativeCPack: struct {
+    root: String
+    musl_sysroot: String
+}
 
 jet_cli_native_c_pack_fetch: fn(engine: String) -[FS, Env, Exec, Time.Wait]> JetCLINativeCPack JetCLIForeignLinkError! {
     receipt: cli_process.cmd([String]{engine, "env", "fetch-toolchain", "--json"}).run() ?? return Err(jet_cli_foreign_link_error("couldn't run `{engine} env fetch-toolchain`: {err}"))
-    if !receipt.success -> return Err(jet_cli_foreign_link_error("jet's C toolchain pack is unavailable: {receipt.errors.trim()}"))
+    if !receipt.success {
+        return Err(jet_cli_foreign_link_error("jet's C toolchain pack is unavailable: {receipt.errors.trim()}"))
+    }
     value: cli_json.parse(receipt.output) ?? return Err(jet_cli_foreign_link_error("`{engine} env fetch-toolchain --json` printed no JSON: {err.reason}"))
     pack := JetCLINativeCPack{root: "", musl_sysroot: ""}
     if value == .Object(fields) {
         loop field in fields {
             if field.key == "root" && field.value == .Text(text) -> pack.root = text.copy()
-            if field.key == "musl_sysroot" && field.value == .Text(text) -> pack.musl_sysroot = text.copy()
+            if field.key == "musl_sysroot" && field.value == .Text(text) {
+                pack.musl_sysroot = text.copy()
+            }
         }
     }
-    if pack.root == "" -> return Err(jet_cli_foreign_link_error("`{engine} env fetch-toolchain --json` named no pack root"))
+    if pack.root == "" {
+        return Err(jet_cli_foreign_link_error("`{engine} env fetch-toolchain --json` named no pack root"))
+    }
     Ok(pack)
 }
 
@@ -234,7 +287,7 @@ jet_cli_native_c_pack_at: fn(root: String) -> JetCLINativeCTools Never! {
         archiver: "{root}/bin/llvm-ar",
         target: JET_CLI_NATIVE_C_PACK_TARGET,
         flags: [String]{"--target={JET_CLI_NATIVE_C_PACK_TARGET}", "--sysroot={sysroot}", "-resource-dir={root}/lib/clang/21"},
-        link_flags: [String]{"-fuse-ld=lld", "--rtlib=compiler-rt", "--unwindlib=none", "-Wl,--dynamic-linker={JET_CLI_NATIVE_C_PACK_LOADER}"}
+        link_flags: [String]{"-fuse-ld=lld", "--rtlib=compiler-rt", "--unwindlib=none", "-Wl,--dynamic-linker={JET_CLI_NATIVE_C_PACK_LOADER}"},
     }
 }
 
@@ -259,9 +312,14 @@ jet_cli_native_c_identity: fn(identity: &[U8], schema: String, tools: JetCLINati
     }
     loop flag in tools.flags -> jet_cli_foreign_hash_field(identity, "tool-flag", flag.bytes())
     loop flag in flags -> jet_cli_foreign_hash_field(identity, "flag", flag.bytes())
-    loop flag in JET_CLI_NATIVE_C_FLAGS -> jet_cli_foreign_hash_field(identity, "policy-flag", flag.bytes())
-    loop feature in JET_CLI_NATIVE_C_HARDENING_REMOVED -> jet_cli_foreign_hash_field(identity, "policy-hardening-removed", feature.bytes())
-    loop name in ([String]{"NIX_CFLAGS_COMPILE", "NIX_CFLAGS_COMPILE_BEFORE", "NIX_HARDENING_ENABLE"}) {
+    loop flag in JET_CLI_NATIVE_C_FLAGS {
+        jet_cli_foreign_hash_field(identity, "policy-flag", flag.bytes())
+    }
+    loop feature in JET_CLI_NATIVE_C_HARDENING_REMOVED {
+        jet_cli_foreign_hash_field(identity, "policy-hardening-removed", feature.bytes())
+    }
+    loop name in
+        ([String]{"NIX_CFLAGS_COMPILE", "NIX_CFLAGS_COMPILE_BEFORE", "NIX_HARDENING_ENABLE"}) {
         jet_cli_foreign_hash_field(identity, "env-{name}", (cli_sys.get(name) ?? "").bytes())
     }
     Ok()
@@ -284,7 +342,9 @@ jet_cli_native_c_publish: fn(tools: JetCLINativeCTools, lib: String, temporary: 
     argv := [String]{tools.archiver, "rcsD", staged}
     loop object in objects -> argv.push(object.copy())
     receipt: cli_process.cmd(argv).run() ?? return Err(jet_cli_foreign_link_error("couldn't archive C dependency `{lib}`: {err}"))
-    if !receipt.success -> return Err(jet_cli_foreign_link_error("C archiver rejected `{lib}`: {receipt.errors}"))
+    if !receipt.success {
+        return Err(jet_cli_foreign_link_error("C archiver rejected `{lib}`: {receipt.errors}"))
+    }
     bytes: cli_files.read_bytes(staged) ?? return Err(jet_cli_foreign_link_error("couldn't read compiled C archive: {err}"))
     digest: sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))
     cli_files.rename(staged, archive) ?? return Err(jet_cli_foreign_link_error("couldn't publish C archive: {err}"))
@@ -332,7 +392,9 @@ jet_cli_foreign_compile: fn(closure: JetCLIClosureCTools, lib: String, directory
         jet_cli_foreign_hash_field(identity, relative, content)
         if path.ends_with(".c") -> sources.push(path)
     }
-    if sources.len() == 0 -> return Err(jet_cli_foreign_link_error("C dependency `{lib}` has neither a static archive nor C sources in `{directory}`"))
+    if sources.len() == 0 {
+        return Err(jet_cli_foreign_link_error("C dependency `{lib}` has neither a static archive nor C sources in `{directory}`"))
+    }
     // Hash what the compiler will consume, including every system/header
     // input. Compile these immutable preprocessed bytes on a cache miss. The
     // units preprocess and compile as parallel C compiler children
@@ -341,13 +403,18 @@ jet_cli_foreign_compile: fn(closure: JetCLIClosureCTools, lib: String, directory
     loop source in sources {
         argv := jet_cli_native_c_argv(tools)
         loop flag in flags -> argv.push(flag)
-        loop flag in ([String]{"-ffile-prefix-map={directory}=/jet/c", "-I", directory, "-E", "-P", source}) -> argv.push(flag)
+        loop flag in
+            ([String]{"-ffile-prefix-map={directory}=/jet/c", "-I", directory, "-E", "-P", source}) {
+            argv.push(flag)
+        }
         commands.push(argv)
     }
     preprocessed := [String]{}
     loop (index, outcome) in jet_cli_native_c_run_all(commands) {
         receipt: outcome.receipt ?? return Err(jet_cli_foreign_link_error("couldn't preprocess C dependency `{lib}`: {outcome.failure}"))
-        if !receipt.success -> return Err(jet_cli_foreign_link_error("C compiler rejected `{sources[index]}`: {receipt.errors}"))
+        if !receipt.success {
+            return Err(jet_cli_foreign_link_error("C compiler rejected `{sources[index]}`: {receipt.errors}"))
+        }
         jet_cli_foreign_hash_field(identity, "preprocessed", receipt.output.bytes())
         preprocessed.push(receipt.output)
     }
@@ -375,13 +442,18 @@ jet_cli_foreign_compile: fn(closure: JetCLIClosureCTools, lib: String, directory
         object: "{temporary}/{index}.o"
         argv := jet_cli_native_c_argv(tools)
         loop flag in flags -> argv.push(flag)
-        loop flag in ([String]{jet_cli_native_c_build_map(temporary), "-c", staged_source, "-o", object}) -> argv.push(flag)
+        loop flag in
+            ([String]{jet_cli_native_c_build_map(temporary), "-c", staged_source, "-o", object}) {
+            argv.push(flag)
+        }
         compiles.push(argv)
         objects.push(object)
     }
     loop (index, outcome) in jet_cli_native_c_run_all(compiles) {
         receipt: outcome.receipt ?? return Err(jet_cli_foreign_link_error("couldn't compile C dependency `{lib}`: {outcome.failure}"))
-        if !receipt.success -> return Err(jet_cli_foreign_link_error("C compiler rejected `{sources[index]}`: {receipt.errors}"))
+        if !receipt.success {
+            return Err(jet_cli_foreign_link_error("C compiler rejected `{sources[index]}`: {receipt.errors}"))
+        }
     }
     if staging_failure == .Val(failure) -> return Err(jet_cli_foreign_link_error(failure))
     jet_cli_native_c_publish(tools, lib, temporary, objects, archive) ?? return Err(err)
@@ -431,7 +503,9 @@ jet_cli_inline_c_source: fn(row: JetDriverInlineC, body: String) -> String Never
 jet_cli_native_inline_c: fn(closure: JetCLIClosureCTools, facts: JetDriverForeignLinkFacts, cache: String) -[FS, Env, Exec, Time.Wait]> String? JetCLIForeignLinkError! {
     units := [String]{}
     loop row in facts.inline_c {
-        if row.cpp -> return Err(jet_cli_foreign_link_error("inline C++ `{row.name}` needs a C++ runtime, which the native static link does not package"))
+        if row.cpp {
+            return Err(jet_cli_foreign_link_error("inline C++ `{row.name}` needs a C++ runtime, which the native static link does not package"))
+        }
         body: row.body ?? return Err(jet_cli_foreign_link_error("inline C `{row.name}` has no triple-quoted body within its checked source span"))
         units.push(jet_cli_inline_c_source(row, body))
     }
@@ -464,12 +538,16 @@ jet_cli_native_inline_c: fn(closure: JetCLIClosureCTools, facts: JetDriverForeig
         }
         argv := jet_cli_native_c_argv(tools)
         loop flag in flags -> argv.push(flag)
-        loop flag in ([String]{jet_cli_native_c_build_map(probe), "-E", "-P", source}) -> argv.push(flag)
+        loop flag in ([String]{jet_cli_native_c_build_map(probe), "-E", "-P", source}) {
+            argv.push(flag)
+        }
         commands.push(argv)
     }
     loop (index, outcome) in jet_cli_native_c_run_all(commands) {
         receipt: outcome.receipt ?? return Err(jet_cli_foreign_link_error("couldn't preprocess inline C: {outcome.failure}"))
-        if !receipt.success -> return Err(jet_cli_foreign_link_error("C compiler rejected inline C unit {index}: {receipt.errors}"))
+        if !receipt.success {
+            return Err(jet_cli_foreign_link_error("C compiler rejected inline C unit {index}: {receipt.errors}"))
+        }
         jet_cli_foreign_hash_field(identity, "inline_{index}.c", units[index].bytes())
         jet_cli_foreign_hash_field(identity, "preprocessed", receipt.output.bytes())
     }
@@ -494,13 +572,17 @@ jet_cli_native_inline_c: fn(closure: JetCLIClosureCTools, facts: JetDriverForeig
         object: "{temporary}/inline_{index}.o"
         argv := jet_cli_native_c_argv(tools)
         loop flag in flags -> argv.push(flag)
-        loop flag in ([String]{jet_cli_native_c_build_map(temporary), "-c", source, "-o", object}) -> argv.push(flag)
+        loop flag in ([String]{jet_cli_native_c_build_map(temporary), "-c", source, "-o", object}) {
+            argv.push(flag)
+        }
         compiles.push(argv)
         objects.push(object)
     }
     loop (index, outcome) in jet_cli_native_c_run_all(compiles) {
         receipt: outcome.receipt ?? return Err(jet_cli_foreign_link_error("couldn't compile inline C: {outcome.failure}"))
-        if !receipt.success -> return Err(jet_cli_foreign_link_error("C compiler rejected inline C unit {index}: {receipt.errors}"))
+        if !receipt.success {
+            return Err(jet_cli_foreign_link_error("C compiler rejected inline C unit {index}: {receipt.errors}"))
+        }
     }
     proof := jet_cli_native_c_argv(tools)
     loop word in tools.link_flags -> proof.push(word.copy())
@@ -508,7 +590,9 @@ jet_cli_native_inline_c: fn(closure: JetCLIClosureCTools, facts: JetDriverForeig
     loop object in objects -> proof.push(object)
     loop word in ([String]{"-o", "{temporary}/inline_bridge.proof"}) -> proof.push(word)
     linked: cli_process.cmd(proof).run() ?? return Err(jet_cli_foreign_link_error("couldn't link the inline C proof: {err}"))
-    if !linked.success -> return Err(jet_cli_foreign_link_error("inline C bodies leave undefined symbols: {linked.errors}"))
+    if !linked.success {
+        return Err(jet_cli_foreign_link_error("inline C bodies leave undefined symbols: {linked.errors}"))
+    }
     jet_cli_native_c_publish(tools, "jet_inline_native", temporary, objects, archive) ?? return Err(err)
     Ok(Val(archive))
 }
@@ -521,13 +605,17 @@ jet_cli_foreign_static_archive: fn(closure: JetCLIClosureCTools, lib: String, di
     }
     // A declared local source directory is a source provider, not a request
     // to silently link a similarly named installed library.
-    if source_provider && directories.len() > 0 -> return jet_cli_foreign_compile(closure, name, directories[0], cache)
+    if source_provider && directories.len() > 0 {
+        return jet_cli_foreign_compile(closure, name, directories[0], cache)
+    }
     tools: closure.tools
     probe := jet_cli_native_c_argv(tools)
     probe.push("-print-file-name=lib{name}.a")
     receipt: cli_process.cmd(probe).run() ?? return Err(jet_cli_foreign_link_error("couldn't find C archive `{name}`: {err}"))
     path: receipt.output.trim()
-    if !receipt.success || path == ("lib{name}.a") || !cli_files.is_file(path) -> return Err(jet_cli_foreign_link_error("C static archive `{name}` was not found"))
+    if !receipt.success || path == ("lib{name}.a") || !cli_files.is_file(path) {
+        return Err(jet_cli_foreign_link_error("C static archive `{name}` was not found"))
+    }
     Ok(path)
 }
 
@@ -546,7 +634,9 @@ jet_cli_native_c_sources: fn(snapshot: JetDriverAuthorizedSourceSnapshot, option
     loop candidate in snapshot.roots {
         if candidate.identity == snapshot.entry_root_identity -> root = candidate.canonical_path
     }
-    if root == "" -> return Err(jet_cli_foreign_link_error("C link resolution has no authorized entry source root"))
+    if root == "" {
+        return Err(jet_cli_foreign_link_error("C link resolution has no authorized entry source root"))
+    }
     Ok(JetCLIForeignSources{root: root, declarations: jet_driver_c_dependencies(snapshot), libs: build_options_list(options, "libs"), link_args: build_options_list(options, "link_args")})
 }
 
@@ -581,7 +671,9 @@ jet_cli_native_c_closure: fn(closure: JetCLIClosureCTools, facts: JetDriverForei
     archives := [String]{}
     loop word in sources.link_args {
         if {
-            word.starts_with("-L") -> link_dirs.push(jet_cli_foreign_option_path(root, word.removeprefix("-L")))
+            word.starts_with("-L") -> {
+                link_dirs.push(jet_cli_foreign_option_path(root, word.removeprefix("-L")))
+            }
             word.starts_with("-l") -> requested.push(word.removeprefix("-l"))
             else -> archives.push(jet_cli_foreign_option_path(root, word))
         }
@@ -608,7 +700,9 @@ jet_cli_native_c_closure: fn(closure: JetCLIClosureCTools, facts: JetDriverForei
             }
             if !directories.contains(directory) -> directories.push(directory)
         }
-        if directories.len() > 1 -> return Err(jet_cli_foreign_link_error("C dependency `{lib}` has conflicting declarations"))
+        if directories.len() > 1 {
+            return Err(jet_cli_foreign_link_error("C dependency `{lib}` has conflicting declarations"))
+        }
         if directories.len() > 0 {
             path: jet_cli_foreign_static_archive(closure, lib, directories, cache, true) ?? return Err(err)
             jet_cli_foreign_add(inputs, path) ?? return Err(err)
@@ -617,7 +711,9 @@ jet_cli_native_c_closure: fn(closure: JetCLIClosureCTools, facts: JetDriverForei
         // A `-L` directory of the `link_args` build option is searched first.
         found := ""
         loop directory in link_dirs {
-            if found == "" && cli_files.is_file("{directory}/lib{lib}.a") -> found = "{directory}/lib{lib}.a"
+            if found == "" && cli_files.is_file("{directory}/lib{lib}.a") {
+                found = "{directory}/lib{lib}.a"
+            }
         }
         if found != "" {
             jet_cli_foreign_add(inputs, found) ?? return Err(err)
@@ -640,7 +736,9 @@ jet_cli_native_c_closure: fn(closure: JetCLIClosureCTools, facts: JetDriverForei
             next
         }
         if !configured {
-            if !declared_system -> return Err(jet_cli_foreign_link_error("C dependency `{lib}` was not declared and pkg-config did not find it"))
+            if !declared_system {
+                return Err(jet_cli_foreign_link_error("C dependency `{lib}` was not declared and pkg-config did not find it"))
+            }
             directory: jet_cli_foreign_nix_directory(lib, lib, root) ?? return Err(err)
             path: jet_cli_foreign_static_archive(closure, lib, [String]{directory}, cache, false) ?? return Err(err)
             jet_cli_foreign_add(inputs, path) ?? return Err(err)
@@ -660,7 +758,9 @@ jet_cli_native_c_closure: fn(closure: JetCLIClosureCTools, facts: JetDriverForei
         }
     }
     loop archive in archives {
-        if !cli_files.is_file(archive) -> return Err(jet_cli_foreign_link_error("the `link_args` archive `{archive}` doesn't exist"))
+        if !cli_files.is_file(archive) {
+            return Err(jet_cli_foreign_link_error("the `link_args` archive `{archive}` doesn't exist"))
+        }
         jet_cli_foreign_add(inputs, archive) ?? return Err(err)
     }
     if rust_helper == .Val(path) -> jet_cli_foreign_add(inputs, path) ?? return Err(err)
@@ -711,9 +811,13 @@ jet_cli_foreign_nix_directory: fn(lib: String, attr: String, root: String) -[FS,
     stored: if BUILD_REUSE_SAVED_WORK -> (cli_files.read(cache) ?? "").trim() else -> ""
     if stored.len() > 0 && cli_files.is_dir(stored) -> return Ok("{stored}/lib")
     receipt: cli_process.cmd([String]{"nix", "build", "--no-link", "--print-out-paths", "nixpkgs#{attr}"}).run() ?? return Err(jet_cli_foreign_link_error("couldn't provision C dependency `{lib}`: {err}"))
-    if !receipt.success -> return Err(jet_cli_foreign_link_error("couldn't provision C dependency `{lib}`: {receipt.errors}"))
+    if !receipt.success {
+        return Err(jet_cli_foreign_link_error("couldn't provision C dependency `{lib}`: {receipt.errors}"))
+    }
     lines: receipt.output.trim().split("\n").to_list()
-    if lines.len() != 1 || !cli_files.is_dir(lines[0]) -> return Err(jet_cli_foreign_link_error("C dependency `{lib}` provisioning returned no single store directory"))
+    if lines.len() != 1 || !cli_files.is_dir(lines[0]) {
+        return Err(jet_cli_foreign_link_error("C dependency `{lib}` provisioning returned no single store directory"))
+    }
     if !BUILD_REUSE_SAVED_WORK -> return Ok("{lines[0]}/lib")
     cli_files.create_dir_all("{root}/.jet/clinks") ?? return Err(jet_cli_foreign_link_error("couldn't create C dependency cache: {err}"))
     cli_files.write(cache, lines[0]) ?? return Err(jet_cli_foreign_link_error("couldn't write C dependency cache: {err}"))

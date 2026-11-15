@@ -158,15 +158,29 @@ sema_contract_check_pure_delta: fn(start: Int, context: SemaCheckContext, kind: 
 }
 
 sema_contract_merge_context_delta: fn(source: SemaCheckContext, call_start: Int, view_start: Int, name_start: Int, comptime_start: Int, copy_start: Int, destination: &SemaCheckContext) Never! {
-    loop index in call_start..<source.call_facts.len() -> destination.call_facts.push(source.call_facts[index])
-    loop index in view_start..<source.call_return_views.len() -> destination.call_return_views.push(source.call_return_views[index])
-    loop index in name_start..<source.name_references.len() -> destination.name_references.push(source.name_references[index])
-    loop index in comptime_start..<source.comptime_requests.len() -> destination.comptime_requests.push(source.comptime_requests[index])
-    loop index in copy_start..<source.copy_events.len() -> destination.copy_events.push(source.copy_events[index])
+    loop index in call_start..<source.call_facts.len() {
+        destination.call_facts.push(source.call_facts[index])
+    }
+    loop index in view_start..<source.call_return_views.len() {
+        destination.call_return_views.push(source.call_return_views[index])
+    }
+    loop index in name_start..<source.name_references.len() {
+        destination.name_references.push(source.name_references[index])
+    }
+    loop index in comptime_start..<source.comptime_requests.len() {
+        destination.comptime_requests.push(source.comptime_requests[index])
+    }
+    loop index in copy_start..<source.copy_events.len() {
+        destination.copy_events.push(source.copy_events[index])
+    }
     // A snapshot starts with no goal rows and no incomplete reasons, so every
     // row it holds is this condition's; a condition left incomplete keeps why.
-    loop index in 0..<source.typed_goals.len() -> destination.typed_goals.push(source.typed_goals[index])
-    loop index in 0..<source.index_proofs.len() -> destination.index_proofs.push(source.index_proofs[index])
+    loop index in 0..<source.typed_goals.len() {
+        destination.typed_goals.push(source.typed_goals[index])
+    }
+    loop index in 0..<source.index_proofs.len() {
+        destination.index_proofs.push(source.index_proofs[index])
+    }
     loop reason in source.incomplete_reasons -> destination.incomplete_reasons.push(reason.copy())
     sema_check_context_merge_expr_ids(source, destination)
     if source.exact_int_reachable -> destination.exact_int_reachable = true
@@ -237,9 +251,7 @@ sema_contract_result_ident_in_pattern: fn(value: Pattern) -> Span? {
             }
             None
         }
-        .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
-            if inner == .Val(nested) -> sema_contract_result_ident_in_pattern(nested) else -> None
-        }
+        .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> if inner == .Val(nested) -> sema_contract_result_ident_in_pattern(nested) else -> None
         .Absent(_) | .Range(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> None
     }
 }
@@ -502,19 +514,25 @@ sema_contract_result_ident_in_expr: fn(expr: Expr) -> Span? {
         }
         .TypedLit(_, body, _, _) -> {
             if body == {
-                .Fields(fields) -> loop field in fields {
-                    found: sema_contract_result_ident_in_expr(field.value)
-                    if found != None -> return found
+                .Fields(fields) -> {
+                    loop field in fields {
+                        found: sema_contract_result_ident_in_expr(field.value)
+                        if found != None -> return found
+                    }
                 }
-                .Elements(elements) -> loop value in elements {
-                    found: sema_contract_result_ident_in_expr(value)
-                    if found != None -> return found
+                .Elements(elements) -> {
+                    loop value in elements {
+                        found: sema_contract_result_ident_in_expr(value)
+                        if found != None -> return found
+                    }
                 }
-                .Entries(entries) -> loop entry in entries {
-                    key_found: sema_contract_result_ident_in_expr(entry.key)
-                    if key_found != None -> return key_found
-                    value_found: sema_contract_result_ident_in_expr(entry.value)
-                    if value_found != None -> return value_found
+                .Entries(entries) -> {
+                    loop entry in entries {
+                        key_found: sema_contract_result_ident_in_expr(entry.key)
+                        if key_found != None -> return key_found
+                        value_found: sema_contract_result_ident_in_expr(entry.value)
+                        if value_found != None -> return value_found
+                    }
                 }
                 .Value(value) -> return sema_contract_result_ident_in_expr(value)
                 .ByteText(_) | .Empty -> {}
@@ -607,18 +625,24 @@ sema_contract_check_expr: fn(expr: Expr, expected: Type, kind: String, forbid_re
     copy_start: checked_context.copy_events.len()
     reference_start: checked_state.references.len()
     value: sema_check_expression(expr, None, environment, program, checked_scopes, checked_state, tail_store, checked_context, diagnostics)
-    loop index in reference_start..<checked_state.references.len() -> reads[checked_state.references[index].def_key] = true
+    loop index in reference_start..<checked_state.references.len() {
+        reads[checked_state.references[index].def_key] = true
+    }
     valid := value != None
     if value == .Val(actual) {
         if actual.ty != expected {
             if {
-                expected == Type.Bool -> diagnostics.push(sema_error("E0110", expr_span(expr), "a `#{kind}` condition must be Bool, but this is {type_name(actual.ty)}", "the program needs a clear yes or no here", "compare the value to something to produce Bool"))
+                expected == Type.Bool -> {
+                    diagnostics.push(sema_error("E0110", expr_span(expr), "a `#{kind}` condition must be Bool, but this is {type_name(actual.ty)}", "the program needs a clear yes or no here", "compare the value to something to produce Bool"))
+                }
                 else -> diagnostics.push(sema_type_mismatch(expected, actual.ty, expr_span(expr)))
             }
             valid = false
         }
     }
-    if check_purity && !sema_contract_check_pure_delta(call_start, checked_context, kind, environment, program, diagnostics) -> valid = false
+    if check_purity && !sema_contract_check_pure_delta(call_start, checked_context, kind, environment, program, diagnostics) {
+        valid = false
+    }
     sema_contract_merge_context_delta(checked_context, call_start, view_start, name_start, comptime_start, copy_start, context)
     // The condition's flat nodes are rows of its arena, which continues this one.
     sema_arena_take_back(context, checked_context.arena.move())
@@ -674,9 +698,7 @@ sema_contract_index_interval: fn(expr: TExpr, environment: SemaScopeEnvironment,
         lhs: sema_contract_index_interval(left, environment, program) ?? return None
         rhs: sema_contract_index_interval(right, environment, program) ?? return None
         range = if op == .Add -> Val(TIntegerRange{lo: lhs.lo + rhs.lo, hi: lhs.hi + rhs.hi}) else -> Val(TIntegerRange{lo: lhs.lo - rhs.hi, hi: lhs.hi - rhs.lo})
-    } else {
-        range = sema_contract_interval(expr, environment, program)
-    }
+    } else { range = sema_contract_interval(expr, environment, program) }
     found: range ?? return None
     if found.lo < -SEMA_CONTRACT_INDEX_LIMIT || found.hi > SEMA_CONTRACT_INDEX_LIMIT -> return None
     Val(found)
@@ -698,7 +720,9 @@ sema_contract_expr_proven: fn(expr: TExpr, environment: SemaScopeEnvironment, pr
     if expr.kind == {
         // A literal condition is a flat `BoolLit` row (sema_node).
         .Flat(index) -> {
-            if context.arena.tree.nodes[index - context.arena.tree.node_base].kind == .BoolLit(value) -> return value
+            if context.arena.tree.nodes[index - context.arena.tree.node_base].kind == .BoolLit(value) {
+                return value
+            }
             false
         }
         .Binary(op, _, _, left, right) -> if op == {
@@ -716,7 +740,9 @@ sema_contract_expr_proven: fn(expr: TExpr, environment: SemaScopeEnvironment, pr
             loop index in 0..<operators.len() {
                 left_range: sema_contract_interval(operands[index], environment, program) ?? return false
                 right_range: sema_contract_interval(operands[index + 1], environment, program) ?? return false
-                if !sema_contract_interval_comparison(operators[index], left_range, right_range) -> return false
+                if !sema_contract_interval_comparison(operators[index], left_range, right_range) {
+                    return false
+                }
             }
             true
         }
@@ -803,17 +829,23 @@ sema_contract_method_function_for_item: fn(item: Item, target_key: String, modul
     if item == {
         .Struct(value) -> {
             loop method in value.methods {
-                if symbol_key_text(SymbolKind.Function, module_identity, value.name, method.name) == target_key -> return Val(method)
+                if symbol_key_text(SymbolKind.Function, module_identity, value.name, method.name) == target_key {
+                    return Val(method)
+                }
             }
         }
         .Enum(value) -> {
             loop method in value.methods {
-                if symbol_key_text(SymbolKind.Function, module_identity, value.name, method.name) == target_key -> return Val(method)
+                if symbol_key_text(SymbolKind.Function, module_identity, value.name, method.name) == target_key {
+                    return Val(method)
+                }
             }
         }
         .Impl(value) -> {
             loop method in value.methods {
-                if symbol_key_text(SymbolKind.Function, module_identity, value.type_name, method.name) == target_key -> return Val(method)
+                if symbol_key_text(SymbolKind.Function, module_identity, value.type_name, method.name) == target_key {
+                    return Val(method)
+                }
             }
         }
         .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
@@ -831,7 +863,9 @@ sema_contract_function_for_symbol: fn(environment: SemaScopeEnvironment, program
     loop declaration_index in 0..<environment.declarations.len() {
         if environment.declarations[declaration_index].symbol_id == target {
             // copy: `value` is a payload of read parameter `environment`, which keeps the original; the Val carrier owns this one
-            if environment.declarations[declaration_index].item == .Func(value) -> return Val(value.copy())
+            if environment.declarations[declaration_index].item == .Func(value) {
+                return Val(value.copy())
+            }
         }
         method: sema_contract_method_function_for_item(environment.declarations[declaration_index].item, target_key, sema_scope_environment_module_text(environment, program))
         if method != None -> return method
@@ -857,7 +891,9 @@ SemaContractCalleeFacts: struct {
 
 sema_contract_callee_facts: fn(func: Func) -> SemaContractCalleeFacts Never! {
     view_from := loop param in func.params {
-        if param.declared_view_from_names != None -> break true
+        if param.declared_view_from_names != None {
+            break true
+        }
     } ?? false
     param_names := [String]{}
     param_view_from := [[String]?]{}
@@ -888,17 +924,23 @@ sema_contract_method_facts_for_item: fn(item: Item, target_key: String, module_i
     if item == {
         .Struct(value) -> {
             loop method in value.methods {
-                if symbol_key_text(SymbolKind.Function, module_identity, value.name, method.name) == target_key -> return Val(sema_contract_callee_facts(method))
+                if symbol_key_text(SymbolKind.Function, module_identity, value.name, method.name) == target_key {
+                    return Val(sema_contract_callee_facts(method))
+                }
             }
         }
         .Enum(value) -> {
             loop method in value.methods {
-                if symbol_key_text(SymbolKind.Function, module_identity, value.name, method.name) == target_key -> return Val(sema_contract_callee_facts(method))
+                if symbol_key_text(SymbolKind.Function, module_identity, value.name, method.name) == target_key {
+                    return Val(sema_contract_callee_facts(method))
+                }
             }
         }
         .Impl(value) -> {
             loop method in value.methods {
-                if symbol_key_text(SymbolKind.Function, module_identity, value.type_name, method.name) == target_key -> return Val(sema_contract_callee_facts(method))
+                if symbol_key_text(SymbolKind.Function, module_identity, value.type_name, method.name) == target_key {
+                    return Val(sema_contract_callee_facts(method))
+                }
             }
         }
         .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
@@ -917,7 +959,9 @@ sema_contract_function_facts: fn(environment: SemaScopeEnvironment, program: Sem
     target_key: sema_program_symbol_key(program, target)
     loop declaration_index in 0..<environment.declarations.len() {
         if environment.declarations[declaration_index].symbol_id == target {
-            if environment.declarations[declaration_index].item == .Func(value) -> return Val(sema_contract_callee_facts(value))
+            if environment.declarations[declaration_index].item == .Func(value) {
+                return Val(sema_contract_callee_facts(value))
+            }
         }
         method: sema_contract_method_facts_for_item(environment.declarations[declaration_index].item, target_key, sema_scope_environment_module_text(environment, program))
         if method != None -> return method
@@ -976,7 +1020,9 @@ sema_contract_check_call: fn(func: Func, target: SymbolID, recall: SemaContractR
     loop clause in func.post {
         if clause.required -> required_post = true
     }
-    if func.pre.len() == 0 && !required_post -> return Val(SemaContractCall{bindings: [TStmt]{}, contracts: [TContract]{}})
+    if func.pre.len() == 0 && !required_post {
+        return Val(SemaContractCall{bindings: [TStmt]{}, contracts: [TContract]{}})
+    }
     if required_post -> any_required = true
     if args.len() != slots.len() -> return None
     if func.params.len() == 0 && args.len() > 0 -> return None
@@ -1016,7 +1062,9 @@ sema_contract_check_call: fn(func: Func, target: SymbolID, recall: SemaContractR
         message: sema_contract_check_expr(clause.message_expr, Type.String, "Pre", false, false, environment, program, checked_scopes, checked_state, reads, tail_store, context, diagnostics)
         if message == None -> complete = false
         if clause.required {
-            if condition != None && !sema_contract_required_holds("#Pre", func.name, clause, call_span, environment, program, checked_scopes, context, diagnostics) -> complete = false
+            if condition != None && !sema_contract_required_holds("#Pre", func.name, clause, call_span, environment, program, checked_scopes, context, diagnostics) {
+                complete = false
+            }
             next
         }
         if condition == .Val(condition_value) && message == .Val(message_value) {
@@ -1026,7 +1074,9 @@ sema_contract_check_call: fn(func: Func, target: SymbolID, recall: SemaContractR
     // A `#Post` decided while building reads `result`: this call's own value.
     loop clause in func.post {
         if !clause.required -> next
-        if !sema_contract_required_post_holds(func, clause, recall, call_span, environment, program, checked_scopes, checked_state, reads, tail_store, context, diagnostics) -> complete = false
+        if !sema_contract_required_post_holds(func, clause, recall, call_span, environment, program, checked_scopes, checked_state, reads, tail_store, context, diagnostics) {
+            complete = false
+        }
     }
     context.fresh_expr_ids = fresh_expr_ids
     sema_scope_leave(checked_scopes, checked_state)
@@ -1110,7 +1160,9 @@ sema_contract_required_post_holds: fn(func: Func, clause: ContractClause, recall
         again: Expr.Call{call: Call{name: written.call.name, name_span: written.call.name_span, type_args: written.call.type_args.copy(), args: args}, id: AST_NODE_GENERATED}
         _ := sema_comptime_body_capture(context, environment, program, scopes, "#Post", again, result_type, clause.span, call_span)
     }
-    if holds && has_call -> holds = sema_contract_required_holds("#Post", func.name, clause, call_span, environment, program, scopes, context, diagnostics)
+    if holds && has_call {
+        holds = sema_contract_required_holds("#Post", func.name, clause, call_span, environment, program, scopes, context, diagnostics)
+    }
     sema_scope_leave(scopes, state)
     holds
 }

@@ -19,8 +19,12 @@ run: fn(check: Check) {
     here: files.cwd() ?? process.fail(1, "no working directory: {err}")
     output: files.read(check.stdout) ?? process.fail(1, "no output file: {err}")
     if json.parse(output) == {
-        .Ok(report) -> print((json.canonical(report) ?? process.fail(1, "the report has no canonical form: {err}")).replace(here, "."))
-        .Err(_) -> loop line in output.lines() -> print(line)
+        .Ok(report) -> {
+            print((json.canonical(report) ?? process.fail(1, "the report has no canonical form: {err}")).replace(here, "."))
+        }
+        .Err(_) -> {
+            loop line in output.lines() -> print(line)
+        }
     }
     corpus: "run/axes/memory-safety-fuzz/fuzz-input.bin"
     staged: if files.exists(corpus) -> crypto.sha256(files.read_bytes(corpus) ?? process.fail(1, "{corpus}: {err}")).hex() else -> "none"

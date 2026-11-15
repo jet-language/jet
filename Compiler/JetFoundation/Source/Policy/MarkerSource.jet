@@ -7,8 +7,26 @@
 // `Site` in Core/Prelude/Prelude.jet, by name and in order (the closed-list
 // mirror ledger): edit `Site`, then copy it here.
 MARKER_SOURCE_SITES: [String]{
-    "Package", "File", "Module", "Function", "Method", "Block", "Statement", "Expression", "Type",
-    "Impl", "Trait", "Declaration", "Constant", "Field", "Variant", "Parameter", "Test", "Operation", "Text", "Arm",
+    "Package",
+    "File",
+    "Module",
+    "Function",
+    "Method",
+    "Block",
+    "Statement",
+    "Expression",
+    "Type",
+    "Impl",
+    "Trait",
+    "Declaration",
+    "Constant",
+    "Field",
+    "Variant",
+    "Parameter",
+    "Test",
+    "Operation",
+    "Text",
+    "Arm",
 }
 
 // `MarkerScope` in Core/Prelude/Prelude.jet (the type of `Marker.scopes`), by
@@ -111,7 +129,9 @@ marker_source_split_default: fn(value: String) -> MarkerSourceDefault? Never! {
 
 // The entries of a `[…]` value.
 marker_source_list: fn(value: String) -> [String] Never! {
-    if !value.starts_with("[") || !value.ends_with("]") || value.len() < 2 -> panic("expected a `[…]` list, found `{value}`")
+    if !value.starts_with("[") || !value.ends_with("]") || value.len() < 2 {
+        panic("expected a `[…]` list, found `{value}`")
+    }
     marker_source_split_top_level(foundation_byte_text(value.bytes(), 1, value.count_bytes() - 1))
 }
 
@@ -124,7 +144,9 @@ marker_source_flag: fn(value: String, line: String) -> Bool Never! {
 }
 
 marker_source_unprefixed: fn(written: String) -> String Never! {
-    if written.starts_with(".") -> return foundation_byte_text(written.bytes(), 1, written.count_bytes())
+    if written.starts_with(".") {
+        return foundation_byte_text(written.bytes(), 1, written.count_bytes())
+    }
     written.copy()
 }
 
@@ -209,7 +231,9 @@ marker_source_strip_comments: fn(source: String) -> String Never! {
         }
         if byte == 47 && following == 42 {
             index += 2
-            loop index + 1 < bytes.len() && !(Int{bytes[index]} == 42 && Int{bytes[index + 1]} == 47) -> index += 1
+            loop index + 1 < bytes.len() && !(Int{bytes[index]} == 42 && Int{bytes[index + 1]} == 47) {
+                index += 1
+            }
             index += 2
             next
         }
@@ -303,8 +327,12 @@ marker_source_declaration: fn(name: String, body: String) -> TAppliedRule? Never
         key: foundation_byte_text(entry.bytes(), 0, separator).trim()
         value: foundation_byte_text(entry.bytes(), separator + 1, entry.count_bytes()).trim()
         if key == {
-            "sites" -> sites = loop item in marker_source_list(value) -> marker_source_site(item, context)
-            "scopes" -> scopes = loop item in marker_source_list(value) -> marker_source_scope(item, context)
+            "sites" -> {
+                sites = loop item in marker_source_list(value) -> marker_source_site(item, context)
+            }
+            "scopes" -> {
+                scopes = loop item in marker_source_list(value) -> marker_source_scope(item, context)
+            }
             "repeatable" -> repeatable = marker_source_flag(value, context)
             "owns_menu" -> owns_menu = marker_source_flag(value, context)
             "inherits" -> inherits = marker_source_flag(value, context)
@@ -342,12 +370,14 @@ marker_source_declaration: fn(name: String, body: String) -> TAppliedRule? Never
             variadic_name = Val(label)
             next
         }
-        params.push(TAppliedRuleParameter{
-            name: label,
-            kind: marker_source_arg_type(type_text),
-            source_type: type_text,
-            default_source: default,
-        })
+        params.push(
+            TAppliedRuleParameter{
+                name: label,
+                kind: marker_source_arg_type(type_text),
+                source_type: type_text,
+                default_source: default,
+            },
+        )
     }
     Val(TAppliedRule{
         name: name,
@@ -368,7 +398,9 @@ marker_source_read: fn(source: String) -> [TAppliedRule] Never! {
     rows := [TAppliedRule]{}
     loop member in marker_source_members(marker_source_strip_comments(source)) {
         name: marker_source_struct_name(member) ?? next
-        if marker_source_declaration(name, marker_source_block(member, "{name}: struct")) == .Val(row) -> rows.push(row)
+        if marker_source_declaration(name, marker_source_block(member, "{name}: struct")) == .Val(row) {
+            rows.push(row)
+        }
     }
     rows
 }
@@ -450,7 +482,9 @@ marker_registered_site_bound: fn(name: String) -> Bool Never! {
 // and no variadic list never takes arguments.
 marker_registered_accepts_arguments: fn(name: String) -> Bool Never! {
     loop rule in MARKER_SOURCE_RULES {
-        if rule.name == name -> return rule.signature.params.len() > 0 || rule.signature.variadic != None
+        if rule.name == name {
+            return rule.signature.params.len() > 0 || rule.signature.variadic != None
+        }
     }
     false
 }

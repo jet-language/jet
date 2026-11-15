@@ -27,8 +27,8 @@ cli_cmd_shared_store: fn(verification: &StoreVerification, theme: Theme, parsed:
         }
         "status" -> {
             if store_shared_store_config(roots) == {
-                .Val(found) -> theme.status("shared-store broker configured at {found.socket}")
-                .None -> theme.status("shared-store broker is not installed.")
+                .Val(found) -> { theme.status("shared-store broker configured at {found.socket}") }
+                .None -> { theme.status("shared-store broker is not installed.") }
                 .Err(error) -> {
                     theme.error("shared-store status failed", error.message(), "repair the administrator-installed shared-store config.")
                     return EXIT_USAGE
@@ -41,7 +41,7 @@ cli_cmd_shared_store: fn(verification: &StoreVerification, theme: Theme, parsed:
             theme.error(
                 "`hangar shared {verb}` is not a command",
                 "the shared-store commands are `install`, `enroll`, `status`, and the socket-activated `broker` entrypoint.",
-                "run `jetpack hangar shared install`."
+                "run `jetpack hangar shared install`.",
             )
             EXIT_USAGE
         }

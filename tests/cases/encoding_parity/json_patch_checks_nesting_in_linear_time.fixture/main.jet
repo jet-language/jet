@@ -9,7 +9,9 @@ use {
 
 document: fn(keys: Int) -> Dyn {
     entries := [(key: String, value: Dyn)]{}
-    loop index in 0..<keys -> entries.push((key: "k{index}", value: Dyn.Array([Dyn]{Dyn.Int(index)})))
+    loop index in 0..<keys {
+        entries.push((key: "k{index}", value: Dyn.Array([Dyn]{Dyn.Int(index)})))
+    }
     Dyn.Object(entries)
 }
 
@@ -24,5 +26,7 @@ run: fn() {
     if json.patch_with_limits(doc, ops, two) == .Ok(_) -> print("max_depth 2: patched")
     one := EncodingLimits.safe()
     one.max_depth = 1
-    if json.patch_with_limits(doc, ops, one) == .Err(refused) -> print("max_depth 1: {refused.reason}")
+    if json.patch_with_limits(doc, ops, one) == .Err(refused) {
+        print("max_depth 1: {refused.reason}")
+    }
 }

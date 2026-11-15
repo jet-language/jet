@@ -12,7 +12,6 @@ use {
 
 #Error
 TrustError: enum {
-    // ── SemanticLock flake graph ──
     EmptyInputName
     DuplicateInput(String)
     ConflictingInput(input: String, field: String)
@@ -23,14 +22,16 @@ TrustError: enum {
     StaleSemanticLock(String)
     IO(String)
     Rejected([ValidationIssue])
-    // ── Trust store grants ──
     Grant(String)
-    // ── Repository secrets ──
     Secret(String)
-    // ── TUF trust root (TrustRoot area) ──
     Root(TrustRootError)
-    // ── Self-toolchain pin diagnostics ──
     Pin(Diagnostic)
+
+    // ── SemanticLock flake graph ──
+    // ── Trust store grants ──
+    // ── Repository secrets ──
+    // ── TUF trust root (TrustRoot area) ──
+    // ── Self-toolchain pin diagnostics ──
 
     message: fn(self) -> String Never! {
         if self == {

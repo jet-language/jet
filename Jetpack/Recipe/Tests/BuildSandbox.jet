@@ -4,7 +4,7 @@
 
 recipe_sandbox_test_restore_env: fn(name: String, previous: String?) -[Env]> {
     if previous == {
-        .Val(value) -> sys.set(name, value)
+        .Val(value) -> { sys.set(name, value) }
         .None -> { sys.unset(name) ?? panic("restore environment") }
     }
 }
@@ -23,17 +23,19 @@ recipe_sandbox_test_cmd: fn() -[Env]> String {
 recipe_sandbox_test_ctx: fn(base: String, tool: String, executable: String) -[FS]> RecipeBuildContext {
     src: files.join(base, "src")
     files.create_dir_all(src) ?? panic("source directory")
-    RecipeBuildContext{source_dir: src, output_root: files.join(base, "out"), tools: [String: String]{tool: executable}, fetch_cache: files.join(base, "cache"), offline: false}
+    RecipeBuildContext{source_dir: src, output_root: files.join(base, "out"), tools: [String:String]{tool: executable}, fetch_cache: files.join(base, "cache"), offline: false}
 }
 
 recipe_sandbox_test_exec: fn(tool: String, args: [String]) -> BuildRecipe {
-    BuildRecipe{steps: [BuildStep]{BuildStep.Exec{tool, args}}}
+    BuildRecipe{steps: [BuildStep]{BuildStep.Exec{tool: tool, args: args}}}
 }
 
 // No unavailable-backend success alternative.
 #Test("build hook does not inherit host credentials") {
-    if sys.is_windows() -> return
-    if sys.is_linux() { _: kit_require_tool("bwrap") ?? return }
+    if sys.is_windows() {
+        return
+    }
+    if sys.is_linux() -> _: kit_require_tool("bwrap") ?? return
     base: recipe_test_scratch("clean-env")
     ctx: recipe_sandbox_test_ctx(base, "sh", recipe_sandbox_test_tool("sh"))
     secret_name: "JET_TEST_SECRET_DO_NOT_LEAK"
@@ -41,7 +43,7 @@ recipe_sandbox_test_exec: fn(tool: String, args: [String]) -> BuildRecipe {
     sys.set(secret_name, "sentinel")
     recipe: recipe_sandbox_test_exec("sh", [String]{"-c", "test \"${{JET_TEST_SECRET_DO_NOT_LEAK:-}}\" = \"\" && printf clean > \"$JET_BUILD_OUTPUT/clean\""})
     if recipe_run(recipe, ctx, None) == {
-        .Ok(_) -> recipe_sandbox_test_restore_env(secret_name, previous)
+        .Ok(_) -> { recipe_sandbox_test_restore_env(secret_name, previous) }
         .Err(_) -> {
             recipe_sandbox_test_restore_env(secret_name, previous)
             panic("build hook must run")
@@ -53,7 +55,9 @@ recipe_sandbox_test_exec: fn(tool: String, args: [String]) -> BuildRecipe {
 
 // Every original backend receipt predicate retained.
 #Test("native Linux recipe blocks host escape and records backend receipt") {
-    if !sys.is_linux() -> return
+    if !sys.is_linux() {
+        return
+    }
     _: kit_require_tool("bwrap") ?? return
     base: recipe_test_scratch("native-linux")
     ctx: recipe_sandbox_test_ctx(base, "sh", recipe_sandbox_test_tool("sh"))
@@ -77,7 +81,9 @@ recipe_sandbox_test_exec: fn(tool: String, args: [String]) -> BuildRecipe {
 
 // This is the logged production executor.
 #Test("logged recipe sandbox blocks host escape") {
-    if !sys.is_linux() -> return
+    if !sys.is_linux() {
+        return
+    }
     base: recipe_test_scratch("logged-native-linux")
     ctx: recipe_sandbox_test_ctx(base, "sh", recipe_sandbox_test_tool("sh"))
     host_dir: recipe_test_scratch("logged-native-linux-host")
@@ -103,7 +109,9 @@ recipe_sandbox_test_exec: fn(tool: String, args: [String]) -> BuildRecipe {
 
 // Windows availability is not a skip predicate.
 #Test("Windows AppContainer permits declared output and records receipt") {
-    if !sys.is_windows() -> return
+    if !sys.is_windows() {
+        return
+    }
     base: recipe_test_scratch("native-windows-output")
     ctx: recipe_sandbox_test_ctx(base, "cmd", recipe_sandbox_test_cmd())
     files.write(files.join(ctx.source_dir, "input"), "source") ?? panic("source input")
@@ -122,16 +130,16 @@ recipe_sandbox_test_exec: fn(tool: String, args: [String]) -> BuildRecipe {
     }
     assert_eq(report.sandbox_class, "windows-appcontainer")
     policies: [String]{"source-readonly,output-readwrite", "process=appcontainer+job-kill-on-close+active-process=256", "network=denied", "environment=clear+declared", "devices=appcontainer-default-deny", "resources=memory-2GiB+active-process-256"}
-    loop policy in policies {
-        assert(report.sandbox_policy.contains(policy))
-    }
+    loop policy in policies { assert(report.sandbox_policy.contains(policy)) }
     assert_eq((files.read(files.join(ctx.output_root, "ok")) ?? panic("ok output")).trim(), "source")
     files.remove_all(base).drop("test cleanup")
 }
 
 // Reject the directory link before launch.
 #Test("Windows AppContainer rejects a reparse parent before launch") {
-    if !sys.is_windows() -> return
+    if !sys.is_windows() {
+        return
+    }
     assert_eq(env_detect_sandbox().level, SandboxLevel.Strong)
     base: recipe_test_scratch("windows-reparse-parent")
     real: files.join(base, "real")
@@ -141,8 +149,8 @@ recipe_sandbox_test_exec: fn(tool: String, args: [String]) -> BuildRecipe {
     files.create_dir_all(files.join(real, "output")) ?? panic("output")
     files.symlink(real, linked) ?? panic("directory link")
     command: "echo launched>\"{marker}\" & if exist \"{marker}\" (exit /b 70) else exit /b 0"
-    if foundation_run_native_sandboxed(recipe_sandbox_test_cmd(), [String]{"/C", command}, files.join(linked, "source"), Val(files.join(linked, "output")), [String: String]{}, false) == {
-        .Ok(_) -> panic("a reparse-point parent must be rejected before launch")
+    if foundation_run_native_sandboxed(recipe_sandbox_test_cmd(), [String]{"/C", command}, files.join(linked, "source"), Val(files.join(linked, "output")), [String:String]{}, false) == {
+        .Ok(_) -> { panic("a reparse-point parent must be rejected before launch") }
         .Err(_) -> {}
     }
     assert(!files.exists(marker))
@@ -150,7 +158,9 @@ recipe_sandbox_test_exec: fn(tool: String, args: [String]) -> BuildRecipe {
 }
 
 #Test("Windows AppContainer blocks sibling write before publication") {
-    if !sys.is_windows() -> return
+    if !sys.is_windows() {
+        return
+    }
     base: recipe_test_scratch("native-windows-escape")
     ctx: recipe_sandbox_test_ctx(base, "cmd", recipe_sandbox_test_cmd())
     sibling: files.join(base, "sibling-escape")
@@ -177,7 +187,9 @@ recipe_sandbox_test_unavailable: fn(base: String, ctx: RecipeBuildContext, args:
 }
 
 #Test("unavailable Windows AppContainer refuses before recipe tool launch") {
-    if !sys.is_windows() -> return
+    if !sys.is_windows() {
+        return
+    }
     base: recipe_test_scratch("windows-unavailable")
     marker: files.join(base, "host-marker")
     ctx: recipe_sandbox_test_ctx(base, "cmd", recipe_sandbox_test_cmd())
@@ -185,7 +197,9 @@ recipe_sandbox_test_unavailable: fn(base: String, ctx: RecipeBuildContext, args:
 }
 
 #Test("unavailable native backend refuses before recipe tool launch") {
-    if !sys.is_linux() -> return
+    if !sys.is_linux() {
+        return
+    }
     base: recipe_test_scratch("unavailable")
     marker: files.join(base, "host-marker")
     ctx: recipe_sandbox_test_ctx(base, "sh", recipe_sandbox_test_tool("sh"))
@@ -194,16 +208,20 @@ recipe_sandbox_test_unavailable: fn(base: String, ctx: RecipeBuildContext, args:
 
 // Keep the executor failure, not validation failure.
 #Test("failed recipe preserves previous output and removes partial stage") {
-    if sys.is_windows() -> return
-    if sys.is_linux() { _: kit_require_tool("bwrap") ?? return }
+    if sys.is_windows() {
+        return
+    }
+    if sys.is_linux() -> _: kit_require_tool("bwrap") ?? return
     base: recipe_test_scratch("rollback")
     ctx: recipe_sandbox_test_ctx(base, "sh", recipe_sandbox_test_tool("sh"))
     files.create_dir_all(ctx.output_root) ?? panic("output")
     files.write(files.join(ctx.output_root, "old"), "previous") ?? panic("previous output")
-    recipe: BuildRecipe{steps: [BuildStep]{
-        BuildStep.Exec{tool: "sh", args: [String]{"-c", "printf replacement > \"$JET_BUILD_OUTPUT/new\""}},
-        BuildStep.Exec{tool: "sh", args: [String]{"-c", "false"}}
-    }}
+    recipe: BuildRecipe{
+        steps: [BuildStep]{
+            BuildStep.Exec{tool: "sh", args: [String]{"-c", "printf replacement > \"$JET_BUILD_OUTPUT/new\""}},
+            BuildStep.Exec{tool: "sh", args: [String]{"-c", "false"}},
+        },
+    }
     assert_eq(recipe_test_run_error(recipe, ctx).code, "E1238")
     assert_eq(files.read(files.join(ctx.output_root, "old")) ?? panic("old output"), "previous")
     assert(!files.exists(files.join(ctx.output_root, "new")))
@@ -214,21 +232,23 @@ recipe_sandbox_test_unavailable: fn(base: String, ctx: RecipeBuildContext, args:
 }
 
 #Test("macOS native sandbox records Seatbelt policy") {
-    if !sys.is_macos() -> return
+    if !sys.is_macos() {
+        return
+    }
     base: recipe_test_scratch("macos-receipt")
     ctx: recipe_sandbox_test_ctx(base, "bash", "/bin/bash")
     report: recipe_run(recipe_sandbox_test_exec("bash", [String]{"-c", "printf ok > \"$JET_BUILD_OUTPUT/ok\""}), ctx, None) ?? panic("native macOS sandbox should run")
     assert_eq(report.sandbox_class, "macos-seatbelt")
     policies: [String]{"filesystem=source-readonly,output-readwrite", "process=declared-tool-and-fork", "network=denied", "environment=clear", "devices=denied", "resources="}
-    loop policy in policies {
-        assert(report.sandbox_policy.contains(policy))
-    }
+    loop policy in policies { assert(report.sandbox_policy.contains(policy)) }
     assert_eq(files.read(files.join(ctx.output_root, "ok")) ?? panic("ok output"), "ok")
     files.remove_all(base).drop("test cleanup")
 }
 
 #Test("unavailable macOS backend refuses before recipe tool launch") {
-    if !sys.is_macos() -> return
+    if !sys.is_macos() {
+        return
+    }
     base: recipe_test_scratch("macos-unavailable")
     marker: files.join(base, "host-marker")
     ctx: recipe_sandbox_test_ctx(base, "bash", "/bin/bash")
@@ -249,17 +269,23 @@ recipe_sandbox_test_macos_attack: fn(label: String, template: String) -[FS, Env,
 }
 
 #Test("macOS native sandbox blocks host read") {
-    if !sys.is_macos() -> return
+    if !sys.is_macos() {
+        return
+    }
     recipe_sandbox_test_macos_attack("macos-host-read", "if IFS= read -r value < \"{{HOST}}\"; then printf '%s' \"$value\" > \"{{OUTSIDE}}\"; exit 0; else exit 77; fi")
 }
 
 #Test("macOS native sandbox blocks sibling write") {
-    if !sys.is_macos() -> return
+    if !sys.is_macos() {
+        return
+    }
     recipe_sandbox_test_macos_attack("macos-sibling-write", "if printf escape > \"{{OUTSIDE}}\"; then exit 0; else exit 77; fi")
 }
 
 #Test("macOS native sandbox blocks source symlink escape") {
-    if !sys.is_macos() -> return
+    if !sys.is_macos() {
+        return
+    }
     base: recipe_test_scratch("macos-symlink")
     ctx: recipe_sandbox_test_ctx(base, "bash", "/bin/bash")
     host: files.join(base, "host-secret")
@@ -275,7 +301,9 @@ recipe_sandbox_test_macos_attack: fn(label: String, template: String) -[FS, Env,
 
 // Each attack is a separate recipe invocation.
 #Test("macOS native sandbox blocks undeclared process network and device") {
-    if !sys.is_macos() -> return
+    if !sys.is_macos() {
+        return
+    }
     recipe_sandbox_test_macos_attack("macos-process", "if /bin/echo escaped >/dev/null; then exit 0; else exit 77; fi")
     recipe_sandbox_test_macos_attack("macos-network", "if exec 3<>/dev/tcp/127.0.0.1/9; then exit 0; else exit 77; fi")
     recipe_sandbox_test_macos_attack("macos-device", "if test -r /dev/zero; then exit 0; else exit 77; fi")
@@ -289,6 +317,8 @@ recipe_sandbox_test_macos_attack: fn(label: String, template: String) -[FS, Env,
     assert_eq(facts.packages[0].targets.len(), 1)
     if facts.packages[0].targets[0] == {
         .Plugin(export) -> assert_eq(export, Val("mathkit"))
-        .Library | .Executable | .Test | .Example -> panic("sandbox target must be Plugin with mathkit export")
+        .Library | .Executable | .Test | .Example -> {
+            panic("sandbox target must be Plugin with mathkit export")
+        }
     }
 }

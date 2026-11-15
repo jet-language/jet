@@ -3,10 +3,18 @@
 use {
     jetpack_foundation.[WORKSPACE_FILE]
     jet_pkg_model.[
-        AuthorityResolver, PackageFacts, WorkspaceDeclarationCache, pkg_authority_effective_root,
-        pkg_extract_inline_package, pkg_find_manifest_root_checked,
-        pkg_find_package_roots_checked, pkg_manifest_path_checked, pkg_package_facts_for_entry,
-        pkg_package_facts_for_root, pkg_package_facts_from_checked_entry, pkg_path_parent,
+        AuthorityResolver,
+        PackageFacts,
+        WorkspaceDeclarationCache,
+        pkg_authority_effective_root,
+        pkg_extract_inline_package,
+        pkg_find_manifest_root_checked,
+        pkg_find_package_roots_checked,
+        pkg_manifest_path_checked,
+        pkg_package_facts_for_entry,
+        pkg_package_facts_for_root,
+        pkg_package_facts_from_checked_entry,
+        pkg_path_parent,
     ]
     jet_foundation.[Diagnostic, diagnostic_sentence_case_line]
     files: core.files
@@ -98,10 +106,12 @@ pkg_entry_test_failure: fn(cache: &WorkspaceDeclarationCache, entry: String) -[F
     assert_eq(facts.version, Val("parent-config"))
     assert_eq(facts.origin, files.join(root, "run.jet"))
     // Root lookup does not invent a parent-inline fallback of its own.
-    assert((if pkg_package_facts_for_root(cache, files.join(root, "nested")) == {
-        .Ok(found) -> found
-        .Err(error) -> panic("nested root")
-    }) == None)
+    assert(
+        (if pkg_package_facts_for_root(cache, files.join(root, "nested")) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("nested root")
+        }) == None,
+    )
     files.remove_all(root) ?? panic("cleanup")
 }
 
@@ -133,18 +143,24 @@ pkg_entry_test_failure: fn(cache: &WorkspaceDeclarationCache, entry: String) -[F
     cache := WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("absent")
     pkg_entry_test_write(root, "run.jet", "run: fn() {{}}\n")
-    assert((if pkg_package_facts_for_entry(cache, files.join(root, "run.jet")) == {
-        .Ok(found) -> found
-        .Err(error) -> panic("plain entry")
-    }) == None)
-    assert((if pkg_package_facts_for_root(cache, root) == {
-        .Ok(found) -> found
-        .Err(error) -> panic("plain root")
-    }) == None)
-    assert((if pkg_manifest_path_checked(root) == {
-        .Ok(found) -> found
-        .Err(error) -> panic("manifest probe")
-    }) == None)
+    assert(
+        (if pkg_package_facts_for_entry(cache, files.join(root, "run.jet")) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("plain entry")
+        }) == None,
+    )
+    assert(
+        (if pkg_package_facts_for_root(cache, root) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("plain root")
+        }) == None,
+    )
+    assert(
+        (if pkg_manifest_path_checked(root) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("manifest probe")
+        }) == None,
+    )
     files.remove_all(root) ?? panic("cleanup")
 }
 
@@ -165,7 +181,7 @@ pkg_entry_test_failure: fn(cache: &WorkspaceDeclarationCache, entry: String) -[F
     assert_eq(diagnostic.fix, "Remove package.jet or remove the inline Package block")
     assert_eq(diagnostic.span, Val(block.span))
     if pkg_package_facts_for_root(cache, root) == {
-        .Err(error) -> assert_eq(error.diagnostic.span, Val(block.span))
+        .Err(error) -> { assert_eq(error.diagnostic.span, Val(block.span)) }
         .Ok(_) -> panic("root conflict must fail")
     }
     files.remove_all(root) ?? panic("cleanup")
@@ -194,10 +210,12 @@ pkg_entry_test_failure: fn(cache: &WorkspaceDeclarationCache, entry: String) -[F
     pkg_entry_test_write(root, "run.jet", "package: {{ name: \"outer\" }}\nrun: fn() {{}}\n")
     pkg_entry_test_write(root, "inner/package.jet", "name: \"inner\"\n")
     pkg_entry_test_write(root, "inner/run.jet", "run: fn() {{}}\n")
-    assert((if pkg_find_package_roots_checked(cache, files.join(root, "inner"), true) == {
-        .Ok(roots) -> roots.inline
-        .Err(error) -> panic("discover")
-    }) == None)
+    assert(
+        (if pkg_find_package_roots_checked(cache, files.join(root, "inner"), true) == {
+            .Ok(roots) -> roots.inline
+            .Err(error) -> panic("discover")
+        }) == None,
+    )
     assert_eq(pkg_entry_test_facts(cache, files.join(root, "inner/run.jet")).name, "inner")
     files.remove_all(root) ?? panic("cleanup")
 }
@@ -340,18 +358,24 @@ pkg_entry_test_failure: fn(cache: &WorkspaceDeclarationCache, entry: String) -[F
     pkg_entry_test_write(root, "child/authority.jet", "workspace: module {{ policy: {{ deny: #(FS) }} }}\n")
     pkg_entry_test_write(root, "child/src/other.jet", "run: fn() {{}}\n")
     nested: files.join(root, "child/src")
-    assert((if pkg_find_manifest_root_checked(cache, nested) == {
-        .Ok(found) -> found
-        .Err(error) -> panic("manifest walk")
-    }) == None)
-    assert((if pkg_find_package_roots_checked(cache, nested, true) == {
-        .Ok(roots) -> roots.inline
-        .Err(error) -> panic("inline walk")
-    }) == None)
-    assert((if pkg_package_facts_for_entry(cache, files.join(nested, "other.jet")) == {
-        .Ok(found) -> found
-        .Err(error) -> panic("boundary entry")
-    }) == None)
+    assert(
+        (if pkg_find_manifest_root_checked(cache, nested) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("manifest walk")
+        }) == None,
+    )
+    assert(
+        (if pkg_find_package_roots_checked(cache, nested, true) == {
+            .Ok(roots) -> roots.inline
+            .Err(error) -> panic("inline walk")
+        }) == None,
+    )
+    assert(
+        (if pkg_package_facts_for_entry(cache, files.join(nested, "other.jet")) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("boundary entry")
+        }) == None,
+    )
     files.remove_all(root) ?? panic("cleanup")
 }
 
@@ -402,17 +426,22 @@ pkg_entry_test_failure: fn(cache: &WorkspaceDeclarationCache, entry: String) -[F
 }
 
 #Test("explicit shared package manifest keeps declared application authority") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     cache := WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("shared-package")
     pkg_entry_test_write(root, "package.jet", "name: \"fixture\"\nversion: \"0.1.0\"\nauthority: {{ allow: [IO], needs: [UI.Clipboard] }}\n")
     pkg_entry_test_write(root, "run.jet", "run: fn() {{}}\n")
     files.set_mode(root, 0o777) ?? panic("chmod shared")
     expected: files.canonicalize(root) ?? panic("canonical root")
-    assert_eq(if pkg_find_manifest_root_checked(cache, root) == {
-        .Ok(found) -> found
-        .Err(error) -> panic("explicit manifest")
-    }, Val(expected))
+    assert_eq(
+        if pkg_find_manifest_root_checked(cache, root) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("explicit manifest")
+        },
+        Val(expected),
+    )
     facts: pkg_entry_test_facts(cache, files.join(root, "run.jet"))
     assert_eq(facts.authority.needs, [String]{"UI.Clipboard"})
     files.set_mode(root, 0o700) ?? panic("restore mode")
@@ -420,7 +449,9 @@ pkg_entry_test_failure: fn(cache: &WorkspaceDeclarationCache, entry: String) -[F
 }
 
 #Test("linked stock entry and linked manifest are refused as authority") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     cache := WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("linked-carriers")
     pkg_entry_test_write(root, "target.txt", "package: {{ name: \"linked\" }}\nrun: fn() {{}}\n")
@@ -435,7 +466,9 @@ pkg_entry_test_failure: fn(cache: &WorkspaceDeclarationCache, entry: String) -[F
 }
 
 #Test("inline symlinked Config fails without changing host state") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     cache := WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("linked-config")
     source: "package: {{ name: \"symlink\", configs: [\"config.jet\"] }}\nrun: fn() {{}}\n"
@@ -451,7 +484,9 @@ pkg_entry_test_failure: fn(cache: &WorkspaceDeclarationCache, entry: String) -[F
 }
 
 #Test("inaccessible entry reports E1331 without becoming package absence") {
-    if !sys.is_unix() -> return
+    if !sys.is_unix() {
+        return
+    }
     cache := WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("unreadable")
     pkg_entry_test_write(root, "run.jet", "run: fn() {{}}\n")
@@ -468,7 +503,9 @@ pkg_entry_test_failure: fn(cache: &WorkspaceDeclarationCache, entry: String) -[F
 
 // E1331 keeps the native open cause of a missing entry.
 #Test("missing entry retains exact native E1331 detail") {
-    if !sys.is_linux() -> return
+    if !sys.is_linux() {
+        return
+    }
     cache := WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("missing-native-detail")
     path: files.join(root, "missing.jet")
@@ -526,7 +563,7 @@ pkg_entry_test_failure: fn(cache: &WorkspaceDeclarationCache, entry: String) -[F
     files.remove(files.join(root, "run.jet")) ?? panic("unlink held path")
     pkg_entry_test_write(root, "run.jet", "package: {{ name: \"replacement\" }}\nrun: fn() {{}}\n")
     if pkg_package_facts_from_checked_entry(resolver, held, held.path, None) == {
-        .Err(error) -> assert_eq(error.diagnostic.code, "E1334")
+        .Err(error) -> { assert_eq(error.diagnostic.code, "E1334") }
         .Ok(_) -> panic("replacement bytes must not become the held source")
     }
     files.remove_all(root) ?? panic("cleanup")

@@ -9,15 +9,50 @@ use {
 // Git environment that could reintroduce ambient configuration, helpers,
 // proxies, or traces. Every hardened command removes all of them.
 FOUNDATION_GIT_REMOVED_ENV: #run { [String]{
-    "GIT_CONFIG_PARAMETERS", "GIT_CONFIG", "GIT_EXEC_PATH", "GIT_TEMPLATE_DIR", "GIT_DIR", "GIT_WORK_TREE",
-    "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    "GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM", "GIT_NAMESPACE", "GIT_NO_REPLACE_OBJECTS",
-    "GIT_REPLACE_REF_BASE", "GIT_ALLOW_PROTOCOL", "GIT_PROTOCOL_FROM_USER", "GIT_SSH", "GIT_SSH_VARIANT",
-    "GIT_PROXY_COMMAND", "GIT_SSL_NO_VERIFY", "SSH_ASKPASS", "GIT_PAGER", "GIT_EDITOR", "GIT_SEQUENCE_EDITOR",
-    "GIT_EXTERNAL_DIFF", "GIT_DIFF_OPTS", "GIT_TRACE", "GIT_TRACE_PERFORMANCE", "GIT_TRACE_SETUP",
-    "GIT_TRACE_PACKET", "GIT_TRACE_CURL", "GIT_TRACE_CURL_NO_DATA", "GIT_TRACE2", "GIT_TRACE2_EVENT",
-    "GIT_TRACE2_PERF", "http_proxy", "https_proxy", "all_proxy", "no_proxy", "HTTP_PROXY", "HTTPS_PROXY",
-    "ALL_PROXY", "NO_PROXY"
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG",
+    "GIT_EXEC_PATH",
+    "GIT_TEMPLATE_DIR",
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_COMMON_DIR",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CEILING_DIRECTORIES",
+    "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+    "GIT_NAMESPACE",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_ALLOW_PROTOCOL",
+    "GIT_PROTOCOL_FROM_USER",
+    "GIT_SSH",
+    "GIT_SSH_VARIANT",
+    "GIT_PROXY_COMMAND",
+    "GIT_SSL_NO_VERIFY",
+    "SSH_ASKPASS",
+    "GIT_PAGER",
+    "GIT_EDITOR",
+    "GIT_SEQUENCE_EDITOR",
+    "GIT_EXTERNAL_DIFF",
+    "GIT_DIFF_OPTS",
+    "GIT_TRACE",
+    "GIT_TRACE_PERFORMANCE",
+    "GIT_TRACE_SETUP",
+    "GIT_TRACE_PACKET",
+    "GIT_TRACE_CURL",
+    "GIT_TRACE_CURL_NO_DATA",
+    "GIT_TRACE2",
+    "GIT_TRACE2_EVENT",
+    "GIT_TRACE2_PERF",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
 } }
 
 // Command-line configuration wins over a repository-local credential helper.
@@ -28,7 +63,7 @@ FOUNDATION_GIT_CONFIG_ARGS: [String]{"-c", "credential.helper=", "-c", "protocol
 // configuration arguments. No caller can create a weaker policy.
 FoundationHardenedGitPolicy: struct {
     cwd: String
-    env: [String: String]
+    env: [String:String]
     removed_env: [String]
     args: [String]
 
@@ -36,7 +71,7 @@ FoundationHardenedGitPolicy: struct {
         null_device: foundation_git_null_device()
         FoundationHardenedGitPolicy{
             cwd: foundation_git_safe_cwd(),
-            env: [String: String]{
+            env: [String:String]{
                 "GIT_CONFIG_NOSYSTEM": "1",
                 "GIT_CONFIG_SYSTEM": null_device,
                 "GIT_CONFIG_GLOBAL": null_device,
@@ -71,7 +106,9 @@ foundation_hardened_git_command: fn() -[Env, Exec]> ProcessSpec Never! {
 
 // The non-interactive SSH policy shared by every hardened Git command.
 foundation_hardened_ssh_command: fn() -[Env]> String Never! {
-    if sys.is_windows() -> return "ssh -oBatchMode=yes -oIdentitiesOnly=yes -oIdentityAgent=none -oIdentityFile=none -F NUL"
+    if sys.is_windows() {
+        return "ssh -oBatchMode=yes -oIdentitiesOnly=yes -oIdentityAgent=none -oIdentityFile=none -F NUL"
+    }
     "ssh -oBatchMode=yes -oIdentitiesOnly=yes -oIdentityAgent=none -oIdentityFile=none -F /dev/null"
 }
 
@@ -79,6 +116,4 @@ foundation_git_null_device: fn() -[Env]> String Never! {
     if sys.is_windows() -> "NUL" else -> "/dev/null"
 }
 
-foundation_git_safe_cwd: fn() -[Env]> String Never! {
-    if sys.is_windows() -> "\\" else -> "/"
-}
+foundation_git_safe_cwd: fn() -[Env]> String Never! { if sys.is_windows() -> "\\" else -> "/" }

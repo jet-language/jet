@@ -5,16 +5,19 @@ use {
     expert: core.crypto.expert
     files: core.files
 }
+
 filled: fn(value: Int, count: Int) -> [U8] {
     out := [U8]{}
     loop _ in 0..<count -> out.push((U8{value}))
     out
 }
+
 cut: fn(bytes: [U8], start: Int, end: Int) -> [U8] {
     out := [U8]{}
     loop i in start..<end -> out.push(bytes[i])
     out
 }
+
 hex: fn(text: String) -> [U8] {
     raw: text.bytes()
     out := [U8]{}
@@ -27,14 +30,17 @@ hex: fn(text: String) -> [U8] {
     }
     out
 }
+
 little: fn(bytes: [U8], at: Int, width: Int) -> Int {
     out := 0
     loop i in 0..<width -> out = out.bit_or(Int{bytes[at + i]} << (8 * i))
     out
 }
+
 store_little: fn(bytes: &[U8], at: Int, width: Int, value: Int) {
     loop i in 0..<width -> bytes[at + i] = (U8{(value >> (8 * i)).bit_and(255)})
 }
+
 #Test("typed_recipient_envelopes_are_canonical_and_fail_closed") {
     alice: crypto.X25519SecretKey.new_random() ?? panic("alice")
     bob: crypto.X25519SecretKey.new_random() ?? panic("bob")
@@ -47,18 +53,18 @@ store_little: fn(bytes: &[U8], at: Int, width: Int, value: Int) {
     assert_eq(crypto.open(alice, crypto.Sealed{bytes: bytes.copy()}, aad) ?? panic("open"), plain)
     // Core/Crypto/crypto.jet447,477 public tag OpenFailed.
     if crypto.open(wrong, crypto.Sealed{bytes: bytes.copy()}, aad) == {
-        .Ok(_) -> panic("wrong recipient opened")
+        .Ok(_) -> { panic("wrong recipient opened") }
         .Err(error) -> assert_eq(error, crypto.CryptoError.OpenFailed)
     }
     if crypto.open(alice, crypto.Sealed{bytes: bytes.copy()}, "wrong".bytes()) == {
-        .Ok(_) -> panic("wrong aad opened")
+        .Ok(_) -> { panic("wrong aad opened") }
         .Err(error) -> assert_eq(error, crypto.CryptoError.OpenFailed)
     }
     tampered := bytes.copy()
     last: tampered.len() - 1
     tampered[last] = (U8{Int{tampered[last]}.bit_xor(1)})
     if crypto.open(alice, crypto.Sealed{bytes: tampered}, aad) == {
-        .Ok(_) -> panic("tampered envelope opened")
+        .Ok(_) -> { panic("tampered envelope opened") }
         .Err(error) -> assert_eq(error, crypto.CryptoError.OpenFailed)
     }
 }

@@ -1,4 +1,3 @@
-
 provider_registry_test_header: fn(kind: Int, stored: Int) -> [U8] Never! {
     header := [U8]{}
     loop _ in 0..<512 -> header.push(U8{0})
@@ -37,11 +36,13 @@ provider_registry_test_project: fn(manifest: String) -[FS]> String Never! {
     archive := provider_registry_test_header(120, pax.len())
     loop byte in pax -> archive.push(byte)
     loop _ in 0..<(512 - pax.len()) -> archive.push(U8{0})
-    loop byte in provider_registry_test_header(76, PROVIDER_MAX_ARCHIVE_ENTRY_BYTES + 1) -> archive.push(byte)
+    loop byte in provider_registry_test_header(76, PROVIDER_MAX_ARCHIVE_ENTRY_BYTES + 1) {
+        archive.push(byte)
+    }
     loop _ in 0..<1024 -> archive.push(U8{0})
     preflight := RegistryTarPreflight.new()
     if preflight.feed(archive) == {
-        .Ok(_) -> panic("an oversized stored payload must be refused")
+        .Ok(_) -> { panic("an oversized stored payload must be refused") }
         .Err(error) -> {
             message: error.message()
             assert(message.contains("payload") && message.contains("per-entry limit"), "unexpected PAX limit error: {message}")
@@ -62,7 +63,7 @@ provider_registry_test_project: fn(manifest: String) -[FS]> String Never! {
     }
     loop url in refused {
         if provider_registry_authority_of(url) == {
-            .Ok(_) -> panic("`{url}` must be refused")
+            .Ok(_) -> { panic("`{url}` must be refused") }
             .Err(_) -> {}
         }
     }
@@ -73,7 +74,8 @@ provider_registry_test_project: fn(manifest: String) -[FS]> String Never! {
 }
 
 #Test("registry configured provider authority replaces defaults") {
-    dir: provider_registry_test_project(```
+    dir: provider_registry_test_project(
+        `
 name: "p"
 version: "0.1.0"
 authority: {
@@ -85,7 +87,8 @@ authority: {
         },
     },
 }
-```)
+`,
+    )
     authority: RegistryAuthority.load(provider_registry_test_ctx(dir), "ruby", "https://index.rubygems.org", [String]{"index.rubygems.org"}) ?? panic("configured authority loads")
     assert_eq(authority.registry(), "https://mirror.example.test")
     assert(authority.check_url("https://mirror.example.test/info/a") == .Ok(_))
@@ -97,7 +100,8 @@ authority: {
 }
 
 #Test("registry configured provider credentials fail before any fetch") {
-    dir: provider_registry_test_project(```
+    dir: provider_registry_test_project(
+        `
 name: "p"
 version: "0.1.0"
 authority: {
@@ -107,10 +111,13 @@ authority: {
         },
     },
 }
-```)
+`,
+    )
     if RegistryAuthority.load(provider_registry_test_ctx(dir), "ruby", "https://8.8.8.8", [String]{"8.8.8.8"}) == {
-        .Ok(_) -> panic("configured provider credentials must be rejected")
-        .Err(error) -> assert(error.message().contains("credentialed authority"), "unexpected credential rejection: {error.message()}")
+        .Ok(_) -> { panic("configured provider credentials must be rejected") }
+        .Err(error) -> {
+            assert(error.message().contains("credentialed authority"), "unexpected credential rejection: {error.message()}")
+        }
     }
     files.remove_all(dir).drop("claim cleanup")
 }
@@ -175,7 +182,7 @@ provider_registry_test_refuses: fn(archive: [U8], expected: String) Never! -[FS]
     path: files.join(dir, "source.tar")
     files.write_bytes(path, archive) ?? panic("write the archive")
     if provider_registry_validate_tar_archive(path, false) == {
-        .Ok(_) -> panic("a hostile archive must be refused: {expected}")
+        .Ok(_) -> { panic("a hostile archive must be refused: {expected}") }
         .Err(error) -> {
             message: error.message()
             assert(message.contains(expected), "unexpected refusal for {expected}: {message}")
@@ -184,7 +191,7 @@ provider_registry_test_refuses: fn(archive: [U8], expected: String) Never! -[FS]
     unpack: files.join(files.join(dir, "deep"), "unpack")
     files.create_dir_all(unpack) ?? panic("create the unpack directory")
     if provider_registry_extract_tar(path, false, unpack) == {
-        .Ok(_) -> panic("extraction must refuse a hostile archive: {expected}")
+        .Ok(_) -> { panic("extraction must refuse a hostile archive: {expected}") }
         .Err(_) -> {}
     }
     assert(!files.lexists(files.join(dir, "escape")), "nothing escaped the unpack root")
@@ -199,28 +206,48 @@ provider_registry_test_refuses: fn(archive: [U8], expected: String) Never! -[FS]
     provider_registry_test_refuses(provider_registry_test_tar([[U8]]{provider_registry_test_member("../escape", 48, body)}), unsafe_path)
     provider_registry_test_refuses(provider_registry_test_tar([[U8]]{provider_registry_test_member("pkg/../../escape", 48, body)}), unsafe_path)
     provider_registry_test_refuses(provider_registry_test_tar([[U8]]{provider_registry_test_member("/tmp/jet-registry-escape", 48, body)}), unsafe_path)
-    provider_registry_test_refuses(provider_registry_test_tar([[U8]]{
-        provider_registry_test_member("pkg/", 53, [U8]{}),
-        provider_registry_test_member("pkg/link", 50, [U8]{}),
-    }), links)
+    provider_registry_test_refuses(
+        provider_registry_test_tar(
+            [[U8]]{
+                provider_registry_test_member("pkg/", 53, [U8]{}),
+                provider_registry_test_member("pkg/link", 50, [U8]{}),
+            },
+        ),
+        links,
+    )
     provider_registry_test_refuses(provider_registry_test_tar([[U8]]{provider_registry_test_member("pkg/hard", 49, [U8]{})}), links)
     provider_registry_test_refuses(provider_registry_test_tar([[U8]]{provider_registry_test_member("pkg/fifo", 54, [U8]{})}), links)
     // A PAX `path` record and a GNU long name both rename the next member.
-    provider_registry_test_refuses(provider_registry_test_tar([[U8]]{
-        provider_registry_test_member("PaxHeaders/ok", 120, "18 path=../escape\n".bytes()),
-        provider_registry_test_member("pkg/ok", 48, body),
-    }), unsafe_path)
+    provider_registry_test_refuses(
+        provider_registry_test_tar(
+            [[U8]]{
+                provider_registry_test_member("PaxHeaders/ok", 120, "18 path=../escape\n".bytes()),
+                provider_registry_test_member("pkg/ok", 48, body),
+            },
+        ),
+        unsafe_path,
+    )
     long_name := "../escape".bytes()
     long_name.push(U8{0})
-    provider_registry_test_refuses(provider_registry_test_tar([[U8]]{
-        provider_registry_test_member("././@LongLink", 76, long_name),
-        provider_registry_test_member("pkg/ok", 48, body),
-    }), unsafe_path)
+    provider_registry_test_refuses(
+        provider_registry_test_tar(
+            [[U8]]{
+                provider_registry_test_member("././@LongLink", 76, long_name),
+                provider_registry_test_member("pkg/ok", 48, body),
+            },
+        ),
+        unsafe_path,
+    )
     // A PAX record whose length does not cover it exactly.
-    provider_registry_test_refuses(provider_registry_test_tar([[U8]]{
-        provider_registry_test_member("PaxHeaders/ok", 120, "99 path=pkg/ok\n".bytes()),
-        provider_registry_test_member("pkg/ok", 48, body),
-    }), "PAX metadata is malformed")
+    provider_registry_test_refuses(
+        provider_registry_test_tar(
+            [[U8]]{
+                provider_registry_test_member("PaxHeaders/ok", 120, "99 path=pkg/ok\n".bytes()),
+                provider_registry_test_member("pkg/ok", 48, body),
+            },
+        ),
+        "PAX metadata is malformed",
+    )
     corrupt := provider_registry_test_member("pkg/ok", 48, body)
     corrupt[0] = U8{113}
     provider_registry_test_refuses(provider_registry_test_tar([[U8]]{corrupt}), "not a readable tar archive")
@@ -233,12 +260,14 @@ provider_registry_test_refuses: fn(archive: [U8], expected: String) Never! -[FS]
 
 #Test("registry tar reader extracts a gzip archive of files and directories") {
     dir: files.tmpdir("jet-registry-tar-") ?? panic("claim a scratch directory")
-    archive: provider_registry_test_tar([[U8]]{
-        provider_registry_test_member("pkg/", 53, [U8]{}),
-        provider_registry_test_member("pkg/a.txt", 48, "hello\n".bytes()),
-        provider_registry_test_member("PaxHeaders/long", 120, "25 path=pkg/sub/long.txt\n".bytes()),
-        provider_registry_test_member("pkg/short", 48, "long\n".bytes()),
-    })
+    archive: provider_registry_test_tar(
+        [[U8]]{
+            provider_registry_test_member("pkg/", 53, [U8]{}),
+            provider_registry_test_member("pkg/a.txt", 48, "hello\n".bytes()),
+            provider_registry_test_member("PaxHeaders/long", 120, "25 path=pkg/sub/long.txt\n".bytes()),
+            provider_registry_test_member("pkg/short", 48, "long\n".bytes()),
+        },
+    )
     path: files.join(dir, "source.tar.gz")
     files.write_bytes(path, gzip.compress(archive) ?? panic("gzip the archive")) ?? panic("write the archive")
     provider_registry_validate_tar_archive(path, true) ?? panic("a plain source archive is admitted")

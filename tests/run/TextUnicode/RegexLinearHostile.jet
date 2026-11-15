@@ -10,7 +10,7 @@ run: fn() {
     // The scan reuses one set of thread rows: repeated long scans keep a flat
     // footprint.
     rounds := 0
-    loop _ in 0..<8 -> rounds = rounds + rx.find_all(plus, long).len()
+    loop _ in 0..<8 -> rounds += rx.find_all(plus, long).len()
     print("8 x 100k a+ find_all: {rounds}")
     print("100k a+ find_all: {rx.find_all(plus, long).len()}")
     group: rx.compile("(a|aa)*b") ?? panic("(a|aa)*b compiles")
@@ -29,7 +29,7 @@ run: fn() {
     blowup: rx.compile("(a+)+$") ?? panic("(a+)+$ compiles")
     print("(a+)+$ on 64 a + c: {rx.is_match(blowup, hostile)}")
     if rx.compile("(a)\\1") == {
-        .Ok(_) -> print("backreference compiled")
+        .Ok(_) -> { print("backreference compiled") }
         .Err(_) -> print("backreference rejected: captures stay linear")
     }
 }

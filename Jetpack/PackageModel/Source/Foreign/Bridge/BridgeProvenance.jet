@@ -31,7 +31,7 @@ ArchiveInput: struct {
 ForeignProvenance: struct {
     schema: String
     identity: String
-    fields: [String: [String]]
+    fields: [String:[String]]
 
     // The first value recorded for a field.
     value: fn(self, name: String) -> String? Never! {
@@ -55,8 +55,12 @@ pkg_bridge_foreign_host_target: fn() -[Env]> String Never! {
 // is written as repeated rows, never as one value that holds line breaks.
 pkg_bridge_append_line: fn(text: &String, name: String, value: String) ForeignBridgeError! {
     carriage_return: "\r"
-    if name == "" || name.contains("\n") || name.contains(carriage_return) || name.contains("=") -> return Err(pkg_bridge_error("bridge provenance field names must be non-empty and hold no line break or `=`"))
-    if value == "" || value.contains("\n") || value.contains(carriage_return) -> return Err(pkg_bridge_error("bridge provenance field `{name}` must have a non-empty, single-line value; write one `{name}` row per value"))
+    if name == "" || name.contains("\n") || name.contains(carriage_return) || name.contains("=") {
+        return Err(pkg_bridge_error("bridge provenance field names must be non-empty and hold no line break or `=`"))
+    }
+    if value == "" || value.contains("\n") || value.contains(carriage_return) {
+        return Err(pkg_bridge_error("bridge provenance field `{name}` must have a non-empty, single-line value; write one `{name}` row per value"))
+    }
     text = "{text}{name}={value}\n"
 }
 
@@ -67,9 +71,7 @@ pkg_bridge_field_value: fn(fields: [(name: String, value: String)], name: String
     None
 }
 
-pkg_bridge_bool_text: fn(value: Bool) -> String Never! {
-    if value -> "true" else -> "false"
-}
+pkg_bridge_bool_text: fn(value: Bool) -> String Never! { if value -> "true" else -> "false" }
 
 // The capability rows that follow every appended boundary row.
 pkg_bridge_append_capability_lines: fn(text: &String, language: ForeignLanguage) ForeignBridgeError! {
@@ -90,14 +92,18 @@ pkg_bridge_render_provenance: fn(identity: String, fields: [(name: String, value
         if field.name.starts_with("boundary-") -> has_boundary_fields = true
     }
     language := ForeignLanguage?{None}
-    if pkg_bridge_field_value(fields, "language") == .Val(root) -> language = ForeignLanguage.from_root(root)
+    if pkg_bridge_field_value(fields, "language") == .Val(root) {
+        language = ForeignLanguage.from_root(root)
+    }
     if has_boundary_fields -> language = None
     loop field in fields -> pkg_bridge_append_line(text, field.name, field.value)
     if language == .Val(boundary_language) {
         abi_library := String?{None}
         if pkg_bridge_field_value(fields, "abi") == .Val(abi) {
             if abi.starts_with("jet_") {
-                if abi.removeprefix("jet_").split_once("_") == .Val(parts) -> abi_library = Val(parts.after)
+                if abi.removeprefix("jet_").split_once("_") == .Val(parts) {
+                    abi_library = Val(parts.after)
+                }
             }
         }
         library: pkg_bridge_field_value(fields, "library") ?? (pkg_bridge_field_value(fields, "lib") ?? (abi_library ?? "not-recorded"))
@@ -114,10 +120,14 @@ pkg_bridge_render_provenance: fn(identity: String, fields: [(name: String, value
         descriptor: pkg_binder_descriptor(boundary_language) ?? return Err(pkg_bridge_error("missing binder descriptor for {boundary_language.debug_name()}"))
         loaded: if loaded_artifact == "" -> "not-recorded" else -> loaded_artifact
         boundary: ForeignBoundaryContract.new(descriptor, library, ForeignBoundaryIdentity.new(source, overlay, generator, implementation, toolchain, target)).with_artifact_coverage(ForeignArtifactCoverage.new(loaded, target, generator))
-        loop field in boundary.provenance_fields() -> pkg_bridge_append_line(text, field.name, field.value)
+        loop field in boundary.provenance_fields() {
+            pkg_bridge_append_line(text, field.name, field.value)
+        }
         pkg_bridge_append_capability_lines(text, boundary_language)
     }
-    loop artifact in artifacts -> pkg_bridge_append_line(text, "artifact.{artifact.name}", artifact.digest)
+    loop artifact in artifacts {
+        pkg_bridge_append_line(text, "artifact.{artifact.name}", artifact.digest)
+    }
     Ok(text)
 }
 
@@ -137,11 +147,15 @@ pkg_bridge_write_provenance: fn(path: String, identity: String, fields: [(name: 
 // A record that already carries a boundary row is left unchanged.
 pkg_bridge_append_boundary_provenance: fn(text: &String, descriptor: BinderDescriptor, library: String, identity: ForeignBoundaryIdentity, coverage: ForeignArtifactCoverage) ForeignBridgeError! {
     loop line in text.split("\n") {
-        if line.starts_with("boundary-schema=") -> return
+        if line.starts_with("boundary-schema=") {
+            return
+        }
     }
     if !text.ends_with("\n") -> text = "{text}\n"
     boundary: ForeignBoundaryContract.new(descriptor, library, identity).with_artifact_coverage(coverage)
-    loop field in boundary.provenance_fields() -> pkg_bridge_append_line(text, field.name, field.value)
+    loop field in boundary.provenance_fields() {
+        pkg_bridge_append_line(text, field.name, field.value)
+    }
     pkg_bridge_append_capability_lines(text, descriptor.language)
 }
 
@@ -159,24 +173,30 @@ pkg_bridge_append_boundary_for_artifact: fn(text: &String, descriptor: BinderDes
 ForeignProvenanceText: struct {
     schema: String
     identity: String?
-    fields: [String: [String]]
+    fields: [String:[String]]
 }
 
 pkg_bridge_parse_provenance: fn(path: String) -[FS]> ForeignProvenanceText ForeignBridgeError! {
     text: bridge_core_files.read(path) ?? return Err(pkg_bridge_error("could not read {path}: {err}"))
     schema := String?{None}
     identity := String?{None}
-    fields := [String: [String]]{}
+    fields := [String:[String]]{}
     loop line in pkg_bridge_text_lines(text) {
         parts: line.split_once("=") ?? return Err(pkg_bridge_error("malformed bridge provenance line in {path}"))
-        if parts.before == "" || parts.after == "" -> return Err(pkg_bridge_error("empty bridge provenance field in {path}"))
+        if parts.before == "" || parts.after == "" {
+            return Err(pkg_bridge_error("empty bridge provenance field in {path}"))
+        }
         if parts.before == {
             "schema" -> {
-                if schema != None -> return Err(pkg_bridge_error("duplicate bridge provenance schema in {path}"))
+                if schema != None {
+                    return Err(pkg_bridge_error("duplicate bridge provenance schema in {path}"))
+                }
                 schema = Val(parts.after)
             }
             "identity" -> {
-                if identity != None -> return Err(pkg_bridge_error("duplicate bridge provenance identity in {path}"))
+                if identity != None {
+                    return Err(pkg_bridge_error("duplicate bridge provenance identity in {path}"))
+                }
                 identity = Val(parts.after)
             }
             else -> {
@@ -204,7 +224,9 @@ pkg_bridge_text_lines: fn(text: String) -> [String] Never! {
 pkg_bridge_read_provenance: fn(path: String) -[FS]> ForeignProvenance ForeignBridgeError! {
     parsed: pkg_bridge_parse_provenance(path)
     identity: parsed.identity ?? return Err(pkg_bridge_error("bridge provenance has no identity: {path}"))
-    if parsed.schema != FOREIGN_BRIDGE_PROVENANCE_SCHEMA -> return Err(pkg_bridge_error("unsupported bridge provenance schema `{parsed.schema}`"))
+    if parsed.schema != FOREIGN_BRIDGE_PROVENANCE_SCHEMA {
+        return Err(pkg_bridge_error("unsupported bridge provenance schema `{parsed.schema}`"))
+    }
     Ok(ForeignProvenance{schema: parsed.schema, identity: identity, fields: parsed.fields})
 }
 
@@ -212,9 +234,13 @@ pkg_bridge_read_provenance: fn(path: String) -[FS]> ForeignProvenance ForeignBri
 pkg_bridge_read_boundary_provenance: fn(path: String) -[FS]> ForeignProvenance ForeignBridgeError! {
     parsed: pkg_bridge_parse_provenance(path)
     schema_rows: parsed.fields.get("boundary-schema") ?? [String]{}
-    if schema_rows.len() == 0 || schema_rows[0] != FOREIGN_BOUNDARY_SCHEMA -> return Err(pkg_bridge_error("foreign boundary provenance has no canonical boundary row: {path}"))
+    if schema_rows.len() == 0 || schema_rows[0] != FOREIGN_BOUNDARY_SCHEMA {
+        return Err(pkg_bridge_error("foreign boundary provenance has no canonical boundary row: {path}"))
+    }
     digest_rows: parsed.fields.get("boundary-digest") ?? [String]{}
-    if digest_rows.len() == 0 -> return Err(pkg_bridge_error("foreign boundary provenance has no digest: {path}"))
+    if digest_rows.len() == 0 {
+        return Err(pkg_bridge_error("foreign boundary provenance has no digest: {path}"))
+    }
     Ok(ForeignProvenance{schema: FOREIGN_BOUNDARY_SCHEMA, identity: digest_rows[0], fields: parsed.fields})
 }
 
@@ -260,12 +286,8 @@ pkg_bridge_add_archive_inputs: fn(identity: &ForeignIdentityBuilder, inputs: [Ar
         identity.field("linked_library", input.library.bytes())
         identity.field("linked_archive_path", input.path.bytes())
         if input.bytes == {
-            .Val(bytes) -> {
-                identity.field("linked_archive_bytes", bytes)
-            }
-            .None -> {
-                identity.field("linked_archive_missing", "true".bytes())
-            }
+            .Val(bytes) -> { identity.field("linked_archive_bytes", bytes) }
+            .None -> { identity.field("linked_archive_missing", "true".bytes()) }
         }
     }
 }

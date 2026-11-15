@@ -37,21 +37,25 @@ run: fn() {
 }
 
 #Test("a_loop_tuple_pattern_with_an_unknown_name_is_e0313") {
-    errors: loop_tuple_errors(`run: fn() {
+    errors: loop_tuple_errors(
+        `run: fn() {
     loop (package, nme) in [(package: "a", name: "b")] {
         print(package)
     }
 }
-`)
+`,
+    )
     assert(errors.len() == 1 && errors[0].starts_with("E0313: `nme` isn't a member of"), errors.join("; "))
 }
 
 #Test("a_loop_tuple_pattern_with_the_wrong_count_is_e0315") {
-    errors: loop_tuple_errors(`run: fn() {
+    errors: loop_tuple_errors(
+        `run: fn() {
     loop (package, name) in [(package: "a", name: "b", version: 1)] {
         print("{package}{name}")
     }
 }
-`)
+`,
+    )
     assert(errors.len() == 1 && errors[0].starts_with("E0315: This pattern binds 2 members, but the tuple has 3"), errors.join("; "))
 }

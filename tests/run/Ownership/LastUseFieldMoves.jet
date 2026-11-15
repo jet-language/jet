@@ -46,9 +46,7 @@ entries: fn(units: [SourceUnit]) -> [Entry] {
     out
 }
 
-make_pair: fn(seed: String) -> Pair {
-    Pair{left: [String]{seed, "l"}, right: [String]{"r"}}
-}
+make_pair: fn(seed: String) -> Pair { Pair{left: [String]{seed, "l"}, right: [String]{"r"}} }
 
 // One field moves into a record; the other is released with the owner.
 pick_left: fn(seed: String) -> Graph {
@@ -68,19 +66,13 @@ split: fn(seed: String) -> [[String]] {
 }
 
 // A field of a fresh call result is taken out of it; the rest is released.
-fresh_left: fn(seed: String) -> Graph {
-    Graph{names: make_pair(seed).left}
-}
+fresh_left: fn(seed: String) -> Graph { Graph{names: make_pair(seed).left} }
 
 // A field of an owned parameter is returned by move.
-take_right: fn(pair: &&Pair) -> [String] {
-    pair.right
-}
+take_right: fn(pair: &&Pair) -> [String] { pair.right }
 
 // A read parameter still owns its field: storing it is a copy.
-keep_left: fn(pair: Pair) -> Graph {
-    Graph{names: pair.left}
-}
+keep_left: fn(pair: Pair) -> Graph { Graph{names: pair.left} }
 
 // Moved on one path only: the cleanup after the early return releases
 // `right`, the fall-through path still reads both fields.
@@ -121,9 +113,7 @@ group: fn(name: String, values: [Int]) -> Host? {
     Val(Host.Group{name: name, items: output})
 }
 
-add_name: fn(graph: &Graph, name: String) {
-    graph.names.push(name.copy())
-}
+add_name: fn(graph: &Graph, name: String) { graph.names.push(name.copy()) }
 
 stage: fn(start: Graph, names: [String]) -> Int {
     env := Env{graph: Val(start), count: 0}
@@ -154,7 +144,7 @@ run: fn() {
 
     grouped := group("g", [Int]{4, 5}) ?? Host.Leaf{n: 0}
     if grouped == {
-        .Group(name, items) -> print("group {name} {items.len()}")
+        .Group(name, items) -> { print("group {name} {items.len()}") }
         .Leaf(n) -> print("leaf {n}")
     }
 

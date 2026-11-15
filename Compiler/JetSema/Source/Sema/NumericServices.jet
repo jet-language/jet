@@ -70,11 +70,11 @@ sema_numeric_unit_conversion_exact_service: fn(value: Float, scale_numerator: St
     }
     bottom := 1
     loop power > 0 {
-        top = top * 2
+        top *= 2
         power -= 1
     }
     loop power < 0 {
-        bottom = bottom * 2
+        bottom *= 2
         power += 1
     }
     if value < 0.0 -> top = -top
@@ -104,7 +104,7 @@ sema_numeric_unit_conversion_exact_service: fn(value: Float, scale_numerator: St
     if width > 53 || shift + width > 1024 -> return None
     result := Float.from_int(odd)
     loop shift > 0 {
-        result = result * 2.0
+        result *= 2.0
         shift -= 1
     }
     Val(if converted < 0 -> -result else -> result)
@@ -115,8 +115,7 @@ sema_numeric_ratio_part: fn(text: String) -[]> Int {
     total := 0
     loop byte in text.bytes() {
         code: Int{byte}
-        if code == 45 -> negative = true
-        else -> total = total * 10 + (code - 48)
+        if code == 45 -> negative = true else -> total = total * 10 + (code - 48)
     }
     if negative -> -total else -> total
 }

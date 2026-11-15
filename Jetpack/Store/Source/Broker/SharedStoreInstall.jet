@@ -18,14 +18,12 @@ SharedStoreConfig: struct {
             {key: "socket", value: self.socket},
             {key: "shared_root", value: self.shared_root},
             {key: "trust_key", value: self.trust_key},
-            {key: "grants", value: self.grants}
+            {key: "grants", value: self.grants},
         }
     }
 
     // Whether this is the administrator's system broker.
-    is_admin: fn(self) -> Bool Never! {
-        self.socket == STORE_BROKER_ADMIN_SOCKET
-    }
+    is_admin: fn(self) -> Bool Never! { self.socket == STORE_BROKER_ADMIN_SOCKET }
 }
 
 SharedStoreInstallReport: struct {
@@ -56,9 +54,7 @@ store_broker_admin_layout: fn() -> BrokerLayout Never! {
 
 // Normal callers resolve their private root; the administrator layout is
 // only ever chosen explicitly.
-store_broker_layout: fn(roots: HangarRoots) -> BrokerLayout {
-    store_broker_user_layout(roots)
-}
+store_broker_layout: fn(roots: HangarRoots) -> BrokerLayout { store_broker_user_layout(roots) }
 
 store_broker_absolute_path: fn(path: String) -> String {
     if files.is_abs(path) -> return path.copy()
@@ -99,11 +95,9 @@ store_broker_status_uid: fn(position: Int) -> Int? {
 store_broker_lstat: fn(path: String) -> Stat? StoreError! {
     if files.stat(path) == {
         .Ok(info) -> Ok(Val(info))
-        .Err(failure) -> {
-            if failure == {
-                .NotFound(_) -> Ok(None)
-                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> Err(StoreError.IO(failure))
-            }
+        .Err(failure) -> if failure == {
+            .NotFound(_) -> Ok(None)
+            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> Err(StoreError.IO(failure))
         }
     }
 }
@@ -124,7 +118,9 @@ store_broker_is_effective_root: fn() -> Bool {
 
 // Rust `current_uid` (getuid): the caller's real uid, Linux only.
 store_broker_current_uid: fn() -> Int StoreError! {
-    if sys.name() != "linux" -> return Err(store_broker_invalid("shared-store enrollment is unsupported on this host"))
+    if sys.name() != "linux" {
+        return Err(store_broker_invalid("shared-store enrollment is unsupported on this host"))
+    }
     uid: store_broker_status_uid(0) ?? return Err(StoreError.Other("could not read the caller uid from /proc/self/status"))
     Ok(uid)
 }
@@ -153,11 +149,13 @@ store_broker_read_config: fn(layout: BrokerLayout) -> SharedStoreConfig? StoreEr
     path: layout.config
     found: store_broker_lstat(path)
     info: found ?? return Ok(None)
-    if info.is_symlink || !info.is_file -> return Err(store_broker_invalid("shared-store config is not a regular file"))
-    if info.size > STORE_BROKER_MAX_CONFIG_BYTES -> return Err(store_broker_invalid("shared-store config is too large"))
-    if layout.admin {
-        store_broker_require_admin_descriptor(path)
-    } else {
+    if info.is_symlink || !info.is_file {
+        return Err(store_broker_invalid("shared-store config is not a regular file"))
+    }
+    if info.size > STORE_BROKER_MAX_CONFIG_BYTES {
+        return Err(store_broker_invalid("shared-store config is too large"))
+    }
+    if layout.admin -> store_broker_require_admin_descriptor(path) else {
         store_broker_require_private_mode(path, "shared-store config")
     }
     text: store_broker_bounded_text_file(path, STORE_BROKER_MAX_CONFIG_BYTES, "shared-store config")
@@ -169,26 +167,34 @@ store_broker_read_config: fn(layout: BrokerLayout) -> SharedStoreConfig? StoreEr
 // The descriptor text: magic, then `key=hex(path)` lines.
 store_broker_parse_config: fn(text: String) -> SharedStoreConfig StoreError! {
     lines: store_text_lines(text)
-    if lines.len() == 0 || lines[0] != STORE_BROKER_CONFIG_MAGIC -> return Err(store_broker_invalid("shared-store config has an unknown format"))
-    fields := [String: String]{}
+    if lines.len() == 0 || lines[0] != STORE_BROKER_CONFIG_MAGIC {
+        return Err(store_broker_invalid("shared-store config has an unknown format"))
+    }
+    fields := [String:String]{}
     loop index in 1..<lines.len() {
         pair: lines[index].split_once("=") ?? return Err(store_broker_invalid("shared-store config has a malformed field"))
         known: [String]{"socket", "shared_root", "trust_key", "grants"}.contains(pair.before)
-        if !known || fields.has_key(pair.before) -> return Err(store_broker_invalid("shared-store config has an unknown or duplicate field"))
+        if !known || fields.has_key(pair.before) {
+            return Err(store_broker_invalid("shared-store config has an unknown or duplicate field"))
+        }
         fields[pair.before] = pair.after
     }
-    Ok(SharedStoreConfig{
-        socket: store_broker_config_path(fields, "socket"),
-        shared_root: store_broker_config_path(fields, "shared_root"),
-        trust_key: store_broker_config_path(fields, "trust_key"),
-        grants: store_broker_config_path(fields, "grants")
-    })
+    Ok(
+        SharedStoreConfig{
+            socket: store_broker_config_path(fields, "socket"),
+            shared_root: store_broker_config_path(fields, "shared_root"),
+            trust_key: store_broker_config_path(fields, "trust_key"),
+            grants: store_broker_config_path(fields, "grants"),
+        },
+    )
 }
 
-store_broker_config_path: fn(fields: [String: String], key: String) -> String StoreError! {
+store_broker_config_path: fn(fields: [String:String], key: String) -> String StoreError! {
     value: fields.get(key) ?? return Err(store_broker_invalid("shared-store config is missing `{key}`"))
     path: String.from_bytes(store_broker_decode_hex(value)) ?? return Err(store_broker_invalid("shared-store config contains invalid UTF-8"))
-    if !files.is_abs(path) -> return Err(store_broker_invalid("shared-store config paths must be absolute"))
+    if !files.is_abs(path) {
+        return Err(store_broker_invalid("shared-store config paths must be absolute"))
+    }
     Ok(path)
 }
 
@@ -267,7 +273,9 @@ store_broker_admin_service_unit_text: fn(executable: String, config: SharedStore
     state_directories: "jet/shared-store/root jet/shared-store/root/.incoming jet/shared-store/root/hangar jet/shared-store/root/.locks"
     writable := [String]{}
     members: [String]{".incoming", "hangar", ".locks"}
-    loop member in members -> writable.push(store_broker_systemd_escape_path(files.join(config.shared_root, member)))
+    loop member in members {
+        writable.push(store_broker_systemd_escape_path(files.join(config.shared_root, member)))
+    }
     readonly := [String]{}
     readonly_roots: [String]{config.shared_root, config.grants, store_broker_parent_or_root(config.trust_key)}
     loop path in readonly_roots -> readonly.push(store_broker_systemd_escape_path(path))
@@ -281,7 +289,9 @@ store_broker_activate_admin_socket: fn() StoreError! {
         argv := [String]{"systemctl"}
         loop arg in args -> argv.push(arg)
         receipt: process.cmd(argv).stdout(.Inherit).stderr(.Inherit).run() ?? return Err(store_broker_invalid("could not activate shared-store systemd socket: {err}"))
-        if !receipt.success -> return Err(store_broker_invalid("systemctl {args.join(" ")} failed with exit status: {receipt.code}"))
+        if !receipt.success {
+            return Err(store_broker_invalid("systemctl {args.join(" ")} failed with exit status: {receipt.code}"))
+        }
     }
 }
 
@@ -294,7 +304,7 @@ store_broker_validate_config_paths: fn(layout: BrokerLayout, config: SharedStore
         {key: "socket", value: socket},
         {key: "shared root", value: files.join(base, "root")},
         {key: "trust key", value: files.join(base, "trust/hangar.key")},
-        {key: "grants", value: files.join(base, "users")}
+        {key: "grants", value: files.join(base, "users")},
     }
     actual: config.fields()
     loop index in 0..<expected.len() {
@@ -317,11 +327,15 @@ store_broker_validate_config_paths: fn(layout: BrokerLayout, config: SharedStore
         store_broker_validate_private_directory(config.grants, "shared-store grants directory")
     }
     key: files.stat(config.trust_key)
-    if key.is_symlink || !key.is_file -> return Err(store_broker_invalid("shared-store trust key is not a regular file"))
+    if key.is_symlink || !key.is_file {
+        return Err(store_broker_invalid("shared-store trust key is not a regular file"))
+    }
     store_broker_require_private_mode(config.trust_key, "shared-store trust key")
     if files.stat(config.socket) == {
         .Ok(info) -> {
-            if info.is_symlink -> return Err(store_broker_invalid("shared-store broker socket is a symlink"))
+            if info.is_symlink {
+                return Err(store_broker_invalid("shared-store broker socket is a symlink"))
+            }
         }
         .Err(_) -> {}
     }
@@ -329,7 +343,9 @@ store_broker_validate_config_paths: fn(layout: BrokerLayout, config: SharedStore
 
 store_broker_validate_private_directory: fn(path: String, label: String) StoreError! {
     info: files.stat(path)
-    if info.is_symlink || !info.is_dir -> return Err(store_broker_invalid("{label} is not a real directory"))
+    if info.is_symlink || !info.is_dir {
+        return Err(store_broker_invalid("{label} is not a real directory"))
+    }
     store_broker_require_private_mode(path, label)
 }
 
@@ -352,9 +368,13 @@ store_broker_validate_managed_directory: fn(path: String, label: String) StoreEr
 
 // The mode of the node a link resolves to.
 store_broker_require_private_mode_followed: fn(path: String, label: String) StoreError! {
-    if sys.family() == "windows" -> return
+    if sys.family() == "windows" {
+        return
+    }
     info: files.stat(files.canonicalize(path))
-    if (info.mode).bit_and(0o077) != 0 -> return Err(store_broker_invalid("{label} has insecure permissions"))
+    if (info.mode).bit_and(0o077) != 0 {
+        return Err(store_broker_invalid("{label} has insecure permissions"))
+    }
 }
 
 // Rust `user_systemd_unit_dir`: `$XDG_CONFIG_HOME` or `$HOME/.config`.
@@ -371,12 +391,16 @@ store_broker_ensure_real_dir: fn(path: String) StoreError! {
     found: store_broker_lstat(path)
     if found == {
         .Val(info) -> {
-            if info.is_symlink || !info.is_dir -> return Err(store_broker_invalid("shared-store path is not a real directory"))
+            if info.is_symlink || !info.is_dir {
+                return Err(store_broker_invalid("shared-store path is not a real directory"))
+            }
         }
         .None -> {
             files.create_dir_all(path)
             info: files.stat(path)
-            if info.is_symlink || !info.is_dir -> return Err(store_broker_invalid("shared-store path is not a real directory"))
+            if info.is_symlink || !info.is_dir {
+                return Err(store_broker_invalid("shared-store path is not a real directory"))
+            }
         }
     }
 }
@@ -396,34 +420,46 @@ store_broker_ensure_admin_public_dir: fn(path: String) StoreError! {
             info: files.stat(path)
             if (info.mode).bit_and(0o005) != 0o005 -> store_broker_set_mode(path, 0o755)
         }
-    } else {
-        store_broker_set_mode(path, 0o755)
-    }
+    } else { store_broker_set_mode(path, 0o755) }
     store_broker_require_admin_public_dir(path)
 }
 
 store_broker_require_admin_dir: fn(path: String) StoreError! {
-    if sys.family() == "windows" -> return
+    if sys.family() == "windows" {
+        return
+    }
     info: files.stat(path)
-    if (info.owner ?? -1) != 0 -> return Err(store_broker_invalid("shared-store administrator directory is not root-owned"))
-    if (info.mode).bit_and(0o022) != 0 -> return Err(store_broker_invalid("shared-store administrator directory is writable by another user"))
+    if (info.owner ?? -1) != 0 {
+        return Err(store_broker_invalid("shared-store administrator directory is not root-owned"))
+    }
+    if (info.mode).bit_and(0o022) != 0 {
+        return Err(store_broker_invalid("shared-store administrator directory is writable by another user"))
+    }
 }
 
 store_broker_require_admin_public_dir: fn(path: String) StoreError! {
     store_broker_require_admin_dir(path)
-    if sys.family() == "windows" -> return
+    if sys.family() == "windows" {
+        return
+    }
     info: files.stat(path)
-    if (info.mode).bit_and(0o005) != 0o005 -> return Err(store_broker_invalid("shared-store administrator directory is not traversable by enrolled users"))
+    if (info.mode).bit_and(0o005) != 0o005 {
+        return Err(store_broker_invalid("shared-store administrator directory is not traversable by enrolled users"))
+    }
 }
 
 store_broker_validate_admin_directory: fn(path: String, label: String) StoreError! {
     info: files.stat(path)
-    if info.is_symlink || !info.is_dir -> return Err(store_broker_invalid("{label} is not a real directory"))
+    if info.is_symlink || !info.is_dir {
+        return Err(store_broker_invalid("{label} is not a real directory"))
+    }
     store_broker_require_admin_public_dir(path)
 }
 
 store_broker_set_mode: fn(path: String, mode: Int) StoreError! {
-    if sys.family() == "windows" -> return
+    if sys.family() == "windows" {
+        return
+    }
     files.set_mode(path, mode)
 }
 
@@ -432,29 +468,39 @@ store_broker_set_mode: fn(path: String, mode: Int) StoreError! {
 store_broker_ensure_private_dir: fn(path: String) StoreError! {
     existed: store_broker_node_exists(path)
     store_broker_ensure_real_dir(path)
-    if sys.family() == "windows" -> return
+    if sys.family() == "windows" {
+        return
+    }
     info: files.stat(path)
     if (info.mode).bit_and(0o077) != 0 {
-        if existed -> return Err(store_broker_invalid("shared-store directory has insecure permissions"))
+        if existed {
+            return Err(store_broker_invalid("shared-store directory has insecure permissions"))
+        }
         files.set_mode(path, 0o700)
     }
 }
 
 store_broker_require_private_mode: fn(path: String, label: String) StoreError! {
-    if sys.family() == "windows" -> return
+    if sys.family() == "windows" {
+        return
+    }
     info: files.stat(path)
-    if (info.mode).bit_and(0o077) != 0 -> return Err(store_broker_invalid("{label} has insecure permissions"))
+    if (info.mode).bit_and(0o077) != 0 {
+        return Err(store_broker_invalid("{label} has insecure permissions"))
+    }
 }
 
-store_broker_set_private_mode: fn(path: String) StoreError! {
-    store_broker_set_mode(path, 0o600)
-}
+store_broker_set_private_mode: fn(path: String) StoreError! { store_broker_set_mode(path, 0o600) }
 
 // A regular descriptor that no other user can write.
 store_broker_require_safe_descriptor: fn(path: String, label: String) StoreError! {
     info: files.stat(path)
-    if info.is_symlink || !info.is_file -> return Err(store_broker_invalid("{label} is not a regular file"))
-    if sys.family() != "windows" && (info.mode).bit_and(0o022) != 0 -> return Err(store_broker_invalid("{label} is writable by another user"))
+    if info.is_symlink || !info.is_file {
+        return Err(store_broker_invalid("{label} is not a regular file"))
+    }
+    if sys.family() != "windows" && (info.mode).bit_and(0o022) != 0 {
+        return Err(store_broker_invalid("{label} is writable by another user"))
+    }
 }
 
 store_broker_require_admin_descriptor: fn(path: String) StoreError! {
@@ -470,16 +516,20 @@ store_broker_ensure_secret: fn(path: String) StoreError! {
     found: store_broker_lstat(path)
     if found == {
         .Val(info) -> {
-            if info.is_symlink || !info.is_file -> return Err(store_broker_invalid("shared-store secret is not a regular file"))
+            if info.is_symlink || !info.is_file {
+                return Err(store_broker_invalid("shared-store secret is not a regular file"))
+            }
             store_broker_require_private_mode(path, "shared-store secret")
             secret: store_broker_bounded_file(path, STORE_BROKER_MAX_CONFIG_BYTES, "shared-store secret")
-            if secret.len() < 32 -> return Err(store_broker_invalid("shared-store secret is too short"))
+            if secret.len() < 32 {
+                return Err(store_broker_invalid("shared-store secret is too short"))
+            }
         }
         .None -> {
             secret := random.bytes(32) ?? return Err(StoreError.Other("operating-system randomness is unavailable: {err}"))
             failure := StoreError?{None}
             if store_broker_atomic_write(path, secret) == {
-                .Err(error) -> failure = Val(error)
+                .Err(error) -> { failure = Val(error) }
                 .Ok(_) -> {}
             }
             loop index in 0..<secret.len() -> secret[index] = U8{0}
@@ -500,7 +550,9 @@ store_broker_atomic_write: fn(path: String, bytes: [U8]) StoreError! {
     store_broker_ensure_real_dir(parent)
     if files.stat(path) == {
         .Ok(info) -> {
-            if info.is_symlink || !info.is_file -> return Err(store_broker_invalid("shared-store destination is not a regular file"))
+            if info.is_symlink || !info.is_file {
+                return Err(store_broker_invalid("shared-store destination is not a regular file"))
+            }
         }
         .Err(_) -> {}
     }

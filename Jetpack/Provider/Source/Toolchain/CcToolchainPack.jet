@@ -15,27 +15,49 @@
 // package dependency, never part of the pack.
 
 CC_PACK_PACKAGE: "cc-toolchain-pack"
+
 CC_PACK_LAYOUT: "pack-tools-v1"
+
 CC_TOOLCHAIN_PACK_LAYOUT: "pack-v1"
+
 CC_PACK_RECIPE_ID: "jet-cc-pack-v1"
+
 CC_PACK_MANIFEST: "jet-cc-pack.json"
+
 CC_PACK_RELEASE_FILE: "RELEASE"
+
 CC_PACK_RELEASE_BASE: "https://github.com/jet-language/jet/releases/download"
+
 CC_PACK_URL_ENV: ENV_JET_CC_PACK_URL
+
 CC_PACK_CLANG: "bin/clang"
+
 CC_PACK_LLD: "bin/ld.lld"
+
 CC_PACK_AR: "bin/llvm-ar"
+
 CC_PACK_RESOURCE_DIR: "lib/clang/21"
+
 CC_PACK_MAX_ENTRIES: 100000
+
 CC_PACK_MAX_UNPACKED_BYTES: 4294967296
+
 CC_PACK_MAX_MANIFEST_BYTES: 65536
+
 CC_PACK_MAX_RELEASE_BYTES: 256
+
 CC_PACK_MAX_SOURCE_LIST_BYTES: 1048576
+
 CC_PACK_MAX_REPORTED_BYTES: 4096
+
 CC_PACK_FETCH_TIMEOUT_MS: 3600000
+
 CC_PACK_READ_CHUNK: 1048576
+
 CC_PACK_EMPTY_ARCHIVE: "!<arch>\n"
+
 CC_PACK_MUSL_CRT: [String]{"crt1", "Scrt1", "rcrt1", "crti", "crtn"}
+
 CC_PACK_MUSL_EMPTY_LIBS: [String]{"m", "rt", "pthread", "crypt", "util", "xnet", "resolv", "dl"}
 
 // One published pack: the host it runs on (target triple and Nix system),
@@ -57,8 +79,8 @@ CC_PACK_ASSETS: #run { [CcPackAsset]{
         platform: "linux-x64",
         file: "jet-cc-pack-x86_64-linux.tar.zst",
         sha256: "7c991b6c41e2ed9b41b34bfe84c0a241df60b25d91f73c58b3ad70494e3ecef3",
-        size: 111338169
-    }
+        size: 111338169,
+    },
 } }
 
 // One target every pack covers: its canonical triple, the short spelling
@@ -82,7 +104,7 @@ CC_PACK_TARGETS: #run { [CcPackTarget]{
     {triple: "x86_64-unknown-linux-gnu", short: "x86_64-linux-gnu", arch: "x86_64", libc: "glibc", loader: "/lib64/ld-linux-x86-64.so.2"},
     {triple: "aarch64-unknown-linux-gnu", short: "aarch64-linux-gnu", arch: "aarch64", libc: "glibc", loader: "/lib/ld-linux-aarch64.so.1"},
     {triple: "x86_64-unknown-linux-musl", short: "x86_64-linux-musl", arch: "x86_64", libc: "musl", loader: ""},
-    {triple: "aarch64-unknown-linux-musl", short: "aarch64-linux-musl", arch: "aarch64", libc: "musl", loader: ""}
+    {triple: "aarch64-unknown-linux-musl", short: "aarch64-linux-musl", arch: "aarch64", libc: "musl", loader: ""},
 } }
 
 // The versions a pack manifest records.
@@ -204,7 +226,7 @@ provider_cc_pack_ensure: fn(verification: &StoreVerification, roots: HangarRoots
     provider_cc_remove_tree(staging)
     unpack := CcPackArchive{path: "", origin: ""}
     if provider_cc_pack_obtain(asset, sources, offline, archive) == {
-        .Ok(obtained) -> unpack = obtained
+        .Ok(obtained) -> { unpack = obtained }
         .Err(error) -> {
             provider_cc_remove_tree(archive)
             return Err(error)
@@ -243,9 +265,13 @@ provider_cc_pack_obtain: fn(asset: CcPackAsset, sources: CcPackSources, offline:
     release: provider_cc_pack_release_name(sources)
     if sources.beside == .Val(dir) {
         local: files.join(dir, asset.file)
-        if provider_cc_is_regular_file(local) -> return Ok(CcPackArchive{path: local, origin: "`{local}`"})
+        if provider_cc_is_regular_file(local) {
+            return Ok(CcPackArchive{path: local, origin: "`{local}`"})
+        }
     }
-    if sources.url == .Val(url) -> return provider_cc_pack_fetch(url, asset, release, offline, destination)
+    if sources.url == .Val(url) {
+        return provider_cc_pack_fetch(url, asset, release, offline, destination)
+    }
     name: release ?? {
         return Err(ProviderError.Unsupported("this jet does not name the release it came from, so its C toolchain pack `{asset.file}` cannot be downloaded; put the pack beside jet, set `{CC_PACK_URL_ENV}` to its URL, or install a released jet from the archive ending in `-{asset.platform}-cc.tar.gz`"))
     }
@@ -278,7 +304,9 @@ provider_cc_pack_download: fn(url: String, destination: String, asset: CcPackAss
     loop part in response.body().chunks(CC_PACK_READ_CHUNK) {
         chunk: part ?? return Err(CcToolchainError.Invalid("download C toolchain pack: {err}"))
         total += chunk.len()
-        if total > asset.size -> return Err(CcToolchainError.Invalid("C toolchain pack at {url} is larger than the {asset.size} bytes this jet expects"))
+        if total > asset.size {
+            return Err(CcToolchainError.Invalid("C toolchain pack at {url} is larger than the {asset.size} bytes this jet expects"))
+        }
         output.write_bytes(chunk) ?? return Err(CcToolchainError.Invalid("write C toolchain pack staging file: {err}"))
     }
 }
@@ -292,7 +320,9 @@ provider_cc_pack_verify_archive: fn(file: &files.FileReader, asset: CcPackAsset,
         chunk: file.read_bytes(CC_PACK_READ_CHUNK) ?? return Err(CcToolchainError.Invalid("read C toolchain pack from {origin}: {err}"))
         if chunk.len() == 0 -> break
         total += chunk.len()
-        if total > asset.size -> return Err(CcToolchainError.Invalid("C toolchain pack from {origin} is larger than the {asset.size} bytes this jet expects"))
+        if total > asset.size {
+            return Err(CcToolchainError.Invalid("C toolchain pack from {origin} is larger than the {asset.size} bytes this jet expects"))
+        }
         hasher.update(chunk)
     }
     actual: hasher.finalize_hex()
@@ -326,7 +356,7 @@ provider_cc_pack_install: fn(verification: &StoreVerification, roots: HangarRoot
     loop path in digests.files.keys() {
         store_remember_content_digest(verification, path, digests.files[path]) ?? return Err(CcToolchainError.Invalid("remember C toolchain pack file digest: {err.message()}"))
     }
-    facts: [String: String]{
+    facts: [String:String]{
         "cc.schema": CC_TOOLCHAIN_SCHEMA,
         "cc.producer": CC_TOOLCHAIN_PRODUCER,
         "cc.layout": CC_PACK_LAYOUT,
@@ -339,12 +369,14 @@ provider_cc_pack_install: fn(verification: &StoreVerification, roots: HangarRoot
         "cc.pack.clang.sha256": clang_sha256,
         "cc.pack.lld.sha256": lld_sha256,
         "cc.pack.ar.sha256": ar_sha256,
-        "cache.output": digest
+        "cache.output": digest,
     }
-    plan: ProviderPlanFacts.from_facts([String: String]{
-        "action.kind": "cc-toolchain-pack-install",
-        "action.recipe": CC_PACK_RECIPE_ID
-    }) ?? return Err(CcToolchainError.Invalid(err.message()))
+    plan: ProviderPlanFacts.from_facts(
+        [String:String]{
+            "action.kind": "cc-toolchain-pack-install",
+            "action.recipe": CC_PACK_RECIPE_ID,
+        },
+    ) ?? return Err(CcToolchainError.Invalid(err.message()))
     source: provider_cc_pack_immutable_source(asset)
     producer: ProducerRecord.new(CC_TOOLCHAIN_PRODUCER, source, digest, plan, CC_PACK_RECIPE_ID, "policy=content-addressed\nplatform=host", facts) ?? return Err(CcToolchainError.Invalid(err.message()))
     reference: "{CC_PACK_PACKAGE}@{CC_TOOLCHAIN_SOURCE}"
@@ -360,12 +392,12 @@ provider_cc_pack_install: fn(verification: &StoreVerification, roots: HangarRoot
             source_fingerprint: source,
             recipe_fingerprint: pkg_sha256_hex(CC_PACK_RECIPE_ID.bytes()),
             policy_fingerprint: env_cache_policy_fingerprint(false),
-            platform: pkg_host_platform()
+            platform: pkg_host_platform(),
         },
         source_state: SourceState.Downloaded,
-        named_outputs: [String: String]{"out": staging},
+        named_outputs: [String:String]{"out": staging},
         references: [String]{},
-        producer: producer
+        producer: producer,
     }
     provider_refresh_provider_facts(realized.producer, reference) ?? return Err(CcToolchainError.Invalid(err.message()))
     store_record_realized_mode(verification, roots, realized) ?? return Err(CcToolchainError.Invalid("record C toolchain pack in the Hangar: {err.message()}"))
@@ -376,7 +408,7 @@ provider_cc_pack_install: fn(verification: &StoreVerification, roots: HangarRoot
 // The pack tree's canonical digest and every file's content SHA-256.
 CcPackDigests: struct {
     tree: String
-    files: [String: String]
+    files: [String:String]
 }
 
 // Hash the pack tree and each of its files on worker tasks at once.
@@ -385,7 +417,7 @@ provider_cc_pack_digests: fn(staging: String) -[FS, Env]> CcPackDigests CcToolch
     sizes := [Int]{}
     provider_cc_pack_collect_files(staging, paths, sizes)
     hashed: store_hash_tree_and_files(staging, paths, sizes) ?? return Err(CcToolchainError.Invalid("hash C toolchain pack: {err.message()}"))
-    file_digests := [String: String]{}
+    file_digests := [String:String]{}
     loop index in 0..<paths.len() -> file_digests[paths[index]] = hashed.files[index]
     Ok(CcPackDigests{tree: hashed.tree, files: file_digests})
 }
@@ -396,9 +428,7 @@ provider_cc_pack_collect_files: fn(path: String, paths: &[String], sizes: &[Int]
     loop entry in entries {
         info: files.stat(entry.path) ?? return Err(CcToolchainError.Invalid("inspect C toolchain pack entry `{entry.path}`: {err}"))
         if info.is_symlink -> next
-        if info.is_dir {
-            provider_cc_pack_collect_files(entry.path, paths, sizes)
-        } else if info.is_file {
+        if info.is_dir -> provider_cc_pack_collect_files(entry.path, paths, sizes) else if info.is_file {
             paths.push(entry.path)
             sizes.push(info.size)
         }
@@ -406,7 +436,7 @@ provider_cc_pack_collect_files: fn(path: String, paths: &[String], sizes: &[Int]
 }
 
 // The SHA-256 of one non-empty pack tool, taken from the pack's file digests.
-provider_cc_pack_tool_sha256: fn(root: String, relative: String, digests: [String: String]) -[FS]> String CcToolchainError! {
+provider_cc_pack_tool_sha256: fn(root: String, relative: String, digests: [String:String]) -[FS]> String CcToolchainError! {
     path: provider_cc_checked_relative_path(root, relative, "pack tool `{relative}`")
     metadata: files.stat(path) ?? return Err(CcToolchainError.Invalid("C toolchain pack tool `{relative}` is unavailable: {err}"))
     if metadata.is_symlink || !metadata.is_file || metadata.size == 0 {
@@ -424,7 +454,9 @@ provider_cc_pack_lookup: fn(verification: &StoreVerification, roots: HangarRoots
         producer: ProducerRecord.decode(entry.producer_record) ?? {
             return Err(CcToolchainError.Invalid("Hangar C toolchain pack `{entry.id}` has an invalid producer record: {err.message()}"))
         }
-        if producer.provider != CC_TOOLCHAIN_PRODUCER || (producer.facts.get("cc.layout") ?? "") != CC_PACK_LAYOUT -> next
+        if producer.provider != CC_TOOLCHAIN_PRODUCER || (producer.facts.get("cc.layout") ?? "") != CC_PACK_LAYOUT {
+            next
+        }
         if (producer.facts.get("cc.pack.sha256") ?? "") != asset.sha256 -> next
         return Ok(Val(provider_cc_pack_tools_from_entry(roots, entry, producer, asset)))
     }
@@ -445,7 +477,7 @@ provider_cc_pack_tools_from_entry: fn(roots: HangarRoots, entry: StoreEntry, pro
     manifest: CcPackManifest{
         llvm: provider_cc_fact(producer, entry.id, "cc.pack.llvm"),
         musl: provider_cc_fact(producer, entry.id, "cc.pack.musl"),
-        glibc: provider_cc_fact(producer, entry.id, "cc.pack.glibc")
+        glibc: provider_cc_fact(producer, entry.id, "cc.pack.glibc"),
     }
     clang_sha256: provider_cc_fact(producer, entry.id, "cc.pack.clang.sha256")
     lld_sha256: provider_cc_fact(producer, entry.id, "cc.pack.lld.sha256")
@@ -462,13 +494,17 @@ provider_cc_pack_read_manifest: fn(root: String, asset: CcPackAsset) -[FS, Env]>
     text: String.from_bytes(bytes) ?? return Err(CcToolchainError.Invalid("C toolchain pack manifest is not UTF-8"))
     value: json.parse(text) ?? return Err(CcToolchainError.Invalid("parse C toolchain pack manifest: {err.reason}"))
     object: provider_cc_manifest_object(value) ?? return Err(CcToolchainError.Invalid("C toolchain pack manifest: expected a Dyn object"))
-    if provider_cc_manifest_number(object, "schema") != 1 -> return Err(CcToolchainError.Invalid("C toolchain pack manifest has an unsupported schema"))
+    if provider_cc_manifest_number(object, "schema") != 1 {
+        return Err(CcToolchainError.Invalid("C toolchain pack manifest has an unsupported schema"))
+    }
     host: provider_cc_manifest_string(object, "host")
-    if host != asset.system -> return Err(CcToolchainError.Invalid("C toolchain pack is for `{host}`, but this jet expects `{asset.system}`"))
+    if host != asset.system {
+        return Err(CcToolchainError.Invalid("C toolchain pack is for `{host}`, but this jet expects `{asset.system}`"))
+    }
     manifest: CcPackManifest{
         llvm: provider_cc_manifest_string(object, "llvm"),
         musl: provider_cc_manifest_string(object, "musl"),
-        glibc: provider_cc_manifest_string(object, "glibc")
+        glibc: provider_cc_manifest_string(object, "glibc"),
     }
     provider_cc_validate_text_field(manifest.llvm, "pack LLVM version")
     provider_cc_validate_text_field(manifest.musl, "pack musl version")
@@ -485,7 +521,9 @@ provider_cc_pack_read_manifest: fn(root: String, asset: CcPackAsset) -[FS, Env]>
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return Err(CcToolchainError.Invalid("C toolchain pack manifest field `targets`: expected a Dyn array"))
     }
     loop target in CC_PACK_TARGETS {
-        if !listed.contains(target.triple) -> return Err(CcToolchainError.Invalid("C toolchain pack does not cover `{target.triple}`"))
+        if !listed.contains(target.triple) {
+            return Err(CcToolchainError.Invalid("C toolchain pack does not cover `{target.triple}`"))
+        }
     }
     Ok(manifest)
 }
@@ -511,7 +549,9 @@ CcPackTarStream: struct {
 
     // The next `count` bytes.
     next_bytes: fn(&self, count: Int) -[FS.Read]> [U8] CcToolchainError! {
-        if !(self.fill(count)) -> return Err(CcToolchainError.Invalid("C toolchain pack archive is truncated"))
+        if !(self.fill(count)) {
+            return Err(CcToolchainError.Invalid("C toolchain pack archive is truncated"))
+        }
         out: self.buffer.slice(self.at, self.at + count)
         self.at += count
         Ok(out)
@@ -521,7 +561,9 @@ CcPackTarStream: struct {
     skip: fn(&self, count: Int) CcToolchainError! -[FS.Read]> {
         remaining := count
         loop remaining > 0 {
-            if !(self.fill(1)) -> return Err(CcToolchainError.Invalid("C toolchain pack archive is truncated"))
+            if !(self.fill(1)) {
+                return Err(CcToolchainError.Invalid("C toolchain pack archive is truncated"))
+            }
             available: self.buffer.len() - self.at
             step: if available < remaining -> available else -> remaining
             self.at += step
@@ -534,7 +576,9 @@ CcPackTarStream: struct {
         output := files.create(path, if_exists: .Refuse) ?? return Err(CcToolchainError.Invalid("create `{path}`: {err}"))
         remaining := count
         loop remaining > 0 {
-            if !(self.fill(1)) -> return Err(CcToolchainError.Invalid("C toolchain pack archive is truncated"))
+            if !(self.fill(1)) {
+                return Err(CcToolchainError.Invalid("C toolchain pack archive is truncated"))
+            }
             available: self.buffer.len() - self.at
             step: if available < remaining -> available else -> remaining
             output.write_bytes(self.buffer.slice(self.at, self.at + step)) ?? return Err(CcToolchainError.Invalid("write `{path}`: {err}"))
@@ -546,14 +590,16 @@ CcPackTarStream: struct {
 
 // Unpack the regular files and directories of a pack archive below
 // `destination`, within the entry and byte limits.
-provider_cc_pack_untar: fn(&&file: files.FileReader, destination: String) CcToolchainError! -[FS]> {
+provider_cc_pack_untar: fn(file: &&files.FileReader, destination: String) CcToolchainError! -[FS]> {
     stream := CcPackTarStream{reader: zstd.reader(file), buffer: [U8]{}, at: 0}
     entries := 0
     unpacked := 0
     loop {
         header: stream.next_bytes(PROVIDER_TAR_BLOCK)
         if provider_registry_tar_zero(header) -> break
-        if !provider_registry_tar_checksum_valid(header) -> return Err(CcToolchainError.Invalid("C toolchain pack has a damaged tar header"))
+        if !provider_registry_tar_checksum_valid(header) {
+            return Err(CcToolchainError.Invalid("C toolchain pack has a damaged tar header"))
+        }
         raw_name: provider_registry_tar_header_name(header) ?? return Err(CcToolchainError.Invalid(err.message()))
         size: provider_registry_tar_number(header[124..<136]) ?? return Err(CcToolchainError.Invalid(err.message()))
         mode: provider_registry_tar_number(header[100..<108]) ?? return Err(CcToolchainError.Invalid(err.message()))
@@ -565,12 +611,16 @@ provider_cc_pack_untar: fn(&&file: files.FileReader, destination: String) CcTool
             next
         }
         entries += 1
-        if entries > CC_PACK_MAX_ENTRIES -> return Err(CcToolchainError.Invalid("C toolchain pack has more than {CC_PACK_MAX_ENTRIES} entries"))
+        if entries > CC_PACK_MAX_ENTRIES {
+            return Err(CcToolchainError.Invalid("C toolchain pack has more than {CC_PACK_MAX_ENTRIES} entries"))
+        }
         if kind != RegistryTarKind.File && kind != RegistryTarKind.Directory {
             return Err(CcToolchainError.Invalid("C toolchain pack entry `{name}` is not a regular file or directory"))
         }
         unpacked += size
-        if unpacked > CC_PACK_MAX_UNPACKED_BYTES -> return Err(CcToolchainError.Invalid("C toolchain pack unpacks to more than {CC_PACK_MAX_UNPACKED_BYTES} bytes"))
+        if unpacked > CC_PACK_MAX_UNPACKED_BYTES {
+            return Err(CcToolchainError.Invalid("C toolchain pack unpacks to more than {CC_PACK_MAX_UNPACKED_BYTES} bytes"))
+        }
         target := String?{None}
         if provider_registry_prepare_entry(name, kind, destination) == {
             .Ok(value) -> target = value
@@ -629,7 +679,7 @@ provider_cc_pack_publish_target: fn(spec: RefSpec, ctx: ProviderCtx, tools: CcPa
     bundle_sha256: pkg_try_output_hash_of(output) ?? return Err(CcToolchainError.Invalid("hash C toolchain target: {err.message()}"))
     sysroot_sha256: pkg_try_output_hash_of(files.join(output, "sysroot")) ?? return Err(CcToolchainError.Invalid("hash C toolchain sysroot: {err.message()}"))
     libc_version: if target.libc == "glibc" -> tools.manifest.glibc else -> tools.manifest.musl
-    facts: [String: String]{
+    facts: [String:String]{
         "cc.schema": CC_TOOLCHAIN_SCHEMA,
         "cc.producer": CC_TOOLCHAIN_PRODUCER,
         "cc.layout": CC_TOOLCHAIN_PACK_LAYOUT,
@@ -650,30 +700,34 @@ provider_cc_pack_publish_target: fn(spec: RefSpec, ctx: ProviderCtx, tools: CcPa
         "cc.compiler.root.sha256": tools.digest,
         "cc.manifest": "pack:{tools.asset.file}",
         "cc.pack.sha256": tools.asset.sha256,
-        "cache.output": bundle_sha256
+        "cache.output": bundle_sha256,
     }
-    plan: ProviderPlanFacts.from_facts([String: String]{
-        "action.kind": "cc-toolchain-provision",
-        "action.recipe": CC_TOOLCHAIN_RECIPE_ID
-    }) ?? return Err(CcToolchainError.Invalid(err.message()))
+    plan: ProviderPlanFacts.from_facts(
+        [String:String]{
+            "action.kind": "cc-toolchain-provision",
+            "action.recipe": CC_TOOLCHAIN_RECIPE_ID,
+        },
+    ) ?? return Err(CcToolchainError.Invalid(err.message()))
     producer: ProducerRecord.new(CC_TOOLCHAIN_PRODUCER, provider_cc_pack_immutable_source(tools.asset), bundle_sha256, plan, CC_TOOLCHAIN_RECIPE_ID, "policy=content-addressed\nplatform=host", facts) ?? return Err(CcToolchainError.Invalid(err.message()))
     references: [String]{tools.digest}
     envelope: Envelope.for_output(output, spec.raw, CC_TOOLCHAIN_RECIPE_ID)
     descriptor: provider_cc_pack_descriptor(output, output, tools.root, references, envelope, producer)
-    Ok(Realized{
-        name: CC_TOOLCHAIN_PACKAGE,
-        version: descriptor.version,
-        reference: spec.raw,
-        out: output,
-        bin: files.join(output, "bin"),
-        rlib: "",
-        envelope: envelope,
-        cache_identity: descriptor.cache_identity(ctx),
-        source_state: SourceState.Downloaded,
-        named_outputs: [String: String]{"out": output},
-        references: references,
-        producer: producer
-    })
+    Ok(
+        Realized{
+            name: CC_TOOLCHAIN_PACKAGE,
+            version: descriptor.version,
+            reference: spec.raw,
+            out: output,
+            bin: files.join(output, "bin"),
+            rlib: "",
+            envelope: envelope,
+            cache_identity: descriptor.cache_identity(ctx),
+            source_state: SourceState.Downloaded,
+            named_outputs: [String:String]{"out": output},
+            references: references,
+            producer: producer,
+        },
+    )
 }
 
 // The pack-layout descriptor of a target entry rooted at `root` whose tools
@@ -686,49 +740,57 @@ provider_cc_pack_descriptor: fn(entry_id: String, root: String, pack_root: Strin
     sysroot_sha256: provider_cc_fact(producer, entry_id, "cc.sysroot.sha256")
     sysroot_root: files.join(root, sysroot)
     virtual: files.join(CC_TOOLCHAIN_VIRTUAL_BASE, bundle_sha256)
-    Ok(CcToolchainDescriptor{
-        entry_id: entry_id,
-        root: root,
-        host: provider_cc_fact(producer, entry_id, "cc.host"),
-        target: provider_cc_fact(producer, entry_id, "cc.target"),
-        version: provider_cc_fact(producer, entry_id, "cc.version"),
-        abi: provider_cc_fact(producer, entry_id, "cc.abi"),
-        compiler: provider_cc_fact(producer, entry_id, "cc.compiler"),
-        compiler_sha256: provider_cc_fact(producer, entry_id, "cc.compiler.sha256"),
-        cxx: provider_cc_fact(producer, entry_id, "cc.cxx"),
-        cxx_sha256: provider_cc_fact(producer, entry_id, "cc.cxx.sha256"),
-        linker: provider_cc_fact(producer, entry_id, "cc.linker"),
-        linker_sha256: provider_cc_fact(producer, entry_id, "cc.linker.sha256"),
-        sysroot: sysroot,
-        sysroot_sha256: sysroot_sha256,
-        bundle_sha256: bundle_sha256,
-        layout: CcToolchainLayout.Pack,
-        compiler_root: pack_root,
-        cxx_root: pack_root,
-        linker_root: pack_root,
-        sysroot_root: sysroot_root,
-        mounts: [CcMount]{
-            CcMount{store_path: "", digest: pack_digest, source: pack_root, destination: files.join(virtual, CcToolchainRole.Compiler.label())},
-            CcMount{store_path: "", digest: sysroot_sha256, source: sysroot_root, destination: files.join(virtual, CcToolchainRole.Sysroot.label())}
+    Ok(
+        CcToolchainDescriptor{
+            entry_id: entry_id,
+            root: root,
+            host: provider_cc_fact(producer, entry_id, "cc.host"),
+            target: provider_cc_fact(producer, entry_id, "cc.target"),
+            version: provider_cc_fact(producer, entry_id, "cc.version"),
+            abi: provider_cc_fact(producer, entry_id, "cc.abi"),
+            compiler: provider_cc_fact(producer, entry_id, "cc.compiler"),
+            compiler_sha256: provider_cc_fact(producer, entry_id, "cc.compiler.sha256"),
+            cxx: provider_cc_fact(producer, entry_id, "cc.cxx"),
+            cxx_sha256: provider_cc_fact(producer, entry_id, "cc.cxx.sha256"),
+            linker: provider_cc_fact(producer, entry_id, "cc.linker"),
+            linker_sha256: provider_cc_fact(producer, entry_id, "cc.linker.sha256"),
+            sysroot: sysroot,
+            sysroot_sha256: sysroot_sha256,
+            bundle_sha256: bundle_sha256,
+            layout: CcToolchainLayout.Pack,
+            compiler_root: pack_root,
+            cxx_root: pack_root,
+            linker_root: pack_root,
+            sysroot_root: sysroot_root,
+            mounts: [CcMount]{
+                CcMount{store_path: "", digest: pack_digest, source: pack_root, destination: files.join(virtual, CcToolchainRole.Compiler.label())},
+                CcMount{store_path: "", digest: sysroot_sha256, source: sysroot_root, destination: files.join(virtual, CcToolchainRole.Sysroot.label())},
+            },
+            references: references,
+            envelope: envelope,
+            producer: producer,
         },
-        references: references,
-        envelope: envelope,
-        producer: producer
-    })
+    )
 }
 
 // Copy a pack subtree into a writable staging tree, refusing symlinks and
 // special files.
 provider_cc_pack_copy_tree: fn(source: String, destination: String) CcToolchainError! -[FS]> {
     metadata: files.stat(source) ?? return Err(CcToolchainError.Invalid("read C toolchain pack `{source}`: {err}"))
-    if metadata.is_symlink -> return Err(CcToolchainError.Invalid("C toolchain pack contains symlink `{source}`"))
+    if metadata.is_symlink {
+        return Err(CcToolchainError.Invalid("C toolchain pack contains symlink `{source}`"))
+    }
     if metadata.is_dir {
         files.create_dir_all(destination) ?? return Err(CcToolchainError.Invalid("create `{destination}`: {err}"))
         children: files.list_dir(source) ?? return Err(CcToolchainError.Invalid("read C toolchain pack directory `{source}`: {err}"))
-        loop child in children -> provider_cc_pack_copy_tree(files.join(source, child.name), files.join(destination, child.name))
+        loop child in children {
+            provider_cc_pack_copy_tree(files.join(source, child.name), files.join(destination, child.name))
+        }
         return
     }
-    if !metadata.is_file -> return Err(CcToolchainError.Invalid("C toolchain pack contains unsupported node `{source}`"))
+    if !metadata.is_file {
+        return Err(CcToolchainError.Invalid("C toolchain pack contains unsupported node `{source}`"))
+    }
     files.copy2(source, destination) ?? return Err(CcToolchainError.Invalid("copy C toolchain pack file `{source}`: {err}"))
     files.set_mode(destination, (metadata.mode).bit_or(0o200).bit_and(0o755)) ?? return Err(CcToolchainError.Invalid("set the mode of `{destination}`: {err}"))
 }
@@ -746,12 +808,28 @@ provider_cc_pack_build_musl: fn(tools: CcPackTools, target: CcPackTarget, usr: S
     files.write(files.join(internal, "version.h"), "#define VERSION \"{tools.manifest.musl}\"\n") ?? return Err(CcToolchainError.Invalid("write musl version header: {err}"))
     clang: files.join(tools.root, CC_PACK_CLANG)
     flags: [String]{
-        "--target={target.triple}", "-resource-dir={files.join(tools.root, CC_PACK_RESOURCE_DIR)}",
-        "-std=c99", "-ffreestanding", "-nostdinc", "-D_XOPEN_SOURCE=700",
-        "-I{files.join(source_root, "arch/{target.arch}")}", "-I{files.join(source_root, "arch/generic")}", "-I{internal}",
-        "-I{files.join(source_root, "src/include")}", "-I{files.join(source_root, "src/internal")}", "-I{files.join(usr, "include")}",
-        "-Os", "-pipe", "-fomit-frame-pointer", "-fno-unwind-tables", "-fno-asynchronous-unwind-tables",
-        "-ffunction-sections", "-fdata-sections", "-fno-stack-protector", "-w", "-Qunused-arguments"
+        "--target={target.triple}",
+        "-resource-dir={files.join(tools.root, CC_PACK_RESOURCE_DIR)}",
+        "-std=c99",
+        "-ffreestanding",
+        "-nostdinc",
+        "-D_XOPEN_SOURCE=700",
+        "-I{files.join(source_root, "arch/{target.arch}")}",
+        "-I{files.join(source_root, "arch/generic")}",
+        "-I{internal}",
+        "-I{files.join(source_root, "src/include")}",
+        "-I{files.join(source_root, "src/internal")}",
+        "-I{files.join(usr, "include")}",
+        "-Os",
+        "-pipe",
+        "-fomit-frame-pointer",
+        "-fno-unwind-tables",
+        "-fno-asynchronous-unwind-tables",
+        "-ffunction-sections",
+        "-fdata-sections",
+        "-fno-stack-protector",
+        "-w",
+        "-Qunused-arguments",
     }
     listing: provider_cc_read_bounded_file(files.join(tools.root, "musl/{target.arch}/sources"), CC_PACK_MAX_SOURCE_LIST_BYTES, "musl source list")
     text: String.from_bytes(listing) ?? return Err(CcToolchainError.Invalid("musl source list is not UTF-8"))
@@ -765,7 +843,9 @@ provider_cc_pack_build_musl: fn(tools: CcPackTools, target: CcPackTarget, usr: S
         objects.push(object.copy())
         specs.push(provider_cc_pack_compile(clang, flags, files.join(source_root, source), files.join(scratch, object), false))
     }
-    if objects.len() == 0 -> return Err(CcToolchainError.Invalid("musl source list for {target.arch} is empty"))
+    if objects.len() == 0 {
+        return Err(CcToolchainError.Invalid("musl source list for {target.arch} is empty"))
+    }
     loop name in CC_PACK_MUSL_CRT {
         arch_source: files.join(source_root, "crt/{target.arch}/{name}.s")
         source: if provider_cc_is_regular_file(arch_source) -> arch_source else -> files.join(source_root, "crt/{name}.c")
@@ -774,12 +854,16 @@ provider_cc_pack_build_musl: fn(tools: CcPackTools, target: CcPackTarget, usr: S
     receipts: process.run_all(specs, sys.cpu_count()) ?? return Err(CcToolchainError.Invalid("run the pack compiler: {err}"))
     loop result in receipts {
         receipt: result ?? return Err(CcToolchainError.Invalid("run the pack compiler: {err}"))
-        if !receipt.success -> return Err(CcToolchainError.Invalid("building musl for {target.triple} failed: {provider_cc_pack_clip(receipt.errors)}"))
+        if !receipt.success {
+            return Err(CcToolchainError.Invalid("building musl for {target.triple} failed: {provider_cc_pack_clip(receipt.errors)}"))
+        }
     }
     archive := [String]{files.join(tools.root, CC_PACK_AR), "rcs", files.join(lib, "libc.a")}
     archive.extend(objects)
     linked: process.cmd(archive).cwd(scratch).env_clear().stdout(.Capture).stderr(.Capture).run() ?? return Err(CcToolchainError.Invalid("run the pack archiver: {err}"))
-    if !linked.success -> return Err(CcToolchainError.Invalid("archiving musl for {target.triple} failed: {provider_cc_pack_clip(linked.errors)}"))
+    if !linked.success {
+        return Err(CcToolchainError.Invalid("archiving musl for {target.triple} failed: {provider_cc_pack_clip(linked.errors)}"))
+    }
     loop name in CC_PACK_MUSL_EMPTY_LIBS {
         files.write(files.join(lib, "lib{name}.a"), CC_PACK_EMPTY_ARCHIVE) ?? return Err(CcToolchainError.Invalid("write empty musl archive `lib{name}.a`: {err}"))
     }
